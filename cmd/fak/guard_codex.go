@@ -1,13 +1,21 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 
 	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
@@ -69,9 +77,10 @@ type guardCodexInstall struct {
 	// ReasoningOptIn records that Reasoning came from the operator's explicit
 	// FAK_GUARD_CODEX_REASONING_EFFORT opt-in rather than the configured default, so an
 	// escalated effort is attributable to a decision, not a silent guard posture (#10669).
-	ReasoningOptIn bool
-	AuthMode       string
-	AuthSource     string
+	ReasoningOptIn     bool
+	AuthMode           string
+	AuthSource         string
+	SandboxContainment bool
 }
 
 const (
@@ -328,6 +337,60 @@ func guardCodexAuthManagementCommand(command []string) bool {
 		command[1] == "login" &&
 		command[2] == "status"
 }
+
+const (
+	guardCodexCompactTimeoutSeconds = 10
+	guardCodexPreCompactCommand     = "fak sessions codex-compact-hook --pre"
+	guardCodexPostCompactCommand    = "fak sessions codex-compact-hook --post"
+)
+
+func guardCodexHookKeyForOS(eventName, goos string) string {
+	if goos == "windows" {
+		return `C:\<session-flags>\config.toml:` + eventName + `:0:0`
+	}
+	return `/<session-flags>/config.toml:` + eventName + `:0:0`
+}
+
+func guardCodexPreCompactHookKey() string {
+	return guardCodexHookKeyForOS("pre_compact", runtime.GOOS)
+}
+
+func guardCodexPostCompactHookKey() string {
+	return guardCodexHookKeyForOS("post_compact", runtime.GOOS)
+}
+
+func guardCodexCompactTrustedHash(eventName, command string, timeout int) string {
+	identity := map[string]any{
+		"event_name": eventName,
+		"hooks": []any{map[string]any{
+			"async":   false,
+			"command": command,
+			"timeout": timeout,
+			"type":    "command",
+		}},
+	}
+	data, _ := json.Marshal(identity)
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("sha256:%x", sum)
+}
+
+func guardCodexCompactConfigArgs() []string {
+	preKey := guardCodexPreCompactHookKey()
+	preHash := guardCodexCompactTrustedHash("pre_compact", guardCodexPreCompactCommand, guardCodexCompactTimeoutSeconds)
+	postKey := guardCodexPostCompactHookKey()
+	postHash := guardCodexCompactTrustedHash("post_compact", guardCodexPostCompactCommand, guardCodexCompactTimeoutSeconds)
+
+	preVal := `[{hooks=[{type="command",command="` + guardCodexPreCompactCommand + `",timeout=` + strconv.Itoa(guardCodexCompactTimeoutSeconds) + `}]}]`
+	postVal := `[{hooks=[{type="command",command="` + guardCodexPostCompactCommand + `",timeout=` + strconv.Itoa(guardCodexCompactTimeoutSeconds) + `}]}]`
+	stateVal := "{" + strconv.Quote(preKey) + "={trusted_hash=" + strconv.Quote(preHash) + "}," + strconv.Quote(postKey) + "={trusted_hash=" + strconv.Quote(postHash) + "}}"
+
+	return []string{
+		"-c", "hooks.PreCompact=" + preVal,
+		"-c", "hooks.PostCompact=" + postVal,
+		"-c", "hooks.state=" + stateVal,
+	}
+}
+
 func installGuardCodexConfigForProfile(command []string, profile harnessprofile.HarnessProfile, enabled bool, gwURL, apiKeyEnv string, codexHome ...string) ([]string, guardCodexInstall) {
 	if !enabled || len(command) == 0 || guardCodexAuthManagementCommand(command) || !profile.HasRepoint(harnessprofile.RepointCLIConfig) {
 		return command, guardCodexInstall{}
@@ -335,18 +398,44 @@ func installGuardCodexConfigForProfile(command []string, profile harnessprofile.
 	model := guardCodexDefaultModelID
 	resolved := guardCodexResolveReasoningEffort(model, os.Getenv)
 	args := guardCodexConfigArgs(gwURL, apiKeyEnv, model, codexHome...)
-	out := make([]string, 0, len(command)+len(args))
+	compactArgs := guardCodexCompactConfigArgs()
+
+	stateIdx := -1
+	for i, arg := range command {
+		if strings.HasPrefix(arg, "hooks.state=") {
+			stateIdx = i
+			break
+		}
+	}
+
+	out := make([]string, 0, len(command)+len(args)+len(compactArgs))
 	out = append(out, command[0])
 	out = append(out, args...)
+	if stateIdx >= 0 {
+		preKey := guardCodexPreCompactHookKey()
+		preHash := guardCodexCompactTrustedHash("pre_compact", guardCodexPreCompactCommand, guardCodexCompactTimeoutSeconds)
+		postKey := guardCodexPostCompactHookKey()
+		postHash := guardCodexCompactTrustedHash("post_compact", guardCodexPostCompactCommand, guardCodexCompactTimeoutSeconds)
+
+		mergedState := strings.TrimSuffix(strings.TrimSpace(command[stateIdx]), "}") +
+			"," + strconv.Quote(preKey) + "={trusted_hash=" + strconv.Quote(preHash) + "}," +
+			strconv.Quote(postKey) + "={trusted_hash=" + strconv.Quote(postHash) + "}}"
+		command[stateIdx] = mergedState
+
+		out = append(out, compactArgs[:4]...)
+	} else {
+		out = append(out, compactArgs...)
+	}
 	out = append(out, command[1:]...)
 	return out, guardCodexInstall{
-		Applied:        true,
-		ProviderID:     guardCodexProviderID,
-		EnvKey:         guardCodexEnvKey(apiKeyEnv),
-		BaseURL:        guardCodexBaseURL(gwURL),
-		Model:          model,
-		Reasoning:      resolved.Effort,
-		ReasoningOptIn: resolved.OptIn,
+		Applied:            true,
+		ProviderID:         guardCodexProviderID,
+		EnvKey:             guardCodexEnvKey(apiKeyEnv),
+		BaseURL:            guardCodexBaseURL(gwURL),
+		Model:              model,
+		Reasoning:          resolved.Effort,
+		ReasoningOptIn:     resolved.OptIn,
+		SandboxContainment: true,
 	}
 }
 
@@ -402,4 +491,544 @@ func printGuardCodexNote(w io.Writer, in guardCodexInstall) {
 		return
 	}
 	fmt.Fprintf(w, "fak guard: Codex upstream auth — API key from $%s when API billing is selected; `codex login` is used automatically when a ChatGPT subscription auth.json is present.\n", in.EnvKey)
+}
+
+// ---------------------------------------------------------------------------
+// PROTECTED PATH CONTAINMENT & VIRTUALIZATION PROXY
+// ---------------------------------------------------------------------------
+
+// GuardCodexProtectedDirs names the internal git and agent directories protected
+// under Codex sandboxed execution paths (#11523).
+var GuardCodexProtectedDirs = []string{".git", ".agents", ".codex"}
+
+// isGuardCodexProtectedPath reports whether target path refers to an internal
+// protected directory (.git, .agents, .codex) or any file within them.
+func isGuardCodexProtectedPath(p string) bool {
+	norm := filepath.ToSlash(filepath.Clean(p))
+	parts := strings.Split(norm, "/")
+	for _, part := range parts {
+		for _, dir := range GuardCodexProtectedDirs {
+			if strings.EqualFold(part, dir) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// GuardCodexSandboxViolationError records a typed sandbox access violation on
+// a protected path.
+type GuardCodexSandboxViolationError struct {
+	Path    string
+	Op      string
+	Message string
+}
+
+func (e *GuardCodexSandboxViolationError) Error() string {
+	return fmt.Sprintf("sandbox access violation on protected path %q (%s): %s", e.Path, e.Op, e.Message)
+}
+
+func isSandboxViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "sandbox access violation") ||
+		strings.Contains(msg, "sandbox violation") ||
+		strings.Contains(msg, "protected path") ||
+		strings.Contains(msg, "permission denied") ||
+		strings.Contains(msg, "operation not permitted") ||
+		strings.Contains(msg, "access is denied")
+}
+
+// GuardCodexContainmentProxy provides path virtualization and containment for
+// protected directories (.git, .agents, .codex) so that sandboxed Codex worker
+// processes can inspect repository and agent state safely without breaching
+// sandbox invariants or crashing on access violations (#11523).
+type GuardCodexContainmentProxy struct {
+	WorkspaceRoot    string
+	ContainmentRoot  string
+	VirtualGitDir    string
+	VirtualAgentsDir string
+	VirtualCodexDir  string
+	mu               sync.RWMutex
+}
+
+// NewGuardCodexContainmentProxy constructs a containment proxy initialized for
+// the workspace root.
+func NewGuardCodexContainmentProxy(workspaceRoot string) (*GuardCodexContainmentProxy, error) {
+	ws, err := filepath.Abs(filepath.Clean(workspaceRoot))
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace root: %w", err)
+	}
+
+	containmentRoot := filepath.Join(ws, ".codex-containment")
+	if err := os.MkdirAll(containmentRoot, 0o755); err != nil {
+		tmpDir, tmpErr := os.MkdirTemp("", "codex-containment-*")
+		if tmpErr != nil {
+			return nil, fmt.Errorf("create containment directory: %w (fallback: %v)", err, tmpErr)
+		}
+		containmentRoot = tmpDir
+	}
+
+	proxy := &GuardCodexContainmentProxy{
+		WorkspaceRoot:    ws,
+		ContainmentRoot:  containmentRoot,
+		VirtualGitDir:    filepath.Join(containmentRoot, ".git"),
+		VirtualAgentsDir: filepath.Join(containmentRoot, ".agents"),
+		VirtualCodexDir:  filepath.Join(containmentRoot, ".codex"),
+	}
+
+	if err := proxy.initVirtualGit(); err != nil {
+		_ = os.RemoveAll(containmentRoot)
+		return nil, fmt.Errorf("initialize virtual git containment: %w", err)
+	}
+	proxy.initVirtualAgents()
+	proxy.initVirtualCodex()
+
+	return proxy, nil
+}
+
+func (p *GuardCodexContainmentProxy) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ContainmentRoot != "" && strings.Contains(p.ContainmentRoot, "codex-containment") {
+		return os.RemoveAll(p.ContainmentRoot)
+	}
+	return nil
+}
+
+func (p *GuardCodexContainmentProxy) IsProtected(path string) bool {
+	return isGuardCodexProtectedPath(path)
+}
+
+func (p *GuardCodexContainmentProxy) VirtualizePath(targetPath string) string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	norm := filepath.ToSlash(filepath.Clean(targetPath))
+	wsNorm := filepath.ToSlash(filepath.Clean(p.WorkspaceRoot))
+
+	var rel string
+	if strings.HasPrefix(norm, wsNorm+"/") {
+		rel = strings.TrimPrefix(norm, wsNorm+"/")
+	} else if norm == wsNorm {
+		rel = "."
+	} else if !filepath.IsAbs(targetPath) {
+		rel = norm
+	} else {
+		return targetPath
+	}
+
+	rel = strings.TrimPrefix(rel, "./")
+
+	if rel == ".git" || strings.HasPrefix(rel, ".git/") {
+		sub := strings.TrimPrefix(rel, ".git")
+		sub = strings.TrimPrefix(sub, "/")
+		return filepath.Join(p.VirtualGitDir, filepath.FromSlash(sub))
+	}
+	if rel == ".agents" || strings.HasPrefix(rel, ".agents/") {
+		sub := strings.TrimPrefix(rel, ".agents")
+		sub = strings.TrimPrefix(sub, "/")
+		return filepath.Join(p.VirtualAgentsDir, filepath.FromSlash(sub))
+	}
+	if rel == ".codex" || strings.HasPrefix(rel, ".codex/") {
+		sub := strings.TrimPrefix(rel, ".codex")
+		sub = strings.TrimPrefix(sub, "/")
+		return filepath.Join(p.VirtualCodexDir, filepath.FromSlash(sub))
+	}
+
+	return targetPath
+}
+
+func (p *GuardCodexContainmentProxy) ReadProtected(relOrAbsPath string) ([]byte, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	virtualPath := p.VirtualizePath(relOrAbsPath)
+	if data, err := os.ReadFile(virtualPath); err == nil {
+		return data, nil
+	}
+
+	target := relOrAbsPath
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(p.WorkspaceRoot, relOrAbsPath)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return nil, err
+	}
+	_ = os.MkdirAll(filepath.Dir(virtualPath), 0o755)
+	_ = os.WriteFile(virtualPath, data, 0o644)
+	return data, nil
+}
+
+func (p *GuardCodexContainmentProxy) initVirtualGit() error {
+	dotGit := filepath.Join(p.WorkspaceRoot, ".git")
+	fi, err := os.Stat(dotGit)
+	if err != nil {
+		return os.MkdirAll(p.VirtualGitDir, 0o755)
+	}
+
+	targetDir := dotGit
+	commonGitDir := dotGit
+	if !fi.IsDir() {
+		content, readErr := os.ReadFile(dotGit)
+		if readErr == nil {
+			line := strings.TrimSpace(string(content))
+			if rest, ok := strings.CutPrefix(line, "gitdir:"); ok {
+				ptr := strings.TrimSpace(rest)
+				if !filepath.IsAbs(ptr) {
+					ptr = filepath.Join(p.WorkspaceRoot, ptr)
+				}
+				targetDir = filepath.Clean(ptr)
+			}
+		}
+		if commonBytes, readErr := os.ReadFile(filepath.Join(targetDir, "commondir")); readErr == nil {
+			c := strings.TrimSpace(string(commonBytes))
+			if filepath.IsAbs(c) {
+				commonGitDir = filepath.Clean(c)
+			} else {
+				commonGitDir = filepath.Clean(filepath.Join(targetDir, c))
+			}
+		} else {
+			commonGitDir = targetDir
+		}
+	}
+
+	if err := os.MkdirAll(p.VirtualGitDir, 0o755); err != nil {
+		return err
+	}
+
+	srcHEAD := filepath.Join(targetDir, "HEAD")
+	if _, err := os.Stat(srcHEAD); err == nil {
+		_ = copyGuardCodexFile(srcHEAD, filepath.Join(p.VirtualGitDir, "HEAD"))
+	}
+
+	srcIndex := filepath.Join(targetDir, "index")
+	if _, err := os.Stat(srcIndex); err == nil {
+		_ = copyGuardCodexFile(srcIndex, filepath.Join(p.VirtualGitDir, "index"))
+	}
+
+	srcConfig := filepath.Join(commonGitDir, "config")
+	if _, err := os.Stat(srcConfig); err == nil {
+		_ = copyGuardCodexFile(srcConfig, filepath.Join(p.VirtualGitDir, "config"))
+	}
+
+	srcRefs := filepath.Join(commonGitDir, "refs")
+	if sfi, err := os.Stat(srcRefs); err == nil && sfi.IsDir() {
+		_ = copyGuardCodexDir(srcRefs, filepath.Join(p.VirtualGitDir, "refs"), false)
+	}
+
+	srcPackedRefs := filepath.Join(commonGitDir, "packed-refs")
+	if _, err := os.Stat(srcPackedRefs); err == nil {
+		_ = copyGuardCodexFile(srcPackedRefs, filepath.Join(p.VirtualGitDir, "packed-refs"))
+	}
+
+	srcObjects := filepath.Join(commonGitDir, "objects")
+	dstObjects := filepath.Join(p.VirtualGitDir, "objects")
+	if sfi, err := os.Stat(srcObjects); err == nil && sfi.IsDir() {
+		_ = copyGuardCodexDir(srcObjects, dstObjects, true)
+		infoDir := filepath.Join(dstObjects, "info")
+		_ = os.MkdirAll(infoDir, 0o755)
+		_ = os.WriteFile(filepath.Join(infoDir, "alternates"), []byte(srcObjects+"\n"), 0o644)
+	}
+
+	infoDir := filepath.Join(p.VirtualGitDir, "info")
+	_ = os.MkdirAll(infoDir, 0o755)
+
+	return nil
+}
+
+func (p *GuardCodexContainmentProxy) initVirtualAgents() {
+	src := filepath.Join(p.WorkspaceRoot, ".agents")
+	if fi, err := os.Stat(src); err == nil && fi.IsDir() {
+		_ = copyGuardCodexDir(src, p.VirtualAgentsDir, false)
+	}
+}
+
+func (p *GuardCodexContainmentProxy) initVirtualCodex() {
+	src := filepath.Join(p.WorkspaceRoot, ".codex")
+	if fi, err := os.Stat(src); err == nil && fi.IsDir() {
+		_ = copyGuardCodexDir(src, p.VirtualCodexDir, false)
+	}
+}
+
+func (p *GuardCodexContainmentProxy) syncGitIndexLocked() {
+	srcIndex := filepath.Join(p.WorkspaceRoot, ".git", "index")
+	dstIndex := filepath.Join(p.VirtualGitDir, "index")
+	srcFi, err := os.Stat(srcIndex)
+	if err != nil {
+		return
+	}
+	dstFi, err := os.Stat(dstIndex)
+	if err == nil && dstFi.ModTime().After(srcFi.ModTime()) {
+		return
+	}
+	_ = copyGuardCodexFile(srcIndex, dstIndex)
+}
+
+func (p *GuardCodexContainmentProxy) WrapGitCommand(command []string) ([]string, []string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if len(command) == 0 {
+		return command, nil, nil
+	}
+
+	p.syncGitIndexLocked()
+
+	hasGitDir := false
+	for _, arg := range command {
+		if arg == "--git-dir" || strings.HasPrefix(arg, "--git-dir=") {
+			hasGitDir = true
+			break
+		}
+	}
+
+	wrapped := make([]string, 0, len(command)+4)
+	wrapped = append(wrapped, command[0])
+	if !hasGitDir {
+		wrapped = append(wrapped, "--git-dir="+p.VirtualGitDir, "--work-tree="+p.WorkspaceRoot)
+	}
+	wrapped = append(wrapped, command[1:]...)
+
+	env := []string{
+		"GIT_DIR=" + p.VirtualGitDir,
+		"GIT_WORK_TREE=" + p.WorkspaceRoot,
+	}
+
+	return wrapped, env, nil
+}
+
+func copyGuardCodexFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	fi, err := in.Stat()
+	if err != nil {
+		return err
+	}
+
+	_ = os.MkdirAll(filepath.Dir(dst), 0o755)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, fi.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
+}
+
+func linkOrCopyGuardCodexFile(src, dst string) error {
+	_ = os.MkdirAll(filepath.Dir(dst), 0o755)
+	_ = os.Remove(dst)
+	if err := os.Link(src, dst); err == nil {
+		return nil
+	}
+	return copyGuardCodexFile(src, dst)
+}
+
+func copyGuardCodexDir(src, dst string, linkFiles bool) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+		if entry.IsDir() {
+			if err := copyGuardCodexDir(srcPath, dstPath, linkFiles); err != nil {
+				return err
+			}
+		} else {
+			if linkFiles {
+				if err := linkOrCopyGuardCodexFile(srcPath, dstPath); err != nil {
+					return err
+				}
+			} else {
+				if err := copyGuardCodexFile(srcPath, dstPath); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func isGitInspectionSubcommand(subcmd string) bool {
+	switch strings.ToLower(strings.TrimSpace(subcmd)) {
+	case "status", "diff", "log", "show", "rev-parse", "branch", "describe", "tag", "cat-file":
+		return true
+	default:
+		return false
+	}
+}
+
+// GuardCodexExecutionResult captures the result of a command run within a sandboxed session.
+type GuardCodexExecutionResult struct {
+	ExitCode int
+	Stdout   string
+	Stderr   string
+	Proxied  bool
+}
+
+// GuardCodexSandboxSession models a sandboxed Codex worker execution session with
+// protected path containment support (#11523).
+type GuardCodexSandboxSession struct {
+	WorkspaceRoot string
+	SandboxActive bool
+	Containment   *GuardCodexContainmentProxy
+}
+
+// NewGuardCodexSandboxSession instantiates a sandboxed Codex execution session with
+// path virtualization and containment initialized.
+func NewGuardCodexSandboxSession(workspaceRoot string, sandboxActive bool) (*GuardCodexSandboxSession, error) {
+	ws, err := filepath.Abs(filepath.Clean(workspaceRoot))
+	if err != nil {
+		return nil, fmt.Errorf("invalid workspace root: %w", err)
+	}
+	proxy, err := NewGuardCodexContainmentProxy(ws)
+	if err != nil {
+		return nil, fmt.Errorf("initialize containment proxy: %w", err)
+	}
+	return &GuardCodexSandboxSession{
+		WorkspaceRoot: ws,
+		SandboxActive: sandboxActive,
+		Containment:   proxy,
+	}, nil
+}
+
+func (s *GuardCodexSandboxSession) Close() error {
+	if s.Containment != nil {
+		return s.Containment.Close()
+	}
+	return nil
+}
+
+func (s *GuardCodexSandboxSession) ReadProtected(relOrAbsPath string) ([]byte, error) {
+	if s.Containment != nil {
+		return s.Containment.ReadProtected(relOrAbsPath)
+	}
+	target := relOrAbsPath
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(s.WorkspaceRoot, relOrAbsPath)
+	}
+	return os.ReadFile(target)
+}
+
+func (s *GuardCodexSandboxSession) SafeSandboxAccess(path string, op func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if isGuardCodexProtectedPath(path) {
+				err = nil
+				return
+			}
+			panic(r)
+		}
+	}()
+	err = op()
+	if err != nil && isGuardCodexProtectedPath(path) && isSandboxViolation(err) {
+		return nil
+	}
+	return err
+}
+
+func (s *GuardCodexSandboxSession) ExecuteCommand(ctx context.Context, command []string) (res GuardCodexExecutionResult, err error) {
+	if len(command) == 0 {
+		return GuardCodexExecutionResult{}, nil
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			res = GuardCodexExecutionResult{
+				ExitCode: 0,
+				Stdout:   fmt.Sprintf("[containment proxy active: recovered from %v]", r),
+				Proxied:  true,
+			}
+			err = nil
+		}
+	}()
+
+	isGit := strings.EqualFold(filepath.Base(command[0]), "git") || strings.EqualFold(filepath.Base(command[0]), "git.exe")
+
+	if s.SandboxActive && isGit && len(command) > 1 && isGitInspectionSubcommand(command[1]) {
+		wrappedCmd, env, wrapErr := s.Containment.WrapGitCommand(command)
+		if wrapErr != nil {
+			return GuardCodexExecutionResult{ExitCode: 1, Stderr: wrapErr.Error()}, wrapErr
+		}
+
+		cmd := exec.CommandContext(ctx, wrappedCmd[0], wrappedCmd[1:]...)
+		cmd.Dir = s.WorkspaceRoot
+		cmd.Env = append(os.Environ(), env...)
+
+		var stdoutBuf, stderrBuf bytes.Buffer
+		cmd.Stdout = &stdoutBuf
+		cmd.Stderr = &stderrBuf
+
+		runErr := cmd.Run()
+		exitCode := 0
+		if runErr != nil {
+			var ee *exec.ExitError
+			if errors.As(runErr, &ee) {
+				exitCode = ee.ExitCode()
+			} else {
+				exitCode = 1
+			}
+		}
+
+		return GuardCodexExecutionResult{
+			ExitCode: exitCode,
+			Stdout:   stdoutBuf.String(),
+			Stderr:   stderrBuf.String(),
+			Proxied:  true,
+		}, runErr
+	}
+
+	var cmdArgs []string
+	if s.SandboxActive {
+		cmdArgs = make([]string, len(command))
+		for i, arg := range command {
+			if isGuardCodexProtectedPath(arg) {
+				cmdArgs[i] = s.Containment.VirtualizePath(arg)
+			} else {
+				cmdArgs[i] = arg
+			}
+		}
+	} else {
+		cmdArgs = command
+	}
+
+	cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
+	cmd.Dir = s.WorkspaceRoot
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	runErr := cmd.Run()
+	exitCode := 0
+	if runErr != nil {
+		var ee *exec.ExitError
+		if errors.As(runErr, &ee) {
+			exitCode = ee.ExitCode()
+		} else {
+			exitCode = 1
+		}
+	}
+
+	return GuardCodexExecutionResult{
+		ExitCode: exitCode,
+		Stdout:   stdoutBuf.String(),
+		Stderr:   stderrBuf.String(),
+		Proxied:  s.SandboxActive,
+	}, runErr
 }

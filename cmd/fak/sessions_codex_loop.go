@@ -626,6 +626,29 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 		return 0
 	}
 	sessionID := codexLoopFirstNonEmpty(in.SessionID, in.ThreadID, in.ConversationID, os.Getenv("CODEX_THREAD_ID"))
+	if sessionID != "" {
+		if restorativeNote, ok := consumeCodexPendingRestoration(*codexHome, sessionID); ok {
+			if guardActive {
+				if err := writeCodexGuardWitness(*codexHome, sessionID); err != nil {
+					fmt.Fprintf(stderr, "fak sessions codex-loop-hook: persist guard witness: %v (allowing turn)\n", err)
+				}
+			}
+			cont := true
+			out := codexLoopHookOutput{
+				Continue:      &cont,
+				SystemMessage: "fak: restorative invariant restoration",
+				HookSpecificOutput: &codexLoopHookSpecificOutput{
+					HookEventName:     "UserPromptSubmit",
+					AdditionalContext: restorativeNote,
+				},
+			}
+			if err := json.NewEncoder(stdout).Encode(out); err != nil {
+				fmt.Fprintf(stderr, "fak sessions codex-loop-hook: encode restoration: %v\n", err)
+				return 1
+			}
+			return 0
+		}
+	}
 	if sessionID != "" && guardActive {
 		if err := writeCodexGuardWitness(*codexHome, sessionID); err != nil {
 			fmt.Fprintf(stderr, "fak sessions codex-loop-hook: persist guard witness: %v (allowing turn)\n", err)
