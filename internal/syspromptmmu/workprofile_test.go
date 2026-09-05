@@ -103,6 +103,9 @@ func TestHeadlessWorkProfilesCanonicalizeAndRemainSafe(t *testing.T) {
 		if !strings.Contains(got.Segment, AmbiguityResolutionDirective) {
 			t.Errorf("%s segment omits ambiguity resolution directive: %q", intensity, got.Segment)
 		}
+		if !strings.Contains(got.Segment, TestBreadthCalibrationDirective) {
+			t.Errorf("%s segment omits test breadth calibration directive: %q", intensity, got.Segment)
+		}
 		for _, required := range []string{
 			"autonomous action-bias",
 			"unattended mode is active",
@@ -113,6 +116,11 @@ func TestHeadlessWorkProfilesCanonicalizeAndRemainSafe(t *testing.T) {
 			"choose the smallest reversible action",
 			"inspect/verify",
 			"stalling, debating trade-offs endlessly, or halting",
+			"test breadth calibration",
+			"focus test authoring on concise, high-signal, atomic reproduction tests",
+			"1-3 focused assertions proving the defect or contract",
+			"sprawling, redundant, over-engineered test matrices",
+			"burn output token limits or corrupt the working tree",
 			"security", "correct", "tests", "evidence",
 		} {
 			if !strings.Contains(strings.ToLower(got.Segment), required) {
@@ -149,6 +157,11 @@ func TestHeadlessWorkProfileMediumActionBiasAndWitnessHash(t *testing.T) {
 		"Ambiguity resolution: when faced with ambiguity",
 		"choose the smallest reversible action, inspect/verify",
 		"rather than stalling, debating trade-offs endlessly, or halting.",
+		TestBreadthCalibrationDirective,
+		"Test breadth calibration: focus test authoring on concise, high-signal, atomic reproduction tests",
+		"1-3 focused assertions proving the defect or contract",
+		"rather than generating sprawling, redundant, over-engineered test matrices",
+		"burn output token limits or corrupt the working tree.",
 		"When the user or task explicitly requests implementing, adding, or modifying functionality, bypass 'no code change' and proceed to the minimal correct implementation.",
 	}
 	for _, want := range wantDirectives {
@@ -160,7 +173,7 @@ func TestHeadlessWorkProfileMediumActionBiasAndWitnessHash(t *testing.T) {
 	// Verify cryptographic witness hash
 	sum := sha256.Sum256([]byte(got.Segment))
 	expectedWitness := "sha256:" + hex.EncodeToString(sum[:])
-	const pinnedWitness = "sha256:0e461cbc25fe5ac671e5f36fa176e5e03af94b6ba54afebbfc423b791305565d"
+	const pinnedWitness = "sha256:e18fcaef925476ced4a2533ae2718a0895d4ddb092e3dda39c7e11ed319d6535"
 	if got.Witness != expectedWitness || got.Witness != pinnedWitness {
 		t.Fatalf("witness = %q, want %q (pinned: %q)", got.Witness, expectedWitness, pinnedWitness)
 	}
@@ -198,7 +211,42 @@ func TestAmbiguityResolutionDirectiveAndWitnessHash(t *testing.T) {
 
 	// Explicitly verify pinned witness for ponytail:headless:medium
 	gotMed := DescribeWorkProfile("ponytail:headless:medium")
-	const expectedMediumWitness = "sha256:0e461cbc25fe5ac671e5f36fa176e5e03af94b6ba54afebbfc423b791305565d"
+	const expectedMediumWitness = "sha256:e18fcaef925476ced4a2533ae2718a0895d4ddb092e3dda39c7e11ed319d6535"
+	if gotMed.Witness != expectedMediumWitness {
+		t.Fatalf("ponytail:headless:medium witness = %q, want pinned %q", gotMed.Witness, expectedMediumWitness)
+	}
+}
+
+func TestTestBreadthCalibrationDirectiveAndWitnessHash(t *testing.T) {
+	if TestBreadthCalibrationDirective == "" {
+		t.Fatal("TestBreadthCalibrationDirective is empty")
+	}
+	if TestBreadthCalibrationDirective != TestBreadthCalibrationRule {
+		t.Fatalf("TestBreadthCalibrationRule alias mismatch: %q != %q", TestBreadthCalibrationRule, TestBreadthCalibrationDirective)
+	}
+	if TestBreadthCalibrationDirective != TestBreadthCalibrationContract {
+		t.Fatalf("TestBreadthCalibrationContract alias mismatch: %q != %q", TestBreadthCalibrationContract, TestBreadthCalibrationDirective)
+	}
+
+	for _, intensity := range []string{"low", "medium", "high"} {
+		profileName := "ponytail:headless:" + intensity
+		got := DescribeWorkProfile(profileName)
+		if !got.Known || !got.Applied {
+			t.Fatalf("%s failed to resolve: %+v", profileName, got)
+		}
+		if !strings.Contains(got.Segment, TestBreadthCalibrationDirective) {
+			t.Errorf("%s missing TestBreadthCalibrationDirective: %q", profileName, got.Segment)
+		}
+		expectedSum := sha256.Sum256([]byte(got.Segment))
+		expectedWitness := "sha256:" + hex.EncodeToString(expectedSum[:])
+		if got.Witness != expectedWitness {
+			t.Errorf("%s witness mismatch: got %q, want %q", profileName, got.Witness, expectedWitness)
+		}
+	}
+
+	// Explicitly verify pinned witness for ponytail:headless:medium
+	gotMed := DescribeWorkProfile("ponytail:headless:medium")
+	const expectedMediumWitness = "sha256:e18fcaef925476ced4a2533ae2718a0895d4ddb092e3dda39c7e11ed319d6535"
 	if gotMed.Witness != expectedMediumWitness {
 		t.Fatalf("ponytail:headless:medium witness = %q, want pinned %q", gotMed.Witness, expectedMediumWitness)
 	}
