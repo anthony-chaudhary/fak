@@ -308,7 +308,14 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if shouldYield, estTokens, toolCalls := shouldYieldResponsesSubturn(messages, tools, req.Input); shouldYield {
+	// Microcontext tool result elision: elide large, older tool outputs
+	messages = s.maybeElideResponsesToolResults(reqTrace, messages)
+
+	var subturnRawInput json.RawMessage
+	if len(messages) == 0 {
+		subturnRawInput = req.Input
+	}
+	if shouldYield, estTokens, toolCalls := shouldYieldResponsesSubturn(messages, tools, subturnRawInput); shouldYield {
 		if s.logf != nil {
 			s.logf("gateway: responses sub-turn yield valve activated: est_tokens=%d tool_calls=%d trace_id=%s", estTokens, toolCalls, reqTrace)
 		}
