@@ -3,13 +3,18 @@ package trajectory
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestAuditIntegratesToolErrorFamilies(t *testing.T) {
@@ -1229,5 +1234,269 @@ func TestAuditCodexTerminal502Stall(t *testing.T) {
 		if !strings.Contains(mdStr, want) {
 			t.Errorf("Markdown output missing %q:\n%s", want, mdStr)
 		}
+	}
+}
+
+func TestAuditProgressMonotonic(t *testing.T) {
+	root := t.TempDir()
+	for i := 1; i <= 5; i++ {
+		path := filepath.Join(root, fmt.Sprintf("session-%d.jsonl", i))
+		content := fmt.Sprintf(`{"type":"assistant","message":{"id":"msg-%d","content":[{"type":"tool_use","id":"call-%d","name":"exec","input":{}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"call-%d","content":"output"}]}}`, i, i, i)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	type progressEvent struct {
+		current int
+		total   int
+		message string
+	}
+	var mu sync.Mutex
+	var events []progressEvent
+
+	reporter := ProgressFunc(func(current, total int, message string) {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, progressEvent{current: current, total: total, message: message})
+	})
+
+	result, err := RunAudit(AuditOptions{
+		Sources: []AuditSource{
+			{Name: AuditSourceClaude, Root: root, RootLabel: "claude/test"},
+		},
+		Progress: reporter,
+	})
+	if err != nil {
+		t.Fatalf("RunAudit: %v", err)
+	}
+	if result.Summary.Transcripts != 5 {
+		t.Fatalf("Transcripts = %d, want 5", result.Summary.Transcripts)
+	}
+
+	mu.Lock()
+	if len(events) == 0 {
+		mu.Unlock()
+		t.Fatal("expected progress events, got none")
+	}
+
+	lastCurrent := -1
+	for idx, ev := range events {
+		if ev.current < lastCurrent {
+			mu.Unlock()
+			t.Fatalf("event %d (%+v): current %d < previous current %d (non-monotonic)", idx, ev, ev.current, lastCurrent)
+		}
+		if ev.total > 0 && ev.current > ev.total {
+			mu.Unlock()
+			t.Fatalf("event %d (%+v): current %d exceeds total %d", idx, ev, ev.current, ev.total)
+		}
+		lastCurrent = ev.current
+	}
+
+	// Also test with multiple sources to verify monotonicity across sources.
+	events = nil
+	mu.Unlock()
+	secondRoot := t.TempDir()
+	for i := 1; i <= 3; i++ {
+		path := filepath.Join(secondRoot, fmt.Sprintf("session-b-%d.jsonl", i))
+		content := fmt.Sprintf(`{"type":"assistant","message":{"id":"msg-b-%d","content":[{"type":"tool_use","id":"call-b-%d","name":"exec","input":{}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"call-b-%d","content":"output"}]}}`, i, i, i)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	multiResult, err := RunAudit(AuditOptions{
+		Sources: []AuditSource{
+			{Name: AuditSourceClaude, Root: root, RootLabel: "claude/a"},
+			{Name: AuditSourceClaude, Root: secondRoot, RootLabel: "claude/b"},
+		},
+		Progress: reporter,
+	})
+	if err != nil {
+		t.Fatalf("RunAudit multi-source: %v", err)
+	}
+	if multiResult.Summary.Transcripts != 8 {
+		t.Fatalf("Multi-source Transcripts = %d, want 8", multiResult.Summary.Transcripts)
+	}
+
+	mu.Lock()
+	lastCurrent = -1
+	for idx, ev := range events {
+		if ev.current < lastCurrent {
+			mu.Unlock()
+			t.Fatalf("multi-source event %d (%+v): current %d < previous %d (non-monotonic)", idx, ev, ev.current, lastCurrent)
+		}
+		lastCurrent = ev.current
+	}
+	mu.Unlock()
+}
+
+func TestAuditSingleflightDeduplication(t *testing.T) {
+	root := t.TempDir()
+	for i := 1; i <= 4; i++ {
+		path := filepath.Join(root, fmt.Sprintf("session-%d.jsonl", i))
+		content := fmt.Sprintf(`{"type":"assistant","message":{"id":"msg-%d","content":[{"type":"tool_use","id":"call-%d","name":"exec","input":{}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"call-%d","content":"output"}]}}`, i, i, i)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ResetAuditSingleflightStats()
+
+	started := make(chan struct{})
+	proceed := make(chan struct{})
+	var once sync.Once
+
+	auditScanHook = func(stage string, path string) {
+		if stage == "file" {
+			once.Do(func() {
+				close(started)
+				<-proceed
+			})
+		}
+	}
+	defer func() { auditScanHook = nil }()
+
+	fixedTime := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	opts := AuditOptions{
+		Sources: []AuditSource{
+			{Name: AuditSourceClaude, Root: root, RootLabel: "claude/shared"},
+		},
+		Now:   fixedTime,
+		Since: 0,
+	}
+
+	var res1, res2 AuditResult
+	var err1, err2 error
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		res1, err1 = RunAudit(opts)
+	}()
+
+	<-started
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		res2, err2 = RunAudit(opts)
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	close(proceed)
+
+	wg.Wait()
+
+	if err1 != nil {
+		t.Fatalf("call 1 failed: %v", err1)
+	}
+	if err2 != nil {
+		t.Fatalf("call 2 failed: %v", err2)
+	}
+
+	if res1.Summary.Transcripts != 4 || res2.Summary.Transcripts != 4 {
+		t.Fatalf("expected 4 transcripts, got res1=%d res2=%d", res1.Summary.Transcripts, res2.Summary.Transcripts)
+	}
+
+	executed, coalesced := AuditSingleflightStats()
+	if executed != 1 {
+		t.Fatalf("executed = %d, want 1", executed)
+	}
+	if coalesced < 1 {
+		t.Fatalf("coalesced = %d, want >= 1", coalesced)
+	}
+}
+
+func TestAuditContextCancellationPartialReport(t *testing.T) {
+	root := t.TempDir()
+	for i := 1; i <= 6; i++ {
+		path := filepath.Join(root, fmt.Sprintf("session-%d.jsonl", i))
+		content := fmt.Sprintf(`{"type":"assistant","message":{"id":"msg-%d","content":[{"type":"tool_use","id":"call-%d","name":"exec","input":{}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"call-%d","content":"output"}]}}`, i, i, i)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 1. Mid-flight cancellation produces partial report without panic.
+	ctx, cancel := context.WithCancel(context.Background())
+	fileCount := 0
+	auditScanHook = func(stage string, path string) {
+		if stage == "file" {
+			fileCount++
+			if fileCount == 2 {
+				cancel()
+			}
+		}
+	}
+	defer func() { auditScanHook = nil }()
+
+	result, err := RunAudit(AuditOptions{
+		Sources: []AuditSource{
+			{Name: AuditSourceClaude, Root: root, RootLabel: "claude/cancel"},
+		},
+		Context: ctx,
+	})
+
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if !result.Partial {
+		t.Fatal("result.Partial = false, want true")
+	}
+	if result.Summary.FilesScanned != 2 {
+		t.Fatalf("FilesScanned = %d, want 2", result.Summary.FilesScanned)
+	}
+	if len(result.Transcripts) != 2 {
+		t.Fatalf("len(Transcripts) = %d, want 2", len(result.Transcripts))
+	}
+	if result.Summary.Transcripts != 2 {
+		t.Fatalf("Summary.Transcripts = %d, want 2", result.Summary.Transcripts)
+	}
+
+	var md bytes.Buffer
+	if err := WriteAuditMarkdown(&md, result); err != nil {
+		t.Fatalf("WriteAuditMarkdown on partial report: %v", err)
+	}
+	if !strings.Contains(md.String(), "files scanned: 2/6") {
+		t.Fatalf("Markdown missing partial scan totals:\n%s", md.String())
+	}
+
+	var jsonl bytes.Buffer
+	if err := WriteAuditJSONL(&jsonl, result); err != nil {
+		t.Fatalf("WriteAuditJSONL on partial report: %v", err)
+	}
+	if !strings.Contains(jsonl.String(), `"files_scanned":2`) {
+		t.Fatalf("JSONL missing partial scan totals:\n%s", jsonl.String())
+	}
+
+	// 2. Pre-cancelled context returns partial report without panic.
+	auditScanHook = nil
+	preCancelledCtx, preCancel := context.WithCancel(context.Background())
+	preCancel()
+
+	preResult, preErr := RunAudit(AuditOptions{
+		Sources: []AuditSource{
+			{Name: AuditSourceClaude, Root: root, RootLabel: "claude/precancel"},
+		},
+		Context: preCancelledCtx,
+	})
+	if preErr == nil || !errors.Is(preErr, context.Canceled) {
+		t.Fatalf("preErr = %v, want context.Canceled", preErr)
+	}
+	if !preResult.Partial {
+		t.Fatal("preResult.Partial = false, want true")
+	}
+	if preResult.Summary.FilesScanned != 0 {
+		t.Fatalf("preResult FilesScanned = %d, want 0", preResult.Summary.FilesScanned)
+	}
+	var preMD bytes.Buffer
+	if err := WriteAuditMarkdown(&preMD, preResult); err != nil {
+		t.Fatalf("WriteAuditMarkdown on pre-cancelled report: %v", err)
 	}
 }

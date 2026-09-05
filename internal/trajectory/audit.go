@@ -2,7 +2,9 @@ package trajectory
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -10,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -36,6 +40,35 @@ type AuditSource struct {
 	RootLabel string
 }
 
+// ProgressReporter receives progress updates during transcript discovery and scanning.
+type ProgressReporter interface {
+	Report(current, total int, message string)
+}
+
+// ProgressFunc adapts a function to the ProgressReporter interface.
+type ProgressFunc func(current, total int, message string)
+
+// Report calls f(current, total, message).
+func (f ProgressFunc) Report(current, total int, message string) {
+	if f != nil {
+		f(current, total, message)
+	}
+}
+
+// NewProgressReporter creates a ProgressReporter that formats and writes bounded progress to w.
+func NewProgressReporter(w io.Writer) ProgressReporter {
+	if w == nil {
+		return nil
+	}
+	return ProgressFunc(func(current, total int, message string) {
+		if total > 0 {
+			fmt.Fprintf(w, "trajectory audit: [%d/%d] %s\n", current, total, message)
+		} else {
+			fmt.Fprintf(w, "trajectory audit: %s\n", message)
+		}
+	})
+}
+
 // AuditOptions selects the transcript roots and comparison window.
 type AuditOptions struct {
 	Sources        []AuditSource
@@ -45,6 +78,8 @@ type AuditOptions struct {
 	SchemaBaseline *AuditSchemaBaseline
 	// UserContains keeps only transcripts whose user-authored prompts contain this case-insensitive literal. Tool output, system text, and injected context never select a transcript; there is no raw-byte fallback.
 	UserContains string
+	Context      context.Context
+	Progress     ProgressReporter
 }
 
 // AuditTokens are the four disjoint, exact billing buckets normalized across
@@ -279,6 +314,7 @@ type AuditResult struct {
 	SchemaDrift       []AuditSchemaDriftRow `json:"schema_drift,omitempty"`
 	Refusals          []AuditRefusalRow     `json:"refusals,omitempty"`
 	ToolErrorFamilies []QwenToolErrorFamily `json:"tool_error_families,omitempty"`
+	Partial           bool                  `json:"partial,omitempty"`
 }
 
 // DefaultAuditSources discovers the two supported harness homes.
@@ -306,13 +342,33 @@ func RunAudit(opts AuditOptions) (AuditResult, error) {
 	if opts.Now.IsZero() {
 		opts.Now = time.Now()
 	}
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	result := AuditResult{}
 	allHookDurations := []int64{}
 	allToolErrorEvents := []QwenToolErrorEvent{}
+	var cancelErr error
+
+	baseOffset := 0
 	for _, source := range opts.Sources {
-		denominator, transcripts, refusals, hookDurations, toolErrorEvents, err := auditSource(source, opts)
+		if ctx.Err() != nil {
+			cancelErr = ctx.Err()
+			break
+		}
+		denominator, transcripts, refusals, hookDurations, toolErrorEvents, err := auditSource(source, opts, baseOffset)
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				cancelErr = err
+				result.Denominators = append(result.Denominators, denominator)
+				result.Transcripts = append(result.Transcripts, transcripts...)
+				result.Refusals = append(result.Refusals, refusals...)
+				allToolErrorEvents = append(allToolErrorEvents, toolErrorEvents...)
+				allHookDurations = append(allHookDurations, hookDurations...)
+				break
+			}
 			return AuditResult{}, err
 		}
 		result.Denominators = append(result.Denominators, denominator)
@@ -320,6 +376,16 @@ func RunAudit(opts AuditOptions) (AuditResult, error) {
 		result.Refusals = append(result.Refusals, refusals...)
 		allToolErrorEvents = append(allToolErrorEvents, toolErrorEvents...)
 		allHookDurations = append(allHookDurations, hookDurations...)
+		baseOffset += denominator.FilesDiscovered
+	}
+
+	if cancelErr != nil && len(result.Denominators) == 0 {
+		for _, source := range opts.Sources {
+			result.Denominators = append(result.Denominators, AuditDenominatorRow{
+				Schema: AuditSchema, Kind: "source_denominator", Source: source.Name,
+				Root: source.RootLabel, RecordTypes: map[string]int{},
+			})
+		}
 	}
 
 	sort.Slice(result.Denominators, func(i, j int) bool {
@@ -387,7 +453,18 @@ func RunAudit(opts AuditOptions) (AuditResult, error) {
 		SchemaDriftCount:         len(result.SchemaDrift),
 		BreakingSchemaDrift:      breakingSchemaDrift,
 	}
+
+	if cancelErr != nil {
+		result.Partial = true
+		return result, cancelErr
+	}
 	return result, nil
+}
+
+// RunAuditWithContext returns a deterministic rollup over the selected transcript roots respecting ctx.
+func RunAuditWithContext(ctx context.Context, opts AuditOptions) (AuditResult, error) {
+	opts.Context = ctx
+	return RunAudit(opts)
 }
 
 func addAuditCanonicalRefusalDenominators(denominators []AuditDenominatorRow, refusals []AuditRefusalRow) {
@@ -401,62 +478,316 @@ func addAuditCanonicalRefusalDenominators(denominators []AuditDenominatorRow, re
 	}
 }
 
-func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []AuditTranscriptRow, []AuditRefusalRow, []int64, []QwenToolErrorEvent, error) {
-	denominator := AuditDenominatorRow{
-		Schema: AuditSchema, Kind: "source_denominator", Source: source.Name,
-		Root: source.RootLabel, RecordTypes: map[string]int{},
+var auditScanHook func(stage string, path string)
+
+type auditSourceResult struct {
+	denominator     AuditDenominatorRow
+	transcripts     []AuditTranscriptRow
+	refusals        []AuditRefusalRow
+	hookDurations   []int64
+	toolErrorEvents []QwenToolErrorEvent
+}
+
+func (r auditSourceResult) clone() auditSourceResult {
+	c := auditSourceResult{
+		denominator: r.denominator,
+	}
+	if r.denominator.RecordTypes != nil {
+		c.denominator.RecordTypes = make(map[string]int, len(r.denominator.RecordTypes))
+		for k, v := range r.denominator.RecordTypes {
+			c.denominator.RecordTypes[k] = v
+		}
+	}
+	if r.transcripts != nil {
+		c.transcripts = make([]AuditTranscriptRow, len(r.transcripts))
+		for i, tr := range r.transcripts {
+			c.transcripts[i] = tr.clone()
+		}
+	}
+	if r.refusals != nil {
+		c.refusals = append([]AuditRefusalRow(nil), r.refusals...)
+	}
+	if r.hookDurations != nil {
+		c.hookDurations = append([]int64(nil), r.hookDurations...)
+	}
+	if r.toolErrorEvents != nil {
+		c.toolErrorEvents = append([]QwenToolErrorEvent(nil), r.toolErrorEvents...)
+	}
+	return c
+}
+
+func (t AuditTranscriptRow) clone() AuditTranscriptRow {
+	c := t
+	c.Models = append([]string(nil), t.Models...)
+	c.BuildIdentities = append([]AuditBuildIdentity(nil), t.BuildIdentities...)
+	if t.Distribution != nil {
+		c.Distribution = make([]AuditDistributionRow, len(t.Distribution))
+		for i, d := range t.Distribution {
+			c.Distribution[i] = d
+			c.Distribution[i].ExemplarIDs = append([]string(nil), d.ExemplarIDs...)
+		}
+	}
+	if t.ToolDistribution != nil {
+		c.ToolDistribution = make([]AuditDistributionRow, len(t.ToolDistribution))
+		for i, d := range t.ToolDistribution {
+			c.ToolDistribution[i] = d
+			c.ToolDistribution[i].ExemplarIDs = append([]string(nil), d.ExemplarIDs...)
+		}
+	}
+	c.ToolResults = append([]AuditToolResultRow(nil), t.ToolResults...)
+	if t.StorageDistribution != nil {
+		c.StorageDistribution = make([]AuditStorageRow, len(t.StorageDistribution))
+		for i, s := range t.StorageDistribution {
+			c.StorageDistribution[i] = s
+			c.StorageDistribution[i].ExemplarIDs = append([]string(nil), s.ExemplarIDs...)
+		}
+	}
+	c.MutationChurnEvents = append([]QwenMutationChurn(nil), t.MutationChurnEvents...)
+	c.SourcePaths = append([]string(nil), t.SourcePaths...)
+	if t.TerminalFailureClasses != nil {
+		c.TerminalFailureClasses = make(map[string]int, len(t.TerminalFailureClasses))
+		for k, v := range t.TerminalFailureClasses {
+			c.TerminalFailureClasses[k] = v
+		}
+	}
+	if t.TerminalStallDurationBuckets != nil {
+		c.TerminalStallDurationBuckets = make(map[string]int, len(t.TerminalStallDurationBuckets))
+		for k, v := range t.TerminalStallDurationBuckets {
+			c.TerminalStallDurationBuckets[k] = v
+		}
+	}
+	c.usageByID = cloneAuditUsage(t.usageByID)
+	c.failureCounts = cloneAuditFailureCounts(t.failureCounts)
+	if t.fragmentDigests != nil {
+		c.fragmentDigests = make(map[string]struct{}, len(t.fragmentDigests))
+		for k := range t.fragmentDigests {
+			c.fragmentDigests[k] = struct{}{}
+		}
+	}
+	return c
+}
+
+type auditSourceFlight struct {
+	done chan struct{}
+	val  auditSourceResult
+	err  error
+
+	mu        sync.Mutex
+	reporters []ProgressReporter
+}
+
+func (f *auditSourceFlight) addReporter(r ProgressReporter) {
+	if r == nil {
+		return
+	}
+	f.mu.Lock()
+	f.reporters = append(f.reporters, r)
+	f.mu.Unlock()
+}
+
+func (f *auditSourceFlight) report(current, total int, msg string) {
+	f.mu.Lock()
+	reps := append([]ProgressReporter(nil), f.reporters...)
+	f.mu.Unlock()
+	for _, r := range reps {
+		if r != nil {
+			r.Report(current, total, msg)
+		}
+	}
+}
+
+type auditFlightGroup struct {
+	mu        sync.Mutex
+	m         map[string]*auditSourceFlight
+	coalesced atomic.Int64
+	executed  atomic.Int64
+}
+
+var defaultAuditFlightGroup = &auditFlightGroup{
+	m: make(map[string]*auditSourceFlight),
+}
+
+// AuditSingleflightStats returns the count of executed and coalesced singleflight audit scans.
+func AuditSingleflightStats() (executed, coalesced int64) {
+	return defaultAuditFlightGroup.executed.Load(), defaultAuditFlightGroup.coalesced.Load()
+}
+
+// ResetAuditSingleflightStats resets the singleflight execution and coalesced counters.
+func ResetAuditSingleflightStats() {
+	defaultAuditFlightGroup.executed.Store(0)
+	defaultAuditFlightGroup.coalesced.Store(0)
+}
+
+func auditSourceKey(source AuditSource, opts AuditOptions) string {
+	var cutoff int64
+	if opts.Since > 0 {
+		if opts.Now.IsZero() {
+			cutoff = time.Now().Add(-opts.Since).Truncate(time.Second).UnixNano()
+		} else {
+			cutoff = opts.Now.Add(-opts.Since).Truncate(time.Second).UnixNano()
+		}
+	}
+	cleanRoot := filepath.Clean(source.Root)
+	if abs, err := filepath.Abs(cleanRoot); err == nil {
+		cleanRoot = abs
+	}
+	return fmt.Sprintf("%s\x00%s\x00%d\x00%d\x00%s",
+		source.Name, cleanRoot, opts.Since, cutoff, strings.ToLower(opts.UserContains))
+}
+
+func auditSource(source AuditSource, opts AuditOptions, baseOffset int) (AuditDenominatorRow, []AuditTranscriptRow, []AuditRefusalRow, []int64, []QwenToolErrorEvent, error) {
+	key := auditSourceKey(source, opts)
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	g := defaultAuditFlightGroup
+	g.mu.Lock()
+	if g.m == nil {
+		g.m = make(map[string]*auditSourceFlight)
+	}
+	if flight, ok := g.m[key]; ok {
+		g.coalesced.Add(1)
+		flight.addReporter(opts.Progress)
+		g.mu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			return AuditDenominatorRow{
+				Schema: AuditSchema, Kind: "source_denominator", Source: source.Name,
+				Root: source.RootLabel, RecordTypes: map[string]int{},
+			}, nil, nil, nil, nil, ctx.Err()
+		case <-flight.done:
+			val := flight.val.clone()
+			return val.denominator, val.transcripts, val.refusals, val.hookDurations, val.toolErrorEvents, flight.err
+		}
+	}
+
+	flight := &auditSourceFlight{
+		done: make(chan struct{}),
+	}
+	flight.addReporter(opts.Progress)
+	g.m[key] = flight
+	g.executed.Add(1)
+	g.mu.Unlock()
+
+	defer func() {
+		g.mu.Lock()
+		delete(g.m, key)
+		g.mu.Unlock()
+		close(flight.done)
+	}()
+
+	res, err := doAuditSource(ctx, source, opts, flight, baseOffset)
+	flight.val = res
+	flight.err = err
+	cloned := res.clone()
+	return cloned.denominator, cloned.transcripts, cloned.refusals, cloned.hookDurations, cloned.toolErrorEvents, err
+}
+
+func doAuditSource(ctx context.Context, source AuditSource, opts AuditOptions, flight *auditSourceFlight, baseOffset int) (auditSourceResult, error) {
+	res := auditSourceResult{
+		denominator: AuditDenominatorRow{
+			Schema: AuditSchema, Kind: "source_denominator", Source: source.Name,
+			Root: source.RootLabel, RecordTypes: map[string]int{},
+		},
 	}
 	switch source.Name {
 	case AuditSourceClaude:
-		denominator.TokenSemantics = "message usage buckets are disjoint; duplicate message ids are counted once"
+		res.denominator.TokenSemantics = "message usage buckets are disjoint; duplicate message ids are counted once"
 	case AuditSourceCodex:
-		denominator.TokenSemantics = "final cumulative input per segment; only a versioned task_started boundary may begin a segment after a decrease; cached/cache-write subsets remain exact subtraction"
+		res.denominator.TokenSemantics = "final cumulative input per segment; only a versioned task_started boundary may begin a segment after a decrease; cached/cache-write subsets remain exact subtraction"
 	default:
-		return denominator, nil, nil, nil, nil, fmt.Errorf("trajectory audit: source %q has no parser", source.Name)
+		return res, fmt.Errorf("trajectory audit: source %q has no parser", source.Name)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return res, err
 	}
 
 	info, err := os.Stat(source.Root)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return denominator, nil, nil, nil, nil, nil
+			return res, nil
 		}
-		return denominator, nil, nil, nil, nil, fmt.Errorf("trajectory audit: stat %s root: %w", source.Name, err)
+		return res, fmt.Errorf("trajectory audit: stat %s root: %w", source.Name, err)
 	}
 	if !info.IsDir() {
-		return denominator, nil, nil, nil, nil, fmt.Errorf("trajectory audit: %s root is not a directory", source.Name)
+		return res, fmt.Errorf("trajectory audit: %s root is not a directory", source.Name)
 	}
-	denominator.RootPresent = true
+	res.denominator.RootPresent = true
+
+	if flight != nil {
+		flight.report(baseOffset, baseOffset, fmt.Sprintf("discovering %s transcripts in %s", source.Name, source.RootLabel))
+	}
+	if auditScanHook != nil {
+		auditScanHook("discover", source.Root)
+	}
 
 	var files []string
+	walkCount := 0
 	err = filepath.WalkDir(source.Root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if !entry.IsDir() && strings.EqualFold(filepath.Ext(entry.Name()), ".jsonl") {
 			files = append(files, path)
+			walkCount++
+			if walkCount%100 == 0 && flight != nil {
+				flight.report(baseOffset, baseOffset, fmt.Sprintf("discovering %s transcripts: %d files found", source.Name, walkCount))
+			}
 		}
 		return nil
 	})
 	if err != nil {
-		return denominator, nil, nil, nil, nil, fmt.Errorf("trajectory audit: discover %s transcripts: %w", source.Name, err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			sort.Strings(files)
+			res.denominator.FilesDiscovered = len(files)
+			return res, err
+		}
+		return res, fmt.Errorf("trajectory audit: discover %s transcripts: %w", source.Name, err)
 	}
 	sort.Strings(files)
-	denominator.FilesDiscovered = len(files)
+	res.denominator.FilesDiscovered = len(files)
+
+	totalFiles := len(files)
+	if flight != nil {
+		flight.report(baseOffset, baseOffset+totalFiles, fmt.Sprintf("discovered %d %s transcripts in %s", totalFiles, source.Name, source.RootLabel))
+	}
 
 	var transcripts []AuditTranscriptRow
 	var refusals []AuditRefusalRow
 	var hookDurations []int64
 	var toolErrorEvents []QwenToolErrorEvent
-	// Canonical merging still receives every row so duplicate-usage conflicts
-	// remain visible. These file-derived side channels have no canonical row
-	// representation, so deduplicate them here by the same transcript identity
-	// and exact fragment digest used by canonicalAuditTranscripts.
 	sideChannelFragments := map[string]struct{}{}
-	for _, path := range files {
+	step := totalFiles / 100
+	if step < 1 {
+		step = 1
+	}
+
+	for i, path := range files {
+		if ctx.Err() != nil {
+			break
+		}
+		if auditScanHook != nil {
+			auditScanHook("file", path)
+		}
+		currentProgress := baseOffset + i + 1
+		totalProgress := baseOffset + totalFiles
+		if (i+1)%step == 0 || i == totalFiles-1 {
+			if flight != nil {
+				flight.report(currentProgress, totalProgress, fmt.Sprintf("auditing %s transcript %d/%d: %s", source.Name, i+1, totalFiles, filepath.Base(path)))
+			}
+		}
+
 		if opts.Since > 0 {
 			stat, statErr := os.Stat(path)
 			if statErr != nil {
-				return denominator, nil, nil, nil, nil, fmt.Errorf("trajectory audit: stat transcript: %w", statErr)
+				return res, fmt.Errorf("trajectory audit: stat transcript: %w", statErr)
 			}
 			if stat.ModTime().Before(opts.Now.Add(-opts.Since)) {
 				continue
@@ -464,28 +795,28 @@ func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []
 		}
 		rel, relErr := filepath.Rel(source.Root, path)
 		if relErr != nil {
-			return denominator, nil, nil, nil, nil, fmt.Errorf("trajectory audit: relativize transcript: %w", relErr)
+			return res, fmt.Errorf("trajectory audit: relativize transcript: %w", relErr)
 		}
 		rel = filepath.ToSlash(rel)
 		if opts.UserContains != "" {
 			matched, matchErr := auditFileUserContains(path, opts.UserContains)
 			if matchErr != nil {
-				return denominator, nil, nil, nil, nil, matchErr
+				return res, matchErr
 			}
 			if !matched {
 				continue
 			}
-			denominator.FilesMatched++
+			res.denominator.FilesMatched++
 		}
 		if source.Name == AuditSourceClaude && auditIsClaudePytestFixture(path, rel) {
-			denominator.FixtureFilesExcluded++
+			res.denominator.FixtureFilesExcluded++
 			continue
 		}
-		row, fileRefusals, fileHooks, fileToolErrors, parseErr := parseAuditFile(source.Name, path, rel, &denominator)
+		row, fileRefusals, fileHooks, fileToolErrors, parseErr := parseAuditFile(source.Name, path, rel, &res.denominator)
 		if parseErr != nil {
-			return denominator, nil, nil, nil, nil, parseErr
+			return res, parseErr
 		}
-		denominator.FilesScanned++
+		res.denominator.FilesScanned++
 		transcripts = append(transcripts, row)
 		refusals = append(refusals, fileRefusals...)
 		sideChannelKey := row.TranscriptID + "\x00" + row.fragmentDigest
@@ -499,7 +830,16 @@ func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []
 			}
 		}
 	}
-	return denominator, transcripts, refusals, hookDurations, toolErrorEvents, nil
+
+	res.transcripts = transcripts
+	res.refusals = refusals
+	res.hookDurations = hookDurations
+	res.toolErrorEvents = toolErrorEvents
+
+	if ctx.Err() != nil {
+		return res, ctx.Err()
+	}
+	return res, nil
 }
 
 func auditFileUserContains(path, needle string) (bool, error) {
