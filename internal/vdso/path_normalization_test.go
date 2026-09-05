@@ -74,3 +74,118 @@ func nonsemanticPathHashOracle(t *testing.T, args []byte, fields ...string) stri
 	sum := sha256.Sum256(canonical)
 	return hex.EncodeToString(sum[:])[:24]
 }
+
+// legacyArgHashFor simulates the pre-optimization decode/re-encode pipeline
+// to verify exact hash identity across all combinations.
+func legacyArgHashFor(v *VDSO, tool string, args []byte) string {
+	v.regMu.RLock()
+	declaration := v.nonsemanticPathFields[tool]
+	fields := make([]string, 0, len(declaration))
+	for field := range declaration {
+		fields = append(fields, field)
+	}
+	v.regMu.RUnlock()
+
+	var normalized []byte
+	declared := len(fields) > 0
+	ok := true
+	if declared {
+		var object map[string]any
+		if err := json.Unmarshal(args, &object); err != nil || object == nil {
+			ok = false
+		} else {
+			for _, field := range fields {
+				value, present := object[field]
+				if !present {
+					continue
+				}
+				if _, isStr := value.(string); !isStr {
+					ok = false
+					break
+				}
+				delete(object, field)
+			}
+			if ok {
+				var err error
+				normalized, err = json.Marshal(object)
+				if err != nil {
+					ok = false
+				}
+			}
+		}
+	}
+
+	if !ok {
+		return rawArgHash(args)
+	}
+	if declared {
+		args = normalized
+	}
+	if v.NearDupOf() {
+		return legacyNearDupArgHash(args)
+	}
+	return argHash(args)
+}
+
+func TestArgHashFor_ExactHashEquivalence(t *testing.T) {
+	cases := []struct {
+		name string
+		tool string
+		args []byte
+	}{
+		{"declared_present_single", "compile", []byte(`{"install_path":"/tmp/pkg","target":"host"}`)},
+		{"declared_present_formatting", "compile", []byte(`{"install_path":"/tmp/pkg","target":"  HOST  ","note":"Build  Task"}`)},
+		{"declared_missing", "compile", []byte(`{"target":"host","debug":true}`)},
+		{"declared_non_string_int", "compile", []byte(`{"install_path":123,"target":"host"}`)},
+		{"declared_non_string_bool", "compile", []byte(`{"install_path":true,"target":"host"}`)},
+		{"declared_non_string_array", "compile", []byte(`{"install_path":["/tmp/pkg"],"target":"host"}`)},
+		{"declared_non_string_obj", "compile", []byte(`{"install_path":{"p":"/tmp"},"target":"host"}`)},
+		{"declared_malformed", "compile", []byte(`{"install_path":"/tmp",`)},
+		{"declared_array_root", "compile", []byte(`[1,2,3]`)},
+		{"declared_null_root", "compile", []byte(`null`)},
+		{"declared_empty_obj", "compile", []byte(`{}`)},
+		{"declared_non_json", "compile", []byte(`not json at all`)},
+		{"undeclared_standard", "search", []byte(`{"query":"hello world","limit":10}`)},
+		{"undeclared_formatting", "search", []byte(`{"query":"  HELLO   WORLD  ","limit":10}`)},
+		{"undeclared_malformed", "search", []byte(`{"query":`)},
+		{"undeclared_non_json", "search", []byte(`plain text`)},
+		{"undeclared_empty", "search", []byte(``)},
+	}
+
+	for _, nearDup := range []bool{false, true} {
+		v := New(8)
+		v.SetNearDup(nearDup)
+		v.RegisterNonsemanticPathFields("compile", "install_path")
+
+		for _, tc := range cases {
+			got := v.argHashFor(tc.tool, tc.args)
+			want := legacyArgHashFor(v, tc.tool, tc.args)
+			if got != want {
+				t.Errorf("nearDup=%v case=%s tool=%s got=%q, want legacy=%q", nearDup, tc.name, tc.tool, got, want)
+			}
+		}
+	}
+}
+
+func BenchmarkArgHashFor_NonsemanticPath(b *testing.B) {
+	v := New(8)
+	v.RegisterNonsemanticPathFields("compile", "install_path")
+	input := []byte(`{"install_path":"/tmp/root-a/pkg","semantic_path":"src/main.mo","target":"host","debug":true}`)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = v.argHashFor("compile", input)
+	}
+}
+
+func BenchmarkArgHashFor_NonsemanticPathWithNearDup(b *testing.B) {
+	v := New(8)
+	v.SetNearDup(true)
+	v.RegisterNonsemanticPathFields("compile", "install_path")
+	input := []byte(`{"install_path":"/tmp/root-a/pkg","semantic_path":"src/main.mo","target":"host","note":"Build   Task"}`)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = v.argHashFor("compile", input)
+	}
+}

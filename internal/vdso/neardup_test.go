@@ -5,6 +5,7 @@ package vdso
 // touches the soundness witness or the existing tests.
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -113,5 +114,81 @@ func TestNearDup_KeysAreStructural(t *testing.T) {
 	fillAndExpectHit(t, v, a, `{"x":1}`)
 	if hits(t, v, b) {
 		t.Errorf("a differing object KEY collided — near-dup must fold values, not keys")
+	}
+}
+
+// legacyNearDupArgHash reproduces the pre-optimization decode/re-encode behavior
+// as an oracle to prove bit-for-bit hash equivalence.
+func legacyNearDupArgHash(b []byte) string {
+	var v any
+	if json.Unmarshal(b, &v) != nil {
+		return argHash(b)
+	}
+	normalizeStrings(&v)
+	out, err := json.Marshal(v)
+	if err != nil {
+		return argHash(b)
+	}
+	return argHash(out)
+}
+
+func TestNearDupArgHash_ExactHashEquivalence(t *testing.T) {
+	cases := [][]byte{
+		[]byte(`{}`),
+		[]byte(`{"a":1}`),
+		[]byte(`{"b":2,"a":1}`),
+		[]byte(`{"from":"USD","to":"EUR"}`),
+		[]byte(`{"from":" usd ","to":"eur"}`),
+		[]byte(`{"from":" USD ","to":"eur","note":"Trip   Budget","passengers":2}`),
+		[]byte(`{"nested":{"b":" BAR ","a":" FOO "},"items":[" ONE ",2,true,null]}`),
+		[]byte(`[{"z":1,"a":2},{"k":" V "}]`),
+		[]byte(`" Just  A  String "`),
+		[]byte(`42.5`),
+		[]byte(`true`),
+		[]byte(`null`),
+		[]byte(`not json at all`),
+		[]byte(`{"invalid":`),
+		[]byte(`{"open": "quote`),
+		[]byte(``),
+		[]byte(`    `),
+		[]byte("\x00\x01\x02\xff"),
+	}
+
+	for _, c := range cases {
+		got := nearDupArgHash(c)
+		want := legacyNearDupArgHash(c)
+		if got != want {
+			t.Errorf("nearDupArgHash(%q) = %q, want legacy %q", string(c), got, want)
+		}
+	}
+}
+
+func BenchmarkNearDupArgHash(b *testing.B) {
+	input := []byte(`{"from":" usd ","to":"eur","note":"Trip   Budget","passengers":2}`)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = nearDupArgHash(input)
+	}
+}
+
+func BenchmarkArgHashFor_NearDup(b *testing.B) {
+	v := New(8)
+	v.SetNearDup(true)
+	input := []byte(`{"from":" usd ","to":"eur","note":"Trip   Budget","passengers":2}`)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = v.argHashFor("convert_currency", input)
+	}
+}
+
+func BenchmarkArgHashFor_Exact(b *testing.B) {
+	v := New(8)
+	input := []byte(`{"from":"usd","to":"eur","note":"Trip Budget","passengers":2}`)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = v.argHashFor("convert_currency", input)
 	}
 }

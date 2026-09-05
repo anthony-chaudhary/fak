@@ -53,15 +53,21 @@ func (v *VDSO) NearDupOf() bool { return atomic.LoadInt32(&v.nearDup) == 1 }
 // nonsemantic path fields are removed first; invalid declarations fail closed to
 // hashing the original bytes. Near-duplicate normalization then remains an
 // independent opt-in for arguments that passed that structural check.
+//
+// When nonsemantic path fields are declared or near-duplicate normalization is
+// performed, json.Marshal produces already canonical JSON bytes (keys sorted at
+// all nesting depths). We reuse those canonical bytes directly via rawArgHash
+// instead of re-unmarshaling and re-marshaling in argHash.
 func (v *VDSO) argHashFor(tool string, args []byte) string {
-	normalized, declared, ok := v.normalizeNonsemanticPathFields(tool, args)
+	nearDup := v.NearDupOf()
+	normalized, declared, ok := v.normalizeNonsemanticPathFields(tool, args, nearDup)
 	if !ok {
 		return rawArgHash(args)
 	}
 	if declared {
-		args = normalized
+		return rawArgHash(normalized)
 	}
-	if v.NearDupOf() {
+	if nearDup {
 		return nearDupArgHash(args)
 	}
 	return argHash(args)
@@ -71,6 +77,10 @@ func (v *VDSO) argHashFor(tool string, args []byte) string {
 // (trim, collapse internal whitespace to a single space, fold to lower case) so formatting
 // variants collapse to one key. Object keys are NOT folded (a field name is structural).
 // Non-JSON args fall back to the exact raw-bytes hash (no normalization we can trust).
+//
+// Freshly marshaled bytes from json.Marshal are already canonical JSON (keys sorted at
+// all nesting depths), so we hash them directly with rawArgHash rather than calling
+// argHash which would redundantly decode and re-encode.
 func nearDupArgHash(b []byte) string {
 	var v any
 	if json.Unmarshal(b, &v) != nil {
@@ -81,7 +91,7 @@ func nearDupArgHash(b []byte) string {
 	if err != nil {
 		return argHash(b)
 	}
-	return argHash(out)
+	return rawArgHash(out)
 }
 
 // normalizeStrings walks a decoded JSON value and rewrites each string VALUE to its
