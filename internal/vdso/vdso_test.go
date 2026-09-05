@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -740,4 +742,155 @@ func itoa(n int) string {
 		b[i] = '-'
 	}
 	return string(b[i:])
+}
+
+// TestConcurrentVerifiedFreshReuse_ScalingWithoutLockSerialization verifies that
+// concurrent Lookups on file-backed cache entries scale cleanly across goroutines
+// without serializing on the global mutex during disk I/O and hashing.
+func TestConcurrentVerifiedFreshReuse_ScalingWithoutLockSerialization(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "scaling_fixture.txt")
+	fileData := make([]byte, 256<<10) // 256 KB
+	for i := range fileData {
+		fileData[i] = byte('A' + (i % 26))
+	}
+	if err := os.WriteFile(filePath, fileData, 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	call := &abi.ToolCall{
+		Tool: "Read",
+		Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"filePath":` + strconv.Quote(filePath) + `}`)},
+		Meta: map[string]string{"readOnlyHint": "true", "idempotentHint": "true"},
+	}
+	expectedPayload := `{"content":` + strconv.Quote(string(fileData)) + `}`
+
+	v := New(64)
+	v.Emit(completeEvent(call, expectedPayload))
+
+	ctx := context.Background()
+	res, ok := v.Lookup(ctx, call)
+	if !ok || res == nil {
+		t.Fatalf("initial lookup failed; want cache hit")
+	}
+	if res.Meta["served_by"] != "vdso" || res.Meta["tier"] != "2" {
+		t.Fatalf("res.Meta = %+v; want served_by=vdso tier=2", res.Meta)
+	}
+
+	const goroutines = 16
+	const iters = 250
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for g := 0; g < goroutines; g++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iters; i++ {
+				hitRes, hitOk := v.Lookup(ctx, call)
+				if !hitOk || hitRes == nil {
+					t.Errorf("concurrent lookup failed; want hit")
+					return
+				}
+				if hitRes.Meta["served_by"] != "vdso" {
+					t.Errorf("served_by = %q, want vdso", hitRes.Meta["served_by"])
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	lookups, hits, fills, rate := v.Stats()
+	if hits < int64(goroutines*iters) {
+		t.Fatalf("expected at least %d hits, got %d (lookups=%d, fills=%d, rate=%f)", goroutines*iters, hits, lookups, fills, rate)
+	}
+
+	// Verify that if the file is modified on disk, fast-path detects mtime/size change and invalidates
+	if err := os.WriteFile(filePath, append(fileData, '!'), 0644); err != nil {
+		t.Fatalf("WriteFile update: %v", err)
+	}
+	if _, ok := v.Lookup(ctx, call); ok {
+		t.Fatalf("lookup hit on modified file; want strict invalidation (miss)")
+	}
+
+	// Verify outside-the-lock content hash verification if requested
+	filePath2 := filepath.Join(dir, "verify_hash_outside_lock.txt")
+	content2 := []byte("payload_for_outside_lock_check")
+	if err := os.WriteFile(filePath2, content2, 0644); err != nil {
+		t.Fatalf("WriteFile2: %v", err)
+	}
+	call2 := &abi.ToolCall{
+		Tool: "Read",
+		Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"filePath":` + strconv.Quote(filePath2) + `}`)},
+		Meta: map[string]string{
+			"readOnlyHint":        "true",
+			"idempotentHint":      "true",
+			"verify_content_hash": "true",
+		},
+	}
+	v.Emit(completeEvent(call2, `{"data":"payload_for_outside_lock_check"}`))
+	if _, ok := v.Lookup(ctx, call2); !ok {
+		t.Fatalf("lookup2 before modification should hit")
+	}
+
+	// Mutate file preserving length and mtime
+	fi2, err := os.Stat(filePath2)
+	if err != nil {
+		t.Fatalf("Stat2: %v", err)
+	}
+	oldMtime2 := fi2.ModTime()
+	mutatedContent2 := []byte("PAYLOAD_FOR_OUTSIDE_LOCK_CHECK") // same length
+	if err := os.WriteFile(filePath2, mutatedContent2, 0644); err != nil {
+		t.Fatalf("WriteFile2 mutate: %v", err)
+	}
+	if err := os.Chtimes(filePath2, oldMtime2, oldMtime2); err != nil {
+		t.Fatalf("Chtimes2: %v", err)
+	}
+
+	// Lookup with verify_content_hash: "true" must detect mismatch outside the lock and return miss
+	if _, ok := v.Lookup(ctx, call2); ok {
+		t.Fatalf("lookup2 with verify_content_hash should miss on modified content")
+	}
+}
+
+// BenchmarkConcurrentVerifiedFreshReuse measures concurrent cache hit throughput
+// for verified_fresh_reuse without lock serialization.
+func BenchmarkConcurrentVerifiedFreshReuse(b *testing.B) {
+	dir := b.TempDir()
+	filePath := filepath.Join(dir, "bench_fresh_reuse.txt")
+	fileData := make([]byte, 64<<10) // 64 KB
+	for i := range fileData {
+		fileData[i] = byte('A' + (i % 26))
+	}
+	if err := os.WriteFile(filePath, fileData, 0644); err != nil {
+		b.Fatalf("WriteFile: %v", err)
+	}
+
+	call := &abi.ToolCall{
+		Tool: "Read",
+		Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"filePath":` + strconv.Quote(filePath) + `}`)},
+		Meta: map[string]string{"readOnlyHint": "true", "idempotentHint": "true"},
+	}
+	expectedPayload := `{"content":` + strconv.Quote(string(fileData)) + `}`
+
+	v := New(64)
+	v.Emit(completeEvent(call, expectedPayload))
+
+	ctx := context.Background()
+	if res, ok := v.Lookup(ctx, call); !ok || res == nil || res.Meta["served_by"] != "vdso" {
+		b.Fatalf("expected cache hit")
+	}
+
+	b.SetBytes(int64(len(fileData)))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			res, ok := v.Lookup(ctx, call)
+			if !ok || res == nil {
+				b.Fatalf("concurrent verified_fresh_reuse lookup failed")
+			}
+		}
+	})
 }

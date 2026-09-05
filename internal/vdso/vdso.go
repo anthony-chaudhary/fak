@@ -669,7 +669,35 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 			filledAt := e.filledAt
 			replication := e.replication
 			producerDiagnostics := e.producerDiagnostics
+			fPath := e.filePath
+			cHash := e.contentHash
 			v.mu.Unlock()
+
+			// Fast-path freshness is verified under lock via mtime and size. If explicit
+			// content-hash verification is requested, verify outside the critical section
+			// without holding v.mu.
+			if (metaTrue(c, "verify_content_hash") || metaTrue(c, "verifyContentHash")) && cHash != "" && fPath != "" {
+				b, err := os.ReadFile(fPath)
+				h := sha256.Sum256(b)
+				if err != nil || hex.EncodeToString(h[:])[:24] != cHash {
+					v.mu.Lock()
+					if el2, ok := v.cache[hk]; ok {
+						v.lru.Remove(el2)
+						delete(v.cache, hk)
+						v.untrackFileWitnessLocked(fPath, hwit)
+						abi.UnpinResolved(href)
+						if hwit != "" {
+							epoch := atomic.AddUint64(&v.trustEpoch, 1)
+							v.rememberRevokedLocked(hwit, epoch)
+						}
+					}
+					v.mu.Unlock()
+					if hwit != "" {
+						v.emitCache(CacheRevoke, hk, href, hwit)
+					}
+					return v.missed(c, MissWitnessRevoked)
+				}
+			}
 			atomic.AddInt64(&v.hits, 1)
 			// §2.5 consumer tracking: a HIT names the agent/turn that reused the entry
 			// (consumerOpt is nil for an anonymous call, so no empty consumer is recorded).
@@ -1083,7 +1111,15 @@ func (v *VDSO) StaticTools() []string {
 }
 
 // checkDiskFreshnessLocked verifies that a file-backed or directory-backed entry
-// is still bit-identical and fresh on disk. Called with v.mu held.
+// is still bit-identical and fresh on disk using fast-path metadata (mtime and size).
+// Called with v.mu held.
+//
+// When e.contentHash != "", it does NOT read the entire file from disk while holding
+// v.mu.Lock(). Fast-path freshness verification checks:
+//
+//	st.ModTime().UnixNano() == e.fileMtime && (e.fileSize == 0 || st.Size() == e.fileSize)
+//
+// This eliminates global mutex serialization on disk I/O and hashing.
 func (v *VDSO) checkDiskFreshnessLocked(e *entry) bool {
 	if e.filePath == "" || e.fileMtime == 0 {
 		return true // not disk-backed or synthetic test entry
@@ -1102,23 +1138,7 @@ func (v *VDSO) checkDiskFreshnessLocked(e *entry) bool {
 	if err != nil || st.IsDir() {
 		return false
 	}
-	if st.ModTime().UnixNano() != e.fileMtime {
-		return false
-	}
-	if e.fileSize != 0 && st.Size() != e.fileSize {
-		return false
-	}
-	if e.contentHash != "" {
-		b, err := os.ReadFile(e.filePath)
-		if err != nil {
-			return false
-		}
-		h := sha256.Sum256(b)
-		if hex.EncodeToString(h[:])[:24] != e.contentHash {
-			return false
-		}
-	}
-	return true
+	return st.ModTime().UnixNano() == e.fileMtime && (e.fileSize == 0 || st.Size() == e.fileSize)
 }
 
 func (v *VDSO) recordFileWitnessLocked(path, witness string) {
