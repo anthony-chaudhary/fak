@@ -44,8 +44,8 @@ func (s *ObserverSemanticScreen) Register() {
 // and context MMU state markers (e.g. active churn/regress flags or quarantined MMU state).
 // If the session is already flagged for churn or regression, or if the mutating call violates
 // context MMU invariants, it returns ScreenQuarantine to prevent unverified mutation execution.
-func (s *ObserverSemanticScreen) VerifyToolCall(ctx context.Context, c *abi.ToolCall) abi.ScreenAdvice {
-	if c == nil || s.pool == nil {
+func (s ObserverSemanticScreen) VerifyToolCall(ctx context.Context, c *abi.ToolCall) abi.ScreenAdvice {
+	if c == nil || s.pool == nil || ctx.Err() != nil {
 		return abi.ScreenAdvice{Disposition: abi.ScreenAllow}
 	}
 
@@ -74,7 +74,6 @@ func (s *ObserverSemanticScreen) VerifyToolCall(ctx context.Context, c *abi.Tool
 		}
 	}
 
-	// Context MMU state checks for mutating calls before execution
 	if IsMutatingTool(c.Tool) || (c.Meta != nil && c.Meta["mutating"] == "true") {
 		if c.Meta != nil {
 			if c.Meta["mmu_quarantined"] == "true" || c.Meta["taint"] == "quarantined" {
@@ -168,7 +167,6 @@ func (s ObserverSemanticScreen) ScreenResult(ctx context.Context, c *abi.ToolCal
 
 	res, err := s.pool.ObserveSyncBarrier(ctx, obs)
 
-	// 1. Unwitnessed mutating claims -> ScreenQuarantine with ReasonUnwitnessed
 	if errors.Is(err, ErrUnwitnessedDiff) || (obs.IsMutating() && res.WitnessVerdict == WitnessUnwitnessedClaim && s.pool.cfg.RequireWitnessDiff) {
 		digest := res.Reason
 		if digest == "" {
@@ -182,7 +180,6 @@ func (s ObserverSemanticScreen) ScreenResult(ctx context.Context, c *abi.ToolCal
 		}
 	}
 
-	// 2. Regression loops -> ScreenQuarantine with ReasonIntegrityRefuted
 	if errors.Is(err, ErrRegressRefused) || res.StepVerdict == StepRegress {
 		digest := res.Reason
 		if digest == "" {
@@ -196,7 +193,6 @@ func (s ObserverSemanticScreen) ScreenResult(ctx context.Context, c *abi.ToolCal
 		}
 	}
 
-	// 3. Churn loops -> ScreenQuarantine with ReasonTrustViolation
 	if errors.Is(err, ErrChurnRefused) || res.StepVerdict == StepChurn {
 		digest := res.Reason
 		if digest == "" {
@@ -210,7 +206,6 @@ func (s ObserverSemanticScreen) ScreenResult(ctx context.Context, c *abi.ToolCal
 		}
 	}
 
-	// 4. Forward progress / benign -> ScreenAllow
 	return abi.ScreenAdvice{
 		Disposition: abi.ScreenAllow,
 		By:          "observer:advance",

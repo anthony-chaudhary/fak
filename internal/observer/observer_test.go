@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,27 +13,27 @@ import (
 )
 
 func TestClosedVocabularyAndWitnessVerdicts(t *testing.T) {
-	// Step classification closed vocabulary
-	verdicts := []StepVerdict{STEP_ADVANCE, STEP_CHURN, STEP_REGRESS}
-	for _, v := range verdicts {
-		if !v.IsValid() {
-			t.Fatalf("expected verdict %s to be valid", v)
+	t.Run("StepVerdicts", func(t *testing.T) {
+		for _, v := range []StepVerdict{STEP_ADVANCE, STEP_CHURN, STEP_REGRESS} {
+			if !v.IsValid() {
+				t.Fatalf("expected verdict %s to be valid", v)
+			}
 		}
-	}
-	if StepVerdict("STEP_UNKNOWN").IsValid() {
-		t.Fatal("expected arbitrary verdict to be invalid")
-	}
+		if StepVerdict("STEP_UNKNOWN").IsValid() {
+			t.Fatal("expected arbitrary verdict to be invalid")
+		}
+	})
 
-	// Witness verification closed vocabulary
-	witnesses := []WitnessVerdict{WITNESS_DIFF_CONFIRMED, WITNESS_UNWITNESSED_CLAIM}
-	for _, w := range witnesses {
-		if !w.IsValid() {
-			t.Fatalf("expected witness %s to be valid", w)
+	t.Run("WitnessVerdicts", func(t *testing.T) {
+		for _, w := range []WitnessVerdict{WITNESS_DIFF_CONFIRMED, WITNESS_UNWITNESSED_CLAIM} {
+			if !w.IsValid() {
+				t.Fatalf("expected witness %s to be valid", w)
+			}
 		}
-	}
-	if WitnessVerdict("WITNESS_UNKNOWN").IsValid() {
-		t.Fatal("expected arbitrary witness to be invalid")
-	}
+		if WitnessVerdict("WITNESS_UNKNOWN").IsValid() {
+			t.Fatal("expected arbitrary witness to be invalid")
+		}
+	})
 }
 
 func TestAsyncShadowingReadOnly(t *testing.T) {
@@ -189,70 +190,69 @@ func TestDeterministicRefusalChurnLoop(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	sessionID := "sess-churn"
+	t.Run("RepeatedErrors", func(t *testing.T) {
+		sessionID := "sess-churn-errors"
+		for i := 1; i <= 2; i++ {
+			obs := StepObservation{
+				SessionID: sessionID,
+				Tool:      "Edit",
+				Error:     "oldString not found in content",
+			}
+			res, err := p.ObserveSyncBarrier(ctx, obs)
+			if err != nil {
+				t.Fatalf("turn %d unexpectedly failed: %v", i, err)
+			}
+			if res.StepVerdict != STEP_ADVANCE {
+				t.Fatalf("turn %d expected STEP_ADVANCE before threshold, got %s", i, res.StepVerdict)
+			}
+		}
 
-	// 1. Repeated failing calls
-	for i := 1; i <= 2; i++ {
-		obs := StepObservation{
+		obsChurn := StepObservation{
 			SessionID: sessionID,
 			Tool:      "Edit",
 			Error:     "oldString not found in content",
 		}
-		res, err := p.ObserveSyncBarrier(ctx, obs)
-		if err != nil {
-			t.Fatalf("turn %d unexpectedly failed: %v", i, err)
+		resChurn, err := p.ObserveSyncBarrier(ctx, obsChurn)
+		if !errors.Is(err, ErrChurnRefused) {
+			t.Fatalf("expected ErrChurnRefused, got %v", err)
 		}
-		if res.StepVerdict != STEP_ADVANCE {
-			t.Fatalf("turn %d expected STEP_ADVANCE before threshold, got %s", i, res.StepVerdict)
+		if resChurn.StepVerdict != STEP_CHURN {
+			t.Fatalf("expected STEP_CHURN, got %s", resChurn.StepVerdict)
 		}
-	}
+	})
 
-	// 3rd failure reaches churn threshold (3) -> deterministic refusal
-	obsChurn := StepObservation{
-		SessionID: sessionID,
-		Tool:      "Edit",
-		Error:     "oldString not found in content",
-	}
-	resChurn, err := p.ObserveSyncBarrier(ctx, obsChurn)
-	if !errors.Is(err, ErrChurnRefused) {
-		t.Fatalf("expected ErrChurnRefused, got %v", err)
-	}
-	if resChurn.StepVerdict != STEP_CHURN {
-		t.Fatalf("expected STEP_CHURN, got %s", resChurn.StepVerdict)
-	}
+	t.Run("RepeatedQueries", func(t *testing.T) {
+		sessionID := "sess-query-loop"
+		for i := 1; i <= 2; i++ {
+			obs := StepObservation{
+				SessionID: sessionID,
+				Tool:      "Grep",
+				Args:      "pattern=samePattern",
+				Result:    "no matches",
+			}
+			res, err := p.ObserveSyncBarrier(ctx, obs)
+			if err != nil {
+				t.Fatalf("turn %d unexpectedly failed: %v", i, err)
+			}
+			if res.StepVerdict != STEP_ADVANCE {
+				t.Fatalf("turn %d expected STEP_ADVANCE, got %s", i, res.StepVerdict)
+			}
+		}
 
-	// 2. Repeated identical queries trigger churn
-	p.ResetSession("sess-query-loop")
-	for i := 1; i <= 2; i++ {
-		obs := StepObservation{
-			SessionID: "sess-query-loop",
+		obsQueryChurn := StepObservation{
+			SessionID: sessionID,
 			Tool:      "Grep",
 			Args:      "pattern=samePattern",
 			Result:    "no matches",
 		}
-		res, err := p.ObserveSyncBarrier(ctx, obs)
-		if err != nil {
-			t.Fatalf("turn %d unexpectedly failed: %v", i, err)
+		resQueryChurn, err := p.ObserveSyncBarrier(ctx, obsQueryChurn)
+		if !errors.Is(err, ErrChurnRefused) {
+			t.Fatalf("expected ErrChurnRefused on repeated query loop, got %v", err)
 		}
-		if res.StepVerdict != STEP_ADVANCE {
-			t.Fatalf("turn %d expected STEP_ADVANCE, got %s", i, res.StepVerdict)
+		if resQueryChurn.StepVerdict != STEP_CHURN {
+			t.Fatalf("expected STEP_CHURN, got %s", resQueryChurn.StepVerdict)
 		}
-	}
-
-	// 3rd identical query -> churn
-	obsQueryChurn := StepObservation{
-		SessionID: "sess-query-loop",
-		Tool:      "Grep",
-		Args:      "pattern=samePattern",
-		Result:    "no matches",
-	}
-	resQueryChurn, err := p.ObserveSyncBarrier(ctx, obsQueryChurn)
-	if !errors.Is(err, ErrChurnRefused) {
-		t.Fatalf("expected ErrChurnRefused on repeated query loop, got %v", err)
-	}
-	if resQueryChurn.StepVerdict != STEP_CHURN {
-		t.Fatalf("expected STEP_CHURN, got %s", resQueryChurn.StepVerdict)
-	}
+	})
 }
 
 func TestDeterministicRefusalRegressLoop(t *testing.T) {
@@ -273,7 +273,6 @@ func TestDeterministicRefusalRegressLoop(t *testing.T) {
 
 	sessionID := "sess-regress"
 
-	// Turns 1 and 2: advance
 	for i := 1; i <= 2; i++ {
 		obs := StepObservation{
 			SessionID: sessionID,
@@ -286,7 +285,6 @@ func TestDeterministicRefusalRegressLoop(t *testing.T) {
 		}
 	}
 
-	// Turn 3: churn
 	obs3 := StepObservation{
 		SessionID: sessionID,
 		Tool:      "bash",
@@ -297,7 +295,6 @@ func TestDeterministicRefusalRegressLoop(t *testing.T) {
 		t.Fatalf("turn 3 expected ErrChurnRefused, got %v", err)
 	}
 
-	// Turn 4: reaches RegressThreshold (4) -> STEP_REGRESS refusal
 	obs4 := StepObservation{
 		SessionID: sessionID,
 		Tool:      "bash",
@@ -310,7 +307,6 @@ func TestDeterministicRefusalRegressLoop(t *testing.T) {
 	if res4.StepVerdict != STEP_REGRESS {
 		t.Fatalf("expected STEP_REGRESS, got %s", res4.StepVerdict)
 	}
-	// On regression, warm KV-cache prefix is invalidated
 	if res4.CachedPrefix {
 		t.Fatal("expected cached prefix to be invalidated on STEP_REGRESS")
 	}
@@ -516,95 +512,100 @@ func BenchmarkObserveSyncBarrierMutating(b *testing.B) {
 }
 
 func TestClosedVocabularyStrictEnforcement(t *testing.T) {
-	// 1. Verify StepVerdicts() returns complete closed vocabulary
-	svs := StepVerdicts()
-	if len(svs) != 3 {
-		t.Fatalf("expected 3 StepVerdicts, got %d", len(svs))
-	}
-	for _, sv := range svs {
-		if !sv.IsValid() {
-			t.Fatalf("expected StepVerdict %s to be valid", sv)
+	t.Run("StepVerdicts", func(t *testing.T) {
+		svs := StepVerdicts()
+		if len(svs) != 3 {
+			t.Fatalf("expected 3 StepVerdicts, got %d", len(svs))
 		}
-	}
-
-	// 2. ParseStepVerdict validation
-	validSteps := []string{"STEP_ADVANCE", "step_advance", "STEP_CHURN", "step_churn", "STEP_REGRESS", "step_regress"}
-	for _, s := range validSteps {
-		v, err := ParseStepVerdict(s)
-		if err != nil {
-			t.Fatalf("expected %q to parse successfully, got err: %v", s, err)
+		for _, sv := range svs {
+			if !sv.IsValid() {
+				t.Fatalf("expected StepVerdict %s to be valid", sv)
+			}
 		}
-		if !v.IsValid() {
-			t.Fatalf("parsed verdict %s is invalid", v)
+	})
+
+	t.Run("ParseStepVerdict", func(t *testing.T) {
+		validSteps := []string{"STEP_ADVANCE", "step_advance", "STEP_CHURN", "step_churn", "STEP_REGRESS", "step_regress"}
+		for _, s := range validSteps {
+			v, err := ParseStepVerdict(s)
+			if err != nil {
+				t.Fatalf("expected %q to parse successfully, got err: %v", s, err)
+			}
+			if !v.IsValid() {
+				t.Fatalf("parsed verdict %s is invalid", v)
+			}
 		}
-	}
 
-	invalidSteps := []string{"STEP_UNKNOWN", "UNKNOWN", "INVALID", "", "   ", "STEP_HALT"}
-	for _, s := range invalidSteps {
-		_, err := ParseStepVerdict(s)
-		if !errors.Is(err, ErrInvalidStepVerdict) {
-			t.Fatalf("expected ErrInvalidStepVerdict for %q, got: %v", s, err)
+		invalidSteps := []string{"STEP_UNKNOWN", "UNKNOWN", "INVALID", "", "   ", "STEP_HALT"}
+		for _, s := range invalidSteps {
+			_, err := ParseStepVerdict(s)
+			if !errors.Is(err, ErrInvalidStepVerdict) {
+				t.Fatalf("expected ErrInvalidStepVerdict for %q, got: %v", s, err)
+			}
 		}
-	}
+	})
 
-	// 3. Verify WitnessVerdicts() returns complete closed vocabulary
-	wvs := WitnessVerdicts()
-	if len(wvs) != 2 {
-		t.Fatalf("expected 2 WitnessVerdicts, got %d", len(wvs))
-	}
-	for _, wv := range wvs {
-		if !wv.IsValid() {
-			t.Fatalf("expected WitnessVerdict %s to be valid", wv)
+	t.Run("WitnessVerdicts", func(t *testing.T) {
+		wvs := WitnessVerdicts()
+		if len(wvs) != 2 {
+			t.Fatalf("expected 2 WitnessVerdicts, got %d", len(wvs))
 		}
-	}
-
-	// 4. ParseWitnessVerdict validation
-	validWitnesses := []string{"WITNESS_DIFF_CONFIRMED", "witness_diff_confirmed", "WITNESS_UNWITNESSED_CLAIM", "witness_unwitnessed_claim"}
-	for _, s := range validWitnesses {
-		w, err := ParseWitnessVerdict(s)
-		if err != nil {
-			t.Fatalf("expected %q to parse successfully, got err: %v", s, err)
+		for _, wv := range wvs {
+			if !wv.IsValid() {
+				t.Fatalf("expected WitnessVerdict %s to be valid", wv)
+			}
 		}
-		if !w.IsValid() {
-			t.Fatalf("parsed witness %s is invalid", w)
+	})
+
+	t.Run("ParseWitnessVerdict", func(t *testing.T) {
+		validWitnesses := []string{"WITNESS_DIFF_CONFIRMED", "witness_diff_confirmed", "WITNESS_UNWITNESSED_CLAIM", "witness_unwitnessed_claim"}
+		for _, s := range validWitnesses {
+			w, err := ParseWitnessVerdict(s)
+			if err != nil {
+				t.Fatalf("expected %q to parse successfully, got err: %v", s, err)
+			}
+			if !w.IsValid() {
+				t.Fatalf("parsed witness %s is invalid", w)
+			}
 		}
-	}
 
-	invalidWitnesses := []string{"WITNESS_UNKNOWN", "UNKNOWN", "INVALID", "", "   ", "WITNESS_SPECULATIVE"}
-	for _, s := range invalidWitnesses {
-		_, err := ParseWitnessVerdict(s)
-		if !errors.Is(err, ErrInvalidWitnessVerdict) {
-			t.Fatalf("expected ErrInvalidWitnessVerdict for %q, got: %v", s, err)
+		invalidWitnesses := []string{"WITNESS_UNKNOWN", "UNKNOWN", "INVALID", "", "   ", "WITNESS_SPECULATIVE"}
+		for _, s := range invalidWitnesses {
+			_, err := ParseWitnessVerdict(s)
+			if !errors.Is(err, ErrInvalidWitnessVerdict) {
+				t.Fatalf("expected ErrInvalidWitnessVerdict for %q, got: %v", s, err)
+			}
 		}
-	}
+	})
 
-	// 5. StepObservation.Validate()
-	obsValid := StepObservation{
-		StepVerdict:    STEP_ADVANCE,
-		WitnessVerdict: WITNESS_DIFF_CONFIRMED,
-	}
-	if err := obsValid.Validate(); err != nil {
-		t.Fatalf("expected valid observation to pass Validate(), got %v", err)
-	}
+	t.Run("ObservationValidate", func(t *testing.T) {
+		obsValid := StepObservation{
+			StepVerdict:    STEP_ADVANCE,
+			WitnessVerdict: WITNESS_DIFF_CONFIRMED,
+		}
+		if err := obsValid.Validate(); err != nil {
+			t.Fatalf("expected valid observation to pass Validate(), got %v", err)
+		}
 
-	obsEmpty := StepObservation{}
-	if err := obsEmpty.Validate(); err != nil {
-		t.Fatalf("expected empty observation to pass Validate(), got %v", err)
-	}
+		obsEmpty := StepObservation{}
+		if err := obsEmpty.Validate(); err != nil {
+			t.Fatalf("expected empty observation to pass Validate(), got %v", err)
+		}
 
-	obsBadStep := StepObservation{
-		StepVerdict: StepVerdict("BAD_STEP"),
-	}
-	if err := obsBadStep.Validate(); !errors.Is(err, ErrInvalidStepVerdict) {
-		t.Fatalf("expected ErrInvalidStepVerdict, got %v", err)
-	}
+		obsBadStep := StepObservation{
+			StepVerdict: StepVerdict("BAD_STEP"),
+		}
+		if err := obsBadStep.Validate(); !errors.Is(err, ErrInvalidStepVerdict) {
+			t.Fatalf("expected ErrInvalidStepVerdict, got %v", err)
+		}
 
-	obsBadWitness := StepObservation{
-		WitnessVerdict: WitnessVerdict("BAD_WITNESS"),
-	}
-	if err := obsBadWitness.Validate(); !errors.Is(err, ErrInvalidWitnessVerdict) {
-		t.Fatalf("expected ErrInvalidWitnessVerdict, got %v", err)
-	}
+		obsBadWitness := StepObservation{
+			WitnessVerdict: WitnessVerdict("BAD_WITNESS"),
+		}
+		if err := obsBadWitness.Validate(); !errors.Is(err, ErrInvalidWitnessVerdict) {
+			t.Fatalf("expected ErrInvalidWitnessVerdict, got %v", err)
+		}
+	})
 }
 
 func TestObserverSemanticScreen_InterfaceConformance(t *testing.T) {
@@ -795,52 +796,557 @@ func TestObserverSemanticScreen_VerifyToolCall_PreExecution(t *testing.T) {
 
 	sessionID := "sess-pre-exec"
 
-	// 1. Fresh call: allowed
-	callClean := &abi.ToolCall{
+	t.Run("CleanCallAllowed", func(t *testing.T) {
+		callClean := &abi.ToolCall{
+			Tool:    "Edit",
+			TraceID: sessionID,
+		}
+		advClean := screen.VerifyToolCall(ctx, callClean)
+		if advClean.Disposition != abi.ScreenAllow {
+			t.Fatalf("expected ScreenAllow on clean pre-execution call, got %v", advClean.Disposition)
+		}
+	})
+
+	t.Run("QuarantinedContextMMU", func(t *testing.T) {
+		callQuarantined := &abi.ToolCall{
+			Tool:    "Write",
+			TraceID: sessionID,
+			Meta:    map[string]string{"mmu_quarantined": "true"},
+		}
+		advQ := screen.VerifyToolCall(ctx, callQuarantined)
+		if advQ.Disposition != abi.ScreenQuarantine || advQ.Reason != abi.ReasonTrustViolation {
+			t.Fatalf("expected ScreenQuarantine with ReasonTrustViolation for quarantined MMU state, got disp=%v reason=%v",
+				advQ.Disposition, advQ.Reason)
+		}
+	})
+
+	t.Run("UnwitnessedMutatingCall", func(t *testing.T) {
+		callUnwitnessed := &abi.ToolCall{
+			Tool:    "Edit",
+			TraceID: sessionID,
+			Meta:    map[string]string{"require_diff": "true"},
+		}
+		advUnwit := screen.VerifyToolCall(ctx, callUnwitnessed)
+		if advUnwit.Disposition != abi.ScreenQuarantine || advUnwit.Reason != abi.ReasonUnwitnessed {
+			t.Fatalf("expected ScreenQuarantine with ReasonUnwitnessed for unwitnessed mutating call, got disp=%v reason=%v",
+				advUnwit.Disposition, advUnwit.Reason)
+		}
+	})
+
+	t.Run("FlaggedChurnPreExecutionQuarantine", func(t *testing.T) {
+		callClean := &abi.ToolCall{
+			Tool:    "Edit",
+			TraceID: sessionID,
+		}
+		churnCall := &abi.ToolCall{
+			Tool:    "bash",
+			TraceID: sessionID,
+			Meta:    map[string]string{"error": "fail"},
+		}
+		_ = screen.ScreenResult(ctx, churnCall, []byte("fail"))
+		_ = screen.ScreenResult(ctx, churnCall, []byte("fail"))
+
+		advChurnPre := screen.VerifyToolCall(ctx, callClean)
+		if advChurnPre.Disposition != abi.ScreenQuarantine || advChurnPre.Reason != abi.ReasonTrustViolation {
+			t.Fatalf("expected pre-execution quarantine once churn tripped, got disp=%v reason=%v",
+				advChurnPre.Disposition, advChurnPre.Reason)
+		}
+	})
+}
+
+func TestObserveSyncBarrier_ContextCancelled(t *testing.T) {
+	p := NewPool(Config{WorkerCount: 2, QueueSize: 16})
+	_ = p.Start()
+	defer p.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	obs := StepObservation{
+		SessionID: "sess-canceled",
+		Tool:      "Edit",
+		Diff:      "@@ -1 +1 @@\n+added",
+	}
+
+	_, err := p.ObserveSyncBarrier(ctx, obs)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestObserveSyncBarrier_InFlightTaskWait(t *testing.T) {
+	p := NewPool(Config{
+		WorkerCount:    1,
+		QueueSize:      16,
+		BarrierTimeout: 200 * time.Millisecond,
+	})
+	_ = p.Start()
+	defer p.Close()
+
+	ctx := context.Background()
+	sessionID := "sess-inflight-wait"
+	sess := p.getOrCreateSession(sessionID)
+
+	// Simulate an in-flight async task
+	atomic.StoreInt64(&sess.inFlight, 1)
+
+	// In a background goroutine, simulate task finishing after 5ms
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		atomic.StoreInt64(&sess.inFlight, 0)
+	}()
+
+	obs := StepObservation{
+		SessionID: sessionID,
+		Tool:      "Write",
+		Diff:      "@@ -1 +1 @@\n+added",
+	}
+
+	start := time.Now()
+	res, err := p.ObserveSyncBarrier(ctx, obs)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("unexpected barrier error: %v", err)
+	}
+	if res.StepVerdict != STEP_ADVANCE {
+		t.Fatalf("expected STEP_ADVANCE, got %s", res.StepVerdict)
+	}
+	if elapsed < 4*time.Millisecond {
+		t.Fatalf("expected barrier to wait for in-flight task, elapsed %s", elapsed)
+	}
+}
+
+func TestObserveSyncBarrier_TimeoutWaitingForInFlight(t *testing.T) {
+	p := NewPool(Config{
+		WorkerCount:    1,
+		QueueSize:      16,
+		BarrierTimeout: 10 * time.Millisecond,
+	})
+	_ = p.Start()
+	defer p.Close()
+
+	ctx := context.Background()
+	sessionID := "sess-inflight-timeout"
+	sess := p.getOrCreateSession(sessionID)
+
+	// Set in-flight task that never finishes
+	atomic.StoreInt64(&sess.inFlight, 1)
+	defer atomic.StoreInt64(&sess.inFlight, 0)
+
+	obs := StepObservation{
+		SessionID: sessionID,
+		Tool:      "Write",
+		Diff:      "@@ -1 +1 @@\n+added",
+	}
+
+	_, err := p.ObserveSyncBarrier(ctx, obs)
+	if !errors.Is(err, ErrBarrierTimeout) {
+		t.Fatalf("expected ErrBarrierTimeout, got %v", err)
+	}
+}
+
+func TestObserveSyncBarrier_ContextCancelWhileWaiting(t *testing.T) {
+	p := NewPool(Config{
+		WorkerCount:    1,
+		QueueSize:      16,
+		BarrierTimeout: 500 * time.Millisecond,
+	})
+	_ = p.Start()
+	defer p.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	sessionID := "sess-inflight-cancel"
+	sess := p.getOrCreateSession(sessionID)
+
+	// Set in-flight task
+	atomic.StoreInt64(&sess.inFlight, 1)
+	defer atomic.StoreInt64(&sess.inFlight, 0)
+
+	// Cancel context after 10ms
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		cancel()
+	}()
+
+	obs := StepObservation{
+		SessionID: sessionID,
+		Tool:      "Write",
+		Diff:      "@@ -1 +1 @@\n+added",
+	}
+
+	_, err := p.ObserveSyncBarrier(ctx, obs)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestSessionHistory_RetentionCap(t *testing.T) {
+	const maxHistory = 10
+	p := NewPool(Config{
+		WorkerCount:          2,
+		QueueSize:            32,
+		MaxHistoryPerSession: maxHistory,
+	})
+	_ = p.Start()
+	defer p.Close()
+
+	ctx := context.Background()
+	sessionID := "sess-retention-test"
+
+	for i := 0; i < 25; i++ {
+		obs := StepObservation{
+			SessionID: sessionID,
+			Tool:      "Read",
+			Args:      fmt.Sprintf("path/file_%d.go", i),
+			Result:    fmt.Sprintf("content_%d", i),
+		}
+		_, err := p.ObserveSyncBarrier(ctx, obs)
+		if err != nil {
+			t.Fatalf("unexpected barrier error on step %d: %v", i, err)
+		}
+	}
+
+	history := p.GetSessionHistory(sessionID)
+	if len(history) != maxHistory {
+		t.Fatalf("expected exactly %d history entries, got %d", maxHistory, len(history))
+	}
+
+	lastEntry := history[len(history)-1]
+	expectedArg := "path/file_24.go"
+	if lastEntry.Args != expectedArg {
+		t.Fatalf("expected newest entry arg %q, got %v", expectedArg, lastEntry.Args)
+	}
+}
+
+func TestSessionHistory_TrailingElementsZeroedForGC(t *testing.T) {
+	const maxHistory = 5
+	p := NewPool(Config{
+		WorkerCount:          2,
+		QueueSize:            32,
+		MaxHistoryPerSession: maxHistory,
+	})
+	_ = p.Start()
+	defer p.Close()
+
+	ctx := context.Background()
+	sessionID := "sess-gc-zero-test"
+
+	// Fill and overflow history
+	for i := 0; i < 15; i++ {
+		obs := StepObservation{
+			SessionID: sessionID,
+			Tool:      "Read",
+			Args:      map[string]any{"index": i, "data": make([]byte, 1024)},
+			Result:    fmt.Sprintf("result-%d", i),
+		}
+		if _, err := p.ObserveSyncBarrier(ctx, obs); err != nil {
+			t.Fatalf("unexpected error on turn %d: %v", i, err)
+		}
+	}
+
+	sess := p.getOrCreateSession(sessionID)
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+
+	if len(sess.history) != maxHistory {
+		t.Fatalf("expected len(history) == %d, got %d", maxHistory, len(sess.history))
+	}
+
+	c := cap(sess.history)
+	if c <= maxHistory {
+		t.Fatalf("expected cap(history) > maxHistory, got cap=%d, maxHistory=%d", c, maxHistory)
+	}
+
+	backingSlice := sess.history[:c]
+	for i := maxHistory; i < c; i++ {
+		elem := backingSlice[i]
+		if elem.Args != nil || elem.Result != nil || elem.Tool != "" || elem.Diff != "" {
+			t.Fatalf("slot %d beyond len in backing array was not zeroed: %+v", i, elem)
+		}
+	}
+}
+
+func TestObservation_ByteSliceResultsAndErrors(t *testing.T) {
+	p := NewPool(Config{
+		RequireWitnessDiff: true,
+		ChurnThreshold:     2,
+	})
+	_ = p.Start()
+	defer p.Close()
+
+	ctx := context.Background()
+
+	// 1. Read tool with byte-slice error is recognized and tracks failure
+	obsErr1 := StepObservation{
+		SessionID: "sess-bytes-err",
+		Tool:      "Read",
+		Result:    []byte("error: file not found"),
+	}
+	resErr1, err := p.ObserveSyncBarrier(ctx, obsErr1)
+	if err != nil {
+		t.Fatalf("unexpected error on read byte error: %v", err)
+	}
+	if resErr1.StepVerdict != STEP_ADVANCE {
+		t.Fatalf("expected STEP_ADVANCE on first error, got %s", resErr1.StepVerdict)
+	}
+
+	// Second byte-slice error reaches ChurnThreshold (2) -> ErrChurnRefused
+	obsErr2 := StepObservation{
+		SessionID: "sess-bytes-err",
+		Tool:      "Read",
+		Result:    []byte("error: file not found"),
+	}
+	resErr2, err := p.ObserveSyncBarrier(ctx, obsErr2)
+	if !errors.Is(err, ErrChurnRefused) {
+		t.Fatalf("expected ErrChurnRefused on second byte error, got %v", err)
+	}
+	if resErr2.StepVerdict != STEP_CHURN {
+		t.Fatalf("expected STEP_CHURN, got %s", resErr2.StepVerdict)
+	}
+
+	// 2. Mutating tool with byte-slice diff confirmation
+	obsDiff := StepObservation{
+		SessionID: "sess-bytes-diff",
+		Tool:      "Edit",
+		Result:    []byte("1 file changed, 3 insertions(+)"),
+	}
+	resDiff, err := p.ObserveSyncBarrier(ctx, obsDiff)
+	if err != nil {
+		t.Fatalf("unexpected error on byte diff observation: %v", err)
+	}
+	if resDiff.WitnessVerdict != WITNESS_DIFF_CONFIRMED {
+		t.Fatalf("expected WITNESS_DIFF_CONFIRMED, got %s", resDiff.WitnessVerdict)
+	}
+
+	// 3. Mutating tool with byte-slice error and no diff -> ErrUnwitnessedDiff
+	obsMutErr := StepObservation{
+		SessionID: "sess-bytes-mut-err",
+		Tool:      "bash",
+		Result:    []byte("error: command not found"),
+	}
+	resMutErr, err := p.ObserveSyncBarrier(ctx, obsMutErr)
+	if !errors.Is(err, ErrUnwitnessedDiff) {
+		t.Fatalf("expected ErrUnwitnessedDiff on mutating byte error, got %v", err)
+	}
+	if resMutErr.WitnessVerdict != WITNESS_UNWITNESSED_CLAIM {
+		t.Fatalf("expected WITNESS_UNWITNESSED_CLAIM, got %s", resMutErr.WitnessVerdict)
+	}
+}
+
+func TestStepObservation_ToolClassification(t *testing.T) {
+	readOnly := []string{
+		"Read", "read", "Grep", "grep", "Glob", "glob", "fak_read",
+		"list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource",
+	}
+	for _, tool := range readOnly {
+		if !IsReadOnlyTool(tool) {
+			t.Errorf("expected %q to be read-only", tool)
+		}
+		if IsMutatingTool(tool) {
+			t.Errorf("expected %q not to be mutating", tool)
+		}
+		obs := StepObservation{Tool: tool}
+		if !obs.IsReadOnly() || obs.IsMutating() {
+			t.Errorf("expected StepObservation(%q) to be read-only", tool)
+		}
+	}
+
+	mutating := []string{
+		"Edit", "edit", "Write", "write", "bash", "git commit", "commit", "fak_syscall",
+		"git push", "git checkout",
+	}
+	for _, tool := range mutating {
+		if !IsMutatingTool(tool) {
+			t.Errorf("expected %q to be mutating", tool)
+		}
+		if IsReadOnlyTool(tool) {
+			t.Errorf("expected %q not to be read-only", tool)
+		}
+		obs := StepObservation{Tool: tool}
+		if !obs.IsMutating() || obs.IsReadOnly() {
+			t.Errorf("expected StepObservation(%q) to be mutating", tool)
+		}
+	}
+
+	gitReadOnly := []string{"git status", "git diff", "git log", "git rev-parse"}
+	for _, tool := range gitReadOnly {
+		if IsMutatingTool(tool) {
+			t.Errorf("expected git subcommand %q not to be mutating", tool)
+		}
+	}
+}
+
+func TestObserverSemanticScreen_NilAndContextHandling(t *testing.T) {
+	screen := NewObserverSemanticScreen(nil)
+
+	adv := screen.ScreenResult(context.Background(), nil, []byte("ok"))
+	if adv.Disposition != abi.ScreenAllow {
+		t.Fatalf("expected ScreenAllow on nil ToolCall, got %v", adv.Disposition)
+	}
+
+	advPre := screen.VerifyToolCall(context.Background(), nil)
+	if advPre.Disposition != abi.ScreenAllow {
+		t.Fatalf("expected ScreenAllow on nil ToolCall in VerifyToolCall, got %v", advPre.Disposition)
+	}
+
+	ctxCanceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	call := &abi.ToolCall{Tool: "Edit"}
+	advCancel := screen.ScreenResult(ctxCanceled, call, []byte("ok"))
+	if advCancel.Disposition != abi.ScreenAllow {
+		t.Fatalf("expected ScreenAllow on canceled context in ScreenResult, got %v", advCancel.Disposition)
+	}
+
+	advCancelPre := screen.VerifyToolCall(ctxCanceled, call)
+	if advCancelPre.Disposition != abi.ScreenAllow {
+		t.Fatalf("expected ScreenAllow on canceled context in VerifyToolCall, got %v", advCancelPre.Disposition)
+	}
+}
+
+func TestPool_ResetAndGetSession(t *testing.T) {
+	p := NewPool(Config{WorkerCount: 2, QueueSize: 16})
+	_ = p.Start()
+	defer p.Close()
+
+	if h := p.GetSessionHistory("non-existent"); h != nil {
+		t.Fatalf("expected nil history for non-existent session, got %v", h)
+	}
+
+	p.ResetSession("non-existent")
+
+	ctx := context.Background()
+	_, err := p.ObserveSyncBarrier(ctx, StepObservation{
+		SessionID: "sess-temp",
+		Tool:      "Read",
+	})
+	if err != nil {
+		t.Fatalf("unexpected barrier error: %v", err)
+	}
+	if h := p.GetSessionHistory("sess-temp"); len(h) != 1 {
+		t.Fatalf("expected 1 history item, got %d", len(h))
+	}
+
+	p.ResetSession("sess-temp")
+	if h := p.GetSessionHistory("sess-temp"); h != nil {
+		t.Fatalf("expected nil history after reset, got %v", h)
+	}
+}
+
+func BenchmarkObserveAsyncParallel(b *testing.B) {
+	p := NewPool(Config{WorkerCount: 8, QueueSize: 4096})
+	_ = p.Start()
+	defer p.Close()
+
+	ctx := context.Background()
+	obs := StepObservation{
+		SessionID: "bench-async-par",
+		Tool:      "Read",
+		Args:      "file.go",
+	}
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			ch := p.ObserveAsync(ctx, obs)
+			<-ch
+		}
+	})
+}
+
+func BenchmarkObserveSyncBarrierParallel(b *testing.B) {
+	p := NewPool(Config{WorkerCount: 8, QueueSize: 4096})
+	_ = p.Start()
+	defer p.Close()
+
+	ctx := context.Background()
+	obs := StepObservation{
+		SessionID: "bench-barrier-par",
+		Tool:      "Edit",
+		Diff:      "@@ -1 +1 @@\n-old\n+new",
+	}
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, _ = p.ObserveSyncBarrier(ctx, obs)
+		}
+	})
+}
+
+func BenchmarkObserverSemanticScreen_ScreenResult_ReadOnly(b *testing.B) {
+	p := NewPool(Config{WorkerCount: 8, QueueSize: 2048})
+	_ = p.Start()
+	defer p.Close()
+
+	screen := NewObserverSemanticScreen(p)
+	ctx := context.Background()
+	call := &abi.ToolCall{
+		Tool:    "Read",
+		TraceID: "bench-screen-readonly",
+		Meta:    map[string]string{"args": "query"},
+	}
+	body := []byte("search results matched 10 lines")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = screen.ScreenResult(ctx, call, body)
+	}
+}
+
+func BenchmarkObserverSemanticScreen_ScreenResult_Mutating(b *testing.B) {
+	p := NewPool(Config{WorkerCount: 8, QueueSize: 2048, RequireWitnessDiff: true})
+	_ = p.Start()
+	defer p.Close()
+
+	screen := NewObserverSemanticScreen(p)
+	ctx := context.Background()
+	call := &abi.ToolCall{
 		Tool:    "Edit",
-		TraceID: sessionID,
+		TraceID: "bench-screen-mutating",
+		Meta:    map[string]string{"diff": "@@ -1 +1 @@\n-old\n+new"},
 	}
-	advClean := screen.VerifyToolCall(ctx, callClean)
-	if advClean.Disposition != abi.ScreenAllow {
-		t.Fatalf("expected ScreenAllow on clean pre-execution call, got %v", advClean.Disposition)
-	}
+	body := []byte("replaced content successfully")
 
-	// 2. Call with quarantined context MMU metadata
-	callQuarantined := &abi.ToolCall{
-		Tool:    "Write",
-		TraceID: sessionID,
-		Meta:    map[string]string{"mmu_quarantined": "true"},
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = screen.ScreenResult(ctx, call, body)
 	}
-	advQ := screen.VerifyToolCall(ctx, callQuarantined)
-	if advQ.Disposition != abi.ScreenQuarantine || advQ.Reason != abi.ReasonTrustViolation {
-		t.Fatalf("expected ScreenQuarantine with ReasonTrustViolation for quarantined MMU state, got disp=%v reason=%v",
-			advQ.Disposition, advQ.Reason)
-	}
+}
 
-	// 3. Mutating call with require_diff set and no diff/args
-	callUnwitnessed := &abi.ToolCall{
+func BenchmarkObserverSemanticScreen_VerifyToolCall(b *testing.B) {
+	p := NewPool(Config{WorkerCount: 8, QueueSize: 2048})
+	_ = p.Start()
+	defer p.Close()
+
+	screen := NewObserverSemanticScreen(p)
+	ctx := context.Background()
+	call := &abi.ToolCall{
 		Tool:    "Edit",
-		TraceID: sessionID,
-		Meta:    map[string]string{"require_diff": "true"},
-	}
-	advUnwit := screen.VerifyToolCall(ctx, callUnwitnessed)
-	if advUnwit.Disposition != abi.ScreenQuarantine || advUnwit.Reason != abi.ReasonUnwitnessed {
-		t.Fatalf("expected ScreenQuarantine with ReasonUnwitnessed for unwitnessed mutating call, got disp=%v reason=%v",
-			advUnwit.Disposition, advUnwit.Reason)
+		TraceID: "bench-screen-verify",
 	}
 
-	// 4. Pre-execution barrier once churn tripped
-	churnCall := &abi.ToolCall{
-		Tool:    "bash",
-		TraceID: sessionID,
-		Meta:    map[string]string{"error": "fail"},
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = screen.VerifyToolCall(ctx, call)
 	}
-	_ = screen.ScreenResult(ctx, churnCall, []byte("fail"))
-	_ = screen.ScreenResult(ctx, churnCall, []byte("fail")) // trips churn
+}
 
-	advChurnPre := screen.VerifyToolCall(ctx, callClean)
-	if advChurnPre.Disposition != abi.ScreenQuarantine || advChurnPre.Reason != abi.ReasonTrustViolation {
-		t.Fatalf("expected pre-execution quarantine once churn tripped, got disp=%v reason=%v",
-			advChurnPre.Disposition, advChurnPre.Reason)
+func BenchmarkParseStepVerdict(b *testing.B) {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = ParseStepVerdict("STEP_ADVANCE")
+	}
+}
+
+func BenchmarkStepObservation_Validate(b *testing.B) {
+	obs := StepObservation{
+		StepVerdict:    STEP_ADVANCE,
+		WitnessVerdict: WITNESS_DIFF_CONFIRMED,
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = obs.Validate()
 	}
 }
