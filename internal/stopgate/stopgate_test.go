@@ -233,6 +233,10 @@ func TestEvaluateBoundaryIntegration(t *testing.T) {
 	// 3. Noted no allowed path on clean stop -> clean wrapup
 	in = BoundaryInput{
 		NotedNoAllowedPath: true,
+		BoundaryRefusalReceipt: &BoundaryRefusalReceipt{
+			Reason:   "POLICY_BLOCK",
+			Verified: true,
+		},
 	}
 	dec = EvaluateBoundary(ladder, witness, in)
 	if dec.Disposition != DispCleanWrapup || dec.Action != ActionAllow {
@@ -243,6 +247,10 @@ func TestEvaluateBoundaryIntegration(t *testing.T) {
 	in = BoundaryInput{
 		ConsecutiveDenyAll: 10,
 		NotedNoAllowedPath: true,
+		BoundaryRefusalReceipt: &BoundaryRefusalReceipt{
+			Reason:   "POLICY_BLOCK",
+			Verified: true,
+		},
 	}
 	dec = EvaluateBoundary(ladder, witness, in)
 	if dec.Disposition != DispCleanWrapup || dec.Action != ActionAllow {
@@ -319,6 +327,10 @@ func TestStopgateNotedNoAllowedPathRequiresWitness(t *testing.T) {
 		in := BoundaryInput{
 			NotedNoAllowedPath: true,
 			FinalGate:          func() (bool, string) { return true, "" },
+			BoundaryRefusalReceipt: &BoundaryRefusalReceipt{
+				Reason:   "POLICY_BLOCK",
+				Verified: true,
+			},
 			WitnessClaim: &WitnessClaim{
 				Claimed:   true,
 				Witnessed: true,
