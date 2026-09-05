@@ -7,6 +7,17 @@ import (
 	"time"
 )
 
+func TestHarnessLint(t *testing.T) {
+	t.Run("RuleHL001_SecretPlaintext", TestRuleHL001_SecretPlaintext)
+	t.Run("RuleHL002_CRLFLineEndings", TestRuleHL002_CRLFLineEndings)
+	t.Run("RuleHL003_SinglePlatform", TestRuleHL003_SinglePlatform)
+	t.Run("RuleHL004_UnpinnedMCPTools", TestRuleHL004_UnpinnedMCPTools)
+	t.Run("RuleHL005_UnknownFields", TestRuleHL005_UnknownFields)
+	t.Run("CleanValidV2Lock", TestCleanValidV2Lock)
+	t.Run("PerformanceUnder50ms", TestPerformanceUnder50ms)
+	t.Run("ReportSerialization", TestReportSerialization)
+}
+
 func TestRuleHL001_SecretPlaintext(t *testing.T) {
 	// Case 1: Plaintext secret in assets
 	lockWithPlaintextSecret := `{

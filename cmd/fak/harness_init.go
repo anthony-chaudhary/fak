@@ -78,8 +78,11 @@ func runHarness(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) > 0 && argv[0] == "protocol" {
 		return runHarnessProtocol(stdout, stderr, argv[1:])
 	}
+	if len(argv) > 0 && argv[0] == "lint" {
+		return runHarnessLint(stdout, stderr, argv[1:])
+	}
 	if len(argv) == 0 || argv[0] != "init" {
-		fmt.Fprintln(stderr, "usage: fak harness <init|classify|compare|compose|cross-dogfood|derive|discover|gallery|inspect|selfcheck|mix|override|preview|release|resolve|select|study|protocol|verify-run|web>")
+		fmt.Fprintln(stderr, "usage: fak harness <init|classify|compare|compose|cross-dogfood|derive|discover|gallery|inspect|selfcheck|lint|mix|override|preview|release|resolve|select|study|protocol|verify-run|web>")
 		return 2
 	}
 	fs := flag.NewFlagSet("harness init", flag.ContinueOnError)
