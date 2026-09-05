@@ -96,6 +96,42 @@ func (ix *Index) Add(id, path, content string) {
 // DocCount is the number of indexed documents.
 func (ix *Index) DocCount() int { return len(ix.docs) }
 
+// SizeBytes returns an estimate of the heap memory used by the index in bytes,
+// accounting for document strings, struct headers, and trigram posting lists.
+func (ix *Index) SizeBytes() int64 {
+	if ix == nil {
+		return 0
+	}
+	var total int64
+	total += int64(cap(ix.docs) * 48)
+	for _, d := range ix.docs {
+		total += int64(len(d.id) + len(d.path) + len(d.content))
+	}
+	for _, lst := range ix.postings {
+		total += int64(48 + cap(lst)*8)
+	}
+	return total
+}
+
+// Compact shrinks postings and doc slice capacities to their exact lengths to minimize memory.
+func (ix *Index) Compact() {
+	if ix == nil {
+		return
+	}
+	if cap(ix.docs) > len(ix.docs) {
+		compactedDocs := make([]doc, len(ix.docs))
+		copy(compactedDocs, ix.docs)
+		ix.docs = compactedDocs
+	}
+	for t, lst := range ix.postings {
+		if cap(lst) > len(lst) {
+			compacted := make([]int, len(lst))
+			copy(compacted, lst)
+			ix.postings[t] = compacted
+		}
+	}
+}
+
 func (ix *Index) allDocIDs() []int {
 	out := make([]int, len(ix.docs))
 	for i := range ix.docs {
