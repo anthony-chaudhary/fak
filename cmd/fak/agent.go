@@ -104,7 +104,7 @@ func runAgent(argv []string) {
 	fs, af := newAgentFlagSet()
 	_ = fs.Parse(argv)
 
-	isRaw, isNative, err := validateAgentMode(*af.raw, *af.native, *af.mode)
+	isRaw, isNative, err := resolveAgentMode(*af.raw, *af.native, *af.mode)
 	must(err)
 
 	if *af.workflow != "" {
@@ -328,15 +328,30 @@ func agentEffortRunOptions(af *agentFlags) []agent.RunOption {
 	return opts
 }
 
-func validateAgentMode(raw, native bool, mode string) (isRaw, isNative bool, err error) {
+func resolveAgentMode(raw, native bool, mode string) (isRaw, isNative bool, err error) {
 	modeVal := strings.ToLower(strings.TrimSpace(mode))
-	if modeVal != "" && modeVal != "dual" && modeVal != "native" && modeVal != "raw" {
-		return false, false, fmt.Errorf("fak agent: unknown --mode %q (want dual, native, or raw)", mode)
+	switch modeVal {
+	case "", "dual", "ab":
+		// default dual/A-B mode unless explicit boolean flags set
+	case "raw":
+		if native {
+			return false, false, errors.New("fak agent: cannot specify both native and raw execution modes")
+		}
+		raw = true
+	case "native":
+		if raw {
+			return false, false, errors.New("fak agent: cannot specify both native and raw execution modes")
+		}
+		native = true
+	default:
+		return false, false, fmt.Errorf("fak agent: unknown --mode %q (want dual, ab, native, or raw)", mode)
 	}
-	isRaw = raw || modeVal == "raw"
-	isNative = native || modeVal == "native"
-	if isRaw && isNative {
+	if raw && native {
 		return false, false, errors.New("fak agent: cannot specify both raw and native execution modes")
 	}
-	return isRaw, isNative, nil
+	return raw, native, nil
+}
+
+func validateAgentMode(raw, native bool, mode string) (isRaw, isNative bool, err error) {
+	return resolveAgentMode(raw, native, mode)
 }
