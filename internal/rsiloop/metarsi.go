@@ -124,7 +124,7 @@ func Fold(rows []Row, cur KeepPolicy, cfg MetaConfig) (Proposal, bool) {
 
 	esc, seen := 0, 0
 	for i := len(rows) - 1; i >= 0 && seen < cfg.Window; i-- {
-		if rows[i].Mode != "improve" {
+		if rows[i].Mode != "improve" || rows[i].Decision == "RETRY" {
 			continue
 		}
 		seen++
@@ -156,6 +156,11 @@ func Fold(rows []Row, cur KeepPolicy, cfg MetaConfig) (Proposal, bool) {
 	}, true
 }
 
+// FoldClusteredEscalations is an alias for Fold.
+func FoldClusteredEscalations(rows []Row, cur KeepPolicy, cfg MetaConfig) (Proposal, bool) {
+	return Fold(rows, cur, cfg)
+}
+
 // KeepRateTruthClean is the anti-goodhart meta-objective: of the improve cycles in
 // rows, the fraction that produced a TRUTH-CLEAN keep (Kept AND TruthClean). A keep
 // that is not truth-clean does NOT count — so admitting more keeps by dropping the
@@ -163,7 +168,7 @@ func Fold(rows []Row, cur KeepPolicy, cfg MetaConfig) (Proposal, bool) {
 func KeepRateTruthClean(rows []Row) float64 {
 	cycles, clean := 0, 0
 	for _, r := range rows {
-		if r.Mode != "improve" {
+		if r.Mode != "improve" || r.Decision == "RETRY" {
 			continue
 		}
 		cycles++
