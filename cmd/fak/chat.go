@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
@@ -37,6 +39,8 @@ type chatFlags struct {
 	memory                *bool
 	memoryStore           *string
 	reasoningProfile      *string
+	asJSON                *bool
+	receiptOut            *string
 }
 
 func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
@@ -64,6 +68,8 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 	cf.memory = fs.Bool("memory", true, "discover and inject verified workspace memory notes into agent prompt; use --memory=false to disable")
 	cf.memoryStore = fs.String("memory-store", "", "optional custom memory store path (directory or MEMORY.md); defaults to auto-discovery")
 	cf.reasoningProfile = fs.String("reasoning-profile", agent.ReasoningProfileDefault, "named reasoning profile: default|baseline|deep-reason (default: default)")
+	cf.asJSON = fs.Bool("json", false, "emit machine-readable JSON execution receipt in headless mode")
+	cf.receiptOut = fs.String("receipt", "", "write machine-readable execution receipt JSON to file in headless mode")
 	return fs, cf
 }
 
@@ -164,7 +170,7 @@ func cmdChat(argv []string) {
 
 	planner := chatPlanner(*cf.offline, effectiveBaseURL, *cf.provider, *cf.model, *cf.apiKeyEnv, *cf.anthropicAuth)
 	if *cf.task != "" {
-		if err := runChatHeadless(os.Stdout, planner, *cf.task, *cf.maxTurns, runOpts...); err != nil {
+		if err := runChatHeadless(os.Stdout, planner, *cf.task, *cf.maxTurns, *cf.asJSON, *cf.receiptOut, root, runOpts...); err != nil {
 			os.Exit(1)
 		}
 		return
@@ -203,9 +209,34 @@ func chatPlanner(offline bool, baseURL, provider, model, apiKeyEnv, anthropicAut
 }
 
 // runChatHeadless executes a single turn non-interactively (headless mode), printing
-// any executed tool calls and the final answer directly to out.
-func runChatHeadless(out io.Writer, planner agent.Planner, task string, maxTurns int, opts ...agent.RunOption) error {
+// any executed tool calls and the final answer directly to out, or outputting/writing
+// a structured execution receipt if asJSON is true or receiptOut is non-empty.
+func runChatHeadless(out io.Writer, planner agent.Planner, task string, maxTurns int, asJSON bool, receiptOut string, workspace string, opts ...agent.RunOption) error {
 	m, calls, err := agent.RunGovernedArm(ctx(), planner, task, maxTurns, opts...)
+	if asJSON || receiptOut != "" {
+		model := ""
+		if planner != nil {
+			model = planner.Model()
+		}
+		receipt := newHeadlessAgentReceipt(task, model, m, calls, workspace, err)
+		data, marshalErr := json.MarshalIndent(receipt, "", "  ")
+		if marshalErr != nil {
+			return marshalErr
+		}
+		if receiptOut != "" {
+			if dir := filepath.Dir(receiptOut); dir != "" && dir != "." {
+				_ = os.MkdirAll(dir, 0o755)
+			}
+			if writeErr := os.WriteFile(receiptOut, append(data, '\n'), 0o644); writeErr != nil {
+				return writeErr
+			}
+		}
+		if asJSON {
+			fmt.Fprintf(out, "%s\n", data)
+			return err
+		}
+	}
+
 	if err != nil {
 		renderChatTermination(out, err)
 		return err
