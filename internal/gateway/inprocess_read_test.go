@@ -184,6 +184,72 @@ func TestGateway_PromoteShellReadToInProcess(t *testing.T) {
 	})
 }
 
+func TestGateway_PromoteShellRead_CompoundPipeline(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	dir := t.TempDir()
+	p1 := filepath.Join(dir, "file1.txt")
+	p2 := filepath.Join(dir, "file2.txt")
+	if err := os.WriteFile(p1, []byte("content from file1\n"), 0644); err != nil {
+		t.Fatalf("failed to write file1: %v", err)
+	}
+	if err := os.WriteFile(p2, []byte("content from file2\n"), 0644); err != nil {
+		t.Fatalf("failed to write file2: %v", err)
+	}
+
+	cmd := fmt.Sprintf("Get-Content %s; Get-Content %s", filepath.ToSlash(p1), filepath.ToSlash(p2))
+	args := fmt.Sprintf(`{"command":%q}`, cmd)
+
+	env, wv, ok := srv.PromoteShellReadToInProcess(context.Background(), "exec_command", args, "trace-compound-pipeline")
+	if !ok || env == nil {
+		t.Fatalf("expected compound pipeline promotion to succeed, ok=%v", ok)
+	}
+	if wv.Kind != "ALLOW" {
+		t.Errorf("expected ALLOW verdict, got %s", wv.Kind)
+	}
+	if env.Meta["served_by"] != "in_process_read" {
+		t.Errorf("expected meta served_by=in_process_read, got %q", env.Meta["served_by"])
+	}
+	if env.Meta["in_process_op"] != "compound" {
+		t.Errorf("expected meta in_process_op=compound, got %q", env.Meta["in_process_op"])
+	}
+
+	var res vdso.ShellReadResult
+	if err := json.Unmarshal([]byte(env.Content), &res); err != nil {
+		t.Fatalf("failed to unmarshal content: %v", err)
+	}
+	if res.ExitCode != 0 {
+		t.Fatalf("expected ExitCode 0, got %d, stderr: %s", res.ExitCode, res.Stderr)
+	}
+	want := "content from file1\ncontent from file2\n"
+	if res.Stdout != want {
+		t.Fatalf("stdout mismatch: got %q, want %q", res.Stdout, want)
+	}
+
+	t.Run("syscall promotion with workdir", func(t *testing.T) {
+		cmdWorkdir := "Get-Content file1.txt; Get-Content file2.txt"
+		argsWorkdir := fmt.Sprintf(`{"cmd":%q,"workdir":%q}`, cmdWorkdir, filepath.ToSlash(dir))
+		wvCall, envCall, err := srv.syscall(context.Background(), "exec_command", argsWorkdir, true, "", "trace-compound-workdir")
+		if err != nil {
+			t.Fatalf("syscall failed: %v", err)
+		}
+		if wvCall.Kind != "ALLOW" {
+			t.Errorf("expected ALLOW verdict, got %s", wvCall.Kind)
+		}
+		if envCall.Meta["served_by"] != "in_process_read" {
+			t.Errorf("expected meta served_by=in_process_read, got %q", envCall.Meta["served_by"])
+		}
+		var resWorkdir vdso.ShellReadResult
+		if err := json.Unmarshal([]byte(envCall.Content), &resWorkdir); err != nil {
+			t.Fatalf("failed to unmarshal content: %v", err)
+		}
+		if resWorkdir.ExitCode != 0 || resWorkdir.Stdout != want {
+			t.Fatalf("unexpected result: exitCode=%d, stdout=%q, stderr=%s", resWorkdir.ExitCode, resWorkdir.Stdout, resWorkdir.Stderr)
+		}
+	})
+}
+
 func BenchmarkGateway_PromoteShellRead_ExecCommand(b *testing.B) {
 	srv := newAdjudicateBenchmarkServer(b)
 	dir := b.TempDir()

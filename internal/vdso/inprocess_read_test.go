@@ -356,6 +356,84 @@ func TestExecuteInProcessRead(t *testing.T) {
 			t.Fatalf("expected empty stdout for empty dir name only, got: %q", res.Stdout)
 		}
 	})
+
+	t.Run("compound parallel execution returning combined outputs in order", func(t *testing.T) {
+		f1 := filepath.Join(dir, "f1.txt")
+		f2 := filepath.Join(dir, "f2.txt")
+		f3 := filepath.Join(dir, "f3.txt")
+		_ = os.WriteFile(f1, []byte("alpha\n"), 0644)
+		_ = os.WriteFile(f2, []byte("beta\n"), 0644)
+		_ = os.WriteFile(f3, []byte("gamma\n"), 0644)
+
+		spec := &ShellReadSpec{
+			Op: "compound",
+			SubSpecs: []*ShellReadSpec{
+				{Op: "cat", FilePath: f1},
+				{Op: "cat", FilePath: f2},
+				{Op: "cat", FilePath: f3},
+			},
+			Connectors: []string{";", ";"},
+		}
+
+		res := ExecuteInProcessRead(spec, "")
+		if res.ExitCode != 0 {
+			t.Fatalf("expected ExitCode 0, got %d, stderr: %s", res.ExitCode, res.Stderr)
+		}
+		want := "alpha\nbeta\ngamma\n"
+		if res.Stdout != want {
+			t.Fatalf("stdout mismatch: got %q, want %q", res.Stdout, want)
+		}
+	})
+
+	t.Run("compound && short-circuit on non-existent file in first segment", func(t *testing.T) {
+		fGood := filepath.Join(dir, "good.txt")
+		_ = os.WriteFile(fGood, []byte("should not be read on short-circuit\n"), 0644)
+
+		spec := &ShellReadSpec{
+			Op: "compound",
+			SubSpecs: []*ShellReadSpec{
+				{Op: "cat", FilePath: filepath.Join(dir, "nonexistent.txt")},
+				{Op: "cat", FilePath: fGood},
+			},
+			Connectors: []string{"&&"},
+		}
+
+		res := ExecuteInProcessRead(spec, "")
+		if res.ExitCode == 0 {
+			t.Fatalf("expected non-zero ExitCode, got 0")
+		}
+		if !strings.Contains(res.Stderr, "No such file or directory") {
+			t.Fatalf("expected Stderr to contain 'No such file or directory', got: %s", res.Stderr)
+		}
+		if res.Stdout != "" {
+			t.Fatalf("expected empty Stdout due to short-circuit, got %q", res.Stdout)
+		}
+	})
+
+	t.Run("compound ; does not short-circuit on failure in first segment", func(t *testing.T) {
+		fGood := filepath.Join(dir, "good_semi.txt")
+		_ = os.WriteFile(fGood, []byte("read after failure\n"), 0644)
+
+		spec := &ShellReadSpec{
+			Op: "compound",
+			SubSpecs: []*ShellReadSpec{
+				{Op: "cat", FilePath: filepath.Join(dir, "nonexistent2.txt")},
+				{Op: "cat", FilePath: fGood},
+			},
+			Connectors: []string{";"},
+		}
+
+		res := ExecuteInProcessRead(spec, "")
+		if res.ExitCode == 0 {
+			t.Fatalf("expected non-zero ExitCode due to first command failure, got 0")
+		}
+		if !strings.Contains(res.Stderr, "No such file or directory") {
+			t.Fatalf("expected Stderr to contain 'No such file or directory', got: %s", res.Stderr)
+		}
+		if res.Stdout != "read after failure\n" {
+			t.Fatalf("expected Stdout from second command, got %q", res.Stdout)
+		}
+	})
 }
 
 func TestPromoteInProcessRead(t *testing.T) {
@@ -480,6 +558,298 @@ func BenchmarkInProcessRead_GetContent(b *testing.B) {
 		Op:       "get-content",
 		FilePath: filePath,
 		Lines:    10,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		res := ExecuteInProcessRead(spec, "")
+		if res.ExitCode != 0 {
+			b.Fatalf("ExecuteInProcessRead failed: %s", res.Stderr)
+		}
+	}
+}
+
+func TestSplitCompoundCommand(t *testing.T) {
+	t.Run("splitting on semicolon, double-ampersand, and newline", func(t *testing.T) {
+		tests := []struct {
+			name           string
+			cmd            string
+			wantSegments   []string
+			wantConnectors []string
+		}{
+			{
+				name:           "semicolon separation",
+				cmd:            "cat file1.txt; cat file2.txt",
+				wantSegments:   []string{"cat file1.txt", "cat file2.txt"},
+				wantConnectors: []string{";", ""},
+			},
+			{
+				name:           "double-ampersand separation",
+				cmd:            "Get-Content A.txt && Get-Content B.txt",
+				wantSegments:   []string{"Get-Content A.txt", "Get-Content B.txt"},
+				wantConnectors: []string{"&&", ""},
+			},
+			{
+				name:           "newline separation",
+				cmd:            "cat file1.txt\ncat file2.txt",
+				wantSegments:   []string{"cat file1.txt", "cat file2.txt"},
+				wantConnectors: []string{";", ""},
+			},
+			{
+				name:           "semicolon followed by newline",
+				cmd:            "cat file1.txt;\ncat file2.txt",
+				wantSegments:   []string{"cat file1.txt", "cat file2.txt"},
+				wantConnectors: []string{";", ""},
+			},
+			{
+				name:           "trailing semicolon",
+				cmd:            "cat file1.txt; cat file2.txt;",
+				wantSegments:   []string{"cat file1.txt", "cat file2.txt"},
+				wantConnectors: []string{";", ""},
+			},
+			{
+				name:           "trailing newline",
+				cmd:            "cat file1.txt\ncat file2.txt\n",
+				wantSegments:   []string{"cat file1.txt", "cat file2.txt"},
+				wantConnectors: []string{";", ""},
+			},
+			{
+				name:           "three commands with mixed connectors",
+				cmd:            "cat A.txt && head -n 5 B.txt; tail C.txt",
+				wantSegments:   []string{"cat A.txt", "head -n 5 B.txt", "tail C.txt"},
+				wantConnectors: []string{"&&", ";", ""},
+			},
+		}
+
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				segs, ok := SplitCompoundCommand(tc.cmd)
+				if !ok {
+					t.Fatalf("SplitCompoundCommand(%q) returned ok=false", tc.cmd)
+				}
+				if len(segs) != len(tc.wantSegments) {
+					t.Fatalf("got %d segments, want %d", len(segs), len(tc.wantSegments))
+				}
+				for i, seg := range segs {
+					if seg.RawCmd != tc.wantSegments[i] {
+						t.Errorf("seg[%d].RawCmd = %q, want %q", i, seg.RawCmd, tc.wantSegments[i])
+					}
+					if seg.Connector != tc.wantConnectors[i] {
+						t.Errorf("seg[%d].Connector = %q, want %q", i, seg.Connector, tc.wantConnectors[i])
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("preserving semicolons and ampersands inside quotes", func(t *testing.T) {
+		tests := []struct {
+			name           string
+			cmd            string
+			wantSegments   []string
+			wantConnectors []string
+		}{
+			{
+				name:           "semicolon in double quotes",
+				cmd:            `cat "file;1.txt"`,
+				wantSegments:   []string{`cat "file;1.txt"`},
+				wantConnectors: []string{""},
+			},
+			{
+				name:           "semicolon in single quotes",
+				cmd:            `cat 'file;1.txt'`,
+				wantSegments:   []string{`cat 'file;1.txt'`},
+				wantConnectors: []string{""},
+			},
+			{
+				name:           "double-ampersand in double quotes",
+				cmd:            `cat "file&&1.txt"`,
+				wantSegments:   []string{`cat "file&&1.txt"`},
+				wantConnectors: []string{""},
+			},
+			{
+				name:           "double-ampersand in single quotes",
+				cmd:            `cat 'file&&1.txt'`,
+				wantSegments:   []string{`cat 'file&&1.txt'`},
+				wantConnectors: []string{""},
+			},
+			{
+				name:           "semicolon in quotes chained with another command",
+				cmd:            `cat "file;1.txt"; cat 'file&&2.txt'`,
+				wantSegments:   []string{`cat "file;1.txt"`, `cat 'file&&2.txt'`},
+				wantConnectors: []string{";", ""},
+			},
+			{
+				name:           "escaped double quote inside double quotes",
+				cmd:            `cat "quoted\"word.txt"; cat other.txt`,
+				wantSegments:   []string{`cat "quoted\"word.txt"`, `cat other.txt`},
+				wantConnectors: []string{";", ""},
+			},
+			{
+				name:           "doubled single quote inside single quotes",
+				cmd:            `cat 'it''s.txt'; cat other.txt`,
+				wantSegments:   []string{`cat 'it''s.txt'`, `cat other.txt`},
+				wantConnectors: []string{";", ""},
+			},
+			{
+				name:           "doubled double quote inside double quotes",
+				cmd:            `cat "it""s.txt"; cat other.txt`,
+				wantSegments:   []string{`cat "it""s.txt"`, `cat other.txt`},
+				wantConnectors: []string{";", ""},
+			},
+		}
+
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				segs, ok := SplitCompoundCommand(tc.cmd)
+				if !ok {
+					t.Fatalf("SplitCompoundCommand(%q) returned ok=false", tc.cmd)
+				}
+				if len(segs) != len(tc.wantSegments) {
+					t.Fatalf("got %d segments, want %d", len(segs), len(tc.wantSegments))
+				}
+				for i, seg := range segs {
+					if seg.RawCmd != tc.wantSegments[i] {
+						t.Errorf("seg[%d].RawCmd = %q, want %q", i, seg.RawCmd, tc.wantSegments[i])
+					}
+					if seg.Connector != tc.wantConnectors[i] {
+						t.Errorf("seg[%d].Connector = %q, want %q", i, seg.Connector, tc.wantConnectors[i])
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("rejecting pipes, redirects, command substitution and invalid syntax", func(t *testing.T) {
+		disallowed := []string{
+			"cat a.txt | grep foo",
+			"cat a.txt || cat b.txt",
+			"cat a.txt > out.txt",
+			"cat a.txt >> out.txt",
+			"cat a.txt < in.txt",
+			"cat $(whoami)",
+			`cat "$(whoami)"`,
+			"cat 'unterminated",
+			`cat "unterminated`,
+			"cat a.txt &",
+			"cat a.txt &&& cat b.txt",
+			"cat a.txt ;; cat b.txt",
+		}
+
+		for _, cmd := range disallowed {
+			t.Run(cmd, func(t *testing.T) {
+				segs, ok := SplitCompoundCommand(cmd)
+				if ok {
+					t.Fatalf("SplitCompoundCommand(%q) returned ok=true, segments=%+v", cmd, segs)
+				}
+			})
+		}
+	})
+}
+
+func TestParseShellRead_CompoundCommands(t *testing.T) {
+	t.Run("all-read commands succeed", func(t *testing.T) {
+		tests := []struct {
+			cmd            string
+			wantSubOps     []string
+			wantConnectors []string
+		}{
+			{
+				cmd:            "cat file1.txt; cat file2.txt",
+				wantSubOps:     []string{"cat", "cat"},
+				wantConnectors: []string{";"},
+			},
+			{
+				cmd:            "Get-Content A.txt && Get-Content B.txt",
+				wantSubOps:     []string{"get-content", "get-content"},
+				wantConnectors: []string{"&&"},
+			},
+			{
+				cmd:            "Get-Content A; Get-ChildItem B",
+				wantSubOps:     []string{"get-content", "get-childitem"},
+				wantConnectors: []string{";"},
+			},
+			{
+				cmd:            "head -n 5 file1.txt && tail -n 10 file2.txt; gc file3.txt",
+				wantSubOps:     []string{"head", "tail", "get-content"},
+				wantConnectors: []string{"&&", ";"},
+			},
+		}
+
+		for _, tc := range tests {
+			t.Run(tc.cmd, func(t *testing.T) {
+				spec, ok := ParseShellRead(tc.cmd)
+				if !ok || spec == nil {
+					t.Fatalf("ParseShellRead(%q) ok=%v, spec=%v", tc.cmd, ok, spec)
+				}
+				if spec.Op != "compound" {
+					t.Fatalf("Op = %q, want compound", spec.Op)
+				}
+				if len(spec.SubSpecs) != len(tc.wantSubOps) {
+					t.Fatalf("got %d SubSpecs, want %d", len(spec.SubSpecs), len(tc.wantSubOps))
+				}
+				for i, wantOp := range tc.wantSubOps {
+					if spec.SubSpecs[i].Op != wantOp {
+						t.Errorf("SubSpecs[%d].Op = %q, want %q", i, spec.SubSpecs[i].Op, wantOp)
+					}
+				}
+				if len(spec.Connectors) != len(tc.wantConnectors) {
+					t.Fatalf("got %d Connectors, want %d", len(spec.Connectors), len(tc.wantConnectors))
+				}
+				for i, wantConn := range tc.wantConnectors {
+					if spec.Connectors[i] != wantConn {
+						t.Errorf("Connectors[%d] = %q, want %q", i, spec.Connectors[i], wantConn)
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("mixed read and write commands return ok=false", func(t *testing.T) {
+		tests := []string{
+			"cat file1.txt; rm file2.txt",
+			"Get-Content A.txt && Remove-Item B.txt",
+			"cat file1.txt && echo hi",
+			"cat file1.txt; touch file2.txt",
+			"rm file.txt; cat file2.txt",
+			"Get-Content A.txt && Set-Content B.txt hello",
+		}
+
+		for _, cmd := range tests {
+			t.Run(cmd, func(t *testing.T) {
+				spec, ok := ParseShellRead(cmd)
+				if ok || spec != nil {
+					t.Fatalf("ParseShellRead(%q) expected ok=false, got ok=%v, spec=%+v", cmd, ok, spec)
+				}
+			})
+		}
+	})
+}
+
+func BenchmarkInProcessRead_CompoundParallel(b *testing.B) {
+	dir := b.TempDir()
+	files := make([]string, 4)
+	for i := 0; i < 4; i++ {
+		p := filepath.Join(dir, fmt.Sprintf("bench_part_%d.txt", i))
+		lines := make([]string, 100)
+		for j := range lines {
+			lines[j] = fmt.Sprintf("part %d line %d benchmark payload", i, j)
+		}
+		if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+			b.Fatalf("WriteFile failed: %v", err)
+		}
+		files[i] = p
+	}
+
+	spec := &ShellReadSpec{
+		Op: "compound",
+		SubSpecs: []*ShellReadSpec{
+			{Op: "get-content", FilePath: files[0], Lines: 10},
+			{Op: "get-content", FilePath: files[1], Lines: 10},
+			{Op: "get-content", FilePath: files[2], Lines: 10},
+			{Op: "get-content", FilePath: files[3], Lines: 10},
+		},
+		Connectors: []string{";", ";", ";"},
 	}
 
 	b.ResetTimer()
