@@ -1377,8 +1377,8 @@
             "lane": "gardenbundle"
         },
         {
-            "command": "fak version modules",
-            "output_contains": "internal/gateway",
+            "command": "fak serve --help",
+            "output_contains": "model gateway",
             "lane": "gateway"
         },
         {
@@ -1630,6 +1630,11 @@
             "command": "fak version modules",
             "output_contains": "internal/harnessgallery",
             "lane": "harnessgallery"
+        },
+        {
+            "command": "fak version modules",
+            "output_contains": "internal/harnesshint",
+            "lane": "harnesshint"
         },
         {
             "command": "fak version modules",
@@ -2585,6 +2590,11 @@
             "command": "fak version modules",
             "output_contains": "internal/observability",
             "lane": "observability"
+        },
+        {
+            "command": "fak version modules",
+            "output_contains": "internal/observer",
+            "lane": "observer"
         },
         {
             "command": "fak version modules",
