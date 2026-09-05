@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/choicetriage"
+	"github.com/anthony-chaudhary/fak/internal/headlesslint"
 )
 
 // guard_operator_directed_test.go — the ACT half of the "stopped to ask a human" gate:
@@ -166,6 +168,14 @@ func TestRunGuardOperatorDirectedGate(t *testing.T) {
 		{"warn allows + soaks", guardOperatorDirectedModeWarn, resolvableDirected(), 0, stopDispOperatorDirectedWarn, true, "soak mode"},
 		// enforce BLOCKS a resolvable ask (exit 2) and feeds the remediation back to the model.
 		{"enforce blocks resolvable", guardPreCompactModeEnforce, resolvableDirected(), 2, stopDispOperatorDirectedContinue, true, "no operator to answer"},
+		// enforce BLOCKS a premature surrender (exit 2) and directs the worker not to give up.
+		{"enforce blocks premature surrender", guardPreCompactModeEnforce, &guardStopTranscript{
+			Read:                    true,
+			OperatorDirected:        true,
+			OperatorDirectedCount:   1,
+			OperatorDirectedClass:   string(headlesslint.PrematureSurrender),
+			OperatorDirectedResolve: "take the obvious next action yourself and state the assumption you made.",
+		}, 2, stopDispOperatorDirectedContinue, true, "prematurely surrendered"},
 		// enforce ALLOWS a HUMAN_RESIDUAL ask and routes it as a typed escalation (exit 0).
 		{"enforce escalates residual", guardPreCompactModeEnforce, residualDirected(), 0, stopDispOperatorDirectedEscalate, true, "HUMAN_RESIDUAL"},
 	} {
@@ -366,5 +376,26 @@ func TestGuardOperatorDirectedContinueInjectsResolve(t *testing.T) {
 	}
 	if strings.Contains(msg, "()") || strings.Contains(msg, "Instead:  ") {
 		t.Errorf("blank fields produced an empty parenthetical or dangling clause:\n%s", msg)
+	}
+}
+
+// TestGuardOperatorDirectedPrematureSurrender verifies that PrematureSurrender outputs the premature surrender continue message.
+func TestGuardOperatorDirectedPrematureSurrender(t *testing.T) {
+	tr := &guardStopTranscript{
+		Read:                    true,
+		OperatorDirected:        true,
+		OperatorDirectedCount:   1,
+		OperatorDirectedClass:   string(headlesslint.PrematureSurrender),
+		OperatorDirectedResolve: "run the affected test suite to verify changes",
+	}
+	var stderr strings.Builder
+	exit, disp, fired := runGuardOperatorDirectedGate(&stderr, guardPreCompactModeEnforce, tr)
+	if exit != 2 || disp != stopDispOperatorDirectedContinue || !fired {
+		t.Fatalf("enforce premature surrender = exit %d disp %q fired %v; want 2/continue/true", exit, disp, fired)
+	}
+	wantMsg := fmt.Sprintf("fak guard Stop: this turn prematurely surrendered (%s) without completing the task or verifying deliverables. Do not give up. Instead: %s Then finish the turn. If a protected boundary genuinely blocks the last step, note it on one line (`no allowed path: <reason>`) and stop cleanly — that is a complete outcome.",
+		string(headlesslint.PrematureSurrender), "run the affected test suite to verify changes")
+	if strings.TrimSpace(stderr.String()) != wantMsg {
+		t.Errorf("got stderr %q, want %q", strings.TrimSpace(stderr.String()), wantMsg)
 	}
 }

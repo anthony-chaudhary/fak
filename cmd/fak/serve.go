@@ -25,6 +25,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/l3kv"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
+	"github.com/anthony-chaudhary/fak/internal/researcharm"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/snapshot"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
@@ -758,6 +759,8 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 	must(err)
 	srv.AddStartupMessages(startupMessages...)
 	srv.SetModelLoadProfile(rt.loadProfile)
+	armsCoord := researcharm.NewCoordinator(16)
+	srv.SetResearchArmCoordinator(armsCoord)
 	if rt.inKernelModel != nil && rt.inKernelTok != nil && strings.TrimSpace(*sf.baseURL) == "" && len(sf.replicaBaseURLs.Values()) == 0 {
 		controller, message, err := newServeNativeAdmissionController(sf)
 		must(err)

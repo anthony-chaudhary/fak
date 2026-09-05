@@ -34,6 +34,19 @@ func toGatewayLoadProfile(p *ggufload.LoadProfile) *gateway.ModelLoadProfile {
 			Tensors: ph.Tensors,
 		})
 	}
+	if len(out.Phases) == 0 && (out.TotalSeconds > 0 || out.Tensors > 0) {
+		b := out.Bottleneck
+		if b == "" {
+			b = "weights-load"
+			out.Bottleneck = b
+		}
+		out.Phases = append(out.Phases, gateway.ModelLoadPhase{
+			Phase:   b,
+			Seconds: out.TotalSeconds,
+			Bytes:   out.Bytes,
+			Tensors: out.Tensors,
+		})
+	}
 	for _, lp := range p.LoadPaths {
 		out.LoadPaths = append(out.LoadPaths, gateway.ModelLoadPath{
 			QuantType:       lp.QuantType,

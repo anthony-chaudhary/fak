@@ -522,3 +522,31 @@ func TestTrajectoryUsageListsAssurance(t *testing.T) {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
+
+func TestRunTrajectoryAuditProgressFlag(t *testing.T) {
+	temp := t.TempDir()
+	jsonlPath := filepath.Join(temp, "audit.jsonl")
+	claudeRoot := filepath.Join("..", "..", "internal", "trajectory", "testdata", "audit", "claude", "projects")
+	codexRoot := filepath.Join("..", "..", "internal", "trajectory", "testdata", "audit", "codex", "sessions")
+	var stdout, stderr bytes.Buffer
+	rc := runTrajectory(&stdout, &stderr, []string{
+		"audit", "--since", "0", "--claude-root", claudeRoot, "--codex-root", codexRoot,
+		"--jsonl", jsonlPath, "--progress",
+	})
+	if rc != 0 {
+		t.Fatalf("rc=%d stderr=%s", rc, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "trajectory audit: [") {
+		t.Fatalf("stderr missing progress: %s", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout polluted by progress: %s", stdout.String())
+	}
+	jsonl, err := os.ReadFile(jsonlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(jsonl, []byte(`"schema":"fak-trajectory-audit/1"`)) {
+		t.Fatalf("JSONL missing schema: %s", jsonl)
+	}
+}

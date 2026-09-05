@@ -110,6 +110,7 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 	snapshot := flags.String("snapshot", "", "verify and replay a private audit snapshot without reading live roots")
 	snapshotUsageLedger := flags.String("snapshot-usage-ledger", "", "append privacy-safe capture/replay outcomes to this explicit JSONL file")
 	snapshotUsageFold := flags.String("snapshot-usage-fold", "", "read this snapshot usage JSONL file and emit its deterministic ISO-week fold")
+	progress := flags.Bool("progress", false, "emit bounded scan progress to stderr")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -212,6 +213,11 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 			return finish(2, "error", "BASELINE_READ_FAILED")
 		}
 	}
+	var progressReporter trajectory.ProgressReporter
+	if *progress && stderr != nil && stderr != io.Discard {
+		progressReporter = trajectory.NewProgressReporter(stderr)
+	}
+
 	var result trajectory.AuditResult
 	var snapshotManifest *trajectory.AuditSnapshotManifest
 	switch {
@@ -229,7 +235,12 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 			return trajectoryAuditSnapshotFlagRefusal(stderr, "snapshot usage ledger must be outside the private snapshot directory")
 		}
 		fmt.Fprintf(stderr, "OUT_OF_TREE_WRITE operation=trajectory-audit-snapshot target=%q\n", target)
-		manifest, captured, captureErr := trajectory.CaptureAuditSnapshot(target, trajectory.AuditOptions{Sources: sources, Since: since, UserContains: strings.TrimSpace(*userContains)})
+		manifest, captured, captureErr := trajectory.CaptureAuditSnapshot(target, trajectory.AuditOptions{
+			Sources:      sources,
+			Since:        since,
+			UserContains: strings.TrimSpace(*userContains),
+			Progress:     progressReporter,
+		})
 		if captureErr != nil {
 			reason := trajectory.AuditSnapshotRefusalCode(captureErr)
 			return finish(trajectoryAuditSnapshotError(stderr, captureErr), trajectoryAuditSnapshotUsageOutcome(reason), reason)
@@ -245,7 +256,13 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 		result = replayed
 		snapshotManifest = &manifest
 	default:
-		result, err = trajectory.RunAudit(trajectory.AuditOptions{Sources: sources, Since: since, Baseline: baseline, UserContains: strings.TrimSpace(*userContains)})
+		result, err = trajectory.RunAudit(trajectory.AuditOptions{
+			Sources:      sources,
+			Since:        since,
+			Baseline:     baseline,
+			UserContains: strings.TrimSpace(*userContains),
+			Progress:     progressReporter,
+		})
 		if err != nil {
 			fmt.Fprintln(stderr, err)
 			return finish(1, "error", "AUDIT_FAILED")

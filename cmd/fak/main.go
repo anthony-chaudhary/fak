@@ -236,6 +236,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdMacBench(args)
 	case "macfit":
 		cmdMacFit(args)
+	case "macobs":
+		cmdMacObs(args)
 	case "capabilities":
 		os.Exit(runCapabilities(os.Stdout, os.Stderr, args))
 	case "runtime-capabilities":

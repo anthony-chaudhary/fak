@@ -140,6 +140,7 @@ func TestRunDevWorkspaceText(t *testing.T) {
 		"local agentic-dev workspace",
 		"#3426",
 		"fak guard -- claude", // the spine map is present
+		"fak goal sync push",  // goal sync component present in spine map
 		"decision stream",
 		"allowed=1 blocked=1",
 		"not yet wired", // honest about what remains
@@ -173,6 +174,16 @@ func TestRunDevWorkspaceJSONSchema(t *testing.T) {
 	if len(rep.Spine) == 0 || len(rep.NotYet) == 0 {
 		t.Errorf("report must carry the spine map and the not-yet-wired list: %+v", rep)
 	}
+	var foundGoalSync bool
+	for _, c := range rep.Spine {
+		if c.Name == "goal sync" && c.Command == "fak goal sync push" && c.Role == "sync durable goal specs and registry to fak-private" {
+			foundGoalSync = true
+			break
+		}
+	}
+	if !foundGoalSync {
+		t.Errorf("rep.Spine missing 'goal sync' component: %+v", rep.Spine)
+	}
 	// gen/next closure contract: a preview must name what promotes it AND the
 	// assumption whose failure retires it, or it is an unfalsifiable placeholder.
 	if len(rep.Promotion) == 0 || rep.InvalidatedIf == "" {
@@ -187,5 +198,24 @@ func TestRunDevWorkspaceBadLimit(t *testing.T) {
 	var out, errb strings.Builder
 	if code := runDevWorkspace(&out, &errb, []string{"--limit", "-1"}); code != 2 {
 		t.Fatalf("bad --limit exit = %d, want 2", code)
+	}
+}
+
+func TestDevWorkspace(t *testing.T) {
+	spine := devWorkspaceSpine()
+	var found bool
+	for _, c := range spine {
+		if c.Name == "goal sync" {
+			found = true
+			if c.Command != "fak goal sync push" {
+				t.Errorf("goal sync command = %q, want %q", c.Command, "fak goal sync push")
+			}
+			if c.Role != "sync durable goal specs and registry to fak-private" {
+				t.Errorf("goal sync role = %q, want %q", c.Role, "sync durable goal specs and registry to fak-private")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("devWorkspaceSpine() missing 'goal sync' component")
 	}
 }

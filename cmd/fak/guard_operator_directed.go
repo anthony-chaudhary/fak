@@ -36,6 +36,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/choicetriage"
+	"github.com/anthony-chaudhary/fak/internal/headlesslint"
 )
 
 const (
@@ -181,6 +182,10 @@ func runGuardOperatorDirectedGate(stderr io.Writer, rawMode string, tr *guardSto
 // asking — then points at the sanctioned wrap-up for the case where a protected boundary genuinely
 // blocks the last step.
 func guardOperatorDirectedContinueMessage(tr *guardStopTranscript) string {
+	if tr != nil && tr.OperatorDirectedClass == string(headlesslint.PrematureSurrender) {
+		return fmt.Sprintf("fak guard Stop: this turn prematurely surrendered (%s) without completing the task or verifying deliverables. Do not give up. Instead: %s Then finish the turn. If a protected boundary genuinely blocks the last step, note it on one line (`no allowed path: <reason>`) and stop cleanly — that is a complete outcome.",
+			guardOperatorDirectedClassLabel(tr), guardOperatorDirectedResolveText(tr))
+	}
 	return fmt.Sprintf("fak guard Stop: this turn ended by asking a human (%s), but this is a headless run with no operator to answer — the question will hang and the work stalls. Do not stop to ask. Instead: %s Then finish the turn. If a protected boundary genuinely blocks the last step, note it on one line (`no allowed path: <reason>`) and stop cleanly — that is a complete outcome.",
 		guardOperatorDirectedClassLabel(tr), guardOperatorDirectedResolveText(tr))
 }

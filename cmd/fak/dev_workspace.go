@@ -100,6 +100,7 @@ func devWorkspaceSpine() []devSpineComponent {
 		{Name: "guard floor", Command: "fak guard -- claude", Role: "in-process gateway floor + SessionStart/PreCompact/Stop/toolproc hooks"},
 		{Name: "memory / recall", Command: "fak memory / fak recall", Role: "durable cross-session continuity"},
 		{Name: "dispatch loop", Command: "fak loop", Role: "governed issue-dispatch over the repo backlog", OptIn: true},
+		{Name: "goal sync", Command: "fak goal sync push", Role: "sync durable goal specs and registry to fak-private"},
 		{Name: "decision stream", Command: "fak dev workspace", Role: "live allowed/blocked/quarantined/witnessed view of the guard floor"},
 	}
 }

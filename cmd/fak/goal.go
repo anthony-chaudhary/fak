@@ -16,8 +16,11 @@ func cmdGoal(args []string) { os.Exit(runGoal(os.Stdout, os.Stderr, args)) }
 
 func runGoal(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak goal create|show|list|update|transition|reopen|bind|resolve|topology|backfill-root|unbind ...")
+		fmt.Fprintln(stderr, "usage: fak goal create|show|list|update|transition|reopen|bind|resolve|topology|backfill-root|unbind|sync ...")
 		return 2
+	}
+	if args[0] == "sync" {
+		return runGoalSync(stdout, stderr, args[1:])
 	}
 	fs := flag.NewFlagSet("goal "+args[0], flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -192,6 +195,8 @@ func runGoal(stdout, stderr io.Writer, args []string) int {
 			return fail(err)
 		}
 		_ = enc.Encode(map[string]any{"ok": true, "goal_id": *id})
+	case "sync":
+		return runGoalSync(stdout, stderr, args[1:])
 	default:
 		fmt.Fprintf(stderr, "fak goal: unknown subcommand %q\n", args[0])
 		return 2

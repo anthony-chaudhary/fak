@@ -30,6 +30,11 @@ func nightrunLedgerRoot(localRoot string) string {
 	if explicit := strings.TrimSpace(os.Getenv(ledgerRootEnv)); explicit != "" && filepath.IsAbs(explicit) {
 		return filepath.Clean(explicit)
 	}
+	if ws := strings.TrimSpace(os.Getenv("FAK_WORKSPACE_ROOT")); ws != "" && filepath.IsAbs(ws) {
+		if _, err := os.Stat(filepath.Join(ws, "go.mod")); err == nil {
+			return filepath.Clean(ws)
+		}
+	}
 	localRoot = filepath.Clean(localRoot)
 	gitMarker := filepath.Join(localRoot, ".git")
 	if info, err := os.Stat(gitMarker); err == nil && info.IsDir() {

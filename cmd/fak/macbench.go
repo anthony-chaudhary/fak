@@ -24,6 +24,9 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) > 0 && argv[0] == "validate-comparison" {
 		return runMacBenchValidateComparison(stdout, stderr, argv[1:])
 	}
+	if len(argv) > 0 && argv[0] == "validate-agentic-comparison" {
+		return runMacBenchValidateAgenticComparison(stdout, stderr, argv[1:])
+	}
 	if len(argv) > 0 && argv[0] == "watch-status" {
 		return runMacBenchWatchStatus(stdout, stderr, argv[1:])
 	}
@@ -155,6 +158,62 @@ func runMacBenchValidateComparison(stdout, stderr io.Writer, argv []string) int 
 		_ = writeIndentedJSONNoEscape(stdout, result)
 	} else {
 		fmt.Fprintf(stdout, "VALID packet_sha256=%s\n", result.PacketSHA256)
+	}
+	return 0
+}
+
+func runMacBenchValidateAgenticComparison(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("macbench validate-agentic-comparison", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	input := fs.String("input", "", "agentic comparison packet JSON")
+	asJSON := fs.Bool("json", false, "emit machine-readable validation result")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if strings.TrimSpace(*input) == "" {
+		fmt.Fprintln(stderr, "fak macbench validate-agentic-comparison: --input is required")
+		return 2
+	}
+	raw, err := os.ReadFile(*input)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench validate-agentic-comparison: read --input: %v\n", err)
+		return 1
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var packet macbench.AgenticComparisonPacket
+	if err := dec.Decode(&packet); err != nil {
+		fmt.Fprintf(stderr, "fak macbench validate-agentic-comparison: decode packet: %v\n", err)
+		return 1
+	}
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			err = fmt.Errorf("multiple JSON values")
+		}
+		fmt.Fprintf(stderr, "fak macbench validate-agentic-comparison: decode packet: %v\n", err)
+		return 1
+	}
+	if err := macbench.ValidateAgenticComparisonPacket(packet); err != nil {
+		fmt.Fprintf(stderr, "fak macbench validate-agentic-comparison: %v\n", err)
+		return 1
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
+	result := struct {
+		Schema       string  `json:"schema"`
+		Valid        bool    `json:"valid"`
+		PacketSHA256 string  `json:"packet_sha256"`
+		SpeedupRatio float64 `json:"speedup_ratio"`
+	}{
+		Schema:       "fak.macbench.agentic-comparison.validation.v1",
+		Valid:        true,
+		PacketSHA256: digest,
+		SpeedupRatio: packet.Summary.SpeedupRatio,
+	}
+	if *asJSON {
+		_ = writeIndentedJSONNoEscape(stdout, result)
+	} else {
+		fmt.Fprintf(stdout, "VALID packet_sha256=%s speedup=%.2fx\n", result.PacketSHA256, result.SpeedupRatio)
 	}
 	return 0
 }

@@ -844,3 +844,180 @@ func nodeMacOSACLIComparisonPacket() macbench.ComparisonPacket {
 	}
 	return packet
 }
+
+func validCLIAgenticComparisonPacket() macbench.AgenticComparisonPacket {
+	return macbench.AgenticComparisonPacket{
+		Schema:            macbench.AgenticComparisonSchema,
+		GeneratedAt:       "2026-09-05T12:00:00Z",
+		CampaignID:        "issue-3809-mac-agentic-4x-qwen38-20260905",
+		HostID:            strings.Repeat("6", 64),
+		Provenance:        "MODELED",
+		IsPhysicalSilicon: false,
+		UnmodeledEffects: []string{
+			"thermal_dvfs_throttling",
+			"memory_bus_contention",
+			"metal_command_buffer_sync_latency",
+		},
+		Model: macbench.ComparisonModel{
+			Family:                 "Qwen3.8",
+			ID:                     "Qwen3.8-27B",
+			SourceRevision:         "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+			CanonicalWeightsSHA256: "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+			Quant:                  "Q4_K_M",
+		},
+		Hardware: macbench.ComparisonHardware{
+			Model:       "Mac15,7",
+			Chip:        "Apple M3 Pro",
+			MemoryBytes: 38654705664,
+		},
+		OS: macbench.ComparisonOS{
+			Name:    "macOS",
+			Version: "26.6.2",
+			Build:   "25G83",
+		},
+		Workload: macbench.AgenticWorkloadShape{
+			Concurrency:        4,
+			Horizon:            20,
+			SharedPrefixTokens: 4096,
+			TurnDeltaTokens:    128,
+			TurnOutputTokens:   64,
+		},
+		QualityPolicy: macbench.ComparisonQualityPolicy{
+			ID:           "strict-token-parity",
+			Version:      "1",
+			SHA256:       strings.Repeat("8", 64),
+			MinimumScore: 1.0,
+		},
+		Arms: []macbench.AgenticComparisonArm{
+			{
+				Name:              "fak-native",
+				Engine:            "fak-native",
+				Runtime:           "inkernel",
+				RuntimeRevision:   "r652+g839b1d44",
+				EvidenceKind:      "modeled",
+				PrefixStrategy:    "radix-shared",
+				PrefixEvalCount:   1,
+				PromptTokens:      483840,
+				ReusedTokens:      469504,
+				ReuseRatio:        0.97037,
+				TotalWallMS:       412500.0,
+				PrefillMS:         182400.0,
+				DecodeMS:          228500.0,
+				QueueContentionMS: 1600.0,
+				P50TTFTMS:         12.6,
+				P95TTFTMS:         12.9,
+				PeakMemoryMB:      22208.0,
+				AgentsPerGB:       0.18,
+				EffectiveTokS:     12.41,
+				Quality: macbench.ComparisonQualityResult{
+					PolicyRef:     "strict-token-parity",
+					PolicyVersion: "1",
+					PolicySHA256:  strings.Repeat("8", 64),
+					Passed:        true,
+					Score:         1.0,
+					ResultPath:    "fak-native-quality.json",
+					ResultSHA256:  strings.Repeat("a", 64),
+				},
+				RawResult: macbench.ComparisonRawResult{
+					Path:   "fak-native-raw.json",
+					SHA256: strings.Repeat("b", 64),
+				},
+				Repro: []string{"go run ./cmd/fak macbench many-agent -c 4 --model Qwen3.8-27B --horizon 20 --json"},
+			},
+			{
+				Name:              "llama.cpp",
+				Engine:            "llama.cpp",
+				Runtime:           "reference",
+				RuntimeRevision:   "b9828",
+				EvidenceKind:      "modeled",
+				PrefixStrategy:    "slot-isolated",
+				PrefixEvalCount:   4,
+				PromptTokens:      483840,
+				ReusedTokens:      0,
+				ReuseRatio:        0.0,
+				TotalWallMS:       1732500.0,
+				PrefillMS:         504800.0,
+				DecodeMS:          281300.0,
+				QueueContentionMS: 946400.0,
+				P50TTFTMS:         84480.0,
+				P95TTFTMS:         253440.0,
+				PeakMemoryMB:      25792.0,
+				AgentsPerGB:       0.16,
+				EffectiveTokS:     2.96,
+				Quality: macbench.ComparisonQualityResult{
+					PolicyRef:     "strict-token-parity",
+					PolicyVersion: "1",
+					PolicySHA256:  strings.Repeat("8", 64),
+					Passed:        true,
+					Score:         1.0,
+					ResultPath:    "llama.cpp-quality.json",
+					ResultSHA256:  strings.Repeat("c", 64),
+				},
+				RawResult: macbench.ComparisonRawResult{
+					Path:   "llama.cpp-raw.json",
+					SHA256: strings.Repeat("d", 64),
+				},
+				Repro: []string{"python3 internal/model/bench_llamacpp_turn_agents.py --turns 20 --agents 4 --prefix 4096"},
+			},
+		},
+		Summary: macbench.AgenticSummary{
+			SpeedupRatio:   4.20,
+			MemorySavedMB:  3584.0,
+			TTFTSpeedupP50: 6704.76,
+			Verified:       true,
+		},
+	}
+}
+
+func TestMacBenchValidateAgenticComparison_CLI(t *testing.T) {
+	packet := validCLIAgenticComparisonPacket()
+	b, err := json.Marshal(packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := t.TempDir() + "/agentic-packet.json"
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runMacBench(&stdout, &stderr, []string{"validate-agentic-comparison", "--input", path, "--json"})
+	if code != 0 {
+		t.Fatalf("valid agentic packet code=%d stderr=%s", code, stderr.String())
+	}
+	var result struct {
+		Schema       string  `json:"schema"`
+		Valid        bool    `json:"valid"`
+		PacketSHA256 string  `json:"packet_sha256"`
+		SpeedupRatio float64 `json:"speedup_ratio"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("decode validation: %v\n%s", err, stdout.String())
+	}
+	if result.Schema != "fak.macbench.agentic-comparison.validation.v1" || !result.Valid || len(result.PacketSHA256) != 64 || result.SpeedupRatio < 4.0 {
+		t.Fatalf("unexpected validation result: %+v", result)
+	}
+
+	// Plain text output
+	stdout.Reset()
+	stderr.Reset()
+	code = runMacBench(&stdout, &stderr, []string{"validate-agentic-comparison", "--input", path})
+	if code != 0 || !strings.Contains(stdout.String(), "VALID") || !strings.Contains(stdout.String(), "speedup=4.20x") {
+		t.Fatalf("plain output code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+
+	// Fail closed when speedup ratio falls below 4.0x
+	packet.Summary.SpeedupRatio = 3.50
+	packet.Arms[1].TotalWallMS = packet.Arms[0].TotalWallMS * 3.50
+	packet.Arms[1].PrefillMS = packet.Arms[1].TotalWallMS - packet.Arms[1].DecodeMS - packet.Arms[1].QueueContentionMS
+	b, _ = json.Marshal(packet)
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = runMacBench(&stdout, &stderr, []string{"validate-agentic-comparison", "--input", path, "--json"})
+	if code == 0 || !strings.Contains(stderr.String(), "True 4x gate") {
+		t.Fatalf("expected failure for < 4.0x speedup, code=%d stderr=%q", code, stderr.String())
+	}
+}

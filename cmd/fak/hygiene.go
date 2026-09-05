@@ -31,9 +31,8 @@ import (
 // `--gates A,B,...` runs only the named gates (so `make index-sync` can call this for INDEX_SYNC
 // while `make hygiene` runs the rest); the default is every gate HygieneGates() returns. Every
 // entry must name a registered gate: an unknown name is REFUSED rather than silently selecting
-// nothing, mirroring `fak test`'s `unknown check %q` (cmd/fak/test.go). The remaining
-// make-hygiene checkers (demo_live_links, guard_mcp_status_audit) stay on the Python path until
-// ported (#928 A5).
+// nothing, mirroring `fak test`'s `unknown check %q` (cmd/fak/test.go). All make-hygiene checkers
+// now have native Go tree gates in internal/hooks/ (#928, #10940).
 //
 // A gate whose Check errors stays fail-open — one broken checker must never wedge the tree —
 // but the skip is COUNTED and NAMED (#5299's pre-commit treatment, ported here by #5604), so

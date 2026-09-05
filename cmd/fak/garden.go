@@ -1420,6 +1420,11 @@ func insideGardenWatchdogEphemera(root, path string) bool {
 // tools/. It walks up from the cwd looking for the go.mod / tools marker, and
 // falls back to the cwd.
 func repoRoot() string {
+	if ws := strings.TrimSpace(os.Getenv("FAK_WORKSPACE_ROOT")); ws != "" {
+		if _, err := os.Stat(filepath.Join(ws, "go.mod")); err == nil {
+			return filepath.Clean(ws)
+		}
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return "."

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -231,10 +232,14 @@ func renderFleetRunExposition(w *promWriter, rows []sessionregistry.Record) {
 		w.gauge("fak_fleet_registered_runs_by_state", "HISTORICAL REGISTRATION: durable root-run registrations by latest lifecycle state; this is not live process liveness.", float64(byState[state]), "state", string(state))
 	}
 	for _, r := range roots {
-		labels := []string{"run", r.RegistrationID, "session", strings.TrimSpace(r.Identity.SessionID)}
+		sid := strings.TrimSpace(r.Identity.SessionID)
+		if sid == "" {
+			sid = strings.TrimSpace(r.RegistrationID)
+		}
+		labels := []string{"run", r.RegistrationID, "session", sid}
 		w.gauge("fak_fleet_run_info", "HISTORICAL REGISTRATION: one series per durable root run with identity, terminal reason, and witness reference for review and drill-down; value is always 1 and does not assert process liveness.", 1,
 			"run", r.RegistrationID,
-			"session", strings.TrimSpace(r.Identity.SessionID),
+			"session", sid,
 			"root_issue", strings.TrimSpace(r.RootIssue),
 			"task", strings.TrimSpace(r.TaskID),
 			"goal_id", strings.TrimSpace(r.GoalID),
@@ -708,8 +713,15 @@ func renderFleetLiveExposition(w *promWriter, inv sessionInventory, byID map[str
 	// The by_state rollup counts the EFFECTIVE status, so a RUNNING row whose heartbeat
 	// lapsed lands in STALLED — the same projection the CLI headline makes. Emitting the
 	// raw pcb_state here instead would make a wedged fleet read as a working one.
-	for _, st := range sortedKeysByPCBOrder(inv.ByState) {
+	// We emit all canonical PCB states so dashboard timeseries panels do not encounter NO_DATA.
+	canonicalStates := []string{"RUNNING", "STALLED", "THROTTLED", "PAUSED", "DRAINING", "STOPPED"}
+	for _, st := range canonicalStates {
 		w.gauge("fak_fleet_sessions_by_state", "LIVE: sessions per EFFECTIVE PCB status; a running-family session with a lapsed heartbeat rolls up as STALLED, not RUNNING.", float64(inv.ByState[st]), "state", st)
+	}
+	for _, st := range sortedKeysByPCBOrder(inv.ByState) {
+		if !slices.Contains(canonicalStates, st) {
+			w.gauge("fak_fleet_sessions_by_state", "LIVE: sessions per EFFECTIVE PCB status; a running-family session with a lapsed heartbeat rolls up as STALLED, not RUNNING.", float64(inv.ByState[st]), "state", st)
+		}
 	}
 
 	byLiveness := map[string]int{}
@@ -817,11 +829,11 @@ func renderFleetLiveExposition(w *promWriter, inv sessionInventory, byID map[str
 		// fully-burned budget on any elapsed/limit panel.
 		{"fak_fleet_session_time_limit_seconds", "LIVE: this session's wall-clock budget limit, when one is set.",
 			func(_ sessionInventoryRow, d session.Descriptor) (float64, bool) {
-				return float64(d.Time.LimitNanos) / 1e9, d.Time.LimitNanos > 0
+				return float64(d.Time.LimitNanos) / 1e9, true
 			}},
 		{"fak_fleet_session_time_elapsed_seconds", "LIVE: wall-clock budget consumed so far, as persisted by the durable registry.",
 			func(_ sessionInventoryRow, d session.Descriptor) (float64, bool) {
-				return float64(d.Time.ElapsedNanos) / 1e9, d.Time.LimitNanos > 0
+				return float64(d.Time.ElapsedNanos) / 1e9, true
 			}},
 	} {
 		for _, r := range rows {
