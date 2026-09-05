@@ -593,7 +593,21 @@ func (s *NativeScheduler) drainWithDonation(tokens <-chan abi.EngineToken) {
 				continue
 			}
 		}
-		<-tokens
+
+		s.mu.Lock()
+		s.blockedDrains--
+		s.mu.Unlock()
+		s.signal()
+
+		_, ok := <-tokens
+
+		s.mu.Lock()
+		s.blockedDrains++
+		s.mu.Unlock()
+
+		if !ok {
+			return
+		}
 	}
 }
 
