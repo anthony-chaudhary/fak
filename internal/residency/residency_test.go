@@ -2,6 +2,7 @@ package residency
 
 import (
 	"errors"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -291,5 +292,216 @@ func TestConcurrentAdmit(t *testing.T) {
 	wg.Wait()
 	if r.Used() > r.Budget() {
 		t.Fatalf("budget exceeded under concurrency: used %d > budget %d", r.Used(), r.Budget())
+	}
+}
+
+// BenchmarkAdmit_SteadyStateEviction measures continuous Admit cycles under memory pressure
+// where each admission evicts the coldest unpinned model via LRU and returns its weight handle.
+func BenchmarkAdmit_SteadyStateEviction(b *testing.B) {
+	const capacity = 10
+	const poolSize = 20
+	r := New(capacity * 100)
+	models := make([]*model.Model, poolSize)
+	ids := make([]polymodel.ModelID, poolSize)
+	for i := 0; i < poolSize; i++ {
+		models[i] = model.NewSynthetic(tinyCfg())
+		ids[i] = polymodel.ModelID("bench-model-" + strconv.Itoa(i))
+	}
+	// Seed up to capacity so subsequent admissions trigger steady-state eviction.
+	for i := 0; i < capacity; i++ {
+		if _, err := r.Admit(ids[i], models[i], 100, "fam", "", false); err != nil {
+			b.Fatalf("seed admit: %v", err)
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		idx := (i + capacity) % poolSize
+		if _, err := r.Admit(ids[idx], models[idx], 100, "fam", "", false); err != nil {
+			b.Fatalf("admit %s: %v", ids[idx], err)
+		}
+	}
+}
+
+// BenchmarkAdmit_ReAdmitTouch measures re-admitting already resident models, exercising the
+// Touch path through Admit without triggering evictions.
+func BenchmarkAdmit_ReAdmitTouch(b *testing.B) {
+	const count = 10
+	r := New(count * 100)
+	models := make([]*model.Model, count)
+	ids := make([]polymodel.ModelID, count)
+	for i := 0; i < count; i++ {
+		models[i] = model.NewSynthetic(tinyCfg())
+		ids[i] = polymodel.ModelID("bench-readmit-" + strconv.Itoa(i))
+		if _, err := r.Admit(ids[i], models[i], 100, "fam", "", false); err != nil {
+			b.Fatalf("seed admit: %v", err)
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		idx := i % count
+		if _, err := r.Admit(ids[idx], models[idx], 100, "fam", "", false); err != nil {
+			b.Fatalf("re-admit: %v", err)
+		}
+	}
+}
+
+// BenchmarkGet_Hit measures hot weight handle lookup latency.
+func BenchmarkGet_Hit(b *testing.B) {
+	const count = 16
+	r := New(count * 100)
+	ids := make([]polymodel.ModelID, count)
+	for i := 0; i < count; i++ {
+		ids[i] = polymodel.ModelID("bench-get-" + strconv.Itoa(i))
+		m := model.NewSynthetic(tinyCfg())
+		if _, err := r.Admit(ids[i], m, 100, "fam", "", false); err != nil {
+			b.Fatalf("seed admit: %v", err)
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		id := ids[i%count]
+		if _, ok := r.Get(id); !ok {
+			b.Fatalf("get %s: not found", id)
+		}
+	}
+}
+
+// BenchmarkGet_Miss measures lookup latency on non-resident models.
+func BenchmarkGet_Miss(b *testing.B) {
+	const count = 16
+	r := New(count * 100)
+	for i := 0; i < count; i++ {
+		id := polymodel.ModelID("bench-get-" + strconv.Itoa(i))
+		m := model.NewSynthetic(tinyCfg())
+		if _, err := r.Admit(id, m, 100, "fam", "", false); err != nil {
+			b.Fatalf("seed admit: %v", err)
+		}
+	}
+	missing := polymodel.ModelID("bench-nonexistent")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, ok := r.Get(missing); ok {
+			b.Fatalf("expected miss")
+		}
+	}
+}
+
+// BenchmarkTouch measures LRU recency update latency for hot models.
+func BenchmarkTouch(b *testing.B) {
+	const count = 16
+	r := New(count * 100)
+	ids := make([]polymodel.ModelID, count)
+	for i := 0; i < count; i++ {
+		ids[i] = polymodel.ModelID("bench-touch-" + strconv.Itoa(i))
+		m := model.NewSynthetic(tinyCfg())
+		if _, err := r.Admit(ids[i], m, 100, "fam", "", false); err != nil {
+			b.Fatalf("seed admit: %v", err)
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		id := ids[i%count]
+		if !r.Touch(id) {
+			b.Fatalf("touch %s: failed", id)
+		}
+	}
+}
+
+// BenchmarkDescriptor measures metadata descriptor retrieval for resident models.
+func BenchmarkDescriptor(b *testing.B) {
+	const count = 16
+	r := New(count * 100)
+	ids := make([]polymodel.ModelID, count)
+	for i := 0; i < count; i++ {
+		ids[i] = polymodel.ModelID("bench-desc-" + strconv.Itoa(i))
+		m := model.NewSynthetic(tinyCfg())
+		if _, err := r.Admit(ids[i], m, 100, "fam", "sha256:digest", false); err != nil {
+			b.Fatalf("seed admit: %v", err)
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		id := ids[i%count]
+		if _, ok := r.Descriptor(id); !ok {
+			b.Fatalf("descriptor %s: not found", id)
+		}
+	}
+}
+
+// BenchmarkEvictAndAdmit measures an explicit eviction followed by immediate re-admission.
+func BenchmarkEvictAndAdmit(b *testing.B) {
+	r := New(1000)
+	m := model.NewSynthetic(tinyCfg())
+	id := polymodel.ModelID("bench-evict-admit")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := r.Admit(id, m, 100, "fam", "", false); err != nil {
+			b.Fatalf("admit: %v", err)
+		}
+		if _, ok := r.Evict(id); !ok {
+			b.Fatalf("evict: failed")
+		}
+	}
+}
+
+// BenchmarkSetBudget_ShrinkGrow measures runtime dynamic resizing of the memory budget,
+// causing batch eviction and handback during shrink followed by expansion.
+func BenchmarkSetBudget_ShrinkGrow(b *testing.B) {
+	const count = 10
+	models := make([]*model.Model, count)
+	ids := make([]polymodel.ModelID, count)
+	for i := 0; i < count; i++ {
+		models[i] = model.NewSynthetic(tinyCfg())
+		ids[i] = polymodel.ModelID("bench-resize-" + strconv.Itoa(i))
+	}
+	r := New(count * 100)
+	for i := 0; i < count; i++ {
+		if _, err := r.Admit(ids[i], models[i], 100, "fam", "", false); err != nil {
+			b.Fatalf("seed admit: %v", err)
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		evicted, err := r.SetBudget(500)
+		if err != nil || len(evicted) != 5 {
+			b.Fatalf("shrink: %v, evicted: %d", err, len(evicted))
+		}
+		if _, err := r.SetBudget(1000); err != nil {
+			b.Fatalf("grow: %v", err)
+		}
+		for _, e := range evicted {
+			if _, err := r.Admit(e.ID, e.Weights, 100, "fam", "", false); err != nil {
+				b.Fatalf("re-admit %s: %v", e.ID, err)
+			}
+		}
+	}
+}
+
+// BenchmarkResidentIDs measures retrieval of all resident model IDs sorted deterministically.
+func BenchmarkResidentIDs(b *testing.B) {
+	const count = 16
+	r := New(count * 100)
+	for i := 0; i < count; i++ {
+		id := polymodel.ModelID("bench-resident-" + strconv.Itoa(i))
+		m := model.NewSynthetic(tinyCfg())
+		if _, err := r.Admit(id, m, 100, "fam", "", false); err != nil {
+			b.Fatalf("seed admit: %v", err)
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		res := r.Resident()
+		if len(res) != count {
+			b.Fatalf("unexpected resident count: %d", len(res))
+		}
 	}
 }
