@@ -205,3 +205,85 @@ func TestReadSpecCopyIsMutationSafe(t *testing.T) {
 		t.Error("Spec() reported an unknown op as known")
 	}
 }
+
+// BenchmarkVocabulary measures the retrieval and deep-copying (slice cloning) of the
+// complete registered read-op vocabulary.
+func BenchmarkVocabulary(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		specs := Vocabulary()
+		if len(specs) == 0 {
+			b.Fatal("unexpected empty vocabulary")
+		}
+	}
+}
+
+// BenchmarkOps measures the extraction and allocation of the registered ReadOp
+// identifier slice.
+func BenchmarkOps(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ops := Ops()
+		if len(ops) == 0 {
+			b.Fatal("unexpected empty ops")
+		}
+	}
+}
+
+// BenchmarkSpec_Hit measures lookup and deep-copying of a single known ReadOp spec.
+func BenchmarkSpec_Hit(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		spec, ok := Spec(OpContextRestore)
+		if !ok || spec.Op != OpContextRestore {
+			b.Fatal("lookup failed for OpContextRestore")
+		}
+	}
+}
+
+// BenchmarkSpec_Miss measures lookup behavior when probing an unregistered ReadOp token.
+func BenchmarkSpec_Miss(b *testing.B) {
+	unknown := ReadOp("unregistered-read-op")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, ok := Spec(unknown)
+		if ok {
+			b.Fatal("expected unregistered op to miss")
+		}
+	}
+}
+
+// BenchmarkSpec_CycleAll measures cycling lookup across all registered ReadOp tokens,
+// simulating varied read operation dispatches.
+func BenchmarkSpec_CycleAll(b *testing.B) {
+	ops := Ops()
+	if len(ops) == 0 {
+		b.Fatal("empty ops")
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		op := ops[i%len(ops)]
+		spec, ok := Spec(op)
+		if !ok || spec.Op != op {
+			b.Fatalf("lookup failed for op %q", op)
+		}
+	}
+}
+
+// BenchmarkReadRefusalTokens measures the retrieval and cloning of the closed
+// read-refusal token set.
+func BenchmarkReadRefusalTokens(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tokens := ReadRefusalTokens()
+		if len(tokens) == 0 {
+			b.Fatal("unexpected empty refusal tokens")
+		}
+	}
+}
