@@ -16,13 +16,56 @@ const (
 // until Codex can put reasoning.mode on the Responses request; Ultra is FAK's
 // guarded multi-worker workflow, not a reasoning-effort alias.
 type SOLRoute struct {
-	Mode            SOLMode `json:"mode"`
-	Model           string  `json:"model"`
-	ReasoningEffort string  `json:"reasoning_effort"`
-	ReasoningMode   string  `json:"reasoning_mode,omitempty"`
-	MultiAgent      bool    `json:"multi_agent"`
-	ConsultOnly     bool    `json:"consult_only,omitempty"`
-	Decision        string  `json:"decision"`
+	Mode                  SOLMode `json:"mode"`
+	Model                 string  `json:"model"`
+	ReasoningEffort       string  `json:"reasoning_effort"`
+	ReasoningMode         string  `json:"reasoning_mode,omitempty"`
+	MultiAgent            bool    `json:"multi_agent"`
+	ConsultOnly           bool    `json:"consult_only,omitempty"`
+	Decision              string  `json:"decision"`
+	WorkerModel           string  `json:"worker_model,omitempty"`
+	WorkerReasoningEffort string  `json:"worker_reasoning_effort,omitempty"`
+}
+
+const (
+	DefaultAstraChildWorkerModel  = "gemini-3.8-flash"
+	DefaultAstraChildWorkerEffort = "medium"
+)
+
+// IsAstraModel reports whether model refers to an Astra model family.
+func IsAstraModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	switch m {
+	case "gpt-6-astra", "gpt 6 astra", "gpt6astra", "gpt-6", "gpt6", "astra",
+		"openai/gpt-6-astra", "openai/gpt-6", "openai/astra":
+		return true
+	default:
+		return strings.Contains(m, "astra")
+	}
+}
+
+// ChildWorkerRoute returns the effective model and reasoning effort for child workers.
+// Under an Astra manager, workers default to gemini-3.8-flash with medium effort
+// unless explicitly overridden.
+func ChildWorkerRoute(managerModel, overrideModel, overrideEffort string) (string, string) {
+	model := strings.TrimSpace(overrideModel)
+	effort := strings.ToLower(strings.TrimSpace(overrideEffort))
+	if IsAstraModel(managerModel) {
+		if model == "" {
+			model = DefaultAstraChildWorkerModel
+		}
+		if effort == "" {
+			effort = DefaultAstraChildWorkerEffort
+		}
+		return model, effort
+	}
+	if model == "" {
+		model = managerModel
+	}
+	if effort == "" {
+		effort = "high"
+	}
+	return model, effort
 }
 
 var (
@@ -55,6 +98,10 @@ func SelectSOLRoute(task string, profile Profile, workClass WorkClass, model str
 		Model:           model,
 		ReasoningEffort: "high",
 		Decision:        "single worker at high effort is the least-cost adequate route",
+	}
+	if IsAstraModel(model) {
+		route.WorkerModel = DefaultAstraChildWorkerModel
+		route.WorkerReasoningEffort = DefaultAstraChildWorkerEffort
 	}
 	if profile == ProfileOff {
 		route.ReasoningEffort = "medium"
@@ -103,10 +150,21 @@ func RouteResolution(res *Resolution, taskText string, model string) {
 	if strings.Contains(res.Resolved.SOLRoute.Decision, "; effort pinned by operator to ") {
 		pinnedEffort = res.Resolved.SOLRoute.ReasoningEffort
 	}
+	pinnedWorkerModel := res.Resolved.SOLRoute.WorkerModel
+	pinnedWorkerEffort := res.Resolved.SOLRoute.WorkerReasoningEffort
 	res.Resolved.SOLRoute = SelectSOLRoute(taskText, profile, res.Resolved.WorkClass, model)
 	if pinnedEffort != "" {
 		res.Resolved.SOLRoute.ReasoningEffort = pinnedEffort
 		res.Resolved.SOLRoute.Decision += "; effort pinned by operator to " + pinnedEffort
+		if pinnedWorkerEffort == "" {
+			res.Resolved.SOLRoute.WorkerReasoningEffort = pinnedEffort
+		}
+	}
+	if pinnedWorkerModel != "" {
+		res.Resolved.SOLRoute.WorkerModel = pinnedWorkerModel
+	}
+	if pinnedWorkerEffort != "" {
+		res.Resolved.SOLRoute.WorkerReasoningEffort = pinnedWorkerEffort
 	}
 	res.Resolved.Explanation = append(res.Resolved.Explanation, "SOL route "+string(res.Resolved.SOLRoute.Mode)+": "+res.Resolved.SOLRoute.Decision)
 }

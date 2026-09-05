@@ -561,8 +561,13 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 			return Resolution{}, fmt.Errorf("fast intent: invalid effort pin %q", task.Pins.Effort)
 		}
 		solRoute.ReasoningEffort = effort
+		solRoute.WorkerReasoningEffort = effort
 		solRoute.Decision += "; effort pinned by operator to " + effort
 		prov = append(prov, Provenance{"fast.effort", "task.pin", effort})
+	}
+	if task.Pins.Model != "" {
+		solRoute.WorkerModel = task.Pins.Model
+		prov = append(prov, Provenance{"fast.model", "task.pin", task.Pins.Model})
 	}
 	explain := []string{fmt.Sprintf("profile %s resolved from %s work", resolvedProfile, task.WorkClass), fmt.Sprintf("budget capped at %d workers and %d tokens", workers, tokens), fmt.Sprintf("task execution remains delegated to taskmgr with engine reference %s", engine)}
 	for _, d := range deg {

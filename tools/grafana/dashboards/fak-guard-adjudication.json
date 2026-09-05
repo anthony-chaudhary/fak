@@ -532,8 +532,8 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum by (reason) (rate(fak_gateway_operations_total{reason!=\"\",verdict!=\"ALLOW\"}[5m]))",
-          "legendFormat": "{{reason}}",
+          "expr": "sum by (reason, refusal_subtype) (rate(fak_gateway_operations_total{reason!=\"\",verdict!=\"ALLOW\"}[5m]))",
+          "legendFormat": "{{reason}} {{refusal_subtype}}",
           "refId": "A"
         }
       ]
@@ -598,8 +598,8 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum by (reason) (fak_gateway_operations_total{reason!=\"\",verdict!=\"ALLOW\"})",
-          "legendFormat": "{{reason}}",
+          "expr": "sum by (reason, refusal_subtype) (fak_gateway_operations_total{reason!=\"\",verdict!=\"ALLOW\"})",
+          "legendFormat": "{{reason}} {{refusal_subtype}}",
           "instant": true,
           "refId": "A"
         }

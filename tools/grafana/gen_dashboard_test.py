@@ -182,3 +182,16 @@ def test_checked_in_run_dashboards_match_generator():
     for name, generated in expected.items():
         checked_in = json.loads((HERE / "dashboards" / name).read_text(encoding="utf-8"))
         assert checked_in == generated, f"{name} must be regenerated with gen_dashboard.py"
+
+
+def test_guard_refusal_panels_break_down_by_reason_and_refusal_subtype():
+    dashboard._id[0] = 0
+    guard = dashboard.build_guard()
+    panels = {panel["title"]: panel for panel in guard["panels"] if panel.get("title")}
+    rate_panel = panels["Refusal rate by reason"]
+    total_panel = panels["Refusals by reason (session total)"]
+
+    assert "sum by (reason, refusal_subtype)" in rate_panel["targets"][0]["expr"]
+    assert rate_panel["targets"][0]["legendFormat"] == "{{reason}} {{refusal_subtype}}"
+    assert "sum by (reason, refusal_subtype)" in total_panel["targets"][0]["expr"]
+    assert total_panel["targets"][0]["legendFormat"] == "{{reason}} {{refusal_subtype}}"

@@ -5,9 +5,9 @@ policy manifests this page used to be named after are the smallest of the three.
 
 | Kind | What it is | Count |
 |---|---|---|
-| **Runnable demos** | self-contained directories, each with a command that proves one claim — most need no key, model, GPU, or network | 76 directories, 67 with their own README |
+| **Runnable demos** | self-contained directories, each with a command that proves one claim — most need no key, model, GPU, or network | 68 immediate directories (61 with a README, 7 README-less data/corpus directories) |
 | **Framework integrations** | eight of those directories put fak in front of an agent you already run: OpenAI SDK, MCP (server and client), OpenAI Agents, AutoGen, CrewAI, Ollama, and a generic external driver | 8 |
-| **Policy manifests** | starter capability floors to copy and adapt, at the top level of `examples/` | 31 `*.json` |
+| **Policy manifests** | starter capability floors to copy and adapt, at the top level of `examples/` | 21 policy manifests |
 
 > **Start here:** [`playground/`](playground/README.md) — one command, nothing to
 > install beyond `fak` itself. You propose tool calls and read the kernel's verdict

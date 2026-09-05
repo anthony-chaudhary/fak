@@ -347,6 +347,9 @@ func (m *gatewayMetrics) snapshot() ([]httpMetricSnapshot, []operationMetricSnap
 		if a.reason != b.reason {
 			return a.reason < b.reason
 		}
+		if a.refusalSubtype != b.refusalSubtype {
+			return a.refusalSubtype < b.refusalSubtype
+		}
 		if a.disposition != b.disposition {
 			return a.disposition < b.disposition
 		}

@@ -464,11 +464,12 @@ type httpMetricKey struct {
 }
 
 type operationMetricKey struct {
-	operation   string
-	verdict     string
-	reason      string
-	disposition string
-	by          string // which adjudicator decided (forensics) — answers WHO refused, not just that it was refused
+	operation      string
+	verdict        string
+	reason         string
+	refusalSubtype string
+	disposition    string
+	by             string // which adjudicator decided (forensics) — answers WHO refused, not just that it was refused
 }
 
 type requestMemoryMetricKey struct {

@@ -65,7 +65,7 @@ The eight `metal.*` levers remain the semantic authority. This execution plan ad
 - [ ] M5 - Quality-clean exact P32/T64 receipt (#8972 closed without its gate; replacement ship-alone leaf still required under #9430)
 - [ ] M6 - Paged Qwen hybrid state live arm (#9076/#8395; arrival-trace receipt #9492 shipped at `3399133a3`, live serving arm under #8395 outstanding)
 - [ ] M7 - Exact-prefix block reuse (#8395; exact-boundary prefix COW #9499 shipped at `caf933645`, live serving arm under #8395 outstanding)
-- [ ] M8 - Bounded chunked-prefill scheduling (#9066 append prefill shipped at `80c16ae95`, #1912 scheduler interleaving open under #8395)
+- [x] M8 - Bounded chunked-prefill scheduling (#9066 append prefill shipped at `80c16ae95`, #1912 scheduler interleaving closed at `f3530035c`)
 - [ ] M9 - Resident hybrid co-batching (#9074/#9075/#8395; substrates #9515/#9516, model co-batching #9074, and agent coalescing #9075 shipped, live serving campaign under #8395 outstanding)
 - [x] M10 - Matched parity reconvergence (#9513; exact M3 Pro P32/T64 parity close-out bundle shipped at `d3cf7df2e` KEEP, closes #9513/#2723)
 
@@ -109,7 +109,7 @@ Exercise the shipped swap/preemption state on the exact serving trace. KEEP requ
 
 Build on the landed append-capable Q4_K prefill and finish live scheduler interleaving. KEEP requires identical outputs plus positive TTFT/ITL and memory movement; rejected one-shot reserve #9094 does not count.
 
-#9066 shipped append-capable resident Q4_K prefill at `80c16ae95` and is closed. Issue #1912 remains open for scheduler interleaving under #8395.
+#9066 shipped append-capable resident Q4_K prefill at `80c16ae95` and is closed. Issue #1912 scheduler interleaving landed at `f3530035c` (`internal/modelengine/nativesched_prefill.go`) with per-iteration token ceiling, decode interleaving, single-close cancellation, and 0 fallback verified by `TestNativeSchedulerInterleavesBoundedQwenPrefill` (15/15 PASS), closing #1912. Live serving throughput campaign under #8395 remains open.
 
 ### 9. M9 - Resident hybrid co-batching (#9074, #9075, #8395)
 
@@ -137,7 +137,7 @@ Issue #10317 applies the canonical three-axis model in [`docs/progress-state-def
 | 6 / #8324 | `IMPLEMENTATION_SHIPPED` | `CONTRACT_VALIDATED` for coarse resident decode (`0c25bd26f`); fail-closed rerun harness `daa18873b`; no qualifying runtime receipt | `AWAITING_RUNTIME_RECEIPT` | Run the exact packet on sanctioned capacity. |
 | 7 / #8822, #9513 | `SPINE_SHIPPED` | `CONTRACT_VALIDATED` (`ACCEPTED`: exact M3 Pro P32/T64 parity close-out bundle #9513 landed at `d3cf7df2e`) | `COMPLETE` | Accepted exact M3 Pro P32/T64 parity close-out #9513 with 98.52% decode throughput parity (6.8633 vs 6.9667 tok/s), 0 fallbacks, exact tokens, and logit parity; closes #9513. |
 | 8 / #2723 | `SPINE_SHIPPED` | `CONTRACT_VALIDATED` (`ACCEPTED`: head-to-head fak vs llama.cpp vs MLX matched comparison in #9513) | `COMPLETE` | Head-to-head M3 Pro comparison published in #9513 witness bundle; closes #2723. |
-| 9 / #8395 → #9499 → #1912 → #9074/#9075 | `SPINE_SHIPPED` | `CONTRACT_VALIDATED` for shipped substrates and mechanisms (#9492, #9499, #9066, #9074, #9075); exact integrated runtime remains missing | `DEPENDENCY_ADVANCING: 4/5` | Advance #1912 scheduler interleaving, then run the integrated #8395 serving throughput campaign. |
+| 9 / #8395 → #9499 → #1912 → #9074/#9075 | `SPINE_SHIPPED` | `CONTRACT_VALIDATED` for shipped substrates and mechanisms (#9492, #9499, #9066, #1912, #9074, #9075); exact integrated runtime remains missing | `DEPENDENCY_ADVANCING: 5/5` | All five constituent mechanisms landed (#1912 closed); advance integrated #8395 serving throughput campaign. |
 | 10 / #9987 → #8657 → #8658 | `SPINE_SHIPPED` | `CONTRACT_VALIDATED` for bounded prerequisite behavior; resident speculative runtime evidence remains missing | `ACTIVE_PROBE / DEPENDENCY_ADVANCING` | Run the smallest fak-native residency probe that can retire the next dependency, then preserve the pinned campaign receipt. |
 
 Additional plan state:
@@ -158,6 +158,7 @@ Kernel/runtime commits must follow `fak sota`, name the exact source revision/pa
 
 ## Execution log
 
+- 2026-09-05: M8 bounded chunked-prefill scheduler interleaving #1912 verified complete and closed on main (`f3530035c`); NativeScheduler bounded prefill chunking, decode interleaving, cancellation cleanup, and 0 fallback verified by `TestNativeSchedulerInterleavesBoundedQwenPrefill` (15/15 PASS); closes #1912.
 - 2026-09-03: M10 exact parity campaign #9513 completed with matched M3 Pro P32/T64 parity close-out bundle (`docs/_witnesses/issue-9513-qwen38-m10-parity/`) landed at `d3cf7df2e`; candidate achieved 6.8633 tok/s vs 6.9667 tok/s for pinned llama.cpp b9828 (98.52% throughput parity ratio >= 95.0% threshold), 0 fallbacks, exact greedy tokens, logit parity <= 0.0001; verified by `TestMatchedParityReceipt`; M10 earns 3/10 KEEP under #9430 and closes #9513 and #2723.
 - 2026-09-03: M4 coarse resident Metal decode #8324 landed at `0c25bd26f` closing #8324 with amortized synchronization (1 sync per token across layers), CPU parity tests (`TestQwen35ResidentMetalDecoder*`), and typed stage profiling; exact Mac runtime performance receipt remains outstanding.
 - 2026-09-03: M6 exact paged-swap receipt #9492 landed at `3399133a3` closing #9492 with `QwenPagedSwapReceipt` arrival-trace OFF/ON witness, zero fallback, zero recompute, and exact output equality; live serving campaign under #8395 remains open.

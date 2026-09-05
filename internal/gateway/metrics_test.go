@@ -41,8 +41,8 @@ func TestHTTPMetricsEndpointExposesGatewayAndKernelCounters(t *testing.T) {
 		`fak_gateway_build_info{version="dev",engine="test",model="test-model",vdso="true"} 1`,
 		`fak_gateway_http_requests_total{route="/v1/fak/syscall",method="POST",status="200"} 1`,
 		`fak_gateway_http_request_duration_seconds_count{route="/v1/fak/syscall",method="POST",status="200"} 1`,
-		`fak_gateway_operations_total{operation="syscall",verdict="ALLOW",reason="",disposition="",by="test"} 1`,
-		`fak_gateway_operation_duration_seconds_count{operation="syscall",verdict="ALLOW",reason="",disposition="",by="test"} 1`,
+		`fak_gateway_operations_total{operation="syscall",verdict="ALLOW",reason="",refusal_subtype="",disposition="",by="test"} 1`,
+		`fak_gateway_operation_duration_seconds_count{operation="syscall",verdict="ALLOW",reason="",refusal_subtype="",disposition="",by="test"} 1`,
 		"fak_kernel_submits_total 1",
 		"fak_kernel_engine_calls_total 1",
 		"fak_kernel_result_denies_total 0",
@@ -1200,5 +1200,34 @@ func TestDebugVarsExposeCompactionStats(t *testing.T) {
 	}
 	if c.UncachedTrimResults != 1 || c.UncachedTrimShedTokens != 300 {
 		t.Fatalf("debug uncached-trim totals = %+v, want 1 result / 300 shed", c)
+	}
+}
+
+func TestOperationMetricsRefusalSubtypeBreakdown(t *testing.T) {
+	srv := newTestServer(t)
+	d := time.Millisecond
+	srv.metrics.observeOperation("adjudicate", WireVerdict{
+		Kind:           "DENY",
+		Reason:         "TRUST_VIOLATION",
+		RefusalSubtype: "injection_quarantine",
+		Disposition:    "TERMINAL",
+		By:             "ctxmmu",
+	}, nil, d)
+	srv.metrics.observeOperation("adjudicate", WireVerdict{
+		Kind:           "DENY",
+		Reason:         "TRUST_VIOLATION",
+		RefusalSubtype: "ifc_sink",
+		Disposition:    "TERMINAL",
+		By:             "ifc-sink",
+	}, nil, d)
+
+	text := srv.renderMetrics()
+	want1 := `fak_gateway_operations_total{operation="adjudicate",verdict="DENY",reason="TRUST_VIOLATION",refusal_subtype="injection_quarantine",disposition="TERMINAL",by="ctxmmu"} 1`
+	want2 := `fak_gateway_operations_total{operation="adjudicate",verdict="DENY",reason="TRUST_VIOLATION",refusal_subtype="ifc_sink",disposition="TERMINAL",by="ifc-sink"} 1`
+	if !strings.Contains(text, want1) {
+		t.Errorf("metrics missing %q\n--- metrics ---\n%s", want1, text)
+	}
+	if !strings.Contains(text, want2) {
+		t.Errorf("metrics missing %q\n--- metrics ---\n%s", want2, text)
 	}
 }
