@@ -258,3 +258,93 @@ func repoRoot(t *testing.T) string {
 		dir = parent
 	}
 }
+
+func BenchmarkDeclaredTaskNames(b *testing.B) {
+	src := `
+[CmdletBinding()]
+param(
+  [string]$TaskName = 'FleetScoutLoop',
+  [string]$CaptureTaskName = 'FakLogvaultCapture',
+  [string]$VerifyTaskName  = "FakLogvaultVerify",
+  [string]$EmptyTaskName = '',
+  [string]$TemplatedTaskName = "FleetSomething-$repoSlug"
+)
+schtasks /Delete /TN $TaskName /F
+`
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = DeclaredTaskNames(src)
+	}
+}
+
+func BenchmarkVerify(b *testing.B) {
+	inv := Inventory()
+	declared := map[string][]string{
+		"tools/register_logvault_backup.ps1":       {"FakLogvaultCapture", "FakLogvaultVerify"},
+		"tools/install_self_update_schedule.ps1":   {"FakSelfUpdate"},
+		"tools/register_bench_plan_doc.ps1":        {"FleetBenchPlanDoc"},
+		"tools/register_dos_dispatch_watchdog.ps1": {"FleetDOSDispatchWatchdog"},
+		"tools/register_dispatch_status_doc.ps1":   {"FleetDispatchStatusDoc"},
+		"tools/register_idea_scout.ps1":            {"FleetIdeaScout"},
+		"tools/register_issue_dispatch.ps1":        {"FleetIssueDispatch"},
+		"tools/register_proc_resource_guard.ps1":   {"FleetProcResourceGuard"},
+		"tools/register_push_lag_pusher.ps1":       {"FleetPushLagPusher"},
+		"tools/register_resolve_progress.ps1":      {"FleetResolveProgress"},
+		"tools/register_resume_watchdog.ps1":       {"FleetResumeWatchdog"},
+		"tools/register_runaway_reaper.ps1":        {"FleetRunawayReaper"},
+		"tools/register_scout_loop.ps1":            {"FleetScoutLoop"},
+		"tools/register_stale_work_watchdog.ps1":   {"FleetStaleWorkGarden"},
+		"tools/register_supervisor_watchdog.ps1":   {"FleetSupervisorWatchdog"},
+		"tools/register_worktree_doctor.ps1":       {"FleetWorktreeDoctor"},
+	}
+	captured := map[string]bool{
+		"tools/scheduled-tasks/ClaudeAccountBackup.xml":          true,
+		"tools/scheduled-tasks/July4CacheValueAutospawn.xml":     true,
+		"tools/scheduled-tasks/FakFleetJanitorHeadless.xml":      true,
+		"tools/scheduled-tasks/FakBenchmarkFleetLoop.xml":        true,
+		"tools/scheduled-tasks/FakMetaSuperloopNight100.xml":     true,
+		"tools/scheduled-tasks/FakOvernightMixedProfiles100.xml": true,
+		"tools/scheduled-tasks/FleetGLM52CampaignStop.xml":       true,
+		"tools/scheduled-tasks/FakReapOrphanTails.xml":           true,
+		"tools/scheduled-tasks/FleetOwnerSeatResume.xml":         true,
+		"tools/scheduled-tasks/FleetStrandedRecovery.xml":        true,
+		"tools/scheduled-tasks/FleetWatchdogWatchdogAudit.xml":   true,
+		"tools/scheduled-tasks/UserSeatDrain-1010.xml":           true,
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = Verify(inv, declared, captured)
+	}
+}
+
+func BenchmarkUncovered(b *testing.B) {
+	inv := Inventory()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = Uncovered(inv)
+	}
+}
+
+func BenchmarkInventory(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = Inventory()
+	}
+}
+
+func BenchmarkOffenseString(b *testing.B) {
+	off := Offense{
+		Task:   "FleetStaleWorkGarden",
+		Reason: ReasonInstallerNameDrift,
+		Detail: "installer tools/register_stale_work_watchdog.ps1 drifted",
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = off.String()
+	}
+}

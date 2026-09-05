@@ -1,65 +1,15 @@
 package taskvc
 
-// This file is the version-controlled record of the fleet's always-on Scheduled
-// Task posture — the artifact that lets a reimaged host be rebuilt from the repo,
-// and the ratchet that keeps installer names bound to the loops they register
-// (#3323).
-//
-// Scope matches the reboot-survival audit: ENABLED tasks at the ROOT task path (\)
-// that belong to THIS repo's fleet. A task is in scope when its action runs a
-// script tracked in this repo, or when it drives this repo's fleet loops (the
-// Fak*/Fleet* families and the campaign one-shots they spawn). The criterion is
-// deliberately by ACTION, not by name prefix: ClaudeAccountBackup runs
-// tools/claude_account_backup.py from this very tree and would be silently missed
-// by a Fak*/Fleet* name filter, which is exactly the orphan class #3323 exists to
-// catch.
-//
-// Deliberately excluded, and NOT gaps:
-//   - Other automation trees that merely share the root task path: DOS-cleanup-sweep
-//     (C:\work\dos-kernel-public), HostMaintenance-* (C:\work\host-maintenance),
-//     JobSearchApplyProfileFleet (C:\work\job) and the \JobSearch\ tasks
-//     (FleetHeartbeat, FleetPipelineTick). Each is reproducible from its own repo,
-//     not this one.
-//   - "Claude state cleanup" — the Claude harness's own housekeeping of
-//     ~/.claude, owned by the harness install, not by this repo.
-//   - \Microsoft\Windows\... vendor and OS tasks (UserTask, OneDrive*, AMD*, ...) —
-//     OS-owned; some only match the fleet's name filter by coincidence.
-//   - Disabled tasks (FakFleetJanitor, FleetSlackBeat, the FleetIssueDispatch*
-//     campaign variants, ...) — they are not part of the live posture, and
-//     several are deliberately-parked one-shots.
-//
-// Measured live on 2026-07-26 (`Get-ScheduledTask`, root path, State != Disabled:
-// 48 tasks, of which 29 are in scope by the rule above): 29 covered and 0 orphans,
-// split 16 rebuildable from a versioned installer and 13 covered by a scrubbed
-// task-XML export under tools/scheduled-tasks/. The #5409 reconcile has since
-// promoted FleetWorktreeDoctor from the capture tier to its installer, so the split
-// now reads 17 / 12 against the same 29 tasks; its export stays tracked but no row
-// leans on it. The 2026-07-08 audit counted ~35 orphans; most were closed by
-// installers landed in the intervening weeks, and the residual 12 are captured here.
-//
-// The two coverage tiers are NOT equivalent, and the difference is the honest part.
-// An installer rebuilds the loop from the repo outright. An XML export versions the
-// task — schedule, principal shape, exact command line — but not the script that
-// command line points at. For a task whose action lives outside the tree, restoring
-// the XML restores a task pointing at a file a fresh host does not have; the Reason
-// on each StatusXML row names exactly what is still missing, and an installer
-// remains the preferred remedy.
-//
-// Adding a loop to the fleet? Add its row here. A StatusInstaller row is checked
-// against the tree by TestFleetTaskInventoryBindsToVersionedInstallers, so a
-// coverage claim can never outrun the installer that backs it; a StatusXML row is
-// checked against the tracked capture, so it cannot outrun the file either.
+// Inventory records version-control coverage for enabled fleet Scheduled Tasks (#3323).
+// Scope covers root-path tasks driving fleet loops or scripts in this repository.
 
-// Inventory returns the declared coverage of every enabled fak-fleet Scheduled
-// Task. It is a value copy, so callers cannot mutate the shared record.
+// Inventory returns a copy of declared coverage for all enabled fleet Scheduled Tasks.
 func Inventory() []Coverage {
 	return append([]Coverage(nil), inventory...)
 }
 
 var inventory = []Coverage{
-	// ---- Rebuildable from a versioned installer -----------------------------
-	// Each of these installers declares its task name as a literal default, so
-	// re-running it updates the live task in place rather than duplicating it.
+	// Tasks rebuildable from versioned installers.
 	{Task: "FakLogvaultCapture", Status: StatusInstaller, Installer: "tools/register_logvault_backup.ps1"},
 	{Task: "FakLogvaultVerify", Status: StatusInstaller, Installer: "tools/register_logvault_backup.ps1"},
 	{Task: "FakSelfUpdate", Status: StatusInstaller, Installer: "tools/install_self_update_schedule.ps1"},
@@ -74,24 +24,13 @@ var inventory = []Coverage{
 	{Task: "FleetResumeWatchdog", Status: StatusInstaller, Installer: "tools/register_resume_watchdog.ps1"},
 	{Task: "FleetRunawayReaper", Status: StatusInstaller, Installer: "tools/register_runaway_reaper.ps1"},
 	{Task: "FleetScoutLoop", Status: StatusInstaller, Installer: "tools/register_scout_loop.ps1"},
-	// The #3323 reconcile: this installer's -TaskName default was realigned to the
-	// live task, so a reinstall updates FleetStaleWorkGarden instead of spawning a
-	// second stale-work loop. This row is what keeps it from drifting again.
+	// Realigned installer default for FleetStaleWorkGarden (#3323).
 	{Task: "FleetStaleWorkGarden", Status: StatusInstaller, Installer: "tools/register_stale_work_watchdog.ps1"},
 	{Task: "FleetSupervisorWatchdog", Status: StatusInstaller, Installer: "tools/register_supervisor_watchdog.ps1"},
-	// The same reconcile, one class later (#5409). register_worktree_doctor.ps1 used
-	// to interpolate "FleetWorktreeDoctor-$repoSlug", which no static parse can bind,
-	// so this row sat at StatusDrift leaning on a task-XML capture as a stopgap. Its
-	// -TaskName default is now the bare literal that the live task and the versioned
-	// capture (tools/scheduled-tasks/FleetWorktreeDoctor.xml, whose <URI> reads
-	// \FleetWorktreeDoctor) already agreed on, so a reinstall updates the live task in
-	// place and the binder can prove it. The capture stays tracked as a historical
-	// export, but it is no longer this row's coverage claim — the installer is.
+	// FleetWorktreeDoctor bound to literal installer default (#5409).
 	{Task: "FleetWorktreeDoctor", Status: StatusInstaller, Installer: "tools/register_worktree_doctor.ps1"},
 
-	// ---- Captured: scrubbed task XML under tools/scheduled-tasks/ ------------
-	// Each Reason names what the XML alone does NOT restore, because that residual
-	// is the difference between this tier and a real installer.
+	// Tasks covered by scrubbed task XML exports under tools/scheduled-tasks/.
 	{
 		Task:    "ClaudeAccountBackup",
 		Status:  StatusXML,
