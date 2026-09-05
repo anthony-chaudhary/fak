@@ -302,6 +302,20 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if shouldYield, estTokens, toolCalls := shouldYieldResponsesSubturn(messages, tools, req.Input); shouldYield {
+		if s.logf != nil {
+			s.logf("gateway: responses sub-turn yield valve activated: est_tokens=%d tool_calls=%d trace_id=%s", estTokens, toolCalls, reqTrace)
+		}
+		w.Header().Set(SubturnYieldHeader, "true")
+		resp := makeSubturnYieldResponse(reqModel, resultAdmissions)
+		if req.Stream {
+			s.writeResponsesStream(w, resp)
+		} else {
+			writeJSON(w, http.StatusOK, resp)
+		}
+		return
+	}
+
 	// Hoisted so the #5212 denial-recovery sample re-samples under the SAME sampling
 	// contract as the first call — a recovery that quietly changed model or budget
 	// would not be the same turn continuing.

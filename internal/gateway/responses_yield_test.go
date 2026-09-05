@@ -1,0 +1,433 @@
+package gateway
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
+)
+
+type capturingYieldPlanner struct {
+	called   bool
+	comp     *agent.Completion
+	messages []agent.Message
+}
+
+func (p *capturingYieldPlanner) Complete(ctx context.Context, m []agent.Message, t []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	p.called = true
+	p.messages = append([]agent.Message(nil), m...)
+	if p.comp != nil {
+		return p.comp, nil
+	}
+	return &agent.Completion{
+		FinishReason: "stop",
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "normal planner output",
+		},
+	}, nil
+}
+
+func (p *capturingYieldPlanner) Model() string {
+	return "test-model"
+}
+
+// TestResponsesSubturnYieldExceedsThresholds simulates a multi-tool execution turn that
+// exceeds token and tool-call thresholds, verifying the gateway activates the yield valve,
+// intercepts the turn with the synthetic conclusion and compaction prompt, and sets
+// X-Fak-Subturn-Yield: true header.
+func TestResponsesSubturnYieldExceedsThresholds(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", "1000")
+	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOOL_CALLS", "5")
+
+	srv := newTestServer(t)
+	planner := &capturingYieldPlanner{}
+	srv.planner = planner
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// 6 tool calls / results with >4000 characters (>1000 tokens).
+	inputItems := []any{
+		map[string]any{"type": "message", "role": "user", "content": "run long subturn tasks"},
+	}
+	for i := 0; i < 6; i++ {
+		inputItems = append(inputItems,
+			map[string]any{
+				"type":    "function_call",
+				"call_id": "call_" + itoa(uint64(i)),
+				"name":    "tool_action",
+			},
+			map[string]any{
+				"type":    "function_call_output",
+				"call_id": "call_" + itoa(uint64(i)),
+				"output":  "tool result data: " + strings.Repeat("A", 800),
+			},
+		)
+	}
+
+	body := map[string]any{
+		"model": "test-model",
+		"input": inputItems,
+	}
+
+	reqBytes, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	httpResp, err := http.Post(ts.URL+"/v1/responses", "application/json", bytes.NewReader(reqBytes))
+	if err != nil {
+		t.Fatalf("POST /v1/responses: %v", err)
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(httpResp.Body)
+		t.Fatalf("expected 200 OK, got %d: %s", httpResp.StatusCode, string(respBody))
+	}
+
+	// Verify X-Fak-Subturn-Yield header is set.
+	if got := httpResp.Header.Get(SubturnYieldHeader); got != "true" {
+		t.Fatalf("expected header %s: true, got %q", SubturnYieldHeader, got)
+	}
+
+	// Decode response body.
+	var resp responsesResponse
+	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response JSON: %v", err)
+	}
+
+	if resp.Status != "completed" {
+		t.Fatalf("expected resp.Status == completed, got %q", resp.Status)
+	}
+	if resp.FinishReason != "stop" && resp.FinishReason != "yield" {
+		t.Fatalf("expected resp.FinishReason stop or yield, got %q", resp.FinishReason)
+	}
+	if !strings.Contains(resp.OutputText, SubturnYieldMessage) {
+		t.Fatalf("expected OutputText to contain %q, got %q", SubturnYieldMessage, resp.OutputText)
+	}
+
+	// Verify the upstream planner was NOT called because the turn was intercepted.
+	if planner.called {
+		t.Fatal("expected upstream planner NOT to be called when yield valve activates")
+	}
+}
+
+// TestResponsesSubturnYieldBelowThresholds verifies that when context and tool calls are below
+// thresholds, normal execution proceeds without yielding.
+func TestResponsesSubturnYieldBelowThresholds(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", "10000")
+	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOOL_CALLS", "10")
+
+	srv := newTestServer(t)
+	planner := &capturingYieldPlanner{
+		comp: &agent.Completion{
+			FinishReason: "stop",
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "normal completion below threshold",
+			},
+		},
+	}
+	srv.planner = planner
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// Only 2 tool calls and modest tokens.
+	inputItems := []any{
+		map[string]any{"type": "message", "role": "user", "content": "quick task"},
+		map[string]any{
+			"type":    "function_call",
+			"call_id": "call_0",
+			"name":    "tool_action",
+		},
+		map[string]any{
+			"type":    "function_call_output",
+			"call_id": "call_0",
+			"output":  "short output",
+		},
+	}
+
+	body := map[string]any{
+		"model": "test-model",
+		"input": inputItems,
+	}
+
+	reqBytes, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	httpResp, err := http.Post(ts.URL+"/v1/responses", "application/json", bytes.NewReader(reqBytes))
+	if err != nil {
+		t.Fatalf("POST /v1/responses: %v", err)
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(httpResp.Body)
+		t.Fatalf("expected 200 OK, got %d: %s", httpResp.StatusCode, string(respBody))
+	}
+
+	// Verify X-Fak-Subturn-Yield header is NOT set.
+	if got := httpResp.Header.Get(SubturnYieldHeader); got != "" {
+		t.Fatalf("expected header %s to be empty, got %q", SubturnYieldHeader, got)
+	}
+
+	var resp responsesResponse
+	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response JSON: %v", err)
+	}
+
+	if !strings.Contains(resp.OutputText, "normal completion below threshold") {
+		t.Fatalf("expected normal output, got %q", resp.OutputText)
+	}
+	if !planner.called {
+		t.Fatal("expected upstream planner to be called for below-threshold request")
+	}
+}
+
+// TestResponsesSubturnYieldStreaming verifies that streaming Responses requests also
+// honor the mid-turn token yield valve.
+func TestResponsesSubturnYieldStreaming(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", "500")
+	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOOL_CALLS", "3")
+
+	srv := newTestServer(t)
+	planner := &capturingYieldPlanner{}
+	srv.planner = planner
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	inputItems := []any{
+		map[string]any{"type": "message", "role": "user", "content": "stream tasks"},
+	}
+	for i := 0; i < 4; i++ {
+		inputItems = append(inputItems,
+			map[string]any{
+				"type":    "function_call",
+				"call_id": "call_" + itoa(uint64(i)),
+				"name":    "tool_action",
+			},
+			map[string]any{
+				"type":    "function_call_output",
+				"call_id": "call_" + itoa(uint64(i)),
+				"output":  "stream output " + strings.Repeat("B", 600),
+			},
+		)
+	}
+
+	body := map[string]any{
+		"model":  "test-model",
+		"stream": true,
+		"input":  inputItems,
+	}
+
+	reqBytes, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	httpResp, err := http.Post(ts.URL+"/v1/responses", "application/json", bytes.NewReader(reqBytes))
+	if err != nil {
+		t.Fatalf("POST /v1/responses: %v", err)
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", httpResp.StatusCode)
+	}
+
+	if got := httpResp.Header.Get(SubturnYieldHeader); got != "true" {
+		t.Fatalf("expected header %s: true, got %q", SubturnYieldHeader, got)
+	}
+
+	streamBytes, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		t.Fatalf("read stream body: %v", err)
+	}
+
+	streamStr := string(streamBytes)
+	if !strings.Contains(streamStr, SubturnYieldMessage) {
+		t.Fatalf("expected stream to contain yield message, got: %s", streamStr)
+	}
+	if planner.called {
+		t.Fatal("expected planner not called on stream yield")
+	}
+}
+
+// TestSubturnYieldDefaults verifies the default constants and env overrides.
+func TestSubturnYieldDefaults(t *testing.T) {
+	if DefaultMaxSubturnTokens != 160000 {
+		t.Fatalf("expected DefaultMaxSubturnTokens == 160000, got %d", DefaultMaxSubturnTokens)
+	}
+	if DefaultMaxSubturnToolCalls != 30 {
+		t.Fatalf("expected DefaultMaxSubturnToolCalls == 30, got %d", DefaultMaxSubturnToolCalls)
+	}
+
+	tokens, calls := resolveSubturnYieldThresholds()
+	if tokens != 160000 || calls != 30 {
+		t.Fatalf("expected default thresholds (160000, 30), got (%d, %d)", tokens, calls)
+	}
+
+	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", "80000")
+	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOOL_CALLS", "15")
+	tokens, calls = resolveSubturnYieldThresholds()
+	if tokens != 80000 || calls != 15 {
+		t.Fatalf("expected overridden thresholds (80000, 15), got (%d, %d)", tokens, calls)
+	}
+}
+
+// TestCountSubturnToolCalls verifies counting of tool results and function calls.
+func TestCountSubturnToolCalls(t *testing.T) {
+	msgs := []agent.Message{
+		{Role: agent.RoleUser, Content: "hi"},
+		{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{
+				{ID: "c1", Function: agent.Func{Name: "fn1"}},
+				{ID: "c2", Function: agent.Func{Name: "fn2"}},
+			},
+		},
+		{Role: agent.RoleTool, ToolCallID: "c1", Content: "res1"},
+		{Role: agent.RoleTool, ToolCallID: "c2", Content: "res2"},
+	}
+	count := countSubturnToolCalls(msgs)
+	if count != 2 {
+		t.Fatalf("expected tool call count 2, got %d", count)
+	}
+}
+
+// TestSubturnLoopRunawayDetection verifies that runaway sub-turn loops trigger the valve.
+func TestSubturnLoopRunawayDetection(t *testing.T) {
+	// Case 1: 5 identical consecutive calls.
+	var runawayMsgs []agent.Message
+	for i := 0; i < 5; i++ {
+		runawayMsgs = append(runawayMsgs, agent.Message{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{
+				{
+					ID: "call_" + itoa(uint64(i)),
+					Function: agent.Func{
+						Name:      "infinite_loop_tool",
+						Arguments: `{"retry":true}`,
+					},
+				},
+			},
+		})
+	}
+	if !detectSubturnRepetitionRunaway(runawayMsgs, 5, 30) {
+		t.Fatal("expected runaway loop to be detected for 5 identical consecutive tool calls")
+	}
+
+	// Case 2: Diverse calls under runaway threshold should not trigger runaway.
+	var normalMsgs []agent.Message
+	for i := 0; i < 4; i++ {
+		normalMsgs = append(normalMsgs, agent.Message{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{
+				{
+					ID: "call_" + itoa(uint64(i)),
+					Function: agent.Func{
+						Name:      "tool_" + itoa(uint64(i)),
+						Arguments: `{}`,
+					},
+				},
+			},
+		})
+	}
+	if detectSubturnRepetitionRunaway(normalMsgs, 4, 30) {
+		t.Fatal("expected non-repeating calls not to trigger runaway")
+	}
+
+	// Case 3: Excessive tool calls exceeding 2x maxToolCalls.
+	if !detectSubturnRepetitionRunaway(normalMsgs, 60, 30) {
+		t.Fatal("expected tool calls >= 2*maxToolCalls to trigger runaway")
+	}
+}
+
+// TestShouldYieldSubturnMatrix verifies the threshold combination logic.
+func TestShouldYieldSubturnMatrix(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", "1000")
+	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOOL_CALLS", "5")
+
+	// 1. High tokens, low calls -> false
+	highTokLowCalls := []agent.Message{
+		{Role: agent.RoleUser, Content: strings.Repeat("X", 8000)}, // ~2000 tokens
+		{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{
+				{ID: "c1", Function: agent.Func{Name: "fn1", Arguments: "{}"}},
+			},
+		},
+		{Role: agent.RoleTool, ToolCallID: "c1", Content: "ok"},
+	}
+	yield, tok, calls := shouldYieldResponsesSubturn(highTokLowCalls, nil, nil)
+	if yield {
+		t.Fatalf("expected yield=false when tool calls (1) < threshold (5), got tokens=%d calls=%d", tok, calls)
+	}
+
+	// 2. Low tokens, high calls (non-runaway) -> false
+	var lowTokHighCalls []agent.Message
+	for i := 0; i < 6; i++ {
+		lowTokHighCalls = append(lowTokHighCalls,
+			agent.Message{
+				Role: agent.RoleAssistant,
+				ToolCalls: []agent.ToolCall{
+					{ID: "c" + itoa(uint64(i)), Function: agent.Func{Name: "fn" + itoa(uint64(i))}},
+				},
+			},
+			agent.Message{
+				Role:       agent.RoleTool,
+				ToolCallID: "c" + itoa(uint64(i)),
+				Content:    "ok",
+			},
+		)
+	}
+	yield, tok, calls = shouldYieldResponsesSubturn(lowTokHighCalls, nil, nil)
+	if yield {
+		t.Fatalf("expected yield=false when tokens (%d) < threshold (1000), got calls=%d", tok, calls)
+	}
+
+	// 3. High tokens AND high calls -> true
+	var highTokHighCalls []agent.Message
+	for i := 0; i < 6; i++ {
+		highTokHighCalls = append(highTokHighCalls,
+			agent.Message{
+				Role: agent.RoleAssistant,
+				ToolCalls: []agent.ToolCall{
+					{ID: "c" + itoa(uint64(i)), Function: agent.Func{Name: "fn" + itoa(uint64(i))}},
+				},
+			},
+			agent.Message{
+				Role:       agent.RoleTool,
+				ToolCallID: "c" + itoa(uint64(i)),
+				Content:    strings.Repeat("Y", 800), // ~200 tokens each => >1200 tokens
+			},
+		)
+	}
+	yield, tok, calls = shouldYieldResponsesSubturn(highTokHighCalls, nil, nil)
+	if !yield {
+		t.Fatalf("expected yield=true when both tokens (%d) >= 1000 and calls (%d) >= 5", tok, calls)
+	}
+}
+
+// TestEstimateSubturnTokens verifies token estimation.
+func TestEstimateSubturnTokens(t *testing.T) {
+	msgs := []agent.Message{
+		{Role: agent.RoleUser, Content: strings.Repeat("A", 400)}, // 400 chars ~ 101 tokens
+	}
+	tokens := estimateSubturnTokens(msgs, nil, nil)
+	if tokens < 100 || tokens > 110 {
+		t.Fatalf("expected ~101 tokens for 400 chars, got %d", tokens)
+	}
+}
