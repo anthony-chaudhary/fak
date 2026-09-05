@@ -93,6 +93,7 @@ import socket
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -214,9 +215,24 @@ def kernel_acquire(
     # contract remain authoritative rather than forwarding an obsolete flag.
     if run_id:
         cmd += ["--run-id", run_id]
-    if leases:
-        cmd += ["--leases", json.dumps(leases)]
-    res = run_text(cmd, workspace)
+    tmp_path: str | None = None
+    try:
+        if leases:
+            payload = json.dumps(leases)
+            if len(payload) > 2048:
+                with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as f:
+                    f.write(payload)
+                    tmp_path = f.name
+                cmd += ["--leases", f"@{tmp_path}"]
+            else:
+                cmd += ["--leases", payload]
+        res = run_text(cmd, workspace)
+    finally:
+        if tmp_path is not None:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
     out = parse_first_obj(res.get("stdout", ""))
     out.setdefault("_returncode", res.get("returncode"))
     if res.get("returncode") not in (0, None) and res.get("stderr"):
