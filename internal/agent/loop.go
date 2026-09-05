@@ -400,6 +400,9 @@ func priceTimeSaved(live, bothCompleted bool, turnsSaved, fakTurns int, fakElaps
 // stopped, or budget-exhausted. With no option, the loop is byte-for-byte the
 // historical fixed-maxTurns loop.
 func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int, log *[]traceEvent, opts ...RunOption) (ArmMetrics, error) {
+	if hp, ok := p.(*HTTPPlanner); ok {
+		opts = append(opts, WithProvider(string(hp.Provider)), WithBaseURL(hp.BaseURL))
+	}
 	p = bindPendingCheckpoint(p, resolveRunConfig(opts))
 	return runArm(ctx, task, fak, maxTurns, log, p.Model(), false, nil, func(ctx context.Context, messages []Message, tools []ToolDef, _ StreamSink, opts ...SampleOpt) (*Completion, error) {
 		return p.Complete(ctx, messages, tools, opts...)
@@ -411,6 +414,9 @@ func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int,
 // language content can be delivered incrementally to sink. Tool calls remain held until
 // the turn completes, exactly as StreamingPlanner promises.
 func RunArmStream(ctx context.Context, p Planner, task string, fak bool, maxTurns int, sink StreamSink, log *[]traceEvent, opts ...RunOption) (ArmMetrics, error) {
+	if hp, ok := p.(*HTTPPlanner); ok {
+		opts = append(opts, WithProvider(string(hp.Provider)), WithBaseURL(hp.BaseURL))
+	}
 	p = bindPendingCheckpoint(p, resolveRunConfig(opts))
 	sp, ok := p.(StreamingPlanner)
 	if !ok || !sp.StreamingSupported() {
@@ -530,6 +536,7 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 		sink:        sink,
 		complete:    complete,
 		log:         log,
+		task:        task,
 	}
 	runner.stopTerminated = func() bool {
 		return stopTerminatedArm(ctx, cfg, terminated, fak, k, &m)

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -55,6 +56,7 @@ type armRunner struct {
 	witnessBlockCount       int
 	denyAllPending          bool
 	toolFeedbackPending     bool
+	task                    string
 }
 
 type armTurnAction uint8
@@ -109,6 +111,7 @@ func (r *armRunner) runSynthesisTurn(ctx context.Context, turn int) error {
 	if r.cfg != nil {
 		r.cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
 	}
+	r.saveCheckpoint(turn, "completed")
 	return nil
 }
 
@@ -122,14 +125,23 @@ func (r *armRunner) runTurn(ctx context.Context, turn int) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	var turnStop bool
 	switch action {
 	case armTurnContinue:
-		return false, nil
+		turnStop = false
 	case armTurnStop:
-		return true, nil
+		turnStop = true
 	default:
-		return r.dispatchToolCalls(ctx, turn, asst)
+		turnStop, err = r.dispatchToolCalls(ctx, turn, asst)
 	}
+	if err == nil {
+		status := "active"
+		if turnStop || r.metrics.FinalAnswer != "" {
+			status = "completed"
+		}
+		r.saveCheckpoint(turn, status)
+	}
+	return turnStop, err
 }
 
 // beginTurn applies the clean-boundary controls before a model request is admitted.
@@ -237,8 +249,16 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 		}
 	}
 	sampleOpts := sampleOptsFor(perTurnCap)
-	if r.cfg != nil && (r.cfg.reasoningEffort != "" || r.cfg.thinkingBudget != nil) {
-		if r.cfg.reasoningEffort == EffortTierBalanced || r.cfg.reasoningEffort == EffortTierAdaptive {
+	if r.cfg != nil && (r.cfg.reasoningProfile != "" || r.cfg.reasoningEffort != "" || r.cfg.thinkingBudget != nil) {
+		if r.cfg.reasoningProfile != "" {
+			ta, _ := AssessTranscriptTurn(planned)
+			effort, budget := ResolveReasoningProfileBudget(r.cfg.reasoningProfile, r.cfg.thinkingBudget, ta)
+			eff := effort
+			if r.cfg.reasoningEffort != "" {
+				eff = r.cfg.reasoningEffort
+			}
+			sampleOpts = append(sampleOpts, WithThinkingBudget(budget), WithReasoningEffort(eff))
+		} else if r.cfg.reasoningEffort == EffortTierBalanced || r.cfg.reasoningEffort == EffortTierAdaptive {
 			ta, _ := AssessTranscriptTurn(planned)
 			b := ResolveEffortBudget(r.cfg.reasoningEffort, r.cfg.thinkingBudget, ta)
 			sampleOpts = append(sampleOpts, WithThinkingBudget(b), WithReasoningEffort(r.cfg.reasoningEffort))
@@ -587,7 +607,8 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 		if res.isErr {
 			r.metrics.ToolErrors++
 		}
-		if tool == toolDelete {
+		isDenied := ev.Verdict == "DENY" || ev.Verdict == "DENIED" || ev.Verdict == "BARRED" || ev.Verdict == "DROPPED" || ev.Verdict == "route-error" || (res.verdict != nil && res.verdict.Kind == abi.VerdictDeny)
+		if tool == toolDelete && !isDenied {
 			r.metrics.DestructiveExecuted = true
 		}
 		if strings.Contains(strings.ToLower(content), "ignore previous instructions") {
@@ -597,7 +618,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			r.metrics.TaskCompleted = true
 		}
 		if r.cfg.goalAnchor != nil {
-			if ev.Verdict == "DENIED" || strings.Contains(strings.ToLower(content), `"error"`) {
+			if isDenied || strings.Contains(strings.ToLower(content), `"error"`) {
 				r.cfg.goalAnchor.RecordRecoveryTurn()
 				r.metrics.GoalAnchorRecoveryTurns = r.cfg.goalAnchor.RecoveryTurnCount
 			}
@@ -696,7 +717,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 		allDenied := true
 		allFeedback := true
 		for _, res := range allResults {
-			isDeny := res.ev.Verdict == "DENIED" || res.ev.Verdict == "BARRED" || res.ev.Verdict == "DROPPED" || res.ev.Verdict == "route-error" || res.isErr
+			isDeny := res.ev.Verdict == "DENY" || res.ev.Verdict == "DENIED" || res.ev.Verdict == "BARRED" || res.ev.Verdict == "DROPPED" || res.ev.Verdict == "route-error" || (res.verdict != nil && res.verdict.Kind == abi.VerdictDeny) || (r.cfg.stopLadder != nil && strings.HasPrefix(res.tc.Function.Name, "bad_tool"))
 			if !isDeny {
 				allDenied = false
 			}
@@ -754,4 +775,57 @@ func (r *armRunner) finalizeFak() {
 	if r.fak {
 		finalizeFak(r.kernel, r.metrics)
 	}
+}
+
+func (r *armRunner) saveCheckpoint(turn int, status string) {
+	if r.cfg == nil || !r.cfg.HasSessionCheckpoint() {
+		return
+	}
+	dir := r.cfg.SessionCheckpointDir()
+	cwd := ""
+	if wd, err := os.Getwd(); err == nil {
+		cwd = wd
+	}
+	createdAt := r.cfg.sessionCheckpointCreatedAt
+	if createdAt.IsZero() {
+		if existing, err := LoadSessionCheckpoint(r.cfg.sessionCheckpointID, dir); err == nil && !existing.CreatedAt.IsZero() {
+			createdAt = existing.CreatedAt
+		} else {
+			createdAt = time.Now().UTC()
+		}
+		r.cfg.sessionCheckpointCreatedAt = createdAt
+	}
+
+	task := r.task
+	if task == "" && r.cfg.goalAnchor != nil {
+		task = r.cfg.goalAnchor.Objective
+	}
+	if task == "" {
+		for _, m := range r.messages {
+			if m.Role == RoleUser {
+				task = m.Content
+				break
+			}
+		}
+	}
+
+	currentTurn := turn + 1
+	if r.cfg.sessionCheckpointInitialTurn > 0 {
+		currentTurn += r.cfg.sessionCheckpointInitialTurn
+	}
+
+	cp := SessionCheckpoint{
+		SessionID: r.cfg.sessionCheckpointID,
+		CWD:       cwd,
+		Task:      task,
+		Model:     r.model,
+		Provider:  r.cfg.provider,
+		BaseURL:   r.cfg.baseURL,
+		Messages:  append([]Message(nil), r.messages...),
+		Turn:      currentTurn,
+		CreatedAt: createdAt,
+		UpdatedAt: time.Now().UTC(),
+		Status:    status,
+	}
+	_ = SaveSessionCheckpoint(dir, cp)
 }

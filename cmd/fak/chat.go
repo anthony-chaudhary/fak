@@ -36,6 +36,7 @@ type chatFlags struct {
 	workflowCheckpointDir *string
 	memory                *bool
 	memoryStore           *string
+	reasoningProfile      *string
 }
 
 func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
@@ -62,6 +63,7 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 	cf.workflowCheckpointDir = fs.String("workflow-checkpoint-dir", ".fak/workflows", "directory for workflow state checkpoints")
 	cf.memory = fs.Bool("memory", true, "discover and inject verified workspace memory notes into agent prompt; use --memory=false to disable")
 	cf.memoryStore = fs.String("memory-store", "", "optional custom memory store path (directory or MEMORY.md); defaults to auto-discovery")
+	cf.reasoningProfile = fs.String("reasoning-profile", agent.ReasoningProfileDefault, "named reasoning profile: default|baseline|deep-reason (default: default)")
 	return fs, cf
 }
 
@@ -86,6 +88,13 @@ func cmdChat(argv []string) {
 			os.Exit(1)
 		}
 		return
+	}
+
+	if cf.reasoningProfile != nil && *cf.reasoningProfile != "" {
+		if err := validateReasoningProfile(*cf.reasoningProfile); err != nil {
+			fmt.Fprintf(os.Stderr, "fak chat: %v\n", err)
+			os.Exit(2)
+		}
 	}
 
 	applyPolicy(*cf.policyPath)
@@ -148,6 +157,9 @@ func cmdChat(argv []string) {
 	}
 	if memOpt, _ := resolveAgentMemoryOption(*cf.memory, *cf.memoryStore, root); memOpt != nil {
 		runOpts = append(runOpts, memOpt)
+	}
+	if cf.reasoningProfile != nil && *cf.reasoningProfile != "" {
+		runOpts = append(runOpts, agent.WithReasoningProfile(*cf.reasoningProfile))
 	}
 
 	planner := chatPlanner(*cf.offline, effectiveBaseURL, *cf.provider, *cf.model, *cf.apiKeyEnv, *cf.anthropicAuth)

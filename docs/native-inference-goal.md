@@ -39,7 +39,7 @@ named. When the evidence says fak-native is behind, say so and keep the gap as n
 work.
 
 New native-performance work prefers Qwen3.8.
-Qwen3.6 is allowed only when the task states an explicit task-specific exception, such as regression, compatibility, historical comparison, or a hardware/artifact constraint.
+Qwen3.6 requires an explicit task-specific exception. Allowed exceptions include regression or compatibility work, historical comparison, and hardware/artifact constraints.
 Preserve historical Qwen3.6 artifacts; do not rename or rewrite them as Qwen3.8 evidence.
 
 ## What fak-native means
@@ -121,6 +121,25 @@ Every external use is selected deliberately and labeled in the command, configur
 or receipt. “Available on this host,” “faster in the last run,” or “native support is missing”
 does not authorize an automatic substitution.
 
+## Vendor accelerator runtimes
+
+Closed vendor accelerator runtimes execute outside the fak-native engine.
+This classification applies when FLM or OGA/Lemonade selects a closed runtime;
+the frontend name alone does not identify the execution engine.
+
+Select one of the same four explicit uses for each vendor-runtime run:
+
+- Benchmark: measure an external baseline in a matched envelope.
+- Parity/reference diagnosis: compare outputs to locate a correctness difference.
+- Migration/interoperability: validate compatible artifacts or explicitly front an external service.
+- Ego-free borrowing: study mechanisms with attribution and license compliance, then implement and witness them inside fak.
+
+Vendor-runtime receipts name the actual engine, device, and explicit use.
+NPU placement does not convert external execution into fak-native performance evidence.
+fak never automatically substitutes a vendor accelerator runtime for native execution.
+When native support is unavailable, return an explicit unsupported result; an operator
+may separately select an external comparison or interoperability run.
+
 ## Default and failure behavior
 
 For work classified as native inference or native performance:
@@ -167,6 +186,11 @@ $requiredPhrases = @(
   'fak never selects llama.cpp as a fallback for native or performance work.'
   'fak must understand and control the full engine stack so higher-order gains compose. That stack covers kernels and memory, scheduling and cache, plus adaptation and operations.'
 )
+$requiredPhrases += @(
+  'Closed vendor accelerator runtimes execute outside the fak-native engine.'
+  'Vendor-runtime receipts name the actual engine, device, and explicit use.'
+  'fak never automatically substitutes a vendor accelerator runtime for native execution.'
+)
 $requiredLinks = [ordered]@{
   'README.md'                  = 'docs/native-inference-goal.md'
   'AGENTS.md'                  = 'docs/native-inference-goal.md'
@@ -177,7 +201,7 @@ $requiredLinks = [ordered]@{
   'docs/benchmarks/README.md'  = '../native-inference-goal.md'
 }
 $failures = @()
-$body = Get-Content -Raw -LiteralPath $canonical
+$body = (Get-Content -Raw -LiteralPath $canonical) -replace '(?s)\x60{3}.*?\x60{3}', ''
 foreach ($phrase in $requiredPhrases) {
   if (-not $body.Contains($phrase)) { $failures += "missing phrase: $phrase" }
 }
@@ -196,7 +220,7 @@ if ($failures.Count) {
 Expected output:
 
 ```text
-PASS native-inference-doctrine phrases=5 inbound_links=7
+PASS native-inference-doctrine phrases=8 inbound_links=7
 ```
 
 Run the repository link and index gates after this guard; they prove the linked target resolves,

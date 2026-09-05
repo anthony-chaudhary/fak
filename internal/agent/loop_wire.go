@@ -67,6 +67,9 @@ func (c runConfig) seedSystemPrompt() string {
 // seedMessages builds the transcript the loop opens with: the loop's system prompt,
 // optional memory digest, then either the wired conversation or the single task message.
 func (c runConfig) seedMessages(task string) []Message {
+	if len(c.conversation) > 0 && c.conversation[0].Role == RoleSystem {
+		return append([]Message(nil), c.conversation...)
+	}
 	msgs := make([]Message, 0, len(c.conversation)+3)
 	msgs = append(msgs, Message{Role: RoleSystem, Content: c.seedSystemPrompt()})
 	if c.memoryDigest != "" {
@@ -84,6 +87,14 @@ func WithTodoTools() RunOption {
 	return func(c *runConfig) {
 		_, _ = ArmTodoTools()
 		c.todoTools = true
+	}
+}
+
+// WithContextControl arms the context_control tool and merges it into the run's tool catalog.
+func WithContextControl(opts ...ContextControlOption) RunOption {
+	return func(c *runConfig) {
+		_, _ = ArmContextControl(opts...)
+		c.contextControl = true
 	}
 }
 
@@ -108,6 +119,22 @@ func (c runConfig) seedTools() []ToolDef {
 				todoDefs = todoToolDefs()
 			}
 			base = append(append([]ToolDef(nil), base...), todoDefs...)
+		}
+	}
+	if c.contextControl {
+		hasCC := false
+		for _, t := range base {
+			if t.Function.Name == ToolContextControl {
+				hasCC = true
+				break
+			}
+		}
+		if !hasCC {
+			ccDefs := ContextControlCatalog()
+			if len(ccDefs) == 0 {
+				ccDefs = contextControlToolDefs()
+			}
+			base = append(append([]ToolDef(nil), base...), ccDefs...)
 		}
 	}
 	return base

@@ -159,6 +159,25 @@ func WithRunThinkingBudget(budget int) RunOption {
 	}
 }
 
+// WithReasoningProfile configures the run with a named reasoning profile
+// (e.g. "default", "baseline", "deep-reason").
+func WithReasoningProfile(profile string) RunOption {
+	return func(c *runConfig) {
+		p := strings.TrimSpace(profile)
+		c.reasoningProfile = p
+		effort, budget := ResolveReasoningProfile(p)
+		if c.reasoningEffort == "" {
+			c.reasoningEffort = effort
+		}
+		if strings.ToLower(p) == ReasoningProfileDeepReason || strings.ToLower(p) == "deepreason" || strings.ToLower(p) == "deep_reason" {
+			if c.thinkingBudget == nil {
+				v := budget
+				c.thinkingBudget = &v
+			}
+		}
+	}
+}
+
 // runConfig is the resolved option set for one RunArm invocation. The zero value is
 // the historical loop (nil table => permissive Decide => no per-turn gate; nil route
 // => Engine left unset => kernel default for every tool call).
@@ -200,6 +219,7 @@ type runConfig struct {
 	conversation []Message
 	toolCatalog  []ToolDef
 	todoTools    bool
+	contextControl bool
 	systemPrompt string
 	memoryDigest string
 	// modelRequestObserver runs synchronously after directive splicing and the
@@ -209,10 +229,80 @@ type runConfig struct {
 	inputClaims             *InputClaimLifecycle
 	promptAssembler         PromptAssembler
 
-	reasoningEffort string
-	thinkingBudget  *int
-	goalAnchor      *GoalAnchor
-	auditJournal    *journal.Journal
+	reasoningEffort  string
+	thinkingBudget   *int
+	reasoningProfile string
+	goalAnchor       *GoalAnchor
+	auditJournal     *journal.Journal
+
+	sessionCheckpointID          string
+	sessionCheckpointDir         string
+	sessionCheckpointInitialTurn int
+	sessionCheckpointCreatedAt   time.Time
+	provider                     string
+	baseURL                      string
+}
+
+// WithSessionCheckpoint configures durable FAK-native session checkpointing.
+// The checkpoint is saved to dir/<sessionID>.json after each turn.
+func WithSessionCheckpoint(sessionID string, dir string) RunOption {
+	return func(c *runConfig) {
+		c.sessionCheckpointID = sessionID
+		c.sessionCheckpointDir = dir
+	}
+}
+
+// WithSessionCheckpointState restores checkpoint metadata for session continuation.
+func WithSessionCheckpointState(cp *SessionCheckpoint, dir string) RunOption {
+	return func(c *runConfig) {
+		if cp == nil {
+			return
+		}
+		c.sessionCheckpointID = cp.SessionID
+		c.sessionCheckpointDir = dir
+		c.sessionCheckpointInitialTurn = cp.Turn
+		c.sessionCheckpointCreatedAt = cp.CreatedAt
+		if c.provider == "" {
+			c.provider = cp.Provider
+		}
+		if c.baseURL == "" {
+			c.baseURL = cp.BaseURL
+		}
+	}
+}
+
+// WithProvider sets the provider wire name for this run configuration.
+func WithProvider(provider string) RunOption {
+	return func(c *runConfig) {
+		c.provider = provider
+	}
+}
+
+// WithBaseURL sets the base URL for this run configuration.
+func WithBaseURL(baseURL string) RunOption {
+	return func(c *runConfig) {
+		c.baseURL = baseURL
+	}
+}
+
+func (c runConfig) HasSessionCheckpoint() bool {
+	return c.sessionCheckpointID != ""
+}
+
+func (c runConfig) SessionCheckpointID() string {
+	return c.sessionCheckpointID
+}
+
+func (c runConfig) SessionCheckpointDir() string {
+	if c.sessionCheckpointDir != "" {
+		return c.sessionCheckpointDir
+	}
+	return DefaultSessionCheckpointDir
+}
+
+// ReasoningProfile returns the active ReasoningProfile for this run configuration, if any.
+func (c runConfig) ReasoningProfile() string {
+	return c.reasoningProfile
 }
 
 // WithAuditJournal attaches a tamper-evident decision journal to the run.

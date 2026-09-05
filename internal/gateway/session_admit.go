@@ -29,9 +29,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/harnessversion"
 	"github.com/anthony-chaudhary/fak/internal/lifecycle"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
@@ -55,6 +57,26 @@ type servedSessionTurn struct {
 func (s *Server) beginServedRequest(w http.ResponseWriter, r *http.Request) (context.Context, string, servedSessionTurn, bool, bool) {
 	ctx := r.Context()
 	trace := s.useHTTPTrace(w, r, "")
+	if s != nil {
+		router := s.HarnessRouter()
+		if router != nil && r != nil {
+			sessionID := strings.TrimSpace(r.Header.Get("X-Fak-Session-Id"))
+			if sessionID == "" {
+				sessionID = strings.TrimSpace(r.Header.Get("X-Trace-Id"))
+			}
+			if sessionID == "" {
+				sessionID = trace
+			}
+			var pathParam string
+			if r.URL != nil {
+				pathParam = r.URL.Path
+			}
+			selectedVersion, _ := router.Route(sessionID, r.Header.Get(harnessversion.HeaderHarnessVersion), pathParam)
+			if selectedVersion != "" && w != nil {
+				w.Header().Set(harnessversion.HeaderHarnessVersion, selectedVersion)
+			}
+		}
+	}
 	turn, ok, canceled := s.beginServedSessionTurn(ctx, trace)
 	return ctx, trace, turn, ok, canceled
 }

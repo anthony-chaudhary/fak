@@ -8,9 +8,11 @@ import (
 )
 
 const (
-	HarnessClaude   = "claude"
-	HarnessCodex    = "codex"
-	HarnessOpenCode = "opencode"
+	HarnessClaude    = "claude"
+	HarnessCodex     = "codex"
+	HarnessOpenCode  = "opencode"
+	HarnessFak       = "fak"
+	HarnessFakNative = "fak-native"
 )
 
 var (
@@ -31,6 +33,7 @@ type Request struct {
 	ClaudeExe   string
 	CodexExe    string
 	OpenCodeExe string
+	FakExe      string
 }
 
 // Harness normalizes the legacy empty value to Claude without guessing any other value.
@@ -42,6 +45,8 @@ func (r Request) HarnessName() (string, error) {
 	switch h {
 	case HarnessClaude, HarnessCodex, HarnessOpenCode:
 		return h, nil
+	case HarnessFak, HarnessFakNative:
+		return HarnessFak, nil
 	default:
 		return "", fmt.Errorf("%w: %s", ErrUnknownAdapter, h)
 	}
@@ -102,6 +107,22 @@ func (r Request) ContinuationArgv(fakExe string) ([]string, error) {
 		argv := []string{exe, "run", "--session", r.Session}
 		if strings.TrimSpace(r.Prompt) != "" {
 			argv = append(argv, r.Prompt)
+		}
+		return argv, nil
+	case HarnessFak, HarnessFakNative:
+		if strings.TrimSpace(r.Session) == "" {
+			return nil, fmt.Errorf("%w: fak session", ErrMissingCoordinate)
+		}
+		exe := strings.TrimSpace(r.FakExe)
+		if exe == "" {
+			exe = strings.TrimSpace(fakExe)
+		}
+		if exe == "" {
+			exe = "fak"
+		}
+		argv := []string{exe, "agent", "--native", "--resume", r.Session}
+		if strings.TrimSpace(r.Prompt) != "" {
+			argv = append(argv, "--task", r.Prompt)
 		}
 		return argv, nil
 	}

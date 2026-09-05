@@ -41,6 +41,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/enginecache"
+	"github.com/anthony-chaudhary/fak/internal/harnessversion"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/kv"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -210,10 +211,21 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 
+	harnessRouter := cfg.HarnessRouter
+	if harnessRouter == nil {
+		harnessRouter = harnessversion.NewStickySessionRouter()
+		_ = harnessRouter.Register(harnessversion.VersionDescriptor{
+			Version: string(harnessversion.VersionV1),
+			Weight:  100,
+			Active:  true,
+		})
+	}
+
 	s := &Server{
 		k:                            k,
 		toolPlugins:                  append([]toolplugin.Plugin(nil), cfg.ToolPlugins...),
 		toolPreferences:              cfg.ToolPreferences,
+		harnessRouter:                harnessRouter,
 		engineID:                     engineID,
 		model:                        model,
 		servedSide:                   servedSide,
