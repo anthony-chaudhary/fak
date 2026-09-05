@@ -62,11 +62,32 @@ type RateLimit struct {
 
 // ToolScope defines the capability boundaries, mutability, and constraints of a tool.
 type ToolScope struct {
-	Mutability           Mutability   `json:"mutability"`
+	WorkspacePaths       []string     `json:"workspace_paths,omitempty"`
+	ReadOnly             bool         `json:"read_only,omitempty"`
+	NetworkAllowed       bool         `json:"network_allowed,omitempty"`
+	MaxTurns             int          `json:"max_turns,omitempty"`
+	Mutability           Mutability   `json:"mutability,omitempty"`
 	PathScopes           []string     `json:"path_scopes,omitempty"`
 	NetworkScopes        []string     `json:"network_scopes,omitempty"`
 	RateLimit            RateLimit    `json:"rate_limit,omitempty"`
 	RequiredCapabilities []Capability `json:"required_capabilities,omitempty"`
+}
+
+// ToolCondition specifies conditional scoping, session allow/block list constraints, and dynamic preconditions.
+type ToolCondition struct {
+	AllowList    []string                                         `json:"allow_list,omitempty"`
+	BlockList    []string                                         `json:"block_list,omitempty"`
+	Precondition func(ctx context.Context, sessionID string) bool `json:"-"`
+}
+
+// AuthBinding declares credential dependencies resolved just-in-time at the execution boundary and scrubbing policy.
+type AuthBinding struct {
+	Type                    AuthType `json:"type,omitempty"`
+	SecretKey               string   `json:"secret_key,omitempty"`
+	SecretRefs              []string `json:"secret_refs,omitempty"`
+	JITAuthPaging           bool     `json:"jit_auth_paging,omitempty"`
+	OAuthProvider           string   `json:"oauth_provider,omitempty"`
+	ScrubSecretsFromResults bool     `json:"scrub_secrets_from_results,omitempty"`
 }
 
 // Condition represents a dynamic prerequisite or activation gate for a tool.
@@ -134,13 +155,19 @@ type ToolHandler func(ctx ExecutionContext, args json.RawMessage) (Result, error
 
 // ToolDefinition is the declarative integration specification for a tool.
 type ToolDefinition struct {
-	Name        string          `json:"name"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Schema      map[string]any    `json:"schema,omitempty"`
+	Scope       ToolScope         `json:"scope"`
+	Condition   ToolCondition     `json:"condition,omitempty"`
+	Auth        *AuthBinding      `json:"auth,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+
+	// Integration & compatibility fields:
 	Integration string          `json:"integration,omitempty"`
-	Description string          `json:"description"`
-	Parameters  json.RawMessage `json:"parameters"`
-	Scope       ToolScope       `json:"scope"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
 	Conditions  []Condition     `json:"conditions,omitempty"`
-	Auth        AuthRequirement `json:"auth"`
+	LegacyAuth  AuthRequirement `json:"legacy_auth,omitempty"`
 	Handler     ToolHandler     `json:"-"`
 }
 
@@ -149,10 +176,132 @@ func NewTool(name string) *ToolDefinition {
 	return &ToolDefinition{
 		Name: name,
 		Scope: ToolScope{
+			ReadOnly:   true,
 			Mutability: MutabilityReadOnly,
 		},
-		Auth: AuthRequirement{Type: AuthTypeNone},
+		Auth: &AuthBinding{
+			Type:                    AuthTypeNone,
+			ScrubSecretsFromResults: true,
+		},
+		LegacyAuth: AuthRequirement{Type: AuthTypeNone},
 	}
+}
+
+// Validate checks whether the tool definition meets structural invariants.
+func (t *ToolDefinition) Validate() error {
+	if strings.TrimSpace(t.Name) == "" {
+		return &Error{Code: CodeInvalid, Op: "tool_validate", Err: errors.New("tool name is required")}
+	}
+	if t.Schema != nil {
+		if len(t.Schema) == 0 {
+			return &Error{Code: CodeInvalid, Op: "tool_validate", Err: errors.New("tool schema cannot be empty")}
+		}
+		if rawType, ok := t.Schema["type"]; ok {
+			typeStr, isStr := rawType.(string)
+			if !isStr || strings.TrimSpace(typeStr) == "" {
+				return &Error{Code: CodeInvalid, Op: "tool_validate", Err: errors.New("tool schema type must be a non-empty string")}
+			}
+		}
+		if _, err := json.Marshal(t.Schema); err != nil {
+			return &Error{Code: CodeInvalid, Op: "tool_validate", Err: fmt.Errorf("tool schema is not valid JSON: %w", err)}
+		}
+	}
+	return nil
+}
+
+// CheckPermission evaluates whether the invocation is permitted under the tool's conditions and scope.
+func (t *ToolDefinition) CheckPermission(sessionID string, requestedPath string, isWrite bool) (bool, string) {
+	// 1. Evaluate Condition BlockList
+	if sessionID != "" {
+		for _, blocked := range t.Condition.BlockList {
+			if MatchToolPattern(blocked, sessionID) {
+				return false, fmt.Sprintf("session %q is blocked by block list", sessionID)
+			}
+		}
+	}
+
+	// 2. Evaluate Condition AllowList
+	if len(t.Condition.AllowList) > 0 {
+		allowed := false
+		for _, allow := range t.Condition.AllowList {
+			if MatchToolPattern(allow, sessionID) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return false, fmt.Sprintf("session %q is not in allow list", sessionID)
+		}
+	}
+
+	// 3. Evaluate Condition Precondition
+	if t.Condition.Precondition != nil {
+		if !t.Condition.Precondition(context.Background(), sessionID) {
+			return false, "precondition failed"
+		}
+	}
+
+	// 4. Evaluate Scope ReadOnly vs isWrite
+	if isWrite && (t.Scope.ReadOnly || t.Scope.Mutability == MutabilityReadOnly) {
+		return false, "tool is read-only"
+	}
+
+	// 5. Evaluate Scope WorkspacePaths / PathScopes
+	paths := append([]string(nil), t.Scope.WorkspacePaths...)
+	paths = append(paths, t.Scope.PathScopes...)
+	if requestedPath != "" && len(paths) > 0 {
+		if !PathWithinScope(requestedPath, paths) {
+			return false, fmt.Sprintf("requested path %q outside workspace scope", requestedPath)
+		}
+	}
+
+	return true, ""
+}
+
+// ScrubResult redacts secret references, authorization tokens, and credentials from tool output.
+func (t *ToolDefinition) ScrubResult(content []byte) []byte {
+	if len(content) == 0 {
+		return content
+	}
+	scrubbed := scrubSensitiveBytes(content)
+	if t.Auth != nil && (t.Auth.ScrubSecretsFromResults || t.Auth.JITAuthPaging) {
+		s := string(scrubbed)
+		for _, ref := range t.Auth.SecretRefs {
+			refTrim := strings.TrimSpace(ref)
+			if refTrim != "" && strings.Contains(s, refTrim) {
+				s = strings.ReplaceAll(s, refTrim, "[REDACTED]")
+			}
+		}
+		if t.Auth.SecretKey != "" && strings.Contains(s, t.Auth.SecretKey) {
+			s = strings.ReplaceAll(s, t.Auth.SecretKey, "[REDACTED]")
+		}
+		scrubbed = []byte(s)
+	}
+	return scrubbed
+}
+
+// WithSchema sets the declarative map schema for tool arguments.
+func (t *ToolDefinition) WithSchema(schema map[string]any) *ToolDefinition {
+	t.Schema = schema
+	return t
+}
+
+// WithToolCondition sets the conditional scoping and dynamic preconditions.
+func (t *ToolDefinition) WithToolCondition(cond ToolCondition) *ToolDefinition {
+	t.Condition = cond
+	return t
+}
+
+// WithAuthBinding configures declarative auth binding.
+func (t *ToolDefinition) WithAuthBinding(auth *AuthBinding) *ToolDefinition {
+	t.Auth = auth
+	return t
+}
+
+// WithMetadata attaches arbitrary key-value metadata to the tool definition.
+func (t *ToolDefinition) WithMetadata(meta map[string]string) *ToolDefinition {
+	t.Metadata = meta
+	return t
 }
 
 // WithIntegration assigns the integration namespace for this tool.
@@ -175,6 +324,16 @@ func (t *ToolDefinition) WithParameters(schema json.RawMessage) *ToolDefinition 
 
 // WithScope configures mutability, paths, network, and rate limits.
 func (t *ToolDefinition) WithScope(scope ToolScope) *ToolDefinition {
+	if scope.ReadOnly && scope.Mutability == "" {
+		scope.Mutability = MutabilityReadOnly
+	} else if scope.Mutability == MutabilityReadOnly {
+		scope.ReadOnly = true
+	}
+	if len(scope.WorkspacePaths) > 0 && len(scope.PathScopes) == 0 {
+		scope.PathScopes = append([]string(nil), scope.WorkspacePaths...)
+	} else if len(scope.PathScopes) > 0 && len(scope.WorkspacePaths) == 0 {
+		scope.WorkspacePaths = append([]string(nil), scope.PathScopes...)
+	}
 	t.Scope = scope
 	return t
 }
@@ -187,7 +346,20 @@ func (t *ToolDefinition) WithCondition(cond Condition) *ToolDefinition {
 
 // WithAuth configures just-in-time credential requirements.
 func (t *ToolDefinition) WithAuth(auth AuthRequirement) *ToolDefinition {
-	t.Auth = auth
+	t.LegacyAuth = auth
+	if t.Auth == nil {
+		t.Auth = &AuthBinding{}
+	}
+	t.Auth.Type = auth.Type
+	t.Auth.SecretKey = auth.SecretKey
+	if auth.SecretKey != "" {
+		t.Auth.SecretRefs = []string{auth.SecretKey}
+	}
+	t.Auth.OAuthProvider = auth.OAuthProvider
+	if auth.Type == AuthTypeFleetSecret || auth.Type == AuthTypeOAuth2 {
+		t.Auth.JITAuthPaging = true
+		t.Auth.ScrubSecretsFromResults = true
+	}
 	return t
 }
 
@@ -265,8 +437,17 @@ func (i *IntegrationDefinition) WithTool(tool *ToolDefinition) *IntegrationDefin
 	if cp.Integration == "" {
 		cp.Integration = i.Name
 	}
-	if cp.Auth.Type == "" || cp.Auth.Type == AuthTypeNone {
-		cp.Auth = i.DefaultAuth
+	if cp.Auth == nil || cp.Auth.Type == "" || cp.Auth.Type == AuthTypeNone {
+		cp.Auth = &AuthBinding{
+			Type:                    i.DefaultAuth.Type,
+			SecretKey:               i.DefaultAuth.SecretKey,
+			OAuthProvider:           i.DefaultAuth.OAuthProvider,
+			JITAuthPaging:           i.DefaultAuth.Type != "" && i.DefaultAuth.Type != AuthTypeNone,
+			ScrubSecretsFromResults: true,
+		}
+		if i.DefaultAuth.SecretKey != "" {
+			cp.Auth.SecretRefs = []string{i.DefaultAuth.SecretKey}
+		}
 	}
 	i.Tools = append(i.Tools, cp)
 	return i
@@ -372,8 +553,8 @@ func (r *ToolRegistry) OnTelemetry(fn func(ToolTelemetry)) *ToolRegistry {
 
 // Register adds a tool definition to the registry.
 func (r *ToolRegistry) Register(tool ToolDefinition) error {
-	if strings.TrimSpace(tool.Name) == "" {
-		return &Error{Code: CodeInvalid, Op: "tool_register", Err: errors.New("tool name is required")}
+	if err := tool.Validate(); err != nil {
+		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -489,7 +670,9 @@ func (r *ToolRegistry) Dispatch(ctx ExecutionContext, inv Invocation) (Result, T
 
 	telem.Integration = tool.Integration
 	telem.Mutability = tool.Scope.Mutability
-	telem.AuthType = tool.Auth.Type
+	if tool.Auth != nil {
+		telem.AuthType = tool.Auth.Type
+	}
 
 	// 1. Condition Verification
 	for _, cond := range tool.Conditions {
@@ -537,23 +720,49 @@ func (r *ToolRegistry) Dispatch(ctx ExecutionContext, inv Invocation) (Result, T
 	r.mu.Unlock()
 
 	// 3. JIT Credential Paging Verification
-	switch tool.Auth.Type {
-	case AuthTypeFleetSecret:
-		secret, err := ctx.GetSecret(tool.Auth.SecretKey)
-		if err != nil || secret == "" {
-			telem.Verdict = "DENY"
-			telem.Reason = "AUTH_SECRET_MISSING"
-			return emit(Result{}, &Error{Code: CodeDenied, Op: "auth_paging", Err: fmt.Errorf("required fleet secret %q could not be resolved", tool.Auth.SecretKey)})
+	if tool.Auth != nil {
+		switch tool.Auth.Type {
+		case AuthTypeFleetSecret:
+			key := tool.Auth.SecretKey
+			if key == "" && len(tool.Auth.SecretRefs) > 0 {
+				key = tool.Auth.SecretRefs[0]
+			}
+			secret, err := ctx.GetSecret(key)
+			if err != nil || secret == "" {
+				telem.Verdict = "DENY"
+				telem.Reason = "AUTH_SECRET_MISSING"
+				return emit(Result{}, &Error{Code: CodeDenied, Op: "auth_paging", Err: fmt.Errorf("required fleet secret %q could not be resolved", key)})
+			}
+			telem.AuthPaged = true
+		case AuthTypeOAuth2:
+			token, err := ctx.GetOAuthToken(tool.Auth.OAuthProvider)
+			if err != nil || token == nil || !token.Valid() {
+				telem.Verdict = "DENY"
+				telem.Reason = "OAUTH_TOKEN_EXPIRED"
+				return emit(Result{}, &Error{Code: CodeDenied, Op: "oauth_paging", Err: fmt.Errorf("valid OAuth token for provider %q unavailable", tool.Auth.OAuthProvider)})
+			}
+			telem.AuthPaged = true
+		default:
+			if tool.Auth.JITAuthPaging {
+				for _, ref := range tool.Auth.SecretRefs {
+					secret, err := ctx.GetSecret(ref)
+					if err != nil || secret == "" {
+						telem.Verdict = "DENY"
+						telem.Reason = "AUTH_SECRET_MISSING"
+						return emit(Result{}, &Error{Code: CodeDenied, Op: "auth_paging", Err: fmt.Errorf("required fleet secret %q could not be resolved", ref)})
+					}
+				}
+				if tool.Auth.OAuthProvider != "" {
+					token, err := ctx.GetOAuthToken(tool.Auth.OAuthProvider)
+					if err != nil || token == nil || !token.Valid() {
+						telem.Verdict = "DENY"
+						telem.Reason = "OAUTH_TOKEN_EXPIRED"
+						return emit(Result{}, &Error{Code: CodeDenied, Op: "oauth_paging", Err: fmt.Errorf("valid OAuth token for provider %q unavailable", tool.Auth.OAuthProvider)})
+					}
+				}
+				telem.AuthPaged = true
+			}
 		}
-		telem.AuthPaged = true
-	case AuthTypeOAuth2:
-		token, err := ctx.GetOAuthToken(tool.Auth.OAuthProvider)
-		if err != nil || token == nil || !token.Valid() {
-			telem.Verdict = "DENY"
-			telem.Reason = "OAUTH_TOKEN_EXPIRED"
-			return emit(Result{}, &Error{Code: CodeDenied, Op: "oauth_paging", Err: fmt.Errorf("valid OAuth token for provider %q unavailable", tool.Auth.OAuthProvider)})
-		}
-		telem.AuthPaged = true
 	}
 
 	if tool.Handler == nil {
@@ -582,8 +791,8 @@ func (r *ToolRegistry) Dispatch(ctx ExecutionContext, inv Invocation) (Result, T
 		return emit(Result{}, err)
 	}
 
-	// 5. Output Sanitization: scrub Bearer tokens and sensitive headers
-	sanitizedContent := scrubSensitiveBytes(rawResult.Content)
+	// 5. Output Sanitization: scrub secret references, Bearer tokens, and sensitive headers
+	sanitizedContent := tool.ScrubResult(rawResult.Content)
 	return emit(Result{Content: sanitizedContent}, nil)
 }
 
@@ -595,11 +804,18 @@ func PathWithinScope(targetPath string, pathScopes []string) bool {
 	targetClean := filepath.Clean(targetPath)
 	for _, scope := range pathScopes {
 		scopeClean := filepath.Clean(scope)
+		if targetClean == scopeClean {
+			return true
+		}
 		rel, err := filepath.Rel(scopeClean, targetClean)
 		if err == nil && !strings.HasPrefix(rel, "..") && rel != "." {
 			return true
 		}
-		if targetClean == scopeClean {
+		scopePrefix := scopeClean
+		if !strings.HasSuffix(scopePrefix, string(filepath.Separator)) {
+			scopePrefix += string(filepath.Separator)
+		}
+		if strings.HasPrefix(targetClean, scopePrefix) {
 			return true
 		}
 	}
