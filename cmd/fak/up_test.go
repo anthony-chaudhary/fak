@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/allinone"
 )
 
 func TestUpHelpUsesServeSurface(t *testing.T) {
@@ -205,5 +208,174 @@ func TestLocalNativeLauncherLifetimeOwnershipConformance(t *testing.T) {
 	}
 	if strings.Contains(string(upSource), sharedOwner) {
 		t.Fatal("up must reuse serve's owner, not acquire a second launcher lease")
+	}
+}
+
+func TestUpBootstrap(t *testing.T) {
+	// 1. Tests fak up --help outputs help
+	var helpBuf bytes.Buffer
+	printUpHelp(&helpBuf)
+	helpText := helpBuf.String()
+	for _, expected := range []string{"--lock", "--bundle", "--mock", "--dry-run"} {
+		if !strings.Contains(helpText, expected) {
+			t.Fatalf("up help output missing %q:\n%s", expected, helpText)
+		}
+	}
+
+	// 2. Tests fak up --lock ... --dry-run prints plan and exits 0
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "harness.lock.json")
+	lockJSON := `{
+  "schema": "fak.harness-product-lock/v2",
+  "id": "bootstrap-test-lock-id",
+  "platforms": [
+    {"os": "linux", "arch": "amd64"},
+    {"os": "darwin", "arch": "arm64"},
+    {"os": "windows", "arch": "amd64"}
+  ],
+  "budget": {
+    "context_tokens": 2048,
+    "memory_mib": 256,
+    "workers": 1
+  },
+  "components": [
+    {
+      "id": "mcp-service",
+      "version": "1.0.0",
+      "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "source": "pkg/mcp",
+      "provider": "mcp",
+      "provides": ["ping", "echo"]
+    }
+  ]
+}`
+	if err := os.WriteFile(lockPath, []byte(lockJSON), 0600); err != nil {
+		t.Fatalf("write lock file: %v", err)
+	}
+
+	origStdout := os.Stdout
+	rPipe, wPipe, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create pipe: %v", err)
+	}
+	os.Stdout = wPipe
+
+	cmdUp([]string{"--lock", lockPath, "--dry-run"})
+
+	_ = wPipe.Close()
+	os.Stdout = origStdout
+
+	var dryRunOutput bytes.Buffer
+	_, _ = io.Copy(&dryRunOutput, rPipe)
+	_ = rPipe.Close()
+
+	var plan allinone.TopologySpec
+	if err := json.Unmarshal(dryRunOutput.Bytes(), &plan); err != nil {
+		t.Fatalf("failed to decode dry-run output as JSON: %v\nOutput: %s", err, dryRunOutput.String())
+	}
+	if plan.LockID != "bootstrap-test-lock-id" {
+		t.Fatalf("plan.LockID = %q, want bootstrap-test-lock-id", plan.LockID)
+	}
+	if len(plan.MCPServers) != 1 || plan.MCPServers[0] != "mcp-service" {
+		t.Fatalf("unexpected plan.MCPServers: %v", plan.MCPServers)
+	}
+
+	// 3. Tests all-in-one lifecycle
+	liveCfg := allinone.Config{
+		LockPath: lockPath,
+		Addr:     "127.0.0.1:0",
+		Engine:   "mock",
+		Mock:     true,
+	}
+	sup, err := allinone.NewSupervisor(liveCfg)
+	if err != nil {
+		t.Fatalf("NewSupervisor: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := sup.Start(ctx); err != nil {
+		t.Fatalf("Start supervisor: %v", err)
+	}
+	defer func() {
+		_ = sup.Shutdown(context.Background())
+	}()
+
+	addr := sup.Addr()
+	if addr == "" {
+		t.Fatal("empty supervisor address")
+	}
+	base := "http://" + addr
+
+	// Verify /healthz returns 200 OK
+	hResp, err := http.Get(base + "/healthz")
+	if err != nil {
+		t.Fatalf("GET /healthz: %v", err)
+	}
+	if hResp.StatusCode != http.StatusOK {
+		t.Fatalf("healthz status = %d, want 200", hResp.StatusCode)
+	}
+	var health allinone.HealthResponse
+	if err := json.NewDecoder(hResp.Body).Decode(&health); err != nil {
+		t.Fatalf("decode healthz: %v", err)
+	}
+	_ = hResp.Body.Close()
+	if health.Status != "ok" {
+		t.Fatalf("health status = %q, want 'ok'", health.Status)
+	}
+
+	// Submits request to /v1/fak/agent/sessions and verifies response
+	body := strings.NewReader(`{"goal":"bootstrap verify goal","tool":"mcp__mcp-service__ping","args":{"token":"xyz"}}`)
+	sessResp, err := http.Post(base+"/v1/fak/agent/sessions", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST /v1/fak/agent/sessions: %v", err)
+	}
+	if sessResp.StatusCode != http.StatusOK {
+		t.Fatalf("session response status = %d, want 200", sessResp.StatusCode)
+	}
+
+	seenEnd := false
+	scan := bufio.NewScanner(sessResp.Body)
+	for scan.Scan() {
+		var event struct {
+			Event string `json:"event"`
+		}
+		if err := json.Unmarshal(scan.Bytes(), &event); err != nil {
+			t.Fatalf("invalid NDJSON %q: %v", scan.Text(), err)
+		}
+		if event.Event == "session.end" {
+			seenEnd = true
+		}
+	}
+	_ = sessResp.Body.Close()
+	if err := scan.Err(); err != nil {
+		t.Fatalf("scanner error: %v", err)
+	}
+	if !seenEnd {
+		t.Fatal("session.end not observed in response")
+	}
+
+	// Injects subsystem failure and verifies /healthz returns 503
+	sup.SetSubsystemHealth(allinone.SubsystemInference, false, "engine GPU timeout")
+	failResp, err := http.Get(base + "/healthz")
+	if err != nil {
+		t.Fatalf("GET /healthz: %v", err)
+	}
+	if failResp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("healthz status = %d, want 503", failResp.StatusCode)
+	}
+	var failHealth allinone.HealthResponse
+	if err := json.NewDecoder(failResp.Body).Decode(&failHealth); err != nil {
+		t.Fatalf("decode failed healthz: %v", err)
+	}
+	_ = failResp.Body.Close()
+	if failHealth.Status != "unavailable" {
+		t.Fatalf("expected health status 'unavailable', got %q", failHealth.Status)
+	}
+
+	// Clean shutdown drains sessions and stops child processes
+	if err := sup.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
 	}
 }
