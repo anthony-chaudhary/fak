@@ -293,10 +293,98 @@ def format_consolidated_bullet(clean: str, count: int, scopes: list[str]) -> str
         return f"- {clean} ({count} occurrences)."
 
 
+RELEASE_DOMAINS: list[tuple[str, set[str], int]] = [
+    (
+        "Security & Governance",
+        {
+            "guard", "policy", "security", "ifc", "audit", "receipt",
+            "taint", "adjudicator", "capability", "capabilitymatrix",
+            "refusal", "vault", "logvault", "perm", "declassify", "airgap",
+            "scrub", "guardvars", "guardrotate", "genlock", "headlesslint",
+        },
+        50,
+    ),
+    (
+        "Autonomous Agent & Multi-Model Harness",
+        {
+            "agent", "agents", "harness", "astra", "codex", "claude", "gemini",
+            "subagent", "goal", "goalsync", "goalpark", "traj", "trajectory",
+            "trajhook", "session", "sessionrecovery", "sessionsignals",
+            "recall", "memory", "blackboard", "skill", "skills",
+            "skillfootprint", "researcharm", "harnesswarm", "observer",
+            "turntaxmeter", "callavoid", "stepbatoncapture", "orchestration",
+        },
+        40,
+    ),
+    (
+        "Serving Engine, Gateway & Kernel Acceleration",
+        {
+            "serve", "gateway", "engine", "model", "modelreg", "qwen",
+            "cuda", "metal", "metalgemm", "gguf", "ggufload", "mlx",
+            "numa", "ctxmmu", "ctxplan", "rehydrate", "rac", "batch",
+            "vdso", "syspromptmmu", "macobs", "macbench", "capindexgw",
+            "livecodebench", "compute", "blob", "maputil", "walkfiles",
+        },
+        30,
+    ),
+    (
+        "Shared Trunk & Workspace Lifecycle",
+        {
+            "sync", "safesync", "worktree", "workerworktree", "lease",
+            "leaseref", "lock", "releaselock", "dispatch", "dispatchworker",
+            "issueorchestrator", "cohort", "steer", "steerpr", "tree",
+            "commit", "safecommit", "shipgate", "stopgate", "dos",
+            "workspace",
+        },
+        20,
+    ),
+    (
+        "Developer Platform, Tooling & Evidence",
+        {
+            "tools", "codetools", "cmd", "bench", "test", "ci", "docs",
+            "dev", "devindex", "hooks", "architest", "witness", "quality",
+            "scorecard", "maturity", "brittleness", "rsiloop", "systools",
+        },
+        10,
+    ),
+]
+
+
+def classify_commit_domain(clean: str, scopes: list[str]) -> tuple[str, int]:
+    scopes_lower = {s.lower().strip() for s in scopes if s}
+    clean_lower = clean.lower()
+    for name, keywords, weight in RELEASE_DOMAINS:
+        if any(k in scopes_lower for k in keywords):
+            return name, weight
+        if any(re.search(r"\b" + re.escape(k) + r"\b", clean_lower) for k in keywords):
+            return name, weight
+    return "Developer Platform, Tooling & Evidence", 10
+
+
+def score_commit_importance(clean: str, count: int, scopes: list[str], has_breaking: bool = False) -> int:
+    score = 0
+    if has_breaking or "breaking" in clean.lower():
+        score += 100
+    _, domain_weight = classify_commit_domain(clean, scopes)
+    score += domain_weight
+    if re.search(r"#[0-9]+|\bcloses\b", clean, re.IGNORECASE):
+        score += 15
+    score += min(count * 5, 20)
+    score += min(len(scopes) * 5, 25)
+    first_word = clean.split()[0].rstrip(".:") if clean.split() else ""
+    if first_word in {
+        "Implement", "Enforce", "Eliminate", "Prevent", "Optimize", "Accelerate",
+        "Disambiguate", "Support", "Add", "Protect", "Isolate", "Require",
+    }:
+        score += 10
+    return score
+
+
 def _process_section_commits(section_commits: list[dict]) -> list[str]:
     groups: dict[str, dict] = {}
     for c in section_commits:
         subj = str(c.get("subject", ""))
+        body = str(c.get("body", ""))
         scope = extract_commit_scope(subj)
         subj_gen = subject_with_generation(c)
         raw_clean = _clean_public_subject(subj_gen)
@@ -306,20 +394,66 @@ def _process_section_commits(section_commits: list[dict]) -> list[str]:
             continue
         if is_pure_merge_commit(subj, scope, clean):
             continue
+        has_breaking = bool(
+            "BREAKING CHANGE" in body
+            or "BREAKING CHANGE" in subj
+            or ("!" in subj.partition(":")[0])
+        )
         if clean not in groups:
-            groups[clean] = {"count": 0, "scopes": []}
+            groups[clean] = {"count": 0, "scopes": [], "has_breaking": False}
         groups[clean]["count"] += 1
+        if has_breaking:
+            groups[clean]["has_breaking"] = True
         if scope and scope not in groups[clean]["scopes"]:
             groups[clean]["scopes"].append(scope)
 
-    bullets: list[str] = []
+    if not groups:
+        return []
+
+    items: list[dict] = []
     seen: set[str] = set()
     for clean, data in groups.items():
         bullet = format_consolidated_bullet(clean, data["count"], data["scopes"])
-        if bullet not in seen:
-            seen.add(bullet)
-            bullets.append(bullet)
-    return bullets
+        if bullet in seen:
+            continue
+        seen.add(bullet)
+        domain, _ = classify_commit_domain(clean, data["scopes"])
+        importance = score_commit_importance(clean, data["count"], data["scopes"], data["has_breaking"])
+        items.append({
+            "clean": clean,
+            "bullet": bullet,
+            "domain": domain,
+            "importance": importance,
+        })
+
+    unique_domains = {it["domain"] for it in items}
+
+    # If small number of items or single domain, sort strictly by importance without domain subheadings
+    if len(items) <= 3 or len(unique_domains) <= 1:
+        sorted_items = sorted(items, key=lambda x: (-x["importance"], x["clean"].lower()))
+        return [it["bullet"] for it in sorted_items]
+
+    domain_buckets: dict[str, list[dict]] = {name: [] for name, _, _ in RELEASE_DOMAINS}
+    for it in items:
+        dom = it["domain"]
+        if dom not in domain_buckets:
+            domain_buckets[dom] = []
+        domain_buckets[dom].append(it)
+
+    lines: list[str] = []
+    for name, _, _ in RELEASE_DOMAINS:
+        dom_items = domain_buckets.get(name) or []
+        if not dom_items:
+            continue
+        sorted_dom = sorted(dom_items, key=lambda x: (-x["importance"], x["clean"].lower()))
+        lines.append(f"### {name}")
+        for it in sorted_dom:
+            lines.append(it["bullet"])
+        lines.append("")
+
+    while lines and not lines[-1]:
+        lines.pop()
+    return lines
 
 
 def extract_upgrade_notes(text: str) -> list[str]:
@@ -352,9 +486,12 @@ def render_notes(version: str, *, date: str, level: str, themes: list[str],
         ("Reliability and correctness", _process_section_commits(fix_commits)),
         ("Engineering quality and evidence", _process_section_commits(other_commits)),
     ]
+    def _count_changes(items: list[str]) -> int:
+        return sum(1 for it in items if it.startswith("- "))
+
     summary = ", ".join(
-        f"{len(items)} {heading.lower()} change{'s' if len(items) != 1 else ''}"
-        for heading, items in sections if items
+        f"{_count_changes(items)} {heading.lower()} change{'s' if _count_changes(items) != 1 else ''}"
+        for heading, items in sections if _count_changes(items) > 0
     )
     title = ascii_clean(headline).strip()
     lines = [f"# fak v{version}: {title}", "",
