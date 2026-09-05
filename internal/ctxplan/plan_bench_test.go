@@ -236,7 +236,7 @@ func BenchmarkPlanWithCache(b *testing.B) {
 	}
 }
 
-func BenchmarkMaterialize(b *testing.B) {
+func BenchmarkPlanMaterialize(b *testing.B) {
 	ctx := context.Background()
 	store, _ := createBenchmarkStore(100)
 	f := Forecast{
