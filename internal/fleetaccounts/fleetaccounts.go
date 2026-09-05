@@ -205,9 +205,29 @@ func isOpusFamily(text, compact string) bool {
 	return opusSegmentRE.MatchString(text) || opusCompactRE.MatchString(compact)
 }
 
+var (
+	gptFrontierRE        = regexp.MustCompile(`(^|[^a-z])gpt-[6-9]`)
+	gptFrontierCompactRE = regexp.MustCompile(`(^|[^a-z])gpt[6-9]`)
+	deepseekProRE        = regexp.MustCompile(`deepseek-?v[4-9].*pro`)
+	geminiFlashRE        = regexp.MustCompile(`gemini[-a-z0-9.]*flash`)
+	geminiFlashCompactRE = regexp.MustCompile(`gemini[0-9]*flash`)
+)
+
+func isGPTFrontierFamily(text, compact string) bool {
+	return gptFrontierRE.MatchString(text) || gptFrontierCompactRE.MatchString(compact)
+}
+
+func isDeepSeekProFamily(text, compact string) bool {
+	return deepseekProRE.MatchString(text) || deepseekProRE.MatchString(compact)
+}
+
+func isGeminiFlashFamily(text, compact string) bool {
+	return geminiFlashRE.MatchString(text) || geminiFlashCompactRE.MatchString(compact)
+}
+
 // modelTierFromName is the small v1 model taxonomy. Tier 0 is the restricted apex
 // model (Fable 5 — see apextier.go); tier 1 is the max-quality frontier set; tier 2 is
-// the lightweight-work set (GLM-5.2 and Gemini 3.5 Flash); everything else is tier 3.
+// the lightweight-work set (GLM-5.2 and Gemini Flash family); everything else is tier 3.
 func modelTierFromName(model string) int {
 	if IsApexModel(model) {
 		return TierApex
@@ -227,13 +247,13 @@ func modelTierFromName(model string) int {
 	// lightweight tier, checked before the generation-wide frontier match below so
 	// the `gpt-5.6` substring does not sweep it up into tier 1.
 	if names("gpt-5.6-luna", "gpt56luna") {
-		return 2
+		return TierLight
 	}
-	// GPT-6 Astra (the flagship, aliased by bare `gpt-6` and `astra`), GPT-5.6 Sol
-	// (aliased by bare `gpt-5.6`), and GPT-5.6 Terra (≈ GPT-5.5) are OpenAI frontier
+	// GPT-6+ generation (gpt-[6-9].*), GPT-6 Astra (the flagship, aliased by bare `gpt-6` and `astra`),
+	// GPT-5.6 Sol (aliased by bare `gpt-5.6`), and GPT-5.6 Terra (≈ GPT-5.5) are OpenAI frontier
 	// seats; GPT-5.5 stays classified alongside them.
-	if names("gpt-6", "gpt6") || names("astra", "astra") || names("gpt-5.6", "gpt56") || names("gpt-5.5", "gpt55") {
-		return 1
+	if isGPTFrontierFamily(text, compact) || names("astra", "astra") || names("gpt-5.6", "gpt56") || names("gpt-5.5", "gpt55") {
+		return TierFrontier
 	}
 	// The Opus FAMILY is the Claude frontier class in every generation — opus-5 (the
 	// current fleet primary), opus-4.8, opus-4.6, and the bare aliases. Matching the
@@ -245,18 +265,18 @@ func modelTierFromName(model string) int {
 	if isOpusFamily(text, compact) {
 		return TierFrontier
 	}
-	if names("deepseek-v4-pro", "deepseekv4pro") || names("kimi-k2.6", "kimik26") {
-		return 1
+	if isDeepSeekProFamily(text, compact) || names("kimi-k2.6", "kimik26") {
+		return TierFrontier
 	}
 	if names("glm-5.2", "glm52") {
-		return 2
+		return TierLight
 	}
-	// Gemini 3.5 Flash — Google's fast/lightweight tier, served via GCP Vertex AI on the
-	// OpenAI-compatible endpoint as `google/gemini-3.5-flash`. Lightweight work, tier 2.
-	if names("gemini-3.5-flash", "gemini35flash") {
-		return 2
+	// Gemini Flash family (gemini-.*-flash) — Google's fast/lightweight tier, served via GCP
+	// Vertex AI on the OpenAI-compatible endpoint as `google/gemini-3.5-flash`. Lightweight work, tier 2.
+	if isGeminiFlashFamily(text, compact) {
+		return TierLight
 	}
-	return 3
+	return TierOther
 }
 
 // Profile is an account's model-routing profile (the cleaned shape from account_profile).

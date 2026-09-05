@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -144,13 +145,19 @@ func negotiateCacheIntent(provider Provider, model string, in *CacheIntent) (Cac
 	return r, nil
 }
 
+var (
+	openAIExtendedRetentionRE = regexp.MustCompile(`(^|/)(gpt-[5-9]|o[1-9]|astra)`)
+	anthropicTTLRE            = regexp.MustCompile(`(^|/)claude-([3-9]|(sonnet|opus|haiku)-[3-9])`)
+)
+
 func openAISupportsExtendedRetention(model string) bool {
-	m := strings.ToLower(model)
-	return strings.HasPrefix(m, "gpt-5") || strings.HasPrefix(m, "gpt-6") || strings.Contains(m, "astra") || strings.HasPrefix(m, "o3") || strings.HasPrefix(m, "o4")
+	m := strings.ToLower(strings.TrimSpace(model))
+	return openAIExtendedRetentionRE.MatchString(m) || strings.Contains(m, "astra")
 }
+
 func anthropicSupportsTTL(model string) bool {
-	m := strings.ToLower(model)
-	return strings.HasPrefix(m, "claude-3") || strings.HasPrefix(m, "claude-sonnet-4") || strings.HasPrefix(m, "claude-opus-4") || strings.HasPrefix(m, "claude-haiku-4")
+	m := strings.ToLower(strings.TrimSpace(model))
+	return anthropicTTLRE.MatchString(m)
 }
 
 func applyCacheHintToJSON(body []byte, result CacheHintResult) ([]byte, error) {

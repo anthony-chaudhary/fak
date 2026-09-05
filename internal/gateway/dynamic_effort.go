@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -32,9 +33,15 @@ const (
 	EffortHigh   = agentopt.EffortHigh
 )
 
+var (
+	oSeriesThinkingRE  = regexp.MustCompile(`(^|/)o[1-9]`)
+	gptAstraThinkingRE = regexp.MustCompile(`(^|/)(gpt-[6-9].*astra|astra)`)
+	claudeThinkingRE   = regexp.MustCompile(`(^|/)claude-(3[-.]7|[4-9])`)
+)
+
 // ModelSupportsThinking reports whether the given model name natively supports
-// reasoning/thinking effort modulation (e.g. Gemini 2.0/2.5/3.8 Flash, OpenAI o1/o3/o4,
-// Anthropic Claude 3.7+ thinking).
+// reasoning/thinking effort modulation (e.g. Gemini 2.0/2.5/3.8 Flash, OpenAI o1/o3/o4/o5,
+// GPT-6+ Astra, Anthropic Claude 3.7+ thinking).
 func ModelSupportsThinking(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
 	if m == "" {
@@ -50,13 +57,16 @@ func ModelSupportsThinking(model string) bool {
 			return true
 		}
 	}
-	// OpenAI o1/o3/o4 series
-	if strings.HasPrefix(m, "o1") || strings.HasPrefix(m, "o3") || strings.HasPrefix(m, "o4") ||
-		strings.Contains(m, "/o1") || strings.Contains(m, "/o3") || strings.Contains(m, "/o4") {
+	// OpenAI o-series reasoning models (o1, o3, o4, o5, ...)
+	if oSeriesThinkingRE.MatchString(m) {
+		return true
+	}
+	// GPT-6+ Astra reasoning models (gpt-6-astra, gpt-7-astra, astra, ...)
+	if gptAstraThinkingRE.MatchString(m) {
 		return true
 	}
 	// Anthropic Claude 3.7+ thinking
-	if strings.Contains(m, "claude-3-7") || strings.Contains(m, "claude-3.7") || strings.Contains(m, "claude-4") {
+	if claudeThinkingRE.MatchString(m) {
 		return true
 	}
 	return false

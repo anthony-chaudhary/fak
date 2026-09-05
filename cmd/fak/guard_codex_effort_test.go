@@ -177,3 +177,42 @@ func TestGuardCodexReasoningEffortGPT6AstraAliases(t *testing.T) {
 		}
 	}
 }
+
+func TestGuardCodexReasoningEffortModelFamilies(t *testing.T) {
+	supported := []string{
+		"gpt-6.5",
+		"gpt-7",
+		"o3",
+		"o4",
+		"o5",
+		"gpt-6-mini",
+		"gpt-5.6",
+		"gpt-5.6-sol",
+		"gpt-6-astra",
+		"o1",
+		"o1-mini",
+		"o3-mini",
+		"o4-mini",
+		"o5-mini",
+		"openai/gpt-7",
+		"openai/o5",
+	}
+	for _, m := range supported {
+		if got := guardCodexReasoningEffort(m); got != "high" {
+			t.Errorf("guardCodexReasoningEffort(%q) = %q, want high", m, got)
+		}
+	}
+
+	unsupported := []string{
+		"gpt-custom",
+		"gpt-4o",
+		"gpt-4",
+		"gpt-3.5-turbo",
+		"claude-3-sonnet",
+	}
+	for _, m := range unsupported {
+		if got := guardCodexReasoningEffort(m); got != "" {
+			t.Errorf("guardCodexReasoningEffort(%q) = %q, want empty", m, got)
+		}
+	}
+}

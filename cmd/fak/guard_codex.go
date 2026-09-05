@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
@@ -258,16 +259,18 @@ func guardCodexResolveReasoningEffort(model string, getenv func(string) string) 
 	return guardCodexEffortResolution{Effort: guardCodexReasoningEffort(model)}
 }
 
+var codexReasoningModelRE = regexp.MustCompile(`(^|/)(gpt-5\.6|gpt-[6-9]|o[1-9]|astra)`)
+
 // guardCodexReasoningEffort is the no-opt-in effort for the model Codex is being pointed at:
-// the configured default for the managed GPT-5.6 and GPT-6 models, and no pin at all for a custom or
-// local model whose supported-effort set the guard cannot know.
+// the configured default for detected reasoning model families (e.g. GPT-5.6*, GPT-6.*,
+// GPT-7.*, o1.*-o5.*, Astra models), and no pin at all for a custom or local model
+// whose supported-effort set the guard cannot know.
 func guardCodexReasoningEffort(model string) string {
-	switch strings.ToLower(configaccounts.NormalizeCodexModelSlug(model)) {
-	case "gpt-5.6", "gpt-5.6-sol", strings.ToLower(configaccounts.GPT6AstraModel):
+	m := strings.ToLower(configaccounts.NormalizeCodexModelSlug(model))
+	if codexReasoningModelRE.MatchString(m) || strings.Contains(m, "astra") {
 		return guardCodexDefaultReasoningEffort
-	default:
-		return ""
 	}
+	return ""
 }
 
 // guardCodexBaseURL is the gateway origin with the single `/v1` suffix Codex's Responses

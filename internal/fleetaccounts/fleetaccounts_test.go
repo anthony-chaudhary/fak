@@ -166,11 +166,15 @@ func TestModelTierFromNameGeminiFlashIsTier2(t *testing.T) {
 		model string
 		tier  int
 	}{
-		// Gemini 3.5 Flash: the new tier-2 lightweight seat, in every id shape it appears.
+		// Gemini Flash family: tier-2 lightweight seat, in every id shape and version it appears.
 		{"gemini-3.5-flash", 2},
 		{"google/gemini-3.5-flash", 2},
 		{"Gemini 3.5 Flash", 2},
 		{"gemini_3.5_flash", 2},
+		{"gemini-3.8-flash", 2},
+		{"google/gemini-3.8-flash", 2},
+		{"Gemini 3.8 Flash", 2},
+		{"gemini_3.8_flash", 2},
 		// Fable 5 is the restricted apex model: tier 0, in every id shape it appears.
 		{"claude-fable-5", 0},
 		{"fable-5", 0},
@@ -188,6 +192,10 @@ func TestModelTierFromNameGeminiFlashIsTier2(t *testing.T) {
 		{"gpt6astra", 1},
 		{"astra", 1},
 		{"openai/gpt-6-astra", 1},
+		// GPT-7+ frontier models:
+		{"gpt-7", 1},
+		{"openai/gpt-7", 1},
+		{"gpt-8", 1},
 		// GPT-5.6 generation: Sol (bare alias) and Terra rank frontier; Luna is the
 		// fast/cheap lightweight seat.
 		{"gpt-5.6", 1},
@@ -212,8 +220,11 @@ func TestModelTierFromNameGeminiFlashIsTier2(t *testing.T) {
 		// the letters must not be promoted into the frontier set.
 		{"octopus-7b", 3},
 		{"deepseek-v4-pro", 1},
+		{"deepseek-v5-pro", 1},
+		{"deepseek-v6-pro", 1},
 		{"kimi-k2.6", 1},
 		{"gemini-3.5-pro", 3}, // only Flash is tier 2; Pro is not classified here
+		{"gemini-3.8-pro", 3},
 		{"llama3.2", 3},
 		{"", 3},
 	}

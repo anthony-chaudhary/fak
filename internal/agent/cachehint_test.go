@@ -22,6 +22,23 @@ func TestCacheHintNegotiationCompatibility(t *testing.T) {
 	}{
 		{"openai supported", ProviderOpenAIResponses, "gpt-5.6", intent(CacheHorizonTwentyFourHours, CacheResidencyExtended), CacheHintSupported, false, ""},
 		{"openai gpt-6-astra supported", ProviderOpenAIResponses, "gpt-6-astra", intent(CacheHorizonTwentyFourHours, CacheResidencyExtended), CacheHintSupported, false, ""},
+		{"openai gpt-7 supported", ProviderOpenAIResponses, "gpt-7", intent(CacheHorizonTwentyFourHours, CacheResidencyExtended), CacheHintSupported, false, ""},
+		{"openai o5 supported", ProviderOpenAIResponses, "o5", intent(CacheHorizonTwentyFourHours, CacheResidencyExtended), CacheHintSupported, false, ""},
+		{"anthropic claude-4-sonnet", ProviderAnthropic, "claude-4-sonnet", func() *CacheIntent {
+			x := intent(CacheHorizonOneHour, CacheResidencyMemory)
+			x.Preference = CachePreferenceExplicit
+			return x
+		}(), CacheHintSupported, false, ""},
+		{"anthropic claude-4.5", ProviderAnthropic, "claude-4.5", func() *CacheIntent {
+			x := intent(CacheHorizonOneHour, CacheResidencyMemory)
+			x.Preference = CachePreferenceExplicit
+			return x
+		}(), CacheHintSupported, false, ""},
+		{"anthropic claude-5", ProviderAnthropic, "claude-5", func() *CacheIntent {
+			x := intent(CacheHorizonOneHour, CacheResidencyMemory)
+			x.Preference = CachePreferenceExplicit
+			return x
+		}(), CacheHintSupported, false, ""},
 		{"openai privacy fail closed", ProviderOpenAIResponses, "gpt-5.6", intent(CacheHorizonTwentyFourHours, CacheResidencyMemory), CacheHintRejected, true, "privacy"},
 		{"openai unsupported fail closed", ProviderOpenAIResponses, "gpt-4.1", intent(CacheHorizonTwentyFourHours, CacheResidencyExtended), CacheHintRejected, true, "does not support"},
 		{"openai advisory downgrade", ProviderOpenAIResponses, "gpt-4.1", func() *CacheIntent {
@@ -158,5 +175,65 @@ func TestUnsupportedProviderCacheHintsRemainWireNeutral(t *testing.T) {
 	}
 	if _, leaked := geminiBody["prompt_cache_key"]; leaked || geminiBody["future"] != true {
 		t.Fatalf("Gemini advisory mutated unsupported cache fields: %s", body)
+	}
+}
+
+func TestFutureModelsCacheRetentionAndTTL(t *testing.T) {
+	openAITests := []struct {
+		model string
+		want  bool
+	}{
+		{"gpt-5", true},
+		{"gpt-5.6", true},
+		{"gpt-6", true},
+		{"gpt-6-astra", true},
+		{"gpt-7", true},
+		{"gpt-8", true},
+		{"gpt-9", true},
+		{"o1", true},
+		{"o1-mini", true},
+		{"o3", true},
+		{"o3-mini", true},
+		{"o4", true},
+		{"o5", true},
+		{"o5-mini", true},
+		{"o6", true},
+		{"astra", true},
+		{"astra-2", true},
+		{"openai/gpt-7", true},
+		{"openai/o5", true},
+		{"gpt-4.1", false},
+		{"gpt-4o", false},
+		{"gpt-3.5-turbo", false},
+	}
+	for _, tc := range openAITests {
+		if got := openAISupportsExtendedRetention(tc.model); got != tc.want {
+			t.Errorf("openAISupportsExtendedRetention(%q) = %v, want %v", tc.model, got, tc.want)
+		}
+	}
+
+	anthropicTests := []struct {
+		model string
+		want  bool
+	}{
+		{"claude-3-sonnet", true},
+		{"claude-3.5-sonnet", true},
+		{"claude-3.7-sonnet", true},
+		{"claude-4-sonnet", true},
+		{"claude-4.5", true},
+		{"claude-5", true},
+		{"claude-sonnet-4-5", true},
+		{"claude-opus-4", true},
+		{"claude-opus-5", true},
+		{"claude-haiku-4", true},
+		{"claude-haiku-5", true},
+		{"anthropic/claude-4-sonnet", true},
+		{"claude-2.1", false},
+		{"claude-1.3", false},
+	}
+	for _, tc := range anthropicTests {
+		if got := anthropicSupportsTTL(tc.model); got != tc.want {
+			t.Errorf("anthropicSupportsTTL(%q) = %v, want %v", tc.model, got, tc.want)
+		}
 	}
 }
