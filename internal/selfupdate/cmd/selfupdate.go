@@ -158,6 +158,7 @@ func Run(argv []string) {
 	if repoRoot == "" {
 		clearSelfUpdateProgressBar()
 		fmt.Fprintln(os.Stderr, "self-update: could not resolve a git repo root (pass --root)")
+		emitSelfUpdateOutcome(outcomePrepareFailed, installTargetOr(*target), "could not resolve a git repo root")
 		os.Exit(2)
 	}
 
@@ -182,6 +183,22 @@ func Run(argv []string) {
 	} else {
 		selfUpdateFetchOrigin(context.Background(), selfinstall.RealRunner, repoRoot, *check)
 		headRev = repoRevOf(repoRoot, "origin/main")
+	}
+
+	if headRev != "" && !isFullGitCommit(headRev) {
+		if resolved := repoRevOf(repoRoot, headRev); isFullGitCommit(resolved) {
+			headRev = resolved
+		}
+	}
+	if !*check && (headRev == "" || !isFullGitCommit(headRev)) {
+		clearSelfUpdateProgressBar()
+		detail := fmt.Sprintf("cannot resolve target revision origin/main in repo %s", repoRoot)
+		if headRev != "" {
+			detail = fmt.Sprintf("selected revision %q in repo %s is not a full 40-hex commit", headRev, repoRoot)
+		}
+		fmt.Fprintln(os.Stderr, "self-update:", detail)
+		emitSelfUpdateOutcome(outcomePrepareFailed, installTargetOr(*target), detail)
+		os.Exit(1)
 	}
 
 	// Whose freshness are we judging? When --target names a DIFFERENT binary (the scheduler
@@ -468,9 +485,13 @@ func selfUpdateFakDevTargets(repoRoot, target string) []string {
 }
 
 func selfUpdateFakDevNeedsConverge(targets []string, headRev string, probe selfinstall.StampProbe) bool {
+	headRev = strings.TrimSpace(headRev)
+	if headRev == "" || !isFullGitCommit(headRev) {
+		return false
+	}
 	for _, target := range targets {
 		revision, dirty, attested := probe(target)
-		if !attested || dirty || !strings.EqualFold(strings.TrimSpace(revision), strings.TrimSpace(headRev)) {
+		if !attested || dirty || !strings.EqualFold(strings.TrimSpace(revision), headRev) {
 			return true
 		}
 	}
@@ -1181,9 +1202,16 @@ func stampOfBinary(path string) (binstamp.Stamp, bool) {
 
 // repoRevOf returns the full SHA a ref resolves to in the repo at root, or "" on error.
 func repoRevOf(root, ref string) string {
-	out, ok := selfinstall.RealRunner(context.Background(), root, "git", "rev-parse", ref)
-	if !ok {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
 		return ""
+	}
+	out, ok := selfinstall.RealRunner(context.Background(), root, "git", "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	if !ok {
+		out, ok = selfinstall.RealRunner(context.Background(), root, "git", "rev-parse", ref)
+		if !ok {
+			return ""
+		}
 	}
 	return strings.TrimSpace(out)
 }
