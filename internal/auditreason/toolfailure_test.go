@@ -192,3 +192,76 @@ func TestToolFailurePayloadUnrecognized(t *testing.T) {
 		t.Fatal("success text must not fabricate a failure payload")
 	}
 }
+
+func TestToolFailureExitCodeScoping(t *testing.T) {
+	msg := "exit code 127: command not found"
+
+	// Clean command (exit code 0): must NEVER resolve to a tool failure even if output
+	// contains substring signatures like "exit code 127" or "command not found".
+	if spec, ok := ToolFailureFromMessageWithExitCode(msg, 0); ok {
+		t.Fatalf("ToolFailureFromMessageWithExitCode(%q, 0) returned unexpected match: %+v", msg, spec)
+	}
+	if spec, ok := ToolFailureFromMessage(msg, 0); ok {
+		t.Fatalf("ToolFailureFromMessage(%q, 0) returned unexpected match: %+v", msg, spec)
+	}
+	if payload, ok := ToolFailurePayloadFromMessageWithExitCode(msg, 0); ok {
+		t.Fatalf("ToolFailurePayloadFromMessageWithExitCode(%q, 0) returned unexpected payload: %+v", msg, payload)
+	}
+	if payload, ok := ToolFailurePayloadForCommandWithExitCode(msg, "Get-ChildItem", 0); ok {
+		t.Fatalf("ToolFailurePayloadForCommandWithExitCode(%q, ..., 0) returned unexpected payload: %+v", msg, payload)
+	}
+	if payload, ok := ToolFailurePayloadForCommand(msg, "Get-ChildItem", 0); ok {
+		t.Fatalf("ToolFailurePayloadForCommand(%q, ..., 0) returned unexpected payload: %+v", msg, payload)
+	}
+
+	// Non-zero exit code (e.g. 127): resolves to ToolFailureShellMismatch.
+	spec127, ok := ToolFailureFromMessageWithExitCode(msg, 127)
+	if !ok {
+		t.Fatalf("ToolFailureFromMessageWithExitCode(%q, 127) did not match", msg)
+	}
+	if spec127.Token != ToolFailureShellMismatch {
+		t.Fatalf("spec.Token = %q, want %q", spec127.Token, ToolFailureShellMismatch)
+	}
+
+	// Non-zero exit code (e.g. 1): also resolves to ToolFailureShellMismatch.
+	spec1, ok := ToolFailureFromMessageWithExitCode(msg, 1)
+	if !ok {
+		t.Fatalf("ToolFailureFromMessageWithExitCode(%q, 1) did not match", msg)
+	}
+	if spec1.Token != ToolFailureShellMismatch {
+		t.Fatalf("spec.Token = %q, want %q", spec1.Token, ToolFailureShellMismatch)
+	}
+
+	// Variadic non-zero exit code on ToolFailureFromMessage.
+	specVar, ok := ToolFailureFromMessage(msg, 127)
+	if !ok || specVar.Token != ToolFailureShellMismatch {
+		t.Fatalf("ToolFailureFromMessage(%q, 127) = %+v, ok=%v, want %s", msg, specVar, ok, ToolFailureShellMismatch)
+	}
+
+	// Payload with non-zero exit code resolves to ToolFailureShellMismatch with PowerShell recovery.
+	payload, ok := ToolFailurePayloadForCommandWithExitCode(msg, "Get-ChildItem", 127)
+	if !ok {
+		t.Fatalf("ToolFailurePayloadForCommandWithExitCode(%q, ..., 127) did not match", msg)
+	}
+	if payload.Code != ToolFailureShellMismatch {
+		t.Fatalf("payload.Code = %q, want %q", payload.Code, ToolFailureShellMismatch)
+	}
+	if !strings.Contains(strings.ToLower(payload.NextCommand), "powershell") || !strings.Contains(payload.NextCommand, "Get-ChildItem") {
+		t.Fatalf("next_command = %q, want runnable PowerShell recovery", payload.NextCommand)
+	}
+}
+
+func TestCleanExitCodeIgnoresAllErrorSignatures(t *testing.T) {
+	signatures := []string{
+		"exit status 143",
+		"context deadline exceeded",
+		"syntax error near unexpected token `then'",
+		"partial apply: edit wrote two files",
+		"tool hung: no output for 120s",
+	}
+	for _, sig := range signatures {
+		if spec, ok := ToolFailureFromMessageWithExitCode(sig, 0); ok {
+			t.Errorf("clean exit 0 falsely matched %q: %+v", sig, spec)
+		}
+	}
+}

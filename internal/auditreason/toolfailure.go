@@ -108,9 +108,14 @@ var toolFailureSignatures = []toolFailureSignature{
 	{[]string{"tool_hang", "tool hung", "hang detected", "no output for"}, ToolFailureHang},
 }
 
-// ToolFailureFromMessage classifies raw tool-failure prose into the closed non-guard
-// vocabulary. The bool is false when no known signature matched.
-func ToolFailureFromMessage(msg string) (ToolFailureSpec, bool) {
+// ToolFailureFromMessageWithExitCode classifies raw tool output into the closed non-guard
+// vocabulary when the process failed (exitCode != 0). Clean commands (exitCode == 0)
+// never resolve to a tool failure, ensuring substring error signatures in normal output
+// are not falsely classified.
+func ToolFailureFromMessageWithExitCode(msg string, exitCode int) (ToolFailureSpec, bool) {
+	if exitCode == 0 {
+		return ToolFailureSpec{}, false
+	}
 	low := strings.ToLower(msg)
 	for _, sig := range toolFailureSignatures {
 		for _, needle := range sig.needles {
@@ -120,6 +125,17 @@ func ToolFailureFromMessage(msg string) (ToolFailureSpec, bool) {
 		}
 	}
 	return ToolFailureSpec{}, false
+}
+
+// ToolFailureFromMessage classifies raw tool-failure prose into the closed non-guard
+// vocabulary. The bool is false when no known signature matched.
+// An optional exitCode argument may be supplied; when exitCode == 0 (clean
+// exit), it never resolves to a tool failure.
+func ToolFailureFromMessage(msg string, exitCode ...int) (ToolFailureSpec, bool) {
+	if len(exitCode) > 0 {
+		return ToolFailureFromMessageWithExitCode(msg, exitCode[0])
+	}
+	return ToolFailureFromMessageWithExitCode(msg, -1)
 }
 
 // ToolFailurePayload is the structured, actionable outcome for a non-guard tool
@@ -156,8 +172,20 @@ func (s ToolFailureSpec) Payload(evidence string) ToolFailurePayload {
 // closed vocabulary and returns the full structured payload, using the message as
 // the observed evidence. The bool is false when no known signature matched, so a
 // caller never fabricates a payload for an unrecognized failure.
-func ToolFailurePayloadFromMessage(msg string) (ToolFailurePayload, bool) {
-	spec, ok := ToolFailureFromMessage(msg)
+// An optional exitCode argument may be supplied; when exitCode == 0 (clean exit),
+// it never resolves to a tool failure.
+func ToolFailurePayloadFromMessage(msg string, exitCode ...int) (ToolFailurePayload, bool) {
+	if len(exitCode) > 0 {
+		return ToolFailurePayloadFromMessageWithExitCode(msg, exitCode[0])
+	}
+	return ToolFailurePayloadFromMessageWithExitCode(msg, -1)
+}
+
+// ToolFailurePayloadFromMessageWithExitCode classifies a tool output with its process
+// exit code into the closed vocabulary and returns the full structured payload.
+// Clean commands (exitCode == 0) never resolve to a tool failure.
+func ToolFailurePayloadFromMessageWithExitCode(msg string, exitCode int) (ToolFailurePayload, bool) {
+	spec, ok := ToolFailureFromMessageWithExitCode(msg, exitCode)
 	if !ok {
 		return ToolFailurePayload{}, false
 	}
@@ -169,8 +197,14 @@ func ToolFailurePayloadFromMessage(msg string) (ToolFailurePayload, bool) {
 // this in PowerShell"), a non-empty cmd is folded into a literally-runnable
 // PowerShell NextCommand instead of the placeholder template — the exact recovery
 // pre-filled. Non-shell classes keep their static NextCommand.
-func ToolFailurePayloadForCommand(msg, cmd string) (ToolFailurePayload, bool) {
-	payload, ok := ToolFailurePayloadFromMessage(msg)
+// An optional exitCode argument may be supplied; clean commands (exitCode == 0)
+// never resolve to a tool failure.
+func ToolFailurePayloadForCommand(msg, cmd string, exitCode ...int) (ToolFailurePayload, bool) {
+	code := -1
+	if len(exitCode) > 0 {
+		code = exitCode[0]
+	}
+	payload, ok := ToolFailurePayloadFromMessageWithExitCode(msg, code)
 	if !ok {
 		return ToolFailurePayload{}, false
 	}
@@ -182,6 +216,12 @@ func ToolFailurePayloadForCommand(msg, cmd string) (ToolFailurePayload, bool) {
 		payload.NextCommand = powershellRecovery(cmd)
 	}
 	return payload, true
+}
+
+// ToolFailurePayloadForCommandWithExitCode is ToolFailurePayloadForCommand with an explicit exit code.
+// Clean commands (exitCode == 0) never resolve to a tool failure.
+func ToolFailurePayloadForCommandWithExitCode(msg, cmd string, exitCode int) (ToolFailurePayload, bool) {
+	return ToolFailurePayloadForCommand(msg, cmd, exitCode)
 }
 
 // powershellRecovery wraps a failing shell command so it reruns natively under
