@@ -78,3 +78,12 @@ func TestRenderNotesDigest_maxBytesOverflowNamed(t *testing.T) {
 		t.Fatalf("over-budget notes must be named under %s:\n%s", memoryread.OverflowReason, out)
 	}
 }
+
+func TestRenderNotesDigest_directFilePath(t *testing.T) {
+	dir := buildNotesDigestStore(t)
+	memFile := filepath.Join(dir, "MEMORY.md")
+	out := RenderNotesDigest(memFile, false, 60000)
+	if !strings.Contains(out, "## Gate helper (fresh.md)") || !strings.Contains(out, "internal/memq/exec.go") {
+		t.Fatalf("RenderNotesDigest with direct file path failed:\n%s", out)
+	}
+}

@@ -44,6 +44,8 @@ type agentFlags struct {
 	workflow              *string
 	workflowStep          *bool
 	workflowCheckpointDir *string
+	memory                *bool
+	memoryStore           *string
 }
 
 func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
@@ -80,6 +82,8 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.workflow = fs.String("workflow", "", "name of workflow to execute (e.g. fleet-wave)")
 	af.workflowStep = fs.Bool("workflow-step", false, "execute a single workflow phase step instead of full workflow")
 	af.workflowCheckpointDir = fs.String("workflow-checkpoint-dir", ".fak/workflows", "directory for workflow state checkpoints")
+	af.memory = fs.Bool("memory", true, "discover and inject verified workspace memory notes into agent prompt; use --memory=false to disable")
+	af.memoryStore = fs.String("memory-store", "", "optional custom memory store path (directory or MEMORY.md); defaults to auto-discovery")
 	return fs, af
 }
 
@@ -211,6 +215,9 @@ func runAgent(argv []string) {
 		runOpts = append(runOpts, agent.WithToolCatalog(catalog))
 	}
 	runOpts = append(runOpts, agentEffortRunOptions(af)...)
+	if memOpt, _ := resolveAgentMemoryOption(*af.memory, *af.memoryStore, root); memOpt != nil {
+		runOpts = append(runOpts, memOpt)
+	}
 
 	providerExplicit := false
 	fs.Visit(func(f *flag.Flag) {
