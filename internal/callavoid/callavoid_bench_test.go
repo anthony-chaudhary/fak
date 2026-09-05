@@ -329,3 +329,14 @@ func BenchmarkAccountFromObservations(b *testing.B) {
 		}
 	})
 }
+
+// TestBenchmarkSanity ensures benchmark routines execute without panic and perform iterations.
+func TestBenchmarkSanity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping benchmark sanity in short mode")
+	}
+	res := testing.Benchmark(BenchmarkAccountFromObservations)
+	if res.N <= 0 {
+		t.Fatalf("expected positive iterations, got %d", res.N)
+	}
+}
