@@ -9,7 +9,7 @@ import (
 func TestLadderThresholdNormalization(t *testing.T) {
 	// Test NormalizeDenyAllThresholds
 	for _, tc := range []struct {
-		w, f, m     int
+		w, f, m             int
 		wantW, wantF, wantM int
 	}{
 		{3, 7, 9, 3, 7, 9},
@@ -26,14 +26,14 @@ func TestLadderThresholdNormalization(t *testing.T) {
 
 	// Test NormalizeSameStop
 	for _, tc := range []struct {
-		stop                 int
+		stop                int
 		wantW, wantF, wantS int
 	}{
 		{6, 3, 5, 6},
 		{9, 6, 8, 9},
 		{2, 1, 1, 2},
 		{3, 1, 2, 3},
-		{1, 3, 5, 6},  // < 2 falls back to default 6
+		{1, 3, 5, 6}, // < 2 falls back to default 6
 		{0, 3, 5, 6},
 		{-5, 3, 5, 6},
 	} {
@@ -264,6 +264,73 @@ func TestEvaluateBoundaryIntegration(t *testing.T) {
 	if dec.Action != ActionAllow || dec.Disposition != DispCleanCompletion {
 		t.Fatalf("want clean completion, got %+v", dec)
 	}
+}
+
+func TestStopgateNotedNoAllowedPathRequiresWitness(t *testing.T) {
+	ladder := DefaultLadderConfig()
+	witness := WitnessGateConfig{
+		Mode: ModeEnforce,
+		Max:  2,
+	}
+
+	t.Run("final_gate_unsatisfied_blocks_clean_wrapup", func(t *testing.T) {
+		in := BoundaryInput{
+			NotedNoAllowedPath: true,
+			FinalGate:          func() (bool, string) { return false, "missing:stamp" },
+		}
+		dec := EvaluateBoundary(ladder, witness, in)
+		if dec.Disposition == DispCleanWrapup || dec.ExitCode == 0 {
+			t.Fatalf("expected blocked or unwitnessed continue, got clean wrapup: %+v", dec)
+		}
+		if dec.Action != ActionContinue || dec.ExitCode != 2 {
+			t.Fatalf("want ActionContinue with exit 2, got %+v", dec)
+		}
+	})
+
+	t.Run("final_gate_stand_down_after_max_blocks", func(t *testing.T) {
+		in := BoundaryInput{
+			NotedNoAllowedPath: true,
+			WitnessBlockCount:  2, // already at max
+			FinalGate:          func() (bool, string) { return false, "missing:stamp" },
+		}
+		dec := EvaluateBoundary(ladder, witness, in)
+		if dec.Disposition == DispCleanWrapup {
+			t.Fatalf("must not grant clean wrapup: %+v", dec)
+		}
+		if dec.Stage != StageGiveUp || dec.Disposition != DispClaimUnwitnessedGiveUp {
+			t.Fatalf("want StageGiveUp with DispClaimUnwitnessedGiveUp, got %+v", dec)
+		}
+	})
+
+	t.Run("missing_witness_claim_in_enforce_mode_blocks_clean_wrapup", func(t *testing.T) {
+		in := BoundaryInput{
+			NotedNoAllowedPath: true,
+		}
+		dec := EvaluateBoundary(ladder, witness, in)
+		if dec.Disposition == DispCleanWrapup || dec.ExitCode == 0 {
+			t.Fatalf("expected blocked or unwitnessed continue, got clean wrapup: %+v", dec)
+		}
+		if dec.Action != ActionContinue || dec.ExitCode != 2 {
+			t.Fatalf("want ActionContinue with exit 2, got %+v", dec)
+		}
+	})
+
+	t.Run("witness_satisfied_allows_clean_wrapup", func(t *testing.T) {
+		in := BoundaryInput{
+			NotedNoAllowedPath: true,
+			FinalGate:          func() (bool, string) { return true, "" },
+			WitnessClaim: &WitnessClaim{
+				Claimed:   true,
+				Witnessed: true,
+				Commit:    "abc1234",
+				Detail:    "verified commit",
+			},
+		}
+		dec := EvaluateBoundary(ladder, witness, in)
+		if dec.Disposition != DispCleanWrapup || dec.ExitCode != 0 || dec.Action != ActionAllow {
+			t.Fatalf("want clean wrapup when witness is satisfied, got %+v", dec)
+		}
+	})
 }
 
 // TestHarnessParityTrajectory proves that guard and native agent harnesses make

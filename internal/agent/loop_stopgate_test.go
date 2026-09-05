@@ -113,6 +113,39 @@ func TestStopgateNoAllowedPathCleanWrapupInAgentLoop(t *testing.T) {
 	}
 }
 
+func TestStopgateNoAllowedPathRequiresWitnessInAgentLoop(t *testing.T) {
+	satisfied := false
+	p := &stopgateTestPlanner{
+		answers: []Completion{
+			{
+				Message:      Message{Role: RoleAssistant, Content: "Blocked; no allowed path: TRUST_VIOLATION"},
+				FinishReason: "stop",
+				Usage:        Usage{CompletionTokens: 1},
+			},
+			{
+				Message:      Message{Role: RoleAssistant, Content: "Landed verified commit."},
+				FinishReason: "stop",
+				Usage:        Usage{CompletionTokens: 1},
+			},
+		},
+	}
+
+	metrics, err := RunArm(context.Background(), p, "test task", false, 5, nil, WithFinalGate(func() (bool, string) {
+		if !satisfied {
+			satisfied = true
+			return false, "missing:stamp"
+		}
+		return true, ""
+	}))
+	if err != nil {
+		t.Fatalf("RunArm failed: %v", err)
+	}
+
+	if metrics.FinalAnswer != "Landed verified commit." {
+		t.Fatalf("expected loop to continue past unwitnessed no allowed path stop, got %q", metrics.FinalAnswer)
+	}
+}
+
 func TestStopgateDenyAllGiveUpStandDownInAgentLoop(t *testing.T) {
 	// Configure SameStop=2 so that after 2 identical consecutive denials (same tool+reason),
 	// give-up stands down and allows the stop
