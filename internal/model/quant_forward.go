@@ -397,6 +397,10 @@ func attnDecodeOne(attnOut, Q []float32, cache *KVCache, layer, nH, hd, w, grp i
 	return scoreScratch
 }
 
+// q8PrefillOProjDstObserver is an optional test hook called before self_attn.o_proj
+// GEMM in prefillBatchedQ, allowing unit tests to witness destination buffer reuse.
+var q8PrefillOProjDstObserver func(layer int, dst []float32)
+
 // prefillBatchedQ is the Q8_0 prefill path: the structural twin of prefillBatched, with
 // the projections run as quantized batched GEMMs (each weight row reused across all P
 // pre-quantized activation rows). Fills the same f32 KV cache the f32 path builds.
@@ -441,6 +445,11 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 		toc(&tGemm, t)
 		return r
 	}
+	gemmInto := func(qt *q8Tensor, qp *q8Panel, dst []float32) {
+		t := tic()
+		qGemm8Into(qt, qp, dst)
+		toc(&tGemm, t)
+	}
 	// One reused scratch panel for all 4×NumLayers activation quantizations: each panel is
 	// fully consumed before the next is built (q/k/v → o → gate/up → down), so a single
 	// buffer is safe and avoids ~120 large allocations per prefill.
@@ -464,6 +473,11 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 	for t := 0; t < P; t++ {
 		cosP[t], sinP[t] = ropeRow(cfg, base+t)
 	}
+
+	// Reused output projection destination for all NumLayers: o_proj writes into O via qGemm8Into
+	// and is synchronously accumulated into X (X[i] += O[i]) before the layer finishes, avoiding
+	// a fresh P*H allocation per layer.
+	O := make([]float32, P*H)
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
@@ -513,7 +527,10 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 		attnPrefillInto(attnOut, Q, Kl, Vl, P, base, nH, hd, w, grp, cfg.windowForLayer(l), l, scale, attnCap, scoreDot, s.M.attnObs)
 		toc(&tAttn, tA)
 
-		O := gemm(ql.oProj, qz(attnOut, P, nH*hd))
+		if q8PrefillOProjDstObserver != nil {
+			q8PrefillOProjDstObserver(l, O)
+		}
+		gemmInto(ql.oProj, qz(attnOut, P, nH*hd), O)
 		for t := 0; t < P; t++ {
 			m.addBiasIfPresent(O[t*H:(t+1)*H], lp("self_attn.o_proj.bias"))
 		}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/shipgate"
@@ -428,293 +429,306 @@ func splitNonEmpty(s string) []string {
 	return out
 }
 
-// TestTransientMeasurementErrorRecoveredWithinBound proves issue #11608:
-// Two transient infrastructure measurement failures at threshold k=2 do NOT
-// prematurely trip the regression breaker or abandon later viable candidates
-// when bounded transient recovery is configured. Failed attempts are retained
-// in the journal as unmeasured evidence (preserving failure auditability).
-func TestTransientMeasurementErrorRecoveredWithinBound(t *testing.T) {
-	candidateAttempts := make(map[string]int)
-	steps := []fakeStep{
-		{label: "c1", metric: 2.0, green: true, clean: true},
-		{label: "c2", metric: 3.0, green: true, clean: true},
-		{label: "c3", metric: 4.0, green: true, clean: true},
-	}
+// TestTransientMeasureErrorRecoversWithoutTrippingBreaker reproduces issue #11608:
+// two transient measurement failures at threshold 2 must not trip the regression
+// breaker immediately and abandon later viable candidates. Transient attempts are
+// retained as unmeasured evidence while candidates recover and keep their gains.
+func TestTransientMeasureErrorRecoversWithoutTrippingBreaker(t *testing.T) {
+	calls := make(map[string]int)
 
 	h := Harness{
-		MetricName:          "m",
-		LowerBetter:         false,
-		BaselineRefName:     "test-ref",
-		MaxTransientRetries: 2,
+		MetricName:      "lru_hit_rate",
+		LowerBetter:     false,
+		BaselineRefName: "main",
 		BaselineMetric: func() (float64, string, error) {
-			return 1.0, "sha001", nil
+			return 1.0, "sha-base", nil
 		},
 		Candidates: func() []Candidate {
 			return []Candidate{
-				{Label: "c1", Payload: 0},
-				{Label: "c2", Payload: 1},
-				{Label: "c3", Payload: 2},
+				{Label: "c1"},
+				{Label: "c2"},
+				{Label: "c3"},
 			}
 		},
 		Measure: func(c Candidate) (Measurement, error) {
-			candidateAttempts[c.Label]++
-			att := candidateAttempts[c.Label]
+			calls[c.Label]++
+			attempt := calls[c.Label]
 			switch c.Label {
 			case "c1":
-				// First attempt fails with ErrTransient; retry succeeds.
-				if att == 1 {
-					return Measurement{}, ErrTransient
+				if attempt == 1 {
+					return Measurement{}, NewTransientMeasureError(errors.New("git lock busy"))
 				}
-				return Measurement{Metric: steps[0].metric, SuiteGreen: steps[0].green, TruthClean: steps[0].clean}, nil
+				return Measurement{Metric: 2.0, SuiteGreen: true, TruthClean: true}, nil
 			case "c2":
-				// First attempt fails with typed TransientError; retry succeeds.
-				if att == 1 {
-					return Measurement{}, NewTransientError(errors.New("timeout"))
+				if attempt == 1 {
+					return Measurement{}, NewTransientMeasureError(errors.New("network timeout"))
 				}
-				return Measurement{Metric: steps[1].metric, SuiteGreen: steps[1].green, TruthClean: steps[1].clean}, nil
+				return Measurement{Metric: 3.0, SuiteGreen: true, TruthClean: true}, nil
 			case "c3":
-				return Measurement{Metric: steps[2].metric, SuiteGreen: steps[2].green, TruthClean: steps[2].clean}, nil
+				return Measurement{Metric: 4.0, SuiteGreen: true, TruthClean: true}, nil
 			default:
-				return Measurement{}, errors.New("unknown")
+				return Measurement{}, errors.New("unknown candidate")
 			}
 		},
 	}
 
-	dir := t.TempDir()
-	jPath := filepath.Join(dir, "journal.jsonl")
-	j, err := NewJournal(jPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	res, err := Run(h, j, 2, 0) // k = 2 breaker threshold
-	_ = j.Close()
+	// Threshold k=2: in the unfixed code, 2 transient failures trip the breaker
+	// immediately and abandon candidate c3. With bounded recovery, c1 and c2
+	// recover, c3 is evaluated, and all three are kept.
+	res, err := Run(h, nil, 2, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if res.Escalated {
-		t.Fatalf("loop escalated prematurely! final=%s", res.Final)
+		t.Fatalf("loop escalated prematurely; transient measurement errors must not trip the breaker immediately")
 	}
 	if res.Cycles != 3 {
-		t.Fatalf("cycles=%d, want 3 (all candidates should be evaluated)", res.Cycles)
+		t.Fatalf("cycles=%d, want 3 (all candidates evaluated)", res.Cycles)
 	}
 	if res.Kept != 3 {
-		t.Fatalf("kept=%d, want 3", res.Kept)
+		t.Fatalf("kept=%d, want 3 (all candidates kept after recovery)", res.Kept)
+	}
+	if res.Final != shipgate.KEEP {
+		t.Fatalf("final decision=%s, want KEEP", res.Final.String())
 	}
 	if res.FinalBaseline != 4.0 {
 		t.Fatalf("final baseline=%.1f, want 4.0", res.FinalBaseline)
 	}
 
-	// Verify all 5 rows (2 failed attempts + 3 successful evaluations) in res.Rows
-	// and in the persisted journal.
+	// 5 rows total:
+	// row 0: c1 attempt 1 (transient error, unmeasured evidence, breaker 0)
+	// row 1: c1 attempt 2 (measured gain, kept, breaker 0)
+	// row 2: c2 attempt 1 (transient error, unmeasured evidence, breaker 0)
+	// row 3: c2 attempt 2 (measured gain, kept, breaker 0)
+	// row 4: c3 attempt 1 (measured gain, kept, breaker 0)
 	if len(res.Rows) != 5 {
-		t.Fatalf("total rows=%d, want 5 (2 transient RETRY + 3 KEEP)", len(res.Rows))
+		t.Fatalf("len(res.Rows)=%d, want 5 (retaining all error attempts as unmeasured evidence)", len(res.Rows))
 	}
 
-	// Row 0: c1 transient retry (unmeasured, breaker count 0)
-	r0 := res.Rows[0]
-	if r0.Candidate != "c1" || r0.Measured || r0.Decision != "RETRY" || r0.BreakerCount != 0 {
-		t.Fatalf("r0 mismatch: %+v", r0)
-	}
-	// Row 1: c1 kept (measured, breaker count 0)
-	r1 := res.Rows[1]
-	if r1.Candidate != "c1" || !r1.Measured || r1.Decision != "KEEP" || !r1.Kept {
-		t.Fatalf("r1 mismatch: %+v", r1)
-	}
-	// Row 2: c2 transient retry (unmeasured, breaker count 0)
-	r2 := res.Rows[2]
-	if r2.Candidate != "c2" || r2.Measured || r2.Decision != "RETRY" || r2.BreakerCount != 0 {
-		t.Fatalf("r2 mismatch: %+v", r2)
-	}
-	// Row 3: c2 kept (measured, breaker count 0)
-	r3 := res.Rows[3]
-	if r3.Candidate != "c2" || !r3.Measured || r3.Decision != "KEEP" || !r3.Kept {
-		t.Fatalf("r3 mismatch: %+v", r3)
-	}
-	// Row 4: c3 kept (measured, breaker count 0)
-	r4 := res.Rows[4]
-	if r4.Candidate != "c3" || !r4.Measured || r4.Decision != "KEEP" || !r4.Kept {
-		t.Fatalf("r4 mismatch: %+v", r4)
+	// Check unmeasured error evidence rows.
+	for _, idx := range []int{0, 2} {
+		r := res.Rows[idx]
+		if r.Measured {
+			t.Errorf("row %d: measured=true, want false for transient error attempt", idx)
+		}
+		if r.Kept {
+			t.Errorf("row %d: kept=true, want false for transient error attempt", idx)
+		}
+		if r.BreakerCount != 0 {
+			t.Errorf("row %d: breaker count=%d, want 0 (transient recovery must not advance breaker)", idx, r.BreakerCount)
+		}
+		if !strings.Contains(r.Note, "transient") {
+			t.Errorf("row %d: note %q should mention transient", idx, r.Note)
+		}
 	}
 
-	// Verify journal persistence
-	b, err := os.ReadFile(jPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := splitNonEmpty(string(b))
-	if len(lines) != 5 {
-		t.Fatalf("journal line count=%d, want 5", len(lines))
+	// Check kept rows.
+	for _, idx := range []int{1, 3, 4} {
+		r := res.Rows[idx]
+		if !r.Measured {
+			t.Errorf("row %d: measured=false, want true", idx)
+		}
+		if !r.Kept {
+			t.Errorf("row %d: kept=false, want true", idx)
+		}
+		if r.Decision != "KEEP" {
+			t.Errorf("row %d: decision=%s, want KEEP", idx, r.Decision)
+		}
+		if r.BreakerCount != 0 {
+			t.Errorf("row %d: breaker count=%d, want 0", idx, r.BreakerCount)
+		}
 	}
 }
 
-// TestPermanentBuildFailureTripsRegressionBreaker proves that untyped errors and
-// build failures are NOT retried and advance the breaker, tripping it at threshold k.
-func TestPermanentBuildFailureTripsRegressionBreaker(t *testing.T) {
-	steps := []fakeStep{
-		{label: "bad1", err: errBoom},
-		{label: "bad2", err: errors.New("syntax error: unexpected token")},
-		{label: "viable", metric: 10.0, green: true, clean: true},
-	}
-	h := fakeHarness("m", false, 1.0, "sha", steps)
-	h.MaxTransientRetries = 2 // retries configured, but must NOT apply to permanent errors
+// TestTransientMeasureErrorExhaustionAdvancesBreaker proves that recovery is finite
+// and bounded: when transient retries are exhausted, the failure advances the
+// regression breaker and eventually escalates if failures persist.
+func TestTransientMeasureErrorExhaustionAdvancesBreaker(t *testing.T) {
+	calls := make(map[string]int)
 
-	res, err := Run(h, nil, 2, 0) // k = 2
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !res.Escalated {
-		t.Fatalf("expected escalation from permanent failures, got final=%s", res.Final)
-	}
-	if res.Cycles != 2 {
-		t.Fatalf("cycles=%d, want 2 (loop must stop after 2 permanent non-keeps at k=2)", res.Cycles)
-	}
-	if len(res.Rows) != 2 {
-		t.Fatalf("rows=%d, want 2 (permanent errors must not retry)", len(res.Rows))
-	}
-	if res.Rows[0].Decision != "REVERT" || res.Rows[0].BreakerCount != 1 {
-		t.Fatalf("row 0 mismatch: %+v", res.Rows[0])
-	}
-	if res.Rows[1].Decision != "ESCALATE" || res.Rows[1].BreakerCount != 2 {
-		t.Fatalf("row 1 mismatch: %+v", res.Rows[1])
-	}
-}
-
-// TestTransientMeasurementErrorExceedingBoundTripsBreaker proves that transient
-// recovery is bounded: persistent transient failures that exhaust all retries
-// are recorded as unrecovered non-keeps that advance and trip the breaker.
-func TestTransientMeasurementErrorExceedingBoundTripsBreaker(t *testing.T) {
 	h := Harness{
-		MetricName:          "m",
-		LowerBetter:         false,
-		BaselineRefName:     "test-ref",
-		MaxTransientRetries: 1, // only 1 retry allowed (2 attempts total)
+		MetricName:      "p50",
+		LowerBetter:     true,
+		BaselineRefName: "main",
 		BaselineMetric: func() (float64, string, error) {
-			return 1.0, "sha001", nil
+			return 10.0, "sha-base", nil
 		},
+		TransientMeasurementRecoveryLimit: 1, // 1 retry allowed (total 2 attempts per candidate)
 		Candidates: func() []Candidate {
 			return []Candidate{
-				{Label: "c1", Payload: 0},
-				{Label: "c2", Payload: 1},
-				{Label: "c3", Payload: 2},
+				{Label: "c1"},
+				{Label: "c2"},
+				{Label: "c3"},
 			}
 		},
 		Measure: func(c Candidate) (Measurement, error) {
-			return Measurement{}, ErrTransient // fails transiently on every attempt
+			calls[c.Label]++
+			return Measurement{}, NewTransientMeasureError(errors.New("service unavailable"))
 		},
 	}
 
-	res, err := Run(h, nil, 2, 0) // k = 2
+	// Threshold k=2: c1 exhausts its retries (advances breaker to 1), then c2
+	// exhausts its retries (advances breaker to 2 == k -> ESCALATE).
+	res, err := Run(h, nil, 2, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !res.Escalated {
-		t.Fatalf("expected escalation after exhausted retries, got final=%s", res.Final)
+		t.Fatalf("expected loop to escalate after exhausting retries on consecutive candidates")
+	}
+	if res.Final != shipgate.ESCALATE {
+		t.Fatalf("final decision=%s, want ESCALATE", res.Final.String())
 	}
 	if res.Cycles != 2 {
-		t.Fatalf("cycles=%d, want 2 (stopped after c1 and c2 exhausted retries)", res.Cycles)
+		t.Fatalf("cycles=%d, want 2 (stopped on escalation at cycle 2)", res.Cycles)
 	}
-	// For each candidate: 1 RETRY row (attempt 1) + 1 REVERT/ESCALATE row (attempt 2 exhausted) = 4 rows total
+
+	// 4 rows total: c1 attempt 1 (recovering) + c1 attempt 2 (exhausted),
+	// c2 attempt 1 (recovering) + c2 attempt 2 (exhausted -> escalate).
 	if len(res.Rows) != 4 {
-		t.Fatalf("rows=%d, want 4", len(res.Rows))
+		t.Fatalf("len(res.Rows)=%d, want 4", len(res.Rows))
 	}
-	if res.Rows[0].Decision != "RETRY" || res.Rows[0].BreakerCount != 0 {
-		t.Fatalf("row 0: %+v", res.Rows[0])
+	for i, r := range res.Rows {
+		if r.Measured {
+			t.Errorf("row %d measured=true, want false", i)
+		}
 	}
-	if res.Rows[1].Decision != "REVERT" || res.Rows[1].BreakerCount != 1 {
-		t.Fatalf("row 1: %+v", res.Rows[1])
+	if res.Rows[1].BreakerCount != 1 {
+		t.Fatalf("c1 exhausted: breaker count=%d, want 1", res.Rows[1].BreakerCount)
 	}
-	if res.Rows[2].Decision != "RETRY" || res.Rows[2].BreakerCount != 1 {
-		t.Fatalf("row 2: %+v", res.Rows[2])
+	if res.Rows[3].BreakerCount != 2 {
+		t.Fatalf("c2 exhausted: breaker count=%d, want 2", res.Rows[3].BreakerCount)
 	}
-	if res.Rows[3].Decision != "ESCALATE" || res.Rows[3].BreakerCount != 2 {
-		t.Fatalf("row 3: %+v", res.Rows[3])
+	if res.Rows[3].Decision != "ESCALATE" {
+		t.Fatalf("c2 exhausted: decision=%s, want ESCALATE", res.Rows[3].Decision)
+	}
+}
+
+// TestUntypedMeasureErrorPreservesImmediateRevert confirms untyped errors do not
+// retry and immediately advance the breaker, preserving default legacy behavior.
+func TestUntypedMeasureErrorPreservesImmediateRevert(t *testing.T) {
+	calls := 0
+	h := Harness{
+		MetricName:      "m",
+		LowerBetter:     false,
+		BaselineRefName: "main",
+		BaselineMetric: func() (float64, string, error) {
+			return 1.0, "sha-base", nil
+		},
+		Candidates: func() []Candidate {
+			return []Candidate{{Label: "untyped-broken"}}
+		},
+		Measure: func(Candidate) (Measurement, error) {
+			calls++
+			return Measurement{}, errors.New("untyped compiler error")
+		},
+	}
+
+	res, err := Run(h, nil, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("untyped error called Measure %d times, want exactly 1 (no retries)", calls)
+	}
+	if len(res.Rows) != 1 {
+		t.Fatalf("len(res.Rows)=%d, want exactly 1 row", len(res.Rows))
+	}
+	r := res.Rows[0]
+	if r.Measured {
+		t.Fatal("untyped error must mark row Measured=false")
+	}
+	if r.BreakerCount != 1 {
+		t.Fatalf("untyped error must advance breaker immediately, got %d", r.BreakerCount)
+	}
+	if r.Decision != "REVERT" {
+		t.Fatalf("decision=%s, want REVERT", r.Decision)
 	}
 }
 
 type customTransientErr struct {
-	transient bool
+	msg string
 }
 
-func (c customTransientErr) Error() string   { return "custom error" }
-func (c customTransientErr) Transient() bool { return c.transient }
+func (e *customTransientErr) Error() string          { return e.msg }
+func (e *customTransientErr) TransientMeasure() bool { return true }
 
-// TestIsTransientClassification proves all transient markers (ErrTransient,
-// TransientError, interface{ Transient() bool }) are recognized while untyped
-// errors are not.
-func TestIsTransientClassification(t *testing.T) {
-	if IsTransient(nil) {
-		t.Fatal("nil should not be transient")
+type customIsTransientErr struct {
+	msg string
+}
+
+func (e *customIsTransientErr) Error() string     { return e.msg }
+func (e *customIsTransientErr) IsTransient() bool { return true }
+
+type customTransientBoolErr struct {
+	msg string
+}
+
+func (e *customTransientBoolErr) Error() string   { return e.msg }
+func (e *customTransientBoolErr) Transient() bool { return true }
+
+// TestIsTransientMeasureErrorPredicate tests the recognition of transient errors.
+func TestIsTransientMeasureErrorPredicate(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"untyped error", errors.New("something broke"), false},
+		{"TransientMeasureError", NewTransientMeasureError(errors.New("disk full")), true},
+		{"wrapped TransientMeasureError", fmt.Errorf("wrap: %w", NewTransientMeasureError(errors.New("inner"))), true},
+		{"custom TransientMeasure()", &customTransientErr{"lock"}, true},
+		{"custom IsTransient()", &customIsTransientErr{"timeout"}, true},
+		{"custom Transient()", &customTransientBoolErr{"busy"}, true},
 	}
-	if !IsTransient(ErrTransient) {
-		t.Fatal("ErrTransient must be transient")
-	}
-	if !IsTransient(fmt.Errorf("wrapped: %w", ErrTransient)) {
-		t.Fatal("wrapped ErrTransient must be transient")
-	}
-	if !IsTransient(&TransientError{Err: errors.New("timeout")}) {
-		t.Fatal("*TransientError must be transient")
-	}
-	if !IsTransient(TransientError{Err: errors.New("timeout")}) {
-		t.Fatal("TransientError value must be transient")
-	}
-	if !IsTransient(NewTransientError(errors.New("conn reset"))) {
-		t.Fatal("NewTransientError must be transient")
-	}
-	if !IsTransient(customTransientErr{transient: true}) {
-		t.Fatal("customTransientErr{transient: true} must be transient")
-	}
-	if IsTransient(customTransientErr{transient: false}) {
-		t.Fatal("customTransientErr{transient: false} must not be transient")
-	}
-	if IsTransient(errors.New("syntax error")) {
-		t.Fatal("untyped errors.New must not be transient")
-	}
-	if IsTransient(errBoom) {
-		t.Fatal("errBoom must not be transient")
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := IsTransientMeasureError(c.err)
+			if got != c.want {
+				t.Fatalf("IsTransientMeasureError(%v) = %v, want %v", c.err, got, c.want)
+			}
+		})
 	}
 }
 
-// TestTransientBudgetBoundsTotalRetriesAcrossRun proves TransientBudget limits the total
-// transient retry attempts across the entire run.
-func TestTransientBudgetBoundsTotalRetriesAcrossRun(t *testing.T) {
+// TestHarnessCustomIsTransientClassifier proves that Harness.IsTransientMeasureError
+// allows callers to classify domain-specific errors without modifying error types.
+func TestHarnessCustomIsTransientClassifier(t *testing.T) {
+	attempts := 0
 	h := Harness{
-		MetricName:          "m",
-		LowerBetter:         false,
-		BaselineRefName:     "test-ref",
-		MaxTransientRetries: 2,
-		TransientBudget:     1, // only 1 retry for the entire run
+		MetricName:      "m",
+		LowerBetter:     false,
+		BaselineRefName: "main",
 		BaselineMetric: func() (float64, string, error) {
-			return 1.0, "sha001", nil
+			return 1.0, "sha-base", nil
+		},
+		IsTransientMeasureError: func(err error) bool {
+			return strings.Contains(err.Error(), "transient-needle")
 		},
 		Candidates: func() []Candidate {
-			return []Candidate{
-				{Label: "c1", Payload: 0},
-				{Label: "c2", Payload: 1},
-			}
+			return []Candidate{{Label: "c1"}}
 		},
-		Measure: func(c Candidate) (Measurement, error) {
-			return Measurement{}, ErrTransient
+		Measure: func(Candidate) (Measurement, error) {
+			attempts++
+			if attempts == 1 {
+				return Measurement{}, errors.New("error with transient-needle inside")
+			}
+			return Measurement{Metric: 2.0, SuiteGreen: true, TruthClean: true}, nil
 		},
 	}
 
-	res, err := Run(h, nil, 3, 0)
+	res, err := Run(h, nil, 2, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// c1 uses the 1 budget retry: row 0 (RETRY), row 1 (REVERT, retries exhausted).
-	// c2 cannot retry (budget 0 left): row 2 (REVERT, no retries allowed).
-	if len(res.Rows) != 3 {
-		t.Fatalf("rows=%d, want 3", len(res.Rows))
+	if res.Kept != 1 {
+		t.Fatalf("kept=%d, want 1", res.Kept)
 	}
-	if res.Rows[0].Decision != "RETRY" {
-		t.Fatalf("row 0 should be RETRY: %+v", res.Rows[0])
-	}
-	if res.Rows[1].Decision != "REVERT" {
-		t.Fatalf("row 1 should be REVERT: %+v", res.Rows[1])
-	}
-	if res.Rows[2].Decision != "REVERT" {
-		t.Fatalf("row 2 should be REVERT: %+v", res.Rows[2])
+	if attempts != 2 {
+		t.Fatalf("attempts=%d, want 2 (recovered via custom classifier)", attempts)
 	}
 }
