@@ -99,9 +99,13 @@ var Catalog = map[string]string{
 	// Qwen3.8-27B is a dense multimodal hybrid (GDN + full attention).
 	// Q4_K_M is the portable default for Metal and CUDA prove-outs; the
 	// official FP8 checkpoint is exposed separately for A100-class engines.
-	"qwen38":         "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
-	"qwen38:27b":     "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
-	"qwen38:27b-fp8": "hf://Qwen/Qwen3.8-27B-FP8",
+	// UD-Q2_K_XL is the optimal 2-bit quantization for Apple Silicon Mac testing,
+	// using dynamic layer selection to preserve agentic reasoning and tool-calling.
+	"qwen38":              "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+	"qwen38:27b":          "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+	"qwen38:27b-fp8":      "hf://Qwen/Qwen3.8-27B-FP8",
+	"qwen38:27b-q2k":      "hf://unsloth/Qwen3.8-27B-GGUF@4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-Q2_K_XL.gguf",
+	"qwen38:27b-ud-q2kxl": "hf://unsloth/Qwen3.8-27B-GGUF@4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-Q2_K_XL.gguf",
 	// Ornith 1.0 — DeepReinforce's MIT-licensed Qwen3.5-family agentic-coding models
 	// (released 2026-06-25, HF org deepreinforce-ai; the collection is exactly 7 public
 	// repos — 9B/35B/397B + GGUF/FP8 siblings, NO 31B). Bare "ornith" and "ornith:9b-gguf"
@@ -135,12 +139,14 @@ var Catalog = map[string]string{
 // heuristic: "qwen2.5:7b" is a fine chat model but is NOT seeded here because the coding
 // loop wants the Coder-tuned weights. Keep it in sync with the Qwen2.5-Coder seeds above.
 var codingAliases = map[string]bool{
-	"qwen2.5-coder:1.5b": true,
-	"qwen2.5-coder:3b":   true,
-	"qwen2.5-coder:7b":   true,
-	"qwen38":             true,
-	"qwen38:27b":         true,
-	"qwen38:27b-fp8":     true,
+	"qwen2.5-coder:1.5b":  true,
+	"qwen2.5-coder:3b":    true,
+	"qwen2.5-coder:7b":    true,
+	"qwen38":              true,
+	"qwen38:27b":          true,
+	"qwen38:27b-fp8":      true,
+	"qwen38:27b-q2k":      true,
+	"qwen38:27b-ud-q2kxl": true,
 }
 
 // DefaultLocalCodingAlias is the model `fak guard --local`/`--gguf` picks when the user

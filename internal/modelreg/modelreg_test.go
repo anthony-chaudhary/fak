@@ -316,9 +316,11 @@ func writeRegistry(t *testing.T, dir string, m map[string]string) {
 
 func TestEmbeddedQwen38Aliases(t *testing.T) {
 	want := map[string]string{
-		"qwen38":         "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
-		"qwen38:27b":     "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
-		"qwen38:27b-fp8": "hf://Qwen/Qwen3.8-27B-FP8",
+		"qwen38":              "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+		"qwen38:27b":          "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+		"qwen38:27b-fp8":      "hf://Qwen/Qwen3.8-27B-FP8",
+		"qwen38:27b-q2k":      "hf://unsloth/Qwen3.8-27B-GGUF@4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-Q2_K_XL.gguf",
+		"qwen38:27b-ud-q2kxl": "hf://unsloth/Qwen3.8-27B-GGUF@4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-Q2_K_XL.gguf",
 	}
 	for alias, target := range want {
 		t.Run(alias, func(t *testing.T) {
@@ -333,6 +335,7 @@ func TestEmbeddedQwen38Aliases(t *testing.T) {
 }
 
 func TestQwen38IsFirstClassDefault(t *testing.T) {
+	withCacheRoot(t)
 	if DefaultAlias != "qwen38:27b" {
 		t.Fatalf("DefaultAlias = %q, want qwen38:27b", DefaultAlias)
 	}
