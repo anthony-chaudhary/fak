@@ -402,3 +402,66 @@ func BenchmarkTimeBudget(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkParseBudgetEnvelope(b *testing.B) {
+	spec := "turns=20,calls=50,tokens=200000,context=64000,wall=2h,spend=$25,throughput=40/s,max-tokens=1024,gap=250ms"
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		env, err := ParseBudgetEnvelope(spec)
+		if err != nil {
+			b.Fatalf("ParseBudgetEnvelope failed: %v", err)
+		}
+		if env.Budget.TurnsLeft != 20 {
+			b.Fatalf("unexpected turns_left")
+		}
+	}
+}
+
+func BenchmarkDescriptorRegistry_RegisterAndGet(b *testing.B) {
+	store := NewMemStore()
+	reg := NewRegistry(store)
+	st := DefaultState("bench-trace")
+	now := time.Now()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		id := fmt.Sprintf("session-%d", i%256)
+		_, err := reg.Register(id, "localhost", st, DefaultDescriptorTTL, now)
+		if err != nil {
+			b.Fatalf("register failed: %v", err)
+		}
+		_, found, err := reg.Get(id)
+		if err != nil || !found {
+			b.Fatalf("get failed")
+		}
+	}
+}
+
+func BenchmarkComposePace(b *testing.B) {
+	pace := Pace{MaxTokensPerTurn: 512}
+	tp := Throughput{ObservedTokensPerSec: 20, ExpectedTokensPerSec: 40}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		budget := pace.ComposePace(tp, 4096, 1024)
+		if budget <= 0 {
+			b.Fatalf("invalid composed budget")
+		}
+	}
+}
+
+func BenchmarkTimeBudget_ElapsedAndRemaining(b *testing.B) {
+	now := time.Unix(1000000, 0)
+	tb := NewTimeBudget().WithLimit(10 * time.Minute).Start(now)
+	queryTime := now.Add(2 * time.Minute)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		elapsed := tb.Elapsed(queryTime)
+		rem, ok := tb.Remaining(queryTime)
+		if !ok || elapsed <= 0 || rem <= 0 {
+			b.Fatalf("unexpected time budget query result")
+		}
+	}
+}

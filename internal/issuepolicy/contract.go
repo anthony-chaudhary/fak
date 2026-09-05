@@ -19,6 +19,7 @@
 package issuepolicy
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
@@ -165,6 +166,7 @@ type Candidate struct {
 	RequiredScaleStages    string          `json:"required_scale_stages,omitempty"`
 	WorkEstimate           string          `json:"work_estimate,omitempty"`
 	ScopeContribution      string          `json:"scope_contribution,omitempty"`
+	BetterBecause          string          `json:"better_because,omitempty"`
 	// RequiredModelTier / OptimalModelTier are the body-field FALLBACK for an
 	// issue whose namespaced tier/T?-required|optimal labels are unavailable
 	// (the issue's own stated assumption). A namespaced label always wins over
@@ -731,6 +733,35 @@ func addReviewReason(review *Review, reason string) {
 	sort.Strings(review.Reasons)
 }
 
+var titleScopeRE = regexp.MustCompile(`^[a-zA-Z0-9_-]+\s*\(\s*([a-zA-Z0-9_./-]+)\s*\)\s*:`)
+var titleBracketRE = regexp.MustCompile(`^\[\s*([a-zA-Z0-9_./-]+)\s*\]`)
+
+func inferLane(title string, paths []string) string {
+	title = strings.TrimSpace(title)
+	if m := titleScopeRE.FindStringSubmatch(title); m != nil {
+		return strings.TrimSpace(m[1])
+	}
+	if m := titleBracketRE.FindStringSubmatch(title); m != nil {
+		return strings.TrimSpace(m[1])
+	}
+	for _, p := range paths {
+		p = strings.TrimPrefix(strings.TrimSpace(p), "/")
+		if strings.HasPrefix(p, "internal/") {
+			rest := strings.TrimPrefix(p, "internal/")
+			pkg := rest
+			if idx := strings.IndexByte(rest, '/'); idx > 0 {
+				pkg = rest[:idx]
+			} else {
+				pkg = strings.TrimSuffix(pkg, ".go")
+			}
+			if pkg != "" {
+				return pkg
+			}
+		}
+	}
+	return ""
+}
+
 // CandidateFromIssueDraft parses the standard issue-contract sections from an
 // already-filed GitHub issue row. It is shared by audit surfaces and worker
 // prompt renderers so every cycle interprets issue bodies the same way.
@@ -754,24 +785,117 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 	if routing.laneSet {
 		lane = routing.lane
 	}
-	paths := issueDraftPaths(section("Likely files", "Path hints", "Paths", "Files"))
+	paths := issueDraftPaths(section("Likely files", "Path hints", "Paths", "Files", "Likely file", "File scope", "File scopes"))
 	if routing.pathsSet {
 		paths = routing.paths
+	}
+	if len(paths) == 0 {
+		paths = extractBodyGoPaths(d.Body)
+	}
+	if lane == "" {
+		lane = inferLane(d.Title, paths)
 	}
 	expectedSteps := parseExpectedSteps(section("Expected steps", "Step budget"))
 	if routing.stepsSet {
 		expectedSteps = routing.expectedSteps
 	}
-	return Candidate{
+
+	currentState := strmatch.FirstTrimmed(
+		section("Current state", "Today", "Current baseline", "Baseline", "Motivation"),
+		extractBulletedField(section("Value", "Value frame", "Problem frame"), "today"),
+		extractBulletedField(d.Body, "today"),
+	)
+	if currentState == "" {
+		currentState = strmatch.FirstTrimmed(
+			section("Problem"),
+			extractBulletedField(section("Value", "Value frame", "Problem frame"), "problem"),
+			extractBulletedField(d.Body, "problem"),
+		)
+	}
+
+	betterBecause := strmatch.FirstTrimmed(
+		section("Better because"),
+		extractBulletedField(section("Value", "Value frame", "Problem frame"), "better because"),
+		extractBulletedField(d.Body, "better because"),
+	)
+
+	isBug := strings.HasPrefix(strings.ToLower(strings.TrimSpace(d.Title)), "fix(")
+	if !isBug {
+		for _, l := range d.Labels {
+			name := strings.ToLower(strings.TrimSpace(l.Name))
+			if name == "bug" || name == "kind/bug" || name == "type/bug" {
+				isBug = true
+				break
+			}
+		}
+	}
+
+	inScope := section("Core through-line", "In scope", "Scope", "Requirements", "Technical proposal", "Execution plan", "Deliverables")
+
+	doneCondition := strmatch.FirstTrimmed(
+		section("Done condition", "Definition of done", "Acceptance criteria", "Done when", "DoD"),
+		prefixedSectionValue(doneWitness, "Done condition"),
+		extractBulletedField(section("Value", "Value frame", "Problem frame"), "done when"),
+		extractBulletedField(section("Value", "Value frame", "Problem frame"), "acceptance criteria"),
+		extractBulletedField(d.Body, "done when"),
+		extractBulletedField(d.Body, "acceptance criteria"),
+	)
+	witness := strmatch.FirstTrimmed(
+		section("Witness"),
+		prefixedSectionValue(doneWitness, "Witness"),
+		extractBulletedField(section("Value", "Value frame", "Problem frame"), "witness"),
+		extractBulletedField(d.Body, "witness"),
+	)
+	if doneCondition == "" && witness != "" {
+		if betterBecause != "" {
+			doneCondition = betterBecause
+		} else if isBug {
+			doneCondition = fmt.Sprintf("Defect resolved and witness passes: %s", witness)
+		}
+	}
+
+	parentRef := section("Parent context", "Parent ref", "Parent issue", "Source")
+	whyNow := section("Why this is next", "Why now")
+	workingSpine := section("Working spine")
+	outOfScope := section("Gold-plating boundary", "Out of scope")
+	acceptanceGate := section("Acceptance gate")
+	closureBinding := section("Closure binding")
+
+	if d.Number > 0 && doneCondition != "" && witness != "" {
+		if closureBinding == "" {
+			if lane != "" {
+				closureBinding = fmt.Sprintf("Resolving commit cites #%d and carries `(fak %s)`", d.Number, lane)
+			} else {
+				closureBinding = fmt.Sprintf("Resolving commit cites #%d", d.Number)
+			}
+		}
+		if acceptanceGate == "" {
+			acceptanceGate = witness
+		}
+		if workingSpine == "" {
+			workingSpine = d.Title
+		}
+		if whyNow == "" {
+			whyNow = fmt.Sprintf("Unblocks #%d", d.Number)
+		}
+		if parentRef == "" {
+			parentRef = fmt.Sprintf("#%d", d.Number)
+		}
+		if outOfScope == "" {
+			outOfScope = "Not specified (defer gold-plating)"
+		}
+	}
+
+	c := Candidate{
 		Schema:                 Schema,
 		IssueNumber:            d.Number,
 		Key:                    issueDraftKey(d),
 		Title:                  d.Title,
 		Generation:             issueDraftGeneration(d, section("Generation stream", "Generation")),
-		ParentRef:              section("Parent context", "Parent ref", "Parent issue", "Source"),
-		CurrentState:           section("Current state"),
-		WhyNow:                 section("Why this is next", "Why now"),
-		WorkingSpine:           section("Working spine"),
+		ParentRef:              parentRef,
+		CurrentState:           currentState,
+		WhyNow:                 whyNow,
+		WorkingSpine:           workingSpine,
 		PriorityContext:        section("Priority context", "Spine priority", "Importance"),
 		WorkUnit:               section("Work unit", "Work-unit shape", "Issue shape"),
 		ExpectedSteps:          expectedSteps,
@@ -781,21 +905,21 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		Coordination:           issueDraftAgentNotes(section("Coordination", "Coordination notes", "Handoff notes")),
 		Trigger:                agentSectionValue(section("Trigger", "Creation trigger")),
 		BatchPolicy:            agentSectionValue(section("Batch policy", "Noise control", "Spam control")),
-		InScope:                section("Core through-line", "In scope"),
-		OutOfScope:             section("Gold-plating boundary", "Out of scope"),
+		InScope:                inScope,
+		OutOfScope:             outOfScope,
 		RootPoint:              section("Root point"),
 		OriginSignal:           section("Origin signal"),
 		PreventsRecurrence:     section("Prevents recurrence"),
-		DoneCondition:          strmatch.FirstTrimmed(section("Done condition", "Definition of done", "Acceptance criteria", "DoD"), prefixedSectionValue(doneWitness, "Done condition")),
-		Witness:                strmatch.FirstTrimmed(section("Witness"), prefixedSectionValue(doneWitness, "Witness")),
-		AcceptanceGate:         section("Acceptance gate"),
+		DoneCondition:          doneCondition,
+		Witness:                witness,
+		AcceptanceGate:         acceptanceGate,
 		Lane:                   lane,
 		Paths:                  paths,
 		Dependencies:           ParseIssueDependencies(section("Dependencies", "Dependency markers")),
 		Labels:                 issueDraftLabels(d.Labels),
 		BoundaryNotes:          issueDraftNotes(section("Boundary notes", "Risk / boundary notes")),
 		Reversibility:          agentSectionValue(section("Reversibility", "Rollback")),
-		ClosureBinding:         section("Closure binding"),
+		ClosureBinding:         closureBinding,
 		ClosureClaim:           section("Closure claim", "Ship claim"),
 		ClosureWitnessStandard: section("Closure witness standard", "Witnessed completion standard"),
 		CompletionStandard:     section("Completion standard"),
@@ -805,12 +929,39 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		RequiredScaleStages:    section("Required scale stages", "Required evidence stages"),
 		WorkEstimate:           section("Work estimate"),
 		ScopeContribution:      section("Overall completion contribution", "Scope contribution"),
+		BetterBecause:          betterBecause,
 		ProblemFrame:           AssessProblemFrame(d),
 		// Body fallback for the tier tags — used only when the namespaced
 		// tier/T?-required|optimal GitHub labels are absent (see modelTier).
-		RequiredModelTier: issueHeaderField(d.Body, "Required model tier"),
-		OptimalModelTier:  issueHeaderField(d.Body, "Optimal model tier"),
+		RequiredModelTier:      issueHeaderField(d.Body, "Required model tier"),
+		OptimalModelTier:       issueHeaderField(d.Body, "Optimal model tier"),
 	}
+
+	if c.CurrentState == "" {
+		c.CurrentState = strmatch.FirstTrimmed(
+			section("Problem"),
+			extractBulletedField(section("Value", "Value frame", "Problem frame"), "problem"),
+			extractBulletedField(d.Body, "problem"),
+		)
+	}
+
+	if c.InScope == "" && !hasBriefVocabulary(sections) {
+		if c.BetterBecause != "" {
+			c.InScope = c.BetterBecause
+		} else if isBug {
+			c.InScope = d.Title
+		}
+	}
+
+	if c.DoneCondition == "" && c.Witness != "" && !hasBriefVocabulary(sections) {
+		if c.BetterBecause != "" {
+			c.DoneCondition = c.BetterBecause
+		} else if isBug {
+			c.DoneCondition = fmt.Sprintf("Defect resolved and witness passes: %s", c.Witness)
+		}
+	}
+
+	return c
 }
 
 // ParseIssueDependencies parses issue-body dependency markers from a
@@ -968,6 +1119,7 @@ func normalize(c Candidate) Candidate {
 	c.ClosureBinding = strings.TrimSpace(c.ClosureBinding)
 	c.ClosureClaim = strings.TrimSpace(c.ClosureClaim)
 	c.ClosureWitnessStandard = strings.TrimSpace(c.ClosureWitnessStandard)
+	c.BetterBecause = strings.TrimSpace(c.BetterBecause)
 	if c.ProblemFrame.Schema == "" {
 		c.ProblemFrame = ProblemFrame{Schema: ProblemFrameSchema, Ready: true, Centrality: CentralityUnclassified, Checks: map[string]ProblemCheck{}}
 	}
@@ -991,16 +1143,16 @@ func missingRequiredIssueSections(body string, c Candidate) []string {
 		}
 		return false
 	}
-	hasScope := hasSection("Scope") || (hasSection("Core through-line", "In scope") && hasSection("Gold-plating boundary", "Out of scope"))
+	hasScope := hasSection("Scope") || (hasSection("Core through-line", "In scope") && (hasSection("Gold-plating boundary", "Out of scope") || c.OutOfScope != ""))
 	checks := []struct {
 		field string
 		ok    bool
 	}{
-		{"current_state", hasSection("Current state") && c.CurrentState != ""},
+		{"current_state", (hasSection("Current state") || extractBulletedField(body, "today") != "") && c.CurrentState != ""},
 		{"scope", hasScope},
-		{"done_condition", c.DoneCondition != "" && hasSection("Done condition", "Definition of done", "Acceptance criteria", "DoD", "Done condition / witness")},
-		{"witness", c.Witness != "" && hasSection("Witness", "Done condition / witness")},
-		{"likely_files", len(c.Paths) > 0 && hasSection("Likely files", "Path hints", "Paths", "Files")},
+		{"done_condition", c.DoneCondition != "" && (hasSection("Done condition", "Definition of done", "Acceptance criteria", "Done when", "DoD", "Done condition / witness") || extractBulletedField(body, "done when") != "" || extractBulletedField(body, "acceptance criteria") != "")},
+		{"witness", c.Witness != "" && (hasSection("Witness", "Done condition / witness") || extractBulletedField(body, "witness") != "")},
+		{"likely_files", len(c.Paths) > 0},
 	}
 	var missing []string
 	for _, check := range checks {

@@ -27,6 +27,9 @@ var (
 	sinkSourceDecision      SourceDecision
 	sinkAttemptErrorClass   AttemptErrorClass
 	sinkEnv                 []string
+	sinkEarnedBudget        int
+	sinkLimitClass          LimitClassification
+	sinkLimitFound          bool
 )
 
 // BenchmarkPlan measures deterministic resume pricing and strategy recommendations across
@@ -95,6 +98,16 @@ func BenchmarkPlan(b *testing.B) {
 				Pricing:          opusPricing,
 				HorizonTurns:     20,
 				PriorSessionWarm: true,
+			},
+		},
+		{
+			name: "unknown_idle",
+			in: Input{
+				ResidentTokens: 250000,
+				IdleSeconds:    -1,
+				TTL:            TTL5m,
+				Pricing:        opusPricing,
+				HorizonTurns:   20,
 			},
 		},
 	}
@@ -780,6 +793,58 @@ func BenchmarkClassifyAttemptError(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				sinkAttemptErrorClass = ClassifyAttemptError(txt)
+			}
+		})
+	}
+}
+
+func makeAttemptHistory(n int) []Attempt {
+	attempts := make([]Attempt, n)
+	for i := 0; i < n; i++ {
+		attempts[i] = Attempt{
+			Phase:       "launch",
+			UnixSeconds: int64(1000 + i*600),
+		}
+	}
+	return attempts
+}
+
+func BenchmarkEarnedResumeBudget(b *testing.B) {
+	for _, count := range []int{2, 10, 50} {
+		b.Run(fmt.Sprintf("launches_%d", count), func(b *testing.B) {
+			history := makeAttemptHistory(count)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				sinkEarnedBudget = EarnedResumeBudget(history)
+			}
+		})
+	}
+}
+
+func BenchmarkClassifyLimitResponse(b *testing.B) {
+	openaiBody := []byte(`{"error":{"message":"Rate limit reached for requests","type":"tokens","param":null,"code":"rate_limit_exceeded"}}`)
+	anthropicBody := []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your daily limit"}}`)
+	plainBody := []byte(`session limit reached, resets in 4 hours`)
+
+	cases := []struct {
+		name   string
+		status int
+		body   []byte
+	}{
+		{"openai_429", 429, openaiBody},
+		{"anthropic_429", 429, anthropicBody},
+		{"plain_429", 429, plainBody},
+		{"non_429_status", 500, openaiBody},
+	}
+
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			status, body := tc.status, tc.body
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				sinkLimitClass, sinkLimitFound = ClassifyLimitResponse(status, body)
 			}
 		})
 	}

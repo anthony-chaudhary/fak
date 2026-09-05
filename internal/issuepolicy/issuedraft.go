@@ -7,6 +7,7 @@ package issuepolicy
 // scoring, dispatch classification, and required-section checks stay in contract.go.
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -124,7 +125,16 @@ func markdownSections(body string) map[string]string {
 		if current == "" {
 			return
 		}
-		out[current] = strings.TrimSpace(strings.Join(buf, "\n"))
+		content := strings.TrimSpace(strings.Join(buf, "\n"))
+		out[current] = content
+		if canon := canonicalHeading(current); canon != "" && canon != current {
+			if _, exists := out[canon]; !exists {
+				out[canon] = content
+			}
+		}
+		if current == "problem" && out["current state"] == "" {
+			out["current state"] = content
+		}
 	}
 	for _, raw := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
 		line := strings.TrimSpace(raw)
@@ -140,6 +150,43 @@ func markdownSections(body string) map[string]string {
 	}
 	flush()
 	return out
+}
+
+func canonicalHeading(norm string) string {
+	norm = strings.ToLower(strings.TrimSpace(norm))
+	switch {
+	case strings.Contains(norm, "requirement") ||
+		strings.Contains(norm, "proposal") ||
+		strings.Contains(norm, "deliverable") ||
+		strings.Contains(norm, "execution") ||
+		strings.Contains(norm, "spec"):
+		return "scope"
+	case (strings.Contains(norm, "done condition") ||
+		strings.Contains(norm, "acceptance") ||
+		strings.Contains(norm, "done when") ||
+		strings.Contains(norm, "dod") ||
+		strings.Contains(norm, "definition of done")) &&
+		!strings.Contains(norm, "witness") &&
+		!strings.Contains(norm, "gate"):
+		return "done condition"
+	case strings.Contains(norm, "current state") ||
+		strings.Contains(norm, "today") ||
+		strings.Contains(norm, "baseline") ||
+		strings.Contains(norm, "motivation"):
+		return "current state"
+	case strings.Contains(norm, "path hint") ||
+		strings.Contains(norm, "paths") ||
+		strings.Contains(norm, "files") ||
+		strings.Contains(norm, "likely file") ||
+		strings.Contains(norm, "file scope"):
+		return "likely files"
+	case strings.Contains(norm, "value frame") ||
+		strings.Contains(norm, "problem frame") ||
+		strings.Contains(norm, "frame"):
+		return "value"
+	default:
+		return norm
+	}
 }
 
 func normalizeHeading(s string) string {
@@ -188,6 +235,18 @@ func agentSectionValue(s string) string {
 	}
 }
 
+var bodyGoPathRE = regexp.MustCompile("(?:`|\")?(internal/[A-Za-z0-9_./-]+\\.go)(?:`|\")?")
+
+func extractBodyGoPaths(body string) []string {
+	var paths []string
+	for _, m := range bodyGoPathRE.FindAllStringSubmatch(body, -1) {
+		if path := cleanPathHint(m[1]); path != "" {
+			paths = append(paths, path)
+		}
+	}
+	return compact(paths)
+}
+
 func issueDraftPaths(section string) []string {
 	var out []string
 	for _, m := range codeSpanRE.FindAllStringSubmatch(section, -1) {
@@ -200,6 +259,45 @@ func issueDraftPaths(section string) []string {
 		if path := cleanPathHint(line); path != "" {
 			out = append(out, path)
 		}
+		for _, tok := range strings.Fields(line) {
+			tok = strings.Trim(tok, ",;:()[]`\"'")
+			if path := cleanPathHint(tok); path != "" {
+				out = append(out, path)
+			}
+		}
 	}
 	return compact(out)
 }
+
+func extractBulletedField(text, fieldName string) string {
+	want := normalizeHeading(fieldName)
+	want = strings.ReplaceAll(want, "_", " ")
+	if want == "" {
+		return ""
+	}
+	for _, raw := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		line := trimListPrefix(trimmed)
+		if line == trimmed {
+			continue
+		}
+		key, val, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		cleanKey := normalizeHeading(key)
+		cleanKey = strings.ReplaceAll(cleanKey, "_", " ")
+		if cleanKey != want {
+			continue
+		}
+		val = strings.TrimSpace(val)
+		val = strings.Trim(val, "*_ \t")
+		val = strings.Trim(val, "`")
+		return val
+	}
+	return ""
+}
+

@@ -2,6 +2,7 @@ package accounts
 
 import (
 	"fmt"
+	"net/http"
 	"testing"
 	"time"
 )
@@ -608,6 +609,46 @@ func BenchmarkNameLie(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			if !mismatch.NameLie() {
 				b.Fatal("expected name lie")
+			}
+		}
+	})
+}
+
+func BenchmarkClassifySeatHealth(b *testing.B) {
+	now := time.Now()
+	body429 := []byte(`{"error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your daily limit."}}`)
+	body403Wall := []byte(`{"error":{"type":"permission_error","message":"OAuth authentication is currently not allowed for this organization."}}`)
+	hdr429 := http.Header{"Retry-After": []string{"60"}}
+
+	b.Run("StatusOK", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			h := ClassifySeatHealth(http.StatusOK, nil, nil, now)
+			if h != SeatHealthReady {
+				b.Fatalf("unexpected health: %v", h)
+			}
+		}
+	})
+
+	b.Run("StatusRateLimit", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			h := ClassifySeatHealth(http.StatusTooManyRequests, body429, hdr429, now)
+			if h != SeatHealthUsageLimited {
+				b.Fatalf("unexpected health: %v", h)
+			}
+		}
+	})
+
+	b.Run("StatusOrgWall", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			h := ClassifySeatHealth(http.StatusForbidden, body403Wall, nil, now)
+			if h != SeatHealthOrgAuthWall {
+				b.Fatalf("unexpected health: %v", h)
 			}
 		}
 	})
