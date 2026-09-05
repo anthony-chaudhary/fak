@@ -139,9 +139,9 @@ seam is a named open axis). Write it under `paths.next_packets`, named
    could be launched with: the plan id, the phase id, the plan-doc path, and the
    one-line goal. Keep each prompt standalone (no shared context). **The dispatch
    list IS a proposed fan-out partition** — if these picks are about to be launched
-   in parallel, price the partition first with
-   [`dos-plan-price`](../dos-plan-price/SKILL.md) so a colliding set is caught
-   before any agent launches, not when the colliding lease is refused mid-wave.
+   in parallel, price the partition first with `fak dispatch price` or `dos arbitrate`
+   so a colliding set is caught before any agent launches, not when the colliding lease
+   is refused mid-wave.
 4. **Already shipped** — the picks Step 2 found `shipped: true`, with `source`/`sha`.
 
 Alongside the packet, emit the gate sidecar so Step 4 can classify it — write

@@ -8,7 +8,7 @@ description: Flag content-redundant SKILL.md pairs as merge candidates — pairw
 The one context-cost technique from the Comet/Perplexity writeup that fak did
 *not* already cover (#3930): **skill-to-skill content redundancy**.
 [`skill-lifecycle`](../skill-lifecycle/SKILL.md) archives *dead* skills and
-[`clean-skill`](../clean-skill/SKILL.md) trims *fat* ones — neither measures
+[`skill-score`](../skill-score/SKILL.md) audits over-budget ones — neither measures
 whether two *live* skills say the same thing. With 55+ `SKILL.md` files (many
 `*-score` scorecards), that overlap is where the pack quietly bloats.
 
