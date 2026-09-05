@@ -248,7 +248,8 @@ func (s *Server) readResource(params json.RawMessage) (any, *rpcError) {
 	if e := mcpUnmarshalParams(params, &p, "resources/read"); e != nil {
 		return nil, e
 	}
-	if p.URI == "fak://capabilities" || strings.HasPrefix(p.URI, "fak://capabilities?") || strings.HasPrefix(p.URI, "fak://server/capabilities?") {
+	cleanURI := strings.TrimRight(p.URI, "/")
+	if cleanURI == "fak://capabilities" || strings.HasPrefix(p.URI, "fak://capabilities?") || strings.HasPrefix(p.URI, "fak://server/capabilities?") {
 		p.URI = "fak://server/capabilities"
 	}
 	if req, ok := contextq.MCPMissingContextResourceRequest(p.URI, 0); ok {

@@ -730,6 +730,133 @@ func TestGuardSessionStartHintPositiveFirst(t *testing.T) {
 	}
 }
 
+func TestGuardSessionStartHintCodexPositiveFirst(t *testing.T) {
+	hint := guardSessionStartHintForProvider("codex")
+	if !strings.HasPrefix(hint, "Reach for the fak substrate verbs") {
+		t.Fatalf("hint does not lead with affordance: %q", hint)
+	}
+	for _, forbidden := range []string{"before working as", "must invoke", "will not", "do not", "never"} {
+		if strings.Contains(strings.ToLower(hint), forbidden) {
+			t.Fatalf("hint retains negation-first clause %q: %q", forbidden, hint)
+		}
+	}
+	if !strings.Contains(hint, "(MCP server `fak_guard`)") {
+		t.Fatalf("hint dropped MCP server `fak_guard`: %s", hint)
+	}
+	if strings.Contains(hint, "(MCP server `fak`)") {
+		t.Fatalf("hint retains (MCP server `fak`): %s", hint)
+	}
+	for _, token := range []string{
+		"`mcp__fak_guard__fak_capabilities`",
+		"`mcp__fak_guard__fak_admit`",
+		"`mcp__fak_guard__fak_adjudicate`",
+		"`mcp__fak_guard__fak_memory_run`",
+		"`mcp__fak_guard__fak_tools_search`",
+	} {
+		if !strings.Contains(hint, token) {
+			t.Fatalf("hint dropped %s", token)
+		}
+	}
+	if strings.Contains(hint, "mcp__fak__") {
+		t.Fatalf("hint retains mcp__fak__: %q", hint)
+	}
+	if got := negframe.Reframe(hint); got != hint {
+		t.Fatalf("positive source is not reframe-idempotent:\n got %q\nwant %q", got, hint)
+	}
+}
+
+func TestGuardSessionStartCodexProviderAffordance(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runGuardSessionStart(&out, &errb, []string{"--mode", "on", "--provider", "codex"})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+
+	var env struct {
+		HookSpecificOutput struct {
+			HookEventName     string `json:"hookEventName"`
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("stdout is not valid JSON envelope: %v\n%s", err, out.String())
+	}
+	if env.HookSpecificOutput.HookEventName != "SessionStart" {
+		t.Fatalf("hookEventName = %q, want SessionStart", env.HookSpecificOutput.HookEventName)
+	}
+	ctx := env.HookSpecificOutput.AdditionalContext
+
+	if !strings.Contains(ctx, "(MCP server `fak_guard`)") {
+		t.Fatalf("affordance missing '(MCP server `fak_guard`)': %s", ctx)
+	}
+	if strings.Contains(ctx, "(MCP server `fak`)") {
+		t.Fatalf("affordance retains '(MCP server `fak`)' for codex: %s", ctx)
+	}
+	for _, verb := range []string{
+		"mcp__fak_guard__fak_capabilities",
+		"mcp__fak_guard__fak_admit",
+		"mcp__fak_guard__fak_adjudicate",
+		"mcp__fak_guard__fak_memory_run",
+		"mcp__fak_guard__fak_tools_search",
+	} {
+		if !strings.Contains(ctx, verb) {
+			t.Fatalf("affordance did not name entry verb %q: %s", verb, ctx)
+		}
+	}
+	if strings.Contains(ctx, "mcp__fak__") {
+		t.Fatalf("affordance still contains mcp__fak__ for codex: %s", ctx)
+	}
+
+	if !strings.HasPrefix(ctx, "Reach for the fak substrate verbs") {
+		t.Fatalf("codex hint does not lead with affordance: %q", ctx)
+	}
+	for _, forbidden := range []string{"before working as", "must invoke", "will not", "do not", "never"} {
+		if strings.Contains(strings.ToLower(ctx), forbidden) {
+			t.Fatalf("codex hint retains negation clause %q: %q", forbidden, ctx)
+		}
+	}
+	if reframed := negframe.Reframe(ctx); reframed != ctx {
+		t.Fatalf("codex hint is not a positive-voice fixed point:\n have: %q\n want: %q", ctx, reframed)
+	}
+}
+
+func TestGuardSessionStartCodexProviderManagedAffordance(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runGuardSessionStart(&out, &errb, []string{"--mode", "on", "--provider", "codex", "--managed"})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+
+	var env struct {
+		HookSpecificOutput struct {
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("stdout is not valid JSON envelope: %v\n%s", err, out.String())
+	}
+	ctx := env.HookSpecificOutput.AdditionalContext
+
+	if !strings.Contains(ctx, "(MCP server `fak_guard`)") {
+		t.Fatalf("managed codex hint missing '(MCP server `fak_guard`)': %s", ctx)
+	}
+	for _, verb := range []string{
+		"mcp__fak_guard__fak_context_value",
+		"mcp__fak_guard__fak_context_spans",
+		"mcp__fak_guard__fak_context_restore",
+	} {
+		if !strings.Contains(ctx, verb) {
+			t.Fatalf("managed codex hint did not name session-state tool %q: %s", verb, ctx)
+		}
+	}
+	if strings.Contains(ctx, "mcp__fak__") {
+		t.Fatalf("managed codex hint still contains mcp__fak__: %s", ctx)
+	}
+	if reframed := negframe.Reframe(ctx); reframed != ctx {
+		t.Fatalf("managed codex hint is not a positive-voice fixed point:\n have: %q\n want: %q", ctx, reframed)
+	}
+}
+
 // TestGuardSessionStartWritesNegframeJournal is #5365's witness for the halves #3568 deferred.
 // Before this, the read side (guardNegframeSummaryLine) was structurally silent because NOTHING
 // wrote guardNegframeJournalRel, and the emit called negframe.ReframeFakOnly unconditionally so
