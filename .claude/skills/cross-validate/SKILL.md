@@ -31,6 +31,15 @@ git diff --stat HEAD~1..HEAD
 
 Ensure no extraneous files are included. All changes must fall within the lane's declared tree.
 
+For native tuning, apply the `AGENTS.md` default before expensive execution: independently
+review validity and planned cost against existing authorization and budget, binding the review
+to exact source/configuration/workload identity, objective, load, and SLO. Check the full
+configuration delta and justification for inseparable bundles; attribute results to the bundle
+only. Require fresh reference measurements where changed objective or load makes history
+incompatible; SLO-only changes may use reassessed compatible history. Candidate changes
+invalidate affected review and witnesses only. This review grants neither spend nor security
+authority and preserves existing user authorization, budget limits, and security controls.
+
 ---
 
 ## Step 1 — On-Device Build & Test Verification

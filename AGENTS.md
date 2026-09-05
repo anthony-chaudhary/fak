@@ -83,6 +83,17 @@ New native-performance work prefers Qwen3.8.
 Qwen3.6 is allowed only when the task states an explicit task-specific exception, such as regression, compatibility, historical comparison, or a hardware/artifact constraint.
 Preserve historical Qwen3.6 artifacts; do not rename or rewrite them as Qwen3.8 evidence.
 
+Default native-tuning discipline: identify each candidate by source, configuration, and
+workload. Re-measure the reference when objective or load changes make prior measurements
+incompatible; for SLO-only changes, reassess compatible historical measurements against the
+new SLO before deciding whether a rerun is needed. Enumerate the full configuration delta;
+prefer one-variable comparisons and justify inseparable bundles. Bundle evidence supports
+only the bundle, with individual attribution requiring separate evidence. Before an expensive
+run, obtain independent validity and budget review bound to that exact candidate and its
+objective, load, SLO, and planned cost. Candidate changes invalidate affected review and
+witnesses; retain unaffected evidence with its scope. Review preserves existing user
+authorization, budget limits, and security controls; it grants neither spend nor security authority.
+
 ## What this project is
 
 **fak** is an *agent kernel*: one Go binary that sits between an AI agent and the tools
