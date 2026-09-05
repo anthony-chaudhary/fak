@@ -88,7 +88,7 @@ func runLoopDrive(stdout, stderr io.Writer, argv []string) int {
 	ledger := fs.String("ledger", defaultLoopLedger(), "loop JSONL ledger path")
 	policy := fs.String("policy", defaultLoopPolicy(), "loop admission policy JSON path")
 	loopID := fs.String("loop", "", "loop id override (default: frontmatter loop; with --template, template loop id)")
-	goalPath := fs.String("goal", "GOAL.md", "GOAL.md goal-spec path")
+	goalPath := fs.String("goal", envOrDefault("FAK_GOAL_SPEC", "GOAL.md"), "GOAL.md goal-spec path")
 	maxIters := fs.Int("max-iters", 0, "override max iterations (default: budget.max_iters from the goal spec, or 1)")
 	maxTokens := fs.Int64("max-tokens", 0, "token budget exposed to the child; child reports deltas through FAK_GOAL_TOKEN_USAGE_FILE")
 	deadlineRaw := fs.String("deadline", "", "wall-clock budget as RFC3339 timestamp or duration from now, such as 10m")

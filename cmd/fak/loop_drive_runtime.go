@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"time"
 )
@@ -30,8 +31,13 @@ func prepareLoopDriveRuntime(opt *loopDriveOptions) (loopDriveRuntime, error) {
 		runtime.floor = time.Second
 	}
 	if runtime.goalPath == "" {
-		runtime.goalPath = "GOAL.md"
+		if envGoal := strings.TrimSpace(os.Getenv("FAK_GOAL_SPEC")); envGoal != "" {
+			runtime.goalPath = envGoal
+		} else {
+			runtime.goalPath = "GOAL.md"
+		}
 	}
+	opt.GoalPath = runtime.goalPath
 	handoffFile, cleanup, err := loopDriveHandoffFile(opt.HandoffFile)
 	if err != nil {
 		return loopDriveRuntime{}, err

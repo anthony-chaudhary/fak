@@ -461,3 +461,108 @@ func TestLoopDriveArmedFileDisarmsBetweenTurns(t *testing.T) {
 		}
 	})
 }
+
+func TestLoopDriveGoalSpecEnvAndCustomPath(t *testing.T) {
+	oldNewCommand := loopDriveNewCommand
+	oldWitness := loopDriveRunWitness
+	defer func() {
+		loopDriveNewCommand = oldNewCommand
+		loopDriveRunWitness = oldWitness
+	}()
+
+	t.Run("uses FAK_GOAL_SPEC when --goal flag omitted", func(t *testing.T) {
+		tempDir := t.TempDir()
+		goalsDir := filepath.Join(tempDir, "goals")
+		if err := os.MkdirAll(goalsDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		customGoal := filepath.Join(goalsDir, "GOAL-custom.md")
+		ledger := filepath.Join(tempDir, "loops.jsonl")
+		writeLoopDriveGoal(t, customGoal, false, true)
+
+		t.Setenv("FAK_GOAL_SPEC", customGoal)
+
+		var sawGoalSpec string
+		loopDriveNewCommand = func(argv []string, env []string, stdout, stderr io.Writer) loopCommand {
+			sawGoalSpec = loopDriveEnvValue(env, "FAK_GOAL_SPEC")
+			return &loopDriveFakeCommand{wait: func() error {
+				writeLoopDriveGoal(t, customGoal, true, true)
+				return nil
+			}}
+		}
+		loopDriveRunWitness = func(spec loopdrive.Spec, headBefore, headAfter string) loopDriveWitnessResult {
+			return loopDriveWitnessResult{Status: loopmgr.StatusWitnessedDone, Reason: "WITNESS_OK", Summary: "done", ExitCode: 0}
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := runLoop(&stdout, &stderr, []string{"drive", "--ledger", ledger, "--max-iters", "1", "--", "worker"})
+		if code != 0 {
+			t.Fatalf("drive code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+		}
+		if sawGoalSpec != customGoal {
+			t.Fatalf("child FAK_GOAL_SPEC = %q, want %q", sawGoalSpec, customGoal)
+		}
+	})
+
+	t.Run("custom --goal path passed to child environment", func(t *testing.T) {
+		tempDir := t.TempDir()
+		customGoal := filepath.Join(tempDir, "GOAL-custom.md")
+		ledger := filepath.Join(tempDir, "loops.jsonl")
+		writeLoopDriveGoal(t, customGoal, false, true)
+
+		var sawGoalSpec string
+		loopDriveNewCommand = func(argv []string, env []string, stdout, stderr io.Writer) loopCommand {
+			sawGoalSpec = loopDriveEnvValue(env, "FAK_GOAL_SPEC")
+			return &loopDriveFakeCommand{wait: func() error {
+				writeLoopDriveGoal(t, customGoal, true, true)
+				return nil
+			}}
+		}
+		loopDriveRunWitness = func(spec loopdrive.Spec, headBefore, headAfter string) loopDriveWitnessResult {
+			return loopDriveWitnessResult{Status: loopmgr.StatusWitnessedDone, Reason: "WITNESS_OK", Summary: "done", ExitCode: 0}
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := runLoop(&stdout, &stderr, []string{"drive", "--goal", customGoal, "--ledger", ledger, "--max-iters", "1", "--", "worker"})
+		if code != 0 {
+			t.Fatalf("drive code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+		}
+		if sawGoalSpec != customGoal {
+			t.Fatalf("child FAK_GOAL_SPEC = %q, want %q", sawGoalSpec, customGoal)
+		}
+	})
+
+	t.Run("prepareLoopDriveRuntime resolves FAK_GOAL_SPEC when goalPath is empty", func(t *testing.T) {
+		t.Setenv("FAK_GOAL_SPEC", "goals/GOAL-custom.md")
+		opt := loopDriveOptions{}
+		rt, err := prepareLoopDriveRuntime(&opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rt.cleanup != nil {
+			defer rt.cleanup()
+		}
+		if rt.goalPath != "goals/GOAL-custom.md" {
+			t.Fatalf("runtime goalPath = %q, want %q", rt.goalPath, "goals/GOAL-custom.md")
+		}
+		if opt.GoalPath != "goals/GOAL-custom.md" {
+			t.Fatalf("opt GoalPath = %q, want %q", opt.GoalPath, "goals/GOAL-custom.md")
+		}
+
+		t.Setenv("FAK_GOAL_SPEC", "")
+		opt2 := loopDriveOptions{}
+		rt2, err := prepareLoopDriveRuntime(&opt2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rt2.cleanup != nil {
+			defer rt2.cleanup()
+		}
+		if rt2.goalPath != "GOAL.md" {
+			t.Fatalf("runtime goalPath = %q, want %q", rt2.goalPath, "GOAL.md")
+		}
+		if opt2.GoalPath != "GOAL.md" {
+			t.Fatalf("opt GoalPath = %q, want %q", opt2.GoalPath, "GOAL.md")
+		}
+	})
+}
