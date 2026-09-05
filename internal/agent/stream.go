@@ -703,7 +703,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		content   strings.Builder
 		reasoning strings.Builder
 		rawBuf    bytes.Buffer // reconstructs the wire transcript for Completion.Raw
-		toolAcc   = map[int]*ToolCall{}
+		toolAcc   = map[int]*streamToolCallAcc{}
 		usage     Usage
 		model     string
 		finish    string
@@ -769,19 +769,19 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 			for _, tcd := range ch.Delta.ToolCalls {
 				acc := toolAcc[tcd.Index]
 				if acc == nil {
-					acc = &ToolCall{Type: "function"}
+					acc = &streamToolCallAcc{callType: "function"}
 					toolAcc[tcd.Index] = acc
 				}
 				if tcd.ID != "" {
-					acc.ID = tcd.ID
+					acc.id = tcd.ID
 				}
 				if tcd.Type != "" {
-					acc.Type = tcd.Type
+					acc.callType = tcd.Type
 				}
 				if tcd.Function.Name != "" {
-					acc.Function.Name = tcd.Function.Name
+					acc.name = tcd.Function.Name
 				}
-				acc.Function.Arguments += tcd.Function.Arguments
+				acc.arguments.WriteString(tcd.Function.Arguments)
 			}
 		}
 	}
@@ -795,7 +795,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 
 	calls := make([]ToolCall, 0, len(toolAcc))
 	for _, idx := range sortedIndices(toolAcc) {
-		calls = append(calls, *toolAcc[idx])
+		calls = append(calls, toolAcc[idx].toolCall())
 	}
 	comp := normalizeCompletionToolCalls(&Completion{
 		Message:      Message{Role: RoleAssistant, Content: content.String(), ReasoningContent: reasoning.String(), ToolCalls: calls},
@@ -812,7 +812,25 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	return comp, nil
 }
 
-func sortedIndices(m map[int]*ToolCall) []int {
+type streamToolCallAcc struct {
+	id        string
+	callType  string
+	name      string
+	arguments strings.Builder
+}
+
+func (a *streamToolCallAcc) toolCall() ToolCall {
+	return ToolCall{
+		ID:   a.id,
+		Type: a.callType,
+		Function: Func{
+			Name:      a.name,
+			Arguments: a.arguments.String(),
+		},
+	}
+}
+
+func sortedIndices[T any](m map[int]T) []int {
 	idx := make([]int, 0, len(m))
 	for k := range m {
 		idx = append(idx, k)

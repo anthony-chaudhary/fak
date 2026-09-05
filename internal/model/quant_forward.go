@@ -397,6 +397,10 @@ func attnDecodeOne(attnOut, Q []float32, cache *KVCache, layer, nH, hd, w, grp i
 	return scoreScratch
 }
 
+// q8PrefillOProjDstObserver is an optional test hook called before self_attn.o_proj
+// GEMM in prefillBatchedQ, allowing unit tests to witness destination buffer reuse.
+var q8PrefillOProjDstObserver func(layer int, dst []float32)
+
 // prefillBatchedQ is the Q8_0 prefill path: the structural twin of prefillBatched, with
 // the projections run as quantized batched GEMMs (each weight row reused across all P
 // pre-quantized activation rows). Fills the same f32 KV cache the f32 path builds.
@@ -529,6 +533,9 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 		attnPrefillInto(attnOut, Q, Kl, Vl, P, base, nH, hd, w, grp, cfg.windowForLayer(l), l, scale, attnCap, scoreDot, s.M.attnObs)
 		toc(&tAttn, tA)
 
+		if q8PrefillOProjDstObserver != nil {
+			q8PrefillOProjDstObserver(l, O)
+		}
 		gemmInto(ql.oProj, qz(attnOut, P, nH*hd), O)
 		for t := 0; t < P; t++ {
 			m.addBiasIfPresent(O[t*H:(t+1)*H], lp("self_attn.o_proj.bias"))

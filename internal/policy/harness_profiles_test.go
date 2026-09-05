@@ -405,3 +405,63 @@ func TestHarnessToolSchemaDriftMutationCoverage(t *testing.T) {
 		}
 	})
 }
+
+func TestCodexProfile_SteeringAndGuidance(t *testing.T) {
+	var prof harnessProfilesDoc
+	if err := json.Unmarshal(harnessProfilesJSON, &prof); err != nil {
+		t.Fatalf("harness-profiles.json is not valid JSON: %v", err)
+	}
+
+	var codex *harnessProfileDecl
+	for i := range prof.Harnesses {
+		if prof.Harnesses[i].Name == "codex" {
+			codex = &prof.Harnesses[i]
+			break
+		}
+	}
+	if codex == nil {
+		t.Fatal("codex harness profile missing")
+	}
+
+	required := make(map[string]bool, len(codex.RequiredTools))
+	for _, tool := range codex.RequiredTools {
+		required[tool] = true
+	}
+	for _, want := range []string{"fak_read", "spawn_agent", "wait_agent", "close_agent"} {
+		if !required[want] {
+			t.Errorf("codex profile missing required tool %q", want)
+		}
+	}
+
+	hasFakReadPrompt := false
+	hasTimeoutPrompt := false
+	for _, prompt := range codex.StarterPrompts {
+		if strings.Contains(prompt, "fak_read") {
+			hasFakReadPrompt = true
+		}
+		if strings.Contains(prompt, "wait_agent") || strings.Contains(prompt, "timeout") || strings.Contains(prompt, "close_agent") {
+			hasTimeoutPrompt = true
+		}
+	}
+	if !hasFakReadPrompt {
+		t.Errorf("codex StarterPrompts missing fak_read guidance")
+	}
+	if !hasTimeoutPrompt {
+		t.Errorf("codex StarterPrompts missing timeout recovery guidance")
+	}
+
+	if codex.CoordinationGuidance == nil {
+		t.Fatal("codex CoordinationGuidance is nil")
+	}
+	if codex.CoordinationGuidance.TimeoutRecovery == "" {
+		t.Errorf("codex CoordinationGuidance.TimeoutRecovery is empty")
+	}
+	if codex.CoordinationGuidance.ReadToolPreference == "" {
+		t.Errorf("codex CoordinationGuidance.ReadToolPreference is empty")
+	}
+	for _, want := range []string{"fak_read", "spawn_agent", "wait_agent", "close_agent"} {
+		if !stringSliceContains(codex.CoordinationGuidance.RecommendedTools, want) {
+			t.Errorf("codex CoordinationGuidance.RecommendedTools missing %q", want)
+		}
+	}
+}

@@ -208,7 +208,9 @@ func TestRedTeamFloorReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read golden report %s: %v (regenerate with FAK_UPDATE_GOLDEN=1)", goldenReportPath(), err)
 	}
-	if got != string(want) {
+	wantStr := strings.ReplaceAll(string(want), "\r\n", "\n")
+	gotStr := strings.ReplaceAll(got, "\r\n", "\n")
+	if gotStr != wantStr {
 		t.Fatalf("rendered report drifted from committed golden %s — the floor's behavior or the corpus changed; regenerate with FAK_UPDATE_GOLDEN=1 and review the diff",
 			goldenReportPath())
 	}

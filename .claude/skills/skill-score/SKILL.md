@@ -45,7 +45,7 @@ gaming).
 | `commit_discipline` | HARD | a committing skill that never names commit-by-path / `-- <paths>` / never `git add -A` |
 | `proof_step` | HARD | a committing skill with no verify / witness / re-measure step |
 | `anti_gaming` | **SOFT** | a metric-driving skill with no anti-gaming / honesty clause |
-| `context_budget` | **SOFT** | a SKILL.md over ~300 lines (the /clean-skill smell) |
+| `context_budget` | **SOFT** | a SKILL.md over ~300 lines (over-budget skill text) |
 
 `refs_resolve` is the **ungameable anchor** — a cited helper either exists on disk or
 it doesn't, cross-checked against the real tree, so you can't drop it by editing text.

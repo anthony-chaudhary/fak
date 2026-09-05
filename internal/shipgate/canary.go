@@ -1,32 +1,5 @@
 package shipgate
 
-// canary.go — quality-aware canary promotion and rollback (issue #4580, epic
-// #4509 middle ladder).
-//
-// shipgate.go decides KEEP-or-REVERT for one candidate from a witness it did not
-// author. A canary is the deploy-time complement: a candidate revision serves a
-// slice of traffic and is PROMOTED, HELD, or ROLLED BACK from measured quality
-// deltas — the practice vLLM/SGLang-class stacks use between primitive
-// correctness tests and coarse end benchmarks. The adjudicator here is a pure,
-// deterministic oracle (stdlib-only): a PR-tier run needs no model call, seed,
-// or GPU, and the same replay artifact re-adjudicates to the same verdict in a
-// clean environment.
-//
-// Contract (the issue's acceptance criteria):
-//   - Three outcomes: PROMOTE, HOLD (inconclusive), ROLLBACK. Missing or
-//     inconclusive evidence is never pass — it HOLDs the canary at the current
-//     baseline, the safe default, and never justifies an automated action.
-//   - A critical slice that drops past its tolerance ROLLs BACK even when the
-//     aggregate mean rises; the FIRST actionable divergence is named.
-//   - PROMOTE needs full provenance (model, tokenizer, engine/backend, seed or
-//     deterministic oracle, code revision, tolerance/baseline provenance), the
-//     declared minimum evidence (samples per slice), every critical slice
-//     within tolerance, AND a non-negative aggregate quality delta.
-//   - Every non-pass emits a scrubbed replay artifact (host paths, emails, and
-//     secret-shaped values redacted) that reconstructs the case byte-for-byte
-//     enough to reproduce the verdict independently.
-//   - Every case is pinned to a PR / nightly / release tier with a cost note.
-
 import (
 	"encoding/json"
 	"fmt"
@@ -39,14 +12,14 @@ import (
 // CanarySchema versions the emitted replay artifact.
 const CanarySchema = "fak-quality-canary/1"
 
-// CanaryVerdict is the three-way canary decision. The zero value is HOLD so an
-// unset verdict fails closed to "do not promote".
+// CanaryVerdict represents the three-way canary decision.
 type CanaryVerdict uint8
 
+// CanaryVerdict constants define the possible outcomes of canary evaluation.
 const (
-	CanaryHold     CanaryVerdict = iota // inconclusive evidence — pin the baseline
-	CanaryPromote                       // fully-evidenced strict pass — promote the candidate
-	CanaryRollback                      // a critical slice regressed past tolerance — roll back
+	CanaryHold CanaryVerdict = iota
+	CanaryPromote
+	CanaryRollback
 )
 
 // String renders the verdict as a stable token.
@@ -60,14 +33,14 @@ func (v CanaryVerdict) String() string {
 	return "HOLD"
 }
 
-// CanaryTier is the CI cadence a canary case is assigned to. A case with an
-// unrecognized tier is inconclusive: an unscheduled gate never runs.
+// CanaryTier specifies CI cadence for canary evaluation.
 type CanaryTier string
 
+// CanaryTier constants define supported execution cadences for canary checks.
 const (
-	CanaryTierPR      CanaryTier = "pr"      // per-PR deterministic gate (no model call)
-	CanaryTierNightly CanaryTier = "nightly" // nightly statistical / sampled gate
-	CanaryTierRelease CanaryTier = "release" // release / hardware qualification gate
+	CanaryTierPR      CanaryTier = "pr"
+	CanaryTierNightly CanaryTier = "nightly"
+	CanaryTierRelease CanaryTier = "release"
 )
 
 func (t CanaryTier) known() bool {
@@ -78,19 +51,16 @@ func (t CanaryTier) known() bool {
 	return false
 }
 
-// CanaryProvenance is the per-case evidence a promotion or rollback must carry
-// so the decision is reproducible. A blank required field is inconclusive.
+// CanaryProvenance records execution environment metadata for reproducible decisions.
 type CanaryProvenance struct {
-	Model     string `json:"model"`     // model under test
-	Tokenizer string `json:"tokenizer"` // tokenizer / vocab revision
-	Engine    string `json:"engine"`    // engine / backend / engine-mode
-	Seed      string `json:"seed"`      // RNG seed OR deterministic-oracle id
-	Revision  string `json:"revision"`  // code / module revision
-	Baseline  string `json:"baseline"`  // tolerance / baseline provenance
+	Model     string `json:"model"`
+	Tokenizer string `json:"tokenizer"`
+	Engine    string `json:"engine"`
+	Seed      string `json:"seed"`
+	Revision  string `json:"revision"`
+	Baseline  string `json:"baseline"`
 }
 
-// missing returns the names of blank required provenance fields, in a stable
-// order, so a fail-closed reason is deterministic.
 func (p CanaryProvenance) missing() []string {
 	var out []string
 	for _, f := range []struct {
@@ -107,8 +77,6 @@ func (p CanaryProvenance) missing() []string {
 	return out
 }
 
-// scrubbed returns a copy with host paths, emails, and secret-shaped values
-// redacted from every field.
 func (p CanaryProvenance) scrubbed() CanaryProvenance {
 	return CanaryProvenance{
 		Model: canaryScrub(p.Model), Tokenizer: canaryScrub(p.Tokenizer),
@@ -117,33 +85,30 @@ func (p CanaryProvenance) scrubbed() CanaryProvenance {
 	}
 }
 
-// QualitySlice is one measured quality cohort of the canary (a task, language,
-// context-length, or engine-mode slice). Scores share one scale (higher is
-// better). A critical slice is one whose loss must roll the canary back
-// regardless of the aggregate.
+// QualitySlice represents one measured metric cohort in a canary evaluation.
 type QualitySlice struct {
 	Name      string  `json:"name"`
 	Critical  bool    `json:"critical"`
 	Baseline  float64 `json:"baseline"`
 	Candidate float64 `json:"candidate"`
-	Tolerance float64 `json:"tolerance"` // max allowed drop (>= 0) for a critical slice
-	Samples   int     `json:"samples"`   // observations behind the candidate score
-	Measured  bool    `json:"measured"`  // false => inconclusive evidence for this slice
+	Tolerance float64 `json:"tolerance"`
+	Samples   int     `json:"samples"`
+	Measured  bool    `json:"measured"`
 }
 
 func (s QualitySlice) delta() float64 { return s.Candidate - s.Baseline }
 
-// CanaryCase is a fully-provenanced canary promotion case.
+// CanaryCase specifies the full configuration and measurements for a canary run.
 type CanaryCase struct {
 	ID         string           `json:"id"`
 	Tier       CanaryTier       `json:"tier"`
-	CostNote   string           `json:"cost_note"`   // runtime / resource cost, e.g. "~1ms CPU, no GPU"
-	MinSamples int              `json:"min_samples"` // minimum evidence for promotion, per slice (>= 1)
+	CostNote   string           `json:"cost_note"`
+	MinSamples int              `json:"min_samples"`
 	Provenance CanaryProvenance `json:"provenance"`
 	Slices     []QualitySlice   `json:"slices"`
 }
 
-// CanaryDivergence localizes the first actionable critical-slice regression.
+// CanaryDivergence localizes the first detected critical-slice regression.
 type CanaryDivergence struct {
 	Slice     string  `json:"slice"`
 	Baseline  float64 `json:"baseline"`
@@ -153,10 +118,7 @@ type CanaryDivergence struct {
 	Reason    string  `json:"reason"`
 }
 
-// CanaryReplay is the scrubbed, machine-readable bundle emitted with every
-// verdict so the case can be re-adjudicated in a clean environment without
-// leaking host secrets. It carries everything ReplayCase needs to reconstruct
-// the case.
+// CanaryReplay holds sanitized execution data for offline reproduction.
 type CanaryReplay struct {
 	Schema          string            `json:"schema"`
 	CaseID          string            `json:"case_id"`
@@ -169,9 +131,7 @@ type CanaryReplay struct {
 	Scrubbed        bool              `json:"scrubbed"`
 }
 
-// ReplayCase reconstructs an adjudicable case from a replay artifact. Scrubbing
-// redacts strings but never scores, flags, or counts, so a replayed case
-// re-adjudicates to the same verdict — the "independently replayed" witness.
+// ReplayCase reconstructs an adjudicable case from a replay artifact.
 func ReplayCase(r CanaryReplay) CanaryCase {
 	return CanaryCase{
 		ID: r.CaseID, Tier: r.Tier, CostNote: r.CostNote,
@@ -180,7 +140,7 @@ func ReplayCase(r CanaryReplay) CanaryCase {
 	}
 }
 
-// CanaryResult is the verdict for one canary case.
+// CanaryResult holds the evaluation outcome and replay evidence.
 type CanaryResult struct {
 	Schema          string            `json:"schema"`
 	CaseID          string            `json:"case_id"`
@@ -194,13 +154,7 @@ type CanaryResult struct {
 	Replay          CanaryReplay      `json:"replay"`
 }
 
-// AdjudicateCanary decides PROMOTE / HOLD / ROLLBACK for one canary case. It
-// fails closed: any missing or inconclusive evidence HOLDs (never a pass, and
-// never an automated rollback either — an unattributable signal is handed to a
-// human, not acted on), a critical-slice loss past tolerance ROLLs BACK even
-// when the aggregate mean rises, and only a fully-evidenced case with every
-// critical slice within tolerance and a non-negative aggregate quality delta
-// PROMOTEs.
+// AdjudicateCanary evaluates slice measurements to decide promote, hold, or rollback.
 func AdjudicateCanary(c CanaryCase) CanaryResult {
 	res := CanaryResult{
 		Schema: CanarySchema, CaseID: c.ID, Tier: c.Tier,
@@ -208,7 +162,6 @@ func AdjudicateCanary(c CanaryCase) CanaryResult {
 		CandidateMean: mathx.MeanBy(c.Slices, func(s QualitySlice) float64 { return s.Candidate }),
 	}
 
-	// Fail closed on inconclusive evidence before judging any score.
 	if miss := c.Provenance.missing(); len(miss) > 0 {
 		return res.hold(c, fmt.Sprintf("missing provenance: %s", strings.Join(miss, ", ")))
 	}
@@ -240,8 +193,6 @@ func AdjudicateCanary(c CanaryCase) CanaryResult {
 		return res.hold(c, "no critical slice declared - the canary cannot witness protection of a critical cohort")
 	}
 
-	// The core rule: a critical slice past tolerance rolls back even if the mean
-	// rose. Iterate in caller order so the FIRST actionable divergence is named.
 	for _, s := range c.Slices {
 		if s.Critical && -s.delta() > s.Tolerance {
 			d := &CanaryDivergence{
@@ -257,8 +208,6 @@ func AdjudicateCanary(c CanaryCase) CanaryResult {
 		}
 	}
 
-	// Quality-delta rule: an aggregate loss with no critical breach is ambiguous
-	// evidence — held for more measurement, never promoted on ambiguity.
 	if res.CandidateMean < res.BaselineMean {
 		return res.hold(c, fmt.Sprintf("aggregate quality delta %.4f is negative without a critical breach - held, not promoted",
 			res.CandidateMean-res.BaselineMean))
@@ -277,7 +226,6 @@ func (r CanaryResult) hold(c CanaryCase, reason string) CanaryResult {
 	return r
 }
 
-// replay builds the scrubbed replay artifact for a case.
 func (c CanaryCase) replay(d *CanaryDivergence) CanaryReplay {
 	slices := append([]QualitySlice(nil), c.Slices...)
 	for i := range slices {
@@ -291,16 +239,12 @@ func (c CanaryCase) replay(d *CanaryDivergence) CanaryReplay {
 	}
 }
 
-// MarshalReplay renders the case's scrubbed replay artifact as indented JSON.
-// It is the captured, re-runnable evidence every canary verdict carries.
+// MarshalReplay renders the replay artifact as indented JSON.
 func (r CanaryResult) MarshalReplay() ([]byte, error) {
 	return json.MarshalIndent(r.Replay, "", "  ")
 }
 
-// SimulateCanary is the issue's simulation: three canonical, fully-provenanced
-// canary cases adjudicated deterministically, covering PROMOTE,
-// HOLD (inconclusive), and ROLLBACK in that fixed order. Pure CPU, no model
-// call — the PR-tier cost each case's cost note documents.
+// SimulateCanary generates representative test cases covering promote, hold, and rollback.
 func SimulateCanary() []CanaryResult {
 	prov := CanaryProvenance{
 		Model:     "fak-sim-7b@q4",
@@ -321,12 +265,12 @@ func SimulateCanary() []CanaryResult {
 	hold := promote
 	hold.ID = "sim-hold-inconclusive"
 	hold.Slices = append([]QualitySlice(nil), promote.Slices...)
-	hold.Slices[1].Samples = 10 // below the declared evidence floor — never pass
+	hold.Slices[1].Samples = 10
 	rollback := promote
 	rollback.ID = "sim-rollback"
 	rollback.Slices = append([]QualitySlice(nil), promote.Slices...)
-	rollback.Slices[0].Candidate = 0.90 // critical slice slips past tolerance (drop 0.04 > 0.02)
-	rollback.Slices[1].Candidate = 0.99 // ...while the aggregate mean still rises
+	rollback.Slices[0].Candidate = 0.90
+	rollback.Slices[1].Candidate = 0.99
 
 	return []CanaryResult{
 		AdjudicateCanary(promote),
@@ -335,9 +279,6 @@ func SimulateCanary() []CanaryResult {
 	}
 }
 
-// canaryScrub redacts host filesystem paths, emails, and secret-shaped values
-// so a replay artifact never leaks host secrets. Provenance identifiers that
-// are not secrets (model names, git SHAs) are preserved for reproducibility.
 var (
 	reCanaryWinPath = regexp.MustCompile(`[A-Za-z]:\\[^\s"',;]+`)
 	reCanaryNixPath = regexp.MustCompile(`/(?:home|Users|root)/[^\s"',;]+`)

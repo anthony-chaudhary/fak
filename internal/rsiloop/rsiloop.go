@@ -23,12 +23,97 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/shipgate"
 )
+
+// DefaultTransientMeasurementRecoveryLimit is the default maximum number of
+// recovery retries permitted for transient measurement errors per candidate.
+const DefaultTransientMeasurementRecoveryLimit = 2
+
+// TransientMeasureError marks an error as a recoverable transient measurement
+// condition (e.g. temporary environment/infrastructure failure, lock contention,
+// or I/O blip) rather than a true candidate defect.
+type TransientMeasureError struct {
+	Err error
+}
+
+func (e *TransientMeasureError) Error() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return "transient measurement error"
+}
+
+func (e *TransientMeasureError) Unwrap() error {
+	return e.Err
+}
+
+// TransientMeasure marks this error as a transient measurement error.
+func (e *TransientMeasureError) TransientMeasure() bool {
+	return true
+}
+
+// IsTransient satisfies generic transient error checkers.
+func (e *TransientMeasureError) IsTransient() bool {
+	return true
+}
+
+// Transient satisfies generic transient error checkers.
+func (e *TransientMeasureError) Transient() bool {
+	return true
+}
+
+// NewTransientMeasureError wraps err as a TransientMeasureError. If err is nil,
+// it returns nil.
+func NewTransientMeasureError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &TransientMeasureError{Err: err}
+}
+
+// IsTransientMeasureError reports whether err represents a transient measurement
+// error. It unwraps err and recognizes:
+//   - *TransientMeasureError
+//   - any error implementing TransientMeasure() bool that returns true
+//   - any error implementing IsTransient() bool that returns true
+//   - any error implementing Transient() bool that returns true
+func IsTransientMeasureError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var tme *TransientMeasureError
+	if errors.As(err, &tme) {
+		return true
+	}
+	type transientMeasurer interface {
+		TransientMeasure() bool
+	}
+	var tm transientMeasurer
+	if errors.As(err, &tm) {
+		return tm.TransientMeasure()
+	}
+	type isTransient interface {
+		IsTransient() bool
+	}
+	var it isTransient
+	if errors.As(err, &it) {
+		return it.IsTransient()
+	}
+	type transient interface {
+		Transient() bool
+	}
+	var tr transient
+	if errors.As(err, &tr) {
+		return tr.Transient()
+	}
+	return false
+}
 
 // Candidate is one proposed change. The engine treats Payload opaquely — the
 // Proposer constructs it, the Measure seam interprets it (e.g. a new cache size) —
@@ -112,6 +197,34 @@ type Harness struct {
 	// rung" — the skip is opt-in and changes nothing for a harness that does not supply
 	// it. The rung is chosen from the harness-proven class, never the candidate's say-so.
 	MeasureTruthOnly func(c Candidate) (Measurement, error)
+	// TransientMeasurementRecoveryLimit sets the maximum number of recovery retries
+	// permitted for transient measurement errors per candidate. When 0 (default),
+	// DefaultTransientMeasurementRecoveryLimit is used. A negative value disables retries.
+	TransientMeasurementRecoveryLimit int
+	// IsTransientMeasureError optionally classifies whether a measurement error is
+	// a transient/recoverable infrastructure failure rather than candidate regression.
+	// When nil, rsiloop.IsTransientMeasureError is used.
+	IsTransientMeasureError func(error) bool
+}
+
+func (h Harness) isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if h.IsTransientMeasureError != nil {
+		return h.IsTransientMeasureError(err)
+	}
+	return IsTransientMeasureError(err)
+}
+
+func (h Harness) transientRecoveryLimit() int {
+	if h.TransientMeasurementRecoveryLimit < 0 {
+		return 0
+	}
+	if h.TransientMeasurementRecoveryLimit > 0 {
+		return h.TransientMeasurementRecoveryLimit
+	}
+	return DefaultTransientMeasurementRecoveryLimit
 }
 
 // Row is one append-only journal record. The schema is stable so a downstream
@@ -262,16 +375,69 @@ func RunObserved(h Harness, j *Journal, k, maxCycles int, obs Observer) (Result,
 			measure = h.MeasureTruthOnly
 		}
 
-		m, merr := measure(c)
-		note := m.Note // carry a measurement-supplied detail (e.g. a suite-red diagnostic)
-		measured := merr == nil
-		if merr != nil {
-			// A candidate that won't build/measure can't be kept — record it as a
-			// hard non-keep (suite RED) and let the breaker advance. Measured=false
-			// marks Candidate_ as NOT a real measurement (it is the baseline, set only
-			// so the witness reverts) — a downstream reader must not trust it.
-			m = Measurement{Metric: running, SuiteGreen: false, TruthClean: false}
-			note = "measure error: " + merr.Error()
+		recoveryLimit := h.transientRecoveryLimit()
+
+		var m Measurement
+		var merr error
+		var note string
+		var measured bool
+
+		for attempt := 0; ; attempt++ {
+			m, merr = measure(c)
+			note = m.Note // carry a measurement-supplied detail (e.g. a suite-red diagnostic)
+			measured = merr == nil
+			if merr == nil {
+				break
+			}
+
+			isTransient := h.isTransientError(merr)
+			if !isTransient || attempt >= recoveryLimit {
+				// Untyped/permanent error, or transient recovery retries exhausted.
+				// A candidate that won't build/measure can't be kept — record it as a
+				// hard non-keep (suite RED) and let the breaker advance. Measured=false
+				// marks Candidate_ as NOT a real measurement (it is the baseline, set only
+				// so the witness reverts) — a downstream reader must not trust it.
+				m = Measurement{Metric: running, SuiteGreen: false, TruthClean: false}
+				if isTransient {
+					note = "measure error (transient, exhausted): " + merr.Error()
+				} else {
+					note = "measure error: " + merr.Error()
+				}
+				break
+			}
+
+			// Transient error within recovery limit: retain attempt as unmeasured evidence
+			// without tripping the regression breaker immediately.
+			attemptNote := "measure error (transient, recovering): " + merr.Error()
+			attemptRow := Row{
+				Cycle:        cycle,
+				Mode:         "improve",
+				Candidate:    c.Label,
+				MetricName:   h.MetricName,
+				Baseline:     running,
+				Candidate_:   running,
+				Measured:     false,
+				LowerBetter:  h.LowerBetter,
+				Improved:     false,
+				SuiteGreen:   false,
+				TruthClean:   false,
+				Decision:     shipgate.REVERT.String(),
+				Kept:         false,
+				BreakerCount: gate.ConsecutiveNonKeeps(),
+				BaselineRef:  baseRef,
+				RefName:      h.BaselineRefName,
+				Score:        cloneScorecard(m.Score),
+				Note:         attemptNote,
+			}
+			if j != nil {
+				if err := j.Append(attemptRow); err != nil {
+					return res, fmt.Errorf("journal append: %w", err)
+				}
+			}
+			res.Rows = append(res.Rows, attemptRow)
+			if obs != nil {
+				obs(attemptRow)
+			}
 		}
 
 		w := shipgate.Witness{

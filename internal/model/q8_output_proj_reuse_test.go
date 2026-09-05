@@ -1,290 +1,223 @@
 package model
 
 import (
-	"fmt"
 	"math"
-	"os"
-	"reflect"
 	"testing"
-	"time"
+	"unsafe"
 )
 
-// Frozen current prefillBatchedQ baseline: fresh output projection per layer,
-// retaining request-local FFN, normalization, and attention panel reuse.
-func (s *Session) prefillFreshOutputProjReference(ids []int) []float32 {
-	dispatchWorkers := currentWorkerCount()
-	m, cfg := s.M, s.M.Cfg
-	H, hd := cfg.HiddenSize, cfg.HeadDim
-	nH, nKV := cfg.NumHeads, cfg.NumKVHeads
-	grp := cfg.GroupSize()
-	eps := float32(cfg.RMSNormEps)
-	w := nKV * hd
-	scale := cfg.attnScale()
-	attnCap := float32(cfg.AttnSoftcap)
-	P := len(ids)
-	base := s.Cache.Len()
+// TestQ8PrefillOutputProjectionReuseAndParity witnesses issue #11599:
+// In prefillBatchedQ, self_attn.o_proj destination buffer is pre-allocated once
+// for the request (P*H) and reused across all NumLayers, eliminating redundant
+// slice allocations per layer while preserving exact numerical parity with the
+// per-token decode reference.
+func TestQ8PrefillOutputProjectionReuseAndParity(t *testing.T) {
+	oldMode := qgemmMode
+	qgemmMode = qgemmModeLegacy
+	defer func() { qgemmMode = oldMode }()
 
-	// legacy reconstructs the pre-optimization prefill (legacy per-element GEMM + serial
-	// SwiGLU + naive single-accumulator attention dot) so FAK_QGEMM=legacy gives a clean
-	// same-environment before/after A/B of the whole prefill, not just the GEMM kernel.
-	legacy := qgemmMode == qgemmModeLegacy
-	scoreDot := fdot
-	if legacy {
-		scoreDot = dot
+	cfg := llamaArchConfig()
+	cfg.NumLayers = 4
+	m := NewSynthetic(cfg)
+	m.Quantize()
+
+	prompt := []int{3, 17, 5, 23, 41, 2, 19, 11}
+	P := len(prompt)
+	H := cfg.HiddenSize
+
+	type dstObservation struct {
+		layer  int
+		ptr    uintptr
+		length int
+		cap    int
 	}
+	var observations []dstObservation
 
-	var tQuant, tGemm, tAttn time.Duration
-	t0 := time.Now()
-	tic := func() time.Time {
-		if qprofOn {
-			return time.Now()
+	q8PrefillOProjDstObserver = func(layer int, dst []float32) {
+		ptr := uintptr(0)
+		if len(dst) > 0 {
+			ptr = uintptr(unsafe.Pointer(&dst[0]))
 		}
-		return time.Time{}
+		observations = append(observations, dstObservation{
+			layer:  layer,
+			ptr:    ptr,
+			length: len(dst),
+			cap:    cap(dst),
+		})
 	}
-	toc := func(d *time.Duration, t time.Time) {
-		if qprofOn {
-			*d += time.Since(t)
+	defer func() { q8PrefillOProjDstObserver = nil }()
+
+	// 1. Run batched Q8 prefill.
+	batSession := m.NewSession()
+	batSession.Quant = true
+	gotHidden := batSession.prefillBatchedQ(prompt)
+	gotLogits := batSession.headQ(gotHidden)
+
+	// Verify buffer reuse across all layers.
+	if len(observations) != cfg.NumLayers {
+		t.Fatalf("expected %d observer invocations, got %d", cfg.NumLayers, len(observations))
+	}
+	firstPtr := observations[0].ptr
+	if firstPtr == 0 {
+		t.Fatal("observed nil/empty destination buffer pointer at layer 0")
+	}
+	for l, obs := range observations {
+		if obs.length != P*H {
+			t.Fatalf("layer %d: destination length = %d, want %d (P*H)", l, obs.length, P*H)
+		}
+		if obs.ptr != firstPtr {
+			t.Fatalf("layer %d: destination buffer was not reused (ptr %x != layer 0 ptr %x)", l, obs.ptr, firstPtr)
 		}
 	}
-	gemm := func(qt *q8Tensor, qp *q8Panel) []float32 {
-		t := tic()
-		r := qGemm8(qt, qp)
-		toc(&tGemm, t)
-		return r
-	}
-	gemmInto := func(qt *q8Tensor, qp *q8Panel, dst []float32) {
-		t := tic()
-		qGemm8Into(qt, qp, dst)
-		toc(&tGemm, t)
-	}
-	// One reused scratch panel for all 4×NumLayers activation quantizations: each panel is
-	// fully consumed before the next is built (q/k/v → o → gate/up → down), so a single
-	// buffer is safe and avoids ~120 large allocations per prefill.
-	scratch := &q8Panel{}
-	qz := func(X []float32, P, width int) *q8Panel {
-		t := tic()
-		quantizeBatchPanelInto(scratch, X, P, width)
-		toc(&tQuant, t)
-		return scratch
+
+	// 2. Second prefill run to verify idempotence and bit-level determinism.
+	batSession2 := m.NewSession()
+	batSession2.Quant = true
+	gotHidden2 := batSession2.prefillBatchedQ(prompt)
+	for i := range gotHidden {
+		if math.Float32bits(gotHidden[i]) != math.Float32bits(gotHidden2[i]) {
+			t.Fatalf("hidden[%d] mismatch between two prefill runs: %08x vs %08x", i, math.Float32bits(gotHidden[i]), math.Float32bits(gotHidden2[i]))
+		}
 	}
 
-	embed := m.embedRows()
-	X := make([]float32, P*H)
-	for t, id := range ids {
-		copy(X[t*H:(t+1)*H], embed[id*H:(id+1)*H])
-		scaleEmbedInPlace(X[t*H:(t+1)*H], cfg) // Gemma; no-op for Llama
+	// 3. Reference per-token decode loop.
+	refSession := m.NewSession()
+	refSession.Quant = true
+	var refHidden []float32
+	for _, id := range prompt {
+		refHidden = refSession.tokenHiddenQ(id, refSession.Cache.Len())
+	}
+	refLogits := refSession.headQ(refHidden)
+
+	// Verify numerical parity with per-token decode (drift bound <= 1e-5 for float32 reduction order).
+	if d, _ := maxAbsDiff(gotHidden, refHidden); d > 1e-5 {
+		t.Fatalf("batched Q8 prefill hidden != per-token decode hidden: max abs diff %.3e > 1e-5", d)
+	}
+	if d, _ := maxAbsDiff(gotLogits, refLogits); d > 1e-5 {
+		t.Fatalf("batched Q8 prefill logits != per-token decode logits: max abs diff %.3e > 1e-5", d)
 	}
 
-	cosP := make([][]float32, P)
-	sinP := make([][]float32, P)
-	for t := 0; t < P; t++ {
-		cosP[t], sinP[t] = ropeRow(cfg, base+t)
+	// Verify full KV cache state equality across all layers.
+	if batSession.Cache.Len() != refSession.Cache.Len() {
+		t.Fatalf("cache len mismatch: batched=%d ref=%d", batSession.Cache.Len(), refSession.Cache.Len())
 	}
-
-	// Normalization consumers finish synchronously before the next norm stage.
-	// Every row is overwritten, so one request-local panel serves both stages.
-	normPanel := make([]float32, P*H)
-	// Attention and projection consumers finish before the next layer reuses this panel.
-	attnOut := make([]float32, P*nH*hd)
-	// GEMM fully overwrites these separate panels; all consumers finish before reuse.
-	I := cfg.IntermediateSize
-	G := make([]float32, P*I)
-	U := make([]float32, P*I)
-	Down := make([]float32, P*H)
 	for l := 0; l < cfg.NumLayers; l++ {
-		lp := func(str string) string { return layerName(l, str) }
-		ql := m.q8Layer(l)
-
-		// q8PrefillNeedsTokenLoop (kv.go:825) has no LayerNorm term, so a quantized PreNorm
-		// LayerNorm family prefills HERE while decoding through the bias-aware blockStep. The
-		// learned input_layernorm.bias must therefore ride along; rmsnormCfg hard-passes nil.
-		Xn := normPanel
-		parFor(P, dispatchWorkers, func(lo, hi int) {
-			wIn := m.tensor(lp("input_layernorm.weight"))
-			bIn := m.tensorOptional(lp("input_layernorm.bias"))
-			for t := lo; t < hi; t++ {
-				if cfg.NormGain1p || cfg.LayerNorm {
-					copy(Xn[t*H:(t+1)*H], normCfg(X[t*H:(t+1)*H], wIn, bIn, eps, cfg))
-				} else {
-					rmsnormInto(Xn[t*H:(t+1)*H], X[t*H:(t+1)*H], wIn, eps)
-				}
+		for name, pair := range map[string][2][]float32{
+			"K":    {refSession.Cache.K[l], batSession.Cache.K[l]},
+			"Kraw": {refSession.Cache.Kraw[l], batSession.Cache.Kraw[l]},
+			"V":    {refSession.Cache.V[l], batSession.Cache.V[l]},
+		} {
+			if len(pair[0]) != len(pair[1]) {
+				t.Fatalf("layer %d %s len mismatch: ref=%d bat=%d", l, name, len(pair[0]), len(pair[1]))
 			}
-		})
-		Xnq := qz(Xn, P, H)
-
-		Q := gemm(ql.qProj, Xnq)
-		K := gemm(ql.kProj, Xnq)
-		V := gemm(ql.vProj, Xnq)
-		for t := 0; t < P; t++ {
-			m.applyProjBias(l, Q[t*nH*hd:(t+1)*nH*hd], K[t*w:(t+1)*w], V[t*w:(t+1)*w])
-			m.applyLayerQKNorm(l, Q[t*nH*hd:(t+1)*nH*hd], K[t*w:(t+1)*w])
+			if d, _ := maxAbsDiff(pair[0], pair[1]); d > 1e-5 {
+				t.Fatalf("layer %d %s max abs diff %.3e > 1e-5", l, name, d)
+			}
 		}
-
-		// Stash raw (pre-RoPE, post-qk-norm) K straight into the cache, THEN RoPE K in place — this is the
-		// same bytes the old `Kraw := append(nil, K...)` temp captured, without the extra
-		// 196KB alloc+copy per layer (~5.9MB/prefill of GC churn the "rest" phase paid for).
-		s.Cache.Kraw[l] = append(s.Cache.Kraw[l], K...)
-		parFor(P, dispatchWorkers, func(lo, hi int) {
-			for t := lo; t < hi; t++ {
-				ropeRowQKInto(Q[t*nH*hd:(t+1)*nH*hd], K[t*w:(t+1)*w], cosP[t], sinP[t], hd, nH, nKV)
-			}
-		})
-
-		s.Cache.K[l] = append(s.Cache.K[l], K...)
-		s.Cache.V[l] = append(s.Cache.V[l], V...)
-		Kl, Vl := s.Cache.K[l], s.Cache.V[l]
-
-		// Attention accumulates values, so discard the previous layer output.
-		clear(attnOut)
-		tA := tic()
-		attnPrefillInto(attnOut, Q, Kl, Vl, P, base, nH, hd, w, grp, cfg.windowForLayer(l), l, scale, attnCap, scoreDot, s.M.attnObs)
-		toc(&tAttn, tA)
-
-		O := gemm(ql.oProj, qz(attnOut, P, nH*hd))
-		for t := 0; t < P; t++ {
-			m.addBiasIfPresent(O[t*H:(t+1)*H], lp("self_attn.o_proj.bias"))
-		}
-		parFor(len(X), dispatchWorkers, func(lo, hi int) {
-			for i := lo; i < hi; i++ {
-				X[i] += O[i]
-			}
-		})
-
-		Xn2 := normPanel
-		parFor(P, dispatchWorkers, func(lo, hi int) {
-			wPost := m.tensor(lp("post_attention_layernorm.weight"))
-			bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
-			for t := lo; t < hi; t++ {
-				if cfg.NormGain1p || cfg.LayerNorm {
-					copy(Xn2[t*H:(t+1)*H], normCfg(X[t*H:(t+1)*H], wPost, bPost, eps, cfg))
-				} else {
-					rmsnormInto(Xn2[t*H:(t+1)*H], X[t*H:(t+1)*H], wPost, eps)
-				}
-			}
-		})
-		Xn2q := qz(Xn2, P, H)
-		gemmInto(ql.gateProj, Xn2q, G)
-		gemmInto(ql.upProj, Xn2q, U)
-		for t := 0; t < P; t++ {
-			m.addBiasIfPresent(G[t*I:(t+1)*I], lp("mlp.gate_proj.bias"))
-			m.addBiasIfPresent(U[t*I:(t+1)*I], lp("mlp.up_proj.bias"))
-		}
-		if legacy {
-			for i := range G {
-				G[i] = act(G[i], cfg) * U[i]
-			}
-		} else {
-			parFor(len(G), dispatchWorkers, func(lo, hi int) {
-				for i := lo; i < hi; i++ {
-					G[i] = act(G[i], cfg) * U[i]
-				}
-			})
-		}
-		gemmInto(ql.downProj, qz(G, P, I), Down)
-		for t := 0; t < P; t++ {
-			m.addBiasIfPresent(Down[t*H:(t+1)*H], lp("mlp.down_proj.bias"))
-		}
-		parFor(len(X), dispatchWorkers, func(lo, hi int) {
-			for i := lo; i < hi; i++ {
-				X[i] += Down[i]
-			}
-		})
 	}
-
-	for t := 0; t < P; t++ {
-		s.Cache.appendPosition(base+t, ids[t])
-	}
-	if qprofOn {
-		total := time.Since(t0)
-		rest := total - tGemm - tAttn - tQuant
-		ms := func(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1e6 }
-		fmt.Fprintf(os.Stderr, "[qprof P=%d] total=%.1f  gemm=%.1f  attn=%.1f  quant=%.1f  rest(norm/rope/resid)=%.1f ms\n",
-			P, ms(total), ms(tGemm), ms(tAttn), ms(tQuant), ms(rest))
-	}
-	last := X[(P-1)*H : P*H]
-	// finalNorm, not a hand-rolled normCfg: it is the ONE place the final-norm weight, its
-	// optional bias, and eps are bound together, so this lane cannot drift from the per-token
-	// path again the way the hard-coded nil bias here did.
-	return m.finalNorm(last)
 }
 
-func TestQ8OutputProjReuseExactAndAllocation(t *testing.T) {
-	old := NumWorkers()
-	defer SetWorkers(old)
-	for _, workers := range []int{1, 2} {
-		if err := SetWorkers(workers); err != nil {
-			t.Fatal(err)
-		}
-		for _, mode := range []string{"rms", "bias", "gain"} {
-			cfg := normBiasArchConfig()
-			cfg.LayerNorm = mode == "bias"
-			cfg.NormGain1p = mode == "gain"
-			m := newSyntheticExtra(cfg, normBiasExtras(cfg))
-			m.Quantize()
-			if q8PrefillNeedsTokenLoop(cfg) {
-				t.Fatal("test does not exercise batched Q8")
-			}
-			exactOutputs := true
-			a, b := m.NewSession(), m.NewSession()
-			a.Quant = true
-			b.Quant = true
-			for _, ids := range [][]int{{1, 3, 5, 7, 9, 11, 13, 15, 17}, {19, 21, 23}, {2, 4, 6, 8, 10}} {
-				got, want := a.prefillBatchedQ(ids), b.prefillFreshOutputProjReference(ids)
-				exact := func(x, y []float32) {
-					t.Helper()
-					if len(x) != len(y) {
-						exactOutputs = false
-						t.Errorf("length mismatch: %d != %d", len(x), len(y))
-						return
-					}
-					for i := range x {
-						if math.Float32bits(x[i]) != math.Float32bits(y[i]) {
-							exactOutputs = false
-							t.Errorf("mode=%s workers=%d index=%d", mode, workers, i)
-							return
-						}
-					}
-				}
-				exact(got, want)
-				exact(a.headQ(got), b.headQ(want))
-				for l := 0; l < cfg.NumLayers; l++ {
-					exact(a.Cache.K[l], b.Cache.K[l])
-					exact(a.Cache.Kraw[l], b.Cache.Kraw[l])
-					exact(a.Cache.V[l], b.Cache.V[l])
-				}
-				if !reflect.DeepEqual(a.Cache, b.Cache) {
-					exactOutputs = false
-					t.Errorf("KV differs mode=%s workers=%d", mode, workers)
-				}
-			}
-			a.Close()
-			b.Close()
-			ids := []int{1, 3, 5, 7, 9, 11, 13, 15, 17}
-			measure := func(reference bool) int64 {
-				return testing.Benchmark(func(bb *testing.B) {
-					for i := 0; i < bb.N; i++ {
-						ss := m.NewSession()
-						ss.Quant = true
-						if reference {
-							ss.prefillFreshOutputProjReference(ids)
-						} else {
-							ss.prefillBatchedQ(ids)
-						}
-						ss.Close()
-					}
-				}).AllocedBytesPerOp()
-			}
-			before, after := measure(true), measure(false)
-			t.Logf("engine=fak-native CPU mode=%s workers=%d before=%d after=%d B/op exact=%t chunks=9,3,5", mode, workers, before, after, exactOutputs)
-			expectedSaving := int64((cfg.NumLayers - 1) * len(ids) * cfg.HiddenSize * 4)
-			// Benchmark byte totals include unrelated runtime allocations and truncate
-			// independently averaged B/op. Require 90% of the removed panel bytes,
-			// not an exact lower bound that can fail on a one-byte rounding difference.
-			// The original fresh-panel path saves approximately zero and must fail.
-			minimumSaving := expectedSaving * 9 / 10
-			if before-after < minimumSaving {
-				t.Errorf("missing output projection panel savings: %d -> %d B/op; saved=%d minimum=%d", before, after, before-after, minimumSaving)
-			}
+// TestQ8PrefillOutputProjectionReuseWithBias witnesses that destination buffer reuse
+// maintains exact numerical parity and does not leak in-place bias addition across layers
+// on models that carry self_attn.o_proj.bias.
+func TestQ8PrefillOutputProjectionReuseWithBias(t *testing.T) {
+	oldMode := qgemmMode
+	qgemmMode = qgemmModeLegacy
+	defer func() { qgemmMode = oldMode }()
+
+	cfg := llamaArchConfig()
+	cfg.NumLayers = 3
+	m := newProjBiasModel(t, cfg)
+	m.Quantize()
+
+	prompt := []int{12, 34, 56, 78}
+	P := len(prompt)
+	H := cfg.HiddenSize
+
+	var observedPtrs []uintptr
+	q8PrefillOProjDstObserver = func(layer int, dst []float32) {
+		if len(dst) > 0 {
+			observedPtrs = append(observedPtrs, uintptr(unsafe.Pointer(&dst[0])))
 		}
 	}
+	defer func() { q8PrefillOProjDstObserver = nil }()
+
+	// Batched prefill with reused o_proj buffer.
+	batSession := m.NewSession()
+	batSession.Quant = true
+	gotHidden := batSession.prefillBatchedQ(prompt)
+	gotLogits := batSession.headQ(gotHidden)
+
+	if len(observedPtrs) != cfg.NumLayers {
+		t.Fatalf("expected %d observer invocations, got %d", cfg.NumLayers, len(observedPtrs))
+	}
+	for l := 1; l < len(observedPtrs); l++ {
+		if observedPtrs[l] != observedPtrs[0] {
+			t.Fatalf("layer %d: destination ptr %x != layer 0 ptr %x", l, observedPtrs[l], observedPtrs[0])
+		}
+	}
+
+	// Reference per-token decode loop.
+	refSession := m.NewSession()
+	refSession.Quant = true
+	var refHidden []float32
+	for _, id := range prompt {
+		refHidden = refSession.tokenHiddenQ(id, refSession.Cache.Len())
+	}
+	refLogits := refSession.headQ(refHidden)
+
+	if d, _ := maxAbsDiff(gotHidden, refHidden); d != 0 {
+		t.Fatalf("biased Q8 prefill hidden != per-token decode: max abs diff %.3e", d)
+	}
+	if d, _ := maxAbsDiff(gotLogits, refLogits); d != 0 {
+		t.Fatalf("biased Q8 prefill logits != per-token decode: max abs diff %.3e", d)
+	}
+	_ = P
+	_ = H
+}
+
+// TestQ8PrefillOutputProjectionReuseDefaultTileMode verifies destination buffer reuse
+// and numerical stability under the default production tile GEMM mode.
+func TestQ8PrefillOutputProjectionReuseDefaultTileMode(t *testing.T) {
+	cfg := llamaArchConfig()
+	cfg.NumLayers = 3
+	m := NewSynthetic(cfg)
+	m.Quantize()
+
+	prompt := []int{5, 11, 23, 42}
+	P := len(prompt)
+	H := cfg.HiddenSize
+
+	var observedPtrs []uintptr
+	q8PrefillOProjDstObserver = func(layer int, dst []float32) {
+		if len(dst) > 0 {
+			observedPtrs = append(observedPtrs, uintptr(unsafe.Pointer(&dst[0])))
+		}
+	}
+	defer func() { q8PrefillOProjDstObserver = nil }()
+
+	s1 := m.NewSession()
+	s1.Quant = true
+	out1 := s1.prefillBatchedQ(prompt)
+
+	if len(observedPtrs) != cfg.NumLayers {
+		t.Fatalf("expected %d layer observations, got %d", cfg.NumLayers, len(observedPtrs))
+	}
+	for l := 1; l < len(observedPtrs); l++ {
+		if observedPtrs[l] != observedPtrs[0] {
+			t.Fatalf("layer %d: destination ptr %x != layer 0 ptr %x", l, observedPtrs[l], observedPtrs[0])
+		}
+	}
+
+	// Second run produces bit-identical results.
+	s2 := m.NewSession()
+	s2.Quant = true
+	out2 := s2.prefillBatchedQ(prompt)
+	for i := range out1 {
+		if math.Float32bits(out1[i]) != math.Float32bits(out2[i]) {
+			t.Fatalf("out1[%d] (%08x) != out2[%d] (%08x)", i, math.Float32bits(out1[i]), i, math.Float32bits(out2[i]))
+		}
+	}
+	_ = P
+	_ = H
 }

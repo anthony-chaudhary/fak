@@ -4,7 +4,7 @@
 The Comet/Perplexity "cutting agent context cost" writeup's one technique fak did
 NOT already cover: detect skills with high pairwise CONTENT overlap and merge the
 redundant ones, so a 55-file skill pack stays lean and discoverable. `skill-lifecycle`
-archives *dead* skills and `clean-skill` trims *fat* ones; neither measures
+archives *dead* skills and `skill-score` audits over-budget ones; neither measures
 skill-to-skill redundancy. This is that missing measure.
 
 It runs a pairwise token-similarity primitive over the `.claude/skills/*/SKILL.md`

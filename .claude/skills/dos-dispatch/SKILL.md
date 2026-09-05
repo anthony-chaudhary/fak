@@ -44,17 +44,18 @@ declared trees — two dispatches on disjoint trees both ADMIT; overlapping tree
 COLLIDE.
 
 ```bash
-python tools/dos_fleet_lease.py --workspace . acquire --lane <LANE> --kind cluster
+dos arbitrate --workspace . --lane <LANE> --kind cluster --mode exclusive
+# Or record the persistent lease in the lane journal:
+dos lease-lane acquire --lane <LANE> --kind cluster
 ```
 
-Read the wrapper JSON. On success, top-level `lane` is the admitted lane and
-`kernel` is the underlying `LaneDecision` (`{outcome, lane, tree, reason,
-free_clusters, ...}`).
+Read the JSON output. On success, `lane` is the admitted lane and
+`outcome` is "acquire" (with `tree` declaring its file tree).
 
-- `kernel.outcome: "acquire"` -> admitted. Top-level `lane` is the lane to run on
-  (may differ from the request when auto-pick reassigned it); `kernel.tree` is its
+- `outcome: "acquire"` -> admitted. The top-level `lane` is the lane to run on
+  (may differ from the request when auto-pick reassigned it); `tree` is its
   file tree. Proceed.
-- `kernel.outcome: "refuse"` -> not admitted. `kernel.reason` explains why; `kernel.free_clusters`
+- `outcome: "refuse"` -> not admitted. `reason` explains why; `free_clusters`
   lists lanes you could pick instead. **Stop** (or retry on a free lane). Do not
   force - `--force` is an operator-only override, not an automation default.
 
@@ -98,8 +99,8 @@ If Step 4 would launch more than one worker/pick, price that fan-out before the
 first worker starts. This is the default admission step, not an optional
 operator check:
 
-```
-/dos-plan-price
+```bash
+fak dispatch price --json
 ```
 
 Build the partition from the acquired lane tree plus each pick's declared tree
@@ -131,13 +132,13 @@ a commit prefix.** (`dos doctor --json`'s `stamp` names the active grammar.)
 
 ## Step 6 — Release the lane lease
 
-If you took a cross-process lane lease for the archive, release it:
+If you took a persistent lane lease for the archive, release it:
 
 ```bash
-python tools/dos_fleet_lease.py --workspace . release --lane <LANE>
+dos lease-lane release --lane <LANE>
 ```
 
-The wrapper releases the local WAL entry and republishes this node's held set, so
+This releases the lease entry in `.dos/lane-journal.jsonl` and republishes this node's held set, so
 global-lane peers stop seeing the lane as held after the dispatch finishes.
 
 ## Out-of-scope findings — file an issue, don't widen the lane

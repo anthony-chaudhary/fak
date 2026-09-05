@@ -11,7 +11,7 @@ project-supplied.
 flowchart TD
   Pack["Project skill pack"] --> WF["Workflow / analysis<br/>(no project contract)"]
   Pack --> MN["Maintenance<br/>(read .claude/project.yaml)"]
-  WF --> Analysis["tail-wag, phased-plan, clean-skill, memory-compact"]
+  WF --> Analysis["tail-wag, phased-plan, memory-compact"]
   MN --> Doc["docs: refresh-readme, appeal-score, curate-cluster"]
   MN --> Plan["planning / ship: release, issue-triage, plan-audit"]
   MN --> Quality["code: quality-score"]
@@ -28,7 +28,6 @@ flowchart TD
 |---|---|
 | [`tail-wag`](tail-wag/SKILL.md) | Find the most "tail wagging the dog" inversion — a peripheral concern driving a core decision. Diagnoses, ranks, proposes a rebalance. |
 | [`phased-plan`](phased-plan/SKILL.md) | Ceremony rules for shipping a phase of a phased plan — when to release, the hero-exit rule, the phase-split test. (Auto-loaded; not user-invocable.) |
-| [`clean-skill`](clean-skill/SKILL.md) | Audit a skill's per-invocation context use and propose a context-bundling helper + SKILL.md trim. Stops for approval before writing code. |
 | [`memory-compact`](memory-compact/SKILL.md) | Keep a Claude Code auto-memory store under the harness load cap (200 lines / 25 KB), tier into hot/cold, prove it with the bundled `check_memory.py` witness. |
 | [`skill-lifecycle`](skill-lifecycle/SKILL.md) | Witnessed lifecycle for this skill pack — usage-telemetry sidecar, value/idle-driven auto-archive (never delete, restorable), pin-exemption, journaled reversible transitions. Bundled `skill_lifecycle_test.py` witness. |
 | [`field-borrow`](field-borrow/SKILL.md) | Turn an outward field idea into grounded backlog *without guessing whether fak already has it*: **dogfood the self-query surface** (`fak_feature_query` / `fak index`) to witness PRESENT/PARTIAL/ABSENT, ground each real gap at a file:line seam, and file epic-anchored issues carrying the named source + the dogfood witness + a first checkable step. The witness-first, human-curated counterpart to the automated `idea-scout`; the product/agent-capability counterpart of the inward `sota-check` (kernels) and outward `industry-score` (the competitive map). Worked instance: [`CONCEPT-FIELD-BORROW-QUERY-QUALITY-2026-07-08`](../../docs/notes/CONCEPT-FIELD-BORROW-QUERY-QUALITY-2026-07-08.md). |
@@ -48,7 +47,6 @@ are intentionally small local entry points over `dos` verbs and this repo's
 | [`dos-dispatch`](dos-dispatch/SKILL.md) | Take a lane through `dos arbitrate`, run the next-up packet, gate empty work, ship, and archive one lane without widening the lease. |
 | [`dos-dispatch-loop`](dos-dispatch-loop/SKILL.md) | Repeat dispatch/replan cycles while the kernel's typed loop verdict says to continue. |
 | [`dos-replan`](dos-replan/SKILL.md) | Refresh the portfolio from `dos verify` evidence and surface only the operator decisions that remain. |
-| [`dos-plan-price`](dos-plan-price/SKILL.md) | Price a proposed multi-agent fan-out before launch so overlapping trees are caught before workers start. |
 | [`dos-witness-claim`](dos-witness-claim/SKILL.md) | Verify subagent results before folding them into synthesis; confirmed effects fold, narration does not. |
 | [`verify`](verify/SKILL.md) | Bind a done-claim to a GREEN test run of the changed package, not just diff shape — run the resolving commit's affected tests (WSL-aware) and report `CLAIM_TEST_GREEN` / `CLAIM_TEST_RED` / `CLAIM_TEST_UNRUN`. The always-on consumer of `dispatch_tick_witness`'s additive `test_run_witness` rung; `dos-witness-claim` proves shape, `verify` proves the tests pass. |
 
@@ -171,17 +169,14 @@ The current entry-point inventory is:
 - [`appeal-score`](appeal-score/SKILL.md)
 - [`bottleneck-map`](bottleneck-map/SKILL.md)
 - [`claim-repro-score`](claim-repro-score/SKILL.md)
-- [`clean-skill`](clean-skill/SKILL.md)
 - [`commit-clean`](commit-clean/SKILL.md)
 - [`conflation-score`](conflation-score/SKILL.md)
 - [`curate-cluster`](curate-cluster/SKILL.md)
-- [`disambiguate-section`](disambiguate-section/SKILL.md)
 - [`disambiguation-score`](disambiguation-score/SKILL.md)
 - [`dojo-rsi-score`](dojo-rsi-score/SKILL.md)
 - [`dos-dispatch`](dos-dispatch/SKILL.md)
 - [`dos-dispatch-loop`](dos-dispatch-loop/SKILL.md)
 - [`dos-next-up`](dos-next-up/SKILL.md)
-- [`dos-plan-price`](dos-plan-price/SKILL.md)
 - [`dos-replan`](dos-replan/SKILL.md)
 - [`dos-witness-claim`](dos-witness-claim/SKILL.md)
 - [`field-borrow`](field-borrow/SKILL.md)

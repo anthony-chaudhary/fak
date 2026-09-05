@@ -59,11 +59,21 @@ type harnessShellAlias struct {
 	Inherits []string `json:"inherits"`
 }
 
+// HarnessCoordinationGuidance provides structured steering for subagent coordination,
+// read tool preferences, and recovery workflows.
+type HarnessCoordinationGuidance struct {
+	TimeoutRecovery    string   `json:"timeout_recovery,omitempty"`
+	ReadToolPreference string   `json:"read_tool_preference,omitempty"`
+	RecommendedTools   []string `json:"recommended_tools,omitempty"`
+}
+
 // harnessProfileDecl is one first-class harness (Claude Code, Codex, OpenCode,
 // MCP client) whose required host-plumbing tools the embedded floor must cover.
 type harnessProfileDecl struct {
-	Name          string   `json:"name"`
-	RequiredTools []string `json:"required_tools"`
+	Name                 string                       `json:"name"`
+	RequiredTools        []string                     `json:"required_tools"`
+	StarterPrompts       []string                     `json:"starter_prompts,omitempty"`
+	CoordinationGuidance *HarnessCoordinationGuidance `json:"coordination_guidance,omitempty"`
 }
 
 type harnessProfilesDoc struct {

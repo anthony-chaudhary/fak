@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -53,13 +54,203 @@ func ExtractToolWorkdir(args []byte) string {
 
 // ShellReadSpec describes an in-process promotable file read command (cat, head, tail, get-content, type, get-childitem).
 type ShellReadSpec struct {
-	Op          string `json:"op"`
-	FilePath    string `json:"file_path"`
-	Lines       int    `json:"lines,omitempty"`
-	LineNumbers bool   `json:"line_numbers,omitempty"`
-	Tail        bool   `json:"tail,omitempty"`
-	NameOnly    bool   `json:"name_only,omitempty"`
-	HasLines    bool   `json:"has_lines,omitempty"`
+	Op          string           `json:"op"`
+	FilePath    string           `json:"file_path"`
+	Lines       int              `json:"lines,omitempty"`
+	LineNumbers bool             `json:"line_numbers,omitempty"`
+	Tail        bool             `json:"tail,omitempty"`
+	NameOnly    bool             `json:"name_only,omitempty"`
+	HasLines    bool             `json:"has_lines,omitempty"`
+	SubSpecs    []*ShellReadSpec `json:"sub_specs,omitempty"`
+	Connectors  []string         `json:"connectors,omitempty"`
+}
+
+// CompoundSegment represents a single command segment within a compound shell pipeline.
+type CompoundSegment struct {
+	RawCmd    string
+	Connector string // ";", "&&", or "" for the last segment
+}
+
+// SplitCompoundCommand decomposes a compound shell command into sequential segments
+// separated by ';', '&&', or '\n' outside quotes.
+// Semicolons and connectors inside single and double quotes are preserved.
+// Escaped quotes (\', \", ”, "", “, etc.) do not exit quote state.
+// Unsupported shell constructs (pipes |, ||, redirects >, <, command substitution $(...)) return nil, false.
+// Unterminated quotes return nil, false.
+// Whitespace is trimmed on each segment, and empty segments are ignored.
+func SplitCompoundCommand(cmd string) ([]CompoundSegment, bool) {
+	type rawPiece struct {
+		text      string
+		connector string
+	}
+
+	var pieces []rawPiece
+	var cur strings.Builder
+	inSingle := false
+	inDouble := false
+	n := len(cmd)
+
+	for i := 0; i < n; i++ {
+		c := cmd[i]
+
+		if inSingle {
+			// Inside single quotes:
+			// '' is an escaped single quote in PowerShell/SQL.
+			if c == '\'' && i+1 < n && cmd[i+1] == '\'' {
+				cur.WriteString("''")
+				i++
+				continue
+			}
+			// \' is an escaped single quote.
+			if c == '\\' && i+1 < n && cmd[i+1] == '\'' {
+				cur.WriteString("\\'")
+				i++
+				continue
+			}
+			// `' is an escaped single quote in PowerShell.
+			if c == '`' && i+1 < n && cmd[i+1] == '\'' {
+				cur.WriteString("`'")
+				i++
+				continue
+			}
+			if c == '\'' {
+				inSingle = false
+				cur.WriteByte('\'')
+				continue
+			}
+			cur.WriteByte(c)
+			continue
+		}
+
+		if inDouble {
+			// Inside double quotes:
+			// Command substitution $(...) is unsupported.
+			if strings.HasPrefix(cmd[i:], "$(") {
+				return nil, false
+			}
+			// "" is an escaped double quote in PowerShell.
+			if c == '"' && i+1 < n && cmd[i+1] == '"' {
+				cur.WriteString("\"\"")
+				i++
+				continue
+			}
+			// \" is an escaped double quote.
+			if c == '\\' && i+1 < n && cmd[i+1] == '"' {
+				cur.WriteString("\\\"")
+				i++
+				continue
+			}
+			// `" is an escaped double quote in PowerShell.
+			if c == '`' && i+1 < n && cmd[i+1] == '"' {
+				cur.WriteString("`\"")
+				i++
+				continue
+			}
+			if c == '"' {
+				inDouble = false
+				cur.WriteByte('"')
+				continue
+			}
+			cur.WriteByte(c)
+			continue
+		}
+
+		// Outside quotes:
+		// Disallow command substitution $(...)
+		if strings.HasPrefix(cmd[i:], "$(") {
+			return nil, false
+		}
+		// Disallow pipes and redirects: |, ||, >, >>, <, <<
+		if c == '|' || c == '>' || c == '<' {
+			return nil, false
+		}
+
+		// Escaped quotes outside quotes
+		if c == '\\' && i+1 < n && (cmd[i+1] == '\'' || cmd[i+1] == '"') {
+			cur.WriteByte(c)
+			cur.WriteByte(cmd[i+1])
+			i++
+			continue
+		}
+		if c == '`' && i+1 < n && (cmd[i+1] == '\'' || cmd[i+1] == '"') {
+			cur.WriteByte(c)
+			cur.WriteByte(cmd[i+1])
+			i++
+			continue
+		}
+
+		// Quote entries
+		if c == '\'' {
+			inSingle = true
+			cur.WriteByte('\'')
+			continue
+		}
+		if c == '"' {
+			inDouble = true
+			cur.WriteByte('"')
+			continue
+		}
+
+		// Connectors outside quotes
+		if c == '&' {
+			if i+1 < n && cmd[i+1] == '&' {
+				if i+2 < n && cmd[i+2] == '&' {
+					return nil, false
+				}
+				pieces = append(pieces, rawPiece{text: cur.String(), connector: "&&"})
+				cur.Reset()
+				i++
+				continue
+			}
+			// Single & outside quotes is unsupported
+			return nil, false
+		}
+
+		if c == ';' {
+			if i+1 < n && cmd[i+1] == ';' {
+				return nil, false
+			}
+			pieces = append(pieces, rawPiece{text: cur.String(), connector: ";"})
+			cur.Reset()
+			continue
+		}
+
+		if c == '\r' && i+1 < n && cmd[i+1] == '\n' {
+			continue
+		}
+
+		if c == '\n' {
+			pieces = append(pieces, rawPiece{text: cur.String(), connector: ";"})
+			cur.Reset()
+			continue
+		}
+
+		cur.WriteByte(c)
+	}
+
+	if inSingle || inDouble {
+		return nil, false
+	}
+
+	pieces = append(pieces, rawPiece{text: cur.String(), connector: ""})
+
+	var segments []CompoundSegment
+	for _, p := range pieces {
+		trimmed := strings.TrimSpace(p.text)
+		if trimmed == "" {
+			continue
+		}
+		segments = append(segments, CompoundSegment{
+			RawCmd:    trimmed,
+			Connector: p.connector,
+		})
+	}
+
+	if len(segments) > 0 {
+		segments[len(segments)-1].Connector = ""
+	}
+
+	return segments, true
 }
 
 // ShellReadResult represents the structured response of an in-process shell read execution,
@@ -72,15 +263,44 @@ type ShellReadResult struct {
 
 // ParseShellRead analyzes a shell command to determine if it is a safe, effect-free
 // read operation (cat, head, tail, get-content, gc, type, get-childitem, gci, dir)
-// that can be executed directly in-process.
+// or a compound pipeline of such operations that can be executed directly in-process.
 // Returns the parsed ShellReadSpec and true if promotable; otherwise false.
 func ParseShellRead(cmd string) (*ShellReadSpec, bool) {
+	segments, ok := SplitCompoundCommand(cmd)
+	if !ok || len(segments) == 0 {
+		return nil, false
+	}
+
+	if len(segments) == 1 {
+		return parseSingleShellRead(segments[0].RawCmd)
+	}
+
+	subSpecs := make([]*ShellReadSpec, 0, len(segments))
+	var connectors []string
+	for i, seg := range segments {
+		subSpec, ok := parseSingleShellRead(seg.RawCmd)
+		if !ok || subSpec == nil {
+			return nil, false
+		}
+		subSpecs = append(subSpecs, subSpec)
+		if i < len(segments)-1 {
+			connectors = append(connectors, seg.Connector)
+		}
+	}
+
+	return &ShellReadSpec{
+		Op:         "compound",
+		SubSpecs:   subSpecs,
+		Connectors: connectors,
+	}, true
+}
+
+func parseSingleShellRead(cmd string) (*ShellReadSpec, bool) {
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
 		return nil, false
 	}
-	// Redirection, chaining, or command substitution forbid in-process promotion.
-	if strings.ContainsAny(cmd, ">|<;$&$\n\r") {
+	if strings.Contains(cmd, "$") {
 		return nil, false
 	}
 
@@ -550,6 +770,40 @@ func isAllDigits(s string) bool {
 func ExecuteInProcessRead(spec *ShellReadSpec, workDir string) ShellReadResult {
 	if spec == nil {
 		return ShellReadResult{Stderr: "invalid read specification\n", ExitCode: 1}
+	}
+
+	if spec.Op == "compound" {
+		results := make([]ShellReadResult, len(spec.SubSpecs))
+		var wg sync.WaitGroup
+		wg.Add(len(spec.SubSpecs))
+		for i, sub := range spec.SubSpecs {
+			go func(idx int, s *ShellReadSpec) {
+				defer wg.Done()
+				results[idx] = ExecuteInProcessRead(s, workDir)
+			}(i, sub)
+		}
+		wg.Wait()
+
+		var stdoutBuilder strings.Builder
+		var stderrBuilder strings.Builder
+		exitCode := 0
+
+		for i, res := range results {
+			stdoutBuilder.WriteString(res.Stdout)
+			stderrBuilder.WriteString(res.Stderr)
+			if res.ExitCode != 0 {
+				exitCode = res.ExitCode
+				if i < len(spec.Connectors) && spec.Connectors[i] == "&&" {
+					break
+				}
+			}
+		}
+
+		return ShellReadResult{
+			Stdout:   stdoutBuilder.String(),
+			Stderr:   stderrBuilder.String(),
+			ExitCode: exitCode,
+		}
 	}
 
 	if spec.Op == "get-childitem" {

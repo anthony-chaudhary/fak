@@ -176,8 +176,8 @@ Local dirty paths are not worker fuel. First convert residuals into dedicated is
 - retain/update/remove authority where stale work is involved.
 
 Use `/stale-work-loop` for candidate adjudication. A one-unit or same-path queue is serial work,
-not a fleet wave. For multiple disjoint issues, use `/dos-plan-price` and split overlaps into later
-waves before generating or starting sessions.
+not a fleet wave. For multiple disjoint issues, use `/issue-orchestrator` (`fak issue-orchestrator --plan-waves`)
+and split overlaps into later waves before generating or starting sessions.
 
 ### Execution intent
 
