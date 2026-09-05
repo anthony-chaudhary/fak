@@ -624,11 +624,11 @@ func TestRoutineTurnClassification(t *testing.T) {
 		t.Error("expected routineTranscript to be classified as routine turn")
 	}
 
-	// Transcript with error is NOT a routine turn
+	// A typed failure is not routine; reading diagnostic text alone is benign.
 	errorTranscript := []Message{
 		{Role: RoleUser, Content: "show files"},
 		{Role: RoleAssistant, Content: "checking"},
-		{Role: RoleTool, Name: "read", Content: "compiler error: syntax error"},
+		{Role: RoleTool, Name: "read", Content: (ToolReceipt{Status: ToolResultError, Detail: "read failed"}).JSON()},
 	}
 	if IsRoutineTurn(errorTranscript) {
 		t.Error("expected errorTranscript to NOT be classified as routine turn")
@@ -777,4 +777,28 @@ func TestReasoningProfileTurnLoop(t *testing.T) {
 			t.Errorf("ThinkingBudget = %v, want 512", sp.ThinkingBudget)
 		}
 	})
+}
+
+func TestRoutineTurnClassificationTypedFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name, content string
+		wantError     bool
+	}{
+		{"diagnostic text", "compiler error: syntax error", false},
+		{"typed refusal", (ToolReceipt{Status: ToolResultError, Reason: "POLICY_BLOCK"}).JSON(), true},
+		{"skipped", (ToolReceipt{Status: ToolResultSkipped}).JSON(), false},
+		{"malformed", `{"status":"error"`, false},
+		{"nested data", `{"result":{"status":"error"}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			messages := []Message{{Role: RoleTool, Name: "read", Content: tc.content}, {Role: RoleTool, Name: "glob", Content: "a.go"}}
+			assessment, ok := AssessTranscriptTurn(messages)
+			if !ok || assessment.IsError() != tc.wantError {
+				t.Fatalf("assessment=%+v ok=%v wantError=%v", assessment, ok, tc.wantError)
+			}
+			if got := IsRoutineTurn(messages); got != !tc.wantError {
+				t.Fatalf("routine=%v want=%v", got, !tc.wantError)
+			}
+		})
+	}
 }

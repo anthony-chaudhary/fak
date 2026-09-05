@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"regexp"
 	"strconv"
 	"strings"
@@ -102,6 +103,14 @@ func AssessTranscriptTurn(messages []Message) (TurnAssessment, bool) {
 	allRoutine := true
 	for i := lastIdx; i >= 0 && messages[i].Role == RoleTool; i-- {
 		msg := messages[i]
+		// Honor owned-loop failure receipts before the routine-tool shortcut;
+		// diagnostic text read from a file is not an execution failure.
+		var receipt ToolReceipt
+		if json.Unmarshal([]byte(msg.Content), &receipt) == nil && receipt.Status == ToolResultError {
+			ta.IsErrorRecovery = true
+			ta.ErrorMessage = msg.Content
+			return ta, true
+		}
 		lower := strings.ToLower(msg.Content)
 		isRoutine := isRoutineToolName(msg.Name)
 		if !isRoutine {
