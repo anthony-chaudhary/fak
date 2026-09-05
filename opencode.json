@@ -1,7 +1,9 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "share": "disabled",
+  "autoupdate": false,
   "snapshot": false,
-  "instructions": ["CONTRIBUTING.md", "AGENTS.md"],
+  "instructions": ["AGENTS.md"],
   "skills": {
     "paths": [".agents/skills"]
   },
@@ -15,6 +17,18 @@
     "deep-reason": {
       "variant": "high",
       "description": "High-reasoning subagent for deep architectural analysis, frozen ABI changes, or complex debugging"
+    },
+    "worker": {
+      "variant": "high",
+      "description": "Substantive implementation worker for atomic code modifications, reproduction tests, refactoring, and package verification"
+    },
+    "researcher": {
+      "variant": "high",
+      "description": "Research and discovery subagent for investigating codebase layout, prior art, doc searches, and structured findings"
+    },
+    "cross-validator": {
+      "variant": "high",
+      "description": "Adversarial cross-validation subagent for verifying code changes, inspecting diffs, executing tests, and producing proof verdicts"
     }
   },
   "mcp": {

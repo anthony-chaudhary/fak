@@ -30,15 +30,18 @@ The five that will bite you if you skip them:
   A bare un-stamped subject stays NOT_SHIPPED. The [`/commit-clean`](.claude/skills/commit-clean/SKILL.md)
   skill mechanizes this rule end to end — lint the subject, stage-and-commit exactly your
   paths under a lock, and verify only your paths landed. (Full convention in [`AGENTS.md`](AGENTS.md).)
-- **Default is to ship green work unprompted** — once the tree is green (`make ci`), commit AND push
-  unprompted. "Green" requires shift-left proof: for changes touching executable CLI verbs,
-  gateway adapters, or runtime logic, execute real paths in dogfood or integration tests
-  rather than relying on mock-only or shallow tests. Stay on the trunk, never force-push,
-  defer to the guard (`OFF_TRUNK` / a peer merge in flight). Full default + verify command
+- **Default is to ship green work and sync safely unprompted** — do more work by default:
+  pre-flight sync with trunk (`fak sync check`, `fak sync reconcile --apply`, or `fak sync apply`),
+  verify on-device (`fak validate --mine <paths>`, `go test ./internal/<pkg>/...`), commit by explicit path
+  (`fak commit --path <p> -m "<subject> (fak <leaf>)"`), and push unprompted via `fak sync push` or `fak commit --push`.
+  "Green" requires shift-left proof: for changes touching executable CLI verbs, gateway adapters, or runtime logic,
+  execute real paths in dogfood or integration tests rather than relying on mock-only or shallow tests. Stay on the trunk,
+  never force-push, defer to the guard (`OFF_TRUNK` / a peer merge in flight). Full default + verify command
   in [`AGENTS.md`](AGENTS.md).
-- **Delegate substantive work and keep this coordinator context clean; enforce capability-aware scoping and persistence** — use guarded
-  headless agents or equivalent isolated workers for investigation, implementation, tests,
-  and review. Constrain smaller models and workers to atomic S0/S1 leaf units (1–3 files,
+- **Divide and conquer: delegate substantive work and keep this coordinator context clean; enforce capability-aware scoping and persistence** —
+  decompose substantive or multi-part requests into atomic single-concern units and launch specialized subagents
+  concurrently for independent components. Use guarded headless agents or equivalent isolated workers for investigation,
+  implementation, tests, and review. Constrain smaller models and workers to atomic S0/S1 leaf units (1–3 files,
   single package, exactly one witness). Scope abstention strictly to bounded high-difficulty aspects
   (concurrency, frozen ABI, kernel memory layout, security gates): emit a structured `ABSTAIN`
   for the escalated boundary while executing all independent, safe, solvable sub-components (such as

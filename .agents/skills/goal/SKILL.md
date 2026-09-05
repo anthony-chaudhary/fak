@@ -1,6 +1,6 @@
 ---
 name: goal
-description: Autonomous goal-directed execution loop. Establishes an immutable objective pin, durable unique disk state (goals/GOAL-<slug>.md & todowrite), deterministic witness exit-gate, and isolated subagent delegation.
+description: Autonomous goal-directed execution loop. Establishes an immutable objective pin, durable disk...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/goal/SKILL.md
