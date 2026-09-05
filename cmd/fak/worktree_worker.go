@@ -62,6 +62,7 @@ fak worktree <subcommand>
       land --worktree D [--base-sha S] [--msg-file F] [--paths p ...] [--verify go-build]
            [--core-lock-maintenance-witness CLAIM] [--recovery-remote R]
            [--require-remote-recovery] [--disambiguation-timeout-ms N]
+           [--require-test-witness]
                    Apply the worktree's diff-since-base onto the trunk as one
                    signed-off commit. Prints {ok, applied, committed, ...}.
                    The optional disambiguation deadline is 1..900000 ms and uses
@@ -72,6 +73,9 @@ fak worktree <subcommand>
                    CORE_SELF_MODIFY unless the witness claim (flag, or a
                    Core-lock-maintenance-witness: trailer in the commit message)
                    resolves CONFIRMED — the same lock fak commit enforces.
+                   --require-test-witness requires an independently verified test
+                   witness receipt in the worktree, refusing unverified claims with
+                   UNWITNESSED_WORKER_CLAIM.
       reap --worktree D [--superseded-by SHA] [--max-wait D]
                    Release ONE clean worker worktree within a shared deadline. A dirty
                    worktree is preserved by default. --superseded-by authorizes force
@@ -519,6 +523,226 @@ func verifyWorkerLandSymptom(wtPath string) workerworktree.Result {
 	}
 }
 
+func verifyWorkerLandTestWitness(wtPath string) workerworktree.Result {
+	candidates := []string{
+		filepath.Join(wtPath, ".fak", "test-witness.json"),
+		filepath.Join(wtPath, "test-witness.json"),
+		filepath.Join(wtPath, ".test-witness.json"),
+		filepath.Join(wtPath, ".fak", "test_witness.json"),
+		filepath.Join(wtPath, ".fak", "test-witness.receipt"),
+		filepath.Join(wtPath, ".fak", "test-witness-receipt.json"),
+		filepath.Join(filepath.Dir(wtPath), ".fak-worker-intents", filepath.Base(wtPath)+"-test-witness.json"),
+		filepath.Join(filepath.Dir(wtPath), ".fak-worker-receipts", filepath.Base(wtPath)+"-test-witness.json"),
+	}
+
+	var foundCandidate bool
+	var lastReason string
+
+	for _, cand := range candidates {
+		data, err := os.ReadFile(cand)
+		if err != nil {
+			continue
+		}
+		foundCandidate = true
+		valid, reason := validateTestWitnessBytes(data)
+		if valid {
+			return workerworktree.Result{OK: true}
+		}
+		if lastReason == "" {
+			lastReason = reason
+		}
+	}
+
+	// Also check if test-witness receipt is committed in git HEAD if not found on disk
+	if !foundCandidate {
+		for _, gitPath := range []string{".fak/test-witness.json", "test-witness.json"} {
+			cmd := windowgate.Command("git", "-C", wtPath, "show", "HEAD:"+gitPath)
+			windowgate.ConfigureBackgroundCommand(cmd)
+			if out, err := cmd.Output(); err == nil && len(out) > 0 {
+				foundCandidate = true
+				valid, reason := validateTestWitnessBytes(out)
+				if valid {
+					return workerworktree.Result{OK: true}
+				}
+				if lastReason == "" {
+					lastReason = reason
+				}
+				break
+			}
+		}
+	}
+
+	if foundCandidate {
+		return workerworktree.Result{
+			OK:     false,
+			Code:   "UNWITNESSED_WORKER_CLAIM",
+			Reason: "UNWITNESSED_WORKER_CLAIM: " + lastReason,
+		}
+	}
+
+	return workerworktree.Result{
+		OK:     false,
+		Code:   "UNWITNESSED_WORKER_CLAIM",
+		Reason: "UNWITNESSED_WORKER_CLAIM: landing requires an independently verified test witness receipt; none found in worker worktree",
+	}
+}
+
+func isWitnessTruthy(v any) bool {
+	switch val := v.(type) {
+	case bool:
+		return val
+	case string:
+		s := strings.ToLower(strings.TrimSpace(val))
+		return s == "true" || s == "1" || s == "yes"
+	}
+	return false
+}
+
+func isWitnessExplicitFalse(v any) bool {
+	switch val := v.(type) {
+	case bool:
+		return !val
+	case string:
+		s := strings.ToLower(strings.TrimSpace(val))
+		return s == "false" || s == "0" || s == "no"
+	}
+	return false
+}
+
+func validateTestWitnessBytes(data []byte) (bool, string) {
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return false, "malformed test witness receipt: invalid JSON"
+	}
+	if len(raw) == 0 {
+		return false, "test witness receipt contains no evidence (empty object)"
+	}
+
+	// 1. Guard against self-report claims
+	if isWitnessTruthy(raw["self_report"]) || isWitnessTruthy(raw["self-report"]) || isWitnessTruthy(raw["selfReport"]) {
+		return false, "test witness is an unverified self-report claim"
+	}
+	for _, key := range []string{"witness", "source", "claim", "type", "kind"} {
+		if val, ok := raw[key].(string); ok {
+			s := strings.ToLower(strings.TrimSpace(val))
+			if s == "self-report" || s == "self_report" || s == "subject-only" || s == "self" {
+				return false, "test witness is an unverified self-report claim"
+			}
+		}
+	}
+	if rung, ok := raw["rung"].(string); ok {
+		if strings.EqualFold(strings.TrimSpace(rung), "w0") {
+			return false, "test witness is an unverified self-report claim (W0 rung)"
+		}
+	}
+
+	// 2. Guard against explicit false verification flags
+	if isWitnessExplicitFalse(raw["verified"]) {
+		return false, "test witness receipt is explicitly unverified"
+	}
+	if isWitnessExplicitFalse(raw["witnesses"]) {
+		return false, "test witness receipt does not witness claim"
+	}
+	if isWitnessExplicitFalse(raw["passed"]) {
+		return false, "test witness receipt indicates test did not pass"
+	}
+	if isWitnessExplicitFalse(raw["ok"]) {
+		return false, "test witness receipt indicates failure"
+	}
+
+	// 3. Guard against non-zero exit code
+	if ec, ok := raw["exit_code"]; ok {
+		switch val := ec.(type) {
+		case float64:
+			if val != 0 {
+				return false, fmt.Sprintf("test witness exited with non-zero code %d", int(val))
+			}
+		case int:
+			if val != 0 {
+				return false, fmt.Sprintf("test witness exited with non-zero code %d", val)
+			}
+		}
+	}
+
+	// 4. Guard against negative status/verdict/outcome strings
+	unwitnessedVerdicts := map[string]bool{
+		"FAIL":              true,
+		"FAILED":            true,
+		"CLAIM_UNWITNESSED": true,
+		"UNWITNESSED":       true,
+		"UNVERIFIED":        true,
+		"ABSTAIN":           true,
+		"VACUOUS":           true,
+		"REJECTED":          true,
+		"ERROR":             true,
+		"RED":               true,
+	}
+	if verdict, ok := raw["verdict"].(string); ok {
+		v := strings.ToUpper(strings.TrimSpace(verdict))
+		if unwitnessedVerdicts[v] {
+			return false, fmt.Sprintf("test witness receipt has negative verdict %q", verdict)
+		}
+	}
+	if status, ok := raw["status"].(string); ok {
+		s := strings.ToUpper(strings.TrimSpace(status))
+		if unwitnessedVerdicts[s] {
+			return false, fmt.Sprintf("test witness receipt has negative status %q", status)
+		}
+	}
+	if outcome, ok := raw["outcome"].(string); ok {
+		o := strings.ToUpper(strings.TrimSpace(outcome))
+		if unwitnessedVerdicts[o] || o == "NOTYET" || o == "NOT_YET" {
+			return false, fmt.Sprintf("test witness receipt has negative outcome %q", outcome)
+		}
+	}
+
+	// 5. Require positive verification / witness evidence
+	positiveVerdicts := map[string]bool{
+		"PASS":           true,
+		"EXEC_PASS":      true,
+		"RESOLVED_MATCH": true,
+		"OK":             true,
+		"DISCRIMINATES":  true,
+		"PASSED":         true,
+		"SUCCESS":        true,
+		"CONFIRMED":      true,
+		"GREEN":          true,
+	}
+	hasPositive := false
+	if isWitnessTruthy(raw["verified"]) || isWitnessTruthy(raw["witnesses"]) || isWitnessTruthy(raw["passed"]) || isWitnessTruthy(raw["ok"]) {
+		hasPositive = true
+	}
+	if verdict, ok := raw["verdict"].(string); ok && positiveVerdicts[strings.ToUpper(strings.TrimSpace(verdict))] {
+		hasPositive = true
+	}
+	if status, ok := raw["status"].(string); ok && positiveVerdicts[strings.ToUpper(strings.TrimSpace(status))] {
+		hasPositive = true
+	}
+	if outcome, ok := raw["outcome"].(string); ok && positiveVerdicts[strings.ToUpper(strings.TrimSpace(outcome))] {
+		hasPositive = true
+	}
+	if witness, ok := raw["witness"].(string); ok {
+		w := strings.ToLower(strings.TrimSpace(witness))
+		if w == "test-witnessed" || w == "diff-witnessed" || w == "verified" || w == "test" || w == "independent" {
+			hasPositive = true
+		}
+	}
+	if rung, ok := raw["rung"].(string); ok {
+		r := strings.ToUpper(strings.TrimSpace(rung))
+		if r == "W3" || r == "W2" || r == "OS_RECORDED" {
+			hasPositive = true
+		}
+	}
+	if schema, ok := raw["schema"].(string); ok && strings.Contains(schema, "test-witness") {
+		hasPositive = true
+	}
+
+	if !hasPositive {
+		return false, "test witness receipt contains no positive verification or passed test evidence"
+	}
+	return true, ""
+}
+
 func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworktree.Result, int) {
 	fs := flag.NewFlagSet("worktree worker land", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -534,6 +758,8 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	requireRemote := fs.Bool("require-remote-recovery", false, "refuse trunk CAS unless remote recovery read-back succeeds")
 	unsafeSkipSymptomWitness := fs.Bool("unsafe-skip-symptom-witness", false,
 		"bypass mandatory fail-to-pass symptom witness for fix(*) commits")
+	requireTestWitness := fs.Bool("require-test-witness", false,
+		"require verified test witness receipt before landing worker diff")
 	var paths repeatedString
 	fs.Var(&paths, "paths", "path to scope the commit to (repeatable); omit to commit the whole applied diff")
 	if err := fs.Parse(argv); err != nil {
@@ -546,6 +772,14 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 		return workerworktree.Result{OK: false, Reason: "--worktree is required"}, 2
 	}
 	repoRoot := worktreeWorkerRoot(*root)
+
+	// Mandatory test witness receipt check (#11532)
+	if *requireTestWitness {
+		testWitnessRes := verifyWorkerLandTestWitness(worktreeDir)
+		if !testWitnessRes.OK {
+			return testWitnessRes, 1
+		}
+	}
 
 	// Mandatory fail-to-pass symptom witness for fix(*) commits (#10926)
 	subj := worktreeCommitSubject(worktreeDir, strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile))
