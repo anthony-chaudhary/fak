@@ -339,6 +339,13 @@ var registry = []Bench{
 		Doc:     "BENCHMARK-AUTHORITY.md",
 	},
 	{
+		Name: "tb4bench", Kind: KindVerb, Need: NeedNone, Level: LevelE2E,
+		Summary: "Terminal-Bench 4 all-in-one vs OpenCode regression benchmark: evaluates task solve rate, prompt-token reduction, and vDSO acceleration.",
+		Run:     "fak bench tb4 run --arm both --mock --dataset testdata/tb4bench/synthetic_suite.json",
+		Flags:   []string{"--arm - benchmark arm (fak, opencode, both)", "--mock - offline synthetic mode", "--dataset - task manifest JSON"},
+		Doc:     "BENCHMARK-AUTHORITY.md",
+	},
+	{
 		Name: "terminalbench", Kind: KindCmd, Need: NeedNone,
 		Summary: "Terminal-Bench-shaped command-boundary smoke: replays local command traces through raw and fak arms and reports solve, safe resolve, blocked dangerous actions, unnecessary blocks, and command evidence.",
 		Run:     "go run ./cmd/terminalbench",
@@ -436,6 +443,9 @@ func Get(name string) (Bench, bool) {
 		if b.Name == name {
 			return b, true
 		}
+	}
+	if name == "bench-tb4" {
+		return Get("tb4bench")
 	}
 	return Bench{}, false
 }
