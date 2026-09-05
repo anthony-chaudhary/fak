@@ -135,3 +135,57 @@ func BenchmarkCUDANaiveAttention(b *testing.B) {
 	}
 	b.StopTimer()
 }
+
+// TestCUDASpecVerifyAttentionMatchesRef tests split-KV speculative verify attention on CUDA vs cpuref (#11100).
+func TestCUDASpecVerifyAttentionMatchesRef(t *testing.T) {
+	cb := cudaOrSkip(t)
+	ref := Default()
+
+	qLens := []int{4, 8, 16}
+	cases := []struct {
+		name     string
+		nH, nHkv int
+		d, kvLen int
+	}{
+		{"mha", 8, 8, 64, 64},
+		{"gqa", 8, 2, 64, 128},
+		{"mqa", 8, 1, 64, 96},
+		{"hd128", 16, 4, 128, 256},
+	}
+
+	for _, qLen := range qLens {
+		for _, c := range cases {
+			var seed lcg = lcg(11100 + qLen*10 + c.nH)
+			qData := randVec(&seed, qLen*c.nH*c.d)
+			kData := randVec(&seed, c.kvLen*c.nHkv*c.d)
+			vData := randVec(&seed, c.kvLen*c.nHkv*c.d)
+
+			qRef := NewF32(ref, []int{qLen, c.nH, c.d}, qData)
+			kRef := NewF32(ref, []int{c.kvLen, c.nHkv, c.d}, kData)
+			vRef := NewF32(ref, []int{c.kvLen, c.nHkv, c.d}, vData)
+			var outRef Tensor
+
+			if err := ref.SpecVerifyAttention(&qRef, &kRef, &vRef, &outRef, qLen, c.kvLen, c.nH, c.nHkv, c.d); err != nil {
+				t.Fatalf("ref.SpecVerifyAttention failed: %v", err)
+			}
+			oRef := ref.Read(outRef)
+
+			qCu := cb.Upload(qRef, F32)
+			kCu := cb.Upload(kRef, F32)
+			vCu := cb.Upload(vRef, F32)
+			var outCu Tensor
+
+			if err := cb.SpecVerifyAttention(&qCu, &kCu, &vCu, &outCu, qLen, c.kvLen, c.nH, c.nHkv, c.d); err != nil {
+				t.Fatalf("cb.SpecVerifyAttention failed: %v", err)
+			}
+			oCu := cb.Read(outCu)
+
+			cos := cosine(oRef, oCu)
+			if cos < 0.999 {
+				t.Fatalf("qLen=%d %s: cosine %.6f < recorded floor 0.999", qLen, c.name, cos)
+			}
+			t.Logf("#11100 spec verify parity [qLen=%d %s nH=%d nHkv=%d d=%d kvLen=%d]: cosine=%.8f maxDelta=%.2e",
+				qLen, c.name, c.nH, c.nHkv, c.d, c.kvLen, cos, maxAbsDelta(oRef, oCu))
+		}
+	}
+}

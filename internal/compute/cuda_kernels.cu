@@ -2064,6 +2064,210 @@ extern "C" int fak_qwen35_sequence_sync(void) {
   return completed == cudaSuccess ? 0 : 60000 + (int)completed;
 }
 
+// ---- Split-KV Multi-Query Speculative Verify Attention (#11100) -------------------
+// When speculative decoding verifies qLen draft tokens (e.g. 4, 8, 16), FA2 assigns only
+// one thread block per query head, leaving GPU SMs underutilized.
+// k_spec_verify_attention tiles queries across BLOCK_M with KV sequence splitting across
+// NUM_SEGMENTS thread blocks, producing partial online-softmax statistics.
+// k_spec_verify_combine then merges these partial reductions across segments.
+#define SPEC_VERIFY_BLOCK_M 4
+#define SPEC_VERIFY_NUM_SEGMENTS 8
+#define BLOCK_M SPEC_VERIFY_BLOCK_M
+#define NUM_SEGMENTS SPEC_VERIFY_NUM_SEGMENTS
+
+__global__ void k_spec_verify_attention(
+    const float *Q, const float *K, const float *V,
+    float *partial_out, float *partial_max, float *partial_sum,
+    int qLen, int kvLen, int nH, int nHkv, int hd, float scale) {
+  int m_block = blockIdx.x;
+  int h = blockIdx.y;
+  int seg_idx = blockIdx.z;
+
+  if (h >= nH || seg_idx >= NUM_SEGMENTS) return;
+
+  int grp = nH / nHkv;
+  int kvh = h / grp;
+  int w = nHkv * hd;
+  int tid = threadIdx.x;
+
+  extern __shared__ float smem[];
+  float *qs = smem;
+  float *red = smem + hd;
+
+  int seg_len = (kvLen + NUM_SEGMENTS - 1) / NUM_SEGMENTS;
+  int kv_start = seg_idx * seg_len;
+  int kv_end = kv_start + seg_len;
+  if (kv_end > kvLen) kv_end = kvLen;
+
+  int prefix = kvLen - qLen;
+
+  for (int m = 0; m < BLOCK_M; m++) {
+    int qi = m_block * BLOCK_M + m;
+    if (qi >= qLen) break;
+
+    const float *qh = Q + ((size_t)qi * nH + h) * hd;
+    for (int d = tid; d < hd; d += blockDim.x) {
+      qs[d] = qh[d];
+    }
+    __syncthreads();
+
+    float m_stat = -1e30f;
+    float l_stat = 0.f;
+    float acc[FLASH_ACC_MAX];
+#pragma unroll
+    for (int k = 0; k < FLASH_ACC_MAX; k++) acc[k] = 0.f;
+
+    int max_attend = prefix + qi + 1;
+    int cur_end = kv_end < max_attend ? kv_end : max_attend;
+
+    if (kv_start < cur_end) {
+      for (int j = kv_start; j < cur_end; j++) {
+        const float *kj = K + (size_t)j * w + (size_t)kvh * hd;
+        float partial = 0.f;
+        for (int d = tid; d < hd; d += blockDim.x) {
+          partial += qs[d] * kj[d];
+        }
+        red[tid] = partial;
+        __syncthreads();
+        for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+          if (tid < s) red[tid] += red[tid + s];
+          __syncthreads();
+        }
+        float sc = red[0] * scale;
+        __syncthreads();
+
+        float mNew = fmaxf(m_stat, sc);
+        float corr = expf(m_stat - mNew);
+        float p = expf(sc - mNew);
+        l_stat = l_stat * corr + p;
+
+        const float *vj = V + (size_t)j * w + (size_t)kvh * hd;
+        int k = 0;
+        for (int d = tid; d < hd; d += blockDim.x, k++) {
+          acc[k] = acc[k] * corr + p * vj[d];
+        }
+        m_stat = mNew;
+      }
+    }
+
+    float invL = (l_stat > 0.f) ? (1.f / l_stat) : 0.f;
+    size_t out_base = (((size_t)qi * nH + h) * NUM_SEGMENTS + seg_idx) * hd;
+    int k = 0;
+    for (int d = tid; d < hd; d += blockDim.x, k++) {
+      partial_out[out_base + d] = acc[k] * invL;
+    }
+
+    if (tid == 0) {
+      size_t stat_idx = ((size_t)qi * nH + h) * NUM_SEGMENTS + seg_idx;
+      partial_max[stat_idx] = m_stat;
+      partial_sum[stat_idx] = l_stat;
+    }
+    __syncthreads();
+  }
+}
+
+__global__ void k_spec_verify_combine(
+    const float *partial_out, const float *partial_max, const float *partial_sum,
+    float *Out, int qLen, int nH, int hd) {
+  int m_block = blockIdx.x;
+  int h = blockIdx.y;
+  if (h >= nH) return;
+
+  int tid = threadIdx.x;
+  __shared__ float s_max[NUM_SEGMENTS];
+  __shared__ float s_sum[NUM_SEGMENTS];
+  __shared__ float s_weights[NUM_SEGMENTS];
+  __shared__ float s_global_sum;
+
+  for (int m = 0; m < BLOCK_M; m++) {
+    int qi = m_block * BLOCK_M + m;
+    if (qi >= qLen) break;
+
+    size_t stat_base = ((size_t)qi * nH + h) * NUM_SEGMENTS;
+    if (tid < NUM_SEGMENTS) {
+      s_max[tid] = partial_max[stat_base + tid];
+      s_sum[tid] = partial_sum[stat_base + tid];
+    }
+    __syncthreads();
+
+    if (tid == 0) {
+      float g_max = -1e30f;
+      for (int s = 0; s < NUM_SEGMENTS; s++) {
+        if (s_sum[s] > 0.f && s_max[s] > g_max) {
+          g_max = s_max[s];
+        }
+      }
+      float total_w = 0.f;
+      for (int s = 0; s < NUM_SEGMENTS; s++) {
+        if (s_sum[s] > 0.f) {
+          float w = s_sum[s] * expf(s_max[s] - g_max);
+          s_weights[s] = w;
+          total_w += w;
+        } else {
+          s_weights[s] = 0.f;
+        }
+      }
+      s_global_sum = total_w;
+    }
+    __syncthreads();
+
+    float inv_w = (s_global_sum > 0.f) ? (1.f / s_global_sum) : 0.f;
+    for (int d = tid; d < hd; d += blockDim.x) {
+      float acc = 0.f;
+      for (int s = 0; s < NUM_SEGMENTS; s++) {
+        if (s_weights[s] > 0.f) {
+          size_t p_offset = (((size_t)qi * nH + h) * NUM_SEGMENTS + s) * hd + d;
+          acc += s_weights[s] * partial_out[p_offset];
+        }
+      }
+      Out[((size_t)qi * nH + h) * hd + d] = acc * inv_w;
+    }
+    __syncthreads();
+  }
+}
+
+extern "C" int fcuda_spec_verify_attention_f32(
+    const float *dQ, const float *dK, const float *dV, float *dOut,
+    int qLen, int kvLen, int nH, int nKV, int hd, float scale) {
+  if (!dQ || !dK || !dV || !dOut) return -1;
+  if (qLen <= 0 || kvLen <= 0 || kvLen < qLen) return -1;
+  if (nH <= 0 || nKV <= 0 || (nH % nKV) != 0) return -1;
+  if (hd <= 0 || hd > FLASH_ACC_MAX * FLASH_THREADS) return -1;
+  if (scale <= 0.f || !isfinite(scale)) {
+    scale = 1.0f / sqrtf((float)hd);
+  }
+
+  size_t partial_elements = (size_t)qLen * nH * NUM_SEGMENTS * hd;
+  size_t stats_elements = (size_t)qLen * nH * NUM_SEGMENTS;
+  size_t total_scratch_bytes = (partial_elements + 2 * stats_elements) * sizeof(float);
+
+  float *scratch = (float *)fcuda_malloc(total_scratch_bytes);
+  if (!scratch) return -2;
+
+  float *d_partial_out = scratch;
+  float *d_partial_max = scratch + partial_elements;
+  float *d_partial_sum = d_partial_max + stats_elements;
+
+  dim3 grid_attn((qLen + BLOCK_M - 1) / BLOCK_M, nH, NUM_SEGMENTS);
+  dim3 block_attn(FLASH_THREADS);
+  size_t shmem_attn = ((size_t)hd + FLASH_THREADS) * sizeof(float);
+
+  k_spec_verify_attention<<<grid_attn, block_attn, shmem_attn, g_stream>>>(
+      dQ, dK, dV, d_partial_out, d_partial_max, d_partial_sum,
+      qLen, kvLen, nH, nKV, hd, scale);
+
+  dim3 grid_combine((qLen + BLOCK_M - 1) / BLOCK_M, nH);
+  dim3 block_combine(FLASH_THREADS);
+
+  k_spec_verify_combine<<<grid_combine, block_combine, 0, g_stream>>>(
+      d_partial_out, d_partial_max, d_partial_sum,
+      dOut, qLen, nH, hd);
+
+  fcuda_free(scratch);
+  cudaError_t err = cudaGetLastError();
+  return (err == cudaSuccess) ? 0 : (int)err;
+}
+
 // ---- GLM-MoE-DSA sparse attention over the host-selected key set ------------------
 // model.glmDsaAttendCached's inner loop on the device. GLM-5.2's attention is SPARSE: a learned
 // indexer picks the top-k keys a query attends, and the softmax(scale·q·k)·ΣwV runs over only

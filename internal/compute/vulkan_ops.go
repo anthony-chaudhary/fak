@@ -86,6 +86,24 @@ func (v *vulkanBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, 
 	return out
 }
 
+// SpecVerifyAttention on vulkanBackend falls back to the CPU reference (#11100).
+func (be *vulkanBackend) SpecVerifyAttention(q, k, v, out *Tensor, qLen, kvLen, nH, nHkv, d int) error {
+	ref, ok := Default().(SpecVerifyBackend)
+	if !ok {
+		return fmt.Errorf("compute: Default backend does not implement SpecVerifyBackend")
+	}
+	return ref.SpecVerifyAttention(q, k, v, out, qLen, kvLen, nH, nHkv, d)
+}
+
+// PrefillBatch on vulkanBackend falls back to the CPU reference (#11036).
+func (be *vulkanBackend) PrefillBatch(args PrefillBatchArgs) (PrefillBatchResult, error) {
+	ref, ok := Default().(BatchedPrefillBackend)
+	if !ok {
+		return PrefillBatchResult{}, fmt.Errorf("compute: Default backend does not implement BatchedPrefillBackend")
+	}
+	return ref.PrefillBatch(args)
+}
+
 // Argmax returns the index of the largest element of the device logits tensor via the
 // scalar-reduction shader, so greedy decode never copies the full vector host-ward.
 func (v *vulkanBackend) Argmax(logits Tensor) int {

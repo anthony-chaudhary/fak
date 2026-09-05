@@ -245,6 +245,13 @@ void fcuda_attention_f32(const float *dQ, const float *dK, const float *dV, floa
 void fcuda_flash_attention_f32(const float *dQ, const float *dK, const float *dV, float *dOut,
                                int nPos, int maxPos, int nH, int nKV, int hd, float scale);
 
+/* Split-KV multi-query speculative verify attention (#11100).
+ * Q is [qLen, nH, hd], K is [kvLen, nKV, hd], V is [kvLen, nKV, hd], Out is [qLen, nH, hd].
+ * Query tiling across BLOCK_M with KV sequence splitting across NUM_SEGMENTS
+ * thread blocks and online softmax merging. */
+int fcuda_spec_verify_attention_f32(const float *dQ, const float *dK, const float *dV, float *dOut,
+                                   int qLen, int kvLen, int nH, int nKV, int hd, float scale);
+
 /* GLM-MoE-DSA sparse attention (model.glmDsaAttendCached's inner loop) for ONE query position
  * over nSel host-SELECTED, gathered, causal keys: per query head h, scores[i]=scale·dot(q_h,
  * selK_i_h), softmax over i, out_h=Σ softmax_i·selV_i_h. selK is [nSel, nH*kd], selV [nSel, nH*vd]

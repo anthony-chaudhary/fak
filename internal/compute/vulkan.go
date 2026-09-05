@@ -392,7 +392,7 @@ func (v *vulkanBackend) Tier() string            { return v.tier }
 func (v *vulkanBackend) Class() CorrectnessClass { return Approx }
 func (v *vulkanBackend) Caps() Caps {
 	_, _, hostKnown := hostSystemMemory()
-	return Caps{DeviceMemory: true, UploadDtype: v.haveQ8, CapacityProbe: v.totalMem > 0, HostCapacityProbe: hostKnown}
+	return Caps{DeviceMemory: true, UploadDtype: v.haveQ8, CapacityProbe: v.totalMem > 0, HostCapacityProbe: hostKnown, BatchedPrefill: true}
 }
 
 // DeviceMemory reports the Vulkan device-local heap total and, when VK_EXT_memory_budget is

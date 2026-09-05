@@ -10,3 +10,4 @@ package compute
 // falling back to eager prefill on the device. On a non-CUDA build this file is absent, so
 // the default artifact stays pure-Go and compiles without it (the guarded-stub rule).
 var _ PrefillGraphCapturer = (*cudaBackend)(nil)
+var _ BatchedPrefillBackend = (*cudaBackend)(nil)

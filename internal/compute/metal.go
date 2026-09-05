@@ -137,7 +137,7 @@ func (c *metalBackend) Caps() Caps {
 	// Device-resident tensors are not host-addressable; the KV cache lives in device buffers.
 	// We do not yet advertise Async/FusedAttn/GraphCompile/UploadDtype — those are tracked seams.
 	_, _, hostKnown := hostSystemMemory()
-	return Caps{DeviceMemory: true, CapacityProbe: c.totalMem > 0, HostCapacityProbe: hostKnown}
+	return Caps{DeviceMemory: true, CapacityProbe: c.totalMem > 0, HostCapacityProbe: hostKnown, BatchedPrefill: true}
 }
 
 func (c *metalBackend) DeviceMemory() (total, free int64, known bool) {
@@ -686,6 +686,123 @@ func (c *metalBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, g
 		C.int(nPos), C.int(nH), C.int(nKV), C.int(hd), C.float(scale))
 	return out
 }
+
+// SpecVerifyAttention on metalBackend falls back to the CPU reference (#11100).
+func (c *metalBackend) SpecVerifyAttention(q, k, v, out *Tensor, qLen, kvLen, nH, nHkv, d int) error {
+	ref, ok := Default().(SpecVerifyBackend)
+	if !ok {
+		return fmt.Errorf("compute: Default backend does not implement SpecVerifyBackend")
+	}
+	return ref.SpecVerifyAttention(q, k, v, out, qLen, kvLen, nH, nHkv, d)
+}
+
+// PrefillBatch executes batched prompt prefill across a sequence panel (P x D) in 1 pass on Metal GPU (#11036).
+func (c *metalBackend) PrefillBatch(args PrefillBatchArgs) (PrefillBatchResult, error) {
+	P, _, err := validatePrefillBatchArgs(&args)
+	if err != nil {
+		return PrefillBatchResult{}, err
+	}
+
+	nH := args.NumHeads
+	nKV := args.NumKVHeads
+	hd := args.HeadDim
+	qOut := nH * hd
+	kvOut := nKV * hd
+	startPos := args.StartPos
+
+	// Ensure inputs are resident device tensors
+	xDev := args.X
+	if _, isHost := c.Host(xDev); isHost {
+		xDev = c.Upload(xDev, F32)
+	}
+	wqDev := args.Wq
+	if _, isHost := c.Host(wqDev); isHost {
+		wqDev = c.Upload(wqDev, F32)
+	}
+	wkDev := args.Wk
+	if _, isHost := c.Host(wkDev); isHost {
+		wkDev = c.Upload(wkDev, F32)
+	}
+	wvDev := args.Wv
+	if _, isHost := c.Host(wvDev); isHost {
+		wvDev = c.Upload(wvDev, F32)
+	}
+
+	// 1. Batched projections on Metal GPU
+	qTen := c.BatchedMatMul(wqDev, xDev, P)
+	kTen := c.BatchedMatMul(wkDev, xDev, P)
+	vTen := c.BatchedMatMul(wvDev, xDev, P)
+
+	qf := c.Read(qTen)
+	kf := c.Read(kTen)
+	vf := c.Read(vTen)
+
+	kRawAll := append([]float32(nil), kf...)
+	qRoped := make([]float32, len(qf))
+	kRoped := make([]float32, len(kf))
+	for t := 0; t < P; t++ {
+		pos := startPos + t
+		qRow := c.Upload(NewF32(Default(), []int{qOut}, qf[t*qOut:(t+1)*qOut]), F32)
+		qR := c.RoPE(qRow, pos, nH, hd, args.RopeTheta)
+		copy(qRoped[t*qOut:(t+1)*qOut], c.Read(qR))
+
+		kRow := c.Upload(NewF32(Default(), []int{kvOut}, kf[t*kvOut:(t+1)*kvOut]), F32)
+		kR := c.RoPE(kRow, pos, nKV, hd, args.RopeTheta)
+		copy(kRoped[t*kvOut:(t+1)*kvOut], c.Read(kR))
+	}
+
+	if args.KV != nil {
+		for t := 0; t < P; t++ {
+			pos := startPos + t
+			rawRow := kRawAll[t*kvOut : (t+1)*kvOut]
+			ropeRowSlice := kRoped[t*kvOut : (t+1)*kvOut]
+			vRow := vf[t*kvOut : (t+1)*kvOut]
+
+			rawTen := c.Upload(NewF32(Default(), []int{kvOut}, rawRow), F32)
+			ropeTen := c.Upload(NewF32(Default(), []int{kvOut}, ropeRowSlice), F32)
+			vRowTen := c.Upload(NewF32(Default(), []int{kvOut}, vRow), F32)
+
+			args.KV.AppendKV(args.Layer, rawTen, ropeTen, vRowTen, pos)
+		}
+	}
+
+	var allK, allV []float32
+	var totalPositions int
+	strideKV := kvOut
+
+	if args.KV != nil {
+		allK = c.Read(args.KV.KeysView(args.Layer))
+		allV = c.Read(args.KV.ValuesView(args.Layer))
+		totalPositions = len(allK) / strideKV
+	} else {
+		allK = kRoped
+		allV = vf
+		totalPositions = P
+		startPos = 0
+	}
+
+	context := prefillBatchCausalAttention(qRoped, allK, allV, P, startPos, totalPositions, nH, nKV, hd, args.Scale)
+	ctxDev := c.Upload(NewF32(Default(), []int{P, qOut}, context), F32)
+
+	var outTen Tensor
+	if args.Wo.buf != nil {
+		woDev := args.Wo
+		if _, isHost := c.Host(woDev); isHost {
+			woDev = c.Upload(woDev, F32)
+		}
+		outTen = c.BatchedMatMul(woDev, ctxDev, P)
+	} else {
+		outTen = ctxDev
+	}
+
+	return PrefillBatchResult{
+		Output:  outTen,
+		Context: ctxDev,
+		Tokens:  P,
+	}, nil
+}
+
+var _ BatchedPrefillBackend = (*metalBackend)(nil)
 
 // Argmax returns the index of the largest logit, reduced on the device so greedy
 // decode never copies the full logits vector host-ward.

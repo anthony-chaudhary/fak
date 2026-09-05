@@ -46,7 +46,7 @@ type cpuBackend struct{ identity byte }
 func (c *cpuBackend) Name() string            { return "cpu-ref" }
 func (c *cpuBackend) Tier() string            { return "scalar" } // a real cpu backend probes CPUID here
 func (c *cpuBackend) Class() CorrectnessClass { return Reference }
-func (c *cpuBackend) Caps() Caps              { return Caps{Collective: true} } // synchronous, host-memory, no fusion; single-box exact collectives (collective.go)
+func (c *cpuBackend) Caps() Caps              { return Caps{Collective: true, BatchedPrefill: true} } // synchronous, host-memory, no fusion; single-box exact collectives (collective.go)
 
 // ---- host data entry + residency ------------------------------------------------
 

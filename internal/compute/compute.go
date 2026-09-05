@@ -274,6 +274,7 @@ type Caps struct {
 	// capacity.go and docs/explainers/hardware-limits-and-capacity.md.
 	CapacityProbe     bool
 	HostCapacityProbe bool // implements HostCapacity for host-scoped offload/DDR demands; absent means fail open
+	BatchedPrefill    bool // implements BatchedPrefillBackend (PrefillBatch) for prompt panelization (#11036)
 }
 
 // ---- KV store -------------------------------------------------------------------

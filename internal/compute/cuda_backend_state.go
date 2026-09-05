@@ -260,7 +260,7 @@ func (c *cudaBackend) Caps() Caps {
 	// succeeded over >1 device, recorded in cudaNCCLWorld). Until then it stays false so a host
 	// never picks the device collective path before it can actually all-reduce across GPUs — the
 	// honesty line (#971): no multi-GPU claim until a device tensor reduces across 2 GPUs.
-	return Caps{Async: true, DeviceMemory: true, GraphCompile: graphEnabled, UploadDtype: true, FusedAttn: true, CapacityProbe: true, HostCapacityProbe: hostKnown, Collective: atomic.LoadInt32(&cudaNCCLWorld) > 1}
+	return Caps{Async: true, DeviceMemory: true, GraphCompile: graphEnabled, UploadDtype: true, FusedAttn: true, CapacityProbe: true, HostCapacityProbe: hostKnown, Collective: atomic.LoadInt32(&cudaNCCLWorld) > 1, BatchedPrefill: true}
 }
 
 func (c *cudaBackend) HostMemory() (total, free int64, known bool) {

@@ -1222,6 +1222,162 @@ func (c *cudaBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, gr
 	return out
 }
 
+// SpecVerifyAttention runs the split-KV multi-query speculative verify attention kernel (#11100).
+// q is [qLen, nH, d], k is [kvLen, nHkv, d], v is [kvLen, nHkv, d], out is [qLen, nH, d].
+// Query tiling across BLOCK_M with KV sequence splitting across NUM_SEGMENTS
+// thread blocks and online softmax merging.
+func (c *cudaBackend) SpecVerifyAttention(q, k, v, out *Tensor, qLen, kvLen, nH, nHkv, d int) error {
+	if q == nil || k == nil || v == nil || out == nil {
+		return fmt.Errorf("compute: SpecVerifyAttention nil tensor argument")
+	}
+	if q.buf == nil || k.buf == nil || v.buf == nil {
+		return fmt.Errorf("compute: SpecVerifyAttention unallocated input tensor")
+	}
+	if qLen <= 0 || kvLen <= 0 || kvLen < qLen {
+		return fmt.Errorf("compute: SpecVerifyAttention invalid lengths qLen=%d kvLen=%d", qLen, kvLen)
+	}
+	if nH <= 0 || nHkv <= 0 || (nH%nHkv) != 0 {
+		return fmt.Errorf("compute: SpecVerifyAttention invalid heads nH=%d nHkv=%d", nH, nHkv)
+	}
+	if d <= 0 {
+		return fmt.Errorf("compute: SpecVerifyAttention invalid head dim d=%d", d)
+	}
+	expectedQ := qLen * nH * d
+	expectedKV := kvLen * nHkv * d
+	if q.Numel() != expectedQ {
+		return fmt.Errorf("compute: SpecVerifyAttention q numel %d != expected %d", q.Numel(), expectedQ)
+	}
+	if k.Numel() != expectedKV {
+		return fmt.Errorf("compute: SpecVerifyAttention k numel %d != expected %d", k.Numel(), expectedKV)
+	}
+	if v.Numel() != expectedKV {
+		return fmt.Errorf("compute: SpecVerifyAttention v numel %d != expected %d", v.Numel(), expectedKV)
+	}
+
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+
+	if out.buf == nil || out.Numel() != expectedQ {
+		devOut, _ := c.devTr([]int{qLen, nH, d}, F32)
+		*out = devOut
+	}
+
+	scale := float32(1.0 / math.Sqrt(float64(d)))
+	rc := int(C.fcuda_spec_verify_attention_f32(
+		c.cf(*q), c.cf(*k), c.cf(*v), c.cf(*out),
+		C.int(qLen), C.int(kvLen), C.int(nH), C.int(nHkv), C.int(d), C.float(scale)))
+	if rc != 0 {
+		return fmt.Errorf("compute: fcuda_spec_verify_attention_f32 failed rc=%d", rc)
+	}
+	return nil
+}
+
+// PrefillBatch executes batched prompt prefill across a sequence panel (P x D) in 1 pass on CUDA GPU (#11036).
+func (c *cudaBackend) PrefillBatch(args PrefillBatchArgs) (PrefillBatchResult, error) {
+	P, _, err := validatePrefillBatchArgs(&args)
+	if err != nil {
+		return PrefillBatchResult{}, err
+	}
+
+	nH := args.NumHeads
+	nKV := args.NumKVHeads
+	hd := args.HeadDim
+	qOut := nH * hd
+	kvOut := nKV * hd
+	startPos := args.StartPos
+
+	// Ensure inputs are resident device tensors
+	xDev := args.X
+	if _, isHost := c.Host(xDev); isHost {
+		xDev = c.Upload(xDev, F32)
+	}
+	wqDev := args.Wq
+	if _, isHost := c.Host(wqDev); isHost {
+		wqDev = c.Upload(wqDev, F32)
+	}
+	wkDev := args.Wk
+	if _, isHost := c.Host(wkDev); isHost {
+		wkDev = c.Upload(wkDev, F32)
+	}
+	wvDev := args.Wv
+	if _, isHost := c.Host(wvDev); isHost {
+		wvDev = c.Upload(wvDev, F32)
+	}
+
+	// 1. Batched projections on CUDA GPU
+	qTen := c.BatchedMatMul(wqDev, xDev, P)
+	kTen := c.BatchedMatMul(wkDev, xDev, P)
+	vTen := c.BatchedMatMul(wvDev, xDev, P)
+
+	qf := c.Read(qTen)
+	kf := c.Read(kTen)
+	vf := c.Read(vTen)
+
+	kRawAll := append([]float32(nil), kf...)
+	qRoped := make([]float32, len(qf))
+	kRoped := make([]float32, len(kf))
+	for t := 0; t < P; t++ {
+		pos := startPos + t
+		qRow := c.Upload(NewF32(Default(), []int{qOut}, qf[t*qOut:(t+1)*qOut]), F32)
+		qR := c.RoPE(qRow, pos, nH, hd, args.RopeTheta)
+		copy(qRoped[t*qOut:(t+1)*qOut], c.Read(qR))
+
+		kRow := c.Upload(NewF32(Default(), []int{kvOut}, kf[t*kvOut:(t+1)*kvOut]), F32)
+		kR := c.RoPE(kRow, pos, nKV, hd, args.RopeTheta)
+		copy(kRoped[t*kvOut:(t+1)*kvOut], c.Read(kR))
+	}
+
+	if args.KV != nil {
+		for t := 0; t < P; t++ {
+			pos := startPos + t
+			rawRow := kRawAll[t*kvOut : (t+1)*kvOut]
+			ropeRowSlice := kRoped[t*kvOut : (t+1)*kvOut]
+			vRow := vf[t*kvOut : (t+1)*kvOut]
+
+			rawTen := c.Upload(NewF32(Default(), []int{kvOut}, rawRow), F32)
+			ropeTen := c.Upload(NewF32(Default(), []int{kvOut}, ropeRowSlice), F32)
+			vRowTen := c.Upload(NewF32(Default(), []int{kvOut}, vRow), F32)
+
+			args.KV.AppendKV(args.Layer, rawTen, ropeTen, vRowTen, pos)
+		}
+	}
+
+	var allK, allV []float32
+	var totalPositions int
+	strideKV := kvOut
+
+	if args.KV != nil {
+		allK = c.Read(args.KV.KeysView(args.Layer))
+		allV = c.Read(args.KV.ValuesView(args.Layer))
+		totalPositions = len(allK) / strideKV
+	} else {
+		allK = kRoped
+		allV = vf
+		totalPositions = P
+		startPos = 0
+	}
+
+	context := prefillBatchCausalAttention(qRoped, allK, allV, P, startPos, totalPositions, nH, nKV, hd, args.Scale)
+	ctxDev := c.Upload(NewF32(Default(), []int{P, qOut}, context), F32)
+
+	var outTen Tensor
+	if args.Wo.buf != nil {
+		woDev := args.Wo
+		if _, isHost := c.Host(woDev); isHost {
+			woDev = c.Upload(woDev, F32)
+		}
+		outTen = c.BatchedMatMul(woDev, ctxDev, P)
+	} else {
+		outTen = ctxDev
+	}
+
+	return PrefillBatchResult{
+		Output:  outTen,
+		Context: ctxDev,
+		Tokens:  P,
+	}, nil
+}
+
 // cudaKVMaxPos is the fixed cache capacity (in positions) each device KV preallocates, so
 // AppendKV never reallocs — a hard requirement for CUDA-graph capture (a cudaMalloc during
 // capture is illegal). 1024 covers the decode benchmarks; a longer-context serve raises it
