@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/fakpack"
+	"github.com/anthony-chaudhary/fak/internal/ociartifact"
 )
 
 func cmdPack(argv []string) {
@@ -27,6 +28,8 @@ func runPack(stdout, stderr io.Writer, argv []string) int {
 		return runPackVerify(stdout, stderr, argv[1:])
 	case "inspect":
 		return runPackInspect(stdout, stderr, argv[1:])
+	case "sign":
+		return runPackSign(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		packUsage(stdout)
 		return 0
@@ -44,6 +47,7 @@ func packUsage(w io.Writer) {
 	fmt.Fprintln(w, "  create   Create an air-gapped OCI collection bundle (.fakpack)")
 	fmt.Fprintln(w, "  verify   Verify bundle digests, completeness, and air-gap safety")
 	fmt.Fprintln(w, "  inspect  Inspect manifest, layer descriptors, and metadata")
+	fmt.Fprintln(w, "  sign     Attach Cosign cryptographic signature to bundle")
 }
 
 func runPackCreate(stdout, stderr io.Writer, argv []string) int {
@@ -88,13 +92,14 @@ func runPackVerify(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	bundlePath := fs.String("bundle", "", "path to .fakpack bundle (required)")
 	lockPath := fs.String("lock", "", "optional expected harness.lock.json")
+	verifyKey := fs.String("verify-key", "", "optional public key file or PEM string to verify Cosign signature")
 	asJSON := fs.Bool("json", false, "emit verification report as JSON")
 
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
 	if *bundlePath == "" {
-		fmt.Fprintln(stderr, "usage: fak pack verify --bundle <bundle.fakpack> [--lock <expected.lock.json>]")
+		fmt.Fprintln(stderr, "usage: fak pack verify --bundle <bundle.fakpack> [--lock <expected.lock.json>] [--verify-key <pubkey>]")
 		return 2
 	}
 
@@ -109,6 +114,17 @@ func runPackVerify(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
+	if *verifyKey != "" {
+		keyData := *verifyKey
+		if b, err := os.ReadFile(*verifyKey); err == nil {
+			keyData = string(b)
+		}
+		if err := ociartifact.VerifyArtifact(*bundlePath, keyData); err != nil {
+			fmt.Fprintf(stderr, "fak pack verify: signature error: %v\n", err)
+			return 1
+		}
+	}
+
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -117,6 +133,34 @@ func runPackVerify(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	fmt.Fprintf(stdout, "Bundle verified: %s (lock: %s, layers: %d, air-gap: verified)\n", res.BundlePath, res.LockID, res.LayersVerified)
+	return 0
+}
+
+func runPackSign(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("pack sign", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	bundlePath := fs.String("bundle", "", "path to .fakpack bundle to sign (required)")
+	keyPath := fs.String("key", "", "private key file or PEM string (required)")
+
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if *bundlePath == "" || *keyPath == "" {
+		fmt.Fprintln(stderr, "usage: fak pack sign --bundle <bundle.fakpack> --key <privkey>")
+		return 2
+	}
+
+	keyData := *keyPath
+	if b, err := os.ReadFile(*keyPath); err == nil {
+		keyData = string(b)
+	}
+
+	if err := ociartifact.SignArtifact(*bundlePath, keyData); err != nil {
+		fmt.Fprintf(stderr, "fak pack sign: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "Signed bundle: %s\n", *bundlePath)
 	return 0
 }
 
