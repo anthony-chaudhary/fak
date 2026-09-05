@@ -18,7 +18,7 @@ func newBenchmarkGate() *Gate {
 	)
 }
 
-func BenchmarkNewGate(b *testing.B) {
+func BenchmarkRehydrateNewGate(b *testing.B) {
 	r1 := NewRung(ColdCache, func(context.Context) Verdict { return Clear() })
 	r2 := NewRung(StaleCred, func(context.Context) Verdict { return Clear() })
 	r3 := NewRung(StaleRecall, func(context.Context) Verdict { return Clear() })
@@ -36,7 +36,7 @@ func BenchmarkNewGate(b *testing.B) {
 	}
 }
 
-func BenchmarkGateAdmitWarm(b *testing.B) {
+func BenchmarkRehydrateGateAdmitWarm(b *testing.B) {
 	ctx := context.Background()
 	gate := newBenchmarkGate()
 
@@ -50,7 +50,7 @@ func BenchmarkGateAdmitWarm(b *testing.B) {
 	}
 }
 
-func BenchmarkGateAdmitCool(b *testing.B) {
+func BenchmarkRehydrateGateAdmitCool(b *testing.B) {
 	ctx := context.Background()
 	gate := newBenchmarkGate()
 
@@ -152,7 +152,7 @@ func BenchmarkCacheProjectionAdmit(b *testing.B) {
 	}
 }
 
-func BenchmarkBGLoopGateAdmit(b *testing.B) {
+func BenchmarkRehydrateBGLoopGateAdmit(b *testing.B) {
 	ctx := context.Background()
 	bg := BGLoopGate{Gate: newBenchmarkGate()}
 
