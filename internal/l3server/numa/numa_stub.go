@@ -47,8 +47,8 @@ func Detect() *Topology {
 }
 
 func (t *Topology) AddDevice(rdmaDevice string) int { return -1 }
-func (t *Topology) CPUsForNode(node int) []int       { return nil }
-func (t *Topology) PinCurrentThread(node int) error   { return nil }
+func (t *Topology) CPUsForNode(node int) []int      { return nil }
+func (t *Topology) PinCurrentThread(node int) error { return nil }
 func (t *Topology) AssignShards(numShards int) []int {
 	result := make([]int, numShards)
 	for i := range result {

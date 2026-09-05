@@ -62,6 +62,7 @@ var analyzedAmendmentFields = map[string]bool{
 	"AllowPrefix":      true,
 	"Deny":             true,
 	"SelfModifyGlobs":  true,
+	"BlockedPathGlobs": true,
 	"ArgPredicates":    true,
 	"SecretPatterns":   true,
 	"InlineEval":       true,

@@ -33,9 +33,71 @@ type Diagnostic struct {
 // LintReport aggregates all diagnostics and counts for a harness lock.
 type LintReport struct {
 	Valid        bool         `json:"valid"`
+	LockPath     string       `json:"lock_path,omitempty"`
 	Diagnostics  []Diagnostic `json:"diagnostics"`
 	ErrorCount   int          `json:"error_count"`
 	WarningCount int          `json:"warning_count"`
+}
+
+// Report is an alias for LintReport.
+type Report = LintReport
+
+// LintOption configures the lint execution.
+type LintOption func(*lintOptions)
+
+type lintOptions struct {
+	allowSinglePlatform bool
+	lockPath            string
+}
+
+// WithAllowSinglePlatform suppresses the single-platform warning.
+func WithAllowSinglePlatform(allow bool) LintOption {
+	return func(o *lintOptions) {
+		o.allowSinglePlatform = allow
+	}
+}
+
+// WithLockPath sets the target lock path on the report.
+func WithLockPath(p string) LintOption {
+	return func(o *lintOptions) {
+		o.lockPath = p
+	}
+}
+
+type lockPlatform struct {
+	OS       string `json:"os,omitempty"`
+	Arch     string `json:"arch,omitempty"`
+	Contract string `json:"contract,omitempty"`
+	Raw      string `json:"-"`
+}
+
+func (p lockPlatform) String() string {
+	if p.Raw != "" {
+		return p.Raw
+	}
+	if p.Contract != "" {
+		return p.OS + "/" + p.Arch + "@" + p.Contract
+	}
+	if p.OS != "" || p.Arch != "" {
+		return p.OS + "/" + p.Arch
+	}
+	return ""
+}
+
+func (p *lockPlatform) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		p.Raw = s
+		p.OS = s
+		return nil
+	}
+	type alias lockPlatform
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	*p = lockPlatform(a)
+	return nil
 }
 
 type lockDocument struct {
@@ -47,7 +109,7 @@ type lockDocument struct {
 	Assets              []lockAsset                `json:"assets,omitempty"`
 	AssetTrace          json.RawMessage            `json:"asset_trace,omitempty"`
 	Decisions           json.RawMessage            `json:"decisions,omitempty"`
-	Platforms           []string                   `json:"platforms,omitempty"`
+	Platforms           []lockPlatform             `json:"platforms,omitempty"`
 	SinglePlatform      bool                       `json:"single_platform,omitempty"`
 	SinglePlatformOptIn bool                       `json:"single_platform_opt_in,omitempty"`
 	AllowSinglePlatform bool                       `json:"allow_single_platform,omitempty"`
@@ -167,9 +229,17 @@ type lockLayer struct {
 }
 
 // LintLock parses lock data and evaluates rules HL001-HL005.
-func LintLock(data []byte) *LintReport {
+func LintLock(data []byte, opts ...LintOption) *LintReport {
+	var cfg lintOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+
 	report := &LintReport{
 		Valid:       true,
+		LockPath:    cfg.lockPath,
 		Diagnostics: make([]Diagnostic, 0),
 	}
 
@@ -354,13 +424,13 @@ func LintLock(data []byte) *LintReport {
 	}
 
 	// HL003: Single Platform Trap
-	optIn := hasSinglePlatformOptIn(&doc)
+	optIn := cfg.allowSinglePlatform || hasSinglePlatformOptIn(&doc)
 	if !optIn {
 		if len(doc.Platforms) == 1 {
 			report.Diagnostics = append(report.Diagnostics, Diagnostic{
 				Rule:     HL003_SINGLE_PLATFORM,
 				Severity: SeverityWarn,
-				Message:  fmt.Sprintf("platforms contains only a single OS/Arch %q without explicit single-platform opt-in", doc.Platforms[0]),
+				Message:  fmt.Sprintf("platforms contains only a single OS/Arch %q without explicit single-platform opt-in (SINGLE_PLATFORM_WARNING)", doc.Platforms[0]),
 				Field:    "platforms",
 			})
 		} else if len(doc.Platforms) == 0 {
@@ -368,14 +438,14 @@ func LintLock(data []byte) *LintReport {
 				report.Diagnostics = append(report.Diagnostics, Diagnostic{
 					Rule:     HL003_SINGLE_PLATFORM,
 					Severity: SeverityWarn,
-					Message:  fmt.Sprintf("compatibility.platforms contains only a single OS/Arch %q without explicit single-platform opt-in", doc.Compatibility.Platforms[0]),
+					Message:  fmt.Sprintf("compatibility.platforms contains only a single OS/Arch %q without explicit single-platform opt-in (SINGLE_PLATFORM_WARNING)", doc.Compatibility.Platforms[0]),
 					Field:    "compatibility.platforms",
 				})
 			} else if doc.Environment != nil && len(doc.Environment.Platforms) == 1 {
 				report.Diagnostics = append(report.Diagnostics, Diagnostic{
 					Rule:     HL003_SINGLE_PLATFORM,
 					Severity: SeverityWarn,
-					Message:  fmt.Sprintf("environment.platforms contains only a single OS/Arch %q without explicit single-platform opt-in", doc.Environment.Platforms[0]),
+					Message:  fmt.Sprintf("environment.platforms contains only a single OS/Arch %q without explicit single-platform opt-in (SINGLE_PLATFORM_WARNING)", doc.Environment.Platforms[0]),
 					Field:    "environment.platforms",
 				})
 			}

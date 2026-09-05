@@ -294,8 +294,8 @@ func TestPlaceShards_Phase3Oversubscription(t *testing.T) {
 // TestPlaceShards_UnequalCapacity verifies shards fill larger node more.
 func TestPlaceShards_UnequalCapacity(t *testing.T) {
 	specs := []NodeSpec{
-		{ID: 0, MemGB: 128.0, HasCPUs: true},  // 90% = 115.2 GB → max 1 shard
-		{ID: 1, MemGB: 512.0, HasCPUs: true},   // 90% = 460.8 GB → max 7 shards
+		{ID: 0, MemGB: 128.0, HasCPUs: true}, // 90% = 115.2 GB → max 1 shard
+		{ID: 1, MemGB: 512.0, HasCPUs: true}, // 90% = 460.8 GB → max 7 shards
 	}
 	perShard := uint64(64) * (1 << 30)
 	assignment, _ := PlaceShards(specs, 8, perShard)

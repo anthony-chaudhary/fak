@@ -158,13 +158,17 @@ func FoldExplain(ctx context.Context, chain []abi.Adjudicator, c *abi.ToolCall) 
 		case sawConclusive:
 			v = best
 			d.Rungs[bestIdx].Winner = true
-		case sawIndeterminate:
-			rv := d.Rungs[indeterminateIdx]
-			v = abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: rv.By,
-				Meta: map[string]string{"fold": "indeterminate"}}
-			d.Rungs[indeterminateIdx].Winner = true
 		default:
-			v = abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: "all-defer"}
+			if pc, ok := abi.PolicyFromContext(ctx); ok && pc.Posture == abi.PostureDefaultOpen {
+				v = abi.Verdict{Kind: abi.VerdictAllow, By: "all-defer(default-open)"}
+			} else if sawIndeterminate {
+				rv := d.Rungs[indeterminateIdx]
+				v = abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: rv.By,
+					Meta: map[string]string{"fold": "indeterminate"}}
+				d.Rungs[indeterminateIdx].Winner = true
+			} else {
+				v = abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: "all-defer"}
+			}
 		}
 	}
 

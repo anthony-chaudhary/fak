@@ -1,4 +1,4 @@
-﻿package shard
+package shard
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ import (
 // interleaves GETs during migration, and verifies all entries are correct after finalization.
 func TestIncrementalMigrationCorrectness(t *testing.T) {
 	s := newTestShard(t, 0, 0, 50, true) // low warmup so detection triggers quickly
-	s.config.MigrateBatchSize = 10        // small batches to exercise multi-batch path
+	s.config.MigrateBatchSize = 10       // small batches to exercise multi-batch path
 	s.Start()
 	defer func() {
 		s.Stop()
@@ -314,9 +314,9 @@ func TestFlushDuringMigration(t *testing.T) {
 // TestStaggeredWarmup verifies that NewManager assigns distinct warmup targets.
 func TestStaggeredWarmup(t *testing.T) {
 	mgr, err := NewManager(ManagerConfig{
-		NumShards:   8,
-		MaxMemoryGB: 1,
-		WarmupOps:   100,
+		NumShards:     8,
+		MaxMemoryGB:   1,
+		WarmupOps:     100,
 		AutoTuneSlabs: true,
 	})
 	if err != nil {

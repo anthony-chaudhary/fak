@@ -54,8 +54,8 @@ func TestRequireWitnessRefutedStaysClosed(t *testing.T) {
 	k := New("e")
 
 	_, v := k.Syscall(context.Background(), call("deploy", "{}"))
-	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
-		t.Fatalf("a refuted claim must DENY/TRUST_VIOLATION, got %v/%s", v.Kind, abi.ReasonName(v.Reason))
+	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonIntegrityRefuted {
+		t.Fatalf("a refuted claim must DENY/INTEGRITY_REFUTED, got %v/%s", v.Kind, abi.ReasonName(v.Reason))
 	}
 	if atomic.LoadInt64(&eng.n) != 0 {
 		t.Fatalf("a refuted call must NOT dispatch (engine n=%d)", eng.n)

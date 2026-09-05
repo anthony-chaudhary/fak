@@ -1,4 +1,4 @@
-﻿package tcp
+package tcp
 
 import (
 	"bufio"
@@ -32,15 +32,15 @@ type connState struct {
 
 // Server is the TCP transport server.
 type Server struct {
-	addr       string
-	manager    *shard.Manager
-	connReg    *metrics.ConnRegistry
-	dispatcher *dispatch.Dispatcher
-	listener   net.Listener
-	wg         sync.WaitGroup
-	quit       chan struct{}
-	connsMu    sync.Mutex
-	conns      map[net.Conn]struct{}
+	addr             string
+	manager          *shard.Manager
+	connReg          *metrics.ConnRegistry
+	dispatcher       *dispatch.Dispatcher
+	listener         net.Listener
+	wg               sync.WaitGroup
+	quit             chan struct{}
+	connsMu          sync.Mutex
+	conns            map[net.Conn]struct{}
 	connsPeak        int
 	maxConns         int   // 0 = unlimited
 	maxOpsPerConnSec int64 // M1: per-connection rate limit; 0 = unlimited

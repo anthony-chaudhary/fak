@@ -1,4 +1,4 @@
-﻿package cluster
+package cluster
 
 import (
 	"encoding/json"
@@ -46,7 +46,7 @@ type memberState struct {
 }
 
 type gossipMessage struct {
-	Type     string         `json:"type"`     // "ping", "ack", "ping-req", "join", "membership"
+	Type     string         `json:"type"` // "ping", "ack", "ping-req", "join", "membership"
 	SenderID string         `json:"sender"`
 	Members  []memberUpdate `json:"members,omitempty"`
 }

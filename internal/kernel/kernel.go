@@ -218,6 +218,9 @@ func Fold(ctx context.Context, chain []abi.Adjudicator, c *abi.ToolCall) abi.Ver
 	if sawConclusive {
 		return best
 	}
+	if pc, ok := abi.PolicyFromContext(ctx); ok && pc.Posture == abi.PostureDefaultOpen {
+		return abi.Verdict{Kind: abi.VerdictAllow, By: "all-defer(default-open)"}
+	}
 	if sawIndeterminate {
 		return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: indeterminateBy,
 			Meta: map[string]string{"fold": "indeterminate"}}
@@ -254,7 +257,7 @@ func (k *Kernel) resolveWitness(ctx context.Context, c *abi.ToolCall, v abi.Verd
 	reason := abi.ReasonUnwitnessed
 	outcome := "unwitnessed"
 	if refuted {
-		reason = abi.ReasonTrustViolation
+		reason = abi.ReasonIntegrityRefuted
 		outcome = "refuted"
 	}
 	return abi.Verdict{Kind: abi.VerdictDeny, Reason: reason, By: "witness",
@@ -824,11 +827,11 @@ func DenyResult(c *abi.ToolCall, v abi.Verdict) *abi.Result {
 // crossed the floor (#5197).
 func Disposition(r abi.ReasonCode) string {
 	switch r {
-	case abi.ReasonMisroute, abi.ReasonMalformed, abi.ReasonShellDialect, abi.ReasonPolicyBlock:
+	case abi.ReasonMisroute, abi.ReasonMalformed, abi.ReasonShellDialect, abi.ReasonPolicyBlock, abi.ReasonTaintEgress:
 		return "RETRYABLE"
 	case abi.ReasonRateLimited, abi.ReasonLeaseHeld:
 		return "WAIT"
-	case abi.ReasonSelfModify, abi.ReasonTrustViolation:
+	case abi.ReasonSelfModify, abi.ReasonTrustViolation, abi.ReasonIntegrityRefuted:
 		return "ESCALATE"
 	default:
 		return "TERMINAL"

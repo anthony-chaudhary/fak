@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/fakpack"
+	"github.com/anthony-chaudhary/fak/internal/ociartifact"
 )
 
 func TestFakPackCreateAndVerify(t *testing.T) {
@@ -156,5 +157,108 @@ func TestFakPackCreateAndVerify(t *testing.T) {
 	code = runPack(&stdout, &stderr, []string{"unknown"})
 	if code != 2 {
 		t.Fatalf("expected unknown subcommand (exit 2), got %d", code)
+	}
+}
+
+func TestSignedBundle(t *testing.T) {
+	TestSignedPrivateBundleExecution(t)
+}
+
+func TestSignedPrivateBundleExecution(t *testing.T) {
+	dir := t.TempDir()
+
+	lockPath := filepath.Join(dir, "harness.lock.json")
+	lockContent := `{
+  "schema": "fak.harness-product-lock/v2",
+  "id": "signed-bundle-lock-id",
+  "platforms": [{"os": "linux", "arch": "amd64"}],
+  "budget": {"context_tokens": 1024, "memory_mib": 256, "workers": 1},
+  "components": [{"id": "worker", "version": "1.0.0", "digest": "sha256:workerhash", "source": "bin/worker"}],
+  "assets": [{"kind": "asset", "id": "prompt", "source": "assets/prompt.txt"}]
+}`
+	if err := os.WriteFile(lockPath, []byte(lockContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	assetsDir := filepath.Join(dir, "assets")
+	_ = os.MkdirAll(assetsDir, 0o755)
+	_ = os.WriteFile(filepath.Join(assetsDir, "prompt.txt"), []byte("signed asset content"), 0o644)
+
+	binDir := filepath.Join(dir, "bin")
+	_ = os.MkdirAll(binDir, 0o755)
+	_ = os.WriteFile(filepath.Join(binDir, "worker"), []byte("#!/bin/sh\nexit 0\n"), 0o755)
+
+	bundlePath := filepath.Join(dir, "bundle.fakpack")
+
+	var stdout, stderr bytes.Buffer
+	code := runPack(&stdout, &stderr, []string{
+		"create",
+		"--lock", lockPath,
+		"--assets", assetsDir,
+		"--bin", binDir,
+		"--out", bundlePath,
+	})
+	if code != 0 {
+		t.Fatalf("create failed with %d: %s", code, stderr.String())
+	}
+
+	privKey, pubKey, err := ociartifact.GenerateEd25519KeyPair()
+	if err != nil {
+		t.Fatalf("generate key pair: %v", err)
+	}
+
+	privKeyPath := filepath.Join(dir, "cosign.key")
+	pubKeyPath := filepath.Join(dir, "cosign.pub")
+	if err := os.WriteFile(privKeyPath, []byte(privKey), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pubKeyPath, []byte(pubKey), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Sign bundle
+	stdout.Reset()
+	stderr.Reset()
+	code = runPack(&stdout, &stderr, []string{
+		"sign",
+		"--bundle", bundlePath,
+		"--key", privKeyPath,
+	})
+	if code != 0 {
+		t.Fatalf("sign failed with %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Signed bundle:") {
+		t.Fatalf("unexpected output: %s", stdout.String())
+	}
+
+	// 2. Verify bundle with correct public key
+	stdout.Reset()
+	stderr.Reset()
+	code = runPack(&stdout, &stderr, []string{
+		"verify",
+		"--bundle", bundlePath,
+		"--verify-key", pubKeyPath,
+	})
+	if code != 0 {
+		t.Fatalf("verify with key failed with %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Bundle verified:") {
+		t.Fatalf("unexpected output: %s", stdout.String())
+	}
+
+	// 3. Verify with wrong public key fails
+	_, wrongPub, _ := ociartifact.GenerateEd25519KeyPair()
+	wrongPubPath := filepath.Join(dir, "wrong.pub")
+	_ = os.WriteFile(wrongPubPath, []byte(wrongPub), 0o644)
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runPack(&stdout, &stderr, []string{
+		"verify",
+		"--bundle", bundlePath,
+		"--verify-key", wrongPubPath,
+	})
+	if code != 1 {
+		t.Fatalf("expected verify with wrong key to fail with 1, got %d", code)
 	}
 }

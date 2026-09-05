@@ -131,6 +131,7 @@ type serveFlags struct {
 	llamaStartupTimeout          *time.Duration
 	cudaGraph                    *bool
 	policyPath                   *string
+	profile                      *string
 	policyCanaryTurns            *int
 	policyCheck                  *bool
 	sizingJSON                   *bool
@@ -239,6 +240,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.llamaStartupTimeout = fs.Duration("llama-startup-timeout", 2*time.Minute, "bounded readiness timeout for a fak-owned llama-server child")
 	sf.cudaGraph = fs.Bool("cuda-graph", false, "with --backend cuda: capture each decode token's whole op stream into a CUDA graph and replay it as ONE launch instead of N kernel launches (#483), the per-token launch-overhead lever for large single-stream decode (e.g. Qwen3.6-27B on an A100). OFF by default (a measured no-win on a tiny 0.5B/L4 where launch overhead is already small); witness tok/s before/after on YOUR node before relying on it. Equivalent to FAK_CUDA_GRAPH=1; inert on a non-cuda build or CPU backend.")
 	sf.policyPath = fs.String("policy", "", "capability-floor manifest to load (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
+	sf.profile = fs.String("profile", "", "permission profile: dev|prod|audit (env: FAK_PROFILE)")
 	sf.policyCanaryTurns = fs.Int("policy-canary-turns", 0, "after a policy reload, roll back when this many consecutive requests are denied; 0 disables the canary")
 	sf.policyCheck = fs.Bool("policy-check", false, "validate --policy and exit without binding a listener")
 	sf.sizingJSON = fs.Bool("plan-json", false, "with --gguf: print the versioned header-derived memory sizing artifact (classed demands, disk/ram/vram tier rollup, per-pool usable bytes after headroom, warnings incl. would-be fit refusals) as JSON on stdout and exit BEFORE any load — nothing is allocated, no listener binds (#4361). The numbers are the same ones the selected serve arm's fit check admits against; a demand set a live boot would refuse still emits, with the refusal in warnings[].")
@@ -464,7 +466,7 @@ func cmdServe(argv []string) {
 	// than silently falling back to a more permissive default. Time it as the first
 	// startup phase.
 	tPolicy := time.Now()
-	applyPolicy(*sf.policyPath)
+	applyFloorWithProfile(*sf.policyPath, *sf.profile)
 	rt.startupPhases = append(rt.startupPhases, gateway.StartupPhase{Name: "policy-load", Dur: time.Since(tPolicy)})
 	configureServeToolEngines()
 

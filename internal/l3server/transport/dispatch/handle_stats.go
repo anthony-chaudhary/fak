@@ -1,4 +1,4 @@
-﻿package dispatch
+package dispatch
 
 import (
 	"encoding/json"
@@ -46,17 +46,17 @@ type statsConnEntry struct {
 
 // statsNICEntry holds per-NIC wire and CQ poller statistics for JSON serialization.
 type statsNICEntry struct {
-	Device           string  `json:"device"`
-	IP               string  `json:"ip"`
-	WireGBTotal      float64 `json:"wire_gb_total"`
-	WireGBRecv       float64 `json:"wire_gb_recv"`
-	WireGBSent       float64 `json:"wire_gb_sent"`
-	ThroughputGbps   float64 `json:"throughput_gbps"`
-	ActiveConns      int32   `json:"active_conns"`
-	Completions      int64   `json:"completions"`
-	DispatchEnqueued int64   `json:"dispatch_enqueued"`
-	DispatchDropped  int64   `json:"dispatch_dropped"`
-	SendChDropped    int64   `json:"send_ch_dropped"`
+	Device                string  `json:"device"`
+	IP                    string  `json:"ip"`
+	WireGBTotal           float64 `json:"wire_gb_total"`
+	WireGBRecv            float64 `json:"wire_gb_recv"`
+	WireGBSent            float64 `json:"wire_gb_sent"`
+	ThroughputGbps        float64 `json:"throughput_gbps"`
+	ActiveConns           int32   `json:"active_conns"`
+	Completions           int64   `json:"completions"`
+	DispatchEnqueued      int64   `json:"dispatch_enqueued"`
+	DispatchDropped       int64   `json:"dispatch_dropped"`
+	SendChDropped         int64   `json:"send_ch_dropped"`
 	DispatchWorkers       int     `json:"dispatch_workers"`
 	LinkRateGbps          float64 `json:"link_rate_gbps"`
 	SaturationPct         float64 `json:"saturation_pct"`
@@ -66,41 +66,41 @@ type statsNICEntry struct {
 // statsTotals holds aggregate statistics for JSON serialization.
 // Byte totals are converted to gigabytes (GB, base-2 / GiB) for display.
 type statsTotals struct {
-	GBIn                float64 `json:"gb_in"`
-	GBOut               float64 `json:"gb_out"`
-	RDMAReadGBOut       float64 `json:"rdma_read_gb_out"`
-	WireGBRecv          float64 `json:"wire_gb_recv"`
-	WireGBSent          float64 `json:"wire_gb_sent"`
-	EffectiveGBSent     float64 `json:"effective_gb_sent"`
-	InlinePayloadGBSent float64 `json:"inline_payload_gb_sent"`
-	OpsOverheadGBRecv   float64 `json:"ops_overhead_gb_recv"`
-	OpsOverheadGBSent   float64 `json:"ops_overhead_gb_sent"`
-	GBpsIn              float64 `json:"gbps_in"`
-	GBpsOut             float64 `json:"gbps_out"`
-	GBpsTotal           float64 `json:"gbps_total"`
-	Gets                int64   `json:"gets"`
-	Sets                int64   `json:"sets"`
-	Evictions              int64   `json:"evictions"`
-	EvictionsKeyPressure   int64   `json:"evictions_key_pressure"`
-	EvictionsValuePressure int64   `json:"evictions_value_pressure"`
-	EvictionsFailed        int64   `json:"evictions_failed"`
-	EvictionsLeaseSkip     int64   `json:"evictions_lease_skip"`
-	EvictionsRebalance     int64   `json:"evictions_rebalance"`
-	EvictionsOrganic       int64   `json:"evictions_organic"`
-	TTLExpirations         int64   `json:"ttl_expirations"`
-	Deletes                int64   `json:"deletes"`
-	Exists              int64   `json:"exists"`
-	ExistsHits          int64   `json:"exists_hits"`
-	ExistsMisses        int64   `json:"exists_misses"`
-	Hits                int64   `json:"hits"`
-	Misses              int64   `json:"misses"`
-	ActiveGB            float64 `json:"active_gb"`
-	Entries             int64   `json:"entries"`
+	GBIn                    float64 `json:"gb_in"`
+	GBOut                   float64 `json:"gb_out"`
+	RDMAReadGBOut           float64 `json:"rdma_read_gb_out"`
+	WireGBRecv              float64 `json:"wire_gb_recv"`
+	WireGBSent              float64 `json:"wire_gb_sent"`
+	EffectiveGBSent         float64 `json:"effective_gb_sent"`
+	InlinePayloadGBSent     float64 `json:"inline_payload_gb_sent"`
+	OpsOverheadGBRecv       float64 `json:"ops_overhead_gb_recv"`
+	OpsOverheadGBSent       float64 `json:"ops_overhead_gb_sent"`
+	GBpsIn                  float64 `json:"gbps_in"`
+	GBpsOut                 float64 `json:"gbps_out"`
+	GBpsTotal               float64 `json:"gbps_total"`
+	Gets                    int64   `json:"gets"`
+	Sets                    int64   `json:"sets"`
+	Evictions               int64   `json:"evictions"`
+	EvictionsKeyPressure    int64   `json:"evictions_key_pressure"`
+	EvictionsValuePressure  int64   `json:"evictions_value_pressure"`
+	EvictionsFailed         int64   `json:"evictions_failed"`
+	EvictionsLeaseSkip      int64   `json:"evictions_lease_skip"`
+	EvictionsRebalance      int64   `json:"evictions_rebalance"`
+	EvictionsOrganic        int64   `json:"evictions_organic"`
+	TTLExpirations          int64   `json:"ttl_expirations"`
+	Deletes                 int64   `json:"deletes"`
+	Exists                  int64   `json:"exists"`
+	ExistsHits              int64   `json:"exists_hits"`
+	ExistsMisses            int64   `json:"exists_misses"`
+	Hits                    int64   `json:"hits"`
+	Misses                  int64   `json:"misses"`
+	ActiveGB                float64 `json:"active_gb"`
+	Entries                 int64   `json:"entries"`
 	EvictionRatePercent     float64 `json:"eviction_rate_percent"`
 	EvictionFailRatePercent float64 `json:"eviction_fail_rate_percent"`
-	ExistsHitRatePercent float64 `json:"exists_hit_rate_percent"`
-	GetHitRatePercent    float64 `json:"get_hit_rate_percent"`
-	ActiveConnections   int     `json:"active_connections"`
+	ExistsHitRatePercent    float64 `json:"exists_hit_rate_percent"`
+	GetHitRatePercent       float64 `json:"get_hit_rate_percent"`
+	ActiveConnections       int     `json:"active_connections"`
 	InflightOps             int64   `json:"inflight_ops"`
 	MaxKeys                 int64   `json:"max_keys"`
 	EvictionCap             int64   `json:"eviction_cap"`
@@ -504,21 +504,21 @@ func (d *Dispatcher) HandleStats(msg protocol.Message) protocol.Message {
 			latencyEntries := make([]map[string]interface{}, len(snaps))
 			for i, snap := range snaps {
 				latencyEntries[i] = map[string]interface{}{
-					"shard_id":     snap.ShardID,
-					"all_p50_us":   snap.AllP50Us,
-					"all_p99_us":   snap.AllP99Us,
-					"get_p50_us":   snap.GetP50Us,
-					"get_p99_us":   snap.GetP99Us,
-					"set_p50_us":   snap.SetP50Us,
-					"set_p99_us":   snap.SetP99Us,
-					"exists_p50_us":      snap.ExistsP50Us,
-					"exists_p99_us":      snap.ExistsP99Us,
-					"queue_wait_p50_us":  snap.QueueWaitP50Us,
-					"queue_wait_p99_us":  snap.QueueWaitP99Us,
-					"alloc_dur_p50_us":   snap.AllocDurP50Us,
-					"alloc_dur_p99_us":   snap.AllocDurP99Us,
-					"queue_depth":        snap.QueueDepth,
-					"queue_cap":          snap.QueueCap,
+					"shard_id":          snap.ShardID,
+					"all_p50_us":        snap.AllP50Us,
+					"all_p99_us":        snap.AllP99Us,
+					"get_p50_us":        snap.GetP50Us,
+					"get_p99_us":        snap.GetP99Us,
+					"set_p50_us":        snap.SetP50Us,
+					"set_p99_us":        snap.SetP99Us,
+					"exists_p50_us":     snap.ExistsP50Us,
+					"exists_p99_us":     snap.ExistsP99Us,
+					"queue_wait_p50_us": snap.QueueWaitP50Us,
+					"queue_wait_p99_us": snap.QueueWaitP99Us,
+					"alloc_dur_p50_us":  snap.AllocDurP50Us,
+					"alloc_dur_p99_us":  snap.AllocDurP99Us,
+					"queue_depth":       snap.QueueDepth,
+					"queue_cap":         snap.QueueCap,
 				}
 			}
 			result["op_latency"] = latencyEntries

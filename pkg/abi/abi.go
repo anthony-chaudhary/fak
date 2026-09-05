@@ -179,20 +179,24 @@ const (
 
 // ReasonCode closed core vocabulary (+ the core-max boundary).
 const (
-	ReasonNone           = internalabi.ReasonNone
-	ReasonDefaultDeny    = internalabi.ReasonDefaultDeny
-	ReasonPolicyBlock    = internalabi.ReasonPolicyBlock
-	ReasonSelfModify     = internalabi.ReasonSelfModify
-	ReasonLeaseHeld      = internalabi.ReasonLeaseHeld
-	ReasonTrustViolation = internalabi.ReasonTrustViolation
-	ReasonMalformed      = internalabi.ReasonMalformed
-	ReasonMisroute       = internalabi.ReasonMisroute
-	ReasonRateLimited    = internalabi.ReasonRateLimited
-	ReasonSecretExfil    = internalabi.ReasonSecretExfil
-	ReasonUnwitnessed    = internalabi.ReasonUnwitnessed
-	ReasonOversize       = internalabi.ReasonOversize
-	ReasonUnknownTool    = internalabi.ReasonUnknownTool
-	ReasonCoreMax        = internalabi.ReasonCoreMax
+	ReasonNone             = internalabi.ReasonNone
+	ReasonDefaultDeny      = internalabi.ReasonDefaultDeny
+	ReasonPolicyBlock      = internalabi.ReasonPolicyBlock
+	ReasonSelfModify       = internalabi.ReasonSelfModify
+	ReasonLeaseHeld        = internalabi.ReasonLeaseHeld
+	ReasonTrustViolation   = internalabi.ReasonTrustViolation
+	ReasonMalformed        = internalabi.ReasonMalformed
+	ReasonMisroute         = internalabi.ReasonMisroute
+	ReasonRateLimited      = internalabi.ReasonRateLimited
+	ReasonSecretExfil      = internalabi.ReasonSecretExfil
+	ReasonUnwitnessed      = internalabi.ReasonUnwitnessed
+	ReasonOversize         = internalabi.ReasonOversize
+	ReasonUnknownTool      = internalabi.ReasonUnknownTool
+	ReasonTaintEgress      = internalabi.ReasonTaintEgress
+	ReasonScopeCrossing    = internalabi.ReasonScopeCrossing
+	ReasonPromptInjection  = internalabi.ReasonPromptInjection
+	ReasonIntegrityRefuted = internalabi.ReasonIntegrityRefuted
+	ReasonCoreMax          = internalabi.ReasonCoreMax
 )
 
 // RefKind discriminator.

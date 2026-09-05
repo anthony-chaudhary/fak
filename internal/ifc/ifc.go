@@ -48,6 +48,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/provenance"
@@ -308,6 +309,10 @@ type Policy struct {
 	// (the prompt-injection threat model) opts into StrictGatedSinks, which gates EXEC
 	// too; the agentdojo red-team harness and the FAK_IFC_GATE_EXEC env toggle do.
 	GatedSinks map[SinkClass]bool
+	// Permissive enables default-permissive mode for IFC: tainted flows into sensitive
+	// sinks are admitted with an audit log rather than hard-blocked, unless a strict
+	// policy or deliberate refusal is configured.
+	Permissive bool
 }
 
 // DefaultGatedSinks is the reasonable default sink-gate set: gate the exfiltration
@@ -344,10 +349,24 @@ func (p Policy) Gates(s SinkClass) bool {
 	return DefaultGatedSinks()[s]
 }
 
-// defaultSafeSinks: a human handoff is the safe response to an injection.
+// defaultSafeSinks: a human handoff is the safe response to an injection, and
+// internal agent-to-agent coordination tools are safe IPC within the workspace.
 var defaultSafeSinks = map[string]bool{
-	"transfer_to_human_agents": true,
-	"transfer_to_human":        true,
+	"transfer_to_human_agents":     true,
+	"transfer_to_human":            true,
+	"send_input":                   true,
+	"multi_agent_v1.send_input":    true,
+	"SendMessage":                  true,
+	"send_message":                 true,
+	"sendmessage":                  true,
+	"send_turn":                    true,
+	"send_signal":                  true,
+	"a2a_send":                     true,
+	"request_user_input":           true,
+	"functions.request_user_input": true,
+	"AskUserQuestion":              true,
+	"ask_user_question":            true,
+	"askuserquestion":              true,
 }
 
 // egressSubstrings / execSubstrings / destructiveSubstrings classify a tool name
@@ -407,8 +426,8 @@ func Classify(ctx context.Context, c *abi.ToolCall, p Policy) SinkClass {
 	if hasExternalDestination(args) {
 		return SinkEgress
 	}
-	// Egress by NAME is exempted only for a declared SafeSink (e.g. send_to_human).
-	if anySubstr(c.Tool, egressSubstrings) && !safe[c.Tool] {
+	// Egress by NAME is exempted only for a declared SafeSink (e.g. send_to_human, send_input).
+	if anySubstr(c.Tool, egressSubstrings) && !safe[c.Tool] && !safe[strings.ToLower(c.Tool)] {
 		return SinkEgress
 	}
 	return SinkNone
@@ -665,6 +684,16 @@ func (g *SinkGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict 
 	if !enabled || c == nil {
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "ifc-sink(off)"}
 	}
+	if pc, ok := abi.PolicyFromContext(ctx); ok && pc.Posture == abi.PostureDefaultOpen {
+		toolName := c.Tool
+		lower := strings.ToLower(toolName)
+		if defaultSafeSinks[toolName] || defaultSafeSinks[lower] ||
+			toolName == "send_input" || toolName == "multi_agent_v1.send_input" ||
+			strings.HasSuffix(lower, ".send_input") ||
+			(pc.SafeSinks != nil && (pc.SafeSinks[toolName] || pc.SafeSinks[lower])) {
+			return abi.Verdict{Kind: abi.VerdictDefer, By: "ifc-sink(default-open)"}
+		}
+	}
 	sink := Classify(ctx, c, g.policy)
 	if sink == SinkNone {
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "ifc-sink"} // not a sink: no opinion
@@ -694,19 +723,182 @@ func (g *SinkGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict 
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "ifc-sink"} // sink class not gated by policy
 	}
 
-	// A tainted flow into a sensitive sink. The explicit-authorization escape (a
-	// human-approved or policy-permitted flow) can release it; otherwise refuse.
+	// A tainted flow into a sensitive sink.
+	// 1. Check for explicit Authorize escape or authorized research destinations:
 	if (g.policy.Authorize != nil && g.policy.Authorize(c, sink)) ||
 		authorizedResearchEgress(ctx, c, sink, g.policy.AuthorizedEgressHosts) {
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "ifc-sink(authorized)"}
 	}
+
+	// 2. Model override: if the model supplies an override reason / justification, permit
+	// the flow and record a clearly logged audit process for transparency.
+	if overrideReason, ok := ExtractOverrideReason(ctx, c); ok {
+		logSecurityOverride(c, sink, flow, abi.ReasonTrustViolation, overrideReason, "ifc-sink(override)")
+		return abi.Verdict{
+			Kind: abi.VerdictDefer,
+			By:   "ifc-sink(override)",
+			Meta: map[string]string{
+				"ifc_sink":            sink.String(),
+				"ifc_flow":            taintName(flow),
+				"ifc_override":        "true",
+				"ifc_override_reason": overrideReason,
+				"claim":               "model override: " + overrideReason,
+			},
+		}
+	}
+
+	// 3. Default permissive mode: when permissive posture is active (via Policy, PostureDefaultOpen,
+	// PostureAdmitAndLog, or FAK_IFC_PERMISSIVE), admit the flow with an audit log rather than hard-blocking.
+	if isPermissive(ctx, g.policy) {
+		logPermissiveEgress(c, sink, flow, "ifc-sink(permissive)")
+		return abi.Verdict{
+			Kind: abi.VerdictDefer,
+			By:   "ifc-sink(permissive)",
+			Meta: map[string]string{
+				"ifc_sink":       sink.String(),
+				"ifc_flow":       taintName(flow),
+				"ifc_permissive": "true",
+				"claim":          "permissive ifc: " + sink.String() + " sink allowed with " + taintName(flow) + " data",
+			},
+		}
+	}
+
+	// 4. Smooth, expected refusal notice when no override was provided and strict gating is active.
 	return abi.Verdict{
 		Kind:    abi.VerdictDeny,
 		Reason:  abi.ReasonTrustViolation,
 		By:      "ifc-sink",
-		Payload: abi.WitnessPayload{Claim: sink.String() + " sink fed " + taintName(flow) + " data"},
-		Meta:    map[string]string{"ifc_sink": sink.String(), "ifc_flow": taintName(flow)},
+		Payload: abi.WitnessPayload{Claim: "Routine IFC check: " + sink.String() + " sink fed " + taintName(flow) + " data (can be overridden with 'override_reason')"},
+		Meta: map[string]string{
+			"ifc_sink":           sink.String(),
+			"ifc_flow":           taintName(flow),
+			"expected_check":     "ifc_sink_gate",
+			"override_supported": "true",
+			"remedy":             "Routine IFC check: tainted data in flight to " + sink.String() + " sink. This is an expected safety boundary. If this action is intentional and safe for your task, re-issue with 'override_reason' or 'justification' to proceed (all overrides are logged for security auditing).",
+			"fix":                "Specify 'override_reason' or 'justification' in tool call arguments or metadata explaining why this action is safe.",
+		},
 	}
+}
+
+// ExtractOverrideReason extracts a model-supplied justification or override reason from
+// ToolCall metadata or arguments, if present.
+func ExtractOverrideReason(ctx context.Context, c *abi.ToolCall) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	if c.Meta != nil {
+		for _, k := range []string{"override_reason", "justification", "override", "ifc_override"} {
+			if s := strings.TrimSpace(c.Meta[k]); len(s) >= 3 {
+				return s, true
+			}
+		}
+	}
+	args := decodeArgs(ctx, c)
+	if args != nil {
+		for _, k := range []string{"override_reason", "justification", "override", "ifc_override"} {
+			if v, ok := args[k].(string); ok {
+				if s := strings.TrimSpace(v); len(s) >= 3 {
+					return s, true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+func isPermissive(ctx context.Context, p Policy) bool {
+	if p.Permissive {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_IFC_PERMISSIVE"))) {
+	case "1", "true", "on", "yes":
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_IFC_MODE"))) {
+	case "permissive", "warn_first", "admit_and_log":
+		return true
+	}
+	if pc, ok := abi.PolicyFromContext(ctx); ok && (pc.Posture == abi.PostureDefaultOpen || pc.Posture == abi.PostureAdmitAndLog) {
+		return true
+	}
+	return false
+}
+
+func emitEvent(ev abi.Event) {
+	for _, e := range abi.EmittersFor(ev.Kind) {
+		e.Emit(ev)
+	}
+}
+
+func logSecurityOverride(c *abi.ToolCall, sink SinkClass, flow abi.TaintLabel, reasonCode abi.ReasonCode, reason, by string) {
+	traceID := ""
+	tool := ""
+	if c != nil {
+		traceID = c.TraceID
+		tool = c.Tool
+	}
+	emitEvent(abi.Event{
+		Kind: abi.EvDecide,
+		Call: c,
+		Verdict: &abi.Verdict{
+			Kind:   abi.VerdictAllow,
+			Reason: reasonCode,
+			By:     by,
+			Payload: abi.WitnessPayload{
+				Claim: "security override: " + reason,
+			},
+			Meta: map[string]string{
+				"override_reason":   reason,
+				"security_override": "true",
+				"ifc_sink":          sink.String(),
+				"ifc_flow":          taintName(flow),
+			},
+		},
+		Fields: map[string]any{
+			"event":           "security_override",
+			"override_type":   "ifc_sink",
+			"override_reason": reason,
+			"tool":            tool,
+			"trace_id":        traceID,
+			"sink_class":      sink.String(),
+			"taint_level":     taintName(flow),
+			"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
+		},
+	})
+}
+
+func logPermissiveEgress(c *abi.ToolCall, sink SinkClass, flow abi.TaintLabel, by string) {
+	traceID := ""
+	tool := ""
+	if c != nil {
+		traceID = c.TraceID
+		tool = c.Tool
+	}
+	emitEvent(abi.Event{
+		Kind: abi.EvDecide,
+		Call: c,
+		Verdict: &abi.Verdict{
+			Kind:   abi.VerdictAllow,
+			Reason: abi.ReasonTaintEgress,
+			By:     by,
+			Payload: abi.WitnessPayload{
+				Claim: "permissive ifc: " + sink.String() + " sink allowed with " + taintName(flow) + " data",
+			},
+			Meta: map[string]string{
+				"ifc_permissive": "true",
+				"ifc_sink":       sink.String(),
+				"ifc_flow":       taintName(flow),
+			},
+		},
+		Fields: map[string]any{
+			"event":       "permissive_ifc_admit",
+			"tool":        tool,
+			"trace_id":    traceID,
+			"sink_class":  sink.String(),
+			"taint_level": taintName(flow),
+			"timestamp":   time.Now().UTC().Format(time.RFC3339Nano),
+		},
+	})
 }
 
 // ---------------------------------------------------------------------------

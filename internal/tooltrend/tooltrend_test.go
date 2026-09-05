@@ -1,6 +1,7 @@
 package tooltrend
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -179,4 +180,69 @@ func TestFoldDeterministic(t *testing.T) {
 func almost(got, want float64) bool {
 	d := got - want
 	return d < 1e-9 && d > -1e-9
+}
+
+func BenchmarkFold(b *testing.B) {
+	buckets := makeSyntheticBuckets(10, 50)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = Fold(buckets)
+	}
+}
+
+func BenchmarkFoldTopK(b *testing.B) {
+	buckets := makeSyntheticBuckets(20, 100)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = FoldTopK(buckets, 5)
+	}
+}
+
+func BenchmarkFoldSingleBucket(b *testing.B) {
+	calls := make([]toolrollup.ToolCall, 100)
+	tools := []string{"read", "edit", "bash", "grep", "glob"}
+	for i := range calls {
+		calls[i] = toolrollup.ToolCall{
+			Tool:      tools[i%len(tools)],
+			TokensOut: (i * 37) % 15000,
+			OK:        i%10 != 0,
+		}
+	}
+	bucket := Bucket{Label: "bench-session", Calls: calls}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = Fold([]Bucket{bucket})
+	}
+}
+
+func BenchmarkSizeClass(b *testing.B) {
+	tokens := []int{-5, 0, 42, 250, 4500, 50000}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = SizeClass(tokens[i%len(tokens)])
+	}
+}
+
+func makeSyntheticBuckets(numBuckets, callsPerBucket int) []Bucket {
+	tools := []string{"read", "edit", "bash", "grep", "glob", "write"}
+	buckets := make([]Bucket, numBuckets)
+	for i := 0; i < numBuckets; i++ {
+		calls := make([]toolrollup.ToolCall, callsPerBucket)
+		for j := 0; j < callsPerBucket; j++ {
+			toolIdx := (j + i) % len(tools)
+			calls[j] = toolrollup.ToolCall{
+				Tool:      tools[toolIdx],
+				TokensOut: ((j + 1) * (i + 1) * 73) % 20000,
+				OK:        (j+i)%8 != 0,
+			}
+		}
+		buckets[i] = Bucket{
+			Label: fmt.Sprintf("session-%d", i),
+			Calls: calls,
+		}
+	}
+	return buckets
 }

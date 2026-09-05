@@ -165,6 +165,15 @@ func DiffAmendment(old, next adjudicator.Policy) AmendmentDelta {
 		d.route(false, AmendmentChange{Field: "SelfModifyGlobs", Label: "added_self_modify_globs", New: g})
 	}
 
+	// BlockedPathGlobs: removed glob widens, added glob tightens.
+	added, removed = diffStrings(old.BlockedPathGlobs, next.BlockedPathGlobs)
+	for _, g := range removed {
+		d.route(true, AmendmentChange{Field: "BlockedPathGlobs", Label: "removed_blocked_path_globs", Old: g})
+	}
+	for _, g := range added {
+		d.route(false, AmendmentChange{Field: "BlockedPathGlobs", Label: "added_blocked_path_globs", New: g})
+	}
+
 	// Posture: diffing by strictness: fail_closed (2) > admit_and_log (1) > default_open (0).
 	// Lowering strictness widens; raising strictness tightens.
 	if old.Posture != next.Posture {

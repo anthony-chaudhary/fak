@@ -349,11 +349,14 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		// invalidator proves freshness), and only a genuine miss reaches the confined
 		// readEngine. No Claude Code change is needed — the model opts in via the MCP tool.
 		var rr struct {
-			FilePath  string   `json:"file_path"`
-			FilePaths []string `json:"file_paths"`
-			Path      string   `json:"path"`
-			TraceID   string   `json:"trace_id"`
-			Witness   string   `json:"witness"`
+			FilePath    string   `json:"file_path"`
+			FilePaths   []string `json:"file_paths"`
+			Path        string   `json:"path"`
+			Offset      int      `json:"offset"`
+			Limit       int      `json:"limit"`
+			LineNumbers bool     `json:"line_numbers"`
+			TraceID     string   `json:"trace_id"`
+			Witness     string   `json:"witness"`
 		}
 		_ = json.Unmarshal(p.Arguments, &rr)
 		if rr.FilePaths != nil {
@@ -367,7 +370,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		if path == "" {
 			path = rr.Path
 		}
-		wv, env, err := s.fakRead(ctx, path, s.traceFor(rr.TraceID), rr.Witness)
+		wv, env, err := s.fakReadWithOptions(ctx, path, rr.Offset, rr.Limit, rr.LineNumbers, s.traceFor(rr.TraceID), rr.Witness)
 		if err != nil {
 			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
 		}
@@ -584,7 +587,21 @@ func decodeSyscallArgs(raw json.RawMessage) SyscallRequest {
 // syscall boundary. On a vDSO hit k.Syscall serves the cached bytes with no engine
 // dispatch and no disk read; the per-path invalidator guarantees that hit is fresh.
 func (s *Server) fakRead(ctx context.Context, path, traceID, witness string) (WireVerdict, *ResultEnvelope, error) {
-	args, _ := json.Marshal(map[string]string{"file_path": path})
+	return s.fakReadWithOptions(ctx, path, 0, 0, false, traceID, witness)
+}
+
+func (s *Server) fakReadWithOptions(ctx context.Context, path string, offset, limit int, lineNumbers bool, traceID, witness string) (WireVerdict, *ResultEnvelope, error) {
+	argsMap := map[string]any{"file_path": path}
+	if offset > 0 {
+		argsMap["offset"] = offset
+	}
+	if limit > 0 {
+		argsMap["limit"] = limit
+	}
+	if lineNumbers {
+		argsMap["line_numbers"] = true
+	}
+	args, _ := json.Marshal(argsMap)
 	tc, err := s.buildCall(ctx, "Read", string(args), true, witness, traceID)
 	if err != nil {
 		return WireVerdict{}, nil, err
@@ -845,7 +862,10 @@ func toolDescriptors() []map[string]any {
   "type": "object",
   "properties": {
     "file_path": {"type": "string", "description": "the path of the file to read (absolute, or relative to the working tree)"},
-	"file_paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "description": "independent file paths to read in one call; preferred when reading more than one file"},
+    "file_paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "description": "independent file paths to read in one call; preferred when reading more than one file"},
+    "offset": {"type": "integer", "description": "optional 1-based line number to start reading from"},
+    "limit": {"type": "integer", "description": "optional maximum number of lines to read"},
+    "line_numbers": {"type": "boolean", "description": "optional flag to prefix lines with 1-based line numbers (<line>: <content>)"},
     "trace_id": {"type": "string", "description": "optional session trace id; omitted means the gateway mints one and returns it"},
     "witness": {"type": "string", "description": "optional external world-state token (a git commit / blob hash) the read is taken at"}
   }

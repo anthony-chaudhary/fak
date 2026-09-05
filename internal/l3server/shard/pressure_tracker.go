@@ -1,4 +1,4 @@
-﻿package shard
+package shard
 
 import (
 	"sync/atomic"

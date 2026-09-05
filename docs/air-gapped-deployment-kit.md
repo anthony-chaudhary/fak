@@ -33,6 +33,7 @@ Related routes, which this page does **not** restate:
 | Captured zero-network governed session, **mock-planner seam** | **Shipped** — witness below |
 | Generated SBOM ([`sbom/fak.spdx.json`](sbom/fak.spdx.json)) | **Shipped** |
 | SBOM/`go.mod` drift gate (`go test ./internal/architest -run TestSBOM`) | **Shipped** — see [Regenerate and verify](#regenerate-and-verify-this-sbom) |
+| Shift-left zero-egress bootstrap gate (`make test-airgap`) | **Shipped** (#11387) — witness below |
 | Captured zero-network governed session, **`--gguf` model-backed seam** | **Not yet witnessed** — see [Not yet witnessed](#not-yet-witnessed) |
 | A *guard* that refuses an auth-less bind on a routable interface | **Shipped** (#5373) — startup refusal `UNAUTHENTICATED_OFF_HOST_BIND`. See [Bind safety](#bind-safety-read-this-one) |
 
@@ -185,6 +186,33 @@ Pair it with the tamper-evident trail for the evidence half:
 ./fak audit verify <journal.jsonl>     # exit 1 if the hash chain was edited
 ```
 
+## Shift-left network-isolated harness bootstrap gate with zero-egress enforcement
+
+To guarantee that air-gapped harness bring-up cannot leak traffic, contact remote services, or depend on out-of-boundary resources, `make test-airgap` (`TestAirGapBootstrap_ZeroEgress` in `internal/airgaptest`) enforces a shift-left CI gate with zero-egress enforcement.
+
+Run the gate locally or in CI:
+
+```sh
+make test-airgap
+# Runs: go test -v ./internal/airgaptest -run 'TestAirGapBootstrap_ZeroEgress'
+```
+
+### Enforced invariants and failure tokens
+
+1. **Zero-egress enforcement (`AIRGAP_EGRESS_VIOLATION`):**
+   - The test environment isolates proxy variables (`HTTP_PROXY=http://127.0.0.1:1`, `HTTPS_PROXY=http://127.0.0.1:1`, `ALL_PROXY=http://127.0.0.1:1`, `GOPROXY=off`).
+   - An active socket tracer/egress trap intercepts all dial attempts. Any connection attempt to a non-loopback address (not `127.0.0.1`, `::1`, or `localhost`) fails closed immediately with error token `AIRGAP_EGRESS_VIOLATION`.
+   - The test asserts that exactly zero outbound connections outside loopback occurred across the entire bootstrap and execution lifecycle.
+
+2. **Offline remote dependency refusal (`AIRGAP_UNRESOLVED_REMOTE_DEPENDENCY`):**
+   - Bundles and lockfiles are verified strictly offline. If a lockfile or bundle references a remote MCP server URL (such as `http://external.service/mcp` or `https://...`) or unbundled remote assets, `fakpack.Verify` and bootstrap preflight fail closed with error token `AIRGAP_UNRESOLVED_REMOTE_DEPENDENCY`.
+
+3. **Hermetic end-to-end execution:**
+   - A synthetic self-contained `.fakpack` bundle is built with valid v2 `harness.lock.json`, local MCP server binary (`os.Args[0]` `TestHelperProcess` pattern), local disk-backed memory journal, in-kernel mock model, and security policy.
+   - The bundle is verified offline with `fakpack.Verify`.
+   - The all-in-one supervisor boots from the bundle, waits for `/healthz` to report `200 OK`, and dispatches agent turns via `/v1/fak/agent/sessions`.
+   - Full tool dispatch to the MCP child process over stdio, session completion (`session.end`), and durable disk-backed memory journal records are verified.
+
 ## Supply-chain posture
 
 **The honest, build-verifiable statement:** fak is one static Go binary whose entire
@@ -257,6 +285,7 @@ Work top to bottom; each line is checkable, not aspirational.
 
 **Boundary**
 
+- [ ] Shift-left zero-egress harness bootstrap gate verified via `make test-airgap` (`TestAirGapBootstrap_ZeroEgress`).
 - [ ] The binary, policy manifest, and model weights were staged once; no runtime path
       leaves the boundary.
 - [ ] Egress is denied at the host firewall / network policy, and that denial is

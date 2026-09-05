@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -490,5 +491,64 @@ func TestFakContextRestore_ResolvesMMUPagedBlob(t *testing.T) {
 	}
 	if res.ID != digest {
 		t.Fatalf("restoreContext ID mismatch: got %q, want %q", res.ID, digest)
+	}
+}
+
+func TestFakReadPaginationAndLineNumbers(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterAdjudicator(0, readAdj{})
+
+	dir := t.TempDir()
+	agent.RegisterReadEngine(dir)
+	filePath := filepath.Join(dir, "multiline.txt")
+	var lines []string
+	for i := 1; i <= 20; i++ {
+		lines = append(lines, fmt.Sprintf("content line %d", i))
+	}
+	if err := os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := New(Config{EngineID: "fakread", Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	// 1. Direct fakReadWithOptions test
+	_, env, err := srv.fakReadWithOptions(ctx, filePath, 5, 3, true, "trace-pagination", "")
+	if err != nil || env == nil || env.Status != "OK" {
+		t.Fatalf("fakReadWithOptions failed: %v, env=%v", err, env)
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(env.Content), &body); err != nil {
+		t.Fatalf("unmarshal content: %v", err)
+	}
+	wantNumbered := "5: content line 5\n6: content line 6\n7: content line 7"
+	if body["content"] != wantNumbered {
+		t.Fatalf("got content %q, want %q", body["content"], wantNumbered)
+	}
+	if body["offset"].(float64) != 5 || body["limit"].(float64) != 3 {
+		t.Fatalf("offset/limit mismatch: %v, %v", body["offset"], body["limit"])
+	}
+	if body["truncated"] != true {
+		t.Fatalf("truncated expected true")
+	}
+
+	// 2. Test through MCP tools/call JSON interface
+	callJSON := fmt.Sprintf(`{"name":"fak_read","arguments":{"file_path":%q,"offset":5,"limit":3,"line_numbers":true}}`, filePath)
+	rawRes, rpcErr := srv.handleMethod(ctx, "tools/call", json.RawMessage(callJSON))
+	if rpcErr != nil {
+		t.Fatalf("handleMethod tools/call: %v", rpcErr)
+	}
+	var resp SyscallResponse
+	decodeMCPText(t, rawRes, &resp)
+	var mcpBody map[string]any
+	if err := json.Unmarshal([]byte(resp.Result.Content), &mcpBody); err != nil {
+		t.Fatalf("unmarshal mcp body: %v", err)
+	}
+	if mcpBody["content"] != wantNumbered {
+		t.Fatalf("MCP got content %q, want %q", mcpBody["content"], wantNumbered)
 	}
 }

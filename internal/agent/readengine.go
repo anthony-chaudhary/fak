@@ -5,8 +5,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -63,14 +66,47 @@ func (e readEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result,
 			}
 		}
 	}
-	out, isErr := e.read(pathArg)
+	offset := parseOptInt(m["offset"])
+	limit := parseOptInt(m["limit"])
+	lineNumbers := parseOptBool(m["line_numbers"])
+	out, isErr := e.readWithOptions(pathArg, offset, limit, lineNumbers)
 	return engineResult(ctx, c, body, out, isErr, FakReadEngineID), nil
+}
+
+func parseOptInt(v any) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case string:
+		if i, err := strconv.Atoi(strings.TrimSpace(n)); err == nil {
+			return i
+		}
+	}
+	return 0
+}
+
+func parseOptBool(v any) bool {
+	switch b := v.(type) {
+	case bool:
+		return b
+	case string:
+		return strings.EqualFold(strings.TrimSpace(b), "true") || b == "1"
+	}
+	return false
 }
 
 // read resolves pathArg against the engine root, refuses an escape, and returns the file
 // bytes (or a JSON error object on any failure). The result is always JSON so the MCP wire
 // shape is stable; a successful read returns {"file_path":..., "content":...}.
 func (e readEngine) read(pathArg string) (result []byte, isError bool) {
+	return e.readWithOptions(pathArg, 0, 0, false)
+}
+
+func (e readEngine) readWithOptions(pathArg string, offset, limit int, lineNumbers bool) (result []byte, isError bool) {
 	errResult := func(code, source, message string) ([]byte, bool) {
 		b, _ := json.Marshal(map[string]any{
 			"error":        "fak_read: " + message,
@@ -90,6 +126,15 @@ func (e readEngine) read(pathArg string) (result []byte, isError bool) {
 	if rel, err := filepath.Rel(e.root, abs); err != nil || rel == ".." || hasDotDotPrefix(rel) {
 		return errResult("path_escape", "confinement", "path escapes the read root")
 	}
+	// Symlink confinement: resolve symlinks on abs and verify the resolved path remains inside realRoot (#11399).
+	if realPath, err := filepath.EvalSymlinks(abs); err == nil {
+		realRoot, rErr := filepath.EvalSymlinks(e.root)
+		if rErr == nil {
+			if rel, err := filepath.Rel(realRoot, realPath); err != nil || rel == ".." || hasDotDotPrefix(rel) {
+				return errResult("path_escape", "confinement", "path escapes the read root via symlink")
+			}
+		}
+	}
 	data, err := os.ReadFile(abs)
 	if err != nil {
 		if info, statErr := os.Stat(abs); statErr == nil && info.IsDir() {
@@ -104,10 +149,50 @@ func (e readEngine) read(pathArg string) (result []byte, isError bool) {
 			return errResult("io_error", "filesystem", "filesystem read failed")
 		}
 	}
-	body := map[string]any{"file_path": pathArg, "content": string(data)}
+	body := map[string]any{"file_path": pathArg}
 	if !utf8.Valid(data) {
 		body["encoding"] = "base64"
 		body["content_base64"] = base64.StdEncoding.EncodeToString(data)
+		body["content"] = ""
+	} else {
+		content := string(data)
+		if offset > 0 || limit > 0 || lineNumbers {
+			lines := strings.Split(content, "\n")
+			start := 0
+			if offset > 0 {
+				start = offset - 1
+			}
+			if start > len(lines) {
+				start = len(lines)
+			}
+			end := len(lines)
+			truncated := false
+			if limit > 0 && start+limit < end {
+				end = start + limit
+				truncated = true
+			}
+			selected := lines[start:end]
+			if lineNumbers {
+				numbered := make([]string, len(selected))
+				for i, l := range selected {
+					numbered[i] = fmt.Sprintf("%d: %s", start+i+1, l)
+				}
+				selected = numbered
+			}
+			body["content"] = strings.Join(selected, "\n")
+			if offset > 0 {
+				body["offset"] = offset
+			}
+			if limit > 0 {
+				body["limit"] = limit
+			}
+			if truncated {
+				body["truncated"] = true
+			}
+			body["total_lines"] = len(lines)
+		} else {
+			body["content"] = content
+		}
 	}
 	b, _ := json.Marshal(body)
 	return b, false

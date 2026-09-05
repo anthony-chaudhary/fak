@@ -58,8 +58,11 @@ func (ScopeCeilingGate) Caps() []abi.Capability { return nil }
 //
 // The witness discloses only the two scopes, never the payload (mirrors the
 // residencyGate's bounded disclosure).
-func (ScopeCeilingGate) Admit(_ context.Context, c *abi.ToolCall, r *abi.Result) abi.Verdict {
+func (ScopeCeilingGate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Verdict {
 	if !enabled || r == nil {
+		return abi.Verdict{Kind: abi.VerdictAllow, By: scopeCeilingBy}
+	}
+	if pc, ok := abi.PolicyFromContext(ctx); ok && pc.Posture == abi.PostureDefaultOpen {
 		return abi.Verdict{Kind: abi.VerdictAllow, By: scopeCeilingBy}
 	}
 	scope := r.Payload.Scope
@@ -71,23 +74,83 @@ func (ScopeCeilingGate) Admit(_ context.Context, c *abi.ToolCall, r *abi.Result)
 	target, ok := readShareTarget(c)
 	if !ok {
 		// Escalation: a wider-than-Agent result with an unknowable target is
-		// confined (fail-closed), not admitted.
+		// confined (fail-closed), not admitted, unless overridden or permissive.
+		if overrideReason, hasOverride := ExtractOverrideReason(ctx, c); hasOverride {
+			logSecurityOverride(c, SinkNone, abi.TaintTrusted, abi.ReasonScopeCrossing, overrideReason, scopeCeilingBy+"(override)")
+			return abi.Verdict{
+				Kind: abi.VerdictAllow,
+				By:   scopeCeilingBy + "(override)",
+				Meta: map[string]string{
+					"share_target":        "unknown",
+					"result_scope":        scopeName(scope),
+					"ifc_override":        "true",
+					"ifc_override_reason": overrideReason,
+				},
+			}
+		}
+		if isPermissive(ctx, Policy{}) {
+			return abi.Verdict{
+				Kind: abi.VerdictAllow,
+				By:   scopeCeilingBy + "(permissive)",
+				Meta: map[string]string{
+					"share_target":   "unknown",
+					"result_scope":   scopeName(scope),
+					"ifc_permissive": "true",
+				},
+			}
+		}
 		return abi.Verdict{
 			Kind:    abi.VerdictQuarantine,
-			Reason:  abi.ReasonTrustViolation,
+			Reason:  abi.ReasonScopeCrossing,
 			By:      scopeCeilingBy,
-			Payload: abi.WitnessPayload{Claim: scopeName(scope) + " result shared to an unknown target boundary"},
-			Meta:    map[string]string{"share_target": "unknown", "result_scope": scopeName(scope)},
+			Payload: abi.WitnessPayload{Claim: "Routine IFC scope check: " + scopeName(scope) + " result shared to an unknown target boundary"},
+			Meta: map[string]string{
+				"share_target":       "unknown",
+				"result_scope":       scopeName(scope),
+				"expected_check":     "ifc_scope_ceiling",
+				"override_supported": "true",
+				"remedy":             "Routine IFC scope check: result scope is wider than target boundary. Supply 'override_reason' or 'justification' in tool arguments or metadata to proceed with audit logging.",
+			},
 		}
 	}
 	if scope > target {
 		// result scope is WIDER than the share target's declared boundary.
+		if overrideReason, hasOverride := ExtractOverrideReason(ctx, c); hasOverride {
+			logSecurityOverride(c, SinkNone, abi.TaintTrusted, abi.ReasonScopeCrossing, overrideReason, scopeCeilingBy+"(override)")
+			return abi.Verdict{
+				Kind: abi.VerdictAllow,
+				By:   scopeCeilingBy + "(override)",
+				Meta: map[string]string{
+					"share_target":        scopeName(target),
+					"result_scope":        scopeName(scope),
+					"ifc_override":        "true",
+					"ifc_override_reason": overrideReason,
+				},
+			}
+		}
+		if isPermissive(ctx, Policy{}) {
+			return abi.Verdict{
+				Kind: abi.VerdictAllow,
+				By:   scopeCeilingBy + "(permissive)",
+				Meta: map[string]string{
+					"share_target":   scopeName(target),
+					"result_scope":   scopeName(scope),
+					"ifc_permissive": "true",
+				},
+			}
+		}
 		return abi.Verdict{
 			Kind:    abi.VerdictQuarantine,
-			Reason:  abi.ReasonTrustViolation,
+			Reason:  abi.ReasonScopeCrossing,
 			By:      scopeCeilingBy,
-			Payload: abi.WitnessPayload{Claim: scopeName(scope) + " result shared into a " + scopeName(target) + " target"},
-			Meta:    map[string]string{"share_target": scopeName(target), "result_scope": scopeName(scope)},
+			Payload: abi.WitnessPayload{Claim: "Routine IFC scope check: " + scopeName(scope) + " result shared into a " + scopeName(target) + " target"},
+			Meta: map[string]string{
+				"share_target":       scopeName(target),
+				"result_scope":       scopeName(scope),
+				"expected_check":     "ifc_scope_ceiling",
+				"override_supported": "true",
+				"remedy":             "Routine IFC scope check: result scope is wider than target boundary. Supply 'override_reason' or 'justification' to proceed with audit logging.",
+			},
 		}
 	}
 	// In-bounds: declared result scope ≤ declared target scope. Admit.

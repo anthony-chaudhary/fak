@@ -70,14 +70,17 @@ const (
 //   - SafeSinks / Authorize / Sources: IFC config for post-read egress precision
 //     and host-authored source classes.
 type Manifest struct {
-	Version         string            `json:"version,omitempty"`
-	Posture         string            `json:"posture,omitempty"`
-	Allow           []string          `json:"allow,omitempty"`
-	AllowPrefix     []string          `json:"allow_prefix,omitempty"`
-	Complain        []string          `json:"complain,omitempty"`
-	Deny            map[string]string `json:"deny,omitempty"`
-	SelfModifyGlobs []string          `json:"self_modify_globs,omitempty"`
-	RedactFields    []string          `json:"redact_fields,omitempty"`
+	Version             string            `json:"version,omitempty"`
+	Profile             string            `json:"profile,omitempty"`
+	Posture             string            `json:"posture,omitempty"`
+	Allow               []string          `json:"allow,omitempty"`
+	AllowPrefix         []string          `json:"allow_prefix,omitempty"`
+	Complain            []string          `json:"complain,omitempty"`
+	Deny                map[string]string `json:"deny,omitempty"`
+	SelfModifyGlobs     []string          `json:"self_modify_globs,omitempty"`
+	BlockedPathGlobs    []string          `json:"blocked_path_globs,omitempty"`
+	CredentialPathGlobs []string          `json:"credential_path_globs,omitempty"`
+	RedactFields        []string          `json:"redact_fields,omitempty"`
 	// AdvisoryReasons is the per-reason advisory (warn) posture — the operator's
 	// false-positive escape hatch for the HEURISTIC rungs. A monitor refusal citing
 	// a listed reason is admitted with the full would-deny record in its verdict
@@ -281,7 +284,10 @@ type Runtime struct {
 	// SubagentDepth is the compiled subagent fan-out depth cap (#2603); nil when
 	// the manifest declares none, in which case AdmitDepth still enforces the
 	// fail-closed DefaultMaxSubagentDepth on the nil receiver.
-	SubagentDepth *SubagentDepthRule
+	SubagentDepth    *SubagentDepthRule
+	PolicyContext    abi.PolicyContext
+	StrictGatedSinks bool
+	GatedSinks       map[string]bool
 }
 
 // Load reads, parses, validates, and resolves a manifest file into a Policy.
@@ -427,16 +433,32 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 	if err := m.validateVersion(); err != nil {
 		return Runtime{}, err
 	}
+	var prof Profile
+	if m.Profile != "" {
+		p, err := ParseProfile(m.Profile)
+		if err != nil {
+			return Runtime{}, err
+		}
+		prof = p
+	}
 	posture, err := parsePosture(m.Posture)
 	if err != nil {
 		return Runtime{}, err
 	}
+	var blockedGlobs []string
+	if len(m.BlockedPathGlobs) > 0 {
+		blockedGlobs = append(blockedGlobs, m.BlockedPathGlobs...)
+	}
+	if len(m.CredentialPathGlobs) > 0 {
+		blockedGlobs = append(blockedGlobs, m.CredentialPathGlobs...)
+	}
 	p := adjudicator.Policy{
-		Posture:         posture,
-		AllowPrefix:     cloneSlice(m.AllowPrefix),
-		Complain:        make(map[string]bool, len(m.Complain)),
-		SelfModifyGlobs: cloneSlice(m.SelfModifyGlobs),
-		RedactFields:    cloneSlice(m.RedactFields),
+		Posture:          posture,
+		AllowPrefix:      cloneSlice(m.AllowPrefix),
+		Complain:         make(map[string]bool, len(m.Complain)),
+		SelfModifyGlobs:  cloneSlice(m.SelfModifyGlobs),
+		BlockedPathGlobs: cloneSlice(blockedGlobs),
+		RedactFields:     cloneSlice(m.RedactFields),
 	}
 	for i, raw := range m.Complain {
 		tool := strings.TrimSpace(raw)
@@ -558,7 +580,7 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 	if p.AutoRepairSidestep, err = autoRepairSidestepFromEnv(os.Getenv(AutoRepairEnv)); err != nil {
 		return Runtime{}, err
 	}
-	return Runtime{
+	rt := Runtime{
 		Adjudicator:           p,
 		Sources:               sources,
 		SafeSinks:             safe,
@@ -568,7 +590,15 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 		ToolRuntime:           tr,
 		InheritedCapabilities: ic,
 		SubagentDepth:         sd,
-	}, nil
+	}
+	if prof != "" {
+		prof.Apply(&rt)
+		if m.Posture != "" {
+			rt.Adjudicator.Posture = posture
+			rt.PolicyContext.Posture = posture
+		}
+	}
+	return rt, nil
 }
 
 func (m Manifest) validateVersion() error {
@@ -608,10 +638,11 @@ func parsePosture(s string) (adjudicator.Posture, error) {
 // p built from a manifest.
 func FromPolicy(p adjudicator.Policy) Manifest {
 	m := Manifest{
-		Version:         Version,
-		AllowPrefix:     cloneSlice(p.AllowPrefix),
-		SelfModifyGlobs: cloneSlice(p.SelfModifyGlobs),
-		RedactFields:    cloneSlice(p.RedactFields),
+		Version:          Version,
+		AllowPrefix:      cloneSlice(p.AllowPrefix),
+		SelfModifyGlobs:  cloneSlice(p.SelfModifyGlobs),
+		BlockedPathGlobs: cloneSlice(p.BlockedPathGlobs),
+		RedactFields:     cloneSlice(p.RedactFields),
 	}
 	if p.Posture == adjudicator.PostureAdmitAndLog {
 		m.Posture = postureAdmitAndLog
@@ -686,6 +717,15 @@ func FromPolicy(p adjudicator.Policy) Manifest {
 		}
 	}
 	m.LintWrites = p.LintWrites
+	return m
+}
+
+// FromRuntime renders a Runtime back into a Manifest, preserving profile and IFC metadata.
+func FromRuntime(rt Runtime) Manifest {
+	m := FromPolicy(rt.Adjudicator)
+	if rt.PolicyContext.Profile != "" {
+		m.Profile = rt.PolicyContext.Profile
+	}
 	return m
 }
 

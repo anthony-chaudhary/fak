@@ -51,10 +51,10 @@ func TestFailClosedDefault(t *testing.T) {
 	if _, v, _ := b.Recv(bg(), to); v.Kind != abi.VerdictDeny {
 		t.Fatalf("uncapped recv: want Deny, got %v", v.Kind)
 	}
-	// A private (ScopeAgent) body to ANOTHER agent's channel → deny TRUST_VIOLATION.
+	// A private (ScopeAgent) body to ANOTHER agent's channel → deny SCOPE_CROSSING.
 	v := b.Send(bg(), "alpha", ChannelKey{Locale: InKernel, ID: "shared-q"}, Private([]byte("secret")), CapA2ASend)
-	if v.Kind != abi.VerdictDeny || abi.ReasonName(v.Reason) != "TRUST_VIOLATION" {
-		t.Fatalf("private cross-agent send: want Deny/TRUST_VIOLATION, got %v/%s", v.Kind, abi.ReasonName(v.Reason))
+	if v.Kind != abi.VerdictDeny || abi.ReasonName(v.Reason) != "SCOPE_CROSSING" {
+		t.Fatalf("private cross-agent send: want Deny/SCOPE_CROSSING, got %v/%s", v.Kind, abi.ReasonName(v.Reason))
 	}
 	if b.Len(to) != 0 || b.Len(ChannelKey{Locale: InKernel, ID: "shared-q"}) != 0 {
 		t.Fatal("a denied send must not enqueue")
@@ -92,8 +92,8 @@ func TestScopeTaintEnforcement(t *testing.T) {
 
 	// A quarantined body is refused at send.
 	q := Inline([]byte("poison"), abi.ScopeFleet, abi.TaintQuarantined)
-	if v := b.Send(bg(), "alpha", to, q, CapA2ASend); v.Kind != abi.VerdictDeny || abi.ReasonName(v.Reason) != "TRUST_VIOLATION" {
-		t.Fatalf("quarantined send: want Deny/TRUST_VIOLATION, got %v/%s", v.Kind, abi.ReasonName(v.Reason))
+	if v := b.Send(bg(), "alpha", to, q, CapA2ASend); v.Kind != abi.VerdictDeny || abi.ReasonName(v.Reason) != "PROMPT_INJECTION" {
+		t.Fatalf("quarantined send: want Deny/PROMPT_INJECTION, got %v/%s", v.Kind, abi.ReasonName(v.Reason))
 	}
 
 	// Defense in depth: a quarantined body that reaches the queue another way is
@@ -248,8 +248,8 @@ func TestPubSubPrivateLeakRefused(t *testing.T) {
 	topic := ChannelKey{Locale: InKernel, ID: "alice"}
 	inbox, _ := b.Subscribe(topic)
 	v, n := b.Publish(bg(), "alice", topic, Private([]byte("secret")), CapA2ASend)
-	if v.Kind != abi.VerdictDeny || abi.ReasonName(v.Reason) != "TRUST_VIOLATION" || n != 0 {
-		t.Fatalf("spoofed (from==topic.ID) private publish: want Deny/TRUST_VIOLATION/0, got %v/%s/%d",
+	if v.Kind != abi.VerdictDeny || abi.ReasonName(v.Reason) != "SCOPE_CROSSING" || n != 0 {
+		t.Fatalf("spoofed (from==topic.ID) private publish: want Deny/SCOPE_CROSSING/0, got %v/%s/%d",
 			v.Kind, abi.ReasonName(v.Reason), n)
 	}
 	if b.Len(inbox) != 0 {

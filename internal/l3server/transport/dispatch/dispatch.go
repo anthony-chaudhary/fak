@@ -1,16 +1,16 @@
-﻿package dispatch
+package dispatch
 
 import (
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/l3server/client"
 	"github.com/anthony-chaudhary/fak/internal/l3server/cluster"
 	"github.com/anthony-chaudhary/fak/internal/l3server/index"
 	"github.com/anthony-chaudhary/fak/internal/l3server/metrics"
 	"github.com/anthony-chaudhary/fak/internal/l3server/shard"
 	"github.com/anthony-chaudhary/fak/internal/l3server/transport/protocol"
-	"github.com/anthony-chaudhary/fak/internal/l3server/client"
 )
 
 // globalInflightOps tracks total ops currently inside Dispatch() across all dispatchers.
@@ -41,9 +41,9 @@ type Dispatcher struct {
 	MetricsAddr    string // address of the /ready endpoint (e.g. ":9090")
 
 	// Cluster â€” nil when standalone
-	Ring       *cluster.Ring
-	Replicator *cluster.Replicator
-	LocalID    string
+	Ring        *cluster.Ring
+	Replicator  *cluster.Replicator
+	LocalID     string
 	SnapshotDir string // for on-demand snapshot/restore
 
 	// RDMA buffer sizes (bytes) â€” surfaced in INFO response for client diagnostics
@@ -64,8 +64,8 @@ type Dispatcher struct {
 	managerReady atomic.Bool
 	numShards    int // set at construction time for NotReady progress responses
 
-	proxyMu    sync.Mutex
-	proxyPool  map[string]*client.Client
+	proxyMu   sync.Mutex
+	proxyPool map[string]*client.Client
 }
 
 // SetManager wires the shard Manager into the dispatcher after background allocation.
@@ -118,7 +118,7 @@ func (d *Dispatcher) SetClusterConfig(ring any, replicator any, localID string, 
 // batchGroup holds keys (and optionally values/indices) destined for a single shard.
 type batchGroup struct {
 	shard   *shard.Shard
-	indices []int    // original positions, populated when trackIndices is true
+	indices []int // original positions, populated when trackIndices is true
 	keys    [][]byte
 	hashes  []uint64
 	values  [][]byte // populated only when values are provided

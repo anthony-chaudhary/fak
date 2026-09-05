@@ -47,12 +47,14 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/canon"
 	"github.com/anthony-chaudhary/fak/internal/numfmt"
 	"github.com/anthony-chaudhary/fak/internal/provenance"
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 // enabled is the runtime toggle (FAK_NORMGATE=off makes Admit a no-op Defer) so
@@ -143,6 +145,29 @@ func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ve
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "normgate"} // let ctxmmu handle oversize/verbatim
 	}
 
+	// Model override: if the tool call supplies a justification / override reason,
+	// admit the result with a retrievable transform and record a clearly logged audit trail.
+	if justification, hasOverride := extractOverride(ctx, c); hasOverride {
+		threatReason := abi.ReasonPromptInjection
+		if secret {
+			threatReason = abi.ReasonSecretExfil
+		} else if pii {
+			threatReason = abi.ReasonPIIExfil
+		}
+		g.logSecurityOverride(c, threatReason, justification, "normgate_override")
+		if r.Meta == nil {
+			r.Meta = map[string]string{}
+		}
+		r.Meta["normgate_overridden"] = "true"
+		r.Meta["override_reason"] = justification
+		v := g.transformOut(ctx, r, body, "override-admitted", "model override admitted: "+justification)
+		v.Meta = map[string]string{
+			"normgate_overridden": "true",
+			"override_reason":     justification,
+		}
+		return v
+	}
+
 	// Secret: warn-first by DEFAULT (issue: a dev handling their own credential on
 	// their own box was blinded when the whole result sealed). The default masks the
 	// credential span IN PLACE and keeps the rest of the legitimate output in context
@@ -162,7 +187,7 @@ func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ve
 			if !highConfidenceInjection(body) {
 				return g.transformOut(ctx, r, body, "paged-low-confidence", "low-confidence injection-shaped content (retrievable, not sealed)")
 			}
-			return g.quarantineOut(ctx, r, abi.ReasonTrustViolation, body)
+			return g.quarantineOut(ctx, r, abi.ReasonPromptInjection, body)
 		}
 		return g.transformOut(ctx, r, body, "paged-trusted-local", "trusted-local injection-shaped content (retrievable, not sealed)")
 	}
@@ -454,8 +479,17 @@ func (g *Gate) quarantineOut(ctx context.Context, r *abi.Result, reason abi.Reas
 	abi.PinResolved(handle)
 	g.evictExcessLocked()
 	g.mu.Unlock()
-	stub := map[string]any{"_quarantined": true, "id": id, "reason": abi.ReasonName(reason),
-		"by": "normgate", "len": len(body), "_note": "obfuscated threat caught on normalized view"}
+	stub := map[string]any{
+		"_quarantined":       true,
+		"status":             "quarantined_for_safety",
+		"id":                 id,
+		"reason":             abi.ReasonName(reason),
+		"by":                 "normgate",
+		"len":                len(body),
+		"_note":              "Routine safety check: threat caught on normalized view (" + abi.ReasonName(reason) + "). This is expected behavior when inspecting external untrusted data or security materials.",
+		"override_guidance":  "If this content is required for your task, supply an override justification with id '" + id + "' to proceed. All overrides are logged for security auditing.",
+		"override_supported": true,
+	}
 	if ref, ok := putJSON(ctx, stub); ok {
 		r.Payload = ref
 	} else {
@@ -477,7 +511,7 @@ func detectorFor(reason abi.ReasonCode) string {
 		return "canonical_secret"
 	case abi.ReasonPIIExfil:
 		return "canonical_pii"
-	case abi.ReasonTrustViolation:
+	case abi.ReasonTrustViolation, abi.ReasonPromptInjection:
 		return "canonical_injection"
 	default:
 		return "canonical_scan"
@@ -544,6 +578,56 @@ func (g *Gate) PageIn(ctx context.Context, id string) ([]byte, canon.Findings, e
 		return nil, f, fmt.Errorf("normgate: page-in of %s refused — re-screen found a secret; a cleared credential does not launder back into context", id)
 	}
 	return body, f, nil
+}
+
+// Override records a model-supplied justification to clear and retrieve a quarantined result,
+// logging the override process for audit.
+func (g *Gate) Override(ctx context.Context, id, justification string) ([]byte, canon.Findings, error) {
+	justification = strings.TrimSpace(justification)
+	if len(justification) < 3 {
+		return nil, canon.Findings{}, fmt.Errorf("normgate: override of %s requires a non-empty justification (>=3 chars)", id)
+	}
+	g.mu.Lock()
+	handle, ok := g.held[id]
+	if ok {
+		g.cleared[id] = true
+	}
+	g.mu.Unlock()
+	if !ok {
+		return nil, canon.Findings{}, fmt.Errorf("normgate: no quarantined result %s", id)
+	}
+
+	g.logSecurityOverride(nil, abi.ReasonNone, justification, "normgate_override:"+id)
+
+	b, has := abi.PageOut("blob")
+	if !has {
+		return nil, canon.Findings{}, fmt.Errorf("normgate: no page-out backend")
+	}
+	ref, err := b.PageIn(ctx, handle)
+	if err != nil {
+		return nil, canon.Findings{}, fmt.Errorf("normgate: page-in of %s: %w", id, err)
+	}
+	body := ref.Inline
+	f := canon.Scan(body)
+	return body, f, nil
+}
+
+// ClearWithOverride marks id as cleared using a model-supplied justification and logs the override for audit.
+func (g *Gate) ClearWithOverride(id, justification string) error {
+	justification = strings.TrimSpace(justification)
+	if len(justification) < 3 {
+		return fmt.Errorf("normgate: clearance of %s requires a non-empty justification (>=3 chars)", id)
+	}
+	g.mu.Lock()
+	if _, ok := g.held[id]; !ok {
+		g.mu.Unlock()
+		return fmt.Errorf("normgate: no quarantined result %s", id)
+	}
+	g.cleared[id] = true
+	g.mu.Unlock()
+
+	g.logSecurityOverride(nil, abi.ReasonNone, justification, "normgate_clear:"+id)
+	return nil
 }
 
 func (g *Gate) transformOut(ctx context.Context, r *abi.Result, body []byte, metaValue, hint string) abi.Verdict {
@@ -635,6 +719,70 @@ func (g *Gate) Stats() (total, quarantined, transformed int64) {
 
 // Default is the registered gate.
 var Default = New()
+
+func extractOverride(ctx context.Context, c *abi.ToolCall) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	if c.Meta != nil {
+		for _, k := range []string{"override_reason", "justification", "override", "quarantine_override"} {
+			if s := strings.TrimSpace(c.Meta[k]); len(s) >= 3 {
+				return s, true
+			}
+		}
+	}
+	b := refutil.Bytes(ctx, c.Args)
+	if len(b) > 0 {
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err == nil && m != nil {
+			for _, k := range []string{"override_reason", "justification", "override", "quarantine_override"} {
+				if v, ok := m[k].(string); ok {
+					if s := strings.TrimSpace(v); len(s) >= 3 {
+						return s, true
+					}
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+func (g *Gate) logSecurityOverride(c *abi.ToolCall, reason abi.ReasonCode, justification, op string) {
+	tool := ""
+	traceID := ""
+	if c != nil {
+		tool = c.Tool
+		traceID = c.TraceID
+	}
+	ev := abi.Event{
+		Kind: abi.EvDecide,
+		Call: c,
+		Verdict: &abi.Verdict{
+			Kind:   abi.VerdictAllow,
+			Reason: reason,
+			By:     "normgate(override)",
+			Payload: abi.WitnessPayload{
+				Claim: "security override: " + justification,
+			},
+			Meta: map[string]string{
+				"override_reason":   justification,
+				"security_override": "true",
+				"operation":         op,
+			},
+		},
+		Fields: map[string]any{
+			"event":           "security_override",
+			"override_type":   op,
+			"override_reason": justification,
+			"tool":            tool,
+			"trace_id":        traceID,
+			"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
+		},
+	}
+	for _, e := range abi.EmittersFor(ev.Kind) {
+		e.Emit(ev)
+	}
+}
 
 func init() {
 	abi.RegisterResultAdmitter(5, Default) // rank 5: BEFORE ctxmmu (rank 10)

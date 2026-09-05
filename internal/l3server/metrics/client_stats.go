@@ -12,9 +12,9 @@ const MaxNICs = 8
 
 // ClientStats holds per-connection client-reported metrics (from the connector).
 type ClientStats struct {
-	ConnID         uint64
-	RemoteAddr     string
-	LastUpdated    time.Time
+	ConnID      uint64
+	RemoteAddr  string
+	LastUpdated time.Time
 
 	GetErrors      int64
 	GetSuccesses   int64
@@ -498,12 +498,12 @@ var knownClientStatsFields = map[string]bool{
 	"dedup_low_hit_streak": true, "dedup_cost_streak": true,
 	"total_pages_set": true, "total_pages_get": true,
 	"backup_coalesce_avg_ops": true,
-	"codec": true, "codec_lossy": true,
+	"codec":                   true, "codec_lossy": true,
 	"pool_rebuilds": true, "transport": true,
 	"backup_bandwidth_gbps": true, "io_max_latency_ms": true,
 	"warmup_phase": true, "warmup_effective_batch_size": true,
 	"model_page_bytes": true,
-	"nic_0_reads": true, "nic_0_bytes_gb": true, "nic_0_writes": true, "nic_0_write_bytes_gb": true,
+	"nic_0_reads":      true, "nic_0_bytes_gb": true, "nic_0_writes": true, "nic_0_write_bytes_gb": true,
 	"nic_1_reads": true, "nic_1_bytes_gb": true, "nic_1_writes": true, "nic_1_write_bytes_gb": true,
 	"nic_2_reads": true, "nic_2_bytes_gb": true, "nic_2_writes": true, "nic_2_write_bytes_gb": true,
 	"nic_3_reads": true, "nic_3_bytes_gb": true, "nic_3_writes": true, "nic_3_write_bytes_gb": true,

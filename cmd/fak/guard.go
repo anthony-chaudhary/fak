@@ -82,6 +82,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	policyPath := fs.String("policy", "", "capability-floor manifest to enforce (default: the built-in guard floor; see --dump-policy)")
 	postureFlag := fs.String("posture", "", "adjudication posture: default_open|fail_closed|admit_and_log (default: default_open; overrides policy manifest posture; env: FAK_GUARD_POSTURE)")
 	selfModifyFlag := fs.String("self-modify", "", "self-modification mode: permissive|strict (default: permissive; overrides policy manifest self_modify_mode; env: FAK_GUARD_SELF_MODIFY)")
+	profileFlag := fs.String("profile", "", "permission profile: dev|prod|audit (env: FAK_PROFILE)")
 	var allowTools launchToolFlag
 	fs.Var(&allowTools, "allow-tool", "grant one exact tool name for THIS guard process only (repeatable). The grant re-admits DEFAULT_DENY tools but cannot bypass explicit denies, dangerous-argument rules, self-modification, or later tightening.")
 	envName := fs.String("env", "", "env var to inject the gateway URL into the child (default: chosen by --provider)")
@@ -438,7 +439,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		effectiveWorkProfile = responseProfileCapture.WorkProfile
 	}
 
-	rt, floorSource, policyDigest, policyDur := loadGuardCapabilityFloor(*policyPath, *postureFlag, *selfModifyFlag)
+	rt, floorSource, policyDigest, policyDur := loadGuardCapabilityFloor(*policyPath, *postureFlag, *profileFlag, *selfModifyFlag)
 	configureGuardPromotionLedger(rt.Adjudicator.Complain, guardPromotionDefaultThreshold)
 	var err error
 

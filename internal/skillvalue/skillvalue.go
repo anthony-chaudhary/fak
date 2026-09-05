@@ -1,25 +1,5 @@
-// Package skillvalue is the per-skill outcome-VALUE ledger — the value sibling
-// of a usage counter (epic #2871, issue #2873).
-//
-// Hermes' curator (agent/curator.py) tracks use_count/view_count/patch_count and
-// auto-archives *stale* skills. Staleness is not value: a heavily-used skill can
-// still make outcomes worse. This package keeps a VALUE ledger instead — it
-// attributes the witnessed outcome delta (pass / cost / latency) of sessions that
-// LOADED a skill against MATCHED sessions of the same task class that did NOT, the
-// ablation-harness "loaded vs not-loaded" arm keyed by skill id. Skills whose
-// measured pass-lift is <= 0 (with enough evidence to say so) are flagged for
-// auto-revert; the divergence between the loaded and baseline arms is surfaced the
-// way the cache-value gross/net split is (#2797).
-//
-// It also carries the #2796 valuation-basis discipline: a promoted skill must name
-// HOW its value was measured. The Gate flags any active skill that carries no
-// valuation basis — a promotion no measurement grounds, the exact gap #2796 closed
-// for $ figures, applied to skills.
-//
-// The fold is PURE and deterministic: it takes pre-read ledger rows and a promotion
-// basis map and returns a Rollup. All git / filesystem plumbing (reading the JSONL
-// ledger, sourcing the promotion map) is the caller's job — the CLI front door in
-// cmd/fak/skill_value.go wires the live paths in.
+// Package skillvalue provides outcome value accounting for skills by comparing
+// loaded sessions against matched baseline sessions of the same task class.
 package skillvalue
 
 import (
@@ -28,63 +8,49 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
-// LedgerSchema tags each per-session outcome row this card folds. A reader keeps
-// only rows carrying it, so a shared ledger file cannot feed the rollup a row of
-// some other provenance.
+// LedgerSchema identifies per-session outcome records in JSONL ledgers.
 const LedgerSchema = "fak-skill-value-ledger/1"
 
-// DefaultLedgerRel is the tracked snapshot of the per-session skill-outcome feed.
-// Live runtime rows belong under the gitignored .fak state root; this tracked path
-// is the last published historical snapshot, mirroring the cache/memory ledgers.
+// DefaultLedgerRel is the repository path for historical skill value snapshots.
 const DefaultLedgerRel = "docs/nightrun/skill-value.jsonl"
 
-// Flag names attached to a per-skill row. They are the closed vocabulary the report
-// and the gate both read — never free text.
+// Flags attached to evaluated skill outcome records.
 const (
-	// FlagInsufficientEvidence: the skill has no comparable matched arm (no
-	// same-task-class session that both did and did not load it), so its lift is
-	// NOT measurable. It is reported not-yet — never auto-reverted on absence.
+	// FlagInsufficientEvidence marks a skill lacking a matched baseline comparison arm.
 	FlagInsufficientEvidence = "insufficient-evidence"
-	// FlagNetNegative: the skill has a comparable arm AND its measured pass-lift is
-	// <= 0 — the auto-revert signal. Keying off measured lift, never load frequency,
-	// is the whole point (a heavily-used skill can still be net-negative).
+	// FlagNetNegative marks a skill whose measured pass lift is non-positive.
 	FlagNetNegative = "net-negative"
-	// FlagNoValuationBasis: the skill is active (loaded by >= 1 session) but names no
-	// valuation basis — the #2796 gate finding. A promotion no measurement grounds.
+	// FlagNoValuationBasis marks an active skill lacking a declared valuation basis.
 	FlagNoValuationBasis = "no-valuation-basis"
 )
 
-// SessionRow is one witnessed session outcome that names the skills it loaded. It
-// is the per-session grain the rollup matches loaded-vs-not-loaded arms over.
+// SessionRow records a single session outcome and its loaded skills.
 type SessionRow struct {
 	Schema    string   `json:"schema"`
 	SessionID string   `json:"session_id"`
-	TaskClass string   `json:"task_class"` // the matching key: like-for-like comparison bucket
-	Skills    []string `json:"skills"`     // skill ids this session loaded (may be empty)
-	Pass      bool     `json:"pass"`       // did the session reach a green outcome
+	TaskClass string   `json:"task_class"`
+	Skills    []string `json:"skills"`
+	Pass      bool     `json:"pass"`
 	CostUSD   float64  `json:"cost_usd"`
 	LatencyMS float64  `json:"latency_ms"`
 }
 
-// SkillValue is one skill id's measured outcome lift: the LOADED arm (sessions that
-// loaded the skill) against the MATCHED baseline (same-task-class sessions that did
-// not), aggregated over task classes that carry BOTH arms and weighted by the loaded
-// session count in each class.
+// SkillValue records the measured outcome lift of a skill across matched task classes.
 type SkillValue struct {
 	SkillID string `json:"skill_id"`
 
-	TotalLoaded int `json:"total_loaded"` // every session that loaded the skill (context, not the arm)
-	ComparableN int `json:"comparable_n"` // loaded sessions in a class that also has a baseline
-	BaselineN   int `json:"baseline_n"`   // matched not-loaded sessions in those same classes
-	TaskClasses int `json:"task_classes"` // number of comparable task classes contributing to the lift
+	TotalLoaded int `json:"total_loaded"`
+	ComparableN int `json:"comparable_n"`
+	BaselineN   int `json:"baseline_n"`
+	TaskClasses int `json:"task_classes"`
 
-	LoadedPass   float64 `json:"loaded_pass"`   // pass rate of the comparable loaded arm
-	BaselinePass float64 `json:"baseline_pass"` // pass rate of the matched baseline arm
-	PassLift     float64 `json:"pass_lift"`     // LoadedPass - BaselinePass (the gross benefit)
-	CostDelta    float64 `json:"cost_delta"`    // mean cost loaded - baseline (positive = dearer)
-	LatencyDelta float64 `json:"latency_delta"` // mean latency loaded - baseline (positive = slower)
+	LoadedPass   float64 `json:"loaded_pass"`
+	BaselinePass float64 `json:"baseline_pass"`
+	PassLift     float64 `json:"pass_lift"`
+	CostDelta    float64 `json:"cost_delta"`
+	LatencyDelta float64 `json:"latency_delta"`
 
-	ValuationBasis string   `json:"valuation_basis"` // how the skill's value was measured; "" = ungrounded
+	ValuationBasis string   `json:"valuation_basis"`
 	Flags          []string `json:"flags,omitempty"`
 }
 
@@ -98,17 +64,14 @@ func (s SkillValue) HasFlag(f string) bool {
 	return false
 }
 
-// Rollup is the whole-catalog value fold. Skills sort worst-lift-first (the
-// auto-revert candidates lead), then by id for a stable order.
+// Rollup aggregates evaluated skill outcomes across all processed sessions.
 type Rollup struct {
 	Schema   string       `json:"schema"`
-	Sessions int          `json:"sessions"` // ledger rows folded
+	Sessions int          `json:"sessions"`
 	Skills   []SkillValue `json:"skills"`
 }
 
-// AutoRevert returns the skill ids the ledger says should be reverted: a measured,
-// comparable pass-lift <= 0. Insufficient-evidence skills are DELIBERATELY excluded
-// — absence of a matched arm is not evidence of harm.
+// AutoRevert returns skill IDs exhibiting non-positive measured pass lift.
 func (r Rollup) AutoRevert() []string {
 	var ids []string
 	for _, s := range r.Skills {
@@ -119,16 +82,13 @@ func (r Rollup) AutoRevert() []string {
 	return ids
 }
 
-// GateReport is the valuation-basis gate result (the #2796 mirror): the active
-// skills promoted with no valuation basis. OK is true when none are ungrounded.
+// GateReport summarizes active skills lacking an explicit valuation basis.
 type GateReport struct {
 	Ungrounded []string `json:"ungrounded"`
 	OK         bool     `json:"ok"`
 }
 
-// Gate flags every active skill (loaded by at least one session) that names no
-// valuation basis. It reads the same rollup the report renders, so the gate and the
-// report can never disagree about which skills are grounded.
+// Gate identifies active skills that lack a declared valuation basis.
 func (r Rollup) Gate() GateReport {
 	rep := GateReport{OK: true}
 	for _, s := range r.Skills {
@@ -140,15 +100,14 @@ func (r Rollup) Gate() GateReport {
 	return rep
 }
 
-// ParseLedger scans JSONL content into the SessionRows this card owns, keeping only
-// rows tagged LedgerSchema. Blank and malformed lines are skipped.
+// ParseLedger extracts session rows matching LedgerSchema from JSONL data.
 func ParseLedger(content string) []SessionRow {
 	return jsonlledger.Parse(content, func(r SessionRow) bool {
 		return r.Schema == LedgerSchema
 	})
 }
 
-// classArm accumulates one (skill, task-class) arm as sessions are folded in.
+// classArm accumulates loaded and matched baseline metrics for a task class.
 type classArm struct {
 	loadedN, loadedPass   int
 	loadedCost, loadedLat float64
@@ -156,23 +115,12 @@ type classArm struct {
 	baseCost, baseLat     float64
 }
 
-// Compute folds session rows plus a per-skill valuation-basis map into the value
-// rollup. basis[id] is the measurement basis a promoted skill carries; a missing or
-// empty entry is treated as ungrounded (the strict default — nothing is grounded
-// until a measurement names it). The fold is pure and order-independent.
+// Compute builds a value rollup comparing loaded skills against baselines.
 func Compute(sessions []SessionRow, basis map[string]string) Rollup {
-	// arms[skill][taskClass] accumulates the loaded and matched-baseline sides.
 	arms := map[string]map[string]*classArm{}
 	totalLoaded := map[string]int{}
-
-	// Every distinct skill id that appears in any session is "active" — a candidate
-	// for both the lift measurement and the valuation-basis gate.
 	active := map[string]bool{}
 
-	// First pass: learn the full active skill set (deduping repeats within a
-	// session) and each skill's total load count. The baseline arm of skill X is
-	// "same-task-class sessions that did NOT load X", so we can only attribute
-	// baselines once the whole active set is known — hence the two passes.
 	for _, s := range sessions {
 		loaded := map[string]bool{}
 		for _, id := range s.Skills {
@@ -187,9 +135,6 @@ func Compute(sessions []SessionRow, basis map[string]string) Rollup {
 		}
 	}
 
-	// Second pass: with the active set known, attribute each session to the loaded
-	// arm of the skills it loaded and to the baseline arm of every active skill it
-	// did NOT load, within its own task class.
 	for _, s := range sessions {
 		loaded := map[string]bool{}
 		for _, id := range s.Skills {
@@ -233,13 +178,11 @@ func Compute(sessions []SessionRow, basis map[string]string) Rollup {
 			TotalLoaded:    totalLoaded[id],
 			ValuationBasis: basis[id],
 		}
-		// Aggregate over task classes that carry BOTH arms, weighting each class's
-		// per-arm rates by that class's loaded count — the like-for-like comparison.
 		var wLoadedPass, wBasePass, wLoadedCost, wBaseCost, wLoadedLat, wBaseLat float64
 		var wLoaded float64
 		for _, a := range arms[id] {
 			if a.loadedN == 0 || a.baseN == 0 {
-				continue // not a comparable class
+				continue
 			}
 			w := float64(a.loadedN)
 			wLoaded += w
@@ -261,8 +204,6 @@ func Compute(sessions []SessionRow, basis map[string]string) Rollup {
 			sv.LatencyDelta = (wLoadedLat - wBaseLat) / wLoaded
 		}
 
-		// Flags. Evidence gates the revert: a skill with no comparable arm is
-		// not-yet, never reverted; a measured lift <= 0 is the revert signal.
 		if sv.TaskClasses == 0 {
 			sv.Flags = append(sv.Flags, FlagInsufficientEvidence)
 		} else if sv.PassLift <= 0 {
@@ -276,7 +217,7 @@ func Compute(sessions []SessionRow, basis map[string]string) Rollup {
 
 	sort.Slice(skills, func(i, j int) bool {
 		if skills[i].PassLift != skills[j].PassLift {
-			return skills[i].PassLift < skills[j].PassLift // worst lift leads
+			return skills[i].PassLift < skills[j].PassLift
 		}
 		return skills[i].SkillID < skills[j].SkillID
 	})

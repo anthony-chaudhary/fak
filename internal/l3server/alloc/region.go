@@ -10,13 +10,13 @@ import (
 type Region struct {
 	data           []byte
 	size           uint64
-	useHuge        bool // derived: hugePageSizeKB > 0
-	hugePageSizeKB int  // 0 = disabled, 2048 = 2MB, 1048576 = 1GB
-	isMapped       bool // true if mmap'd, false if heap-allocated
-	gotHuge        bool // true if MAP_HUGETLB succeeded
-	gotHugeSizeKB  int  // actual hugepage size that succeeded (2048 or 1048576)
-	thpHinted      bool // true if madvise(MADV_HUGEPAGE) was applied
-	pinned         bool // true if pages are locked in RAM via mlock
+	useHuge        bool   // derived: hugePageSizeKB > 0
+	hugePageSizeKB int    // 0 = disabled, 2048 = 2MB, 1048576 = 1GB
+	isMapped       bool   // true if mmap'd, false if heap-allocated
+	gotHuge        bool   // true if MAP_HUGETLB succeeded
+	gotHugeSizeKB  int    // actual hugepage size that succeeded (2048 or 1048576)
+	thpHinted      bool   // true if madvise(MADV_HUGEPAGE) was applied
+	pinned         bool   // true if pages are locked in RAM via mlock
 	devdaxFd       int    // -1 for anonymous mmap, >=0 for devdax
 	devdaxOffset   uint64 // offset within device
 	devdaxPath     string // "/dev/dax0.0" (for client advertisement)

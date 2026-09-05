@@ -220,7 +220,7 @@ func rateLimitKeyMode(key string) ratelimit.KeyMode {
 
 func ifcPolicy(rt policy.Runtime) ifc.Policy {
 	p := ifc.Policy{AuthorizedEgressHosts: append([]string(nil), rt.Adjudicator.ResearchEgressAllowHosts...)}
-	if len(rt.SafeSinks) > 0 || len(rt.AuthorizeRules) > 0 || len(rt.Sources) > 0 {
+	if rt.StrictGatedSinks || len(rt.SafeSinks) > 0 || len(rt.AuthorizeRules) > 0 || len(rt.Sources) > 0 {
 		p.GatedSinks = ifc.StrictGatedSinks()
 	}
 	if len(rt.SafeSinks) > 0 {

@@ -61,13 +61,13 @@ func TestScopeCeilingGateConfinesWiderShare(t *testing.T) {
 		{"agent result, tenant target", abi.ScopeAgent, "tenant", abi.VerdictAllow, abi.ReasonNone},
 
 		// Rung 1 — ScopeFleet result: confined iff target is fleet-or-wider.
-		{"fleet result, agent target (crossing)", abi.ScopeFleet, "agent", abi.VerdictQuarantine, abi.ReasonTrustViolation},
+		{"fleet result, agent target (crossing)", abi.ScopeFleet, "agent", abi.VerdictQuarantine, abi.ReasonScopeCrossing},
 		{"fleet result, fleet target (in-bounds)", abi.ScopeFleet, "fleet", abi.VerdictAllow, abi.ReasonNone},
 		{"fleet result, tenant target (in-bounds)", abi.ScopeFleet, "tenant", abi.VerdictAllow, abi.ReasonNone},
 
 		// Rung 1 — ScopeTenant result: confined iff target is tenant (the widest).
-		{"tenant result, agent target (crossing)", abi.ScopeTenant, "agent", abi.VerdictQuarantine, abi.ReasonTrustViolation},
-		{"tenant result, fleet target (crossing)", abi.ScopeTenant, "fleet", abi.VerdictQuarantine, abi.ReasonTrustViolation},
+		{"tenant result, agent target (crossing)", abi.ScopeTenant, "agent", abi.VerdictQuarantine, abi.ReasonScopeCrossing},
+		{"tenant result, fleet target (crossing)", abi.ScopeTenant, "fleet", abi.VerdictQuarantine, abi.ReasonScopeCrossing},
 		{"tenant result, tenant target (in-bounds)", abi.ScopeTenant, "tenant", abi.VerdictAllow, abi.ReasonNone},
 	}
 	ctx := context.Background()
@@ -139,8 +139,8 @@ func TestScopeCeilingUnknownTargetQuarantines(t *testing.T) {
 	for _, scope := range []abi.ShareScope{abi.ScopeFleet, abi.ScopeTenant} {
 		// No Meta at all.
 		v := gate.Admit(ctx, &abi.ToolCall{Tool: "share"}, scopeResult(scope))
-		if v.Kind != abi.VerdictQuarantine || v.Reason != abi.ReasonTrustViolation {
-			t.Fatalf("scope %s with nil Meta: verdict = %+v, want Quarantine/TRUST_VIOLATION", scopeName(scope), v)
+		if v.Kind != abi.VerdictQuarantine || v.Reason != abi.ReasonScopeCrossing {
+			t.Fatalf("scope %s with nil Meta: verdict = %+v, want Quarantine/SCOPE_CROSSING", scopeName(scope), v)
 		}
 		if v.Meta["share_target"] != "unknown" {
 			t.Fatalf("scope %s nil Meta: share_target = %q, want \"unknown\"", scopeName(scope), v.Meta["share_target"])

@@ -108,6 +108,31 @@ For complex maintainer operations, `fak` and `fak-private` decouple through the 
 - **Git Refs**: Autonomous workers coordinate state through namespaced git references (`refs/fak/locks/contract-*` for contracts, `refs/fak/locks/<lane>` for file trees).
 - **Scrubbed JSON**: Public status readers (e.g., `fleetctl`) consume scrubbed status manifests produced across the boundary without exposing raw hostnames, private IPs, or API keys.
 
+### 4.4 Cross-Repo Bundle Distribution & Air-Gap Verification (`.fakpack`)
+To distribute hermetic models, capabilities, and harness collections securely across the private-to-public boundary:
+1. **Creation & Packaging (Private Factory)**:
+   - `fak-private` bundles internal model weights, binaries, policies, and assets with `harness.lock.json` into an air-gapped `.fakpack` OCI collection:
+     ```bash
+     fak pack create --lock harness.lock.json --bin ./bin --assets ./assets --model model.bin --out bundle.fakpack
+     ```
+2. **Cosign SimpleSigning (Private Factory Seam)**:
+   - The factory signs the bundle's manifest digest using standard Go crypto (Ed25519/ECDSA) via Cosign simple signing payloads (`application/vnd.dev.cosign.simplesigning.v1+json`):
+     ```bash
+     fak pack sign --bundle bundle.fakpack --key /path/to/private.key
+     ```
+   - The resulting signature is embedded directly within the `.fakpack` archive as `signature.json`.
+3. **Distribution & Air-Gap Verification (Public / Production Runtime)**:
+   - The signed `.fakpack` bundle is transferred across the boundary to public deployments or air-gapped target environments.
+   - On `fak up` or bundle deployment, public `fak` performs offline cryptographic and integrity verification:
+     ```bash
+     fak pack verify --bundle bundle.fakpack --verify-key /path/to/public.key
+     ```
+   - Verification strictly enforces:
+     - **Hermetic content digests**: SHA-256 validation of all layer blobs and manifest descriptors (`BUNDLE_DIGEST_MISMATCH` / `BUNDLE_CORRUPT`).
+     - **Harness completeness**: Checks that all components and assets declared in `harness.lock.json` are present in the archive.
+     - **Air-gap safety gate**: Immediate rejection of any outbound `http://` or `https://` URLs in asset or component references.
+     - **Cosign signature verification**: Cryptographic verification of the embedded signature against the operator's pinned public key (`BUNDLE_SIGNATURE_INVALID` on failure).
+
 ---
 
 ## 5. Asymmetric Leak Gate & Scrub Policy

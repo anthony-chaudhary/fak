@@ -1,14 +1,14 @@
-﻿package tcp_test
+package tcp_test
 
 import (
 	"bytes"
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/l3server/client"
 	"github.com/anthony-chaudhary/fak/internal/l3server/metrics"
 	"github.com/anthony-chaudhary/fak/internal/l3server/shard"
 	"github.com/anthony-chaudhary/fak/internal/l3server/transport/tcp"
-	"github.com/anthony-chaudhary/fak/internal/l3server/client"
 )
 
 func TestServerIntegration(t *testing.T) {

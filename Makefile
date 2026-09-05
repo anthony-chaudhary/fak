@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast test-integration smoke-build test-fast-build-regression test-affected test-durations test-race bench mac-perf status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent dogfood-test performance-rsi-health vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
+.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast test-integration test-airgap smoke-build test-fast-build-regression test-affected test-durations test-race bench mac-perf status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent dogfood-test performance-rsi-health vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
 
 VERIFY_LOOP_BUDGET ?= 30s
 SMOKE_BUILD_BUDGET ?= 2m
@@ -174,6 +174,10 @@ test-race:
 		exit 2; }
 	CGO_ENABLED=1 go test -short -race -count=1 -timeout=25m ./...
 	@echo "test-race OK (-short -race ./...; full no--short -race stays authoritative in CI -- pair with 'make test-affected' for the oracle)"
+
+.PHONY: test-airgap
+test-airgap:
+	go test -v ./internal/airgaptest -run 'TestAirGapBootstrap_ZeroEgress'
 
 bench:
 	go build -o fak ./cmd/fak && ./fak bench --suite tau2-smoke --out report.json

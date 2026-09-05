@@ -220,17 +220,20 @@ func TestNewLedgerUsesDefaultLimit(t *testing.T) {
 func TestSinkClassification(t *testing.T) {
 	ctx := context.Background()
 	cases := map[string]SinkClass{
-		"send_email":               SinkEgress,
-		"http_post":                SinkEgress,
-		"post_message":             SinkEgress,
-		"upload_file":              SinkEgress,
-		"Bash":                     SinkExec,
-		"run_command":              SinkExec,
-		"delete_reservation":       SinkDestructive,
-		"drop_table":               SinkDestructive,
-		"read_webpage":             SinkNone,
-		"get_user_details":         SinkNone,
-		"transfer_to_human_agents": SinkNone, // safe sink: human handoff
+		"send_email":                SinkEgress,
+		"http_post":                 SinkEgress,
+		"post_message":              SinkEgress,
+		"upload_file":               SinkEgress,
+		"Bash":                      SinkExec,
+		"run_command":               SinkExec,
+		"delete_reservation":        SinkDestructive,
+		"drop_table":                SinkDestructive,
+		"read_webpage":              SinkNone,
+		"get_user_details":          SinkNone,
+		"transfer_to_human_agents":  SinkNone, // safe sink: human handoff
+		"send_input":                SinkNone, // safe sink: internal agent IPC
+		"multi_agent_v1.send_input": SinkNone, // safe sink: multi-agent IPC
+		"SendMessage":               SinkNone, // safe sink: harness IPC
 	}
 	for tool, want := range cases {
 		if got := Classify(ctx, &abi.ToolCall{Tool: tool}, Policy{}); got != want {
@@ -492,5 +495,41 @@ func TestSinkGateAllowsOnlyExplicitResearchWebFetchHost(t *testing.T) {
 				t.Fatalf("verdict = %+v, want Deny/TRUST_VIOLATION", v)
 			}
 		})
+	}
+}
+
+// TestSendInputDelegationNotBlockedByTaint reproduces the Codex multi-agent
+// coordinator delegation scenario: after reading tainted external context,
+// an internal coordination call (send_input) without off-box destination must NOT
+// be denied as an egress sink.
+func TestSendInputDelegationNotBlockedByTaint(t *testing.T) {
+	ctx := context.Background()
+	led := NewLedger()
+	stamp := NewStampGate(led, Policy{})
+	sink := NewSinkGate(led, Policy{})
+
+	// Turn 1: coordinator reads untrusted webpage, tainting the session.
+	read := &abi.ToolCall{Tool: "read_webpage", TraceID: "coord-trace"}
+	if v := stamp.Admit(ctx, read, resultOf("external content")); v.Kind != abi.VerdictDefer {
+		t.Fatalf("stamp must Defer, got %v", v.Kind)
+	}
+	if led.Level("coord-trace") != abi.TaintTainted {
+		t.Fatalf("session must be tainted, got %s", taintName(led.Level("coord-trace")))
+	}
+
+	// Turn 2: coordination call matching the audited codex session.
+	args := `{"target":"01a06eca-695a-7da3-9902-e1ef3137c22f","message":"Read-only request: report whether you remain available"}`
+	call := &abi.ToolCall{
+		TraceID: "coord-trace",
+		Tool:    "send_input",
+		Args:    abi.Ref{Kind: abi.RefInline, Inline: []byte(args)},
+	}
+
+	v := sink.Adjudicate(ctx, call)
+	if v.Kind == abi.VerdictDeny && v.Reason == abi.ReasonTrustViolation {
+		t.Fatalf("send_input delegation was denied as tainted egress: %+v", v)
+	}
+	if v.Kind != abi.VerdictDefer {
+		t.Fatalf("send_input delegation: got Kind=%v, want VerdictDefer", v.Kind)
 	}
 }

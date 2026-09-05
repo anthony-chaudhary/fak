@@ -10,6 +10,7 @@ func (a *Adjudicator) PolicySnapshot() Policy {
 	p.AllowPrefix = append([]string(nil), p.AllowPrefix...)
 	p.Deny = cloneReasonMap(p.Deny)
 	p.SelfModifyGlobs = append([]string(nil), p.SelfModifyGlobs...)
+	p.BlockedPathGlobs = append([]string(nil), p.BlockedPathGlobs...)
 	p.ArgPredicates = append([]ArgPredicate(nil), p.ArgPredicates...)
 	if p.Profile != nil {
 		profile := *p.Profile

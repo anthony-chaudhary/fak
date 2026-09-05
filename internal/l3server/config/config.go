@@ -14,34 +14,34 @@ import (
 
 // Config is the top-level L3 configuration.
 type Config struct {
-	ListenAddrs       []string `json:"listen_addrs"`
-	RDMAAddrs         []string `json:"rdma_addrs"`
-	RDMAListenPort    int      `json:"rdma_listen_port"`
-	RDMAReadThreshold int      `json:"rdma_read_threshold"`
-	RDMARecvBufSize   int      `json:"rdma_recv_buf_size"`
-	RDMASendBufSize   int      `json:"rdma_send_buf_size"`
-	RDMARecvBufCount  int      `json:"rdma_recv_buf_count"`
-	RDMACQDepth       int      `json:"rdma_cq_depth"`
-	RDMAODP           string   `json:"rdma_odp"`            // "auto" (default), "enable", "disable"
-	RDMALinkRateGbps  float64  `json:"rdma_link_rate_gbps"` // 0 = auto-detect from sysfs
-	NUMANodes         string   `json:"numa_nodes"`          // "auto" (default), "none", or comma-separated node IDs (e.g. "0,1")
-	NumShards         int      `json:"num_shards"`
-	MaxMemoryGB       int      `json:"max_memory_gb"`
-	UseHugePages       bool     `json:"use_huge_pages"`
-	AutoAllocHugePages bool     `json:"auto_alloc_huge_pages"`
-	HugepageSize       string   `json:"hugepage_size"` // "auto" (default), "2mb", "1gb"
-	MaxKeys           uint64   `json:"max_keys"`
-	EvictionPolicy    string   `json:"eviction_policy"`
-	ModelPageBytes    uint64   `json:"model_page_bytes"`
-	MaxLeaseDurationMs int64   `json:"max_lease_duration_ms"`
-	DispatchTimeoutMs int64    `json:"dispatch_timeout_ms"`
-	AllocatorMode     string   `json:"allocator_mode"` // "slab" (default) or "offset"
-	SlabPreset        string   `json:"slab_preset"`    // named preset: "static", "auto", "benchmark"
-	SlabDistribution  string   `json:"slab_distribution"`
-	WarmupOps         int      `json:"warmup_ops"`      // SET ops before auto-detect fires; 0 = disabled
-	AutoTuneSlabs     bool     `json:"auto_tune_slabs"` // rebuild slab allocator on FLUSH with detected sizes
-	SlabClassWeights  map[string]float64 `json:"slab_class_weights"`
-	MetricsAddr       string   `json:"metrics_addr"`
+	ListenAddrs        []string           `json:"listen_addrs"`
+	RDMAAddrs          []string           `json:"rdma_addrs"`
+	RDMAListenPort     int                `json:"rdma_listen_port"`
+	RDMAReadThreshold  int                `json:"rdma_read_threshold"`
+	RDMARecvBufSize    int                `json:"rdma_recv_buf_size"`
+	RDMASendBufSize    int                `json:"rdma_send_buf_size"`
+	RDMARecvBufCount   int                `json:"rdma_recv_buf_count"`
+	RDMACQDepth        int                `json:"rdma_cq_depth"`
+	RDMAODP            string             `json:"rdma_odp"`            // "auto" (default), "enable", "disable"
+	RDMALinkRateGbps   float64            `json:"rdma_link_rate_gbps"` // 0 = auto-detect from sysfs
+	NUMANodes          string             `json:"numa_nodes"`          // "auto" (default), "none", or comma-separated node IDs (e.g. "0,1")
+	NumShards          int                `json:"num_shards"`
+	MaxMemoryGB        int                `json:"max_memory_gb"`
+	UseHugePages       bool               `json:"use_huge_pages"`
+	AutoAllocHugePages bool               `json:"auto_alloc_huge_pages"`
+	HugepageSize       string             `json:"hugepage_size"` // "auto" (default), "2mb", "1gb"
+	MaxKeys            uint64             `json:"max_keys"`
+	EvictionPolicy     string             `json:"eviction_policy"`
+	ModelPageBytes     uint64             `json:"model_page_bytes"`
+	MaxLeaseDurationMs int64              `json:"max_lease_duration_ms"`
+	DispatchTimeoutMs  int64              `json:"dispatch_timeout_ms"`
+	AllocatorMode      string             `json:"allocator_mode"` // "slab" (default) or "offset"
+	SlabPreset         string             `json:"slab_preset"`    // named preset: "static", "auto", "benchmark"
+	SlabDistribution   string             `json:"slab_distribution"`
+	WarmupOps          int                `json:"warmup_ops"`      // SET ops before auto-detect fires; 0 = disabled
+	AutoTuneSlabs      bool               `json:"auto_tune_slabs"` // rebuild slab allocator on FLUSH with detected sizes
+	SlabClassWeights   map[string]float64 `json:"slab_class_weights"`
+	MetricsAddr        string             `json:"metrics_addr"`
 
 	// Slab vacuum
 	VacuumEnabled              bool    `json:"vacuum_enabled"`

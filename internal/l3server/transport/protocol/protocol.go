@@ -1,4 +1,4 @@
-﻿package protocol
+package protocol
 
 import (
 	"encoding/binary"
@@ -27,14 +27,14 @@ const (
 	OpMTest = 0x12
 	OpMDel  = 0x13
 
-	OpInfo      = 0x20
-	OpCluster   = 0x21
-	OpKeys      = 0x22
-	OpHandshake = 0x23
-	OpFlush     = 0x24
+	OpInfo        = 0x20
+	OpCluster     = 0x21
+	OpKeys        = 0x22
+	OpHandshake   = 0x23
+	OpFlush       = 0x24
 	OpStats       = 0x25
-	OpReportStats  = 0x26
-	OpMaintenance  = 0x27
+	OpReportStats = 0x26
+	OpMaintenance = 0x27
 
 	OpRegMem        = 0x30
 	OpDeregMem      = 0x31
@@ -56,8 +56,8 @@ const (
 	RespOOM        = 0xF6 // memory pressure â€” SET rejected with diagnostics
 	RespNotReady   = 0xF7 // server still starting â€” shard not allocated yet
 
-	OpSnapshot  = 0x28 // trigger snapshot to configured dir
-	OpRestore   = 0x29 // restore from configured dir
+	OpSnapshot = 0x28 // trigger snapshot to configured dir
+	OpRestore  = 0x29 // restore from configured dir
 
 	FlagNone       = 0x00
 	FlagWithTTL    = 0x01
@@ -67,8 +67,8 @@ const (
 )
 
 var (
-	ErrBadMagic    = errors.New("invalid magic bytes")
-	ErrBadVersion  = errors.New("unsupported protocol version")
+	ErrBadMagic     = errors.New("invalid magic bytes")
+	ErrBadVersion   = errors.New("unsupported protocol version")
 	ErrBodyTooLarge = errors.New("body exceeds maximum size")
 )
 
@@ -77,9 +77,9 @@ var (
 const bodyPoolMinSize = 16 * 1024
 
 var bodyPools = [...]sync.Pool{
-	{New: func() any { b := make([]byte, 16*1024); return &b }},    // 16KB
-	{New: func() any { b := make([]byte, 256*1024); return &b }},   // 256KB
-	{New: func() any { b := make([]byte, 1024*1024); return &b }},  // 1MB
+	{New: func() any { b := make([]byte, 16*1024); return &b }},      // 16KB
+	{New: func() any { b := make([]byte, 256*1024); return &b }},     // 256KB
+	{New: func() any { b := make([]byte, 1024*1024); return &b }},    // 1MB
 	{New: func() any { b := make([]byte, 64*1024*1024); return &b }}, // 64MB
 }
 

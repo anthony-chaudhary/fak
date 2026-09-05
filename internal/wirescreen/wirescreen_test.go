@@ -86,8 +86,8 @@ func TestScreenAdapterQuarantinesViaSelectedScreener(t *testing.T) {
 	if adv.Disposition != abi.ScreenQuarantine {
 		t.Fatalf("selected screener should quarantine the injection body, got disposition %d", adv.Disposition)
 	}
-	if adv.Reason != abi.ReasonTrustViolation {
-		t.Fatalf("quarantine reason: want ReasonTrustViolation, got %v", adv.Reason)
+	if adv.Reason != abi.ReasonPromptInjection {
+		t.Fatalf("quarantine reason: want ReasonPromptInjection, got %v", adv.Reason)
 	}
 	if adv.By == "" {
 		t.Fatalf("advice carries no By (observability)")

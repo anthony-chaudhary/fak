@@ -1203,14 +1203,48 @@ func jsonIndent(v any) []byte {
 var policyReloadMu sync.Mutex
 
 func applyPolicy(path string) {
-	if path == "" {
+	applyFloorWithProfile(path, os.Getenv("FAK_PROFILE"))
+}
+
+func applyFloorWithProfile(path string, profile string) {
+	profile = strings.TrimSpace(profile)
+	if profile == "" {
+		profile = strings.TrimSpace(os.Getenv("FAK_PROFILE"))
+	}
+	if path == "" && profile == "" {
 		return
 	}
 	policyReloadMu.Lock()
+	defer policyReloadMu.Unlock()
+	if path == "" && profile != "" {
+		prof, err := policy.ParseProfile(profile)
+		must(err)
+		rt, err := policy.RuntimeForProfile(prof)
+		must(err)
+		_, err = applyPolicyRuntimeLocked(rt, "profile:"+string(prof), "", "", false)
+		must(err)
+		fmt.Fprintf(os.Stderr, "fak: applied permission profile %s\n", prof)
+		return
+	}
 	_, _, err := loadAndApplyPolicyLocked(path, false)
-	policyReloadMu.Unlock()
 	must(err)
-	fmt.Fprintf(os.Stderr, "fak: loaded capability floor from %s\n", path)
+	if profile != "" {
+		fmt.Fprintf(os.Stderr, "fak: loaded capability floor from %s with profile %s\n", path, profile)
+	} else {
+		fmt.Fprintf(os.Stderr, "fak: loaded capability floor from %s\n", path)
+	}
+}
+
+func applyPolicyWithProfile(path string, profile string) {
+	if path == "" && profile == "" {
+		return
+	}
+	policyReloadMu.Lock()
+	defer policyReloadMu.Unlock()
+	rt, floorSource, policyDigest, _ := loadGuardCapabilityFloor(path, "", profile)
+	_, err := applyPolicyRuntimeLocked(rt, floorSource, policyDigest, "", false)
+	must(err)
+	fmt.Fprintf(os.Stderr, "fak: loaded capability floor from %s (digest %s)\n", floorSource, policyDigest)
 }
 
 func reloadPolicy(path string) (policy.Runtime, string, error) {

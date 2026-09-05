@@ -51,8 +51,8 @@ type Allocator interface {
 // OffsetAllocatorConfig configures the offset allocator.
 type OffsetAllocatorConfig struct {
 	MaxMemoryBytes uint64
-	UseHugePages   bool // deprecated: use HugePageSizeKB instead (kept for backward compat)
-	HugePageSizeKB int  // 0 = disabled, 2048 = 2MB, 1048576 = 1GB (takes precedence over UseHugePages)
+	UseHugePages   bool   // deprecated: use HugePageSizeKB instead (kept for backward compat)
+	HugePageSizeKB int    // 0 = disabled, 2048 = 2MB, 1048576 = 1GB (takes precedence over UseHugePages)
 	MaxAllocations uint32 // determines node pool size; 0 = auto
 	DevdaxPath     string // if set, back region with this devdax device
 }

@@ -1,4 +1,4 @@
-﻿package shard
+package shard
 
 import (
 	"fmt"
@@ -1226,14 +1226,14 @@ func TestJustDetectedPreservedOnSemFull(t *testing.T) {
 	sem <- struct{}{} // fill the semaphore
 
 	cfg := ShardConfig{
-		ID:              0,
-		IndexCapacity:   1024,
-		MaxMemoryBytes:  64 * 1024 * 1024,
-		EvictionPolicy:  "wtinylfu",
-		ModelPageBytes:  0,
-		WarmupOps:       5,
-		AutoTuneSlabs:   true,
-		MigrateSem:      sem,
+		ID:             0,
+		IndexCapacity:  1024,
+		MaxMemoryBytes: 64 * 1024 * 1024,
+		EvictionPolicy: "wtinylfu",
+		ModelPageBytes: 0,
+		WarmupOps:      5,
+		AutoTuneSlabs:  true,
+		MigrateSem:     sem,
 	}
 	s, err := New(cfg)
 	if err != nil {
@@ -1290,13 +1290,13 @@ func TestJustDetectedPreservedOnSemFull(t *testing.T) {
 func TestSkipRedundantAutoRebuild(t *testing.T) {
 	pageSize := uint64(4096)
 	cfg := ShardConfig{
-		ID:              0,
-		IndexCapacity:   1024,
-		MaxMemoryBytes:  64 * 1024 * 1024,
-		EvictionPolicy:  "wtinylfu",
-		ModelPageBytes:  pageSize,
-		WarmupOps:       5,
-		AutoTuneSlabs:   true,
+		ID:             0,
+		IndexCapacity:  1024,
+		MaxMemoryBytes: 64 * 1024 * 1024,
+		EvictionPolicy: "wtinylfu",
+		ModelPageBytes: pageSize,
+		WarmupOps:      5,
+		AutoTuneSlabs:  true,
 	}
 	s, err := New(cfg)
 	if err != nil {
@@ -1555,8 +1555,8 @@ func TestMigrationDrainBudget(t *testing.T) {
 		ModelPageBytes:     0,
 		WarmupOps:          5,
 		AutoTuneSlabs:      true,
-		MigrateBatchSize:   1,  // tiny batch â†’ migration stays in progress for many cycles
-		MigrateDrainBudget: 8,  // small budget to test capping
+		MigrateBatchSize:   1, // tiny batch â†’ migration stays in progress for many cycles
+		MigrateDrainBudget: 8, // small budget to test capping
 	}
 	s, err := New(cfg)
 	if err != nil {
