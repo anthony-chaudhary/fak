@@ -7,32 +7,19 @@ import (
 	"sort"
 )
 
-// ToolRollupSchema versions the rollup report (and the JSONL [ToolCall] corpus row
-// it folds) so a downstream reader can tell which fold discipline produced a table —
-// the same schema-stamp convention internal/usagelog and internal/toolshape follow.
+// ToolRollupSchema identifies the JSONL corpus and aggregate version.
 const ToolRollupSchema = "fak.toolrollup.v1"
 
-// ToolCall is one tool-call record in the corpus: a single call of a single tool,
-// with its token cost, its wall duration, and whether it succeeded. The JSON tags
-// are the stable corpus schema. `tool` mirrors internal/trajectory's Turn field
-// name; the remaining tags follow the wider repo convention (input_tokens /
-// output_tokens, duration_ms, ok) so a row reads alongside the other JSONL ledgers.
-//
-// OK is fail-closed: a row without an explicit `ok` decodes to false and is counted
-// as an errored call, so a corpus can never silently inflate its success rate by
-// omitting the field.
+// ToolCall records single execution metrics including tokens, duration, and status.
 type ToolCall struct {
-	Tool       string `json:"tool"`          // the tool TYPE name — the rollup key
-	TokensIn   int    `json:"input_tokens"`  // input/prompt tokens billed to the call
-	TokensOut  int    `json:"output_tokens"` // output/completion tokens billed to the call
-	DurationMS int64  `json:"duration_ms"`   // wall-clock duration of the call, milliseconds
-	OK         bool   `json:"ok"`            // true on success; false marks an errored call
+	Tool       string `json:"tool"`
+	TokensIn   int    `json:"input_tokens"`
+	TokensOut  int    `json:"output_tokens"`
+	DurationMS int64  `json:"duration_ms"`
+	OK         bool   `json:"ok"`
 }
 
-// ToolStat is the aggregate for one distinct tool TYPE across the whole corpus.
-// Counts are ints; totals are int64 (a large corpus sums past a 32-bit range);
-// means and rates are float64. Share is the tool's fraction of all calls in the
-// corpus, in [0,1].
+// ToolStat aggregates execution volume, resource usage, and error metrics for a tool.
 type ToolStat struct {
 	Tool           string  `json:"tool"`
 	Calls          int     `json:"calls"`
@@ -47,12 +34,8 @@ type ToolStat struct {
 	Share          float64 `json:"share"`
 }
 
-// Rollup folds a corpus of tool-call records into one ToolStat per distinct tool
-// TYPE. The result is deterministic: sorted by call count descending, then by tool
-// name ascending, so the same corpus always renders the same report. An empty or nil
-// input returns an empty (non-nil) slice.
+// Rollup aggregates tool calls into deterministic statistics sorted by frequency.
 func Rollup(records []ToolCall) []ToolStat {
-	// Accumulate per tool. A pointer keeps the running sums cheap to update.
 	type acc struct {
 		calls               int
 		tokensIn, tokensOut int64
@@ -78,7 +61,7 @@ func Rollup(records []ToolCall) []ToolStat {
 	total := len(records)
 	out := make([]ToolStat, 0, len(byTool))
 	for tool, a := range byTool {
-		calls := float64(a.calls) // calls >= 1 for any tool present in the map
+		calls := float64(a.calls)
 		st := ToolStat{
 			Tool:           tool,
 			Calls:          a.calls,
@@ -97,9 +80,6 @@ func Rollup(records []ToolCall) []ToolStat {
 		out = append(out, st)
 	}
 
-	// Deterministic order: call count desc, then tool name asc. The tool name is
-	// unique per group, so this is a total order — the ranking is stable without
-	// depending on the map's iteration order.
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Calls != out[j].Calls {
 			return out[i].Calls > out[j].Calls
@@ -109,12 +89,7 @@ func Rollup(records []ToolCall) []ToolStat {
 	return out
 }
 
-// ReadCorpus reads a JSONL corpus — one JSON ToolCall per line — into a slice, the
-// same one-record-per-line shape internal/trajectory's ExportTo writes and the
-// trajquery `--corpus` reader consumes. Whitespace between records (blank lines) is
-// tolerated. A malformed record aborts the read with a line-numbered error rather
-// than being silently dropped, so a torn corpus is reported, not misfolded. An empty
-// reader is not an error: it yields an empty slice that Rollup folds to no stats.
+// ReadCorpus decodes line-delimited JSON tool call records from an input stream.
 func ReadCorpus(r io.Reader) ([]ToolCall, error) {
 	dec := json.NewDecoder(r)
 	out := []ToolCall{}
@@ -128,15 +103,7 @@ func ReadCorpus(r io.Reader) ([]ToolCall, error) {
 	return out, nil
 }
 
-// Render writes a stable, human-readable table of the per-tool rollup [Rollup]
-// produced — one header row then one row per tool in the fold's deterministic
-// most-used-first (tie by name) order, so the same corpus always prints
-// byte-identically. Columns: tool, calls, share%, error%, and the mean input/output
-// token cost and mean wall duration per call. It answers, at a glance, "what tools
-// ran, how often, how expensively, how reliably?" — the toolrollup analogue of the
-// per-verb usage table. An empty slice prints just the header (honest-empty, no
-// panic). Rates are shown as percentages; token/duration means are rounded to whole
-// units for a compact column.
+// Render formats aggregated tool statistics into an aligned text table.
 func Render(w io.Writer, stats []ToolStat) {
 	fmt.Fprintf(w, "%-20s %8s %8s %8s %10s %10s %10s\n",
 		"TOOL", "CALLS", "SHARE%", "ERR%", "MEAN-IN", "MEAN-OUT", "MEAN-MS")
