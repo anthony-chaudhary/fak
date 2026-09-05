@@ -1148,18 +1148,18 @@ func cmdManageCommand(commandName string, argv []string) {
 				t, free, known := compute.DeviceMemoryInfo(chatBackend)
 				var smi []compute.GPUStat
 				if !known || t <= 0 {
-					smi, _ = compute.NvidiaGPUStats() // fail-soft; nil → axis stays n/a
+					smi, _ = compute.SystemGPUStats() // fail-soft; nil → axis stays n/a
 				}
 				return compute.HarnessGPUVRAM(t, free, known, smi)
 			})
 			// Feed the GPU utilization axis. The in-kernel device-handle seam
 			// (DeviceMemoryInfo) reports memory only — there is no utilization on it — so
-			// this is the nvidia-smi fallback the issue names: per-device VRAM+util folded
-			// to the busiest device's percent. Fail-soft (no nvidia-smi / timeout /
+			// this is the accelerator fallback the issue names: per-device VRAM+util folded
+			// to the busiest device's percent. Fail-soft (no probe / timeout /
 			// unparseable → ok=false), so the util axis stays honestly n/a rather than a
-			// fabricated 0 on a host that lacks the tool (#2052).
+			// fabricated 0 on a host that lacks the tool (#2052, #11319).
 			resSampler.SetGPUUtilProvider(func() (pct float64, ok bool) {
-				stats, present := compute.NvidiaGPUStats()
+				stats, present := compute.SystemGPUStats()
 				if !present {
 					return 0, false
 				}
