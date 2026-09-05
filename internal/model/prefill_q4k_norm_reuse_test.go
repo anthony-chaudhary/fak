@@ -1,58 +1,17 @@
 package model
 
-// prefill_q4k.go — the resident-Q4_K PREFILL lane: a BATCHED prefill that is the structural
-// twin of prefillBatchedQ (quant_forward.go), differing in exactly ONE way — each per-layer
-// projection GEMM dispatches by resident format, exactly as the per-token sessionQ4KKernel
-// does for decode:
-//
-//   - the q4_k_m majority (self_attn.v_proj/o_proj, mlp.gate/up/down — every identity-
-//     normalized matmul weight the loader held raw) runs q4kGemmDispatch, the batched Q4_K
-//     GEMM, on the f32 activation: the CPU q4kGemm by default, and under -tags fakmetal with
-//     s.MetalQ4K the Metal q4_k dequant-GEMM on the GPU — the same GPU route decode's GEMV
-//     already took, so the resident-Q4_K prefill stops running the slow CPU GEMM that timed
-//     out real prompts (#1071). Each weight super-block is dequantized ONCE and reused across
-//     all P prompt tokens, instead of re-streaming the whole weight matrix P times as the
-//     per-token GEMV prefill does. Prefill is compute-bound, so amortizing the dequant +
-//     weight bandwidth across the P free axes is what closes the gap to llama.cpp-Metal on
-//     the q4_k_m artifact (QWEN36-NATIVE-PERF-PLAN-2026-06-19.md P3).
-//   - the resident K-quant minority (kqw: Q5_K/Q6_K weights such as v_proj or down_proj
-//     in mixed-quant artifacts) runs kQuantGemmDispatch on the f32 activation.
-//   - the normalize-sensitive / Q8 minority (self_attn.q_proj/k_proj always, plus any Q8
-//     weight or un-quantized f32 manifest tensor) runs q8GemmDispatch against the
-//     q8w store — CPU qGemm8 by default, Metal Q8 GEMM when MetalQ4K is enabled — on a
-//     Q8-quantized activation panel.
-//
-// Everything else — RMSNorm, RoPE, the causal GQA attention over the f32 KV cache, SwiGLU,
-// the residuals — is the identical f32 math prefillBatchedQ runs. The cache it builds is the
-// same f32 object (Kraw pre-RoPE, K post-RoPE, V, pos), so Evict/Clone and the proven KV
-// rungs are unaffected.
-//
-// Correctness contract vs the per-token Q4K decode path (tokenHiddenQ via sessionQ4KKernel):
-//   - For a Q4_K-resident projection, q4kGemm[o,t] is BIT-IDENTICAL to q4kMatRows(row o,
-//     activation t) — same per-super-block dequant, same 4-accumulator dot, same super-block
-//     order (TestQ4KGemmMatchesMatRows). So the q4_k_m majority produces byte-for-byte the
-//     same projection as the proven per-token Q4K path.
-//   - For a Q8-minority projection, qGemm8 is the SAME register-blocked tile kernel
-//     prefillBatchedQ uses; its relationship to the per-token Q8 GEMV (qMatRows/qdot8) is
-//     the documented deferred-reduction / single-rounded-FMA drift already covered by the
-//     Q8 path's own gate (argmax-exact vs the oracle, logit-cosine-tight) — NOT a new
-//     numerical surface introduced here.
-// The end-to-end Q4_K correctness gate is unchanged: greedy-continuation agreement with the
-// llama.cpp q4_k_m artifact + first-token id parity (248068), the standard the plan holds
-// the whole Q4_K lane to.
-
 import (
 	"fmt"
+	"math"
 	"os"
+	"reflect"
+	"testing"
 	"time"
 )
 
-// prefillBatchedQ4K ingests `ids` as a batch through the resident-Q4_K path, appending P
-// positions to the cache and returning the LAST token's post-final-norm hidden (caller
-// applies the head). It assumes the q4k-hybrid load: every matmul weight is resident in
-// EITHER q4kw (raw Q4_K majority) or q8w (Q8 minority); the per-projection dispatch picks
-// the right one. Fills the same f32 KV cache the per-token / f32 / Q8 paths build.
-func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
+// Frozen allocating native CPU prefill oracle for #11595. Keep Xn and Xn2
+// independently allocated inside each layer; do not apply reuse optimizations here.
+func (s *Session) prefillQ4KFreshNormReference(ids []int) []float32 {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
@@ -133,9 +92,6 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 		m.metalQ8Weights()  // upload Q8-minority projection weights upfront for Metal Q8 prefill (#1087)
 	}
 
-	// Normalization fully overwrites this request-local panel; synchronous projections
-	// finish consuming it before the next normalization, including across layers.
-	normPanel := make([]float32, P*H)
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
 
@@ -143,7 +99,7 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 		// resident-Q4_K PreNorm LayerNorm family prefills HERE while decoding through the
 		// bias-aware blockStep. The learned input_layernorm.bias must ride along; rmsnormCfg
 		// hard-passes nil.
-		Xn := normPanel
+		Xn := make([]float32, P*H)
 		parFor(P, dispatchWorkers, func(lo, hi int) {
 			wIn := m.tensor(lp("input_layernorm.weight"))
 			bIn := m.tensorOptional(lp("input_layernorm.bias"))
@@ -196,7 +152,7 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 			}
 		})
 
-		Xn2 := normPanel
+		Xn2 := make([]float32, P*H)
 		parFor(P, dispatchWorkers, func(lo, hi int) {
 			wPost := m.tensor(lp("post_attention_layernorm.weight"))
 			bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
@@ -247,4 +203,110 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 	// optional bias, and eps are bound together, so this lane cannot drift from the per-token
 	// path again the way the hard-coded nil bias here did.
 	return m.finalNorm(last)
+}
+
+func TestPrefillQ4KNormReuseExactAndAllocation(t *testing.T) {
+	old := NumWorkers()
+	defer SetWorkers(old)
+	for _, workers := range []int{1, 2} {
+		if err := SetWorkers(workers); err != nil {
+			t.Fatal(err)
+		}
+		for _, mode := range []string{"rms", "bias", "gain"} {
+			t.Run(fmt.Sprintf("%s/workers=%d", mode, workers), func(t *testing.T) {
+				cfg := Config{HiddenSize: 256, NumLayers: 3, NumHeads: 4, NumKVHeads: 2, HeadDim: 64,
+					IntermediateSize: 256, VocabSize: 64, RMSNormEps: 1e-6, AttnSoftcap: 50, RopeTheta: 10000}
+				cfg.LayerNorm = mode == "bias"
+				cfg.NormGain1p = mode == "gain"
+				m := newSyntheticExtra(cfg, normBiasExtras(cfg))
+				var projs [][2]any
+				for l := 0; l < cfg.NumLayers; l++ {
+					p := layerPrefix(l)
+					// Q/K stay Q8; native Q4_K consumes both normalization panels directly.
+					projs = append(projs,
+						[2]any{p + "self_attn.v_proj.weight", cfg.NumKVHeads * cfg.HeadDim},
+						[2]any{p + "self_attn.o_proj.weight", cfg.HiddenSize},
+						[2]any{p + "mlp.gate_proj.weight", cfg.IntermediateSize},
+						[2]any{p + "mlp.up_proj.weight", cfg.IntermediateSize},
+						[2]any{p + "mlp.down_proj.weight", cfg.HiddenSize})
+				}
+				fillQ4KW(t, m, projs, 11595)
+				a, b := m.NewSession(), m.NewSession()
+				defer a.Close()
+				defer b.Close()
+				a.Q4K, b.Q4K = true, true
+				if a.MetalQ4K || b.MetalQ4K {
+					t.Fatal("requires native CPU dispatch")
+				}
+				exact := func(label string, x, y []float32) {
+					t.Helper()
+					if len(x) != len(y) {
+						t.Fatalf("%s length %d != %d", label, len(x), len(y))
+					}
+					for i := range x {
+						if math.IsNaN(float64(x[i])) || math.IsInf(float64(x[i]), 0) {
+							t.Fatalf("%s[%d] nonfinite", label, i)
+						}
+						if math.Float32bits(x[i]) != math.Float32bits(y[i]) {
+							t.Fatalf("%s[%d] bits %08x != %08x", label, i, math.Float32bits(x[i]), math.Float32bits(y[i]))
+						}
+					}
+				}
+				total := 0
+				// Unequal chunks exercise nonzero RoPE/cache bases and request-local resizing.
+				chunks := [][]int{{1, 3, 5, 7, 9, 11, 13, 15, 17}, {19, 21, 23}, {25, 27, 29, 31, 33}}
+				for chunk, ids := range chunks {
+					got, want := a.prefillBatchedQ4K(ids), b.prefillQ4KFreshNormReference(ids)
+					exact("hidden", got, want)
+					exact("logits", a.headResident(got), b.headResident(want))
+					total += len(ids)
+					if a.Cache.Len() != total || b.Cache.Len() != total {
+						t.Fatal("cache length")
+					}
+					for l := 0; l < cfg.NumLayers; l++ {
+						for _, pair := range []struct {
+							name string
+							x, y []float32
+						}{
+							{"K", a.Cache.K[l], b.Cache.K[l]}, {"Kraw", a.Cache.Kraw[l], b.Cache.Kraw[l]}, {"V", a.Cache.V[l], b.Cache.V[l]},
+						} {
+							if len(pair.x) != total*cfg.NumKVHeads*cfg.HeadDim {
+								t.Fatalf("%s layer %d cache shape", pair.name, l)
+							}
+							exact(fmt.Sprintf("chunk=%d layer=%d %s", chunk, l, pair.name), pair.x, pair.y)
+						}
+					}
+					if !reflect.DeepEqual(a.Cache, b.Cache) {
+						t.Fatalf("chunk %d full cache (positions/lineage included) differs", chunk)
+					}
+				}
+				t.Log("engine=fak-native CPU exact hidden/logits/FULL KV parity; bases=0,9,12")
+				// Both routes are warm above; model weights and lazy Q8 conversions are shared.
+				// Each measured request owns a fresh session and executes the real native path.
+				measure := func(reference bool) int64 {
+					return testing.Benchmark(func(bb *testing.B) {
+						for i := 0; i < bb.N; i++ {
+							ss := m.NewSession()
+							ss.Q4K = true
+							if reference {
+								ss.prefillQ4KFreshNormReference(chunks[0])
+							} else {
+								ss.prefillBatchedQ4K(chunks[0])
+							}
+							ss.Close()
+						}
+					}).AllocedBytesPerOp()
+				}
+				before, after := measure(true), measure(false)
+				// Hoisting two panels removes 2*(layers-1) allocations; aliasing the panels
+				// safely may save one more. Allow 10% for independently averaged runtime noise.
+				expected := int64(2 * (cfg.NumLayers - 1) * len(chunks[0]) * cfg.HiddenSize * 4)
+				minimum := expected * 9 / 10
+				t.Logf("engine=fak-native CPU allocating=%d reused=%d B/op saving=%d required=%d", before, after, before-after, minimum)
+				if before-after < minimum {
+					t.Fatalf("missing request-local Xn/Xn2 allocation savings: got %d B/op, need >=%d", before-after, minimum)
+				}
+			})
+		}
+	}
 }
