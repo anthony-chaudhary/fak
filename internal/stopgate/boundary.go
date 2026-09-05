@@ -1,81 +1,21 @@
 package stopgate
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
-// HasVerifiedTerminalBoundaryRefusal checks whether BoundaryInput presents verified
-// non-transient boundary refusal evidence (such as POLICY_BLOCK or an explicitly
-// terminal verified receipt). If unverified or transient, returns false with detail.
-func (in BoundaryInput) HasVerifiedTerminalBoundaryRefusal() (bool, string) {
-	if in.BoundaryRefusalReceipt != nil {
-		rc := in.BoundaryRefusalReceipt
-		if rc.Transient {
-			r := rc.Reason
-			if r == "" && rc.ReasonCode != abi.ReasonNone {
-				r = abi.ReasonName(rc.ReasonCode)
-			}
-			if r == "" {
-				r = "transient_hurdle"
-			}
-			return false, "transient refusal (" + r + ") cannot witness no allowed path without terminal receipt"
-		}
-		if !rc.Verified && rc.Token == "" {
-			return false, "unverified boundary refusal receipt"
-		}
-		if rc.Terminal {
-			return true, ""
-		}
-		reason := rc.Reason
-		code := rc.ReasonCode
-		if code == abi.ReasonNone && reason != "" {
-			code, _ = abi.ReasonByName(reason)
-		}
-		if isTransientReason(reason, code) {
-			r := reason
-			if r == "" && code != abi.ReasonNone {
-				r = abi.ReasonName(code)
-			}
-			return false, "transient refusal (" + r + ") cannot witness no allowed path without terminal receipt"
-		}
-		if isTerminalBoundaryReason(reason, code) {
-			return true, ""
-		}
-		if reason == "" && code == abi.ReasonNone {
-			return false, "boundary refusal receipt missing reason code"
-		}
-		return false, "boundary refusal reason (" + reason + ") not recognized as terminal boundary"
+// IsTransientHurdle returns true if the refusal reason or disposition represents
+// a transient, retryable hurdle (such as concurrency lock contention, rate limiting, or malformed input)
+// rather than an immovable policy boundary.
+func IsTransientHurdle(reason, disposition string) bool {
+	disp := strings.ToUpper(strings.TrimSpace(disposition))
+	if disp == "TERMINAL" {
+		return false
 	}
-
-	if in.ReasonCode != abi.ReasonNone {
-		if isTransientReason("", in.ReasonCode) {
-			return false, "transient refusal (" + abi.ReasonName(in.ReasonCode) + ") cannot witness no allowed path without terminal receipt"
-		}
-		if isTerminalBoundaryReason("", in.ReasonCode) {
-			return true, ""
-		}
-		return false, "refusal code (" + abi.ReasonName(in.ReasonCode) + ") not recognized as terminal boundary"
-	}
-
-	if in.RefusalToken != "" {
-		code, _ := abi.ReasonByName(in.RefusalToken)
-		if isTransientReason(in.RefusalToken, code) {
-			return false, "transient refusal token (" + in.RefusalToken + ") cannot witness no allowed path without terminal receipt"
-		}
-		if isTerminalBoundaryReason(in.RefusalToken, code) {
-			return true, ""
-		}
-		return false, "refusal token (" + in.RefusalToken + ") not recognized as terminal boundary"
-	}
-
-	return false, "missing verified boundary refusal receipt"
-}
-
-func isTransientReason(reason string, code abi.ReasonCode) bool {
-	switch code {
-	case abi.ReasonLeaseHeld, abi.ReasonRateLimited, abi.ReasonMisroute, abi.ReasonMalformed, abi.ReasonShellDialect:
+	if disp == "RETRYABLE" || disp == "WAIT" {
 		return true
 	}
 	r := strings.ToUpper(strings.TrimSpace(reason))
@@ -85,18 +25,32 @@ func isTransientReason(reason string, code abi.ReasonCode) bool {
 		"INTERACTIVE_HANG", "DISAMBIGUATION_TIMEOUT", "HOST_CHURN_BACKOFF", "CRASH_RESTART_EXHAUSTED":
 		return true
 	}
+	if code, ok := abi.ReasonByName(r); ok {
+		switch code {
+		case abi.ReasonLeaseHeld, abi.ReasonRateLimited, abi.ReasonMisroute, abi.ReasonMalformed, abi.ReasonShellDialect:
+			return true
+		}
+	}
 	return false
 }
 
-func isTerminalBoundaryReason(reason string, code abi.ReasonCode) bool {
-	switch code {
-	case abi.ReasonPolicyBlock, abi.ReasonSelfModify, abi.ReasonTrustViolation,
-		abi.ReasonSecretExfil, abi.ReasonDefaultDeny, abi.ReasonPIIExfil,
-		abi.ReasonTaintEgress, abi.ReasonScopeCrossing, abi.ReasonPromptInjection,
-		abi.ReasonIntegrityRefuted:
+// IsTerminalBoundary returns true if the receipt records a verified terminal boundary refusal
+// (e.g. POLICY_BLOCK, TRUST_VIOLATION, or explicit TERMINAL disposition).
+func IsTerminalBoundary(receipt *BoundaryRefusalReceipt) bool {
+	if receipt == nil || !receipt.Verified {
+		return false
+	}
+	if receipt.Transient {
+		return false
+	}
+	if IsTransientHurdle(receipt.Reason, receipt.Disposition) {
+		return false
+	}
+	disp := strings.ToUpper(strings.TrimSpace(receipt.Disposition))
+	if receipt.Terminal || disp == "TERMINAL" {
 		return true
 	}
-	r := strings.ToUpper(strings.TrimSpace(reason))
+	r := strings.ToUpper(strings.TrimSpace(receipt.Reason))
 	switch r {
 	case "POLICY_BLOCK", "DEFAULT_DENY", "SELF_MODIFY", "CORE_SELF_MODIFY",
 		"TRUST_VIOLATION", "SECRET_EXFIL", "PII_EXFIL", "TAINT_EGRESS",
@@ -105,7 +59,87 @@ func isTerminalBoundaryReason(reason string, code abi.ReasonCode) bool {
 		"NEVER_AMEND_SHARED", "OFF_TRUNK":
 		return true
 	}
+	if receipt.ReasonCode != abi.ReasonNone {
+		switch receipt.ReasonCode {
+		case abi.ReasonPolicyBlock, abi.ReasonSelfModify, abi.ReasonTrustViolation,
+			abi.ReasonSecretExfil, abi.ReasonDefaultDeny, abi.ReasonPIIExfil,
+			abi.ReasonTaintEgress, abi.ReasonScopeCrossing, abi.ReasonPromptInjection,
+			abi.ReasonIntegrityRefuted:
+			return true
+		}
+	}
+	if code, ok := abi.ReasonByName(r); ok {
+		switch code {
+		case abi.ReasonPolicyBlock, abi.ReasonSelfModify, abi.ReasonTrustViolation,
+			abi.ReasonSecretExfil, abi.ReasonDefaultDeny, abi.ReasonPIIExfil,
+			abi.ReasonTaintEgress, abi.ReasonScopeCrossing, abi.ReasonPromptInjection,
+			abi.ReasonIntegrityRefuted:
+			return true
+		}
+	}
 	return false
+}
+
+func getReceipt(in BoundaryInput) *BoundaryRefusalReceipt {
+	if in.RefusalReceipt != nil {
+		return in.RefusalReceipt
+	}
+	if in.BoundaryRefusalReceipt != nil {
+		return in.BoundaryRefusalReceipt
+	}
+	if in.RefusalToken != "" || in.ReasonCode != abi.ReasonNone {
+		r := in.RefusalToken
+		if r == "" && in.ReasonCode != abi.ReasonNone {
+			r = abi.ReasonName(in.ReasonCode)
+		}
+		return &BoundaryRefusalReceipt{
+			Reason:     r,
+			ReasonCode: in.ReasonCode,
+			Verified:   true,
+		}
+	}
+	return nil
+}
+
+// HasVerifiedTerminalBoundaryRefusal checks whether BoundaryInput presents verified
+// non-transient boundary refusal evidence (such as POLICY_BLOCK or an explicitly
+// terminal verified receipt). If unverified or transient, returns false with detail.
+func (in BoundaryInput) HasVerifiedTerminalBoundaryRefusal() (bool, string) {
+	rc := getReceipt(in)
+	if rc == nil {
+		return false, "missing verified boundary refusal receipt"
+	}
+	if !rc.Verified && rc.Token == "" {
+		return false, "unverified boundary refusal receipt"
+	}
+	if IsTerminalBoundary(rc) {
+		return true, ""
+	}
+	reason := rc.Reason
+	if reason == "" && rc.ReasonCode != abi.ReasonNone {
+		reason = abi.ReasonName(rc.ReasonCode)
+	}
+	if IsTransientHurdle(reason, rc.Disposition) {
+		return false, "transient refusal (" + reason + ") cannot witness no allowed path without terminal receipt"
+	}
+	return false, "boundary refusal reason (" + reason + ") not recognized as terminal boundary"
+}
+
+func isTransientReason(reason string, code abi.ReasonCode) bool {
+	switch code {
+	case abi.ReasonLeaseHeld, abi.ReasonRateLimited, abi.ReasonMisroute, abi.ReasonMalformed, abi.ReasonShellDialect:
+		return true
+	}
+	return IsTransientHurdle(reason, "")
+}
+
+func isTerminalBoundaryReason(reason string, code abi.ReasonCode) bool {
+	rc := &BoundaryRefusalReceipt{
+		Reason:     reason,
+		ReasonCode: code,
+		Verified:   true,
+	}
+	return IsTerminalBoundary(rc)
 }
 
 // EvaluateBoundary unifies turn-boundary lifecycle adjudication across harness architectures.
@@ -143,46 +177,64 @@ func EvaluateBoundary(ladder LadderConfig, witnessCfg WitnessGateConfig, in Boun
 		}
 	}
 
-	// 2. Clean wrap-up: if agent explicitly noted "no allowed path", that is a sanctioned clean stop
-	// only when accompanied by verified terminal boundary refusal evidence (e.g. POLICY_BLOCK or
-	// a verified terminal receipt). If claimed without verified boundary evidence or on transient
-	// hurdles like LOCK_BUSY without a terminal refusal receipt, treat as STOP_UNWITNESSED
-	// (Disposition != DispCleanWrapup).
+	// 2. Clean wrap-up: if agent explicitly noted "no allowed path", require verified terminal
+	// boundary evidence (either IsTerminalBoundary(in.RefusalReceipt) or (in.WitnessClaim != nil && in.WitnessClaim.Witnessed)).
+	// If neither is present, treat as STOP_UNWITNESSED returning ActionContinue, ExitCode: 2, Signal: "STOP_UNWITNESSED".
+	// If verified terminal boundary receipt is present (e.g. POLICY_BLOCK), admit DispCleanWrapup with ExitCode: 0.
 	if in.NotedNoAllowedPath {
-		hasBoundary, detail := in.HasVerifiedTerminalBoundaryRefusal()
-		if !hasBoundary {
-			claim := WitnessClaim{
-				Claimed:   true,
-				Witnessed: false,
-				Reason:    "STOP_UNWITNESSED",
-				Detail:    detail,
-			}
-			if in.WitnessClaim != nil && in.WitnessClaim.Claimed {
-				claim = *in.WitnessClaim
-				claim.Witnessed = false
-				if claim.Reason == "" {
-					claim.Reason = "STOP_UNWITNESSED"
+		rc := getReceipt(in)
+		isTerminal := IsTerminalBoundary(rc)
+		isWitnessed := in.WitnessClaim != nil && in.WitnessClaim.Witnessed
+
+		if !isTerminal && !isWitnessed {
+			reason := ""
+			disp := ""
+			if rc != nil {
+				reason = rc.Reason
+				if reason == "" && rc.ReasonCode != abi.ReasonNone {
+					reason = abi.ReasonName(rc.ReasonCode)
 				}
-				if claim.Detail == "" {
-					claim.Detail = detail
+				disp = rc.Disposition
+			}
+			isTransient := IsTransientHurdle(reason, disp)
+			guidance := NoAllowedPathContinuationMessage(reason, isTransient)
+
+			max := witnessCfg.Max
+			if max < 1 {
+				max = 3
+			}
+			if in.WitnessBlockCount >= max {
+				opMsg := fmt.Sprintf("fak guard Stop: STOP_UNWITNESSED stood down after %d blocks (bounded max=%d); allowing stop", in.WitnessBlockCount, max)
+				return Decision{
+					Action:      ActionAllow,
+					Stage:       StageGiveUp,
+					Disposition: DispClaimUnwitnessedGiveUp,
+					Kind:        KindStandDown,
+					Blocked:     false,
+					ExitCode:    0,
+					Signal:      "STOP_UNWITNESSED",
+					Reason:      "STOP_UNWITNESSED",
+					Depth:       in.WitnessBlockCount,
+					Bound:       max,
+					OperatorMsg: opMsg,
+					Note:        opMsg,
 				}
 			}
-			dec := EvaluateWitness(witnessCfg, claim, in.WitnessBlockCount)
-			if dec.ShouldContinue() {
-				return dec
+
+			return Decision{
+				Action:      ActionContinue,
+				Stage:       StageWarn,
+				Disposition: DispClaimUnwitnessedContinue,
+				Kind:        KindContinue,
+				Blocked:     true,
+				ExitCode:    2,
+				Signal:      "STOP_UNWITNESSED",
+				Reason:      "STOP_UNWITNESSED",
+				Depth:       in.WitnessBlockCount + 1,
+				Bound:       max,
+				Guidance:    guidance,
+				Note:        guidance,
 			}
-			if dec.Disposition != DispCleanCompletion && dec.Disposition != DispClaimWitnessed {
-				return dec
-			}
-			// Fail-closed fallback: ensure Disposition is never DispCleanWrapup when unverified.
-			if dec.Disposition == DispCleanCompletion || dec.Disposition == DispCleanWrapup {
-				dec.Disposition = DispClaimUnwitnessedContinue
-				dec.Action = ActionContinue
-				dec.ExitCode = 2
-				dec.Blocked = true
-				return dec
-			}
-			return dec
 		}
 
 		return Decision{

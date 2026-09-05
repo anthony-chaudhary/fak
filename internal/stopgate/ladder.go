@@ -58,6 +58,26 @@ func ToolFeedbackGiveUpMessage(consecutive, bound int) string {
 	return fmt.Sprintf("fak guard Stop: standing down — %d consecutive tool-feedback turn(s) exceeded the continue bound (%d). The model kept emitting malformed/misrouted tool calls without landing one, so fak is allowing the stop instead of holding the turn open indefinitely. Raise FAK_GUARD_TOOL_FEEDBACK_MAX to extend the bound.", consecutive, bound)
 }
 
+// NoAllowedPathContinuationMessage generates auto-continue guidance when an agent claims
+// 'no allowed path' without a verified terminal boundary refusal receipt. If isTransient,
+// explains that reason is a transient hurdle (concurrency lock, busy state) and not an immovable
+// boundary, to back off, retry, or pivot to an allowed task; if not transient / bare, explains
+// that 'no allowed path' requires a verified terminal kernel refusal receipt.
+func NoAllowedPathContinuationMessage(reason string, isTransient bool) string {
+	if isTransient {
+		r := reason
+		if r == "" {
+			r = "this condition"
+		}
+		return fmt.Sprintf("fak guard: 'no allowed path' refused — %s is a transient hurdle (concurrency lock, busy state, or rate limit), not an immovable boundary. Do not surrender or stop: back off, retry, or pivot to an allowed task.", r)
+	}
+	r := reason
+	if r != "" {
+		return fmt.Sprintf("fak guard: 'no allowed path' refused — '%s' requires a verified terminal kernel refusal receipt (e.g. POLICY_BLOCK) or witnessed completion before wrapping up. If you reached a genuine boundary, emit a verified terminal refusal receipt or land safe verified sub-components with checkable next steps.", r)
+	}
+	return "fak guard: 'no allowed path' refused — stopping with 'no allowed path' requires a verified terminal kernel refusal receipt (e.g. POLICY_BLOCK) or witnessed completion. Choose an allowed alternative and continue, or satisfy required witness evidence."
+}
+
 // NormalizeDenyAllThresholds ensures 1 <= warn <= final <= max total ordering.
 func NormalizeDenyAllThresholds(warnAt, finalAt, maxN int) (int, int, int) {
 	if maxN <= 0 {

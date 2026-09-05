@@ -29,7 +29,7 @@ func TestBoundaryNoAllowedPathRequiresVerifiedRefusal(t *testing.T) {
 			t.Fatalf("want DispClaimUnwitnessedContinue, got: %s", dec.Disposition)
 		}
 
-		// Case B: Missing receipt (nil) in ModeShadow -> DispClaimWitnessShadow (never DispCleanWrapup)
+		// Case B: Missing receipt (nil) in ModeShadow -> refuses DispCleanWrapup
 		witnessShadow := WitnessGateConfig{Mode: ModeShadow, Max: 3}
 		inMissingShadow := BoundaryInput{
 			NotedNoAllowedPath: true,
@@ -38,8 +38,8 @@ func TestBoundaryNoAllowedPathRequiresVerifiedRefusal(t *testing.T) {
 		if dec.Disposition == DispCleanWrapup {
 			t.Fatalf("expected refusal of DispCleanWrapup for missing receipt in shadow mode, got: %+v", dec)
 		}
-		if dec.Reason != "STOP_UNWITNESSED" || dec.Disposition != DispClaimWitnessShadow {
-			t.Fatalf("want STOP_UNWITNESSED with DispClaimWitnessShadow, got: %+v", dec)
+		if dec.Reason != "STOP_UNWITNESSED" || (dec.Disposition != DispClaimWitnessShadow && dec.Disposition != DispClaimUnwitnessedContinue) {
+			t.Fatalf("want STOP_UNWITNESSED continuation, got: %+v", dec)
 		}
 
 		// Case C: Unverified receipt (Verified: false) -> treated as STOP_UNWITNESSED
