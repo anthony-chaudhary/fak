@@ -83,6 +83,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdAgentic(args)
 	case "harness":
 		cmdHarnessCommand(args)
+	case "pack":
+		cmdPack(args)
 	case "armbench":
 		cmdArmbench(args)
 	case "api-host":
@@ -847,6 +849,8 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdLLMSFull(args)
 	case "attest":
 		cmdAttest(args)
+	case "pack":
+		cmdPack(args)
 	case "speed-ab":
 		cmdSpeedAB(os.Args[2:])
 	case "model-observe":
