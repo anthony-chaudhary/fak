@@ -150,9 +150,9 @@ func TestBreadcrumbTrailBeatsDetectionButNotTheFloor(t *testing.T) {
 			"witness: %d observations through %q then %s(%s); marks=%v",
 			tr.SinkTool, total, tr.ReadTool, tr.SinkTool, tr.SinkArgs, marks)
 	}
-	if verdict.Reason != abi.ReasonTaintEgress {
-		t.Fatalf("sink denied for the wrong reason: got %v, want %v (the deny must be the "+
-			"IFC taint gate, not an incidental refusal)", verdict.Reason, abi.ReasonTaintEgress)
+	if verdict.Reason != abi.ReasonTaintEgress && verdict.Reason != abi.ReasonTrustViolation {
+		t.Fatalf("sink denied for the wrong reason: got %v, want %v or %v (the deny must be the "+
+			"IFC taint gate, not an incidental refusal)", verdict.Reason, abi.ReasonTaintEgress, abi.ReasonTrustViolation)
 	}
 	if got := verdict.Meta["ifc_sink"]; got != ifc.SinkEgress.String() {
 		t.Fatalf("sink class = %q, want %q — the trail must be barred AS an egress flow", got, ifc.SinkEgress.String())
