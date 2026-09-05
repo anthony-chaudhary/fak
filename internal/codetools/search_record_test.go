@@ -527,6 +527,57 @@ func TestSnapToRuneBoundaryMultiByte(t *testing.T) {
 	})
 }
 
+type walkErrorContext struct {
+	context.Context
+	checkedFirst bool
+	err          error
+}
+
+func (c *walkErrorContext) Err() error {
+	if !c.checkedFirst {
+		c.checkedFirst = true
+		return nil
+	}
+	return c.err
+}
+
+func (c *walkErrorContext) Done() <-chan struct{} {
+	ch := make(chan struct{})
+	if c.checkedFirst {
+		close(ch)
+	}
+	return ch
+}
+
+func TestGlobWalkCancellationReturnsCodeCanceled(t *testing.T) {
+	ts, dir := newTestToolset(t)
+	mustWrite(t, filepath.Join(dir, "file.go"), "package main\n")
+
+	t.Run("context_canceled", func(t *testing.T) {
+		ctx := &walkErrorContext{Context: context.Background(), err: context.Canceled}
+		out, isErr := ts.glob(ctx, argsOf(t, GlobArgs{Pattern: "*.go"}))
+		if !isErr {
+			t.Fatalf("Glob succeeded, want error: %s", string(out))
+		}
+		code := errCode(t, out)
+		if code != CodeCanceled {
+			t.Fatalf("Glob refusal code = %q, want %q (not %q)", code, CodeCanceled, CodeIO)
+		}
+	})
+
+	t.Run("deadline_exceeded", func(t *testing.T) {
+		ctx := &walkErrorContext{Context: context.Background(), err: context.DeadlineExceeded}
+		out, isErr := ts.glob(ctx, argsOf(t, GlobArgs{Pattern: "*.go"}))
+		if !isErr {
+			t.Fatalf("Glob succeeded, want error: %s", string(out))
+		}
+		code := errCode(t, out)
+		if code != CodeCanceled {
+			t.Fatalf("Glob refusal code = %q, want %q (not %q)", code, CodeCanceled, CodeIO)
+		}
+	})
+}
+
 func TestGrepOversizedLineCentersMatch(t *testing.T) {
 	dir := t.TempDir()
 	ts, err := New(Config{Root: dir})

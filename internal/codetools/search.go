@@ -318,6 +318,9 @@ func (t *Toolset) glob(ctx context.Context, body []byte) ([]byte, bool) {
 		if errors.As(walkErr, &halt) {
 			return halt.r.JSON(), true
 		}
+		if errors.Is(walkErr, context.Canceled) || errors.Is(walkErr, context.DeadlineExceeded) {
+			return refuse(CodeCanceled, "operation canceled").JSON(), true
+		}
 		if errors.Is(walkErr, errWalkBudget) {
 			truncated = true
 			truncationReason = upgradeTruncationReason(truncationReason, "walk_budget")
