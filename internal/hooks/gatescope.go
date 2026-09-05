@@ -120,6 +120,8 @@ func gateScopes() []gateScopeRow {
 		{"NEW_PYTHON_TOOL", "gate_pythongate.go", SeamHygiene, ClassTreeTwin, "whole-tree hygiene sweep against a frozen baseline"},
 		{"DEMO_COMMAND", "gate_democommand.go", SeamHygiene, ClassTreeTwin, "whole-tree hygiene sweep (reads the Makefile and demo sources off disk by design)"},
 		{"BROWSER_CONTRACT", "gate_browsercontract.go", SeamHygiene, ClassTreeTwin, "whole-tree hygiene sweep (reads browser-demo metadata off disk by design)"},
+		{"DEMO_LIVE_LINKS", "gate_demolivelinks.go", SeamHygiene, ClassTreeTwin, "whole-tree hygiene sweep (reads docs/demos.html and social preview off disk by design)"},
+		{"GUARD_MCP_STATUS", "gate_guardmcpstatus.go", SeamHygiene, ClassTreeTwin, "whole-tree hygiene sweep (reads agent-live proof packet and evidence artifacts off disk by design)"},
 	}
 }
 

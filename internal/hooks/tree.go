@@ -102,9 +102,8 @@ type HygieneGate struct {
 }
 
 // HygieneGates returns the tree-mode gates that have a parity-proven Go twin, in the order
-// `make hygiene` / `make index-sync` run them. The remaining `make hygiene` checkers
-// (demo_live_links, guard_mcp_status_audit) stay on the Python path until they are ported
-// under #928 A5; each port appends its gate here.
+// `make hygiene` / `make index-sync` run them. All `make hygiene` checkers now have native
+// Go gates here (#928, #10940).
 func HygieneGates() []HygieneGate {
 	return []HygieneGate{
 		{"DOC_PLACEMENT", gateDocPlacementTree, false, false},
@@ -143,6 +142,14 @@ func HygieneGates() []HygieneGate {
 		// tree, so the gate lands clean and only NEW browser-demo metadata drift (a moved default
 		// port, a dropped demoui helper, a stale run/public doc, a bad lifecycle decision) can red it.
 		{"BROWSER_CONTRACT", gateBrowserContractTree, false, false},
+		// DEMO_LIVE_LINKS (issue #10940) ships default-ON: it is a faithful port of
+		// tools/demo_live_links.py, which `make hygiene` already runs green over the real
+		// tree, so the gate lands clean and only stale hosted demo links or metadata drift can red it.
+		{"DEMO_LIVE_LINKS", gateDemoLiveLinksTree, false, false},
+		// GUARD_MCP_STATUS (issue #10940) ships default-ON: it is a faithful port of
+		// tools/guard_mcp_status_audit.py, which `make hygiene` already runs green over the real
+		// tree, so the gate lands clean and only broken status packet claims can red it.
+		{"GUARD_MCP_STATUS", gateGuardMCPStatusTree, false, false},
 	}
 }
 
