@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -52,9 +53,9 @@ func TestDefaultDenySurfacesBoundedLiveOperatorChoice(t *testing.T) {
 		"deniedToolResult": deniedToolResult(adj),
 	} {
 		for _, want := range []string{
-			"Operator choice (outside this wrapped agent)",
-			"fak guard allow --ttl 15m exec_command",
-			"live guard reloads",
+			"operator choice (outside this wrapped agent)",
+			"tool not permitted by policy",
+			"consult operator to widen capability floor",
 			"standard harness tool",
 			"DEFAULT_DENY",
 		} {
@@ -62,13 +63,89 @@ func TestDefaultDenySurfacesBoundedLiveOperatorChoice(t *testing.T) {
 				t.Fatalf("%s missing %q:\n%s", name, want, got)
 			}
 		}
+		// Agent-visible text must never contain runnable fak guard allow commands (#11504)
+		for _, forbid := range []string{
+			"fak guard allow",
+			"`fak guard",
+		} {
+			if strings.Contains(got, forbid) {
+				t.Fatalf("%s contains forbidden executable command %q:\n%s", name, forbid, got)
+			}
+		}
+	}
+
+	// Operator remedy is preserved out-of-band via helper
+	cmd := OperatorRemedyCommand(adj)
+	if cmd != "fak guard allow --ttl 15m exec_command" {
+		t.Fatalf("OperatorRemedyCommand mismatch: got %q, want %q", cmd, "fak guard allow --ttl 15m exec_command")
 	}
 
 	unsafe := adj
 	unsafe.Tool = "exec_command; injected"
 	got := denySummary([]ToolAdjudication{unsafe})
-	if strings.Contains(got, "--ttl 15m exec_command;") || !strings.Contains(got, "--ttl 15m <tool>") {
-		t.Fatalf("unsafe tool name entered the copyable command:\n%s", got)
+	if strings.Contains(got, "--ttl 15m exec_command;") || strings.Contains(got, "fak guard allow") {
+		t.Fatalf("unsafe or executable command entered agent-visible text:\n%s", got)
+	}
+	unsafeCmd := OperatorRemedyCommand(unsafe)
+	if unsafeCmd != "fak guard allow --ttl 15m <tool>" {
+		t.Fatalf("OperatorRemedyCommand for unsafe tool mismatch: got %q, want %q", unsafeCmd, "fak guard allow --ttl 15m <tool>")
+	}
+}
+
+// TestRefusalNotesIsolateOperatorRemedyFromAgentVisibleContext asserts that renderRefusalNotes
+// and deniedToolResult for DEFAULT_DENY or POLICY_BLOCK contain zero runnable "fak guard allow"
+// shell strings in agent-visible text, while operator remediation is preserved in the header or metadata (#11504).
+func TestRefusalNotesIsolateOperatorRemedyFromAgentVisibleContext(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		reason string
+		tool   string
+	}{
+		{name: "DefaultDeny", reason: "DEFAULT_DENY", tool: "exec_command"},
+		{name: "PolicyBlock", reason: "POLICY_BLOCK", tool: "rm_rf"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			adj := ToolAdjudication{
+				Tool:     tc.tool,
+				Admitted: false,
+				Verdict:  WireVerdict{Kind: "DENY", Reason: tc.reason, Disposition: "TERMINAL"},
+			}
+			notes, _ := renderRefusalNotes(adj)
+			deniedResult := deniedToolResult(adj)
+
+			for label, text := range map[string]string{
+				"renderRefusalNotes": notes,
+				"deniedToolResult":   deniedResult,
+			} {
+				if strings.Contains(text, "fak guard allow") {
+					t.Fatalf("%s contains runnable 'fak guard allow': %q", label, text)
+				}
+				if strings.Contains(text, "`fak guard") {
+					t.Fatalf("%s contains backtick-wrapped fak guard command: %q", label, text)
+				}
+			}
+
+			// Verify operator remediation is available via helper/metadata
+			cmd := OperatorRemedyCommand(adj)
+			expectedCmd := "fak guard allow --ttl 15m " + tc.tool
+			if cmd != expectedCmd {
+				t.Fatalf("OperatorRemedyCommand got %q, want %q", cmd, expectedCmd)
+			}
+
+			AttachOperatorRemedyMetadata(&adj)
+			if got := adj.Verdict.Detail["operator_remedy"]; got != expectedCmd {
+				t.Fatalf("metadata operator_remedy got %q, want %q", got, expectedCmd)
+			}
+
+			rec := httptest.NewRecorder()
+			SetOperatorRemedyHeaders(rec, []ToolAdjudication{adj})
+			if h := rec.Header().Get("X-Fak-Operator-Remedy"); h != expectedCmd {
+				t.Fatalf("X-Fak-Operator-Remedy header got %q, want %q", h, expectedCmd)
+			}
+			if h := rec.Header().Get("X-Fak-Operator-Action"); h != expectedCmd {
+				t.Fatalf("X-Fak-Operator-Action header got %q, want %q", h, expectedCmd)
+			}
+		})
 	}
 }
 

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"time"
 
@@ -145,4 +146,16 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 	d := time.Since(start)
 	s.MarkWarmupComplete(d)
 	return d, err
+}
+
+// checkWarmupPending checks if the server warmup gate is still armed and incomplete.
+// If warmup is pending, it writes HTTP 503 (StatusServiceUnavailable) with a Retry-After: 1
+// header and a typed "warmup_pending" error, returning true.
+func (s *Server) checkWarmupPending(w http.ResponseWriter) bool {
+	if s == nil || !s.warmup.pending() {
+		return false
+	}
+	w.Header().Set("Retry-After", "1")
+	writeErrCode(w, http.StatusServiceUnavailable, "warmup_pending", "server is warming up; please retry shortly")
+	return true
 }

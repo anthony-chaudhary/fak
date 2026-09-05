@@ -99,6 +99,9 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+	if s.checkWarmupPending(w) {
+		return
+	}
 	model, method, ok := parseGeminiPath(r.URL.Path)
 	if !ok {
 		writeErr(w, http.StatusNotFound, "unknown Gemini route")

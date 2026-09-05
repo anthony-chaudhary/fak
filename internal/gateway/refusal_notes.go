@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"fmt"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -38,20 +39,99 @@ var refusalNotes = []refusalNote{
 	{render: livelockInBandNote},
 }
 
-// defaultDenyOperatorRemedy turns an otherwise bare DEFAULT_DENY token into a
-// live recovery choice. The agent cannot widen its own floor, so the command is
-// explicitly addressed to an operator outside the wrapped session. A short TTL
-// keeps the workaround bounded while the normal fix (updating a stale harness
-// profile or deliberately authoring the policy) is applied.
+// defaultDenyOperatorRemedy turns an otherwise bare DEFAULT_DENY token into
+// actionable agent-facing advisory text. Runnable operator shell commands (such
+// as fak guard allow) are strictly isolated from agent-visible context to prevent
+// autonomous agents from attempting self-modification loops (#11504). The operator
+// remedy is exposed out-of-band via OperatorRemedyCommand and HTTP headers/metadata.
 func defaultDenyOperatorRemedy(a ToolAdjudication) string {
 	if reasonOrKind(a.Verdict) != "DEFAULT_DENY" {
 		return ""
 	}
 	tool := refusalCommandTool(a.Tool)
-	return "for autonomous agents: decompose into S0/S1 leaves, pivot to permitted tools, land safe verified partial progress, or emit a structured ABSTAIN record. Operator choice (outside this wrapped agent): run `fak guard allow --ttl 15m " + tool +
-		"`; the live guard reloads the temporary repo overlay automatically, then retry the open task." +
-		" Surface this choice to the operator instead of invoking it through the refused tool." +
-		" If " + tool + " is a standard harness tool, update fak too; the built-in floor should cover it."
+	return "for autonomous agents: tool not permitted by policy; consult operator to widen capability floor or pivot to permitted tools, decompose into S0/S1 leaves, land safe verified partial progress, or emit a structured ABSTAIN record. operator choice (outside this wrapped agent): consult operator to widen capability floor or pivot to permitted tools. Surface this choice to the operator instead of invoking it through the refused tool. If " + tool + " is a standard harness tool, update fak too; the built-in floor should cover it."
+}
+
+// OperatorRemedyCommand returns the actionable out-of-band shell command for an operator
+// to remediate a refusal (e.g. by widening capability floor with fak guard allow), or "" if none.
+func OperatorRemedyCommand(a ToolAdjudication) string {
+	if a.Verdict.Detail != nil {
+		if cmd := strings.TrimSpace(a.Verdict.Detail["operator_remedy"]); cmd != "" {
+			return cmd
+		}
+		if cmd := strings.TrimSpace(a.Verdict.Detail["operator_action"]); cmd != "" {
+			return cmd
+		}
+	}
+	r := reasonOrKind(a.Verdict)
+	if r == "DEFAULT_DENY" || r == "POLICY_BLOCK" {
+		tool := refusalCommandTool(a.Tool)
+		return "fak guard allow --ttl 15m " + tool
+	}
+	return ""
+}
+
+// AttachOperatorRemedyMetadata ensures the operator remedy command is recorded in the
+// adjudication's Detail metadata under "operator_remedy".
+func AttachOperatorRemedyMetadata(a *ToolAdjudication) {
+	if a == nil {
+		return
+	}
+	cmd := OperatorRemedyCommand(*a)
+	if cmd == "" {
+		return
+	}
+	if a.Verdict.Detail == nil {
+		a.Verdict.Detail = make(map[string]string)
+	}
+	if _, ok := a.Verdict.Detail["operator_remedy"]; !ok {
+		a.Verdict.Detail["operator_remedy"] = cmd
+	}
+}
+
+// OperatorRemedies returns all distinct operator remediation commands for a slice of adjudications.
+func OperatorRemedies(adjs []ToolAdjudication) []string {
+	seen := make(map[string]bool)
+	var cmds []string
+	for _, a := range adjs {
+		cmd := OperatorRemedyCommand(a)
+		if cmd != "" && !seen[cmd] {
+			seen[cmd] = true
+			cmds = append(cmds, cmd)
+		}
+	}
+	return cmds
+}
+
+const (
+	HeaderOperatorRemedy = "X-Fak-Operator-Remedy"
+	HeaderOperatorAction = "X-Fak-Operator-Action"
+)
+
+// SetOperatorRemedyHeaders sets the out-of-band operator remedy headers on the HTTP response
+// writer if any operator remediation commands exist in the adjudications.
+func SetOperatorRemedyHeaders(w http.ResponseWriter, adjs []ToolAdjudication) {
+	if w == nil {
+		return
+	}
+	remedies := OperatorRemedies(adjs)
+	if len(remedies) > 0 {
+		val := strings.Join(remedies, "; ")
+		w.Header().Set(HeaderOperatorRemedy, val)
+		w.Header().Set(HeaderOperatorAction, val)
+	}
+}
+
+var reExecutableSecurityCmd = regexp.MustCompile("`[^`]*\\bfak\\s+guard\\b[^`]*`")
+
+func stripExecutableSecurityCommands(s string) string {
+	if strings.Contains(s, "`") && strings.Contains(s, "fak guard") {
+		s = reExecutableSecurityCmd.ReplaceAllString(s, "consult operator to widen capability floor")
+	}
+	if strings.Contains(s, "fak guard allow") {
+		s = strings.ReplaceAll(s, "fak guard allow", "consult operator to widen capability floor")
+	}
+	return s
 }
 
 func refusalCommandTool(tool string) string {
@@ -83,7 +163,7 @@ func renderRefusalNotes(a ToolAdjudication) (notes string, confirmRecipe bool) {
 			}
 		}
 	}
-	return strings.Join(parts, " "), confirmRecipe
+	return stripExecutableSecurityCommands(strings.Join(parts, " ")), confirmRecipe
 }
 
 // compiledSidestepRemedy reports whether a refusal's sanctioned alternative names

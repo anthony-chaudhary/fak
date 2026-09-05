@@ -28,6 +28,9 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+	if s.checkWarmupPending(w) {
+		return
+	}
 	if dl := s.ScalarConfig().CompletionDeadlineMs; dl > 0 {
 		ctx, cancel := context.WithTimeout(r.Context(), time.Duration(dl)*time.Millisecond)
 		defer cancel()

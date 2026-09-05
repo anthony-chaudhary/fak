@@ -211,6 +211,10 @@ func (s *Server) Handler() http.Handler {
 	// outside routeTable so API-spec and follower-fanout coverage remain scoped
 	// to callable runtime surfaces.
 	mux.HandleFunc("/readyz", s.handleReady)
+	mux.HandleFunc("/v1/fak/arms", s.handleFakArms)
+	mux.HandleFunc("/v1/fak/arms/traffic", s.handleFakArmsTraffic)
+	mux.HandleFunc("/v1/fak/arms/lease", s.handleFakArmsLease)
+	mux.HandleFunc("/v1/fak/arms/limits", s.handleFakArmsLimits)
 	return s.withMetrics(s.withAuth(mux))
 }
 
@@ -466,7 +470,7 @@ func authExempt(r *http.Request) bool {
 // surface here widens both at once, which is the intent.
 func readScopedPath(r *http.Request) bool {
 	switch r.URL.Path {
-	case "/metrics", "/debug/vars", "/v1/fak/observation":
+	case "/metrics", "/debug/vars", "/v1/fak/observation", "/v1/fak/arms", "/v1/fak/arms/traffic":
 		return true
 	}
 	return false
@@ -529,6 +533,9 @@ func gatewayCredential(r *http.Request) (string, bool) {
 // extension. It NEVER executes the client's tools — the client does.
 func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if s.checkWarmupPending(w) {
 		return
 	}
 	if dl := s.ScalarConfig().CompletionDeadlineMs; dl > 0 {

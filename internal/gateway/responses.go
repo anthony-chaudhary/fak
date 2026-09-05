@@ -107,6 +107,7 @@ type responsesResponse struct {
 	CreatedAt         int64                 `json:"created_at"`
 	Model             string                `json:"model"`
 	Status            string                `json:"status"`
+	FinishReason      string                `json:"finish_reason,omitempty"`
 	IncompleteDetails *responsesIncomplete  `json:"incomplete_details,omitempty"`
 	Output            []responsesOutputItem `json:"output"`
 	OutputText        string                `json:"output_text,omitempty"`
@@ -225,6 +226,9 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+	if s.checkWarmupPending(w) {
+		return
+	}
 	// Release the EP follower ranks BEFORE this rank enters the decode, onto THIS wire's
 	// own route (#5528). Same placement and same reasoning as the chat, legacy and
 	// Anthropic wires: after the method check, before anything reads the body.
@@ -263,8 +267,11 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	tools := responsesToolsToToolDefs(req.Tools)
 
-	reqModel := req.Model
+	reqModel := strings.TrimSpace(req.Model)
 	if reqModel == "" {
+		reqModel = s.model
+	} else if s.isForceResponsesStream() && isUnsupportedChatGPTModel(reqModel) {
+		s.logf("gateway: model %q is not supported by Codex ChatGPT subscription upstream; adapting to configured default %q", reqModel, s.model)
 		reqModel = s.model
 	}
 
@@ -301,11 +308,25 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if shouldYield, estTokens, toolCalls := shouldYieldResponsesSubturn(messages, tools, req.Input); shouldYield {
+		if s.logf != nil {
+			s.logf("gateway: responses sub-turn yield valve activated: est_tokens=%d tool_calls=%d trace_id=%s", estTokens, toolCalls, reqTrace)
+		}
+		w.Header().Set(SubturnYieldHeader, "true")
+		resp := makeSubturnYieldResponse(reqModel, resultAdmissions)
+		if req.Stream {
+			s.writeResponsesStream(w, resp)
+		} else {
+			writeJSON(w, http.StatusOK, resp)
+		}
+		return
+	}
+
 	// Hoisted so the #5212 denial-recovery sample re-samples under the SAME sampling
 	// contract as the first call — a recovery that quietly changed model or budget
 	// would not be the same turn continuing.
 	sampleOpts := []agent.SampleOpt{
-		agent.WithModel(req.Model),
+		agent.WithModel(reqModel),
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxOutputTokens)),
 		agent.WithTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
@@ -451,6 +472,10 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		resp.Status = "incomplete"
 		resp.IncompleteDetails = &responsesIncomplete{Reason: deniedGuardIncompleteReason}
 	}
+	for i := range turnAdjs {
+		AttachOperatorRemedyMetadata(&turnAdjs[i])
+	}
+	SetOperatorRemedyHeaders(w, turnAdjs)
 	if len(turnAdjs) > 0 || len(resultAdmissions) > 0 {
 		resp.Fak = &FakExt{Adjudications: turnAdjs, ResultAdmissions: resultAdmissions}
 	}
@@ -927,4 +952,38 @@ func trimLeadingWS(raw json.RawMessage) []byte {
 		i++
 	}
 	return b[i:]
+}
+
+func (s *Server) isForceResponsesStream() bool {
+	if s == nil || s.planner == nil {
+		return false
+	}
+	if hp, ok := s.planner.(*agent.HTTPPlanner); ok {
+		return hp.ForceResponsesStream
+	}
+	if frs, ok := s.planner.(interface{ IsForceResponsesStream() bool }); ok {
+		return frs.IsForceResponsesStream()
+	}
+	return false
+}
+
+// isUnsupportedChatGPTModel reports whether model cannot be served by OpenAI's ChatGPT
+// backend (such as non-OpenAI model families or unsupported slugs like gpt-5.3-codex).
+func isUnsupportedChatGPTModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if m == "" {
+		return false
+	}
+	if strings.HasPrefix(m, "openai/") {
+		m = strings.TrimPrefix(m, "openai/")
+	}
+	for _, prefix := range []string{"gemini", "claude", "qwen", "glm", "llama", "deepseek", "mistral", "gemma"} {
+		if strings.HasPrefix(m, prefix) {
+			return true
+		}
+	}
+	if m == "gpt-5.3-codex" || m == "gpt-5.3" {
+		return true
+	}
+	return false
 }

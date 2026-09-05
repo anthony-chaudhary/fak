@@ -885,3 +885,76 @@ func TestResponsesRouteForwardsReasoningTokens(t *testing.T) {
 		t.Fatalf("reasoning_tokens = %d, want 10", resp.Usage.OutputTokensDetails.ReasoningTokens)
 	}
 }
+
+type modelCapturingResponsesPlanner struct {
+	comp                 *agent.Completion
+	seenModel            string
+	forceResponsesStream bool
+}
+
+func (p *modelCapturingResponsesPlanner) Complete(ctx context.Context, m []agent.Message, t []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	var req agent.SampleParams
+	for _, opt := range opts {
+		opt(&req)
+	}
+	p.seenModel = req.Model
+	return p.comp, nil
+}
+
+func (*modelCapturingResponsesPlanner) Model() string { return "capturing" }
+
+func (p *modelCapturingResponsesPlanner) IsForceResponsesStream() bool {
+	return p.forceResponsesStream
+}
+
+func TestResponsesAdaptsUnsupportedChatGPTModelWhenForcingStream(t *testing.T) {
+	srv := newTestServer(t)
+	srv.model = "gpt-6-astra"
+	planner := &modelCapturingResponsesPlanner{
+		comp: &agent.Completion{
+			Message:      agent.Message{Role: agent.RoleAssistant, Content: "ok"},
+			FinishReason: "stop",
+		},
+		forceResponsesStream: true,
+	}
+	srv.planner = planner
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// 1. Unsupported Gemini model adapted to configured default
+	code, _ := postResponses(t, ts.URL, map[string]any{"model": "gemini-3.8-flash", "input": "hi"})
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if planner.seenModel != "gpt-6-astra" {
+		t.Errorf("seenModel for gemini-3.8-flash = %q, want gpt-6-astra", planner.seenModel)
+	}
+
+	// 2. Unsupported gpt-5.3-codex model adapted to configured default
+	code, _ = postResponses(t, ts.URL, map[string]any{"model": "gpt-5.3-codex", "input": "hi"})
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if planner.seenModel != "gpt-6-astra" {
+		t.Errorf("seenModel for gpt-5.3-codex = %q, want gpt-6-astra", planner.seenModel)
+	}
+
+	// 3. Supported model preserved
+	code, _ = postResponses(t, ts.URL, map[string]any{"model": "gpt-4o", "input": "hi"})
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if planner.seenModel != "gpt-4o" {
+		t.Errorf("seenModel for gpt-4o = %q, want gpt-4o", planner.seenModel)
+	}
+
+	// 4. When not forcing stream (not ChatGPT subscription upstream), model is preserved
+	planner.forceResponsesStream = false
+	code, _ = postResponses(t, ts.URL, map[string]any{"model": "gemini-3.8-flash", "input": "hi"})
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if planner.seenModel != "gemini-3.8-flash" {
+		t.Errorf("seenModel for non-ChatGPT = %q, want gemini-3.8-flash", planner.seenModel)
+	}
+}

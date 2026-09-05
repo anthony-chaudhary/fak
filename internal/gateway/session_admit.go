@@ -111,6 +111,29 @@ func (s *Server) admitServedRequest(w http.ResponseWriter, r *http.Request, mess
 		}
 		return ctx, trace, messages, turn, false
 	}
+
+	if c := s.ResearchArmCoordinator(); c != nil {
+		path := ""
+		if r != nil && r.URL != nil {
+			path = r.URL.Path
+		}
+		armLease, err := c.Admit(ctx, r, path, trace)
+		if err != nil {
+			if w != nil {
+				w.Header().Set("Retry-After", "1")
+				writeErr(w, http.StatusTooManyRequests, err.Error())
+			}
+			return ctx, trace, messages, turn, false
+		}
+		if armLease != nil {
+			ctx = withArmLease(ctx, armLease)
+			go func() {
+				<-ctx.Done()
+				armLease.Done(0, ctx.Err())
+			}()
+		}
+	}
+
 	return ctx, trace, messages, turn, true
 }
 
@@ -374,6 +397,9 @@ func (s *Server) debitServedSessionTurn(ctx context.Context, turn servedSessionT
 	// DebitSession hook. A breach fires its counter + webhook here; the NEXT turn's
 	// beginServedSessionTurn refuses on the accumulated total. No-op when unattached.
 	s.chargeSpend(turn.traceID, usage)
+	if armLease := armLeaseFromContext(ctx); armLease != nil {
+		armLease.Done(su.CompletionTokens+su.ContextTokens, nil)
+	}
 	if (s.debitSession == nil && s.table == nil) || turn.traceID == "" || (su.CompletionTokens <= 0 && su.ContextTokens <= 0 && su.DurationNanos <= 0) {
 		return
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/researcharm"
 	"github.com/anthony-chaudhary/fak/internal/rungobs"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
@@ -628,6 +629,9 @@ type Server struct {
 	ctxValueMu sync.Mutex
 	ctxValue   map[string]*sessionCtxValue
 
+	researchArmsMu sync.RWMutex
+	researchArms   *researcharm.Coordinator
+
 	// ctxExpenseWarn / ctxExpenseBlock are the effective per-turn as-sent-volume lines the
 	// context-expense verdict (ctxexpense.go) grades on, in ESTIMATED tokens (0 = that tier
 	// off). Derived from Config.CtxExpense{Warn,Block}Tokens via ctxExpenseThresholdOr, so
@@ -674,6 +678,12 @@ type Server struct {
 	// maxCtxRestoreSessions generational reset as ctxRestore so it cannot grow unbounded.
 	traceOwnerMu sync.RWMutex
 	traceOwner   map[string]string
+
+	// pagedRefOwner records the principal that authored a paged-out MMU ref (#11551),
+	// so bounded retrieval at the MCP boundary preserves same-trace tenant isolation.
+	// Guarded by pagedRefMu; bounded by maxCtxRestoreSessions with generational reset.
+	pagedRefMu    sync.RWMutex
+	pagedRefOwner map[string]string
 
 	// tracePrincipal binds a session trace to the AUTHORITY principal its CURRENT turn
 	// is attributed to (human / self-model / peer-agent / timer / network-tool / unknown) —

@@ -69,6 +69,16 @@ func (s *Server) resources() []mcpResource {
 			},
 		),
 		jsonMCPResource(
+			"fak://server/tools",
+			"fak gateway tool catalog",
+			"machine-readable tool catalog: exposed tools with names, descriptions, and input schemas",
+			func(s *Server) any {
+				return map[string]any{
+					"tools": s.exposedToolDescriptors(),
+				}
+			},
+		),
+		jsonMCPResource(
 			mcpCacheSemanticsURI,
 			"fak MCP cache semantics",
 			"machine-readable cache contract for MCP clients: descriptor/resource reuse, tool-result hits, provider-prefix constraints, and invalidation verbs",
@@ -251,6 +261,9 @@ func (s *Server) readResource(params json.RawMessage) (any, *rpcError) {
 	cleanURI := strings.TrimRight(p.URI, "/")
 	if cleanURI == "fak://capabilities" || strings.HasPrefix(p.URI, "fak://capabilities?") || strings.HasPrefix(p.URI, "fak://server/capabilities?") {
 		p.URI = "fak://server/capabilities"
+	}
+	if cleanURI == "fak://tools" || strings.HasPrefix(p.URI, "fak://tools?") || strings.HasPrefix(p.URI, "fak://server/tools?") {
+		p.URI = "fak://server/tools"
 	}
 	if req, ok := contextq.MCPMissingContextResourceRequest(p.URI, 0); ok {
 		plan := selfquery.MissingContextClarifications([]string{req.Key})

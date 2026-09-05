@@ -458,3 +458,31 @@ func TestResourcesReadCapabilitiesNormalization(t *testing.T) {
 		}
 	}
 }
+
+func TestResourcesReadToolsNormalization(t *testing.T) {
+	srv := newTestServer(t)
+
+	base := resultMap(t, rpcRoundTrip(t, srv, "resources/read", `{"uri":"fak://server/tools"}`))
+	baseContents, ok := base["contents"].([]any)
+	if !ok || len(baseContents) != 1 {
+		t.Fatalf("base contents malformed: %v", base)
+	}
+	baseText := baseContents[0].(map[string]any)["text"].(string)
+
+	for _, uri := range []string{
+		"fak://tools",
+		"fak://tools/",
+		"fak://tools?scope=public",
+		"fak://server/tools?scope=public",
+	} {
+		read := resultMap(t, rpcRoundTrip(t, srv, "resources/read", `{"uri":"`+uri+`"}`))
+		contents, ok := read["contents"].([]any)
+		if !ok || len(contents) != 1 {
+			t.Fatalf("resources/read for %q contents malformed: %v", uri, read)
+		}
+		text := contents[0].(map[string]any)["text"].(string)
+		if text != baseText {
+			t.Errorf("resources/read for %q returned text different from fak://server/tools", uri)
+		}
+	}
+}

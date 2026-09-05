@@ -1,10 +1,13 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -186,4 +189,78 @@ func warmupHealthzBody(t *testing.T, s *Server) map[string]any {
 		t.Fatalf("decode /healthz body %q: %v", rec.Body.String(), err)
 	}
 	return body
+}
+
+// TestInferenceGatedDuringWarmup proves that incoming inference requests are gated
+// while warmup is pending (HTTP 503 with Retry-After: 1 and "code":"warmup_pending"),
+// and admitted (HTTP 200 OK) once warmup completes.
+func TestInferenceGatedDuringWarmup(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = agent.NewMockPlanner("test-model")
+	srv.ArmWarmupGate()
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	chatPayload := []byte(`{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`)
+	messagesPayload := []byte(`{"model":"test-model","messages":[{"role":"user","content":"hello"}],"max_tokens":100}`)
+
+	// 1. Armed warmup gate: POST /v1/chat/completions returns 503, Retry-After: 1, "code":"warmup_pending"
+	res, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", bytes.NewReader(chatPayload))
+	if err != nil {
+		t.Fatalf("POST /v1/chat/completions: %v", err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("POST /v1/chat/completions status = %d, want 503", res.StatusCode)
+	}
+	if got := res.Header.Get("Retry-After"); got != "1" {
+		t.Fatalf("POST /v1/chat/completions Retry-After = %q, want 1", got)
+	}
+	if !strings.Contains(string(body), `"code":"warmup_pending"`) {
+		t.Fatalf("POST /v1/chat/completions body = %s, want to contain \"code\":\"warmup_pending\"", string(body))
+	}
+
+	// 2. Armed warmup gate: POST /v1/messages returns 503, Retry-After: 1, "code":"warmup_pending"
+	res, err = http.Post(ts.URL+"/v1/messages", "application/json", bytes.NewReader(messagesPayload))
+	if err != nil {
+		t.Fatalf("POST /v1/messages: %v", err)
+	}
+	body, _ = io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("POST /v1/messages status = %d, want 503", res.StatusCode)
+	}
+	if got := res.Header.Get("Retry-After"); got != "1" {
+		t.Fatalf("POST /v1/messages Retry-After = %q, want 1", got)
+	}
+	if !strings.Contains(string(body), `"code":"warmup_pending"`) {
+		t.Fatalf("POST /v1/messages body = %s, want to contain \"code\":\"warmup_pending\"", string(body))
+	}
+
+	// 3. Mark warmup complete
+	srv.MarkWarmupComplete(100 * time.Millisecond)
+
+	// 4. Post-warmup: POST /v1/chat/completions returns 200 OK
+	res, err = http.Post(ts.URL+"/v1/chat/completions", "application/json", bytes.NewReader(chatPayload))
+	if err != nil {
+		t.Fatalf("POST /v1/chat/completions post-warmup: %v", err)
+	}
+	body, _ = io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST /v1/chat/completions post-warmup status = %d, want 200; body=%s", res.StatusCode, string(body))
+	}
+
+	// 5. Post-warmup: POST /v1/messages returns 200 OK
+	res, err = http.Post(ts.URL+"/v1/messages", "application/json", bytes.NewReader(messagesPayload))
+	if err != nil {
+		t.Fatalf("POST /v1/messages post-warmup: %v", err)
+	}
+	body, _ = io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST /v1/messages post-warmup status = %d, want 200; body=%s", res.StatusCode, string(body))
+	}
 }
