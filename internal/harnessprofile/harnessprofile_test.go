@@ -26,6 +26,11 @@ func TestLookupReproducesGuardDetectTable(t *testing.T) {
 		{"/opt/openai/codex", WireOpenAIResponses, true}, // absolute path still matches
 		{"gemini", WireGemini, true},
 		{"gemini.ps1", WireGemini, true},
+		{"fak", WireOpenAI, true},
+		{"fak-agent", WireOpenAI, true},
+		{"/usr/local/bin/fak", WireOpenAI, true},
+		{`C:\Program Files\fak\fak.exe`, WireOpenAI, true},
+		{"fak.cmd", WireOpenAI, true},
 		{"opencode", WireOpenAI, true},
 		{"opencode.cmd", WireOpenAI, true},
 		{"aider", WireOpenAI, true},
@@ -89,6 +94,7 @@ func TestRepointEncodesTodaysWiring(t *testing.T) {
 	want := map[string][]RepointMechanism{
 		"claude":         {RepointEnv, RepointSettingsFile},
 		"codex":          {RepointEnv, RepointCLIConfig},
+		"fak":            {RepointEnv, RepointSettingsFile},
 		"gemini":         {RepointEnv, RepointSystemSettingsEnv},
 		"openai-generic": {RepointEnv},
 		"pi":             {RepointEnv, RepointExtension},
@@ -143,5 +149,49 @@ func TestProfilesIsACopy(t *testing.T) {
 	a[0].Name = "mutated"
 	if b := Profiles(); b[0].Name == "mutated" {
 		t.Errorf("Profiles() must return a fresh copy; registry was mutated through it")
+	}
+}
+
+func TestLookupFakHarnessProfile(t *testing.T) {
+	for _, tc := range []struct {
+		cmd      string
+		wantName string
+	}{
+		{"fak", "fak"},
+		{"fak-agent", "fak"},
+		{"FAK", "fak"},
+		{"FAK-AGENT", "fak"},
+		{"/usr/local/bin/fak", "fak"},
+		{`C:\Program Files\fak\fak.exe`, "fak"},
+		{"fak-agent.exe", "fak"},
+	} {
+		p, ok := Lookup(tc.cmd)
+		if !ok {
+			t.Fatalf("Lookup(%q) ok = false, want true", tc.cmd)
+		}
+		if p.Name != tc.wantName {
+			t.Errorf("Lookup(%q).Name = %q, want %q", tc.cmd, p.Name, tc.wantName)
+		}
+		if p.Wire != WireOpenAI {
+			t.Errorf("Lookup(%q).Wire = %q, want %q", tc.cmd, p.Wire, WireOpenAI)
+		}
+		if p.AdapterVersion != "1.0.0" {
+			t.Errorf("Lookup(%q).AdapterVersion = %q, want 1.0.0", tc.cmd, p.AdapterVersion)
+		}
+		if p.DefaultBaseURL != "https://api.openai.com/v1" {
+			t.Errorf("Lookup(%q).DefaultBaseURL = %q, want https://api.openai.com/v1", tc.cmd, p.DefaultBaseURL)
+		}
+		if !p.HasRepoint(RepointEnv) || !p.HasRepoint(RepointSettingsFile) {
+			t.Errorf("Lookup(%q).Repoint = %v, want env and settings-file", tc.cmd, p.Repoint)
+		}
+		if p.Credential.Kind != CredentialEnvKey || p.Credential.EnvKey != "OPENAI_API_KEY" {
+			t.Errorf("Lookup(%q).Credential = %+v, want OPENAI_API_KEY", tc.cmd, p.Credential)
+		}
+		if p.ConfigHomeGlob != ".fak*" {
+			t.Errorf("Lookup(%q).ConfigHomeGlob = %q, want .fak*", tc.cmd, p.ConfigHomeGlob)
+		}
+		if p.Identity != IdentityEnvKey {
+			t.Errorf("Lookup(%q).Identity = %q, want env-key", tc.cmd, p.Identity)
+		}
 	}
 }
