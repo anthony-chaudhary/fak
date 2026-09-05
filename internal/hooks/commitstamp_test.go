@@ -638,6 +638,7 @@ func TestLaneForPath_conventionFallback(t *testing.T) {
 		"docs/x.md":                  "docs",
 		"README.md":                  "docs", // allowed root doc -> docs lane
 		"BENCHMARK-TEMPLATE.md":      "docs", // allowed root doc -> docs lane
+		"GOAL-my-feature.md":         "docs", // allowed root doc -> docs lane
 		"MISC.txt":                   "",     // ordinary root file: no lane
 	}
 	for path, want := range cases {

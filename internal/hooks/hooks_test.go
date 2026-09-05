@@ -286,7 +286,7 @@ func hasFileAdmissionFindingForPath(fs []Finding, path string) bool {
 
 func TestDocPlacement_rootMD(t *testing.T) {
 	d := diffOf("/r", map[string][]string{})
-	d.StagedPaths = []string{"RANDOM-NOTE-2026-06-25.md", "README.md", "AGENT.md", "GEMINI.md", "docs/x.md"}
+	d.StagedPaths = []string{"RANDOM-NOTE-2026-06-25.md", "README.md", "AGENT.md", "GEMINI.md", "GOAL-my-feature.md", "docs/x.md"}
 	f, _ := gateDocPlacement(d)
 	if !hasFindingFor(f, "DOC_PLACEMENT", "RANDOM-NOTE-2026-06-25.md") {
 		t.Errorf("a non-allowlisted root .md must be flagged; got %+v", f)
@@ -297,6 +297,9 @@ func TestDocPlacement_rootMD(t *testing.T) {
 		}
 		if strings.Contains(bad.Detail, "AGENT.md") || strings.Contains(bad.Detail, "GEMINI.md") {
 			t.Errorf("agent harness root docs are allowlisted")
+		}
+		if strings.Contains(bad.Detail, "GOAL-my-feature.md") {
+			t.Errorf("GOAL-my-feature.md is allowlisted")
 		}
 		if strings.Contains(bad.Detail, "docs/x.md") {
 			t.Errorf("a non-root .md is fine")

@@ -34,7 +34,7 @@ type fileReader interface {
 func rootMDPlacementFindings(paths []string) []Finding {
 	var findings []Finding
 	for _, n := range paths {
-		if strings.HasSuffix(n, ".md") && !strings.Contains(n, "/") && !allowedRootMD[n] {
+		if strings.HasSuffix(n, ".md") && !strings.Contains(n, "/") && !isAllowedRootMD(n) {
 			findings = append(findings, Finding{
 				Gate: "DOC_PLACEMENT", File: n,
 				Detail: "dated/research doc at the repo root — belongs under docs/notes/ (reached via INDEX.md): " + n + "  ->  docs/notes/" + n,

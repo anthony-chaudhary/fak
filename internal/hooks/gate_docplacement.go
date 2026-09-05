@@ -26,6 +26,11 @@ var allowedRootMD = map[string]bool{
 	"TRADEMARK.md": true, "LICENSING.md": true,
 }
 
+// isAllowedRootMD returns true if the root markdown file is allowlisted or is a unique goal file (GOAL-*.md).
+func isAllowedRootMD(name string) bool {
+	return allowedRootMD[name] || (strings.HasPrefix(name, "GOAL-") && strings.HasSuffix(name, ".md"))
+}
+
 // datedRE matches a YYYY-MM-DD date anywhere in a note basename (check_doc_placement.py L106).
 var datedRE = regexp.MustCompile(`20\d\d-\d\d-\d\d`)
 

@@ -208,6 +208,7 @@ func TestParity_DocPlacement(t *testing.T) {
 	runParity(t, "DOC_PLACEMENT", "check_doc_placement.py", []parityCase{
 		{"clean-allowlisted", map[string]string{"ROADMAP.md": "# roadmap\n"}, false},
 		{"clean-subdir", map[string]string{"docs/note.md": "# note\n"}, false},
+		{"clean-goal", map[string]string{"GOAL-my-feature.md": "# goal\n"}, false},
 		{"bad-root", map[string]string{"MY-RANDOM-DOC.md": "# stray\n"}, true},
 	})
 }
