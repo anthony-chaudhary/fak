@@ -1,5 +1,3 @@
-//go:build wip_mcp_codex_inventory
-
 package gateway
 
 import (

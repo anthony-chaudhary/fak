@@ -1,5 +1,3 @@
-//go:build wip_tool_routing
-
 package gateway
 
 import (
