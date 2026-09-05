@@ -98,6 +98,9 @@ func PlanWaves(issues []Issue, opts WavePlanOptions) Plan {
 		if laneLower != "" && excludedLanesMap[laneLower] {
 			continue
 		}
+		if opts.LaneFilter != "" && !strings.EqualFold(iss.Lane, opts.LaneFilter) {
+			continue
+		}
 
 		key := strings.TrimSpace(iss.Key)
 		if key != "" {
@@ -425,7 +428,12 @@ func isUrgent(iss Issue) bool {
 }
 
 func issuesCollide(a, b Issue, graph map[string]map[string]struct{}) bool {
-	// 1. Path tree overlap
+	// 1. Same lane always collides (two workers cannot hold the same lane lease simultaneously)
+	if a.Lane != "" && b.Lane != "" && strings.EqualFold(a.Lane, b.Lane) {
+		return true
+	}
+
+	// 2. Path tree overlap
 	if len(a.Paths) > 0 && len(b.Paths) > 0 {
 		for _, pa := range a.Paths {
 			for _, pb := range b.Paths {
@@ -434,8 +442,6 @@ func issuesCollide(a, b Issue, graph map[string]map[string]struct{}) bool {
 				}
 			}
 		}
-	} else if a.Lane != "" && b.Lane != "" && strings.EqualFold(a.Lane, b.Lane) {
-		return true
 	}
 
 	// 2. Package import graph contention
