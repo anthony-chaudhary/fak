@@ -509,6 +509,9 @@ func TestTransientMeasureErrorRecoversWithoutTrippingBreaker(t *testing.T) {
 	// Check unmeasured error evidence rows.
 	for _, idx := range []int{0, 2} {
 		r := res.Rows[idx]
+		if r.Decision != "RETRY" {
+			t.Errorf("row %d: decision=%s, want RETRY", idx, r.Decision)
+		}
 		if r.Measured {
 			t.Errorf("row %d: measured=true, want false for transient error attempt", idx)
 		}
@@ -730,5 +733,58 @@ func TestHarnessCustomIsTransientClassifier(t *testing.T) {
 	}
 	if attempts != 2 {
 		t.Fatalf("attempts=%d, want 2 (recovered via custom classifier)", attempts)
+	}
+}
+
+// TestTransientRecoveryAttemptRowsProduceRetryDecision verifies that transient
+// error recovery attempt rows are stamped with Decision == "RETRY" rather than
+// "REVERT", ensuring downstream meta-RSI consumers filter them out correctly.
+func TestTransientRecoveryAttemptRowsProduceRetryDecision(t *testing.T) {
+	calls := 0
+	h := Harness{
+		MetricName:      "p50",
+		LowerBetter:     true,
+		BaselineRefName: "main",
+		BaselineMetric: func() (float64, string, error) {
+			return 10.0, "sha-base", nil
+		},
+		TransientMeasurementRecoveryLimit: 2,
+		Candidates: func() []Candidate {
+			return []Candidate{{Label: "c1"}}
+		},
+		Measure: func(c Candidate) (Measurement, error) {
+			calls++
+			if calls == 1 {
+				return Measurement{}, NewTransientMeasureError(errors.New("connection reset"))
+			}
+			return Measurement{Metric: 5.0, SuiteGreen: true, TruthClean: true}, nil
+		},
+	}
+
+	res, err := Run(h, nil, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(res.Rows) != 2 {
+		t.Fatalf("len(res.Rows)=%d, want 2 (1 transient retry attempt + 1 kept result)", len(res.Rows))
+	}
+
+	// Attempt 1: transient error recovery row must have Decision == "RETRY".
+	attemptRow := res.Rows[0]
+	if attemptRow.Decision != "RETRY" {
+		t.Fatalf("attempt row decision=%q, want %q", attemptRow.Decision, "RETRY")
+	}
+	if attemptRow.Measured {
+		t.Fatalf("attempt row measured=%v, want false", attemptRow.Measured)
+	}
+	if attemptRow.Kept {
+		t.Fatalf("attempt row kept=%v, want false", attemptRow.Kept)
+	}
+
+	// Attempt 2: final kept row.
+	finalRow := res.Rows[1]
+	if finalRow.Decision != "KEEP" {
+		t.Fatalf("final row decision=%q, want %q", finalRow.Decision, "KEEP")
 	}
 }

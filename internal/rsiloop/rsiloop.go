@@ -241,7 +241,7 @@ type Row struct {
 	Improved     bool       `json:"improved"`    // strict directional gain vs the running baseline
 	SuiteGreen   bool       `json:"suite_green"` // derived from a real suite run
 	TruthClean   bool       `json:"truth_clean"` // derived from a real truth syscall
-	Decision     string     `json:"decision"`    // KEEP | REVERT | ESCALATE | TRACK
+	Decision     string     `json:"decision"`    // KEEP | REVERT | ESCALATE | TRACK | RETRY
 	Kept         bool       `json:"kept"`        // the non-forgeable keep-bit (shipgate)
 	BreakerCount int        `json:"breaker_nonkeeps"`
 	BaselineRef  string     `json:"baseline_ref"`       // the resolved SHA the baseline + every candidate forked from
@@ -421,7 +421,7 @@ func RunObserved(h Harness, j *Journal, k, maxCycles int, obs Observer) (Result,
 				Improved:     false,
 				SuiteGreen:   false,
 				TruthClean:   false,
-				Decision:     shipgate.REVERT.String(),
+				Decision:     "RETRY",
 				Kept:         false,
 				BreakerCount: gate.ConsecutiveNonKeeps(),
 				BaselineRef:  baseRef,
