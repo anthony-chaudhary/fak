@@ -24,7 +24,7 @@ func write(t *testing.T, root, path, body string) {
 }
 func fixture(t *testing.T) string {
 	r := t.TempDir()
-	m := Manifest{Schema: "fak-project-assets/1", Skills: SkillPolicy{CanonicalRoot: ".claude/skills", CodexRoot: ".agents/skills", Include: []string{"SKILL.md"}}, Memories: Policy{CanonicalRoot: ".claude/memory", Include: []string{"*.md"}, Exclude: []Exclusion{{"MEMORY.md", "index"}}, StartupCommand: "fak memory recall --intent <task> --json"}, GoalPrompts: Policy{CanonicalRoot: ".claude/goal-prompts", Include: []string{"template.md"}, Exclude: []Exclusion{{"resolve-[0-9]*.md", "run fuel"}}}, Harnesses: map[string]Harness{"codex": {}, "fak-native": {}}}
+	m := Manifest{Schema: "fak-project-assets/1", Skills: SkillPolicy{CanonicalRoot: ".claude/skills", CodexRoot: ".agents/skills", Include: []string{"SKILL.md"}}, Memories: Policy{CanonicalRoot: ".claude/memory", Include: []string{"*.md"}, Exclude: []Exclusion{{"MEMORY.md", "index"}}, StartupCommand: "fak memory recall --intent <task> --json"}, GoalPrompts: Policy{CanonicalRoot: ".claude/goal-prompts", Include: []string{"template.md"}, Exclude: []Exclusion{{"resolve-[0-9]*.md", "run fuel"}}}, Harnesses: map[string]Harness{"codex": {}, "fak-native": {}, "opencode": {}}}
 	b, _ := json.Marshal(m)
 	write(t, r, ManifestPath, string(b))
 	write(t, r, ".claude/skills/verify/SKILL.md", "---\nname: verify\ndescription: Verify.\n---\nbody\n")
@@ -209,7 +209,7 @@ func baseManifest() string {
  "skills":{"canonical_root":".claude/skills","codex_root":".agents/skills","include":["SKILL.md"],"exclude":[]},
  "memories":{"canonical_root":".claude/memory","include":["*.md"],"exclude":[],"startup_command":"CLAUDE.md"},
  "goal_prompts":{"canonical_root":".claude/goal-prompts","include":["*.md"],"exclude":[]},
- "harnesses":{"claude":{"skills":"native","memories":"native","goal_prompts":"native"},"codex":{"skills":"generated-adapter","memories":"AGENTS.md","goal_prompts":"native"},"fak-native":{"skills":"native-loader","memories":"AGENTS.md","goal_prompts":"native-loader"}}
+ "harnesses":{"claude":{"skills":"native","memories":"native","goal_prompts":"native"},"codex":{"skills":"generated-adapter","memories":"AGENTS.md","goal_prompts":"native"},"fak-native":{"skills":"native-loader","memories":"AGENTS.md","goal_prompts":"native-loader"},"opencode":{"skills":"generated-adapter","memories":"AGENTS.md","goal_prompts":"native"}}
 }`
 }
 
@@ -455,5 +455,185 @@ func TestVerifyOpenCodeSnapshot(t *testing.T) {
 	// Test repo root opencode.json directly
 	if err := VerifyOpenCodeSnapshot("../.."); err != nil {
 		t.Fatalf("repo root opencode.json failed verification: %v", err)
+	}
+}
+
+func TestEnsureAutoSync(t *testing.T) {
+	// 1. autoSync=false when not in parity returns receipt with ZeroUnexplainedGaps=false without syncing
+	r := fixture(t)
+	receipt, err := Ensure(r, false)
+	if err != nil {
+		t.Fatalf("unexpected error with autoSync=false: %v", err)
+	}
+	if receipt.ZeroUnexplainedGaps {
+		t.Fatal("expected ZeroUnexplainedGaps=false on desynchronized fixture")
+	}
+	if len(receipt.Harnesses["codex"].Stale) == 0 {
+		t.Fatal("expected stale codex adapters before sync")
+	}
+	if len(receipt.Harnesses["opencode"].Stale) == 0 {
+		t.Fatal("expected stale opencode adapters before sync")
+	}
+	adapterPath := filepath.Join(r, ".agents", "skills", "verify", "SKILL.md")
+	if _, err := os.Stat(adapterPath); !os.IsNotExist(err) {
+		t.Fatal("expected adapter to not exist before sync")
+	}
+
+	// 2. autoSync=true when not in parity synchronizes adapters and returns receipt with ZeroUnexplainedGaps=true
+	receiptSync, err := Ensure(r, true)
+	if err != nil {
+		t.Fatalf("unexpected error with autoSync=true: %v", err)
+	}
+	if !receiptSync.ZeroUnexplainedGaps {
+		t.Fatalf("expected ZeroUnexplainedGaps=true after autoSync, got %#v", receiptSync.Harnesses["opencode"])
+	}
+	if len(receiptSync.Harnesses["codex"].Stale) != 0 {
+		t.Fatalf("expected 0 stale codex adapters after autoSync, got %d", len(receiptSync.Harnesses["codex"].Stale))
+	}
+	if len(receiptSync.Harnesses["opencode"].Stale) != 0 {
+		t.Fatalf("expected 0 stale opencode adapters after autoSync, got %d", len(receiptSync.Harnesses["opencode"].Stale))
+	}
+	if _, err := os.Stat(adapterPath); err != nil {
+		t.Fatalf("expected adapter to exist after autoSync: %v", err)
+	}
+
+	// 3. autoSync=false on already synchronized workspace succeeds and returns parity
+	receiptClean, err := Ensure(r, false)
+	if err != nil {
+		t.Fatalf("unexpected error on synchronized workspace: %v", err)
+	}
+	if !receiptClean.ZeroUnexplainedGaps {
+		t.Fatal("expected ZeroUnexplainedGaps=true on synchronized workspace")
+	}
+	if len(receiptClean.Harnesses["codex"].Stale) != 0 || len(receiptClean.Harnesses["opencode"].Stale) != 0 {
+		t.Fatal("expected no stale adapters on synchronized workspace")
+	}
+
+	// 4. Ensure returns error when manifest cannot be loaded
+	badDir := t.TempDir()
+	if _, err := Ensure(badDir, false); err == nil {
+		t.Fatal("expected error for missing manifest with autoSync=false")
+	}
+	if _, err := Ensure(badDir, true); err == nil {
+		t.Fatal("expected error for missing manifest with autoSync=true")
+	}
+}
+
+func TestEnsureSync(t *testing.T) {
+	r := fixture(t)
+
+	// 1. Initial run on fixture without adapters: synced should be true, err nil, ZeroUnexplainedGaps true after sync
+	receiptSync, synced, err := EnsureSync(r)
+	if err != nil {
+		t.Fatalf("unexpected error on EnsureSync: %v", err)
+	}
+	if !synced {
+		t.Fatal("expected synced=true when adapters are missing")
+	}
+	if !receiptSync.ZeroUnexplainedGaps {
+		t.Fatalf("expected ZeroUnexplainedGaps=true after EnsureSync, got %#v", receiptSync.Harnesses["opencode"])
+	}
+
+	// 2. Second run when already in parity: synced should be false, err nil
+	receiptClean, synced2, err2 := EnsureSync(r)
+	if err2 != nil {
+		t.Fatalf("unexpected error on second EnsureSync: %v", err2)
+	}
+	if synced2 {
+		t.Fatal("expected synced=false when workspace is already in parity")
+	}
+	if !receiptClean.ZeroUnexplainedGaps {
+		t.Fatal("expected ZeroUnexplainedGaps=true on clean workspace")
+	}
+
+	// 3. Error case when manifest is missing
+	badDir := t.TempDir()
+	if _, synced3, err3 := EnsureSync(badDir); err3 == nil || !synced3 {
+		t.Fatalf("expected error and synced=true for badDir, got err=%v synced=%v", err3, synced3)
+	}
+}
+
+func TestOpenCodeHarnessReceiptAndZeroUnexplainedGaps(t *testing.T) {
+	r := fixture(t)
+	receipt, err := Ensure(r, true)
+	if err != nil {
+		t.Fatalf("Ensure failed: %v", err)
+	}
+	if !receipt.ZeroUnexplainedGaps {
+		t.Fatalf("expected ZeroUnexplainedGaps=true, got false")
+	}
+
+	opencode, ok := receipt.Harnesses["opencode"]
+	if !ok {
+		t.Fatal("expected opencode harness receipt to be present")
+	}
+	codex, ok := receipt.Harnesses["codex"]
+	if !ok {
+		t.Fatal("expected codex harness receipt to be present")
+	}
+
+	if len(opencode.Canonical) != len(codex.Canonical) {
+		t.Fatalf("canonical mismatch: opencode=%d, codex=%d", len(opencode.Canonical), len(codex.Canonical))
+	}
+	for i := range opencode.Canonical {
+		if opencode.Canonical[i] != codex.Canonical[i] {
+			t.Fatalf("canonical item %d mismatch: %q vs %q", i, opencode.Canonical[i], codex.Canonical[i])
+		}
+	}
+	if len(opencode.Imported) != len(codex.Imported) {
+		t.Fatalf("imported mismatch: opencode=%d, codex=%d", len(opencode.Imported), len(codex.Imported))
+	}
+	for i := range opencode.Imported {
+		if opencode.Imported[i] != codex.Imported[i] {
+			t.Fatalf("imported item %d mismatch: %q vs %q", i, opencode.Imported[i], codex.Imported[i])
+		}
+	}
+	if len(opencode.Excluded) != len(codex.Excluded) {
+		t.Fatalf("excluded mismatch: opencode=%d, codex=%d", len(opencode.Excluded), len(codex.Excluded))
+	}
+	if len(opencode.Duplicate) != 0 {
+		t.Fatalf("expected 0 duplicates, got %d", len(opencode.Duplicate))
+	}
+	if len(opencode.Stale) != 0 {
+		t.Fatalf("expected 0 stale, got %d", len(opencode.Stale))
+	}
+
+	// Verify missing opencode in manifest causes ZeroUnexplainedGaps to be false
+	noOpenCodeDir := t.TempDir()
+	noOpenCodeManifest := Manifest{
+		Schema:      "fak-project-assets/1",
+		Skills:      SkillPolicy{CanonicalRoot: ".claude/skills", CodexRoot: ".agents/skills", Include: []string{"SKILL.md"}},
+		Memories:    Policy{CanonicalRoot: ".claude/memory", Include: []string{"*.md"}, StartupCommand: "cmd"},
+		GoalPrompts: Policy{CanonicalRoot: ".claude/goal-prompts", Include: []string{"*.md"}},
+		Harnesses:   map[string]Harness{"codex": {}, "fak-native": {}},
+	}
+	b, _ := json.Marshal(noOpenCodeManifest)
+	write(t, noOpenCodeDir, ManifestPath, string(b))
+	write(t, noOpenCodeDir, ".claude/skills/demo/SKILL.md", "---\nname: demo\ndescription: demo\n---\n")
+	write(t, noOpenCodeDir, ".claude/memory/m.md", "mem\n")
+	write(t, noOpenCodeDir, ".claude/goal-prompts/g.md", "goal\n")
+	noOpenCodeReceipt, err := Build(noOpenCodeDir, true)
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	if noOpenCodeReceipt.ZeroUnexplainedGaps {
+		t.Fatal("expected ZeroUnexplainedGaps=false when opencode is missing from manifest")
+	}
+
+	// Verify repo root project-assets achieves ZeroUnexplainedGaps and includes opencode
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	repoReceipt, err := Ensure(repoRoot, false)
+	if err != nil {
+		t.Fatalf("Ensure repo root failed: %v", err)
+	}
+	if !repoReceipt.ZeroUnexplainedGaps {
+		t.Fatalf("repo root has unexplained gaps: codex stale=%v opencode stale=%v dup=%v", repoReceipt.Harnesses["codex"].Stale, repoReceipt.Harnesses["opencode"].Stale, repoReceipt.Harnesses["opencode"].Duplicate)
+	}
+	repoOpenCode, ok := repoReceipt.Harnesses["opencode"]
+	if !ok {
+		t.Fatal("repo root receipt missing opencode harness")
+	}
+	if len(repoOpenCode.Stale) != 0 {
+		t.Fatalf("repo root opencode harness has stale adapters: %v", repoOpenCode.Stale)
 	}
 }
