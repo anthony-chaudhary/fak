@@ -468,6 +468,8 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 	// Normalization consumers finish synchronously before the next norm stage.
 	// Every row is overwritten, so one request-local panel serves both stages.
 	normPanel := make([]float32, P*H)
+	// Attention and projection consumers finish before the next layer reuses this panel.
+	attnOut := make([]float32, P*nH*hd)
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
 		ql := m.q8Layer(l)
@@ -511,7 +513,8 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 		s.Cache.V[l] = append(s.Cache.V[l], V...)
 		Kl, Vl := s.Cache.K[l], s.Cache.V[l]
 
-		attnOut := make([]float32, P*nH*hd)
+		// Attention accumulates values, so discard the previous layer output.
+		clear(attnOut)
 		tA := tic()
 		attnPrefillInto(attnOut, Q, Kl, Vl, P, base, nH, hd, w, grp, cfg.windowForLayer(l), l, scale, attnCap, scoreDot, s.M.attnObs)
 		toc(&tAttn, tA)
