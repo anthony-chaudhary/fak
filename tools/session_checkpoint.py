@@ -97,6 +97,7 @@ REPO_ROOT = os.path.dirname(TOOLS_DIR)
 # history is the time series, no unbounded growth.
 PRIVATE_REPO = os.path.normpath(os.path.join(REPO_ROOT, "..", "fak-private"))
 PRIVATE_ARCHIVE_REL = os.path.join("session-checkpoints", "fak")
+PRIVATE_GOALS_REL = os.path.join("goals", "fak")
 
 
 def _py() -> str:
@@ -240,6 +241,18 @@ def discover_active_transcript(repo: str, *, home: str | None = None,
     return max(candidates, key=os.path.getmtime)
 
 
+def _dir_or_git_has_files(repo: str, rel: str) -> bool:
+    full = os.path.join(repo, rel)
+    if os.path.isdir(full):
+        for _, _, files in os.walk(full):
+            if files:
+                return True
+    elif os.path.exists(full):
+        return True
+    rc, out = _git(repo, "ls-files", "--", rel)
+    return rc == 0 and bool(out.strip())
+
+
 def _git_commit_push(archive: str, do_push: bool, *, message: str) -> int:
     """Stage + commit ``archive`` in its repo; optionally push. Fail-soft (returns 1 on a
     real git error, 0 otherwise). Mirrors memory_sync._git_commit_push exactly -- the same
@@ -254,16 +267,24 @@ def _git_commit_push(archive: str, do_push: bool, *, message: str) -> int:
     if not os.path.isdir(os.path.join(repo, ".git")):
         print(f"  commit: no git repo found above {archive}; skipped", file=sys.stderr)
         return 1
-    rel = os.path.relpath(archive, repo)
-    rc, out = _git(repo, "add", "--", rel)
+
+    targets: list[str] = []
+    for rel in [PRIVATE_ARCHIVE_REL, PRIVATE_GOALS_REL]:
+        full = os.path.join(repo, rel)
+        if os.path.exists(full) and _dir_or_git_has_files(repo, rel):
+            targets.append(rel)
+    if not targets:
+        targets.append(os.path.relpath(archive, repo))
+
+    rc, out = _git(repo, "add", "--", *targets)
     if rc != 0:
         print(f"  git add failed: {out}", file=sys.stderr)
         return 1
-    rc, _ = _git(repo, "diff", "--cached", "--quiet", "--", rel)
+    rc, _ = _git(repo, "diff", "--cached", "--quiet", "--", *targets)
     if rc == 0:
         print("  commit: nothing staged (checkpoint unchanged)")
         return 0
-    rc, out = _git(repo, "commit", "-s", "-m", message, "--", rel)
+    rc, out = _git(repo, "commit", "-s", "-m", message, "--", *targets)
     if rc != 0:
         print(f"  git commit failed: {out}", file=sys.stderr)
         return 1
@@ -327,9 +348,125 @@ def render_md(rec: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def sync_goal_artifacts(ws_root: str, private_repo: str, *, dry: bool = False) -> dict[str, Any]:
+    """Discover, scan, and safely copy goal artifacts into private_repo under PRIVATE_GOALS_REL.
+
+    Discovers:
+      - goals/*.md
+      - goals/subagents/*.md
+      - canonical registry ~/.fak/goals.json (or .fak/goals.json)
+      - .fak/goal-park/*.json
+
+    Scans text for secrets via needle_hits(..., secrets_only=True) and skips hits.
+    Copies files safely using atomic temp file + replace and re-stat verification.
+    """
+    target_base = os.path.join(private_repo, PRIVATE_GOALS_REL)
+    candidates: list[tuple[str, str]] = []
+
+    # 1. goals/*.md
+    goals_dir = os.path.join(ws_root, "goals")
+    if os.path.isdir(goals_dir):
+        for name in sorted(os.listdir(goals_dir)):
+            p = os.path.join(goals_dir, name)
+            if os.path.isfile(p) and name.endswith(".md"):
+                candidates.append((p, os.path.join("goals", name)))
+
+    # 2. goals/subagents/*.md
+    sub_dir = os.path.join(ws_root, "goals", "subagents")
+    if os.path.isdir(sub_dir):
+        for name in sorted(os.listdir(sub_dir)):
+            p = os.path.join(sub_dir, name)
+            if os.path.isfile(p) and name.endswith(".md"):
+                candidates.append((p, os.path.join("goals", "subagents", name)))
+
+    # 3. canonical registry: ~/.fak/goals.json (or .fak/goals.json)
+    home = os.environ.get("FAK_CHECKPOINT_HOME") or os.path.expanduser("~")
+    reg_candidates = [
+        os.path.join(ws_root, ".fak", "goals.json"),
+        os.path.join(home, ".fak", "goals.json"),
+    ]
+    for cand in reg_candidates:
+        if os.path.isfile(cand):
+            candidates.append((cand, os.path.join("registry", "goals.json")))
+            break
+
+    # 4. .fak/goal-park/*.json
+    park_dir = os.path.join(ws_root, ".fak", "goal-park")
+    if os.path.isdir(park_dir):
+        for name in sorted(os.listdir(park_dir)):
+            p = os.path.join(park_dir, name)
+            if os.path.isfile(p) and name.endswith(".json"):
+                candidates.append((p, os.path.join("goal-park", name)))
+
+    synced_count = 0
+    skipped_count = 0
+    synced_paths: list[str] = []
+
+    for src_path, rel_dest in candidates:
+        try:
+            with open(src_path, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError:
+            skipped_count += 1
+            continue
+
+        hits = needle_hits(text, ws_root, secrets_only=True)
+        if hits:
+            skipped_count += 1
+            continue
+
+        dest_path = os.path.join(target_base, rel_dest)
+        if dry:
+            synced_count += 1
+            synced_paths.append(dest_path)
+            continue
+
+        dest_dir = os.path.dirname(dest_path)
+        os.makedirs(dest_dir, exist_ok=True)
+
+        try:
+            st1 = os.stat(src_path)
+            with open(src_path, "rb") as sf:
+                raw = sf.read()
+            st2 = os.stat(src_path)
+            if st1.st_mtime != st2.st_mtime or st1.st_size != st2.st_size:
+                skipped_count += 1
+                continue
+
+            fd, tmp = tempfile.mkstemp(prefix=".tmp-goalsync-", dir=dest_dir)
+            try:
+                with os.fdopen(fd, "wb") as tf:
+                    tf.write(raw)
+                os.replace(tmp, dest_path)
+            finally:
+                if os.path.exists(tmp):
+                    try:
+                        os.unlink(tmp)
+                    except OSError:
+                        pass
+
+            st_dest = os.stat(dest_path)
+            if st_dest.st_size != len(raw):
+                skipped_count += 1
+                continue
+
+            synced_count += 1
+            synced_paths.append(dest_path)
+        except OSError:
+            skipped_count += 1
+            continue
+
+    return {
+        "synced_count": synced_count,
+        "skipped_count": skipped_count,
+        "paths": synced_paths,
+    }
+
+
 # --- the router --------------------------------------------------------------------
 def route_private(body: str, host: str, *, do_push: bool, dry: bool,
-                  private_repo: str = PRIVATE_REPO) -> dict[str, Any]:
+                  private_repo: str = PRIVATE_REPO,
+                  ws_root: str | None = None) -> dict[str, Any]:
     """private route: GATE on hard SECRETS only (the private repo may hold the operator's
     own host/account names), then write+commit+push the raw record."""
     hits = needle_hits(body, REPO_ROOT, secrets_only=True)
@@ -338,7 +475,9 @@ def route_private(body: str, host: str, *, do_push: bool, dry: bool,
                 "hits": hits, "wrote": False}
     archive = os.path.join(private_repo, PRIVATE_ARCHIVE_REL)
     dst = os.path.join(archive, f"{host}.md")
+    root = ws_root if ws_root is not None else REPO_ROOT
     if dry:
+        sync_goal_artifacts(root, private_repo, dry=True)
         return {"route": "private", "ok": True, "wrote": False, "dry_run": True, "path": dst}
     if not os.path.isdir(private_repo):
         return {"route": "private", "ok": False, "reason": f"private repo not found: {private_repo}",
@@ -346,6 +485,7 @@ def route_private(body: str, host: str, *, do_push: bool, dry: bool,
     os.makedirs(archive, exist_ok=True)
     with open(dst, "w", encoding="utf-8") as f:
         f.write(body)
+    sync_goal_artifacts(root, private_repo, dry=False)
     rc = _git_commit_push(archive, do_push,
                           message="chore(checkpoint): session work-status checkpoint (fak)")
     return {"route": "private", "ok": rc == 0, "wrote": True, "path": dst,
@@ -407,7 +547,8 @@ def route_checkpoint(rec: dict[str, Any], *, route: str, public_target: str | No
     out: dict[str, Any] = {"route": route, "results": []}
     if route in ("private", "both"):
         out["results"].append(route_private(body, rec["host"], do_push=do_push,
-                                             dry=dry, private_repo=private_repo))
+                                             dry=dry, private_repo=private_repo,
+                                             ws_root=rec.get("repo_root", REPO_ROOT)))
     if route in ("public", "both"):
         out["results"].append(route_public(body, public_target=public_target,
                                             dry=dry, post_fn=post_fn))

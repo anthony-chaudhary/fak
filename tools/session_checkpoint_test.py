@@ -282,5 +282,95 @@ def test_cli_no_discover_keeps_pure_floor(monkeypatch, capsys):
         assert "transcript" not in doc["record"]
 
 
+# --- goal artifact synchronization ------------------------------------------------
+def test_sync_goal_artifacts_discovers_and_copies(tmp_path):
+    ws = tmp_path / "workspace"
+    (ws / "goals" / "subagents").mkdir(parents=True)
+    (ws / ".fak" / "goal-park").mkdir(parents=True)
+    (ws / "goals" / "GOAL-test-1.md").write_text("# Goal Test 1\nSpec\n", encoding="utf-8")
+    (ws / "goals" / "subagents" / "GOAL-sub-1.md").write_text("# Subagent Goal\n", encoding="utf-8")
+    (ws / ".fak" / "goals.json").write_text('{"schema":"fak-goal-registry/1","goals":[]}', encoding="utf-8")
+    (ws / ".fak" / "goal-park" / "park-1.json").write_text('{"schema":"fak.goal-park.v1"}', encoding="utf-8")
+
+    priv = tmp_path / "fak-private"
+    priv.mkdir()
+
+    res = sc.sync_goal_artifacts(str(ws), str(priv), dry=False)
+    assert res["synced_count"] == 4
+    assert res["skipped_count"] == 0
+    assert len(res["paths"]) == 4
+
+    target = priv / "goals" / "fak"
+    assert (target / "goals" / "GOAL-test-1.md").is_file()
+    assert (target / "goals" / "subagents" / "GOAL-sub-1.md").is_file()
+    assert (target / "registry" / "goals.json").is_file()
+    assert (target / "goal-park" / "park-1.json").is_file()
+
+
+def test_sync_goal_artifacts_skips_secret_shapes(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAK_CHECKPOINT_HOME", str(tmp_path / "home"))
+    ws = tmp_path / "workspace"
+    (ws / "goals").mkdir(parents=True)
+    (ws / "goals" / "GOAL-clean.md").write_text("# Clean Goal\nNo secrets\n", encoding="utf-8")
+    (ws / "goals" / "GOAL-leaked.md").write_text(f"# Leaked Goal\n{PLANTED_NEEDLE}\n", encoding="utf-8")
+
+    priv = tmp_path / "fak-private"
+    priv.mkdir()
+
+    res = sc.sync_goal_artifacts(str(ws), str(priv), dry=False)
+    assert res["synced_count"] == 1
+    assert res["skipped_count"] == 1
+
+    target = priv / "goals" / "fak"
+    assert (target / "goals" / "GOAL-clean.md").is_file()
+    assert not (target / "goals" / "GOAL-leaked.md").exists()
+
+
+def test_sync_goal_artifacts_dry_run_writes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAK_CHECKPOINT_HOME", str(tmp_path / "home"))
+    ws = tmp_path / "workspace"
+    (ws / "goals").mkdir(parents=True)
+    (ws / "goals" / "GOAL-dry.md").write_text("# Dry Goal\n", encoding="utf-8")
+
+    priv = tmp_path / "fak-private"
+    priv.mkdir()
+
+    res = sc.sync_goal_artifacts(str(ws), str(priv), dry=True)
+    assert res["synced_count"] == 1
+    assert not (priv / "goals").exists()
+
+
+def test_route_private_copies_goals_and_subagents(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAK_CHECKPOINT_HOME", str(tmp_path / "home"))
+    ws = tmp_path / "workspace"
+    (ws / "goals" / "subagents").mkdir(parents=True)
+    (ws / "goals" / "GOAL-sample-42.md").write_text("# Goal 42", encoding="utf-8")
+    (ws / "goals" / "subagents" / "GOAL-sub-42.md").write_text("# Sub 42", encoding="utf-8")
+    monkeypatch.setattr(sc, "REPO_ROOT", str(ws))
+
+    priv = tmp_path / "fak-private"
+    (priv / "session-checkpoints" / "fak").mkdir(parents=True)
+    subprocess.run(["git", "-C", str(priv), "init", "-q"], check=False)
+    subprocess.run(["git", "-C", str(priv), "config", "user.email", "t@t"], check=False)
+    subprocess.run(["git", "-C", str(priv), "config", "user.name", "t"], check=False)
+
+    rec = _rec()
+    res = sc.route_private(sc.render_md(rec), rec["host"], do_push=False, dry=False,
+                           private_repo=str(priv))
+    assert res["ok"] is True and res["wrote"] is True
+    goal_spec = priv / "goals" / "fak" / "goals" / "GOAL-sample-42.md"
+    goal_sub = priv / "goals" / "fak" / "goals" / "subagents" / "GOAL-sub-42.md"
+    assert goal_spec.is_file()
+    assert goal_sub.is_file()
+    assert goal_spec.read_text(encoding="utf-8") == "# Goal 42"
+    assert goal_sub.read_text(encoding="utf-8") == "# Sub 42"
+
+    log = subprocess.run(["git", "-C", str(priv), "show", "--name-only", "--pretty=format:"],
+                         capture_output=True, text=True)
+    assert "goals/fak/goals/GOAL-sample-42.md" in log.stdout
+    assert "goals/fak/goals/subagents/GOAL-sub-42.md" in log.stdout
+    assert "session-checkpoints/fak/test-host.md" in log.stdout
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

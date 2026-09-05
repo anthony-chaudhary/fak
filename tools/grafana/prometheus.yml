@@ -88,3 +88,10 @@ scrape_configs:
       - targets: ["host.docker.internal:9098"]
         labels:
           service: fak-fleet
+
+  - job_name: fak_native_slo
+    metrics_path: /fak-native-slo.prom
+    static_configs:
+      - targets: ["host.docker.internal:9099"]
+        labels:
+          service: fak-native-slo

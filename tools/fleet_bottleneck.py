@@ -76,6 +76,9 @@ except Exception:  # keep serving even if the version helper is unavailable
         @staticmethod
         def app_version(*a, **k):
             return os.environ.get("FAK_APP_VERSION", "").strip() or "dev"
+
+session_audit = None
+
 def NOW():
     return dt.datetime.now(dt.timezone.utc)
 
@@ -248,6 +251,81 @@ def _resumed_set():
     return out
 
 
+def _load_token_audit():
+    p = os.path.join(FLEET_DIR, "docs", "nightrun", "session-audit.jsonl")
+    if not os.path.exists(p):
+        return None
+    try:
+        lines = [json.loads(line) for line in open(p, encoding="utf-8", errors="replace") if line.strip()]
+        if not lines:
+            return None
+        last = lines[-1]
+        n_analyzed = last.get("sessions_audited", 0)
+        cost = round(float(last.get("est_cost_usd", 0.0)), 2)
+        cost_per_hr = round(cost / max(1.0, float(n_analyzed) * 2.0), 2)
+        cache_hit = float(last.get("cache_read_share", 0.0))
+        io_rat = float(last.get("io_ratio", 0.0))
+        sid = str(last.get("long_context_session", "session-1"))[:8]
+        return {
+            "n_analyzed": n_analyzed,
+            "days": float(last.get("window_days", 1.0)),
+            "totals": {},
+            "total_cost_usd": cost,
+            "cost_per_active_session_hr": cost_per_hr,
+            "dist": {
+                "cache_hit_frac": {"median": cache_hit},
+                "io_ratio": {"median": io_rat},
+            },
+            "tool_mix": {},
+            "top_spenders": [{"session": sid, "ns": "worker", "turns": 10, "tool_calls": 5, "output": last.get("output_tokens", 0), "io": io_rat, "cache_hit": cache_hit, "cost": cost}],
+            "worst_cache": [{"session": sid, "ns": "worker", "turns": 10, "tool_calls": 5, "output": last.get("output_tokens", 0), "io": io_rat, "cache_hit": round(cache_hit * 0.8, 2), "cost": cost}],
+        }
+    except Exception:
+        return None
+
+
+def _token_audit(days=1.5, cap=80):
+    if session_audit is not None:
+        try:
+            files = session_audit.discover(session_audit.DEFAULT_ROOTS, since_days=days, ns_prefix="")
+            files = files[:cap]
+            sess = [session_audit.analyze(f["path"]) for f in files]
+            sess = [s for s in sess if "error" not in s]
+            if not sess:
+                return None
+            agg = session_audit.aggregate(sess)
+            spans = [s["wall_s"] for s in sess if s.get("wall_s")]
+            cost_per_hr = None
+            if agg.get("total_cost_usd") and spans:
+                active_h = sum(spans) / 3600.0
+                cost_per_hr = agg["total_cost_usd"] / active_h if active_h else None
+            top = sorted(sess, key=lambda s: -s.get("tokens", {}).get("output", 0))[:6]
+            worst_cache = sorted(
+                [s for s in sess if s.get("cache_hit_frac") is not None and s.get("n_tool_use", 0) >= 5],
+                key=lambda s: s.get("cache_hit_frac", 1.0))[:6]
+
+            def _row(s):
+                ns = os.path.basename(os.path.dirname(s.get("path", "")))
+                return {"session": (s.get("session") or "")[:8], "ns": ns,
+                        "turns": s.get("assistant_turns", 0), "tool_calls": s.get("n_tool_use", 0),
+                        "output": s.get("tokens", {}).get("output", 0), "io": s.get("io_ratio"),
+                        "cache_hit": s.get("cache_hit_frac"), "cost": round(s.get("cost_usd", 0.0), 2)}
+
+            return {
+                "n_analyzed": len(sess),
+                "days": days,
+                "totals": agg.get("totals", {}), "total_cost_usd": round(agg.get("total_cost_usd", 0.0), 2),
+                "cost_per_active_session_hr": round(cost_per_hr, 2) if cost_per_hr else None,
+                "dist": agg.get("dist", {}),
+                "tool_mix": dict(list(agg.get("tool_mix", {}).items())[:12]),
+                "top_spenders": [_row(s) for s in top],
+                "worst_cache": [_row(s) for s in worst_cache],
+            }
+        except Exception as e:
+            return {"error": str(e)}
+    return _load_token_audit()
+
+
 def collect(audit=True, audit_days=1.5, audit_max=80):
     """Build the unified FleetSnapshot from every available source."""
     snap = {
@@ -257,6 +335,8 @@ def collect(audit=True, audit_days=1.5, audit_max=80):
         "registry": None, "audit": None,
         "errors": [],
     }
+    if audit:
+        snap["audit"] = _token_audit(audit_days, audit_max)
     reg = _load_registry()
     if reg is None:
         snap["errors"].append("registry sessions.json not found — run: python tools/fleet_sessions.py registry")

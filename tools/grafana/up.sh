@@ -166,7 +166,7 @@ start_bg() {  # name port-check-path command… → records only processes this 
         } >"$pid_file_tmp"
         /bin/mv "$pid_file_tmp" "$pid_file"
         cd "$runtime"
-        FAK_WORKSPACE_ROOT="$workspace" "$@" &
+        FAK_WORKSPACE_ROOT="$workspace" FAK_LEDGER_ROOT="$workspace" "$@" &
         child=$!
         wait "$child"
       ' "fak-grafana-owner=$RUN_ID" "$pid_file" "$RUN_ID" "$label" "$runtime" "$ROOT" "$@"
@@ -357,7 +357,7 @@ start_bg fleet_bottleneck "$BOTTLENECK_PORT /metrics" \
 # fleet dashboards drill down. Deliberately OUTSIDE the FAK_NO_GATEWAY guard: it needs
 # no gateway, no weights and no network.
 start_bg fak_fleet "$FLEET_METRICS_PORT /metrics" \
-  "$FAK_BIN" fleet metrics --serve --addr "0.0.0.0:$FLEET_METRICS_PORT"
+  "$FAK_BIN" fleet metrics --serve --addr "0.0.0.0:$FLEET_METRICS_PORT" --usage-ledger "$ROOT/.fak/nightrun/gateway-usage.jsonl"
 
 if [ "${FAK_NO_GATEWAY:-0}" != "1" ]; then
   start_bg fak_gateway "${GATEWAY_ADDR##*:} /metrics" \
@@ -366,7 +366,11 @@ if [ "${FAK_NO_GATEWAY:-0}" != "1" ]; then
   # each scrape (no model/weights needed). Its panels read "No data" until the
   # docs/nightrun/*.jsonl ledgers exist — run `fak cachevalue feed --once` to populate.
   start_bg fak_cachevalue "$CACHEVALUE_PORT /metrics" \
-    "$FAK_BIN" cachevalue metrics --serve --addr "0.0.0.0:$CACHEVALUE_PORT"
+    "$FAK_BIN" cachevalue metrics --serve --addr "0.0.0.0:$CACHEVALUE_PORT" \
+      --ledger "$ROOT/docs/nightrun/cache-value.jsonl" \
+      --savings-ledger "$ROOT/docs/nightrun/cache-savings.jsonl" \
+      --usage-ledger "$ROOT/.fak/nightrun/gateway-usage.jsonl" \
+      --ablation-dir "$ROOT/experiments/ablate"
 else
   warn "FAK_NO_GATEWAY=1 — skipping fak serve; the FAK Gateway + Cache Value dashboards will show no data."
 fi
