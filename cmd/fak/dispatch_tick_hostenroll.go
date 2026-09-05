@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -77,15 +79,23 @@ func dispatchTickHostEnroll(root, runsDir string, opts dispatchTickOptions, pick
 	}
 
 	// Enroll the routed issue as ONE microagent into a real in-process host over one
-	// shared (offline prototype) gateway and one audit sink — the M2 host lifecycle
+	// shared gateway and one audit sink — the M2 host lifecycle
 	// (Spawn -> Step -> retire -> Reap), not an exec.Command spawn.
 	sink := &hostEnrollSink{}
-	host, err := microagent.NewHost(hostEnrollPlanner{}, microagent.Config{Workers: 1, Queue: 1, Audit: sink})
+	planner := dispatchHostEnrollWorker(opts, account)
+	host, err := microagent.NewHost(planner, microagent.Config{Workers: 1, Queue: 1, Audit: sink})
 	if err != nil {
 		return dispatchHostEnrollFailed(runsDir, opts, payload, finish, fmt.Sprintf("microagent host construct failed for issue #%d: %v", target, err))
 	}
 	defer host.Close()
-	if err := host.Spawn(plan.AgentID, &hostEnrollAgent{issue: target}); err != nil {
+	agentInst := &hostEnrollAgent{
+		issue:    target,
+		root:     root,
+		lane:     pick.Lane,
+		tree:     pick.Tree,
+		maxTurns: opts.MaxTurns,
+	}
+	if err := host.Spawn(plan.AgentID, agentInst); err != nil {
 		return dispatchHostEnrollFailed(runsDir, opts, payload, finish, fmt.Sprintf("host refused to enroll microagent %q for issue #%d: %v", plan.AgentID, target, err))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), dispatchHostEnrollDrainTimeout)
@@ -106,7 +116,14 @@ func dispatchTickHostEnroll(root, runsDir string, opts dispatchTickOptions, pick
 		"cancels":         sink.count(microagent.EventCancel),
 		"distinct_agents": sink.agentCount(),
 	}
-	payload["host_result"] = map[string]any{"agent_id": plan.AgentID, "steps": steps, "done": done}
+	payload["host_result"] = map[string]any{
+		"agent_id":   plan.AgentID,
+		"steps":      steps,
+		"done":       done,
+		"turns":      agentInst.metrics.Turns,
+		"tool_calls": agentInst.metrics.ToolCalls,
+		"metrics":    agentInst.metrics,
+	}
 
 	if drainErr != nil || !done {
 		return dispatchHostEnrollFailed(runsDir, opts, payload, finish, fmt.Sprintf("microagent %q for issue #%d did not retire done (done=%v drain_err=%v)", plan.AgentID, target, done, drainErr))
@@ -127,7 +144,7 @@ func dispatchTickHostEnroll(root, runsDir string, opts dispatchTickOptions, pick
 	payload["ok"] = true
 	payload["action"] = "enrolled"
 	payload["verdict"] = "ENROLLED"
-	payload["reason"] = fmt.Sprintf("enrolled issue #%d (lane %q) as microagent %q into the in-process %s host under %q (%d prototype step(s), lease tree %v); full in-process issue resolution awaits #2001 (RunArm stepping)", target, pick.Lane, plan.AgentID, opts.Backend, account.Tag, steps, plan.Tree)
+	payload["reason"] = fmt.Sprintf("enrolled issue #%d (lane %q) as microagent %q into the in-process %s host under %q (%d step(s), %d turn(s), %d tool call(s), lease tree %v)", target, pick.Lane, plan.AgentID, opts.Backend, account.Tag, steps, agentInst.metrics.Turns, agentInst.metrics.ToolCalls, plan.Tree)
 	recordDispatchPayload(runsDir, opts.Backend, payload)
 	return finish(payload)
 }
@@ -161,11 +178,9 @@ func dispatchHostEnrollFailed(runsDir string, opts dispatchTickOptions, payload 
 // generous liveness backstop, not a steady-state budget.
 const dispatchHostEnrollDrainTimeout = 30 * time.Second
 
-// hostEnrollPlanner is the minimal offline agent.Planner the #2030 prototype host runs
+// hostEnrollPlanner is the minimal offline agent.Planner the prototype host runs
 // on: it returns a deterministic canned completion with no network, credentials, or
-// model call. A production host would carry the real shared gateway (internal/gateway
-// over a served model); this prototype only needs to prove the dispatch->host->one-
-// shared-gateway seam, so it stays fully offline.
+// model call.
 type hostEnrollPlanner struct{}
 
 func (hostEnrollPlanner) Model() string { return "micro-prototype" }
@@ -177,16 +192,82 @@ func (hostEnrollPlanner) Complete(ctx context.Context, _ []agent.Message, _ []ag
 	return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "microagent host-enroll prototype step"}}, nil
 }
 
-// hostEnrollAgent is the bounded prototype microagent one routed issue enrolls as. It
-// takes ONE turn through the host-shared gateway and retires done — it performs NO edits
-// and NO tool calls. The REAL claude issue-resolution loop (per-turn stepping of
-// internal/agent RunArm) is #2001, still OPEN; until that lands, the micro path proves
-// the enrollment seam, not full in-process issue resolution.
-type hostEnrollAgent struct{ issue int }
+// dispatchHostEnrollWorkerHook is an optional test hook to intercept host-enroll worker creation.
+var dispatchHostEnrollWorkerHook func(opts dispatchTickOptions, account dispatchtick.Account) agent.Planner
+
+// dispatchHostEnrollWorker returns the agent.Planner for in-process issue resolution.
+// If live with account credentials/endpoint, it returns a provider HTTP planner;
+// if offline or in tests without credentials, it returns hostEnrollPlanner{}.
+var dispatchHostEnrollWorker = defaultDispatchHostEnrollWorker
+
+func defaultDispatchHostEnrollWorker(opts dispatchTickOptions, account dispatchtick.Account) agent.Planner {
+	if dispatchHostEnrollWorkerHook != nil {
+		if p := dispatchHostEnrollWorkerHook(opts, account); p != nil {
+			return p
+		}
+	}
+	if !opts.Live {
+		return hostEnrollPlanner{}
+	}
+
+	model := firstString(opts.WorkerModel, account.Model)
+	if model == "" {
+		model = "claude-3-5-sonnet-20241022"
+	}
+
+	if key := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); key != "" || strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL")) != "" {
+		baseURL := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL"))
+		if p, err := agent.NewProviderHTTPPlanner("anthropic", baseURL, model, key); err == nil {
+			return p
+		}
+	}
+
+	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" || strings.TrimSpace(os.Getenv("OPENAI_BASE_URL")) != "" || strings.TrimSpace(os.Getenv("OPENAI_API_BASE")) != "" {
+		baseURL := firstString(strings.TrimSpace(os.Getenv("OPENAI_BASE_URL")), strings.TrimSpace(os.Getenv("OPENAI_API_BASE")))
+		if p, err := agent.NewProviderHTTPPlanner("openai", baseURL, model, key); err == nil {
+			return p
+		}
+	}
+
+	if gw := strings.TrimSpace(os.Getenv("FAK_GATEWAY_URL")); gw != "" {
+		return agent.NewHTTPPlanner(gatewayBaseURL(gw), model, strings.TrimSpace(os.Getenv("FAK_API_KEY")))
+	}
+
+	return hostEnrollPlanner{}
+}
+
+// hostEnrollAgent executes in-process issue resolution through the owned agent loop.
+type hostEnrollAgent struct {
+	issue    int
+	root     string
+	lane     string
+	tree     []string
+	maxTurns int
+	opts     []agent.RunOption
+	metrics  agent.ArmMetrics
+	traces   []agent.CallTrace
+	err      error
+}
 
 func (a *hostEnrollAgent) Step(ctx context.Context, gw microagent.Gateway) (bool, error) {
-	msg := []agent.Message{{Role: agent.RoleUser, Content: fmt.Sprintf("enroll issue #%d into the in-process host (prototype turn)", a.issue)}}
-	if _, err := gw.Complete(ctx, msg, nil); err != nil {
+	task := fmt.Sprintf("Resolve issue #%d in lane %s (fence tree: %v)", a.issue, a.lane, a.tree)
+	maxTurns := a.maxTurns
+	if maxTurns <= 0 {
+		maxTurns = 10
+	}
+	runOpts := append([]agent.RunOption(nil), a.opts...)
+	if a.root != "" {
+		codeCat, armErr := agent.ArmFocusedCodeTools(a.root)
+		if armErr == nil {
+			defer agent.DisarmCodeTools()
+			runOpts = append(runOpts, agent.WithToolCatalog(codeCat))
+		}
+	}
+	m, traces, err := agent.RunGovernedArm(ctx, gw, task, maxTurns, runOpts...)
+	a.metrics = m
+	a.traces = traces
+	a.err = err
+	if err != nil {
 		return false, err
 	}
 	return true, nil
