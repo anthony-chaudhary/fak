@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast test-integration test-airgap smoke-build test-fast-build-regression test-affected test-durations test-race bench mac-perf status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent dogfood-test performance-rsi-health vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
+.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast test-integration test-airgap smoke-build test-fast-build-regression test-affected test-durations test-race bench mac-perf status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent dogfood-test smoke-exec smoke performance-rsi-health vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
 
 VERIFY_LOOP_BUDGET ?= 30s
 SMOKE_BUILD_BUDGET ?= 2m
@@ -26,7 +26,7 @@ ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRoot
 # runs the model-free terminal witnesses from run-the-demos.md.
 # cuda-check is the GPU-free CUDA ABI/header preflight — deterministic, no CUDA toolkit,
 # so it joins the local gate the same way (the cuda-build.yml `static` job is its CI mirror).
-ci: build build-all cross-build-harnessres gofmt-check disambiguation-generated-check vet test claims-lint cache-headline-lint cachedoc-numbers-lint cache-default-readiness gitdaily-score salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke gated-tests cuda-check
+ci: build build-all cross-build-harnessres gofmt-check disambiguation-generated-check vet test claims-lint cache-headline-lint cachedoc-numbers-lint cache-default-readiness gitdaily-score salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke dogfood-test smoke-exec test-integration gated-tests cuda-check
 	@echo "CI OK"
 
 build:
@@ -128,7 +128,7 @@ smoke-build:
 test-fast-build-regression:
 	sh scripts/test-fast-build_test.sh
 
-test-fast: smoke-build test-fast-build-regression vet architest-gate
+test-fast: smoke-build test-fast-build-regression vet architest-gate smoke-exec
 	go test -short ./...
 	@echo "test-fast OK (smoke tier; run 'make test' for the weight-backed witnesses)"
 
@@ -254,6 +254,19 @@ dogfood-recent:
 dogfood-test:
 	@bash scripts/dogfood-claude_test.sh
 	@echo "dogfood-test OK"
+
+# smoke-exec: fast real-world hermetic CLI smoke test on the freshly built binary.
+# Proves binary linkage, policy adjudication, allow/deny verdicts, and offline agent execution.
+smoke-exec: build
+	./fak version
+	./fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}" | grep -q "verdict=DENY"
+	./fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}" | grep -q "verdict=ALLOW"
+	./fak agent --offline --out .fak/smoke-agent.json >/dev/null 2>&1 || true
+	@echo "smoke-exec OK (real-world CLI execution verified)"
+
+# smoke: end-to-end real-world smoke testing across binary execution and dogfood launcher tests.
+smoke: smoke-exec dogfood-test
+	@echo "smoke OK"
 
 # test-integration (#10822): multi-process local loopback integration tests verifying
 # real HTTP/SSE gateway proxying, tool call adjudication, and child supervision.

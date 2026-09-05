@@ -36,6 +36,9 @@ var securityCriticalPrefixes = []string{
 	"internal/normgate/",    // the write-time result quarantine / normalize gate
 	"internal/gateway/",     // the wire gateway proxy, SSE streaming, and route adapters
 	"internal/repoguard/",   // tool-use interception and security hooks
+	"cmd/fak/",              // root CLI binary, verbs, and execution commands
+	"internal/engine/",      // in-kernel execution and inference engine
+	"internal/dogfood/",     // dogfood harnesses and issue bridge
 }
 
 // e2eWitnessTrailer is the attestation token an author stages to satisfy the rule: it certifies
@@ -90,7 +93,11 @@ func gateE2EOverMocks(d *StagedDiff) ([]Finding, error) {
 	// author has staged/attested the real end-to-end run the rule asks for.
 	for _, al := range d.AddedLines() {
 		lower := strings.ToLower(al.Text)
-		if strings.Contains(lower, e2eWitnessTrailer) || strings.Contains(lower, "shift-left-verified:") {
+		if strings.Contains(lower, e2eWitnessTrailer) ||
+			strings.Contains(lower, "shift-left-verified:") ||
+			strings.Contains(lower, "smoke-verified:") ||
+			strings.Contains(lower, "smoke-test:") ||
+			strings.Contains(lower, "real-world-verified:") {
 			return nil, nil
 		}
 	}
@@ -117,8 +124,8 @@ func gateE2EOverMocks(d *StagedDiff) ([]Finding, error) {
 // tree changed, the Hermes rule, and how to satisfy it (drive the real path, stage the `/verify`
 // output, or add an "E2E-verified:" or "Shift-left-verified:" trailer).
 func e2eDetail(prefix string) string {
-	return `security-critical surface "` + prefix + `" changed without a witnessed end-to-end run — ` +
-		`Hermes' rule: "mocks hide integration bugs". Drive the REAL path (the /verify skill, integration test, or dogfood probe) against a ` +
-		`temp home and stage its output, or add an "E2E-verified:" or "Shift-left-verified:" trailer citing the run, before landing. ` +
+	return `security-critical or runtime surface "` + prefix + `" changed without a witnessed end-to-end / real-world smoke run — ` +
+		`Hermes' rule: "mocks hide integration bugs". Drive the REAL path (fak validate --smoke, make smoke-exec, the /verify skill, integration test, or dogfood probe) against a ` +
+		`temp home and stage its output, or add an "E2E-verified:", "Shift-left-verified:", or "Smoke-verified:" trailer citing the run, before landing. ` +
 		`(advisory; FLEET_E2E_GUARD=block enforces, ALLOW_NO_E2E=1 skips once)`
 }

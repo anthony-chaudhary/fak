@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -66,6 +67,7 @@ func RunCIPreflight(stdout, stderr io.Writer, argv []string) int {
 	ref := fs.String("ref", "HEAD", "ref or sha of the committed tip to check")
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
 	skipBuild := fs.Bool("skip-build", false, "skip `go build ./...` (gofmt-only; much faster)")
+	smoke := fs.Bool("smoke", false, "run real-world binary smoke tests against the committed tip")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -126,6 +128,16 @@ func RunCIPreflight(stdout, stderr io.Writer, argv []string) int {
 		res.Failures = append(res.Failures, ciPreflightFailure{Step: "build", Detail: detail})
 	} else {
 		committedbuildwitness.Record(r, tip, "ci-preflight", time.Now())
+	}
+
+	// smoke: run real-world hermetic CLI smoke tests against the freshly compiled fak binary in the extracted tip
+	if *smoke && res.OK {
+		if detail, ok := goSmokeCheck(dir); !ok {
+			res.OK = false
+			res.Failures = append(res.Failures, ciPreflightFailure{Step: "smoke", Detail: detail})
+		}
+	} else if !*smoke {
+		res.Skipped = append(res.Skipped, "smoke")
 	}
 
 	if *asJSON {
@@ -291,6 +303,55 @@ func renderCIPreflight(w io.Writer, res ciPreflightResult) {
 			for _, ln := range strings.Split(f.Detail, "\n") {
 				fmt.Fprintf(w, "    %s\n", ln)
 			}
+		case "smoke":
+			fmt.Fprintln(w, "  [smoke] real-world CLI smoke test failed:")
+			for _, ln := range strings.Split(f.Detail, "\n") {
+				fmt.Fprintf(w, "    %s\n", ln)
+			}
 		}
 	}
+}
+
+func goSmokeCheck(dir string) (string, bool) {
+	smokeBin := "fak_ci_smoke"
+	if runtime.GOOS == "windows" {
+		smokeBin = "fak_ci_smoke.exe"
+	}
+	smokePath := filepath.Join(dir, smokeBin)
+	defer os.Remove(smokePath)
+
+	buildCmd := windowgate.Command("go", "build", "-o", smokeBin, "./cmd/fak")
+	buildCmd.Dir = dir
+	windowgate.ConfigureBackgroundCommand(buildCmd)
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		return fmt.Sprintf("compile smoke binary: %v: %s", err, strings.TrimSpace(string(out))), false
+	}
+
+	// 1. Version check
+	verCmd := windowgate.Command(smokePath, "version")
+	verCmd.Dir = dir
+	windowgate.ConfigureBackgroundCommand(verCmd)
+	if out, err := verCmd.CombinedOutput(); err != nil {
+		return fmt.Sprintf("smoke 'fak version': %v: %s", err, strings.TrimSpace(string(out))), false
+	}
+
+	// 2. Preflight DENY check
+	denyCmd := windowgate.Command(smokePath, "preflight", "--policy", "examples/customer-support-readonly-policy.json", "--tool", "refund_payment", "--args", "{}")
+	denyCmd.Dir = dir
+	windowgate.ConfigureBackgroundCommand(denyCmd)
+	denyOut, err := denyCmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(denyOut), "verdict=DENY") {
+		return fmt.Sprintf("smoke 'fak preflight' DENY failed: %v: %s", err, strings.TrimSpace(string(denyOut))), false
+	}
+
+	// 3. Preflight ALLOW check
+	allowCmd := windowgate.Command(smokePath, "preflight", "--policy", "examples/customer-support-readonly-policy.json", "--tool", "search_kb", "--args", "{}")
+	allowCmd.Dir = dir
+	windowgate.ConfigureBackgroundCommand(allowCmd)
+	allowOut, err := allowCmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(allowOut), "verdict=ALLOW") {
+		return fmt.Sprintf("smoke 'fak preflight' ALLOW failed: %v: %s", err, strings.TrimSpace(string(allowOut))), false
+	}
+
+	return "", true
 }

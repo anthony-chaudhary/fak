@@ -187,6 +187,7 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 	wslTests := fs.Bool("wsl-tests", defaultValidateWSLTests(runtime.GOOS), "run isolated affected tests through WSL (default on Windows hosts)")
 	testRun := fs.String("test-run", "", "go test -run expression for isolated affected tests")
 	auditSelection := fs.Bool("audit-selection", false, "compare affected tests with a full-suite truth run")
+	smoke := fs.Bool("smoke", false, "run real-world binary smoke tests against the freshly compiled fak binary in the isolated checkout")
 	var mine pathList
 	fs.Var(&mine, "mine", "owned changed path to overlay (repeatable; files and directories accepted)")
 	positional, parseErr := interspersedflags.Parse(fs, argv)
@@ -219,7 +220,7 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 		Overlays: validateOverlayProgress{Checked: []string{}, Skipped: requestedMinePaths(mine)},
 		Failures: []ciPreflightFailure{},
 	}
-	phaseOrder := validatePhaseOrder(*testOnly, *auditSelection)
+	phaseOrder := validatePhaseOrder(*testOnly, *auditSelection, *smoke)
 	recorder := validateRecorder{ctx: ctx, stderr: stderr, progress: *progress, started: started, phaseOrder: phaseOrder, res: &res}
 
 	phase := recorder.start("resolve_root")
@@ -325,6 +326,11 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 		}
 		if *auditSelection {
 			if code, timedOut := runValidateAuditSelectionPhase(ctx, stdout, &res, &recorder, r, dir, tip, paths, fileToPkg, selectedObservation, *wslTests, wslWorkspace, *asJSON); timedOut {
+				return code
+			}
+		}
+		if *smoke {
+			if code, timedOut := runValidateSmokePhase(ctx, stdout, &res, &recorder, dir, wslWorkspace, *asJSON); timedOut {
 				return code
 			}
 		}

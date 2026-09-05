@@ -20,6 +20,9 @@ func TestMatchSecurityPrefix(t *testing.T) {
 		{"internal/normgate/normgate.go", "internal/normgate/", true},
 		{"internal/gateway/gateway.go", "internal/gateway/", true},
 		{"internal/repoguard/repoguard.go", "internal/repoguard/", true},
+		{"cmd/fak/main.go", "cmd/fak/", true},
+		{"internal/engine/engine.go", "internal/engine/", true},
+		{"internal/dogfood/dogfood.go", "internal/dogfood/", true},
 		{`internal\adjudicator\secretposture.go`, "internal/adjudicator/", true}, // backslashes normalized
 		{"internal/cache/cache.go", "", false},                                   // not in the guarded set
 		{"README.md", "", false},                                                 // non-security
@@ -80,6 +83,9 @@ func TestE2EOverMocks_witnessTrailerSuppresses(t *testing.T) {
 	for _, token := range []string{
 		"// E2E-verified: drove `fak preflight` against a temp home; metadata egress DENY witnessed.",
 		"// Shift-left-verified: executed dogfood probe against loopback server.",
+		"// Smoke-verified: ran `fak validate --smoke` and verified hermetic execution.",
+		"// smoke-test: executed CLI preflight smoke on compiled binary.",
+		"// Real-world-verified: proved via live agent execution.",
 	} {
 		d := diffOf("/r", map[string][]string{
 			"internal/egressfloor/egressfloor.go": {

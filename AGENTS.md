@@ -149,11 +149,12 @@ dependencies means no `go.sum`.
 ```bash
 go build ./cmd/fak        # build ./fak (fak.exe on Windows)
 make build                # debuggable binary
-make test-fast            # build + vet + short tests
+make smoke                # fast real-world binary smoke + dogfood test
+make test-fast            # build + vet + short tests + smoke
 make mac-perf             # Mac shift-left: Metal tok/s and prefill bench
 make test-race            # WSL race gate
 make test                 # full suite, including model witnesses
-make ci                   # build + vet + test + claims lint
+make ci                   # build + vet + test + claims lint + smoke
 ```
 
 Build profiles and their one flag-delta table: [`docs/dev-tooling.md`](docs/dev-tooling.md#build-profiles).
@@ -167,7 +168,7 @@ mix your work with peers' WIP. Use the matching isolated verb:
 | Question | Command |
 |---|---|
 | Is committed trunk buildable and gofmt-clean? | `fak-dev ci-preflight` |
-| Does trunk plus only my paths pass build, vet, and affected tests? | `fak validate --mine <path>...` |
+| Does trunk plus only my paths pass build, vet, and affected tests? | `fak validate --mine <path>... [--smoke]` |
 | Does my change compile while hiding peer WIP? | `fak-dev buildcheck [--vet] [--mine <file>]` |
 | Does the literal working tree compile? | `fak-dev buildcheck --isolate=false --vet` |
 | Will my push break another worker's graph? | `fak hooks pre-push` |
@@ -233,8 +234,9 @@ just a code change and a "looks fixed". Pick the witness the bug actually has:
   proof. Land it in the same commit as the fix.
 - **Runtime / CLI / Dogfood / Integration** (an executable verb, CLI command, gateway protocol
   adapter, daemon hook, or multi-component flow): the proof is **meaningful execution of the real
-  path**, not an in-memory mock. Hermes' rule: "mocks hide integration bugs." For executable verbs
-  or protocol layers, run the real binary or harness in dogfood (`make dogfood-test`,
+  path**, not an in-memory mock. Hermes' rule: "mocks hide integration bugs." Shift real-world smoke testing
+  earlier into the process: run `fak validate --mine <paths> --smoke` in your inner loop, run `make smoke`
+  (`smoke-exec` + `dogfood-test`) or `make test-fast` before commit, and enforce execution via dogfood (`make dogfood-test`,
   `scripts/dogfood-claude.sh --probe`, `recent_feature_dogfood.py`) or a loopback integration test
   (`make test-integration`, `*integration*test.go`) against a temporary workspace before claiming
   completion. A green unit test that only asserts mocks or verifies syntax without executing the

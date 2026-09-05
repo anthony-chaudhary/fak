@@ -149,5 +149,32 @@ if ($null -ne $py) {
     Write-Host "== index-sync + repo-hygiene (warn): python not found; gates skipped =="
 }
 
+Write-Host "== real-world CLI smoke execution =="
+$fakBin = Join-Path $PSScriptRoot "..\fak.exe"
+if (-not (Test-Path $fakBin)) {
+    go build -o $fakBin ./cmd/fak
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+}
+& $fakBin version
+if ($LASTEXITCODE -ne 0) { exit 1 }
+$denyOut = & $fakBin preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
+if ($LASTEXITCODE -ne 0 -or $denyOut -notmatch "verdict=DENY") {
+    Write-Error "preflight refund_payment did not return DENY"
+    exit 1
+}
+$allowOut = & $fakBin preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}"
+if ($LASTEXITCODE -ne 0 -or $allowOut -notmatch "verdict=ALLOW") {
+    Write-Error "preflight search_kb did not return ALLOW"
+    exit 1
+}
+$null = & $fakBin agent --offline --out .fak/smoke-agent.json
+Write-Host "CLI smoke OK"
+
+if (Get-Command bash -ErrorAction SilentlyContinue) {
+    Write-Host "== dogfood test =="
+    bash scripts/dogfood-claude_test.sh
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+}
+
 Write-Host "CI OK"
 exit 0

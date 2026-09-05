@@ -387,3 +387,23 @@ func TestArmbenchWitnessDriftAcceptsFreshArtifact(t *testing.T) {
 		t.Fatalf("checked=%v detail=%q err=%v", checked, detail, err)
 	}
 }
+
+func TestCIPreflightRenderSmokeFailure(t *testing.T) {
+	var buf bytes.Buffer
+	res := ciPreflightResult{
+		Ref: "HEAD",
+		Tip: "1234567890abcdef",
+		OK:  false,
+		Failures: []ciPreflightFailure{
+			{Step: "smoke", Detail: "smoke 'fak preflight' DENY failed"},
+		},
+	}
+	renderCIPreflight(&buf, res)
+	got := buf.String()
+	if !strings.Contains(got, "[smoke] real-world CLI smoke test failed:") {
+		t.Fatalf("expected smoke failure header, got %q", got)
+	}
+	if !strings.Contains(got, "smoke 'fak preflight' DENY failed") {
+		t.Fatalf("expected detail in output, got %q", got)
+	}
+}

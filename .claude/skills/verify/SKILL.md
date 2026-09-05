@@ -51,6 +51,15 @@ go test ./<changed-pkg>/... -count=1
 Do not substitute a build (`go build`) or a vet for a test run — a green build
 is shape, not the test binding.
 
+## Step 1b - Execute Real-World Smoke Testing Earlier in the Process
+
+Mocks hide integration bugs (Hermes' rule). Whenever touching CLI, runtime, or security-critical paths, prove real execution early in development:
+
+- **Isolated Validation Smoke**: Run `fak validate --mine <changed-files> --smoke` in your inner loop to compile and execute preflight, version, and offline agent checks in an isolated overlay.
+- **Fast Local Smoke Tier**: Run `make smoke` (`smoke-exec` + `dogfood-test`) or `make test-fast` before staging.
+- **Dogfood Launcher Witness**: Run `bash scripts/dogfood-claude_test.sh` to verify process supervision and fail-fast deadlines.
+- **Attestation Trailer**: Add `Smoke-verified: <command>` or `E2E-verified: <command>` in commit or test files to satisfy the `E2E_OVER_MOCKS` boundary hook.
+
 ## Step 2 - Grade The Binding
 
 Fold the run into exactly one claim, the same grader the dispatch-tick witness
