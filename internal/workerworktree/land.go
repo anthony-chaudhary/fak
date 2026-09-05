@@ -302,7 +302,7 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		// race window, never regresses it. Path-scoped lands only (a whole-tree land has no
 		// safe isolated form here).
 		if isolatedLandEnabled() && len(paths) > 0 {
-			if r, handled := landIsolated(root, wtPath, diff, msgFile, paths, git, isolatedGitEnv, cfg); handled {
+			if r, handled := landIsolated(root, wtPath, diff, msgFile, paths, verify, git, isolatedGitEnv, cfg); handled {
 				r.DroppedOutOfLane = droppedOutOfLane
 				if r.OK && r.Committed {
 					r.Code = LandResultSuccess
@@ -433,6 +433,94 @@ func writePatch(diff string) (string, func(), error) {
 	return f.Name(), func() { os.Remove(f.Name()) }, nil
 }
 
+func parseIsolatedArgs(args []any) (VerifyHook, GitRunner, GitEnvRunner, landConfig) {
+	var (
+		verify VerifyHook
+		git    GitRunner
+		genv   GitEnvRunner
+		cfg    landConfig
+	)
+	toVerify := func(a any) VerifyHook {
+		if a == nil {
+			return nil
+		}
+		switch v := a.(type) {
+		case VerifyHook:
+			return v
+		case func(string) (bool, string):
+			return VerifyHook(v)
+		}
+		return nil
+	}
+	toGit := func(a any) GitRunner {
+		if a == nil {
+			return nil
+		}
+		switch v := a.(type) {
+		case GitRunner:
+			return v
+		case func(string, []string) (int, string):
+			return GitRunner(v)
+		}
+		return nil
+	}
+	toGenv := func(a any) GitEnvRunner {
+		if a == nil {
+			return nil
+		}
+		switch v := a.(type) {
+		case GitEnvRunner:
+			return v
+		case func(string, map[string]string, []string) (int, string):
+			return GitEnvRunner(v)
+		}
+		return nil
+	}
+	toCfg := func(a any) landConfig {
+		if a == nil {
+			return landConfig{}
+		}
+		switch v := a.(type) {
+		case landConfig:
+			return v
+		case *landConfig:
+			if v != nil {
+				return *v
+			}
+		}
+		return landConfig{}
+	}
+
+	switch len(args) {
+	case 0:
+	case 1:
+		git = toGit(args[0])
+	case 2:
+		git = toGit(args[0])
+		genv = toGenv(args[1])
+	case 3:
+		if c, ok := args[2].(landConfig); ok {
+			git = toGit(args[0])
+			genv = toGenv(args[1])
+			cfg = c
+		} else if c, ok := args[2].(*landConfig); ok && c != nil {
+			git = toGit(args[0])
+			genv = toGenv(args[1])
+			cfg = *c
+		} else {
+			verify = toVerify(args[0])
+			git = toGit(args[1])
+			genv = toGenv(args[2])
+		}
+	default:
+		verify = toVerify(args[0])
+		git = toGit(args[1])
+		genv = toGenv(args[2])
+		cfg = toCfg(args[3])
+	}
+	return verify, git, genv, cfg
+}
+
 // landIsolated is the race-free layer-2 land (#3547). It stages the worker diff into a
 // THROWAWAY index seeded from the current trunk HEAD, commits it as a child of that
 // exact HEAD via commit-tree, then advances the branch with a compare-and-swap
@@ -458,11 +546,8 @@ func writePatch(diff string) (string, func(), error) {
 // working tree is synced for `paths` (git checkout <new> -- paths) so trunk builders
 // see the landed change, matching the baseline post-state; a sync hiccup is reported
 // but does NOT unland.
-func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRunner, genv GitEnvRunner, configs ...landConfig) (Result, bool) {
-	cfg := landConfig{}
-	if len(configs) > 0 {
-		cfg = configs[0]
-	}
+func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...any) (Result, bool) {
+	verify, git, genv, cfg := parseIsolatedArgs(args)
 	tracker := cfg.tracker
 	finishIsolationAdmission := beginLandPhase(tracker, "isolated-admission", 0)
 	isolationAdmissionActive := true
@@ -639,6 +724,21 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 			}
 		}
 		finishRecovery()
+
+		if verify != nil {
+			finishVerify := beginLandPhase(tracker, "post-merge-validation", attempt)
+			rc, out := run(git, wtPath, []string{"checkout", "--detach", newCommit})
+			if rc != 0 {
+				finishVerify()
+				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: git checkout failed: " + tail(out, 200)}, true
+			}
+			ok, detail := verify(wtPath)
+			finishVerify()
+			if !ok {
+				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: " + detail}, true
+			}
+		}
+
 		// Compare-and-swap: move the branch ONLY if HEAD is still oldHEAD. A peer commit
 		// in the gap fails this → retry on the peer's new HEAD (#3570); the throwaway
 		// commit built on the stale base is simply abandoned, unreferenced.

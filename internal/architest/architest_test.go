@@ -840,6 +840,7 @@ var tier = map[string]int{
 	"harnessversion":             1,
 	"fakpack":                    2,
 	"allinone":                   5,
+	"airgaptest":                 5, // hermetic air-gapped harness integration contracts (#11387).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

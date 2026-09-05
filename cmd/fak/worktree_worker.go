@@ -320,7 +320,7 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	worktree := fs.String("worktree", "", "the worker's worktree dir to land from (required)")
 	baseSHA := fs.String("base-sha", "", "the sha the worktree was pinned at — the diff ref (default: HEAD)")
 	msgFile := fs.String("msg-file", "", "commit message file for `git commit -s -F` (default: derive from the worktree tip)")
-	verify := fs.String("verify", "off", "pre-land witness run IN the worktree: off | go-build")
+	verify := fs.String("verify", "go-build", "pre-land witness run IN the worktree: off | go-build (default: go-build)")
 	root := fs.String("root", "", "repo root the change lands on (default: discover from cwd)")
 	disambiguationTimeoutMS := fs.String("disambiguation-timeout-ms", "", "one shared whole-tree disambiguation deadline in milliseconds (1..900000; default 120000; no retries)")
 	coreLockWitness := fs.String("core-lock-maintenance-witness", "",
@@ -353,9 +353,9 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 
 	var hook workerworktree.VerifyHook
 	switch strings.ToLower(strings.TrimSpace(*verify)) {
-	case "", "off", "none":
+	case "off", "none":
 		hook = nil
-	case "go-build", "gobuild", "build":
+	case "", "go-build", "gobuild", "build":
 		hook = worktreeWorkerGoBuildVerify
 	default:
 		fmt.Fprintf(stderr, "fak worktree worker land: unknown --verify %q (want off|go-build)\n", *verify)

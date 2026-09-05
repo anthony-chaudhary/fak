@@ -806,6 +806,87 @@ func TestLandIsolatedHappyPathUsesTempIndexAndCASRefUpdate(t *testing.T) {
 	}
 }
 
+func TestLandIsolatedPostMergeVerificationFailureRefusesCAS(t *testing.T) {
+	g := newFakeGit().
+		reply("symbolic-ref", 0, "refs/heads/main\n").
+		reply("rev-parse", 0, "oldhead000\n").
+		reply("config", 0, "fak test\n").
+		reply("read-tree", 0, "").
+		reply("apply", 0, "").
+		reply("write-tree", 0, "treeSHA111\n").
+		reply("commit-tree", 0, "newc2223334445556667778889990001112223334\n").
+		reply("checkout", 0, "") // checkout --detach <newCommit>
+	msg := writeMsg(t, "feat(x): do the thing (fak x)")
+
+	verifyCalled := false
+	var verifiedPath string
+	failingVerify := func(wtPath string) (bool, string) {
+		verifyCalled = true
+		verifiedPath = wtPath
+		return false, "syntax error in merged code"
+	}
+
+	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", msg, []string{"x"}, failingVerify, g.run, g.runEnv)
+	if !handled {
+		t.Fatalf("expected handled=true, got %v", handled)
+	}
+	if res.OK {
+		t.Fatalf("expected res.OK=false, got %+v", res)
+	}
+	if !verifyCalled || verifiedPath != "/wt" {
+		t.Fatalf("expected verify to be called on /wt, called=%v path=%q", verifyCalled, verifiedPath)
+	}
+	expectedReason := "post-merge compilation verification failed, refusing CAS update: syntax error in merged code"
+	if res.Reason != expectedReason {
+		t.Fatalf("expected reason %q, got %q", expectedReason, res.Reason)
+	}
+
+	// CAS update must be refused and update-ref must never be called.
+	ur := g.callsWithPrefix("update-ref", "refs/heads/main")
+	if len(ur) != 0 {
+		t.Fatalf("expected update-ref never to be called, got: %v", ur)
+	}
+
+	// Confirm checkout --detach was called on wtPath with newCommit.
+	co := g.callsWithPrefix("checkout", "--detach")
+	if len(co) != 1 || len(co[0]) < 3 || !strings.HasPrefix(co[0][2], "newc222") {
+		t.Fatalf("expected checkout --detach <newCommit>, got %v", co)
+	}
+}
+
+func TestLandIsolatedPostMergeVerificationSuccessProceedsWithCAS(t *testing.T) {
+	g := newFakeGit().
+		reply("symbolic-ref", 0, "refs/heads/main\n").
+		reply("rev-parse", 0, "oldhead000\n").
+		reply("config", 0, "fak test\n").
+		reply("read-tree", 0, "").
+		reply("apply", 0, "").
+		reply("write-tree", 0, "treeSHA111\n").
+		reply("commit-tree", 0, "newc2223334445556667778889990001112223334\n").
+		reply("checkout", 0, ""). // checkout --detach <newCommit>
+		reply("update-ref", 0, "").
+		reply("checkout", 0, "") // checkout <newCommit> -- paths
+	msg := writeMsg(t, "feat(x): do the thing (fak x)")
+
+	verifyCalled := false
+	passingVerify := func(wtPath string) (bool, string) {
+		verifyCalled = true
+		return true, ""
+	}
+
+	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", msg, []string{"x"}, passingVerify, g.run, g.runEnv)
+	if !handled || !res.OK {
+		t.Fatalf("expected handled=true res.OK=true, got handled=%v res=%+v", handled, res)
+	}
+	if !verifyCalled {
+		t.Fatalf("expected verify to be called")
+	}
+	ur := g.callsWithPrefix("update-ref", "refs/heads/main")
+	if len(ur) != 1 {
+		t.Fatalf("expected update-ref to be called once, got: %v", ur)
+	}
+}
+
 func TestLandIsolatedDisambiguationRefusalPreservesStateAndWorkerDiff(t *testing.T) {
 	g := isolatedHappyFake()
 	oldRead := readDisambiguation

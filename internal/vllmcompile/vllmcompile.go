@@ -6,70 +6,34 @@ import (
 	"strings"
 )
 
-// Block is the `vllm_compile` artifact block recorded at benchmark start for one
-// served-engine row. A bench artifact carries one Block per compared row (raw
-// vLLM, fak-fronted vLLM, SGLang/llama when comparable) so no row is silently
-// cold. Pointer fields distinguish "observed false" from "not observed": a nil
-// CompileCacheEnabled means the harness never captured the cache state, which is
-// itself gate-relevant — an unobserved cache cannot certify a tuned baseline.
+// Block records the compile, CUDA-graph, and warmup execution state for a served engine.
 type Block struct {
-	// Engine names the served engine this block describes: "vllm",
-	// "vllm+fak" (fak-fronted vLLM), "sglang", "llama", ...
-	Engine string `json:"engine,omitempty"`
-
-	// EngineCommit is the engine commit/version measured (e.g. a vLLM commit or
-	// version string), pinning the baseline to a known build.
-	EngineCommit string `json:"engine_commit,omitempty"`
-
-	// CompileCacheEnabled reports whether the torch.compile artifact cache was
-	// enabled. nil = not observed; *false = disabled (cold); *true = enabled.
-	CompileCacheEnabled *bool `json:"compile_cache_enabled,omitempty"`
-
-	// CompileCacheKey is the compile cache key/hash when the engine exposes it.
-	CompileCacheKey string `json:"compile_cache_key,omitempty"`
-
-	// CUDAGraphMode is the runtime CUDA-graph dispatch mode: "full",
-	// "piecewise", or "none". Recorded for provenance; not itself a gate axis
-	// ("none" is a legitimate tuned configuration).
-	CUDAGraphMode string `json:"cuda_graph_mode,omitempty"`
-
-	// CaptureSizes are the CUDA-graph capture batch sizes, when captured.
-	CaptureSizes []int `json:"cuda_graph_capture_sizes,omitempty"`
-
-	// WarmupComplete reports whether warmup finished before the measured
-	// window. nil = not observed; *false = warmup did not complete (cold).
-	WarmupComplete *bool `json:"warmup_complete,omitempty"`
-
-	// RequestTimeCompilation is true when any request triggered compilation
-	// during the measured window — the defining signature of a cold reading.
-	RequestTimeCompilation bool `json:"request_time_compilation"`
+	Engine                 string `json:"engine,omitempty"`
+	EngineCommit           string `json:"engine_commit,omitempty"`
+	CompileCacheEnabled    *bool  `json:"compile_cache_enabled,omitempty"`
+	CompileCacheKey        string `json:"compile_cache_key,omitempty"`
+	CUDAGraphMode          string `json:"cuda_graph_mode,omitempty"`
+	CaptureSizes           []int  `json:"cuda_graph_capture_sizes,omitempty"`
+	WarmupComplete         *bool  `json:"warmup_complete,omitempty"`
+	RequestTimeCompilation bool   `json:"request_time_compilation"`
 }
 
-// Class is the tuned-baseline classification of a recorded compile block.
+// Class classifies whether an engine block meets tuned baseline criteria.
 type Class string
 
 const (
-	// ClassTuned: cache enabled, warmup complete, no request-time compilation —
-	// a legitimate tuned baseline the net-true-value standard may quote.
+	// ClassTuned indicates cache was enabled, warmup completed, and no request compilation occurred.
 	ClassTuned Class = "tuned"
-	// ClassColdStart: the engine paid compile latency inside the measured
-	// window — cache disabled, warmup incomplete, or a request-time compilation
-	// event. A diagnostic reading, never a tuned baseline.
+	// ClassColdStart indicates compilation latency occurred during the measurement window.
 	ClassColdStart Class = "cold-start"
-	// ClassDiagnostic: compile/warmup state was not observed, so the row cannot
-	// be certified tuned. Report it; do not quote it as tuned.
+	// ClassDiagnostic indicates compilation or warmup state was unobserved.
 	ClassDiagnostic Class = "diagnostic"
 )
 
-// ErrNotTuned is the sentinel a gate failure wraps, so callers can errors.Is it
-// while still reading the specific reason from the message.
+// ErrNotTuned indicates an engine compile block failed tuned baseline requirements.
 var ErrNotTuned = errors.New("vllm_compile: not a tuned baseline")
 
-// Classify folds the recorded state into a tuned/cold-start/diagnostic class.
-// Explicit cold signals (a request-time compilation event, a disabled cache, an
-// incomplete warmup) take precedence over unobserved state, so a fixture that
-// both compiled at request time and left warmup unknown is reported cold, not
-// diagnostic.
+// Classify evaluates the compile block into a tuned, cold-start, or diagnostic class.
 func (b Block) Classify() Class {
 	switch {
 	case b.RequestTimeCompilation:
@@ -88,8 +52,7 @@ func (b Block) Classify() Class {
 // Tuned reports whether the block certifies a tuned baseline.
 func (b Block) Tuned() bool { return b.Classify() == ClassTuned }
 
-// Reason states, in one clause, why the block is not tuned — or "tuned" when it
-// is. It names the highest-precedence cold/diagnostic signal.
+// Reason returns the failure clause explaining why a block is not tuned.
 func (b Block) Reason() string {
 	switch {
 	case b.RequestTimeCompilation:
@@ -107,10 +70,7 @@ func (b Block) Reason() string {
 	}
 }
 
-// Gate fails closed unless the block certifies a tuned baseline. The returned
-// error wraps ErrNotTuned and names the engine, class, and specific reason so a
-// bench harness can reject (or relabel) the row instead of quoting a cold engine
-// as tuned. It returns nil exactly when Classify() == ClassTuned.
+// Gate returns ErrNotTuned unless the block satisfies tuned baseline criteria.
 func (b Block) Gate() error {
 	if b.Tuned() {
 		return nil
@@ -118,23 +78,20 @@ func (b Block) Gate() error {
 	return fmt.Errorf("%w: %s row is %s (%s)", ErrNotTuned, engineLabel(b.Engine), b.Classify(), b.Reason())
 }
 
-// RowVerdict is one compared row's classification within a GateReport.
+// RowVerdict records the baseline classification and failure reason for a single row.
 type RowVerdict struct {
 	Engine string `json:"engine,omitempty"`
 	Class  Class  `json:"class"`
-	Reason string `json:"reason,omitempty"` // empty when tuned
+	Reason string `json:"reason,omitempty"`
 }
 
-// GateReport is the verdict for a full set of compared engine rows.
+// GateReport aggregates evaluation verdicts across all compared engine rows.
 type GateReport struct {
 	Rows  []RowVerdict `json:"rows"`
-	Tuned bool         `json:"tuned"` // true iff there is >=1 row and every row is tuned
+	Tuned bool         `json:"tuned"`
 }
 
-// GateRows classifies every compared row and reports whether the whole
-// comparison is tuned. A comparison is tuned only when it has at least one row
-// and EVERY row is tuned: one cold row poisons the A/B, since a cold raw-vLLM
-// baseline makes a fak "win" meaningless even when the fak row is warm.
+// GateRows validates that every compared engine block satisfies tuned criteria.
 func GateRows(blocks ...Block) GateReport {
 	rep := GateReport{Tuned: len(blocks) > 0, Rows: make([]RowVerdict, 0, len(blocks))}
 	for _, b := range blocks {
@@ -148,8 +105,7 @@ func GateRows(blocks ...Block) GateReport {
 	return rep
 }
 
-// Bool is a small constructor for the pointer fields, so a caller can write
-// vllmcompile.Block{CompileCacheEnabled: vllmcompile.Bool(true)} inline.
+// Bool wraps a primitive boolean as a pointer for optional block fields.
 func Bool(v bool) *bool { return &v }
 
 func engineLabel(engine string) string {

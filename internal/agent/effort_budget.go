@@ -1,6 +1,10 @@
 package agent
 
-import "strings"
+import (
+	"regexp"
+	"strconv"
+	"strings"
+)
 
 // Effort tier constants defining model reasoning capacity allocations.
 const (
@@ -55,6 +59,21 @@ func (ta TurnAssessment) IsError() bool {
 	return strings.Contains(lower, "error") || strings.Contains(lower, "fail") || strings.Contains(lower, "panic")
 }
 
+var reExitStatus = regexp.MustCompile(`(?i)\b(?:exit status|exit code)\s*[:=]?\s*(-?[0-9]+)\b`)
+
+func hasNonZeroExitStatus(s string) bool {
+	matches := reExitStatus.FindAllStringSubmatch(s, -1)
+	for _, m := range matches {
+		if len(m) >= 2 {
+			code, err := strconv.Atoi(m[1])
+			if err == nil && code != 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func isRoutineToolName(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "read", "glob", "grep", "cat", "view", "read_file", "list_dir", "find", "file_search":
@@ -84,19 +103,23 @@ func AssessTranscriptTurn(messages []Message) (TurnAssessment, bool) {
 	for i := lastIdx; i >= 0 && messages[i].Role == RoleTool; i-- {
 		msg := messages[i]
 		lower := strings.ToLower(msg.Content)
+		isRoutine := isRoutineToolName(msg.Name)
+		if !isRoutine {
+			allRoutine = false
+		}
+		if isRoutine {
+			continue
+		}
 		if strings.Contains(lower, "compiler error") ||
 			strings.Contains(lower, "test failure") ||
 			strings.Contains(lower, "panic:") ||
 			strings.Contains(lower, "panic") ||
 			strings.Contains(lower, "policy block") ||
 			strings.Contains(lower, "policy_block") ||
-			strings.Contains(lower, "exit status") {
+			hasNonZeroExitStatus(lower) {
 			ta.IsErrorRecovery = true
 			ta.ErrorMessage = msg.Content
 			return ta, true
-		}
-		if !isRoutineToolName(msg.Name) {
-			allRoutine = false
 		}
 	}
 

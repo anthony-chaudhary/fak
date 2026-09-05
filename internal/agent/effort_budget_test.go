@@ -213,6 +213,39 @@ func TestResolveEffortBalancedTitration(t *testing.T) {
 		if ok {
 			t.Fatalf("expected ok=false for non-tool trailing message")
 		}
+
+		// Routine tool reading file content with error terms should stay routine
+		routineWithContent := []Message{
+			{Role: RoleUser, Content: "grep errors"},
+			{Role: RoleAssistant, Content: "grepping"},
+			{Role: RoleTool, Name: "grep", Content: "compiler error handling logic on line 42"},
+		}
+		taRoutineContent, ok := AssessTranscriptTurn(routineWithContent)
+		if !ok || taRoutineContent.IsError() || !taRoutineContent.IsRoutine() {
+			t.Fatalf("routine grep containing error phrase should stay routine, got ok=%v, ta=%+v", ok, taRoutineContent)
+		}
+
+		// Tool returning exit status 0 is success, not error
+		exitZeroMsgs := []Message{
+			{Role: RoleUser, Content: "run test"},
+			{Role: RoleAssistant, Content: "running"},
+			{Role: RoleTool, Name: "bash", Content: "PASS: all tests passed\nexit status 0"},
+		}
+		taExitZero, ok := AssessTranscriptTurn(exitZeroMsgs)
+		if !ok || taExitZero.IsError() {
+			t.Fatalf("exit status 0 should not trigger error recovery, got ok=%v, ta=%+v", ok, taExitZero)
+		}
+
+		// Tool with benign "exit status" phrase in output without non-zero code
+		benignExitMsgs := []Message{
+			{Role: RoleUser, Content: "git log"},
+			{Role: RoleAssistant, Content: "checking log"},
+			{Role: RoleTool, Name: "bash", Content: "commit abc: improve exit status handling in worker"},
+		}
+		taBenignExit, ok := AssessTranscriptTurn(benignExitMsgs)
+		if !ok || taBenignExit.IsError() {
+			t.Fatalf("benign exit status phrase should not trigger error recovery, got ok=%v, ta=%+v", ok, taBenignExit)
+		}
 	})
 }
 
