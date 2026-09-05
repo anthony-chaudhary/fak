@@ -1,10 +1,10 @@
-# fak vNext (targeting v0.51.0): Work in Progress
+# fak vNext (targeting v0.52.0): Work in Progress
 
-This document tracks in-flight work on `main` targeting the upcoming `v0.51.0` release.
+This document tracks in-flight work on `main` targeting the upcoming `v0.52.0` release.
 It is updated as commits land so that release notes are maintained proactively rather than scrambled at cut time.
 
-- **Projected version:** `0.51.0` (`minor` bump)
-- **Base release tag:** `v0.50.0`
+- **Projected version:** `0.52.0` (`minor` bump)
+- **Base release tag:** `v0.51.0`
 - **Commits in flight:** 0
 
 ## What changed
