@@ -27,6 +27,7 @@ import (
 type codexLaunchOptions struct {
 	dryRun          bool
 	skipPermissions bool
+	approveForMe    bool
 	verbose         bool
 	splitMode       string
 	splitWhere      string
@@ -84,6 +85,7 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	_ = fs.String("freshness-gate", "on", "require a current checkout launcher before admission (on|off; off is an explicit recovery override)")
 	skipPermissions := fs.Bool("skip-permissions", true, "legacy explicit opt-in for Codex's full approval/sandbox bypass (default true for managed launches); fak routing, capacity, policy, hook, and loop gates still apply")
 	nativePermissions := fs.Bool("native-permissions", false, "restore Codex's native approval prompts and sandbox; Codex subagents inherit this parent permission mode")
+	approveForMe := fs.Bool("approve-for-me", false, "configure Codex automated approval reviewer (approvals_reviewer = \"auto_review\") for headless execution without sandbox bypass")
 	verbose := fs.Bool("verbose", false, "verbose launcher diagnostics logging")
 	fs.BoolVar(verbose, "v", false, "verbose launcher diagnostics logging (shorthand)")
 	splitMode := fs.String("split", "auto", "open the 20% fak-info pane when possible: auto|on|off")
@@ -134,7 +136,8 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	fakBin := tuiExecutable()
 	launch := codexLaunchOptions{
 		dryRun:          *dryRun,
-		skipPermissions: *skipPermissions && !*nativePermissions,
+		skipPermissions: *skipPermissions && !*nativePermissions && !*approveForMe,
+		approveForMe:    *approveForMe,
 		verbose:         *verbose,
 		splitMode:       *splitMode,
 		splitWhere:      *splitWhere,
@@ -180,7 +183,9 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	if launch.dryRun {
 		fmt.Fprintln(stderr, "fak codex: dry-run - not launching")
 		fmt.Fprintln(stderr, "  view        = agent 80% / fak info 20% (--split "+launch.splitMode+")")
-		if launch.skipPermissions {
+		if launch.approveForMe {
+			fmt.Fprintln(stderr, "  permissions = Codex automated approval reviewer (sandbox active); fak gates remain active; Codex subagents inherit this mode")
+		} else if launch.skipPermissions {
 			fmt.Fprintln(stderr, "  permissions = Codex approval/sandbox bypass (managed default); fak gates remain active; Codex subagents inherit this mode")
 		} else {
 			fmt.Fprintln(stderr, "  permissions = Codex native approvals + sandbox explicitly restored; Codex subagents inherit this mode; fak gates remain active")
@@ -268,6 +273,9 @@ func buildCodexLaunchArgv(fakBin string, o codexLaunchOptions) []string {
 		// still run their own gate because they never set this internal bit.
 		argv = append(argv, "--codex-loop-gate", "off")
 	}
+	if o.approveForMe {
+		argv = append(argv, "--approve-for-me")
+	}
 
 	argv = append(argv, "--", "codex")
 	// fak's history compactor is intentionally attached to the Anthropic Messages
@@ -277,6 +285,9 @@ func buildCodexLaunchArgv(fakBin string, o codexLaunchOptions) []string {
 	// sessions appear never to compact and left headless workers above the 96K
 	// budget tracked by #4253. A later user-supplied -c remains authoritative.
 	argv = append(argv, "-c", fmt.Sprintf("model_auto_compact_token_limit=%d", codexCompactTokenLimit))
+	if o.approveForMe {
+		argv = append(argv, "-c", `approvals_reviewer="auto_review"`)
+	}
 	if o.skipPermissions {
 		if flag := launchSkipPermsFlag("codex"); flag != "" {
 			argv = append(argv, flag)
