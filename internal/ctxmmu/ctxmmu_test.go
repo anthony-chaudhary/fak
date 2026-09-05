@@ -363,3 +363,47 @@ func TestPageInGatedByClear(t *testing.T) {
 		t.Fatalf("PageIn after Clear: bytes mismatch\n want %q\n got  %q", orig, got)
 	}
 }
+
+func TestReadFileToolOversizeThresholdAdmitsNormalFilesAndPagesGiantFiles(t *testing.T) {
+	ctx := context.Background()
+	m := ctxmmu.New()
+
+	// A 50 KiB file body: well over the 4 KiB generic threshold, but under ReadOversizeBytes (1 MiB).
+	fileBody := distinctOversize(50 * 1024)
+
+	// Case 1: Generic tool ("dump_table") pages out at 50 KiB (> 4 KiB).
+	cGeneric := call("dump_table")
+	rGeneric := result(cGeneric, append([]byte(nil), fileBody...))
+	vGeneric := m.Admit(ctx, cGeneric, rGeneric)
+	if vGeneric.Kind != abi.VerdictTransform {
+		t.Fatalf("generic tool at 50 KiB: want VerdictTransform, got %v", vGeneric.Kind)
+	}
+
+	// Case 2: Read tools ("Read", "fak_read", "mcp__fak_guard__fak_read") are admitted as-is.
+	for _, toolName := range []string{"Read", "read", "fak_read", "mcp__fak_guard__fak_read", "read_file"} {
+		cRead := call(toolName)
+		rRead := result(cRead, append([]byte(nil), fileBody...))
+		vRead := m.Admit(ctx, cRead, rRead)
+		if vRead.Kind != abi.VerdictAllow {
+			t.Fatalf("read tool %q at 50 KiB: want VerdictAllow, got %v", toolName, vRead.Kind)
+		}
+	}
+
+	// Case 3: Read tool with engine="fakread" meta is also admitted as-is.
+	cEngine := call("custom_read")
+	rEngine := result(cEngine, append([]byte(nil), fileBody...))
+	rEngine.Meta = map[string]string{"engine": "fakread"}
+	vEngine := m.Admit(ctx, cEngine, rEngine)
+	if vEngine.Kind != abi.VerdictAllow {
+		t.Fatalf("tool with engine=fakread at 50 KiB: want VerdictAllow, got %v", vEngine.Kind)
+	}
+
+	// Case 4: Read tool exceeding ReadOversizeBytes (> 1 MiB) pages out.
+	giantBody := distinctOversize(1024*1024 + 100)
+	cGiant := call("fak_read")
+	rGiant := result(cGiant, append([]byte(nil), giantBody...))
+	vGiant := m.Admit(ctx, cGiant, rGiant)
+	if vGiant.Kind != abi.VerdictTransform {
+		t.Fatalf("read tool at >1 MiB: want VerdictTransform, got %v", vGiant.Kind)
+	}
+}

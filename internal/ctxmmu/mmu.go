@@ -20,14 +20,20 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/canon"
 	"github.com/anthony-chaudhary/fak/internal/numfmt"
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 const (
 	// OversizeBytes: a result larger than this benign-pages-out to a pointer.
 	OversizeBytes = 4096
+	// ReadOversizeBytes: file read results use this higher threshold so normal code files
+	// (up to 1 MiB, matching codetools.MaxReadBytes) are not paged out to stubs.
+	ReadOversizeBytes = 1 << 20
 	// PointerMax: the injected pointer must be smaller than this (unit 65).
 	PointerMax = 2048
 	// DefaultMaxHeld bounds the quarantine ledger so a long-lived gate driven by
@@ -139,6 +145,28 @@ func (m *MMU) CompactPositive(turns []TurnRecord, originalGoal string) *Positive
 	return CompactPositiveState(turns, originalGoal)
 }
 
+// EpisodeTracker returns a semantic episode tracker backed by the provided CASStore, or a new
+// CASStore if omitted or nil.
+func (m *MMU) EpisodeTracker(store ...*CASStore) *EpisodeTracker {
+	var s *CASStore
+	if len(store) > 0 {
+		s = store[0]
+	}
+	return NewEpisodeTracker(s)
+}
+
+// CompactEpisodes compacts context pages using an EpisodeTracker, paging out verbose middle-turn
+// tool outputs to CAS stubs while preserving prefix warmth.
+func (m *MMU) CompactEpisodes(pages []TokenPage, tracker ...*EpisodeTracker) ([]TokenPage, CompactionReport, error) {
+	var t *EpisodeTracker
+	if len(tracker) > 0 && tracker[0] != nil {
+		t = tracker[0]
+	} else {
+		t = m.EpisodeTracker()
+	}
+	return t.CompactPages(pages)
+}
+
 func (m *MMU) Caps() []abi.Capability { return nil }
 
 // Admit is the write-time gate. It inspects the produced result and returns:
@@ -151,8 +179,83 @@ func (m *MMU) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ver
 	atomic.AddInt64(&m.total, 1)
 	body := m.bytes(ctx, r.Payload)
 
-	// 1-3. unsafe result bytes -> quarantine (unit 70/68/62).
+	// 1-3. unsafe result bytes -> quarantine or permissive/override handling.
 	if reason, ok := ScreenBytes(body); ok {
+		// 1a. Model override: if the tool call explicitly supplies a justification / override reason,
+		// allow the result through with a clearly logged audit trail rather than hard-quarantining.
+		if justification, hasOverride := extractOverride(ctx, c); hasOverride {
+			m.logSecurityOverride(c, reason, justification, "quarantine_result")
+			if r.Meta == nil {
+				r.Meta = map[string]string{}
+			}
+			r.Meta["quarantine_overridden"] = "true"
+			r.Meta["override_reason"] = justification
+			limit := m.oversizeThreshold(c, r)
+			if len(body) > limit {
+				if ptr, pok := m.pageToPointer(ctx, r.Payload, body, "override-oversize"); pok {
+					atomic.AddInt64(&m.paged, 1)
+					return abi.Verdict{
+						Kind:    abi.VerdictTransform,
+						By:      "ctxmmu(override)",
+						Reason:  reason,
+						Payload: abi.TransformPayload{NewArgs: ptr},
+						Meta: map[string]string{
+							"quarantine_overridden": "true",
+							"override_reason":       justification,
+							"quarantine_reason":     abi.ReasonName(reason),
+							"oversize_paged":        "true",
+						},
+					}
+				}
+			}
+			return abi.Verdict{
+				Kind:    abi.VerdictAllow,
+				By:      "ctxmmu(override)",
+				Reason:  reason,
+				Payload: abi.WitnessPayload{Claim: "model override admitted: " + justification},
+				Meta: map[string]string{
+					"quarantine_overridden": "true",
+					"override_reason":       justification,
+					"quarantine_reason":     abi.ReasonName(reason),
+				},
+			}
+		}
+
+		// 1b. Permissive mode / discussion context:
+		if isPermissive(ctx) {
+			if reason == abi.ReasonSecretExfil {
+				red, masked := canon.RedactSecrets(body)
+				if masked > 0 {
+					if redRef, pok := putBytes(ctx, red); pok {
+						atomic.AddInt64(&m.paged, 1)
+						r.Payload = redRef
+						if r.Meta == nil {
+							r.Meta = map[string]string{}
+						}
+						r.Meta["ctxmmu"] = "secret-redacted"
+						return abi.Verdict{
+							Kind:    abi.VerdictTransform,
+							Reason:  abi.ReasonSecretRedacted,
+							By:      "ctxmmu(permissive)",
+							Payload: abi.TransformPayload{NewArgs: redRef},
+						}
+					}
+				}
+			} else if reason == abi.ReasonPromptInjection && canon.DiscussionContext(strings.ToLower(string(body))) {
+				ptr, pok := m.pageToPointer(ctx, r.Payload, body, "discussion-context")
+				if pok {
+					atomic.AddInt64(&m.paged, 1)
+					return abi.Verdict{
+						Kind:    abi.VerdictTransform,
+						Reason:  abi.ReasonPromptInjection,
+						By:      "ctxmmu(permissive)",
+						Payload: abi.TransformPayload{NewArgs: ptr},
+						Meta:    map[string]string{"discussion_context": "true"},
+					}
+				}
+			}
+		}
+
 		return m.quarantineResult(ctx, r, reason, body, detectorFor(reason))
 	}
 	// 3b. SEMANTIC screen — the local-model-on-the-wire seam (RESEARCH-local-model-on
@@ -178,7 +281,7 @@ func (m *MMU) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ver
 		case abi.ScreenQuarantine:
 			reason := adv.Reason
 			if reason == abi.ReasonNone {
-				reason = abi.ReasonTrustViolation
+				reason = abi.ReasonPromptInjection
 			}
 			atomic.AddInt64(&m.screened, 1)
 			return m.quarantineResult(ctx, r, reason, body, semanticDetector(adv.By))
@@ -202,7 +305,8 @@ func (m *MMU) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ver
 	// screen authored a digest (rung 3, issue #570), the stub carries that summary
 	// instead of an opaque pointer and the original is pinned in CAS under the held
 	// ledger so a witness Clear + PageIn restores it byte-exact.
-	if len(body) > OversizeBytes {
+	limit := m.oversizeThreshold(c, r)
+	if len(body) > limit {
 		if digestAdv.Digest != "" {
 			ptr, id, ok := m.digestToPointer(ctx, body, digestAdv.Digest, digestAdv.By)
 			if ok {
@@ -247,7 +351,17 @@ func (m *MMU) quarantineResult(ctx context.Context, r *abi.Result, reason abi.Re
 	m.touchLocked(id, holdNowMillis()) // start the TTL keepalive countdown (pinreaper.go)
 	m.evictExcessLocked()
 	m.mu.Unlock()
-	stub := map[string]any{"_quarantined": true, "id": id, "reason": abi.ReasonName(reason), "len": len(body)}
+	stub := map[string]any{
+		"_quarantined":       true,
+		"status":             "quarantined_for_safety",
+		"id":                 id,
+		"reason":             abi.ReasonName(reason),
+		"len":                len(body),
+		"note":               "Routine safety check: this tool result was held out of immediate context (" + abi.ReasonName(reason) + "). This is expected behavior when inspecting security materials or external untrusted data.",
+		"action":             "If your task requires this content, you can retrieve or override it with an override reason / justification. All overrides are logged for security auditing.",
+		"override_guidance":  "If your task requires this content, you can retrieve or override it with an override reason / justification. All overrides are logged for security auditing.",
+		"override_supported": true,
+	}
 	if ref, ok := putJSON(ctx, stub); ok {
 		r.Payload = ref // bytes now ABSENT from context
 	} else {
@@ -266,7 +380,7 @@ func detectorFor(reason abi.ReasonCode) string {
 	switch reason {
 	case abi.ReasonSecretExfil:
 		return "secret_pattern"
-	case abi.ReasonTrustViolation:
+	case abi.ReasonTrustViolation, abi.ReasonPromptInjection:
 		return "injection_marker"
 	case abi.ReasonOversize:
 		return "repeated_chunk"
@@ -421,6 +535,55 @@ func (m *MMU) PageIn(ctx context.Context, id string) ([]byte, error) {
 	return nil, fmt.Errorf("ctxmmu: no page-out backend")
 }
 
+// Override records a model-supplied justification to clear and retrieve a quarantined result,
+// logging the override process for audit.
+func (m *MMU) Override(ctx context.Context, id, justification string) ([]byte, error) {
+	justification = strings.TrimSpace(justification)
+	if len(justification) < 3 {
+		return nil, fmt.Errorf("ctxmmu: override of %s requires a non-empty justification (>=3 chars)", id)
+	}
+	m.mu.Lock()
+	handle, ok := m.held[id]
+	if ok {
+		m.cleared[id] = true
+		m.touchLocked(id, holdNowMillis())
+	}
+	m.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("ctxmmu: no quarantined result %s", id)
+	}
+
+	m.logSecurityOverride(nil, abi.ReasonNone, justification, "quarantine_override:"+id)
+
+	if b, has := abi.PageOut(m.codecID()); has {
+		ref, err := b.PageIn(ctx, handle)
+		if err != nil {
+			return nil, err
+		}
+		return ref.Inline, nil
+	}
+	return nil, fmt.Errorf("ctxmmu: no page-out backend")
+}
+
+// ClearWithOverride marks id as cleared using a model-supplied justification and logs the override for audit.
+func (m *MMU) ClearWithOverride(id, justification string) error {
+	justification = strings.TrimSpace(justification)
+	if len(justification) < 3 {
+		return fmt.Errorf("ctxmmu: clearance of %s requires a non-empty justification (>=3 chars)", id)
+	}
+	m.mu.Lock()
+	if _, ok := m.held[id]; !ok {
+		m.mu.Unlock()
+		return fmt.Errorf("ctxmmu: no quarantined result %s", id)
+	}
+	m.cleared[id] = true
+	m.touchLocked(id, holdNowMillis())
+	m.mu.Unlock()
+
+	m.logSecurityOverride(nil, abi.ReasonNone, justification, "quarantine_clear:"+id)
+	return nil
+}
+
 // Held returns a copy of the id->handle map for every quarantined result still
 // held out of context. It is the read side the recall leaf needs to PERSIST the
 // quarantine state across the process boundary (the bytes themselves already live
@@ -504,7 +667,7 @@ func (m *MMU) bytes(ctx context.Context, r abi.Ref) []byte {
 
 func hasInjection(b []byte) bool {
 	s := strings.ToLower(string(b))
-	for _, m := range injectionMarkers {
+	for _, m := range canon.InjectionMarkers {
 		if strings.Contains(s, m) {
 			return true
 		}
@@ -542,7 +705,7 @@ func ScreenBytes(body []byte) (abi.ReasonCode, bool) {
 		return abi.ReasonSecretExfil, true
 	}
 	if hasInjection(body) {
-		return abi.ReasonTrustViolation, true
+		return abi.ReasonPromptInjection, true
 	}
 	if repeats(body) {
 		return abi.ReasonOversize, true
@@ -645,6 +808,46 @@ var (
 // mentions "today"; a clearly session-scoped frame ("today's task") beats the bare
 // "today" deictic; everything unmatched fails closed to turn, because a false-positive
 // promotion (a poltergeist fact recalled as current) is the expensive error direction.
+func isReadFileTool(tool string) bool {
+	t := strings.ToLower(strings.TrimSpace(tool))
+	if idx := strings.LastIndex(t, "__"); idx >= 0 {
+		t = t[idx+2:]
+	}
+	t = strings.TrimPrefix(t, "functions.")
+	switch t {
+	case "read", "fak_read", "read_file", "readfile", "get_file":
+		return true
+	default:
+		return false
+	}
+}
+
+func isReadFileCall(c *abi.ToolCall, r *abi.Result) bool {
+	if r != nil && r.Meta != nil {
+		switch r.Meta["engine"] {
+		case "fakread", "codetools.read":
+			return true
+		}
+	}
+	if c != nil {
+		switch c.Engine {
+		case "fakread", "codetools.read":
+			return true
+		}
+		if isReadFileTool(c.Tool) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *MMU) oversizeThreshold(c *abi.ToolCall, r *abi.Result) int {
+	if isReadFileCall(c, r) {
+		return numfmt.EnvPositiveInt("FAK_READ_OVERSIZE_BYTES", ReadOversizeBytes)
+	}
+	return OversizeBytes
+}
+
 func classifyDurability(c *abi.ToolCall, body []byte) string {
 	_ = c // reserved: a future tool prior (a clock/now source is inherently turn-class)
 	switch {
@@ -687,6 +890,90 @@ func putJSON(ctx context.Context, v any) (abi.Ref, bool) {
 		}
 	}
 	return abi.Ref{Kind: abi.RefInline, Inline: b, Len: int64(len(b))}, true
+}
+
+func putBytes(ctx context.Context, b []byte) (abi.Ref, bool) {
+	if res := abi.ActiveResolver(); res != nil {
+		if ref, err := res.Put(ctx, b); err == nil {
+			return ref, true
+		}
+	}
+	return abi.Ref{Kind: abi.RefInline, Inline: b, Len: int64(len(b))}, true
+}
+
+func extractOverride(ctx context.Context, c *abi.ToolCall) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	if c.Meta != nil {
+		for _, k := range []string{"override_reason", "justification", "override", "quarantine_override"} {
+			if s := strings.TrimSpace(c.Meta[k]); len(s) >= 3 {
+				return s, true
+			}
+		}
+	}
+	b := refutil.Bytes(ctx, c.Args)
+	if len(b) > 0 {
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err == nil && m != nil {
+			for _, k := range []string{"override_reason", "justification", "override", "quarantine_override"} {
+				if v, ok := m[k].(string); ok {
+					if s := strings.TrimSpace(v); len(s) >= 3 {
+						return s, true
+					}
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+func isPermissive(ctx context.Context) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_CTXMMU_PERMISSIVE"))) {
+	case "1", "true", "on", "yes":
+		return true
+	}
+	if pc, ok := abi.PolicyFromContext(ctx); ok && (pc.Posture == abi.PostureDefaultOpen || pc.Posture == abi.PostureAdmitAndLog) {
+		return true
+	}
+	return false
+}
+
+func (m *MMU) logSecurityOverride(c *abi.ToolCall, reason abi.ReasonCode, justification, op string) {
+	tool := ""
+	traceID := ""
+	if c != nil {
+		tool = c.Tool
+		traceID = c.TraceID
+	}
+	ev := abi.Event{
+		Kind: abi.EvDecide,
+		Call: c,
+		Verdict: &abi.Verdict{
+			Kind:   abi.VerdictAllow,
+			Reason: reason,
+			By:     "ctxmmu(override)",
+			Payload: abi.WitnessPayload{
+				Claim: "security override: " + justification,
+			},
+			Meta: map[string]string{
+				"override_reason":   justification,
+				"security_override": "true",
+				"operation":         op,
+			},
+		},
+		Fields: map[string]any{
+			"event":           "security_override",
+			"override_type":   op,
+			"override_reason": justification,
+			"tool":            tool,
+			"trace_id":        traceID,
+			"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
+		},
+	}
+	for _, e := range abi.EmittersFor(ev.Kind) {
+		e.Emit(ev)
+	}
 }
 
 // Default is the registered MMU.
