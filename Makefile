@@ -188,6 +188,8 @@ bench:
 mac-perf: build
 	@echo "== Mac Shift-Left Performance Verification =="
 	@go test -v ./internal/macbench -run '^TestValidateComparisonPacketNodeMacOSA$$'
+	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ2KGemv$$'
+	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ2KGemmSteady$$'
 	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ4KGemv$$'
 	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ4KGemmSteady$$'
 	@./fak macbench validate-comparison --input experiments/benchmark/runs/by-machine/node-macos-a/20260903T050000Z-macbench-threeway/packet.json --json
@@ -443,14 +445,13 @@ gofmt-check:
 # placement, links, hosted-demo URLs, demo-command refs, browser-demo metadata, file admission, secret shapes —
 # mirrored into the local gate so a pre-push `make ci` catches them. The --audit-tree
 # checkers with a parity-proven Go twin (DOC_PLACEMENT, BROKEN_LINK, FILE_ADMISSION,
-# SECRET_SHAPE, BRAND_CONSISTENCY, PROVENANCE_LABEL, HARDWARE_TELL, DEMO_COMMAND, BROWSER_CONTRACT)
-# now run in ONE process via `fak hygiene` — no per-checker Python interpreter spawn (~15-20s of
-# process-create + Defender tax saved on Windows). Exit 2 = could-not-run, so we fall back to the
-# Python checkers; exit 1 = a gate fired (HARD fail). The remaining checkers (demo_live_links,
-# guard_mcp_status_audit) are not yet ported (#928) and stay on Python.
+# SECRET_SHAPE, BRAND_CONSISTENCY, PROVENANCE_LABEL, HARDWARE_TELL, DEMO_COMMAND, BROWSER_CONTRACT,
+# DEMO_LIVE_LINKS, GUARD_MCP_STATUS) now run in ONE process via `fak hygiene` — no per-checker Python
+# interpreter spawn (~15-20s of process-create + Defender tax saved on Windows). Exit 2 = could-not-run,
+# so we fall back to the Python checkers; exit 1 = a gate fired (HARD fail).
 hygiene:
 	@go build -o tools/.bin/fak ./cmd/fak
-	@tools/.bin/fak hygiene --gates DOC_PLACEMENT,BROKEN_LINK,FILE_ADMISSION,SECRET_SHAPE,BRAND_CONSISTENCY,PROVENANCE_LABEL,HARDWARE_TELL,DEMO_COMMAND,BROWSER_CONTRACT; \
+	@tools/.bin/fak hygiene --gates DOC_PLACEMENT,BROKEN_LINK,FILE_ADMISSION,SECRET_SHAPE,BRAND_CONSISTENCY,PROVENANCE_LABEL,HARDWARE_TELL,DEMO_COMMAND,BROWSER_CONTRACT,DEMO_LIVE_LINKS,GUARD_MCP_STATUS; \
 	rc=$$?; \
 	if [ $$rc -eq 2 ]; then \
 		echo "fak hygiene could not run; falling back to Python gates"; \
@@ -460,12 +461,12 @@ hygiene:
 		python3 tools/check_secret_shapes.py --audit-tree && \
 		python3 tools/scrub_hardware_names.py --check && \
 		python3 tools/demo_command_audit.py && \
-		python3 tools/demo_browser_contract.py; \
+		python3 tools/demo_browser_contract.py && \
+		python3 tools/demo_live_links.py && \
+		python3 tools/guard_mcp_status_audit.py; \
 	elif [ $$rc -ne 0 ]; then \
 		exit $$rc; \
 	fi
-	@python3 tools/demo_live_links.py
-	@python3 tools/guard_mcp_status_audit.py
 	@go test ./internal/pythongate -run TestNoNewPythonTools
 	@go test ./internal/windowgate -run TestTrackedTreeHasNoPopups
 	@go test ./internal/benchlineagegate -run TestEveryBenchEmitterStampsLineage
