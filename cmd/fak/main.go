@@ -66,13 +66,32 @@ func main() {
 		recordUsage(verb, argv, 0, start)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "fak: unknown verb %q\n", os.Args[1])
-	if s := suggestVerbSpelling(os.Args[1]); s != "" {
-		fmt.Fprintf(os.Stderr, "  did you mean 'fak %s'?\n", s)
-	}
-	fmt.Fprintln(os.Stderr, "  'fak help' shows the overview; 'fak help --all' lists every verb.")
+	printUnknownVerb(os.Stderr, os.Args[1])
 	recordUsage(verb, argv, 2, start)
 	os.Exit(2)
+}
+
+var unknownVerbSuggestions = map[string]string{
+	"changes":  `did you mean "fak whatschanged" or native git status?`,
+	"git":      `did you mean native git, "fak shadowgit", or "fak gitbroker"?`,
+	"lease":    `did you mean "dos arbitrate" or "dos lease-lane"?`,
+	"lane":     `did you mean "dos arbitrate" or "dos lease-lane"?`,
+	"headless": `did you mean "fak agent" or "fak ultracode"?`,
+	"exec":     `did you mean "fak agent" or "fak-dev"?`,
+}
+
+func unknownVerbSuggestion(verb string) string {
+	return unknownVerbSuggestions[strings.ToLower(strings.TrimSpace(verb))]
+}
+
+func printUnknownVerb(w io.Writer, verb string) {
+	fmt.Fprintf(w, "fak: unknown verb %q\n", verb)
+	if h := unknownVerbSuggestion(verb); h != "" {
+		fmt.Fprintf(w, "  hint: %s\n", h)
+	} else if s := suggestVerbSpelling(verb); s != "" {
+		fmt.Fprintf(w, "  did you mean 'fak %s'?\n", s)
+	}
+	fmt.Fprintln(w, "  'fak help' shows the overview; 'fak help --all' lists every verb.")
 }
 
 func dispatchCoreVerbA(name string, args []string) bool {
@@ -636,7 +655,7 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdAntipatternScorecard(args)
 	case "debt-lanes":
 		cmdDebtLanes(args)
-	case "issue-orchestrator":
+	case "issue-orchestrator", "issue-queue", "issue-lanes":
 		cmdIssueOrchestrator(args)
 	case "bench-effort":
 		cmdBenchEffort(args)
@@ -1212,7 +1231,7 @@ func applyFloorWithProfile(path string, profile string) {
 		profile = strings.TrimSpace(os.Getenv("FAK_PROFILE"))
 	}
 	if path == "" && profile == "" {
-		return
+		profile = string(policy.ProfileStandard)
 	}
 	policyReloadMu.Lock()
 	defer policyReloadMu.Unlock()
@@ -1226,7 +1245,7 @@ func applyFloorWithProfile(path string, profile string) {
 		fmt.Fprintf(os.Stderr, "fak: applied permission profile %s\n", prof)
 		return
 	}
-	_, _, err := loadAndApplyPolicyLocked(path, false)
+	_, _, err := loadAndApplyPolicyWithProfileLocked(path, profile, false)
 	must(err)
 	if profile != "" {
 		fmt.Fprintf(os.Stderr, "fak: loaded capability floor from %s with profile %s\n", path, profile)
@@ -1237,7 +1256,7 @@ func applyFloorWithProfile(path string, profile string) {
 
 func applyPolicyWithProfile(path string, profile string) {
 	if path == "" && profile == "" {
-		return
+		profile = string(policy.ProfileStandard)
 	}
 	policyReloadMu.Lock()
 	defer policyReloadMu.Unlock()
@@ -1262,6 +1281,10 @@ func reloadPolicyWithPrior(path string) (policy.Runtime, adjudicator.Policy, str
 }
 
 func loadAndApplyPolicyLocked(path string, enforceWideningGate bool) (policy.Runtime, string, error) {
+	return loadAndApplyPolicyWithProfileLocked(path, "", enforceWideningGate)
+}
+
+func loadAndApplyPolicyWithProfileLocked(path string, profile string, enforceWideningGate bool) (policy.Runtime, string, error) {
 	if path == "" {
 		return policy.Runtime{}, "", errors.New("policy reload requires --policy FILE")
 	}
@@ -1274,6 +1297,13 @@ func loadAndApplyPolicyLocked(path string, enforceWideningGate bool) (policy.Run
 		// AppendConfigSwap no-ops, keeping that run byte-identical.
 		journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, path, configFileDigest(path), journal.ConfigSwapRejected, err.Error())
 		return policy.Runtime{}, "", err
+	}
+	if profile != "" {
+		prof, err := policy.ParseProfile(profile)
+		if err != nil {
+			return policy.Runtime{}, "", err
+		}
+		prof.Apply(&rt)
 	}
 	// Re-apply the operator overlays before comparing effective floors. This keeps
 	// the gate from mistaking a persisted always-allow entry for a manifest widening.

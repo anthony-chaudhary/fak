@@ -9584,6 +9584,11 @@
           "category": "incidental",
           "reason": "loopgate helper adjudicating turns with trajectory receipts",
           "token": "AdjudicateTurnWithReceipts"
+        },
+        {
+          "category": "incidental",
+          "reason": "policy profile loader helper",
+          "token": "loadAndApplyPolicyWithProfileLocked"
         }
       ],
       "exclude": [
@@ -9732,6 +9737,7 @@
         "launchPostureReport",
         "launchPostureSchema",
         "liveToolPolicy",
+        "loadAndApplyPolicyWithProfileLocked",
         "manageParityPosture",
         "mergePolicy",
         "multi_capability",
