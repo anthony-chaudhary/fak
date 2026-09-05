@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -48,17 +49,80 @@ func (e grepEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result,
 
 // GrepMatch is one match row: the workspace-relative file, the 1-based line number, and
 // the matching line, bounded in length so one pathological minified line cannot flood the
-// result.
+// result. Truncated reports whether this match's line text was capped.
 type GrepMatch struct {
-	File string `json:"file"`
-	Line int    `json:"line"`
-	Text string `json:"text"`
+	File      string `json:"file"`
+	Line      int    `json:"line"`
+	Text      string `json:"text"`
+	Truncated bool   `json:"truncated"`
 }
 
 // maxMatchLineBytes bounds a single reported line. A minified bundle is one 3MB "line";
 // reporting it whole would blow the result bound on a single row while telling the caller
 // nothing they could act on.
 const maxMatchLineBytes = 512
+
+type grepRecord struct {
+	pattern          string
+	matches          []GrepMatch
+	filesScanned     int
+	truncated        bool
+	truncationReason string
+	errJSON          []byte
+	isErr            bool
+}
+
+func (r *grepRecord) toOutput() ([]byte, bool) {
+	if r.isErr {
+		return r.errJSON, true
+	}
+	return okJSON(map[string]any{
+		"pattern":           r.pattern,
+		"matches":           r.matches,
+		"match_count":       len(r.matches),
+		"files_scanned":     r.filesScanned,
+		"truncated":         r.truncated,
+		"truncation_reason": r.truncationReason,
+	}), false
+}
+
+func snapToRuneBoundary(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	s = s[:maxBytes]
+	for len(s) > 0 && !utf8.RuneStart(s[len(s)-1]) {
+		s = s[:len(s)-1]
+	}
+	if len(s) > 0 {
+		r, size := utf8.DecodeLastRuneInString(s)
+		if r == utf8.RuneError && size == 1 {
+			s = s[:len(s)-1]
+		}
+	}
+	return s
+}
+
+func upgradeTruncationReason(current, candidate string) string {
+	precedence := func(r string) int {
+		switch r {
+		case "match_limit":
+			return 4
+		case "walk_budget":
+			return 3
+		case "file_size":
+			return 2
+		case "line_width":
+			return 1
+		default:
+			return 0
+		}
+	}
+	if precedence(candidate) > precedence(current) {
+		return candidate
+	}
+	return current
+}
 
 // grep decodes, confines, and executes a Grep.
 func (t *Toolset) grep(ctx context.Context, body []byte) ([]byte, bool) {
@@ -84,8 +148,14 @@ func (t *Toolset) grep(ctx context.Context, body []byte) ([]byte, bool) {
 	if a.MaxMatches > 0 && a.MaxMatches < limit {
 		limit = a.MaxMatches
 	}
+	rec := t.executeGrep(ctx, a, re, root, limit)
+	return rec.toOutput()
+}
+
+func (t *Toolset) executeGrep(ctx context.Context, a GrepArgs, re *regexp.Regexp, root Resolved, limit int) *grepRecord {
 	matches := make([]GrepMatch, 0, 16)
 	truncated := false
+	truncationReason := ""
 	visited := 0
 	walkErr := t.walk(ctx, root, func(abs, rel string) error {
 		if a.Glob != "" {
@@ -104,40 +174,58 @@ func (t *Toolset) grep(ctx context.Context, body []byte) ([]byte, bool) {
 		}
 		if int64(len(data)) > t.limits.MaxReadBytes {
 			data = data[:t.limits.MaxReadBytes]
+			truncated = true
+			truncationReason = upgradeTruncationReason(truncationReason, "file_size")
 		}
 		for i, line := range strings.Split(string(data), "\n") {
-			if !re.MatchString(line) {
+			cleanLine := strings.TrimRight(line, "\r")
+			if !re.MatchString(cleanLine) {
 				continue
 			}
 			if len(matches) >= limit {
 				truncated = true
+				truncationReason = upgradeTruncationReason(truncationReason, "match_limit")
 				return errStopWalk
 			}
-			if len(line) > maxMatchLineBytes {
-				line = line[:maxMatchLineBytes]
+			matchTruncated := false
+			if len(cleanLine) > maxMatchLineBytes {
+				cleanLine = snapToRuneBoundary(cleanLine, maxMatchLineBytes)
+				matchTruncated = true
+				truncated = true
+				truncationReason = upgradeTruncationReason(truncationReason, "line_width")
 			}
-			matches = append(matches, GrepMatch{File: rel, Line: i + 1, Text: strings.TrimRight(line, "\r")})
+			matches = append(matches, GrepMatch{
+				File:      rel,
+				Line:      i + 1,
+				Text:      cleanLine,
+				Truncated: matchTruncated,
+			})
 		}
 		return nil
 	})
 	if walkErr != nil {
 		var halt *haltError
 		if errors.As(walkErr, &halt) {
-			return halt.r.JSON(), true
+			return &grepRecord{errJSON: halt.r.JSON(), isErr: true}
+		}
+		if errors.Is(walkErr, context.Canceled) || errors.Is(walkErr, context.DeadlineExceeded) {
+			return &grepRecord{errJSON: refuse(CodeCanceled, "operation canceled").JSON(), isErr: true}
 		}
 		if errors.Is(walkErr, errWalkBudget) {
 			truncated = true
+			truncationReason = upgradeTruncationReason(truncationReason, "walk_budget")
 		} else if !errors.Is(walkErr, errStopWalk) {
-			return refuse(CodeIO, "Grep: "+walkErr.Error()).JSON(), true
+			return &grepRecord{errJSON: refuse(CodeIO, "Grep: "+walkErr.Error()).JSON(), isErr: true}
 		}
 	}
-	return okJSON(map[string]any{
-		"pattern":       a.Pattern,
-		"matches":       matches,
-		"match_count":   len(matches),
-		"files_scanned": visited,
-		"truncated":     truncated,
-	}), false
+	return &grepRecord{
+		pattern:          a.Pattern,
+		matches:          matches,
+		filesScanned:     visited,
+		truncated:        truncated,
+		truncationReason: truncationReason,
+		isErr:            false,
+	}
 }
 
 // globEngine serves Glob: a bounded path-shape search.
@@ -179,6 +267,7 @@ func (t *Toolset) glob(ctx context.Context, body []byte) ([]byte, bool) {
 	base := strings.TrimPrefix(pattern, "**/")
 	files := make([]string, 0, 16)
 	truncated := false
+	truncationReason := ""
 	walkErr := t.walk(ctx, root, func(abs, rel string) error {
 		sub := rel
 		if root.Rel != "" && root.Rel != "." {
@@ -196,6 +285,7 @@ func (t *Toolset) glob(ctx context.Context, body []byte) ([]byte, bool) {
 		}
 		if len(files) >= t.limits.MaxEntries {
 			truncated = true
+			truncationReason = "match_limit"
 			return errStopWalk
 		}
 		files = append(files, rel)
@@ -208,15 +298,19 @@ func (t *Toolset) glob(ctx context.Context, body []byte) ([]byte, bool) {
 		}
 		if errors.Is(walkErr, errWalkBudget) {
 			truncated = true
+			if truncationReason == "" {
+				truncationReason = "walk_budget"
+			}
 		} else if !errors.Is(walkErr, errStopWalk) {
 			return refuse(CodeIO, "Glob: "+walkErr.Error()).JSON(), true
 		}
 	}
 	return okJSON(map[string]any{
-		"pattern":   a.Pattern,
-		"files":     files,
-		"count":     len(files),
-		"truncated": truncated,
+		"pattern":           a.Pattern,
+		"files":             files,
+		"count":             len(files),
+		"truncated":         truncated,
+		"truncation_reason": truncationReason,
 	}), false
 }
 
