@@ -91,14 +91,13 @@ func snapToRuneBoundary(s string, maxBytes int) string {
 		return s
 	}
 	s = s[:maxBytes]
-	for len(s) > 0 && !utf8.RuneStart(s[len(s)-1]) {
-		s = s[:len(s)-1]
-	}
-	if len(s) > 0 {
+	for i := 0; i < utf8.UTFMax && len(s) > 0; i++ {
 		r, size := utf8.DecodeLastRuneInString(s)
 		if r == utf8.RuneError && size == 1 {
 			s = s[:len(s)-1]
+			continue
 		}
+		break
 	}
 	return s
 }
@@ -298,9 +297,7 @@ func (t *Toolset) glob(ctx context.Context, body []byte) ([]byte, bool) {
 		}
 		if errors.Is(walkErr, errWalkBudget) {
 			truncated = true
-			if truncationReason == "" {
-				truncationReason = "walk_budget"
-			}
+			truncationReason = upgradeTruncationReason(truncationReason, "walk_budget")
 		} else if !errors.Is(walkErr, errStopWalk) {
 			return refuse(CodeIO, "Glob: "+walkErr.Error()).JSON(), true
 		}

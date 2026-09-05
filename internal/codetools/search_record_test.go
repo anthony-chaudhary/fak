@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -327,4 +328,200 @@ func TestGlobTruncationReporting(t *testing.T) {
 	if m["truncation_reason"] != "" {
 		t.Fatalf("truncation_reason = %v, want empty", m["truncation_reason"])
 	}
+}
+
+func TestGrepWalkBudgetPrecedence(t *testing.T) {
+	t.Run("oversized_line_then_walk_budget", func(t *testing.T) {
+		dir := t.TempDir()
+		ts, err := New(Config{Root: dir, Limits: Limits{MaxWalkFiles: 2}})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		// File 1: oversized line (> 512 bytes) with match
+		longLine := strings.Repeat("A", 600) + "needle"
+		mustWrite(t, filepath.Join(dir, "01_oversized.txt"), longLine+"\n")
+		// File 2: normal match
+		mustWrite(t, filepath.Join(dir, "02_second.txt"), "normal needle\n")
+		// File 3: forces walk budget exhaustion (visited > MaxWalkFiles)
+		mustWrite(t, filepath.Join(dir, "03_third.txt"), "another needle\n")
+
+		out, isErr := ts.grep(context.Background(), argsOf(t, GrepArgs{Pattern: "needle"}))
+		if isErr {
+			t.Fatalf("Grep failed: %s", string(out))
+		}
+		m := decodeResult(t, out)
+		if m["truncated"] != true {
+			t.Fatalf("truncated = %v, want true", m["truncated"])
+		}
+		if m["truncation_reason"] != "walk_budget" {
+			t.Fatalf("truncation_reason = %v, want walk_budget", m["truncation_reason"])
+		}
+		rows := m["matches"].([]any)
+		if len(rows) != 2 {
+			t.Fatalf("len(matches) = %d, want 2", len(rows))
+		}
+		row0 := rows[0].(map[string]any)
+		if row0["truncated"] != true {
+			t.Fatalf("row0 truncated = %v, want true", row0["truncated"])
+		}
+	})
+
+	t.Run("file_size_limit_then_walk_budget", func(t *testing.T) {
+		dir := t.TempDir()
+		ts, err := New(Config{Root: dir, Limits: Limits{MaxReadBytes: 200, MaxWalkFiles: 2}})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		// File 1: exceeds MaxReadBytes (file_size limit)
+		largeContent := "needle in head\n" + strings.Repeat("x\n", 200)
+		mustWrite(t, filepath.Join(dir, "01_large.txt"), largeContent)
+		// File 2: normal match
+		mustWrite(t, filepath.Join(dir, "02_second.txt"), "normal needle\n")
+		// File 3: forces walk budget exhaustion
+		mustWrite(t, filepath.Join(dir, "03_third.txt"), "another needle\n")
+
+		out, isErr := ts.grep(context.Background(), argsOf(t, GrepArgs{Pattern: "needle"}))
+		if isErr {
+			t.Fatalf("Grep failed: %s", string(out))
+		}
+		m := decodeResult(t, out)
+		if m["truncated"] != true {
+			t.Fatalf("truncated = %v, want true", m["truncated"])
+		}
+		if m["truncation_reason"] != "walk_budget" {
+			t.Fatalf("truncation_reason = %v, want walk_budget", m["truncation_reason"])
+		}
+	})
+}
+
+func TestSnapToRuneBoundaryMultiByte(t *testing.T) {
+	t.Run("direct", func(t *testing.T) {
+		cases := []struct {
+			name     string
+			input    string
+			maxBytes int
+			wantEnd  string
+		}{
+			{
+				name:     "cjk_split_2_bytes_in",
+				input:    strings.Repeat("a", 510) + "世" + "suffix",
+				maxBytes: 512,
+				wantEnd:  strings.Repeat("a", 510),
+			},
+			{
+				name:     "cjk_split_1_byte_in",
+				input:    strings.Repeat("a", 511) + "世" + "suffix",
+				maxBytes: 512,
+				wantEnd:  strings.Repeat("a", 511),
+			},
+			{
+				name:     "cjk_exact_boundary",
+				input:    strings.Repeat("a", 509) + "世" + "suffix",
+				maxBytes: 512,
+				wantEnd:  strings.Repeat("a", 509) + "世",
+			},
+			{
+				name:     "emoji_split_3_bytes_in",
+				input:    strings.Repeat("a", 509) + "🎉" + "suffix",
+				maxBytes: 512,
+				wantEnd:  strings.Repeat("a", 509),
+			},
+			{
+				name:     "emoji_split_2_bytes_in",
+				input:    strings.Repeat("a", 510) + "🎉" + "suffix",
+				maxBytes: 512,
+				wantEnd:  strings.Repeat("a", 510),
+			},
+			{
+				name:     "emoji_split_1_byte_in",
+				input:    strings.Repeat("a", 511) + "🎉" + "suffix",
+				maxBytes: 512,
+				wantEnd:  strings.Repeat("a", 511),
+			},
+			{
+				name:     "emoji_exact_boundary",
+				input:    strings.Repeat("a", 508) + "🎉" + "suffix",
+				maxBytes: 512,
+				wantEnd:  strings.Repeat("a", 508) + "🎉",
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				got := snapToRuneBoundary(tc.input, tc.maxBytes)
+				if !utf8.ValidString(got) {
+					t.Fatalf("snapToRuneBoundary() produced invalid UTF-8: %q", got)
+				}
+				if len(got) > tc.maxBytes {
+					t.Fatalf("len(got) = %d, want <= %d", len(got), tc.maxBytes)
+				}
+				if strings.ContainsRune(got, utf8.RuneError) {
+					t.Fatalf("snapToRuneBoundary() produced replacement character: %q", got)
+				}
+				if got != tc.wantEnd {
+					t.Fatalf("got %q (len %d), want %q (len %d)", got, len(got), tc.wantEnd, len(tc.wantEnd))
+				}
+			})
+		}
+	})
+
+	t.Run("grep_match_text", func(t *testing.T) {
+		dir := t.TempDir()
+		ts, err := New(Config{Root: dir})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+
+		// 1. CJK character crossing 512-byte boundary
+		cjkLine := strings.Repeat("A", 510) + "世" + "match_target_cjk" + strings.Repeat("B", 50)
+		mustWrite(t, filepath.Join(dir, "cjk.txt"), cjkLine+"\n")
+
+		// 2. Emoji character crossing 512-byte boundary
+		emojiLine := strings.Repeat("C", 510) + "🎉" + "match_target_emoji" + strings.Repeat("D", 50)
+		mustWrite(t, filepath.Join(dir, "emoji.txt"), emojiLine+"\n")
+
+		// Test CJK match
+		out, isErr := ts.grep(context.Background(), argsOf(t, GrepArgs{Pattern: "match_target_cjk"}))
+		if isErr {
+			t.Fatalf("Grep cjk failed: %s", string(out))
+		}
+		m := decodeResult(t, out)
+		rows := m["matches"].([]any)
+		if len(rows) != 1 {
+			t.Fatalf("cjk matches count = %d, want 1", len(rows))
+		}
+		row := rows[0].(map[string]any)
+		matchText := row["text"].(string)
+		if !utf8.ValidString(matchText) {
+			t.Fatalf("cjk match.Text is not valid UTF-8: %q", matchText)
+		}
+		if len(matchText) > maxMatchLineBytes {
+			t.Fatalf("len(cjk match.Text) = %d, want <= %d", len(matchText), maxMatchLineBytes)
+		}
+		if strings.ContainsRune(matchText, utf8.RuneError) {
+			t.Fatalf("cjk match.Text contains replacement character: %q", matchText)
+		}
+
+		// Test Emoji match
+		out, isErr = ts.grep(context.Background(), argsOf(t, GrepArgs{Pattern: "match_target_emoji"}))
+		if isErr {
+			t.Fatalf("Grep emoji failed: %s", string(out))
+		}
+		m = decodeResult(t, out)
+		rows = m["matches"].([]any)
+		if len(rows) != 1 {
+			t.Fatalf("emoji matches count = %d, want 1", len(rows))
+		}
+		row = rows[0].(map[string]any)
+		matchText = row["text"].(string)
+		if !utf8.ValidString(matchText) {
+			t.Fatalf("emoji match.Text is not valid UTF-8: %q", matchText)
+		}
+		if len(matchText) > maxMatchLineBytes {
+			t.Fatalf("len(emoji match.Text) = %d, want <= %d", len(matchText), maxMatchLineBytes)
+		}
+		if strings.ContainsRune(matchText, utf8.RuneError) {
+			t.Fatalf("emoji match.Text contains replacement character: %q", matchText)
+		}
+	})
 }
