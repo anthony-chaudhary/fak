@@ -1410,6 +1410,7 @@ func DevAgentPolicy() Policy {
 		Allow: map[string]bool{
 			// safe inspect / build / test tools a coding agent drives
 			"Read":       true,
+			"fak_read":   true,
 			"git_status": true, "git_diff": true, "git_log": true,
 			"go_build": true, "go_test": true, "run_tests": true,
 			// the high-level ship action: allowed at the floor, but witness-gated by

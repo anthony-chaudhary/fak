@@ -3,6 +3,7 @@
   "posture": "default_open",
   "allow": [
     "Read",
+    "fak_read",
     "git_diff",
     "git_log",
     "git_status",

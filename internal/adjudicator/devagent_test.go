@@ -54,14 +54,21 @@ func TestDevAgentAllowsShipReleaseAtFloor(t *testing.T) {
 	}
 }
 
-// The Codex-visible fak_read MCP helper lowers to the host-style `Read` tool name
-// before dispatch. The dev-agent floor must allow that exact name, not only read_*
-// prefixes, or the advertised read helper terminal-denies every file read.
+// The host-style `Read` tool is transformed to `fak_read` by monitor/read_to_fak_read,
+// while native `fak_read` is allowed directly without undergoing a spurious transform.
 func TestDevAgentAllowsHostReadForFakReadMCP(t *testing.T) {
 	a := New(DevAgentPolicy())
 	v := a.Adjudicate(context.Background(), inlineCall("Read", `{"file_path":"AGENTS.md"}`))
 	if v.Kind != abi.VerdictTransform && v.Kind != abi.VerdictAllow {
 		t.Fatalf("Read at the floor: got %v/%s, want Transform or Allow", v.Kind, abi.ReasonName(v.Reason))
+	}
+}
+
+func TestDevAgentAllowsFakReadAtFloorWithoutTransform(t *testing.T) {
+	a := New(DevAgentPolicy())
+	v := a.Adjudicate(context.Background(), inlineCall("fak_read", `{"file_path":"AGENTS.md"}`))
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("fak_read at the floor: got %v/%s, want Allow without transform", v.Kind, abi.ReasonName(v.Reason))
 	}
 }
 

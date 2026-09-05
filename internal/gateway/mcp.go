@@ -146,6 +146,9 @@ func (s *Server) handleMCPHTTP(w http.ResponseWriter, r *http.Request) {
 	// scope floor. Absent a proxy (the no-RequireKey loopback) the principal is "" — the
 	// single-tenant default the floor reads as a self-read.
 	ctx := WithPrincipal(r.Context(), principalFor(r, ""))
+	if r.URL.Query().Get("strict") == "true" || r.Header.Get("X-Fak-Strict") == "true" {
+		ctx = withMCPStrict(ctx, true)
+	}
 	resp := s.dispatchRPC(ctx, body)
 	if resp == nil { // a notification
 		w.WriteHeader(http.StatusAccepted)
@@ -155,6 +158,20 @@ func (s *Server) handleMCPHTTP(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(resp)
+}
+
+type mcpStrictReqKey struct{}
+
+func withMCPStrict(ctx context.Context, strict bool) context.Context {
+	return context.WithValue(ctx, mcpStrictReqKey{}, strict)
+}
+
+func isMCPStrictRequested(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(mcpStrictReqKey{}).(bool)
+	return v
 }
 
 // dispatchRPC parses one JSON-RPC frame and routes it. It returns nil for a
@@ -192,15 +209,7 @@ func (s *Server) handleMethod(ctx context.Context, method string, params json.Ra
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":
-		// Native schema filtering is default-on, but fails open whenever its
-		// recovery path is unavailable. The receipt lets operators distinguish
-		// real savings from a safe bailout without parsing logs.
-		tools, filter := s.toolsListView()
-		s.metrics.observeToolFilter(filter)
-		return mcpCacheHint(map[string]any{
-			"tools": tools,
-			"_meta": map[string]any{"fak/tool_filter": filter},
-		}, mcpCatalogTTLMillis, mcpCacheScopePublic), nil
+		return s.handleMCPToolsList(ctx, params)
 	case "tools/call":
 		return s.callTool(ctx, params)
 	case "resources/list":
@@ -216,6 +225,30 @@ func (s *Server) handleMethod(ctx context.Context, method string, params json.Ra
 	default:
 		return nil, &rpcError{Code: rpcMethodNotFound, Message: "method not found: " + method}
 	}
+}
+
+type mcpToolsListParams struct {
+	Cursor string `json:"cursor,omitempty"`
+	Strict *bool  `json:"strict,omitempty"`
+}
+
+func (s *Server) handleMCPToolsList(ctx context.Context, params json.RawMessage) (any, *rpcError) {
+	strict := envEnabled("FAK_STRICT_MCP_TOOLS") || isMCPStrictRequested(ctx)
+	if len(params) > 0 {
+		var p mcpToolsListParams
+		if err := json.Unmarshal(params, &p); err == nil && p.Strict != nil {
+			strict = *p.Strict
+		}
+	}
+	tools, filter := s.toolsListView()
+	if strict {
+		tools = ToStrictToolDescriptors(tools)
+	}
+	s.metrics.observeToolFilter(filter)
+	return mcpCacheHint(map[string]any{
+		"tools": tools,
+		"_meta": map[string]any{"fak/tool_filter": filter},
+	}, mcpCatalogTTLMillis, mcpCacheScopePublic), nil
 }
 
 // mcpProtocolVersions is the SINGLE source of truth for the MCP revisions whose
@@ -602,7 +635,7 @@ func (s *Server) fakReadWithOptions(ctx context.Context, path string, offset, li
 		argsMap["line_numbers"] = true
 	}
 	args, _ := json.Marshal(argsMap)
-	tc, err := s.buildCall(ctx, "Read", string(args), true, witness, traceID)
+	tc, err := s.buildCall(ctx, "fak_read", string(args), true, witness, traceID)
 	if err != nil {
 		return WireVerdict{}, nil, err
 	}
@@ -830,89 +863,165 @@ func mcpToolResultSpan(v any, cacheResident bool) map[string]any {
 	}
 }
 
+// mcpToolAnnotations defines standard MCP tool annotations (e.g. MCP 2024-11-05+).
+type mcpToolAnnotations struct {
+	ReadOnly            *bool `json:"readOnly,omitempty"`
+	Idempotent          *bool `json:"idempotent,omitempty"`
+	Consequential       *bool `json:"consequential,omitempty"`
+	ReadOnlyHint        bool  `json:"readOnlyHint,omitempty"`
+	ReadOnlyHintSnake   bool  `json:"read_only_hint,omitempty"`
+	IdempotentHint      bool  `json:"idempotentHint,omitempty"`
+	IdempotentHintSnake bool  `json:"idempotent_hint,omitempty"`
+}
+
+func (a *mcpToolAnnotations) toMap() map[string]any {
+	if a == nil {
+		return nil
+	}
+	m := make(map[string]any)
+	if a.ReadOnly != nil {
+		m["readOnly"] = *a.ReadOnly
+	}
+	if a.Idempotent != nil {
+		m["idempotent"] = *a.Idempotent
+	}
+	if a.Consequential != nil {
+		m["consequential"] = *a.Consequential
+	}
+	if a.ReadOnlyHint {
+		m["readOnlyHint"] = true
+	}
+	if a.ReadOnlyHintSnake {
+		m["read_only_hint"] = true
+	}
+	if a.IdempotentHint {
+		m["idempotentHint"] = true
+	}
+	if a.IdempotentHintSnake {
+		m["idempotent_hint"] = true
+	}
+	return m
+}
+
+func boolPtr(b bool) *bool {
+	return &b
+}
+
+func readOnlyToolAnnotations() *mcpToolAnnotations {
+	return &mcpToolAnnotations{
+		ReadOnly:            boolPtr(true),
+		Idempotent:          boolPtr(true),
+		Consequential:       boolPtr(false),
+		ReadOnlyHint:        true,
+		ReadOnlyHintSnake:   true,
+		IdempotentHint:      true,
+		IdempotentHintSnake: true,
+	}
+}
+
+func mutatingToolAnnotations() *mcpToolAnnotations {
+	return &mcpToolAnnotations{
+		ReadOnly:      boolPtr(false),
+		Consequential: boolPtr(true),
+	}
+}
+
+// mcpToolDescriptor represents an MCP tool descriptor with schema and annotations.
+type mcpToolDescriptor struct {
+	Name        string              `json:"name"`
+	Description string              `json:"description,omitempty"`
+	InputSchema json.RawMessage     `json:"inputSchema"`
+	Annotations *mcpToolAnnotations `json:"annotations,omitempty"`
+	Strict      bool                `json:"strict,omitempty"`
+}
+
+func (td mcpToolDescriptor) toMap() map[string]any {
+	m := map[string]any{
+		"name":        td.Name,
+		"description": td.Description,
+		"inputSchema": td.InputSchema,
+	}
+	if td.Annotations != nil {
+		m["annotations"] = td.Annotations.toMap()
+	}
+	if td.Strict {
+		m["strict"] = true
+	}
+	return m
+}
+
 // toolDescriptors is the tools/list payload. The inputSchema is a JSON Schema for
 // the {tool, arguments, read_only} shape both tools accept.
 func toolDescriptors() []map[string]any {
-	schema := json.RawMessage(`{
-  "type": "object",
-  "properties": {
-    "tool": {"type": "string", "description": "the logical tool name to route through the kernel"},
-    "arguments": {"description": "the tool arguments: a JSON object, or a JSON-encoded string (the OpenAI function.arguments convention)"},
-    "read_only": {"type": "boolean", "description": "hint that the tool is read-only/idempotent (enables vDSO dedup)"},
-    "trace_id": {"type": "string", "description": "optional session trace id; omitted means the gateway mints one and returns it"},
-    "witness": {"type": "string", "description": "optional external world-state token the call is reading at"}
-  },
-  "required": ["tool"]
-}`)
+	schema := json.RawMessage(`{"type":"object","properties":{"tool":{"type":"string","description":"the logical tool name to route through the kernel"},"arguments":{"anyOf":[{"type":"object","additionalProperties":false},{"type":"string"}],"description":"the tool arguments: a JSON object, or a JSON-encoded string"},"read_only":{"type":"boolean","description":"hint that the tool is read-only/idempotent (enables vDSO dedup)"},"trace_id":{"type":"string","description":"optional session trace id; omitted means the gateway mints one and returns it"},"witness":{"type":"string","description":"optional external world-state token the call is reading at"}},"required":["tool"],"additionalProperties":false}`)
 	tools := []map[string]any{
-		{
-			"name":        "fak_adjudicate",
-			"description": "Adjudicate a proposed tool call through the fak kernel WITHOUT executing it. Returns verdict and a fak-adjudicate-receipt/1 receipt with outcome, duration, execution=not_executed, and kernel_decide provenance. Repaired arguments appear only for TRANSFORM. Use when client executes tools out-of-band.",
-			"inputSchema": schema,
-			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
-		},
-		{
-			"name":        "fak_syscall",
-			"description": "Adjudicate AND execute a tool call through the fak kernel (dispatch to the registered engine + context-MMU result admission). Returns the verdict and the admitted result. Use when fak should run the tool.",
-			"inputSchema": schema,
-		},
-		{
-			"name":        "fak_read",
-			"description": "Read files with verified-fresh cache reuse or cold read. Preserves file_path/content/error format; adds receipt {schema,outcome,bytes,duration_ns,witness,error?}. Outcome is executed_cold_read or verified_fresh_reuse; typed errors expose code/source. Prefer {file_paths:[...]} for multiple files.",
-			"inputSchema": json.RawMessage(`{
-  "type": "object",
-  "properties": {
-    "file_path": {"type": "string", "description": "the path of the file to read (absolute, or relative to the working tree)"},
-    "file_paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "description": "independent file paths to read in one call; preferred when reading more than one file"},
-    "offset": {"type": "integer", "description": "optional 1-based line number to start reading from"},
-    "limit": {"type": "integer", "description": "optional maximum number of lines to read"},
-    "line_numbers": {"type": "boolean", "description": "optional flag to prefix lines with 1-based line numbers (<line>: <content>)"},
-    "trace_id": {"type": "string", "description": "optional session trace id; omitted means the gateway mints one and returns it"},
-    "witness": {"type": "string", "description": "optional external world-state token (a git commit / blob hash) the read is taken at"}
-  }
-}`),
-			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true},
-		},
-		{
-			"name":        "fak_admit",
-			"description": "Submit tool RESULTS your own client executed, to run them through the fak kernel's result-side stack (context-MMU quarantine + IFC source-stamp / per-trace taint ledger) BEFORE admitting them to context. Wire-proxied sessions are gated automatically; fak_admit is for out-of-band client tool results. A poisoned/secret-shaped result comes back QUARANTINE with the bytes paged out; the session's taint high-water mark is raised so a later egress is gated. Prefer {items:[{tool,result},...]} for independent results; {tool,result,trace_id} remains the unchanged single-result form. Every batch item crosses the safety floor independently and returns in request order, so one refusal never drops its peers. This arms the exfil floor on the path where YOU run the tool (the complement of fak_adjudicate).",
-			"inputSchema": json.RawMessage(`{
+		mcpToolDescriptor{
+			Name:        "fak_adjudicate",
+			Description: "Adjudicate a proposed tool call through the fak kernel WITHOUT executing it. Returns verdict and a fak-adjudicate-receipt/1 receipt with outcome, duration, execution=not_executed, and kernel_decide provenance. Repaired arguments appear only for TRANSFORM. Use when client executes tools out-of-band.",
+			InputSchema: schema,
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_syscall",
+			Description: "Adjudicate AND execute a tool call through the fak kernel (dispatch to the registered engine + context-MMU result admission). Returns the verdict and the admitted result. Use when fak should run the tool.",
+			InputSchema: schema,
+			Annotations: mutatingToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_read",
+			Description: "Read files with verified-fresh cache reuse or cold read. Preserves file_path/content/error format; adds receipt {schema,outcome,bytes,duration_ns,witness,error?}. Outcome is executed_cold_read or verified_fresh_reuse; typed errors expose code/source. Prefer {file_paths:[...]} for multiple files.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string","description":"the path of the file to read (absolute, or relative to the working tree)"},"file_paths":{"type":"array","minItems":1,"items":{"type":"string","minLength":1},"description":"independent file paths to read in one call; preferred when reading more than one file"},"offset":{"type":"integer","description":"optional 1-based line number to start reading from"},"limit":{"type":"integer","description":"optional maximum number of lines to read"},"line_numbers":{"type":"boolean","description":"optional flag to prefix lines with 1-based line numbers (<line>: <content>)"},"trace_id":{"type":"string","description":"optional session trace id; omitted means the gateway mints one and returns it"},"witness":{"type":"string","description":"optional external world-state token (a git commit / blob hash) the read is taken at"}},"additionalProperties":false}`),
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_admit",
+			Description: "Submit tool RESULTS your own client executed, to run them through the fak kernel's result-side stack (context-MMU quarantine + IFC source-stamp / per-trace taint ledger) BEFORE admitting them to context. Wire-proxied sessions are gated automatically; fak_admit is for out-of-band client tool results. A poisoned/secret-shaped result comes back QUARANTINE with the bytes paged out; the session's taint high-water mark is raised so a later egress is gated. Prefer {items:[{tool,result},...]} for independent results; {tool,result,trace_id} remains the unchanged single-result form. Every batch item crosses the safety floor independently and returns in request order, so one refusal never drops its peers. This arms the exfil floor on the path where YOU run the tool (the complement of fak_adjudicate).",
+			InputSchema: json.RawMessage(`{
   "type": "object",
   "properties": {
     "tool": {"type": "string", "description": "the tool name that produced this result (its source class keys the provenance taint)"},
-    "result": {"description": "the tool result content: a JSON object, or a JSON-encoded string"},
-	"items": {"type": "array", "minItems": 1, "description": "independent tool results to admit in one call", "items": {"type": "object", "properties": {"tool": {"type": "string"}, "result": {}, "trace_id": {"type": "string"}, "witness": {"type": "string"}}, "required": ["tool"]}},
+    "result": {
+      "anyOf": [{"type": "object", "additionalProperties": false}, {"type": "string"}],
+      "description": "the tool result content: a JSON object, or a JSON-encoded string"
+    },
+	"items": {"type": "array", "minItems": 1, "description": "independent tool results to admit in one call", "items": {"type": "object", "properties": {"tool": {"type": "string"}, "result": {"anyOf": [{"type": "object", "additionalProperties": false}, {"type": "string"}], "description": "the tool result content: a JSON object, or a JSON-encoded string"}, "trace_id": {"type": "string"}, "witness": {"type": "string"}}, "required": ["tool"], "additionalProperties": false}},
     "trace_id": {"type": "string", "description": "the session trace this result belongs to (keys the IFC taint ledger)"},
     "witness": {"type": "string", "description": "optional external world-state token the result was read at"}
-  }
+  },
+  "additionalProperties": false
 }`),
-		},
-		{
-			"name":        "fak_changes",
-			"description": "Drain the cross-agent 'what changed' feed: the typed write Mutations and Revocations observed since your cursor, so you can re-plan or evict your own cache when another agent changed or refuted shared data. Pass {since: <cursor>} (0 = everything retained); returns the events and your next cursor.",
-			"inputSchema": json.RawMessage(`{"type":"object","properties":{"since":{"type":"integer","description":"the Seq cursor of the last event you saw (0 = from the start of the retained window)"}}}`),
-		},
-		{
-			"name":        "fak_revoke",
-			"description": "Refute an external world-state witness (a git commit / blob hash / lease epoch) found poisoned or stale: every pooled tier-2 entry admitted under it is causally evicted fleet-wide, future re-admission under it is refused, and the eviction is broadcast on the change feed. Pass {witness: <token>}; returns the local eviction count and the new trust epoch.",
-			"inputSchema": json.RawMessage(`{"type":"object","properties":{"witness":{"type":"string","description":"the external world-state witness to refute"}},"required":["witness"]}`),
-		},
-		{
-			"name":        "fak_session_reset",
-			"description": "Cooperatively reset a budget-drained served session from an MCP client. Pass {trace_id?, context_tokens?, messages?}; context_tokens is first debited against the session budget, then fak reuses the same --reset-on-budget carryover builder to mint a fresh continuation trace and seed_messages for a new model window. Returns reset=false when the session is not budget-drained or the host did not wire --reset-on-budget.",
-			"inputSchema": json.RawMessage(`{
+			Annotations: mutatingToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_changes",
+			Description: "Drain the cross-agent 'what changed' feed: the typed write Mutations and Revocations observed since your cursor, so you can re-plan or evict your own cache when another agent changed or refuted shared data. Pass {since: <cursor>} (0 = everything retained); returns the events and your next cursor.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"since":{"type":"integer","description":"the Seq cursor of the last event you saw (0 = from the start of the retained window)"}},"additionalProperties":false}`),
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_revoke",
+			Description: "Refute an external world-state witness (a git commit / blob hash / lease epoch) found poisoned or stale: every pooled tier-2 entry admitted under it is causally evicted fleet-wide, future re-admission under it is refused, and the eviction is broadcast on the change feed. Pass {witness: <token>}; returns the local eviction count and the new trust epoch.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"witness":{"type":"string","description":"the external world-state witness to refute"}},"required":["witness"],"additionalProperties":false}`),
+			Annotations: mutatingToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_session_reset",
+			Description: "Cooperatively reset a budget-drained served session from an MCP client. Pass {trace_id?, context_tokens?, messages?}; context_tokens is first debited against the session budget, then fak reuses the same --reset-on-budget carryover builder to mint a fresh continuation trace and seed_messages for a new model window. Returns reset=false when the session is not budget-drained or the host did not wire --reset-on-budget.",
+			InputSchema: json.RawMessage(`{
   "type": "object",
   "properties": {
     "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace when configured"},
     "context_tokens": {"type": "integer", "description": "optional provider/model context-token count to debit before checking the reset boundary"},
-    "messages": {"type": "array", "items": {"type": "object"}, "description": "optional transcript messages to distill into the fresh-window carryover seed"}
-  }
+    "messages": {"type": "array", "items": {"type": "object", "additionalProperties": false}, "description": "optional transcript messages to distill into the fresh-window carryover seed"}
+  },
+  "additionalProperties": false
 }`),
-		},
-		{
-			"name":        "fak_context_change",
-			"description": "Request a safe negative-only context mutation against a persisted recall core image. Today this records a tombstone for one page: future Resolve/Recall/working-set assembly skips it, while the original page row and CAS bytes remain available for audit. Pass {image_dir, step, reason, requested_by?, digest?, witness?, action?}; action may be omitted, 'tombstone', or 'tombstone_page'.",
-			"inputSchema": json.RawMessage(`{
+			Annotations: mutatingToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_context_change",
+			Description: "Request a safe negative-only context mutation against a persisted recall core image. Today this records a tombstone for one page: future Resolve/Recall/working-set assembly skips it, while the original page row and CAS bytes remain available for audit. Pass {image_dir, step, reason, requested_by?, digest?, witness?, action?}; action may be omitted, 'tombstone', or 'tombstone_page'.",
+			InputSchema: json.RawMessage(`{
   "type": "object",
   "properties": {
     "image_dir": {"type": "string", "description": "path to the persisted recall core image directory"},
@@ -923,66 +1032,65 @@ func toolDescriptors() []map[string]any {
     "requested_by": {"type": "string", "description": "agent/operator identity requesting the tombstone"},
     "witness": {"type": "string", "description": "optional external witness supporting the request"}
   },
-  "required": ["image_dir", "step", "reason"]
+  "required": ["image_dir", "step", "reason"],
+  "additionalProperties": false
 }`),
-		},
-		{
-			"name":        "fak_memory_drivers",
-			"description": "List the built-in memory STRATEGIES (recall/render/clean/compact/dream). Each is a composable query in the memq algebra (scan|filter|rank|limit|budget|render|tombstone|consolidate|reclassify|prune), not a hardcoded function — 'build SQL, not a specific query'. Returns each driver's name, doc, and compiled plan so you can see the pipeline and author your own.",
-			"inputSchema": json.RawMessage(`{"type":"object","properties":{}}`),
-			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
-		},
-		{
-			"name":        "fak_memory_explain",
-			"description": "EXPLAIN a memory query as a plan WITHOUT executing it — every step, which steps are effects, and which mutate durable state (and so are proposal-only). Pass {driver} for a built-in, or {query} with an inline authored memq Query ({intent, ops:[{kind,...}]}). This is the 'step through it before you run it' surface.",
-			"inputSchema": memoryInputSchema,
-			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
-		},
-		{
-			"name":        "fak_memory_run",
-			"description": "RUN a memory query against a backend: pick a built-in {driver} or supply an inline {query}; parameterize with {intent,k,budget}; point at a recall core image with {image_dir} (default: an in-memory demo corpus). Effects default to PROPOSED — set {apply:true} to enact the safe negative-only/storage mutations (tombstone, prune). Sealed spans are never rendered (the trust gate); consolidate/reclassify never persist this rung. Returns the per-step trace, the rendered set, proposed/applied effects, refusals, and stats.",
-			"inputSchema": memoryInputSchema,
-		},
-		{
-			"name":        "fak_tools_search",
-			"description": "Search and retrieve tool schemas with progressive disclosure. Filter tools by query; detail_level selects 'name', 'description', or 'full' schemas.",
-			"inputSchema": json.RawMessage(`{
-  "type": "object",
-  "properties": {
-    "query": {"type": "string", "description": "optional filter string; matches tools whose name or description contains this substring (case-insensitive)"},
-    "detail_level": {"type": "string", "enum": ["name", "description", "full"], "description": "level of detail to return: 'name' = just tool names, 'description' = names + descriptions, 'full' = complete schemas including inputSchema"}
-  }
-}`),
-			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
-		},
-		{
-			"name":        "fak_feature_query",
-			"description": "Query fak's unified self-feature catalog: dev facts, live MCP tools, memory drivers, and capability cards. Returns lightweight FeatureCards with guarded request shapes; pass detail to fault only one selected schema, doc snippet, or memory explain plan.",
-			"inputSchema": featureQueryInputSchema,
-			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
-		},
-		{
-			"name":        "fak_capabilities",
-			"description": "The task-scoped toolbelt: memory drivers (memq recall/render/clean/compact/dream), the fak index * self-index verbs, and the kernel shared-path verbs (fak_changes, dos_arbitrate), ranked by an optional intent, each with the exact call to make (a memory-driver card carries a ready fak_memory_run call). Narrower and memory-forward compared to fak_feature_query.",
-			"inputSchema": capabilitiesInputSchema,
-			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
-		},
-		{
-			"name":        "view_image",
-			"description": "Inspect an image file or visual artifact when the active model supports multimodal vision inputs. Omitted from tool declarations when model vision is unsupported.",
-			"inputSchema": json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"path to the image file to inspect"}},"required":["path"]}`),
-			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true},
-		},
-		{
-			"name":        "fak_arch_check",
-			"description": "Preflight architectural validity: check whether Go package imports violate layered DAG tiers or primitive leaf constraints in <50ms.",
-			"inputSchema": json.RawMessage(`{"type":"object","properties":{"package":{"type":"string","description":"repo-relative package path, e.g. internal/agentquery"},"mine":{"type":"boolean","description":"check only packages touched by uncommitted or staged changes"}}}`),
-			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
-		},
+			Annotations: mutatingToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_memory_drivers",
+			Description: "List the built-in memory STRATEGIES (recall/render/clean/compact/dream). Each is a composable query in the memq algebra (scan|filter|rank|limit|budget|render|tombstone|consolidate|reclassify|prune), not a hardcoded function — 'build SQL, not a specific query'. Returns each driver's name, doc, and compiled plan so you can see the pipeline and author your own.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_memory_explain",
+			Description: "EXPLAIN a memory query as a plan WITHOUT executing it — every step, which steps are effects, and which mutate durable state (and so are proposal-only). Pass {driver} for a built-in, or {query} with an inline authored memq Query ({intent, ops:[{kind,...}]}). This is the 'step through it before you run it' surface.",
+			InputSchema: memoryInputSchema,
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_memory_run",
+			Description: "RUN a memory query against a backend: pick a built-in {driver} or supply an inline {query}; parameterize with {intent,k,budget}; point at a recall core image with {image_dir} (default: an in-memory demo corpus). Effects default to PROPOSED — set {apply:true} to enact the safe negative-only/storage mutations (tombstone, prune). Sealed spans are never rendered (the trust gate); consolidate/reclassify never persist this rung. Returns the per-step trace, the rendered set, proposed/applied effects, refusals, and stats.",
+			InputSchema: memoryInputSchema,
+			Annotations: mutatingToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_tools_search",
+			Description: "Search and retrieve tool schemas with progressive disclosure. Filter tools by query; detail_level selects 'name', 'description', or 'full' schemas.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"optional filter string; matches tools whose name or description contains this substring (case-insensitive)"},"detail_level":{"type":"string","enum":["name","description","full"],"description":"level of detail to return: 'name' = just tool names, 'description' = names + descriptions, 'full' = complete schemas including inputSchema"}},"additionalProperties":false}`),
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_feature_query",
+			Description: "Query fak's unified self-feature catalog: dev facts, live MCP tools, memory drivers, and capability cards. Returns lightweight FeatureCards with guarded request shapes; pass detail to fault only one selected schema, doc snippet, or memory explain plan.",
+			InputSchema: featureQueryInputSchema,
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_capabilities",
+			Description: "The task-scoped toolbelt: memory drivers (memq recall/render/clean/compact/dream), the fak index * self-index verbs, and the kernel shared-path verbs (fak_changes, dos_arbitrate), ranked by an optional intent, each with the exact call to make (a memory-driver card carries a ready fak_memory_run call). Narrower and memory-forward compared to fak_feature_query.",
+			InputSchema: capabilitiesInputSchema,
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "view_image",
+			Description: "Inspect an image file or visual artifact when the active model supports multimodal vision inputs. Omitted from tool declarations when model vision is unsupported.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"path to the image file to inspect"}},"required":["path"],"additionalProperties":false}`),
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_arch_check",
+			Description: "Preflight architectural validity: check whether Go package imports violate layered DAG tiers or primitive leaf constraints in <50ms.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"package":{"type":"string","description":"repo-relative package path, e.g. internal/agentquery"},"mine":{"type":"boolean","description":"check only packages touched by uncommitted or staged changes"}},"additionalProperties":false}`),
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
 	}
 	// The scoped trajectory-query surface (#3550): trajquery over MCP with the same
 	// validate -> rewrite -> execute scope enforcement the CLI runs.
-	tools = append(tools, trajqueryToolDescriptor())
+	tj := trajqueryToolDescriptor()
+	tj["annotations"] = readOnlyToolAnnotations().toMap()
+	tools = append(tools, tj)
 	return append(tools, contextIntrospectionToolDescriptors()...)
 }
 
@@ -991,55 +1099,59 @@ func toolDescriptors() []map[string]any {
 // restorable-span discovery). Split out of toolDescriptors as a cohesive concern.
 func contextIntrospectionToolDescriptors() []map[string]any {
 	return []map[string]any{
-		{
-			"name":        "fak_context_value",
-			"description": "Inspect managed-context pressure for a session. Returns observed token headroom and growth, a turn/compaction forecast, lifecycle volumes, and step_advice (any | bounded | checkpoint | rebuild | unknown). Read-only; optional trace_id defaults to the current guarded session.",
-			"inputSchema": json.RawMessage(`{
+		mcpToolDescriptor{
+			Name:        "fak_context_value",
+			Description: "Inspect managed-context pressure for a session. Returns observed token headroom and growth, a turn/compaction forecast, lifecycle volumes, and step_advice (any | bounded | checkpoint | rebuild | unknown). Read-only; optional trace_id defaults to the current guarded session.",
+			InputSchema: json.RawMessage(`{
   "type": "object",
   "properties": {
     "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace when configured (your own session under fak guard)"}
-  }
+  },
+  "additionalProperties": false
 }`),
-			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
-		},
-		{
-			"name":        "fak_context_restore",
-			"description": "Restore dropped context by content-addressed sha256 id. Returns verbatim stashed bytes plus orientation; optional trace_id defaults to the current guarded session, and image_dir may page a recall-image digest. Read-only and trust-gated: sealed or tombstoned spans are refused, while unknown or evicted ids return a miss.",
-			"inputSchema": json.RawMessage(`{
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_context_restore",
+			Description: "Restore dropped context by content-addressed sha256 id. Returns verbatim stashed bytes plus orientation; optional trace_id defaults to the current guarded session, and image_dir may page a recall-image digest. Read-only and trust-gated: sealed or tombstoned spans are refused, while unknown or evicted ids return a miss.",
+			InputSchema: json.RawMessage(`{
   "type": "object",
   "required": ["id"],
   "properties": {
     "id": {"type": "string", "description": "the content-address handle (sha256 hex) a compaction tombstone embedded as id=<hex>, or a recall page digest"},
     "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace (your own session under fak guard)"},
     "image_dir": {"type": "string", "description": "optional persisted recall core image dir; when the compaction stash misses the id, a recall page at that digest is paged back in under the image's trust gate"}
-  }
+  },
+  "additionalProperties": false
 }`),
-			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
-		},
-		{
-			"name":        "fak_context_spans",
-			"description": "List dropped context spans available to fak_context_restore. Returns safe metadata (id, excerpt, bytes, evidence edges, suppression, restorable) without content or paging; sealed or tombstoned spans remain listed but not restorable. Optional trace_id defaults to the current guarded session; unknown traces return Count 0.",
-			"inputSchema": json.RawMessage(`{
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_context_spans",
+			Description: "List dropped context spans available to fak_context_restore. Returns safe metadata (id, excerpt, bytes, evidence edges, suppression, restorable) without content or paging; sealed or tombstoned spans remain listed but not restorable. Optional trace_id defaults to the current guarded session; unknown traces return Count 0.",
+			InputSchema: json.RawMessage(`{
   "type": "object",
   "properties": {
     "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace (your own session under fak guard)"}
-  }
+  },
+  "additionalProperties": false
 }`),
-			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
-		},
-		{
-			"name":        "fak_resume_history",
-			"description": "Inspect the current session's durable resume and heal history. Returns attempts, closed resume_state, retry block and reason, earned budget, operator settlement, and next hint; no history is explicit and unresolved ledgers fail closed. Read-only and advice-only. Optional session, ledger, and max_attempts default from the guarded fleet environment.",
-			"inputSchema": json.RawMessage(`{
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
+		mcpToolDescriptor{
+			Name:        "fak_resume_history",
+			Description: "Inspect the current session's durable resume and heal history. Returns attempts, closed resume_state, retry block and reason, earned budget, operator settlement, and next hint; no history is explicit and unresolved ledgers fail closed. Read-only and advice-only. Optional session, ledger, and max_attempts default from the guarded fleet environment.",
+			InputSchema: json.RawMessage(`{
   "type": "object",
   "properties": {
     "session": {"type": "string", "description": "session id to observe; omitted resolves $CLAUDE_SESSION_ID, then the gateway default trace (your own session under fak guard)"},
     "ledger": {"type": "string", "description": "explicit resume ledger path; omitted resolves the fleet default from the environment ($FLEET_REG_DIR, then the Fleet registry conventions)"},
     "max_attempts": {"type": "integer", "description": "give-up cap; omitted or <= 0 uses the progress-earned budget"}
-  }
+  },
+  "additionalProperties": false
 }`),
-			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
-		},
+			Annotations: readOnlyToolAnnotations(),
+		}.toMap(),
 	}
 }
 
@@ -1239,7 +1351,8 @@ var memoryInputSchema = json.RawMessage(`{
     "backend": {"type": "string", "description": "run only: recall source. \"\" (default) = recall image at image_dir else demo; \"codex\" = read the external Codex memories home as a READ-ONLY generated recall layer (every cell external/untrusted, gated — not an AGENTS.md replacement)"},
     "codex_home": {"type": "string", "description": "run only, backend=codex: the Codex memories home to read (default: $CODEX_HOME; never silently ~/.codex over MCP)"},
     "include_chronicle": {"type": "boolean", "description": "run only, backend=codex: also include the higher-risk screen-generated chronicle memories. Default false"}
-  }
+  },
+  "additionalProperties": false
 }`)
 
 // ToolsSearchRequest is the request shape for fak_tools_search.

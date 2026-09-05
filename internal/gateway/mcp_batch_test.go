@@ -24,7 +24,7 @@ type batchReadAdj struct {
 func (*batchReadAdj) Caps() []abi.Capability { return nil }
 
 func (a *batchReadAdj) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
-	if c.Tool != "Read" {
+	if c.Tool != "Read" && c.Tool != "fak_read" {
 		return abi.Verdict{Kind: abi.VerdictAllow, By: "batch-read-test"}
 	}
 	var args struct {

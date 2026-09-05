@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
@@ -550,5 +551,45 @@ func TestFakReadPaginationAndLineNumbers(t *testing.T) {
 	}
 	if mcpBody["content"] != wantNumbered {
 		t.Fatalf("MCP got content %q, want %q", mcpBody["content"], wantNumbered)
+	}
+}
+
+// TestFakReadNoSpuriousTransformOrAmplificationInflation is the shift-left witness
+// that native MCP calls to fak_read do NOT trigger synthetic alias-transforms (Read -> fak_read),
+// which would falsely inflate kernel.Counters.Transforms and cause callavoid to claim
+// false avoided-call amplification.
+func TestFakReadNoSpuriousTransformOrAmplificationInflation(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterAdjudicator(100, adjudicator.New(adjudicator.DevAgentPolicy()))
+
+	dir := t.TempDir()
+	agent.RegisterReadEngine(dir)
+	filePath := filepath.Join(dir, "sample.txt")
+	if err := os.WriteFile(filePath, []byte("clean-content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := New(Config{EngineID: "fakread", Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	// 1. Direct fak_read via MCP tools/call
+	callJSON := fmt.Sprintf(`{"name":"fak_read","arguments":{"file_path":%q}}`, filePath)
+	rawRes, rpcErr := srv.handleMethod(ctx, "tools/call", json.RawMessage(callJSON))
+	if rpcErr != nil {
+		t.Fatalf("handleMethod tools/call: %v", rpcErr)
+	}
+	var resp SyscallResponse
+	decodeMCPText(t, rawRes, &resp)
+	if resp.Verdict.Kind != "ALLOW" {
+		t.Fatalf("verdict = %q, want ALLOW (must not be TRANSFORM)", resp.Verdict.Kind)
+	}
+
+	kc := srv.KernelCounters()
+	if kc.Transforms != 0 {
+		t.Fatalf("KernelCounters.Transforms = %d, want 0 (native fak_read must not trigger synthetic repair)", kc.Transforms)
 	}
 }
