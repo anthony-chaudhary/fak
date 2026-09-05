@@ -28,6 +28,7 @@
 //	symptom:<ref>     a fix(...) ships a test that fails on the parent, passes at the ref (#1326)
 //	exec:<json>       fail-to-pass/pass-to-pass execution witness
 //	settled:<json>    an asynchronously produced artifact has stopped growing (#5646)
+//	pipe:<json>       subprocess stdout/stderr SHA-256 and exit code witness (#10924)
 //
 // The notests rung is the dual of the others: where the rest CONFIRM that a
 // claimed effect is present, notests REFUTES when a ship-commit modified the very
@@ -62,6 +63,7 @@ package witness
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"strings"
@@ -276,6 +278,8 @@ func (r *Resolver) resolveUncached(ctx context.Context, c *abi.ToolCall, kind, a
 		// produced artifact EXISTS; this proves it has stopped growing and belongs
 		// to THIS run, so a consumer never parses a prefix. See settle.go.
 		return r.resolveSettled(ctx, arg)
+	case "pipe":
+		return r.resolvePipe(ctx, arg)
 	case "symptom":
 		// The fix-witness rung (#1326): does the fix at <ref> carry a test that FAILS on the
 		// parent and PASSES at the ref? Structural check always runs; the red-then-green
@@ -287,6 +291,24 @@ func (r *Resolver) resolveUncached(ctx context.Context, c *abi.ToolCall, kind, a
 		return r.resolveRSL(ctx, arg)
 	}
 	return abi.WitnessAbstain
+}
+
+func (r *Resolver) resolvePipe(ctx context.Context, arg string) abi.WitnessOutcome {
+	var spec PipeClaimSpec
+	if err := json.Unmarshal([]byte(arg), &spec); err != nil {
+		return abi.WitnessAbstain
+	}
+	// An unexecuted self-authored receipt is never accepted as proof.
+	// The witness kernel must execute the command directly via RunPipeWitness.
+	if len(spec.Command) == 0 {
+		return abi.WitnessAbstain
+	}
+	receipt, _, _, err := RunPipeWitness(ctx, r.dir, spec.Command...)
+	if err != nil {
+		return abi.WitnessAbstain
+	}
+	outcome, _ := ValidatePipeReceipt(&receipt, spec)
+	return outcome
 }
 
 // isGatingTestPath reports whether a repo path is a test file whose edit by a

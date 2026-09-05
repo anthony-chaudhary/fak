@@ -39,12 +39,16 @@ type ExecutionSpec struct {
 
 // ExecutionEvidence records a single selector observation.
 type ExecutionEvidence struct {
-	Kind     string `json:"kind"`
-	Ref      string `json:"ref"`
-	Selector string `json:"selector"`
-	ExitCode int    `json:"exit_code"`
-	Outcome  string `json:"outcome"`
-	Error    string `json:"error,omitempty"`
+	Kind         string `json:"kind"`
+	Ref          string `json:"ref"`
+	Selector     string `json:"selector"`
+	ExitCode     int    `json:"exit_code"`
+	Outcome      string `json:"outcome"`
+	Error        string `json:"error,omitempty"`
+	StdoutSHA256 string `json:"stdout_sha256,omitempty"`
+	StderrSHA256 string `json:"stderr_sha256,omitempty"`
+	StdoutBytes  int64  `json:"stdout_bytes,omitempty"`
+	StderrBytes  int64  `json:"stderr_bytes,omitempty"`
 }
 
 // ExecutionResult is the portable read-back from the execution witness rung.

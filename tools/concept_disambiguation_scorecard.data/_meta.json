@@ -7548,6 +7548,11 @@
           "category": "incidental",
           "reason": "closed refusal reason token in dos.toml and internal/hooks for pseudo-merge rejection",
           "token": "MERGE_WITNESS_FAIL"
+        },
+        {
+          "category": "incidental",
+          "reason": "witness execution kernel helper capturing subprocess stdout/stderr SHA-256",
+          "token": "RunPipeWitness"
         }
       ],
       "id": "witness-proof",
@@ -7593,6 +7598,7 @@
         "RefutesWitness",
         "ResolutionUnwitnessed",
         "RevocationEntry",
+        "RunPipeWitness",
         "RuntimeTerminalWitness",
         "SOURCE_WITNESSED",
         "STATE_TRANSITION_WITNESS_OK",
