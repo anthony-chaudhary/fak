@@ -695,9 +695,16 @@ func TestObservationEnvelopeGoldenAndStateLaws(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 var (
-	benchSinkBytes []byte
-	benchSinkErr   error
-	benchSinkBool  bool
+	benchSinkBytes        []byte
+	benchSinkErr          error
+	benchSinkBool         bool
+	benchSinkSessionVars  SessionVars
+	benchSinkSessions     []SessionVars
+	benchSinkCacheAttr    CacheAttributionVars
+	benchSinkManagedCache ManagedCacheVars
+	benchSinkShrinkLever  ShrinkLeverVars
+	benchSinkObservation  ObservationEnvelope
+	benchSinkTokenSavings TokenSavingsVars
 )
 
 func populatedShrinkLeverVars() ShrinkLeverVars {
@@ -718,6 +725,56 @@ const shrinkLeverVarsWire = `{
 	"inert_on_wire": ["defer_cold_tools"],
 	"dual_local_routing": false,
 	"finding": "SHRINK_LEVER_INERT_ON_WIRE"
+}`
+
+func populatedTokenSavingsVars() TokenSavingsVars {
+	return TokenSavingsVars{
+		NativeMCPFilter: TokenSavingLever{
+			Fired:          10,
+			Units:          12,
+			SavedBytes:     1024,
+			SavedTokens:    256,
+			Evidence:       "filtered 3 schemas",
+			ModeledTokens:  256.0,
+			ModeledCalls:   1.0,
+			ModeledSeconds: 0.15,
+		},
+		StaleReadElide: TokenSavingLever{
+			Fired:          5,
+			Units:          5,
+			SavedBytes:     4096,
+			SavedTokens:    1024,
+			Evidence:       "elided unchanged file read",
+			ModeledTokens:  1024.0,
+			ModeledCalls:   0.0,
+			ModeledSeconds: 0.05,
+		},
+		ColdToolDefer: TokenSavingLever{
+			Fired:          2,
+			Units:          8,
+			SavedTokens:    512,
+			Evidence:       "deferred 8 definitions",
+			ModeledTokens:  512.0,
+			ModeledCalls:   0.0,
+			ModeledSeconds: 0.02,
+		},
+		ModelRouting: TokenSavingLever{
+			Fired:          14,
+			Units:          14,
+			SavedTokens:    2048,
+			Evidence:       "routed to fast model",
+			ModeledTokens:  2048.0,
+			ModeledCalls:   14.0,
+			ModeledSeconds: 1.25,
+		},
+	}
+}
+
+const tokenSavingsVarsWire = `{
+	"native_mcp_filter": {"fired": 10, "units": 12, "saved_bytes": 1024, "saved_tokens": 256, "evidence": "filtered 3 schemas", "modeled_input_tokens_delta": 256, "modeled_model_calls_delta": 1, "modeled_latency_seconds_delta": 0.15},
+	"stale_read_elide": {"fired": 5, "units": 5, "saved_bytes": 4096, "saved_tokens": 1024, "evidence": "elided unchanged file read", "modeled_input_tokens_delta": 1024, "modeled_model_calls_delta": 0, "modeled_latency_seconds_delta": 0.05},
+	"cold_tool_defer": {"fired": 2, "units": 8, "saved_tokens": 512, "evidence": "deferred 8 definitions", "modeled_input_tokens_delta": 512, "modeled_model_calls_delta": 0, "modeled_latency_seconds_delta": 0.02},
+	"model_routing": {"fired": 14, "units": 14, "saved_tokens": 2048, "evidence": "routed to fast model", "modeled_input_tokens_delta": 2048, "modeled_model_calls_delta": 14, "modeled_latency_seconds_delta": 1.25}
 }`
 
 func BenchmarkSessionVars_Marshal(b *testing.B) {
@@ -742,6 +799,75 @@ func BenchmarkSessionVars_Unmarshal(b *testing.B) {
 		if err := json.Unmarshal(raw, &sv); err != nil {
 			b.Fatal(err)
 		}
+		benchSinkSessionVars = sv
+	}
+}
+
+func BenchmarkSessionVars_SliceMarshal(b *testing.B) {
+	rows := []SessionVars{
+		populatedSessionVars(),
+		{
+			TraceID:         "trace-worker-1",
+			Run:             "run-1",
+			TurnsLeft:       15,
+			TokensLeft:      50000,
+			InflightSeconds: 12,
+			LastTool:        "Read",
+		},
+		{
+			TraceID:        "trace-worker-2",
+			Run:            "run-1",
+			TurnsLeft:      8,
+			TokensLeft:     25000,
+			IdleSeconds:    45,
+			SpawnCount:     2,
+			ElapsedSeconds: 300,
+		},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		out, err := json.Marshal(rows)
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchSinkBytes = out
+	}
+}
+
+func BenchmarkSessionVars_SliceUnmarshal(b *testing.B) {
+	rows := []SessionVars{
+		populatedSessionVars(),
+		{
+			TraceID:         "trace-worker-1",
+			Run:             "run-1",
+			TurnsLeft:       15,
+			TokensLeft:      50000,
+			InflightSeconds: 12,
+			LastTool:        "Read",
+		},
+		{
+			TraceID:        "trace-worker-2",
+			Run:            "run-1",
+			TurnsLeft:      8,
+			TokensLeft:     25000,
+			IdleSeconds:    45,
+			SpawnCount:     2,
+			ElapsedSeconds: 300,
+		},
+	}
+	raw, err := json.Marshal(rows)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var decoded []SessionVars
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			b.Fatal(err)
+		}
+		benchSinkSessions = decoded
 	}
 }
 
@@ -767,6 +893,7 @@ func BenchmarkCacheAttributionVars_Unmarshal(b *testing.B) {
 		if err := json.Unmarshal(raw, &ca); err != nil {
 			b.Fatal(err)
 		}
+		benchSinkCacheAttr = ca
 	}
 }
 
@@ -792,6 +919,7 @@ func BenchmarkManagedCacheVars_Unmarshal(b *testing.B) {
 		if err := json.Unmarshal(raw, &mc); err != nil {
 			b.Fatal(err)
 		}
+		benchSinkManagedCache = mc
 	}
 }
 
@@ -826,22 +954,82 @@ func BenchmarkShrinkLeverVars_Unmarshal(b *testing.B) {
 		if err := json.Unmarshal(raw, &sl); err != nil {
 			b.Fatal(err)
 		}
+		benchSinkShrinkLever = sl
+	}
+}
+
+func BenchmarkTokenSavingsVars_Marshal(b *testing.B) {
+	ts := populatedTokenSavingsVars()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		out, err := json.Marshal(ts)
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchSinkBytes = out
+	}
+}
+
+func BenchmarkTokenSavingsVars_Unmarshal(b *testing.B) {
+	raw := []byte(tokenSavingsVarsWire)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var ts TokenSavingsVars
+		if err := json.Unmarshal(raw, &ts); err != nil {
+			b.Fatal(err)
+		}
+		benchSinkTokenSavings = ts
 	}
 }
 
 func BenchmarkObservationEnvelope_Validate(b *testing.B) {
-	envelope := ObservationEnvelope{
-		Schema:       ObservationSchemaV1,
-		Source:       "gateway",
-		Revision:     "r1",
-		Provenance:   "measured",
-		Availability: AvailabilityObserved,
-		Data:         json.RawMessage(`{"hits":0}`),
+	envelopes := []ObservationEnvelope{
+		{
+			Schema:       ObservationSchemaV1,
+			Source:       "gateway",
+			Revision:     "r1",
+			Provenance:   "measured",
+			Availability: AvailabilityObserved,
+			Data:         json.RawMessage(`{"hits":0}`),
+		},
+		{
+			Schema:       ObservationSchemaV1,
+			Source:       "gateway",
+			Revision:     "r1",
+			Provenance:   "measured",
+			Availability: AvailabilityEmpty,
+		},
+		{
+			Schema:       ObservationSchemaV1,
+			Source:       "gateway",
+			ObservedAt:   "2026-09-05T00:00:00Z",
+			Provenance:   "probe",
+			Availability: AvailabilityUnavailable,
+			Reason:       "probe failed",
+		},
+		{
+			Schema:       ObservationSchemaV1,
+			Source:       "gateway",
+			Revision:     "r1",
+			Provenance:   "cache",
+			Availability: AvailabilityStale,
+			Reason:       "ttl elapsed",
+		},
+		{
+			Schema:       ObservationSchemaV1,
+			Source:       "gateway",
+			Revision:     "r1",
+			Provenance:   "platform",
+			Availability: AvailabilityNotApplicable,
+			Reason:       "unsupported platform",
+		},
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		benchSinkErr = envelope.Validate()
+		benchSinkErr = envelopes[i%len(envelopes)].Validate()
 	}
 }
 
@@ -874,5 +1062,6 @@ func BenchmarkObservationEnvelope_Unmarshal(b *testing.B) {
 		if err := json.Unmarshal(raw, &env); err != nil {
 			b.Fatal(err)
 		}
+		benchSinkObservation = env
 	}
 }
