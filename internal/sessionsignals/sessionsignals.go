@@ -1,19 +1,6 @@
-// Package sessionsignals is the shared, closed vocabulary of TERMINAL-TURN signals the
-// fleet session/resume tools classify a Claude Code transcript's last turn with: the
-// usage-limit banner (and its reset window), the auth/login/credit/access walls, and the
-// transient transport/server errors. It is the Go port of tools/fleet_session_signals.py —
-// the single source of truth the Python resume tools shared so the sweep, the stopped-
-// session classifier, and the resume watchdogs could never disagree about what state a
-// session is in. Porting it as ONE leaf preserves that property on the Go side.
-//
-// Everything here is a pure string/time computation: no clock (ResetPassed takes its
-// times), no I/O, no process. Tier-1 foundation leaf — stdlib-only, imports nothing
-// internal, off the hot path.
-//
-// The one behavioral fence, inherited from the Python: a failure classification keys off
-// the session's ERROR channel (the injected isApiErrorMessage / error record), NEVER the
-// assistant prose. TerminalFailure documents that contract; callers must feed it error-
-// record text only.
+// Package sessionsignals defines the closed vocabulary of terminal-turn transcript signals
+// (usage limits, auth/credit walls, and transient errors) used to classify session state.
+// Calculations are pure string and time operations evaluated against the error channel.
 package sessionsignals
 
 import (
@@ -22,11 +9,7 @@ import (
 	"time"
 )
 
-// limitRE captures the `<when>` of a "limit … resets <when>" throttle banner. `<when>`
-// can itself contain a parenthesized timezone, e.g. "12:10am (America/Los_Angeles)":
-// capture the time and an optional trailing "(...)" group as a unit, then stop before
-// banner junk. The terminator accepts a sentence-final period (". " / end) so both the
-// daily and the weekly window of a Claude throttle banner parse even when each ends in ".".
+// limitRE extracts the reset window from a "limit ... resets <when>" throttle banner.
 var limitRE = regexp.MustCompile(`(?i)limit\s*[·:|.\-]?\s*resets?\s+([^()"` + "\n" + `]+?(?:\([^()` + "\n" + `]*\))?)\s*(?:["` + "\n" + `<]|$|\.(?:\s|$))`)
 
 var bareLimitRE = regexp.MustCompile(`(?i)\b(?:session|weekly|usage|fable\s+\d+)\s+limit\b|/usage-credits`)
@@ -49,51 +32,31 @@ var loginRequiredRE = regexp.MustCompile(`(?i)Login interrupted|please run /logi
 	`API Error:\s*401|HTTP\s*401|401\s+(?:authentication required|unauthorized)|` +
 	`OAuth token has expired|Not logged in`)
 
-// apiErrPattern also names the 429 THROTTLE reason-phrases a provider can emit WITHOUT the
-// numeric code: OpenAI/Codex wire an over-rate refusal as "Too Many Requests" / "Rate limit
-// reached for <model> ... per min" / a `rate_limit_exceeded` error code, none of which carry
-// a literal "429" in the log tail. These are the same transient-overload member as \b429\b (a
-// 429's own reason phrase), so a Codex worker throttled per-minute is graded rate_limit like a
-// coded 429 — the reason the concurrency-backoff term counts and Layer-2 downgrade re-dispatches.
-// A genuine session/weekly/usage CAP is still skimmed off first by IsLimitError / the LIMIT arm
-// of TerminalFailure (bareLimitRE names session|weekly|usage|fable, never "rate"), so widening
-// here never reclassifies a cap — it only rescues the residual throttle from UNKNOWN.
+// apiErrPattern captures transient transport errors, server failures, and codex rate limits.
 const apiErrPattern = `(?i)isApiErrorMessage|API Error|overloaded_error|\boverloaded\b|` +
 	`\b429\b|\b529\b|\b503\b|too many requests|rate[ _-]?limit(?:ed|_exceeded|\s+reached)|` +
 	`fetch failed|ECONNRESET|ETIMEDOUT|` +
 	`socket hang up|Internal Server Error|service unavailable|` +
 	`connection error|network error`
 
-// apiErrRE matches transport/server errors only. Auth and quota signals are checked
-// separately (IsAPIError subtracts IsAuthError, exactly as the Python did).
+// apiErrRE matches transport and server errors, excluding auth and quota walls.
 var apiErrRE = regexp.MustCompile(apiErrPattern + `|request timed out`)
 var apiErrWithoutBareTimeoutRE = regexp.MustCompile(apiErrPattern)
 
-// operatorStopPattern names an operator-stop / context-exhaustion refusal — the
-// session-state wall the guard writes as a synthetic terminal turn ("API Error: 409
-// session <trace> is stopped (operator control); request refused:
-// BUDGET_CONTEXT_EXHAUSTED"). It rides in on the "API Error:" prefix, but a raw
-// resume / model switch / retry can never clear it: terminal, NOT a transient
-// transport error, so isAPIError subtracts it exactly as it subtracts IsAuthError
-// (#3457). Kept in lockstep with OPERATOR_STOP_RE in tools/fleet_session_signals.py.
+// operatorStopPattern matches terminal operator-stop and context-exhaustion refusals.
 const operatorStopPattern = `(?i)BUDGET_CONTEXT_EXHAUSTED|` +
 	`\b409\b.*operator\s+(?:control|stop)|` +
 	`restart_fresh_session`
 
 var operatorStopRE = regexp.MustCompile(operatorStopPattern)
 
-// Resets is the set of usage-limit reset windows one throttle banner carries. Claude's
-// banner can name a short (hourly/daily) window AND a weekly one in the same message;
-// either field is empty when that window is absent.
+// Resets holds parsed daily and weekly usage-limit reset windows from a throttle banner.
 type Resets struct {
 	Daily  string `json:"daily,omitempty"`
 	Weekly string `json:"weekly,omitempty"`
 }
 
-// LimitResets extracts every "limit … resets <when>" window from a throttle banner. Each
-// occurrence is classified by the ~24 chars preceding it: a "week" hint makes it the
-// weekly window, otherwise it is the short window. Raw reset strings are returned with
-// any timezone suffix preserved.
+// LimitResets extracts daily and weekly reset windows from a throttle banner string.
 func LimitResets(text string) Resets {
 	var out Resets
 	for _, m := range limitRE.FindAllStringSubmatchIndex(text, -1) {
@@ -114,9 +77,7 @@ func LimitResets(text string) Resets {
 	return out
 }
 
-// LimitReset is the primary (blocking) reset window: the short (hourly/daily) window when
-// present, else the weekly one — a weekly cap still blocks the account, so the absence of
-// a short window must not read as "not throttled". Empty when the text carries no reset.
+// LimitReset returns the primary blocking reset window (daily if present, else weekly).
 func LimitReset(text string) string {
 	w := LimitResets(text)
 	if w.Daily != "" {
@@ -125,9 +86,7 @@ func LimitReset(text string) string {
 	return w.Weekly
 }
 
-// IsLimitError reports whether text is a provider quota/session cap, including
-// no-reset banners such as "Fable 5 limit" that require a different seat/model rather
-// than a same-seat blind retry.
+// IsLimitError reports whether text contains a provider quota or session cap banner.
 func IsLimitError(text string) bool {
 	return LimitReset(text) != "" || hasBareLimitSignal(text)
 }
@@ -136,14 +95,12 @@ func hasBareLimitSignal(text string) bool {
 	return bareLimitRE.MatchString(text) && !negatedBareLimitRE.MatchString(text)
 }
 
-// WeeklyReset is just the weekly reset window, or "".
+// WeeklyReset returns the weekly reset window from a throttle banner, or empty.
 func WeeklyReset(text string) string { return LimitResets(text).Weekly }
 
 var resetTimeRE = regexp.MustCompile(`(?i)(\d{1,2})(?::(\d{2}))?\s*([ap])m\b`)
 
-// tzOffsetHours maps the IANA zones the fleet's banners actually name to a fixed UTC
-// offset. The fleet's banners only ever name the US zones; a small explicit table avoids
-// a tzdata dependency. PDT (DST, Mar–Nov) is UTC-7; the fleet runs year-round on Pacific.
+// tzOffsetHours maps US timezones found in banners to fixed UTC offsets.
 var tzOffsetHours = map[string]int{
 	"america/los_angeles": -7, "america/denver": -6, "america/chicago": -5,
 	"america/new_york": -4, "utc": 0,
@@ -151,8 +108,7 @@ var tzOffsetHours = map[string]int{
 
 var tzParenRE = regexp.MustCompile(`\(([^)]+)\)`)
 
-// resetTZOffset resolves the "(America/Los_Angeles)" suffix of a reset string to a fixed
-// offset, defaulting to Pacific — the only zone the banners use.
+// resetTZOffset resolves the timezone suffix of a reset string, defaulting to Pacific.
 func resetTZOffset(when string) int {
 	if m := tzParenRE.FindStringSubmatch(when); m != nil {
 		if off, ok := tzOffsetHours[strings.ToLower(strings.TrimSpace(m[1]))]; ok {
@@ -162,17 +118,8 @@ func resetTZOffset(when string) int {
 	return -7
 }
 
-// ResetPassed reports whether a usage-limit reset window has already elapsed.
-//
-// when is a raw reset string from LimitReset, e.g. "6am (America/Los_Angeles)" or
-// "7:10am (America/Los_Angeles)". A reset banner names the NEXT occurrence of that
-// wall-clock time, so the window is resolved against the banner's own time (anchorUTC —
-// the transcript's last timestamp, when known; pass the zero time to anchor on nowUTC)
-// and compared to nowUTC.
-//
-// Returns (passed, ok): ok is false when the reset string is unparseable — the caller
-// should treat that conservatively as not-yet-passed, exactly as the Python None did.
-// Pure and injectable, so it unit-tests without a clock.
+// ResetPassed reports whether a usage-limit reset window has elapsed relative to nowUTC
+// and anchorUTC. Returns ok=false when the reset string cannot be parsed.
 func ResetPassed(when string, nowUTC, anchorUTC time.Time) (passed, ok bool) {
 	if nowUTC.IsZero() {
 		nowUTC = time.Now().UTC()
@@ -180,8 +127,7 @@ func ResetPassed(when string, nowUTC, anchorUTC time.Time) (passed, ok bool) {
 	return ResetPassedAt(when, nowUTC, anchorUTC)
 }
 
-// ResetPassedAt is the clock-free reset check used by compatibility callers that
-// require a fully injected nowUTC value, even when it is the zero time.
+// ResetPassedAt evaluates a reset window against injected nowUTC and anchorUTC timestamps.
 func ResetPassedAt(when string, nowUTC, anchorUTC time.Time) (passed, ok bool) {
 	m := resetTimeRE.FindStringSubmatch(when)
 	if m == nil {
@@ -200,7 +146,7 @@ func ResetPassedAt(when string, nowUTC, anchorUTC time.Time) (passed, ok bool) {
 	if anchor.IsZero() {
 		anchor = nowUTC
 	}
-	// The reset is the FIRST occurrence of (hour:minute) in tz at/after the anchor.
+	// The reset is the first occurrence of (hour:minute) in tz at or after the anchor.
 	aLocal := anchor.In(tz)
 	reset := time.Date(aLocal.Year(), aLocal.Month(), aLocal.Day(), hour, minute, 0, 0, tz)
 	if reset.Before(aLocal) {
@@ -209,8 +155,7 @@ func ResetPassedAt(when string, nowUTC, anchorUTC time.Time) (passed, ok bool) {
 	return !nowUTC.Before(reset.UTC()), true
 }
 
-// atoiSafe parses a digits-only string already vetted by a regexp; malformed input (which
-// the pattern cannot produce) yields 0 rather than an error path.
+// atoiSafe parses a non-negative integer from digits, returning 0 on invalid input.
 func atoiSafe(s string) int {
 	n := 0
 	for _, r := range s {
@@ -222,13 +167,10 @@ func atoiSafe(s string) int {
 	return n
 }
 
-// httpStatusRE captures the HTTP/transport status codes that show up in a terminal error
-// banner, so "what status did this session last report?" is answerable directly instead
-// of eyeballing the prose.
+// httpStatusRE captures HTTP status codes present in terminal error messages.
 var httpStatusRE = regexp.MustCompile(`\b(401|403|429|500|502|503|529)\b`)
 
-// HTTPStatus is the first HTTP/transport status code named in an error banner, or "".
-// A plain "session limit; resets 6pm" banner carries no code at all — that returns "".
+// HTTPStatus returns the first HTTP status code named in error text, or empty.
 func HTTPStatus(text string) string {
 	if m := httpStatusRE.FindStringSubmatch(text); m != nil {
 		return m[1]
@@ -236,24 +178,18 @@ func HTTPStatus(text string) string {
 	return ""
 }
 
-// IsAuthError reports whether text names an auth/login/credit/access wall.
+// IsAuthError reports whether text names an auth, login, credit, or access wall.
 func IsAuthError(text string) bool { return authRE.MatchString(text) }
 
-// IsOperatorStop reports whether text names an operator-stop / context-exhaustion
-// refusal (409 operator control / BUDGET_CONTEXT_EXHAUSTED / restart_fresh_session) —
-// a terminal session-state wall a raw resume or retry cannot clear, never a
-// transient API error.
+// IsOperatorStop reports whether text names a terminal operator-stop refusal.
 func IsOperatorStop(text string) bool { return operatorStopRE.MatchString(text) }
 
-// IsAPIError reports whether text names a transient transport/server error that is NOT
-// also an auth wall (auth outranks: a 401 is never a retry-now signal) and NOT an
-// operator-stop / context-exhaustion wall (terminal: a resume re-hits the same wall).
+// IsAPIError reports whether text names a transient transport or server error.
 func IsAPIError(text string) bool {
 	return isAPIError(text, apiErrRE)
 }
 
-// IsAPIErrorWithoutBareTimeout preserves the older resume/signals API-error surface,
-// which did not classify a bare "request timed out" banner as retryable.
+// IsAPIErrorWithoutBareTimeout reports transient transport errors while excluding bare request timeouts.
 func IsAPIErrorWithoutBareTimeout(text string) bool {
 	return isAPIError(text, apiErrWithoutBareTimeoutRE)
 }
@@ -262,23 +198,15 @@ func isAPIError(text string, re *regexp.Regexp) bool {
 	return re.MatchString(text) && !IsAuthError(text) && !IsOperatorStop(text)
 }
 
-// unknownModelRE names an UNKNOWN / INVALID / UNENTITLED model refusal — a startup
-// failure a switch to a DIFFERENT model can fix, distinct from a usage cap (bucket-
-// scoped, IsLimitError) and an auth wall (IsAuthError, which a model switch cannot
-// clear). Kept aligned with the launch-time set in cmd/fak/accounts_launch.go
-// (launchModelUnknownSignals) so a model refusal reads the same wherever the fleet
-// classifies one. The "model" dimension must be named so a generic "not available"
-// (a network/service blip) does not read as a model refusal.
+// unknownModelRE matches model-not-found or unentitled model refusal messages.
 var unknownModelRE = regexp.MustCompile(`(?i)unknown model|invalid model|unsupported model|model_not_found|` +
 	`no access to model|does not have access to model|not entitled to (?:use )?(?:the )?model|` +
 	`model[^` + "\n" + `]{0,40}(?:not available|unavailable|not found|does not exist|not entitled)`)
 
-// UnknownModel reports whether text names an unknown/invalid/unentitled MODEL refusal
-// — the class a fallback to a different model can address.
+// UnknownModel reports whether text names an unknown or unentitled model refusal.
 func UnknownModel(text string) bool { return unknownModelRE.MatchString(text) }
 
-// AuthBlockKind classifies an auth wall's text: "credit" (balance too low), "access"
-// (org disabled subscription access), else "auth" (login/credential refresh).
+// AuthBlockKind classifies an auth wall into categories: credit, access, or general auth.
 func AuthBlockKind(text string) string {
 	if strings.Contains(strings.ToLower(text), "credit balance is too low") {
 		return "credit"
@@ -289,7 +217,7 @@ func AuthBlockKind(text string) string {
 	return "auth"
 }
 
-// AuthBlockReason is the human reason matching AuthBlockKind.
+// AuthBlockReason returns a human-readable explanation string matching the given AuthBlockKind.
 func AuthBlockReason(text string) string {
 	switch AuthBlockKind(text) {
 	case "credit":
@@ -301,41 +229,26 @@ func AuthBlockReason(text string) string {
 	}
 }
 
-// NeedsLoginPrompt is true only for blockers a human login/credential refresh can
-// plausibly fix — never for a credit or org-access wall, which a `/login` cannot clear.
+// NeedsLoginPrompt reports whether an error requires an interactive human login prompt.
 func NeedsLoginPrompt(text string) bool {
 	return AuthBlockKind(text) == "auth" && loginRequiredRE.MatchString(text)
 }
 
-// The closed failure taxonomy, ordered by recovery-remediation cost: AUTH (needs a human
-// /login) outranks LIMIT (wait for the named reset) outranks API_ERR (transient, retry).
+// Failure category identifiers ordered by remediation cost: AUTH outranks LIMIT outranks API_ERR.
 const (
 	FailureAuth   = "AUTH"
 	FailureLimit  = "LIMIT"
 	FailureAPIErr = "API_ERR"
 )
 
-// TerminalFailureOptions selects compatibility edges around the shared terminal
-// failure taxonomy.
+// TerminalFailureOptions configures compatibility flags for TerminalFailure evaluation.
 type TerminalFailureOptions struct {
 	IncludeBareLimit          bool
 	IncludeBareRequestTimeout bool
 }
 
-// TerminalFailure classifies a session's TERMINAL ERROR text into its failure mode — the
-// single source of truth shared by the sweep classifier and the resume watchdogs, so they
-// can never disagree about what state a session is in.
-//
-// Keyed off the ERROR record ONLY (the injected isApiErrorMessage / error turn), NEVER
-// the assistant prose: a session that merely *discusses* an auth wall, a 529, or a usage
-// limit in its final message (e.g. a worker editing the resume tooling itself) is NOT in
-// that failure state. Precedence follows remediation cost, so the most expensive-to-
-// recover wall is never masked by a cheaper one.
-//
-// Returns (kind, detail): kind is one of the Failure* tokens or ""; detail is the auth
-// reason for AUTH, the reset window for LIMIT, else "". Empty/blank errText (no error
-// record at all) yields ("", "") — no error record means no failure bucket, never an
-// inference from prose.
+// TerminalFailure classifies session error text into a failure category (AUTH, LIMIT, API_ERR).
+// Evaluates error record text only (never assistant prose) and returns (kind, detail).
 func TerminalFailure(errText string) (kind, detail string) {
 	return TerminalFailureWithOptions(errText, TerminalFailureOptions{
 		IncludeBareLimit:          true,
@@ -343,8 +256,7 @@ func TerminalFailure(errText string) (kind, detail string) {
 	})
 }
 
-// TerminalFailureWithOptions classifies terminal error text with explicit compatibility
-// switches for legacy callers.
+// TerminalFailureWithOptions classifies error text using explicit compatibility switches.
 func TerminalFailureWithOptions(errText string, opts TerminalFailureOptions) (kind, detail string) {
 	t := strings.TrimSpace(errText)
 	if t == "" {
