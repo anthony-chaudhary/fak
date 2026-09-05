@@ -35,3 +35,7 @@ internal/newmodel/testdata/replay/ledger.json text eol=lf
 # Effective-instruction fixtures and their receipt are SHA-256 addressed; keep
 # one byte sequence across autocrlf-enabled Windows and Unix checkouts (#10157).
 internal/agentsindex/testdata/effective/** text eol=lf
+
+# The red-team floor report is generated and compared byte-for-byte; keep its
+# markdown line endings stable under core.autocrlf=true (#11345).
+internal/policy/testdata/redteam_floor_report.md text eol=lf
