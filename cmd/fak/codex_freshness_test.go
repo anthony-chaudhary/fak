@@ -225,6 +225,83 @@ func TestCodexFreshnessSelfUpdateUsesSupportedFlags(t *testing.T) {
 	if got := codexFreshnessSelfUpdateArgs(`C:\work\fak`, `C:\bin\fak.exe`); !reflect.DeepEqual(got, want) {
 		t.Fatalf("self-update args=%q, want %q", got, want)
 	}
+	if got := codexFreshnessSelfUpdateArgs(`C:\work\fak`, `C:\bin\fak.exe`, false); !reflect.DeepEqual(got, want) {
+		t.Fatalf("self-update args (verbose=false)=%q, want %q", got, want)
+	}
+	wantVerbose := []string{"self-update", "--json", "--root", `C:\work\fak`, "--target", `C:\bin\fak.exe`, "--verbose"}
+	if got := codexFreshnessSelfUpdateArgs(`C:\work\fak`, `C:\bin\fak.exe`, true); !reflect.DeepEqual(got, wantVerbose) {
+		t.Fatalf("self-update args (verbose=true)=%q, want %q", got, wantVerbose)
+	}
+}
+
+func TestCodexFreshnessAdmissionStopsStatusBeforeUpdate(t *testing.T) {
+	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessBehind, RunningCommit: "old", TargetCommit: "new"})
+	defer restore()
+
+	var order []string
+	var out bytes.Buffer
+	status := newCodexStartupStatus(&out, true)
+	oldStatus := codexFreshnessStatus
+	codexFreshnessStatus = func() *codexStartupStatus {
+		return status
+	}
+	defer func() { codexFreshnessStatus = oldStatus }()
+
+	codexFreshnessUpdate = func(_, _ string) (string, error) {
+		order = append(order, "update")
+		if !strings.Contains(out.String(), "\r\x1b[2K") {
+			t.Errorf("status line was not cleared before update")
+		}
+		return "new", nil
+	}
+	codexFreshnessReexec = func(_ string, _ []string, _ string) error {
+		order = append(order, "reexec")
+		return nil
+	}
+
+	_, code, stop := runCodexFreshnessAdmission([]string{"--model", "gpt-5"})
+	if code != 0 || !stop {
+		t.Fatalf("expected code=0, stop=true, got code=%d, stop=%v", code, stop)
+	}
+	if len(order) != 2 || order[0] != "update" || order[1] != "reexec" {
+		t.Fatalf("unexpected order: %v", order)
+	}
+}
+
+func TestParseCodexFreshnessSettingsVerbose(t *testing.T) {
+	// Flag --verbose
+	filtered, policy, err := parseCodexFreshnessSettings([]string{"--verbose", "--model", "gpt-5"}, "", "", codexFreshnessConfig{})
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !policy.Verbose {
+		t.Fatalf("expected policy.Verbose to be true")
+	}
+	if !reflect.DeepEqual(filtered, []string{"--verbose", "--model", "gpt-5"}) {
+		t.Fatalf("expected --verbose preserved in filtered args, got: %v", filtered)
+	}
+
+	// Flag -v
+	filtered, policy, err = parseCodexFreshnessSettings([]string{"-v", "--model", "gpt-5"}, "", "", codexFreshnessConfig{})
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !policy.Verbose {
+		t.Fatalf("expected policy.Verbose to be true")
+	}
+	if !reflect.DeepEqual(filtered, []string{"-v", "--model", "gpt-5"}) {
+		t.Fatalf("expected -v preserved in filtered args, got: %v", filtered)
+	}
+
+	// Env var FAK_SELF_UPDATE_VERBOSE
+	t.Setenv("FAK_SELF_UPDATE_VERBOSE", "1")
+	_, policy, err = parseCodexFreshnessSettings([]string{"--model", "gpt-5"}, "", "", codexFreshnessConfig{})
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !policy.Verbose {
+		t.Fatalf("expected policy.Verbose to be true from env var")
+	}
 }
 
 func TestRunCodexFreshnessAdmissionStalePreservesFilteredArguments(t *testing.T) {

@@ -948,3 +948,21 @@ func TestCodexLauncherSynchronizesProjectAssets(t *testing.T) {
 		t.Fatalf("expected adapter to be synchronized, got error: %v", err)
 	}
 }
+
+func TestRunCodexVerboseFlagsAccepted(t *testing.T) {
+	for _, flag := range []string{"--verbose", "-v"} {
+		t.Run(flag, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			rc := runCodex(&out, &errb, []string{
+				flag,
+				"--dry-run",
+				"--split", "off",
+				"--",
+				"exec", "status",
+			})
+			if rc != 0 {
+				t.Fatalf("runCodex with %s failed: rc=%d stderr=%s", flag, rc, errb.String())
+			}
+		})
+	}
+}

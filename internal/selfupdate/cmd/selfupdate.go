@@ -103,8 +103,22 @@ func Run(argv []string) {
 	root := fs.String("root", "", "repo root to build from (default: discover from cwd)")
 	target := fs.String("target", "", "binary path to replace (default: this binary's own path). Lets a scheduler update the FLEET binary regardless of which fak it invokes.")
 	pinnedBin := fs.String("pinned-bin", "", "the binary path a scheduled-task registration REVIEWED and pinned; refuse to run when the executing binary has drifted from it (#6508)")
+	verbose := fs.Bool("verbose", false, "verbose progress and diagnostics logging")
+	fs.BoolVar(verbose, "v", false, "verbose progress and diagnostics logging (shorthand)")
 	_ = fs.Parse(argv)
+	isVerbose := *verbose
+	if !isVerbose {
+		if v := os.Getenv("FAK_SELF_UPDATE_VERBOSE"); v != "" {
+			if b, err := strconv.ParseBool(v); err == nil {
+				isVerbose = b
+			} else {
+				isVerbose = true
+			}
+		}
+	}
+	setSelfUpdateVerbose(isVerbose)
 	beginSelfUpdateOutput(*jsonMode)
+	defer clearSelfUpdateProgressBar()
 	if handleBuildGC(*root, *buildGC, *applyBuildGC, *check) {
 		return
 	}
@@ -130,6 +144,7 @@ func Run(argv []string) {
 	// the fleet's binary with code nobody reviewed. Refuse instead of converging from it.
 	if strings.TrimSpace(*pinnedBin) != "" {
 		if skew, why := selfinstall.PinSkew(selfinstall.Pin{Path: *pinnedBin}, selfUpdateInvoker()); skew {
+			clearSelfUpdateProgressBar()
 			fmt.Fprintln(os.Stderr, "self-update: PIN_SKEW —", why)
 			emitSelfUpdateOutcome(outcomePinSkew, *pinnedBin, why)
 			os.Exit(2)
@@ -141,6 +156,7 @@ func Run(argv []string) {
 		repoRoot = discoverRepoRoot()
 	}
 	if repoRoot == "" {
+		clearSelfUpdateProgressBar()
 		fmt.Fprintln(os.Stderr, "self-update: could not resolve a git repo root (pass --root)")
 		os.Exit(2)
 	}
@@ -149,6 +165,7 @@ func Run(argv []string) {
 	// manifest URL configured this block is skipped, preserving the legacy path byte-for-byte.
 	manifestSelection, ok := selectSelfUpdateManifest(*manifestURL, *manifestID, *manifestStatePath, *manifestChannel, *manifestCohort, *target, *offline, *force)
 	if !ok {
+		clearSelfUpdateProgressBar()
 		return
 	}
 
@@ -207,8 +224,10 @@ func Run(argv []string) {
 	if len(head) > 12 {
 		head = head[:12]
 	}
-	fmt.Fprintf(selfUpdateProgress, "%s: %s%s   origin/main: %s   => %s (skew: %s)\n",
-		subject, stampRev, dirtyMark(stamp.Dirty), head, verdict, skew.Verdict)
+	if !isInteractiveProgressBar() {
+		fmt.Fprintf(selfUpdateProgress, "%s: %s%s   origin/main: %s   => %s (skew: %s)\n",
+			subject, stampRev, dirtyMark(stamp.Dirty), head, verdict, skew.Verdict)
+	}
 
 	if *check {
 		runSelfUpdateCheck(repoRoot, headRev, *target, verdict, skew)
@@ -219,7 +238,9 @@ func Run(argv []string) {
 	companionPaths := selfUpdateFakDevTargets(repoRoot, installTargetOr(*target))
 	selectedArtifact := usableSelfUpdateArtifact(manifestSelection, companionPaths)
 	if manifestSelection.Artifact != nil && selectedArtifact == nil {
-		fmt.Fprintln(selfUpdateProgress, "self-update: signed catalog has no fak-dev companion target; using full source-build fallback")
+		if !isInteractiveProgressBar() {
+			fmt.Fprintln(selfUpdateProgress, "self-update: signed catalog has no fak-dev companion target; using full source-build fallback")
+		}
 		selectedArtifact = nil
 		selfUpdateFetchOrigin(context.Background(), selfinstall.RealRunner, repoRoot, *check)
 	}
@@ -292,6 +313,7 @@ func selectSelfUpdateManifest(manifestURL, manifestID, manifestStatePath, manife
 }
 
 func runSelfUpdateCheck(repoRoot, headRev, target string, verdict binstamp.Freshness, skew versionskew.Assessment) {
+	clearSelfUpdateProgressBar()
 	reportAsideFootprint(installTargetOr(target))
 	audit := selfUpdateAudit(repoRoot, headRev)
 	printHotCopyAudit(audit)
@@ -299,6 +321,7 @@ func runSelfUpdateCheck(repoRoot, headRev, target string, verdict binstamp.Fresh
 }
 
 func reportSelfUpdateSkipped(fleetTarget bool, skewVerdict versionskew.Verdict, target string) {
+	clearSelfUpdateProgressBar()
 	emitSelfUpdateOutcome(selfUpdateSkipOutcome(fleetTarget, skewVerdict), installTargetOr(target), fmt.Sprintf("%s", skewVerdict))
 	switch {
 	case fleetTarget:
@@ -763,6 +786,7 @@ var selfUpdateProgressState struct {
 	sync.Mutex
 	percent   int
 	operation string
+	barDrawn  bool
 }
 
 const selfUpdateHeartbeatInterval = 15 * time.Second
@@ -852,6 +876,9 @@ func finishSelfUpdateTiming() selfUpdateTimingSnapshot {
 }
 
 func reportSelfUpdateTiming(timing selfUpdateTimingSnapshot) {
+	if isInteractiveProgressBar() {
+		return
+	}
 	fmt.Fprintf(selfUpdateProgress, "self-update: timing total_ms=%d dominant_phase=%s dominant_ms=%d\n",
 		timing.totalMS, timing.dominantPhase, timing.dominantMS)
 }
@@ -873,6 +900,10 @@ func reportSelfUpdateProgress(percent int, operation string) {
 	}
 	selfUpdateProgressState.percent = percent
 	selfUpdateProgressState.operation = operation
+	if isInteractiveProgressBar() {
+		drawSelfUpdateProgressBar(selfUpdateProgress, percent, operation)
+		return
+	}
 	fmt.Fprintf(selfUpdateProgress, "self-update: progress=%d%% operation=%q\n", percent, operation)
 }
 
@@ -884,6 +915,10 @@ func finishSelfUpdateProgress(cause selfUpdateOutcome) {
 	}
 	selfUpdateProgressState.percent = 100
 	selfUpdateProgressState.operation = "terminal outcome: " + string(cause)
+	if isInteractiveProgressBar() {
+		clearSelfUpdateProgressBarLocked()
+		return
+	}
 	fmt.Fprintf(selfUpdateProgress, "self-update: progress=100%% operation=%q\n", selfUpdateProgressState.operation)
 }
 
@@ -900,7 +935,11 @@ func startSelfUpdateHeartbeat(percent int, operation string) func() {
 			currentPercent := selfUpdateProgressState.percent
 			currentOperation := selfUpdateProgressState.operation
 			if currentPercent == percent && currentOperation == strings.TrimSpace(operation) {
-				fmt.Fprintf(selfUpdateProgress, "self-update: progress=%d%% operation=%q heartbeat=true\n", currentPercent, currentOperation)
+				if isInteractiveProgressBar() {
+					drawSelfUpdateProgressBar(selfUpdateProgress, currentPercent, currentOperation)
+				} else {
+					fmt.Fprintf(selfUpdateProgress, "self-update: progress=%d%% operation=%q heartbeat=true\n", currentPercent, currentOperation)
+				}
 			}
 			selfUpdateProgressState.Unlock()
 		}
@@ -914,13 +953,17 @@ func startSelfUpdateHeartbeat(percent int, operation string) func() {
 	}
 }
 
-func beginSelfUpdateOutput(enabled bool) {
+func beginSelfUpdateOutput(enabled bool, verbose ...bool) {
 	selfUpdateProgress = os.Stderr
 	selfUpdateJSON = nil
 	selfUpdateProgressState.Lock()
 	selfUpdateProgressState.percent = 0
 	selfUpdateProgressState.operation = ""
+	selfUpdateProgressState.barDrawn = false
 	selfUpdateProgressState.Unlock()
+	if len(verbose) > 0 {
+		setSelfUpdateVerbose(verbose[0])
+	}
 	selfUpdateReceiptOldRevision = ""
 	selfUpdateReceiptNewRevision = ""
 	selfUpdateReceiptTargets = nil
@@ -1071,7 +1114,7 @@ func installTargetOr(target string) string {
 // target binary, so `self-update --check` surfaces a leak while it is 5 files instead of 500.
 // A clean install dir prints nothing (no noise on the healthy path).
 func reportAsideFootprint(target string) {
-	if strings.TrimSpace(target) == "" {
+	if strings.TrimSpace(target) == "" || isInteractiveProgressBar() {
 		return
 	}
 	fp := selfinstall.MeasureAsides(target, os.Getpid(), safecommit.ProcessAlive)

@@ -34,6 +34,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	// expensive origin checkout + build. The lock is released on return (or process exit).
 	release, lerr := selfinstall.TrySingleFlight("")
 	if lerr != nil {
+		clearSelfUpdateProgressBar()
 		if lerr == selfinstall.ErrBusy {
 			fmt.Fprintln(selfUpdateProgress, "self-update: another self-update is already building — skipping this run.")
 			emitSelfUpdateOutcome(outcomeBusy, installTarget, "single-flight lock held")
@@ -66,26 +67,21 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		BaseRef:      "origin/main",
 		ProcessAlive: safecommit.ProcessAlive,
 	})
-	if buildGC.Reaped > 0 {
-		fmt.Fprintf(selfUpdateProgress, "self-update: reaped %d stale build worktree(s) leaked by killed prior runs\n", buildGC.Reaped)
-	}
-	if len(buildGC.Failures) > 0 {
-		fmt.Fprintf(selfUpdateProgress, "self-update: kept %d stale-build candidate(s) after apply-time revalidation/removal failure\n", len(buildGC.Failures))
-	}
-
-	// Also reap the "<binary>.old.<pid>.<i>" swap-aside files OSSwap leaks on Windows when the
-	// old binary was still handle-locked at swap time. Nothing else reclaims them, so one leaks
-	// per tick (a real host accumulated 211 of them, ~9 GB). We delete only asides whose owning
-	// PID is provably dead — so the old .exe is no longer mapped and the file is safe to remove.
-	if reaped := selfinstall.ReapStaleAsides(installTarget, os.Getpid(), safecommit.ProcessAlive); len(reaped) > 0 {
-		fmt.Fprintf(selfUpdateProgress, "self-update: reaped %d stale swap-aside binary file(s) leaked by prior swaps\n", len(reaped))
-	}
-	// After reaping, report any REMAINING footprint: asides pinned by still-live owners that we
-	// could not reclaim. A large surviving count is the early signal that swaps are outrunning
-	// exits (the leak's leading edge) — visible now instead of after it reaches gigabytes.
-	if fp := selfinstall.MeasureAsides(installTarget, os.Getpid(), safecommit.ProcessAlive); fp.Count >= 8 {
-		fmt.Fprintf(selfUpdateProgress, "self-update: NOTE — %d swap-aside file(s) still next to the binary (%s); %d reclaimable once their owners exit\n",
-			fp.Count, humanBytes(fp.Bytes), fp.DeadCount)
+	reaped := selfinstall.ReapStaleAsides(installTarget, os.Getpid(), safecommit.ProcessAlive)
+	if !isInteractiveProgressBar() {
+		if buildGC.Reaped > 0 {
+			fmt.Fprintf(selfUpdateProgress, "self-update: reaped %d stale build worktree(s) leaked by killed prior runs\n", buildGC.Reaped)
+		}
+		if len(buildGC.Failures) > 0 {
+			fmt.Fprintf(selfUpdateProgress, "self-update: kept %d stale-build candidate(s) after apply-time revalidation/removal failure\n", len(buildGC.Failures))
+		}
+		if len(reaped) > 0 {
+			fmt.Fprintf(selfUpdateProgress, "self-update: reaped %d stale swap-aside binary file(s) leaked by prior swaps\n", len(reaped))
+		}
+		if fp := selfinstall.MeasureAsides(installTarget, os.Getpid(), safecommit.ProcessAlive); fp.Count >= 8 {
+			fmt.Fprintf(selfUpdateProgress, "self-update: NOTE — %d swap-aside file(s) still next to the binary (%s); %d reclaimable once their owners exit\n",
+				fp.Count, humanBytes(fp.Bytes), fp.DeadCount)
+		}
 	}
 
 	// The build worktree must live OUTSIDE .git (git refuses `worktree add` to a path
@@ -102,6 +98,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		_, preparedCleanup, perr := prepareSelfUpdateAttempt(ctx, selfinstall.RealRunner, repoRoot, headRev, buildDir)
 		stopHeartbeat()
 		if perr != nil {
+			clearSelfUpdateProgressBar()
 			fmt.Fprintln(os.Stderr, "self-update:", perr)
 			emitSelfUpdateOutcome(outcomePrepareFailed, installTarget, perr.Error())
 			os.Exit(1)
@@ -112,6 +109,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		var cacheErr error
 		buildRunner, cleanupBuildCache, cacheErr = selfinstall.NewSelfUpdateRunner()
 		if cacheErr != nil {
+			clearSelfUpdateProgressBar()
 			detail := "prepare update-owned Go build cache: " + cacheErr.Error()
 			fmt.Fprintln(os.Stderr, "self-update:", detail)
 			emitSelfUpdateOutcome(outcomeGateFailed, installTarget, detail)
@@ -132,6 +130,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	var companionErr error
 	companionBinary, companionPaths, companionErr = prepareFakDevUpdate(ctx, buildRunner, buildDir, companionPaths, headRev)
 	if companionErr != nil {
+		clearSelfUpdateProgressBar()
 		fmt.Fprintln(os.Stderr, "self-update:", companionErr)
 		emitSelfUpdateOutcome(outcomeGateFailed, installTarget, companionErr.Error())
 		cleanupAttempt() // os.Exit skips deferred functions; owned cache/source cleanup must run first.
@@ -158,7 +157,9 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	candidateEphemeral := false
 	var res selfinstall.Result
 	if artifact != nil {
-		fmt.Fprintf(selfUpdateProgress, "self-update: acquiring signed artifact for %d target(s) …\n", 1+len(staleSiblings))
+		if !isInteractiveProgressBar() {
+			fmt.Fprintf(selfUpdateProgress, "self-update: acquiring signed artifact for %d target(s) …\n", 1+len(staleSiblings))
+		}
 		stopHeartbeat = startSelfUpdateHeartbeat(55, "acquiring signed fak artifact")
 		downloaded, transfer, err := acquireSelfUpdateArtifact(ctx, selfinstall.RealRunner, installTarget, *artifact, os.TempDir())
 		stopHeartbeat()
@@ -190,7 +191,9 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 			}
 		}
 	} else {
-		fmt.Fprintf(selfUpdateProgress, "self-update: building and gating origin/main for %d target(s) …\n", 1+len(staleSiblings)+len(companionPaths))
+		if !isInteractiveProgressBar() {
+			fmt.Fprintf(selfUpdateProgress, "self-update: building and gating origin/main for %d target(s) …\n", 1+len(staleSiblings)+len(companionPaths))
+		}
 		attemptOptions := selfUpdateAttemptOptions(buildDir, installTarget, headRev)
 		cacheEntryPresent := selfUpdateCandidateCacheEntryPresent(attemptOptions.CacheDir)
 		res = selfinstall.Install(ctx, selfUpdateGateRunner(buildRunner), func(source, _ string) error {
@@ -287,7 +290,9 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	switch result := transaction.(type) {
 	case selfinstall.Updated:
 		selfUpdateReceiptAttempted, selfUpdateReceiptChanged = result.Attempted, result.Changed
-		fmt.Fprintf(selfUpdateProgress, "self-update: updated %d target(s)\n", result.Changed)
+		if !isInteractiveProgressBar() {
+			fmt.Fprintf(selfUpdateProgress, "self-update: updated %d target(s)\n", result.Changed)
+		}
 	case selfinstall.RolledBack:
 		selfUpdateReceiptAttempted, selfUpdateReceiptChanged = result.Attempted, result.Changed
 		detail := selfUpdateTransactionDetail(result.Err, result.RollbackErrors)
@@ -502,8 +507,10 @@ func reportSelfUpdateCandidateCacheOutcome(result selfinstall.Result, cacheDir s
 	counts := selfUpdateCandidateCacheOutcomes.counts
 	selfUpdateCandidateCacheOutcomes.Unlock()
 
-	fmt.Fprintf(selfUpdateProgress, "self-update: candidate-cache outcomes success=%d refusal=%d error=%d\n",
-		counts.Success, counts.Refusal, counts.Error)
+	if !isInteractiveProgressBar() {
+		fmt.Fprintf(selfUpdateProgress, "self-update: candidate-cache outcomes success=%d refusal=%d error=%d\n",
+			counts.Success, counts.Refusal, counts.Error)
+	}
 }
 
 func resetSelfUpdateCandidateCacheOutcomesForTest() {
