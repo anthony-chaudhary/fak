@@ -14,6 +14,7 @@
 #import <Metal/Metal.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <string.h>
+#include <limits.h>
 
 // Device + queue are owned by metal.m (mg_init); we reuse them.
 extern id<MTLDevice>       gDev;
@@ -132,11 +133,21 @@ static int q2k_init(void) {
 typedef struct {
     CFTypeRef buf; // retained id<MTLBuffer>
     int out, in, nblk;
+    int handle; // generation * MG_MAX_Q2K + slot; -1 retires an exhausted slot
 } Q2KW;
 
 #define MG_MAX_Q2K 8192
 static Q2KW gQ2K[MG_MAX_Q2K];
 static int gNQ2K = 0;
+
+// Keep generations across reset so copied/stale handles cannot alias new owners.
+// Backend calls retain the existing externally serialized execution contract.
+static int q2k_slot(int handle) {
+    if (handle < 0) return -1;
+    int slot = handle % MG_MAX_Q2K;
+    if (slot >= gNQ2K || gQ2K[slot].buf == NULL || gQ2K[slot].handle != handle) return -1;
+    return slot;
+}
 
 static id<MTLBuffer> gQ2KXBuf = nil; static long gQ2KXCap = 0;
 static id<MTLBuffer> gQ2KYBuf = nil; static long gQ2KYCap = 0;
@@ -156,7 +167,9 @@ int mg_q2k_upload(const unsigned char* raw, int out, int in) {
     if (!mg_init() || gDev == nil) return -1;
     if (!q2k_init()) return -1;
     if (in <= 0 || in % 256 != 0 || out <= 0) return -1;
-    if (gNQ2K >= MG_MAX_Q2K) {
+    int slot = 0;
+    while (slot < gNQ2K && (gQ2K[slot].buf != NULL || gQ2K[slot].handle < 0)) slot++;
+    if (slot >= MG_MAX_Q2K) {
         static int capWarned = 0;
         if (!capWarned) { capWarned = 1; NSLog(@"mg_q2k_upload: q2k weight table full (%d)", MG_MAX_Q2K); }
         return -1;
@@ -169,18 +182,22 @@ int mg_q2k_upload(const unsigned char* raw, int out, int in) {
         return -1;
     }
     memcpy(b.contents, raw, (size_t)bytes);
-    int id = gNQ2K++;
-    gQ2K[id].buf  = CFBridgingRetain(b);
-    gQ2K[id].out  = out;
-    gQ2K[id].in   = in;
-    gQ2K[id].nblk = nblk;
-    return id;
+    if (slot == gNQ2K) {
+        gQ2K[slot].handle = slot;
+        gNQ2K++;
+    }
+    gQ2K[slot].buf  = CFBridgingRetain(b);
+    gQ2K[slot].out  = out;
+    gQ2K[slot].in   = in;
+    gQ2K[slot].nblk = nblk;
+    return gQ2K[slot].handle;
 }
 
 void mg_q2k_gemv(int wid, const float* x, float* y) {
-    if (wid < 0 || wid >= gNQ2K) return;
+    int slot = q2k_slot(wid);
+    if (slot < 0) return;
     @autoreleasepool {
-        Q2KW W = gQ2K[wid];
+        Q2KW W = gQ2K[slot];
         q2k_grow_scratch((long)W.in, (long)W.out);
         memcpy(gQ2KXBuf.contents, x, (size_t)W.in * 4);
 
@@ -203,9 +220,10 @@ void mg_q2k_gemv(int wid, const float* x, float* y) {
 }
 
 void mg_q2k_gemm(int wid, const float* X, int P, float* Y) {
-    if (wid < 0 || wid >= gNQ2K || P <= 0) return;
+    int slot = q2k_slot(wid);
+    if (slot < 0 || P <= 0) return;
     @autoreleasepool {
-        Q2KW W = gQ2K[wid];
+        Q2KW W = gQ2K[slot];
         q2k_grow_scratch((long)P * W.in, (long)P * W.out);
         memcpy(gQ2KXBuf.contents, X, (size_t)P * W.in * 4);
 
@@ -227,14 +245,20 @@ void mg_q2k_gemm(int wid, const float* X, int P, float* Y) {
     }
 }
 
+void mg_q2k_release(int wid) {
+    int slot = q2k_slot(wid);
+    if (slot < 0) return;
+    CFBridgingRelease(gQ2K[slot].buf);
+    gQ2K[slot].buf = NULL;
+    gQ2K[slot].out = gQ2K[slot].in = gQ2K[slot].nblk = 0;
+    // Never wrap a generation: retire the slot rather than revive stale handles.
+    gQ2K[slot].handle = wid > INT_MAX - MG_MAX_Q2K ? -1 : wid + MG_MAX_Q2K;
+}
+
 void mg_q2k_reset(void) {
     for (int i = 0; i < gNQ2K; i++) {
-        if (gQ2K[i].buf != NULL) {
-            CFBridgingRelease(gQ2K[i].buf);
-            gQ2K[i].buf = NULL;
-        }
+        mg_q2k_release(gQ2K[i].handle);
     }
-    gNQ2K = 0;
     gQ2KXBuf = nil; gQ2KXCap = 0;
     gQ2KYBuf = nil; gQ2KYCap = 0;
 }
