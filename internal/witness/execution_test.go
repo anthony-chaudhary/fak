@@ -175,6 +175,7 @@ func newExecutionRepo(t *testing.T) string {
 func gitIn(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.CommandContext(context.Background(), "git", args...)
+	cleanGitEnv(cmd)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -184,6 +185,7 @@ func gitIn(t *testing.T, dir string, args ...string) {
 func assertRepoClean(t *testing.T, dir string) {
 	t.Helper()
 	cmd := exec.CommandContext(context.Background(), "git", "status", "--porcelain")
+	cleanGitEnv(cmd)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -437,4 +439,85 @@ func TestFailToPassVerifier(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestFailToPassVerifier_PollutedGitEnv proves issue #11570: when the caller
+// environment carries repository-steering variables (GIT_DIR, GIT_WORK_TREE,
+// GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY), fixture repos and execution verifiers
+// isolate their Git subprocesses so they operate cleanly on the temporary repo
+// rather than being hijacked by the parent environment.
+func TestFailToPassVerifier_PollutedGitEnv(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	t.Setenv("GIT_DIR", "/nonexistent")
+	t.Setenv("GIT_WORK_TREE", "/nonexistent")
+	t.Setenv("GIT_INDEX_FILE", "/nonexistent/index")
+	t.Setenv("GIT_OBJECT_DIRECTORY", "/nonexistent/objects")
+
+	dir := newExecutionRepo(t)
+	ctx := context.Background()
+
+	writeRepoFile(t, dir, "value.txt", "bad\n")
+	gitIn(t, dir, "add", "value.txt")
+	gitIn(t, dir, "commit", "-q", "-m", "parent red")
+
+	writeRepoFile(t, dir, "value.txt", "good\n")
+	gitIn(t, dir, "add", "value.txt")
+	gitIn(t, dir, "commit", "-q", "-m", "fix green")
+
+	res, err := VerifyFailToPass(ctx, dir, "HEAD~1", "HEAD", "git grep -q good -- value.txt")
+	if err != nil {
+		t.Fatalf("unexpected error under polluted git env: %v", err)
+	}
+	if res.Verdict != ExecPass {
+		t.Fatalf("verdict = %s, want %s (reason: %s)", res.Verdict, ExecPass, res.Reason)
+	}
+	assertRepoClean(t, dir)
+
+	// Run full TestFailToPassVerifier suite under polluted env.
+	TestFailToPassVerifier(t)
+}
+
+func TestCleanGitEnv_StripsRepoSteeringVariables(t *testing.T) {
+	t.Setenv("GIT_DIR", "/nonexistent")
+	t.Setenv("git_work_tree", "/nonexistent/wt")
+	t.Setenv("GIT_INDEX_FILE", "/nonexistent/index")
+	t.Setenv("Git_Object_Directory", "/nonexistent/objects")
+	t.Setenv("GIT_PREFIX", "sub/")
+	t.Setenv("GIT_COMMON_DIR", "/nonexistent/common")
+	t.Setenv("FAK_TEST_PRESERVED_VAR", "keep_this")
+
+	env := isolatedGitEnv()
+	foundPreserved := false
+	for _, kv := range env {
+		name, val, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		u := strings.ToUpper(name)
+		switch u {
+		case "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_PREFIX", "GIT_COMMON_DIR":
+			t.Errorf("isolatedGitEnv retained %s=%s", name, val)
+		case "FAK_TEST_PRESERVED_VAR":
+			foundPreserved = true
+		}
+	}
+	if !foundPreserved {
+		t.Errorf("isolatedGitEnv dropped non-git variable FAK_TEST_PRESERVED_VAR")
+	}
+
+	cmd := exec.Command("git", "status")
+	cleanGitEnv(cmd)
+	for _, kv := range cmd.Env {
+		name, val, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		u := strings.ToUpper(name)
+		switch u {
+		case "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_PREFIX", "GIT_COMMON_DIR":
+			t.Errorf("cleanGitEnv retained %s=%s", name, val)
+		}
+	}
 }

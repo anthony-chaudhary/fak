@@ -87,6 +87,43 @@ type Runner func(ctx context.Context, dir string, args ...string) (stdout string
 // non-zero process exit is reported in code, not err.
 type CommandRunner func(ctx context.Context, dir string, argv ...string) (stdout string, code int, err error)
 
+// isolatedGitEnv returns a copy of os.Environ() with repository-steering variables
+// (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY, GIT_PREFIX, GIT_COMMON_DIR)
+// stripped so Git subprocesses operate on their specified target directory rather than
+// inheriting an ambient repository context.
+func isolatedGitEnv() []string {
+	return filterGitEnv(os.Environ())
+}
+
+// cleanGitEnv strips repository-steering variables from cmd.Env (or os.Environ() if cmd.Env is nil).
+func cleanGitEnv(cmd *exec.Cmd) {
+	if cmd == nil {
+		return
+	}
+	base := cmd.Env
+	if base == nil {
+		base = os.Environ()
+	}
+	cmd.Env = filterGitEnv(base)
+}
+
+func filterGitEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		u := strings.ToUpper(name)
+		switch u {
+		case "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_PREFIX", "GIT_COMMON_DIR":
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
 // gitRunner is the default: it runs the real git binary. A non-zero git exit is
 // returned in code (not err); err signals git could not be executed at all.
 func gitRunner(ctx context.Context, dir string, args ...string) (string, int, error) {
@@ -94,6 +131,7 @@ func gitRunner(ctx context.Context, dir string, args ...string) (string, int, er
 	windowgate.ConfigureBackgroundCommand(cmd)
 	if dir != "" {
 		cmd.Dir = dir
+		cleanGitEnv(cmd)
 	}
 	var out strings.Builder
 	cmd.Stdout = &out
@@ -124,6 +162,7 @@ func commandRunner(ctx context.Context, dir string, argv ...string) (string, int
 	cmd.WaitDelay = 10 * time.Second
 	if dir != "" {
 		cmd.Dir = dir
+		cleanGitEnv(cmd)
 	}
 	var out strings.Builder
 	cmd.Stdout = &out

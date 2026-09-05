@@ -150,6 +150,9 @@ func TestRealGitAncestor(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
+	if err := exec.Command("git", "rev-parse", "--git-dir").Run(); err != nil {
+		t.Skip("not running inside a git repository")
+	}
 	ctx := context.Background()
 	r := New()
 	if got := r.Resolve(ctx, nil, "ancestor:HEAD"); got != abi.WitnessConfirmed {
@@ -182,6 +185,7 @@ func TestRealGitNotests(t *testing.T) {
 	git := func(args ...string) {
 		t.Helper()
 		cmd := exec.CommandContext(ctx, "git", args...)
+		cleanGitEnv(cmd)
 		cmd.Dir = dir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)

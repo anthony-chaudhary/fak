@@ -200,6 +200,7 @@ func RunPipeWitness(ctx context.Context, dir string, argv ...string) (PipeReceip
 	cmd.WaitDelay = 10 * time.Second
 	if dir != "" {
 		cmd.Dir = dir
+		cleanGitEnv(cmd)
 	}
 
 	stdoutBuf := &boundedBuffer{limit: MaxPipeBufferSize}
