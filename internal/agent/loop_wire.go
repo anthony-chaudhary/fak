@@ -1,6 +1,10 @@
 package agent
 
-import "github.com/anthony-chaudhary/fak/internal/syspromptmmu"
+import (
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
+)
 
 // loop_wire.go — the two RunOptions a WIRE caller needs to hand the owned loop a real
 // served request instead of a reconstruction (#6657).
@@ -52,10 +56,25 @@ func WithMemoryDigest(digest string) RunOption {
 	return func(c *runConfig) { c.memoryDigest = digest }
 }
 
+func (c runConfig) hasCodingTools() bool {
+	if armedCodeTools.Load() != nil {
+		return true
+	}
+	for _, t := range c.seedTools() {
+		switch strings.ToLower(t.Function.Name) {
+		case "read", "write", "edit", "grep", "glob", "bash":
+			return true
+		}
+	}
+	return false
+}
+
 func (c runConfig) seedSystemPrompt() string {
 	base := SystemPrompt
 	if c.systemPrompt != "" {
 		base = c.systemPrompt
+	} else if c.hasCodingTools() {
+		base = CodeAgentSystemPrompt
 	}
 	block := BuildOwnedSystemBlock([][]byte{[]byte(base)}, func(syspromptmmu.BaseEdit) bool { return true })
 	if len(block.Value) == 0 {
@@ -141,9 +160,13 @@ func (c runConfig) seedTools() []ToolDef {
 }
 
 func ownedAgentSystemPrompt() string {
-	block := BuildOwnedSystemBlock([][]byte{[]byte(SystemPrompt)}, func(syspromptmmu.BaseEdit) bool { return true })
+	prompt := SystemPrompt
+	if armedCodeTools.Load() != nil {
+		prompt = CodeAgentSystemPrompt
+	}
+	block := BuildOwnedSystemBlock([][]byte{[]byte(prompt)}, func(syspromptmmu.BaseEdit) bool { return true })
 	if len(block.Value) == 0 {
-		return SystemPrompt
+		return prompt
 	}
 	return string(block.Value)
 }
