@@ -179,21 +179,31 @@ func sampleLogitsWithPenalty(logits []float32, temp, topP float64, topK int, bia
 // the single most-probable token is always kept so the nucleus is never empty.
 // probs is unsorted on entry and stays index-aligned to the caller's logits.
 func nucleusTruncate(probs []float64, sum, topP float64) float64 {
+	if len(probs) == 0 {
+		return 0
+	}
 	order := descProbOrder(probs, func(i, j int) bool { return probs[i] > probs[j] })
 	target := topP * sum
 	var cum float64
-	kept := make(map[int]bool, len(order))
+	cutoff := len(order)
 	for rank, idx := range order {
 		// Stop BEFORE adding this token once the nucleus already reached the target —
 		// the kept set is the minimal prefix whose mass >= target. Rank 0 is always
 		// kept (the head token) so the nucleus is never empty.
 		if rank > 0 && cum >= target {
+			cutoff = rank
 			break
 		}
-		kept[idx] = true
 		cum += probs[idx]
 	}
-	return maskKept(probs, kept)
+	for _, idx := range order[cutoff:] {
+		probs[idx] = 0
+	}
+	var newSum float64
+	for _, p := range probs {
+		newSum += p
+	}
+	return newSum
 }
 
 // descProbOrder returns the indices of probs ordered by the caller's less comparator, which
@@ -211,8 +221,7 @@ func descProbOrder(probs []float64, less func(i, j int) bool) []int {
 }
 
 // maskKept zeroes every probability whose index is not in kept (in place) and returns the
-// surviving mass (the new normalization sum) — the shared renormalization tail of
-// nucleusTruncate and topKTruncate.
+// surviving mass (the new normalization sum) — the renormalization tail of topKTruncate.
 func maskKept(probs []float64, kept map[int]bool) float64 {
 	var newSum float64
 	for i := range probs {

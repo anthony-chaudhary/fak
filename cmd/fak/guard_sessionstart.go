@@ -47,7 +47,19 @@ const (
 // entry verbs (in their mcp__fak__ wire form, the names the agent actually calls) and the
 // two situations where fak most earns its keep: discovering the task-scoped toolbelt, and
 // gating a write.
-const guardSessionStartHint = "Reach for the fak substrate verbs (MCP server `fak`) to discover the task-scoped toolbelt and gate tool calls through the kernel. Call `mcp__fak__fak_capabilities` to find the right fak surface for this task; `mcp__fak__fak_admit` / `mcp__fak__fak_adjudicate` to gate/execute a tool call through the kernel; `mcp__fak__fak_memory_run` for durable memory; `mcp__fak__fak_tools_search` to page in the rest. Invoke these deferred tools explicitly to page them in."
+const guardSessionStartHint = "Reach for the fak substrate verbs (MCP server `fak`) to discover the task-scoped toolbelt and access kernel services. Standard client tools are already wire-gated by the kernel proxy; `mcp__fak__fak_adjudicate` / `mcp__fak__fak_admit` are only for unmanaged clients requiring manual out-of-band admission. Call `mcp__fak__fak_capabilities` to find the right fak surface for this task; `mcp__fak__fak_memory_run` for durable memory; `mcp__fak__fak_tools_search` to page in the rest. Invoke these deferred tools explicitly to page them in."
+
+// guardSessionStartHintForProvider returns the provider-aligned affordance hint.
+// When provider is "codex", it targets the `fak_guard` MCP server and verbs
+// (matching guardCodexConfigArgs which sets -c mcp_servers.fak_guard.url=... and disables mcp_servers.fak.enabled=false).
+// For other providers (claude), it retains guardSessionStartHint unchanged (#11375).
+func guardSessionStartHintForProvider(provider string) string {
+	if strings.ToLower(strings.TrimSpace(provider)) == "codex" {
+		hint := strings.ReplaceAll(guardSessionStartHint, "(MCP server `fak`)", "(MCP server `fak_guard`)")
+		return strings.ReplaceAll(hint, "mcp__fak__", "mcp__fak_guard__")
+	}
+	return guardSessionStartHint
+}
 
 func cmdGuardSessionStart(argv []string) {
 	os.Exit(runGuardSessionStartHook(os.Stdout, os.Stderr, os.Stdin, argv))
@@ -157,11 +169,15 @@ func runGuardSessionStartHook(stdout, stderr io.Writer, stdin io.Reader, argv []
 	// Compose the injected context: the MCP-affordance hint always, plus the long-horizon rule
 	// when this session was admitted MANAGED. SessionStartRule returns "" for a non-managed
 	// directive, so an attended session composes to the base hint unchanged.
-	additionalContext := guardSessionStartHint
+	hint := guardSessionStartHintForProvider(provider)
+	additionalContext := hint
 	if *managedFlag {
 		directive := sessionsteer.Steer(sessionsteer.SteerInput{Headless: true, DurableStore: true})
 		if rule := sessionsteer.SessionStartRule(directive); rule != "" {
-			additionalContext = guardSessionStartHint + "\n\n" + rule
+			if strings.ToLower(strings.TrimSpace(provider)) == "codex" {
+				rule = strings.ReplaceAll(rule, "mcp__fak__", "mcp__fak_guard__")
+			}
+			additionalContext = hint + "\n\n" + rule
 		}
 		if strings.TrimSpace(os.Getenv("FAK_TOOL_WIDTH_HINT")) != "off" {
 			additionalContext += "\n\n" + sessionsteer.IndependentToolHint(true)

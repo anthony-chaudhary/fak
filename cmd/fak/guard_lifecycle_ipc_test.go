@@ -129,8 +129,11 @@ func TestGuardSessionStartClearCreatesFakSessionBoundary(t *testing.T) {
 		t.Fatalf("identity join=%q, want %q", got, newTrace)
 	}
 	journal := sessionjournal.FoldEvents(sessionjournal.LoadFile(journalPath))
-	if len(journal) != 2 || journal[0].ID != "provider-thread-1" || !journal[0].Closed ||
-		journal[1].ID != "provider-thread-2" || journal[1].Closed {
+	bySession := make(map[string]sessionjournal.Session, len(journal))
+	for _, rec := range journal {
+		bySession[rec.ID] = rec
+	}
+	if len(journal) != 2 || !bySession["provider-thread-1"].Closed || bySession["provider-thread-2"].Closed {
 		t.Fatalf("provider journal boundary = %+v", journal)
 	}
 }

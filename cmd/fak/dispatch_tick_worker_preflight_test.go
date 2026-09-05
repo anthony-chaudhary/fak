@@ -457,3 +457,93 @@ func TestDispatchWorkerPreflightAuthMissingIdentifiesSeatAndRemediation(t *testi
 		t.Fatalf("reason missing actionable remediation: %q", res.Reason)
 	}
 }
+
+func TestDispatchTickWorkerPreflightSynchronizesProjectAssets(t *testing.T) {
+	ws := t.TempDir()
+	home := t.TempDir()
+	manifestDir := filepath.Join(ws, ".claude")
+	if err := os.MkdirAll(filepath.Join(ws, ".claude", "skills", "testskill"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(ws, ".claude", "memory"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(ws, ".claude", "goal-prompts"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifestJSON := `{
+  "schema": "fak-project-assets/1",
+  "skills": {
+    "canonical_root": ".claude/skills",
+    "codex_root": ".agents/skills",
+    "include": ["SKILL.md"],
+    "exclude": []
+  },
+  "memories": {
+    "canonical_root": ".claude/memory",
+    "include": ["*.md"],
+    "exclude": []
+  },
+  "goal_prompts": {
+    "canonical_root": ".claude/goal-prompts",
+    "include": ["*.md"],
+    "exclude": []
+  },
+  "harnesses": {
+    "claude": {"skills": ".claude/skills", "memories": ".claude/memory", "goal_prompts": ".claude/goal-prompts"},
+    "codex": {"skills": ".agents/skills", "memories": "cmd", "goal_prompts": ".claude/goal-prompts"},
+    "fak-native": {"skills": ".claude/skills", "memories": "cmd", "goal_prompts": ".claude/goal-prompts"},
+    "opencode": {"skills": ".agents/skills", "memories": "cmd", "goal_prompts": ".claude/goal-prompts"}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(manifestDir, "project-assets.json"), []byte(manifestJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+	skillMD := "---\nname: testskill\ndescription: Test skill for preflight\n---\n# Test\n"
+	if err := os.WriteFile(filepath.Join(ws, ".claude", "skills", "testskill", "SKILL.md"), []byte(skillMD), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".claude", "memory", "base.md"), []byte("memory\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".claude", "goal-prompts", "base.md"), []byte("prompt\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	adapterPath := filepath.Join(ws, ".agents", "skills", "testskill", "SKILL.md")
+	if _, err := os.Stat(adapterPath); !os.IsNotExist(err) {
+		t.Fatalf("expected adapter to not exist before preflight")
+	}
+
+	installReadyDispatchWorkerPreflightProbe(t)
+	req := dispatchWorkerPreflightRequest{
+		Backend:       "codex",
+		Account:       dispatchtick.Account{Tag: "worker-seat-1", Dir: home},
+		Model:         "gpt-5.6-sol",
+		Guarded:       true,
+		Workspace:     ws,
+		LaunchCommand: []string{"fak", "guard", "--", "codex"},
+	}
+
+	res := dispatchWorkerPreflight(context.Background(), req, time.Now())
+	if !res.Ready {
+		t.Fatalf("preflight not ready: %+v", res)
+	}
+
+	if _, err := os.Stat(adapterPath); err != nil {
+		t.Fatalf("expected adapter to be synchronized at %s, got err: %v", adapterPath, err)
+	}
+
+	// Remove adapter and test with opencode backend
+	if err := os.Remove(adapterPath); err != nil {
+		t.Fatal(err)
+	}
+	req.Backend = "opencode"
+	res = dispatchWorkerPreflight(context.Background(), req, time.Now())
+	if !res.Ready {
+		t.Fatalf("preflight not ready for opencode: %+v", res)
+	}
+	if _, err := os.Stat(adapterPath); err != nil {
+		t.Fatalf("expected adapter to be synchronized for opencode backend, got err: %v", err)
+	}
+}

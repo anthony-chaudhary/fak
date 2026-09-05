@@ -23,17 +23,18 @@ func (v *VDSO) RegisterNonsemanticPathFields(tool string, fields ...string) {
 	v.regMu.Unlock()
 }
 
-func (v *VDSO) normalizeNonsemanticPathFields(tool string, args []byte) ([]byte, bool, bool) {
+func (v *VDSO) normalizeNonsemanticPathFields(tool string, args []byte, nearDup bool) ([]byte, bool, bool) {
 	v.regMu.RLock()
 	declaration := v.nonsemanticPathFields[tool]
+	if len(declaration) == 0 {
+		v.regMu.RUnlock()
+		return nil, false, true
+	}
 	fields := make([]string, 0, len(declaration))
 	for field := range declaration {
 		fields = append(fields, field)
 	}
 	v.regMu.RUnlock()
-	if len(fields) == 0 {
-		return nil, false, true
-	}
 
 	var object map[string]any
 	if err := json.Unmarshal(args, &object); err != nil || object == nil {
@@ -48,6 +49,10 @@ func (v *VDSO) normalizeNonsemanticPathFields(tool string, args []byte) ([]byte,
 			return nil, true, false
 		}
 		delete(object, field)
+	}
+	if nearDup {
+		var anyObj any = object
+		normalizeStrings(&anyObj)
 	}
 	normalized, err := json.Marshal(object)
 	if err != nil {

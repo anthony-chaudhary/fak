@@ -833,6 +833,10 @@ var tier = map[string]int{
 	"mcpbroker":                  1,
 	"issueorchestrator":          3,
 	"storage":                    1,
+	"harnesshint":                1,
+	"harnesslint":                1,
+	"harnessversion":             1,
+	"fakpack":                    2,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/contextq"
 	"github.com/anthony-chaudhary/fak/internal/selfquery"
@@ -218,6 +219,24 @@ func (s *Server) resourceDescriptors() []map[string]any {
 	return out
 }
 
+// resourceTemplateDescriptors is the resources/templates/list payload:
+// {uriTemplate, name, description, mimeType} per template resource (#10014).
+func (s *Server) resourceTemplateDescriptors() []map[string]any {
+	rs := s.resources()
+	out := make([]map[string]any, 0, len(rs))
+	for _, r := range rs {
+		if strings.Contains(r.uri, "{") {
+			out = append(out, map[string]any{
+				"uriTemplate": r.uri,
+				"name":        r.name,
+				"description": r.desc,
+				"mimeType":    r.mime,
+			})
+		}
+	}
+	return out
+}
+
 // readResource handles resources/read. params is {uri}; the response is the MCP
 // {contents:[{uri, mimeType, text}]} shape. An unknown URI is a parameter fault
 // (InvalidParams), the same convention this file's tools/call uses for an unknown
@@ -228,6 +247,10 @@ func (s *Server) readResource(params json.RawMessage) (any, *rpcError) {
 	}
 	if e := mcpUnmarshalParams(params, &p, "resources/read"); e != nil {
 		return nil, e
+	}
+	cleanURI := strings.TrimRight(p.URI, "/")
+	if cleanURI == "fak://capabilities" || strings.HasPrefix(p.URI, "fak://capabilities?") || strings.HasPrefix(p.URI, "fak://server/capabilities?") {
+		p.URI = "fak://server/capabilities"
 	}
 	if req, ok := contextq.MCPMissingContextResourceRequest(p.URI, 0); ok {
 		plan := selfquery.MissingContextClarifications([]string{req.Key})

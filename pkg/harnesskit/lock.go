@@ -1,75 +1,48 @@
 package harnesskit
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit/lockv2"
 )
 
+const ProductLockSchemaV2 = lockv2.ProductLockSchemaV2
 const ProductLockSchema = "fak.harness-product-lock/v1alpha2"
 const LegacyProductLockSchema = "fak.harness-product-lock/v1alpha1"
 const LaunchReceiptSchema = "fak.harness-launch-receipt/v1alpha1"
+const SecretPlaintextLeakError = lockv2.SecretPlaintextLeakError
+const ErrSecretPlaintextLeak = SecretPlaintextLeakError
+
+var secretRefPattern = regexp.MustCompile(`^(env|file|vault|keyring):[a-zA-Z0-9_./#-]+$`)
+
+type PlatformRequirement = lockv2.PlatformRequirement
+type SecretContract = lockv2.SecretContract
+type ToolSchemaFingerprint = lockv2.ToolSchemaFingerprint
+type LockEnvironment = lockv2.LockEnvironment
+type LockBudget = lockv2.LockBudget
+type LockRequirement = lockv2.LockRequirement
+type LockCompatibility = lockv2.LockCompatibility
+type LockedComponent = lockv2.LockedComponent
+type LockedAsset = lockv2.LockedAsset
 
 type ProductLock struct {
-	Schema      string            `json:"schema"`
-	ID          string            `json:"id"`
-	Environment LockEnvironment   `json:"environment"`
-	Budget      LockBudget        `json:"budget"`
-	Components  []LockedComponent `json:"components"`
-	Assets      []LockedAsset     `json:"assets"`
-	AssetTrace  json.RawMessage   `json:"asset_trace"`
-	Decisions   json.RawMessage   `json:"decisions"`
-}
-
-type LockEnvironment struct {
-	OS       string `json:"os"`
-	Arch     string `json:"arch"`
-	Contract string `json:"contract"`
-}
-type LockBudget struct {
-	ContextTokens int `json:"context_tokens,omitempty"`
-	MemoryMiB     int `json:"memory_mib,omitempty"`
-	Workers       int `json:"workers,omitempty"`
-}
-type LockRequirement struct {
-	Capability string `json:"capability"`
-	Range      string `json:"range,omitempty"`
-	Optional   bool   `json:"optional,omitempty"`
-}
-type LockCompatibility struct {
-	OS       []string `json:"os,omitempty"`
-	Arch     []string `json:"arch,omitempty"`
-	Contract string   `json:"contract,omitempty"`
-}
-type LockedComponent struct {
-	ID            string            `json:"id"`
-	Version       string            `json:"version"`
-	Digest        string            `json:"digest"`
-	Source        string            `json:"source"`
-	Reason        string            `json:"reason"`
-	Provider      string            `json:"provider"`
-	Provides      []string          `json:"provides,omitempty"`
-	Requires      []LockRequirement `json:"requires,omitempty"`
-	Conflicts     []string          `json:"conflicts,omitempty"`
-	Compatibility LockCompatibility `json:"compatibility,omitempty"`
-	Cost          LockBudget        `json:"cost,omitempty"`
-	Adapters      []string          `json:"adapters,omitempty"`
-}
-type LockedAsset struct {
-	Kind      string   `json:"kind"`
-	ID        string   `json:"id"`
-	Value     string   `json:"value,omitempty"`
-	Ref       string   `json:"ref,omitempty"`
-	Boundary  string   `json:"boundary,omitempty"`
-	Grants    []string `json:"grants,omitempty"`
-	Denies    []string `json:"denies,omitempty"`
-	Source    string   `json:"source"`
-	Locked    bool     `json:"locked,omitempty"`
-	Mandatory bool     `json:"mandatory,omitempty"`
+	Schema      string                `json:"schema"`
+	ID          string                `json:"id"`
+	Platforms   []PlatformRequirement `json:"platforms,omitempty"`
+	Environment LockEnvironment       `json:"environment,omitempty"`
+	Budget      LockBudget            `json:"budget"`
+	Components  []LockedComponent     `json:"components"`
+	Assets      []LockedAsset         `json:"assets"`
+	AssetTrace  json.RawMessage       `json:"asset_trace,omitempty"`
+	Decisions   json.RawMessage       `json:"decisions,omitempty"`
 }
 
 type LaunchReceipt struct {
@@ -91,14 +64,15 @@ func LoadProductLock(path string) (ProductLock, error) {
 }
 
 func ParseProductLock(raw []byte) (ProductLock, error) {
+	raw = bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
 	var lock ProductLock
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&lock); err != nil {
 		return ProductLock{}, fmt.Errorf("parse product lock: %w", err)
 	}
-	if lock.Schema != ProductLockSchema && lock.Schema != LegacyProductLockSchema {
-		return ProductLock{}, fmt.Errorf("product lock schema must be %q or legacy %q", ProductLockSchema, LegacyProductLockSchema)
+	if lock.Schema != ProductLockSchemaV2 && lock.Schema != ProductLockSchema && lock.Schema != LegacyProductLockSchema {
+		return ProductLock{}, fmt.Errorf("product lock schema must be %q, %q, or legacy %q", ProductLockSchemaV2, ProductLockSchema, LegacyProductLockSchema)
 	}
 	if lock.ID == "" || len(lock.Components) == 0 {
 		return ProductLock{}, fmt.Errorf("product lock id and components are required")
@@ -112,31 +86,86 @@ func ParseProductLock(raw []byte) (ProductLock, error) {
 		if asset.Kind == "" || asset.ID == "" || asset.Source == "" {
 			return ProductLock{}, fmt.Errorf("locked asset kind/id/source are required")
 		}
-		if asset.Kind == "secret" && asset.Ref == "" {
-			return ProductLock{}, fmt.Errorf("locked secret %q has no opaque reference", asset.ID)
+		if asset.Kind == "secret" {
+			if asset.Value != "" {
+				return ProductLock{}, fmt.Errorf("%s: locked secret %q cannot contain plaintext value", SecretPlaintextLeakError, asset.ID)
+			}
+			if asset.Ref == "" {
+				return ProductLock{}, fmt.Errorf("locked secret %q has no opaque reference", asset.ID)
+			}
+			if !secretRefPattern.MatchString(asset.Ref) {
+				return ProductLock{}, fmt.Errorf("locked secret %q invalid opaque reference %q", asset.ID, asset.Ref)
+			}
 		}
 	}
-	want := lock.ID
-	lock.ID = ""
-	canonical, err := json.Marshal(lock)
-	if err != nil {
-		return ProductLock{}, err
+	for i := range lock.Assets {
+		lock.Assets[i].Value = strings.ReplaceAll(lock.Assets[i].Value, "\r\n", "\n")
 	}
-	sum := sha256.Sum256(canonical)
-	got := "sha256:" + hex.EncodeToString(sum[:])
-	if got != want {
-		return ProductLock{}, fmt.Errorf("product lock digest mismatch: got %s want %s", want, got)
+	want := lock.ID
+	if lock.Schema == ProductLockSchemaV2 {
+		v2 := lockv2.Lock(lock)
+		got, err := lockv2.CanonicalID(&v2)
+		if err != nil {
+			return ProductLock{}, err
+		}
+		if got != want {
+			return ProductLock{}, fmt.Errorf("product lock digest mismatch: got %s want %s", want, got)
+		}
+	} else {
+		lock.ID = ""
+		canonical, err := json.Marshal(lock)
+		if err != nil {
+			return ProductLock{}, err
+		}
+		sum := sha256.Sum256(canonical)
+		got := "sha256:" + hex.EncodeToString(sum[:])
+		if got != want {
+			return ProductLock{}, fmt.Errorf("product lock digest mismatch: got %s want %s", want, got)
+		}
 	}
 	lock.ID = want
 	return lock, nil
 }
 
-// Mixable reports whether the lock carries the v1alpha2 component evidence
+// LockID calculates the canonical identity digest of the product lock.
+func LockID(lock ProductLock) (string, error) {
+	if lock.Schema == ProductLockSchemaV2 {
+		v2 := lockv2.Lock(lock)
+		return lockv2.CanonicalID(&v2)
+	}
+	copy := lock
+	copy.ID = ""
+	raw, err := json.Marshal(copy)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+// SupportsPlatform reports whether the lock supports the target OS and CPU architecture.
+func (l ProductLock) SupportsPlatform(targetOS, targetArch string) bool {
+	v2 := lockv2.Lock(l)
+	return v2.SupportsPlatform(targetOS, targetArch)
+}
+
+// ValidatePlatforms verifies that every component is compatible with declared platforms.
+func (l ProductLock) ValidatePlatforms() error {
+	v2 := lockv2.Lock(l)
+	return v2.ValidatePlatforms()
+}
+
+// CanonicalID computes the RFC 8785 JCS LF SHA-256 digest of the lock.
+func (l ProductLock) CanonicalID() (string, error) {
+	return LockID(l)
+}
+
+// Mixable reports whether the lock carries the component evidence
 // required for sound downstream composition. Legacy locks remain launchable,
 // but missing compatibility facts are never guessed.
 func (l ProductLock) Mixable() error {
-	if l.Schema != ProductLockSchema {
-		return fmt.Errorf("legacy product lock %q is launchable but not mixable; rebuild it from source as %q", l.Schema, ProductLockSchema)
+	if l.Schema != ProductLockSchema && l.Schema != ProductLockSchemaV2 {
+		return fmt.Errorf("legacy product lock %q is launchable but not mixable; rebuild it from source as %q", l.Schema, ProductLockSchemaV2)
 	}
 	for _, component := range l.Components {
 		if component.Reason == "" || component.Provider == "" {
@@ -147,6 +176,11 @@ func (l ProductLock) Mixable() error {
 		}
 		if len(component.Adapters) == 0 {
 			return fmt.Errorf("component %q has no runtime adapter conformance evidence", component.ID)
+		}
+	}
+	if l.Schema == ProductLockSchemaV2 {
+		if len(l.Platforms) == 0 && (l.Environment.OS == "" && l.Environment.Arch == "") {
+			return fmt.Errorf("lock %q has no platform or environment facts", l.ID)
 		}
 	}
 	return nil

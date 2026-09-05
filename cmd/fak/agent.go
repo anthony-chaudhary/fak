@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/dropin"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
@@ -46,6 +47,8 @@ type agentFlags struct {
 	workflowCheckpointDir *string
 	memory                *bool
 	memoryStore           *string
+	posture               *string
+	mcpConfig             *string
 }
 
 func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
@@ -84,6 +87,8 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.workflowCheckpointDir = fs.String("workflow-checkpoint-dir", ".fak/workflows", "directory for workflow state checkpoints")
 	af.memory = fs.Bool("memory", true, "discover and inject verified workspace memory notes into agent prompt; use --memory=false to disable")
 	af.memoryStore = fs.String("memory-store", "", "optional custom memory store path (directory or MEMORY.md); defaults to auto-discovery")
+	af.posture = fs.String("posture", "default_open", "adjudication posture: default_open|fail_closed|admit_and_log (default: default_open; env: FAK_AGENT_POSTURE or FAK_GUARD_POSTURE)")
+	af.mcpConfig = fs.String("mcp-config", os.Getenv("FAK_MCP_CONFIG"), "optional path to MCP client configuration file")
 	return fs, af
 }
 
@@ -107,6 +112,29 @@ func runAgent(argv []string) {
 	}
 	fs, af := newAgentFlagSet()
 	_ = fs.Parse(argv)
+
+	postureExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "posture" {
+			postureExplicit = true
+		}
+	})
+	rawPosture := *af.posture
+	if !postureExplicit {
+		if env := os.Getenv("FAK_AGENT_POSTURE"); env != "" {
+			rawPosture = env
+		} else if env := os.Getenv("FAK_GUARD_POSTURE"); env != "" {
+			rawPosture = env
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(rawPosture)) {
+	case "fail_closed", "strict":
+		agent.SetConfiguredPosture(adjudicator.PostureFailClosed)
+	case "admit_and_log":
+		agent.SetConfiguredPosture(adjudicator.PostureAdmitAndLog)
+	default:
+		agent.SetConfiguredPosture(adjudicator.PostureDefaultOpen)
+	}
 
 	isRaw, isNative, err := resolveAgentMode(*af.raw, *af.native, *af.mode)
 	must(err)
@@ -226,8 +254,12 @@ func runAgent(argv []string) {
 		}
 	})
 	effectiveBaseURL := *af.baseURL
-	if effectiveBaseURL == "" && providerExplicit && !*af.offline {
-		effectiveBaseURL = dropin.DefaultBaseURL(*af.provider)
+	if effectiveBaseURL == "" {
+		if env := os.Getenv(dropin.EnvVar(*af.provider, "")); env != "" {
+			effectiveBaseURL = env
+		} else if providerExplicit && !*af.offline {
+			effectiveBaseURL = dropin.DefaultBaseURL(*af.provider)
+		}
 	}
 
 	var planner agent.Planner

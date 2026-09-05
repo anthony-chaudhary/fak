@@ -870,3 +870,81 @@ func TestRunCodexDryRunRetainsCommandDetails(t *testing.T) {
 		t.Fatalf("dry-run stdout did not retain runnable command: %q", out.String())
 	}
 }
+
+func TestCodexLauncherSynchronizesProjectAssets(t *testing.T) {
+	ws := t.TempDir()
+	manifestDir := filepath.Join(ws, ".claude")
+	if err := os.MkdirAll(filepath.Join(ws, ".claude", "skills", "codexskill"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(ws, ".claude", "memory"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(ws, ".claude", "goal-prompts"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifestJSON := `{
+  "schema": "fak-project-assets/1",
+  "skills": {
+    "canonical_root": ".claude/skills",
+    "codex_root": ".agents/skills",
+    "include": ["SKILL.md"],
+    "exclude": []
+  },
+  "memories": {
+    "canonical_root": ".claude/memory",
+    "include": ["*.md"],
+    "exclude": []
+  },
+  "goal_prompts": {
+    "canonical_root": ".claude/goal-prompts",
+    "include": ["*.md"],
+    "exclude": []
+  },
+  "harnesses": {
+    "claude": {"skills": ".claude/skills", "memories": ".claude/memory", "goal_prompts": ".claude/goal-prompts"},
+    "codex": {"skills": ".agents/skills", "memories": "cmd", "goal_prompts": ".claude/goal-prompts"},
+    "fak-native": {"skills": ".claude/skills", "memories": "cmd", "goal_prompts": ".claude/goal-prompts"},
+    "opencode": {"skills": ".agents/skills", "memories": "cmd", "goal_prompts": ".claude/goal-prompts"}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(manifestDir, "project-assets.json"), []byte(manifestJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+	skillMD := "---\nname: codexskill\ndescription: Codex test skill\n---\n# Codex\n"
+	if err := os.WriteFile(filepath.Join(ws, ".claude", "skills", "codexskill", "SKILL.md"), []byte(skillMD), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".claude", "memory", "base.md"), []byte("memory\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".claude", "goal-prompts", "base.md"), []byte("prompt\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	adapterPath := filepath.Join(ws, ".agents", "skills", "codexskill", "SKILL.md")
+	if _, err := os.Stat(adapterPath); !os.IsNotExist(err) {
+		t.Fatalf("expected adapter to not exist before launch")
+	}
+
+	origRun := codexLaunchRun
+	ran := false
+	codexLaunchRun = func(stdout, stderr io.Writer, argv, env []string) int {
+		ran = true
+		return 0
+	}
+	t.Cleanup(func() { codexLaunchRun = origRun })
+
+	t.Chdir(ws)
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{"--split", "off", "--loop-gate", "off", "--quiet", "--", "exec", "do task"})
+	if rc != 0 {
+		t.Fatalf("runCodex returned %d, stderr: %s", rc, errb.String())
+	}
+	if !ran {
+		t.Fatal("expected codexLaunchRun to be called")
+	}
+	if _, err := os.Stat(adapterPath); err != nil {
+		t.Fatalf("expected adapter to be synchronized, got error: %v", err)
+	}
+}

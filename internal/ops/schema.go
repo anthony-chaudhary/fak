@@ -22,6 +22,7 @@ const (
 	ActionProcessReap    ActionType = "PROCESS_REAP"
 	ActionLockEvict      ActionType = "LOCK_EVICT"
 	ActionWorktreePrune  ActionType = "WORKTREE_PRUNE"
+	ActionAssetSync      ActionType = "ASSET_SYNC"
 )
 
 // Event records a single witnessed autonomous maintenance action in fak-ops-event/1.

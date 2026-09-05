@@ -457,3 +457,264 @@ func TestPathWithinScopeEnforcement(t *testing.T) {
 		t.Errorf("Expected traversal path to be rejected")
 	}
 }
+
+func TestToolDefinitionValidation(t *testing.T) {
+	// 1. Valid tool definition
+	validTool := ToolDefinition{
+		Name:        "fs.read_file",
+		Description: "Reads a file safely within workspace bounds",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path": map[string]any{"type": "string"},
+			},
+			"required": []any{"path"},
+		},
+		Scope: ToolScope{
+			WorkspacePaths: []string{"/workspace/project"},
+			ReadOnly:       true,
+			NetworkAllowed: false,
+			MaxTurns:       10,
+		},
+		Condition: ToolCondition{
+			AllowList: []string{"sess-1"},
+		},
+		Auth: &AuthBinding{
+			SecretRefs:              []string{"FLEET_TOKEN_1"},
+			JITAuthPaging:           true,
+			OAuthProvider:           "github",
+			ScrubSecretsFromResults: true,
+		},
+		Metadata: map[string]string{
+			"category": "filesystem",
+		},
+	}
+	if err := validTool.Validate(); err != nil {
+		t.Fatalf("Expected valid tool to pass Validate(), got err: %v", err)
+	}
+
+	// 2. Empty name rejection
+	emptyNameTool := ToolDefinition{
+		Name: "",
+		Schema: map[string]any{
+			"type": "object",
+		},
+	}
+	if err := emptyNameTool.Validate(); err == nil {
+		t.Fatalf("Expected empty name to fail Validate(), got nil")
+	}
+
+	// 3. Whitespace name rejection
+	whitespaceTool := ToolDefinition{
+		Name: "   ",
+		Schema: map[string]any{
+			"type": "object",
+		},
+	}
+	if err := whitespaceTool.Validate(); err == nil {
+		t.Fatalf("Expected whitespace name to fail Validate(), got nil")
+	}
+
+	// 4. Empty schema rejection
+	emptySchemaTool := ToolDefinition{
+		Name:   "fs.write",
+		Schema: map[string]any{},
+	}
+	if err := emptySchemaTool.Validate(); err == nil {
+		t.Fatalf("Expected empty schema map to fail Validate(), got nil")
+	}
+
+	// 5. Invalid schema type rejection
+	invalidTypeTool := ToolDefinition{
+		Name: "fs.write",
+		Schema: map[string]any{
+			"type": 12345,
+		},
+	}
+	if err := invalidTypeTool.Validate(); err == nil {
+		t.Fatalf("Expected non-string schema type to fail Validate(), got nil")
+	}
+}
+
+func TestToolPermissionScopeChecks(t *testing.T) {
+	// Read-only scope enforcement
+	roTool := ToolDefinition{
+		Name: "fs.read",
+		Scope: ToolScope{
+			WorkspacePaths: []string{"/workspace/project"},
+			ReadOnly:       true,
+		},
+	}
+
+	// Read operation on read-only tool is permitted
+	allowed, reason := roTool.CheckPermission("sess-1", "/workspace/project/README.md", false)
+	if !allowed {
+		t.Fatalf("Expected read on read-only tool to be allowed, got reason: %s", reason)
+	}
+
+	// Write operation on read-only tool is refused
+	allowed, reason = roTool.CheckPermission("sess-1", "/workspace/project/README.md", true)
+	if allowed || !strings.Contains(reason, "read-only") {
+		t.Fatalf("Expected write on read-only tool to be rejected, got allowed=%v reason=%s", allowed, reason)
+	}
+
+	// Mutating tool permits write
+	mutTool := ToolDefinition{
+		Name: "fs.write",
+		Scope: ToolScope{
+			WorkspacePaths: []string{"/workspace/project"},
+			ReadOnly:       false,
+			Mutability:     MutabilityMutating,
+		},
+	}
+	allowed, reason = mutTool.CheckPermission("sess-1", "/workspace/project/main.go", true)
+	if !allowed {
+		t.Fatalf("Expected write on mutating tool to be allowed, got reason: %s", reason)
+	}
+
+	// Path prefix and containment matching
+	scopedTool := ToolDefinition{
+		Name: "fs.access",
+		Scope: ToolScope{
+			WorkspacePaths: []string{"/workspace/project", "/tmp/scratch"},
+			ReadOnly:       true,
+		},
+	}
+
+	// Paths within scope
+	if ok, r := scopedTool.CheckPermission("sess-1", "/workspace/project/sub/file.go", false); !ok {
+		t.Errorf("Expected subfile to be allowed, got %s", r)
+	}
+	if ok, r := scopedTool.CheckPermission("sess-1", "/tmp/scratch/temp.txt", false); !ok {
+		t.Errorf("Expected /tmp/scratch path to be allowed, got %s", r)
+	}
+
+	// Paths outside scope
+	if ok, r := scopedTool.CheckPermission("sess-1", "/etc/passwd", false); ok || !strings.Contains(r, "outside workspace scope") {
+		t.Errorf("Expected /etc/passwd to be rejected, got ok=%v reason=%s", ok, r)
+	}
+	if ok, _ := scopedTool.CheckPermission("sess-1", "/workspace/other_project/main.go", false); ok {
+		t.Errorf("Expected /workspace/other_project to be rejected")
+	}
+
+	// Directory traversal path escape
+	if ok, _ := scopedTool.CheckPermission("sess-1", "/workspace/project/../../etc/shadow", false); ok {
+		t.Errorf("Expected traversal path to be rejected")
+	}
+}
+
+func TestToolConditionAllowBlockEvaluation(t *testing.T) {
+	// AllowList evaluation
+	allowTool := ToolDefinition{
+		Name: "admin.run",
+		Condition: ToolCondition{
+			AllowList: []string{"session-prod-*", "admin-session"},
+		},
+	}
+	if ok, _ := allowTool.CheckPermission("admin-session", "", false); !ok {
+		t.Errorf("Expected admin-session in allow list to be permitted")
+	}
+	if ok, _ := allowTool.CheckPermission("session-prod-99", "", false); !ok {
+		t.Errorf("Expected session-prod-* match to be permitted")
+	}
+	if ok, reason := allowTool.CheckPermission("session-dev-1", "", false); ok || !strings.Contains(reason, "not in allow list") {
+		t.Errorf("Expected session-dev-1 to be rejected by allow list, got ok=%v reason=%s", ok, reason)
+	}
+	if ok, _ := allowTool.CheckPermission("", "", false); ok {
+		t.Errorf("Expected empty session to be rejected when allow list is non-empty")
+	}
+
+	// BlockList evaluation
+	blockTool := ToolDefinition{
+		Name: "shell.run",
+		Condition: ToolCondition{
+			BlockList: []string{"untrusted-*", "blocked-session"},
+		},
+	}
+	if ok, reason := blockTool.CheckPermission("untrusted-worker-1", "", false); ok || !strings.Contains(reason, "blocked") {
+		t.Errorf("Expected untrusted worker to be blocked, got ok=%v reason=%s", ok, reason)
+	}
+	if ok, reason := blockTool.CheckPermission("blocked-session", "", false); ok || !strings.Contains(reason, "blocked") {
+		t.Errorf("Expected blocked-session to be blocked, got ok=%v reason=%s", ok, reason)
+	}
+	if ok, _ := blockTool.CheckPermission("clean-session", "", false); !ok {
+		t.Errorf("Expected clean-session not on block list to be permitted")
+	}
+
+	// Precedence: BlockList takes priority over AllowList
+	priorityTool := ToolDefinition{
+		Name: "data.export",
+		Condition: ToolCondition{
+			AllowList: []string{"worker-*"},
+			BlockList: []string{"worker-quarantined"},
+		},
+	}
+	if ok, _ := priorityTool.CheckPermission("worker-clean", "", false); !ok {
+		t.Errorf("Expected worker-clean to be permitted")
+	}
+	if ok, _ := priorityTool.CheckPermission("worker-quarantined", "", false); ok {
+		t.Errorf("Expected worker-quarantined to be blocked despite matching allow pattern")
+	}
+	if ok, _ := priorityTool.CheckPermission("external-agent", "", false); ok {
+		t.Errorf("Expected external-agent to be rejected by allow list")
+	}
+
+	// Precondition evaluation
+	precondTool := ToolDefinition{
+		Name: "deploy.service",
+		Condition: ToolCondition{
+			Precondition: func(ctx context.Context, sessionID string) bool {
+				return strings.HasPrefix(sessionID, "verified-")
+			},
+		},
+	}
+	if ok, _ := precondTool.CheckPermission("verified-session-123", "", false); !ok {
+		t.Errorf("Expected verified session to pass precondition")
+	}
+	if ok, reason := precondTool.CheckPermission("unverified-session-123", "", false); ok || !strings.Contains(reason, "precondition failed") {
+		t.Errorf("Expected unverified session to fail precondition, got ok=%v reason=%s", ok, reason)
+	}
+}
+
+func TestToolSecretScrubbingWithJITAuth(t *testing.T) {
+	tool := &ToolDefinition{
+		Name: "payment.charge",
+		Auth: &AuthBinding{
+			SecretRefs:              []string{"sk_live_998877665544", "DB_PASSWORD_123"},
+			JITAuthPaging:           true,
+			OAuthProvider:           "stripe",
+			ScrubSecretsFromResults: true,
+		},
+	}
+
+	raw := []byte(`{"status":"ok","token":"sk_live_998877665544","db_pass":"DB_PASSWORD_123","auth":"Bearer sec_live_bearer_9999"}`)
+	scrubbed := tool.ScrubResult(raw)
+	scrubbedStr := string(scrubbed)
+
+	if strings.Contains(scrubbedStr, "sk_live_998877665544") {
+		t.Fatalf("Secret sk_live_998877665544 leaked in scrubbed output: %s", scrubbedStr)
+	}
+	if strings.Contains(scrubbedStr, "DB_PASSWORD_123") {
+		t.Fatalf("Secret DB_PASSWORD_123 leaked in scrubbed output: %s", scrubbedStr)
+	}
+	if strings.Contains(scrubbedStr, "sec_live_bearer_9999") {
+		t.Fatalf("Bearer token sec_live_bearer_9999 leaked in scrubbed output: %s", scrubbedStr)
+	}
+	if !strings.Contains(scrubbedStr, "[REDACTED]") {
+		t.Fatalf("Expected [REDACTED] in scrubbed output: %s", scrubbedStr)
+	}
+
+	// When ScrubSecretsFromResults is false, SecretRefs are not redacted
+	noScrubTool := &ToolDefinition{
+		Name: "debug.echo",
+		Auth: &AuthBinding{
+			SecretRefs:              []string{"debug_token_xyz"},
+			ScrubSecretsFromResults: false,
+		},
+	}
+	rawNoScrub := []byte(`{"debug":"debug_token_xyz"}`)
+	scrubbedNoScrub := noScrubTool.ScrubResult(rawNoScrub)
+	if !strings.Contains(string(scrubbedNoScrub), "debug_token_xyz") {
+		t.Fatalf("Expected debug_token_xyz to be preserved when ScrubSecretsFromResults=false")
+	}
+}

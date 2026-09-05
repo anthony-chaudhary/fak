@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/dropin"
 	"github.com/anthony-chaudhary/fak/internal/systools"
@@ -74,6 +75,7 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 // RunArm in-process, with no upstream required (the offline mock planner is the
 // default, matching `fak agent`). --base-url swaps in a live provider planner.
 func cmdChat(argv []string) {
+	agent.SetConfiguredPosture(adjudicator.PostureDefaultOpen)
 	fs, cf := newChatFlagSet()
 	_ = fs.Parse(argv)
 

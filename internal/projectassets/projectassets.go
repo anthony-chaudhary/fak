@@ -451,14 +451,37 @@ func Build(root string, write bool) (Receipt, error) {
 	codexImports = append(codexImports, m.Memories.StartupCommand)
 	sort.Strings(codexImports)
 	r.Harnesses["codex"] = HarnessReceipt{all, codexImports, ex, dup, stale}
+	r.Harnesses["opencode"] = HarnessReceipt{all, codexImports, ex, dup, stale}
 	nativeImports := append(append([]string{}, canon...), prompts...)
 	nativeImports = append(nativeImports, m.Memories.StartupCommand)
 	sort.Strings(nativeImports)
 	r.Harnesses["fak-native"] = HarnessReceipt{all, nativeImports, ex, dup, nil}
 	_, cok := m.Harnesses["codex"]
 	_, nok := m.Harnesses["fak-native"]
-	r.ZeroUnexplainedGaps = len(dup) == 0 && len(stale) == 0 && cok && nok
+	_, ook := m.Harnesses["opencode"]
+	r.ZeroUnexplainedGaps = len(dup) == 0 && len(stale) == 0 && cok && nok && ook
 	return r, nil
+}
+
+// EnsureSync checks parity with Build(root, false) and synchronizes adapters with Build(root, true) if needed.
+// If Build(root, false) is in parity (ZeroUnexplainedGaps with no stale), returns (r, false, nil).
+// Otherwise, calls Build(root, true) and returns (syncedReceipt, true, syncErr).
+func EnsureSync(root string) (Receipt, bool, error) {
+	r, err := Build(root, false)
+	if err == nil && r.ZeroUnexplainedGaps && len(r.Harnesses["codex"].Stale) == 0 && len(r.Harnesses["opencode"].Stale) == 0 {
+		return r, false, nil
+	}
+	syncedReceipt, syncErr := Build(root, true)
+	return syncedReceipt, true, syncErr
+}
+
+// Ensure checks parity with Build(root, false) and synchronizes adapters with Build(root, true) if autoSync is true.
+func Ensure(root string, autoSync bool) (Receipt, error) {
+	if autoSync {
+		r, _, err := EnsureSync(root)
+		return r, err
+	}
+	return Build(root, false)
 }
 
 // VerifyOpenCodeSnapshot asserts that opencode.json exists in root and explicitly sets "snapshot": false

@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/sessionread"
 	"github.com/anthony-chaudhary/fak/internal/sessionread/screen"
@@ -383,6 +384,38 @@ func (s *Server) restoreContext(caller string, req ContextRestoreRequest) (CtxRe
 		}
 		// An unflagged span cannot refuse today; if the screen ever does, fall through to the
 		// remaining sources rather than serve withheld bytes.
+	}
+
+	// 1c) The MMU page/blob store (#10018): paged-out tool results (including fak_read pointers)
+	//     live in the shared content-addressed blob store under their sha256 digest. A request
+	//     restoring a _paged.ref pointer resolves here.
+	cleanID := strings.TrimPrefix(id, "sha256:")
+	if b, ok := abi.PageOut("blob"); ok {
+		handle := abi.Ref{Kind: abi.RefBlob, Digest: cleanID}
+		if ref, perr := b.PageIn(context.Background(), handle); perr == nil && len(ref.Inline) > 0 {
+			if body, serr := screen.ScreenOutbound(screen.Span{Bytes: ref.Inline}); serr == nil {
+				return CtxRestoreResult{
+					Schema:     ctxRestoreSchema,
+					TraceID:    trace,
+					ID:         id,
+					Bytes:      string(body),
+					Provenance: "WITNESSED",
+				}, nil
+			}
+		}
+	} else if res := abi.ActiveResolver(); res != nil {
+		handle := abi.Ref{Kind: abi.RefBlob, Digest: cleanID}
+		if raw, rerr := res.Resolve(context.Background(), handle); rerr == nil && len(raw) > 0 {
+			if body, serr := screen.ScreenOutbound(screen.Span{Bytes: raw}); serr == nil {
+				return CtxRestoreResult{
+					Schema:     ctxRestoreSchema,
+					TraceID:    trace,
+					ID:         id,
+					Bytes:      string(body),
+					Provenance: "WITNESSED",
+				}, nil
+			}
+		}
 	}
 
 	// 2) Stash miss — the ctxview-elision source (#3062). The trace's retained view planner holds a

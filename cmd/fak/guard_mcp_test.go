@@ -63,6 +63,7 @@ func TestGuardMCPRegistrationSkipsOffAndNonClaude(t *testing.T) {
 		command []string
 	}{
 		{name: "off", enabled: false, command: []string{"claude"}},
+		{name: "off-fak", enabled: false, command: []string{"fak", "agent"}},
 		{name: "non-claude", enabled: true, command: []string{"codex"}},
 		{name: "empty", enabled: true, command: nil},
 	} {
@@ -159,5 +160,208 @@ func TestGuardMCPRegistrationReachesLiveGatewayMCPEndpoint(t *testing.T) {
 		if !names[want] {
 			t.Fatalf("tools/list at %s missing %s: got %+v", install.URL, want, names)
 		}
+	}
+}
+
+func TestGuardMCPRegistrationInstallsFakConfig(t *testing.T) {
+	origEnv := os.Getenv("FAK_MCP_CONFIG")
+	defer os.Setenv("FAK_MCP_CONFIG", origEnv)
+
+	dir := t.TempDir()
+	command, install, err := installGuardMCPRegistrationAt(
+		[]string{"fak", "agent", "--task", "hello"},
+		"http://127.0.0.1:4567",
+		dir,
+	)
+	if err != nil {
+		t.Fatalf("install mcp registration: %v", err)
+	}
+	if !install.Applied {
+		t.Fatalf("mcp registration not applied: %+v", install)
+	}
+	if !install.IsFak {
+		t.Fatalf("expected install.IsFak to be true: %+v", install)
+	}
+	if got, want := install.Harness, "fak"; got != want {
+		t.Fatalf("install.Harness = %q, want %q", got, want)
+	}
+	if got, want := install.URL, "http://127.0.0.1:4567/mcp"; got != want {
+		t.Fatalf("install.URL = %q, want %q", got, want)
+	}
+	// Verify insertion after "agent" for ["fak", "agent", ...]
+	if got, want := strings.Join(command[:4], " "), "fak agent --mcp-config "+install.ConfigPath; got != want {
+		t.Fatalf("command prefix = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(command[4:], " "), "--task hello"; got != want {
+		t.Fatalf("command remaining args = %q, want %q", got, want)
+	}
+	// Verify FAK_MCP_CONFIG env var was set
+	if got, want := os.Getenv("FAK_MCP_CONFIG"), install.ConfigPath; got != want {
+		t.Fatalf("FAK_MCP_CONFIG = %q, want %q", got, want)
+	}
+
+	// Verify written config JSON
+	data, err := os.ReadFile(install.ConfigPath)
+	if err != nil {
+		t.Fatalf("read mcp config: %v", err)
+	}
+	var cfg guardMCPClientConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("unmarshal mcp config: %v\n%s", err, data)
+	}
+	fak, ok := cfg.MCPServers["fak"]
+	if !ok {
+		t.Fatalf("mcp config missing fak server: %+v", cfg)
+	}
+	if fak.Type != "http" || fak.URL != "http://127.0.0.1:4567/mcp" {
+		t.Fatalf("fak server = %+v, want http server at .../mcp", fak)
+	}
+
+	// Test fak-agent variant
+	cmdFakAgent, install2, err := installGuardMCPRegistrationAt(
+		[]string{"fak-agent", "--task", "hello"},
+		"http://127.0.0.1:4567",
+		t.TempDir(),
+	)
+	if err != nil {
+		t.Fatalf("install fak-agent: %v", err)
+	}
+	if !install2.Applied || !install2.IsFak || install2.Harness != "fak-agent" {
+		t.Fatalf("unexpected install2: %+v", install2)
+	}
+	if got, want := strings.Join(cmdFakAgent[:3], " "), "fak-agent --mcp-config "+install2.ConfigPath; got != want {
+		t.Fatalf("fak-agent prefix = %q, want %q", got, want)
+	}
+
+	// Test bare fak variant
+	cmdBareFak, install3, err := installGuardMCPRegistrationAt(
+		[]string{"fak", "--offline"},
+		"http://127.0.0.1:4567",
+		t.TempDir(),
+	)
+	if err != nil {
+		t.Fatalf("install bare fak: %v", err)
+	}
+	if !install3.Applied || !install3.IsFak {
+		t.Fatalf("unexpected install3: %+v", install3)
+	}
+	if got, want := strings.Join(cmdBareFak[:3], " "), "fak --mcp-config "+install3.ConfigPath; got != want {
+		t.Fatalf("bare fak prefix = %q, want %q", got, want)
+	}
+
+	// Test absolute path to fak with agent subcommand
+	cmdAbsFak, install4, err := installGuardMCPRegistrationAt(
+		[]string{"/usr/local/bin/fak", "agent", "--task", "work"},
+		"http://127.0.0.1:4567",
+		t.TempDir(),
+	)
+	if err != nil {
+		t.Fatalf("install abs fak: %v", err)
+	}
+	if got, want := strings.Join(cmdAbsFak[:4], " "), "/usr/local/bin/fak agent --mcp-config "+install4.ConfigPath; got != want {
+		t.Fatalf("abs fak prefix = %q, want %q", got, want)
+	}
+}
+
+func TestGuardMCPIsFakCommand(t *testing.T) {
+	for _, tc := range []struct {
+		cmd  []string
+		want bool
+	}{
+		{[]string{"fak"}, true},
+		{[]string{"fak", "agent"}, true},
+		{[]string{"fak-agent"}, true},
+		{[]string{"fak-agent", "-task", "hi"}, true},
+		{[]string{"/usr/local/bin/fak", "agent"}, true},
+		{[]string{`C:\bin\fak.exe`}, true},
+		{[]string{`C:\bin\fak-agent.cmd`}, true},
+		{[]string{"FAK", "agent"}, true},
+		{[]string{"claude"}, false},
+		{[]string{"claude-code"}, false},
+		{[]string{"codex"}, false},
+		{[]string{"opencode"}, false},
+		{nil, false},
+		{[]string{}, false},
+	} {
+		if got := guardIsFakCommand(tc.cmd); got != tc.want {
+			t.Errorf("guardIsFakCommand(%v) = %v, want %v", tc.cmd, got, tc.want)
+		}
+	}
+}
+
+func TestGuardMCPNoteMentionsHarness(t *testing.T) {
+	var buf bytes.Buffer
+	printGuardMCPNote(&buf, guardMCPInstall{
+		Applied:    true,
+		ConfigPath: "/tmp/mcp.json",
+		URL:        "http://127.0.0.1:4567/mcp",
+		IsFak:      true,
+		Harness:    "fak",
+	})
+	out := buf.String()
+	if !strings.Contains(out, "fak MCP self-query surface registered") {
+		t.Errorf("note missing fak label: %q", out)
+	}
+	if !strings.Contains(out, "FAK_MCP_CONFIG") {
+		t.Errorf("note missing FAK_MCP_CONFIG: %q", out)
+	}
+
+	buf.Reset()
+	printGuardMCPNote(&buf, guardMCPInstall{
+		Applied:    true,
+		ConfigPath: "/tmp/mcp.json",
+		URL:        "http://127.0.0.1:4567/mcp",
+		IsFak:      true,
+		Harness:    "fak-agent",
+	})
+	out = buf.String()
+	if !strings.Contains(out, "fak-agent MCP self-query surface registered") {
+		t.Errorf("note missing fak-agent label: %q", out)
+	}
+
+	buf.Reset()
+	printGuardMCPNote(&buf, guardMCPInstall{
+		Applied:    true,
+		ConfigPath: "/tmp/mcp.json",
+		URL:        "http://127.0.0.1:4567/mcp",
+		IsFak:      false,
+	})
+	out = buf.String()
+	if !strings.Contains(out, "Claude MCP self-query surface registered") {
+		t.Errorf("note missing Claude label: %q", out)
+	}
+}
+
+func TestGuardMCPAgentFlag(t *testing.T) {
+	orig := os.Getenv("FAK_MCP_CONFIG")
+	defer os.Setenv("FAK_MCP_CONFIG", orig)
+
+	// Case 1: default without env var
+	_ = os.Unsetenv("FAK_MCP_CONFIG")
+	fs, af := newAgentFlagSet()
+	if err := fs.Parse([]string{}); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if *af.mcpConfig != "" {
+		t.Errorf("default mcpConfig = %q, want empty", *af.mcpConfig)
+	}
+
+	// Case 2: default with env var
+	_ = os.Setenv("FAK_MCP_CONFIG", "/env/path/mcp.json")
+	fs2, af2 := newAgentFlagSet()
+	if err := fs2.Parse([]string{}); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if *af2.mcpConfig != "/env/path/mcp.json" {
+		t.Errorf("env mcpConfig = %q, want /env/path/mcp.json", *af2.mcpConfig)
+	}
+
+	// Case 3: flag overrides env var
+	fs3, af3 := newAgentFlagSet()
+	if err := fs3.Parse([]string{"--mcp-config", "/cli/path/mcp.json"}); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if *af3.mcpConfig != "/cli/path/mcp.json" {
+		t.Errorf("flag mcpConfig = %q, want /cli/path/mcp.json", *af3.mcpConfig)
 	}
 }

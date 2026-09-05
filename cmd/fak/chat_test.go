@@ -132,7 +132,7 @@ func TestChatWithCodeToolsAllowed(t *testing.T) {
 	if !strings.Contains(got, "Found file with contents.") {
 		t.Fatalf("expected final answer in output, got:\n%s", got)
 	}
-	if !strings.Contains(got, "[tool] Read") || !strings.Contains(got, "ALLOW") {
+	if !strings.Contains(got, "[tool] Read") || (!strings.Contains(got, "ALLOW") && !strings.Contains(got, "TRANSFORM")) {
 		t.Fatalf("expected tool execution receipt in output, got:\n%s", got)
 	}
 }
@@ -164,7 +164,7 @@ func TestChatHeadless(t *testing.T) {
 	if strings.Contains(got, "fak chat — native REPL") || strings.Contains(got, "you> ") {
 		t.Fatalf("headless mode must not emit interactive REPL chrome:\n%s", got)
 	}
-	if !strings.Contains(got, "[tool] Read") || !strings.Contains(got, "ALLOW") {
+	if !strings.Contains(got, "[tool] Read") || (!strings.Contains(got, "ALLOW") && !strings.Contains(got, "TRANSFORM")) {
 		t.Fatalf("expected tool execution receipt in headless output:\n%s", got)
 	}
 	if !strings.Contains(got, "Headless read finished.") {

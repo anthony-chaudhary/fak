@@ -22,6 +22,7 @@
   "harnesses": {
     "claude": {"skills": "canonical .claude/skills", "memories": "canonical .claude/memory", "goal_prompts": "classified canonical templates"},
     "codex": {"skills": "generated .agents/skills adapters", "memories": "startup recall command", "goal_prompts": "classified canonical templates"},
-    "fak-native": {"skills": "manifest canonical paths", "memories": "startup recall command", "goal_prompts": "manifest classified templates"}
+    "fak-native": {"skills": "manifest canonical paths", "memories": "startup recall command", "goal_prompts": "manifest classified templates"},
+    "opencode": {"skills": "generated .agents/skills adapters", "memories": "startup recall command", "goal_prompts": "classified canonical templates"}
   }
 }

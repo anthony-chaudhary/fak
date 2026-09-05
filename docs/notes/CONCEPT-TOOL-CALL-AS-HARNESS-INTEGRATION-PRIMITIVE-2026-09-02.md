@@ -222,16 +222,31 @@ In this single declaration, the harness builder gets:
 
 ## 5. Architectural Contract in `pkg/harnesskit`
 
-The Go-native contract lives in `pkg/harnesskit/tool.go`, extending `ContractVersion = "v1alpha1"` with:
+The Go-native contract lives in `pkg/harnesskit/tool.go`, defining declarative tool integration primitives:
 
-1. `ToolDefinition`: Full metadata, parameters schema, scope, conditions, auth requirement, and execution handler.
-2. `ToolScope`: Mutability tier (`ReadOnly`, `Mutating`, `Destructive`), allowed path prefixes, allowed network hosts, and turn/session rate limits.
-3. `Condition`: Declarative prerequisites (`RequirePriorSuccess`, `RequirePhase`, `RequireRole`, custom predicate).
-4. `ToolFilterPolicy`: Dynamic allowlists, blocklists, and schema masking configuration.
-5. `AuthRequirement`: Typed union supporting `AuthTypeNone`, `AuthTypeFleetSecret`, and `AuthTypeOAuth2`.
-6. `ExecutionContext`: Encapsulated context providing safe access to paged secrets and OAuth tokens without leaking them into serialization interfaces.
-7. `ToolRegistry`: High-performance, concurrent catalog supporting registration, dynamic turn filtering, execution dispatch, and telemetry generation.
-8. `ToolTelemetry`: Structured record capturing timings, verdicts, auth events, and error classifications for Grafana ingestion.
+1. **`ToolScope`**: Declarative execution boundary:
+   - `WorkspacePaths []string`: Allowed directory containment paths.
+   - `ReadOnly bool`: Immutable read-only enforcement (rejects write operations).
+   - `NetworkAllowed bool`: Egress authorization toggle.
+   - `MaxTurns int`: Ceiling on invocations per turn.
+   - Preserves mutability tiers (`MutabilityReadOnly`, `MutabilityMutating`, `MutabilityDestructive`), network scopes, and rate limits.
+2. **`ToolCondition`**: Conditional scoping and dynamic admission:
+   - `AllowList []string`: Session ID allowlist (supports wildcard prefix/suffix patterns).
+   - `BlockList []string`: Session ID blocklist (takes priority over allowlist).
+   - `Precondition func(ctx context.Context, sessionID string) bool`: Dynamic predicate evaluated before admission.
+3. **`AuthBinding`**: Just-In-Time credential paging and output redaction:
+   - `SecretRefs []string`: Named secrets paged from the fleet vault at execution time.
+   - `JITAuthPaging bool`: Whether credentials are paged dynamically at the call boundary.
+   - `OAuthProvider string`: Managed OAuth 2.0 provider identifier.
+   - `ScrubSecretsFromResults bool`: Automatically strips secret references and Bearer tokens from tool output.
+4. **`ToolDefinition`**: Universal integration specification:
+   - `Name string`, `Description string`, `Schema map[string]any`, `Scope ToolScope`, `Condition ToolCondition`, `Auth *AuthBinding`, `Metadata map[string]string`.
+   - `Validate() error`: Verifies structural integrity (name presence, schema validation).
+   - `CheckPermission(sessionID string, requestedPath string, isWrite bool) (bool, string)`: Evaluates allow/block conditions, preconditions, read-only constraints, and workspace path containment.
+   - `ScrubResult(content []byte) []byte`: Redacts sensitive secret references and Bearer tokens from output content.
+5. **`ExecutionContext`**: Encapsulated context providing safe access to paged secrets and OAuth tokens without leaking them into serialization interfaces.
+6. **`ToolRegistry`**: High-performance, concurrent catalog supporting registration, dynamic turn filtering, execution dispatch, and telemetry generation.
+7. **`ToolTelemetry`**: Structured record capturing timings, verdicts, auth events, and error classifications for Grafana ingestion.
 
 ---
 
