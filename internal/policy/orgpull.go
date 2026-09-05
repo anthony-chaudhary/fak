@@ -277,9 +277,16 @@ func (r OrgLastGood) EnvelopeBytes() ([]byte, error) {
 	return raw, nil
 }
 
-// writeOrgLastGood persists the cache atomically: temp file, fsync, close,
+// WriteOrgLastGood persists the cache atomically: temp file, fsync, close,
 // chmod, rename, inside a 0700 directory. A crash mid-write leaves the previous
 // record or the new one — never a truncated file the next boot has to refuse.
+func WriteOrgLastGood(path string, r OrgLastGood) error {
+	if r.Sum == "" {
+		r.Sum = lastGoodSum(r)
+	}
+	return writeOrgLastGood(path, r)
+}
+
 func writeOrgLastGood(path string, r OrgLastGood) error {
 	b, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
