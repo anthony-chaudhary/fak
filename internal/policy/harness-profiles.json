@@ -68,8 +68,23 @@
         "read_mcp_resource", "functions.read_mcp_resource",
         "tool_search_tool", "tool_search.tool_search_tool",
         "parallel", "multi_tool_use.parallel",
-        "web.run", "imagegen", "image_gen.imagegen"
-      ]
+        "web.run", "imagegen", "image_gen.imagegen",
+        "fak_read", "spawn_agent", "wait_agent", "close_agent"
+      ],
+      "starter_prompts": [
+        "Prefer native vDSO-accelerated fak_read and structured codetools (Read, Grep, Glob) over exec_command for file inspection. Do not shell out (cat, head, tail, grep) for reads.",
+        "When subagent wait_agent calls time out or stall, do NOT fall back to monolithic sequential exec_command execution. Safely cancel the stalled subagent with close_agent, subdivide the remaining task into smaller S0/S1 packets, and re-delegate."
+      ],
+      "coordination_guidance": {
+        "timeout_recovery": "On wait_agent timeout, issue close_agent to safely terminate stalled subagents, subdivide remaining scope into atomic S0/S1 tasks, and re-dispatch instead of falling back to sequential exec_command shell execution.",
+        "read_tool_preference": "Prefer fak_read and structured codetools for all file inspection. Disallow shelling out via exec_command for reads.",
+        "recommended_tools": [
+          "fak_read",
+          "spawn_agent",
+          "wait_agent",
+          "close_agent"
+        ]
+      }
     },
     {
       "name": "opencode",

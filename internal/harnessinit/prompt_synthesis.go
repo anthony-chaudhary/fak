@@ -147,7 +147,8 @@ func DefaultParts(scale AgentScale) []promptcomp.PromptPart {
 			"- File operations: Read, Edit, Write, Glob, Grep.\n" +
 			"- Terminal operations: Bash (safe execution with directory verification).\n" +
 			"- Worker orchestration: task, dos_arbitrate, dos_verify, dos_status.\n" +
-			"- Tool discovery: fak_tools_search for dynamic schema retrieval.",
+			"- Tool discovery: fak_tools_search for dynamic schema retrieval.\n" +
+			"- Tool preference: prefer native vDSO-accelerated fak_read and structured codetools (Read, Grep, Glob) over exec_command/Bash for file reads; do not shell out for inspection.",
 		Kind:      promptcomp.KindTools,
 		Rank:      30,
 		DependsOn: []string{PartIDContractCoord},
@@ -161,7 +162,8 @@ func DefaultParts(scale AgentScale) []promptcomp.PromptPart {
 		Content: "TOOL CATALOG:\n" +
 			"- Available tools: Read, Edit, Write, Bash, Glob, Grep.\n" +
 			"- Use Read before Edit. Confirm exact string match before replacement.\n" +
-			"- Run verification command via Bash before declaring task complete.",
+			"- Run verification command via Bash before declaring task complete.\n" +
+			"- Tool preference: prefer native vDSO-accelerated fak_read and structured codetools (Read, Grep, Glob) over exec_command/Bash for file reads; do not shell out for inspection.",
 		Kind:      promptcomp.KindTools,
 		Rank:      30,
 		DependsOn: []string{PartIDContractLeaf},
@@ -175,7 +177,8 @@ func DefaultParts(scale AgentScale) []promptcomp.PromptPart {
 		Content: "DELEGATION & COLLISION PROTOCOL:\n" +
 			"- Enforce tree-disjointness across child worktrees.\n" +
 			"- Price child fan-out before launch; gate execution if concurrency budget is exceeded.\n" +
-			"- Reconcile child state upon exit; release leases immediately after receipt capture.",
+			"- Reconcile child state upon exit; release leases immediately after receipt capture.\n" +
+			"- Subagent Timeout Recovery: when wait_agent times out, do NOT abandon delegation or revert to serial monolithic exec_command shell loops. Safely cancel the stalled subagent with close_agent, subdivide remaining task into atomic S0/S1 subagents, and re-delegate.",
 		Kind:      promptcomp.KindOverlay,
 		Rank:      40,
 		DependsOn: []string{PartIDContractCoord},
