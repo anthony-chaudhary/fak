@@ -59,6 +59,7 @@ type benchFlags struct {
 	nativeDecodeHandoff   *model.Qwen35DecodeHandoffMode
 	qwenSwapOut           *string
 	qwenSwapReadback      *string
+	numaReplicas          *string
 
 	processExit     func(int)
 	weightCloser    func() error
@@ -115,6 +116,7 @@ func parseFlags() *benchFlags {
 		nativeDecodeHandoff:   &nativeDecodeHandoff,
 		qwenSwapOut:           flag.String("qwen38-paged-swap", "", "write one exact Qwen3.8 fak-native Metal NativeScheduler OFF/ON paged-swap receipt, then exit"),
 		qwenSwapReadback:      flag.String("qwen38-paged-swap-readback", "", "validate an exact Qwen3.8 NativeScheduler paged-swap receipt without loading a model"),
+		numaReplicas:          flag.String("numa-replicas", "", "per-NUMA-node weight replication mode or count (auto, off, or integer N; overrides FAK_NUMA_REPLICAS)"),
 	}
 	flag.Var(&nativeProfileComparisonPhaseSelection, "native-performance-compare-phase", "stable comparison phase: prefill (default), steady-decode, or end-to-end (full contiguous capture including setup, verification, and teardown)")
 	flag.Var(&nativeProfileComparisonAxisSelection, "native-performance-compare-axis", "typed comparison axis: sequence (default) or m3-decode-handoff")

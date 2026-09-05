@@ -1084,6 +1084,9 @@ func assembleBenchReport(f *benchFlags, be compute.Backend, registeredBackends [
 		report["resident"] = rep
 		report["resident_summary"] = model.FormatResidentReport(rep)
 	}
+	if m != nil && m.NUMAReplicasLabel() != "" && m.NUMAReplicasLabel() != "numa_replicas=unrun" {
+		report["numa_replicas"] = m.NUMAReplicasLabel()
+	}
 	if workload != nil {
 		report["workload"] = map[string]any{
 			"path":             *f.workloadPath,
@@ -1142,6 +1145,14 @@ func main() {
 	m, modelName, loadStart := loadBenchModel(f, ggufLoadProfiler)
 	if bindLoadedModelWeights(f, m) {
 		defer f.closeTransferredWeights()
+	}
+	numaReq := ""
+	if f.numaReplicas != nil && *f.numaReplicas != "" {
+		numaReq = *f.numaReplicas
+	}
+	if numaReq != "" || os.Getenv("FAK_NUMA_REPLICAS") != "" {
+		lbl := m.ApplyNUMAWeightReplicas(numaReq)
+		fmt.Fprintf(os.Stderr, "numa_replicas: %s\n", lbl)
 	}
 	if *f.name != "" {
 		modelName = *f.name

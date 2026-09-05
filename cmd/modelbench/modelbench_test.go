@@ -602,6 +602,53 @@ func TestQ8MetalSessionFlagsKeepMetalLane(t *testing.T) {
 	}
 }
 
+func TestNUMAReplicasFlagAndWiring(t *testing.T) {
+	cfg := model.Config{
+		HiddenSize:       256,
+		NumLayers:        1,
+		NumHeads:         4,
+		NumKVHeads:       2,
+		HeadDim:          64,
+		IntermediateSize: 512,
+		VocabSize:        256,
+	}
+	m := model.NewSynthetic(cfg)
+	defer m.FreeNUMAReplicas()
+
+	f := &benchFlags{
+		numaReplicas: testString("2"),
+	}
+
+	lbl := m.ApplyNUMAWeightReplicas(*f.numaReplicas)
+	if !m.NUMAReplicasEnabled() {
+		t.Fatalf("expected NUMA replicas enabled with flag=2, got label %s", lbl)
+	}
+	if !strings.Contains(m.NUMAReplicasLabel(), "nodes=2") {
+		t.Fatalf("label does not indicate 2 nodes: %s", m.NUMAReplicasLabel())
+	}
+
+	// Disable via flag "off"
+	*f.numaReplicas = "off"
+	lbl = m.ApplyNUMAWeightReplicas(*f.numaReplicas)
+	if m.NUMAReplicasEnabled() {
+		t.Fatalf("expected NUMA replicas disabled with flag=off, got label %s", lbl)
+	}
+
+	// Fallback via FAK_NUMA_REPLICAS environment variable
+	t.Setenv("FAK_NUMA_REPLICAS", "2")
+	*f.numaReplicas = ""
+	lbl = m.ApplyNUMAWeightReplicas(*f.numaReplicas)
+	if !m.NUMAReplicasEnabled() {
+		t.Fatalf("expected NUMA replicas enabled via env FAK_NUMA_REPLICAS=2, got label %s", lbl)
+	}
+
+	t.Setenv("FAK_NUMA_REPLICAS", "off")
+	lbl = m.ApplyNUMAWeightReplicas("")
+	if m.NUMAReplicasEnabled() {
+		t.Fatalf("expected NUMA replicas disabled via env FAK_NUMA_REPLICAS=off, got label %s", lbl)
+	}
+}
+
 func TestResolveMetalDoesNotForceQuantForQ4K(t *testing.T) {
 	f := testBenchFlags(true, false, true)
 	resolveMetal(f)

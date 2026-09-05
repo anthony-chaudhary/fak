@@ -174,6 +174,7 @@ func fpFlags() *benchFlags {
 		quant: testBool(false), metal: testBool(false), backendName: sp("legacy"), q4kGateUpSlab: testBool(false), vulkanQ4KProfile: testBool(false), vulkanStageQ4K: testBool(false),
 		prefillReps: ip(5), decodeReps: ip(5), decodeSteps: ip(32), decodePrompt: ip(16),
 		workloadPath: sp(""), workloadPrefillCap: ip(0), prefillSizesCSV: sp("16,64,256"),
+		numaReplicas: sp(""),
 	}
 }
 
