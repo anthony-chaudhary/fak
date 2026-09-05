@@ -22,38 +22,35 @@ const (
 	WorkProfilePonytailHeadlessHigh = "ponytail:headless:high"
 )
 
-// AutonomousActionBiasDirective defines the autonomous action-bias prompt contract
-// prohibiting conversational pauses in unattended mode.
-const AutonomousActionBiasDirective = "Autonomous action-bias: unattended mode is active. Never pause to ask clarifying or conversational questions when running headless, and instead prioritize minimal reversible action and execution."
+// AutonomousActionBiasDirective defines the prompt contract prohibiting conversational pauses in unattended/headless mode (#11519).
+const AutonomousActionBiasDirective = "Never stop to ask interactive questions; resolve ambiguities by minimal reversible action and checkable artifacts."
 
-// HeadlessActionBiasDirective is an alias for AutonomousActionBiasDirective.
-const HeadlessActionBiasDirective = AutonomousActionBiasDirective
+// AutonomousActionBiasFragment aliases AutonomousActionBiasDirective.
+const AutonomousActionBiasFragment = AutonomousActionBiasDirective
 
-// AutonomousActionBiasContract is an alias for AutonomousActionBiasDirective.
-const AutonomousActionBiasContract = AutonomousActionBiasDirective
+// TestBreadthCalibrationDirective instructs agents to focus on atomic reproduction tests and prevent token exhaustion (#11520).
+const TestBreadthCalibrationDirective = "Calibrate test breadth: focus on single atomic reproduction tests, prohibit sprawling 20-test suites when 1 witness suffices, and prevent token exhaustion."
 
-// HeadlessActionBiasContract is an alias for AutonomousActionBiasDirective.
-const HeadlessActionBiasContract = AutonomousActionBiasDirective
+// TestBreadthCalibrationFragment aliases TestBreadthCalibrationDirective.
+const TestBreadthCalibrationFragment = TestBreadthCalibrationDirective
 
-// AmbiguityResolutionDirective defines the prompt-level ambiguity resolution rule
-// prioritizing minimal reversible action over hesitation, endless debate, or freeze.
-const AmbiguityResolutionDirective = "Ambiguity resolution: when faced with ambiguity, choose the smallest reversible action, inspect/verify, rather than stalling, debating trade-offs endlessly, or halting."
+// AmbiguityResolutionDirective instructs agents to prioritize minimal reversible action over freeze (#11521).
+const AmbiguityResolutionDirective = "When encountering ambiguity, prioritize minimal reversible action and test verification over freezing or speculation."
 
-// AmbiguityResolutionRule is an alias for AmbiguityResolutionDirective.
-const AmbiguityResolutionRule = AmbiguityResolutionDirective
+// AmbiguityResolutionFragment aliases AmbiguityResolutionDirective.
+const AmbiguityResolutionFragment = AmbiguityResolutionDirective
 
-// AmbiguityResolutionContract is an alias for AmbiguityResolutionDirective.
-const AmbiguityResolutionContract = AmbiguityResolutionDirective
+// DivideAndConquerDirective instructs agents to decompose substantive tasks into atomic units or isolated subagents.
+const DivideAndConquerDirective = "Divide and conquer: decompose substantive or multi-component tasks into atomic single-concern units or isolated subagents; keep coordinator context clean, isolate file sets, and integrate only witnessed results."
 
-// TestBreadthCalibrationDirective defines the prompt-level test breadth calibration directive
-// instructing reasoning models to focus test authoring on concise, high-signal, atomic reproduction tests.
-const TestBreadthCalibrationDirective = "Test breadth calibration: focus test authoring on concise, high-signal, atomic reproduction tests (1-3 focused assertions proving the defect or contract) rather than generating sprawling, redundant, over-engineered test matrices that burn output token limits or corrupt the working tree."
+// DivideAndConquerFragment aliases DivideAndConquerDirective.
+const DivideAndConquerFragment = DivideAndConquerDirective
 
-// TestBreadthCalibrationRule is an alias for TestBreadthCalibrationDirective.
-const TestBreadthCalibrationRule = TestBreadthCalibrationDirective
+// AutonomousGitSyncPushDirective instructs agents to carry work through to verified completion by default.
+const AutonomousGitSyncPushDirective = "Ship green work autonomously: synchronize safely with trunk before and during work, verify green with on-device tests, stage-and-commit by explicit path, and push verified commits unprompted."
 
-// TestBreadthCalibrationContract is an alias for TestBreadthCalibrationDirective.
-const TestBreadthCalibrationContract = TestBreadthCalibrationDirective
+// AutonomousGitSyncPushFragment aliases AutonomousGitSyncPushDirective.
+const AutonomousGitSyncPushFragment = AutonomousGitSyncPushDirective
 
 // WorkProfileReadout is the reproducible record of a selected implementation-policy overlay.
 type WorkProfileReadout struct {
@@ -70,31 +67,41 @@ type WorkProfileReadout struct {
 var workProfileFragments = map[string]string{
 	WorkProfilePonytailNativeLow: `Work profile: Ponytail-inspired, native, low intensity.
 Before adding machinery, briefly check whether existing code, configuration, or deletion solves the task more simply. Prefer the smallest correct implementation.
+When encountering ambiguity, prioritize minimal reversible action and test verification over freezing or speculation. Focus on single atomic reproduction tests, prohibit sprawling 20-test suites when 1 witness suffices, and prevent token exhaustion.
 This profile never overrides explicit requirements, repository instructions, policy, security, compatibility, migrations, tests, diagnostics, or evidence.`,
 	WorkProfilePonytailNativeMed: `Work profile: Ponytail-inspired, native, medium intensity.
 Challenge unnecessary additions. In order, consider: no code change, deletion, configuration, existing project primitives, standard library, then new machinery. Stop at the first option that completely and correctly satisfies the task. When the user or task explicitly requests implementing, adding, or modifying functionality, bypass 'no code change' and proceed to the minimal correct implementation.
+When encountering ambiguity, prioritize minimal reversible action and test verification over freezing or speculation. Calibrate test breadth: focus on single atomic reproduction tests, prohibit sprawling 20-test suites when 1 witness suffices, and prevent token exhaustion.
+Divide and conquer: decompose substantive or multi-component tasks into atomic single-concern units or isolated subagents; keep coordinator context clean, isolate file sets, and integrate only witnessed results.
+Ship green work autonomously: synchronize safely with trunk before and during work, verify green with on-device tests, stage-and-commit by explicit path, and push verified commits unprompted.
 Do not optimize for fewer lines alone. Preserve explicit requirements, repository instructions, policy, security, correctness, compatibility, migrations, tests, diagnostics, and evidence.`,
 	WorkProfilePonytailNativeHigh: `Work profile: Ponytail-inspired, native, high intensity.
 Actively resist accidental complexity. State the required outcome, test the simplest viable route, and prefer deletion or reuse over addition. Use configuration before code, project primitives before dependencies, and standard library before new abstractions. Add machinery only when the simpler rung cannot meet the requirement; stop once the smallest complete solution is witnessed.
+When encountering ambiguity, prioritize minimal reversible action and test verification over freezing or speculation. Calibrate test breadth strictly: focus on single atomic reproduction tests, prohibit sprawling 20-test suites when 1 witness suffices, avoid speculative matrix coverage, and prevent token exhaustion.
+Divide and conquer: decompose substantive or multi-component tasks into atomic single-concern units or isolated subagents; keep coordinator context clean, isolate file sets, and integrate only witnessed results.
+Ship green work autonomously: synchronize safely with trunk before and during work, verify green with on-device tests, stage-and-commit by explicit path, and push verified commits unprompted.
 Aggressiveness applies only to avoidable complexity. Never narrow requested scope or weaken repository instructions, policy, security, correctness, compatibility, migrations, tests, diagnostics, uncertainty reporting, evidence, or proof.`,
-	WorkProfilePonytailHeadlessLow: "Work profile: Ponytail-inspired, headless, low intensity.\n" +
-		AutonomousActionBiasDirective + "\n" +
-		AmbiguityResolutionDirective + "\n" +
-		TestBreadthCalibrationDirective + "\n" +
-		"Before adding machinery, briefly check whether existing code, configuration, or deletion solves the task more simply. Prefer the smallest correct implementation.\n" +
-		"This profile never overrides explicit requirements, repository instructions, policy, security, compatibility, migrations, tests, diagnostics, or evidence.",
-	WorkProfilePonytailHeadlessMed: "Work profile: Ponytail-inspired, headless, medium intensity.\n" +
-		AutonomousActionBiasDirective + "\n" +
-		AmbiguityResolutionDirective + "\n" +
-		TestBreadthCalibrationDirective + "\n" +
-		"Challenge unnecessary additions. In order, consider: no code change, deletion, configuration, existing project primitives, standard library, then new machinery. Stop at the first option that completely and correctly satisfies the task. When the user or task explicitly requests implementing, adding, or modifying functionality, bypass 'no code change' and proceed to the minimal correct implementation.\n" +
-		"Do not optimize for fewer lines alone. Preserve explicit requirements, repository instructions, policy, security, correctness, compatibility, migrations, tests, diagnostics, and evidence.",
-	WorkProfilePonytailHeadlessHigh: "Work profile: Ponytail-inspired, headless, high intensity.\n" +
-		AutonomousActionBiasDirective + "\n" +
-		AmbiguityResolutionDirective + "\n" +
-		TestBreadthCalibrationDirective + "\n" +
-		"Actively resist accidental complexity. State the required outcome, test the simplest viable route, and prefer deletion or reuse over addition. Use configuration before code, project primitives before dependencies, and standard library before new abstractions. Add machinery only when the simpler rung cannot meet the requirement; stop once the smallest complete solution is witnessed.\n" +
-		"Aggressiveness applies only to avoidable complexity. Never narrow requested scope or weaken repository instructions, policy, security, correctness, compatibility, migrations, tests, diagnostics, uncertainty reporting, evidence, or proof.",
+	WorkProfilePonytailHeadlessLow: `Work profile: Ponytail-inspired, headless, low intensity.
+Operate unattended with autonomous action bias: Never stop to ask interactive questions; resolve ambiguities by minimal reversible action and checkable artifacts.
+Before adding machinery, briefly check whether existing code, configuration, or deletion solves the task more simply. Prefer the smallest correct implementation.
+When encountering ambiguity, prioritize minimal reversible action and test verification over freezing or speculation. Focus on single atomic reproduction tests, prohibit sprawling 20-test suites when 1 witness suffices, and prevent token exhaustion.
+Divide and conquer: decompose substantive or multi-component tasks into atomic single-concern units or isolated subagents; keep coordinator context clean, isolate file sets, and integrate only witnessed results.
+Ship green work autonomously: synchronize safely with trunk before and during work, verify green with on-device tests, stage-and-commit by explicit path, and push verified commits unprompted.
+This profile never overrides explicit requirements, repository instructions, policy, security, compatibility, migrations, tests, diagnostics, or evidence.`,
+	WorkProfilePonytailHeadlessMed: `Work profile: Ponytail-inspired, headless, medium intensity.
+Operate unattended with autonomous action bias: Never stop to ask interactive questions; resolve ambiguities by minimal reversible action and checkable artifacts.
+Challenge unnecessary additions. In order, consider: no code change, deletion, configuration, existing project primitives, standard library, then new machinery. Stop at the first option that completely and correctly satisfies the task. When the user or task explicitly requests implementing, adding, or modifying functionality, bypass 'no code change' and proceed to the minimal correct implementation.
+When encountering ambiguity, prioritize minimal reversible action and test verification over freezing or speculation. Calibrate test breadth: focus on single atomic reproduction tests, prohibit sprawling 20-test suites when 1 witness suffices, and prevent token exhaustion.
+Divide and conquer: decompose substantive or multi-component tasks into atomic single-concern units or isolated subagents; keep coordinator context clean, isolate file sets, and integrate only witnessed results.
+Ship green work autonomously: synchronize safely with trunk before and during work, verify green with on-device tests, stage-and-commit by explicit path, and push verified commits unprompted.
+Do not optimize for fewer lines alone. Preserve explicit requirements, repository instructions, policy, security, correctness, compatibility, migrations, tests, diagnostics, and evidence.`,
+	WorkProfilePonytailHeadlessHigh: `Work profile: Ponytail-inspired, headless, high intensity.
+Operate unattended with autonomous action bias: Never stop to ask interactive questions; resolve ambiguities by minimal reversible action and checkable artifacts.
+Actively resist accidental complexity. State the required outcome, test the simplest viable route, and prefer deletion or reuse over addition. Use configuration before code, project primitives before dependencies, and standard library before new abstractions. Add machinery only when the simpler rung cannot meet the requirement; stop once the smallest complete solution is witnessed.
+When encountering ambiguity, prioritize minimal reversible action and test verification over freezing or speculation. Calibrate test breadth strictly: focus on single atomic reproduction tests, prohibit sprawling 20-test suites when 1 witness suffices, avoid speculative matrix coverage, and prevent token exhaustion.
+Divide and conquer: decompose substantive or multi-component tasks into atomic single-concern units or isolated subagents; keep coordinator context clean, isolate file sets, and integrate only witnessed results.
+Ship green work autonomously: synchronize safely with trunk before and during work, verify green with on-device tests, stage-and-commit by explicit path, and push verified commits unprompted.
+Aggressiveness applies only to avoidable complexity. Never narrow requested scope or weaken repository instructions, policy, security, correctness, compatibility, migrations, tests, diagnostics, uncertainty reporting, evidence, or proof.`,
 }
 
 // WorkProfileNames returns the closed set accepted by DescribeWorkProfile.
@@ -103,8 +110,7 @@ func WorkProfileNames() []string {
 		WorkProfileStandard, "off",
 		"ponytail:low", "ponytail:medium", "ponytail:high",
 		WorkProfilePonytailNativeLow, WorkProfilePonytailNativeMed, WorkProfilePonytailNativeHigh,
-		"headless", "ponytail:headless",
-		"headless:low", "headless:medium", "headless:high",
+		"ponytail:headless", "ponytail:headless:low", "ponytail:headless:med",
 		WorkProfilePonytailHeadlessLow, WorkProfilePonytailHeadlessMed, WorkProfilePonytailHeadlessHigh,
 	}
 }
@@ -116,10 +122,8 @@ func DescribeWorkProfile(name string) WorkProfileReadout {
 	if raw == "" || raw == "standard" || raw == "off" {
 		return WorkProfileReadout{Profile: WorkProfileStandard, Family: "standard", Implementation: "native", Intensity: "off", Known: true}
 	}
-	if raw == "headless" || raw == "ponytail:headless" {
+	if raw == "ponytail:headless" || raw == "ponytail:headless:med" {
 		raw = WorkProfilePonytailHeadlessMed
-	} else if strings.HasPrefix(raw, "headless:") && strings.Count(raw, ":") == 1 {
-		raw = "ponytail:headless:" + strings.TrimPrefix(raw, "headless:")
 	} else if strings.HasPrefix(raw, "ponytail:") && strings.Count(raw, ":") == 1 {
 		raw = "ponytail:native:" + strings.TrimPrefix(raw, "ponytail:")
 	}
