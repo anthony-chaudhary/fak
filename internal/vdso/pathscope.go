@@ -3,8 +3,14 @@ package vdso
 import (
 	"encoding/json"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
+
+// isCaseInsensitiveOS reports whether the host operating system has case-insensitive
+// path semantics (Windows, macOS/Darwin). It is a package-level variable so tests can
+// control and verify behavior across OS modes.
+var isCaseInsensitiveOS = runtime.GOOS == "windows" || runtime.GOOS == "darwin"
 
 // pathscope.go — the PER-PATH write-generation invalidator (#795).
 //
@@ -74,31 +80,50 @@ func fileEntityOf(args []byte) string {
 	return ""
 }
 
+func isWindowsDrivePath(path string) bool {
+	return len(path) >= 2 && ((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z')) && path[1] == ':'
+}
+
 // fileCanonPath normalizes a path string so the SAME file always yields the SAME tag,
 // regardless of how the read and the write happened to spell it. It cleans "." / ".."
-// segments and normalizes separators to forward slashes (so a Windows agent's
-// "C:\work\x" and a tool that echoes "C:/work/x" collide). It does NOT lowercase — paths
-// are case-sensitive on the agent's filesystem on Linux, and lowercasing would falsely
-// alias two distinct files, which is the one error class soundness cannot tolerate (a
-// write to a.txt invalidating a read of A.txt is over-invalidation = safe, but the
-// reverse — a read of a.txt served stale because the write hit A.txt — is NOT, so we
-// never merge case-distinct paths). It does NOT resolve symlinks or make the path
-// absolute: a relative read and a relative write in the same session share a cwd, and
-// resolving here would require filesystem access on a pure-data path; an absolute and a
-// relative spelling of one file simply land in different tags (conservative — they don't
-// cross-invalidate, but neither is served stale because each only matches its own spelling).
+// segments and normalizes separators to forward slashes.
+//
+// Relative paths are canonicalized against the workspace root / cwd (filepath.Abs) before
+// tag derivation so relative and absolute paths for the same file collide on the same tag.
+// If a path starts with a Windows drive letter (e.g. "C:" or "c:"), it is treated as already
+// absolute so Unix cwd is not prepended on non-Windows hosts.
+//
+// On case-insensitive operating systems (Windows, macOS where isCaseInsensitiveOS is true),
+// case is folded (strings.ToLower) to prevent cache invalidation desyncs where a write to
+// "readme.md" fails to invalidate a cached read of "README.md". On case-sensitive systems
+// (Linux where isCaseInsensitiveOS is false), case is preserved so distinct files do not
+// falsely alias.
 func fileCanonPath(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return ""
 	}
-	// filepath.Clean uses the OS separator; normalize to '/' afterwards so the tag is
-	// stable across the separator a tool happened to emit.
-	cleaned := filepath.ToSlash(filepath.Clean(s))
+	cleaned := filepath.Clean(s)
 	if cleaned == "." || cleaned == "" {
 		return ""
 	}
-	return cleaned
+
+	if isWindowsDrivePath(s) {
+		s = strings.ReplaceAll(s, "\\", "/")
+		s = filepath.ToSlash(filepath.Clean(s))
+	} else {
+		if !filepath.IsAbs(s) {
+			if abs, err := filepath.Abs(s); err == nil {
+				s = abs
+			}
+		}
+		s = filepath.ToSlash(filepath.Clean(s))
+	}
+
+	if isCaseInsensitiveOS {
+		s = strings.ToLower(s)
+	}
+	return s
 }
 
 // filePathTag returns the leaf tag for a canonical path, e.g. "files:C:/work/x.go".

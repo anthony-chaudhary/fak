@@ -1,6 +1,12 @@
 package vdso
 
-import "testing"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 // pathscope_test.go — witnesses for the per-path write-generation invalidator (#795):
 // a file Read is served from cache, an Edit/Write to the SAME path strands exactly that
@@ -113,28 +119,128 @@ func TestPathScope_BashDoesNotPathInvalidate(t *testing.T) {
 
 // TestFileCanonPath is a direct unit witness on the canonicalizer both sides share.
 func TestFileCanonPath(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"/work/a.go", "/work/a.go"},
-		{"./a.go", "a.go"},
-		{"a/b/../c.go", "a/c.go"},
-		{"  /work/a.go  ", "/work/a.go"},
-		{".", ""},
-		{"", ""},
-		{"C:\\work\\x.go", "C:/work/x.go"}, // separator normalization (filepath.Clean is OS-dependent; ToSlash makes the tag stable)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
 	}
-	for _, tc := range cases {
-		got := fileCanonPath(tc.in)
-		// On non-Windows, filepath.Clean treats backslashes as literal chars, so the
-		// Windows case may not normalize — accept either the slash form or a non-empty
-		// stable string for that one input.
-		if tc.in == "C:\\work\\x.go" {
-			if got == "" {
-				t.Errorf("fileCanonPath(%q) = empty, want a stable non-empty tag", tc.in)
+
+	for _, caseInsensitive := range []bool{false, true} {
+		orig := isCaseInsensitiveOS
+		isCaseInsensitiveOS = caseInsensitive
+		name := "case-sensitive"
+		if caseInsensitive {
+			name = "case-insensitive"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			defer func() { isCaseInsensitiveOS = orig }()
+
+			wantRelA := filepath.ToSlash(filepath.Join(cwd, "a.go"))
+			wantRelC := filepath.ToSlash(filepath.Join(cwd, "a", "c.go"))
+			wantWin := "C:/work/x.go"
+			wantAbsUpper := "/work/A.go"
+			if caseInsensitive {
+				wantRelA = strings.ToLower(wantRelA)
+				wantRelC = strings.ToLower(wantRelC)
+				wantWin = "c:/work/x.go"
+				wantAbsUpper = "/work/a.go"
 			}
-			continue
-		}
-		if got != tc.want {
-			t.Errorf("fileCanonPath(%q) = %q, want %q", tc.in, got, tc.want)
-		}
+
+			cases := []struct{ in, want string }{
+				{"/work/a.go", "/work/a.go"},
+				{"/work/A.go", wantAbsUpper},
+				{"./a.go", wantRelA},
+				{"a/b/../c.go", wantRelC},
+				{"  /work/a.go  ", "/work/a.go"},
+				{".", ""},
+				{"", ""},
+				{"C:\\work\\x.go", wantWin},
+			}
+			for _, tc := range cases {
+				got := fileCanonPath(tc.in)
+				if got != tc.want {
+					t.Errorf("fileCanonPath(%q) = %q, want %q", tc.in, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// TestPathScope_CaseInsensitiveInvalidation tests that on case-insensitive filesystems
+// (Windows, macOS), Read("README.md") followed by Write("readme.md") invalidates the
+// cached README.md.
+func TestPathScope_CaseInsensitiveInvalidation(t *testing.T) {
+	orig := isCaseInsensitiveOS
+	isCaseInsensitiveOS = true
+	defer func() { isCaseInsensitiveOS = orig }()
+
+	v := New(64)
+	v.SetGranularity(Resource)
+
+	read := roCall("Read", `{"file_path":"README.md"}`)
+	fillAndExpectHit(t, v, read, `# fak`)
+
+	// Mutate using different casing
+	v.Emit(completeEvent(wrCall("Write", `{"file_path":"readme.md","content":"# updated"}`), `{"ok":true}`))
+	if hits(t, v, read) {
+		t.Errorf("Read('README.md') still hits after Write('readme.md') on case-insensitive OS; write did not invalidate case-variant read")
+	}
+}
+
+// TestPathScope_RelativeAndAbsoluteCollision tests that relative and absolute paths
+// for the same file map to the same tag and invalidate each other in both directions.
+func TestPathScope_RelativeAndAbsoluteCollision(t *testing.T) {
+	v := New(64)
+	v.SetGranularity(Resource)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	absPath := filepath.ToSlash(filepath.Join(cwd, "README.md"))
+
+	// Direction 1: Read via relative path, Write via absolute path
+	readRel := roCall("Read", `{"file_path":"README.md"}`)
+	fillAndExpectHit(t, v, readRel, `# fak`)
+
+	writeAbs := wrCall("Write", fmt.Sprintf(`{"file_path":%q,"content":"# new"}`, absPath))
+	v.Emit(completeEvent(writeAbs, `{"ok":true}`))
+
+	if hits(t, v, readRel) {
+		t.Errorf("Read('README.md') still hits after Write(%q); relative and absolute paths did not collide", absPath)
+	}
+
+	// Direction 2: Read via absolute path, Write via relative path
+	readAbs := roCall("Read", fmt.Sprintf(`{"file_path":%q}`, absPath))
+	fillAndExpectHit(t, v, readAbs, `# new`)
+
+	writeRel := wrCall("Write", `{"file_path":"./README.md","content":"# newer"}`)
+	v.Emit(completeEvent(writeRel, `{"ok":true}`))
+
+	if hits(t, v, readAbs) {
+		t.Errorf("Read(%q) still hits after Write('./README.md'); absolute read not invalidated by relative write", absPath)
+	}
+}
+
+// TestPathScope_CaseSensitivePreservesDistinctTags tests that on case-sensitive filesystems
+// (Linux default, isCaseInsensitiveOS = false), distinct casing paths do NOT cross-invalidate.
+func TestPathScope_CaseSensitivePreservesDistinctTags(t *testing.T) {
+	orig := isCaseInsensitiveOS
+	isCaseInsensitiveOS = false
+	defer func() { isCaseInsensitiveOS = orig }()
+
+	v := New(64)
+	v.SetGranularity(Resource)
+
+	readUpper := roCall("Read", `{"file_path":"/work/README.md"}`)
+	fillAndExpectHit(t, v, readUpper, `# uppercase`)
+
+	// Mutate different casing on case-sensitive OS
+	v.Emit(completeEvent(wrCall("Write", `{"file_path":"/work/readme.md","content":"# lowercase"}`), `{"ok":true}`))
+
+	// On case-sensitive OS, /work/README.md and /work/readme.md are distinct files;
+	// readUpper should still hit.
+	if !hits(t, v, readUpper) {
+		t.Errorf("Read('/work/README.md') was invalidated by Write('/work/readme.md') on case-sensitive OS; distinct casing should not cross-invalidate")
 	}
 }

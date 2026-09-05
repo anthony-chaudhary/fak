@@ -128,8 +128,9 @@ func ExtractToolPath(args []byte) string {
 		if raw, ok := m[k]; ok {
 			var s string
 			if json.Unmarshal(raw, &s) == nil && strings.TrimSpace(s) != "" {
-				if cp := fileCanonPath(s); cp != "" {
-					return cp
+				cleaned := filepath.ToSlash(filepath.Clean(strings.TrimSpace(s)))
+				if cleaned != "." && cleaned != "" {
+					return cleaned
 				}
 			}
 		}

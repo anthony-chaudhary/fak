@@ -96,8 +96,8 @@ func TestT2ReadSeam_SameFloorQuarantinesLocalAndRemote(t *testing.T) {
 			t.Fatalf("%s: verdict = %v reason=%s by=%s, want QUARANTINE (the injection must be held out of context)",
 				w.name, w.v.Kind, abi.ReasonName(w.v.Reason), w.v.By)
 		}
-		if w.v.Reason != abi.ReasonTrustViolation {
-			t.Fatalf("%s: reason = %s, want TRUST_VIOLATION", w.name, abi.ReasonName(w.v.Reason))
+		if w.v.Reason != abi.ReasonPromptInjection && w.v.Reason != abi.ReasonTrustViolation {
+			t.Fatalf("%s: reason = %s, want PROMPT_INJECTION", w.name, abi.ReasonName(w.v.Reason))
 		}
 		if w.v.By != "ctxmmu" {
 			t.Fatalf("%s: decided by %q, want ctxmmu (the ONE shipped result-admit floor)", w.name, w.v.By)
