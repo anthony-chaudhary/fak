@@ -80,6 +80,15 @@ func NewIndex() *Index {
 
 // Add indexes a document and updates internal term-frequency postings and document frequencies.
 func (ix *Index) Add(d Doc) {
+	if ix == nil {
+		return
+	}
+	if ix.postings == nil {
+		ix.postings = make(map[string][]posting)
+	}
+	if ix.df == nil {
+		ix.df = make(map[string]int)
+	}
 	d.Source = NormSource(string(d.Source))
 	i := len(ix.docs)
 	ix.docs = append(ix.docs, d)
@@ -90,7 +99,12 @@ func (ix *Index) Add(d Doc) {
 }
 
 // Len reports the total count of indexed documents currently stored in the index.
-func (ix *Index) Len() int { return len(ix.docs) }
+func (ix *Index) Len() int {
+	if ix == nil {
+		return 0
+	}
+	return len(ix.docs)
+}
 
 func (ix *Index) idf(term string) float64 {
 	n := float64(len(ix.docs))
@@ -100,6 +114,9 @@ func (ix *Index) idf(term string) float64 {
 
 // Search queries the inverted index and returns the top-k hits ranked by TF-IDF and source weight.
 func (ix *Index) Search(query string, k, window int) []Hit {
+	if ix == nil || len(ix.docs) == 0 {
+		return nil
+	}
 	if k <= 0 {
 		k = DefaultK
 	}
@@ -178,6 +195,9 @@ const DefaultWindow = 5
 
 // DocsFromJournal parses a toolproc journal reader into searchable Doc descriptors.
 func DocsFromJournal(r io.Reader) ([]Doc, error) {
+	if r == nil {
+		return nil, fmt.Errorf("sessionsearch: reader is nil")
+	}
 	events, err := toolproc.ParseEvents(r)
 	if err != nil {
 		return nil, err
@@ -226,7 +246,8 @@ func RecalledSpan(hits []Hit) string {
 	var b strings.Builder
 	b.WriteString("recalled from prior sessions:\n")
 	for i, h := range hits {
-		fmt.Fprintf(&b, "  #%d [%s] %s\n", i+1, h.Doc.Source, h.Doc.Text)
+		src := NormSource(string(h.Doc.Source))
+		fmt.Fprintf(&b, "  #%d [%s] %s\n", i+1, src, h.Doc.Text)
 		for _, w := range h.Window {
 			if w.ID == h.Doc.ID {
 				continue
@@ -293,12 +314,14 @@ func WitnessUsefulness(hits []Hit, priorContext, outcome string) Usefulness {
 	out := distinctTermSet(outcome)
 	u := Usefulness{Hits: len(hits)}
 	for _, h := range hits {
-		text := h.Doc.Text
-		for _, w := range h.Window {
-			text += " " + w.Text
-		}
 		referenced := false
-		for term := range distinctTermSet(text) {
+		hitTerms := distinctTermSet(h.Doc.Text)
+		for _, w := range h.Window {
+			for term := range distinctTermSet(w.Text) {
+				hitTerms[term] = true
+			}
+		}
+		for term := range hitTerms {
 			if prior[term] {
 				continue
 			}
@@ -358,6 +381,9 @@ func termFreq(s string) map[string]int {
 
 func distinctTerms(s string) []string {
 	seen := distinctTermSet(s)
+	if len(seen) == 0 {
+		return nil
+	}
 	out := make([]string, 0, len(seen))
 	for t := range seen {
 		out = append(out, t)
@@ -368,8 +394,12 @@ func distinctTerms(s string) []string {
 
 func distinctTermSet(s string) map[string]bool {
 	out := map[string]bool{}
-	for t := range termFreq(s) {
-		out[t] = true
+	for _, t := range strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		if len(t) > 2 {
+			out[t] = true
+		}
 	}
 	return out
 }
