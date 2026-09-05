@@ -465,6 +465,9 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 		cosP[t], sinP[t] = ropeRow(cfg, base+t)
 	}
 
+	// Normalization consumers finish synchronously before the next norm stage.
+	// Every row is overwritten, so one request-local panel serves both stages.
+	normPanel := make([]float32, P*H)
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
 		ql := m.q8Layer(l)
@@ -472,7 +475,7 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 		// q8PrefillNeedsTokenLoop (kv.go:825) has no LayerNorm term, so a quantized PreNorm
 		// LayerNorm family prefills HERE while decoding through the bias-aware blockStep. The
 		// learned input_layernorm.bias must therefore ride along; rmsnormCfg hard-passes nil.
-		Xn := make([]float32, P*H)
+		Xn := normPanel
 		parFor(P, dispatchWorkers, func(lo, hi int) {
 			wIn := m.tensor(lp("input_layernorm.weight"))
 			bIn := m.tensorOptional(lp("input_layernorm.bias"))
@@ -523,7 +526,7 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 			}
 		})
 
-		Xn2 := make([]float32, P*H)
+		Xn2 := normPanel
 		parFor(P, dispatchWorkers, func(lo, hi int) {
 			wPost := m.tensor(lp("post_attention_layernorm.weight"))
 			bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
