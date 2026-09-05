@@ -11,8 +11,7 @@ import (
 	"time"
 )
 
-// countingReaderAt counts ReadAt calls so tests can assert which mirrors were
-// touched.
+// countingReaderAt tracks ReadAt calls across mirrors.
 type countingReaderAt struct {
 	inner io.ReaderAt
 	calls atomic.Int64
@@ -23,7 +22,7 @@ func (c *countingReaderAt) ReadAt(p []byte, off int64) (int, error) {
 	return c.inner.ReadAt(p, off)
 }
 
-// blob returns size deterministic pseudo-random bytes (fixed seed, no time).
+// blob returns deterministic pseudo-random bytes.
 func blob(t *testing.T, rng *rand.Rand, size int) []byte {
 	t.Helper()
 	b := make([]byte, size)
@@ -33,9 +32,7 @@ func blob(t *testing.T, rng *rand.Rand, size int) []byte {
 	return b
 }
 
-// TestBitIdentity is the load-bearing test: for many random (off, len) pairs,
-// a striped read across 3 mirrors returns exactly what a single reader
-// returns -- same bytes, same count, same EOF behavior.
+// TestBitIdentity verifies striped reads match single reader bytes, counts, and EOF behavior.
 func TestBitIdentity(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 	data := blob(t, rng, 1<<20) // 1 MiB
@@ -44,12 +41,12 @@ func TestBitIdentity(t *testing.T) {
 		{R: bytes.NewReader(data), BWWeight: 1},
 		{R: bytes.NewReader(data), BWWeight: 2.5},
 		{R: bytes.NewReader(data), BWWeight: 0.75},
-	}, WithMinChunk(512)) // small floor so most reads actually stripe
+	}, WithMinChunk(512))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	for i := 0; i < 300; i++ {
-		off := rng.Int63n(int64(len(data)) + 4096) // sometimes past EOF
+		off := rng.Int63n(int64(len(data)) + 4096)
 		n := rng.Intn(96 * 1024)
 		want := make([]byte, n)
 		got := make([]byte, n)
@@ -67,8 +64,7 @@ func TestBitIdentity(t *testing.T) {
 	}
 }
 
-// TestSingleSourcePassthrough: one source degrades to a byte-identical direct
-// read.
+// TestSingleSourcePassthrough verifies single source reads degrade to direct byte reads.
 func TestSingleSourcePassthrough(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 	data := blob(t, rng, 256*1024)
@@ -86,7 +82,7 @@ func TestSingleSourcePassthrough(t *testing.T) {
 	}
 }
 
-// TestSmallReadSingleSource: a read below MinChunk touches exactly one mirror.
+// TestSmallReadSingleSource verifies reads below MinChunk touch only the fastest mirror.
 func TestSmallReadSingleSource(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 	data := blob(t, rng, 64*1024)
@@ -124,8 +120,7 @@ func TestSmallReadSingleSource(t *testing.T) {
 	}
 }
 
-// TestBandwidthWeighting: a 2x-weight source is planned ~2x the bytes of a
-// 1x source (within integer rounding).
+// TestBandwidthWeighting verifies sub-range planning matches relative bandwidth weights.
 func TestBandwidthWeighting(t *testing.T) {
 	const n = int64(3 << 20)
 	ranges := carveRanges(0, n, []float64{1, 2}, 1<<10)
@@ -133,7 +128,6 @@ func TestBandwidthWeighting(t *testing.T) {
 		t.Fatalf("got %d ranges, want 2", len(ranges))
 	}
 	slow, fast := ranges[0].n, ranges[1].n
-	// Ideal split is n/3 and 2n/3; allow only rounding slack.
 	if d := slow - n/3; d < -2 || d > 2 {
 		t.Fatalf("1x source got %d bytes, want ~%d", slow, n/3)
 	}
@@ -146,8 +140,7 @@ func TestBandwidthWeighting(t *testing.T) {
 	}
 }
 
-// TestCarveRanges: exact gap-free coverage, no zero-length ranges, remainder
-// absorbed, degrade rules honored.
+// TestCarveRanges verifies gap-free coverage, degradation, and rounding allocation.
 func TestCarveRanges(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -204,13 +197,12 @@ func TestCarveRanges(t *testing.T) {
 	}
 }
 
-// errReaderAt fails every read.
+// errReaderAt always fails reads.
 type errReaderAt struct{ err error }
 
 func (e *errReaderAt) ReadAt(p []byte, off int64) (int, error) { return 0, e.err }
 
-// TestErrorPropagation: a failing mirror surfaces its error (wrapped) instead
-// of silently returning partial data.
+// TestErrorPropagation verifies failing mirror errors are returned to the caller.
 func TestErrorPropagation(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 	data := blob(t, rng, 1<<20)
@@ -229,8 +221,7 @@ func TestErrorPropagation(t *testing.T) {
 	}
 }
 
-// gateReaderAt tracks peak in-flight reads and blocks every read until two
-// are in flight at once, proving the cap is both enforced and actually used.
+// gateReaderAt tracks peak in-flight reads across mirrors.
 type gateReaderAt struct {
 	inner    io.ReaderAt
 	inflight *atomic.Int64
@@ -259,8 +250,7 @@ func (g *gateReaderAt) ReadAt(p []byte, off int64) (int, error) {
 	return g.inner.ReadAt(p, off)
 }
 
-// TestBoundedConcurrency: with WithMaxConcurrency(2) and 4 sources, peak
-// concurrent in-flight reads never exceed 2.
+// TestBoundedConcurrency verifies peak in-flight reads never exceed the concurrency cap.
 func TestBoundedConcurrency(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 	data := blob(t, rng, 1<<20)
@@ -293,7 +283,7 @@ func TestBoundedConcurrency(t *testing.T) {
 	}
 }
 
-// TestNewValidation: construction rejects empty/invalid inputs.
+// TestNewValidation verifies construction rejects empty or invalid inputs.
 func TestNewValidation(t *testing.T) {
 	good := Source{R: bytes.NewReader([]byte("x")), BWWeight: 1}
 	if _, err := New(nil); err == nil {
