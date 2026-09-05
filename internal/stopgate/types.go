@@ -191,4 +191,9 @@ type BoundaryInput struct {
 	BoundaryRefusalReceipt *BoundaryRefusalReceipt
 	RefusalToken           string
 	ReasonCode             abi.ReasonCode
+
+	NotedSurrender bool
+	SurrenderNote  string
+	GoalActive     bool
+	GoalObjective  string
 }

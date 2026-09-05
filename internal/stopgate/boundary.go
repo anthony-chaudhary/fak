@@ -80,6 +80,31 @@ func IsTerminalBoundary(receipt *BoundaryRefusalReceipt) bool {
 	return false
 }
 
+// IsSurrenderNote returns true if text contains any recognized surrender/give-up phrase.
+func IsSurrenderNote(text string) bool {
+	s := strings.ToLower(text)
+	phrases := []string{
+		"giving up",
+		"give up",
+		"cannot complete",
+		"unable to proceed",
+		"cannot proceed",
+		"stopping here",
+		"i surrender",
+		"failed to complete",
+		"unable to solve",
+		"cannot solve",
+		"cannot fix",
+		"stop now",
+	}
+	for _, p := range phrases {
+		if strings.Contains(s, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func getReceipt(in BoundaryInput) *BoundaryRefusalReceipt {
 	if in.RefusalReceipt != nil {
 		return in.RefusalReceipt
@@ -257,7 +282,64 @@ func EvaluateBoundary(ladder LadderConfig, witnessCfg WitnessGateConfig, in Boun
 		return EvaluateDenyAll(ladder, in.ConsecutiveDenyAll, in.ConsecutiveSameIssue, in.UseSameIssue)
 	}
 
-	// 5. Default clean completion.
+	// 5. Premature surrender / goal persistence check.
+	isSurrender := in.NotedSurrender || IsSurrenderNote(in.SurrenderNote)
+	isUnfinishedGoal := in.GoalActive && in.WitnessClaim == nil && in.FinalGate == nil
+	if isSurrender || isUnfinishedGoal {
+		hasTerminal, _ := in.HasVerifiedTerminalBoundaryRefusal()
+		if hasTerminal || IsTerminalBoundary(getReceipt(in)) {
+			return Decision{
+				Action:      ActionAllow,
+				Stage:       StageAllow,
+				Disposition: DispCleanWrapup,
+				Kind:        KindClean,
+				ExitCode:    0,
+				Signal:      "clean",
+			}
+		}
+
+		max := witnessCfg.Max
+		if max < 1 {
+			max = 3
+		}
+		if in.WitnessBlockCount >= max {
+			opMsg := fmt.Sprintf("fak guard Stop: PREMATURE_SURRENDER stood down after %d blocks (bounded max=%d); allowing stop", in.WitnessBlockCount, max)
+			return Decision{
+				Action:      ActionAllow,
+				Stage:       StageGiveUp,
+				Disposition: DispClaimUnwitnessedGiveUp,
+				Kind:        KindStandDown,
+				ExitCode:    0,
+				Signal:      "PREMATURE_SURRENDER",
+				Reason:      "PREMATURE_SURRENDER",
+				Depth:       in.WitnessBlockCount,
+				Bound:       max,
+				OperatorMsg: opMsg,
+				Note:        opMsg,
+			}
+		}
+
+		guidance := "fak guard: premature surrender refused without verified terminal boundary evidence. Do not give up: analyze the obstacle, try an allowed alternative, or delegate sub-tasks."
+		if in.GoalObjective != "" {
+			guidance = fmt.Sprintf("fak guard: premature surrender refused — you are working toward pinned goal %q. Do not give up: analyze the hurdle, decompose into atomic sub-tasks, try alternative tools, or delegate to subagents.", in.GoalObjective)
+		}
+		return Decision{
+			Action:      ActionContinue,
+			Stage:       StageWarn,
+			Disposition: DispClaimUnwitnessedContinue,
+			Kind:        KindContinue,
+			Blocked:     true,
+			ExitCode:    2,
+			Signal:      "PREMATURE_SURRENDER",
+			Reason:      "PREMATURE_SURRENDER",
+			Depth:       in.WitnessBlockCount + 1,
+			Bound:       max,
+			Guidance:    guidance,
+			Note:        guidance,
+		}
+	}
+
+	// 6. Default clean completion.
 	return Decision{
 		Action:      ActionAllow,
 		Stage:       StageAllow,

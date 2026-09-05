@@ -1,6 +1,7 @@
 package stopgate
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -189,6 +190,266 @@ func TestBoundaryNoAllowedPathRequiresVerifiedRefusal(t *testing.T) {
 		dec = EvaluateBoundary(ladder, witnessEnforce, inDirectCode)
 		if dec.Disposition != DispCleanWrapup || dec.Action != ActionAllow {
 			t.Fatalf("want DispCleanWrapup for ReasonCode abi.ReasonPolicyBlock, got: %+v", dec)
+		}
+	})
+}
+
+func TestIsSurrenderNote(t *testing.T) {
+	phrases := []string{
+		"giving up",
+		"give up",
+		"cannot complete",
+		"unable to proceed",
+		"cannot proceed",
+		"stopping here",
+		"i surrender",
+		"failed to complete",
+		"unable to solve",
+		"cannot solve",
+		"cannot fix",
+		"stop now",
+	}
+	for _, p := range phrases {
+		if !IsSurrenderNote("I am " + p + " because of errors") {
+			t.Errorf("IsSurrenderNote should match phrase %q", p)
+		}
+		if !IsSurrenderNote(strings.ToUpper(p)) {
+			t.Errorf("IsSurrenderNote should match uppercase phrase %q", p)
+		}
+	}
+	negatives := []string{
+		"",
+		"all tests pass",
+		"completed successfully",
+		"shipping the fix",
+	}
+	for _, neg := range negatives {
+		if IsSurrenderNote(neg) {
+			t.Errorf("IsSurrenderNote should not match %q", neg)
+		}
+	}
+}
+
+func TestStopgatePrematureSurrender(t *testing.T) {
+	ladder := DefaultLadderConfig()
+	witness := WitnessGateConfig{Mode: ModeEnforce, Max: 3}
+
+	t.Run("surrender_note_without_terminal_refusal_returns_continue", func(t *testing.T) {
+		cases := []struct {
+			name  string
+			input BoundaryInput
+		}{
+			{
+				name: "noted_surrender_flag",
+				input: BoundaryInput{
+					NotedSurrender: true,
+				},
+			},
+			{
+				name: "surrender_note_giving_up",
+				input: BoundaryInput{
+					SurrenderNote: "I am giving up on this task",
+				},
+			},
+			{
+				name: "surrender_note_cannot_proceed",
+				input: BoundaryInput{
+					SurrenderNote: "Unable to proceed further",
+				},
+			},
+			{
+				name: "surrender_note_cannot_fix",
+				input: BoundaryInput{
+					SurrenderNote: "I cannot fix this issue",
+				},
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				dec := EvaluateBoundary(ladder, witness, tc.input)
+				if dec.Action != ActionContinue {
+					t.Fatalf("want ActionContinue, got %s", dec.Action)
+				}
+				if dec.ExitCode != 2 {
+					t.Fatalf("want ExitCode 2, got %d", dec.ExitCode)
+				}
+				if dec.Signal != "PREMATURE_SURRENDER" {
+					t.Fatalf("want Signal PREMATURE_SURRENDER, got %s", dec.Signal)
+				}
+				if dec.Reason != "PREMATURE_SURRENDER" {
+					t.Fatalf("want Reason PREMATURE_SURRENDER, got %s", dec.Reason)
+				}
+				if dec.Disposition != DispClaimUnwitnessedContinue {
+					t.Fatalf("want DispClaimUnwitnessedContinue, got %s", dec.Disposition)
+				}
+				if !dec.Blocked {
+					t.Fatalf("want Blocked true, got false")
+				}
+				if dec.Stage != StageWarn {
+					t.Fatalf("want StageWarn, got %s", dec.Stage)
+				}
+				if !strings.Contains(dec.Guidance, "premature surrender refused") {
+					t.Fatalf("guidance missing 'premature surrender refused': %s", dec.Guidance)
+				}
+			})
+		}
+	})
+
+	t.Run("surrender_note_with_verified_terminal_refusal_returns_allow", func(t *testing.T) {
+		in := BoundaryInput{
+			NotedSurrender: true,
+			SurrenderNote:  "giving up",
+			BoundaryRefusalReceipt: &BoundaryRefusalReceipt{
+				Reason:   "POLICY_BLOCK",
+				Verified: true,
+			},
+		}
+		dec := EvaluateBoundary(ladder, witness, in)
+		if dec.Action != ActionAllow {
+			t.Fatalf("want ActionAllow, got %s", dec.Action)
+		}
+		if dec.ExitCode != 0 {
+			t.Fatalf("want ExitCode 0, got %d", dec.ExitCode)
+		}
+		if dec.Disposition != DispCleanWrapup {
+			t.Fatalf("want DispCleanWrapup, got %s", dec.Disposition)
+		}
+		if dec.Stage != StageAllow {
+			t.Fatalf("want StageAllow, got %s", dec.Stage)
+		}
+		if dec.Kind != KindClean {
+			t.Fatalf("want KindClean, got %s", dec.Kind)
+		}
+	})
+
+	t.Run("surrender_note_stands_down_after_max_blocks", func(t *testing.T) {
+		in := BoundaryInput{
+			NotedSurrender:    true,
+			SurrenderNote:     "cannot fix",
+			WitnessBlockCount: 3, // equals max=3
+		}
+		dec := EvaluateBoundary(ladder, witness, in)
+		if dec.Action != ActionAllow {
+			t.Fatalf("want ActionAllow, got %s", dec.Action)
+		}
+		if dec.ExitCode != 0 {
+			t.Fatalf("want ExitCode 0, got %d", dec.ExitCode)
+		}
+		if dec.Stage != StageGiveUp {
+			t.Fatalf("want StageGiveUp, got %s", dec.Stage)
+		}
+		if dec.Disposition != DispClaimUnwitnessedGiveUp {
+			t.Fatalf("want DispClaimUnwitnessedGiveUp, got %s", dec.Disposition)
+		}
+		if dec.Kind != KindStandDown {
+			t.Fatalf("want KindStandDown, got %s", dec.Kind)
+		}
+		if dec.Signal != "PREMATURE_SURRENDER" {
+			t.Fatalf("want Signal PREMATURE_SURRENDER, got %s", dec.Signal)
+		}
+		if dec.Reason != "PREMATURE_SURRENDER" {
+			t.Fatalf("want Reason PREMATURE_SURRENDER, got %s", dec.Reason)
+		}
+		if !strings.Contains(dec.OperatorMsg, "PREMATURE_SURRENDER stood down after 3 blocks") {
+			t.Fatalf("operator message mismatch: %s", dec.OperatorMsg)
+		}
+	})
+}
+
+func TestStopgateGoalPersistence(t *testing.T) {
+	ladder := DefaultLadderConfig()
+	witness := WitnessGateConfig{Mode: ModeEnforce, Max: 3}
+
+	t.Run("goal_active_without_completion_returns_continue", func(t *testing.T) {
+		in := BoundaryInput{
+			GoalActive:    true,
+			GoalObjective: "implement premature surrender gate",
+		}
+		dec := EvaluateBoundary(ladder, witness, in)
+		if dec.Action != ActionContinue {
+			t.Fatalf("want ActionContinue, got %s", dec.Action)
+		}
+		if dec.ExitCode != 2 {
+			t.Fatalf("want ExitCode 2, got %d", dec.ExitCode)
+		}
+		if dec.Signal != "PREMATURE_SURRENDER" {
+			t.Fatalf("want Signal PREMATURE_SURRENDER, got %s", dec.Signal)
+		}
+		if dec.Reason != "PREMATURE_SURRENDER" {
+			t.Fatalf("want Reason PREMATURE_SURRENDER, got %s", dec.Reason)
+		}
+		if dec.Disposition != DispClaimUnwitnessedContinue {
+			t.Fatalf("want DispClaimUnwitnessedContinue, got %s", dec.Disposition)
+		}
+		if !dec.Blocked {
+			t.Fatalf("want Blocked true, got false")
+		}
+		if dec.Stage != StageWarn {
+			t.Fatalf("want StageWarn, got %s", dec.Stage)
+		}
+		if !strings.Contains(dec.Guidance, "implement premature surrender gate") {
+			t.Fatalf("guidance must include goal objective: %s", dec.Guidance)
+		}
+	})
+
+	t.Run("goal_active_with_terminal_refusal_returns_allow", func(t *testing.T) {
+		in := BoundaryInput{
+			GoalActive:    true,
+			GoalObjective: "implement premature surrender gate",
+			BoundaryRefusalReceipt: &BoundaryRefusalReceipt{
+				Reason:   "POLICY_BLOCK",
+				Verified: true,
+			},
+		}
+		dec := EvaluateBoundary(ladder, witness, in)
+		if dec.Action != ActionAllow {
+			t.Fatalf("want ActionAllow, got %s", dec.Action)
+		}
+		if dec.ExitCode != 0 {
+			t.Fatalf("want ExitCode 0, got %d", dec.ExitCode)
+		}
+		if dec.Disposition != DispCleanWrapup {
+			t.Fatalf("want DispCleanWrapup, got %s", dec.Disposition)
+		}
+		if dec.Stage != StageAllow {
+			t.Fatalf("want StageAllow, got %s", dec.Stage)
+		}
+		if dec.Kind != KindClean {
+			t.Fatalf("want KindClean, got %s", dec.Kind)
+		}
+	})
+
+	t.Run("goal_active_stands_down_after_max_blocks", func(t *testing.T) {
+		in := BoundaryInput{
+			GoalActive:        true,
+			GoalObjective:     "implement premature surrender gate",
+			WitnessBlockCount: 3, // equals max=3
+		}
+		dec := EvaluateBoundary(ladder, witness, in)
+		if dec.Action != ActionAllow {
+			t.Fatalf("want ActionAllow, got %s", dec.Action)
+		}
+		if dec.ExitCode != 0 {
+			t.Fatalf("want ExitCode 0, got %d", dec.ExitCode)
+		}
+		if dec.Stage != StageGiveUp {
+			t.Fatalf("want StageGiveUp, got %s", dec.Stage)
+		}
+		if dec.Disposition != DispClaimUnwitnessedGiveUp {
+			t.Fatalf("want DispClaimUnwitnessedGiveUp, got %s", dec.Disposition)
+		}
+		if dec.Kind != KindStandDown {
+			t.Fatalf("want KindStandDown, got %s", dec.Kind)
+		}
+		if dec.Signal != "PREMATURE_SURRENDER" {
+			t.Fatalf("want Signal PREMATURE_SURRENDER, got %s", dec.Signal)
+		}
+		if dec.Reason != "PREMATURE_SURRENDER" {
+			t.Fatalf("want Reason PREMATURE_SURRENDER, got %s", dec.Reason)
+		}
+		if !strings.Contains(dec.OperatorMsg, "PREMATURE_SURRENDER stood down after 3 blocks") {
+			t.Fatalf("operator message mismatch: %s", dec.OperatorMsg)
 		}
 	})
 }
