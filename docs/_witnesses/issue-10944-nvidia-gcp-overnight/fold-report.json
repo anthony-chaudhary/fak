@@ -1,0 +1,109 @@
+{
+  "schema": "fak.nvidia-gcp-overnight-witness/1",
+  "title": "NVIDIA A100 & Hopper H100 GPU Performance & Multi-Subagent Concurrency Campaign",
+  "generated_at": "2026-09-05T17:00:00Z",
+  "verdict": "KEEP_NATIVE_ACCELERATION_CONFIRMED",
+  "summary": {
+    "native_serving": {
+      "node": "fak-qwen-serve",
+      "gpu": "1x NVIDIA A100-SXM4-40GB",
+      "engine": "fak-native in-kernel CUDA (fak-00684f03a4-cuda)",
+      "model": "Qwen3.8-27B-Q4_K_M",
+      "peak_decode_tokens_per_sec": 18.1,
+      "prefix_reuse_speedup_vs_cold": 4.84,
+      "prefix_reuse_speedup_vs_unique": 6.12,
+      "fanout_50_agent_success_rate": 1.0,
+      "fanout_effective_throughput_tokens_per_sec": 997.32
+    },
+    "fresh_a100_qwen38_v2": {
+      "node": "fak-qwen-serve",
+      "gpu": "1x NVIDIA A100-SXM4-40GB",
+      "engine": "fak-native in-kernel CUDA (fak-00684f03a4-cuda)",
+      "model": "Qwen3.8-27B-Q4_K_M",
+      "context_scaling_runs": 12,
+      "context_scaling_success_rate": 1.0,
+      "peak_decode_tokens_per_sec": 14.6,
+      "prefix_reuse_speedup_vs_unique": 2.14,
+      "concurrency_grid": [1, 5, 10, 20, 30],
+      "concurrency_agents_tested": 66,
+      "concurrency_errors": 0,
+      "cluster_peak_throughput_tok_per_sec": 264.0
+    },
+    "hopper_h100_kernel_levers": {
+      "node": "gcp-a3-high-h100-1g (a3-highgpu-1g)",
+      "gpu": "1x NVIDIA H100 80GB HBM3 (sm_90)",
+      "model": "qwen2.5-3b-instruct-q8_0.gguf",
+      "fak_cuda_f32_decode": 95.37,
+      "fak_cuda_q8_decode": 111.94,
+      "fak_cuda_tf32_decode": 95.72,
+      "llama_cuda_q8_decode": 362.68,
+      "q8_decode_speedup_vs_f32": 1.174,
+      "q8_decode_relative_to_llama": 0.309,
+      "fak_cuda_q8_prefill": 62.93,
+      "llama_cuda_q8_prefill": 18797.66
+    },
+    "vllm_fp8_reference": {
+      "node": "fak-qwen38-fp8-perf",
+      "gpu": "1x NVIDIA A100-SXM4-40GB",
+      "engine": "vllm@0.27.1 (reference-only, not fak-native)",
+      "model": "qwen38-fp8",
+      "tensor_parallel_size": 1,
+      "avg_decode_tokens_per_sec": 9.0,
+      "prefix_reuse_speedup_8k": 10.33
+    },
+    "vllm_bf16_tp2_reference": {
+      "node": "fak-qwen38-bf16-tp2-perf",
+      "gpu": "2x NVIDIA A100-SXM4-40GB",
+      "engine": "vllm@0.27.1 (reference-only, not fak-native)",
+      "model": "qwen38-bf16",
+      "tensor_parallel_size": 2,
+      "avg_decode_tokens_per_sec": 9.32,
+      "prefix_reuse_speedup_8k": 5.64,
+      "cold_prefill_speedup_vs_fp8_8k": 2.12
+    }
+  },
+  "artifacts": [
+    {
+      "filename": "fak_native_qwen38_a100_bench_raw.json",
+      "sha256": "32558710b7673d63465c52d0442d60c886a74b6b77631f4aaf8d826ead689c38",
+      "schema": "fak.qwen38-native-a100-benchmark/1",
+      "role": "fak-native in-kernel CUDA performance, context scaling, and prefix caching ablation"
+    },
+    {
+      "filename": "qwen38_fanout_concurrency_raw.json",
+      "sha256": "63a6bf4a50466ad8741826a2496d6a9e7fd7939109873ee71f000d4658f14384",
+      "schema": "fak.qwen38-fanout-concurrency-raw/1",
+      "role": "50-subagent concurrency fanout benchmark against in-kernel CUDA serving endpoint"
+    },
+    {
+      "filename": "vllm_fp8_a100_bench_raw.json",
+      "sha256": "c6b5178aaaf7df9aa2823e076207a0fa0e44147cc112d8e5af27b06784245b1d",
+      "schema": "fak.qwen38-fp8-perf-raw/1",
+      "role": "vLLM FP8 single-A100 reference benchmark and prefix caching ablation"
+    },
+    {
+      "filename": "vllm_bf16_tp2_a100_bench_raw.json",
+      "sha256": "d92742184c933b5a74a00240f59038bde5645aba72632fbeeead03e1c65adadd",
+      "schema": "fak.qwen38-bf16-perf-raw/1",
+      "role": "vLLM BF16 TP=2 dual-A100 reference benchmark and prefix caching ablation"
+    },
+    {
+      "filename": "gcp_h100_hopper_bench_raw.json",
+      "sha256": "490ea3611de9c6fddf1877d2329cd68c5da83e7bbcec9268d84f4191fa59bfb6",
+      "schema": "fak.gcp-vm-bench.v2",
+      "role": "GCP A3 Hopper H100 physical benchmark run across llama, fak-cuda, fak-cuda-q8, fak-cuda-tf32"
+    },
+    {
+      "filename": "gcp_h100_paired_report.json",
+      "sha256": "4e7ca8d04c58db5cc168ffe652a9e2ea7ff97f38aced9af08a29c6684e5610ae",
+      "schema": "fak.armbench.paired-report/1",
+      "role": "Statistical paired-report comparison on H100 against llama.cpp baseline"
+    },
+    {
+      "filename": "qwen38_a100_bench_v2_raw.json",
+      "sha256": "32ae037c91039f7079faa30ab250b2695678328264868cb0f0293c32ef1ab065",
+      "schema": "fak.qwen38-a100-bench-v2/1",
+      "role": "Fresh physical A100 Qwen3.8-27B benchmark capture: context scaling, prefix caching ablation, and 66-agent fanout grid"
+    }
+  ]
+}

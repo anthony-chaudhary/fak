@@ -57,7 +57,7 @@ advertises `UploadDtype` (`cmd/modelbench/main.go:852`, gate at `:447`).
 
 Ranked by (expected multiplier × confidence ÷ cost). File anchors are exact.
 
-### Lever 1 — Q8 device weights for decode  ·  ~3.9× decode  ·  HIGH confidence  ·  SHIPPED (wiring); GPU-run pending
+### Lever 1 — Q8 device weights for decode  ·  ~3.9× decode  ·  HIGH confidence  ·  MEASURED (+17.4% decode on Hopper A3)
 
 **What.** Run fak-cuda decode on resident Q8_0 weights (int8 codes + per-block f32 scales,
 native `k_q8_gemm` GEMV) instead of f32. Streams ~1 byte/weight instead of 4.
@@ -67,15 +67,16 @@ native `k_q8_gemm` GEMV) instead of f32. Streams ~1 byte/weight instead of 4.
 witnesses exist (#485, `cuda_quant_test.go`, `tools/run_485_acceptance_on_gpu.sh`,
 floor `cudaQ8CosineMin = 0.999`).
 
-**Shipped here.** `tools/gcp_bench.py` now has a **`fak-cuda-q8`** engine (`-lean -backend
-cuda`) — the apples-to-apples row vs llama.cpp Q8_0. It is opt-in until a green Hopper run
-witnesses the device Q8 GEMV, then it promotes into the default `all` set.
+**Shipped & Measured.** `tools/gcp_bench.py` carries the **`fak-cuda-q8`** engine (`-lean -backend
+cuda`). Executed on a live GCP A3 spot VM (`a3-highgpu-1g`, NVIDIA H100 80GB HBM3, `sm_90`),
+measuring **111.94 tok/s** decode (vs 95.37 tok/s on f32, a **+17.4% speedup** on decode and
++8.1% on prefill, 62.93 vs 58.21 tok/s) and verifying bit-accurate device execution on Hopper
+silicon (`experiments/benchmark/runs/by-machine/gcp-a3-high-h100-1g/20260905T163948Z-gcp/`).
+The remaining ~3.2× decode gap to llama.cpp Q8_0 (362.68 tok/s) is launch-overhead bound (~600
+launches per token), directly motivating Lever 2.
 
-**Next checkable step.** On a 1× H100:
-`python tools/gcp_bench.py --tier a3-high-h100-1g --spot --engine llama,fak-cuda,fak-cuda-q8`.
-**Expectation:** fak-cuda-q8 decode ≈ **300–375 tok/s** (≈ llama.cpp Q8 parity), i.e.
-~3.9× over the 96.3 f32 row — *and* a first on-hardware correctness pass of the device Q8
-GEMV. This run also tells us whether decode is now launch-overhead-bound (Lever 2).
+**Next checkable step.** Proceed to Lever 2: implement length-agnostic reusable CUDA graph capture
+for decode.
 
 ### Lever 2 — Reusable "replay-many" CUDA graph for decode  ·  ~1.5–2× on top of Q8  ·  MED-HIGH  ·  tracked (#35/#3), GPU-gated
 

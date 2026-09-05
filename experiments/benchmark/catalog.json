@@ -5,8 +5,10 @@
       "2026-06-27": [
         "cpu-server-a-glm52-cpu-wedge-20260627T000000Z"
       ],
-      "2026-09-03": [
-        "node-macos-a-macbench-threeway-20260903T050000Z"
+      "2026-07-09": [
+        "a100-glm52-dsa-decode-ctx-scaling-20260709T233630Z",
+        "a100-glm52-l1-rowsplit-ab-20260709T234240Z",
+        "box-873af63b-cpu-throughput-curve-20260709T003308Z"
       ],
       "unknown": [
         "node-agent-live-offline-mock-20260617",
@@ -65,10 +67,53 @@
         "gcp-g2-l4-nvidia-l4-20260624T142454Z",
         "node-macos-a-mac-battery-20260625T050017Z",
         "gcp-a3-high-h100-1g-nvidia-h100-80gb-20260628T105459Z",
-        "gcp-g2-l4-32-nvidia-l4-20260629T132955Z"
+        "gcp-g2-l4-32-nvidia-l4-20260629T132955Z",
+        "gcp-a3-high-h100-1g-bench-fleet-d7ed1f6afa901604-20260715T054347Z",
+        "gcp-g2-l4-bench-fleet-ccd9326f22bb636d-20260715T053520Z",
+        "gcp-g2-l4-32-bench-fleet-768fde4f6770a6b7-20260715T061239Z",
+        "workstation-a-bench-fleet-ddb5682fef5e2c66-20260714T232505Z",
+        "workstation-a-bench-fleet-ddb5682fef5e2c66-20260715T062106Z",
+        "workstation-a-bench-fleet-6a57fc5d83c48046-20260714T232940Z",
+        "gcp-a3-high-h100-1g-bench-fleet-3f79be34d1b35229-20260714T234519Z",
+        "gcp-g2-l4-bench-fleet-ed971feb9d0bf6de-20260714T234529Z",
+        "gcp-g2-l4-32-bench-fleet-c4f937d74bdff3a1-20260714T235827Z",
+        "gcp-g2-l4-32-bench-fleet-c4f937d74bdff3a1-20260715T000303Z",
+        "workstation-a-bench-fleet-87432b95a1e5e5eb-20260715T002953Z",
+        "workstation-a-bench-fleet-53bed382ec05eac9-20260715T003531Z",
+        "gcp-a3-high-h100-1g-bench-fleet-3676dd201b110a1c-20260715T005539Z",
+        "gcp-g2-l4-32-bench-fleet-84954ac2420bc0f1-20260715T005544Z",
+        "gcp-g2-l4-bench-fleet-ba239c64e5857eec-20260715T005551Z",
+        "gcp-a3-high-h100-1g-bench-fleet-74fc998548eb7ea1-20260715T010503Z",
+        "gcp-g2-l4-32-bench-fleet-b75fb0bf6b8cefb5-20260715T010536Z",
+        "gcp-g2-l4-bench-fleet-a1b39790ee5db2f5-20260715T010559Z",
+        "gcp-a3-high-h100-1g-bench-fleet-d33cdba2fa084251-20260715T011927Z",
+        "gcp-g2-l4-bench-fleet-16b1fc3932ba1c5d-20260715T012132Z",
+        "gcp-g2-l4-32-bench-fleet-a93f45c5408bf856-20260715T012337Z",
+        "gcp-a3-high-h100-1g-bench-fleet-fc981ca368cb92df-20260715T013500Z",
+        "gcp-g2-l4-32-bench-fleet-a2e086827230ba26-20260715T013516Z",
+        "gcp-g2-l4-bench-fleet-ab9737d7cae08ed9-20260715T013524Z",
+        "gcp-a3-high-h100-1g-bench-fleet-a0159f7418d9b012-20260715T014839Z",
+        "gcp-g2-l4-32-bench-fleet-59e4dff23d0c2956-20260715T014903Z",
+        "gcp-g2-l4-bench-fleet-b8798cee847ae37c-20260715T014911Z",
+        "gcp-a3-high-h100-1g-bench-fleet-12b34b1a36f4dc48-20260715T015902Z",
+        "gcp-g2-l4-32-bench-fleet-d23346119585acf5-20260715T015922Z",
+        "gcp-g2-l4-bench-fleet-7a1858e614d7d4dd-20260715T015929Z",
+        "gcp-a3-high-h100-1g-bench-fleet-ab1057bf628baa3e-20260715T020758Z",
+        "gcp-g2-l4-32-bench-fleet-f32b636331fc7560-20260715T020824Z",
+        "gcp-g2-l4-bench-fleet-d08f95b5ab9ea6ce-20260715T020840Z",
+        "gcp-a3-high-h100-1g-bench-fleet-b60cc6b49d74f50f-20260715T021822Z",
+        "gcp-g2-l4-32-bench-fleet-52065e8517b4e0bd-20260715T021906Z",
+        "gcp-g2-l4-bench-fleet-90be86c7d03a1ede-20260715T021911Z",
+        "node-macos-a-macbench-threeway-20260903T050000Z",
+        "gcp-a2-high-a100-40gb-1g-nvidia-tesla-a100-20260903T204714Z",
+        "gcp-a3-high-h100-1g-nvidia-h100-80gb-20260905T163948Z",
+        "gpu-server-sglang-gemma4-serving-parity-20260704T144837Z"
       ]
     },
     "by_model": {
+      "GLM-5.2 (real 753B checkpoint)": [
+        "a100-glm52-l1-rowsplit-ab-20260709T234240Z"
+      ],
       "GLM-5.2-UD-Q4_K_M": [
         "cpu-server-a-glm52-cpu-wedge-20260627T000000Z"
       ],
@@ -79,13 +124,21 @@
         "node-macos-a-macbench-threeway-20260903T050000Z"
       ],
       "SmolLM2-135M": [
-        "workstation-a-smollm2-135m-q8_0-20260618"
+        "workstation-a-smollm2-135m-q8_0-20260618",
+        "workstation-a-bench-fleet-53bed382ec05eac9-20260715T003531Z",
+        "gcp-a3-high-h100-1g-bench-fleet-74fc998548eb7ea1-20260715T010503Z",
+        "gcp-g2-l4-32-bench-fleet-b75fb0bf6b8cefb5-20260715T010536Z",
+        "gcp-g2-l4-bench-fleet-a1b39790ee5db2f5-20260715T010559Z"
       ],
       "SmolLM2-135M (int8 dynamic)": [
         "workstation-a-smollm2-135m-(int8-dynamic)-unknown-20260618"
       ],
       "SmolLM2-135M-Instruct": [
-        "workstation-a-smollm2-135m-q8-batch-20260618T145635Z"
+        "workstation-a-smollm2-135m-q8-batch-20260618T145635Z",
+        "gcp-a3-high-h100-1g-bench-fleet-3f79be34d1b35229-20260714T234519Z",
+        "gcp-g2-l4-bench-fleet-ed971feb9d0bf6de-20260714T234529Z",
+        "gcp-g2-l4-32-bench-fleet-c4f937d74bdff3a1-20260714T235827Z",
+        "gcp-g2-l4-32-bench-fleet-c4f937d74bdff3a1-20260715T000303Z"
       ],
       "SmolLM2-135M-Instruct (GGUF)": [
         "node-macos-a-smollm2-135m-instruct-(gguf)-unknown-20260617"
@@ -118,6 +171,12 @@
         "workstation-a-contextq-context-query-d-20260619",
         "workstation-a-turn-tax-turntax-stochas-20260619"
       ],
+      "glm_moe_dsa (synthetic)": [
+        "a100-glm52-dsa-decode-ctx-scaling-20260709T233630Z"
+      ],
+      "google/gemma-4-31B-it": [
+        "gpu-server-sglang-gemma4-serving-parity-20260704T144837Z"
+      ],
       "multi-agent-session": [
         "node-macos-a-sessionbench-20260619"
       ],
@@ -127,6 +186,11 @@
       "qwen2.5-1.5b-instruct-q8_0.gguf": [
         "node-macos-a-mac-battery-20260625T050017Z"
       ],
+      "qwen2.5-3b": [
+        "gcp-a3-high-h100-1g-bench-fleet-d7ed1f6afa901604-20260715T054347Z",
+        "gcp-g2-l4-bench-fleet-ccd9326f22bb636d-20260715T053520Z",
+        "gcp-g2-l4-32-bench-fleet-768fde4f6770a6b7-20260715T061239Z"
+      ],
       "qwen2.5-3b (qwen2) [lean]": [
         "workstation-a-gpu-qwen2.5-3b-(qwen2)-[lean]-20260619"
       ],
@@ -135,7 +199,9 @@
         "gcp-g2-l4-nvidia-l4-20260620T164719Z",
         "gcp-g2-l4-nvidia-l4-20260624T142454Z",
         "gcp-a3-high-h100-1g-nvidia-h100-80gb-20260628T105459Z",
-        "gcp-g2-l4-32-nvidia-l4-20260629T132955Z"
+        "gcp-g2-l4-32-nvidia-l4-20260629T132955Z",
+        "gcp-a2-high-a100-40gb-1g-nvidia-tesla-a100-20260903T204714Z",
+        "gcp-a3-high-h100-1g-nvidia-h100-80gb-20260905T163948Z"
       ],
       "qwen3.6-27b": [
         "workstation-a-qwen36-qwen36-agent-amd-vul-20260619",
@@ -151,7 +217,12 @@
         "node-macos-a-qwen36-qwen36-agent-mac-loc-20260619",
         "node-macos-a-qwen36-llamacpp-vulkan-qwen-20260619",
         "node-macos-a-qwen36-llamacpp-vulkan-qwen-20260619",
-        "node-macos-a-qwen36-llamacpp-qwen36-mult-20260619"
+        "node-macos-a-qwen36-llamacpp-qwen36-mult-20260619",
+        "workstation-a-bench-fleet-ddb5682fef5e2c66-20260714T232505Z",
+        "workstation-a-bench-fleet-ddb5682fef5e2c66-20260715T062106Z",
+        "gcp-a3-high-h100-1g-bench-fleet-3676dd201b110a1c-20260715T005539Z",
+        "gcp-g2-l4-32-bench-fleet-84954ac2420bc0f1-20260715T005544Z",
+        "gcp-g2-l4-bench-fleet-ba239c64e5857eec-20260715T005551Z"
       ],
       "smollm2-135m": [
         "workstation-a-radixbench-smollm2-135m-20260618"
@@ -165,7 +236,28 @@
         "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-\u2014-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618"
       ],
       "unknown": [
-        "workstation-a-unknown-unknown-20260617"
+        "workstation-a-unknown-unknown-20260617",
+        "workstation-a-bench-fleet-6a57fc5d83c48046-20260714T232940Z",
+        "workstation-a-bench-fleet-87432b95a1e5e5eb-20260715T002953Z",
+        "gcp-a3-high-h100-1g-bench-fleet-d33cdba2fa084251-20260715T011927Z",
+        "gcp-g2-l4-bench-fleet-16b1fc3932ba1c5d-20260715T012132Z",
+        "gcp-g2-l4-32-bench-fleet-a93f45c5408bf856-20260715T012337Z",
+        "gcp-a3-high-h100-1g-bench-fleet-fc981ca368cb92df-20260715T013500Z",
+        "gcp-g2-l4-32-bench-fleet-a2e086827230ba26-20260715T013516Z",
+        "gcp-g2-l4-bench-fleet-ab9737d7cae08ed9-20260715T013524Z",
+        "gcp-a3-high-h100-1g-bench-fleet-a0159f7418d9b012-20260715T014839Z",
+        "gcp-g2-l4-32-bench-fleet-59e4dff23d0c2956-20260715T014903Z",
+        "gcp-g2-l4-bench-fleet-b8798cee847ae37c-20260715T014911Z",
+        "gcp-a3-high-h100-1g-bench-fleet-12b34b1a36f4dc48-20260715T015902Z",
+        "gcp-g2-l4-32-bench-fleet-d23346119585acf5-20260715T015922Z",
+        "gcp-g2-l4-bench-fleet-7a1858e614d7d4dd-20260715T015929Z",
+        "gcp-a3-high-h100-1g-bench-fleet-ab1057bf628baa3e-20260715T020758Z",
+        "gcp-g2-l4-32-bench-fleet-f32b636331fc7560-20260715T020824Z",
+        "gcp-g2-l4-bench-fleet-d08f95b5ab9ea6ce-20260715T020840Z",
+        "gcp-a3-high-h100-1g-bench-fleet-b60cc6b49d74f50f-20260715T021822Z",
+        "gcp-g2-l4-32-bench-fleet-52065e8517b4e0bd-20260715T021906Z",
+        "gcp-g2-l4-bench-fleet-90be86c7d03a1ede-20260715T021911Z",
+        "box-873af63b-cpu-throughput-curve-20260709T003308Z"
       ],
       "visual-gen-deck": [
         "workstation-a-visualgen-20260620T140700Z"
@@ -184,7 +276,16 @@
         "gcp-g2-l4-nvidia-l4-20260624T142454Z",
         "node-macos-a-mac-battery-20260625T050017Z",
         "gcp-a3-high-h100-1g-nvidia-h100-80gb-20260628T105459Z",
-        "gcp-g2-l4-32-nvidia-l4-20260629T132955Z"
+        "gcp-g2-l4-32-nvidia-l4-20260629T132955Z",
+        "gcp-a3-high-h100-1g-bench-fleet-d7ed1f6afa901604-20260715T054347Z",
+        "gcp-g2-l4-bench-fleet-ccd9326f22bb636d-20260715T053520Z",
+        "gcp-g2-l4-32-bench-fleet-768fde4f6770a6b7-20260715T061239Z",
+        "a100-glm52-dsa-decode-ctx-scaling-20260709T233630Z",
+        "gcp-a2-high-a100-40gb-1g-nvidia-tesla-a100-20260903T204714Z",
+        "gcp-a3-high-h100-1g-nvidia-h100-80gb-20260905T163948Z"
+      ],
+      "UD-Q4_K_M": [
+        "a100-glm52-l1-rowsplit-ab-20260709T234240Z"
       ],
       "n/a": [
         "node-agent-live-offline-mock-20260617",
@@ -213,7 +314,31 @@
         "workstation-a-turn-tax-turntax-stochas-20260619",
         "node-agent-live-dogfood-claude-probe-20260619",
         "workstation-a-visualgen-20260620T140700Z",
-        "node-macos-a-sessionbench-20260619"
+        "node-macos-a-sessionbench-20260619",
+        "workstation-a-bench-fleet-6a57fc5d83c48046-20260714T232940Z",
+        "workstation-a-bench-fleet-87432b95a1e5e5eb-20260715T002953Z",
+        "gcp-a3-high-h100-1g-bench-fleet-d33cdba2fa084251-20260715T011927Z",
+        "gcp-g2-l4-bench-fleet-16b1fc3932ba1c5d-20260715T012132Z",
+        "gcp-g2-l4-32-bench-fleet-a93f45c5408bf856-20260715T012337Z",
+        "gcp-a3-high-h100-1g-bench-fleet-fc981ca368cb92df-20260715T013500Z",
+        "gcp-g2-l4-32-bench-fleet-a2e086827230ba26-20260715T013516Z",
+        "gcp-g2-l4-bench-fleet-ab9737d7cae08ed9-20260715T013524Z",
+        "gcp-a3-high-h100-1g-bench-fleet-a0159f7418d9b012-20260715T014839Z",
+        "gcp-g2-l4-32-bench-fleet-59e4dff23d0c2956-20260715T014903Z",
+        "gcp-g2-l4-bench-fleet-b8798cee847ae37c-20260715T014911Z",
+        "gcp-a3-high-h100-1g-bench-fleet-12b34b1a36f4dc48-20260715T015902Z",
+        "gcp-g2-l4-32-bench-fleet-d23346119585acf5-20260715T015922Z",
+        "gcp-g2-l4-bench-fleet-7a1858e614d7d4dd-20260715T015929Z",
+        "gcp-a3-high-h100-1g-bench-fleet-ab1057bf628baa3e-20260715T020758Z",
+        "gcp-g2-l4-32-bench-fleet-f32b636331fc7560-20260715T020824Z",
+        "gcp-g2-l4-bench-fleet-d08f95b5ab9ea6ce-20260715T020840Z",
+        "gcp-a3-high-h100-1g-bench-fleet-b60cc6b49d74f50f-20260715T021822Z",
+        "gcp-g2-l4-32-bench-fleet-52065e8517b4e0bd-20260715T021906Z",
+        "gcp-g2-l4-bench-fleet-90be86c7d03a1ede-20260715T021911Z"
+      ],
+      "official": [
+        "workstation-a-bench-fleet-ddb5682fef5e2c66-20260714T232505Z",
+        "workstation-a-bench-fleet-ddb5682fef5e2c66-20260715T062106Z"
       ],
       "q4": [
         "cpu-server-a-glm52-cpu-wedge-20260627T000000Z"
@@ -221,10 +346,24 @@
       "q8": [
         "workstation-a-radixbench-synthetic-llama-(64h/4l/8q-2kv,-vocab-256)-\u2014-wiring-witness;-numerics-proven-by-internal/model-oracle-20260618",
         "workstation-a-radixbench-smollm2-135m-20260618",
-        "workstation-a-smollm2-135m-q8-batch-20260618T145635Z"
+        "workstation-a-smollm2-135m-q8-batch-20260618T145635Z",
+        "gcp-a3-high-h100-1g-bench-fleet-3676dd201b110a1c-20260715T005539Z",
+        "gcp-g2-l4-32-bench-fleet-84954ac2420bc0f1-20260715T005544Z",
+        "gcp-g2-l4-bench-fleet-ba239c64e5857eec-20260715T005551Z",
+        "gcp-a3-high-h100-1g-bench-fleet-74fc998548eb7ea1-20260715T010503Z",
+        "gcp-g2-l4-32-bench-fleet-b75fb0bf6b8cefb5-20260715T010536Z",
+        "gcp-g2-l4-bench-fleet-a1b39790ee5db2f5-20260715T010559Z"
       ],
       "q8_0": [
-        "workstation-a-smollm2-135m-q8_0-20260618"
+        "workstation-a-smollm2-135m-q8_0-20260618",
+        "gcp-a3-high-h100-1g-bench-fleet-3f79be34d1b35229-20260714T234519Z",
+        "gcp-g2-l4-bench-fleet-ed971feb9d0bf6de-20260714T234529Z",
+        "gcp-g2-l4-32-bench-fleet-c4f937d74bdff3a1-20260714T235827Z",
+        "gcp-g2-l4-32-bench-fleet-c4f937d74bdff3a1-20260715T000303Z",
+        "workstation-a-bench-fleet-53bed382ec05eac9-20260715T003531Z"
+      ],
+      "served": [
+        "gpu-server-sglang-gemma4-serving-parity-20260704T144837Z"
       ],
       "unknown": [
         "workstation-a-unknown-unknown-20260617",
@@ -243,11 +382,12 @@
         "node-macos-a-qwen36-qwen36-agent-mac-loc-20260619",
         "node-macos-a-qwen36-llamacpp-vulkan-qwen-20260619",
         "node-macos-a-qwen36-llamacpp-vulkan-qwen-20260619",
-        "node-macos-a-qwen36-llamacpp-qwen36-mult-20260619"
+        "node-macos-a-qwen36-llamacpp-qwen36-mult-20260619",
+        "box-873af63b-cpu-throughput-curve-20260709T003308Z"
       ]
     }
   },
-  "last_updated": "2026-09-03T05:30:00Z",
+  "last_updated": "2026-09-05T16:40:54.353582+00:00",
   "machines": {
     "a100": {
       "arch": "x86_64",
@@ -255,10 +395,10 @@
       "gpu": "NVIDIA A100",
       "hostname": "datacenter-gpu-server",
       "id": "a100",
-      "last_run": null,
+      "last_run": "2026-07-09T23:42:40Z",
       "os": "Linux",
       "role": "bench-node",
-      "runs": 0
+      "runs": 2
     },
     "cpu-server-a": {
       "arch": "x86_64",
@@ -282,16 +422,27 @@
       "role": "agent-host",
       "runs": 0
     },
+    "gcp-a2-high-a100-40gb-1g": {
+      "arch": "x86_64",
+      "cpu_cores": 12,
+      "gpu": "NVIDIA A100 40GB (Ampere)",
+      "hostname": "gcp-a2-highgpu-1g",
+      "id": "gcp-a2-high-a100-40gb-1g",
+      "last_run": "20260903T204714Z",
+      "os": "GCP Deep Learning VM (CUDA)",
+      "role": "bench-node",
+      "runs": 1
+    },
     "gcp-a3-high-h100-1g": {
       "arch": "x86_64",
       "cpu_cores": 26,
       "gpu": "NVIDIA H100 (Hopper)",
       "hostname": "gcp-a3-highgpu-1g",
       "id": "gcp-a3-high-h100-1g",
-      "last_run": "20260715T021822Z",
+      "last_run": "20260905T163948Z",
       "os": "GCP Deep Learning VM (CUDA)",
       "role": "bench-node",
-      "runs": 11
+      "runs": 12
     },
     "gcp-g2-l4": {
       "arch": "x86_64",
@@ -299,7 +450,7 @@
       "gpu": "NVIDIA L4",
       "hostname": "gcp-g2-standard-8",
       "id": "gcp-g2-l4",
-      "last_run": "20260715T021911Z",
+      "last_run": "20260715T053520Z",
       "os": "GCP Deep Learning VM (CUDA)",
       "role": "bench-node",
       "runs": 13
@@ -318,7 +469,7 @@
     "node-macos-a": {
       "arch": "arm64",
       "capabilities": {
-        "served_coding_model": "qwen3.6-27b"
+        "served_coding_model": "qwen38:27b"
       },
       "cpu_cores": 12,
       "gpu": "Apple M3 Pro 18-core GPU",
@@ -332,16 +483,16 @@
     "workstation-a": {
       "arch": "x86_64",
       "capabilities": {
-        "served_coding_model": "qwen3.6-27b"
+        "served_coding_model": "qwen38:27b"
       },
       "cpu_cores": 20,
       "gpu": "NVIDIA GeForce RTX 4070 Laptop GPU",
       "hostname": "workstation-a",
       "id": "workstation-a",
-      "last_run": "20260715T003531Z",
+      "last_run": "20260715T062106Z",
       "os": "Windows",
       "role": "bench-node",
-      "runs": 4
+      "runs": 47
     }
   },
   "runs": [
@@ -1773,6 +1924,143 @@
         "model-benchmark"
       ],
       "timestamp": "20260903T050000Z"
+    },
+    {
+      "baseline_tok_per_sec": null,
+      "machine_id": "a100",
+      "model": "glm_moe_dsa (synthetic)",
+      "path": "experiments\\benchmark\\runs\\by-machine\\a100\\20260709T233630Z-glm52-dsa-decode-ctx-scaling",
+      "peak_tok_per_sec": null,
+      "precision": "Q8_0",
+      "provenance": "measured",
+      "run_id": "a100-glm52-dsa-decode-ctx-scaling-20260709T233630Z",
+      "speedup": null,
+      "tags": [
+        "gpu",
+        "a100",
+        "ampere",
+        "sm_80",
+        "glm52",
+        "dsa",
+        "sparse-attention",
+        "context-scaling",
+        "synthetic",
+        "optimistic-lower-bound",
+        "not-753b",
+        "decode",
+        "prefill"
+      ],
+      "timestamp": "2026-07-09T23:36:30Z"
+    },
+    {
+      "baseline_tok_per_sec": null,
+      "machine_id": "a100",
+      "model": "GLM-5.2 (real 753B checkpoint)",
+      "path": "experiments\\benchmark\\runs\\by-machine\\a100\\20260709T234240Z-glm52-l1-rowsplit-ab",
+      "peak_tok_per_sec": null,
+      "precision": "UD-Q4_K_M",
+      "provenance": "measured",
+      "run_id": "a100-glm52-l1-rowsplit-ab-20260709T234240Z",
+      "speedup": null,
+      "tags": [
+        "gpu",
+        "a100",
+        "ampere",
+        "sm_80",
+        "glm52",
+        "real-753b",
+        "ud-q4_k_m",
+        "llama.cpp",
+        "split-mode",
+        "tensor-parallel",
+        "pipeline-parallel",
+        "single-stream-decode",
+        "L1",
+        "negative-result",
+        "thesis-refuted"
+      ],
+      "timestamp": "2026-07-09T23:42:40Z"
+    },
+    {
+      "baseline_tok_per_sec": null,
+      "machine_id": "box-873af63b",
+      "model": null,
+      "path": "experiments\\benchmark\\runs\\by-machine\\box-873af63b\\20260709T003308Z-cpu-throughput-curve",
+      "peak_tok_per_sec": null,
+      "precision": null,
+      "provenance": "unknown",
+      "run_id": "box-873af63b-cpu-throughput-curve-20260709T003308Z",
+      "speedup": null,
+      "tags": [
+        "cpu-only",
+        "no-gpu",
+        "fak-native",
+        "throughput",
+        "single-stream",
+        "box-873af63b-first"
+      ],
+      "timestamp": "2026-07-09T00:33:08Z"
+    },
+    {
+      "baseline_tok_per_sec": null,
+      "machine_id": "gcp-a2-high-a100-40gb-1g",
+      "model": "qwen2.5-3b-instruct-q8_0.gguf",
+      "path": "experiments\\benchmark\\runs\\by-machine\\gcp-a2-high-a100-40gb-1g\\20260903T204714Z-gcp",
+      "peak_tok_per_sec": null,
+      "precision": "Q8_0",
+      "provenance": "measured",
+      "run_id": "gcp-a2-high-a100-40gb-1g-nvidia-tesla-a100-20260903T204714Z",
+      "speedup": null,
+      "tags": [
+        "gcp",
+        "gpu",
+        "ampere",
+        "engine-llama",
+        "engine-vllm",
+        "engine-fak-cuda-q8",
+        "engine-fak-cuda-tf32"
+      ],
+      "timestamp": "20260903T204714Z"
+    },
+    {
+      "baseline_tok_per_sec": null,
+      "machine_id": "gcp-a3-high-h100-1g",
+      "model": "qwen2.5-3b-instruct-q8_0.gguf",
+      "path": "experiments\\benchmark\\runs\\by-machine\\gcp-a3-high-h100-1g\\20260905T163948Z-gcp",
+      "peak_tok_per_sec": null,
+      "precision": "Q8_0",
+      "provenance": "measured",
+      "run_id": "gcp-a3-high-h100-1g-nvidia-h100-80gb-20260905T163948Z",
+      "speedup": null,
+      "tags": [
+        "gcp",
+        "gpu",
+        "hopper",
+        "engine-llama",
+        "engine-fak-cuda",
+        "engine-fak-cuda-q8",
+        "engine-fak-cuda-tf32"
+      ],
+      "timestamp": "20260905T163948Z"
+    },
+    {
+      "baseline_tok_per_sec": null,
+      "machine_id": "gpu-server-sglang",
+      "model": "google/gemma-4-31B-it",
+      "path": "experiments\\benchmark\\runs\\by-machine\\gpu-server-sglang\\20260704T144837Z-serving-parity",
+      "peak_tok_per_sec": null,
+      "precision": "served",
+      "provenance": "functional",
+      "run_id": "gpu-server-sglang-gemma4-serving-parity-20260704T144837Z",
+      "speedup": null,
+      "tags": [
+        "serving",
+        "webbench",
+        "sglang",
+        "gateway-tax",
+        "witnessed"
+      ],
+      "timestamp": "20260704T144837Z"
     }
   ],
   "version": "1.0",

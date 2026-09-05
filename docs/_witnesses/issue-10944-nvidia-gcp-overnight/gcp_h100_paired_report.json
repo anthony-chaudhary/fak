@@ -1,0 +1,48 @@
+{
+  "schema": "fak.armbench.paired-report/1",
+  "tuned_baseline": "llama",
+  "arms": {
+    "fak-cuda": {
+      "treatment_arm": "fak-cuda",
+      "baseline_arm": "llama",
+      "apples_to_apples": true,
+      "honesty_note": "FP32 weights resident in VRAM, single-stream batch=1",
+      "treatment_decode": 95.3707423162654,
+      "baseline_decode": 362.679266,
+      "paired_delta_decode": -267.3085236837346,
+      "speedup_decode": 0.2629616335191599,
+      "treatment_prefill": 58.21309106138149,
+      "baseline_prefill": 18797.662133,
+      "paired_delta_prefill": -18739.44904193862,
+      "speedup_prefill": 0.003096826078347209
+    },
+    "fak-cuda-q8": {
+      "treatment_arm": "fak-cuda-q8",
+      "baseline_arm": "llama",
+      "apples_to_apples": true,
+      "honesty_note": "TRUE APPLES-TO-APPLES: matched Q8_0 quantized weights in VRAM, single-stream batch=1",
+      "treatment_decode": 111.9391874692587,
+      "baseline_decode": 362.679266,
+      "paired_delta_decode": -250.7400785307413,
+      "speedup_decode": 0.3086451253775087,
+      "treatment_prefill": 62.92655693773002,
+      "baseline_prefill": 18797.662133,
+      "paired_delta_prefill": -18734.73557606227,
+      "speedup_prefill": 0.0033475735748530184
+    },
+    "fak-cuda-tf32": {
+      "treatment_arm": "fak-cuda-tf32",
+      "baseline_arm": "llama",
+      "apples_to_apples": true,
+      "honesty_note": "TF32 tensor-core SGEMM math vs FP32 baseline (compute-bound prefill lever)",
+      "treatment_decode": 95.71558840344389,
+      "baseline_decode": 362.679266,
+      "paired_delta_decode": -266.9636775965561,
+      "speedup_decode": 0.26391249052206686,
+      "treatment_prefill": 58.369325973526635,
+      "baseline_prefill": 18797.662133,
+      "paired_delta_prefill": -18739.292807026472,
+      "speedup_prefill": 0.0031051374668261317
+    }
+  }
+}
