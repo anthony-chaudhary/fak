@@ -97,3 +97,19 @@ func TestRouteResolutionAstraManagerPreservesExplicitWorkerOverrides(t *testing.
 		t.Errorf("got WorkerReasoningEffort %q, want high", res.Resolved.SOLRoute.WorkerReasoningEffort)
 	}
 }
+
+func TestSelectSOLRouteSubagentsSignal(t *testing.T) {
+	got := SelectSOLRoute("work on goal using sub agents", ProfileAuto, WorkDefault, "gpt-6-astra")
+	if got.Mode != SOLUltra {
+		t.Errorf("got Mode %q, want %q", got.Mode, SOLUltra)
+	}
+	if !got.MultiAgent {
+		t.Errorf("got MultiAgent = false, want true")
+	}
+	if got.WorkerModel != DefaultAstraChildWorkerModel {
+		t.Errorf("got WorkerModel %q, want %q", got.WorkerModel, DefaultAstraChildWorkerModel)
+	}
+	if got.WorkerReasoningEffort != DefaultAstraChildWorkerEffort {
+		t.Errorf("got WorkerReasoningEffort %q, want %q", got.WorkerReasoningEffort, DefaultAstraChildWorkerEffort)
+	}
+}

@@ -77,7 +77,8 @@ var (
 	}
 	parallelSignals = []string{
 		"all night", "backlog", "bulk", "fan out", "fan-out", "fleet", "independent",
-		"many issues", "multi-agent", "multi agent", "parallel", "several issues", "super loop",
+		"many issues", "multi-agent", "multi agent", "parallel", "several issues",
+		"subagent", "subagents", "sub agent", "sub agents", "super loop",
 		"super-loop", "unattended", "wave",
 	}
 	consultSignals = []string{
