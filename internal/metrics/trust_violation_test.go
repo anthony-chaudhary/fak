@@ -498,7 +498,7 @@ func TestTrustViolationLabelsHelpers(t *testing.T) {
 	}
 
 	mapLabels := TrustViolationMetricLabels(SubtypeWitnessRefuted)
-	if mapLabels[ReasonLabel] != "TRUST_VIOLATION" || mapLabels[RefusalSubtypeLabel] != "witness_refuted" {
+	if mapLabels[ReasonLabel] != "TRUST_VIOLATION" || mapLabels[RefusalSubtypeLabelKey] != "witness_refuted" {
 		t.Fatalf("TrustViolationMetricLabels unexpected: %+v", mapLabels)
 	}
 }

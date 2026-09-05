@@ -64,7 +64,7 @@ func ClassifyRefusalSubtype(reason string, meta map[string]string) string {
 
 // RefusalSubtypeLabel returns an OpenMetricLabel for the refusal_subtype dimension.
 func RefusalSubtypeLabel(reason string, meta map[string]string) OpenMetricLabel {
-	return OpenMetricLabel{Name: "refusal_subtype", Value: ClassifyRefusalSubtype(reason, meta)}
+	return OpenMetricLabel{Name: RefusalSubtypeLabelKey, Value: ClassifyRefusalSubtype(reason, meta)}
 }
 
 // VerdictRefusalSubtype classifies the refusal subtype from an abi.Verdict.

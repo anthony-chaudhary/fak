@@ -53,8 +53,8 @@ const (
 	// disambiguated trust violations.
 	TrustViolationMetricName = "fak_trust_violations_total"
 
-	// RefusalSubtypeLabel is the Prometheus label key for the mechanical boundary dimension.
-	RefusalSubtypeLabel = "refusal_subtype"
+	// RefusalSubtypeLabelKey is the Prometheus label key for the mechanical boundary dimension.
+	RefusalSubtypeLabelKey = "refusal_subtype"
 
 	// ReasonLabel is the Prometheus label key for the refusal reason.
 	ReasonLabel = "reason"
@@ -287,7 +287,7 @@ func (r TrustViolationReport) OpenMetricFamilies() []OpenMetricFamily {
 	samples := make([]OpenMetricSample, 0, len(r.BySubtype))
 	for _, t := range r.BySubtype {
 		labels := []OpenMetricLabel{
-			{Name: RefusalSubtypeLabel, Value: string(t.Subtype)},
+			{Name: RefusalSubtypeLabelKey, Value: string(t.Subtype)},
 		}
 		samples = append(samples, OpenMetricSample{
 			Labels: labels,
@@ -311,7 +311,7 @@ func (r TrustViolationReport) OpenMetricFamiliesWithReason() []OpenMetricFamily 
 	for _, t := range r.BySubtype {
 		labels := []OpenMetricLabel{
 			{Name: ReasonLabel, Value: "TRUST_VIOLATION"},
-			{Name: RefusalSubtypeLabel, Value: string(t.Subtype)},
+			{Name: RefusalSubtypeLabelKey, Value: string(t.Subtype)},
 		}
 		samples = append(samples, OpenMetricSample{
 			Labels: labels,
@@ -337,7 +337,7 @@ func (r TrustViolationReport) Prometheus() string {
 	for _, t := range r.BySubtype {
 		b.WriteString(TrustViolationMetricName)
 		b.WriteString("{")
-		b.WriteString(RefusalSubtypeLabel)
+		b.WriteString(RefusalSubtypeLabelKey)
 		b.WriteString("=\"")
 		b.WriteString(string(t.Subtype))
 		b.WriteString("\"} ")
@@ -480,7 +480,7 @@ func (r *TrustViolationRecorder) Reset() {
 func TrustViolationLabels(subtype TrustViolationSubtype) []OpenMetricLabel {
 	sub := NormalizeTrustViolationSubtype(string(subtype))
 	return []OpenMetricLabel{
-		{Name: RefusalSubtypeLabel, Value: string(sub)},
+		{Name: RefusalSubtypeLabelKey, Value: string(sub)},
 	}
 }
 
@@ -488,7 +488,7 @@ func TrustViolationLabels(subtype TrustViolationSubtype) []OpenMetricLabel {
 func TrustViolationMetricLabels(subtype TrustViolationSubtype) map[string]string {
 	sub := NormalizeTrustViolationSubtype(string(subtype))
 	return map[string]string{
-		ReasonLabel:         "TRUST_VIOLATION",
-		RefusalSubtypeLabel: string(sub),
+		ReasonLabel:            "TRUST_VIOLATION",
+		RefusalSubtypeLabelKey: string(sub),
 	}
 }
