@@ -16,8 +16,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -194,15 +196,28 @@ func verdictName(k abi.VerdictKind) string {
 }
 
 func main() {
-	in := flag.String("corpus", "testdata/poison.json", "corpus JSON from extract_context_corpus.py or a hand-authored fixture")
-	out := flag.String("out", "", "optional JSON report path")
-	chain := flag.Bool("chain", false, "fold the registered ResultAdmitter chain (normgate+ctxmmu) instead of a bare ctxmmu")
-	flag.Parse()
+	if err := run(os.Stdout, os.Stderr, os.Args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
+		os.Exit(1)
+	}
+}
+
+func run(stdout, stderr io.Writer, args []string) error {
+	fs := flag.NewFlagSet("ctxbench", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	in := fs.String("corpus", "testdata/poison.json", "corpus JSON from extract_context_corpus.py or a hand-authored fixture")
+	out := fs.String("out", "", "optional JSON report path")
+	chain := fs.Bool("chain", false, "fold the registered ResultAdmitter chain (normgate+ctxmmu) instead of a bare ctxmmu")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	cp, err := loadCorpus(*in)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, err)
+		return err
 	}
 	ctx := context.Background()
 
@@ -284,11 +299,11 @@ func main() {
 	caught, ctotal, crate := l.CatchRate()
 
 	// ---- report ----
-	fmt.Printf("== ctxbench: fak security gates over corpus ==\n")
+	fmt.Fprintf(stdout, "== ctxbench: fak security gates over corpus ==\n")
 	if len(cp.Sources) == 0 {
-		fmt.Printf("sources: (none listed in corpus)\n\n")
+		fmt.Fprintf(stdout, "sources: (none listed in corpus)\n\n")
 	} else {
-		fmt.Printf("sources: %v\n\n", cp.Sources)
+		fmt.Fprintf(stdout, "sources: %v\n\n", cp.Sources)
 	}
 
 	resultGate := "ctxmmu.Admit (bare write-time context-admission gate)"
@@ -298,22 +313,22 @@ func main() {
 			resultGate = "registered ResultAdmitter chain (normgate=off + ctxmmu)"
 		}
 	}
-	fmt.Printf("RESULT side — %s\n", resultGate)
-	fmt.Printf("  results admitted : %d  (%d bytes total)\n", total, totalBytes)
+	fmt.Fprintf(stdout, "RESULT side — %s\n", resultGate)
+	fmt.Fprintf(stdout, "  results admitted : %d  (%d bytes total)\n", total, totalBytes)
 	for _, k := range maputil.SortedKeys(byVerdict) {
-		fmt.Printf("    %-11s %d\n", k, byVerdict[k])
+		fmt.Fprintf(stdout, "    %-11s %d\n", k, byVerdict[k])
 	}
-	fmt.Printf("  quarantine reasons:\n")
+	fmt.Fprintf(stdout, "  quarantine reasons:\n")
 	for _, k := range maputil.SortedKeys(byReason) {
 		if k == "NONE" {
 			continue
 		}
-		fmt.Printf("    %-15s %d\n", k, byReason[k])
+		fmt.Fprintf(stdout, "    %-15s %d\n", k, byReason[k])
 	}
-	fmt.Printf("  pollution rate   : %d/%d = %.1f%%\n", q, total, rate*100)
-	fmt.Printf("  trigger bytes still in context after admit (LEAK): %d  <-- must be 0\n\n", leaked)
+	fmt.Fprintf(stdout, "  pollution rate   : %d/%d = %.1f%%\n", q, total, rate*100)
+	fmt.Fprintf(stdout, "  trigger bytes still in context after admit (LEAK): %d  <-- must be 0\n\n", leaked)
 
-	fmt.Printf("  per-result (non-ALLOW only):\n")
+	fmt.Fprintf(stdout, "  per-result (non-ALLOW only):\n")
 	for _, r := range rows {
 		if r.Verdict == "ALLOW" {
 			continue
@@ -325,21 +340,21 @@ func main() {
 		if r.SecretShape {
 			tag += " secret-shape"
 		}
-		fmt.Printf("    %-22s %-9s %-15s %6dB%s\n", r.Name, r.Verdict, r.Reason, r.Bytes, tag)
+		fmt.Fprintf(stdout, "    %-22s %-9s %-15s %6dB%s\n", r.Name, r.Verdict, r.Reason, r.Bytes, tag)
 	}
 
-	fmt.Printf("\nCALL side — preflight.Adjudicate (rung ladder)\n")
-	fmt.Printf("  calls adjudicated: %d\n", ctotal)
+	fmt.Fprintf(stdout, "\nCALL side — preflight.Adjudicate (rung ladder)\n")
+	fmt.Fprintf(stdout, "  calls adjudicated: %d\n", ctotal)
 	for _, k := range maputil.SortedKeys(callByVerdict) {
-		fmt.Printf("    %-11s %d\n", k, callByVerdict[k])
+		fmt.Fprintf(stdout, "    %-11s %d\n", k, callByVerdict[k])
 	}
 	if ctotal == 0 {
 		// 0/0 is not a failed gate — there were simply no calls. Say so, rather than
 		// printing "0.0% caught", which reads as the gate having let everything through.
 		// (The public poison.json fixture is result-side only; pass -corpus for a call set.)
-		fmt.Printf("  catch rate       : n/a (corpus has no calls — this fixture is result-side only)\n")
+		fmt.Fprintf(stdout, "  catch rate       : n/a (corpus has no calls — this fixture is result-side only)\n")
 	} else {
-		fmt.Printf("  catch rate       : %d/%d = %.1f%% (malformed calls caught pre-fire)\n", caught, ctotal, crate*100)
+		fmt.Fprintf(stdout, "  catch rate       : %d/%d = %.1f%% (malformed calls caught pre-fire)\n", caught, ctotal, crate*100)
 	}
 
 	if *out != "" {
@@ -360,8 +375,16 @@ func main() {
 				"by_verdict": callByVerdict, "rows": crows,
 			},
 		}
-		b, _ := benchcli.MarshalReport(report)
-		_ = os.WriteFile(*out, b, 0644)
-		fmt.Printf("\nwrote %s\n", *out)
+		b, err := benchcli.MarshalReport(report)
+		if err != nil {
+			fmt.Fprintf(stderr, "marshal report: %v\n", err)
+			return err
+		}
+		if err := os.WriteFile(*out, b, 0644); err != nil {
+			fmt.Fprintf(stderr, "write report: %v\n", err)
+			return err
+		}
+		fmt.Fprintf(stdout, "\nwrote %s\n", *out)
 	}
+	return nil
 }
