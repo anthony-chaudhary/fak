@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
@@ -282,6 +284,36 @@ func (s *Server) traceOwnerOf(trace string) (string, bool) {
 	return owner, ok
 }
 
+var (
+	pagedRefMu    sync.RWMutex
+	pagedRefOwner = make(map[string]string)
+)
+
+// recordPagedRef records the principal that authored a paged-out MMU blob ref (#11551),
+// so bounded retrieval at the MCP boundary preserves same-trace tenant isolation.
+func (s *Server) recordPagedRef(cleanID, owner string) {
+	if cleanID == "" {
+		return
+	}
+	pagedRefMu.Lock()
+	defer pagedRefMu.Unlock()
+	if len(pagedRefOwner) >= maxCtxRestoreSessions {
+		pagedRefOwner = make(map[string]string)
+	}
+	pagedRefOwner[cleanID] = owner
+}
+
+// pagedRefOwnerOf returns the principal that authored a paged-out MMU blob ref, if recorded.
+func (s *Server) pagedRefOwnerOf(cleanID string) (string, bool) {
+	if cleanID == "" {
+		return "", false
+	}
+	pagedRefMu.RLock()
+	defer pagedRefMu.RUnlock()
+	owner, ok := pagedRefOwner[cleanID]
+	return owner, ok
+}
+
 // scopeReadSelf is the C1 read-scope floor for the two read-self context ops (fak_context_restore /
 // fak_context_spans, #4192): a caller may address a trace's dropped originating task ONLY when its
 // principal matches the trace's owner. When caller and owner are the SAME principal — including both
@@ -298,17 +330,36 @@ func (s *Server) scopeReadSelf(caller string, op sessionread.ReadOp, trace strin
 	return screen.Authorize(screen.ScopeRequest{Op: op, Caller: caller, TargetOwner: owner})
 }
 
+// RestoreContinuation is the exact next retrieval call returned when bounded
+// retrieval produces a partial slice (#11551).
+type RestoreContinuation struct {
+	Tool      string                `json:"tool,omitempty"`
+	Name      string                `json:"name,omitempty"`
+	Arguments ContextRestoreRequest `json:"arguments"`
+	ID        string                `json:"id,omitempty"`
+	TraceID   string                `json:"trace_id,omitempty"`
+	Offset    int                   `json:"offset"`
+	Limit     int                   `json:"limit"`
+	Range     string                `json:"range,omitempty"`
+}
+
 // CtxRestoreResult is the fak_context_restore reply. Bytes is the verbatim dropped turn (the full
-// task, not the excerpt); Excerpt echoes the orientation line the stub carried, so a model gets both
+// task, not the excerpt) or the requested bounded slice; Excerpt echoes the orientation line the stub carried, so a model gets both
 // "what it is" and "all of it" in one answer. Provenance is WITNESSED — fak is returning bytes it
 // authored the drop of, never a guess or a fabrication.
 type CtxRestoreResult struct {
-	Schema     string `json:"schema"`
-	TraceID    string `json:"trace_id"`
-	ID         string `json:"id"`
-	Excerpt    string `json:"excerpt,omitempty"`
-	Bytes      string `json:"bytes"` // the verbatim JSON of the dropped originating-task turn
-	Provenance string `json:"provenance"`
+	Schema       string               `json:"schema"`
+	TraceID      string               `json:"trace_id"`
+	ID           string               `json:"id"`
+	Excerpt      string               `json:"excerpt,omitempty"`
+	Bytes        string               `json:"bytes"` // the verbatim JSON of the dropped originating-task turn
+	Provenance   string               `json:"provenance"`
+	Offset       int                  `json:"offset"`
+	Limit        int                  `json:"limit"`
+	TotalBytes   int                  `json:"total_bytes"`
+	HasMore      bool                 `json:"has_more"`
+	NextOffset   int                  `json:"next_offset"`
+	Continuation *RestoreContinuation `json:"continuation,omitempty"`
 }
 
 const ctxRestoreSchema = "fak-ctxrestore-result/1"
@@ -316,15 +367,18 @@ const ctxRestoreSchema = "fak-ctxrestore-result/1"
 // ContextRestoreRequest is the fak_context_restore MCP argument shape: the content-address handle a
 // tombstone embedded, an optional trace (omitted resolves to the gateway default trace — the wrapped
 // session itself under `fak guard`, so a model restoring its OWN dropped task needs no out-of-band
-// identity), and an optional recall image dir (issue #3062). ImageDir generalizes restore beyond the
-// compaction-tombstone stash: when the per-trace stash does not hold the digest, a named recall core
-// image is consulted so a recall PAGE addressed by its recall digest pages back in under the image's
-// own trust gate — the SAME content-address, one restore call. Omitted, restore is stash-only, exactly
-// as Slice 1 behaved (backward-compatible).
+// identity), an optional recall image dir (issue #3062), and optional range/limit bounding (#11551).
+// ImageDir generalizes restore beyond the compaction-tombstone stash: when the per-trace stash does
+// not hold the digest, a named recall core image is consulted so a recall PAGE addressed by its recall
+// digest pages back in under the image's own trust gate — the SAME content-address, one restore call.
+// Omitted, restore is stash-only, exactly as Slice 1 behaved (backward-compatible).
 type ContextRestoreRequest struct {
 	ID       string `json:"id"`
 	TraceID  string `json:"trace_id"`
 	ImageDir string `json:"image_dir,omitempty"`
+	Offset   int    `json:"offset,omitempty"`
+	Limit    int    `json:"limit,omitempty"`
+	Range    string `json:"range,omitempty"`
 }
 
 // restoreContext resolves a fak_context_restore call: page dropped-span bytes back in by their
@@ -356,6 +410,14 @@ func (s *Server) restoreContext(caller string, req ContextRestoreRequest) (CtxRe
 		return CtxRestoreResult{}, err
 	}
 
+	res, err := s.resolveRestoreRaw(caller, trace, id, req)
+	if err != nil {
+		return CtxRestoreResult{}, err
+	}
+	return applyRestoreBounds(res, req), nil
+}
+
+func (s *Server) resolveRestoreRaw(caller, trace, id string, req ContextRestoreRequest) (CtxRestoreResult, error) {
 	// 1) The per-trace compaction-tombstone stash — the default source. A hit here (bytes or a
 	//    trust-gate refusal) is authoritative; only a genuine miss falls through to a Store.
 	res, err := s.restoreFromStash(trace, id)
@@ -390,6 +452,13 @@ func (s *Server) restoreContext(caller string, req ContextRestoreRequest) (CtxRe
 	//     live in the shared content-addressed blob store under their sha256 digest. A request
 	//     restoring a _paged.ref pointer resolves here.
 	cleanID := strings.TrimPrefix(id, "sha256:")
+	if refOwner, ok := s.pagedRefOwnerOf(cleanID); ok && refOwner != "" && caller != refOwner {
+		return CtxRestoreResult{}, screen.Authorize(screen.ScopeRequest{
+			Op:          sessionread.OpContextRestore,
+			Caller:      caller,
+			TargetOwner: refOwner,
+		})
+	}
 	if b, ok := abi.PageOut("blob"); ok {
 		handle := abi.Ref{Kind: abi.RefBlob, Digest: cleanID}
 		if ref, perr := b.PageIn(context.Background(), handle); perr == nil && len(ref.Inline) > 0 {
@@ -462,6 +531,107 @@ func (s *Server) restoreContext(caller string, req ContextRestoreRequest) (CtxRe
 	}
 
 	return CtxRestoreResult{}, ErrRestoreMiss
+}
+
+func parseRange(r string) (offset int, limit int, ok bool) {
+	r = strings.TrimSpace(r)
+	if r == "" {
+		return 0, 0, false
+	}
+	isHTTPBytes := strings.HasPrefix(strings.ToLower(r), "bytes=")
+	r = strings.TrimPrefix(r, "bytes=")
+	r = strings.TrimPrefix(r, "BYTES=")
+	r = strings.TrimSpace(r)
+	sep := "-"
+	if strings.Contains(r, ":") {
+		sep = ":"
+	}
+	parts := strings.Split(r, sep)
+	if len(parts) == 2 {
+		start, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+		end, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err1 == nil && err2 == nil && start >= 0 && end >= start {
+			if isHTTPBytes {
+				return start, end - start + 1, true
+			}
+			return start, end - start, true
+		}
+	}
+	return 0, 0, false
+}
+
+func applyRestoreBounds(res CtxRestoreResult, req ContextRestoreRequest) CtxRestoreResult {
+	fullLen := len(res.Bytes)
+	res.TotalBytes = fullLen
+
+	offset := req.Offset
+	limit := req.Limit
+	if req.Range != "" {
+		if rOffset, rLimit, ok := parseRange(req.Range); ok {
+			if req.Offset == 0 {
+				offset = rOffset
+			}
+			if req.Limit == 0 {
+				limit = rLimit
+			}
+		}
+	}
+
+	if offset == 0 && limit <= 0 && req.Range == "" {
+		res.Offset = 0
+		res.Limit = fullLen
+		res.HasMore = false
+		res.NextOffset = fullLen
+		res.Continuation = nil
+		return res
+	}
+
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > fullLen {
+		offset = fullLen
+	}
+	if limit <= 0 {
+		limit = fullLen - offset
+	}
+
+	end := offset + limit
+	if end > fullLen {
+		end = fullLen
+	}
+
+	res.Bytes = res.Bytes[offset:end]
+	res.Offset = offset
+	res.Limit = limit
+
+	hasMore := end < fullLen
+	res.HasMore = hasMore
+	if hasMore {
+		nextOffset := end
+		res.NextOffset = nextOffset
+		nextArgs := ContextRestoreRequest{
+			ID:       res.ID,
+			TraceID:  res.TraceID,
+			ImageDir: req.ImageDir,
+			Offset:   nextOffset,
+			Limit:    limit,
+		}
+		res.Continuation = &RestoreContinuation{
+			Tool:      "fak_context_restore",
+			Name:      "fak_context_restore",
+			Arguments: nextArgs,
+			ID:        res.ID,
+			TraceID:   res.TraceID,
+			Offset:    nextOffset,
+			Limit:     limit,
+			Range:     fmt.Sprintf("%d-%d", nextOffset, nextOffset+limit),
+		}
+	} else {
+		res.NextOffset = fullLen
+		res.Continuation = nil
+	}
+	return res
 }
 
 // restoreFromStash resolves a restore-by-digest call against the per-trace compaction-tombstone stash:

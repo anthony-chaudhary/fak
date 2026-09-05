@@ -1,10 +1,16 @@
 package gateway
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 )
 
@@ -248,5 +254,333 @@ func TestRestoreDigestSchemeMatchesCtxplan(t *testing.T) {
 	b := []byte(`{"role":"user","content":"x"}`)
 	if got := ctxplan.Digest(b); len(got) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex is a fixed 64-char width
 		t.Fatalf("ctxplan.Digest length = %d, want 64-hex", len(got))
+	}
+}
+
+// TestMCPPagedResultBoundedRetrieval proves that paged MMU result refs exposed at the MCP boundary
+// advertise an actionable retrieval call, accept explicit range/limit bounds across subsequent slices,
+// return valid continuation handles, reconstruct byte-exact content, and refuse cross-principal
+// or unknown ref disclosure (#11551).
+func TestMCPPagedResultBoundedRetrieval(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+	abi.RegisterResultAdmitter(10, ctxmmu.New())
+
+	srv, err := New(Config{EngineID: "test", Model: "test-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// 1. Force paging over MCP loopback.
+	// We send a tool result > 16 KiB (oversize threshold) via fak_admit under trace "alice-trace" with principal "alice".
+	const line = "0123456789abcdefghij\n"         // 21 bytes
+	originalContent := strings.Repeat(line, 1500) // 31,500 bytes (> 16 KiB)
+
+	admitCall := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "fak_admit",
+			"arguments": map[string]any{
+				"tool":     "allow_large_reader",
+				"result":   originalContent,
+				"trace_id": "alice-trace",
+			},
+		},
+	}
+	admitBytes, err := json.Marshal(admitCall)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/mcp", bytes.NewReader(admitBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Fak-Principal", "alice")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /mcp: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("admit status = %d, want 200", resp.StatusCode)
+	}
+
+	var rpcResp rpcResponse
+	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+		t.Fatalf("decode rpc response: %v", err)
+	}
+	if rpcResp.Error != nil {
+		t.Fatalf("unexpected RPC error: %+v", rpcResp.Error)
+	}
+
+	var sysResp SyscallResponse
+	decodeMCPResult(t, rpcResp.Result, &sysResp)
+
+	if sysResp.Verdict.Kind != "TRANSFORM" {
+		t.Fatalf("verdict = %s, want TRANSFORM (oversize paged)", sysResp.Verdict.Kind)
+	}
+	if sysResp.Result == nil {
+		t.Fatal("result envelope is nil")
+	}
+
+	var pagedStub map[string]any
+	if err := json.Unmarshal([]byte(sysResp.Result.Content), &pagedStub); err != nil {
+		t.Fatalf("unmarshal paged content: %v, raw=%s", err, sysResp.Result.Content)
+	}
+	if paged, _ := pagedStub["_paged"].(bool); !paged {
+		t.Fatalf("expected _paged=true in %+v", pagedStub)
+	}
+	ref, _ := pagedStub["ref"].(string)
+	if ref == "" {
+		t.Fatalf("expected non-empty ref in %+v", pagedStub)
+	}
+
+	// Verify enriched retrieval call in paged response
+	retrievalCall, ok := pagedStub["retrieval"].(map[string]any)
+	if !ok {
+		t.Fatalf("paged response missing advertised retrieval call: %+v", pagedStub)
+	}
+	toolName, _ := retrievalCall["name"].(string)
+	if toolName == "" {
+		toolName, _ = retrievalCall["tool"].(string)
+	}
+	if toolName != "fak_context_restore" {
+		t.Fatalf("advertised retrieval tool = %q, want fak_context_restore", toolName)
+	}
+	retrievalArgs, ok := retrievalCall["arguments"].(map[string]any)
+	if !ok {
+		t.Fatalf("retrieval call missing arguments: %+v", retrievalCall)
+	}
+	if retrievalArgs["id"] != ref {
+		t.Fatalf("retrieval id = %v, want %v", retrievalArgs["id"], ref)
+	}
+
+	// 2. Follow the advertised bounded retrieval for two slices.
+	// Slice 1: call fak_context_restore with advertised args
+	slice1ReqBody, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "fak_context_restore",
+			"arguments": retrievalArgs,
+		},
+	})
+	req1, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", bytes.NewReader(slice1ReqBody))
+	req1.Header.Set("Content-Type", "application/json")
+	req1.Header.Set("X-Fak-Principal", "alice")
+
+	resp1, err := http.DefaultClient.Do(req1)
+	if err != nil {
+		t.Fatalf("POST /mcp slice1: %v", err)
+	}
+	defer resp1.Body.Close()
+	var rpcResp1 rpcResponse
+	if err := json.NewDecoder(resp1.Body).Decode(&rpcResp1); err != nil {
+		t.Fatalf("decode slice1 rpc response: %v", err)
+	}
+	if rpcResp1.Error != nil {
+		t.Fatalf("slice1 RPC error: %+v", rpcResp1.Error)
+	}
+
+	var slice1 CtxRestoreResult
+	decodeMCPResult(t, rpcResp1.Result, &slice1)
+
+	// Check output bounds and continuation on slice 1
+	limitVal := int(retrievalArgs["limit"].(float64))
+	if len(slice1.Bytes) > limitVal {
+		t.Fatalf("slice1 bytes len = %d, exceeds limit %d", len(slice1.Bytes), limitVal)
+	}
+	if len(slice1.Bytes) == 0 {
+		t.Fatal("slice1 returned empty bytes")
+	}
+	if !slice1.HasMore {
+		t.Fatal("slice1 expected has_more = true")
+	}
+	if slice1.Continuation == nil {
+		t.Fatal("slice1 expected continuation != nil")
+	}
+	if slice1.TotalBytes != len(originalContent) {
+		t.Fatalf("slice1 total_bytes = %d, want %d", slice1.TotalBytes, len(originalContent))
+	}
+	if slice1.NextOffset != len(slice1.Bytes) {
+		t.Fatalf("slice1 next_offset = %d, want %d", slice1.NextOffset, len(slice1.Bytes))
+	}
+
+	// Slice 2: follow continuation
+	slice2ReqBody, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      3,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      slice1.Continuation.Name,
+			"arguments": slice1.Continuation.Arguments,
+		},
+	})
+	req2, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", bytes.NewReader(slice2ReqBody))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("X-Fak-Principal", "alice")
+
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("POST /mcp slice2: %v", err)
+	}
+	defer resp2.Body.Close()
+	var rpcResp2 rpcResponse
+	if err := json.NewDecoder(resp2.Body).Decode(&rpcResp2); err != nil {
+		t.Fatalf("decode slice2 rpc response: %v", err)
+	}
+	if rpcResp2.Error != nil {
+		t.Fatalf("slice2 RPC error: %+v", rpcResp2.Error)
+	}
+
+	var slice2 CtxRestoreResult
+	decodeMCPResult(t, rpcResp2.Result, &slice2)
+
+	// Check output bounds and continuation on slice 2
+	if slice2.HasMore {
+		t.Fatal("slice2 expected has_more = false")
+	}
+	if slice2.Continuation != nil {
+		t.Fatalf("slice2 expected nil continuation, got %+v", slice2.Continuation)
+	}
+	if slice2.Offset != len(slice1.Bytes) {
+		t.Fatalf("slice2 offset = %d, want %d", slice2.Offset, len(slice1.Bytes))
+	}
+	if slice2.TotalBytes != len(originalContent) {
+		t.Fatalf("slice2 total_bytes = %d, want %d", slice2.TotalBytes, len(originalContent))
+	}
+
+	// Byte-compare reconstructed content
+	reconstructed := slice1.Bytes + slice2.Bytes
+	if reconstructed != originalContent {
+		t.Fatalf("reconstructed content mismatch: len got %d, want %d", len(reconstructed), len(originalContent))
+	}
+
+	// 3. Confirm unknown ref cannot disclose content
+	unknownReqBody, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      4,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "fak_context_restore",
+			"arguments": map[string]any{
+				"id":       "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+				"trace_id": "alice-trace",
+			},
+		},
+	})
+	reqUnknown, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", bytes.NewReader(unknownReqBody))
+	reqUnknown.Header.Set("Content-Type", "application/json")
+	reqUnknown.Header.Set("X-Fak-Principal", "alice")
+	respUnknown, err := http.DefaultClient.Do(reqUnknown)
+	if err != nil {
+		t.Fatalf("POST /mcp unknown: %v", err)
+	}
+	defer respUnknown.Body.Close()
+	var rpcRespUnknown rpcResponse
+	_ = json.NewDecoder(respUnknown.Body).Decode(&rpcRespUnknown)
+	if rpcRespUnknown.Error == nil {
+		t.Fatal("unknown ref expected JSON-RPC error, got success")
+	}
+
+	// 4. Confirm cross-principal ref cannot disclose content
+	// 4a. Cross-principal under alice's trace
+	crossReqBody, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      5,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "fak_context_restore",
+			"arguments": map[string]any{
+				"id":       ref,
+				"trace_id": "alice-trace",
+			},
+		},
+	})
+	reqCross, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", bytes.NewReader(crossReqBody))
+	reqCross.Header.Set("Content-Type", "application/json")
+	reqCross.Header.Set("X-Fak-Principal", "bob") // bob attempting to read alice's trace/ref
+	respCross, err := http.DefaultClient.Do(reqCross)
+	if err != nil {
+		t.Fatalf("POST /mcp cross: %v", err)
+	}
+	defer respCross.Body.Close()
+	var rpcRespCross rpcResponse
+	_ = json.NewDecoder(respCross.Body).Decode(&rpcRespCross)
+	if rpcRespCross.Error == nil {
+		t.Fatal("cross-principal ref expected JSON-RPC error, got success")
+	}
+	if !strings.Contains(rpcRespCross.Error.Message, "READ_SCOPE_DENIED") && !strings.Contains(rpcRespCross.Error.Message, "refused") {
+		t.Fatalf("cross-principal error message = %q, expected refusal/READ_SCOPE_DENIED", rpcRespCross.Error.Message)
+	}
+
+	// 4b. Cross-principal under bob's own trace
+	crossBobTraceBody, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      6,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "fak_context_restore",
+			"arguments": map[string]any{
+				"id":       ref,
+				"trace_id": "bob-trace",
+			},
+		},
+	})
+	reqCrossBob, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", bytes.NewReader(crossBobTraceBody))
+	reqCrossBob.Header.Set("Content-Type", "application/json")
+	reqCrossBob.Header.Set("X-Fak-Principal", "bob")
+	respCrossBob, err := http.DefaultClient.Do(reqCrossBob)
+	if err != nil {
+		t.Fatalf("POST /mcp cross-bob: %v", err)
+	}
+	defer respCrossBob.Body.Close()
+	var rpcRespCrossBob rpcResponse
+	_ = json.NewDecoder(respCrossBob.Body).Decode(&rpcRespCrossBob)
+	if rpcRespCrossBob.Error == nil {
+		t.Fatal("cross-principal ref under own trace expected JSON-RPC error, got success")
+	}
+}
+
+func decodeMCPResult(t *testing.T, res any, v any) {
+	t.Helper()
+	m, ok := res.(map[string]any)
+	if !ok {
+		t.Fatalf("mcp result is not an object: %T", res)
+	}
+	rawContent, ok := m["content"]
+	if !ok {
+		t.Fatalf("mcp result has no content: %+v", m)
+	}
+	var text string
+	switch c := rawContent.(type) {
+	case []any:
+		if len(c) == 0 {
+			t.Fatalf("mcp result content empty: %+v", m)
+		}
+		item, _ := c[0].(map[string]any)
+		text, _ = item["text"].(string)
+	case []map[string]any:
+		if len(c) == 0 {
+			t.Fatalf("mcp result content empty: %+v", m)
+		}
+		text, _ = c[0]["text"].(string)
+	default:
+		t.Fatalf("unexpected content type: %T", rawContent)
+	}
+	if err := json.Unmarshal([]byte(text), v); err != nil {
+		t.Fatalf("decode mcp text %q: %v", text, err)
 	}
 }

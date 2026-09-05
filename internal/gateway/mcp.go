@@ -354,7 +354,12 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 			return nil, &rpcError{Code: rpcInvalidParams, Message: "view_image is not allowed because active model does not support image inputs"}
 		}
 		req.TraceID = s.traceFor(req.TraceID)
-		ctx = WithPrincipal(ctx, req.Principal)
+		principal := principalFromContext(ctx)
+		if principal == "" {
+			principal = req.Principal
+		}
+		s.bindTraceOwner(req.TraceID, principal)
+		ctx = WithPrincipal(ctx, principal)
 		// The brokered call is a tool process (seam 3): spawn/exit rows in the
 		// same journal the guard hooks feed, keyed by the kernel trace id the
 		// seam-2 revocation gate also keys on.
@@ -374,6 +379,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		if err != nil {
 			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
 		}
+		env = s.enrichPagedResultEnvelope(env, req.TraceID)
 		return mcpToolResult(SyscallResponse{Verdict: wv, Result: env, TraceID: req.TraceID, PluginTrace: trace, EffectivePreferences: pref}), nil
 	case "fak_read":
 		// The vToolcall serve seam (#795): a real, kernel-mediated file read the model can
@@ -433,13 +439,16 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 				return nil, &rpcError{Code: rpcInvalidParams, Message: "fak_admit requires a non-empty items array"}
 			}
 			traceID := s.traceFor(req.TraceID)
+			s.bindTraceOwner(traceID, principalFromContext(ctx))
 			return mcpToolResult(s.fakAdmitBatch(ctx, req.Items, traceID, req.Witness)), nil
 		}
 		req.TraceID = s.traceFor(req.TraceID)
+		s.bindTraceOwner(req.TraceID, principalFromContext(ctx))
 		wv, env, err := s.admit(ctx, req.Tool, rawArgs(req.Result), req.Witness, req.TraceID)
 		if err != nil {
 			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
 		}
+		env = s.enrichPagedResultEnvelope(env, req.TraceID)
 		return mcpToolResult(SyscallResponse{Verdict: wv, Result: env, TraceID: req.TraceID}), nil
 	case "fak_changes":
 		var req ChangesRequest
@@ -696,6 +705,70 @@ func unpageFakReadPayload(ctx context.Context, payload []byte) []byte {
 	return payload
 }
 
+// enrichPagedResultEnvelope inspects a tool result envelope and, if the result was paged
+// out by ctxmmu ({"_paged":true,"ref":...}), enriches the stub with the exact retrieval call
+// (fak_context_restore) so an MCP client can immediately perform bounded same-trace retrieval (#11551).
+func (s *Server) enrichPagedResultEnvelope(env *ResultEnvelope, traceID string) *ResultEnvelope {
+	if s == nil || env == nil || len(env.Content) == 0 || !strings.Contains(env.Content, `"_paged"`) {
+		return env
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(env.Content), &m); err != nil {
+		return env
+	}
+	paged, _ := m["_paged"].(bool)
+	if !paged {
+		return env
+	}
+	ref, _ := m["ref"].(string)
+	if ref == "" {
+		return env
+	}
+	cleanRef := strings.TrimPrefix(ref, "sha256:")
+	effectiveTrace := s.traceFor(traceID)
+	owner, _ := s.traceOwnerOf(effectiveTrace)
+	s.recordPagedRef(cleanRef, owner)
+
+	tot := 0
+	if l, ok := m["len"].(float64); ok {
+		tot = int(l)
+	}
+	sliceLimit := (tot + 1) / 2
+	if sliceLimit <= 0 {
+		sliceLimit = 16384
+	}
+	retrievalArgs := map[string]any{
+		"id":       ref,
+		"trace_id": effectiveTrace,
+		"offset":   0,
+		"limit":    sliceLimit,
+		"range":    fmt.Sprintf("0-%d", sliceLimit),
+	}
+	retrievalCall := map[string]any{
+		"tool":      "fak_context_restore",
+		"name":      "fak_context_restore",
+		"arguments": retrievalArgs,
+		"id":        ref,
+		"trace_id":  effectiveTrace,
+		"offset":    0,
+		"limit":     sliceLimit,
+		"range":     fmt.Sprintf("0-%d", sliceLimit),
+	}
+	m["retrieval"] = retrievalCall
+	m["retrieval_call"] = retrievalCall
+
+	if env.Meta == nil {
+		env.Meta = make(map[string]string)
+	}
+	env.Meta["retrieval_tool"] = "fak_context_restore"
+	env.Meta["retrieval_id"] = ref
+
+	if enc, err := json.Marshal(m); err == nil {
+		env.Content = string(enc)
+	}
+	return env
+}
+
 // fakReadReceipt adds the additive fak_read/1 receipt to the legacy JSON payload. Existing
 // file_path/content/error fields are preserved. The receipt is rebuilt after every syscall so
 // a cached payload can never falsely retain the cold-read outcome or its latency.
@@ -781,6 +854,7 @@ func (s *Server) fakAdmitBatch(ctx context.Context, items []AdmitRequest, traceI
 			req.Witness = witness
 		}
 		wv, env, err := s.admit(ctx, req.Tool, rawArgs(req.Result), req.Witness, req.TraceID)
+		env = s.enrichPagedResultEnvelope(env, req.TraceID)
 		item := FakAdmitBatchItem{Tool: req.Tool, TraceID: req.TraceID, Verdict: wv, Result: env}
 		if err != nil {
 			item.Error = err.Error()
@@ -1120,7 +1194,10 @@ func contextIntrospectionToolDescriptors() []map[string]any {
   "properties": {
     "id": {"type": "string", "description": "the content-address handle (sha256 hex) a compaction tombstone embedded as id=<hex>, or a recall page digest"},
     "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace (your own session under fak guard)"},
-    "image_dir": {"type": "string", "description": "optional persisted recall core image dir; when the compaction stash misses the id, a recall page at that digest is paged back in under the image's trust gate"}
+    "image_dir": {"type": "string", "description": "optional persisted recall core image dir; when the compaction stash misses the id, a recall page at that digest is paged back in under the image's trust gate"},
+    "offset": {"type": "integer", "description": "optional byte offset to start retrieval from"},
+    "limit": {"type": "integer", "description": "optional maximum number of bytes to retrieve"},
+    "range": {"type": "string", "description": "optional byte range to retrieve (e.g. '0-100' or 'bytes=0-100')"}
   },
   "additionalProperties": false
 }`),
