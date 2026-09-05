@@ -96,6 +96,8 @@ func printUnknownVerb(w io.Writer, verb string) {
 
 func dispatchCoreVerbA(name string, args []string) bool {
 	switch name {
+	case "redteam":
+		cmdRedTeam(args)
 	case "agent":
 		cmdAgent(args)
 	case "agentic":
