@@ -103,7 +103,7 @@ SCHEMA = "fak-repo-hygiene-scorecard/1"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 try:  # the root-md allowlist the DOC_PLACEMENT gate enforces
-    from check_doc_placement import ALLOWED_ROOT_MD, NOTES_DIR
+    from check_doc_placement import ALLOWED_ROOT_MD, NOTES_DIR, is_allowed_root_md
 except Exception:  # noqa: BLE001
     ALLOWED_ROOT_MD = {
         "README.md", "START-HERE.md", "INSTALL.md", "INDEX.md", "CONTRIBUTING.md",
@@ -111,6 +111,9 @@ except Exception:  # noqa: BLE001
         "EXTENDING.md", "GETTING-STARTED.md", "POLICY.md", "STATUS.md", "CLAIMS.md",
     }
     NOTES_DIR = "docs/notes"
+
+    def is_allowed_root_md(name: str) -> bool:
+        return name in ALLOWED_ROOT_MD or (name.startswith("GOAL-") and name.endswith(".md"))
 
 try:  # the file-admission junk patterns
     from check_committed_files import HARD_JUNK, SOFT_JUNK, EXEMPT_DATA_DIRS
@@ -402,7 +405,7 @@ def is_reader_facing(rel: str) -> bool:
         return False
     parts = rel.split("/")
     if len(parts) == 1:
-        return parts[0] in ALLOWED_ROOT_MD
+        return is_allowed_root_md(parts[0])
     if parts[0] != "docs":
         return False
     return not (len(parts) >= 3 and parts[1] in ARCHIVE_DIRS)
@@ -485,7 +488,7 @@ def flesch(text: str) -> float:
 
 def root_md_violations(root_md: list[str]) -> list[str]:
     """Root-level .md basenames not on the DOC_PLACEMENT allowlist."""
-    return sorted(n for n in root_md if n not in ALLOWED_ROOT_MD)
+    return sorted(n for n in root_md if not is_allowed_root_md(n))
 
 
 def root_other_violations(root_other: list[str]) -> list[str]:

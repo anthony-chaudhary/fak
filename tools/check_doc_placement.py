@@ -60,6 +60,10 @@ ALLOWED_ROOT_MD = {
 NOTES_DIR = "docs/notes"
 
 
+def is_allowed_root_md(name: str) -> bool:
+    return name in ALLOWED_ROOT_MD or (name.startswith("GOAL-") and name.endswith(".md"))
+
+
 def _git(args: list[str], root: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", root] + args, capture_output=True, text=True)
 
@@ -67,7 +71,7 @@ def _git(args: list[str], root: str) -> subprocess.CompletedProcess:
 def _violations(names) -> list[str]:
     return sorted(
         n for n in names
-        if n.endswith(".md") and "/" not in n and n not in ALLOWED_ROOT_MD
+        if n.endswith(".md") and "/" not in n and not is_allowed_root_md(n)
     )
 
 
@@ -122,7 +126,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--audit-staged", action="store_true", help="scan staged additions (pre-commit)")
-    g.add_argument("--audit-tree", action="store_true", help="scan the whole tracked tree (CI/DoD)")
+    g.add_argument("--audit-tree", "--tree", dest="audit_tree", action="store_true", help="scan the whole tracked tree (CI/DoD)")
     ap.add_argument("--root", default=".", help="repo root (default: cwd)")
     args = ap.parse_args()
     root = os.path.abspath(args.root)

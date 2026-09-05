@@ -324,19 +324,19 @@ def check_doc_placement(root, tracked):
     # public front door must stay uncluttered. Shares the allowlist with the
     # pre-commit gate (tools/check_doc_placement.py) so the two cannot drift.
     import sys as _sys
-    allow = None
     try:
         _sys.path.insert(0, str(root / "tools"))
-        from check_doc_placement import ALLOWED_ROOT_MD as _allow
-        allow = set(_allow)
+        from check_doc_placement import is_allowed_root_md
     except Exception:
         allow = {"README.md", "START-HERE.md", "INSTALL.md", "INDEX.md", "CONTRIBUTING.md",
                  "CLA.md", "SECURITY.md", "PUBLIC-SCRUB-POLICY.md", "AGENTS.md", "CLAUDE.md",
                  "CODE_OF_CONDUCT.md", "CHANGELOG.md", "GOVERNANCE.md", "MAINTAINERS.md",
                  "ROADMAP.md", "AUTHORS.md", "NOTICE.md", "SUPPORT.md", "HISTORY.md"}
+        def is_allowed_root_md(name):
+            return name in allow or (name.startswith("GOAL-") and name.endswith(".md"))
     out = []
     for f in sorted(tracked):
-        if "/" not in f and f.endswith(".md") and f not in allow:
+        if "/" not in f and f.endswith(".md") and not is_allowed_root_md(f):
             out.append(Finding("doc-placement", "FAIL",
                                "dated/research doc at repo root — move to docs/notes/", f))
     return out
