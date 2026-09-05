@@ -689,3 +689,190 @@ func TestObservationEnvelopeGoldenAndStateLaws(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 5. Benchmarks
+// ---------------------------------------------------------------------------
+
+var (
+	benchSinkBytes []byte
+	benchSinkErr   error
+	benchSinkBool  bool
+)
+
+func populatedShrinkLeverVars() ShrinkLeverVars {
+	return ShrinkLeverVars{
+		WireRunsLevers:   true,
+		Wire:             "anthropic",
+		LiveOnWire:       []string{ShrinkLeverCompactHistoryBudget, ShrinkLeverElideStaleReads},
+		InertOnWire:      []string{ShrinkLeverDeferColdTools},
+		DualLocalRouting: false,
+		Finding:          FindingShrinkLeverInertOnWire,
+	}
+}
+
+const shrinkLeverVarsWire = `{
+	"wire_runs_levers": true,
+	"wire": "anthropic",
+	"live_on_wire": ["compact_history_budget", "elide_stale_reads"],
+	"inert_on_wire": ["defer_cold_tools"],
+	"dual_local_routing": false,
+	"finding": "SHRINK_LEVER_INERT_ON_WIRE"
+}`
+
+func BenchmarkSessionVars_Marshal(b *testing.B) {
+	sv := populatedSessionVars()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		out, err := json.Marshal(sv)
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchSinkBytes = out
+	}
+}
+
+func BenchmarkSessionVars_Unmarshal(b *testing.B) {
+	raw := []byte(sessionVarsWire)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var sv SessionVars
+		if err := json.Unmarshal(raw, &sv); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkCacheAttributionVars_Marshal(b *testing.B) {
+	ca := populatedCacheAttributionVars()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		out, err := json.Marshal(ca)
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchSinkBytes = out
+	}
+}
+
+func BenchmarkCacheAttributionVars_Unmarshal(b *testing.B) {
+	raw := []byte(cacheAttributionVarsWire)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var ca CacheAttributionVars
+		if err := json.Unmarshal(raw, &ca); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkManagedCacheVars_Marshal(b *testing.B) {
+	mc := populatedManagedCacheVars()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		out, err := json.Marshal(mc)
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchSinkBytes = out
+	}
+}
+
+func BenchmarkManagedCacheVars_Unmarshal(b *testing.B) {
+	raw := []byte(managedCacheVarsWire)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var mc ManagedCacheVars
+		if err := json.Unmarshal(raw, &mc); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkManagedCacheVars_WireHasNo1hTTLLever(b *testing.B) {
+	mc := ManagedCacheVars{Wire: WireOpenAIResponses}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchSinkBool = mc.WireHasNo1hTTLLever()
+	}
+}
+
+func BenchmarkShrinkLeverVars_Marshal(b *testing.B) {
+	sl := populatedShrinkLeverVars()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		out, err := json.Marshal(sl)
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchSinkBytes = out
+	}
+}
+
+func BenchmarkShrinkLeverVars_Unmarshal(b *testing.B) {
+	raw := []byte(shrinkLeverVarsWire)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var sl ShrinkLeverVars
+		if err := json.Unmarshal(raw, &sl); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkObservationEnvelope_Validate(b *testing.B) {
+	envelope := ObservationEnvelope{
+		Schema:       ObservationSchemaV1,
+		Source:       "gateway",
+		Revision:     "r1",
+		Provenance:   "measured",
+		Availability: AvailabilityObserved,
+		Data:         json.RawMessage(`{"hits":0}`),
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchSinkErr = envelope.Validate()
+	}
+}
+
+func BenchmarkObservationEnvelope_Marshal(b *testing.B) {
+	envelope := ObservationEnvelope{
+		Schema:       ObservationSchemaV1,
+		Source:       "gateway",
+		Revision:     "r1",
+		Provenance:   "measured",
+		Availability: AvailabilityObserved,
+		Data:         json.RawMessage(`{"hits":0}`),
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		out, err := json.Marshal(envelope)
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchSinkBytes = out
+	}
+}
+
+func BenchmarkObservationEnvelope_Unmarshal(b *testing.B) {
+	raw := []byte(`{"schema":"fak-observation/1","source":"gateway","revision":"r1","provenance":"measured","availability":"OBSERVED","data":{"hits":0}}`)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var env ObservationEnvelope
+		if err := json.Unmarshal(raw, &env); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
