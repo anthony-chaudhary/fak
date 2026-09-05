@@ -27,6 +27,8 @@ recipe**. This page carries those labels rather than coining its own. The *custo
 column in the tables below is a **wire fact** (can the tool repoint its wire), not a support
 label.
 
+> **Building your own harness?** See the architectural evaluation: [When to use `fak guard` vs native `harnesskit`](../architecture/when-to-use-fak-guard-for-harnesses.md) and the [Public-harness vs. private-factory boundary](../architecture/public-private-harness-boundary.md).
+
 ---
 
 ## Harnesses with a dedicated guide

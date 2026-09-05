@@ -9,7 +9,7 @@ This document defines the architectural boundary between **public `fak`** (the o
 
 > **Context:** As detailed in `NOTES-serving-product-economics-and-hardware-architecture-2026-09-03.md` (in `fak-private`), our autonomous development flywheel ("The Factory") is as much a competitive advantage as the kernel itself ("The Engine"). This document establishes the boundary, encapsulation rules, and migration phases for moving development process modules into `fak-private`.
 >
-> For GPU hardware boundaries, see [`docs/gpu-server-private-boundary.md`](gpu-server-private-boundary.md). For public fleet status, see [`docs/fleet.md`](fleet.md). For multi-repo workspace topology and synchronization mechanics, see [`docs/notes/2026-09-03-dual-repo-workspace-and-safe-sync.md`](notes/2026-09-03-dual-repo-workspace-and-safe-sync.md).
+> For GPU hardware boundaries, see [`docs/gpu-server-private-boundary.md`](gpu-server-private-boundary.md). For public fleet status, see [`docs/fleet.md`](fleet.md). For multi-repo workspace topology and synchronization mechanics, see [`docs/notes/2026-09-03-dual-repo-workspace-and-safe-sync.md`](notes/2026-09-03-dual-repo-workspace-and-safe-sync.md). For harness-level contracts and isolation rules across the public/private seam, see [`docs/architecture/public-private-harness-boundary.md`](architecture/public-private-harness-boundary.md).
 
 ---
 
