@@ -188,7 +188,30 @@ func (t *Toolset) executeGrep(ctx context.Context, a GrepArgs, re *regexp.Regexp
 			}
 			matchTruncated := false
 			if len(cleanLine) > maxMatchLineBytes {
-				cleanLine = snapToRuneBoundary(cleanLine, maxMatchLineBytes)
+				loc := re.FindStringIndex(cleanLine)
+				start := 0
+				if len(loc) == 2 {
+					matchLen := loc[1] - loc[0]
+					if matchLen >= maxMatchLineBytes {
+						start = loc[0]
+					} else {
+						mid := loc[0] + matchLen/2
+						start = mid - maxMatchLineBytes/2
+						if start < 0 {
+							start = 0
+						}
+						if start+maxMatchLineBytes > len(cleanLine) {
+							start = len(cleanLine) - maxMatchLineBytes
+							if start < 0 {
+								start = 0
+							}
+						}
+						for start < loc[0] && !utf8.RuneStart(cleanLine[start]) {
+							start++
+						}
+					}
+				}
+				cleanLine = snapToRuneBoundary(cleanLine[start:], maxMatchLineBytes)
 				matchTruncated = true
 				truncated = true
 				truncationReason = upgradeTruncationReason(truncationReason, "line_width")

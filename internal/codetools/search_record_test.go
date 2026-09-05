@@ -3,6 +3,7 @@ package codetools
 import (
 	"context"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -522,6 +523,198 @@ func TestSnapToRuneBoundaryMultiByte(t *testing.T) {
 		}
 		if strings.ContainsRune(matchText, utf8.RuneError) {
 			t.Fatalf("emoji match.Text contains replacement character: %q", matchText)
+		}
+	})
+}
+
+func TestGrepOversizedLineCentersMatch(t *testing.T) {
+	dir := t.TempDir()
+	ts, err := New(Config{Root: dir})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// 1,000-byte line with "target_token" starting at byte 700
+	prefix := strings.Repeat("A", 700)
+	token := "target_token"
+	suffix := strings.Repeat("B", 1000-700-len(token))
+	line := prefix + token + suffix
+	mustWrite(t, filepath.Join(dir, "match700.txt"), line+"\n")
+
+	re := regexp.MustCompile(token)
+	root, r := ts.searchRoot("")
+	if r != nil {
+		t.Fatalf("searchRoot: %v", r)
+	}
+	rec := ts.executeGrep(context.Background(), GrepArgs{Pattern: token}, re, root, 10)
+	if rec.isErr {
+		t.Fatalf("executeGrep failed: %s", string(rec.errJSON))
+	}
+	if len(rec.matches) != 1 {
+		t.Fatalf("len(matches) = %d, want 1", len(rec.matches))
+	}
+	match := rec.matches[0]
+	if !strings.Contains(match.Text, "target_token") {
+		t.Fatalf("match.Text does not contain %q: got %q", "target_token", match.Text)
+	}
+	if len(match.Text) > maxMatchLineBytes {
+		t.Fatalf("len(match.Text) = %d, want <= %d", len(match.Text), maxMatchLineBytes)
+	}
+}
+
+func TestGrepMatchCenteringEdgeCases(t *testing.T) {
+	dir := t.TempDir()
+	ts, err := New(Config{Root: dir})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	root, r := ts.searchRoot("")
+	if r != nil {
+		t.Fatalf("searchRoot: %v", r)
+	}
+
+	t.Run("empty_lines", func(t *testing.T) {
+		mustWrite(t, filepath.Join(dir, "empty.txt"), "\n\n\n")
+		re := regexp.MustCompile(`^$`)
+		rec := ts.executeGrep(context.Background(), GrepArgs{Path: "empty.txt", Pattern: `^$`}, re, root, 10)
+		if rec.isErr {
+			t.Fatalf("executeGrep failed: %s", string(rec.errJSON))
+		}
+		if len(rec.matches) != 4 {
+			t.Fatalf("len(matches) = %d, want 4", len(rec.matches))
+		}
+		for _, m := range rec.matches {
+			if m.Text != "" || m.Truncated {
+				t.Fatalf("unexpected match: %+v", m)
+			}
+		}
+	})
+
+	t.Run("match_at_start_0", func(t *testing.T) {
+		line := "START_TOKEN" + strings.Repeat("X", 1000)
+		mustWrite(t, filepath.Join(dir, "start0.txt"), line+"\n")
+		re := regexp.MustCompile("START_TOKEN")
+		rec := ts.executeGrep(context.Background(), GrepArgs{Path: "start0.txt", Pattern: "START_TOKEN"}, re, root, 10)
+		if rec.isErr {
+			t.Fatalf("executeGrep failed: %s", string(rec.errJSON))
+		}
+		if len(rec.matches) != 1 {
+			t.Fatalf("len(matches) = %d, want 1", len(rec.matches))
+		}
+		m := rec.matches[0]
+		if !strings.HasPrefix(m.Text, "START_TOKEN") {
+			t.Fatalf("match.Text should start with START_TOKEN, got %q", m.Text)
+		}
+		if len(m.Text) > maxMatchLineBytes {
+			t.Fatalf("len(m.Text) = %d, want <= %d", len(m.Text), maxMatchLineBytes)
+		}
+		if !m.Truncated {
+			t.Fatal("expected match to be truncated")
+		}
+	})
+
+	t.Run("match_at_end_of_line", func(t *testing.T) {
+		line := strings.Repeat("Y", 1000) + "END_TOKEN"
+		mustWrite(t, filepath.Join(dir, "end.txt"), line+"\n")
+		re := regexp.MustCompile("END_TOKEN")
+		rec := ts.executeGrep(context.Background(), GrepArgs{Path: "end.txt", Pattern: "END_TOKEN"}, re, root, 10)
+		if rec.isErr {
+			t.Fatalf("executeGrep failed: %s", string(rec.errJSON))
+		}
+		if len(rec.matches) != 1 {
+			t.Fatalf("len(matches) = %d, want 1", len(rec.matches))
+		}
+		m := rec.matches[0]
+		if !strings.HasSuffix(m.Text, "END_TOKEN") {
+			t.Fatalf("match.Text should end with END_TOKEN, got %q", m.Text)
+		}
+		if len(m.Text) > maxMatchLineBytes {
+			t.Fatalf("len(m.Text) = %d, want <= %d", len(m.Text), maxMatchLineBytes)
+		}
+		if !m.Truncated {
+			t.Fatal("expected match to be truncated")
+		}
+	})
+
+	t.Run("multibyte_utf8_boundaries", func(t *testing.T) {
+		prefix := strings.Repeat("A", 443) + "世" + strings.Repeat("B", 700-443-3)
+		token := "MID_TOKEN"
+		suffix := strings.Repeat("C", 955-(443+3+len(strings.Repeat("B", 700-443-3))+len(token))) + "🎉" + strings.Repeat("D", 200)
+		line := prefix + token + suffix
+		mustWrite(t, filepath.Join(dir, "utf8_boundaries.txt"), line+"\n")
+
+		re := regexp.MustCompile(token)
+		rec := ts.executeGrep(context.Background(), GrepArgs{Path: "utf8_boundaries.txt", Pattern: token}, re, root, 10)
+		if rec.isErr {
+			t.Fatalf("executeGrep failed: %s", string(rec.errJSON))
+		}
+		if len(rec.matches) != 1 {
+			t.Fatalf("len(matches) = %d, want 1", len(rec.matches))
+		}
+		m := rec.matches[0]
+		if !utf8.ValidString(m.Text) {
+			t.Fatalf("match.Text is not valid UTF-8: %q", m.Text)
+		}
+		if strings.ContainsRune(m.Text, utf8.RuneError) {
+			t.Fatalf("match.Text contains replacement character: %q", m.Text)
+		}
+		if !strings.Contains(m.Text, token) {
+			t.Fatalf("match.Text does not contain token: got %q", m.Text)
+		}
+		if len(m.Text) > maxMatchLineBytes {
+			t.Fatalf("len(m.Text) = %d, want <= %d", len(m.Text), maxMatchLineBytes)
+		}
+	})
+
+	t.Run("match_spanning_window_boundaries", func(t *testing.T) {
+		token800 := strings.Repeat("M", 800)
+		line := strings.Repeat("P", 300) + token800 + strings.Repeat("S", 300)
+		mustWrite(t, filepath.Join(dir, "spanning.txt"), line+"\n")
+
+		re := regexp.MustCompile(`M{800}`)
+		rec := ts.executeGrep(context.Background(), GrepArgs{Path: "spanning.txt", Pattern: `M{800}`}, re, root, 10)
+		if rec.isErr {
+			t.Fatalf("executeGrep failed: %s", string(rec.errJSON))
+		}
+		if len(rec.matches) != 1 {
+			t.Fatalf("len(matches) = %d, want 1", len(rec.matches))
+		}
+		m := rec.matches[0]
+		if len(m.Text) > maxMatchLineBytes {
+			t.Fatalf("len(m.Text) = %d, want <= %d", len(m.Text), maxMatchLineBytes)
+		}
+		if !utf8.ValidString(m.Text) {
+			t.Fatalf("m.Text is not valid UTF-8: %q", m.Text)
+		}
+		if !strings.HasPrefix(m.Text, "MMMM") {
+			t.Fatalf("m.Text should anchor at start of match, got %q", m.Text)
+		}
+		if !m.Truncated {
+			t.Fatal("expected match to be truncated")
+		}
+	})
+
+	t.Run("zero_width_regex_at_end_of_long_line", func(t *testing.T) {
+		line := strings.Repeat("Z", 1000)
+		subDir := t.TempDir()
+		ts2, _ := New(Config{Root: subDir})
+		root2, _ := ts2.searchRoot("")
+		mustWrite(t, filepath.Join(subDir, "dollar.txt"), line+"\n")
+		re := regexp.MustCompile(`$`)
+		rec := ts2.executeGrep(context.Background(), GrepArgs{Pattern: `$`}, re, root2, 10)
+		if rec.isErr {
+			t.Fatalf("executeGrep failed: %s", string(rec.errJSON))
+		}
+		// A line ending with \n splits into [line, ""] so there's line 1 (1000 bytes) and line 2 (0 bytes)
+		if len(rec.matches) != 2 {
+			t.Fatalf("len(matches) = %d, want 2", len(rec.matches))
+		}
+		m := rec.matches[0]
+		if len(m.Text) != maxMatchLineBytes {
+			t.Fatalf("len(m.Text) = %d, want %d", len(m.Text), maxMatchLineBytes)
+		}
+		if !m.Truncated {
+			t.Fatal("expected match to be truncated")
 		}
 	})
 }
