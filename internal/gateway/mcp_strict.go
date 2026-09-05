@@ -238,6 +238,7 @@ func strictSanitize(s map[string]any) map[string]any {
 	delete(s, "minProperties")
 	delete(s, "maxProperties")
 	delete(s, "patternProperties")
+	delete(s, "dependentRequired")
 
 	if fmtVal, hasFmt := s["format"]; hasFmt {
 		if fmtStr, ok := fmtVal.(string); ok {
@@ -248,6 +249,81 @@ func strictSanitize(s map[string]any) map[string]any {
 			delete(s, "format")
 		}
 	}
+
+	if props, ok := s["properties"].(map[string]any); ok {
+		for k, v := range props {
+			if vMap, ok := v.(map[string]any); ok {
+				props[k] = strictSanitize(vMap)
+			}
+		}
+	}
+
+	if apMap, ok := s["additionalProperties"].(map[string]any); ok {
+		s["additionalProperties"] = strictSanitize(apMap)
+	}
+
+	if itemsMap, ok := s["items"].(map[string]any); ok {
+		s["items"] = strictSanitize(itemsMap)
+	} else if itemsSlice, ok := s["items"].([]any); ok {
+		for i, it := range itemsSlice {
+			if itMap, ok := it.(map[string]any); ok {
+				itemsSlice[i] = strictSanitize(itMap)
+			}
+		}
+	}
+
+	if prefixSlice, ok := s["prefixItems"].([]any); ok {
+		for i, it := range prefixSlice {
+			if itMap, ok := it.(map[string]any); ok {
+				prefixSlice[i] = strictSanitize(itMap)
+			}
+		}
+	}
+
+	if anyOfSlice, ok := s["anyOf"].([]any); ok {
+		for i, it := range anyOfSlice {
+			if itMap, ok := it.(map[string]any); ok {
+				anyOfSlice[i] = strictSanitize(itMap)
+			}
+		}
+	}
+
+	if allOfSlice, ok := s["allOf"].([]any); ok {
+		for i, it := range allOfSlice {
+			if itMap, ok := it.(map[string]any); ok {
+				allOfSlice[i] = strictSanitize(itMap)
+			}
+		}
+	}
+
+	if oneOfSlice, ok := s["oneOf"].([]any); ok {
+		for i, it := range oneOfSlice {
+			if itMap, ok := it.(map[string]any); ok {
+				oneOfSlice[i] = strictSanitize(itMap)
+			}
+		}
+	}
+
+	if notMap, ok := s["not"].(map[string]any); ok {
+		s["not"] = strictSanitize(notMap)
+	}
+
+	if defsMap, ok := s["$defs"].(map[string]any); ok {
+		for k, v := range defsMap {
+			if vMap, ok := v.(map[string]any); ok {
+				defsMap[k] = strictSanitize(vMap)
+			}
+		}
+	}
+
+	if defsMap, ok := s["definitions"].(map[string]any); ok {
+		for k, v := range defsMap {
+			if vMap, ok := v.(map[string]any); ok {
+				defsMap[k] = strictSanitize(vMap)
+			}
+		}
+	}
+
 	return s
 }
 
@@ -255,6 +331,51 @@ func strictTransformObject(obj map[string]any) map[string]any {
 	obj = strictSanitize(obj)
 	obj["type"] = "object"
 	obj["additionalProperties"] = false
+
+	if defsMap, isMap := obj["$defs"].(map[string]any); isMap {
+		for dk, dv := range defsMap {
+			if dvMap, ok := dv.(map[string]any); ok {
+				defsMap[dk] = strictTransformSchema(dvMap)
+			}
+		}
+		obj["$defs"] = defsMap
+	}
+
+	if defsMap, isMap := obj["definitions"].(map[string]any); isMap {
+		for dk, dv := range defsMap {
+			if dvMap, ok := dv.(map[string]any); ok {
+				defsMap[dk] = strictTransformSchema(dvMap)
+			}
+		}
+		obj["definitions"] = defsMap
+	}
+
+	if anyOfSlice, isSlice := obj["anyOf"].([]any); isSlice {
+		for i, it := range anyOfSlice {
+			if itMap, ok := it.(map[string]any); ok {
+				anyOfSlice[i] = strictTransformSchema(itMap)
+			}
+		}
+		obj["anyOf"] = anyOfSlice
+	}
+
+	if allOfSlice, isSlice := obj["allOf"].([]any); isSlice {
+		for i, it := range allOfSlice {
+			if itMap, ok := it.(map[string]any); ok {
+				allOfSlice[i] = strictTransformSchema(itMap)
+			}
+		}
+		obj["allOf"] = allOfSlice
+	}
+
+	if oneOfSlice, isSlice := obj["oneOf"].([]any); isSlice {
+		for i, it := range oneOfSlice {
+			if itMap, ok := it.(map[string]any); ok {
+				oneOfSlice[i] = strictTransformSchema(itMap)
+			}
+		}
+		obj["oneOf"] = oneOfSlice
+	}
 
 	propsVal, hasProps := obj["properties"]
 	if !hasProps || propsVal == nil {

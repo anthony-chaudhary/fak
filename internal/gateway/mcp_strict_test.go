@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -204,6 +205,33 @@ func TestOpenAIStrictSchema(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "deeply nested $defs with patternProperties, minLength, and default",
+			input: `{
+				"type": "object",
+				"properties": {
+					"req": {"$ref": "#/$defs/Sub"}
+				},
+				"required": ["req"],
+				"$defs": {
+					"Sub": {
+						"type": "object",
+						"patternProperties": {"^x-": {"type": "string"}},
+						"properties": {
+							"val": {"type": "string", "minLength": 2, "default": "hi"}
+						}
+					}
+				}
+			}`,
+			wantErrs: 0,
+			validate: func(t *testing.T, res json.RawMessage) {
+				var parsed any
+				if err := json.Unmarshal(res, &parsed); err != nil {
+					t.Fatalf("unmarshal error: %v", err)
+				}
+				assertNoForbiddenDraftKeywords(t, parsed, "$")
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -351,6 +379,222 @@ func TestAllMCPToolsPassOpenAIStrictMode(t *testing.T) {
 	for _, exp := range expectedTools {
 		if !foundTools[exp] {
 			t.Errorf("expected tool %q was not found in StrictToolDescriptors() output", exp)
+		}
+	}
+}
+
+func TestStrictSanitizerNestedDefs(t *testing.T) {
+	input := `{
+		"type": "object",
+		"properties": {
+			"filter": {
+				"$ref": "#/$defs/FilterConfig"
+			},
+			"options": {
+				"type": "object",
+				"patternProperties": {
+					"^opt_": {"type": "string"}
+				},
+				"properties": {
+					"verbose": {
+						"type": "boolean",
+						"default": false
+					}
+				}
+			}
+		},
+		"required": ["filter"],
+		"$defs": {
+			"FilterConfig": {
+				"type": "object",
+				"patternProperties": {
+					"^[a-z]+$": {"type": "string"}
+				},
+				"properties": {
+					"name": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 100,
+						"default": "unnamed"
+					},
+					"rules": {
+						"type": "array",
+						"minItems": 1,
+						"maxItems": 10,
+						"uniqueItems": true,
+						"items": {
+							"type": "object",
+							"patternProperties": {
+								"^rule_": {"type": "string"}
+							},
+							"properties": {
+								"pattern": {
+									"type": "string",
+									"minLength": 3,
+									"default": ".*"
+								},
+								"action": {
+									"type": "string",
+									"default": "allow"
+								}
+							},
+							"required": ["pattern"]
+						}
+					},
+					"nestedDef": {
+						"type": "object",
+						"properties": {
+							"inner": {
+								"type": "string",
+								"minLength": 5,
+								"default": "val"
+							}
+						},
+						"patternProperties": {
+							"^meta_": {"type": "string"}
+						},
+						"dependentRequired": {
+							"inner": ["name"]
+						}
+					}
+				},
+				"dependentRequired": {
+					"rules": ["name"]
+				},
+				"required": ["name"]
+			}
+		}
+	}`
+
+	res, err := ToOpenAIStrictSchema(json.RawMessage(input))
+	if err != nil {
+		t.Fatalf("ToOpenAIStrictSchema failed: %v", err)
+	}
+
+	errs := ValidateOpenAIStrictMode(res)
+	if len(errs) != 0 {
+		t.Fatalf("ValidateOpenAIStrictMode returned errors (%d): %v\nschema: %s", len(errs), errs, string(res))
+	}
+
+	var parsed any
+	if err := json.Unmarshal(res, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
+
+	assertNoForbiddenDraftKeywords(t, parsed, "$")
+}
+
+func TestStrictSanitizerAllContainers(t *testing.T) {
+	input := `{
+		"type": "object",
+		"properties": {
+			"choice": {
+				"anyOf": [
+					{
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 10,
+						"default": "abc"
+					},
+					{
+						"type": "object",
+						"patternProperties": {
+							"^val_": {"type": "string"}
+						},
+						"properties": {
+							"count": {
+								"type": "integer",
+								"default": 10
+							}
+						}
+					}
+				]
+			},
+			"combo": {
+				"allOf": [
+					{
+						"type": "object",
+						"patternProperties": {"^k_": {"type": "string"}},
+						"properties": {
+							"id": {"type": "string", "minLength": 2, "default": "id"}
+						}
+					}
+				]
+			},
+			"single": {
+				"oneOf": [
+					{
+						"type": "string",
+						"minLength": 1,
+						"default": "x"
+					}
+				]
+			}
+		},
+		"required": ["choice"],
+		"definitions": {
+			"OldDef": {
+				"type": "object",
+				"patternProperties": {
+					"^p_": {"type": "string"}
+				},
+				"properties": {
+					"title": {
+						"type": "string",
+						"minLength": 4,
+						"default": "defTitle"
+					}
+				},
+				"dependentRequired": {
+					"title": ["other"]
+				}
+			}
+		}
+	}`
+
+	res, err := ToOpenAIStrictSchema(json.RawMessage(input))
+	if err != nil {
+		t.Fatalf("ToOpenAIStrictSchema failed: %v", err)
+	}
+
+	errs := ValidateOpenAIStrictMode(res)
+	if len(errs) != 0 {
+		t.Fatalf("ValidateOpenAIStrictMode returned errors (%d): %v\nschema: %s", len(errs), errs, string(res))
+	}
+
+	var parsed any
+	if err := json.Unmarshal(res, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
+
+	assertNoForbiddenDraftKeywords(t, parsed, "$")
+}
+
+func assertNoForbiddenDraftKeywords(t *testing.T, node any, path string) {
+	forbidden := []string{
+		"patternProperties",
+		"minLength",
+		"maxLength",
+		"minItems",
+		"maxItems",
+		"uniqueItems",
+		"default",
+		"dependentRequired",
+	}
+
+	switch val := node.(type) {
+	case map[string]any:
+		for _, f := range forbidden {
+			if _, exists := val[f]; exists {
+				t.Errorf("found forbidden keyword %q at %s", f, path)
+			}
+		}
+		for k, v := range val {
+			assertNoForbiddenDraftKeywords(t, v, path+"."+k)
+		}
+	case []any:
+		for i, item := range val {
+			assertNoForbiddenDraftKeywords(t, item, fmt.Sprintf("%s[%d]", path, i))
 		}
 	}
 }
