@@ -165,30 +165,73 @@ func TestGoalContinuation_RecordDenialTracking(t *testing.T) {
 	}
 }
 
-func TestGoalContinuation_FormatWorldStateConsecutiveStall(t *testing.T) {
-	session := NewGoalContinuationSession("goal-ws-stall", "Test format world state stall")
-	env := map[string]string{"ENV": "staging"}
+func TestGoalContinuation_CombinedWorldStateAndTurnProgressLifecycle(t *testing.T) {
+	session := NewGoalContinuationSession("goal-lifecycle", "Combined world state and turn progress lifecycle")
+	env := map[string]string{"ENV": "production", "STEP": "active"}
 
-	// Turn 1: initial baseline (turnsDelivered = 1, isFirst = true)
-	session.FormatWorldState(env, false)
-	if session.BranchBlocked {
-		t.Fatalf("turn 1 should not be blocked")
-	}
+	for i := 1; i <= 5; i++ {
+		up, msg := session.FormatWorldState(env, false)
+		if i == 1 && !up.Full {
+			t.Fatalf("turn 1 expected full world state snapshot")
+		} else if i > 1 && up.Full {
+			t.Fatalf("turn %d with unchanged env expected partial diff, got full", i)
+		}
+		if msg.Role != RoleSystem {
+			t.Fatalf("turn %d expected RoleSystem message, got %s", i, msg.Role)
+		}
+		// FormatWorldState must be idempotent context formatting and not increment turnsDelivered
+		if session.TurnsDelivered() != i-1 {
+			t.Fatalf("turn %d: FormatWorldState unexpectedly incremented turnsDelivered, got %d, expected %d", i, session.TurnsDelivered(), i-1)
+		}
 
-	// Turns 2..5: 4 consecutive turns with identical env hash
-	for i := 2; i <= 5; i++ {
-		session.FormatWorldState(env, false)
+		blocked := session.RecordTurnProgress(TurnProgress{ToolExecutions: 1})
+		if blocked {
+			t.Fatalf("turn %d unexpectedly returned blocked=true", i)
+		}
 		if session.BranchBlocked {
-			t.Fatalf("turn %d should not be blocked yet", i)
+			t.Fatalf("turn %d unexpectedly tripped BranchBlocked", i)
+		}
+		if !session.CanContinue() {
+			t.Fatalf("turn %d unexpectedly suppressed continuation", i)
+		}
+		if session.TurnsDelivered() != i {
+			t.Fatalf("turn %d expected TurnsDelivered() == %d, got %d", i, i, session.TurnsDelivered())
 		}
 	}
 
-	// Turn 6: 5th consecutive turn with identical env hash trips MaxConsecutiveNoProgress (5)
-	session.FormatWorldState(env, false)
-	if !session.BranchBlocked {
-		t.Fatalf("turn 6 with 5 consecutive identical world states must trip BranchBlocked")
+	if session.TurnsDelivered() != 5 {
+		t.Fatalf("expected TurnsDelivered() == 5, got %d", session.TurnsDelivered())
 	}
-	if session.CanContinue() {
-		t.Fatalf("continuation must be suppressed")
+	if !session.CanContinue() {
+		t.Fatalf("expected CanContinue() == true after 5 turns with progress")
+	}
+	if session.BranchBlocked {
+		t.Fatalf("expected BranchBlocked == false")
+	}
+}
+
+func TestGoalContinuation_FormatWorldStateIdempotentDoesNotStall(t *testing.T) {
+	session := NewGoalContinuationSession("goal-ws-idempotent", "Test format world state idempotency")
+	env := map[string]string{"ENV": "staging"}
+
+	for i := 1; i <= 10; i++ {
+		up, msg := session.FormatWorldState(env, false)
+		if i == 1 && !up.Full {
+			t.Fatalf("turn 1 must emit full snapshot")
+		} else if i > 1 && up.Full {
+			t.Fatalf("call %d with unchanged env must emit partial diff", i)
+		}
+		if msg.Role != RoleSystem {
+			t.Fatalf("call %d expected RoleSystem, got %s", i, msg.Role)
+		}
+		if session.TurnsDelivered() != 0 {
+			t.Fatalf("FormatWorldState must not increment TurnsDelivered, got %d", session.TurnsDelivered())
+		}
+		if session.BranchBlocked {
+			t.Fatalf("FormatWorldState must not trip BranchBlocked on consecutive calls")
+		}
+		if !session.CanContinue() {
+			t.Fatalf("FormatWorldState must not suppress continuation")
+		}
 	}
 }

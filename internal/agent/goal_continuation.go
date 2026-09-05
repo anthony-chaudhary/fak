@@ -357,8 +357,7 @@ type WorldStateUpdate struct {
 
 // FormatWorldState emits world state as a diff/partial by default (#10671).
 // A full injection is emitted only on the first turn (turn 0), explicit drift, or forced request.
-// If the session turn budget is exceeded or consecutive turns exhibit no state delta exceeding
-// the MaxConsecutiveNoProgress threshold, BranchBlocked is tripped and further continuations are suppressed (#11639).
+// It is an idempotent context formatter: it does not consume turn budget or mutate stall detector state (#11649).
 func (g *GoalContinuationSession) FormatWorldState(currentEnv map[string]string, forceFull bool) (WorldStateUpdate, Message) {
 	if g.BranchBlocked || g.turnsDelivered >= g.effectiveMaxTurns() {
 		g.BranchBlocked = true
@@ -381,51 +380,10 @@ func (g *GoalContinuationSession) FormatWorldState(currentEnv map[string]string,
 	}
 
 	currentHash := computeEnvHash(currentEnv)
-	isFirst := g.turnsDelivered == 0
+	isFirst := g.lastWorldHash == ""
 	drift := g.lastWorldHash != "" && g.lastWorldHash != currentHash
 
-	g.turnsDelivered++
 	g.lastWorldHash = currentHash
-
-	// Track state delta for stall detector
-	if isFirst || drift {
-		g.consecutiveNoProgress = 0
-		if g.StallDetector != nil {
-			g.StallDetector.ConsecutiveNoProgress = 0
-		}
-	} else {
-		// Identical world state hash without drift
-		maxThreshold := g.effectiveMaxConsecutiveNoProgress()
-		if g.StallDetector != nil {
-			g.StallDetector.MaxConsecutiveNoProgress = maxThreshold
-			g.StallDetector.RecordProgress(false)
-			g.consecutiveNoProgress = g.StallDetector.ConsecutiveNoProgress
-			if g.StallDetector.BranchBlocked {
-				g.BranchBlocked = true
-				g.StallReason = g.StallDetector.StallReason
-				if g.StallReason == "" {
-					g.StallReason = StallReasonMaxConsecutiveNoProgress
-				}
-			}
-		} else {
-			g.consecutiveNoProgress++
-			if g.consecutiveNoProgress >= maxThreshold {
-				g.BranchBlocked = true
-				g.StallReason = StallReasonMaxConsecutiveNoProgress
-			}
-		}
-	}
-
-	if g.turnsDelivered >= g.effectiveMaxTurns() {
-		g.BranchBlocked = true
-		if g.StallReason == "" {
-			g.StallReason = StallReasonMaxTurnsExceeded
-		}
-		if g.StallDetector != nil {
-			g.StallDetector.BranchBlocked = true
-			g.StallDetector.StallReason = g.StallReason
-		}
-	}
 
 	if isFirst || forceFull || drift {
 		// Full baseline snapshot
