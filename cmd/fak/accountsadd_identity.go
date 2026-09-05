@@ -144,6 +144,9 @@ func writeClaudeJSONIdentity(dir string, id accounts.ProbedIdentity) error {
 	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, &doc) // best-effort: a corrupt file is replaced wholesale
 	}
+	if doc == nil {
+		doc = make(map[string]any)
+	}
 	doc["oauthAccount"] = claudeOAuthAccountBlock(id)
 	return writeClaudeJSONDoc(path, doc)
 }
