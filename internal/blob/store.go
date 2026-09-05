@@ -1,17 +1,5 @@
-// Package blob is the v0.1 default backend behind every abi.Ref: a
-// content-addressed (sha256) in-memory blob store. It provides the three things
-// the frozen ABI leaves open as seams:
-//
-//   - abi.Resolver        — materialize bytes from a Ref / Put bytes -> Ref
-//   - abi.RegionBackend   — the registered provider of that Resolver (the
-//     zero-copy seam; v0.1 is a copy-CAS, a shared arena is a later swap)
-//   - abi.PageOutBackend  — the context-MMU's page-out codec (cold/quarantined
-//     results page out to a handle Ref and back)
-//
-// Content addressing is the load-bearing property: the digest IS the identity,
-// so the vDSO (tier-2 cache) and the context-MMU (paged-out results) share one
-// store and a byte-identical payload is stored once. Small payloads stay inline
-// (RefInline) to avoid a store round-trip on the hot path.
+// Package blob provides an in-memory, content-addressed blob store backing abi.Ref
+// resolution, region management, and page-out caching with byte-bounded LRU eviction.
 package blob
 
 import (
@@ -28,45 +16,27 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
-// InlineMax is the largest payload kept inline on the Ref itself. Anything larger
-// is stored in the CAS and the Ref carries only the digest+handle.
+// InlineMax is the byte-size threshold below which payloads stay inline on a Ref.
 const InlineMax = 256
 
-// DefaultMaxBytes bounds the resident CAS so a long-running gateway cannot accrete
-// distinct payloads without limit. It is generous — far above any single call's
-// working set, so eviction only ever fires in the pathological unbounded-growth
-// case — and only ever drops UNPINNED digests (transient call args/results no live
-// holder still references). Override with FAK_BLOB_MAX_BYTES (0 = unbounded).
-const DefaultMaxBytes = 1 << 30 // 1 GiB
+// DefaultMaxBytes is the default 1 GiB ceiling for resident unpinned CAS blobs.
+const DefaultMaxBytes = 1 << 30
 
-// Store is a concurrency-safe, byte-bounded content-addressed blob store.
-//
-// Bounding is pin-aware: a digest a live holder will resolve LATER (a vDSO tier-2
-// cache entry, a context-MMU held quarantine handle) is Pin'd, which protects it
-// from eviction; everything else (transient gateway call args/results that are
-// resolved only within their producing call) is evictable LRU/FIFO once the
-// resident footprint exceeds maxBytes. Eviction never drops a pinned digest, so it
-// can never break the vDSO soundness invariant ("a cache hit equals a fresh call")
-// or a gated page-in. recall Sessions carry their OWN CAS (recall.Load), so they
-// are unaffected by global eviction. maxBytes <= 0 disables eviction entirely
-// (legacy append-only behavior).
+// Store is a concurrency-safe, byte-bounded content-addressed memory blob store
+// that supports refcounted pins to protect live entries from LRU eviction.
 type Store struct {
 	mu       sync.RWMutex
-	blobs    map[string][]byte        // digest -> bytes
-	bytes    int64                    // total bytes resident in blobs (O(1) footprint tap)
-	maxBytes int64                    // 0 => unbounded (no eviction)
-	pins     map[string]int           // digest -> pin count (>0 => protected, kept OUT of lru)
-	lru      *list.List               // evictable (unpinned) digests; front = most-recently inserted
-	lruIndex map[string]*list.Element // digest -> its lru element (only unpinned, resident digests)
+	blobs    map[string][]byte
+	bytes    int64
+	maxBytes int64
+	pins     map[string]int
+	lru      *list.List
+	lruIndex map[string]*list.Element
 	puts     int64
-	hits     int64 // Put of an already-present digest (dedup)
-	// resolv is bumped from Resolve under the READ lock (Resolve is intentionally
-	// concurrent — it only reads the blob map), so the counter itself must be atomic:
-	// two readers holding the RLock would otherwise race on this plain increment. A
-	// concurrent K-arm replay (turnbench.RunPolicyReplay) resolves the same shared
-	// payload from several goroutines at once, which is exactly the path that trips it.
+	hits     int64
+	// resolv is accessed via sync/atomic under RLock.
 	resolv  int64
-	evicted int64 // digests dropped by the byte bound
+	evicted int64
 }
 
 // New returns an empty store bounded by FAK_BLOB_MAX_BYTES (default DefaultMaxBytes).
@@ -74,10 +44,7 @@ func New() *Store {
 	return newStore(MaxBytesFromEnv("FAK_BLOB_MAX_BYTES", DefaultMaxBytes))
 }
 
-// NewWithBudget returns an empty store whose resident CAS holds at most maxBytes of
-// blob payload (a non-positive maxBytes falls back to DefaultMaxBytes). It is the seam
-// the leak-regression test uses to exercise eviction with a small budget; the bound is
-// still pin-aware, so a pinned digest is never the thing evicted.
+// NewWithBudget returns an empty store with a custom resident byte ceiling.
 func NewWithBudget(maxBytes int64) *Store {
 	if maxBytes < 1 {
 		maxBytes = DefaultMaxBytes
@@ -95,12 +62,7 @@ func newStore(maxBytes int64) *Store {
 	}
 }
 
-// MaxBytesFromEnv reads a resident-byte budget from the environment variable
-// named name, returning def when it is unset or does not hold a non-negative
-// integer. It is the budget parser shared by the in-memory and durable stores
-// (blob reads FAK_BLOB_MAX_BYTES default DefaultMaxBytes; blobfs reads
-// FAK_BLOB_DIR_MAX_BYTES default 0/unbounded) — hoisted here alongside
-// PreparePut/PageIn so the env parse lives in exactly one place.
+// MaxBytesFromEnv parses an integer byte budget from the named environment variable.
 func MaxBytesFromEnv(name string, def int64) int64 {
 	if v, ok := os.LookupEnv(name); ok {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
@@ -110,9 +72,6 @@ func MaxBytesFromEnv(name string, def int64) int64 {
 	return def
 }
 
-// storeLocked inserts a NEW digest's bytes (caller holds s.mu and has confirmed the
-// digest is absent), tracking the footprint, the evictable LRU, and then enforcing
-// the byte bound. A digest pinned before it was stored stays out of the LRU.
 func (s *Store) storeLocked(d string, b []byte) {
 	s.blobs[d] = append([]byte(nil), b...)
 	s.bytes += int64(len(b))
@@ -122,10 +81,6 @@ func (s *Store) storeLocked(d string, b []byte) {
 	s.evictLocked()
 }
 
-// evictLocked drops unpinned digests (oldest first) until the resident footprint is
-// within maxBytes. Pinned digests are never in lru, so they are never evicted; if
-// only pinned digests remain, the footprint legitimately exceeds the bound and the
-// loop stops (it bounds the leak, not the live working set). Caller holds s.mu.
 func (s *Store) evictLocked() {
 	if s.maxBytes <= 0 {
 		return
@@ -133,7 +88,7 @@ func (s *Store) evictLocked() {
 	for s.bytes > s.maxBytes {
 		el := s.lru.Back()
 		if el == nil {
-			return // everything resident is pinned (live) — nothing safe to drop
+			return
 		}
 		d := el.Value.(string)
 		s.lru.Remove(el)
@@ -146,10 +101,7 @@ func (s *Store) evictLocked() {
 	}
 }
 
-// Pin protects a digest from eviction for as long as a live holder will resolve it
-// later (a vDSO cache entry, a held quarantine handle). It is refcounted, so a
-// digest shared by several holders (content dedup) survives until the LAST Unpin.
-// A no-op for the empty digest. Safe to call before or after the bytes are stored.
+// Pin increments the refcounted protection preventing eviction of digest.
 func (s *Store) Pin(digest string) {
 	if digest == "" {
 		return
@@ -158,15 +110,14 @@ func (s *Store) Pin(digest string) {
 	defer s.mu.Unlock()
 	s.pins[digest]++
 	if s.pins[digest] == 1 {
-		if el, ok := s.lruIndex[digest]; ok { // was evictable -> protect it
+		if el, ok := s.lruIndex[digest]; ok {
 			s.lru.Remove(el)
 			delete(s.lruIndex, digest)
 		}
 	}
 }
 
-// Unpin releases one Pin. When the last holder unpins, the digest becomes evictable
-// again (re-entered at the LRU front if still resident). A no-op if not pinned.
+// Unpin decrements pin protection, restoring digest to evictable LRU status when zero.
 func (s *Store) Unpin(digest string) {
 	if digest == "" {
 		return
@@ -182,25 +133,19 @@ func (s *Store) Unpin(digest string) {
 		if _, ok := s.blobs[digest]; ok {
 			s.lruIndex[digest] = s.lru.PushFront(digest)
 		}
-		s.evictLocked() // it may now be the thing that puts us over budget
+		s.evictLocked()
 		return
 	}
 	s.pins[digest] = n - 1
 }
 
-// Digest is the canonical content address of b.
+// Digest returns the canonical sha256 content address for byte slice b.
 func Digest(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
 
-// PreparePut builds the addressable Ref header every content-addressed Store's Put
-// shares — the digest, length, default taint/scope, and the InlineMax split. A
-// payload at or below InlineMax rides inline on the Ref (no store round-trip) and
-// is returned with inline=true and Kind=RefInline; a larger payload is returned
-// with inline=false and Kind=RefBlob, leaving the caller to persist the bytes in
-// its own backing store (memory map, disk, remote object endpoint) before handing
-// the Ref back. It is the shared prologue hoisted out of blob/blobfs/blobhttp Put.
+// PreparePut constructs an addressable Ref header, keeping payloads at or below InlineMax inline.
 func PreparePut(b []byte) (r abi.Ref, inline bool) {
 	r = abi.Ref{Digest: Digest(b), Len: int64(len(b)), Taint: abi.TaintTainted, Scope: abi.ScopeAgent}
 	if len(b) <= InlineMax {
@@ -212,12 +157,7 @@ func PreparePut(b []byte) (r abi.Ref, inline bool) {
 	return r, false
 }
 
-// PageIn re-materializes a paged-out handle Ref into an inline Ref by resolving its
-// bytes through res (the backend the handle belongs to). It is the byte-identical
-// PageIn shared by every content-addressed Store (memory/disk/remote): the only
-// per-backend difference is which Resolver reads the bytes, so callers pass their
-// own Store as res. The returned Ref carries the handle's identity (digest, taint,
-// scope) with the resolved bytes inline.
+// PageIn resolves a paged-out handle Ref into an inline Ref via the provided Resolver.
 func PageIn(ctx context.Context, res abi.Resolver, handle abi.Ref) (abi.Ref, error) {
 	b, err := res.Resolve(ctx, handle)
 	if err != nil {
@@ -226,9 +166,7 @@ func PageIn(ctx context.Context, res abi.Resolver, handle abi.Ref) (abi.Ref, err
 	return abi.Ref{Kind: abi.RefInline, Digest: handle.Digest, Inline: b, Len: int64(len(b)), Taint: handle.Taint, Scope: handle.Scope}, nil
 }
 
-// Put stores b and returns an addressable Ref. Small payloads are returned
-// inline; larger ones are stored in the CAS. A byte-identical payload is stored
-// exactly once (content-addressed dedup) — the property the vDSO and MMU rely on.
+// Put stores bytes in the CAS or inline and returns the corresponding addressable Ref.
 func (s *Store) Put(ctx context.Context, b []byte) (abi.Ref, error) {
 	r, inline := PreparePut(b)
 	if inline {
@@ -254,7 +192,7 @@ func (s *Store) Resolve(ctx context.Context, r abi.Ref) ([]byte, error) {
 	case abi.RefBlob, abi.RefRegion:
 		s.mu.RLock()
 		defer s.mu.RUnlock()
-		atomic.AddInt64(&s.resolv, 1) // RLock allows concurrent Resolvers; the counter must be atomic
+		atomic.AddInt64(&s.resolv, 1)
 		b, ok := s.blobs[r.Digest]
 		if !ok {
 			return nil, fmt.Errorf("blob: unknown digest %s", r.Digest)
@@ -265,8 +203,7 @@ func (s *Store) Resolve(ctx context.Context, r abi.Ref) ([]byte, error) {
 	}
 }
 
-// PageOut moves a (possibly inline) Ref's bytes into the CAS and returns a handle
-// Ref that carries no inline bytes — the MMU's "evict to a pointer" primitive.
+// PageOut offloads inline Ref bytes into the CAS and returns a handle Ref.
 func (s *Store) PageOut(ctx context.Context, r abi.Ref) (abi.Ref, error) {
 	b, err := s.Resolve(ctx, r)
 	if err != nil {
@@ -286,12 +223,10 @@ func (s *Store) PageIn(ctx context.Context, handle abi.Ref) (abi.Ref, error) {
 	return PageIn(ctx, s, handle)
 }
 
-// Stats reports store activity (puts, dedup hits, resolves) for KPI taps.
+// Stats reports lifetime store metrics for puts, deduplication hits, and resolves.
 func (s *Store) Stats() (puts, dedupHits, resolves int64) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	// resolv is bumped atomically under the READ lock by concurrent Resolvers, so it
-	// is read atomically here too (the RLock alone does not order it against them).
 	return s.puts, s.hits, atomic.LoadInt64(&s.resolv)
 }
 
@@ -302,22 +237,14 @@ func (s *Store) Len() int {
 	return len(s.blobs)
 }
 
-// Bytes reports the total bytes resident in the CAS — the live footprint of the
-// append-only store, the surface a footprint KPI / the proc-resource guard's
-// memory analogue alarms on when it grows without bound.
+// Bytes returns the total payload bytes currently resident in the CAS.
 func (s *Store) Bytes() int64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.bytes
 }
 
-// Reset drops every stored blob, reclaiming all CAS memory. SAFE ONLY at a
-// quiescent lifecycle boundary: every outstanding RefBlob (a vDSO cache entry, a
-// held quarantine handle, a paged-out pointer) becomes unresolvable afterward, so
-// the caller must guarantee no in-flight Ref will be resolved across the Reset.
-// It is the lifecycle leaf's reclaim hook — the CAS dual of vDSO.BumpWorld — for a
-// long-running gateway that would otherwise accrete distinct payloads for its
-// whole lifetime. Counters are left intact (they are cumulative activity taps).
+// Reset purges all stored blobs and clears resident memory while retaining activity counters.
 func (s *Store) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -328,18 +255,14 @@ func (s *Store) Reset() {
 	s.lruIndex = map[string]*list.Element{}
 }
 
-// Evicted reports how many digests the byte bound has dropped (a KPI tap; a rising
-// count means real working pressure or a leak the bound is now absorbing).
+// Evicted returns the count of unpinned blobs dropped to satisfy resident bounds.
 func (s *Store) Evicted() int64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.evicted
 }
 
-// Resident reports the current resident CAS size (blob count, total bytes) and the
-// lifetime count of blobs dropped by the byte budget — the leak-sweep observability
-// triple (blobCount/bytes plateau while evicted climbs). A convenience view over
-// Len/Bytes/Evicted under a single lock.
+// Resident returns a point-in-time snapshot of blob count, total bytes, and evicted count.
 func (s *Store) Resident() (blobCount int, bytes, evicted int64) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -353,9 +276,7 @@ func (s *Store) MaxBytes() int64 {
 	return s.maxBytes
 }
 
-// SetMaxBytes changes the resident-footprint ceiling and immediately enforces it
-// (0 = unbounded). Pinned digests are never evicted, so a tighter bound only ever
-// drops unpinned transient entries.
+// SetMaxBytes updates the resident byte limit and immediately evicts eligible unpinned blobs.
 func (s *Store) SetMaxBytes(n int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -363,28 +284,25 @@ func (s *Store) SetMaxBytes(n int64) {
 	s.evictLocked()
 }
 
-// ----------------------------------------------------------------------------
-// ABI registration: the blob store is the default RegionBackend + PageOutBackend.
-// ----------------------------------------------------------------------------
-
-// backend adapts *Store to abi.RegionBackend.
 type backend struct{ s *Store }
 
-// Resolver returns the underlying Store as the abi.Resolver for this RegionBackend.
+// Resolver returns the underlying Store as the abi.Resolver.
 func (b backend) Resolver() abi.Resolver { return b.s }
+
+// Caps returns backend capabilities supported by the Store.
 func (b backend) Caps() []abi.Capability { return nil }
+
+// PageOut offloads a Ref payload into the underlying Store.
 func (b backend) PageOut(ctx context.Context, r abi.Ref) (abi.Ref, error) {
 	return b.s.PageOut(ctx, r)
 }
 
-// PageIn re-materializes a paged-out handle into an inline Ref via the underlying Store.
+// PageIn resolves a paged handle Ref through the underlying Store.
 func (b backend) PageIn(ctx context.Context, h abi.Ref) (abi.Ref, error) {
 	return b.s.PageIn(ctx, h)
 }
 
-// Default is the process-wide store backing the registered RegionBackend, so the
-// vDSO tier-2 cache and the context-MMU page-out share one CAS (content-addressed
-// dedup across both).
+// Default is the process-wide Store instance registered with the ABI runtime.
 var Default = New()
 
 func init() {
