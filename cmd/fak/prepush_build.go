@@ -1055,8 +1055,8 @@ func safeArchiveJoin(root, name string) (string, error) {
 // goBuildPackageArgs constructs the verification-only build argv. -trimpath keeps Go's cache
 // identities stable when the same committed source is materialized under disposable roots.
 func goBuildPackageArgs(pkgs []string) []string {
-	args := make([]string, 0, len(pkgs)+2)
-	args = append(args, "build", "-trimpath")
+	args := make([]string, 0, len(pkgs)+3)
+	args = append(args, "build", "-trimpath", "-buildvcs=false")
 	return append(args, pkgs...)
 }
 

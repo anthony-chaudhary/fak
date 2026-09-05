@@ -268,7 +268,7 @@ func ciPreflightDisambiguationArgs() []string {
 }
 
 func ciPreflightBuildArgs() []string {
-	return []string{"build", "-trimpath", "./..."}
+	return []string{"build", "-trimpath", "-buildvcs=false", "./..."}
 }
 
 func renderCIPreflight(w io.Writer, res ciPreflightResult) {
@@ -320,7 +320,7 @@ func goSmokeCheck(dir string) (string, bool) {
 	smokePath := filepath.Join(dir, smokeBin)
 	defer os.Remove(smokePath)
 
-	buildCmd := windowgate.Command("go", "build", "-o", smokeBin, "./cmd/fak")
+	buildCmd := windowgate.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", smokeBin, "./cmd/fak")
 	buildCmd.Dir = dir
 	windowgate.ConfigureBackgroundCommand(buildCmd)
 	if out, err := buildCmd.CombinedOutput(); err != nil {
