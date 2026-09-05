@@ -48,7 +48,7 @@ func defaultDenyOperatorRemedy(a ToolAdjudication) string {
 		return ""
 	}
 	tool := refusalCommandTool(a.Tool)
-	return "operator choice (outside this wrapped agent): run `fak guard allow --ttl 15m " + tool +
+	return "for autonomous agents: decompose into S0/S1 leaves, pivot to permitted tools, land safe verified partial progress, or emit a structured ABSTAIN record. Operator choice (outside this wrapped agent): run `fak guard allow --ttl 15m " + tool +
 		"`; the live guard reloads the temporary repo overlay automatically, then retry the open task." +
 		" Surface this choice to the operator instead of invoking it through the refused tool." +
 		" If " + tool + " is a standard harness tool, update fak too; the built-in floor should cover it."
@@ -438,7 +438,7 @@ func defaultAffordanceForReason(reason string) string {
 	case "REVERSIBILITY_CONFIRM":
 		return "re-propose with _fak_confirm key or choose sanctioned alternative"
 	case "DEFAULT_DENY":
-		return "run fak guard allow or update policy profile"
+		return "decompose into S0/S1 leaves, pivot to permitted tools, or emit a structured ABSTAIN record"
 	case "LIVELOCK_DETECTED":
 		return "change approach; identical repeated calls are refused"
 	case "NEEDS_WITNESS":
@@ -456,7 +456,7 @@ func defaultAffordanceForReason(reason string) string {
 	case "INVALID_TOOL_ARGUMENTS":
 		return "correct tool arguments to match schema and retry"
 	default:
-		return "choose an admitted tool or request operator override"
+		return "choose an admitted tool, land safe partial deliverables, or emit a structured ABSTAIN record"
 	}
 }
 

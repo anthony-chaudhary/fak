@@ -407,3 +407,17 @@ func TestRecoverTrustViolationUsesPreflight(t *testing.T) {
 		t.Fatalf("TRUST_VIOLATION step = %+v, want fak preflight", plan.Steps)
 	}
 }
+
+func TestRecoverPolicyBlockRecommendsScopedAbstain(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runRecover(&out, &errb, []string{"POLICY_BLOCK", "--dry-run"}); rc != 0 {
+		t.Fatalf("rc = %d, stderr=%s", rc, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "scoped fail-to-abstain") && !strings.Contains(got, "ABSTAIN") {
+		t.Fatalf("expected scoped fail-to-abstain guidance in POLICY_BLOCK output:\n%s", got)
+	}
+	if !strings.Contains(got, "Operator only — do not attempt from autonomous agent") {
+		t.Fatalf("expected operator-only qualification for manual guard overrides in POLICY_BLOCK output:\n%s", got)
+	}
+}

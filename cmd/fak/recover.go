@@ -188,7 +188,7 @@ var emittedRecoveryReasons = []string{
 	"DISAMBIGUATION_TIMEOUT",
 	"DIVERGED_DISJOINT",
 	"DIVERGED_OVERLAP",
-	"INTEGRITY" + "_REFUTED",
+	"INTEGRITY_REFUTED",
 	"ISSUE_NOT_DISPATCH_LEAF",
 	"ISSUE_UNROUTED",
 	"LEASE_HELD",
@@ -536,21 +536,23 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 			},
 			Notes: []string{
 				"the command was blocked by a dangerous gotchas pattern, an explicit deny rule, or an arg predicate",
-				"if the operation is benign, use a safer alternative or run with --posture default_open",
-				"configure an operator overlay with `fak guard allow` if the tool should be permitted",
+				"for autonomous agents: practice scoped fail-to-abstain — pivot to permitted tools, isolate safe non-gated subtasks (tests, diagnostics), commit partial verified deliverables, and record a structured ABSTAIN verdict with exact boundary specifications for operator escalation",
+				"(Operator only — do not attempt from autonomous agent): if the operation is benign, run with --posture default_open or configure an operator overlay with `fak guard allow`",
 			},
 		},
 		"TRUST_VIOLATION": {
 			Reason:     "TRUST_VIOLATION",
-			Summary:    "taint tracking, scope ceiling, context-MMU, or IFC sink gate blocked untrusted or tainted flow",
+			Summary:    "legacy umbrella refusal for capability, taint, context-MMU quarantine, or witness contradiction",
 			Executable: false,
 			Steps: []recoveryStep{
 				{Argv: []string{"fak", "preflight"}, Summary: "inspect the recent trust violation details and quarantine witness", Safe: true},
 			},
 			Notes: []string{
-				"the call attempted to send tainted context to an external egress sink or violated tenant/fleet scope boundaries",
-				"for subagent delegation, use internal communication channels (e.g. send_input, a2achan) or degrade to local execution",
-				"if a tool result was quarantined by context-MMU, page out poisoned context or clear taint markers before continuing",
+				"this legacy token covers four physical sub-cases: TAINT_EGRESS, SCOPE_CROSSING, PROMPT_INJECTION, and INTEGRITY_REFUTED",
+				"for TAINT_EGRESS: sanitize data before dispatch or use internal IPC (e.g. send_input, a2achan) or supply override_reason",
+				"for SCOPE_CROSSING: confine payloads to declared scope or residency boundaries",
+				"for PROMPT_INJECTION: page out quarantined context or read sanitized stubs via context-MMU",
+				"for INTEGRITY_REFUTED: ground claims in verified git/filesystem state rather than self-report",
 			},
 		},
 		"DEFAULT_DENY": {
@@ -562,7 +564,8 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 			},
 			Notes: []string{
 				"the tool call failed closed under strict posture because it was not in the policy allowlist",
-				"run with `--posture default_open` for standard permissive execution, or configure an operator overlay via `fak guard allow`",
+				"for autonomous agents: decompose the task into S0/S1 leaves, pivot to sanctioned tools, land verified partial progress, and emit a structured ABSTAIN record describing the required unpermitted tool",
+				"(Operator only — do not attempt from autonomous agent): run with `--posture default_open` for permissive execution or configure an operator overlay via `fak guard allow`",
 			},
 		},
 		"SELF_MODIFY": {
@@ -574,8 +577,9 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 			},
 			Notes: []string{
 				"the target path reaches guarded files (internal/adjudicator, internal/kernel, internal/abi, dos.toml, or self_modify_globs)",
+				"for autonomous agents: scope abstention strictly to the guarded boundary — land safe non-gated changes (tests, documentation, caller leaves), record a structured ABSTAIN verdict for the locked kernel/ABI path, and escalate to an operator",
 				"target an unguarded path, or run in a detached worker worktree via `fak worktree worker prepare`",
-				"for operator-authorized configuration changes, adjust policy rules via an explicit operator overlay",
+				"(Operator only — do not attempt from autonomous agent): adjust policy rules via an explicit operator overlay",
 			},
 		},
 		"LEASE_HELD": {
@@ -725,8 +729,8 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 				"quarantine the payload and use structured data extraction rather than raw instruction ingestion",
 			},
 		},
-		"INTEGRITY" + "_REFUTED": {
-			Reason:     "INTEGRITY" + "_REFUTED",
+		"INTEGRITY_REFUTED": {
+			Reason:     "INTEGRITY_REFUTED",
 			Summary:    "an external witness or verification check refuted the claimed state",
 			Executable: false,
 			Notes: []string{
