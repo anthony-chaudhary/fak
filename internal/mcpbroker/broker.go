@@ -69,6 +69,9 @@ type ServerConfig struct {
 
 	// ReadOnly indicates whether the server is restricted to non-mutating operations.
 	ReadOnly bool `json:"read_only,omitempty"`
+
+	// MaxRestarts specifies the maximum number of restart attempts on unexpected crashes.
+	MaxRestarts *int `json:"max_restarts,omitempty"`
 }
 
 // ToolHandler defines the execution signature for an MCP tool call.
@@ -199,6 +202,7 @@ type Broker struct {
 	servers        map[string]ServerConfig
 	tools          map[string]ToolRegistration
 	sessions       map[string]time.Time
+	supervisors    map[string]*ProcessSupervisor
 	globalFilter   SecurityFilter
 	defaultTimeout time.Duration
 
@@ -212,9 +216,10 @@ type Broker struct {
 // NewBroker initializes and returns a new Broker ready to accept registrations and calls.
 func NewBroker(opts ...BrokerOption) *Broker {
 	b := &Broker{
-		servers:  make(map[string]ServerConfig),
-		tools:    make(map[string]ToolRegistration),
-		sessions: make(map[string]time.Time),
+		servers:     make(map[string]ServerConfig),
+		tools:       make(map[string]ToolRegistration),
+		sessions:    make(map[string]time.Time),
+		supervisors: make(map[string]*ProcessSupervisor),
 	}
 	for _, opt := range opts {
 		opt(b)
@@ -256,12 +261,17 @@ func (b *Broker) RegisterTool(reg ToolRegistration) error {
 		return ErrBrokerClosed
 	}
 
+	if _, exists := b.tools[reg.Name]; exists {
+		return ErrToolAlreadyRegistered
+	}
+
 	// Validate against server policy if server is registered.
 	if reg.ServerID != "" {
 		if srv, exists := b.servers[reg.ServerID]; exists {
+			_, rawName, isNamespaced := ParseNamespacedTool(reg.Name)
 			// Check denylist
 			for _, denied := range srv.DeniedTools {
-				if denied == reg.Name {
+				if denied == reg.Name || (isNamespaced && denied == rawName) {
 					return ErrToolDenied
 				}
 			}
@@ -270,7 +280,7 @@ func (b *Broker) RegisterTool(reg ToolRegistration) error {
 			if len(srv.AllowedTools) > 0 {
 				allowed := false
 				for _, allow := range srv.AllowedTools {
-					if allow == reg.Name {
+					if allow == reg.Name || (isNamespaced && allow == rawName) {
 						allowed = true
 						break
 					}
@@ -494,16 +504,127 @@ func (b *Broker) Stats() BrokerStats {
 	}
 }
 
-// Close gracefully closes the broker, preventing subsequent registrations and routing.
-// Existing in-flight requests may finish. Calling Close on an already closed broker is a no-op.
-func (b *Broker) Close() error {
+// UnregisterTool removes a registered tool by name. Returns true if the tool was found and removed.
+func (b *Broker) UnregisterTool(name string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
 	if b.closed {
+		return false
+	}
+	_, exists := b.tools[name]
+	if exists {
+		delete(b.tools, name)
+	}
+	return exists
+}
+
+// UnregisterServerTools removes all tools associated with serverID. Returns the count of removed tools.
+func (b *Broker) UnregisterServerTools(serverID string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return 0
+	}
+	count := 0
+	for name, tool := range b.tools {
+		if tool.ServerID == serverID {
+			delete(b.tools, name)
+			count++
+		}
+	}
+	return count
+}
+
+// RegisterSupervisor registers a configured ProcessSupervisor with the broker under its server ID.
+func (b *Broker) RegisterSupervisor(sup *ProcessSupervisor) error {
+	if sup == nil {
+		return errors.New("mcpbroker: nil supervisor")
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return ErrBrokerClosed
+	}
+	b.supervisors[sup.cfg.ID] = sup
+	return nil
+}
+
+// LaunchSupervisor creates, starts, and supervises an MCP server using ServerConfig,
+// automatically discovering and registering its tools into the broker with namespacing.
+func (b *Broker) LaunchSupervisor(ctx context.Context, cfg ServerConfig) (*ProcessSupervisor, error) {
+	if cfg.ID == "" {
+		return nil, errors.New("mcpbroker: server ID cannot be empty")
+	}
+
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return nil, ErrBrokerClosed
+	}
+	b.servers[cfg.ID] = cfg
+	b.mu.Unlock()
+
+	sup := NewProcessSupervisor(cfg, b)
+	if err := sup.Start(ctx); err != nil {
+		return nil, err
+	}
+
+	b.mu.Lock()
+	b.supervisors[cfg.ID] = sup
+	b.mu.Unlock()
+
+	return sup, nil
+}
+
+// GetSupervisor retrieves the supervisor for the given server ID, if any.
+func (b *Broker) GetSupervisor(serverID string) (*ProcessSupervisor, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	sup, ok := b.supervisors[serverID]
+	return sup, ok
+}
+
+// StopSupervisor gracefully stops and removes the supervisor for the given server ID,
+// and unregisters its associated tools.
+func (b *Broker) StopSupervisor(serverID string) error {
+	b.mu.Lock()
+	sup, ok := b.supervisors[serverID]
+	if ok {
+		delete(b.supervisors, serverID)
+	}
+	b.mu.Unlock()
+
+	if !ok {
+		return ErrServerNotFound
+	}
+
+	_ = sup.Stop()
+	b.UnregisterServerTools(serverID)
+	return nil
+}
+
+// Close gracefully closes the broker, preventing subsequent registrations and routing,
+// and terminates all running supervised MCP server processes. Calling Close on an already
+// closed broker is a no-op.
+func (b *Broker) Close() error {
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
 		return nil
 	}
 
 	b.closed = true
+
+	sups := make([]*ProcessSupervisor, 0, len(b.supervisors))
+	for _, s := range b.supervisors {
+		sups = append(sups, s)
+	}
+	b.supervisors = make(map[string]*ProcessSupervisor)
+	b.mu.Unlock()
+
+	for _, s := range sups {
+		_ = s.Stop()
+	}
+
 	return nil
 }
