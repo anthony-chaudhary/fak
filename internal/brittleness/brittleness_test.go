@@ -2,8 +2,11 @@ package brittleness
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // --- Fold ------------------------------------------------------------------------------------
@@ -326,5 +329,173 @@ func TestFlakyBridgeFoldsToCard(t *testing.T) {
 	}
 	if got := p.Corpus["flaky_retry_pass"]; got != 2 {
 		t.Fatalf("flaky_retry_pass count = %v, want 2", got)
+	}
+}
+
+// --- Benchmarks ------------------------------------------------------------------------------
+
+var (
+	benchFindingsSink []Finding
+	benchPayloadSink  scorecard.Payload
+	benchPressureSink int
+)
+
+func sampleCommits(n int) []Commit {
+	commits := make([]Commit, n)
+	for i := 0; i < n; i++ {
+		sha := fmt.Sprintf("%07x", i+1)
+		fileA := fmt.Sprintf("pkg%d/file%d.go", i%15, (i%15)+1)
+		fileB := fmt.Sprintf("pkg%d/helper.go", i%15)
+		var subject string
+		switch i % 10 {
+		case 0, 3, 6:
+			subject = fmt.Sprintf("fix(pkg%d): resolve nil pointer in worker", i%15)
+		case 1:
+			subject = fmt.Sprintf("revert(pkg%d): back out cache change", i%15)
+		case 2:
+			subject = fmt.Sprintf("Revert \"feat: experimental feature %d\"", i)
+		default:
+			subject = fmt.Sprintf("feat(pkg%d): add telemetry tracking %d", i%15, i)
+		}
+		commits[i] = Commit{
+			SHA:     sha,
+			Subject: subject,
+			Files:   []string{fileA, fileB},
+		}
+	}
+	return commits
+}
+
+func sampleFindings(n int) []Finding {
+	out := make([]Finding, n)
+	classes := []Class{ClassFlakyRetryPass, ClassRecurringFix, ClassRevertedLanding}
+	for i := 0; i < n; i++ {
+		cls := classes[i%len(classes)]
+		ref := fmt.Sprintf("internal/pkg%d/file%d.go", i%20, i)
+		if cls == ClassRevertedLanding {
+			ref = fmt.Sprintf("%07x", i)
+		}
+		out[i] = Finding{
+			Class:      cls,
+			Ref:        ref,
+			Detail:     fmt.Sprintf("observation detail %d", i),
+			Mitigation: "sample remediation action",
+			Weight:     (i % 5) + 1,
+			Fresh:      []string{fmt.Sprintf("%07x", i), fmt.Sprintf("%07x", i+100)},
+		}
+	}
+	return out
+}
+
+func sampleFlakyPackages(n int) []string {
+	pkgs := make([]string, n)
+	for i := 0; i < n; i++ {
+		pkgs[i] = fmt.Sprintf("internal/pkg%d", i%25)
+	}
+	return pkgs
+}
+
+func BenchmarkDetectFromCommits(b *testing.B) {
+	for _, size := range []int{50, 200, 500} {
+		b.Run(fmt.Sprintf("window_%d", size), func(b *testing.B) {
+			commits := sampleCommits(size)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchFindingsSink = DetectFromCommits(commits)
+			}
+		})
+	}
+}
+
+func BenchmarkDetectRecurringFixes(b *testing.B) {
+	commits := sampleCommits(200)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchFindingsSink = DetectRecurringFixes(commits)
+	}
+}
+
+func BenchmarkDetectReverts(b *testing.B) {
+	commits := sampleCommits(200)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchFindingsSink = DetectReverts(commits)
+	}
+}
+
+func BenchmarkFromFlakyPackages(b *testing.B) {
+	for _, count := range []int{10, 50, 200} {
+		b.Run(fmt.Sprintf("count_%d", count), func(b *testing.B) {
+			pkgs := sampleFlakyPackages(count)
+			stamp := "d3adb33f"
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchFindingsSink = FromFlakyPackages(pkgs, stamp)
+			}
+		})
+	}
+}
+
+func BenchmarkFold(b *testing.B) {
+	b.Run("clean", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			benchPayloadSink = Fold(nil)
+		}
+	})
+	for _, n := range []int{10, 50, 200} {
+		b.Run(fmt.Sprintf("findings_%d", n), func(b *testing.B) {
+			base := sampleFindings(n)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				fs := append([]Finding(nil), base...)
+				benchPayloadSink = Fold(fs)
+			}
+		})
+	}
+}
+
+func BenchmarkPressure(b *testing.B) {
+	for _, n := range []int{10, 50, 200} {
+		b.Run(fmt.Sprintf("findings_%d", n), func(b *testing.B) {
+			fs := sampleFindings(n)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchPressureSink = Pressure(fs)
+			}
+		})
+	}
+}
+
+func BenchmarkSortFindings(b *testing.B) {
+	for _, n := range []int{10, 50, 200} {
+		b.Run(fmt.Sprintf("findings_%d", n), func(b *testing.B) {
+			base := sampleFindings(n)
+			buf := make([]Finding, n)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				copy(buf, base)
+				SortFindings(buf)
+			}
+		})
+	}
+}
+
+// TestBenchmarkSanity ensures benchmark routines execute without panic and perform iterations.
+func TestBenchmarkSanity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping benchmark sanity in short mode")
+	}
+	res := testing.Benchmark(BenchmarkDetectRecurringFixes)
+	if res.N <= 0 {
+		t.Fatalf("expected positive iterations, got %d", res.N)
 	}
 }
