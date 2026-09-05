@@ -79,9 +79,14 @@ resource-constrained models (such as 7B/14B local models, fast/flash models, or 
   package, and exactly one unambiguous witness command.
 - Mandate sequential subdivision: require multi-part tasks to split into reproduction,
   minimal implementation, and verification phases.
-- Require fail-to-abstain: workers must explicitly emit an `ABSTAIN` verdict when
-  confronting high-difficulty aspects (concurrency invariants, frozen ABI changes,
-  low-level kernels, security policies) rather than guessing or emitting unverified diffs.
+- Require scoped fail-to-abstain: workers must scope abstention strictly to isolated
+  high-difficulty aspects (concurrency invariants, frozen ABI changes, low-level kernels,
+  security policies), landing partial verified evidence for safe sub-components and emitting
+  an explicit `ABSTAIN` verdict for the hard boundary rather than guessing or emitting unverified diffs.
+- Enforce persistence through recoverable blockers: workers must not treat guard refusals or
+  transient locks as terminal failures. They must query `fak recover <TOKEN>`, handle transient
+  concurrency locks or pivot to sanctioned routes, and persist toward the goal without
+  weakening safety gates.
 
 ### Required worker body sections
 

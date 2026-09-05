@@ -30,10 +30,13 @@ malformed calls, quarantine poisoned results. Its MCP server is wired in `.mcp.j
   branch and never trips `OFF_TRUNK`. Feature branches and off-trunk commits stay forbidden.
 - Commit by explicit path (`git commit -- <paths>`, never `git add -A`); sign off with
   `git commit -s` (DCO).
-- Subdivide work and fail-to-abstain — smaller or worker models must keep tasks
-  bounded to atomic S0/S1 leaf units (1–3 files, single package, one witness) and
-  abstain with a structured reason from high-difficulty aspects (concurrency, ABI,
-  kernel/memory layout) instead of speculating.
+- Subdivide work, practice scoped fail-to-abstain, and persist through recoverable
+  blockers — smaller or worker models must keep tasks bounded to atomic S0/S1 leaf
+  units (1–3 files, single package, one witness), advance independent safe sub-components,
+  and persist through recoverable hurdles using alternate sanctioned routes or waiting out
+  transient locks rather than abandoning the prompt or stopping on recoverable failures.
+  Abstain with a structured reason strictly on isolated high-difficulty aspects
+  (concurrency, ABI, kernel/memory layout) instead of speculating.
 - The Go module is the repository root — run `go` commands from the clone root.
 
 To run your harness's own model behind the kernel, pick your recipe under
