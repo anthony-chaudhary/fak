@@ -124,24 +124,71 @@ Using `fak guard` is unnecessary, inefficient, or actively harmful in the follow
 
 ---
 
-## 5. Comparative Decision Matrix
+## 5. Trade-Off Analysis: Latency, Memory, Governance, and Complexity
+
+Selecting the appropriate harness integration pattern requires balancing four fundamental engineering trade-offs:
+
+### 5.1 Latency Overhead & Wire Serialization
+- **`fak guard` (Wire Loopback Proxy):** Interposes an HTTP/MCP reverse proxy between the agent and upstream LLMs or tool engines.
+  - *Per-Turn Overhead:* Adds ~0.5ms to 2.0ms per request (loopback socket I/O, HTTP parsing, capability AST checks, and in-memory vDSO table lookups).
+  - *Remote Model Context:* When calling external frontier models (Claude 3.5 Sonnet, GPT-4o, DeepSeek) where network RTT is 20–150ms and generation takes 500–4000ms, an extra ~1ms represents <0.2% latency overhead—statistically imperceptible.
+  - *Net-Negative Trajectory Latency:* When vDSO cache hits resolve read-only tools (e.g. repeated file inspections, `git status`), `fak guard` answers in <1ms without executing the shell command or invoking the model, cutting aggregate session wall-clock time by 15–35%.
+- **`pkg/harnesskit` (In-Process Native SDK):** Executes tool dispatch, context manipulation, and model routing via direct Go function calls.
+  - *Per-Turn Overhead:* <10 microseconds (CPU register and pointer dereference).
+  - *Local Inference Prerequisite:* Crucial when pairing with `fak serve` over native Metal, CUDA, or SIMD kernels where local token generation and tool calls execute in 10–30ms. Interposing a 2ms wire hop in local loops would impose an unacceptable 10–20% latency penalty.
+
+### 5.2 Memory Footprint & Resource Scaling
+- **`fak guard` (Independent Supervisor Process):**
+  - Runs as an autonomous daemon alongside the agent runtime (e.g., Node.js for Claude Code/OpenCode, Python for Aider/LangChain).
+  - Consumes ~25MB–50MB RSS for HTTP connection pools, context MMU buffers, and vDSO in-memory tables.
+  - Allocates OS file descriptors, loopback TCP ports, or named pipes for each connected child agent.
+  - *High-Density Fan-Out Constraint:* Running 50–100 parallel subagent workers concurrently on a single workstation (e.g. autonomous wave dispatchers) can consume 2.5GB–5GB of RAM and exhaust ephemeral ports or file descriptors.
+- **`pkg/harnesskit` (Compiled In-Process Library):**
+  - Shares the host binary's single Go runtime heap and garbage collector.
+  - Zero extra OS processes, zero socket descriptors allocated for IPC.
+  - *High-Density Scaling Advantage:* Enables spinning up hundreds of concurrent agent goroutines inside a single process, bounded only by model KV-cache and application memory.
+
+### 5.3 Governance Boundaries & Security Guarantees
+- **`fak guard` (Hard OS Process Boundary):**
+  - *Adversarial Containment:* The proxy executes in an isolated process memory space. Untrusted or prompt-injected agents running in child processes (Python, Node, Bash) cannot inspect, manipulate, or disable the policy engine.
+  - *Immunity to Self-Modification (`SELF_MODIFY` Refusal):* Even if an agent acquires arbitrary local code execution, it cannot alter the active `fak guard` policy or silence the decision journal.
+  - *Cryptographic Auditing:* Writes an append-only, SHA256 hash-chained JSONL decision journal (`--audit`) verifiable via `fak audit verify`.
+- **`pkg/harnesskit` (Cooperative In-Process Contract):**
+  - *Type-Safe Contract Enforcement:* Tools, extensions, and context planes are bounded by Go type definitions, capability descriptors, and canonical lockfiles (`harness.lock.json` validated via `pkg/harnesskit/lockv2`).
+  - *Intra-Process Trust Model:* Protects against model steerability failures, unauthorized tool capabilities, and schema drift. However, because user-defined tools share the same memory space, an intentional memory-unsafe exploit (e.g. cgo or unsafe pointers) could theoretically access process memory.
+
+### 5.4 Operational Lifecycle & Execution Complexity
+- **`fak guard` (Zero-Code Drop-In Wrapper):**
+  - *Zero Integration Cost:* Requires zero source modifications to the agent; configure via one CLI flag (`fak guard -- claude`) or an environment variable (`ANTHROPIC_BASE_URL`).
+  - *Process Supervision Burden:* Requires managing the lifecycle of two coupled processes (the proxy daemon and the agent CLI), coordinating shutdown signals, and handling orphan processes.
+  - *Built-in Autonomous Reliability:* Provides built-in process watchdog auto-healing, terminal reset recovery, rate-limit backoff handling, and multi-account seat rotation (`--rotate auto`).
+- **`pkg/harnesskit` (Single-Binary Operational Simplicity):**
+  - *Upfront Construction Cost:* Requires Go development, project scaffolding (`fak harness init`), module dependency management, and compilation.
+  - *Operational Simplicity in Production:* Results in a single, static binary with zero runtime dependencies (`fak up` philosophy). Trivial to package into scratch Docker containers, systemd services, or Kubernetes pods.
+  - *Lifecycle Autonomy:* The host application owns its own process restarts, error handling, and telemetry integration.
+
+---
+
+## 6. Comparative Decision Matrix
 
 | Dimension | `fak guard` (Out-of-Process Supervision) | `pkg/harnesskit` (In-Process Native SDK) |
 |---|---|---|
 | **Primary Use Case** | Governed execution of existing CLI agents (Claude, Codex, OpenCode, Aider, Hermes). | Developing a new, standalone, branded agent product or single-binary harness. |
-| **Language / Runtime** | Agnostic (any agent that speaks HTTP or MCP). | Go (imports `pkg/harnesskit`). |
+| **Language / Runtime** | Agnostic (any agent speaking HTTP Chat/Messages or MCP). | Go (imports `pkg/harnesskit`). |
 | **Process Model** | Supervised child process behind an intercepting loopback proxy. | Single monolithic binary embedding the agent loop. |
 | **Setup Overhead** | Zero code changes: 1 flag or environment variable repoint. | Go project initialization (`fak harness init`), compilation, and typed configuration. |
 | **Tool Execution** | Intercepted at HTTP wire or MCP stdio/SSE socket boundary. | Directly registered and dispatched in-process via Go interfaces. |
 | **Latency Overhead** | ~0.5–2ms per request (loopback socket + JSON parsing + policy check). | <10µs (direct in-memory function call). |
-| **Security Enforcement** | External default-deny floor; child process cannot bypass proxy. | Internal API contracts; builder controls policy and extension registration. |
+| **Memory Footprint** | ~25–50MB RSS per supervisor process + OS socket handles. | 0 MB overhead; shared within host Go runtime heap. |
+| **Security Enforcement** | External default-deny floor; child process cannot bypass proxy (`SELF_MODIFY` refusal). | Internal API contracts; builder controls policy and extension registration. |
 | **Audit Capabilities** | Tamper-evident, hash-chained JSONL decision journal (`--audit`). | Telemetry streams emitted via `EventStream` / `StreamObserver`. |
 | **Prompt Caching** | Automated prefix stabilization and tool output compaction. | Builder explicitly manages system prompt and context planes. |
 | **Resilience / Watchdog** | In-flight process auto-healing, terminal recovery, account rotation. | Application must handle its own process lifecycles and recovery. |
+| **Operational Simplicity** | Manages dual processes (supervisor + agent); zero build step. | Single compiled binary (`fak up` philosophy); requires Go build. |
 
 ---
 
-## 6. Architectural Decision Tree for Builders
+## 7. Architectural Decision Tree for Builders
 
 ```
 Are you building or customizing an agent harness?
@@ -165,7 +212,7 @@ Are you building or customizing an agent harness?
 
 ---
 
-## 7. Public vs. Private Boundary Considerations
+## 8. Public vs. Private Boundary Considerations
 
 When deploying custom harnesses across the boundary between **public `fak`** (open-core runtime) and **private `fak-private`** (proprietary enterprise serving and autonomous development factory):
 
@@ -179,10 +226,11 @@ When deploying custom harnesses across the boundary between **public `fak`** (op
 
 ---
 
-## 8. Related Artifacts & References
+## 9. Related Artifacts & References
 
 - **Issue #11610:** Architectural evaluation of when `fak guard` is useful vs native `harnesskit`.
 - **Issue #11611:** Public-harness vs private-factory contract and isolation rules across `fak` and `fak-private`.
+- **Public vs. Private Harness Boundary:** [`docs/architecture/public-private-harness-boundary.md`](public-private-harness-boundary.md)
 - **Public SDK Contract:** [`docs/harness-kit-contract.md`](../harness-kit-contract.md)
 - **Harness Generator Guide:** [`docs/harness-init.md`](../harness-init.md)
 - **Supported Harnesses Matrix:** [`docs/supported/agent-harnesses.md`](../supported/agent-harnesses.md)

@@ -91,9 +91,10 @@ All shared data structures, protocols, and interfaces required by both the publi
 | **Agent RPC Client** | `pkg/fakclient` | `fak-private/tools/benchrunners` | Typed client for streaming tool events and gateway requests. |
 
 ### Enforcement via Static AST Gates
-`internal/architest/harnesskit_lockv2_test.go` statically parses all AST nodes in `pkg/harnesskit/lockv2` and asserts that:
-1. Zero `internal/*` packages are imported.
-2. An isolated external Go module can compile and execute against the exported package without warnings.
+Repository architectural tests in `internal/architest/` continuously enforce this invariant at compile-time and AST-parse time:
+1. **Zero Internal Imports in `lockv2` (`TestHarnessKitLockV2Export` in `internal/architest/harnesskit_lockv2_test.go`):** Statically parses all AST nodes in `pkg/harnesskit/lockv2`, asserts that zero `internal/*` packages are imported, and compiles an external test Go module against the exported package to compute RFC 8785 canonical IDs and validate secret contracts.
+2. **Encapsulation Compile Barrier (`TestHarnesskitExternalImportBoundary` in `internal/architest/harnesskit_external_test.go`):** Verifies that an isolated external module compiles cleanly against `pkg/harnesskit`, while any attempt to import `fak/internal/*` (such as `internal/abi`) fails immediately with a compiler error (`use of internal package ... not allowed`).
+3. **External Upgrade Contract (`TestHarnesskitUpgradeContractFromCleanModule` in `internal/architest/harnesskit_upgrade_external_test.go`):** Asserts that external modules can execute upgrade lifecycles against clean exported types without dependency drift.
 
 ---
 
@@ -117,6 +118,12 @@ To allow harnesses to execute across both environments without leaking credentia
   }
   ```
 - `lockv2.ValidateSecretContracts()` enforces that any asset of kind `secret` that specifies a non-empty `value` field immediately fails validation with `SECRET_PLAINTEXT_LEAK`.
+
+### 3. Air-Gap Integrity & Offline Validation Contract
+To ensure that harnesses and models can be deployed into strictly air-gapped sovereign environments without leaking internal topologies:
+- **Hermetic Asset Resolution:** Air-gapped deployments and public harness distributions cannot rely on live outbound networks or unverified endpoints. All assets and components must be packaged locally or addressed by immutable SHA-256 layer digests.
+- **Outbound URL Gate:** Any asset or component reference declaring an unpinned external `http://` or `https://` URL is rejected with `AIRGAP_URL_FORBIDDEN` during air-gapped bundle verification.
+- **Internal Infrastructure Boundary:** Factory tools running on internal lab fabrics must not embed intranet URLs, cluster DNS names (`*.internal`, `*.cluster.local`), or private S3/GCS bucket paths into exported lockfiles or public receipts.
 
 ---
 
@@ -161,6 +168,11 @@ When proprietary models, specialized policies, and compiled binaries from `fak-p
    ```bash
    fak pack verify --bundle bundle.fakpack --public-key key.pub
    ```
+   Verification strictly enforces a four-phase gate:
+   - **Hermetic content digests:** SHA-256 validation of all layer blobs and manifest descriptors (`BUNDLE_DIGEST_MISMATCH` / `BUNDLE_CORRUPT`).
+   - **Harness completeness:** Checks that all components and assets declared in `harness.lock.json` are present in the archive.
+   - **Air-gap safety gate:** Immediate rejection of any outbound `http://` or `https://` URLs in asset or component references (`AIRGAP_URL_FORBIDDEN`).
+   - **Cosign signature verification:** Cryptographic verification of the embedded signature against the operator's pinned public key (`BUNDLE_SIGNATURE_INVALID`).
 
 ---
 
@@ -182,4 +194,5 @@ When proprietary models, specialized policies, and compiled binaries from `fak-p
 - **Issue #11386:** Export v2 lock parser and secret validator to `pkg/` for `fak-private` consumption.
 - **Architectural Specification:** [`docs/architecture/when-to-use-fak-guard-for-harnesses.md`](when-to-use-fak-guard-for-harnesses.md)
 - **Dev-Process Private Boundary:** [`docs/dev-process-private-boundary.md`](../dev-process-private-boundary.md)
+- **GPU-Server Private Boundary:** [`docs/gpu-server-private-boundary.md`](../gpu-server-private-boundary.md)
 - **Multi-Repo Sync Guide:** [`docs/notes/2026-09-03-dual-repo-workspace-and-safe-sync.md`](../notes/2026-09-03-dual-repo-workspace-and-safe-sync.md)

@@ -96,7 +96,7 @@ The Go compiler enforces that packages under `internal/` within module `github.c
 
 Therefore, the Go-level boundary adheres strictly to:
 - **`go.work` Workspace Setup**: `fak-private` contains a root `go.work` referencing `.` and `../fak`, enabling unified local resolution.
-- **`pkg/` Export Rule**: Any Go types or abstractions required by both the public runtime and private factory must live in `fak/pkg/*` (e.g., `pkg/abi`, `pkg/scorecard`, `pkg/fakclient`), NEVER in `internal/*`.
+- **`pkg/` Export Rule**: Any Go types or abstractions required by both the public runtime and private factory must live in `fak/pkg/*` (e.g., `pkg/abi`, `pkg/scorecard`, `pkg/fakclient`, `pkg/harnesskit`), NEVER in `internal/*`. See [`docs/architecture/public-private-harness-boundary.md`](architecture/public-private-harness-boundary.md) for the complete export invariant and isolation rules.
 - **Zero Runtime Import of Private Code**: Public `fak` must never reference or import any module or package in `fak-private`.
 
 ### 4.2 Process Boundary Seam (`fak dev`)
@@ -127,11 +127,12 @@ To distribute hermetic models, capabilities, and harness collections securely ac
      ```bash
      fak pack verify --bundle bundle.fakpack --verify-key /path/to/public.key
      ```
-   - Verification strictly enforces:
-     - **Hermetic content digests**: SHA-256 validation of all layer blobs and manifest descriptors (`BUNDLE_DIGEST_MISMATCH` / `BUNDLE_CORRUPT`).
-     - **Harness completeness**: Checks that all components and assets declared in `harness.lock.json` are present in the archive.
-     - **Air-gap safety gate**: Immediate rejection of any outbound `http://` or `https://` URLs in asset or component references.
-     - **Cosign signature verification**: Cryptographic verification of the embedded signature against the operator's pinned public key (`BUNDLE_SIGNATURE_INVALID` on failure).
+    - Verification strictly enforces:
+      - **Hermetic content digests**: SHA-256 validation of all layer blobs and manifest descriptors (`BUNDLE_DIGEST_MISMATCH` / `BUNDLE_CORRUPT`).
+      - **Harness completeness**: Checks that all components and assets declared in `harness.lock.json` are present in the archive.
+      - **Air-gap safety gate**: Immediate rejection of any outbound `http://` or `https://` URLs in asset or component references (`AIRGAP_URL_FORBIDDEN`).
+      - **Cosign signature verification**: Cryptographic verification of the embedded signature against the operator's pinned public key (`BUNDLE_SIGNATURE_INVALID` on failure).
+    - See [`docs/architecture/public-private-harness-boundary.md`](architecture/public-private-harness-boundary.md) for OCI layer layout specifications, RFC 8785 canonical lock generation, and airgap validation.
 
 ---
 
@@ -150,7 +151,7 @@ The migration of dev process modules to `fak-private` proceeds in five sequentia
 
 | Phase | Milestone | Deliverables |
 |---|---|---|
-| **Phase 1** | **Groundwork & Boundary Contract** *(Current)* | `docs/dev-process-private-boundary.md`, `go.work` integration in `fak-private`, clean workspace compilation, issue #11166. |
+| **Phase 1** | **Groundwork & Boundary Contract** *(Current)* | `docs/dev-process-private-boundary.md`, [`docs/architecture/public-private-harness-boundary.md`](architecture/public-private-harness-boundary.md), `go.work` integration in `fak-private`, clean workspace compilation, issues #11166 and #11611. |
 | **Phase 2** | **Private Platform Scaffolding** | Scaffold `platform/dispatch/`, `platform/scorecards/`, and `platform/watchdogs/` in `fak-private` with clean `pkg/*` imports. |
 | **Phase 3** | **Autonomous Dispatch & Contract Leases** | Implement contract lease queueing (`refs/fak/locks/contract-*`) and dispatch workers in `fak-private/platform/dispatch/`. |
 | **Phase 4** | **Scorecards & Watchdogs Relocation** | Migrate scorecard control panes and session recovery watchdogs to `fak-private/platform/`. |
