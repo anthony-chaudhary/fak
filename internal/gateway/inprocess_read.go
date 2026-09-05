@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
@@ -12,7 +11,7 @@ import (
 // an effect-free read operation (cat, head, tail), avoiding subprocess shell spawning (#11035).
 // Returns the structured ResultEnvelope, WireVerdict, and true if promoted; otherwise false.
 func (s *Server) PromoteShellReadToInProcess(ctx context.Context, tool, rawArgs, traceID string) (*ResultEnvelope, WireVerdict, bool) {
-	if !strings.EqualFold(tool, "bash") && !strings.EqualFold(tool, "sh") {
+	if !vdso.IsPromotableShellTool(tool) {
 		return nil, WireVerdict{}, false
 	}
 
