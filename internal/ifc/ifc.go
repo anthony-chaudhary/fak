@@ -43,9 +43,15 @@ package ifc
 import (
 	"container/list"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/url"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -110,16 +116,82 @@ const DefaultLedgerLimit = 8192
 // Ledger records, per trace, the most-restrictive taint that has entered the
 // session's working set. It is the control-flow taint CaMeL/FIDES track: once a
 // session has seen untrusted content, its sinks are gated.
+// TaintProvenance records the origin and timestamp of a trace's taint.
+type TaintProvenance struct {
+	Level         abi.TaintLabel `json:"level"`
+	SourceTool    string         `json:"source_tool,omitempty"`
+	SourceCallSeq uint64         `json:"source_call_seq,omitempty"`
+	SourceDigest  string         `json:"source_digest,omitempty"`
+	TaintedAt     int64          `json:"tainted_at_unix_nano,omitempty"`
+}
+
+// DeclassificationReceipt records an auditable, hash-chained declassification
+// of a tainted trace or turn boundary.
+type DeclassificationReceipt struct {
+	Trace       string         `json:"trace"`
+	Turn        int            `json:"turn,omitempty"`
+	FromLevel   abi.TaintLabel `json:"from_level"`
+	ToLevel     abi.TaintLabel `json:"to_level"`
+	Rationale   string         `json:"rationale"`
+	Witness     string         `json:"witness,omitempty"`
+	Timestamp   int64          `json:"timestamp_unix_nano"`
+	PrevHash    string         `json:"prev_hash"`
+	ReceiptHash string         `json:"receipt_hash"`
+}
+
+// TurnTrace constructs a canonical turn-scoped trace identifier.
+func TurnTrace(baseTrace string, turn int) string {
+	return baseTrace + "/turn-" + strconv.Itoa(turn)
+}
+
+// ParseTurnTrace parses turn-scoped trace identifiers supporting delimiters
+// "/turn-", ":turn-", and "#turn-".
+func ParseTurnTrace(trace string) (base string, turn int, ok bool) {
+	seps := []string{"/turn-", ":turn-", "#turn-"}
+	bestIdx := -1
+	bestSep := ""
+	for _, sep := range seps {
+		idx := strings.LastIndex(trace, sep)
+		if idx > bestIdx {
+			bestIdx = idx
+			bestSep = sep
+		}
+	}
+	if bestIdx < 0 {
+		return "", 0, false
+	}
+	base = trace[:bestIdx]
+	turnPart := trace[bestIdx+len(bestSep):]
+	if turnPart == "" {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(turnPart)
+	if err != nil || n < 0 {
+		return "", 0, false
+	}
+	return base, n, true
+}
+
+// Ledger records, per trace, the most-restrictive taint that has entered the
+// session's working set. It is the control-flow taint CaMeL/FIDES track: once a
+// session has seen untrusted content, its sinks are gated.
 type Ledger struct {
-	mu    sync.RWMutex
-	mark  map[string]abi.TaintLabel
-	cap   int
-	lru   *list.List
-	index map[string]*list.Element
+	mu              sync.RWMutex
+	mark            map[string]abi.TaintLabel
+	prov            map[string]TaintProvenance
+	cap             int
+	lru             *list.List
+	index           map[string]*list.Element
+	declass         []DeclassificationReceipt
+	lastReceiptHash string
+	turnTaint       map[string]map[int]abi.TaintLabel
 }
 
 // NewLedger returns a Ledger bounded by DefaultLedgerLimit traces.
 func NewLedger() *Ledger { return NewLedgerWithLimit(DefaultLedgerLimit) }
+
+// NewLedgerCap returns a Ledger bounded by limit traces (alias for NewLedgerWithLimit).
+func NewLedgerCap(limit int) *Ledger { return NewLedgerWithLimit(limit) }
 
 // NewLedgerWithLimit builds a ledger with a bounded trace table. limit<=0 uses
 // DefaultLedgerLimit. The most recently raised traces are retained.
@@ -128,10 +200,12 @@ func NewLedgerWithLimit(limit int) *Ledger {
 		limit = DefaultLedgerLimit
 	}
 	return &Ledger{
-		mark:  map[string]abi.TaintLabel{},
-		cap:   limit,
-		lru:   list.New(),
-		index: map[string]*list.Element{},
+		mark:      map[string]abi.TaintLabel{},
+		prov:      map[string]TaintProvenance{},
+		cap:       limit,
+		lru:       list.New(),
+		index:     map[string]*list.Element{},
+		turnTaint: map[string]map[int]abi.TaintLabel{},
 	}
 }
 
@@ -139,15 +213,30 @@ func NewLedgerWithLimit(limit int) *Ledger {
 // missing key is Trusted (NOT the enum zero value, which is Tainted) — so the
 // FIRST tainted result on a fresh trace is correctly recorded.
 func (l *Ledger) Raise(trace string, t abi.TaintLabel) {
+	l.RaiseWithProvenance(trace, t, TaintProvenance{Level: t})
+}
+
+// RaiseWithProvenance lifts trace's high-water mark and records its taint provenance.
+func (l *Ledger) RaiseWithProvenance(trace string, t abi.TaintLabel, p TaintProvenance) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.ensureLocked()
+	if base, turn, ok := ParseTurnTrace(trace); ok {
+		if l.turnTaint[base] == nil {
+			l.turnTaint[base] = map[int]abi.TaintLabel{}
+		}
+		curTurn, exists := l.turnTaint[base][turn]
+		if !exists || taintRank(t) > taintRank(curTurn) {
+			l.turnTaint[base][turn] = t
+		}
+	}
 	cur, ok := l.mark[trace]
 	if !ok {
 		cur = abi.TaintTrusted
 	}
 	if taintRank(t) > taintRank(cur) {
 		l.mark[trace] = t
+		l.prov[trace] = p
 		l.touchLocked(trace)
 		l.trimLocked()
 		return
@@ -157,25 +246,224 @@ func (l *Ledger) Raise(trace string, t abi.TaintLabel) {
 	}
 }
 
+// Provenance returns trace's taint provenance (empty with Level=Trusted if unseen).
+func (l *Ledger) Provenance(trace string) TaintProvenance {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if l.prov == nil {
+		return TaintProvenance{Level: abi.TaintTrusted}
+	}
+	p, ok := l.prov[trace]
+	if !ok {
+		if base, turn, okTT := ParseTurnTrace(trace); okTT {
+			for k := turn - 1; k >= 1; k-- {
+				if pk, has := l.prov[TurnTrace(base, k)]; has && pk.Level != abi.TaintTrusted {
+					return pk
+				}
+			}
+			if pBase, hasBase := l.prov[base]; hasBase && pBase.Level != abi.TaintTrusted {
+				return pBase
+			}
+		} else {
+			if l.turnTaint != nil && l.turnTaint[trace] != nil {
+				for k := range l.turnTaint[trace] {
+					if pk, has := l.prov[TurnTrace(trace, k)]; has && pk.Level != abi.TaintTrusted {
+						return pk
+					}
+				}
+			}
+		}
+		return TaintProvenance{Level: abi.TaintTrusted}
+	}
+	return p
+}
+
 // Level returns trace's current high-water mark (Trusted if unseen).
 func (l *Ledger) Level(trace string) abi.TaintLabel {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	t, ok := l.mark[trace]
-	if !ok {
-		return abi.TaintTrusted // an unseen trace is clean
-	}
-	return t
+	return l.levelLocked(trace)
 }
 
-// Reset clears a trace's mark (a fresh session / test isolation).
+func (l *Ledger) levelLocked(trace string) abi.TaintLabel {
+	if base, turn, ok := ParseTurnTrace(trace); ok {
+		var maxPrior abi.TaintLabel = abi.TaintTrusted
+		if l.turnTaint != nil && l.turnTaint[base] != nil {
+			for k, tk := range l.turnTaint[base] {
+				if k < turn && taintRank(tk) > taintRank(maxPrior) {
+					maxPrior = tk
+				}
+			}
+		}
+		if baseMark, hasBase := l.mark[base]; hasBase && taintRank(baseMark) > taintRank(maxPrior) {
+			maxPrior = baseMark
+		}
+		if mark, has := l.mark[trace]; has {
+			if mark == abi.TaintTrusted {
+				return abi.TaintTrusted
+			}
+			if taintRank(maxPrior) > taintRank(mark) {
+				return maxPrior
+			}
+			return mark
+		}
+		if Dangerous(maxPrior) {
+			return maxPrior
+		}
+		return abi.TaintTrusted
+	}
+
+	var maxTurn abi.TaintLabel = abi.TaintTrusted
+	if mark, has := l.mark[trace]; has {
+		maxTurn = mark
+	}
+	if l.turnTaint != nil && l.turnTaint[trace] != nil {
+		for _, tk := range l.turnTaint[trace] {
+			if taintRank(tk) > taintRank(maxTurn) {
+				maxTurn = tk
+			}
+		}
+	}
+	return maxTurn
+}
+
+func declassPreimage(prevHash, trace string, turn int, from, to abi.TaintLabel, rationale, witness string, ts int64) string {
+	return fmt.Sprintf("%d:%s|%d:%s|%d|%d|%d|%d:%s|%d:%s|%d",
+		len(prevHash), prevHash,
+		len(trace), trace,
+		turn,
+		from,
+		to,
+		len(rationale), rationale,
+		len(witness), witness,
+		ts)
+}
+
+// Declassify lowers the taint level for trace (or turn) to Trusted, recording an
+// auditable, hash-chained receipt in the ledger.
+func (l *Ledger) Declassify(trace string, rationale string, witness any) (*DeclassificationReceipt, error) {
+	trimmed := strings.TrimSpace(rationale)
+	if trimmed == "" {
+		return nil, errors.New("ifc: declassification requires non-empty rationale")
+	}
+
+	witnessStr := ""
+	if witness != nil {
+		witnessStr = fmt.Sprint(witness)
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.ensureLocked()
+
+	cur := l.levelLocked(trace)
+	now := time.Now().UnixNano()
+
+	base, turn, isTurn := ParseTurnTrace(trace)
+	if isTurn {
+		if l.turnTaint[base] == nil {
+			l.turnTaint[base] = map[int]abi.TaintLabel{}
+		}
+		l.turnTaint[base][turn] = abi.TaintTrusted
+		l.mark[trace] = abi.TaintTrusted
+	} else {
+		turn = 0
+		l.mark[trace] = abi.TaintTrusted
+		if l.turnTaint[trace] != nil {
+			for tNum := range l.turnTaint[trace] {
+				l.turnTaint[trace][tNum] = abi.TaintTrusted
+			}
+		}
+		for m := range l.mark {
+			if b, _, ok := ParseTurnTrace(m); ok && b == trace {
+				l.mark[m] = abi.TaintTrusted
+			}
+		}
+	}
+	l.touchLocked(trace)
+
+	preimage := declassPreimage(l.lastReceiptHash, trace, turn, cur, abi.TaintTrusted, trimmed, witnessStr, now)
+	sum := sha256.Sum256([]byte(preimage))
+	receiptHash := hex.EncodeToString(sum[:])
+
+	rcpt := DeclassificationReceipt{
+		Trace:       trace,
+		Turn:        turn,
+		FromLevel:   cur,
+		ToLevel:     abi.TaintTrusted,
+		Rationale:   trimmed,
+		Witness:     witnessStr,
+		Timestamp:   now,
+		PrevHash:    l.lastReceiptHash,
+		ReceiptHash: receiptHash,
+	}
+
+	l.lastReceiptHash = receiptHash
+	l.declass = append(l.declass, rcpt)
+	return &rcpt, nil
+}
+
+// Declassifications returns a copy of all recorded declassification receipts.
+func (l *Ledger) Declassifications() []DeclassificationReceipt {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if len(l.declass) == 0 {
+		return nil
+	}
+	out := make([]DeclassificationReceipt, len(l.declass))
+	copy(out, l.declass)
+	return out
+}
+
+// VerifyDeclassifications verifies the cryptographic integrity and hash chaining
+// of all declassification receipts recorded in the ledger.
+func (l *Ledger) VerifyDeclassifications() error {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	prevHash := ""
+	for i, r := range l.declass {
+		if r.PrevHash != prevHash {
+			return fmt.Errorf("ifc: declassification chain broken at receipt %d: prev_hash %q != expected %q", i, r.PrevHash, prevHash)
+		}
+		expectedPreimage := declassPreimage(r.PrevHash, r.Trace, r.Turn, r.FromLevel, r.ToLevel, r.Rationale, r.Witness, r.Timestamp)
+		sum := sha256.Sum256([]byte(expectedPreimage))
+		expectedHash := hex.EncodeToString(sum[:])
+		if r.ReceiptHash != expectedHash {
+			return fmt.Errorf("ifc: declassification hash mismatch at receipt %d: got %s, want %s", i, r.ReceiptHash, expectedHash)
+		}
+		prevHash = r.ReceiptHash
+	}
+	return nil
+}
+
+// Reset clears a trace's mark (a fresh session / test isolation) and working
+// provenance, while retaining the immutable declassification receipt chain.
 func (l *Ledger) Reset(trace string) {
 	l.mu.Lock()
 	l.ensureLocked()
 	delete(l.mark, trace)
+	delete(l.prov, trace)
 	if el := l.index[trace]; el != nil {
 		l.lru.Remove(el)
 		delete(l.index, trace)
+	}
+
+	if base, turn, ok := ParseTurnTrace(trace); ok {
+		if l.turnTaint[base] != nil {
+			delete(l.turnTaint[base], turn)
+		}
+	} else {
+		delete(l.turnTaint, trace)
+		for m := range l.mark {
+			if b, _, ok := ParseTurnTrace(m); ok && b == trace {
+				delete(l.mark, m)
+				delete(l.prov, m)
+				if el := l.index[m]; el != nil {
+					l.lru.Remove(el)
+					delete(l.index, m)
+				}
+			}
+		}
 	}
 	l.mu.Unlock()
 }
@@ -204,11 +492,17 @@ func (l *Ledger) ensureLocked() {
 	if l.mark == nil {
 		l.mark = map[string]abi.TaintLabel{}
 	}
+	if l.prov == nil {
+		l.prov = map[string]TaintProvenance{}
+	}
 	if l.lru == nil {
 		l.lru = list.New()
 	}
 	if l.index == nil {
 		l.index = map[string]*list.Element{}
+	}
+	if l.turnTaint == nil {
+		l.turnTaint = map[string]map[int]abi.TaintLabel{}
 	}
 }
 
@@ -230,6 +524,16 @@ func (l *Ledger) trimLocked() {
 		l.lru.Remove(el)
 		delete(l.index, trace)
 		delete(l.mark, trace)
+		delete(l.prov, trace)
+		delete(l.turnTaint, trace)
+		if base, turn, ok := ParseTurnTrace(trace); ok {
+			if l.turnTaint[base] != nil {
+				delete(l.turnTaint[base], turn)
+				if len(l.turnTaint[base]) == 0 {
+					delete(l.turnTaint, base)
+				}
+			}
+		}
 	}
 }
 
@@ -458,26 +762,38 @@ func Classify(ctx context.Context, c *abi.ToolCall, p Policy) SinkClass {
 //     `send_email(path="attacker.example.com")` is still EGRESS by name;
 //   - it is per-key, not per-call, so every OTHER arg is still bare-scanned — the
 //     unlisted-key evasion (`{"server":"attacker.example.com"}`) stays closed.
-func hasExternalDestination(args map[string]any) bool {
-	if args == nil {
-		return false
+// findExternalDestination inspects args and returns the offending key, value, and true
+// if any arg value represents an off-box network destination.
+func findExternalDestination(args map[string]any) (key string, val string, ok bool) {
+	if len(args) == 0 {
+		return "", "", false
 	}
-	for k, v := range args {
-		s, ok := v.(string)
-		if !ok {
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		s, okVal := args[k].(string)
+		if !okVal {
 			continue
 		}
 		if isEgressKey(k) && looksExternal(s) {
-			return true
+			return k, s, true
 		}
 		if isLocalPathKey(k) {
 			continue
 		}
 		if isBareDestination(s) {
-			return true
+			return k, s, true
 		}
 	}
-	return false
+	return "", "", false
+}
+
+func hasExternalDestination(args map[string]any) bool {
+	_, _, ok := findExternalDestination(args)
+	return ok
 }
 
 func isEgressKey(k string) bool {
@@ -648,10 +964,27 @@ func (g *StampGate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) a
 		r.Payload.Scope = abi.ScopeAgent // tainted data is never shared beyond this agent
 	}
 	trace := ""
+	var toolName string
+	var seq uint64
 	if c != nil {
 		trace = c.TraceID
+		toolName = c.Tool
+		seq = c.SeqNo
+	} else if r.Call != nil {
+		trace = r.Call.TraceID
+		toolName = r.Call.Tool
+		seq = r.Call.SeqNo
 	}
-	g.ledger.Raise(trace, t)
+	digest := r.Payload.Digest
+	taintedAt := time.Now().UnixNano()
+
+	g.ledger.RaiseWithProvenance(trace, t, TaintProvenance{
+		Level:         t,
+		SourceTool:    toolName,
+		SourceCallSeq: seq,
+		SourceDigest:  digest,
+		TaintedAt:     taintedAt,
+	})
 	if r.Meta == nil {
 		r.Meta = map[string]string{}
 	}
@@ -764,19 +1097,34 @@ func (g *SinkGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict 
 	}
 
 	// 4. Smooth, expected refusal notice when no override was provided and strict gating is active.
+	meta := map[string]string{
+		"ifc_sink":           sink.String(),
+		"ifc_flow":           taintName(flow),
+		"subsystem":          "ifc-sink",
+		"deny_rule":          "ifc_taint_egress",
+		"expected_check":     "ifc_sink_gate",
+		"override_supported": "true",
+		"remedy":             "Routine IFC check: tainted data in flight to " + sink.String() + " sink. This is an expected safety boundary. If this action is intentional and safe for your task, re-issue with 'override_reason' or 'justification' to proceed (all overrides are logged for security auditing).",
+	}
+	prov := g.ledger.Provenance(c.TraceID)
+	if prov.SourceTool != "" {
+		meta["taint_source_tool"] = prov.SourceTool
+	}
+	args := decodeArgs(ctx, c)
+	offendingKey, _, hasExt := findExternalDestination(args)
+	if hasExt {
+		meta["offending_arg"] = offendingKey
+		meta["fix"] = "IFC egress block: parameter '" + offendingKey + "' contains external destination; strip off-box destination keys from " + c.Tool + " or authorize tool in policy"
+	} else {
+		meta["fix"] = "IFC " + sink.String() + " block: session carries untrusted data; avoid outbound egress or authorize tool in policy"
+	}
+
 	return abi.Verdict{
 		Kind:    abi.VerdictDeny,
 		Reason:  abi.ReasonTrustViolation,
 		By:      "ifc-sink",
 		Payload: abi.WitnessPayload{Claim: "Routine IFC check: " + sink.String() + " sink fed " + taintName(flow) + " data (can be overridden with 'override_reason')"},
-		Meta: map[string]string{
-			"ifc_sink":           sink.String(),
-			"ifc_flow":           taintName(flow),
-			"expected_check":     "ifc_sink_gate",
-			"override_supported": "true",
-			"remedy":             "Routine IFC check: tainted data in flight to " + sink.String() + " sink. This is an expected safety boundary. If this action is intentional and safe for your task, re-issue with 'override_reason' or 'justification' to proceed (all overrides are logged for security auditing).",
-			"fix":                "Specify 'override_reason' or 'justification' in tool call arguments or metadata explaining why this action is safe.",
-		},
+		Meta:    meta,
 	}
 }
 

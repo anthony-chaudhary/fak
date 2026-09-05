@@ -533,3 +533,314 @@ func TestSendInputDelegationNotBlockedByTaint(t *testing.T) {
 		t.Fatalf("send_input delegation: got Kind=%v, want VerdictDefer", v.Kind)
 	}
 }
+
+func TestTurnBoundaryTaint(t *testing.T) {
+	ctx := context.Background()
+	led := NewLedger()
+	stamp := NewStampGate(led, Policy{})
+	sink := NewSinkGate(led, Policy{})
+
+	// Test turn helpers
+	if got := TurnTrace("sess1", 1); got != "sess1/turn-1" {
+		t.Fatalf("TurnTrace = %q, want sess1/turn-1", got)
+	}
+	base, turn, ok := ParseTurnTrace("sess1/turn-1")
+	if !ok || base != "sess1" || turn != 1 {
+		t.Fatalf("ParseTurnTrace(/) = (%q, %d, %v), want (sess1, 1, true)", base, turn, ok)
+	}
+	base, turn, ok = ParseTurnTrace("sess1:turn-2")
+	if !ok || base != "sess1" || turn != 2 {
+		t.Fatalf("ParseTurnTrace(:) = (%q, %d, %v), want (sess1, 2, true)", base, turn, ok)
+	}
+	base, turn, ok = ParseTurnTrace("sess1#turn-3")
+	if !ok || base != "sess1" || turn != 3 {
+		t.Fatalf("ParseTurnTrace(#) = (%q, %d, %v), want (sess1, 3, true)", base, turn, ok)
+	}
+	if _, _, ok := ParseTurnTrace("sess1"); ok {
+		t.Fatal("ParseTurnTrace(sess1) should not be ok")
+	}
+
+	// Turn 1: Agent reads untrusted external webpage on sess1/turn-1.
+	// StampGate admits, raising taint on sess1/turn-1.
+	readCall := &abi.ToolCall{Tool: "read_webpage", TraceID: "sess1/turn-1"}
+	readRes := resultOf("<html>API documentation</html>")
+	if v := stamp.Admit(ctx, readCall, readRes); v.Kind != abi.VerdictDefer {
+		t.Fatalf("stamp must Defer, got %v", v.Kind)
+	}
+	if got := led.Level("sess1/turn-1"); got != abi.TaintTainted {
+		t.Fatalf("led.Level(sess1/turn-1) = %v, want %v", got, abi.TaintTainted)
+	}
+
+	// Turn 2 without declassification: sess1/turn-2 attempts egress to send_email.
+	// Assert SinkGate denies with ReasonTrustViolation (cannot evade taint simply by incrementing turn).
+	emailCall := &abi.ToolCall{
+		Tool:    "send_email",
+		TraceID: "sess1/turn-2",
+		Args:    abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"to":"ops@example.com","body":"spec"}`)},
+	}
+	v := sink.Adjudicate(ctx, emailCall)
+	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
+		t.Fatalf("turn 2 egress without declassification must Deny/ReasonTrustViolation, got %v/%s", v.Kind, abi.ReasonName(v.Reason))
+	}
+
+	// Declassify Turn 1: Call led.Declassify("sess1/turn-1", "Extracted factual API spec, stripped injection prompts", "witness:sha256:abcd").
+	rcpt, err := led.Declassify("sess1/turn-1", "Extracted factual API spec, stripped injection prompts", "witness:sha256:abcd")
+	if err != nil {
+		t.Fatalf("Declassify failed: %v", err)
+	}
+	if rcpt == nil || rcpt.ReceiptHash == "" {
+		t.Fatalf("expected non-nil receipt with hash, got %+v", rcpt)
+	}
+	if got := led.Level("sess1/turn-1"); got != abi.TaintTrusted {
+		t.Fatalf("led.Level(sess1/turn-1) after declassify = %v, want %v", got, abi.TaintTrusted)
+	}
+	if got := led.Level("sess1/turn-2"); got != abi.TaintTrusted {
+		t.Fatalf("led.Level(sess1/turn-2) after declassify = %v, want %v", got, abi.TaintTrusted)
+	}
+
+	// Turn 2 with clean state: Now sess1/turn-2 performs local coding / safe actions.
+	// SinkGate defers on clean egress or local coding.
+	vClean := sink.Adjudicate(ctx, emailCall)
+	if vClean.Kind != abi.VerdictDefer {
+		t.Fatalf("turn 2 egress after declassification must Defer, got %v", vClean.Kind)
+	}
+	localCall := &abi.ToolCall{
+		Tool:    "Read",
+		TraceID: "sess1/turn-2",
+		Args:    abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"path":"main.go"}`)},
+	}
+	vLocal := sink.Adjudicate(ctx, localCall)
+	if vLocal.Kind != abi.VerdictDefer {
+		t.Fatalf("turn 2 local read must Defer, got %v", vLocal.Kind)
+	}
+}
+
+func TestDeclassificationLedger(t *testing.T) {
+	led := NewLedger()
+	led.Raise("trace1/turn-1", abi.TaintTainted)
+	led.Raise("trace1/turn-2", abi.TaintQuarantined)
+
+	// Tests Declassify with empty rationale returns error.
+	if _, err := led.Declassify("trace1/turn-1", "", nil); err == nil {
+		t.Fatal("expected error on empty rationale, got nil")
+	}
+	if _, err := led.Declassify("trace1/turn-1", "   \t\n  ", nil); err == nil {
+		t.Fatal("expected error on whitespace rationale, got nil")
+	}
+
+	// Multiple Declassify calls create a valid, tamper-evident hash chain.
+	r1, err := led.Declassify("trace1/turn-1", "Sanitized external payload", "wit1")
+	if err != nil {
+		t.Fatalf("declassify turn 1: %v", err)
+	}
+	if r1.PrevHash != "" {
+		t.Fatalf("r1.PrevHash = %q, want empty", r1.PrevHash)
+	}
+	if r1.FromLevel != abi.TaintTainted || r1.ToLevel != abi.TaintTrusted {
+		t.Fatalf("r1 levels: from=%v, to=%v", r1.FromLevel, r1.ToLevel)
+	}
+
+	r2, err := led.Declassify("trace1/turn-2", "Inspected quarantine contents", "wit2")
+	if err != nil {
+		t.Fatalf("declassify turn 2: %v", err)
+	}
+	if r2.PrevHash != r1.ReceiptHash {
+		t.Fatalf("r2.PrevHash = %q, want %q", r2.PrevHash, r1.ReceiptHash)
+	}
+	if r2.FromLevel != abi.TaintQuarantined || r2.ToLevel != abi.TaintTrusted {
+		t.Fatalf("r2 levels: from=%v, to=%v", r2.FromLevel, r2.ToLevel)
+	}
+
+	receipts := led.Declassifications()
+	if len(receipts) != 2 {
+		t.Fatalf("len(receipts) = %d, want 2", len(receipts))
+	}
+
+	// VerifyDeclassifications() passes.
+	if err := led.VerifyDeclassifications(); err != nil {
+		t.Fatalf("VerifyDeclassifications() failed: %v", err)
+	}
+
+	// Tampering with receipt breaks VerifyDeclassifications().
+	origRationale := led.declass[0].Rationale
+	led.declass[0].Rationale = "tampered rationale"
+	if err := led.VerifyDeclassifications(); err == nil {
+		t.Fatal("expected VerifyDeclassifications() to fail after tampering rationale, got nil")
+	}
+	led.declass[0].Rationale = origRationale
+
+	origHash := led.declass[0].ReceiptHash
+	led.declass[0].ReceiptHash = "deadbeef"
+	if err := led.VerifyDeclassifications(); err == nil {
+		t.Fatal("expected VerifyDeclassifications() to fail after tampering receipt hash, got nil")
+	}
+	led.declass[0].ReceiptHash = origHash
+
+	if err := led.VerifyDeclassifications(); err != nil {
+		t.Fatalf("expected VerifyDeclassifications() to pass after restore, got %v", err)
+	}
+
+	// Test Reset clears marks but retains immutable declassifications
+	led.Reset("trace1")
+	if got := led.Level("trace1/turn-1"); got != abi.TaintTrusted {
+		t.Fatalf("after reset, level = %v, want Trusted", got)
+	}
+	if len(led.Declassifications()) != 2 {
+		t.Fatalf("after reset, declassifications should remain immutable, got %d want 2", len(led.Declassifications()))
+	}
+	if err := led.VerifyDeclassifications(); err != nil {
+		t.Fatalf("VerifyDeclassifications() failed after reset: %v", err)
+	}
+}
+
+func TestBaseToTurnTaintPropagation(t *testing.T) {
+	ctx := context.Background()
+	led := NewLedger()
+	sink := NewSinkGate(led, Policy{})
+
+	// Base tainted -> turn trace inherits base taint
+	led.Raise("sess-prop", abi.TaintTainted)
+
+	if got := led.Level("sess-prop/turn-1"); got != abi.TaintTainted {
+		t.Fatalf("sess-prop/turn-1 must inherit Tainted from base, got %v", taintName(got))
+	}
+	if got := led.Level("sess-prop/turn-42"); got != abi.TaintTainted {
+		t.Fatalf("sess-prop/turn-42 must inherit Tainted from base, got %v", taintName(got))
+	}
+
+	// Sink gate denies egress for turn trace inheriting base taint
+	emailCall := &abi.ToolCall{
+		Tool:    "send_email",
+		TraceID: "sess-prop/turn-1",
+		Args:    abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"to":"leak@example.com"}`)},
+	}
+	if v := sink.Adjudicate(ctx, emailCall); v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
+		t.Fatalf("turn trace inheriting base taint must be denied egress, got %v/%s", v.Kind, abi.ReasonName(v.Reason))
+	}
+
+	// Base quarantined -> turn trace inherits Quarantined
+	led.Raise("sess-q", abi.TaintQuarantined)
+	if got := led.Level("sess-q/turn-1"); got != abi.TaintQuarantined {
+		t.Fatalf("sess-q/turn-1 must inherit Quarantined from base, got %v", taintName(got))
+	}
+
+	// Explicit declassification of a turn cleans that turn while others keep inheriting base taint
+	if _, err := led.Declassify("sess-prop/turn-1", "Turn 1 verified clean", "wit-1"); err != nil {
+		t.Fatalf("declassify turn-1: %v", err)
+	}
+	if got := led.Level("sess-prop/turn-1"); got != abi.TaintTrusted {
+		t.Fatalf("declassified turn-1 must be Trusted, got %v", taintName(got))
+	}
+	if got := led.Level("sess-prop/turn-2"); got != abi.TaintTainted {
+		t.Fatalf("non-declassified turn-2 must still inherit base taint, got %v", taintName(got))
+	}
+}
+
+func TestMultiTraceReceiptsSurviveReset(t *testing.T) {
+	led := NewLedger()
+	led.Raise("traceA/turn-1", abi.TaintTainted)
+	led.Raise("traceB/turn-1", abi.TaintQuarantined)
+	led.Raise("traceA/turn-2", abi.TaintTainted)
+
+	r1, err := led.Declassify("traceA/turn-1", "Sanitized traceA turn 1", "witA1")
+	if err != nil {
+		t.Fatalf("declassify traceA/turn-1: %v", err)
+	}
+	r2, err := led.Declassify("traceB/turn-1", "Sanitized traceB turn 1", "witB1")
+	if err != nil {
+		t.Fatalf("declassify traceB/turn-1: %v", err)
+	}
+	r3, err := led.Declassify("traceA/turn-2", "Sanitized traceA turn 2", "witA2")
+	if err != nil {
+		t.Fatalf("declassify traceA/turn-2: %v", err)
+	}
+
+	if err := led.VerifyDeclassifications(); err != nil {
+		t.Fatalf("initial VerifyDeclassifications failed: %v", err)
+	}
+
+	// Reset traceA: marks and working state cleared, but receipts remain immutable and chain valid
+	led.Reset("traceA")
+
+	if got := led.Level("traceA"); got != abi.TaintTrusted {
+		t.Fatalf("after reset, traceA level = %v, want Trusted", taintName(got))
+	}
+	if got := led.Level("traceA/turn-1"); got != abi.TaintTrusted {
+		t.Fatalf("after reset, traceA/turn-1 level = %v, want Trusted", taintName(got))
+	}
+
+	receipts := led.Declassifications()
+	if len(receipts) != 3 {
+		t.Fatalf("receipt count after Reset = %d, want 3 (immutable audit trail)", len(receipts))
+	}
+	if receipts[0].ReceiptHash != r1.ReceiptHash || receipts[1].ReceiptHash != r2.ReceiptHash || receipts[2].ReceiptHash != r3.ReceiptHash {
+		t.Fatal("receipt hashes altered after Reset")
+	}
+
+	// The full cryptographic hash chain across multi-trace receipts must remain valid
+	if err := led.VerifyDeclassifications(); err != nil {
+		t.Fatalf("VerifyDeclassifications failed after Reset: %v", err)
+	}
+
+	// Subsequent declassification continues the hash chain
+	r4, err := led.Declassify("traceC", "Sanitized traceC", "witC")
+	if err != nil {
+		t.Fatalf("declassify traceC: %v", err)
+	}
+	if r4.PrevHash != r3.ReceiptHash {
+		t.Fatalf("new receipt prevHash = %q, want previous receipt %q", r4.PrevHash, r3.ReceiptHash)
+	}
+	if err := led.VerifyDeclassifications(); err != nil {
+		t.Fatalf("VerifyDeclassifications failed after continuing chain: %v", err)
+	}
+}
+
+func TestLatticeSupremumAcrossTurns(t *testing.T) {
+	led := NewLedger()
+
+	// Mixed Tainted and Quarantined turns: base trace must return Quarantined
+	led.Raise("base-mix/turn-1", abi.TaintTainted)
+	led.Raise("base-mix/turn-2", abi.TaintQuarantined)
+
+	for i := 0; i < 20; i++ {
+		if got := led.Level("base-mix"); got != abi.TaintQuarantined {
+			t.Fatalf("base trace level = %v, want lattice supremum %v", taintName(got), taintName(abi.TaintQuarantined))
+		}
+	}
+
+	// Inverse declaration order: turn-1 Quarantined, turn-2 Tainted
+	led.Raise("base-mix2/turn-1", abi.TaintQuarantined)
+	led.Raise("base-mix2/turn-2", abi.TaintTainted)
+	if got := led.Level("base-mix2"); got != abi.TaintQuarantined {
+		t.Fatalf("base-mix2 level = %v, want %v", taintName(got), taintName(abi.TaintQuarantined))
+	}
+
+	// Base mark Tainted with a Quarantined turn
+	led.Raise("base-mix3", abi.TaintTainted)
+	led.Raise("base-mix3/turn-1", abi.TaintQuarantined)
+	if got := led.Level("base-mix3"); got != abi.TaintQuarantined {
+		t.Fatalf("base-mix3 level = %v, want %v", taintName(got), taintName(abi.TaintQuarantined))
+	}
+
+	// Base mark Quarantined with Tainted turns
+	led.Raise("base-mix4", abi.TaintQuarantined)
+	led.Raise("base-mix4/turn-1", abi.TaintTainted)
+	if got := led.Level("base-mix4"); got != abi.TaintQuarantined {
+		t.Fatalf("base-mix4 level = %v, want %v", taintName(got), taintName(abi.TaintQuarantined))
+	}
+}
+
+func TestTrimLockedCleansTurnTaint(t *testing.T) {
+	led := NewLedgerWithLimit(2)
+	led.Raise("t1/turn-1", abi.TaintTainted)
+	led.Raise("t2/turn-1", abi.TaintTainted)
+	// Raising a 3rd trace causes LRU eviction of t1/turn-1
+	led.Raise("t3/turn-1", abi.TaintTainted)
+
+	if got := led.Level("t1/turn-1"); got != abi.TaintTrusted {
+		t.Fatalf("evicted trace level = %v, want Trusted", taintName(got))
+	}
+	if led.turnTaint["t1"] != nil && len(led.turnTaint["t1"]) > 0 {
+		t.Fatalf("evicted trace turnTaint should be cleaned up, got %v", led.turnTaint["t1"])
+	}
+}
