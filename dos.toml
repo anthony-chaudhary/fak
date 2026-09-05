@@ -3102,5 +3102,26 @@ summary  = "Compatibility alias for sync divergence: the local branch is behind 
 fix      = "Run `fak sync check --fetch --remote origin --branch <trunk>` to classify divergence into typed reasons (such as BEHIND_FASTFORWARDABLE), then follow the typed recovery plan."
 see_also = ["BEHIND_FASTFORWARDABLE", "DIVERGED_DISJOINT", "DIVERGED_OVERLAP", "TARGET_MOVED", "fak sync check"]
 
+[reasons.PARENT_TOKEN_BUDGET_EXCEEDED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "Aggregate token consumption across all launched ultracode worker children exceeded the declared parent token budget envelope (issue #11469)."
+fix      = "Increase the declared token budget envelope for the parent ultracode run, reduce the child worker count, or constrain individual child prompt and completion sizes. Floor: internal/orchestration."
+see_also = ["PARENT_WALL_DEADLINE_EXCEEDED", "BUDGET_RECEIPT_INCOMPLETE", "internal/orchestration/ultracode_envelope.go", "cmd/fak/recover.go"]
+
+[reasons.PARENT_WALL_DEADLINE_EXCEEDED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "Elapsed wall-clock execution time of the ultracode run reached or exceeded the declared parent wall deadline envelope (issue #11469)."
+fix      = "Extend the parent wall budget duration, optimize slow worker steps, or parallelize execution across more responsive fleet nodes. Floor: internal/orchestration."
+see_also = ["PARENT_TOKEN_BUDGET_EXCEEDED", "BUDGET_RECEIPT_INCOMPLETE", "internal/orchestration/ultracode_envelope.go", "cmd/fak/recover.go"]
+
+[reasons.BUDGET_RECEIPT_INCOMPLETE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The ultracode budget receipt is incomplete because one or more child workers did not return provider-authoritative token usage or coverage (issue #11469)."
+fix      = "Ensure all launched child workers finish cleanly and report provider-authoritative token usage before admitting the aggregate envelope receipt. Floor: internal/orchestration."
+see_also = ["PARENT_TOKEN_BUDGET_EXCEEDED", "PARENT_WALL_DEADLINE_EXCEEDED", "internal/orchestration/ultracode_envelope.go", "cmd/fak/recover.go"]
+
 [retention]
 audits_keep_last = 30
