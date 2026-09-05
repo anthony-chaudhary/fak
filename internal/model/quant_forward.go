@@ -480,6 +480,8 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 	G := make([]float32, P*I)
 	U := make([]float32, P*I)
 	Down := make([]float32, P*H)
+	// Output projection overwrites every cell; residual addition finishes before reuse.
+	O := make([]float32, P*H)
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
 		ql := m.q8Layer(l)
@@ -529,7 +531,7 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 		attnPrefillInto(attnOut, Q, Kl, Vl, P, base, nH, hd, w, grp, cfg.windowForLayer(l), l, scale, attnCap, scoreDot, s.M.attnObs)
 		toc(&tAttn, tA)
 
-		O := gemm(ql.oProj, qz(attnOut, P, nH*hd))
+		gemmInto(ql.oProj, qz(attnOut, P, nH*hd), O)
 		for t := 0; t < P; t++ {
 			m.addBiasIfPresent(O[t*H:(t+1)*H], lp("self_attn.o_proj.bias"))
 		}
