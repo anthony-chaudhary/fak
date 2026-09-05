@@ -39,6 +39,7 @@ type agentFlags struct {
 	codeTools             *bool
 	codeWorkspace         *string
 	sysTools              *bool
+	mcpTools              *bool
 	routeManifest         *string
 	routeAccounts         *string
 	keepAwake             *string
@@ -79,6 +80,7 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.codeTools = fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the current repository; use --code-tools=false to disable")
 	af.codeWorkspace = fs.String("code-workspace", "", "override the workspace root for default-on bounded repository code tools")
 	af.sysTools = fs.Bool("sys-tools", true, "arm safe read-only system and web utility tools (get_time, fetch_web, web_search); use --sys-tools=false to disable")
+	af.mcpTools = fs.Bool("mcp-tools", true, "arm native fak MCP features (fak_read, fak_tools_search, fak_adjudicate, fak_syscall); use --mcp-tools=false to disable")
 	af.routeManifest = fs.String("route-manifest", "", "model-routing policy to install for the fak arm; each tool call is classified and a single-model PICK binds abi.ToolCall.Engine before kernel submit")
 	af.routeAccounts = fs.String("route-accounts", "", "model-account roster used to resolve routed model ids to account-bound engine routes")
 	af.keepAwake = fs.String("keep-awake", KeepAwakeOff, "prevent OS sleep during execution: off|while-active|always (default off)")
@@ -235,13 +237,15 @@ func runAgent(argv []string) {
 		sysCatalog, sysErr := agent.ArmSysTools(systools.Config{})
 		must(sysErr)
 		defer agent.DisarmSysTools()
-		if *af.codeTools {
-			catalog = append(catalog, sysCatalog...)
-			runOpts = append(runOpts, agent.WithToolCatalog(catalog))
-		} else {
-			runOpts = append(runOpts, agent.WithToolCatalog(sysCatalog))
-		}
-	} else if *af.codeTools {
+		catalog = append(catalog, sysCatalog...)
+	}
+	if *af.mcpTools {
+		mcpCatalog, mcpErr := agent.ArmMCPTools()
+		must(mcpErr)
+		defer agent.DisarmMCPTools()
+		catalog = append(catalog, mcpCatalog...)
+	}
+	if len(catalog) > 0 {
 		runOpts = append(runOpts, agent.WithToolCatalog(catalog))
 	}
 	runOpts = append(runOpts, agentEffortRunOptions(af)...)

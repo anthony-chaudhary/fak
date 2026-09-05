@@ -275,6 +275,17 @@ var builtins = []HarnessProfile{
 		ConfigHomeGlob: ".pi*",
 		Identity:       IdentityEnvKey,
 	},
+	{
+		Name:           "fak",
+		AdapterVersion: "1.0.0",
+		Names:          []string{"fak", "fak-agent"},
+		Wire:           WireOpenAI,
+		DefaultBaseURL: "https://api.openai.com/v1",
+		Repoint:        []RepointMechanism{RepointEnv, RepointSettingsFile},
+		Credential:     CredentialSource{Kind: CredentialEnvKey, EnvKey: "OPENAI_API_KEY"},
+		ConfigHomeGlob: ".fak*",
+		Identity:       IdentityEnvKey,
+	},
 }
 
 // Lookup resolves a wrapped-agent command to its HarnessProfile, matching on the
