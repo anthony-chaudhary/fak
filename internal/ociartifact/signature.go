@@ -179,9 +179,6 @@ func VerifyArtifact(bundlePath, publicKeyPEMOrHex string) error {
 	if publicKeyPEMOrHex == "" {
 		return fail("EMPTY_KEY", "verify-artifact", "verifyKey", "verification key cannot be empty")
 	}
-	if publicKeyPEMOrHex == "test-key" {
-		return nil
-	}
 	return VerifyArtifactCosign(bundlePath, publicKeyPEMOrHex)
 }
 
