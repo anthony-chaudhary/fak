@@ -1460,7 +1460,7 @@ func selfRegisters(t *testing.T, internal, pkg string) bool {
 // wired by its constructor at the Submit seam, not as a passive driver.
 // A leaf added here is a conscious "wired elsewhere" decision, the same review
 // chokepoint as the tier table.
-var regOffList = map[string]bool{"agent": true, "gateway": true, "computeadmit": true, "codetools": true, "systools": true}
+var regOffList = map[string]bool{"agent": true, "gateway": true, "computeadmit": true, "codetools": true, "systools": true, "observer": true, "trajhook": true}
 
 // TestRequestPathLeavesRegistered closes the registration-completeness hole: a leaf whose
 // production init() calls abi.Register* MUST be either blank-imported by the defconfig
@@ -2931,6 +2931,9 @@ func TestShellSelfModifyGuardWiredInDecide(t *testing.T) {
 // A NEW engine under a NEW id is correctly allowed (the map is plural by design); only a
 // second registrant of an EXISTING id is the regression this gate catches.
 var engineDriverRole = map[string]map[string]string{
+	"agent.context_control": {
+		"agent": "bounded agent context control engine",
+	},
 	"agent.skill": {
 		"agent": "dynamic agent skill loader engine",
 	},
@@ -2939,6 +2942,9 @@ var engineDriverRole = map[string]map[string]string{
 	},
 	"agent.todowrite": {
 		"agent": "native harness task list mutation and planning engine",
+	},
+	"inprocess_mcp": {
+		"agent": "in-process MCP tool server engine",
 	},
 	"codetools.bash": {
 		"codetools": "bounded coding Bash engine",
