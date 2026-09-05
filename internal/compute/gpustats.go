@@ -126,6 +126,16 @@ func AggregateGPUStats(stats []GPUStat) (usedBytes, totalBytes uint64, utilPct f
 	return usedBytes, totalBytes, utilPct, true
 }
 
+// SystemGPUStats queries accelerator telemetry from available platform probes.
+// On Darwin, it checks Apple Silicon IORegistry IOAccelerator telemetry first,
+// falling back to nvidia-smi. On other platforms, it queries nvidia-smi.
+func SystemGPUStats() (stats []GPUStat, present bool) {
+	if stats, ok := AppleSiliconGPUStats(); ok {
+		return stats, true
+	}
+	return NvidiaGPUStats()
+}
+
 // HarnessGPUVRAM selects the VRAM reading for the harness-resource sampler (#2052).
 // It PREFERS the in-kernel backend's own device handle — deviceTotal/deviceFree/
 // deviceKnown exactly as DeviceMemoryInfo returns them — because that is the memory
