@@ -598,3 +598,371 @@ func assertNoForbiddenDraftKeywords(t *testing.T, node any, path string) {
 		}
 	}
 }
+
+func assertNoNestedAnyOf(t *testing.T, node any, path string, inAnyOf bool) {
+	switch val := node.(type) {
+	case map[string]any:
+		if anyOf, hasAnyOf := val["anyOf"]; hasAnyOf {
+			if inAnyOf {
+				t.Errorf("found nested anyOf at %s", path)
+			}
+			if anyOfSlice, ok := anyOf.([]any); ok {
+				for i, branch := range anyOfSlice {
+					assertNoNestedAnyOf(t, branch, fmt.Sprintf("%s.anyOf[%d]", path, i), true)
+				}
+			}
+		}
+		for k, v := range val {
+			if k != "anyOf" {
+				assertNoNestedAnyOf(t, v, path+"."+k, false)
+			}
+		}
+	case []any:
+		for i, item := range val {
+			assertNoNestedAnyOf(t, item, fmt.Sprintf("%s[%d]", path, i), inAnyOf)
+		}
+	}
+}
+
+func countNullBranches(anyOfList []any) int {
+	nullCount := 0
+	for _, b := range anyOfList {
+		if bMap, ok := b.(map[string]any); ok {
+			if t, ok := bMap["type"].(string); ok && t == "null" {
+				nullCount++
+			}
+		}
+	}
+	return nullCount
+}
+
+func TestStrictNullableUnions(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		propName     string
+		wantBranches int
+		check        func(t *testing.T, prop map[string]any)
+	}{
+		{
+			name: "flat anyOf string and integer",
+			input: `{
+				"type": "object",
+				"properties": {
+					"val": {
+						"anyOf": [{"type": "string"}, {"type": "integer"}]
+					}
+				}
+			}`,
+			propName:     "val",
+			wantBranches: 3,
+			check: func(t *testing.T, prop map[string]any) {
+				branches := prop["anyOf"].([]any)
+				if branches[0].(map[string]any)["type"] != "string" ||
+					branches[1].(map[string]any)["type"] != "integer" ||
+					branches[2].(map[string]any)["type"] != "null" {
+					t.Errorf("unexpected branch order or types: %v", branches)
+				}
+			},
+		},
+		{
+			name: "nested anyOf lists flattened",
+			input: `{
+				"type": "object",
+				"properties": {
+					"val": {
+						"anyOf": [
+							{
+								"anyOf": [{"type": "string"}, {"type": "integer"}]
+							},
+							{"type": "boolean"}
+						]
+					}
+				}
+			}`,
+			propName:     "val",
+			wantBranches: 4,
+			check: func(t *testing.T, prop map[string]any) {
+				branches := prop["anyOf"].([]any)
+				types := []string{
+					branches[0].(map[string]any)["type"].(string),
+					branches[1].(map[string]any)["type"].(string),
+					branches[2].(map[string]any)["type"].(string),
+					branches[3].(map[string]any)["type"].(string),
+				}
+				expected := []string{"string", "integer", "boolean", "null"}
+				for i, exp := range expected {
+					if types[i] != exp {
+						t.Errorf("branch %d type = %q, want %q", i, types[i], exp)
+					}
+				}
+			},
+		},
+		{
+			name: "nested anyOf with $ref and null",
+			input: `{
+				"type": "object",
+				"properties": {
+					"target": {
+						"anyOf": [
+							{"$ref": "#/$defs/A"},
+							{
+								"anyOf": [
+									{"$ref": "#/$defs/B"},
+									{"type": "null"}
+								]
+							}
+						]
+					}
+				},
+				"$defs": {
+					"A": {"type": "object", "properties": {"a": {"type": "string"}}, "required": ["a"]},
+					"B": {"type": "object", "properties": {"b": {"type": "integer"}}, "required": ["b"]}
+				}
+			}`,
+			propName:     "target",
+			wantBranches: 3,
+			check: func(t *testing.T, prop map[string]any) {
+				branches := prop["anyOf"].([]any)
+				if branches[0].(map[string]any)["$ref"] != "#/$defs/A" {
+					t.Errorf("branch 0 expected $ref A, got %v", branches[0])
+				}
+				if branches[1].(map[string]any)["$ref"] != "#/$defs/B" {
+					t.Errorf("branch 1 expected $ref B, got %v", branches[1])
+				}
+				if branches[2].(map[string]any)["type"] != "null" {
+					t.Errorf("branch 2 expected null, got %v", branches[2])
+				}
+			},
+		},
+		{
+			name: "deeply nested union hierarchy with null deduplication",
+			input: `{
+				"type": "object",
+				"properties": {
+					"deep": {
+						"anyOf": [
+							{
+								"anyOf": [
+									{
+										"anyOf": [
+											{"type": "string"},
+											{"type": "null"}
+										]
+									},
+									{"type": "integer"}
+								]
+							},
+							{"type": "null"},
+							{
+								"anyOf": [
+									{"$ref": "#/$defs/Foo"},
+									{"type": "null"}
+								]
+							},
+							{"type": "null"}
+						]
+					}
+				},
+				"$defs": {
+					"Foo": {"type": "object", "properties": {"x": {"type": "number"}}, "required": ["x"]}
+				}
+			}`,
+			propName:     "deep",
+			wantBranches: 4,
+			check: func(t *testing.T, prop map[string]any) {
+				branches := prop["anyOf"].([]any)
+				if branches[0].(map[string]any)["type"] != "string" {
+					t.Errorf("branch 0 expected string, got %v", branches[0])
+				}
+				if branches[1].(map[string]any)["type"] != "integer" {
+					t.Errorf("branch 1 expected integer, got %v", branches[1])
+				}
+				if branches[2].(map[string]any)["$ref"] != "#/$defs/Foo" {
+					t.Errorf("branch 2 expected $ref Foo, got %v", branches[2])
+				}
+				if branches[3].(map[string]any)["type"] != "null" {
+					t.Errorf("branch 3 expected null, got %v", branches[3])
+				}
+			},
+		},
+		{
+			name: "optional property with already present null branch",
+			input: `{
+				"type": "object",
+				"properties": {
+					"opt_null": {
+						"anyOf": [
+							{"type": "string"},
+							{"type": "null"}
+						]
+					}
+				}
+			}`,
+			propName:     "opt_null",
+			wantBranches: 2,
+			check: func(t *testing.T, prop map[string]any) {
+				branches := prop["anyOf"].([]any)
+				if branches[0].(map[string]any)["type"] != "string" ||
+					branches[1].(map[string]any)["type"] != "null" {
+					t.Errorf("unexpected branches: %v", branches)
+				}
+			},
+		},
+		{
+			name: "preserves outer title and description on flattened union",
+			input: `{
+				"type": "object",
+				"properties": {
+					"annotated": {
+						"title": "AnnotatedProp",
+						"description": "Detailed description of prop",
+						"anyOf": [
+							{
+								"anyOf": [
+									{"type": "string"},
+									{"type": "number"}
+								]
+							}
+						]
+					}
+				}
+			}`,
+			propName:     "annotated",
+			wantBranches: 3,
+			check: func(t *testing.T, prop map[string]any) {
+				if prop["title"] != "AnnotatedProp" {
+					t.Errorf("expected title AnnotatedProp, got %v", prop["title"])
+				}
+				if prop["description"] != "Detailed description of prop" {
+					t.Errorf("expected description preserved, got %v", prop["description"])
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := ToOpenAIStrictSchema(json.RawMessage(tt.input))
+			if err != nil {
+				t.Fatalf("ToOpenAIStrictSchema error: %v", err)
+			}
+			errs := ValidateOpenAIStrictMode(res)
+			if len(errs) != 0 {
+				t.Fatalf("ValidateOpenAIStrictMode errors (%d): %v\nschema: %s", len(errs), errs, string(res))
+			}
+
+			var parsed map[string]any
+			if err := json.Unmarshal(res, &parsed); err != nil {
+				t.Fatalf("unmarshal error: %v", err)
+			}
+
+			assertNoNestedAnyOf(t, parsed, "$", false)
+
+			props, ok := parsed["properties"].(map[string]any)
+			if !ok {
+				t.Fatalf("missing properties map: %v", parsed)
+			}
+
+			prop, ok := props[tt.propName].(map[string]any)
+			if !ok {
+				t.Fatalf("property %q not found in properties: %v", tt.propName, props)
+			}
+
+			branches, ok := prop["anyOf"].([]any)
+			if !ok {
+				t.Fatalf("property %q missing anyOf list: %v", tt.propName, prop)
+			}
+
+			if len(branches) != tt.wantBranches {
+				t.Fatalf("property %q got %d branches, want %d: %v", tt.propName, len(branches), tt.wantBranches, branches)
+			}
+
+			nullCount := countNullBranches(branches)
+			if nullCount != 1 {
+				t.Errorf("property %q expected exactly 1 null branch, got %d in %v", tt.propName, nullCount, branches)
+			}
+
+			if tt.check != nil {
+				tt.check(t, prop)
+			}
+		})
+	}
+}
+
+func TestToOpenAIStrictComplexUnions(t *testing.T) {
+	// Direct unit tests of strictMakeNullable
+	t.Run("strictMakeNullable direct flattening and deduplication", func(t *testing.T) {
+		inputProp := map[string]any{
+			"description": "direct test",
+			"anyOf": []any{
+				map[string]any{
+					"anyOf": []any{
+						map[string]any{"type": "string"},
+						map[string]any{"type": "null"},
+					},
+				},
+				map[string]any{
+					"anyOf": []any{
+						map[string]any{"$ref": "#/$defs/Item"},
+						map[string]any{"type": "null"},
+					},
+				},
+				map[string]any{"type": "null"},
+			},
+		}
+
+		out := strictMakeNullable(inputProp)
+		if out["description"] != "direct test" {
+			t.Errorf("description lost: %v", out["description"])
+		}
+
+		branches, ok := out["anyOf"].([]any)
+		if !ok {
+			t.Fatalf("out[anyOf] is not []any: %T", out["anyOf"])
+		}
+
+		// Expected branches: string, $ref, null
+		if len(branches) != 3 {
+			t.Fatalf("expected 3 branches, got %d: %v", len(branches), branches)
+		}
+
+		b0, _ := branches[0].(map[string]any)
+		b1, _ := branches[1].(map[string]any)
+		b2, _ := branches[2].(map[string]any)
+
+		if b0["type"] != "string" {
+			t.Errorf("branch 0 expected string, got %v", b0)
+		}
+		if b1["$ref"] != "#/$defs/Item" {
+			t.Errorf("branch 1 expected $ref Item, got %v", b1)
+		}
+		if b2["type"] != "null" {
+			t.Errorf("branch 2 expected null, got %v", b2)
+		}
+
+		if countNullBranches(branches) != 1 {
+			t.Errorf("expected exactly 1 null branch, got %d", countNullBranches(branches))
+		}
+	})
+
+	t.Run("strictMakeNullable with type array containing null", func(t *testing.T) {
+		inputProp := map[string]any{
+			"type": []any{"string", "null"},
+		}
+		out := strictMakeNullable(inputProp)
+		branches, ok := out["anyOf"].([]any)
+		if !ok {
+			t.Fatalf("out[anyOf] is not []any: %T", out["anyOf"])
+		}
+		if len(branches) != 2 {
+			t.Fatalf("expected 2 branches, got %d: %v", len(branches), branches)
+		}
+		if branches[0].(map[string]any)["type"] != "string" || branches[1].(map[string]any)["type"] != "null" {
+			t.Errorf("unexpected branches: %v", branches)
+		}
+		if countNullBranches(branches) != 1 {
+			t.Errorf("expected exactly 1 null branch, got %d", countNullBranches(branches))
+		}
+	})
+}

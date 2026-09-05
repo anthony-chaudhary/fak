@@ -533,25 +533,86 @@ func strictTransformSchema(s map[string]any) map[string]any {
 	return s
 }
 
+func isNullBranch(item any) bool {
+	if item == nil {
+		return true
+	}
+	itemMap, ok := item.(map[string]any)
+	if !ok {
+		return false
+	}
+	if t, ok := itemMap["type"].(string); ok && t == "null" {
+		return true
+	}
+	if tList, ok := itemMap["type"].([]any); ok && len(tList) == 1 {
+		if t, ok := tList[0].(string); ok && t == "null" {
+			return true
+		}
+	}
+	return false
+}
+
+func flattenAnyOf(items []any) []any {
+	var result []any
+	for _, item := range items {
+		if item == nil {
+			result = append(result, item)
+			continue
+		}
+		itemMap, ok := item.(map[string]any)
+		if ok {
+			if tList, isList := itemMap["type"].([]any); isList {
+				var innerList []any
+				for _, t := range tList {
+					if tStr, ok := t.(string); ok {
+						innerList = append(innerList, map[string]any{"type": tStr})
+					}
+				}
+				flatInner := flattenAnyOf(innerList)
+				result = append(result, flatInner...)
+				continue
+			}
+			if anyOfVal, hasAnyOf := itemMap["anyOf"]; hasAnyOf {
+				if anyOfList, isList := anyOfVal.([]any); isList {
+					flatInner := flattenAnyOf(anyOfList)
+					result = append(result, flatInner...)
+					continue
+				}
+			}
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
 func strictMakeNullable(p map[string]any) map[string]any {
-	if t, _ := p["type"].(string); t == "null" {
+	if isNullBranch(p) {
 		return p
+	}
+
+	if tList, isList := p["type"].([]any); isList {
+		var anyOfList []any
+		for _, t := range tList {
+			if tStr, ok := t.(string); ok {
+				anyOfList = append(anyOfList, map[string]any{"type": tStr})
+			}
+		}
+		delete(p, "type")
+		p["anyOf"] = anyOfList
 	}
 
 	if anyOfVal, hasAnyOf := p["anyOf"]; hasAnyOf {
 		if anyOfList, isList := anyOfVal.([]any); isList {
-			hasNull := false
-			for _, item := range anyOfList {
-				if itemMap, ok := item.(map[string]any); ok {
-					if t, _ := itemMap["type"].(string); t == "null" {
-						hasNull = true
-						break
-					}
+			flat := flattenAnyOf(anyOfList)
+			var nonNull []any
+			for _, item := range flat {
+				if isNullBranch(item) {
+					continue
 				}
+				nonNull = append(nonNull, item)
 			}
-			if !hasNull {
-				p["anyOf"] = append(anyOfList, map[string]any{"type": "null"})
-			}
+			nonNull = append(nonNull, map[string]any{"type": "null"})
+			p["anyOf"] = nonNull
 			return p
 		}
 	}
