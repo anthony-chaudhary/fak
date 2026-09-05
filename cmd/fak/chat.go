@@ -33,6 +33,8 @@ type chatFlags struct {
 	workflow              *string
 	workflowStep          *bool
 	workflowCheckpointDir *string
+	memory                *bool
+	memoryStore           *string
 }
 
 func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
@@ -56,6 +58,8 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 	cf.workflow = fs.String("workflow", "", "name of workflow to execute (e.g. fleet-wave)")
 	cf.workflowStep = fs.Bool("workflow-step", false, "execute a single workflow phase step instead of full workflow")
 	cf.workflowCheckpointDir = fs.String("workflow-checkpoint-dir", ".fak/workflows", "directory for workflow state checkpoints")
+	cf.memory = fs.Bool("memory", true, "discover and inject verified workspace memory notes into agent prompt; use --memory=false to disable")
+	cf.memoryStore = fs.String("memory-store", "", "optional custom memory store path (directory or MEMORY.md); defaults to auto-discovery")
 	return fs, cf
 }
 
@@ -98,14 +102,14 @@ func cmdChat(argv []string) {
 	var runOpts []agent.RunOption
 	var catalog []agent.ToolDef
 	hasCustomCatalog := false
+	root := strings.TrimSpace(*cf.codeWorkspace)
+	if root == "" {
+		var err error
+		root, err = os.Getwd()
+		must(err)
+	}
 	useCodeTools := *cf.codeTools && *cf.tools != "demo" && *cf.tools != "none"
 	if *cf.tools == "code" || useCodeTools {
-		root := strings.TrimSpace(*cf.codeWorkspace)
-		if root == "" {
-			var err error
-			root, err = os.Getwd()
-			must(err)
-		}
 		var extraDirs []string
 		if *cf.skillsDir != "" {
 			extraDirs = append(extraDirs, *cf.skillsDir)
@@ -132,6 +136,9 @@ func cmdChat(argv []string) {
 		runOpts = append(runOpts, agent.WithToolCatalog(catalog))
 	} else if *cf.tools == "none" {
 		runOpts = append(runOpts, agent.WithToolCatalog(nil))
+	}
+	if memOpt, _ := resolveAgentMemoryOption(*cf.memory, *cf.memoryStore, root); memOpt != nil {
+		runOpts = append(runOpts, memOpt)
 	}
 
 	planner := chatPlanner(*cf.offline, effectiveBaseURL, *cf.provider, *cf.model, *cf.apiKeyEnv, *cf.anthropicAuth)

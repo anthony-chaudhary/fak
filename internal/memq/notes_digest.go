@@ -20,7 +20,12 @@ import (
 // screen and no claim probe), wired into `fak memory-read`. Byte-budget and
 // overflow-naming behavior otherwise match RenderDigest exactly.
 func RenderNotesDigest(storeDir string, indexOnly bool, maxBytes int) string {
-	indexPath := filepath.Join(storeDir, "MEMORY.md")
+	dir := storeDir
+	indexPath := filepath.Join(dir, "MEMORY.md")
+	if fi, err := os.Stat(dir); err == nil && !fi.IsDir() {
+		indexPath = dir
+		dir = filepath.Dir(dir)
+	}
 	indexBytes, err := os.ReadFile(indexPath)
 	if err != nil {
 		return fmt.Sprintf("(no committed memory mirror at %s - fresh node or scrubbed clone; nothing to orient from)\n", filepath.ToSlash(storeDir))
@@ -36,7 +41,7 @@ func RenderNotesDigest(storeDir string, indexOnly bool, maxBytes int) string {
 		return strings.Join(parts, "\n") + "\n"
 	}
 
-	backend, _ := NewNotesBackend(storeDir) // a missing/partial store yields an empty corpus, never an error
+	backend, _ := NewNotesBackend(dir) // a missing/partial store yields an empty corpus, never an error
 	ctx := context.Background()
 	cells, _ := backend.Cells(ctx)
 

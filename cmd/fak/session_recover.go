@@ -226,6 +226,8 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 	jsonOutput := fs.Bool("json", false, "emit the versioned cohort summary as JSON")
 	receipts := fs.String("receipts", "", "receipt directory")
 	interactive := fs.Bool("interactive", false, "preserve native Codex TUI on relaunch (uses codex resume instead of codex exec resume)")
+	endpoint := fs.String("endpoint", "", "configured upstream endpoint URL to probe for readiness (defaults to OPENAI_BASE_URL or FAK_CODEX_BASE_URL if set)")
+	endpointWait := fs.Duration("endpoint-wait", 0, "optional duration to wait for endpoint readiness before refusing")
 	threads := threadFlags{}
 	fs.Var(threads, "thread", "thread ID to recover (repeatable)")
 	if err := fs.Parse(args); err != nil {
@@ -283,14 +285,26 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "fak session recover: resolve current executable:", exeErr)
 		return 2
 	}
-	requests := sessionrecovery.Select(before, sessionrecovery.Options{ManagerBin: managerPath, Threads: threads, Limit: selectionLimit, CWDOverride: *cwd, Prompt: *prompt, ReceiptDir: *receipts, Interactive: *interactive})
+	resolvedEndpoint := strings.TrimSpace(*endpoint)
+	if resolvedEndpoint == "" {
+		resolvedEndpoint = strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
+		if resolvedEndpoint == "" {
+			resolvedEndpoint = strings.TrimSpace(os.Getenv("FAK_CODEX_BASE_URL"))
+		}
+	}
+	recoveryOpts := sessionrecovery.Options{
+		ManagerBin: managerPath, Threads: threads, Limit: selectionLimit, CWDOverride: *cwd,
+		Prompt: *prompt, ReceiptDir: *receipts, Interactive: *interactive,
+		Endpoint: resolvedEndpoint, EndpointWait: *endpointWait, EndpointReady: sessionrecovery.CheckEndpointReadiness,
+	}
+	requests := sessionrecovery.Select(before, recoveryOpts)
 	if *journal {
 		classified, journalErr := recoveryJournalCrashes(*journalPath, recoveryNow())
 		if journalErr != nil {
 			fmt.Fprintln(stderr, "fak session recover: session journal:", journalErr)
 			return 2
 		}
-		requests = sessionrecovery.MergeJournalCrashes(requests, classified, sessionrecovery.Options{ManagerBin: managerPath, Threads: threads, Limit: selectionLimit, CWDOverride: *cwd, Prompt: *prompt, ReceiptDir: *receipts, Interactive: *interactive})
+		requests = sessionrecovery.MergeJournalCrashes(requests, classified, recoveryOpts)
 	}
 	mode := "preview"
 	if doLive {
@@ -304,7 +318,7 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 		return 1
 	}
 	if doLive {
-		if !processLiveRequests(stderr, &summary, requests, before, *since, *verifyTimeout, *pollInterval, *settle) {
+		if !processLiveRequests(stderr, &summary, requests, before, *since, *verifyTimeout, *pollInterval, *settle, resolvedEndpoint, *endpointWait) {
 			return 1
 		}
 	}
@@ -335,7 +349,32 @@ func processLiveRequests(
 	requests []sessionrecovery.Request,
 	before sessionrecovery.InventoryReport,
 	since, verifyTimeout, pollInterval, settle time.Duration,
+	endpoint string,
+	endpointWait time.Duration,
 ) bool {
+	if endpoint != "" {
+		ready, _ := sessionrecovery.CheckEndpointReadiness(context.Background(), endpoint)
+		if !ready && endpointWait > 0 {
+			deadline := recoveryNow().Add(endpointWait)
+			for !ready && recoveryNow().Before(deadline) {
+				recoverySleep(500 * time.Millisecond)
+				ready, _ = sessionrecovery.CheckEndpointReadiness(context.Background(), endpoint)
+			}
+		}
+		if !ready {
+			for i := range requests {
+				if requests[i].Status == "candidate" {
+					requests[i].Status = "refused"
+					requests[i].Reason = "endpoint_unavailable"
+					resultIndex := recoveryResultIndex(summary.Results, requests[i].ThreadID)
+					if resultIndex >= 0 {
+						persistRecoveryResult(stderr, summary, resultIndex, sessionRecoveryResult(requests[i]))
+					}
+				}
+			}
+			return true
+		}
+	}
 	pending := make(map[int]time.Time)
 	requestByResult := make(map[int]int)
 	for i := range requests {

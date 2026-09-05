@@ -5,11 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/dropin"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/systools"
 )
@@ -45,6 +47,8 @@ type agentFlags struct {
 	workflow              *string
 	workflowStep          *bool
 	workflowCheckpointDir *string
+	memory                *bool
+	memoryStore           *string
 	posture               *string
 	mcpConfig             *string
 }
@@ -83,6 +87,8 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.workflow = fs.String("workflow", "", "name of workflow to execute (e.g. fleet-wave)")
 	af.workflowStep = fs.Bool("workflow-step", false, "execute a single workflow phase step instead of full workflow")
 	af.workflowCheckpointDir = fs.String("workflow-checkpoint-dir", ".fak/workflows", "directory for workflow state checkpoints")
+	af.memory = fs.Bool("memory", true, "discover and inject verified workspace memory notes into agent prompt; use --memory=false to disable")
+	af.memoryStore = fs.String("memory-store", "", "optional custom memory store path (directory or MEMORY.md); defaults to auto-discovery")
 	af.posture = fs.String("posture", "default_open", "adjudication posture: default_open|fail_closed|admit_and_log (default: default_open; env: FAK_AGENT_POSTURE or FAK_GUARD_POSTURE)")
 	af.mcpConfig = fs.String("mcp-config", os.Getenv("FAK_MCP_CONFIG"), "optional path to MCP client configuration file")
 	return fs, af
@@ -132,7 +138,7 @@ func runAgent(argv []string) {
 		agent.SetConfiguredPosture(adjudicator.PostureDefaultOpen)
 	}
 
-	isRaw, isNative, err := validateAgentMode(*af.raw, *af.native, *af.mode)
+	isRaw, isNative, err := resolveAgentMode(*af.raw, *af.native, *af.mode)
 	must(err)
 
 	if *af.workflow != "" {
@@ -239,6 +245,9 @@ func runAgent(argv []string) {
 		runOpts = append(runOpts, agent.WithToolCatalog(catalog))
 	}
 	runOpts = append(runOpts, agentEffortRunOptions(af)...)
+	if memOpt, _ := resolveAgentMemoryOption(*af.memory, *af.memoryStore, root); memOpt != nil {
+		runOpts = append(runOpts, memOpt)
+	}
 
 	providerExplicit := false
 	fs.Visit(func(f *flag.Flag) {
@@ -278,8 +287,23 @@ func runAgent(argv []string) {
 		planner = p
 	}
 
+	var auditJournal *journal.Journal
+	if *af.logOut != "" && strings.HasSuffix(strings.ToLower(*af.logOut), ".jsonl") {
+		if dir := filepath.Dir(*af.logOut); dir != "" && dir != "." {
+			_ = os.MkdirAll(dir, 0o755)
+		}
+		j, err := journal.Open(*af.logOut)
+		must(err)
+		defer func() {
+			_ = j.Flush()
+			_ = j.Close()
+		}()
+		auditJournal = j
+		runOpts = append(runOpts, agent.WithAuditJournal(j))
+	}
+
 	if isRaw {
-		if *af.logOut != "" {
+		if *af.logOut != "" && auditJournal == nil {
 			must(errors.New("fak agent: --raw does not support --log; use --out for its receipt"))
 		}
 		activeWakeReleaser, _ := acquireAgentRunKeepAwake(*af.keepAwake)
@@ -288,6 +312,9 @@ func runAgent(argv []string) {
 			_ = activeWakeReleaser.Release()
 		}
 		must(err)
+		if auditJournal != nil {
+			_ = auditJournal.Flush()
+		}
 		receipt := newRawAgentReceipt(*af.task, planner.Model(), metrics)
 		data := jsonIndent(receipt)
 		if *af.out == "" || *af.out == "-" || *af.out == "stdout" {
@@ -301,7 +328,7 @@ func runAgent(argv []string) {
 	}
 
 	if isNative {
-		if *af.logOut != "" {
+		if *af.logOut != "" && auditJournal == nil {
 			must(errors.New("fak agent: --native does not support --log; use --out for its receipt"))
 		}
 		activeWakeReleaser, _ := acquireAgentRunKeepAwake(*af.keepAwake)
@@ -310,6 +337,9 @@ func runAgent(argv []string) {
 			_ = activeWakeReleaser.Release()
 		}
 		must(err)
+		if auditJournal != nil {
+			_ = auditJournal.Flush()
+		}
 		receipt := newNativeAgentReceipt(*af.task, planner.Model(), metrics)
 		must(os.WriteFile(*af.out, jsonIndent(receipt), 0o644))
 		fmt.Fprintln(os.Stdout, metrics.FinalAnswer)
@@ -323,9 +353,12 @@ func runAgent(argv []string) {
 		_ = activeWakeReleaser.Release()
 	}
 	must(err)
+	if auditJournal != nil {
+		_ = auditJournal.Flush()
+	}
 
 	must(os.WriteFile(*af.out, jsonIndent(res), 0o644))
-	if *af.logOut != "" {
+	if *af.logOut != "" && auditJournal == nil {
 		_ = os.WriteFile(*af.logOut, agent.RenderTrace(trace), 0o644)
 	}
 	agent.PrintReport(os.Stdout, res, trace, *af.out)
@@ -360,15 +393,30 @@ func agentEffortRunOptions(af *agentFlags) []agent.RunOption {
 	return opts
 }
 
-func validateAgentMode(raw, native bool, mode string) (isRaw, isNative bool, err error) {
+func resolveAgentMode(raw, native bool, mode string) (isRaw, isNative bool, err error) {
 	modeVal := strings.ToLower(strings.TrimSpace(mode))
-	if modeVal != "" && modeVal != "dual" && modeVal != "native" && modeVal != "raw" {
-		return false, false, fmt.Errorf("fak agent: unknown --mode %q (want dual, native, or raw)", mode)
+	switch modeVal {
+	case "", "dual", "ab":
+		// default dual/A-B mode unless explicit boolean flags set
+	case "raw":
+		if native {
+			return false, false, errors.New("fak agent: cannot specify both native and raw execution modes")
+		}
+		raw = true
+	case "native":
+		if raw {
+			return false, false, errors.New("fak agent: cannot specify both native and raw execution modes")
+		}
+		native = true
+	default:
+		return false, false, fmt.Errorf("fak agent: unknown --mode %q (want dual, ab, native, or raw)", mode)
 	}
-	isRaw = raw || modeVal == "raw"
-	isNative = native || modeVal == "native"
-	if isRaw && isNative {
+	if raw && native {
 		return false, false, errors.New("fak agent: cannot specify both raw and native execution modes")
 	}
-	return isRaw, isNative, nil
+	return raw, native, nil
+}
+
+func validateAgentMode(raw, native bool, mode string) (isRaw, isNative bool, err error) {
+	return resolveAgentMode(raw, native, mode)
 }

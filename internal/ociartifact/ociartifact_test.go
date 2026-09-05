@@ -347,3 +347,50 @@ func ioReadAll(r *http.Request) ([]byte, error) {
 	_, e := b.ReadFrom(r.Body)
 	return b.Bytes(), e
 }
+
+func TestVerifyArtifact(t *testing.T) {
+	dir := t.TempDir()
+	validPath := filepath.Join(dir, "artifact.bin")
+	if err := os.WriteFile(validPath, []byte("payload"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("empty path returns error", func(t *testing.T) {
+		err := VerifyArtifact("", "test-key")
+		if err == nil {
+			t.Fatal("expected error for empty path, got nil")
+		}
+		if Code(err) != "EMPTY_PATH" {
+			t.Fatalf("expected EMPTY_PATH, got %v", err)
+		}
+	})
+
+	t.Run("non-existent path returns error", func(t *testing.T) {
+		nonExistent := filepath.Join(dir, "does-not-exist")
+		err := VerifyArtifact(nonExistent, "test-key")
+		if err == nil {
+			t.Fatal("expected error for non-existent path, got nil")
+		}
+		if Code(err) != "NOT_FOUND" {
+			t.Fatalf("expected NOT_FOUND, got %v", err)
+		}
+	})
+
+	t.Run("empty verifyKey returns error", func(t *testing.T) {
+		err := VerifyArtifact(validPath, "")
+		if err == nil {
+			t.Fatal("expected error for empty verifyKey, got nil")
+		}
+		if Code(err) != "EMPTY_KEY" {
+			t.Fatalf("expected EMPTY_KEY, got %v", err)
+		}
+	})
+
+	t.Run("valid path and verifyKey returns nil", func(t *testing.T) {
+		err := VerifyArtifact(validPath, "test-key")
+		if err != nil {
+			t.Fatalf("expected nil error, got %v", err)
+		}
+	})
+}
+

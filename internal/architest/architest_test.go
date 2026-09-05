@@ -57,6 +57,7 @@ var tier = map[string]int{
 	"ops":                4, // autonomous operations daemon and machine maintenance subsystem (#11156, #11158).
 	"observability":      2,
 	"studyreceipt":       1,
+	"stopgate":           1, // unified lifecycle stop gates across fak guard and fak agent (#11253); stdlib-only, off the hot path.
 	"abi":                0,
 	"launchguard":        1, // per-attempt launch guard and state directory management; stdlib-only, off the hot path.
 	"servingsupervision": 3, // serving failure-domain isolation and supervision; mechanism leaf, off the hot path.

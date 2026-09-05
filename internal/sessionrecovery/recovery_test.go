@@ -3,12 +3,13 @@ package sessionrecovery
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
-
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
@@ -649,5 +650,98 @@ func TestWriteReceiptPersistsHarnessIdentity(t *testing.T) {
 	}
 	if got.Harness != ProviderCodex || got.HarnessSource != "session_registration" {
 		t.Fatalf("receipt identity=%+v", got)
+	}
+}
+
+func TestSelectRefusesWhenEndpointUnavailable(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream model error", http.StatusBadGateway)
+	}))
+	defer ts.Close()
+
+	report := InventoryReport{Sessions: []Session{{
+		Thread:  &Thread{ID: "0198ec3d-6d66-7c82-a700-cedf64660a44", Source: "session_registration", CWD: `C:\work\fak`},
+		Harness: ProviderCodex, HarnessSource: "session_registration", Category: CategorySubstantive, Action: ActionRecover,
+	}}}
+	got := Select(report, Options{
+		Limit: 1, ReceiptDir: t.TempDir(), ManagerBin: "fak", CodexBin: "codex",
+		Endpoint: ts.URL,
+	})
+	if len(got) != 1 {
+		t.Fatalf("requests=%d, want 1", len(got))
+	}
+	if got[0].Status != "refused" || !strings.Contains(got[0].Reason, "endpoint_unavailable") {
+		t.Fatalf("status/reason = %q/%q, want refused/endpoint_unavailable", got[0].Status, got[0].Reason)
+	}
+}
+
+func TestSelectAdmitsWhenEndpointHealthy(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer ts.Close()
+
+	report := InventoryReport{Sessions: []Session{{
+		Thread:  &Thread{ID: "0198ec3d-6d66-7c82-a700-cedf64660a44", Source: "session_registration", CWD: `C:\work\fak`},
+		Harness: ProviderCodex, HarnessSource: "session_registration", Category: CategorySubstantive, Action: ActionRecover,
+	}}}
+	got := Select(report, Options{
+		Limit: 1, ReceiptDir: t.TempDir(), ManagerBin: "fak", CodexBin: "codex",
+		Endpoint: ts.URL,
+	})
+	if len(got) != 1 {
+		t.Fatalf("requests=%d, want 1", len(got))
+	}
+	if got[0].Status != "candidate" {
+		t.Fatalf("status = %q, want candidate", got[0].Status)
+	}
+}
+
+func TestSelectRefusesDuplicateActiveOwner(t *testing.T) {
+	receiptDir := t.TempDir()
+	id := "0198ec3d-6d66-7c82-a700-cedf64660a44"
+	report := InventoryReport{Sessions: []Session{
+		{
+			Thread:  &Thread{ID: id, Source: "session_registration", CWD: `C:\work\fak`},
+			Harness: ProviderCodex, HarnessSource: "session_registration", Category: CategorySubstantive, Action: ActionRecover,
+		},
+		{
+			Thread:  &Thread{ID: id, Source: "session_registration", CWD: `C:\work\fak`},
+			Harness: ProviderCodex, HarnessSource: "session_registration", Category: CategorySubstantive, Action: ActionRecover,
+		},
+	}}
+
+	// First: duplicate rows in same cohort
+	got := Select(report, Options{
+		Limit: 10, ReceiptDir: receiptDir, ManagerBin: "fak", CodexBin: "codex",
+	})
+	if len(got) != 2 {
+		t.Fatalf("requests=%d, want 2", len(got))
+	}
+	if got[0].Status != "candidate" {
+		t.Fatalf("first row status = %q, want candidate", got[0].Status)
+	}
+	if got[1].Status != "refused" || got[1].Reason != "duplicate_active_owner" {
+		t.Fatalf("second duplicate row status/reason = %q/%q, want refused/duplicate_active_owner", got[1].Status, got[1].Reason)
+	}
+
+	// Second: active non-terminal receipt on disk prevents new candidate
+	req := got[0]
+	if wrote, err := WriteReceipt(req, time.Now()); err != nil || !wrote {
+		t.Fatalf("WriteReceipt err=%v wrote=%v", err, wrote)
+	}
+	singleReport := InventoryReport{Sessions: []Session{{
+		Thread:  &Thread{ID: id, Source: "session_registration", CWD: `C:\work\fak`},
+		Harness: ProviderCodex, HarnessSource: "session_registration", Category: CategorySubstantive, Action: ActionRecover,
+	}}}
+	gotWithReceipt := Select(singleReport, Options{
+		Limit: 10, ReceiptDir: receiptDir, ManagerBin: "fak", CodexBin: "codex",
+	})
+	if len(gotWithReceipt) != 1 {
+		t.Fatalf("requests=%d, want 1", len(gotWithReceipt))
+	}
+	if gotWithReceipt[0].Status != "refused" || gotWithReceipt[0].Reason != "duplicate_active_owner" {
+		t.Fatalf("existing receipt status/reason = %q/%q, want refused/duplicate_active_owner", gotWithReceipt[0].Status, gotWithReceipt[0].Reason)
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/resume/transcript"
+	"github.com/anthony-chaudhary/fak/internal/stopgate"
 	"github.com/anthony-chaudhary/fak/internal/witness"
 )
 
@@ -151,39 +152,31 @@ func runGuardWitnessedDoneGate(stderr io.Writer, rawMode, transcriptPath, root, 
 	if !finding.Claimed {
 		return 0, "", "", false
 	}
-	if finding.Witnessed {
-		fmt.Fprintf(stderr, "fak guard Stop: CLAIM_WITNESSED commit=%s — %s\n", finding.Commit, finding.Detail)
-		return 0, stopDispClaimWitnessed, finding.Reason, true
+	seq := guardWitnessedDoneBlockCount(session)
+	claim := stopgate.WitnessClaim{
+		Claimed:   finding.Claimed,
+		Witnessed: finding.Witnessed,
+		Commit:    finding.Commit,
+		Reason:    finding.Reason,
+		Detail:    finding.Detail,
 	}
-	if mode != guardPreCompactModeEnforce {
-		fmt.Fprintf(stderr, "fak guard Stop: shadow %s — %s; would require a witnessed stamped commit before stopping\n", finding.Reason, finding.Detail)
-		return 0, stopDispClaimWitnessShadow, finding.Reason, true
+	cfg := stopgate.WitnessGateConfig{
+		Mode: stopgate.Mode(mode),
+		Max:  max,
 	}
-	seq := guardWitnessedDoneBlockCount(session) + 1
-	if max < 1 {
-		max = guardWitnessedDoneMax
+	dec := stopgate.EvaluateWitness(cfg, claim, seq)
+	if dec.Note != "" {
+		fmt.Fprintln(stderr, dec.Note)
+	} else if dec.OperatorMsg != "" {
+		fmt.Fprintln(stderr, dec.OperatorMsg)
+	} else if dec.Guidance != "" {
+		fmt.Fprintln(stderr, dec.Guidance)
 	}
-	if seq > max {
-		fmt.Fprintf(stderr, "fak guard Stop: %s stood down after %d blocks (bounded max=%d); allowing stop\n", finding.Reason, seq-1, max)
-		return 0, stopDispClaimUnwitnessedGiveUp, finding.Reason, true
-	}
-	fmt.Fprintf(stderr, "fak guard Stop: %s (%d/%d) — %s. Do not stop on self-narrated completion: commit the coherent change with a bindable (fak <leaf>) stamp, run its witness, and report that commit.\n", finding.Reason, seq, max, finding.Detail)
-	return 2, stopDispClaimUnwitnessedContinue, finding.Reason, true
+	return dec.ExitCode, guardStopDisposition(dec.Disposition), dec.Reason, true
 }
 
 func guardWitnessedDoneKind(d guardStopDisposition) guardStopKind {
-	switch d {
-	case stopDispClaimWitnessed:
-		return stopKindClean
-	case stopDispClaimUnwitnessedContinue:
-		return stopKindContinue
-	case stopDispClaimUnwitnessedGiveUp:
-		return stopKindStandDown
-	case stopDispClaimWitnessShadow:
-		return stopKindShadow
-	default:
-		return stopKindFailOpen
-	}
+	return guardStopKind(stopgate.Disposition(d).Kind())
 }
 func guardWitnessedDoneBlockCount(session string) int {
 	ledger := guardStopsLedgerConfigured()

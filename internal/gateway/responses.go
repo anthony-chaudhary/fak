@@ -303,6 +303,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	began := time.Now()
 	comp, err := s.completeServed(ctx, sessionTurn, messages, tools, sampleOpts...)
 	if err != nil {
+		s.renderTurnDebugError(reqTrace, "openai_responses", err, time.Since(began))
 		s.logf("gateway: upstream model error: %v", err)
 		s.writeUpstreamErr(w, err)
 		return

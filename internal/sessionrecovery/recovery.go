@@ -1,11 +1,14 @@
 package sessionrecovery
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -122,17 +125,54 @@ type Receipt struct {
 }
 
 type Options struct {
-	ManagerBin  string
-	Threads     map[string]bool
-	Limit       int
-	CWDOverride string
-	Prompt      string
-	PromptPath  string
-	ReceiptDir  string
-	CodexBin    string
-	Interactive bool
-	Now         time.Time
-	Since       time.Duration
+	ManagerBin    string
+	Threads       map[string]bool
+	Limit         int
+	CWDOverride   string
+	Prompt        string
+	PromptPath    string
+	ReceiptDir    string
+	CodexBin      string
+	Interactive   bool
+	Now           time.Time
+	Since         time.Duration
+	Endpoint      string
+	EndpointWait  time.Duration
+	EndpointReady func(ctx context.Context, endpoint string) (bool, error)
+}
+
+func CheckEndpointReadiness(ctx context.Context, endpoint string) (bool, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return true, nil
+	}
+	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+		endpoint = "http://" + endpoint
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return false, fmt.Errorf("invalid endpoint URL: %w", err)
+	}
+	probeURL := *parsed
+	if probeURL.Path == "" || probeURL.Path == "/" {
+		probeURL.Path = "/v1/models"
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, probeURL.String(), nil)
+	if err != nil {
+		return false, err
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+		return false, fmt.Errorf("endpoint returned HTTP %d", resp.StatusCode)
+	}
+	return true, nil
 }
 
 func Select(report InventoryReport, opts Options) []Request {
@@ -145,6 +185,21 @@ func Select(report InventoryReport, opts Options) []Request {
 	}
 	if opts.ManagerBin == "" {
 		opts.ManagerBin = "fak"
+	}
+	endpointChecked := false
+	endpointAvailable := true
+	var endpointErr error
+	if strings.TrimSpace(opts.Endpoint) != "" || opts.EndpointReady != nil {
+		readyFn := opts.EndpointReady
+		if readyFn == nil {
+			readyFn = CheckEndpointReadiness
+		}
+		endpointChecked = true
+		ready, err := readyFn(context.Background(), opts.Endpoint)
+		if err != nil || !ready {
+			endpointAvailable = false
+			endpointErr = err
+		}
 	}
 	rows := append([]Session(nil), report.Sessions...)
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -162,6 +217,7 @@ func Select(report InventoryReport, opts Options) []Request {
 	out := make([]Request, 0, len(rows)+len(opts.Threads))
 	selected := 0
 	found := make(map[string]bool, len(opts.Threads))
+	seenCandidate := make(map[string]bool)
 	for _, row := range rows {
 		if row.Thread == nil {
 			continue
@@ -198,6 +254,12 @@ func Select(report InventoryReport, opts Options) []Request {
 			}
 			continue
 		}
+		if seenCandidate[id] {
+			req.Status = "refused"
+			req.Reason = "duplicate_active_owner"
+			out = append(out, req)
+			continue
+		}
 		if opts.Limit > 0 && selected >= opts.Limit {
 			req.Status = "deferred"
 			req.Reason = "launch_limit"
@@ -224,6 +286,27 @@ func Select(report InventoryReport, opts Options) []Request {
 		req.PromptPath = opts.PromptPath
 		req.Prompt = opts.Prompt
 		req.ReceiptPath = filepath.Join(opts.ReceiptDir, receiptName(id, cwd, req.Argv)+".json")
+		if opts.ReceiptDir != "" && req.ReceiptPath != "" {
+			if data, err := os.ReadFile(req.ReceiptPath); err == nil {
+				var r Receipt
+				if json.Unmarshal(data, &r) == nil && !TerminalStatus(r.State) {
+					req.Status = "refused"
+					req.Reason = "duplicate_active_owner"
+					out = append(out, req)
+					continue
+				}
+			}
+		}
+		if endpointChecked && !endpointAvailable {
+			req.Status = "refused"
+			req.Reason = "endpoint_unavailable"
+			if endpointErr != nil {
+				req.Reason = "endpoint_unavailable: " + endpointErr.Error()
+			}
+			out = append(out, req)
+			continue
+		}
+		seenCandidate[id] = true
 		out = append(out, req)
 		selected++
 	}

@@ -56,6 +56,9 @@ const (
 // scrubbed clone must not crash the algebra. The verifier defaults to
 // recall.DefaultArtifactVerifier; tests inject their own via WithVerifier.
 func NewNotesBackend(dir string) (*NotesBackend, error) {
+	if fi, err := os.Stat(dir); err == nil && !fi.IsDir() {
+		dir = filepath.Dir(dir)
+	}
 	b := &NotesBackend{dir: dir, verifier: recall.DefaultArtifactVerifier, bodies: map[string][]byte{}}
 	if strings.TrimSpace(dir) == "" {
 		return b, nil

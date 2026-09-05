@@ -9,7 +9,11 @@ import (
 	"strings"
 )
 
-const StoreRel = ".claude/memory"
+const (
+	StoreRel    = ".claude/memory"
+	FakStoreRel = ".fak/memory"
+	MemoryFile  = "MEMORY.md"
+)
 
 var (
 	linkRE  = regexp.MustCompile(`\[([^\]]+)\]\(([^)#\s]+\.md)(?:#[^)]*)?\)`)
@@ -56,9 +60,80 @@ func DefaultStore(root string) string {
 	return filepath.Join(root, filepath.FromSlash(StoreRel))
 }
 
+// DiscoverStore looks for default memory stores in the workspace root in priority order:
+// 1. .fak/memory (with MEMORY.md)
+// 2. .claude/memory (with MEMORY.md)
+// 3. MEMORY.md (in workspace root)
+// 4. .fak/memory (directory)
+// 5. .claude/memory (directory)
+// It returns the resolved path, or "" if no candidate exists.
+func DiscoverStore(root string) string {
+	if strings.TrimSpace(root) == "" {
+		root = "."
+	}
+	fakPath := filepath.Join(root, filepath.FromSlash(FakStoreRel))
+	fakMem := filepath.Join(fakPath, MemoryFile)
+	if fi, err := os.Stat(fakMem); err == nil && !fi.IsDir() {
+		return fakPath
+	}
+
+	claudePath := filepath.Join(root, filepath.FromSlash(StoreRel))
+	claudeMem := filepath.Join(claudePath, MemoryFile)
+	if fi, err := os.Stat(claudeMem); err == nil && !fi.IsDir() {
+		return claudePath
+	}
+
+	rootMem := filepath.Join(root, MemoryFile)
+	if fi, err := os.Stat(rootMem); err == nil && !fi.IsDir() {
+		return rootMem
+	}
+
+	if fi, err := os.Stat(fakPath); err == nil && fi.IsDir() {
+		return fakPath
+	}
+
+	if fi, err := os.Stat(claudePath); err == nil && fi.IsDir() {
+		return claudePath
+	}
+
+	return ""
+}
+
+// ResolveStore resolves the effective memory store given an optional explicit path
+// and workspace root. If explicit is non-empty, it is expanded and returned (or resolved
+// against root if relative). If explicit is empty, DiscoverStore(root) is used.
+func ResolveStore(root, explicit string) string {
+	if strings.TrimSpace(root) == "" {
+		root = "."
+	}
+	explicit = strings.TrimSpace(explicit)
+	if explicit != "" {
+		exp := expandTilde(explicit)
+		if !filepath.IsAbs(exp) {
+			exp = filepath.Join(root, exp)
+		}
+		return exp
+	}
+	return DiscoverStore(root)
+}
+
+func expandTilde(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, p[1:])
+		}
+	}
+	return p
+}
+
 // RenderDigest renders MEMORY.md plus linked fact bodies, bounded by maxBytes.
 func RenderDigest(storeDir string, indexOnly bool, maxBytes int) string {
-	indexPath := filepath.Join(storeDir, "MEMORY.md")
+	dir := storeDir
+	indexPath := filepath.Join(dir, MemoryFile)
+	if fi, err := os.Stat(dir); err == nil && !fi.IsDir() {
+		indexPath = dir
+		dir = filepath.Dir(dir)
+	}
 	indexBytes, err := os.ReadFile(indexPath)
 	if err != nil {
 		return fmt.Sprintf("(no committed memory mirror at %s - fresh node or scrubbed clone; nothing to orient from)\n", filepath.ToSlash(storeDir))
@@ -80,7 +155,7 @@ func RenderDigest(storeDir string, indexOnly bool, maxBytes int) string {
 	var overflow []string // fact files dropped for BUDGET — named, never an anonymous count (#2430)
 	for _, fact := range ParseIndex(indexText) {
 		title, fname := fact[0], fact[1]
-		bodyBytes, err := os.ReadFile(filepath.Join(storeDir, fname))
+		bodyBytes, err := os.ReadFile(filepath.Join(dir, fname))
 		if err != nil {
 			unreadable++
 			continue

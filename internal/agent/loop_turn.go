@@ -2,34 +2,59 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/attemptbudget"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
+	"github.com/anthony-chaudhary/fak/internal/stopgate"
 )
+
+func isEmitterRegistered(e abi.Emitter) bool {
+	if e == nil {
+		return false
+	}
+	for _, em := range abi.EmittersFor(abi.EvDecide) {
+		if em == e {
+			return true
+		}
+	}
+	return false
+}
 
 // armRunner owns the mutable state shared by the phases of one arm's turn loop.
 // Keeping it named avoids passing the same large parameter set through every phase
 // while leaving runArm responsible only for arm-level setup and teardown.
 type armRunner struct {
-	cfg              *runConfig
-	metrics          *ArmMetrics
-	fak              bool
-	kernel           *kernel.Kernel
-	speculation      *specState
-	messages         []Message
-	tools            []ToolDef
-	model            string
-	stream           bool
-	sink             StreamSink
-	complete         armCompleteFunc
-	log              *[]traceEvent
-	stopTerminated   func() bool
-	repeatedFailures attemptbudget.RepeatedFailureTracker
+	cfg                     *runConfig
+	metrics                 *ArmMetrics
+	fak                     bool
+	kernel                  *kernel.Kernel
+	speculation             *specState
+	messages                []Message
+	tools                   []ToolDef
+	model                   string
+	stream                  bool
+	sink                    StreamSink
+	complete                armCompleteFunc
+	log                     *[]traceEvent
+	stopTerminated          func() bool
+	repeatedFailures        attemptbudget.RepeatedFailureTracker
+	consecutiveDenyAll      int
+	consecutiveSameIssue    int
+	lastDeniedTool          string
+	lastDeniedReason        string
+	consecutiveToolFeedback int
+	witnessBlockCount       int
+	denyAllPending          bool
+	toolFeedbackPending     bool
 }
 
 type armTurnAction uint8
@@ -259,14 +284,50 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 	if len(asst.ToolCalls) != 0 {
 		return asst, armTurnDispatchTools, nil
 	}
-	if r.cfg.finalGate != nil {
-		if satisfied, missing := r.cfg.finalGate(); !satisfied {
-			continuation := "STOP_UNWITNESSED: missing declared witness: " + missing + ". Continue working until that witness exists."
-			sessionctl.RecordStopWitnessNext(r.cfg.trace, continuation)
-			r.messages = append(r.messages, Message{Role: RoleUser, Content: continuation})
-			r.cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
-			return Message{}, armTurnContinue, nil
+	consecDeny := 0
+	sameConsec := 0
+	useSame := false
+	if r.denyAllPending {
+		consecDeny = r.consecutiveDenyAll
+		sameConsec = r.consecutiveSameIssue
+		useSame = r.consecutiveSameIssue > 0
+		r.denyAllPending = false
+	}
+	consecFeedback := 0
+	if r.toolFeedbackPending {
+		consecFeedback = r.consecutiveToolFeedback
+		r.toolFeedbackPending = false
+	}
+
+	ladderCfg := stopgate.DefaultLadderConfig()
+	if r.cfg.stopLadder != nil {
+		ladderCfg = *r.cfg.stopLadder
+	}
+	witnessCfg := stopgate.DefaultWitnessGateConfig()
+	if r.cfg.witnessGate != nil {
+		witnessCfg = *r.cfg.witnessGate
+	}
+	boundaryIn := stopgate.BoundaryInput{
+		SessionID:               r.cfg.trace,
+		Turn:                    turn + 1,
+		ConsecutiveDenyAll:      consecDeny,
+		ConsecutiveSameIssue:    sameConsec,
+		UseSameIssue:            useSame,
+		ConsecutiveToolFeedback: consecFeedback,
+		NotedNoAllowedPath:      strings.Contains(strings.ToLower(asst.Content), "no allowed path"),
+		FinalGate:               r.cfg.finalGate,
+		WitnessBlockCount:       r.witnessBlockCount,
+	}
+	decision := stopgate.EvaluateBoundary(ladderCfg, witnessCfg, boundaryIn)
+	if decision.ShouldContinue() {
+		if decision.Signal == "STOP_UNWITNESSED" || decision.Signal == "witness" || strings.HasPrefix(decision.Guidance, "STOP_UNWITNESSED") {
+			r.witnessBlockCount++
 		}
+		continuation := decision.Guidance
+		sessionctl.RecordStopWitnessNext(r.cfg.trace, continuation)
+		r.messages = append(r.messages, Message{Role: RoleUser, Content: continuation})
+		r.cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
+		return Message{}, armTurnContinue, nil
 	}
 	// A final answer cannot confirm a pending speculation, so squash it before returning.
 	r.speculation.resolve(ctx, nil, r.metrics)
@@ -278,24 +339,37 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 
 // dispatchToolCalls adjudicates and admits every tool call from one assistant turn.
 func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Message) (bool, error) {
+	if len(asst.ToolCalls) == 0 {
+		return false, nil
+	}
 	// Resolve a suspended speculation against the first authoritative call in this turn.
 	r.speculation.resolve(ctx, authoritativeCall(asst.ToolCalls[0]), r.metrics)
 	var turnResults []*abi.Result
-	for _, tc := range asst.ToolCalls {
-		if r.stopTerminated() {
-			return true, nil
-		}
-		if reason := r.cfg.debitToolCall(); reason != "" {
-			r.metrics.StoppedBySession = reason
-			r.finalizeFak()
-			return true, nil
-		}
-		r.metrics.ToolCalls++
+
+	t0 := time.Now()
+	defer func() {
+		r.metrics.ToolElapsedMs += time.Since(t0).Milliseconds()
+	}()
+
+	type toolExecResult struct {
+		tc      ToolCall
+		content string
+		ev      traceEvent
+		isErr   bool
+		abiCall *abi.ToolCall
+		abiRes  *abi.Result
+		verdict *abi.Verdict
+	}
+
+	execOne := func(tc ToolCall) toolExecResult {
 		tool := tc.Function.Name
 		rawArgs := tc.Function.Arguments
 		var content string
 		ev := traceEvent{Turn: turn + 1, Arm: r.metrics.Arm, Tool: tool, RawArgs: rawArgs}
-		r.cfg.emitProgress(ProgressEvent{Kind: ProgressToolStarted, Turn: turn + 1, CallID: tc.ID, Tool: tool})
+		var isErr bool
+		var abiCall *abi.ToolCall
+		var abiRes *abi.Result
+		var verdict *abi.Verdict
 		switch {
 		case r.cfg.dropMidflightCall(tc.ID, turn+1):
 			content = ToolReceipt{
@@ -308,7 +382,13 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			ev.Verdict = "DROPPED"
 			ev.By = "operator"
 			ev.Note = "DROPPED by a mid-flight drop-pending-call verb (skipped before dispatch)"
+			abiCall = &abi.ToolCall{Tool: tool, TraceID: r.cfg.trace, Args: putBytes(ctx, []byte(rawArgs))}
+			v := abi.Verdict{Kind: abi.VerdictDeny, By: "operator", Reason: abi.ReasonPolicyBlock}
+			verdict = &v
 		case r.cfg.constraintDenied(tool, &content, &ev):
+			abiCall = &abi.ToolCall{Tool: tool, TraceID: r.cfg.trace, Args: putBytes(ctx, []byte(rawArgs))}
+			v := abi.Verdict{Kind: abi.VerdictDeny, By: "session-constraint", Reason: abi.ReasonPolicyBlock}
+			verdict = &v
 		case r.speculation.barWrite(tool, r.metrics):
 			content = ToolReceipt{
 				Status:      ToolResultSkipped,
@@ -320,6 +400,9 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			ev.Verdict = "BARRED"
 			ev.By = "write-barrier"
 			ev.Note = "BARRED by the before-consumption write barrier (dependent speculation squashed)"
+			abiCall = &abi.ToolCall{Tool: tool, TraceID: r.cfg.trace, Args: putBytes(ctx, []byte(rawArgs))}
+			v := abi.Verdict{Kind: abi.VerdictDeny, By: "write-barrier", Reason: abi.ReasonPolicyBlock}
+			verdict = &v
 		case r.fak:
 			engine, routeErr := r.cfg.resolveCallEngine(tool, rawArgs, metaFor(tool))
 			if routeErr != nil {
@@ -328,19 +411,184 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 				ev.Verdict = "route-error"
 				ev.By = "route-accounts"
 				ev.Note = "ROUTE REFUSED (fail-loud): " + routeErr.Error()
+				abiCall = &abi.ToolCall{Tool: tool, TraceID: r.cfg.trace, Args: putBytes(ctx, []byte(rawArgs))}
+				v := abi.Verdict{Kind: abi.VerdictDeny, By: "route-accounts", Reason: abi.ReasonMisroute}
+				verdict = &v
 			} else {
-				content, ev = execViaKernel(ctx, r.kernel, tool, rawArgs, engine, ev, r.cfg.principal)
+				var verdictVal abi.Verdict
+				content, ev, abiCall, abiRes, verdictVal = execViaKernelFull(ctx, r.kernel, tool, rawArgs, engine, r.cfg.trace, ev, r.cfg.principal)
+				verdict = &verdictVal
 				content, ev = r.cfg.parkEscalatedDeny(ctx, r.kernel, tool, rawArgs, engine, content, ev)
 			}
 		default:
-			content, ev = execNaive(tool, rawArgs, r.metrics, ev)
+			var naiveM ArmMetrics
+			content, ev = execNaive(tool, rawArgs, &naiveM, ev)
+			if naiveM.ToolErrors > 0 {
+				isErr = true
+			}
 		}
+		return toolExecResult{tc: tc, content: content, ev: ev, isErr: isErr, abiCall: abiCall, abiRes: abiRes, verdict: verdict}
+	}
+
+	commitOne := func(res toolExecResult) error {
+		tc := res.tc
+		tool := tc.Function.Name
+		rawArgs := tc.Function.Arguments
+		content := res.content
+		ev := res.ev
+
+		if r.cfg != nil && r.cfg.auditJournal != nil {
+			if !r.fak {
+				rawBytes := []byte(rawArgs)
+				hArgs := sha256.Sum256(rawBytes)
+				call := &abi.ToolCall{
+					Tool:    tool,
+					TraceID: r.cfg.trace,
+					Args: abi.Ref{
+						Kind:   abi.RefInline,
+						Inline: rawBytes,
+						Len:    int64(len(rawBytes)),
+						Digest: hex.EncodeToString(hArgs[:]),
+					},
+				}
+				contentBytes := []byte(content)
+				hRes := sha256.Sum256(contentBytes)
+				resPayload := abi.Ref{
+					Kind:   abi.RefInline,
+					Inline: contentBytes,
+					Len:    int64(len(contentBytes)),
+					Digest: hex.EncodeToString(hRes[:]),
+				}
+				result := &abi.Result{
+					Call:    call,
+					Payload: resPayload,
+				}
+				if res.isErr {
+					v := &abi.Verdict{
+						Kind:   abi.VerdictDeny,
+						By:     "raw-harness",
+						Reason: abi.ReasonMalformed,
+					}
+					r.cfg.auditJournal.Emit(abi.Event{
+						Kind:    abi.EvDecide,
+						Call:    call,
+						Verdict: v,
+						Result:  result,
+					})
+					r.cfg.auditJournal.Emit(abi.Event{
+						Kind:    abi.EvDeny,
+						Call:    call,
+						Verdict: v,
+						Result:  result,
+					})
+				} else {
+					v := &abi.Verdict{
+						Kind:   abi.VerdictAllow,
+						By:     "raw-harness",
+						Reason: abi.ReasonNone,
+					}
+					r.cfg.auditJournal.Emit(abi.Event{
+						Kind:    abi.EvDecide,
+						Call:    call,
+						Verdict: v,
+						Result:  result,
+					})
+				}
+			} else if !isEmitterRegistered(r.cfg.auditJournal) {
+				call := res.abiCall
+				if call == nil {
+					call = &abi.ToolCall{
+						Tool:    tool,
+						TraceID: r.cfg.trace,
+						Args:    putBytes(ctx, []byte(rawArgs)),
+					}
+				}
+				if call.TraceID == "" {
+					call.TraceID = r.cfg.trace
+				}
+				if call.Args.Digest == "" {
+					h := sha256.Sum256([]byte(rawArgs))
+					call.Args.Digest = hex.EncodeToString(h[:])
+				}
+				result := res.abiRes
+				if result == nil {
+					result = &abi.Result{
+						Call:    call,
+						Payload: putBytes(ctx, []byte(content)),
+					}
+				}
+				if result.Payload.Digest == "" {
+					h := sha256.Sum256([]byte(content))
+					result.Payload.Digest = hex.EncodeToString(h[:])
+				}
+				v := res.verdict
+				if v == nil {
+					v = &abi.Verdict{
+						Kind:   abi.VerdictAllow,
+						By:     "localtools",
+						Reason: abi.ReasonNone,
+					}
+				}
+				if v.By == "vdso" {
+					r.cfg.auditJournal.Emit(abi.Event{
+						Kind:    abi.EvVDSOHit,
+						Call:    call,
+						Verdict: v,
+						Result:  result,
+					})
+				} else if v.Kind == abi.VerdictDeny {
+					r.cfg.auditJournal.Emit(abi.Event{
+						Kind:    abi.EvDecide,
+						Call:    call,
+						Verdict: v,
+						Result:  result,
+					})
+					r.cfg.auditJournal.Emit(abi.Event{
+						Kind:    abi.EvDeny,
+						Call:    call,
+						Verdict: v,
+						Result:  result,
+					})
+				} else {
+					r.cfg.auditJournal.Emit(abi.Event{
+						Kind:    abi.EvDecide,
+						Call:    call,
+						Verdict: v,
+						Result:  result,
+					})
+				}
+				if result != nil && result.Meta != nil {
+					if result.Meta["admit"] == "quarantined" {
+						r.cfg.auditJournal.Emit(abi.Event{
+							Kind:    abi.EvQuarantine,
+							Call:    call,
+							Verdict: v,
+							Result:  result,
+						})
+					} else if result.Meta["admit"] == "deny" {
+						r.cfg.auditJournal.Emit(abi.Event{
+							Kind:    abi.EvResultDeny,
+							Call:    call,
+							Verdict: v,
+							Result:  result,
+						})
+					}
+				}
+			}
+		}
+
 		r.cfg.emitProgress(ProgressEvent{
 			Kind: ProgressCallAdjudicated, Turn: turn + 1, CallID: tc.ID, Tool: tool,
 			Verdict: ev.Verdict, Reason: ev.Reason,
 		})
 		if r.log != nil {
 			*r.log = append(*r.log, ev)
+		}
+		if res.isErr {
+			r.metrics.ToolErrors++
+		}
+		if tool == toolDelete {
+			r.metrics.DestructiveExecuted = true
 		}
 		if strings.Contains(strings.ToLower(content), "ignore previous instructions") {
 			r.metrics.InjectionInContext = true
@@ -355,7 +603,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			}
 		}
 		if recordRepeatedFailure(&r.repeatedFailures, tool, rawArgs, content) {
-			return false, fmt.Errorf("REPEATED_IDENTICAL_TOOL_FAILURE: tool %s failed three consecutive times", tool)
+			return fmt.Errorf("REPEATED_IDENTICAL_TOOL_FAILURE: tool %s failed three consecutive times", tool)
 		}
 		r.messages = append(r.messages, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tool, Content: content})
 		r.cfg.emitProgress(ProgressEvent{
@@ -369,7 +617,131 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 				Status:  abi.StatusOK,
 			})
 		}
+		return nil
 	}
+
+	var allResults []toolExecResult
+	for idx := 0; idx < len(asst.ToolCalls); {
+		if r.stopTerminated() {
+			return true, nil
+		}
+		// Determine segment boundary.
+		// A contiguous slice of effect-safe calls can execute their bodies concurrently.
+		// An exclusive call forms a barrier (segment of length 1).
+		segEnd := idx + 1
+		isSafe := isEffectSafeTool(asst.ToolCalls[idx].Function.Name)
+		if isSafe {
+			for segEnd < len(asst.ToolCalls) && isEffectSafeTool(asst.ToolCalls[segEnd].Function.Name) {
+				segEnd++
+			}
+		}
+		segCalls := asst.ToolCalls[idx:segEnd]
+
+		var runnable []ToolCall
+		stopped := false
+		for _, tc := range segCalls {
+			if r.stopTerminated() {
+				stopped = true
+				break
+			}
+			if reason := r.cfg.debitToolCall(); reason != "" {
+				r.metrics.StoppedBySession = reason
+				r.finalizeFak()
+				stopped = true
+				break
+			}
+			r.metrics.ToolCalls++
+			if isSafe {
+				r.metrics.ToolCallsSafe++
+			} else {
+				r.metrics.ToolCallsExclusive++
+			}
+			r.cfg.emitProgress(ProgressEvent{Kind: ProgressToolStarted, Turn: turn + 1, CallID: tc.ID, Tool: tc.Function.Name})
+			runnable = append(runnable, tc)
+		}
+
+		if len(runnable) > 0 {
+			results := make([]toolExecResult, len(runnable))
+			if isSafe && len(runnable) > 1 {
+				var wg sync.WaitGroup
+				wg.Add(len(runnable))
+				for i, tc := range runnable {
+					go func(i int, tc ToolCall) {
+						defer wg.Done()
+						results[i] = execOne(tc)
+					}(i, tc)
+				}
+				wg.Wait()
+			} else {
+				for i, tc := range runnable {
+					results[i] = execOne(tc)
+				}
+			}
+
+			for _, res := range results {
+				allResults = append(allResults, res)
+				if err := commitOne(res); err != nil {
+					return false, err
+				}
+			}
+		}
+
+		if stopped {
+			return true, nil
+		}
+		idx = segEnd
+	}
+
+	if len(allResults) > 0 {
+		allDenied := true
+		allFeedback := true
+		for _, res := range allResults {
+			isDeny := res.ev.Verdict == "DENIED" || res.ev.Verdict == "BARRED" || res.ev.Verdict == "DROPPED" || res.ev.Verdict == "route-error" || res.isErr
+			if !isDeny {
+				allDenied = false
+			}
+			isFb := strings.Contains(strings.ToLower(res.content), "invalid json") || strings.Contains(strings.ToLower(res.content), "malformed") || res.ev.Reason == "MISROUTE" || res.ev.Reason == "ARG_INVALID"
+			if !isFb {
+				allFeedback = false
+			}
+		}
+
+		if allDenied {
+			r.consecutiveDenyAll++
+			r.denyAllPending = true
+			lastTool := allResults[0].tc.Function.Name
+			lastReason := allResults[0].ev.Reason
+			if lastReason == "" {
+				lastReason = allResults[0].ev.Verdict
+			}
+			if r.lastDeniedTool == lastTool && r.lastDeniedReason == lastReason && lastTool != "" {
+				r.consecutiveSameIssue++
+			} else {
+				r.consecutiveSameIssue = 1
+				r.lastDeniedTool = lastTool
+				r.lastDeniedReason = lastReason
+			}
+			r.consecutiveToolFeedback = 0
+			r.toolFeedbackPending = false
+		} else if allFeedback {
+			r.consecutiveToolFeedback++
+			r.toolFeedbackPending = true
+			r.consecutiveDenyAll = 0
+			r.consecutiveSameIssue = 0
+			r.lastDeniedTool = ""
+			r.lastDeniedReason = ""
+			r.denyAllPending = false
+		} else {
+			r.consecutiveDenyAll = 0
+			r.consecutiveSameIssue = 0
+			r.lastDeniedTool = ""
+			r.lastDeniedReason = ""
+			r.consecutiveToolFeedback = 0
+			r.denyAllPending = false
+			r.toolFeedbackPending = false
+		}
+	}
+
 	r.cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
 	r.speculation.disarm()
 	if r.speculation != nil && len(asst.ToolCalls) > 0 {
