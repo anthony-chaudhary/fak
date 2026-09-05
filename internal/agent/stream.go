@@ -451,6 +451,8 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 			ExtraBody:                extraBody,
 			Stream:                   stream || forceResponsesStream,
 			OpenAIToolMessagesAsText: p.OpenAIToolMessagesAsText,
+			ReasoningEffort:          sp.ReasoningEffort,
+			ThinkingBudget:           sp.ThinkingBudget,
 		})
 		if err != nil {
 			return nil, err

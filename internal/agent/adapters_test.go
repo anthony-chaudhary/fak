@@ -2455,3 +2455,87 @@ func TestOpenAIResponsesInputPreservesReasoningContent(t *testing.T) {
 		t.Fatalf("unexpected assistant item: %+v", asstItem)
 	}
 }
+
+func TestGeminiThinkingConfigMarshal(t *testing.T) {
+	ptr := func(v int) *int { return &v }
+	adapter := geminiAdapter{}
+
+	t.Run("reasoning effort medium", func(t *testing.T) {
+		body, err := adapter.MarshalRequest(adapterRequest{
+			ReasoningEffort: "medium",
+		})
+		if err != nil {
+			t.Fatalf("MarshalRequest failed: %v", err)
+		}
+		var parsed struct {
+			GenerationConfig struct {
+				ThinkingConfig *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+			} `json:"generationConfig"`
+		}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			t.Fatalf("unmarshal failed: %v: %s", err, body)
+		}
+		if parsed.GenerationConfig.ThinkingConfig == nil {
+			t.Fatalf("expected thinkingConfig, got nil: %s", body)
+		}
+		if parsed.GenerationConfig.ThinkingConfig.ThinkingLevel != "medium" {
+			t.Errorf("expected thinkingLevel medium, got %q", parsed.GenerationConfig.ThinkingConfig.ThinkingLevel)
+		}
+		if parsed.GenerationConfig.ThinkingConfig.ThinkingBudget != nil {
+			t.Errorf("expected thinkingBudget nil, got %v", parsed.GenerationConfig.ThinkingConfig.ThinkingBudget)
+		}
+		if !strings.Contains(string(body), `"thinkingLevel":"medium"`) {
+			t.Errorf("wire payload missing thinkingLevel: %s", body)
+		}
+	})
+
+	t.Run("thinking budget 2048", func(t *testing.T) {
+		body, err := adapter.MarshalRequest(adapterRequest{
+			ThinkingBudget: ptr(2048),
+		})
+		if err != nil {
+			t.Fatalf("MarshalRequest failed: %v", err)
+		}
+		var parsed struct {
+			GenerationConfig struct {
+				ThinkingConfig *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+			} `json:"generationConfig"`
+		}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			t.Fatalf("unmarshal failed: %v: %s", err, body)
+		}
+		if parsed.GenerationConfig.ThinkingConfig == nil {
+			t.Fatalf("expected thinkingConfig, got nil: %s", body)
+		}
+		if parsed.GenerationConfig.ThinkingConfig.ThinkingBudget == nil || *parsed.GenerationConfig.ThinkingConfig.ThinkingBudget != 2048 {
+			t.Errorf("expected thinkingBudget 2048, got %v", parsed.GenerationConfig.ThinkingConfig.ThinkingBudget)
+		}
+		if parsed.GenerationConfig.ThinkingConfig.ThinkingLevel != "" {
+			t.Errorf("expected thinkingLevel empty, got %q", parsed.GenerationConfig.ThinkingConfig.ThinkingLevel)
+		}
+		if !strings.Contains(string(body), `"thinkingBudget":2048`) {
+			t.Errorf("wire payload missing thinkingBudget: %s", body)
+		}
+	})
+
+	t.Run("neither set omits thinkingConfig", func(t *testing.T) {
+		body, err := adapter.MarshalRequest(adapterRequest{})
+		if err != nil {
+			t.Fatalf("MarshalRequest failed: %v", err)
+		}
+		var parsed struct {
+			GenerationConfig struct {
+				ThinkingConfig *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+			} `json:"generationConfig"`
+		}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			t.Fatalf("unmarshal failed: %v: %s", err, body)
+		}
+		if parsed.GenerationConfig.ThinkingConfig != nil {
+			t.Fatalf("expected nil thinkingConfig, got %+v: %s", parsed.GenerationConfig.ThinkingConfig, body)
+		}
+		if strings.Contains(string(body), "thinkingConfig") {
+			t.Errorf("wire payload should omit thinkingConfig: %s", body)
+		}
+	})
+}
