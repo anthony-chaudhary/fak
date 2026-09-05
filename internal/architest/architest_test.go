@@ -144,7 +144,7 @@ var tier = map[string]int{
 	"workloadfit":            2, // purpose-specific fitness mechanism over stackresolve contracts; keeps soft ranking outside composition gates (#6893).
 	"stackpreflight":         3, // launch integrator joining dependency, workload-fitness, and support-evidence receipts (#6897).
 	"amdgpu":                 2, // AMD GPU fact probe and perf-counter JSON fold for Windows harness diagnostics; imports windowgate(1), off the hot path.
-	"accounts":               2, "accountobs": 1, "guardaudit": 2, "appversion": 2, "blob": 1, "boundarylint": 1, "cachemeta": 2, "cacheobs": 1, "cachevalue": 2, "canon": 1, "compute": 2, "runtimecap": 3, "deletioncert": 1, "demoui": 2, "ggufload": 2, "gpulease": 2, "fleetreap": 2, "hfhub": 2, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 2, "model": 2, "orphanscan": 1, "pathlint": 1, "pathutil": 1, "privatepath": 2, "provenance": 1, "swebench": 2, "urllint": 1, "webbench": 2,
+	"accounts":               2, "accountobs": 1, "guardaudit": 2, "appversion": 2, "blob": 1, "boundarylint": 1, "cachemeta": 2, "cacheobs": 1, "cachevalue": 2, "canon": 1, "compute": 2, "runtimecap": 3, "deletioncert": 1, "demoui": 2, "ggufload": 2, "gpulease": 2, "researcharm": 2, "fleetreap": 2, "hfhub": 2, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 2, "model": 2, "orphanscan": 1, "pathlint": 1, "pathutil": 1, "privatepath": 2, "provenance": 1, "swebench": 2, "urllint": 1, "webbench": 2,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
 	"auditpane": 2, "benchingest": 2, "binstamp": 2, "cachewitness": 2, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "experiments": 2, "fleetaccounts": 2, "fleetbottleneck": 2, "flock": 1, "framevisibility": 1, "ghspam": 1, "issuecontractrepair": 2, "jsonlledger": 1, "kvbudget": 2, "maputil": 1, "mathx": 1, "modeldescriptor": 1, "newleaf": 1, "numfmt": 1, "randhex": 1, "refutil": 2, "selfinstall": 2, "sessionaudit": 2, "strmatch": 1,
 	"newmodel":      2,                                                                            // deterministic onboarding compiler composed over the primitive modeldescriptor contract (#9421).
@@ -372,6 +372,7 @@ var tier = map[string]int{
 	"lanebeat":            2, // #5864: the pure authority rung for REFRESHING a DOS lane lease — the writer the kernel's heartbeat_at liveness evidence never had (0 HEARTBEAT ops in 3584 WAL entries). Folds the supervisor's structural readings of the holder process (alive / output-growth / spawn budget) against the live lease set into a beat-or-named-refusal, fail-closed in every rung so a beat can never outlive the work it attests. Imports nothing internal, no clock, no process table, off the hot path; the `dos` I/O lives at the cmd/fak witness-sweep call site.
 	"guard":               2, // agent-spawn containment seam (#824): the Linux Landlock read-only-.git/hooks hook-floor for the child `fak guard` spawns, via a re-exec trampoline. Pure spec/resolution core + raw-syscall linux impl + no-op twin; opt-in, off by default, fails open; imports only stdlib (syscall/unsafe on linux), nothing internal.
 	"goalpark":            2, // durable long Retry-After goal parking and exactly-once supervisor claim (#4805)
+	"goalsync":            2, // goal artifact sync between workspace and private backup repo; off the hot path.
 	"codexmcphealth":      3, // Codex MCP transport health diagnostic (#1445): fresh stdio smoke + stale-child inventory/reap fold over subprocess evidence. Tool-shaped mechanism leaf, off the hot path, imports only stdlib.
 	"pythongate":          3, // NEW-PYTHON-TOOL de-Python ratchet: scans tracked tools/*.py (git ls-files) against a frozen grandfathered baseline and refuses any new .py (NEW_PYTHON_TOOL). A tool-shaped witness leaf (reads tree, folds, emits offenses); shells to git off the hot path, imports nothing internal.
 	"ctxknobs":            2, // MANUAL-OVERLAY COUNTER ratchet (#2199): walks cmd/fak flags/env + .claude/skills for context knobs, classifies operator-debug vs user-required, refuses a NEW user-required overlay against a frozen baseline (NEW_USER_REQUIRED_KNOB). Pure filesystem walk + fold, stdlib-only, imports nothing internal, off the hot path.
@@ -841,6 +842,8 @@ var tier = map[string]int{
 	"fakpack":                    2,
 	"allinone":                   5,
 	"airgaptest":                 5, // hermetic air-gapped harness integration contracts (#11387).
+	"harnesswarm":                2, // progressive non-blocking workspace warming engine (#10649).
+	"macobs":                     1, // Apple Silicon Mac & MLX observability leaf: hardware telemetry, headroom, metrics; stdlib-only, off hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
