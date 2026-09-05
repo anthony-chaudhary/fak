@@ -1,8 +1,15 @@
 package sessionreplay
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
+)
+
+var (
+	benchVerdictSink Verdict
+	benchFixtureSink Fixture
+	benchBytesSink   []byte
 )
 
 const goldenFixture = "regime_conditioned_turn.json"
@@ -104,5 +111,136 @@ func TestReplayRefusesUnknownRegime(t *testing.T) {
 	)
 	if _, err := Replay(f); err == nil {
 		t.Fatal("replay under an unknown regime returned nil error, want a refusal")
+	}
+}
+
+// BenchmarkReplay_Plan measures end-to-end replay throughput under the "plan"
+// regime, exercising regime resolution, policy parsing, and adjudication to DENY.
+func BenchmarkReplay_Plan(b *testing.B) {
+	f, err := LoadFixture(filepath.Join("testdata", goldenFixture))
+	if err != nil {
+		b.Fatalf("load golden fixture: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		v, err := Replay(f)
+		if err != nil {
+			b.Fatalf("replay: %v", err)
+		}
+		benchVerdictSink = v
+	}
+}
+
+// BenchmarkReplay_Autonomous measures end-to-end replay throughput under the
+// "autonomous" regime, exercising policy parsing and adjudication to ALLOW.
+func BenchmarkReplay_Autonomous(b *testing.B) {
+	f, err := LoadFixture(filepath.Join("testdata", goldenFixture))
+	if err != nil {
+		b.Fatalf("load golden fixture: %v", err)
+	}
+	f.ActiveRegime = "autonomous"
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		v, err := Replay(f)
+		if err != nil {
+			b.Fatalf("replay: %v", err)
+		}
+		benchVerdictSink = v
+	}
+}
+
+// BenchmarkReplay_DiverseTurns measures replay across alternating tool calls
+// and regimes (Read, Write, and bash under plan and autonomous floors).
+func BenchmarkReplay_DiverseTurns(b *testing.B) {
+	fixtures := []Fixture{
+		Capture(
+			DecisionInputs{Tool: "Read", Args: []byte(`{"path":"workspace/notes.txt"}`)},
+			"plan",
+			Verdict{Kind: "ALLOW"},
+		),
+		Capture(
+			DecisionInputs{Tool: "Write", Args: []byte(`{"path":"workspace/notes.txt","content":"hello"}`)},
+			"plan",
+			Verdict{Kind: "DENY", Reason: "DEFAULT_DENY"},
+		),
+		Capture(
+			DecisionInputs{Tool: "Write", Args: []byte(`{"path":"workspace/notes.txt","content":"hello"}`)},
+			"autonomous",
+			Verdict{Kind: "ALLOW"},
+		),
+		Capture(
+			DecisionInputs{Tool: "bash", Args: []byte(`{"command":"ls -la"}`)},
+			"plan",
+			Verdict{Kind: "DENY", Reason: "DEFAULT_DENY"},
+		),
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		f := fixtures[i%len(fixtures)]
+		v, err := Replay(f)
+		if err != nil {
+			b.Fatalf("replay: %v", err)
+		}
+		benchVerdictSink = v
+	}
+}
+
+// BenchmarkParseFixture measures fixture unmarshaling throughput with strict
+// schema tagging and unknown-field rejection.
+func BenchmarkParseFixture(b *testing.B) {
+	raw, err := os.ReadFile(filepath.Join("testdata", goldenFixture))
+	if err != nil {
+		b.Fatalf("read golden fixture: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		f, err := ParseFixture(raw)
+		if err != nil {
+			b.Fatalf("parse fixture: %v", err)
+		}
+		benchFixtureSink = f
+	}
+}
+
+// BenchmarkMarshalFixture measures indented JSON serialization throughput
+// for golden regression fixtures.
+func BenchmarkMarshalFixture(b *testing.B) {
+	f, err := LoadFixture(filepath.Join("testdata", goldenFixture))
+	if err != nil {
+		b.Fatalf("load golden fixture: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		data, err := f.Marshal()
+		if err != nil {
+			b.Fatalf("marshal fixture: %v", err)
+		}
+		benchBytesSink = data
+	}
+}
+
+// BenchmarkCapture measures in-memory fixture construction throughput.
+func BenchmarkCapture(b *testing.B) {
+	turn := DecisionInputs{
+		Tool: "Write",
+		Args: []byte(`{"path":"workspace/report.txt","content":"shipped"}`),
+	}
+	expect := Verdict{Kind: "DENY", Reason: "DEFAULT_DENY"}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		f := Capture(turn, "plan", expect)
+		benchFixtureSink = f
 	}
 }
