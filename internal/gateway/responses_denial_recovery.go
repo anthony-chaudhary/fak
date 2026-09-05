@@ -100,6 +100,7 @@ func deniedRecoveryMessages(base []agent.Message, proposed agent.Message, adjs [
 		if !ok {
 			continue
 		}
+		AttachOperatorRemedyMetadata(&adj)
 		calls = append(calls, tc)
 		results = append(results, agent.Message{
 			Role:       agent.RoleTool,
@@ -141,6 +142,10 @@ func refusedByCallID(adjs []ToolAdjudication) map[string]ToolAdjudication {
 // the call as done), why (the structured reason/disposition), and that the ORIGINAL task
 // is still open (so a refusal is not mistaken for the work being finished). The actionable
 // half is the same remedy text every other refusal surface renders, via the one registry.
+//
+// Invariant (#11504): agent-facing text must never emit runnable shell commands (such as
+// `fak guard allow`) in backticks or otherwise, preventing automated agents from looping
+// in recursive self-modification attempts.
 func deniedToolResult(a ToolAdjudication) string {
 	var b strings.Builder
 	b.WriteString("[fak] FAK_DENIED — the kernel refused this tool call; it did not run, nothing executed, and no state changed.")
@@ -163,7 +168,7 @@ func deniedToolResult(a ToolAdjudication) string {
 	b.WriteString(" The requested task remains OPEN — this refusal ended one call, not the task." +
 		" Continue in this same turn: pick an allowed tool or allowed arguments and keep working." +
 		" Report completion only once the work itself is done.")
-	return b.String()
+	return stripExecutableSecurityCommands(b.String())
 }
 
 // recoverDeniedResponsesTurn re-samples ONCE with every refusal handed back as a

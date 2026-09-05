@@ -107,6 +107,7 @@ type responsesResponse struct {
 	CreatedAt         int64                 `json:"created_at"`
 	Model             string                `json:"model"`
 	Status            string                `json:"status"`
+	FinishReason      string                `json:"finish_reason,omitempty"`
 	IncompleteDetails *responsesIncomplete  `json:"incomplete_details,omitempty"`
 	Output            []responsesOutputItem `json:"output"`
 	OutputText        string                `json:"output_text,omitempty"`
@@ -451,6 +452,10 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		resp.Status = "incomplete"
 		resp.IncompleteDetails = &responsesIncomplete{Reason: deniedGuardIncompleteReason}
 	}
+	for i := range turnAdjs {
+		AttachOperatorRemedyMetadata(&turnAdjs[i])
+	}
+	SetOperatorRemedyHeaders(w, turnAdjs)
 	if len(turnAdjs) > 0 || len(resultAdmissions) > 0 {
 		resp.Fak = &FakExt{Adjudications: turnAdjs, ResultAdmissions: resultAdmissions}
 	}

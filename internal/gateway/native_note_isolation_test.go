@@ -233,3 +233,43 @@ func TestProxyPathStillReachesAdjudicationNote(t *testing.T) {
 			"make TestNativePathHasNoProseAdjudicationNote pass vacuously")
 	}
 }
+
+// TestNativeNoteIsolationRefusalNotesNoRunnableGuardCommands asserts that renderRefusalNotes
+// and deniedToolResult for DEFAULT_DENY or POLICY_BLOCK contain zero runnable "fak guard allow"
+// shell strings in agent-visible text, while operator remediation is preserved in the header or metadata (#11504).
+func TestNativeNoteIsolationRefusalNotesNoRunnableGuardCommands(t *testing.T) {
+	cases := []struct {
+		reason string
+		tool   string
+	}{
+		{"DEFAULT_DENY", "exec_command"},
+		{"POLICY_BLOCK", "rm_rf"},
+	}
+	for _, tc := range cases {
+		adj := ToolAdjudication{
+			Tool:     tc.tool,
+			Admitted: false,
+			Verdict: WireVerdict{
+				Kind:        "DENY",
+				Reason:      tc.reason,
+				Disposition: "TERMINAL",
+			},
+		}
+
+		notes, _ := renderRefusalNotes(adj)
+		if strings.Contains(notes, "fak guard allow") {
+			t.Errorf("renderRefusalNotes(%s) contains runnable 'fak guard allow': %q", tc.reason, notes)
+		}
+		if strings.Contains(notes, "`fak guard") {
+			t.Errorf("renderRefusalNotes(%s) contains backtick 'fak guard': %q", tc.reason, notes)
+		}
+
+		result := deniedToolResult(adj)
+		if strings.Contains(result, "fak guard allow") {
+			t.Errorf("deniedToolResult(%s) contains runnable 'fak guard allow': %q", tc.reason, result)
+		}
+		if strings.Contains(result, "`fak guard") {
+			t.Errorf("deniedToolResult(%s) contains backtick 'fak guard': %q", tc.reason, result)
+		}
+	}
+}
