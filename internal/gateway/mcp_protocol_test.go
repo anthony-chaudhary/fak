@@ -225,3 +225,67 @@ func TestMCPToolsListBootstrapCeilingAndSchemaSize(t *testing.T) {
 		t.Fatalf("expected exactly %d capped tools, got %d", MaxMCPToolAdvertisementCeiling, len(capped))
 	}
 }
+
+func TestMCPToolDescriptorsReadOnlyAnnotations(t *testing.T) {
+	tools := toolDescriptors()
+	byName := make(map[string]map[string]any)
+	for _, td := range tools {
+		if name, ok := td["name"].(string); ok {
+			byName[name] = td
+		}
+	}
+
+	readOnlyTools := []string{
+		"fak_tools_search",
+		"fak_read",
+		"fak_adjudicate",
+		"fak_memory_drivers",
+		"fak_memory_explain",
+		"fak_feature_query",
+		"fak_capabilities",
+		"view_image",
+		"fak_arch_check",
+		"fak_trajquery",
+		"fak_context_value",
+		"fak_context_restore",
+		"fak_context_spans",
+		"fak_resume_history",
+	}
+	for _, name := range readOnlyTools {
+		td, ok := byName[name]
+		if !ok {
+			t.Fatalf("tool %q not found in descriptors", name)
+		}
+		ann, ok := td["annotations"].(map[string]any)
+		if !ok {
+			t.Fatalf("tool %q missing annotations map", name)
+		}
+		if ann["readOnlyHint"] != true {
+			t.Errorf("tool %q annotations[readOnlyHint] = %v, want true", name, ann["readOnlyHint"])
+		}
+		if ann["read_only_hint"] != true {
+			t.Errorf("tool %q annotations[read_only_hint] = %v, want true", name, ann["read_only_hint"])
+		}
+	}
+
+	mutatingTools := []string{
+		"fak_syscall",
+		"fak_admit",
+		"fak_changes",
+		"fak_revoke",
+		"fak_session_reset",
+		"fak_context_change",
+		"fak_memory_run",
+	}
+	for _, name := range mutatingTools {
+		td, ok := byName[name]
+		if !ok {
+			t.Fatalf("mutating tool %q not found in descriptors", name)
+		}
+		if ann, ok := td["annotations"].(map[string]any); ok {
+			if ann["readOnlyHint"] == true || ann["read_only_hint"] == true {
+				t.Errorf("mutating tool %q must not have readOnlyHint or read_only_hint: %v", name, ann)
+			}
+		}
+	}
+}

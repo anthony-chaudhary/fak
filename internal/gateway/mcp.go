@@ -847,8 +847,9 @@ func toolDescriptors() []map[string]any {
 	tools := []map[string]any{
 		{
 			"name":        "fak_adjudicate",
-			"description": "Adjudicate a proposed tool call through the fak kernel WITHOUT executing it. Returns the legacy verdict/trace/repaired_arguments fields plus a fak-adjudicate-receipt/1 receipt with closed outcome, duration, execution=not_executed, and kernel_decide provenance. Outcomes are allowed, denied, transformed, witness_required, or failed; failures expose only stable error code/source. Repaired arguments appear only for TRANSFORM. Standard client tools in guarded sessions are already adjudicated automatically by the kernel proxy; call this only when an unmanaged client executes tools out-of-band.",
+			"description": "Adjudicate a proposed tool call through the fak kernel WITHOUT executing it. Returns verdict and a fak-adjudicate-receipt/1 receipt with outcome, duration, execution=not_executed, and kernel_decide provenance. Repaired arguments appear only for TRANSFORM. Use when client executes tools out-of-band.",
 			"inputSchema": schema,
+			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
 		},
 		{
 			"name":        "fak_syscall",
@@ -857,7 +858,7 @@ func toolDescriptors() []map[string]any {
 		},
 		{
 			"name":        "fak_read",
-			"description": "Read files through the fak kernel instead of the built-in Read tool. When a file was read before and has not changed, fak serves the cached contents WITHOUT touching disk (a verified-fresh cache hit); otherwise it reads the file. Each result preserves file_path/content/error compatibility and adds receipt {schema,outcome,bytes,duration_ns,freshness_verified,witness,error?}; outcome is executed_cold_read or verified_fresh_reuse, and typed errors expose code/source without raw filesystem text. Prefer {file_paths:[...]} for independent reads so one call expresses their width; {file_path} remains the unchanged single-file form. Every path is adjudicated and cached independently, and batch results stay in request order.",
+			"description": "Read files with verified-fresh cache reuse or cold read. Preserves file_path/content/error format; adds receipt {schema,outcome,bytes,duration_ns,witness,error?}. Outcome is executed_cold_read or verified_fresh_reuse; typed errors expose code/source. Prefer {file_paths:[...]} for multiple files.",
 			"inputSchema": json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -870,6 +871,7 @@ func toolDescriptors() []map[string]any {
     "witness": {"type": "string", "description": "optional external world-state token (a git commit / blob hash) the read is taken at"}
   }
 }`),
+			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true},
 		},
 		{
 			"name":        "fak_admit",
@@ -928,11 +930,13 @@ func toolDescriptors() []map[string]any {
 			"name":        "fak_memory_drivers",
 			"description": "List the built-in memory STRATEGIES (recall/render/clean/compact/dream). Each is a composable query in the memq algebra (scan|filter|rank|limit|budget|render|tombstone|consolidate|reclassify|prune), not a hardcoded function — 'build SQL, not a specific query'. Returns each driver's name, doc, and compiled plan so you can see the pipeline and author your own.",
 			"inputSchema": json.RawMessage(`{"type":"object","properties":{}}`),
+			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
 		},
 		{
 			"name":        "fak_memory_explain",
 			"description": "EXPLAIN a memory query as a plan WITHOUT executing it — every step, which steps are effects, and which mutate durable state (and so are proposal-only). Pass {driver} for a built-in, or {query} with an inline authored memq Query ({intent, ops:[{kind,...}]}). This is the 'step through it before you run it' surface.",
 			"inputSchema": memoryInputSchema,
+			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
 		},
 		{
 			"name":        "fak_memory_run",
@@ -941,7 +945,7 @@ func toolDescriptors() []map[string]any {
 		},
 		{
 			"name":        "fak_tools_search",
-			"description": "Search and retrieve tool schemas on demand with progressive disclosure to reduce token usage. Accepts a query string to filter tools by name or description, and a detail_level (name|description|full) to control how much schema information is returned. Returns matching tools with the requested level of detail — use 'name' for a lightweight listing, 'description' to include tool descriptions, or 'full' for complete schemas.",
+			"description": "Search and retrieve tool schemas with progressive disclosure. Filter tools by query; detail_level selects 'name', 'description', or 'full' schemas.",
 			"inputSchema": json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -949,26 +953,31 @@ func toolDescriptors() []map[string]any {
     "detail_level": {"type": "string", "enum": ["name", "description", "full"], "description": "level of detail to return: 'name' = just tool names, 'description' = names + descriptions, 'full' = complete schemas including inputSchema"}
   }
 }`),
+			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
 		},
 		{
 			"name":        "fak_feature_query",
 			"description": "Query fak's unified self-feature catalog: dev facts, live MCP tools, memory drivers, and capability cards. Returns lightweight FeatureCards with guarded request shapes; pass detail to fault only one selected schema, doc snippet, or memory explain plan.",
 			"inputSchema": featureQueryInputSchema,
+			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
 		},
 		{
 			"name":        "fak_capabilities",
 			"description": "The task-scoped toolbelt: memory drivers (memq recall/render/clean/compact/dream), the fak index * self-index verbs, and the kernel shared-path verbs (fak_changes, dos_arbitrate), ranked by an optional intent, each with the exact call to make (a memory-driver card carries a ready fak_memory_run call). Narrower and memory-forward compared to fak_feature_query.",
 			"inputSchema": capabilitiesInputSchema,
+			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
 		},
 		{
 			"name":        "view_image",
 			"description": "Inspect an image file or visual artifact when the active model supports multimodal vision inputs. Omitted from tool declarations when model vision is unsupported.",
 			"inputSchema": json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"path to the image file to inspect"}},"required":["path"]}`),
+			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true},
 		},
 		{
 			"name":        "fak_arch_check",
 			"description": "Preflight architectural validity: check whether Go package imports violate layered DAG tiers or primitive leaf constraints in <50ms.",
 			"inputSchema": json.RawMessage(`{"type":"object","properties":{"package":{"type":"string","description":"repo-relative package path, e.g. internal/agentquery"},"mine":{"type":"boolean","description":"check only packages touched by uncommitted or staged changes"}}}`),
+			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
 		},
 	}
 	// The scoped trajectory-query surface (#3550): trajquery over MCP with the same
@@ -991,6 +1000,7 @@ func contextIntrospectionToolDescriptors() []map[string]any {
     "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace when configured (your own session under fak guard)"}
   }
 }`),
+			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
 		},
 		{
 			"name":        "fak_context_restore",
@@ -1004,6 +1014,7 @@ func contextIntrospectionToolDescriptors() []map[string]any {
     "image_dir": {"type": "string", "description": "optional persisted recall core image dir; when the compaction stash misses the id, a recall page at that digest is paged back in under the image's trust gate"}
   }
 }`),
+			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
 		},
 		{
 			"name":        "fak_context_spans",
@@ -1014,6 +1025,7 @@ func contextIntrospectionToolDescriptors() []map[string]any {
     "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace (your own session under fak guard)"}
   }
 }`),
+			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
 		},
 		{
 			"name":        "fak_resume_history",
@@ -1026,6 +1038,7 @@ func contextIntrospectionToolDescriptors() []map[string]any {
     "max_attempts": {"type": "integer", "description": "give-up cap; omitted or <= 0 uses the progress-earned budget"}
   }
 }`),
+			"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
 		},
 	}
 }
@@ -1280,6 +1293,9 @@ func (s *Server) toolsSearch(req ToolsSearchRequest) (ToolsSearchResponse, error
 		if level == "full" {
 			if schema, ok := t["inputSchema"]; ok {
 				tool["inputSchema"] = schema
+			}
+			if ann, ok := t["annotations"]; ok {
+				tool["annotations"] = ann
 			}
 		}
 		result = append(result, tool)

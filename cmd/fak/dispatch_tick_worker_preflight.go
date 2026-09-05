@@ -89,24 +89,31 @@ type dispatchWorkerPreflightResult struct {
 	routeDigest     string
 }
 
+// AllowsStartup is admission, not a readiness claim. The caller must hold a lane
+// lease and observe progress after the single guarded, deadline-bound launch.
+func (r dispatchWorkerPreflightResult) AllowsStartup() bool {
+	return r.Ready || (r.Verdict == dispatchWorkerPreflightTransientUpstream && r.guarded && r.deadlineSeconds > 0)
+}
+
 func (r dispatchWorkerPreflightResult) Map() map[string]any {
 	out := map[string]any{
-		"id":           "worker_identity",
-		"evaluated":    true,
-		"ok":           r.Ready,
-		"verdict":      r.Verdict,
-		"reason":       r.Reason,
-		"seat_token":   r.SeatToken,
-		"model":        r.Model,
-		"evidence":     r.Evidence,
-		"checked_at":   r.CheckedAt.UTC().Format(time.RFC3339Nano),
-		"expires_at":   r.ExpiresAt.UTC().Format(time.RFC3339Nano),
-		"evidence_ttl": int(dispatchWorkerPreflightEvidenceTTL / time.Second),
-		"guarded":      r.guarded,
-		"route_digest": r.routeDigest,
-		"work_kind":    r.workKind,
-		"deadline_s":   r.deadlineSeconds,
-		"workspace":    dispatchWorkerPreflightDigest("workspace", r.workspace),
+		"id":              "worker_identity",
+		"evaluated":       true,
+		"ok":              r.Ready,
+		"startup_allowed": r.AllowsStartup(),
+		"verdict":         r.Verdict,
+		"reason":          r.Reason,
+		"seat_token":      r.SeatToken,
+		"model":           r.Model,
+		"evidence":        r.Evidence,
+		"checked_at":      r.CheckedAt.UTC().Format(time.RFC3339Nano),
+		"expires_at":      r.ExpiresAt.UTC().Format(time.RFC3339Nano),
+		"evidence_ttl":    int(dispatchWorkerPreflightEvidenceTTL / time.Second),
+		"guarded":         r.guarded,
+		"route_digest":    r.routeDigest,
+		"work_kind":       r.workKind,
+		"deadline_s":      r.deadlineSeconds,
+		"workspace":       dispatchWorkerPreflightDigest("workspace", r.workspace),
 	}
 	if r.AccountType != "" {
 		out["credential_class"] = r.AccountType
@@ -118,7 +125,7 @@ func (r dispatchWorkerPreflightResult) Map() map[string]any {
 }
 
 func (r dispatchWorkerPreflightResult) Binds(req dispatchWorkerPreflightRequest, now time.Time) bool {
-	return r.Ready &&
+	return r.AllowsStartup() &&
 		!now.After(r.ExpiresAt) &&
 		r.backend == strings.TrimSpace(req.Backend) &&
 		r.accountTag == strings.TrimSpace(req.Account.Tag) &&
@@ -195,8 +202,6 @@ func dispatchWorkerPreflight(ctx context.Context, req dispatchWorkerPreflightReq
 	obs, err := dispatchCodexWorkerPreflightProbe(ctx, req)
 	result.AccountType = strings.TrimSpace(obs.AccountType)
 	switch {
-	case err != nil:
-		result.Verdict = dispatchWorkerPreflightErrorVerdict(err.Error())
 	case strings.TrimSpace(obs.RouteError) != "":
 		result.Verdict = dispatchWorkerPreflightErrorVerdict(obs.RouteError)
 		if result.Verdict == dispatchWorkerPreflightTransientUpstream {
@@ -212,21 +217,40 @@ func dispatchWorkerPreflight(ctx context.Context, req dispatchWorkerPreflightReq
 			result.Verdict != dispatchWorkerPreflightGatewayRejected {
 			result.Verdict = dispatchWorkerPreflightAuthInvalid
 		}
-	case !obs.Authenticated:
-		result.Verdict = dispatchWorkerPreflightAuthMissing
 	case strings.TrimSpace(obs.GatewayVerdict) != "":
 		result.Verdict = obs.GatewayVerdict
 	case strings.TrimSpace(obs.ModelError) != "":
 		result.Verdict = dispatchWorkerPreflightErrorVerdict(obs.ModelError)
-	case !dispatchPreflightModelAvailable(result.Model, obs.Models):
-		result.Verdict = dispatchWorkerPreflightModelUnsupported
 	case strings.TrimSpace(obs.QuotaError) != "":
 		result.Verdict = dispatchWorkerPreflightErrorVerdict(obs.QuotaError)
 	case obs.QuotaExhausted:
 		result.Verdict = dispatchWorkerPreflightQuotaExhausted
+	case err != nil:
+		result.Verdict = dispatchWorkerPreflightErrorVerdict(err.Error())
+	case !obs.Authenticated:
+		result.Verdict = dispatchWorkerPreflightAuthMissing
+	case !dispatchPreflightModelAvailable(result.Model, obs.Models):
+		result.Verdict = dispatchWorkerPreflightModelUnsupported
 	default:
 		result.Ready = true
 		result.Verdict = dispatchWorkerPreflightReady
+	}
+
+	// A partial response can contain both a transport failure and an explicit
+	// denial. No inconclusive rung may erase a denial from another RPC reply.
+	if result.Verdict == dispatchWorkerPreflightTransientUpstream {
+		if obs.QuotaExhausted {
+			result.Verdict = dispatchWorkerPreflightQuotaExhausted
+		}
+		for _, text := range []string{obs.AuthError, obs.ModelError, obs.QuotaError} {
+			if verdict := dispatchWorkerPreflightErrorVerdict(text); strings.TrimSpace(text) != "" && verdict != dispatchWorkerPreflightTransientUpstream {
+				result.Verdict = verdict
+				break
+			}
+		}
+		if obs.GatewayVerdict != "" && obs.GatewayVerdict != dispatchWorkerPreflightTransientUpstream {
+			result.Verdict = obs.GatewayVerdict
+		}
 	}
 
 	switch result.Verdict {
@@ -257,10 +281,11 @@ func dispatchWorkerPreflight(ctx context.Context, req dispatchWorkerPreflightReq
 		}
 	case dispatchWorkerPreflightRouteMisconfigured:
 		result.Reason = "Codex launch route is misconfigured"
-	default:
-		result.Verdict = dispatchWorkerPreflightTransientUpstream
+	case dispatchWorkerPreflightTransientUpstream:
 		result.Reason = "Codex preflight did not receive a stable upstream response"
 		result.CooldownUntil = now.Add(dispatchWorkerPreflightBackoff)
+	default:
+		result.Reason = "Codex preflight explicitly refused startup"
 	}
 	return result.finishEvidence(&obs)
 }
@@ -293,6 +318,10 @@ func (r dispatchWorkerPreflightResult) finishEvidence(obs *dispatchCodexPrefligh
 func dispatchWorkerPreflightErrorVerdict(text string) string {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	switch {
+	case strings.Contains(lower, "route misconfigured"):
+		return dispatchWorkerPreflightRouteMisconfigured
+	case strings.Contains(lower, "policy_block"), strings.Contains(lower, "policy denied"), strings.Contains(lower, "host_denied"), strings.Contains(lower, "403 forbidden"):
+		return dispatchWorkerPreflightGatewayRejected
 	case strings.Contains(lower, "credential missing"),
 		strings.Contains(lower, "no codex login"),
 		strings.Contains(lower, "not logged in"),
@@ -320,17 +349,6 @@ func dispatchWorkerPreflightErrorVerdict(text string) string {
 		strings.Contains(lower, "config.toml"),
 		strings.Contains(lower, "executable file not found"):
 		return dispatchWorkerPreflightRouteMisconfigured
-	case strings.Contains(lower, "timeout"),
-		strings.Contains(lower, "timed out"),
-		strings.Contains(lower, "temporar"),
-		strings.Contains(lower, "unavailable"),
-		strings.Contains(lower, "connection"),
-		strings.Contains(lower, "reset by peer"),
-		strings.Contains(lower, "unexpected eof"),
-		strings.Contains(lower, " 502"),
-		strings.Contains(lower, " 503"),
-		strings.Contains(lower, " 504"):
-		return dispatchWorkerPreflightTransientUpstream
 	case strings.Contains(lower, "unsupported model"),
 		strings.Contains(lower, "model unsupported"),
 		strings.Contains(lower, "model is not supported"),
@@ -464,19 +482,19 @@ func runDispatchCodexAppServerPreflight(ctx context.Context, req dispatchWorkerP
 		}
 	}
 	messages, err := dispatchReadCodexRPCMessages(ctx, scanner, []string{"1", "2", "3"})
+	obs := dispatchCodexObservationFromRPC(messages)
 	if err != nil {
-		return dispatchCodexPreflightObservation{}, err
+		return obs, err
 	}
 	if err := stdin.Close(); err != nil {
-		return dispatchCodexPreflightObservation{}, err
+		return obs, err
 	}
 	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
-			return dispatchCodexPreflightObservation{}, ctx.Err()
+			return obs, ctx.Err()
 		}
-		return dispatchCodexPreflightObservation{}, fmt.Errorf("Codex app-server preflight exited: %w", err)
+		return obs, fmt.Errorf("Codex app-server preflight exited: %w", err)
 	}
-	obs := dispatchCodexObservationFromRPC(messages)
 	if obs.Authenticated && obs.AuthError == "" {
 		obs.GatewayVerdict = dispatchCodexGatewayCredentialPreflight(ctx, req, time.Now().UTC())
 	}
@@ -528,7 +546,14 @@ func dispatchCodexGatewayCredentialPreflight(ctx context.Context, req dispatchWo
 		return dispatchWorkerPreflightGatewayRejected
 	case http.StatusForbidden:
 		return dispatchWorkerPreflightAuthMismatched
+	case http.StatusTooManyRequests:
+		return dispatchWorkerPreflightQuotaExhausted
+	case http.StatusNotFound:
+		return dispatchWorkerPreflightRouteMisconfigured
 	default:
+		if resp.StatusCode >= 500 {
+			return dispatchWorkerPreflightTransientUpstream
+		}
 		return ""
 	}
 }
@@ -576,12 +601,12 @@ func dispatchReadCodexRPCMessages(ctx context.Context, scanner *bufio.Scanner, w
 		return found, nil
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return found, err
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return found, err
 	}
-	return nil, errors.New("Codex app-server ended before preflight responses arrived")
+	return found, errors.New("Codex app-server ended before preflight responses arrived")
 }
 
 func dispatchCodexObservationFromRPC(messages map[string]dispatchCodexRPCMessage) dispatchCodexPreflightObservation {
@@ -589,7 +614,7 @@ func dispatchCodexObservationFromRPC(messages map[string]dispatchCodexRPCMessage
 	accountMsg := messages["1"]
 	if accountMsg.Error != nil {
 		obs.AuthError = accountMsg.Error.Message
-	} else {
+	} else if len(accountMsg.Result) > 0 {
 		var result struct {
 			Account *struct {
 				Type string `json:"type"`
@@ -612,7 +637,7 @@ func dispatchCodexObservationFromRPC(messages map[string]dispatchCodexRPCMessage
 	modelMsg := messages["2"]
 	if modelMsg.Error != nil {
 		obs.ModelError = modelMsg.Error.Message
-	} else {
+	} else if len(modelMsg.Result) > 0 {
 		var result struct {
 			Data []struct {
 				ID    string `json:"id"`
@@ -631,7 +656,7 @@ func dispatchCodexObservationFromRPC(messages map[string]dispatchCodexRPCMessage
 	quotaMsg := messages["3"]
 	if quotaMsg.Error != nil {
 		obs.QuotaError = quotaMsg.Error.Message
-	} else {
+	} else if len(quotaMsg.Result) > 0 {
 		obs.QuotaExhausted, obs.RetryAt, obs.QuotaError = dispatchCodexQuotaFromResult(quotaMsg.Result)
 	}
 	return obs
@@ -699,4 +724,61 @@ func dispatchCodexQuotaFromResult(raw json.RawMessage) (bool, time.Time, string)
 		}
 	}
 	return exhausted, retryAt, ""
+}
+
+// Only successful command execution is progress; banners, a thread ID, and a
+// surviving PID do not establish that the worker can actually perform work.
+var dispatchObserveStartup = dispatchObserveCodexStartup
+
+func dispatchObserveCodexStartup(logPath string, budget time.Duration) bool {
+	deadline := time.Now().Add(budget)
+	for {
+		if dispatchCodexLogHasProgress(logPath) {
+			return true
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false
+		}
+		time.Sleep(min(100*time.Millisecond, remaining))
+	}
+}
+
+func dispatchCodexLogHasProgress(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(io.LimitReader(f, 4<<20))
+	scanner.Buffer(make([]byte, 4096), 1<<20)
+	for scanner.Scan() {
+		var event struct {
+			Type string `json:"type"`
+			Item struct {
+				Type     string `json:"type"`
+				Status   string `json:"status"`
+				ExitCode *int   `json:"exit_code"`
+			} `json:"item"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &event) == nil && event.Type == "item.completed" && event.Item.Type == "command_execution" && event.Item.Status == "completed" && event.Item.ExitCode != nil && *event.Item.ExitCode == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func dispatchTransientProviderCheck(check map[string]any) bool {
+	reason := dispatchMapString(check, "reason")
+	if dispatchWorkerPreflightErrorVerdict(reason) != dispatchWorkerPreflightTransientUpstream {
+		return false
+	}
+	for _, key := range []string{"status", "upstream_status"} {
+		if status, ok := check[key].(int); ok && status >= 400 && status < 500 {
+			return false
+		}
+	}
+	// Do not reinterpret arbitrary explicit health denials as uncertainty.
+	lower := strings.ToLower(reason)
+	return strings.Contains(lower, "timeout") || strings.Contains(lower, "connection") || strings.Contains(lower, "http 50") || strings.Contains(lower, "malformed json") || strings.Contains(lower, "did not evaluate") || strings.Contains(lower, "temporar")
 }

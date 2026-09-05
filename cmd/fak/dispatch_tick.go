@@ -790,6 +790,16 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		return finish(payload), nil
 	}
 
+	uncertainStartup := preflight != nil && !preflight.Ready
+	if uncertainStartup {
+		if acquired, _ := lease["acquired"].(bool); !acquired {
+			payload["ok"] = false
+			payload["action"] = "worker_preflight_refused"
+			payload["reason"] = "inconclusive startup requires an acquired lane lease"
+			recordDispatchPayload(runsDir, opts.Backend, payload)
+			return finish(payload), nil
+		}
+	}
 	prompt := dispatchMapString(promptRec, "prompt")
 	command, err := dispatchtick.BuildWorkerCommand(opts.Backend, prompt, launch)
 	if err != nil {
@@ -799,6 +809,9 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		// full TTL. Fail-open, so an unreleasable lease still returns the build error.
 		releaseAbandonedLaneLease(root, lease, payload)
 		return nil, err
+	}
+	if uncertainStartup {
+		command = append(command[:len(command)-1], "--json", command[len(command)-1])
 	}
 	launchCommand, guarded := guardedDispatchCommand(root, pick.Lane, opts.Backend, command)
 	if guarded {
@@ -876,6 +889,7 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
 	}
+	started, identified := dispatchProcessStart(spawned.PID)
 	payload["command"] = dispatchtick.LaunchCommandShape(command, root, account)
 	payload["command_executed"] = true
 	payload["launch_command"] = dispatchtick.LaunchCommandShape(launchCommand, root, account)
@@ -890,7 +904,9 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		payload["verdict"] = "WORKTREE_OWNER_HANDOFF_FAILED"
 		payload["reason"] = err.Error()
 		payload["pid"] = spawned.PID
-		releaseAbandonedLaneLease(root, lease, payload)
+		if !uncertainStartup {
+			releaseAbandonedLaneLease(root, lease, payload)
+		}
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
 	}
@@ -926,9 +942,29 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		// the crash bucket. Releasing here does not weaken that sweep: it reaches the
 		// already-absent ref as ReleaseFenced's idempotent OK, and a lane re-acquired in
 		// the meantime has advanced its generation, so the sweep's stale token refuses.
-		releaseAbandonedLaneLease(root, lease, payload)
+		if !uncertainStartup {
+			releaseAbandonedLaneLease(root, lease, payload)
+		}
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
+	}
+	if uncertainStartup {
+		progressed := dispatchObserveStartup(spawned.Log, min(30*time.Second, time.Duration(opts.WorkerTimeoutS)*time.Second))
+		payload["startup_progress_observed"] = progressed
+		if !progressed {
+			// Keep the lease through its bounded TTL: a second tick must not retry
+			// the same inconclusive startup. Reap only the process identity we saw.
+			if current, ok := dispatchProcessStart(spawned.PID); identified && ok && current.Equal(started) {
+				reaped, _ := dispatchReapPID(spawned.PID)
+				payload["startup_reaped"] = reaped
+			}
+			payload["ok"] = false
+			payload["action"] = "startup_inconclusive"
+			payload["verdict"] = dispatchWorkerPreflightTransientUpstream
+			payload["reason"] = "bounded guarded startup produced no command-completion evidence; lane retained until expiry"
+			recordDispatchPayload(runsDir, opts.Backend, payload)
+			return finish(payload), nil
+		}
 	}
 	payload["ok"] = true
 	payload["action"] = "spawned"

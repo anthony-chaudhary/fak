@@ -308,7 +308,7 @@ func completeDispatchTickEvaluation(root, runsDir string, opts dispatchTickOptio
 		workerPreflight = &result
 		payload["worker_preflight"] = result.Map()
 		gates["worker_identity"] = result.Map()
-		if !result.Ready {
+		if !result.AllowsStartup() {
 			payload["ok"] = false
 			payload["action"] = "worker_preflight_refused"
 			payload["verdict"] = result.Verdict
@@ -323,7 +323,7 @@ func completeDispatchTickEvaluation(root, runsDir string, opts dispatchTickOptio
 	gates["provider_reachability"] = providerCheck
 	payload["launch_checks"] = gates
 	if evaluated, _ := providerCheck["evaluated"].(bool); evaluated {
-		if ok, _ := providerCheck["ok"].(bool); !ok {
+		if ok, _ := providerCheck["ok"].(bool); !ok && !(workerPreflight != nil && !workerPreflight.Ready && workerPreflight.AllowsStartup() && dispatchTransientProviderCheck(providerCheck)) {
 			payload["ok"] = false
 			payload["action"] = "provider_unreachable"
 			payload["verdict"] = "PROVIDER_REACHABILITY_REFUSED"

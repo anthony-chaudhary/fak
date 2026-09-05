@@ -172,8 +172,16 @@ func guardArbitrateAcquire(ctx context.Context, stderr io.Writer, cfg guardArbit
 	if len(requestTree) == 0 && strings.TrimSpace(cfg.Lane) == "" {
 		requestTree = []string{"**/*"}
 	}
+	commonDir, err := resolveGitCommonDir(root)
+	if err != nil {
+		if mode == guardArbitrateModeEnforce {
+			return nil, fmt.Errorf("COLLISION_RISK: guard admission git directory unavailable: %w", err)
+		}
+		fmt.Fprintf(stderr, "fak guard: arbitrate fail-open; git directory unavailable: %v\n", err)
+		return nil, nil
+	}
 	store := leaseref.NewInDir(root)
-	lock, err := gpulease.Acquire(gpulease.Options{Path: filepath.Join(root, ".git", "fak-guard-arbitrate.lock"), Timeout: 2 * time.Second, Logf: func(string, ...any) {}})
+	lock, err := gpulease.Acquire(gpulease.Options{Path: filepath.Join(commonDir, "fak-guard-arbitrate.lock"), Timeout: 2 * time.Second, Logf: func(string, ...any) {}})
 	if err != nil {
 		if errors.Is(err, gpulease.ErrBusy) || errors.Is(err, gpulease.ErrTimeout) {
 			if mode == guardArbitrateModeShadow {
@@ -183,6 +191,9 @@ func guardArbitrateAcquire(ctx context.Context, stderr io.Writer, cfg guardArbit
 				return nil, nil
 			}
 			return nil, fmt.Errorf("COLLISION_RISK: guard admission serialization is busy: %w", err)
+		}
+		if mode == guardArbitrateModeEnforce {
+			return nil, fmt.Errorf("COLLISION_RISK: guard admission serialization is unavailable: %w", err)
 		}
 		fmt.Fprintf(stderr, "fak guard: arbitrate fail-open; admission lock unavailable: %v\n", err)
 		return nil, nil
@@ -362,4 +373,48 @@ func guardArbitrateHolder() string {
 
 func guardArbitrateLeaseID() string {
 	return "guard-" + strconv.Itoa(os.Getpid()) + "-" + strings.ToLower(slackoutbox.NewNonce()[:12])
+}
+
+func resolveGitCommonDir(root string) (string, error) {
+	dot := filepath.Join(root, ".git")
+	fi, err := os.Stat(dot)
+	if err != nil {
+		return "", err
+	}
+	if fi.IsDir() {
+		return filepath.Clean(dot), nil
+	}
+	b, err := os.ReadFile(dot)
+	if err != nil {
+		return "", err
+	}
+	line := strings.TrimSpace(string(b))
+	rest, ok := strings.CutPrefix(line, "gitdir:")
+	if !ok {
+		return "", fmt.Errorf("%s is not a gitdir pointer: %q", dot, line)
+	}
+	gitDir := strings.TrimSpace(rest)
+	if gitDir == "" {
+		return "", fmt.Errorf("%s contains empty gitdir pointer", dot)
+	}
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(root, gitDir)
+	}
+	gitDir = filepath.Clean(gitDir)
+
+	commonBytes, err := os.ReadFile(filepath.Join(gitDir, "commondir"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return gitDir, nil
+		}
+		return "", err
+	}
+	common := strings.TrimSpace(string(commonBytes))
+	if common == "" {
+		return gitDir, nil
+	}
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(gitDir, common)
+	}
+	return filepath.Clean(common), nil
 }

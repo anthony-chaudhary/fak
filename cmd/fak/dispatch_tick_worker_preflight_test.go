@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -334,6 +336,9 @@ func TestDispatchCodexGatewayCredentialPreflightFixtures(t *testing.T) {
 		{name: "expired", status: http.StatusBadRequest, credential: dispatchTestJWT(time.Now().Add(-time.Hour)), want: dispatchWorkerPreflightAuthExpired},
 		{name: "mismatched", status: http.StatusForbidden, credential: dispatchTestJWT(time.Now().Add(time.Hour)), want: dispatchWorkerPreflightAuthMismatched},
 		{name: "gateway rejected", status: http.StatusUnauthorized, credential: dispatchTestJWT(time.Now().Add(time.Hour)), want: dispatchWorkerPreflightGatewayRejected},
+		{name: "transient", status: 503, credential: dispatchTestJWT(time.Now().Add(time.Hour)), want: dispatchWorkerPreflightTransientUpstream},
+		{name: "quota", status: 429, credential: dispatchTestJWT(time.Now().Add(time.Hour)), want: dispatchWorkerPreflightQuotaExhausted},
+		{name: "route", status: 404, credential: dispatchTestJWT(time.Now().Add(time.Hour)), want: dispatchWorkerPreflightRouteMisconfigured},
 		{name: "healthy route", status: http.StatusBadRequest, credential: dispatchTestJWT(time.Now().Add(time.Hour)), want: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -545,5 +550,171 @@ func TestDispatchTickWorkerPreflightSynchronizesProjectAssets(t *testing.T) {
 	}
 	if _, err := os.Stat(adapterPath); err != nil {
 		t.Fatalf("expected adapter to be synchronized for opencode backend, got err: %v", err)
+	}
+}
+
+func TestDispatchTransientStartupAdmission(t *testing.T) {
+	req := dispatchWorkerPreflightRequest{Backend: "codex", Account: dispatchtick.Account{Tag: "fixture", Dir: t.TempDir()}, Model: "fixture", Workspace: t.TempDir(), Guarded: true, DeadlineSeconds: 60}
+	setDispatchWorkerPreflightProbe(t, func(context.Context, dispatchWorkerPreflightRequest) (dispatchCodexPreflightObservation, error) {
+		return dispatchCodexPreflightObservation{}, context.DeadlineExceeded
+	})
+	now := time.Now()
+	got := dispatchWorkerPreflight(context.Background(), req, now)
+	if got.Ready || !got.AllowsStartup() || !got.Binds(req, now) || got.Map()["ok"] != false {
+		t.Fatalf("uncertainty misrepresented: %+v", got)
+	}
+	req.Guarded = false
+	if got.Binds(req, now) {
+		t.Fatal("evidence bound to unguarded launch")
+	}
+	if dispatchWorkerPreflight(context.Background(), req, now).AllowsStartup() {
+		t.Fatal("unguarded uncertainty admitted")
+	}
+	req.Guarded = true
+	req.DeadlineSeconds = 0
+	if dispatchWorkerPreflight(context.Background(), req, now).AllowsStartup() {
+		t.Fatal("unbounded uncertainty admitted")
+	}
+}
+
+func TestDispatchTransientStartupExplicitDenialsWin(t *testing.T) {
+	for _, obs := range []dispatchCodexPreflightObservation{{AuthError: "credential expired"}, {QuotaExhausted: true}, {RouteError: "missing route"}, {GatewayVerdict: dispatchWorkerPreflightGatewayRejected}, {ModelError: "policy denied"}} {
+		t.Run(fmt.Sprintf("%+v", obs), func(t *testing.T) {
+			setDispatchWorkerPreflightProbe(t, func(context.Context, dispatchWorkerPreflightRequest) (dispatchCodexPreflightObservation, error) {
+				return obs, context.DeadlineExceeded
+			})
+			got := dispatchWorkerPreflight(context.Background(), dispatchWorkerPreflightRequest{Backend: "codex", Guarded: true, DeadlineSeconds: 60}, time.Now())
+			if got.AllowsStartup() {
+				t.Fatalf("explicit denial admitted: %+v", got)
+			}
+		})
+	}
+}
+
+func TestDispatchTransientStartupRealChildProgress(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("POSIX child witness requires WSL")
+	}
+	path := filepath.Join(t.TempDir(), "worker.log")
+	for _, body := range []string{`{"type":"thread.started"}`, `{"type":"item.completed","item":{"type":"command_execution","status":"completed","exit_code":1}}`, `{"type":"item.completed","item":{"type":"command_execution","status":"completed"}}`} {
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if dispatchObserveCodexStartup(path, time.Millisecond) {
+			t.Fatalf("false progress: %s", body)
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	child := exec.Command("sh", "-c", `sleep 0.05; printf '%s\n' '{"type":"item.completed","item":{"type":"command_execution","status":"completed","exit_code":0}}'`)
+	child.Stdout = f
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if !dispatchObserveCodexStartup(path, time.Second) {
+		t.Error("real child completion not observed")
+	}
+	if err := child.Wait(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDispatchTransientStartupCLIOnce(t *testing.T) {
+	root, _ := dispatchCodexGateFixture(t, false)
+	if out, err := exec.Command("git", "-C", root, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %s %v", out, err)
+	}
+	oldObserver := dispatchObserveStartup
+	observed := 0
+	dispatchObserveStartup = func(path string, budget time.Duration) bool { observed++; return false }
+	t.Cleanup(func() { dispatchObserveStartup = oldObserver })
+	launches := 0
+	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", healthyDispatchProvider(t)+"/v1")
+
+	var probed dispatchWorkerPreflightRequest
+	setDispatchWorkerPreflightProbe(t, func(_ context.Context, req dispatchWorkerPreflightRequest) (dispatchCodexPreflightObservation, error) {
+		probed = req
+		return dispatchCodexPreflightObservation{}, context.DeadlineExceeded
+	})
+	oldBroker := launchSpawnBroker
+	oldSpawner := dispatchIssueWorkerSpawner
+	var capturedCommand []string
+	var capturedEnv map[string]string
+	var capturedAccount dispatchtick.Account
+	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant {
+		return allowLaunchBrokerGrant(a, "unit-test-allow")
+	}
+	dispatchIssueWorkerSpawner = func(argv []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error) {
+		launches++
+		capturedCommand = append([]string(nil), argv...)
+		capturedEnv = copyStringMap(env)
+		capturedAccount = account
+		logPath := filepath.Join(runsDir, "resolve-12-20260819-033000.log")
+		if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+			return dispatchSpawnResult{}, err
+		}
+		if err := os.WriteFile(logPath, []byte("# fak-spawn\nworking\n"), 0o644); err != nil {
+			return dispatchSpawnResult{}, err
+		}
+		return dispatchSpawnResult{PID: 6849, Log: logPath, Issue: issue, Lane: lane, Backend: backend, LeaseID: leaseID, Tree: tree}, nil
+	}
+	t.Cleanup(func() {
+		launchSpawnBroker = oldBroker
+		dispatchIssueWorkerSpawner = oldSpawner
+	})
+
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--backend", "codex", "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--live", "--json")
+	if code != 0 && !strings.Contains(out, "startup_inconclusive") {
+		t.Fatalf("exit = %d, want launched fixture (stderr %s)\n%s", code, errb, out)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	t.Cleanup(func() { releaseInProcessLaneLease(root, mapAt(got, "lease")) })
+	preflight := mapAt(got, "worker_preflight")
+	if got["action"] != "startup_inconclusive" || dispatchMapString(preflight, "verdict") != dispatchWorkerPreflightTransientUpstream {
+		t.Fatalf("launch receipt = %#v", got)
+	}
+	if probed.Account.Tag == "" || capturedAccount.Tag != probed.Account.Tag || capturedAccount.Dir != probed.Account.Dir {
+		t.Fatalf("preflight account=%+v spawn account=%+v", probed.Account, capturedAccount)
+	}
+	if probed.Model != guardCodexDefaultModelID || !slices.Contains(capturedCommand, probed.Model) {
+		t.Fatalf("preflight model=%q command=%#v", probed.Model, capturedCommand)
+	}
+	if capturedEnv["FAK_WORKER_PREFLIGHT_EVIDENCE"] == "" ||
+		capturedEnv["FAK_WORKER_PREFLIGHT_EVIDENCE"] != dispatchMapString(preflight, "evidence") ||
+		capturedEnv["FAK_WORKER_PREFLIGHT_MODEL"] != probed.Model ||
+		capturedEnv["FAK_WORKER_PREFLIGHT_SEAT"] != dispatchMapString(preflight, "seat_token") {
+		t.Fatalf("spawn env did not carry exact preflight evidence: env=%#v preflight=%#v", capturedEnv, preflight)
+	}
+	if observed != 1 || launches != 1 || !slices.Contains(capturedCommand, "--json") || preflight["ok"] != false {
+		t.Fatalf("startup observation=%d launches=%d command=%v preflight=%v", observed, launches, capturedCommand, preflight)
+	}
+	out, _, _ = runDispatchAt("tick", "--workspace", root, "--backend", "codex", "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--live", "--json")
+	if launches != 1 {
+		t.Fatalf("duplicate launch: %d receipt %s", launches, out)
+	}
+	t.Logf("CLI loopback: observed=%d launches=%d second=%s", observed, launches, out)
+
+}
+
+func TestDispatchTransientStartupPartialRPC(t *testing.T) {
+	messages, err := dispatchReadCodexRPCMessages(context.Background(), bufio.NewScanner(strings.NewReader(`{"id":1,"error":{"code":401,"message":"credential expired"}}`)), []string{"1", "2", "3"})
+	if err == nil || len(messages) != 1 {
+		t.Fatalf("partial denial lost: %v %v", messages, err)
+	}
+}
+func TestDispatchTransientStartupProviderDenials(t *testing.T) {
+	for _, reason := range []string{"policy denied: connection timeout", "host_denied timeout", "HTTP 401 unauthorized", "quota exhausted timeout", "route misconfigured timeout"} {
+		if dispatchTransientProviderCheck(map[string]any{"reason": reason}) {
+			t.Fatalf("denial admitted: %s", reason)
+		}
+	}
+	if !dispatchTransientProviderCheck(map[string]any{"reason": "guarded provider health returned HTTP 503", "status": 503}) {
+		t.Fatal("503 refused")
 	}
 }
