@@ -441,6 +441,11 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 		toc(&tGemm, t)
 		return r
 	}
+	gemmInto := func(qt *q8Tensor, qp *q8Panel, dst []float32) {
+		t := tic()
+		qGemm8Into(qt, qp, dst)
+		toc(&tGemm, t)
+	}
 	// One reused scratch panel for all 4×NumLayers activation quantizations: each panel is
 	// fully consumed before the next is built (q/k/v → o → gate/up → down), so a single
 	// buffer is safe and avoids ~120 large allocations per prefill.
@@ -470,6 +475,11 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 	normPanel := make([]float32, P*H)
 	// Attention and projection consumers finish before the next layer reuses this panel.
 	attnOut := make([]float32, P*nH*hd)
+	// GEMM fully overwrites these separate panels; all consumers finish before reuse.
+	I := cfg.IntermediateSize
+	G := make([]float32, P*I)
+	U := make([]float32, P*I)
+	Down := make([]float32, P*H)
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
 		ql := m.q8Layer(l)
@@ -541,10 +551,9 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 				}
 			}
 		})
-		I := cfg.IntermediateSize
 		Xn2q := qz(Xn2, P, H)
-		G := gemm(ql.gateProj, Xn2q)
-		U := gemm(ql.upProj, Xn2q)
+		gemmInto(ql.gateProj, Xn2q, G)
+		gemmInto(ql.upProj, Xn2q, U)
 		for t := 0; t < P; t++ {
 			m.addBiasIfPresent(G[t*I:(t+1)*I], lp("mlp.gate_proj.bias"))
 			m.addBiasIfPresent(U[t*I:(t+1)*I], lp("mlp.up_proj.bias"))
@@ -560,7 +569,7 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 				}
 			})
 		}
-		Down := gemm(ql.downProj, qz(G, P, I))
+		gemmInto(ql.downProj, qz(G, P, I), Down)
 		for t := 0; t < P; t++ {
 			m.addBiasIfPresent(Down[t*H:(t+1)*H], lp("mlp.down_proj.bias"))
 		}
