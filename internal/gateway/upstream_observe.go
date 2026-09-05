@@ -27,7 +27,7 @@ func (t *upstreamObserveTransport) RoundTrip(req *http.Request) (*http.Response,
 		t.observeError(err)
 	}
 	if t.observeFailure != nil {
-		if err != nil && transientUpstreamTransportError(err) {
+		if err != nil {
 			t.observeFailure(upstreamFailureReceipt(req, 0, nil, attempt, err))
 		} else if resp != nil && resp.StatusCode >= 400 {
 			t.observeFailure(upstreamFailureReceipt(req, resp.StatusCode, resp.Header, attempt, nil))

@@ -666,6 +666,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithNativeDecodeTokenIDs(decodeTokenIDsRequested),
 	)
 	if err != nil {
+		s.renderTurnDebugError(reqTrace, "openai_chat_completions", err, time.Since(began))
 		// Map the upstream failure to an honest status. Log the detail for the operator
 		// but return a GENERIC message — the planner error embeds up to 400 bytes of the
 		// upstream provider's raw body, which must not cross the trust boundary to a

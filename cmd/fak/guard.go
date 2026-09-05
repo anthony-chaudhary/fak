@@ -81,6 +81,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	oauthTokenEnv := fs.String("oauth-token-env", "CLAUDE_CODE_OAUTH_TOKEN", "env var to read the subscription OAuth token from first")
 	policyPath := fs.String("policy", "", "capability-floor manifest to enforce (default: the built-in guard floor; see --dump-policy)")
 	postureFlag := fs.String("posture", "", "adjudication posture: default_open|fail_closed|admit_and_log (default: default_open; overrides policy manifest posture; env: FAK_GUARD_POSTURE)")
+	selfModifyFlag := fs.String("self-modify", "", "self-modification mode: permissive|strict (default: permissive; overrides policy manifest self_modify_mode; env: FAK_GUARD_SELF_MODIFY)")
 	var allowTools launchToolFlag
 	fs.Var(&allowTools, "allow-tool", "grant one exact tool name for THIS guard process only (repeatable). The grant re-admits DEFAULT_DENY tools but cannot bypass explicit denies, dangerous-argument rules, self-modification, or later tightening.")
 	envName := fs.String("env", "", "env var to inject the gateway URL into the child (default: chosen by --provider)")
@@ -437,7 +438,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		effectiveWorkProfile = responseProfileCapture.WorkProfile
 	}
 
-	rt, floorSource, policyDigest, policyDur := loadGuardCapabilityFloor(*policyPath, *postureFlag)
+	rt, floorSource, policyDigest, policyDur := loadGuardCapabilityFloor(*policyPath, *postureFlag, *selfModifyFlag)
 	configureGuardPromotionLedger(rt.Adjudicator.Complain, guardPromotionDefaultThreshold)
 	var err error
 
@@ -918,6 +919,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		UpstreamBadRequestNotify:       guardUpstreamBadRequestAuditNotify(auditJournal, guardTraceID),
 		UpstreamResponseObserver:       observeUpstreamResponse,
 		UpstreamTransportErrorObserver: func(err error) { wireErrors.Observe(time.Now(), err) },
+		UpstreamFailureObserver:        guardUpstreamFailureObserver(auditJournal, guardTraceID, wireErrors, gwLogf, debugStatsSink(debugStatsStderr)),
 		// Re-resolve the pinned subscription OAuth token per request so a long session
 		// never sends the stale boot-time bearer (the 401-after-relogin bug). nil in every
 		// non-pinned path leaves the static-APIKey behavior byte-for-byte unchanged.
@@ -1389,8 +1391,11 @@ func cmdManageCommand(commandName string, argv []string) {
 	srv.RecordStartupPhase("mcp-registration", time.Since(mcpStarted), "measured")
 	if err != nil {
 		cancel()
-		fmt.Fprintf(os.Stderr, "fak guard: Claude MCP registration setup failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "fak guard: MCP registration setup failed: %v\n", err)
 		os.Exit(1)
+	}
+	if mcpInstall.Applied && mcpInstall.IsFak {
+		injected = append(injected, [2]string{"FAK_MCP_CONFIG", mcpInstall.ConfigPath})
 	}
 
 	// Render the FULL startup report and register it on the gateway so the session serves it

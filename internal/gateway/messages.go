@@ -265,6 +265,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	began := time.Now()
 	turn, err := s.completeAnthropicTurn(ctx, req, reqTrace, sessionTurn, "", "", upstreamKey, upstreamBeta)
 	if err != nil {
+		s.renderTurnDebugError(reqTrace, "anthropic_messages", err, time.Since(began))
 		// Classify like the chat-completions path: an in-kernel device OOM becomes a specific,
 		// actionable 503; a genuine upstream failure stays the opaque 502 with the raw provider
 		// body kept off the wire. writeErrCode with an empty code reproduces the historical
@@ -1339,6 +1340,7 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 		began := time.Now()
 		turn, err := s.completeAnthropicTurn(r.Context(), req, reqTrace, sessionTurn, "", "", upstreamKey, upstreamBeta)
 		if err != nil {
+			s.renderTurnDebugError(reqTrace, "anthropic_messages", err, time.Since(began))
 			s.logf("gateway: upstream model error (messages): %v", err)
 			s.writeUpstreamErr(w, err)
 			return
