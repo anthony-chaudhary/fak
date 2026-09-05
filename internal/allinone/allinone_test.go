@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/fakpack"
 )
 
 func TestUpBootstrap(t *testing.T) {
@@ -234,4 +237,163 @@ func TestAllInOneBootstrapLifecycle(t *testing.T) {
 func jsonQuote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+func TestBundledRelativeMemorySurvivesShutdown(t *testing.T) {
+	dir := t.TempDir()
+
+	lockPath := filepath.Join(dir, "harness.lock.json")
+	lockContent := `{
+  "schema": "fak.harness-product-lock/v2",
+  "id": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "platforms": [
+    {"os": "linux", "arch": "amd64"},
+    {"os": "darwin", "arch": "arm64"},
+    {"os": "windows", "arch": "amd64"}
+  ],
+  "budget": {
+    "context_tokens": 4096,
+    "memory_mib": 512,
+    "workers": 1
+  },
+  "components": [
+    {
+      "id": "echo-service",
+      "version": "1.0.0",
+      "digest": "sha256:1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff",
+      "source": "bin/echo-service",
+      "provider": "mcp",
+      "provides": ["echo"]
+    }
+  ],
+  "assets": [
+    {
+      "kind": "memory",
+      "id": "rel-journal",
+      "value": "relative-session-journal.jsonl"
+    }
+  ]
+}`
+	if err := os.WriteFile(lockPath, []byte(lockContent), 0600); err != nil {
+		t.Fatalf("write lock file: %v", err)
+	}
+
+	policyPath := filepath.Join(dir, "policy.json")
+	if err := os.WriteFile(policyPath, []byte(`{"version":"v1","allow":["*"]}`), 0600); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+	assetsDir := filepath.Join(dir, "assets")
+	_ = os.MkdirAll(assetsDir, 0755)
+	binDir := filepath.Join(dir, "bin")
+	_ = os.MkdirAll(binDir, 0755)
+	_ = os.WriteFile(filepath.Join(binDir, "echo-service"), []byte("#!/bin/sh\necho echo-service\n"), 0755)
+	modelPath := filepath.Join(dir, "model.bin")
+	_ = os.WriteFile(modelPath, []byte("fake-model-weights"), 0600)
+
+	bundlePath := filepath.Join(dir, "test.fakpack")
+	createRes, err := fakpack.Create(fakpack.CreateOptions{
+		LockPath:   lockPath,
+		PolicyPath: policyPath,
+		AssetsDir:  assetsDir,
+		BinDir:     binDir,
+		ModelPath:  modelPath,
+		OutPath:    bundlePath,
+	})
+	if err != nil {
+		t.Fatalf("fakpack.Create: %v", err)
+	}
+	if createRes == nil || createRes.BundlePath != bundlePath {
+		t.Fatalf("unexpected bundle creation: %+v", createRes)
+	}
+
+	cfg := Config{
+		BundlePath: bundlePath,
+		Addr:       "127.0.0.1:0",
+		Engine:     "mock",
+		Mock:       true,
+	}
+
+	// Session 1: start supervisor, execute session request, then shutdown.
+	sup1, err := NewSupervisor(cfg)
+	if err != nil {
+		t.Fatalf("NewSupervisor (1): %v", err)
+	}
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+	if err := sup1.Start(ctx1); err != nil {
+		t.Fatalf("Start (1): %v", err)
+	}
+
+	sessReq1 := `{"goal":"session 1 task","max_turns":1}`
+	resp1, err := http.Post("http://"+sup1.Addr()+"/v1/fak/agent/sessions", "application/json", strings.NewReader(sessReq1))
+	if err != nil {
+		t.Fatalf("POST session (1): %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp1.Body)
+	_ = resp1.Body.Close()
+	if resp1.StatusCode != http.StatusOK {
+		t.Fatalf("session (1) status = %d, want 200", resp1.StatusCode)
+	}
+
+	// Verify session 1 recorded entries
+	entries1 := sup1.Memory().Entries()
+	if len(entries1) < 2 {
+		t.Fatalf("expected >=2 memory entries in session 1, got %d", len(entries1))
+	}
+
+	// Clean shutdown removes unpackDir. Relative memory MUST survive!
+	if err := sup1.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown (1): %v", err)
+	}
+
+	expectedJournalFile := filepath.Join(dir, "relative-session-journal.jsonl")
+	dataAfterShutdown, err := os.ReadFile(expectedJournalFile)
+	if err != nil {
+		t.Fatalf("relative memory journal did not survive shutdown at %s: %v", expectedJournalFile, err)
+	}
+	if len(dataAfterShutdown) == 0 {
+		t.Fatalf("expected non-empty journal file after shutdown")
+	}
+
+	// Session 2: restart supervisor with same bundle. Verify session 1 entries are recalled.
+	sup2, err := NewSupervisor(cfg)
+	if err != nil {
+		t.Fatalf("NewSupervisor (2): %v", err)
+	}
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	if err := sup2.Start(ctx2); err != nil {
+		t.Fatalf("Start (2): %v", err)
+	}
+
+	// Memory journal should already have session 1 entries
+	recalledEntries := sup2.Memory().Entries()
+	if len(recalledEntries) < len(entries1) {
+		t.Fatalf("expected recalled entries >= %d, got %d", len(entries1), len(recalledEntries))
+	}
+
+	// Execute session 2
+	sessReq2 := `{"goal":"session 2 task","max_turns":1}`
+	resp2, err := http.Post("http://"+sup2.Addr()+"/v1/fak/agent/sessions", "application/json", strings.NewReader(sessReq2))
+	if err != nil {
+		t.Fatalf("POST session (2): %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp2.Body)
+	_ = resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("session (2) status = %d, want 200", resp2.StatusCode)
+	}
+
+	if err := sup2.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown (2): %v", err)
+	}
+
+	finalData, err := os.ReadFile(expectedJournalFile)
+	if err != nil {
+		t.Fatalf("read final journal: %v", err)
+	}
+	finalLines := strings.Split(strings.TrimSpace(string(finalData)), "\n")
+	if len(finalLines) < len(entries1)+2 {
+		t.Fatalf("expected combined journal lines >= %d, got %d", len(entries1)+2, len(finalLines))
+	}
 }

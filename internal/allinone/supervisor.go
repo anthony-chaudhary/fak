@@ -2,6 +2,7 @@ package allinone
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -52,6 +53,22 @@ func newMemoryJournal(path string) (*MemoryJournal, error) {
 		entries: make([]MemoryEntry, 0),
 	}
 	if path != "" && path != "in-memory" {
+		if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
+			scanner := bufio.NewScanner(bytes.NewReader(data))
+			for scanner.Scan() {
+				line := bytes.TrimSpace(scanner.Bytes())
+				if len(line) == 0 {
+					continue
+				}
+				var entry MemoryEntry
+				if err := json.Unmarshal(line, &entry); err == nil {
+					j.entries = append(j.entries, entry)
+				}
+			}
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return nil, fmt.Errorf("create memory journal dir: %w", err)
+		}
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
 			return nil, fmt.Errorf("open memory journal: %w", err)
@@ -396,8 +413,24 @@ func (s *Supervisor) Start(ctx context.Context) error {
 			}
 		}
 	}
-	if memPath != "" && !filepath.IsAbs(memPath) && s.unpackDir != "" {
-		memPath = filepath.Join(s.unpackDir, memPath)
+	if memPath != "" && memPath != "in-memory" && !filepath.IsAbs(memPath) {
+		baseDir := "."
+		if s.cfg.BundlePath != "" {
+			baseDir = filepath.Dir(s.cfg.BundlePath)
+		} else if s.cfg.LockPath != "" {
+			baseDir = filepath.Dir(s.cfg.LockPath)
+		}
+		persistentPath := filepath.Join(baseDir, memPath)
+		if s.unpackDir != "" {
+			extractedSeed := filepath.Join(s.unpackDir, memPath)
+			if _, err := os.Stat(persistentPath); os.IsNotExist(err) {
+				if seedData, err := os.ReadFile(extractedSeed); err == nil && len(seedData) > 0 {
+					_ = os.MkdirAll(filepath.Dir(persistentPath), 0755)
+					_ = os.WriteFile(persistentPath, seedData, 0600)
+				}
+			}
+		}
+		memPath = persistentPath
 	}
 	memJournal, err := newMemoryJournal(memPath)
 	if err != nil {
