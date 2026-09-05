@@ -844,6 +844,7 @@ var tier = map[string]int{
 	"airgaptest":                 5, // hermetic air-gapped harness integration contracts (#11387).
 	"harnesswarm":                2, // progressive non-blocking workspace warming engine (#10649).
 	"macobs":                     1, // Apple Silicon Mac & MLX observability leaf: hardware telemetry, headroom, metrics; stdlib-only, off hot path.
+	"capabilitymatrix":           1, // unified model capability registry (#11507); stdlib-only, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -997,16 +998,34 @@ func leafOf(path string) string {
 // checkout, or the remote-tracking ref is absent); the caller then falls back to strict
 // all-undeclared-fail, which is safe precisely because in that setting there are no
 // concurrent peer pushes to wedge.
+func cleanGitEnv() []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		k, _, ok := strings.Cut(kv, "=")
+		if ok {
+			u := strings.ToUpper(k)
+			if u == "GIT_DIR" || u == "GIT_WORK_TREE" || u == "GIT_INDEX_FILE" || u == "GIT_OBJECT_DIRECTORY" || u == "GIT_PREFIX" || u == "GIT_COMMON_DIR" {
+				continue
+			}
+		}
+		env = append(env, kv)
+	}
+	return env
+}
+
 func leavesTouchedByPush(internal string) (map[string]bool, bool) {
 	repo := filepath.Dir(internal) // internal/ -> repo root
+	cEnv := cleanGitEnv()
 	top := exec.Command("git", "rev-parse", "--show-toplevel")
 	top.Dir = repo
+	top.Env = cEnv
 	topOut, err := top.Output()
 	if err != nil || !samePath(strings.TrimSpace(string(topOut)), repo) {
 		return nil, false
 	}
 	base := exec.Command("git", "merge-base", trunkRef(), "HEAD")
 	base.Dir = repo
+	base.Env = cEnv
 	baseOut, err := base.Output()
 	if err != nil {
 		return nil, false
@@ -1017,6 +1036,7 @@ func leavesTouchedByPush(internal string) (map[string]bool, bool) {
 	}
 	diff := exec.Command("git", "diff", "--name-only", mb, "HEAD", "--", "internal/")
 	diff.Dir = repo
+	diff.Env = cEnv
 	diffOut, err := diff.Output()
 	if err != nil {
 		return nil, false
@@ -3358,7 +3378,7 @@ func TestLeavesTouchedByPushScopesToCommitDelta(t *testing.T) {
 	git := func(args ...string) {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = repo
-		cmd.Env = append(os.Environ(),
+		cmd.Env = append(cleanGitEnv(),
 			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
 			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -3374,6 +3394,7 @@ func TestLeavesTouchedByPushScopesToCommitDelta(t *testing.T) {
 	branch := func() string {
 		cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
 		cmd.Dir = repo
+		cmd.Env = cleanGitEnv()
 		out, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("rev-parse: %v", err)

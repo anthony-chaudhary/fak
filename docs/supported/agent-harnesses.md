@@ -27,6 +27,8 @@ recipe**. This page carries those labels rather than coining its own. The *custo
 column in the tables below is a **wire fact** (can the tool repoint its wire), not a support
 label.
 
+> **Building your own harness?** See the architectural evaluation: [When to use `fak guard` vs native `harnesskit`](../architecture/when-to-use-fak-guard-for-harnesses.md) and the [Public-harness vs. private-factory boundary](../architecture/public-private-harness-boundary.md).
+
 ---
 
 ## Harnesses with a dedicated guide
@@ -135,6 +137,7 @@ in the integration index is the one-paste pattern, and the
 
 ## Reference (the witnessed sources behind this page)
 
+- [When to use fak guard vs native harnesskit](../architecture/when-to-use-fak-guard-for-harnesses.md) — architectural evaluation and trade-off analysis for custom harness builders
 - [Compatibility matrix](../integrations/compatibility-matrix.md) — 47 sourced harnesses / frameworks / backends / protocols, each with the exact repoint key
 - [Integration index](../integrations/README.md) — the "repoint one base URL" recipe and the 60-second offline proof
 - [Terminal-Bench 4 Reproduction](../benchmarks/TERMINAL-BENCH-4-REPRODUCTION.md) — end-to-end benchmark manual comparing fak native harness against OpenCode baseline

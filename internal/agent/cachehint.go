@@ -3,8 +3,8 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
-	"strings"
+
+	capmatrix "github.com/anthony-chaudhary/fak/internal/capabilitymatrix"
 )
 
 // CacheIntentVersion is the provider-neutral cache-hint contract version.
@@ -145,19 +145,12 @@ func negotiateCacheIntent(provider Provider, model string, in *CacheIntent) (Cac
 	return r, nil
 }
 
-var (
-	openAIExtendedRetentionRE = regexp.MustCompile(`(^|/)(gpt-[5-9]|o[1-9]|astra)`)
-	anthropicTTLRE            = regexp.MustCompile(`(^|/)claude-([3-9]|(sonnet|opus|haiku)-[3-9])`)
-)
-
 func openAISupportsExtendedRetention(model string) bool {
-	m := strings.ToLower(strings.TrimSpace(model))
-	return openAIExtendedRetentionRE.MatchString(m) || strings.Contains(m, "astra")
+	return capmatrix.Lookup(model).ExtendedRetention
 }
 
 func anthropicSupportsTTL(model string) bool {
-	m := strings.ToLower(strings.TrimSpace(model))
-	return anthropicTTLRE.MatchString(m)
+	return capmatrix.Lookup(model).AnthropicTTL
 }
 
 func applyCacheHintToJSON(body []byte, result CacheHintResult) ([]byte, error) {

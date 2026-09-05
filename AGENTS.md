@@ -25,7 +25,7 @@ Only inspect or modify another repository when the operator explicitly names
 that repository or the FAK task itself has a concrete, evidenced cross-repo
 dependency. If scope is ambiguous, stay in FAK.
 
-## Delegate real work; keep the coordinator context clean
+## Divide and conquer: delegate real work; keep the coordinator context clean
 
 Use guarded headless agents or an equivalent isolated worker for every substantive
 unit of work. The primary agent is the coordinator: decompose the request, give each
@@ -33,6 +33,15 @@ worker a bounded goal and distinct file set, preserve only decisions and compact
 evidence in the primary context, and independently witness worker results before
 landing or reporting them. Delegate investigation, implementation, tests, long command
 output, and independent review; do not pull their full transcripts into the coordinator.
+
+- **Divide and conquer by default**: When handling substantive, multi-part, or complex tasks,
+  decompose them into atomic, single-concern units or parallel subagent packets. Launch specialized
+  subagents (`task`: worker, researcher, explore, deep-reason, cross-validator) concurrently for
+  independent components to maximize throughput and prevent coordinator context saturation.
+- **Tree-disjoint boundaries**: Assign each worker a distinct, non-overlapping file set to avoid
+  concurrent collisions on the shared trunk.
+- **Isolate and witness**: Keep heavy command logs and raw transcripts in worker boundaries; pull
+  only compact decisions, diffs, and verification receipts into the coordinator.
 
 The primary agent may directly perform only lightweight coordination: inspect enough
 state to scope packets, launch and supervise workers, adjudicate conflicts, integrate
@@ -46,7 +55,7 @@ final result.
 
 Smaller or resource-constrained models (such as local 7B/14B checkpoints, fast/flash models,
 or bounded worker subagents) achieve reliability by keeping work tightly focused and strictly verified.
-When operating as or delegating to smaller models, enforce two scoping safeguards:
+When operating as or delegating to smaller models, enforce scoping safeguards:
 
 1. **Subdivide into atomic units (S0/S1 leaves)**:
    - Restrict each task or dispatch packet to a single observable deliverable and exactly one witness command.
@@ -67,6 +76,11 @@ When operating as or delegating to smaller models, enforce two scoping safeguard
    - **Break interactive tool loops while persisting toward the goal**: In CLI/tool loops, Flash models can confabulate success or loop in repeat-failure cycles ("apologizes, then retries the exact same command"). Ground every claim in an observed tool receipt. When a tool call is denied or fails, halt repetition of the identical call or cycling argument variations; read the error or refusal receipt, query `fak recover <TOKEN>` for structured recovery, and pivot to an alternate sanctioned route or decomposed subtask. Persist through recoverable hurdles by adapting the approach rather than repeating failed calls or abandoning the objective.
    - **Prefer specialized file tools over shell scripting**: Flash models experience higher failure rates on complex CLI/terminal pipelines (TerminalBench regressions). Prefer structured tools (`Read`, `Edit`, `Glob`, `Grep`) over complex piped bash commands.
    - **Anticipate safety false-positives**: Standard 3.8 Flash guardrails can trigger false refusals on legitimate security inspection, redaction, or policy code; frame technical security contexts neutrally or emit structured `ABSTAIN` rather than hallucinating workarounds. Full analysis: [`docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md`](docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md).
+
+4. **Calibrate test breadth (prevent reasoning model test over-engineering)**:
+   - Restrict test authoring to a single atomic reproduction or regression unit test demonstrating the defect or behavior change; prohibit sprawling 20-test suites when 1 witness suffices.
+   - Prevent token exhaustion and context pollution by targeting only the explicit requirement or failure mode instead of writing speculative matrix permutations or redundant assertion variations.
+   - Keep test execution deterministic, bounded, and fast-failing within the target package (`go test -v ./internal/<pkg>` and `go vet ./internal/<pkg>`).
 
 ## Native inference performance invariant
 
@@ -288,7 +302,12 @@ is a no-op). **When you cite evidence in a claim or a handoff, prefer `module@re
 
 ## Hard rules (enforced below the agent layer)
 
-- **Ship green work by default.** Run the scope-correct gate above, then commit and push without waiting for a prompt. "Green" mandates shift-left proof: for changes touching executable CLI verbs, gateway adapters, or runtime logic, execute real paths in dogfood or integration tests rather than relying on mock-only or shallow tests. Stay on `main`; never force-push, create a feature branch, use `--autostash`, or escape a dirty/diverged tree into a worktree. Merge `origin/main` in place. If a peer owns `MERGE_HEAD`, unstage your paths and wait; do not finish or abort their merge.
+- **Ship green work and sync safely by default.** Do more work by default: when implementing or fixing tasks yourself, do not stop at partial edits or ask conversational permission to test, sync, or push. Run the full lifecycle through to completion:
+  1. **Pre-flight safe sync**: Check and synchronize safely with `origin/main` (`fak sync check`, `fak sync reconcile --apply`, or `fak sync apply`) so local work is grounded on trunk.
+  2. **Atomic implementation & self-verification**: Decompose work into single-concern leaves, write/update tests, and verify on-device (`fak validate --mine <paths>`, `go test ./internal/<pkg>/...`).
+  3. **Stage-and-commit by explicit path**: Lint the subject (`fak commit --preview`) and commit only your touched paths (`fak commit --path <p> -m "<subject> (fak <leaf>)"`).
+  4. **Safe push unprompted**: Push verified commits via `fak sync push` or `fak commit --push`. `fak sync push` automatically retries transient non-fast-forward races (when a peer lands between fetch and push while HEAD already contains origin) and stops safely on genuine diverged states. Never wait for an operator prompt to push once the tree is green.
+  Stay on `main`; never force-push, create a feature branch, use `--autostash`, or escape a dirty/diverged tree into a worktree. Merge `origin/main` in place. If a peer owns `MERGE_HEAD`, unstage your paths and wait; do not finish or abort their merge.
 - **Match scope to capability.** Constrain smaller models and workers to atomic S0/S1 leaf units with single-concern boundaries and one witness. When encountering high-difficulty aspects (concurrency, frozen ABI, complex kernel algorithms), practice scoped fail-to-abstain: land partial verified evidence and escalate only the isolated high-difficulty boundary with a structured ABSTAIN record rather than guessing or emitting speculative changes. Persist through recoverable hurdles using alternate sanctioned routes or waiting out transient locks rather than abandoning the task.
 - **Commit exactly one issue through explicit paths.** Prefer `fak commit --preview`, then `fak commit --path <p> ... -m "<subject>"`; use `fak sweep` for one coherent lane. The fallback is `git commit -s -m "<subject>" -- <paths>`, never `git add -A`. One issue lands in one commit and one leaf; do not split a green issue into patch commits or batch unrelated issues.
 - **Make the first subject final.** Sign off with DCO, use a Conventional-Commits subject, and include a recognized `(fak <leaf>)` trailer. A peer may push your commit before an amend, so preview the subject and paths first. Demo binaries use their `cmd/<dir>` name as the leaf.

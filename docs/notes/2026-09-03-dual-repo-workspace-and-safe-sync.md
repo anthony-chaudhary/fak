@@ -108,7 +108,14 @@ To safely pull and maintain synchronization across both trees (whether arranged 
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
----
+### 3.1 Goal Artifact Synchronization (`fak goal sync`, `fak-sync goal`)
+
+In addition to git tree synchronization, autonomous agent sessions maintain execution continuity across restarts and feed factory dispatch by synchronizing goal artifacts (`goals/GOAL-<slug>.md`, `goals/subagents/*.md`, `.fak/goal-registry.json`, and `.fak/goal-park/`) to the companion store (`fak-private/goals/fak/`):
+
+- **Push (`fak goal sync push` / `fak goal sync push --commit`)**: Copies active and achieved goal specifications, child sub-goals, canonical registry entries, and park records from the working tree into `fak-private/goals/fak/`. Passing `--commit` commits the synced artifacts in the target repository.
+- **Pull (`fak goal sync pull`)**: Restores goal artifacts from `fak-private/goals/fak/` into the working tree, skipping newer local files unless `--force` is specified.
+- **Status (`fak goal sync status`)**: Evaluates hash-level synchronization status across all goal artifacts.
+- **Lifecycle Integration (`fak-sync goal`)**: Functions as the unified goal sync verb within the safe dual-repo sync lifecycle, ensuring uncommitted loop state and intent ledgers survive host crashes and agent handoffs.
 
 ---
 
@@ -128,6 +135,7 @@ Context cannot flow symmetrically between the two trees. It follows a strict asy
 │                 "Open Engine & Public Memory"               │
 │  - Public ABI changes, bug fixes, engine benchmarks         │
 │  - Public agent memory: agent-memory/fak/                   │
+│  - Public goal artifacts: goals/GOAL-*.md, goal registry    │
 └──────────────────────────────┬──────────────────────────────┘
                                │
                                │ 1. DOWNLINK: Unrestricted Ingestion
@@ -138,6 +146,7 @@ Context cannot flow symmetrically between the two trees. It follows a strict asy
 │                 PRIVATE REPO (fak-private)                  │
 │                "Factory & Proprietary Context"              │
 │  - Autonomous dispatch queues, scorecards, hardware bridges │
+│  - Durable goal store: goals/fak/                           │
 │  - Private agent memory: agent-memory/fak-private/          │
 └──────────────────────────────┬──────────────────────────────┘
                                │
@@ -163,6 +172,7 @@ Context cannot flow symmetrically between the two trees. It follows a strict asy
 
 | Context Tier | Storage / Mechanism | Sync Strategy Across Repositories |
 |---|---|---|
+| **Durable Goal Artifacts** | `goals/` & `.fak/goal-registry.json` $\rightarrow$ `fak-private/goals/fak/` | Synced via `fak goal sync [push\|pull\|status]` or `fak-sync goal`. Pushes active goals, child sub-goals, and registry transitions to the private companion to survive local crashes and feed factory dispatch. |
 | **Durable Agent Memory** | `$CLAUDE_CONFIG_DIR/projects/<key>/memory/` | Separate project keys (`C--work-fak` vs `C--work-fak-private`). Private agents ingest public memories as an overlay; public agents never load private memory. |
 | **Runtime Lease Coordination** | Git references (`refs/fak/locks/*`) | Synced via `git fetch`. Both public and private workers observe lock states, contract leases, and liveness heartbeats in real time. |
 | **Change Feeds & Revocations** | In-kernel `fak_changes` feed | Propagates typed mutations and invalidations so peer agents evict stale caches when shared data changes. |
@@ -177,5 +187,5 @@ Context cannot flow symmetrically between the two trees. It follows a strict asy
    - `fak-all/` is a plain filesystem directory, never a git repository.
    - The relative sibling relationship (`fak` and `fak-private` at the same relative depth) is preserved.
    - Agent execution sessions anchor their working directory in the target repository (`fak/` or `fak-private/`), rather than the outer container.
-3. **Mechanize the Dual-Pull:** Provide a dedicated helper (e.g., via `fak dev sync` or an ops synchronization script) that automates the 6-step safe pull protocol above, preventing manual skew between the engine and companion layers.
+3. **Mechanize the Dual-Pull & Goal Sync:** Provide dedicated helpers (e.g., via `fak dev sync`, `fak goal sync`, or `fak-sync goal`) that automate the 6-step safe pull protocol and goal artifact mirroring, preventing manual skew between the engine, companion layers, and factory queues.
 4. **Enforce Asymmetric Context Synchronization:** Treat context flow as a one-way lattice: private agents inherit public facts and memories freely; public agents only receive sanitized, scrubbed task distillations.

@@ -355,3 +355,126 @@ func TestReadJournal_RoundTripsAndSkipsTornLine(t *testing.T) {
 		t.Errorf("ReadJournal(missing) = (%v, %v), want (nil, nil)", rows, err)
 	}
 }
+
+func TestKeepRateTruthCleanExcludesRetries(t *testing.T) {
+	rows := []Row{
+		{Mode: "improve", Decision: "RETRY", Kept: false},
+		{Mode: "improve", Decision: "RETRY", Kept: false},
+		{Mode: "improve", Decision: "KEEP", Kept: true, TruthClean: true, SuiteGreen: true},
+	}
+	got := KeepRateTruthClean(rows)
+	if got != 1.0 {
+		t.Fatalf("KeepRateTruthClean(rows) = %v, want 1.0", got)
+	}
+}
+
+func TestFoldClusteredEscalations_IgnoresRetryRows(t *testing.T) {
+	cfg := MetaConfig{Window: 3, MinEscalations: 2, GainStep: 0.05, GainCeiling: 0.5}
+	cur := KeepPolicy{GainThreshold: 0.10, BreakerK: 3, Throttle: 4}
+
+	rows := []Row{
+		improveRow("ESCALATE", false, false, true),
+		{Mode: "improve", Decision: "RETRY", Kept: false},
+		{Mode: "improve", Decision: "RETRY", Kept: false},
+		improveRow("ESCALATE", false, false, true),
+	}
+
+	p, ok := FoldClusteredEscalations(rows, cur, cfg)
+	if !ok {
+		t.Fatal("FoldClusteredEscalations failed to produce a proposal when RETRY rows were present; RETRY rows should be ignored in window calculation")
+	}
+	if p.Escalations != 2 {
+		t.Errorf("proposal escalations = %d, want 2", p.Escalations)
+	}
+	if p.Window != 2 {
+		t.Errorf("proposal window = %d, want 2", p.Window)
+	}
+}
+
+func TestMetaRSIEdgeCases(t *testing.T) {
+	cfg := MetaConfig{Window: 5, MinEscalations: 2, GainStep: 0.05, GainCeiling: 0.5}
+	cur := KeepPolicy{GainThreshold: 0.10, BreakerK: 3, Throttle: 4}
+
+	t.Run("all_retry_rows", func(t *testing.T) {
+		allRetry := []Row{
+			{Mode: "improve", Decision: "RETRY", Kept: false},
+			{Mode: "improve", Decision: "RETRY", Kept: false},
+			{Mode: "improve", Decision: "RETRY", Kept: false},
+		}
+		// Fold must produce no proposal
+		if _, ok := Fold(allRetry, cur, cfg); ok {
+			t.Fatal("Fold on all-RETRY rows should return ok=false")
+		}
+		// KeepRateTruthClean must return 0.0 (no divide by zero)
+		if rate := KeepRateTruthClean(allRetry); rate != 0.0 {
+			t.Fatalf("KeepRateTruthClean(allRetry) = %v, want 0.0", rate)
+		}
+		// EvaluateProposal on all-RETRY must REVERT
+		dec, _ := EvaluateProposal(allRetry, allRetry)
+		if dec != shipgate.REVERT {
+			t.Fatalf("EvaluateProposal(allRetry, allRetry) = %v, want REVERT", dec)
+		}
+	})
+
+	t.Run("empty_rows", func(t *testing.T) {
+		for _, empty := range [][]Row{nil, {}} {
+			if _, ok := Fold(empty, cur, cfg); ok {
+				t.Fatal("Fold on empty rows should return ok=false")
+			}
+			if rate := KeepRateTruthClean(empty); rate != 0.0 {
+				t.Fatalf("KeepRateTruthClean(empty) = %v, want 0.0", rate)
+			}
+			dec, _ := EvaluateProposal(empty, empty)
+			if dec != shipgate.REVERT {
+				t.Fatalf("EvaluateProposal(empty, empty) = %v, want REVERT", dec)
+			}
+		}
+	})
+
+	t.Run("mixed_decisions", func(t *testing.T) {
+		mixed := []Row{
+			{Mode: "track", Decision: "TRACK", Kept: false},
+			{Mode: "improve", Decision: "KEEP", Kept: true, TruthClean: true, SuiteGreen: true},
+			{Mode: "improve", Decision: "RETRY", Kept: false},
+			{Mode: "improve", Decision: "REVERT", Kept: false, TruthClean: false, SuiteGreen: false},
+			{Mode: "improve", Decision: "RETRY", Kept: false},
+			{Mode: "improve", Decision: "ESCALATE", Kept: false, TruthClean: true, SuiteGreen: false},
+			{Mode: "improve", Decision: "ESCALATE", Kept: false, TruthClean: true, SuiteGreen: false},
+			{Mode: "", Decision: ""},
+		}
+
+		// In Fold:
+		// Working backwards from the end:
+		// row 7: Mode="" -> skipped
+		// row 6: Mode=improve, ESCALATE -> seen=1, esc=1
+		// row 5: Mode=improve, ESCALATE -> seen=2, esc=2
+		// row 4: Mode=improve, RETRY -> skipped
+		// row 3: Mode=improve, REVERT -> seen=3
+		// row 2: Mode=improve, RETRY -> skipped
+		// row 1: Mode=improve, KEEP -> seen=4
+		// row 0: Mode=track -> skipped
+		// Total seen = 4, esc = 2. esc >= MinEscalations (2) -> proposal generated!
+		p, ok := Fold(mixed, cur, cfg)
+		if !ok {
+			t.Fatal("Fold(mixed) want ok=true")
+		}
+		if p.Escalations != 2 {
+			t.Errorf("p.Escalations = %d, want 2", p.Escalations)
+		}
+		if p.Window != 4 {
+			t.Errorf("p.Window = %d, want 4", p.Window)
+		}
+
+		// In KeepRateTruthClean:
+		// Valid improve non-retry rows are:
+		// row 1: KEEP, Kept=true, TruthClean=true -> clean
+		// row 3: REVERT -> non-clean
+		// row 5: ESCALATE -> non-clean
+		// row 6: ESCALATE -> non-clean
+		// Total cycles = 4, clean = 1 -> rate = 0.25
+		rate := KeepRateTruthClean(mixed)
+		if rate != 0.25 {
+			t.Fatalf("KeepRateTruthClean(mixed) = %v, want 0.25", rate)
+		}
+	})
+}

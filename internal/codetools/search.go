@@ -92,14 +92,13 @@ func snapToRuneBoundary(s string, maxBytes int) string {
 		return s
 	}
 	s = s[:maxBytes]
-	for len(s) > 0 && !utf8.RuneStart(s[len(s)-1]) {
-		s = s[:len(s)-1]
-	}
-	if len(s) > 0 {
+	for i := 0; i < utf8.UTFMax && len(s) > 0; i++ {
 		r, size := utf8.DecodeLastRuneInString(s)
 		if r == utf8.RuneError && size == 1 {
 			s = s[:len(s)-1]
+			continue
 		}
+		break
 	}
 	return s
 }
@@ -211,7 +210,30 @@ func (t *Toolset) executeGrep(ctx context.Context, a GrepArgs, re *regexp.Regexp
 			}
 			matchTruncated := false
 			if len(cleanLine) > maxMatchLineBytes {
-				cleanLine = snapToRuneBoundary(cleanLine, maxMatchLineBytes)
+				loc := re.FindStringIndex(cleanLine)
+				start := 0
+				if len(loc) == 2 {
+					matchLen := loc[1] - loc[0]
+					if matchLen >= maxMatchLineBytes {
+						start = loc[0]
+					} else {
+						mid := loc[0] + matchLen/2
+						start = mid - maxMatchLineBytes/2
+						if start < 0 {
+							start = 0
+						}
+						if start+maxMatchLineBytes > len(cleanLine) {
+							start = len(cleanLine) - maxMatchLineBytes
+							if start < 0 {
+								start = 0
+							}
+						}
+						for start < loc[0] && !utf8.RuneStart(cleanLine[start]) {
+							start++
+						}
+					}
+				}
+				cleanLine = snapToRuneBoundary(cleanLine[start:], maxMatchLineBytes)
 				matchTruncated = true
 				truncated = true
 				truncationReason = upgradeTruncationReason(truncationReason, "line_width")
@@ -320,11 +342,12 @@ func (t *Toolset) glob(ctx context.Context, body []byte) ([]byte, bool) {
 		if errors.As(walkErr, &halt) {
 			return halt.r.JSON(), true
 		}
+		if errors.Is(walkErr, context.Canceled) || errors.Is(walkErr, context.DeadlineExceeded) {
+			return refuse(CodeCanceled, "operation canceled").JSON(), true
+		}
 		if errors.Is(walkErr, errWalkBudget) {
 			truncated = true
-			if truncationReason == "" {
-				truncationReason = "walk_budget"
-			}
+			truncationReason = upgradeTruncationReason(truncationReason, "walk_budget")
 		} else if !errors.Is(walkErr, errStopWalk) {
 			return refuse(CodeIO, "Glob: "+walkErr.Error()).JSON(), true
 		}

@@ -150,6 +150,7 @@ concurrent = [
   "blobfs", "blobhttp", "ctxplan", "gitgate", "gitresource", "hfhub", "memq", "polymodel", "storedrv",
   "advmodel",
   "modelroute",
+  "capabilitymatrix",
   # #5619: internal/gitbroker, the resident git query broker. Declared BEFORE the package
   # exists so the rungs (#5620-#5624) can ship a `(fak gitbroker)` stamp without tripping
   # TIER_DECLARED on their first push. Sibling of gitgate and deliberately disjoint from it:
@@ -816,6 +817,7 @@ polymodel = ["internal/polymodel/**"]
 storedrv = ["internal/storedrv/**"]
 advmodel = ["internal/advmodel/**"]
 modelroute = ["internal/modelroute/**"]
+capabilitymatrix = ["internal/capabilitymatrix/**"]
 # reconciled 2026-06-28 (dos lint --strict LANE_WITHOUT_TREE): #1029 added the modelreg lane to
 # [lanes].concurrent/autopick but never declared its tree here, so the lane could NOT be arbitrated
 # (the disjointness algebra had no region to compare) -- the very same-tree collision protection

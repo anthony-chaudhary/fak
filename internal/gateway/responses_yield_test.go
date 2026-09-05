@@ -431,3 +431,252 @@ func TestEstimateSubturnTokens(t *testing.T) {
 		t.Fatalf("expected ~101 tokens for 400 chars, got %d", tokens)
 	}
 }
+
+// TestCountSubturnToolCallsScopedToActiveTurn verifies that historical tool calls
+// from a previous user turn do not count towards the active sub-turn tool call count.
+func TestCountSubturnToolCallsScopedToActiveTurn(t *testing.T) {
+	// Turn 1: user prompt, 5 tool calls / results, assistant message concluding turn.
+	// Turn 2: user prompt just started (0 tool calls in current turn).
+	msgsTurnJustStarted := []agent.Message{
+		{Role: agent.RoleUser, Content: "turn 1 start"},
+	}
+	for i := 0; i < 5; i++ {
+		msgsTurnJustStarted = append(msgsTurnJustStarted,
+			agent.Message{
+				Role: agent.RoleAssistant,
+				ToolCalls: []agent.ToolCall{
+					{ID: "c" + itoa(uint64(i)), Function: agent.Func{Name: "fn"}},
+				},
+			},
+			agent.Message{
+				Role:       agent.RoleTool,
+				ToolCallID: "c" + itoa(uint64(i)),
+				Content:    "res",
+			},
+		)
+	}
+	msgsTurnJustStarted = append(msgsTurnJustStarted,
+		agent.Message{Role: agent.RoleAssistant, Content: "turn 1 concluded"},
+		agent.Message{Role: agent.RoleUser, Content: "turn 2 start"},
+	)
+
+	count := countSubturnToolCalls(msgsTurnJustStarted)
+	if count != 0 {
+		t.Fatalf("expected active subturn tool call count 0 at turn start, got %d", count)
+	}
+
+	// Turn 2 makes 1 tool call.
+	msgsOneCall := append(msgsTurnJustStarted,
+		agent.Message{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{
+				{ID: "t2_c1", Function: agent.Func{Name: "fn_t2"}},
+			},
+		},
+		agent.Message{
+			Role:       agent.RoleTool,
+			ToolCallID: "t2_c1",
+			Content:    "res_t2",
+		},
+	)
+	count = countSubturnToolCalls(msgsOneCall)
+	if count != 1 {
+		t.Fatalf("expected active subturn tool call count 1, got %d", count)
+	}
+
+	// Also test raw input JSON scoping.
+	rawInputItems := []any{
+		map[string]any{"type": "message", "role": "user", "content": "turn 1"},
+	}
+	for i := 0; i < 5; i++ {
+		rawInputItems = append(rawInputItems,
+			map[string]any{"type": "function_call", "call_id": "c" + itoa(uint64(i)), "name": "fn"},
+			map[string]any{"type": "function_call_output", "call_id": "c" + itoa(uint64(i)), "output": "res"},
+		)
+	}
+	rawInputItems = append(rawInputItems,
+		map[string]any{"type": "message", "role": "assistant", "content": "done turn 1"},
+		map[string]any{"type": "message", "role": "user", "content": "turn 2"},
+	)
+	rawBytes, _ := json.Marshal(rawInputItems)
+	rawCount := countSubturnToolCallsFromRaw(rawBytes)
+	if rawCount != 0 {
+		t.Fatalf("expected raw active subturn tool call count 0 at turn start, got %d", rawCount)
+	}
+}
+
+// TestResponsesSubturnHistoricalToolCallsDoNotTriggerYield verifies that historical tool calls
+// from a previous user turn do not trigger the yield valve on a new turn.
+func TestResponsesSubturnHistoricalToolCallsDoNotTriggerYield(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", "1000")
+	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOOL_CALLS", "5")
+
+	srv := newTestServer(t)
+	planner := &capturingYieldPlanner{
+		comp: &agent.Completion{
+			FinishReason: "stop",
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "turn 2 normal output",
+			},
+		},
+	}
+	srv.planner = planner
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// Turn 1 had 6 tool calls and >1000 tokens of output.
+	// Turn 2 just started with a new user message.
+	inputItems := []any{
+		map[string]any{"type": "message", "role": "user", "content": "turn 1 tasks"},
+	}
+	for i := 0; i < 6; i++ {
+		inputItems = append(inputItems,
+			map[string]any{
+				"type":    "function_call",
+				"call_id": "call_" + itoa(uint64(i)),
+				"name":    "tool_action",
+			},
+			map[string]any{
+				"type":    "function_call_output",
+				"call_id": "call_" + itoa(uint64(i)),
+				"output":  "tool result data: " + strings.Repeat("A", 800),
+			},
+		)
+	}
+	inputItems = append(inputItems,
+		map[string]any{"type": "message", "role": "assistant", "content": "turn 1 complete"},
+		map[string]any{"type": "message", "role": "user", "content": "turn 2 task"},
+	)
+
+	body := map[string]any{
+		"model": "test-model",
+		"input": inputItems,
+	}
+
+	reqBytes, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	httpResp, err := http.Post(ts.URL+"/v1/responses", "application/json", bytes.NewReader(reqBytes))
+	if err != nil {
+		t.Fatalf("POST /v1/responses: %v", err)
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(httpResp.Body)
+		t.Fatalf("expected 200 OK, got %d: %s", httpResp.StatusCode, string(respBody))
+	}
+
+	// Yield header should NOT be set because active sub-turn has 0 tool calls.
+	if got := httpResp.Header.Get(SubturnYieldHeader); got != "" {
+		t.Fatalf("expected header %s to be empty, got %q", SubturnYieldHeader, got)
+	}
+	if !planner.called {
+		t.Fatal("expected upstream planner to be called because active turn has 0 tool calls")
+	}
+}
+
+// TestResponsesSubturnSuppressImmediateYieldLoop verifies that when the preceding assistant
+// message was SubturnYieldMessage, the next turn is not intercepted by the yield valve.
+func TestResponsesSubturnSuppressImmediateYieldLoop(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", "500")
+	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOOL_CALLS", "3")
+
+	srv := newTestServer(t)
+	planner := &capturingYieldPlanner{
+		comp: &agent.Completion{
+			FinishReason: "stop",
+			Message: agent.Message{
+				Role:    agent.RoleAssistant,
+				Content: "Here is the requested progress summary after yield.",
+			},
+		},
+	}
+	srv.planner = planner
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// Turn 1 had 4 tool calls (>3 max) and ended with SubturnYieldMessage.
+	// Turn 2 is client's request to summarize.
+	inputItems := []any{
+		map[string]any{"type": "message", "role": "user", "content": "long task with >500 tokens: " + strings.Repeat("Z", 2500)},
+	}
+	for i := 0; i < 4; i++ {
+		inputItems = append(inputItems,
+			map[string]any{"type": "function_call", "call_id": "c" + itoa(uint64(i)), "name": "fn"},
+			map[string]any{"type": "function_call_output", "call_id": "c" + itoa(uint64(i)), "output": "res"},
+		)
+	}
+	inputItems = append(inputItems,
+		map[string]any{"type": "message", "role": "assistant", "content": SubturnYieldMessage},
+		map[string]any{"type": "message", "role": "user", "content": "Please summarize progress so far."},
+	)
+
+	body := map[string]any{
+		"model": "test-model",
+		"input": inputItems,
+	}
+
+	reqBytes, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	httpResp, err := http.Post(ts.URL+"/v1/responses", "application/json", bytes.NewReader(reqBytes))
+	if err != nil {
+		t.Fatalf("POST /v1/responses: %v", err)
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(httpResp.Body)
+		t.Fatalf("expected 200 OK, got %d: %s", httpResp.StatusCode, string(respBody))
+	}
+
+	// Verify X-Fak-Subturn-Yield header is NOT set on the turn following SubturnYieldMessage.
+	if got := httpResp.Header.Get(SubturnYieldHeader); got != "" {
+		t.Fatalf("expected header %s to be empty, got %q", SubturnYieldHeader, got)
+	}
+
+	var resp responsesResponse
+	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response JSON: %v", err)
+	}
+
+	if !strings.Contains(resp.OutputText, "progress summary after yield") {
+		t.Fatalf("expected output to contain summary, got %q", resp.OutputText)
+	}
+	if !planner.called {
+		t.Fatal("expected upstream planner to be called to generate summary")
+	}
+
+	// Also verify direct call to shouldYieldResponsesSubturn suppresses yield even if tool calls are present.
+	msgs := []agent.Message{
+		{Role: agent.RoleUser, Content: strings.Repeat("W", 3000)},
+		{Role: agent.RoleAssistant, Content: SubturnYieldMessage},
+	}
+	for i := 0; i < 5; i++ {
+		msgs = append(msgs, agent.Message{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{
+				{ID: "c" + itoa(uint64(i)), Function: agent.Func{Name: "fn", Arguments: "{}"}},
+			},
+		})
+	}
+	// Here the last assistant messages are tool calls, not SubturnYieldMessage.
+	// But if the last assistant message is SubturnYieldMessage (e.g. client sent next user turn or no user turn):
+	msgsAfterYield := []agent.Message{
+		{Role: agent.RoleUser, Content: strings.Repeat("W", 3000)},
+		{Role: agent.RoleAssistant, Content: SubturnYieldMessage},
+		{Role: agent.RoleUser, Content: "summarize"},
+	}
+	shouldYield, _, _ := shouldYieldResponsesSubturn(msgsAfterYield, nil, nil)
+	if shouldYield {
+		t.Fatal("expected shouldYieldResponsesSubturn to return false when preceding assistant message was SubturnYieldMessage")
+	}
+}
