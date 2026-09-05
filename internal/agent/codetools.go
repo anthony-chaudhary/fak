@@ -93,11 +93,12 @@ func armCodeTools(root string, focused bool) ([]ToolDef, error) {
 
 // CodeToolsOptions configures coding tools and skills arming.
 type CodeToolsOptions struct {
-	Root         string
-	Focused      bool
-	EnableSkills bool
-	SkillsDir    string
-	ExtraDirs    []string
+	Root                 string
+	Focused              bool
+	EnableSkills         bool
+	SkillsDir            string
+	ExtraDirs            []string
+	EnableContextControl bool
 }
 
 // ArmCodeToolsWithOptions arms coding tools with optional fine-grained skills control.
@@ -107,7 +108,18 @@ func ArmCodeToolsWithOptions(opts CodeToolsOptions) ([]ToolDef, error) {
 		extraDirs = append(extraDirs, opts.SkillsDir)
 	}
 	extraDirs = append(extraDirs, opts.ExtraDirs...)
-	return armCodeToolsFull(opts.Root, opts.Focused, opts.EnableSkills, extraDirs...)
+	defs, err := armCodeToolsFull(opts.Root, opts.Focused, opts.EnableSkills, extraDirs...)
+	if err != nil {
+		return nil, err
+	}
+	if opts.EnableContextControl {
+		ccDefs, err := ArmContextControl()
+		if err != nil {
+			return nil, err
+		}
+		defs = append(defs, ccDefs...)
+	}
+	return defs, nil
 }
 
 func armCodeToolsFull(root string, focused bool, enableSkills bool, extraDirs ...string) ([]ToolDef, error) {
@@ -138,6 +150,7 @@ func armCodeToolsFull(root string, focused bool, enableSkills bool, extraDirs ..
 func DisarmCodeTools() {
 	armedCodeTools.Store(nil)
 	armedSkills.Store(nil)
+	DisarmContextControl()
 }
 
 // CodeToolCatalog renders the coding tools as loop ToolDefs. Empty when unarmed, so
@@ -147,7 +160,7 @@ func CodeToolCatalog() []ToolDef {
 		return nil
 	}
 	defs := codetools.Catalog()
-	out := make([]ToolDef, 0, len(defs)+1)
+	out := make([]ToolDef, 0, len(defs)+2)
 	for _, d := range defs {
 		out = append(out, ToolDef{Type: "function", Function: ToolDefFunction{
 			Name:        d.Name,
@@ -157,6 +170,9 @@ func CodeToolCatalog() []ToolDef {
 	}
 	if reg := armedSkills.Load(); reg != nil {
 		out = append(out, reg.ToolDef())
+	}
+	if armedContextControl.Load() != nil {
+		out = append(out, ContextControlCatalog()...)
 	}
 	return out
 }
@@ -175,6 +191,11 @@ func codeToolMeta(tool string) map[string]string {
 			"idempotentHint": "true",
 		}
 	}
+	if tool == ToolContextControl {
+		if m, ok := contextControlMeta(tool); ok {
+			return m
+		}
+	}
 	for _, d := range codetools.Catalog() {
 		if d.Name == tool {
 			return codetools.CallMeta(tool, "")
@@ -189,12 +210,15 @@ func codeToolAllow() []string {
 	if armedCodeTools.Load() == nil {
 		return nil
 	}
-	names := make([]string, 0, len(codetools.Catalog())+1)
+	names := make([]string, 0, len(codetools.Catalog())+2)
 	for _, d := range codetools.Catalog() {
 		names = append(names, d.Name)
 	}
 	if armedSkills.Load() != nil {
 		names = append(names, ToolSkill)
+	}
+	if armedContextControl.Load() != nil {
+		names = append(names, ToolContextControl)
 	}
 	return names
 }

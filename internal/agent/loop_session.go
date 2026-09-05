@@ -219,6 +219,7 @@ type runConfig struct {
 	conversation []Message
 	toolCatalog  []ToolDef
 	todoTools    bool
+	contextControl bool
 	systemPrompt string
 	memoryDigest string
 	// modelRequestObserver runs synchronously after directive splicing and the
