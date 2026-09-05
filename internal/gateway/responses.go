@@ -308,7 +308,14 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if shouldYield, estTokens, toolCalls := shouldYieldResponsesSubturn(messages, tools, req.Input); shouldYield {
+	// Microcontext tool result elision: elide large, older tool outputs
+	messages = s.maybeElideResponsesToolResults(reqTrace, messages)
+
+	var subturnRawInput json.RawMessage
+	if len(messages) == 0 {
+		subturnRawInput = req.Input
+	}
+	if shouldYield, estTokens, toolCalls := shouldYieldResponsesSubturn(messages, tools, subturnRawInput); shouldYield {
 		if s.logf != nil {
 			s.logf("gateway: responses sub-turn yield valve activated: est_tokens=%d tool_calls=%d trace_id=%s", estTokens, toolCalls, reqTrace)
 		}
@@ -320,6 +327,13 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, resp)
 		}
 		return
+	}
+
+	// Clear ReasoningContent on historical assistant messages to prevent re-marshaling
+	for i := 0; i < len(messages); i++ {
+		if messages[i].Role == agent.RoleAssistant {
+			messages[i].ReasoningContent = ""
+		}
 	}
 
 	// Hoisted so the #5212 denial-recovery sample re-samples under the SAME sampling
@@ -523,13 +537,16 @@ func decodeResponsesInput(raw json.RawMessage, instructions string) ([]agent.Mes
 		for _, it := range items {
 			switch it.Type {
 			case "message", "": // a bare item with a role+content is a message
-				if it.Role == "" {
+				if it.Role == "" || len(it.Content) == 0 {
 					continue
 				}
 				msgs = append(msgs, agent.Message{
 					Role:    responsesRole(it.Role),
-					Content: responsesContentText(it.Content),
+					Content: responsesContentText(it.Content, it.Role),
 				})
+			case "reasoning", "thought":
+				// Ephemeral chain-of-thought tokens: explicitly drop from conversation history.
+				continue
 			case "function_call":
 				// An assistant tool call the client is echoing back into context.
 				id := it.CallID
@@ -655,40 +672,80 @@ func decodeResponsesFunctionCallOutput(raw json.RawMessage) (string, error) {
 // The chat wire's agent.contentPartText does NOT recognize the Responses-specific
 // `input_text`/`output_text` part types, so this wire needs its own part flattener
 // or user/assistant content silently drops.
-func responsesContentText(raw json.RawMessage) string {
+func responsesContentText(raw json.RawMessage, role ...string) string {
 	b := trimLeadingWS(raw)
 	if len(b) == 0 {
 		return ""
 	}
+	var text string
 	if b[0] == '"' {
 		var s string
 		if err := json.Unmarshal(raw, &s); err == nil {
-			return s
+			text = s
 		}
-		return ""
-	}
-	if b[0] != '[' {
-		return ""
-	}
-	var parts []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(raw, &parts); err != nil {
-		return ""
-	}
-	out := make([]byte, 0, 64)
-	for _, p := range parts {
-		// input_text / output_text / text all carry the human-readable text in `text`.
-		if p.Text == "" {
-			continue
+	} else if b[0] == '[' {
+		var parts []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
 		}
-		if len(out) > 0 {
-			out = append(out, '\n')
+		if err := json.Unmarshal(raw, &parts); err == nil {
+			out := make([]byte, 0, 64)
+			for _, p := range parts {
+				// input_text / output_text / text all carry the human-readable text in `text`.
+				if p.Text == "" {
+					continue
+				}
+				if len(out) > 0 {
+					out = append(out, '\n')
+				}
+				out = append(out, p.Text...)
+			}
+			text = string(out)
 		}
-		out = append(out, p.Text...)
 	}
-	return string(out)
+	if len(role) > 0 && responsesRole(role[0]) == agent.RoleAssistant {
+		text = stripReasoningTags(text)
+	}
+	return text
+}
+
+func stripReasoningTags(s string) string {
+	s = agent.StripReasoning(s)
+	s = stripTagBlock(s, "<thought>", "</thought>")
+	return strings.TrimSpace(s)
+}
+
+func stripTagBlock(s, openTag, closeTag string) string {
+	lower := strings.ToLower(s)
+	openLen := len(openTag)
+	closeLen := len(closeTag)
+	if !strings.Contains(lower, openTag) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for {
+		open := strings.Index(lower, openTag)
+		if open < 0 {
+			b.WriteString(s)
+			break
+		}
+		b.WriteString(s[:open])
+		rest := lower[open+openLen:]
+		closeIdx := strings.Index(rest, closeTag)
+		if closeIdx < 0 {
+			// unclosed tag: drop to end of string
+			break
+		}
+		consumed := open + openLen + closeIdx + closeLen
+		s = s[consumed:]
+		lower = lower[consumed:]
+	}
+	res := b.String()
+	for strings.Contains(res, "\n\n\n") {
+		res = strings.ReplaceAll(res, "\n\n\n", "\n\n")
+	}
+	return strings.TrimSpace(res)
 }
 
 // responsesRole maps a Responses message role to the gateway's internal role. The
@@ -842,7 +899,8 @@ func responsesStatusFor(finishReason string) string {
 
 // writeResponsesStream synthesizes a well-formed Responses SSE stream from a
 // buffered response, matching the request's stream flag. It emits the sequence:
-// response.created → response.output_item.added (per item) → response.output_item.done
+// response.created → response.output_item.added (per item) →
+// response.output_text.delta/done (for message items) → response.output_item.done
 // (per item) → response.completed. This is the synthesized-stream analogue of
 // writeChatCompletionStream: the gateway buffers the entire turn, adjudicates the
 // proposed tool calls, then re-serializes the adjudicated turn as SSE.
@@ -892,6 +950,43 @@ func (s *Server) writeResponsesStream(w http.ResponseWriter, resp responsesRespo
 			Item:           item,
 		})
 		nextSeq++
+
+		if item.Type == "message" {
+			type outputTextDeltaEvent struct {
+				Type           string `json:"type"`
+				SequenceNumber int    `json:"sequence_number"`
+				OutputIndex    int    `json:"output_index"`
+				ContentIndex   int    `json:"content_index"`
+				Delta          string `json:"delta"`
+			}
+			type outputTextDoneEvent struct {
+				Type           string `json:"type"`
+				SequenceNumber int    `json:"sequence_number"`
+				OutputIndex    int    `json:"output_index"`
+				ContentIndex   int    `json:"content_index"`
+				Text           string `json:"text"`
+			}
+			for cIdx, part := range item.Content {
+				if part.Type == "output_text" && part.Text != "" {
+					_ = writeSSEEvent(w, "response.output_text.delta", outputTextDeltaEvent{
+						Type:           "response.output_text.delta",
+						SequenceNumber: nextSeq,
+						OutputIndex:    i,
+						ContentIndex:   cIdx,
+						Delta:          part.Text,
+					})
+					nextSeq++
+					_ = writeSSEEvent(w, "response.output_text.done", outputTextDoneEvent{
+						Type:           "response.output_text.done",
+						SequenceNumber: nextSeq,
+						OutputIndex:    i,
+						ContentIndex:   cIdx,
+						Text:           part.Text,
+					})
+					nextSeq++
+				}
+			}
+		}
 
 		// response.output_item.done
 		_ = writeSSEEvent(w, "response.output_item.done", outputItemEvent{

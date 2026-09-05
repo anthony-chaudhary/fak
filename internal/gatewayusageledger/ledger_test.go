@@ -338,3 +338,36 @@ not json at all
 		t.Fatalf("expected 2 valid rows out of 5 lines, got %d: %+v", len(rows), rows)
 	}
 }
+
+func TestCompactionRestoredTurnsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	ledgerPath := filepath.Join(dir, "gateway-usage.jsonl")
+
+	row := NewRow("exit", "guard", "claude", "", time.Minute, nil, Counters{
+		CompactionDroppedTurns:  10,
+		CompactionRestoredTurns: 5,
+	}, time.Unix(1000, 0))
+	if err := Append(ledgerPath, row); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	rows := ReadLedgerFile(ledgerPath)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	got := rows[0].Counters
+	if got.CompactionDroppedTurns != 10 {
+		t.Fatalf("CompactionDroppedTurns = %d, want 10", got.CompactionDroppedTurns)
+	}
+	if got.CompactionRestoredTurns != 5 {
+		t.Fatalf("CompactionRestoredTurns = %d, want 5", got.CompactionRestoredTurns)
+	}
+
+	raw, err := os.ReadFile(ledgerPath)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	if !strings.Contains(string(raw), `"compaction_restored_turns":5`) {
+		t.Fatalf("serialized row missing compaction_restored_turns: %s", raw)
+	}
+}

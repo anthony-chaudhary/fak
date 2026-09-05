@@ -1,6 +1,8 @@
 package roofline
 
 import (
+	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -281,5 +283,182 @@ func repoRoot() (string, bool) {
 			return "", false
 		}
 		dir = parent
+	}
+}
+
+// --- benchmarks -------------------------------------------------------------
+
+var (
+	benchSinkRows     []Row
+	benchSinkString   string
+	benchSinkArtifact Artifact
+	benchSinkLanes    []Lane
+)
+
+func sampleBenchmarkArtifacts(n int) []Artifact {
+	arts := make([]Artifact, 0, n)
+	for i := 0; i < n; i++ {
+		switch i % 4 {
+		case 0:
+			arts = append(arts, Artifact{
+				RunID:     fmt.Sprintf("run-decode-%03d", i),
+				MachineID: "server-3",
+				Real753B:  true,
+				Meas: []Measurement{
+					{Kind: KindDecodeSingle, TokS: 20.0 + float64(i%10), Witness: "-sm layer, batch=1"},
+				},
+			})
+		case 1:
+			arts = append(arts, Artifact{
+				RunID:     fmt.Sprintf("run-agg-%03d", i),
+				MachineID: "server-3",
+				Real753B:  true,
+				Meas: []Measurement{
+					{Kind: KindAggregate, TokS: 10000.0 + float64(i*50), Witness: "concurrency 64"},
+				},
+			})
+		case 2:
+			arts = append(arts, Artifact{
+				RunID:     fmt.Sprintf("run-synth-%03d", i),
+				MachineID: "server-3",
+				Synthetic: true,
+				Meas: []Measurement{
+					{Kind: KindPrefill, TokS: 500.0 + float64(i), Witness: "synthetic"},
+				},
+			})
+		case 3:
+			arts = append(arts, Artifact{
+				RunID:     fmt.Sprintf("run-wedge-%03d", i),
+				MachineID: "server-2",
+				Real753B:  true,
+				Failed:    true,
+				FailNote:  "host RAM allocation failed",
+			})
+		}
+	}
+	return arts
+}
+
+// BenchmarkFoldRoofline measures the throughput of folding run artifacts against
+// canonical drive lanes, scaling across small, medium, and large artifact pools.
+func BenchmarkFoldRoofline(b *testing.B) {
+	lanes := Lanes()
+	for _, size := range []int{4, 20, 100} {
+		b.Run(fmt.Sprintf("artifacts_%d", size), func(b *testing.B) {
+			arts := sampleBenchmarkArtifacts(size)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchSinkRows = Fold(lanes, arts)
+			}
+		})
+	}
+}
+
+// BenchmarkRenderDashboard measures rendering the folded roofline dashboard
+// to markdown, including lanes table, synthetic witnesses, and failure notes.
+func BenchmarkRenderDashboard(b *testing.B) {
+	lanes := Lanes()
+	arts := sampleBenchmarkArtifacts(16)
+	d := Dashboard{
+		CeilingDoc:      CeilingDocRel,
+		CeilingDocTitle: "GLM-5.2 GPU-server roofline dashboard: current vs 80%-target vs ceiling, one row per lane",
+		Rows:            Fold(lanes, arts),
+		GLMArtifacts:    len(arts),
+	}
+	for _, a := range arts {
+		switch {
+		case a.Synthetic:
+			d.Synthetic = append(d.Synthetic, a)
+		case a.Failed:
+			d.FailedReal = append(d.FailedReal, a)
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchSinkString = d.Markdown()
+	}
+}
+
+// BenchmarkNormalizeArtifact measures raw JSON result normalization across
+// the three production schemas: verdict A/B, context curve, and engine wedge.
+func BenchmarkNormalizeArtifact(b *testing.B) {
+	verdictRaw := []byte(`{
+		"run_id":"a100-glm52-l1-rowsplit-ab-TEST","machine_id":"a100","timestamp":"2026-07-09T23:42:40Z",
+		"summary":"Real 753B GLM-5.2 decode","scope":"REAL-753B;UD-Q4_K_M",
+		"verdict":{"winner":"layer","decode_toks_layer":23.38,"decode_toks_row":7.129}
+	}`)
+	var verdictMap map[string]any
+	if err := json.Unmarshal(verdictRaw, &verdictMap); err != nil {
+		b.Fatalf("unmarshal verdict JSON: %v", err)
+	}
+
+	curveRaw := []byte(`{
+		"run_id":"a100-glm52-dsa-decode-TEST","machine_id":"a100","timestamp":"2026-07-09T23:36:30Z",
+		"summary":"Synthetic GLM-5.2-shaped (glm_moe_dsa), NOT-the-753B","scope":"synthetic-weights;NOT-the-753B",
+		"curve":[
+			{"prompt_len":128,"status":"collected","decode_tok_s":26.61,"prefill_tok_s":35.87},
+			{"prompt_len":512,"status":"collected","decode_tok_s":20.9,"prefill_tok_s":24.74},
+			{"prompt_len":2048,"status":"aborted"}
+		]
+	}`)
+	var curveMap map[string]any
+	if err := json.Unmarshal(curveRaw, &curveMap); err != nil {
+		b.Fatalf("unmarshal curve JSON: %v", err)
+	}
+
+	wedgeRaw := []byte(`{
+		"schema":"fak.cpu-serve-bench.v1","machine_id":"cpu-server-a","model":"GLM-5.2-UD-Q4_K_M",
+		"ok":false,"headline":"NO usable throughput tok/s obtained. fak-native CPU serve WEDGED on host RAM.",
+		"engines":{"fak-native":{"ok":false,"decode_tok_per_sec":null}}
+	}`)
+	var wedgeMap map[string]any
+	if err := json.Unmarshal(wedgeRaw, &wedgeMap); err != nil {
+		b.Fatalf("unmarshal wedge JSON: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		raw  []byte
+		m    map[string]any
+		rel  string
+	}{
+		{"verdict_ab", verdictRaw, verdictMap, "experiments/benchmark/runs/by-machine/a100/l1ab/result.json"},
+		{"context_curve", curveRaw, curveMap, "experiments/benchmark/runs/by-machine/a100/dsa/result.json"},
+		{"engine_wedge", wedgeRaw, wedgeMap, "experiments/benchmark/runs/by-machine/cpu-server-a/wedge/result.json"},
+	}
+
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			raw := tc.raw
+			m := tc.m
+			rel := tc.rel
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchSinkArtifact = normalize(m, raw, rel)
+			}
+		})
+	}
+}
+
+// BenchmarkFrontMatterTitle measures front-matter title extraction speed on doc headers.
+func BenchmarkFrontMatterTitle(b *testing.B) {
+	doc := "---\ntitle: \"GLM-5.2 GPU-server roofline dashboard: current vs 80%-target vs ceiling, one row per lane\"\ndescription: \"A deterministic fold of run artifacts\"\n---\n# Roofline Dashboard\n"
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchSinkString = frontMatterTitle(doc)
+	}
+}
+
+// BenchmarkLanes measures canonical drive lane construction and roofline ceiling allocation.
+func BenchmarkLanes(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchSinkLanes = Lanes()
 	}
 }

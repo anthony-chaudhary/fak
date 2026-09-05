@@ -28,15 +28,16 @@ detached workers this session can't see.
 The launchers leave durable markers; read them, don't guess:
 
 ```bash
-python tools/dispatch_status.py --md | head -50    # live vs cap, throughput, CLOSURE HONESTY, orphan cross-check
+fak dispatch status --json                           # live vs cap, throughput, CLOSURE HONESTY, orphan cross-check
+fak dispatch closure-audit --workspace . --json      # closure rate vs claimed closed audit
 ```
 
-- `.goal-runs/*.pid` / `*.out.log` — one per detached `/goal` worker (`launch_wave_detached.ps1`).
-- `.dispatch-runs/inflight-*` — one per in-repo wave worker (`issue_dispatch.py --wave`);
+- `.goal-runs/*.pid` / `*.out.log` — one per detached worker.
+- `.dispatch-runs/inflight-*` — one per in-repo wave worker (`fak dispatch wave`);
   each names the lane it took.
 
 Build the work-list: for each marker, the `{pid, lane, leaf/issue}` it was launched
-on. `dispatch_status.py`'s **closure-honesty** block is the headline — a low
+on. `fak dispatch status`'s **closure-honesty** block is the headline — a low
 `closure_rate` with a high `CLAIMED_CLOSED` count is exactly the drift this pass exists
 to catch.
 
@@ -67,7 +68,7 @@ Classify each leaf into one of four buckets:
 ## Step 2 — Stop the spinners (net-gain, not motion)
 
 A detached worker that is still live but producing no witnessed net gain is burning an
-account. Judge by witnessed work, not log volume — the `dispatch_status.py` cross-check
+account. Judge by witnessed work, not log volume — the `fak dispatch status` cross-check
 flags orphan processes and dead-but-live workers:
 
 - A worker whose leaf is VERIFIED and whose lane is clean has finished — if it is still

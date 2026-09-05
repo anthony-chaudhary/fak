@@ -68,6 +68,7 @@ type compactionSnapshot struct {
 	attempts            map[string]uint64
 	bailReasons         map[string]uint64
 	dropped             uint64
+	restored            uint64
 	shed                uint64
 	cacheReads          uint64
 	lastCacheRd         float64
@@ -192,6 +193,7 @@ func (m *gatewayMetrics) compactionSnapshotData() compactionSnapshot {
 		ttlUpgrades:         ttlUpgrades,
 		placementAttempts:   placementAttempts,
 		dropped:             m.compactDropped,
+		restored:            m.compactRestored,
 		shed:                m.compactShed,
 		cacheReads:          m.compactCacheReads,
 		lastCacheRd:         m.compactLastCacheRd,

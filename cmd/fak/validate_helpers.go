@@ -249,7 +249,7 @@ func validateWriterIsTerminal(w io.Writer) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-func validatePhaseOrder(testOnly, auditSelection bool) []string {
+func validatePhaseOrder(testOnly, auditSelection, smoke bool) []string {
 	phases := []string{"resolve_root", "resolve_ref", "wsl_preflight", "normalize_mine", "extract_tip", "base_graph", "overlay"}
 	if !testOnly {
 		phases = append(phases, "gofmt")
@@ -261,6 +261,9 @@ func validatePhaseOrder(testOnly, auditSelection bool) []string {
 	phases = append(phases, "test")
 	if auditSelection {
 		phases = append(phases, "test_audit_full")
+	}
+	if smoke {
+		phases = append(phases, "smoke")
 	}
 	return phases
 }

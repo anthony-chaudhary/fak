@@ -290,30 +290,164 @@ def parse_existing_draft(text: str) -> dict[str, list[str]]:
     return sections
 
 
+RELEASE_DOMAINS: list[tuple[str, set[str], int]] = [
+    (
+        "Security & Governance",
+        {
+            "guard", "policy", "security", "ifc", "audit", "receipt",
+            "taint", "adjudicator", "capability", "capabilitymatrix",
+            "refusal", "vault", "logvault", "perm", "declassify", "airgap",
+            "scrub", "guardvars", "guardrotate", "genlock", "headlesslint",
+        },
+        50,
+    ),
+    (
+        "Autonomous Agent & Multi-Model Harness",
+        {
+            "agent", "agents", "harness", "astra", "codex", "claude", "gemini",
+            "subagent", "goal", "goalsync", "goalpark", "traj", "trajectory",
+            "trajhook", "session", "sessionrecovery", "sessionsignals",
+            "recall", "memory", "blackboard", "skill", "skills",
+            "skillfootprint", "researcharm", "harnesswarm", "observer",
+            "turntaxmeter", "callavoid", "stepbatoncapture", "orchestration",
+        },
+        40,
+    ),
+    (
+        "Serving Engine, Gateway & Kernel Acceleration",
+        {
+            "serve", "gateway", "engine", "model", "modelreg", "qwen",
+            "cuda", "metal", "metalgemm", "gguf", "ggufload", "mlx",
+            "numa", "ctxmmu", "ctxplan", "rehydrate", "rac", "batch",
+            "vdso", "syspromptmmu", "macobs", "macbench", "capindexgw",
+            "livecodebench", "compute", "blob", "maputil", "walkfiles",
+        },
+        30,
+    ),
+    (
+        "Shared Trunk & Workspace Lifecycle",
+        {
+            "sync", "safesync", "worktree", "workerworktree", "lease",
+            "leaseref", "lock", "releaselock", "dispatch", "dispatchworker",
+            "issueorchestrator", "cohort", "steer", "steerpr", "tree",
+            "commit", "safecommit", "shipgate", "stopgate", "dos",
+            "workspace",
+        },
+        20,
+    ),
+    (
+        "Developer Platform, Tooling & Evidence",
+        {
+            "tools", "codetools", "cmd", "bench", "test", "ci", "docs",
+            "dev", "devindex", "hooks", "architest", "witness", "quality",
+            "scorecard", "maturity", "brittleness", "rsiloop", "systools",
+        },
+        10,
+    ),
+]
+
+
+def classify_commit_domain(clean: str, scopes: list[str]) -> tuple[str, int]:
+    scopes_lower = {s.lower().strip() for s in scopes if s}
+    clean_lower = clean.lower()
+    for name, keywords, weight in RELEASE_DOMAINS:
+        if any(k in scopes_lower for k in keywords):
+            return name, weight
+        if any(re.search(r"\b" + re.escape(k) + r"\b", clean_lower) for k in keywords):
+            return name, weight
+    return "Developer Platform, Tooling & Evidence", 10
+
+
+def score_commit_importance(clean: str, count: int, scopes: list[str], has_breaking: bool = False) -> int:
+    score = 0
+    if has_breaking or "breaking" in clean.lower():
+        score += 100
+    _, domain_weight = classify_commit_domain(clean, scopes)
+    score += domain_weight
+    if re.search(r"#[0-9]+|\bcloses\b", clean, re.IGNORECASE):
+        score += 15
+    score += min(count * 5, 20)
+    score += min(len(scopes) * 5, 25)
+    first_word = clean.split()[0].rstrip(".:") if clean.split() else ""
+    if first_word in {
+        "Implement", "Enforce", "Eliminate", "Prevent", "Optimize", "Accelerate",
+        "Disambiguate", "Support", "Add", "Protect", "Isolate", "Require",
+    }:
+        score += 10
+    return score
+
+
 def _process_section_commits(section_commits: list[dict]) -> tuple[list[str], set[str]]:
     groups: dict[str, dict] = {}
     for c in section_commits:
         subj = str(c.get("subject", ""))
+        body = str(c.get("body", ""))
         scope = extract_commit_scope(subj)
         clean = clean_public_subject(subj).rstrip(".")
         if not clean:
             continue
         if is_pure_merge_commit(subj, scope, clean):
             continue
+        has_breaking = bool(
+            "BREAKING CHANGE" in body
+            or "BREAKING CHANGE" in subj
+            or ("!" in subj.partition(":")[0])
+        )
         if clean not in groups:
-            groups[clean] = {"count": 0, "scopes": []}
+            groups[clean] = {"count": 0, "scopes": [], "has_breaking": False}
         groups[clean]["count"] += 1
+        if has_breaking:
+            groups[clean]["has_breaking"] = True
         if scope and scope not in groups[clean]["scopes"]:
             groups[clean]["scopes"].append(scope)
 
-    bullets: list[str] = []
+    if not groups:
+        return [], set()
+
+    items: list[dict] = []
     seen: set[str] = set()
     for clean, data in groups.items():
         bullet = format_consolidated_bullet(clean, data["count"], data["scopes"])
-        if bullet not in seen:
-            seen.add(bullet)
-            bullets.append(bullet)
-    return bullets, set(groups.keys())
+        if bullet in seen:
+            continue
+        seen.add(bullet)
+        domain, _ = classify_commit_domain(clean, data["scopes"])
+        importance = score_commit_importance(clean, data["count"], data["scopes"], data["has_breaking"])
+        items.append({
+            "clean": clean,
+            "bullet": bullet,
+            "domain": domain,
+            "importance": importance,
+        })
+
+    unique_domains = {it["domain"] for it in items}
+
+    # If small number of items or single domain, sort strictly by importance without domain subheadings
+    if len(items) <= 3 or len(unique_domains) <= 1:
+        sorted_items = sorted(items, key=lambda x: (-x["importance"], x["clean"].lower()))
+        return [it["bullet"] for it in sorted_items], set(groups.keys())
+
+    domain_buckets: dict[str, list[dict]] = {name: [] for name, _, _ in RELEASE_DOMAINS}
+    for it in items:
+        dom = it["domain"]
+        if dom not in domain_buckets:
+            domain_buckets[dom] = []
+        domain_buckets[dom].append(it)
+
+    lines: list[str] = []
+    for name, _, _ in RELEASE_DOMAINS:
+        dom_items = domain_buckets.get(name) or []
+        if not dom_items:
+            continue
+        sorted_dom = sorted(dom_items, key=lambda x: (-x["importance"], x["clean"].lower()))
+        lines.append(f"### {name}")
+        for it in sorted_dom:
+            lines.append(it["bullet"])
+        lines.append("")
+
+    while lines and not lines[-1]:
+        lines.pop()
+    return lines, set(groups.keys())
 
 
 def render_next_draft(state: dict, existing_sections: dict[str, list[str]] | None = None) -> str:
@@ -342,10 +476,10 @@ def render_next_draft(state: dict, existing_sections: dict[str, list[str]] | Non
 
     def merge_existing(bullets: list[str], cleans: set[str], existing: list[str]) -> list[str]:
         out = list(bullets)
-        seen = {b.lstrip("- ").strip() for b in bullets}
+        seen = {b.lstrip("- ").strip() for b in bullets if b.startswith("- ")}
         for raw_item in existing:
             item = raw_item.strip()
-            if not item or item.startswith("*(No "):
+            if not item or item.startswith("*(No ") or item.startswith("### "):
                 continue
             item_text = item[2:].strip() if item.startswith("- ") else item
             base = re.sub(r"\s+\([^)]*\)\.?$", "", item_text)
@@ -378,28 +512,26 @@ def render_next_draft(state: dict, existing_sections: dict[str, list[str]] | Non
         "## What changed",
         "",
     ]
-    if feat_items:
-        for item in feat_items:
-            lines.append(item if item.startswith("- ") else f"- {item}")
-    else:
-        lines.append("- *(No new user-visible features landed yet)*")
-    lines.append("")
+    def append_section_lines(items: list[str], placeholder: str) -> None:
+        if items:
+            for item in items:
+                if item.startswith("### ") or not item.strip():
+                    lines.append(item)
+                elif item.startswith("- "):
+                    lines.append(item)
+                else:
+                    lines.append(f"- {item}")
+        else:
+            lines.append(f"- {placeholder}")
+        lines.append("")
+
+    append_section_lines(feat_items, "*(No new user-visible features landed yet)*")
 
     lines.extend(["## Reliability and correctness", ""])
-    if fix_items:
-        for item in fix_items:
-            lines.append(item if item.startswith("- ") else f"- {item}")
-    else:
-        lines.append("- *(No bug fixes landed yet)*")
-    lines.append("")
+    append_section_lines(fix_items, "*(No bug fixes landed yet)*")
 
     lines.extend(["## Engineering quality and evidence", ""])
-    if other_items:
-        for item in other_items:
-            lines.append(item if item.startswith("- ") else f"- {item}")
-    else:
-        lines.append("- *(No maintenance/quality commits landed yet)*")
-    lines.append("")
+    append_section_lines(other_items, "*(No maintenance/quality commits landed yet)*")
 
     upgrade_items = existing_sections.get("Upgrade and breaking changes", []) if existing_sections else []
     lines.extend(["## Upgrade and breaking changes", ""])

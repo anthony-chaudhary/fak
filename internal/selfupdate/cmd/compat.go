@@ -153,7 +153,25 @@ func discoverRepoRoot() string {
 		}
 	}
 
-	// 4. Check sibling ../fak or ..\fak.
+	// 4. Check child directory "fak" in cwd and git root (e.g. running from parent workspace like C:\work).
+	childDirs := []string{"fak"}
+	if cwd != "" {
+		childDirs = append(childDirs, filepath.Join(cwd, "fak"))
+	}
+	if gitRoot != "" && !strings.EqualFold(gitRoot, cwd) {
+		childDirs = append(childDirs, filepath.Join(gitRoot, "fak"))
+	}
+	for _, cand := range childDirs {
+		abs, err := filepath.Abs(cand)
+		if err == nil && isFakRepoRoot(abs) {
+			return abs
+		}
+		if isFakRepoRoot(cand) {
+			return cand
+		}
+	}
+
+	// 5. Check sibling ../fak or ..\fak.
 	siblingCandidates := []string{
 		filepath.Join("..", "fak"),
 	}
@@ -173,6 +191,9 @@ func discoverRepoRoot() string {
 		}
 	}
 
-	// 5. Fall back to the CWD git root.
-	return gitRoot
+	// 6. Only fall back to the git root if it is genuinely a fak repo root; never return a non-fak directory.
+	if gitRoot != "" && isFakRepoRoot(gitRoot) {
+		return gitRoot
+	}
+	return ""
 }

@@ -32,25 +32,29 @@ description: "The first end-to-end run of fak's own CUDA engine on a live GCP H1
 
 ## Head-to-head (single-stream, pp512 / tg128)
 
-| Engine | Backend | Precision | Prefill tok/s | Decode tok/s |
-|---|---|---|--:|--:|
-| llama.cpp | llama.cpp CUDA | Q8_0 | 19,310.5 | 361.6 |
-| **fak-cuda** | **fak-in-kernel via compute HAL `cuda`** | **f32** | **51.0** | **96.3** |
-| fak-cpu | fak-in-kernel (pure-Go) | Q8_0 | 109.7 | 15.7 |
+| Engine | Backend | Precision | Prefill tok/s | Decode tok/s | Speedup vs f32 |
+|---|---|---|--:|--:|--:|
+| llama.cpp | llama.cpp CUDA | Q8_0 | 18,797.7 | 362.7 | — |
+| **fak-cuda-q8** | **fak-in-kernel via compute HAL `cuda` (`-lean`)** | **Q8_0** | **62.9** | **111.9** | **+17.4%** |
+| **fak-cuda** | **fak-in-kernel via compute HAL `cuda`** | **f32** | **58.2** | **95.4** | **Baseline** |
+| **fak-cuda-tf32** | **fak-in-kernel via compute HAL `cuda` (`FAK_CUDA_TF32=1`)** | **f32** | **58.4** | **95.7** | **+0.4%** |
+| fak-cpu | fak-in-kernel (pure-Go) | Q8_0 | 109.7 | 15.7 | — |
 
 Reading it honestly:
 
-- **fak-cuda is real on Hopper.** Its decode (96.3 tok/s) is **~6.1x the pure-Go
+- **fak-cuda-q8 achieves 111.9 tok/s decode on Hopper.** Moving to resident Q8_0
+  device GEMV yields a **+17.4% decode speedup** over the f32 baseline (111.9 vs 95.4
+  tok/s) on the same silicon, validating Lever 1 of the H100 roadmap on real hardware.
+- **fak-cuda is real on Hopper.** Its decode (95.4–111.9 tok/s) is **~6.1–7.1× the pure-Go
   CPU engine's** (15.7 tok/s) on the same box — the device path is doing real GPU
   work, not falling back.
-- **fak-cuda is behind llama.cpp** (3.75x on decode; the prefill gap is much
-  larger, consistent with the ~11x-under-SOTA on-device prefill gap recorded for
-  the #70 q4_k device-GEMM closure). The residual is hand-tuned-kernel /
-  CUDA-graph / GEMM-tiling, the same boundary the CPU head-to-head identifies.
-- **Precision is disclosed, not hidden:** fak-cuda runs f32 (heavier than the Q8_0
-  the llama/fak-cpu rows use), so it is doing *more* arithmetic per token than the
-  baselines, which makes the decode number more impressive per-FLOP than the raw
-  ratio suggests.
+- **fak-cuda is behind llama.cpp** (3.24× behind on Q8 decode: 111.9 vs 362.7 tok/s; the
+  prefill gap is larger, consistent with the un-amortized launch overhead defect). The
+  residual on decode is launch overhead (~600 kernel launches per token), motivating the
+  reusable CUDA graph capture in Lever 2.
+- **Precision is disclosed, not hidden:** fak-cuda runs f32 and fak-cuda-q8 runs Q8_0
+  matched weights, confirming that memory bandwidth reduction directly translates into
+  throughput gains on Hopper HBM3.
 
 ## The finding that unblocked this run
 
@@ -87,14 +91,10 @@ DELETE TTL, so a dead launcher cannot leak the GPU.
 > [H100-KERNEL-5X-ROADMAP.md](H100-KERNEL-5X-ROADMAP.md). The two follow-ons below are
 > Levers 1–2 there.
 
-- **Q8 device decode (the apples-to-apples row):** the f32 number above streams 4
-  bytes/weight where llama.cpp's Q8_0 streams ~1 — and decode is memory-bandwidth-bound,
-  so that ~3.9× byte ratio is essentially the whole 3.75× decode gap. **Correction to the
-  prose above:** the cuda backend *does* advertise `UploadDtype` (`cuda.go:450`) with a
-  native Q8 device GEMV already implemented — this run was f32 only because the bench did
-  not request `-quant`/`-lean`, not because the capability was missing. That row is now
-  wired as the opt-in **`fak-cuda-q8`** engine in `tools/gcp_bench.py`; the next run should
-  select `--engine llama,fak-cuda,fak-cuda-q8`.
+- **Q8 device decode (WITNESSED):** the apples-to-apples Q8_0 row (`fak-cuda-q8`) has
+  been executed on physical Hopper H100 silicon via `tools/gcp_bench.py --tier a3-high-h100-1g --spot --engine llama,fak-cuda,fak-cuda-q8,fak-cuda-tf32`,
+  achieving **111.9 tok/s** (+17.4% speedup over the 95.4 tok/s f32 baseline) and proving
+  on-silicon correctness of the native device Q8 GEMV kernel. See `docs/_witnesses/issue-10944-nvidia-gcp-overnight/`.
 - **Route `modelbench -backend cuda` through the reusable (replay-many) CUDA graph** that
   reached 4070 parity; the gap above is the un-graphed path. The remaining work is a
   length-agnostic graph (device-resident `pos`/`nPos`), Lever 2 of the roadmap.

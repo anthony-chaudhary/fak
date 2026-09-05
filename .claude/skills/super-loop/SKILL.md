@@ -86,7 +86,8 @@ already doing the work.** So the first fact to settle is not "is it safe to spaw
 it is **"is anything already spawning?"** One cheap, pure-local read answers it:
 
 ```bash
-python tools/dispatch_status.py --fast   # watchdog fold: is FleetIssueDispatch installed + firing? + live-worker/throughput count
+fak dispatch status --json   # native Go status fold: live workers, throughput, and closure honesty
+# (Legacy fallback: python tools/dispatch_status.py --fast)
 ```
 
 Read the watchdog fold and the live-worker count, then branch. This is a **gate**,
@@ -195,8 +196,10 @@ The dispatchable surface is the `ready-leaves` / `p0-p1` views; the deterministi
 P2 150 · none 60; +300 orphan P0/P1, +40 bug, + idle-age):
 
 ```bash
-python tools/issue_lane_router.py --view p0-p1 --json      # prioritized leaves → lanes (fall through to ready-leaves)
-python tools/issue_triage.py --markdown --out docs/_audits/issue-triage-$(date +%F).md   # ranked, read-only
+fak dispatch order --json                                   # deterministic candidate ordering & cooldown math
+fak issue-orchestrator --top 10                             # top priority leaves and safe wave candidates
+fak console issues --state open --json > open-issues.json   # current open issues census
+# (Legacy fallback: python tools/issue_lane_router.py --view p0-p1 --json)
 ```
 
 Read the top N (default N = `--max-workers`) rows. These are the leaves the wave
@@ -357,6 +360,11 @@ super-loop commit.
 
 - **`/super-loop`** (this) — DETACHED, BULK, multi-account headless launch. Workers
   survive the session; you launch and walk away. Fuel = a `/goal` pointer.
+- **`/issue-queue`** — the ATOMIC, BOUNDED issue management and queuing pass. Resolves
+  1–3 issues with reproduction tests, package-scoped fences, and independent witnessing.
+  The issue counterpart of `/debt-clean`.
+- **`/issue-orchestrator`** — CAMPAIGN-SCALE multi-wave issue resolution. Partitions the
+  backlog into concurrent-safe waves and tracks milestone burndown.
 - **`/dos-dispatch-loop`** — an IN-SESSION dispatch⇄replan cadence on ONE lane, with
   a kernel-decided stop verdict. Use when you want to stay in the loop, not detach.
 - **`/dos-dispatch`** — a single lane, end to end, once. The unit `/super-loop`'s

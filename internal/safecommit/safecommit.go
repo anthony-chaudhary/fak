@@ -139,6 +139,20 @@ type Options struct {
 	// refuses CHECKER_TAMPERED on drift.
 	CheckerBaseline CheckerBaseline
 	Now             func() time.Time // optional test clock for lock-hold measurement
+
+	// SessionID is the acting session id. When empty, defaults to
+	// FAK_SESSION_ID or CLAUDE_CODE_SESSION_ID env var.
+	SessionID string
+	// SessionScope specifies the explicit paths/files claimed by this session.
+	SessionScope []string
+	// PeerWIP maps file paths to owning peer session IDs.
+	PeerWIP map[string]string
+	// PeerWIPChecker is an optional injectable checker for tests or custom attribution.
+	PeerWIPChecker func(path string) (peerSession string, isPeer bool)
+	// RestrictToSessionScope, when true, automatically filters expanded directory paths
+	// to only those within SessionScope instead of refusing. When false (default),
+	// sweeps of peer/unscoped paths under a directory pathspec are refused.
+	RestrictToSessionScope bool
 }
 
 type ReviewFunc func(context.Context, modelroute.ReviewRequest) (modelroute.ReviewResult, error)
@@ -231,6 +245,7 @@ type Result struct {
 	// reading that says which, and it is recorded on the maintenance decision note.
 	CoreLockWitnessCorrelation string                   `json:"core_lock_witness_correlation,omitempty"`
 	Review                     *modelroute.ReviewResult `json:"review,omitempty"`
+	PeerCollisions             []string                 `json:"peer_collisions,omitempty"`
 	// BuildCheck is what the COMMITTED_RED prospective-tree compile gate DID (#6006): passed,
 	// failed, or skipped — and, when skipped, whether the commit was admitted anyway. The gate
 	// runs in cmd/fak before the executor, so CommitWith never sets this; the caller attaches
@@ -347,6 +362,7 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		return res, gerr
 	} else {
 		res = r
+		paths = res.Paths
 	}
 
 	var recordPathspec bool
@@ -765,8 +781,44 @@ func precommitGates(ctx context.Context, run Runner, opts Options, trunk string,
 		statusOut = out
 	}
 
+	// (4a) Path attribution & directory sweep guard (#11232).
+	// When a pathspec is a directory (e.g. `internal/gateway`), git status matches hierarchically.
+	// Cross-reference changed paths with session scope / peer WIP: refuse if a peer's modified
+	// or untracked file sits under the directory pathspec, or restrict to session's explicit files.
+	if mode := peerWIPGuardMode(); mode != staleBaseOff {
+		attrOpts := PathAttributionOptions{
+			SessionID:              opts.SessionID,
+			SessionScope:           opts.SessionScope,
+			PeerWIP:                opts.PeerWIP,
+			PeerWIPChecker:         opts.PeerWIPChecker,
+			RestrictToSessionScope: opts.RestrictToSessionScope,
+		}
+		attrRes, aerr := checkPathAttributionFromStatus(ctx, run, opts.Dir, paths, statusOut, attrOpts)
+		if aerr != nil {
+			return res, false, aerr
+		}
+		if !attrRes.OK {
+			if mode == staleBaseWarn {
+				res.Detail = appendDetail(res.Detail, "PEER_WIP_COLLISION (warn): "+attrRes.Detail)
+			} else {
+				res.Reason = ReasonPeerWIPCollision
+				res.Detail = attrRes.Detail
+				res.PeerCollisions = attrRes.CollidingPaths
+				return res, true, nil
+			}
+		}
+		if len(attrRes.EffectivePaths) > 0 && opts.RestrictToSessionScope {
+			paths = attrRes.EffectivePaths
+			res.Paths = append([]string(nil), paths...)
+			res.PeerCollisions = attrRes.CollidingPaths
+		}
+	}
+
 	changedForCoreLock := statusChangedPaths(statusOut)
 	if len(changedForCoreLock) == 0 {
+		changedForCoreLock = paths
+	}
+	if len(paths) > 0 && opts.RestrictToSessionScope {
 		changedForCoreLock = paths
 	}
 	if f, ok := coreLockHardSelfFinding(changedForCoreLock); ok {

@@ -114,12 +114,10 @@ FAK_SRC = (ROOT / "fak") if (ROOT / "fak" / "go.mod").is_file() else ROOT
 RUNS_DIR = FAK_SRC / "experiments" / "benchmark" / "runs" / "by-machine"
 MACHINES_DIR = FAK_SRC / "experiments" / "benchmark" / "machines"
 
-# The model the on-VM bench runs. A small, fast-to-fetch GGUF that exercises the
-# real decode path on the datacenter GPU without a multi-hundred-GB download --
-# the point is the HARDWARE number + a proven pipeline, not a 27B run (that is the
-# DGX ladder's job). Operator can override with --hf-repo/--hf-file.
-DEFAULT_HF_REPO = "Qwen/Qwen2.5-3B-Instruct-GGUF"
-DEFAULT_HF_FILE = "qwen2.5-3b-instruct-q8_0.gguf"
+# The model the on-VM bench runs. Defaults to the canonical Qwen3.8 GGUF artifact.
+# Operator can override with --hf-repo/--hf-file.
+DEFAULT_HF_REPO = "unsloth/Qwen3.8-27B-GGUF"
+DEFAULT_HF_FILE = "Qwen3.8-27B-Q4_K_M.gguf"
 
 
 @dataclass(frozen=True)
@@ -169,15 +167,14 @@ ENGINE_ORDER = ["llama", "vllm", "fak-cpu", "fak-cuda", "fak-cuda-q8", "fak-cuda
 # vLLM is a ~5 GB install on a different (server) serving paradigm, so pulling it
 # into every default run would change the cost/behaviour of existing benches. vLLM is
 # therefore opt-in -- select it explicitly (`--engine vllm`) or in a comma list.
-# fak-cuda-q8 is likewise opt-in: the f32 fak-cuda row is the witnessed device path
-# today; the Q8 device GEMV has off-GPU cosine witnesses but no on-H100 number yet, so
-# it is selected explicitly (`--engine fak-cuda,fak-cuda-q8`) and PROMOTED into `all`
-# only once a green Hopper run witnesses it (docs/benchmarks/H100-KERNEL-5X-ROADMAP.md).
+# fak-cuda-q8 (Q8 device GEMV; apples-to-apples vs llama.cpp Q8_0) was promoted into `all`
+# following the Hopper H100 benchmark (20260905T163948Z-gcp) which witnessed 111.94 tok/s
+# decode (+17.4% speedup vs f32) and proved on-silicon Lever 1 correctness.
 # fak-cuda-tf32 (Lever 4: the same f32 device path with TF32 tensor-core SGEMM math, via
-# FAK_CUDA_TF32=1) is opt-in for the same reason — it targets the compute-bound PREFILL row
-# and changes the f32 GEMM numerics (mantissa-only), so it stays a deliberate side-by-side
-# against the pedantic-FP32 fak-cuda row until a green Hopper run witnesses its prefill gain.
-DEFAULT_ALL = ["llama", "fak-cpu", "fak-cuda"]
+# FAK_CUDA_TF32=1) is opt-in — it targets the compute-bound PREFILL row and changes the
+# f32 GEMM numerics (mantissa-only), staying a deliberate side-by-side against the
+# pedantic-FP32 fak-cuda row.
+DEFAULT_ALL = ["llama", "fak-cpu", "fak-cuda", "fak-cuda-q8"]
 
 
 def resolve_engines(spec: str) -> list[str]:
@@ -634,21 +631,28 @@ def make_source_tarball(dest: Path, dry_run: bool) -> Path:
     # `experiments/` is benchmark DATA (handoff tarballs, GGUFs, oracle dumps --
     # hundreds of MB); the VM builds cmd/modelbench from SOURCE and fetches its own
     # model, so none of it is needed. Excluding it is what keeps the tarball small.
-    exclude_dir_names = {".git", ".cache", "node_modules", "__pycache__", "experiments"}
+    exclude_dir_names = {
+        ".git", ".cache", "node_modules", "__pycache__", "experiments", "_scratch",
+        ".dispatch-runs", ".dos", ".fak", ".goal-runs", "fak-orchestration-runs",
+        "temp_bin", "tmp", "visuals",
+    }
     exclude_suffixes = (".test", ".exe", ".o", ".a", ".gguf", ".safetensors",
                         ".bin", ".pt", ".pth", ".onnx", ".log",
-                        ".tgz", ".tar", ".gz", ".zip", ".so", ".dylib", ".dll", ".wasm")
+                        ".tgz", ".tar", ".gz", ".zip", ".so", ".dylib", ".dll", ".wasm",
+                        ".old", ".exe~")
 
     def keep(ti: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
+        if not (ti.isfile() or ti.isdir() or ti.issym()):
+            return None
         parts = ti.name.split("/")
-        if any(p in exclude_dir_names for p in parts):
+        if any(p in exclude_dir_names or p.startswith(".gocache") for p in parts):
             return None
         # When the source IS the repo root, a compiled `fak` binary may sit at the
         # root; it has no excluded suffix, so drop it explicitly (it would tar as
         # fak/fak and bloat the tarball / shadow nothing useful on the VM).
-        if FAK_SRC == ROOT and ti.name == "fak/fak":
+        if FAK_SRC == ROOT and (ti.name == "fak/fak" or ti.name.startswith("fak/_scratch")):
             return None
-        if ti.isfile() and ti.name.endswith(exclude_suffixes):
+        if ti.isfile() and (ti.name.endswith(exclude_suffixes) or ".exe" in ti.name):
             return None
         return ti
 
@@ -1072,10 +1076,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                     help="use the cheapest (L4) tier to prove the pipeline")
     ap.add_argument("--engine", default="all",
                     help="which engine(s): llama, vllm, fak-cpu, fak-cuda, fak-cuda-q8, "
-                         "fak-cuda-tf32, fak, all, or a comma list (default: all). vLLM, "
-                         "fak-cuda-q8 and fak-cuda-tf32 are opt-in -- NOT in 'all'; run the "
-                         "apples-to-apples Q8 head-to-head with --engine llama,fak-cuda,fak-cuda-q8, "
-                         "or the TF32 prefill lever with --engine llama,fak-cuda,fak-cuda-tf32")
+                         "fak-cuda-tf32, fak, all, or a comma list (default: all). vLLM and "
+                         "fak-cuda-tf32 are opt-in; fak-cuda-q8 is in 'all' as the promoted "
+                         "apples-to-apples Q8 head-to-head row")
     ap.add_argument("--zone", default=None, help="override zone (else tier default)")
     ap.add_argument("--project", default=os.environ.get("GCP_PROJECT") or None)
     ap.add_argument("--account", default=os.environ.get("GCP_ACCOUNT") or None)

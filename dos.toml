@@ -95,6 +95,9 @@ concurrent = [
   # same-tree collision on them (the same class the 2026-06-22 reconciliation above fixed).
   "a2achan",
   "rungobs",
+  "observer",
+  "gym",
+  "sandbox",
   "vcachechain",
   "dropin",
   "comm",
@@ -541,6 +544,7 @@ autopick = [
   "a2achan",
   "snapshot",
   "rungobs",
+  "observer",
   "sharedtask",
   "vcachegov",
   "vcachechain",
@@ -829,6 +833,9 @@ sessionimage = ["internal/sessionimage/**"]
 a2achan = ["internal/a2achan/**"]
 snapshot = ["internal/snapshot/**"]
 rungobs = ["internal/rungobs/**"]
+observer = ["internal/observer/**"]
+gym = ["internal/gym/**"]
+sandbox = ["internal/sandbox/**"]
 sharedtask = ["internal/sharedtask/**"]
 vcachegov = ["internal/vcachegov/**"]
 vcachechain = ["internal/vcachechain/**"]

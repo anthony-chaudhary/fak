@@ -277,6 +277,84 @@ func AcquireQueuedWriterLease(ctx context.Context, repo, owner string, now func(
 	}
 }
 
+// AcquireQueuedSharedReadLease acquires a shared read lease (Phase 1), waiting with
+// exponential backoff and jitter if an exclusive write lease is currently held, until
+// maxWait expires (#11234/#11616).
+func AcquireQueuedSharedReadLease(ctx context.Context, repo, owner string, now func() time.Time, ttl time.Duration, maxWait time.Duration) (*SharedReadLease, error) {
+	if now == nil {
+		now = time.Now
+	}
+	if maxWait <= 0 {
+		return AcquireSharedReadLease(repo, owner, now, ttl)
+	}
+
+	start := now()
+	deadline := start.Add(maxWait)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+
+	backoff := 5 * time.Millisecond
+	maxBackoff := 50 * time.Millisecond
+	var lastHeld *WriterLeaseHeldError
+
+	for {
+		lease, err := AcquireSharedReadLease(repo, owner, now, ttl)
+		if err == nil && lease != nil {
+			return lease, nil
+		}
+
+		var held *WriterLeaseHeldError
+		if !errors.As(err, &held) {
+			return nil, err
+		}
+		lastHeld = held
+
+		// Verify if the exclusive holder process died on the local host before sleeping
+		dir, dirErr := worktreeGitDir(repo)
+		if dirErr == nil {
+			path := filepath.Join(dir, writerLeaseFile)
+			cur, rerr := readLease(path)
+			host, _ := os.Hostname()
+			isLocal := cur.Host == "" || cur.Host == host
+			if rerr == nil && isLocal && cur.PID > 0 && !isProcessAlive(cur.PID) {
+				_ = os.Remove(path)
+				if lease, lerr := AcquireSharedReadLease(repo, owner, now, ttl); lerr == nil && lease != nil {
+					return lease, nil
+				}
+			}
+		}
+
+		currentTime := now()
+		if !currentTime.Before(deadline) || ctx.Err() != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if lastHeld != nil {
+				return nil, lastHeld
+			}
+			return nil, ErrLeaseOwnerUnavailable
+		}
+
+		jitter := time.Duration(cryptoRandInt(int64(backoff) / 2))
+		sleepDuration := backoff + jitter
+		if remaining := deadline.Sub(currentTime); sleepDuration > remaining {
+			sleepDuration = remaining
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(sleepDuration):
+		}
+
+		backoff = backoff * 3 / 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
+}
+
 func cryptoRandInt(max int64) int64 {
 	if max <= 0 {
 		return 0

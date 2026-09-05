@@ -9,15 +9,16 @@ argument-hint: "[--target-issues 10] [--points 50] [--wave-size 4] [--max-waves 
 
 # /issue-orchestrator — campaign-scale multi-wave issue resolution
 
-> **The Campaign Coordinator for General Issue Work.** While atomic issue resolution targets a single
-> issue in isolation, `/issue-orchestrator` coordinates **large volumes of general issue work**
+> **The Campaign Coordinator for General Issue Work.** While atomic issue resolution targets 1–3
+> issues in isolation via [`/issue-queue`](../issue-queue/SKILL.md) (the issue counterpart of [`/debt-clean`](../debt-clean/SKILL.md)),
+> `/issue-orchestrator` coordinates **large volumes of general issue work**
 > across multiple concurrent subagent waves. It partitions the active issue backlog into
 > **pairwise tree-disjoint, concurrent-safe cohorts**, verifies or acquires lane leases via
 > `dos arbitrate`, dispatches parallel worker subagents via the `task` tool, independently
 > witnesses each worker's effects, commits explicit paths with issue citations `(#N)`, and
 > tracks campaign burndown velocity against a baseline.
 
-The shape: **baseline campaign → automated safe wave planning (`fak issue-orchestrator --plan-waves`) → pre-dispatch arbitration (`dos arbitrate`) → parallel subagent wave dispatch (`task`) → harvest & independently witness → commit leaf-by-leaf with `(#N)` → compare burndown → loop.**
+The shape: **baseline campaign (`fak issue-orchestrator --json`) → automated safe wave planning (`fak issue-orchestrator --plan-waves`) → pre-dispatch arbitration (`dos arbitrate`) → parallel subagent wave dispatch (`task`) → harvest & independently witness → commit leaf-by-leaf with `(#N)` → compare burndown → loop.**
 
 ---
 
@@ -139,24 +140,24 @@ dos arbitrate --workspace . --lane <lane> --kind keyword --mode exclusive
 
 ### 2. Launch Parallel Subagents
 
-Launch all admitted workers in parallel in a single turn using multiple `task` tool calls with strict fences (configured with Gemini 3.8 Flash high `variant: high` for hard work):
+Launch all admitted workers in parallel in a single turn using multiple `task` tool calls with `subagent_type="worker"` under strict fences (using Gemini 3.8 Flash high `variant: high` for hard work):
 
 ```json
 [
   {
     "tool": "task",
     "parameters": {
-      "subagent_type": "general",
+      "subagent_type": "worker",
       "description": "Resolve #1024 gateway streaming timeout",
-      "prompt": "You are an isolated worker for issue #1024: Fix gateway streaming timeout.\nLane: gateway\nBoundaries: Edit ONLY files under internal/gateway/. NEVER touch go.mod, go.sum, dos.toml, or root files.\nVerification: Run ONLY package-scoped tests: `go test -v ./internal/gateway` and `go vet ./internal/gateway`. NEVER run `go test ./...`.\nDeliverable: Fix the timeout issue and add a regression test.\nReturn: Return a compact 3-line receipt: (1) files created/edited, (2) package test result, (3) confirmation of defect fix."
+      "prompt": "You are an isolated worker for issue #1024: Fix gateway streaming timeout.\nLane: gateway\nBoundaries: Edit ONLY files under internal/gateway/. NEVER touch go.mod, go.sum, dos.toml, or root files.\nVerification: Run ONLY package-scoped tests: `go test -v ./internal/gateway` and `go vet ./internal/gateway`. NEVER run `go test ./...`.\nDeliverable: Fix the timeout issue and add a reproduction unit test.\nReturn: Return a compact 3-line receipt: (1) files created/edited, (2) package test result, (3) confirmation of defect fix."
     }
   },
   {
     "tool": "task",
     "parameters": {
-      "subagent_type": "general",
+      "subagent_type": "worker",
       "description": "Resolve #1035 model kv cache recycling",
-      "prompt": "You are an isolated worker for issue #1035: Add model KV cache recycling.\nLane: model\nBoundaries: Edit ONLY files under internal/model/. NEVER touch go.mod, go.sum, dos.toml, or root files.\nVerification: Run ONLY package-scoped tests: `go test -v ./internal/model` and `go vet ./internal/model`. NEVER run `go test ./...`.\nDeliverable: Implement the KV cache recycling path with unit tests.\nReturn: Return a compact 3-line receipt: (1) files created/edited, (2) package test result, (3) confirmation of defect fix."
+      "prompt": "You are an isolated worker for issue #1035: Add model KV cache recycling.\nLane: model\nBoundaries: Edit ONLY files under internal/model/. NEVER touch go.mod, go.sum, dos.toml, or root files.\nVerification: Run ONLY package-scoped tests: `go test -v ./internal/model` and `go vet ./internal/model`. NEVER run `go test ./...`.\nDeliverable: Implement the KV cache recycling path with reproduction unit tests.\nReturn: Return a compact 3-line receipt: (1) files created/edited, (2) package test result, (3) confirmation of defect fix."
     }
   }
 ]
@@ -164,23 +165,33 @@ Launch all admitted workers in parallel in a single turn using multiple `task` t
 
 ---
 
-## Phase 4 — Wave Harvest & Independent Verification
+## Phase 4 — Wave Harvest, Cross-Validation & Independent Witnessing
 
 When the parallel subagents finish:
 
 1. **Audit Receipts**: Verify each subagent reported green tests strictly within its declared package.
-2. **Independent Verification**: Coordinator independently runs package-scoped checks:
+2. **Parallel Adversarial Verification & Gap Audit**:
+   Launch parallel `cross-validator` and `issue-auditor` subagents to independently evaluate the changes:
+   - `cross-validator`: Independently verifies git diff boundaries, executes on-device package tests, and produces DOS-style proof verdicts.
+   - `issue-auditor`: Inspects diffs for unhandled edge cases, failure modes, and QA gaps, filing or drafting structured follow-on tickets.
+3. **Independent Verification**: Coordinator independently runs package-scoped checks:
    ```bash
    go vet ./internal/<laneA> ./internal/<laneB>
    go test -v ./internal/<laneA> ./internal/<laneB>
    ```
-3. **Commit by Explicit Path**:
+4. **Commit by Explicit Path**:
    Commit each finished leaf independently on the trunk with the issue citation and ship-stamp trailer:
    ```bash
    fak commit --path internal/<laneA> -m "fix(<laneA>): resolve gateway streaming timeout (#1024) (fak <laneA>)"
    fak commit --path internal/<laneB> -m "feat(<laneB>): add model KV cache recycling (#1035) (fak <laneB>)"
    ```
    *(Fallback: `git commit -s -m "..." -- internal/<laneA>` without `git add -A`).*
+5. **Release Lane Leases**:
+   Release the acquired lane leases so peer agents can work on the lanes:
+   ```bash
+   dos lease-lane release --lane <laneA>
+   dos lease-lane release --lane <laneB>
+   ```
 
 ---
 

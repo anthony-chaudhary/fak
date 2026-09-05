@@ -8,8 +8,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 )
 
-// --- Acceptance item 1: FTS-backed recall over the guard session journal --------
-
 // TestSearchRanksRelevantAboveNoise proves the inverted index is a real relevance
 // ranker: a rare, discriminating hit outranks a store full of common noise, and a
 // query with no overlap recalls nothing (no false positives).
@@ -102,8 +100,6 @@ func TestRecallOverGuardJournal(t *testing.T) {
 	}
 }
 
-// --- Acceptance item 2: cache-safe injection proven byte-stable on the prefix ---
-
 // TestInjectionByteStableOnPrefix proves the injection appends the recalled span
 // as a fresh suffix that leaves the ENTIRE prior prefix cacheable, witnessed by
 // cachemeta.Diverge — and that the witness actually distinguishes a prefix-mutating
@@ -157,8 +153,6 @@ func TestInjectionByteStableOnPrefix(t *testing.T) {
 	}
 }
 
-// --- Acceptance item 3: a recall-usefulness witness metric ----------------------
-
 // TestUsefulnessWitnessReferenceAndBlindness proves the witness credits a recall
 // only for DISTINCTIVE tokens it added that survived into the outcome, and flags
 // recall blindness when an injected hit changed nothing.
@@ -202,5 +196,147 @@ func TestUsefulnessLedgerRow(t *testing.T) {
 	}
 	if got["hits"] != float64(3) || got["referenced"] != float64(2) || got["unreferenced"] != float64(1) {
 		t.Fatalf("row counts wrong: %v", got)
+	}
+}
+
+func TestIndexZeroValueAndNilSafety(t *testing.T) {
+	var nilIx *Index
+	if nilIx.Len() != 0 {
+		t.Fatalf("nil Index.Len() want 0, got %d", nilIx.Len())
+	}
+	if hits := nilIx.Search("query", 5, 2); hits != nil {
+		t.Fatalf("nil Index.Search() want nil, got %+v", hits)
+	}
+	nilIx.Add(Doc{ID: "drop", Text: "this should not panic"})
+
+	var zeroIx Index
+	if zeroIx.Len() != 0 {
+		t.Fatalf("zero-value Index.Len() want 0, got %d", zeroIx.Len())
+	}
+	zeroIx.Add(Doc{ID: "d1", Ordinal: 0, Source: SourceInteractive, Text: "first indexed document"})
+	if zeroIx.Len() != 1 {
+		t.Fatalf("zero-value Index after Add want Len() == 1, got %d", zeroIx.Len())
+	}
+	hits := zeroIx.Search("indexed document", 5, 0)
+	if len(hits) != 1 || hits[0].Doc.ID != "d1" {
+		t.Fatalf("expected to recall d1, got %+v", hits)
+	}
+}
+
+func TestDocsFromJournalNilAndEmpty(t *testing.T) {
+	if _, err := DocsFromJournal(nil); err == nil {
+		t.Fatal("expected error on nil reader")
+	}
+
+	docs, err := DocsFromJournal(strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("empty reader should return nil error, got %v", err)
+	}
+	if len(docs) != 0 {
+		t.Fatalf("empty reader should return 0 docs, got %d", len(docs))
+	}
+
+	docs, err = DocsFromJournal(strings.NewReader("# comment\n\n"))
+	if err != nil {
+		t.Fatalf("comment-only reader should return nil error, got %v", err)
+	}
+	if len(docs) != 0 {
+		t.Fatalf("comment-only reader should return 0 docs, got %d", len(docs))
+	}
+}
+
+func TestSearchEdgeCasesAndDefaults(t *testing.T) {
+	ix := NewIndex()
+	ix.Add(Doc{ID: "doc1", Ordinal: 0, Source: SourceInteractive, Text: "alpha beta gamma delta"})
+
+	hits := ix.Search("alpha", 0, -1)
+	if len(hits) != 1 {
+		t.Fatalf("expected 1 hit with default k, got %d", len(hits))
+	}
+
+	if hits := ix.Search("", 5, 2); hits != nil {
+		t.Fatalf("expected nil for empty query, got %+v", hits)
+	}
+
+	if hits := ix.Search("a to of in", 5, 2); hits != nil {
+		t.Fatalf("expected nil for short-term query, got %+v", hits)
+	}
+
+	emptyIx := NewIndex()
+	if hits := emptyIx.Search("alpha", 5, 2); hits != nil {
+		t.Fatalf("expected nil for empty index, got %+v", hits)
+	}
+}
+
+func TestEstimateTokens(t *testing.T) {
+	if got := EstimateTokens(""); got != 0 {
+		t.Fatalf("EstimateTokens(\"\") want 0, got %d", got)
+	}
+	if got := EstimateTokens("abc"); got != 1 {
+		t.Fatalf("EstimateTokens(\"abc\") want 1, got %d", got)
+	}
+	if got := EstimateTokens("12345678"); got != 2 {
+		t.Fatalf("EstimateTokens(\"12345678\") want 2, got %d", got)
+	}
+}
+
+func TestRecalledSpanFormatting(t *testing.T) {
+	if got := RecalledSpan(nil); got != "" {
+		t.Fatalf("RecalledSpan(nil) want empty string, got %q", got)
+	}
+	if got := RecalledSpan([]Hit{}); got != "" {
+		t.Fatalf("RecalledSpan([]) want empty string, got %q", got)
+	}
+
+	hits := []Hit{
+		{
+			Doc: Doc{ID: "d1", Source: "", Text: "target event occurred"},
+			Window: []Doc{
+				{ID: "d1", Text: "target event occurred"},
+				{ID: "d0", Text: "preceding event happened"},
+			},
+		},
+	}
+	span := RecalledSpan(hits)
+	if !strings.Contains(span, "[interactive]") {
+		t.Fatalf("empty source should normalize to interactive, got:\n%s", span)
+	}
+	if !strings.Contains(span, "~ preceding event happened") {
+		t.Fatalf("window item should be formatted with ~, got:\n%s", span)
+	}
+	if strings.Count(span, "target event occurred") != 1 {
+		t.Fatalf("center doc should appear only once, got:\n%s", span)
+	}
+}
+
+func TestWitnessUsefulnessEdgeCases(t *testing.T) {
+	u := WitnessUsefulness(nil, "prior text", "outcome text")
+	if u.Hits != 0 || u.Referenced != 0 || u.Unreferenced != 0 || u.Blindness || u.ReferencedRatio != 0 {
+		t.Fatalf("empty hits should report zero counts and no blindness, got: %+v", u)
+	}
+
+	hits := []Hit{
+		{Doc: Doc{Text: "alpha beta gamma"}},
+		{Doc: Doc{Text: "omega psi zeta"}},
+	}
+	u = WitnessUsefulness(hits, "prior context", "result contains alpha beta")
+	if u.Hits != 2 || u.Referenced != 1 || u.Unreferenced != 1 {
+		t.Fatalf("expected 1 of 2 hits referenced, got: %+v", u)
+	}
+	if u.ReferencedRatio != 0.5 || u.Blindness {
+		t.Fatalf("expected ratio 0.5 and Blindness=false, got: %+v", u)
+	}
+
+	hitsWithWindow := []Hit{
+		{
+			Doc: Doc{Text: "unrelated main text"},
+			Window: []Doc{
+				{Text: "distinguishing context clue"},
+			},
+		},
+	}
+	uWindow := WitnessUsefulness(hitsWithWindow, "prior context", "outcome contains clue")
+	if uWindow.Referenced != 1 || uWindow.Blindness {
+		t.Fatalf("reference via window text should count: %+v", uWindow)
 	}
 }

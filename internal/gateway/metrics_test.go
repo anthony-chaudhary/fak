@@ -294,12 +294,13 @@ func TestAdjudicationSummaryReportsCompaction(t *testing.T) {
 	m.observeCompaction(agent.CompactOutcome{Reason: agent.CompactReasonNone, Dropped: 4, ShedTokens: 900}, false)
 	m.observeCompaction(agent.CompactOutcome{Reason: agent.CompactReasonUnderBudget}, false)
 	m.recordCompactionCacheRead(1234)
+	m.recordCompactionRestore(2)
 
 	s := m.adjudicationSummary()
 	if s.CompactionFired != 1 || s.CompactionBailed != 1 || s.CompactionOff != 1 {
 		t.Fatalf("compaction attempts = fired %d bailed %d off %d, want 1/1/1", s.CompactionFired, s.CompactionBailed, s.CompactionOff)
 	}
-	if s.CompactionDroppedTurns != 4 || s.CompactionShedTokens != 900 || s.CompactionCacheReadTokens != 1234 || s.LastCompactionCacheRead != 1234 {
+	if s.CompactionDroppedTurns != 4 || s.CompactionRestoredTurns != 2 || s.CompactionShedTokens != 900 || s.CompactionCacheReadTokens != 1234 || s.LastCompactionCacheRead != 1234 {
 		t.Fatalf("compaction summary = %+v, want dropped/shed/cache-read folded from metrics", s)
 	}
 }

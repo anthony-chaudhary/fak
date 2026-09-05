@@ -66,6 +66,8 @@ func runSessionsWithStdin(stdout, stderr io.Writer, stdin io.Reader, argv []stri
 		return sessionsCodexLoop(stdout, stderr, rest)
 	case "codex-loop-hook":
 		return sessionsCodexLoopHook(stdout, stderr, stdin, rest)
+	case "codex-compact-hook":
+		return sessionsCodexCompactHook(stdout, stderr, stdin, rest)
 	case "codex-hook-install":
 		return sessionsCodexHookInstall(stdout, stderr, rest)
 	case "workflow-default-report":

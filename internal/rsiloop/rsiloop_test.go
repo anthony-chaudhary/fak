@@ -509,6 +509,9 @@ func TestTransientMeasureErrorRecoversWithoutTrippingBreaker(t *testing.T) {
 	// Check unmeasured error evidence rows.
 	for _, idx := range []int{0, 2} {
 		r := res.Rows[idx]
+		if r.Decision != "RETRY" {
+			t.Errorf("row %d: decision=%s, want RETRY", idx, r.Decision)
+		}
 		if r.Measured {
 			t.Errorf("row %d: measured=true, want false for transient error attempt", idx)
 		}
@@ -730,5 +733,275 @@ func TestHarnessCustomIsTransientClassifier(t *testing.T) {
 	}
 	if attempts != 2 {
 		t.Fatalf("attempts=%d, want 2 (recovered via custom classifier)", attempts)
+	}
+}
+
+// TestTransientRecoveryAttemptRowsProduceRetryDecision verifies that transient
+// error recovery attempt rows are stamped with Decision == "RETRY" rather than
+// "REVERT", ensuring downstream meta-RSI consumers filter them out correctly.
+func TestTransientRecoveryAttemptRowsProduceRetryDecision(t *testing.T) {
+	calls := 0
+	h := Harness{
+		MetricName:      "p50",
+		LowerBetter:     true,
+		BaselineRefName: "main",
+		BaselineMetric: func() (float64, string, error) {
+			return 10.0, "sha-base", nil
+		},
+		TransientMeasurementRecoveryLimit: 2,
+		Candidates: func() []Candidate {
+			return []Candidate{{Label: "c1"}}
+		},
+		Measure: func(c Candidate) (Measurement, error) {
+			calls++
+			if calls == 1 {
+				return Measurement{}, NewTransientMeasureError(errors.New("connection reset"))
+			}
+			return Measurement{Metric: 5.0, SuiteGreen: true, TruthClean: true}, nil
+		},
+	}
+
+	res, err := Run(h, nil, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(res.Rows) != 2 {
+		t.Fatalf("len(res.Rows)=%d, want 2 (1 transient retry attempt + 1 kept result)", len(res.Rows))
+	}
+
+	// Attempt 1: transient error recovery row must have Decision == "RETRY".
+	attemptRow := res.Rows[0]
+	if attemptRow.Decision != "RETRY" {
+		t.Fatalf("attempt row decision=%q, want %q", attemptRow.Decision, "RETRY")
+	}
+	if attemptRow.Measured {
+		t.Fatalf("attempt row measured=%v, want false", attemptRow.Measured)
+	}
+	if attemptRow.Kept {
+		t.Fatalf("attempt row kept=%v, want false", attemptRow.Kept)
+	}
+
+	// Attempt 2: final kept row.
+	finalRow := res.Rows[1]
+	if finalRow.Decision != "KEEP" {
+		t.Fatalf("final row decision=%q, want %q", finalRow.Decision, "KEEP")
+	}
+}
+
+// TestTransientMeasureErrorExhaustionProducesRetryAndRevertRows proves that when
+// transient measurement errors recur until retry attempts are exhausted:
+//  1. Exactly N RETRY rows and 1 terminal REVERT/ESCALATE row are recorded in the
+//     journal and persisted to disk.
+//  2. Downstream metarsi integration (Fold and KeepRateTruthClean) correctly ignores
+//     all intermediate RETRY rows and only evaluates terminal decision rows.
+func TestTransientMeasureErrorExhaustionProducesRetryAndRevertRows(t *testing.T) {
+	dir := t.TempDir()
+	journalPath := filepath.Join(dir, "transient_exhaustion.jsonl")
+	j, err := NewJournal(journalPath)
+	if err != nil {
+		t.Fatalf("NewJournal: %v", err)
+	}
+
+	const retryLimit = 3
+	calls := make(map[string]int)
+
+	h := Harness{
+		MetricName:      "p50",
+		LowerBetter:     true,
+		BaselineRefName: "main",
+		BaselineMetric: func() (float64, string, error) {
+			return 10.0, "sha-base", nil
+		},
+		TransientMeasurementRecoveryLimit: retryLimit,
+		Candidates: func() []Candidate {
+			return []Candidate{
+				{Label: "c1"},
+				{Label: "c2"},
+			}
+		},
+		Measure: func(c Candidate) (Measurement, error) {
+			calls[c.Label]++
+			return Measurement{}, NewTransientMeasureError(fmt.Errorf("transient error on %s attempt %d", c.Label, calls[c.Label]))
+		},
+	}
+
+	// Threshold k=2:
+	// c1 exhausts its retryLimit (3 retries) -> terminal row is REVERT (breaker count advances to 1).
+	// c2 exhausts its retryLimit (3 retries) -> terminal row is ESCALATE (breaker count advances to 2 == k).
+	res, err := Run(h, j, 2, 0)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatalf("Journal.Close: %v", err)
+	}
+
+	// 1. Assert in-memory results: exactly N retry rows and 1 final row per candidate.
+	const wantRowsPerCandidate = retryLimit + 1 // 3 RETRY + 1 terminal
+	const wantTotalRows = wantRowsPerCandidate * 2
+	if len(res.Rows) != wantTotalRows {
+		t.Fatalf("len(res.Rows) = %d, want %d", len(res.Rows), wantTotalRows)
+	}
+
+	// 2. Assert journal persistence roundtrip via ReadJournal.
+	persistedRows, err := ReadJournal(journalPath)
+	if err != nil {
+		t.Fatalf("ReadJournal: %v", err)
+	}
+	if len(persistedRows) != wantTotalRows {
+		t.Fatalf("ReadJournal returned %d rows, want %d", len(persistedRows), wantTotalRows)
+	}
+
+	for i, r := range persistedRows {
+		memRow := res.Rows[i]
+		if r.Decision != memRow.Decision || r.Candidate != memRow.Candidate || r.BreakerCount != memRow.BreakerCount {
+			t.Fatalf("row %d mismatch between memory and journal: memory=%+v, journal=%+v", i, memRow, r)
+		}
+	}
+
+	// Check Candidate 1: exactly N RETRY rows + 1 final REVERT row.
+	c1Rows := persistedRows[:wantRowsPerCandidate]
+	for idx := 0; idx < retryLimit; idx++ {
+		r := c1Rows[idx]
+		if r.Decision != "RETRY" {
+			t.Errorf("c1 attempt %d: decision = %q, want %q", idx+1, r.Decision, "RETRY")
+		}
+		if r.Mode != "improve" {
+			t.Errorf("c1 attempt %d: mode = %q, want %q", idx+1, r.Mode, "improve")
+		}
+		if r.Measured {
+			t.Errorf("c1 attempt %d: measured = true, want false", idx+1)
+		}
+		if r.Kept {
+			t.Errorf("c1 attempt %d: kept = true, want false", idx+1)
+		}
+		if r.BreakerCount != 0 {
+			t.Errorf("c1 attempt %d: breaker count = %d, want 0", idx+1, r.BreakerCount)
+		}
+		if !strings.Contains(r.Note, "transient, recovering") {
+			t.Errorf("c1 attempt %d: note %q should mention transient, recovering", idx+1, r.Note)
+		}
+	}
+	c1Final := c1Rows[retryLimit]
+	if c1Final.Decision != "REVERT" {
+		t.Fatalf("c1 final row decision = %q, want %q", c1Final.Decision, "REVERT")
+	}
+	if c1Final.Measured {
+		t.Errorf("c1 final row: measured = true, want false")
+	}
+	if c1Final.Kept {
+		t.Errorf("c1 final row: kept = true, want false")
+	}
+	if c1Final.BreakerCount != 1 {
+		t.Fatalf("c1 final row breaker count = %d, want 1", c1Final.BreakerCount)
+	}
+	if !strings.Contains(c1Final.Note, "transient, exhausted") {
+		t.Errorf("c1 final row note %q should mention transient, exhausted", c1Final.Note)
+	}
+
+	// Check Candidate 2: exactly N RETRY rows + 1 final ESCALATE row.
+	c2Rows := persistedRows[wantRowsPerCandidate:]
+	for idx := 0; idx < retryLimit; idx++ {
+		r := c2Rows[idx]
+		if r.Decision != "RETRY" {
+			t.Errorf("c2 attempt %d: decision = %q, want %q", idx+1, r.Decision, "RETRY")
+		}
+		if r.Mode != "improve" {
+			t.Errorf("c2 attempt %d: mode = %q, want %q", idx+1, r.Mode, "improve")
+		}
+		if r.Measured {
+			t.Errorf("c2 attempt %d: measured = true, want false", idx+1)
+		}
+		if r.Kept {
+			t.Errorf("c2 attempt %d: kept = true, want false", idx+1)
+		}
+		if r.BreakerCount != 1 {
+			t.Errorf("c2 attempt %d: breaker count = %d, want 1", idx+1, r.BreakerCount)
+		}
+		if !strings.Contains(r.Note, "transient, recovering") {
+			t.Errorf("c2 attempt %d: note %q should mention transient, recovering", idx+1, r.Note)
+		}
+	}
+	c2Final := c2Rows[retryLimit]
+	if c2Final.Decision != "ESCALATE" {
+		t.Fatalf("c2 final row decision = %q, want %q", c2Final.Decision, "ESCALATE")
+	}
+	if c2Final.BreakerCount != 2 {
+		t.Fatalf("c2 final row breaker count = %d, want 2", c2Final.BreakerCount)
+	}
+	if !strings.Contains(c2Final.Note, "transient, exhausted") {
+		t.Errorf("c2 final row note %q should mention transient, exhausted", c2Final.Note)
+	}
+
+	// 3. Downstream metarsi integration: KeepRateTruthClean must ignore all
+	// intermediate RETRY rows and only evaluate terminal decision rows.
+	// c1 alone: exactly 1 evaluated cycle (terminal REVERT), rate 0.0.
+	if rate := KeepRateTruthClean(c1Rows); rate != 0.0 {
+		t.Fatalf("KeepRateTruthClean(c1Rows) = %v, want 0.0", rate)
+	}
+
+	// If we append one truth-clean keep row, the keep rate must be 1/2 = 0.50.
+	// If RETRY rows were mistakenly counted in the denominator, rate would be 1/(3+1+1) = 0.20.
+	c1WithKeep := append([]Row{}, c1Rows...)
+	c1WithKeep = append(c1WithKeep, Row{Mode: "improve", Decision: "KEEP", Kept: true, TruthClean: true, SuiteGreen: true})
+	if rate := KeepRateTruthClean(c1WithKeep); rate != 0.50 {
+		t.Fatalf("KeepRateTruthClean(c1WithKeep) = %v, want 0.50 (1 keep out of 2 evaluated cycles)", rate)
+	}
+
+	// All persisted rows (c1 REVERT + c2 ESCALATE, plus intermediate RETRY rows):
+	// Total cycles evaluated must be 2, clean = 0 -> rate = 0.0.
+	if rate := KeepRateTruthClean(persistedRows); rate != 0.0 {
+		t.Fatalf("KeepRateTruthClean(persistedRows) = %v, want 0.0", rate)
+	}
+
+	// With a keep appended to all persisted rows:
+	// Total cycles evaluated must be 3 (c1 REVERT, c2 ESCALATE, and KEEP), clean = 1 -> rate = 1/3.
+	allWithKeep := append([]Row{}, persistedRows...)
+	allWithKeep = append(allWithKeep, Row{Mode: "improve", Decision: "KEEP", Kept: true, TruthClean: true, SuiteGreen: true})
+	wantThird := 1.0 / 3.0
+	if rate := KeepRateTruthClean(allWithKeep); rate != wantThird {
+		t.Fatalf("KeepRateTruthClean(allWithKeep) = %v, want %v (1 keep out of 3 evaluated cycles)", rate, wantThird)
+	}
+
+	// 4. Downstream metarsi integration: metarsi.Fold must ignore all intermediate
+	// RETRY rows and only count terminal decision rows within its window.
+	cur := KeepPolicy{GainThreshold: 0.10, BreakerK: 2, Throttle: 4}
+	cfg := MetaConfig{Window: 2, MinEscalations: 1, GainStep: 0.05, GainCeiling: 0.5}
+
+	// In persistedRows:
+	// Walking backwards:
+	// - c2 terminal ESCALATE: seen = 1, esc = 1
+	// - c2 RETRY rows (3): skipped! seen remains 1
+	// - c1 terminal REVERT: seen = 2
+	// Window of 2 is satisfied by the two terminal rows; all 6 intermediate RETRY rows skipped.
+	p, ok := Fold(persistedRows, cur, cfg)
+	if !ok {
+		t.Fatalf("Fold(persistedRows) returned ok = false; RETRY rows should have been ignored")
+	}
+	if p.Escalations != 1 {
+		t.Errorf("proposal escalations = %d, want 1", p.Escalations)
+	}
+	if p.Window != 2 {
+		t.Errorf("proposal window = %d, want 2", p.Window)
+	}
+
+	// Furthermore, verify an older ESCALATE separated from the terminal REVERT by intermediate RETRY rows:
+	// [ESCALATE, c1 RETRY 1, c1 RETRY 2, c1 RETRY 3, c1 REVERT]
+	// If RETRY rows were not ignored, a window of 2 walking backward from REVERT would stop on RETRY
+	// and never see the ESCALATE. With RETRY skipped, ESCALATE is reached at seen = 2.
+	separatedRows := []Row{
+		{Mode: "improve", Decision: "ESCALATE", Kept: false, TruthClean: true, SuiteGreen: false},
+	}
+	separatedRows = append(separatedRows, c1Rows...)
+	p2, ok2 := Fold(separatedRows, cur, cfg)
+	if !ok2 {
+		t.Fatalf("Fold(separatedRows) returned ok = false; intermediate RETRY rows must not block reaching earlier cycles")
+	}
+	if p2.Escalations != 1 {
+		t.Errorf("separated proposal escalations = %d, want 1", p2.Escalations)
+	}
+	if p2.Window != 2 {
+		t.Errorf("separated proposal window = %d, want 2", p2.Window)
 	}
 }

@@ -56,6 +56,8 @@ var tier = map[string]int{
 	"cmdutil":            2, // shared command benchmark/render helpers; composes benchids for deterministic synthetic token streams.
 	"ops":                4, // autonomous operations daemon and machine maintenance subsystem (#11156, #11158).
 	"observability":      2,
+	"sandbox":            2, // multi-tier local execution sandbox (wazero WebAssembly, OS container, Job Object/cgroups).
+	"gym":                3, // sandbox evaluation gym and RSI calibration loop (#11666).
 	"observer":           1, // in-kernel observer worker pool for zero-cost step-by-step agent output interpretation (#11408).
 	"director":           3, // autonomous multi-agent roll-up digest for zero-self-report supervisor steering (#11411).
 	"studyreceipt":       1,
@@ -79,6 +81,7 @@ var tier = map[string]int{
 	"flowmetrics":            2, // deterministic flow-metrics fold (#6194); composes maputil for stable issue/commit row traversal while grading Little's-Law KPIs and working-tree WIP.
 	"stallpage":              2, // durable deduped operator page for stallscan reboot high-water; imports stallscan(1)+choicetriage(1)+flock, off the hot path.
 	"agenticbench":           3, // #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
+	"agentxbench":            3, // AgentX benchmark runner, request lifecycle phase decomposition, and interactivity metrics (#8774, #8775); stdlib-only.
 	"ailuminate":             1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
 	"apihostprobe":           1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
 	"accountprobe":           1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.

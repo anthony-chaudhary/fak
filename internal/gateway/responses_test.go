@@ -580,13 +580,25 @@ func TestResponsesStreamEmitsSSE(t *testing.T) {
 		t.Errorf("response.completed data = %s, want OpenAI-style event envelope with type and response", last.Data)
 	}
 
-	// Verify we have output_item events
-	var foundAdded, foundDone bool
+	// Verify we have output_item events and text delta events
+	var foundAdded, foundDone, foundDelta, foundTextDone bool
 	for _, ev := range events {
 		if ev.Event == "response.output_item.added" {
 			foundAdded = true
 			if !strings.Contains(ev.Data, `"type":"response.output_item.added"`) || !strings.Contains(ev.Data, `"output_index":0`) {
 				t.Errorf("response.output_item.added data = %s, want type and output_index", ev.Data)
+			}
+		}
+		if ev.Event == "response.output_text.delta" {
+			foundDelta = true
+			if !strings.Contains(ev.Data, `"delta":"hello back"`) || !strings.Contains(ev.Data, `"output_index":0`) {
+				t.Errorf("response.output_text.delta data = %s, want delta and output_index", ev.Data)
+			}
+		}
+		if ev.Event == "response.output_text.done" {
+			foundTextDone = true
+			if !strings.Contains(ev.Data, `"text":"hello back"`) || !strings.Contains(ev.Data, `"output_index":0`) {
+				t.Errorf("response.output_text.done data = %s, want text and output_index", ev.Data)
 			}
 		}
 		if ev.Event == "response.output_item.done" {
@@ -599,8 +611,44 @@ func TestResponsesStreamEmitsSSE(t *testing.T) {
 	if !foundAdded {
 		t.Error("no response.output_item.added event found")
 	}
+	if !foundDelta {
+		t.Error("no response.output_text.delta event found")
+	}
+	if !foundTextDone {
+		t.Error("no response.output_text.done event found")
+	}
 	if !foundDone {
 		t.Error("no response.output_item.done event found")
+	}
+}
+
+func TestResponsesStreamSyntheticYieldEmitsTextDelta(t *testing.T) {
+	srv := newTestServer(t)
+	rec := httptest.NewRecorder()
+	yieldResp := makeSubturnYieldResponse("test-model", nil)
+	srv.writeResponsesStream(rec, yieldResp)
+
+	events := parseTypedSSE(t, rec.Body.String())
+	var foundDelta, foundDone bool
+	for _, ev := range events {
+		if ev.Event == "response.output_text.delta" {
+			foundDelta = true
+			if !strings.Contains(ev.Data, SubturnYieldMessage) {
+				t.Errorf("response.output_text.delta missing SubturnYieldMessage: %s", ev.Data)
+			}
+		}
+		if ev.Event == "response.output_text.done" {
+			foundDone = true
+			if !strings.Contains(ev.Data, SubturnYieldMessage) {
+				t.Errorf("response.output_text.done missing SubturnYieldMessage: %s", ev.Data)
+			}
+		}
+	}
+	if !foundDelta {
+		t.Error("synthetic yield stream missing response.output_text.delta")
+	}
+	if !foundDone {
+		t.Error("synthetic yield stream missing response.output_text.done")
 	}
 }
 

@@ -173,3 +173,168 @@ func TestCoreToolAdmissionRefusesReachableMCPCapability(t *testing.T) {
 		t.Fatalf("novel capability was refused: %+v", unmatched)
 	}
 }
+
+var (
+	benchCardsSink     []capindex.CapCard
+	benchCapSink       capindex.Capability
+	benchAdmissionSink CoreToolAdmission
+	benchErrSink       error
+	benchIndexSink     *capindex.Index
+	benchChangesSink   []capindex.Change
+)
+
+func BenchmarkMCPResolverIndex(b *testing.B) {
+	r := NewMCPResolver(nil)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchCardsSink = r.Index()
+	}
+}
+
+func BenchmarkMCPResolverFault(b *testing.B) {
+	r := NewMCPResolver(nil)
+	cards := r.Index()
+	if len(cards) == 0 {
+		b.Fatal("empty MCP catalog")
+	}
+	validRef := cards[0].Ref
+	notFoundRef := capindex.CapRef{Kind: capindex.CapKindMCPTool, Name: "nonexistent_mcp_tool"}
+	mismatchRef := capindex.CapRef{Kind: capindex.CapKindA2AAgent, Name: validRef.Name}
+
+	b.Run("Hit", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			benchCapSink, benchErrSink = r.Fault(validRef)
+		}
+	})
+
+	b.Run("NotFound", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			benchCapSink, benchErrSink = r.Fault(notFoundRef)
+		}
+	})
+
+	b.Run("KindMismatch", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			benchCapSink, benchErrSink = r.Fault(mismatchRef)
+		}
+	})
+}
+
+func BenchmarkMCPResolverAdmitCoreTool(b *testing.B) {
+	r := NewMCPResolver(nil)
+	cards := r.Index()
+	if len(cards) == 0 {
+		b.Fatal("empty MCP catalog")
+	}
+	reachable := CoreToolProposal{Name: "candidate", Capability: cards[0].Ref.Name}
+	novel := CoreToolProposal{Name: "candidate", Capability: "unregistered_novel_tool"}
+	empty := CoreToolProposal{Name: "candidate", Capability: ""}
+
+	b.Run("RefuseReachable", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			benchAdmissionSink = r.AdmitCoreTool(reachable)
+		}
+	})
+
+	b.Run("AdmitNovel", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			benchAdmissionSink = r.AdmitCoreTool(novel)
+		}
+	})
+
+	b.Run("AdmitEmpty", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			benchAdmissionSink = r.AdmitCoreTool(empty)
+		}
+	})
+}
+
+func BenchmarkA2AResolverIndex(b *testing.B) {
+	r := NewA2AResolver()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchCardsSink = r.Index()
+	}
+}
+
+func BenchmarkA2AResolverFault(b *testing.B) {
+	r := NewA2AResolver()
+	cards := r.Index()
+	if len(cards) == 0 {
+		b.Fatal("empty A2A catalog")
+	}
+	validRef := cards[0].Ref
+	notFoundRef := capindex.CapRef{Kind: capindex.CapKindA2AAgent, Name: "nonexistent_a2a_method"}
+	mismatchRef := capindex.CapRef{Kind: capindex.CapKindMCPTool, Name: validRef.Name}
+
+	b.Run("Hit", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			benchCapSink, benchErrSink = r.Fault(validRef)
+		}
+	})
+
+	b.Run("NotFound", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			benchCapSink, benchErrSink = r.Fault(notFoundRef)
+		}
+	})
+
+	b.Run("KindMismatch", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			benchCapSink, benchErrSink = r.Fault(mismatchRef)
+		}
+	})
+}
+
+func BenchmarkIndexRegistration(b *testing.B) {
+	mcpResolver := NewMCPResolver(nil)
+	a2aResolver := NewA2AResolver()
+	mcpCards := mcpResolver.Index()
+	a2aCards := a2aResolver.Index()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ix := capindex.NewIndex()
+		ix.RegisterAll(mcpCards)
+		ix.RegisterAll(a2aCards)
+		benchIndexSink = ix
+	}
+}
+
+func BenchmarkIndexDiff_Noop(b *testing.B) {
+	mcpResolver := NewMCPResolver(nil)
+	a2aResolver := NewA2AResolver()
+	ix := capindex.NewIndex()
+	ix.RegisterAll(mcpResolver.Index())
+	ix.RegisterAll(a2aResolver.Index())
+
+	snap1 := ix.Snapshot()
+	snap2 := ix.Snapshot()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchChangesSink = snap1.Diff(snap2)
+	}
+}

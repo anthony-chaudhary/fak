@@ -96,10 +96,14 @@ func printUnknownVerb(w io.Writer, verb string) {
 
 func dispatchCoreVerbA(name string, args []string) bool {
 	switch name {
+	case "redteam":
+		cmdRedTeam(args)
 	case "agent":
 		cmdAgent(args)
 	case "agentic":
 		cmdAgentic(args)
+	case "agentx":
+		cmdAgentX(args)
 	case "harness":
 		cmdHarnessCommand(args)
 	case "pack":
@@ -346,6 +350,18 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		cmdBreath(args)
 	case "answer-shape":
 		cmdAnswerShape(args)
+	case "harness-hint", "harnesshint":
+		cmdHarnessHint(args)
+	case "managedocs":
+		cmdManageDocs(args)
+	case "observer":
+		cmdObserver(args)
+	case "roofline":
+		cmdRoofline(args)
+	case "sensecheck":
+		cmdSenseCheck(args)
+	case "sessionsearch":
+		cmdSessionSearch(args)
 	case "negate":
 		// The negation operator (#4461/#4472, negframe L2): `fak negate detect|resolve|reframe`
 		// exposes detect (Classify), resolve (positive-complement over the L2 registry), and

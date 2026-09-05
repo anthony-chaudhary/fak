@@ -95,8 +95,6 @@ func (s *sessionState) evaluate(cfg Config, obs *StepObservation) {
 		s.failCount = 0
 	}
 
-	// Warm KV-cache prefix reuse simulation:
-	// Once a session establishes valid turns, subsequent steps benefit from warm KV prefix reuse.
 	if s.kvPrefixWarm {
 		obs.CachedPrefix = true
 	} else {
@@ -104,8 +102,6 @@ func (s *sessionState) evaluate(cfg Config, obs *StepObservation) {
 		s.kvPrefixWarm = true
 	}
 
-	// Witness verification:
-	// Read-only tools confirm query results; mutating tools verify diff evidence.
 	if obs.IsMutating() {
 		if obs.Diff != "" || hasDiffInResult(obs.Result) {
 			obs.WitnessVerdict = WitnessDiffConfirmed
@@ -116,7 +112,6 @@ func (s *sessionState) evaluate(cfg Config, obs *StepObservation) {
 		obs.WitnessVerdict = WitnessDiffConfirmed
 	}
 
-	// Closed step classification vocabulary evaluation (STEP_ADVANCE, STEP_CHURN, STEP_REGRESS).
 	switch {
 	case obs.StepVerdict == StepRegress || s.repeatCount >= cfg.RegressThreshold || s.failCount >= cfg.RegressThreshold:
 		obs.StepVerdict = StepRegress
@@ -126,7 +121,7 @@ func (s *sessionState) evaluate(cfg Config, obs *StepObservation) {
 		}
 		s.flaggedRegress = true
 		s.flaggedChurn = false
-		s.kvPrefixWarm = false // Invalidate warm KV-prefix on regression
+		s.kvPrefixWarm = false
 		obs.CachedPrefix = false
 
 	case obs.StepVerdict == StepChurn || s.repeatCount >= cfg.ChurnThreshold || s.failCount >= cfg.ChurnThreshold:
@@ -156,7 +151,12 @@ func (s *sessionState) evaluate(cfg Config, obs *StepObservation) {
 
 	s.history = append(s.history, *obs)
 	if len(s.history) > cfg.MaxHistoryPerSession {
-		s.history = s.history[len(s.history)-cfg.MaxHistoryPerSession:]
+		overflow := len(s.history) - cfg.MaxHistoryPerSession
+		copy(s.history, s.history[overflow:])
+		for i := cfg.MaxHistoryPerSession; i < len(s.history); i++ {
+			s.history[i] = StepObservation{}
+		}
+		s.history = s.history[:cfg.MaxHistoryPerSession]
 	}
 }
 
@@ -257,7 +257,6 @@ func (p *Pool) worker(id int) {
 			}
 			p.processTask(task)
 		case <-p.stopCh:
-			// Drain remaining tasks before termination
 			for {
 				select {
 				case task, ok := <-p.workQueue:
@@ -370,12 +369,11 @@ func (p *Pool) ObserveAsync(ctx context.Context, obs StepObservation) <-chan Ste
 		close(resCh)
 		return resCh
 	}
-	p.mu.RUnlock()
 
 	sess := p.getOrCreateSession(obs.SessionID)
 
-	// Hard-seam promotion on mutating tools or flagged churn/regress
 	if obs.IsMutating() || sess.isFlagged() {
+		p.mu.RUnlock()
 		evaluated, _ := p.ObserveSyncBarrier(ctx, obs)
 		resCh <- evaluated
 		close(resCh)
@@ -385,7 +383,6 @@ func (p *Pool) ObserveAsync(ctx context.Context, obs StepObservation) <-chan Ste
 	atomic.AddInt64(&p.observationsTotal, 1)
 	atomic.AddInt64(&p.asyncTotal, 1)
 
-	// Read-only exploration: queue asynchronously with zero-cost non-blocking dispatch
 	atomic.AddInt64(&sess.inFlight, 1)
 	task := asyncTask{
 		ctx:  ctx,
@@ -396,8 +393,10 @@ func (p *Pool) ObserveAsync(ctx context.Context, obs StepObservation) <-chan Ste
 
 	select {
 	case p.workQueue <- task:
+		p.mu.RUnlock()
 		return resCh
 	default:
+		p.mu.RUnlock()
 		go p.processTask(task)
 		return resCh
 	}
@@ -432,20 +431,37 @@ func (p *Pool) ObserveSyncBarrier(ctx context.Context, obs StepObservation) (Ste
 
 	sess := p.getOrCreateSession(obs.SessionID)
 
-	// Drain any in-flight async tasks for this session to establish consistent state
+	// Mutating operations wait for concurrent async exploration turns in this session to settle.
 	timeout := p.cfg.BarrierTimeout
 	if timeout <= 0 {
 		timeout = 50 * time.Millisecond
 	}
 	deadline := time.Now().Add(timeout)
-	for atomic.LoadInt64(&sess.inFlight) > 0 {
-		if time.Now().After(deadline) {
-			return obs, ErrBarrierTimeout
+	if atomic.LoadInt64(&sess.inFlight) > 0 {
+		pollInterval := 50 * time.Microsecond
+		if timeout < pollInterval {
+			pollInterval = timeout
 		}
-		time.Sleep(10 * time.Microsecond)
+		timer := time.NewTimer(pollInterval)
+		defer timer.Stop()
+
+		for atomic.LoadInt64(&sess.inFlight) > 0 {
+			if err := ctx.Err(); err != nil {
+				return obs, err
+			}
+			if time.Now().After(deadline) {
+				return obs, ErrBarrierTimeout
+			}
+			select {
+			case <-ctx.Done():
+				return obs, ctx.Err()
+			case <-timer.C:
+				timer.Reset(pollInterval)
+			}
+		}
+		timer.Stop()
 	}
 
-	// Evaluate observation under session lock
 	sess.evaluate(p.cfg, &obs)
 
 	obs.BarrierLatency = time.Since(start)
@@ -457,7 +473,6 @@ func (p *Pool) ObserveSyncBarrier(ctx context.Context, obs StepObservation) (Ste
 		atomic.AddInt64(&p.cacheMisses, 1)
 	}
 
-	// Closed step vocabulary deterministic refusal
 	if obs.IsMutating() && obs.WitnessVerdict == WitnessUnwitnessedClaim && p.cfg.RequireWitnessDiff {
 		atomic.AddInt64(&p.churnCount, 1)
 		return obs, ErrUnwitnessedDiff
@@ -492,6 +507,8 @@ func computeArgsSig(tool string, args any) string {
 	switch a := args.(type) {
 	case string:
 		return tool + ":" + a
+	case []byte:
+		return tool + ":" + string(a)
 	default:
 		return fmt.Sprintf("%s:%v", tool, a)
 	}
@@ -507,6 +524,9 @@ func isResultError(result any) bool {
 	case string:
 		lower := strings.ToLower(strings.TrimSpace(r))
 		return strings.HasPrefix(lower, "error:") || strings.HasPrefix(lower, "failed:") || strings.HasPrefix(lower, "refused:")
+	case []byte:
+		lower := strings.ToLower(strings.TrimSpace(string(r)))
+		return strings.HasPrefix(lower, "error:") || strings.HasPrefix(lower, "failed:") || strings.HasPrefix(lower, "refused:")
 	case map[string]any:
 		if errVal, ok := r["error"]; ok && errVal != nil && errVal != "" {
 			return true
@@ -520,6 +540,8 @@ func hasDiffInResult(result any) bool {
 		return false
 	}
 	switch r := result.(type) {
+	case []byte:
+		return hasDiffInResult(string(r))
 	case string:
 		if isResultError(r) || strings.TrimSpace(r) == "" {
 			return false

@@ -68,6 +68,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	fs := flag.NewFlagSet(commandName, flag.ExitOnError)
 	hostRecovery := fs.Bool("host-recovery", false, "opt this interactive session into automatic terminal-host recovery")
 	rotateMode := fs.String("rotate", "", "account rotation: auto|off|<seat> (default auto headless, off interactive)")
+	sandboxMode := fs.String("sandbox", "auto", "execution sandbox tier for tool dispatches: auto|runsc|l1|wasi|off (default: auto; sets FAK_SANDBOX_TIER)")
 	verbFlagUsage(fs, "guard")
 	addr := fs.String("addr", "", "gateway listen address (default: a private 127.0.0.1 port the OS picks)")
 	provider := fs.String("provider", "", "upstream wire the gateway proxies to: anthropic|openai|gemini|xai (default: auto-detected from the agent name — claude->anthropic, codex/opencode->openai — else anthropic)")
@@ -159,6 +160,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	codexLoopGate := fs.String("codex-loop-gate", dispatchCodexLoopGateDefaultThreshold(), "Codex-only opt-in launch gate: audit recent Codex sessions before wrapping a Codex child and refuse at threshold loop|action, or use off (default: $FLEET_CODEX_LOOP_GATE, else off)")
 	codexLoopGateSinceHours := fs.Float64("codex-loop-gate-since-hours", 24, "with --codex-loop-gate, only scan Codex sessions modified within N hours (0 = all)")
 	codexLoopGateLimit := fs.Int("codex-loop-gate-limit", 20, "with --codex-loop-gate, maximum newest Codex sessions to scan")
+	approveForMe := fs.Bool("approve-for-me", false, "configure Codex automated approval reviewer (approvals_reviewer = \"auto_review\") for headless execution without sandbox bypass")
 	mcpRegister := fs.Bool("mcp-register", true, "register fak's own runtime MCP self-query surface (fak_capabilities, fak_feature_query, fak_memory_*, fak_tools_search) into the wrapped Claude Code child by default, via a session-scoped --mcp-config pointing at this gateway's /mcp endpoint. Claude-only; ADDS to any project/user MCP config the child already loads, never replaces it. Every call is still re-adjudicated by the guard floor — this widens discovery, not the danger floor. Pass --mcp-register=false if you already supply your own MCP config.")
 	piExtension := fs.Bool("pi-extension", true, "when wrapping Pi (earendil-works), prepend a session-scoped -e extension that calls pi.registerProvider(\"anthropic\", {baseUrl}) so Pi talks to the in-process gateway. Pi-only; Pi's Anthropic client reads baseUrl from provider config, not ANTHROPIC_BASE_URL, so the env repoint alone cannot route it. Pass --pi-extension=false if you already registered the fak provider yourself.")
 	managedCacheMode := fs.String("managed-cache", guardManagedCacheAuto, "actively manage the provider prompt-cache on the outbound Anthropic wire: auto|on|off (epic #1844 C6). ACTIVE upgrades the stable-prefix cache_control breakpoint to Anthropic's 1h TTL tier, so a long session that idles past the default 5m cache window (a human stepping away, a slow tool, a rate-limit stall) re-enters on a 0.1x cache READ instead of re-writing the whole prefix; the upgrade is byte-safe (only an existing stable system/tools-head breakpoint is extended, volatile heads refused) and witnessed on /metrics as fak_gateway_cache_ttl_upgrade_total. AUTO (default) activates ONLY when this session provably bills an API key (--api-key-env resolved a key on the Anthropic wire) — there the 2x one-time 1h write premium vs repeated 1.25x prefix re-writes is the operator's own dollars; a subscription-OAuth or passthrough session stays passive. on forces it; off disables.")
@@ -268,6 +270,9 @@ func cmdManageCommand(commandName string, argv []string) {
 	// flag into the env so buildGuardChild (called from two paths) consults one source.
 	if *landlockHooks {
 		_ = os.Setenv(guard.EnvOptIn, "1")
+	}
+	if *sandboxMode != "" {
+		_ = os.Setenv("FAK_SANDBOX_TIER", *sandboxMode)
 	}
 
 	// --compress activates the native context-compressor for THIS guard process: the
@@ -1351,6 +1356,9 @@ func cmdManageCommand(commandName string, argv []string) {
 	// provider overrides, not OPENAI_BASE_URL. Repoint only Codex children, after the
 	// Claude-specific hook installers have had a chance to no-op.
 	command, codexInstall := installGuardCodexConfigForProfile(command, launchPlan.harnessProfile(), *codexConfig, gwURL, *apiKeyEnv, *codexHome)
+	if *approveForMe && len(command) > 0 && guardIsCodex(command[0]) {
+		command = configureGuardCodexApproveForMe(command)
+	}
 	launchPlan = launchPlan.withExecutableCommand(command)
 	if codexInstall.Applied && pinUpstream && up == "openai-responses" && strings.TrimSpace(oauthSource) != "" {
 		codexInstall.AuthMode = "chatgpt"
@@ -1500,4 +1508,28 @@ func cmdManageCommand(commandName string, argv []string) {
 		return
 	}
 	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, sessionStartInstall.StatePath, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, agentName, up, *dojoMode, resSampler, dumpStartupOnLaunchFail, startupProgress)
+}
+
+// configureGuardCodexApproveForMe ensures a Codex command uses automated approval reviewer
+// integration (approvals_reviewer = "auto_review") without stripping the sandbox.
+func configureGuardCodexApproveForMe(command []string) []string {
+	if len(command) == 0 {
+		return command
+	}
+	filtered := make([]string, 0, len(command))
+	for _, arg := range command {
+		if arg != "--dangerously-bypass-approvals-and-sandbox" {
+			filtered = append(filtered, arg)
+		}
+	}
+	command = filtered
+	for _, arg := range command {
+		if strings.Contains(arg, "approvals_reviewer") {
+			return command
+		}
+	}
+	out := make([]string, 0, len(command)+2)
+	out = append(out, command[0], "-c", `approvals_reviewer="auto_review"`)
+	out = append(out, command[1:]...)
+	return out
 }

@@ -388,8 +388,15 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 // second fetch is needed for this transaction.
 func prepareSelfUpdateAttempt(ctx context.Context, runner selfinstall.Runner, repoRoot, expectedCommit, buildDir string) (string, func(), error) {
 	expectedCommit = strings.TrimSpace(expectedCommit)
+	if expectedCommit == "" {
+		return "", func() {}, fmt.Errorf("selected revision is empty (target commit not resolved in %s)", repoRoot)
+	}
 	if !isFullGitCommit(expectedCommit) {
-		return "", func() {}, fmt.Errorf("self-update: selected revision is not a full 40-hex commit")
+		if resolved, ok := runner(ctx, repoRoot, "git", "rev-parse", "--verify", "--quiet", expectedCommit+"^{commit}"); ok && isFullGitCommit(strings.TrimSpace(resolved)) {
+			expectedCommit = strings.TrimSpace(resolved)
+		} else {
+			return "", func() {}, fmt.Errorf("selected revision %q is not a full 40-hex commit and could not be resolved", expectedCommit)
+		}
 	}
 	return selfinstall.PrepareOrigin(ctx, runner, repoRoot, expectedCommit, buildDir)
 }

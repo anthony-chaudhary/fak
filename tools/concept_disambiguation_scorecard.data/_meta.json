@@ -6134,6 +6134,11 @@
           "category": "incidental",
           "reason": "KV cache session matching predicate",
           "token": "MatchesSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI command handler for sessionsearch",
+          "token": "cmdSessionSearch"
         }
       ],
       "exclude": [
@@ -6292,6 +6297,7 @@
         "chooseSessionID",
         "classifyGuardCodexSessionStart",
         "cmdSessionRecover",
+        "cmdSessionSearch",
         "codexLoopSessionFile",
         "codexlooparchivemanifest",
         "codexlooparchivenow",
@@ -10349,6 +10355,16 @@
           "category": "incidental",
           "reason": "max context tokens for budget calculation",
           "token": "MaxContextTokensForBudget"
+        },
+        {
+          "category": "incidental",
+          "reason": "Telemetry counter for restored turns",
+          "token": "CompactionRestoredTurns"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal gateway helper recording compaction restore",
+          "token": "recordCompactionRestore"
         }
       ],
       "exclude": [
@@ -10361,6 +10377,7 @@
         "COMPACTION_THRASH",
         "CompactionCheckpointConflation",
         "CompactionContract",
+        "CompactionRestoredTurns",
         "ContextKey",
         "ContextLimit",
         "ContextSeconds",
@@ -10454,6 +10471,7 @@
         "recalled",
         "recalling",
         "recalls",
+        "recordCompactionRestore",
         "recordCompactionThrash",
         "recordGuardCompactionWitness",
         "repository_context",

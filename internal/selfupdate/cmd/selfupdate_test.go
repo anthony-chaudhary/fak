@@ -1122,3 +1122,122 @@ func main() {
 		t.Fatalf("stamp.Dirty = true, want false")
 	}
 }
+
+func TestDiscoverRepoRoot_ChildFakInCWD(t *testing.T) {
+	parent := t.TempDir()
+	fakDir := filepath.Join(parent, "fak")
+	if err := os.MkdirAll(filepath.Join(fakDir, "cmd", "fak"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fakDir, "cmd", "fak", "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldCwd) }()
+
+	if err := os.Chdir(parent); err != nil {
+		t.Fatal(err)
+	}
+
+	discovered := discoverRepoRoot()
+	if discovered == "" {
+		t.Fatal("discoverRepoRoot failed to find child fak directory")
+	}
+	if !strings.EqualFold(filepath.Clean(discovered), filepath.Clean(fakDir)) {
+		t.Fatalf("discoverRepoRoot() = %q, want %q", discovered, fakDir)
+	}
+}
+
+func TestDiscoverRepoRoot_NonFakGitRootReturnsEmpty(t *testing.T) {
+	parent := t.TempDir()
+	// Initialize a bare git repo in parent with no fak subdirectories
+	cmd := exec.Command("git", "init", parent)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("git init failed: %v\n%s", err, out)
+	}
+
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldCwd) }()
+
+	if err := os.Chdir(parent); err != nil {
+		t.Fatal(err)
+	}
+
+	discovered := discoverRepoRoot()
+	if discovered != "" {
+		t.Fatalf("discoverRepoRoot() returned %q for a non-fak git repo, want empty string", discovered)
+	}
+}
+
+func TestSelfUpdateFakDevNeedsConverge_EmptyOrInvalidHeadRev(t *testing.T) {
+	probe := func(path string) (string, bool, bool) {
+		return "9439765e06d6a73af1ef9d06deca14d18f97b824", false, true
+	}
+	targets := []string{"/bin/fak-dev"}
+
+	if selfUpdateFakDevNeedsConverge(targets, "", probe) {
+		t.Fatal("selfUpdateFakDevNeedsConverge returned true for empty headRev")
+	}
+	if selfUpdateFakDevNeedsConverge(targets, "shortrev", probe) {
+		t.Fatal("selfUpdateFakDevNeedsConverge returned true for invalid/short headRev")
+	}
+	if !selfUpdateFakDevNeedsConverge(targets, "1111111111111111111111111111111111111111", probe) {
+		t.Fatal("selfUpdateFakDevNeedsConverge returned false for different full commit")
+	}
+	if selfUpdateFakDevNeedsConverge(targets, "9439765e06d6a73af1ef9d06deca14d18f97b824", probe) {
+		t.Fatal("selfUpdateFakDevNeedsConverge returned true for identical full commit")
+	}
+}
+
+func TestPrepareSelfUpdateAttempt_ShortSHA(t *testing.T) {
+	fullSHA := "9439765e06d6a73af1ef9d06deca14d18f97b824"
+	shortSHA := "9439765e06d6"
+
+	runner := func(_ context.Context, dir, name string, args ...string) (string, bool) {
+		if name == "git" && len(args) >= 4 && args[0] == "rev-parse" && args[3] == shortSHA+"^{commit}" {
+			return fullSHA + "\n", true
+		}
+		if name == "git" && len(args) >= 4 && args[0] == "worktree" && args[1] == "add" {
+			return "", true
+		}
+		if name == "git" && len(args) >= 3 && args[0] == "worktree" && args[1] == "remove" {
+			return "", true
+		}
+		return "", true
+	}
+
+	buildDir := filepath.Join(t.TempDir(), "build")
+	dir, cleanup, err := prepareSelfUpdateAttempt(context.Background(), runner, t.TempDir(), shortSHA, buildDir)
+	if err != nil {
+		t.Fatalf("prepareSelfUpdateAttempt with short SHA failed: %v", err)
+	}
+	cleanup()
+	if dir != buildDir {
+		t.Fatalf("dir = %q, want %q", dir, buildDir)
+	}
+}
+
+func TestPrepareSelfUpdateAttempt_UnresolvableErrorFormatting(t *testing.T) {
+	runner := func(_ context.Context, dir, name string, args ...string) (string, bool) {
+		return "fatal: not a valid object name", false
+	}
+
+	_, _, err := prepareSelfUpdateAttempt(context.Background(), runner, t.TempDir(), "badrev", filepath.Join(t.TempDir(), "build"))
+	if err == nil {
+		t.Fatal("expected error for unresolvable revision")
+	}
+	errMsg := err.Error()
+	if strings.Contains(errMsg, "self-update:") {
+		t.Fatalf("error should not contain redundant 'self-update:' prefix, got: %q", errMsg)
+	}
+	if !strings.Contains(errMsg, "badrev") {
+		t.Fatalf("error should name the bad revision, got: %q", errMsg)
+	}
+}

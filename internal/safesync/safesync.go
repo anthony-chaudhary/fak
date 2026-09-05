@@ -66,6 +66,10 @@ type Options struct {
 	AutoQuarantine bool `json:"auto_quarantine,omitempty"`
 	// Session identifies this sync run for quarantine tagging (#11233).
 	Session string `json:"session,omitempty"`
+	// QueueWait bounds how long Apply waits in Phase 1 (shared read) and Phase 2 (exclusive write)
+	// when a peer writer holds the worktree lease, before refusing (#11234/#11616).
+	// 0 means no wait in Phase 1 (fail-fast / assess immediately) and default 10s in Phase 2.
+	QueueWait time.Duration `json:"queue_wait,omitempty"`
 	// barrier is a test-only seam fired while Apply holds the writer lease, so a
 	// concurrency test can prove a second managed writer is refused mid-window.
 	barrier func()
@@ -242,9 +246,9 @@ func Assess(ctx context.Context, opts Options) (Assessment, error) {
 // Apply performs the same assessment and runs the fast-forward only when Assess
 // says the behind state is safe. Refused states leave the tree untouched.
 // Refactored to a two-phase protocol (#11234):
-// - Phase 1 (Shared Read Lease): Fetch remote refs, inspect git rev-parse, run diff audits concurrently.
-// - Phase 2 (Exclusive Write Lease): Short bounded critical section (<500ms) that moves HEAD and
-//   checks out files only when divergence requires a fast-forward write.
+//   - Phase 1 (Shared Read Lease): Fetch remote refs, inspect git rev-parse, run diff audits concurrently.
+//   - Phase 2 (Exclusive Write Lease): Short bounded critical section (<500ms) that moves HEAD and
+//     checks out files only when divergence requires a fast-forward write.
 func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 	now := opts.Now
 	if now == nil {
@@ -260,7 +264,7 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 	run := opts.Runner
 
 	// Phase 1 (Shared Read Lease): Fetch remote refs, inspect git rev-parse, run diff audits concurrently (#11234).
-	readLease, rerr := AcquireSharedReadLease(opts.Repo, opts.LeaseOwner, now, opts.WriterLeaseTTL)
+	readLease, rerr := AcquireQueuedSharedReadLease(ctx, opts.Repo, opts.LeaseOwner, now, opts.WriterLeaseTTL, opts.QueueWait)
 	if rerr != nil {
 		var held *WriterLeaseHeldError
 		if errors.As(rerr, &held) {
@@ -269,6 +273,12 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 			info.Applied = false
 			info.Lease = &holder
 			info.Reason = fmt.Sprintf("worktree writer lease held by %s; refusing to enter the assess/apply window so a peer writer's bytes are never overwritten", holder.Owner)
+			return info, nil
+		}
+		if errors.Is(rerr, ErrLeaseOwnerUnavailable) {
+			info.OK = false
+			info.Applied = false
+			info.Reason = ReasonLeaseOwnerUnavailable
 			return info, nil
 		}
 		return info, rerr
@@ -315,7 +325,11 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 
 	// Phase 2 (Exclusive Write Lease): Short bounded critical section (<500ms) that moves HEAD
 	// and checks out files only when divergence requires a fast-forward write (#11234).
-	writeLease, lerr := AcquireQueuedWriterLease(ctx, opts.Repo, opts.LeaseOwner, now, opts.WriterLeaseTTL, 10*time.Second)
+	writeMaxWait := opts.QueueWait
+	if writeMaxWait <= 0 {
+		writeMaxWait = 10 * time.Second
+	}
+	writeLease, lerr := AcquireQueuedWriterLease(ctx, opts.Repo, opts.LeaseOwner, now, opts.WriterLeaseTTL, writeMaxWait)
 	if lerr != nil {
 		var held *WriterLeaseHeldError
 		if errors.As(lerr, &held) {
@@ -387,6 +401,28 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 		return info, nil
 	}
 	if !applied {
+		// Check if HEAD moved to target or past target by a concurrent peer writer (#11234/#11616)
+		curHead, revErr := rev(ctx, run, opts.Repo, "HEAD")
+		if revErr == nil && curHead != "" && info.Target != "" {
+			if curHead == info.Target {
+				info.OK = true
+				info.State = StateInSync
+				info.Applied = true
+				info.NewHead = curHead
+				info.Reason = "fast-forward already applied by concurrent peer writer; in-sync"
+				return info, nil
+			}
+			isAnc, ancErr := isAncestor(ctx, run, opts.Repo, info.Target, curHead)
+			if ancErr == nil && isAnc {
+				info.OK = true
+				info.State = StateInSync
+				info.Applied = true
+				info.NewHead = curHead
+				info.Reason = "fast-forward already contained in HEAD after concurrent peer advance; in-sync"
+				return info, nil
+			}
+		}
+
 		info.OK = false
 		info.Applied = false
 		info.Reason = "fast-forward refused after assessment; the worktree or repository state changed, so no sync was applied"

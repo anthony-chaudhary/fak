@@ -174,6 +174,35 @@ class ReleaseNextTest(unittest.TestCase):
         self.assertNotIn("sync trunk with origin/main", rendered.lower())
         self.assertNotIn("remote-tracking", rendered.lower())
 
+    def test_render_next_draft_orders_by_importance_and_groups_by_domain(self) -> None:
+        state = {
+            "projected_version": "0.52.0",
+            "projected_level": "minor",
+            "base_tag": "v0.51.0",
+            "commits": [
+                {"subject": "feat(tools): minor formatting helper (fak tools)", "body": ""},
+                {"subject": "feat(guard)!: strict capability boundary check (#11500) (fak guard)", "body": ""},
+                {"subject": "feat(agent): subagent coordination and goal anchor (#11400) (fak agent)", "body": ""},
+                {"subject": "feat(model): NUMA replica allocation and speculative verification (#11300) (fak model)", "body": ""},
+                {"subject": "feat(guard): secondary audit rule (fak guard)", "body": ""},
+            ],
+        }
+        rendered = self.mod.render_next_draft(state)
+        self.assertIn("### Security & Governance", rendered)
+        self.assertIn("### Autonomous Agent & Multi-Model Harness", rendered)
+        self.assertIn("### Serving Engine, Gateway & Kernel Acceleration", rendered)
+        self.assertIn("### Developer Platform, Tooling & Evidence", rendered)
+
+        sec_idx = rendered.index("### Security & Governance")
+        agent_idx = rendered.index("### Autonomous Agent & Multi-Model Harness")
+        dev_idx = rendered.index("### Developer Platform, Tooling & Evidence")
+        self.assertLess(sec_idx, agent_idx)
+        self.assertLess(agent_idx, dev_idx)
+
+        strict_idx = rendered.index("Strict capability boundary check")
+        audit_idx = rendered.index("Secondary audit rule")
+        self.assertLess(strict_idx, audit_idx)
+
 
 if __name__ == "__main__":
     unittest.main()

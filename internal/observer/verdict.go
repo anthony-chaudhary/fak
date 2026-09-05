@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Closed step classification vocabulary.
+// StepVerdict represents the closed classification vocabulary for agent execution steps.
 type StepVerdict string
 
 const (
@@ -15,7 +15,6 @@ const (
 	StepChurn   StepVerdict = "STEP_CHURN"
 	StepRegress StepVerdict = "STEP_REGRESS"
 
-	// Direct uppercase aliases for explicit closed vocabulary matching.
 	STEP_ADVANCE = StepAdvance
 	STEP_CHURN   = StepChurn
 	STEP_REGRESS = StepRegress
@@ -49,14 +48,13 @@ func (v StepVerdict) String() string {
 	return string(v)
 }
 
-// Witness verification types for mutation claims.
+// WitnessVerdict represents the closed vocabulary for mutation evidence verification.
 type WitnessVerdict string
 
 const (
 	WitnessDiffConfirmed    WitnessVerdict = "WITNESS_DIFF_CONFIRMED"
 	WitnessUnwitnessedClaim WitnessVerdict = "WITNESS_UNWITNESSED_CLAIM"
 
-	// Direct uppercase aliases for explicit witness verification type matching.
 	WITNESS_DIFF_CONFIRMED    = WitnessDiffConfirmed
 	WITNESS_UNWITNESSED_CLAIM = WitnessUnwitnessedClaim
 )
@@ -89,7 +87,7 @@ func (w WitnessVerdict) String() string {
 	return string(w)
 }
 
-// Sentinel refusal and barrier errors.
+// Sentinel errors for observer pool lifecycle, barriers, and loop refusals.
 var (
 	ErrPoolClosed            = errors.New("observer: pool is closed")
 	ErrPoolStopped           = errors.New("observer: pool is stopped")
@@ -103,7 +101,7 @@ var (
 	ErrInvalidWitnessVerdict = errors.New("observer: invalid witness verdict; not in closed vocabulary")
 )
 
-// StepObservation holds execution, classification, and witness facts for an agent step.
+// StepObservation captures execution facts, closed-vocabulary classifications, and witness proof for a tool turn.
 type StepObservation struct {
 	ID             string         `json:"id,omitempty"`
 	SessionID      string         `json:"session_id,omitempty"`
@@ -155,7 +153,7 @@ func (o StepObservation) Summary() string {
 		o.StepVerdict, o.WitnessVerdict, o.Tool, o.IsMutating(), o.CachedPrefix, o.Duration, o.Reason)
 }
 
-// IsReadOnlyTool reports whether tool is a read-only exploration tool (Read, Grep, Glob).
+// IsReadOnlyTool reports whether tool is a read-only exploration tool.
 func IsReadOnlyTool(tool string) bool {
 	t := strings.ToLower(strings.TrimSpace(tool))
 	switch t {
@@ -166,7 +164,7 @@ func IsReadOnlyTool(tool string) bool {
 	}
 }
 
-// IsMutatingTool reports whether tool is a mutating operation (Edit, Write, git commit, etc.).
+// IsMutatingTool reports whether tool is a mutating operation that produces workspace or system side effects.
 func IsMutatingTool(tool string) bool {
 	if IsReadOnlyTool(tool) {
 		return false

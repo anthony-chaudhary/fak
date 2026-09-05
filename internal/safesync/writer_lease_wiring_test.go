@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 	"github.com/anthony-chaudhary/fak/internal/safesync"
@@ -222,4 +223,44 @@ func TestSyncApplyRefusedWhileManagedCommitHoldsWriterLease(t *testing.T) {
 		t.Fatalf("lease not released after the managed commit returned: %v", err)
 	}
 	_ = l.Release()
+}
+
+// TestManagedCommitWithTimeoutWaitsForSyncApply proves that when safecommit is configured
+// with a Lock.Timeout > 0, it queues for the worktree writer lease and lands cleanly after
+// the sync apply window closes, rather than immediately failing with WRITER_LEASE_HELD (#11234/#11616).
+func TestManagedCommitWithTimeoutWaitsForSyncApply(t *testing.T) {
+	clone := wiringClone(t)
+	if err := os.WriteFile(filepath.Join(clone, "w.txt"), []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	applyLease, err := safesync.AcquireWriterLease(clone, "sync-apply", nil, time.Minute)
+	if err != nil {
+		t.Fatalf("acquire writer lease: %v", err)
+	}
+
+	commitDone := make(chan struct{})
+	var commitRes safecommit.Result
+	var commitErr error
+
+	opts := wiringCommitOptions(clone)
+	opts.Lock = safecommit.LockOptions{
+		Timeout: 2 * time.Second,
+	}
+
+	go func() {
+		defer close(commitDone)
+		commitRes, commitErr = safecommit.CommitWith(context.Background(), wiringCommitRunner, wiringNoopLock, opts)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	_ = applyLease.Release()
+
+	<-commitDone
+	if commitErr != nil {
+		t.Fatalf("commit error: %v", commitErr)
+	}
+	if !commitRes.Committed || !commitRes.Verified || commitRes.Reason != "" {
+		t.Fatalf("commit failed to land after queue wait: %+v", commitRes)
+	}
 }
