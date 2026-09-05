@@ -758,6 +758,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 	if len(allResults) > 0 {
 		allDenied := true
 		allFeedback := true
+		allFailedOrDenied := true
 		for _, res := range allResults {
 			isDeny := res.ev.Verdict == "DENY" || res.ev.Verdict == "DENIED" || res.ev.Verdict == "BARRED" || res.ev.Verdict == "DROPPED" || res.ev.Verdict == "route-error" || (res.verdict != nil && res.verdict.Kind == abi.VerdictDeny) || strings.HasPrefix(res.tc.Function.Name, "bad_tool") || strings.Contains(res.tc.Function.Name, "lock_busy")
 			if !isDeny {
@@ -767,44 +768,59 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			if !isFb {
 				allFeedback = false
 			}
+			if !(isToolResultFailure(res.isErr, res.ev.Verdict, res.content) || isDeny) {
+				allFailedOrDenied = false
+			}
+		}
+
+		lastTool := allResults[0].tc.Function.Name
+		lastReason := allResults[0].ev.Reason
+		if lastReason == "" {
+			lastReason = allResults[0].ev.Verdict
+		}
+		lastDisp := allResults[0].ev.Disposition
+		var rc ToolReceipt
+		if err := json.Unmarshal([]byte(allResults[0].content), &rc); err == nil {
+			if lastDisp == "" && rc.Disposition != "" {
+				lastDisp = rc.Disposition
+			}
+			if rc.Reason != "" && (lastReason == "" || lastReason == "naive-exec" || lastReason == "ALLOW") {
+				lastReason = rc.Reason
+			}
+		}
+		if strings.Contains(lastTool, "lock_busy") || strings.Contains(lastReason, "LOCK_BUSY") {
+			lastReason = "LOCK_BUSY"
+			if lastDisp == "" {
+				lastDisp = "RETRYABLE"
+			}
+		} else if strings.HasPrefix(lastTool, "bad_tool") && (lastReason == "" || lastReason == "naive-exec" || lastReason == "DENY") {
+			lastReason = "POLICY_BLOCK"
+			lastDisp = "TERMINAL"
+		}
+		if lastReason == "" || lastReason == "naive-exec" || lastReason == "ALLOW" {
+			var rawMap map[string]any
+			if err := json.Unmarshal([]byte(allResults[0].content), &rawMap); err == nil {
+				if errVal, ok := rawMap["error"]; ok && errVal != nil {
+					lastReason = fmt.Sprintf("%v", errVal)
+				}
+			}
+		}
+		if lastReason == "" || lastReason == "naive-exec" || lastReason == "ALLOW" {
+			if allResults[0].isErr {
+				lastReason = "TOOL_ERROR"
+			} else {
+				lastReason = "TOOL_FAILURE"
+			}
 		}
 
 		if allDenied {
 			r.consecutiveDenyAll++
 			r.denyAllPending = true
-			lastTool := allResults[0].tc.Function.Name
-			lastReason := allResults[0].ev.Reason
-			if lastReason == "" {
-				lastReason = allResults[0].ev.Verdict
-			}
-			lastDisp := allResults[0].ev.Disposition
-			if lastDisp == "" {
-				var rc ToolReceipt
-				if err := json.Unmarshal([]byte(allResults[0].content), &rc); err == nil && rc.Disposition != "" {
-					lastDisp = rc.Disposition
-				}
-			}
-			if strings.Contains(lastTool, "lock_busy") || strings.Contains(lastReason, "LOCK_BUSY") {
-				lastReason = "LOCK_BUSY"
-				if lastDisp == "" {
-					lastDisp = "RETRYABLE"
-				}
-			} else if strings.HasPrefix(lastTool, "bad_tool") && (lastReason == "" || lastReason == "naive-exec" || lastReason == "DENY") {
-				lastReason = "POLICY_BLOCK"
-				lastDisp = "TERMINAL"
-			}
 			r.lastRefusalReceipt = &stopgate.BoundaryRefusalReceipt{
 				Tool:        lastTool,
 				Reason:      lastReason,
 				Disposition: lastDisp,
 				Verified:    true,
-			}
-			if r.lastDeniedTool == lastTool && r.lastDeniedReason == lastReason && lastTool != "" {
-				r.consecutiveSameIssue++
-			} else {
-				r.consecutiveSameIssue = 1
-				r.lastDeniedTool = lastTool
-				r.lastDeniedReason = lastReason
 			}
 			r.consecutiveToolFeedback = 0
 			r.toolFeedbackPending = false
@@ -813,19 +829,52 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			r.consecutiveToolFeedback++
 			r.toolFeedbackPending = true
 			r.consecutiveDenyAll = 0
-			r.consecutiveSameIssue = 0
-			r.lastDeniedTool = ""
-			r.lastDeniedReason = ""
 			r.denyAllPending = false
 		} else {
 			r.lastRefusalReceipt = nil
 			r.consecutiveDenyAll = 0
-			r.consecutiveSameIssue = 0
-			r.lastDeniedTool = ""
-			r.lastDeniedReason = ""
 			r.consecutiveToolFeedback = 0
 			r.denyAllPending = false
 			r.toolFeedbackPending = false
+		}
+
+		if allFailedOrDenied {
+			if r.lastDeniedTool == lastTool && r.lastDeniedReason == lastReason && lastTool != "" {
+				r.consecutiveSameIssue++
+			} else {
+				r.consecutiveSameIssue = 1
+				r.lastDeniedTool = lastTool
+				r.lastDeniedReason = lastReason
+			}
+
+			thresh := DefaultCircuitBreakerThreshold
+			if r.cfg != nil {
+				thresh = r.cfg.circuitBreakerThreshold
+				if thresh <= 0 {
+					thresh = DefaultCircuitBreakerThreshold
+				}
+			}
+
+			if r.consecutiveSameIssue >= thresh {
+				r.metrics.CircuitBreakerTripped = true
+				r.metrics.CircuitBreakerReason = fmt.Sprintf("tool %q repeatedly failed or was refused with reason %q (%d consecutive occurrences)", lastTool, lastReason, r.consecutiveSameIssue)
+				if r.metrics.FinalAnswer == "" {
+					r.metrics.FinalAnswer = fmt.Sprintf("Circuit breaker tripped: tool %q repeatedly failed or was refused with reason %q (%d consecutive occurrences)", lastTool, lastReason, r.consecutiveSameIssue)
+				}
+				tripMsg := fmt.Sprintf("[CIRCUIT BREAKER TRIPPED]: Tool %q repeatedly failed or was refused with reason %q (%d consecutive occurrences). Halting turn loop early to prevent quota exhaustion.", lastTool, lastReason, r.consecutiveSameIssue)
+				r.messages = append(r.messages, Message{Role: RoleSystem, Content: tripMsg})
+				r.cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
+				r.speculation.disarm()
+				r.finalizeFak()
+				return true, nil
+			} else if r.consecutiveSameIssue >= 2 {
+				guidanceMsg := fmt.Sprintf("[CIRCUIT BREAKER GUIDANCE]: Tool %q repeatedly failed or was refused with reason %q (%d consecutive occurrences). Do NOT repeat identical arguments or apologize without changing course. Adapt your arguments, choose an alternative tool, or report why the task cannot proceed.", lastTool, lastReason, r.consecutiveSameIssue)
+				r.messages = append(r.messages, Message{Role: RoleSystem, Content: guidanceMsg})
+			}
+		} else {
+			r.consecutiveSameIssue = 0
+			r.lastDeniedTool = ""
+			r.lastDeniedReason = ""
 		}
 	}
 

@@ -27,6 +27,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/stopgate"
 )
 
+const DefaultCircuitBreakerThreshold = 3
+
 // RunOption configures an optional behavior of RunArm / Run. The zero set of options
 // is the historical behavior; each option opts into one capability (today: a session
 // drive-state table). It is the variadic-options idiom so adding a capability never
@@ -216,12 +218,12 @@ type runConfig struct {
 	// conversation / toolCatalog are the WIRE seam (#6657, loop_wire.go): a served
 	// request's ordered transcript and its request-scoped tool declarations. Both empty
 	// => the historical fixed seed (system prompt + task, ToolCatalog()).
-	conversation []Message
-	toolCatalog  []ToolDef
-	todoTools    bool
+	conversation   []Message
+	toolCatalog    []ToolDef
+	todoTools      bool
 	contextControl bool
-	systemPrompt string
-	memoryDigest string
+	systemPrompt   string
+	memoryDigest   string
 	// modelRequestObserver runs synchronously after directive splicing and the
 	// one context-planning pass, immediately before the Planner call.
 	modelRequestObserver    ModelRequestObserver
@@ -241,6 +243,15 @@ type runConfig struct {
 	sessionCheckpointCreatedAt   time.Time
 	provider                     string
 	baseURL                      string
+	circuitBreakerThreshold      int
+}
+
+// WithCircuitBreakerThreshold configures the threshold of consecutive identical
+// tool failures or refusals before the circuit breaker trips.
+func WithCircuitBreakerThreshold(threshold int) RunOption {
+	return func(c *runConfig) {
+		c.circuitBreakerThreshold = threshold
+	}
 }
 
 // WithSessionCheckpoint configures durable FAK-native session checkpointing.
