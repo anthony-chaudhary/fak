@@ -95,6 +95,9 @@ func validateGoCheckArgs(mode string, targets []string) []string {
 	// validate materializes the same committed bytes under a fresh root on every run.
 	// Normalize that disposable root in compile identities so the shared Go cache can
 	// reuse artifacts without changing the developer/release build's debug-path contract.
+	if mode == "build" {
+		return append([]string{mode, "-trimpath", "-buildvcs=false"}, targets...)
+	}
 	return append([]string{mode, "-trimpath"}, targets...)
 }
 
