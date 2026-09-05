@@ -33,7 +33,17 @@ func armContractBoundary(srv *Server) func() {
 	srv.planner = &agent.HTTPPlanner{Provider: agent.ProviderAnthropic}
 	srv.compactHistoryBudget = 1200
 	srv.compactAnchorHead = true
-	return func() { srv.planner = prev }
+	b := 1200
+	a := 1
+	prevVC := srv.VersionedConfig()
+	_, _, _ = srv.PatchScalarConfig(ScalarConfigPatch{
+		CompactHistoryBudget: &b,
+		CompactAnchorHead:    &a,
+	})
+	return func() {
+		srv.planner = prev
+		_, _ = srv.SetScalarConfig(prevVC.Config)
+	}
 }
 
 // crossCompactionBoundary drives ONE real compaction on trace and returns the body it

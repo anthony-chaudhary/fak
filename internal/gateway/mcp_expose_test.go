@@ -139,11 +139,8 @@ func TestExposeAllowlistFiltersDiscoveryAndGuardsCall(t *testing.T) {
 }
 
 func TestExposeEmptyPreservesFullRetrievalSurface(t *testing.T) {
-	srv, err := New(Config{EngineID: "test", Model: "test-model", VDSO: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer srv.Close()
+	t.Setenv("FAK_MODEL_VISION", "1")
+	srv := newExposeServer(t)
 	got := descriptorNames(srv.exposedToolDescriptors())
 	want := descriptorNames(toolDescriptors())
 	if !reflect.DeepEqual(got, want) {

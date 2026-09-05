@@ -52,7 +52,7 @@ func TestDefaultDenySurfacesBoundedLiveOperatorChoice(t *testing.T) {
 		"deniedToolResult": deniedToolResult(adj),
 	} {
 		for _, want := range []string{
-			"operator choice (outside this wrapped agent)",
+			"Operator choice (outside this wrapped agent)",
 			"fak guard allow --ttl 15m exec_command",
 			"live guard reloads",
 			"standard harness tool",
