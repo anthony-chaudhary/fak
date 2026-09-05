@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -637,4 +641,119 @@ func containsModelCanaryAction(actions []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestModelCanaryNoIncumbentConfig(t *testing.T) {
+	cfg := validModelCanaryTestConfig()
+	cfg.NoIncumbent = true
+	if _, err := validateModelCanaryConfig(cfg); err == nil {
+		t.Fatal("accepted ambiguous incumbent configuration")
+	}
+	cfg.Incumbent = modelCanaryIncumbentConfig{}
+	if _, err := validateModelCanaryConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.NoIncumbent = false
+	if _, err := validateModelCanaryConfig(cfg); err == nil {
+		t.Fatal("default no longer requires exact handoff")
+	}
+}
+
+// The test binary is a bounded, model-free child; the live runner still owns identity,
+// listener readiness, lease, pressure sampling, request capture and TERM-only cleanup.
+func TestModelCanaryBoundedChild(t *testing.T) {
+	switch os.Getenv("FAK_CANARY_TEST_CHILD") {
+	case "candidate":
+		listener, err := net.Listen("tcp", "127.0.0.1:"+os.Getenv("FAK_CANARY_TEST_PORT"))
+		if err != nil {
+			os.Exit(2)
+		}
+		server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "bounded-child") })}
+		go server.Serve(listener)
+		time.Sleep(20 * time.Second)
+		server.Close()
+		os.Exit(0)
+	case "request":
+		time.Sleep(300 * time.Millisecond)
+		client := &http.Client{Timeout: time.Second}
+		response, err := client.Get("http://127.0.0.1:" + os.Getenv("FAK_CANARY_TEST_PORT") + "/health")
+		if err != nil {
+			os.Exit(3)
+		}
+		response.Body.Close()
+		fmt.Println("bounded-request-complete")
+		os.Exit(0)
+	}
+}
+
+func TestModelCanaryNoIncumbentLiveLifecycle(t *testing.T) {
+	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
+		t.Skip("live safety runtime requires Darwin arm64")
+	}
+	deps, err := modelCanaryLiveDependencies()
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+	cfg := validModelCanaryTestConfig()
+	cfg.NoIncumbent = true
+	cfg.Incumbent = modelCanaryIncumbentConfig{}
+	cfg.Lease.Path = filepath.Join(t.TempDir(), "gpu.lease")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Candidate.Command = []string{executable, "-test.run=^TestModelCanaryBoundedChild$"}
+	cfg.Candidate.Environment = map[string]string{"FAK_CANARY_TEST_CHILD": "candidate", "FAK_CANARY_TEST_PORT": strconv.Itoa(port)}
+	cfg.Candidate.ListenerPort = port
+	cfg.Candidate.ReadinessEndpoints = []string{fmt.Sprintf("http://127.0.0.1:%d/health", port)}
+	cfg.Candidate.ReadinessTimeout = "5s"
+	cfg.Request.Command = cfg.Candidate.Command
+	cfg.Request.Environment = map[string]string{"FAK_CANARY_TEST_CHILD": "request", "FAK_CANARY_TEST_PORT": strconv.Itoa(port)}
+	cfg.Request.Deadline = "10s"
+	cfg.Watcher.Interval = "100ms"
+	cfg.Watcher.MaximumRSSBytes, cfg.Watcher.MaximumFootprintBytes, cfg.Watcher.MaximumSwapGrowthBytes = 1<<40, 1<<40, 1<<40
+	cfg.Watcher.MinimumSystemFreePercent, cfg.Watcher.MinimumMemorystatusPercent = 1, 1
+	durations, err := validateModelCanaryConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	occupied := executeModelCanaryRun(ctx, cfg, durations, "fixture", deps)
+	if !occupied.NoIncumbent || occupied.Outcome == "complete" || occupied.Candidate != nil || occupied.RestorationAttempted {
+		t.Fatalf("occupied listener admitted: %+v", occupied)
+	}
+	// The incumbent owner is this real test process; it must still accept connections.
+	conn, err := net.DialTimeout("tcp", listener.Addr().String(), time.Second)
+	if err != nil {
+		t.Fatalf("occupied listener owner was disturbed: %v", err)
+	}
+	conn.Close()
+	listener.Close()
+	receipt := executeModelCanaryRun(ctx, cfg, durations, "fixture", deps)
+	if receipt.Outcome != "complete" {
+		t.Fatalf("live lifecycle: %s: %s; events=%+v", receipt.Reason, receipt.Detail, receipt.Events)
+	}
+	if !receipt.NoIncumbent || !receipt.LeaseReleased || receipt.RestorationAttempted || receipt.RestoredIncumbent != nil || receipt.Candidate == nil || receipt.RequestEvidence == nil || !strings.Contains(receipt.RequestEvidence.Stdout, "bounded-request-complete") {
+		t.Fatalf("incomplete live receipt: %+v", receipt)
+	}
+	if err := deps.VerifyUnusedListener(ctx, port); err != nil {
+		t.Fatalf("child listener not cleaned: %v", err)
+	}
+	// A second cleanup must see the original child as gone, never signal a reused PID.
+	if err := deps.TermCandidate(ctx, modelCanaryProcess{Identity: *receipt.Candidate}, time.Second); err == nil {
+		t.Fatal("cleanup accepted an unowned process handle")
+	}
+	assertModelCanaryEventSequence(t, receipt.Events)
+	for _, event := range receipt.Events {
+		if event.Action == "bootout_incumbent" || event.Action == "restore_incumbent" {
+			t.Fatal("no-incumbent run mutated a service")
+		}
+	}
 }

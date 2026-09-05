@@ -94,30 +94,34 @@ func modelCanaryLiveDependencies() (modelCanaryRunDeps, error) {
 	}
 	live := &darwinModelCanaryRuntime{}
 	return modelCanaryRunDeps{
-		Platform:           runtime.GOOS,
-		Architecture:       runtime.GOARCH,
-		Now:                time.Now,
-		Preflight:          live.preflight,
-		AcquireLease:       live.acquireLease,
-		VerifyIncumbent:    live.verifyIncumbent,
-		BootoutIncumbent:   live.bootoutIncumbent,
-		StartCandidate:     live.startCandidate,
-		WaitCandidateReady: live.waitCandidateReady,
-		StartRequest:       live.startRequest,
-		PollRequest:        live.pollRequest,
-		RequestEvidence:    live.requestEvidence,
-		StopRequest:        live.stopRequest,
-		Sample:             live.sample,
-		Sleep:              sleepModelCanaryContext,
-		TermCandidate:      live.termCandidate,
-		RestoreIncumbent:   live.restoreIncumbent,
-		EndpointsStable:    live.endpointsStable,
+		Platform:             runtime.GOOS,
+		Architecture:         runtime.GOARCH,
+		Now:                  time.Now,
+		Preflight:            live.preflight,
+		AcquireLease:         live.acquireLease,
+		VerifyIncumbent:      live.verifyIncumbent,
+		VerifyUnusedListener: live.verifyUnusedListener,
+		BootoutIncumbent:     live.bootoutIncumbent,
+		StartCandidate:       live.startCandidate,
+		WaitCandidateReady:   live.waitCandidateReady,
+		StartRequest:         live.startRequest,
+		PollRequest:          live.pollRequest,
+		RequestEvidence:      live.requestEvidence,
+		StopRequest:          live.stopRequest,
+		Sample:               live.sample,
+		Sleep:                sleepModelCanaryContext,
+		TermCandidate:        live.termCandidate,
+		RestoreIncumbent:     live.restoreIncumbent,
+		EndpointsStable:      live.endpointsStable,
 	}, nil
 }
 
 func (d *darwinModelCanaryRuntime) preflight(ctx context.Context, cfg modelCanaryRunConfig) (modelCanaryPreflight, error) {
 	tools := make(map[string]string)
 	for _, name := range []string{"lsof", "ps", "footprint", "sysctl", "memory_pressure", "launchctl"} {
+		if cfg.NoIncumbent && name == "launchctl" {
+			continue
+		}
 		path, err := exec.LookPath(name)
 		if err != nil {
 			return modelCanaryPreflight{}, fmt.Errorf("required Darwin executable %s: %w", name, err)
@@ -133,6 +137,9 @@ func (d *darwinModelCanaryRuntime) preflight(ctx context.Context, cfg modelCanar
 		"request":   cfg.Request.Command,
 		"restore":   cfg.Incumbent.RestoreCommand,
 	} {
+		if cfg.NoIncumbent && name == "restore" {
+			continue
+		}
 		path, err := exec.LookPath(argv[0])
 		if err != nil {
 			return modelCanaryPreflight{}, fmt.Errorf("%s executable %q: %w", name, argv[0], err)
@@ -151,6 +158,23 @@ func (d *darwinModelCanaryRuntime) preflight(ctx context.Context, cfg modelCanar
 		}
 		executableSHA[name] = digestBytes(raw)
 	}
+	d.setTools(tools, executableSHA)
+	if cfg.NoIncumbent {
+		if err := d.verifyUnusedListener(ctx, cfg.Candidate.ListenerPort); err != nil {
+			return modelCanaryPreflight{}, err
+		}
+		// Exercise the same pressure/swap parsers against the runner when no incumbent exists.
+		identity, err := d.readProcessIdentity(ctx, os.Getpid())
+		if err != nil {
+			return modelCanaryPreflight{}, err
+		}
+		probe, err := d.sampleProcess(ctx, modelCanaryProcess{Identity: identity}, 0)
+		if err != nil {
+			return modelCanaryPreflight{}, fmt.Errorf("read-only Darwin parser preflight: %w", err)
+		}
+		return modelCanaryPreflight{BaselineSwapBytes: probe.SwapUsedBytes, Tools: tools, ExecutableSHA256: executableSHA}, nil
+	}
+
 	if err := validateDarwinModelCanaryRestore(cfg, tools); err != nil {
 		return modelCanaryPreflight{}, err
 	}
@@ -200,6 +224,18 @@ func (d *darwinModelCanaryRuntime) acquireLease(_ context.Context, cfg modelCana
 		return nil, err
 	}
 	return &darwinModelCanaryLease{lease: lease}, nil
+}
+
+// This is read-only: an occupied or ambiguous listener never authorizes a signal.
+func (d *darwinModelCanaryRuntime) verifyUnusedListener(ctx context.Context, port int) error {
+	_, present, err := d.queryListenerIdentity(ctx, port)
+	if err != nil {
+		return err
+	}
+	if present {
+		return fmt.Errorf("candidate listener port %d is occupied", port)
+	}
+	return nil
 }
 
 func (d *darwinModelCanaryRuntime) verifyIncumbent(ctx context.Context, cfg modelCanaryRunConfig, expected modelCanaryProcessIdentity) (modelCanaryProcessIdentity, error) {

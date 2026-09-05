@@ -30,13 +30,14 @@ const (
 )
 
 type modelCanaryRunConfig struct {
-	Schema    string                     `json:"schema"`
-	Lease     modelCanaryLeaseConfig     `json:"lease"`
-	Incumbent modelCanaryIncumbentConfig `json:"incumbent"`
-	Candidate modelCanaryCandidateConfig `json:"candidate"`
-	Request   modelCanaryRequestConfig   `json:"request"`
-	Watcher   modelCanaryWatcherConfig   `json:"watcher"`
-	Cleanup   modelCanaryCleanupConfig   `json:"cleanup"`
+	Schema      string                     `json:"schema"`
+	NoIncumbent bool                       `json:"no_incumbent,omitempty"`
+	Lease       modelCanaryLeaseConfig     `json:"lease"`
+	Incumbent   modelCanaryIncumbentConfig `json:"incumbent"`
+	Candidate   modelCanaryCandidateConfig `json:"candidate"`
+	Request     modelCanaryRequestConfig   `json:"request"`
+	Watcher     modelCanaryWatcherConfig   `json:"watcher"`
+	Cleanup     modelCanaryCleanupConfig   `json:"cleanup"`
 }
 
 type modelCanaryLeaseConfig struct {
@@ -239,6 +240,7 @@ type modelCanaryRunReceipt struct {
 	ConfigSHA256         string                      `json:"config_sha256"`
 	EvidenceSHA256       string                      `json:"evidence_sha256"`
 	Engine               string                      `json:"engine,omitempty"`
+	NoIncumbent          bool                        `json:"no_incumbent,omitempty"`
 	Platform             string                      `json:"platform"`
 	Architecture         string                      `json:"architecture"`
 	StartedAt            string                      `json:"started_at"`
@@ -277,24 +279,25 @@ type modelCanaryProcess struct {
 // injected so the complete handoff, watcher, cleanup, restoration, and lease ordering can be
 // exercised without a model, GPU, launchd, or a fixed port.
 type modelCanaryRunDeps struct {
-	Platform           string
-	Architecture       string
-	Now                func() time.Time
-	Preflight          func(context.Context, modelCanaryRunConfig) (modelCanaryPreflight, error)
-	AcquireLease       func(context.Context, modelCanaryLeaseConfig, time.Duration) (modelCanaryLease, error)
-	VerifyIncumbent    func(context.Context, modelCanaryRunConfig, modelCanaryProcessIdentity) (modelCanaryProcessIdentity, error)
-	BootoutIncumbent   func(context.Context, modelCanaryRunConfig, modelCanaryProcessIdentity, time.Duration) error
-	StartCandidate     func(context.Context, modelCanaryCandidateConfig) (modelCanaryProcess, error)
-	WaitCandidateReady func(context.Context, modelCanaryRunConfig, modelCanaryProcess, time.Duration) error
-	StartRequest       func(context.Context, modelCanaryRequestConfig) (modelCanaryProcess, error)
-	PollRequest        func(modelCanaryProcess) (done bool, exitCode int, err error)
-	RequestEvidence    func(modelCanaryProcess) (modelCanaryRequestEvidence, error)
-	StopRequest        func(context.Context, modelCanaryProcess, time.Duration) error
-	Sample             func(context.Context, modelCanaryProcess, int64) (modelCanarySample, error)
-	Sleep              func(context.Context, time.Duration) error
-	TermCandidate      func(context.Context, modelCanaryProcess, time.Duration) error
-	RestoreIncumbent   func(context.Context, modelCanaryRunConfig, time.Duration) error
-	EndpointsStable    func(context.Context, modelCanaryRunConfig, time.Duration, time.Duration) (modelCanaryProcessIdentity, error)
+	Platform             string
+	VerifyUnusedListener func(context.Context, int) error
+	Architecture         string
+	Now                  func() time.Time
+	Preflight            func(context.Context, modelCanaryRunConfig) (modelCanaryPreflight, error)
+	AcquireLease         func(context.Context, modelCanaryLeaseConfig, time.Duration) (modelCanaryLease, error)
+	VerifyIncumbent      func(context.Context, modelCanaryRunConfig, modelCanaryProcessIdentity) (modelCanaryProcessIdentity, error)
+	BootoutIncumbent     func(context.Context, modelCanaryRunConfig, modelCanaryProcessIdentity, time.Duration) error
+	StartCandidate       func(context.Context, modelCanaryCandidateConfig) (modelCanaryProcess, error)
+	WaitCandidateReady   func(context.Context, modelCanaryRunConfig, modelCanaryProcess, time.Duration) error
+	StartRequest         func(context.Context, modelCanaryRequestConfig) (modelCanaryProcess, error)
+	PollRequest          func(modelCanaryProcess) (done bool, exitCode int, err error)
+	RequestEvidence      func(modelCanaryProcess) (modelCanaryRequestEvidence, error)
+	StopRequest          func(context.Context, modelCanaryProcess, time.Duration) error
+	Sample               func(context.Context, modelCanaryProcess, int64) (modelCanarySample, error)
+	Sleep                func(context.Context, time.Duration) error
+	TermCandidate        func(context.Context, modelCanaryProcess, time.Duration) error
+	RestoreIncumbent     func(context.Context, modelCanaryRunConfig, time.Duration) error
+	EndpointsStable      func(context.Context, modelCanaryRunConfig, time.Duration, time.Duration) (modelCanaryProcessIdentity, error)
 }
 
 func runModelCanaryRun(stdout, stderr io.Writer, args []string) int {
@@ -351,6 +354,7 @@ func runModelCanaryRun(stdout, stderr io.Writer, args []string) int {
 	if depErr != nil {
 		receipt = newModelCanaryReceipt(started, configSHA, runtime.GOOS, runtime.GOARCH)
 		receipt.Engine = cfg.Candidate.Engine
+		receipt.NoIncumbent = cfg.NoIncumbent
 		refuseModelCanary(&receipt, modelCanaryPhasePreflightComplete, modelCanaryReasonUnsupportedPlatform, depErr.Error())
 		finishModelCanaryReceipt(&receipt, time.Now().UTC())
 	} else {
@@ -377,6 +381,7 @@ func executeModelCanaryRun(ctx context.Context, cfg modelCanaryRunConfig, durati
 		now = time.Now
 	}
 	receipt := newModelCanaryReceipt(now().UTC(), configSHA, deps.Platform, deps.Architecture)
+	receipt.NoIncumbent = cfg.NoIncumbent
 	receipt.Engine = cfg.Candidate.Engine
 	receipt.Commands = modelCanaryCommandBinding{
 		CandidateArgvSHA256: hashModelCanaryArgv(cfg.Candidate.Command),
@@ -429,22 +434,37 @@ func executeModelCanaryRun(ctx context.Context, cfg modelCanaryRunConfig, durati
 		terminalSet = true
 	}
 
-	verified, err := deps.VerifyIncumbent(ctx, cfg, preflight.Incumbent)
-	if err != nil || !verified.equal(preflight.Incumbent) {
-		if err == nil {
-			err = errors.New("incumbent PID/start/argv identity changed after lease acquisition")
-		}
-		setFailure(modelCanaryPhaseIncumbentVerified, modelCanaryReasonIncumbentIdentityMismatch, err)
-		addModelCanaryEvent(&receipt, now(), modelCanaryPhaseIncumbentVerified, "reverify_incumbent", "refused", err.Error())
-	} else {
-		addModelCanaryEvent(&receipt, now(), modelCanaryPhaseIncumbentVerified, "reverify_incumbent", "ok", "")
-		bootoutAttempted = true // bootout can mutate before returning an error, so restoration is owed from here.
-		if err = deps.BootoutIncumbent(ctx, cfg, verified, durations.CandidateTERM); err != nil {
-			setFailure(modelCanaryPhaseIncumbentStopped, modelCanaryReasonBootoutFailed, err)
-			addModelCanaryEvent(&receipt, now(), modelCanaryPhaseIncumbentStopped, "bootout_incumbent", "error", err.Error())
+	if cfg.NoIncumbent {
+		if deps.VerifyUnusedListener == nil {
+			err = errors.New("unused-listener verifier unavailable")
 		} else {
-			addModelCanaryEvent(&receipt, now(), modelCanaryPhaseIncumbentStopped, "bootout_incumbent", "ok", "")
+			err = deps.VerifyUnusedListener(ctx, cfg.Candidate.ListenerPort)
 		}
+		if err != nil {
+			setFailure(modelCanaryPhaseIncumbentVerified, modelCanaryReasonIncumbentIdentityMismatch, err)
+			addModelCanaryEvent(&receipt, now(), modelCanaryPhaseIncumbentVerified, "verify_unused_listener", "refused", err.Error())
+		} else {
+			addModelCanaryEvent(&receipt, now(), modelCanaryPhaseIncumbentVerified, "verify_unused_listener", "ok", "no incumbent; no service mutation or restoration")
+		}
+	} else {
+		verified, err := deps.VerifyIncumbent(ctx, cfg, preflight.Incumbent)
+		if err != nil || !verified.equal(preflight.Incumbent) {
+			if err == nil {
+				err = errors.New("incumbent PID/start/argv identity changed after lease acquisition")
+			}
+			setFailure(modelCanaryPhaseIncumbentVerified, modelCanaryReasonIncumbentIdentityMismatch, err)
+			addModelCanaryEvent(&receipt, now(), modelCanaryPhaseIncumbentVerified, "reverify_incumbent", "refused", err.Error())
+		} else {
+			addModelCanaryEvent(&receipt, now(), modelCanaryPhaseIncumbentVerified, "reverify_incumbent", "ok", "")
+			bootoutAttempted = true // bootout can mutate before returning an error, so restoration is owed from here.
+			if err = deps.BootoutIncumbent(ctx, cfg, verified, durations.CandidateTERM); err != nil {
+				setFailure(modelCanaryPhaseIncumbentStopped, modelCanaryReasonBootoutFailed, err)
+				addModelCanaryEvent(&receipt, now(), modelCanaryPhaseIncumbentStopped, "bootout_incumbent", "error", err.Error())
+			} else {
+				addModelCanaryEvent(&receipt, now(), modelCanaryPhaseIncumbentStopped, "bootout_incumbent", "ok", "")
+			}
+		}
+
 	}
 
 	if !terminalSet {
@@ -583,16 +603,24 @@ func validateModelCanaryRequestEvidence(evidence modelCanaryRequestEvidence) err
 }
 
 func validateModelCanaryPreflight(cfg modelCanaryRunConfig, preflight modelCanaryPreflight) error {
-	if !preflight.Incumbent.valid() || preflight.BaselineSwapBytes < 0 || !validSHA256(preflight.RestorePlistSHA256) {
-		return errors.New("preflight returned incomplete incumbent, swap, or restore-plist identity")
+	if preflight.BaselineSwapBytes < 0 {
+		return errors.New("preflight returned invalid baseline swap")
 	}
-	if !sameModelCanaryDigest(preflight.Incumbent.ArgvSHA256, cfg.Incumbent.ExpectedArgvSHA256) {
-		return errors.New("preflight incumbent argv identity differs from the strict config")
-	}
-	if !sameModelCanaryDigest(preflight.RestorePlistSHA256, cfg.Incumbent.RestorePlistSHA256) {
-		return errors.New("preflight restore-plist identity differs from the strict config")
+	if !cfg.NoIncumbent {
+		if !preflight.Incumbent.valid() || preflight.BaselineSwapBytes < 0 || !validSHA256(preflight.RestorePlistSHA256) {
+			return errors.New("preflight returned incomplete incumbent, swap, or restore-plist identity")
+		}
+		if !sameModelCanaryDigest(preflight.Incumbent.ArgvSHA256, cfg.Incumbent.ExpectedArgvSHA256) {
+			return errors.New("preflight incumbent argv identity differs from the strict config")
+		}
+		if !sameModelCanaryDigest(preflight.RestorePlistSHA256, cfg.Incumbent.RestorePlistSHA256) {
+			return errors.New("preflight restore-plist identity differs from the strict config")
+		}
 	}
 	for _, name := range []string{"lsof", "ps", "footprint", "sysctl", "memory_pressure", "launchctl", "candidate", "request", "restore"} {
+		if cfg.NoIncumbent && (name == "launchctl" || name == "restore") {
+			continue
+		}
 		path := strings.TrimSpace(preflight.Tools[name])
 		if path == "" || !filepath.IsAbs(path) {
 			return fmt.Errorf("preflight tool %s has no absolute executable path", name)
@@ -691,28 +719,37 @@ func validateModelCanaryConfig(cfg modelCanaryRunConfig) (modelCanaryDurations, 
 			return durations, err
 		}
 	}
-	if err := validateModelCanaryPort("incumbent.listener_port", cfg.Incumbent.ListenerPort); err != nil {
-		return durations, err
-	}
 	if err := validateModelCanaryPort("candidate.listener_port", cfg.Candidate.ListenerPort); err != nil {
 		return durations, err
 	}
-	if cfg.Candidate.ListenerPort != cfg.Incumbent.ListenerPort {
-		return durations, errors.New("candidate.listener_port must equal incumbent.listener_port for an exact handoff")
-	}
-	if strings.TrimSpace(cfg.Incumbent.LaunchdTarget) == "" || strings.ContainsAny(cfg.Incumbent.LaunchdTarget, "\r\n\x00") {
-		return durations, errors.New("incumbent.launchd_target is required and must be one line")
-	}
-	if !validSHA256(cfg.Incumbent.ExpectedArgvSHA256) {
-		return durations, errors.New("incumbent.expected_argv_sha256 must be a sha256 digest")
-	}
-	if !filepath.IsAbs(cfg.Incumbent.RestorePlist) {
-		return durations, errors.New("incumbent.restore_plist must be an absolute path")
-	}
-	if !validSHA256(cfg.Incumbent.RestorePlistSHA256) {
-		return durations, errors.New("incumbent.restore_plist_sha256 must be a sha256 digest")
+	if cfg.NoIncumbent {
+		if cfg.Incumbent.ListenerPort != 0 || cfg.Incumbent.LaunchdTarget != "" || cfg.Incumbent.ExpectedArgvSHA256 != "" || cfg.Incumbent.RestorePlist != "" || cfg.Incumbent.RestorePlistSHA256 != "" || len(cfg.Incumbent.RestoreCommand) != 0 || len(cfg.Incumbent.StableEndpoints) != 0 {
+			return durations, errors.New("no_incumbent requires an empty incumbent configuration")
+		}
+	} else {
+		if err := validateModelCanaryPort("incumbent.listener_port", cfg.Incumbent.ListenerPort); err != nil {
+			return durations, err
+		}
+		if cfg.Candidate.ListenerPort != cfg.Incumbent.ListenerPort {
+			return durations, errors.New("candidate.listener_port must equal incumbent.listener_port for an exact handoff")
+		}
+		if strings.TrimSpace(cfg.Incumbent.LaunchdTarget) == "" || strings.ContainsAny(cfg.Incumbent.LaunchdTarget, "\r\n\x00") {
+			return durations, errors.New("incumbent.launchd_target is required and must be one line")
+		}
+		if !validSHA256(cfg.Incumbent.ExpectedArgvSHA256) {
+			return durations, errors.New("incumbent.expected_argv_sha256 must be a sha256 digest")
+		}
+		if !filepath.IsAbs(cfg.Incumbent.RestorePlist) {
+			return durations, errors.New("incumbent.restore_plist must be an absolute path")
+		}
+		if !validSHA256(cfg.Incumbent.RestorePlistSHA256) {
+			return durations, errors.New("incumbent.restore_plist_sha256 must be a sha256 digest")
+		}
 	}
 	for name, command := range map[string][]string{"candidate.command": cfg.Candidate.Command, "request.command": cfg.Request.Command, "incumbent.restore_command": cfg.Incumbent.RestoreCommand} {
+		if cfg.NoIncumbent && name == "incumbent.restore_command" {
+			continue
+		}
 		if err := validateModelCanaryCommand(name, command); err != nil {
 			return durations, err
 		}
@@ -729,7 +766,7 @@ func validateModelCanaryConfig(cfg modelCanaryRunConfig) (modelCanaryDurations, 
 	if err := validateModelCanaryEndpoints("candidate.readiness_endpoints", cfg.Candidate.ReadinessEndpoints, cfg.Candidate.ListenerPort); err != nil {
 		return durations, err
 	}
-	if err := validateModelCanaryEndpoints("incumbent.stable_endpoints", cfg.Incumbent.StableEndpoints, cfg.Incumbent.ListenerPort); err != nil {
+	if err := validateModelCanaryEndpoints("incumbent.stable_endpoints", cfg.Incumbent.StableEndpoints, cfg.Incumbent.ListenerPort); !cfg.NoIncumbent && err != nil {
 		return durations, err
 	}
 	if cfg.Watcher.ConsecutiveCrossings < 1 {
