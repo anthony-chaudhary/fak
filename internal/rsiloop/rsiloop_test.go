@@ -2,6 +2,8 @@ package rsiloop
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -424,4 +426,295 @@ func splitNonEmpty(s string) []string {
 		out = append(out, cur)
 	}
 	return out
+}
+
+// TestTransientMeasurementErrorRecoveredWithinBound proves issue #11608:
+// Two transient infrastructure measurement failures at threshold k=2 do NOT
+// prematurely trip the regression breaker or abandon later viable candidates
+// when bounded transient recovery is configured. Failed attempts are retained
+// in the journal as unmeasured evidence (preserving failure auditability).
+func TestTransientMeasurementErrorRecoveredWithinBound(t *testing.T) {
+	candidateAttempts := make(map[string]int)
+	steps := []fakeStep{
+		{label: "c1", metric: 2.0, green: true, clean: true},
+		{label: "c2", metric: 3.0, green: true, clean: true},
+		{label: "c3", metric: 4.0, green: true, clean: true},
+	}
+
+	h := Harness{
+		MetricName:          "m",
+		LowerBetter:         false,
+		BaselineRefName:     "test-ref",
+		MaxTransientRetries: 2,
+		BaselineMetric: func() (float64, string, error) {
+			return 1.0, "sha001", nil
+		},
+		Candidates: func() []Candidate {
+			return []Candidate{
+				{Label: "c1", Payload: 0},
+				{Label: "c2", Payload: 1},
+				{Label: "c3", Payload: 2},
+			}
+		},
+		Measure: func(c Candidate) (Measurement, error) {
+			candidateAttempts[c.Label]++
+			att := candidateAttempts[c.Label]
+			switch c.Label {
+			case "c1":
+				// First attempt fails with ErrTransient; retry succeeds.
+				if att == 1 {
+					return Measurement{}, ErrTransient
+				}
+				return Measurement{Metric: steps[0].metric, SuiteGreen: steps[0].green, TruthClean: steps[0].clean}, nil
+			case "c2":
+				// First attempt fails with typed TransientError; retry succeeds.
+				if att == 1 {
+					return Measurement{}, NewTransientError(errors.New("timeout"))
+				}
+				return Measurement{Metric: steps[1].metric, SuiteGreen: steps[1].green, TruthClean: steps[1].clean}, nil
+			case "c3":
+				return Measurement{Metric: steps[2].metric, SuiteGreen: steps[2].green, TruthClean: steps[2].clean}, nil
+			default:
+				return Measurement{}, errors.New("unknown")
+			}
+		},
+	}
+
+	dir := t.TempDir()
+	jPath := filepath.Join(dir, "journal.jsonl")
+	j, err := NewJournal(jPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Run(h, j, 2, 0) // k = 2 breaker threshold
+	_ = j.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if res.Escalated {
+		t.Fatalf("loop escalated prematurely! final=%s", res.Final)
+	}
+	if res.Cycles != 3 {
+		t.Fatalf("cycles=%d, want 3 (all candidates should be evaluated)", res.Cycles)
+	}
+	if res.Kept != 3 {
+		t.Fatalf("kept=%d, want 3", res.Kept)
+	}
+	if res.FinalBaseline != 4.0 {
+		t.Fatalf("final baseline=%.1f, want 4.0", res.FinalBaseline)
+	}
+
+	// Verify all 5 rows (2 failed attempts + 3 successful evaluations) in res.Rows
+	// and in the persisted journal.
+	if len(res.Rows) != 5 {
+		t.Fatalf("total rows=%d, want 5 (2 transient RETRY + 3 KEEP)", len(res.Rows))
+	}
+
+	// Row 0: c1 transient retry (unmeasured, breaker count 0)
+	r0 := res.Rows[0]
+	if r0.Candidate != "c1" || r0.Measured || r0.Decision != "RETRY" || r0.BreakerCount != 0 {
+		t.Fatalf("r0 mismatch: %+v", r0)
+	}
+	// Row 1: c1 kept (measured, breaker count 0)
+	r1 := res.Rows[1]
+	if r1.Candidate != "c1" || !r1.Measured || r1.Decision != "KEEP" || !r1.Kept {
+		t.Fatalf("r1 mismatch: %+v", r1)
+	}
+	// Row 2: c2 transient retry (unmeasured, breaker count 0)
+	r2 := res.Rows[2]
+	if r2.Candidate != "c2" || r2.Measured || r2.Decision != "RETRY" || r2.BreakerCount != 0 {
+		t.Fatalf("r2 mismatch: %+v", r2)
+	}
+	// Row 3: c2 kept (measured, breaker count 0)
+	r3 := res.Rows[3]
+	if r3.Candidate != "c2" || !r3.Measured || r3.Decision != "KEEP" || !r3.Kept {
+		t.Fatalf("r3 mismatch: %+v", r3)
+	}
+	// Row 4: c3 kept (measured, breaker count 0)
+	r4 := res.Rows[4]
+	if r4.Candidate != "c3" || !r4.Measured || r4.Decision != "KEEP" || !r4.Kept {
+		t.Fatalf("r4 mismatch: %+v", r4)
+	}
+
+	// Verify journal persistence
+	b, err := os.ReadFile(jPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := splitNonEmpty(string(b))
+	if len(lines) != 5 {
+		t.Fatalf("journal line count=%d, want 5", len(lines))
+	}
+}
+
+// TestPermanentBuildFailureTripsRegressionBreaker proves that untyped errors and
+// build failures are NOT retried and advance the breaker, tripping it at threshold k.
+func TestPermanentBuildFailureTripsRegressionBreaker(t *testing.T) {
+	steps := []fakeStep{
+		{label: "bad1", err: errBoom},
+		{label: "bad2", err: errors.New("syntax error: unexpected token")},
+		{label: "viable", metric: 10.0, green: true, clean: true},
+	}
+	h := fakeHarness("m", false, 1.0, "sha", steps)
+	h.MaxTransientRetries = 2 // retries configured, but must NOT apply to permanent errors
+
+	res, err := Run(h, nil, 2, 0) // k = 2
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Escalated {
+		t.Fatalf("expected escalation from permanent failures, got final=%s", res.Final)
+	}
+	if res.Cycles != 2 {
+		t.Fatalf("cycles=%d, want 2 (loop must stop after 2 permanent non-keeps at k=2)", res.Cycles)
+	}
+	if len(res.Rows) != 2 {
+		t.Fatalf("rows=%d, want 2 (permanent errors must not retry)", len(res.Rows))
+	}
+	if res.Rows[0].Decision != "REVERT" || res.Rows[0].BreakerCount != 1 {
+		t.Fatalf("row 0 mismatch: %+v", res.Rows[0])
+	}
+	if res.Rows[1].Decision != "ESCALATE" || res.Rows[1].BreakerCount != 2 {
+		t.Fatalf("row 1 mismatch: %+v", res.Rows[1])
+	}
+}
+
+// TestTransientMeasurementErrorExceedingBoundTripsBreaker proves that transient
+// recovery is bounded: persistent transient failures that exhaust all retries
+// are recorded as unrecovered non-keeps that advance and trip the breaker.
+func TestTransientMeasurementErrorExceedingBoundTripsBreaker(t *testing.T) {
+	h := Harness{
+		MetricName:          "m",
+		LowerBetter:         false,
+		BaselineRefName:     "test-ref",
+		MaxTransientRetries: 1, // only 1 retry allowed (2 attempts total)
+		BaselineMetric: func() (float64, string, error) {
+			return 1.0, "sha001", nil
+		},
+		Candidates: func() []Candidate {
+			return []Candidate{
+				{Label: "c1", Payload: 0},
+				{Label: "c2", Payload: 1},
+				{Label: "c3", Payload: 2},
+			}
+		},
+		Measure: func(c Candidate) (Measurement, error) {
+			return Measurement{}, ErrTransient // fails transiently on every attempt
+		},
+	}
+
+	res, err := Run(h, nil, 2, 0) // k = 2
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Escalated {
+		t.Fatalf("expected escalation after exhausted retries, got final=%s", res.Final)
+	}
+	if res.Cycles != 2 {
+		t.Fatalf("cycles=%d, want 2 (stopped after c1 and c2 exhausted retries)", res.Cycles)
+	}
+	// For each candidate: 1 RETRY row (attempt 1) + 1 REVERT/ESCALATE row (attempt 2 exhausted) = 4 rows total
+	if len(res.Rows) != 4 {
+		t.Fatalf("rows=%d, want 4", len(res.Rows))
+	}
+	if res.Rows[0].Decision != "RETRY" || res.Rows[0].BreakerCount != 0 {
+		t.Fatalf("row 0: %+v", res.Rows[0])
+	}
+	if res.Rows[1].Decision != "REVERT" || res.Rows[1].BreakerCount != 1 {
+		t.Fatalf("row 1: %+v", res.Rows[1])
+	}
+	if res.Rows[2].Decision != "RETRY" || res.Rows[2].BreakerCount != 1 {
+		t.Fatalf("row 2: %+v", res.Rows[2])
+	}
+	if res.Rows[3].Decision != "ESCALATE" || res.Rows[3].BreakerCount != 2 {
+		t.Fatalf("row 3: %+v", res.Rows[3])
+	}
+}
+
+type customTransientErr struct {
+	transient bool
+}
+
+func (c customTransientErr) Error() string   { return "custom error" }
+func (c customTransientErr) Transient() bool { return c.transient }
+
+// TestIsTransientClassification proves all transient markers (ErrTransient,
+// TransientError, interface{ Transient() bool }) are recognized while untyped
+// errors are not.
+func TestIsTransientClassification(t *testing.T) {
+	if IsTransient(nil) {
+		t.Fatal("nil should not be transient")
+	}
+	if !IsTransient(ErrTransient) {
+		t.Fatal("ErrTransient must be transient")
+	}
+	if !IsTransient(fmt.Errorf("wrapped: %w", ErrTransient)) {
+		t.Fatal("wrapped ErrTransient must be transient")
+	}
+	if !IsTransient(&TransientError{Err: errors.New("timeout")}) {
+		t.Fatal("*TransientError must be transient")
+	}
+	if !IsTransient(TransientError{Err: errors.New("timeout")}) {
+		t.Fatal("TransientError value must be transient")
+	}
+	if !IsTransient(NewTransientError(errors.New("conn reset"))) {
+		t.Fatal("NewTransientError must be transient")
+	}
+	if !IsTransient(customTransientErr{transient: true}) {
+		t.Fatal("customTransientErr{transient: true} must be transient")
+	}
+	if IsTransient(customTransientErr{transient: false}) {
+		t.Fatal("customTransientErr{transient: false} must not be transient")
+	}
+	if IsTransient(errors.New("syntax error")) {
+		t.Fatal("untyped errors.New must not be transient")
+	}
+	if IsTransient(errBoom) {
+		t.Fatal("errBoom must not be transient")
+	}
+}
+
+// TestTransientBudgetBoundsTotalRetriesAcrossRun proves TransientBudget limits the total
+// transient retry attempts across the entire run.
+func TestTransientBudgetBoundsTotalRetriesAcrossRun(t *testing.T) {
+	h := Harness{
+		MetricName:          "m",
+		LowerBetter:         false,
+		BaselineRefName:     "test-ref",
+		MaxTransientRetries: 2,
+		TransientBudget:     1, // only 1 retry for the entire run
+		BaselineMetric: func() (float64, string, error) {
+			return 1.0, "sha001", nil
+		},
+		Candidates: func() []Candidate {
+			return []Candidate{
+				{Label: "c1", Payload: 0},
+				{Label: "c2", Payload: 1},
+			}
+		},
+		Measure: func(c Candidate) (Measurement, error) {
+			return Measurement{}, ErrTransient
+		},
+	}
+
+	res, err := Run(h, nil, 3, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// c1 uses the 1 budget retry: row 0 (RETRY), row 1 (REVERT, retries exhausted).
+	// c2 cannot retry (budget 0 left): row 2 (REVERT, no retries allowed).
+	if len(res.Rows) != 3 {
+		t.Fatalf("rows=%d, want 3", len(res.Rows))
+	}
+	if res.Rows[0].Decision != "RETRY" {
+		t.Fatalf("row 0 should be RETRY: %+v", res.Rows[0])
+	}
+	if res.Rows[1].Decision != "REVERT" {
+		t.Fatalf("row 1 should be REVERT: %+v", res.Rows[1])
+	}
+	if res.Rows[2].Decision != "REVERT" {
+		t.Fatalf("row 2 should be REVERT: %+v", res.Rows[2])
+	}
 }

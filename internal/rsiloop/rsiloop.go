@@ -23,12 +23,69 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/shipgate"
 )
+
+// ErrTransient marks a measurement failure as a transient infrastructure error
+// (e.g. timeout, device busy, network blip) eligible for bounded retry, rather
+// than a candidate code/build regression.
+var ErrTransient = errors.New("transient measurement error")
+
+// TransientError is a typed error wrapping a transient measurement failure.
+type TransientError struct {
+	Err error
+}
+
+func (e TransientError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("transient measurement error: %v", e.Err)
+	}
+	return "transient measurement error"
+}
+
+func (e TransientError) Unwrap() error {
+	return e.Err
+}
+
+func (e TransientError) Transient() bool {
+	return true
+}
+
+// NewTransientError wraps err into a typed TransientError.
+func NewTransientError(err error) error {
+	return &TransientError{Err: err}
+}
+
+// transientMarker tests whether an error advertises itself as transient.
+type transientMarker interface {
+	Transient() bool
+}
+
+// IsTransient reports whether err represents a transient measurement failure.
+// It recognizes ErrTransient (via errors.Is), TransientError (value or pointer),
+// and any error implementing interface{ Transient() bool } returning true.
+func IsTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrTransient) {
+		return true
+	}
+	var tm transientMarker
+	if errors.As(err, &tm) {
+		return tm.Transient()
+	}
+	return false
+}
+
+// DefaultMaxTransientRetries is the recommended bound for transient measurement
+// retries per candidate.
+const DefaultMaxTransientRetries = 2
 
 // Candidate is one proposed change. The engine treats Payload opaquely — the
 // Proposer constructs it, the Measure seam interprets it (e.g. a new cache size) —
@@ -101,7 +158,20 @@ type Harness struct {
 	// Measure applies a candidate in isolation and returns its measured witness. An
 	// error here is NOT fatal: a candidate that won't even build is simply reverted
 	// (recorded as a non-keep with SuiteGreen=false), and the loop continues.
+	// Transient infrastructure errors (recognized by IsTransient) are retried up to
+	// MaxTransientRetries before advancing the regression breaker.
 	Measure func(c Candidate) (Measurement, error)
+	// MaxTransientRetries bounds the number of measurement retry attempts for
+	// transient infrastructure errors per candidate. When > 0, transient
+	// measurement errors (identified by IsTransient) are retried up to
+	// MaxTransientRetries times before the failure is treated as unrecovered.
+	// Failed attempts are retained in the journal as unmeasured evidence without
+	// advancing the regression breaker. Defaults to 0 (no retries).
+	MaxTransientRetries int
+	// TransientBudget optionally bounds the total number of transient measurement
+	// retries across the entire Run. When > 0, retries stop once the budget is
+	// exhausted even if MaxTransientRetries has not been reached for a candidate.
+	TransientBudget int
 	// Classify optionally proves the candidate's evidence class from artifacts the
 	// candidate did not author (for example, touched paths). nil means ClassFull.
 	Classify func(c Candidate) shipgate.EvidenceClass
@@ -128,7 +198,7 @@ type Row struct {
 	Improved     bool       `json:"improved"`    // strict directional gain vs the running baseline
 	SuiteGreen   bool       `json:"suite_green"` // derived from a real suite run
 	TruthClean   bool       `json:"truth_clean"` // derived from a real truth syscall
-	Decision     string     `json:"decision"`    // KEEP | REVERT | ESCALATE | TRACK
+	Decision     string     `json:"decision"`    // KEEP | REVERT | ESCALATE | TRACK | RETRY
 	Kept         bool       `json:"kept"`        // the non-forgeable keep-bit (shipgate)
 	BreakerCount int        `json:"breaker_nonkeeps"`
 	BaselineRef  string     `json:"baseline_ref"`       // the resolved SHA the baseline + every candidate forked from
@@ -240,6 +310,7 @@ func RunObserved(h Harness, j *Journal, k, maxCycles int, obs Observer) (Result,
 	res := Result{Final: shipgate.REVERT, FinalBaseline: base, BaselineRef: baseRef}
 	running := base
 
+	transientRetriesUsed := 0
 	cands := h.Candidates()
 	for i, c := range cands {
 		if maxCycles > 0 && i >= maxCycles {
@@ -262,16 +333,84 @@ func RunObserved(h Harness, j *Journal, k, maxCycles int, obs Observer) (Result,
 			measure = h.MeasureTruthOnly
 		}
 
-		m, merr := measure(c)
-		note := m.Note // carry a measurement-supplied detail (e.g. a suite-red diagnostic)
-		measured := merr == nil
+		maxRetries := h.MaxTransientRetries
+		if maxRetries < 0 {
+			maxRetries = 0
+		}
+
+		var m Measurement
+		var merr error
+		var note string
+		var measured bool
+		attempt := 0
+
+		for {
+			m, merr = measure(c)
+			note = m.Note // carry a measurement-supplied detail (e.g. a suite-red diagnostic)
+			measured = merr == nil
+
+			if merr == nil {
+				break
+			}
+
+			isTrans := IsTransient(merr)
+			canRetry := isTrans && attempt < maxRetries
+			if canRetry && h.TransientBudget > 0 && transientRetriesUsed >= h.TransientBudget {
+				canRetry = false
+			}
+
+			if canRetry {
+				transientRetriesUsed++
+				retryNote := fmt.Sprintf("transient measure error (attempt %d): %v", attempt+1, merr)
+				if note != "" {
+					retryNote = note + "; " + retryNote
+				}
+				retryRow := Row{
+					Cycle:        cycle,
+					Mode:         "improve",
+					Candidate:    c.Label,
+					MetricName:   h.MetricName,
+					Baseline:     running,
+					Candidate_:   running,
+					Measured:     false,
+					LowerBetter:  h.LowerBetter,
+					Improved:     false,
+					SuiteGreen:   false,
+					TruthClean:   false,
+					Decision:     "RETRY",
+					Kept:         false,
+					BreakerCount: gate.ConsecutiveNonKeeps(),
+					BaselineRef:  baseRef,
+					RefName:      h.BaselineRefName,
+					Note:         retryNote,
+				}
+				if j != nil {
+					if err := j.Append(retryRow); err != nil {
+						return res, fmt.Errorf("journal append: %w", err)
+					}
+				}
+				res.Rows = append(res.Rows, retryRow)
+				if obs != nil {
+					obs(retryRow)
+				}
+				attempt++
+				continue
+			}
+
+			break
+		}
+
 		if merr != nil {
 			// A candidate that won't build/measure can't be kept — record it as a
 			// hard non-keep (suite RED) and let the breaker advance. Measured=false
 			// marks Candidate_ as NOT a real measurement (it is the baseline, set only
 			// so the witness reverts) — a downstream reader must not trust it.
 			m = Measurement{Metric: running, SuiteGreen: false, TruthClean: false}
-			note = "measure error: " + merr.Error()
+			if attempt > 0 {
+				note = fmt.Sprintf("measure error (transient retries exhausted after %d attempts): %v", attempt+1, merr)
+			} else {
+				note = "measure error: " + merr.Error()
+			}
 		}
 
 		w := shipgate.Witness{
