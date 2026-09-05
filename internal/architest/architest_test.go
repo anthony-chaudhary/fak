@@ -841,6 +841,7 @@ var tier = map[string]int{
 	"fakpack":                    2,
 	"allinone":                   5,
 	"airgaptest":                 5, // hermetic air-gapped harness integration contracts (#11387).
+	"capabilitymatrix":           1, // unified model capability registry (#11507); stdlib-only, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
