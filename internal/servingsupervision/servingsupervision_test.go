@@ -3,6 +3,8 @@ package servingsupervision_test
 import (
 	"context"
 	"errors"
+	"net"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -208,7 +210,9 @@ func TestDrainBoundedTrackingAndReceipt(t *testing.T) {
 
 	// Release 1 request during drain, leave 1 slow request
 	go func() {
-		time.Sleep(10 * time.Millisecond)
+		for dm.Phase() != servingsupervision.PhaseDraining {
+			runtime.Gosched()
+		}
 		release1()
 	}()
 
@@ -368,7 +372,14 @@ func TestProxyReconstructibleRestart(t *testing.T) {
 		t.Fatalf("rep1 start: %v", err)
 	}
 
-	proxy := servingsupervision.NewProxySupervisor(proxySpec, "proxy-0", "http://127.0.0.1:9090")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	endpoint := "http://" + ln.Addr().String()
+	ln.Close()
+
+	proxy := servingsupervision.NewProxySupervisor(proxySpec, "proxy-0", endpoint)
 	if err := proxy.Start(ctx); err != nil {
 		t.Fatalf("proxy start: %v", err)
 	}
@@ -407,7 +418,7 @@ func TestProxyReconstructibleRestart(t *testing.T) {
 	}
 
 	// Stable endpoint identity is preserved
-	if proxy.Endpoint() != "http://127.0.0.1:9090" {
+	if proxy.Endpoint() != endpoint {
 		t.Fatalf("endpoint identity changed: %s", proxy.Endpoint())
 	}
 

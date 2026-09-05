@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dogfoodscore"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
@@ -219,11 +221,20 @@ func runSteerabilityScorecard() ([]byte, error) {
 	interps = append(interps, "python3", "python")
 	var lastErr error
 	for _, py := range interps {
-		cmd := exec.Command(py, "tools/steerability_scorecard.py", "--json")
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		cmd := exec.CommandContext(ctx, py, "tools/steerability_scorecard.py", "--json")
 		windowgate.ConfigureBackgroundCommand(cmd)
+		cmd.WaitDelay = 5 * time.Second
+		cmd.Cancel = func() error {
+			if cmd.Process != nil && cmd.Process.Pid > 0 {
+				procguard.KillPID(cmd.Process.Pid)
+			}
+			return nil
+		}
 		var out, errb bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &out, &errb
 		runErr := cmd.Run()
+		cancel()
 		if out.Len() > 0 && bytes.HasPrefix(bytes.TrimSpace(out.Bytes()), []byte("{")) {
 			// Valid-looking JSON on stdout: the verdict (exit code) is the payload, not a failure.
 			return out.Bytes(), nil

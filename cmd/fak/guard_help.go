@@ -110,7 +110,7 @@ var guardFlagGroups = []guardFlagGroup{
 	}},
 	{"Observability & UI", []string{
 		"banner", "quiet", "split", "split-where", "split-interval", "split-dry-run",
-		"debug-stats", "resource-stats", "child-max-memory-mb", "child-resource-poll", "child-resource-journal", "dojo",
+		"debug-stats", "resource-stats", "child-max-memory-mb", "child-resource-poll", "child-resource-journal", "child-headroom-debounce", "dojo",
 	}},
 	{"Diagnostics & replay", []string{
 		"probe", "replay-trace", "replay-wire",

@@ -37,6 +37,7 @@ type Qwen38BenchSpeedupMetrics struct {
 // Qwen38GPUDirectSwapReceipt represents the structured, machine-readable receipt for Qwen3.8 GPU Direct swapping.
 type Qwen38GPUDirectSwapReceipt struct {
 	Schema                 string                           `json:"schema"`
+	Provenance             string                           `json:"provenance"`
 	Verdict                string                           `json:"verdict"`
 	Model                  string                           `json:"model"`
 	Architecture           string                           `json:"architecture"`
@@ -242,6 +243,7 @@ func runQwen38OverflowBench(stdout, stderr io.Writer, engine *compute.AMDGPUDire
 	if jsonOut {
 		receipt := Qwen38GPUDirectSwapReceipt{
 			Schema:                 Qwen38GPUDirectSwapReceiptSchema,
+			Provenance:             "MODELED",
 			Verdict:                "PASS",
 			Model:                  "Qwen3.8",
 			Architecture:           archName,
@@ -272,7 +274,7 @@ func runQwen38OverflowBench(stdout, stderr io.Writer, engine *compute.AMDGPUDire
 
 	// Formatted human table output
 	fmt.Fprintln(stdout, "========================================================================================================================")
-	fmt.Fprintf(stdout, "Qwen3.8 GPU Direct Storage & Cache Swap Benchmark (%s)\n", archName)
+	fmt.Fprintf(stdout, "Qwen3.8 GPU Direct Storage & Cache Swap Architecture [MODELED Projections] (%s)\n", archName)
 	fmt.Fprintln(stdout, "========================================================================================================================")
 	fmt.Fprintf(stdout, "%-23s | %-14s | %-9s | %-15s | %-14s | %-12s | %-12s | %s\n",
 		"Arm", "Staging Copies", "TTFT (ms)", "Prefill (tok/s)", "Decode (tok/s)", "ITL p50 (ms)", "ITL p95 (ms)", "Bandwidth")
@@ -292,6 +294,9 @@ func runQwen38OverflowBench(stdout, stderr io.Writer, engine *compute.AMDGPUDire
 	for _, ev := range evidence {
 		fmt.Fprintf(stdout, "  - %s\n", ev)
 	}
+	fmt.Fprintln(stdout, "Note: Architecture specification and modeled projections ([SIMULATED]).")
+	fmt.Fprintln(stdout, "      Algorithmic zero-copy invariant (staging_copy_count = 0) and bit-exact hybrid state round-trip verified.")
+	fmt.Fprintln(stdout, "      Physical on-device baseline on this host is 1.15-1.24 tok/s (docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md).")
 	fmt.Fprintln(stdout, "========================================================================================================================")
 
 	return 0

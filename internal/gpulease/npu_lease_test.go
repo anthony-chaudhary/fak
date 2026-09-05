@@ -2,6 +2,7 @@ package gpulease
 
 import (
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -144,6 +145,9 @@ func TestNPULease_ConcurrentContention(t *testing.T) {
 	var successCount int64
 	var busyCount int64
 	var wg sync.WaitGroup
+	var once sync.Once
+	barrier := make(chan struct{})
+	firstAcquired := make(chan struct{})
 
 	wg.Add(numWorkers)
 	for i := 0; i < numWorkers; i++ {
@@ -153,7 +157,8 @@ func TestNPULease_ConcurrentContention(t *testing.T) {
 			l, err := mgr.Acquire(sess, "shared-model", 200*time.Millisecond)
 			if err == nil {
 				atomic.AddInt64(&successCount, 1)
-				time.Sleep(10 * time.Millisecond)
+				once.Do(func() { close(firstAcquired) })
+				<-barrier
 				l.Release()
 			} else {
 				var busy *ErrNPUBusy
@@ -164,6 +169,11 @@ func TestNPULease_ConcurrentContention(t *testing.T) {
 		}(i)
 	}
 
+	<-firstAcquired
+	for atomic.LoadInt64(&successCount)+atomic.LoadInt64(&busyCount) < numWorkers {
+		runtime.Gosched()
+	}
+	close(barrier)
 	wg.Wait()
 
 	if successCount == 0 {

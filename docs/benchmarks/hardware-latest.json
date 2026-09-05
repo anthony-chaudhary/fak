@@ -8,9 +8,9 @@
       "row": "| Mac | Qwen3.8-27B Q4_K_M on an Apple M3 Pro: 2.3–2.9 decode tok/s and 3.2–8.4 full-prefill tok/s, observed 2026-08-20. | Historical; its review window ended without a comparable replacement, so this is not a current parity claim. | [Mac result](docs/benchmarks/QWEN38-27B-LATEST.md) |"
     },
     "AMD": {
-      "observed": "2026-09-04",
-      "detail": "docs/benchmarks/QWEN38-AMD-GPUDIRECT-RESULTS.md",
-      "row": "| AMD | Qwen3.8-27B on an RX 7600 (8GB VRAM) + NVMe Gen5: 145.8 decode tok/s, 2450.0 prefill tok/s, 34.80 ms TTFT via zero-copy GPU Direct NVMe P2PDMA, observed 2026-09-04. | Witnessed via native BaM storage kernel; eliminates memory wall on consumer VRAM saturation. | [AMD result](docs/benchmarks/QWEN38-AMD-GPUDIRECT-RESULTS.md) |"
+      "observed": "2026-06-19",
+      "detail": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
+      "row": "| AMD | Qwen3.6-27B on an RX 7600: the measured pure-fak microbench reached 1.15–1.24 decode tok/s versus 0.99 for the local llama.cpp Vulkan baseline, observed 2026-06-19. | Witnessed in that narrow microbench; not a broad quality or full-model parity claim. Qwen3.8 awaits a comparable AMD receipt. | [AMD result](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |"
     },
     "NVIDIA": {
       "observed": "2026-08-25",

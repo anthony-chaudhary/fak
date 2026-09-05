@@ -46,8 +46,9 @@ type ArmMetrics struct {
 	HitTurnCap          bool   `json:"hit_turn_cap"`
 	FinalAnswer         string `json:"final_answer"`
 
-	GracefulDrained      bool `json:"graceful_drained,omitempty"`
-	SynthesizedFinalTurn bool `json:"synthesized_final_turn,omitempty"`
+	GracefulDrained         bool `json:"graceful_drained,omitempty"`
+	SynthesizedFinalTurn    bool `json:"synthesized_final_turn,omitempty"`
+	GoalAnchorRecoveryTurns int  `json:"goal_anchor_recovery_turns,omitempty"`
 
 	// ElapsedMs is the arm's observed wall-clock in milliseconds. It is populated
 	// ONLY on the live lane (a real network model actually blocks on each turn); the
@@ -452,6 +453,9 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 	var sp *specState
 	if fak && cfg.spec != nil {
 		sp = newSpecState(cfg.spec, k)
+	}
+	if cfg.goalAnchor == nil && strings.TrimSpace(task) != "" {
+		cfg.goalAnchor = NewGoalAnchor(task)
 	}
 	// The loop's opening transcript and tool surface. With no wire options these are the
 	// historical pair — system prompt + the single task message, and the built-in

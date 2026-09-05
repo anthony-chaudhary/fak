@@ -3,6 +3,7 @@ package breathgate
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -505,7 +506,7 @@ func TestGate_Concurrency(t *testing.T) {
 				_ = g.Check()
 				_ = g.Stats()
 				_ = g.Remaining()
-				time.Sleep(200 * time.Microsecond)
+				runtime.Gosched()
 			}
 		}
 	}()

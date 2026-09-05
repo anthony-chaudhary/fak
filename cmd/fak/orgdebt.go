@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,8 +12,10 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/orgdebt"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
 func cmdOrgDebtScore(argv []string) {
@@ -127,7 +130,15 @@ func runOrgDebtScore(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+const defaultGitTimeout = 60 * time.Second
+
 func fetchRecentCommits(root string, limit int) ([]orgdebt.Commit, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultGitTimeout)
+	defer cancel()
+	return fetchRecentCommitsContext(ctx, root, limit)
+}
+
+func fetchRecentCommitsContext(ctx context.Context, root string, limit int) ([]orgdebt.Commit, error) {
 	args := []string{
 		"-C", root,
 		"log",
@@ -135,8 +146,15 @@ func fetchRecentCommits(root string, limit int) ([]orgdebt.Commit, error) {
 		"--pretty=format:__COMMIT__%H%x00%P%x00%s",
 		"--numstat",
 	}
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(ctx, "git", args...)
 	configureDispatchHelperCommand(cmd)
+	cmd.WaitDelay = 5 * time.Second
+	cmd.Cancel = func() error {
+		if cmd.Process != nil && cmd.Process.Pid > 0 {
+			procguard.KillPID(cmd.Process.Pid)
+		}
+		return nil
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err

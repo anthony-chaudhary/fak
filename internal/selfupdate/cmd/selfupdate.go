@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -22,6 +23,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/selfinstall"
 	"github.com/anthony-chaudhary/fak/internal/selfupdate"
 	"github.com/anthony-chaudhary/fak/internal/versionskew"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // cmdSelfUpdate — `fak self-update`: converge THIS install on the latest VERIFIED fak.
@@ -1097,12 +1099,40 @@ func sameBinary(path string) bool {
 // that line (or that errors) yields ok=false; the caller treats that as "cannot prove fresh"
 // which, in --target mode, correctly lets the update proceed (a fak that cannot self-report
 // its build is by definition not the current one).
-func stampOfBinary(path string) (binstamp.Stamp, bool) {
-	bi, err := buildinfo.ReadFile(path)
-	if err != nil {
-		return binstamp.Stamp{}, false
+func isFakBinary(bi *buildinfo.BuildInfo) bool {
+	if bi == nil {
+		return false
 	}
-	stamp := binstamp.FromBuildInfo(bi)
+	if strings.Contains(bi.Path, "internal/") || strings.HasSuffix(bi.Path, ".test") {
+		return false
+	}
+	return true
+}
+
+func stampOfBinary(path string) (binstamp.Stamp, bool) {
+	var stamp binstamp.Stamp
+	bi, err := buildinfo.ReadFile(path)
+	if err == nil {
+		stamp = binstamp.FromBuildInfo(bi)
+	}
+	if !stamp.HasVCS && isFakBinary(bi) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, path, "version", "--json")
+		windowgate.ConfigureBackgroundCommand(cmd)
+		if out, err := cmd.Output(); err == nil {
+			var id struct {
+				Commit  string `json:"commit"`
+				Dirty   bool   `json:"dirty"`
+				Stamped bool   `json:"stamped"`
+			}
+			if json.Unmarshal(out, &id) == nil && id.Stamped && id.Commit != "" {
+				stamp.Revision = id.Commit
+				stamp.HasVCS = true
+				stamp.Dirty = id.Dirty
+			}
+		}
+	}
 	return stamp, stamp.HasVCS
 }
 

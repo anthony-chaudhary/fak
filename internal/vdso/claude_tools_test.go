@@ -133,10 +133,13 @@ func TestClaudeRead_InvalidationOnFileModificationOnDisk(t *testing.T) {
 	}
 
 	// External modification on disk (outside fak)
-	time.Sleep(10 * time.Millisecond) // ensure mtime tick
 	updatedContent := `{"version":2,"env":"prod"}`
 	if err := os.WriteFile(filePath, []byte(updatedContent), 0644); err != nil {
 		t.Fatalf("WriteFile update: %v", err)
+	}
+	newMtime := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(filePath, newMtime, newMtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
 	}
 
 	// Next lookup must detect mtime/content-hash change, evict entry, and return miss

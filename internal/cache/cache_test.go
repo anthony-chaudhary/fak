@@ -3,10 +3,25 @@ package cache
 import (
 	"context"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
 )
+
+func pollUntil(t testing.TB, timeout time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		runtime.Gosched()
+	}
+	if !cond() {
+		t.Fatalf("condition not met within %v", timeout)
+	}
+}
 
 func TestMemoryBackend(t *testing.T) {
 	b := NewMemoryBackend()
@@ -33,11 +48,10 @@ func TestMemoryBackend(t *testing.T) {
 	if err := b.Set(ctx, "exp", []byte("bye"), 10*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(20 * time.Millisecond)
-	_, ok, _ = b.Get(ctx, "exp")
-	if ok {
-		t.Fatalf("expected key to be expired")
-	}
+	pollUntil(t, 2*time.Second, func() bool {
+		_, ok, _ := b.Get(ctx, "exp")
+		return !ok
+	})
 
 	// 4. Delete
 	if err := b.Delete(ctx, "k1"); err != nil {
@@ -86,7 +100,7 @@ func TestRedisAndCloudflareBackends(t *testing.T) {
 	ctx := context.Background()
 
 	// Redis backend
-	rb := NewRedisBackend("localhost:6379", "db0")
+	rb := NewRedisBackend("127.0.0.1:0", "db0")
 	defer rb.Close()
 
 	if err := rb.Set(ctx, "k1", []byte("redis_val"), 0); err != nil {

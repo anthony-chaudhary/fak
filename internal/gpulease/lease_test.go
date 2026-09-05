@@ -85,19 +85,23 @@ func TestWaitThenSucceed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}
-	go func() {
-		time.Sleep(40 * time.Millisecond)
-		held.Release()
-	}()
 
-	start := time.Now()
-	l, err := Acquire(Options{Path: path, pollEvery: 5 * time.Millisecond, Timeout: 5 * time.Second})
+	waitedCalled := false
+	l, err := Acquire(Options{
+		Path:      path,
+		pollEvery: 2 * time.Millisecond,
+		Timeout:   5 * time.Second,
+		Logf: func(format string, args ...any) {
+			waitedCalled = true
+			held.Release()
+		},
+	})
 	if err != nil {
 		t.Fatalf("waiting acquire: %v", err)
 	}
 	defer l.Release()
-	if time.Since(start) < 35*time.Millisecond {
-		t.Fatalf("acquired before the holder released (%v)", time.Since(start))
+	if !waitedCalled {
+		t.Fatal("acquired without waiting for the holder to release")
 	}
 }
 

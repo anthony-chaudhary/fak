@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -8,10 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
 	"github.com/anthony-chaudhary/fak/internal/guardroute"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
@@ -313,10 +316,19 @@ func runPythonTool(root string, args []string) ([]byte, error) {
 	interps = append(interps, "python3", "python")
 	var lastErr error
 	for _, py := range interps {
-		cmd := exec.Command(py, args...)
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		cmd := exec.CommandContext(ctx, py, args...)
 		cmd.Dir = root
 		cmd.Stderr = os.Stderr
+		cmd.WaitDelay = 5 * time.Second
+		cmd.Cancel = func() error {
+			if cmd.Process != nil && cmd.Process.Pid > 0 {
+				procguard.KillPID(cmd.Process.Pid)
+			}
+			return nil
+		}
 		out, err := cmd.Output()
+		cancel()
 		if err == nil {
 			return out, nil
 		}

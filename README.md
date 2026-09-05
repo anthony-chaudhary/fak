@@ -38,7 +38,7 @@ and links to its receipt.
 | Platform | Latest witnessed result | Status | Details |
 |---|---|---|---|
 | Mac | Qwen3.8-27B Q4_K_M on an Apple M3 Pro: 2.3–2.9 decode tok/s and 3.2–8.4 full-prefill tok/s, observed 2026-08-20. | Historical; its review window ended without a comparable replacement, so this is not a current parity claim. | [Mac result](docs/benchmarks/QWEN38-27B-LATEST.md) |
-| AMD | Qwen3.8-27B on an RX 7600 (8GB VRAM) + NVMe Gen5: 145.8 decode tok/s, 2450.0 prefill tok/s, 34.80 ms TTFT via zero-copy GPU Direct NVMe P2PDMA, observed 2026-09-04. | Witnessed via native BaM storage kernel; eliminates memory wall on consumer VRAM saturation. | [AMD result](docs/benchmarks/QWEN38-AMD-GPUDIRECT-RESULTS.md) |
+| AMD | Qwen3.6-27B on an RX 7600: the measured pure-fak microbench reached 1.15–1.24 decode tok/s versus 0.99 for the local llama.cpp Vulkan baseline, observed 2026-06-19. | Witnessed in that narrow microbench; not a broad quality or full-model parity claim. Qwen3.8 awaits a comparable AMD receipt. | [AMD result](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |
 | NVIDIA | Native Qwen3.8-27B CUDA: the cold arm produced 5/5 exact outputs at 11.8–12.1 decode tok/s; confirmed cache hits produced 0/5 exact at about 0.2 tok/s, captured 2026-08-25. | Hold: failed cache-hit quality excludes this from parity or improvement claims. | [NVIDIA result](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md) |
 
 Read the status column before comparing rates: the held NVIDIA cache-hit path measured about 0.2 tok/s, but failed exact-output quality.
@@ -64,7 +64,7 @@ Most LLM serving engines treat memory overflow as a slow host-memory fallback wi
 ## Why run coding agents on fak
 
 - **Workflow batching and cache reuse:** Multi-agent coding loops reuse prompt context across turns, achieving **4.1× vs tuned** baselines with 86.7% cache hit rates. Instead of re-reading codebases on every turn, fak keeps shared prefixes hot and trims stale context.
-- **Zero-copy GPU Direct storage overflow:** Run models far exceeding physical GPU VRAM without CPU memory thrashing. Built on a BaM-style accelerator storage architecture, fak maps NVMe submission queues directly in GPU VRAM and streams paged KV caches and hybrid linear attention states over peer-to-peer PCIe DMA. On an 8 GB AMD RX 7600, Qwen3.8-27B achieves 145.8 decode tok/s and 34.80 ms TTFT with strictly zero host DRAM bounce copies (3.00× faster decode and 73.6% lower p95 latency than CPU-staged swapping).
+- **Zero-copy GPU Direct storage overflow:** Run models far exceeding physical GPU VRAM without CPU memory thrashing. Built on a BaM-style accelerator storage architecture, fak maps NVMe submission queues directly in GPU VRAM and streams paged KV caches and hybrid linear attention states over peer-to-peer PCIe DMA without host DRAM bounce buffering (`StagingCopyCount == 0`). See the [GPU Direct overflow specification](docs/benchmarks/QWEN38-AMD-GPUDIRECT-RESULTS.md).
 - **Local execution on your hardware:** Run models directly with native inference across Apple Silicon, AMD, and NVIDIA. Cut per-token API bills and keep your code private on your own machine.
 - **Default-deny capability floor:** Protect your workspace from unintended terminal commands or file edits. Every tool call is checked against a default-deny (block everything unless allowed) policy before it runs. Drop-in support wraps existing agents like Claude Code, Codex, Aider, and Cursor with zero rewrites.
 
@@ -116,4 +116,4 @@ Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium`
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-09-04 vs VERSION 0.47.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-04 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-09-04 vs VERSION 0.48.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-04 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->

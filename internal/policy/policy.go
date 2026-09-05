@@ -385,6 +385,22 @@ func (m Manifest) ToPolicy() (adjudicator.Policy, error) {
 	return rt.Adjudicator, nil
 }
 
+// NewTieredEvaluator constructs a TieredEvaluator pre-configured with the Manifest's allowed tools.
+func (m Manifest) NewTieredEvaluator() *TieredEvaluator {
+	eval := NewTieredEvaluator()
+	for _, tool := range m.Allow {
+		eval.AllowTool(tool)
+	}
+	return eval
+}
+
+// EvaluateAgainstTiers evaluates a tool invocation against the two-tier decoupled safety floor model
+// using this manifest's allowed tools on the convenience surface.
+func (m Manifest) EvaluateAgainstTiers(tool string, args any) TierDecision {
+	eval := m.NewTieredEvaluator()
+	return eval.Evaluate(tool, args)
+}
+
 // DeniesToolUnconditionally reports whether the manifest denies tool for EVERY
 // argument value — i.e. no ArgRule could make it ALLOW — the args-independent
 // "is this a blanket block?" question promptmmu (#752) asks before it may safely

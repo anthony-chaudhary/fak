@@ -24,6 +24,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -36,6 +37,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
 const (
@@ -256,11 +258,20 @@ func cronObservedBlock(job, slot, source, text string) string {
 // captured stdout. A non-zero exit (or a shell that cannot start) is an error, so
 // a broken collector fails the prompt closed rather than injecting empty context.
 func cronRunScript(script string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
 	var c *exec.Cmd
 	if runtime.GOOS == "windows" {
-		c = exec.Command("cmd", "/c", script)
+		c = exec.CommandContext(ctx, "cmd", "/c", script)
 	} else {
-		c = exec.Command("sh", "-c", script)
+		c = exec.CommandContext(ctx, "sh", "-c", script)
+	}
+	c.WaitDelay = 5 * time.Second
+	c.Cancel = func() error {
+		if c.Process != nil && c.Process.Pid > 0 {
+			procguard.KillPID(c.Process.Pid)
+		}
+		return nil
 	}
 	var out, errb bytes.Buffer
 	c.Stdout = &out

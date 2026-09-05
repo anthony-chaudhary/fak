@@ -8,6 +8,8 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,6 +21,7 @@ type concurrencyWitnessReader struct {
 	active     atomic.Int32
 	peak       atomic.Int32
 	totalCalls atomic.Int64
+	onActive   func(cur int32)
 }
 
 func newConcurrencyWitnessReader(size int, gate chan struct{}) *concurrencyWitnessReader {
@@ -41,6 +44,9 @@ func (r *concurrencyWitnessReader) ReadAt(p []byte, off int64) (int, error) {
 		}
 	}
 	r.totalCalls.Add(1)
+	if r.onActive != nil {
+		r.onActive(cur)
+	}
 
 	if r.gate != nil {
 		<-r.gate
@@ -98,15 +104,24 @@ func TestExpertStream_Concurrency(t *testing.T) {
 	}
 	doneCh := make(chan batchResult, 1)
 
+	full := make(chan struct{})
+	var once sync.Once
+	reader.onActive = func(cur int32) {
+		if cur == queueDepth {
+			once.Do(func() { close(full) })
+		}
+	}
+
 	go func() {
 		leases, err := q.StreamBatch(context.Background(), first32)
 		doneCh <- batchResult{leases: leases, err: err}
 	}()
 
 	// Wait for all 32 worker lanes to become concurrently active in ReadAt.
-	deadline := time.Now().Add(5 * time.Second)
-	for reader.active.Load() < queueDepth && time.Now().Before(deadline) {
-		time.Sleep(2 * time.Millisecond)
+	select {
+	case <-full:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %d active workers, got %d", queueDepth, reader.active.Load())
 	}
 
 	activeCount := reader.active.Load()
@@ -125,8 +140,8 @@ func TestExpertStream_Concurrency(t *testing.T) {
 		nextDoneCh <- batchResult{leases: leases, err: err}
 	}()
 
-	// Brief sleep to let second batch queue up. Active workers must still be capped at 32.
-	time.Sleep(20 * time.Millisecond)
+	// Active workers must still be capped at 32.
+	runtime.Gosched()
 	if activeAfterQueue := reader.active.Load(); activeAfterQueue > queueDepth {
 		t.Fatalf("active workers exceeded queue depth %d: got %d", queueDepth, activeAfterQueue)
 	}
@@ -434,12 +449,24 @@ func TestExpertStream_ContextCancellation(t *testing.T) {
 		q.RegisterLocation(i, int64(i*1024), 1024)
 	}
 
+	filled := make(chan struct{})
+	var fillOnce sync.Once
+	reader.onActive = func(cur int32) {
+		if cur == 2 {
+			fillOnce.Do(func() { close(filled) })
+		}
+	}
+
 	// Fill both slots with blocked reads.
 	go func() {
 		q.StreamBatch(context.Background(), []ExpertRequest{{ExpertID: 0}, {ExpertID: 1}})
 	}()
 
-	time.Sleep(10 * time.Millisecond)
+	select {
+	case <-filled:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for slots to be filled")
+	}
 
 	// Now try to stream expert 2 with a cancellable context.
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)

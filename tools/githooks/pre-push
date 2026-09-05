@@ -367,6 +367,40 @@ if [ -z "$(git rev-list "$range" 2>/dev/null)" ]; then
 	exit 0
 fi
 
+# Merge-integrity gate (#11306) -- check for unedited conflict banners or silent dropped branches
+merge_mode="${FLEET_MERGE_GUARD:-block}"
+if [ "$merge_mode" != "off" ] && [ "${ALLOW_SILENT_MERGE:-0}" != "1" ] && [ -f "$root/tools/check_commit_msg.py" ]; then
+	if [ -n "${PYTHON:-}" ]; then _PY="$PYTHON"; _PY_ARG=""
+	elif command -v python3 >/dev/null 2>&1; then _PY=python3; _PY_ARG=""
+	elif command -v python >/dev/null 2>&1; then _PY=python; _PY_ARG=""
+	elif command -v py >/dev/null 2>&1; then _PY=py; _PY_ARG="-3"
+	else _PY=""; _PY_ARG=""; fi
+
+	if [ -n "$_PY" ]; then
+		suspect_commits="$(git log --format="%H" --grep="# Conflicts:" --grep="<<<<<<<" --grep="=======" --grep=">>>>>>>" "$range" 2>/dev/null) $(git rev-list --merges "$range" 2>/dev/null)"
+		suspect_commits="$(printf '%s\n' $suspect_commits | sort -u | grep .)"
+		for sc in $suspect_commits; do
+			sc_out="$("$_PY" $_PY_ARG "$root/tools/check_commit_msg.py" --commit "$sc" --root "$root" 2>&1)"
+			sc_st=$?
+			if [ "$sc_st" -eq 1 ]; then
+				case "$sc_out" in
+					*MERGE_CONFLICT_*|*SILENT_DROP_MERGE_*)
+						if [ "$merge_mode" = "block" ]; then
+							echo "MERGE_INTEGRITY (blocked): commit $sc fails merge integrity check." >&2
+							echo "$sc_out" >&2
+							echo "  fix: resolve conflict banners or provide 'Merge-Strategy: ours' / 'Silent-Merge: intentional' trailer; or ALLOW_SILENT_MERGE=1 to override." >&2
+							exit 1
+						else
+							echo "MERGE_INTEGRITY (advisory): commit $sc fails merge integrity check." >&2
+							echo "$sc_out" >&2
+						fi
+						;;
+				esac
+			fi
+		done
+	fi
+fi
+
 # Cross-package duplication push gate (#4329). The scan remains advisory by
 # default and blocks only when explicitly promoted. It reuses the bounded push
 # range and the existing `fak dup guard` implementation; no second clone engine.

@@ -386,6 +386,9 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 	if p.CoherenceShaper != nil {
 		safeMessages = p.CoherenceShaper(safeMessages)
 	}
+	if stabilized, ok := StabilizePromptPrefix(safeMessages); ok {
+		safeMessages = stabilized
+	}
 	sp := applySampleOpts(opts...)
 	// Request-model pass-through (#82): a client-supplied model wins for THIS turn.
 	modelID := p.ModelID

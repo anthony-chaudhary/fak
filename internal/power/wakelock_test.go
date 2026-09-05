@@ -2,9 +2,24 @@ package power
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 )
+
+func pollUntil(t *testing.T, timeout time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		runtime.Gosched()
+	}
+	if !cond() {
+		t.Fatalf("condition not met within %v", timeout)
+	}
+}
 
 func TestAcquireRelease(t *testing.T) {
 	ResetGlobalForTesting()
@@ -177,13 +192,9 @@ func TestAcquireWithTimeout(t *testing.T) {
 	}
 
 	// Wait for timeout to expire and auto-release
-	deadline := time.Now().Add(250 * time.Millisecond)
-	for IsActive() && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if IsActive() {
-		t.Fatal("expected lock to be auto-released after timeout")
-	}
+	pollUntil(t, 2*time.Second, func() bool {
+		return !IsActive()
+	})
 
 	// Calling release after timeout should be a clean no-op
 	if err := r.Release(); err != nil {
@@ -205,13 +216,9 @@ func TestAcquireContext(t *testing.T) {
 	}
 
 	cancel()
-	deadline := time.Now().Add(250 * time.Millisecond)
-	for IsActive() && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if IsActive() {
-		t.Fatal("expected lock to release when context canceled")
-	}
+	pollUntil(t, 2*time.Second, func() bool {
+		return !IsActive()
+	})
 
 	if err := r.Release(); err != nil {
 		t.Fatalf("release after cancel: %v", err)

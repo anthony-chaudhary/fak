@@ -10,7 +10,7 @@ var testNow = time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 
 func testInstance(t *testing.T, id, machine, role string, now time.Time) Instance {
 	t.Helper()
-	inst, r := NewInstance(id, machine, role, 4242, "127.0.0.1:8080", []Op{"steer"}, now)
+	inst, r := NewInstance(id, machine, role, 4242, "127.0.0.1:0", []Op{"steer"}, now)
 	if r != nil {
 		t.Fatalf("NewInstance(%q): %v", id, r)
 	}

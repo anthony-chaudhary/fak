@@ -119,6 +119,32 @@ class ReleaseCutTest(unittest.TestCase):
         self.assertIn("Add generation preview [gen/now].", text)
         self.assertIn("Preserve horizon [gen/next].", text)
 
+    def test_render_notes_consolidates_repeated_cleaned_subjects(self) -> None:
+        rc = load()
+        commits = [
+            {"subject": "fix(foo): add contract benchmarks (fak foo)"},
+            {"subject": "fix(bar): add contract benchmarks (fak bar)"},
+            {"subject": "fix(single): unique single item (fak single)"},
+            {"subject": "fix: repeated no scope"},
+            {"subject": "fix: repeated no scope"},
+            {"subject": "merge: sync trunk with origin/main"},
+            {"subject": "Merge remote-tracking branch 'origin/main'"},
+        ] + [
+            {"subject": f"fix(pkg{i}): wide coverage change (fak pkg{i})"}
+            for i in range(8)
+        ]
+        text = rc.render_notes(
+            "0.23.0", date="2026-06-18", level="minor", themes=["tools"],
+            headline="Consolidated release", commits=commits)
+        self.assertIn("- Add contract benchmarks (foo, bar).", text)
+        self.assertEqual(text.count("- Add contract benchmarks (foo, bar)."), 1)
+        self.assertNotIn("- Add contract benchmarks.\n", text)
+        self.assertIn("- Unique single item.", text)
+        self.assertIn("- Repeated no scope (2 occurrences).", text)
+        self.assertIn("- Wide coverage change across 8 packages (pkg0, pkg1, pkg2, pkg3, pkg4, pkg5, ...).", text)
+        self.assertNotIn("sync trunk with origin/main", text.lower())
+        self.assertNotIn("remote-tracking", text.lower())
+
     def test_notes_quality_gate_rejects_public_leaks(self) -> None:
         rc = load()
         errors = rc.notes_quality_errors(
@@ -557,6 +583,20 @@ class ReleaseCutTest(unittest.TestCase):
         self.assertTrue(result["skipped"])
         self.assertIn("HEAD changed", result["reason"])
         self.assertEqual(self._git(root, "rev-parse", "HEAD"), peer_sha)
+
+    def test_render_notes_incorporates_next_draft_upgrade_notes(self) -> None:
+        rc = load()
+        next_md = (
+            "# fak vNext: Work in Progress\n\n"
+            "## Upgrade and breaking changes\n\n"
+            "- Migration required: run `fak upgrade --migrate-db`\n"
+        )
+        commits = [{"subject": "feat(core): new capability (fak core)"}]
+        notes = rc.render_notes("0.47.0", date="2026-09-04", level="minor", themes=["core"],
+                                headline="minor update", commits=commits, next_content=next_md)
+        self.assertIn("Migration required: run `fak upgrade --migrate-db`", notes)
+        self.assertIn("## Upgrade", notes)
+        self.assertIn("## Release facts", notes)
 
     def test_live_cli_dry_run_no_mutation(self) -> None:
         proc = subprocess.run(

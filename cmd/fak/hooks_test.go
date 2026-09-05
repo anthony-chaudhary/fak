@@ -360,3 +360,95 @@ func TestHooksCommitMsg_rejectsSingleParentPseudoMerge(t *testing.T) {
 		t.Errorf("stderr %q does not contain MERGE_WITNESS_FAIL", errb.String())
 	}
 }
+
+// TestHooksCommitMsg_rejectsConflictBanners proves issue #11306:
+// `fak hooks commit-msg` rejects messages containing conflict templates or conflict markers.
+func TestHooksCommitMsg_rejectsConflictBanners(t *testing.T) {
+	msgFile := filepath.Join(t.TempDir(), "msg.txt")
+
+	// 1. Conflict template
+	if err := os.WriteFile(msgFile, []byte("Merge remote-tracking branch 'origin/main'\n\n# Conflicts:\n#\tcmd/fak/serve.go\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := runHooks(&out, &errb, []string{"commit-msg", msgFile})
+	if code != 1 {
+		t.Fatalf("runHooks commit-msg for conflict template want exit 1, got %d; stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "MERGE_CONFLICT_TEMPLATE_FORBIDDEN") {
+		t.Errorf("stderr %q does not contain MERGE_CONFLICT_TEMPLATE_FORBIDDEN", errb.String())
+	}
+
+	// 2. Conflict marker
+	errb.Reset()
+	out.Reset()
+	if err := os.WriteFile(msgFile, []byte("feat(core): update\n\n<<<<<<< HEAD\nfoo\n=======\nbar\n>>>>>>> main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code = runHooks(&out, &errb, []string{"commit-msg", msgFile})
+	if code != 1 {
+		t.Fatalf("runHooks commit-msg for conflict markers want exit 1, got %d; stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "MERGE_CONFLICT_MARKERS_FORBIDDEN") {
+		t.Errorf("stderr %q does not contain MERGE_CONFLICT_MARKERS_FORBIDDEN", errb.String())
+	}
+}
+
+// TestHooksCommitMsg_rejectsSilentDropMerge proves issue #11306:
+// `fak hooks commit-msg` rejects merge commits where the tree SHA matches parent 1 exactly
+// while parent 2 contains non-empty unique commits.
+func TestHooksCommitMsg_rejectsSilentDropMerge(t *testing.T) {
+	repo := t.TempDir()
+	gitHook(t, repo, "init", "-q")
+	gitHook(t, repo, "config", "user.name", "Test")
+	gitHook(t, repo, "config", "user.email", "test@example.com")
+	gitHook(t, repo, "config", "commit.gpgsign", "false")
+
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitHook(t, repo, "add", "a.txt")
+	gitHook(t, repo, "commit", "-m", "feat(core): initial base")
+
+	gitHook(t, repo, "checkout", "-q", "-b", "side-branch")
+	if err := os.WriteFile(filepath.Join(repo, "b.txt"), []byte("side change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitHook(t, repo, "add", "b.txt")
+	gitHook(t, repo, "commit", "-m", "feat(side): side change")
+
+	gitHook(t, repo, "checkout", "-q", "-")
+	if err := os.WriteFile(filepath.Join(repo, "c.txt"), []byte("main change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitHook(t, repo, "add", "c.txt")
+	gitHook(t, repo, "commit", "-m", "feat(main): main change")
+
+	// Merge with ours strategy
+	gitHook(t, repo, "merge", "-s", "ours", "--no-commit", "side-branch")
+
+	msgFile := filepath.Join(t.TempDir(), "msg.txt")
+	if err := os.WriteFile(msgFile, []byte("Merge branch 'side-branch'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runHooks(&out, &errb, []string{"commit-msg", "--root", repo, msgFile})
+	if code != 1 {
+		t.Fatalf("runHooks commit-msg for silent drop merge want exit 1, got %d; stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "SILENT_DROP_MERGE_FORBIDDEN") {
+		t.Errorf("stderr %q does not contain SILENT_DROP_MERGE_FORBIDDEN", errb.String())
+	}
+
+	// Allowed with Merge-Strategy: ours trailer
+	errb.Reset()
+	out.Reset()
+	if err := os.WriteFile(msgFile, []byte("Merge branch 'side-branch'\n\nMerge-Strategy: ours\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code = runHooks(&out, &errb, []string{"commit-msg", "--root", repo, msgFile})
+	if code != 0 {
+		t.Fatalf("runHooks commit-msg with Merge-Strategy: ours trailer want exit 0, got %d; stderr=%s", code, errb.String())
+	}
+}

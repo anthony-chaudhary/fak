@@ -121,7 +121,7 @@ func TestGuardTerminalFunnelEmitsExactResumeCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(raw)
+	text := strings.ReplaceAll(string(raw), "\r\n", "\n")
 	resolve := strings.Index(text, "resumeCommand := formatGuardSessionResumeCommand(agentName, srv.DefaultTraceID())")
 	quiet := strings.Index(text, "emitResumeCommand := func() {\n\t\tif !quiet {")
 	if resolve < 0 || quiet < resolve {

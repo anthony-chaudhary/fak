@@ -8,8 +8,8 @@ func BenchmarkConfigGuide(b *testing.B) {
 	opts := []Options{
 		{Posture: "default"},
 		{Posture: "long-session", Budget: 200000},
-		{Posture: "team-gateway", KeyEnv: "BENCH_KEY", Bind: "127.0.0.1:9090"},
-		{Posture: "hardened", PolicyPath: "bench-policy.json", KeyEnv: "HARDENED_KEY", Bind: "127.0.0.1:8443"},
+		{Posture: "team-gateway", KeyEnv: "BENCH_KEY", Bind: "127.0.0.1:0"},
+		{Posture: "hardened", PolicyPath: "bench-policy.json", KeyEnv: "HARDENED_KEY", Bind: "127.0.0.1:0"},
 	}
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -29,8 +29,8 @@ func TestBenchmarkConfigGuide(t *testing.T) {
 	opts := []Options{
 		{Posture: "default"},
 		{Posture: "long-session", Budget: 200000},
-		{Posture: "team-gateway", KeyEnv: "BENCH_KEY", Bind: "127.0.0.1:9090"},
-		{Posture: "hardened", PolicyPath: "bench-policy.json", KeyEnv: "HARDENED_KEY", Bind: "127.0.0.1:8443"},
+		{Posture: "team-gateway", KeyEnv: "BENCH_KEY", Bind: "127.0.0.1:0"},
+		{Posture: "hardened", PolicyPath: "bench-policy.json", KeyEnv: "HARDENED_KEY", Bind: "127.0.0.1:0"},
 	}
 	for _, opt := range opts {
 		res, err := Guide(opt)

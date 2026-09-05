@@ -128,7 +128,11 @@ func cmdHelp(args []string) {
 			printServeHelp(os.Stdout, fs, topic)
 			return
 		}
-		if printVerbHelp(os.Stdout, args[0]) {
+		tok := args[0]
+		if strings.EqualFold(tok, "self") {
+			tok = "self-update"
+		}
+		if printVerbHelp(os.Stdout, tok) {
 			return
 		}
 		fmt.Fprintf(os.Stderr, "fak help: no verb %q\n", args[0])
@@ -156,6 +160,9 @@ func usageAllVerbs(w io.Writer) {
 // when neither source knows the verb.
 func printVerbHelp(w io.Writer, tok string) bool {
 	tok = strings.ToLower(strings.TrimSpace(tok))
+	if tok == "self" {
+		tok = "self-update"
+	}
 	if !verbDeepHelpBody(w, tok) {
 		return false
 	}
@@ -175,6 +182,9 @@ func printVerbHelp(w io.Writer, tok string) bool {
 // nor the wall knows the verb.
 func verbDeepHelpBody(w io.Writer, tok string) bool {
 	tok = strings.ToLower(strings.TrimSpace(tok))
+	if tok == "self" {
+		tok = "self-update"
+	}
 	if tok == "capabilities" {
 		writeCapabilitiesUsage(w)
 		return true

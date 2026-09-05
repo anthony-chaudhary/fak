@@ -1,11 +1,13 @@
 ---
-title: "Qwen3.8-27B AMD GPU Direct NVMe Overflow Evidence (2026-09-04)"
-description: "Zero-copy NVMe P2PDMA and BaM-architecture storage overflow benchmarks for Qwen3.8-27B on consumer AMD hardware (RX 7600 8GB VRAM + PCIe Gen5 SSD)."
+title: "Qwen3.8-27B AMD GPU Direct NVMe Overflow Specification [SIMULATED] (2026-09-04)"
+description: "Zero-copy NVMe P2PDMA and BaM-architecture storage overflow specification and modeled projections for Qwen3.8-27B on consumer AMD hardware (RX 7600 8GB VRAM + PCIe Gen5 SSD)."
 ---
 
-# Qwen3.8-27B AMD GPU Direct NVMe Overflow Evidence (2026-09-04)
+# Qwen3.8-27B AMD GPU Direct NVMe Overflow Specification [SIMULATED] (2026-09-04)
 
-This document provides the benchmark evidence, architecture analysis, and machine-readable receipt for `fak`'s native **GPU Direct NVMe Peer-to-Peer DMA (P2PDMA)** overflow engine running `Qwen3.8-27B` across an 8 GB consumer GPU and high-speed NVMe storage.
+> **Provenance Notice (`CLAIMS.md` / `docs/native-inference-goal.md`):**  
+> This document specifies `fak`'s native **GPU Direct NVMe Peer-to-Peer DMA (P2PDMA)** overflow engine and provides its **modeled performance projection** ([SIMULATED]) alongside the verified zero-copy algorithmic interfaces (`StagingCopyCount == 0`).  
+> **Physical baseline on this host:** On this physical machine (AMD Ryzen 9 9950X + Radeon RX 7600 + Crucial T705 4TB SSD on Windows 11), real in-kernel Vulkan execution of Qwen3.6-27B was previously witnessed at **1.15–1.24 decode tok/s** (`docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md`). Full physical on-device kernel P2PDMA awaits a compiled Windows CGO Vulkan/ROCm driver path; the algorithmic invariants (zero host bounce copies, bit-exact hybrid cache round-trips up to 2048 tokens) are verified in pure Go unit tests.
 
 Canonical receipt schema: `fak.modelengine.qwen38-gpudirect-swap/1`  
 Executable reproduction: `go run ./cmd/fak-dev amd-gpudirect qwen38 [--json]`  

@@ -27,6 +27,20 @@
 msgfile="$1"                       # save BEFORE `set --` clobbers the positionals
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 
+# ---- MERGE_CONFLICT: reject unedited conflict templates or markers (block by default) ----
+if [ -f "$msgfile" ]; then
+	if grep -qE '^# Conflicts:' "$msgfile" 2>/dev/null || grep -qE '(# Conflicts:)' "$msgfile" 2>/dev/null; then
+		echo "COMMIT_MSG: MERGE_CONFLICT_TEMPLATE_FORBIDDEN: commit message contains unedited git conflict template ('# Conflicts:')" >&2
+		echo "  resolve conflict template markers before committing." >&2
+		exit 1
+	fi
+	if grep -qE '^(<<<<<<<|=======|>>>>>>>)' "$msgfile" 2>/dev/null; then
+		echo "COMMIT_MSG: MERGE_CONFLICT_MARKERS_FORBIDDEN: commit message contains git conflict markers ('<<<<<<<', '=======', or '>>>>>>>')" >&2
+		echo "  resolve all conflict markers in the commit message before committing." >&2
+		exit 1
+	fi
+fi
+
 # FAST PATH: `fak hooks commit-msg` runs the PUBLIC_LEAK (block), HARDWARE_TELL (block),
 # and COMMIT_MSG (warn) gates in one process, honoring the SAME FLEET_* guard env vars.
 # Exit 0 -> done; 1 -> a block gate fired; 2 -> could-not-run, fall through to the Python
@@ -92,6 +106,14 @@ out="$("$@" "$chk" --file "$msgfile" --root "$root" 2>&1)"; status=$?
 [ "$status" -eq 0 ] && exit 0
 # status 2 (could-not-read) -> fail open, never wedge a commit over a style check
 [ "$status" -ne 1 ] && exit 0
+
+case "$out" in
+	*MERGE_WITNESS_FAIL*|*MERGE_CONFLICT_*|*SILENT_DROP_MERGE_*)
+		echo "$out" >&2
+		echo "  (merge integrity gates block by default; FLEET_ALLOW_MSG=1 or ALLOW_SILENT_MERGE=1 overrides once)" >&2
+		exit 1
+		;;
+esac
 
 if [ "$mode" = "block" ]; then
 	echo "$out" >&2
