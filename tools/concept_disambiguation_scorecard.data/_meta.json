@@ -14414,6 +14414,11 @@
           "category": "incidental",
           "reason": "context-plan-required lint package",
           "token": "ctxplanlint"
+        },
+        {
+          "category": "incidental",
+          "reason": "cargo cult prefix check",
+          "token": "isCargoCultCandidate"
         }
       ],
       "exclude": [
@@ -14577,6 +14582,7 @@
         "indexPlanSteps",
         "indexedPlanStep",
         "inspectCodexMarketplaceCandidate",
+        "isCargoCultCandidate",
         "knownFaultPlane",
         "listPlan",
         "measuredPlanner",
