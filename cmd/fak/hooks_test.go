@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/hooks"
+	"github.com/anthony-chaudhary/fak/internal/safecommit"
 )
 
 // hooks_test.go — end-to-end CLI tests for `fak hooks` against a real temp git repo. Skipped if
@@ -450,5 +452,137 @@ func TestHooksCommitMsg_rejectsSilentDropMerge(t *testing.T) {
 	code = runHooks(&out, &errb, []string{"commit-msg", "--root", repo, msgFile})
 	if code != 0 {
 		t.Fatalf("runHooks commit-msg with Merge-Strategy: ours trailer want exit 0, got %d; stderr=%s", code, errb.String())
+	}
+}
+
+func TestRunHooks_preCommitBlocksCommittedRed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short")
+	}
+	repo := newRepoWith(t, map[string]string{"src/x.go": "package main\n"})
+
+	oldBuild := commitBuildCheckGate
+	t.Cleanup(func() { commitBuildCheckGate = oldBuild })
+	commitBuildCheckGate = func(_ io.Writer, _ string, _ []string) (safecommit.BuildCheckOutcome, string) {
+		return safecommit.BuildCheckFailed, "syntax error: unexpected identifier"
+	}
+
+	var out, errb bytes.Buffer
+	code := runHooks(&out, &errb, []string{"pre-commit", "--root", repo})
+	if code != 1 {
+		t.Fatalf("prospective build failure should block (1), got %d; stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "COMMITTED_RED") {
+		t.Fatalf("stderr should name COMMITTED_RED, got %s", errb.String())
+	}
+	if !strings.Contains(errb.String(), "syntax error: unexpected identifier") {
+		t.Fatalf("stderr should carry diagnostic detail, got %s", errb.String())
+	}
+}
+
+func TestRunHooks_preCommitCommittedRedJSON(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short")
+	}
+	repo := newRepoWith(t, map[string]string{"src/x.go": "package main\n"})
+
+	oldBuild := commitBuildCheckGate
+	t.Cleanup(func() { commitBuildCheckGate = oldBuild })
+	commitBuildCheckGate = func(_ io.Writer, _ string, _ []string) (safecommit.BuildCheckOutcome, string) {
+		return safecommit.BuildCheckFailed, "deliberate syntax error"
+	}
+
+	var out, errb bytes.Buffer
+	code := runHooks(&out, &errb, []string{"pre-commit", "--root", repo, "--json"})
+	if code != 1 {
+		t.Fatalf("prospective build failure should block in JSON mode (1), got %d; stderr=%s", code, errb.String())
+	}
+	var payload struct {
+		Findings []hooks.Finding `json:"findings"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal findings JSON: %v\n%s", err, out.String())
+	}
+	found := false
+	for _, f := range payload.Findings {
+		if f.Gate == "COMMITTED_RED" && strings.Contains(f.Detail, "deliberate syntax error") {
+			found = true
+			if f.Advisory {
+				t.Fatalf("COMMITTED_RED finding should be binding (Advisory=false), got %+v", f)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("COMMITTED_RED finding not found in JSON payload: %+v", payload.Findings)
+	}
+}
+
+func TestRunHooks_preCommitCommittedRedEscapes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short")
+	}
+	repo := newRepoWith(t, map[string]string{"src/x.go": "package main\n"})
+
+	oldBuild := commitBuildCheckGate
+	t.Cleanup(func() { commitBuildCheckGate = oldBuild })
+	commitBuildCheckGate = func(_ io.Writer, _ string, _ []string) (safecommit.BuildCheckOutcome, string) {
+		return safecommit.BuildCheckFailed, "syntax error"
+	}
+
+	t.Setenv("ALLOW_COMMITTED_RED", "1")
+	var out, errb bytes.Buffer
+	code := runHooks(&out, &errb, []string{"pre-commit", "--root", repo})
+	if code != 0 {
+		t.Fatalf("ALLOW_COMMITTED_RED=1 should escape buildcheck, got %d; stderr=%s", code, errb.String())
+	}
+}
+
+func TestRunHooks_preCommitCommittedRedOff(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short")
+	}
+	repo := newRepoWith(t, map[string]string{"src/x.go": "package main\n"})
+
+	oldBuild := commitBuildCheckGate
+	t.Cleanup(func() { commitBuildCheckGate = oldBuild })
+	called := false
+	commitBuildCheckGate = func(_ io.Writer, _ string, _ []string) (safecommit.BuildCheckOutcome, string) {
+		called = true
+		return safecommit.BuildCheckFailed, "syntax error"
+	}
+
+	t.Setenv("FLEET_BUILDCHECK_GUARD", "off")
+	var out, errb bytes.Buffer
+	code := runHooks(&out, &errb, []string{"pre-commit", "--root", repo})
+	if code != 0 {
+		t.Fatalf("FLEET_BUILDCHECK_GUARD=off should skip buildcheck, got %d; stderr=%s", code, errb.String())
+	}
+	if called {
+		t.Fatal("commitBuildCheckGate should NOT be called when FLEET_BUILDCHECK_GUARD=off")
+	}
+}
+
+func TestRunHooks_preCommitCommittedRedSkipsNonGo(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short")
+	}
+	repo := newRepoWith(t, map[string]string{"docs/readme.md": "# Readme\n"})
+
+	oldBuild := commitBuildCheckGate
+	t.Cleanup(func() { commitBuildCheckGate = oldBuild })
+	called := false
+	commitBuildCheckGate = func(_ io.Writer, _ string, _ []string) (safecommit.BuildCheckOutcome, string) {
+		called = true
+		return safecommit.BuildCheckFailed, "syntax error"
+	}
+
+	var out, errb bytes.Buffer
+	code := runHooks(&out, &errb, []string{"pre-commit", "--root", repo})
+	if code != 0 {
+		t.Fatalf("non-Go staged diff should not trigger buildcheck, got %d; stderr=%s", code, errb.String())
+	}
+	if called {
+		t.Fatal("commitBuildCheckGate should NOT be called when no .go files are staged")
 	}
 }

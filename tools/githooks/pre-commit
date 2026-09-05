@@ -1,6 +1,6 @@
 #!/bin/sh
 # fleet pre-commit gates  --  DOS reasons: PUBLIC_LEAK, SECRET_SHAPE,
-# DOC_PLACEMENT, BROKEN_LINK, FILE_ADMISSION, INDEX_SYNC.
+# DOC_PLACEMENT, BROKEN_LINK, FILE_ADMISSION, INDEX_SYNC, COMMITTED_RED.
 #
 # A sequence of independent commit-boundary gates, each owned by a tools/check_*.py
 # (or the scrubber). git runs this BELOW the agent layer, so the gates bind Claude
@@ -24,6 +24,7 @@
 #   PROVENANCE_LABEL FLEET_PROVENANCE_GUARD ALLOW_PROVENANCE_DRIFT tools/check_provenance_labels.py
 #   HARDWARE_TELL   FLEET_HW_GUARD     FLEET_ALLOW_HW      fak hooks pre-commit (Go-only)
 #   BARE_COMMIT_SWEEP FLEET_BARE_COMMIT_GUARD ALLOW_BARE_COMMIT fak hooks pre-commit (Go-only, advisory; also FAK_PRESTAGED_PATH_GUARD=off)
+#   COMMITTED_RED   FLEET_BUILDCHECK_GUARD ALLOW_COMMITTED_RED fak hooks pre-commit (Go-only)
 #
 # The leak needle list (AUDIT_NEEDLES) is owned by tools/scrub_public_copy.py so the
 # commit gate and the export-time scrub cannot drift; the other gates own their own

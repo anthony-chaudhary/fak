@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -867,6 +868,85 @@ func TestRunSweepApplyValidation(t *testing.T) {
 	// Unknown lane -> a refusal on the merits (4); retrying never invents the lane.
 	if code := runSweepApply(&out, &errb, t.TempDir(), plan, "gateway", "feat: x", nil, 0, false); code != safecommit.ExitRefused {
 		t.Fatalf("unknown lane: exit = %d, want %d", code, safecommit.ExitRefused)
+	}
+}
+
+func TestRunSweepApplyRefusesCommittedRed(t *testing.T) {
+	root := t.TempDir()
+	writeDosTomlLane(t, root, "svc", "svc/**")
+	plan := sweepPlan{Groups: []sweepGroup{{
+		Lane:    "svc",
+		Trailer: "(fak svc)",
+		Paths:   []string{"svc/a/broken.go"},
+	}}}
+
+	oldBuild := commitBuildCheckGate
+	t.Cleanup(func() { commitBuildCheckGate = oldBuild })
+	commitBuildCheckGate = func(_ io.Writer, _ string, _ []string) (safecommit.BuildCheckOutcome, string) {
+		return safecommit.BuildCheckFailed, "prospective build failed: syntax error in svc/a/broken.go"
+	}
+
+	commitCalled := false
+	oldCommit := commitFn
+	t.Cleanup(func() { commitFn = oldCommit })
+	commitFn = func(_ context.Context, _ safecommit.Options) (safecommit.Result, error) {
+		commitCalled = true
+		return safecommit.Result{}, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runSweepApply(&stdout, &stderr, root, plan, "svc", "refactor(svc): split code (fak svc)", nil, 0, false)
+	if code != safecommit.ExitRefused {
+		t.Fatalf("runSweepApply exit = %d, want %d (ExitRefused); stderr=%s", code, safecommit.ExitRefused, stderr.String())
+	}
+	if commitCalled {
+		t.Fatal("commitFn must NOT be called when prospective build fails")
+	}
+	if !strings.Contains(stderr.String(), "COMMITTED_RED") {
+		t.Fatalf("stderr missing COMMITTED_RED: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "syntax error in svc/a/broken.go") {
+		t.Fatalf("stderr missing error detail: %s", stderr.String())
+	}
+}
+
+func TestRunSweepApplyBypassesBuildCheckWhenOff(t *testing.T) {
+	root := t.TempDir()
+	writeDosTomlLane(t, root, "svc", "svc/**")
+	plan := sweepPlan{Groups: []sweepGroup{{
+		Lane:    "svc",
+		Trailer: "(fak svc)",
+		Paths:   []string{"svc/a/broken.go"},
+	}}}
+
+	t.Setenv("FAK_COMMIT_BUILD_CHECK", "off")
+
+	oldBuild := commitBuildCheckGate
+	t.Cleanup(func() { commitBuildCheckGate = oldBuild })
+	buildCheckCalled := false
+	commitBuildCheckGate = func(_ io.Writer, _ string, _ []string) (safecommit.BuildCheckOutcome, string) {
+		buildCheckCalled = true
+		return safecommit.BuildCheckFailed, "broken"
+	}
+
+	commitCalled := false
+	oldCommit := commitFn
+	t.Cleanup(func() { commitFn = oldCommit })
+	commitFn = func(_ context.Context, _ safecommit.Options) (safecommit.Result, error) {
+		commitCalled = true
+		return safecommit.Result{SHA: "1234567890ab", Paths: []string{"svc/a/broken.go"}}, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runSweepApply(&stdout, &stderr, root, plan, "svc", "refactor(svc): split code (fak svc)", nil, 0, false)
+	if code != 0 {
+		t.Fatalf("runSweepApply with build check off exit = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	if buildCheckCalled {
+		t.Fatal("commitBuildCheckGate should NOT be called when FAK_COMMIT_BUILD_CHECK=off")
+	}
+	if !commitCalled {
+		t.Fatal("commitFn should be called when build check is off")
 	}
 }
 

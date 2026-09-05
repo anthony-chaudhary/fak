@@ -360,6 +360,20 @@ func runSweepApply(stdout, stderr io.Writer, root string, plan sweepPlan, lane, 
 		return safecommit.ExitRefused
 	}
 
+	buildCheckOutcome, buildCheckDetail := safecommit.BuildCheckDisabled, ""
+	if os.Getenv("FAK_COMMIT_BUILD_CHECK") != "off" {
+		buildCheckOutcome, buildCheckDetail = commitBuildCheckGate(stderr, root, paths)
+	}
+	buildCheck, admitBuild, buildReason := safecommit.DecideBuildCheck(buildCheckOutcome, buildCheckDetail, os.Getenv("FAK_COMMIT_BUILD_CHECK") == "allow-timeout")
+	if !admitBuild {
+		fmt.Fprintf(stderr, "fak sweep --apply: %s\n", buildReason)
+		if d := strings.TrimSpace(buildCheck.Detail); d != "" {
+			fmt.Fprintln(stderr, d)
+		}
+		fmt.Fprintln(stderr, commitBuildCheckAdvice(buildReason))
+		return safecommit.ExitRefused
+	}
+
 	res, err := commitFn(ctx(), safecommit.Options{
 		Dir:     root,
 		Paths:   paths,
@@ -371,6 +385,7 @@ func runSweepApply(stdout, stderr io.Writer, root string, plan sweepPlan, lane, 
 		fmt.Fprintf(stderr, "fak sweep --apply: %v\n", err)
 		return 1
 	}
+	res.BuildCheck = &buildCheck
 	renderCommitResult(stdout, res)
 	return commitExitCode(res)
 }

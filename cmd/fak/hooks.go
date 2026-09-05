@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/hooks"
+	"github.com/anthony-chaudhary/fak/internal/safecommit"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -426,6 +427,41 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 		} else if !*asJSON { // warn
 			printGateFindings(stderr, g.Name+" (advisory)", findings)
 			printGateHint(stderr, g.Name, findings, false)
+		}
+	}
+
+	buildcheckMode, buildcheckEscaped := gateModeDefault("FLEET_BUILDCHECK_GUARD", "ALLOW_COMMITTED_RED", "block")
+	if buildcheckMode != "off" && !buildcheckEscaped {
+		hasGoFiles := false
+		for _, p := range d.StagedPaths {
+			if strings.HasSuffix(p, ".go") {
+				hasGoFiles = true
+				break
+			}
+		}
+		if hasGoFiles {
+			outcome, detail := commitBuildCheckGate(stderr, r, d.StagedPaths)
+			buildCheck, admitBuild, buildReason := safecommit.DecideBuildCheck(outcome, detail, os.Getenv("FAK_COMMIT_BUILD_CHECK") == "allow-timeout")
+			if !admitBuild {
+				fDetail := buildCheck.Detail
+				if fDetail == "" {
+					fDetail = buildReason
+				}
+				finding := hooks.Finding{
+					Gate:     "COMMITTED_RED",
+					Detail:   fDetail,
+					Advisory: buildcheckMode != "block",
+				}
+				allFindings = append(allFindings, finding)
+				if buildcheckMode == "block" {
+					blocked = true
+					if !*asJSON {
+						printGateFindings(stderr, "COMMITTED_RED", []hooks.Finding{finding})
+					}
+				} else if !*asJSON {
+					printGateFindings(stderr, "COMMITTED_RED (advisory)", []hooks.Finding{finding})
+				}
+			}
 		}
 	}
 
