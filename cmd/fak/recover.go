@@ -182,26 +182,64 @@ var emittedRecoveryReasons = []string{
 	"COMMITTED_RED",
 	"CONCEPT_ADMISSION",
 	"CONCEPT_FRESHNESS",
+	"DEFAULT_DENY",
 	"DIRTY_WRITE_OVERLAP",
 	"DISAMBIGUATION_TIMEOUT",
 	"DIVERGED_DISJOINT",
 	"DIVERGED_OVERLAP",
+	"INTEGRITY" + "_REFUTED",
 	"ISSUE_NOT_DISPATCH_LEAF",
 	"ISSUE_UNROUTED",
+	"LEASE_HELD",
 	"LEASE_OWNER_UNAVAILABLE",
 	"LOCK_BUSY",
+	"MALFORMED",
 	"MERGE_ACTIVE_PEER_OWNED",
+	"MISROUTE",
+	"OVERSIZE",
 	"PATHSPEC_RACE",
+	"PII_EXFIL",
+	"PII_REDACTED",
+	"POLICY_BLOCK",
+	"PROMPT_INJECTION",
 	"QUEUED_AWAITING_QUIESCENCE",
+	"RATE_LIMITED",
 	"REQUIRE_WITNESS",
+	"RESULT_SECRET_DISCOVERED",
+	"SCOPE_CROSSING",
+	"SECRET_EXFIL",
+	"SECRET_REDACTED",
+	"SELF_MODIFY",
+	"SHELL_DIALECT",
 	"SYSTEM_COMMIT_HEADROOM",
+	"TAINT_EGRESS",
 	"TARGET_MOVED",
+	"TRUST_VIOLATION",
+	"UNKNOWN_TOOL",
+	"UNWITNESSED",
 }
 
 func recoveryPlans(trunk string) map[string]recoveryPlan {
 	plans := treeRecoveryPlans(trunk)
 	for token, plan := range configRecoveryPlans() {
 		plans[token] = plan
+	}
+	root := guardFindReasonRoot()
+	if root != "" {
+		for token, doc := range guardReadReasonDocs(root) {
+			if _, exists := plans[token]; !exists {
+				notes := []string{}
+				if strings.TrimSpace(doc.Fix) != "" {
+					notes = append(notes, strings.TrimSpace(doc.Fix))
+				}
+				plans[token] = recoveryPlan{
+					Reason:     token,
+					Summary:    strings.TrimSpace(doc.Summary),
+					Executable: false,
+					Notes:      notes,
+				}
+			}
+		}
 	}
 	return plans
 }
@@ -323,10 +361,10 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 			"do not lower FAK_SYSTEM_COMMIT_HEADROOM_MB, terminate unrelated processes, or add launch retries to route around the refusal",
 		}},
 		"PATHSPEC_RACE":     {Reason: "PATHSPEC_RACE", Summary: "a peer changed the index while the path-scoped commit was being sealed", Steps: []recoveryStep{{Argv: []string{"git", "show", "--stat", "--oneline", "HEAD"}, Summary: "inspect the intact commit and verify which paths landed"}}, Notes: []string{"do not amend or force-push; if an extra peer path landed, report the intact commit and let its owner reconcile it"}, Executable: true},
-		"COMMITTED_RED":     {Reason: "COMMITTED_RED", Summary: "the committed tip fails its isolated build or formatting gate", Steps: []recoveryStep{{Argv: []string{"fak", "ci-preflight"}, Summary: "reproduce the committed-tip failure outside the peer-dirty tree"}}, Notes: []string{"fix the committed failure before attempting another commit or push"}, Executable: true},
+		"COMMITTED_RED":     {Reason: "COMMITTED_RED", Summary: "the committed tip fails its isolated build or formatting gate", Steps: []recoveryStep{{Argv: []string{"fak-dev", "ci-preflight"}, Summary: "reproduce the committed-tip failure outside the peer-dirty tree"}}, Notes: []string{"fix the committed failure before attempting another commit or push"}, Executable: true},
 		"LOCK_BUSY":         {Reason: "LOCK_BUSY", Summary: "another committer owns the serialized commit lock", Steps: []recoveryStep{{Argv: []string{"fak", "commit", "--reclaim-stale-commit-lock"}, Summary: "probe only the commit lock and reclaim only when its recorded owner is proven stale"}}, Notes: []string{"the actuator is a dry-run unless you explicitly add --apply; if the owner is live, wait and retry; never delete the lock by hand"}, Executable: true},
 		"CONCEPT_ADMISSION": {Reason: "CONCEPT_ADMISSION", Summary: "a new concept-family identifier is absent from the staged concept corpus", Notes: []string{"add or reuse the concept-corpus row named by the refusal, then stage that evidence in the same commit as the identifier"}},
-		"CONCEPT_FRESHNESS": {Reason: "CONCEPT_FRESHNESS", Summary: "the staged concept corpus is stale relative to the staged source tree", Steps: []recoveryStep{{Argv: []string{"fak", "concept", "generate-staged"}, Summary: "regenerate against the exact staged tree"}}, Notes: []string{"stage the generated corpus paths in the same commit; the gate intentionally evaluates the staged tree"}, Executable: true},
+		"CONCEPT_FRESHNESS": {Reason: "CONCEPT_FRESHNESS", Summary: "the staged concept corpus is stale relative to the staged source tree", Steps: []recoveryStep{{Argv: []string{"fak", "concept", "generate", "--staged"}, Summary: "regenerate against the exact staged tree"}}, Notes: []string{"stage the generated corpus paths in the same commit; the gate intentionally evaluates the staged tree"}, Executable: true},
 		"DISAMBIGUATION_TIMEOUT": {
 			Reason:     "DISAMBIGUATION_TIMEOUT",
 			Summary:    "the exact whole-tree disambiguation oracle exceeded its bounded pre-CAS deadline",
@@ -412,7 +450,7 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 			Summary:    "refresh the source witness and discard the stale recalled digest",
 			Executable: false,
 			Steps: []recoveryStep{
-				{Argv: []string{"dos", "status"}, Summary: "refresh live DOS status from the source witness"},
+				{Argv: []string{"dos", "status", "<run-id>"}, Summary: "refresh live DOS status from the source witness"},
 				{Argv: []string{"dos", "commit-audit", "HEAD"}, Summary: "refresh git ancestry evidence for the current tip"},
 			},
 			Notes: []string{"replace recalled memory with the fresh witness before retrying"},
@@ -449,6 +487,213 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 			Summary:    "remove private-only, loose operational, generated, or oversized artifacts from the staged set",
 			Executable: false,
 			Notes:      []string{"move private-only material to fak-private or mark one-off ops notes operator-private"},
+		},
+		"POLICY_BLOCK": {
+			Reason:     "POLICY_BLOCK",
+			Summary:    "an explicit policy rule or dangerous gotcha denied the tool call",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "preflight"}, Summary: "inspect recent capability floor denials and matching rules", Safe: true},
+			},
+			Notes: []string{
+				"the command was blocked by a dangerous gotchas pattern, an explicit deny rule, or an arg predicate",
+				"if the operation is benign, use a safer alternative or run with --posture default_open",
+				"configure an operator overlay with `fak guard allow` if the tool should be permitted",
+			},
+		},
+		"TRUST_VIOLATION": {
+			Reason:     "TRUST_VIOLATION",
+			Summary:    "taint tracking, scope ceiling, context-MMU, or IFC sink gate blocked untrusted or tainted flow",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "preflight"}, Summary: "inspect the recent trust violation details and quarantine witness", Safe: true},
+			},
+			Notes: []string{
+				"the call attempted to send tainted context to an external egress sink or violated tenant/fleet scope boundaries",
+				"for subagent delegation, use internal communication channels (e.g. send_input, a2achan) or degrade to local execution",
+				"if a tool result was quarantined by context-MMU, page out poisoned context or clear taint markers before continuing",
+			},
+		},
+		"DEFAULT_DENY": {
+			Reason:     "DEFAULT_DENY",
+			Summary:    "the proposed tool is not permitted by any loaded capability floor rule",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "preflight"}, Summary: "inspect recent capability floor denials", Safe: true},
+			},
+			Notes: []string{
+				"the tool call failed closed under strict posture because it was not in the policy allowlist",
+				"run with `--posture default_open` for standard permissive execution, or configure an operator overlay via `fak guard allow`",
+			},
+		},
+		"SELF_MODIFY": {
+			Reason:     "SELF_MODIFY",
+			Summary:    "the call attempted to modify guarded kernel code, ABI definitions, or workspace configuration",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "preflight"}, Summary: "inspect the blocked self-modification path and policy rule", Safe: true},
+			},
+			Notes: []string{
+				"the target path reaches guarded files (internal/adjudicator, internal/kernel, internal/abi, dos.toml, or self_modify_globs)",
+				"target an unguarded path, or run in a detached worker worktree via `fak worktree worker prepare`",
+				"for operator-authorized configuration changes, adjust policy rules via an explicit operator overlay",
+			},
+		},
+		"LEASE_HELD": {
+			Reason:     "LEASE_HELD",
+			Summary:    "the requested file tree or lane is locked by another in-flight lease",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"dos", "top"}, Summary: "inspect active lane leases and holders", Safe: true},
+			},
+			Notes: []string{
+				"wait for the conflicting lease to clear or pick a disjoint lane with `dos arbitrate`",
+				"checkpoint finished progress with `fak wip checkpoint` while waiting",
+			},
+		},
+		"MALFORMED": {
+			Reason:     "MALFORMED",
+			Summary:    "the tool call arguments or payload failed schema or grammar validation",
+			Executable: false,
+			Notes: []string{
+				"inspect the tool schema and ensure all required arguments and types conform to expectations",
+				"check argument JSON formatting and arity before re-invoking",
+			},
+		},
+		"MISROUTE": {
+			Reason:     "MISROUTE",
+			Summary:    "the call used an inappropriate tool or argument shape for the intended action",
+			Executable: false,
+			Notes: []string{
+				"consult tool documentation and choose the specialized tool designed for this action",
+				"re-route file operations to specialized file tools rather than generic shell scripts",
+			},
+		},
+		"RATE_LIMITED": {
+			Reason:     "RATE_LIMITED",
+			Summary:    "tool or provider invocation rate exceeded the configured throughput limit",
+			Executable: false,
+			Notes: []string{
+				"back off and wait before retrying the operation",
+				"adjust rate limit thresholds or concurrency limits if authorized",
+			},
+		},
+		"SECRET_EXFIL": {
+			Reason:     "SECRET_EXFIL",
+			Summary:    "tool arguments or payload matched a secret or credential pattern destined for egress",
+			Executable: false,
+			Notes: []string{
+				"redact API keys, tokens, or credentials from command arguments before transmission",
+				"store secrets in environment variables or private keyrings rather than inline arguments",
+			},
+		},
+		"UNWITNESSED": {
+			Reason:     "UNWITNESSED",
+			Summary:    "a required verification witness or proof artifact is missing",
+			Executable: false,
+			Notes: []string{
+				"provide a corroborating test run, captured render, or commit witness before claiming completion",
+				"run the required verification command and capture its exit receipt",
+			},
+		},
+		"OVERSIZE": {
+			Reason:     "OVERSIZE",
+			Summary:    "the payload exceeded the context admission budget or token limit",
+			Executable: false,
+			Notes: []string{
+				"reduce the request payload size or compact preceding session turns",
+				"target smaller file chunks or specific slices rather than whole directory dumps",
+			},
+		},
+		"UNKNOWN_TOOL": {
+			Reason:     "UNKNOWN_TOOL",
+			Summary:    "the proposed tool name is not registered in the tool catalog",
+			Executable: false,
+			Notes: []string{
+				"verify the tool name against available tools registered in the current session",
+				"check for typos or missing namespace prefixes in the tool name",
+			},
+		},
+		"RESULT_SECRET_DISCOVERED": {
+			Reason:     "RESULT_SECRET_DISCOVERED",
+			Summary:    "a tool result contained sensitive credentials caught during discovery inspection",
+			Executable: false,
+			Notes: []string{
+				"mask or scrub sensitive credentials before propagating tool results into LLM context",
+				"configure redaction rules in secretgate policy to automatically mask matched patterns",
+			},
+		},
+		"SECRET_REDACTED": {
+			Reason:     "SECRET_REDACTED",
+			Summary:    "a credential span in a tool result was masked in place by policy",
+			Executable: false,
+			Notes: []string{
+				"the credential was safely redacted; non-sensitive output remains available in context",
+				"proceed with workflow using the masked output, or supply explicit authorization if unredacted secret is required",
+			},
+		},
+		"SHELL_DIALECT": {
+			Reason:     "SHELL_DIALECT",
+			Summary:    "a command was executed under an incompatible shell interpreter dialect",
+			Executable: false,
+			Notes: []string{
+				"re-route PowerShell commands and cmdlets to the PowerShell execution tool",
+				"use standard POSIX commands when targeting the Bash execution tool",
+			},
+		},
+		"PII_REDACTED": {
+			Reason:     "PII_REDACTED",
+			Summary:    "personally identifiable information (PII) was masked in place by policy",
+			Executable: false,
+			Notes: []string{
+				"the PII was redacted according to privacy policy while preserving surrounding text",
+				"proceed using sanitized data; do not attempt to reconstruct masked identity fields",
+			},
+		},
+		"PII_EXFIL": {
+			Reason:     "PII_EXFIL",
+			Summary:    "a tool call attempted to egress unredacted personally identifiable information (PII)",
+			Executable: false,
+			Notes: []string{
+				"sanitize or mask PII fields before sending data to external destinations or sinks",
+				"verify privacy compliance rules governing sensitive customer or user data",
+			},
+		},
+		"TAINT_EGRESS": {
+			Reason:     "TAINT_EGRESS",
+			Summary:    "a tool call attempted external network egress or sensitive sink invocation carrying tainted data",
+			Executable: false,
+			Notes: []string{
+				"sanitize or untaint data flow before dispatching to external network endpoints",
+				"use internal IPC channels (e.g. send_input, a2a_send) for worker delegation within the workspace",
+			},
+		},
+		"SCOPE_CROSSING": {
+			Reason:     "SCOPE_CROSSING",
+			Summary:    "a payload or message was routed outside its permitted isolation or residency boundary",
+			Executable: false,
+			Notes: []string{
+				"confine payload routing to its declared scope boundary (agent, fleet, or tenant)",
+				"ensure tenant-scoped data remains within local or designated compute engines",
+			},
+		},
+		"PROMPT_INJECTION": {
+			Reason:     "PROMPT_INJECTION",
+			Summary:    "untrusted input or tool result matched prompt injection patterns",
+			Executable: false,
+			Notes: []string{
+				"inspect untrusted content and strip jailbreak or instruction override markers",
+				"quarantine the payload and use structured data extraction rather than raw instruction ingestion",
+			},
+		},
+		"INTEGRITY" + "_REFUTED": {
+			Reason:     "INTEGRITY" + "_REFUTED",
+			Summary:    "an external witness or verification check refuted the claimed state",
+			Executable: false,
+			Notes: []string{
+				"verify claims against ground-truth git history, test runs, or external reporters",
+				"never fabricate evidence or self-report completion without verifiable artifacts",
+			},
 		},
 	}
 }

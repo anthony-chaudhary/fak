@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
 func TestRecoverOffTrunkDryRunPrintsCommands(t *testing.T) {
@@ -311,5 +313,97 @@ func TestRecoverSyncManualPlansRefuseExecute(t *testing.T) {
 				t.Fatalf("stderr missing refusal: %s", errb.String())
 			}
 		})
+	}
+}
+
+func TestRecoveryCatalogCoversABIKernelReasons(t *testing.T) {
+	plans := recoveryPlans("main")
+	for _, reason := range abi.ReasonNames() {
+		plan, ok := plans[reason]
+		if !ok {
+			t.Errorf("kernel ABI reason %q has no registered recovery plan in fak recover", reason)
+			continue
+		}
+		if plan.Summary == "" {
+			t.Errorf("kernel ABI recovery plan for %q has empty Summary", reason)
+		}
+		if !plan.Executable && len(plan.Notes) == 0 && len(plan.Steps) == 0 {
+			t.Errorf("manual recovery plan for %q has neither Notes nor Steps", reason)
+		}
+	}
+}
+
+func TestRecoveryCatalogCoversDOSTokens(t *testing.T) {
+	plans := recoveryPlans("main")
+	root := guardFindReasonRoot()
+	if root == "" {
+		t.Fatal("could not find repository root containing dos.toml")
+	}
+	dosDocs := guardReadReasonDocs(root)
+	if len(dosDocs) == 0 {
+		t.Fatal("no reasons parsed from dos.toml")
+	}
+	for token := range dosDocs {
+		plan, ok := plans[token]
+		if !ok {
+			t.Errorf("dos.toml refusal reason %q has no registered recovery plan in fak recover", token)
+			continue
+		}
+		if plan.Summary == "" {
+			t.Errorf("recovery plan for dos.toml reason %q has empty Summary", token)
+		}
+		if len(plan.Notes) == 0 && len(plan.Steps) == 0 {
+			t.Errorf("recovery plan for dos.toml reason %q has neither Notes nor Steps", token)
+		}
+	}
+}
+
+func TestRecoverCommittedRedUsesFakDev(t *testing.T) {
+	plan, ok := recoveryPlans("main")["COMMITTED_RED"]
+	if !ok {
+		t.Fatal("COMMITTED_RED plan missing")
+	}
+	if len(plan.Steps) == 0 || !reflect.DeepEqual(plan.Steps[0].Argv, []string{"fak-dev", "ci-preflight"}) {
+		t.Fatalf("COMMITTED_RED step = %+v, want fak-dev ci-preflight", plan.Steps)
+	}
+}
+
+func TestRecoverConceptFreshnessUsesGenerateStagedFlag(t *testing.T) {
+	plan, ok := recoveryPlans("main")["CONCEPT_FRESHNESS"]
+	if !ok {
+		t.Fatal("CONCEPT_FRESHNESS plan missing")
+	}
+	if len(plan.Steps) == 0 || !reflect.DeepEqual(plan.Steps[0].Argv, []string{"fak", "concept", "generate", "--staged"}) {
+		t.Fatalf("CONCEPT_FRESHNESS step = %+v, want fak concept generate --staged", plan.Steps)
+	}
+}
+
+func TestRecoverStaleRecallUsesRunIDPlaceholder(t *testing.T) {
+	plan, ok := recoveryPlans("main")["STALE_RECALL"]
+	if !ok {
+		t.Fatal("STALE_RECALL plan missing")
+	}
+	if len(plan.Steps) == 0 || !reflect.DeepEqual(plan.Steps[0].Argv, []string{"dos", "status", "<run-id>"}) {
+		t.Fatalf("STALE_RECALL step = %+v, want dos status <run-id>", plan.Steps)
+	}
+}
+
+func TestRecoverPolicyBlockUsesPreflight(t *testing.T) {
+	plan, ok := recoveryPlans("main")["POLICY_BLOCK"]
+	if !ok {
+		t.Fatal("POLICY_BLOCK plan missing")
+	}
+	if len(plan.Steps) == 0 || !reflect.DeepEqual(plan.Steps[0].Argv, []string{"fak", "preflight"}) {
+		t.Fatalf("POLICY_BLOCK step = %+v, want fak preflight", plan.Steps)
+	}
+}
+
+func TestRecoverTrustViolationUsesPreflight(t *testing.T) {
+	plan, ok := recoveryPlans("main")["TRUST_VIOLATION"]
+	if !ok {
+		t.Fatal("TRUST_VIOLATION plan missing")
+	}
+	if len(plan.Steps) == 0 || !reflect.DeepEqual(plan.Steps[0].Argv, []string{"fak", "preflight"}) {
+		t.Fatalf("TRUST_VIOLATION step = %+v, want fak preflight", plan.Steps)
 	}
 }
