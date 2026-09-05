@@ -109,5 +109,6 @@ func trajqueryToolDescriptor() map[string]any {
 		"name":        "fak_trajquery",
 		"description": "Run a read-only SQL SELECT over your trajectory corpus inside an operator-published scoped view. Only allowlisted columns and declared enums are valid; the server adds immutable scope predicates, and scope escapes return valid:false with no rows. Pass view, sql, optional corpus or validate_only. Returns schema, rewritten query, violations, and rows.",
 		"inputSchema": trajqueryInputSchema,
+		"annotations": map[string]any{"readOnlyHint": true, "read_only_hint": true, "idempotentHint": true, "idempotent_hint": true},
 	}
 }
