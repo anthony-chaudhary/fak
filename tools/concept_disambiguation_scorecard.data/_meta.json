@@ -7553,6 +7553,16 @@
           "category": "incidental",
           "reason": "witness execution kernel helper capturing subprocess stdout/stderr SHA-256",
           "token": "RunPipeWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "loopgate refusal token for unwitnessed narration claims",
+          "token": "ReasonUnwitnessedNarrationClaim"
+        },
+        {
+          "category": "incidental",
+          "reason": "closed refusal reason for unwitnessed narration claims",
+          "token": "UNWITNESSED_NARRATION_CLAIM"
         }
       ],
       "id": "witness-proof",
@@ -7592,6 +7602,7 @@
         "QualityWitness",
         "REVOCABLE",
         "ReasonPopulationUnwitnessed",
+        "ReasonUnwitnessedNarrationClaim",
         "ReasonWitnessMissing",
         "ReasonWitnessUnverified",
         "ReceiptsDigest",
@@ -7608,6 +7619,7 @@
         "StageAttest",
         "StageWitnessRequest",
         "TurnOutcomesFromWitness",
+        "UNWITNESSED_NARRATION_CLAIM",
         "ValidateWitness",
         "VerdictSetupNotWitnessed",
         "VerdictUnwitnessed",
@@ -9519,6 +9531,11 @@
           "category": "incidental",
           "reason": "setter for active policy runtime",
           "token": "SetPolicyRuntime"
+        },
+        {
+          "category": "incidental",
+          "reason": "loopgate helper adjudicating turns with trajectory receipts",
+          "token": "AdjudicateTurnWithReceipts"
         }
       ],
       "exclude": [
@@ -9528,6 +9545,7 @@
       "ignore": [
         "ARM_CAPABILITY_BUNDLED",
         "ARM_CAPABILITY_UNNAMED",
+        "AdjudicateTurnWithReceipts",
         "AdjudicatorAgreement",
         "AdjudicatorSHA256",
         "AdmitPolicyDeny",

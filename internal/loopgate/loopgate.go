@@ -61,6 +61,7 @@ type Turn struct {
 	Claim       string
 	HeadRef     string
 	Criterion   Criterion
+	Receipts    []ReceiptRecord
 }
 
 // Request is the normalized witness call the loop host must satisfy.
@@ -138,6 +139,13 @@ func Adjudicate(ctx context.Context, turn Turn, witness WitnessFunc) Decision {
 			Verdict: VerdictNotYet,
 			Reason:  ReasonDoneUnwitnessed,
 			Summary: "turn did not claim done; continue",
+		}
+	}
+	if turn.ClaimedDone && IsNarrationTestClaim(turn.Claim) && !HasMatchingExecutionReceipt(turn.Claim, turn.Receipts) {
+		return Decision{
+			Verdict: VerdictRefused,
+			Reason:  ReasonUnwitnessedNarrationClaim,
+			Summary: "turn asserted test completion without matching execution receipts in trajectory",
 		}
 	}
 	req, err := turn.request()
