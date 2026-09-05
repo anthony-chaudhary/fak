@@ -446,11 +446,16 @@ func TestPushGitCommit(t *testing.T) {
 	// Set up targetDir inside a real git repository
 	gitRoot := t.TempDir()
 	cmdInit := exec.Command("git", "init", gitRoot)
+	cmdInit.Env = isolatedGitEnv()
 	if out, err := cmdInit.CombinedOutput(); err != nil {
 		t.Skipf("git init not available: %s (%v)", string(out), err)
 	}
-	_ = exec.Command("git", "-C", gitRoot, "config", "user.email", "test@example.com").Run()
-	_ = exec.Command("git", "-C", gitRoot, "config", "user.name", "Test User").Run()
+	cfgEmail := exec.Command("git", "-C", gitRoot, "config", "user.email", "test@example.com")
+	cfgEmail.Env = isolatedGitEnv()
+	_ = cfgEmail.Run()
+	cfgName := exec.Command("git", "-C", gitRoot, "config", "user.name", "Test User")
+	cfgName.Env = isolatedGitEnv()
+	_ = cfgName.Run()
 
 	targetDir := filepath.Join(gitRoot, "goals", "fak")
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
@@ -467,6 +472,7 @@ func TestPushGitCommit(t *testing.T) {
 
 	// Verify git log has the commit
 	logCmd := exec.Command("git", "-C", gitRoot, "log", "-1", "--oneline")
+	logCmd.Env = isolatedGitEnv()
 	out, err := logCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git log failed: %s: %v", string(out), err)

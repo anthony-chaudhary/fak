@@ -408,10 +408,30 @@ func atomicWriteFile(destPath string, data []byte, perm os.FileMode, modTime tim
 	return nil
 }
 
+func isolatedGitEnv() []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		k, _, ok := strings.Cut(kv, "=")
+		if ok {
+			u := strings.ToUpper(k)
+			if u == "GIT_DIR" || u == "GIT_WORK_TREE" || u == "GIT_INDEX_FILE" || u == "GIT_OBJECT_DIRECTORY" || u == "GIT_PREFIX" || u == "GIT_COMMON_DIR" {
+				continue
+			}
+		}
+		env = append(env, kv)
+	}
+	return env
+}
+
+func configureGitCommand(cmd *exec.Cmd) {
+	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.Env = isolatedGitEnv()
+}
+
 // findGitRoot discovers the root of the git repository containing dir.
 func findGitRoot(dir string) (string, error) {
 	cmd := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel")
-	windowgate.ConfigureBackgroundCommand(cmd)
+	configureGitCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse in %s failed: %w", dir, err)
@@ -495,7 +515,7 @@ func Push(wsRoot, targetDir, registryPath, goalParkDir string, commit, push, dry
 
 		if commit {
 			addCmd := exec.Command("git", "-C", resolvedRoot, "add", targetRel)
-			windowgate.ConfigureBackgroundCommand(addCmd)
+			configureGitCommand(addCmd)
 			if out, err := addCmd.CombinedOutput(); err != nil {
 				err := fmt.Errorf("git add failed: %s: %w", strings.TrimSpace(string(out)), err)
 				report.Error = err.Error()
@@ -503,10 +523,10 @@ func Push(wsRoot, targetDir, registryPath, goalParkDir string, commit, push, dry
 			}
 
 			diffCmd := exec.Command("git", "-C", resolvedRoot, "diff", "--cached", "--quiet")
-			windowgate.ConfigureBackgroundCommand(diffCmd)
+			configureGitCommand(diffCmd)
 			if err := diffCmd.Run(); err != nil {
 				commitCmd := exec.Command("git", "-C", resolvedRoot, "commit", "-m", "chore(goals): sync goal artifacts (fak)")
-				windowgate.ConfigureBackgroundCommand(commitCmd)
+				configureGitCommand(commitCmd)
 				if out, err := commitCmd.CombinedOutput(); err != nil {
 					err := fmt.Errorf("git commit failed: %s: %w", strings.TrimSpace(string(out)), err)
 					report.Error = err.Error()
@@ -518,7 +538,7 @@ func Push(wsRoot, targetDir, registryPath, goalParkDir string, commit, push, dry
 
 		if push {
 			pushCmd := exec.Command("git", "-C", resolvedRoot, "push")
-			windowgate.ConfigureBackgroundCommand(pushCmd)
+			configureGitCommand(pushCmd)
 			if out, err := pushCmd.CombinedOutput(); err != nil {
 				err := fmt.Errorf("git push failed: %s: %w", strings.TrimSpace(string(out)), err)
 				report.Error = err.Error()
