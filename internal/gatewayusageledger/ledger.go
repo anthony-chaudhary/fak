@@ -122,6 +122,7 @@ type Counters struct {
 	CompactionBailed          uint64 `json:"compaction_bailed"`
 	CompactionOff             uint64 `json:"compaction_off"`
 	CompactionDroppedTurns    uint64 `json:"compaction_dropped_turns"`
+	CompactionRestoredTurns   uint64 `json:"compaction_restored_turns,omitempty"`
 	CompactionShedTokens      uint64 `json:"compaction_shed_tokens"`
 	CompactionCacheReadTokens uint64 `json:"compaction_cache_read_tokens"`
 	// CompactionInducedCreationTokens is the suffix-burst base (#2785): provider

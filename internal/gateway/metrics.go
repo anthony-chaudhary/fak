@@ -141,6 +141,7 @@ type gatewayMetrics struct {
 	compactAttempts      map[string]uint64 // WITNESSED: outcome -> count: fired | bailed | off
 	compactBailReasons   map[string]uint64 // WITNESSED: CompactReason* -> count (why a bail happened)
 	compactDropped       uint64            // WITNESSED: whole messages stubbed out across all fires
+	compactRestored      uint64            // WITNESSED: dropped messages restored via fak_context_restore
 	compactShed          uint64            // WITNESSED: estimated tokens fak removed from the body across all fires
 	compactCacheReads    uint64            // OBSERVED: sum of provider-reported cache_read on compacted turns
 	compactLastCacheRd   float64           // OBSERVED: provider-reported cache_read on the MOST RECENT compacted turn
@@ -754,6 +755,7 @@ type AdjudicationSummary struct {
 	CompactionBailed          uint64  `json:"compaction_bailed"`
 	CompactionOff             uint64  `json:"compaction_off"`
 	CompactionDroppedTurns    uint64  `json:"compaction_dropped_turns"`
+	CompactionRestoredTurns   uint64  `json:"compaction_restored_turns"`
 	CompactionShedTokens      uint64  `json:"compaction_shed_tokens"`
 	CompactionCacheReadTokens uint64  `json:"compaction_cache_read_tokens"`
 	LastCompactionCacheRead   float64 `json:"last_compaction_cache_read"`
@@ -897,6 +899,21 @@ type AdjudicationSummary struct {
 	AnchorPlacement *metrics.AnchorRefusalReport `json:"anchor_placement,omitempty"`
 }
 
+func (m *gatewayMetrics) recordCompactionRestore(count int) {
+	if m == nil || count <= 0 {
+		return
+	}
+	m.compactMu.Lock()
+	m.compactRestored += uint64(count)
+	m.compactMu.Unlock()
+}
+
+func (s *Server) recordCompactionRestore(count int) {
+	if s != nil && s.metrics != nil {
+		s.metrics.recordCompactionRestore(count)
+	}
+}
+
 // adjudicationSummary folds the live operation counters into a verdict roll-up.
 func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum := AdjudicationSummary{ByReason: map[string]uint64{}}
@@ -935,6 +952,7 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.CompactionBailed = comp.attempts["bailed"]
 	sum.CompactionOff = comp.attempts["off"]
 	sum.CompactionDroppedTurns = comp.dropped
+	sum.CompactionRestoredTurns = comp.restored
 	sum.CompactionShedTokens = comp.shed
 	sum.CompactionCacheReadTokens = comp.cacheReads
 	sum.LastCompactionCacheRead = comp.lastCacheRd

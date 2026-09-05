@@ -584,3 +584,38 @@ func decodeMCPResult(t *testing.T, res any, v any) {
 		t.Fatalf("decode mcp text %q: %v", text, err)
 	}
 }
+
+func TestRestoreContextIncrementsCompactionRestoredTurns(t *testing.T) {
+	srv := newTestServer(t)
+	const trace = "t-restore-counter"
+	taskBytes := []byte(`{"role":"user","content":"reproduce issue 11647"}`)
+	id := ctxplan.Digest(taskBytes)
+
+	srv.stashRestore(trace, id, "reproduce issue 11647", taskBytes)
+
+	if got := srv.AdjudicationSummary().CompactionRestoredTurns; got != 0 {
+		t.Fatalf("initial CompactionRestoredTurns = %d, want 0", got)
+	}
+
+	if _, err := srv.restoreContext("", ContextRestoreRequest{ID: id, TraceID: trace}); err != nil {
+		t.Fatalf("restoreContext failed: %v", err)
+	}
+
+	if got := srv.AdjudicationSummary().CompactionRestoredTurns; got != 1 {
+		t.Fatalf("CompactionRestoredTurns after 1 restore = %d, want 1", got)
+	}
+
+	// An error / miss should not increment the counter
+	_, _ = srv.restoreContext("", ContextRestoreRequest{ID: "deadbeef", TraceID: trace})
+	if got := srv.AdjudicationSummary().CompactionRestoredTurns; got != 1 {
+		t.Fatalf("CompactionRestoredTurns after miss = %d, want 1", got)
+	}
+
+	if _, err := srv.restoreContext("", ContextRestoreRequest{ID: id, TraceID: trace}); err != nil {
+		t.Fatalf("second restoreContext failed: %v", err)
+	}
+
+	if got := srv.AdjudicationSummary().CompactionRestoredTurns; got != 2 {
+		t.Fatalf("CompactionRestoredTurns after 2 restores = %d, want 2", got)
+	}
+}

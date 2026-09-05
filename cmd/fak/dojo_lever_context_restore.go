@@ -43,24 +43,24 @@ func (l contextRestoreLever) Episodes(dojo.Scenario) ([]dojo.ScoredInput, error)
 // gateway-usage ledger, which records each compaction's dropped turns — to the
 // drop/restore counts the pure fold needs. Only exit rows are summed (the same
 // choice compaction_segments makes: a periodic or carryforward snapshot would
-// double-count a session's drops). The ledger records DROPS but no restore counter,
-// so RestoreRecorded is false and the fold reports UNMEASURED honestly rather than
-// fabricating a 0.0 recall; the extension seam is a restore counter on the gateway
-// usage row (#4486). Fail-open: a missing/unreadable ledger yields a zero-drop
-// ledger and the fold reports the honest "no dropped spans" UNMEASURED.
+// double-count a session's drops). Fail-open: a missing/unreadable ledger yields
+// a zero-drop ledger and the fold reports the honest "no dropped spans" UNMEASURED.
 func loadContextSpanLedger(root string) dojo.ContextSpanLedger {
 	rows := gatewayusageledger.ReadLedgerFile(filepath.Join(root, gatewayusageledger.DefaultLedgerRel))
 	var dropped uint64
+	var restored uint64
+	var hasRestoreRecorded bool
 	for _, r := range rows {
 		if r.Kind != "exit" {
 			continue // fold only exit rows so periodic/carryforward snapshots don't double-count
 		}
 		dropped += r.Counters.CompactionDroppedTurns
+		restored += r.Counters.CompactionRestoredTurns
+		hasRestoreRecorded = true
 	}
 	return dojo.ContextSpanLedger{
-		DroppedSpans: int(dropped),
-		// No durable restore counter exists on the gateway usage row yet (#4486): the
-		// ledger records drops but not restores, so recall stays honestly UNMEASURED.
-		RestoreRecorded: false,
+		DroppedSpans:    int(dropped),
+		RestoredSpans:   int(restored),
+		RestoreRecorded: hasRestoreRecorded,
 	}
 }
