@@ -179,6 +179,7 @@ func runRecover(stdout, stderr io.Writer, argv []string) int {
 var emittedRecoveryReasons = []string{
 	"BEHIND",
 	"BEHIND_FASTFORWARDABLE",
+	"BUDGET_RECEIPT_INCOMPLETE",
 	"COMMITTED_RED",
 	"CONCEPT_ADMISSION",
 	"CONCEPT_FRESHNESS",
@@ -197,6 +198,8 @@ var emittedRecoveryReasons = []string{
 	"MERGE_ACTIVE_PEER_OWNED",
 	"MISROUTE",
 	"OVERSIZE",
+	"PARENT_TOKEN_BUDGET_EXCEEDED",
+	"PARENT_WALL_DEADLINE_EXCEEDED",
 	"PATHSPEC_RACE",
 	"PII_EXFIL",
 	"PII_REDACTED",
@@ -378,6 +381,42 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 				"omitting the flag preserves the 120000 ms default",
 				"the override changes only the one shared deadline around the same three witnesses; it does not skip, weaken, or retry any witness",
 				"the timeout refusal happens before trunk CAS, so the managed worker and trunk/index remain unchanged",
+			},
+		},
+		"BUDGET_RECEIPT_INCOMPLETE": {
+			Reason:     "BUDGET_RECEIPT_INCOMPLETE",
+			Summary:    "one or more child workers did not return provider-authoritative token usage",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "ultracode", "status"}, Summary: "inspect the ultracode run to verify child worker completion and usage authority"},
+			},
+			Notes: []string{
+				"ensure all launched child workers finish cleanly and report provider-authoritative token usage before admitting the aggregate envelope receipt",
+				"re-run with completed child receipts or inspect failed child workers",
+			},
+		},
+		"PARENT_TOKEN_BUDGET_EXCEEDED": {
+			Reason:     "PARENT_TOKEN_BUDGET_EXCEEDED",
+			Summary:    "aggregate token consumption across child workers exceeded the parent budget envelope",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "ultracode", "status"}, Summary: "inspect child token allocation and consumption breakdown"},
+			},
+			Notes: []string{
+				"increase the parent token budget envelope, reduce the child worker count, or constrain individual child context/prompt sizes",
+				"do not tamper with child usage records to bypass the parent token envelope",
+			},
+		},
+		"PARENT_WALL_DEADLINE_EXCEEDED": {
+			Reason:     "PARENT_WALL_DEADLINE_EXCEEDED",
+			Summary:    "ultracode run elapsed wall-clock time exceeded the parent deadline envelope",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "ultracode", "status"}, Summary: "inspect child worker durations and execution bottlenecks"},
+			},
+			Notes: []string{
+				"extend the parent wall budget duration or optimize/parallelize slow child execution steps",
+				"verify worker responsiveness and network latency across compute nodes",
 			},
 		},
 		"ISSUE_NOT_DISPATCH_LEAF": {Reason: "ISSUE_NOT_DISPATCH_LEAF", Summary: "the selected issue is a parent, research item, or other non-leaf unit", Notes: []string{"decompose it into independently shippable child issues with done conditions, then dispatch one child leaf"}},
