@@ -232,10 +232,17 @@ func metaFor(tool string) map[string]string {
 	if m, ok := todoToolMeta(tool); ok {
 		return m
 	}
+	if m, ok := mcpToolMeta(tool); ok {
+		return m
+	}
 	if readOnlyTools[tool] {
 		return map[string]string{"readOnlyHint": "true", "idempotentHint": "true"}
 	}
 	return map[string]string{"readOnlyHint": "false", "idempotentHint": "false", "destructive": "true"}
+}
+
+func isEffectSafeTool(tool string) bool {
+	return metaFor(tool)["readOnlyHint"] == "true"
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +342,9 @@ func Configure() {
 		allow[name] = true
 	}
 	for _, name := range todoToolAllow() {
+		allow[name] = true
+	}
+	for _, name := range mcpToolAllow() {
 		allow[name] = true
 	}
 

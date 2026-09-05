@@ -87,6 +87,15 @@
         "mcp__dos__dos_answer", "mcp__dos__dos_check_reason", "mcp__dos__dos_refuse_reasons",
         "mcp__dos__dos_commit_audit", "mcp__dos__dos_citation_resolve", "mcp__dos__acme_lane_hint"
       ]
+    },
+    {
+      "name": "fak-native",
+      "required_tools": [
+        "Read", "Write", "Edit", "Grep", "Glob", "Bash",
+        "get_time", "fetch_web", "web_search",
+        "todowrite", "todoread", "skill",
+        "fak_read", "fak_tools_search", "fak_adjudicate", "fak_syscall", "fak_capabilities"
+      ]
     }
   ]
 }

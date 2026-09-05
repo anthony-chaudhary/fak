@@ -210,6 +210,30 @@ func firstClassHarnessFloorProfiles() []harnessFloorProfile {
 			// off-floor, and there is no shell alias to carry danger rules for.
 			ShellAliases: nil,
 		},
+		{
+			Name: "fak-native",
+			RequiredTools: []harnessToolProbe{
+				{"Read", `{"file_path":"README.md"}`},
+				{"Write", `{"file_path":"test.txt","content":"hello","mode":"create"}`},
+				{"Edit", `{"file_path":"test.txt","old_string":"a","new_string":"b","expected_version":"1"}`},
+				{"Grep", `{"pattern":"func"}`},
+				{"Glob", `{"pattern":"*.go"}`},
+				{"get_time", `{}`},
+				{"fetch_web", `{"url":"https://example.com"}`},
+				{"web_search", `{"query":"fak"}`},
+				{"todowrite", `{"todos":[]}`},
+				{"todoread", `{}`},
+				{"skill", `{"name":"test"}`},
+				{"fak_read", `{"file_path":"README.md"}`},
+				{"fak_tools_search", `{"query":"tool","detail_level":"name"}`},
+				{"fak_adjudicate", `{"tool":"Read","arguments":{}}`},
+				{"fak_syscall", `{"tool":"get_time","arguments":{}}`},
+				{"fak_capabilities", `{}`},
+			},
+			ShellAliases: []shellAliasSpec{
+				{Name: "Bash", Benign: "git status", Denies: posixDenies},
+			},
+		},
 	}
 }
 
@@ -257,6 +281,8 @@ func verdictWord(v abi.VerdictKind) string {
 		return "allow"
 	case abi.VerdictDeny:
 		return "deny"
+	case abi.VerdictTransform:
+		return "transform"
 	default:
 		return fmt.Sprintf("verdict(%d)", int(v))
 	}
@@ -299,7 +325,7 @@ func checkHarnessFloorCoverage(manifestJSON []byte) ([]string, error) {
 			if err != nil {
 				return nil, err
 			}
-			if v != abi.VerdictAllow {
+			if v != abi.VerdictAllow && v != abi.VerdictTransform {
 				gaps = append(gaps, fmt.Sprintf("%s: required tool %q is not admitted (got %s, want allow) — a guarded %s turn can DEFAULT_DENY-loop on it before any useful work",
 					p.Name, probe.Tool, verdictWord(v), p.Name))
 			}

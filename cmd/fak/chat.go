@@ -28,6 +28,7 @@ type chatFlags struct {
 	codeTools             *bool
 	codeWorkspace         *string
 	sysTools              *bool
+	mcpTools              *bool
 	skills                *bool
 	skillsDir             *string
 	workflow              *string
@@ -53,6 +54,7 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 	cf.codeTools = fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the workspace (alias for --tools=code)")
 	cf.codeWorkspace = fs.String("code-workspace", "", "override workspace root for code tools (default: current directory)")
 	cf.sysTools = fs.Bool("sys-tools", true, "arm safe read-only system and web utility tools (get_time, fetch_web, web_search); use --sys-tools=false to disable")
+	cf.mcpTools = fs.Bool("mcp-tools", true, "arm native fak MCP features")
 	cf.skills = fs.Bool("skills", true, "enable Agent Skills discovery and dynamic faulting")
 	cf.skillsDir = fs.String("skills-dir", "", "optional custom directory to search for SKILL.md definitions")
 	cf.workflow = fs.String("workflow", "", "name of workflow to execute (e.g. fleet-wave)")
@@ -130,6 +132,13 @@ func cmdChat(argv []string) {
 		must(sysErr)
 		defer agent.DisarmSysTools()
 		catalog = append(catalog, sysCatalog...)
+		hasCustomCatalog = true
+	}
+	if *cf.mcpTools && *cf.tools != "demo" && *cf.tools != "none" {
+		mcpCatalog, mcpErr := agent.ArmMCPTools()
+		must(mcpErr)
+		defer agent.DisarmMCPTools()
+		catalog = append(catalog, mcpCatalog...)
 		hasCustomCatalog = true
 	}
 	if hasCustomCatalog {
