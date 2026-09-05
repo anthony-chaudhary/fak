@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"sync"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
@@ -123,5 +128,114 @@ func TestDispatchTickMicroBackendDryRunWouldEnroll(t *testing.T) {
 	// A dry run plans but does NOT construct the host, so it records no audit/result.
 	if _, ok := got["host_audit"]; ok {
 		t.Fatalf("dry-run micro tick recorded host_audit; want none")
+	}
+}
+
+// mockInProcessToolPlanner is an agent.Planner for testing in-process tool execution.
+// It emits a Read tool call on the first turn and reports completion on the second turn.
+type mockInProcessToolPlanner struct {
+	mu   sync.Mutex
+	turn int
+}
+
+func (p *mockInProcessToolPlanner) Model() string { return "mock-inprocess-tool" }
+
+func (p *mockInProcessToolPlanner) Complete(_ context.Context, messages []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.turn == 0 {
+		p.turn++
+		return &agent.Completion{
+			Message: agent.Message{
+				Role: agent.RoleAssistant,
+				ToolCalls: []agent.ToolCall{
+					{
+						ID:   "call_read_1",
+						Type: "function",
+						Function: agent.Func{
+							Name:      "Read",
+							Arguments: `{"file_path":"docs/test.txt"}`,
+						},
+					},
+				},
+			},
+			FinishReason: "tool_calls",
+		}, nil
+	}
+	return &agent.Completion{
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "resolved issue via in-process tool execution",
+		},
+		FinishReason: "stop",
+	}, nil
+}
+
+// TestDispatchTickMicroBackendExecutesInProcessToolCalls verifies that the micro backend
+// executes tool calls in-process via the owned agent loop (RunGovernedArm) instead of
+// spawning a detached CLI process.
+func TestDispatchTickMicroBackendExecutesInProcessToolCalls(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	root := t.TempDir()
+
+	// Seed the file to be read
+	docsDir := filepath.Join(root, "docs")
+	if err := os.MkdirAll(docsDir, 0o755); err != nil {
+		t.Fatalf("mkdir docs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(docsDir, "test.txt"), []byte("sample test content\n"), 0o644); err != nil {
+		t.Fatalf("write test.txt: %v", err)
+	}
+
+	oldSpawner := dispatchIssueWorkerSpawner
+	spawned := false
+	dispatchIssueWorkerSpawner = func(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error) {
+		spawned = true
+		return dispatchSpawnResult{PID: 999, Issue: issue, Lane: lane, Backend: backend}, nil
+	}
+	t.Cleanup(func() { dispatchIssueWorkerSpawner = oldSpawner })
+
+	oldPlanner := dispatchHostEnrollWorker
+	dispatchHostEnrollWorker = func(opts dispatchTickOptions, account dispatchtick.Account) agent.Planner {
+		return &mockInProcessToolPlanner{}
+	}
+	t.Cleanup(func() { dispatchHostEnrollWorker = oldPlanner })
+
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--backend", "micro", "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--live", "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 for micro host-enroll (stderr: %s)\n%s", code, errb, out)
+	}
+	if spawned {
+		t.Fatal("micro backend called the DETACHED exec spawner; it must execute tool calls in-process")
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	if got["action"] != "enrolled" || got["verdict"] != "ENROLLED" || got["ok"] != true {
+		t.Fatalf("micro tick = action %v verdict %v ok %v\n%s", got["action"], got["verdict"], got["ok"], out)
+	}
+
+	res := mapAt(got, "host_result")
+	if res["done"] != true {
+		t.Fatalf("host_result done = %v, want true", res["done"])
+	}
+
+	metricsMap := mapAt(res, "metrics")
+	toolCalls := dispatchMapInt(metricsMap, "tool_calls")
+	turns := dispatchMapInt(metricsMap, "turns")
+	if toolCalls <= 0 {
+		t.Fatalf("metrics.tool_calls = %d, want > 0", toolCalls)
+	}
+	if turns < 2 {
+		t.Fatalf("metrics.turns = %d, want >= 2", turns)
+	}
+
+	if topToolCalls := dispatchMapInt(res, "tool_calls"); topToolCalls != toolCalls {
+		t.Fatalf("host_result.tool_calls = %d, want %d", topToolCalls, toolCalls)
+	}
+	if topTurns := dispatchMapInt(res, "turns"); topTurns != turns {
+		t.Fatalf("host_result.turns = %d, want %d", topTurns, turns)
 	}
 }

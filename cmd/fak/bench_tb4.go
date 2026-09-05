@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -146,6 +147,7 @@ func runTB4Run(stdout, stderr io.Writer, args []string) int {
 	outDir := fs.String("out", "", "destination run output directory")
 	seed := fs.Int64("seed", 42, "deterministic RNG seed")
 	temp := fs.Float64("temp", 0.0, "sampling temperature")
+	mockMode := fs.Bool("mock", false, "run in mock/synthetic mode for smoke testing")
 
 	if err := fs.Parse(args); err != nil {
 		return 1
@@ -196,7 +198,33 @@ func runTB4Run(stdout, stderr io.Writer, args []string) int {
 	contractData, _ := json.MarshalIndent(contract, "", "  ")
 	_ = os.WriteFile(filepath.Join(*outDir, "contract.json"), contractData, 0644)
 
-	fmt.Fprintf(stdout, "Run initialized under %s\n", *outDir)
+	cfg := tb4bench.RunCampaignConfig{
+		Tasks:       selectedTasks,
+		Arm:         *arm,
+		ModelPath:   *model,
+		OutDir:      *outDir,
+		MockMode:    *mockMode,
+		Determinism: contract.Determinism,
+		Contract:    contract,
+	}
+
+	runRes, err := tb4bench.RunCampaign(context.Background(), cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "error running campaign: %v\n", err)
+		return 1
+	}
+
+	for _, armID := range runRes.ArmExecuted {
+		results := runRes.ArmResults[armID]
+		for _, t := range selectedTasks {
+			if r, ok := results[t.TaskID]; ok {
+				fmt.Fprintf(stdout, "[%s] [%s] -> %s (turns: %d, tokens: %dp/%dc, %dms)\n",
+					t.TaskID, armID, r.Status, r.TotalTurns, r.TotalPromptTokens, r.TotalCompletionTokens, r.DurationMs)
+			}
+		}
+	}
+
+	fmt.Fprintf(stdout, "Run completed successfully under %s\n", *outDir)
 	return 0
 }
 
@@ -204,6 +232,7 @@ func runTB4Eval(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("fak bench tb4 eval", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	runDir := fs.String("run-dir", "", "path to benchmark run directory")
+	dataset := fs.String("dataset", "", "path to task manifest JSON (optional)")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
@@ -212,6 +241,43 @@ func runTB4Eval(stdout, stderr io.Writer, args []string) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "Evaluating tasks in %s...\n", *runDir)
+
+	evalCfg := tb4bench.EvaluateCampaignConfig{
+		RunDir:  *runDir,
+		Dataset: *dataset,
+	}
+
+	evalRes, err := tb4bench.EvaluateCampaign(context.Background(), evalCfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "error evaluating campaign: %v\n", err)
+		return 1
+	}
+
+	var arms []string
+	for arm := range evalRes.Receipts {
+		arms = append(arms, arm)
+	}
+	sort.Strings(arms)
+
+	for _, arm := range arms {
+		taskReceipts := evalRes.Receipts[arm]
+		var taskIDs []string
+		for id := range taskReceipts {
+			taskIDs = append(taskIDs, id)
+		}
+		sort.Strings(taskIDs)
+
+		for _, id := range taskIDs {
+			r := taskReceipts[id]
+			fmt.Fprintf(stdout, "[%s] [%s] -> %s (reason: %s, exit: %d, %dms)\n",
+				id, r.Arm, r.Verdict, r.FailureReason, r.ExitCode, r.DurationMs)
+		}
+		solved := evalRes.SolvedCount[arm]
+		total := evalRes.TotalCount[arm]
+		rate := evalRes.SolveRates[arm]
+		fmt.Fprintf(stdout, "Summary for %s: %d/%d solved (%.1f%%)\n", arm, solved, total, rate*100)
+	}
+
 	return 0
 }
 
@@ -220,6 +286,7 @@ func runTB4Compare(stdout, stderr io.Writer, args []string) int {
 	fs.SetOutput(stderr)
 	fakDir := fs.String("fak-dir", "", "path to Arm A (fak) run directory")
 	opencodeDir := fs.String("opencode-dir", "", "path to Arm B (opencode) run directory")
+	dataset := fs.String("dataset", "", "path to task manifest JSON (optional)")
 	outJSON := fs.String("out-json", "", "output JSON report path")
 	outMD := fs.String("out-md", "", "output Markdown report path")
 	if err := fs.Parse(args); err != nil {
@@ -232,6 +299,23 @@ func runTB4Compare(stdout, stderr io.Writer, args []string) int {
 	}
 
 	fmt.Fprintf(stdout, "Synthesizing comparative analysis between %s and %s...\n", *fakDir, *opencodeDir)
+
+	compCfg := tb4bench.CompareCampaignConfig{
+		FakDir:      *fakDir,
+		OpenCodeDir: *opencodeDir,
+		Dataset:     *dataset,
+		OutJSON:     *outJSON,
+		OutMD:       *outMD,
+	}
+
+	report, err := tb4bench.CompareCampaign(context.Background(), compCfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "error generating comparison report: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprint(stdout, report.GenerateMarkdown())
+
 	if *outJSON != "" {
 		fmt.Fprintf(stdout, "Wrote JSON report to %s\n", *outJSON)
 	}
@@ -251,6 +335,7 @@ func runTB4Replay(stdout, stderr io.Writer, args []string) int {
 	compare := fs.Bool("compare", false, "side-by-side comparative replay")
 	fakDir := fs.String("fak-dir", "", "Arm A run directory")
 	opencodeDir := fs.String("opencode-dir", "", "Arm B run directory")
+	interactive := fs.Bool("interactive", false, "launch interactive TUI replay")
 
 	if err := fs.Parse(args); err != nil {
 		return 1
@@ -271,6 +356,19 @@ func runTB4Replay(stdout, stderr io.Writer, args []string) int {
 			fmt.Fprintf(stderr, "failed to load comparative transcripts: %v / %v\n", errA, errB)
 			return 1
 		}
+		if resA.TaskID == "" {
+			resA.TaskID = *taskID
+		}
+		if resB.TaskID == "" {
+			resB.TaskID = *taskID
+		}
+		if *interactive {
+			if err := tb4bench.RunInteractive(os.Stdin, stdout, resA, resB); err != nil {
+				fmt.Fprintf(stderr, "interactive replay error: %v\n", err)
+				return 1
+			}
+			return 0
+		}
 		viewer.RenderComparativeSideBySide(stdout, resA, resB)
 		return 0
 	}
@@ -288,6 +386,17 @@ func runTB4Replay(stdout, stderr io.Writer, args []string) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "failed to load transcript: %v\n", err)
 		return 1
+	}
+	if res.TaskID == "" && *taskID != "" {
+		res.TaskID = *taskID
+	}
+
+	if *interactive {
+		if err := tb4bench.RunInteractive(os.Stdin, stdout, res, nil); err != nil {
+			fmt.Fprintf(stderr, "interactive replay error: %v\n", err)
+			return 1
+		}
+		return 0
 	}
 
 	viewer.RenderTrajectory(stdout, res)

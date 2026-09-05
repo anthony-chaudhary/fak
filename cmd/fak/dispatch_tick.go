@@ -48,6 +48,7 @@ type dispatchTickOptions struct {
 	CooldownMin    int
 	WorkerTimeoutS int
 	SpawnProbeS    float64
+	MaxTurns       int
 	LoopLedger     string
 	RecordLoop     bool
 	// WorkerModel un-blanks the claude worker model to an explicit id (highest-precedence
@@ -265,6 +266,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	cooldownMin := fs.Int("cooldown-min", dispatchtick.DefaultCooldownMinutes, "skip issues attempted within this many minutes (0 disables)")
 	workerTimeoutS := fs.Int("worker-timeout-s", dispatchtick.DefaultWorkerTimeoutS, "worker lease TTL base in seconds (0 uses default)")
 	spawnProbeS := fs.Float64("spawn-probe-s", dispatchtick.DefaultSpawnProbeS, "seconds to wait after spawn to catch immediate empty-log exits")
+	maxTurns := fs.Int("max-turns", 0, "maximum turns for in-process issue resolution (<=0 uses default)")
 	loopLedger := fs.String("loop-ledger", "", "append this tick to a fak loop ledger (default: FAK_LOOP_LEDGER or .fak/loops.jsonl)")
 	noLoopLedger := fs.Bool("no-loop-ledger", false, "disable loop-ledger append for this tick")
 	workerModel := fs.String("worker-model", "", "pin the claude worker to this exact --model id (un-blanks the seat default; empty falls back to the lane_models pin/benchmark gate/seat default)")
@@ -371,6 +373,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		CooldownMin:             *cooldownMin,
 		WorkerTimeoutS:          *workerTimeoutS,
 		SpawnProbeS:             maxFloat64(0, *spawnProbeS),
+		MaxTurns:                *maxTurns,
 		LoopLedger:              *loopLedger,
 		RecordLoop:              !*noLoopLedger,
 		WorkerModel:             firstString(strings.TrimSpace(*workerModel), strings.TrimSpace(os.Getenv("FLEET_DISPATCH_WORKER_MODEL"))),

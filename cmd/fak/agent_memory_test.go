@@ -282,7 +282,7 @@ func TestChatHeadlessMemoryIntegration(t *testing.T) {
 	memOpt, _ := resolveAgentMemoryOption(true, "", ws)
 	plannerWithMem := &memoryCapturePlanner{}
 	var out bytes.Buffer
-	err := runChatHeadless(&out, plannerWithMem, "hello chat", 1, memOpt)
+	err := runChatHeadless(&out, plannerWithMem, "hello chat", 1, false, "", "", memOpt)
 	if err != nil {
 		t.Fatalf("runChatHeadless with memory: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestChatHeadlessMemoryIntegration(t *testing.T) {
 	if memOptDisabled != nil {
 		optsNoMem = append(optsNoMem, memOptDisabled)
 	}
-	err = runChatHeadless(&out2, plannerNoMem, "hello chat no mem", 1, optsNoMem...)
+	err = runChatHeadless(&out2, plannerNoMem, "hello chat no mem", 1, false, "", "", optsNoMem...)
 	if err != nil {
 		t.Fatalf("runChatHeadless without memory: %v", err)
 	}

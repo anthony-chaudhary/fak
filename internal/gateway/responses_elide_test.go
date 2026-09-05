@@ -213,6 +213,29 @@ func TestResponsesElideHttpIntegration(t *testing.T) {
 	}
 }
 
+func TestResponsesElideToolAlignment(t *testing.T) {
+	srv := newTestServer(t)
+	const trace = "t-responses-elide-alignment"
+
+	bigOutput := strings.Repeat("M", 2000)
+	messages := []agent.Message{
+		{Role: agent.RoleTool, ToolCallID: "c0", Content: bigOutput},
+		{Role: agent.RoleTool, ToolCallID: "c1", Content: "r1"},
+		{Role: agent.RoleTool, ToolCallID: "c2", Content: "r2"},
+		{Role: agent.RoleTool, ToolCallID: "c3", Content: "r3"},
+		{Role: agent.RoleTool, ToolCallID: "c4", Content: "r4"},
+	}
+
+	elided := srv.maybeElideResponsesToolResults(trace, messages, "mcp__fak__fak_context_restore")
+	sum := sha256.Sum256([]byte(bigOutput))
+	digest := hex.EncodeToString(sum[:])
+	wantMarker := "...[fak: tool output elided (len=2000 bytes); recover original via mcp__fak__fak_context_restore id=sha256:" + digest + "]..."
+
+	if elided[0].Content != wantMarker {
+		t.Fatalf("marker mismatch:\ngot:  %q\nwant: %q", elided[0].Content, wantMarker)
+	}
+}
+
 // TestResponsesSubturnHistoricalToolElisionPreventsPrematureYield verifies that when
 // historical tool outputs exceed 160k tokens un-elided, running tool result elision
 // compresses context below the threshold so shouldYieldResponsesSubturn does NOT prematurely yield.
@@ -413,11 +436,13 @@ type capturingResponsesPlanner struct {
 	called   bool
 	comp     *agent.Completion
 	messages []agent.Message
+	tools    []agent.ToolDef
 }
 
 func (p *capturingResponsesPlanner) Complete(ctx context.Context, m []agent.Message, t []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
 	p.called = true
 	p.messages = append([]agent.Message(nil), m...)
+	p.tools = append([]agent.ToolDef(nil), t...)
 	return p.comp, nil
 }
 

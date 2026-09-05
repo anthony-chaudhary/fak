@@ -2,15 +2,18 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/dropin"
+	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/systools"
 )
 
@@ -23,6 +26,7 @@ type chatFlags struct {
 	offline               *bool
 	maxTurns              *int
 	policyPath            *string
+	posture               *string
 	task                  *string
 	tools                 *string
 	codeTools             *bool
@@ -37,6 +41,8 @@ type chatFlags struct {
 	memory                *bool
 	memoryStore           *string
 	reasoningProfile      *string
+	asJSON                *bool
+	receiptOut            *string
 }
 
 func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
@@ -50,6 +56,7 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 	cf.offline = fs.Bool("offline", false, "force the deterministic mock planner (no network)")
 	cf.maxTurns = fs.Int("max-turns", 10, "max model turns the loop may take to resolve ONE human turn")
 	cf.policyPath = fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor)")
+	cf.posture = fs.String("posture", "fail_closed", "adjudication posture: fail_closed|default_open|admit_and_log (default: fail_closed developer floor; env: FAK_AGENT_POSTURE or FAK_GUARD_POSTURE)")
 	cf.task = fs.String("task", "", "run a single non-interactive task turn (headless mode) and exit")
 	cf.tools = fs.String("tools", "code", "toolset to arm: code (Read/Write/Edit/Bash/Grep/Glob), demo (airline fixture), or none")
 	cf.codeTools = fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the workspace (alias for --tools=code)")
@@ -64,6 +71,8 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 	cf.memory = fs.Bool("memory", true, "discover and inject verified workspace memory notes into agent prompt; use --memory=false to disable")
 	cf.memoryStore = fs.String("memory-store", "", "optional custom memory store path (directory or MEMORY.md); defaults to auto-discovery")
 	cf.reasoningProfile = fs.String("reasoning-profile", agent.ReasoningProfileDefault, "named reasoning profile: default|baseline|deep-reason (default: default)")
+	cf.asJSON = fs.Bool("json", false, "emit machine-readable JSON execution receipt in headless mode")
+	cf.receiptOut = fs.String("receipt", "", "write machine-readable execution receipt JSON to file in headless mode")
 	return fs, cf
 }
 
@@ -79,7 +88,6 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 // RunArm in-process, with no upstream required (the offline mock planner is the
 // default, matching `fak agent`). --base-url swaps in a live provider planner.
 func cmdChat(argv []string) {
-	agent.SetConfiguredPosture(adjudicator.PostureDefaultOpen)
 	fs, cf := newChatFlagSet()
 	_ = fs.Parse(argv)
 
@@ -97,7 +105,30 @@ func cmdChat(argv []string) {
 		}
 	}
 
-	applyPolicy(*cf.policyPath)
+	postureExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "posture" {
+			postureExplicit = true
+		}
+	})
+	rawMode := *cf.posture
+	if !postureExplicit {
+		if env := os.Getenv("FAK_AGENT_POSTURE"); env != "" {
+			rawMode = env
+		} else if env := os.Getenv("FAK_GUARD_POSTURE"); env != "" {
+			rawMode = env
+		}
+	}
+	if strings.TrimSpace(rawMode) == "" {
+		rawMode = "fail_closed"
+	}
+
+	if *cf.policyPath != "" {
+		applyPolicy(*cf.policyPath)
+		agent.SetConfiguredPosture(parseChatMode(rawMode))
+	} else {
+		initDevRules(rawMode)
+	}
 
 	providerExplicit := false
 	fs.Visit(func(f *flag.Flag) {
@@ -164,7 +195,7 @@ func cmdChat(argv []string) {
 
 	planner := chatPlanner(*cf.offline, effectiveBaseURL, *cf.provider, *cf.model, *cf.apiKeyEnv, *cf.anthropicAuth)
 	if *cf.task != "" {
-		if err := runChatHeadless(os.Stdout, planner, *cf.task, *cf.maxTurns, runOpts...); err != nil {
+		if err := runChatHeadless(os.Stdout, planner, *cf.task, *cf.maxTurns, *cf.asJSON, *cf.receiptOut, root, runOpts...); err != nil {
 			os.Exit(1)
 		}
 		return
@@ -203,9 +234,34 @@ func chatPlanner(offline bool, baseURL, provider, model, apiKeyEnv, anthropicAut
 }
 
 // runChatHeadless executes a single turn non-interactively (headless mode), printing
-// any executed tool calls and the final answer directly to out.
-func runChatHeadless(out io.Writer, planner agent.Planner, task string, maxTurns int, opts ...agent.RunOption) error {
+// any executed tool calls and the final answer directly to out, or outputting/writing
+// a structured execution receipt if asJSON is true or receiptOut is non-empty.
+func runChatHeadless(out io.Writer, planner agent.Planner, task string, maxTurns int, asJSON bool, receiptOut string, workspace string, opts ...agent.RunOption) error {
 	m, calls, err := agent.RunGovernedArm(ctx(), planner, task, maxTurns, opts...)
+	if asJSON || receiptOut != "" {
+		model := ""
+		if planner != nil {
+			model = planner.Model()
+		}
+		receipt := newHeadlessAgentReceipt(task, model, m, calls, workspace, err)
+		data, marshalErr := json.MarshalIndent(receipt, "", "  ")
+		if marshalErr != nil {
+			return marshalErr
+		}
+		if receiptOut != "" {
+			if dir := filepath.Dir(receiptOut); dir != "" && dir != "." {
+				_ = os.MkdirAll(dir, 0o755)
+			}
+			if writeErr := os.WriteFile(receiptOut, append(data, '\n'), 0o644); writeErr != nil {
+				return writeErr
+			}
+		}
+		if asJSON {
+			fmt.Fprintf(out, "%s\n", data)
+			return err
+		}
+	}
+
 	if err != nil {
 		renderChatTermination(out, err)
 		return err
@@ -278,4 +334,35 @@ func runChat(in io.Reader, out io.Writer, planner agent.Planner, maxTurns int, o
 func renderChatTermination(out io.Writer, err error) {
 	t := agent.ClassifyTermination(err)
 	fmt.Fprintf(out, "fak> turn terminated [%s]: %s\n", t.Cause, t.Evidence)
+}
+
+func parseChatMode(s string) adjudicator.Posture {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "default_open":
+		return adjudicator.PostureDefaultOpen
+	case "admit_and_log":
+		return adjudicator.PostureAdmitAndLog
+	case "fail_closed", "strict", "":
+		return adjudicator.PostureFailClosed
+	default:
+		p, err := policy.ParsePosture(s)
+		if err == nil {
+			return p
+		}
+		return adjudicator.PostureFailClosed
+	}
+}
+
+func initDevRules(mode string) {
+	rt, err := policy.ParseRuntime(guardDefaultPolicyJSON)
+	must(err)
+	effMode := parseChatMode(mode)
+	rt.Adjudicator.Posture = effMode
+	rt.PolicyContext.Posture = effMode
+	agent.SetConfiguredPosture(effMode)
+	digest := guardPolicyDigest(guardDefaultPolicyJSON)
+	policyReloadMu.Lock()
+	defer policyReloadMu.Unlock()
+	_, err = applyPolicyRuntimeLocked(rt, "embedded:developer", digest, "", false)
+	must(err)
 }

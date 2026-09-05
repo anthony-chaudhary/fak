@@ -213,10 +213,15 @@ func (l *WriterLease) Release() error {
 	if cur != l.info {
 		return nil // reclaimed by a peer; leave theirs intact
 	}
-	if err := os.Remove(l.path); err != nil && !os.IsNotExist(err) {
-		return err
+	var remErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		remErr = os.Remove(l.path)
+		if remErr == nil || os.IsNotExist(remErr) {
+			return nil
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
-	return nil
+	return remErr
 }
 
 // SharedReadLease is a held shared read lease (Phase 1). Release it when the read window closes.

@@ -155,7 +155,7 @@ func TestChatHeadless(t *testing.T) {
 	}}
 
 	var out strings.Builder
-	err = runChatHeadless(&out, planner, "read note.txt", 10, agent.WithToolCatalog(catalog))
+	err = runChatHeadless(&out, planner, "read note.txt", 10, false, "", "", agent.WithToolCatalog(catalog))
 	if err != nil {
 		t.Fatalf("runChatHeadless failed: %v", err)
 	}

@@ -604,6 +604,20 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Microcontext tool result elision (#11648)
+	restoreToolName, restoreToolPresent := determineChatRestoreTool(req.Tools)
+	req.Messages = s.maybeElideResponsesToolResults(reqTrace, req.Messages, restoreToolName)
+	if len(req.Tools) > 0 && !restoreToolPresent {
+		req.Tools = append(req.Tools, agent.ToolDef{
+			Type: "function",
+			Function: agent.ToolDefFunction{
+				Name:        restoreToolName,
+				Description: "Restore dropped context by content-addressed sha256 id. Returns verbatim stashed bytes plus orientation; optional trace_id defaults to the current guarded session. Read-only and trust-gated.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string","description":"the content-address handle (sha256 hex) a compaction tombstone embedded as id=<hex>, or a recall page digest"},"trace_id":{"type":"string","description":"session trace id; omitted uses the gateway default trace"}},"required":["id"]}`),
+			},
+		})
+	}
+
 	// True streaming fast path: when the client asked to stream AND the planner can
 	// stream this wire, forward the upstream tokens live for a real time-to-first-token
 	// instead of synthesizing the SSE from a fully-buffered turn. Tool-bearing requests
@@ -745,6 +759,33 @@ func validateChatRequestIngress(w http.ResponseWriter, req ChatRequest) bool {
 		return false
 	}
 	return true
+}
+
+func determineChatRestoreTool(tools []agent.ToolDef) (restoreToolName string, present bool) {
+	for _, t := range tools {
+		if t.Function.Name == "mcp__fak_guard__fak_context_restore" {
+			return "mcp__fak_guard__fak_context_restore", true
+		}
+	}
+	for _, t := range tools {
+		if t.Function.Name == "mcp__fak__fak_context_restore" {
+			return "mcp__fak__fak_context_restore", true
+		}
+	}
+	for _, t := range tools {
+		if t.Function.Name == "fak_context_restore" {
+			return "fak_context_restore", true
+		}
+	}
+	for _, t := range tools {
+		if strings.HasPrefix(t.Function.Name, "mcp__fak_guard__") {
+			return "mcp__fak_guard__fak_context_restore", false
+		}
+		if strings.HasPrefix(t.Function.Name, "mcp__fak__") {
+			return "mcp__fak__fak_context_restore", false
+		}
+	}
+	return "fak_context_restore", false
 }
 
 func (s *Server) validateChatCompletionConformance(w http.ResponseWriter, stream *chatStreamWriter, comp *agent.Completion, asst agent.Message, receiptRequested, decodeTraceRequested, decodeTokenIDsRequested bool, inputTriggerRoute *InputTriggerRouteReceipt) bool {

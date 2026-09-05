@@ -4,11 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
+
+// ResponsesElisionsHeader is the response header reporting the count of elided tool outputs.
+const ResponsesElisionsHeader = "X-Fak-Context-Elisions"
 
 // responses.go is the inbound OpenAI **Responses API** wire (`POST /v1/responses`)
 // — the third client-facing chat surface, alongside /v1/chat/completions and the
@@ -265,6 +269,15 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if rejectInvalidSampling(w, validateResponsesSampling(req)) {
 		return
 	}
+	restoreToolName, restoreToolPresent := determineResponsesRestoreTool(req.Tools)
+	if !restoreToolPresent {
+		req.Tools = append(req.Tools, responsesTool{
+			Type:        "function",
+			Name:        restoreToolName,
+			Description: "Restore dropped context by content-addressed sha256 id. Returns verbatim stashed bytes plus orientation; optional trace_id defaults to the current guarded session. Read-only and trust-gated.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string","description":"the content-address handle (sha256 hex) a compaction tombstone embedded as id=<hex>, or a recall page digest"},"trace_id":{"type":"string","description":"session trace id; omitted uses the gateway default trace"}},"required":["id"]}`),
+		})
+	}
 	tools := responsesToolsToToolDefs(req.Tools)
 
 	reqModel := strings.TrimSpace(req.Model)
@@ -309,7 +322,16 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Microcontext tool result elision: elide large, older tool outputs
-	messages = s.maybeElideResponsesToolResults(reqTrace, messages)
+	messages = s.maybeElideResponsesToolResults(reqTrace, messages, restoreToolName)
+	elisionsCount := 0
+	for _, m := range messages {
+		if strings.Contains(m.Content, "...[fak: tool output elided") {
+			elisionsCount++
+		}
+	}
+	if elisionsCount > 0 {
+		w.Header().Set(ResponsesElisionsHeader, strconv.Itoa(elisionsCount))
+	}
 
 	var subturnRawInput json.RawMessage
 	if len(messages) == 0 {
@@ -769,6 +791,32 @@ const (
 	mcpCanonPrefix  = "mcp__fak" + "_guard__"
 )
 
+// determineResponsesRestoreTool inspects req.Tools to determine the restore tool name
+// and whether a context restore tool is already present in the tool list.
+func determineResponsesRestoreTool(tools []responsesTool) (restoreToolName string, present bool) {
+	for _, t := range tools {
+		if t.Name == "mcp__fak_guard__fak_context_restore" {
+			return "mcp__fak_guard__fak_context_restore", true
+		}
+	}
+	for _, t := range tools {
+		if t.Name == "mcp__fak__fak_context_restore" {
+			return "mcp__fak__fak_context_restore", true
+		}
+	}
+	for _, t := range tools {
+		if t.Name == "fak_context_restore" {
+			return "fak_context_restore", true
+		}
+	}
+	for _, t := range tools {
+		if strings.HasPrefix(t.Name, "mcp__fak_guard__") {
+			return "mcp__fak_guard__fak_context_restore", false
+		}
+	}
+	return "mcp__fak__fak_context_restore", false
+}
+
 // responsesToolsToToolDefs maps the flat Responses function-tool shape onto the
 // gateway's agent.ToolDef (the nested chat shape the planner consumes). A
 // non-function tool type (web_search, file_search, computer_use, ...) is skipped
@@ -1081,4 +1129,19 @@ func isUnsupportedChatGPTModel(model string) bool {
 		return true
 	}
 	return false
+}
+
+// SetPlanner sets the active chat planner for the gateway server.
+func (s *Server) SetPlanner(p agent.Planner) {
+	if s != nil {
+		s.planner = p
+	}
+}
+
+// Planner returns the active chat planner.
+func (s *Server) Planner() agent.Planner {
+	if s == nil {
+		return nil
+	}
+	return s.planner
 }

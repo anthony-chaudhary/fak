@@ -17,6 +17,8 @@ const (
 	CategoryGit      = "git"
 	CategoryTest     = "test"
 	CategoryRefactor = "refactor"
+	CategoryDebug    = "debug"
+	CategorySecurity = "security"
 )
 
 var validCategories = map[string]bool{
@@ -25,6 +27,8 @@ var validCategories = map[string]bool{
 	CategoryGit:      true,
 	CategoryTest:     true,
 	CategoryRefactor: true,
+	CategoryDebug:    true,
+	CategorySecurity: true,
 }
 
 // TaskManifest represents a single task definition in the TB4 benchmark dataset.
@@ -48,7 +52,7 @@ func (t *TaskManifest) Validate() error {
 		return errors.New("task_id cannot be empty")
 	}
 	if !validCategories[t.Category] {
-		return fmt.Errorf("invalid category %q for task %s; must be one of: sysadmin, build, git, test, refactor", t.Category, t.TaskID)
+		return fmt.Errorf("invalid category %q for task %s; must be one of: sysadmin, build, git, test, refactor, debug, security", t.Category, t.TaskID)
 	}
 	if strings.TrimSpace(t.Prompt) == "" {
 		return fmt.Errorf("prompt cannot be empty for task %s", t.TaskID)
