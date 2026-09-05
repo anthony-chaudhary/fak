@@ -94,8 +94,21 @@ func auditJournalPathArg(name, usage string, args []string) string {
 }
 
 func cmdAuditVerify(args []string) {
-	path := auditJournalPathArg("audit verify", "usage: fak audit verify <journal.jsonl>", args)
-	os.Exit(runAuditVerify(os.Stdout, os.Stderr, path))
+	os.Exit(runCmdAuditVerify(os.Stdout, os.Stderr, args))
+}
+
+func runCmdAuditVerify(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("audit verify", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() { fmt.Fprintln(stderr, "usage: fak audit verify <journal.jsonl>") }
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return 2
+	}
+	return runAuditVerify(stdout, stderr, fs.Arg(0))
 }
 
 func runAuditVerify(stdout, stderr io.Writer, path string) int {

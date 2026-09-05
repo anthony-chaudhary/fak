@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -56,6 +58,11 @@ type ArmMetrics struct {
 	// mock loop is not a real per-turn latency — the same observed-only, silent-when-
 	// untimed rule the guard exit line uses (#3113).
 	ElapsedMs int64 `json:"elapsed_ms,omitempty"`
+
+	// Tool scheduler metrics (#8266)
+	ToolCallsSafe      int   `json:"tool_calls_safe,omitempty"`
+	ToolCallsExclusive int   `json:"tool_calls_exclusive,omitempty"`
+	ToolElapsedMs      int64 `json:"tool_elapsed_ms,omitempty"`
 
 	// Speculation lifecycle (#1318, SEAM-4) — populated only on the fak arm when a
 	// speculator is wired (WithSpeculator); all zero on the historical loop. SpecIssued
@@ -204,6 +211,11 @@ func finalizeFak(k *kernel.Kernel, m *ArmMetrics) {
 // leaves Engine unset, so k.routeFor falls back to the loop's kernel default
 // ("localtools"): the no-manifest path is byte-for-byte the pre-routing loop.
 func execViaKernel(ctx context.Context, k *kernel.Kernel, tool, rawArgs, engine string, ev traceEvent, principal ...string) (string, traceEvent) {
+	content, ev, _, _, _ := execViaKernelFull(ctx, k, tool, rawArgs, engine, "", ev, principal...)
+	return content, ev
+}
+
+func execViaKernelFull(ctx context.Context, k *kernel.Kernel, tool, rawArgs, engine, trace string, ev traceEvent, principal ...string) (string, traceEvent, *abi.ToolCall, *abi.Result, abi.Verdict) {
 	args := []byte(rawArgs)
 	if len(args) == 0 {
 		args = []byte("{}")
@@ -211,17 +223,34 @@ func execViaKernel(ctx context.Context, k *kernel.Kernel, tool, rawArgs, engine 
 	ref, err := abi.ActiveResolver().Put(ctx, args)
 	if err != nil {
 		ev.Note = "resolver error: " + err.Error()
-		return `{"error":"internal resolver failure"}`, ev
+		return `{"error":"internal resolver failure"}`, ev, nil, nil, abi.Verdict{}
 	}
 	meta := metaFor(tool)
 	if len(principal) != 0 && strings.TrimSpace(principal[0]) != "" {
 		meta[vdso.MetaPrincipal] = strings.TrimSpace(principal[0])
 	}
-	tc := &abi.ToolCall{Tool: tool, Args: ref, Engine: engine, Meta: meta}
+	tc := &abi.ToolCall{Tool: tool, TraceID: trace, Args: ref, Engine: engine, Meta: meta}
 	r, v := k.Syscall(ctx, tc)
 	ev.Verdict = verdictName(v.Kind)
 	ev.By = v.By
 	body := refutil.Bytes(ctx, r.Payload)
+
+	if r != nil {
+		if r.Payload.Digest == "" && len(r.Payload.Inline) == 0 && len(body) > 0 {
+			r.Payload.Kind = abi.RefInline
+			r.Payload.Inline = body
+			r.Payload.Len = int64(len(body))
+			h := sha256.Sum256(body)
+			r.Payload.Digest = hex.EncodeToString(h[:])
+		}
+	}
+	if tc.Args.Digest == "" && len(tc.Args.Inline) == 0 && len(args) > 0 {
+		tc.Args.Kind = abi.RefInline
+		tc.Args.Inline = args
+		tc.Args.Len = int64(len(args))
+		h := sha256.Sum256(args)
+		tc.Args.Digest = hex.EncodeToString(h[:])
+	}
 
 	switch {
 	case v.Kind == abi.VerdictDeny:
@@ -234,7 +263,7 @@ func execViaKernel(ctx context.Context, k *kernel.Kernel, tool, rawArgs, engine 
 		// vocabulary (#2414) — not a prose adjudicationNote, which is the proxy-only
 		// shim the wire forces there. The model reads a structured verdict it can adapt
 		// to, not a narrated one it can ignore.
-		return denyToolReceipt(r, v).JSON(), ev
+		return denyToolReceipt(r, v).JSON(), ev, tc, r, v
 	case v.By == "vdso":
 		ev.Note = "vDSO hit (served locally, no dispatch)"
 	case v.Kind == abi.VerdictTransform && v.By == "grammar":
@@ -243,7 +272,7 @@ func execViaKernel(ctx context.Context, k *kernel.Kernel, tool, rawArgs, engine 
 	if r.Meta["admit"] == "quarantined" {
 		ev.Note = "QUARANTINED poisoned result (held out of context)"
 	}
-	return string(body), ev
+	return string(body), ev, tc, r, v
 }
 
 // execNaive is the "now" baseline: execute the tool directly, no kernel. A
@@ -287,8 +316,13 @@ func Run(ctx context.Context, p Planner, task string, maxTurns int, opts ...RunO
 	if err != nil {
 		return nil, nil, err
 	}
+	var baseOpts []RunOption
+	cfg := resolveRunConfig(opts)
+	if cfg.auditJournal != nil {
+		baseOpts = append(baseOpts, WithAuditJournal(cfg.auditJournal))
+	}
 	baseStart := time.Now()
-	baseM, err := RunArm(ctx, p, task, false, maxTurns, &baseLog)
+	baseM, err := RunArm(ctx, p, task, false, maxTurns, &baseLog, baseOpts...)
 	baseElapsed := time.Since(baseStart)
 	if err != nil {
 		return nil, nil, err
@@ -432,6 +466,9 @@ func watchArmTermination(ctx context.Context, termCh <-chan struct{}) (context.C
 }
 func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]traceEvent, model string, stream bool, sink StreamSink, complete armCompleteFunc, opts ...RunOption) (ArmMetrics, error) {
 	cfg := resolveRunConfig(opts)
+	if cfg.trace == "" {
+		cfg.trace = "agent"
+	}
 	// Mid-flight mailbox (#5158): seal the verb mailbox on EVERY return path once the arm
 	// finishes, so a finished run refuses further mid-flight verbs with the closed
 	// terminal-session token. Nil-safe: no mailbox wired => a no-op.

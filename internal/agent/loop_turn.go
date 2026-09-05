@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -14,6 +16,18 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/stopgate"
 )
+
+func isEmitterRegistered(e abi.Emitter) bool {
+	if e == nil {
+		return false
+	}
+	for _, em := range abi.EmittersFor(abi.EvDecide) {
+		if em == e {
+			return true
+		}
+	}
+	return false
+}
 
 // armRunner owns the mutable state shared by the phases of one arm's turn loop.
 // Keeping it named avoids passing the same large parameter set through every phase
@@ -342,6 +356,9 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 		content string
 		ev      traceEvent
 		isErr   bool
+		abiCall *abi.ToolCall
+		abiRes  *abi.Result
+		verdict *abi.Verdict
 	}
 
 	execOne := func(tc ToolCall) toolExecResult {
@@ -350,6 +367,9 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 		var content string
 		ev := traceEvent{Turn: turn + 1, Arm: r.metrics.Arm, Tool: tool, RawArgs: rawArgs}
 		var isErr bool
+		var abiCall *abi.ToolCall
+		var abiRes *abi.Result
+		var verdict *abi.Verdict
 		switch {
 		case r.cfg.dropMidflightCall(tc.ID, turn+1):
 			content = ToolReceipt{
@@ -362,7 +382,13 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			ev.Verdict = "DROPPED"
 			ev.By = "operator"
 			ev.Note = "DROPPED by a mid-flight drop-pending-call verb (skipped before dispatch)"
+			abiCall = &abi.ToolCall{Tool: tool, TraceID: r.cfg.trace, Args: putBytes(ctx, []byte(rawArgs))}
+			v := abi.Verdict{Kind: abi.VerdictDeny, By: "operator", Reason: abi.ReasonPolicyBlock}
+			verdict = &v
 		case r.cfg.constraintDenied(tool, &content, &ev):
+			abiCall = &abi.ToolCall{Tool: tool, TraceID: r.cfg.trace, Args: putBytes(ctx, []byte(rawArgs))}
+			v := abi.Verdict{Kind: abi.VerdictDeny, By: "session-constraint", Reason: abi.ReasonPolicyBlock}
+			verdict = &v
 		case r.speculation.barWrite(tool, r.metrics):
 			content = ToolReceipt{
 				Status:      ToolResultSkipped,
@@ -374,6 +400,9 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			ev.Verdict = "BARRED"
 			ev.By = "write-barrier"
 			ev.Note = "BARRED by the before-consumption write barrier (dependent speculation squashed)"
+			abiCall = &abi.ToolCall{Tool: tool, TraceID: r.cfg.trace, Args: putBytes(ctx, []byte(rawArgs))}
+			v := abi.Verdict{Kind: abi.VerdictDeny, By: "write-barrier", Reason: abi.ReasonPolicyBlock}
+			verdict = &v
 		case r.fak:
 			engine, routeErr := r.cfg.resolveCallEngine(tool, rawArgs, metaFor(tool))
 			if routeErr != nil {
@@ -382,8 +411,13 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 				ev.Verdict = "route-error"
 				ev.By = "route-accounts"
 				ev.Note = "ROUTE REFUSED (fail-loud): " + routeErr.Error()
+				abiCall = &abi.ToolCall{Tool: tool, TraceID: r.cfg.trace, Args: putBytes(ctx, []byte(rawArgs))}
+				v := abi.Verdict{Kind: abi.VerdictDeny, By: "route-accounts", Reason: abi.ReasonMisroute}
+				verdict = &v
 			} else {
-				content, ev = execViaKernel(ctx, r.kernel, tool, rawArgs, engine, ev, r.cfg.principal)
+				var verdictVal abi.Verdict
+				content, ev, abiCall, abiRes, verdictVal = execViaKernelFull(ctx, r.kernel, tool, rawArgs, engine, r.cfg.trace, ev, r.cfg.principal)
+				verdict = &verdictVal
 				content, ev = r.cfg.parkEscalatedDeny(ctx, r.kernel, tool, rawArgs, engine, content, ev)
 			}
 		default:
@@ -393,7 +427,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 				isErr = true
 			}
 		}
-		return toolExecResult{tc: tc, content: content, ev: ev, isErr: isErr}
+		return toolExecResult{tc: tc, content: content, ev: ev, isErr: isErr, abiCall: abiCall, abiRes: abiRes, verdict: verdict}
 	}
 
 	commitOne := func(res toolExecResult) error {
@@ -402,6 +436,146 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 		rawArgs := tc.Function.Arguments
 		content := res.content
 		ev := res.ev
+
+		if r.cfg != nil && r.cfg.auditJournal != nil {
+			if !r.fak {
+				rawBytes := []byte(rawArgs)
+				hArgs := sha256.Sum256(rawBytes)
+				call := &abi.ToolCall{
+					Tool:    tool,
+					TraceID: r.cfg.trace,
+					Args: abi.Ref{
+						Kind:   abi.RefInline,
+						Inline: rawBytes,
+						Len:    int64(len(rawBytes)),
+						Digest: hex.EncodeToString(hArgs[:]),
+					},
+				}
+				contentBytes := []byte(content)
+				hRes := sha256.Sum256(contentBytes)
+				resPayload := abi.Ref{
+					Kind:   abi.RefInline,
+					Inline: contentBytes,
+					Len:    int64(len(contentBytes)),
+					Digest: hex.EncodeToString(hRes[:]),
+				}
+				result := &abi.Result{
+					Call:    call,
+					Payload: resPayload,
+				}
+				if res.isErr {
+					v := &abi.Verdict{
+						Kind:   abi.VerdictDeny,
+						By:     "raw-harness",
+						Reason: abi.ReasonMalformed,
+					}
+					r.cfg.auditJournal.Emit(abi.Event{
+						Kind:    abi.EvDecide,
+						Call:    call,
+						Verdict: v,
+						Result:  result,
+					})
+					r.cfg.auditJournal.Emit(abi.Event{
+						Kind:    abi.EvDeny,
+						Call:    call,
+						Verdict: v,
+						Result:  result,
+					})
+				} else {
+					v := &abi.Verdict{
+						Kind:   abi.VerdictAllow,
+						By:     "raw-harness",
+						Reason: abi.ReasonNone,
+					}
+					r.cfg.auditJournal.Emit(abi.Event{
+						Kind:    abi.EvDecide,
+						Call:    call,
+						Verdict: v,
+						Result:  result,
+					})
+				}
+			} else if !isEmitterRegistered(r.cfg.auditJournal) {
+				call := res.abiCall
+				if call == nil {
+					call = &abi.ToolCall{
+						Tool:    tool,
+						TraceID: r.cfg.trace,
+						Args:    putBytes(ctx, []byte(rawArgs)),
+					}
+				}
+				if call.TraceID == "" {
+					call.TraceID = r.cfg.trace
+				}
+				if call.Args.Digest == "" {
+					h := sha256.Sum256([]byte(rawArgs))
+					call.Args.Digest = hex.EncodeToString(h[:])
+				}
+				result := res.abiRes
+				if result == nil {
+					result = &abi.Result{
+						Call:    call,
+						Payload: putBytes(ctx, []byte(content)),
+					}
+				}
+				if result.Payload.Digest == "" {
+					h := sha256.Sum256([]byte(content))
+					result.Payload.Digest = hex.EncodeToString(h[:])
+				}
+				v := res.verdict
+				if v == nil {
+					v = &abi.Verdict{
+						Kind:   abi.VerdictAllow,
+						By:     "localtools",
+						Reason: abi.ReasonNone,
+					}
+				}
+				if v.By == "vdso" {
+					r.cfg.auditJournal.Emit(abi.Event{
+						Kind:    abi.EvVDSOHit,
+						Call:    call,
+						Verdict: v,
+						Result:  result,
+					})
+				} else if v.Kind == abi.VerdictDeny {
+					r.cfg.auditJournal.Emit(abi.Event{
+						Kind:    abi.EvDecide,
+						Call:    call,
+						Verdict: v,
+						Result:  result,
+					})
+					r.cfg.auditJournal.Emit(abi.Event{
+						Kind:    abi.EvDeny,
+						Call:    call,
+						Verdict: v,
+						Result:  result,
+					})
+				} else {
+					r.cfg.auditJournal.Emit(abi.Event{
+						Kind:    abi.EvDecide,
+						Call:    call,
+						Verdict: v,
+						Result:  result,
+					})
+				}
+				if result != nil && result.Meta != nil {
+					if result.Meta["admit"] == "quarantined" {
+						r.cfg.auditJournal.Emit(abi.Event{
+							Kind:    abi.EvQuarantine,
+							Call:    call,
+							Verdict: v,
+							Result:  result,
+						})
+					} else if result.Meta["admit"] == "deny" {
+						r.cfg.auditJournal.Emit(abi.Event{
+							Kind:    abi.EvResultDeny,
+							Call:    call,
+							Verdict: v,
+							Result:  result,
+						})
+					}
+				}
+			}
+		}
 
 		r.cfg.emitProgress(ProgressEvent{
 			Kind: ProgressCallAdjudicated, Turn: turn + 1, CallID: tc.ID, Tool: tool,

@@ -20,6 +20,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/a2achan"
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
@@ -211,6 +212,14 @@ type runConfig struct {
 	reasoningEffort string
 	thinkingBudget  *int
 	goalAnchor      *GoalAnchor
+	auditJournal    *journal.Journal
+}
+
+// WithAuditJournal attaches a tamper-evident decision journal to the run.
+func WithAuditJournal(j *journal.Journal) RunOption {
+	return func(c *runConfig) {
+		c.auditJournal = j
+	}
 }
 
 // WithGoalAnchor installs an immutable primary objective anchor across recovery turns.

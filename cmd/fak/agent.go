@@ -5,11 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/dropin"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/systools"
 )
@@ -285,8 +287,23 @@ func runAgent(argv []string) {
 		planner = p
 	}
 
+	var auditJournal *journal.Journal
+	if *af.logOut != "" && strings.HasSuffix(strings.ToLower(*af.logOut), ".jsonl") {
+		if dir := filepath.Dir(*af.logOut); dir != "" && dir != "." {
+			_ = os.MkdirAll(dir, 0o755)
+		}
+		j, err := journal.Open(*af.logOut)
+		must(err)
+		defer func() {
+			_ = j.Flush()
+			_ = j.Close()
+		}()
+		auditJournal = j
+		runOpts = append(runOpts, agent.WithAuditJournal(j))
+	}
+
 	if isRaw {
-		if *af.logOut != "" {
+		if *af.logOut != "" && auditJournal == nil {
 			must(errors.New("fak agent: --raw does not support --log; use --out for its receipt"))
 		}
 		activeWakeReleaser, _ := acquireAgentRunKeepAwake(*af.keepAwake)
@@ -295,6 +312,9 @@ func runAgent(argv []string) {
 			_ = activeWakeReleaser.Release()
 		}
 		must(err)
+		if auditJournal != nil {
+			_ = auditJournal.Flush()
+		}
 		receipt := newRawAgentReceipt(*af.task, planner.Model(), metrics)
 		data := jsonIndent(receipt)
 		if *af.out == "" || *af.out == "-" || *af.out == "stdout" {
@@ -308,7 +328,7 @@ func runAgent(argv []string) {
 	}
 
 	if isNative {
-		if *af.logOut != "" {
+		if *af.logOut != "" && auditJournal == nil {
 			must(errors.New("fak agent: --native does not support --log; use --out for its receipt"))
 		}
 		activeWakeReleaser, _ := acquireAgentRunKeepAwake(*af.keepAwake)
@@ -317,6 +337,9 @@ func runAgent(argv []string) {
 			_ = activeWakeReleaser.Release()
 		}
 		must(err)
+		if auditJournal != nil {
+			_ = auditJournal.Flush()
+		}
 		receipt := newNativeAgentReceipt(*af.task, planner.Model(), metrics)
 		must(os.WriteFile(*af.out, jsonIndent(receipt), 0o644))
 		fmt.Fprintln(os.Stdout, metrics.FinalAnswer)
@@ -330,9 +353,12 @@ func runAgent(argv []string) {
 		_ = activeWakeReleaser.Release()
 	}
 	must(err)
+	if auditJournal != nil {
+		_ = auditJournal.Flush()
+	}
 
 	must(os.WriteFile(*af.out, jsonIndent(res), 0o644))
-	if *af.logOut != "" {
+	if *af.logOut != "" && auditJournal == nil {
 		_ = os.WriteFile(*af.logOut, agent.RenderTrace(trace), 0o644)
 	}
 	agent.PrintReport(os.Stdout, res, trace, *af.out)
