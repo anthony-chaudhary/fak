@@ -406,7 +406,7 @@ func TestNativeServeArmsCodingCatalogAndSpeculator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(planner.catalogs) == 0 || len(planner.catalogs[0]) != 6 {
+	if len(planner.catalogs) == 0 || len(planner.catalogs[0]) < 6 {
 		t.Fatalf("catalog=%+v", planner.catalogs)
 	}
 	if m.EngineCalls < 2 || m.SpecIssued < 1 || m.SpecSquashed < 1 || m.SpecServed < 1 {

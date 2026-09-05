@@ -266,7 +266,14 @@ func (l *Ledger) Provenance(trace string) TaintProvenance {
 			}
 		} else {
 			if l.turnTaint != nil && l.turnTaint[trace] != nil {
+				turns := make([]int, 0, len(l.turnTaint[trace]))
 				for k := range l.turnTaint[trace] {
+					turns = append(turns, k)
+				}
+				sort.Slice(turns, func(i, j int) bool {
+					return turns[i] > turns[j]
+				})
+				for _, k := range turns {
 					if pk, has := l.prov[TurnTrace(trace, k)]; has && pk.Level != abi.TaintTrusted {
 						return pk
 					}
