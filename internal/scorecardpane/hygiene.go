@@ -610,10 +610,14 @@ func HygieneError(workspace, errMsg string) HygienePayload {
 
 // --- small pure helpers ----------------------------------------------------
 
+func isAllowedRootMD(name string) bool {
+	return allowedRootMD[name] || (strings.HasPrefix(name, "GOAL-") && strings.HasSuffix(name, ".md"))
+}
+
 func rootMDViolations(rootMD []string) []string {
 	var out []string
 	for _, n := range rootMD {
-		if !allowedRootMD[n] {
+		if !isAllowedRootMD(n) {
 			out = append(out, n)
 		}
 	}

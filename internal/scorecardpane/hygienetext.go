@@ -213,7 +213,7 @@ func isReaderFacing(rel string) bool {
 	}
 	parts := strings.Split(rel, "/")
 	if len(parts) == 1 {
-		return allowedRootMD[parts[0]]
+		return isAllowedRootMD(parts[0])
 	}
 	if parts[0] != "docs" {
 		return false
