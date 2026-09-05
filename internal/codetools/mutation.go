@@ -202,10 +202,10 @@ func (t *Toolset) editLocked(ctx context.Context, a EditArgs, target mutationTar
 	b := observed.Content
 	n := strings.Count(string(b), a.OldString)
 	if n == 0 {
-		return refuse(CodeEditConflict, "Edit old_string matched 0 occurrences").JSON(), true
+		return refuse(CodeEditConflict, "Edit old_string matched 0 occurrences; file not changed. Read the same authorized file_path with bounded offset and limit around the intended edit; use the returned version as expected_version and current exact text with unique surrounding context for one explicit Edit retry. If unresolved, stop; do not guess or retry automatically.").JSON(), true
 	}
 	if !a.ReplaceAll && n != 1 {
-		return refuse(CodeEditConflict, fmt.Sprintf("Edit old_string matched %d occurrences; want exactly 1", n)).JSON(), true
+		return refuse(CodeEditConflict, fmt.Sprintf("Edit old_string matched %d occurrences; want exactly 1; file not changed. Read the same authorized file_path with bounded offset and limit around the intended edit; use the returned version as expected_version and extend old_string with exact unique surrounding context for one explicit Edit retry. If unresolved, stop; do not guess or retry automatically.", n)).JSON(), true
 	}
 	limit := 1
 	if a.ReplaceAll {

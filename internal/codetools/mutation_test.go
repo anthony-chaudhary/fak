@@ -393,3 +393,107 @@ func TestMutationsRefuseProtectedControlSubtrees(t *testing.T) {
 		}
 	}
 }
+
+func TestEditConflictRecoveryRegisteredEngine(t *testing.T) {
+	const original = "header\nfirst\nvalue=old\nsecond\nvalue=old\nfooter\n"
+	const unique = "first\nvalue=old"
+	for _, tc := range []struct {
+		name, old, retry, detail string
+		unresolved               bool
+	}{
+		{"missing", "value = old", unique, "matched 0 occurrences", false},
+		{"ambiguous", "value=old", unique, "matched 2 occurrences", false},
+		{"missing-unresolved", "value = old", "still absent", "matched 0 occurrences", true},
+		{"ambiguous-unresolved", "value=old", "value=old", "matched 2 occurrences", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts, root := newTestToolset(t)
+			p := filepath.Join(root, "a.txt")
+			mustWrite(t, p, original)
+			ts.RegisterEngines()
+			reads, edits := 0, 0
+			execute := func(tool string, args any) ([]byte, bool) {
+				t.Helper()
+				if tool == ToolRead {
+					reads++
+					a := args.(ReadArgs)
+					if a.FilePath != "a.txt" || a.Offset != 2 || a.Limit != 2 {
+						t.Fatalf("unbounded or redirected Read: %+v", a)
+					}
+				} else if tool == ToolEdit {
+					edits++
+				}
+				call := &abi.ToolCall{Tool: tool, Args: abi.Ref{Kind: abi.RefInline, Inline: argsOf(t, args)}, Meta: CallMeta(tool, "conflict-recovery")}
+				if v := ts.Adjudicate(context.Background(), call); v.Kind != abi.VerdictAllow {
+					t.Fatalf("%s verdict = %+v", tool, v)
+				}
+				engine := abi.Engine(call.Engine)
+				if engine == nil {
+					t.Fatalf("unregistered engine %q", call.Engine)
+				}
+				result, err := engine.Complete(context.Background(), call)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return bytesOf(context.Background(), result.Payload), result.Status == abi.StatusError
+			}
+			assertBytes := func(want string) {
+				t.Helper()
+				got, err := os.ReadFile(p)
+				if err != nil || string(got) != want {
+					t.Fatalf("file bytes = %q, error %v; want %q", got, err, want)
+				}
+			}
+			read := func() string {
+				t.Helper()
+				out, bad := execute(ToolRead, ReadArgs{FilePath: "a.txt", Offset: 2, Limit: 2})
+				if bad {
+					t.Fatalf("Read = %s", out)
+				}
+				r := decodeResult(t, out)
+				if r["content"] != unique || r["bytes"] != float64(len(unique)) || r["truncated"] != true {
+					t.Fatalf("Read bounds = %s", out)
+				}
+				version, _ := r["version"].(string)
+				if version == "" {
+					t.Fatal("Read omitted version")
+				}
+				return version
+			}
+			version := read()
+			out, bad := execute(ToolEdit, EditArgs{FilePath: "a.txt", OldString: tc.old, NewString: "unintended", ExpectedVersion: version})
+			if !bad || errCode(t, out) != CodeEditConflict {
+				t.Fatalf("conflict = %s", out)
+			}
+			assertBytes(original)
+			for _, fragment := range []string{tc.detail, "Read", "same authorized file_path", "offset and limit", "expected_version", "unique", "explicit", "stop", "not changed"} {
+				if !strings.Contains(string(out), fragment) {
+					t.Errorf("diagnostic lacks %q: %s", fragment, out)
+				}
+			}
+			if strings.Contains(string(out), tc.old) || strings.Contains(string(out), "unintended") {
+				t.Errorf("diagnostic echoed edit content: %s", out)
+			}
+			fresh := read()
+			if fresh != version {
+				t.Fatal("conflict changed version")
+			}
+			assertBytes(original)
+			out, bad = execute(ToolEdit, EditArgs{FilePath: "a.txt", OldString: tc.retry, NewString: "first\nvalue=new", ExpectedVersion: fresh})
+			if tc.unresolved {
+				if !bad || errCode(t, out) != CodeEditConflict {
+					t.Fatalf("unresolved retry = %s", out)
+				}
+				assertBytes(original)
+			} else {
+				if bad {
+					t.Fatalf("explicit unique retry = %s", out)
+				}
+				assertBytes("header\nfirst\nvalue=new\nsecond\nvalue=old\nfooter\n")
+			}
+			if reads != 2 || edits != 2 {
+				t.Fatalf("calls: Read=%d Edit=%d; want initial read/edit + one reread/retry", reads, edits)
+			}
+		})
+	}
+}

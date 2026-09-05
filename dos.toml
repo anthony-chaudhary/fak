@@ -2593,11 +2593,25 @@ fix      = "Restore the checker to its declared bytes and re-grade, or -- if the
 see_also = ["internal/safecommit/checkerpin.go", "internal/safecommit/checkerpin_test.go", "dos_refuse_reasons", "dos_check_reason"]
 
 [reasons.TEST_TAMPER_REFUSED]
-category = "INTEGRITY_GATE"
+category = "OPERATOR_GATE"
 refusal  = true
 summary  = "Tool call attempted to write or edit gating test files under an implementation lane."
 fix      = "Modify only implementation files in your assigned lane; test modifications are forbidden."
 see_also = ["internal/adjudicator", "internal/witness"]
+
+[reasons.UNWITNESSED_NARRATION_CLAIM]
+category = "STALE_CLAIM"
+refusal  = true
+summary  = "Turn asserted test completion or verification pass in assistant text without matching execution receipts in session trajectory."
+fix      = "Run the tests or verification command using available tool calls so the session trajectory contains verifiable 3rd-party execution receipts before claiming done. Producer: loopgate.AdjudicateTurn."
+see_also = ["internal/loopgate/narration_gate.go", "dos_refuse_reasons", "dos_check_reason"]
+
+[reasons.UNWITNESSED_DENOMINATOR]
+category = "STALE_CLAIM"
+refusal  = true
+summary  = "Benchmark evaluation report or census failed complete denominator accounting: dropped tasks, uncataloged tasks, duplicated tasks, or unpermitted simulated results in hardware census."
+fix      = "Ensure all tasks in the frozen manifest domain are accounted for: N_total = N_pass + N_fail + N_timeout + N_crash + N_refused, with no dropped instances. Producer: bench.VerifyCensusDomain."
+see_also = ["internal/bench/denominator_census.go", "dos_refuse_reasons", "dos_check_reason"]
 
 # #2522 (integration follow-on of the spine-first + fan-out epic #2510): the
 # issue fanout planner's own contract rejections (internal/issuefanout.Refusal,

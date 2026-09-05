@@ -54,17 +54,17 @@ When operating as or delegating to smaller models, enforce two scoping safeguard
    - Decompose multi-step tasks into sequential, verified phases: write the reproduction test first, commit the minimal implementation, and verify the targeted package.
    - Complete and witness one step before advancing to the next; keep edits focused rather than attempting broad multi-subsystem sweeps in one turn.
 
-2. **Abstain from high-difficulty aspects (fail-to-abstain)**:
+2. **Abstain from high-difficulty aspects (scoped fail-to-abstain)**:
    - Identify task aspects that demand deep architectural context or high-risk reasoning: concurrency invariants and lock ordering, frozen ABI modifications (`internal/abi`), low-level SIMD/CUDA kernel mechanics, cross-subsystem protocol migrations, and security policy gates.
-   - When an aspect exceeds confident reasoning or reliable verification, abstain explicitly rather than guessing or generating speculative diffs.
-   - Emit a structured `ABSTAIN` verdict with a typed refusal token or clear rationale that names the exact boundary reached.
-   - Land or report the solvable, verified sub-component (such as a reproduction test case or diagnostic data) and cleanly escalate the difficult aspect to a higher-capability model or human operator.
+   - Scope abstention strictly to the bounded high-difficulty aspect; maintain momentum by executing all independent, safe, solvable sub-components (such as baseline reproduction tests, diagnostic witnesses, non-gated packages, or documentation) rather than abandoning the prompt.
+   - Emit a structured `ABSTAIN` verdict with a typed refusal token and exact boundary description for the escalated aspect alongside the landed partial evidence.
+   - Deliver the verified sub-component and cleanly escalate the isolated difficult aspect to a higher-capability model or human operator.
 
 3. **Guard against fast/flash model sharp edges (Gemini 3.8 Flash & peers)**:
    - **Curb token inflation and verbosity**: 3.8 Flash is designed to "work harder" and can output 2×–4× more tokens than other models per task. Enforce extreme conciseness (<3 lines commentary in CLI), eliminate conversational preambles/postambles, and keep explanations minimal.
    - **Resist over-scaffolding ("happy-go-lucky" sprawl)**: Flash models are prone to generating unsolicited companion abstractions, multi-panel apps, or broad refactors for simple requests. Confine diffs strictly to the requested lines/files; do not introduce unasked scaffolding.
    - **Beware thinking effort tradeoffs**: At low thinking effort, 3.8 Flash exhibits quality regressions (spatial/geometric flaws, shallow verification); at high effort, it burns large token budgets. Never trust low-effort intuition on complex logic—always verify against deterministic external tools (`go test`, `go vet`, `fak validate`).
-   - **Break interactive tool loops and avoid self-narrating**: In CLI/tool loops, Flash models can confabulate success or loop in repeat-failure cycles ("apologizes, then retries the exact same command"). Ground every claim in an observed tool receipt; if a tool call is denied or fails, stop immediately, read the error, and change tack rather than repeating the call.
+   - **Break interactive tool loops while persisting toward the goal**: In CLI/tool loops, Flash models can confabulate success or loop in repeat-failure cycles ("apologizes, then retries the exact same command"). Ground every claim in an observed tool receipt. When a tool call is denied or fails, halt repetition of the identical call or cycling argument variations; read the error or refusal receipt, query `fak recover <TOKEN>` for structured recovery, and pivot to an alternate sanctioned route or decomposed subtask. Persist through recoverable hurdles by adapting the approach rather than repeating failed calls or abandoning the objective.
    - **Prefer specialized file tools over shell scripting**: Flash models experience higher failure rates on complex CLI/terminal pipelines (TerminalBench regressions). Prefer structured tools (`Read`, `Edit`, `Glob`, `Grep`) over complex piped bash commands.
    - **Anticipate safety false-positives**: Standard 3.8 Flash guardrails can trigger false refusals on legitimate security inspection, redaction, or policy code; frame technical security contexts neutrally or emit structured `ABSTAIN` rather than hallucinating workarounds. Full analysis: [`docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md`](docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md).
 
@@ -297,6 +297,8 @@ The detailed recovery for a refusal is intentionally paged: query the token belo
 
 ### If the kernel refuses you (recover, don't fight it)
 
+A guard refusal is per-call runtime feedback; it is not a session stop or permission to abandon the task. A worker that treats a refusal as a prompt termination converts a recoverable hurdle into an unforced failure.
+
 A guard refusal names a token from the closed `[reasons.*]` vocabulary in
 [`dos.toml`](dos.toml). Run `dos man wedge <TOKEN> --explain` instead of carrying
 the full recovery cookbook in every agent context:
@@ -307,8 +309,13 @@ fak recover <TOKEN>              # concrete recovery plan when one exists
 fak recover --list               # list executable and manual-only plans
 ```
 
-Recover by the named action; do not route around the guard. `fak recover` is a
-dry-run unless `--execute` is passed, and manual-only plans refuse execution
+Recover by the named action; do not route around the guard:
+1. **Execute recovery**: Run `fak recover <TOKEN>` and apply the output. Manual plans name the required remediation.
+2. **Handle transient locks**: For concurrency blockers (`MERGE_IN_PROGRESS`, `COLLISION_RISK`, `LOCK_BUSY`), unstage local paths (`git restore --staged`), wait for quiescence or inspect `dos top`, checkpoint finished progress with `fak wip checkpoint` or `git tag hold/<lane>`, or pivot to an independent disjoint subtask.
+3. **Use sanctioned alternative routes**: When an operation is refused (such as `FILE_ADMISSION` on a script), use the sanctioned Go tool, leaf verb, or structured file tool instead of quitting.
+4. **Scope boundary blocks**: When an explicit policy or core-lock blocks a specific path (`POLICY_BLOCK`, `SELF_MODIFY`), land your safe, verified sub-components, record the structured refusal, and escalate the isolated boundary with checkable next steps.
+
+`fak recover` is a dry-run unless `--execute` is passed, and manual-only plans refuse execution
 rather than guessing. The token argument is case- and separator-insensitive.
 
 Keep the common commit-lane rules available before a refusal: stay on `main`,
