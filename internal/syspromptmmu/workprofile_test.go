@@ -22,6 +22,14 @@ func TestWorkProfilesCanonicalizeAndRemainSafe(t *testing.T) {
 	}
 }
 
+func TestWorkProfilePonytailBypassesNoCodeChangeOnExplicitRequest(t *testing.T) {
+	got := DescribeWorkProfile("ponytail:medium")
+	want := "When the user or task explicitly requests implementing, adding, or modifying functionality, bypass 'no code change' and proceed to the minimal correct implementation."
+	if !strings.Contains(got.Segment, want) {
+		t.Fatalf("ponytail:medium missing explicit request bypass guidance: %q", got.Segment)
+	}
+}
+
 func TestWorkProfileStandardAndUnknownAreOff(t *testing.T) {
 	for _, name := range []string{"", "standard", "off"} {
 		got := DescribeWorkProfile(name)
