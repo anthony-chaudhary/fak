@@ -1,25 +1,5 @@
-// Package stepbaton is the pre-resume step-advice stamp: the durable, cross-restart
-// carrier of the managed-context DECISION (a StepClass) captured while the trace is
-// still live, so a resuming successor can read what the window pressure WAS before the
-// trace rotated. It exists because of the witnessed resume-boundary break
-// (docs/notes/CONCEPT-IDEAL-WORKING-CONDITIONS-2026-07-09.md §2.3, "consumed by us"):
-// the gateway's live step-advice (internal/gateway ctxvalue.go, CtxStepAdvice) is
-// scoped to one gateway/trace lifetime, so at SessionStart on a resume the trace
-// reports phase:fresh / step_class:unknown and the pre-resume decision is gone. The
-// only fix is to capture the decision at the LAST live moment (a PreCompact or Stop
-// hook, trace still alive) and stash it to a durable per-session file the resume path
-// can read back — a write+read pair across the process boundary.
-//
-// SCOPE — this is the PRODUCER-CORE rung only. It defines the stamp vocabulary,
-// persists it durably (atomic write), and reads it back. It deliberately does NOT:
-//   - capture the live report itself (the hook that projects a gateway.CtxValueReport
-//     into New() lands in a guard hook — separate wiring), nor
-//   - inject the carried line on resume (the consumer lands in the SessionStart rule /
-//     internal/sessionsteer, concurrent #3512 territory — separate wiring).
-//
-// Like internal/relay's baton and armtriggers, it takes plain SCALARS, never a
-// gateway type, so it stays dependency-free and cannot form an import cycle: the hook
-// that already holds the gateway report does the projection and calls New().
+// Package stepbaton provides durable, cross-process persistence for
+// step-advice decisions captured before trace rotation during session restarts.
 package stepbaton
 
 import (
@@ -30,16 +10,11 @@ import (
 	"strings"
 )
 
-// Schema is the wire/schema tag every stamp carries. Bump it (never mutate a shipped
-// field's meaning) when the stamp shape changes, so a stale file from an older writer
-// is recognizably a different schema rather than silently misread.
+// Schema identifies the versioned wire format for step-advice stamps.
 const Schema = "fak.stepadvice.stamp.v1"
 
-// The closed step-advice vocabulary, mirrored verbatim from internal/gateway
-// ctxvalue.go (StepClassAny..StepClassUnknown). Kept as its own copy — not imported —
-// so this package stays free of the gateway dependency; ValidStepClass is the guard
-// against the two vocabularies drifting (a stamp written with an off-vocabulary class
-// is normalized to Unknown, exactly the gateway's own fail-closed default).
+// Step-advice vocabulary constants mirroring gateway step classes
+// to maintain dependency independence while preserving classifications.
 const (
 	StepAny        = "any"
 	StepBounded    = "bounded"
@@ -48,7 +23,7 @@ const (
 	StepUnknown    = "unknown"
 )
 
-// ValidStepClass reports whether s is a member of the closed vocabulary.
+// ValidStepClass reports whether the class is recognized in the step vocabulary.
 func ValidStepClass(s string) bool {
 	switch s {
 	case StepAny, StepBounded, StepCheckpoint, StepRebuild, StepUnknown:
@@ -58,10 +33,7 @@ func ValidStepClass(s string) bool {
 	}
 }
 
-// NormalizeStepClass folds any input to a vocabulary member, failing CLOSED to
-// StepUnknown for anything off-vocabulary — the same conservative default the gateway's
-// adviseCtxStep uses when it has no evidence. A carryover we cannot classify must never
-// masquerade as a confident "any".
+// NormalizeStepClass trims whitespace and maps unclassified input to StepUnknown.
 func NormalizeStepClass(s string) string {
 	s = strings.TrimSpace(s)
 	if ValidStepClass(s) {
@@ -70,43 +42,20 @@ func NormalizeStepClass(s string) string {
 	return StepUnknown
 }
 
-// Stamp is one durable capture of the managed-context decision at a live boundary. It
-// carries the DECISION plus the numbers behind it — never a transcript recap — so the
-// successor can weigh it, not obey it. Every field is a scalar the capturing hook reads
-// off the live gateway.CtxValueReport at capture time.
+// Stamp persists managed-context execution decisions across process boundaries.
 type Stamp struct {
-	// Schema is the version tag (Schema const). New() stamps it.
-	Schema string `json:"schema"`
-	// TraceID is the trace this was captured FROM — lineage only. The successor records
-	// it to link its provenance back here; it never trusts the trace to still be live
-	// (on resume it is not).
-	TraceID string `json:"trace_id,omitempty"`
-	// StepClass is the carried decision: a closed-vocabulary member (fail-closed to
-	// StepUnknown). This is the load-bearing field — the reason the stamp exists.
-	StepClass string `json:"step_class"`
-	// Basis is the gateway's deciding axis (token_headroom | event_cadence |
-	// context_event | none), carried so the successor can see WHY the class fired.
-	Basis string `json:"basis,omitempty"`
-	// Reason is the gateway's one-line, display-only explanation. Never a recap.
-	Reason string `json:"reason,omitempty"`
-	// ResidentTokens / BudgetTokens are the deciding numbers at capture: observed
-	// resident context against the budget it was measured on. Headroom is derivable
-	// (budget-resident) so it is not stored, keeping the stamp minimal and unambiguous.
-	ResidentTokens int `json:"resident_tokens,omitempty"`
-	BudgetTokens   int `json:"budget_tokens,omitempty"`
-	// Phase is the session phase at capture (e.g. "guard"): a LIVE phase, the very thing
-	// a resume's "fresh" cannot recover.
-	Phase string `json:"phase,omitempty"`
-	// CapturedAtSHA is the git commit observed at capture — the anchor that lets the
-	// successor situate the decision against ground truth. Empty is allowed (no anchor
-	// observed); a consumer treats an empty anchor as "situate loosely", never an error.
-	CapturedAtSHA string `json:"captured_at_sha,omitempty"`
+	Schema         string `json:"schema"`
+	TraceID        string `json:"trace_id,omitempty"`
+	StepClass      string `json:"step_class"`
+	Basis          string `json:"basis,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+	ResidentTokens int    `json:"resident_tokens,omitempty"`
+	BudgetTokens   int    `json:"budget_tokens,omitempty"`
+	Phase          string `json:"phase,omitempty"`
+	CapturedAtSHA  string `json:"captured_at_sha,omitempty"`
 }
 
-// New builds a stamp from the scalars a capturing hook reads off the live report,
-// normalizing the step class fail-closed and stamping the schema. It is the single
-// projection seam: a hook holding a gateway.CtxValueReport maps its fields to these
-// arguments, so this package never imports the gateway.
+// New constructs a validated Stamp with normalized step classification.
 func New(traceID, stepClass, basis, reason, phase, capturedAtSHA string, residentTokens, budgetTokens int) Stamp {
 	return Stamp{
 		Schema:         Schema,
@@ -121,19 +70,12 @@ func New(traceID, stepClass, basis, reason, phase, capturedAtSHA string, residen
 	}
 }
 
-// ShouldCarry reports whether this decision is worth injecting on resume: only the
-// classes that change what a successor should DO — checkpoint (land in-flight state
-// first) and rebuild (re-anchor from durable state first). any / bounded / unknown add
-// no steer, so carrying them would be noise. Advisory: the consumer may override, but
-// co-locating the predicate keeps that consumer a one-liner and pins the policy under
-// test here.
+// ShouldCarry reports whether the advice requires explicit injection upon resumption.
 func (s Stamp) ShouldCarry() bool {
 	return s.StepClass == StepCheckpoint || s.StepClass == StepRebuild
 }
 
-// Line renders the one-line carryover a resume consumer injects into the successor's
-// first-turn context — the human/agent-readable form of the decision. Fixed shape so a
-// scan reads cleanly; omits empty optional fields.
+// Line formats the stamp into a concise single-line context hint.
 func (s Stamp) Line() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "managed-context carryover: last live step=%s", s.StepClass)
@@ -155,9 +97,7 @@ func (s Stamp) Line() string {
 	return b.String()
 }
 
-// Marshal encodes a stamp as indented JSON with a trailing newline: the durable file is
-// meant to be human-inspectable (an operator can cat it), and the byte shape is stable
-// because encoding/json emits struct fields in declaration order.
+// Marshal serializes the stamp into indented JSON with a trailing newline.
 func Marshal(s Stamp) ([]byte, error) {
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
@@ -166,7 +106,7 @@ func Marshal(s Stamp) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
-// Unmarshal decodes a stamp from its wire bytes.
+// Unmarshal decodes a stamp from raw JSON bytes.
 func Unmarshal(data []byte) (Stamp, error) {
 	var s Stamp
 	if err := json.Unmarshal(data, &s); err != nil {
@@ -175,10 +115,7 @@ func Unmarshal(data []byte) (Stamp, error) {
 	return s, nil
 }
 
-// Path is the durable per-session file path for a stamp: <dir>/stepadvice-<id>.json.
-// The session id is sanitized to a single safe path segment (any character outside
-// [A-Za-z0-9._-] becomes '_') so a hostile or oddly-shaped id can never escape dir via
-// a separator or "..".
+// Path computes the sanitized filesystem path for a session stamp file.
 func Path(dir, sessionID string) string {
 	return filepath.Join(dir, "stepadvice-"+sanitizeSegment(sessionID)+".json")
 }
@@ -206,11 +143,7 @@ func sanitizeSegment(id string) string {
 	return out
 }
 
-// Write persists the stamp to path atomically: it writes a sibling temp file and
-// renames it over path, so a failed or partial write leaves any pre-existing stamp
-// intact rather than truncating it (the same all-or-nothing swap the guard settings
-// writer uses). The parent directory is created if absent. On Windows the rename is a
-// same-directory replace (MoveFileEx), matching the guard writer's assumption.
+// Write atomically persists the stamp to disk via sibling temporary file swap.
 func Write(path string, s Stamp) error {
 	data, err := Marshal(s)
 	if err != nil {
@@ -240,11 +173,7 @@ func Write(path string, s Stamp) error {
 	return os.Rename(tmpName, path)
 }
 
-// Read loads the stamp at path. An ABSENT file is not an error: it returns
-// (zero, false, nil), so a resume consumer that finds no carryover is decidable and
-// simply injects nothing (fail-open, the way the gateway treats an unknown trace). A
-// present-but-corrupt file returns a non-nil error so the caller can log it rather than
-// silently treat garbage as "no carryover".
+// Read retrieves the stamp at path, returning false when the file does not exist.
 func Read(path string) (Stamp, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
