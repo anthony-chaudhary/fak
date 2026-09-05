@@ -50,6 +50,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunAMDGotchas(stdout, stderr, argv[1:])
 	case "amd-sim":
 		return devcmd.RunAMDStrixSim(stdout, stderr, argv[1:])
+	case "amd-strix-package":
+		return devcmd.RunAMDStrixPackage(stdout, stderr, argv[1:])
 	case "amd-gpudirect":
 		return devcmd.RunAMDGPUDirect(stdout, stderr, argv[1:])
 	case "cuda-gpudirect":
@@ -160,6 +162,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  amd-setup [--apply] [--json] [flags]  diagnose/configure AMD GPU governor and TTM limits")
 	fmt.Fprintln(w, "  amd-gotchas [--fix-plan] [--json]     audit host for AMD Strix Halo top 20 gotchas & mitigations")
 	fmt.Fprintln(w, "  amd-sim [--json] [flags]              simulate & verify multi-agent workloads on AMD Strix Halo")
+	fmt.Fprintln(w, "  amd-strix-package [--apply] [--json] [flags] generate AMD Strix Halo installer package with LAN config")
 	fmt.Fprintln(w, "  amd-gpudirect [inspect|audit|bench]   AMD GPU Direct topology, ReBAR/ACS audit, & zero-copy bench")
 	fmt.Fprintln(w, "  cuda-gpudirect [inspect|audit|bench|qwen38] CUDA GPU Direct topology, BaM P2PDMA bench, & Qwen 3.8 receipt")
 	fmt.Fprintln(w, "  commit-subject-coverage [flags]       audit repository commit subject grammar")
