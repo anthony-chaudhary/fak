@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
@@ -285,6 +286,25 @@ func engineResult(ctx context.Context, c *abi.ToolCall, body, out []byte, isErr 
 	}}
 }
 
+var (
+	activePostureMu sync.RWMutex
+	activePosture   = adjudicator.PostureDefaultOpen
+)
+
+// SetConfiguredPosture sets the posture used when Configure() initializes the adjudicator policy.
+func SetConfiguredPosture(p adjudicator.Posture) {
+	activePostureMu.Lock()
+	defer activePostureMu.Unlock()
+	activePosture = p
+}
+
+// ConfiguredPosture returns the current configured posture.
+func ConfiguredPosture() adjudicator.Posture {
+	activePostureMu.RLock()
+	defer activePostureMu.RUnlock()
+	return activePosture
+}
+
 // Configure installs the agent's policy, grammar aliases, and schemas into the
 // globally-registered kernel drivers, and registers the localtools engine. It is
 // idempotent and called once at the start of a run. (Each `fak` process serves one
@@ -318,8 +338,12 @@ func Configure() {
 		allow[name] = true
 	}
 
+	activePostureMu.RLock()
+	defer activePostureMu.RUnlock()
+
 	adjudicator.Default.SetPolicy(adjudicator.Policy{
-		Allow: allow,
+		Posture: activePosture,
+		Allow:   allow,
 		Deny: map[string]abi.ReasonCode{
 			toolDelete: abi.ReasonPolicyBlock, // the agent must never delete an account
 		},
