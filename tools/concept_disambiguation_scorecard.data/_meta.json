@@ -7563,6 +7563,36 @@
           "category": "incidental",
           "reason": "closed refusal reason for unwitnessed narration claims",
           "token": "UNWITNESSED_NARRATION_CLAIM"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench refusal reason for unwitnessed denominator in census reconciliation",
+          "token": "ReasonUnwitnessedDenominator"
+        },
+        {
+          "category": "incidental",
+          "reason": "closed refusal reason for unwitnessed denominator in census reconciliation",
+          "token": "UNWITNESSED_DENOMINATOR"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench denominator census domain verifier",
+          "token": "VerifyCensusDomain"
+        },
+        {
+          "category": "incidental",
+          "reason": "bench deterministic domain proof hash computation",
+          "token": "ComputeDomainProof"
+        },
+        {
+          "category": "incidental",
+          "reason": "manifest option requiring cryptographic pass witness proof",
+          "token": "RequirePassWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "task result cryptographic pass witness proof field",
+          "token": "WitnessProof"
         }
       ],
       "id": "witness-proof",
@@ -7570,6 +7600,7 @@
         "ActionRequireWitness",
         "Attestation",
         "ClaimUnwitnessedCount",
+        "ComputeDomainProof",
         "CoreLockWitnessTrailer",
         "DebtWitnessRecord",
         "DebtWitnesses",
@@ -7602,11 +7633,13 @@
         "QualityWitness",
         "REVOCABLE",
         "ReasonPopulationUnwitnessed",
+        "ReasonUnwitnessedDenominator",
         "ReasonUnwitnessedNarrationClaim",
         "ReasonWitnessMissing",
         "ReasonWitnessUnverified",
         "ReceiptsDigest",
         "RefutesWitness",
+        "RequirePassWitness",
         "ResolutionUnwitnessed",
         "RevocationEntry",
         "RunPipeWitness",
@@ -7619,10 +7652,12 @@
         "StageAttest",
         "StageWitnessRequest",
         "TurnOutcomesFromWitness",
+        "UNWITNESSED_DENOMINATOR",
         "UNWITNESSED_NARRATION_CLAIM",
         "ValidateWitness",
         "VerdictSetupNotWitnessed",
         "VerdictUnwitnessed",
+        "VerifyCensusDomain",
         "VerifySessionMoveDestinationReceipt",
         "WITNESSLESS",
         "WITNESS_REQUIRED",
@@ -7633,6 +7668,7 @@
         "WitnessID",
         "WitnessKey",
         "WitnessMove",
+        "WitnessProof",
         "WitnessRoute",
         "WitnessSHA256",
         "WitnessedEffect",
