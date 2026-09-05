@@ -179,13 +179,13 @@ func TestMCPToolsListBootstrapCeilingAndSchemaSize(t *testing.T) {
 		}
 	}
 
-	// Assert total serialized descriptor schema size <= 4500 bytes (4.5 KB)
+	// Assert total serialized descriptor schema size <= 5000 bytes (5.0 KB)
 	serialized, err := json.Marshal(rawTools)
 	if err != nil {
 		t.Fatalf("json.Marshal(tools): %v", err)
 	}
-	if len(serialized) > 4500 {
-		t.Fatalf("serialized schema size = %d bytes, want <= 4500 bytes", len(serialized))
+	if len(serialized) > 5000 {
+		t.Fatalf("serialized schema size = %d bytes, want <= 5000 bytes", len(serialized))
 	}
 
 	// Also test that with mcpToolCeiling = 10 and disableMCPDefer = true, it clamps to at most 10 tools

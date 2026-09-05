@@ -223,6 +223,8 @@ func validateStrictNode(node any, path string, isRoot bool, errs *[]string) {
 
 func strictSanitize(s map[string]any) map[string]any {
 	delete(s, "$schema")
+	delete(s, "$id")
+	delete(s, "id")
 	delete(s, "default")
 	delete(s, "minItems")
 	delete(s, "maxItems")
