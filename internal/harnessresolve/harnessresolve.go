@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnesscompose"
 	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/stackresolve"
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit/lockv2"
 )
 
 // Invariant: resolution produces deterministic, permutation-invariant locks whose SHA-256 digests uniquely seal content.
@@ -20,16 +22,34 @@ import (
 // Schema specifies the canonical JSON schema URI for harness product specification manifests.
 const Schema = "fak.harness-product/v1alpha1"
 
+// LockSchemaV2 specifies the version 2 JSON schema URI for compiled multi-platform harness product locks.
+const LockSchemaV2 = "fak.harness-product-lock/v2"
+
+// ProductLockSchemaV2 is an alias for LockSchemaV2.
+const ProductLockSchemaV2 = LockSchemaV2
+
 // LockSchema specifies the version 1alpha2 JSON schema URI for compiled harness product locks.
 const LockSchema = "fak.harness-product-lock/v1alpha2"
 
 // LegacyLockSchema specifies the backward-compatible version 1alpha1 schema URI for launchable product locks.
 const LegacyLockSchema = "fak.harness-product-lock/v1alpha1"
 
+// SecretPlaintextLeakError is the typed refusal token when a secret asset contains an inline plaintext value.
+const SecretPlaintextLeakError = lockv2.SecretPlaintextLeakError
+
+// ErrSecretPlaintextLeak is an alias for SecretPlaintextLeakError.
+const ErrSecretPlaintextLeak = SecretPlaintextLeakError
+
+var secretRefPattern = regexp.MustCompile(`^(env|file|vault|keyring):[a-zA-Z0-9_./#-]+$`)
+
+// PlatformRequirement defines an execution platform target (OS, architecture, contract).
+type PlatformRequirement = lockv2.PlatformRequirement
+
 // Manifest defines root components, environment constraints, and asset layers for a harness product.
 type Manifest struct {
 	Schema        string                  `json:"schema"`
 	Roots         []string                `json:"roots"`
+	Platforms     []PlatformRequirement   `json:"platforms,omitempty"`
 	Components    []Component             `json:"components"`
 	Compatibility Compatibility           `json:"compatibility,omitempty"`
 	Budget        Budget                  `json:"budget,omitempty"`
@@ -99,12 +119,70 @@ type LockedComponent struct {
 type Lock struct {
 	Schema      string                          `json:"schema"`
 	ID          string                          `json:"id"`
-	Environment Environment                     `json:"environment"`
+	Platforms   []PlatformRequirement           `json:"platforms,omitempty"`
+	Environment Environment                     `json:"environment,omitempty"`
 	Budget      Budget                          `json:"budget"`
 	Components  []LockedComponent               `json:"components"`
 	Assets      []harnesscompose.EffectiveAsset `json:"assets"`
 	AssetTrace  []harnesscompose.Trace          `json:"asset_trace"`
 	Decisions   []stackresolve.Decision         `json:"decisions"`
+}
+
+// matchesPlatform reports whether the lock targets the given operating system and CPU architecture.
+func (l Lock) matchesPlatform(targetOS, targetArch string) bool {
+	if len(l.Platforms) == 0 {
+		if l.Environment.OS != "" || l.Environment.Arch != "" {
+			return (l.Environment.OS == "" || l.Environment.OS == targetOS) &&
+				(l.Environment.Arch == "" || l.Environment.Arch == targetArch)
+		}
+		return true
+	}
+	for _, p := range l.Platforms {
+		if (p.OS == "" || p.OS == targetOS) && (p.Arch == "" || p.Arch == targetArch) {
+			return true
+		}
+	}
+	return false
+}
+
+// validatePlatforms verifies that every component is compatible with declared platforms.
+func (l Lock) validatePlatforms() error {
+	platforms := l.Platforms
+	if len(platforms) == 0 && (l.Environment.OS != "" || l.Environment.Arch != "") {
+		platforms = []PlatformRequirement{{OS: l.Environment.OS, Arch: l.Environment.Arch, Contract: l.Environment.Contract}}
+	}
+	for _, p := range platforms {
+		for _, comp := range l.Components {
+			if len(comp.Compatibility.OS) > 0 {
+				matched := false
+				for _, os := range comp.Compatibility.OS {
+					if os == p.OS {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					return fmt.Errorf("component %q incompatible with platform OS %q", comp.ID, p.OS)
+				}
+			}
+			if len(comp.Compatibility.Arch) > 0 {
+				matched := false
+				for _, arch := range comp.Compatibility.Arch {
+					if arch == p.Arch {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					return fmt.Errorf("component %q incompatible with platform arch %q", comp.ID, p.Arch)
+				}
+			}
+			if comp.Compatibility.Contract != "" && p.Contract != "" && comp.Compatibility.Contract != p.Contract {
+				return fmt.Errorf("component %q requires contract %q, platform has %q", comp.ID, comp.Compatibility.Contract, p.Contract)
+			}
+		}
+	}
+	return nil
 }
 
 // Explanation accounts for why a specific dependency capability was bound to a selected provider component.
@@ -166,6 +244,19 @@ func Parse(raw []byte) (Manifest, error) {
 	return manifest, nil
 }
 
+// CheckMultiPlatformCompatibility verifies that all components are compatible with all target platforms.
+func CheckMultiPlatformCompatibility(components []Component, platforms []PlatformRequirement) error {
+	for _, p := range platforms {
+		env := Environment{OS: p.OS, Arch: p.Arch, Contract: p.Contract}
+		for _, c := range components {
+			if err := checkCompatibility(c.Compatibility, env, "component "+c.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // Resolve compiles asset layers and component dependencies into an immutable product lock against target environment rules.
 // Precondition: manifest must contain valid roots and component declarations matching the provided target environment.
 // Postcondition: returns an immutable product lock with resolved dependencies and budget guarantees, or an error if constraints fail.
@@ -174,8 +265,24 @@ func Resolve(ctx context.Context, manifest Manifest, selectedLayers []string, en
 	if err != nil {
 		return Result{}, fmt.Errorf("compose assets: %w", err)
 	}
-	if err := checkCompatibility(manifest.Compatibility, env, "product"); err != nil {
-		return Result{}, err
+	for _, a := range assets.Assets {
+		if a.Kind == "secret" {
+			if a.Value != "" {
+				return Result{}, fmt.Errorf("%s: locked secret %q cannot contain plaintext value", SecretPlaintextLeakError, a.ID)
+			}
+			if a.Ref == "" || !secretRefPattern.MatchString(a.Ref) {
+				return Result{}, fmt.Errorf("locked secret %q invalid or missing opaque reference %q (must match ^(env|file|vault|keyring):[a-zA-Z0-9_./#-]+$)", a.ID, a.Ref)
+			}
+		}
+	}
+	if len(manifest.Platforms) > 0 {
+		if err := CheckMultiPlatformCompatibility(manifest.Components, manifest.Platforms); err != nil {
+			return Result{}, err
+		}
+	} else {
+		if err := checkCompatibility(manifest.Compatibility, env, "product"); err != nil {
+			return Result{}, err
+		}
 	}
 	components, err := bindRequirements(manifest.Components)
 	if err != nil {
@@ -187,8 +294,10 @@ func Resolve(ctx context.Context, manifest Manifest, selectedLayers []string, en
 	stack := make([]stackresolve.Component, 0, len(components))
 	byID := map[string]Component{}
 	for _, component := range components {
-		if err := checkCompatibility(component.Compatibility, env, "component "+component.ID); err != nil {
-			return Result{}, err
+		if len(manifest.Platforms) == 0 {
+			if err := checkCompatibility(component.Compatibility, env, "component "+component.ID); err != nil {
+				return Result{}, err
+			}
 		}
 		byID[component.ID] = component
 		relations := make([]stackresolve.Relation, 0, len(component.Requires)+len(component.Conflicts))
@@ -221,7 +330,11 @@ func Resolve(ctx context.Context, manifest Manifest, selectedLayers []string, en
 		return Result{}, err
 	}
 	sort.Slice(locked, func(i, j int) bool { return locked[i].ID < locked[j].ID })
-	lock := Lock{Schema: LockSchema, Environment: env, Budget: used, Components: locked, Assets: assets.Assets, AssetTrace: assets.Trace, Decisions: receipt.Decisions}
+	lockSchema := LockSchema
+	if len(manifest.Platforms) > 0 {
+		lockSchema = LockSchemaV2
+	}
+	lock := Lock{Schema: lockSchema, Platforms: manifest.Platforms, Environment: env, Budget: used, Components: locked, Assets: assets.Assets, AssetTrace: assets.Trace, Decisions: receipt.Decisions}
 	lock.ID, err = lockID(lock)
 	if err != nil {
 		return Result{}, err
@@ -353,6 +466,20 @@ func withinBudget(used, limit Budget) error {
 	return nil
 }
 func lockID(lock Lock) (string, error) {
+	if lock.Schema == LockSchemaV2 {
+		copy := lock
+		copy.ID = ""
+		raw, err := json.Marshal(copy)
+		if err != nil {
+			return "", err
+		}
+		canonical, err := lockv2.CanonicalizeJSON(raw)
+		if err != nil {
+			return "", err
+		}
+		sum := sha256.Sum256(canonical)
+		return "sha256:" + hex.EncodeToString(sum[:]), nil
+	}
 	copy := lock
 	copy.ID = ""
 	raw, err := json.Marshal(copy)
@@ -561,11 +688,21 @@ func appendProvider(in []Component, component Component) []Component {
 // Precondition: lock must declare a recognized schema identifier and non-empty content digest ID.
 // Postcondition: returns nil if and only if the recomputed SHA-256 payload digest matches the claimed lock ID.
 func VerifyLock(lock Lock) error {
-	if lock.Schema != LockSchema && lock.Schema != LegacyLockSchema {
-		return fmt.Errorf("lock schema must be %q or legacy %q", LockSchema, LegacyLockSchema)
+	if lock.Schema != LockSchemaV2 && lock.Schema != LockSchema && lock.Schema != LegacyLockSchema {
+		return fmt.Errorf("lock schema must be %q, %q, or legacy %q", LockSchemaV2, LockSchema, LegacyLockSchema)
 	}
 	if lock.ID == "" {
 		return fmt.Errorf("lock id is required")
+	}
+	for _, a := range lock.Assets {
+		if a.Kind == "secret" {
+			if a.Value != "" {
+				return fmt.Errorf("%s: locked secret %q cannot contain plaintext value", SecretPlaintextLeakError, a.ID)
+			}
+			if a.Ref == "" || !secretRefPattern.MatchString(a.Ref) {
+				return fmt.Errorf("locked secret %q invalid or missing opaque reference %q (must match ^(env|file|vault|keyring):[a-zA-Z0-9_./#-]+$)", a.ID, a.Ref)
+			}
+		}
 	}
 	want := lock.ID
 	got, err := lockID(lock)
@@ -587,7 +724,7 @@ func Mixable(lock Lock) error {
 	if err := VerifyLock(lock); err != nil {
 		return err
 	}
-	if lock.Schema != LockSchema {
+	if lock.Schema != LockSchema && lock.Schema != LockSchemaV2 {
 		return fmt.Errorf("legacy product lock %q is launchable but not mixable; rebuild it from source as %q", lock.Schema, LockSchema)
 	}
 	for _, component := range lock.Components {
