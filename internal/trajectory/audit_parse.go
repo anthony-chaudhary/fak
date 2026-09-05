@@ -833,7 +833,7 @@ func auditOutputIsError(value any) bool {
 		if status, _ := typed["status"].(string); status == "failed" || status == "error" || auditTimeoutStatus(status) {
 			return true
 		}
-		for _, key := range []string{"output", "content", "result", "text"} {
+		for _, key := range []string{"output", "content", "result", "results", "text"} {
 			if child, ok := typed[key]; ok && auditOutputIsError(child) {
 				return true
 			}

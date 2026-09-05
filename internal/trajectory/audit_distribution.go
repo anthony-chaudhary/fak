@@ -436,7 +436,22 @@ func auditOutputIsSuccess(value any) bool {
 		if status, _ := typed["status"].(string); auditSuccessStatus(status) {
 			return true
 		}
-		for _, key := range []string{"output", "content", "result"} {
+		if outcome, _ := typed["outcome"].(string); auditSuccessStatus(outcome) || auditSuccessOutcome(outcome) {
+			return true
+		}
+		if verdict, _ := typed["verdict"].(string); auditSuccessVerdict(verdict) {
+			return true
+		}
+		if kind, _ := typed["kind"].(string); auditSuccessVerdict(kind) {
+			return true
+		}
+		if tools, ok := typed["tools"].([]any); ok && len(tools) > 0 {
+			return true
+		}
+		if resources, ok := typed["resources"].([]any); ok && len(resources) > 0 {
+			return true
+		}
+		for _, key := range []string{"output", "content", "result", "results", "text", "verdict", "receipt", "structuredContent"} {
 			if child, ok := typed[key]; ok && auditOutputIsSuccess(child) {
 				return true
 			}
@@ -460,6 +475,24 @@ func auditOutputIsSuccess(value any) bool {
 func auditSuccessStatus(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "success", "succeeded", "completed", "complete", "ok":
+		return true
+	default:
+		return false
+	}
+}
+
+func auditSuccessOutcome(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "allowed", "transformed", "acquire", "executed_cold_read", "verified_fresh_reuse":
+		return true
+	default:
+		return false
+	}
+}
+
+func auditSuccessVerdict(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "allow", "transform", "ok", "resolved_match", "resolved_mismatch":
 		return true
 	default:
 		return false

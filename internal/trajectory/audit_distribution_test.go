@@ -138,6 +138,40 @@ func TestAuditToolResultsCodexExecOutcomesAndDirectIDs(t *testing.T) {
 	}
 }
 
+func TestAuditToolResultsCodexMCPAndInputTextSuccess(t *testing.T) {
+	d := newAuditDistribution()
+	lines := []string{
+		`{"type":"response_item","payload":{"type":"function_call","name":"fak_read","call_id":"c1"}}`,
+		`{"type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":[{"type":"input_text","text":"Wall time: 0.02s\nOutput:"},{"type":"input_text","text":"{\"results\":[{\"file_path\":\"a.go\",\"result\":{\"status\":\"OK\"}}]}"}]}}`,
+		`{"type":"response_item","payload":{"type":"function_call","name":"fak_adjudicate","call_id":"c2"}}`,
+		`{"type":"response_item","payload":{"type":"function_call_output","call_id":"c2","output":[{"type":"input_text","text":"{\"outcome\":\"allowed\",\"verdict\":\"ALLOW\"}"}]}}`,
+		`{"type":"response_item","payload":{"type":"function_call","name":"dos_arbitrate","call_id":"c3"}}`,
+		`{"type":"response_item","payload":{"type":"function_call_output","call_id":"c3","output":[{"type":"input_text","text":"{\"outcome\":\"acquire\",\"reason\":\"ok\"}"}]}}`,
+		`{"type":"response_item","payload":{"type":"function_call","name":"fak_tools_search","call_id":"c4"}}`,
+		`{"type":"response_item","payload":{"type":"function_call_output","call_id":"c4","output":[{"type":"input_text","text":"Wall time: 0.02s\nOutput:"},{"type":"input_text","text":"{\"tools\":[{\"name\":\"fak_capabilities\"}]}"}]}}`,
+	}
+	for _, line := range lines {
+		d.observe(AuditSourceCodex, []byte(line))
+	}
+	rows := d.toolResultRows()
+	read := auditToolResultByName(rows, "fak_read")
+	if read.Results != 1 || read.Success != 1 || read.Unknown != 0 {
+		t.Fatalf("fak_read outcomes = %+v, want 1 success, 0 unknown", read)
+	}
+	adjudicate := auditToolResultByName(rows, "fak_adjudicate")
+	if adjudicate.Results != 1 || adjudicate.Success != 1 || adjudicate.Unknown != 0 {
+		t.Fatalf("fak_adjudicate outcomes = %+v, want 1 success, 0 unknown", adjudicate)
+	}
+	arbitrate := auditToolResultByName(rows, "dos_arbitrate")
+	if arbitrate.Results != 1 || arbitrate.Success != 1 || arbitrate.Unknown != 0 {
+		t.Fatalf("dos_arbitrate outcomes = %+v, want 1 success, 0 unknown", arbitrate)
+	}
+	toolsSearch := auditToolResultByName(rows, "fak_tools_search")
+	if toolsSearch.Results != 1 || toolsSearch.Success != 1 || toolsSearch.Unknown != 0 {
+		t.Fatalf("fak_tools_search outcomes = %+v, want 1 success, 0 unknown", toolsSearch)
+	}
+}
+
 func TestAuditToolResultMetadataNestedMapPrecedenceDeterministic(t *testing.T) {
 	payload := make(map[string]any, 2)
 	payload["z_later"] = map[string]any{"exit_code": 9, "duration_ms": 90}

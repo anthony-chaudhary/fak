@@ -10,6 +10,7 @@ and every time-dependent function takes an injected `now`. Mirrors release_lock_
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -173,6 +174,61 @@ class KernelAcquireContractTest(unittest.TestCase):
 
         self.assertEqual(result["_returncode"], 2)
         self.assertEqual(result["_stderr"], "unrecognized arguments: --future-flag")
+
+    def test_kernel_acquire_passes_short_leases_inline(self):
+        seen = {}
+
+        def fake_run(cmd, cwd):
+            seen["cmd"] = cmd
+            return {"stdout": '{"outcome":"acquire","lane":"tools"}', "stderr": "", "returncode": 0}
+
+        short_leases = [{"lane": "tools", "tree": ["tools/**"]}]
+        with mock.patch.object(fl, "run_text", side_effect=fake_run):
+            result = fl.kernel_acquire(
+                Path("C:/work/fleet"), lane="tools", owner="worker",
+                leases=short_leases,
+            )
+
+        self.assertIn("--leases", seen["cmd"])
+        idx = seen["cmd"].index("--leases")
+        self.assertEqual(seen["cmd"][idx + 1], json.dumps(short_leases))
+        self.assertEqual(result["outcome"], "acquire")
+
+    def test_kernel_acquire_spills_large_leases_to_temp_file(self):
+        seen = {}
+        file_existed_during_run = []
+        file_content_during_run = []
+
+        def fake_run(cmd, cwd):
+            seen["cmd"] = cmd
+            idx = cmd.index("--leases")
+            arg = cmd[idx + 1]
+            if arg.startswith("@"):
+                p = Path(arg[1:])
+                file_existed_during_run.append(p.is_file())
+                if p.is_file():
+                    file_content_during_run.append(p.read_text(encoding="utf-8"))
+            return {"stdout": '{"outcome":"acquire","lane":"tools"}', "stderr": "", "returncode": 0}
+
+        large_leases = [{"lane": f"lane_{i}", "tree": [f"path/to/resource_{i}/**"]} for i in range(100)]
+        payload = json.dumps(large_leases)
+        self.assertGreater(len(payload), 2048)
+
+        with mock.patch.object(fl, "run_text", side_effect=fake_run):
+            result = fl.kernel_acquire(
+                Path("C:/work/fleet"), lane="tools", owner="worker",
+                leases=large_leases,
+            )
+
+        self.assertIn("--leases", seen["cmd"])
+        idx = seen["cmd"].index("--leases")
+        arg = seen["cmd"][idx + 1]
+        self.assertTrue(arg.startswith("@"))
+        temp_path = Path(arg[1:])
+        self.assertTrue(file_existed_during_run[0])
+        self.assertEqual(json.loads(file_content_during_run[0]), large_leases)
+        self.assertFalse(temp_path.exists())
+        self.assertEqual(result["outcome"], "acquire")
 
 
 class LocalDirStoreCASTest(unittest.TestCase):

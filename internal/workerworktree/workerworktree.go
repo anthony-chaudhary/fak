@@ -37,6 +37,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -617,10 +618,19 @@ func verifyPreparedWorktree(res Result, git GitRunner) Result {
 		gitDir = filepath.Join(res.Path, gitDir)
 	}
 	lock := filepath.Join(gitDir, "index.lock")
-	if _, err := os.Stat(lock); err == nil {
+	var lockErr error
+	if _, lockErr = os.Stat(lock); lockErr == nil || !os.IsNotExist(lockErr) {
+		for attempt := 0; attempt < 5; attempt++ {
+			time.Sleep(50 * time.Millisecond)
+			if _, lockErr = os.Stat(lock); os.IsNotExist(lockErr) {
+				break
+			}
+		}
+	}
+	if lockErr == nil {
 		return fail("PREPARE_NOT_READY", "worker worktree index lock is still present", lock)
-	} else if !os.IsNotExist(err) {
-		return fail("PREPARE_NOT_READY", "worker worktree index lock state is unknown", err.Error())
+	} else if !os.IsNotExist(lockErr) {
+		return fail("PREPARE_NOT_READY", "worker worktree index lock state is unknown", lockErr.Error())
 	}
 	res.OK = true
 	return res
@@ -703,6 +713,17 @@ func (gitWorktree) MaterializeOwned(root, lane, key, baseSHA, wtRoot string, git
 			Reason: "could not create worktree root: " + err.Error() + " — fail open"}
 	}
 	rc, out := run(git, root, []string{"-c", "core.longpaths=true", "worktree", "add", "--detach", wt, base})
+	if rc != 0 && isIndexFailure(out) {
+		for attempt := 0; attempt < 3; attempt++ {
+			ForceReap(root, wt, git)
+			_ = os.RemoveAll(wt)
+			time.Sleep(time.Duration(50+rand.Intn(51)) * time.Millisecond)
+			rc, out = run(git, root, []string{"-c", "core.longpaths=true", "worktree", "add", "--detach", wt, base})
+			if rc == 0 || !isIndexFailure(out) {
+				break
+			}
+		}
+	}
 	if rc != 0 {
 		if isIndexFailure(out) {
 			ForceReap(root, wt, git)

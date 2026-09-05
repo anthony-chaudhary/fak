@@ -57,7 +57,7 @@ func tokenDestinationTrendRows(snapshot *infoTokenDestinationSnapshot, width int
 func TestGuardInfoTokenDestinationPopulatedCapturedRender(t *testing.T) {
 	got := strings.Join(tokenDestinationTrendRows(populatedTokenDestinationSnapshot(), 160), "\n")
 	for _, exact := range []string{
-		" cost    ▁█  150 tok-eq/turn · avg 135 · trend ↑ +25%",
+		" usage    ▁█  150 tok/reply · avg 135 · trend ↑ +25%",
 		" tokens→ · tool_result 60% · assistant 25% · reasoning 15% · top-tool exec_command 70%",
 		" basis   model-visible attributed UTF-8 bytes (not billed tokens) · last 12 recorded turns · recorded 2026-08-27T18:04:05Z",
 	} {
