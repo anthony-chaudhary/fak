@@ -75,7 +75,7 @@ var guardFlagGroups = []guardFlagGroup{
 		"anthropic-oauth", "oauth-token-env", "env", "require-key-env", "rotate",
 	}},
 	{"Policy, floor & audit", []string{
-		"policy", "allow-tool", "dump-policy", "audit", "log", "landlock-hooks", "toolcall-control",
+		"policy", "posture", "profile", "self-modify", "allow-tool", "dump-policy", "dump-strict-policy", "audit", "log", "landlock-hooks", "toolcall-control",
 	}},
 	{"Token economy (cache & context savers)", []string{
 		"compact-history-budget", "compact-anchor-head", "assume-session-turns",
@@ -97,6 +97,7 @@ var guardFlagGroups = []guardFlagGroup{
 	}},
 	{"Local in-kernel model", []string{
 		"gguf", "local", "alongside", "backend", "tokenizer", "remote-serve",
+		"gpudirect-overflow",
 		"native-admission-token-budget",
 		"native-qwen-q4k-prefill-chunk-tokens", "native-qwen35-metal-gdn-sequence",
 		"native-q4k-gateup-slab", "native-prefix-profile", "vulkan-q4k-profile", "vulkan-stage-q4k",

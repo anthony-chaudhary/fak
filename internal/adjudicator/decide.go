@@ -50,6 +50,9 @@ type Policy struct {
 	// SelfModifyGlobs are path fragments that, if present in a write-shaped call's
 	// target, prove a SELF_MODIFY attempt (the agent editing its own kernel).
 	SelfModifyGlobs []string
+	// BlockedPathGlobs are path fragments for credentials and host configuration that,
+	// if present in a write-shaped call's target or shell command, are denied with POLICY_BLOCK.
+	BlockedPathGlobs []string
 	// RedactFields are arg keys whose presence triggers a TRANSFORM that strips the
 	// value before dispatch (secret hygiene at the call boundary).
 	RedactFields []string
@@ -172,20 +175,20 @@ type Policy struct {
 
 // Posture selects the policy's default-deny behavior after all provable refusal
 // checks have passed.
-type Posture uint8
+type Posture = abi.Posture
 
 const (
 	// PostureFailClosed keeps the v0.1 floor: anything not affirmatively allowed
 	// is denied with DEFAULT_DENY.
-	PostureFailClosed Posture = iota
+	PostureFailClosed = abi.PostureFailClosed
 	// PostureAdmitAndLog downgrades low-risk read-shaped DEFAULT_DENY decisions
 	// to ALLOW while carrying forensic metadata that records the would-have-denied
 	// reason. Explicit denies, self-modify, arg-rule violations, and write-shaped
 	// default denies still fail closed.
-	PostureAdmitAndLog
+	PostureAdmitAndLog = abi.PostureAdmitAndLog
 	// PostureDefaultOpen permits tools by default after all provable refusal
 	// checks have passed, even when no affirmative allow matched.
-	PostureDefaultOpen
+	PostureDefaultOpen = abi.PostureDefaultOpen
 )
 
 // ArgKind selects which argument-value matcher an ArgPredicate applies.
@@ -520,6 +523,15 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) (verdict 
 	// internal/abi/x.go) is NOT a self-modify, so it stays allowed. Bounded
 	// disclosure: the witness names only the offending glob.
 	if pr.runs(cl, rungCmdSelfModify) {
+		if g := commandSelfModifyWithSpecs(args, p.BlockedPathGlobs, p.InlineEval); g != "" {
+			return abi.Verdict{
+				Kind:    abi.VerdictDeny,
+				Reason:  abi.ReasonPolicyBlock,
+				By:      "monitor/credential-block",
+				Payload: abi.WitnessPayload{Claim: g},
+				Meta:    denyRule(abi.DenyRuleCredentialPathBlock),
+			}
+		}
 		if g := commandSelfModifyWithSpecs(args, p.SelfModifyGlobs, p.InlineEval); g != "" {
 			return p.soften(abi.Verdict{
 				Kind:    abi.VerdictDeny,
@@ -706,6 +718,15 @@ func (a *Adjudicator) selfModifyPathVerdict(ctx context.Context, p Policy, c *ab
 		return abi.Verdict{}, false
 	}
 	target := targetPath(args)
+	if g := matchGlob(target, p.BlockedPathGlobs); g != "" {
+		return abi.Verdict{
+			Kind:    abi.VerdictDeny,
+			Reason:  abi.ReasonPolicyBlock,
+			By:      "monitor/credential-block",
+			Payload: abi.WitnessPayload{Claim: g},
+			Meta:    denyRule(abi.DenyRuleCredentialPathBlock),
+		}, true
+	}
 	if g := matchGlob(target, p.SelfModifyGlobs); g != "" {
 		if directDevEditTool(c.Tool) && a.devEditAttested(ctx, c, target) {
 			return abi.Verdict{Kind: abi.VerdictAllow, By: "monitor/dev-lease", Meta: map[string]string{"dev_attested": "true"}}, true
@@ -1385,6 +1406,7 @@ func DefaultPolicy() Policy {
 // policy manifest loader), so an adopter selects it with `--policy` — no fork.
 func DevAgentPolicy() Policy {
 	return Policy{
+		Posture: PostureDefaultOpen,
 		Allow: map[string]bool{
 			// safe inspect / build / test tools a coding agent drives
 			"Read":       true,

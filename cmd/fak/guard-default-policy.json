@@ -450,6 +450,15 @@
     ".git/",
     ".fak/guard/",
     ".hermes/",
+    "internal/abi/",
+    "internal/kernel/",
+    "internal/adjudicator/",
+    "internal/architest/",
+    "dos.toml",
+    ".dos/"
+  ],
+
+  "blocked_path_globs": [
     ".env",
     ".aws/",
     ".npmrc",

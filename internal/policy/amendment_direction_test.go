@@ -79,6 +79,13 @@ func amendmentDirectionCases() []amendmentDirectionCase {
 			widenNext:   adjudicator.Policy{},
 		},
 		{
+			field:       "BlockedPathGlobs",
+			tightenOld:  adjudicator.Policy{},
+			tightenNext: adjudicator.Policy{BlockedPathGlobs: []string{".env"}},
+			widenOld:    adjudicator.Policy{BlockedPathGlobs: []string{".env"}},
+			widenNext:   adjudicator.Policy{},
+		},
+		{
 			field:       "ArgPredicates",
 			tightenOld:  adjudicator.Policy{},
 			tightenNext: adjudicator.Policy{ArgPredicates: []adjudicator.ArgPredicate{{Tool: "write_file", Arg: "path", Glob: "./out/**"}}},

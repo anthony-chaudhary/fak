@@ -240,7 +240,7 @@ func writeGuardStartupBanner(w io.Writer, v guardStartupView, report string, std
 // tool and the wrapped agent can do nothing — so guard ALWAYS loads one, fail-loud. It unions the
 // operator allow overlay, digests the floor, and applies the runtime before returning the runtime,
 // the floor-source label (banner), the policy digest (spawn metadata), and the load duration.
-func loadGuardCapabilityFloor(policyPath string, postureOverrides ...string) (rt policy.Runtime, floorSource, policyDigest string, dur time.Duration) {
+func loadGuardCapabilityFloor(policyPath string, overrides ...string) (rt policy.Runtime, floorSource, policyDigest string, dur time.Duration) {
 	var (
 		err         error
 		policyBytes []byte
@@ -264,18 +264,36 @@ func loadGuardCapabilityFloor(policyPath string, postureOverrides ...string) (rt
 	}
 	must(err)
 
+	var profileStr string
+	if len(overrides) > 1 && strings.TrimSpace(overrides[1]) != "" {
+		profileStr = strings.TrimSpace(overrides[1])
+	} else if env := strings.TrimSpace(os.Getenv("FAK_PROFILE")); env != "" {
+		profileStr = env
+	} else if rt.PolicyContext.Profile != "" {
+		profileStr = rt.PolicyContext.Profile
+	}
+	if profileStr != "" {
+		prof, pErr := policy.ParseProfile(profileStr)
+		must(pErr)
+		prof.Apply(&rt)
+		floorSource += "; profile=" + string(prof)
+	}
+
 	effectivePosture := rt.Adjudicator.Posture
 	var postureStr string
-	if len(postureOverrides) > 0 && postureOverrides[0] != "" {
-		p, pErr := policy.ParsePosture(postureOverrides[0])
+	if len(overrides) > 0 && overrides[0] != "" {
+		p, pErr := policy.ParsePosture(overrides[0])
 		must(pErr)
 		effectivePosture = p
-		postureStr = postureOverrides[0]
+		postureStr = overrides[0]
 	} else if env := strings.TrimSpace(os.Getenv("FAK_GUARD_POSTURE")); env != "" {
 		p, pErr := policy.ParsePosture(env)
 		must(pErr)
 		effectivePosture = p
 		postureStr = env
+	} else if profileStr != "" {
+		effectivePosture = rt.Adjudicator.Posture
+		postureStr = effectivePosture.String()
 	} else if policyPath == "" {
 		effectivePosture = adjudicator.PostureDefaultOpen
 		postureStr = "default_open"
@@ -284,6 +302,7 @@ func loadGuardCapabilityFloor(policyPath string, postureOverrides ...string) (rt
 		floorSource += "; posture=" + postureStr
 	}
 	rt.Adjudicator.Posture = effectivePosture
+	rt.PolicyContext.Posture = effectivePosture
 	// Union the OPERATOR allow overlay (`fak guard allow`) on top of whichever floor
 	// loaded. It only widens Allow / AllowPrefix — the danger arg-rules and explicit
 	// denies below stay intact — so an operator can re-admit a DEFAULT_DENY'd tool

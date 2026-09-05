@@ -1,5 +1,6 @@
 {
   "version": "fak-policy/v1",
+  "posture": "default_open",
   "allow": [
     "Read",
     "git_diff",

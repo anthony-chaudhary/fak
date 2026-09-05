@@ -10,7 +10,7 @@ import (
 )
 
 func attestedDevCall(path, trace string, meta map[string]string) *abi.ToolCall {
-	c := inlineCall("write_file", `{"path":"`+path+`"}`)
+	c := inlineCall("write_file", `{"path":"`+filepath.ToSlash(path)+`"}`)
 	c.TraceID = trace
 	c.Meta = meta
 	return c

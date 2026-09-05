@@ -71,6 +71,7 @@ func TestGuardLaunchGrantCrossWireHostileMatrix(t *testing.T) {
 
 func runGuardLaunchGrantCrossWireHostileMatrix(t *testing.T) {
 	isolateGuardLaunchGrantOverlays(t)
+	t.Setenv("FAK_GUARD_POSTURE", "fail_closed")
 	useGuardLaunchToolGrant(t, "deploy_preview", "delete_file", "opencode.bash", "write_file")
 	preserveGuardDefaultPolicy(t)
 	assertGuardLaunchGrantWireCoverage(t)
