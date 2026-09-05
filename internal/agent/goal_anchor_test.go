@@ -38,7 +38,7 @@ func TestGoalAnchor(t *testing.T) {
 
 		got := anchor.FormatRecoveryReinforcement(guidance)
 		expected := fmt.Sprintf(
-			"[PRIMARY GOAL ANCHOR]: %s\n[RECOVERY GUIDANCE]: %s\n[REMINDER]: Maintain focus on the primary goal above while resolving this error.",
+			"[PRIMARY GOAL ANCHOR]: %s\n[RECOVERY GUIDANCE]: %s\n[REMINDER]: Maintain focus on the primary goal above while resolving this error. If blocked or complex, decompose into smaller sub-steps or delegate to subagents.",
 			objective,
 			guidance,
 		)

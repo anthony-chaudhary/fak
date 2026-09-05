@@ -30,7 +30,7 @@ func (g *GoalAnchor) FormatRecoveryReinforcement(recoveryGuidance string) string
 	if g != nil {
 		obj = g.Objective
 	}
-	return fmt.Sprintf("[PRIMARY GOAL ANCHOR]: %s\n[RECOVERY GUIDANCE]: %s\n[REMINDER]: Maintain focus on the primary goal above while resolving this error.", obj, recoveryGuidance)
+	return fmt.Sprintf("[PRIMARY GOAL ANCHOR]: %s\n[RECOVERY GUIDANCE]: %s\n[REMINDER]: Maintain focus on the primary goal above while resolving this error. If blocked or complex, decompose into smaller sub-steps or delegate to subagents.", obj, recoveryGuidance)
 }
 
 // RecordRecoveryTurn increments the counter of recovery turns undergone.

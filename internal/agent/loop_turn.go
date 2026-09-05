@@ -346,10 +346,23 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 		code, _ := abi.ReasonByName(r.lastDeniedReason)
 		boundaryIn.ReasonCode = code
 	}
+	boundaryIn.NotedSurrender = stopgate.IsSurrenderNote(asst.Content)
+	boundaryIn.SurrenderNote = asst.Content
+	if r.cfg.goalAnchor != nil {
+		boundaryIn.GoalActive = true
+		boundaryIn.GoalObjective = r.cfg.goalAnchor.Objective
+		if !boundaryIn.NotedSurrender && !boundaryIn.NotedNoAllowedPath && r.cfg.finalGate == nil {
+			boundaryIn.WitnessClaim = &stopgate.WitnessClaim{Claimed: true, Witnessed: true}
+		}
+	}
 	decision := stopgate.EvaluateBoundary(ladderCfg, witnessCfg, boundaryIn)
 	if decision.ShouldContinue() {
-		if decision.Signal == "STOP_UNWITNESSED" || decision.Signal == "witness" || strings.HasPrefix(decision.Guidance, "STOP_UNWITNESSED") {
+		if decision.Signal == "PREMATURE_SURRENDER" || decision.Signal == "STOP_UNWITNESSED" || decision.Signal == "witness" || strings.HasPrefix(decision.Guidance, "STOP_UNWITNESSED") || strings.HasPrefix(decision.Guidance, "fak guard: premature surrender") {
 			r.witnessBlockCount++
+		}
+		if r.cfg.goalAnchor != nil {
+			r.cfg.goalAnchor.RecordRecoveryTurn()
+			r.metrics.GoalAnchorRecoveryTurns = r.cfg.goalAnchor.RecoveryTurnCount
 		}
 		continuation := decision.Guidance
 		sessionctl.RecordStopWitnessNext(r.cfg.trace, continuation)

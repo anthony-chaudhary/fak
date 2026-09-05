@@ -268,3 +268,58 @@ func TestStopgateNoAllowedPathLockBusyRefusedCleanWrapup(t *testing.T) {
 		t.Fatalf("expected final answer after continuation, got %q", metrics.FinalAnswer)
 	}
 }
+
+func TestStopgatePrematureSurrenderInAgentLoop(t *testing.T) {
+	witnessEnforce := stopgate.WitnessGateConfig{Mode: stopgate.ModeEnforce, Max: 3}
+	p := &stopgateTestPlanner{
+		answers: []Completion{
+			{
+				Message:      Message{Role: RoleAssistant, Content: "I cannot complete this goal; giving up."},
+				FinishReason: "stop",
+				Usage:        Usage{CompletionTokens: 1},
+			},
+			{
+				Message:      Message{Role: RoleAssistant, Content: "Decomposed into sub-tasks and successfully finished."},
+				FinishReason: "stop",
+				Usage:        Usage{CompletionTokens: 1},
+			},
+		},
+	}
+
+	metrics, err := RunArm(context.Background(), p, "test task", false, 5, nil, WithWitnessGateConfig(witnessEnforce))
+	if err != nil {
+		t.Fatalf("RunArm failed: %v", err)
+	}
+
+	if metrics.FinalAnswer != "Decomposed into sub-tasks and successfully finished." {
+		t.Fatalf("expected final answer after premature surrender continuation, got %q", metrics.FinalAnswer)
+	}
+}
+
+func TestStopgateGoalAnchorPersistenceInAgentLoop(t *testing.T) {
+	witnessEnforce := stopgate.WitnessGateConfig{Mode: stopgate.ModeEnforce, Max: 3}
+	anchor := NewGoalAnchor("Build payment signature validation")
+	p := &stopgateTestPlanner{
+		answers: []Completion{
+			{
+				Message:      Message{Role: RoleAssistant, Content: "I am stopping here."},
+				FinishReason: "stop",
+				Usage:        Usage{CompletionTokens: 1},
+			},
+			{
+				Message:      Message{Role: RoleAssistant, Content: "Completed payment signature validation."},
+				FinishReason: "stop",
+				Usage:        Usage{CompletionTokens: 1},
+			},
+		},
+	}
+
+	metrics, err := RunArm(context.Background(), p, "Build payment signature validation", false, 5, nil, WithGoalAnchor(anchor), WithWitnessGateConfig(witnessEnforce))
+	if err != nil {
+		t.Fatalf("RunArm failed: %v", err)
+	}
+
+	if metrics.FinalAnswer != "Completed payment signature validation." {
+		t.Fatalf("expected final answer after goal persistence continuation, got %q", metrics.FinalAnswer)
+	}
+}
