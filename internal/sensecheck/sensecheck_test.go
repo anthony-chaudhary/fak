@@ -233,3 +233,118 @@ func TestRenderCarriesFence(t *testing.T) {
 		t.Fatalf("render missing verdict or fence:\n%s", out)
 	}
 }
+
+var (
+	benchReportSink Report
+	benchStringSink string
+	benchSegsSink   []Segment
+	benchSevSink    Severity
+	benchBoolSink   bool
+)
+
+func BenchmarkCheckClean(b *testing.B) {
+	subj := TextSubject("bench-clean", "Refactored the parser into three passes; added a table test; go test ./... is green with 42 files changed.")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r := Check(subj)
+		if r.Verdict != VerdictClean {
+			b.Fatalf("unexpected verdict: %s", r.Verdict)
+		}
+		benchReportSink = r
+	}
+}
+
+func BenchmarkCheckSmelly(b *testing.B) {
+	subj := TextSubject("bench-smelly", "All tests pass successfully. CI output: exit status 1. Retry loop configured with backoff = 0 and max_retries = 0. Cache hit-rate 142% across the run. assert result == result. This always works for all users — tested it once and it passed.")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r := Check(subj)
+		if r.Verdict != VerdictSmells {
+			b.Fatalf("unexpected verdict: %s", r.Verdict)
+		}
+		benchReportSink = r
+	}
+}
+
+func BenchmarkCheckCommitSubject(b *testing.B) {
+	subj := CommitSubject(
+		"deadbeef",
+		"feat(gateway): implement retry loop and mark done\n\nAll tests pass and feature is complete and ready to ship.",
+		"+ // TODO wire the real endpoint\n+ if (retries == 0) { ... }\n- old code",
+	)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r := Check(subj)
+		if r.Verdict != VerdictSmells {
+			b.Fatalf("unexpected verdict: %s", r.Verdict)
+		}
+		benchReportSink = r
+	}
+}
+
+func BenchmarkCheckLogMultiSegment(b *testing.B) {
+	logText := "para 1: initial bootstrap sequence completed with zero errors.\n\n" +
+		"para 2: test execution finished: All tests pass. Build log: exit status 1\n\n" +
+		"para 3: metrics reported cache hit-rate 142% coverage with backoff = 0.\n\n" +
+		"para 4: final wrap-up done: Fixed the bug. 0 files changed, nothing to commit."
+	segs := LogSegments(logText)
+	subj := Subject{Kind: "log", Ref: "bench-log", Segments: segs}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r := Check(subj)
+		if r.Verdict != VerdictSmells {
+			b.Fatalf("unexpected verdict: %s", r.Verdict)
+		}
+		benchReportSink = r
+	}
+}
+
+func BenchmarkLogSegments(b *testing.B) {
+	raw := "para 1: line one\nline two\n\n" +
+		"para 2: second segment\nwith more text\n\n" +
+		"para 3: third paragraph here\n\n" +
+		"para 4: fourth paragraph here\n\n" +
+		"para 5: final paragraph\n"
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		segs := LogSegments(raw)
+		if len(segs) != 5 {
+			b.Fatalf("unexpected segment count: %d", len(segs))
+		}
+		benchSegsSink = segs
+	}
+}
+
+func BenchmarkRenderReport(b *testing.B) {
+	subj := TextSubject("bench-render", "All tests pass successfully. CI output: exit status 1. Retry loop with backoff = 0. Cache hit-rate 142% coverage.")
+	rep := Check(subj)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		out := Render(rep)
+		if len(out) == 0 {
+			b.Fatal("unexpected empty render")
+		}
+		benchStringSink = out
+	}
+}
+
+func BenchmarkMaxSeverity(b *testing.B) {
+	subj := TextSubject("bench-maxsev", "All tests pass — exit status 1")
+	rep := Check(subj)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sev, raised := MaxSeverity(rep)
+		if !raised || sev != SevReek {
+			b.Fatalf("unexpected max severity: %v, %v", sev, raised)
+		}
+		benchSevSink = sev
+		benchBoolSink = raised
+	}
+}
