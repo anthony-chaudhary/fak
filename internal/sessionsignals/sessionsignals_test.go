@@ -260,3 +260,59 @@ func TestUsageCapStillOutranksThrottleWidening(t *testing.T) {
 		}
 	}
 }
+
+func BenchmarkExtractReset(b *testing.B) {
+	cases := []string{
+		"You've hit your session limit · resets 6am (America/Los_Angeles). You've also hit your weekly limit · resets Jul 3, 2026 at 9am (America/Los_Angeles).",
+		"You've hit your weekly limit · resets Jul 3 at 9am",
+		"clean text should carry no reset",
+		"You've reached your Fable 5 limit. Run /usage-credits to continue.",
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, text := range cases {
+			_ = LimitReset(text)
+			_ = LimitResets(text)
+		}
+	}
+}
+
+func BenchmarkIsAPIError(b *testing.B) {
+	samples := []string{
+		"API Error: Overloaded (529) server-side issue",
+		"API Error: 401 authentication_error",
+		"Request timed out.",
+		"stream error: Too Many Requests; retrying 1/5",
+		"API Error: 409 session stopped (operator control)",
+		"Rate limit reached for gpt-5-codex in organization org-abc on tokens per min (TPM): Limit 30000, Used 30000. Please try again in 2s.",
+		"clean operational log message with no error keywords",
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, s := range samples {
+			_ = IsAPIError(s)
+			_ = IsAPIErrorWithoutBareTimeout(s)
+		}
+	}
+}
+
+func BenchmarkClassifyHTTPStatus(b *testing.B) {
+	samples := []string{
+		"API Error: 529 Overloaded",
+		"HTTP 401 Unauthorized",
+		"session limit; resets 6pm",
+		"error code 500 internal error",
+		"clean output without status codes",
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, s := range samples {
+			_ = HTTPStatus(s)
+		}
+	}
+}
+
+

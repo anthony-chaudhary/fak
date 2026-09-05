@@ -117,8 +117,8 @@ func BenchmarkIsLimitError(b *testing.B) {
 	}
 }
 
-// BenchmarkIsAPIError measures detection of transient transport/server errors and rate limits.
-func BenchmarkIsAPIError(b *testing.B) {
+// BenchmarkIsAPIErrorWithoutBareTimeout measures detection of transient errors excluding bare timeouts.
+func BenchmarkIsAPIErrorWithoutBareTimeout(b *testing.B) {
 	samples := []string{
 		"API Error: Overloaded (529) server-side issue",
 		"Request timed out.",
@@ -131,7 +131,7 @@ func BenchmarkIsAPIError(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, s := range samples {
-			sinkBool = IsAPIError(s)
+			sinkBool = IsAPIErrorWithoutBareTimeout(s)
 		}
 	}
 }
