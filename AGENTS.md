@@ -292,6 +292,7 @@ is a no-op). **When you cite evidence in a claim or a handoff, prefer `module@re
 - **Keep private control private.** GPU-server credentials, hostnames, SSH details, private paths, and raw internal logs stay in the private companion repo. Public evidence must be scrubbed and reproducible through [`docs/private-comms-channel.md`](docs/private-comms-channel.md).
 - **Respect Windows operational fences.** Never run broad `find /`, `find ~`, `find /mnt`, or `find /proc` from Git Bash. Route git and hang-sensitive commands through the guarded fak verbs. Treat low-utilization whole-machine stalls as kernel-path churn: stop launch storms, inspect process counts/handles, and use the committed diagnostics rather than adding retries.
 - **Make external writes explicit.** `OUT_OF_TREE_WRITE` records writes outside the repo. Use the operation’s declared external target and reversible preview/confirm path; never disguise an external mutation as repository scratch.
+- **Do not stop or restart a managed inference server during active sessions.** Before stopping, restarting, or reconfiguring any locally or remotely managed model inference endpoint or server, verify that all dependent sessions have completed or ownership has been explicitly handed off. Stopping an active upstream server strands dependent guarded sessions behind repeated 502 Bad Gateway errors.
 
 The detailed recovery for a refusal is intentionally paged: query the token below instead of carrying every failure cookbook in every agent context.
 

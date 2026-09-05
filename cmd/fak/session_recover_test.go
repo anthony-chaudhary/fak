@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1053,5 +1055,64 @@ func TestSessionRecoverDefaultFullSafeCohortAndBoundedLimit(t *testing.T) {
 		if !strings.Contains(text, expected) {
 			t.Errorf("text output missing %q:\n%s", expected, text)
 		}
+	}
+}
+
+func TestSessionRecoverEndpointReadinessGate(t *testing.T) {
+	installSessionRecoverIdentityFixture(t)
+	oldInv, oldJournal, oldLaunch := recoveryInventory, recoveryJournalCrashes, recoveryLaunch
+	defer func() {
+		recoveryInventory, recoveryJournalCrashes, recoveryLaunch = oldInv, oldJournal, oldLaunch
+	}()
+	recoveryJournalCrashes = func(string, time.Time) ([]sessionjournal.Classified, error) { return nil, nil }
+	recoveryInventory = func(time.Duration) (sessionrecovery.InventoryReport, error) {
+		return sessionrecovery.InventoryReport{Sessions: []sessionrecovery.Session{{
+			Thread:  &sessionrecovery.Thread{ID: "t-endpoint", Source: "session_registration", CWD: `C:\work\fak`},
+			Harness: sessionrecovery.ProviderCodex, HarnessSource: "session_registration", Category: sessionrecovery.CategorySubstantive, Action: sessionrecovery.ActionRecover,
+		}}}, nil
+	}
+	recoveryLaunch = &captureLauncher{}
+
+	// 1. Endpoint unavailable (HTTP 502): candidate refused
+	downServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream model error", http.StatusBadGateway)
+	}))
+	defer downServer.Close()
+
+	var downOut, downErr bytes.Buffer
+	code := runSessionRecover(&downOut, &downErr, []string{
+		"--json", "--journal=false", "--receipts", t.TempDir(), "--endpoint", downServer.URL,
+	})
+	if code != 0 {
+		t.Fatalf("preview with down endpoint code=%d err=%s", code, downErr.String())
+	}
+	var downSummary sessionrecovery.Summary
+	if err := json.Unmarshal(downOut.Bytes(), &downSummary); err != nil {
+		t.Fatal(err)
+	}
+	if len(downSummary.Results) != 1 || downSummary.Results[0].Status != "refused" || !strings.Contains(downSummary.Results[0].Reason, "endpoint_unavailable") {
+		t.Fatalf("down endpoint result=%+v, want refused/endpoint_unavailable", downSummary.Results)
+	}
+
+	// 2. Endpoint healthy (HTTP 200): candidate admitted
+	upServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer upServer.Close()
+
+	var upOut, upErr bytes.Buffer
+	code = runSessionRecover(&upOut, &upErr, []string{
+		"--json", "--journal=false", "--receipts", t.TempDir(), "--endpoint", upServer.URL,
+	})
+	if code != 0 {
+		t.Fatalf("preview with up endpoint code=%d err=%s", code, upErr.String())
+	}
+	var upSummary sessionrecovery.Summary
+	if err := json.Unmarshal(upOut.Bytes(), &upSummary); err != nil {
+		t.Fatal(err)
+	}
+	if len(upSummary.Results) != 1 || upSummary.Results[0].Status != "candidate" {
+		t.Fatalf("up endpoint result=%+v, want candidate", upSummary.Results)
 	}
 }
