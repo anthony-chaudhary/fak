@@ -167,6 +167,19 @@ func (s ObserverSemanticScreen) ScreenResult(ctx context.Context, c *abi.ToolCal
 
 	res, err := s.pool.ObserveSyncBarrier(ctx, obs)
 
+	if errors.Is(err, ErrBarrierTimeout) {
+		digest := res.Reason
+		if digest == "" {
+			digest = "observer sync barrier timed out waiting for in-flight tasks"
+		}
+		return abi.ScreenAdvice{
+			Disposition: abi.ScreenQuarantine,
+			Reason:      abi.ReasonIntegrityRefuted,
+			Digest:      digest,
+			By:          "observer:barrier_timeout",
+		}
+	}
+
 	if errors.Is(err, ErrUnwitnessedDiff) || (obs.IsMutating() && res.WitnessVerdict == WitnessUnwitnessedClaim && s.pool.cfg.RequireWitnessDiff) {
 		digest := res.Reason
 		if digest == "" {

@@ -437,18 +437,29 @@ func (p *Pool) ObserveSyncBarrier(ctx context.Context, obs StepObservation) (Ste
 		timeout = 50 * time.Millisecond
 	}
 	deadline := time.Now().Add(timeout)
-	for atomic.LoadInt64(&sess.inFlight) > 0 {
-		if err := ctx.Err(); err != nil {
-			return obs, err
+	if atomic.LoadInt64(&sess.inFlight) > 0 {
+		pollInterval := 50 * time.Microsecond
+		if timeout < pollInterval {
+			pollInterval = timeout
 		}
-		if time.Now().After(deadline) {
-			return obs, ErrBarrierTimeout
+		timer := time.NewTimer(pollInterval)
+		defer timer.Stop()
+
+		for atomic.LoadInt64(&sess.inFlight) > 0 {
+			if err := ctx.Err(); err != nil {
+				return obs, err
+			}
+			if time.Now().After(deadline) {
+				return obs, ErrBarrierTimeout
+			}
+			select {
+			case <-ctx.Done():
+				return obs, ctx.Err()
+			case <-timer.C:
+				timer.Reset(pollInterval)
+			}
 		}
-		select {
-		case <-ctx.Done():
-			return obs, ctx.Err()
-		case <-time.After(50 * time.Microsecond):
-		}
+		timer.Stop()
 	}
 
 	sess.evaluate(p.cfg, &obs)

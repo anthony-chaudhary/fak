@@ -786,6 +786,46 @@ func TestObserverSemanticScreen_ScreenResult_ReadOnly(t *testing.T) {
 	}
 }
 
+func TestObserverSemanticScreen_BarrierTimeoutQuarantined(t *testing.T) {
+	pool := NewPool(Config{
+		WorkerCount:        1,
+		QueueSize:          16,
+		BarrierTimeout:     10 * time.Millisecond,
+		RequireWitnessDiff: true,
+	})
+	_ = pool.Start()
+	defer pool.Close()
+
+	screen := NewObserverSemanticScreen(pool)
+	ctx := context.Background()
+	sessionID := "sess-screen-barrier-timeout"
+
+	sess := pool.getOrCreateSession(sessionID)
+	// Simulate an un-settled in-flight task that triggers barrier timeout
+	atomic.StoreInt64(&sess.inFlight, 1)
+	defer atomic.StoreInt64(&sess.inFlight, 0)
+
+	call := &abi.ToolCall{
+		Tool:    "Edit",
+		TraceID: sessionID,
+		Meta: map[string]string{
+			"diff": "@@ -1 +1 @@\n-old\n+new",
+		},
+	}
+	body := []byte("applied edit successfully")
+
+	advice := screen.ScreenResult(ctx, call, body)
+	if advice.Disposition != abi.ScreenQuarantine {
+		t.Fatalf("expected ScreenQuarantine on barrier timeout, got %v", advice.Disposition)
+	}
+	if advice.Reason != abi.ReasonIntegrityRefuted {
+		t.Fatalf("expected ReasonIntegrityRefuted, got %v", advice.Reason)
+	}
+	if advice.By != "observer:barrier_timeout" {
+		t.Fatalf("expected By='observer:barrier_timeout', got %q", advice.By)
+	}
+}
+
 func TestObserverSemanticScreen_VerifyToolCall_PreExecution(t *testing.T) {
 	pool := NewPool(Config{ChurnThreshold: 2, RegressThreshold: 3})
 	_ = pool.Start()
