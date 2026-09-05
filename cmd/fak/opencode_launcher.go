@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/childprocess"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/projectassets"
 )
 
 type opencodeLaunchOptions struct {
@@ -123,6 +124,13 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "  command     = "+strings.Join(argvOut, " "))
 		fmt.Fprintln(stdout, strings.Join(argvOut, " "))
 		return 0
+	}
+
+	if _, err := projectassets.Ensure(".", true); err != nil && !launch.quiet {
+		fmt.Fprintf(stderr, "fak opencode: warning: %v\n", err)
+	}
+	if err := projectassets.VerifyOpenCodeSnapshot("."); err != nil && !launch.quiet {
+		fmt.Fprintf(stderr, "fak opencode: warning: %v\n", err)
 	}
 
 	started := time.Now()

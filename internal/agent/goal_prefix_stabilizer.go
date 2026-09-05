@@ -149,6 +149,21 @@ var (
 		"# goal continuation",
 		"## goal continuation",
 	}
+
+	volatileTagRegexps = func() []*regexp.Regexp {
+		res := make([]*regexp.Regexp, len(volatileTagNames))
+		for i, tag := range volatileTagNames {
+			res[i] = regexp.MustCompile(`(?is)<` + tag + `(\s+[^>]*)?>.*?</` + tag + `>`)
+		}
+		return res
+	}()
+
+	goalTagStripRe = regexp.MustCompile(`(?is)<[^>]+>`)
+
+	worldStateTagRe     = regexp.MustCompile(`(?is)(.*?)(<world_state(?:\s+[^>]*)?>)(.*?)(</world_state>)(.*)`)
+	worldStateAltTagRe  = regexp.MustCompile(`(?is)(.*?)(<(?:system_state|environment_state)(?:\s+[^>]*)?>)(.*?)(</(?:system_state|environment_state)>)(.*)`)
+	worldStateBracketRe = regexp.MustCompile(`(?is)(.*?)(\[world_state\])(.*?)(\[/world_state\])(.*)`)
+	worldStateHeaderRe  = regexp.MustCompile(`(?is)(.*?)(?:^|\n)(#+\s*world state\b|world state:)(.*)`)
 )
 
 // IsGoalContinuationMessage reports whether content is a goal continuation message.
@@ -341,8 +356,7 @@ func stripVolatileFromText(text string) (string, string) {
 	workingText := text
 	var volatilePieces []string
 
-	for _, tag := range volatileTagNames {
-		re := regexp.MustCompile(`(?is)<` + tag + `(\s+[^>]*)?>.*?</` + tag + `>`)
+	for _, re := range volatileTagRegexps {
 		matches := re.FindAllString(workingText, -1)
 		for _, m := range matches {
 			volatilePieces = append(volatilePieces, strings.TrimSpace(m))
@@ -490,9 +504,8 @@ func canonicalizeText(s string) string {
 }
 
 func isSameGoal(a, b string) bool {
-	reTag := regexp.MustCompile(`(?is)<[^>]+>`)
 	norm := func(s string) string {
-		s = reTag.ReplaceAllString(s, "")
+		s = goalTagStripRe.ReplaceAllString(s, "")
 		s = strings.ToLower(s)
 		s = strings.TrimPrefix(s, strings.ToLower(compactGoalMarker))
 		for _, h := range goalLineHeaders {
@@ -613,8 +626,7 @@ func extractWorldState(content string) (worldStateExtraction, bool) {
 	}
 
 	// 1. Tag match <world_state ...> ... </world_state>
-	reTag := regexp.MustCompile(`(?is)(.*?)(<world_state(?:\s+[^>]*)?>)(.*?)(</world_state>)(.*)`)
-	if m := reTag.FindStringSubmatch(content); len(m) == 6 {
+	if m := worldStateTagRe.FindStringSubmatch(content); len(m) == 6 {
 		raw := m[2] + m[3] + m[4]
 		body := strings.TrimSpace(m[3])
 		return worldStateExtraction{
@@ -627,8 +639,7 @@ func extractWorldState(content string) (worldStateExtraction, bool) {
 	}
 
 	// Also check <system_state> or <environment_state>
-	reAlt := regexp.MustCompile(`(?is)(.*?)(<(?:system_state|environment_state)(?:\s+[^>]*)?>)(.*?)(</(?:system_state|environment_state)>)(.*)`)
-	if m := reAlt.FindStringSubmatch(content); len(m) == 6 {
+	if m := worldStateAltTagRe.FindStringSubmatch(content); len(m) == 6 {
 		raw := m[2] + m[3] + m[4]
 		body := strings.TrimSpace(m[3])
 		return worldStateExtraction{
@@ -641,8 +652,7 @@ func extractWorldState(content string) (worldStateExtraction, bool) {
 	}
 
 	// 2. Bracket marker [world_state] ... [/world_state]
-	reBracket := regexp.MustCompile(`(?is)(.*?)(\[world_state\])(.*?)(\[/world_state\])(.*)`)
-	if m := reBracket.FindStringSubmatch(content); len(m) == 6 {
+	if m := worldStateBracketRe.FindStringSubmatch(content); len(m) == 6 {
 		raw := m[2] + m[3] + m[4]
 		body := strings.TrimSpace(m[3])
 		return worldStateExtraction{
@@ -671,8 +681,7 @@ func extractWorldState(content string) (worldStateExtraction, bool) {
 	}
 
 	// 4. Line header: World State: or # World State
-	reHeader := regexp.MustCompile(`(?is)(.*?)(?:^|\n)(#+\s*world state\b|world state:)(.*)`)
-	if m := reHeader.FindStringSubmatch(content); len(m) == 4 {
+	if m := worldStateHeaderRe.FindStringSubmatch(content); len(m) == 4 {
 		raw := strings.TrimSpace(m[2] + m[3])
 		return worldStateExtraction{
 			raw:    raw,

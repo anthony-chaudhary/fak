@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/dropin"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
@@ -27,6 +28,8 @@ type agentFlags struct {
 	anthropicAuth         *string
 	offline               *bool
 	native                *bool
+	raw                   *bool
+	mode                  *string
 	maxTurns              *int
 	out                   *string
 	logOut                *string
@@ -42,6 +45,8 @@ type agentFlags struct {
 	workflow              *string
 	workflowStep          *bool
 	workflowCheckpointDir *string
+	posture               *string
+	mcpConfig             *string
 }
 
 func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
@@ -61,6 +66,8 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.anthropicAuth = fs.String("anthropic-auth", "auto", "(--provider anthropic) how to present the credential: auto (sniff the token shape - correct for api.anthropic.com), bearer, or x-api-key. Pass bearer for a THIRD-PARTY Anthropic-compatible endpoint whose tenant token is not an sk-ant-* key: auto would send x-api-key and the call would 401 even with a correct base URL, model, and body")
 	af.offline = fs.Bool("offline", false, "use the deterministic mock planner (no network)")
 	af.native = fs.Bool("native", false, "run one kernel-mediated arm and print its final answer (basic terminal mode)")
+	af.raw = fs.Bool("raw", false, "run one unmediated baseline harness arm (skipping the mediated fak kernel arm)")
+	af.mode = fs.String("mode", "", "execution mode: dual (default), native, or raw")
 	af.maxTurns = fs.Int("max-turns", 10, "max model turns per arm")
 	af.out = fs.String("out", "agent-report.json", "report output path")
 	af.logOut = fs.String("log", "", "optional path to write the per-call trace log")
@@ -76,6 +83,8 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.workflow = fs.String("workflow", "", "name of workflow to execute (e.g. fleet-wave)")
 	af.workflowStep = fs.Bool("workflow-step", false, "execute a single workflow phase step instead of full workflow")
 	af.workflowCheckpointDir = fs.String("workflow-checkpoint-dir", ".fak/workflows", "directory for workflow state checkpoints")
+	af.posture = fs.String("posture", "default_open", "adjudication posture: default_open|fail_closed|admit_and_log (default: default_open; env: FAK_AGENT_POSTURE or FAK_GUARD_POSTURE)")
+	af.mcpConfig = fs.String("mcp-config", os.Getenv("FAK_MCP_CONFIG"), "optional path to MCP client configuration file")
 	return fs, af
 }
 
@@ -86,6 +95,10 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 // adjudicator denies, and MMU quarantines for each arm  -  the real turn-use-vs-now
 // measurement the static bench could not produce.
 func cmdAgent(argv []string) {
+	runAgent(argv)
+}
+
+func runAgent(argv []string) {
 	if len(argv) > 0 && argv[0] == "profiles" {
 		if err := printAgentOutputProfiles(os.Stdout, argv[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -95,6 +108,32 @@ func cmdAgent(argv []string) {
 	}
 	fs, af := newAgentFlagSet()
 	_ = fs.Parse(argv)
+
+	postureExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "posture" {
+			postureExplicit = true
+		}
+	})
+	rawPosture := *af.posture
+	if !postureExplicit {
+		if env := os.Getenv("FAK_AGENT_POSTURE"); env != "" {
+			rawPosture = env
+		} else if env := os.Getenv("FAK_GUARD_POSTURE"); env != "" {
+			rawPosture = env
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(rawPosture)) {
+	case "fail_closed", "strict":
+		agent.SetConfiguredPosture(adjudicator.PostureFailClosed)
+	case "admit_and_log":
+		agent.SetConfiguredPosture(adjudicator.PostureAdmitAndLog)
+	default:
+		agent.SetConfiguredPosture(adjudicator.PostureDefaultOpen)
+	}
+
+	isRaw, isNative, err := validateAgentMode(*af.raw, *af.native, *af.mode)
+	must(err)
 
 	if *af.workflow != "" {
 		if err := runWorkflowCLI(*af.workflow, *af.workflowStep, *af.workflowCheckpointDir); err != nil {
@@ -153,14 +192,18 @@ func cmdAgent(argv []string) {
 	}
 	defer restoreWork()
 	printAgentProfileValue(os.Stderr, preference, work)
-	applyPolicy(*af.policyPath)
+	if !isRaw {
+		applyPolicy(*af.policyPath)
+	}
 	loadedRoute, loadedAccounts, runOpts, err := loadAgentRouteOptionsWithAccounts(*af.routeManifest, *af.routeAccounts)
 	must(err)
 	runOpts = append(runOpts, agent.WithResponseProfileSource(preference.Source))
-	if loadedRoute != nil {
+	if loadedRoute != nil && !isRaw {
 		fmt.Fprintf(os.Stderr, "fak agent: loaded model-routing policy from %s\n", *af.routeManifest)
 	}
-	announceAgentRouteAccounts(os.Stderr, *af.routeAccounts, loadedAccounts)
+	if !isRaw {
+		announceAgentRouteAccounts(os.Stderr, *af.routeAccounts, loadedAccounts)
+	}
 	root := strings.TrimSpace(*af.codeWorkspace)
 	if root == "" {
 		root, err = os.Getwd()
@@ -204,8 +247,12 @@ func cmdAgent(argv []string) {
 		}
 	})
 	effectiveBaseURL := *af.baseURL
-	if effectiveBaseURL == "" && providerExplicit && !*af.offline {
-		effectiveBaseURL = dropin.DefaultBaseURL(*af.provider)
+	if effectiveBaseURL == "" {
+		if env := os.Getenv(dropin.EnvVar(*af.provider, "")); env != "" {
+			effectiveBaseURL = env
+		} else if providerExplicit && !*af.offline {
+			effectiveBaseURL = dropin.DefaultBaseURL(*af.provider)
+		}
 	}
 
 	var planner agent.Planner
@@ -231,7 +278,29 @@ func cmdAgent(argv []string) {
 		planner = p
 	}
 
-	if *af.native {
+	if isRaw {
+		if *af.logOut != "" {
+			must(errors.New("fak agent: --raw does not support --log; use --out for its receipt"))
+		}
+		activeWakeReleaser, _ := acquireAgentRunKeepAwake(*af.keepAwake)
+		metrics, err := agent.RunArm(ctx(), planner, *af.task, false, *af.maxTurns, nil, runOpts...)
+		if activeWakeReleaser != nil {
+			_ = activeWakeReleaser.Release()
+		}
+		must(err)
+		receipt := newRawAgentReceipt(*af.task, planner.Model(), metrics)
+		data := jsonIndent(receipt)
+		if *af.out == "" || *af.out == "-" || *af.out == "stdout" {
+			fmt.Fprintln(os.Stdout, string(data))
+		} else {
+			must(os.WriteFile(*af.out, data, 0o644))
+			fmt.Fprintln(os.Stdout, metrics.FinalAnswer)
+			announceAgentReport(os.Stderr, *af.out)
+		}
+		return
+	}
+
+	if isNative {
 		if *af.logOut != "" {
 			must(errors.New("fak agent: --native does not support --log; use --out for its receipt"))
 		}
@@ -289,4 +358,17 @@ func agentEffortRunOptions(af *agentFlags) []agent.RunOption {
 		opts = append(opts, agent.WithRunThinkingBudget(*af.thinkingBudget))
 	}
 	return opts
+}
+
+func validateAgentMode(raw, native bool, mode string) (isRaw, isNative bool, err error) {
+	modeVal := strings.ToLower(strings.TrimSpace(mode))
+	if modeVal != "" && modeVal != "dual" && modeVal != "native" && modeVal != "raw" {
+		return false, false, fmt.Errorf("fak agent: unknown --mode %q (want dual, native, or raw)", mode)
+	}
+	isRaw = raw || modeVal == "raw"
+	isNative = native || modeVal == "native"
+	if isRaw && isNative {
+		return false, false, errors.New("fak agent: cannot specify both raw and native execution modes")
+	}
+	return isRaw, isNative, nil
 }

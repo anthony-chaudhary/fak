@@ -1389,8 +1389,11 @@ func cmdManageCommand(commandName string, argv []string) {
 	srv.RecordStartupPhase("mcp-registration", time.Since(mcpStarted), "measured")
 	if err != nil {
 		cancel()
-		fmt.Fprintf(os.Stderr, "fak guard: Claude MCP registration setup failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "fak guard: MCP registration setup failed: %v\n", err)
 		os.Exit(1)
+	}
+	if mcpInstall.Applied && mcpInstall.IsFak {
+		injected = append(injected, [2]string{"FAK_MCP_CONFIG", mcpInstall.ConfigPath})
 	}
 
 	// Render the FULL startup report and register it on the gateway so the session serves it

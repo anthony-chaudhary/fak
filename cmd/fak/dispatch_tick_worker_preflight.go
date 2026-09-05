@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/projectassets"
 )
 
 const (
@@ -185,6 +186,10 @@ func dispatchWorkerPreflight(ctx context.Context, req dispatchWorkerPreflightReq
 				return result.finishEvidence(nil)
 			}
 		}
+	}
+
+	if req.Workspace != "" && (strings.EqualFold(req.Backend, "codex") || strings.EqualFold(req.Backend, "opencode")) {
+		_, _ = projectassets.Ensure(req.Workspace, true)
 	}
 
 	obs, err := dispatchCodexWorkerPreflightProbe(ctx, req)

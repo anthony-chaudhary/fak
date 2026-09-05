@@ -37,7 +37,7 @@ func runProjectAssets(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stdout, string(b))
 	} else {
 		fmt.Fprintf(stdout, "PROJECT_ASSETS zero_unexplained_gaps=%t manifest=%s\n", r.ZeroUnexplainedGaps, r.Manifest)
-		for _, h := range []string{"claude", "codex", "fak-native"} {
+		for _, h := range []string{"claude", "codex", "fak-native", "opencode"} {
 			x := r.Harnesses[h]
 			fmt.Fprintf(stdout, "%s canonical=%d imported=%d excluded=%d duplicate=%d stale=%d\n", h, len(x.Canonical), len(x.Imported), len(x.Excluded), len(x.Duplicate), len(x.Stale))
 		}

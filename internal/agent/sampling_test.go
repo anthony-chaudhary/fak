@@ -422,3 +422,487 @@ func BenchmarkTopKTruncate_FullSort_248k(b *testing.B) {
 		referenceFullSortTopKTruncate(work, sum, k)
 	}
 }
+
+// referenceMapNucleusTruncate is the golden reference implementing nucleus truncation
+// via a vocabulary-sized map[int]bool membership mask and maskKept (the pre-optimization implementation).
+func referenceMapNucleusTruncate(probs []float64, sum, topP float64) float64 {
+	order := descProbOrder(probs, func(i, j int) bool { return probs[i] > probs[j] })
+	target := topP * sum
+	var cum float64
+	kept := make(map[int]bool, len(order))
+	for rank, idx := range order {
+		if rank > 0 && cum >= target {
+			break
+		}
+		kept[idx] = true
+		cum += probs[idx]
+	}
+	return maskKept(probs, kept)
+}
+
+func TestTopPNucleusTruncateEquivalence(t *testing.T) {
+	vocabs := []int{8, 64, 1024, 32768, 248000}
+	topPValues := []float64{0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99}
+
+	for _, vocabSize := range vocabs {
+		// 1. Realistic softmax-like logit distribution
+		rng := rand.New(rand.NewSource(int64(vocabSize)))
+		logits := make([]float32, vocabSize)
+		for i := range logits {
+			logits[i] = float32(rng.NormFloat64() * 3.0)
+		}
+		maxL := float32(-math.MaxFloat32)
+		for _, x := range logits {
+			if x > maxL {
+				maxL = x
+			}
+		}
+		var baseSum float64
+		baseProbs := make([]float64, vocabSize)
+		for i, x := range logits {
+			p := math.Exp(float64(x - maxL))
+			baseProbs[i] = p
+			baseSum += p
+		}
+
+		for _, topP := range topPValues {
+			t.Run(fmt.Sprintf("softmax_vocab_%d_topP_%v", vocabSize, topP), func(t *testing.T) {
+				fastProbs := append([]float64(nil), baseProbs...)
+				refProbs := append([]float64(nil), baseProbs...)
+
+				fastSum := nucleusTruncate(fastProbs, baseSum, topP)
+				refSum := referenceMapNucleusTruncate(refProbs, baseSum, topP)
+
+				if math.Float64bits(fastSum) != math.Float64bits(refSum) {
+					t.Fatalf("vocab %d topP %v sum mismatch: fast=%v (%x), ref=%v (%x)", vocabSize, topP, fastSum, math.Float64bits(fastSum), refSum, math.Float64bits(refSum))
+				}
+				for i := range fastProbs {
+					if math.Float64bits(fastProbs[i]) != math.Float64bits(refProbs[i]) {
+						t.Fatalf("vocab %d topP %v prob mismatch at %d: fast=%v (%x), ref=%v (%x)", vocabSize, topP, i, fastProbs[i], math.Float64bits(fastProbs[i]), refProbs[i], math.Float64bits(refProbs[i]))
+					}
+				}
+			})
+		}
+
+		// 2. Heavy ties distribution (discrete values with extensive ties across the vocabulary)
+		var tieSum float64
+		tieProbs := make([]float64, vocabSize)
+		for i := range tieProbs {
+			tieProbs[i] = float64(i%7) / 10.0
+			tieSum += tieProbs[i]
+		}
+		for _, topP := range []float64{0.1, 0.5, 0.9} {
+			t.Run(fmt.Sprintf("ties_vocab_%d_topP_%v", vocabSize, topP), func(t *testing.T) {
+				fastProbs := append([]float64(nil), tieProbs...)
+				refProbs := append([]float64(nil), tieProbs...)
+
+				fastSum := nucleusTruncate(fastProbs, tieSum, topP)
+				refSum := referenceMapNucleusTruncate(refProbs, tieSum, topP)
+
+				if math.Float64bits(fastSum) != math.Float64bits(refSum) {
+					t.Fatalf("tie vocab %d topP %v sum mismatch: fast=%v, ref=%v", vocabSize, topP, fastSum, refSum)
+				}
+				for i := range fastProbs {
+					if math.Float64bits(fastProbs[i]) != math.Float64bits(refProbs[i]) {
+						t.Fatalf("tie vocab %d topP %v prob mismatch at %d: fast=%v, ref=%v", vocabSize, topP, i, fastProbs[i], refProbs[i])
+					}
+				}
+			})
+		}
+
+		// 3. Peaked distribution (head has 99.9% of mass)
+		peakedProbs := make([]float64, vocabSize)
+		peakedProbs[0] = 0.999
+		for i := 1; i < vocabSize; i++ {
+			peakedProbs[i] = 0.001 / float64(vocabSize-1)
+		}
+		t.Run(fmt.Sprintf("peaked_vocab_%d_topP_0.5", vocabSize), func(t *testing.T) {
+			fastProbs := append([]float64(nil), peakedProbs...)
+			refProbs := append([]float64(nil), peakedProbs...)
+
+			fastSum := nucleusTruncate(fastProbs, 1.0, 0.5)
+			refSum := referenceMapNucleusTruncate(refProbs, 1.0, 0.5)
+
+			if math.Float64bits(fastSum) != math.Float64bits(refSum) {
+				t.Fatalf("peaked sum mismatch: got %v want %v", fastSum, refSum)
+			}
+			for i := range fastProbs {
+				if math.Float64bits(fastProbs[i]) != math.Float64bits(refProbs[i]) {
+					t.Fatalf("peaked prob mismatch at %d: got %v want %v", i, fastProbs[i], refProbs[i])
+				}
+			}
+		})
+	}
+}
+
+func TestTopPNucleusTruncateEdgeCases(t *testing.T) {
+	// 1. Empty slice
+	{
+		fastProbs := []float64{}
+		refProbs := []float64{}
+		fastSum := nucleusTruncate(fastProbs, 0, 0.9)
+		refSum := referenceMapNucleusTruncate(refProbs, 0, 0.9)
+		if fastSum != refSum {
+			t.Fatalf("empty slice sum mismatch: fast=%v ref=%v", fastSum, refSum)
+		}
+	}
+
+	// 2. Single element
+	{
+		fastProbs := []float64{0.75}
+		refProbs := []float64{0.75}
+		fastSum := nucleusTruncate(fastProbs, 0.75, 0.5)
+		refSum := referenceMapNucleusTruncate(refProbs, 0.75, 0.5)
+		if math.Float64bits(fastSum) != math.Float64bits(refSum) || fastProbs[0] != refProbs[0] {
+			t.Fatalf("single element mismatch: fast=(%v, %v), ref=(%v, %v)", fastSum, fastProbs, refSum, refProbs)
+		}
+	}
+
+	// 3. Two elements
+	{
+		fastProbs := []float64{0.8, 0.2}
+		refProbs := []float64{0.8, 0.2}
+		fastSum := nucleusTruncate(fastProbs, 1.0, 0.5)
+		refSum := referenceMapNucleusTruncate(refProbs, 1.0, 0.5)
+		if math.Float64bits(fastSum) != math.Float64bits(refSum) || fastProbs[0] != refProbs[0] || fastProbs[1] != refProbs[1] {
+			t.Fatalf("two element mismatch: fast=(%v, %v), ref=(%v, %v)", fastSum, fastProbs, refSum, refProbs)
+		}
+	}
+
+	// 4. All zeros
+	{
+		fastProbs := []float64{0, 0, 0, 0}
+		refProbs := []float64{0, 0, 0, 0}
+		fastSum := nucleusTruncate(fastProbs, 0, 0.5)
+		refSum := referenceMapNucleusTruncate(refProbs, 0, 0.5)
+		if math.Float64bits(fastSum) != math.Float64bits(refSum) {
+			t.Fatalf("all zeros sum mismatch: fast=%v ref=%v", fastSum, refSum)
+		}
+		for i := range fastProbs {
+			if math.Float64bits(fastProbs[i]) != math.Float64bits(refProbs[i]) {
+				t.Fatalf("all zeros prob mismatch at %d: fast=%v ref=%v", i, fastProbs[i], refProbs[i])
+			}
+		}
+	}
+
+	// 5. topP <= 0
+	{
+		for _, p := range []float64{0, -0.5, -10.0} {
+			fastProbs := []float64{0.5, 0.3, 0.2}
+			refProbs := []float64{0.5, 0.3, 0.2}
+			fastSum := nucleusTruncate(fastProbs, 1.0, p)
+			refSum := referenceMapNucleusTruncate(refProbs, 1.0, p)
+			if math.Float64bits(fastSum) != math.Float64bits(refSum) {
+				t.Fatalf("topP <= 0 sum mismatch: fast=%v ref=%v", fastSum, refSum)
+			}
+			for i := range fastProbs {
+				if math.Float64bits(fastProbs[i]) != math.Float64bits(refProbs[i]) {
+					t.Fatalf("topP <= 0 prob mismatch at %d: fast=%v ref=%v", i, fastProbs[i], refProbs[i])
+				}
+			}
+		}
+	}
+
+	// 6. topP >= 1.0
+	{
+		for _, p := range []float64{1.0, 1.5, 100.0} {
+			fastProbs := []float64{0.5, 0.3, 0.2}
+			refProbs := []float64{0.5, 0.3, 0.2}
+			fastSum := nucleusTruncate(fastProbs, 1.0, p)
+			refSum := referenceMapNucleusTruncate(refProbs, 1.0, p)
+			if math.Float64bits(fastSum) != math.Float64bits(refSum) {
+				t.Fatalf("topP >= 1.0 sum mismatch: fast=%v ref=%v", fastSum, refSum)
+			}
+			for i := range fastProbs {
+				if math.Float64bits(fastProbs[i]) != math.Float64bits(refProbs[i]) {
+					t.Fatalf("topP >= 1.0 prob mismatch at %d: fast=%v ref=%v", i, fastProbs[i], refProbs[i])
+				}
+			}
+		}
+	}
+
+	// 7. Pathologically small topP
+	{
+		fastProbs := []float64{0.4, 0.3, 0.2, 0.1}
+		refProbs := []float64{0.4, 0.3, 0.2, 0.1}
+		fastSum := nucleusTruncate(fastProbs, 1.0, 1e-15)
+		refSum := referenceMapNucleusTruncate(refProbs, 1.0, 1e-15)
+		if math.Float64bits(fastSum) != math.Float64bits(refSum) {
+			t.Fatalf("tiny topP sum mismatch: fast=%v ref=%v", fastSum, refSum)
+		}
+		for i := range fastProbs {
+			if math.Float64bits(fastProbs[i]) != math.Float64bits(refProbs[i]) {
+				t.Fatalf("tiny topP prob mismatch at %d: fast=%v ref=%v", i, fastProbs[i], refProbs[i])
+			}
+		}
+	}
+}
+
+func TestTopKComposesWithTopPEquivalence(t *testing.T) {
+	vocabs := []int{64, 1024, 32768}
+	kValues := []int{5, 20, 50, 100}
+	pValues := []float64{0.2, 0.5, 0.8, 0.95}
+
+	for _, vocabSize := range vocabs {
+		rng := rand.New(rand.NewSource(int64(vocabSize * 99)))
+		logits := make([]float32, vocabSize)
+		for i := range logits {
+			logits[i] = float32(rng.NormFloat64() * 2.5)
+		}
+		maxL := float32(-math.MaxFloat32)
+		for _, x := range logits {
+			if x > maxL {
+				maxL = x
+			}
+		}
+		var baseSum float64
+		baseProbs := make([]float64, vocabSize)
+		for i, x := range logits {
+			p := math.Exp(float64(x - maxL))
+			baseProbs[i] = p
+			baseSum += p
+		}
+
+		for _, k := range kValues {
+			if k >= vocabSize {
+				continue
+			}
+			for _, topP := range pValues {
+				fastProbs := append([]float64(nil), baseProbs...)
+				refProbs := append([]float64(nil), baseProbs...)
+
+				fastSum := topKTruncate(fastProbs, baseSum, k)
+				fastSum = nucleusTruncate(fastProbs, fastSum, topP)
+
+				refSum := referenceFullSortTopKTruncate(refProbs, baseSum, k)
+				refSum = referenceMapNucleusTruncate(refProbs, refSum, topP)
+
+				if math.Float64bits(fastSum) != math.Float64bits(refSum) {
+					t.Fatalf("compose vocab %d k %d topP %v sum mismatch: fast=%v ref=%v", vocabSize, k, topP, fastSum, refSum)
+				}
+				for i := range fastProbs {
+					if math.Float64bits(fastProbs[i]) != math.Float64bits(refProbs[i]) {
+						t.Fatalf("compose vocab %d k %d topP %v prob mismatch at %d: fast=%v ref=%v", vocabSize, k, topP, i, fastProbs[i], refProbs[i])
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestSampleLogitsNativePathWithTopKAndTopP(t *testing.T) {
+	vocabSize := 1024
+	rng := rand.New(rand.NewSource(42))
+	logits := make([]float32, vocabSize)
+	for i := range logits {
+		logits[i] = float32(rng.NormFloat64())
+	}
+
+	for seed := 0; seed < 50; seed++ {
+		r1 := rand.New(rand.NewSource(int64(seed)))
+		tok := sampleLogits(logits, 1.0, 0.9, 50, r1)
+		if tok < 0 || tok >= vocabSize {
+			t.Fatalf("token out of bounds: %d", tok)
+		}
+	}
+}
+
+func BenchmarkNucleusTruncate_OldMap_32k(b *testing.B) {
+	const vocabSize = 32768
+	const topP = 0.9
+
+	rng := rand.New(rand.NewSource(12345))
+	orig := make([]float64, vocabSize)
+	var sum float64
+	for i := range orig {
+		orig[i] = rng.Float64()
+		sum += orig[i]
+	}
+
+	work := make([]float64, vocabSize)
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		copy(work, orig)
+		referenceMapNucleusTruncate(work, sum, topP)
+	}
+}
+
+func BenchmarkNucleusTruncate_PrefixZero_32k(b *testing.B) {
+	const vocabSize = 32768
+	const topP = 0.9
+
+	rng := rand.New(rand.NewSource(12345))
+	orig := make([]float64, vocabSize)
+	var sum float64
+	for i := range orig {
+		orig[i] = rng.Float64()
+		sum += orig[i]
+	}
+
+	work := make([]float64, vocabSize)
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		copy(work, orig)
+		nucleusTruncate(work, sum, topP)
+	}
+}
+
+func BenchmarkNucleusTruncate_OldMap_248k(b *testing.B) {
+	const vocabSize = 248000
+	const topP = 0.9
+
+	rng := rand.New(rand.NewSource(12345))
+	orig := make([]float64, vocabSize)
+	var sum float64
+	for i := range orig {
+		orig[i] = rng.Float64()
+		sum += orig[i]
+	}
+
+	work := make([]float64, vocabSize)
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		copy(work, orig)
+		referenceMapNucleusTruncate(work, sum, topP)
+	}
+}
+
+func BenchmarkNucleusTruncate_PrefixZero_248k(b *testing.B) {
+	const vocabSize = 248000
+	const topP = 0.9
+
+	rng := rand.New(rand.NewSource(12345))
+	orig := make([]float64, vocabSize)
+	var sum float64
+	for i := range orig {
+		orig[i] = rng.Float64()
+		sum += orig[i]
+	}
+
+	work := make([]float64, vocabSize)
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		copy(work, orig)
+		nucleusTruncate(work, sum, topP)
+	}
+}
+
+func sampleLogitsReferenceOldMap(logits []float32, temp, topP float64, topK int, rng *rand.Rand) int {
+	if temp <= 0 {
+		best, bi := float32(-math.MaxFloat32), 0
+		for i, x := range logits {
+			if x > best {
+				best, bi = x, i
+			}
+		}
+		return bi
+	}
+	maxL := float32(-math.MaxFloat32)
+	for _, x := range logits {
+		if x > maxL {
+			maxL = x
+		}
+	}
+	var sum float64
+	probs := make([]float64, len(logits))
+	for i, x := range logits {
+		p := math.Exp(float64(x-maxL) / temp)
+		probs[i] = p
+		sum += p
+	}
+	if topK > 0 && topK < len(probs) {
+		sum = topKTruncate(probs, sum, topK)
+	}
+	if topP > 0 && topP < 1 {
+		sum = referenceMapNucleusTruncate(probs, sum, topP)
+	}
+	r := rng.Float64() * sum
+	for i, p := range probs {
+		r -= p
+		if r <= 0 {
+			return i
+		}
+	}
+	for i := len(probs) - 1; i >= 0; i-- {
+		if probs[i] > 0 {
+			return i
+		}
+	}
+	return len(logits) - 1
+}
+
+func BenchmarkSampleLogits_OldMap_32k(b *testing.B) {
+	const vocabSize = 32768
+	rng := rand.New(rand.NewSource(12345))
+	logits := make([]float32, vocabSize)
+	for i := range logits {
+		logits[i] = float32(rng.NormFloat64() * 2.0)
+	}
+	sampleRNG := rand.New(rand.NewSource(42))
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		sampleLogitsReferenceOldMap(logits, 1.0, 0.9, 50, sampleRNG)
+	}
+}
+
+func BenchmarkSampleLogits_Native_32k(b *testing.B) {
+	const vocabSize = 32768
+	rng := rand.New(rand.NewSource(12345))
+	logits := make([]float32, vocabSize)
+	for i := range logits {
+		logits[i] = float32(rng.NormFloat64() * 2.0)
+	}
+	sampleRNG := rand.New(rand.NewSource(42))
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		sampleLogits(logits, 1.0, 0.9, 50, sampleRNG)
+	}
+}
+
+func BenchmarkSampleLogits_OldMap_248k(b *testing.B) {
+	const vocabSize = 248000
+	rng := rand.New(rand.NewSource(12345))
+	logits := make([]float32, vocabSize)
+	for i := range logits {
+		logits[i] = float32(rng.NormFloat64() * 2.0)
+	}
+	sampleRNG := rand.New(rand.NewSource(42))
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		sampleLogitsReferenceOldMap(logits, 1.0, 0.9, 50, sampleRNG)
+	}
+}
+
+func BenchmarkSampleLogits_Native_248k(b *testing.B) {
+	const vocabSize = 248000
+	rng := rand.New(rand.NewSource(12345))
+	logits := make([]float32, vocabSize)
+	for i := range logits {
+		logits[i] = float32(rng.NormFloat64() * 2.0)
+	}
+	sampleRNG := rand.New(rand.NewSource(42))
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		sampleLogits(logits, 1.0, 0.9, 50, sampleRNG)
+	}
+}

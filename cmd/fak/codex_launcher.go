@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/childprocess"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/projectassets"
 )
 
 // fak codex is the short, operator-facing Codex launcher. It intentionally does not
@@ -183,6 +184,10 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "  command     = "+strings.Join(argvOut, " "))
 		fmt.Fprintln(stdout, strings.Join(argvOut, " "))
 		return 0
+	}
+
+	if _, err := projectassets.Ensure(".", true); err != nil && !launch.quiet {
+		fmt.Fprintf(stderr, "fak codex: warning: %v\n", err)
 	}
 
 	started := time.Now()

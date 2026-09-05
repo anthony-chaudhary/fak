@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/projectassets"
 )
 
 // Engine coordinates the autonomous operations background tasks.
@@ -80,6 +82,18 @@ func (e *Engine) Tick(ctx context.Context, forceAll bool) error {
 				Details:      fmt.Sprintf("reaped %d processes: %s", len(procRes.PIDsReaped), strings.Join(procRes.Names, ", ")),
 				PIDsAffected: procRes.PIDsReaped,
 				DurationMS:   durProc,
+			})
+		}
+
+		// Background asset synchronization for portable skill adapters (#11156, #11158)
+		startAsset := time.Now()
+		assetReceipt, synced, assetErr := projectassets.EnsureSync(e.RepoRoot)
+		durAsset := time.Since(startAsset).Milliseconds()
+		if assetErr == nil && synced {
+			_ = e.Ledger.Record(Event{
+				ActionType: ActionAssetSync,
+				Details:    fmt.Sprintf("synchronized portable skill adapters for opencode and codex workers (%d skills)", len(assetReceipt.Harnesses["opencode"].Canonical)),
+				DurationMS: durAsset,
 			})
 		}
 
