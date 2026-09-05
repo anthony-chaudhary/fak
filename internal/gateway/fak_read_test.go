@@ -411,3 +411,84 @@ func TestFakReadPreservesDefaultDeny(t *testing.T) {
 		t.Fatalf("denied read reached engine: before=%+v after=%+v", before, after)
 	}
 }
+
+// TestFakRead_LargeFileWithCtxMMU proves that when ctxmmu is active in the result-admitter chain,
+// a normal code file > 4 KiB (e.g. 20 KiB) is NOT paged out to a {"_paged":true} stub and returns
+// its full content, satisfying the documented fak_read contract.
+func TestFakRead_LargeFileWithCtxMMU(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterAdjudicator(0, readAdj{})
+
+	root := t.TempDir()
+	agent.RegisterReadEngine(root)
+	path := filepath.Join(root, "large_file.go")
+	largeContent := strings.Repeat("// line of code in large file\n", 800) // ~24 KiB, > 4 KiB
+	if err := os.WriteFile(path, []byte(largeContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := New(Config{EngineID: "fakread", Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+
+	wv, env, err := srv.fakRead(context.Background(), path, "large-trace", "")
+	if err != nil {
+		t.Fatalf("fakRead: %v", err)
+	}
+	if wv.Kind != "ALLOW" || env == nil || env.Status != "OK" {
+		t.Fatalf("result: verdict=%+v env=%+v", wv, env)
+	}
+	if strings.Contains(env.Content, `"_paged":true`) {
+		t.Fatalf("fakRead returned paged-out stub for 24 KiB file: %s", env.Content)
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(env.Content), &body); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if body["content"] != largeContent {
+		t.Fatalf("content mismatch: got %d bytes, want %d bytes", len(body["content"].(string)), len(largeContent))
+	}
+}
+
+// TestFakContextRestore_ResolvesMMUPagedBlob proves that an MMU _paged.ref pointer can be
+// immediately resolved via fak_context_restore under the same session/trace (#10018).
+func TestFakContextRestore_ResolvesMMUPagedBlob(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+
+	srv, err := New(Config{EngineID: "fakread", Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+
+	// Store a test payload into the blob CAS
+	originalText := "package main\n// this is a paged-out tool result stored in blob CAS\nfunc Hello() string { return \"world\" }\n"
+	b, ok := abi.PageOut("blob")
+	if !ok {
+		t.Fatal("blob PageOut backend not registered")
+	}
+	ref, err := b.PageOut(context.Background(), abi.Ref{Kind: abi.RefInline, Inline: []byte(originalText)})
+	if err != nil {
+		t.Fatalf("PageOut: %v", err)
+	}
+	digest := ref.Digest
+
+	// Restore using fak_context_restore via srv.restoreContext
+	res, err := srv.restoreContext("", ContextRestoreRequest{
+		ID:      digest,
+		TraceID: "test-trace",
+	})
+	if err != nil {
+		t.Fatalf("restoreContext failed for MMU blob digest %q: %v", digest, err)
+	}
+	if res.Bytes != originalText {
+		t.Fatalf("restoreContext bytes mismatch: got %q, want %q", res.Bytes, originalText)
+	}
+	if res.ID != digest {
+		t.Fatalf("restoreContext ID mismatch: got %q, want %q", res.ID, digest)
+	}
+}

@@ -205,6 +205,8 @@ func (s *Server) handleMethod(ctx context.Context, method string, params json.Ra
 		return s.callTool(ctx, params)
 	case "resources/list":
 		return mcpCacheHint(map[string]any{"resources": s.resourceDescriptors()}, mcpCatalogTTLMillis, mcpCacheScopePublic), nil
+	case "resources/templates/list":
+		return mcpCacheHint(map[string]any{"resourceTemplates": s.resourceTemplateDescriptors()}, mcpCatalogTTLMillis, mcpCacheScopePublic), nil
 	case "resources/read":
 		return s.readResource(params)
 	case "prompts/list":
@@ -598,6 +600,7 @@ func (s *Server) fakRead(ctx context.Context, path, traceID, witness string) (Wi
 	var env *ResultEnvelope
 	if r != nil {
 		payload := resolveBytes(ctx, r.Payload)
+		payload = unpageFakReadPayload(ctx, payload)
 		payload = fakReadReceipt(payload, r, duration)
 		env = &ResultEnvelope{
 			Status:  statusName(r.Status),
@@ -606,6 +609,41 @@ func (s *Server) fakRead(ctx context.Context, path, traceID, witness string) (Wi
 		}
 	}
 	return wv, env, nil
+}
+
+// unpageFakReadPayload resolves a paged-out MMU pointer back to the original payload bytes.
+// If ctxmmu paged out an oversize read result to a pointer stub ({"_paged":true,"ref":...}),
+// unpageFakReadPayload faults the original file-read JSON back in from CAS so the MCP client
+// receives the intended file content rather than an empty stub.
+func unpageFakReadPayload(ctx context.Context, payload []byte) []byte {
+	if len(payload) == 0 || !bytes.Contains(payload, []byte(`"_paged"`)) {
+		return payload
+	}
+	var m map[string]any
+	if err := json.Unmarshal(payload, &m); err != nil {
+		return payload
+	}
+	if paged, _ := m["_paged"].(bool); !paged {
+		return payload
+	}
+	ref, _ := m["ref"].(string)
+	if ref == "" {
+		return payload
+	}
+	cleanRef := strings.TrimPrefix(ref, "sha256:")
+	if b, ok := abi.PageOut("blob"); ok {
+		handle := abi.Ref{Kind: abi.RefBlob, Digest: cleanRef}
+		if res, err := b.PageIn(ctx, handle); err == nil && len(res.Inline) > 0 {
+			return res.Inline
+		}
+	}
+	if res := abi.ActiveResolver(); res != nil {
+		handle := abi.Ref{Kind: abi.RefBlob, Digest: cleanRef}
+		if raw, err := res.Resolve(ctx, handle); err == nil && len(raw) > 0 {
+			return raw
+		}
+	}
+	return payload
 }
 
 // fakReadReceipt adds the additive fak_read/1 receipt to the legacy JSON payload. Existing
@@ -792,7 +830,7 @@ func toolDescriptors() []map[string]any {
 	tools := []map[string]any{
 		{
 			"name":        "fak_adjudicate",
-			"description": "Adjudicate a proposed tool call through the fak kernel WITHOUT executing it. Returns the legacy verdict/trace/repaired_arguments fields plus a fak-adjudicate-receipt/1 receipt with closed outcome, duration, execution=not_executed, and kernel_decide provenance. Outcomes are allowed, denied, transformed, witness_required, or failed; failures expose only stable error code/source. Repaired arguments appear only for TRANSFORM. Call this before running a tool your own client executes.",
+			"description": "Adjudicate a proposed tool call through the fak kernel WITHOUT executing it. Returns the legacy verdict/trace/repaired_arguments fields plus a fak-adjudicate-receipt/1 receipt with closed outcome, duration, execution=not_executed, and kernel_decide provenance. Outcomes are allowed, denied, transformed, witness_required, or failed; failures expose only stable error code/source. Repaired arguments appear only for TRANSFORM. Standard client tools in guarded sessions are already adjudicated automatically by the kernel proxy; call this only when an unmanaged client executes tools out-of-band.",
 			"inputSchema": schema,
 		},
 		{
@@ -815,7 +853,7 @@ func toolDescriptors() []map[string]any {
 		},
 		{
 			"name":        "fak_admit",
-			"description": "Submit tool RESULTS your own client executed, to run them through the fak kernel's result-side stack (context-MMU quarantine + IFC source-stamp / per-trace taint ledger) BEFORE admitting them to context. A poisoned/secret-shaped result comes back QUARANTINE with the bytes paged out; the session's taint high-water mark is raised so a later egress is gated. Prefer {items:[{tool,result},...]} for independent results; {tool,result,trace_id} remains the unchanged single-result form. Every batch item crosses the safety floor independently and returns in request order, so one refusal never drops its peers. This arms the exfil floor on the path where YOU run the tool (the complement of fak_adjudicate).",
+			"description": "Submit tool RESULTS your own client executed, to run them through the fak kernel's result-side stack (context-MMU quarantine + IFC source-stamp / per-trace taint ledger) BEFORE admitting them to context. Wire-proxied sessions are gated automatically; fak_admit is for out-of-band client tool results. A poisoned/secret-shaped result comes back QUARANTINE with the bytes paged out; the session's taint high-water mark is raised so a later egress is gated. Prefer {items:[{tool,result},...]} for independent results; {tool,result,trace_id} remains the unchanged single-result form. Every batch item crosses the safety floor independently and returns in request order, so one refusal never drops its peers. This arms the exfil floor on the path where YOU run the tool (the complement of fak_adjudicate).",
 			"inputSchema": json.RawMessage(`{
   "type": "object",
   "properties": {

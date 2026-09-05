@@ -3,6 +3,8 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -130,8 +132,8 @@ func TestResourcesListAndRead(t *testing.T) {
 		doc.CacheSemantics.Schema != "fak-mcp-cache-semantics/1" {
 		t.Errorf("capabilities resource omitted cache semantics pointer: %+v", doc.CacheSemantics)
 	}
-	if len(doc.Tools) != len(toolDescriptors()) {
-		t.Errorf("capabilities resource lists %d tools, registry has %d", len(doc.Tools), len(toolDescriptors()))
+	if len(doc.Tools) != len(srv.exposedToolDescriptors()) {
+		t.Errorf("capabilities resource lists %d tools, registry has %d", len(doc.Tools), len(srv.exposedToolDescriptors()))
 	}
 }
 
@@ -384,5 +386,75 @@ func assertCacheHint(t *testing.T, got map[string]any, wantTTL float64, wantScop
 	scope, _ := got["cacheScope"].(string)
 	if scope != wantScope {
 		t.Fatalf("cacheScope = %q, want %q in %v", scope, wantScope, got)
+	}
+}
+
+func TestResourceTemplatesList(t *testing.T) {
+	srv := newTestServer(t)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	frame := `{"jsonrpc":"2.0","id":1,"method":"resources/templates/list"}`
+	res, err := http.Post(ts.URL+"/mcp", "application/json", strings.NewReader(frame))
+	if err != nil {
+		t.Fatalf("POST /mcp failed: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 OK", res.StatusCode)
+	}
+
+	var rpcResp rpcResponse
+	if err := json.NewDecoder(res.Body).Decode(&rpcResp); err != nil {
+		t.Fatalf("decode rpc response: %v", err)
+	}
+	if rpcResp.Error != nil {
+		t.Fatalf("unexpected JSON-RPC error: %+v", rpcResp.Error)
+	}
+
+	m := resultMap(t, rpcResp)
+	templates, ok := m["resourceTemplates"].([]any)
+	if !ok || len(templates) == 0 {
+		t.Fatalf("resourceTemplates missing or empty: %v", m)
+	}
+	first, ok := templates[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first template not a map: %v", templates[0])
+	}
+	if first["uriTemplate"] != "fak://context/missing/{key}" {
+		t.Errorf("uriTemplate = %v, want fak://context/missing/{key}", first["uriTemplate"])
+	}
+	for _, field := range []string{"name", "description", "mimeType"} {
+		if _, present := first[field]; !present {
+			t.Errorf("resource template descriptor missing %q: %v", field, first)
+		}
+	}
+	assertCacheHint(t, m, float64(mcpCatalogTTLMillis), mcpCacheScopePublic)
+}
+
+func TestResourcesReadCapabilitiesNormalization(t *testing.T) {
+	srv := newTestServer(t)
+
+	base := resultMap(t, rpcRoundTrip(t, srv, "resources/read", `{"uri":"fak://server/capabilities"}`))
+	baseContents, ok := base["contents"].([]any)
+	if !ok || len(baseContents) != 1 {
+		t.Fatalf("base contents malformed: %v", base)
+	}
+	baseText := baseContents[0].(map[string]any)["text"].(string)
+
+	for _, uri := range []string{
+		"fak://capabilities",
+		"fak://capabilities?filter=tools",
+		"fak://server/capabilities?filter=tools",
+	} {
+		read := resultMap(t, rpcRoundTrip(t, srv, "resources/read", `{"uri":"`+uri+`"}`))
+		contents, ok := read["contents"].([]any)
+		if !ok || len(contents) != 1 {
+			t.Fatalf("resources/read for %q contents malformed: %v", uri, read)
+		}
+		text := contents[0].(map[string]any)["text"].(string)
+		if text != baseText {
+			t.Errorf("resources/read for %q returned text different from fak://server/capabilities", uri)
+		}
 	}
 }
