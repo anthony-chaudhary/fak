@@ -25,7 +25,7 @@ It unifies the best patterns from existing open-source agent systems:
 2. **State on Disk, Not Ephemeral Memory**: Progress, plans, and scratchpad live in `GOAL.md` on disk. When context resets or compacts, re-reading disk restores full fidelity.
 3. **External Witness Exit-Gate**: Model proposes, test disposes. The agent never grades its own work. A goal is satisfied only when a deterministic external command (test suite, buildcheck, validator) exits 0.
 4. **Atomic S0/S1 Steps (Subdivide and Scope Abstention)**: Decompose work into single-concern leaves (1–3 files touched per step). Keep exactly one step `in_progress` in `todowrite`. When encountering high-difficulty boundaries (e.g. frozen ABI, kernel SIMD), scope abstention strictly to the bounded aspect: emit a structured `ABSTAIN` record for that boundary while advancing all independent, safe, solvable sub-components (reproduction tests, diagnostics, disjoint packages).
-5. **Failure Memory Scratchpad & Persistence**: Every error, non-zero exit, or guard refusal is recorded in `# Scratch / last-refusal` in `GOAL.md`. A refusal or tool failure is diagnostic feedback, not a session abort. Query `fak recover <TOKEN>` for structured recovery, adapt the execution path or decompose the step, and maintain momentum on the pinned objective without repeating identical failing calls.
+5. **Failure Memory Scratchpad & Persistence**: Genuine guard refusals carrying a closed reason token or unexpected process crashes are recorded in `# Scratch / last-refusal` in `GOAL.md`. Routine CLI return codes from read-only commands (such as `grep` returning 1 on no match, or `git diff --quiet` detecting changes) are normal tool execution results and must not be logged as failures in `# Scratch / last-refusal`. A refusal or tool crash is diagnostic feedback, not a session abort. Query `fak recover <TOKEN>` for structured recovery, adapt the execution path or decompose the step, and maintain momentum on the pinned objective without repeating identical failing calls.
 
 ---
 
@@ -86,7 +86,8 @@ Iterate through plan items sequentially:
 1. Keep only one task `in_progress` in `todowrite`.
 2. Confine edits to 1–3 closely related files using `Edit` or `Write`.
 3. If a command or tool fails:
-   - Log the failure, exit code, and any refusal token to `# Scratch / last-refusal` in `GOAL.md`.
+   - Routine CLI return codes from read-only commands (such as `grep` returning 1 on no match, or `git diff --quiet` detecting changes) are normal tool execution results and must not be logged as failures in `# Scratch / last-refusal`.
+   - Log only genuine guard refusals carrying a closed reason token or unexpected process crashes to `# Scratch / last-refusal` in `GOAL.md`.
    - Query structured recovery: if a guard refused the call, run `fak recover <TOKEN>` or `dos man wedge <TOKEN> --explain` to obtain the sanctioned remedy.
    - Handle transient locks: if blocked by `MERGE_IN_PROGRESS`, `COLLISION_RISK`, or `LOCK_BUSY`, unstage paths (`git restore --staged`), wait for quiescence, or switch to an independent disjoint subtask.
    - Decompose rather than abandon: if a subtask is blocked or too complex, divide it into smaller verifiable leaves (e.g. capture baseline reproduction tests first) while keeping the pinned objective intact.
