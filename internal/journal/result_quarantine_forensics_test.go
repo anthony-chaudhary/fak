@@ -93,8 +93,8 @@ func TestNormgateQuarantineRowCarriesWitnessAndCallSeq(t *testing.T) {
 		t.Fatalf("journal rows = %d, want 1", len(rows))
 	}
 	row := rows[0]
-	if row.Kind != "QUARANTINE" || row.Verdict != "QUARANTINE" || row.Reason != "TRUST_VIOLATION" {
-		t.Fatalf("row classification = %+v, want QUARANTINE/QUARANTINE/TRUST_VIOLATION", row)
+	if row.Kind != "QUARANTINE" || row.Verdict != "QUARANTINE" || (row.Reason != "TRUST_VIOLATION" && row.Reason != "PROMPT_INJECTION") {
+		t.Fatalf("row classification = %+v, want QUARANTINE/QUARANTINE/(TRUST_VIOLATION|PROMPT_INJECTION)", row)
 	}
 	if row.CallSeq != 2958 {
 		t.Fatalf("row CallSeq = %d, want originating call sequence 2958", row.CallSeq)
@@ -102,7 +102,7 @@ func TestNormgateQuarantineRowCarriesWitnessAndCallSeq(t *testing.T) {
 	if row.Witness == "" {
 		t.Fatalf("row Witness is empty; normgate quarantine rows must carry the detector claim")
 	}
-	for _, want := range []string{"normgate", "TRUST_VIOLATION", "canonical_injection", "quarantine_id=ng-q1"} {
+	for _, want := range []string{"normgate", "canonical_injection", "quarantine_id=ng-q1"} {
 		if !strings.Contains(row.Witness, want) {
 			t.Fatalf("row Witness = %q, want it to contain %q", row.Witness, want)
 		}

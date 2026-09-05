@@ -98,6 +98,10 @@ type Row struct {
 	// can appear here at all. Do not "relax" that to a character class.
 	DenyRule string `json:"deny_rule,omitempty"`
 
+	// Override fields (for SECURITY_OVERRIDE: audit trail for IFC and quarantine model overrides).
+	// Not part of the hash-chain pre-image; appended for operator and audit convenience.
+	OverrideType string `json:"override_type,omitempty"`
+
 	// Capability fields (for C6: witness + audit surface). These are populated for
 	// CAP_FAULT / CAP_EVICT / CAP_VERSION_BIND events to track capability lifecycle.
 	// Fields is the carrier; these are NOT part of the hash-chain pre-image.
@@ -497,7 +501,11 @@ func rowFromEvent(ev abi.Event) (Row, bool) {
 		if abi.RedundantDecisionEvent(ev) {
 			return Row{}, false
 		}
-		kind = "DECIDE"
+		if ev.Fields != nil && ev.Fields["event"] == "security_override" {
+			kind = KindSecurityOverride
+		} else {
+			kind = "DECIDE"
+		}
 	case abi.EvDeny:
 		kind = "DENY"
 	case abi.EvResultDeny:
@@ -543,6 +551,22 @@ func rowFromEvent(ev abi.Event) (Row, bool) {
 	// Populate capability fields from Event.Fields (the carrier for C6 events)
 	// Fields carries: {cap_kind, cap_name, cap_digest, cap_from, cap_to, reason}
 	if ev.Fields != nil {
+		if ot, ok := ev.Fields["override_type"].(string); ok && ot != "" {
+			row.OverrideType = ot
+		}
+		if row.Tool == "" {
+			if tool, ok := ev.Fields["tool"].(string); ok && tool != "" {
+				row.Tool = tool
+			}
+		}
+		if row.TraceID == "" {
+			if trace, ok := ev.Fields["trace_id"].(string); ok && trace != "" {
+				row.TraceID = trace
+			}
+		}
+		if or, ok := ev.Fields["override_reason"].(string); ok && or != "" && row.Witness == "" {
+			row.Witness = or
+		}
 		if ck, ok := ev.Fields["cap_kind"].(string); ok {
 			row.CapKind = ck
 		}
