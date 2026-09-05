@@ -83,6 +83,23 @@ func TestSignedBundleLifecycle(t *testing.T) {
 		t.Fatalf("VerifyArtifact failed on valid signed bundle: %v", err)
 	}
 
+	// Even a genuinely signed bundle requires a parseable, non-empty key.
+	for _, tc := range []struct {
+		name string
+		key  string
+		code string
+	}{
+		{"missing key", "", "EMPTY_KEY"},
+		{"literal test key", "test-key", ErrBundleSignatureInvalid},
+		{"malformed key", "not-a-public-key", ErrBundleSignatureInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := VerifyArtifact(bundlePath, tc.key); Code(err) != tc.code {
+				t.Fatalf("expected %s, got %v", tc.code, err)
+			}
+		})
+	}
+
 	// 4. Verify with wrong public key -> fails with BUNDLE_SIGNATURE_INVALID
 	_, otherPubPEM, err := GenerateEd25519KeyPair()
 	if err != nil {

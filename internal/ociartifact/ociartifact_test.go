@@ -386,11 +386,10 @@ func TestVerifyArtifact(t *testing.T) {
 		}
 	})
 
-	t.Run("valid path and verifyKey returns nil", func(t *testing.T) {
+	t.Run("unsigned payload with literal key is rejected", func(t *testing.T) {
 		err := VerifyArtifact(validPath, "test-key")
-		if err != nil {
-			t.Fatalf("expected nil error, got %v", err)
+		if Code(err) != ErrBundleSignatureInvalid {
+			t.Fatalf("expected BUNDLE_SIGNATURE_INVALID, got %v", err)
 		}
 	})
 }
-
