@@ -51,10 +51,13 @@ fak worktree <subcommand>
   worker <op>   Per-worker git worktree isolation (#3182). Ops:
       prepare --lane <l> --key <k> [--base-sha S] [--wt-root D]
               [--lease-id ID] [--owner-pid PID] [--capacity-reason WHY]
+              [--sandbox-compatible]
                    Create ONE worker's DETACHED worktree pinned at trunk HEAD
                    (or --base-sha), stamped with owner PID, lease, and timestamp.
                    Above the advisory setpoint of 50, --capacity-reason records
                    why growth is needed; omission warns but never blocks prepare.
+                   --sandbox-compatible translates the .git pointer to a localized
+                   bridge for strict host sandboxes.
                    Prints {ok, path, base_sha, reused, env, ...}.
       land --worktree D [--base-sha S] [--msg-file F] [--paths p ...] [--verify go-build]
            [--core-lock-maintenance-witness CLAIM] [--recovery-remote R]
@@ -177,8 +180,9 @@ func worktreeWorkerProgressEmitter(w io.Writer) func(workerworktree.LandProgress
 // fields to the top level.
 type worktreePrepareOut struct {
 	workerworktree.Result
-	Env      map[string]string               `json:"env,omitempty"`
-	Capacity workerworktree.CapacityAdvisory `json:"capacity"`
+	Env               map[string]string               `json:"env,omitempty"`
+	Capacity          workerworktree.CapacityAdvisory `json:"capacity"`
+	SandboxCompatible bool                            `json:"sandbox_compatible,omitempty"`
 }
 
 func worktreeWorkerPrepare(argv []string) {
@@ -190,6 +194,7 @@ func worktreeWorkerPrepare(argv []string) {
 	ownerPID := fs.Int("owner-pid", os.Getpid(), "owner process PID to retain in the owner stamp")
 	capacityReason := fs.String("capacity-reason", "", "why worker-worktree growth above the advisory setpoint is needed (advisory; never blocks)")
 	message := fs.String("message", "", "intended signed commit message retained for lifecycle recovery")
+	sandboxCompatible := fs.Bool("sandbox-compatible", false, "localize worktree gitdir pointer for strict host sandboxes")
 	var paths repeatedString
 	fs.Var(&paths, "path", "explicit intended land path (repeatable; required with --message for LAND_READY inventory)")
 	wtRoot := fs.String("wt-root", "", "parent dir for the worktree (default: FLEET_WORKER_WORKTREE_ROOT or per-OS scratch)")
@@ -211,7 +216,7 @@ func worktreeWorkerPrepare(argv []string) {
 		prospectiveCount++
 	}
 	capacity := worktreeWorkerCapacityAdvisory(repoRoot, capacityCensus, prospectiveCount, *capacityReason, nil)
-	out := worktreePrepareOut{Result: res, Capacity: capacity}
+	out := worktreePrepareOut{Result: res, Capacity: capacity, SandboxCompatible: *sandboxCompatible}
 	if res.OK && res.Path != "" {
 		hasInclude := false
 		if fi, err := os.Stat(filepath.Join(repoRoot, ".worktreeinclude")); err == nil && !fi.IsDir() {
@@ -222,6 +227,12 @@ func worktreeWorkerPrepare(argv []string) {
 		if hasInclude {
 			if err := dojocal.ApplyWorktreeInclude(res.Path, nil); err != nil {
 				res.OK, res.Reason = false, "apply worktree include: "+err.Error()
+				out.Result = res
+			}
+		}
+		if res.OK && *sandboxCompatible {
+			if err := localizeWorktreeGitdir(repoRoot, res.Path); err != nil {
+				res.OK, res.Reason = false, "sandbox gitdir localization: "+err.Error()
 				out.Result = res
 			}
 		}
@@ -245,6 +256,200 @@ func worktreeWorkerPrepare(argv []string) {
 	if !res.OK {
 		os.Exit(1)
 	}
+}
+
+func localizeWorktreeGitdir(repoRoot, wtPath string) error {
+	dotGit := filepath.Join(wtPath, ".git")
+	b, err := os.ReadFile(dotGit)
+	if err != nil {
+		return fmt.Errorf("read .git pointer: %w", err)
+	}
+	line := strings.TrimSpace(string(b))
+	rest, ok := strings.CutPrefix(line, "gitdir:")
+	if !ok {
+		return fmt.Errorf(".git is not a gitdir pointer: %q", line)
+	}
+	targetDir := strings.TrimSpace(rest)
+	if targetDir == "" {
+		return fmt.Errorf(".git contains empty gitdir pointer")
+	}
+	if !filepath.IsAbs(targetDir) {
+		targetDir = filepath.Join(wtPath, targetDir)
+	}
+	targetDir = filepath.Clean(targetDir)
+
+	// If targetDir is already inside wtPath, nothing to localize.
+	rel, err := filepath.Rel(wtPath, targetDir)
+	if err == nil && !strings.HasPrefix(rel, "..") && rel != "." {
+		return nil
+	}
+
+	var commonGitDir string
+	if commonBytes, err := os.ReadFile(filepath.Join(targetDir, "commondir")); err == nil {
+		c := strings.TrimSpace(string(commonBytes))
+		if filepath.IsAbs(c) {
+			commonGitDir = filepath.Clean(c)
+		} else {
+			commonGitDir = filepath.Clean(filepath.Join(targetDir, c))
+		}
+	}
+	if commonGitDir == "" {
+		commonGitDir = filepath.Join(repoRoot, ".git")
+	}
+	if fi, err := os.Stat(commonGitDir); err == nil && !fi.IsDir() {
+		if data, err := os.ReadFile(commonGitDir); err == nil {
+			if r, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir:"); ok {
+				ptr := strings.TrimSpace(r)
+				if !filepath.IsAbs(ptr) {
+					ptr = filepath.Join(filepath.Dir(commonGitDir), ptr)
+				}
+				commonGitDir = filepath.Clean(ptr)
+			}
+		}
+	}
+
+	localGitDir := filepath.Join(wtPath, ".gitdir")
+	if err := os.MkdirAll(localGitDir, 0o755); err != nil {
+		return fmt.Errorf("create localized gitdir: %w", err)
+	}
+
+	entries, err := os.ReadDir(targetDir)
+	if err != nil {
+		return fmt.Errorf("read target gitdir %s: %w", targetDir, err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == "commondir" || name == "gitdir" {
+			continue
+		}
+		srcPath := filepath.Join(targetDir, name)
+		dstPath := filepath.Join(localGitDir, name)
+		if entry.IsDir() {
+			if err := copyWorktreeDir(srcPath, dstPath, false); err != nil {
+				return fmt.Errorf("copy worktree dir %s: %w", name, err)
+			}
+		} else {
+			if err := copyWorktreeFile(srcPath, dstPath); err != nil {
+				return fmt.Errorf("copy worktree file %s: %w", name, err)
+			}
+		}
+	}
+
+	_ = os.WriteFile(filepath.Join(localGitDir, "original_gitdir"), []byte(targetDir+"\n"), 0o644)
+
+	srcObjects := filepath.Join(commonGitDir, "objects")
+	dstObjects := filepath.Join(localGitDir, "objects")
+	if fi, err := os.Stat(srcObjects); err == nil && fi.IsDir() {
+		if err := copyWorktreeDir(srcObjects, dstObjects, true); err != nil {
+			return fmt.Errorf("copy git objects: %w", err)
+		}
+	}
+
+	srcRefs := filepath.Join(commonGitDir, "refs")
+	dstRefs := filepath.Join(localGitDir, "refs")
+	if fi, err := os.Stat(srcRefs); err == nil && fi.IsDir() {
+		_ = copyWorktreeDir(srcRefs, dstRefs, false)
+	}
+
+	srcPackedRefs := filepath.Join(commonGitDir, "packed-refs")
+	dstPackedRefs := filepath.Join(localGitDir, "packed-refs")
+	if _, err := os.Stat(srcPackedRefs); err == nil {
+		_ = copyWorktreeFile(srcPackedRefs, dstPackedRefs)
+	}
+
+	srcConfig := filepath.Join(commonGitDir, "config")
+	dstConfig := filepath.Join(localGitDir, "config")
+	if _, err := os.Stat(srcConfig); err == nil {
+		_ = copyWorktreeFile(srcConfig, dstConfig)
+	}
+
+	infoDir := filepath.Join(localGitDir, "info")
+	if err := os.MkdirAll(infoDir, 0o755); err != nil {
+		return fmt.Errorf("create info dir: %w", err)
+	}
+	srcExclude := filepath.Join(commonGitDir, "info", "exclude")
+	dstExclude := filepath.Join(infoDir, "exclude")
+	var excludeContent []byte
+	if b, err := os.ReadFile(srcExclude); err == nil {
+		excludeContent = b
+	}
+	if !strings.Contains(string(excludeContent), ".gitdir") {
+		if len(excludeContent) > 0 && !strings.HasSuffix(string(excludeContent), "\n") {
+			excludeContent = append(excludeContent, '\n')
+		}
+		excludeContent = append(excludeContent, []byte(".gitdir\n.gitdir/\n")...)
+	}
+	if err := os.WriteFile(dstExclude, excludeContent, 0o644); err != nil {
+		return fmt.Errorf("write exclude file: %w", err)
+	}
+
+	if err := os.WriteFile(dotGit, []byte("gitdir: .gitdir\n"), 0o644); err != nil {
+		return fmt.Errorf("update .git pointer: %w", err)
+	}
+
+	return nil
+}
+
+func copyWorktreeFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	fi, err := in.Stat()
+	if err != nil {
+		return err
+	}
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, fi.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
+}
+
+func linkOrCopyWorktreeFile(src, dst string) error {
+	_ = os.Remove(dst)
+	if err := os.Link(src, dst); err == nil {
+		return nil
+	}
+	return copyWorktreeFile(src, dst)
+}
+
+func copyWorktreeDir(src, dst string, linkFiles bool) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+		if entry.IsDir() {
+			if err := copyWorktreeDir(srcPath, dstPath, linkFiles); err != nil {
+				return err
+			}
+		} else {
+			if linkFiles {
+				if err := linkOrCopyWorktreeFile(srcPath, dstPath); err != nil {
+					return err
+				}
+			} else {
+				if err := copyWorktreeFile(srcPath, dstPath); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func worktreeCommitSubject(wtPath, baseSHA, msgFile string) string {

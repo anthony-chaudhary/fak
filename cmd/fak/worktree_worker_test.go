@@ -1859,3 +1859,143 @@ func TestWorktreeWorkerListTimeoutReturnsPartialResultWithoutHanging(t *testing.
 		t.Fatalf("expected partial results containing only wt1, got: %+v", got)
 	}
 }
+
+func TestWorktreeWorkerSandboxCompatible(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	t.Setenv(workerworktree.PoolCapEnv, "0")
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git -C %s %s: %v: %s", dir, strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git(repo, "init", "-q", "-b", "main")
+	git(repo, "config", "user.email", "t@t")
+	git(repo, "config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(repo, "sample.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(repo, "add", "sample.txt")
+	git(repo, "commit", "-qm", "initial commit")
+
+	wtRoot := filepath.Join(root, "workers")
+
+	// Capture stdout from worktreeWorkerPrepare with --sandbox-compatible
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = write
+	worktreeWorkerPrepare([]string{
+		"--root", repo,
+		"--lane", "cmd",
+		"--key", "sandbox-compat-1",
+		"--sandbox-compatible",
+		"--wt-root", wtRoot,
+	})
+	os.Stdout = oldStdout
+	if err := write.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := read.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out worktreePrepareOut
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &out); err != nil {
+		t.Fatalf("decode prepare output: %v; raw=%q", err, string(raw))
+	}
+	if !out.OK || out.Path == "" {
+		t.Fatalf("prepare failed or path empty: %+v", out)
+	}
+	if !out.SandboxCompatible {
+		t.Fatalf("expected SandboxCompatible=true in receipt, got %+v", out)
+	}
+
+	// 1. Verify .git in worker worktree is a pointer to localized gitdir
+	dotGit := filepath.Join(out.Path, ".git")
+	fi, err := os.Stat(dotGit)
+	if err != nil {
+		t.Fatalf("stat .git: %v", err)
+	}
+	if fi.IsDir() {
+		t.Fatal(".git should remain a pointer file, not a directory")
+	}
+	content, err := os.ReadFile(dotGit)
+	if err != nil {
+		t.Fatalf("read .git: %v", err)
+	}
+	line := strings.TrimSpace(string(content))
+	if !strings.HasPrefix(line, "gitdir:") {
+		t.Fatalf(".git pointer content invalid: %q", line)
+	}
+	ptr := strings.TrimSpace(strings.TrimPrefix(line, "gitdir:"))
+	if ptr != ".gitdir" && ptr != filepath.Join(out.Path, ".gitdir") {
+		t.Fatalf(".git pointer does not reference localized gitdir: %q", ptr)
+	}
+
+	// 2. Verify localized .gitdir structure
+	localGitDir := filepath.Join(out.Path, ".gitdir")
+	if fi, err := os.Stat(localGitDir); err != nil || !fi.IsDir() {
+		t.Fatalf("localized .gitdir missing or not dir: %v", err)
+	}
+	// commondir must NOT exist in the self-contained bridge so git does not resolve outside
+	if _, err := os.Stat(filepath.Join(localGitDir, "commondir")); !os.IsNotExist(err) {
+		t.Fatalf("localized gitdir must not contain commondir reaching outside sandbox: %v", err)
+	}
+	for _, req := range []string{"HEAD", "index", "objects", "refs"} {
+		if _, err := os.Stat(filepath.Join(localGitDir, req)); err != nil {
+			t.Fatalf("localized gitdir missing required git artifact %q: %v", req, err)
+		}
+	}
+
+	// 3. Verify clean git status within the prepared worktree
+	status := git(out.Path, "status", "--porcelain=v1")
+	if status != "" {
+		t.Fatalf("expected clean worktree status, got %q", status)
+	}
+
+	// 4. Simulate strict host sandbox: make the parent repository completely inaccessible
+	// by temporarily moving it.
+	blockedRepo := filepath.Join(root, "repo_blocked")
+	if err := os.Rename(repo, blockedRepo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Rename(blockedRepo, repo)
+	})
+
+	// Under strict host sandboxes, access outside the sandbox worktree root is denied.
+	// git status must continue to succeed without access to repo.
+	statusUnderSandbox := git(out.Path, "status")
+	if !strings.Contains(statusUnderSandbox, "nothing to commit") && !strings.Contains(statusUnderSandbox, "clean") {
+		t.Fatalf("git status failed under sandbox isolation: %s", statusUnderSandbox)
+	}
+
+	// Modifying and inspecting diff inside the sandboxed worktree
+	if err := os.WriteFile(filepath.Join(out.Path, "sample.txt"), []byte("hello\nmodified in sandbox\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	diffOutput := git(out.Path, "diff")
+	if !strings.Contains(diffOutput, "modified in sandbox") {
+		t.Fatalf("git diff failed under sandbox isolation: %s", diffOutput)
+	}
+}
