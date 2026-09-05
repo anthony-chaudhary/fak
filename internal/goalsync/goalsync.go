@@ -429,6 +429,7 @@ func configureGitCommand(cmd *exec.Cmd) {
 // findGitRoot discovers the root of the git repository containing dir.
 func findGitRoot(dir string) (string, error) {
 	cmd := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel")
+	configureDispatchHelperCommand(cmd)
 	configureGitCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -513,6 +514,7 @@ func Push(wsRoot, targetDir, registryPath, goalParkDir string, commit, push, dry
 
 		if commit {
 			addCmd := exec.Command("git", "-C", resolvedRoot, "add", targetRel)
+			configureDispatchHelperCommand(addCmd)
 			configureGitCommand(addCmd)
 			if out, err := addCmd.CombinedOutput(); err != nil {
 				err := fmt.Errorf("git add failed: %s: %w", strings.TrimSpace(string(out)), err)
@@ -521,9 +523,11 @@ func Push(wsRoot, targetDir, registryPath, goalParkDir string, commit, push, dry
 			}
 
 			diffCmd := exec.Command("git", "-C", resolvedRoot, "diff", "--cached", "--quiet")
+			configureDispatchHelperCommand(diffCmd)
 			configureGitCommand(diffCmd)
 			if err := diffCmd.Run(); err != nil {
 				commitCmd := exec.Command("git", "-C", resolvedRoot, "commit", "-m", "chore(goals): sync goal artifacts (fak)")
+				configureDispatchHelperCommand(commitCmd)
 				configureGitCommand(commitCmd)
 				if out, err := commitCmd.CombinedOutput(); err != nil {
 					err := fmt.Errorf("git commit failed: %s: %w", strings.TrimSpace(string(out)), err)
@@ -536,6 +540,7 @@ func Push(wsRoot, targetDir, registryPath, goalParkDir string, commit, push, dry
 
 		if push {
 			pushCmd := exec.Command("git", "-C", resolvedRoot, "push")
+			configureDispatchHelperCommand(pushCmd)
 			configureGitCommand(pushCmd)
 			if out, err := pushCmd.CombinedOutput(); err != nil {
 				err := fmt.Errorf("git push failed: %s: %w", strings.TrimSpace(string(out)), err)
