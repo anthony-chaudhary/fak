@@ -422,6 +422,18 @@ func TestSnapToRuneBoundaryMultiByte(t *testing.T) {
 				wantEnd:  strings.Repeat("a", 509) + "世",
 			},
 			{
+				name:     "latin_2byte_split_1_byte_in",
+				input:    strings.Repeat("a", 511) + "é" + "suffix",
+				maxBytes: 512,
+				wantEnd:  strings.Repeat("a", 511),
+			},
+			{
+				name:     "latin_2byte_exact_boundary",
+				input:    strings.Repeat("a", 510) + "é" + "suffix",
+				maxBytes: 512,
+				wantEnd:  strings.Repeat("a", 510) + "é",
+			},
+			{
 				name:     "emoji_split_3_bytes_in",
 				input:    strings.Repeat("a", 509) + "🎉" + "suffix",
 				maxBytes: 512,
@@ -523,6 +535,34 @@ func TestSnapToRuneBoundaryMultiByte(t *testing.T) {
 		}
 		if strings.ContainsRune(matchText, utf8.RuneError) {
 			t.Fatalf("emoji match.Text contains replacement character: %q", matchText)
+		}
+
+		// 3. Match at line start with CJK character crossing 512-byte boundary
+		cjkStartLine := "target_start_cjk" + strings.Repeat("E", 510-len("target_start_cjk")) + "世" + strings.Repeat("F", 50)
+		mustWrite(t, filepath.Join(dir, "cjk_start.txt"), cjkStartLine+"\n")
+
+		out, isErr = ts.grep(context.Background(), argsOf(t, GrepArgs{Pattern: "target_start_cjk"}))
+		if isErr {
+			t.Fatalf("Grep cjk_start failed: %s", string(out))
+		}
+		m = decodeResult(t, out)
+		rows = m["matches"].([]any)
+		if len(rows) != 1 {
+			t.Fatalf("cjk_start matches count = %d, want 1", len(rows))
+		}
+		row = rows[0].(map[string]any)
+		matchText = row["text"].(string)
+		if !utf8.ValidString(matchText) {
+			t.Fatalf("cjk_start match.Text is not valid UTF-8: %q", matchText)
+		}
+		if len(matchText) > maxMatchLineBytes {
+			t.Fatalf("len(cjk_start match.Text) = %d, want <= %d", len(matchText), maxMatchLineBytes)
+		}
+		if strings.ContainsRune(matchText, utf8.RuneError) {
+			t.Fatalf("cjk_start match.Text contains replacement character: %q", matchText)
+		}
+		if matchText != "target_start_cjk"+strings.Repeat("E", 510-len("target_start_cjk")) {
+			t.Fatalf("cjk_start matchText = %q, want trimmed before 世", matchText)
 		}
 	})
 }
