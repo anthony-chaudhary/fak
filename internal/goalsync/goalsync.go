@@ -11,8 +11,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const Schema = "fak-goal-sync/1"
@@ -424,7 +422,7 @@ func isolatedGitEnv() []string {
 }
 
 func configureGitCommand(cmd *exec.Cmd) {
-	windowgate.ConfigureBackgroundCommand(cmd)
+	configureDispatchHelperCommand(cmd)
 	cmd.Env = isolatedGitEnv()
 }
 
