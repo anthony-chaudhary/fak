@@ -952,3 +952,25 @@ func (sw *SlidingWindow) PageCount() int {
 func (c *Compactor) CompactPositive(turns []TurnRecord, originalGoal string) *PositiveCompactedHistory {
 	return CompactPositiveState(turns, originalGoal)
 }
+
+// EpisodeTracker returns a semantic episode tracker backed by the provided CASStore, or a new
+// CASStore if omitted or nil.
+func (c *Compactor) EpisodeTracker(store ...*CASStore) *EpisodeTracker {
+	var s *CASStore
+	if len(store) > 0 {
+		s = store[0]
+	}
+	return NewEpisodeTracker(s)
+}
+
+// CompactEpisodes delegates context page compaction to the provided EpisodeTracker.
+// If tracker is nil, a new EpisodeTracker is created.
+func (c *Compactor) CompactEpisodes(pages []TokenPage, tracker ...*EpisodeTracker) ([]TokenPage, CompactionReport, error) {
+	var t *EpisodeTracker
+	if len(tracker) > 0 && tracker[0] != nil {
+		t = tracker[0]
+	} else {
+		t = NewEpisodeTracker(nil)
+	}
+	return t.CompactPages(pages)
+}
