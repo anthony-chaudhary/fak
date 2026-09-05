@@ -23,6 +23,13 @@ func q4kRowDotF32AVX2(row *byte, x *float32, nblk int, ds *float32, ms *float32)
 // row's per-sub-block d*sc / min*m are precomputed here (the 6-bit GetScaleMinK4 unpack + f16 decode)
 // into ds/ms scratch reused across the range, exactly the values q4kDequantSuperBlock forms inline.
 func q4kMatRowsRangeArch(qt *q4kTensor, x, y []float32, lo, hi int) bool {
+	return q4kMatRowsRangeArchRaw(qt.raw, qt, x, y, lo, hi)
+}
+
+func q4kMatRowsRangeArchRaw(raw []byte, qt *q4kTensor, x, y []float32, lo, hi int) bool {
+	if len(raw) == 0 {
+		raw = qt.raw
+	}
 	if qtier < tierAVX2 || qt.nblk == 0 {
 		return false
 	}
@@ -31,7 +38,7 @@ func q4kMatRowsRangeArch(qt *q4kTensor, x, y []float32, lo, hi int) bool {
 	ms := make([]float32, nblk*8)
 	rowBytes := qt.q4kRowBytes()
 	for o := lo; o < hi; o++ {
-		row := qt.raw[o*rowBytes : o*rowBytes+rowBytes]
+		row := raw[o*rowBytes : o*rowBytes+rowBytes]
 		for b := 0; b < nblk; b++ {
 			blk := row[b*q4kBlockBytes:]
 			d := math.Float32frombits(F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[0:])))

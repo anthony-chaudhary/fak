@@ -3,6 +3,8 @@ package model
 import (
 	"encoding/binary"
 	"math"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // quant_kquant.go â€” resident raw expert-quant weight path, the load-time lever for GLM-5.2's
@@ -154,6 +156,20 @@ type kQuantTensor struct {
 	kind          kQuantKind
 	w3MLP         bool
 	raw           []byte
+	replicas      *compute.NUMAReplicaSet
+	numaPool      *compute.NUMADecodePool
+}
+
+func (qt *kQuantTensor) rawForNode(nodeID int) []byte {
+	if qt != nil && qt.replicas != nil {
+		if r := qt.replicas.For(nodeID); len(r) > 0 {
+			return r
+		}
+	}
+	if qt != nil {
+		return qt.raw
+	}
+	return nil
 }
 
 func (qt *kQuantTensor) rowBytes() int { return qt.nblk * qt.kind.blockBytes() }
@@ -311,6 +327,33 @@ func kQuantMatRowsInto(qt *kQuantTensor, x, y []float32) {
 // takes the capped decode budget. Prefill is not the memory-bound batch-1 shape the cap targets.
 func kQuantMatRowsIntoWorkers(qt *kQuantTensor, x, y []float32, workers int) {
 	y = y[:qt.out]
+	if qt.numaPool != nil && qt.numaPool.Schedule().Eligible {
+		if qt.w3MLP {
+			qv := quantizeVecQ8(x)
+			_ = qt.numaPool.Dispatch(qt.out, func(nodeID, lo, hi int) {
+				raw := qt.rawForNode(nodeID)
+				iq3xxsMatRowsRangeInt8Raw(raw, qt, qv, y, lo, hi)
+			})
+			return
+		}
+		if kQuantSDOTEnabled(qt.kind) {
+			qv := quantizeVecQ8(x)
+			_ = qt.numaPool.Dispatch(qt.out, func(nodeID, lo, hi int) {
+				raw := qt.rawForNode(nodeID)
+				ranger := q5kMatRowsRangeInt8Raw
+				if qt.kind == kindQ6K {
+					ranger = q6kMatRowsRangeInt8Raw
+				}
+				ranger(raw, qt, qv, y, lo, hi)
+			})
+			return
+		}
+		_ = qt.numaPool.Dispatch(qt.out, func(nodeID, lo, hi int) {
+			raw := qt.rawForNode(nodeID)
+			kQuantMatRowsRangeRaw(raw, qt, x, y, lo, hi)
+		})
+		return
+	}
 	if qt.w3MLP {
 		// The W3 path is deliberately decode-only: a pre-quantized IQ3_XXS dense-MLP
 		// tensor carries this load-time tag, so one Q8 activation is shared by every
@@ -343,12 +386,19 @@ func kQuantMatRowsIntoWorkers(qt *kQuantTensor, x, y []float32, workers int) {
 // super-block order as q4kMatRowsRange, so the resident k-quant GEMV is deterministic and
 // arithmetically identical to a dequant-then-dot over the same f32 weights.
 func kQuantMatRowsRange(qt *kQuantTensor, x, y []float32, lo, hi int) {
+	kQuantMatRowsRangeRaw(qt.raw, qt, x, y, lo, hi)
+}
+
+func kQuantMatRowsRangeRaw(raw []byte, qt *kQuantTensor, x, y []float32, lo, hi int) {
+	if len(raw) == 0 {
+		raw = qt.raw
+	}
 	blockWeights := qt.kind.blockWeights()
 	buf := make([]float32, blockWeights) // reused per block; L1/L2-resident
 	rowBytes := qt.rowBytes()
 	bb := qt.kind.blockBytes()
 	for o := lo; o < hi; o++ {
-		row := qt.raw[o*rowBytes:]
+		row := raw[o*rowBytes:]
 		var acc float32
 		for b := 0; b < qt.nblk; b++ {
 			kQuantDequantSuperBlock(buf, row[b*bb:(b+1)*bb], qt.kind)

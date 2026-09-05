@@ -40,6 +40,8 @@ import (
 	"strings"
 	"sync"
 	"unsafe"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // qkK is the Q4_K super-block size: 256 weights share one (d, min, scales, q) block. This
@@ -107,6 +109,20 @@ type q4kTensor struct {
 	out, in, nblk int
 	raw           []byte
 	lazy          *LazyQ4KRange
+	replicas      *compute.NUMAReplicaSet
+	numaPool      *compute.NUMADecodePool
+}
+
+func (qt *q4kTensor) rawForNode(nodeID int) []byte {
+	if qt != nil && qt.replicas != nil {
+		if r := qt.replicas.For(nodeID); len(r) > 0 {
+			return r
+		}
+	}
+	if qt != nil {
+		return qt.raw
+	}
+	return nil
 }
 
 // q4kRowBytes is the byte length of one resident row (nblk super-blocks).
@@ -171,6 +187,23 @@ func q4kMatRows(qt *q4kTensor, x []float32) []float32 {
 func q4kMatRowsInto(qt *q4kTensor, x, y []float32) {
 	qt.requireRawCPU("decode GEMV")
 	y = y[:qt.out]
+	if qt.numaPool != nil && qt.numaPool.Schedule().Eligible {
+		if q4kSDOTEnabled() {
+			qv := quantizeVecQ8(x)
+			_ = qt.numaPool.Dispatch(qt.out, func(nodeID, lo, hi int) {
+				raw := qt.rawForNode(nodeID)
+				q4kMatRowsRangeInt8Raw(raw, qt, qv, y, lo, hi)
+			})
+			return
+		}
+		_ = qt.numaPool.Dispatch(qt.out, func(nodeID, lo, hi int) {
+			raw := qt.rawForNode(nodeID)
+			if !q4kMatRowsRangeArchRaw(raw, qt, x, y, lo, hi) {
+				q4kMatRowsRangeRaw(raw, qt, x, y, lo, hi)
+			}
+		})
+		return
+	}
 	if q4kSDOTEnabled() {
 		// int8 SDOT decode path (plan P2): the activation is quantized ONCE here (quantizeVecQ8)
 		// and reused across every output row — this is a GEMV (one x, many weight rows) — so the
@@ -196,10 +229,17 @@ func q4kMatRowsInto(qt *q4kTensor, x, y []float32) {
 // super-block, combined in fixed order, then summed across super-blocks in row order — so
 // the result is deterministic and a future NEON SDOT kernel (P2) can be held to it.
 func q4kMatRowsRange(qt *q4kTensor, x, y []float32, lo, hi int) {
+	q4kMatRowsRangeRaw(qt.raw, qt, x, y, lo, hi)
+}
+
+func q4kMatRowsRangeRaw(raw []byte, qt *q4kTensor, x, y []float32, lo, hi int) {
+	if len(raw) == 0 {
+		raw = qt.raw
+	}
 	buf := make([]float32, qkK) // 256 f32, reused per super-block; L1/L2-resident
 	rowBytes := qt.q4kRowBytes()
 	for o := lo; o < hi; o++ {
-		row := qt.raw[o*rowBytes:]
+		row := raw[o*rowBytes:]
 		var acc float32
 		for b := 0; b < qt.nblk; b++ {
 			q4kDequantSuperBlock(buf, row[b*q4kBlockBytes:(b+1)*q4kBlockBytes])
@@ -651,6 +691,7 @@ func (m *Model) finishWeightClose(s *weightCloserState) {
 		// Native buffers stop borrowing mapped Q4_K/Q8 backing before the checkpoint owner can unmap it.
 		releaseModelQ4KHandles(m)
 		m.releaseMetalQ8Residency()
+		_ = m.FreeNUMAReplicas()
 		if s.c != nil {
 			s.err = s.c.Close()
 		}

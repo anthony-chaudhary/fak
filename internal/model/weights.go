@@ -206,6 +206,9 @@ type Model struct {
 	// "" ⇒ ApplyDecodeNUMAInterleave has not run on this model yet.
 	numaInterleaveLabel string
 
+	// numa owns the NUMA weight replication and barrier-free schedule state.
+	numa *numaModelState
+
 	// kqw holds the optional resident Q5_K/Q6_K (k-quant super-block) copy of MoE EXPERT
 	// matmul weights, built straight from the GGUF payload (no f32 round trip) for GLM-5.2's
 	// mixed-quant UD-Q4_K_M experts and consumed on the host expert seam (residentMatRows ->

@@ -120,6 +120,13 @@ func q6kCombineRow(row []byte, nblk int, dx []float32, IS, SS []int32) float32 {
 // q6kMatRowsRangeInt8 is the int8 GEMV over output rows [lo,hi): one shared activation quantize
 // (qv), then per row the integer reduce + float combine. Mirrors q5kMatRowsRangeInt8.
 func q6kMatRowsRangeInt8(qt *kQuantTensor, qv q8Vec, y []float32, lo, hi int) {
+	q6kMatRowsRangeInt8Raw(qt.raw, qt, qv, y, lo, hi)
+}
+
+func q6kMatRowsRangeInt8Raw(raw []byte, qt *kQuantTensor, qv q8Vec, y []float32, lo, hi int) {
+	if len(raw) == 0 {
+		raw = qt.raw
+	}
 	ngrp := qt.nblk * q6kGroupsPerBlock
 	IS := make([]int32, ngrp)
 	SS := make([]int32, ngrp)
@@ -127,7 +134,7 @@ func q6kMatRowsRangeInt8(qt *kQuantTensor, qv q8Vec, y []float32, lo, hi int) {
 	dx := qv.d
 	rowBytes := qt.rowBytes()
 	for o := lo; o < hi; o++ {
-		row := qt.raw[o*rowBytes : (o+1)*rowBytes]
+		row := raw[o*rowBytes : (o+1)*rowBytes]
 		q6kReduceRow(row, qt.nblk, qx, IS, SS)
 		y[o] = q6kCombineRow(row, qt.nblk, dx, IS, SS)
 	}

@@ -130,12 +130,19 @@ func q4kCombineRow(row []byte, nblk int, dx []float32, IS, SS []int32) float32 {
 // (shared across all rows — this is a GEMV), IS/SS are per-worker int32 scratch sized nblk*8.
 // Each row: arch-dispatched integer reduction, then the shared float combine.
 func q4kMatRowsRangeInt8(qt *q4kTensor, qv q8Vec, y []float32, lo, hi int) {
+	q4kMatRowsRangeInt8Raw(qt.raw, qt, qv, y, lo, hi)
+}
+
+func q4kMatRowsRangeInt8Raw(raw []byte, qt *q4kTensor, qv q8Vec, y []float32, lo, hi int) {
+	if len(raw) == 0 {
+		raw = qt.raw
+	}
 	nblk := qt.nblk
 	IS := make([]int32, nblk*8)
 	SS := make([]int32, nblk*8)
 	rowBytes := qt.q4kRowBytes()
 	for o := lo; o < hi; o++ {
-		row := qt.raw[o*rowBytes:]
+		row := raw[o*rowBytes:]
 		q4kReduceRow(row, nblk, qv.q, IS, SS)
 		y[o] = q4kCombineRow(row, nblk, qv.d, IS, SS)
 	}

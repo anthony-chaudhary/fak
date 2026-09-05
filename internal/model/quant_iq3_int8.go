@@ -186,11 +186,18 @@ func iq3xxsCombineRow(row []byte, nblk int, dx []float32, IS []int32) float32 {
 // iq3xxsMatRowsRangeInt8 is the row-range decode GEMV body. Scratch is
 // allocated once per worker range and reused for every row.
 func iq3xxsMatRowsRangeInt8(qt *kQuantTensor, qv q8Vec, y []float32, lo, hi int) {
+	iq3xxsMatRowsRangeInt8Raw(qt.raw, qt, qv, y, lo, hi)
+}
+
+func iq3xxsMatRowsRangeInt8Raw(raw []byte, qt *kQuantTensor, qv q8Vec, y []float32, lo, hi int) {
+	if len(raw) == 0 {
+		raw = qt.raw
+	}
 	nblk := qt.nblk
 	IS := make([]int32, nblk*8)
 	rowBytes := qt.rowBytes()
 	for rowIndex := lo; rowIndex < hi; rowIndex++ {
-		row := qt.raw[rowIndex*rowBytes : (rowIndex+1)*rowBytes]
+		row := raw[rowIndex*rowBytes : (rowIndex+1)*rowBytes]
 		iq3xxsReduceRow(row, nblk, qv.q, IS)
 		y[rowIndex] = iq3xxsCombineRow(row, nblk, qv.d, IS)
 	}
