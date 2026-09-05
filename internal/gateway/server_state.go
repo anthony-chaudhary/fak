@@ -13,6 +13,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/enginecache"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
+	"github.com/anthony-chaudhary/fak/internal/harnessversion"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/kv"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
@@ -1076,6 +1077,9 @@ type Server struct {
 	controlSocketMu sync.Mutex
 	controlSocket   *ControlSocketServer
 	kvStore         kv.Store
+
+	harnessRouterMu sync.RWMutex
+	harnessRouter   *harnessversion.StickySessionRouter
 }
 
 // SetTable attaches or replaces the session table on Server.
@@ -1118,4 +1122,24 @@ func (s *Server) SetFleet(pool *session.Pool) {
 	if ctl != nil {
 		ctl.SetFleet(pool)
 	}
+}
+
+// SetHarnessRouter attaches or replaces the sub-harness runtime version router on Server.
+func (s *Server) SetHarnessRouter(r *harnessversion.StickySessionRouter) {
+	if s == nil {
+		return
+	}
+	s.harnessRouterMu.Lock()
+	s.harnessRouter = r
+	s.harnessRouterMu.Unlock()
+}
+
+// HarnessRouter returns the sub-harness runtime version router configured on Server.
+func (s *Server) HarnessRouter() *harnessversion.StickySessionRouter {
+	if s == nil {
+		return nil
+	}
+	s.harnessRouterMu.RLock()
+	defer s.harnessRouterMu.RUnlock()
+	return s.harnessRouter
 }

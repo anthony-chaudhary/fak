@@ -8,6 +8,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/auditreceipt"
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/harnessversion"
 	"github.com/anthony-chaudhary/fak/internal/kv"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
@@ -531,6 +532,9 @@ type Config struct {
 	Scheduler *session.Scheduler
 	// Pool is the optional fleet-wide token budget pool.
 	Pool *session.Pool
+	// HarnessRouter manages sub-harness runtime multi-versioning, sticky session pinning,
+	// and canary traffic distribution. When nil, New initializes a default router with v1 active.
+	HarnessRouter *harnessversion.StickySessionRouter
 
 	// StopGate checks declared completion evidence at a model-final boundary. Nil disables it.
 	StopGate StopGateFunc
