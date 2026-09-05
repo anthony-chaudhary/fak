@@ -167,14 +167,16 @@ func writeHttpRequestMetrics(b *strings.Builder, httpRows []httpMetricSnapshot) 
 func writeOperationMetrics(b *strings.Builder, opRows []operationMetricSnapshot) {
 	writeHelpType(b, "fak_gateway_operations_total", "Gateway kernel operations by operation, verdict, and deciding adjudicator (by).", "counter")
 	for _, row := range opRows {
-		fmt.Fprintf(b, "fak_gateway_operations_total{operation=\"%s\",verdict=\"%s\",reason=\"%s\",disposition=\"%s\",by=\"%s\"} %d\n",
+		fmt.Fprintf(b, "fak_gateway_operations_total{operation=\"%s\",verdict=\"%s\",reason=\"%s\",refusal_subtype=\"%s\",disposition=\"%s\",by=\"%s\"} %d\n",
 			promQuote(row.key.operation), promQuote(row.key.verdict), promQuote(row.key.reason),
+			promQuote(row.key.refusalSubtype),
 			promQuote(row.key.disposition), promQuote(row.key.by), row.val.count)
 	}
 	writeHelpType(b, "fak_gateway_operation_duration_seconds", "Gateway kernel operation latency by operation, verdict, and deciding adjudicator (by).", "histogram")
 	for _, row := range opRows {
-		baseLabels := fmt.Sprintf("operation=\"%s\",verdict=\"%s\",reason=\"%s\",disposition=\"%s\",by=\"%s\"",
+		baseLabels := fmt.Sprintf("operation=\"%s\",verdict=\"%s\",reason=\"%s\",refusal_subtype=\"%s\",disposition=\"%s\",by=\"%s\"",
 			promQuote(row.key.operation), promQuote(row.key.verdict), promQuote(row.key.reason),
+			promQuote(row.key.refusalSubtype),
 			promQuote(row.key.disposition), promQuote(row.key.by))
 		writeHistogram(b, "fak_gateway_operation_duration_seconds", baseLabels, row.val)
 	}

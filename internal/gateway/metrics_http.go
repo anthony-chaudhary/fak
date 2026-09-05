@@ -33,9 +33,10 @@ func (m *gatewayMetrics) observeOperation(operation string, v WireVerdict, err e
 		return
 	}
 	key := operationMetricKey{
-		operation: operation,
-		verdict:   v.Kind,
-		reason:    v.Reason,
+		operation:      operation,
+		verdict:        v.Kind,
+		reason:         v.Reason,
+		refusalSubtype: v.RefusalSubtype,
 	}
 	if err != nil || key.verdict == "" {
 		key.verdict = "ERROR"

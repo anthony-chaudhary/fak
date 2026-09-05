@@ -7,6 +7,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute/inputtrigger"
 	"github.com/anthony-chaudhary/fak/internal/numfmt"
@@ -24,11 +25,12 @@ import (
 // Disposition is the actionable deny-loopback class — it is what lets a refusal
 // cost a non-Go agent zero extra model turns.
 type WireVerdict struct {
-	Kind        string            `json:"kind"`                  // ALLOW|DENY|TRANSFORM|QUARANTINE|REQUIRE_WITNESS|DEFER|RESIDUAL|KIND_<n>
-	Reason      string            `json:"reason,omitempty"`      // closed refusal vocabulary, e.g. POLICY_BLOCK
-	By          string            `json:"by,omitempty"`          // which adjudicator decided (forensics)
-	Disposition string            `json:"disposition,omitempty"` // RETRYABLE|WAIT|ESCALATE|TERMINAL
-	Detail      map[string]string `json:"detail,omitempty"`      // bounded disclosure (e.g. the offending self-modify glob)
+	Kind           string            `json:"kind"`                       // ALLOW|DENY|TRANSFORM|QUARANTINE|REQUIRE_WITNESS|DEFER|RESIDUAL|KIND_<n>
+	Reason         string            `json:"reason,omitempty"`           // closed refusal vocabulary, e.g. POLICY_BLOCK
+	RefusalSubtype string            `json:"refusal_subtype,omitempty"`  // granular subtype for TRUST_VIOLATION, e.g. injection_quarantine
+	By             string            `json:"by,omitempty"`               // which adjudicator decided (forensics)
+	Disposition    string            `json:"disposition,omitempty"`      // RETRYABLE|WAIT|ESCALATE|TERMINAL
+	Detail         map[string]string `json:"detail,omitempty"`           // bounded disclosure (e.g. the offending self-modify glob)
 }
 
 // renderVerdict projects a folded abi.Verdict (and the optional result Meta) onto
@@ -90,6 +92,28 @@ func renderVerdict(v abi.Verdict, resultMeta map[string]string) WireVerdict {
 	if resultMeta["admit"] == "quarantined" {
 		w.Kind = "QUARANTINE"
 	}
+
+	if w.Reason == "TRUST_VIOLATION" || w.Reason == "TRUSTVIOLATION" {
+		merged := make(map[string]string, len(v.Meta)+len(resultMeta)+2)
+		for k, val := range v.Meta {
+			merged[k] = val
+		}
+		for k, val := range resultMeta {
+			merged[k] = val
+		}
+		if v.By != "" {
+			if _, ok := merged["by"]; !ok {
+				merged["by"] = v.By
+			}
+		}
+		if wp, ok := v.Payload.(abi.WitnessPayload); ok && wp.Claim != "" {
+			if _, ok := merged["claim"]; !ok {
+				merged["claim"] = wp.Claim
+			}
+		}
+		w.RefusalSubtype = metrics.ClassifyRefusalSubtype(w.Reason, merged)
+	}
+
 	return w
 }
 

@@ -1007,15 +1007,15 @@ def build_guard():
     panels.append(row("Trust floor — refusals by reason", 5))
     panels.append(timeseries(
         "Refusal rate by reason",
-        [(f"sum by (reason) (rate({nonallow}[5m]))", "{{reason}}")],
+        [(f"sum by (reason, refusal_subtype) (rate({nonallow}[5m]))", "{{reason}} {{refusal_subtype}}")],
         0, 6, w=12, h=8,
         desc="Per-second rate of non-ALLOW verdicts grouped by the closed refusal "
              "vocabulary (internal/abi/reasons.go: TRUST_VIOLATION, SECRET_EXFIL, "
              "SELF_MODIFY, POLICY_BLOCK, DEFAULT_DENY, ...). 0 across the board means "
              "the floor refused nothing."))
     panels.append(bargauge(
-        "Refusals by reason (session total)", f"sum by (reason) ({nonallow})",
-        "{{reason}}", 12, 6, w=12, h=8, thresholds=ONE_RED,
+        "Refusals by reason (session total)", f"sum by (reason, refusal_subtype) ({nonallow})",
+        "{{reason}} {{refusal_subtype}}", 12, 6, w=12, h=8, thresholds=ONE_RED,
         desc="Cumulative count of each structured refusal reason this session — the "
              "kernel's 'why I said no', ranked."))
 

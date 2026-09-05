@@ -171,22 +171,28 @@ func TestRenderVerdict(t *testing.T) {
 		name   string
 		v      abi.Verdict
 		meta   map[string]string
-		kind   string
-		reason string
-		disp   string
-		claim  string
+		kind    string
+		reason  string
+		disp    string
+		claim   string
+		subtype string
 	}{
-		{"allow", abi.Verdict{Kind: abi.VerdictAllow, By: "x"}, nil, "ALLOW", "", "", ""},
-		{"deny-policy", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock}, nil, "DENY", "POLICY_BLOCK", "RETRYABLE", ""},
-		{"deny-policy-explicit-disposition", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock, Disposition: "ESCALATE"}, nil, "DENY", "POLICY_BLOCK", "ESCALATE", ""},
-		{"deny-policy-meta-disposition", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock, Meta: map[string]string{"disposition": "ESCALATE"}}, nil, "DENY", "POLICY_BLOCK", "ESCALATE", ""},
-		{"deny-misroute-retryable", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonMisroute}, nil, "DENY", "MISROUTE", "RETRYABLE", ""},
-		{"deny-ratelimited-wait", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonRateLimited}, nil, "DENY", "RATE_LIMITED", "WAIT", ""},
-		{"deny-selfmodify-escalate", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonSelfModify, Payload: abi.WitnessPayload{Claim: "internal/abi/"}}, nil, "DENY", "SELF_MODIFY", "ESCALATE", "internal/abi/"},
-		{"transform", abi.Verdict{Kind: abi.VerdictTransform}, nil, "TRANSFORM", "", "", ""},
-		{"require-witness", abi.Verdict{Kind: abi.VerdictRequireWitness, Payload: abi.WitnessPayload{Claim: "phase-shipped"}}, nil, "REQUIRE_WITNESS", "", "ESCALATE", "phase-shipped"},
-		{"quarantine-from-admit", abi.Verdict{Kind: abi.VerdictAllow}, map[string]string{"admit": "quarantined"}, "QUARANTINE", "", "", ""},
-		{"unknown-registered-kind-escalates", abi.Verdict{Kind: abi.VerdictKind(2000)}, nil, "KIND_2000", "", "ESCALATE", ""},
+		{"allow", abi.Verdict{Kind: abi.VerdictAllow, By: "x"}, nil, "ALLOW", "", "", "", ""},
+		{"deny-policy", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock}, nil, "DENY", "POLICY_BLOCK", "RETRYABLE", "", ""},
+		{"deny-policy-explicit-disposition", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock, Disposition: "ESCALATE"}, nil, "DENY", "POLICY_BLOCK", "ESCALATE", "", ""},
+		{"deny-policy-meta-disposition", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock, Meta: map[string]string{"disposition": "ESCALATE"}}, nil, "DENY", "POLICY_BLOCK", "ESCALATE", "", ""},
+		{"deny-misroute-retryable", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonMisroute}, nil, "DENY", "MISROUTE", "RETRYABLE", "", ""},
+		{"deny-ratelimited-wait", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonRateLimited}, nil, "DENY", "RATE_LIMITED", "WAIT", "", ""},
+		{"deny-selfmodify-escalate", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonSelfModify, Payload: abi.WitnessPayload{Claim: "internal/abi/"}}, nil, "DENY", "SELF_MODIFY", "ESCALATE", "internal/abi/", ""},
+		{"transform", abi.Verdict{Kind: abi.VerdictTransform}, nil, "TRANSFORM", "", "", "", ""},
+		{"require-witness", abi.Verdict{Kind: abi.VerdictRequireWitness, Payload: abi.WitnessPayload{Claim: "phase-shipped"}}, nil, "REQUIRE_WITNESS", "", "ESCALATE", "phase-shipped", ""},
+		{"quarantine-from-admit", abi.Verdict{Kind: abi.VerdictAllow}, map[string]string{"admit": "quarantined"}, "QUARANTINE", "", "", "", ""},
+		{"unknown-registered-kind-escalates", abi.Verdict{Kind: abi.VerdictKind(2000)}, nil, "KIND_2000", "", "ESCALATE", "", ""},
+		{"trust-violation-injection", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonTrustViolation, By: "ctxmmu"}, nil, "DENY", "TRUST_VIOLATION", "ESCALATE", "", "injection_quarantine"},
+		{"trust-violation-ifc", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonTrustViolation, Meta: map[string]string{"ifc_sink": "network_egress"}}, nil, "DENY", "TRUST_VIOLATION", "ESCALATE", "", "ifc_sink"},
+		{"trust-violation-witness", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonTrustViolation, Meta: map[string]string{"witness": "refuted"}}, nil, "DENY", "TRUST_VIOLATION", "ESCALATE", "", "witness_refuted"},
+		{"trust-violation-residency", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonTrustViolation, By: "residency"}, nil, "DENY", "TRUST_VIOLATION", "ESCALATE", "", "residency_mismatch"},
+		{"trust-violation-unspecified", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonTrustViolation}, nil, "DENY", "TRUST_VIOLATION", "ESCALATE", "", "unspecified"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -202,6 +208,9 @@ func TestRenderVerdict(t *testing.T) {
 			}
 			if c.claim != "" && w.Detail["claim"] != c.claim {
 				t.Errorf("detail.claim = %q, want %q", w.Detail["claim"], c.claim)
+			}
+			if w.RefusalSubtype != c.subtype {
+				t.Errorf("refusal_subtype = %q, want %q", w.RefusalSubtype, c.subtype)
 			}
 		})
 	}
