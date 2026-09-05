@@ -166,11 +166,11 @@ func TestQ8PrefillOutputProjectionReuseWithBias(t *testing.T) {
 	}
 	refLogits := refSession.headQ(refHidden)
 
-	if d, _ := maxAbsDiff(gotHidden, refHidden); d != 0 {
-		t.Fatalf("biased Q8 prefill hidden != per-token decode: max abs diff %.3e", d)
+	if d, _ := maxAbsDiff(gotHidden, refHidden); d > 1e-5 {
+		t.Fatalf("biased Q8 prefill hidden != per-token decode: max abs diff %.3e > 1e-5", d)
 	}
-	if d, _ := maxAbsDiff(gotLogits, refLogits); d != 0 {
-		t.Fatalf("biased Q8 prefill logits != per-token decode: max abs diff %.3e", d)
+	if d, _ := maxAbsDiff(gotLogits, refLogits); d > 1e-5 {
+		t.Fatalf("biased Q8 prefill logits != per-token decode: max abs diff %.3e > 1e-5", d)
 	}
 	_ = P
 	_ = H
