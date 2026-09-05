@@ -85,3 +85,15 @@ func TestRunCheckToolFailureUnknown(t *testing.T) {
 		t.Fatalf("stderr missing unknown-token message: %s", errb.String())
 	}
 }
+
+func TestRunCheckToolFailureExitCodeZeroIgnoresErrorSignature(t *testing.T) {
+	var out, errb bytes.Buffer
+	// Message has substring "command not found", but exit-code is 0 -> should NOT classify as failure
+	code := runCheckToolFailure(&out, &errb, []string{
+		"--message", "git log: fixed command not found in readme",
+		"--exit-code", "0",
+	})
+	if code != 3 {
+		t.Fatalf("expected code 3 (did not match tool failure on exit 0), got %d", code)
+	}
+}

@@ -23,6 +23,7 @@ func runCheckToolFailure(stdout, stderr io.Writer, argv []string) int {
 	list := fs.Bool("list", false, "list the closed non-guard tool-failure vocabulary")
 	message := fs.String("message", "", "classify a raw tool-failure message into a structured {code,cause,evidence,fix,retryable,next_command} payload")
 	command := fs.String("command", "", "the exact failing command, folded into a runnable next_command for the shell-mismatch classes (used with --message)")
+	exitCode := fs.Int("exit-code", -1, "process exit code (0 indicates clean exit and ignores substring error signatures)")
 	resume := fs.Bool("resume", false, "report the partial state + safe resume of a mutating op killed on timeout (see --op), instead of a bare exit-143")
 	op := fs.String("op", "commit-push", "the killed mutating op to diagnose for --resume (currently: commit-push)")
 	dir := fs.String("dir", ".", "repository directory to inspect for --resume")
@@ -37,7 +38,7 @@ func runCheckToolFailure(stdout, stderr io.Writer, argv []string) int {
 	case *list:
 		return renderToolFailureList(stdout, stderr, *asJSON)
 	case strings.TrimSpace(*message) != "":
-		payload, ok := auditreason.ToolFailurePayloadForCommand(*message, *command)
+		payload, ok := auditreason.ToolFailurePayloadForCommand(*message, *command, *exitCode)
 		if !ok {
 			fmt.Fprintln(stderr, "fak check-tool-failure: message did not match a known tool-failure token")
 			return 3
