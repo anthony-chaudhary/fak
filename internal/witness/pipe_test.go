@@ -1,10 +1,10 @@
 package witness
 
 import (
+	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -105,6 +105,7 @@ func TestValidatePipeReceipt(t *testing.T) {
 		StdoutSHA256: stdoutSHA,
 		StderrSHA256: stderrSHA,
 	}
+	baseReceipt.Attestation = SignPipeReceipt(baseReceipt, nil)
 
 	// Valid matching spec
 	outcome, err := ValidatePipeReceipt(baseReceipt, PipeClaimSpec{
@@ -149,12 +150,26 @@ func TestValidatePipeReceipt(t *testing.T) {
 		t.Errorf("outcome = %v, err = %v, want Abstain, error", outcome, err)
 	}
 
+	// Receipt without execution or attestation is rejected
+	unverifiedReceipt := &PipeReceipt{
+		Schema:       PipeReceiptSchema,
+		Command:      []string{"test"},
+		ExitCode:     0,
+		StdoutSHA256: stdoutSHA,
+		StderrSHA256: stderrSHA,
+	}
+	outcome, err = ValidatePipeReceipt(unverifiedReceipt, PipeClaimSpec{ExpectedExitCode: 0})
+	if err == nil || outcome != abi.WitnessAbstain {
+		t.Errorf("outcome = %v, err = %v, want Abstain on unverified receipt", outcome, err)
+	}
+
 	// Receipt with error
 	errReceipt := &PipeReceipt{
 		Schema:   PipeReceiptSchema,
 		ExitCode: -1,
 		Error:    "spawn failed",
 	}
+	errReceipt.Attestation = SignPipeReceipt(errReceipt, nil)
 	outcome, err = ValidatePipeReceipt(errReceipt, PipeClaimSpec{ExpectedExitCode: 0})
 	if err == nil || outcome != abi.WitnessAbstain {
 		t.Errorf("outcome = %v, err = %v, want Abstain, error", outcome, err)
@@ -165,6 +180,7 @@ func TestValidatePipeReceipt(t *testing.T) {
 		Schema:   PipeReceiptSchema,
 		ExitCode: 2,
 	}
+	nonZeroReceipt.Attestation = SignPipeReceipt(nonZeroReceipt, nil)
 	outcome, err = ValidatePipeReceipt(nonZeroReceipt, PipeClaimSpec{ExpectedExitCode: 2})
 	if err != nil || outcome != abi.WitnessConfirmed {
 		t.Errorf("outcome = %v, err = %v, want Confirmed, nil", outcome, err)
@@ -247,7 +263,8 @@ func TestResolverResolvePipeReceipt(t *testing.T) {
 		t.Errorf("Resolve(bare self-reported receipt) = %v, want Abstain", got)
 	}
 
-	// 2. Direct receipt validation via ValidatePipeReceipt passes for valid receipt
+	// 2. Direct receipt validation via ValidatePipeReceipt passes for verified receipt
+	validReceipt.Attestation = SignPipeReceipt(validReceipt, nil)
 	if outcome, err := ValidatePipeReceipt(validReceipt, spec); outcome != abi.WitnessConfirmed || err != nil {
 		t.Errorf("ValidatePipeReceipt(valid) = %v, %v, want Confirmed, nil", outcome, err)
 	}
@@ -258,6 +275,7 @@ func TestResolverResolvePipeReceipt(t *testing.T) {
 		ExitCode:     0,
 		StdoutSHA256: "0000000000000000000000000000000000000000000000000000000000000000",
 	}
+	tamperedReceipt.Attestation = SignPipeReceipt(tamperedReceipt, nil)
 	specTampered := PipeClaimSpec{
 		ExpectedExitCode:  0,
 		ExpectedStdoutSHA: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -277,7 +295,142 @@ func TestResolverResolvePipeReceipt(t *testing.T) {
 	}
 }
 
-func sha256Hex(b []byte) string {
-	s := sha256.Sum256(b)
-	return hex.EncodeToString(s[:])
+const witLargeOutputEnv = "FAK_WITNESS_LARGE_OUTPUT"
+
+// TestHelperWitnessLargeOutput emits ~5.12MB of output to stdout so RunPipeWitness
+// stream buffer capping can be tested against a real OS process.
+func TestHelperWitnessLargeOutput(t *testing.T) {
+	if os.Getenv(witLargeOutputEnv) != "1" {
+		return
+	}
+	chunk := bytes.Repeat([]byte("A"), 64*1024)
+	for i := 0; i < 80; i++ { // 80 * 64KB = 5.12MB > MaxPipeBufferSize (4MB)
+		_, _ = os.Stdout.Write(chunk)
+	}
+	os.Exit(0)
+}
+
+func TestRunPipeWitness_CapStreamBuffer(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	t.Setenv(witLargeOutputEnv, "1")
+	ctx := context.Background()
+	receipt, stdoutBytes, _, err := RunPipeWitness(ctx, "", self, "-test.run=^TestHelperWitnessLargeOutput$")
+	if err != nil {
+		t.Fatalf("RunPipeWitness failed: %v", err)
+	}
+	if receipt.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0", receipt.ExitCode)
+	}
+	// receipt.StdoutBytes records full bytes processed through the hash stream
+	const wantMinBytes = 80 * 64 * 1024
+	if receipt.StdoutBytes < wantMinBytes {
+		t.Errorf("receipt.StdoutBytes = %d, want >= %d", receipt.StdoutBytes, wantMinBytes)
+	}
+	// Stream buffer retained in memory must be capped to MaxPipeBufferSize without crashing
+	if len(stdoutBytes) != MaxPipeBufferSize {
+		t.Errorf("len(stdoutBytes) = %d, want capped to MaxPipeBufferSize (%d)", len(stdoutBytes), MaxPipeBufferSize)
+	}
+	if receipt.StdoutSHA256 == "" {
+		t.Error("expected non-empty StdoutSHA256 for streamed output")
+	}
+}
+
+func TestPipeTamper_ForgedReceiptWithoutExecution(t *testing.T) {
+	ctx := context.Background()
+	r := New()
+
+	// 1. Inlined forged receipt in claim string without execution returns WitnessAbstain
+	forgedSpec := PipeClaimSpec{
+		ExpectedExitCode:  0,
+		ExpectedStdoutSHA: "deadbeef00000000000000000000000000000000000000000000000000000000",
+		Receipt: &PipeReceipt{
+			Schema:        PipeReceiptSchema,
+			ExitCode:      0,
+			StdoutSHA256:  "deadbeef00000000000000000000000000000000000000000000000000000000",
+			StdoutBytes:   100,
+			DurationNanos: 500,
+		},
+	}
+	forgedJSON, err := json.Marshal(forgedSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Resolve(ctx, nil, "pipe:"+string(forgedJSON)); got != abi.WitnessAbstain {
+		t.Errorf("Resolve(forged receipt without execution) = %v, want Abstain", got)
+	}
+
+	// 2. Inlined forged receipt accompanying real command is refuted
+	forgedWithCmd := PipeClaimSpec{
+		Command:           []string{"go", "version"},
+		ExpectedExitCode:  0,
+		ExpectedStdoutSHA: "deadbeef00000000000000000000000000000000000000000000000000000000",
+		Receipt: &PipeReceipt{
+			Schema:       PipeReceiptSchema,
+			Command:      []string{"go", "version"},
+			ExitCode:     0,
+			StdoutSHA256: "deadbeef00000000000000000000000000000000000000000000000000000000",
+		},
+	}
+	forgedCmdJSON, _ := json.Marshal(forgedWithCmd)
+	if got := r.Resolve(ctx, nil, "pipe:"+string(forgedCmdJSON)); got != abi.WitnessRefuted {
+		t.Errorf("Resolve(forged inlined receipt with command) = %v, want Refuted", got)
+	}
+
+	// 3. Direct ValidatePipeReceipt on unexecuted, unattested receipt returns WitnessAbstain with error
+	unverifiedReceipt := &PipeReceipt{
+		Schema:       PipeReceiptSchema,
+		Command:      []string{"echo", "hi"},
+		ExitCode:     0,
+		StdoutSHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+	}
+	outcome, valErr := ValidatePipeReceipt(unverifiedReceipt, PipeClaimSpec{
+		ExpectedExitCode:  0,
+		ExpectedStdoutSHA: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+	})
+	if outcome != abi.WitnessAbstain || valErr == nil {
+		t.Errorf("ValidatePipeReceipt(unverified) = %v, %v, want Abstain, error", outcome, valErr)
+	}
+
+	// 4. PipeReceipt.WitnessOutcome() on unverified receipt returns WitnessAbstain
+	if got := unverifiedReceipt.WitnessOutcome(); got != abi.WitnessAbstain {
+		t.Errorf("unverifiedReceipt.WitnessOutcome() = %v, want Abstain", got)
+	}
+
+	// 5. Inlined receipt with invalid/forged signature is refuted
+	forgedSigReceipt := &PipeReceipt{
+		Schema:       PipeReceiptSchema,
+		Command:      []string{"echo", "hi"},
+		ExitCode:     0,
+		StdoutSHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		Attestation:  "forged-signature-invalid-hmac-123456",
+	}
+	outcome, valErr = ValidatePipeReceipt(forgedSigReceipt, PipeClaimSpec{ExpectedExitCode: 0})
+	if outcome != abi.WitnessAbstain || valErr == nil {
+		t.Errorf("ValidatePipeReceipt(forged attestation) = %v, %v, want Abstain, error", outcome, valErr)
+	}
+}
+
+func TestExecutionEvidence_PopulatedFromPipe(t *testing.T) {
+	ctx := context.Background()
+	ev := NewExecutionVerifier("").runSelector(ctx, "", "HEAD", "test_kind", ExecutionSelector{
+		ID:      "go-version-check",
+		Command: []string{"go", "version"},
+	})
+
+	if ev.Outcome != "pass" {
+		t.Fatalf("ev.Outcome = %q, want pass", ev.Outcome)
+	}
+	if ev.ExitCode != 0 {
+		t.Errorf("ev.ExitCode = %d, want 0", ev.ExitCode)
+	}
+	if ev.StdoutSHA256 == "" {
+		t.Error("expected non-empty ev.StdoutSHA256")
+	}
+	if ev.StdoutBytes <= 0 {
+		t.Errorf("ev.StdoutBytes = %d, want > 0", ev.StdoutBytes)
+	}
 }

@@ -298,10 +298,18 @@ func (r *Resolver) resolvePipe(ctx context.Context, arg string) abi.WitnessOutco
 	if err := json.Unmarshal([]byte(arg), &spec); err != nil {
 		return abi.WitnessAbstain
 	}
-	// An unexecuted self-authored receipt is never accepted as proof.
-	// The witness kernel must execute the command directly via RunPipeWitness.
+	// Pipe witness requires either command pipe execution or verified attestation.
+	// An unexecuted, unverified self-authored receipt is rejected (fail-closed).
 	if len(spec.Command) == 0 {
+		if spec.Receipt != nil && VerifyPipeReceiptAttestation(spec.Receipt, nil) {
+			outcome, _ := ValidatePipeReceipt(spec.Receipt, spec)
+			return outcome
+		}
 		return abi.WitnessAbstain
+	}
+	// An inlined receipt accompanying a command pipe must be authentic.
+	if spec.Receipt != nil && !VerifyPipeReceiptAttestation(spec.Receipt, nil) {
+		return abi.WitnessRefuted
 	}
 	receipt, _, _, err := RunPipeWitness(ctx, r.dir, spec.Command...)
 	if err != nil {
