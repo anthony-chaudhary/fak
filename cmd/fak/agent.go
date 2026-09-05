@@ -21,6 +21,7 @@ type agentFlags struct {
 	outputStyle           *string
 	consoleConfig         *string
 	workProfile           *string
+	reasoningProfile      *string
 	effort                *string
 	thinkingBudget        *int
 	provider              *string
@@ -62,6 +63,7 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.outputStyle = fs.String("output-style", agentDefaultOutputStyle, "response shape: full|native:{low|medium|high}|caveman:{low|medium|high}; defaults to caveman:medium, full disables it (see `fak agent profiles`)")
 	af.consoleConfig = fs.String("console-config", defaultTUIConsoleFile(), "persisted operator preferences (default: FAK_CONSOLE_FILE, else ~/.fak/console.json)")
 	af.workProfile = fs.String("work-profile", agentDefaultWorkProfile, "implementation policy: ponytail:{low|medium|high}|standard; defaults to ponytail:medium, standard disables it (see `fak agent profiles`)")
+	af.reasoningProfile = fs.String("reasoning-profile", agent.ReasoningProfileDefault, "named reasoning profile: default|baseline|deep-reason (default: default)")
 	af.effort = fs.String("effort", "", "reasoning effort for model inference: none|low|medium|balanced|adaptive|high")
 	af.thinkingBudget = fs.Int("thinking-budget", -1, "explicit thinking token budget ceiling (>=0 overrides --effort; 0 disables thinking)")
 	af.provider = fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
@@ -142,6 +144,13 @@ func runAgent(argv []string) {
 
 	isRaw, isNative, err := resolveAgentMode(*af.raw, *af.native, *af.mode)
 	must(err)
+
+	if af.reasoningProfile != nil && *af.reasoningProfile != "" {
+		if err := validateReasoningProfile(*af.reasoningProfile); err != nil {
+			fmt.Fprintf(os.Stderr, "fak agent: %v\n", err)
+			os.Exit(2)
+		}
+	}
 
 	if *af.workflow != "" {
 		if err := runWorkflowCLI(*af.workflow, *af.workflowStep, *af.workflowCheckpointDir); err != nil {
@@ -249,6 +258,9 @@ func runAgent(argv []string) {
 		runOpts = append(runOpts, agent.WithToolCatalog(catalog))
 	}
 	runOpts = append(runOpts, agentEffortRunOptions(af)...)
+	if opt := agentReasoningProfileRunOption(af); opt != nil {
+		runOpts = append(runOpts, opt)
+	}
 	if memOpt, _ := resolveAgentMemoryOption(*af.memory, *af.memoryStore, root); memOpt != nil {
 		runOpts = append(runOpts, memOpt)
 	}
@@ -395,6 +407,22 @@ func agentEffortRunOptions(af *agentFlags) []agent.RunOption {
 		opts = append(opts, agent.WithRunThinkingBudget(*af.thinkingBudget))
 	}
 	return opts
+}
+
+func agentReasoningProfileRunOption(af *agentFlags) agent.RunOption {
+	if af == nil || af.reasoningProfile == nil || *af.reasoningProfile == "" {
+		return nil
+	}
+	return agent.WithReasoningProfile(*af.reasoningProfile)
+}
+
+func validateReasoningProfile(profile string) error {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case agent.ReasoningProfileDefault, agent.ReasoningProfileBaseline, agent.ReasoningProfileDeepReason:
+		return nil
+	default:
+		return fmt.Errorf("unknown --reasoning-profile %q (want default, baseline, or deep-reason)", profile)
+	}
 }
 
 func resolveAgentMode(raw, native bool, mode string) (isRaw, isNative bool, err error) {

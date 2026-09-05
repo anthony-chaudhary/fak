@@ -18,6 +18,10 @@ const (
 	BudgetBalancedRoutineTool = 0
 	BudgetBalancedError       = 1536
 	BudgetBalancedDefault     = 768
+
+	ReasoningProfileDefault    = "default"
+	ReasoningProfileBaseline   = "baseline"
+	ReasoningProfileDeepReason = "deep-reason"
 )
 
 // TurnAssessment carries signals about the current turn's workload to titrate
@@ -102,6 +106,85 @@ func AssessTranscriptTurn(messages []Message) (TurnAssessment, bool) {
 	return ta, true
 }
 
+// ResolveReasoningProfile resolves a named reasoning profile into an effort tier
+// and a default thinking token budget ceiling.
+// Routine tool turns under default/baseline profiles run at default/medium effort
+// with routine turns titrated down to zero thinking overhead (<2s overhead).
+// Deep-reason delegates on-demand high-effort reasoning for complex tasks.
+func ResolveReasoningProfile(profile string) (effort string, budget int) {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "", ReasoningProfileDefault, ReasoningProfileBaseline:
+		return EffortTierMedium, BudgetTierMedium
+	case ReasoningProfileDeepReason, "deepreason", "deep_reason":
+		return EffortTierHigh, BudgetTierHigh
+	case EffortTierHigh:
+		return EffortTierHigh, BudgetTierHigh
+	case EffortTierMedium:
+		return EffortTierMedium, BudgetTierMedium
+	case EffortTierLow:
+		return EffortTierLow, BudgetTierLow
+	case EffortTierNone:
+		return EffortTierNone, BudgetTierNone
+	default:
+		return EffortTierMedium, BudgetTierMedium
+	}
+}
+
+// ResolveReasoningProfileBudget resolves a named reasoning profile, optional explicit budget override,
+// and turn assessments into an effective effort tier and token budget.
+// Under default/baseline, routine inspection turns are clamped to BudgetBalancedRoutineTool (0)
+// for <2s overhead, error recovery receives BudgetBalancedError (1536), and normal turns get BudgetTierMedium (1024).
+// Deep-reason returns high effort and BudgetTierHigh (2048).
+func ResolveReasoningProfileBudget(profile string, explicitBudget *int, turnContext ...TurnAssessment) (effort string, budget int) {
+	effort, defaultBudget := ResolveReasoningProfile(profile)
+	if explicitBudget != nil && *explicitBudget >= 0 {
+		return effort, *explicitBudget
+	}
+	p := strings.ToLower(strings.TrimSpace(profile))
+	if p == "" || p == ReasoningProfileDefault || p == ReasoningProfileBaseline {
+		for _, ta := range turnContext {
+			if ta.IsError() {
+				return effort, BudgetBalancedError
+			}
+		}
+		for _, ta := range turnContext {
+			if ta.IsRoutine() {
+				return effort, BudgetBalancedRoutineTool
+			}
+		}
+	}
+	return effort, defaultBudget
+}
+
+// IsRoutineToolName reports whether a tool name represents a routine inspection tool.
+func IsRoutineToolName(name string) bool {
+	return isRoutineToolName(name)
+}
+
+// IsRoutineTurn reports whether the trailing transcript turn is classified as a routine tool turn.
+func IsRoutineTurn(messages []Message) bool {
+	ta, ok := AssessTranscriptTurn(messages)
+	if !ok {
+		return false
+	}
+	return ta.IsRoutine() && !ta.IsError()
+}
+
+// ValidReasoningProfiles returns the supported reasoning profile names.
+func ValidReasoningProfiles() []string {
+	return []string{ReasoningProfileDefault, ReasoningProfileBaseline, ReasoningProfileDeepReason}
+}
+
+// IsValidReasoningProfile checks if the given profile string is recognized.
+func IsValidReasoningProfile(profile string) bool {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "", ReasoningProfileDefault, ReasoningProfileBaseline, ReasoningProfileDeepReason:
+		return true
+	default:
+		return false
+	}
+}
+
 // ResolveEffortBudget resolves the reasoning token budget given an effort tier,
 // an optional explicit token budget override, and optional turn context assessments.
 // Explicit budget wins if set and >= 0.
@@ -116,9 +199,19 @@ func ResolveEffortBudget(effort string, explicitBudget *int, turnContext ...Turn
 		return BudgetTierNone
 	case EffortTierLow:
 		return BudgetTierLow
-	case EffortTierMedium:
+	case EffortTierMedium, ReasoningProfileDefault, ReasoningProfileBaseline:
+		for _, ta := range turnContext {
+			if ta.IsError() {
+				return BudgetBalancedError
+			}
+		}
+		for _, ta := range turnContext {
+			if ta.IsRoutine() {
+				return BudgetBalancedRoutineTool
+			}
+		}
 		return BudgetTierMedium
-	case EffortTierHigh:
+	case EffortTierHigh, ReasoningProfileDeepReason:
 		return BudgetTierHigh
 	case EffortTierBalanced, EffortTierAdaptive:
 		// Error recovery takes precedence over routine inspection.

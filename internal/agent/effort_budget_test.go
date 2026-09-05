@@ -458,3 +458,290 @@ func TestEffortTurnLoopResolution(t *testing.T) {
 		}
 	})
 }
+
+// TestResolveReasoningProfile verifies profile resolution to effort tier and budget ceiling.
+func TestResolveReasoningProfile(t *testing.T) {
+	cases := []struct {
+		profile    string
+		wantEffort string
+		wantBudget int
+	}{
+		{ReasoningProfileDefault, EffortTierMedium, BudgetTierMedium},
+		{ReasoningProfileBaseline, EffortTierMedium, BudgetTierMedium},
+		{ReasoningProfileDeepReason, EffortTierHigh, BudgetTierHigh},
+		{"DEFAULT", EffortTierMedium, BudgetTierMedium},
+		{"Baseline", EffortTierMedium, BudgetTierMedium},
+		{"deep-reason", EffortTierHigh, BudgetTierHigh},
+		{"DEEP-REASON", EffortTierHigh, BudgetTierHigh},
+		{"deepreason", EffortTierHigh, BudgetTierHigh},
+		{"deep_reason", EffortTierHigh, BudgetTierHigh},
+		{"", EffortTierMedium, BudgetTierMedium},
+		{"unknown-profile", EffortTierMedium, BudgetTierMedium},
+		{"high", EffortTierHigh, BudgetTierHigh},
+		{"medium", EffortTierMedium, BudgetTierMedium},
+		{"low", EffortTierLow, BudgetTierLow},
+		{"none", EffortTierNone, BudgetTierNone},
+	}
+
+	for _, tc := range cases {
+		gotEffort, gotBudget := ResolveReasoningProfile(tc.profile)
+		if gotEffort != tc.wantEffort || gotBudget != tc.wantBudget {
+			t.Errorf("ResolveReasoningProfile(%q) = (%q, %d), want (%q, %d)",
+				tc.profile, gotEffort, gotBudget, tc.wantEffort, tc.wantBudget)
+		}
+	}
+
+	if !IsValidReasoningProfile("default") || !IsValidReasoningProfile("baseline") || !IsValidReasoningProfile("deep-reason") {
+		t.Error("expected default, baseline, and deep-reason to be valid reasoning profiles")
+	}
+	if IsValidReasoningProfile("invalid_profile") {
+		t.Error("expected invalid_profile to not be valid")
+	}
+	valid := ValidReasoningProfiles()
+	if len(valid) != 3 {
+		t.Errorf("expected 3 valid reasoning profiles, got %d", len(valid))
+	}
+}
+
+// TestResolveReasoningProfileBudget verifies dynamic budget mapping under named profiles.
+func TestResolveReasoningProfileBudget(t *testing.T) {
+	for _, profile := range []string{ReasoningProfileDefault, ReasoningProfileBaseline, ""} {
+		t.Run("DefaultProfile/RoutineToolClampedToZero", func(t *testing.T) {
+			ta := TurnAssessment{ToolName: "read", IsRoutineTool: true}
+			eff, budget := ResolveReasoningProfileBudget(profile, nil, ta)
+			if eff != EffortTierMedium {
+				t.Errorf("effort = %q, want %q", eff, EffortTierMedium)
+			}
+			if budget != BudgetBalancedRoutineTool {
+				t.Errorf("budget = %d, want %d (zero overhead for routine turn)", budget, BudgetBalancedRoutineTool)
+			}
+		})
+
+		t.Run("DefaultProfile/ErrorRecoveryElevated", func(t *testing.T) {
+			ta := TurnAssessment{ErrorMessage: "compiler error: syntax error", IsErrorRecovery: true}
+			eff, budget := ResolveReasoningProfileBudget(profile, nil, ta)
+			if eff != EffortTierMedium {
+				t.Errorf("effort = %q, want %q", eff, EffortTierMedium)
+			}
+			if budget != BudgetBalancedError {
+				t.Errorf("budget = %d, want %d", budget, BudgetBalancedError)
+			}
+		})
+
+		t.Run("DefaultProfile/NormalTurnMediumBudget", func(t *testing.T) {
+			ta := TurnAssessment{ToolName: "bash"}
+			eff, budget := ResolveReasoningProfileBudget(profile, nil, ta)
+			if eff != EffortTierMedium {
+				t.Errorf("effort = %q, want %q", eff, EffortTierMedium)
+			}
+			if budget != BudgetTierMedium {
+				t.Errorf("budget = %d, want %d", budget, BudgetTierMedium)
+			}
+		})
+
+		t.Run("DefaultProfile/ExplicitBudgetOverride", func(t *testing.T) {
+			override := 512
+			ta := TurnAssessment{ToolName: "read", IsRoutineTool: true}
+			eff, budget := ResolveReasoningProfileBudget(profile, &override, ta)
+			if eff != EffortTierMedium {
+				t.Errorf("effort = %q, want %q", eff, EffortTierMedium)
+			}
+			if budget != 512 {
+				t.Errorf("budget = %d, want 512", budget)
+			}
+		})
+	}
+
+	t.Run("DeepReasonProfile/HighBudgetMaintained", func(t *testing.T) {
+		// Even for routine tool turns, deep-reason retains high capacity for complex delegation
+		ta := TurnAssessment{ToolName: "read", IsRoutineTool: true}
+		eff, budget := ResolveReasoningProfileBudget(ReasoningProfileDeepReason, nil, ta)
+		if eff != EffortTierHigh {
+			t.Errorf("effort = %q, want %q", eff, EffortTierHigh)
+		}
+		if budget != BudgetTierHigh {
+			t.Errorf("budget = %d, want %d", budget, BudgetTierHigh)
+		}
+	})
+}
+
+// TestRoutineTurnClassification verifies routine turn classification helpers.
+func TestRoutineTurnClassification(t *testing.T) {
+	routineTools := []string{"read", "glob", "grep", "cat", "view", "read_file", "list_dir", "find", "file_search"}
+	for _, tool := range routineTools {
+		if !IsRoutineToolName(tool) {
+			t.Errorf("expected %q to be classified as routine tool name", tool)
+		}
+	}
+
+	nonRoutineTools := []string{"bash", "write", "edit", "custom_eval", "test_runner"}
+	for _, tool := range nonRoutineTools {
+		if IsRoutineToolName(tool) {
+			t.Errorf("expected %q to NOT be classified as routine tool name", tool)
+		}
+	}
+
+	// IsRoutineTurn with routine message transcript
+	routineTranscript := []Message{
+		{Role: RoleUser, Content: "show files"},
+		{Role: RoleAssistant, Content: "checking"},
+		{Role: RoleTool, Name: "glob", Content: "file1.go\nfile2.go"},
+	}
+	if !IsRoutineTurn(routineTranscript) {
+		t.Error("expected routineTranscript to be classified as routine turn")
+	}
+
+	// Transcript with error is NOT a routine turn
+	errorTranscript := []Message{
+		{Role: RoleUser, Content: "show files"},
+		{Role: RoleAssistant, Content: "checking"},
+		{Role: RoleTool, Name: "read", Content: "compiler error: syntax error"},
+	}
+	if IsRoutineTurn(errorTranscript) {
+		t.Error("expected errorTranscript to NOT be classified as routine turn")
+	}
+
+	// Non-tool trailing message is NOT a routine turn
+	userTranscript := []Message{
+		{Role: RoleUser, Content: "hello"},
+	}
+	if IsRoutineTurn(userTranscript) {
+		t.Error("expected userTranscript to NOT be classified as routine turn")
+	}
+}
+
+// TestReasoningProfileTurnLoop verifies end-to-end RunArm wiring of WithReasoningProfile.
+func TestReasoningProfileTurnLoop(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("DefaultProfileRoutineToolTurn", func(t *testing.T) {
+		p := &mockEffortPlanner{model: "test-model"}
+		msgs := []Message{
+			{Role: RoleUser, Content: "check directory"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Function: Func{Name: "glob"}}}},
+			{Role: RoleTool, Name: "glob", Content: "a.go\nb.go"},
+		}
+		_, err := RunArm(ctx, p, "task", false, 1, nil,
+			WithReasoningProfile(ReasoningProfileDefault),
+			WithConversation(msgs),
+		)
+		if err != nil {
+			t.Fatalf("RunArm: %v", err)
+		}
+		if len(p.capturedOpts) == 0 {
+			t.Fatal("expected Complete to be called")
+		}
+		sp := p.capturedOpts[0]
+		if sp.ReasoningEffort != EffortTierMedium {
+			t.Errorf("ReasoningEffort = %q, want %q", sp.ReasoningEffort, EffortTierMedium)
+		}
+		if sp.ThinkingBudget == nil || *sp.ThinkingBudget != BudgetBalancedRoutineTool {
+			t.Errorf("ThinkingBudget = %v, want %d (zero overhead on routine tool turn)", sp.ThinkingBudget, BudgetBalancedRoutineTool)
+		}
+	})
+
+	t.Run("DefaultProfileErrorTurn", func(t *testing.T) {
+		p := &mockEffortPlanner{model: "test-model"}
+		msgs := []Message{
+			{Role: RoleUser, Content: "run build"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Function: Func{Name: "bash"}}}},
+			{Role: RoleTool, Name: "bash", Content: "panic: nil pointer dereference"},
+		}
+		_, err := RunArm(ctx, p, "task", false, 1, nil,
+			WithReasoningProfile(ReasoningProfileDefault),
+			WithConversation(msgs),
+		)
+		if err != nil {
+			t.Fatalf("RunArm: %v", err)
+		}
+		if len(p.capturedOpts) == 0 {
+			t.Fatal("expected Complete to be called")
+		}
+		sp := p.capturedOpts[0]
+		if sp.ReasoningEffort != EffortTierMedium {
+			t.Errorf("ReasoningEffort = %q, want %q", sp.ReasoningEffort, EffortTierMedium)
+		}
+		if sp.ThinkingBudget == nil || *sp.ThinkingBudget != BudgetBalancedError {
+			t.Errorf("ThinkingBudget = %v, want %d", sp.ThinkingBudget, BudgetBalancedError)
+		}
+	})
+
+	t.Run("DefaultProfileNormalTurn", func(t *testing.T) {
+		p := &mockEffortPlanner{model: "test-model"}
+		msgs := []Message{
+			{Role: RoleUser, Content: "solve problem"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Function: Func{Name: "bash"}}}},
+			{Role: RoleTool, Name: "bash", Content: "output without error"},
+		}
+		_, err := RunArm(ctx, p, "task", false, 1, nil,
+			WithReasoningProfile(ReasoningProfileDefault),
+			WithConversation(msgs),
+		)
+		if err != nil {
+			t.Fatalf("RunArm: %v", err)
+		}
+		if len(p.capturedOpts) == 0 {
+			t.Fatal("expected Complete to be called")
+		}
+		sp := p.capturedOpts[0]
+		if sp.ReasoningEffort != EffortTierMedium {
+			t.Errorf("ReasoningEffort = %q, want %q", sp.ReasoningEffort, EffortTierMedium)
+		}
+		if sp.ThinkingBudget == nil || *sp.ThinkingBudget != BudgetTierMedium {
+			t.Errorf("ThinkingBudget = %v, want %d", sp.ThinkingBudget, BudgetTierMedium)
+		}
+	})
+
+	t.Run("DeepReasonProfile", func(t *testing.T) {
+		p := &mockEffortPlanner{model: "test-model"}
+		msgs := []Message{
+			{Role: RoleUser, Content: "audit concurrency lock ordering"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Function: Func{Name: "read"}}}},
+			{Role: RoleTool, Name: "read", Content: "package kernel\n..."},
+		}
+		_, err := RunArm(ctx, p, "task", false, 1, nil,
+			WithReasoningProfile(ReasoningProfileDeepReason),
+			WithConversation(msgs),
+		)
+		if err != nil {
+			t.Fatalf("RunArm: %v", err)
+		}
+		if len(p.capturedOpts) == 0 {
+			t.Fatal("expected Complete to be called")
+		}
+		sp := p.capturedOpts[0]
+		if sp.ReasoningEffort != EffortTierHigh {
+			t.Errorf("ReasoningEffort = %q, want %q", sp.ReasoningEffort, EffortTierHigh)
+		}
+		if sp.ThinkingBudget == nil || *sp.ThinkingBudget != BudgetTierHigh {
+			t.Errorf("ThinkingBudget = %v, want %d", sp.ThinkingBudget, BudgetTierHigh)
+		}
+	})
+
+	t.Run("DefaultProfileWithExplicitBudgetOverride", func(t *testing.T) {
+		p := &mockEffortPlanner{model: "test-model"}
+		msgs := []Message{
+			{Role: RoleUser, Content: "check file"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Function: Func{Name: "read"}}}},
+			{Role: RoleTool, Name: "read", Content: "data"},
+		}
+		_, err := RunArm(ctx, p, "task", false, 1, nil,
+			WithReasoningProfile(ReasoningProfileDefault),
+			WithRunThinkingBudget(512),
+			WithConversation(msgs),
+		)
+		if err != nil {
+			t.Fatalf("RunArm: %v", err)
+		}
+		if len(p.capturedOpts) == 0 {
+			t.Fatal("expected Complete to be called")
+		}
+		sp := p.capturedOpts[0]
+		if sp.ReasoningEffort != EffortTierMedium {
+			t.Errorf("ReasoningEffort = %q, want %q", sp.ReasoningEffort, EffortTierMedium)
+		}
+		if sp.ThinkingBudget == nil || *sp.ThinkingBudget != 512 {
+			t.Errorf("ThinkingBudget = %v, want 512", sp.ThinkingBudget)
+		}
+	})
+}

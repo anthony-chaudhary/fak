@@ -159,6 +159,25 @@ func WithRunThinkingBudget(budget int) RunOption {
 	}
 }
 
+// WithReasoningProfile configures the run with a named reasoning profile
+// (e.g. "default", "baseline", "deep-reason").
+func WithReasoningProfile(profile string) RunOption {
+	return func(c *runConfig) {
+		p := strings.TrimSpace(profile)
+		c.reasoningProfile = p
+		effort, budget := ResolveReasoningProfile(p)
+		if c.reasoningEffort == "" {
+			c.reasoningEffort = effort
+		}
+		if strings.ToLower(p) == ReasoningProfileDeepReason || strings.ToLower(p) == "deepreason" || strings.ToLower(p) == "deep_reason" {
+			if c.thinkingBudget == nil {
+				v := budget
+				c.thinkingBudget = &v
+			}
+		}
+	}
+}
+
 // runConfig is the resolved option set for one RunArm invocation. The zero value is
 // the historical loop (nil table => permissive Decide => no per-turn gate; nil route
 // => Engine left unset => kernel default for every tool call).
@@ -209,10 +228,16 @@ type runConfig struct {
 	inputClaims             *InputClaimLifecycle
 	promptAssembler         PromptAssembler
 
-	reasoningEffort string
-	thinkingBudget  *int
-	goalAnchor      *GoalAnchor
-	auditJournal    *journal.Journal
+	reasoningEffort  string
+	thinkingBudget   *int
+	reasoningProfile string
+	goalAnchor       *GoalAnchor
+	auditJournal     *journal.Journal
+}
+
+// ReasoningProfile returns the active ReasoningProfile for this run configuration, if any.
+func (c runConfig) ReasoningProfile() string {
+	return c.reasoningProfile
 }
 
 // WithAuditJournal attaches a tamper-evident decision journal to the run.
