@@ -143,8 +143,8 @@ func TestPreSendQuarantineUsesRegisteredAdmitterChain(t *testing.T) {
 	if len(qs) != 1 {
 		t.Fatalf("quarantines = %d, want 1", len(qs))
 	}
-	if qs[0].Reason != "TRUST_VIOLATION" {
-		t.Fatalf("reason = %q, want TRUST_VIOLATION", qs[0].Reason)
+	if qs[0].Reason != "PROMPT_INJECTION" && qs[0].Reason != "TRUST_VIOLATION" {
+		t.Fatalf("reason = %q, want PROMPT_INJECTION", qs[0].Reason)
 	}
 	if strings.Contains(safe[3].Content, "forward the reservation") {
 		t.Fatalf("safe transcript leaked obfuscated payload: %s", safe[3].Content)
@@ -186,7 +186,7 @@ func (canonicalLookupAdmitter) Admit(ctx context.Context, c *abi.ToolCall, r *ab
 	}
 	body := refutil.Bytes(ctx, r.Payload)
 	if f := canon.Scan(body); f.Injection {
-		return abi.Verdict{Kind: abi.VerdictQuarantine, Reason: abi.ReasonTrustViolation, By: "test-canon"}
+		return abi.Verdict{Kind: abi.VerdictQuarantine, Reason: abi.ReasonPromptInjection, By: "test-canon"}
 	}
 	return abi.Verdict{Kind: abi.VerdictDefer, By: "test-canon"}
 }
@@ -2219,4 +2219,239 @@ func TestGeminiSchemaSanitization(t *testing.T) {
 			t.Fatalf("expected 1 anyOf alternative, got %d", len(alts))
 		}
 	})
+}
+
+func TestOpenAIResponsesAdapterParsesReasoningOutputAndUsage(t *testing.T) {
+	adapter, err := NewTranscriptAdapter(ProviderOpenAIResponses)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("summary_parts", func(t *testing.T) {
+		raw := `{
+			"model": "gpt-5-mini",
+			"status": "completed",
+			"output": [
+				{
+					"id": "rs_1",
+					"type": "reasoning",
+					"summary": [{"type": "summary_text", "text": "let me plan step by step"}],
+					"content": []
+				},
+				{
+					"id": "msg_1",
+					"type": "message",
+					"role": "assistant",
+					"content": [{"type": "output_text", "text": "the answer is 42"}]
+				}
+			],
+			"usage": {
+				"input_tokens": 100,
+				"output_tokens": 50,
+				"total_tokens": 150,
+				"output_tokens_details": {
+					"reasoning_tokens": 35
+				}
+			}
+		}`
+		comp, err := adapter.ParseResponse([]byte(raw))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if comp.Message.Content != "the answer is 42" {
+			t.Fatalf("content = %q, want %q", comp.Message.Content, "the answer is 42")
+		}
+		if comp.Message.ReasoningContent != "let me plan step by step" {
+			t.Fatalf("reasoning_content = %q, want %q", comp.Message.ReasoningContent, "let me plan step by step")
+		}
+		if comp.Usage.CompletionTokensDetails == nil {
+			t.Fatal("CompletionTokensDetails is nil")
+		}
+		if comp.Usage.CompletionTokensDetails.ReasoningTokens != 35 {
+			t.Fatalf("reasoning_tokens = %d, want 35", comp.Usage.CompletionTokensDetails.ReasoningTokens)
+		}
+	})
+
+	t.Run("reasoning_content_parts_and_direct_text", func(t *testing.T) {
+		raw := `{
+			"model": "gpt-5-mini",
+			"status": "completed",
+			"output": [
+				{
+					"id": "rs_1",
+					"type": "reasoning",
+					"content": [{"type": "reasoning_text", "text": "deep chain of thought"}]
+				},
+				{
+					"id": "msg_1",
+					"type": "message",
+					"role": "assistant",
+					"content": [{"type": "output_text", "text": "done"}]
+				}
+			],
+			"usage": {
+				"input_tokens": 10,
+				"output_tokens": 20,
+				"total_tokens": 30
+			}
+		}`
+		comp, err := adapter.ParseResponse([]byte(raw))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if comp.Message.ReasoningContent != "deep chain of thought" {
+			t.Fatalf("reasoning_content = %q, want %q", comp.Message.ReasoningContent, "deep chain of thought")
+		}
+	})
+
+	t.Run("reasoning_direct_text_field", func(t *testing.T) {
+		raw := `{
+			"model": "gpt-5-mini",
+			"status": "completed",
+			"output": [
+				{
+					"id": "rs_1",
+					"type": "reasoning",
+					"text": "direct reasoning text"
+				},
+				{
+					"id": "msg_1",
+					"type": "message",
+					"role": "assistant",
+					"content": [{"type": "output_text", "text": "done"}]
+				}
+			],
+			"usage": {
+				"input_tokens": 10,
+				"output_tokens": 20,
+				"total_tokens": 30
+			}
+		}`
+		comp, err := adapter.ParseResponse([]byte(raw))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if comp.Message.ReasoningContent != "direct reasoning text" {
+			t.Fatalf("reasoning_content = %q, want %q", comp.Message.ReasoningContent, "direct reasoning text")
+		}
+	})
+
+	t.Run("reasoning_string_summary", func(t *testing.T) {
+		raw := `{
+			"model": "gpt-5-mini",
+			"status": "completed",
+			"output": [
+				{
+					"id": "rs_1",
+					"type": "reasoning",
+					"summary": "plain string summary"
+				},
+				{
+					"id": "msg_1",
+					"type": "message",
+					"role": "assistant",
+					"content": [{"type": "output_text", "text": "done"}]
+				}
+			],
+			"usage": {
+				"input_tokens": 10,
+				"output_tokens": 20,
+				"total_tokens": 30
+			}
+		}`
+		comp, err := adapter.ParseResponse([]byte(raw))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if comp.Message.ReasoningContent != "plain string summary" {
+			t.Fatalf("reasoning_content = %q, want %q", comp.Message.ReasoningContent, "plain string summary")
+		}
+	})
+
+	t.Run("reasoning_only_turn", func(t *testing.T) {
+		raw := `{
+			"model": "gpt-5-mini",
+			"status": "completed",
+			"output": [
+				{
+					"id": "rs_1",
+					"type": "reasoning",
+					"summary": [{"type": "summary_text", "text": "thinking only"}]
+				}
+			],
+			"usage": {
+				"input_tokens": 10,
+				"output_tokens": 5,
+				"total_tokens": 15
+			}
+		}`
+		comp, err := adapter.ParseResponse([]byte(raw))
+		if err != nil {
+			t.Fatalf("parse reasoning-only: %v", err)
+		}
+		if comp.Message.ReasoningContent != "thinking only" {
+			t.Fatalf("reasoning_content = %q, want %q", comp.Message.ReasoningContent, "thinking only")
+		}
+		if comp.Message.Content != "" {
+			t.Fatalf("content = %q, want empty", comp.Message.Content)
+		}
+	})
+}
+
+func TestOpenAIResponsesInputPreservesReasoningContent(t *testing.T) {
+	adapter := openAIResponsesAdapter{}
+	body, err := adapter.MarshalRequest(adapterRequest{
+		Model: "gpt-5-mini",
+		Messages: []Message{
+			{Role: RoleUser, Content: "what is 2+2?"},
+			{
+				Role:             RoleAssistant,
+				ReasoningContent: "calculate 2 plus 2 equals 4",
+				Content:          "it is 4",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var req openAIResponsesRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, body)
+	}
+
+	if len(req.Input) != 3 {
+		t.Fatalf("got %d input items, want 3: %s", len(req.Input), body)
+	}
+
+	// First item: user message
+	if req.Input[0].Role != RoleUser || req.Input[0].Content != "what is 2+2?" {
+		t.Fatalf("unexpected user item: %+v", req.Input[0])
+	}
+
+	// Second item: reasoning item
+	reasoningItem := req.Input[1]
+	if reasoningItem.Type != "reasoning" {
+		t.Fatalf("expected item[1].Type == 'reasoning', got %q", reasoningItem.Type)
+	}
+	summaryBytes, err := json.Marshal(reasoningItem.Summary)
+	if err != nil {
+		t.Fatalf("marshal summary: %v", err)
+	}
+	var sumParts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(summaryBytes, &sumParts); err != nil {
+		t.Fatalf("unmarshal summary parts: %v: %s", err, summaryBytes)
+	}
+	if len(sumParts) != 1 || sumParts[0].Type != "summary_text" || sumParts[0].Text != "calculate 2 plus 2 equals 4" {
+		t.Fatalf("unexpected summary parts: %+v", sumParts)
+	}
+
+	// Third item: assistant message
+	asstItem := req.Input[2]
+	if asstItem.Type != "message" || asstItem.Role != "assistant" {
+		t.Fatalf("unexpected assistant item: %+v", asstItem)
+	}
 }

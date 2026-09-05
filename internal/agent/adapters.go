@@ -494,6 +494,7 @@ type openAIResponsesItem struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 	Output    string `json:"output,omitempty"`
+	Summary   any    `json:"summary,omitempty"`
 }
 
 type openAIResponsesTool struct {
@@ -509,14 +510,16 @@ type openAIResponsesResponse struct {
 	Status      string `json:"status"`
 	Model       string `json:"model"` // the model the upstream reports it served (#82 echo)
 	Output      []struct {
-		ID        string `json:"id"`
-		Type      string `json:"type"`
-		Role      string `json:"role,omitempty"`
-		Status    string `json:"status,omitempty"`
-		CallID    string `json:"call_id,omitempty"`
-		Name      string `json:"name,omitempty"`
-		Namespace string `json:"namespace,omitempty"`
-		Arguments string `json:"arguments,omitempty"`
+		ID        string          `json:"id"`
+		Type      string          `json:"type"`
+		Role      string          `json:"role,omitempty"`
+		Status    string          `json:"status,omitempty"`
+		CallID    string          `json:"call_id,omitempty"`
+		Name      string          `json:"name,omitempty"`
+		Namespace string          `json:"namespace,omitempty"`
+		Arguments string          `json:"arguments,omitempty"`
+		Text      string          `json:"text,omitempty"`
+		Summary   json.RawMessage `json:"summary,omitempty"`
 		Content   []struct {
 			Type string `json:"type"`
 			Text string `json:"text,omitempty"`
@@ -524,12 +527,13 @@ type openAIResponsesResponse struct {
 	} `json:"output"`
 	OutputText string `json:"output_text,omitempty"`
 	Usage      struct {
-		ServiceTier         string             `json:"service_tier,omitempty"`
-		InputTokens         int                `json:"input_tokens"`
-		OutputTokens        int                `json:"output_tokens"`
-		TotalTokens         int                `json:"total_tokens"`
-		InputTokensDetails  *UsageTokenDetails `json:"input_tokens_details,omitempty"`
-		PromptTokensDetails *UsageTokenDetails `json:"prompt_tokens_details,omitempty"`
+		ServiceTier         string                       `json:"service_tier,omitempty"`
+		InputTokens         int                          `json:"input_tokens"`
+		OutputTokens        int                          `json:"output_tokens"`
+		TotalTokens         int                          `json:"total_tokens"`
+		InputTokensDetails  *UsageTokenDetails           `json:"input_tokens_details,omitempty"`
+		PromptTokensDetails *UsageTokenDetails           `json:"prompt_tokens_details,omitempty"`
+		OutputTokensDetails *UsageCompletionTokenDetails `json:"output_tokens_details,omitempty"`
 	} `json:"usage"`
 	Error *apiError `json:"error"`
 }
@@ -628,6 +632,14 @@ func openAIResponsesInput(messages []Message) []openAIResponsesItem {
 	for _, m := range messages {
 		switch m.Role {
 		case RoleAssistant:
+			if m.ReasoningContent != "" {
+				out = append(out, openAIResponsesItem{
+					Type: "reasoning",
+					Summary: []map[string]string{{
+						"type": "summary_text", "text": m.ReasoningContent,
+					}},
+				})
+			}
 			if m.Content != "" {
 				out = append(out, openAIResponsesItem{Type: "message", Role: "assistant", Content: []map[string]string{{
 					"type": "output_text", "text": m.Content,
@@ -677,8 +689,9 @@ func openAIResponsesTools(tools []ToolDef) []json.RawMessage {
 
 // ParseResponse decodes a Responses-API response into a Completion: it gathers
 // output_text parts as content and function_call items as tool calls, falls back to
-// the top-level output_text, derives the finish reason from the calls/status, and
-// maps the input/output/cached token details into Usage.
+// the top-level output_text, extracts reasoning items into ReasoningContent, derives
+// the finish reason from the calls/status, and maps the input/output/cached/reasoning
+// token details into Usage.
 func (openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
 	var rr openAIResponsesResponse
 	if err := json.Unmarshal(raw, &rr); err != nil {
@@ -688,6 +701,7 @@ func (openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
 		return nil, fmt.Errorf("api error: %s", rr.Error.Message)
 	}
 	var content []string
+	var reasoning []string
 	var calls []ToolCall
 	for _, item := range rr.Output {
 		switch item.Type {
@@ -696,6 +710,46 @@ func (openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
 				if part.Type == "output_text" && part.Text != "" {
 					content = append(content, part.Text)
 				}
+			}
+		case "reasoning":
+			var rparts []string
+			if item.Text != "" {
+				rparts = append(rparts, item.Text)
+			}
+			for _, part := range item.Content {
+				if part.Text != "" {
+					rparts = append(rparts, part.Text)
+				}
+			}
+			if len(item.Summary) > 0 {
+				var s string
+				if err := json.Unmarshal(item.Summary, &s); err == nil && s != "" {
+					rparts = append(rparts, s)
+				} else {
+					var sumParts []struct {
+						Type string `json:"type"`
+						Text string `json:"text,omitempty"`
+					}
+					if err := json.Unmarshal(item.Summary, &sumParts); err == nil {
+						for _, p := range sumParts {
+							if p.Text != "" {
+								rparts = append(rparts, p.Text)
+							}
+						}
+					} else {
+						var strList []string
+						if err := json.Unmarshal(item.Summary, &strList); err == nil {
+							for _, str := range strList {
+								if str != "" {
+									rparts = append(rparts, str)
+								}
+							}
+						}
+					}
+				}
+			}
+			if len(rparts) > 0 {
+				reasoning = append(reasoning, strings.Join(rparts, "\n"))
 			}
 		case "function_call":
 			id := item.CallID
@@ -712,7 +766,7 @@ func (openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
 	if len(content) == 0 && rr.OutputText != "" {
 		content = append(content, rr.OutputText)
 	}
-	if len(content) == 0 && len(calls) == 0 {
+	if len(content) == 0 && len(calls) == 0 && len(reasoning) == 0 {
 		return nil, fmt.Errorf("no output items (body: %s)", truncate(raw, 200))
 	}
 	finish := "stop"
@@ -726,15 +780,21 @@ func (openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
 		details = rr.Usage.PromptTokensDetails
 	}
 	return normalizeCompletionToolCalls(&Completion{
-		Message:      Message{Role: RoleAssistant, Content: strings.Join(content, "\n"), ToolCalls: calls},
+		Message: Message{
+			Role:             RoleAssistant,
+			Content:          strings.Join(content, "\n"),
+			ReasoningContent: strings.Join(reasoning, "\n"),
+			ToolCalls:        calls,
+		},
 		FinishReason: finish,
 		Model:        rr.Model,
 		ServiceTier:  parseServiceTier(ProviderOpenAIResponses, rr.ServiceTier),
 		Usage: Usage{
-			PromptTokens:        rr.Usage.InputTokens,
-			CompletionTokens:    rr.Usage.OutputTokens,
-			TotalTokens:         rr.Usage.TotalTokens,
-			PromptTokensDetails: details,
+			PromptTokens:            rr.Usage.InputTokens,
+			CompletionTokens:        rr.Usage.OutputTokens,
+			TotalTokens:             rr.Usage.TotalTokens,
+			PromptTokensDetails:     details,
+			CompletionTokensDetails: rr.Usage.OutputTokensDetails,
 		},
 	}), nil
 }
