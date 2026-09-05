@@ -27,6 +27,7 @@ import (
 type codexLaunchOptions struct {
 	dryRun          bool
 	skipPermissions bool
+	verbose         bool
 	splitMode       string
 	splitWhere      string
 	splitInterval   time.Duration
@@ -83,6 +84,8 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	_ = fs.String("freshness-gate", "on", "require a current checkout launcher before admission (on|off; off is an explicit recovery override)")
 	skipPermissions := fs.Bool("skip-permissions", true, "legacy explicit opt-in for Codex's full approval/sandbox bypass (default true for managed launches); fak routing, capacity, policy, hook, and loop gates still apply")
 	nativePermissions := fs.Bool("native-permissions", false, "restore Codex's native approval prompts and sandbox; Codex subagents inherit this parent permission mode")
+	verbose := fs.Bool("verbose", false, "verbose launcher diagnostics logging")
+	fs.BoolVar(verbose, "v", false, "verbose launcher diagnostics logging (shorthand)")
 	splitMode := fs.String("split", "auto", "open the 20% fak-info pane when possible: auto|on|off")
 	splitWhere := fs.String("split-where", "bottom", "with --split: place the 20% fak-info pane as a bottom strip or right column")
 	splitInterval := fs.Duration("split-interval", 2*time.Second, "with --split: fak-info refresh interval")
@@ -132,6 +135,7 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	launch := codexLaunchOptions{
 		dryRun:          *dryRun,
 		skipPermissions: *skipPermissions && !*nativePermissions,
+		verbose:         *verbose,
 		splitMode:       *splitMode,
 		splitWhere:      *splitWhere,
 		splitInterval:   *splitInterval,

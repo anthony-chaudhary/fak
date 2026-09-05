@@ -75,8 +75,9 @@ var (
 	codexFreshnessInspect       = func(root, _ string) codexFreshnessInspection {
 		return inspectCodexFreshness(root, binstamp.Self(), versionskew.RealRunner)
 	}
-	codexFreshnessUpdate = func(root, executable string) (string, error) {
-		cmd := exec.Command(executable, codexFreshnessSelfUpdateArgs(root, executable)...)
+	codexFreshnessVerbose bool
+	codexFreshnessUpdate  = func(root, executable string) (string, error) {
+		cmd := exec.Command(executable, codexFreshnessSelfUpdateArgs(root, executable, codexFreshnessVerbose)...)
 		var receipt bytes.Buffer
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, &receipt, os.Stderr
 		runErr := cmd.Run()
@@ -139,8 +140,12 @@ func codexFreshnessResolveCommit(root string, run versionskew.Runner) string {
 	return commit
 }
 
-func codexFreshnessSelfUpdateArgs(root, executable string) []string {
-	return []string{"self-update", "--json", "--root", root, "--target", executable}
+func codexFreshnessSelfUpdateArgs(root, executable string, verbose ...bool) []string {
+	args := []string{"self-update", "--json", "--root", root, "--target", executable}
+	if len(verbose) > 0 && verbose[0] {
+		args = append(args, "--verbose")
+	}
+	return args
 }
 
 func runCodexFreshnessReexec(executable string, argv []string, expectedCommit string) error {
@@ -267,6 +272,8 @@ func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
 			return nil, 1, true
 		}
 		status.Update(fmt.Sprintf("updating launcher %s -> %s at %s", running, target, executable))
+		status.Stop()
+		codexFreshnessVerbose = policy.Verbose
 		installedCommit, err := codexFreshnessUpdate(root, executable)
 		if err != nil {
 			if strings.Contains(err.Error(), "target updated successfully") {
@@ -406,12 +413,20 @@ func loadCodexFreshnessConfig() (codexFreshnessConfig, error) {
 }
 
 type codexFreshnessSettings struct {
-	MaxAge time.Duration
-	Force  bool
+	MaxAge  time.Duration
+	Force   bool
+	Verbose bool
 }
 
 func parseCodexFreshnessSettings(args []string, envMaxAge, envForce string, config codexFreshnessConfig) ([]string, codexFreshnessSettings, error) {
 	policy := codexFreshnessSettings{MaxAge: codexFreshnessLeaseTTL}
+	if v := os.Getenv("FAK_SELF_UPDATE_VERBOSE"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			policy.Verbose = b
+		} else {
+			policy.Verbose = true
+		}
+	}
 	if raw := strings.TrimSpace(config.MaxAge); raw != "" {
 		d, err := time.ParseDuration(raw)
 		if err != nil || d < 0 {
@@ -440,6 +455,17 @@ func parseCodexFreshnessSettings(args []string, envMaxAge, envForce string, conf
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
+		case arg == "--verbose" || arg == "-v":
+			policy.Verbose = true
+			filtered = append(filtered, arg)
+		case strings.HasPrefix(arg, "--verbose="):
+			raw := strings.TrimPrefix(arg, "--verbose=")
+			if b, err := strconv.ParseBool(raw); err == nil {
+				policy.Verbose = b
+			} else {
+				policy.Verbose = true
+			}
+			filtered = append(filtered, arg)
 		case arg == "--freshness-check-now" || arg == "--freshness-force":
 			policy.Force = true
 		case strings.HasPrefix(arg, "--freshness-check-now=") || strings.HasPrefix(arg, "--freshness-force="):
