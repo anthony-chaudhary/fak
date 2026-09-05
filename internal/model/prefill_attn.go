@@ -51,10 +51,13 @@ func preparePrefillAttention(cache *KVCache, layer int, rawKey, key, value []flo
 // score soft-cap; zero keeps Llama-family scores unchanged.
 func attnPrefillInto(attnOut, Q, Kl, Vl []float32, P, base, nH, hd, w, grp, W, layer int, scale, attnCap float32, scoreDot func(a, b []float32) float32, obs AttnObserver) {
 	units := P * nH
-	maxPos := base + P // widest scores row in this panel
+	maxPos := base + P
+	// The last query has the widest active row: full prefix for W<0,
+	// otherwise at most W positions. Keep scheduling and score order unchanged.
+	scoreWidth := maxPos - windowLoContig(maxPos, maxPos-1, W)
 
 	work := func(wkr, nw int) {
-		scores := make([]float32, maxPos) // one scratch per worker, resliced per unit
+		scores := make([]float32, scoreWidth) // one scratch per worker, resliced per unit
 		for u := wkr; u < units; u += nw {
 			t := u / nH
 			h := u % nH
