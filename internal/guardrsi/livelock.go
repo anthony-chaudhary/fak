@@ -12,6 +12,14 @@ const (
 	LivelockSchema           = "guardrsi.livelock/1"
 	LivelockEvent            = "LIVELOCK_DETECTED"
 	DefaultLivelockThreshold = 3
+	// CargoCultPrefixSchema versions the cargo-cult command prefixing detection
+	// record emitted when a leading advisory/recovery sub-command repeats across
+	// consecutive tool calls.
+	CargoCultPrefixSchema = "guardrsi.cargo-cult-prefix/1"
+	CargoCultPrefixEvent  = "CARGO_CULT_PREFIX_DETECTED"
+	// SuggestedChangeCargoCultPrefix is the recommended actionable change when an
+	// agent repeatedly prefixes substantive commands with advisory/recovery commands.
+	SuggestedChangeCargoCultPrefix = "change_approach_remove_cargo_cult_command_prefix"
 	// RefusalCheckpointSchema versions the typed recovery checkpoint nested in a
 	// livelock envelope. It is deliberately additive to LivelockSchema: existing
 	// callers still receive the advisory/fuse fields, while recovery-aware callers
@@ -72,6 +80,23 @@ type LivelockObservation struct {
 	// callers that know target/effect boundaries should always supply the sharper
 	// identity so genuinely different routes remain distinct.
 	SemanticIdentity string
+	// Command is an optional direct shell command string. Supplying it lets the
+	// detector decompose compound shell commands (e.g. splitting on ';' or '&&')
+	// and track repetition of leading advisory/recovery sub-commands across consecutive turns.
+	Command string
+	// RawArgs is optional raw tool arguments (JSON or plain string) from which
+	// a command string can be extracted if Command is omitted.
+	RawArgs string
+}
+
+// CargoCultPrefixRecord is the typed cargo-cult prefix record emitted when a
+// leading advisory/recovery sub-command repeats across consecutive compound commands.
+type CargoCultPrefixRecord struct {
+	Schema      string `json:"schema"`
+	Event       string `json:"event"`
+	Prefix      string `json:"prefix"`
+	RepeatCount int    `json:"repeat_count"`
+	NextAction  string `json:"next_action"`
 }
 
 // RefusalCheckpoint is the typed same-turn recovery contract emitted on the
@@ -112,6 +137,11 @@ type LivelockEnvelope struct {
 	// It does not weaken the DENY; it changes the control response from another
 	// terminal-looking denial into an explicit recoverable pause contract.
 	Checkpoint *RefusalCheckpoint `json:"checkpoint,omitempty"`
+	// CommandPrefix and Prefix are the extracted leading sub-command when a compound
+	// command prefix repeat is detected.
+	CommandPrefix   string                 `json:"command_prefix,omitempty"`
+	Prefix          string                 `json:"prefix,omitempty"`
+	CargoCultPrefix *CargoCultPrefixRecord `json:"cargo_cult_prefix,omitempty"`
 	// Fuse is true once the consecutive run reaches the fuse count (>= advisory
 	// threshold). It tells the caller the loop must be broken now — an admitted call
 	// carrying Fuse should be converted into a hard refusal rather than admitted
@@ -131,13 +161,20 @@ type livelockRun struct {
 	last  LivelockObservation
 }
 
+type prefixRun struct {
+	prefix string
+	count  int
+	last   LivelockObservation
+}
+
 // LivelockDetector tracks consecutive identical tool-call outcomes per trace. It is intentionally
 // small and caller-synchronized; gateway guards it with its server mutex.
 type LivelockDetector struct {
-	threshold int
-	fuse      int
-	abort     int
-	byTrace   map[string]livelockRun
+	threshold     int
+	fuse          int
+	abort         int
+	byTrace       map[string]livelockRun
+	prefixByTrace map[string]prefixRun
 }
 
 func NewLivelockDetector(threshold int) *LivelockDetector {
@@ -145,10 +182,11 @@ func NewLivelockDetector(threshold int) *LivelockDetector {
 		threshold = DefaultLivelockThreshold
 	}
 	return &LivelockDetector{
-		threshold: threshold,
-		fuse:      threshold * DefaultLivelockFuseFactor,
-		abort:     threshold * DefaultLivelockAbortFactor,
-		byTrace:   map[string]livelockRun{},
+		threshold:     threshold,
+		fuse:          threshold * DefaultLivelockFuseFactor,
+		abort:         threshold * DefaultLivelockAbortFactor,
+		byTrace:       map[string]livelockRun{},
+		prefixByTrace: map[string]prefixRun{},
 	}
 }
 
@@ -210,6 +248,9 @@ func (d *LivelockDetector) Clear(trace string) {
 		return
 	}
 	delete(d.byTrace, trace)
+	if d.prefixByTrace != nil {
+		delete(d.prefixByTrace, trace)
+	}
 }
 
 func (d *LivelockDetector) ObserveFailure(obs LivelockObservation) (LivelockEnvelope, bool) {
@@ -224,6 +265,12 @@ func (d *LivelockDetector) ObserveAllowed(obs LivelockObservation) (LivelockEnve
 func (d *LivelockDetector) ObserveAdmitted(obs LivelockObservation) (LivelockEnvelope, bool) {
 	if strings.TrimSpace(obs.Verdict) == "" {
 		obs.Verdict = "ALLOW"
+	}
+	traceID := strings.TrimSpace(obs.TraceID)
+	if d != nil && traceID != "" && d.byTrace != nil {
+		if run, ok := d.byTrace[traceID]; ok && isRefusalObservation(run.last) {
+			delete(d.byTrace, traceID)
+		}
 	}
 	return d.observe(obs)
 }
@@ -250,13 +297,50 @@ func (d *LivelockDetector) observe(obs LivelockObservation) (LivelockEnvelope, b
 	if d.byTrace == nil {
 		d.byTrace = map[string]livelockRun{}
 	}
+	if d.prefixByTrace == nil {
+		d.prefixByTrace = map[string]prefixRun{}
+	}
 	obs.TraceID = strings.TrimSpace(obs.TraceID)
 	obs.Tool = strings.TrimSpace(obs.Tool)
+	obs.Command = strings.TrimSpace(obs.Command)
+	obs.RawArgs = strings.TrimSpace(obs.RawArgs)
 	obs.ArgsDigest = strings.TrimSpace(obs.ArgsDigest)
+	if obs.ArgsDigest == "" {
+		if obs.Command != "" {
+			obs.ArgsDigest = ArgsDigest(obs.Command)
+		} else if obs.RawArgs != "" {
+			obs.ArgsDigest = ArgsDigest(obs.RawArgs)
+		}
+	}
+	if obs.Tool == "" && obs.Command != "" {
+		obs.Tool = "Bash"
+	}
 	obs.Verdict = strings.ToUpper(strings.TrimSpace(obs.Verdict))
 	obs.Reason = strings.TrimSpace(obs.Reason)
 	obs.Disposition = strings.TrimSpace(obs.Disposition)
 	obs.SemanticIdentity = strings.TrimSpace(obs.SemanticIdentity)
+
+	// Cargo-cult prefix extraction and tracking across consecutive tool calls.
+	cmd := extractCommand(obs)
+	prefix, _, isCompound := DecomposeCompoundCommand(cmd)
+	isCargoCultCandidate := isCompound && IsAdvisoryOrRecoveryCommand(prefix)
+
+	var pRun prefixRun
+	if isCargoCultCandidate {
+		pRun = d.prefixByTrace[obs.TraceID]
+		if strings.EqualFold(pRun.prefix, prefix) {
+			if d.abort <= 0 || pRun.count < d.abort+1 {
+				pRun.count++
+			}
+			pRun.last = obs
+		} else {
+			pRun = prefixRun{prefix: prefix, count: 1, last: obs}
+		}
+		d.prefixByTrace[obs.TraceID] = pRun
+	} else {
+		delete(d.prefixByTrace, obs.TraceID)
+	}
+
 	key, semanticIdentity := livelockKey(obs)
 	run := d.byTrace[obs.TraceID]
 	if run.key == key {
@@ -272,6 +356,42 @@ func (d *LivelockDetector) observe(obs LivelockObservation) (LivelockEnvelope, b
 	}
 	d.byTrace[obs.TraceID] = run
 	checkpoint := semanticRefusalCheckpoint(obs, semanticIdentity, run.count)
+
+	if isCargoCultCandidate && pRun.count >= d.threshold && run.count < d.threshold {
+		reason := obs.Reason
+		if reason == "" {
+			reason = "CARGO_CULT_PREFIX"
+		}
+		prefixHash := failureHash("cargo-cult-prefix\x00" + strings.ToLower(prefix))
+		record := &CargoCultPrefixRecord{
+			Schema:      CargoCultPrefixSchema,
+			Event:       CargoCultPrefixEvent,
+			Prefix:      prefix,
+			RepeatCount: pRun.count,
+			NextAction:  "remove leading advisory/recovery sub-command prefix and execute substantive command directly",
+		}
+		return LivelockEnvelope{
+			Schema:           LivelockSchema,
+			Event:            CargoCultPrefixEvent,
+			TraceID:          obs.TraceID,
+			Tool:             obs.Tool,
+			ArgsDigest:       obs.ArgsDigest,
+			FailureHash:      prefixHash,
+			Verdict:          obs.Verdict,
+			Reason:           reason,
+			Disposition:      obs.Disposition,
+			RepeatCount:      pRun.count,
+			SuggestedChange:  SuggestedChangeCargoCultPrefix,
+			IdentityKind:     "cargo_cult_prefix",
+			SemanticIdentity: prefixHash,
+			CommandPrefix:    prefix,
+			Prefix:           prefix,
+			CargoCultPrefix:  record,
+			Fuse:             d.fuse > 0 && pRun.count >= d.fuse,
+			Escalate:         d.abort > 0 && pRun.count >= d.abort,
+		}, true
+	}
+
 	if run.count < d.threshold && checkpoint == nil {
 		return LivelockEnvelope{}, false
 	}
@@ -279,7 +399,7 @@ func (d *LivelockDetector) observe(obs LivelockObservation) (LivelockEnvelope, b
 	if semanticIdentity != "" {
 		identityKind = "semantic_refusal"
 	}
-	return LivelockEnvelope{
+	env := LivelockEnvelope{
 		Schema:           LivelockSchema,
 		Event:            LivelockEvent,
 		TraceID:          obs.TraceID,
@@ -296,13 +416,27 @@ func (d *LivelockDetector) observe(obs LivelockObservation) (LivelockEnvelope, b
 		Checkpoint:       checkpoint,
 		Fuse:             d.fuse > 0 && run.count >= d.fuse,
 		Escalate:         d.abort > 0 && run.count >= d.abort,
-	}, true
+	}
+	if isCargoCultCandidate && pRun.count >= d.threshold {
+		env.CommandPrefix = prefix
+		env.Prefix = prefix
+		env.CargoCultPrefix = &CargoCultPrefixRecord{
+			Schema:      CargoCultPrefixSchema,
+			Event:       CargoCultPrefixEvent,
+			Prefix:      prefix,
+			RepeatCount: pRun.count,
+			NextAction:  "remove leading advisory/recovery sub-command prefix and execute substantive command directly",
+		}
+	}
+	return env, true
 }
 
 func livelockKey(obs LivelockObservation) (key, semanticIdentity string) {
 	if isRefusalObservation(obs) {
 		source := strings.TrimSpace(obs.SemanticIdentity)
-		if source == "" && strings.EqualFold(obs.Reason, "SELF_MODIFY") {
+		if source != "" {
+			source = strings.ToUpper(obs.Reason) + "\x00" + strings.ToLower(obs.Tool) + "\x00" + source
+		} else if strings.EqualFold(obs.Reason, "SELF_MODIFY") {
 			// The gateway currently has only the reason/tool projection at this seam:
 			// arguments are content-free digests, so the guarded target cannot be
 			// recovered here. Grouping SELF_MODIFY by (reason, tool) is a conservative
@@ -312,10 +446,14 @@ func livelockKey(obs LivelockObservation) (key, semanticIdentity string) {
 		}
 		if source != "" {
 			semanticIdentity = failureHash("semantic-refusal\x00" + source)
-			return "semantic-refusal\x00" + semanticIdentity + "\x00" + obs.Verdict + "\x00" + strings.ToUpper(obs.Reason), semanticIdentity
+			return "semantic-refusal\x00" + semanticIdentity + "\x00" + obs.Verdict + "\x00" + strings.ToUpper(obs.Reason) + "\x00" + strings.ToLower(obs.Tool), semanticIdentity
 		}
 	}
-	return obs.Tool + "\x00" + obs.ArgsDigest + "\x00" + obs.Verdict + "\x00" + obs.Reason + "\x00" + obs.Disposition, ""
+	key = obs.Tool + "\x00" + obs.ArgsDigest + "\x00" + obs.Verdict + "\x00" + obs.Reason + "\x00" + obs.Disposition
+	if obs.SemanticIdentity != "" {
+		key += "\x00" + obs.SemanticIdentity
+	}
+	return key, ""
 }
 
 func isRefusalObservation(obs LivelockObservation) bool {
@@ -370,4 +508,104 @@ func suggestedLivelockChange(obs LivelockObservation, checkpoint bool) string {
 	default:
 		return "change_approach_fetch_merge_escalate_or_not_yet_with_witness"
 	}
+}
+
+// DecomposeCompoundCommand splits a shell command on the first ';' or '&&' outside quotes,
+// returning the leading prefix sub-command, the trailing suffix, and true if compound.
+func DecomposeCompoundCommand(cmd string) (prefix, suffix string, isCompound bool) {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return "", "", false
+	}
+	inSingle := false
+	inDouble := false
+	escaped := false
+	for i := 0; i < len(cmd); i++ {
+		c := cmd[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if c == '\\' {
+			escaped = true
+			continue
+		}
+		if c == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if c == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
+		}
+		if !inSingle && !inDouble {
+			if c == ';' {
+				if i+1 < len(cmd) && cmd[i+1] == ';' {
+					i++
+					continue
+				}
+				p := strings.TrimSpace(cmd[:i])
+				s := strings.TrimSpace(cmd[i+1:])
+				if p != "" && s != "" {
+					return p, s, true
+				}
+			}
+			if c == '&' && i+1 < len(cmd) && cmd[i+1] == '&' {
+				p := strings.TrimSpace(cmd[:i])
+				s := strings.TrimSpace(cmd[i+2:])
+				if p != "" && s != "" {
+					return p, s, true
+				}
+			}
+		}
+	}
+	return "", "", false
+}
+
+// IsAdvisoryOrRecoveryCommand reports whether a shell command or prefix matches
+// advisory or recovery patterns in the fak/dos ecosystem.
+func IsAdvisoryOrRecoveryCommand(cmd string) bool {
+	s := strings.ToLower(strings.TrimSpace(cmd))
+	if s == "" {
+		return false
+	}
+	if strings.HasPrefix(s, "dos ") ||
+		strings.HasPrefix(s, "fak recover") ||
+		strings.HasPrefix(s, "fak doctor") ||
+		strings.HasPrefix(s, "fak man") ||
+		strings.HasPrefix(s, "fak help") ||
+		strings.Contains(s, "wedge") ||
+		strings.Contains(s, "recover") ||
+		strings.Contains(s, "--explain") ||
+		strings.Contains(s, "advisory") ||
+		strings.Contains(s, "check-reason") ||
+		strings.Contains(s, "check_reason") ||
+		strings.Contains(s, "refuse-reasons") ||
+		strings.Contains(s, "refuse_reasons") ||
+		strings.Contains(s, "cargo") ||
+		strings.Contains(s, "prefix") {
+		return true
+	}
+	return false
+}
+
+func extractCommand(obs LivelockObservation) string {
+	if cmd := strings.TrimSpace(obs.Command); cmd != "" {
+		return cmd
+	}
+	raw := strings.TrimSpace(obs.RawArgs)
+	if raw == "" {
+		return ""
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(raw), &obj); err == nil {
+		for _, key := range []string{"command", "cmd", "input", "script"} {
+			if v, ok := obj[key]; ok {
+				if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+					return strings.TrimSpace(s)
+				}
+			}
+		}
+	}
+	return raw
 }

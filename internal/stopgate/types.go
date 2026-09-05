@@ -3,6 +3,8 @@ package stopgate
 import (
 	"fmt"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
 // Mode controls gate enforcement: off, shadow, or enforce.
@@ -156,6 +158,20 @@ func (d Decision) ShouldContinue() bool {
 	return d.Action == ActionContinue || (d.Blocked && d.ExitCode == 2)
 }
 
+// BoundaryRefusalReceipt records verified evidence of a boundary refusal from the capability floor.
+type BoundaryRefusalReceipt struct {
+	Tool        string         `json:"tool,omitempty"`
+	Reason      string         `json:"reason,omitempty"`      // abi.ReasonCode name or dos.toml refusal token
+	Disposition string         `json:"disposition,omitempty"` // TERMINAL, RETRYABLE, WAIT, etc.
+	Detail      string         `json:"detail,omitempty"`
+	Signature   string         `json:"signature,omitempty"`
+	Verified    bool           `json:"verified,omitempty"`
+	Token       string         `json:"token,omitempty"`       // optional legacy token
+	ReasonCode  abi.ReasonCode `json:"reason_code,omitempty"` // optional typed code
+	Terminal    bool           `json:"terminal,omitempty"`    // explicit assertion of terminal boundary
+	Transient   bool           `json:"transient,omitempty"`   // explicit assertion of transient hurdle
+}
+
 // BoundaryInput contains the telemetry and state for turn boundary adjudication.
 type BoundaryInput struct {
 	SessionID               string
@@ -169,4 +185,10 @@ type BoundaryInput struct {
 	WitnessBlockCount       int
 	FinalGate               func() (satisfied bool, missingWitness string)
 	StopHookActive          bool
+
+	// Verified boundary refusal evidence required when NotedNoAllowedPath is true.
+	RefusalReceipt         *BoundaryRefusalReceipt
+	BoundaryRefusalReceipt *BoundaryRefusalReceipt
+	RefusalToken           string
+	ReasonCode             abi.ReasonCode
 }

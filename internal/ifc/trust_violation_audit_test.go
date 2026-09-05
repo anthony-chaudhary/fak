@@ -190,3 +190,29 @@ func TestFindExternalDestinationDeterministic(t *testing.T) {
 		t.Fatalf("expected deterministic key 'endpoint', got %q (%q)", k, val)
 	}
 }
+
+func TestLedgerProvenanceBaseTraceDeterministicDescending(t *testing.T) {
+	led := NewLedgerCap(10)
+
+	base := "sess-abc"
+	led.RaiseWithProvenance(TurnTrace(base, 1), abi.TaintTainted, TaintProvenance{
+		Level:      abi.TaintTainted,
+		SourceTool: "tool_turn1",
+	})
+	led.RaiseWithProvenance(TurnTrace(base, 3), abi.TaintTainted, TaintProvenance{
+		Level:      abi.TaintTainted,
+		SourceTool: "tool_turn3",
+	})
+	led.RaiseWithProvenance(TurnTrace(base, 2), abi.TaintTainted, TaintProvenance{
+		Level:      abi.TaintTainted,
+		SourceTool: "tool_turn2",
+	})
+
+	// Provenance for base should deterministically pick the latest turn (turn 3)
+	for i := 0; i < 20; i++ {
+		p := led.Provenance(base)
+		if p.SourceTool != "tool_turn3" {
+			t.Fatalf("iteration %d: expected latest turn tool_turn3, got %q", i, p.SourceTool)
+		}
+	}
+}

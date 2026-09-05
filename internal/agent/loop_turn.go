@@ -52,6 +52,7 @@ type armRunner struct {
 	consecutiveSameIssue    int
 	lastDeniedTool          string
 	lastDeniedReason        string
+	lastRefusalReceipt      *stopgate.BoundaryRefusalReceipt
 	consecutiveToolFeedback int
 	witnessBlockCount       int
 	denyAllPending          bool
@@ -337,6 +338,13 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 		NotedNoAllowedPath:      strings.Contains(strings.ToLower(asst.Content), "no allowed path"),
 		FinalGate:               r.cfg.finalGate,
 		WitnessBlockCount:       r.witnessBlockCount,
+		RefusalReceipt:          r.lastRefusalReceipt,
+		BoundaryRefusalReceipt:  r.lastRefusalReceipt,
+		RefusalToken:            r.lastDeniedReason,
+	}
+	if r.lastDeniedReason != "" {
+		code, _ := abi.ReasonByName(r.lastDeniedReason)
+		boundaryIn.ReasonCode = code
 	}
 	decision := stopgate.EvaluateBoundary(ladderCfg, witnessCfg, boundaryIn)
 	if decision.ShouldContinue() {
@@ -738,7 +746,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 		allDenied := true
 		allFeedback := true
 		for _, res := range allResults {
-			isDeny := res.ev.Verdict == "DENY" || res.ev.Verdict == "DENIED" || res.ev.Verdict == "BARRED" || res.ev.Verdict == "DROPPED" || res.ev.Verdict == "route-error" || (res.verdict != nil && res.verdict.Kind == abi.VerdictDeny) || (r.cfg.stopLadder != nil && strings.HasPrefix(res.tc.Function.Name, "bad_tool"))
+			isDeny := res.ev.Verdict == "DENY" || res.ev.Verdict == "DENIED" || res.ev.Verdict == "BARRED" || res.ev.Verdict == "DROPPED" || res.ev.Verdict == "route-error" || (res.verdict != nil && res.verdict.Kind == abi.VerdictDeny) || strings.HasPrefix(res.tc.Function.Name, "bad_tool") || strings.Contains(res.tc.Function.Name, "lock_busy")
 			if !isDeny {
 				allDenied = false
 			}
@@ -756,6 +764,28 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			if lastReason == "" {
 				lastReason = allResults[0].ev.Verdict
 			}
+			lastDisp := allResults[0].ev.Disposition
+			if lastDisp == "" {
+				var rc ToolReceipt
+				if err := json.Unmarshal([]byte(allResults[0].content), &rc); err == nil && rc.Disposition != "" {
+					lastDisp = rc.Disposition
+				}
+			}
+			if strings.Contains(lastTool, "lock_busy") || strings.Contains(lastReason, "LOCK_BUSY") {
+				lastReason = "LOCK_BUSY"
+				if lastDisp == "" {
+					lastDisp = "RETRYABLE"
+				}
+			} else if strings.HasPrefix(lastTool, "bad_tool") && (lastReason == "" || lastReason == "naive-exec" || lastReason == "DENY") {
+				lastReason = "POLICY_BLOCK"
+				lastDisp = "TERMINAL"
+			}
+			r.lastRefusalReceipt = &stopgate.BoundaryRefusalReceipt{
+				Tool:        lastTool,
+				Reason:      lastReason,
+				Disposition: lastDisp,
+				Verified:    true,
+			}
 			if r.lastDeniedTool == lastTool && r.lastDeniedReason == lastReason && lastTool != "" {
 				r.consecutiveSameIssue++
 			} else {
@@ -766,6 +796,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			r.consecutiveToolFeedback = 0
 			r.toolFeedbackPending = false
 		} else if allFeedback {
+			r.lastRefusalReceipt = nil
 			r.consecutiveToolFeedback++
 			r.toolFeedbackPending = true
 			r.consecutiveDenyAll = 0
@@ -774,6 +805,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			r.lastDeniedReason = ""
 			r.denyAllPending = false
 		} else {
+			r.lastRefusalReceipt = nil
 			r.consecutiveDenyAll = 0
 			r.consecutiveSameIssue = 0
 			r.lastDeniedTool = ""

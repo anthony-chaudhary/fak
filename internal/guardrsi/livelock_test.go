@@ -324,3 +324,322 @@ func TestLivelockDetectorResetsOnDifferentFailureAndClear(t *testing.T) {
 		t.Fatal("clear must reset the run")
 	}
 }
+
+func TestCargoCultPrefixDetection(t *testing.T) {
+	d := NewLivelockDetector(3)
+	trace := "session-prefix-1"
+
+	// 1. Prove compound shell commands with ';' and varying suffixes trigger prefix livelock detection on the 3rd repetition.
+	commands := []string{
+		"dos man wedge TRUST_VIOLATION --explain; fak worktree worker list",
+		"dos man wedge TRUST_VIOLATION --explain; fak orchestration plan --help",
+		"dos man wedge TRUST_VIOLATION --explain; go test ./...",
+	}
+
+	for i, cmd := range commands[:2] {
+		obs := LivelockObservation{
+			TraceID: trace,
+			Tool:    "Bash",
+			Command: cmd,
+			Verdict: "ALLOW",
+		}
+		if env, ok := d.ObserveAdmitted(obs); ok {
+			t.Fatalf("turn %d fired early: %+v", i+1, env)
+		}
+	}
+
+	// 3rd repetition with a different suffix: exact-match livelock does not fire,
+	// but cargo-cult prefix detection fires!
+	obs3 := LivelockObservation{
+		TraceID: trace,
+		Tool:    "Bash",
+		Command: commands[2],
+		Verdict: "ALLOW",
+	}
+	env, ok := d.ObserveAdmitted(obs3)
+	if !ok {
+		t.Fatal("third repeat with varying suffix failed to trigger cargo-cult prefix detection")
+	}
+	if env.Event != CargoCultPrefixEvent {
+		t.Fatalf("event = %q, want %q", env.Event, CargoCultPrefixEvent)
+	}
+	if env.RepeatCount != 3 {
+		t.Fatalf("repeat_count = %d, want 3", env.RepeatCount)
+	}
+	expectedPrefix := "dos man wedge TRUST_VIOLATION --explain"
+	if env.Prefix != expectedPrefix || env.CommandPrefix != expectedPrefix {
+		t.Fatalf("prefix = %q / command_prefix = %q, want %q", env.Prefix, env.CommandPrefix, expectedPrefix)
+	}
+	if env.CargoCultPrefix == nil {
+		t.Fatal("CargoCultPrefix record was nil")
+	}
+	if env.CargoCultPrefix.Event != CargoCultPrefixEvent || env.CargoCultPrefix.Prefix != expectedPrefix || env.CargoCultPrefix.RepeatCount != 3 {
+		t.Fatalf("CargoCultPrefix = %+v, want prefix=%q repeat=3", env.CargoCultPrefix, expectedPrefix)
+	}
+	if env.IdentityKind != "cargo_cult_prefix" {
+		t.Fatalf("identity_kind = %q, want cargo_cult_prefix", env.IdentityKind)
+	}
+	if env.SuggestedChange != SuggestedChangeCargoCultPrefix {
+		t.Fatalf("suggested_change = %q, want %q", env.SuggestedChange, SuggestedChangeCargoCultPrefix)
+	}
+
+	// 2. 4th turn with same prefix continues to fire with incremented repeat count
+	obs4 := LivelockObservation{
+		TraceID: trace,
+		Tool:    "Bash",
+		Command: "dos man wedge TRUST_VIOLATION --explain; git status",
+		Verdict: "ALLOW",
+	}
+	env4, ok := d.ObserveAdmitted(obs4)
+	if !ok || env4.RepeatCount != 4 || env4.Event != CargoCultPrefixEvent {
+		t.Fatalf("turn 4 = %+v ok=%v, want repeat=4 event=%s", env4, ok, CargoCultPrefixEvent)
+	}
+
+	// 3. Reset: substantive command without the prefix breaks consecutive run
+	obs5 := LivelockObservation{
+		TraceID: trace,
+		Tool:    "Bash",
+		Command: "git status",
+		Verdict: "ALLOW",
+	}
+	if env5, ok := d.ObserveAdmitted(obs5); ok {
+		t.Fatalf("substantive command without prefix fired: %+v", env5)
+	}
+
+	// Returning to prefix starts fresh at 1 (does not fire)
+	obs6 := LivelockObservation{
+		TraceID: trace,
+		Tool:    "Bash",
+		Command: "dos man wedge TRUST_VIOLATION --explain; git diff",
+		Verdict: "ALLOW",
+	}
+	if env6, ok := d.ObserveAdmitted(obs6); ok {
+		t.Fatalf("first repetition after reset fired early: %+v", env6)
+	}
+
+	// 4. Test '&&' compound commands with 'fak recover' prefix
+	d.Clear(trace)
+	recoverCommands := []string{
+		"fak recover TRUST_VIOLATION && fak worktree worker list",
+		"fak recover TRUST_VIOLATION && fak orchestration plan --help",
+		"fak recover TRUST_VIOLATION && fak buildcheck",
+	}
+	for i, cmd := range recoverCommands[:2] {
+		if env, ok := d.ObserveAdmitted(LivelockObservation{
+			TraceID: trace,
+			Tool:    "Bash",
+			Command: cmd,
+			Verdict: "ALLOW",
+		}); ok {
+			t.Fatalf("recover turn %d fired early: %+v", i+1, env)
+		}
+	}
+	envRec, ok := d.ObserveAdmitted(LivelockObservation{
+		TraceID: trace,
+		Tool:    "Bash",
+		Command: recoverCommands[2],
+		Verdict: "ALLOW",
+	})
+	if !ok {
+		t.Fatal("fak recover compound commands failed to trigger on third repeat")
+	}
+	if envRec.Event != CargoCultPrefixEvent || envRec.Prefix != "fak recover TRUST_VIOLATION" {
+		t.Fatalf("recover envelope = %+v, want event=%s prefix='fak recover TRUST_VIOLATION'", envRec, CargoCultPrefixEvent)
+	}
+
+	// 5. Test JSON RawArgs extraction
+	d.Clear(trace)
+	rawArgsCalls := []string{
+		`{"command":"dos man wedge TRUST_VIOLATION --explain; echo 1"}`,
+		`{"command":"dos man wedge TRUST_VIOLATION --explain; echo 2"}`,
+		`{"command":"dos man wedge TRUST_VIOLATION --explain; echo 3"}`,
+	}
+	for i, raw := range rawArgsCalls[:2] {
+		if env, ok := d.ObserveAdmitted(LivelockObservation{
+			TraceID: trace,
+			Tool:    "Bash",
+			RawArgs: raw,
+			Verdict: "ALLOW",
+		}); ok {
+			t.Fatalf("raw args turn %d fired early: %+v", i+1, env)
+		}
+	}
+	envRaw, ok := d.ObserveAdmitted(LivelockObservation{
+		TraceID: trace,
+		Tool:    "Bash",
+		RawArgs: rawArgsCalls[2],
+		Verdict: "ALLOW",
+	})
+	if !ok || envRaw.Event != CargoCultPrefixEvent || envRaw.RepeatCount != 3 {
+		t.Fatalf("raw args turn 3 = %+v ok=%v, want repeat=3 event=%s", envRaw, ok, CargoCultPrefixEvent)
+	}
+
+	// 6. Benign compound commands (e.g. cd /dir && ...) do NOT trigger cargo-cult prefixing
+	d.Clear(trace)
+	benignCommands := []string{
+		"cd /some/dir && make test",
+		"cd /some/dir && make build",
+		"cd /some/dir && git status",
+	}
+	for i, cmd := range benignCommands {
+		if env, ok := d.ObserveAdmitted(LivelockObservation{
+			TraceID: trace,
+			Tool:    "Bash",
+			Command: cmd,
+			Verdict: "ALLOW",
+		}); ok {
+			t.Fatalf("benign compound command turn %d falsely triggered prefix livelock: %+v", i+1, env)
+		}
+	}
+}
+
+func TestDecomposeCompoundCommand(t *testing.T) {
+	tests := []struct {
+		input      string
+		wantPrefix string
+		wantSuffix string
+		wantComp   bool
+	}{
+		{"dos man wedge TRUST_VIOLATION --explain; fak worktree worker list", "dos man wedge TRUST_VIOLATION --explain", "fak worktree worker list", true},
+		{"fak recover TRUST_VIOLATION && fak orchestration plan", "fak recover TRUST_VIOLATION", "fak orchestration plan", true},
+		{"echo 'foo; bar' && git status", "echo 'foo; bar'", "git status", true},
+		{"echo \"foo && bar\"; git status", "echo \"foo && bar\"", "git status", true},
+		{"git status", "", "", false},
+		{"", "", "", false},
+		{"; git status", "", "", false},
+		{"git status;", "", "", false},
+	}
+	for _, tt := range tests {
+		p, s, comp := DecomposeCompoundCommand(tt.input)
+		if comp != tt.wantComp || p != tt.wantPrefix || s != tt.wantSuffix {
+			t.Errorf("DecomposeCompoundCommand(%q) = (%q, %q, %v), want (%q, %q, %v)",
+				tt.input, p, s, comp, tt.wantPrefix, tt.wantSuffix, tt.wantComp)
+		}
+	}
+}
+
+func TestLivelockDetectorTargetAwarenessDistinguishesFiles(t *testing.T) {
+	d := NewLivelockDetector(DefaultLivelockThreshold)
+	trace := "session-target-aware"
+
+	obsFileA := LivelockObservation{
+		TraceID:          trace,
+		Tool:             "file_editor",
+		Verdict:          "DENY",
+		Reason:           "POLICY_BLOCK",
+		Disposition:      "RETRYABLE",
+		SemanticIdentity: "internal/guardrsi/livelock.go",
+	}
+	obsFileB := LivelockObservation{
+		TraceID:          trace,
+		Tool:             "file_editor",
+		Verdict:          "DENY",
+		Reason:           "POLICY_BLOCK",
+		Disposition:      "RETRYABLE",
+		SemanticIdentity: "internal/guardrsi/recovery.go",
+	}
+
+	// 1. Two failures on file A (repeat 1 and 2, below threshold 3).
+	for i := 1; i <= 2; i++ {
+		if env, ok := d.ObserveFailure(obsFileA); ok {
+			t.Fatalf("file A failure %d fired early: %+v", i, env)
+		}
+	}
+
+	// 2. Failures on file B must not conflate with file A's failure streak.
+	// If files were conflated, the first failure on file B would count as failure 3
+	// and fire livelock.
+	for i := 1; i <= 2; i++ {
+		if env, ok := d.ObserveFailure(obsFileB); ok {
+			t.Fatalf("file B failure %d fired early: %+v", i, env)
+		}
+	}
+
+	// 3. A 3rd consecutive failure on file B reaches threshold and fires livelock for file B.
+	envB, ok := d.ObserveFailure(obsFileB)
+	if !ok {
+		t.Fatal("3rd consecutive failure on file B did not fire livelock")
+	}
+	if envB.RepeatCount != 3 {
+		t.Fatalf("file B repeat count = %d, want 3", envB.RepeatCount)
+	}
+	if envB.Event != LivelockEvent {
+		t.Fatalf("file B event = %q, want %q", envB.Event, LivelockEvent)
+	}
+	if envB.IdentityKind != "semantic_refusal" || envB.SemanticIdentity == "" {
+		t.Fatalf("file B identity = %q/%q, want semantic_refusal", envB.IdentityKind, envB.SemanticIdentity)
+	}
+
+	// 4. Switching back to file A starts a distinct run for file A (repeat count = 1, does not fire).
+	envA, ok := d.ObserveFailure(obsFileA)
+	if ok {
+		t.Fatalf("file A after file B fired early: %+v", envA)
+	}
+
+	// 5. Subsequent consecutive failures on file A reach threshold independently.
+	for i := 2; i <= 3; i++ {
+		env, ok := d.ObserveFailure(obsFileA)
+		if i < 3 && ok {
+			t.Fatalf("file A repetition %d fired early: %+v", i, env)
+		}
+		if i == 3 {
+			if !ok || env.RepeatCount != 3 {
+				t.Fatalf("file A 3rd repeat = %+v, ok=%v, want repeat=3", env, ok)
+			}
+			if env.SemanticIdentity == envB.SemanticIdentity {
+				t.Fatalf("file A and file B must have distinct semantic identities: got %q", env.SemanticIdentity)
+			}
+		}
+	}
+}
+
+func TestLivelockDetectorAdmittedCallResetsRefusalStreak(t *testing.T) {
+	d := NewLivelockDetector(DefaultLivelockThreshold)
+	trace := "session-admitted-reset"
+
+	refusal := LivelockObservation{
+		TraceID:          trace,
+		Tool:             "file_editor",
+		Verdict:          "DENY",
+		Reason:           "POLICY_BLOCK",
+		Disposition:      "RETRYABLE",
+		SemanticIdentity: "internal/guardrsi/livelock.go",
+	}
+
+	// 1. Two consecutive refusals (streak = 2, threshold = 3).
+	for i := 1; i <= 2; i++ {
+		if env, ok := d.ObserveFailure(refusal); ok {
+			t.Fatalf("refusal %d fired early: %+v", i, env)
+		}
+	}
+
+	// 2. An admitted call representing a forward-progressing recovery action.
+	admitted := LivelockObservation{
+		TraceID:          trace,
+		Tool:             "file_editor",
+		Verdict:          "ALLOW",
+		SemanticIdentity: "internal/guardrsi/livelock.go",
+	}
+	if env, ok := d.ObserveAdmitted(admitted); ok {
+		t.Fatalf("admitted recovery action fired unexpectedly: %+v", env)
+	}
+
+	// 3. Next refusal must start a fresh refusal streak (count=1), not fire as repeat 3.
+	if env, ok := d.ObserveFailure(refusal); ok {
+		t.Fatalf("refusal after admitted action fired livelock (streak was not reset): %+v", env)
+	}
+
+	// 4. Second refusal after recovery (count=2, does not fire).
+	if env, ok := d.ObserveFailure(refusal); ok {
+		t.Fatalf("second refusal after recovery fired early: %+v", env)
+	}
+
+	// 5. Third consecutive refusal after recovery reaches threshold=3 and fires livelock.
+	env, ok := d.ObserveFailure(refusal)
+	if !ok {
+		t.Fatal("third refusal after recovery did not fire livelock")
+	}
+	if env.RepeatCount != 3 {
+		t.Fatalf("repeat count = %d, want 3", env.RepeatCount)
+	}
+}

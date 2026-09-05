@@ -179,8 +179,8 @@ func assertGuardTraceEndToEnd(t *testing.T, provider string) {
 	if int(sum.Denied) != exp.Denied {
 		t.Errorf("summary Denied = %d, want %d", sum.Denied, exp.Denied)
 	}
-	if int(sum.Allowed) < exp.Allowed {
-		t.Errorf("summary Allowed = %d, want >= %d (proposed-call allows)", sum.Allowed, exp.Allowed)
+	if int(sum.Allowed+sum.Transformed) < exp.Allowed {
+		t.Errorf("summary Allowed+Transformed = %d, want >= %d (proposed-call allows)", sum.Allowed+sum.Transformed, exp.Allowed)
 	}
 	for reason, want := range exp.ByReason {
 		if got := int(sum.ByReason[reason]); got != want {

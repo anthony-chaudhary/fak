@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -359,22 +360,50 @@ func (v *ExecutionVerifier) expectSelectors(ctx context.Context, dir, ref, kind 
 }
 
 func (v *ExecutionVerifier) runSelector(ctx context.Context, dir, ref, kind string, sel ExecutionSelector) ExecutionEvidence {
-	out, code, err := v.commandRun()(ctx, dir, sel.Command...)
-	ev := ExecutionEvidence{
-		Kind:     kind,
-		Ref:      ref,
-		Selector: selectorID(sel),
-		ExitCode: code,
-		Outcome:  "fail",
+	if v.run != nil && reflect.ValueOf(v.run).Pointer() != reflect.ValueOf(commandRunner).Pointer() {
+		out, code, err := v.run(ctx, dir, sel.Command...)
+		ev := ExecutionEvidence{
+			Kind:         kind,
+			Ref:          ref,
+			Selector:     selectorID(sel),
+			ExitCode:     code,
+			Outcome:      "fail",
+			StdoutSHA256: sha256Hex([]byte(out)),
+			StdoutBytes:  int64(len(out)),
+		}
+		if code == 0 {
+			ev.Outcome = "pass"
+		}
+		if err != nil {
+			ev.Outcome = "error"
+			ev.Error = err.Error()
+		} else if code == -1 && strings.TrimSpace(out) != "" {
+			ev.Error = strings.TrimSpace(out)
+		}
+		return ev
 	}
-	if code == 0 {
+
+	receipt, _, _, err := RunPipeWitness(ctx, dir, sel.Command...)
+	ev := ExecutionEvidence{
+		Kind:         kind,
+		Ref:          ref,
+		Selector:     selectorID(sel),
+		ExitCode:     receipt.ExitCode,
+		Outcome:      "fail",
+		StdoutSHA256: receipt.StdoutSHA256,
+		StderrSHA256: receipt.StderrSHA256,
+		StdoutBytes:  receipt.StdoutBytes,
+		StderrBytes:  receipt.StderrBytes,
+	}
+	if receipt.ExitCode == 0 {
 		ev.Outcome = "pass"
 	}
 	if err != nil {
 		ev.Outcome = "error"
 		ev.Error = err.Error()
-	} else if code == -1 && strings.TrimSpace(out) != "" {
-		ev.Error = strings.TrimSpace(out)
+	} else if receipt.Error != "" {
+		ev.Outcome = "error"
+		ev.Error = receipt.Error
 	}
 	return ev
 }

@@ -188,3 +188,83 @@ func TestStopgateDenyAllGiveUpStandDownInAgentLoop(t *testing.T) {
 		t.Fatalf("expected give-up stand-down final answer, got %q", metrics.FinalAnswer)
 	}
 }
+
+func TestStopgateNoAllowedPathRefusedWithoutVerifiedReceiptInAgentLoop(t *testing.T) {
+	// Turn 1: Model immediately surrenders with "no allowed path" without any prior tool denial
+	// (unverified surrender note). Stopgate must refuse DispCleanWrapup and force continuation.
+	// Turn 2: Model completes work after continuation.
+	witnessEnforce := stopgate.WitnessGateConfig{Mode: stopgate.ModeEnforce, Max: 3}
+	p := &stopgateTestPlanner{
+		answers: []Completion{
+			{
+				Message:      Message{Role: RoleAssistant, Content: "I am giving up; no allowed path."},
+				FinishReason: "stop",
+				Usage:        Usage{CompletionTokens: 1},
+			},
+			{
+				Message:      Message{Role: RoleAssistant, Content: "Successfully recovered and finished work."},
+				FinishReason: "stop",
+				Usage:        Usage{CompletionTokens: 1},
+			},
+		},
+	}
+
+	metrics, err := RunArm(context.Background(), p, "test task", false, 5, nil, WithWitnessGateConfig(witnessEnforce))
+	if err != nil {
+		t.Fatalf("RunArm failed: %v", err)
+	}
+
+	if metrics.FinalAnswer != "Successfully recovered and finished work." {
+		t.Fatalf("expected loop to refuse unverified no allowed path and continue to second turn, got %q", metrics.FinalAnswer)
+	}
+}
+
+func TestStopgateNoAllowedPathLockBusyRefusedCleanWrapup(t *testing.T) {
+	// Turn 1: Model encounters LOCK_BUSY (tool "bad_tool_lock_busy")
+	// Turn 2: Model attempts to wrap up with "no allowed path: LOCK_BUSY"
+	// Stopgate catches unwitnessed stop on transient hurdle LOCK_BUSY, refuses DispCleanWrapup,
+	// and injects auto-continue guidance (UnwitnessedNoAllowedPathMessage).
+	// Turn 3: Model continues and finishes with final answer.
+	p := &stopgateTestPlanner{
+		answers: []Completion{
+			{
+				Message: Message{Role: RoleAssistant, ToolCalls: []ToolCall{
+					{ID: "c1", Type: "function", Function: Func{Name: "bad_tool_lock_busy", Arguments: `{}`}},
+				}},
+				FinishReason: "tool_calls",
+				Usage:        Usage{CompletionTokens: 1},
+			},
+			{
+				Message:      Message{Role: RoleAssistant, Content: "I cannot proceed; no allowed path due to lock contention."},
+				FinishReason: "stop",
+				Usage:        Usage{CompletionTokens: 1},
+			},
+			{
+				Message:      Message{Role: RoleAssistant, Content: "Retried after backoff and completed successfully."},
+				FinishReason: "stop",
+				Usage:        Usage{CompletionTokens: 1},
+			},
+		},
+	}
+
+	ladderCfg := stopgate.DefaultLadderConfig()
+	metrics, err := RunArm(context.Background(), p, "test task", false, 5, nil, WithStopLadderConfig(ladderCfg))
+	if err != nil {
+		t.Fatalf("RunArm failed: %v", err)
+	}
+
+	// Verify that the loop continued past turn 2
+	var foundTransientNotice bool
+	for _, m := range p.seen {
+		if m.Role == RoleUser && strings.Contains(m.Content, "transient hurdle") {
+			foundTransientNotice = true
+			break
+		}
+	}
+	if !foundTransientNotice {
+		t.Fatalf("expected transient hurdle auto-continue guidance injected, messages: %+v", p.seen)
+	}
+	if metrics.FinalAnswer != "Retried after backoff and completed successfully." {
+		t.Fatalf("expected final answer after continuation, got %q", metrics.FinalAnswer)
+	}
+}

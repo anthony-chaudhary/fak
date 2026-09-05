@@ -13,11 +13,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/engine"
 )
 
 func newTestControlGateway(t *testing.T, cfg Config) *Server {
 	t.Helper()
+	abi.RegisterEngine("mock", engine.MockEngine)
 	if cfg.EngineID == "" {
 		cfg.EngineID = "mock"
 	}

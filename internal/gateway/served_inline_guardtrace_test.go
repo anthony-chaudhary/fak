@@ -259,7 +259,9 @@ func TestServedInlineGuardTrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read golden (run with UPDATE_GOLDEN=1 to create): %v", err)
 	}
-	if !bytes.Equal(bytes.TrimRight(want, "\n"), bytes.TrimRight(got, "\n")) {
+	wantNorm := bytes.TrimRight(bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n")), "\n")
+	gotNorm := bytes.TrimRight(bytes.ReplaceAll(got, []byte("\r\n"), []byte("\n")), "\n")
+	if !bytes.Equal(wantNorm, gotNorm) {
 		t.Errorf("report drifted from golden %s; re-run with UPDATE_GOLDEN=1 if intended", golden)
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
 func TestLadderThresholdNormalization(t *testing.T) {
@@ -233,6 +235,10 @@ func TestEvaluateBoundaryIntegration(t *testing.T) {
 	// 3. Noted no allowed path on clean stop -> clean wrapup
 	in = BoundaryInput{
 		NotedNoAllowedPath: true,
+		BoundaryRefusalReceipt: &BoundaryRefusalReceipt{
+			Reason:   "POLICY_BLOCK",
+			Verified: true,
+		},
 	}
 	dec = EvaluateBoundary(ladder, witness, in)
 	if dec.Disposition != DispCleanWrapup || dec.Action != ActionAllow {
@@ -243,6 +249,10 @@ func TestEvaluateBoundaryIntegration(t *testing.T) {
 	in = BoundaryInput{
 		ConsecutiveDenyAll: 10,
 		NotedNoAllowedPath: true,
+		BoundaryRefusalReceipt: &BoundaryRefusalReceipt{
+			Reason:   "POLICY_BLOCK",
+			Verified: true,
+		},
 	}
 	dec = EvaluateBoundary(ladder, witness, in)
 	if dec.Disposition != DispCleanWrapup || dec.Action != ActionAllow {
@@ -319,6 +329,10 @@ func TestStopgateNotedNoAllowedPathRequiresWitness(t *testing.T) {
 		in := BoundaryInput{
 			NotedNoAllowedPath: true,
 			FinalGate:          func() (bool, string) { return true, "" },
+			BoundaryRefusalReceipt: &BoundaryRefusalReceipt{
+				Reason:   "POLICY_BLOCK",
+				Verified: true,
+			},
 			WitnessClaim: &WitnessClaim{
 				Claimed:   true,
 				Witnessed: true,
@@ -329,6 +343,120 @@ func TestStopgateNotedNoAllowedPathRequiresWitness(t *testing.T) {
 		dec := EvaluateBoundary(ladder, witness, in)
 		if dec.Disposition != DispCleanWrapup || dec.ExitCode != 0 || dec.Action != ActionAllow {
 			t.Fatalf("want clean wrapup when witness is satisfied, got %+v", dec)
+		}
+	})
+}
+
+func TestStopgateNoAllowedPathWitnessedBoundaryRefusal(t *testing.T) {
+	ladder := DefaultLadderConfig()
+	witness := DefaultWitnessGateConfig()
+
+	// a) in.NotedNoAllowedPath = true with RefusalReceipt: &BoundaryRefusalReceipt{Reason: "LOCK_BUSY", Verified: true} -> refuses DispCleanWrapup, returns ActionContinue exit code 2
+	t.Run("lock_busy_refuses_clean_wrapup", func(t *testing.T) {
+		in := BoundaryInput{
+			NotedNoAllowedPath: true,
+			RefusalReceipt: &BoundaryRefusalReceipt{
+				Reason:   "LOCK_BUSY",
+				Verified: true,
+			},
+		}
+		dec := EvaluateBoundary(ladder, witness, in)
+		if dec.Disposition == DispCleanWrapup {
+			t.Fatalf("expected refusal of DispCleanWrapup on LOCK_BUSY, got: %+v", dec)
+		}
+		if dec.Action != ActionContinue || dec.ExitCode != 2 {
+			t.Fatalf("want ActionContinue with exit 2, got action=%s exit=%d", dec.Action, dec.ExitCode)
+		}
+		if dec.Signal != "STOP_UNWITNESSED" {
+			t.Fatalf("want Signal STOP_UNWITNESSED, got %q", dec.Signal)
+		}
+	})
+
+	// b) in.NotedNoAllowedPath = true with RefusalReceipt: nil -> refuses DispCleanWrapup, returns ActionContinue exit code 2
+	t.Run("nil_receipt_refuses_clean_wrapup", func(t *testing.T) {
+		in := BoundaryInput{
+			NotedNoAllowedPath: true,
+			RefusalReceipt:     nil,
+		}
+		dec := EvaluateBoundary(ladder, witness, in)
+		if dec.Disposition == DispCleanWrapup {
+			t.Fatalf("expected refusal of DispCleanWrapup on nil receipt, got: %+v", dec)
+		}
+		if dec.Action != ActionContinue || dec.ExitCode != 2 {
+			t.Fatalf("want ActionContinue with exit 2, got action=%s exit=%d", dec.Action, dec.ExitCode)
+		}
+		if dec.Signal != "STOP_UNWITNESSED" {
+			t.Fatalf("want Signal STOP_UNWITNESSED, got %q", dec.Signal)
+		}
+	})
+
+	// c) in.NotedNoAllowedPath = true with RefusalReceipt: &BoundaryRefusalReceipt{Reason: "POLICY_BLOCK", Verified: true, Disposition: "TERMINAL"} -> admits DispCleanWrapup exit code 0
+	t.Run("policy_block_admits_clean_wrapup", func(t *testing.T) {
+		in := BoundaryInput{
+			NotedNoAllowedPath: true,
+			RefusalReceipt: &BoundaryRefusalReceipt{
+				Reason:      "POLICY_BLOCK",
+				Verified:    true,
+				Disposition: "TERMINAL",
+			},
+		}
+		dec := EvaluateBoundary(ladder, witness, in)
+		if dec.Disposition != DispCleanWrapup || dec.Action != ActionAllow || dec.ExitCode != 0 {
+			t.Fatalf("want DispCleanWrapup with ActionAllow and exit 0, got: %+v", dec)
+		}
+	})
+
+	// d) IsTransientHurdle and IsTerminalBoundary table test
+	t.Run("transient_and_terminal_table_test", func(t *testing.T) {
+		transientCases := []struct {
+			reason      string
+			disposition string
+			want        bool
+		}{
+			{"LOCK_BUSY", "", true},
+			{"LOCK_BUSY", "RETRYABLE", true},
+			{"RATE_LIMITED", "", true},
+			{"COLLISION_RISK", "WAIT", true},
+			{"LEASE_HELD", "", true},
+			{"MISROUTE", "", true},
+			{"MALFORMED", "", true},
+			{"POLICY_BLOCK", "", false},
+			{"POLICY_BLOCK", "TERMINAL", false},
+			{"LOCK_BUSY", "TERMINAL", false}, // explicit TERMINAL overrides reason
+			{"TRUST_VIOLATION", "TERMINAL", false},
+			{"UNKNOWN_REASON", "", false},
+			{"UNKNOWN_REASON", "RETRYABLE", true},
+		}
+		for _, tc := range transientCases {
+			got := IsTransientHurdle(tc.reason, tc.disposition)
+			if got != tc.want {
+				t.Errorf("IsTransientHurdle(%q, %q) = %v; want %v", tc.reason, tc.disposition, got, tc.want)
+			}
+		}
+
+		terminalCases := []struct {
+			receipt *BoundaryRefusalReceipt
+			want    bool
+		}{
+			{nil, false},
+			{&BoundaryRefusalReceipt{Reason: "POLICY_BLOCK", Verified: false}, false},
+			{&BoundaryRefusalReceipt{Reason: "POLICY_BLOCK", Verified: true, Disposition: "TERMINAL"}, true},
+			{&BoundaryRefusalReceipt{Reason: "POLICY_BLOCK", Verified: true}, true},
+			{&BoundaryRefusalReceipt{Reason: "TRUST_VIOLATION", Verified: true}, true},
+			{&BoundaryRefusalReceipt{Reason: "SELF_MODIFY", Verified: true}, true},
+			{&BoundaryRefusalReceipt{Reason: "LOCK_BUSY", Verified: true}, false},
+			{&BoundaryRefusalReceipt{Reason: "LOCK_BUSY", Verified: true, Disposition: "RETRYABLE"}, false},
+			{&BoundaryRefusalReceipt{Reason: "CUSTOM", Verified: true, Terminal: true}, true},
+			{&BoundaryRefusalReceipt{Reason: "CUSTOM", Verified: true, Disposition: "TERMINAL"}, true},
+			{&BoundaryRefusalReceipt{Reason: "CUSTOM", Verified: true, Transient: true}, false},
+			{&BoundaryRefusalReceipt{ReasonCode: abi.ReasonPolicyBlock, Verified: true}, true},
+			{&BoundaryRefusalReceipt{ReasonCode: abi.ReasonRateLimited, Verified: true}, false},
+		}
+		for i, tc := range terminalCases {
+			got := IsTerminalBoundary(tc.receipt)
+			if got != tc.want {
+				t.Errorf("case %d: IsTerminalBoundary(%+v) = %v; want %v", i, tc.receipt, got, tc.want)
+			}
 		}
 	})
 }

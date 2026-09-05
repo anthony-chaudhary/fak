@@ -7593,6 +7593,16 @@
           "category": "incidental",
           "reason": "task result cryptographic pass witness proof field",
           "token": "WitnessProof"
+        },
+        {
+          "category": "incidental",
+          "reason": "metrics subtype constant",
+          "token": "SubtypeWitnessRefuted"
+        },
+        {
+          "category": "incidental",
+          "reason": "substring matching for refuted witness",
+          "token": "refut"
         }
       ],
       "id": "witness-proof",
@@ -7651,6 +7661,7 @@
         "SessionMoveProviderWitness",
         "StageAttest",
         "StageWitnessRequest",
+        "SubtypeWitnessRefuted",
         "TurnOutcomesFromWitness",
         "UNWITNESSED_DENOMINATOR",
         "UNWITNESSED_NARRATION_CLAIM",
@@ -7760,6 +7771,7 @@
         "readDurableDispatchWitnesses",
         "readGuardCompactionWitnesses",
         "recordGuardCompactionWitness",
+        "refut",
         "refutations",
         "refuted",
         "refutes",
@@ -9572,6 +9584,11 @@
           "category": "incidental",
           "reason": "loopgate helper adjudicating turns with trajectory receipts",
           "token": "AdjudicateTurnWithReceipts"
+        },
+        {
+          "category": "incidental",
+          "reason": "policy profile loader helper",
+          "token": "loadAndApplyPolicyWithProfileLocked"
         }
       ],
       "exclude": [
@@ -9720,6 +9737,7 @@
         "launchPostureReport",
         "launchPostureSchema",
         "liveToolPolicy",
+        "loadAndApplyPolicyWithProfileLocked",
         "manageParityPosture",
         "mergePolicy",
         "multi_capability",
@@ -14402,6 +14420,11 @@
           "category": "incidental",
           "reason": "context-plan-required lint package",
           "token": "ctxplanlint"
+        },
+        {
+          "category": "incidental",
+          "reason": "cargo cult prefix check",
+          "token": "isCargoCultCandidate"
         }
       ],
       "exclude": [
@@ -14565,6 +14588,7 @@
         "indexPlanSteps",
         "indexedPlanStep",
         "inspectCodexMarketplaceCandidate",
+        "isCargoCultCandidate",
         "knownFaultPlane",
         "listPlan",
         "measuredPlanner",
