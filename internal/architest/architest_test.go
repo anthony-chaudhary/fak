@@ -56,6 +56,8 @@ var tier = map[string]int{
 	"cmdutil":            2, // shared command benchmark/render helpers; composes benchids for deterministic synthetic token streams.
 	"ops":                4, // autonomous operations daemon and machine maintenance subsystem (#11156, #11158).
 	"observability":      2,
+	"observer":           1, // in-kernel observer worker pool for zero-cost step-by-step agent output interpretation (#11408).
+	"director":           3, // autonomous multi-agent roll-up digest for zero-self-report supervisor steering (#11411).
 	"studyreceipt":       1,
 	"stopgate":           1, // unified lifecycle stop gates across fak guard and fak agent (#11253); stdlib-only, off the hot path.
 	"abi":                0,
