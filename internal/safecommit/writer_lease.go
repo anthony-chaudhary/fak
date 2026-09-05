@@ -1,6 +1,7 @@
 package safecommit
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -43,8 +44,17 @@ const writerLeaseOwner = "fak-commit"
 // lease is a VALUE (a non-empty heldDetail for Result.Detail), never an error; err is
 // infrastructure only. On success the returned release drops the lease.
 func acquireWorktreeWriterLease(opts Options) (release func(), heldDetail string, err error) {
-	lease, lerr := safesync.AcquireWriterLease(opts.Dir, writerLeaseOwner, opts.Now, 0)
+	var lease *safesync.WriterLease
+	var lerr error
+	if opts.Lock.Timeout > 0 && !opts.Lock.NoWait {
+		lease, lerr = safesync.AcquireQueuedWriterLease(context.Background(), opts.Dir, writerLeaseOwner, opts.Now, 0, opts.Lock.Timeout)
+	} else {
+		lease, lerr = safesync.AcquireWriterLease(opts.Dir, writerLeaseOwner, opts.Now, 0)
+	}
 	if lerr != nil {
+		if errors.Is(lerr, safesync.ErrLeaseOwnerUnavailable) {
+			return nil, lerr.Error(), nil
+		}
 		var held *safesync.WriterLeaseHeldError
 		if errors.As(lerr, &held) {
 			return nil, held.Error(), nil

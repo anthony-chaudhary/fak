@@ -541,3 +541,100 @@ func BenchmarkConcurrentSafesyncUnderContention(b *testing.B) {
 		}
 	})
 }
+
+// TestAcquireQueuedSharedReadLeaseWaitsForExclusiveWriter verifies that
+// AcquireQueuedSharedReadLease waits for a brief exclusive write lease to finish
+// and acquires the shared read lease cleanly without failing (#11234/#11616).
+func TestAcquireQueuedSharedReadLeaseWaitsForExclusiveWriter(t *testing.T) {
+	clone := behindClone(t)
+	wl, err := AcquireWriterLease(clone, "exclusive-writer", nil, time.Minute)
+	if err != nil {
+		t.Fatalf("acquire writer lease: %v", err)
+	}
+
+	readerDone := make(chan struct{})
+	var rl *SharedReadLease
+	var rerr error
+
+	go func() {
+		defer close(readerDone)
+		rl, rerr = AcquireQueuedSharedReadLease(context.Background(), clone, "queued-reader", nil, time.Minute, 2*time.Second)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	if err := wl.Release(); err != nil {
+		t.Fatalf("release writer lease: %v", err)
+	}
+
+	<-readerDone
+	if rerr != nil {
+		t.Fatalf("queued reader error: %v", rerr)
+	}
+	if rl == nil {
+		t.Fatal("queued reader lease is nil")
+	}
+	if rl.Info().Owner != "queued-reader" {
+		t.Fatalf("unexpected reader owner: %s", rl.Info().Owner)
+	}
+	if rl.Info().Mode != "shared-read" {
+		t.Fatalf("unexpected reader mode: %s", rl.Info().Mode)
+	}
+	_ = rl.Release()
+}
+
+// TestAcquireQueuedSharedReadLeaseTimeout verifies that AcquireQueuedSharedReadLease
+// times out cleanly when the exclusive writer holds the lease past maxWait (#11234/#11616).
+func TestAcquireQueuedSharedReadLeaseTimeout(t *testing.T) {
+	clone := behindClone(t)
+	wl, err := AcquireWriterLease(clone, "blocking-writer", nil, time.Minute)
+	if err != nil {
+		t.Fatalf("acquire writer lease: %v", err)
+	}
+	defer func() { _ = wl.Release() }()
+
+	_, rerr := AcquireQueuedSharedReadLease(context.Background(), clone, "timeout-reader", nil, time.Minute, 60*time.Millisecond)
+	if rerr == nil {
+		t.Fatal("expected timeout error for queued reader, got nil")
+	}
+	var held *WriterLeaseHeldError
+	if !errors.As(rerr, &held) && !errors.Is(rerr, ErrLeaseOwnerUnavailable) {
+		t.Fatalf("expected WriterLeaseHeldError or ErrLeaseOwnerUnavailable, got %v", rerr)
+	}
+}
+
+// TestConcurrentSafesyncWithQueueWaitZeroFailures proves that concurrent
+// sync workers with QueueWait enabled complete with zero spurious refusals (#11234/#11616).
+func TestConcurrentSafesyncWithQueueWaitZeroFailures(t *testing.T) {
+	clone := behindClone(t)
+	const concurrent = 8
+	type workerResult struct {
+		id   int
+		info Assessment
+		err  error
+	}
+	results := make(chan workerResult, concurrent)
+
+	for i := 0; i < concurrent; i++ {
+		go func(id int) {
+			opts := Options{
+				Repo:       clone,
+				Remote:     "origin",
+				Branch:     "work",
+				LeaseOwner: fmt.Sprintf("parallel-worker-%d", id),
+				QueueWait:  5 * time.Second,
+			}
+			info, err := Apply(context.Background(), opts)
+			results <- workerResult{id: id, info: info, err: err}
+		}(i)
+	}
+
+	for i := 0; i < concurrent; i++ {
+		res := <-results
+		if res.err != nil {
+			t.Fatalf("worker %d failed with error: %v", res.id, res.err)
+		}
+		if !res.info.OK {
+			t.Fatalf("worker %d failed: reason=%s lease=%+v", res.id, res.info.Reason, res.info.Lease)
+		}
+	}
+}

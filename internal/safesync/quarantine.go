@@ -127,10 +127,10 @@ func PrepareQuarantine(repo string, paths []string, targetIdentical map[string]b
 }
 
 // Commit finalizes the quarantine transaction post fast-forward:
-// - Verifies byte-identical files were populated by git with matching hashes.
-// - Restores non-colliding scratch files.
-// - Relocates genuinely colliding scratch to .git/fak-quarantine/<session_or_ts>/ and .fak/quarantine/
-//   to guarantee zero data loss, and writes a quarantine receipt to disk (#11233).
+//   - Verifies byte-identical files were populated by git with matching hashes.
+//   - Restores non-colliding scratch files.
+//   - Relocates genuinely colliding scratch to .git/fak-quarantine/<session_or_ts>/ and .fak/quarantine/
+//     to guarantee zero data loss, and writes a quarantine receipt to disk (#11233).
 func (tx *QuarantineTransaction) Commit() (QuarantineReceipt, error) {
 	receipt := QuarantineReceipt{
 		QuarantinedCount: len(tx.Files),

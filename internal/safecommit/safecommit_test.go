@@ -81,6 +81,13 @@ func (f *fakeGit) run(_ context.Context, _ string, args ...string) (string, int,
 		return "", -1, f.err
 	}
 	f.calls = append(f.calls, append([]string(nil), args...))
+	full := strings.Join(args, " ")
+	if r, ok := f.reply[full]; ok {
+		if len(args) > 0 && args[0] == "commit" && r.code == 0 {
+			f.captureCommitMessage(args)
+		}
+		return r.out, r.code, nil
+	}
 	if r, ok := f.reply[keyFor(args)]; ok {
 		if len(args) > 0 && args[0] == "commit" && r.code == 0 {
 			f.captureCommitMessage(args)
@@ -1189,4 +1196,149 @@ func TestLandedEscapesLease_directUnit(t *testing.T) {
 	if got := landedEscapesLease("", "outside/secret.go\n", []string{"lease"}); len(got) != 0 {
 		t.Fatalf("empty dir did not disable the check: %v", got)
 	}
+}
+
+func TestCommitRefusesDirectorySweepOfPeerWIP(t *testing.T) {
+	t.Run("PeerModifiedFileUnderDirectoryRefuses", func(t *testing.T) {
+		g := &fakeGit{reply: onTrunkBase()}
+		g.reply["status"] = reply{out: " M internal/gateway/router.go\n M internal/gateway/peer.go\n", code: 0}
+		opts := baseOpts()
+		opts.Paths = []string{"internal/gateway"}
+		opts.PeerWIP = map[string]string{"internal/gateway/peer.go": "peer-agent-1"}
+
+		res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+		if err != nil {
+			t.Fatalf("unexpected infra error: %v", err)
+		}
+		if res.Committed || res.Verified {
+			t.Fatalf("want !Committed && !Verified, got Committed=%v Verified=%v", res.Committed, res.Verified)
+		}
+		if res.Reason != ReasonPeerWIPCollision {
+			t.Fatalf("want reason %q, got %q (detail=%q)", ReasonPeerWIPCollision, res.Reason, res.Detail)
+		}
+		if !strings.Contains(res.Detail, "internal/gateway/peer.go") || !strings.Contains(res.Detail, "peer-agent-1") {
+			t.Fatalf("detail must name peer file and session, got %q", res.Detail)
+		}
+		if len(res.PeerCollisions) != 1 || res.PeerCollisions[0] != "internal/gateway/peer.go" {
+			t.Fatalf("want PeerCollisions=[internal/gateway/peer.go], got %v", res.PeerCollisions)
+		}
+		if g.sawSubcommand("commit") {
+			t.Fatalf("must not issue git commit on peer collision")
+		}
+	})
+
+	t.Run("PeerUntrackedFileUnderDirectoryRefuses", func(t *testing.T) {
+		g := &fakeGit{reply: onTrunkBase()}
+		g.reply["status"] = reply{out: " M internal/gateway/router.go\n?? internal/gateway/peer_scratch.go\n", code: 0}
+		opts := baseOpts()
+		opts.Paths = []string{"internal/gateway"}
+		opts.PeerWIP = map[string]string{"internal/gateway/peer_scratch.go": "peer-agent-2"}
+
+		res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+		if err != nil {
+			t.Fatalf("unexpected infra error: %v", err)
+		}
+		if res.Committed {
+			t.Fatalf("untracked peer file must not be committed")
+		}
+		if res.Reason != ReasonPeerWIPCollision {
+			t.Fatalf("want reason %q, got %q", ReasonPeerWIPCollision, res.Reason)
+		}
+		if !strings.Contains(res.Detail, "peer_scratch.go") || !strings.Contains(res.Detail, "peer-agent-2") {
+			t.Fatalf("detail must name untracked file and peer, got %q", res.Detail)
+		}
+	})
+
+	t.Run("DiscoveredViaGitCheckpointsRefuses", func(t *testing.T) {
+		g := &fakeGit{reply: onTrunkBase()}
+		g.reply["status"] = reply{out: " M internal/gateway/router.go\n M internal/gateway/peer_wip.go\n", code: 0}
+		g.reply["for-each-ref --format=%(refname) refs/fak/wip"] = reply{out: "refs/fak/wip/peer-agent-3\n", code: 0}
+		g.reply["diff-tree --no-commit-id --name-only -r refs/fak/wip/peer-agent-3"] = reply{out: "internal/gateway/peer_wip.go\n", code: 0}
+		opts := baseOpts()
+		opts.Paths = []string{"internal/gateway"}
+		opts.SessionID = "self-session"
+
+		res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+		if err != nil {
+			t.Fatalf("unexpected infra error: %v", err)
+		}
+		if res.Committed {
+			t.Fatalf("checkpointed peer file must not be committed")
+		}
+		if res.Reason != ReasonPeerWIPCollision {
+			t.Fatalf("want reason %q, got %q (detail=%q)", ReasonPeerWIPCollision, res.Reason, res.Detail)
+		}
+		if !strings.Contains(res.Detail, "peer-agent-3") {
+			t.Fatalf("detail must name peer session, got %q", res.Detail)
+		}
+	})
+
+	t.Run("RestrictsToSessionScopeWhenConfigured", func(t *testing.T) {
+		g := &fakeGit{reply: onTrunkBase()}
+		g.reply["status"] = reply{out: " M internal/gateway/router.go\n M internal/gateway/peer.go\n", code: 0}
+		g.reply["diff-tree"] = reply{out: "internal/gateway/router.go\n", code: 0}
+		opts := baseOpts()
+		opts.Paths = []string{"internal/gateway"}
+		opts.SessionScope = []string{"internal/gateway/router.go"}
+		opts.PeerWIP = map[string]string{"internal/gateway/peer.go": "peer-agent-4"}
+		opts.RestrictToSessionScope = true
+
+		res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+		if err != nil {
+			t.Fatalf("unexpected infra error: %v", err)
+		}
+		if !res.Committed || !res.Verified {
+			t.Fatalf("want Committed && Verified, got Committed=%v Verified=%v (reason=%q detail=%q)", res.Committed, res.Verified, res.Reason, res.Detail)
+		}
+		if len(res.Paths) != 1 || res.Paths[0] != "internal/gateway/router.go" {
+			t.Fatalf("committed paths must be restricted to session scope, got %v", res.Paths)
+		}
+		argv := g.argvFor("commit")
+		foundPeer := false
+		for _, a := range argv {
+			if strings.Contains(a, "peer.go") {
+				foundPeer = true
+			}
+		}
+		if foundPeer {
+			t.Fatalf("commit argv must not contain peer.go: %v", argv)
+		}
+	})
+
+	t.Run("ExplicitNonDirectoryPathspecPassesClean", func(t *testing.T) {
+		g := &fakeGit{reply: onTrunkBase()}
+		g.reply["status"] = reply{out: " M internal/gateway/router.go\n", code: 0}
+		g.reply["diff-tree"] = reply{out: "internal/gateway/router.go\n", code: 0}
+		opts := baseOpts()
+		opts.Paths = []string{"internal/gateway/router.go"}
+
+		res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+		if err != nil {
+			t.Fatalf("unexpected infra error: %v", err)
+		}
+		if !res.Committed || !res.Verified {
+			t.Fatalf("explicit file must commit cleanly, got Committed=%v Verified=%v", res.Committed, res.Verified)
+		}
+	})
+
+	t.Run("ValidatePathAttributionStandalone", func(t *testing.T) {
+		g := &fakeGit{reply: onTrunkBase()}
+		g.reply["status"] = reply{out: " M internal/gateway/router.go\n M internal/gateway/peer.go\n", code: 0}
+		attrOpts := PathAttributionOptions{
+			PeerWIP: map[string]string{"internal/gateway/peer.go": "peer-agent-5"},
+		}
+		attrRes, err := ValidatePathAttribution(context.Background(), g.run, "/repo", []string{"internal/gateway"}, attrOpts)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if attrRes.OK {
+			t.Fatalf("must detect collision")
+		}
+		if attrRes.Reason != ReasonPeerWIPCollision {
+			t.Fatalf("want reason %q, got %q", ReasonPeerWIPCollision, attrRes.Reason)
+		}
+		if len(attrRes.CollidingPaths) != 1 || attrRes.CollidingPaths[0] != "internal/gateway/peer.go" {
+			t.Fatalf("want CollidingPaths=[internal/gateway/peer.go], got %v", attrRes.CollidingPaths)
+		}
+	})
 }
