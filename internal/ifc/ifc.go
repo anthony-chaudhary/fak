@@ -792,6 +792,12 @@ func findExternalDestination(args map[string]any) (key string, val string, ok bo
 		if isLocalPathKey(k) {
 			continue
 		}
+		if isInternalIdentifierKey(k) {
+			if isInternalIdentifierExternalDestination(s) {
+				return k, s, true
+			}
+			continue
+		}
 		if isBareDestination(s) {
 			return k, s, true
 		}
@@ -839,6 +845,111 @@ func isLocalPathKey(k string) bool {
 	return !isEgressKey(k) && localPathArgKeys[k]
 }
 
+// internalIdentifierArgKeys names argument keys representing internal multi-agent
+// coordination handles and local worker routing parameters (#11488). They are
+// not external egress destinations.
+var internalIdentifierArgKeys = map[string]bool{
+	"target":        true,
+	"worker_id":     true,
+	"subagent_type": true,
+	"agent_id":      true,
+	"channel":       true,
+}
+
+func isInternalIdentifierKey(k string) bool {
+	k = strings.ToLower(strings.TrimSpace(k))
+	return !isEgressKey(k) && internalIdentifierArgKeys[k]
+}
+
+// internetTLDs contains common internet TLDs used to distinguish external FQDNs
+// from internal multi-agent coordination handles.
+var internetTLDs = map[string]bool{
+	"com": true, "org": true, "net": true, "edu": true, "gov": true, "mil": true,
+	"io": true, "ai": true, "co": true, "dev": true, "app": true, "xyz": true,
+	"info": true, "biz": true, "me": true, "cc": true, "tv": true, "us": true,
+	"uk": true, "de": true, "ca": true, "fr": true, "au": true, "jp": true,
+	"ru": true, "ch": true, "it": true, "nl": true, "se": true, "no": true,
+	"es": true, "in": true, "br": true, "kr": true, "cn": true, "za": true,
+	"cloud": true, "tech": true, "site": true, "online": true, "store": true,
+	"security": true, "network": true, "systems": true, "agency": true,
+}
+
+// isDottedWorkerName reports whether s follows multi-agent worker naming conventions
+// (e.g. worker.1, agent.main, subagent.tester.2, agent.test.1) rather than an external FQDN.
+func isDottedWorkerName(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if !strings.Contains(s, ".") {
+		return false
+	}
+	labels := strings.Split(s, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	first := labels[0]
+	if first != "worker" && first != "agent" && first != "subagent" && first != "coordinator" {
+		return false
+	}
+	last := labels[len(labels)-1]
+	if internetTLDs[last] {
+		return false
+	}
+	for _, lab := range labels[1:] {
+		if lab == "" {
+			return false
+		}
+		for _, r := range lab {
+			if !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '-' && r != '_' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// isInternalIdentifierExternalDestination checks whether a value in an internal identifier key
+// (e.g. target, channel) actually represents an external destination (URL, IP, or public domain).
+func isInternalIdentifierExternalDestination(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" || strings.ContainsAny(s, " \t\n\r") {
+		return false
+	}
+	switch {
+	case strings.HasPrefix(s, "http://"), strings.HasPrefix(s, "https://"), strings.HasPrefix(s, "ftp://"):
+		return true
+	case strings.HasPrefix(s, "xn--"):
+		return true
+	case strings.Contains(s, "@") && strings.Contains(s, "."):
+		return true
+	}
+	host := s
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	if !strings.Contains(host, ".") {
+		return false
+	}
+	labels := strings.Split(host, ".")
+	allNumeric := true
+	for _, lab := range labels {
+		if lab == "" {
+			return false
+		}
+		for _, r := range lab {
+			if !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '-' {
+				return false
+			}
+			if r < '0' || r > '9' {
+				allNumeric = false
+			}
+		}
+	}
+	if allNumeric {
+		return len(labels) == 4 // dotted-quad IPv4
+	}
+	last := labels[len(labels)-1]
+	return internetTLDs[last]
+}
+
 // isBareDestination reports whether the WHOLE value is a network destination — a
 // scheme URL, an email, a punycode host, or a dotted host whose last label is
 // alphabetic (a TLD) or which is a dotted-quad IPv4. Embedded whitespace (prose),
@@ -868,6 +979,9 @@ func isBareDestination(s string) bool {
 // either an alphabetic TLD or a dotted-quad IPv4 — i.e. a real network host, not a
 // decimal/version string.
 func isHostShaped(host string) bool {
+	if isDottedWorkerName(host) {
+		return false
+	}
 	if !strings.Contains(host, ".") {
 		return false
 	}
