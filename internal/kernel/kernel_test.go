@@ -777,6 +777,68 @@ func TestDenyResultNonWaitNoRetryAfter(t *testing.T) {
 	}
 }
 
+func TestExplicitVerdictDispositionPrecedence(t *testing.T) {
+	c := &abi.ToolCall{Tool: "test_tool", Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{}`)}}
+
+	// 1. Explicit v.Disposition takes highest precedence over Meta and Reason fallback.
+	vExplicit := abi.Verdict{
+		Kind:        abi.VerdictDeny,
+		Reason:      abi.ReasonPolicyBlock, // fallback would be RETRYABLE
+		Disposition: "ESCALATE",
+		Meta:        map[string]string{"disposition": "WAIT"},
+	}
+	if got := VerdictDisposition(vExplicit); got != "ESCALATE" {
+		t.Fatalf("VerdictDisposition with explicit Disposition = %q, want ESCALATE", got)
+	}
+	resExplicit := DenyResult(c, vExplicit)
+	if got := resExplicit.Meta["disposition"]; got != "ESCALATE" {
+		t.Fatalf("DenyResult meta disposition = %q, want ESCALATE", got)
+	}
+
+	// 2. v.Meta["disposition"] takes precedence when v.Disposition is empty.
+	vMeta := abi.Verdict{
+		Kind:   abi.VerdictDeny,
+		Reason: abi.ReasonPolicyBlock, // fallback would be RETRYABLE
+		Meta:   map[string]string{"disposition": "ESCALATE"},
+	}
+	if got := VerdictDisposition(vMeta); got != "ESCALATE" {
+		t.Fatalf("VerdictDisposition with Meta disposition = %q, want ESCALATE", got)
+	}
+	resMeta := DenyResult(c, vMeta)
+	if got := resMeta.Meta["disposition"]; got != "ESCALATE" {
+		t.Fatalf("DenyResult meta disposition = %q, want ESCALATE", got)
+	}
+
+	// 3. Fallback to Disposition(v.Reason) when neither explicit field nor Meta is set.
+	vFallbackPolicy := abi.Verdict{
+		Kind:   abi.VerdictDeny,
+		Reason: abi.ReasonPolicyBlock,
+	}
+	if got := VerdictDisposition(vFallbackPolicy); got != "RETRYABLE" {
+		t.Fatalf("VerdictDisposition fallback for POLICY_BLOCK = %q, want RETRYABLE", got)
+	}
+	resFallbackPolicy := DenyResult(c, vFallbackPolicy)
+	if got := resFallbackPolicy.Meta["disposition"]; got != "RETRYABLE" {
+		t.Fatalf("DenyResult fallback meta disposition = %q, want RETRYABLE", got)
+	}
+
+	vFallbackWait := abi.Verdict{
+		Kind:   abi.VerdictDeny,
+		Reason: abi.ReasonRateLimited,
+	}
+	if got := VerdictDisposition(vFallbackWait); got != "WAIT" {
+		t.Fatalf("VerdictDisposition fallback for RATE_LIMITED = %q, want WAIT", got)
+	}
+
+	vFallbackEscalate := abi.Verdict{
+		Kind:   abi.VerdictDeny,
+		Reason: abi.ReasonTrustViolation,
+	}
+	if got := VerdictDisposition(vFallbackEscalate); got != "ESCALATE" {
+		t.Fatalf("VerdictDisposition fallback for TRUST_VIOLATION = %q, want ESCALATE", got)
+	}
+}
+
 // ---- unit 72: no os/exec on the dispatch hot path (ABSENCE proof) ------------
 
 func TestNoOsExecOnHotPath(t *testing.T) {

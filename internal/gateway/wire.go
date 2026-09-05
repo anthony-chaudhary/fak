@@ -42,7 +42,7 @@ func renderVerdict(v abi.Verdict, resultMeta map[string]string) WireVerdict {
 
 	switch v.Kind {
 	case abi.VerdictDeny:
-		w.Disposition = kernel.Disposition(v.Reason)
+		w.Disposition = kernel.VerdictDisposition(v)
 	case abi.VerdictRequireWitness:
 		// The gate is unresolved at adjudicate-time: route it for escalation rather
 		// than collapsing it to a plain refusal, so the client can hand it to a

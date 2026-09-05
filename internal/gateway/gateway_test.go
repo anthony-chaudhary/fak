@@ -178,6 +178,8 @@ func TestRenderVerdict(t *testing.T) {
 	}{
 		{"allow", abi.Verdict{Kind: abi.VerdictAllow, By: "x"}, nil, "ALLOW", "", "", ""},
 		{"deny-policy", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock}, nil, "DENY", "POLICY_BLOCK", "RETRYABLE", ""},
+		{"deny-policy-explicit-disposition", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock, Disposition: "ESCALATE"}, nil, "DENY", "POLICY_BLOCK", "ESCALATE", ""},
+		{"deny-policy-meta-disposition", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock, Meta: map[string]string{"disposition": "ESCALATE"}}, nil, "DENY", "POLICY_BLOCK", "ESCALATE", ""},
 		{"deny-misroute-retryable", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonMisroute}, nil, "DENY", "MISROUTE", "RETRYABLE", ""},
 		{"deny-ratelimited-wait", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonRateLimited}, nil, "DENY", "RATE_LIMITED", "WAIT", ""},
 		{"deny-selfmodify-escalate", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonSelfModify, Payload: abi.WitnessPayload{Claim: "internal/abi/"}}, nil, "DENY", "SELF_MODIFY", "ESCALATE", "internal/abi/"},

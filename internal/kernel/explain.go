@@ -189,7 +189,7 @@ func (d *Decision) populate(ctx context.Context, c *abi.ToolCall, v abi.Verdict)
 	d.By = v.By
 	d.Claim = claimOf(v)
 	if v.Kind == abi.VerdictDeny {
-		d.Disposition = Disposition(v.Reason)
+		d.Disposition = VerdictDisposition(v)
 	}
 	// Bind the refusal to the rule that actually matched, and to that rule's OWN
 	// declared alternative. Both are read off the winning verdict only — never

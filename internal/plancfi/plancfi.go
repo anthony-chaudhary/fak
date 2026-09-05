@@ -161,13 +161,14 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "plancfi"} // conforms: no objection
 	}
 	// A deviation from the approved plan — an unplanned gadget. Escalate (or deny).
-	// Reason TRUST_VIOLATION so the deny-loopback disposition is ESCALATE.
+	// Emits ReasonPolicyBlock with explicit ESCALATE disposition decoupled from reason code.
 	return abi.Verdict{
-		Kind:    a.OnDeviation,
-		Reason:  abi.ReasonTrustViolation,
-		By:      "plancfi",
-		Payload: abi.WitnessPayload{Claim: fmt.Sprintf("call %q deviates from the approved plan", c.Tool)},
-		Meta:    map[string]string{"plancfi": "deviation", "tool": c.Tool},
+		Kind:        a.OnDeviation,
+		Reason:      abi.ReasonPolicyBlock,
+		Disposition: "ESCALATE",
+		By:          "plancfi",
+		Payload:     abi.WitnessPayload{Claim: fmt.Sprintf("call %q deviates from the approved plan", c.Tool)},
+		Meta:        map[string]string{"plancfi": "deviation", "tool": c.Tool, "disposition": "ESCALATE"},
 	}
 }
 

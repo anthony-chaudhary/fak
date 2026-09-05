@@ -222,11 +222,12 @@ const (
 // type-valid by construction — the property that makes Verdict a clean training
 // target for the syscall-tuned model.
 type Verdict struct {
-	Kind    VerdictKind
-	Payload VerdictPayload    // nil for Allow/Deny/Defer; typed for the rest
-	Reason  ReasonCode        // CLOSED registered refusal vocabulary (trainable)
-	By      string            // which adjudicator decided (forensics, not dispatch)
-	Meta    map[string]string // OPEN; ignored if unknown
+	Kind        VerdictKind
+	Payload     VerdictPayload    // nil for Allow/Deny/Defer; typed for the rest
+	Reason      ReasonCode        // CLOSED registered refusal vocabulary (trainable)
+	By          string            // which adjudicator decided (forensics, not dispatch)
+	Meta        map[string]string // OPEN; ignored if unknown
+	Disposition string            // explicit loopback routing disposition; overrides Reason fallback
 }
 
 // VerdictPayload is a sealed sum type. Each concrete payload is the typed body of

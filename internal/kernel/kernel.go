@@ -797,7 +797,7 @@ func DenyResult(c *abi.ToolCall, v abi.Verdict) *abi.Result {
 	meta := map[string]string{
 		"verdict":     "deny",
 		"reason":      abi.ReasonName(v.Reason),
-		"disposition": Disposition(v.Reason),
+		"disposition": VerdictDisposition(v),
 		"by":          v.By,
 	}
 	if wp, ok := v.Payload.(abi.WitnessPayload); ok && wp.Claim != "" {
@@ -817,6 +817,19 @@ func DenyResult(c *abi.ToolCall, v abi.Verdict) *abi.Result {
 		}
 	}
 	return &abi.Result{Call: c, Status: abi.StatusError, Outcome: abi.OutcomeCommitted, Meta: meta}
+}
+
+// VerdictDisposition returns the loopback routing disposition for a verdict.
+// An explicit v.Disposition takes first precedence, followed by v.Meta["disposition"],
+// falling back to Disposition(v.Reason).
+func VerdictDisposition(v abi.Verdict) string {
+	if v.Disposition != "" {
+		return v.Disposition
+	}
+	if v.Meta != nil && v.Meta["disposition"] != "" {
+		return v.Meta["disposition"]
+	}
+	return Disposition(v.Reason)
 }
 
 // Disposition derives the deny-loopback disposition (RETRYABLE / WAIT / ESCALATE /
