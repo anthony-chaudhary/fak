@@ -3,6 +3,7 @@ package ops
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/treedoctor"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
@@ -90,6 +92,11 @@ func (wm *WorkspaceManager) SweepLocksAndWorktrees(ctx context.Context, dryRun b
 		return res, nil
 	}
 
+	processAlive := wm.ProcessAlive
+	if processAlive == nil {
+		processAlive = defaultProcessAlive
+	}
+
 	gitDir := filepath.Join(wm.RepoRoot, ".git")
 	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
 		return res, nil
@@ -139,7 +146,7 @@ func (wm *WorkspaceManager) SweepLocksAndWorktrees(ctx context.Context, dryRun b
 
 		shouldEvict := false
 		if pid > 0 {
-			if !wm.ProcessAlive(pid) {
+			if !processAlive(pid) {
 				shouldEvict = true
 			}
 		} else {
@@ -165,16 +172,83 @@ func (wm *WorkspaceManager) SweepLocksAndWorktrees(ctx context.Context, dryRun b
 	// 2. Ref-locks & general doctor sweep via treedoctor
 	_, _ = treedoctor.Sweep(ctx, defaultTreeDoctorRunner, treedoctor.Options{
 		RepoRoot:     wm.RepoRoot,
-		ProcessAlive: wm.ProcessAlive,
+		ProcessAlive: processAlive,
 		LocksOnly:    true,
 	}, !dryRun)
 
 	// 3. Cold worker worktrees pruning
-	cwList := workerworktree.ColdReapList(wm.RepoRoot, defaultWorkerWorktreeRunner, time.Now(), 30*time.Minute, func(wtPath string) bool { return false })
+	now := time.Now()
+	liveLeases, _, leaserefErr := leaseref.NewInDir(wm.RepoRoot).Live(ctx, now)
+
+	oracle := func(wtPath string) bool {
+		lane := workerworktree.LaneOf(wtPath)
+		if lane == "" {
+			return true // unclassifiable worktree -> fail toward keep
+		}
+
+		hasDeadProof := false
+
+		// Check worker lease (lease.json)
+		lease, leaseErr := workerworktree.ReadWorkerLease(wtPath)
+		if leaseErr == nil {
+			if lease.PID > 0 && processAlive(lease.PID) {
+				return true // live process ownership
+			}
+			if !lease.HeartbeatTS.IsZero() && time.Since(lease.HeartbeatTS) < workerworktree.DefaultHeartbeatStaleThreshold {
+				return true // live heartbeat
+			}
+			if lease.PID > 0 && !processAlive(lease.PID) {
+				hasDeadProof = true
+			}
+		} else if !os.IsNotExist(leaseErr) {
+			// Metadata cannot be read -> fail toward keep
+			return true
+		}
+
+		// Check owner stamp sidecar
+		stampPath := workerworktree.OwnerStampPath(wtPath)
+		if stampBytes, stampErr := os.ReadFile(stampPath); stampErr == nil {
+			var stamp workerworktree.OwnerStamp
+			if err := json.Unmarshal(stampBytes, &stamp); err != nil {
+				// Metadata cannot be read -> fail toward keep
+				return true
+			}
+			if stamp.PID > 0 {
+				if processAlive(stamp.PID) {
+					return true // live process ownership
+				}
+				hasDeadProof = true
+			}
+		} else if !os.IsNotExist(stampErr) {
+			// Metadata cannot be read -> fail toward keep
+			return true
+		}
+
+		// Fail toward keep if no dead process ownership was proven
+		if !hasDeadProof {
+			return true
+		}
+
+		// Check leaseref for active leases on this lane
+		if leaserefErr != nil {
+			return true // fail toward keep on query failure
+		}
+		for _, rec := range liveLeases {
+			if leaseMatchesLane(rec.ID, lane) {
+				return true // active lease exists on this lane
+			}
+		}
+
+		// Only return false (reapable) when proven to have dead process ownership and no live lease
+		return false
+	}
+
+	cwList := workerworktree.ColdReapList(wm.RepoRoot, defaultWorkerWorktreeRunner, now, 30*time.Minute, oracle)
 	for _, cw := range cwList {
 		if cw.Eligible && !cw.HeldByWork {
 			if !dryRun {
 				if err := os.RemoveAll(cw.Path); err == nil {
+					_ = os.Remove(workerworktree.OwnerStampPath(cw.Path))
 					res.WorktreesPruned = append(res.WorktreesPruned, filepath.Base(cw.Path))
 				}
 			} else {
@@ -193,4 +267,35 @@ func (wm *WorkspaceManager) SweepLocksAndWorktrees(ctx context.Context, dryRun b
 	}
 
 	return res, nil
+}
+
+func isDigitsOnly(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func leaseMatchesLane(leaseID, lane string) bool {
+	if lane == "" || leaseID == "" {
+		return false
+	}
+	if strings.EqualFold(leaseID, lane) {
+		return true
+	}
+	rest := strings.TrimPrefix(strings.ToLower(leaseID), "resolve-")
+	if strings.EqualFold(rest, lane) {
+		return true
+	}
+	if i := strings.LastIndex(rest, "-"); i > 0 && isDigitsOnly(rest[i+1:]) {
+		if strings.EqualFold(rest[:i], lane) {
+			return true
+		}
+	}
+	return false
 }
