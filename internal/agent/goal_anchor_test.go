@@ -1,10 +1,13 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
 func TestGoalAnchor(t *testing.T) {
@@ -155,6 +158,155 @@ func TestGoalAnchor(t *testing.T) {
 		compactedWithoutAnchor := "Agent action: Acquiring advisory lock with retry backoff\nTool: success"
 		if anchor.ValidateTextContainsAnchor(compactedWithoutAnchor) {
 			t.Error("expected validation failure when anchor was purged from context")
+		}
+	})
+}
+
+type mockGoalAnchorResultEngine struct {
+	content string
+	isErr   bool
+}
+
+func (m mockGoalAnchorResultEngine) Caps() []abi.Capability { return nil }
+func (m mockGoalAnchorResultEngine) WeightBearing() bool    { return false }
+func (m mockGoalAnchorResultEngine) Complete(_ context.Context, _ *abi.ToolCall) (*abi.Result, error) {
+	status := abi.StatusOK
+	if m.isErr {
+		status = abi.StatusError
+	}
+	return &abi.Result{
+		Status: status,
+		Payload: abi.Ref{
+			Kind:   abi.RefInline,
+			Inline: []byte(m.content),
+			Len:    int64(len(m.content)),
+		},
+	}, nil
+}
+
+func TestGoalAnchorIgnoresBenignErrorSubstrings(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("isToolResultFailure_classification", func(t *testing.T) {
+		// Benign error substrings must NOT be classified as failures
+		benign := []string{
+			`{"result": "found error handling in file.go"}`,
+			`{"error_budget": 0}`,
+			`{"status": "ok", "error": null}`,
+			`{"status": "ok", "error": ""}`,
+			`{"status": "ok", "error": false}`,
+			`found error handling in file.go`,
+			`grep matches: 42: if err != nil { return "error" }`,
+		}
+		for _, s := range benign {
+			if isToolResultFailure(false, "ALLOW", s) {
+				t.Errorf("expected isToolResultFailure to return false for benign content %q", s)
+			}
+		}
+
+		// Structured failures must be classified as failures
+		failures := []string{
+			`{"error": "database connection refused"}`,
+			`{"status": "error", "reason": "POLICY_BLOCK"}`,
+			`{"error": true}`,
+			ToolReceipt{Status: ToolResultError, Reason: "POLICY_BLOCK"}.JSON(),
+		}
+		for _, s := range failures {
+			if !isToolResultFailure(false, "ALLOW", s) {
+				t.Errorf("expected isToolResultFailure to return true for failure content %q", s)
+			}
+		}
+
+		if !isToolResultFailure(true, "ALLOW", `{"result": "ok"}`) {
+			t.Errorf("expected isToolResultFailure to return true when isErr=true")
+		}
+		if !isToolResultFailure(false, "DENIED", `{"result": "ok"}`) {
+			t.Errorf("expected isToolResultFailure to return true when verdict=DENIED")
+		}
+	})
+
+	t.Run("benign_error_substring_does_not_increment_recovery_count", func(t *testing.T) {
+		Configure()
+		defer func() {
+			abi.RegisterEngine("localtools", localEngine{})
+		}()
+		abi.RegisterEngine("localtools", mockGoalAnchorResultEngine{
+			content: `{"result": "found error handling in file.go"}`,
+		})
+
+		anchor := NewGoalAnchor("Find error handling")
+		p := &stopgateTestPlanner{
+			answers: []Completion{
+				{
+					Message: Message{Role: RoleAssistant, ToolCalls: []ToolCall{
+						{ID: "c1", Type: "function", Function: Func{Name: toolFetchDoc, Arguments: `{"topic": "found error handling in file.go"}`}},
+					}},
+					FinishReason: "tool_calls",
+					Usage:        Usage{CompletionTokens: 1},
+				},
+				{
+					Message:      Message{Role: RoleAssistant, Content: "Done"},
+					FinishReason: "stop",
+					Usage:        Usage{CompletionTokens: 1},
+				},
+			},
+		}
+
+		metrics, err := RunArm(ctx, p, "Find error handling", true, 5, nil, WithGoalAnchor(anchor))
+		if err != nil {
+			t.Fatalf("RunArm failed: %v", err)
+		}
+
+		if anchor.RecoveryTurnCount != 0 {
+			t.Fatalf("expected RecoveryTurnCount == 0 for benign error substring, got %d", anchor.RecoveryTurnCount)
+		}
+		if metrics.GoalAnchorRecoveryTurns != 0 {
+			t.Fatalf("expected GoalAnchorRecoveryTurns == 0, got %d", metrics.GoalAnchorRecoveryTurns)
+		}
+	})
+
+	t.Run("actual_tool_error_increments_recovery_count", func(t *testing.T) {
+		Configure()
+		defer func() {
+			abi.RegisterEngine("localtools", localEngine{})
+		}()
+		abi.RegisterEngine("localtools", mockGoalAnchorResultEngine{
+			content: `{"error": "database connection refused"}`,
+		})
+
+		anchor := NewGoalAnchor("Fix payment bug")
+		p := &stopgateTestPlanner{
+			answers: []Completion{
+				{
+					Message: Message{Role: RoleAssistant, ToolCalls: []ToolCall{
+						{ID: "c1", Type: "function", Function: Func{Name: toolSearch, Arguments: `{}`}},
+					}},
+					FinishReason: "tool_calls",
+					Usage:        Usage{CompletionTokens: 1},
+				},
+				{
+					Message:      Message{Role: RoleAssistant, Content: "Done"},
+					FinishReason: "stop",
+					Usage:        Usage{CompletionTokens: 1},
+				},
+			},
+		}
+
+		metrics, err := RunArm(ctx, p, "Fix payment bug", true, 5, nil, WithGoalAnchor(anchor))
+		if err != nil {
+			t.Fatalf("RunArm failed: %v", err)
+		}
+
+		if anchor.RecoveryTurnCount != 1 {
+			t.Fatalf("expected RecoveryTurnCount == 1 for structured error, got %d", anchor.RecoveryTurnCount)
+		}
+		if metrics.GoalAnchorRecoveryTurns != 1 {
+			t.Fatalf("expected GoalAnchorRecoveryTurns == 1, got %d", metrics.GoalAnchorRecoveryTurns)
+		}
+
+		reinforcement := anchor.FormatRecoveryReinforcement("database connection refused")
+		if !strings.Contains(reinforcement, "Fix payment bug") || !strings.Contains(reinforcement, "database connection refused") {
+			t.Fatalf("expected recovery reinforcement to contain goal and guidance, got: %s", reinforcement)
 		}
 	})
 }

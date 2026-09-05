@@ -65,6 +65,15 @@ func TestToolFailureFromMessage(t *testing.T) {
 	if _, ok := ToolFailureFromMessage("everything succeeded"); ok {
 		t.Fatal("unrelated success text must not map into the closed failure vocabulary")
 	}
+	for _, text := range []string{
+		"stopped making progress on ticket #123",
+		"we hung the painting on the wall",
+		"timed out after 5pm",
+	} {
+		if spec, ok := ToolFailureFromMessage(text); ok {
+			t.Fatalf("benign phrase %q should not match tool failure, got: %+v", text, spec)
+		}
+	}
 }
 
 func TestToolFailureRetryContract(t *testing.T) {

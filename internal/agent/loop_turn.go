@@ -319,7 +319,7 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 		r.toolFeedbackPending = false
 	}
 
-	ladderCfg := stopgate.DefaultLadderConfig()
+	ladderCfg := stopgate.LadderConfig{Mode: stopgate.ModeOff}
 	if r.cfg.stopLadder != nil {
 		ladderCfg = *r.cfg.stopLadder
 	}
@@ -355,6 +355,27 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 	r.cfg.emitProgress(ProgressEvent{Kind: ProgressTurnDone, Turn: turn + 1})
 	r.finalizeFak()
 	return Message{}, armTurnStop, nil
+}
+
+// isToolResultFailure determines whether a tool execution outcome constitutes an
+// error or denial that warrants entering recovery mode.
+func isToolResultFailure(isErr bool, verdict string, content string) bool {
+	if isErr || verdict == "DENY" || verdict == "DENIED" || verdict == "BARRED" || verdict == "DROPPED" || verdict == "route-error" {
+		return true
+	}
+	if strings.HasPrefix(strings.TrimSpace(content), "{") {
+		var rc ToolReceipt
+		if err := json.Unmarshal([]byte(content), &rc); err == nil && rc.Status == ToolResultError {
+			return true
+		}
+		var rawMap map[string]any
+		if err := json.Unmarshal([]byte(content), &rawMap); err == nil {
+			if errVal, ok := rawMap["error"]; ok && errVal != nil && errVal != "" && errVal != false && errVal != 0 && errVal != float64(0) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // dispatchToolCalls adjudicates and admits every tool call from one assistant turn.
@@ -618,7 +639,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			r.metrics.TaskCompleted = true
 		}
 		if r.cfg.goalAnchor != nil {
-			if isDenied || strings.Contains(strings.ToLower(content), `"error"`) {
+			if isToolResultFailure(res.isErr, ev.Verdict, content) {
 				r.cfg.goalAnchor.RecordRecoveryTurn()
 				r.metrics.GoalAnchorRecoveryTurns = r.cfg.goalAnchor.RecoveryTurnCount
 			}

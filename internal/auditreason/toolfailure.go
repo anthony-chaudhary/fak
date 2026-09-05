@@ -102,10 +102,10 @@ type toolFailureSignature struct {
 
 var toolFailureSignatures = []toolFailureSignature{
 	{[]string{"tool_hang_shell_mismatch", "exit status 143", "exit code 143", "terminated with 143", "signal: terminated"}, ToolFailureHangShellMismatch},
-	{[]string{"tool_timeout", "context deadline exceeded", "timed out", "timeout exceeded", "command timed out"}, ToolFailureTimeout},
+	{[]string{"tool_timeout", "context deadline exceeded", "timed out waiting for", "timeout exceeded", "command timed out"}, ToolFailureTimeout},
 	{[]string{"tool_shell_mismatch", "shell mismatch", "syntax error near unexpected token", "is not recognized as", "cannot be loaded because running scripts is disabled", "exit status 127", "exit code 127", "command not found"}, ToolFailureShellMismatch},
 	{[]string{"tool_partial_apply", "partial apply", "partially applied", "partial mutation", "applied only part"}, ToolFailurePartialApply},
-	{[]string{"tool_hang", "hung", "hang detected", "no output for", "stopped making progress"}, ToolFailureHang},
+	{[]string{"tool_hang", "tool hung", "hang detected", "no output for"}, ToolFailureHang},
 }
 
 // ToolFailureFromMessage classifies raw tool-failure prose into the closed non-guard
