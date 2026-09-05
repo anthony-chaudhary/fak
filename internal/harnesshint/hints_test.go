@@ -165,6 +165,10 @@ func TestResolveHint_NormalizationAndPrefixes(t *testing.T) {
 		{"claude-3.5-sonnet", "claude-3-5-sonnet", PostureBalanced},
 		{"deepseek-chat", "deepseek-v3", PostureBalanced},
 		{"deepseek-reasoner", "deepseek-r1", PostureCostHeavy},
+		{"gpt-4o:latest", "gpt-4o", PostureBalanced},
+		{"claude-3.5-haiku:20241022", "claude-3.5-haiku", PostureSupportHeavy},
+		{"providers/google/gemini-3.8-flash", "gemini-3.8-flash", PostureSupportHeavy},
+		{"  o1:latest  ", "o1", PostureCostHeavy},
 	}
 
 	for _, tc := range tests {
@@ -370,5 +374,53 @@ func BenchmarkResolveHint(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		_ = ResolveHint(models[i%len(models)], nil)
+	}
+}
+
+func BenchmarkResolveHint_BuiltinExact(b *testing.B) {
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		_ = ResolveHint("gemini-3.8-flash", nil)
+	}
+}
+
+func BenchmarkResolveHint_PrefixNormalized(b *testing.B) {
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		_ = ResolveHint("google/gemini-3.8-flash", nil)
+	}
+}
+
+func BenchmarkResolveHint_DateTrimmed(b *testing.B) {
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		_ = ResolveHint("gpt-4o-2024-08-06", nil)
+	}
+}
+
+func BenchmarkResolveHint_UnknownFallback(b *testing.B) {
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		_ = ResolveHint("custom-private-model-v1", nil)
+	}
+}
+
+func BenchmarkResolveHint_WithOverride(b *testing.B) {
+	override := &ScopeHint{
+		MaxTurnsRecommended: 10,
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		_ = ResolveHint("gemini-3.8-flash", override)
 	}
 }
