@@ -1,6 +1,7 @@
 package sessionrecovery
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -650,6 +651,45 @@ func TestWriteReceiptPersistsHarnessIdentity(t *testing.T) {
 	}
 	if got.Harness != ProviderCodex || got.HarnessSource != "session_registration" {
 		t.Fatalf("receipt identity=%+v", got)
+	}
+}
+
+func TestEndpointReadinessRejectsHTTP500(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream model error", http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	ready, err := CheckEndpointReadiness(context.Background(), ts.URL)
+	if ready || err == nil || !strings.Contains(err.Error(), "HTTP 500") {
+		t.Fatalf("readiness = %v, %v; want false and HTTP 500 error", ready, err)
+	}
+}
+
+func TestEndpointReadinessStatusMatrix(t *testing.T) {
+	statuses := []int{200, 204, 301, 400, 401, 403, 404, 429, 499}
+	for status := 500; status < 600; status++ {
+		statuses = append(statuses, status)
+	}
+	for _, status := range statuses {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/v1/models" {
+					t.Errorf("probe = %s %s, want GET /v1/models", r.Method, r.URL.Path)
+				}
+				w.WriteHeader(status)
+			}))
+			defer ts.Close()
+
+			ready, err := CheckEndpointReadiness(context.Background(), ts.URL)
+			if status >= 500 {
+				if ready || err == nil || !strings.Contains(err.Error(), fmt.Sprintf("HTTP %d", status)) {
+					t.Fatalf("readiness = %v, %v; want false and HTTP %d error", ready, err, status)
+				}
+			} else if !ready || err != nil {
+				t.Fatalf("readiness = %v, %v; want true, nil for reachable non-5xx endpoint", ready, err)
+			}
+		})
 	}
 }
 

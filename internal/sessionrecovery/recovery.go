@@ -169,7 +169,8 @@ func CheckEndpointReadiness(ctx context.Context, endpoint string) (bool, error) 
 		return false, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+	// Non-5xx responses, including authentication failures, still prove reachability.
+	if resp.StatusCode >= http.StatusInternalServerError && resp.StatusCode < 600 {
 		return false, fmt.Errorf("endpoint returned HTTP %d", resp.StatusCode)
 	}
 	return true, nil
