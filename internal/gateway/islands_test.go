@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"context"
 	"math"
 	"strings"
 	"testing"
@@ -10,11 +9,7 @@ import (
 )
 
 func TestGatewayIslandsWiring(t *testing.T) {
-	// Initialize default server
-	srv, err := New(Config{})
-	if err != nil {
-		t.Fatalf("gateway.New failed: %v", err)
-	}
+	srv := newTestServer(t)
 
 	t.Run("CompactDenySummary wired with FormatCompactRefusalNote", func(t *testing.T) {
 		adjs := []ToolAdjudication{
@@ -113,5 +108,4 @@ func TestGatewayIslandsWiring(t *testing.T) {
 			t.Fatalf("expected 2 prompts evaluated, got %d", runawayReceipt.PromptsEvaluated)
 		}
 	})
-	_ = context.Background()
 }
