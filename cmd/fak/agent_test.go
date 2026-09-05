@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/dropin"
 )
 
 func TestAgentRawMode(t *testing.T) {
@@ -169,5 +171,77 @@ func TestAgentRawMode(t *testing.T) {
 	}
 	if dashReceipt.Schema != "agent.raw-receipt.v1" || dashReceipt.FakMediated != false || dashReceipt.Mode != "raw" {
 		t.Fatalf("dash receipt mismatch: %#v", dashReceipt)
+	}
+}
+
+func TestAgentPostureFlagAndBaseURLResolution(t *testing.T) {
+	// 1. Verify flag default
+	fs, af := newAgentFlagSet()
+	if err := fs.Parse([]string{}); err != nil {
+		t.Fatalf("Parse empty args: %v", err)
+	}
+	if af.posture == nil || *af.posture != "default_open" {
+		t.Fatalf("--posture defaulted to %q, want default_open", *af.posture)
+	}
+
+	// 2. Verify explicit flag parsing
+	fs2, af2 := newAgentFlagSet()
+	if err := fs2.Parse([]string{"--posture", "fail_closed"}); err != nil {
+		t.Fatalf("Parse --posture: %v", err)
+	}
+	if af2.posture == nil || *af2.posture != "fail_closed" {
+		t.Fatalf("--posture parsed %q, want fail_closed", *af2.posture)
+	}
+
+	// 3. Test cmdAgent respects --posture flag
+	t.Cleanup(func() {
+		agent.SetConfiguredPosture(adjudicator.PostureDefaultOpen)
+	})
+
+	outPath := filepath.Join(t.TempDir(), "report.json")
+	cmdAgent([]string{"--offline", "--posture", "fail_closed", "--out", outPath})
+	if got := agent.ConfiguredPosture(); got != adjudicator.PostureFailClosed {
+		t.Fatalf("agent.ConfiguredPosture() = %v, want PostureFailClosed", got)
+	}
+
+	cmdAgent([]string{"--offline", "--posture", "admit_and_log", "--out", outPath})
+	if got := agent.ConfiguredPosture(); got != adjudicator.PostureAdmitAndLog {
+		t.Fatalf("agent.ConfiguredPosture() = %v, want PostureAdmitAndLog", got)
+	}
+
+	cmdAgent([]string{"--offline", "--posture", "default_open", "--out", outPath})
+	if got := agent.ConfiguredPosture(); got != adjudicator.PostureDefaultOpen {
+		t.Fatalf("agent.ConfiguredPosture() = %v, want PostureDefaultOpen", got)
+	}
+
+	// 4. Test cmdAgent respects FAK_AGENT_POSTURE and FAK_GUARD_POSTURE env vars when flag not explicit
+	t.Setenv("FAK_AGENT_POSTURE", "fail_closed")
+	cmdAgent([]string{"--offline", "--out", outPath})
+	if got := agent.ConfiguredPosture(); got != adjudicator.PostureFailClosed {
+		t.Fatalf("agent.ConfiguredPosture() with FAK_AGENT_POSTURE=fail_closed: got %v, want PostureFailClosed", got)
+	}
+
+	t.Setenv("FAK_AGENT_POSTURE", "")
+	t.Setenv("FAK_GUARD_POSTURE", "strict")
+	cmdAgent([]string{"--offline", "--out", outPath})
+	if got := agent.ConfiguredPosture(); got != adjudicator.PostureFailClosed {
+		t.Fatalf("agent.ConfiguredPosture() with FAK_GUARD_POSTURE=strict: got %v, want PostureFailClosed", got)
+	}
+
+	// 5. Test baseURL picks up dropin.EnvVar when --base-url is empty
+	t.Setenv("FAK_GUARD_POSTURE", "")
+	t.Setenv("OPENAI_BASE_URL", "http://127.0.0.1:9999/v1")
+	fsBase, afBase := newAgentFlagSet()
+	if err := fsBase.Parse([]string{"--provider", "openai"}); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	effectiveBaseURL := *afBase.baseURL
+	if effectiveBaseURL == "" {
+		if env := os.Getenv(dropin.EnvVar(*afBase.provider, "")); env != "" {
+			effectiveBaseURL = env
+		}
+	}
+	if effectiveBaseURL != "http://127.0.0.1:9999/v1" {
+		t.Fatalf("effectiveBaseURL = %q, want http://127.0.0.1:9999/v1", effectiveBaseURL)
 	}
 }

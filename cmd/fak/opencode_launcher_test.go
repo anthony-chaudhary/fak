@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -95,5 +98,119 @@ func TestOpencodeLauncherSplitValidation(t *testing.T) {
 	}
 	if err := validateOpencodeLaunchSplit("auto", "bottom"); err != nil {
 		t.Errorf("unexpected error for valid split: %v", err)
+	}
+}
+
+func TestOpencodeLauncherSynchronizesProjectAssets(t *testing.T) {
+	ws := t.TempDir()
+	manifestDir := filepath.Join(ws, ".claude")
+	if err := os.MkdirAll(filepath.Join(ws, ".claude", "skills", "openskill"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(ws, ".claude", "memory"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(ws, ".claude", "goal-prompts"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifestJSON := `{
+  "schema": "fak-project-assets/1",
+  "skills": {
+    "canonical_root": ".claude/skills",
+    "codex_root": ".agents/skills",
+    "include": ["SKILL.md"],
+    "exclude": []
+  },
+  "memories": {
+    "canonical_root": ".claude/memory",
+    "include": ["*.md"],
+    "exclude": []
+  },
+  "goal_prompts": {
+    "canonical_root": ".claude/goal-prompts",
+    "include": ["*.md"],
+    "exclude": []
+  },
+  "harnesses": {
+    "claude": {"skills": ".claude/skills", "memories": ".claude/memory", "goal_prompts": ".claude/goal-prompts"},
+    "codex": {"skills": ".agents/skills", "memories": "cmd", "goal_prompts": ".claude/goal-prompts"},
+    "fak-native": {"skills": ".claude/skills", "memories": "cmd", "goal_prompts": ".claude/goal-prompts"},
+    "opencode": {"skills": ".agents/skills", "memories": "cmd", "goal_prompts": ".claude/goal-prompts"}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(manifestDir, "project-assets.json"), []byte(manifestJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+	skillMD := "---\nname: openskill\ndescription: OpenCode test skill\n---\n# Open\n"
+	if err := os.WriteFile(filepath.Join(ws, ".claude", "skills", "openskill", "SKILL.md"), []byte(skillMD), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".claude", "memory", "base.md"), []byte("memory\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, ".claude", "goal-prompts", "base.md"), []byte("prompt\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "opencode.json"), []byte(`{"snapshot": false}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	adapterPath := filepath.Join(ws, ".agents", "skills", "openskill", "SKILL.md")
+	if _, err := os.Stat(adapterPath); !os.IsNotExist(err) {
+		t.Fatalf("expected adapter to not exist before launch")
+	}
+
+	origRun := opencodeLaunchRun
+	ran := false
+	opencodeLaunchRun = func(stdout, stderr io.Writer, argv, env []string) int {
+		ran = true
+		return 0
+	}
+	t.Cleanup(func() { opencodeLaunchRun = origRun })
+
+	t.Chdir(ws)
+	var stdout, stderr bytes.Buffer
+	code := runOpencode(&stdout, &stderr, []string{"--quiet"})
+	if code != 0 {
+		t.Fatalf("runOpencode failed with code %d, stderr: %s", code, stderr.String())
+	}
+	if !ran {
+		t.Fatal("expected opencodeLaunchRun to be called")
+	}
+	if _, err := os.Stat(adapterPath); err != nil {
+		t.Fatalf("expected adapter to be synchronized, got error: %v", err)
+	}
+}
+
+func TestOpencodeLauncherVerifiesSnapshotWarning(t *testing.T) {
+	ws := t.TempDir()
+	if err := os.WriteFile(filepath.Join(ws, "opencode.json"), []byte(`{"snapshot": true}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origRun := opencodeLaunchRun
+	opencodeLaunchRun = func(stdout, stderr io.Writer, argv, env []string) int {
+		return 0
+	}
+	t.Cleanup(func() { opencodeLaunchRun = origRun })
+
+	t.Chdir(ws)
+	var stdout, stderr bytes.Buffer
+	code := runOpencode(&stdout, &stderr, nil)
+	if code != 0 {
+		t.Fatalf("runOpencode returned %d, stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "warning:") || !strings.Contains(stderr.String(), "snapshot") {
+		t.Fatalf("expected snapshot warning in stderr, got: %s", stderr.String())
+	}
+
+	// With --quiet, warning should be suppressed
+	stderr.Reset()
+	code = runOpencode(&stdout, &stderr, []string{"--quiet"})
+	if code != 0 {
+		t.Fatalf("runOpencode returned %d, stderr: %s", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "warning:") {
+		t.Fatalf("expected warning to be suppressed with --quiet, got: %s", stderr.String())
 	}
 }
