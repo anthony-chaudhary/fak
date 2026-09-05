@@ -37,9 +37,13 @@ func (s *Server) persistRestoreCAS(id string, body []byte) {
 // It protects the active working set by keeping the most recent 4 tool result messages intact (elideRecentKeepMsgs = 4).
 // Tool outputs exceeding the threshold are content-addressed via SHA-256 and stashed for recovery
 // via fak_context_restore. Payloads >= 32 KiB are also persisted to durable CAS.
-func (s *Server) maybeElideResponsesToolResults(trace string, messages []agent.Message) []agent.Message {
+func (s *Server) maybeElideResponsesToolResults(trace string, messages []agent.Message, restoreToolName ...string) []agent.Message {
 	if s == nil || len(messages) == 0 {
 		return messages
+	}
+	toolName := "fak_context_restore"
+	if len(restoreToolName) > 0 && strings.TrimSpace(restoreToolName[0]) != "" {
+		toolName = strings.TrimSpace(restoreToolName[0])
 	}
 	trace = s.traceFor(trace)
 	threshold := s.responsesElideThreshold()
@@ -79,7 +83,7 @@ func (s *Server) maybeElideResponsesToolResults(trace string, messages []agent.M
 		if len(body) >= responsesCASThreshold {
 			s.persistRestoreCAS(digest, body)
 		}
-		out[idx].Content = fmt.Sprintf("...[fak: tool output elided (len=%d bytes); recover original via fak_context_restore id=sha256:%s]...", len(body), digest)
+		out[idx].Content = fmt.Sprintf("...[fak: tool output elided (len=%d bytes); recover original via %s id=sha256:%s]...", len(body), toolName, digest)
 	}
 	if out != nil {
 		return out

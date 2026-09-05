@@ -500,7 +500,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		return mcpDecodeCall[ContextValueRequest](p.Arguments, "fak_context_value", func(req ContextValueRequest) (any, error) {
 			return s.CtxValueReportFor(s.traceFor(req.TraceID)), nil
 		})
-	case "fak_context_restore":
+	case "fak_context_restore", "mcp__fak__fak_context_restore", "mcp__fak_guard__fak_context_restore":
 		return mcpDecodeCall[ContextRestoreRequest](p.Arguments, "fak_context_restore", func(req ContextRestoreRequest) (any, error) {
 			return s.restoreContext(principalFromContext(ctx), req)
 		})

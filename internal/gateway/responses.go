@@ -322,7 +322,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Microcontext tool result elision: elide large, older tool outputs
-	messages = s.maybeElideResponsesToolResults(reqTrace, messages)
+	messages = s.maybeElideResponsesToolResults(reqTrace, messages, restoreToolName)
 	elisionsCount := 0
 	for _, m := range messages {
 		if strings.Contains(m.Content, "...[fak: tool output elided") {

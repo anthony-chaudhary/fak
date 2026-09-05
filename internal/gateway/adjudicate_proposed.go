@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -103,6 +104,28 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 			adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, ArgsDigest: argsDigest, Admitted: true,
 				Verdict: WireVerdict{Kind: "ALLOW", Reason: "SERVED_INLINE", By: ReuseServedByVerdict}})
 			continue
+		}
+		if isRestoreTool(tool) {
+			var req ContextRestoreRequest
+			if err := json.Unmarshal([]byte(tc.Function.Arguments), &req); err == nil && req.ID != "" {
+				if req.TraceID == "" {
+					req.TraceID = reqTrace
+				}
+				caller, _ := s.traceOwnerOf(reqTrace)
+				res, err := s.restoreContext(caller, req)
+				if err == nil {
+					served = append(served, fmt.Sprintf("[fak: restored context id=%s]\n%s", req.ID, res.Bytes))
+					servedHits++
+					adjs = append(adjs, ToolAdjudication{
+						ToolCallID: tc.ID,
+						Tool:       tool,
+						ArgsDigest: argsDigest,
+						Admitted:   true,
+						Verdict:    WireVerdict{Kind: "ALLOW", Reason: "SERVED_INLINE", By: "restoreContext"},
+					})
+					continue
+				}
+			}
 		}
 		// vDSO-eligible iff the tool name is read-only-shaped (the same readOnlyPrefix
 		// gate buildCall uses to stamp readOnlyHint+idempotentHint). A write-shaped tool
@@ -626,4 +649,11 @@ func turnHasEffectCapableCall(calls []agent.ToolCall) bool {
 		}
 	}
 	return false
+}
+
+func isRestoreTool(tool string) bool {
+	return tool == "fak_context_restore" ||
+		tool == "mcp__fak__fak_context_restore" ||
+		tool == "mcp__fak_guard__fak_context_restore" ||
+		tool == "functions.fak_context_restore"
 }
