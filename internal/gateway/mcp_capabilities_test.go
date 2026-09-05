@@ -1,8 +1,11 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -189,5 +192,254 @@ func TestSyscallPreservesCapabilitiesCards(t *testing.T) {
 	}
 	if strings.Contains(env.Content, "generated_tokens") {
 		t.Fatal("result content should not contain model-generation tokens")
+	}
+}
+
+// TestMCPCompactDiscoveryRoundTrip witnesses the bounded task-scoped discovery round trip (#11552):
+// 1. Initial name-only discovery reveals the compact query path (fak_capabilities) without dumping schemas.
+// 2. Client requests one intent-matching card with actionable fields via query/limit.
+// 3. Client retrieves only its selected tool schema with exact selected-tool lookup.
+// 4. Client verifies bounded non-paged responses and exact equivalence to the full catalog schema.
+func TestMCPCompactDiscoveryRoundTrip(t *testing.T) {
+	srv := newTestServerWithConfig(t, Config{
+		EngineID:        "test",
+		DisableMCPDefer: true,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	root := writeMCPIndexRepo(t)
+
+	allExposed := srv.exposedToolDescriptors()
+	if len(allExposed) < 15 {
+		t.Fatalf("expected large catalog with at least 15 tools, got %d", len(allExposed))
+	}
+
+	// 1. Initial name-only discovery reveals compact query path without requiring full catalog output.
+	nameOnlyReq, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "fak_tools_search",
+			"arguments": map[string]any{
+				"detail_level": "name",
+			},
+		},
+	})
+	res1, err := http.Post(ts.URL+"/mcp", "application/json", bytes.NewReader(nameOnlyReq))
+	if err != nil {
+		t.Fatalf("name-only discovery POST error: %v", err)
+	}
+	defer res1.Body.Close()
+	if res1.StatusCode != http.StatusOK {
+		t.Fatalf("name-only status = %d, want 200", res1.StatusCode)
+	}
+	var rpcResp1 rpcResponse
+	if err := json.NewDecoder(res1.Body).Decode(&rpcResp1); err != nil {
+		t.Fatalf("decode name-only rpc response: %v", err)
+	}
+	if rpcResp1.Error != nil {
+		t.Fatalf("name-only RPC error: %+v", rpcResp1.Error)
+	}
+
+	var searchResp ToolsSearchResponse
+	decodeMCPResult(t, rpcResp1.Result, &searchResp)
+
+	// Assert compact query path is revealed
+	if searchResp.CompactQueryPath == "" {
+		t.Fatal("name-only discovery missing compact_query_path in response")
+	}
+	queryTool := searchResp.CompactQueryPath
+	if queryTool != CompactDiscoveryToolName {
+		t.Fatalf("compact_query_path = %q, want %q", queryTool, CompactDiscoveryToolName)
+	}
+
+	// Assert bounded, non-paged, schema-free name list
+	foundCap := false
+	for _, td := range searchResp.Tools {
+		name, _ := td["name"].(string)
+		if name == "" {
+			t.Fatalf("tool in name-only response has empty name: %+v", td)
+		}
+		if name == queryTool {
+			foundCap = true
+			if path, _ := td["compact_query_path"].(string); path != CompactDiscoveryToolName {
+				t.Fatalf("tool %q missing compact_query_path attribute: %+v", name, td)
+			}
+		}
+		if _, hasDesc := td["description"]; hasDesc {
+			t.Fatalf("name-only response leaked description for tool %q", name)
+		}
+		if _, hasSchema := td["inputSchema"]; hasSchema {
+			t.Fatalf("name-only response leaked inputSchema for tool %q", name)
+		}
+	}
+	if !foundCap {
+		t.Fatalf("name-only discovery tools missing %q", queryTool)
+	}
+
+	// 2. Request one intent-matching card via compact query path
+	const intent = "compact my context"
+	capReq, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": queryTool,
+			"arguments": map[string]any{
+				"root":  root,
+				"query": intent,
+				"limit": 1,
+			},
+		},
+	})
+	res2, err := http.Post(ts.URL+"/mcp", "application/json", bytes.NewReader(capReq))
+	if err != nil {
+		t.Fatalf("capability card request error: %v", err)
+	}
+	defer res2.Body.Close()
+	if res2.StatusCode != http.StatusOK {
+		t.Fatalf("capability card request status = %d, want 200", res2.StatusCode)
+	}
+	var rpcResp2 rpcResponse
+	if err := json.NewDecoder(res2.Body).Decode(&rpcResp2); err != nil {
+		t.Fatalf("decode capability card rpc response: %v", err)
+	}
+	if rpcResp2.Error != nil {
+		t.Fatalf("capability card RPC error: %+v", rpcResp2.Error)
+	}
+
+	var capResp selfquery.CapabilitiesResponse
+	decodeMCPResult(t, rpcResp2.Result, &capResp)
+
+	if len(capResp.Cards) != 1 {
+		t.Fatalf("expected exactly 1 card with limit=1, got %d", len(capResp.Cards))
+	}
+	matchedCard := capResp.Cards[0]
+	if matchedCard.Name != "memory-driver:compact" {
+		t.Fatalf("matched card name = %q, want memory-driver:compact", matchedCard.Name)
+	}
+
+	// Assert actionable fields on matched card
+	selectedTool := matchedCard.Request.MCPTool
+	if selectedTool == "" {
+		t.Fatalf("matched card missing actionable MCPTool in request: %+v", matchedCard.Request)
+	}
+	if matchedCard.Request.Arguments == nil || len(matchedCard.Request.Arguments) == 0 {
+		t.Fatalf("matched card missing actionable arguments in request: %+v", matchedCard.Request)
+	}
+	if matchedCard.Request.Route != "mcp/tools-call" {
+		t.Fatalf("matched card request route = %q, want mcp/tools-call", matchedCard.Request.Route)
+	}
+	if len(matchedCard.Request.Command) == 0 {
+		t.Fatalf("matched card request command is empty: %+v", matchedCard.Request)
+	}
+
+	// 3. Retrieve only its selected schema via exact selected-tool schema lookup
+	schemaReq, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      3,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "fak_tools_search",
+			"arguments": map[string]any{
+				"tool":         selectedTool,
+				"detail_level": "full",
+			},
+		},
+	})
+	res3, err := http.Post(ts.URL+"/mcp", "application/json", bytes.NewReader(schemaReq))
+	if err != nil {
+		t.Fatalf("schema lookup error: %v", err)
+	}
+	defer res3.Body.Close()
+	if res3.StatusCode != http.StatusOK {
+		t.Fatalf("schema lookup status = %d, want 200", res3.StatusCode)
+	}
+	var rpcResp3 rpcResponse
+	if err := json.NewDecoder(res3.Body).Decode(&rpcResp3); err != nil {
+		t.Fatalf("decode schema lookup rpc response: %v", err)
+	}
+	if rpcResp3.Error != nil {
+		t.Fatalf("schema lookup RPC error: %+v", rpcResp3.Error)
+	}
+
+	var schemaResp ToolsSearchResponse
+	decodeMCPResult(t, rpcResp3.Result, &schemaResp)
+
+	// Assert bounded non-paged response returning ONLY the selected tool
+	if len(schemaResp.Tools) != 1 {
+		t.Fatalf("expected exactly 1 tool schema returned, got %d", len(schemaResp.Tools))
+	}
+	retrievedTool := schemaResp.Tools[0]
+	if retrievedTool["name"] != selectedTool {
+		t.Fatalf("retrieved tool = %v, want %q", retrievedTool["name"], selectedTool)
+	}
+	retrievedSchema, ok := retrievedTool["inputSchema"]
+	if !ok || retrievedSchema == nil {
+		t.Fatalf("retrieved tool %q missing inputSchema: %+v", selectedTool, retrievedTool)
+	}
+
+	// 4. Assert equal selected-tool correctness against the large catalog
+	var catalogSchema any
+	for _, td := range allExposed {
+		if td["name"] == selectedTool {
+			catalogSchema = td["inputSchema"]
+			break
+		}
+	}
+	if catalogSchema == nil {
+		t.Fatalf("selected tool %q not found in server catalog", selectedTool)
+	}
+	retrievedJSON, err := json.Marshal(retrievedSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotSchema, wantSchema any
+	if err := json.Unmarshal(retrievedJSON, &gotSchema); err != nil {
+		t.Fatal(err)
+	}
+	if rawBytes, ok := catalogSchema.(json.RawMessage); ok {
+		if err := json.Unmarshal(rawBytes, &wantSchema); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		wantBytes, _ := json.Marshal(catalogSchema)
+		if err := json.Unmarshal(wantBytes, &wantSchema); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !reflect.DeepEqual(gotSchema, wantSchema) {
+		t.Fatalf("retrieved schema does not match catalog schema:\n got %#v\nwant %#v", gotSchema, wantSchema)
+	}
+
+	// 5. Verify explicit full-detail compatibility (returning all tools when no exact tool is requested)
+	fullReq, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      4,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "fak_tools_search",
+			"arguments": map[string]any{
+				"detail_level": "full",
+			},
+		},
+	})
+	res4, err := http.Post(ts.URL+"/mcp", "application/json", bytes.NewReader(fullReq))
+	if err != nil {
+		t.Fatalf("full detail request error: %v", err)
+	}
+	defer res4.Body.Close()
+	var rpcResp4 rpcResponse
+	if err := json.NewDecoder(res4.Body).Decode(&rpcResp4); err != nil {
+		t.Fatalf("decode full detail rpc response: %v", err)
+	}
+	if rpcResp4.Error != nil {
+		t.Fatalf("full detail RPC error: %+v", rpcResp4.Error)
+	}
+	var fullResp ToolsSearchResponse
+	decodeMCPResult(t, rpcResp4.Result, &fullResp)
+	if len(fullResp.Tools) != len(allExposed) {
+		t.Fatalf("full detail returned %d tools, want %d", len(fullResp.Tools), len(allExposed))
 	}
 }

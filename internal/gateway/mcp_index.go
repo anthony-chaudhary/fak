@@ -13,6 +13,10 @@ import (
 // repository-development command surface (#6022). Runtime gateway retains only
 // model-serving self-query and capabilities tools below.
 
+// CompactDiscoveryToolName is the canonical capability-cards tool reused for
+// bounded task-scoped startup discovery (#11552).
+const CompactDiscoveryToolName = "fak_capabilities"
+
 // FeatureQueryRequest is the MCP argument shape for fak_feature_query. It mirrors
 // `fak feature query`: a non-empty intent, optional dev/live/all plane, optional
 // result limit, and optional detail fault for one selected card.

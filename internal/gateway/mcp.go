@@ -1131,8 +1131,8 @@ func toolDescriptors() []map[string]any {
 		}.toMap(),
 		mcpToolDescriptor{
 			Name:        "fak_tools_search",
-			Description: "Search and retrieve tool schemas with progressive disclosure. Filter tools by query; detail_level selects 'name', 'description', or 'full' schemas.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"optional filter string; matches tools whose name or description contains this substring (case-insensitive)"},"detail_level":{"type":"string","enum":["name","description","full"],"description":"level of detail to return: 'name' = just tool names, 'description' = names + descriptions, 'full' = complete schemas including inputSchema"}},"additionalProperties":false}`),
+			Description: "Search and retrieve tool schemas with progressive disclosure. Filter tools by query, or look up an exact tool schema by tool/name; detail_level selects 'name', 'description', or 'full' schemas.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"optional filter string; matches tools whose name or description contains this substring (case-insensitive)"},"tool":{"type":"string","description":"optional exact tool name for single-tool schema lookup"},"name":{"type":"string","description":"optional alias for tool name"},"detail_level":{"type":"string","enum":["name","description","full"],"description":"level of detail to return: 'name' = just tool names, 'description' = names + descriptions, 'full' = complete schemas including inputSchema"},"limit":{"type":"integer","description":"maximum number of tool descriptors to return (0 or omitted means no limit)"}},"additionalProperties":false}`),
 			Annotations: readOnlyToolAnnotations(),
 		}.toMap(),
 		mcpToolDescriptor{
@@ -1434,13 +1434,18 @@ var memoryInputSchema = json.RawMessage(`{
 
 // ToolsSearchRequest is the request shape for fak_tools_search.
 type ToolsSearchRequest struct {
-	Query       string `json:"query"`        // optional filter string
-	DetailLevel string `json:"detail_level"` // "name" | "description" | "full"
+	Query       string `json:"query,omitempty"`        // optional filter string
+	Tool        string `json:"tool,omitempty"`         // optional exact tool name lookup
+	Name        string `json:"name,omitempty"`         // optional alias for tool
+	DetailLevel string `json:"detail_level,omitempty"` // "name" | "description" | "full"
+	Limit       int    `json:"limit,omitempty"`        // optional limit on returned tools
 }
 
 // ToolsSearchResponse is the response shape for fak_tools_search.
 type ToolsSearchResponse struct {
-	Tools []map[string]any `json:"tools"` // filtered tool descriptors at requested detail level
+	Tools            []map[string]any `json:"tools"`                        // filtered tool descriptors at requested detail level
+	CompactQueryPath string           `json:"compact_query_path,omitempty"` // canonical capability cards tool for task-scoped query
+	QueryPath        string           `json:"query_path,omitempty"`         // alias for compact_query_path
 }
 
 // toolsSearch is the tool_search_tool: lazy/on-demand tool-schema loading with
@@ -1449,8 +1454,8 @@ type ToolsSearchResponse struct {
 // selfquery hybrid catalog (#3235) rather than a flat substring scan, so a
 // deferred schema is re-findable by intent — recall is the documented failure
 // mode of deferral. Results are returned best-first at the requested detail
-// level. This is the "full retrieval view" half of the two-view split: tools/list
-// may be schema-light, but the search tool always sees every exposed tool.
+// level. As of #11552 it supports exact selected-tool schema lookup by tool/name
+// and bounded task-scoped discovery via compact query-limit cards.
 func (s *Server) toolsSearch(req ToolsSearchRequest) (ToolsSearchResponse, error) {
 	level := req.DetailLevel
 	if level == "" {
@@ -1459,12 +1464,107 @@ func (s *Server) toolsSearch(req ToolsSearchRequest) (ToolsSearchResponse, error
 	if level != "name" && level != "description" && level != "full" {
 		return ToolsSearchResponse{}, fmt.Errorf("invalid detail_level: %s (must be name, description, or full)", level)
 	}
+	if req.Limit < 0 {
+		return ToolsSearchResponse{}, fmt.Errorf("limit must be non-negative")
+	}
 
 	// Index the full registry by name so ranked names map back to descriptors.
 	byName := make(map[string]map[string]any)
 	for _, t := range s.exposedToolDescriptors() {
 		if n, _ := t["name"].(string); n != "" {
 			byName[n] = t
+		}
+	}
+
+	var compactPath string
+	if _, ok := byName[CompactDiscoveryToolName]; ok {
+		compactPath = CompactDiscoveryToolName
+	}
+
+	selected := strings.TrimSpace(req.Tool)
+	if selected == "" {
+		selected = strings.TrimSpace(req.Name)
+	}
+
+	// Exact selected-tool schema lookup: if an explicit tool/name was requested,
+	// retrieve only that selected tool.
+	if selected != "" {
+		cleanSelected := strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(selected, "mcp__fak_guard__"), "mcp__fak__"), "functions.")
+		t, ok := byName[selected]
+		if !ok {
+			t, ok = byName[cleanSelected]
+			if ok {
+				selected = cleanSelected
+			}
+		}
+		if !ok {
+			return ToolsSearchResponse{
+				Tools:            nil,
+				CompactQueryPath: compactPath,
+				QueryPath:        compactPath,
+			}, nil
+		}
+		tool := map[string]any{"name": selected}
+		if selected == CompactDiscoveryToolName {
+			tool["compact_query_path"] = CompactDiscoveryToolName
+			tool["query_path"] = CompactDiscoveryToolName
+		}
+		if level == "description" || level == "full" {
+			if desc, ok := t["description"].(string); ok {
+				tool["description"] = desc
+			}
+		}
+		if level == "full" {
+			if schema, ok := t["inputSchema"]; ok {
+				tool["inputSchema"] = schema
+			}
+			if ann, ok := t["annotations"]; ok {
+				tool["annotations"] = ann
+			}
+		}
+		return ToolsSearchResponse{
+			Tools:            []map[string]any{tool},
+			CompactQueryPath: compactPath,
+			QueryPath:        compactPath,
+		}, nil
+	}
+
+	// If query exactly matches a known tool name and limit is 1 or query is a single token,
+	// fast-path the exact tool schema lookup.
+	trimmedQuery := strings.TrimSpace(req.Query)
+	if trimmedQuery != "" {
+		cleanQuery := strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(trimmedQuery, "mcp__fak_guard__"), "mcp__fak__"), "functions.")
+		target := ""
+		if _, ok := byName[trimmedQuery]; ok && (req.Limit == 1 || !strings.Contains(trimmedQuery, " ")) {
+			target = trimmedQuery
+		} else if _, ok := byName[cleanQuery]; ok && (req.Limit == 1 || !strings.Contains(cleanQuery, " ")) {
+			target = cleanQuery
+		}
+		if target != "" {
+			t := byName[target]
+			tool := map[string]any{"name": target}
+			if target == CompactDiscoveryToolName {
+				tool["compact_query_path"] = CompactDiscoveryToolName
+				tool["query_path"] = CompactDiscoveryToolName
+			}
+			if level == "description" || level == "full" {
+				if desc, ok := t["description"].(string); ok {
+					tool["description"] = desc
+				}
+			}
+			if level == "full" {
+				if schema, ok := t["inputSchema"]; ok {
+					tool["inputSchema"] = schema
+				}
+				if ann, ok := t["annotations"]; ok {
+					tool["annotations"] = ann
+				}
+			}
+			return ToolsSearchResponse{
+				Tools:            []map[string]any{tool},
+				CompactQueryPath: compactPath,
+				QueryPath:        compactPath,
+			}, nil
 		}
 	}
 
@@ -1477,6 +1577,10 @@ func (s *Server) toolsSearch(req ToolsSearchRequest) (ToolsSearchResponse, error
 		}
 		desc, _ := t["description"].(string)
 		tool := map[string]any{"name": name}
+		if name == CompactDiscoveryToolName {
+			tool["compact_query_path"] = CompactDiscoveryToolName
+			tool["query_path"] = CompactDiscoveryToolName
+		}
 		if level == "description" || level == "full" {
 			tool["description"] = desc
 		}
@@ -1489,7 +1593,14 @@ func (s *Server) toolsSearch(req ToolsSearchRequest) (ToolsSearchResponse, error
 			}
 		}
 		result = append(result, tool)
+		if req.Limit > 0 && len(result) >= req.Limit {
+			break
+		}
 	}
 
-	return ToolsSearchResponse{Tools: result}, nil
+	return ToolsSearchResponse{
+		Tools:            result,
+		CompactQueryPath: compactPath,
+		QueryPath:        compactPath,
+	}, nil
 }
