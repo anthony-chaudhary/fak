@@ -391,6 +391,9 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	if lbl := m.ApplyDecodeNUMAInterleave(); p != nil && p.Progress != nil && lbl != "" {
 		fmt.Fprintf(p.Progress, "numa: %s\n", lbl)
 	}
+	if lbl := m.ApplyNUMAWeightReplicas(""); p != nil && p.Progress != nil && lbl != "" {
+		fmt.Fprintf(p.Progress, "numa_replicas: %s\n", lbl)
+	}
 	if w3Requested {
 		if err := m.ValidateResidentW3MLP(); err != nil {
 			return nil, err
