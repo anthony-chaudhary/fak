@@ -46,6 +46,8 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	maxTokens := orchestrationOptionalInt64{}
 	maxWall := fs.Duration("max-wall", defaultUltracodeWallBudget, "one parent wall deadline shared by launch staggering and all workers")
 	attended := orchestrationOptionalBool{}
+	workerModel := fs.String("worker-model", "", "explicit child worker model override")
+	workerEffort := fs.String("worker-effort", "", "explicit child worker reasoning effort override")
 	fs.Var(&maxWorkers, "max-workers", "operator worker cap")
 	fs.Var(&exactWorkers, "exact-workers", "operator exact-width pin (stronger than adaptive selection)")
 	fs.Var(&maxTokens, "max-tokens", "operator token cap")
@@ -117,6 +119,19 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	}
 	if err == nil && taskText != nil && *taskText != "" {
 		orchestration.RouteResolution(&resolved, *taskText, guardCodexDefaultModelID)
+	}
+	if err == nil {
+		if *workerModel != "" {
+			resolved.Resolved.SOLRoute.WorkerModel = *workerModel
+		}
+		if *workerEffort != "" {
+			effort := strings.ToLower(strings.TrimSpace(*workerEffort))
+			if effort != "low" && effort != "medium" && effort != "high" && effort != "xhigh" {
+				fmt.Fprintf(stderr, "fak orchestration plan: invalid --worker-effort %q\n", *workerEffort)
+				return 2
+			}
+			resolved.Resolved.SOLRoute.WorkerReasoningEffort = effort
+		}
 	}
 	if err != nil {
 		if errors.Is(err, orchestration.ErrStrictDegradation) {

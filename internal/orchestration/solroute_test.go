@@ -63,3 +63,37 @@ func TestRouteResolutionPreservesEffortPin(t *testing.T) {
 		t.Fatal("expected error on invalid effort pin, got nil")
 	}
 }
+
+func TestSelectSOLRouteAstraManagerDefaults(t *testing.T) {
+	for _, astraModel := range []string{"gpt-6-astra", "astra", "gpt-6", "openai/gpt-6-astra"} {
+		got := SelectSOLRoute("implement feature", ProfileUltracode, WorkGrind, astraModel)
+		if got.WorkerModel != DefaultAstraChildWorkerModel {
+			t.Errorf("model %q: got WorkerModel %q, want %q", astraModel, got.WorkerModel, DefaultAstraChildWorkerModel)
+		}
+		if got.WorkerReasoningEffort != DefaultAstraChildWorkerEffort {
+			t.Errorf("model %q: got WorkerReasoningEffort %q, want %q", astraModel, got.WorkerReasoningEffort, DefaultAstraChildWorkerEffort)
+		}
+	}
+}
+
+func TestRouteResolutionAstraManagerPreservesExplicitWorkerOverrides(t *testing.T) {
+	task := TaskSpec{
+		ID:        "override-task",
+		WorkClass: WorkGrind,
+		Pins: FastPins{
+			Model:  "custom-worker-model",
+			Effort: "high",
+		},
+	}
+	res, err := Resolve(OrchestrationProfile{Name: ProfileUltracode}, task, HarnessCapabilities{})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	RouteResolution(&res, "implement feature in parallel", "gpt-6-astra")
+	if res.Resolved.SOLRoute.WorkerModel != "custom-worker-model" {
+		t.Errorf("got WorkerModel %q, want custom-worker-model", res.Resolved.SOLRoute.WorkerModel)
+	}
+	if res.Resolved.SOLRoute.WorkerReasoningEffort != "high" {
+		t.Errorf("got WorkerReasoningEffort %q, want high", res.Resolved.SOLRoute.WorkerReasoningEffort)
+	}
+}
