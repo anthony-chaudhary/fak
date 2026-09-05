@@ -23,13 +23,14 @@ package devcmd
 //     it is almost always the matched new file that edit references (e.g. a new
 //     `compact.go` supplying symbols an edited `drain.go` calls) -- masking it would red
 //     the edit's own compile, a false red. --mine still force-keeps a specific file (the
-//     escape hatch for a brand-new untracked PACKAGE wired from an edit elsewhere). As a
-//     backstop for that cross-package case, if the masked build STILL reds, buildcheck
-//     re-runs once against the live tree (no overlay); if the live tree compiles, the red
-//     was purely mask-induced and it reports OK (`live_cross_checked`), so a false red never
-//     survives. This is the LIGHT path: no full-tree copy, unlike the heavy git-archive /
-//     detached-worktree isolation (`fak worktree witness`). NOTE it does not REVERT peers'
-//     modifications to TRACKED files; for a true committed-bytes view use the worktree.
+//     escape hatch for a brand-new untracked PACKAGE wired from an edit elsewhere). If the
+//     masked build still reds, buildcheck cross-checks against the live tree (no overlay);
+//     even if the live tree compiles, buildcheck remains strictly fail-closed, reporting
+//     the failure and diagnosing that untracked dependencies must be added (`git add`)
+//     or declared via --mine (`live_cross_checked`). This is the LIGHT path: no full-tree copy,
+//     unlike the heavy git-archive / detached-worktree isolation (`fak worktree witness`).
+//     NOTE it does not REVERT peers' modifications to TRACKED files; for a true committed-bytes
+//     view use the worktree.
 //
 //	fak buildcheck                     compile-check ./... , masking untracked siblings
 //	fak buildcheck ./cmd/fak           compile one package, output discarded (never in-tree)
@@ -242,19 +243,17 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 		reason = fmt.Sprintf("go %s exited %d", mode, code)
 	}
 
-	// Live-tree cross-check: an isolate red can be a FALSE red -- the overlay hid an untracked
-	// file that kept/tracked code needs (a brand-new package imported from an edited file, a
-	// cross-package matched pair the dir-scoped keep cannot infer). Re-run once against the
-	// live tree (no overlay); if THAT compiles, the tree the fleet sees is green, so report OK.
-	// A live failure means the breakage is in tracked/kept code -> keep the failure verdict.
+	// Live-tree cross-check: when an isolated overlay build fails, cross-check against the live
+	// tree (no overlay) to diagnose if the failure is from hidden untracked dependencies.
+	// Buildcheck remains strictly fail-closed: even if the live tree compiles, code and verdict
+	// are preserved, buf is NOT reset, and liveCrossChecked is recorded for diagnostic messaging
+	// or JSON reporting, informing the user that untracked dependencies must be added (#11457).
 	liveCrossChecked := false
 	if overlayMasked && execErr == nil && code != 0 {
 		var liveBuf bytes.Buffer
 		liveArgs := buildCheckArgs(mode, "", outTarget, wipTag, pkgs)
 		if code2, execErr2 := buildCheckRun(root, liveArgs, &liveBuf, &liveBuf); execErr2 == nil && code2 == 0 {
 			liveCrossChecked = true
-			verdict, reason, code = "OK", "", 0
-			buf.Reset() // the captured masked-build errors were a false red; do not surface them
 		}
 	}
 	if code != 0 {
@@ -263,13 +262,11 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 	elapsed := buildCheckNow().Sub(start)
 
 	// Flush the captured primary-build output in non-JSON mode now that the verdict is settled:
-	// a real red shows its errors; a cross-checked false red shows only a one-line explanation.
 	if !*asJSON && capture {
+		io.Copy(stderr, &buf)
 		if liveCrossChecked {
-			fmt.Fprintf(stderr, "fak buildcheck: isolate build red only because masked untracked deps were hidden; the live tree compiles -- reporting OK.\n")
+			fmt.Fprintf(stderr, "fak buildcheck: isolate build red because masked untracked deps were hidden; the live tree compiles.\n")
 			fmt.Fprintf(stderr, "fak buildcheck: `git add` the new package(s) your tracked/kept files import before committing so a peer's build stays green.\n")
-		} else {
-			io.Copy(stderr, &buf)
 		}
 	}
 

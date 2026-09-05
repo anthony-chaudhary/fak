@@ -397,11 +397,12 @@ func TestRunBuildCheckKeepsMatchedSibling(t *testing.T) {
 	}
 }
 
-// TestRunBuildCheckLiveCrossCheckPasses covers the cross-package residual the dir heuristic
-// can't catch: a masked untracked file (a brand-new package in an un-edited dir) is imported
-// by kept/tracked code, so the isolate build reds -- but the LIVE tree compiles. The fallback
-// pass must reclassify that false red to OK and flag live_cross_checked.
-func TestRunBuildCheckLiveCrossCheckPasses(t *testing.T) {
+// TestRunBuildCheckLiveCrossCheckFailsClosed covers the cross-package case: a masked
+// untracked file (a brand-new package in an un-edited dir) is imported by kept/tracked
+// code, so the isolate build reds -- but the LIVE tree compiles. Buildcheck remains
+// strictly fail-closed: it records live_cross_checked = true, but does NOT override
+// the non-zero exit code or BUILD_FAILED verdict (#11457).
+func TestRunBuildCheckLiveCrossCheckFailsClosed(t *testing.T) {
 	withBuildCheckSeams(t, []string{"internal/conformance/conformance.go"}, nil,
 		func(_ string, args []string, _, stderr io.Writer) (int, error) {
 			if strings.Contains(strings.Join(args, " "), "-overlay") {
@@ -413,21 +414,74 @@ func TestRunBuildCheckLiveCrossCheckPasses(t *testing.T) {
 		})
 	var out, errb bytes.Buffer
 	rc := RunBuildCheck(&out, &errb, []string{"--json", "./..."})
-	if rc != 0 {
-		t.Fatalf("rc = %d, want 0 (live tree compiles -> mask-induced false red reclassified)", rc)
+	if rc != 1 {
+		t.Fatalf("rc = %d, want 1 (strictly fail-closed when isolated overlay compilation fails)", rc)
 	}
 	var rep buildCheckReport
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 		t.Fatalf("bad JSON: %v\n%s", err, out.String())
 	}
-	if rep.Verdict != "OK" || rep.ExitCode != 0 {
-		t.Errorf("verdict/exit = %q/%d, want OK/0", rep.Verdict, rep.ExitCode)
+	if rep.Verdict != "BUILD_FAILED" || rep.ExitCode != 1 {
+		t.Errorf("verdict/exit = %q/%d, want BUILD_FAILED/1", rep.Verdict, rep.ExitCode)
 	}
 	if !rep.LiveCrossChecked {
-		t.Error("live_cross_checked = false, want true (OK came via the live fallback)")
+		t.Error("live_cross_checked = false, want true (live cross check succeeded)")
 	}
-	if strings.Contains(rep.Reason, "conformance") {
-		t.Errorf("reason %q should not carry the false-red masked-build errors", rep.Reason)
+	if !strings.Contains(rep.Reason, "conformance") {
+		t.Errorf("reason %q should carry the failure reason", rep.Reason)
+	}
+}
+
+// TestRunBuildCheckRefusesMaskedOverlayCompilationFailure verifies that when an isolated
+// overlay build fails, buildcheck strictly fails closed with non-zero exit code, preserves
+// the failure verdict and reason, and does NOT report OK -- even if the ambient live tree compiles (#11457).
+func TestRunBuildCheckRefusesMaskedOverlayCompilationFailure(t *testing.T) {
+	withBuildCheckSeams(t, []string{"internal/conformance/conformance.go"}, nil,
+		func(_ string, args []string, _, stderr io.Writer) (int, error) {
+			if strings.Contains(strings.Join(args, " "), "-overlay") {
+				stderr.Write([]byte("cmd/fak/conformance.go:9:2: no required module provides package .../internal/conformance\n"))
+				return 1, nil
+			}
+			return 0, nil // live tree (no overlay) compiles
+		})
+	// 1. JSON report must fail-closed: non-zero exit, BUILD_FAILED, LiveCrossChecked=true, error retained.
+	var out, errb bytes.Buffer
+	rc := RunBuildCheck(&out, &errb, []string{"--json", "./..."})
+	if rc != 1 {
+		t.Fatalf("rc = %d, want 1 (strictly fail-closed on isolated overlay build failure)", rc)
+	}
+	var rep buildCheckReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("bad JSON: %v\n%s", err, out.String())
+	}
+	if rep.Verdict != "BUILD_FAILED" {
+		t.Errorf("rep.Verdict = %q, want BUILD_FAILED (must not report OK)", rep.Verdict)
+	}
+	if rep.ExitCode != 1 {
+		t.Errorf("rep.ExitCode = %d, want 1", rep.ExitCode)
+	}
+	if !rep.LiveCrossChecked {
+		t.Error("rep.LiveCrossChecked = false, want true")
+	}
+	if !strings.Contains(rep.Reason, "conformance") {
+		t.Errorf("rep.Reason = %q, want captured failure output", rep.Reason)
+	}
+
+	// 2. Non-JSON output must retain compiler error and advise adding untracked files with git add.
+	var textOut, textErr bytes.Buffer
+	textRc := RunBuildCheck(&textOut, &textErr, []string{"./..."})
+	if textRc != 1 {
+		t.Fatalf("textRc = %d, want 1", textRc)
+	}
+	textErrStr := textErr.String()
+	if strings.Contains(textErrStr, "reporting OK") {
+		t.Errorf("textErr should not report OK: %s", textErrStr)
+	}
+	if !strings.Contains(textErrStr, "git add") {
+		t.Errorf("textErr should advise `git add`: %s", textErrStr)
+	}
+	if !strings.Contains(textErrStr, "conformance.go:9:2") {
+		t.Errorf("textErr should retain compilation error: %s", textErrStr)
 	}
 }
 
