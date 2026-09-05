@@ -1,4 +1,4 @@
-﻿package shard
+package shard
 
 import (
 	"fmt"
@@ -35,10 +35,10 @@ type VacuumConfig struct {
 // VacuumStats exposes vacuum state for Prometheus metrics.
 type VacuumStats struct {
 	RebalancesTotal    int64
-	LastRebalanceEpoch int64 // unix seconds, 0 = never
-	PendingShards      int   // shards currently needing rebalance
-	PressureEvals      int64 // total pressure evaluations performed
-	PressureRebuilds   int64 // rebuilds triggered by pressure
+	LastRebalanceEpoch int64   // unix seconds, 0 = never
+	PendingShards      int     // shards currently needing rebalance
+	PressureEvals      int64   // total pressure evaluations performed
+	PressureRebuilds   int64   // rebuilds triggered by pressure
 	MaxDrift           float64 // current max relative weight drift across all shards
 	RebalanceFailures  int64   // total rebalance failures (dispatch timeouts, etc.)
 }
@@ -75,7 +75,7 @@ type Manager struct {
 	pressureRebuilds atomic.Int64 // rebuilds triggered by pressure
 
 	// Per-shard rebalance backoff (only accessed from vacuum goroutine â€” no lock needed)
-	rebalanceBackoff       map[int]rebalanceFailState
+	rebalanceBackoff        map[int]rebalanceFailState
 	vacuumRebalanceFailures atomic.Int64
 
 	vacuumTickCount     atomic.Uint64
@@ -90,26 +90,26 @@ type Manager struct {
 
 // ManagerConfig holds config for the shard manager.
 type ManagerConfig struct {
-	NumShards         int
-	MaxMemoryGB       int
-	EvictionPolicy    string
-	AllocatorMode     string // "slab" (default) or "offset"
-	ModelPageBytes    uint64
-	MaxLeaseDurMs     int64
-	UseHugePages      bool // kept for convenience checks
-	HugePageSizeKB    int  // 0 = disabled, 2048 = 2MB, 1048576 = 1GB
-	IndexCapacity     uint64
-	DispatchTimeoutMs int64
-	WarmupOps           int
-	AutoTuneSlabs       bool
-	SlabDistribution    string             // "auto", "model", "uniform", "dedicated"
-	InitialClassWeights map[uint64]float64 // static class weight overrides from config; nil = use defaults
-	VerboseShardLogging      bool
-	Vacuum                   VacuumConfig
-	OnShardReady             func(id, total int, memBytes uint64) // called after each shard is allocated
-	MaxConcurrentMigrations  int // max parallel shard migrations (default 2)
-	MigrateBatchSize         int // entries per ZeroLatencyBalance batch (default 512)
-	MigrateDrainBudget       int // max ops drained per migration cycle (default 64)
+	NumShards               int
+	MaxMemoryGB             int
+	EvictionPolicy          string
+	AllocatorMode           string // "slab" (default) or "offset"
+	ModelPageBytes          uint64
+	MaxLeaseDurMs           int64
+	UseHugePages            bool // kept for convenience checks
+	HugePageSizeKB          int  // 0 = disabled, 2048 = 2MB, 1048576 = 1GB
+	IndexCapacity           uint64
+	DispatchTimeoutMs       int64
+	WarmupOps               int
+	AutoTuneSlabs           bool
+	SlabDistribution        string             // "auto", "model", "uniform", "dedicated"
+	InitialClassWeights     map[uint64]float64 // static class weight overrides from config; nil = use defaults
+	VerboseShardLogging     bool
+	Vacuum                  VacuumConfig
+	OnShardReady            func(id, total int, memBytes uint64) // called after each shard is allocated
+	MaxConcurrentMigrations int                                  // max parallel shard migrations (default 2)
+	MigrateBatchSize        int                                  // entries per ZeroLatencyBalance batch (default 512)
+	MigrateDrainBudget      int                                  // max ops drained per migration cycle (default 64)
 
 	// OOM graceful handling
 	OOMRejectAfterFails int // consecutive alloc failures before fast-rejecting SETs; 0 = disabled
@@ -216,15 +216,15 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 		}
 
 		shardCfg := ShardConfig{
-			ID:                i,
-			IndexCapacity:     perShardIdxCap,
-			MaxMemoryBytes:    perShardMem,
-			EvictionPolicy:    cfg.EvictionPolicy,
-			AllocatorMode:     cfg.AllocatorMode,
-			ModelPageBytes:    cfg.ModelPageBytes,
-			MaxLeaseDurMs:     cfg.MaxLeaseDurMs,
-			UseHugePages:      cfg.UseHugePages,
-			HugePageSizeKB:    cfg.HugePageSizeKB,
+			ID:                  i,
+			IndexCapacity:       perShardIdxCap,
+			MaxMemoryBytes:      perShardMem,
+			EvictionPolicy:      cfg.EvictionPolicy,
+			AllocatorMode:       cfg.AllocatorMode,
+			ModelPageBytes:      cfg.ModelPageBytes,
+			MaxLeaseDurMs:       cfg.MaxLeaseDurMs,
+			UseHugePages:        cfg.UseHugePages,
+			HugePageSizeKB:      cfg.HugePageSizeKB,
 			DispatchTimeoutMs:   cfg.DispatchTimeoutMs,
 			WarmupOps:           staggeredWarmup,
 			AutoTuneSlabs:       cfg.AutoTuneSlabs,
@@ -235,10 +235,10 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 			MigrateBatchSize:    migrateBatch,
 			MigrateDrainBudget:  cfg.MigrateDrainBudget,
 			MigrateSem:          migrateSem,
-			NUMANode:              slot.numaNode,
-			OOMRejectAfterFails:   cfg.OOMRejectAfterFails,
-			SystemOOMFlag:         cfg.SystemOOMFlag,
-			SystemPressureLevel:   cfg.SystemPressureLevel,
+			NUMANode:            slot.numaNode,
+			OOMRejectAfterFails: cfg.OOMRejectAfterFails,
+			SystemOOMFlag:       cfg.SystemOOMFlag,
+			SystemPressureLevel: cfg.SystemPressureLevel,
 		}
 		s, err := New(shardCfg)
 		if err != nil {
@@ -421,15 +421,15 @@ func (m *Manager) AllocateShards(cfg ManagerConfig) error {
 		}
 
 		shardCfg := ShardConfig{
-			ID:                i,
-			IndexCapacity:     perShardIdxCap,
-			MaxMemoryBytes:    perShardMem,
-			EvictionPolicy:    cfg.EvictionPolicy,
-			AllocatorMode:     cfg.AllocatorMode,
-			ModelPageBytes:    cfg.ModelPageBytes,
-			MaxLeaseDurMs:     cfg.MaxLeaseDurMs,
-			UseHugePages:      cfg.UseHugePages,
-			HugePageSizeKB:    cfg.HugePageSizeKB,
+			ID:                  i,
+			IndexCapacity:       perShardIdxCap,
+			MaxMemoryBytes:      perShardMem,
+			EvictionPolicy:      cfg.EvictionPolicy,
+			AllocatorMode:       cfg.AllocatorMode,
+			ModelPageBytes:      cfg.ModelPageBytes,
+			MaxLeaseDurMs:       cfg.MaxLeaseDurMs,
+			UseHugePages:        cfg.UseHugePages,
+			HugePageSizeKB:      cfg.HugePageSizeKB,
 			DispatchTimeoutMs:   cfg.DispatchTimeoutMs,
 			WarmupOps:           staggeredWarmup,
 			AutoTuneSlabs:       cfg.AutoTuneSlabs,
@@ -440,10 +440,10 @@ func (m *Manager) AllocateShards(cfg ManagerConfig) error {
 			MigrateBatchSize:    migrateBatch,
 			MigrateDrainBudget:  cfg.MigrateDrainBudget,
 			MigrateSem:          m.migrateSem,
-			NUMANode:              slot.numaNode,
-			OOMRejectAfterFails:   cfg.OOMRejectAfterFails,
-			SystemOOMFlag:         cfg.SystemOOMFlag,
-			SystemPressureLevel:   cfg.SystemPressureLevel,
+			NUMANode:            slot.numaNode,
+			OOMRejectAfterFails: cfg.OOMRejectAfterFails,
+			SystemOOMFlag:       cfg.SystemOOMFlag,
+			SystemPressureLevel: cfg.SystemPressureLevel,
 		}
 		s, err := New(shardCfg)
 		if err != nil {
@@ -608,8 +608,8 @@ func (m *Manager) RegisterAllocListener(l AllocChangeListener) {
 }
 
 const (
-	minPageHintBytes = 64                // minimum allowed page hint (64 B)
-	maxPageHintBytes = 64 * 1024 * 1024  // maximum allowed page hint (64 MB)
+	minPageHintBytes = 64               // minimum allowed page hint (64 B)
+	maxPageHintBytes = 64 * 1024 * 1024 // maximum allowed page hint (64 MB)
 )
 
 // SetModelPageHint broadcasts a client-reported model page size to all shards.
@@ -1031,10 +1031,10 @@ type OnDemandVacuumResult struct {
 
 // OnDemandAutoTuneResult holds the result of a client-triggered auto-tune.
 type OnDemandAutoTuneResult struct {
-	ShardsRebuilt      []int                      `json:"shards_rebuilt"`
-	ShardsSkipped      map[int]string             `json:"shards_skipped"`
-	DetectionSnapshots map[int]DetectionSnapshot   `json:"detection_snapshots"`
-	DurationMs         int64                      `json:"duration_ms"`
+	ShardsRebuilt      []int                     `json:"shards_rebuilt"`
+	ShardsSkipped      map[int]string            `json:"shards_skipped"`
+	DetectionSnapshots map[int]DetectionSnapshot `json:"detection_snapshots"`
+	DurationMs         int64                     `json:"duration_ms"`
 }
 
 // MaintenanceStatusResult holds read-only vacuum + detection state.
@@ -1215,7 +1215,7 @@ func nextPow2Mgr(v uint64) uint64 {
 // Hard cap at 8 GB; warning at 16 GB recommending dedicated distribution.
 // When total memory is below 8 GB the cap is skipped (can't be satisfied).
 func capShardsForMemory(numShards int, totalMem uint64) int {
-	const minPerShardMem uint64 = 8 << 30  // 8 GB hard minimum
+	const minPerShardMem uint64 = 8 << 30   // 8 GB hard minimum
 	const warnPerShardMem uint64 = 16 << 30 // 16 GB recommendation threshold
 	if totalMem < minPerShardMem || totalMem/uint64(numShards) >= minPerShardMem {
 		// Not capped â€” but warn if per-shard is below 16 GB recommendation

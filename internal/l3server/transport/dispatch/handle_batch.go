@@ -1,4 +1,4 @@
-﻿package dispatch
+package dispatch
 
 import (
 	"fmt"
@@ -189,7 +189,7 @@ func (d *Dispatcher) HandleMSet(msg protocol.Message) protocol.Message {
 	allStatuses := make([]byte, len(keys))
 	anyFailed := false
 	var oomShard *shard.Shard // first shard that returned OOM (for diagnostics)
-	allOOM := true           // track if every shard group failed with OOM
+	allOOM := true            // track if every shard group failed with OOM
 
 	if d.Ring != nil {
 		nodeGroups := d.groupKeysByNode(keys, vals)

@@ -1,4 +1,4 @@
-﻿package shard
+package shard
 
 import (
 	"errors"
@@ -26,36 +26,36 @@ const (
 	OpDelete
 	OpMGet
 	OpMSet
-	OpTest    // EXISTS check
+	OpTest // EXISTS check
 	OpLease
 	OpPin
 	OpUnpin
 	OpInfo
-	OpMDel    // Batch delete
-	OpKeys    // Key pattern scan
-	OpFlush        // Flush all data
-	OpRebalance      // ZeroLatencyBalance rebalance (internal only, not a wire op)
-	OpPageSizeHint   // Client-reported model page size hint (triggers slab rebuild)
-	OpForceAutoTune  // Client-requested auto-tune (force detect + rebuild)
-	OpSnapshot       // Iterate all entries and return them for snapshot
-	OpRestore        // Bulk-load entries from a snapshot
-	OpMGetWithAlloc  // Batch GET returning AllocInfos per key (for RDMA batch)
-	OpBatchLease     // Batch lease grant (multiple keyHashes in one op)
+	OpMDel          // Batch delete
+	OpKeys          // Key pattern scan
+	OpFlush         // Flush all data
+	OpRebalance     // ZeroLatencyBalance rebalance (internal only, not a wire op)
+	OpPageSizeHint  // Client-reported model page size hint (triggers slab rebuild)
+	OpForceAutoTune // Client-requested auto-tune (force detect + rebuild)
+	OpSnapshot      // Iterate all entries and return them for snapshot
+	OpRestore       // Bulk-load entries from a snapshot
+	OpMGetWithAlloc // Batch GET returning AllocInfos per key (for RDMA batch)
+	OpBatchLease    // Batch lease grant (multiple keyHashes in one op)
 )
 
 // ShardOp is a request submitted to a shard.
 type ShardOp struct {
-	Type         OpType
-	Key          []byte
-	KeyHash      uint64
-	Value        []byte
-	TTLMs        int64 // TTL in milliseconds; 0 = no expiry
-	LeaseMs      int64
-	Keys         [][]byte   // for MGET/MSET/MDEL
-	KeyHashes    []uint64
-	Values       [][]byte   // for MSET
-	Pattern      []byte     // for KEYS scan
-	ClassWeights map[uint64]float64 // pressure-derived weights for OpRebalance; nil = use defaults
+	Type           OpType
+	Key            []byte
+	KeyHash        uint64
+	Value          []byte
+	TTLMs          int64 // TTL in milliseconds; 0 = no expiry
+	LeaseMs        int64
+	Keys           [][]byte // for MGET/MSET/MDEL
+	KeyHashes      []uint64
+	Values         [][]byte           // for MSET
+	Pattern        []byte             // for KEYS scan
+	ClassWeights   map[uint64]float64 // pressure-derived weights for OpRebalance; nil = use defaults
 	HintBytes      uint64             // for OpPageSizeHint: client-reported model page size
 	ForceDetect    bool               // for OpForceAutoTune: force early detection
 	RestoreEntries []snapshot.KVEntry // for OpRestore: entries to load
@@ -73,10 +73,10 @@ type AllocMeta struct {
 
 // OpResult is the result returned from a shard operation.
 type OpResult struct {
-	Value       []byte
-	Values      [][]byte  // for MGET
-	Found       bool
-	Founds      []bool    // for MGET/MTEST
+	Value           []byte
+	Values          [][]byte // for MGET
+	Found           bool
+	Founds          []bool // for MGET/MTEST
 	OK              bool
 	Err             error
 	Info            map[string]interface{}
@@ -90,25 +90,25 @@ type OpResult struct {
 
 // ShardConfig holds configuration for a single shard.
 type ShardConfig struct {
-	ID                int
-	IndexCapacity     uint64
-	MaxMemoryBytes    uint64
-	EvictionPolicy    string // "wtinylfu", "sieve", "lru"
-	AllocatorMode     string // "slab" (default) or "offset"
-	ModelPageBytes    uint64
-	MaxLeaseDurMs     int64
-	UseHugePages      bool // kept for convenience checks (derived from HugePageSizeKB > 0)
-	HugePageSizeKB    int  // 0 = disabled, 2048 = 2MB, 1048576 = 1GB
-	DispatchTimeoutMs int64 // 0 = use default (30s)
-	WarmupOps           int   // SET ops before auto-detect; 0 = disabled
-	AutoTuneSlabs       bool  // rebuild allocator on FLUSH with detected sizes
-	SlabDistribution    string             // "auto", "model", "uniform", "dedicated"
-	InitialClassWeights map[uint64]float64 // static class weight overrides from config; nil = use defaults
-	VerboseShardLogging bool                                                       // emit per-shard log lines (default false â€” aggregates only)
+	ID                  int
+	IndexCapacity       uint64
+	MaxMemoryBytes      uint64
+	EvictionPolicy      string // "wtinylfu", "sieve", "lru"
+	AllocatorMode       string // "slab" (default) or "offset"
+	ModelPageBytes      uint64
+	MaxLeaseDurMs       int64
+	UseHugePages        bool                                                        // kept for convenience checks (derived from HugePageSizeKB > 0)
+	HugePageSizeKB      int                                                         // 0 = disabled, 2048 = 2MB, 1048576 = 1GB
+	DispatchTimeoutMs   int64                                                       // 0 = use default (30s)
+	WarmupOps           int                                                         // SET ops before auto-detect; 0 = disabled
+	AutoTuneSlabs       bool                                                        // rebuild allocator on FLUSH with detected sizes
+	SlabDistribution    string                                                      // "auto", "model", "uniform", "dedicated"
+	InitialClassWeights map[uint64]float64                                          // static class weight overrides from config; nil = use defaults
+	VerboseShardLogging bool                                                        // emit per-shard log lines (default false â€” aggregates only)
 	OnWarmupComplete    func(shardID int, dominantSize uint64, freqPercent float64) // aggregate warmup callback
-	MigrateBatchSize    int                // entries per ZeroLatencyBalance batch (default 512)
-	MigrateDrainBudget  int                // max ops drained per migration cycle (default 64)
-	MigrateSem          chan struct{}       // shared semaphore limiting concurrent migrations (from Manager)
+	MigrateBatchSize    int                                                         // entries per ZeroLatencyBalance batch (default 512)
+	MigrateDrainBudget  int                                                         // max ops drained per migration cycle (default 64)
+	MigrateSem          chan struct{}                                               // shared semaphore limiting concurrent migrations (from Manager)
 
 	// NUMA pinning â€” set by Manager when topology is detected
 	NUMANode int // -1 = no pinning
@@ -141,9 +141,9 @@ type migrateState struct {
 	startTime    time.Time          // when migration started
 	totalEntries uint64             // snapshot of index count at start
 	lastLogTime  time.Time          // last periodic progress log
-	preRegDone   []<-chan struct{}   // signals from AllocPreRegisterer goroutines
+	preRegDone   []<-chan struct{}  // signals from AllocPreRegisterer goroutines
 
-	drainBudget    int               // drain budget override (0 = use config default)
+	drainBudget int // drain budget override (0 = use config default)
 }
 
 // DefaultIndexCapacity is the default Swiss table capacity per shard (2^17).
@@ -163,11 +163,11 @@ func IsOOM(err error) bool {
 // --- Panic recovery tracking ---
 
 const (
-	panicWindowSize  = 3                // panics to track
-	panicWindowDur   = 60 * time.Second // window for rapid-panic detection
-	consecutiveDropThreshold int32 = 100   // M2: drops before circuit breaker trips
-	circuitCooldownBase              = 200 * time.Millisecond
-	circuitCooldownMax               = 5 * time.Second
+	panicWindowSize                = 3                // panics to track
+	panicWindowDur                 = 60 * time.Second // window for rapid-panic detection
+	consecutiveDropThreshold int32 = 100              // M2: drops before circuit breaker trips
+	circuitCooldownBase            = 200 * time.Millisecond
+	circuitCooldownMax             = 5 * time.Second
 )
 
 // panicTracker is a circular buffer of panic timestamps for rapid-panic detection.
@@ -314,17 +314,17 @@ type Shard struct {
 	done            chan struct{} // closed when run() exits
 	config          ShardConfig
 	dispatchTimeout time.Duration
-	sizeTracker      *valueSizeTracker
-	pressureTracker  *classPressureTracker
-	latency          *opLatencyTrackers // per-op-category latency tracking
-	allocListeners   []AllocChangeListener
-	migrate          *migrateState // non-nil during ZeroLatencyBalance
+	sizeTracker     *valueSizeTracker
+	pressureTracker *classPressureTracker
+	latency         *opLatencyTrackers // per-op-category latency tracking
+	allocListeners  []AllocChangeListener
+	migrate         *migrateState // non-nil during ZeroLatencyBalance
 
 	// Async allocator construction: background goroutine builds the allocator
 	// and sends the result here. The shard's run loop picks it up to start migration,
 	// avoiding a 30s+ mmap(MAP_POPULATE) stall in the shard's op goroutine.
 	pendingAlloc  chan *pendingAllocResult // capacity 1
-	allocBuilding atomic.Bool             // true while background goroutine is constructing
+	allocBuilding atomic.Bool              // true while background goroutine is constructing
 
 	// C1: Panic recovery with cooldown
 	panics             *panicTracker
@@ -342,7 +342,7 @@ type Shard struct {
 	dropLogLast atomic.Int64 // unix nanos of last drop warning
 
 	// OOM admission control â€” fast-reject SETs after consecutive alloc failures
-	consecAllocFails int // consecutive allocation failures (reset on success or free)
+	consecAllocFails int  // consecutive allocation failures (reset on success or free)
 	oomActive        bool // true = reject SETs without attempting eviction
 	oomThreshold     int  // from config.OOMRejectAfterFails; 0 = disabled
 
@@ -442,23 +442,23 @@ func New(cfg ShardConfig) (*Shard, error) {
 	idx.SetMaxCapacity(maxKeys)
 
 	s := &Shard{
-		id:              cfg.ID,
-		idx:             idx,
-		eviction:        ev,
-		leases:          lt,
-		metrics:         metrics.NewShardMetrics(cfg.ID),
-		ops:             make(chan ShardOp, 4096),
-		quit:            make(chan struct{}),
-		done:            make(chan struct{}),
-		config:          cfg,
-		dispatchTimeout: dispatchTimeout,
-		sizeTracker:      newValueSizeTracker(int64(cfg.WarmupOps), cfg.ID, cfg.VerboseShardLogging, cfg.OnWarmupComplete),
-		pressureTracker:  newClassPressureTracker(a.NumClasses()),
-		latency:          &opLatencyTrackers{},
-		pendingAlloc:     make(chan *pendingAllocResult, 1),
-		panics:           &panicTracker{},
-		ttlBatchSize:     ttlSweepBatchSize,
-		ttlInterval:      ttlSweepInterval,
+		id:                  cfg.ID,
+		idx:                 idx,
+		eviction:            ev,
+		leases:              lt,
+		metrics:             metrics.NewShardMetrics(cfg.ID),
+		ops:                 make(chan ShardOp, 4096),
+		quit:                make(chan struct{}),
+		done:                make(chan struct{}),
+		config:              cfg,
+		dispatchTimeout:     dispatchTimeout,
+		sizeTracker:         newValueSizeTracker(int64(cfg.WarmupOps), cfg.ID, cfg.VerboseShardLogging, cfg.OnWarmupComplete),
+		pressureTracker:     newClassPressureTracker(a.NumClasses()),
+		latency:             &opLatencyTrackers{},
+		pendingAlloc:        make(chan *pendingAllocResult, 1),
+		panics:              &panicTracker{},
+		ttlBatchSize:        ttlSweepBatchSize,
+		ttlInterval:         ttlSweepInterval,
 		oomThreshold:        cfg.OOMRejectAfterFails,
 		systemOOMFlag:       cfg.SystemOOMFlag,
 		systemPressureLevel: cfg.SystemPressureLevel,

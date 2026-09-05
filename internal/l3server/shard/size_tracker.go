@@ -1,4 +1,4 @@
-﻿package shard
+package shard
 
 import (
 	"fmt"
@@ -14,15 +14,15 @@ import (
 // Internal fields are written only by the shard goroutine (single-writer).
 // External goroutines read the cached snapshot via atomic pointer.
 type valueSizeTracker struct {
-	counts       map[uint64]int64 // exact value_size -> count
-	totalSets    int64
-	warmupTarget int64 // 0 = disabled
-	detected     bool
-	optimalSize  uint64  // detected dominant value size
+	counts          map[uint64]int64 // exact value_size -> count
+	totalSets       int64
+	warmupTarget    int64 // 0 = disabled
+	detected        bool
+	optimalSize     uint64  // detected dominant value size
 	slotUtilization float64 // slot utilization with current slab classes (1.0 = perfect fit)
-	shardID      int
-	justDetected bool // set in detect(), cleared after rebuild
-	frozen       bool // set after successful auto-rebuild, prevents further recording
+	shardID         int
+	justDetected    bool // set in detect(), cleared after rebuild
+	frozen          bool // set after successful auto-rebuild, prevents further recording
 
 	verbose          bool // emit per-shard log lines
 	onWarmupComplete func(shardID int, dominantSize uint64, freqPercent float64)
@@ -39,13 +39,13 @@ type SizeEntry struct {
 
 // DetectionSnapshot holds the result of size detection for Stats API exposure.
 type DetectionSnapshot struct {
-	Status               string      `json:"status"` // "disabled", "warming_up", "detected"
-	WarmupProgress       string      `json:"warmup_progress"`
-	DominantValueSize    uint64      `json:"dominant_value_size"`
-	DominantFreqPercent  float64     `json:"dominant_frequency_percent"`
-	CurrentSlotUtilization float64   `json:"current_slot_utilization"`
-	RecommendedPageBytes uint64      `json:"recommended_model_page_bytes"`
-	TopSizes             []SizeEntry `json:"top_sizes"`
+	Status                 string      `json:"status"` // "disabled", "warming_up", "detected"
+	WarmupProgress         string      `json:"warmup_progress"`
+	DominantValueSize      uint64      `json:"dominant_value_size"`
+	DominantFreqPercent    float64     `json:"dominant_frequency_percent"`
+	CurrentSlotUtilization float64     `json:"current_slot_utilization"`
+	RecommendedPageBytes   uint64      `json:"recommended_model_page_bytes"`
+	TopSizes               []SizeEntry `json:"top_sizes"`
 }
 
 func newValueSizeTracker(warmupTarget int64, shardID int, verbose bool, onComplete func(int, uint64, float64)) *valueSizeTracker {

@@ -17,8 +17,8 @@ func BenchmarkEvaluateQuality(b *testing.B) {
 	}
 }
 
-// BenchmarkEvaluateJSON benchmarks the JSON serialization and evaluation adapter.
-func BenchmarkEvaluateJSON(b *testing.B) {
+// BenchmarkEvaluateJSONDynamic benchmarks the JSON serialization and evaluation adapter.
+func BenchmarkEvaluateJSONDynamic(b *testing.B) {
 	req := validRequest()
 	raw, err := json.Marshal(req)
 	if err != nil {

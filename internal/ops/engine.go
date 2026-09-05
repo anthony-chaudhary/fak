@@ -53,7 +53,7 @@ func (e *Engine) Tick(ctx context.Context, forceAll bool) error {
 	// 1. Quick checks: Locks & Worktrees (every 60s or forceAll)
 	if forceAll || now.Sub(e.lastQuickTick) >= 60*time.Second {
 		start := time.Now()
-		healRes, err := e.Workspace.SweepLocksAndWorktrees(ctx, false)
+		healRes, _ := e.Workspace.SweepLocksAndWorktrees(ctx, false)
 		dur := time.Since(start).Milliseconds()
 
 		if len(healRes.LocksEvicted) > 0 {
@@ -98,13 +98,12 @@ func (e *Engine) Tick(ctx context.Context, forceAll bool) error {
 		}
 
 		e.lastQuickTick = now
-		_ = err
 	}
 
 	// 2. Storage & Cache Lifecycle (every 15m or forceAll)
 	if forceAll || now.Sub(e.lastStorageTick) >= 15*time.Minute {
 		start := time.Now()
-		reclaimRes, err := e.Storage.ReclaimCascade(ctx, false)
+		reclaimRes, _ := e.Storage.ReclaimCascade(ctx, false)
 		dur := time.Since(start).Milliseconds()
 
 		if reclaimRes.TotalBytes > 0 {
@@ -117,7 +116,6 @@ func (e *Engine) Tick(ctx context.Context, forceAll bool) error {
 		}
 
 		e.lastStorageTick = now
-		_ = err
 	}
 
 	return nil

@@ -24,12 +24,12 @@ const (
 	MaxLoadDenominator = 8
 
 	// Slot field offsets within the 48-byte slot
-	offKeyHash     = 0
-	offKeyLen      = 8
-	offKeyOffset   = 10
-	offValueOffset = 18
-	offValueLen    = 26
-	offTTL         = 30
+	offKeyHash       = 0
+	offKeyLen        = 8
+	offKeyOffset     = 10
+	offValueOffset   = 18
+	offValueLen      = 26
+	offTTL           = 30
 	offRefCount      = 38
 	offFlags         = 42
 	offValueClassIdx = 44 // 1 byte: actual slab class index
@@ -50,7 +50,7 @@ type Entry struct {
 	KeyOffset     uint64
 	ValueOffset   uint64
 	ValueLen      uint32
-	TTL           int64  // Unix timestamp in ms; 0 = no expiry
+	TTL           int64 // Unix timestamp in ms; 0 = no expiry
 	RefCount      uint32
 	Flags         uint16
 	ValueClassIdx uint8 // actual slab class index (valid when FlagHasClassIdx set)

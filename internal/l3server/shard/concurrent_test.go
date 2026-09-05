@@ -1,4 +1,4 @@
-﻿package shard
+package shard
 
 import (
 	"bytes"
@@ -339,15 +339,15 @@ func TestShardCountCappedByMemory(t *testing.T) {
 		wantShards int
 	}{
 		{"512GB/64â†’64", 512 * GB, 64, 64},   // 8GB/shard = 8GB â†’ no cap (warns <16GB)
-		{"512GB/32â†’32", 512 * GB, 32, 32},    // 16GB/shard = 16GB â†’ no cap
-		{"256GB/32â†’32", 256 * GB, 32, 32},    // 8GB/shard = 8GB â†’ no cap (warns <16GB)
-		{"128GB/16â†’16", 128 * GB, 16, 16},    // 8GB/shard = 8GB â†’ no cap (warns <16GB)
-		{"32GB/8â†’4", 32 * GB, 8, 4},          // 4GB/shard < 8GB â†’ cap
-		{"16GB/1â†’1", 16 * GB, 1, 1},          // 16GB/shard â†’ no cap
-		{"8GB/4â†’1", 8 * GB, 4, 1},            // 2GB/shard < 8GB â†’ cap (total=8GB â†’ cap at 1)
-		{"1GB/4â†’4", 1 * GB, 4, 4},            // total < 8GB â†’ skip
-		{"1024GB/64â†’64", 1024 * GB, 64, 64},  // 16GB/shard â†’ no cap, no warning
-		{"512GB/128â†’64", 512 * GB, 128, 64},  // 4GB/shard < 8GB â†’ cap
+		{"512GB/32â†’32", 512 * GB, 32, 32},   // 16GB/shard = 16GB â†’ no cap
+		{"256GB/32â†’32", 256 * GB, 32, 32},   // 8GB/shard = 8GB â†’ no cap (warns <16GB)
+		{"128GB/16â†’16", 128 * GB, 16, 16},   // 8GB/shard = 8GB â†’ no cap (warns <16GB)
+		{"32GB/8â†’4", 32 * GB, 8, 4},         // 4GB/shard < 8GB â†’ cap
+		{"16GB/1â†’1", 16 * GB, 1, 1},         // 16GB/shard â†’ no cap
+		{"8GB/4â†’1", 8 * GB, 4, 1},           // 2GB/shard < 8GB â†’ cap (total=8GB â†’ cap at 1)
+		{"1GB/4â†’4", 1 * GB, 4, 4},           // total < 8GB â†’ skip
+		{"1024GB/64â†’64", 1024 * GB, 64, 64}, // 16GB/shard â†’ no cap, no warning
+		{"512GB/128â†’64", 512 * GB, 128, 64}, // 4GB/shard < 8GB â†’ cap
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

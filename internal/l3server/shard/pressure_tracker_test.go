@@ -1,4 +1,4 @@
-﻿package shard
+package shard
 
 import (
 	"math"
@@ -97,7 +97,7 @@ func TestCustomWeightsInSlabConfig(t *testing.T) {
 		MaxMemoryBytes: 16 * 1024 * 1024,
 		ModelPageBytes: 5242880,
 		ClassWeights: map[uint64]float64{
-			64:   50.0,
+			64:      50.0,
 			5242880: 50.0,
 		},
 	}

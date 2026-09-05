@@ -111,14 +111,14 @@ type SystemHealthProvider func() SystemHealthSnapshot
 type VacuumMetricsProvider func() VacuumSnapshot
 
 type OpLatencySnapshot struct {
-	ShardID                                        int
-	AllP50Us, AllP99Us                             int64
-	GetP50Us, GetP99Us                             int64
-	SetP50Us, SetP99Us                             int64
-	ExistsP50Us, ExistsP99Us                       int64
-	QueueWaitP50Us, QueueWaitP99Us                 int64
-	AllocDurP50Us, AllocDurP99Us                   int64
-	QueueDepth, QueueCap                           int
+	ShardID                        int
+	AllP50Us, AllP99Us             int64
+	GetP50Us, GetP99Us             int64
+	SetP50Us, SetP99Us             int64
+	ExistsP50Us, ExistsP99Us       int64
+	QueueWaitP50Us, QueueWaitP99Us int64
+	AllocDurP50Us, AllocDurP99Us   int64
+	QueueDepth, QueueCap           int
 }
 
 type ShardPressureSnapshot struct {

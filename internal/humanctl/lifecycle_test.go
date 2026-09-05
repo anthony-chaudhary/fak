@@ -329,8 +329,8 @@ func TestAddresseeScopingConstraints(t *testing.T) {
 	}
 }
 
-// BenchmarkHumanCtl measures end-to-end performance of lookup, instruction validation, compose, and envelope checks.
-func BenchmarkHumanCtl(b *testing.B) {
+// BenchmarkHumanCtlLifecycle measures end-to-end performance of lookup, instruction validation, compose, and envelope checks.
+func BenchmarkHumanCtlLifecycle(b *testing.B) {
 	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
 	b.ReportAllocs()
 	b.ResetTimer()

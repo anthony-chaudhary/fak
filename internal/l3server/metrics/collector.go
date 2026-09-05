@@ -1,4 +1,4 @@
-﻿package metrics
+package metrics
 
 import (
 	"encoding/json"
@@ -15,35 +15,35 @@ import (
 
 // Collector aggregates metrics from all shards and connections.
 type Collector struct {
-	shardsMu           sync.RWMutex
-	shards             []*ShardMetrics
-	startup            *StartupState
-	connReg            *ConnRegistry
-	ClientStatsReg     *ClientStatsRegistry
-	startedAt          time.Time
-	SlabMetrics        SlabMetricsProvider    // set after shard allocation
-	CacheStateProvider CacheStateProvider     // set after shard allocation
-	VacuumMetrics      VacuumMetricsProvider  // set after manager starts
-	PressureMetrics    PressureMetricsProvider // set after manager starts (pressure rebalancing)
-	PollerMetrics      PollerMetricsProvider   // set after RDMA servers start
-	RDMAReadMetrics    RDMAReadMetricsProvider // set after RDMA servers start
-	InflightOpsFunc    func() int64            // set after transport servers start
-	SystemHealth       SystemHealthProvider    // set after health monitor starts
-	OpLatencyMetrics      OpLatencyProvider          // set after shard allocation
-	ShardPressureMetrics  ShardPressureProvider      // set after shard allocation
-	ConnBufBytesFunc      func() int64            // RDMA connection buffer bytes (from A2)
-	MaxKeysPerShard    uint64                   // configured max_keys per shard (for capacity metrics)
-	NumShards          int                      // number of shards (for capacity metrics)
-	ReplicationQueue   func() (depth, cap int)  // cluster replication queue metrics (nil = no cluster)
+	shardsMu             sync.RWMutex
+	shards               []*ShardMetrics
+	startup              *StartupState
+	connReg              *ConnRegistry
+	ClientStatsReg       *ClientStatsRegistry
+	startedAt            time.Time
+	SlabMetrics          SlabMetricsProvider     // set after shard allocation
+	CacheStateProvider   CacheStateProvider      // set after shard allocation
+	VacuumMetrics        VacuumMetricsProvider   // set after manager starts
+	PressureMetrics      PressureMetricsProvider // set after manager starts (pressure rebalancing)
+	PollerMetrics        PollerMetricsProvider   // set after RDMA servers start
+	RDMAReadMetrics      RDMAReadMetricsProvider // set after RDMA servers start
+	InflightOpsFunc      func() int64            // set after transport servers start
+	SystemHealth         SystemHealthProvider    // set after health monitor starts
+	OpLatencyMetrics     OpLatencyProvider       // set after shard allocation
+	ShardPressureMetrics ShardPressureProvider   // set after shard allocation
+	ConnBufBytesFunc     func() int64            // RDMA connection buffer bytes (from A2)
+	MaxKeysPerShard      uint64                  // configured max_keys per shard (for capacity metrics)
+	NumShards            int                     // number of shards (for capacity metrics)
+	ReplicationQueue     func() (depth, cap int) // cluster replication queue metrics (nil = no cluster)
 
 	// Slab-aware readiness: returns per-shard detection status strings.
 	// Set after shard allocation. Returns nil if not wired up.
 	ShardDetectionFunc func() []string
 
 	// Preflight metrics (point-in-time values captured once at startup)
-	PreflightMemAvailGB    float64
-	PreflightSwapUsedPct   float64
-	PreflightStaleProcs    int
+	PreflightMemAvailGB  float64
+	PreflightSwapUsedPct float64
+	PreflightStaleProcs  int
 
 	lastChurnWarn time.Time // rate-limit churn warnings
 
@@ -65,33 +65,33 @@ func (c *Collector) SetShards(shards []*ShardMetrics) {
 
 // shardTotals holds aggregated counters across all shards.
 type shardTotals struct {
-	gets                     int64
-	sets                     int64
-	deletes                  int64
-	exists                   int64
-	existsHits               int64
-	existsMisses             int64
-	hits                     int64
-	misses                   int64
-	evictions                int64
-	ttlExpirations           int64
-	evictionsKeyPressure     int64
-	evictionsValuePressure   int64
-	evictionsFailed          int64
-	evictionsLeaseSkip       int64
-	evictionsRebalance       int64
-	promotions               int64
-	oomRejections            int64
-	opsDropped               int64
-	bytesIn                  int64
-	bytesOut                 int64
-	rdmaReadBytesOut         int64
-	keyBytesIn               int64
-	valueBytesIn             int64
-	migrationsInProgress     int32
-	panics                   int64
-	circuitTrips             int64
-	shardHalted              int32
+	gets                   int64
+	sets                   int64
+	deletes                int64
+	exists                 int64
+	existsHits             int64
+	existsMisses           int64
+	hits                   int64
+	misses                 int64
+	evictions              int64
+	ttlExpirations         int64
+	evictionsKeyPressure   int64
+	evictionsValuePressure int64
+	evictionsFailed        int64
+	evictionsLeaseSkip     int64
+	evictionsRebalance     int64
+	promotions             int64
+	oomRejections          int64
+	opsDropped             int64
+	bytesIn                int64
+	bytesOut               int64
+	rdmaReadBytesOut       int64
+	keyBytesIn             int64
+	valueBytesIn           int64
+	migrationsInProgress   int32
+	panics                 int64
+	circuitTrips           int64
+	shardHalted            int32
 }
 
 // aggregateShards computes totals across all shards. Returns nil shardTotals if shards is nil.
@@ -162,11 +162,11 @@ func aggregateLifetimeShards(shards []*ShardMetrics) *shardTotals {
 		t.evictionsRebalance += m.LifetimeEvictionsRebalance()
 		t.promotions += m.LifetimePromotions()
 		t.oomRejections += m.LifetimeOOMRejections()
-		t.opsDropped += m.OpsDropped()             // already lifetime â€” never reset
+		t.opsDropped += m.OpsDropped()                // already lifetime â€” never reset
 		t.migrationsInProgress += m.MigrationActive() // gauge, not a counter
-		t.panics += m.Panics()             // logically lifetime â€” never reset
-		t.circuitTrips += m.CircuitTrips() // logically lifetime â€” never reset
-		t.shardHalted += m.ShardHalted()   // gauge, not a counter
+		t.panics += m.Panics()                        // logically lifetime â€” never reset
+		t.circuitTrips += m.CircuitTrips()            // logically lifetime â€” never reset
+		t.shardHalted += m.ShardHalted()              // gauge, not a counter
 	}
 	return t
 }
@@ -400,7 +400,6 @@ func (c *Collector) writeAggregateOps(b *strings.Builder, totals *shardTotals) {
 	b.WriteString("\n# HELP l3_shard_circuit_trips_total Total shard circuit breaker activations.\n")
 	b.WriteString("# TYPE l3_shard_circuit_trips_total counter\n")
 	fmt.Fprintf(b, "l3_shard_circuit_trips_total %d\n", totals.circuitTrips)
-
 
 	b.WriteString("\n# HELP l3_server_tcp_handler_panics_total Total panics in TCP connection handlers.\n")
 	b.WriteString("# TYPE l3_server_tcp_handler_panics_total counter\n")
@@ -1777,16 +1776,16 @@ func (c *Collector) MetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
 			existsHitRate = float64(totals.existsHits) / float64(totals.exists) * 100
 		}
 		result["ops"] = map[string]interface{}{
-			"gets":                  totals.gets,
-			"sets":                  totals.sets,
-			"deletes":               totals.deletes,
-			"exists":                totals.exists,
-			"exists_hits":           totals.existsHits,
-			"exists_misses":         totals.existsMisses,
-			"hits":                  totals.hits,
-			"misses":                totals.misses,
-			"ttl_expirations":       totals.ttlExpirations,
-			"hit_rate_percent":      hitRate,
+			"gets":                    totals.gets,
+			"sets":                    totals.sets,
+			"deletes":                 totals.deletes,
+			"exists":                  totals.exists,
+			"exists_hits":             totals.existsHits,
+			"exists_misses":           totals.existsMisses,
+			"hits":                    totals.hits,
+			"misses":                  totals.misses,
+			"ttl_expirations":         totals.ttlExpirations,
+			"hit_rate_percent":        hitRate,
 			"exists_hit_rate_percent": existsHitRate,
 		}
 	}
@@ -1809,15 +1808,15 @@ func (c *Collector) MetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
 			totalEvictionsOrganic = 0
 		}
 		result["eviction"] = map[string]interface{}{
-			"total":          totals.evictions,
-			"key_pressure":   totals.evictionsKeyPressure,
-			"value_pressure": totals.evictionsValuePressure,
-			"failed":         totals.evictionsFailed,
-			"lease_skip":     totals.evictionsLeaseSkip,
-			"rebalance":      totals.evictionsRebalance,
-			"organic":        totalEvictionsOrganic,
-			"promotions":     totals.promotions,
-			"rate_percent":   evictionRate,
+			"total":             totals.evictions,
+			"key_pressure":      totals.evictionsKeyPressure,
+			"value_pressure":    totals.evictionsValuePressure,
+			"failed":            totals.evictionsFailed,
+			"lease_skip":        totals.evictionsLeaseSkip,
+			"rebalance":         totals.evictionsRebalance,
+			"organic":           totalEvictionsOrganic,
+			"promotions":        totals.promotions,
+			"rate_percent":      evictionRate,
 			"fail_rate_percent": evictionFailRate,
 		}
 	}
@@ -1828,9 +1827,9 @@ func (c *Collector) MetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
 
 	if totals != nil {
 		payload := map[string]interface{}{
-			"gb_in":             float64(totals.bytesIn) / (1 << 30),
-			"gb_out":            float64(totals.bytesOut) / (1 << 30),
-			"rdma_read_gb_out":  float64(totals.rdmaReadBytesOut) / (1 << 30),
+			"gb_in":            float64(totals.bytesIn) / (1 << 30),
+			"gb_out":           float64(totals.bytesOut) / (1 << 30),
+			"rdma_read_gb_out": float64(totals.rdmaReadBytesOut) / (1 << 30),
 		}
 		if totals.sets > 0 {
 			payload["avg_key_bytes"] = float64(totals.keyBytesIn) / float64(totals.sets)
@@ -1845,23 +1844,23 @@ func (c *Collector) MetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
 
 	if shards != nil {
 		type shardEntry struct {
-			ID                       int   `json:"id"`
-			Gets                     int64 `json:"gets"`
-			Sets                     int64 `json:"sets"`
-			Evictions                int64 `json:"evictions"`
-			BytesIn                  int64 `json:"bytes_in"`
-			EvictionsKeyPressure     int64 `json:"evictions_key_pressure"`
-			EvictionsValuePressure   int64 `json:"evictions_value_pressure"`
-			EvictionsFailed          int64 `json:"evictions_failed"`
-			EvictionsLeaseSkip       int64 `json:"evictions_lease_skip"`
-			EvictionsRebalance       int64 `json:"evictions_rebalance"`
-			MigrationActive          int32 `json:"migration_active"`
+			ID                       int     `json:"id"`
+			Gets                     int64   `json:"gets"`
+			Sets                     int64   `json:"sets"`
+			Evictions                int64   `json:"evictions"`
+			BytesIn                  int64   `json:"bytes_in"`
+			EvictionsKeyPressure     int64   `json:"evictions_key_pressure"`
+			EvictionsValuePressure   int64   `json:"evictions_value_pressure"`
+			EvictionsFailed          int64   `json:"evictions_failed"`
+			EvictionsLeaseSkip       int64   `json:"evictions_lease_skip"`
+			EvictionsRebalance       int64   `json:"evictions_rebalance"`
+			MigrationActive          int32   `json:"migration_active"`
 			MigrationDurationSeconds float64 `json:"migration_last_duration_seconds"`
-			MigrationCompletedTotal  int64 `json:"migration_completed_total"`
-			MigrationLastEntries     int64 `json:"migration_last_entries"`
+			MigrationCompletedTotal  int64   `json:"migration_completed_total"`
+			MigrationLastEntries     int64   `json:"migration_last_entries"`
 			MigrationPreRegSeconds   float64 `json:"migration_prereg_wait_seconds"`
-			MigrationP99Us           int64 `json:"migration_p99_us,omitempty"`
-			MigrationBatchSize       int32 `json:"migration_batch_size,omitempty"`
+			MigrationP99Us           int64   `json:"migration_p99_us,omitempty"`
+			MigrationBatchSize       int32   `json:"migration_batch_size,omitempty"`
 		}
 
 		shardEntries := make([]shardEntry, len(shards))
@@ -1981,12 +1980,12 @@ func (c *Collector) MetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
 	if c.RDMAReadMetrics != nil {
 		snap := c.RDMAReadMetrics()
 		rdma["reads"] = map[string]int64{
-			"issued":                snap.Issued,
-			"confirmed":             snap.Confirmed,
-			"failed":                snap.Failed,
-			"forced_inline":         snap.ForcedInline,
-			"lease_drops":           snap.LeaseDrops,
-			"mget_migration_skips":  snap.MgetMigrationSkips,
+			"issued":               snap.Issued,
+			"confirmed":            snap.Confirmed,
+			"failed":               snap.Failed,
+			"forced_inline":        snap.ForcedInline,
+			"lease_drops":          snap.LeaseDrops,
+			"mget_migration_skips": snap.MgetMigrationSkips,
 		}
 	}
 
@@ -2090,7 +2089,7 @@ func (c *Collector) MetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
 	if c.VacuumMetrics != nil {
 		vs := c.VacuumMetrics()
 		vacuum := map[string]interface{}{
-			"rebalances_total":    vs.RebalancesTotal,
+			"rebalances_total":   vs.RebalancesTotal,
 			"pending_shards":     vs.PendingShards,
 			"pressure_evals":     vs.PressureEvals,
 			"pressure_rebuilds":  vs.PressureRebuilds,
@@ -2111,22 +2110,22 @@ func (c *Collector) MetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
 		h := c.SystemHealth()
 		health := map[string]interface{}{
 			"mem_available_bytes": h.MemAvailableBytes,
-			"mem_psi_some_bp":    h.MemPSISomeBP,
-			"mem_psi_full_bp":    h.MemPSIFullBP,
+			"mem_psi_some_bp":     h.MemPSISomeBP,
+			"mem_psi_full_bp":     h.MemPSIFullBP,
 			// Memory accounting: process_rss_bytes is VmRSS (regular 4KB pages only),
 			// process_hugetlb_bytes is hugepage-backed slab memory, and
 			// process_total_rss_bytes = VmRSS + HugeTLB (matches htop RES column).
 			// On a healthy system with hugepages, rss_bytes is small and hugetlb_bytes
 			// is large â€” this is expected, not a bug.
-			"process_total_rss_bytes": h.ProcessTotalRSSBytes,
-			"process_rss_bytes":       h.ProcessRSSBytes,
-			"process_hugetlb_bytes":   h.ProcessHugetlbBytes,
-			"cpu_user_seconds":           h.CPUUserSeconds,
-			"cpu_system_seconds":         h.CPUSystemSeconds,
-			"goroutines":                 h.Goroutines,
-			"threads":                    h.Threads,
-			"voluntary_ctx_switches":     h.VoluntaryCtxSwitches,
-			"involuntary_ctx_switches":   h.InvoluntaryCtxSwitches,
+			"process_total_rss_bytes":  h.ProcessTotalRSSBytes,
+			"process_rss_bytes":        h.ProcessRSSBytes,
+			"process_hugetlb_bytes":    h.ProcessHugetlbBytes,
+			"cpu_user_seconds":         h.CPUUserSeconds,
+			"cpu_system_seconds":       h.CPUSystemSeconds,
+			"goroutines":               h.Goroutines,
+			"threads":                  h.Threads,
+			"voluntary_ctx_switches":   h.VoluntaryCtxSwitches,
+			"involuntary_ctx_switches": h.InvoluntaryCtxSwitches,
 		}
 		if h.FDLimit > 0 {
 			health["fd_ratio"] = float64(h.FDCount) / float64(h.FDLimit)
@@ -2145,10 +2144,10 @@ func (c *Collector) MetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
 	// ================================================================
 
 	result["startup"] = map[string]interface{}{
-		"shards_ready":     c.startup.ShardsReady.Load(),
-		"shards_total":     c.startup.ShardsTotal.Load(),
+		"shards_ready":       c.startup.ShardsReady.Load(),
+		"shards_total":       c.startup.ShardsTotal.Load(),
 		"mem_reserved_bytes": c.startup.MemReservedBytes.Load(),
-		"mem_total_bytes":  c.startup.MemTotalBytes.Load(),
+		"mem_total_bytes":    c.startup.MemTotalBytes.Load(),
 	}
 
 	// ================================================================
@@ -2165,15 +2164,15 @@ func (c *Collector) MetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
 					"remote":              cs.RemoteAddr,
 					"last_report_seconds": now.Sub(cs.LastUpdated).Seconds(),
 					// Core errors/ops
-					"get_errors":      cs.GetErrors,
-					"get_successes":   cs.GetSuccesses,
-					"set_errors":      cs.SetErrors,
-					"exists_errors":   cs.ExistsErrors,
-					"exists_timeouts": cs.ExistsTimeouts,
-					"io_workers":      cs.IoWorkers,
+					"get_errors":        cs.GetErrors,
+					"get_successes":     cs.GetSuccesses,
+					"set_errors":        cs.SetErrors,
+					"exists_errors":     cs.ExistsErrors,
+					"exists_timeouts":   cs.ExistsTimeouts,
+					"io_workers":        cs.IoWorkers,
 					"avg_io_batch_size": cs.AvgIoBatchSize,
 					"avg_io_latency_ms": cs.AvgIoLatencyMs,
-					"io_calls":        cs.IoCalls,
+					"io_calls":          cs.IoCalls,
 					// SGLang metrics
 					"cache_hit_rate":          cs.CacheHitRate,
 					"token_usage":             cs.TokenUsage,
@@ -2220,14 +2219,14 @@ func (c *Collector) MetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
 					"prefetch_queue_depth":  cs.PrefetchQueueDepth,
 					"prefetch_in_flight":    cs.PrefetchInFlight,
 					// Connector config/state
-					"reconnect_count":          cs.ReconnectCount,
-					"pool_size":                cs.PoolSize,
-					"dedup_low_hit_streak":     cs.DedupLowHitStreak,
-					"total_pages_set":          cs.TotalPagesSet,
-					"total_pages_get":          cs.TotalPagesGet,
-					"backup_coalesce_avg_ops":  cs.BackupCoalesceAvgOps,
-					"dedup_mode":               cs.DedupMode,
-					"dedup_auto_disabled":      cs.DedupAutoDisabled,
+					"reconnect_count":         cs.ReconnectCount,
+					"pool_size":               cs.PoolSize,
+					"dedup_low_hit_streak":    cs.DedupLowHitStreak,
+					"total_pages_set":         cs.TotalPagesSet,
+					"total_pages_get":         cs.TotalPagesGet,
+					"backup_coalesce_avg_ops": cs.BackupCoalesceAvgOps,
+					"dedup_mode":              cs.DedupMode,
+					"dedup_auto_disabled":     cs.DedupAutoDisabled,
 				}
 				// Latency histogram
 				if len(cs.IoLatencyHistBuckets) > 0 && len(cs.IoLatencyHistCounts) > 0 {
@@ -2260,21 +2259,21 @@ func (c *Collector) MetricsJSONHandler(w http.ResponseWriter, r *http.Request) {
 			latencyEntries := make([]map[string]interface{}, len(snaps))
 			for i, snap := range snaps {
 				latencyEntries[i] = map[string]interface{}{
-					"shard_id":      snap.ShardID,
-					"all_p50_us":    snap.AllP50Us,
-					"all_p99_us":    snap.AllP99Us,
-					"get_p50_us":    snap.GetP50Us,
-					"get_p99_us":    snap.GetP99Us,
-					"set_p50_us":    snap.SetP50Us,
-					"set_p99_us":    snap.SetP99Us,
-					"exists_p50_us":      snap.ExistsP50Us,
-					"exists_p99_us":      snap.ExistsP99Us,
-					"queue_wait_p50_us":  snap.QueueWaitP50Us,
-					"queue_wait_p99_us":  snap.QueueWaitP99Us,
-					"alloc_dur_p50_us":   snap.AllocDurP50Us,
-					"alloc_dur_p99_us":   snap.AllocDurP99Us,
-					"queue_depth":        snap.QueueDepth,
-					"queue_cap":          snap.QueueCap,
+					"shard_id":          snap.ShardID,
+					"all_p50_us":        snap.AllP50Us,
+					"all_p99_us":        snap.AllP99Us,
+					"get_p50_us":        snap.GetP50Us,
+					"get_p99_us":        snap.GetP99Us,
+					"set_p50_us":        snap.SetP50Us,
+					"set_p99_us":        snap.SetP99Us,
+					"exists_p50_us":     snap.ExistsP50Us,
+					"exists_p99_us":     snap.ExistsP99Us,
+					"queue_wait_p50_us": snap.QueueWaitP50Us,
+					"queue_wait_p99_us": snap.QueueWaitP99Us,
+					"alloc_dur_p50_us":  snap.AllocDurP50Us,
+					"alloc_dur_p99_us":  snap.AllocDurP99Us,
+					"queue_depth":       snap.QueueDepth,
+					"queue_cap":         snap.QueueCap,
 				}
 			}
 			result["op_latency"] = latencyEntries

@@ -1,15 +1,15 @@
-﻿package dispatch
+package dispatch
 
 import (
-	"github.com/anthony-chaudhary/fak/internal/l3server/cluster"
 	"github.com/anthony-chaudhary/fak/internal/l3server/client"
+	"github.com/anthony-chaudhary/fak/internal/l3server/cluster"
 )
 
 // nodeGroup holds keys destined for a single cluster node during batch fan-out.
 type nodeGroup struct {
 	addr    string
 	isLocal bool
-	indices []int    // positions in original keys array
+	indices []int // positions in original keys array
 	keys    [][]byte
 	values  [][]byte // for MSet
 }

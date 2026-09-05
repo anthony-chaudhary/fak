@@ -17,7 +17,7 @@ func TestGrafanaContractLifecycle(t *testing.T) {
 		t.Fatalf("failed reading dashboard file: %v", err)
 	}
 
-	var d dashboard
+	var d Dashboard
 	if err := json.Unmarshal(data, &d); err != nil {
 		t.Fatalf("failed unmarshaling dashboard: %v", err)
 	}
