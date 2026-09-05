@@ -173,3 +173,35 @@ func TestCoreToolAdmissionRefusesReachableMCPCapability(t *testing.T) {
 		t.Fatalf("novel capability was refused: %+v", unmatched)
 	}
 }
+
+// Benchmarks for production operations.
+var benchCapCardsSink []capindex.CapCard
+var benchAdmissionSink CoreToolAdmission
+
+func BenchmarkMCPResolver_Index(b *testing.B) {
+	r := NewMCPResolver(nil)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchCapCardsSink = r.Index()
+	}
+}
+
+func BenchmarkA2AResolver_Index(b *testing.B) {
+	r := NewA2AResolver()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchCapCardsSink = r.Index()
+	}
+}
+
+func BenchmarkMCPResolver_AdmitCoreTool(b *testing.B) {
+	r := NewMCPResolver(nil)
+	proposal := CoreToolProposal{Name: "new_tool", Capability: "not-in-catalog"}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchAdmissionSink = r.AdmitCoreTool(proposal)
+	}
+}
