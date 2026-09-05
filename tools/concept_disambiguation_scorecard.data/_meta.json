@@ -9589,6 +9589,11 @@
           "category": "incidental",
           "reason": "policy profile loader helper",
           "token": "loadAndApplyPolicyWithProfileLocked"
+        },
+        {
+          "category": "incidental",
+          "reason": "model capability registry leaf",
+          "token": "capabilitymatrix"
         }
       ],
       "exclude": [
@@ -9698,6 +9703,7 @@
         "capability_expired",
         "capability_failure",
         "capability_lines",
+        "capabilitymatrix",
         "capabilitynotverdict",
         "ciPreflightArchiveTimeout",
         "classifyIncumbentPreflight",

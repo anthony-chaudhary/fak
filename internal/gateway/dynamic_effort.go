@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/agentopt"
+	capmatrix "github.com/anthony-chaudhary/fak/internal/capabilitymatrix"
 )
 
 // DynamicEffortDecision is an alias for agentopt.TurnEffortDecision representing
@@ -33,43 +33,11 @@ const (
 	EffortHigh   = agentopt.EffortHigh
 )
 
-var (
-	oSeriesThinkingRE  = regexp.MustCompile(`(^|/)o[1-9]`)
-	gptAstraThinkingRE = regexp.MustCompile(`(^|/)(gpt-[6-9].*astra|astra)`)
-	claudeThinkingRE   = regexp.MustCompile(`(^|/)claude-(3[-.]7|[4-9])`)
-)
-
 // ModelSupportsThinking reports whether the given model name natively supports
 // reasoning/thinking effort modulation (e.g. Gemini 2.0/2.5/3.8 Flash, OpenAI o1/o3/o4/o5,
 // GPT-6+ Astra, Anthropic Claude 3.7+ thinking).
 func ModelSupportsThinking(model string) bool {
-	m := strings.ToLower(strings.TrimSpace(model))
-	if m == "" {
-		return false
-	}
-	if strings.Contains(m, "thinking") || strings.Contains(m, "reason") {
-		return true
-	}
-	// Gemini: Gemini 2.0 / 2.5 / 3.8 Flash and pro
-	if strings.Contains(m, "gemini") {
-		if strings.Contains(m, "2.0") || strings.Contains(m, "2.5") || strings.Contains(m, "3.8") ||
-			strings.Contains(m, "flash") || strings.Contains(m, "pro") {
-			return true
-		}
-	}
-	// OpenAI o-series reasoning models (o1, o3, o4, o5, ...)
-	if oSeriesThinkingRE.MatchString(m) {
-		return true
-	}
-	// GPT-6+ Astra reasoning models (gpt-6-astra, gpt-7-astra, astra, ...)
-	if gptAstraThinkingRE.MatchString(m) {
-		return true
-	}
-	// Anthropic Claude 3.7+ thinking
-	if claudeThinkingRE.MatchString(m) {
-		return true
-	}
-	return false
+	return capmatrix.Lookup(model).Thinking
 }
 
 // RequestSupportsThinking reports whether the request should undergo dynamic effort modulation,

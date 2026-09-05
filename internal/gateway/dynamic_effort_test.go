@@ -624,13 +624,17 @@ func TestDynamicEffort_AnthropicJSONModulation(t *testing.T) {
 
 func TestDynamicEffort_ModelSupportDetection(t *testing.T) {
 	supported := []string{
+		"gpt-6.5",
+		"gpt-7",
+		"claude-4.5",
+		"o3",
+		"astra",
 		"gemini-2.0-flash-thinking",
 		"gemini-2.5-pro",
 		"gemini-3.8-flash",
 		"o1",
 		"o1-mini",
 		"o1-preview",
-		"o3",
 		"o3-mini",
 		"o4",
 		"o4-mini",
