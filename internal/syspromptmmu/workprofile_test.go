@@ -100,11 +100,19 @@ func TestHeadlessWorkProfilesCanonicalizeAndRemainSafe(t *testing.T) {
 		if !strings.Contains(got.Segment, AutonomousActionBiasDirective) {
 			t.Errorf("%s segment omits autonomous action bias directive: %q", intensity, got.Segment)
 		}
+		if !strings.Contains(got.Segment, AmbiguityResolutionDirective) {
+			t.Errorf("%s segment omits ambiguity resolution directive: %q", intensity, got.Segment)
+		}
 		for _, required := range []string{
 			"autonomous action-bias",
 			"unattended mode is active",
 			"never pause to ask clarifying or conversational questions",
 			"prioritize minimal reversible action and execution",
+			"ambiguity resolution",
+			"when faced with ambiguity",
+			"choose the smallest reversible action",
+			"inspect/verify",
+			"stalling, debating trade-offs endlessly, or halting",
 			"security", "correct", "tests", "evidence",
 		} {
 			if !strings.Contains(strings.ToLower(got.Segment), required) {
@@ -137,6 +145,10 @@ func TestHeadlessWorkProfileMediumActionBiasAndWitnessHash(t *testing.T) {
 		"Autonomous action-bias: unattended mode is active.",
 		"Never pause to ask clarifying or conversational questions when running headless",
 		"prioritize minimal reversible action and execution.",
+		AmbiguityResolutionDirective,
+		"Ambiguity resolution: when faced with ambiguity",
+		"choose the smallest reversible action, inspect/verify",
+		"rather than stalling, debating trade-offs endlessly, or halting.",
 		"When the user or task explicitly requests implementing, adding, or modifying functionality, bypass 'no code change' and proceed to the minimal correct implementation.",
 	}
 	for _, want := range wantDirectives {
@@ -148,12 +160,47 @@ func TestHeadlessWorkProfileMediumActionBiasAndWitnessHash(t *testing.T) {
 	// Verify cryptographic witness hash
 	sum := sha256.Sum256([]byte(got.Segment))
 	expectedWitness := "sha256:" + hex.EncodeToString(sum[:])
-	const pinnedWitness = "sha256:84f2d5dc68a53ffb947f5b22be5de020e78a3adaa7b070a12d3d8aaae7509aa4"
+	const pinnedWitness = "sha256:0e461cbc25fe5ac671e5f36fa176e5e03af94b6ba54afebbfc423b791305565d"
 	if got.Witness != expectedWitness || got.Witness != pinnedWitness {
 		t.Fatalf("witness = %q, want %q (pinned: %q)", got.Witness, expectedWitness, pinnedWitness)
 	}
 	if !strings.HasPrefix(got.Witness, "sha256:") || len(got.Witness) != 71 {
 		t.Fatalf("witness format invalid: %q", got.Witness)
+	}
+}
+
+func TestAmbiguityResolutionDirectiveAndWitnessHash(t *testing.T) {
+	if AmbiguityResolutionDirective == "" {
+		t.Fatal("AmbiguityResolutionDirective is empty")
+	}
+	if AmbiguityResolutionDirective != AmbiguityResolutionRule {
+		t.Fatalf("AmbiguityResolutionRule alias mismatch: %q != %q", AmbiguityResolutionRule, AmbiguityResolutionDirective)
+	}
+	if AmbiguityResolutionDirective != AmbiguityResolutionContract {
+		t.Fatalf("AmbiguityResolutionContract alias mismatch: %q != %q", AmbiguityResolutionContract, AmbiguityResolutionDirective)
+	}
+
+	for _, intensity := range []string{"low", "medium", "high"} {
+		profileName := "ponytail:headless:" + intensity
+		got := DescribeWorkProfile(profileName)
+		if !got.Known || !got.Applied {
+			t.Fatalf("%s failed to resolve: %+v", profileName, got)
+		}
+		if !strings.Contains(got.Segment, AmbiguityResolutionDirective) {
+			t.Errorf("%s missing AmbiguityResolutionDirective: %q", profileName, got.Segment)
+		}
+		expectedSum := sha256.Sum256([]byte(got.Segment))
+		expectedWitness := "sha256:" + hex.EncodeToString(expectedSum[:])
+		if got.Witness != expectedWitness {
+			t.Errorf("%s witness mismatch: got %q, want %q", profileName, got.Witness, expectedWitness)
+		}
+	}
+
+	// Explicitly verify pinned witness for ponytail:headless:medium
+	gotMed := DescribeWorkProfile("ponytail:headless:medium")
+	const expectedMediumWitness = "sha256:0e461cbc25fe5ac671e5f36fa176e5e03af94b6ba54afebbfc423b791305565d"
+	if gotMed.Witness != expectedMediumWitness {
+		t.Fatalf("ponytail:headless:medium witness = %q, want pinned %q", gotMed.Witness, expectedMediumWitness)
 	}
 }
 

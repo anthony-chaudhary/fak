@@ -35,6 +35,16 @@ const AutonomousActionBiasContract = AutonomousActionBiasDirective
 // HeadlessActionBiasContract is an alias for AutonomousActionBiasDirective.
 const HeadlessActionBiasContract = AutonomousActionBiasDirective
 
+// AmbiguityResolutionDirective defines the prompt-level ambiguity resolution rule
+// prioritizing minimal reversible action over hesitation, endless debate, or freeze.
+const AmbiguityResolutionDirective = "Ambiguity resolution: when faced with ambiguity, choose the smallest reversible action, inspect/verify, rather than stalling, debating trade-offs endlessly, or halting."
+
+// AmbiguityResolutionRule is an alias for AmbiguityResolutionDirective.
+const AmbiguityResolutionRule = AmbiguityResolutionDirective
+
+// AmbiguityResolutionContract is an alias for AmbiguityResolutionDirective.
+const AmbiguityResolutionContract = AmbiguityResolutionDirective
+
 // WorkProfileReadout is the reproducible record of a selected implementation-policy overlay.
 type WorkProfileReadout struct {
 	Profile        string
@@ -59,14 +69,17 @@ Actively resist accidental complexity. State the required outcome, test the simp
 Aggressiveness applies only to avoidable complexity. Never narrow requested scope or weaken repository instructions, policy, security, correctness, compatibility, migrations, tests, diagnostics, uncertainty reporting, evidence, or proof.`,
 	WorkProfilePonytailHeadlessLow: "Work profile: Ponytail-inspired, headless, low intensity.\n" +
 		AutonomousActionBiasDirective + "\n" +
+		AmbiguityResolutionDirective + "\n" +
 		"Before adding machinery, briefly check whether existing code, configuration, or deletion solves the task more simply. Prefer the smallest correct implementation.\n" +
 		"This profile never overrides explicit requirements, repository instructions, policy, security, compatibility, migrations, tests, diagnostics, or evidence.",
 	WorkProfilePonytailHeadlessMed: "Work profile: Ponytail-inspired, headless, medium intensity.\n" +
 		AutonomousActionBiasDirective + "\n" +
+		AmbiguityResolutionDirective + "\n" +
 		"Challenge unnecessary additions. In order, consider: no code change, deletion, configuration, existing project primitives, standard library, then new machinery. Stop at the first option that completely and correctly satisfies the task. When the user or task explicitly requests implementing, adding, or modifying functionality, bypass 'no code change' and proceed to the minimal correct implementation.\n" +
 		"Do not optimize for fewer lines alone. Preserve explicit requirements, repository instructions, policy, security, correctness, compatibility, migrations, tests, diagnostics, and evidence.",
 	WorkProfilePonytailHeadlessHigh: "Work profile: Ponytail-inspired, headless, high intensity.\n" +
 		AutonomousActionBiasDirective + "\n" +
+		AmbiguityResolutionDirective + "\n" +
 		"Actively resist accidental complexity. State the required outcome, test the simplest viable route, and prefer deletion or reuse over addition. Use configuration before code, project primitives before dependencies, and standard library before new abstractions. Add machinery only when the simpler rung cannot meet the requirement; stop once the smallest complete solution is witnessed.\n" +
 		"Aggressiveness applies only to avoidable complexity. Never narrow requested scope or weaken repository instructions, policy, security, correctness, compatibility, migrations, tests, diagnostics, uncertainty reporting, evidence, or proof.",
 }
