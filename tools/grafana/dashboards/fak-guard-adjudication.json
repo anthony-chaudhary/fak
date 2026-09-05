@@ -606,6 +606,143 @@
       ]
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "title": "Trust violations by subtype (rate)",
+      "description": "Per-second rate of TRUST_VIOLATION non-allow verdicts disambiguated by mechanical boundary refusal subtype (injection_quarantine, ifc_sink, witness_refuted, residency_mismatch, generic).",
+      "type": "timeseries",
+      "id": 117,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "axisPlacement": "auto",
+            "spanNulls": true,
+            "pointSize": 5,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (refusal_subtype) (rate(fak_gateway_operations_total{reason=\"TRUST_VIOLATION\",refusal_subtype!=\"\"}[5m])) or sum by (refusal_subtype) (rate(fak_trust_violations_total[5m]))",
+          "legendFormat": "{{refusal_subtype}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "title": "Trust violations by subtype (session total)",
+      "description": "Cumulative count of TRUST_VIOLATION occurrences broken down by mechanical boundary refusal subtype.",
+      "type": "bargauge",
+      "id": 118,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "valueMode": "color",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (refusal_subtype) (fak_gateway_operations_total{reason=\"TRUST_VIOLATION\",refusal_subtype!=\"\"}) or sum by (refusal_subtype) (fak_trust_violations_total)",
+          "legendFormat": "{{refusal_subtype}}",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "type": "row",
       "title": "Verdict & disposition mix",
       "id": 96,
@@ -614,7 +751,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 22
       },
       "panels": []
     },
@@ -631,7 +768,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 15
+        "y": 23
       },
       "fieldConfig": {
         "defaults": {
@@ -701,7 +838,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 15
+        "y": 23
       },
       "fieldConfig": {
         "defaults": {
@@ -767,7 +904,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 31
       },
       "panels": []
     },
@@ -784,7 +921,7 @@
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 24
+        "y": 32
       },
       "fieldConfig": {
         "defaults": {
@@ -848,7 +985,7 @@
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 24
+        "y": 32
       },
       "fieldConfig": {
         "defaults": {
@@ -908,7 +1045,7 @@
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 24
+        "y": 32
       },
       "fieldConfig": {
         "defaults": {
@@ -976,7 +1113,7 @@
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 24
+        "y": 32
       },
       "fieldConfig": {
         "defaults": {
@@ -1056,7 +1193,7 @@
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 24
+        "y": 32
       },
       "fieldConfig": {
         "defaults": {
@@ -1116,7 +1253,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 24
+        "y": 32
       },
       "fieldConfig": {
         "defaults": {
@@ -1176,7 +1313,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 28
+        "y": 36
       },
       "fieldConfig": {
         "defaults": {
@@ -1260,7 +1397,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 36
+        "y": 44
       },
       "panels": []
     },
@@ -1277,7 +1414,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 37
+        "y": 45
       },
       "fieldConfig": {
         "defaults": {
@@ -1340,7 +1477,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 37
+        "y": 45
       },
       "fieldConfig": {
         "defaults": {
@@ -1407,7 +1544,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 37
+        "y": 45
       },
       "fieldConfig": {
         "defaults": {
@@ -1467,7 +1604,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 41
+        "y": 49
       },
       "fieldConfig": {
         "defaults": {
@@ -1523,7 +1660,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 45
+        "y": 53
       },
       "panels": []
     },
@@ -1540,7 +1677,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 46
+        "y": 54
       },
       "fieldConfig": {
         "defaults": {
@@ -1610,7 +1747,7 @@
         "h": 8,
         "w": 8,
         "x": 12,
-        "y": 46
+        "y": 54
       },
       "fieldConfig": {
         "defaults": {
@@ -1673,7 +1810,7 @@
         "h": 8,
         "w": 4,
         "x": 20,
-        "y": 46
+        "y": 54
       },
       "fieldConfig": {
         "defaults": {
@@ -1733,7 +1870,7 @@
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 54
+        "y": 62
       },
       "fieldConfig": {
         "defaults": {},
