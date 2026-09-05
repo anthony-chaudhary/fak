@@ -23,6 +23,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
+	"github.com/anthony-chaudhary/fak/internal/stopgate"
 )
 
 // RunOption configures an optional behavior of RunArm / Run. The zero set of options
@@ -121,6 +122,16 @@ func WithFinalGate(check func() (satisfied bool, missingWitness string)) RunOpti
 	return func(c *runConfig) { c.finalGate = check }
 }
 
+// WithStopLadderConfig overrides the stopgate ladder configuration for the loop.
+func WithStopLadderConfig(cfg stopgate.LadderConfig) RunOption {
+	return func(c *runConfig) { c.stopLadder = &cfg }
+}
+
+// WithWitnessGateConfig overrides the witness gate configuration for the loop.
+func WithWitnessGateConfig(cfg stopgate.WitnessGateConfig) RunOption {
+	return func(c *runConfig) { c.witnessGate = &cfg }
+}
+
 // WithResponseProfileSource records where the already-resolved response profile came
 // from. Selection remains on syspromptmmu's existing environment seam; this option adds
 // provenance to the run artifact without creating another profile mechanism.
@@ -168,6 +179,8 @@ type runConfig struct {
 	contextBaselineOutput int
 	toolTerminalWake      *ToolTerminalWakeQueue
 	finalGate             func() (bool, string)
+	stopLadder            *stopgate.LadderConfig
+	witnessGate           *stopgate.WitnessGateConfig
 	responseProfileSource string
 	gracefulDrain         bool
 	// observer is the typed loop-progress sink (#5148, WithProgressObserver in

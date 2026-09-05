@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
+	"github.com/anthony-chaudhary/fak/internal/stopgate"
 	"github.com/anthony-chaudhary/fak/internal/taskmgr"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
@@ -150,174 +151,111 @@ func (s guardStopHookStage) String() string {
 }
 
 // guardStopHookContinueReason is the NUDGE-rung instruction fed back to the model (via the Stop
-// hook's exit-2 stderr) when fak first resumes the agent past a deny-all stop. The per-call
-// refusal detail is already in the transcript (the in-band `[fak] refused …` note on the ended
-// turn); this is the gentle nudge to act on it rather than stop. Later rungs of the ladder
-// (guardStopHookStageMessage) escalate the firmness and name the sanctioned clean exit.
-const guardStopHookContinueReason = "fak guard: heads-up — your previous turn ended before acting because its tool call(s) are waiting on a shape the capability floor can admit (reported upstream as end_turn). You can continue right now. The in-band `[fak]` note on that turn labels each call as `Tool (REASON/DISPOSITION)` — let that reason point the way. Most reasons just invite a small RESHAPING the floor will welcome: for MISROUTE, reach for the tool or argument shape it expects; for SELF_MODIFY, the floor is protecting a guarded write target (VERSION, .dos/, internal/…), so aim the write at an unguarded path, split a compound command to isolate it, or leave the guarded part out; for LEASE_HELD, another agent holds that tree, so narrow your paths or pick up other work; for a preview-confirm pause, re-send the same call with the confirm key it asked for. A few reasons are protected on purpose — a TERMINAL disposition (e.g. SECRET_EXFIL, TRUST_VIOLATION) is a deliberate boundary, so the clean win there is a different task. Choose an ALLOWED alternative and keep the work moving; and if a protected boundary is all that stands between you and the last step, that is a fine, complete place to stop — note it in one line (`no allowed path: <reason>`) and finish cleanly."
+// hook's exit-2 stderr) when fak first resumes the agent past a deny-all stop.
+const guardStopHookContinueReason = stopgate.ContinueReason
 
 func guardStopHookToolFeedbackMessage(consecutive int) string {
-	return fmt.Sprintf("fak guard: the previous %d turn(s) ended after retryable tool-call feedback, not a session stop. The proposed tool call(s) were just malformed or otherwise model-fixable, so fak returned per-call feedback and kept the task alive. Fix the JSON/arguments/tool shape and continue — this is a routine retry, so keep going.", consecutive)
+	return stopgate.ToolFeedbackMessage(consecutive)
 }
 
 // guardStopHookToolFeedbackGiveUpMessage is the operator-facing stand-down line (exit 0, NOT fed
-// to the model) printed when the retryable tool-feedback continue passes its bound (#A6): the
-// model emitted malformed/misrouted calls for more consecutive turns than the ceiling without
-// landing one, so the hook stops auto-continuing and allows the stop rather than looping the turn
-// open until the harness's own cutoff. Mirrors the deny-all give-up: a visible, logged stand-down.
+// to the model) printed when the retryable tool-feedback continue passes its bound (#A6).
 func guardStopHookToolFeedbackGiveUpMessage(consecutive, bound int) string {
-	return fmt.Sprintf("fak guard Stop: standing down — %d consecutive tool-feedback turn(s) exceeded the continue bound (%d). The model kept emitting malformed/misrouted tool calls without landing one, so fak is allowing the stop instead of holding the turn open indefinitely. Raise FAK_GUARD_TOOL_FEEDBACK_MAX to extend the bound.", consecutive, bound)
+	return stopgate.ToolFeedbackGiveUpMessage(consecutive, bound)
 }
 
 func guardStopHookToolFeedbackMaxFromEnv() int {
 	return guardStopHookIntFromEnv(guardStopHookEnvToolFeedbackMax, guardStopHookToolFeedbackMaxDefault)
 }
 
-// normalizeDenyAllThresholds makes the ladder a TOTAL, deterministic function of its three
-// knobs: it clamps any operator/env misconfiguration into the invariant 1 <= warn <= final <=
-// max so a bad flag can never invert the ladder or wedge the hook. A non-positive max falls
-// back to the default; warn floors at 1; final is pulled into [warn, max].
+// normalizeDenyAllThresholds makes the ladder a TOTAL, deterministic function of its three knobs.
 func normalizeDenyAllThresholds(warnAt, finalAt, maxN int) (int, int, int) {
-	if maxN <= 0 {
-		maxN = guardStopHookDefaultMax
-	}
-	if warnAt < 1 {
-		warnAt = 1
-	}
-	if warnAt > maxN {
-		warnAt = maxN
-	}
-	if finalAt < warnAt {
-		finalAt = warnAt
-	}
-	if finalAt > maxN {
-		finalAt = maxN
-	}
-	return warnAt, finalAt, maxN
+	return stopgate.NormalizeDenyAllThresholds(warnAt, finalAt, maxN)
 }
 
-// guardStopHookStageFor maps a consecutive deny-all count onto its ladder rung. Pure + total;
-// thresholds are normalized first so the rung order can never invert.
+// guardStopHookStageFor maps a consecutive deny-all count onto its ladder rung.
 func guardStopHookStageFor(consecutive, warnAt, finalAt, maxN int) guardStopHookStage {
-	warnAt, finalAt, maxN = normalizeDenyAllThresholds(warnAt, finalAt, maxN)
-	switch {
-	case consecutive <= 0:
-		return guardStopHookAllow
-	case consecutive > maxN:
-		return guardStopHookGiveUp
-	case consecutive >= finalAt:
-		return guardStopHookFinal
-	case consecutive >= warnAt:
-		return guardStopHookWarn
-	default:
-		return guardStopHookNudge
-	}
+	return toGuardStopHookStage(stopgate.StageForDenyAll(consecutive, warnAt, finalAt, maxN))
 }
 
-// normalizeSameStop clamps the same-issue give-up depth into a sane range and derives the
-// warn/final rungs from it. The give-up depth is the single knob; warn/final are stop-3 and
-// stop-1 so the guidance firms up over the last few identical repeats before the stand-down.
-// A give-up depth below 2 (which would stop on the first deny-all, defeating the "keep going"
-// intent) falls back to the default. Returns warn <= final < stop, all >= 1.
+// normalizeSameStop clamps the same-issue give-up depth into a sane range and derives the warn/final rungs.
 func normalizeSameStop(stop int) (warnAt, finalAt, stopN int) {
-	if stop < 2 {
-		stop = guardStopHookSameStopDefault
-	}
-	finalAt = stop - 1
-	warnAt = stop - 3
-	if warnAt < 1 {
-		warnAt = 1
-	}
-	if finalAt < warnAt {
-		finalAt = warnAt
-	}
-	return warnAt, finalAt, stop
+	return stopgate.NormalizeSameStop(stop)
 }
 
-// guardStopHookSameStageFor maps the same-issue consecutive count (identical refused action turn
-// after turn) onto its ladder rung. A clean >= ladder that stands down AT the give-up depth —
-// distinct from the blind guardStopHookStageFor (whose > maxN semantics + tests stay untouched),
-// so the two paths cannot interfere. Because any deny-all turn has same-issue count >= 1 and a
-// varied session pins it at 1, a varied session sits at NUDGE forever and is never given up.
+// guardStopHookSameStageFor maps the same-issue consecutive count onto its ladder rung.
 func guardStopHookSameStageFor(sameConsecutive, stop int) guardStopHookStage {
-	warnAt, finalAt, stopN := normalizeSameStop(stop)
-	switch {
-	case sameConsecutive <= 0:
-		return guardStopHookAllow
-	case sameConsecutive >= stopN:
-		return guardStopHookGiveUp
-	case sameConsecutive >= finalAt:
-		return guardStopHookFinal
-	case sameConsecutive >= warnAt:
-		return guardStopHookWarn
-	default:
-		return guardStopHookNudge
-	}
+	return toGuardStopHookStage(stopgate.StageForSameIssue(sameConsecutive, stop))
 }
 
-// guardStopHookSameDecision is the same-issue twin of guardStopHookDecision: given the gateway's
-// same-issue consecutive count and the give-up depth, return the exit code, whether it WOULD
-// block, and the rung. Mode gating is identical to the blind path (nudge/warn/final block the
-// stop; allow and give-up let it through; shadow always allows but reports the would-be block).
+// guardStopHookSameDecision is the same-issue twin of guardStopHookDecision.
 func guardStopHookSameDecision(sameConsecutive, stop int, mode string) (exit int, block bool, stage guardStopHookStage) {
-	stage = guardStopHookSameStageFor(sameConsecutive, stop)
-	if mode == guardPreCompactModeOff {
-		return 0, false, stage
-	}
-	block = stage == guardStopHookNudge || stage == guardStopHookWarn || stage == guardStopHookFinal
-	if mode == guardPreCompactModeShadow {
-		return 0, block, stage
-	}
-	if block {
-		return 2, true, stage
-	}
-	return 0, false, stage
+	m, _ := stopgate.NormalizeMode(mode, stopgate.ModeEnforce)
+	cfg := stopgate.LadderConfig{SameStop: stop, Mode: m}
+	dec := stopgate.EvaluateDenyAll(cfg, 0, sameConsecutive, true)
+	return dec.ExitCode, dec.Blocked, toGuardStopHookStage(dec.Stage)
 }
 
-// guardStopHookStageMessage is the exact stderr text fed back to the model when the hook holds
-// the stop (exit 2) at a continue rung. Each rung is firmer than the last, and the WARN/FINAL
-// rungs name the clean wrap-up: note the blocker on one line (`no allowed path: <reason>`) and
-// stop. (A pure-text turn resets the gateway's consecutive gauge to 0, so that note genuinely
-// lets the next stop through — the agent's own choice, not a fak-forced halt.)
+// guardStopHookDecision is the PURE decision behind the hook.
+func guardStopHookDecision(consecutive, warnAt, finalAt, maxN int, mode string) (exit int, block bool, stage guardStopHookStage) {
+	m, _ := stopgate.NormalizeMode(mode, stopgate.ModeEnforce)
+	cfg := stopgate.LadderConfig{WarnAt: warnAt, FinalAt: finalAt, Max: maxN, Mode: m}
+	dec := stopgate.EvaluateDenyAll(cfg, consecutive, 0, false)
+	return dec.ExitCode, dec.Blocked, toGuardStopHookStage(dec.Stage)
+}
+
+// guardStopHookStageMessage is the exact stderr text fed back to the model at a continue rung.
 func guardStopHookStageMessage(stage guardStopHookStage, consecutive, maxN int) string {
-	switch stage {
-	case guardStopHookWarn:
-		return fmt.Sprintf("fak guard: the last %d turns each closed while the capability floor was still waiting for a shape it can admit, so the same approach keeps returning. Good moment to try a fresh angle: if the remaining work is reachable under this floor, take a different allowed action now — a different tool, a narrower command, or a path the floor welcomes. If a protected boundary is all that's left, note it on one line (`no allowed path: <reason>`) and finish cleanly — that is a good, complete outcome. (Auto-continue %d of %d before fak lets the turn end.)", consecutive, consecutive, maxN)
-	case guardStopHookFinal:
-		return fmt.Sprintf("fak guard: last auto-continue (%d of %d). After %d turns still waiting on a shape the floor can admit, fak will let the session wrap up. If there is an allowed way forward, take it on this turn; otherwise note what's protecting the last step on one line (`no allowed path: <reason>`) and finish cleanly now, so the stop is your own call — a complete, expected ending.", consecutive, maxN, maxN)
-	default:
-		return guardStopHookContinueReason
-	}
+	return stopgate.StageMessage(fromGuardStopHookStage(stage), consecutive, maxN)
 }
 
-// guardStopHookGiveUpMessage is the OPERATOR-facing line printed when the hook gives up and
-// allows the stop (exit 0, so it is NOT fed to the model). It makes the previously-invisible
-// give-up legible: the residual false-stop the audit named.
+// guardStopHookGiveUpMessage is the OPERATOR-facing line printed when the hook gives up.
 func guardStopHookGiveUpMessage(consecutive, maxN int) string {
-	return fmt.Sprintf("fak guard Stop: standing down after %d consecutive deny-all turns (every proposed tool call set aside; %d > max %d) — allowing the stop so the loop cannot spin. To keep the agent moving, inspect why the floor sets everything aside (fak guard --dump-policy) or raise --deny-all-continue=max=N; --deny-all-continue off disables this layer.", consecutive, consecutive, maxN)
+	return stopgate.GiveUpMessage(consecutive, maxN)
 }
 
-// guardStopHookSameStageMessage is the same-issue twin of guardStopHookStageMessage: the exact
-// stderr text fed back to the model (exit 2) at a same-issue continue rung. Unlike the blind
-// message it NAMES the repeat — the point is that the model keeps proposing the IDENTICAL refused
-// action, so the guidance is "a different angle," not "try again." The NUDGE rung (a shallow or
-// just-changed issue) still uses the gentle generic continue reason.
+// guardStopHookSameStageMessage is the same-issue twin of guardStopHookStageMessage.
 func guardStopHookSameStageMessage(stage guardStopHookStage, sameConsecutive, stop int) string {
-	switch stage {
-	case guardStopHookWarn:
-		return fmt.Sprintf("fak guard: you have now ended %d turns in a row proposing the IDENTICAL refused action — the capability floor is setting aside the very same tool call, for the same reason, each time. Repeating it will not change the verdict. Try a genuinely different angle now: a different tool, a narrower command, or a path the floor welcomes. The in-band `[fak]` note labels the block as `Tool (REASON/DISPOSITION)` — let that reason point the way. If a protected boundary is all that's left, note it on one line (`no allowed path: <reason>`) and finish cleanly — a complete, expected outcome. (Auto-continue %d of %d identical repeats before fak lets the turn end.)", sameConsecutive, sameConsecutive, stop)
-	case guardStopHookFinal:
-		return fmt.Sprintf("fak guard: last auto-continue (%d of %d). You have proposed the IDENTICAL refused action %d turns running; one more and fak will let the session wrap up. This is a genuine repeat, not exploration — if there is an allowed way forward, take a DIFFERENT action on this turn; otherwise note what is protecting the last step on one line (`no allowed path: <reason>`) and finish cleanly now, so the stop is your own call.", sameConsecutive, stop, sameConsecutive)
+	return stopgate.SameStageMessage(fromGuardStopHookStage(stage), sameConsecutive, stop)
+}
+
+// guardStopHookSameGiveUpMessage is the OPERATOR-facing line when the hook stands down on a repeated same issue.
+func guardStopHookSameGiveUpMessage(sameConsecutive, stop int) string {
+	return stopgate.SameGiveUpMessage(sameConsecutive, stop)
+}
+
+func toGuardStopHookStage(s stopgate.Stage) guardStopHookStage {
+	switch s {
+	case stopgate.StageAllow:
+		return guardStopHookAllow
+	case stopgate.StageNudge:
+		return guardStopHookNudge
+	case stopgate.StageWarn:
+		return guardStopHookWarn
+	case stopgate.StageFinal:
+		return guardStopHookFinal
+	case stopgate.StageGiveUp:
+		return guardStopHookGiveUp
 	default:
-		return guardStopHookContinueReason
+		return guardStopHookAllow
 	}
 }
 
-// guardStopHookSameGiveUpMessage is the OPERATOR-facing line (exit 0, not fed to the model) when
-// the hook stands down on a true repeated same issue. It makes explicit that this is a genuine
-// spin on ONE refusal — not the old blind count — and that a varied session is never stopped here.
-func guardStopHookSameGiveUpMessage(sameConsecutive, stop int) string {
-	return fmt.Sprintf("fak guard Stop: standing down after %d turns proposing the IDENTICAL refused action (same tool + same reason; %d >= same-issue give-up %d) — a genuine repeated same issue, not exploration, so allowing the stop keeps the loop from spinning. A session hitting a FRESH block each turn is never stopped here. To keep the agent moving, inspect why the floor sets that same call aside (fak guard --dump-policy) or raise --deny-all-continue=same-stop=N; --deny-all-continue off disables this layer.", sameConsecutive, sameConsecutive, stop)
+func fromGuardStopHookStage(s guardStopHookStage) stopgate.Stage {
+	switch s {
+	case guardStopHookAllow:
+		return stopgate.StageAllow
+	case guardStopHookNudge:
+		return stopgate.StageNudge
+	case guardStopHookWarn:
+		return stopgate.StageWarn
+	case guardStopHookFinal:
+		return stopgate.StageFinal
+	case guardStopHookGiveUp:
+		return stopgate.StageGiveUp
+	default:
+		return stopgate.StageAllow
+	}
 }
 
 type guardStopHookInstall struct {
@@ -833,27 +771,6 @@ func guardTaskHandoffRequiredMessage(file string, review taskmgr.HandoffReview, 
 	}
 	fmt.Fprintf(&b, "The path is also exposed to the agent as `$%s`.\n", guardTaskHandoffFileEnv)
 	return strings.TrimRight(b.String(), "\n")
-}
-
-// guardStopHookDecision is the PURE decision behind the hook: given the gateway's consecutive
-// deny-all count, the graduated thresholds, and the mode, return the exit code, whether it
-// WOULD block, and the ladder rung (drives the guidance text + the shadow log). Side-effect-free
-// so the policy is unit-tested without an HTTP gateway. The continue rungs (nudge/warn/final)
-// block the stop (1..max); rung 0 is a clean completion and rung > max is the bounded give-up —
-// both ALLOW the stop, so a stuck model cannot loop forever.
-func guardStopHookDecision(consecutive, warnAt, finalAt, maxN int, mode string) (exit int, block bool, stage guardStopHookStage) {
-	stage = guardStopHookStageFor(consecutive, warnAt, finalAt, maxN)
-	if mode == guardPreCompactModeOff {
-		return 0, false, stage
-	}
-	block = stage == guardStopHookNudge || stage == guardStopHookWarn || stage == guardStopHookFinal
-	if mode == guardPreCompactModeShadow {
-		return 0, block, stage // shadow always allows the stop (exit 0) but reports the would-be block
-	}
-	if block {
-		return 2, true, stage
-	}
-	return 0, false, stage
 }
 
 // readStopHookActive parses the stop_hook_active flag from Claude's Stop-hook stdin JSON. A nil

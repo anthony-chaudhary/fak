@@ -77,7 +77,7 @@ concurrent = [
   "cdb", "ctxmmu", "engine", "gateway", "ggufload", "grammar", "harvest", "ifc", "kernel",
   "kvmmu", "metrics", "model", "normgate", "plancfi", "policy", "preflight",
   "provenance", "recall", "registrations", "shipgate", "steward", "studydrift", "studymonitor", "studyreceipt", "turnbench",
-  "vdso", "witness",
+  "vdso", "witness", "stopgate",
   "cmd", "experiments", "docs", "tools", "scripts", "visuals", "claude", "ci",
   "tokenizer",
   "contextq", "journal", "examples",
@@ -704,6 +704,7 @@ autopick = [
 # stripped to the real layout, and the leaves that existed in internal/ but had no
 # lane are added, so arbitrate now actually detects same-tree collisions.
 [lanes.trees]
+stopgate = ["internal/stopgate/**"]
 launchguard = ["internal/launchguard/**", "cmd/fak/guard_crash_rsi.go", "cmd/fak/guard_crash_rsi_test.go", "cmd/fak/guard_failure_rsi_test.go", "cmd/fak/launchguard.go", "cmd/fak/launchguard_test.go", "docs/launchguard.md"]
 nativebench = ["internal/nativebench/**"]
 adjudicator = ["internal/adjudicator/**"]
@@ -1929,8 +1930,8 @@ see_also = ["internal/adjudicator/decide.go", "internal/policy", "cmd/fak/guard-
 [reasons.TRUST_VIOLATION]
 category = "OPERATOR_GATE"
 refusal  = true
-summary  = "A tool result failed context-MMU quarantine or IFC taint tracking due to unsafe or untrusted content. Floor: internal/adjudicator/decide.go"
-fix      = "Inspect the tool result for exfiltration patterns, high taint, or unsafe content. Clear the taint marker or page out poisoned content before admitting to context."
+summary  = "A tool call or result breached kernel capability, taint, or memory protection boundaries (context-MMU prompt-injection quarantine, IFC taint sink floor, residency mismatch, or empirical witness refutation). Floor: internal/adjudicator/decide.go"
+fix      = "Identify the producing boundary: for quarantined inbound results, read sanitized stubs or clear markers; for IFC taint sinks and multi-agent coordination (multi_agent_v1.send_input, send_input), avoid off-box destination arguments (url/dest) and sanitize tainted payloads; for witness refutation, ground claims in verified git/filesystem state."
 see_also = ["internal/adjudicator/decide.go", "internal/ctxmmu", "internal/ifc"]
 
 [reasons.MALFORMED]
