@@ -88,3 +88,6 @@ This compact ledger indexes one addressable page per claim. Claim text and matur
 - [SIMULATED] [What fak is NOT](docs/claims/what-fak-is-not.md)
 <a id="prior-art-posture"></a>
 - [SHIPPED] [Prior-art posture](docs/claims/prior-art-posture.md) [exposure: default-on]
+<a id="nvidia-rtx-5090-bam-gpudirect-nvme"></a>
+- [SIMULATED] [NVIDIA RTX 5090 BaM GPU Direct NVMe & Hierarchical Memory](docs/claims/nvidia-rtx-5090-bam-gpudirect-nvme.md)
+
