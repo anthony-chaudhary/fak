@@ -179,8 +179,9 @@ type openAIResponse struct {
 	ServiceTier string `json:"service_tier,omitempty"`
 	Model       string `json:"model"` // the model the upstream reports it served (#82 echo)
 	Choices     []struct {
-		Message      Message `json:"message"`
-		FinishReason string  `json:"finish_reason"`
+		Message      Message  `json:"message"`
+		Delta        *Message `json:"delta,omitempty"`
+		FinishReason string   `json:"finish_reason"`
 	} `json:"choices"`
 	Usage Usage     `json:"usage"`
 	Error *apiError `json:"error"`
@@ -400,8 +401,14 @@ func (a openAIAdapter) ParseResponse(raw []byte) (*Completion, error) {
 		return nil, fmt.Errorf("no choices (body: %s)", truncate(raw, 200))
 	}
 	msg := cr.Choices[0].Message
+	if cr.Choices[0].Delta != nil {
+		if msg.Role == "" && msg.Content == "" && len(msg.ToolCalls) == 0 && msg.FunctionCall == nil {
+			msg = *cr.Choices[0].Delta
+		}
+	}
 	finish := cr.Choices[0].FinishReason
 	normalizeLegacyOpenAIFunctionCall(&msg, &finish)
+	separateMessageReasoning(&msg)
 	return normalizeCompletionToolCalls(&Completion{
 		Message:      msg,
 		FinishReason: finish,
@@ -426,6 +433,108 @@ func normalizeLegacyOpenAIFunctionCall(msg *Message, finish *string) {
 		}
 	}
 	msg.FunctionCall = nil
+}
+
+// extractDelimitedThinking separates reasoning wrapped between openTag and closeTag
+// (case-insensitively) from user-visible content.
+func extractDelimitedThinking(s, openTag, closeTag string) (string, string) {
+	lower := strings.ToLower(s)
+	if !strings.Contains(lower, openTag) && !strings.Contains(lower, closeTag) {
+		return s, ""
+	}
+
+	var contentBuilder strings.Builder
+	var reasoningParts []string
+
+	for len(s) > 0 {
+		lower = strings.ToLower(s)
+		openIdx := strings.Index(lower, openTag)
+		closeIdx := strings.Index(lower, closeTag)
+
+		// Prompt-preseeded case: closing tag before any opening tag.
+		if closeIdx >= 0 && (openIdx < 0 || closeIdx < openIdx) {
+			r := strings.TrimSpace(s[:closeIdx])
+			if r != "" {
+				reasoningParts = append(reasoningParts, r)
+			}
+			s = s[closeIdx+len(closeTag):]
+			continue
+		}
+
+		if openIdx < 0 {
+			// No more think blocks; rest is content.
+			contentBuilder.WriteString(s)
+			break
+		}
+
+		// Content preceding the open tag survives as content.
+		if openIdx > 0 {
+			contentBuilder.WriteString(s[:openIdx])
+		}
+
+		afterOpen := s[openIdx+len(openTag):]
+		lowerAfter := strings.ToLower(afterOpen)
+		nextClose := strings.Index(lowerAfter, closeTag)
+		if nextClose < 0 {
+			// Unclosed tag: truncated stream / completion.
+			r := strings.TrimSpace(afterOpen)
+			if r != "" {
+				reasoningParts = append(reasoningParts, r)
+			}
+			break
+		}
+
+		r := strings.TrimSpace(afterOpen[:nextClose])
+		if r != "" {
+			reasoningParts = append(reasoningParts, r)
+		}
+		s = afterOpen[nextClose+len(closeTag):]
+	}
+
+	content := tidyAfterStrip(contentBuilder.String())
+	reasoning := strings.Join(reasoningParts, "\n")
+	return content, reasoning
+}
+
+// extractThinking separates reasoning content wrapped in thinking delimiters
+// (<think>...</think> or <thought>...</thought>) from user-visible content,
+// guaranteeing strict separation of reasoning and content.
+func extractThinking(s string) (string, string) {
+	var allReasoning []string
+	c1, r1 := extractDelimitedThinking(s, thinkOpen, thinkClose)
+	if r1 != "" {
+		allReasoning = append(allReasoning, r1)
+	}
+	c2, r2 := extractDelimitedThinking(c1, "<thought>", "</thought>")
+	if r2 != "" {
+		allReasoning = append(allReasoning, r2)
+	}
+	return c2, strings.Join(allReasoning, "\n")
+}
+
+// separateMessageReasoning ensures strict separation of reasoning content and
+// tool call tokens on a message. Any thinking delimiters in msg.Content are extracted
+// into msg.ReasoningContent, ensuring that tool call syntax and speculative tool
+// invocations inside thinking blocks are never exposed to text-tool-call lifting.
+func separateMessageReasoning(msg *Message) {
+	if msg == nil || msg.Content == "" {
+		return
+	}
+	content, reasoning := extractThinking(msg.Content)
+	if reasoning == "" && content == msg.Content {
+		return
+	}
+	msg.Content = content
+	if reasoning != "" {
+		if msg.ReasoningContent != "" {
+			msg.ReasoningContent = strings.TrimSpace(msg.ReasoningContent + "\n" + reasoning)
+		} else {
+			msg.ReasoningContent = reasoning
+		}
+		if msg.Thinking != "" {
+			msg.Thinking = strings.TrimSpace(msg.Thinking + "\n" + reasoning)
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -710,7 +819,13 @@ func (openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
 		case "message":
 			for _, part := range item.Content {
 				if part.Type == "output_text" && part.Text != "" {
-					content = append(content, part.Text)
+					cText, rText := extractThinking(part.Text)
+					if cText != "" {
+						content = append(content, cText)
+					}
+					if rText != "" {
+						reasoning = append(reasoning, rText)
+					}
 				}
 			}
 		case "reasoning":
@@ -766,7 +881,13 @@ func (openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
 		}
 	}
 	if len(content) == 0 && rr.OutputText != "" {
-		content = append(content, rr.OutputText)
+		cText, rText := extractThinking(rr.OutputText)
+		if cText != "" {
+			content = append(content, cText)
+		}
+		if rText != "" {
+			reasoning = append(reasoning, rText)
+		}
 	}
 	if len(content) == 0 && len(calls) == 0 && len(reasoning) == 0 {
 		return nil, fmt.Errorf("no output items (body: %s)", truncate(raw, 200))
@@ -781,13 +902,15 @@ func (openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
 	if details == nil {
 		details = rr.Usage.PromptTokensDetails
 	}
+	msg := Message{
+		Role:             RoleAssistant,
+		Content:          strings.Join(content, "\n"),
+		ReasoningContent: strings.Join(reasoning, "\n"),
+		ToolCalls:        calls,
+	}
+	separateMessageReasoning(&msg)
 	return normalizeCompletionToolCalls(&Completion{
-		Message: Message{
-			Role:             RoleAssistant,
-			Content:          strings.Join(content, "\n"),
-			ReasoningContent: strings.Join(reasoning, "\n"),
-			ToolCalls:        calls,
-		},
+		Message:      msg,
 		FinishReason: finish,
 		Model:        rr.Model,
 		ServiceTier:  parseServiceTier(ProviderOpenAIResponses, rr.ServiceTier),
@@ -1097,7 +1220,13 @@ func (anthropicAdapter) ParseResponse(raw []byte) (*Completion, error) {
 		switch b.Type {
 		case "text":
 			if b.Text != "" {
-				content = append(content, b.Text)
+				cText, rText := extractThinking(b.Text)
+				if cText != "" {
+					content = append(content, cText)
+				}
+				if rText != "" {
+					thinking = append(thinking, rText)
+				}
 			}
 		case "tool_use":
 			args := string(b.Input)
@@ -1125,15 +1254,17 @@ func (anthropicAdapter) ParseResponse(raw []byte) (*Completion, error) {
 	if len(calls) > 0 {
 		finish = "tool_calls"
 	}
+	msg := Message{
+		Role:              RoleAssistant,
+		Content:           strings.Join(content, "\n"),
+		ToolCalls:         calls,
+		Thinking:          strings.Join(thinking, "\n"),
+		ThinkingSignature: signature,
+		RedactedThinking:  redacted,
+	}
+	separateMessageReasoning(&msg)
 	return normalizeCompletionToolCalls(&Completion{
-		Message: Message{
-			Role:              RoleAssistant,
-			Content:           strings.Join(content, "\n"),
-			ToolCalls:         calls,
-			Thinking:          strings.Join(thinking, "\n"),
-			ThinkingSignature: signature,
-			RedactedThinking:  redacted,
-		},
+		Message:      msg,
 		FinishReason: finish,
 		Model:        ar.Model,
 		ServiceTier:  parseServiceTier(ProviderAnthropic, ar.Usage.ServiceTier),
@@ -1521,10 +1652,17 @@ func (geminiAdapter) ParseResponse(raw []byte) (*Completion, error) {
 	}
 	c := gr.Candidates[0]
 	var content []string
+	var reasoning []string
 	var calls []ToolCall
 	for _, p := range c.Content.Parts {
 		if p.Text != "" {
-			content = append(content, p.Text)
+			cText, rText := extractThinking(p.Text)
+			if cText != "" {
+				content = append(content, cText)
+			}
+			if rText != "" {
+				reasoning = append(reasoning, rText)
+			}
 		}
 		if p.FunctionCall != nil {
 			args := string(p.FunctionCall.Args)
@@ -1549,8 +1687,15 @@ func (geminiAdapter) ParseResponse(raw []byte) (*Completion, error) {
 	if gr.UsageMetadata.CachedContentTokenCount > 0 {
 		details = &UsageTokenDetails{CachedTokens: gr.UsageMetadata.CachedContentTokenCount}
 	}
+	msg := Message{
+		Role:             RoleAssistant,
+		Content:          strings.Join(content, "\n"),
+		ReasoningContent: strings.Join(reasoning, "\n"),
+		ToolCalls:        calls,
+	}
+	separateMessageReasoning(&msg)
 	return normalizeCompletionToolCalls(&Completion{
-		Message:      Message{Role: RoleAssistant, Content: strings.Join(content, "\n"), ToolCalls: calls},
+		Message:      msg,
 		FinishReason: finish,
 		Model:        gr.ModelVersion,
 		Usage: Usage{

@@ -2539,3 +2539,225 @@ func TestGeminiThinkingConfigMarshal(t *testing.T) {
 		}
 	})
 }
+
+// TestThinkingBlockToolCallsIgnored verifies that any tool call syntax (bare JSON,
+// Hermes <tool_call>, fenced JSON, etc.) occurring inside thinking delimiters
+// (<think>...</think>) is strictly quarantined to reasoning content and never
+// extracted into comp.Message.ToolCalls.
+func TestThinkingBlockToolCallsIgnored(t *testing.T) {
+	t.Run("openai_bare_json_inside_think", func(t *testing.T) {
+		adapter, err := NewTranscriptAdapter(ProviderOpenAI)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := `{"choices":[{"message":{"role":"assistant","content":"<think>\n{\"name\": \"lookup\", \"arguments\": {\"city\": \"SFO\"}}\n</think>\nI am not calling tools."},"finish_reason":"stop"}]}`
+		comp, err := adapter.ParseResponse([]byte(raw))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(comp.Message.ToolCalls) != 0 {
+			t.Fatalf("tool calls inside <think> must not be extracted, got %d: %+v", len(comp.Message.ToolCalls), comp.Message.ToolCalls)
+		}
+		if comp.FinishReason != "stop" {
+			t.Errorf("finish_reason = %q, want stop", comp.FinishReason)
+		}
+		if comp.Message.Content != "I am not calling tools." {
+			t.Errorf("content = %q, want 'I am not calling tools.'", comp.Message.Content)
+		}
+		if !strings.Contains(comp.Message.ReasoningContent, "lookup") {
+			t.Errorf("reasoning_content missing thinking block: %q", comp.Message.ReasoningContent)
+		}
+	})
+
+	t.Run("openai_hermes_tag_inside_think", func(t *testing.T) {
+		adapter, err := NewTranscriptAdapter(ProviderOpenAI)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := `{"choices":[{"message":{"role":"assistant","content":"<think>\n<tool_call>{\"name\": \"lookup\", \"arguments\": {\"city\": \"SFO\"}}</tool_call>\n</think>\nDone."},"finish_reason":"stop"}]}`
+		comp, err := adapter.ParseResponse([]byte(raw))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(comp.Message.ToolCalls) != 0 {
+			t.Fatalf("hermes tool call inside <think> must not be extracted, got %d: %+v", len(comp.Message.ToolCalls), comp.Message.ToolCalls)
+		}
+		if comp.FinishReason != "stop" {
+			t.Errorf("finish_reason = %q, want stop", comp.FinishReason)
+		}
+		if comp.Message.Content != "Done." {
+			t.Errorf("content = %q, want 'Done.'", comp.Message.Content)
+		}
+		if !strings.Contains(comp.Message.ReasoningContent, "lookup") {
+			t.Errorf("reasoning_content missing thinking block: %q", comp.Message.ReasoningContent)
+		}
+	})
+
+	t.Run("openai_fenced_json_inside_think", func(t *testing.T) {
+		adapter, err := NewTranscriptAdapter(ProviderOpenAI)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"<think>\\n```json\\n{\\\"name\\\": \\\"lookup\\\", \\\"arguments\\\": {\\\"city\\\": \\\"SFO\\\"}}\\n```\\n</think>\"},\"finish_reason\":\"stop\"}]}"
+		comp, err := adapter.ParseResponse([]byte(raw))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(comp.Message.ToolCalls) != 0 {
+			t.Fatalf("fenced JSON tool call inside <think> must not be extracted, got %d", len(comp.Message.ToolCalls))
+		}
+		if comp.FinishReason != "stop" {
+			t.Errorf("finish_reason = %q, want stop", comp.FinishReason)
+		}
+		if comp.Message.Content != "" {
+			t.Errorf("content = %q, want empty", comp.Message.Content)
+		}
+		if !strings.Contains(comp.Message.ReasoningContent, "lookup") {
+			t.Errorf("reasoning_content missing thinking block: %q", comp.Message.ReasoningContent)
+		}
+	})
+
+	t.Run("openai_unclosed_think_block", func(t *testing.T) {
+		adapter, err := NewTranscriptAdapter(ProviderOpenAI)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := `{"choices":[{"message":{"role":"assistant","content":"<think>I am speculating: {\"name\": \"lookup\", \"arguments\": {\"city\": \"SFO\"}}"},"finish_reason":"stop"}]}`
+		comp, err := adapter.ParseResponse([]byte(raw))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(comp.Message.ToolCalls) != 0 {
+			t.Fatalf("unclosed think block tool call must not be extracted, got %d", len(comp.Message.ToolCalls))
+		}
+		if comp.FinishReason != "stop" {
+			t.Errorf("finish_reason = %q, want stop", comp.FinishReason)
+		}
+	})
+
+	t.Run("openai_speculative_think_with_legitimate_tool_call_outside", func(t *testing.T) {
+		adapter, err := NewTranscriptAdapter(ProviderOpenAI)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := `{"choices":[{"message":{"role":"assistant","content":"<think><tool_call>{\"name\": \"speculative\", \"arguments\": {}}</tool_call></think><tool_call>{\"name\": \"lookup\", \"arguments\": {\"city\": \"SFO\"}}</tool_call>"},"finish_reason":"stop"}]}`
+		comp, err := adapter.ParseResponse([]byte(raw))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(comp.Message.ToolCalls) != 1 {
+			t.Fatalf("expected exactly 1 legitimate tool call, got %d: %+v", len(comp.Message.ToolCalls), comp.Message.ToolCalls)
+		}
+		if comp.Message.ToolCalls[0].Function.Name != "lookup" {
+			t.Errorf("tool call name = %q, want 'lookup'", comp.Message.ToolCalls[0].Function.Name)
+		}
+		if comp.FinishReason != "tool_calls" {
+			t.Errorf("finish_reason = %q, want tool_calls", comp.FinishReason)
+		}
+		if !strings.Contains(comp.Message.ReasoningContent, "speculative") {
+			t.Errorf("reasoning content missing speculative thought: %q", comp.Message.ReasoningContent)
+		}
+	})
+
+	t.Run("openai_streaming_chunk_delta_inside_think", func(t *testing.T) {
+		adapter, err := NewTranscriptAdapter(ProviderOpenAI)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := `{"id":"chunk-1","choices":[{"delta":{"role":"assistant","content":"<think>{\"name\": \"lookup\", \"arguments\": {\"city\": \"SFO\"}}</think>"},"finish_reason":null}]}`
+		comp, err := adapter.ParseResponse([]byte(raw))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(comp.Message.ToolCalls) != 0 {
+			t.Fatalf("streaming delta tool call inside <think> must not be extracted, got %d", len(comp.Message.ToolCalls))
+		}
+		if !strings.Contains(comp.Message.ReasoningContent, "lookup") {
+			t.Errorf("reasoning content missing thinking: %q", comp.Message.ReasoningContent)
+		}
+	})
+
+	t.Run("openai_responses_tool_call_inside_think", func(t *testing.T) {
+		adapter, err := NewTranscriptAdapter(ProviderOpenAIResponses)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := `{"status":"completed","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"<think>{\"name\": \"lookup\", \"arguments\": {\"city\": \"SFO\"}}</think>All set."}]}],"usage":{"input_tokens":5,"output_tokens":5,"total_tokens":10}}`
+		comp, err := adapter.ParseResponse([]byte(raw))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(comp.Message.ToolCalls) != 0 {
+			t.Fatalf("tool call inside <think> in Responses API must not be extracted, got %d", len(comp.Message.ToolCalls))
+		}
+		if comp.Message.Content != "All set." {
+			t.Errorf("content = %q, want 'All set.'", comp.Message.Content)
+		}
+		if !strings.Contains(comp.Message.ReasoningContent, "lookup") {
+			t.Errorf("reasoning content missing thinking: %q", comp.Message.ReasoningContent)
+		}
+	})
+
+	t.Run("anthropic_tool_call_inside_think", func(t *testing.T) {
+		adapter, err := NewTranscriptAdapter(ProviderAnthropic)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := `{"content":[{"type":"text","text":"<think>{\"name\": \"lookup\", \"arguments\": {\"city\": \"SFO\"}}</think>Answer."}],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":5}}`
+		comp, err := adapter.ParseResponse([]byte(raw))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(comp.Message.ToolCalls) != 0 {
+			t.Fatalf("anthropic text tool call inside <think> must not be extracted, got %d", len(comp.Message.ToolCalls))
+		}
+		if comp.Message.Content != "Answer." {
+			t.Errorf("content = %q, want 'Answer.'", comp.Message.Content)
+		}
+		if !strings.Contains(comp.Message.Thinking, "lookup") && !strings.Contains(comp.Message.ReasoningContent, "lookup") {
+			t.Errorf("thinking missing: thinking=%q, reasoning=%q", comp.Message.Thinking, comp.Message.ReasoningContent)
+		}
+	})
+
+	t.Run("gemini_tool_call_inside_think", func(t *testing.T) {
+		adapter, err := NewTranscriptAdapter(ProviderGemini)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := `{"candidates":[{"content":{"role":"model","parts":[{"text":"<think>{\"name\": \"lookup\", \"arguments\": {\"city\": \"SFO\"}}</think>Here you go."}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":5,"totalTokenCount":10}}`
+		comp, err := adapter.ParseResponse([]byte(raw))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(comp.Message.ToolCalls) != 0 {
+			t.Fatalf("gemini text tool call inside <think> must not be extracted, got %d", len(comp.Message.ToolCalls))
+		}
+		if comp.Message.Content != "Here you go." {
+			t.Errorf("content = %q, want 'Here you go.'", comp.Message.Content)
+		}
+		if !strings.Contains(comp.Message.ReasoningContent, "lookup") {
+			t.Errorf("reasoning content missing thinking: %q", comp.Message.ReasoningContent)
+		}
+	})
+
+	t.Run("multiple_thinking_blocks_with_speculative_calls", func(t *testing.T) {
+		adapter, err := NewTranscriptAdapter(ProviderOpenAI)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := `{"choices":[{"message":{"role":"assistant","content":"<think>speculative call 1: {\"name\": \"call1\", \"arguments\": {}}</think>Part 1.<think>speculative call 2: {\"name\": \"call2\", \"arguments\": {}}</think>Part 2."},"finish_reason":"stop"}]}`
+		comp, err := adapter.ParseResponse([]byte(raw))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(comp.Message.ToolCalls) != 0 {
+			t.Fatalf("multiple thinking blocks must not produce tool calls, got %d", len(comp.Message.ToolCalls))
+		}
+		if !strings.Contains(comp.Message.Content, "Part 1.") || !strings.Contains(comp.Message.Content, "Part 2.") {
+			t.Errorf("content missing parts: %q", comp.Message.Content)
+		}
+		if !strings.Contains(comp.Message.ReasoningContent, "call1") || !strings.Contains(comp.Message.ReasoningContent, "call2") {
+			t.Errorf("reasoning missing thoughts: %q", comp.Message.ReasoningContent)
+		}
+	})
+}
