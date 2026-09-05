@@ -565,4 +565,44 @@ func TestLoopDriveGoalSpecEnvAndCustomPath(t *testing.T) {
 			t.Fatalf("opt GoalPath = %q, want %q", opt2.GoalPath, "GOAL.md")
 		}
 	})
+
+	t.Run("resolves _scratch/goals/GOAL.md when FAK_GOAL_SPEC empty and scratch goal exists", func(t *testing.T) {
+		tempDir := t.TempDir()
+		scratchGoals := filepath.Join(tempDir, "_scratch", "goals")
+		if err := os.MkdirAll(scratchGoals, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		scratchGoalFile := filepath.Join(scratchGoals, "GOAL.md")
+		if err := os.WriteFile(scratchGoalFile, []byte("# goal\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		oldWd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chdir(tempDir); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_ = os.Chdir(oldWd)
+		})
+
+		t.Setenv("FAK_GOAL_SPEC", "")
+		opt := loopDriveOptions{}
+		rt, err := prepareLoopDriveRuntime(&opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rt.cleanup != nil {
+			defer rt.cleanup()
+		}
+		want := filepath.Join("_scratch", "goals", "GOAL.md")
+		if rt.goalPath != want {
+			t.Fatalf("runtime goalPath = %q, want %q", rt.goalPath, want)
+		}
+		if opt.GoalPath != want {
+			t.Fatalf("opt GoalPath = %q, want %q", opt.GoalPath, want)
+		}
+	})
 }

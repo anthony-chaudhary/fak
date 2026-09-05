@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -12,6 +13,17 @@ type loopDriveRuntime struct {
 	floor    time.Duration
 	goalPath string
 	cleanup  func()
+}
+
+func defaultGoalSpecPath() string {
+	if envGoal := strings.TrimSpace(os.Getenv("FAK_GOAL_SPEC")); envGoal != "" {
+		return envGoal
+	}
+	scratchGoal := filepath.Join("_scratch", "goals", "GOAL.md")
+	if _, err := os.Stat(scratchGoal); err == nil {
+		return scratchGoal
+	}
+	return "GOAL.md"
 }
 
 func prepareLoopDriveRuntime(opt *loopDriveOptions) (loopDriveRuntime, error) {
@@ -31,11 +43,7 @@ func prepareLoopDriveRuntime(opt *loopDriveOptions) (loopDriveRuntime, error) {
 		runtime.floor = time.Second
 	}
 	if runtime.goalPath == "" {
-		if envGoal := strings.TrimSpace(os.Getenv("FAK_GOAL_SPEC")); envGoal != "" {
-			runtime.goalPath = envGoal
-		} else {
-			runtime.goalPath = "GOAL.md"
-		}
+		runtime.goalPath = defaultGoalSpecPath()
 	}
 	opt.GoalPath = runtime.goalPath
 	handoffFile, cleanup, err := loopDriveHandoffFile(opt.HandoffFile)
