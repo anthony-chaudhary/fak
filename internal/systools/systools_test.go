@@ -273,26 +273,18 @@ func TestFetchWebByteCapTruncation(t *testing.T) {
 }
 
 func TestWebSearch(t *testing.T) {
-	// 1. Default simulated documentation search
+	// 1. Unconfigured search returns explicit error
 	ts, err := New(Config{})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 
 	raw, isErr := ts.webSearch(context.Background(), []byte(`{"query":"agent kernel"}`))
-	if isErr {
-		t.Fatalf("webSearch failed: %s", string(raw))
+	if !isErr {
+		t.Fatalf("expected error for unconfigured search, got: %s", string(raw))
 	}
-	var res map[string]any
-	if err := json.Unmarshal(raw, &res); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if res["query"] != "agent kernel" {
-		t.Errorf("query = %v, want 'agent kernel'", res["query"])
-	}
-	results := res["results"].([]any)
-	if len(results) == 0 {
-		t.Fatalf("results count = 0, want > 0")
+	if !strings.Contains(string(raw), "search backend unconfigured") {
+		t.Errorf("expected 'search backend unconfigured', got: %s", string(raw))
 	}
 
 	// 2. Custom search adapter
@@ -418,7 +410,14 @@ func TestAdjudicatorRung(t *testing.T) {
 }
 
 func TestCompleteEnginesThroughDriver(t *testing.T) {
-	ts, err := New(Config{AllowPrivateIPs: true})
+	ts, err := New(Config{
+		AllowPrivateIPs: true,
+		SearchAdapter: func(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
+			return []SearchResult{
+				{Title: "Kernel Docs", URL: "https://example.com/kernel", Snippet: "Kernel documentation"},
+			}, nil
+		},
+	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -455,5 +454,113 @@ func TestCompleteEnginesThroughDriver(t *testing.T) {
 	}
 	if resSearch.Status != abi.StatusOK {
 		t.Errorf("status = %v, want StatusOK", resSearch.Status)
+	}
+}
+
+func TestWebSearchUnconfiguredRegression(t *testing.T) {
+	// 1. Unconfigured Toolset dispatch: verify unconfigured query never yields canned results
+	tsUnconfigured, err := New(Config{})
+	if err != nil {
+		t.Fatalf("New unconfigured: %v", err)
+	}
+	tsUnconfigured.RegisterEngines()
+
+	driver := abi.Engine(EngineWebSearch)
+	if driver == nil {
+		t.Fatalf("driver %s not registered", EngineWebSearch)
+	}
+
+	queries := []string{
+		"agent kernel",
+		"FAK Agent Kernel Overview",
+		"Go Standard Library Documentation",
+		"random unmatched search query",
+	}
+
+	for _, q := range queries {
+		reqBody := fmt.Sprintf(`{"query":%q}`, q)
+
+		// Direct engine method
+		raw, isErr := tsUnconfigured.webSearch(context.Background(), []byte(reqBody))
+		if !isErr {
+			t.Fatalf("expected error for unconfigured search query %q, got: %s", q, string(raw))
+		}
+		rawStr := string(raw)
+		if strings.Contains(rawStr, "FAK Agent Kernel Overview") ||
+			strings.Contains(rawStr, "github.com/anthony-chaudhary/fak") ||
+			strings.Contains(rawStr, "pkg.go.dev") {
+			t.Fatalf("unconfigured search returned canned documents for query %q: %s", q, rawStr)
+		}
+		if !strings.Contains(rawStr, "search backend unconfigured") {
+			t.Errorf("expected 'search backend unconfigured' for query %q, got: %s", q, rawStr)
+		}
+
+		// Toolset dispatch through abi.Engine
+		call := &abi.ToolCall{
+			Tool: ToolWebSearch,
+			Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(reqBody), Len: int64(len(reqBody))},
+		}
+		v := tsUnconfigured.Adjudicate(context.Background(), call)
+		if v.Kind != abi.VerdictAllow {
+			t.Fatalf("Adjudicate expected VerdictAllow, got %+v", v)
+		}
+		res, err := driver.Complete(context.Background(), call)
+		if err != nil {
+			t.Fatalf("Complete: %v", err)
+		}
+		if res.Status != abi.StatusError {
+			t.Fatalf("expected StatusError for unconfigured query %q, got %v", q, res.Status)
+		}
+		payload := string(bytesOf(context.Background(), res.Payload))
+		if strings.Contains(payload, "FAK Agent Kernel Overview") ||
+			strings.Contains(payload, "github.com/anthony-chaudhary/fak") ||
+			strings.Contains(payload, "pkg.go.dev") {
+			t.Fatalf("dispatch returned canned documents for query %q: %s", q, payload)
+		}
+		if !strings.Contains(payload, "search backend unconfigured") {
+			t.Errorf("expected 'search backend unconfigured' in payload for query %q, got: %s", q, payload)
+		}
+	}
+
+	// 2. Configured SearchAdapter still executes normally
+	called := false
+	tsCustom, err := New(Config{
+		SearchAdapter: func(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
+			called = true
+			return []SearchResult{
+				{
+					Title:   "Live Search Result: " + query,
+					URL:     "https://search.example.com?q=" + query,
+					Snippet: "Fresh result for query " + query,
+				},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New custom: %v", err)
+	}
+	tsCustom.RegisterEngines()
+	driverCustom := abi.Engine(EngineWebSearch)
+	if driverCustom == nil {
+		t.Fatalf("driver %s not registered", EngineWebSearch)
+	}
+
+	callCustom := &abi.ToolCall{
+		Tool: ToolWebSearch,
+		Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"query":"real world query"}`)},
+	}
+	resCustom, err := driverCustom.Complete(context.Background(), callCustom)
+	if err != nil {
+		t.Fatalf("Complete custom: %v", err)
+	}
+	if resCustom.Status != abi.StatusOK {
+		t.Fatalf("expected StatusOK for configured search, got %v", resCustom.Status)
+	}
+	if !called {
+		t.Fatalf("configured SearchAdapter was not called")
+	}
+	payloadCustom := string(bytesOf(context.Background(), resCustom.Payload))
+	if !strings.Contains(payloadCustom, "Live Search Result: real world query") {
+		t.Fatalf("expected configured adapter result in payload, got: %s", payloadCustom)
 	}
 }

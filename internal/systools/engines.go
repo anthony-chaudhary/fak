@@ -179,9 +179,16 @@ func (t *Toolset) webSearch(ctx context.Context, body []byte) ([]byte, bool) {
 		maxResults = 20
 	}
 
+	if t.searchAdapter == nil {
+		return refuse(CodeIO, "web_search: search backend unconfigured").JSON(), true
+	}
+
 	results, err := t.searchAdapter(ctx, a.Query, maxResults)
 	if err != nil {
 		return refuse(CodeIO, err.Error()).JSON(), true
+	}
+	if results == nil {
+		results = []SearchResult{}
 	}
 
 	return okJSON(map[string]any{

@@ -60,7 +60,7 @@ type Config struct {
 	DefaultMaxFetchBytes int           // default response byte cap (default 32KB)
 	MaxFetchBytes        int           // ceiling response byte cap (default 1MB)
 	FetchTimeout         time.Duration // timeout for HTTP requests (default 15s)
-	SearchAdapter        SearchAdapter // custom search adapter; nil uses simulated documentation search
+	SearchAdapter        SearchAdapter // custom search adapter; nil means search backend is unconfigured
 	Policy               Policy        // tool allowlist
 	HTTPClient           *http.Client  // optional custom HTTP client
 }
@@ -92,9 +92,6 @@ func New(cfg Config) (*Toolset, error) {
 		timeout = DefaultFetchTimeout
 	}
 	search := cfg.SearchAdapter
-	if search == nil {
-		search = defaultDocSearchAdapter
-	}
 	pol := cfg.Policy
 	if pol.Allow == nil {
 		pol = DefaultPolicy()
@@ -335,63 +332,4 @@ func okJSON(v any) []byte {
 		return refuse(CodeIO, "cannot encode result").JSON()
 	}
 	return b
-}
-
-var defaultDocs = []SearchResult{
-	{
-		Title:   "FAK Agent Kernel Overview",
-		URL:     "https://github.com/anthony-chaudhary/fak#readme",
-		Snippet: "fak is an agent kernel that sits between an AI agent and the tools it calls, providing default-deny security and vDSO performance acceleration.",
-	},
-	{
-		Title:   "FAK System Tools and Web Utilities",
-		URL:     "https://github.com/anthony-chaudhary/fak/docs/systools.md",
-		Snippet: "Utility tools for native agents: get_time for system timestamps, fetch_web with SSRF protection and byte capping, and web_search for documentation querying.",
-	},
-	{
-		Title:   "FAK Tool Sandboxing and Security Policy",
-		URL:     "https://github.com/anthony-chaudhary/fak/POLICY.md",
-		Snippet: "Kernel-mediated tool security: strict schema decoding, SSRF prevention, domain allowlists, and execution confinement.",
-	},
-	{
-		Title:   "FAK Native Inference and Architecture",
-		URL:     "https://github.com/anthony-chaudhary/fak/ARCHITECTURE.md",
-		Snippet: "Layered DAG architecture and native inference runtime beating traditional engines in matched, quality-constrained envelopes.",
-	},
-	{
-		Title:   "Go Standard Library Documentation",
-		URL:     "https://pkg.go.dev/std",
-		Snippet: "Official documentation for the Go standard library packages including net/http, context, time, and encoding/json.",
-	},
-}
-
-func defaultDocSearchAdapter(_ context.Context, query string, maxResults int) ([]SearchResult, error) {
-	qLower := strings.ToLower(query)
-	words := strings.Fields(qLower)
-	var matched []SearchResult
-	for _, doc := range defaultDocs {
-		text := strings.ToLower(doc.Title + " " + doc.Snippet)
-		match := false
-		for _, w := range words {
-			if strings.Contains(text, w) {
-				match = true
-				break
-			}
-		}
-		if match {
-			matched = append(matched, doc)
-			if len(matched) >= maxResults {
-				break
-			}
-		}
-	}
-	if len(matched) == 0 {
-		for _, doc := range defaultDocs {
-			matched = append(matched, doc)
-			if len(matched) >= maxResults {
-				break
-			}
-		}
-	}
-	return matched, nil
 }
