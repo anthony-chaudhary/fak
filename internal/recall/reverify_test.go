@@ -92,7 +92,18 @@ func TestDefaultArtifactVerifierClassifiesRevertedCommitStale(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = repo
-		cmd.Env = append(os.Environ(),
+		var env []string
+		for _, kv := range os.Environ() {
+			k, _, ok := strings.Cut(kv, "=")
+			if ok {
+				u := strings.ToUpper(k)
+				if u == "GIT_DIR" || u == "GIT_WORK_TREE" || u == "GIT_INDEX_FILE" || u == "GIT_OBJECT_DIRECTORY" || u == "GIT_PREFIX" || u == "GIT_COMMON_DIR" {
+					continue
+				}
+			}
+			env = append(env, kv)
+		}
+		cmd.Env = append(env,
 			"GIT_AUTHOR_NAME=recall-test",
 			"GIT_AUTHOR_EMAIL=recall-test@example.com",
 			"GIT_COMMITTER_NAME=recall-test",
