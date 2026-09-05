@@ -435,12 +435,6 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 			*d += time.Since(t)
 		}
 	}
-	gemm := func(qt *q8Tensor, qp *q8Panel) []float32 {
-		t := tic()
-		r := qGemm8(qt, qp)
-		toc(&tGemm, t)
-		return r
-	}
 	gemmInto := func(qt *q8Tensor, qp *q8Panel, dst []float32) {
 		t := tic()
 		qGemm8Into(qt, qp, dst)
@@ -482,6 +476,10 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 	Down := make([]float32, P*H)
 	// Output projection overwrites every cell; residual addition finishes before reuse.
 	O := make([]float32, P*H)
+	// Cache appends copy K/V; synchronous attention consumes Q before reuse.
+	Q := make([]float32, P*nH*hd)
+	K := make([]float32, P*w)
+	V := make([]float32, P*w)
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
 		ql := m.q8Layer(l)
@@ -503,9 +501,9 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 		})
 		Xnq := qz(Xn, P, H)
 
-		Q := gemm(ql.qProj, Xnq)
-		K := gemm(ql.kProj, Xnq)
-		V := gemm(ql.vProj, Xnq)
+		gemmInto(ql.qProj, Xnq, Q)
+		gemmInto(ql.kProj, Xnq, K)
+		gemmInto(ql.vProj, Xnq, V)
 		for t := 0; t < P; t++ {
 			m.applyProjBias(l, Q[t*nH*hd:(t+1)*nH*hd], K[t*w:(t+1)*w], V[t*w:(t+1)*w])
 			m.applyLayerQKNorm(l, Q[t*nH*hd:(t+1)*nH*hd], K[t*w:(t+1)*w])
