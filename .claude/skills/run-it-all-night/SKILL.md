@@ -31,20 +31,34 @@ If another live holder owns the tree, stop this unit and choose non-overlapping 
 ## 3. Dry-run before live launch
 
 Render the issue-specific guarded command first. A dry-run must show the intended worker
-identity, bounded fuel, file tree, account admission, and zero launches. For stale-work units,
-use the issue-bound loop and keep issue creation separate from process launch:
+identity, bounded fuel, file tree, account admission, and zero launches.
+
+For general backlog issues, plan the bounded unit via `fak issue-queue` or `fak dispatch tick`:
+
+```bash
+fak issue-queue --lane <lane> --top 1 --json
+fak dispatch tick --issue <issue_id> --workspace . --json
+```
+
+For stale-work units, use the issue-bound loop and keep issue creation separate from process launch:
 
 ```bash
 fak stale-work loop --packet <packet.json> --issues <issues.json> --max-wave 1 --json
 ```
 
-Inspect the plan. Do not add `--live-launch` until the issue is contract-valid, the typed
+Inspect the plan. Do not add `--live-launch` or `--live` until the issue is contract-valid, the typed
 capacity preflight admits it, and the lane lease is held.
 
 ## 4. Launch one bounded worker
 
 Enable exactly one live gate for exactly one worker. Prefer the issue-specific command rendered
-by the dry-run (`fak dispatch tick ... --live`); for stale-work, use:
+by the dry-run:
+
+```bash
+fak dispatch tick --issue <issue_id> --workspace . --live --json
+```
+
+For stale-work units:
 
 ```bash
 fak stale-work loop --packet <packet.json> --issues <issues.json> \

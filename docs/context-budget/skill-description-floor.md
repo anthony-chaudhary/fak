@@ -36,34 +36,34 @@ go test ./internal/skillfootprint   # the enforcing test; -v logs the same figur
 ## Baseline (measured)
 
 ```
-skill footprint [interactive]: 70 skill(s); resident floor = 33415 bytes (~8353 tokens);
-  description floor = 33415 B; name-only floor = 939 B; at-rest card floor = 16258 bytes
-  at-rest intent slice (#5560): across 70 skill(s)
+skill footprint [interactive]: 71 skill(s); resident floor = 33982 bytes (~8495 tokens);
+  description floor = 33982 B; name-only floor = 956 B; at-rest card floor = 16466 bytes
+  at-rest intent slice (#5560): across 71 skill(s)
 ```
 
 Heaviest resident descriptions — the trim targets:
 
 | rank | bytes | skill |
 |-----:|------:|-------|
-| 1 | 686 | field-borrow |
-| 2 | 680 | refresh-readme |
-| 3 | 657 | study-repo |
-| 4 | 652 | refresh-cachedoc-numbers |
-| 5 | 648 | milestone-score |
-| 6 | 647 | modularize |
-| 7 | 645 | issue-orchestrator |
-| 8 | 644 | issue-queue |
+| 1 | 731 | debt-orchestrator |
+| 2 | 686 | field-borrow |
+| 3 | 680 | refresh-readme |
+| 4 | 657 | study-repo |
+| 5 | 652 | refresh-cachedoc-numbers |
+| 6 | 648 | milestone-score |
+| 7 | 647 | modularize |
+| 8 | 645 | issue-orchestrator |
 
-The full 70-skill breakdown is what `fak skill footprint --top 0` prints; only the
+The full 71-skill breakdown is what `fak skill footprint --top 0` prints; only the
 head is pinned here so a drift is legible in review.
 
-`name-only floor = 939 B` is the size of the headroom: **32.5 kB of the 33.4 kB
+`name-only floor = 956 B` is the size of the headroom: **33.0 kB of the 34.0 kB
 resident floor is description prose**, and every skill stays invocable by name
 without a single byte of it.
 
-**Last re-pin: 35182 → 33415 B (-1767, 70 skills)** — the live `SkillResolver`
-measurement records the current catalog footprint across 70 skills after reaping
-legacy skills (`clean-skill`, `disambiguate-section`, `dos-plan-price`, `issue-clean`). The
+**Last re-pin: 33415 → 33982 B (+567, 71 skills)** — the live `SkillResolver`
+measurement records the current catalog footprint across 71 skills after adding
+`issue-queue` and refreshing issue management skills (#11541). The
 gate banks that measured baseline; future growth retains the same narrow ratchet
 band.
 
@@ -95,7 +95,7 @@ in the twenty days that followed, the measured floor grew from 36,237 B to 47,23
 and taste lost 30% in three weeks.
 
 `internal/skillfootprint.CheckDescriptions` gates the measured floor against a
-committed ceiling, `SkillDescriptionBudgetBytes` (currently **33415**), as a one-way
+committed ceiling, `SkillDescriptionBudgetBytes` (currently **33982**), as a one-way
 ratchet:
 
 | Direction | Reason | What it means |

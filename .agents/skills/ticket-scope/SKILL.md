@@ -1,6 +1,6 @@
 ---
 name: ticket-scope
-description: One repeatable pass that decides whether a GitHub ticket is a single dispatchable unit of agent work — or names exactly which of the six scope axes it fails and how to fix it. Wraps the native scope toolkit (`fak...
+description: One repeatable pass that decides whether a GitHub ticket is a single dispatchable unit of agent work — or names exactly which of the six scope axes it fails and how to fix it. Wraps the native scope toolkit...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/ticket-scope/SKILL.md

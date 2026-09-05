@@ -1,6 +1,6 @@
 ---
 name: ticket-scope
-description: "One repeatable pass that decides whether a GitHub ticket is a single dispatchable unit of agent work — or names exactly which of the six scope axes it fails and how to fix it. Wraps the native scope toolkit (`fak issue contract` for structure/size/routing, `fak dispatch issue-smallness-lint` for atomicity, `fak issue cohort` for batch/wave placement) and reads back one verdict per issue: DISPATCHABLE, or TRIAGE (add the missing section), DECOMPOSE (S2+ epic → leaves), or SPLIT (two deliverables / not. Use when this named workflow matches the task."
+description: "One repeatable pass that decides whether a GitHub ticket is a single dispatchable unit of agent work — or names exactly which of the six scope axes it fails and how to fix it. Wraps the native scope toolkit (`fak-dev issue contract` for structure/size/routing, `fak dispatch issue-smallness-lint` for atomicity, `fak-dev issue cohort` for batch/wave placement) and reads back one verdict per issue: DISPATCHABLE, or TRIAGE (add the missing section), DECOMPOSE (S2+ epic → leaves), or SPLIT. Use when assessing whether a ticket is dispatchable."
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Grep, Glob
@@ -11,11 +11,11 @@ metadata:
 
 # /ticket-scope — is this ticket one dispatchable unit of work?
 
-> Wraps the native **ticket-scope toolkit** — `fak issue contract`,
-> `fak dispatch issue-smallness-lint`, `fak issue cohort`. Every verb is
+> Wraps the native **ticket-scope toolkit** — `fak-dev issue contract`,
+> `fak dispatch issue-smallness-lint`, `fak-dev issue cohort`. Every verb is
 > **read-only**: it fetches via `gh`, lints, and reports. Editing the issue body,
 > splitting an epic into child issues, or relabeling is a separate,
-> operator-approved step (`fak issue create`, `gh issue edit`). This mirrors
+> operator-approved step (`fak-dev issue create`, `gh issue edit`). This mirrors
 > [`issue-triage`](../issue-triage/SKILL.md)'s discipline: the tool decides what is
 > *true*; the operator decides what *is done*.
 
@@ -32,11 +32,11 @@ ticket whose write boundary collides with a live lease. One pass:
 
 | # | Axis | Verb | Fails with → fix |
 |---|------|------|------------------|
-| 1 | Structure | `fak issue contract` | `ISSUE_SCOPE_INCOMPLETE` → **TRIAGE** (add the missing section) |
-| 2 | Size (S0–S4) | `fak issue contract` | `ISSUE_NOT_DISPATCH_LEAF` (S2+) → **DECOMPOSE** |
+| 1 | Structure | `fak-dev issue contract` | `ISSUE_SCOPE_INCOMPLETE` → **TRIAGE** (add the missing section) |
+| 2 | Size (S0–S4) | `fak-dev issue contract` | `ISSUE_NOT_DISPATCH_LEAF` (S2+) → **DECOMPOSE** |
 | 3 | Atomicity | `fak dispatch issue-smallness-lint` | `fail` (≥3 deliverables / witness≠1) → **SPLIT** |
 | 4 | Write-scope | `dos arbitrate` · `fak orient` | unknown paths / collision → **TRIAGE** |
-| 5 | Cohort | `fak issue cohort` | split-first queue → **DECOMPOSE** |
+| 5 | Cohort | `fak-dev issue cohort` | split-first queue → **DECOMPOSE** |
 | 6 | Work-class | `fak orient` · work-class axis | fenced/private lane → **ROUTE** |
 
 A ticket is **DISPATCHABLE** only when all six agree.
@@ -62,7 +62,7 @@ gh issue view <N> --json number,title,body > /tmp/ticket-scope-<N>.json
 **Axes 1, 2, 4, 6 — structure, size, routing, class:**
 
 ```sh
-fak issue contract --from-issues /tmp/ticket-scope-<N>.json --json
+fak-dev issue contract --from-issues /tmp/ticket-scope-<N>.json --json
 # exit 0 = dispatchable on these axes; exit 3 = triage-only/refused.
 # Read: missing_sections, missing_fields, the scale readout (declared/derived/
 # effective size + witness-KIND match), model_tier readout, and the closed reason.
@@ -80,13 +80,13 @@ fak dispatch issue-smallness-lint --issue <N> --json
 **Axis 5 — cohort (only with `--batch`):**
 
 ```sh
-fak issue cohort --from-issues issues.json --json --max-wave 8
+fak-dev issue cohort --from-issues issues.json --json --max-wave 8
 # waves[] = concurrency-safe (disjoint-tree); split_first[] = oversized/non-leaf;
 # triage[] = the rest; duplicate marker keys reported. Planner, not a gate.
 ```
 
 For the **backlog** (`--open`), lead with the smallness report — it scans every
-open issue in one call — then run `fak issue contract --from-issues` over the
+open issue in one call — then run `fak-dev issue contract --from-issues` over the
 flagged rows to attach the structure/size reason:
 
 ```sh
@@ -120,7 +120,7 @@ State the proposed writes explicitly and stop for approval:
 - **TRIAGE** — the exact section text to add (`Current state` / `Scope` /
   `Done condition` / `Witness` / `Likely files`). Apply with `gh issue edit`.
 - **SPLIT / DECOMPOSE** — the proposed child titles + one-line scopes. File with
-  `fak issue create` (the sanctioned smooth path — one issue at a time, deduped
+  `fak-dev issue create` (the sanctioned smooth path — one issue at a time, deduped
   by failure-signature, never one per turn), then link parent↔children.
 - **ROUTE** — the label edit for an operator to make.
 

@@ -115,8 +115,9 @@ Before proposing dispatch for a selected issue, validate and price it through th
 first-class Go surfaces:
 
 ```bash
-gh issue view N --repo owner/name --json number,title,body,labels > issue.json`nfak-dev issue contract --from-issues issue.json --json
-fak dispatch issues --issues issue.json --json
+gh issue view N --repo owner/name --json number,title,body,labels > issue.json
+fak-dev issue contract --from-issues issue.json --json
+fak issue-queue --from-issues issue.json --json
 ```
 
 Use `tools/issue_contract.py` or `tools/issue_lane_router.py` only to debug a discrepancy
