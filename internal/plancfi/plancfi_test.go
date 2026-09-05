@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/kernel"
 )
 
 func call(tool, trace string) *abi.ToolCall {
@@ -130,5 +131,32 @@ func TestRequireApprovalRegistered(t *testing.T) {
 	}
 	if abi.Fallback(VerdictRequireApproval) != abi.FallbackDeny {
 		t.Fatal("RequireApproval must fall back to Deny (fail-closed)")
+	}
+}
+
+func TestPlanCFIDeviationDisposition(t *testing.T) {
+	ctx := context.Background()
+	l := NewLedger()
+	l.Declare("t", airlinePlan)
+	a := New(l)
+	c := call("send_email", "t")
+	v := a.Adjudicate(ctx, c)
+
+	if v.Reason != abi.ReasonPolicyBlock {
+		t.Fatalf("deviation verdict reason = %v, want ReasonPolicyBlock (%v)", v.Reason, abi.ReasonPolicyBlock)
+	}
+	if v.Disposition != "ESCALATE" {
+		t.Fatalf("deviation verdict disposition = %q, want ESCALATE", v.Disposition)
+	}
+	if v.Meta["disposition"] != "ESCALATE" {
+		t.Fatalf("deviation verdict meta disposition = %q, want ESCALATE", v.Meta["disposition"])
+	}
+
+	res := kernel.DenyResult(c, v)
+	if got := res.Meta["disposition"]; got != "ESCALATE" {
+		t.Fatalf("DenyResult meta disposition = %q, want ESCALATE", got)
+	}
+	if got := res.Meta["reason"]; got != "POLICY_BLOCK" {
+		t.Fatalf("DenyResult meta reason = %q, want POLICY_BLOCK", got)
 	}
 }
