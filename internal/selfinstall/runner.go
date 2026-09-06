@@ -104,16 +104,29 @@ func goRunnerEnv(name string, env []string, tempDir, cacheDir string) []string {
 // transaction. cleanup removes recovery state; the stable cache remains warm and Go's own
 // age-based cache trimming reclaims old entries. Fixed paths ensure a killed attempt cannot
 // leak one cache directory per invocation.
-func NewSelfUpdateRunner() (Runner, func(), error) {
+//
+// By default, the runner is silent. Callers may supply an optional outcome reporter, or use
+// NewSelfUpdateRunnerWithReporter directly.
+func NewSelfUpdateRunner(reports ...func(GoCacheOutcomeCounts)) (Runner, func(), error) {
+	var report func(GoCacheOutcomeCounts)
+	if len(reports) > 0 {
+		report = reports[0]
+	}
+	return NewSelfUpdateRunnerWithReporter(report)
+}
+
+// NewSelfUpdateRunnerWithReporter constructs a self-update runner with an explicit outcome reporter.
+// When reporter is nil, cache outcome telemetry is silent.
+func NewSelfUpdateRunnerWithReporter(reporter func(GoCacheOutcomeCounts)) (Runner, func(), error) {
 	cacheBase, err := os.UserCacheDir()
 	if err != nil || strings.TrimSpace(cacheBase) == "" {
 		cacheBase = os.TempDir()
 	}
 	primary, recovery := selfUpdateGoCachePaths(cacheBase, os.TempDir())
-	report := func(counts GoCacheOutcomeCounts) {
-		fmt.Fprintln(os.Stderr, FormatGoCacheOutcomeCounts(counts))
+	if reporter != nil {
+		return newGoCacheRunner(primary, recovery, os.TempDir(), runCommandWithEnv, reporter)
 	}
-	return newGoCacheRunner(primary, recovery, os.TempDir(), runCommandWithEnv, report)
+	return newGoCacheRunner(primary, recovery, os.TempDir(), runCommandWithEnv)
 }
 
 func selfUpdateGoCachePaths(cacheBase, tempDir string) (primary, recovery string) {

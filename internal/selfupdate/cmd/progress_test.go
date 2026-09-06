@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/anthony-chaudhary/fak/internal/selfinstall"
 )
 
 func TestProgressBarFormatAndGlyphs(t *testing.T) {
@@ -303,5 +305,117 @@ func TestSelfUpdateVerboseFlags(t *testing.T) {
 				t.Fatalf("verbose parsed = %v, want %v", isVerbose, tc.want)
 			}
 		})
+	}
+}
+
+func TestProgressWriteSelfUpdateLog(t *testing.T) {
+	var buf bytes.Buffer
+	oldProgress := selfUpdateProgress
+	oldTerminal := selfUpdateWriterIsTerminal
+	oldWidth := selfUpdateTerminalWidth
+	selfUpdateProgress = &buf
+	selfUpdateWriterIsTerminal = func(_ io.Writer) bool { return true }
+	selfUpdateTerminalWidth = func(_ io.Writer) int { return 80 }
+	setSelfUpdateVerbose(false)
+	resetSelfUpdateProgressForTest()
+
+	t.Cleanup(func() {
+		selfUpdateProgress = oldProgress
+		selfUpdateWriterIsTerminal = oldTerminal
+		selfUpdateTerminalWidth = oldWidth
+		setSelfUpdateVerbose(false)
+		clearSelfUpdateProgressBar()
+		resetSelfUpdateProgressForTest()
+	})
+
+	// Case 1: Active progress bar is cleared with \r\x1b[2K, message is written with \n, and bar is redrawn below.
+	reportSelfUpdateProgress(40, "building fak candidate")
+	buf.Reset()
+
+	WriteSelfUpdateLog(&buf, "compiler notice: cache warm")
+	got := buf.String()
+
+	if !strings.HasPrefix(got, "\r\x1b[2K") {
+		t.Fatalf("WriteSelfUpdateLog with active progress bar must start with \\r\\x1b[2K, got: %q", got)
+	}
+
+	wantMsg := "compiler notice: cache warm\n"
+	if !strings.Contains(got, wantMsg) {
+		t.Fatalf("WriteSelfUpdateLog missing log message with newline: got %q, want containing %q", got, wantMsg)
+	}
+
+	wantBar := formatSelfUpdateProgressBar(40, "building fak candidate", 80)
+	if !strings.Contains(got, wantBar) {
+		t.Fatalf("WriteSelfUpdateLog must redraw active progress bar: got %q, want containing %q", got, wantBar)
+	}
+
+	logIdx := strings.Index(got, wantMsg)
+	barIdx := strings.LastIndex(got, "\r\x1b[2K")
+	if barIdx <= logIdx {
+		t.Fatalf("redrawn progress bar must appear after the log message: log at %d, bar at %d in %q", logIdx, barIdx, got)
+	}
+
+	// Case 2: Inactive progress bar writes message with \n without \r\x1b[2K clear or redraw.
+	clearSelfUpdateProgressBar()
+	resetSelfUpdateProgressForTest()
+	buf.Reset()
+
+	WriteSelfUpdateLog(&buf, "notice when inactive")
+	if gotInactive := buf.String(); gotInactive != "notice when inactive\n" {
+		t.Fatalf("WriteSelfUpdateLog without active bar = %q, want %q", gotInactive, "notice when inactive\n")
+	}
+
+	// Case 3: Message with existing trailing newline does not emit double newline.
+	buf.Reset()
+	WriteSelfUpdateLog(&buf, "already terminated\n")
+	if gotTerminated := buf.String(); gotTerminated != "already terminated\n" {
+		t.Fatalf("WriteSelfUpdateLog with trailing newline = %q, want %q", gotTerminated, "already terminated\n")
+	}
+}
+
+func TestProgressGoCacheOutcomes(t *testing.T) {
+	var buf bytes.Buffer
+	oldProgress := selfUpdateProgress
+	oldTerminal := selfUpdateWriterIsTerminal
+	selfUpdateProgress = &buf
+
+	t.Cleanup(func() {
+		selfUpdateProgress = oldProgress
+		selfUpdateWriterIsTerminal = oldTerminal
+		setSelfUpdateVerbose(false)
+		clearSelfUpdateProgressBar()
+		resetSelfUpdateProgressForTest()
+	})
+
+	// Case 1: Interactive mode suppresses go-cache outcomes.
+	selfUpdateWriterIsTerminal = func(_ io.Writer) bool { return true }
+	setSelfUpdateVerbose(false)
+	resetSelfUpdateProgressForTest()
+	buf.Reset()
+
+	reportSelfUpdateGoCacheOutcome(selfinstall.GoCacheOutcomeCounts{Success: 1, Refusal: 0, Error: 0})
+	if buf.Len() != 0 {
+		t.Fatalf("go-cache outcomes must be suppressed in interactive mode, got: %q", buf.String())
+	}
+
+	// Case 2: Verbose mode emits go-cache outcomes.
+	setSelfUpdateVerbose(true)
+	buf.Reset()
+
+	reportSelfUpdateGoCacheOutcome(selfinstall.GoCacheOutcomeCounts{Success: 1, Refusal: 0, Error: 0})
+	wantVerbose := "self-update: go-cache outcomes success=1 refusal=0 error=0\n"
+	if gotVerbose := buf.String(); gotVerbose != wantVerbose {
+		t.Fatalf("go-cache outcomes in verbose mode = %q, want %q", gotVerbose, wantVerbose)
+	}
+
+	// Case 3: Non-interactive mode emits go-cache outcomes.
+	selfUpdateWriterIsTerminal = func(_ io.Writer) bool { return false }
+	setSelfUpdateVerbose(false)
+	buf.Reset()
+
+	reportSelfUpdateGoCacheOutcome(selfinstall.GoCacheOutcomeCounts{Success: 2, Refusal: 1, Error: 0})
+	wantNonInteractive := "self-update: go-cache outcomes success=2 refusal=1 error=0\n"
+	if gotNonInteractive := buf.String(); gotNonInteractive != wantNonInteractive {
+		t.Fatalf("go-cache outcomes in non-interactive mode = %q, want %q", gotNonInteractive, wantNonInteractive)
 	}
 }
