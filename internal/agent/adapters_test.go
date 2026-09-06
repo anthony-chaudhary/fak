@@ -2219,6 +2219,70 @@ func TestGeminiSchemaSanitization(t *testing.T) {
 			t.Fatalf("expected 1 anyOf alternative, got %d", len(alts))
 		}
 	})
+
+	t.Run("removes_additional_properties_and_dollar_schema_recursively", func(t *testing.T) {
+		input := json.RawMessage(`{
+			"$schema": "http://json-schema.org/draft-07/schema#",
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"config": {
+					"$schema": "http://json-schema.org/draft-07/schema#",
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"key": {"type": "string"}
+					}
+				},
+				"tags": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"additionalProperties": {"type": "string"},
+						"properties": {
+							"name": {"type": "string"}
+						}
+					}
+				}
+			}
+		}`)
+		outAny := geminiSchemaCompute(input)
+		outBytes, ok := outAny.(json.RawMessage)
+		if !ok {
+			t.Fatalf("expected json.RawMessage, got %T", outAny)
+		}
+		outStr := string(outBytes)
+		if strings.Contains(outStr, "additionalProperties") {
+			t.Fatalf("expected additionalProperties to be completely removed, got: %s", outStr)
+		}
+		if strings.Contains(outStr, "$schema") {
+			t.Fatalf("expected $schema to be completely removed, got: %s", outStr)
+		}
+
+		var parsed map[string]any
+		if err := json.Unmarshal(outBytes, &parsed); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := parsed["$schema"]; ok {
+			t.Errorf("top-level $schema not removed")
+		}
+		if _, ok := parsed["additionalProperties"]; ok {
+			t.Errorf("top-level additionalProperties not removed")
+		}
+		props, _ := parsed["properties"].(map[string]any)
+		config, _ := props["config"].(map[string]any)
+		if _, ok := config["$schema"]; ok {
+			t.Errorf("config $schema not removed")
+		}
+		if _, ok := config["additionalProperties"]; ok {
+			t.Errorf("config additionalProperties not removed")
+		}
+		tags, _ := props["tags"].(map[string]any)
+		items, _ := tags["items"].(map[string]any)
+		if _, ok := items["additionalProperties"]; ok {
+			t.Errorf("tags.items additionalProperties not removed")
+		}
+	})
 }
 
 func TestOpenAIResponsesAdapterParsesReasoningOutputAndUsage(t *testing.T) {
@@ -2538,6 +2602,83 @@ func TestGeminiThinkingConfigMarshal(t *testing.T) {
 			t.Errorf("wire payload should omit thinkingConfig: %s", body)
 		}
 	})
+
+	t.Run("both thinking budget and reasoning effort prefers budget", func(t *testing.T) {
+		body, err := adapter.MarshalRequest(adapterRequest{
+			ThinkingBudget:  ptr(2048),
+			ReasoningEffort: "high",
+		})
+		if err != nil {
+			t.Fatalf("MarshalRequest failed: %v", err)
+		}
+		var parsed struct {
+			GenerationConfig struct {
+				ThinkingConfig *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+			} `json:"generationConfig"`
+		}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			t.Fatalf("unmarshal failed: %v: %s", err, body)
+		}
+		if parsed.GenerationConfig.ThinkingConfig == nil {
+			t.Fatalf("expected thinkingConfig, got nil: %s", body)
+		}
+		if parsed.GenerationConfig.ThinkingConfig.ThinkingBudget == nil || *parsed.GenerationConfig.ThinkingConfig.ThinkingBudget != 2048 {
+			t.Errorf("expected thinkingBudget 2048, got %v", parsed.GenerationConfig.ThinkingConfig.ThinkingBudget)
+		}
+		if parsed.GenerationConfig.ThinkingConfig.ThinkingLevel != "" {
+			t.Errorf("expected thinkingLevel empty when thinkingBudget > 0, got %q", parsed.GenerationConfig.ThinkingConfig.ThinkingLevel)
+		}
+		if strings.Contains(string(body), "thinkingLevel") {
+			t.Errorf("wire payload should not contain thinkingLevel: %s", body)
+		}
+	})
+
+	t.Run("thinking budget zero omits thinking config even if reasoning effort set", func(t *testing.T) {
+		body, err := adapter.MarshalRequest(adapterRequest{
+			ThinkingBudget:  ptr(0),
+			ReasoningEffort: "high",
+		})
+		if err != nil {
+			t.Fatalf("MarshalRequest failed: %v", err)
+		}
+		var parsed struct {
+			GenerationConfig struct {
+				ThinkingConfig *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+			} `json:"generationConfig"`
+		}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			t.Fatalf("unmarshal failed: %v: %s", err, body)
+		}
+		if parsed.GenerationConfig.ThinkingConfig != nil {
+			t.Fatalf("expected nil thinkingConfig, got %+v: %s", parsed.GenerationConfig.ThinkingConfig, body)
+		}
+		if strings.Contains(string(body), "thinkingConfig") {
+			t.Errorf("wire payload should omit thinkingConfig: %s", body)
+		}
+	})
+
+	t.Run("thinking budget negative omits thinking config", func(t *testing.T) {
+		body, err := adapter.MarshalRequest(adapterRequest{
+			ThinkingBudget: ptr(-100),
+		})
+		if err != nil {
+			t.Fatalf("MarshalRequest failed: %v", err)
+		}
+		var parsed struct {
+			GenerationConfig struct {
+				ThinkingConfig *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+			} `json:"generationConfig"`
+		}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			t.Fatalf("unmarshal failed: %v: %s", err, body)
+		}
+		if parsed.GenerationConfig.ThinkingConfig != nil {
+			t.Fatalf("expected nil thinkingConfig, got %+v: %s", parsed.GenerationConfig.ThinkingConfig, body)
+		}
+		if strings.Contains(string(body), "thinkingConfig") {
+			t.Errorf("wire payload should omit thinkingConfig: %s", body)
+		}
+	})
 }
 
 // TestThinkingBlockToolCallsIgnored verifies that any tool call syntax (bare JSON,
@@ -2758,6 +2899,135 @@ func TestThinkingBlockToolCallsIgnored(t *testing.T) {
 		}
 		if !strings.Contains(comp.Message.ReasoningContent, "call1") || !strings.Contains(comp.Message.ReasoningContent, "call2") {
 			t.Errorf("reasoning missing thoughts: %q", comp.Message.ReasoningContent)
+		}
+	})
+}
+
+func TestGeminiThoughtSignature(t *testing.T) {
+	adapter := geminiAdapter{}
+
+	t.Run("parse response extracts thought signature", func(t *testing.T) {
+		raw := `{
+			"candidates": [{
+				"content": {
+					"role": "model",
+					"parts": [
+						{
+							"thoughtSignature": "sig_abc_123",
+							"functionCall": {
+								"name": "lookup",
+								"args": {"city": "SFO"},
+								"id": "g1"
+							}
+						}
+					]
+				},
+				"finishReason": "STOP"
+			}],
+			"usageMetadata": {"promptTokenCount": 5, "candidatesTokenCount": 2, "totalTokenCount": 7}
+		}`
+		comp, err := adapter.ParseResponse([]byte(raw))
+		if err != nil {
+			t.Fatalf("ParseResponse failed: %v", err)
+		}
+		if len(comp.Message.ToolCalls) != 1 {
+			t.Fatalf("expected 1 tool call, got %d", len(comp.Message.ToolCalls))
+		}
+		tc := comp.Message.ToolCalls[0]
+		if tc.ThoughtSignature != "sig_abc_123" {
+			t.Errorf("expected thought signature %q, got %q", "sig_abc_123", tc.ThoughtSignature)
+		}
+		if tc.Function.Name != "lookup" {
+			t.Errorf("expected name %q, got %q", "lookup", tc.Function.Name)
+		}
+		if tc.ID != "g1" {
+			t.Errorf("expected id %q, got %q", "g1", tc.ID)
+		}
+	})
+
+	t.Run("marshal request emits thought signature", func(t *testing.T) {
+		req := adapterRequest{
+			Messages: []Message{
+				{
+					Role: RoleAssistant,
+					ToolCalls: []ToolCall{
+						{
+							ID:               "call_1",
+							Type:             "function",
+							ThoughtSignature: "sig_abc_123",
+							Function: Func{
+								Name:      "lookup",
+								Arguments: `{"city":"SFO"}`,
+							},
+						},
+						{
+							ID:   "call_2",
+							Type: "function",
+							Function: Func{
+								Name:      "other",
+								Arguments: `{}`,
+							},
+						},
+					},
+				},
+			},
+		}
+		body, err := adapter.MarshalRequest(req)
+		if err != nil {
+			t.Fatalf("MarshalRequest failed: %v", err)
+		}
+		var parsed struct {
+			Contents []struct {
+				Role  string `json:"role"`
+				Parts []struct {
+					ThoughtSignature string `json:"thoughtSignature"`
+					FunctionCall     *struct {
+						Name string `json:"name"`
+					} `json:"functionCall"`
+				} `json:"parts"`
+			} `json:"contents"`
+		}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			t.Fatalf("unmarshal failed: %v: %s", err, body)
+		}
+		if len(parsed.Contents) != 1 || len(parsed.Contents[0].Parts) != 2 {
+			t.Fatalf("expected 1 content with 2 parts, got %+v", parsed.Contents)
+		}
+		if parsed.Contents[0].Parts[0].ThoughtSignature != "sig_abc_123" {
+			t.Errorf("expected part 0 thoughtSignature %q, got %q", "sig_abc_123", parsed.Contents[0].Parts[0].ThoughtSignature)
+		}
+		if parsed.Contents[0].Parts[1].ThoughtSignature != "" {
+			t.Errorf("expected part 1 thoughtSignature empty, got %q", parsed.Contents[0].Parts[1].ThoughtSignature)
+		}
+		if !strings.Contains(string(body), `"thoughtSignature":"sig_abc_123"`) {
+			t.Errorf("wire json missing thoughtSignature: %s", body)
+		}
+	})
+
+	t.Run("tool call json roundtrip", func(t *testing.T) {
+		raw := `{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"},"thought_signature":"sig_xyz"}`
+		var tc ToolCall
+		if err := json.Unmarshal([]byte(raw), &tc); err != nil {
+			t.Fatalf("unmarshal ToolCall: %v", err)
+		}
+		if tc.ThoughtSignature != "sig_xyz" {
+			t.Errorf("expected ThoughtSignature %q, got %q", "sig_xyz", tc.ThoughtSignature)
+		}
+		b, err := json.Marshal(tc)
+		if err != nil {
+			t.Fatalf("marshal ToolCall: %v", err)
+		}
+		if !strings.Contains(string(b), `"thought_signature":"sig_xyz"`) {
+			t.Errorf("marshaled ToolCall missing thought_signature: %s", b)
+		}
+
+		rawMsg := `{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"},"thought_signature":"sig_xyz"}]}`
+		var msg Message
+		if err := json.Unmarshal([]byte(rawMsg), &msg); err != nil {
+			t.Fatalf("unmarshal Message: %v", err)
+		}
+		if len(msg.ToolCalls) != 1 || msg.ToolCalls[0].ThoughtSignature != "sig_xyz" {
+			t.Errorf("expected msg.ToolCalls[0].ThoughtSignature %q, got %+v", "sig_xyz", msg.ToolCalls)
 		}
 	})
 }

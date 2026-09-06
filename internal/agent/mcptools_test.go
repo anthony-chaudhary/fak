@@ -28,8 +28,8 @@ func TestMCPArmDisarmCatalog(t *testing.T) {
 	}
 	defer DisarmMCPTools()
 
-	if len(cat) != 5 {
-		t.Fatalf("ArmMCPTools() returned %d tools, want 5", len(cat))
+	if len(cat) != 9 {
+		t.Fatalf("ArmMCPTools() returned %d tools, want 9", len(cat))
 	}
 
 	expected := map[string]bool{
@@ -38,6 +38,10 @@ func TestMCPArmDisarmCatalog(t *testing.T) {
 		"fak_adjudicate":   false,
 		"fak_syscall":      false,
 		"fak_capabilities": false,
+		"sandbox_exec":     false,
+		"sandbox_read":     false,
+		"sandbox_write":    false,
+		"sandbox_reset":    false,
 	}
 	for _, tool := range cat {
 		if _, ok := expected[tool.Function.Name]; ok {
@@ -51,8 +55,8 @@ func TestMCPArmDisarmCatalog(t *testing.T) {
 	}
 
 	armedCat := MCPToolCatalog()
-	if len(armedCat) != 5 {
-		t.Fatalf("MCPToolCatalog() when armed returned %d tools, want 5", len(armedCat))
+	if len(armedCat) != 9 {
+		t.Fatalf("MCPToolCatalog() when armed returned %d tools, want 9", len(armedCat))
 	}
 
 	allowed := mcpToolAllow()
@@ -472,6 +476,18 @@ func TestMCPGatePrefixes(t *testing.T) {
 		{"fak_capabilities", "inprocess_mcp", abi.VerdictAllow},
 		{"mcp__fak__fak_capabilities", "inprocess_mcp", abi.VerdictAllow},
 		{"mcp__fak_guard__fak_capabilities", "inprocess_mcp", abi.VerdictAllow},
+		{"sandbox_exec", "inprocess_mcp", abi.VerdictAllow},
+		{"mcp__fak__sandbox_exec", "inprocess_mcp", abi.VerdictAllow},
+		{"mcp__fak_guard__sandbox_exec", "inprocess_mcp", abi.VerdictAllow},
+		{"sandbox_read", "inprocess_mcp", abi.VerdictAllow},
+		{"mcp__fak__sandbox_read", "inprocess_mcp", abi.VerdictAllow},
+		{"mcp__fak_guard__sandbox_read", "inprocess_mcp", abi.VerdictAllow},
+		{"sandbox_write", "inprocess_mcp", abi.VerdictAllow},
+		{"mcp__fak__sandbox_write", "inprocess_mcp", abi.VerdictAllow},
+		{"mcp__fak_guard__sandbox_write", "inprocess_mcp", abi.VerdictAllow},
+		{"sandbox_reset", "inprocess_mcp", abi.VerdictAllow},
+		{"mcp__fak__sandbox_reset", "inprocess_mcp", abi.VerdictAllow},
+		{"mcp__fak_guard__sandbox_reset", "inprocess_mcp", abi.VerdictAllow},
 		{"unrelated_tool", "", abi.VerdictDefer},
 	}
 
@@ -485,5 +501,154 @@ func TestMCPGatePrefixes(t *testing.T) {
 		if tc.wantEngine != "" && c.Engine != tc.wantEngine {
 			t.Errorf("Adjudicate(%q): got Engine=%q, want %q", tc.tool, c.Engine, tc.wantEngine)
 		}
+	}
+}
+
+func TestMCPSandboxTools(t *testing.T) {
+	tmpDir := t.TempDir()
+	SetSandboxWorkspace(tmpDir)
+	defer SetSandboxWorkspace("")
+
+	_, err := ArmMCPTools()
+	if err != nil {
+		t.Fatalf("ArmMCPTools failed: %v", err)
+	}
+	defer DisarmMCPTools()
+
+	ctx := context.Background()
+	eng := abi.Engine("inprocess_mcp")
+	if eng == nil {
+		t.Fatal("inprocess_mcp engine is nil")
+	}
+
+	// 1. sandbox_write
+	writeArgs, _ := json.Marshal(map[string]any{
+		"path":    "notes/sample.txt",
+		"content": "line 1\nline 2\nline 3\nline 4\nline 5",
+	})
+	cWrite := &abi.ToolCall{
+		Tool: "sandbox_write",
+		Args: putBytes(ctx, writeArgs),
+	}
+	resWrite, err := eng.Complete(ctx, cWrite)
+	if err != nil {
+		t.Fatalf("sandbox_write Complete error: %v", err)
+	}
+	if resWrite == nil || resWrite.Status != abi.StatusOK {
+		t.Fatalf("sandbox_write failed with non-OK status: %+v", resWrite)
+	}
+
+	// Verify file was written to disk inside workspace
+	diskPath := filepath.Join(tmpDir, "notes", "sample.txt")
+	diskData, err := os.ReadFile(diskPath)
+	if err != nil {
+		t.Fatalf("ReadFile from disk failed: %v", err)
+	}
+	if string(diskData) != "line 1\nline 2\nline 3\nline 4\nline 5" {
+		t.Fatalf("file content on disk mismatch: %q", string(diskData))
+	}
+
+	// 2. sandbox_read full
+	readArgs, _ := json.Marshal(map[string]any{
+		"path": "notes/sample.txt",
+	})
+	cRead := &abi.ToolCall{
+		Tool: "sandbox_read",
+		Args: putBytes(ctx, readArgs),
+	}
+	resRead, err := eng.Complete(ctx, cRead)
+	if err != nil {
+		t.Fatalf("sandbox_read Complete error: %v", err)
+	}
+	var readBody map[string]any
+	if err := json.Unmarshal(refutil.Bytes(ctx, resRead.Payload), &readBody); err != nil {
+		t.Fatalf("sandbox_read unmarshal payload error: %v", err)
+	}
+	if readBody["content"] != "line 1\nline 2\nline 3\nline 4\nline 5" {
+		t.Fatalf("sandbox_read content = %v, want full text", readBody["content"])
+	}
+
+	// 3. sandbox_read with offset and limit (lines 2 to 3)
+	readSliceArgs, _ := json.Marshal(map[string]any{
+		"path":   "notes/sample.txt",
+		"offset": 2,
+		"limit":  2,
+	})
+	cReadSlice := &abi.ToolCall{
+		Tool: "sandbox_read",
+		Args: putBytes(ctx, readSliceArgs),
+	}
+	resReadSlice, err := eng.Complete(ctx, cReadSlice)
+	if err != nil {
+		t.Fatalf("sandbox_read slice Complete error: %v", err)
+	}
+	var readSliceBody map[string]any
+	_ = json.Unmarshal(refutil.Bytes(ctx, resReadSlice.Payload), &readSliceBody)
+	if readSliceBody["content"] != "line 2\nline 3" {
+		t.Fatalf("sandbox_read slice content = %v, want 'line 2\\nline 3'", readSliceBody["content"])
+	}
+
+	// 4. sandbox_read traversal escape refusal
+	escapeReadArgs, _ := json.Marshal(map[string]any{
+		"path": "../../secret.txt",
+	})
+	cEscapeRead := &abi.ToolCall{
+		Tool: "sandbox_read",
+		Args: putBytes(ctx, escapeReadArgs),
+	}
+	resEscapeRead, _ := eng.Complete(ctx, cEscapeRead)
+	if resEscapeRead == nil || resEscapeRead.Status != abi.StatusError {
+		t.Fatalf("sandbox_read path escape should return StatusError: %+v", resEscapeRead)
+	}
+
+	// 5. sandbox_write traversal escape refusal
+	escapeWriteArgs, _ := json.Marshal(map[string]any{
+		"path":    "../escape.txt",
+		"content": "illegal",
+	})
+	cEscapeWrite := &abi.ToolCall{
+		Tool: "sandbox_write",
+		Args: putBytes(ctx, escapeWriteArgs),
+	}
+	resEscapeWrite, _ := eng.Complete(ctx, cEscapeWrite)
+	if resEscapeWrite == nil || resEscapeWrite.Status != abi.StatusError {
+		t.Fatalf("sandbox_write path escape should return StatusError: %+v", resEscapeWrite)
+	}
+
+	// 6. sandbox_reset
+	cReset := &abi.ToolCall{
+		Tool: "sandbox_reset",
+		Args: putBytes(ctx, []byte("{}")),
+	}
+	resReset, err := eng.Complete(ctx, cReset)
+	if err != nil {
+		t.Fatalf("sandbox_reset Complete error: %v", err)
+	}
+	if resReset == nil || resReset.Status != abi.StatusOK {
+		t.Fatalf("sandbox_reset non-OK status: %+v", resReset)
+	}
+
+	// 7. sandbox_exec
+	execArgs, _ := json.Marshal(map[string]any{
+		"command": "echo sandbox_ok",
+	})
+	cExec := &abi.ToolCall{
+		Tool: "sandbox_exec",
+		Args: putBytes(ctx, execArgs),
+	}
+	resExec, err := eng.Complete(ctx, cExec)
+	if err != nil {
+		t.Fatalf("sandbox_exec Complete error: %v", err)
+	}
+	if resExec == nil || resExec.Status != abi.StatusOK {
+		t.Fatalf("sandbox_exec non-OK status: %+v", resExec)
+	}
+	var execBody map[string]any
+	if err := json.Unmarshal(refutil.Bytes(ctx, resExec.Payload), &execBody); err != nil {
+		t.Fatalf("sandbox_exec unmarshal error: %v", err)
+	}
+	stdoutStr, _ := execBody["stdout"].(string)
+	if !strings.Contains(stdoutStr, "sandbox_ok") {
+		t.Fatalf("sandbox_exec stdout = %q, want it to contain 'sandbox_ok'", stdoutStr)
 	}
 }

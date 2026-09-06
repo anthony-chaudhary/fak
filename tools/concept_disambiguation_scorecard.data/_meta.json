@@ -3637,6 +3637,31 @@
           "category": "incidental",
           "reason": "turn pacing jitter and burst cooldown gate",
           "token": "breathgate"
+        },
+        {
+          "category": "incidental",
+          "reason": "sandbox tool name",
+          "token": "mcp__fak_guard__sandbox_exec"
+        },
+        {
+          "category": "incidental",
+          "reason": "sandbox tool name",
+          "token": "mcp__fak_guard__sandbox_read"
+        },
+        {
+          "category": "incidental",
+          "reason": "sandbox tool name",
+          "token": "mcp__fak_guard__sandbox_write"
+        },
+        {
+          "category": "incidental",
+          "reason": "sandbox tool name",
+          "token": "mcp__fak_guard__sandbox_state"
+        },
+        {
+          "category": "incidental",
+          "reason": "sandbox tool name",
+          "token": "mcp__fak_guard__sandbox_reset"
         }
       ],
       "exclude": [
@@ -4001,6 +4026,11 @@
         "mapBehaviorProbe",
         "markGuardChildTerminalIntent",
         "marshalGuardProfileCapture",
+        "mcp__fak_guard__sandbox_exec",
+        "mcp__fak_guard__sandbox_read",
+        "mcp__fak_guard__sandbox_reset",
+        "mcp__fak_guard__sandbox_state",
+        "mcp__fak_guard__sandbox_write",
         "nativeAdmissionPolicyForBudget",
         "nativeReasonMessageRoleUnsupported",
         "nativeq4kgateupoutputslab",
@@ -8372,6 +8402,31 @@
           "category": "incidental",
           "reason": "Constructor for ops.Engine",
           "token": "NewEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "sync primitive in a2a director",
+          "token": "directorEngineMu"
+        },
+        {
+          "category": "incidental",
+          "reason": "instance var in a2a director",
+          "token": "directorEngineInst"
+        },
+        {
+          "category": "incidental",
+          "reason": "sync once in a2a director",
+          "token": "directorEngineOnce"
+        },
+        {
+          "category": "incidental",
+          "reason": "accessor in a2a director",
+          "token": "GetDirectorEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "setter in a2a director",
+          "token": "SetDirectorEngine"
         }
       ],
       "id": "gateway-engine",
@@ -8395,6 +8450,7 @@
         "FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE",
         "FAK_INKERNEL_RADIX_HOST_L2_BYTES",
         "GatewaySeat",
+        "GetDirectorEngine",
         "InKernelKVPrefixPressureSource",
         "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
         "KernelID",
@@ -8413,6 +8469,7 @@
         "RegisterEngines",
         "RemotePlacement",
         "SessionAffinityGateway",
+        "SetDirectorEngine",
         "SpeculativeEngine",
         "ThisPeriodTotalKernelTime",
         "TotalKernelTime",
@@ -8422,6 +8479,9 @@
         "collectDogfoodKernelValue",
         "convkernel",
         "countingEngine",
+        "directorEngineInst",
+        "directorEngineMu",
+        "directorEngineOnce",
         "dispatchEngineForWorkClass",
         "dogfoodKernelValue",
         "editEngine",
@@ -10365,6 +10425,31 @@
           "category": "incidental",
           "reason": "Internal gateway helper recording compaction restore",
           "token": "recordCompactionRestore"
+        },
+        {
+          "category": "incidental",
+          "reason": "compaction summary helper in prompt ordering",
+          "token": "reCompactionSummary"
+        },
+        {
+          "category": "incidental",
+          "reason": "compaction summary helper in prompt ordering",
+          "token": "ExtractCompactionSummary"
+        },
+        {
+          "category": "incidental",
+          "reason": "compaction summary helper in prompt ordering",
+          "token": "preCompactionPrefix"
+        },
+        {
+          "category": "incidental",
+          "reason": "compaction summary helper in prompt ordering",
+          "token": "postCompactionPrefix"
+        },
+        {
+          "category": "incidental",
+          "reason": "compaction summary helper in prompt ordering",
+          "token": "RenderInvariantPrefix"
         }
       ],
       "exclude": [
@@ -10385,6 +10470,7 @@
         "ContextTokenSeconds",
         "ContextTokensSaved",
         "ContextualID",
+        "ExtractCompactionSummary",
         "FAK_COMPACTION_THRASH_STOP",
         "FullContextInputTokens",
         "IsCopiedContext",
@@ -10392,6 +10478,7 @@
         "MaxContextTokensForBudget",
         "MechanismStaleContext",
         "MetricFactRecall",
+        "RenderInvariantPrefix",
         "RestoreCalls",
         "RetainedContextBytes",
         "RuntimeContextChanged",
@@ -10461,11 +10548,14 @@
         "noteCtxValueTTL1hScope",
         "outboundTraceContext",
         "outboundTraceContextKey",
+        "postCompactionPrefix",
         "postCtx",
+        "preCompactionPrefix",
         "probeCtx",
         "providerContext",
         "providerSpanContext",
         "queryCodexHooksContext",
+        "reCompactionSummary",
         "readGuardCompactionWitnesses",
         "readyCtx",
         "recalled",
@@ -13326,6 +13416,11 @@
           "category": "incidental",
           "reason": "classifier token for premature surrender in headless loops",
           "token": "PrematureSurrender"
+        },
+        {
+          "category": "incidental",
+          "reason": "compaction summary helper in prompt ordering",
+          "token": "RenderInvariantPrefix"
         }
       ],
       "id": "render-materialize",
@@ -13351,6 +13446,7 @@
         "RenderFreshness",
         "RenderHistoryStatus",
         "RenderIndexHealth",
+        "RenderInvariantPrefix",
         "RenderKind",
         "RenderPublicDocs",
         "RenderQueue",
