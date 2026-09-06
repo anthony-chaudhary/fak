@@ -85,6 +85,10 @@ const (
 	DeepSeekAnthropicBaseURL = "https://api.deepseek.com/anthropic"
 	// GPT6AstraModel is the OpenAI GPT-6 Astra flagship model id.
 	GPT6AstraModel = "gpt-6-astra"
+	// GPT6AstraWindowTokens is the documented GPT-6 Astra context window.
+	GPT6AstraWindowTokens = 1_000_000
+	// GPT6AstraMaxOutputTokens is the documented GPT-6 Astra maximum output tokens.
+	GPT6AstraMaxOutputTokens = 131_072
 	// DeepSeekV4ProModel is the DeepSeek V4 Pro API model id.
 	DeepSeekV4ProModel = "deepseek-v4-pro"
 	// DeepSeekV4FlashModel is the DeepSeek V4 Flash API model id.
@@ -655,6 +659,9 @@ func (r Roster) Validate() error {
 		if err := safeRouteToken("binding model", b.Model); err != nil {
 			return err
 		}
+		if b.UpstreamModel == "" && strings.ContainsAny(b.Model, " \t") {
+			return fmt.Errorf("modelroute: binding for model %q has no upstream_model and contains whitespace", b.Model)
+		}
 		if b.UpstreamModel != "" && strings.ContainsAny(b.UpstreamModel, ": \t") {
 			return fmt.Errorf("modelroute: binding for model %q has an upstream_model %q containing a route delimiter (: or space)", b.Model, b.UpstreamModel)
 		}
@@ -697,7 +704,11 @@ func (r Roster) Validate() error {
 // validated <kind>: prefix (never the account id), so no id can flip the floor's
 // local/remote decision. Locality is the leading prefix, full stop.
 func safeRouteToken(what, tok string) error {
-	if strings.ContainsAny(tok, ":/ \t") {
+	delims := ":/ \t"
+	if what == "binding model" {
+		delims = ":/\r\n\t"
+	}
+	if strings.ContainsAny(tok, delims) {
 		return fmt.Errorf("modelroute: %s %q contains a route delimiter (:, /, space) — it must be a plain token", what, tok)
 	}
 	return nil
@@ -851,6 +862,9 @@ func DefaultRoster() Roster {
 			{Model: "gpt-6-astra", Account: "openai-personal", UpstreamModel: GPT6AstraModel},
 			{Model: "gpt-6", Account: "openai-personal", UpstreamModel: GPT6AstraModel},
 			{Model: "astra", Account: "openai-personal", UpstreamModel: GPT6AstraModel},
+			{Model: "astra-gpt-6", Account: "openai-personal", UpstreamModel: GPT6AstraModel},
+			{Model: "astra gpt 6", Account: "openai-personal", UpstreamModel: GPT6AstraModel},
+			{Model: "gpt-6 astra", Account: "openai-personal", UpstreamModel: GPT6AstraModel},
 			{Model: OpenCodeGoOxAlphaModel, Account: OpenCodeGoProviderKey, UpstreamModel: OpenCodeGoOxAlphaModel},
 			{Model: "guard-a", Account: "openai-work", UpstreamModel: "gpt-5.5"},
 			{Model: "guard-b", Account: "claude-sub", UpstreamModel: "claude-opus-4-6"},

@@ -84,7 +84,7 @@ func DefaultBaseURL(provider string) string {
 	switch provider {
 	case "anthropic":
 		return "https://api.anthropic.com"
-	case "openai":
+	case "openai", "openai-responses", "astra":
 		return "https://api.openai.com/v1"
 	case "gemini":
 		return "https://generativelanguage.googleapis.com/v1beta"
@@ -98,8 +98,8 @@ func DefaultBaseURL(provider string) string {
 // Anthropic clients (Claude Code, the Anthropic SDKs) read ANTHROPIC_BASE_URL;
 // OpenAI-compatible clients read OPENAI_BASE_URL; Gemini CLI reads
 // GOOGLE_GEMINI_BASE_URL on its native generateContent wire.
-func EnvVar(provider, override string) string {
-	if v := strings.TrimSpace(override); v != "" {
+func EnvVar(provider, explicitEnv string) string {
+	if v := strings.TrimSpace(explicitEnv); v != "" {
 		return v
 	}
 	switch provider {
@@ -107,6 +107,8 @@ func EnvVar(provider, override string) string {
 		return "ANTHROPIC_BASE_URL"
 	case "gemini":
 		return "GOOGLE_GEMINI_BASE_URL"
+	case "openai", "openai-responses", "astra":
+		return "OPENAI_BASE_URL"
 	default:
 		return "OPENAI_BASE_URL"
 	}
@@ -121,11 +123,16 @@ func EnvVar(provider, override string) string {
 // "/chat/completions" — so the value MUST carry the /v1 the gateway serves its OpenAI
 // routes under. Without it the client calls "<host>/chat/completions" and the gateway
 // (which exposes "/v1/chat/completions") 404s.
-func EnvValue(provider, gwURL string) string {
+func EnvValue(provider, gatewayURL string) string {
 	if provider == "anthropic" || provider == "gemini" {
-		return gwURL
+		return gatewayURL
 	}
-	return strings.TrimRight(gwURL, "/") + "/v1"
+	switch provider {
+	case "openai", "openai-responses", "astra":
+		return strings.TrimRight(gatewayURL, "/") + "/v1"
+	default:
+		return strings.TrimRight(gatewayURL, "/") + "/v1"
+	}
 }
 
 // InjectedEnv lists the environment variables guard sets in the child to point it at

@@ -61,6 +61,12 @@ func TestDefaultBaseURL(t *testing.T) {
 	if got := DefaultBaseURL("openai"); got != "https://api.openai.com/v1" {
 		t.Errorf("openai default = %q", got)
 	}
+	if got := DefaultBaseURL("openai-responses"); got != "https://api.openai.com/v1" {
+		t.Errorf("openai-responses default = %q", got)
+	}
+	if got := DefaultBaseURL("astra"); got != "https://api.openai.com/v1" {
+		t.Errorf("astra default = %q", got)
+	}
 	if got := DefaultBaseURL("gemini"); got != "https://generativelanguage.googleapis.com/v1beta" {
 		t.Errorf("gemini default = %q", got)
 	}

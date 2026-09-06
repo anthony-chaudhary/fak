@@ -547,3 +547,31 @@ func TestKindBaseURLDefaults(t *testing.T) {
 		t.Fatalf("deepseek default base url wrong: %q", KindBaseURL(KindDeepSeek))
 	}
 }
+
+func TestDefaultRosterAstraBindings(t *testing.T) {
+	if GPT6AstraWindowTokens != 1_000_000 {
+		t.Fatalf("GPT6AstraWindowTokens = %d, want 1000000", GPT6AstraWindowTokens)
+	}
+	if GPT6AstraMaxOutputTokens != 131_072 {
+		t.Fatalf("GPT6AstraMaxOutputTokens = %d, want 131072", GPT6AstraMaxOutputTokens)
+	}
+	r := DefaultRoster()
+	if err := r.Validate(); err != nil {
+		t.Fatalf("DefaultRoster failed Validate: %v", err)
+	}
+	for _, model := range []string{"astra-gpt-6", "astra gpt 6", "gpt-6 astra"} {
+		tg, err := r.Resolve(model)
+		if err != nil {
+			t.Fatalf("resolve %q: %v", model, err)
+		}
+		if tg.Account != "openai-personal" {
+			t.Errorf("model %q account = %q, want openai-personal", model, tg.Account)
+		}
+		if tg.UpstreamModel != GPT6AstraModel {
+			t.Errorf("model %q upstream = %q, want %q", model, tg.UpstreamModel, GPT6AstraModel)
+		}
+		if tg.Kind != KindOpenAI {
+			t.Errorf("model %q kind = %q, want %q", model, tg.Kind, KindOpenAI)
+		}
+	}
+}

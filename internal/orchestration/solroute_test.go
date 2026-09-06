@@ -65,7 +65,7 @@ func TestRouteResolutionPreservesEffortPin(t *testing.T) {
 }
 
 func TestSelectSOLRouteAstraManagerDefaults(t *testing.T) {
-	for _, astraModel := range []string{"gpt-6-astra", "astra", "gpt-6", "openai/gpt-6-astra"} {
+	for _, astraModel := range []string{"gpt-6-astra", "astra", "gpt-6", "openai/gpt-6-astra", "astra-gpt-6", "astra gpt 6", "gpt-6 astra"} {
 		got := SelectSOLRoute("implement feature", ProfileUltracode, WorkGrind, astraModel)
 		if got.WorkerModel != DefaultAstraChildWorkerModel {
 			t.Errorf("model %q: got WorkerModel %q, want %q", astraModel, got.WorkerModel, DefaultAstraChildWorkerModel)

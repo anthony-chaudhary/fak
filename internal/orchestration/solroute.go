@@ -37,7 +37,10 @@ func IsAstraModel(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
 	switch m {
 	case "gpt-6-astra", "gpt 6 astra", "gpt6astra", "gpt-6", "gpt6", "astra",
-		"openai/gpt-6-astra", "openai/gpt-6", "openai/astra":
+		"astra-gpt-6", "astra gpt 6", "astra gpt-6", "astra-gpt6", "astragpt6",
+		"gpt-6 astra", "gpt 6-astra", "gpt6-astra",
+		"openai/gpt-6-astra", "openai/gpt-6", "openai/astra",
+		"openai/astra-gpt-6", "openai/astra gpt 6":
 		return true
 	default:
 		return strings.Contains(m, "astra")

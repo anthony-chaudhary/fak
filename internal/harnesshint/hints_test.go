@@ -140,6 +140,39 @@ func TestResolveHint_CostHeavyReasoningModels(t *testing.T) {
 	}
 }
 
+func TestResolveHint_AstraModels(t *testing.T) {
+	models := []string{
+		"gpt-6-astra",
+		"astra",
+		"gpt-6",
+		"astra-gpt-6",
+		"astra-gpt6",
+		"gpt6-astra",
+		"astra gpt 6",
+		"gpt 6 astra",
+		"gpt-6 astra",
+		"gpt6astra",
+		"openai/gpt-6-astra",
+		"openai/astra-gpt-6",
+	}
+
+	for _, model := range models {
+		t.Run(model, func(t *testing.T) {
+			hint := ResolveHint(model, nil)
+
+			if hint.CanonicalModel != "gpt-6-astra" {
+				t.Errorf("expected CanonicalModel=%q, got %q", "gpt-6-astra", hint.CanonicalModel)
+			}
+			if hint.Posture != PostureCostHeavy {
+				t.Errorf("expected Posture=%v, got %v", PostureCostHeavy, hint.Posture)
+			}
+			if hint.Provenance != ProvenanceBuiltinAlias {
+				t.Errorf("expected Provenance=%q, got %q", ProvenanceBuiltinAlias, hint.Provenance)
+			}
+		})
+	}
+}
+
 func TestResolveHint_NormalizationAndPrefixes(t *testing.T) {
 	tests := []struct {
 		input             string

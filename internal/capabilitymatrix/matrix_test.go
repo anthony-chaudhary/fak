@@ -270,10 +270,23 @@ func TestCapabilityMatrix_NormalizeCodexModelSlug(t *testing.T) {
 		{"gpt6", GPT6AstraModel},
 		{"astra", GPT6AstraModel},
 		{"ASTRA", GPT6AstraModel},
+		{"gpt-6 astra", GPT6AstraModel},
+		{"gpt 6-astra", GPT6AstraModel},
+		{"gpt6-astra", GPT6AstraModel},
+		{"astra-gpt-6", GPT6AstraModel},
+		{"astra gpt 6", GPT6AstraModel},
+		{"astra gpt-6", GPT6AstraModel},
+		{"astra-gpt6", GPT6AstraModel},
+		{"astragpt6", GPT6AstraModel},
 		{"openai/gpt-6-astra", GPT6AstraModel},
 		{"openai/gpt-6", GPT6AstraModel},
 		{"openai/astra", GPT6AstraModel},
+		{"openai/gpt-6 astra", GPT6AstraModel},
+		{"openai/astra-gpt-6", GPT6AstraModel},
+		{"openai/astra gpt 6", GPT6AstraModel},
+		{"openai/astra-gpt6", GPT6AstraModel},
 		{"  gpt 6 astra  ", GPT6AstraModel},
+		{"astra-2", "astra-2"},
 		{"gpt-5.6-sol", "gpt-5.6-sol"},
 		{"custom-model", "custom-model"},
 		{"", ""},
@@ -293,4 +306,35 @@ func TestCapabilityMatrix_LookupProfile(t *testing.T) {
 	if !prof.Capabilities.Thinking {
 		t.Errorf("LookupProfile('gpt-6').Capabilities.Thinking = false, want true")
 	}
+}
+
+func TestCapabilityMatrix_LookupProfile_Astra(t *testing.T) {
+	astraModels := []string{"gpt-6-astra", "astra", "gpt-6", "astra-gpt-6", "astra gpt 6"}
+	for _, m := range astraModels {
+		t.Run(m, func(t *testing.T) {
+			prof := LookupProfile(m)
+			if prof.Canonical != GPT6AstraModel {
+				t.Errorf("LookupProfile(%q).Canonical = %q, want %q", m, prof.Canonical, GPT6AstraModel)
+			}
+			if prof.Capabilities.ContextWindow != 1000000 {
+				t.Errorf("LookupProfile(%q).Capabilities.ContextWindow = %d, want 1000000", m, prof.Capabilities.ContextWindow)
+			}
+			if prof.Capabilities.MaxOutputTokens != 131072 {
+				t.Errorf("LookupProfile(%q).Capabilities.MaxOutputTokens = %d, want 131072", m, prof.Capabilities.MaxOutputTokens)
+			}
+			if !prof.Capabilities.Thinking {
+				t.Errorf("LookupProfile(%q).Capabilities.Thinking = false, want true", m)
+			}
+		})
+	}
+
+	t.Run("astra-2", func(t *testing.T) {
+		prof := LookupProfile("astra-2")
+		if prof.Canonical == GPT6AstraModel {
+			t.Errorf("LookupProfile('astra-2').Canonical = %q, should not be %q", prof.Canonical, GPT6AstraModel)
+		}
+		if got := NormalizeCodexModelSlug("astra-2"); got == GPT6AstraModel {
+			t.Errorf("NormalizeCodexModelSlug('astra-2') = %q, should not be %q", got, GPT6AstraModel)
+		}
+	})
 }

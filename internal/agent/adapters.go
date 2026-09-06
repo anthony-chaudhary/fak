@@ -26,7 +26,7 @@ func ParseProvider(s string) (Provider, bool) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", "openai", "gpt", "chat-completions", "openai-compatible":
 		return ProviderOpenAI, true
-	case "responses", "responses-api", "openai-responses":
+	case "responses", "responses-api", "openai-responses", "astra":
 		return ProviderOpenAIResponses, true
 	case "anthropic", "claude":
 		return ProviderAnthropic, true
@@ -557,13 +557,14 @@ func (openAIResponsesAdapter) Headers(apiKey string) map[string]string {
 }
 
 type openAIResponsesRequest struct {
-	Model           string                `json:"model"`
-	Input           []openAIResponsesItem `json:"input"`
-	Tools           []json.RawMessage     `json:"tools,omitempty"`
-	ToolChoice      string                `json:"tool_choice,omitempty"`
-	Temperature     *float64              `json:"temperature,omitempty"`
-	MaxOutputTokens *int                  `json:"max_output_tokens,omitempty"`
-	TopP            *float64              `json:"top_p,omitempty"` // Responses API has no `stop`
+	Model           string                    `json:"model"`
+	Input           []openAIResponsesItem     `json:"input"`
+	Tools           []json.RawMessage         `json:"tools,omitempty"`
+	ToolChoice      string                    `json:"tool_choice,omitempty"`
+	Temperature     *float64                  `json:"temperature,omitempty"`
+	MaxOutputTokens *int                      `json:"max_output_tokens,omitempty"`
+	TopP            *float64                  `json:"top_p,omitempty"` // Responses API has no `stop`
+	Reasoning       *openAIResponsesReasoning `json:"reasoning,omitempty"`
 	// Text carries the Responses-API structured-output control. The chat wire's
 	// `response_format` carrier (adapterRequest.ResponseFormat) maps here as
 	// `text.format`: a `json_schema` body is flattened (its inner `json_schema`
@@ -588,6 +589,10 @@ type openAIResponsesRequest struct {
 	// stable leading bytes the prefix cache keys on.
 	// Empty => omit (so a caller that computed no key is byte-for-byte the pre-seam body).
 	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
+}
+
+type openAIResponsesReasoning struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 // openAIResponsesText is the `text` envelope on the Responses API; only its
@@ -672,6 +677,10 @@ func (openAIResponsesAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 	if !r.OmitMaxOutputTokens && r.MaxTokens > 0 {
 		maxOutput = &r.MaxTokens
 	}
+	var reasoning *openAIResponsesReasoning
+	if r.ReasoningEffort != "" {
+		reasoning = &openAIResponsesReasoning{Effort: r.ReasoningEffort}
+	}
 	return marshalWithExtraBody(openAIResponsesRequest{
 		Model:           r.Model,
 		Input:           openAIResponsesInput(r.Messages),
@@ -680,6 +689,7 @@ func (openAIResponsesAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		Temperature:     temp,
 		MaxOutputTokens: maxOutput,
 		TopP:            r.TopP,
+		Reasoning:       reasoning,
 		Text:            responsesText(r.ResponseFormat),
 		Store:           false,
 		Stream:          r.Stream,

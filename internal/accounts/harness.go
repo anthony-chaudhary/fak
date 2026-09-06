@@ -36,7 +36,10 @@ const (
 func NormalizeCodexModelSlug(model string) string {
 	m := strings.TrimSpace(model)
 	switch strings.ToLower(m) {
-	case "gpt-6-astra", "gpt 6 astra", "gpt6astra", "gpt-6", "gpt6", "astra", "openai/gpt-6-astra", "openai/gpt-6", "openai/astra":
+	case "gpt-6-astra", "gpt 6 astra", "gpt6astra", "gpt-6", "gpt6", "astra",
+		"gpt-6 astra", "gpt 6-astra", "gpt6-astra", "astra-gpt-6", "astra gpt 6", "astra gpt-6", "astra-gpt6", "astragpt6",
+		"openai/gpt-6-astra", "openai/gpt-6", "openai/astra", "openai/gpt-6 astra",
+		"openai/astra-gpt-6", "openai/astra gpt 6", "openai/astra-gpt6":
 		return GPT6AstraModel
 	default:
 		return m

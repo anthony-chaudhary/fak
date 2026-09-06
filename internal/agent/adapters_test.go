@@ -1667,6 +1667,7 @@ func TestParseProviderAliases(t *testing.T) {
 		"responses":         ProviderOpenAIResponses,
 		"responses-api":     ProviderOpenAIResponses,
 		"openai-responses":  ProviderOpenAIResponses,
+		"astra":             ProviderOpenAIResponses,
 		"claude":            ProviderAnthropic,
 		"google":            ProviderGemini,
 		"grok":              ProviderXAI,
@@ -2518,6 +2519,35 @@ func TestOpenAIResponsesInputPreservesReasoningContent(t *testing.T) {
 	if asstItem.Type != "message" || asstItem.Role != "assistant" {
 		t.Fatalf("unexpected assistant item: %+v", asstItem)
 	}
+}
+
+func TestOpenAIResponsesReasoningEffortMarshal(t *testing.T) {
+	adapter := openAIResponsesAdapter{}
+
+	t.Run("reasoning effort high", func(t *testing.T) {
+		body, err := adapter.MarshalRequest(adapterRequest{
+			Model:           "gpt-test",
+			ReasoningEffort: "high",
+		})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if !strings.Contains(string(body), `"reasoning":{"effort":"high"}`) {
+			t.Fatalf("expected \"reasoning\":{\"effort\":\"high\"} in body, got %s", body)
+		}
+	})
+
+	t.Run("reasoning effort empty", func(t *testing.T) {
+		body, err := adapter.MarshalRequest(adapterRequest{
+			Model: "gpt-test",
+		})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if strings.Contains(string(body), `"reasoning"`) {
+			t.Fatalf("expected reasoning to be omitted, got %s", body)
+		}
+	})
 }
 
 func TestGeminiThinkingConfigMarshal(t *testing.T) {

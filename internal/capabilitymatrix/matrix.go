@@ -164,6 +164,8 @@ var knownProfiles = map[string]ModelProfile{
 			ExtendedRetention: true,
 			StrictSchema:      true,
 			ResponsesAPI:      true,
+			ContextWindow:     1000000,
+			MaxOutputTokens:   131072,
 		},
 	},
 	"astra": {
@@ -174,6 +176,32 @@ var knownProfiles = map[string]ModelProfile{
 			ExtendedRetention: true,
 			StrictSchema:      true,
 			ResponsesAPI:      true,
+			ContextWindow:     1000000,
+			MaxOutputTokens:   131072,
+		},
+	},
+	"gpt-6": {
+		Slug:      "gpt-6",
+		Canonical: GPT6AstraModel,
+		Capabilities: Capabilities{
+			Thinking:          true,
+			ExtendedRetention: true,
+			StrictSchema:      true,
+			ResponsesAPI:      true,
+			ContextWindow:     1000000,
+			MaxOutputTokens:   131072,
+		},
+	},
+	"astra-gpt-6": {
+		Slug:      "astra-gpt-6",
+		Canonical: GPT6AstraModel,
+		Capabilities: Capabilities{
+			Thinking:          true,
+			ExtendedRetention: true,
+			StrictSchema:      true,
+			ResponsesAPI:      true,
+			ContextWindow:     1000000,
+			MaxOutputTokens:   131072,
 		},
 	},
 	"astra-2": {
@@ -347,7 +375,10 @@ var knownProfiles = map[string]ModelProfile{
 func NormalizeCodexModelSlug(model string) string {
 	m := strings.TrimSpace(model)
 	switch strings.ToLower(m) {
-	case "gpt-6-astra", "gpt 6 astra", "gpt6astra", "gpt-6", "gpt6", "astra", "openai/gpt-6-astra", "openai/gpt-6", "openai/astra":
+	case "gpt-6-astra", "gpt 6 astra", "gpt6astra", "gpt-6", "gpt6", "astra",
+		"gpt-6 astra", "gpt 6-astra", "gpt6-astra", "astra-gpt-6", "astra gpt 6", "astra gpt-6", "astra-gpt6", "astragpt6",
+		"openai/gpt-6-astra", "openai/gpt-6", "openai/astra", "openai/gpt-6 astra",
+		"openai/astra-gpt-6", "openai/astra gpt 6", "openai/astra-gpt6":
 		return GPT6AstraModel
 	default:
 		return m
@@ -378,6 +409,10 @@ func Lookup(model string) Capabilities {
 	if prof, ok := knownProfiles[m]; ok {
 		caps = prof.Capabilities
 	} else if prof, ok := knownProfiles[base]; ok {
+		caps = prof.Capabilities
+	} else if prof, ok := knownProfiles[NormalizeModelSlug(m)]; ok {
+		caps = prof.Capabilities
+	} else if prof, ok := knownProfiles[NormalizeModelSlug(base)]; ok {
 		caps = prof.Capabilities
 	} else {
 		caps = inferCapabilities(m)

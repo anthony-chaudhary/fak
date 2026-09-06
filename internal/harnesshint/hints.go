@@ -146,6 +146,19 @@ var builtins = map[string]modelSpec{
 	"o1-mini":           {canonical: "o1-mini", posture: PostureCostHeavy},
 	"claude-3.0-opus":   {canonical: "claude-3-opus", posture: PostureCostHeavy},
 	"deepseek-reasoner": {canonical: "deepseek-r1", posture: PostureCostHeavy},
+
+	// Astra GPT-6 Frontier Reasoning Models -> PostureCostHeavy
+	"gpt-6-astra": {canonical: "gpt-6-astra", posture: PostureCostHeavy},
+	"gpt-6":       {canonical: "gpt-6-astra", posture: PostureCostHeavy},
+	"astra":       {canonical: "gpt-6-astra", posture: PostureCostHeavy},
+	"astra-gpt-6": {canonical: "gpt-6-astra", posture: PostureCostHeavy},
+	"astra-gpt6":  {canonical: "gpt-6-astra", posture: PostureCostHeavy},
+	"gpt6-astra":  {canonical: "gpt-6-astra", posture: PostureCostHeavy},
+	"gpt6":        {canonical: "gpt-6-astra", posture: PostureCostHeavy},
+	"astra gpt 6": {canonical: "gpt-6-astra", posture: PostureCostHeavy},
+	"gpt 6 astra": {canonical: "gpt-6-astra", posture: PostureCostHeavy},
+	"gpt-6 astra": {canonical: "gpt-6-astra", posture: PostureCostHeavy},
+	"gpt6astra":   {canonical: "gpt-6-astra", posture: PostureCostHeavy},
 }
 
 func defaultTurnsForPosture(p Posture) int {
