@@ -2,8 +2,10 @@ package selfupdatecmd
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -418,4 +420,204 @@ func TestProgressGoCacheOutcomes(t *testing.T) {
 	if gotNonInteractive := buf.String(); gotNonInteractive != wantNonInteractive {
 		t.Fatalf("go-cache outcomes in non-interactive mode = %q, want %q", gotNonInteractive, wantNonInteractive)
 	}
+}
+
+func TestWriteSelfUpdateLogSecondaryStreamNotCorrupted(t *testing.T) {
+	var progressBuf bytes.Buffer
+	var secondaryBuf bytes.Buffer
+
+	oldProgress := selfUpdateProgress
+	oldTerminal := selfUpdateWriterIsTerminal
+	oldWidth := selfUpdateTerminalWidth
+	selfUpdateProgress = &progressBuf
+	selfUpdateWriterIsTerminal = func(w io.Writer) bool { return w == &progressBuf }
+	selfUpdateTerminalWidth = func(_ io.Writer) int { return 80 }
+	setSelfUpdateVerbose(false)
+	resetSelfUpdateProgressForTest()
+
+	t.Cleanup(func() {
+		selfUpdateProgress = oldProgress
+		selfUpdateWriterIsTerminal = oldTerminal
+		selfUpdateTerminalWidth = oldWidth
+		setSelfUpdateVerbose(false)
+		clearSelfUpdateProgressBar()
+		resetSelfUpdateProgressForTest()
+	})
+
+	// 1. Draw active progress bar on authoritative stream.
+	reportSelfUpdateProgress(40, "building fak candidate")
+	if !strings.Contains(progressBuf.String(), "fak self-update · [") {
+		t.Fatalf("expected progress bar on progress stream, got: %q", progressBuf.String())
+	}
+	progressBuf.Reset()
+
+	// 2. Write log to secondary non-progress stream.
+	WriteSelfUpdateLog(&secondaryBuf, "warning: secondary stream message")
+
+	// 3. Verify secondary stream contains ONLY the log message without corruption.
+	gotSecondary := secondaryBuf.String()
+	wantSecondary := "warning: secondary stream message\n"
+	if gotSecondary != wantSecondary {
+		t.Fatalf("secondary stream mismatch: got %q, want %q", gotSecondary, wantSecondary)
+	}
+	if strings.Contains(gotSecondary, "\x1b[2K") {
+		t.Fatalf("secondary stream contains spurious ANSI clear sequence: %q", gotSecondary)
+	}
+	if strings.Contains(gotSecondary, "fak self-update") {
+		t.Fatalf("secondary stream contains misdirected progress bar: %q", gotSecondary)
+	}
+
+	// 4. Verify authoritative progress stream got cleared and redrawn.
+	gotProgress := progressBuf.String()
+	if !strings.HasPrefix(gotProgress, "\r\x1b[2K") {
+		t.Fatalf("authoritative stream missing clear sequence: %q", gotProgress)
+	}
+	wantBar := formatSelfUpdateProgressBar(40, "building fak candidate", 80)
+	if !strings.Contains(gotProgress, wantBar) {
+		t.Fatalf("authoritative stream missing redrawn progress bar: got %q, want containing %q", gotProgress, wantBar)
+	}
+
+	// 5. Test with ProgressReporter targeting authoritative stream.
+	progressBuf.Reset()
+	secondaryBuf.Reset()
+	reporter := NewProgressReporter(&progressBuf, false)
+	reporter.isTerminal = func(w io.Writer) bool { return w == &progressBuf }
+	reporter.termWidth = func(_ io.Writer) int { return 80 }
+
+	reporter.Report(60, "linking companion")
+	progressBuf.Reset()
+
+	WriteSelfUpdateLog(&secondaryBuf, "second notice on secondary stream")
+	gotSec2 := secondaryBuf.String()
+	if gotSec2 != "second notice on secondary stream\n" {
+		t.Fatalf("secondary stream mismatch with ProgressReporter: got %q, want %q", gotSec2, "second notice on secondary stream\n")
+	}
+	if strings.Contains(gotSec2, "\x1b[2K") || strings.Contains(gotSec2, "fak self-update") {
+		t.Fatalf("secondary stream corrupted with ProgressReporter: %q", gotSec2)
+	}
+
+	gotProg2 := progressBuf.String()
+	wantBar2 := formatSelfUpdateProgressBar(60, "linking companion", 80)
+	if !strings.Contains(gotProg2, wantBar2) {
+		t.Fatalf("authoritative stream missing redrawn bar with ProgressReporter: got %q, want containing %q", gotProg2, wantBar2)
+	}
+}
+
+func TestProgressConcurrentReportAndWriteSelfUpdateLog(t *testing.T) {
+	var progressBuf bytes.Buffer
+	var secondaryBuf bytes.Buffer
+
+	oldProgress := selfUpdateProgress
+	oldTerminal := selfUpdateWriterIsTerminal
+	oldWidth := selfUpdateTerminalWidth
+	selfUpdateProgress = &progressBuf
+	selfUpdateWriterIsTerminal = func(_ io.Writer) bool { return true }
+	selfUpdateTerminalWidth = func(_ io.Writer) int { return 80 }
+	setSelfUpdateVerbose(false)
+	resetSelfUpdateProgressForTest()
+
+	t.Cleanup(func() {
+		selfUpdateProgress = oldProgress
+		selfUpdateWriterIsTerminal = oldTerminal
+		selfUpdateTerminalWidth = oldWidth
+		setSelfUpdateVerbose(false)
+		clearSelfUpdateProgressBar()
+		resetSelfUpdateProgressForTest()
+	})
+
+	reporter := NewProgressReporter(&progressBuf, false)
+
+	const nWorkers = 6
+	const nIters = 40
+
+	var wg sync.WaitGroup
+	wg.Add(nWorkers * 4)
+
+	// Goroutines calling reporter.Report()
+	for i := 0; i < nWorkers; i++ {
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < nIters; j++ {
+				reporter.Report((id*15+j)%100, fmt.Sprintf("reporter op %d-%d", id, j))
+			}
+		}(i)
+	}
+
+	// Goroutines calling WriteSelfUpdateLog()
+	for i := 0; i < nWorkers; i++ {
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < nIters; j++ {
+				if j%2 == 0 {
+					WriteSelfUpdateLog(&progressBuf, fmt.Sprintf("log progress %d-%d", id, j))
+				} else {
+					WriteSelfUpdateLog(&secondaryBuf, fmt.Sprintf("log secondary %d-%d", id, j))
+				}
+			}
+		}(i)
+	}
+
+	// Goroutines calling reportSelfUpdateProgress()
+	for i := 0; i < nWorkers; i++ {
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < nIters; j++ {
+				reportSelfUpdateProgress((id*10+j)%99, fmt.Sprintf("central op %d-%d", id, j))
+			}
+		}(i)
+	}
+
+	// Goroutines calling Clear() and Settle()
+	for i := 0; i < nWorkers; i++ {
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < nIters; j++ {
+				if j%2 == 0 {
+					reporter.Clear()
+				} else {
+					reporter.Settle()
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+}
+
+func TestProgressReporterConcurrentReportClearSettle(t *testing.T) {
+	var buf bytes.Buffer
+	reporter := NewProgressReporter(&buf, false)
+	reporter.isTerminal = func(_ io.Writer) bool { return true }
+	reporter.termWidth = func(_ io.Writer) int { return 80 }
+
+	const nWorkers = 8
+	const nIters = 50
+
+	var wg sync.WaitGroup
+	wg.Add(nWorkers * 3)
+
+	for i := 0; i < nWorkers; i++ {
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < nIters; j++ {
+				reporter.Report(j%100, fmt.Sprintf("reporting %d-%d", id, j))
+			}
+		}(i)
+
+		go func() {
+			defer wg.Done()
+			for j := 0; j < nIters; j++ {
+				reporter.Clear()
+			}
+		}()
+
+		go func() {
+			defer wg.Done()
+			for j := 0; j < nIters; j++ {
+				reporter.Settle()
+			}
+		}()
+	}
+
+	wg.Wait()
 }

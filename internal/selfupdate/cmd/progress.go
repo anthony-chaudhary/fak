@@ -35,9 +35,17 @@ var (
 )
 
 var (
-	selfUpdateVerboseMu sync.Mutex
-	selfUpdateVerbose   bool
+	selfUpdateProgressMu sync.Mutex
+	selfUpdateVerboseMu  sync.Mutex
+	selfUpdateVerbose    bool
 )
+
+func authoritativeProgressWriter() io.Writer {
+	if selfUpdateProgress != nil {
+		return selfUpdateProgress
+	}
+	return os.Stderr
+}
 
 func setSelfUpdateVerbose(v bool) {
 	selfUpdateVerboseMu.Lock()
@@ -57,7 +65,7 @@ func isInteractiveProgressBar() bool {
 	if isSelfUpdateVerbose() {
 		return false
 	}
-	return selfUpdateWriterIsTerminal(selfUpdateProgress)
+	return selfUpdateWriterIsTerminal(authoritativeProgressWriter())
 }
 
 // formatSelfUpdateProgressBar formats the single-line progress bar text:
@@ -102,6 +110,8 @@ func drawSelfUpdateProgressBar(w io.Writer, percent int, operation string) {
 
 // clearSelfUpdateProgressBar erases the single-line progress bar if one was drawn.
 func clearSelfUpdateProgressBar() {
+	selfUpdateProgressMu.Lock()
+	defer selfUpdateProgressMu.Unlock()
 	selfUpdateProgressState.Lock()
 	defer selfUpdateProgressState.Unlock()
 	clearSelfUpdateProgressBarLocked()
@@ -109,37 +119,39 @@ func clearSelfUpdateProgressBar() {
 
 func clearSelfUpdateProgressBarLocked() {
 	if selfUpdateProgressState.barDrawn || isInteractiveProgressBar() {
-		fmt.Fprint(selfUpdateProgress, "\r\x1b[2K")
+		fmt.Fprint(authoritativeProgressWriter(), "\r\x1b[2K")
 		selfUpdateProgressState.barDrawn = false
 	}
 }
 
 // settleSelfUpdateProgressBar finalizes the single-line progress bar with a newline if drawn.
 func settleSelfUpdateProgressBar() {
+	selfUpdateProgressMu.Lock()
+	defer selfUpdateProgressMu.Unlock()
 	selfUpdateProgressState.Lock()
 	defer selfUpdateProgressState.Unlock()
 	if selfUpdateProgressState.barDrawn && isInteractiveProgressBar() {
-		fmt.Fprintln(selfUpdateProgress)
+		fmt.Fprintln(authoritativeProgressWriter())
 		selfUpdateProgressState.barDrawn = false
 	}
 }
 
 // WriteSelfUpdateLog multiplexes a log line onto w while de-conflicting with any active single-line progress bar.
-// If an in-place progress bar is currently active, it clears the bar (\r\x1b[2K), writes the log message
-// with a trailing newline, and redraws the progress bar below.
+// If an in-place progress bar is currently active, it clears the bar (\r\x1b[2K) on the authoritative progress stream,
+// writes the log message to w with a trailing newline, and redraws the progress bar on the authoritative progress stream.
 func WriteSelfUpdateLog(w io.Writer, msg string) {
+	progressStream := authoritativeProgressWriter()
 	if w == nil {
-		w = selfUpdateProgress
-		if w == nil {
-			w = os.Stderr
-		}
+		w = progressStream
 	}
+	selfUpdateProgressMu.Lock()
+	defer selfUpdateProgressMu.Unlock()
 	selfUpdateProgressState.Lock()
 	defer selfUpdateProgressState.Unlock()
 
 	active := selfUpdateProgressState.barDrawn
 	if active {
-		fmt.Fprint(w, "\r\x1b[2K")
+		fmt.Fprint(progressStream, "\r\x1b[2K")
 		selfUpdateProgressState.barDrawn = false
 	}
 	if !strings.HasSuffix(msg, "\n") {
@@ -147,12 +159,13 @@ func WriteSelfUpdateLog(w io.Writer, msg string) {
 	}
 	fmt.Fprint(w, msg)
 	if active {
-		drawSelfUpdateProgressBar(w, selfUpdateProgressState.percent, selfUpdateProgressState.operation)
+		drawSelfUpdateProgressBar(progressStream, selfUpdateProgressState.percent, selfUpdateProgressState.operation)
 	}
 }
 
 // ProgressReporter provides a direct API for managing progress bar state and display.
 type ProgressReporter struct {
+	mu         sync.Mutex
 	w          io.Writer
 	verbose    bool
 	isTerminal func(io.Writer) bool
@@ -162,6 +175,9 @@ type ProgressReporter struct {
 
 // NewProgressReporter constructs a reporter targeting w.
 func NewProgressReporter(w io.Writer, verbose bool) *ProgressReporter {
+	if w == nil {
+		w = authoritativeProgressWriter()
+	}
 	return &ProgressReporter{
 		w:          w,
 		verbose:    verbose,
@@ -170,13 +186,24 @@ func NewProgressReporter(w io.Writer, verbose bool) *ProgressReporter {
 	}
 }
 
+func (r *ProgressReporter) writer() io.Writer {
+	if r.w != nil {
+		return r.w
+	}
+	return authoritativeProgressWriter()
+}
+
+func (r *ProgressReporter) isAuthoritative() bool {
+	return r.writer() == authoritativeProgressWriter()
+}
+
 // IsInteractive reports whether interactive progress bar display is active.
 func (r *ProgressReporter) IsInteractive() bool {
 	if r.verbose {
 		return false
 	}
 	if r.isTerminal != nil {
-		return r.isTerminal(r.w)
+		return r.isTerminal(r.writer())
 	}
 	return false
 }
@@ -184,31 +211,71 @@ func (r *ProgressReporter) IsInteractive() bool {
 // Report updates progress. In interactive TTY mode it draws the single progress bar;
 // otherwise it emits standard progress lines.
 func (r *ProgressReporter) Report(percent int, operation string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	selfUpdateProgressMu.Lock()
+	defer selfUpdateProgressMu.Unlock()
+	selfUpdateProgressState.Lock()
+	defer selfUpdateProgressState.Unlock()
+
+	w := r.writer()
 	if r.IsInteractive() {
 		width := 80
 		if r.termWidth != nil {
-			width = r.termWidth(r.w)
+			width = r.termWidth(w)
 		}
 		bar := formatSelfUpdateProgressBar(percent, operation, width)
-		fmt.Fprintf(r.w, "\r\x1b[2K%s", bar)
+		fmt.Fprintf(w, "\r\x1b[2K%s", bar)
 		r.barDrawn = true
+		if r.isAuthoritative() {
+			selfUpdateProgressState.percent = percent
+			selfUpdateProgressState.operation = operation
+			selfUpdateProgressState.barDrawn = true
+		}
 		return
 	}
-	fmt.Fprintf(r.w, "self-update: progress=%d%% operation=%q\n", percent, strings.TrimSpace(operation))
+	fmt.Fprintf(w, "self-update: progress=%d%% operation=%q\n", percent, strings.TrimSpace(operation))
+	if r.isAuthoritative() {
+		selfUpdateProgressState.percent = percent
+		selfUpdateProgressState.operation = operation
+		selfUpdateProgressState.barDrawn = false
+	}
 }
 
 // Clear erases the progress bar if drawn.
 func (r *ProgressReporter) Clear() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	selfUpdateProgressMu.Lock()
+	defer selfUpdateProgressMu.Unlock()
+	selfUpdateProgressState.Lock()
+	defer selfUpdateProgressState.Unlock()
+
+	w := r.writer()
 	if r.barDrawn || r.IsInteractive() {
-		fmt.Fprint(r.w, "\r\x1b[2K")
+		fmt.Fprint(w, "\r\x1b[2K")
 		r.barDrawn = false
+		if r.isAuthoritative() {
+			selfUpdateProgressState.barDrawn = false
+		}
 	}
 }
 
 // Settle finishes the progress bar cleanly by printing a trailing newline.
 func (r *ProgressReporter) Settle() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	selfUpdateProgressMu.Lock()
+	defer selfUpdateProgressMu.Unlock()
+	selfUpdateProgressState.Lock()
+	defer selfUpdateProgressState.Unlock()
+
+	w := r.writer()
 	if r.barDrawn && r.IsInteractive() {
-		fmt.Fprintln(r.w)
+		fmt.Fprintln(w)
 		r.barDrawn = false
+		if r.isAuthoritative() {
+			selfUpdateProgressState.barDrawn = false
+		}
 	}
 }
