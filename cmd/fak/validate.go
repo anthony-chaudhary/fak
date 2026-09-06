@@ -176,6 +176,12 @@ func cmdValidate(argv []string) { os.Exit(runValidate(os.Stdout, os.Stderr, argv
 
 // runValidate checks committed ref plus only explicitly-owned working-tree paths.
 func runValidate(stdout, stderr io.Writer, argv []string) int {
+	for _, arg := range argv {
+		if strings.HasPrefix(arg, "--acceptance") || strings.HasPrefix(arg, "-acceptance") {
+			return runValidateAcceptanceCLI(stdout, stderr, argv)
+		}
+	}
+
 	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")

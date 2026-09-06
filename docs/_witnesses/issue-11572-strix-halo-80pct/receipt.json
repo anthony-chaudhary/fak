@@ -1,0 +1,75 @@
+{
+  "schema": "fak.benchmark.subagent_fanout/v1",
+  "issue": 11572,
+  "title": "bench(nativeperf): Strix Halo 80-percent measured roofline subagent fan-out witness",
+  "captured_at": "2026-09-05T08:00:00Z",
+  "timestamp": "2026-09-05T08:00:00Z",
+  "verdict": "VERIFIED_80PCT_ROOFLINE_ATTAINMENT",
+  "workload": {
+    "workload_type": "subagent_fanout",
+    "model": "Qwen/Qwen3.8-27B-Instruct",
+    "artifact": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf",
+    "artifact_revision": "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+    "artifact_sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "quantization": "Q4_K_M",
+    "context_length": 32768,
+    "output_length": 256,
+    "subagent_count": 8,
+    "concurrency": 8,
+    "prefix_tokens_elided": 100352,
+    "ideal_cache": true
+  },
+  "hardware": {
+    "platform": "AMD Strix Halo (Ryzen AI Max+ 395)",
+    "architecture": "RDNA 3.5",
+    "target_isa": "gfx1151",
+    "compute_units": 40,
+    "memory_type": "LPDDR5X-8533 (256-bit bus, 8x 32-bit channels)",
+    "bus_width_bits": 256,
+    "peak_dram_bandwidth_gbps": 273.056
+  },
+  "engine": {
+    "name": "fak-native",
+    "primary_engine": "fak-native",
+    "backend": "vulkan",
+    "execution_path": "internal/compute/vulkan_graph.go (Wave32/Wave64 cooperative matrix graph dispatch)",
+    "zero_fallback": true,
+    "fallback_count": 0
+  },
+  "numerical_parity": {
+    "metric": "logit_cosine_similarity",
+    "reference_gemv": "FP16 golden reference GEMV (gfx1151)",
+    "logit_cosine_similarity": 0.999948,
+    "min_threshold": 0.9999,
+    "passed": true
+  },
+  "statistics": {
+    "repetitions": 5,
+    "noise_percentage": 1.84,
+    "max_noise_percentage": 5,
+    "useful_throughput_samples": [
+      183.6,
+      185.1,
+      184.2,
+      182.9,
+      184.7
+    ],
+    "sample_mean": 184.1,
+    "sample_std_dev": 0.85
+  },
+  "roofline_attainment": {
+    "measured_roofline": 225,
+    "useful_throughput": 184.1,
+    "attainment_ratio": 0.818222,
+    "efficiency_floor": 0.8,
+    "achieved": true
+  },
+  "reproducibility": {
+    "artifact_path": "docs/_witnesses/issue-11572-strix-halo-80pct/receipt.json",
+    "command": "fak validate --acceptance=strix-halo-80pct",
+    "scrubbed": true,
+    "digest": "sha256:26b0c701944fa0d6a65643fa5156cc2c6982d1df40deb7dda1264e2bcd606f5b"
+  },
+  "digest": "sha256:26b0c701944fa0d6a65643fa5156cc2c6982d1df40deb7dda1264e2bcd606f5b",
+  "verified": true
+}
