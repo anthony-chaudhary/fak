@@ -70,14 +70,42 @@ type Job struct {
 
 	// CreatedUnixNano / UpdatedUnixNano are registry bookkeeping, stamped by the
 	// mutating helpers so a reload can show when a job last changed.
-	CreatedUnixNano int64      `json:"created_unix_nano,omitempty"`
-	UpdatedUnixNano int64      `json:"updated_unix_nano,omitempty"`
-	WakeAtUnixNano  int64      `json:"wake_at_unix_nano,omitempty"`
-	Duty            *DutyCycle `json:"duty_cycle,omitempty"`
+	CreatedUnixNano int64          `json:"created_unix_nano,omitempty"`
+	UpdatedUnixNano int64          `json:"updated_unix_nano,omitempty"`
+	WakeAtUnixNano  int64          `json:"wake_at_unix_nano,omitempty"`
+	Duty            *DutyCycle     `json:"duty_cycle,omitempty"`
+	Execution       *ExecutionSpec `json:"execution,omitempty"`
 }
 
 // JobID is the job's identity, sourced from its schedule.
 func (j Job) JobID() string { return j.Schedule.JobID }
+
+// Executable reports whether the job carries a valid execution specification.
+func (j Job) Executable() bool {
+	return j.Execution != nil && j.Execution.Validate() == nil
+}
+
+// Validate checks that the job's schedule, state, and optional duty cycle or
+// execution specification are valid.
+func (j Job) Validate() error {
+	if err := j.Schedule.Validate(); err != nil {
+		return err
+	}
+	if j.Duty != nil {
+		if err := j.Duty.Validate(); err != nil {
+			return err
+		}
+	}
+	if j.Execution != nil {
+		if err := j.Execution.Validate(); err != nil {
+			return err
+		}
+	}
+	if !ValidJobState(j.State) {
+		return fmt.Errorf("state = %q, want armed|stopped|disabled (never defaulted)", j.State)
+	}
+	return nil
+}
 
 // Registry is the full persisted job set, keyed by job id.
 type Registry struct {
@@ -100,6 +128,11 @@ func (r Registry) Validate() error {
 		}
 		if job.Duty != nil {
 			if err := job.Duty.Validate(); err != nil {
+				return fmt.Errorf("loop registry job %q: %w", key, err)
+			}
+		}
+		if job.Execution != nil {
+			if err := job.Execution.Validate(); err != nil {
 				return fmt.Errorf("loop registry job %q: %w", key, err)
 			}
 		}
@@ -196,6 +229,11 @@ func (r *Registry) Put(job Job, at time.Time) error {
 	}
 	if job.Duty != nil {
 		if err := job.Duty.Validate(); err != nil {
+			return err
+		}
+	}
+	if job.Execution != nil {
+		if err := job.Execution.Validate(); err != nil {
 			return err
 		}
 	}
