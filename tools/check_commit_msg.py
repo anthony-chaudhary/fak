@@ -76,6 +76,12 @@ VERBS = {
     # commit-gardening surface itself, #1326) names a real, checkable change. The gate was
     # abstaining on "advise"/"nudge"/"recommend" despite each leading a concrete diff.
     "advise", "nudge", "recommend", "warn", "remind", "hint",
+    # Imperative base forms the DOS commit-audit referee witnesses as a code effect
+    # (dos_witness_verbs.go dosCodeEffectVerbs) that fak's gate was REJECTING as ungradeable.
+    "accumulate", "arm", "attribute", "author", "bind", "bridge", "carry",
+    "consume", "dequant", "dequantize", "derive", "downgrade", "floor", "hook",
+    "invert", "memoize", "optimise", "price", "refuse", "require", "reserve",
+    "reset", "show", "splice", "synthesize",
     # A concrete imperative verb that names a checkable change but was absent from the harvest,
     # so `fak commit --preview` red-flagged a real subject the mutating `fak commit` accepted
     # and scored 100/A — the preview/mutation grade divergence of #3912. "isolate" leads a
@@ -83,8 +89,235 @@ VERBS = {
     # commitVerbs set (internal/hooks/gate_commitmsg.go).
     "isolate", "retain", "quarantine", "scavenge",
 }
-SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(\([^)]+\))?(?P<bang>!)?:\s+(?P<rest>.+)$")
+SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(?P<scope>\([^)]+\))?(?P<bang>!)?:\s+(?P<rest>.+)$")
 EXEMPT_PREFIXES = ("Merge ", "Revert ", "fixup! ", "squash! ", "amend! ")
+
+# verbSynonyms maps common unsupported imperative verbs or synonyms to their canonical
+# recognized counterpart in VERBS (#11811).
+VERB_SYNONYMS = {
+    "synchronize": "sync",
+    "synchronise": "sync",
+    "inspect":     "verify",
+    "examine":     "verify",
+    "audit":       "witness",
+    "probe":       "sample",
+    "survey":      "sample",
+    "monitor":     "log",
+    "terminate":   "kill",
+    "persist":     "record",
+    "store":       "cache",
+    "broadcast":   "publish",
+    "notify":      "emit",
+    "signal":      "emit",
+    "modify":      "update",
+    "alter":       "update",
+    "change":      "update",
+    "adjust":      "tune",
+    "reorganize":  "restructure",
+    "reorganise":  "restructure",
+    "rearrange":   "restructure",
+    "reconfigure": "tune",
+    "configure":   "set",
+    "truncate":    "cap",
+    "clip":        "cap",
+    "clamp":       "bound",
+    "intercept":   "gate",
+    "prohibit":    "prevent",
+    "disallow":    "deny",
+    "forbid":      "deny",
+    "unblock":     "allow",
+    "bypass":      "ignore",
+    "discard":     "drop",
+    "abandon":     "drop",
+    "gather":      "accumulate",
+    "collect":     "accumulate",
+    "rerun":       "run",
+    "retry":       "run",
+    "teardown":    "reap",
+    "coalesce":    "consolidate",
+    "orchestrate": "dispatch",
+    "instantiate": "create",
+    "construct":   "build",
+    "setup":       "scaffold",
+    "bootstrap":   "scaffold",
+    "initialize":  "introduce",
+    "initialise":  "introduce",
+    "init":        "introduce",
+}
+
+# unsupportedImperativeVerbs is a set of known imperative verbs that are not in VERBS
+# and lack an unambiguous 1:1 rewrite, but are genuine verbs rather than nouns (#11811).
+UNSUPPORTED_IMPERATIVE_VERBS = {
+    "calculate", "compute", "evaluate", "estimate", "quantify", "measure",
+    "abort", "halt", "stop", "pause", "resume", "restart",
+    "retrieve", "fetch", "query", "poll", "listen",
+    "trigger", "invoke", "call", "fire",
+    "parse", "tokenize", "compile", "assemble", "interpret",
+    "convert", "transform", "translate", "encode", "decode",
+    "marshal", "unmarshal", "deserialize",
+    "allocate", "deallocate", "free",
+    "attach", "detach", "unbind",
+    "connect", "disconnect", "reconnect",
+    "override", "overwrite",
+    "inject", "eject", "insert",
+    "instrument", "trace", "profile",
+    "compress", "decompress", "deflate", "inflate",
+    "provision", "deprovision",
+    "schedule", "reschedule", "defer", "delay",
+    "throttle", "rate-limit",
+    "unlock", "unmount", "mount",
+    "clone", "copy",
+    "coordinate",
+    "escape", "unescape",
+    "redirect", "reroute",
+    "rearchitect",
+    "mitigate", "alleviate", "relieve", "offload",
+    "distribute", "partition", "shard",
+    "wrap", "unwrap",
+    "suppress", "silence",
+    "invalidate",
+    "check", "observe", "watch",
+    "clean", "cleanup",
+}
+
+NEAR_MISS_TYPES = {
+    "feature": "feat", "features": "feat",
+    "fixes": "fix", "fixed": "fix", "bugfix": "fix", "bugfixes": "fix", "hotfix": "fix",
+    "doc": "docs", "documentation": "docs",
+    "tests": "test", "testing": "test",
+    "chores": "chore",
+    "refactoring": "refactor", "refactored": "refactor",
+    "performance": "perf",
+    "builds": "build",
+    "styling": "style", "styles": "style",
+    "reverts": "revert", "reverted": "revert",
+}
+
+IRREGULAR_VERB_BASES = {
+    "built": "build", "made": "make", "ran": "run", "kept": "keep",
+    "drove": "drive", "driven": "drive", "fed": "feed", "showed": "show", "shown": "show",
+}
+
+
+def de_double_consonant(s: str) -> str:
+    n = len(s)
+    if n >= 2 and s[-1] == s[-2]:
+        return s[:-1]
+    return s
+
+
+def imperative_base_forms(w: str) -> list[str]:
+    out = [w]
+
+    def add(s: str):
+        if s and s != w and s not in out:
+            out.append(s)
+
+    if w.endswith("ies"):
+        add(w[:-3] + "y")
+    elif w.endswith("es"):
+        add(w[:-2])
+        add(w[:-1])
+    elif w.endswith("s"):
+        add(w[:-1])
+
+    if w.endswith("ied"):
+        add(w[:-3] + "y")
+    elif w.endswith("ed"):
+        base = w[:-2]
+        add(base)
+        add(w[:-1])
+        add(de_double_consonant(base))
+
+    if w.endswith("ing"):
+        base = w[:-3]
+        add(base)
+        add(base + "e")
+        add(de_double_consonant(base))
+
+    if w in IRREGULAR_VERB_BASES:
+        add(IRREGULAR_VERB_BASES[w])
+
+    return out
+
+
+def lookup_verb_synonym(w: str) -> tuple[str, bool]:
+    if w in VERB_SYNONYMS:
+        return VERB_SYNONYMS[w], True
+    for cand in imperative_base_forms(w):
+        if cand in VERB_SYNONYMS:
+            return VERB_SYNONYMS[cand], True
+    return "", False
+
+
+def is_unsupported_imperative_verb(w: str) -> bool:
+    if w in UNSUPPORTED_IMPERATIVE_VERBS or w in VERB_SYNONYMS:
+        return True
+    for cand in imperative_base_forms(w):
+        if cand in UNSUPPORTED_IMPERATIVE_VERBS or cand in VERB_SYNONYMS:
+            return True
+    return False
+
+
+def lint_subject_verb(first: str) -> tuple[bool, str]:
+    if first in VERBS:
+        return True, ""
+    syn, ok = lookup_verb_synonym(first)
+    if ok:
+        return False, f"description leads with unsupported imperative verb '{first}' (consider '{syn}' or a recognized verb: add/fix/implement/…)."
+    if is_unsupported_imperative_verb(first):
+        return False, f"description leads with unsupported imperative verb '{first}', not a recognized verb. Lead with a recognized verb (add/fix/implement/…)."
+    return False, f"description leads with '{first}', not a recognized verb — the witness ABSTAINs on a noun-led subject. Lead with a verb (add/fix/implement/…)."
+
+
+def imperative_base(w: str) -> str:
+    for cand in imperative_base_forms(w):
+        if cand in VERBS:
+            return cand
+    return ""
+
+
+def suggest_gradeable_subject(subject: str) -> str:
+    subject = subject.strip()
+    if not subject:
+        return ""
+    for p in EXEMPT_PREFIXES:
+        if subject.startswith(p):
+            return ""
+    m = SUBJECT_RE.match(subject)
+    if not m:
+        return ""
+    typ = m.group("type")
+    bang = m.group("bang") or ""
+    scope = m.group("scope") or ""
+    rest = m.group("rest").strip()
+
+    if typ not in TYPES:
+        canon = NEAR_MISS_TYPES.get(typ)
+        if not canon:
+            return ""
+        typ = canon
+
+    first_word = re.split(r"[\s:]", rest, maxsplit=1)[0]
+    first_lower = first_word.lower()
+    if first_lower not in VERBS:
+        if first_word.strip("`*\"'") != first_word:
+            return ""
+        base = imperative_base(first_lower)
+        if not base:
+            syn, ok = lookup_verb_synonym(first_lower)
+            if ok:
+                base = syn
+        if not base:
+            return ""
+        rest = base + rest[len(first_word):]
+
+    rebuilt = f"{typ}{scope}{bang}: {rest}"
+    if rebuilt == subject:
+        return ""
+    if verdict(rebuilt) is None:
+        return rebuilt
+    return ""
 
 
 def check_conflict_banners(text: str) -> str | None:
@@ -265,9 +498,9 @@ def verdict(text: str, root: str | None = None, commit_ref: str | None = None):
     if m.group("type") not in TYPES:
         return f"unknown type '{m.group('type')}' (use one of: {'/'.join(TYPES)})"
     first = re.split(r"[\s:]", m.group("rest").strip(), maxsplit=1)[0].lower().strip("`*\"'")
-    if first not in VERBS:
-        return (f"description leads with '{first}', not a recognized verb — the witness "
-                f"ABSTAINs on a noun-led subject. Lead with a verb (add/fix/implement/…).")
+    ok, why = lint_subject_verb(first)
+    if not ok:
+        return why
     return None
 
 
@@ -313,6 +546,9 @@ def main() -> int:
     subject = first_line(raw)
     if subject:
         print(f"  subject: {subject!r}", file=sys.stderr)
+        suggestion = suggest_gradeable_subject(subject)
+        if suggestion:
+            print(f"  suggest: {suggestion}", file=sys.stderr)
     if "is not `type" in why or "unknown type" in why or "recognized verb" in why:
         print("  shape:   type(scope): <verb> <what>   e.g. fix(public): redact lab hostname", file=sys.stderr)
     return 1
