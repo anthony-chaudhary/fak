@@ -927,6 +927,76 @@ func TestObserverSemanticScreen_BarrierTimeout_FailClosedOnUnknownTools(t *testi
 	}
 }
 
+func TestObserverSemanticScreen_BarrierTimeout_PreservesFlaggedQuarantine(t *testing.T) {
+	pool := NewPool(Config{
+		WorkerCount:        1,
+		QueueSize:          16,
+		BarrierTimeout:     10 * time.Millisecond,
+		RequireWitnessDiff: true,
+	})
+	_ = pool.Start()
+	defer pool.Close()
+
+	screen := NewObserverSemanticScreen(pool)
+	ctx := context.Background()
+
+	// 1. Churn flagged session
+	sessionChurnID := "sess-screen-preserve-quarantine-churn"
+	sessChurn := pool.getOrCreateSession(sessionChurnID)
+	sessChurn.mu.Lock()
+	sessChurn.flaggedChurn = true
+	sessChurn.mu.Unlock()
+
+	atomic.StoreInt64(&sessChurn.inFlight, 1)
+	defer atomic.StoreInt64(&sessChurn.inFlight, 0)
+
+	callChurn := &abi.ToolCall{
+		Tool:    "Read",
+		TraceID: sessionChurnID,
+	}
+	adviceChurn := screen.ScreenResult(ctx, callChurn, []byte("content"))
+	if adviceChurn.Disposition != abi.ScreenQuarantine {
+		t.Fatalf("expected ScreenQuarantine on barrier timeout for churn-flagged session, got %v", adviceChurn.Disposition)
+	}
+	if adviceChurn.Reason != abi.ReasonIntegrityRefuted {
+		t.Fatalf("expected ReasonIntegrityRefuted for churn-flagged session, got %v", adviceChurn.Reason)
+	}
+	if !sessChurn.isFlagged() {
+		t.Fatal("expected session to remain flagged after barrier timeout")
+	}
+
+	// 2. Regress flagged session
+	sessionRegressID := "sess-screen-preserve-quarantine-regress"
+	sessRegress := pool.getOrCreateSession(sessionRegressID)
+	sessRegress.mu.Lock()
+	sessRegress.flaggedRegress = true
+	sessRegress.mu.Unlock()
+
+	atomic.StoreInt64(&sessRegress.inFlight, 1)
+	defer atomic.StoreInt64(&sessRegress.inFlight, 0)
+
+	callRegress := &abi.ToolCall{
+		Tool:    "Grep",
+		TraceID: sessionRegressID,
+	}
+	adviceRegress := screen.ScreenResult(ctx, callRegress, []byte("content"))
+	if adviceRegress.Disposition != abi.ScreenQuarantine {
+		t.Fatalf("expected ScreenQuarantine on barrier timeout for regress-flagged session, got %v", adviceRegress.Disposition)
+	}
+	if adviceRegress.Reason != abi.ReasonIntegrityRefuted {
+		t.Fatalf("expected ReasonIntegrityRefuted for regress-flagged session, got %v", adviceRegress.Reason)
+	}
+	if !sessRegress.isFlagged() {
+		t.Fatal("expected regress session to remain flagged after barrier timeout")
+	}
+	sessRegress.mu.Lock()
+	if sessRegress.kvPrefixWarm {
+		sessRegress.mu.Unlock()
+		t.Fatal("expected regress session kvPrefixWarm to remain false after barrier timeout")
+	}
+	sessRegress.mu.Unlock()
+}
+
 func TestObserverSemanticScreen_ScreenResult_ContextDeadlineExceeded(t *testing.T) {
 	pool := NewPool(Config{
 		WorkerCount:        1,
@@ -1116,6 +1186,58 @@ func TestObserveSyncBarrier_InFlightTaskWait(t *testing.T) {
 	}
 	if elapsed < 4*time.Millisecond {
 		t.Fatalf("expected barrier to wait for in-flight task, elapsed %s", elapsed)
+	}
+}
+
+func TestObserveSyncBarrier_ReadOnlyBypassesInFlightWait(t *testing.T) {
+	p := NewPool(Config{
+		WorkerCount:    1,
+		QueueSize:      16,
+		BarrierTimeout: 100 * time.Millisecond,
+	})
+	_ = p.Start()
+	defer p.Close()
+
+	ctx := context.Background()
+	sessionID := "sess-readonly-bypass-inflight"
+	sess := p.getOrCreateSession(sessionID)
+
+	// Simulate an active in-flight async task that does not finish
+	atomic.StoreInt64(&sess.inFlight, 1)
+	defer atomic.StoreInt64(&sess.inFlight, 0)
+
+	readTools := []string{"Read", "Grep", "Glob", "fak_read"}
+	for _, tool := range readTools {
+		obs := StepObservation{
+			SessionID: sessionID,
+			Tool:      tool,
+			Args:      "path/to/target",
+			Result:    "sample content",
+		}
+
+		start := time.Now()
+		res, err := p.ObserveSyncBarrier(ctx, obs)
+		elapsed := time.Since(start)
+
+		if err != nil {
+			t.Fatalf("expected read-only tool %s to succeed without timeout error, got %v", tool, err)
+		}
+		if elapsed >= 10*time.Millisecond {
+			t.Fatalf("expected read-only tool %s to bypass in-flight wait (<10ms), took %s", tool, elapsed)
+		}
+		if res.BarrierLatency > 2*time.Millisecond {
+			t.Fatalf("expected BarrierLatency < 2ms for read-only bypass on %s, got %s", tool, res.BarrierLatency)
+		}
+		if res.StepVerdict != STEP_ADVANCE {
+			t.Fatalf("expected STEP_ADVANCE for %s, got %s", tool, res.StepVerdict)
+		}
+	}
+
+	if got := p.BarrierTimeouts(); got != 0 {
+		t.Fatalf("expected BarrierTimeouts to be 0 for read-only bypasses, got %d", got)
+	}
+	if got := p.DetailedStats().BarrierTimeouts; got != 0 {
+		t.Fatalf("expected DetailedStats().BarrierTimeouts to be 0, got %d", got)
 	}
 }
 

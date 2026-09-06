@@ -432,13 +432,14 @@ func (p *Pool) ObserveSyncBarrier(ctx context.Context, obs StepObservation) (Ste
 
 	sess := p.getOrCreateSession(obs.SessionID)
 
-	// Mutating operations wait for concurrent async exploration turns in this session to settle.
+	// Mutating operations or flagged sessions wait for concurrent async exploration turns in this session to settle.
+	// Read-only non-flagged observations bypass the wait loop entirely.
 	timeout := p.cfg.BarrierTimeout
 	if timeout <= 0 {
 		timeout = 50 * time.Millisecond
 	}
 	deadline := time.Now().Add(timeout)
-	if atomic.LoadInt64(&sess.inFlight) > 0 {
+	if (obs.IsMutating() || !obs.IsReadOnly() || sess.isFlagged()) && atomic.LoadInt64(&sess.inFlight) > 0 {
 		pollInterval := 50 * time.Microsecond
 		if timeout < pollInterval {
 			pollInterval = timeout
@@ -452,6 +453,46 @@ func (p *Pool) ObserveSyncBarrier(ctx context.Context, obs StepObservation) (Ste
 			}
 			if time.Now().After(deadline) {
 				atomic.AddInt64(&p.barrierTimeouts, 1)
+				sess.mu.Lock()
+				wasChurn := sess.flaggedChurn
+				wasRegress := sess.flaggedRegress
+				wasFlagged := wasChurn || wasRegress
+				sess.mu.Unlock()
+
+				sess.evaluate(p.cfg, &obs)
+				obs.BarrierLatency = time.Since(start)
+				obs.Duration = obs.BarrierLatency
+
+				if obs.CachedPrefix {
+					atomic.AddInt64(&p.cacheHits, 1)
+				} else {
+					atomic.AddInt64(&p.cacheMisses, 1)
+				}
+
+				if wasFlagged {
+					sess.mu.Lock()
+					sess.flaggedChurn = wasChurn
+					sess.flaggedRegress = wasRegress
+					if wasRegress {
+						sess.kvPrefixWarm = false
+						obs.CachedPrefix = false
+						obs.StepVerdict = StepRegress
+						if obs.Reason == "" || obs.Reason == "step completed forward progress" {
+							obs.Reason = "step refused due to regression loop (barrier timeout)"
+						}
+					} else if wasChurn {
+						obs.StepVerdict = StepChurn
+						if obs.Reason == "" || obs.Reason == "step completed forward progress" {
+							obs.Reason = "step refused due to churn loop (barrier timeout)"
+						}
+					}
+					if len(sess.history) > 0 {
+						sess.history[len(sess.history)-1].StepVerdict = obs.StepVerdict
+						sess.history[len(sess.history)-1].Reason = obs.Reason
+					}
+					sess.mu.Unlock()
+				}
+
 				return obs, ErrBarrierTimeout
 			}
 			select {
