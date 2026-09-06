@@ -8,9 +8,6 @@ import (
 	"testing"
 )
 
-// mintChain stamps a sound, verifiable hash chain over the given content rows
-// (Seq/PrevHash/Hash), the fixture builder for the pure Verify tests — the same
-// shape cmd/fak's mintChain uses for the decision journal.
 func mintChain(content []Row) []Row {
 	out := make([]Row, 0, len(content))
 	prev := ""
@@ -24,8 +21,6 @@ func mintChain(content []Row) []Row {
 	return out
 }
 
-// ffOnlyHistory is a fast-forward-only trunk history: each transition continues
-// the recorded head (old_sha == the prior new_sha) and never revisits a target.
 func ffOnlyHistory() []Row {
 	return mintChain([]Row{
 		{Ref: "refs/heads/main", OldSHA: "A", NewSHA: "B"},
@@ -45,12 +40,10 @@ func TestVerify_FastForwardOnlyHistoryPasses(t *testing.T) {
 }
 
 func TestVerify_ForcePushGapFailsNamingRef(t *testing.T) {
-	// A force-push: main advanced A->B->C, then was reset back to B and moved to X.
-	// The forced transition's old_sha (B) no longer continues the recorded head (C).
 	rows := mintChain([]Row{
 		{Ref: "refs/heads/main", OldSHA: "A", NewSHA: "B"},
 		{Ref: "refs/heads/main", OldSHA: "B", NewSHA: "C"},
-		{Ref: "refs/heads/main", OldSHA: "B", NewSHA: "X"}, // non-ff: old_sha=B, head=C
+		{Ref: "refs/heads/main", OldSHA: "B", NewSHA: "X"},
 	})
 	n, err := Verify(rows)
 	if err == nil {
@@ -68,12 +61,10 @@ func TestVerify_ForcePushGapFailsNamingRef(t *testing.T) {
 }
 
 func TestVerify_RewindToPriorTargetFailsNamingRef(t *testing.T) {
-	// A force-push that honestly records old_sha == head but rewinds new_sha back to
-	// a commit the ref already held (B): contiguous, yet not fast-forward.
 	rows := mintChain([]Row{
 		{Ref: "refs/heads/main", OldSHA: "A", NewSHA: "B"},
 		{Ref: "refs/heads/main", OldSHA: "B", NewSHA: "C"},
-		{Ref: "refs/heads/main", OldSHA: "C", NewSHA: "B"}, // rewind: revisits prior target B
+		{Ref: "refs/heads/main", OldSHA: "C", NewSHA: "B"},
 	})
 	_, err := Verify(rows)
 	if err == nil {
@@ -85,8 +76,6 @@ func TestVerify_RewindToPriorTargetFailsNamingRef(t *testing.T) {
 }
 
 func TestVerify_TamperedRowDetected(t *testing.T) {
-	// A sound chain whose middle row's new_sha is edited AFTER the hashes were
-	// stamped: the hash no longer recomputes, so the chain breaks at that row.
 	rows := ffOnlyHistory()
 	rows[1].NewSHA = "TAMPERED"
 	n, err := Verify(rows)
@@ -101,17 +90,30 @@ func TestVerify_TamperedRowDetected(t *testing.T) {
 	}
 }
 
+func TestVerify_BrokenPrevHashDetected(t *testing.T) {
+	rows := ffOnlyHistory()
+	rows[1].PrevHash = "broken_prev"
+	n, err := Verify(rows)
+	if err == nil {
+		t.Fatalf("broken prev_hash must fail Verify")
+	}
+	if !strings.Contains(err.Error(), "broken chain") {
+		t.Fatalf("error must indicate broken chain, got %q", err.Error())
+	}
+	if n != 1 {
+		t.Fatalf("Verify should break at index 1, got n=%d", n)
+	}
+}
+
 func TestVerify_SequenceGapDetected(t *testing.T) {
 	rows := ffOnlyHistory()
-	rows = append(rows[:1], rows[2:]...) // drop the 2nd row: seq jumps 1 -> 3
+	rows = append(rows[:1], rows[2:]...)
 	if _, err := Verify(rows); err == nil || !strings.Contains(err.Error(), "sequence gap") {
 		t.Fatalf("a dropped row must fail as a sequence gap, got err=%v", err)
 	}
 }
 
 func TestVerify_IndependentRefsDoNotCollide(t *testing.T) {
-	// Two refs interleaved in one log: each is fast-forward-only on its own, so the
-	// per-ref invariant must not conflate B(main) with B(release).
 	rows := mintChain([]Row{
 		{Ref: "refs/heads/main", OldSHA: "A", NewSHA: "B"},
 		{Ref: "refs/heads/release", OldSHA: "P", NewSHA: "Q"},
@@ -145,13 +147,18 @@ func TestAppendThenVerifyRoundTrips(t *testing.T) {
 	}
 }
 
-// stubSigner is a deterministic Signer for the seam test — no real key, just
-// proof AppendSigned attributes and signs and that the signed row still verifies.
 type stubSigner struct{ id string }
 
 func (s stubSigner) Identity() string { return s.id }
 func (s stubSigner) Sign(hash string) (string, error) {
 	return "sig:" + hash[:8], nil
+}
+
+type errSigner struct{}
+
+func (errSigner) Identity() string { return "err-key" }
+func (errSigner) Sign(hash string) (string, error) {
+	return "", fmt.Errorf("signature failure")
 }
 
 func TestAppendSigned_AttributesAndStillVerifies(t *testing.T) {
@@ -163,10 +170,49 @@ func TestAppendSigned_AttributesAndStillVerifies(t *testing.T) {
 	if row.Signer != "op-key-1" || row.Sig == "" {
 		t.Fatalf("signed row must carry identity + signature, got signer=%q sig=%q", row.Signer, row.Sig)
 	}
-	// The signature is over the hash and NOT part of the pre-image, so the chain
-	// still verifies with the attribution chained in.
 	if _, err := VerifyFile(path); err != nil {
 		t.Fatalf("a signed log must still verify its hash chain, got %v", err)
+	}
+}
+
+func TestAppendSigned_SignError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rsl.jsonl")
+	_, err := AppendSigned(path, Row{Ref: "refs/heads/main", OldSHA: "A", NewSHA: "B"}, errSigner{})
+	if err == nil {
+		t.Fatalf("expected error from failing signer")
+	}
+	if !strings.Contains(err.Error(), "signature failure") {
+		t.Fatalf("expected signature failure in error message, got %v", err)
+	}
+}
+
+func TestReadRows_NonExistentFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nonexistent.jsonl")
+	rows, err := ReadRows(path)
+	if err != nil || rows != nil {
+		t.Fatalf("non-existent file must return nil, nil; got rows=%v err=%v", rows, err)
+	}
+}
+
+func TestRecoverHeadAndReadRows_TornLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "torn.jsonl")
+	content := "{\"seq\":1,\"ref\":\"refs/heads/main\",\"old_sha\":\"A\",\"new_sha\":\"B\",\"hash\":\"h1\"}\n{\"seq\":2,\"ref\":\"refs/heads/main\","
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write torn file: %v", err)
+	}
+	rows, err := ReadRows(path)
+	if err != nil {
+		t.Fatalf("ReadRows with torn line should not error, got %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("want 1 well-formed row, got %d", len(rows))
+	}
+	seq, hash, err := recoverHead(path)
+	if err != nil {
+		t.Fatalf("recoverHead with torn line should not error, got %v", err)
+	}
+	if seq != 1 || hash != "h1" {
+		t.Fatalf("recoverHead: want seq=1 hash=h1, got seq=%d hash=%q", seq, hash)
 	}
 }
 
