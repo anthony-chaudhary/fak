@@ -107,9 +107,10 @@ func (e *LockBusyError) Unwrap() error { return ErrLockBusy }
 
 // LockOptions configures the advisory commit lock.
 type LockOptions struct {
-	Path    string        // "" => <Dir>/.git/fak-commit.lock
-	Timeout time.Duration // 0 => DefaultLockTimeout
-	NoWait  bool          // fail LOCK_BUSY immediately instead of waiting
+	Path    string          // "" => <Dir>/.git/fak-commit.lock
+	Timeout time.Duration   // 0 => DefaultLockTimeout
+	NoWait  bool            // fail LOCK_BUSY immediately instead of waiting
+	Context context.Context // optional cancellation context for lock wait (#11844)
 }
 
 // DefaultLockTimeout bounds the wait for the advisory lock before LOCK_BUSY.
@@ -162,6 +163,23 @@ type Options struct {
 	// AuthorityValidator is an optional custom validator func for authority checking (#11849).
 	// When non-nil, it is called immediately before staging paths.
 	AuthorityValidator AuthorityValidator
+
+	// PostValidationTimeout bounds total post-validation execution (review, lock wait,
+	// staging, commit, verification, push) with phase evidence (#11844).
+	// When 0, DefaultPostValidationTimeout applies if the context has no shorter deadline.
+	PostValidationTimeout time.Duration
+
+	// Timeout is an alias/shorthand for PostValidationTimeout (#11844).
+	Timeout time.Duration
+
+	// PhaseTimeout bounds any individual post-validation phase execution (#11844).
+	PhaseTimeout time.Duration
+
+	// OnPhase is an optional progression callback invoked whenever a phase begins, completes, or stalls (#11844).
+	OnPhase func(PhaseReceipt)
+
+	// PhaseReporter is an optional progression reporter interface (#11844).
+	PhaseReporter PhaseReporter
 }
 
 // CommitOptions is an alias for Options for callers using that naming convention (#11849).
@@ -275,6 +293,12 @@ type Result struct {
 	// distinct from Score (outcome quality) and always populated by CommitWith; a
 	// refusal/no-op still carries it with UNSCORED legs and retained timing.
 	Velocity *CommitVelocity `json:"velocity,omitempty"`
+	// Phase records the active or terminal commit phase (#11844).
+	Phase CommitPhase `json:"phase,omitempty"`
+	// Phases records the sequence of phase receipts for progression evidence (#11844).
+	Phases []PhaseReceipt `json:"phases,omitempty"`
+	// PhaseEvidence provides structured phase progression and stall evidence (#11844).
+	PhaseEvidence *PhaseEvidence `json:"phase_evidence,omitempty"`
 }
 
 // Outcome returns the typed authority outcome if authority was evaluated, or OutcomeRefused
@@ -330,6 +354,15 @@ func buildCommitArgs(signOff bool, msgPath string, paths []string) []string {
 // a fake Runner + fake LockFunc exercise the whole step-ordered algorithm — including the
 // race remedy — with no git and no repo. See the package doc for the discipline it encodes.
 func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (res Result, err error) {
+	tracker := newPhaseTracker(opts, DefaultPostValidationTimeout)
+	if opts.PostValidationTimeout > 0 {
+		tracker.deadline = opts.PostValidationTimeout
+	} else if opts.Timeout > 0 {
+		tracker.deadline = opts.Timeout
+	} else if d, ok := ctx.Deadline(); ok {
+		tracker.deadline = time.Until(d)
+	}
+
 	// Authoritative clock for the effect-qualified velocity legs (#4241). It shares
 	// opts.Now with the lock-hold timer so a test's injected clock drives both, and is
 	// read ONLY after the lock is acquired — never on a pre-lock refusal path — so a
@@ -343,6 +376,7 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	var localElapsed, pushElapsed time.Duration
 	var localStamped, pushStamped bool
 	defer func() {
+		tracker.Finalize(&res)
 		res = ScoreResult(res)
 		// Legs that never reached their qualifying boundary still retain timing: an
 		// unstamped leg is measured to the terminal instant so a refusal/race reports
@@ -365,24 +399,29 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 
 	// (0) Normalize + validate — pure, no git. Share gitgate's ONE path rule so the
 	// executor and the policy agree on what a repo path is.
+	tracker.Start(PhaseValidation)
 	paths, ok := normalizePaths(opts.Paths)
 	res = Result{Paths: paths}
 	if !ok || len(paths) == 0 {
 		res.Reason = ReasonNoPath
+		tracker.End(PhaseValidation, PhaseStatusFailed, ReasonNoPath, "no valid paths given")
 		return res, nil
 	}
 	if strings.TrimSpace(opts.Message) == "" {
 		res.Reason = ReasonEmptyMessage
+		tracker.End(PhaseValidation, PhaseStatusFailed, ReasonEmptyMessage, "commit message empty")
 		return res, nil
 	}
 	if reason, refused := GuardCheckerPin(opts.Dir, opts.CheckerBaseline); refused {
 		res.Reason = reason
 		res.Detail = "declared checker bytes drifted since task declaration"
+		tracker.End(PhaseValidation, PhaseStatusFailed, reason, res.Detail)
 		return res, nil
 	}
 	if release, admitted := opts.Window.TryAcquire(); !admitted {
 		res.Reason = ReasonWindowFull
 		res.Detail = "adaptive commit window is full; retry after an in-flight writer finishes"
+		tracker.End(PhaseValidation, PhaseStatusFailed, ReasonWindowFull, res.Detail)
 		return res, nil
 	} else if release != nil {
 		defer func() { release(res) }()
@@ -394,10 +433,38 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	// (the window-release defer above still fires); the rationale lives on precommitGates.
 	if r, refused, gerr := precommitGates(ctx, run, opts, trunk, paths, res); gerr != nil || refused {
 		res = r
+		if refused {
+			tracker.End(PhaseValidation, PhaseStatusFailed, res.Reason, res.Detail)
+		} else {
+			tracker.End(PhaseValidation, PhaseStatusFailed, "", gerr.Error())
+		}
 		return res, gerr
 	} else {
 		res = r
 		paths = res.Paths
+		tracker.End(PhaseValidation, PhaseStatusPassed, "", "")
+	}
+
+	// Post-validation bounded context setup (#11844).
+	postTimeout := opts.PostValidationTimeout
+	if postTimeout <= 0 && opts.Timeout > 0 {
+		postTimeout = opts.Timeout
+	}
+	postCtx := ctx
+	var postCancel context.CancelFunc
+	if postTimeout > 0 {
+		postCtx, postCancel = context.WithTimeout(ctx, postTimeout)
+		defer postCancel()
+	} else if _, hasDeadline := ctx.Deadline(); !hasDeadline && DefaultPostValidationTimeout > 0 {
+		postCtx, postCancel = context.WithTimeout(ctx, DefaultPostValidationTimeout)
+		defer postCancel()
+	}
+
+	withPhaseTimeout := func(parent context.Context) (context.Context, context.CancelFunc) {
+		if opts.PhaseTimeout > 0 {
+			return context.WithTimeout(parent, opts.PhaseTimeout)
+		}
+		return parent, func() {}
 	}
 
 	var recordPathspec bool
@@ -411,24 +478,40 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	}()
 
 	if reviewEnabled(opts.Review) {
-		review := runPreCommitReview(ctx, run, opts.Dir, paths, opts.Review)
+		tracker.Start(PhaseReview)
+		phaseCtx, phaseCancel := withPhaseTimeout(postCtx)
+		review := runPreCommitReview(phaseCtx, run, opts.Dir, paths, opts.Review)
+		phaseCancel()
 		res.Review = &review
 		if review.Verdict == modelroute.ReviewRefute {
 			res.Reason = ReasonReviewRefuted
 			res.Detail = review.Reason
+			tracker.End(PhaseReview, PhaseStatusFailed, ReasonReviewRefuted, review.Reason)
 			return res, nil
 		}
+		tracker.End(PhaseReview, PhaseStatusPassed, "", "")
 	}
 
 	// (5) Acquire the advisory lock (bounded). Busy is a value, not an error.
-	releaseLock, lockStart, busyReason, lockErr := acquireCommitLock(lock, opts, &res)
+	tracker.Start(PhaseLockWait)
+	phaseCtx, phaseCancel := withPhaseTimeout(postCtx)
+	releaseLock, lockStart, busyReason, lockErr := acquireCommitLock(phaseCtx, lock, opts, &res)
+	phaseCancel()
 	if lockErr != nil {
+		tracker.End(PhaseLockWait, PhaseStatusFailed, "", lockErr.Error())
 		return res, lockErr
 	}
 	if busyReason != "" {
+		status := PhaseStatusFailed
+		if postCtx.Err() != nil {
+			status = PhaseStatusTimeout
+			tracker.MarkStalled(PhaseLockWait, busyReason)
+		}
+		tracker.End(PhaseLockWait, status, busyReason, res.Detail)
 		res.Reason = busyReason
 		return res, nil
 	}
+	tracker.End(PhaseLockWait, PhaseStatusPassed, "", "")
 	defer releaseLock()
 	// The velocity clock starts at lock acquisition (#4241): only work that held the
 	// lock has an effect boundary to time, so velStart is set past the busy return.
@@ -439,19 +522,29 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	// tree mid-window. Held is a retryable value (WRITER_LEASE_HELD), not an error; on
 	// success the lease is held for the rest of the mutation window so the refusal is
 	// symmetric — a concurrent sync apply is refused while this commit writes.
+	tracker.Start(PhaseWriterLease)
 	releaseWriterLease, leaseHeldDetail, wlErr := acquireWorktreeWriterLease(opts)
 	if wlErr != nil {
+		tracker.End(PhaseWriterLease, PhaseStatusFailed, "", wlErr.Error())
 		return res, wlErr
 	}
 	if leaseHeldDetail != "" {
 		res.Reason = ReasonWriterLeaseHeld
 		res.Detail = leaseHeldDetail
+		tracker.End(PhaseWriterLease, PhaseStatusFailed, ReasonWriterLeaseHeld, leaseHeldDetail)
 		return res, nil
 	}
+	tracker.End(PhaseWriterLease, PhaseStatusPassed, "", "")
 	defer releaseWriterLease()
 
 	// (6) Capture HEAD, then commit by pathspec with the message in a file.
-	if sha, herr := headSHA(ctx, run, opts.Dir); herr != nil {
+	if sha, herr := headSHA(postCtx, run, opts.Dir); herr != nil {
+		if postCtx.Err() != nil {
+			res.Reason = ReasonCommitStalled
+			res.Detail = "head sha timed out: " + postCtx.Err().Error()
+			tracker.MarkStalled(PhaseLockWait, ReasonCommitStalled)
+			return res, nil
+		}
 		return res, herr
 	} else {
 		res.HeadBefore = sha
@@ -461,21 +554,42 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	// before staging paths. Refuses stale, foreign or unavailable authority before
 	// any index mutation or staging occurs, leaving index and HEAD completely unchanged.
 	authConfigured := (opts.AuthorityFence != nil && !opts.AuthorityFence.IsZero()) || opts.AuthorityValidator != nil
-	if authReceipt, refused := checkAuthorityFence(ctx, run, opts.Dir, opts.AuthorityFence, opts.AuthorityValidator, paths); refused {
-		res.Reason = authReceipt.Reason
-		res.Detail = authReceipt.Detail
-		res.Authority = &authReceipt
-		return res, nil
-	} else if authReceipt.Outcome == OutcomeAdmitted && authConfigured {
-		res.Authority = &authReceipt
+	if authConfigured {
+		tracker.Start(PhaseAuthority)
+		phaseCtx, phaseCancel := withPhaseTimeout(postCtx)
+		authReceipt, refused := checkAuthorityFence(phaseCtx, run, opts.Dir, opts.AuthorityFence, opts.AuthorityValidator, paths)
+		phaseCancel()
+		if refused {
+			res.Reason = authReceipt.Reason
+			res.Detail = authReceipt.Detail
+			res.Authority = &authReceipt
+			tracker.End(PhaseAuthority, PhaseStatusFailed, authReceipt.Reason, authReceipt.Detail)
+			return res, nil
+		} else if authReceipt.Outcome == OutcomeAdmitted {
+			res.Authority = &authReceipt
+		}
+		tracker.End(PhaseAuthority, PhaseStatusPassed, "", "")
 	}
 
-	if augmented, changed, aerr := autoIndexDatedNotes(ctx, run, opts.Dir, paths); aerr != nil {
+	tracker.Start(PhaseIndexNotes)
+	phaseCtx, phaseCancel = withPhaseTimeout(postCtx)
+	augmented, changed, aerr := autoIndexDatedNotes(phaseCtx, run, opts.Dir, paths)
+	phaseCancel()
+	if aerr != nil {
+		if postCtx.Err() != nil || errors.Is(aerr, context.DeadlineExceeded) || errors.Is(aerr, context.Canceled) {
+			res.Reason = ReasonCommitStalled
+			res.Detail = "auto-index notes timed out: " + postCtx.Err().Error()
+			tracker.End(PhaseIndexNotes, PhaseStatusTimeout, ReasonCommitStalled, res.Detail)
+			tracker.MarkStalled(PhaseIndexNotes, ReasonCommitStalled)
+			return res, nil
+		}
+		tracker.End(PhaseIndexNotes, PhaseStatusFailed, "", aerr.Error())
 		return res, fmt.Errorf("safecommit: auto-index notes: %w", aerr)
 	} else if changed {
 		paths = augmented
 		res.Paths = append([]string(nil), paths...)
 	}
+	tracker.End(PhaseIndexNotes, PhaseStatusPassed, "", "")
 
 	// Stage EXACTLY the requested paths, inside the lock, with an explicit pathspec — never
 	// an unscoped `git add -A`/`.` (which would sweep a peer's tree). `--all` is deliberately
@@ -483,38 +597,88 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	// including a path already removed from the index by `git rm`, without touching any other
 	// dirty file. The post-commit assertion (step 7) remains the authority — a peer who raced
 	// between this add and the commit is caught there.
+	tracker.Start(PhaseStage)
 	addArgs := append([]string{"add", "--all", "--"}, paths...)
-	if reason, detail, aerr := runLockRidingMutation(ctx, run, opts.Dir, addArgs); aerr != nil {
+	phaseCtx, phaseCancel = withPhaseTimeout(postCtx)
+	reason, detail, aerr := runLockRidingMutation(phaseCtx, run, opts.Dir, addArgs)
+	phaseCancel()
+	if aerr != nil {
+		if postCtx.Err() != nil {
+			res.Reason = ReasonCommitStalled
+			res.Detail = "staging paths timed out: " + postCtx.Err().Error()
+			tracker.End(PhaseStage, PhaseStatusTimeout, ReasonCommitStalled, res.Detail)
+			tracker.MarkStalled(PhaseStage, ReasonCommitStalled)
+			return res, nil
+		}
+		tracker.End(PhaseStage, PhaseStatusFailed, "", aerr.Error())
 		return res, aerr
 	} else if reason != "" {
 		res.Reason = reason
 		res.Detail = detail
+		status := PhaseStatusFailed
+		if reason == ReasonCommitStalled || postCtx.Err() != nil {
+			status = PhaseStatusTimeout
+			tracker.MarkStalled(PhaseStage, reason)
+		}
+		tracker.End(PhaseStage, status, reason, detail)
 		return res, nil
 	}
+	tracker.End(PhaseStage, PhaseStatusPassed, "", "")
 
+	tracker.Start(PhaseCommit)
 	msgPath, cleanup, err := writeMessageFile(opts.Message)
 	if err != nil {
+		tracker.End(PhaseCommit, PhaseStatusFailed, "", err.Error())
 		return res, fmt.Errorf("safecommit: write message file: %w", err)
 	}
 	defer cleanup()
 
 	commitArgs := buildCommitArgs(opts.SignOff, msgPath, paths)
-	if reason, detail, cerr := runLockRidingMutation(ctx, run, opts.Dir, commitArgs); cerr != nil {
+	phaseCtx, phaseCancel = withPhaseTimeout(postCtx)
+	reason, detail, cerr := runLockRidingMutation(phaseCtx, run, opts.Dir, commitArgs)
+	phaseCancel()
+	if cerr != nil {
+		if postCtx.Err() != nil {
+			res.Reason = ReasonCommitStalled
+			res.Detail = "git commit timed out: " + postCtx.Err().Error()
+			tracker.End(PhaseCommit, PhaseStatusTimeout, ReasonCommitStalled, res.Detail)
+			tracker.MarkStalled(PhaseCommit, ReasonCommitStalled)
+			return res, nil
+		}
+		tracker.End(PhaseCommit, PhaseStatusFailed, "", cerr.Error())
 		return res, cerr
 	} else if reason != "" {
 		res.Reason = reason
 		res.Detail = detail
+		status := PhaseStatusFailed
+		if reason == ReasonCommitStalled || postCtx.Err() != nil {
+			status = PhaseStatusTimeout
+			tracker.MarkStalled(PhaseCommit, reason)
+		}
+		tracker.End(PhaseCommit, status, reason, detail)
 		return res, nil
 	}
+	tracker.End(PhaseCommit, PhaseStatusPassed, "", "")
 
-	verification, verr := verifyCommittedEffect(ctx, run, opts, paths, &res)
+	tracker.Start(PhaseVerify)
+	phaseCtx, phaseCancel = withPhaseTimeout(postCtx)
+	verification, verr := verifyCommittedEffect(phaseCtx, run, opts, paths, &res)
+	phaseCancel()
 	if verification.record {
 		recordPathspec = true
 		recordVerdict, recordReason, recordAssertion = verification.verdict, verification.reason, verification.assertion
 	}
 	if verr != nil || verification.stop {
+		status := PhaseStatusFailed
+		if res.Reason == ReasonCommitStalled || postCtx.Err() != nil {
+			status = PhaseStatusTimeout
+			tracker.MarkStalled(PhaseVerify, res.Reason)
+		}
+		tracker.End(PhaseVerify, status, res.Reason, res.Detail)
 		return res, verr
 	}
+	tracker.End(PhaseVerify, PhaseStatusPassed, "", "")
+
 	// Local effect boundary reached: stamp the local velocity leg at the verified-commit
 	// instant (#4241), before the lock is released and any push is attempted.
 	localElapsed, localStamped = now().Sub(velStart), true
@@ -532,7 +696,21 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	// safesync.SafePush so transient transport/non-ff races get the same retry and
 	// integrate-through-`fak sync apply` guidance as `fak sync push`. We never pull --rebase
 	// --autostash (it strands .git/rebase-merge).
-	res, err = applyVerifiedPush(ctx, run, opts, trunk, res)
+	if opts.Push {
+		tracker.Start(PhasePush)
+		phaseCtx, phaseCancel = withPhaseTimeout(postCtx)
+		res, err = applyVerifiedPush(phaseCtx, run, opts, trunk, res)
+		phaseCancel()
+		if err != nil {
+			tracker.End(PhasePush, PhaseStatusFailed, "", err.Error())
+		} else if res.Reason == ReasonPushRejected || res.Reason == ReasonCommitStalled {
+			tracker.End(PhasePush, PhaseStatusFailed, res.Reason, res.Detail)
+		} else {
+			tracker.End(PhasePush, PhaseStatusPassed, "", "")
+		}
+	} else {
+		res, err = applyVerifiedPush(postCtx, run, opts, trunk, res)
+	}
 	// Push effect boundary reached only on a verified push: stamp the push velocity leg
 	// when the commit actually landed on the remote (#4241). A rejected push leaves the
 	// leg unstamped, so it retains terminal timing but stays UNSCORED.
@@ -551,6 +729,11 @@ type commitVerification struct {
 // verifyCommittedEffect performs the post-commit path, symlink, and message assertions.
 func verifyCommittedEffect(ctx context.Context, run Runner, opts Options, paths []string, res *Result) (commitVerification, error) {
 	if sha, err := headSHA(ctx, run, opts.Dir); err != nil {
+		if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			res.Reason = ReasonCommitStalled
+			res.Detail = "head sha timed out: " + ctx.Err().Error()
+			return commitVerification{record: true, verdict: witness.VerdictAssertFail, reason: ReasonCommitStalled, assertion: "verification-timeout", stop: true}, nil
+		}
 		return commitVerification{}, err
 	} else {
 		res.SHA = sha
@@ -559,6 +742,11 @@ func verifyCommittedEffect(ctx context.Context, run Runner, opts Options, paths 
 
 	landed, _, err := run(ctx, opts.Dir, "diff-tree", "--no-commit-id", "--name-only", "--no-renames", "-r", "HEAD")
 	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			res.Reason = ReasonCommitStalled
+			res.Detail = "verify diff-tree timed out: " + ctx.Err().Error()
+			return commitVerification{record: true, verdict: witness.VerdictAssertFail, reason: ReasonCommitStalled, assertion: "verification-timeout", stop: true}, nil
+		}
 		return commitVerification{}, fmt.Errorf("safecommit: git not executable: %w", err)
 	}
 	if extra := racedExtra(landed, paths); len(extra) > 0 {
@@ -575,9 +763,19 @@ func verifyCommittedEffect(ctx context.Context, run Runner, opts Options, paths 
 	}
 	landedMsg, code, err := run(ctx, opts.Dir, "log", "-1", "--format=%B")
 	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			res.Reason = ReasonCommitStalled
+			res.Detail = "verify commit message timed out: " + ctx.Err().Error()
+			return commitVerification{record: true, verdict: witness.VerdictAssertFail, reason: ReasonCommitStalled, assertion: "verification-timeout", stop: true}, nil
+		}
 		return commitVerification{}, fmt.Errorf("safecommit: git not executable: %w", err)
 	}
 	if code != 0 {
+		if ctx.Err() != nil {
+			res.Reason = ReasonCommitStalled
+			res.Detail = "verify commit message timed out: " + ctx.Err().Error()
+			return commitVerification{record: true, verdict: witness.VerdictAssertFail, reason: ReasonCommitStalled, assertion: "verification-timeout", stop: true}, nil
+		}
 		res.Reason = ReasonMessageRace
 		res.Detail = "could not read landed commit message for verification; commit left intact for review, not pushed"
 		return commitVerification{record: true, verdict: witness.VerdictAssertFail, reason: ReasonMessageRace, assertion: "committed-message-readable=false", stop: true}, nil
@@ -623,8 +821,73 @@ func applyVerifiedPush(ctx context.Context, run Runner, opts Options, trunk stri
 // CommitWith so the executor core stays under its ceiling; res is a pointer to the
 // caller's named result so the release closure records LockHoldNS exactly where the
 // original in-function closure did.
-func acquireCommitLock(lock LockFunc, opts Options, res *Result) (releaseLock func(), lockStart time.Time, busyReason string, err error) {
-	unlock, err := lock(opts.Lock)
+func acquireCommitLock(ctx context.Context, lock LockFunc, opts Options, res *Result) (releaseLock func(), lockStart time.Time, busyReason string, err error) {
+	waitStart := time.Now()
+
+	lockOpts := opts.Lock
+	if lockOpts.Context == nil {
+		lockOpts.Context = ctx
+	}
+
+	if ctx.Err() != nil {
+		deadline := lockOpts.Timeout
+		if deadline <= 0 {
+			deadline = DefaultLockTimeout
+		}
+		probe := ProbeLock(lockOpts.Path)
+		res.LockWait = &LockWaitReceipt{
+			ElapsedNS:      0,
+			DeadlineNS:     deadline.Nanoseconds(),
+			HolderPID:      probe.HolderPID,
+			HolderAlive:    probe.Alive,
+			HolderStale:    probe.Stale,
+			HolderForeign:  probe.Foreign,
+			LockAgeSeconds: probe.AgeSeconds,
+		}
+		res.Detail = "lock acquisition cancelled or deadline exceeded before acquire: " + ctx.Err().Error()
+		return nil, time.Time{}, ReasonLockBusy, nil
+	}
+
+	type lockResult struct {
+		unlock func()
+		err    error
+	}
+	ch := make(chan lockResult, 1)
+	go func() {
+		u, e := lock(lockOpts)
+		ch <- lockResult{unlock: u, err: e}
+	}()
+
+	var unlock func()
+	select {
+	case <-ctx.Done():
+		go func() {
+			lr := <-ch
+			if lr.unlock != nil {
+				lr.unlock()
+			}
+		}()
+		deadline := lockOpts.Timeout
+		if deadline <= 0 {
+			deadline = DefaultLockTimeout
+		}
+		probe := ProbeLock(lockOpts.Path)
+		receipt := LockWaitReceipt{
+			ElapsedNS:      time.Since(waitStart).Nanoseconds(),
+			DeadlineNS:     deadline.Nanoseconds(),
+			HolderPID:      probe.HolderPID,
+			HolderAlive:    probe.Alive,
+			HolderStale:    probe.Stale,
+			HolderForeign:  probe.Foreign,
+			LockAgeSeconds: probe.AgeSeconds,
+		}
+		res.LockWait = &receipt
+		res.Detail = "lock acquisition stalled/timed out: " + receipt.Detail()
+		return nil, time.Time{}, ReasonLockBusy, nil
+	case lr := <-ch:
+		unlock, err = lr.unlock, lr.err
+	}
+
 	if err != nil {
 		if errors.Is(err, ErrLockBusy) {
 			var busy *LockBusyError
@@ -639,10 +902,12 @@ func acquireCommitLock(lock LockFunc, opts Options, res *Result) (releaseLock fu
 		}
 		return nil, time.Time{}, "", fmt.Errorf("safecommit: lock: %w", err)
 	}
+
 	now := opts.Now
 	if now == nil {
 		now = time.Now
 	}
+
 	// lockStart is the lock-acquisition instant: it anchors both the lock-hold timer
 	// and the velocity legs' start (#4241), so the clock is read exactly once here and
 	// never before the lock is held.
@@ -670,7 +935,13 @@ func acquireCommitLock(lock LockFunc, opts Options, res *Result) (releaseLock fu
 // reserved for a genuine hook refusal. The returned err is non-nil only when git itself
 // could not be executed; on success both reason and err are empty.
 func runLockRidingMutation(ctx context.Context, run Runner, dir string, args []string) (reason, detail string, err error) {
+	if ctx.Err() != nil {
+		return ReasonCommitStalled, "git mutation aborted: " + ctx.Err().Error(), nil
+	}
 	out, code, rerr := runRidingLockContention(ctx, run, dir, args...)
+	if ctx.Err() != nil && (rerr != nil || code != 0) {
+		return ReasonCommitStalled, "git mutation timed out: " + ctx.Err().Error(), nil
+	}
 	// Stale-index-lock auto-recovery (#3915): contention that outlives the in-place
 	// retries and names the INDEX lock may be a crashed writer's abandoned lock,
 	// which never clears on its own and would otherwise force a manual `rm`. Reap it
@@ -691,6 +962,9 @@ func runLockRidingMutation(ctx context.Context, run Runner, dir string, args []s
 // anything else is the halt-class HOOK_REFUSED.
 func classifyMutation(out string, code int, rerr error) (reason, detail string, err error) {
 	if rerr != nil {
+		if errors.Is(rerr, context.DeadlineExceeded) || errors.Is(rerr, context.Canceled) {
+			return ReasonCommitStalled, "git mutation timed out: " + rerr.Error(), nil
+		}
 		return "", "", fmt.Errorf("safecommit: git not executable: %w", rerr)
 	}
 	if code == 0 {
@@ -791,7 +1065,7 @@ func precommitGates(ctx context.Context, run Runner, opts Options, trunk string,
 				isSanctionedWorker = true
 			} else if cwd, err := os.Getwd(); err == nil && workerworktree.IsWorkerWorktree(cwd) {
 				isSanctionedWorker = true
-			} else if isSanctionedWorkerWorktreeDir(opts.Dir) || isSanctionedWorkerWorktreeDir("") {
+			} else if isSanctionedWorkerWorktreeDir(opts.Dir) {
 				isSanctionedWorker = true
 			}
 		} else if workerworktree.IsWorkerWorktree(opts.Dir) || isSanctionedWorkerWorktreeDir(opts.Dir) {
@@ -1287,14 +1561,15 @@ func landedEscapesLease(dir string, diffTreeOut string, requested []string) []st
 }
 
 // isSanctionedWorkerWorktreeDir checks whether dir or any of its parent directories
-// is a sanctioned worker worktree.
+// is a sanctioned worker worktree. Fallback to os.Getwd() is restricted to when
+// dir == "" or dir == ".".
 func isSanctionedWorkerWorktreeDir(dir string) bool {
-	if dir == "" {
+	if dir == "" || dir == "." {
 		if cwd, err := os.Getwd(); err == nil {
 			dir = cwd
 		}
 	}
-	if dir == "" {
+	if dir == "" || dir == "." {
 		return false
 	}
 	curr := filepath.Clean(dir)
