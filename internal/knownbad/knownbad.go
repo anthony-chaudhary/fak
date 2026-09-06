@@ -192,7 +192,7 @@ type Query struct {
 }
 
 // isWindowsDrive reports whether s has a Windows drive-letter prefix (e.g.
-// "C:/", "C:\", or bare "C:").
+// "C:/", "C:\", bare "C:", or drive-relative "C:foo").
 func isWindowsDrive(s string) bool {
 	if len(s) < 2 {
 		return false
@@ -201,10 +201,7 @@ func isWindowsDrive(s string) bool {
 	if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
 		return false
 	}
-	if s[1] != ':' {
-		return false
-	}
-	return len(s) == 2 || s[2] == '/' || s[2] == '\\'
+	return s[1] == ':'
 }
 
 // NormalizeTree canonicalizes one tree glob to a repo-relative directory/file
@@ -240,7 +237,7 @@ cleaned:
 		return ""
 	}
 	p := path.Clean(s)
-	if p == "." || p == ".." || strings.HasPrefix(p, "../") {
+	if p == "." || p == ".." || strings.HasPrefix(p, "../") || isWindowsDrive(p) {
 		return ""
 	}
 	return p
