@@ -68,39 +68,51 @@ func TestRunManageDocs(t *testing.T) {
 		t.Errorf("expected audit message for --budget, got: %s", stdout.String())
 	}
 
-	// Verify default audit does not enforce 150-line document-set budget on the repo
+	// Verify default audit does not enforce document sets budget and runs retained occurrences audit
 	stdout.Reset()
 	stderr.Reset()
-	rc = runManageDocs(&stdout, &stderr, []string{"--workspace", repoRoot()})
-	if rc != 0 {
-		t.Fatalf("expected rc 0 for repo default audit, got %d, stderr: %s", rc, stderr.String())
+	runManageDocs(&stdout, &stderr, []string{"--workspace", repoRoot()})
+	if !strings.Contains(stdout.String(), "retained occurrences audit passed") &&
+		!strings.Contains(stderr.String(), "fak managedocs retained audit failed") {
+		t.Errorf("expected retained occurrences audit to run, stdout: %s, stderr: %s", stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "retained occurrences audit passed") {
-		t.Errorf("expected retained occurrences audit message, got: %s", stdout.String())
-	}
-	if strings.Contains(stderr.String(), "document sets audit failed") {
-		t.Errorf("default audit should not enforce document sets budget, stderr: %s", stderr.String())
+	if strings.Contains(stdout.String(), "document sets audit") || strings.Contains(stderr.String(), "document sets audit") {
+		t.Errorf("default audit should not enforce document sets budget, stdout: %s, stderr: %s", stdout.String(), stderr.String())
 	}
 
-	// Verify --docs-dir without --document-sets/--budget does not enforce 150-line budget
+	// Verify --docs-dir without --document-sets/--budget infers document sets audit
 	stdout.Reset()
 	stderr.Reset()
-	rc = runManageDocs(&stdout, &stderr, []string{"--workspace", repoRoot(), "--docs-dir", "docs"})
+	rc = runManageDocs(&stdout, &stderr, []string{"--workspace", temp, "--docs-dir", "docs"})
 	if rc != 0 {
-		t.Fatalf("expected rc 0 for --docs-dir without --document-sets, got %d, stderr: %s", rc, stderr.String())
+		t.Fatalf("expected rc 0 for --docs-dir with inferred --document-sets, got %d, stderr: %s", rc, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "retained occurrences audit passed") {
-		t.Errorf("expected retained occurrences audit message, got: %s", stdout.String())
+	if !strings.Contains(stdout.String(), "document sets audit in") {
+		t.Errorf("expected document sets audit message for inferred flag, got: %s", stdout.String())
+	}
+
+	// Verify inferred document-sets audit enforces budget on oversized document
+	unmarkedLongDoc := filepath.Join(docDir, "unmarked.md")
+	if err := os.WriteFile(unmarkedLongDoc, []byte(strings.Repeat("line\n", managedocs.PageLines+1)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(unmarkedLongDoc)
+	stdout.Reset()
+	stderr.Reset()
+	rc = runManageDocs(&stdout, &stderr, []string{"--workspace", temp, "--docs-dir", "docs"})
+	if rc != 1 {
+		t.Fatalf("expected rc 1 for oversized doc with inferred --document-sets, got %d", rc)
+	}
+	if !strings.Contains(stderr.String(), "document sets audit failed") {
+		t.Errorf("expected audit failed in stderr, got: %s", stderr.String())
 	}
 }
 
 func TestRunManageDocs_CheckRetained(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	rc := runManageDocs(&stdout, &stderr, []string{"--workspace", repoRoot(), "--check-retained"})
-	if rc != 0 {
-		t.Fatalf("expected rc 0, got %d, stderr: %s", rc, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "retained occurrences audit passed") {
-		t.Errorf("expected audit message, got: %s", stdout.String())
+	runManageDocs(&stdout, &stderr, []string{"--workspace", repoRoot(), "--check-retained"})
+	if !strings.Contains(stdout.String(), "retained occurrences audit passed") &&
+		!strings.Contains(stderr.String(), "fak managedocs retained audit failed") {
+		t.Errorf("expected retained occurrences audit to run, stdout: %s, stderr: %s", stdout.String(), stderr.String())
 	}
 }

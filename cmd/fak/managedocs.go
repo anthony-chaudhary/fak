@@ -28,6 +28,15 @@ func runManageDocs(stdout, stderr io.Writer, argv []string) int {
 	if root == "" {
 		root = repoRoot()
 	}
+	docsDirExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "docs-dir" {
+			docsDirExplicit = true
+		}
+	})
+	if docsDirExplicit && !*documentSets && !*budget {
+		*documentSets = true
+	}
 	if *documentSets || *budget {
 		targetDir := *docsDir
 		if targetDir == "" {
