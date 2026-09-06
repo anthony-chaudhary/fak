@@ -1,6 +1,7 @@
 package projectassets
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -170,6 +171,74 @@ func skillDescription(root, path string) (string, error) {
 	return "", fmt.Errorf("%s has no frontmatter description", path)
 }
 
+type metadataField struct {
+	key   string
+	value string
+}
+
+func skillMetadata(root, path string) ([]metadataField, error) {
+	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return nil, nil
+	}
+
+	var meta []metadataField
+	inFrontmatter := false
+	inMetadata := false
+
+	for i, line := range lines {
+		if i == 0 {
+			inFrontmatter = true
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" {
+			break
+		}
+		if !inFrontmatter || trimmed == "" {
+			continue
+		}
+
+		isIndented := len(line) > 0 && (line[0] == ' ' || line[0] == '\t')
+		if !isIndented {
+			inMetadata = false
+			if strings.HasPrefix(trimmed, "metadata:") {
+				inMetadata = true
+			}
+			continue
+		}
+
+		if inMetadata {
+			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			key, val, ok := strings.Cut(trimmed, ":")
+			if !ok {
+				continue
+			}
+			k := strings.TrimSpace(key)
+			v := strings.TrimSpace(val)
+			if k == "" || k == "generated-by" || k == "canonical" || k == "canonical-description-hash" {
+				continue
+			}
+			if len(v) > 0 && (v[0] == '"' || v[0] == '\'') {
+				v = normalizeYAMLScalar(v)
+			} else {
+				if idx := strings.Index(v, " #"); idx != -1 {
+					v = strings.TrimSpace(v[:idx])
+				}
+				v = normalizeYAMLScalar(v)
+			}
+			meta = append(meta, metadataField{key: k, value: v})
+		}
+	}
+	return meta, nil
+}
+
 // normalizeYAMLScalar turns the frontmatter representation into the description
 // text that loaders see. Canonical skills use plain, single-quoted, and
 // double-quoted scalars. Some older skills also carry a missing closing quote;
@@ -313,6 +382,12 @@ func decodeYAMLScalar(value string) string {
 	}
 	return value
 }
+
+// AdapterDescription projects the canonical skill description into the adapter limit.
+func AdapterDescription(description string) string {
+	return adapterDescription(description)
+}
+
 func adapterDescription(description string) string {
 	runes := []rune(description)
 	if len(runes) <= maxSkillDescriptionChars {
@@ -330,9 +405,18 @@ func adapterDescription(description string) string {
 	return cut + suffix
 }
 
-func adapter(name, description, rel string) string {
-	description = adapterDescription(description)
-	return fmt.Sprintf("---\nname: %s\ndescription: %s\nmetadata:\n  generated-by: fak project-assets sync\n  canonical: %s\n---\n\n# Canonical project skill adapter\n\nLoad and follow [`%s`](%s). This generated discovery adapter contains no maintained workflow body.\n\n## Portability contract\n\n- The linked canonical `SKILL.md` is the single semantic workflow body for Claude, Codex, and fak-native loaders.\n- This adapter changes discovery only; it must not fork, summarize, or translate the workflow.\n- Harness-native invocation, permissions, hooks, model routing, and worker launch remain typed adapters outside the semantic body.\n", name, yamlScalar(description), rel, rel, rel)
+func adapter(name, description, rel string, extraMeta ...metadataField) string {
+	truncated := adapterDescription(description)
+	var metaLines strings.Builder
+	for _, m := range extraMeta {
+		metaLines.WriteString(fmt.Sprintf("  %s: %s\n", m.key, yamlScalar(m.value)))
+	}
+	metaLines.WriteString("  generated-by: fak project-assets sync\n")
+	metaLines.WriteString(fmt.Sprintf("  canonical: %s\n", rel))
+	if len([]rune(description)) > maxSkillDescriptionChars {
+		metaLines.WriteString(fmt.Sprintf("  canonical-description-hash: %x\n", sha256.Sum256([]byte(description))))
+	}
+	return fmt.Sprintf("---\nname: %s\ndescription: %s\nmetadata:\n%s---\n\n# Canonical project skill adapter\n\nLoad and follow [`%s`](%s). This generated discovery adapter contains no maintained workflow body.\n\n## Portability contract\n\n- The linked canonical `SKILL.md` is the single semantic workflow body for Claude, Codex, and fak-native loaders.\n- This adapter changes discovery only; it must not fork, summarize, or translate the workflow.\n- Harness-native invocation, permissions, hooks, model routing, and worker launch remain typed adapters outside the semantic body.\n", name, yamlScalar(truncated), metaLines.String(), rel, rel)
 }
 
 func classify(root, kind string, p Policy) ([]string, []Excluded, error) {
@@ -386,6 +470,10 @@ func Build(root string, write bool) (Receipt, error) {
 		if e != nil {
 			return r, e
 		}
+		meta, e := skillMetadata(root, p)
+		if e != nil {
+			return r, e
+		}
 		target := filepath.ToSlash(filepath.Join(m.Skills.CodexRoot, n, "SKILL.md"))
 		canon = append(canon, p)
 		imports = append(imports, target)
@@ -399,7 +487,7 @@ func Build(root string, write bool) (Receipt, error) {
 				continue
 			}
 			rel, _ := filepath.Rel(filepath.Dir(abs), filepath.Join(root, filepath.FromSlash(p)))
-			e = os.WriteFile(abs, []byte(adapter(n, description, filepath.ToSlash(rel))), 0644)
+			e = os.WriteFile(abs, []byte(adapter(n, description, filepath.ToSlash(rel), meta...)), 0644)
 			if e != nil {
 				return r, e
 			}
@@ -419,7 +507,8 @@ func Build(root string, write bool) (Receipt, error) {
 		b, e := os.ReadFile(abs)
 		n, _ := skillName(root, source)
 		description, descriptionErr := skillDescription(root, source)
-		if e != nil || descriptionErr != nil || (isGeneratedAdapter(b) && string(b) != adapter(n, description, filepath.ToSlash(rel))) {
+		meta, metaErr := skillMetadata(root, source)
+		if e != nil || descriptionErr != nil || metaErr != nil || (isGeneratedAdapter(b) && string(b) != adapter(n, description, filepath.ToSlash(rel), meta...)) {
 			stale = append(stale, target)
 		}
 	}
