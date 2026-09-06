@@ -707,6 +707,17 @@ func handleSandboxRead(_ context.Context, m map[string]any) (map[string]any, err
 		return nil, fmt.Errorf("path %q escapes sandbox workspace", relPath)
 	}
 
+	// Symlink confinement: resolve symlinks on target and verify the resolved path remains inside realRoot (#11693).
+	if realPath, err := filepath.EvalSymlinks(target); err == nil {
+		realRoot, rErr := filepath.EvalSymlinks(cleanWS)
+		if rErr != nil {
+			realRoot = cleanWS
+		}
+		if rel, err := filepath.Rel(realRoot, realPath); err != nil || rel == ".." || hasDotDotPrefix(rel) {
+			return nil, fmt.Errorf("path %q escapes sandbox workspace via symlink", relPath)
+		}
+	}
+
 	data, err := os.ReadFile(target)
 	if err != nil {
 		return nil, err
@@ -769,6 +780,57 @@ func handleSandboxWrite(_ context.Context, m map[string]any) (map[string]any, er
 	rel, err := filepath.Rel(cleanWS, target)
 	if err != nil || hasDotDotPrefix(rel) || rel == ".." {
 		return nil, fmt.Errorf("path %q escapes sandbox workspace", relPath)
+	}
+
+	// Symlink confinement: if target exists (or its existing parent directory exists),
+	// evaluate symlinks and verify the resolved physical path remains within realRoot (#11693).
+	realRoot, rErr := filepath.EvalSymlinks(cleanWS)
+	if rErr != nil {
+		realRoot = cleanWS
+	}
+	var realTarget string
+	if realPath, err := filepath.EvalSymlinks(target); err == nil {
+		realTarget = realPath
+	} else if fi, lerr := os.Lstat(target); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+		if linkDest, rerr := os.Readlink(target); rerr == nil {
+			if !filepath.IsAbs(linkDest) {
+				linkDest = filepath.Join(filepath.Dir(target), linkDest)
+			}
+			anc := linkDest
+			for {
+				if realAnc, err := filepath.EvalSymlinks(anc); err == nil {
+					relToAnc, _ := filepath.Rel(anc, linkDest)
+					realTarget = filepath.Join(realAnc, relToAnc)
+					break
+				}
+				next := filepath.Dir(anc)
+				if next == anc {
+					break
+				}
+				anc = next
+			}
+		}
+	} else {
+		parent := filepath.Dir(target)
+		for {
+			if realParent, err := filepath.EvalSymlinks(parent); err == nil {
+				relToParent, err := filepath.Rel(parent, target)
+				if err == nil {
+					realTarget = filepath.Join(realParent, relToParent)
+				}
+				break
+			}
+			next := filepath.Dir(parent)
+			if next == parent {
+				break
+			}
+			parent = next
+		}
+	}
+	if realTarget != "" {
+		if rel, err := filepath.Rel(realRoot, realTarget); err != nil || rel == ".." || hasDotDotPrefix(rel) {
+			return nil, fmt.Errorf("path %q escapes sandbox workspace via symlink", relPath)
+		}
 	}
 
 	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
