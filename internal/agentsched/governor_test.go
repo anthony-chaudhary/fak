@@ -33,6 +33,18 @@ func TestPriorityQueueOrdering(t *testing.T) {
 			t.Fatalf("dequeue order error: got %s, want %s", task.ID, expected)
 		}
 	}
+
+	// Verify FIFO ordering within the same tier
+	pqFIFO := NewPriorityQueue(10)
+	_ = pqFIFO.Enqueue(&Task{ID: "p1-first", Priority: abi.ThreadPriorityP1Interactive})
+	_ = pqFIFO.Enqueue(&Task{ID: "p1-second", Priority: abi.ThreadPriorityP1Interactive})
+	_ = pqFIFO.Enqueue(&Task{ID: "p1-third", Priority: abi.ThreadPriorityP1Interactive})
+	for _, expected := range []string{"p1-first", "p1-second", "p1-third"} {
+		task, ok := pqFIFO.Dequeue(true)
+		if !ok || task == nil || task.ID != expected {
+			t.Fatalf("expected FIFO order %s, got %v", expected, task)
+		}
+	}
 }
 
 func TestPriorityQueueCapacityBackpressure(t *testing.T) {
@@ -61,6 +73,17 @@ func TestPriorityQueueCapacityBackpressure(t *testing.T) {
 	}
 	if admErr.RetryAfterMS <= 0 {
 		t.Fatalf("expected positive retry_after_ms, got %d", admErr.RetryAfterMS)
+	}
+
+	// Capacity overflow preserves existing enqueued tasks
+	if pq.Len() != cap {
+		t.Fatalf("expected length %d after overflow, got %d", cap, pq.Len())
+	}
+	for i := 0; i < cap; i++ {
+		task, ok := pq.Dequeue(true)
+		if !ok || task == nil || task.ID != fmt.Sprintf("task-%d", i) {
+			t.Fatalf("queue contents corrupted at %d: got %v", i, task)
+		}
 	}
 }
 
@@ -108,6 +131,9 @@ func TestFourGateAdmissionGovernor(t *testing.T) {
 	if verdictConf.FailedGate != GateLaneClearance {
 		t.Fatalf("expected GateLaneClearance, got %v", verdictConf.FailedGate)
 	}
+	if gov.Queue().Len() != 1 {
+		t.Fatalf("expected unadmitted task to remain enqueued, got len %d", gov.Queue().Len())
+	}
 
 	// Remove conflicting task
 	gov.Queue().Remove("task-conflict")
@@ -144,6 +170,9 @@ func TestFourGateAdmissionGovernor(t *testing.T) {
 	}
 	if verdict3.FailedGate != GateWorkerConcurrency {
 		t.Fatalf("expected GateWorkerConcurrency, got %v", verdict3.FailedGate)
+	}
+	if gov.Queue().Len() != 1 {
+		t.Fatalf("expected task3 to remain enqueued on concurrency block, got len %d", gov.Queue().Len())
 	}
 
 	// Release task 1 -> inFlight drops to 1 -> task3 admitted
@@ -257,9 +286,12 @@ func TestDynamicThermalLoadSheddingAndRecovery(t *testing.T) {
 	if gov.PacingMS() < DefaultPacingHighMS {
 		t.Fatalf("expected pacing >= %d ms, got %d ms", DefaultPacingHighMS, gov.PacingMS())
 	}
-	// P3 dropped
+	// P3 dropped while higher-priority tasks are preserved
 	if gov.Queue().LenPriority(abi.ThreadPriorityP3Speculative) != 0 {
 		t.Fatalf("expected speculative tasks to be dropped, got %d", gov.Queue().LenPriority(abi.ThreadPriorityP3Speculative))
+	}
+	if gov.Queue().LenPriority(abi.ThreadPriorityP1Interactive) != 1 {
+		t.Fatalf("expected P1 task preserved during load shedding, got %d", gov.Queue().LenPriority(abi.ThreadPriorityP1Interactive))
 	}
 
 	// 2. Second severe tick cuts concurrency again: 8 -> 4

@@ -10,42 +10,34 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/laneadmit"
 )
 
-// Invariant: agent scheduler enforces priority queue ordering and shedder admission fail-closed.
-// Invariant: four admission gates (concurrency, host envelope, provider headroom, lane clearance) evaluate sequentially and fail closed.
-// Invariant: thermal pressure and power sag downscale effective concurrency and inject turn pacing without blocking runnable tasks.
-
 const (
-	// DefaultMaxWorkers specifies the default worker concurrency ceiling (Gate 1).
+	// DefaultMaxWorkers is the default worker concurrency ceiling.
 	DefaultMaxWorkers = 16
 
-	// MaxCPUPctThreshold specifies the maximum allowable host CPU percentage before Gate 2 trips.
+	// MaxCPUPctThreshold is the host CPU percentage threshold where GateHostEnvelope trips.
 	MaxCPUPctThreshold = 85.0
-	// EarlyWarningCPUThreshold specifies the host CPU threshold triggering pre-emptive turn pacing.
+	// EarlyWarningCPUThreshold is the host CPU threshold triggering pre-emptive turn pacing.
 	EarlyWarningCPUThreshold = 75.0
-	// MinFreeRAMBytesThreshold specifies the minimum required free system RAM bytes before Gate 2 trips.
+	// MinFreeRAMBytesThreshold is the minimum free system RAM required before GateHostEnvelope trips.
 	MinFreeRAMBytesThreshold = uint64(4 * 1024 * 1024 * 1024) // 4 GB
-	// MaxOpenHandlesThreshold specifies the maximum allowable open file handles before Gate 2 trips.
+	// MaxOpenHandlesThreshold is the maximum open file handles allowed before GateHostEnvelope trips.
 	MaxOpenHandlesThreshold = 130000 // 130k handles
 
-	// DefaultPacingModerateMS specifies turn pacing interval in milliseconds injected under moderate host thermal/CPU load.
+	// DefaultPacingModerateMS is the turn pacing delay injected under moderate host stress.
 	DefaultPacingModerateMS int64 = 100
 
-	// DefaultPacingHighMS specifies turn pacing interval in milliseconds injected under severe host thermal/CPU load.
+	// DefaultPacingHighMS is the turn pacing delay injected under severe host stress.
 	DefaultPacingHighMS int64 = 250
 )
 
-// AdmissionGate identifies one of the 4 gates in the admission governor.
+// AdmissionGate identifies one of the four gates in the admission governor.
 type AdmissionGate uint8
 
 const (
-	// GateWorkerConcurrency identifies Gate 1: worker pool saturation ceiling check.
 	GateWorkerConcurrency AdmissionGate = 1
-	// GateHostEnvelope identifies Gate 2: CPU, memory, handle, and thermal health check.
-	GateHostEnvelope AdmissionGate = 2
-	// GateProviderHeadroom identifies Gate 3: provider rate-limit or token budget constraint check.
-	GateProviderHeadroom AdmissionGate = 3
-	// GateLaneClearance identifies Gate 4: conflicting active repository lane lease check.
-	GateLaneClearance AdmissionGate = 4
+	GateHostEnvelope      AdmissionGate = 2
+	GateProviderHeadroom  AdmissionGate = 3
+	GateLaneClearance     AdmissionGate = 4
 )
 
 // String returns the canonical human-readable identifier for the admission gate.
@@ -208,8 +200,7 @@ func (g *Governor) Queue() *PriorityQueue {
 	return g.queue
 }
 
-// Submit enqueues a task into the multi-level priority queue.
-// Saturated queue returns immediate non-blocking ErrQueueFull (429).
+// Submit enqueues a task into the priority queue.
 func (g *Governor) Submit(task *Task) error {
 	return g.queue.Enqueue(task)
 }
@@ -305,7 +296,7 @@ func (g *Governor) CheckAdmission(task *Task) *AdmissionVerdict {
 }
 
 func (g *Governor) checkAdmissionLocked(task *Task) *AdmissionVerdict {
-	// Gate 1: Worker Concurrency (inFlight < effectiveConcurrency)
+	// Gate 1: worker concurrency ceiling.
 	if g.inFlight >= g.effectiveConcurrency {
 		return &AdmissionVerdict{
 			Admitted:     false,
@@ -316,7 +307,7 @@ func (g *Governor) checkAdmissionLocked(task *Task) *AdmissionVerdict {
 		}
 	}
 
-	// Gate 2: Host Envelope (CPU < 85%, free RAM > 4GB, handles < 130k, no thermal/power sag)
+	// Gate 2: host telemetry envelope.
 	if g.telemetry.CPUPct >= MaxCPUPctThreshold {
 		return &AdmissionVerdict{
 			Admitted:     false,
@@ -354,7 +345,7 @@ func (g *Governor) checkAdmissionLocked(task *Task) *AdmissionVerdict {
 		}
 	}
 
-	// Gate 3: Provider Headroom (token budget and not throttled)
+	// Gate 3: provider headroom and throttle status.
 	if task != nil && task.AccountID != "" {
 		if g.headroom.IsThrottled(task.AccountID) {
 			return &AdmissionVerdict{
@@ -376,7 +367,7 @@ func (g *Governor) checkAdmissionLocked(task *Task) *AdmissionVerdict {
 		}
 	}
 
-	// Gate 4: Lane Clearance (no collision with active held leases)
+	// Gate 4: lane clearance against active leases.
 	if task != nil && (task.Lane != "" || len(task.Tree) > 0) {
 		req := laneadmit.Request{
 			Surface: laneadmit.SurfaceDispatch,
@@ -425,7 +416,7 @@ func (g *Governor) TryAdmit() (*Task, *AdmissionVerdict, error) {
 		return nil, verdict, nil
 	}
 
-	// Task passes all 4 gates! Dequeue it.
+	// All gates passed: dequeue task and increment in-flight count.
 	dequeued, ok := g.queue.Dequeue(allowP3)
 	if !ok || dequeued == nil {
 		return nil, &AdmissionVerdict{Admitted: false, Reason: "concurrent dequeue"}, nil

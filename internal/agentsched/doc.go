@@ -1,13 +1,9 @@
-// Package agentsched implements multi-level prioritized agent task scheduling, host envelope telemetry
-// monitoring, provider headroom enforcement, and lane clearance governance for concurrent agent workflows.
+// Package agentsched provides prioritized task scheduling and admission governance
+// for concurrent agent execution.
 //
-// Invariant: Four-gate admission evaluation is fail-closed; a task is only dequeued and admitted when all four gates pass.
-//
-// Contract:
-//   - Multi-level priority queues maintain FIFO ordering within each priority tier (P0 System through P3 Speculative).
-//   - Capacity saturation returns immediate, non-blocking ErrQueueFull without dropping existing higher-priority tasks.
-//   - Telemetry-driven dynamic load shedding pauses P3 tasks and downscales worker concurrency during severe host stress.
-//   - Gate 4 enforces tree-disjoint lease clearance before any task execution commences.
-//
-// Guard: Host telemetry breaches (CPU >= 85%, memory exhaustion, power/thermal sag) downscale concurrency and shed speculative load.
+// Tasks are scheduled across four priority tiers (P0 system through P3 speculative)
+// and admitted through four sequential gates: worker concurrency, host resource
+// envelope (CPU, memory, file handles, thermals), provider headroom, and lane
+// clearance against active repository leases. Under host stress, the governor
+// dynamically paces turns, downscales worker concurrency, and sheds speculative load.
 package agentsched
