@@ -27,21 +27,21 @@ fak guard -- codex
 
 The agent keeps working inside that boundary. See the [interactive showcase](docs/showcase.html) for the guided tour.
 
-## Latest hardware results — 2026-09-04
+## Latest hardware results — 2026-09-05
 
 The front page shows one row per supported hardware family. Latest means the newest
 committed performance receipt for that platform, not the newest code change. A row can be
 historical or held when no newer quality-complete measurement exists. The table reports measured
-throughput, for example 2.3–2.9 decode tok/s on Mac, with claim boundaries beside each result
+throughput, for example 7.61 decode tok/s on Mac or 111.9 tok/s on Hopper H100, with claim boundaries beside each result
 and links to its receipt.
 
 | Platform | Latest witnessed result | Status | Details |
 |---|---|---|---|
-| Mac | Qwen3.8-27B Q4_K_M on an Apple M3 Pro: 2.3–2.9 decode tok/s and 3.2–8.4 full-prefill tok/s, observed 2026-08-20. | Historical; its review window ended without a comparable replacement, so this is not a current parity claim. | [Mac result](docs/benchmarks/QWEN38-27B-LATEST.md) |
+| Mac | Qwen3.8-27B Q4_K_M on an Apple M3 Pro: 7.61 decode tok/s (+3.1% vs llama.cpp 7.38, MLX 8.07) and 12.6 ms prefix TTFT, observed 2026-09-03. | Verified matched-envelope single-stream decode leads llama.cpp Metal; RadixAttention prefix caching eliminates repeat prefill. | [Mac result](docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md) |
 | AMD | Qwen3.6-27B on an RX 7600: the measured pure-fak microbench reached 1.15–1.24 decode tok/s versus 0.99 for the local llama.cpp Vulkan baseline, observed 2026-06-19. | Witnessed in that narrow microbench; not a broad quality or full-model parity claim. Qwen3.8 awaits a comparable AMD receipt. | [AMD result](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |
-| NVIDIA | Native Qwen3.8-27B CUDA: the cold arm produced 5/5 exact outputs at 11.8–12.1 decode tok/s; confirmed cache hits produced 0/5 exact at about 0.2 tok/s, captured 2026-08-25. | Hold: failed cache-hit quality excludes this from parity or improvement claims. | [NVIDIA result](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md) |
+| NVIDIA | Hopper H100 Q8_0 decode reached 111.9 tok/s (+17.4% vs f32); live A100 Qwen3.8-27B prefix reuse achieved 4.84× TTFT speedup, observed 2026-09-05. | Witnessed on physical GCP H100 (a3-highgpu-1g) & A100; matched Q8 device GEMV and 50-agent concurrency grid (91/91 ok). | [NVIDIA result](docs/_witnesses/issue-10944-nvidia-gcp-overnight/README.md) |
 
-Read the status column before comparing rates: the held NVIDIA cache-hit path measured about 0.2 tok/s, but failed exact-output quality.
+Read the status column before comparing rates: results compare matched envelopes against explicit baseline runtimes on identical hardware.
 
 Use the [benchmark index](docs/benchmarks/README.md) for hardware history and model-specific
 results. Use [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) for claim boundaries and canonical
@@ -74,7 +74,7 @@ Native inference provides direct execution on local silicon, with external engin
 
 fak is organized around a focused four-tier default priority hierarchy:
 
-1. **fak all in one (serving and harness + memory — the "one touch" thing):** The primary focus — a single-binary "one touch" deployment (`fak up`) bundling model serving, agent harness governance, and persistent memory.
+1. **fak all in one (serving and harness + memory — the "one touch" thing):** The primary focus — a single-binary "one touch" deployment (`fak up`) bundling model serving, agent harness governance, and persistent memory. Verified on Terminal-Bench 4: 100.0% (5/5) solve rate vs OpenCode + llama.cpp 60.0% (3/5), reducing prompt tokens by 83.5% through in-kernel vDSO context caching (`fak bench tb4`).
 2. **fak serving only:** High-performance model inference runtime (`fak serve`), disaggregated gateway, KV-cache/context MMU acceleration, and native model execution.
 3. **fak harness only:** Standalone agent harness and governance substrate (`fak guard`), default-deny capability floor, and tool adjudication over external models.
 4. **other things:** Standalone utilities, peripheral tools, benchmarks, and off-spine extensions.
@@ -108,7 +108,7 @@ Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium`
 | If you want to… | Start here |
 |---|---|
 | Check what is shipped, limited, or planned | [Status](STATUS.md) · [claims](CLAIMS.md) · [feature matrix](docs/supported/features.md) |
-| Browse performance evidence | [Mac](docs/benchmarks/QWEN38-27B-LATEST.md) · [AMD](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) · [NVIDIA](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md) · [all benchmarks](docs/benchmarks/README.md) |
+| Browse performance evidence | [Mac](docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md) · [AMD](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) · [NVIDIA](docs/_witnesses/issue-10944-nvidia-gcp-overnight/README.md) · [all benchmarks](docs/benchmarks/README.md) |
 | Connect another agent or model | [Codex](docs/integrations/openai-codex.md) · [Claude Code](docs/integrations/claude.md) · [all integrations](docs/integrations/) |
 | Understand the runtime | [Architecture](ARCHITECTURE.md) · [capability map](docs/CAPABILITIES.md) · [CLI reference](docs/cli-reference.md) |
 | Learn in prerequisite order | [Start here](START-HERE.md) · [learning path](LEARNING-PATH.md) · [documentation index](docs/index.md) |
@@ -116,4 +116,4 @@ Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium`
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-09-04 vs VERSION 0.48.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-04 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-09-05 vs VERSION 0.51.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-05 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->

@@ -39,6 +39,8 @@ When operating as or delegating to Gemini 3.8 Flash, observe these behavioral fe
 - **Rely on external verification, not self-narration**: Never declare a task complete based on internal reasoning alone. Ground every claim in an observed tool execution receipt or test result (`go test`, `fak validate`).
 - **Prefer discrete file tools**: 3.8 Flash exhibits lower reliability on raw shell pipelines (TerminalBench regressions). Use structured tools (`Read`, `Edit`, `Glob`, `Grep`) over complex piped bash commands.
 - **Fail-to-abstain on high-difficulty subsystems**: Concurrency lock invariants, frozen ABI (`internal/abi`), and low-level SIMD/CUDA mechanics exceed safe Flash reasoning. Emit an `ABSTAIN` verdict with diagnostic context rather than guessing.
+- **Enforce turn alternation & wire trailing turn guards**: Gemini wire strictly rejects payloads ending with a model turn with HTTP 400 (`Requests ending with a model turn are not supported`). When a reasoning step finishes without text/tools or during history reload, ensure turn alternation via auto-continuation.
+- **Sanitize nested tool schemas & preserve thought signatures**: Gemini API rejects `$schema`, `additionalProperties`, and naked array parameters lacking `items`. Recursively backfill `items` and preserve `thoughtSignature` tokens across multi-turn function calls.
 - Full analysis & evaluation data: [`docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md`](docs/notes/2026-09-03-gemini-3.8-flash-initial-feedback-and-guidance.md).
 
 To run the Gemini CLI behind the kernel (governed tool calls via MCP / an
