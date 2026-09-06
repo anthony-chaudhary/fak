@@ -1234,7 +1234,7 @@ func txtLen(raw json.RawMessage) int64 {
 
 func looksLikeTypedPrompt(s string) bool {
 	st := strings.TrimSpace(s)
-	return st != "" && !strings.HasPrefix(st, "<system-reminder>") && !strings.HasPrefix(st, "Caveat:")
+	return st != "" && !strings.HasPrefix(st, "<system-reminder>") && !strings.HasPrefix(st, "Caveat:") && !strings.HasPrefix(st, "<session_context>")
 }
 
 func excludedNamespace(ns string) bool {
@@ -1342,7 +1342,16 @@ func ProjectNamespace(workspace string) string {
 }
 
 func namespaceName(path string) string {
-	return filepath.Base(filepath.Dir(path))
+	dir := filepath.Dir(path)
+	base := filepath.Base(dir)
+	if base == "chats" {
+		return filepath.Base(filepath.Dir(dir))
+	}
+	parent := filepath.Dir(dir)
+	if filepath.Base(parent) == "chats" {
+		return filepath.Base(filepath.Dir(parent))
+	}
+	return base
 }
 
 // tierOutputCostTotals sums PerTier output tokens and total PerModel
