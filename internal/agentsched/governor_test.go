@@ -483,3 +483,116 @@ func TestGovernorEdgeCasesAndReset(t *testing.T) {
 		t.Fatalf("reset failed to restore state")
 	}
 }
+
+func TestGovernorReleaseClearsLeaseOnEmptyTaskID(t *testing.T) {
+	gov := NewGovernor(GovernorConfig{
+		BaseConcurrency: 2,
+	})
+
+	task := &Task{
+		ID:       "",
+		Priority: abi.ThreadPriorityP1Interactive,
+		Lane:     "lane-test-empty-id",
+	}
+
+	if err := gov.Queue().Enqueue(task); err != nil {
+		t.Fatalf("failed to enqueue task: %v", err)
+	}
+
+	admitted, verdict, err := gov.TryAdmit()
+	if err != nil {
+		t.Fatalf("unexpected error on TryAdmit: %v", err)
+	}
+	if !verdict.Admitted || admitted == nil {
+		t.Fatalf("expected task to be admitted, got verdict: %+v", verdict)
+	}
+	if admitted.ID == "" {
+		t.Fatalf("expected admitted task to have a non-empty ID assigned")
+	}
+	if len(gov.heldLeases) != 1 {
+		t.Fatalf("expected 1 held lease, got %d", len(gov.heldLeases))
+	}
+
+	gov.Release(admitted)
+	if len(gov.heldLeases) != 0 {
+		t.Fatalf("expected 0 held leases after release, got %d (leak detected)", len(gov.heldLeases))
+	}
+}
+
+func TestHeadOfLineBlockingCandidateAdmission(t *testing.T) {
+	gov := NewGovernor(GovernorConfig{
+		BaseConcurrency: 2,
+	})
+
+	// Task 1 holds lease on lane-a
+	task1 := &Task{
+		ID:       "task-1",
+		Priority: abi.ThreadPriorityP1Interactive,
+		Lane:     "lane-a",
+		Tree:     []string{"internal/lane_a/*"},
+	}
+	if err := gov.Queue().Enqueue(task1); err != nil {
+		t.Fatalf("failed to enqueue task1: %v", err)
+	}
+	admitted1, verdict1, err := gov.TryAdmit()
+	if err != nil || !verdict1.Admitted || admitted1 == nil {
+		t.Fatalf("failed to admit task1: %v, verdict: %+v", err, verdict1)
+	}
+
+	// Task 2 targets lane-a (blocked by Gate 4 conflict)
+	task2 := &Task{
+		ID:       "task-2-blocked",
+		Priority: abi.ThreadPriorityP1Interactive,
+		Lane:     "lane-a",
+		Tree:     []string{"internal/lane_a/*"},
+	}
+	// Task 3 targets lane-b (disjoint lane, should be runnable and admitted despite task2 being head of queue)
+	task3 := &Task{
+		ID:       "task-3-runnable",
+		Priority: abi.ThreadPriorityP1Interactive,
+		Lane:     "lane-b",
+		Tree:     []string{"internal/lane_b/*"},
+	}
+
+	if err := gov.Queue().Enqueue(task2); err != nil {
+		t.Fatalf("failed to enqueue task2: %v", err)
+	}
+	if err := gov.Queue().Enqueue(task3); err != nil {
+		t.Fatalf("failed to enqueue task3: %v", err)
+	}
+
+	// TryAdmit should skip blocked task2 and admit task3 without head-of-line blocking
+	admitted3, verdict3, err := gov.TryAdmit()
+	if err != nil {
+		t.Fatalf("unexpected error on TryAdmit: %v", err)
+	}
+	if !verdict3.Admitted || admitted3 == nil {
+		t.Fatalf("expected task3 to be admitted past blocked head task2, got verdict: %+v", verdict3)
+	}
+	if admitted3.ID != "task-3-runnable" {
+		t.Fatalf("expected admitted task to be task-3-runnable, got %s", admitted3.ID)
+	}
+
+	// Blocked task2 should still be in the queue
+	if gov.Queue().Len() != 1 {
+		t.Fatalf("expected 1 task remaining in queue, got %d", gov.Queue().Len())
+	}
+	if peeked, ok := gov.Queue().Peek(true); !ok || peeked.ID != "task-2-blocked" {
+		t.Fatalf("expected task-2-blocked to remain at head of queue, got %+v", peeked)
+	}
+
+	// Now release task1, freeing lane-a
+	gov.Release(admitted1)
+
+	// TryAdmit should now admit task2
+	admitted2, verdict2, err := gov.TryAdmit()
+	if err != nil {
+		t.Fatalf("unexpected error on TryAdmit: %v", err)
+	}
+	if !verdict2.Admitted || admitted2 == nil || admitted2.ID != "task-2-blocked" {
+		t.Fatalf("expected task-2-blocked to be admitted after release of task1, got %+v", verdict2)
+	}
+	if gov.Queue().Len() != 0 {
+		t.Fatalf("expected queue to be empty, got %d", gov.Queue().Len())
+	}
+}

@@ -406,30 +406,45 @@ func (g *Governor) TryAdmit() (*Task, *AdmissionVerdict, error) {
 	defer g.mu.Unlock()
 
 	allowP3 := !g.p3Paused
-	task, found := g.queue.Peek(allowP3)
-	if !found {
+	candidates := g.queue.Candidates(allowP3)
+	if len(candidates) == 0 {
 		return nil, &AdmissionVerdict{Admitted: false, Reason: "queue empty"}, nil
 	}
 
-	verdict := g.checkAdmissionLocked(task)
-	if !verdict.Admitted {
-		return nil, verdict, nil
+	var firstVerdict *AdmissionVerdict
+	var admittedTask *Task
+	var admittedVerdict *AdmissionVerdict
+
+	for _, candidate := range candidates {
+		verdict := g.checkAdmissionLocked(candidate)
+		if verdict.Admitted {
+			admittedTask = candidate
+			admittedVerdict = verdict
+			break
+		}
+		if firstVerdict == nil {
+			firstVerdict = verdict
+		}
 	}
 
-	// All gates passed: dequeue task and increment in-flight count.
-	dequeued, ok := g.queue.Dequeue(allowP3)
-	if !ok || dequeued == nil {
+	if admittedTask == nil {
+		return nil, firstVerdict, nil
+	}
+
+	// Dequeue the admitted candidate from the queue.
+	if !g.queue.RemoveTask(admittedTask) {
 		return nil, &AdmissionVerdict{Admitted: false, Reason: "concurrent dequeue"}, nil
 	}
+	dequeued := admittedTask
 
 	g.inFlight++
 
 	// Register held lane lease if task declared a lane or tree
 	if dequeued.Lane != "" || len(dequeued.Tree) > 0 {
-		leaseID := dequeued.ID
-		if leaseID == "" {
-			leaseID = fmt.Sprintf("lease-%d", time.Now().UnixNano())
+		if dequeued.ID == "" {
+			dequeued.ID = fmt.Sprintf("lease-%d", time.Now().UnixNano())
 		}
+		leaseID := dequeued.ID
 		g.heldLeases[leaseID] = laneadmit.Lease{
 			ID:     leaseID,
 			Lane:   dequeued.Lane,
@@ -438,7 +453,7 @@ func (g *Governor) TryAdmit() (*Task, *AdmissionVerdict, error) {
 		}
 	}
 
-	return dequeued, verdict, nil
+	return dequeued, admittedVerdict, nil
 }
 
 // Release completes execution for task: decrements in-flight worker count and releases lane leases.

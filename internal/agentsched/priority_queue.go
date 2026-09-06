@@ -149,6 +149,46 @@ func (pq *PriorityQueue) Remove(taskID string) bool {
 	return false
 }
 
+// RemoveTask removes the exact task pointer from the queue if present.
+func (pq *PriorityQueue) RemoveTask(target *Task) bool {
+	if target == nil {
+		return false
+	}
+	pq.mu.Lock()
+	defer pq.mu.Unlock()
+
+	for p := 0; p < 4; p++ {
+		for i, t := range pq.buckets[p] {
+			if t == target {
+				pq.buckets[p] = append(pq.buckets[p][:i], pq.buckets[p][i+1:]...)
+				pq.total--
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Candidates returns a snapshot slice of all tasks eligible for admission in priority and FIFO order.
+// If allowP3 is false, speculative (P3) tasks are excluded.
+func (pq *PriorityQueue) Candidates(allowP3 bool) []*Task {
+	pq.mu.Lock()
+	defer pq.mu.Unlock()
+
+	maxTier := abi.ThreadPriorityP3Speculative
+	if !allowP3 {
+		maxTier = abi.ThreadPriorityP2Batch
+	}
+
+	var candidates []*Task
+	for p := abi.ThreadPriorityP0System; p <= maxTier; p++ {
+		if len(pq.buckets[p]) > 0 {
+			candidates = append(candidates, pq.buckets[p]...)
+		}
+	}
+	return candidates
+}
+
 // DropP3 sheds all speculative P3 tasks currently enqueued and returns the count dropped.
 func (pq *PriorityQueue) DropP3() int {
 	pq.mu.Lock()
