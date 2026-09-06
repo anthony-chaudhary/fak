@@ -8,10 +8,7 @@ import (
 )
 
 func TestVulkanQwen35GDNDecodeMatchesCPUOracleInPlace(t *testing.T) {
-	be, ok := Pick("vulkan").(*vulkanBackend)
-	if !ok {
-		t.Skip("Vulkan backend unavailable")
-	}
+	be := vk(t)
 	hidden, nK, nV, kHd, vHd, kernel := 7, 1, 2, 3, 65, 3
 	keyDim, valueDim := nK*kHd, nV*vHd
 	convDim := 2*keyDim + valueDim
@@ -79,6 +76,9 @@ func TestVulkanQwen35GDNDecodeMatchesCPUOracleInPlace(t *testing.T) {
 			t.Fatalf("%s length=%d want %d", name, len(got), len(want))
 		}
 		for i := range got {
+			if math.IsNaN(float64(got[i])) || math.IsInf(float64(got[i]), 0) || math.IsNaN(float64(want[i])) || math.IsInf(float64(want[i]), 0) {
+				t.Fatalf("%s[%d] must be finite: got=%g want=%g", name, i, got[i], want[i])
+			}
 			if math.Abs(float64(got[i]-want[i])) > 3e-4 {
 				t.Fatalf("%s[%d]=%g want %g", name, i, got[i], want[i])
 			}
