@@ -26,7 +26,17 @@ func DetectResubmissionLoops(samples []ResubmissionLoopSample) (toolCallLoops in
 	var pendingYieldTokens int
 	awaitingYieldContinuation := false
 
-	for _, s := range samples {
+	lastSessionID := ""
+	for i, s := range samples {
+		if i > 0 && s.SessionID != lastSessionID {
+			lastToolSig = ""
+			toolStreak = 0
+			elisionActive = false
+			awaitingYieldContinuation = false
+			pendingYieldTokens = 0
+		}
+		lastSessionID = s.SessionID
+
 		// 1. Tool-call resubmission loop detection
 		if s.WasElided {
 			elisionActive = true
