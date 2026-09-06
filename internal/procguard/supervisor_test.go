@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -21,7 +22,12 @@ func TestSupervisor_SubprocessTrackingAndReaping(t *testing.T) {
 	}()
 
 	// Spawn a parent process that sleeps so it stays alive during test
-	cmd := exec.Command("sleep", "30")
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("ping", "127.0.0.1", "-n", "30")
+	} else {
+		cmd = exec.Command("sleep", "30")
+	}
 	supervisor.ConfigureCommand(cmd, "session-tree-1")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start command: %v", err)
@@ -227,7 +233,12 @@ func TestSupervisor_DeadlineTimeoutEnforcement(t *testing.T) {
 	defer supervisor.Close()
 
 	// Spawn a real long-running sleep command
-	cmd := exec.Command("sleep", "60")
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("ping", "127.0.0.1", "-n", "60")
+	} else {
+		cmd = exec.Command("sleep", "60")
+	}
 	supervisor.ConfigureCommand(cmd, "deadline-session-1")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start command: %v", err)
@@ -337,7 +348,12 @@ func TestSupervisor_ExecuteCommand(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	cmd := exec.Command("echo", "fak-procguard-governance")
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd.exe", "/c", "echo", "fak-procguard-governance")
+	} else {
+		cmd = exec.Command("echo", "fak-procguard-governance")
+	}
 	if err := supervisor.ExecuteCommand(ctx, "exec-session-1", cmd); err != nil {
 		t.Fatalf("ExecuteCommand failed: %v", err)
 	}
