@@ -2,6 +2,7 @@ package dojopost
 
 import (
 	"bufio"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -248,6 +249,53 @@ func TestRollupClampsMaxEpisodesAndPreservesWorstFirst(t *testing.T) {
 	}
 	if !strings.Contains(text, "…and 2 more episode(s) (worst-first; see `fak dojo run`)") {
 		t.Fatalf("expected overflow summary line in text:\n%s", text)
+	}
+}
+
+func TestRollupFromReportClampsNonPositiveMaxEpisodes(t *testing.T) {
+	eps := make([]dojo.Episode, 10)
+	for i := 0; i < 10; i++ {
+		eps[i] = dojo.Episode{
+			Lever:      fmt.Sprintf("lever-%d", i),
+			Metric:     fmt.Sprintf("metric-%d", i),
+			Claimed:    0.9,
+			Realized:   0.5,
+			CalibErr:   float64(i+1) * 0.05,
+			Verdict:    dojo.VerdictOverClaim,
+			Grade:      "C",
+			Provenance: dojo.Witnessed,
+			Sample:     50,
+		}
+	}
+	r := dojo.Report{
+		Commit:       "abcdef1234567890",
+		LeverCount:   10,
+		EpisodeCount: 10,
+		Measured:     10,
+		Calibrated:   5,
+		MeanCalibErr: 0.275,
+		Grade:        "C",
+		Episodes:     eps,
+	}
+
+	for _, maxEp := range []int{0, -1} {
+		post := RollupFromReport(r, maxEp)
+		text := post.Text()
+
+		wantOverflow := fmt.Sprintf("…and %d more episode(s) (worst-first; see `fak dojo run`)", 10-DefaultMaxEpisodes)
+		if !strings.Contains(text, wantOverflow) {
+			t.Fatalf("maxEpisodes=%d: expected overflow summary %q in text:\n%s", maxEp, wantOverflow, text)
+		}
+
+		episodeLineCount := 0
+		for _, e := range eps {
+			if strings.Contains(text, e.Metric) {
+				episodeLineCount++
+			}
+		}
+		if episodeLineCount != DefaultMaxEpisodes {
+			t.Fatalf("maxEpisodes=%d: got %d episode lines, want clamped to %d:\n%s", maxEp, episodeLineCount, DefaultMaxEpisodes, text)
+		}
 	}
 }
 

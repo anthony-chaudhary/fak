@@ -366,6 +366,9 @@ func ClampResultBytes(raw []byte, budget ToolResultBudget) ([]byte, bool) {
 	if len(out) >= len(raw) {
 		return raw[:limit], true
 	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
 	return out, true
 }
 

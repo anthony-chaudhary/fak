@@ -232,6 +232,9 @@ func metaFor(tool string) map[string]string {
 	if m, ok := todoToolMeta(tool); ok {
 		return m
 	}
+	if m, ok := taskToolMeta(tool); ok {
+		return m
+	}
 	if m, ok := mcpToolMeta(tool); ok {
 		return m
 	}
@@ -342,6 +345,9 @@ func Configure() {
 		allow[name] = true
 	}
 	for _, name := range todoToolAllow() {
+		allow[name] = true
+	}
+	for _, name := range taskToolAllow() {
 		allow[name] = true
 	}
 	for _, name := range mcpToolAllow() {

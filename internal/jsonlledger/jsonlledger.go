@@ -12,7 +12,6 @@ import (
 	"hash/fnv"
 	"io"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -50,24 +49,25 @@ func Parse[T any](content string, keep func(T) bool) []T {
 // packages each carried.
 func LatestBefore[T any](row T, prior []T, date, tiebreak func(T) string) (T, bool) {
 	self := tiebreak(row)
-	cands := make([]T, 0, len(prior))
-	for _, p := range prior {
-		if tb := tiebreak(p); tb != "" && tb == self {
+	var best *T
+	var bestDate, bestTiebreak string
+	for i := range prior {
+		tb := tiebreak(prior[i])
+		if tb != "" && tb == self {
 			continue
 		}
-		cands = append(cands, p)
+		d := date(prior[i])
+		if best == nil || d > bestDate || (d == bestDate && tb >= bestTiebreak) {
+			best = &prior[i]
+			bestDate = d
+			bestTiebreak = tb
+		}
 	}
-	if len(cands) == 0 {
+	if best == nil {
 		var zero T
 		return zero, false
 	}
-	sort.SliceStable(cands, func(i, j int) bool {
-		if di, dj := date(cands[i]), date(cands[j]); di != dj {
-			return di < dj
-		}
-		return tiebreak(cands[i]) < tiebreak(cands[j])
-	})
-	return cands[len(cands)-1], true
+	return *best, true
 }
 
 // Checkpoint records where a prior TailFold stopped so the next call can fold

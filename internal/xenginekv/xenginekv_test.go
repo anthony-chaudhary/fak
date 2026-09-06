@@ -195,3 +195,69 @@ func TestInertByDefault(t *testing.T) {
 		t.Fatal("FAK_XENGINE_KV unset but Default arena is live; the package must be inert by default")
 	}
 }
+
+// TestPutZeroLengthDoesNotCollide proves that zero-length payloads receive distinct
+// non-colliding handles in Put and do not clobber adjacent or subsequent allocations.
+// In particular, evicting the empty handle must not alter the non-empty span.
+func TestPutZeroLengthDoesNotCollide(t *testing.T) {
+	ctx := context.Background()
+	a := NewArena(1024)
+
+	emptyRef1, err := a.Put(ctx, []byte{})
+	if err != nil {
+		t.Fatalf("Put(empty1): %v", err)
+	}
+
+	nonEmpty := []byte("non-empty payload")
+	nonEmptyRef, err := a.Put(ctx, nonEmpty)
+	if err != nil {
+		t.Fatalf("Put(nonEmpty): %v", err)
+	}
+
+	emptyRef2, err := a.Put(ctx, []byte{})
+	if err != nil {
+		t.Fatalf("Put(empty2): %v", err)
+	}
+
+	if emptyRef1.Handle == nonEmptyRef.Handle {
+		t.Fatalf("empty1 and nonEmpty received identical handle %d; handles must be distinct", emptyRef1.Handle)
+	}
+	if emptyRef1.Handle == emptyRef2.Handle {
+		t.Fatalf("consecutive empty Puts received identical handle %d; handles must be distinct", emptyRef1.Handle)
+	}
+	if nonEmptyRef.Handle == emptyRef2.Handle {
+		t.Fatalf("nonEmpty and empty2 received identical handle %d; handles must be distinct", nonEmptyRef.Handle)
+	}
+
+	vBefore, err := a.Resolve(ctx, nonEmptyRef)
+	if err != nil {
+		t.Fatalf("Resolve(nonEmptyRef) before evict: %v", err)
+	}
+	if !bytes.Equal(vBefore, nonEmpty) {
+		t.Fatalf("Resolve(nonEmptyRef) before evict = %q, want %q", vBefore, nonEmpty)
+	}
+
+	if err := a.Evict(emptyRef1); err != nil {
+		t.Fatalf("Evict(emptyRef1): %v", err)
+	}
+
+	if _, err := a.Resolve(ctx, emptyRef1); err == nil {
+		t.Fatal("Resolve(emptyRef1) succeeded after Evict; handle must be unresolvable")
+	}
+
+	vAfter, err := a.Resolve(ctx, nonEmptyRef)
+	if err != nil {
+		t.Fatalf("Resolve(nonEmptyRef) after evicting emptyRef1 failed: %v", err)
+	}
+	if !bytes.Equal(vAfter, nonEmpty) {
+		t.Fatalf("non-empty span altered after evicting empty handle: got %q, want %q", vAfter, nonEmpty)
+	}
+
+	vEmpty2, err := a.Resolve(ctx, emptyRef2)
+	if err != nil {
+		t.Fatalf("Resolve(emptyRef2) failed: %v", err)
+	}
+	if len(vEmpty2) != 0 {
+		t.Fatalf("Resolve(emptyRef2) len = %d, want 0", len(vEmpty2))
+	}
+}

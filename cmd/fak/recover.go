@@ -368,20 +368,25 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 		"COMMITTED_RED":     {Reason: "COMMITTED_RED", Summary: "the committed tip fails its isolated build or formatting gate", Steps: []recoveryStep{{Argv: []string{"fak-dev", "ci-preflight"}, Summary: "reproduce the committed-tip failure outside the peer-dirty tree"}}, Notes: []string{"fix the committed failure before attempting another commit or push"}, Executable: true},
 		"BUILD_CHECK_TIMEOUT": {
 			Reason:     "BUILD_CHECK_TIMEOUT",
-			Summary:    "prospective commit validation exceeded its bounded execution deadline before index mutation",
+			Summary:    "prospective commit validation exceeded its bounded observation deadline before completing",
 			Executable: false,
 			Steps: []recoveryStep{
 				{
+					Argv:    []string{"fak", "commit", "status"},
+					Summary: "inspect live committer ownership and active child validation process state before retrying",
+				},
+				{
 					Argv:    []string{"fak", "validate", "--mine", "<paths>..."},
-					Summary: "run isolated prospective validation to measure build, vet, and test duration outside commit lock",
+					Summary: "run isolated prospective validation to measure build, vet, and test duration outside commit lock; standalone success does not bypass or substitute for the commit gate",
 				},
 			},
 			Notes: []string{
 				"the timeout refused the commit before index mutation; no unchecked commit was admitted to trunk",
-				"distinguish an observation timeout from a terminal receipt: deadline expiration is not a pass verdict or completed witness",
-				"inspect which phase timed out (build, vet, or tests) and check for live owner or background contention before retrying",
-				"declare a finite prospective validation budget or run isolated prospective validation with `fak validate --mine <paths>...` to determine required duration",
-				"commit validation remains strictly fail-closed: retain refusal if validation does not complete; never bypass the gate or fail open without explicit authorization",
+				"observation timeout vs terminal receipt: distinguish an observation timeout from a terminal receipt; a timeout indicates the validation deadline expired while in-flight, not that the tree was proven green",
+				"inspect which phase timed out (build, vet, or tests) and inspect live owner and phase before retry to avoid duplicate competing validation runs",
+				"permit a declared finite validation budget: declare a finite prospective validation budget or run isolated prospective validation with `fak validate --mine <paths>...` to determine required duration",
+				"validation remains strictly fail-closed: retain refusal if prospective validation does not complete within the declared budget; never fail open or assume unverified code is safe",
+				"do not bypass the gate: standalone validation output (`fak validate`) diagnoses phase health but is not automatically consumed or authorized by `fak commit`; the prospective committed tree must be verified by the commit gate",
 			},
 		},
 		"LOCK_BUSY":         {Reason: "LOCK_BUSY", Summary: "another committer owns the serialized commit lock", Steps: []recoveryStep{{Argv: []string{"fak", "commit", "--reclaim-stale-commit-lock"}, Summary: "probe only the commit lock and reclaim only when its recorded owner is proven stale"}}, Notes: []string{"the actuator is a dry-run unless you explicitly add --apply; if the owner is live, wait and retry; never delete the lock by hand"}, Executable: true},

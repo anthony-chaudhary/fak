@@ -147,6 +147,9 @@ func (a *Arena) ResolveLeased(ctx context.Context, r abi.Ref) (view []byte, rele
 		}
 		s.readers++
 		a.live[off] = s
+		if s.n == 0 {
+			return []byte{}, a.releaseFunc(off), nil
+		}
 		return a.buf[s.off : s.off+s.n : s.off+s.n], a.releaseFunc(off), nil
 	default:
 		return nil, nil, fmt.Errorf("xenginekv: unsupported RefKind %d (this backend issues RefRegion)", r.Kind)

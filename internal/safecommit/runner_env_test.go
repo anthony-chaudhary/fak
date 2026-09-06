@@ -2,6 +2,7 @@ package safecommit
 
 import (
 	"context"
+	"io"
 	"slices"
 	"testing"
 )
@@ -62,3 +63,17 @@ func TestNewGitCmdDirWiring(t *testing.T) {
 		t.Errorf("empty dir must stay empty, got %q", got)
 	}
 }
+
+// TestNewGitCmdEmptyStdin: background git subprocesses must have an empty Stdin
+// so they never block or hang waiting for terminal input (e.g. prompts or credentials).
+func TestNewGitCmdEmptyStdin(t *testing.T) {
+	cmd := newGitCmd(context.Background(), "", "status")
+	if cmd.Stdin == nil {
+		t.Fatal("cmd.Stdin must be non-nil to prevent hanging on stdin")
+	}
+	b, err := io.ReadAll(cmd.Stdin)
+	if err != nil || len(b) != 0 {
+		t.Errorf("cmd.Stdin must be empty reader, got %d bytes (err: %v)", len(b), err)
+	}
+}
+

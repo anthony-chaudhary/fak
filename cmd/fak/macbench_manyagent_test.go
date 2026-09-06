@@ -70,6 +70,16 @@ func TestMacBenchManyAgent_Validation(t *testing.T) {
 			},
 			wantErr: "invalid --output",
 		},
+		{
+			name: "prefix tokens negative",
+			opts: ManyAgentOptions{
+				Concurrency:        4,
+				Model:              "Qwen3.8-27B",
+				Horizon:            20,
+				SharedPrefixTokens: -1,
+			},
+			wantErr: "--prefix-tokens must be non-negative",
+		},
 	}
 
 	for _, tc := range tests {
@@ -418,5 +428,70 @@ func TestMacBenchManyAgent_TwoBitQuantModelSpec(t *testing.T) {
 	}
 	if spec.BasePrefillTokPerSec <= 65.0 {
 		t.Errorf("BasePrefillTokPerSec for 2-bit quant = %.1f, want > 65.0", spec.BasePrefillTokPerSec)
+	}
+}
+
+func TestMacBenchManyAgent_20kContext_Qwen38_UD_Q2_K_XL(t *testing.T) {
+	opts := ManyAgentOptions{
+		Model:              "Qwen3.8-27B-UD-Q2_K_XL",
+		SharedPrefixTokens: 20000,
+		Concurrency:        4,
+		Horizon:            20,
+		Cache:              true,
+	}
+
+	rep, err := RunManyAgentSpine(opts)
+	if err != nil {
+		t.Fatalf("RunManyAgentSpine failed: %v", err)
+	}
+	if rep.SharedPrefixTokens != 20000 {
+		t.Errorf("rep.SharedPrefixTokens = %d, want 20000", rep.SharedPrefixTokens)
+	}
+	if !rep.Verified {
+		t.Errorf("rep.Verified = false, want true")
+	}
+	if rep.ReuseRatio <= 0.90 {
+		t.Errorf("rep.ReuseRatio = %.4f, want > 0.90", rep.ReuseRatio)
+	}
+
+	compRep, err := RunManyAgentComparison(opts)
+	if err != nil {
+		t.Fatalf("RunManyAgentComparison failed: %v", err)
+	}
+	if !compRep.True4xAchieved {
+		t.Errorf("compRep.True4xAchieved = false, want true")
+	}
+	if compRep.SpeedupRatio < 4.0 {
+		t.Errorf("compRep.SpeedupRatio = %.2f, want >= 4.0", compRep.SpeedupRatio)
+	}
+
+	var stdout, stderr bytes.Buffer
+	argv := []string{"--prefix-tokens", "20000", "--model", "Qwen3.8-27B-UD-Q2_K_XL", "--compare-llama", "--json"}
+	code := runMacBenchManyAgent(&stdout, &stderr, argv)
+	if code != 0 {
+		t.Fatalf("runMacBenchManyAgent returned code %d, stderr: %s", code, stderr.String())
+	}
+
+	var cliRep ManyAgentComparisonReport
+	if err := json.Unmarshal(stdout.Bytes(), &cliRep); err != nil {
+		t.Fatalf("failed to parse CLI JSON output: %v\nOutput: %s", err, stdout.String())
+	}
+	if cliRep.Schema != ManyAgentComparisonSchema {
+		t.Errorf("cliRep.Schema = %q, want %q", cliRep.Schema, ManyAgentComparisonSchema)
+	}
+	if cliRep.SharedPrefixTokens != 20000 {
+		t.Errorf("cliRep.SharedPrefixTokens = %d, want 20000", cliRep.SharedPrefixTokens)
+	}
+	if cliRep.Model != "Qwen3.8-27B-UD-Q2_K_XL" {
+		t.Errorf("cliRep.Model = %q, want %q", cliRep.Model, "Qwen3.8-27B-UD-Q2_K_XL")
+	}
+	if !cliRep.True4xAchieved {
+		t.Errorf("cliRep.True4xAchieved = false, want true")
+	}
+	if cliRep.SpeedupRatio < 4.0 {
+		t.Errorf("cliRep.SpeedupRatio = %.2f, want >= 4.0", cliRep.SpeedupRatio)
+	}
+	if !cliRep.Verified {
+		t.Errorf("cliRep.Verified = false, want true")
 	}
 }

@@ -31,6 +31,7 @@ import "C"
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"sync"
 	"sync/atomic"
