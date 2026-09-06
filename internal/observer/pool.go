@@ -561,18 +561,19 @@ func (p *Pool) ObserveSyncBarrier(ctx context.Context, obs StepObservation) (Ste
 					atomic.AddInt64(&p.cacheMisses, 1)
 				}
 
-				if wasFlagged {
+				if wasFlagged || sess.isFlagged() {
 					sess.mu.Lock()
-					sess.flaggedChurn = wasChurn
-					sess.flaggedRegress = wasRegress
-					if wasRegress {
+					if wasRegress || sess.flaggedRegress {
+						sess.flaggedRegress = true
+						sess.flaggedChurn = false
 						sess.kvPrefixWarm = false
 						obs.CachedPrefix = false
 						obs.StepVerdict = StepRegress
 						if obs.Reason == "" || obs.Reason == "step completed forward progress" {
 							obs.Reason = "step refused due to regression loop (barrier timeout)"
 						}
-					} else if wasChurn {
+					} else if wasChurn || sess.flaggedChurn {
+						sess.flaggedChurn = true
 						obs.StepVerdict = StepChurn
 						if obs.Reason == "" || obs.Reason == "step completed forward progress" {
 							obs.Reason = "step refused due to churn loop (barrier timeout)"

@@ -925,6 +925,9 @@ func TestObserverSemanticScreen_BarrierTimeout_FailClosedOnUnknownTools(t *testi
 	if advice.Reason != abi.ReasonIntegrityRefuted {
 		t.Fatalf("expected ReasonIntegrityRefuted for flagged session, got %v", advice.Reason)
 	}
+	if advice.By != "observer:barrier_timeout_flagged" {
+		t.Fatalf("expected By='observer:barrier_timeout_flagged' for flagged session, got %q", advice.By)
+	}
 }
 
 func TestObserverSemanticScreen_BarrierTimeout_PreservesFlaggedQuarantine(t *testing.T) {
@@ -961,8 +964,42 @@ func TestObserverSemanticScreen_BarrierTimeout_PreservesFlaggedQuarantine(t *tes
 	if adviceChurn.Reason != abi.ReasonIntegrityRefuted {
 		t.Fatalf("expected ReasonIntegrityRefuted for churn-flagged session, got %v", adviceChurn.Reason)
 	}
+	if adviceChurn.By != "observer:barrier_timeout_flagged" {
+		t.Fatalf("expected By='observer:barrier_timeout_flagged', got %q", adviceChurn.By)
+	}
 	if !sessChurn.isFlagged() {
 		t.Fatal("expected session to remain flagged after barrier timeout")
+	}
+
+	// Verify that evaluation happened on timeout: observation history is updated
+	histChurn := pool.GetSessionHistory(sessionChurnID)
+	if len(histChurn) != 1 {
+		t.Fatalf("expected 1 evaluated observation in history on barrier timeout, got %d", len(histChurn))
+	}
+	if histChurn[0].Tool != "Read" {
+		t.Fatalf("expected evaluated tool 'Read', got %s", histChurn[0].Tool)
+	}
+	if histChurn[0].StepVerdict != StepChurn {
+		t.Fatalf("expected evaluated StepVerdict=StepChurn, got %s", histChurn[0].StepVerdict)
+	}
+
+	// Second read call maintains repeat count and preserves quarantine
+	adviceChurn2 := screen.ScreenResult(ctx, callChurn, []byte("content 2"))
+	if adviceChurn2.Disposition != abi.ScreenQuarantine {
+		t.Fatalf("expected ScreenQuarantine on second barrier timeout, got %v", adviceChurn2.Disposition)
+	}
+	if adviceChurn2.By != "observer:barrier_timeout_flagged" {
+		t.Fatalf("expected By='observer:barrier_timeout_flagged' on second timeout, got %q", adviceChurn2.By)
+	}
+	histChurn2 := pool.GetSessionHistory(sessionChurnID)
+	if len(histChurn2) != 2 {
+		t.Fatalf("expected 2 evaluated observations in history on second barrier timeout, got %d", len(histChurn2))
+	}
+	sessChurn.mu.Lock()
+	repCount := sessChurn.repeatCount
+	sessChurn.mu.Unlock()
+	if repCount != 2 {
+		t.Fatalf("expected repeat count=2 after second evaluated timeout call, got %d", repCount)
 	}
 
 	// 2. Regress flagged session
@@ -986,6 +1023,9 @@ func TestObserverSemanticScreen_BarrierTimeout_PreservesFlaggedQuarantine(t *tes
 	if adviceRegress.Reason != abi.ReasonIntegrityRefuted {
 		t.Fatalf("expected ReasonIntegrityRefuted for regress-flagged session, got %v", adviceRegress.Reason)
 	}
+	if adviceRegress.By != "observer:barrier_timeout_flagged" {
+		t.Fatalf("expected By='observer:barrier_timeout_flagged' for regress session, got %q", adviceRegress.By)
+	}
 	if !sessRegress.isFlagged() {
 		t.Fatal("expected regress session to remain flagged after barrier timeout")
 	}
@@ -995,6 +1035,18 @@ func TestObserverSemanticScreen_BarrierTimeout_PreservesFlaggedQuarantine(t *tes
 		t.Fatal("expected regress session kvPrefixWarm to remain false after barrier timeout")
 	}
 	sessRegress.mu.Unlock()
+
+	// Verify evaluation happened on timeout for regress session
+	histRegress := pool.GetSessionHistory(sessionRegressID)
+	if len(histRegress) != 1 {
+		t.Fatalf("expected 1 evaluated observation in history on barrier timeout for regress session, got %d", len(histRegress))
+	}
+	if histRegress[0].Tool != "Grep" {
+		t.Fatalf("expected evaluated tool 'Grep', got %s", histRegress[0].Tool)
+	}
+	if histRegress[0].StepVerdict != StepRegress {
+		t.Fatalf("expected evaluated StepVerdict=StepRegress, got %s", histRegress[0].StepVerdict)
+	}
 }
 
 func TestObserverSemanticScreen_ScreenResult_ContextDeadlineExceeded(t *testing.T) {

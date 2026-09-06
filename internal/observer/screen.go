@@ -195,6 +195,18 @@ func (s ObserverSemanticScreen) ScreenResult(ctx context.Context, c *abi.ToolCal
 
 	if errors.Is(err, ErrBarrierTimeout) {
 		sess := s.pool.getOrCreateSession(sessionID)
+		if (sess != nil && sess.isFlagged()) || res.StepVerdict == StepRegress || res.StepVerdict == StepChurn || obs.StepVerdict == StepRegress || obs.StepVerdict == StepChurn {
+			digest := res.Reason
+			if digest == "" {
+				digest = "observer sync barrier timed out on flagged session"
+			}
+			return abi.ScreenAdvice{
+				Disposition: abi.ScreenQuarantine,
+				Reason:      abi.ReasonIntegrityRefuted,
+				Digest:      digest,
+				By:          "observer:barrier_timeout_flagged",
+			}
+		}
 		if obs.IsReadOnly() && sess != nil && !sess.isFlagged() {
 			return abi.ScreenAdvice{
 				Disposition: abi.ScreenAllow,
