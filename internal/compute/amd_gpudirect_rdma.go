@@ -610,3 +610,139 @@ func (qp *RDMAQueuePair) Stats() QPStats {
 		BytesRecv: atomic.LoadUint64(&qp.bytesRecv),
 	}
 }
+
+// NewUSB4ReliableConnectedQP creates a Reliable Connected (RC) Queue Pair over USB4 DMA rings
+// configured with MTU 4096 for direct zero-copy APU interconnect (translating XINNOV-03 / ds4-odinlink).
+func NewUSB4ReliableConnectedQP(qpNum uint32, localNode, remoteNode int, sendCQ, recvCQ *CompletionQueue) (*RDMAQueuePair, error) {
+	if sendCQ == nil || recvCQ == nil {
+		return nil, errors.New("amddirect: SendCQ and RecvCQ are required for USB4 RC QP")
+	}
+
+	initAttr := QPInitAttr{
+		QPType:     QPTypeRC,
+		SendCQ:     sendCQ,
+		RecvCQ:     recvCQ,
+		MaxSendWR:  256,
+		MaxRecvWR:  256,
+		MaxSendSGE: 16,
+		MaxRecvSGE: 16,
+		NodeID:     localNode,
+	}
+
+	qp, err := NewRDMAQueuePair(qpNum, initAttr)
+	if err != nil {
+		return nil, err
+	}
+	qp.RemoteNode = remoteNode
+
+	// Transition RESET -> INIT
+	if err := qp.Modify(QPAttr{State: QPStateInit}); err != nil {
+		return nil, fmt.Errorf("amddirect: failed to transition USB4 QP to INIT: %w", err)
+	}
+
+	// Transition INIT -> RTR (with MTU 4096)
+	destQPN := qpNum ^ 1
+	if destQPN == 0 {
+		destQPN = 1001
+	}
+	if err := qp.Modify(QPAttr{
+		State:   QPStateRTR,
+		PathMTU: 4096,
+		DestQPN: destQPN,
+		RQPSN:   1,
+	}); err != nil {
+		return nil, fmt.Errorf("amddirect: failed to transition USB4 QP to RTR: %w", err)
+	}
+
+	// Transition RTR -> RTS
+	if err := qp.Modify(QPAttr{
+		State: QPStateRTS,
+		SQPSN: 1,
+	}); err != nil {
+		return nil, fmt.Errorf("amddirect: failed to transition USB4 QP to RTS: %w", err)
+	}
+
+	return qp, nil
+}
+
+// RegisterDirectSlabRegion registers a DirectSlab memory allocation directly with the RDMA subsystem,
+// returning a zero-copy RDMARegisteredRegion without intermediate host staging copies.
+func RegisterDirectSlabRegion(allocator *DirectSlabAllocator, alloc *SlabAllocation) (*RDMARegisteredRegion, error) {
+	if allocator == nil || alloc == nil {
+		return nil, errors.New("amddirect: allocator and allocation are required")
+	}
+
+	sge, err := allocator.GetSGE(alloc)
+	if err != nil {
+		return nil, fmt.Errorf("amddirect: failed to generate verbs SGE from direct slab: %w", err)
+	}
+
+	return &RDMARegisteredRegion{
+		RKey:        sge.LKey,
+		LKey:        sge.LKey,
+		IOVA:        uint64(sge.Address),
+		Length:      uint64(sge.Length),
+		DMABUFFD:    -1,
+		NodeID:      0,
+		SGEs:        []ScatterGatherElement{sge},
+		StagingCopy: 0,
+		Active:      true,
+	}, nil
+}
+
+// PostUSB4OneSidedWrite posts a one-sided RDMA write to the send queue of a USB4 RC Queue Pair,
+// directly transferring zero-copy tensor payloads to the remote peer's UMA address.
+func PostUSB4OneSidedWrite(qp *RDMAQueuePair, sge ScatterGatherElement, remoteAddr uint64, rkey uint32, immData uint32) (*WorkRequest, error) {
+	if qp == nil {
+		return nil, errors.New("amddirect: nil Queue Pair")
+	}
+
+	opcode := RDMAOpWrite
+	if immData > 0 {
+		opcode = RDMAOpWriteWithImm
+	}
+
+	wr := &WorkRequest{
+		WRID:       uint64(time.Now().UnixNano()),
+		OpCode:     opcode,
+		SGEs:       []ScatterGatherElement{sge},
+		RemoteAddr: remoteAddr,
+		RKey:       rkey,
+		ImmData:    immData,
+		Signaled:   true,
+	}
+
+	if err := qp.PostSend(wr); err != nil {
+		return nil, err
+	}
+	return wr, nil
+}
+
+// PostUSB4ArrivalSignal posts an arrival flag update to the peer's arrival flag address over USB4 RoCEv2.
+func PostUSB4ArrivalSignal(qp *RDMAQueuePair, remoteArrivalAddr uint64, rkey uint32, seq uint32) (*WorkRequest, error) {
+	if qp == nil {
+		return nil, errors.New("amddirect: nil Queue Pair")
+	}
+
+	// 4-byte sequence payload for arrival flag
+	sge := ScatterGatherElement{
+		Address: uintptr(remoteArrivalAddr),
+		Length:  4,
+		LKey:    rkey,
+	}
+
+	wr := &WorkRequest{
+		WRID:       uint64(time.Now().UnixNano()),
+		OpCode:     RDMAOpWriteWithImm,
+		SGEs:       []ScatterGatherElement{sge},
+		RemoteAddr: remoteArrivalAddr,
+		RKey:       rkey,
+		ImmData:    seq,
+		Signaled:   true,
+	}
+
+	if err := qp.PostSend(wr); err != nil {
+		return nil, err
+	}
+	return wr, nil
+}

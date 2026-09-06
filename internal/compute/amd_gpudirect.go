@@ -583,6 +583,17 @@ func (e *AMDGPUDirectHAL) GetRDMARegion(rkey uint32) *RDMARegisteredRegion {
 	return e.rdmaMRs[rkey]
 }
 
+// RegisterRDMARegion registers an externally-created RDMARegisteredRegion with the HAL coordinator.
+func (e *AMDGPUDirectHAL) RegisterRDMARegion(region *RDMARegisteredRegion) error {
+	if region == nil {
+		return errors.New("amddirect: cannot register nil RDMA region")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.rdmaMRs[region.RKey] = region
+	return nil
+}
+
 // CreateQueuePair allocates and registers an RDMA Queue Pair in this coordinator.
 func (e *AMDGPUDirectHAL) CreateQueuePair(initAttr QPInitAttr) (*RDMAQueuePair, error) {
 	e.mu.Lock()

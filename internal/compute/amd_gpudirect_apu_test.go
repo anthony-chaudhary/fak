@@ -2,10 +2,13 @@ package compute
 
 import (
 	"bytes"
+	"math"
 	"sync"
 	"testing"
 	"time"
 )
+
+var _ = math.Abs
 
 // TestAMDAPU_UnifiedZeroCopyStreaming verifies the core invariants for APU unified zero-copy memory streaming:
 //  1. Detection of APU signatures and unified topology.
@@ -754,5 +757,539 @@ func TestAMDAPU_HALIntegration(t *testing.T) {
 	_, err = hal.CreateAPUMemoryManager(999, 64*1024*1024*1024)
 	if err == nil {
 		t.Errorf("expected error on unknown node ID in CreateAPUMemoryManager")
+	}
+}
+
+// -------------------------------------------------------------------------------------------------
+// USB4 RoCEv2 All-Reduce Interconnect & 8us Interrupt Moderation Tests (#11910)
+// -------------------------------------------------------------------------------------------------
+
+func TestDirectSlab_USB4NHIInterruptModeration(t *testing.T) {
+	// 1. Verify PCI Class and MMIO Register Constants
+	if NHI_CLASS != 0x0c0340 {
+		t.Fatalf("NHI_CLASS mismatch: got 0x%06x, want 0x0c0340", NHI_CLASS)
+	}
+	if REG_INT_THROTTLE != 0x38c00 {
+		t.Fatalf("REG_INT_THROTTLE mismatch: got 0x%x, want 0x38c00", REG_INT_THROTTLE)
+	}
+	if NVEC != 16 {
+		t.Fatalf("NVEC mismatch: got %d, want 16", NVEC)
+	}
+
+	// 2. Verify Default (128us -> 500) and Tuned (8us -> 32) Values
+	if DefaultNHIInterruptModerationUS != 128 {
+		t.Errorf("DefaultNHIInterruptModerationUS = %d, want 128", DefaultNHIInterruptModerationUS)
+	}
+	if DefaultNHIThrottleValue != 500 {
+		t.Errorf("DefaultNHIThrottleValue = %d, want 500", DefaultNHIThrottleValue)
+	}
+	if TunedNHIInterruptModerationUS != 8 {
+		t.Errorf("TunedNHIInterruptModerationUS = %d, want 8", TunedNHIInterruptModerationUS)
+	}
+	if TunedNHIThrottleValue != 32 {
+		t.Errorf("TunedNHIThrottleValue = %d, want 32", TunedNHIThrottleValue)
+	}
+
+	// 3. Formula Test: DIV_ROUND_UP(ns, 256)
+	// 128,000 ns -> 500
+	if val := CalculateNHIThrottleValue(128000); val != 500 {
+		t.Errorf("CalculateNHIThrottleValue(128000) = %d, want 500", val)
+	}
+	// 8,000 ns -> (8000 + 255) / 256 = 32
+	if val := CalculateNHIThrottleValue(8000); val != 32 {
+		t.Errorf("CalculateNHIThrottleValue(8000) = %d, want 32", val)
+	}
+	// 0 ns -> 0
+	if val := CalculateNHIThrottleValue(0); val != 0 {
+		t.Errorf("CalculateNHIThrottleValue(0) = %d, want 0", val)
+	}
+	// Negative ns -> 0
+	if val := CalculateNHIThrottleValue(-100); val != 0 {
+		t.Errorf("CalculateNHIThrottleValue(-100) = %d, want 0", val)
+	}
+	// Saturation at 0xFFFF
+	if val := CalculateNHIThrottleValue(20000000); val != 0xFFFF {
+		t.Errorf("CalculateNHIThrottleValue(20ms) = 0x%x, want 0xFFFF", val)
+	}
+	// Massive duration / MaxInt64 overflow guard
+	if val := CalculateNHIThrottleValue(math.MaxInt64); val != 0xFFFF {
+		t.Errorf("CalculateNHIThrottleValue(MaxInt64) = 0x%x, want 0xFFFF", val)
+	}
+	if val := CalculateNHIThrottleValue(100 * 1000 * 1000 * 1000); val != 0xFFFF { // 100s
+		t.Errorf("CalculateNHIThrottleValue(100s) = 0x%x, want 0xFFFF", val)
+	}
+
+	// Duration calculation
+	if dur := CalculateNHIDuration(500); dur != 128*time.Microsecond {
+		t.Errorf("CalculateNHIDuration(500) = %v, want 128us", dur)
+	}
+	if dur := CalculateNHIDuration(32); dur != 8192*time.Nanosecond {
+		t.Errorf("CalculateNHIDuration(32) = %v, want 8192ns", dur)
+	}
+
+	// 4. Controller Initialization and Status
+	cfg := USB4NHIConfig{
+		PCIClass:         NHI_CLASS,
+		ThrottleRegister: REG_INT_THROTTLE,
+		NumVectors:       NVEC,
+	}
+	ctrl := NewUSB4NHIController(cfg)
+	if ctrl.IsTuned() {
+		t.Errorf("expected controller not tuned initially")
+	}
+
+	// Check initial values (all 500) and register offsets (0x38c00 + 4*i)
+	for i := 0; i < NVEC; i++ {
+		reg, err := ctrl.RegisterOffset(i)
+		if err != nil {
+			t.Fatalf("RegisterOffset(%d) failed: %v", i, err)
+		}
+		expectedReg := REG_INT_THROTTLE + uint32(4*i)
+		if reg != expectedReg {
+			t.Errorf("vector %d register = 0x%x, want 0x%x", i, reg, expectedReg)
+		}
+
+		val, err := ctrl.ReadThrottleRegister(i)
+		if err != nil {
+			t.Fatalf("ReadThrottleRegister(%d) failed: %v", i, err)
+		}
+		if val != DefaultNHIThrottleValue {
+			t.Errorf("vector %d initial val = %d, want %d", i, val, DefaultNHIThrottleValue)
+		}
+	}
+
+	// Error on out-of-bounds vectors
+	if _, err := ctrl.RegisterOffset(-1); err == nil {
+		t.Errorf("expected error for vector -1")
+	}
+	if _, err := ctrl.RegisterOffset(16); err == nil {
+		t.Errorf("expected error for vector 16")
+	}
+	if err := ctrl.TuneVector(16, 8*time.Microsecond); err == nil {
+		t.Errorf("expected error tuning vector 16")
+	}
+	if _, err := ctrl.VectorStatus(-1); err == nil {
+		t.Errorf("expected error getting status for vector -1")
+	}
+
+	// Tune single vector (vector 5)
+	if err := ctrl.TuneVector(5, 8*time.Microsecond); err != nil {
+		t.Fatalf("TuneVector(5) failed: %v", err)
+	}
+	stat, err := ctrl.VectorStatus(5)
+	if err != nil {
+		t.Fatalf("VectorStatus(5) failed: %v", err)
+	}
+	if stat.ThrottleValue != TunedNHIThrottleValue {
+		t.Errorf("vector 5 throttle = %d, want %d", stat.ThrottleValue, TunedNHIThrottleValue)
+	}
+	if !stat.Tuned {
+		t.Errorf("expected vector 5 to be marked tuned")
+	}
+
+	// Tune all vectors to 8us (value 32)
+	if err := ctrl.TuneAllVectors(8 * time.Microsecond); err != nil {
+		t.Fatalf("TuneAllVectors(8us) failed: %v", err)
+	}
+	if !ctrl.IsTuned() {
+		t.Errorf("expected controller to be marked tuned")
+	}
+
+	statuses := ctrl.AllVectorsStatus()
+	if len(statuses) != NVEC {
+		t.Fatalf("AllVectorsStatus returned %d entries, want %d", len(statuses), NVEC)
+	}
+	for i, s := range statuses {
+		if s.ThrottleValue != TunedNHIThrottleValue {
+			t.Errorf("vector %d throttle = %d, want %d", i, s.ThrottleValue, TunedNHIThrottleValue)
+		}
+		if s.Latency > 9*time.Microsecond || s.Latency < 8*time.Microsecond {
+			t.Errorf("vector %d latency = %v, want ~8.192us", i, s.Latency)
+		}
+	}
+}
+
+func TestDirectSlab_USB4RoCEv2_DualStrixHalo(t *testing.T) {
+	// 1. Architecture Guard: requires gfx1151 (Strix Halo)
+	badCfg := DualStrixHaloConfig{
+		Architecture: "gfx90c",
+	}
+	if _, err := NewDualStrixHaloInterconnect(badCfg); err == nil {
+		t.Errorf("expected error creating interconnect with non-gfx1151 arch")
+	}
+
+	// 2. Valid Interconnect for Dual Strix Halo
+	cfg := DualStrixHaloConfig{
+		LocalNodeID:         0,
+		RemoteNodeID:        1,
+		Architecture:        "gfx1151",
+		LinkSpeedGbps:       40.0,
+		MTU:                 4096,
+		InterruptModeration: 8 * time.Microsecond,
+		DirectSlabBytes:     16 * 1024 * 1024, // 16 MiB
+		DMABUFCapable:       true,
+		LKey:                0x1000,
+		RKey:                0x2000,
+	}
+
+	interconnect, err := NewDualStrixHaloInterconnect(cfg)
+	if err != nil {
+		t.Fatalf("NewDualStrixHaloInterconnect failed: %v", err)
+	}
+	defer interconnect.Close()
+
+	// Verify NHI moderation is tuned to 8us
+	nhi := interconnect.NHI()
+	if !nhi.IsTuned() {
+		t.Errorf("expected interconnect NHI controller to be tuned")
+	}
+	for i := 0; i < NVEC; i++ {
+		val, _ := nhi.ReadThrottleRegister(i)
+		if val != TunedNHIThrottleValue {
+			t.Errorf("vector %d throttle = %d, want %d (8us)", i, val, TunedNHIThrottleValue)
+		}
+	}
+
+	// Verify DirectSlabAllocator configuration:
+	// Page-aligned (4096), Direct zero-copy, PinMemory
+	slab := interconnect.Slab()
+	if slab == nil {
+		t.Fatalf("slab allocator is nil")
+	}
+	if slab.Alignment() != 4096 {
+		t.Errorf("slab alignment = %d, want 4096", slab.Alignment())
+	}
+	if !slab.IsZeroCopy() {
+		t.Errorf("expected slab IsZeroCopy() = true")
+	}
+	if slab.StagingCopyCount() != 0 {
+		t.Errorf("slab StagingCopyCount = %d, want 0", slab.StagingCopyCount())
+	}
+
+	// 3. Allocate 8KB tensor buffer (300B-class MoE hidden state: 4096 BF16 = 8192 bytes)
+	alloc, err := slab.Allocate(8192)
+	if err != nil {
+		t.Fatalf("slab Allocate failed: %v", err)
+	}
+	defer alloc.Free()
+
+	if alloc.Offset%4096 != 0 {
+		t.Errorf("allocation offset %d is not 4096-page aligned", alloc.Offset)
+	}
+
+	// 4. Verbs SGE generation and RDMA region registration
+	sge, err := slab.GetSGE(alloc)
+	if err != nil {
+		t.Fatalf("GetSGE failed: %v", err)
+	}
+	if sge.Length != 8192 {
+		t.Errorf("sge.Length = %d, want 8192", sge.Length)
+	}
+	if sge.LKey != cfg.LKey {
+		t.Errorf("sge.LKey = 0x%x, want 0x%x", sge.LKey, cfg.LKey)
+	}
+
+	mr, err := RegisterDirectSlabRegion(slab, alloc)
+	if err != nil {
+		t.Fatalf("RegisterDirectSlabRegion failed: %v", err)
+	}
+	if mr.StagingCopyCount() != 0 {
+		t.Errorf("RDMA region staging copy count = %d, want 0", mr.StagingCopyCount())
+	}
+	if !mr.Active {
+		t.Errorf("expected RDMA region to be active")
+	}
+
+	// 5. RC Queue Pairs over USB4 with MTU 4096 in RTS state
+	localQP := interconnect.LocalQP()
+	remoteQP := interconnect.RemoteQP()
+	if localQP.Type != QPTypeRC || remoteQP.Type != QPTypeRC {
+		t.Errorf("expected QPTypeRC for both QPs")
+	}
+	if localQP.PathMTU != 4096 || remoteQP.PathMTU != 4096 {
+		t.Errorf("expected PathMTU 4096 for both QPs")
+	}
+	if localQP.State != QPStateRTS || remoteQP.State != QPStateRTS {
+		t.Errorf("expected QPStateRTS for both QPs (local=%s, remote=%s)", localQP.State, remoteQP.State)
+	}
+
+	// Post one-sided RDMA Write directly targeting peer UMA memory
+	wr, err := PostUSB4OneSidedWrite(localQP, sge, uint64(sge.Address), cfg.RKey, 0)
+	if err != nil {
+		t.Fatalf("PostUSB4OneSidedWrite failed: %v", err)
+	}
+	if wr.OpCode != RDMAOpWrite {
+		t.Errorf("expected opcode RDMAOpWrite, got %v", wr.OpCode)
+	}
+
+	// Post arrival flag update
+	signalWR, err := PostUSB4ArrivalSignal(localQP, uint64(sge.Address+8192), cfg.RKey, 1)
+	if err != nil {
+		t.Fatalf("PostUSB4ArrivalSignal failed: %v", err)
+	}
+	if signalWR.OpCode != RDMAOpWriteWithImm {
+		t.Errorf("expected opcode RDMAOpWriteWithImm for arrival signal, got %v", signalWR.OpCode)
+	}
+}
+
+func TestDirectSlab_StreamAsyncDoorbellAllReduce(t *testing.T) {
+	// 1. Doorbell Encoding and Decoding Tests
+	for _, seq := range []uint8{1, 2, 42, 255} {
+		for _, nbytes := range []uint32{256, 1024, 8192, 65536, 0x00FFFFFF} {
+			db := EncodeGPUSendDoorbell(seq, nbytes)
+			dSeq, dBytes := DecodeGPUSendDoorbell(db)
+			if dSeq != seq {
+				t.Errorf("doorbell seq decoded %d, want %d", dSeq, seq)
+			}
+			if dBytes != nbytes {
+				t.Errorf("doorbell bytes decoded %d, want %d", dBytes, nbytes)
+			}
+		}
+	}
+
+	// 2. Interconnect & Engine Setup
+	interconnect, err := NewDualStrixHaloInterconnect(DualStrixHaloConfig{
+		Architecture:        "gfx1151",
+		DirectSlabBytes:     16 * 1024 * 1024,
+		InterruptModeration: 8 * time.Microsecond,
+	})
+	if err != nil {
+		t.Fatalf("NewDualStrixHaloInterconnect failed: %v", err)
+	}
+	defer interconnect.Close()
+
+	engine, err := NewUSB4DualAPUAllReduceEngine(interconnect, 0, 1)
+	if err != nil {
+		t.Fatalf("NewUSB4DualAPUAllReduceEngine failed: %v", err)
+	}
+	defer engine.Close()
+
+	if engine.StagingCopyCount() != 0 {
+		t.Errorf("initial engine StagingCopyCount = %d, want 0", engine.StagingCopyCount())
+	}
+
+	// 3. Float32 TP=2 Tensor All-Reduce Test (Double-Buffered Slots Alternation)
+	const numElems = 2048 // 2048 floats = 8192 bytes
+	rank0Src := make([]float32, numElems)
+	rank1Src := make([]float32, numElems)
+	for i := 0; i < numElems; i++ {
+		rank0Src[i] = float32(i + 1)
+		rank1Src[i] = float32((i + 1) * 10)
+	}
+
+	rank0Dst := make([]float32, numElems)
+	rank1Dst := make([]float32, numElems)
+
+	// Run multiple rounds to exercise double-buffering (slot 0 -> slot 1 -> slot 0)
+	for round := 0; round < 6; round++ {
+		err := engine.AllReduceTP2(rank0Src, rank1Src, rank0Dst, rank1Dst)
+		if err != nil {
+			t.Fatalf("round %d AllReduceTP2 failed: %v", round, err)
+		}
+
+		for i := 0; i < numElems; i++ {
+			expected := float32((i + 1) * 11)
+			if rank0Dst[i] != expected {
+				t.Fatalf("round %d rank0Dst[%d] = %f, want %f", round, i, rank0Dst[i], expected)
+			}
+			if rank1Dst[i] != expected {
+				t.Fatalf("round %d rank1Dst[%d] = %f, want %f", round, i, rank1Dst[i], expected)
+			}
+		}
+	}
+
+	if engine.StagingCopyCount() != 0 {
+		t.Errorf("engine StagingCopyCount after F32 exchanges = %d, want 0", engine.StagingCopyCount())
+	}
+
+	// 4. BF16 8KB Hidden State All-Reduce (4096 BF16 elements = 8192 bytes)
+	const bf16Elems = 4096
+	rank0BF16Src := make([]byte, bf16Elems*2)
+	rank1BF16Src := make([]byte, bf16Elems*2)
+	for i := 0; i < bf16Elems; i++ {
+		f0 := float32(i + 1)
+		f1 := float32(2 * (i + 1))
+		b0 := float32ToBF16(f0)
+		b1 := float32ToBF16(f1)
+		rank0BF16Src[2*i] = byte(b0 & 0xFF)
+		rank0BF16Src[2*i+1] = byte(b0 >> 8)
+		rank1BF16Src[2*i] = byte(b1 & 0xFF)
+		rank1BF16Src[2*i+1] = byte(b1 >> 8)
+	}
+
+	rank0BF16Dst := make([]byte, bf16Elems*2)
+	rank1BF16Dst := make([]byte, bf16Elems*2)
+
+	for round := 0; round < 4; round++ {
+		err := engine.AllReduceBF16TP2(rank0BF16Src, rank1BF16Src, rank0BF16Dst, rank1BF16Dst)
+		if err != nil {
+			t.Fatalf("round %d AllReduceBF16TP2 failed: %v", round, err)
+		}
+
+		for i := 0; i < bf16Elems; i++ {
+			expected := float32(3 * (i + 1))
+			b0 := uint16(rank0BF16Dst[2*i]) | (uint16(rank0BF16Dst[2*i+1]) << 8)
+			gotF0 := bf16ToFloat32(b0)
+			if math.Abs(float64(gotF0-expected))/float64(expected) > 0.02 {
+				t.Fatalf("round %d BF16 rank0 result at %d = %f, want ~%f", round, i, gotF0, expected)
+			}
+
+			b1 := uint16(rank1BF16Dst[2*i]) | (uint16(rank1BF16Dst[2*i+1]) << 8)
+			gotF1 := bf16ToFloat32(b1)
+			if math.Abs(float64(gotF1-expected))/float64(expected) > 0.02 {
+				t.Fatalf("round %d BF16 rank1 result at %d = %f, want ~%f", round, i, gotF1, expected)
+			}
+		}
+	}
+
+	if engine.StagingCopyCount() != 0 {
+		t.Errorf("engine StagingCopyCount after BF16 exchanges = %d, want 0", engine.StagingCopyCount())
+	}
+
+	ops, totalBytes := engine.Stats()
+	if ops != 10 { // 6 F32 rounds + 4 BF16 rounds
+		t.Errorf("total ops = %d, want 10", ops)
+	}
+	if totalBytes == 0 {
+		t.Errorf("expected totalBytes > 0")
+	}
+
+	// 5. Single Rank AllReduceF32 and AllReduceBF16
+	singleF32Src := make([]float32, 1024)
+	singleF32Dst := make([]float32, 1024)
+	for i := range singleF32Src {
+		singleF32Src[i] = float32(i + 5)
+	}
+	if err := engine.AllReduceF32(singleF32Src, singleF32Dst); err != nil {
+		t.Fatalf("AllReduceF32 failed: %v", err)
+	}
+	for i := range singleF32Dst {
+		if singleF32Dst[i] != singleF32Src[i] {
+			t.Fatalf("single AllReduceF32 mismatch at %d: got %f, want %f", i, singleF32Dst[i], singleF32Src[i])
+		}
+	}
+
+	// 6. Large Sub-1MB Payload Test (128 KiB > 64 KiB)
+	const largeElems = 32768 // 32768 floats = 128 KiB
+	largeSrc0 := make([]float32, largeElems)
+	largeSrc1 := make([]float32, largeElems)
+	for i := range largeSrc0 {
+		largeSrc0[i] = 1.5
+		largeSrc1[i] = 2.5
+	}
+	largeDst0 := make([]float32, largeElems)
+	largeDst1 := make([]float32, largeElems)
+	if err := engine.AllReduceTP2(largeSrc0, largeSrc1, largeDst0, largeDst1); err != nil {
+		t.Fatalf("AllReduceTP2 on 128 KiB payload failed: %v", err)
+	}
+	for i := range largeDst0 {
+		if largeDst0[i] != 4.0 || largeDst1[i] != 4.0 {
+			t.Fatalf("128 KiB all-reduce mismatch at %d: got (%f, %f), want 4.0", i, largeDst0[i], largeDst1[i])
+		}
+	}
+
+	// 7. Error Boundary Checks
+	if err := engine.AllReduceTP2(nil, rank1Src, rank0Dst, rank1Dst); err == nil {
+		t.Errorf("expected error on nil tensor slice")
+	}
+	// Odd length BF16 slice
+	oddBF16 := make([]byte, 15)
+	if err := engine.AllReduceBF16TP2(oddBF16, oddBF16, oddBF16, oddBF16); err == nil {
+		t.Errorf("expected error on odd length BF16 tensor")
+	}
+	oversized := make([]float32, (TBV2MaxPayloadBytes/4)+100)
+	if err := engine.AllReduceTP2(oversized, oversized, oversized, oversized); err == nil {
+		t.Errorf("expected error on payload exceeding 1 MiB threshold")
+	}
+}
+
+func TestDirectSlab_MoETP2ExchangeSpeedup(t *testing.T) {
+	// 1. Invariant Checks for Latency Constants
+	if TCPBaselineLatencyUS != 120.0 {
+		t.Errorf("TCPBaselineLatencyUS = %.1f, want 120.0", TCPBaselineLatencyUS)
+	}
+	if USB4RoCELatencyUS != 105.0 {
+		t.Errorf("USB4RoCELatencyUS = %.1f, want 105.0", USB4RoCELatencyUS)
+	}
+	if LatencySavedPerExchangeUS != 15.0 {
+		t.Errorf("LatencySavedPerExchangeUS = %.1f, want 15.0", LatencySavedPerExchangeUS)
+	}
+
+	// 2. GLM-5.3-Flash Verification (46 Layers, 92 All-Reduce Exchanges, 8KB Hidden State)
+	glmModel, err := NewMoETP2ExchangeModel("GLM-5.3-Flash", 46)
+	if err != nil {
+		t.Fatalf("NewMoETP2ExchangeModel(GLM-5.3-Flash) failed: %v", err)
+	}
+	if err := glmModel.Verify(); err != nil {
+		t.Fatalf("glmModel.Verify() failed: %v", err)
+	}
+
+	glmReport := glmModel.EvaluateSpeedup()
+	if glmReport.TotalExchanges != 92 {
+		t.Errorf("GLM-5.3-Flash total exchanges = %d, want 92 (46 layers * 2)", glmReport.TotalExchanges)
+	}
+	if glmReport.HiddenStateBytes != 8192 {
+		t.Errorf("hidden state bytes = %d, want 8192 (8KB)", glmReport.HiddenStateBytes)
+	}
+	if glmReport.TCPExchangeLatencyUS != 120.0 {
+		t.Errorf("TCPExchangeLatencyUS = %.1fus, want 120.0us", glmReport.TCPExchangeLatencyUS)
+	}
+	if glmReport.USB4RoCEExchangeLatencyUS != 105.0 {
+		t.Errorf("USB4RoCEExchangeLatencyUS = %.1fus, want 105.0us", glmReport.USB4RoCEExchangeLatencyUS)
+	}
+	if glmReport.LatencySavedPerExchangeUS != 15.0 {
+		t.Errorf("LatencySavedPerExchangeUS = %.1fus, want 15.0us", glmReport.LatencySavedPerExchangeUS)
+	}
+
+	// Total communication time per token
+	// 92 exchanges * 120us = 11,040 us = 11.04 ms
+	if glmReport.TCPCommPerTokenUS != 11040.0 {
+		t.Errorf("TCPCommPerTokenUS = %.1fus, want 11040.0us", glmReport.TCPCommPerTokenUS)
+	}
+	// 92 exchanges * 105us = 9,660 us = 9.66 ms
+	if glmReport.USB4RoCECommPerTokenUS != 9660.0 {
+		t.Errorf("USB4RoCECommPerTokenUS = %.1fus, want 9660.0us", glmReport.USB4RoCECommPerTokenUS)
+	}
+	// Net communication saved per token: 11040 - 9660 = 1380 us = 1.38 ms
+	if glmReport.CommTimeSavedPerTokenUS != 1380.0 {
+		t.Errorf("CommTimeSavedPerTokenUS = %.1fus, want 1380.0us", glmReport.CommTimeSavedPerTokenUS)
+	}
+
+	// Decoding speedup: 15.0 tok/s -> 21.3 tok/s (1.42x speedup)
+	if glmReport.BaselineTokensPerSec != 15.0 {
+		t.Errorf("BaselineTokensPerSec = %.1f, want 15.0", glmReport.BaselineTokensPerSec)
+	}
+	if glmReport.OptimizedTokensPerSec != 21.3 {
+		t.Errorf("OptimizedTokensPerSec = %.1f, want 21.3", glmReport.OptimizedTokensPerSec)
+	}
+	if glmReport.ThroughputSpeedupRatio < 1.41 || glmReport.ThroughputSpeedupRatio > 1.43 {
+		t.Errorf("ThroughputSpeedupRatio = %.3f, want ~1.420", glmReport.ThroughputSpeedupRatio)
+	}
+	if glmReport.LatencyReductionPercent != 12.5 {
+		t.Errorf("LatencyReductionPercent = %.2f%%, want 12.5%%", glmReport.LatencyReductionPercent)
+	}
+
+	// 3. DeepSeek-V4-Flash Verification (61 Layers, 122 All-Reduce Exchanges)
+	d4Model, err := NewMoETP2ExchangeModel("DeepSeek-V4-Flash", 61)
+	if err != nil {
+		t.Fatalf("NewMoETP2ExchangeModel(DeepSeek-V4-Flash) failed: %v", err)
+	}
+	if err := d4Model.Verify(); err != nil {
+		t.Fatalf("d4Model.Verify() failed: %v", err)
+	}
+	d4Report := d4Model.EvaluateSpeedup()
+	if d4Report.TotalExchanges != 122 {
+		t.Errorf("DeepSeek-V4-Flash total exchanges = %d, want 122 (61 layers * 2)", d4Report.TotalExchanges)
+	}
+	if d4Report.HiddenStateBytes != 8192 {
+		t.Errorf("hidden state bytes = %d, want 8192 (8KB)", d4Report.HiddenStateBytes)
+	}
+
+	// 4. Out-of-bounds layer counts (< 46 or > 92)
+	if _, err := NewMoETP2ExchangeModel("InvalidModel", 32); err == nil {
+		t.Errorf("expected error for layer count 32 (< 46)")
+	}
+	if _, err := NewMoETP2ExchangeModel("InvalidModel", 128); err == nil {
+		t.Errorf("expected error for layer count 128 (> 92)")
 	}
 }
