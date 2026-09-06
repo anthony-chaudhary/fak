@@ -1,0 +1,43 @@
+{
+  "sessionId": "gemini-tokens-session-002",
+  "projectHash": "fak",
+  "startTime": "2026-06-16T12:00:00.000Z",
+  "lastUpdated": "2026-06-16T12:03:00.000Z",
+  "messages": [
+    {
+      "id": "u1",
+      "timestamp": "2026-06-16T12:00:00.000Z",
+      "type": "user",
+      "content": "List files in directory"
+    },
+    {
+      "id": "g1",
+      "timestamp": "2026-06-16T12:00:15.000Z",
+      "type": "gemini",
+      "model": "gemini-2.5-flash",
+      "content": "I will list the files in the directory.",
+      "tokens": {
+        "input": 5000,
+        "output": 50,
+        "cached": 2000,
+        "thoughts": 30,
+        "tool": 0,
+        "total": 5080
+      },
+      "toolCalls": [
+        {
+          "id": "tc-list",
+          "name": "list_directory",
+          "args": {
+            "path": "."
+          },
+          "result": [
+            "file1.txt",
+            "file2.txt"
+          ],
+          "status": "success"
+        }
+      ]
+    }
+  ]
+}

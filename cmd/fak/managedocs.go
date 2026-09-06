@@ -35,7 +35,7 @@ func runManageDocs(stdout, stderr io.Writer, argv []string) int {
 			docsDirExplicit = true
 		}
 	})
-	if docsDirExplicit && !*documentSets && !*budget {
+	if docsDirExplicit && !*documentSets && !*budget && !*checkRetained {
 		*documentSets = true
 	}
 	if *documentSets || *budget {

@@ -20,8 +20,8 @@ package trajctl
 // the derived curve; the single side effect (delivery) enters through the
 // SteerFunc seam, and the wire client below speaks the steer route's pinned
 // shape with the stdlib client because trajctl(1) cannot import gateway(4).
-// DETOUR_OVERRUN is the return-to-main rung's trigger, and warn/suspend/
-// escalate are higher rungs — all out of scope here.
+// DETOUR_OVERRUN triggers the return-to-main loop (#2552), reusing the spine
+// steer channel to nudge or warn referencing the paused parent.
 
 import (
 	"bytes"
@@ -35,14 +35,15 @@ import (
 	"time"
 )
 
-// SteerAction is the closed vocabulary of a regime-gate decision. Exactly two
-// values on this rung: a composed nudge, or an explicit ledgered no-action.
+// SteerAction is the closed vocabulary of a regime-gate decision.
 type SteerAction string
 
 const (
-	// ActionNudge: a re-anchor packet was composed for delivery through the
-	// session steer channel.
+	// ActionNudge: a re-anchor or return-to-main packet was composed for delivery
+	// through the session steer channel.
 	ActionNudge SteerAction = "nudge"
+	// ActionWarn: repeated overrun escalates one rung to warn.
+	ActionWarn SteerAction = "warn"
 	// ActionNone: the regime gate decided against intervening. The decision is
 	// still ledgered — a silent no-action would starve the calibration child.
 	ActionNone SteerAction = "none"
@@ -109,8 +110,21 @@ func (s State) DecideNudge(oc ObjectiveCurve) SteerDecision {
 	case SignalDrift, SignalStall:
 		// the rung's trigger regime — fall through to the episode scan.
 	case SignalDetourOverrun:
-		d.Reason = "regime gate: DETOUR_OVERRUN belongs to the return-to-main rung, not the re-anchor nudge"
-		return d
+		obj, ok := s.Objectives[oc.ObjectiveID]
+		if !ok {
+			d.Reason = "regime gate: objective was never declared — nothing to re-anchor on"
+			return d
+		}
+		parentID := oc.ParentID
+		if parentID == "" {
+			parentID = obj.ParentID
+		}
+		parent, okParent := s.Objectives[parentID]
+		if parentID == "" || !okParent || parent.Status != StatusPaused {
+			d.Reason = "regime gate: DETOUR_OVERRUN belongs to the return-to-main rung, not the re-anchor nudge"
+			return d
+		}
+		return s.DecideReturnToMain(oc)
 	default:
 		d.Reason = "regime gate: recent curve healthy — mid-trajectory intervention degrades a high-success session"
 		return d
@@ -192,7 +206,7 @@ func (s State) SteerSweep(stamp Stamp, unixMillis int64, deliver SteerFunc) []St
 		d.UnixMillis = unixMillis
 		d.SessionID = stamp.SessionID
 		d.RunID = stamp.RunID
-		if d.Action == ActionNudge {
+		if d.Action == ActionNudge || d.Action == ActionWarn {
 			switch {
 			case deliver == nil:
 				d.DeliverErr = "no steer channel configured"
@@ -284,7 +298,7 @@ func validateSteer(d SteerDecision) error {
 		return errors.New("trajctl: steer objective id is required")
 	}
 	switch d.Action {
-	case ActionNudge, ActionNone:
+	case ActionNudge, ActionWarn, ActionNone:
 	default:
 		return fmt.Errorf("trajctl: invalid steer action %q", d.Action)
 	}
@@ -294,8 +308,8 @@ func validateSteer(d SteerDecision) error {
 	if d.Reason == "" {
 		return errors.New("trajctl: steer reason is required")
 	}
-	if d.Action == ActionNudge && d.Packet == "" {
-		return errors.New("trajctl: a nudge row must carry its packet")
+	if (d.Action == ActionNudge || d.Action == ActionWarn) && d.Packet == "" {
+		return errors.New("trajctl: a nudge or warn row must carry its packet")
 	}
 	if d.Action == ActionNone && (d.Packet != "" || d.Delivered) {
 		return errors.New("trajctl: a none row must not carry a packet or a delivery")

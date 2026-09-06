@@ -263,3 +263,142 @@ func TestPayloadMarshalsEmptySlicesNotNull(t *testing.T) {
 		t.Fatalf("round-trip lost fields: %+v", round)
 	}
 }
+
+func TestWitnessedProgressNamesUnmeasurableAggregates(t *testing.T) {
+	now := base
+	// Four child issues, each closed at +10h, +20h, +30h, +40h.
+	child1 := Issue{Number: 1, CreatedAt: now, ClosedAt: ptr(now.Add(10 * time.Hour))}
+	child2 := Issue{Number: 2, CreatedAt: now, ClosedAt: ptr(now.Add(20 * time.Hour))}
+	child3 := Issue{Number: 3, CreatedAt: now, ClosedAt: ptr(now.Add(30 * time.Hour))}
+	child4 := Issue{Number: 4, CreatedAt: now, ClosedAt: ptr(now.Add(40 * time.Hour))}
+
+	// Witnessed epic with children (basis="children"), all 4 closed so all 4 DefaultThresholds reached.
+	witnessedEpic := Issue{
+		Number:    100,
+		Title:     "Epic: witnessed core",
+		CreatedAt: now,
+		Body:      "- [ ] #1\n- [ ] #2\n- [ ] #3\n- [ ] #4\n",
+	}
+
+	// Checkbox-only aggregate (basis="checkbox"), self-reported without child refs.
+	checkboxEpic := Issue{
+		Number:    200,
+		Title:     "Epic: checkbox tasks",
+		CreatedAt: now,
+		Body:      "- [x] done one\n- [ ] todo two\n- [ ] todo three\n- [ ] todo four\n- [ ] todo five\n",
+	}
+
+	// None-basis aggregate (basis="none"), epic title/label but no task items.
+	noneEpic := Issue{
+		Number:    300,
+		Title:     "[epic] bare aggregate",
+		CreatedAt: now,
+		Body:      "prose only",
+	}
+
+	in := healthyInput(now.Add(50 * time.Hour))
+	in.Issues = append(in.Issues, child1, child2, child3, child4, witnessedEpic, checkboxEpic, noneEpic)
+
+	rep := Build(in)
+	k := findKPI(t, rep, "witnessed_progress")
+
+	// 1. Unmeasurable aggregates (#200, #300) must be named by number in defect detail and report.
+	if len(k.Defects) == 0 {
+		t.Fatalf("expected defect for witnessed_progress, got none")
+	}
+	defectText := strings.Join(k.Defects, " ")
+	if !strings.Contains(defectText, "#200") || !strings.Contains(defectText, "#300") {
+		t.Fatalf("defect must name unmeasurable aggregates #200 and #300 by number: %q", defectText)
+	}
+	if !strings.Contains(k.Detail, "#200") || !strings.Contains(k.Detail, "#300") {
+		t.Fatalf("kpi detail must name unmeasurable aggregates #200 and #300 by number: %q", k.Detail)
+	}
+	// Check rep.Unmeasurable
+	if len(rep.Unmeasurable) != 2 || rep.Unmeasurable[0] != 200 || rep.Unmeasurable[1] != 300 {
+		t.Fatalf("rep.Unmeasurable = %v, want [200 300] (worst 200 with 4 open checkboxes first, 300 second)", rep.Unmeasurable)
+	}
+
+	// 2. The four DefaultThresholds (25, 50, 75, 100) must be reported for the witnessed aggregate.
+	var witnessedProg *EpicProgress
+	var checkboxProg *EpicProgress
+	for i := range rep.Epics {
+		if rep.Epics[i].Issue == 100 {
+			witnessedProg = &rep.Epics[i]
+		}
+		if rep.Epics[i].Issue == 200 {
+			checkboxProg = &rep.Epics[i]
+		}
+	}
+	if witnessedProg == nil {
+		t.Fatalf("rep.Epics missing epic #100")
+	}
+	if witnessedProg.Basis != "children" {
+		t.Fatalf("epic #100 basis = %q, want children", witnessedProg.Basis)
+	}
+	if witnessedProg.Fraction != 1.0 {
+		t.Fatalf("epic #100 fraction = %v, want 1.0", witnessedProg.Fraction)
+	}
+	if witnessedProg.ChildrenClosed != 4 || len(witnessedProg.Children) != 4 {
+		t.Fatalf("epic #100 closed/total = %d/%d, want 4/4", witnessedProg.ChildrenClosed, len(witnessedProg.Children))
+	}
+	for _, pct := range DefaultThresholds {
+		h, ok := witnessedProg.HoursTo[pct]
+		if !ok {
+			t.Fatalf("epic #100 missing milestone %d%% in HoursTo: %v", pct, witnessedProg.HoursTo)
+		}
+		if h <= 0 {
+			t.Fatalf("epic #100 milestone %d%% HoursTo = %v, want > 0", pct, h)
+		}
+	}
+	// And check that k.Soft carries milestone timestamps for all four DefaultThresholds.
+	softText := strings.Join(k.Soft, "\n")
+	for _, pctStr := range []string{"25%", "50%", "75%", "100%"} {
+		if !strings.Contains(softText, pctStr) {
+			t.Fatalf("k.Soft must report threshold %s, got:\n%s", pctStr, softText)
+		}
+	}
+
+	// 3. A checkbox-basis aggregate must emit NO milestone timestamps.
+	if checkboxProg == nil {
+		t.Fatalf("rep.Epics missing epic #200")
+	}
+	if checkboxProg.Basis != "checkbox" {
+		t.Fatalf("epic #200 basis = %q, want checkbox", checkboxProg.Basis)
+	}
+	if len(checkboxProg.Milestones) != 0 || len(checkboxProg.HoursTo) != 0 {
+		t.Fatalf("checkbox-basis aggregate #200 must emit no milestones, got milestones=%v hours_to=%v",
+			checkboxProg.Milestones, checkboxProg.HoursTo)
+	}
+	for _, line := range k.Soft {
+		if strings.Contains(line, "#200") {
+			if strings.Contains(line, "hours to") || strings.Contains(line, "25%") {
+				t.Fatalf("checkbox-basis aggregate #200 soft line must emit no milestone timestamps: %q", line)
+			}
+		}
+	}
+
+	// 4. Batch policy capping: when > 20 unmeasurable aggregates exist, list is capped at 20.
+	t.Run("capping", func(t *testing.T) {
+		inCap := healthyInput(now.Add(50 * time.Hour))
+		for i := 1; i <= 25; i++ {
+			inCap.Issues = append(inCap.Issues, Issue{
+				Number:    500 + i,
+				Title:     "Epic: extra unmeasurable",
+				CreatedAt: now,
+				Body:      "- [x] a\n- [ ] b\n- [ ] c\n- [ ] d\n- [ ] e\n",
+			})
+		}
+		repCap := Build(inCap)
+		kCap := findKPI(t, repCap, "witnessed_progress")
+		if len(repCap.Unmeasurable) != UnmeasurableLimit {
+			t.Fatalf("repCap.Unmeasurable len = %d, want capped at %d", len(repCap.Unmeasurable), UnmeasurableLimit)
+		}
+		if repCap.UnmeasurableTotal != 25 {
+			t.Fatalf("repCap.UnmeasurableTotal = %d, want 25", repCap.UnmeasurableTotal)
+		}
+		defectCap := strings.Join(kCap.Defects, " ")
+		if !strings.Contains(defectCap, "and 5 more") {
+			t.Fatalf("defect must mention remaining unmeasurable count when capped: %q", defectCap)
+		}
+	})
+}

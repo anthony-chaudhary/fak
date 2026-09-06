@@ -1,0 +1,25 @@
+{
+  "$schema": "fak-readme-candidate/1",
+  "schema": "fak-readme-candidate/1",
+  "issue": 10944,
+  "topic": "nvidia-hopper-h100",
+  "target_section": "hardware_table",
+  "candidate_content": "| NVIDIA | Hopper H100 Q8_0 decode reached 111.9 tok/s (+17.4% vs f32); live A100 Qwen3.8-27B prefix reuse achieved 4.84× TTFT speedup, observed 2026-09-05. | Witnessed on physical GCP H100 (a3-highgpu-1g) & A100; matched Q8 device GEMV and 50-agent concurrency grid (91/91 ok). | [NVIDIA result](docs/_witnesses/issue-10944-nvidia-gcp-overnight/README.md) |",
+  "retire_target": {
+    "action": "replace_row",
+    "target_text": "| NVIDIA | Prior result placeholder |",
+    "legacy_archive_doc": "docs/README-legacy.md"
+  },
+  "witness": {
+    "authority_entry": "BENCHMARK-AUTHORITY.md#quick-reference-primary-numbers",
+    "receipt_path": "docs/_witnesses/issue-10944-nvidia-gcp-overnight/README.md",
+    "hardware_json_row": "NVIDIA"
+  },
+  "laws_checklist": {
+    "sota_comparison": true,
+    "feynman_gloss": true,
+    "wide_audience": true
+  },
+  "proposed_by": "gemini-worker",
+  "date": "2026-09-06"
+}

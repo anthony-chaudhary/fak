@@ -125,6 +125,9 @@ func (t *Toolset) targetOf(tool string, body []byte) (string, *Refusal) {
 	case ToolGlob:
 		var a GlobArgs
 		return decodeTarget(t, body, &a, func() string { return a.Path })
+	case ToolApplyPatch:
+		var a PatchArgs
+		return decodeTarget(t, body, &a, func() string { return "" })
 	}
 	return "", refuse(CodeMalformed, "unknown tool "+tool)
 }

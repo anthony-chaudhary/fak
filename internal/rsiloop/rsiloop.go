@@ -232,6 +232,14 @@ type Harness struct {
 	// permitted for transient measurement errors per candidate. When 0 (default),
 	// DefaultTransientMeasurementRecoveryLimit is used. A negative value disables retries.
 	TransientMeasurementRecoveryLimit int
+	// MaxTransientRetries sets the maximum number of recovery retries permitted for
+	// transient measurement errors per candidate. When non-zero, it takes precedence
+	// over TransientMeasurementRecoveryLimit. A negative value disables retries.
+	MaxTransientRetries int
+	// TransientBudget sets the maximum total transient retries allowed across the entire
+	// run. When 0 (default), transient retries are bounded only by the per-candidate limit.
+	// A negative value disables transient retries across the run.
+	TransientBudget int
 	// IsTransientMeasureError optionally classifies whether a measurement error is
 	// a transient/recoverable infrastructure failure rather than candidate regression.
 	// When nil, rsiloop.IsTransientMeasureError is used.
@@ -258,6 +266,12 @@ func (h Harness) isTransientError(err error) bool {
 }
 
 func (h Harness) transientRecoveryLimit() int {
+	if h.MaxTransientRetries < 0 {
+		return 0
+	}
+	if h.MaxTransientRetries > 0 {
+		return h.MaxTransientRetries
+	}
 	if h.TransientMeasurementRecoveryLimit < 0 {
 		return 0
 	}
@@ -366,13 +380,14 @@ type Row struct {
 
 // Result summarizes a Run.
 type Result struct {
-	Cycles        int
-	Kept          int
-	Final         shipgate.Decision
-	FinalBaseline float64 // the running baseline after the last KEEP (the recursion's product)
-	BaselineRef   string
-	Escalated     bool
-	Rows          []Row
+	Cycles           int
+	Kept             int
+	Final            shipgate.Decision
+	FinalBaseline    float64 // the running baseline after the last KEEP (the recursion's product)
+	BaselineRef      string
+	Escalated        bool
+	Rows             []Row
+	TransientRetries int
 }
 
 // Journal is an append-only JSONL sink. It is the durable ledger the loop writes —
@@ -467,6 +482,8 @@ func RunObserved(h Harness, j *Journal, k, maxCycles int, obs Observer) (Result,
 	res := Result{Final: shipgate.REVERT, FinalBaseline: base, BaselineRef: baseRef}
 	running := base
 
+	transientRetriesUsed := 0
+
 	cands := h.Candidates()
 	for i, c := range cands {
 		if h.Context != nil && h.Context.Err() != nil {
@@ -508,7 +525,8 @@ func RunObserved(h Harness, j *Journal, k, maxCycles int, obs Observer) (Result,
 			}
 
 			isTransient := h.isTransientError(merr)
-			if !isTransient || attempt >= recoveryLimit {
+			budgetExhausted := (h.TransientBudget > 0 && transientRetriesUsed >= h.TransientBudget) || (h.TransientBudget < 0)
+			if !isTransient || attempt >= recoveryLimit || budgetExhausted {
 				// Untyped/permanent error, or transient recovery retries exhausted.
 				// A candidate that won't build/measure can't be kept — record it as a
 				// hard non-keep (suite RED) and let the breaker advance. Measured=false
@@ -516,12 +534,19 @@ func RunObserved(h Harness, j *Journal, k, maxCycles int, obs Observer) (Result,
 				// so the witness reverts) — a downstream reader must not trust it.
 				m = Measurement{Metric: running, SuiteGreen: false, TruthClean: false}
 				if isTransient {
-					note = "measure error (transient, exhausted): " + merr.Error()
+					if budgetExhausted {
+						note = "measure error (transient, exhausted: budget exhausted): " + merr.Error()
+					} else {
+						note = "measure error (transient, exhausted): " + merr.Error()
+					}
 				} else {
 					note = "measure error: " + merr.Error()
 				}
 				break
 			}
+
+			transientRetriesUsed++
+			res.TransientRetries = transientRetriesUsed
 
 			// Transient error within recovery limit: retain attempt as unmeasured evidence
 			// without tripping the regression breaker immediately.

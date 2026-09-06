@@ -124,6 +124,33 @@ func settleSelfUpdateProgressBar() {
 	}
 }
 
+// WriteSelfUpdateLog multiplexes a log line onto w while de-conflicting with any active single-line progress bar.
+// If an in-place progress bar is currently active, it clears the bar (\r\x1b[2K), writes the log message
+// with a trailing newline, and redraws the progress bar below.
+func WriteSelfUpdateLog(w io.Writer, msg string) {
+	if w == nil {
+		w = selfUpdateProgress
+		if w == nil {
+			w = os.Stderr
+		}
+	}
+	selfUpdateProgressState.Lock()
+	defer selfUpdateProgressState.Unlock()
+
+	active := selfUpdateProgressState.barDrawn
+	if active {
+		fmt.Fprint(w, "\r\x1b[2K")
+		selfUpdateProgressState.barDrawn = false
+	}
+	if !strings.HasSuffix(msg, "\n") {
+		msg += "\n"
+	}
+	fmt.Fprint(w, msg)
+	if active {
+		drawSelfUpdateProgressBar(w, selfUpdateProgressState.percent, selfUpdateProgressState.operation)
+	}
+}
+
 // ProgressReporter provides a direct API for managing progress bar state and display.
 type ProgressReporter struct {
 	w          io.Writer

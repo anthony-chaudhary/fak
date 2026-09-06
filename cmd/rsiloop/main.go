@@ -58,6 +58,10 @@ func main() {
 	dosObserve := flag.Bool("dos-observe", false, "also emit a `dos improve --observe` "+
 		"receipt of each keep/revert verdict to the DOS audit journal (record-only "+
 		"telemetry; never re-gates the loop; no-op when dos is absent) — #588")
+	maxTransientRetries := flag.Int("max-transient-retries", rsiloop.DefaultTransientMeasurementRecoveryLimit,
+		"max transient measurement recovery retries per candidate (negative disables)")
+	transientBudget := flag.Int("transient-budget", 0,
+		"total transient recovery retry budget across the run (0 = unlimited)")
 
 	// -mode meta flags (#3975): the apex meta-RSI fold over the journal. The four
 	// config knobs bound the proposal; --apply + --witness-journal witness and land it.
@@ -91,6 +95,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, herr)
 		os.Exit(2)
 	}
+	applyTransientFlags(&h, *maxTransientRetries, *transientBudget)
 
 	j, err := rsiloop.NewJournal(*journalPath)
 	if err != nil {
@@ -149,6 +154,19 @@ func selectHarness(kind, repo, baselineRef, candidates, probePkg, suitePkgs stri
 	default:
 		return rsiloop.Harness{}, fmt.Errorf("unknown -harness %q (want worktree|rulesynth|sessionobs)", kind)
 	}
+}
+
+// applyTransientFlags applies the CLI flags -max-transient-retries and -transient-budget
+// onto the target Harness.
+func applyTransientFlags(h *rsiloop.Harness, maxTransientRetries, transientBudget int) {
+	if maxTransientRetries <= 0 {
+		h.MaxTransientRetries = -1
+		h.TransientMeasurementRecoveryLimit = -1
+	} else {
+		h.MaxTransientRetries = maxTransientRetries
+		h.TransientMeasurementRecoveryLimit = maxTransientRetries
+	}
+	h.TransientBudget = transientBudget
 }
 
 // runImprove drives the closed loop and prints a per-cycle trace + a summary. obs is an

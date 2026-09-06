@@ -658,6 +658,8 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		return true
 	}
 	switch name {
+	case "readme", "readmenext":
+		cmdReadme(args)
 	case "agent-queue":
 		cmdAgentQueue(args)
 	case "propagation-debt-dispatch":

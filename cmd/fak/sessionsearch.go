@@ -6,9 +6,18 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/anthony-chaudhary/fak/internal/sessionsearch"
+	"github.com/anthony-chaudhary/fak/internal/toolproc"
 )
+
+type sessionSearchResultsEnvelope struct {
+	Schema string              `json:"schema"`
+	Query  string              `json:"query"`
+	Total  int                 `json:"total"`
+	Hits   []sessionsearch.Hit `json:"hits"`
+}
 
 func cmdSessionSearch(argv []string) {
 	os.Exit(runSessionSearch(os.Stdout, os.Stderr, argv))
@@ -27,9 +36,17 @@ func runSessionSearch(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
+	journalPath := *journal
+	if journalPath == "" {
+		defaultJournal := filepath.Join(".fak", "toolproc", "journal.jsonl")
+		if _, err := os.Stat(defaultJournal); err == nil {
+			journalPath = defaultJournal
+		}
+	}
+
 	idx := sessionsearch.NewIndex()
-	if *journal != "" {
-		f, err := os.Open(*journal)
+	if journalPath != "" {
+		f, err := toolproc.OpenShareDelete(journalPath)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak sessionsearch: open journal: %v\n", err)
 			return 2
@@ -51,9 +68,15 @@ func runSessionSearch(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *asJSON {
+		envelope := sessionSearchResultsEnvelope{
+			Schema: "fak.sessionsearch-results/1",
+			Query:  *query,
+			Total:  len(hits),
+			Hits:   hits,
+		}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
-		if err := enc.Encode(hits); err != nil {
+		if err := enc.Encode(envelope); err != nil {
 			fmt.Fprintf(stderr, "fak sessionsearch: json encode: %v\n", err)
 			return 2
 		}

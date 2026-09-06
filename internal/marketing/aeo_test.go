@@ -446,7 +446,7 @@ func TestConfigAnswerFeedsStayEquivalentAndCiteAuthorities(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"How do I configure fak?", "Does fak require a config file?", "--print-effective-config", "flags win over declared fak.toml values", "Keep secret values out", "capability-floor policy manifest", "fak guard", ".mcp.json", "model providers", "one policy for an organization"} {
+	for _, want := range []string{"How do I configure fak?", "Does fak require a config file?", "--print-effective-config", "flags win over declared fak.toml values", "Keep secret values out", "capability-floor policy manifest", "fak manage", ".mcp.json", "model providers", "one policy for an organization"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("plain config feed missing discoverability phrase %q", want)
 		}

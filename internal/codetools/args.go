@@ -26,12 +26,12 @@ import (
 // the harness-conventional spellings so a model already fluent in Read/Grep/Glob needs
 // no retraining to drive the kernel-mediated versions.
 const (
-	ToolRead  = "Read"
-	ToolGrep  = "Grep"
-	ToolGlob  = "Glob"
-	ToolWrite = "Write"
-	ToolEdit  = "Edit"
-	ToolBash  = "Bash"
+	ToolRead       = "Read"
+	ToolGrep       = "Grep"
+	ToolGlob       = "Glob"
+	ToolWrite      = "Write"
+	ToolEdit       = "Edit"
+	ToolBash       = "Bash"
 )
 
 // ReadArgs names one file and an optional line window. Offset is 1-based (line 1 is the
@@ -247,6 +247,16 @@ func Catalog() []ToolDef {
 				`"path":{"type":"string","description":"subtree to walk; defaults to the workspace root"}},` +
 				`"required":["pattern"],"additionalProperties":false}`),
 			ReadOnly: true,
+		},
+		{
+			Name:        ToolApplyPatch,
+			Description: "Apply a unified diff patch to workspace files atomically with optimistic concurrency verification.",
+			Parameters: json.RawMessage(`{"type":"object","properties":{` +
+				`"patch":{"type":"string","description":"unified diff patch text"},` +
+				`"expected_version":{"type":"string","description":"opaque version returned by Read or SHA-256 hash; required for optimistic concurrency verification"},` +
+				`"fuzz_margin":{"type":"integer","description":"maximum line drift tolerance (0-5 lines, default 2) for hunk matching","minimum":0,"maximum":5}},` +
+				`"required":["patch"],"additionalProperties":false}`),
+			ReadOnly: false,
 		},
 	}
 }

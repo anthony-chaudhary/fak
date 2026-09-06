@@ -1,0 +1,6 @@
+{
+  "sessionId": "corrupted-session",
+  "messages": [
+    {
+      "type": "user",
+      "content": "truncated json

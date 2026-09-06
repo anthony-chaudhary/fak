@@ -35,6 +35,12 @@
       "check": "Channel rules, links, and launch copy remain current."
     },
     {
+      "path": "docs/launch/microcontext-e2e-video.md",
+      "class": "review",
+      "review_after_days": 21,
+      "check": "Voice-over copy, operating envelope metrics, Mac capture status, and videogen project contracts remain current."
+    },
+    {
       "path": "docs/launch/positioning-brief.md",
       "class": "review",
       "review_after_days": 90,

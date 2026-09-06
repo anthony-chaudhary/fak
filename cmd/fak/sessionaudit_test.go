@@ -16,7 +16,7 @@ func TestSessionAuditDiscoverAuditAndDeep(t *testing.T) {
 	root := t.TempDir()
 	sessionPath := writeSessionAuditJSONL(t, filepath.Join(root, "C--work-fak", "session-a.jsonl"), []map[string]any{
 		sessionAuditAssistant("msg-1", 100, "Read"),
-		map[string]any{
+		{
 			"type":      "user",
 			"timestamp": "2026-06-20T00:01:00.000Z",
 			"message": map[string]any{
@@ -477,5 +477,148 @@ func TestSessionAuditIncludeSubagentsCountsDelegatedVolume(t *testing.T) {
 	// And the breakout must not invite anyone to add the same tokens on twice.
 	if !strings.Contains(got, "already counted in the totals above") {
 		t.Fatalf("the subagent breakout must say it is already counted:\n%s", got)
+	}
+}
+
+func TestSessionAuditGeminiIntegration(t *testing.T) {
+	root := t.TempDir()
+	geminiChatDir := filepath.Join(root, "proj-gemini", "chats")
+	if err := os.MkdirAll(geminiChatDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	geminiPath := filepath.Join(geminiChatDir, "session-gemini.json")
+	geminiData := map[string]any{
+		"sessionId": "session-gemini",
+		"startTime": "2026-07-10T10:00:00Z",
+		"model":     "gemini-2.5-pro",
+		"messages": []map[string]any{
+			{
+				"type":    "user",
+				"content": "Read the main source file",
+			},
+			{
+				"type":    "gemini",
+				"model":   "gemini-2.5-pro",
+				"content": "I will read the main file.",
+				"usageMetadata": map[string]any{
+					"promptTokenCount":     int64(500),
+					"candidatesTokenCount": int64(100),
+					"totalTokenCount":      int64(600),
+				},
+				"toolCalls": []map[string]any{
+					{
+						"id":     "tc-1",
+						"name":   "read_file",
+						"args":   map[string]any{"path": "main.go"},
+						"status": "success",
+						"result": []any{"package main"},
+					},
+				},
+			},
+		},
+	}
+	b, err := json.MarshalIndent(geminiData, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(geminiPath, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. discover
+	var stdout, stderr bytes.Buffer
+	rc := runSessionAudit(&stdout, &stderr, []string{"discover", "--root", root, "--all"})
+	if rc != 0 {
+		t.Fatalf("discover rc=%d stderr=%s", rc, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "1 sessions") || !strings.Contains(stdout.String(), "session-gemini.json") {
+		t.Fatalf("unexpected discover output:\n%s", stdout.String())
+	}
+
+	// 2. audit
+	stdout.Reset()
+	stderr.Reset()
+	jsonOut := filepath.Join(t.TempDir(), "audit.json")
+	rc = runSessionAudit(&stdout, &stderr, []string{"audit", "--root", root, "--all", "--json", jsonOut})
+	if rc != 0 {
+		t.Fatalf("audit rc=%d stderr=%s", rc, stderr.String())
+	}
+	raw, err := os.ReadFile(jsonOut)
+	if err != nil {
+		t.Fatalf("failed to read audit json: %v", err)
+	}
+	var auditPayload struct {
+		Aggregate struct {
+			NSessions int `json:"n_sessions"`
+			Totals    struct {
+				Output int64 `json:"output"`
+			} `json:"totals"`
+		} `json:"aggregate"`
+	}
+	if err := json.Unmarshal(raw, &auditPayload); err != nil {
+		t.Fatalf("unmarshal audit json: %v", err)
+	}
+	if auditPayload.Aggregate.NSessions != 1 {
+		t.Fatalf("audit sessions = %d, want 1", auditPayload.Aggregate.NSessions)
+	}
+	if auditPayload.Aggregate.Totals.Output != 100 {
+		t.Fatalf("audit output tokens = %d, want 100", auditPayload.Aggregate.Totals.Output)
+	}
+
+	// 3. summary
+	stdout.Reset()
+	stderr.Reset()
+	rc = runSessionAudit(&stdout, &stderr, []string{"summary", "--root", root, "--all", "--json"})
+	if rc != 0 {
+		t.Fatalf("summary rc=%d stderr=%s", rc, stderr.String())
+	}
+	var summaryRep struct {
+		Totals struct {
+			OutputTokens int64 `json:"output_tokens"`
+		} `json:"totals"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &summaryRep); err != nil {
+		t.Fatalf("unmarshal summary json: %v", err)
+	}
+	if summaryRep.Totals.OutputTokens != 100 {
+		t.Fatalf("summary output tokens = %d, want 100", summaryRep.Totals.OutputTokens)
+	}
+
+	// 4. deep
+	stdout.Reset()
+	stderr.Reset()
+	rc = runSessionAudit(&stdout, &stderr, []string{"deep", geminiPath})
+	if rc != 0 {
+		t.Fatalf("deep rc=%d stderr=%s", rc, stderr.String())
+	}
+	deepOut := stdout.String()
+	if !strings.Contains(deepOut, "# Trajectory: session-gemini") || !strings.Contains(deepOut, "Read the main source file") {
+		t.Fatalf("unexpected deep output:\n%s", deepOut)
+	}
+
+	// 5. Dual Claude + Gemini discovery in same root
+	writeSessionAuditJSONL(t, filepath.Join(root, "C--work-fak", "session-claude.jsonl"), []map[string]any{
+		sessionAuditAssistant("claude-msg", 50, ""),
+	})
+
+	stdout.Reset()
+	stderr.Reset()
+	rc = runSessionAudit(&stdout, &stderr, []string{"discover", "--root", root, "--all"})
+	if rc != 0 {
+		t.Fatalf("dual discover rc=%d stderr=%s", rc, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "2 sessions") {
+		t.Fatalf("expected 2 sessions in dual discovery:\n%s", stdout.String())
+	}
+
+	// 6. --no-gemini excludes Gemini sessions
+	stdout.Reset()
+	stderr.Reset()
+	rc = runSessionAudit(&stdout, &stderr, []string{"discover", "--root", root, "--all", "--no-gemini"})
+	if rc != 0 {
+		t.Fatalf("no-gemini discover rc=%d stderr=%s", rc, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "1 sessions") || strings.Contains(stdout.String(), "session-gemini.json") {
+		t.Fatalf("--no-gemini should only discover 1 Claude session:\n%s", stdout.String())
 	}
 }

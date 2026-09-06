@@ -60,19 +60,22 @@ type Plan struct {
 // are substituted from Input; every scope field the contract requires is here
 // or synthesized identically for all templates in expand.
 type template struct {
-	area       string
-	slug       string
-	title      string
-	spine      string
-	inScope    string
-	outOfScope string
-	done       string
-	witness    string
-	gate       string
-	confusion  string
-	steps      int
-	generation string
-	priority   string
+	area         string
+	slug         string
+	title        string
+	spine        string
+	inScope      string
+	outOfScope   string
+	done         string
+	witness      string
+	gate         string
+	confusion    string
+	steps        int
+	generation   string
+	priority     string
+	lane         string
+	paths        []string
+	coordination string
 }
 
 // taxonomy is the fixed follow-on order: QA and dogfooding first (gen/now — the
@@ -125,6 +128,8 @@ var taxonomy = []template{
 		gate:       "Readout committed on trunk; issues visible on the tracker.",
 		confusion:  "A synthetic fixture run is not dogfood; use the repo's live backlog/data.",
 		steps:      3, generation: "gen/now", priority: "priority/P1",
+		lane:  "docs",
+		paths: []string{"docs/notes/"},
 	},
 	{
 		area: "dogfood", slug: "dogfood-usage-ledger",
@@ -149,6 +154,8 @@ var taxonomy = []template{
 		gate:       "Docs lint/claims-lint green.",
 		confusion:  "Document what ships, not what is planned — unshipped flags stay out.",
 		steps:      2, generation: "gen/next", priority: "priority/P2",
+		lane:  "docs",
+		paths: []string{"docs/cli-reference.md"},
 	},
 	{
 		area: "product", slug: "product-lcd-demo",
@@ -161,6 +168,8 @@ var taxonomy = []template{
 		gate:       "make demo-audit (demo registry) green.",
 		confusion:  "The LCD bar is strict: one command, deterministic, zero external dependencies.",
 		steps:      5, generation: "gen/next", priority: "priority/P2",
+		lane:  "cmd",
+		paths: []string{"cmd/*demo", "examples/"},
 	},
 	{
 		area: "product", slug: "product-error-ux",
@@ -209,6 +218,8 @@ var taxonomy = []template{
 		gate:       "make test-fast green; gate registered in PreCommitGates().",
 		confusion:  "Fail open (ErrCouldNotRun) when evidence is unreachable — a broken gate must not wedge the trunk.",
 		steps:      5, generation: "gen/next", priority: "priority/P2",
+		lane:  "hooks",
+		paths: []string{"internal/hooks/"},
 	},
 	{
 		area: "integration", slug: "int-dos-wiring",
@@ -221,6 +232,8 @@ var taxonomy = []template{
 		gate:       "dos doctor / config parse green.",
 		confusion:  "dos.toml is peer-hot: commit only your own hunks, by explicit path, after a fresh diff.",
 		steps:      3, generation: "gen/next", priority: "priority/P2",
+		lane:  "dos",
+		paths: []string{"./dos.toml"},
 	},
 	{
 		area: "integration", slug: "int-superloop",
@@ -233,6 +246,8 @@ var taxonomy = []template{
 		gate:       "Existing loop tests/skill lint green.",
 		confusion:  "Wire the default at ONE seam; two call sites double-fire on every turn.",
 		steps:      5, generation: "gen/next", priority: "priority/P2",
+		lane:  "superloop",
+		paths: []string{"internal/superloop/"},
 	},
 	{
 		area: "docs", slug: "docs-doctrine-linkage",
@@ -245,6 +260,8 @@ var taxonomy = []template{
 		gate:       "Docs placement gates (DOC_PLACEMENT/INDEX_SYNC) green.",
 		confusion:  "Dated notes go under docs/notes/ WITH an INDEX.md line same-commit.",
 		steps:      2, generation: "gen/next", priority: "priority/P2",
+		lane:  "docs",
+		paths: []string{"docs/INDEX.md", "llms.txt", "AGENTS.md", "README.md"},
 	},
 	{
 		area: "release", slug: "release-claims",
@@ -257,6 +274,8 @@ var taxonomy = []template{
 		gate:       "make claims-lint green.",
 		confusion:  "Do not upgrade [SIMULATED]/[STUB] to [SHIPPED] without the witness.",
 		steps:      2, generation: "gen/next", priority: "priority/P2",
+		lane:  "release",
+		paths: []string{"CLAIMS.md", "docs/releases/"},
 	},
 }
 
@@ -509,9 +528,26 @@ func fanoutModelTiers(priority string) (required, optimal string) {
 
 // expand substitutes one template into a fully-scoped candidate.
 func expand(t template, in Input, goPackage string) issuepolicy.Candidate {
-	paths := in.Paths
+	paths := t.paths
 	if len(paths) == 0 {
-		paths = []string{"internal/" + in.Leaf + "/"}
+		paths = in.Paths
+		if len(paths) == 0 {
+			if in.Leaf == "cmd" {
+				paths = []string{"cmd/"}
+			} else {
+				paths = []string{"internal/" + in.Leaf + "/"}
+			}
+		}
+	} else {
+		paths = append([]string(nil), paths...)
+	}
+	lane := t.lane
+	if lane == "" {
+		lane = in.Leaf
+	}
+	coordination := t.coordination
+	if coordination == "" {
+		coordination = "Stay inside {paths}; check the lane lease before dispatch."
 	}
 	parent := strings.TrimSpace(in.ParentRef)
 	if parent == "" {
@@ -520,6 +556,7 @@ func expand(t template, in Input, goPackage string) issuepolicy.Candidate {
 	r := strings.NewReplacer(
 		"{title}", in.Title,
 		"{leaf}", in.Leaf,
+		"{lane}", lane,
 		"{spine}", in.SpineRef,
 		"{paths}", strings.Join(paths, ", "),
 		"{go_package}", goPackage,
@@ -541,7 +578,7 @@ func expand(t template, in Input, goPackage string) issuepolicy.Candidate {
 			r.Replace(t.confusion),
 			"Harden what exists; do not grow the spine's scope inside this follow-on.",
 		},
-		Coordination:   []string{r.Replace("Stay inside {paths}; check the lane lease before dispatch.")},
+		Coordination:   []string{r.Replace(coordination)},
 		Trigger:        "one-shot: filed at spine-ship time by fak issue fanout",
 		BatchPolicy:    r.Replace("one batch per spine, capped at --max candidates; marker-key (fanout-{leaf}-*) dedupe against existing issues before filing"),
 		InScope:        r.Replace(t.inScope),
@@ -549,7 +586,7 @@ func expand(t template, in Input, goPackage string) issuepolicy.Candidate {
 		DoneCondition:  r.Replace(t.done),
 		Witness:        r.Replace(t.witness),
 		AcceptanceGate: r.Replace(t.gate),
-		Lane:           in.Leaf,
+		Lane:           lane,
 		Paths:          paths,
 		Labels:         []string{"fanout", t.area, fanoutClass(t.area), t.priority},
 		Priority:       t.priority,

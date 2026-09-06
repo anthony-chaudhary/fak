@@ -64,7 +64,7 @@ async function start(message){list.replaceChildren();after=0;const r=await fetch
 document.querySelector("#prompt").addEventListener("submit",async e=>{e.preventDefault();await start(text.value)});document.querySelector(".examples").addEventListener("click",async e=>{const x=e.target.dataset.example;if(!x)return;text.value=x==="approval"?"approval: inspect workspace":x==="failure"?"failure: demonstrate typed error":"show the native harness works";await start(text.value)});document.querySelector("#skin").addEventListener("click",()=>{skin=skin==="forest"?"minimal":"forest";document.body.dataset.skin=skin});const scenario=new URLSearchParams(location.search).get("scenario");if(scenario){text.value=scenario==="approval"?"approval: inspect workspace":scenario==="failure"?"failure: demonstrate typed error":"show the native harness works";start(text.value)}
 async function loadSessions(focusID=""){sessionCards.setAttribute("aria-busy","true");try{const r=await fetch("/api/sessions"+(query.get("no_color")==="1"?"?no_color=1":""));const d=await r.json();if(!r.ok)throw new Error(d.error||"session load failed");sessionCards.innerHTML=d.html;bindSessionCards();if(focusID){const card=[...sessionCards.querySelectorAll(".session-card")].find(item=>item.dataset.sessionId===focusID);if(card){sessionCards.querySelectorAll(".session-card").forEach(item=>item.tabIndex=-1);card.tabIndex=0;card.focus()}}}catch(e){sessionCards.innerHTML='<p class="empty">Session state unavailable.</p>';sessionFeedback.textContent=e.message}finally{sessionCards.setAttribute("aria-busy","false")}}
 function bindSessionCards(){const cards=[...sessionCards.querySelectorAll(".session-card")];const moveFocus=index=>{cards.forEach((card,i)=>card.tabIndex=i===index?0:-1);cards[index]?.focus()};cards.forEach((card,index)=>card.addEventListener("keydown",e=>{let next;if(["ArrowDown","ArrowRight"].includes(e.key))next=(index+1)%cards.length;else if(["ArrowUp","ArrowLeft"].includes(e.key))next=(index-1+cards.length)%cards.length;else if(e.key==="Home")next=0;else if(e.key==="End")next=cards.length-1;else return;e.preventDefault();moveFocus(next)}));sessionCards.querySelectorAll("[data-session-action]").forEach(button=>button.addEventListener("click",async()=>{const id=button.dataset.sessionId,action=button.dataset.sessionAction;button.disabled=true;sessionFeedback.textContent=action+" requested for "+id;try{const r=await fetch("/api/sessions/"+encodeURIComponent(id)+"/controls/"+action,{method:"POST"});const d=await r.json();if(!r.ok)throw new Error(d.error||"control failed");sessionFeedback.textContent=action+" sent to "+id;await loadSessions(id)}catch(e){sessionFeedback.textContent=e.message;button.disabled=false}}));sessionCards.querySelectorAll("[data-approval-action]").forEach(button=>button.addEventListener("click",async e=>{e.preventDefault();const id=button.dataset.sessionId,action=button.dataset.approvalAction,approvalId=button.dataset.approvalId||"";button.disabled=true;sessionFeedback.textContent="Approval "+action+" requested for "+id;try{const r=await fetch("/api/sessions/"+encodeURIComponent(id)+"/approval",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({resolution:action,approval_id:approvalId,reason:"web operator "+action})});const d=await r.json();if(!r.ok)throw new Error(d.error||"approval resolution failed");sessionFeedback.textContent="Approval "+action+" sent to "+id;await loadSessions(id)}catch(err){sessionFeedback.textContent=err.message;button.disabled=false}}));sessionCards.querySelectorAll(".approval-form").forEach(form=>form.addEventListener("submit",async e=>{e.preventDefault();const submitter=e.submitter;const action=submitter?.dataset?.approvalAction||submitter?.value||"accept";const id=form.dataset.sessionId;const approvalId=form.dataset.approvalId||form.querySelector('input[name="approval_id"]')?.value||"";sessionFeedback.textContent="Approval "+action+" requested for "+id;try{const r=await fetch("/api/sessions/"+encodeURIComponent(id)+"/approval",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({resolution:action,approval_id:approvalId,reason:"web operator "+action})});const d=await r.json();if(!r.ok)throw new Error(d.error||"approval resolution failed");sessionFeedback.textContent="Approval "+action+" sent to "+id;await loadSessions(id)}catch(err){sessionFeedback.textContent=err.message}}))}
-function subscribeSessionEvents(){if(!window.EventSource)return;try{const es=new EventSource("/api/sessions/events");es.addEventListener("session_update",e=>{if(e.data){try{const p=JSON.parse(e.data);if(p.html){sessionCards.innerHTML=p.html;bindSessionCards();return}}catch(_){}}loadSessions()});es.addEventListener("approval_requested",e=>{if(e.data){try{const p=JSON.parse(e.data);sessionFeedback.textContent="Approval requested for "+(p.session_id||"session")}catch(_){}}loadSessions()});es.addEventListener("approval_resolved",e=>{if(e.data){try{const p=JSON.parse(e.data);sessionFeedback.textContent="Approval "+(p.resolution||"resolved")+" for "+(p.session_id||"session")}catch(_){}}loadSessions()});es.onmessage=()=>{loadSessions()}}catch(_){}}
+function subscribeSessionEvents(){if(!window.EventSource)return;try{const es=new EventSource("/api/sessions/events");es.addEventListener("session_cards",e=>{if(e.data){try{const p=JSON.parse(e.data);if(p.html){sessionCards.innerHTML=p.html;bindSessionCards();return}}catch(_){}}loadSessions()});es.addEventListener("session_update",e=>{if(e.data){try{const p=JSON.parse(e.data);if(p.html){sessionCards.innerHTML=p.html;bindSessionCards();return}}catch(_){}}loadSessions()});es.addEventListener("approval_requested",e=>{if(e.data){try{const p=JSON.parse(e.data);sessionFeedback.textContent="Approval requested for "+(p.session_id||"session")}catch(_){}}loadSessions()});es.addEventListener("approval_resolved",e=>{if(e.data){try{const p=JSON.parse(e.data);sessionFeedback.textContent="Approval "+(p.resolution||"resolved")+" for "+(p.session_id||"session")}catch(_){}}loadSessions()});es.onmessage=()=>{loadSessions()}}catch(_){}}
 subscribeSessionEvents();document.querySelector("#refresh").addEventListener("click",()=>{refreshOverview();loadSessions()});refreshOverview();loadSessions();if(run)pull();setInterval(refreshOverview,5000);setInterval(loadSessions,5000);
 </script></body></html>`
 
@@ -981,6 +981,9 @@ func handleSessionApproval(source any, s *store) http.HandlerFunc {
 			}
 
 			if resolved {
+				if sessSrc, ok := source.(SessionSource); ok {
+					broadcastCards(sessSrc)
+				}
 				defaultSessionHub.broadcastSession(id, "approval_resolved", []byte(fmt.Sprintf(`{"session_id":%q,"resolution":%q,"approval_id":%q}`, id, resolution, approvalID)))
 				writeSessionJSON(w, http.StatusOK, map[string]any{
 					"status":      "accepted",
@@ -1002,56 +1005,6 @@ func handleSessionApproval(source any, s *store) http.HandlerFunc {
 		}
 
 		writeSessionJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "session authority is not connected"})
-	}
-}
-
-// handleSessionSSE serves Server-Sent Events (SSE) for session cards and approval notifications.
-// If scoped is true, it only streams events matching the path parameter {id} and global broadcasts.
-func handleSessionSSE(scoped bool) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "streaming unsupported", http.StatusBadRequest)
-			return
-		}
-		sessionID := ""
-		if scoped {
-			var err error
-			sessionID, err = url.PathUnescape(r.PathValue("id"))
-			if err != nil || strings.TrimSpace(sessionID) == "" {
-				http.Error(w, "invalid session id", http.StatusBadRequest)
-				return
-			}
-		}
-
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("X-Accel-Buffering", "no")
-
-		ch := defaultSessionHub.subscribe(sessionID)
-		defer defaultSessionHub.unsubscribe(ch)
-
-		if sessionID != "" {
-			fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"connected\",\"session_id\":%q}\n\n", sessionID)
-		} else {
-			fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"connected\"}\n\n")
-		}
-		flusher.Flush()
-
-		ctx := r.Context()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case msg, ok := <-ch:
-				if !ok {
-					return
-				}
-				_, _ = w.Write(msg)
-				flusher.Flush()
-			}
-		}
 	}
 }
 

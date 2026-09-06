@@ -27,7 +27,7 @@ fak guard -- codex
 
 The agent keeps working inside that boundary. See the [interactive showcase](docs/showcase.html) for the guided tour.
 
-## Latest hardware results — 2026-09-05
+## Latest hardware results — 2026-09-06
 
 The front page shows one row per supported hardware family. Latest means the newest
 committed performance receipt for that platform, not the newest code change. A row can be
@@ -54,19 +54,19 @@ Most LLM serving engines treat memory overflow as a slow host-memory fallback wi
 
 | Framework | Storage / Offload DMA Path | Host DRAM Copies | Predictive Prefetching | Hybrid Attention + GDN Linear State | Target Workload |
 |---|---|:---:|:---:|:---:|---|
-| **fak (native)** | **GPU Direct NVMe P2PDMA (BaM architecture)** | **0 (strictly zero)** | **Yes (asynchronous pipeline)** | **Yes (bit-exact full + linear)** | **Interactive, real-time agent coding loops** |
-| **vLLM** | Host DRAM block swapping (`swap_blocks`) | 2–3 copies | No (reactive) | No (Transformer KV only) | High-throughput data-center batching |
-| **DeepSpeed ZeRO** | Async CPU `aio` offload via pinned DRAM buffers | 2 copies | Coarse (layer-level weights) | No (static forward layers only) | Multi-node distributed training / inference |
-| **FlexGen** | 3-tier offload (GPU ↔ CPU ↔ Disk) | 2–3 copies | Zigzag batch schedule | No (attention matrices only) | Extreme high-latency batch throughput |
-| **TensorRT-LLM** | NVIDIA GPUDirect Storage (`libcufile.so`) | 0 (NVIDIA only) | Yes (NVIDIA GDS) | Partial (Transformer KV) | NVIDIA enterprise data centers only |
-| **llama.cpp** | OS `mmap` demand paging & CPU fallback | 2 copies (OS cache) | No (kernel readahead) | Basic (CPU fallback layers) | Local desktop CPU/GPU inference |
+| **fak (native)** | GPU Direct NVMe P2PDMA (BaM architecture) | 0 (strictly zero) | Yes (asynchronous pipeline) | Yes (bit-exact full + linear) | Interactive, real-time agent coding loops |
+| vLLM | Host DRAM block swapping (`swap_blocks`) | 2–3 copies | No (reactive) | No (Transformer KV only) | High-throughput data-center batching |
+| DeepSpeed ZeRO | Async CPU `aio` offload via pinned DRAM buffers | 2 copies | Coarse (layer-level weights) | No (static forward layers only) | Multi-node distributed training / inference |
+| FlexGen | 3-tier offload (GPU ↔ CPU ↔ Disk) | 2–3 copies | Zigzag batch schedule | No (attention matrices only) | Extreme high-latency batch throughput |
+| TensorRT-LLM | NVIDIA GPUDirect Storage (`libcufile.so`) | 0 (NVIDIA only) | Yes (NVIDIA GDS) | Partial (Transformer KV) | NVIDIA enterprise data centers only |
+| llama.cpp | OS `mmap` demand paging & CPU fallback | 2 copies (OS cache) | No (kernel readahead) | Basic (CPU fallback layers) | Local desktop CPU/GPU inference |
 
 ## Why run coding agents on fak
 
-- **Workflow batching and cache reuse:** Multi-agent coding loops reuse prompt context across turns, achieving **4.1× vs tuned** baselines with 86.7% cache hit rates. Instead of re-reading codebases on every turn, fak keeps shared prefixes hot and trims stale context.
-- **Zero-copy GPU Direct storage overflow:** Run models far exceeding physical GPU VRAM without CPU memory thrashing. Built on a BaM-style accelerator storage architecture, fak maps NVMe submission queues directly in GPU VRAM and streams paged KV caches and hybrid linear attention states over peer-to-peer PCIe DMA without host DRAM bounce buffering (`StagingCopyCount == 0`). See the [GPU Direct overflow specification](docs/benchmarks/QWEN38-AMD-GPUDIRECT-RESULTS.md).
-- **Local execution on your hardware:** Run models directly with native inference across Apple Silicon, AMD, and NVIDIA. Cut per-token API bills and keep your code private on your own machine.
-- **Default-deny capability floor:** Protect your workspace from unintended terminal commands or file edits. Every tool call is checked against a default-deny (block everything unless allowed) policy before it runs. Drop-in support wraps existing agents like Claude Code, Codex, Aider, and Cursor with zero rewrites.
+- **Workflow batching and cache reuse:** Multi-agent coding loops reuse prompt context across turns, achieving **4.1× vs tuned** baselines with 86.7% cache hit rates. In-kernel vDSO tool caching serves idempotent file reads in sub-microsecond time without extra model round trips.
+- **Zero-copy GPU Direct storage overflow:** Run models far exceeding physical GPU VRAM without host memory thrashing. Built on a BaM accelerator storage architecture, fak maps NVMe queues directly in GPU VRAM. It streams paged KV caches and hybrid linear states over peer-to-peer PCIe DMA without DRAM bounce copies (`StagingCopyCount == 0`). See the [GPU Direct overflow specification](docs/benchmarks/QWEN38-AMD-GPUDIRECT-RESULTS.md).
+- **Local execution on your hardware:** Run models directly with native inference across Apple Silicon, AMD, and NVIDIA. New work prioritizes Qwen3.8 with resident quantization and prefix reuse. Cut token bills and keep your code private on your own machine.
+- **Default-deny capability floor:** Protect your workspace from unintended commands, path escapes, or tool poisoning. Every tool call is verified against a capability floor before execution. Drop-in wrappers protect existing agents like Claude Code, Codex, OpenCode, and Cursor with zero rewrites.
 
 Native inference provides direct execution on local silicon, with external engines supported as an explicit reference; see the [native inference goal](docs/native-inference-goal.md) for details.
 
@@ -74,9 +74,9 @@ Native inference provides direct execution on local silicon, with external engin
 
 fak is organized around a focused four-tier default priority hierarchy:
 
-1. **fak all in one (serving and harness + memory — the "one touch" thing):** The primary focus — a single-binary "one touch" deployment (`fak up`) bundling model serving, agent harness governance, and persistent memory. Verified on Terminal-Bench 4: 100.0% (5/5) solve rate vs OpenCode + llama.cpp 60.0% (3/5), reducing prompt tokens by 83.5% through in-kernel vDSO context caching (`fak bench tb4`).
-2. **fak serving only:** High-performance model inference runtime (`fak serve`), disaggregated gateway, KV-cache/context MMU acceleration, and native model execution.
-3. **fak harness only:** Standalone agent harness and governance substrate (`fak guard`), default-deny capability floor, and tool adjudication over external models.
+1. **fak all in one (serving and harness + memory — the "one touch" thing):** The primary focus: a single-binary turnkey runtime (`fak up`) bundling model serving, agent harness governance, and persistent memory. Verified on Terminal-Bench 4: 100.0% (5/5) solve rate vs OpenCode + llama.cpp 60.0% (3/5), cutting prompt tokens by 83.5% via in-kernel vDSO context caching (`fak bench tb4`).
+2. **fak serving only:** High-performance model inference runtime (`fak serve`), disaggregated gateway, KV-cache context acceleration, and native model execution.
+3. **fak harness only:** Standalone agent governance substrate (`fak guard`), default-deny capability floor, and tool adjudication over external models.
 4. **other things:** Standalone utilities, peripheral tools, benchmarks, and off-spine extensions.
 
 ## Install and configure
@@ -116,4 +116,4 @@ Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium`
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-09-05 vs VERSION 0.51.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-05 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-09-06 vs VERSION 0.51.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-06 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -430,6 +431,8 @@ type sseSubscriber struct {
 type sessionHub struct {
 	mu          sync.RWMutex
 	subscribers map[chan []byte]*sseSubscriber
+	lastCards   []SessionCard
+	lastHTML    string
 }
 
 var defaultSessionHub = &sessionHub{
@@ -502,6 +505,202 @@ func UnsubscribeSessionEvents(ch chan []byte) {
 	defaultSessionHub.unsubscribe(ch)
 }
 
+// CurrentCards returns the latest populated session cards held in the default hub.
+func CurrentCards() []SessionCard {
+	return defaultSessionHub.currentCards()
+}
+
+func (h *sessionHub) currentCards() []SessionCard {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return append([]SessionCard(nil), h.lastCards...)
+}
+
+func (h *sessionHub) resetForTest() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.lastCards = nil
+	h.lastHTML = ""
+}
+
+func resetSessionHubForTest() {
+	defaultSessionHub.resetForTest()
+}
+
+// broadcastCards fetches the latest session cards from source, renders the HTML markup,
+// and broadcasts the update to all connected SSE clients. If source.Sessions() returns
+// a transient error, previously populated card state is preserved and not wiped out.
+func broadcastCards(source SessionSource) {
+	defaultSessionHub.broadcastCards(source)
+}
+
+// BroadcastCards fetches the latest session cards from source and broadcasts them to clients,
+// preserving existing populated card state on transient errors.
+func BroadcastCards(source SessionSource) {
+	defaultSessionHub.broadcastCards(source)
+}
+
+func (h *sessionHub) broadcastCards(source SessionSource) {
+	if h == nil || source == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cards, err := source.Sessions(ctx)
+	if err != nil {
+		// Transient error from source.Sessions(): preserve existing populated card state.
+		// Do not overwrite lastCards with empty/nil and do not broadcast empty markup.
+		return
+	}
+	norm, err := normalizeSessionCards(cards)
+	if err != nil {
+		return
+	}
+	markup, err := renderSessionCardsHTML(norm, time.Now(), false)
+	if err != nil {
+		return
+	}
+	h.mu.Lock()
+	h.lastCards = norm
+	h.lastHTML = markup
+	h.mu.Unlock()
+
+	data, err := json.Marshal(map[string]any{"sessions": norm, "html": markup})
+	if err != nil {
+		return
+	}
+	h.broadcast("session_update", data)
+	h.broadcast("session_cards", data)
+}
+
+// sessionBroadcaster manages active SSE subscriptions and broadcasts session card updates.
+type sessionBroadcaster struct {
+	hub *sessionHub
+}
+
+func newSessionBroadcaster() *sessionBroadcaster {
+	return &sessionBroadcaster{hub: defaultSessionHub}
+}
+
+func (b *sessionBroadcaster) broadcastCards(source SessionSource) {
+	if b == nil || b.hub == nil {
+		defaultSessionHub.broadcastCards(source)
+		return
+	}
+	b.hub.broadcastCards(source)
+}
+
+func (b *sessionBroadcaster) subscribe() (chan []byte, func()) {
+	if b == nil || b.hub == nil {
+		ch := defaultSessionHub.subscribe("")
+		return ch, func() { defaultSessionHub.unsubscribe(ch) }
+	}
+	ch := b.hub.subscribe("")
+	return ch, func() { b.hub.unsubscribe(ch) }
+}
+
+var (
+	sseHeartbeatMu       sync.RWMutex
+	sseHeartbeatInterval = 15 * time.Second
+)
+
+func getSSEHeartbeatInterval() time.Duration {
+	sseHeartbeatMu.RLock()
+	defer sseHeartbeatMu.RUnlock()
+	return sseHeartbeatInterval
+}
+
+func setSSEHeartbeatInterval(d time.Duration) func() {
+	sseHeartbeatMu.Lock()
+	old := sseHeartbeatInterval
+	sseHeartbeatInterval = d
+	sseHeartbeatMu.Unlock()
+	return func() {
+		sseHeartbeatMu.Lock()
+		sseHeartbeatInterval = old
+		sseHeartbeatMu.Unlock()
+	}
+}
+
+// handleSessionSSE serves Server-Sent Events (SSE) for session cards and approval notifications.
+// If scoped is true, it only streams events matching the path parameter {id} and global broadcasts.
+// It emits periodic comment heartbeats (: ping\n\n) every 15 seconds during idle periods to prevent
+// intermediate proxies from closing idle connections.
+func handleSessionSSE(scoped bool) http.HandlerFunc {
+	return handleSessionSSEWithInterval(scoped, getSSEHeartbeatInterval())
+}
+
+func handleSessionSSEWithInterval(scoped bool, interval time.Duration) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusBadRequest)
+			return
+		}
+		sessionID := ""
+		if scoped {
+			var err error
+			sessionID, err = url.PathUnescape(r.PathValue("id"))
+			if err != nil || strings.TrimSpace(sessionID) == "" {
+				http.Error(w, "invalid session id", http.StatusBadRequest)
+				return
+			}
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		ch := defaultSessionHub.subscribe(sessionID)
+		defer defaultSessionHub.unsubscribe(ch)
+
+		if sessionID != "" {
+			fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"connected\",\"session_id\":%q}\n\n", sessionID)
+		} else {
+			fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"connected\"}\n\n")
+		}
+		defaultSessionHub.mu.RLock()
+		lastCards := defaultSessionHub.lastCards
+		lastHTML := defaultSessionHub.lastHTML
+		defaultSessionHub.mu.RUnlock()
+		if len(lastCards) > 0 || lastHTML != "" {
+			if data, err := json.Marshal(map[string]any{"sessions": lastCards, "html": lastHTML}); err == nil {
+				fmt.Fprintf(w, "event: session_cards\ndata: %s\n\n", data)
+			}
+		}
+		flusher.Flush()
+
+		if interval <= 0 {
+			interval = getSSEHeartbeatInterval()
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		ctx := r.Context()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := io.WriteString(w, ": ping\n\n"); err != nil {
+					return
+				}
+				flusher.Flush()
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
+				if _, err := w.Write(msg); err != nil {
+					return
+				}
+				flusher.Flush()
+				ticker.Reset(interval)
+			}
+		}
+	}
+}
+
 func installSessionRoutes(mux *http.ServeMux, source SessionSource) {
 	installSessionRoutesWithStore(mux, source, nil)
 }
@@ -533,6 +732,10 @@ func installSessionRoutesWithStore(mux *http.ServeMux, source SessionSource, s *
 			writeSessionJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 			return
 		}
+		defaultSessionHub.mu.Lock()
+		defaultSessionHub.lastCards = cards
+		defaultSessionHub.lastHTML = markup
+		defaultSessionHub.mu.Unlock()
 		writeSessionJSON(w, http.StatusOK, map[string]any{"sessions": cards, "html": markup})
 	})
 	mux.HandleFunc("POST /api/sessions/{id}/controls/{action}", func(w http.ResponseWriter, r *http.Request) {
@@ -556,7 +759,7 @@ func installSessionRoutesWithStore(mux *http.ServeMux, source SessionSource, s *
 		}
 		cards, err := source.Sessions(r.Context())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			writeSessionJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 			return
 		}
 		cards, err = normalizeSessionCards(cards)
@@ -584,6 +787,7 @@ func installSessionRoutesWithStore(mux *http.ServeMux, source SessionSource, s *
 			writeSessionJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
+		broadcastCards(source)
 		writeSessionJSON(w, http.StatusAccepted, SessionControlRequest{SessionID: id, Action: action})
 	})
 	mux.HandleFunc("POST /api/sessions/{id}/approval", handleSessionApproval(source, s))

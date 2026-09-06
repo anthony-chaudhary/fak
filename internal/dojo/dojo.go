@@ -293,6 +293,12 @@ type Report struct {
 	GateMessage string `json:"gate_message,omitempty"`
 }
 
+// WithTrend attaches a Trend to the Report and returns the updated Report.
+func (r Report) WithTrend(t Trend) Report {
+	r.Trend = &t
+	return r
+}
+
 // Fold rolls a run's episodes into one control-pane envelope. The verdict ladder
 // is a REPORT contract, not a second quality gate: it is ACTION only when the run
 // could not be MEASURED (no episodes, or none with ground truth) and OK

@@ -370,3 +370,215 @@ func TestLiveDetourRows_ClosesADetourOpenedOnAnEarlierTurn(t *testing.T) {
 		t.Fatalf("child repair curve = %+v, want W2 endpoints 0 then 1", scores)
 	}
 }
+
+// TestDetourOverrun_FixtureReturnToMainAndWarn verifies issue #2552 acceptance criteria:
+// A fixture detour crossing its budget triggers exactly one return nudge referencing
+// the paused parent, repeated overrun escalates one rung to warn, and all decisions
+// are ledgered.
+func TestDetourOverrun_FixtureReturnToMainAndWarn(t *testing.T) {
+	fixturePath := filepath.Join("testdata", "curve", "detour-overrun.jsonl")
+	fixtureRows := ReadLedgerFile(fixturePath)
+	if len(fixtureRows) == 0 {
+		t.Fatalf("failed to read fixture %s", fixturePath)
+	}
+
+	ledger := filepath.Join(t.TempDir(), "trajctl.jsonl")
+	for _, row := range fixtureRows {
+		if err := Append(ledger, row); err != nil {
+			t.Fatalf("seed fixture row: %v", err)
+		}
+	}
+
+	rec := &countingSteer{}
+	stamp := Stamp{SessionID: "sess-detour", RunID: "run-detour"}
+
+	// Boundary 1: detour crosses its budget (3 turns scored > 2-turn budget).
+	// Triggers exactly one return-to-main nudge referencing the paused parent.
+	st1 := Fold(ReadLedgerFile(ledger))
+	ds1 := st1.SteerSweep(stamp, 4000, rec.fn())
+	var d1 *SteerDecision
+	for i := range ds1 {
+		if ds1[i].ObjectiveID == "traj-detour" {
+			d1 = &ds1[i]
+			break
+		}
+	}
+	if d1 == nil {
+		t.Fatalf("sweep 1 produced no decision for traj-detour: %+v", ds1)
+	}
+	if d1.Action != ActionNudge || d1.Signal != SignalDetourOverrun {
+		t.Fatalf("sweep 1 decision = %+v, want ActionNudge on SignalDetourOverrun", d1)
+	}
+	if !d1.Delivered || d1.DeliverErr != "" {
+		t.Fatalf("sweep 1 decision not delivered: %+v", d1)
+	}
+	if rec.calls != 1 {
+		t.Fatalf("steer calls after sweep 1 = %d, want 1", rec.calls)
+	}
+	// Verify packet references the paused parent (ID and statement) and return-to-main.
+	for _, want := range []string{
+		"return-to-main",
+		"traj-epic",
+		"the parent objective",
+		"traj-detour",
+		"repair the broken linker flag",
+	} {
+		if !strings.Contains(d1.Packet, want) {
+			t.Errorf("sweep 1 packet missing %q:\n%s", want, d1.Packet)
+		}
+	}
+	if n, err := AppendSteerDecisions(ledger, ds1); err != nil || n != len(ds1) {
+		t.Fatalf("AppendSteerDecisions sweep 1 = (%d, %v)", n, err)
+	}
+
+	// Boundary 2: repeated overrun (still over budget).
+	// Escalates one rung to warn.
+	st2 := Fold(ReadLedgerFile(ledger))
+	ds2 := st2.SteerSweep(stamp, 5000, rec.fn())
+	var d2 *SteerDecision
+	for i := range ds2 {
+		if ds2[i].ObjectiveID == "traj-detour" {
+			d2 = &ds2[i]
+			break
+		}
+	}
+	if d2 == nil {
+		t.Fatalf("sweep 2 produced no decision for traj-detour: %+v", ds2)
+	}
+	if d2.Action != ActionWarn || d2.Signal != SignalDetourOverrun {
+		t.Fatalf("sweep 2 decision = %+v, want ActionWarn on SignalDetourOverrun", d2)
+	}
+	if !d2.Delivered || d2.DeliverErr != "" {
+		t.Fatalf("sweep 2 decision not delivered: %+v", d2)
+	}
+	if rec.calls != 2 {
+		t.Fatalf("steer calls after sweep 2 = %d, want 2", rec.calls)
+	}
+	for _, want := range []string{
+		"WARN",
+		"traj-epic",
+		"the parent objective",
+		"traj-detour",
+	} {
+		if !strings.Contains(d2.Packet, want) {
+			t.Errorf("sweep 2 packet missing %q:\n%s", want, d2.Packet)
+		}
+	}
+	if n, err := AppendSteerDecisions(ledger, ds2); err != nil || n != len(ds2) {
+		t.Fatalf("AppendSteerDecisions sweep 2 = (%d, %v)", n, err)
+	}
+
+	// Boundary 3: repeated overrun again after warn delivered.
+	// Holds at ActionNone (warn is outstanding; does not hammer the channel).
+	st3 := Fold(ReadLedgerFile(ledger))
+	ds3 := st3.SteerSweep(stamp, 6000, rec.fn())
+	var d3 *SteerDecision
+	for i := range ds3 {
+		if ds3[i].ObjectiveID == "traj-detour" {
+			d3 = &ds3[i]
+			break
+		}
+	}
+	if d3 == nil {
+		t.Fatalf("sweep 3 produced no decision for traj-detour: %+v", ds3)
+	}
+	if d3.Action != ActionNone || d3.Signal != SignalDetourOverrun {
+		t.Fatalf("sweep 3 decision = %+v, want ActionNone on SignalDetourOverrun", d3)
+	}
+	if !strings.Contains(d3.Reason, "outstanding") {
+		t.Errorf("sweep 3 reason = %q, want hold reason naming outstanding warn", d3.Reason)
+	}
+	if rec.calls != 2 {
+		t.Fatalf("steer calls after sweep 3 = %d, want 2 (held, no new delivery)", rec.calls)
+	}
+	if n, err := AppendSteerDecisions(ledger, ds3); err != nil || n != len(ds3) {
+		t.Fatalf("AppendSteerDecisions sweep 3 = (%d, %v)", n, err)
+	}
+
+	// Verify ledger contents: exactly the 3 expected steer decisions for traj-detour.
+	finalSt := Fold(ReadLedgerFile(ledger))
+	steers := finalSt.SteersFor("traj-detour")
+	if len(steers) != 3 {
+		t.Fatalf("ledgered steers for traj-detour = %d, want 3: %+v", len(steers), steers)
+	}
+	if steers[0].Action != ActionNudge || !steers[0].Delivered {
+		t.Errorf("steers[0] = %+v, want delivered ActionNudge", steers[0])
+	}
+	if steers[1].Action != ActionWarn || !steers[1].Delivered {
+		t.Errorf("steers[1] = %+v, want delivered ActionWarn", steers[1])
+	}
+	if steers[2].Action != ActionNone {
+		t.Errorf("steers[2] = %+v, want held ActionNone", steers[2])
+	}
+}
+
+// TestDetourOverrun_FailedDeliveryRetriesBeforeEscalating proves that an undelivered
+// return nudge does not consume the nudge rung; the gate retries delivery before
+// escalating to warn.
+func TestDetourOverrun_FailedDeliveryRetriesBeforeEscalating(t *testing.T) {
+	fixturePath := filepath.Join("testdata", "curve", "detour-overrun.jsonl")
+	ledger := filepath.Join(t.TempDir(), "trajctl.jsonl")
+	for _, row := range ReadLedgerFile(fixturePath) {
+		if err := Append(ledger, row); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec := &countingSteer{failures: 1}
+	stamp := Stamp{SessionID: "sess-fail"}
+
+	// Boundary 1: delivery fails.
+	st1 := Fold(ReadLedgerFile(ledger))
+	ds1 := st1.SteerSweep(stamp, 4000, rec.fn())
+	if ds1[0].Action != ActionNudge || ds1[0].Delivered || ds1[0].DeliverErr == "" {
+		t.Fatalf("sweep 1 = %+v, want undelivered nudge with error", ds1[0])
+	}
+	if _, err := AppendSteerDecisions(ledger, ds1); err != nil {
+		t.Fatal(err)
+	}
+
+	// Boundary 2: retries ActionNudge (does NOT escalate to warn yet).
+	st2 := Fold(ReadLedgerFile(ledger))
+	ds2 := st2.SteerSweep(stamp, 5000, rec.fn())
+	if ds2[0].Action != ActionNudge || !ds2[0].Delivered {
+		t.Fatalf("sweep 2 = %+v, want delivered retry of ActionNudge", ds2[0])
+	}
+	if _, err := AppendSteerDecisions(ledger, ds2); err != nil {
+		t.Fatal(err)
+	}
+
+	// Boundary 3: now escalates to ActionWarn.
+	st3 := Fold(ReadLedgerFile(ledger))
+	ds3 := st3.SteerSweep(stamp, 6000, rec.fn())
+	if ds3[0].Action != ActionWarn || !ds3[0].Delivered {
+		t.Fatalf("sweep 3 = %+v, want delivered ActionWarn", ds3[0])
+	}
+}
+
+// TestDetourOverrun_RecoveryRearms proves that after an overrun episode has escalated
+// to warn, a subsequent healthy decision re-arms the episode.
+func TestDetourOverrun_RecoveryRearms(t *testing.T) {
+	st := State{
+		Objectives: map[string]Objective{
+			"p": {ID: "p", Statement: "parent", Status: StatusPaused},
+			"d": {ID: "d", ParentID: "p", Statement: "detour", Budget: Budget{Turns: 1}, Status: StatusActive},
+		},
+		Scores: []ScoreRow{
+			w3Progress("d", 0.1, 1000),
+			w3Progress("d", 0.1, 2000),
+		},
+		Steers: []SteerDecision{
+			{ObjectiveID: "d", Action: ActionNudge, Signal: SignalDetourOverrun, Delivered: true},
+			{ObjectiveID: "d", Action: ActionWarn, Signal: SignalDetourOverrun, Delivered: true},
+			{ObjectiveID: "d", Action: ActionNone, Signal: SignalHealthy, Reason: "recovered"},
+		},
+	}
+	oc, ok := st.CurveFor("d")
+	if !ok || oc.Signal != SignalDetourOverrun {
+		t.Fatalf("curve = %+v, ok = %v", oc, ok)
+	}
+	d := st.DecideNudge(oc)
+	if d.Action != ActionNudge {
+		t.Fatalf("recovered episode did not re-arm to ActionNudge: %+v", d)
+	}
+}

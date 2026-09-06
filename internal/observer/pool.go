@@ -213,9 +213,9 @@ func (s *sessionState) evaluate(cfg Config, obs *StepObservation) {
 	if len(s.history) > cfg.MaxHistoryPerSession {
 		overflow := len(s.history) - cfg.MaxHistoryPerSession
 		copy(s.history, s.history[overflow:])
-		for i := cfg.MaxHistoryPerSession; i < len(s.history); i++ {
-			s.history[i] = StepObservation{}
-		}
+		// Clear trailing elements in backing array up to capacity before reslicing
+		// to ensure garbage collection of old StepObservation structures (args, diffs, results).
+		clear(s.history[cfg.MaxHistoryPerSession:cap(s.history)])
 		s.history = s.history[:cfg.MaxHistoryPerSession]
 	}
 }
@@ -406,6 +406,8 @@ func (p *Pool) ResetSession(sessionID string) {
 		if s.cond != nil {
 			s.cond.Broadcast()
 		}
+		clear(s.history[:cap(s.history)])
+		s.history = nil
 		s.mu.Unlock()
 	}
 	delete(p.sessions, sessionID)
@@ -588,6 +590,11 @@ func (p *Pool) ObserveSyncBarrier(ctx context.Context, obs StepObservation) (Ste
 
 				return obs, ErrBarrierTimeout
 			case <-settleCh:
+				// Bounded pause if in-flight tasks have not fully settled,
+				// eliminating CPU busy-spinning while preserving responsive completion.
+				if atomic.LoadInt64(&sess.inFlight) > 0 {
+					time.Sleep(50 * time.Microsecond)
+				}
 			}
 		}
 	}

@@ -107,7 +107,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		defer cleanup()
 
 		var cacheErr error
-		buildRunner, cleanupBuildCache, cacheErr = selfinstall.NewSelfUpdateRunner()
+		buildRunner, cleanupBuildCache, cacheErr = selfinstall.NewSelfUpdateRunnerWithReporter(reportSelfUpdateGoCacheOutcome)
 		if cacheErr != nil {
 			clearSelfUpdateProgressBar()
 			detail := "prepare update-owned Go build cache: " + cacheErr.Error()
@@ -517,6 +517,12 @@ func reportSelfUpdateCandidateCacheOutcome(result selfinstall.Result, cacheDir s
 	if !isInteractiveProgressBar() {
 		fmt.Fprintf(selfUpdateProgress, "self-update: candidate-cache outcomes success=%d refusal=%d error=%d\n",
 			counts.Success, counts.Refusal, counts.Error)
+	}
+}
+
+func reportSelfUpdateGoCacheOutcome(counts selfinstall.GoCacheOutcomeCounts) {
+	if !isInteractiveProgressBar() {
+		WriteSelfUpdateLog(selfUpdateProgress, selfinstall.FormatGoCacheOutcomeCounts(counts))
 	}
 }
 

@@ -711,6 +711,7 @@ autopick = [
   "interactivesession",
   "toolgrammar",
   "containment",
+  "readmenext",
   # new-leaf:lane
 ]
 
@@ -1647,6 +1648,7 @@ fakclient = ["pkg/fakclient/**"]
 harnessconformance = ["pkg/harnessconformance/**"]
 harnesssidecar = ["pkg/harnesssidecar/**"]
 managedharness = ["pkg/managedharness/**"]
+readmenext = ["internal/readmenext/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose

@@ -853,6 +853,7 @@ var tier = map[string]int{
 	"macobs":                     1, // Apple Silicon Mac & MLX observability leaf: hardware telemetry, headroom, metrics; stdlib-only, off hot path.
 	"capabilitymatrix":           1, // unified model capability registry (#11507); stdlib-only, off the hot path.
 	"containment":                1,
+	"readmenext":                 2, // README-NEXT staging and reconciliation pipeline (#11881).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

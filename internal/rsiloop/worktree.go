@@ -30,13 +30,16 @@ import (
 
 // WorktreeConfig parameterizes the real harness.
 type WorktreeConfig struct {
-	Repo        string     // a path inside the working copy (the fak module root is fine; git finds the repo)
-	BaselineRef string     // the ref the baseline + every candidate fork from (e.g. "main")
-	Candidates  []int      // proposed DefaultCacheSize values, tried in order
-	ProbePkg    string     // the KPI probe package path, e.g. "./cmd/kpiprobe"
-	SuiteCmds   [][]string // suite-green gate; ALL must exit 0. Default: build + vet over SuitePkgs
-	SuitePkgs   string     // package pattern for the default suite gate (default "./...")
-	ScratchDir  string     // parent for ephemeral worktrees ("" => os.TempDir)
+	Repo                string                                     // a path inside the working copy (the fak module root is fine; git finds the repo)
+	BaselineRef         string                                     // the ref the baseline + every candidate fork from (e.g. "main")
+	Candidates          []int                                      // proposed DefaultCacheSize values, tried in order
+	ProbePkg            string                                     // the KPI probe package path, e.g. "./cmd/kpiprobe"
+	SuiteCmds           [][]string                                 // suite-green gate; ALL must exit 0. Default: build + vet over SuitePkgs
+	SuitePkgs           string                                     // package pattern for the default suite gate (default "./...")
+	ScratchDir          string                                     // parent for ephemeral worktrees ("" => os.TempDir)
+	MaxTransientRetries int                                        // max transient retries per candidate (negative disables)
+	TransientBudget     int                                        // total transient retry budget across the run (0 = unlimited)
+	Command             func(name string, arg ...string) *exec.Cmd // optional command runner override for testing
 }
 
 // tunableRewrite matches the single `DefaultCacheSize = <int>` literal the Proposer
@@ -89,9 +92,12 @@ func NewWorktreeHarness(cfg WorktreeConfig) Harness {
 	}
 
 	return Harness{
-		MetricName:      "lru_hit_rate",
-		LowerBetter:     false,
-		BaselineRefName: cfg.BaselineRef,
+		MetricName:                        "lru_hit_rate",
+		LowerBetter:                       false,
+		BaselineRefName:                   cfg.BaselineRef,
+		MaxTransientRetries:               cfg.MaxTransientRetries,
+		TransientMeasurementRecoveryLimit: cfg.MaxTransientRetries,
+		TransientBudget:                   cfg.TransientBudget,
 		BaselineMetric: func() (float64, string, error) {
 			sha, err := resolvePinned()
 			if err != nil {
@@ -186,9 +192,13 @@ type wtPaths struct {
 func resolveRef(repo, ref string) (string, error) {
 	cmd := windowgate.Command("git", "-C", repo, "rev-parse", ref)
 	windowgate.ConfigureBackgroundCommand(cmd)
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("rev-parse %s: %w", ref, err)
+		rerr := fmt.Errorf("rev-parse %s: %w", ref, err)
+		if isGitLockMessage(string(out)) || isGitLockMessage(err.Error()) {
+			return "", NewTransientMeasureError(&GitLockError{Err: rerr, Msg: string(out)})
+		}
+		return "", rerr
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -223,6 +233,13 @@ func repoTopAndRel(repoArg string) (top, moduleRel string, err error) {
 	return top, filepath.ToSlash(rel), nil
 }
 
+func commandFor(cfg WorktreeConfig, name string, arg ...string) *exec.Cmd {
+	if cfg.Command != nil {
+		return cfg.Command(name, arg...)
+	}
+	return windowgate.Command(name, arg...)
+}
+
 // withWorktree creates a fresh detached worktree at ref, runs fn against it, and
 // always tears it down. main is never modified.
 func withWorktree(cfg WorktreeConfig, ref string, fn func(wtPaths) error) error {
@@ -236,17 +253,85 @@ func withWorktree(cfg WorktreeConfig, ref string, fn func(wtPaths) error) error 
 	}
 	defer os.RemoveAll(parent)
 	wt := filepath.Join(parent, "wt")
-	add := windowgate.Command("git", "-C", top, "worktree", "add", "--detach", wt, ref)
+	add := commandFor(cfg, "git", "-C", top, "worktree", "add", "--detach", wt, ref)
 	windowgate.ConfigureBackgroundCommand(add)
 	if out, err := add.CombinedOutput(); err != nil {
-		return fmt.Errorf("worktree add %s: %v: %s", ref, err, out)
+		addErr := fmt.Errorf("worktree add %s: %v: %s", ref, err, out)
+		if isGitLockMessage(string(out)) || isGitLockMessage(err.Error()) {
+			return NewTransientMeasureError(&GitLockError{Err: addErr, Msg: string(out)})
+		}
+		return addErr
 	}
 	defer shipgate.RemoveWorktree(top, wt)
 	module := wt
 	if moduleRel != "." {
 		module = filepath.Join(wt, filepath.FromSlash(moduleRel))
 	}
-	return fn(wtPaths{root: wt, module: module, moduleRel: moduleRel})
+	err = fn(wtPaths{root: wt, module: module, moduleRel: moduleRel})
+	if err != nil && (isGitLockMessage(err.Error()) || IsGitLockError(err)) {
+		return NewTransientMeasureError(&GitLockError{Err: err, Msg: err.Error()})
+	}
+	return err
+}
+
+// GitLockError represents an error originating from git lock contention
+// (e.g. index.lock, packed-refs.lock, or another git process running).
+type GitLockError struct {
+	Err error
+	Msg string
+}
+
+func (e *GitLockError) Error() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return e.Msg
+}
+
+func (e *GitLockError) Unwrap() error {
+	return e.Err
+}
+
+// IsTransient satisfies generic transient error checkers.
+func (e *GitLockError) IsTransient() bool {
+	return true
+}
+
+// Transient satisfies generic transient error checkers.
+func (e *GitLockError) Transient() bool {
+	return true
+}
+
+// TransientMeasure satisfies rsiloop transient measurement error classification.
+func (e *GitLockError) TransientMeasure() bool {
+	return true
+}
+
+// IsGitLockError reports whether err (or its cause) represents git lock contention.
+func IsGitLockError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var gle *GitLockError
+	if errors.As(err, &gle) {
+		return true
+	}
+	return isGitLockMessage(err.Error())
+}
+
+func isGitLockMessage(msg string) bool {
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "index.lock") ||
+		strings.Contains(lower, "packed-refs.lock") ||
+		strings.Contains(lower, ".lock': file exists") ||
+		strings.Contains(lower, "lock exists") ||
+		strings.Contains(lower, "another git process") ||
+		strings.Contains(lower, "cannot lock ref") ||
+		(strings.Contains(lower, "unable to create") && strings.Contains(lower, ".lock")) ||
+		strings.Contains(lower, "lock_busy") ||
+		strings.Contains(lower, "lock busy") ||
+		strings.Contains(lower, "could not reset index") ||
+		strings.Contains(lower, "unable to write new index file")
 }
 
 // runProbe runs the KPI probe in the module dir and parses its `KPI=<float>` line.

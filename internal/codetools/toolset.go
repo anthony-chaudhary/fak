@@ -25,12 +25,14 @@ import (
 // manifest, a residency PDP, or an operator reading a decision journal can see WHICH
 // coding operation a call dispatched to, not just "the coding engine".
 const (
-	EngineRead  = "codetools.read"
-	EngineGrep  = "codetools.grep"
-	EngineGlob  = "codetools.glob"
-	EngineWrite = "codetools.write"
-	EngineEdit  = "codetools.edit"
-	EngineBash  = "codetools.bash"
+	EngineRead       = "codetools.read"
+	EngineGrep       = "codetools.grep"
+	EngineGlob       = "codetools.glob"
+	EngineWrite      = "codetools.write"
+	EngineEdit       = "codetools.edit"
+	EngineBash       = "codetools.bash"
+	EngineApplyPatch = "codetools.apply_patch"
+	ToolApplyPatch   = "apply_patch"
 )
 
 // RungName identifies this package's adjudicator in a Verdict.By field and in the
@@ -109,7 +111,7 @@ type Policy struct {
 // IMPLEMENTED here (#6704, #6705) — so the read spine cannot be mistaken for a mutation
 // surface an operator forgot to close.
 func DefaultPolicy() Policy {
-	return Policy{Allow: map[string]bool{ToolRead: true, ToolGrep: true, ToolGlob: true, ToolWrite: true, ToolEdit: true, ToolBash: true}}
+	return Policy{Allow: map[string]bool{ToolRead: true, ToolGrep: true, ToolGlob: true, ToolWrite: true, ToolEdit: true, ToolBash: true, ToolApplyPatch: true}}
 }
 
 // Config configures a Toolset. Root is the workspace every path is confined to; empty
@@ -229,6 +231,11 @@ func (t *Toolset) Edit(ctx context.Context, body []byte) ([]byte, bool) {
 	return t.edit(ctx, body)
 }
 
+// ApplyPatch executes an ApplyPatch operation with JSON body arguments.
+func (t *Toolset) ApplyPatch(ctx context.Context, body []byte) ([]byte, bool) {
+	return t.applyPatch(ctx, body)
+}
+
 // RegisterEngines binds the engines into the abi registry under their own ids, so a
 // kernel dispatching a call whose Engine names one of them reaches this toolset. Mirrors
 // RegisterReadEngine: re-registering replaces the driver, so arming twice is safe.
@@ -239,6 +246,7 @@ func (t *Toolset) RegisterEngines() {
 	abi.RegisterEngine(EngineWrite, writeEngine{t})
 	abi.RegisterEngine(EngineEdit, editEngine{t})
 	abi.RegisterEngine(EngineBash, bashEngine{t})
+	abi.RegisterEngine(EngineApplyPatch, applyPatchEngine{t})
 }
 
 // Register builds a Toolset, registers its engines, and places its rung in the
@@ -273,6 +281,8 @@ func engineFor(tool string) (string, bool) {
 		return EngineEdit, true
 	case ToolBash:
 		return EngineBash, true
+	case ToolApplyPatch:
+		return EngineApplyPatch, true
 	}
 	return "", false
 }

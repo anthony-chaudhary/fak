@@ -1,0 +1,73 @@
+{
+  "sessionId": "gemini-turns-002",
+  "startTime": "2026-07-02T12:00:00.000Z",
+  "lastUpdateTime": "2026-07-02T12:02:00.000Z",
+  "model": "gemini-1.5-pro",
+  "turns": [
+    {
+      "role": "user",
+      "timestamp": "2026-07-02T12:00:01.000Z",
+      "parts": [
+        {
+          "text": "Find files matching pattern"
+        }
+      ]
+    },
+    {
+      "role": "model",
+      "model": "gemini-1.5-pro",
+      "timestamp": "2026-07-02T12:00:10.000Z",
+      "parts": [
+        {
+          "text": "I will search using Glob."
+        },
+        {
+          "functionCall": {
+            "id": "fc-1",
+            "name": "Glob",
+            "args": {
+              "pattern": "*.go"
+            }
+          }
+        }
+      ],
+      "usageMetadata": {
+        "promptTokenCount": 500,
+        "candidatesTokenCount": 45,
+        "totalTokenCount": 545,
+        "cachedContentTokenCount": 100
+      }
+    },
+    {
+      "role": "user",
+      "timestamp": "2026-07-02T12:00:15.000Z",
+      "parts": [
+        {
+          "functionResponse": {
+            "id": "fc-1",
+            "name": "Glob",
+            "response": {
+              "files": ["main.go"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "model",
+      "model": "gemini-1.5-pro",
+      "timestamp": "2026-07-02T12:00:20.000Z",
+      "parts": [
+        {
+          "text": "Found main.go."
+        }
+      ],
+      "usageMetadata": {
+        "promptTokenCount": 600,
+        "candidatesTokenCount": 20,
+        "totalTokenCount": 620,
+        "cachedContentTokenCount": 500
+      }
+    }
+  ]
+}
