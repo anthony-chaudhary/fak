@@ -820,6 +820,16 @@ func runLeaserefAcquire(stdout, stderr io.Writer, argv []string) int {
 	if v.OK {
 		out.Record = &rec
 		ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefAcquire, store, "", true)
+		postVerdict, postErr := store.Fence(context.Background(), rec, time.Now())
+		if postErr != nil {
+			fmt.Fprintf(stderr, "fak leaseref acquire: post-sync witness error: %v\n", postErr)
+			return 1
+		}
+		if !postVerdict.OK {
+			out.Record = nil
+			out.Verdict = postVerdict
+			return emitLeaserefOutcome(stdout, stderr, out, false, "acquire")
+		}
 		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceAcquire, rec, resolveAmbientLeaserefConfig(*announce, *announceIssue, *announceRepo))
 	}
 	return emitLeaserefOutcome(stdout, stderr, out, v.OK, "acquire")

@@ -198,6 +198,7 @@ var emittedRecoveryReasons = []string{
 	"MALFORMED",
 	"MERGE_ACTIVE_PEER_OWNED",
 	"MISROUTE",
+	"NO_LEASE",
 	"OVERSIZE",
 	"PARENT_TOKEN_BUDGET_EXCEEDED",
 	"PARENT_WALL_DEADLINE_EXCEEDED",
@@ -215,6 +216,7 @@ var emittedRecoveryReasons = []string{
 	"SECRET_REDACTED",
 	"SELF_MODIFY",
 	"SHELL_DIALECT",
+	"STALE_LEASE",
 	"SYSTEM_COMMIT_HEADROOM",
 	"TAINT_EGRESS",
 	"TARGET_MOVED",
@@ -636,6 +638,14 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 				"re-route file operations to specialized file tools rather than generic shell scripts",
 			},
 		},
+		"NO_LEASE": {
+			Reason:     "NO_LEASE",
+			Summary:    "no live lease exists for the requested id (expired, reaped, or displaced)",
+			Executable: false,
+			Notes: []string{
+				"reacquire the lease with `fak leaseref acquire` before attempting fenced operations",
+			},
+		},
 		"RATE_LIMITED": {
 			Reason:     "RATE_LIMITED",
 			Summary:    "tool or provider invocation rate exceeded the configured throughput limit",
@@ -706,6 +716,14 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 			Notes: []string{
 				"re-route PowerShell commands and cmdlets to the PowerShell execution tool",
 				"use standard POSIX commands when targeting the Bash execution tool",
+			},
+		},
+		"STALE_LEASE": {
+			Reason:     "STALE_LEASE",
+			Summary:    "presented lease generation or holder does not match live ref on disk",
+			Executable: false,
+			Notes: []string{
+				"fetch latest ref or reacquire lease if previous hold was displaced or expired",
 			},
 		},
 		"PII_REDACTED": {

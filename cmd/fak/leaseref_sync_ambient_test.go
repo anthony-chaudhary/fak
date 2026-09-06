@@ -9,6 +9,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -609,5 +610,44 @@ func TestDispatchLaneLeaseAmbientSync(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].written {
 		t.Fatalf("refused acquire should only run fetch before decide: %+v", got)
+	}
+}
+
+// TestLeaserefAcquireFailsClosedWhenDisplacedPostSync verifies that if the ref is
+// displaced during or immediately after the post-acquire ambient sync, runLeaserefAcquire
+// fails closed returning ok: false, reason NO_LEASE, and does not report success (#11832).
+func TestLeaserefAcquireFailsClosedWhenDisplacedPostSync(t *testing.T) {
+	dir := initRegionTestRepo(t)
+	leaseID := "lane-11832"
+
+	orig := ambientLeaseRefSync
+	ambientLeaseRefSync = func(surface loopdrive.LeaseRefSyncSurface, store *leaseref.Store, remote string, written bool) loopdrive.LeaseRefSyncReport {
+		if surface == loopdrive.LeaseRefSyncSurfaceLeaserefAcquire && written {
+			// Simulate displacement of the newly-acquired ref by releasing/deleting it behind the store's back.
+			_ = store.Release(context.Background(), leaseID)
+		}
+		return loopdrive.LeaseRefSyncReport{Outcome: loopdrive.LeaseRefSyncOK}
+	}
+	t.Cleanup(func() { ambientLeaseRefSync = orig })
+
+	var stdout, stderr bytes.Buffer
+	code := runLeaserefAcquire(&stdout, &stderr, []string{"--dir", dir, "--id", leaseID, "--holder", "worker-1", "--ttl", "300"})
+	if code != leaserefRefused {
+		t.Fatalf("expected exit code %d (leaserefRefused), got %d; stdout=%s stderr=%s", leaserefRefused, code, stdout.String(), stderr.String())
+	}
+
+	var res fencedResult
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatalf("failed to parse stdout json: %v, raw: %s", err, stdout.String())
+	}
+
+	if res.Verdict.OK {
+		t.Fatalf("expected verdict.ok to be false, got true: %+v", res)
+	}
+	if res.Verdict.Reason != "NO_LEASE" {
+		t.Fatalf("expected verdict.reason to be NO_LEASE, got %q: %+v", res.Verdict.Reason, res)
+	}
+	if res.Record != nil {
+		t.Fatalf("expected result record to be nil on refusal, got %+v", res.Record)
 	}
 }

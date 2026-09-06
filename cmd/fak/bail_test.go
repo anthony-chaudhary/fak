@@ -188,13 +188,35 @@ func TestPendingBailWiringNamesItsSites(t *testing.T) {
 // operator hitting OFF_TRUNK would be handed a config recovery.
 func TestTreeAndConfigRecoveryVocabulariesAreDisjoint(t *testing.T) {
 	tree := treeRecoveryPlans("main")
-	for reason := range configRecoveryPlans() {
+	config := configRecoveryPlans()
+	for reason := range config {
 		if _, clash := tree[reason]; clash {
 			t.Errorf("%s is defined in BOTH the tree and config catalogs; the merge in recoveryPlans would drop the tree plan", reason)
 		}
 	}
 	merged := recoveryPlans("main")
-	if want := len(tree) + len(configRecoveryPlans()); len(merged) != want {
+	for reason := range tree {
+		if _, ok := merged[reason]; !ok {
+			t.Errorf("tree recovery plan %s missing from merged catalog", reason)
+		}
+	}
+	for reason := range config {
+		if _, ok := merged[reason]; !ok {
+			t.Errorf("config recovery plan %s missing from merged catalog", reason)
+		}
+	}
+
+	dosCount := 0
+	if root := guardFindReasonRoot(); root != "" {
+		for token := range guardReadReasonDocs(root) {
+			if _, inTree := tree[token]; !inTree {
+				if _, inConfig := config[token]; !inConfig {
+					dosCount++
+				}
+			}
+		}
+	}
+	if want := len(tree) + len(config) + dosCount; len(merged) != want {
 		t.Fatalf("merged catalog has %d plans, want %d — a token collided", len(merged), want)
 	}
 }
