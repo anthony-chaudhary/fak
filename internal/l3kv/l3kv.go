@@ -90,13 +90,20 @@ type SpanRestorer interface {
 	RestoreSpanBytes(payload []byte) (positions int, err error)
 }
 
+// SpanFileResolver is an optional capability interface exposed by an inner KV backend
+// or Store allowing cache span eviction to map token/position ranges to backing file extents.
+type SpanFileResolver interface {
+	SpanFileRange(from, n int) (file *os.File, offset, length int64, ok bool)
+}
+
 // backend wraps an inner abi.KVBackend with the durable L3 residency tier. The four
 // local ops delegate to inner; the residency pair moves bytes through store.
 type backend struct {
-	inner    abi.KVBackend
-	stager   SpanStager   // nil when inner exposes no span byte-source
-	restorer SpanRestorer // nil when inner cannot install recovered bytes
-	store    Store
+	inner       abi.KVBackend
+	stager      SpanStager   // nil when inner exposes no span byte-source
+	restorer    SpanRestorer // nil when inner cannot install recovered bytes
+	store       Store
+	deallocator *AsyncDeallocator
 }
 
 // New wraps inner with the durable L3 residency tier at store. If inner also
@@ -114,10 +121,32 @@ func New(inner abi.KVBackend, store Store) abi.KVBackend {
 	return b
 }
 
+// WithDeallocator configures b to issue asynchronous deallocate/TRIM commands on span eviction.
+func WithDeallocator(b abi.KVBackend, d *AsyncDeallocator) abi.KVBackend {
+	if bk, ok := b.(*backend); ok {
+		bk.deallocator = d
+	}
+	return b
+}
+
 func (b *backend) Len() int                    { return b.inner.Len() }
 func (b *backend) Prefill(ids []int) []float32 { return b.inner.Prefill(ids) }
-func (b *backend) Evict(from, n int) int       { return b.inner.Evict(from, n) }
-func (b *backend) ModelID() string             { return b.inner.ModelID() }
+func (b *backend) Evict(from, n int) int {
+	removed := b.inner.Evict(from, n)
+	if b.deallocator != nil && removed > 0 {
+		if res, ok := b.inner.(SpanFileResolver); ok {
+			if f, off, len, ok := res.SpanFileRange(from, n); ok {
+				_ = b.deallocator.Submit(f, off, len)
+			}
+		} else if res, ok := b.store.(SpanFileResolver); ok {
+			if f, off, len, ok := res.SpanFileRange(from, n); ok {
+				_ = b.deallocator.Submit(f, off, len)
+			}
+		}
+	}
+	return removed
+}
+func (b *backend) ModelID() string { return b.inner.ModelID() }
 
 // CanEvict forwards the wrapped backend's span-eviction verdict so the KV-MMU still
 // sees a recurrent cache's typed limitation THROUGH the wrapper. Without this
