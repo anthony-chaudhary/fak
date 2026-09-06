@@ -1,6 +1,11 @@
 package workerenvelope
 
 import (
+	"bufio"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
 	"strings"
 	"testing"
 )
@@ -151,5 +156,355 @@ func TestParseMalformedFixtureFails(t *testing.T) {
 	const fixture = `{"status":"shipped","issue":1795,"commit_sha":"c99f5c02"}` // no witness
 	if _, err := Parse([]byte(fixture)); err == nil {
 		t.Fatal("malformed fixture (shipped without witness) should fail Parse")
+	}
+}
+
+func TestStatusInvariants(t *testing.T) {
+	validStatuses := []Status{StatusShipped, StatusBlocked, StatusNotYet}
+	for _, st := range validStatuses {
+		if !st.valid() {
+			t.Errorf("expected valid() == true for %q", st)
+		}
+	}
+
+	invalidStatuses := []Status{
+		"",
+		"done",
+		"Shipped",
+		"SHIPPED",
+		"blocked ",
+		" not_yet",
+		"pending",
+		"aborted",
+	}
+	for _, st := range invalidStatuses {
+		if st.valid() {
+			t.Errorf("expected valid() == false for %q", st)
+		}
+	}
+}
+
+func TestLooksLikeSHAInvariants(t *testing.T) {
+	cases := []struct {
+		input string
+		want  bool
+	}{
+		{"", false},
+		{"123456", false}, // 6 chars, too short
+		{"1234567", true}, // 7 chars, min bound
+		{"abcdef0", true},
+		{"ABCDEF0", true},
+		{"c99f5c02a1b2c3d4e5f60718293a4b5c6d7e8f90", true}, // 40 chars, max bound
+		{"C99F5C02A1B2C3D4E5F60718293A4B5C6D7E8F90", true},
+		{"c99f5c02a1b2c3d4e5f60718293a4b5c6d7e8f901", false}, // 41 chars, too long
+		{"123456g", false},  // non-hex char 'g'
+		{"123456z", false},  // non-hex char 'z'
+		{"123456 ", false},  // trailing space
+		{" 1234567", false}, // leading space
+		{"1234-567", false}, // dash
+	}
+	for _, tc := range cases {
+		got := looksLikeSHA(tc.input)
+		if got != tc.want {
+			t.Errorf("looksLikeSHA(%q) = %v, want %v", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestDispatchContractInvariants(t *testing.T) {
+	t.Run("empty commit_sha on shipped fails", func(t *testing.T) {
+		r := Result{
+			Status:    StatusShipped,
+			Issue:     1,
+			CommitSHA: "",
+			Witness:   "commit c99f5c02",
+		}
+		if err := r.Validate(); err == nil || !strings.Contains(err.Error(), "requires a commit_sha") {
+			t.Fatalf("expected requires a commit_sha error, got: %v", err)
+		}
+	})
+
+	t.Run("whitespace commit_sha on shipped fails", func(t *testing.T) {
+		r := Result{
+			Status:    StatusShipped,
+			Issue:     1,
+			CommitSHA: "       ",
+			Witness:   "commit c99f5c02",
+		}
+		if err := r.Validate(); err == nil || !strings.Contains(err.Error(), "commit_sha") {
+			t.Fatalf("expected commit_sha error, got: %v", err)
+		}
+	})
+
+	t.Run("whitespace witness on shipped fails", func(t *testing.T) {
+		r := Result{
+			Status:    StatusShipped,
+			Issue:     1,
+			CommitSHA: "c99f5c02",
+			Witness:   "  \t \n ",
+		}
+		if err := r.Validate(); err == nil || !strings.Contains(err.Error(), "requires a witness") {
+			t.Fatalf("expected witness error, got: %v", err)
+		}
+	})
+
+	t.Run("whitespace blocker on shipped passes", func(t *testing.T) {
+		r := Result{
+			Status:    StatusShipped,
+			Issue:     1,
+			CommitSHA: "c99f5c02",
+			Witness:   "commit c99f5c02",
+			Blocker:   "   ",
+		}
+		if err := r.Validate(); err != nil {
+			t.Fatalf("expected whitespace blocker to count as empty on shipped, got error: %v", err)
+		}
+	})
+
+	t.Run("whitespace blocker on blocked fails", func(t *testing.T) {
+		r := Result{
+			Status:  StatusBlocked,
+			Issue:   1,
+			Blocker: "   \t",
+		}
+		if err := r.Validate(); err == nil || !strings.Contains(err.Error(), "requires a blocker") {
+			t.Fatalf("expected blocker error, got: %v", err)
+		}
+	})
+
+	t.Run("whitespace blocker on not_yet fails", func(t *testing.T) {
+		r := Result{
+			Status:  StatusNotYet,
+			Issue:   1,
+			Blocker: " \n ",
+		}
+		if err := r.Validate(); err == nil || !strings.Contains(err.Error(), "requires a blocker") {
+			t.Fatalf("expected blocker error, got: %v", err)
+		}
+	})
+
+	t.Run("blocked with optional valid commit_sha passes", func(t *testing.T) {
+		r := Result{
+			Status:    StatusBlocked,
+			Issue:     1,
+			CommitSHA: "c99f5c02",
+			Blocker:   "pipeline failure",
+		}
+		if err := r.Validate(); err != nil {
+			t.Fatalf("expected blocked with valid commit_sha to pass, got: %v", err)
+		}
+	})
+}
+
+func TestParseFailClosedInvariants(t *testing.T) {
+	cases := []struct {
+		name    string
+		data    []byte
+		wantErr string
+	}{
+		{"empty payload", []byte{}, "decode"},
+		{"null payload", []byte("null"), "invalid status"},
+		{"numeric payload", []byte("12345"), "decode"},
+		{"array payload", []byte("[]"), "decode"},
+		{"trailing syntax error", []byte(`{"status":"shipped"} trailing`), "decode"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse(tc.data)
+			if err == nil {
+				t.Fatalf("expected Parse to fail, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error %q does not contain %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+func countNonEmptyLines(b []byte) int {
+	scanner := bufio.NewScanner(strings.NewReader(string(b)))
+	n := 0
+	for scanner.Scan() {
+		if strings.TrimSpace(scanner.Text()) != "" {
+			n++
+		}
+	}
+	return n
+}
+
+func checkFormulaicComment(cg *ast.CommentGroup) (bool, bool) {
+	if cg == nil {
+		return false, false
+	}
+	text := strings.TrimSpace(cg.Text())
+	lower := strings.ToLower(text)
+
+	hasMarker := strings.Contains(lower, "invariant:") ||
+		strings.Contains(lower, "invariants:") ||
+		strings.Contains(lower, "key invariant:") ||
+		strings.Contains(lower, "contract:") ||
+		strings.Contains(lower, "fail-closed:") ||
+		strings.Contains(lower, "fail-closed guard:") ||
+		strings.HasPrefix(lower, "invariant") ||
+		strings.HasPrefix(lower, "guard") ||
+		strings.HasPrefix(lower, "contract") ||
+		strings.HasPrefix(lower, "fail-closed")
+
+	if !hasMarker {
+		return false, false
+	}
+
+	words := strings.Fields(lower)
+	if len(words) <= 3 {
+		return true, true
+	}
+
+	keywordCount := 0
+	for _, w := range words {
+		cleaned := strings.Trim(w, ":,.-()")
+		if cleaned == "invariant" || cleaned == "contract" || cleaned == "guard" ||
+			cleaned == "fail-closed" || cleaned == "precondition" || cleaned == "postcondition" {
+			keywordCount++
+		}
+	}
+	if float64(keywordCount)/float64(len(words)) > 0.25 || keywordCount >= 3 {
+		return true, true
+	}
+
+	return true, false
+}
+
+func isSubstantiveDoc(name string, doc *ast.CommentGroup) bool {
+	if doc == nil {
+		return false
+	}
+	text := strings.TrimSpace(doc.Text())
+	if text == "" {
+		return false
+	}
+	words := strings.Fields(text)
+	if len(words) < 3 {
+		return false
+	}
+	firstWord := strings.Trim(strings.ToLower(words[0]), ":,.-()")
+	nameLower := strings.ToLower(name)
+	if firstWord == nameLower && len(words) <= 4 {
+		fillers := map[string]bool{
+			"is": true, "a": true, "the": true, "an": true, "for": true, "of": true,
+		}
+		meaningful := 0
+		for _, w := range words[1:] {
+			wl := strings.ToLower(strings.Trim(w, ":,.-()"))
+			if !fillers[wl] && wl != nameLower {
+				meaningful++
+			}
+		}
+		if meaningful < 2 {
+			return false
+		}
+	}
+	return true
+}
+
+func TestCommentHygieneAndNoFormulaicNoise(t *testing.T) {
+	fset := token.NewFileSet()
+	filename := "workerenvelope.go"
+
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", filename, err)
+	}
+
+	node, err := parser.ParseFile(fset, filename, content, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("failed to parse %s: %v", filename, err)
+	}
+
+	codeLines := countNonEmptyLines(content)
+	commentLines := 0
+	formulaicCount := 0
+	hasFiller := false
+
+	for _, cg := range node.Comments {
+		for _, c := range cg.List {
+			commentLines += strings.Count(c.Text, "\n") + 1
+		}
+		isForm, isFill := checkFormulaicComment(cg)
+		if isForm {
+			formulaicCount++
+			t.Logf("%s: detected formulaic comment: %q", filename, strings.TrimSpace(cg.Text()))
+		}
+		if isFill {
+			hasFiller = true
+		}
+	}
+
+	commentRatio := float64(commentLines) / float64(codeLines)
+	if codeLines > 30 && commentRatio > 0.35 {
+		t.Errorf("%s: comment bloat ratio %.2f exceeds 0.35 (comments: %d, code: %d)",
+			filename, commentRatio, commentLines, codeLines)
+	}
+
+	if formulaicCount > 0 || hasFiller {
+		t.Errorf("%s: formulaic comments detected: count=%d, filler=%v",
+			filename, formulaicCount, hasFiller)
+	}
+
+	exported := 0
+	documented := 0
+	var undocumented []string
+
+	for _, decl := range node.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			if ast.IsExported(d.Name.Name) {
+				exported++
+				if isSubstantiveDoc(d.Name.Name, d.Doc) {
+					documented++
+				} else {
+					undocumented = append(undocumented, d.Name.Name)
+				}
+			}
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				switch s := spec.(type) {
+				case *ast.TypeSpec:
+					if ast.IsExported(s.Name.Name) {
+						exported++
+						doc := s.Doc
+						if doc == nil {
+							doc = d.Doc
+						}
+						if isSubstantiveDoc(s.Name.Name, doc) {
+							documented++
+						} else {
+							undocumented = append(undocumented, s.Name.Name)
+						}
+					}
+				case *ast.ValueSpec:
+					for _, name := range s.Names {
+						if ast.IsExported(name.Name) {
+							exported++
+							doc := s.Doc
+							if doc == nil {
+								doc = d.Doc
+							}
+							if isSubstantiveDoc(name.Name, doc) {
+								documented++
+							} else {
+								undocumented = append(undocumented, name.Name)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if exported > 0 {
+		ratio := float64(documented) / float64(exported)
+		if ratio < 0.90 {
+			t.Errorf("%s: documented exports ratio %.2f < 0.90 (undocumented: %v)", filename, ratio, undocumented)
+		}
 	}
 }

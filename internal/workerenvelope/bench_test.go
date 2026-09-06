@@ -26,3 +26,36 @@ func BenchmarkWorkerEnvelope(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkValidate exercises Validate on a pre-constructed valid Result.
+func BenchmarkValidate(b *testing.B) {
+	res := Result{
+		Status:    StatusShipped,
+		Issue:     1795,
+		CommitSHA: "c99f5c02a1b2c3d4e5f60718293a4b5c6d7e8f90",
+		TestsRun:  []string{"go test ./internal/workerenvelope/"},
+		Witness:   "commit c99f5c02",
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := res.Validate(); err != nil {
+			b.Fatalf("unexpected validation error: %v", err)
+		}
+	}
+}
+
+// BenchmarkLooksLikeSHA exercises commit SHA validation across varying length strings.
+func BenchmarkLooksLikeSHA(b *testing.B) {
+	const shortSHA = "c99f5c0"
+	const fullSHA = "c99f5c02a1b2c3d4e5f60718293a4b5c6d7e8f90"
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if !looksLikeSHA(shortSHA) || !looksLikeSHA(fullSHA) {
+			b.Fatal("unexpected false from looksLikeSHA")
+		}
+	}
+}
