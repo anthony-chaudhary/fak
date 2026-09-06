@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/anthony-chaudhary/fak/internal/sessionsearch"
+	"github.com/anthony-chaudhary/fak/internal/toolproc"
 )
 
 type sessionSearchResultsEnvelope struct {
@@ -45,7 +46,7 @@ func runSessionSearch(stdout, stderr io.Writer, argv []string) int {
 
 	idx := sessionsearch.NewIndex()
 	if journalPath != "" {
-		f, err := os.Open(journalPath)
+		f, err := toolproc.OpenShareDelete(journalPath)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak sessionsearch: open journal: %v\n", err)
 			return 2
