@@ -523,6 +523,172 @@ func TestBuildCompactReportRecommendsProcessIssue(t *testing.T) {
 	}
 }
 
+func TestCompactReportCarriesShellChoice(t *testing.T) {
+	// Corpus reproducing the #3227 window:
+	// Bash: 194 calls / 5 errors (2.6%)
+	// PowerShell: 33 calls / 6 errors (18.2%)
+	sessions3227 := []Session{
+		{
+			Path:    "ns/s1.jsonl",
+			Session: "s1",
+			Tools:   map[string]int64{"Bash": 100, "PowerShell": 10, "Read": 500},
+			Behavior: Behavior{
+				ToolErrors: map[string]int64{"Bash": 1, "PowerShell": 2},
+			},
+		},
+		{
+			Path:    "ns/s2.jsonl",
+			Session: "s2",
+			Tools:   map[string]int64{"Bash": 94, "PowerShell": 23, "Edit": 20},
+			Behavior: Behavior{
+				ToolErrors: map[string]int64{"Bash": 4, "PowerShell": 4},
+			},
+		},
+	}
+	agg3227 := AggregateSessions(sessions3227)
+	rep3227 := BuildCompactReport(sessions3227, agg3227, "ns", nil, false, 0, len(sessions3227), nil, time.Now())
+
+	// 1. The compact record carries the fold
+	sc := rep3227.ShellChoice
+	if sc.Calls != 227 || sc.Errors != 11 {
+		t.Fatalf("compact shell choice calls/errors = %d/%d, want 227/11", sc.Calls, sc.Errors)
+	}
+	if sc.Preferred != "Bash" {
+		t.Errorf("compact preferred = %q, want Bash", sc.Preferred)
+	}
+	approx(t, "all-shell error rate", sc.ErrorRate, 11.0/227)
+
+	bashRow := shellRow(t, sc.ShellChoice, "Bash")
+	if bashRow.Calls != 194 || bashRow.Errors != 5 {
+		t.Errorf("bash calls/errors = %d/%d, want 194/5", bashRow.Calls, bashRow.Errors)
+	}
+	approx(t, "bash error rate", bashRow.ErrorRate, 5.0/194)
+	approx(t, "bash call share", bashRow.CallShare, 194.0/227)
+
+	pwshRow := shellRow(t, sc.ShellChoice, "PowerShell")
+	if pwshRow.Calls != 33 || pwshRow.Errors != 6 {
+		t.Errorf("powershell calls/errors = %d/%d, want 33/6", pwshRow.Calls, pwshRow.Errors)
+	}
+	approx(t, "pwsh error rate", pwshRow.ErrorRate, 6.0/33)
+	approx(t, "pwsh call share", pwshRow.CallShare, 33.0/227)
+
+	// Per-session distribution is carried
+	if sc.ShellErrorRate.Median == nil {
+		t.Fatal("expected per-session shell error rate median in compact record")
+	}
+	approx(t, "shell-error-rate median", sc.ShellErrorRate.Median, (3.0/110+8.0/117)/2)
+
+	// JSON round-trip preserves the fold
+	data, err := json.Marshal(rep3227)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	var decoded CompactReport
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if decoded.ShellChoice.Calls != 227 || decoded.ShellChoice.Errors != 11 {
+		t.Fatalf("decoded calls/errors = %d/%d, want 227/11", decoded.ShellChoice.Calls, decoded.ShellChoice.Errors)
+	}
+	if decoded.ShellChoice.Preferred != "Bash" {
+		t.Fatalf("decoded preferred = %q, want Bash", decoded.ShellChoice.Preferred)
+	}
+
+	// 2. The recommendation fires on a corpus reproducing the #3227 window
+	var shellRec *CompactRecommendation
+	for i := range rep3227.Recommendations {
+		if strings.Contains(rep3227.Recommendations[i].Kind, "shell_friction") {
+			shellRec = &rep3227.Recommendations[i]
+			break
+		}
+	}
+	if shellRec == nil {
+		t.Fatalf("expected shell friction recommendation, got recommendations: %+v", rep3227.Recommendations)
+	}
+	if shellRec.Severity != "high" {
+		t.Errorf("recommendation severity = %q, want high", shellRec.Severity)
+	}
+	if !strings.Contains(shellRec.Reason, "PowerShell") || !strings.Contains(shellRec.Evidence, "tool=PowerShell") {
+		t.Errorf("recommendation should name PowerShell: %+v", shellRec)
+	}
+
+	// 3. A 3-call shell does not trip it
+	sessionsNoise := []Session{
+		{
+			Path:    "ns/noise.jsonl",
+			Session: "noise",
+			Tools:   map[string]int64{"Bash": 100, "PowerShell": 3},
+			Behavior: Behavior{
+				ToolErrors: map[string]int64{"Bash": 1, "PowerShell": 1},
+			},
+		},
+	}
+	aggNoise := AggregateSessions(sessionsNoise)
+	repNoise := BuildCompactReport(sessionsNoise, aggNoise, "ns", nil, false, 0, len(sessionsNoise), nil, time.Now())
+	for _, rec := range repNoise.Recommendations {
+		if strings.Contains(rec.Kind, "shell_friction") {
+			t.Fatalf("3-call shell should not trip recommendation: %+v", rec)
+		}
+	}
+
+	// 4. Empty window reports UNKNOWN / no error rate
+	sessionsEmpty := []Session{
+		{
+			Path:    "ns/empty.jsonl",
+			Session: "empty",
+			Tools:   map[string]int64{"Read": 10},
+		},
+	}
+	aggEmpty := AggregateSessions(sessionsEmpty)
+	repEmpty := BuildCompactReport(sessionsEmpty, aggEmpty, "ns", nil, false, 0, len(sessionsEmpty), nil, time.Now())
+	scEmpty := repEmpty.ShellChoice
+	if scEmpty.Calls != 0 || scEmpty.Errors != 0 {
+		t.Errorf("empty window calls/errors = %d/%d, want 0/0", scEmpty.Calls, scEmpty.Errors)
+	}
+	if scEmpty.Preferred != "UNKNOWN" {
+		t.Errorf("empty window preferred = %q, want UNKNOWN", scEmpty.Preferred)
+	}
+	if scEmpty.ErrorRate != nil {
+		t.Errorf("empty window error rate = %v, want nil (no rate, never 0%%)", *scEmpty.ErrorRate)
+	}
+	for _, s := range scEmpty.Shells {
+		if s.ErrorRate != nil {
+			t.Errorf("empty window shell %s error rate = %v, want nil", s.Tool, *s.ErrorRate)
+		}
+	}
+	if scEmpty.ShellErrorRate.Median != nil {
+		t.Errorf("empty window shell error rate median = %v, want nil", *scEmpty.ShellErrorRate.Median)
+	}
+	for _, rec := range repEmpty.Recommendations {
+		if strings.Contains(rec.Kind, "shell_friction") {
+			t.Fatalf("empty window should not trip recommendation: %+v", rec)
+		}
+	}
+
+	// Empty window JSON output check
+	emptyData, err := json.Marshal(repEmpty)
+	if err != nil {
+		t.Fatalf("json.Marshal empty failed: %v", err)
+	}
+	var decodedEmpty CompactReport
+	if err := json.Unmarshal(emptyData, &decodedEmpty); err != nil {
+		t.Fatalf("json.Unmarshal empty failed: %v", err)
+	}
+	if decodedEmpty.ShellChoice.Preferred != "UNKNOWN" {
+		t.Errorf("decoded empty preferred = %q, want UNKNOWN", decodedEmpty.ShellChoice.Preferred)
+	}
+	if decodedEmpty.ShellChoice.ErrorRate != nil {
+		t.Errorf("decoded empty error rate = %v, want nil", *decodedEmpty.ShellChoice.ErrorRate)
+	}
+
+	// Zero sessions slice also reports UNKNOWN with no error rate
+	repZero := BuildCompactReport(nil, Aggregate{}, "ns", nil, false, 0, 0, nil, time.Now())
+	if repZero.ShellChoice.Preferred != "UNKNOWN" || repZero.ShellChoice.ErrorRate != nil {
+		t.Errorf("zero sessions preferred = %q (want UNKNOWN), error rate = %v (want nil)",
+			repZero.ShellChoice.Preferred, repZero.ShellChoice.ErrorRate)
+	}
+}
+
 func TestProviderBucketAndCostBehavior(t *testing.T) {
 	if _, ok := PriceFor("gemini-2.5-pro"); ok {
 		t.Fatal("Gemini should not get a Claude rate card")

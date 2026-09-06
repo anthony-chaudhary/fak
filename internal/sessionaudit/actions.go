@@ -224,6 +224,27 @@ func compactActionFromRecommendation(rep CompactReport, rec CompactRecommendatio
 			action.Target = fmt.Sprintf("process:confusion@%s", top.Session)
 		}
 		return action, true
+	case "shell_friction_pressure", "shell_friction":
+		action := CompactAction{
+			ID:       "address_shell_friction",
+			Kind:     rec.Kind,
+			Severity: rec.Severity,
+			Target:   "tool:shell",
+			Command:  rec.Action,
+			WitnessCommands: []string{
+				"fak session-audit summary --here --json",
+				"fak session audit --days 7 --json",
+			},
+			Reason:   rec.Reason,
+			Evidence: rec.Evidence,
+		}
+		for _, s := range rep.ShellChoice.Shells {
+			if s.ErrorRate != nil && s.Calls >= shellFrictionMinCalls && *s.ErrorRate >= shellFrictionThreshold {
+				action.Target = "tool:" + s.Tool
+				break
+			}
+		}
+		return action, true
 	default:
 		return CompactAction{}, false
 	}

@@ -105,3 +105,46 @@ func SessionShellErrorRate(s Session) *float64 {
 	sc := FoldShellChoice(s.Tools, s.Behavior.ToolErrors)
 	return sc.ErrorRate
 }
+
+// CompactShellChoice folds the shell-choice KPI (#3227, #6523) into the compact report:
+// per-shell calls, call share, errors, error rate, preferred shell, and the per-session
+// shell-error-rate distribution.
+type CompactShellChoice struct {
+	ShellChoice
+	ShellErrorRate StatSet `json:"shell_error_rate"`
+}
+
+// buildCompactShellChoice folds the shell-choice KPI into the compact report format,
+// joining agg.ShellChoice (or folding from sessions) with the per-session shell error
+// rate distribution. An empty window reports UNKNOWN for Preferred and nil for ErrorRate.
+func buildCompactShellChoice(sessions []Session, agg Aggregate) CompactShellChoice {
+	sc := agg.ShellChoice
+	if len(sc.Shells) == 0 {
+		toolCalls := map[string]int64{}
+		toolErrors := map[string]int64{}
+		for _, s := range sessions {
+			addMap(toolCalls, s.Tools)
+			addMap(toolErrors, s.Behavior.ToolErrors)
+		}
+		sc = FoldShellChoice(toolCalls, toolErrors)
+	}
+	if sc.Calls == 0 {
+		sc.Preferred = "UNKNOWN"
+	}
+	dist := agg.Distributions.ShellErrorRate
+	if dist.Median == nil && len(sessions) > 0 {
+		var shellErrs []float64
+		for _, s := range sessions {
+			if r := SessionShellErrorRate(s); r != nil {
+				shellErrs = append(shellErrs, *r)
+			}
+		}
+		if len(shellErrs) > 0 {
+			dist = stat(shellErrs, false, false, true)
+		}
+	}
+	return CompactShellChoice{
+		ShellChoice:    sc,
+		ShellErrorRate: dist,
+	}
+}

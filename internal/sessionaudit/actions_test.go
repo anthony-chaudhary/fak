@@ -112,3 +112,43 @@ func TestApplyCompactActionGateRefusesAtThreshold(t *testing.T) {
 		t.Fatal("unknown threshold should be invalid")
 	}
 }
+
+func TestBuildCompactActionPlanNamesShellFrictionAction(t *testing.T) {
+	pwshErrRate := 0.1818
+	rep := CompactReport{
+		Schema: "fak.session_audit.summary.v1",
+		ShellChoice: CompactShellChoice{
+			ShellChoice: ShellChoice{
+				Calls:     227,
+				Errors:    11,
+				Preferred: "Bash",
+				Shells: []ShellStat{
+					{Tool: "Bash", Calls: 194, Errors: 5},
+					{Tool: "PowerShell", Calls: 33, Errors: 6, ErrorRate: &pwshErrRate},
+				},
+			},
+		},
+		Recommendations: []CompactRecommendation{{
+			Kind:     "shell_friction_pressure",
+			Severity: "high",
+			Action:   "investigate PowerShell command failures and consider routing commands through Bash",
+			Reason:   "PowerShell error rate (18.2% over 33 calls) exceeds the shell friction threshold (10.0%)",
+			Evidence: "tool=PowerShell calls=33 errors=6 error_rate=18.2%",
+		}},
+	}
+
+	plan := BuildCompactActionPlan(rep)
+	if plan.Counts.Total != 1 || plan.Counts.High != 1 {
+		t.Fatalf("counts = %+v, want one high action", plan.Counts)
+	}
+	a := plan.Actions[0]
+	if a.ID != "address_shell_friction" ||
+		a.Target != "tool:PowerShell" ||
+		len(a.WitnessCommands) == 0 {
+		t.Fatalf("shell action = %+v", a)
+	}
+	gated, ok := ApplyCompactActionGate(plan, "high")
+	if !ok || gated.Gate.Verdict != "refuse" || gated.Gate.Refused != 1 {
+		t.Fatalf("gate = %+v, want one refused high action", gated.Gate)
+	}
+}

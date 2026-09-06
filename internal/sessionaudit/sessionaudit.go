@@ -259,6 +259,7 @@ type CompactReport struct {
 	Behavior          *CompactBehavior        `json:"behavior,omitempty"`
 	Confusion         *CompactConfusion       `json:"confusion,omitempty"`
 	ExcludedSubagents *Summary                `json:"excluded_subagents,omitempty"`
+	ShellChoice       CompactShellChoice      `json:"shell_choice"`
 }
 
 type CompactScope struct {
@@ -834,6 +835,7 @@ func BuildCompactReport(sessions []Session, agg Aggregate, nsPrefix string, sinc
 	}
 	rep.Behavior = aggregateCompactBehavior(ok)
 	rep.Confusion = aggregateCompactConfusion(ok)
+	rep.ShellChoice = buildCompactShellChoice(ok, agg)
 	rep.Recommendations = compactRecommendations(rep)
 	return rep
 }

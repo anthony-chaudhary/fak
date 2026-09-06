@@ -34,6 +34,9 @@ func compactRecommendations(rep CompactReport) []CompactRecommendation {
 	if rec, ok := compactUnpricedHold(rep.Totals); ok {
 		out = append(out, rec)
 	}
+	if rec, ok := compactShellFrictionPressure(rep.ShellChoice); ok {
+		out = append(out, rec)
+	}
 	return out
 }
 
@@ -459,4 +462,59 @@ func compactTierByName(tiers []CompactTier, name string) (CompactTier, bool) {
 		}
 	}
 	return CompactTier{}, false
+}
+
+const (
+	// shellFrictionMinCalls: a shell must reach this call volume before its error rate
+	// is treated as signal rather than noise (#3227, #6523). A 3-call shell with 1 error
+	// is 33% on sample noise alone.
+	shellFrictionMinCalls = int64(10)
+	// shellFrictionThreshold: error rate at or above which a shell is flagged for
+	// friction. In #3227, PowerShell ran at 18.2% (6/33) vs Bash at 2.6% (5/194).
+	shellFrictionThreshold = 0.10
+)
+
+// compactShellFrictionPressure raises a recommendation when a shell's error rate
+// crosses shellFrictionThreshold over at least shellFrictionMinCalls (#3227, #6523).
+// Stays silent for low-volume shells whose error rate is noise.
+func compactShellFrictionPressure(sc CompactShellChoice) (CompactRecommendation, bool) {
+	var worst *ShellStat
+	for i := range sc.Shells {
+		s := &sc.Shells[i]
+		if s.Calls < shellFrictionMinCalls || s.ErrorRate == nil || *s.ErrorRate < shellFrictionThreshold {
+			continue
+		}
+		if worst == nil || *s.ErrorRate > *worst.ErrorRate || (*s.ErrorRate == *worst.ErrorRate && s.Calls > worst.Calls) {
+			worst = s
+		}
+	}
+	if worst == nil {
+		return CompactRecommendation{}, false
+	}
+	severity := "medium"
+	if *worst.ErrorRate >= 0.15 || worst.Errors >= 5 {
+		severity = "high"
+	}
+	preferred := sc.Preferred
+	if preferred == "UNKNOWN" {
+		preferred = ""
+	}
+	var action string
+	if preferred != "" && preferred != worst.Tool {
+		action = fmt.Sprintf("investigate %s command failures and consider routing commands through %s or fixing shell environment issues", worst.Tool, preferred)
+	} else {
+		action = fmt.Sprintf("investigate and resolve %s command failures and shell environment issues", worst.Tool)
+	}
+	reason := fmt.Sprintf("%s error rate (%.1f%% over %d calls) exceeds the shell friction threshold (%.1f%%)",
+		worst.Tool, 100**worst.ErrorRate, worst.Calls, 100*shellFrictionThreshold)
+	evidence := fmt.Sprintf("tool=%s calls=%d errors=%d error_rate=%.1f%% all_shell_calls=%d all_shell_errors=%d preferred=%s",
+		worst.Tool, worst.Calls, worst.Errors, 100**worst.ErrorRate, sc.Calls, sc.Errors, sc.Preferred)
+
+	return CompactRecommendation{
+		Kind:     "shell_friction_pressure",
+		Severity: severity,
+		Action:   action,
+		Reason:   reason,
+		Evidence: evidence,
+	}, true
 }
