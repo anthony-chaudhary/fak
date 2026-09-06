@@ -43,3 +43,45 @@ func TestRecommendationNeverBlocks(t *testing.T) {
 		t.Fatal(result)
 	}
 }
+
+var benchRunResult Result
+
+func BenchmarkRun(b *testing.B) {
+	asOf := time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC)
+	stack := stackresolve.Receipt{Status: "allow"}
+	fitness := workloadfit.Assessment{Status: "fit"}
+	tuple := supportgraph.Tuple{Artifact: "a", Hardware: "l4"}
+	graph := supportgraph.Graph{
+		Schema: supportgraph.Schema,
+		Edges: []supportgraph.Edge{
+			{
+				Tuple:       tuple,
+				Required:    []string{"sm>=80"},
+				Recommended: []string{"memory>=24GiB"},
+				Evidence: []supportgraph.Evidence{
+					{
+						ID:        "w",
+						State:     supportgraph.Supported,
+						Tier:      supportgraph.Witnessed,
+						Authority: "lab",
+						Source:    "w",
+					},
+				},
+			},
+		},
+	}
+	in := Input{
+		Stack:          stack,
+		Fitness:        fitness,
+		Graph:          graph,
+		Tuple:          tuple,
+		AsOf:           asOf,
+		CapacityTarget: "24GiB",
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchRunResult = Run(in)
+	}
+}
