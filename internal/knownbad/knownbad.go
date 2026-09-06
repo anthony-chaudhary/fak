@@ -191,6 +191,22 @@ type Query struct {
 	TreeGlobs []string
 }
 
+// isWindowsDrive reports whether s has a Windows drive-letter prefix (e.g.
+// "C:/", "C:\", or bare "C:").
+func isWindowsDrive(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+	c := s[0]
+	if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+		return false
+	}
+	if s[1] != ':' {
+		return false
+	}
+	return len(s) == 2 || s[2] == '/' || s[2] == '\\'
+}
+
 // NormalizeTree canonicalizes one tree glob to a repo-relative directory/file
 // prefix so a lease-style "dir/**" and a bare file path under it compare as the
 // same containment: backslash->slash, strip any trailing "/**" or "/*" (or bare
@@ -200,7 +216,7 @@ type Query struct {
 // everything.
 func NormalizeTree(raw string) string {
 	s := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
-	if s == "" || strings.HasPrefix(s, "/") || strings.ContainsRune(s, 0) {
+	if s == "" || strings.HasPrefix(s, "/") || strings.ContainsRune(s, 0) || isWindowsDrive(s) {
 		return ""
 	}
 	s = strings.TrimRight(s, "/")
