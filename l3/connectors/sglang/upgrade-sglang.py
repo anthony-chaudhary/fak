@@ -82,10 +82,16 @@ def rmtree(path: Path) -> None:
             time.sleep(0.5)
 
 
+def no_window_creationflags() -> int:
+    """CREATE_NO_WINDOW on Windows to prevent console flashing in background tools."""
+    return 0x08000000 if sys.platform == "win32" else 0
+
+
 # ── git helpers ────────────────────────────────────────────────────────
 def _git(*args, cwd=None) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=cwd, check=True,
-                          capture_output=True, text=True)
+                          capture_output=True, text=True,
+                          creationflags=no_window_creationflags())
 
 
 def clone_sparse(repo: str, ref: str, dest: Path) -> None:
@@ -124,6 +130,7 @@ def merge_one(base: Path, ours: Path, theirs: Path, out: Path, target_ref: str) 
              "-L", f"theirs (upstream {target_ref})",
              str(to), str(tb), str(tt)],
             capture_output=True, text=True,
+            creationflags=no_window_creationflags(),
         )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(res.stdout, encoding="utf-8")
@@ -299,7 +306,9 @@ def apply(target_ref: str, staging: Path, repo: str, force: bool) -> int:
 
     # 7. regenerate patches/
     subprocess.run([sys.executable,
-                    str(cpl.CONNECTOR_DIR / "scripts" / "sync_patches.py")], check=True)
+                    str(cpl.CONNECTOR_DIR / "scripts" / "sync_patches.py")],
+                   check=True,
+                   creationflags=no_window_creationflags())
 
     print("\nDONE. Now: Linux smoke test before committing, then update")
     print("DIFF_STANDALONE_VS_SGLANG.md + CHANGELOG. The old tree is kept as")

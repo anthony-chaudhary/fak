@@ -56,6 +56,11 @@ PATCHES_DIR = SCRIPT_DIR / "patches"
 
 FLASHINFER_FIND_LINKS = "https://flashinfer.ai/whl/cu124/torch2.5/"
 
+def no_window_creationflags() -> int:
+    """CREATE_NO_WINDOW on Windows to prevent console flashing in background tools."""
+    return 0x08000000 if sys.platform == "win32" else 0
+
+
 # Files copied from cama_module/ -> <sglang>/.../storage/cama/
 MODULE_FILES = [
     "cama_storage.py",
@@ -93,6 +98,7 @@ def run(cmd: list[str], check: bool = True, **kwargs) -> subprocess.CompletedPro
     if len(display) > 120:
         display = display[:117] + "..."
     info(f"$ {display}")
+    kwargs.setdefault("creationflags", no_window_creationflags())
     result = subprocess.run(cmd, **kwargs)
     if check and result.returncode != 0:
         error(f"Command failed (exit {result.returncode})")
@@ -125,6 +131,7 @@ def detect_scm_version(sglang_dir: Path) -> str | None:
         cwd=str(sglang_dir),
         capture_output=True,
         text=True,
+        creationflags=no_window_creationflags(),
     )
     if result.returncode == 0:
         return None  # git describe works, no workaround needed
@@ -135,6 +142,7 @@ def detect_scm_version(sglang_dir: Path) -> str | None:
         cwd=str(sglang_dir),
         capture_output=True,
         text=True,
+        creationflags=no_window_creationflags(),
     )
     if tag_result.returncode == 0 and tag_result.stdout.strip():
         # Use the last tag as the version
@@ -418,6 +426,7 @@ def do_setup(
         [str(vpy), "-c", verify_script],
         capture_output=True,
         text=True,
+        creationflags=no_window_creationflags(),
     )
     if result.returncode == 0:
         for line in result.stdout.strip().splitlines():

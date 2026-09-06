@@ -40,6 +40,11 @@ IGNORE_DIR_NAMES = {"__pycache__"}
 ADDED_PREFIXES = ("python/sglang/srt/mem_cache/storage/cama/",)
 
 
+def no_window_creationflags() -> int:
+    """CREATE_NO_WINDOW on Windows to prevent console flashing in background tools."""
+    return 0x08000000 if sys.platform == "win32" else 0
+
+
 def clone_base(repo: str, ref: str, dest: Path) -> None:
     """Shallow + sparse clone of <repo>@<ref>, python/sglang only, forced LF.
 
@@ -51,9 +56,10 @@ def clone_base(repo: str, ref: str, dest: Path) -> None:
          "clone", "--depth", "1", "--branch", ref,
          "--filter=blob:none", "--sparse", repo, str(dest)],
         check=True,
+        creationflags=no_window_creationflags(),
     )
     subprocess.run(["git", "sparse-checkout", "set", SUBTREE],
-                   cwd=str(dest), check=True)
+                   cwd=str(dest), check=True, creationflags=no_window_creationflags())
 
 
 def iter_intree_files() -> list[str]:
