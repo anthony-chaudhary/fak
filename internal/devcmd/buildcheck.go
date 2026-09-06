@@ -429,10 +429,15 @@ func prepareBuildCheckIsolation(stdout, stderr io.Writer, root, scratch string, 
 // OS-native — how the go command keys the overlay), which hides it from the compile.
 func buildCheckArgs(mode, overlayPath, outTarget, wipTag string, pkgs []string) []string {
 	// Every buildcheck checkout is disposable and may live under a different absolute
-	// root. Keep that root out of compile action identities so Go's shared content-addressed
-	// cache can reuse sound artifacts. This is verification-only: the debuggable developer
-	// build deliberately keeps host paths.
+	// root. Keep that root out of compile action identities (-trimpath) and skip VCS
+	// stamping (-buildvcs=false) so Go's shared content-addressed cache can reuse
+	// sound artifacts across disposable verification checkouts without VCS queries or dirty-state
+	// hashing. This is verification-only: the debuggable developer build deliberately keeps
+	// host paths and VCS metadata.
 	args := []string{mode, "-trimpath"}
+	if mode == "build" {
+		args = append(args, "-buildvcs=false")
+	}
 	if overlayPath != "" {
 		args = append(args, "-overlay", overlayPath)
 	}

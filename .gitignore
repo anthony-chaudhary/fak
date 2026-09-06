@@ -762,6 +762,10 @@ cmd/_*
 /trajectory-audit-*.md
 /.verify1259
 
+# Scratch goal specs (disposable active loop memory; first-class coordination lives in leases, claims, and comments)
+/GOAL.md
+/GOAL-*.md
+
 # learning-debt dispatch seen-cache - node-local {source_id: record} of every
 # learning-scorecard HARD defect already filed as a triage issue; its durable
 # anti-re-file rung (tools/learning_debt_dispatch.py). Peer of .idea-scout/.

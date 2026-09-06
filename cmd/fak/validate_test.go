@@ -389,7 +389,7 @@ func TestValidateBuildAndVetArgsArePathPortable(t *testing.T) {
 		mode string
 		want []string
 	}{
-		{"build", []string{"build", "-trimpath", "./internal/owned"}},
+		{"build", []string{"build", "-trimpath", "-buildvcs=false", "./internal/owned"}},
 		{"vet", []string{"vet", "-trimpath", "./internal/owned"}},
 	}
 	for _, tc := range tests {

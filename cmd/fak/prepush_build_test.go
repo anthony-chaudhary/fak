@@ -237,7 +237,7 @@ func TestParseTestOnlyPackagesRetainsEveryUnprovenShape(t *testing.T) {
 func TestGoBuildPackageArgsAddsExactlyOneTrimpathBeforePackages(t *testing.T) {
 	packages := []string{"example.com/mod/a", "example.com/mod/b", "./cmd/..."}
 	got := goBuildPackageArgs(packages)
-	want := []string{"build", "-trimpath", "example.com/mod/a", "example.com/mod/b", "./cmd/..."}
+	want := []string{"build", "-trimpath", "-buildvcs=false", "example.com/mod/a", "example.com/mod/b", "./cmd/..."}
 
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("go build argv = %q, want %q", got, want)

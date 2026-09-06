@@ -23,7 +23,7 @@ func TestCIPreflightGoArgsArePathPortable(t *testing.T) {
 		want []string
 	}{
 		{"generated check", ciPreflightDisambiguationArgs(), []string{"run", "-trimpath", "./cmd/fak", "disambiguation", "generate", "--check", "--json"}},
-		{"committed build", ciPreflightBuildArgs(), []string{"build", "-trimpath", "./..."}},
+		{"committed build", ciPreflightBuildArgs(), []string{"build", "-trimpath", "-buildvcs=false", "./..."}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
