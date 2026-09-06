@@ -275,3 +275,32 @@ func BenchmarkMarkPhase(b *testing.B) {
 		sinkReceipt = MarkPhase(r, PhaseMaterialized, int64(1_700_000_000+i), EventMaterialized, "worktree prepared")
 	}
 }
+
+// TestBenchmarkOperationsSanity ensures all benchmark operations run cleanly without panics.
+func TestBenchmarkOperationsSanity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping benchmark sanity in short mode")
+	}
+	benchmarks := []struct {
+		name string
+		fn   func(b *testing.B)
+	}{
+		{"BenchmarkDecide", BenchmarkDecide},
+		{"BenchmarkReconcile", BenchmarkReconcile},
+		{"BenchmarkRankReclaim", BenchmarkRankReclaim},
+		{"BenchmarkUnownedReclaim", BenchmarkUnownedReclaim},
+		{"BenchmarkDecideAdopt", BenchmarkDecideAdopt},
+		{"BenchmarkApplyAdopt", BenchmarkApplyAdopt},
+		{"BenchmarkReceiptEncodeDecode", BenchmarkReceiptEncodeDecode},
+		{"BenchmarkMarkPhase", BenchmarkMarkPhase},
+	}
+
+	for _, tc := range benchmarks {
+		t.Run(tc.name, func(t *testing.T) {
+			res := testing.Benchmark(tc.fn)
+			if res.N <= 0 {
+				t.Fatalf("%s failed to execute any iterations: %+v", tc.name, res)
+			}
+		})
+	}
+}
