@@ -1,0 +1,31 @@
+{
+  "source_url": "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-UD-Q2_K_XL.gguf",
+  "source_revision": "4ca720788d1e01f1bff70c033e0d0028fd02e502",
+  "source_bytes": 9828981664,
+  "upstream_lfs_sha256": "fd4730dd8aad070517978752b63d530aeb1740d2283cab9fa24f1e404032ddb0",
+  "upstream_hash_scope": "Reported by Hugging Face X-Linked-ETag; not independently computed from the full artifact.",
+  "header_sha256": "1fe82fda85430cca654a156e9ec2915baf460752197013563b426db2581dcc0f",
+  "header_bytes": 10996640,
+  "fetched_range": "bytes=0-16777215",
+  "fixture_scope": "Exact original GGUF prefix through aligned tensor data offset. All metadata and tensor descriptors retained. No tensor payloads.",
+  "license": "Apache-2.0",
+  "tensor_count": 866,
+  "tensor_type_counts": {
+    "12": 21,
+    "0": 360,
+    "10": 16,
+    "21": 57,
+    "17": 34,
+    "19": 20,
+    "8": 98,
+    "18": 112,
+    "22": 67,
+    "16": 48,
+    "23": 19,
+    "29": 1,
+    "11": 5,
+    "13": 2,
+    "14": 6
+  },
+  "storage": "Lossless gzip of header prefix; header_sha256 hashes decompressed bytes."
+}
