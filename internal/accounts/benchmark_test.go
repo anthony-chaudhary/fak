@@ -404,8 +404,9 @@ func BenchmarkCooldownStore(b *testing.B) {
 			template.Cool(fmt.Sprintf("expired-%02d", j), CooldownUsageLimit, "limit", now.Add(-2*time.Hour), now.Add(-time.Hour))
 		}
 
-		stores := make([]*CooldownStore, b.N)
-		for i := 0; i < b.N; i++ {
+		const poolSize = 1024
+		stores := make([]*CooldownStore, poolSize)
+		for i := 0; i < poolSize; i++ {
 			entries := make(map[string]CooldownEntry, len(template.entries))
 			for k, v := range template.entries {
 				entries[k] = v
@@ -417,10 +418,30 @@ func BenchmarkCooldownStore(b *testing.B) {
 			}
 		}
 
+		type entryPair struct {
+			key   string
+			entry CooldownEntry
+		}
+		expired := make([]entryPair, 50)
+		for j := 0; j < 50; j++ {
+			k := fmt.Sprintf("expired-%02d", j)
+			expired[j] = entryPair{key: k, entry: template.entries[k]}
+		}
+
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			pruned := stores[i].Prune(now)
+			idx := i % poolSize
+			if i > 0 && idx == 0 {
+				b.StopTimer()
+				for k := 0; k < poolSize; k++ {
+					for _, ep := range expired {
+						stores[k].entries[ep.key] = ep.entry
+					}
+				}
+				b.StartTimer()
+			}
+			pruned := stores[idx].Prune(now)
 			if pruned != 50 {
 				b.Fatalf("got %d pruned, want 50", pruned)
 			}
