@@ -379,3 +379,23 @@ func TestStrictLiveAndLiveSnapshot(t *testing.T) {
 		t.Fatalf("res = %+v, want 2 records, 1 live, 1 expired", res)
 	}
 }
+
+// TestStrictSnapshotNilStore verifies that calling strict snapshot methods or
+// package-level helpers on a nil Store returns an error rather than panicking.
+func TestStrictSnapshotNilStore(t *testing.T) {
+	ctx := context.Background()
+	var s *Store
+
+	if _, err := s.StrictSnapshot(ctx); err == nil {
+		t.Fatal("s.StrictSnapshot on nil store must fail, got nil err")
+	}
+	if _, err := StrictSnapshot(ctx, s); err == nil {
+		t.Fatal("StrictSnapshot on nil store must fail, got nil err")
+	}
+	if _, err := StrictList(ctx, s); err == nil {
+		t.Fatal("StrictList on nil store must fail, got nil err")
+	}
+	if _, _, err := StrictLive(ctx, s, time.Now()); err == nil {
+		t.Fatal("StrictLive on nil store must fail, got nil err")
+	}
+}

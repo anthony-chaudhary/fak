@@ -42,6 +42,9 @@ func (s *Store) readRefStrict(ctx context.Context, ref string) (Record, error) {
 // Session, intent, and contract refs are ignored (preserving namespace isolation).
 // An empty or absent namespace returns an empty slice and nil error.
 func (s *Store) StrictSnapshot(ctx context.Context) ([]Record, error) {
+	if s == nil {
+		return nil, fmt.Errorf("leaseref: nil store")
+	}
 	recs, err := listRefsStrict(ctx, s, isLeaseRef, s.readRefStrict)
 	if err != nil {
 		return nil, err
@@ -61,11 +64,17 @@ func (s *Store) StrictList(ctx context.Context) ([]Record, error) {
 
 // StrictSnapshot is the package-level entry point for Store.StrictSnapshot.
 func StrictSnapshot(ctx context.Context, s *Store) ([]Record, error) {
+	if s == nil {
+		return nil, fmt.Errorf("leaseref: nil store")
+	}
 	return s.StrictSnapshot(ctx)
 }
 
 // StrictList is the package-level entry point for Store.StrictList.
 func StrictList(ctx context.Context, s *Store) ([]Record, error) {
+	if s == nil {
+		return nil, fmt.Errorf("leaseref: nil store")
+	}
 	return s.StrictList(ctx)
 }
 
@@ -89,6 +98,9 @@ func (s *Store) StrictLive(ctx context.Context, now time.Time) (live []Record, e
 
 // StrictLive is the package-level entry point for Store.StrictLive.
 func StrictLive(ctx context.Context, s *Store, now time.Time) (live []Record, expired []string, err error) {
+	if s == nil {
+		return nil, nil, fmt.Errorf("leaseref: nil store")
+	}
 	return s.StrictLive(ctx, now)
 }
 
