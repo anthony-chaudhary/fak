@@ -427,3 +427,118 @@ func TestBuildDerivesPerCandidateTreeFromScope(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildCandidatesDisjointPaths witnesses that cross-cutting candidates in
+// a fanout declare disjoint file paths where appropriate (#3716).
+// Previously, expand() stamped every candidate with the spine leaf's path,
+// forcing peak-1 cohort waves because every candidate collided with every other.
+func TestBuildCandidatesDisjointPaths(t *testing.T) {
+	plan, err := Build(spineInput())
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	bySlug := map[string]issuepolicy.Candidate{}
+	for _, c := range plan.Candidates {
+		for _, tmpl := range taxonomy {
+			if strings.HasSuffix(c.Key, "-"+tmpl.slug) {
+				bySlug[tmpl.slug] = c
+				break
+			}
+		}
+	}
+
+	// Helper to determine if two path globs/prefixes overlap in the file tree.
+	pathsOverlap := func(a, b string) bool {
+		a = strings.TrimPrefix(strings.TrimSpace(a), "./")
+		b = strings.TrimPrefix(strings.TrimSpace(b), "./")
+		a = strings.TrimRight(a, "*")
+		b = strings.TrimRight(b, "*")
+		a = strings.TrimSuffix(a, "/")
+		b = strings.TrimSuffix(b, "/")
+		if a == b {
+			return true
+		}
+		if strings.HasPrefix(a, b+"/") {
+			return true
+		}
+		if strings.HasPrefix(b, a+"/") {
+			return true
+		}
+		return false
+	}
+
+	candidatePathsDisjoint := func(c1, c2 issuepolicy.Candidate) bool {
+		for _, p1 := range c1.Paths {
+			for _, p2 := range c2.Paths {
+				if pathsOverlap(p1, p2) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+
+	// 1. Cross-lane candidate pairs must have mutually disjoint paths.
+	crossLanePairs := [][2]string{
+		{"qa-edge-sweep", "int-dos-wiring"},
+		{"qa-edge-sweep", "int-guard-gate"},
+		{"qa-edge-sweep", "int-superloop"},
+		{"qa-edge-sweep", "release-claims"},
+		{"qa-edge-sweep", "product-lcd-demo"},
+		{"qa-edge-sweep", "docs-doctrine-linkage"},
+		{"int-dos-wiring", "int-guard-gate"},
+		{"int-dos-wiring", "int-superloop"},
+		{"int-dos-wiring", "release-claims"},
+		{"int-guard-gate", "int-superloop"},
+		{"int-guard-gate", "release-claims"},
+		{"release-claims", "docs-doctrine-linkage"},
+	}
+
+	for _, pair := range crossLanePairs {
+		c1, ok1 := bySlug[pair[0]]
+		c2, ok2 := bySlug[pair[1]]
+		if !ok1 || !ok2 {
+			t.Fatalf("missing candidate for pair %v", pair)
+		}
+		if !candidatePathsDisjoint(c1, c2) {
+			t.Errorf("expected %s (%v) and %s (%v) to have disjoint paths, but overlap was found",
+				pair[0], c1.Paths, pair[1], c2.Paths)
+		}
+	}
+
+	// 2. In-leaf candidates sharing internal/<leaf>/ must NOT be disjoint from each other.
+	cQA1 := bySlug["qa-edge-sweep"]
+	cQA2 := bySlug["qa-failure-paths"]
+	if candidatePathsDisjoint(cQA1, cQA2) {
+		t.Errorf("expected %s and %s to overlap on internal/issuefanout/, but reported disjoint",
+			"qa-edge-sweep", "qa-failure-paths")
+	}
+
+	// 3. A cohort wave can find a clique of pairwise-disjoint candidates > 1
+	// (specifically >= 6 concurrent candidates), proving that fanout no longer
+	// forces peak-1 cohort waves.
+	concurrentCohortSlugs := []string{
+		"qa-edge-sweep",
+		"int-dos-wiring",
+		"int-guard-gate",
+		"int-superloop",
+		"release-claims",
+		"product-lcd-demo",
+		"docs-doctrine-linkage",
+	}
+	for i := 0; i < len(concurrentCohortSlugs); i++ {
+		for j := i + 1; j < len(concurrentCohortSlugs); j++ {
+			s1, s2 := concurrentCohortSlugs[i], concurrentCohortSlugs[j]
+			c1, ok1 := bySlug[s1]
+			c2, ok2 := bySlug[s2]
+			if !ok1 || !ok2 {
+				t.Fatalf("missing candidate %s or %s", s1, s2)
+			}
+			if !candidatePathsDisjoint(c1, c2) {
+				t.Errorf("cohort candidate %s (%v) overlaps with %s (%v); cannot run in parallel wave",
+					s1, c1.Paths, s2, c2.Paths)
+			}
+		}
+	}
+}
