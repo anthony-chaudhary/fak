@@ -228,9 +228,9 @@ func TestGuardCodexEnvKey(t *testing.T) {
 }
 
 func TestGuardCodexGatewayModel(t *testing.T) {
-	// #10669: the shared Codex default effort is the user-configured high; xhigh is opt-in.
-	if guardCodexDefaultModelID != "gpt-6-astra" || guardCodexDefaultReasoningEffort != "high" {
-		t.Fatalf("Codex defaults = model %q effort %q, want gpt-6-astra/high",
+	// #10669: the guarded Astra default effort is medium; xhigh is opt-in.
+	if guardCodexDefaultModelID != "gpt-6-astra" || guardCodexDefaultReasoningEffort != "medium" {
+		t.Fatalf("Codex defaults = model %q effort %q, want gpt-6-astra/medium",
 			guardCodexDefaultModelID, guardCodexDefaultReasoningEffort)
 	}
 	if got := guardCodexGatewayModel([]string{"codex"}, "", "openai-responses"); got != guardCodexDefaultModelID {
@@ -335,7 +335,7 @@ func TestGuardCodexConfigArgs(t *testing.T) {
 		"-c", `model_providers.fak.wire_api="responses"`,
 		"-c", `model_providers.fak.env_key="OPENAI_API_KEY"`,
 		"-c", `mcp_servers.fak_guard.url="http://127.0.0.1:8137/mcp"`,
-		"-c", `model_reasoning_effort="high"`,
+		"-c", `model_reasoning_effort="medium"`,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("guardCodexConfigArgs len = %d, want %d\n got=%v", len(got), len(want), got)
@@ -493,8 +493,8 @@ func TestInstallGuardCodexConfigCodexOnlyRewrite(t *testing.T) {
 		// The struct the banner reads is fully populated (#10669: the resolved effort, and
 		// that it is the configured default rather than an operator opt-in).
 		if info.ProviderID != "fak" || info.EnvKey != "OPENAI_API_KEY" || info.BaseURL != gw+"/v1" ||
-			info.Model != "gpt-6-astra" || info.Reasoning != "high" || info.ReasoningOptIn {
-			t.Errorf("guardCodexInstall fields = %+v, want provider=fak env=OPENAI_API_KEY base=%s/v1 model=gpt-6-astra effort=high not-opt-in", info, gw)
+			info.Model != "gpt-6-astra" || info.Reasoning != "medium" || info.ReasoningOptIn {
+			t.Errorf("guardCodexInstall fields = %+v, want provider=fak env=OPENAI_API_KEY base=%s/v1 model=gpt-6-astra effort=medium not-opt-in", info, gw)
 		}
 	})
 

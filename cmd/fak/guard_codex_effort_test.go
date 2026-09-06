@@ -6,7 +6,7 @@ import (
 )
 
 // guard_codex_effort_test.go — the #10669 red/green witness. Goal-continuation and guarded
-// Codex sessions must run at the user-configured reasoning effort (`high`), never a silently
+// Codex sessions must run at the model-specific default reasoning effort (Astra: `medium`), never a silently
 // forced `xhigh` (measured to roughly double the post-tool wait). `xhigh` is opt-in only,
 // via $FAK_GUARD_CODEX_REASONING_EFFORT, and the resolved effort stays auditable in the
 // guard install receipt and the banner.
@@ -15,7 +15,7 @@ import (
 // in docs and runbooks names this exact variable.
 const guardCodexReasoningEffortEnvOptInName = "FAK_GUARD_CODEX_REASONING_EFFORT"
 
-// The default guarded Codex session config must pin the configured effort (high), not the
+// The default guarded Codex session config must pin the configured effort (Astra: medium), not the
 // xhigh escalation the guard used to force onto every goal-continuation turn (#10669).
 func TestGuardCodexConfigArgsEffortIsConfiguredNotXhigh(t *testing.T) {
 	t.Setenv(guardCodexReasoningEffortEnvOptInName, "")
@@ -23,8 +23,8 @@ func TestGuardCodexConfigArgsEffortIsConfiguredNotXhigh(t *testing.T) {
 	if containsArg(got, `model_reasoning_effort="xhigh"`) {
 		t.Errorf("#10669: guarded Codex config args still force xhigh (doubles post-tool wait): %v", got)
 	}
-	if !containsArg(got, `model_reasoning_effort="high"`) {
-		t.Errorf("#10669: guarded Codex config args must default to the configured high effort: %v", got)
+	if !containsArg(got, `model_reasoning_effort="medium"`) {
+		t.Errorf("#10669: guarded Codex config args must default to the configured medium effort: %v", got)
 	}
 }
 
@@ -43,8 +43,8 @@ func TestGuardCodexReasoningEffortEnvOptInControlsSessionEffort(t *testing.T) {
 	t.Run("unset defers to the configured default", func(t *testing.T) {
 		t.Setenv(guardCodexReasoningEffortEnvOptInName, "")
 		got := guardCodexConfigArgs(gw, "", "")
-		if !containsArg(got, `model_reasoning_effort="high"`) || containsArg(got, `model_reasoning_effort="xhigh"`) {
-			t.Errorf("#10669: unset opt-in must keep the configured high effort: %v", got)
+		if !containsArg(got, `model_reasoning_effort="medium"`) || containsArg(got, `model_reasoning_effort="xhigh"`) {
+			t.Errorf("#10669: unset opt-in must keep the configured medium effort: %v", got)
 		}
 	})
 
@@ -94,14 +94,14 @@ func TestGuardCodexReasoningEffortEnvOptInControlsSessionEffort(t *testing.T) {
 func TestInstallGuardCodexReasoningEffortReceiptAuditable(t *testing.T) {
 	const gw = "http://127.0.0.1:8137"
 
-	t.Run("default install receipts the configured high effort", func(t *testing.T) {
+	t.Run("default install receipts the configured medium effort", func(t *testing.T) {
 		t.Setenv(guardCodexReasoningEffortEnvOptInName, "")
 		_, info := installGuardCodexConfig([]string{"codex", "exec", "task"}, true, gw, "")
 		if !info.Applied {
 			t.Fatal("#10669: codex install not applied")
 		}
-		if info.Reasoning != "high" {
-			t.Errorf("#10669: install receipt Reasoning = %q, want the configured high (got forced xhigh?)", info.Reasoning)
+		if info.Reasoning != "medium" {
+			t.Errorf("#10669: install receipt Reasoning = %q, want the configured medium (got forced xhigh?)", info.Reasoning)
 		}
 		if info.ReasoningOptIn {
 			t.Errorf("#10669: default install must not mark the effort as operator-opted-in: %+v", info)
@@ -127,7 +127,7 @@ func TestInstallGuardCodexReasoningEffortReceiptAuditable(t *testing.T) {
 }
 
 // The banner names the resolved effort, and when it came from the explicit opt-in the banner
-// says so — an operator reading the startup report can tell a default high from an opted-in
+// says so — an operator reading the startup report can tell a default medium from an opted-in
 // xhigh without reverse-engineering the environment.
 func TestPrintGuardCodexNoteNamesEffortSource(t *testing.T) {
 	t.Run("default effort is named plainly", func(t *testing.T) {
@@ -137,11 +137,11 @@ func TestPrintGuardCodexNoteNamesEffortSource(t *testing.T) {
 			ProviderID: "fak",
 			EnvKey:     "OPENAI_API_KEY",
 			BaseURL:    "http://127.0.0.1:8137/v1",
-			Model:      "gpt-5.6-sol",
-			Reasoning:  "high",
+			Model:      "gpt-6-astra",
+			Reasoning:  "medium",
 		})
 		out := b.String()
-		if !strings.Contains(out, `model_reasoning_effort=high`) {
+		if !strings.Contains(out, `model_reasoning_effort=medium`) {
 			t.Errorf("#10669: banner must name the resolved effort: %s", out)
 		}
 		if strings.Contains(out, "opt-in") {
@@ -172,8 +172,8 @@ func TestPrintGuardCodexNoteNamesEffortSource(t *testing.T) {
 
 func TestGuardCodexReasoningEffortGPT6AstraAliases(t *testing.T) {
 	for _, m := range []string{"gpt-6-astra", "gpt 6 astra", "astra", "gpt-6", "gpt6astra", "openai/gpt-6-astra"} {
-		if got := guardCodexReasoningEffort(m); got != "high" {
-			t.Errorf("guardCodexReasoningEffort(%q) = %q, want high", m, got)
+		if got := guardCodexReasoningEffort(m); got != "medium" {
+			t.Errorf("guardCodexReasoningEffort(%q) = %q, want medium", m, got)
 		}
 	}
 }
@@ -188,7 +188,6 @@ func TestGuardCodexReasoningEffortModelFamilies(t *testing.T) {
 		"gpt-6-mini",
 		"gpt-5.6",
 		"gpt-5.6-sol",
-		"gpt-6-astra",
 		"o1",
 		"o1-mini",
 		"o3-mini",

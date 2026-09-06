@@ -87,7 +87,7 @@ const (
 	guardCodexLocalPlaceholderAPIKey = "fak-local-codex-placeholder"
 	guardCodexOAuthPlaceholderAPIKey = "fak-guard-oauth-placeholder"
 	guardCodexDefaultModelID         = configaccounts.CodexDefaultModel
-	guardCodexDefaultReasoningEffort = configaccounts.CodexDefaultReasoningEffort
+	guardCodexDefaultReasoningEffort = "medium"
 )
 
 func guardCodexGatewayModel(command []string, model, provider string) string {
@@ -254,7 +254,7 @@ type guardCodexEffortResolution struct {
 
 // guardCodexResolveReasoningEffort resolves the guarded Codex session's reasoning effort in
 // strict order (#10669): an explicit $FAK_GUARD_CODEX_REASONING_EFFORT opt-in wins over
-// everything; otherwise the managed GPT-5.6 default gets the configured effort — never the
+// everything; otherwise Astra gets medium and other reasoning models get their configured effort — never the
 // silent xhigh escalation the guard used to force onto every goal-continuation turn; an
 // explicit custom/local model keeps its own supported-effort contract instead of receiving a
 // config value it may reject. A later user-supplied `-c model_reasoning_effort=...` still
@@ -271,13 +271,16 @@ func guardCodexResolveReasoningEffort(model string, getenv func(string) string) 
 var codexReasoningModelRE = regexp.MustCompile(`(^|/)(gpt-5\.6|gpt-[6-9]|o[1-9]|astra)`)
 
 // guardCodexReasoningEffort is the no-opt-in effort for the model Codex is being pointed at:
-// the configured default for detected reasoning model families (e.g. GPT-5.6*, GPT-6.*,
-// GPT-7.*, o1.*-o5.*, Astra models), and no pin at all for a custom or local model
+// medium for Astra, the configured default for other reasoning model families (e.g. GPT-5.6*, GPT-6.*,
+// GPT-7.*, o1.*-o5.*), and no pin at all for a custom or local model
 // whose supported-effort set the guard cannot know.
 func guardCodexReasoningEffort(model string) string {
 	m := strings.ToLower(configaccounts.NormalizeCodexModelSlug(model))
-	if codexReasoningModelRE.MatchString(m) || strings.Contains(m, "astra") {
+	if m == configaccounts.GPT6AstraModel {
 		return guardCodexDefaultReasoningEffort
+	}
+	if codexReasoningModelRE.MatchString(m) || strings.Contains(m, "astra") {
+		return configaccounts.CodexDefaultReasoningEffort
 	}
 	return ""
 }
