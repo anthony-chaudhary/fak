@@ -13,14 +13,11 @@ func call(tool, trace string) *abi.ToolCall {
 		Args: abi.Ref{Kind: abi.RefInline, Inline: []byte("{}")}}
 }
 
-// the airline-booking plan: the tools a legitimate booking task needs.
 var airlinePlan = Plan{
 	Tools: []string{"get_user_details", "search_flights", "read_refund_policy", "book_reservation"},
 	Mode:  AllowedSet,
 }
 
-// TestNoPlanDefers — with no plan declared, CFI is inactive and Defers (it must not
-// affect an unplanned flow).
 func TestNoPlanDefers(t *testing.T) {
 	ctx := context.Background()
 	a := New(NewLedger())
@@ -29,8 +26,6 @@ func TestNoPlanDefers(t *testing.T) {
 	}
 }
 
-// TestConformingCallDefers — a call within the approved set Defers (CFI has no
-// objection; the other gates decide).
 func TestConformingCallDefers(t *testing.T) {
 	ctx := context.Background()
 	l := NewLedger()
@@ -43,9 +38,6 @@ func TestConformingCallDefers(t *testing.T) {
 	}
 }
 
-// TestDeviationEscalates is the headline: an injection-derailed call to a tool NOT
-// in the approved plan (send_email — the exfil gadget) is trapped as a CFI
-// violation and escalated for human approval.
 func TestDeviationEscalates(t *testing.T) {
 	ctx := context.Background()
 	l := NewLedger()
@@ -63,8 +55,6 @@ func TestDeviationEscalates(t *testing.T) {
 	}
 }
 
-// TestStrictModeDenies — OnDeviation=Deny turns a deviation into a hard block
-// (no human in the loop), proving the escalate-vs-deny policy is a knob.
 func TestStrictModeDenies(t *testing.T) {
 	ctx := context.Background()
 	l := NewLedger()
@@ -76,8 +66,6 @@ func TestStrictModeDenies(t *testing.T) {
 	}
 }
 
-// TestSequenceMode — calls must follow the plan order; a repeat or a prior step is
-// fine, a jump ahead or an unlisted tool deviates.
 func TestSequenceMode(t *testing.T) {
 	ctx := context.Background()
 	l := NewLedger()
@@ -93,32 +81,26 @@ func TestSequenceMode(t *testing.T) {
 			t.Fatalf("%q should deviate, got Defer", tool)
 		}
 	}
-	ok("a")  // step 0
-	ok("b")  // step 1
-	ok("a")  // a prior step (re-read) is fine
-	dev("z") // unlisted tool deviates
-	ok("c")  // step 2 (next) is fine
+	ok("a")
+	ok("b")
+	ok("a")
+	dev("z")
+	ok("c")
 }
 
-// TestSessionIsolation — a plan on one trace does not constrain another.
 func TestSessionIsolation(t *testing.T) {
 	ctx := context.Background()
 	l := NewLedger()
 	l.Declare("planned", airlinePlan)
 	a := New(l)
-	// an unplanned trace is unconstrained.
 	if v := a.Adjudicate(ctx, call("send_email", "free")); v.Kind != abi.VerdictDefer {
 		t.Fatalf("an unplanned trace must Defer, got %v", v.Kind)
 	}
-	// the planned trace still traps the deviation.
 	if v := a.Adjudicate(ctx, call("send_email", "planned")); v.Kind != VerdictRequireApproval {
 		t.Fatalf("the planned trace must still escalate, got %v", v.Kind)
 	}
 }
 
-// TestRequireApprovalRegistered — the open-range verdict is registered with the
-// right fold rank + fail-closed fallback (so an unaware worker can't proceed past
-// an approval gate).
 func TestRequireApprovalRegistered(t *testing.T) {
 	if got := abi.FoldRank(VerdictRequireApproval); got != requireApprovalFoldRank {
 		t.Fatalf("RequireApproval fold rank = %d, want %d", got, requireApprovalFoldRank)
