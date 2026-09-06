@@ -194,21 +194,22 @@ func (s ObserverSemanticScreen) ScreenResult(ctx context.Context, c *abi.ToolCal
 	}
 
 	if errors.Is(err, ErrBarrierTimeout) {
-		if obs.IsMutating() {
-			digest := res.Reason
-			if digest == "" {
-				digest = "observer sync barrier timed out waiting for in-flight tasks"
-			}
+		sess := s.pool.getOrCreateSession(sessionID)
+		if obs.IsReadOnly() && sess != nil && !sess.isFlagged() {
 			return abi.ScreenAdvice{
-				Disposition: abi.ScreenQuarantine,
-				Reason:      abi.ReasonIntegrityRefuted,
-				Digest:      digest,
-				By:          "observer:barrier_timeout",
+				Disposition: abi.ScreenAllow,
+				By:          "observer:advance",
 			}
 		}
+		digest := res.Reason
+		if digest == "" {
+			digest = "observer sync barrier timed out waiting for in-flight tasks"
+		}
 		return abi.ScreenAdvice{
-			Disposition: abi.ScreenAllow,
-			By:          "observer:advance",
+			Disposition: abi.ScreenQuarantine,
+			Reason:      abi.ReasonIntegrityRefuted,
+			Digest:      digest,
+			By:          "observer:barrier_timeout",
 		}
 	}
 

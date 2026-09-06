@@ -863,6 +863,70 @@ func TestObserverSemanticScreen_BarrierTimeoutReadOnlyAllowed(t *testing.T) {
 	}
 }
 
+func TestObserverSemanticScreen_BarrierTimeout_FailClosedOnUnknownTools(t *testing.T) {
+	pool := NewPool(Config{
+		WorkerCount:        1,
+		QueueSize:          16,
+		BarrierTimeout:     10 * time.Millisecond,
+		RequireWitnessDiff: true,
+	})
+	_ = pool.Start()
+	defer pool.Close()
+
+	screen := NewObserverSemanticScreen(pool)
+	ctx := context.Background()
+	sessionID := "sess-screen-barrier-timeout-unknown"
+
+	sess := pool.getOrCreateSession(sessionID)
+	// Simulate an un-settled in-flight task that triggers barrier timeout
+	atomic.StoreInt64(&sess.inFlight, 1)
+	defer atomic.StoreInt64(&sess.inFlight, 0)
+
+	unknownTools := []string{"powershell", "pwsh", "cmd", "sh", "zsh", "delete_file", "custom_mcp_op"}
+	for _, tool := range unknownTools {
+		call := &abi.ToolCall{
+			Tool:    tool,
+			TraceID: sessionID,
+			Meta: map[string]string{
+				"args": "exec",
+			},
+		}
+		body := []byte("command output")
+
+		advice := screen.ScreenResult(ctx, call, body)
+		if advice.Disposition != abi.ScreenQuarantine {
+			t.Fatalf("expected ScreenQuarantine on barrier timeout for unclassified tool %s, got %v", tool, advice.Disposition)
+		}
+		if advice.Reason != abi.ReasonIntegrityRefuted {
+			t.Fatalf("expected ReasonIntegrityRefuted for %s, got %v", tool, advice.Reason)
+		}
+		if advice.By != "observer:barrier_timeout" {
+			t.Fatalf("expected By='observer:barrier_timeout' for %s, got %q", tool, advice.By)
+		}
+	}
+
+	// Also verify that a read-only tool on a flagged session is quarantined on barrier timeout
+	flaggedSessionID := "sess-screen-barrier-timeout-flagged"
+	flaggedSess := pool.getOrCreateSession(flaggedSessionID)
+	flaggedSess.mu.Lock()
+	flaggedSess.flaggedChurn = true
+	flaggedSess.mu.Unlock()
+	atomic.StoreInt64(&flaggedSess.inFlight, 1)
+	defer atomic.StoreInt64(&flaggedSess.inFlight, 0)
+
+	readCall := &abi.ToolCall{
+		Tool:    "Read",
+		TraceID: flaggedSessionID,
+	}
+	advice := screen.ScreenResult(ctx, readCall, []byte("content"))
+	if advice.Disposition != abi.ScreenQuarantine {
+		t.Fatalf("expected ScreenQuarantine on barrier timeout for flagged session, got %v", advice.Disposition)
+	}
+	if advice.Reason != abi.ReasonIntegrityRefuted {
+		t.Fatalf("expected ReasonIntegrityRefuted for flagged session, got %v", advice.Reason)
+	}
+}
+
 func TestObserverSemanticScreen_ScreenResult_ContextDeadlineExceeded(t *testing.T) {
 	pool := NewPool(Config{
 		WorkerCount:        1,
