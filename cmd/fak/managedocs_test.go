@@ -129,10 +129,6 @@ func TestManageDocs(t *testing.T) {
 	}
 }
 
-func TestRunManageDocs(t *testing.T) {
-	TestManageDocs(t)
-}
-
 func TestManageDocs_CheckRetained(t *testing.T) {
 	cleanWorkspace := createCleanManagedocsWorkspace(t)
 	var stdout, stderr bytes.Buffer
@@ -159,10 +155,6 @@ func TestManageDocs_CheckRetained(t *testing.T) {
 	if !strings.Contains(stderr.String(), "fak managedocs retained audit failed") {
 		t.Errorf("expected retained audit failed in stderr, got: %s", stderr.String())
 	}
-}
-
-func TestRunManageDocs_CheckRetained(t *testing.T) {
-	TestManageDocs_CheckRetained(t)
 }
 
 func createCleanManagedocsWorkspace(t *testing.T) string {
@@ -210,10 +202,6 @@ func TestManageDocs_ExplicitNonexistentDirFails(t *testing.T) {
 	if !strings.Contains(stderr.String(), "nonexistent-docs-dir-xyz-123") {
 		t.Errorf("expected stderr to contain nonexistent docs dir name, got: %s", stderr.String())
 	}
-}
-
-func TestRunManageDocs_ExplicitNonexistentDirFails(t *testing.T) {
-	TestManageDocs_ExplicitNonexistentDirFails(t)
 }
 
 func TestManageDocs_DocsDirInfersDocumentSets(t *testing.T) {
