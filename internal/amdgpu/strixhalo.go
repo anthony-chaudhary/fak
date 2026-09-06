@@ -49,17 +49,20 @@ func ParseStrixHaloPlatform(s string) (StrixHaloPlatform, error) {
 // StrixHaloServingConfig specifies the operational serving parameters and hardware resource
 // allocations for AMD Strix Halo (Ryzen AI MAX+ 395 / Radeon 8060S / gfx1151).
 type StrixHaloServingConfig struct {
-	Platform             StrixHaloPlatform   `json:"platform"`
-	UMAAllocatedGiB      float64             `json:"uma_allocated_gib"`
-	OSReservedGiB        float64             `json:"os_reserved_gib"`
-	KVPrecision          compute.KVPrecision `json:"kv_precision"`
-	KVPrecisionLabel     string              `json:"kv_precision_label"`
-	DecoupledDraftUBatch int                 `json:"decoupled_draft_ubatch"`
-	PrefillChunkTokens   int                 `json:"prefill_chunk_tokens"`
-	WatchdogTimeoutMs    int64               `json:"watchdog_timeout_ms"`
-	MaxConcurrentAgents  int                 `json:"max_concurrent_agents"`
-	MaxContextTokens     int                 `json:"max_context_tokens"`
-	MaxDepthOfTurns      int                 `json:"max_depth_of_turns"`
+	Platform                  StrixHaloPlatform   `json:"platform"`
+	UMAAllocatedGiB           float64             `json:"uma_allocated_gib"`
+	OSReservedGiB             float64             `json:"os_reserved_gib"`
+	KVPrecision               compute.KVPrecision `json:"kv_precision"`
+	KVPrecisionLabel          string              `json:"kv_precision_label"`
+	EnableF16KVContiguization bool                `json:"enable_f16_kv_contiguization"`
+	ContiguizationScratchGiB  float64             `json:"contiguization_scratch_gib"`
+	ContiguizationMinContext  int                 `json:"contiguization_min_context"`
+	DecoupledDraftUBatch      int                 `json:"decoupled_draft_ubatch"`
+	PrefillChunkTokens        int                 `json:"prefill_chunk_tokens"`
+	WatchdogTimeoutMs         int64               `json:"watchdog_timeout_ms"`
+	MaxConcurrentAgents       int                 `json:"max_concurrent_agents"`
+	MaxContextTokens          int                 `json:"max_context_tokens"`
+	MaxDepthOfTurns           int                 `json:"max_depth_of_turns"`
 }
 
 // CalculateStrixHaloServingEnvelope derives the optimal Strix Halo serving configuration,
@@ -127,14 +130,32 @@ func CalculateStrixHaloServingEnvelope(
 	requiredKVFP16 := int64(targetContextTokens) * kvBytesFP16
 	requiredKVQ8 := int64(targetContextTokens) * kvBytesQ8
 
+	// F16 KV contiguization scratch buffer (per-layer K and V head-contiguous buffers)
+	// prevents LPDDR5X 16-channel camping on Strix Halo APUs.
+	contiguizationScratchBytes := int64(2 * kvHeads * targetContextTokens * headDim * 2)
+
 	var selectedPrecision compute.KVPrecision
 	var precisionLabel string
 	var chosenKVBytesPerToken int64
+	var enableContiguization bool
+	var contiguizationScratchGiB float64
+	var contiguizationMinContext int
 
-	if requiredKVFP16 <= availableKVBudget {
+	if requiredKVFP16+contiguizationScratchBytes <= availableKVBudget {
 		selectedPrecision = compute.KVPrecisionF32
 		precisionLabel = "f16"
 		chosenKVBytesPerToken = kvBytesFP16
+		enableContiguization = true
+		contiguizationScratchGiB = float64(contiguizationScratchBytes) / (1024 * 1024 * 1024)
+		contiguizationMinContext = compute.ContiguizationMinContext
+		availableKVBudget -= contiguizationScratchBytes
+	} else if requiredKVFP16 <= availableKVBudget {
+		selectedPrecision = compute.KVPrecisionF32
+		precisionLabel = "f16"
+		chosenKVBytesPerToken = kvBytesFP16
+		enableContiguization = true
+		contiguizationScratchGiB = float64(contiguizationScratchBytes) / (1024 * 1024 * 1024)
+		contiguizationMinContext = compute.ContiguizationMinContext
 	} else if requiredKVQ8 <= availableKVBudget {
 		selectedPrecision = compute.KVPrecisionQ8
 		precisionLabel = "q8"
@@ -168,17 +189,20 @@ func CalculateStrixHaloServingEnvelope(
 	}
 
 	return &StrixHaloServingConfig{
-		Platform:             platform,
-		UMAAllocatedGiB:      umaAllocatedGiB,
-		OSReservedGiB:        osReservedGiB,
-		KVPrecision:          selectedPrecision,
-		KVPrecisionLabel:     precisionLabel,
-		DecoupledDraftUBatch: 512,
-		PrefillChunkTokens:   1024,
-		WatchdogTimeoutMs:    -1,
-		MaxConcurrentAgents:  targetConcurrency,
-		MaxContextTokens:     targetContextTokens,
-		MaxDepthOfTurns:      maxDepthOfTurns,
+		Platform:                  platform,
+		UMAAllocatedGiB:           umaAllocatedGiB,
+		OSReservedGiB:             osReservedGiB,
+		KVPrecision:               selectedPrecision,
+		KVPrecisionLabel:          precisionLabel,
+		EnableF16KVContiguization: enableContiguization,
+		ContiguizationScratchGiB:  contiguizationScratchGiB,
+		ContiguizationMinContext:  contiguizationMinContext,
+		DecoupledDraftUBatch:      512,
+		PrefillChunkTokens:        1024,
+		WatchdogTimeoutMs:         -1,
+		MaxConcurrentAgents:       targetConcurrency,
+		MaxContextTokens:          targetContextTokens,
+		MaxDepthOfTurns:           maxDepthOfTurns,
 	}, nil
 }
 
