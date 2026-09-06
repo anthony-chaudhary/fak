@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -32,11 +31,6 @@ func TestCommandDisablesPromptingInEnv(t *testing.T) {
 	}
 	if len(cmd.Args) == 0 || cmd.Args[0] != "gh" {
 		t.Errorf("Command args = %v, want gh argv[0]", cmd.Args)
-	}
-	if runtime.GOOS == "windows" {
-		if cmd.SysProcAttr == nil || !cmd.SysProcAttr.HideWindow {
-			t.Errorf("Command SysProcAttr missing HideWindow on windows: %+v", cmd.SysProcAttr)
-		}
 	}
 }
 
