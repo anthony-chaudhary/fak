@@ -111,8 +111,8 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 	snapshotUsageLedger := flags.String("snapshot-usage-ledger", "", "append privacy-safe capture/replay outcomes to this explicit JSONL file")
 	snapshotUsageFold := flags.String("snapshot-usage-fold", "", "read this snapshot usage JSONL file and emit its deterministic ISO-week fold")
 	progress := flags.Bool("progress", false, "emit bounded scan progress to stderr")
-	if err := flags.Parse(args); err != nil {
-		return 2
+	if code, ok := parseFlagsOrHelp(flags, args); !ok {
+		return code
 	}
 	explicit := map[string]bool{}
 	flags.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
