@@ -15,6 +15,12 @@ var (
 	reVerifiedMarker = regexp.MustCompile(`(<!--\s*readme-verified:\s*)\d{4}-\d{2}-\d{2}`)
 )
 
+// SynthesizeNextDraft renders the simulated README with fragments applied and returns
+// the transformed content alongside a list of changes and retired items. It is an alias for PreviewNext.
+func SynthesizeNextDraft(readmeContent string, fragments []*CandidateFragment) (string, []string, error) {
+	return PreviewNext(readmeContent, fragments)
+}
+
 // PreviewNext renders the simulated README with fragments applied and returns
 // the transformed content alongside a list of changes and retired items.
 func PreviewNext(readmeContent string, fragments []*CandidateFragment) (string, []string, error) {

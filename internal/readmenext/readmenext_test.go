@@ -35,7 +35,7 @@ const sampleReadme = `# fak — the fast local runtime for coding agents
 <!-- readme-verified: 2026-09-01 vs VERSION 0.50.0 -->
 `
 
-func setupHermeticRepo(t *testing.T) string {
+func setupHermeticRepo(t testing.TB) string {
 	t.Helper()
 	repoRoot := t.TempDir()
 
@@ -537,5 +537,41 @@ func TestPublish_Live(t *testing.T) {
 	}
 	if nvEntry.Detail != "docs/_witnesses/issue-10944-nvidia-gcp-overnight/README.md" {
 		t.Errorf("expected detail path to match receipt, got %s", nvEntry.Detail)
+	}
+}
+
+func TestSynthesizeNextDraft(t *testing.T) {
+	oldNvidiaRow := "| NVIDIA | Older H100 result: 95 tok/s. | Verified baseline. | [NVIDIA](docs/nvidia.md) |"
+	newNvidiaRow := "| NVIDIA | Hopper H100 Q8_0: 111.9 tok/s | Verified | [NVIDIA](docs/nv.md) |"
+
+	fragments := []*CandidateFragment{
+		{
+			Schema:           SchemaCandidate,
+			Issue:            10944,
+			Topic:            "nvidia-update",
+			TargetSection:    TargetHardwareTable,
+			CandidateContent: newNvidiaRow,
+			RetireTarget: RetireTarget{
+				Action:     RetireActionReplaceRow,
+				TargetText: oldNvidiaRow,
+			},
+			Date: "2026-09-06",
+		},
+	}
+
+	draft, changes, err := SynthesizeNextDraft(sampleReadme, fragments)
+	if err != nil {
+		t.Fatalf("unexpected error from SynthesizeNextDraft: %v", err)
+	}
+	preview, previewChanges, previewErr := PreviewNext(sampleReadme, fragments)
+	if previewErr != nil {
+		t.Fatalf("unexpected error from PreviewNext: %v", previewErr)
+	}
+
+	if draft != preview {
+		t.Errorf("expected SynthesizeNextDraft output to match PreviewNext exactly")
+	}
+	if len(changes) != len(previewChanges) {
+		t.Errorf("expected changes count to match: got %d, want %d", len(changes), len(previewChanges))
 	}
 }
