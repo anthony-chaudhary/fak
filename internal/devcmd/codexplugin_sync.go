@@ -114,6 +114,18 @@ func RunCodexPluginSync(stdout, stderr io.Writer, args []string) int {
 	return 0
 }
 
+func renamePluginPath(ops codexPluginSyncOps, old, new string) error {
+	var err error
+	for attempt := 0; attempt < 8; attempt++ {
+		err = ops.rename(old, new)
+		if err == nil {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return err
+}
+
 func syncCodexPlugin(home, source, destination, workspace string, ops codexPluginSyncOps) (codexPluginSyncReceipt, error) {
 	now := time.Now().UTC()
 	r := codexPluginSyncReceipt{Schema: codexPluginSyncSchema, Status: "FAILED", CodexHome: filepath.Clean(home), Source: filepath.Clean(source), Destination: filepath.Clean(destination), CreatedAt: now.Format(time.RFC3339)}
@@ -204,7 +216,7 @@ func syncCodexPlugin(home, source, destination, workspace string, ops codexPlugi
 			return cause
 		}
 		_ = ops.remove(destination)
-		if rollbackErr := ops.rename(backup, destination); rollbackErr != nil {
+		if rollbackErr := renamePluginPath(ops, backup, destination); rollbackErr != nil {
 			r.Status = "ROLLBACK_FAILED"
 			r.Detail = fmt.Sprintf("%s: %v; rollback: %v", stageName, cause, rollbackErr)
 			return errors.New(r.Detail)
@@ -213,7 +225,7 @@ func syncCodexPlugin(home, source, destination, workspace string, ops codexPlugi
 	}
 	if err := ops.rename(stage, destination); err != nil {
 		if destinationExists {
-			if rollbackErr := ops.rename(backup, destination); rollbackErr != nil {
+			if rollbackErr := renamePluginPath(ops, backup, destination); rollbackErr != nil {
 				r.Status, r.FailureStage = "ROLLBACK_FAILED", "cutover"
 				r.Detail = fmt.Sprintf("cutover: %v; rollback: %v", err, rollbackErr)
 				return r, errors.New(r.Detail)

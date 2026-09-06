@@ -148,8 +148,8 @@ func TestSyncCodexPluginCutoverFailureRollsBackOldInstall(t *testing.T) {
 	if !strings.Contains(string(old), "old") {
 		t.Fatalf("rollback did not restore old install: %s", old)
 	}
-	if calls != 3 {
-		t.Fatalf("rename calls=%d, want backup/cutover/rollback", calls)
+	if calls < 3 {
+		t.Fatalf("rename calls=%d, want at least backup/cutover/rollback", calls)
 	}
 }
 
