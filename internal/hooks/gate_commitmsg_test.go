@@ -39,6 +39,8 @@ func TestSuggestGradeableSubject_correctsDeterministicFailures(t *testing.T) {
 
 		// Unsupported imperative verb with unambiguous synonym (#11811)
 		{"synonym-synchronize", "feat(gateway): synchronize the routing table", "feat(gateway): sync the routing table"},
+		{"synonym-inspect", "test(core): inspect the buffer state", "test(core): verify the buffer state"},
+		{"synonym-modify", "refactor(core): modify cache config", "refactor(core): update cache config"},
 		{"inflected-synonym-synchronized", "feat(gateway): synchronized the routing table", "feat(gateway): sync the routing table"},
 		{"inflected-retained", "fix(agent): retained Responses SSE terminal failures (#11548) (fak agent)", "fix(agent): retain Responses SSE terminal failures (#11548) (fak agent)"},
 
