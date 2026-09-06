@@ -18,7 +18,7 @@ package witness
 //
 // THE TWO RUNGS, ONE FAIL-CLOSED CONTRACT.
 //
-//	STRUCTURAL (always, flag-independent): did the fix commit add or modify a `_test.go`?
+//	STRUCTURAL (always, flag-independent): did the fix commit add or modify a `_test.go` or Python test file?
 //	  No test touched => REFUTED — a fix with no symptom witness is exactly the gap. This is
 //	  the cheap, deterministic half; it needs no second worktree and never abstains on cost.
 //
@@ -37,7 +37,10 @@ package witness
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -91,14 +94,16 @@ func (r *Resolver) resolveSymptom(ctx context.Context, ref string) abi.WitnessOu
 	return r.ResolveSymptom(ctx, ref, false)
 }
 
-// changedTestFiles extracts the repo-relative `_test.go` paths from `git show --name-only`
-// output, normalizing separators and skipping blanks. testdata/ fixtures are excluded — a
-// fixture named *_test.go is not a gating test.
+// changedTestFiles extracts the repo-relative test paths from `git show --name-only`
+// output, normalizing separators and skipping blanks. Both Go test files (`_test.go`)
+// and Python test files (e.g. under `tools/` ending with `_test.py` or starting with `test_`
+// and ending with `.py`) are recognized. testdata/ fixtures are excluded — a
+// fixture named *_test.go or *_test.py is not a gating test.
 func changedTestFiles(nameOnly string) []string {
 	var tests []string
 	for _, line := range strings.Split(nameOnly, "\n") {
 		p := strings.ReplaceAll(strings.TrimSpace(line), "\\", "/")
-		if p == "" || !strings.HasSuffix(p, "_test.go") {
+		if p == "" || !isTestFile(p) {
 			continue
 		}
 		if isUnderTestdata(p) {
@@ -109,7 +114,28 @@ func changedTestFiles(nameOnly string) []string {
 	return tests
 }
 
+func isTestFile(p string) bool {
+	p = strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")
+	if strings.HasSuffix(p, "_test.go") {
+		return true
+	}
+	return isPythonTestFile(p)
+}
+
+func isPythonTestFile(p string) bool {
+	p = strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")
+	base := path.Base(p)
+	if strings.HasSuffix(base, "_test.py") && len(base) > len("_test.py") {
+		return true
+	}
+	if strings.HasPrefix(base, "test_") && strings.HasSuffix(base, ".py") && len(base) > len("test_.py") {
+		return true
+	}
+	return false
+}
+
 func isUnderTestdata(p string) bool {
+	p = strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")
 	for _, seg := range strings.Split(p, "/") {
 		if seg == "testdata" {
 			return true
@@ -138,7 +164,8 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 	}
 
 	pkgs := testPackages(tests)
-	if len(pkgs) == 0 {
+	pyTests := pythonTestFiles(tests)
+	if len(pkgs) == 0 && len(pyTests) == 0 {
 		return abi.WitnessAbstain
 	}
 
@@ -148,7 +175,7 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 		return abi.WitnessAbstain
 	}
 	defer cleanupCommit()
-	if !goTestPasses(ctx, exec, commitDir, pkgs) {
+	if !allTestsPass(ctx, exec, commitDir, pkgs, pyTests) {
 		// The committed test does not even pass at the fix — not a usable witness; don't CONFIRM.
 		return abi.WitnessRefuted
 	}
@@ -163,7 +190,7 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 	if !overlayTestsAtRef(ctx, r.run, r.dir, commit, parentDir, tests) {
 		return abi.WitnessAbstain // could not stage the red test — uncertain, never a false CONFIRM
 	}
-	if goTestPasses(ctx, exec, parentDir, pkgs) {
+	if allTestsPass(ctx, exec, parentDir, pkgs, pyTests) {
 		// The test passes against the OLD source too: it constrains nothing about the bug.
 		return abi.WitnessRefuted
 	}
@@ -176,6 +203,10 @@ func testPackages(tests []string) []string {
 	seen := map[string]bool{}
 	var pkgs []string
 	for _, t := range tests {
+		t = strings.ReplaceAll(strings.TrimSpace(t), "\\", "/")
+		if !strings.HasSuffix(t, "_test.go") {
+			continue
+		}
 		dir := path.Dir(t)
 		if dir == "." || dir == "" {
 			dir = "."
@@ -186,6 +217,28 @@ func testPackages(tests []string) []string {
 		}
 	}
 	return pkgs
+}
+
+// pythonTestFiles filters tests down to Python test files.
+func pythonTestFiles(tests []string) []string {
+	var pyTests []string
+	for _, t := range tests {
+		t = strings.ReplaceAll(strings.TrimSpace(t), "\\", "/")
+		if isPythonTestFile(t) {
+			pyTests = append(pyTests, t)
+		}
+	}
+	return pyTests
+}
+
+func allTestsPass(ctx context.Context, exec CommandRunner, dir string, pkgs, pyTests []string) bool {
+	if len(pkgs) > 0 && !goTestPasses(ctx, exec, dir, pkgs) {
+		return false
+	}
+	if len(pyTests) > 0 && !pythonTestsPass(ctx, exec, dir, pyTests) {
+		return false
+	}
+	return true
 }
 
 // overlayTestsAtRef writes each changed test file's content AT <commit> into the corresponding
@@ -200,8 +253,8 @@ func overlayTestsAtRef(ctx context.Context, git Runner, repoDir, commit, destDir
 		if err != nil || code != 0 {
 			return false
 		}
-		dst := path.Join(strings.ReplaceAll(destDir, "\\", "/"), rel)
-		if err := os.MkdirAll(path.Dir(dst), 0o755); err != nil {
+		dst := filepath.Join(destDir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return false
 		}
 		if err := os.WriteFile(dst, []byte(content), 0o644); err != nil {
@@ -219,4 +272,41 @@ func goTestPasses(ctx context.Context, run CommandRunner, dir string, pkgs []str
 	argv := append([]string{"go", "test", "-count=1"}, pkgs...)
 	_, code, err := run(ctx, dir, argv...)
 	return err == nil && code == 0
+}
+
+// pythonTestsPass runs each Python test script in dir and reports whether all exited 0.
+func pythonTestsPass(ctx context.Context, run CommandRunner, dir string, tests []string) bool {
+	if run == nil {
+		run = commandRunner
+	}
+	py := pythonBin()
+	for _, t := range tests {
+		_, code, err := run(ctx, dir, py, t)
+		if err != nil || code != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func pythonBin() string {
+	if env := strings.TrimSpace(os.Getenv("PYTHON")); env != "" {
+		return env
+	}
+	if runtime.GOOS == "windows" {
+		if _, err := exec.LookPath("python"); err == nil {
+			return "python"
+		}
+		if _, err := exec.LookPath("python3"); err == nil {
+			return "python3"
+		}
+		return "python"
+	}
+	if _, err := exec.LookPath("python3"); err == nil {
+		return "python3"
+	}
+	if _, err := exec.LookPath("python"); err == nil {
+		return "python"
+	}
+	return "python3"
 }
