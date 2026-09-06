@@ -529,6 +529,9 @@ func ComposeV1(snapshot string, inputs []ComposeInput) (Evidence, error) {
 		}
 		seenSources[sorted[i].Source] = true
 		validated := sorted[i].Evidence
+		if len(validated.Dimensions) > 0 {
+			validated.Dimensions = append([]Dimension(nil), validated.Dimensions...)
+		}
 		if err := validate(&validated); err != nil {
 			return Evidence{}, fmt.Errorf("%s: receipt %q is invalid: %w", CompositionSchema, sorted[i].Source, err)
 		}

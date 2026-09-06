@@ -11,6 +11,20 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
+// TestDeterminism verifies that strict live fanout contract evaluation produces
+// identical output across multiple runs and is race-clean.
+func TestDeterminism(t *testing.T) {
+	t.Run("CandidateEvaluation", TestDeterminismCandidateEvaluation)
+	t.Run("StrictLiveFanoutContracts", TestDeterminismStrictLiveFanoutContracts)
+	t.Run("ConcurrentRaceWitness", TestDeterminismStrictLiveConcurrentRaceWitness)
+}
+
+// TestIssueFanout_Determinism verifies that strict live fanout contract evaluation
+// produces identical output across multiple runs and is race-clean.
+func TestIssueFanout_Determinism(t *testing.T) {
+	TestDeterminism(t)
+}
+
 // TestDeterminismCandidateEvaluation runs candidate and fanout evaluation twice with
 // identical inputs and asserts deep equality of output structures, rendered fields,
 // strict policy reviews, and serialized representations.

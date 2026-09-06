@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -1290,12 +1291,16 @@ func TestErrorContractsNameRequiredCallerFix(t *testing.T) {
 }
 
 func TestRequiredLoopTurnRefusalsNameRecovery(t *testing.T) {
+	fileNotFound := "no such file"
+	if runtime.GOOS == "windows" {
+		fileNotFound = "cannot find the file"
+	}
 	tests := []struct {
 		name, input string
 		want        []string
 	}{
 		{"unset input", "", []string{LoopTurnInputEnv, "not set"}},
-		{"missing file", filepath.Join(t.TempDir(), "missing.json"), []string{"missing.json", "no such file"}},
+		{"missing file", filepath.Join(t.TempDir(), "missing.json"), []string{"missing.json", fileNotFound}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
