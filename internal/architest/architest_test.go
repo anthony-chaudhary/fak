@@ -852,6 +852,7 @@ var tier = map[string]int{
 	"harnesswarm":                2, // progressive non-blocking workspace warming engine (#10649).
 	"macobs":                     1, // Apple Silicon Mac & MLX observability leaf: hardware telemetry, headroom, metrics; stdlib-only, off hot path.
 	"capabilitymatrix":           1, // unified model capability registry (#11507); stdlib-only, off the hot path.
+	"containment":                1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

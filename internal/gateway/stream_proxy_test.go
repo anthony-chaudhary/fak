@@ -229,3 +229,101 @@ func TestChatProxyStreamFallsBackWhenPlannerCannotStream(t *testing.T) {
 		t.Fatalf("buffered fallback stream missing [DONE]: %s", respRaw)
 	}
 }
+
+// TestStreamProxyMidStreamSteeringInjection verifies registering an active stream and
+// injecting mid-stream steering frames via StreamRegistry (#11513).
+func TestStreamProxyMidStreamSteeringInjection(t *testing.T) {
+	registry := newStreamRegistry()
+
+	ch := make(chan SteeringFrame, 10)
+	w := httptest.NewRecorder()
+
+	reg := StreamRegistration{
+		StreamID:  "stream-test-42",
+		SessionID: "sess-test-99",
+		Writer:    w,
+		Channel:   ch,
+	}
+
+	as, unreg := registry.Register(reg)
+	if as == nil {
+		t.Fatal("expected non-nil ActiveStream")
+	}
+	defer unreg()
+
+	// 1. Inject by StreamID
+	frame := SteeringFrame{
+		StreamID:  "stream-test-42",
+		Directive: "redirect",
+		Text:      "Focus on auth module only",
+	}
+
+	count, err := registry.Inject(frame)
+	if err != nil {
+		t.Fatalf("Inject by StreamID failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("injected count = %d, want 1", count)
+	}
+
+	// Verify received on channel
+	select {
+	case received := <-ch:
+		if received.Directive != "redirect" || received.Text != "Focus on auth module only" {
+			t.Errorf("unexpected frame on channel: %+v", received)
+		}
+		if received.Op != "steer" {
+			t.Errorf("op = %q, want 'steer'", received.Op)
+		}
+	default:
+		t.Fatal("no frame received on channel")
+	}
+
+	// Verify SSE written to writer
+	body := w.Body.String()
+	if !strings.Contains(body, "event: steering\n") {
+		t.Errorf("expected SSE event: steering in writer, got: %q", body)
+	}
+	if !strings.Contains(body, "Focus on auth module only") {
+		t.Errorf("expected steering text in writer body, got: %q", body)
+	}
+
+	// 2. Inject by SessionID
+	frameSess := SteeringFrame{
+		SessionID: "sess-test-99",
+		Directive: "note",
+		Text:      "Reminder: tests must pass",
+	}
+	countSess, err := registry.Inject(frameSess)
+	if err != nil {
+		t.Fatalf("Inject by SessionID failed: %v", err)
+	}
+	if countSess != 1 {
+		t.Fatalf("injected count = %d, want 1", countSess)
+	}
+
+	select {
+	case received := <-ch:
+		if received.Directive != "note" || received.Text != "Reminder: tests must pass" {
+			t.Errorf("unexpected frame on channel: %+v", received)
+		}
+	default:
+		t.Fatal("no frame received on channel for session inject")
+	}
+
+	// 3. Inject to unknown target returns error
+	frameUnknown := SteeringFrame{
+		StreamID: "nonexistent-stream",
+	}
+	_, err = registry.Inject(frameUnknown)
+	if err == nil {
+		t.Fatal("expected error injecting to nonexistent stream")
+	}
+
+	// 4. Teardown and verify stream unregisters cleanly
+	unreg()
+	_, err = registry.Inject(frame)
+	if err == nil {
+		t.Fatal("expected error injecting to unregistered stream")
+	}
+}

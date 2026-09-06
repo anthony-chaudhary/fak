@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -171,11 +172,11 @@ func (h *heartbeatConfig) emitHeartbeat(w http.ResponseWriter) bool {
 	h.mu.Unlock()
 
 	hb := map[string]any{
-		"elapsed_ms":         elapsed.Milliseconds(),
-		"phase":              "mid_stream",
-		"bytes_emitted":      bytesEmitted,
-		"events_emitted":     eventsEmitted,
-		"last_event_age_ms":  lastEventAge.Milliseconds(),
+		"elapsed_ms":        elapsed.Milliseconds(),
+		"phase":             "mid_stream",
+		"bytes_emitted":     bytesEmitted,
+		"events_emitted":    eventsEmitted,
+		"last_event_age_ms": lastEventAge.Milliseconds(),
 	}
 	data, _ := json.Marshal(hb)
 	_, _ = fmt.Fprintf(w, ": fak-heartbeat %s\n\n", data)
@@ -470,4 +471,250 @@ func writeSSEDone(w http.ResponseWriter, flusher http.Flusher) {
 	if flusher != nil {
 		flusher.Flush()
 	}
+}
+
+// SteeringFrame represents a mid-stream control or steering injection frame (#11513).
+// Operators or supervisor loops inject steering frames into active streaming or websocket
+// connections to guide generation without terminating the connection.
+type SteeringFrame struct {
+	Op        string         `json:"op,omitempty"`         // "steer", "pause", "redirect", etc. (default: "steer")
+	StreamID  string         `json:"stream_id,omitempty"`  // Target stream ID
+	SessionID string         `json:"session_id,omitempty"` // Target session ID
+	Directive string         `json:"directive,omitempty"`  // e.g. "redirect", "pause", "note"
+	Text      string         `json:"text,omitempty"`       // Steering guidance note or instruction
+	Metadata  map[string]any `json:"metadata,omitempty"`   // Optional arbitrary structured metadata
+	Timestamp int64          `json:"timestamp,omitempty"`  // Millisecond epoch timestamp
+}
+
+// ActiveStream represents an active streaming (SSE) or websocket connection
+// registered to receive mid-stream steering control frames.
+type ActiveStream struct {
+	StreamID  string
+	SessionID string
+	Writer    http.ResponseWriter
+	Flusher   http.Flusher
+	Channel   chan SteeringFrame
+	EmitFunc  func(SteeringFrame) error
+	mu        sync.Mutex
+	closed    bool
+}
+
+// SynthesizeSteeringEvent writes a steering boundary event into the active stream
+// (e.g. SSE event `event: steering`) or forwards it to the registered channel/callback,
+// while keeping the stream and session alive.
+func (as *ActiveStream) SynthesizeSteeringEvent(frame SteeringFrame) error {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	if as.closed {
+		return errors.New("active stream is closed")
+	}
+
+	if frame.Op == "" {
+		frame.Op = "steer"
+	}
+	if frame.Timestamp == 0 {
+		frame.Timestamp = time.Now().UnixMilli()
+	}
+
+	// If custom emitter is supplied, invoke it
+	if as.EmitFunc != nil {
+		if err := as.EmitFunc(frame); err != nil {
+			return err
+		}
+	} else if as.Writer != nil {
+		// Synthesize SSE event: steering
+		data, err := json.Marshal(frame)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(as.Writer, "event: steering\ndata: %s\n\n", data); err != nil {
+			return err
+		}
+		if as.Flusher != nil {
+			as.Flusher.Flush()
+		} else if f, ok := as.Writer.(http.Flusher); ok {
+			f.Flush()
+		}
+	}
+
+	// Forward to channel if registered (e.g. websocket reader or async loop)
+	if as.Channel != nil {
+		select {
+		case as.Channel <- frame:
+		default:
+			// Non-blocking drop if channel buffer is full
+		}
+	}
+
+	return nil
+}
+
+// StreamRegistration defines registration parameters for an active stream or websocket.
+type StreamRegistration struct {
+	StreamID  string
+	SessionID string
+	Writer    http.ResponseWriter
+	Channel   chan SteeringFrame
+	EmitFunc  func(SteeringFrame) error
+}
+
+// StreamRegistry manages active streaming and websocket connections for mid-turn steering.
+type StreamRegistry struct {
+	mu      sync.RWMutex
+	streams map[string]*ActiveStream            // keyed by streamID
+	bySess  map[string]map[string]*ActiveStream // sessionID -> map[streamID]*ActiveStream
+}
+
+func newStreamRegistry() *StreamRegistry {
+	return &StreamRegistry{
+		streams: make(map[string]*ActiveStream),
+		bySess:  make(map[string]map[string]*ActiveStream),
+	}
+}
+
+// Register registers an active stream or websocket connection. Returns the ActiveStream
+// handle and an unregister teardown func.
+func (r *StreamRegistry) Register(reg StreamRegistration) (*ActiveStream, func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	id := strings.TrimSpace(reg.StreamID)
+	if id == "" {
+		id = "stream-" + itoa(uint64(time.Now().UnixNano()))
+	}
+	sessID := strings.TrimSpace(reg.SessionID)
+
+	as := &ActiveStream{
+		StreamID:  id,
+		SessionID: sessID,
+		Writer:    reg.Writer,
+		Channel:   reg.Channel,
+		EmitFunc:  reg.EmitFunc,
+	}
+	if fl, ok := reg.Writer.(http.Flusher); ok {
+		as.Flusher = fl
+	}
+
+	r.streams[id] = as
+	if sessID != "" {
+		if r.bySess[sessID] == nil {
+			r.bySess[sessID] = make(map[string]*ActiveStream)
+		}
+		r.bySess[sessID][id] = as
+	}
+
+	var once sync.Once
+	unreg := func() {
+		once.Do(func() {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			as.mu.Lock()
+			as.closed = true
+			as.mu.Unlock()
+
+			delete(r.streams, id)
+			if sessID != "" && r.bySess[sessID] != nil {
+				delete(r.bySess[sessID], id)
+				if len(r.bySess[sessID]) == 0 {
+					delete(r.bySess, sessID)
+				}
+			}
+		})
+	}
+
+	return as, unreg
+}
+
+// Inject injects a steering frame into matching active streams by StreamID or SessionID.
+func (r *StreamRegistry) Inject(frame SteeringFrame) (int, error) {
+	r.mu.RLock()
+	var targets []*ActiveStream
+	sID := strings.TrimSpace(frame.StreamID)
+	sessID := strings.TrimSpace(frame.SessionID)
+
+	if sID != "" {
+		if s, ok := r.streams[sID]; ok {
+			targets = append(targets, s)
+		}
+	}
+	if len(targets) == 0 && sessID != "" {
+		if m, ok := r.bySess[sessID]; ok {
+			for _, s := range m {
+				targets = append(targets, s)
+			}
+		}
+	}
+	// Fallback lookup: if sID matches a session ID
+	if len(targets) == 0 && sID != "" {
+		if m, ok := r.bySess[sID]; ok {
+			for _, s := range m {
+				targets = append(targets, s)
+			}
+		}
+	}
+	// Fallback lookup: if sessID matches a stream ID
+	if len(targets) == 0 && sessID != "" {
+		if s, ok := r.streams[sessID]; ok {
+			targets = append(targets, s)
+		}
+	}
+	r.mu.RUnlock()
+
+	if len(targets) == 0 {
+		return 0, fmt.Errorf("active stream not found: stream_id=%q session_id=%q", frame.StreamID, frame.SessionID)
+	}
+
+	injected := 0
+	for _, t := range targets {
+		if err := t.SynthesizeSteeringEvent(frame); err == nil {
+			injected++
+		}
+	}
+	return injected, nil
+}
+
+var defaultStreamRegistry = newStreamRegistry()
+
+// StreamRegistry returns the stream registry for this server.
+func (s *Server) StreamRegistry() *StreamRegistry {
+	if s == nil {
+		return defaultStreamRegistry
+	}
+	return defaultStreamRegistry
+}
+
+// RegisterActiveStream registers an active stream with the server's stream registry.
+func (s *Server) RegisterActiveStream(reg StreamRegistration) (*ActiveStream, func()) {
+	return s.StreamRegistry().Register(reg)
+}
+
+// InjectSteering injects a steering control frame into active streams matching the frame's
+// StreamID or SessionID.
+func (s *Server) InjectSteering(frame SteeringFrame) (int, error) {
+	return s.StreamRegistry().Inject(frame)
+}
+
+// InjectSteer injects a steering directive and text for target stream or session ID.
+func (s *Server) InjectSteer(targetID, directive, text string, metadata map[string]any) error {
+	frame := SteeringFrame{
+		Op:        "steer",
+		StreamID:  targetID,
+		SessionID: targetID,
+		Directive: directive,
+		Text:      text,
+		Metadata:  metadata,
+		Timestamp: time.Now().UnixMilli(),
+	}
+	_, err := s.InjectSteering(frame)
+	return err
+}
+
+// RegisterActiveStream registers an active stream on the default global registry.
+func RegisterActiveStream(reg StreamRegistration) (*ActiveStream, func()) {
+	return defaultStreamRegistry.Register(reg)
+}
+
+// InjectStreamSteering injects a steering frame on the default global registry.
+func InjectStreamSteering(frame SteeringFrame) (int, error) {
+	return defaultStreamRegistry.Inject(frame)
 }

@@ -168,6 +168,10 @@ func TestResolveHint_NormalizationAndPrefixes(t *testing.T) {
 		{"gpt-4o:latest", "gpt-4o", PostureBalanced},
 		{"claude-3.5-haiku:20241022", "claude-3.5-haiku", PostureSupportHeavy},
 		{"providers/google/gemini-3.8-flash", "gemini-3.8-flash", PostureSupportHeavy},
+		{"ag/gemini-3.8-flash-high", "gemini-3.8-flash", PostureSupportHeavy},
+		{"gemini-3.8-flash-medium", "gemini-3.8-flash", PostureSupportHeavy},
+		{"google/gemini-3.8-flash-cyber", "gemini-3.8-flash", PostureSupportHeavy},
+		{"gemini-3.8-pro", "gemini-3.8-pro", PostureBalanced},
 		{"  o1:latest  ", "o1", PostureCostHeavy},
 	}
 

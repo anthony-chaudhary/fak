@@ -582,3 +582,30 @@ func TestStagedFilesMatchingReconstructsMultilineFiles(t *testing.T) {
 		t.Fatalf("reconstructed files = %#v", got)
 	}
 }
+
+func TestConceptAdmissionReadPathsDiff(t *testing.T) {
+	root := t.TempDir()
+	gitFixture(t, root, "init")
+	gitFixture(t, root, "config", "user.email", "test@example.com")
+	gitFixture(t, root, "config", "user.name", "Fixture")
+	data := filepath.Join(root, "tools", "concept_disambiguation_scorecard.data")
+	os.MkdirAll(data, 0755)
+	os.WriteFile(filepath.Join(data, "_meta.json"), []byte(`{"families":[{"id":"cache","roots":["cache"],"ignore":[]}]}`), 0600)
+	os.WriteFile(filepath.Join(data, "rows-cache.json"), []byte(`{"rows":[{"id":"cache-a","family":"cache","grounding":"CacheA"}]}`), 0600)
+	os.MkdirAll(filepath.Join(root, "internal", "demo"), 0755)
+	demoPath := filepath.Join(root, "internal", "demo", "demo.go")
+	os.WriteFile(demoPath, []byte("package demo\nconst CacheA=1\n"), 0600)
+	gitFixture(t, root, "add", ".")
+	gitFixture(t, root, "commit", "-m", "base")
+
+	os.WriteFile(demoPath, []byte("package demo\nconst CacheA=1\nconst CacheBurst=2\n"), 0600)
+
+	d, err := ReadPathsDiff(root, []string{"internal/demo/demo.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := CheckConceptAdmission(d)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("ReadPathsDiff got=%+v err=%v", got, err)
+	}
+}

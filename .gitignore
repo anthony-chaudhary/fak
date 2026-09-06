@@ -334,6 +334,8 @@ experiments/dgx/
 # under fak/, while this public checkout is root-hoisted.
 fak/experiments/benchmark/runs/by-machine/
 experiments/benchmark/runs/by-machine/
+fak/experiments/benchmarks/tb4-*/
+experiments/benchmarks/tb4-*/
 # Atomic-write temp sibling of the tracked experiments/benchmark/catalog.json: the
 # catalog writer renders to catalog.tmp then renames over catalog.json, and a crashed
 # or racing write leaves the .tmp behind. Regenerable, never source. Scoped to the dir

@@ -3031,3 +3031,149 @@ func TestGeminiThoughtSignature(t *testing.T) {
 		}
 	})
 }
+
+func TestGeminiTrailingModelTurnContinuation(t *testing.T) {
+	adapter := geminiAdapter{}
+
+	t.Run("injects continue when trailing message is assistant without tool calls", func(t *testing.T) {
+		req := adapterRequest{
+			Messages: []Message{
+				{Role: RoleUser, Content: "Hello"},
+				{Role: RoleAssistant, Content: "Thinking through the solution..."},
+			},
+		}
+		body, err := adapter.MarshalRequest(req)
+		if err != nil {
+			t.Fatalf("MarshalRequest failed: %v", err)
+		}
+		var parsed struct {
+			Contents []struct {
+				Role  string `json:"role"`
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"contents"`
+		}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			t.Fatalf("unmarshal failed: %v: %s", err, body)
+		}
+		if len(parsed.Contents) != 3 {
+			t.Fatalf("expected 3 contents (user, model, user continuation), got %d: %+v", len(parsed.Contents), parsed.Contents)
+		}
+		last := parsed.Contents[len(parsed.Contents)-1]
+		if last.Role != "user" {
+			t.Errorf("expected last content role 'user', got %q", last.Role)
+		}
+		if len(last.Parts) == 0 || last.Parts[0].Text != "Continue" {
+			t.Errorf("expected user part 'Continue', got %+v", last.Parts)
+		}
+	})
+
+	t.Run("does not inject continue when assistant has tool calls", func(t *testing.T) {
+		req := adapterRequest{
+			Messages: []Message{
+				{Role: RoleUser, Content: "Run tool"},
+				{
+					Role: RoleAssistant,
+					ToolCalls: []ToolCall{
+						{
+							ID:   "c1",
+							Type: "function",
+							Function: Func{
+								Name:      "read_file",
+								Arguments: `{"filePath":"foo.go"}`,
+							},
+						},
+					},
+				},
+			},
+		}
+		body, err := adapter.MarshalRequest(req)
+		if err != nil {
+			t.Fatalf("MarshalRequest failed: %v", err)
+		}
+		var parsed struct {
+			Contents []struct {
+				Role string `json:"role"`
+			} `json:"contents"`
+		}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			t.Fatalf("unmarshal failed: %v: %s", err, body)
+		}
+		if len(parsed.Contents) != 2 {
+			t.Fatalf("expected 2 contents without continuation, got %d", len(parsed.Contents))
+		}
+		if parsed.Contents[1].Role != "model" {
+			t.Errorf("expected second content role 'model', got %q", parsed.Contents[1].Role)
+		}
+	})
+}
+
+func TestGeminiNestedArraySchemaSanitization(t *testing.T) {
+	t.Run("backfills missing items on array parameter", func(t *testing.T) {
+		input := json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"tags": {"type": "array"}
+			}
+		}`)
+		outAny := geminiSchemaCompute(input)
+		outBytes := outAny.(json.RawMessage)
+		var parsed map[string]any
+		if err := json.Unmarshal(outBytes, &parsed); err != nil {
+			t.Fatal(err)
+		}
+		props := parsed["properties"].(map[string]any)
+		tags := props["tags"].(map[string]any)
+		if tags["type"] != "ARRAY" {
+			t.Fatalf("expected ARRAY, got %v", tags["type"])
+		}
+		items, ok := tags["items"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected items object on array, got %T: %+v", tags["items"], tags)
+		}
+		if items["type"] != "STRING" {
+			t.Errorf("expected items.type STRING, got %v", items["type"])
+		}
+	})
+
+	t.Run("repairs deeply nested array without items (claudish #232 repro)", func(t *testing.T) {
+		input := json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"query": {
+					"type": "object",
+					"properties": {
+						"where": {
+							"type": "array",
+							"items": {
+								"type": "array"
+							}
+						}
+					}
+				}
+			}
+		}`)
+		outAny := geminiSchemaCompute(input)
+		outBytes := outAny.(json.RawMessage)
+		var parsed map[string]any
+		if err := json.Unmarshal(outBytes, &parsed); err != nil {
+			t.Fatal(err)
+		}
+		props := parsed["properties"].(map[string]any)
+		query := props["query"].(map[string]any)
+		qProps := query["properties"].(map[string]any)
+		where := qProps["where"].(map[string]any)
+		if where["type"] != "ARRAY" {
+			t.Fatalf("expected where type ARRAY, got %v", where["type"])
+		}
+		items1 := where["items"].(map[string]any)
+		if items1["type"] != "ARRAY" {
+			t.Fatalf("expected where.items type ARRAY, got %v", items1["type"])
+		}
+		items2, ok := items1["items"].(map[string]any)
+		if !ok || items2["type"] != "STRING" {
+			t.Fatalf("expected nested items.items type STRING, got %+v", items1["items"])
+		}
+	})
+}

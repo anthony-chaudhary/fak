@@ -25,6 +25,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/stopgate"
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
 const DefaultCircuitBreakerThreshold = 3
@@ -244,6 +245,7 @@ type runConfig struct {
 	provider                     string
 	baseURL                      string
 	circuitBreakerThreshold      int
+	envelopeSink                 func(harnesskit.Envelope)
 }
 
 // WithCircuitBreakerThreshold configures the threshold of consecutive identical

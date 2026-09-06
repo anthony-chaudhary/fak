@@ -363,6 +363,66 @@ func ReadRangeDiff(root, base, tip string) (*StagedDiff, error) {
 	return d, nil
 }
 
+// ReadPathsDiff constructs a StagedDiff evaluating specifically the given paths,
+// reading from staged diff, working-tree diff against HEAD, or the file on disk.
+func ReadPathsDiff(root string, paths []string) (*StagedDiff, error) {
+	d := &StagedDiff{
+		Root:        root,
+		run:         realRunner,
+		Treeish:     ":",
+		ctx:         context.Background(),
+		AddedByFile: map[string][]AddedLine{},
+		fileCache:   map[string]fileEntry{},
+	}
+	if out, code, err := realRunner(d.ctx, root, "ls-files"); err == nil && code == 0 {
+		for _, line := range strings.Split(out, "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				d.IndexPaths = append(d.IndexPaths, filepath.ToSlash(line))
+			}
+		}
+	}
+	for _, p := range paths {
+		norm := filepath.ToSlash(p)
+		// 1. Try staged diff first
+		out, code, err := realRunner(d.ctx, root, "diff", "--cached", "--unified=0", "--no-color", "--", norm)
+		if err == nil && code == 0 && strings.TrimSpace(out) != "" {
+			parsed := parseUnifiedAddedLines(out)
+			if lines, ok := parsed[norm]; ok {
+				d.AddedByFile[norm] = lines
+				d.StagedPaths = append(d.StagedPaths, norm)
+				continue
+			}
+		}
+		// 2. Try working-tree diff against HEAD
+		out, code, err = realRunner(d.ctx, root, "diff", "--unified=0", "--no-color", "HEAD", "--", norm)
+		if err == nil && code == 0 && strings.TrimSpace(out) != "" {
+			parsed := parseUnifiedAddedLines(out)
+			if lines, ok := parsed[norm]; ok {
+				d.AddedByFile[norm] = lines
+				d.StagedPaths = append(d.StagedPaths, norm)
+				continue
+			}
+		}
+		// 3. Fall back to entire file on disk (for untracked files)
+		fullPath := filepath.Join(root, filepath.FromSlash(norm))
+		data, err := os.ReadFile(fullPath)
+		if err == nil {
+			var lines []AddedLine
+			rawLines := strings.Split(string(data), "\n")
+			for i, line := range rawLines {
+				lines = append(lines, AddedLine{
+					File: norm,
+					New:  i + 1,
+					Text: strings.TrimRight(line, "\r"),
+				})
+			}
+			d.AddedByFile[norm] = lines
+			d.StagedPaths = append(d.StagedPaths, norm)
+		}
+	}
+	return d, nil
+}
+
 // stagedPathLines runs a `git diff --cached <listFlag> <filter>` path listing and folds each
 // non-blank trimmed output line through pick. nameList / nameStatusPaths differ only in the list
 // flag and how a line maps to a path, so the run + split + trim + skip-blank scaffold lives here.

@@ -86,6 +86,36 @@ type LockEnvironment struct {
 	Contract string `json:"contract,omitempty"`
 }
 
+// ComponentKind classifies the execution role or protocol implemented by a locked component.
+type ComponentKind string
+
+const (
+	ComponentKindRuntime ComponentKind = "runtime"
+	ComponentKindMCP     ComponentKind = "mcp"
+	ComponentKindLSP     ComponentKind = "lsp"
+	ComponentKindTool    ComponentKind = "tool"
+	ComponentKindEngine  ComponentKind = "engine"
+)
+
+// LockedLSPMetadata specifies execution, language, and feature settings for Language Server Protocol components.
+type LockedLSPMetadata struct {
+	Language       string          `json:"language,omitempty"`
+	Extensions     []string        `json:"extensions,omitempty"`
+	Transport      string          `json:"transport,omitempty"`
+	Command        []string        `json:"command,omitempty"`
+	Diagnostics    bool            `json:"diagnostics,omitempty"`
+	Symbols        bool            `json:"symbols,omitempty"`
+	Initialization json.RawMessage `json:"initialization,omitempty"`
+}
+
+// LockedMCPMetadata specifies transport, launch command, environment, and security policy for Model Context Protocol components.
+type LockedMCPMetadata struct {
+	Transport   string            `json:"transport,omitempty"`
+	Command     []string          `json:"command,omitempty"`
+	Environment map[string]string `json:"environment,omitempty"`
+	Policy      string            `json:"policy,omitempty"`
+}
+
 // LockedComponent describes a bound provider component locked into the harness product.
 type LockedComponent struct {
 	ID            string                  `json:"id"`
@@ -101,6 +131,19 @@ type LockedComponent struct {
 	Cost          LockBudget              `json:"cost,omitempty"`
 	Adapters      []string                `json:"adapters,omitempty"`
 	Fingerprints  []ToolSchemaFingerprint `json:"fingerprints,omitempty"`
+	Kind          ComponentKind           `json:"kind,omitempty"`
+	MCP           *LockedMCPMetadata      `json:"mcp,omitempty"`
+	LSP           *LockedLSPMetadata      `json:"lsp,omitempty"`
+}
+
+// IsMCP reports whether the component represents a Model Context Protocol server.
+func (c LockedComponent) IsMCP() bool {
+	return c.Kind == ComponentKindMCP || c.MCP != nil
+}
+
+// IsLSP reports whether the component represents a Language Server Protocol server.
+func (c LockedComponent) IsLSP() bool {
+	return c.Kind == ComponentKindLSP || c.LSP != nil
 }
 
 // LockedAsset captures resolved instructions, policies, tools, and secret references.

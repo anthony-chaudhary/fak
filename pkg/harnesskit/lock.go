@@ -30,6 +30,18 @@ type LockEnvironment = lockv2.LockEnvironment
 type LockBudget = lockv2.LockBudget
 type LockRequirement = lockv2.LockRequirement
 type LockCompatibility = lockv2.LockCompatibility
+type ComponentKind = lockv2.ComponentKind
+
+const (
+	ComponentKindRuntime ComponentKind = lockv2.ComponentKindRuntime
+	ComponentKindMCP     ComponentKind = lockv2.ComponentKindMCP
+	ComponentKindLSP     ComponentKind = lockv2.ComponentKindLSP
+	ComponentKindTool    ComponentKind = lockv2.ComponentKindTool
+	ComponentKindEngine  ComponentKind = lockv2.ComponentKindEngine
+)
+
+type LockedLSPMetadata = lockv2.LockedLSPMetadata
+type LockedMCPMetadata = lockv2.LockedMCPMetadata
 type LockedComponent = lockv2.LockedComponent
 type LockedAsset = lockv2.LockedAsset
 

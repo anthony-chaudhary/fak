@@ -144,6 +144,35 @@ func TestConceptStageRejectsDryRun(t *testing.T) {
 	}
 }
 
+func TestConceptAdmissionPathsFlag(t *testing.T) {
+	_, root := conceptCLIFixture(t)
+	if out, err := runGitAt(root, "init"); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	if out, err := runGitAt(root, "add", "."); err != nil {
+		t.Fatalf("git add fixture: %v: %s", err, out)
+	}
+	if out, err := runGitAt(root, "-c", "user.name=fak-test", "-c", "user.email=fak@example.invalid", "commit", "-m", "fixture"); err != nil {
+		t.Fatalf("git commit fixture: %v: %s", err, out)
+	}
+	demo := filepath.Join(root, "internal", "demo")
+	if err := os.MkdirAll(demo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(demo, "demo.go"), []byte("package demo\nconst CacheUnclassified=1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runConceptAdmission(&out, &errb, root, []string{"--paths", "internal/demo/demo.go"})
+	if code != 0 {
+		t.Fatalf("expected code 0, got %d (err: %s)", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "CacheUnclassified") {
+		t.Fatalf("expected finding for CacheUnclassified, got %q", out.String())
+	}
+}
+
 func runGitAt(root string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = root

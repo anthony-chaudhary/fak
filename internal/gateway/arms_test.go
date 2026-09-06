@@ -9,14 +9,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/engine"
 	"github.com/anthony-chaudhary/fak/internal/researcharm"
 )
 
-func TestGatewayArmsEndpoints(t *testing.T) {
-	srv, err := New(Config{})
+func newArmsTestServer(t *testing.T) *Server {
+	t.Helper()
+	abi.RegisterEngine("mock", engine.MockEngine)
+	srv, err := New(Config{EngineID: "mock", Model: "fak-mock"})
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestGatewayArmsEndpoints(t *testing.T) {
+	srv := newArmsTestServer(t)
 	coord := researcharm.NewCoordinator(5)
 	srv.SetResearchArmCoordinator(coord)
 
@@ -104,10 +114,7 @@ func TestGatewayArmsEndpoints(t *testing.T) {
 }
 
 func TestGatewayArmsThrottling(t *testing.T) {
-	srv, err := New(Config{})
-	if err != nil {
-		t.Fatalf("failed to create server: %v", err)
-	}
+	srv := newArmsTestServer(t)
 	coord := researcharm.NewCoordinator(1) // Limit = 1 request per arm
 	srv.SetResearchArmCoordinator(coord)
 
@@ -145,15 +152,12 @@ func TestGatewayArmsThrottling(t *testing.T) {
 }
 
 func TestGatewayArmsExclusiveLease(t *testing.T) {
-	srv, err := New(Config{})
-	if err != nil {
-		t.Fatalf("failed to create server: %v", err)
-	}
+	srv := newArmsTestServer(t)
 	coord := researcharm.NewCoordinator(10)
 	srv.SetResearchArmCoordinator(coord)
 
 	// Acquire exclusive lease for arm "owner-arm"
-	_, err = coord.AcquireLease(researcharm.LeaseRequest{
+	_, err := coord.AcquireLease(researcharm.LeaseRequest{
 		ArmID: "owner-arm",
 		Mode:  researcharm.LeaseModeExclusive,
 		TTL:   5 * time.Minute,

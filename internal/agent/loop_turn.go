@@ -16,6 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/stopgate"
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
 func isEmitterRegistered(e abi.Emitter) bool {
@@ -58,6 +59,38 @@ type armRunner struct {
 	denyAllPending          bool
 	toolFeedbackPending     bool
 	task                    string
+	envelopeSink            func(harnesskit.Envelope)
+	envelopeSeq             uint64
+	envelopeMu              sync.Mutex
+}
+
+func (r *armRunner) emitEnvelope(eventType harnesskit.EventType, payload any) {
+	if r.envelopeSink == nil {
+		return
+	}
+	r.envelopeMu.Lock()
+	defer r.envelopeMu.Unlock()
+	r.envelopeSeq++
+	seq := r.envelopeSeq
+	runID := "agent"
+	if r.cfg != nil && r.cfg.trace != "" {
+		runID = r.cfg.trace
+	}
+	eventID := fmt.Sprintf("%s:%d", runID, seq)
+	var raw json.RawMessage
+	if payload != nil {
+		raw, _ = json.Marshal(payload)
+	}
+	env := harnesskit.Envelope{
+		Version:     harnesskit.ProtocolVersion,
+		RunID:       runID,
+		Sequence:    seq,
+		EventID:     eventID,
+		Type:        eventType,
+		Sensitivity: harnesskit.SensitivityPublic,
+		Payload:     raw,
+	}
+	r.envelopeSink(env)
 }
 
 type armTurnAction uint8
@@ -91,6 +124,23 @@ func (r *armRunner) run(ctx context.Context, maxTurns int) error {
 func (r *armRunner) runSynthesisTurn(ctx context.Context, turn int) error {
 	r.metrics.GracefulDrained = true
 	turnSink := r.sink
+	if r.stream {
+		turnSink = func(chunk string) error {
+			if r.sink != nil {
+				if err := r.sink(chunk); err != nil {
+					return err
+				}
+			}
+			if r.envelopeSink != nil && chunk != "" {
+				r.emitEnvelope(harnesskit.EventMessageDelta, harnesskit.MessagePayload{
+					MessageID: fmt.Sprintf("turn-%d", turn+1),
+					Role:      RoleAssistant,
+					Text:      chunk,
+				})
+			}
+			return nil
+		}
+	}
 	comp, err := r.complete(ctx, r.messages, nil, turnSink)
 	if err != nil {
 		return err
@@ -246,6 +296,13 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 				}
 			}
 			streamedChunks = append(streamedChunks, chunk)
+			if r.envelopeSink != nil && chunk != "" {
+				r.emitEnvelope(harnesskit.EventMessageDelta, harnesskit.MessagePayload{
+					MessageID: fmt.Sprintf("turn-%d", turn+1),
+					Role:      RoleAssistant,
+					Text:      chunk,
+				})
+			}
 			return nil
 		}
 	}
@@ -673,6 +730,24 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			Kind: ProgressResultAdmitted, Turn: turn + 1, CallID: tc.ID, Tool: tool,
 			Taint: admittedTaint(ev, content), Summary: progressResultSummary(tool, content),
 		})
+		if r.envelopeSink != nil {
+			callID := tc.ID
+			if callID == "" {
+				callID = fmt.Sprintf("call-%s-%d", tool, turn+1)
+			}
+			status := "ok"
+			if res.isErr {
+				status = "error"
+			} else if isDenied {
+				status = "denied"
+			}
+			r.emitEnvelope(harnesskit.EventToolCompleted, harnesskit.ToolPayload{
+				CallID:  callID,
+				Name:    tool,
+				Status:  status,
+				Summary: progressResultSummary(tool, content),
+			})
+		}
 		if r.speculation != nil {
 			turnResults = append(turnResults, &abi.Result{
 				Call:    &abi.ToolCall{Tool: tool},
@@ -720,6 +795,17 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 				r.metrics.ToolCallsExclusive++
 			}
 			r.cfg.emitProgress(ProgressEvent{Kind: ProgressToolStarted, Turn: turn + 1, CallID: tc.ID, Tool: tc.Function.Name})
+			if r.envelopeSink != nil {
+				callID := tc.ID
+				if callID == "" {
+					callID = fmt.Sprintf("call-%s-%d", tc.Function.Name, turn+1)
+				}
+				r.emitEnvelope(harnesskit.EventToolStarted, harnesskit.ToolPayload{
+					CallID: callID,
+					Name:   tc.Function.Name,
+					Status: "started",
+				})
+			}
 			runnable = append(runnable, tc)
 		}
 

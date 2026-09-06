@@ -325,6 +325,20 @@ var knownProfiles = map[string]ModelProfile{
 			StrictSchema: true,
 		},
 	},
+	"gemini-3.8-flash-cyber": {
+		Slug: "gemini-3.8-flash-cyber",
+		Capabilities: Capabilities{
+			Thinking:     true,
+			StrictSchema: true,
+		},
+	},
+	"gemini-3.8-pro": {
+		Slug: "gemini-3.8-pro",
+		Capabilities: Capabilities{
+			Thinking:     true,
+			StrictSchema: true,
+		},
+	},
 }
 
 // NormalizeCodexModelSlug maps natural aliases and slugs (such as "gpt 6 astra",
