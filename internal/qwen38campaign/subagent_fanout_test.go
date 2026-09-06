@@ -1,6 +1,7 @@
 package qwen38campaign
 
 import (
+	"bytes"
 	"encoding/json"
 	"math"
 	"strings"
@@ -8,6 +9,17 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 )
+
+func TestSubagentCLIRejectsSyntheticPhysicalMode(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := RunCLI(&stdout, &stderr, []string{"--simulated=false", "--json", "--runs=5", "--prefix-tokens=1", "--gen-tokens=1"})
+	if code == 0 || stdout.Len() != 0 {
+		t.Fatalf("synthetic physical execution returned code=%d receipt_bytes=%d", code, stdout.Len())
+	}
+	if !strings.Contains(stderr.String(), "physical execution is unavailable") {
+		t.Fatalf("missing physical execution diagnostic: %s", stderr.String())
+	}
+}
 
 // TestSubagentFanoutMatrix tests the full 3 scenarios x 4 concurrencies matrix.
 func TestSubagentFanoutMatrix(t *testing.T) {

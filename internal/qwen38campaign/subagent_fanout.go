@@ -418,6 +418,9 @@ func NewSubagentFanoutHarness(cfg FanoutConfig) (*SubagentFanoutHarness, error) 
 
 // Execute runs all benchmark repetitions and generates the validated receipt.
 func (h *SubagentFanoutHarness) Execute() (SubagentFanoutReceipt, error) {
+	if !h.Config.Simulated {
+		return SubagentFanoutReceipt{}, errors.New("qwen38campaign: physical execution is unavailable; this harness models GPU metrics, use --simulated=true")
+	}
 	runs := make([]RunMetric, h.Config.Runs)
 
 	for i := 0; i < h.Config.Runs; i++ {
