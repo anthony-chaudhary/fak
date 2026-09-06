@@ -3,12 +3,13 @@ package codetools
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -79,27 +80,54 @@ type flightGroup[T any] struct {
 }
 
 type flight[T any] struct {
-	wg      sync.WaitGroup
-	val     T
-	err     error
-	waiters atomic.Int32
+	done     chan struct{}
+	doneOnce sync.Once
+	val      T
+	err      error
+	waiters  atomic.Int32
+	canceled bool
 }
 
-func (g *flightGroup[T]) Do(key string, fn func() (T, error)) (val T, shared bool, err error) {
+func (g *flightGroup[T]) Do(ctx context.Context, key string, fn func() (T, error)) (val T, shared bool, err error) {
 	g.mu.Lock()
 	if g.m == nil {
 		g.m = make(map[string]*flight[T])
 	}
 	if inflight, ok := g.m[key]; ok {
+		if err := ctx.Err(); err != nil {
+			g.mu.Unlock()
+			var zero T
+			return zero, false, err
+		}
 		inflight.waiters.Add(1)
 		g.mu.Unlock()
-		inflight.wg.Wait()
+
+		select {
+		case <-ctx.Done():
+			inflight.waiters.Add(-1)
+			var zero T
+			return zero, false, ctx.Err()
+		case <-inflight.done:
+			inflight.waiters.Add(-1)
+			if err := ctx.Err(); err != nil {
+				var zero T
+				return zero, false, err
+			}
+		}
+
+		if inflight.canceled {
+			// Leader was canceled, but this joiner's context is still valid.
+			// Recover by executing or joining a fresh flight.
+			return g.Do(ctx, key, fn)
+		}
+
 		g.coalesced.Add(1)
 		return inflight.val, true, inflight.err
 	}
-	f := new(flight[T])
-	f.err = errFlightAbandoned
-	f.wg.Add(1)
+	f := &flight[T]{
+		done: make(chan struct{}),
+		err:  errFlightAbandoned,
+	}
 	g.m[key] = f
 	g.mu.Unlock()
 
@@ -107,11 +135,18 @@ func (g *flightGroup[T]) Do(key string, fn func() (T, error)) (val T, shared boo
 		g.mu.Lock()
 		delete(g.m, key)
 		g.mu.Unlock()
-		f.wg.Done()
+		f.doneOnce.Do(func() {
+			close(f.done)
+		})
 	}()
 
 	v, ferr := fn()
 	f.val, f.err = v, ferr
+	if (ctx != nil && ctx.Err() != nil) ||
+		errors.Is(ferr, context.Canceled) ||
+		errors.Is(ferr, context.DeadlineExceeded) {
+		f.canceled = true
+	}
 	return v, false, ferr
 }
 
@@ -217,11 +252,14 @@ func (t *Toolset) grep(ctx context.Context, body []byte) ([]byte, bool) {
 		limit = a.MaxMatches
 	}
 
-	key := root.Abs + "\x00" + a.Pattern + "\x00" + a.Glob + "\x00" + strconv.Itoa(limit)
-	rec, shared, err := t.grepFlight.Do(key, func() (*grepRecord, error) {
+	key := grepFlightKey(root.Abs, a.Pattern, a.Glob, limit)
+	rec, shared, err := t.grepFlight.Do(ctx, key, func() (*grepRecord, error) {
 		return t.executeGrep(ctx, a, re, root, limit), nil
 	})
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return refuse(CodeCanceled, err.Error()).JSON(), true
+		}
 		return refuse(CodeIO, "Grep: in-flight search abandoned").JSON(), true
 	}
 	if rec.isErr {
@@ -377,10 +415,19 @@ func (r *globRecord) toOutput() ([]byte, bool) {
 	}), false
 }
 
+// grepFlightKey constructs a length-prefixed singleflight key avoiding delimiter collisions.
+func grepFlightKey(absRoot, pattern, glob string, limit int) string {
+	return fmt.Sprintf("%d:%s\x00%d:%s\x00%d:%s\x00%d", len(absRoot), absRoot, len(pattern), pattern, len(glob), glob, limit)
+}
+
+// globFlightKey constructs a length-prefixed singleflight key avoiding delimiter collisions.
+func globFlightKey(absRoot, pattern string) string {
+	return fmt.Sprintf("%d:%s\x00%d:%s", len(absRoot), absRoot, len(pattern), pattern)
+}
+
 // glob decodes, confines, and executes a Glob. The pattern is matched against the path
-// relative to the SEARCH ROOT and, for a leading-`**` pattern, against the base name too,
-// so the familiar "**/*.go" spelling works without the caller having to know how deep the
-// tree is.
+// relative to the SEARCH ROOT, supporting recursive `**` wildcards anywhere in the pattern
+// (e.g. "**/*.go", "src/**/*.go", or "internal/**/test_*.go").
 func (t *Toolset) glob(ctx context.Context, body []byte) ([]byte, bool) {
 	RecordSubprocessAvoided()
 	var a GlobArgs
@@ -398,11 +445,14 @@ func (t *Toolset) glob(ctx context.Context, body []byte) ([]byte, bool) {
 		return r.JSON(), true
 	}
 
-	key := root.Abs + "\x00" + a.Pattern
-	rec, shared, err := t.globFlight.Do(key, func() (*globRecord, error) {
+	key := globFlightKey(root.Abs, a.Pattern)
+	rec, shared, err := t.globFlight.Do(ctx, key, func() (*globRecord, error) {
 		return t.executeGlob(ctx, a, root), nil
 	})
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return refuse(CodeCanceled, err.Error()).JSON(), true
+		}
 		return refuse(CodeIO, "Glob: in-flight search abandoned").JSON(), true
 	}
 	if rec.isErr {
@@ -414,8 +464,10 @@ func (t *Toolset) glob(ctx context.Context, body []byte) ([]byte, bool) {
 }
 
 func (t *Toolset) executeGlob(ctx context.Context, a GlobArgs, root Resolved) *globRecord {
-	pattern := a.Pattern
-	base := strings.TrimPrefix(pattern, "**/")
+	g, err := compileGlob(a.Pattern)
+	if err != nil {
+		return &globRecord{errJSON: refuse(CodeMalformed, "Glob: bad pattern: "+err.Error()).JSON(), isErr: true}
+	}
 	files := make([]string, 0, 16)
 	truncated := false
 	truncationReason := ""
@@ -424,14 +476,7 @@ func (t *Toolset) executeGlob(ctx context.Context, a GlobArgs, root Resolved) *g
 		if root.Rel != "" && root.Rel != "." {
 			sub = strings.TrimPrefix(strings.TrimPrefix(rel, root.Rel), "/")
 		}
-		ok, err := filepath.Match(pattern, sub)
-		if err != nil {
-			return &haltError{refuse(CodeMalformed, "Glob: bad pattern: "+err.Error())}
-		}
-		if !ok && base != pattern {
-			ok, _ = filepath.Match(base, filepath.Base(sub))
-		}
-		if !ok {
+		if !g.match(sub) {
 			return nil
 		}
 		if len(files) >= t.limits.MaxEntries {
@@ -464,6 +509,103 @@ func (t *Toolset) executeGlob(ctx context.Context, a GlobArgs, root Resolved) *g
 		truncationReason: truncationReason,
 		isErr:            false,
 	}
+}
+
+// globPattern holds compiled segments for glob matching with recursive ** wildcards.
+type globPattern struct {
+	raw      string
+	segments []string
+}
+
+func compileGlob(pattern string) (*globPattern, error) {
+	pattern = filepath.ToSlash(pattern)
+	pattern = strings.TrimPrefix(pattern, "./")
+	pattern = strings.TrimPrefix(pattern, "/")
+	pattern = strings.TrimSuffix(pattern, "/")
+
+	patSegs := splitPathSegments(pattern)
+	for _, seg := range patSegs {
+		if seg != "**" {
+			if _, err := path.Match(seg, ""); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return &globPattern{raw: pattern, segments: patSegs}, nil
+}
+
+func splitPathSegments(p string) []string {
+	if p == "" {
+		return nil
+	}
+	raw := strings.Split(p, "/")
+	segs := make([]string, 0, len(raw))
+	for _, s := range raw {
+		if s != "" && s != "." {
+			segs = append(segs, s)
+		}
+	}
+	return segs
+}
+
+func (g *globPattern) match(pathStr string) bool {
+	pathStr = filepath.ToSlash(pathStr)
+	pathStr = strings.TrimPrefix(pathStr, "./")
+	pathStr = strings.TrimPrefix(pathStr, "/")
+	pathSegs := splitPathSegments(pathStr)
+	matched, _ := matchSegments(g.segments, pathSegs)
+	return matched
+}
+
+// matchGlob reports whether pathStr matches the glob pattern. It supports ** recursive
+// directory wildcards anywhere in the pattern (e.g. "src/**/*.go", "internal/**/test_*.go",
+// or "**/*.go").
+func matchGlob(pattern, pathStr string) (bool, error) {
+	g, err := compileGlob(pattern)
+	if err != nil {
+		return false, err
+	}
+	return g.match(pathStr), nil
+}
+
+func matchSegments(patSegs, pathSegs []string) (bool, error) {
+	if len(patSegs) == 0 && len(pathSegs) == 0 {
+		return true, nil
+	}
+	if len(patSegs) == 0 {
+		return false, nil
+	}
+	if len(pathSegs) == 0 {
+		for _, seg := range patSegs {
+			if seg != "**" {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
+
+	if patSegs[0] == "**" {
+		for len(patSegs) > 1 && patSegs[1] == "**" {
+			patSegs = patSegs[1:]
+		}
+		matched, err := matchSegments(patSegs[1:], pathSegs)
+		if matched || err != nil {
+			return matched, err
+		}
+		for k := 0; k < len(pathSegs); k++ {
+			matched, err := matchSegments(patSegs[1:], pathSegs[k+1:])
+			if matched || err != nil {
+				return matched, err
+			}
+		}
+		return false, nil
+	}
+
+	ok, err := path.Match(patSegs[0], pathSegs[0])
+	if err != nil || !ok {
+		return false, err
+	}
+	return matchSegments(patSegs[1:], pathSegs[1:])
 }
 
 // searchRoot resolves and confines the subtree a search runs over, defaulting to the

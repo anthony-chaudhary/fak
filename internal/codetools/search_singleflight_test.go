@@ -30,7 +30,7 @@ func TestSearchSingleflightGrep(t *testing.T) {
 	}
 
 	const total = 8
-	key := ts.root + "\x00" + matchToken + "\x00\x00" + fmt.Sprintf("%d", ts.limits.MaxMatches)
+	key := grepFlightKey(ts.root, matchToken, "", ts.limits.MaxMatches)
 
 	// searchHook pauses the leader during its walk until all (total-1) joiners have entered Do.
 	var hookOnce sync.Once
@@ -128,7 +128,7 @@ func TestSearchSingleflightGlob(t *testing.T) {
 	}
 
 	const total = 6
-	key := ts.root + "\x00**/*.go"
+	key := globFlightKey(ts.root, "**/*.go")
 
 	var hookOnce sync.Once
 	ts.searchHook = func() {
@@ -370,5 +370,299 @@ func TestSearchSingleflightLateArrivalStartsFresh(t *testing.T) {
 	m2 := decodeResult(t, out2)
 	if m2["coalesced"] != false {
 		t.Fatalf("late arrival coalesced = %v, want false (starts fresh)", m2["coalesced"])
+	}
+}
+
+// TestSearchSingleflightJoinerTimeoutUnblocksImmediately verifies that a joiner with a
+// short timeout context unblocks immediately with CANCELED when its context expires, while
+// the leader continues and later finishes successfully.
+func TestSearchSingleflightJoinerTimeoutUnblocksImmediately(t *testing.T) {
+	dir := t.TempDir()
+	ts, err := New(Config{Root: dir})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	const matchToken = "JOINER_TIMEOUT_NEEDLE"
+	mustWrite(t, filepath.Join(dir, "f1.txt"), "hit: "+matchToken+" here\n")
+
+	key := grepFlightKey(ts.root, matchToken, "", ts.limits.MaxMatches)
+
+	leaderHold := make(chan struct{})
+	leaderStarted := make(chan struct{})
+	var hookOnce sync.Once
+
+	ts.searchHook = func() {
+		hookOnce.Do(func() {
+			close(leaderStarted)
+			<-leaderHold
+		})
+	}
+
+	// 1. Start leader with long context; it pauses in searchHook.
+	var leaderOut []byte
+	var leaderErr bool
+	leaderDone := make(chan struct{})
+	go func() {
+		defer close(leaderDone)
+		leaderOut, leaderErr = ts.grep(context.Background(), argsOf(t, GrepArgs{Pattern: matchToken}))
+	}()
+
+	select {
+	case <-leaderStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("leader did not start in time")
+	}
+
+	// 2. Start joiner with a 50ms timeout.
+	ctxJoiner, cancelJoiner := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancelJoiner()
+
+	start := time.Now()
+	joinerOut, joinerErr := ts.grep(ctxJoiner, argsOf(t, GrepArgs{Pattern: matchToken}))
+	elapsed := time.Since(start)
+
+	if elapsed > 400*time.Millisecond {
+		t.Fatalf("joiner hung for %v, want timeout in ~50ms", elapsed)
+	}
+	if !joinerErr {
+		t.Fatalf("joiner succeeded, want canceled refusal: %s", string(joinerOut))
+	}
+	code := errCode(t, joinerOut)
+	if code != CodeCanceled {
+		t.Fatalf("joiner refusal code = %q, want %q", code, CodeCanceled)
+	}
+
+	// Waiters count must be 0 after joiner unblocks.
+	if waiters := ts.grepFlight.Waiters(key); waiters != 0 {
+		t.Fatalf("Waiters = %d, want 0 after joiner unblocked", waiters)
+	}
+
+	// Leader must still be held.
+	select {
+	case <-leaderDone:
+		t.Fatal("leader finished prematurely while still held")
+	default:
+	}
+
+	// 3. Release leader and verify it succeeds.
+	close(leaderHold)
+
+	select {
+	case <-leaderDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("leader did not complete after release")
+	}
+
+	if leaderErr {
+		t.Fatalf("leader failed: %s", string(leaderOut))
+	}
+	leaderData := decodeResult(t, leaderOut)
+	if leaderData["match_count"] != float64(1) {
+		t.Fatalf("leader match_count = %v, want 1", leaderData["match_count"])
+	}
+}
+
+// TestSearchSingleflightLeaderCancellationJoinerRecovers verifies that when a leader's
+// context is canceled, waiting joiners do not inherit the premature cancellation refusal,
+// but instead recover and complete their search successfully.
+func TestSearchSingleflightLeaderCancellationJoinerRecovers(t *testing.T) {
+	dir := t.TempDir()
+	ts, err := New(Config{Root: dir})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	const matchToken = "LEADER_CANCEL_NEEDLE"
+	mustWrite(t, filepath.Join(dir, "match.txt"), "found: "+matchToken+"\n")
+
+	key := grepFlightKey(ts.root, matchToken, "", ts.limits.MaxMatches)
+
+	ctxLeader, cancelLeader := context.WithCancel(context.Background())
+	defer cancelLeader()
+
+	var hookOnce sync.Once
+	ts.searchHook = func() {
+		hookOnce.Do(func() {
+			deadline := time.Now().Add(2 * time.Second)
+			for ts.grepFlight.Waiters(key) < 1 {
+				if time.Now().After(deadline) {
+					t.Errorf("timed out waiting for joiner to enter Do")
+					return
+				}
+				time.Sleep(1 * time.Millisecond)
+			}
+			cancelLeader()
+		})
+	}
+
+	var leaderOut []byte
+	var leaderErr bool
+	var joinerOut []byte
+	var joinerErr bool
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		leaderOut, leaderErr = ts.grep(ctxLeader, argsOf(t, GrepArgs{Pattern: matchToken}))
+	}()
+
+	go func() {
+		defer wg.Done()
+		joinerOut, joinerErr = ts.grep(context.Background(), argsOf(t, GrepArgs{Pattern: matchToken}))
+	}()
+
+	wg.Wait()
+
+	if !leaderErr {
+		t.Fatalf("leader unexpectedly succeeded: %s", string(leaderOut))
+	}
+	if code := errCode(t, leaderOut); code != CodeCanceled {
+		t.Fatalf("leader error code = %q, want %q", code, CodeCanceled)
+	}
+
+	if joinerErr {
+		t.Fatalf("joiner failed prematurely: %s", string(joinerOut))
+	}
+	joinerData := decodeResult(t, joinerOut)
+	if joinerData["match_count"] != float64(1) {
+		t.Fatalf("joiner match_count = %v, want 1", joinerData["match_count"])
+	}
+}
+
+// TestSearchSingleflightGlobJoinerTimeoutUnblocksImmediately verifies that a glob joiner
+// unblocks immediately when its context times out.
+func TestSearchSingleflightGlobJoinerTimeoutUnblocksImmediately(t *testing.T) {
+	dir := t.TempDir()
+	ts, err := New(Config{Root: dir})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	mustWrite(t, filepath.Join(dir, "src/main.go"), "package main\n")
+	key := ts.root + "\x00**/*.go"
+
+	leaderHold := make(chan struct{})
+	leaderStarted := make(chan struct{})
+	var hookOnce sync.Once
+
+	ts.searchHook = func() {
+		hookOnce.Do(func() {
+			close(leaderStarted)
+			<-leaderHold
+		})
+	}
+
+	var leaderOut []byte
+	var leaderErr bool
+	leaderDone := make(chan struct{})
+	go func() {
+		defer close(leaderDone)
+		leaderOut, leaderErr = ts.glob(context.Background(), argsOf(t, GlobArgs{Pattern: "**/*.go"}))
+	}()
+
+	select {
+	case <-leaderStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("leader did not start in time")
+	}
+
+	ctxJoiner, cancelJoiner := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancelJoiner()
+
+	start := time.Now()
+	joinerOut, joinerErr := ts.glob(ctxJoiner, argsOf(t, GlobArgs{Pattern: "**/*.go"}))
+	elapsed := time.Since(start)
+
+	if elapsed > 400*time.Millisecond {
+		t.Fatalf("glob joiner hung for %v, want timeout in ~50ms", elapsed)
+	}
+	if !joinerErr {
+		t.Fatalf("glob joiner succeeded, want canceled refusal: %s", string(joinerOut))
+	}
+	code := errCode(t, joinerOut)
+	if code != CodeCanceled {
+		t.Fatalf("glob joiner refusal code = %q, want %q", code, CodeCanceled)
+	}
+
+	if waiters := ts.globFlight.Waiters(key); waiters != 0 {
+		t.Fatalf("Waiters = %d, want 0 after joiner unblocked", waiters)
+	}
+
+	close(leaderHold)
+	select {
+	case <-leaderDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("leader did not complete after release")
+	}
+
+	if leaderErr {
+		t.Fatalf("leader failed: %s", string(leaderOut))
+	}
+}
+
+// TestSearchSingleflightGlobLeaderCancellationJoinerRecovers verifies that when a glob leader's
+// context is canceled, waiting joiners recover and complete without failing prematurely.
+func TestSearchSingleflightGlobLeaderCancellationJoinerRecovers(t *testing.T) {
+	dir := t.TempDir()
+	ts, err := New(Config{Root: dir})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	mustWrite(t, filepath.Join(dir, "src/lib.go"), "package lib\n")
+	key := ts.root + "\x00**/*.go"
+
+	ctxLeader, cancelLeader := context.WithCancel(context.Background())
+	defer cancelLeader()
+
+	var hookOnce sync.Once
+	ts.searchHook = func() {
+		hookOnce.Do(func() {
+			deadline := time.Now().Add(2 * time.Second)
+			for ts.globFlight.Waiters(key) < 1 {
+				if time.Now().After(deadline) {
+					t.Errorf("timed out waiting for joiner to enter Do")
+					return
+				}
+				time.Sleep(1 * time.Millisecond)
+			}
+			cancelLeader()
+		})
+	}
+
+	var leaderOut []byte
+	var leaderErr bool
+	var joinerOut []byte
+	var joinerErr bool
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		leaderOut, leaderErr = ts.glob(ctxLeader, argsOf(t, GlobArgs{Pattern: "**/*.go"}))
+	}()
+
+	go func() {
+		defer wg.Done()
+		joinerOut, joinerErr = ts.glob(context.Background(), argsOf(t, GlobArgs{Pattern: "**/*.go"}))
+	}()
+
+	wg.Wait()
+
+	if !leaderErr {
+		t.Fatalf("leader unexpectedly succeeded: %s", string(leaderOut))
+	}
+	if code := errCode(t, leaderOut); code != CodeCanceled {
+		t.Fatalf("leader error code = %q, want %q", code, CodeCanceled)
+	}
+
+	if joinerErr {
+		t.Fatalf("joiner failed prematurely: %s", string(joinerOut))
+	}
+	joinerData := decodeResult(t, joinerOut)
+	if joinerData["count"] != float64(1) {
+		t.Fatalf("joiner count = %v, want 1", joinerData["count"])
 	}
 }
