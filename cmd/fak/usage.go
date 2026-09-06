@@ -50,7 +50,7 @@ const usageCoreText = `usage:
                  state without mutation; selfcheck re-evaluates locally and writes
                  a compatibility receipt. No command downloads or starts a model.
                  Exit 0 compatible, 2 usage, 3 typed incompatibility, 1 invalid I/O.)
-  fak commit    --path P [--path P ...] (-m STR | -F FILE/-) [--push] [--trunk B] [--no-signoff] [--review-model M] [--json]
+  fak commit    --path P [--path P ...] (-m STR | -F FILE/-) [-s] [--push] [--trunk B] [--no-signoff] [--review-model M] [--json]
   fak commit status [--dir DIR] [--json]
   fak commit preflight --path P [--path P ...] [--dir DIR] [--json]
                 (classify each commit-by-path pathspec against the index+worktree

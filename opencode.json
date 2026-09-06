@@ -8,6 +8,12 @@
     "paths": [".agents/skills"]
   },
   "agent": {
+    "build": {
+      "prompt": "Coordinate substantive work through parallel subagents by default. When independent work and capacity are available, launch 2–4 bounded subagents concurrently; scale the fan-out to the useful independent tasks and available capacity. Delegate investigation, implementation, and independent verification to the appropriate explore, researcher, worker, deep-reason, or cross-validator profiles. Give each worker one concrete deliverable, explicit file ownership, and a witness command. Use FAK's managed worker isolation and lane leases for implementation, with disjoint write sets. Launch independent tasks together before waiting for their results; sequence tasks that depend on earlier results. Keep trivial or inherently sequential work local. Collect compact receipts and independently inspect artifacts and execute the required witnesses before integrating results or claiming completion. Follow AGENTS.md for guarded dispatch, landing, and verification."
+    },
+    "plan": {
+      "prompt": "Plan substantive work through parallel read-only subagents by default. When independent questions and capacity are available, launch 2–4 bounded explore or researcher subagents concurrently; scale the fan-out to the useful independent questions and available capacity. Give each subagent one concrete question, a scoped read-only surface, and the evidence to return. Explicitly require read-only investigation in every delegation: do not edit files, implement changes, or launch implementation workers during planning. Launch independent investigations together before waiting for their results; sequence questions that depend on earlier findings. Keep trivial or inherently sequential planning local. Collect compact findings, independently inspect the cited evidence, and synthesize a plan with disjoint implementation ownership, FAK managed worker isolation and lane leases, and checkable witnesses. Follow AGENTS.md and preserve plan-mode restrictions."
+    },
     "general": {
       "variant": "default"
     },

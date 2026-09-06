@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -375,7 +376,7 @@ func TestCodexResumeHumanOutputExplainsFreshProcess(t *testing.T) {
 	var out, errOut bytes.Buffer
 	_ = runCodexResume(&out, &errOut, []string{"--codex-home", home, threadID, "continue"})
 	text := out.String()
-	if !strings.Contains(text, "fresh Codex process started") || !strings.Contains(text, "pid=4321") || !strings.Contains(text, "lookup=found") || !strings.Contains(text, home) {
+	if !strings.Contains(text, "fresh Codex process started") || !strings.Contains(text, "pid=4321") || !strings.Contains(text, "lookup=found") || (!strings.Contains(text, home) && !strings.Contains(text, strconv.Quote(home))) {
 		t.Fatalf("stdout=%q stderr=%q", text, errOut.String())
 	}
 }

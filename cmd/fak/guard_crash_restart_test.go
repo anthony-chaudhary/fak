@@ -686,8 +686,10 @@ func guardNamedCodexTestBinary(t *testing.T, dir string) string {
 		name += ".exe"
 	}
 	destination := filepath.Join(dir, name)
-	if err := os.Link(source, destination); err == nil {
-		return destination
+	if runtime.GOOS != "windows" {
+		if err := os.Link(source, destination); err == nil {
+			return destination
+		}
 	}
 	in, err := os.Open(source)
 	if err != nil {

@@ -703,6 +703,9 @@ func renderSync(w io.Writer, command string, info safesync.Assessment) {
 		for _, e := range info.Divergent {
 			fmt.Fprintf(w, "    DIVERGES  %s  %s\n", e.Status, e.Path)
 		}
+		if !info.Applied && len(info.Divergent) > 0 {
+			fmt.Fprintln(w, "  remedy: suspend divergent local paths across integration via `fak sync reconcile --goal integrate --apply` or `fak wip park`, then re-apply; never `git stash` or `git pull` on shared trunk")
+		}
 		if info.Applied {
 			fmt.Fprintf(w, "  HEAD -> %s (novel local work on other paths preserved)\n", short(info.NewHead))
 		}

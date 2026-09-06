@@ -14,14 +14,15 @@ import (
 )
 
 func TestCommitLifecycleQueueMapsCheckpointStatesToExecutableActions(t *testing.T) {
-	dir, file := wipTestRepo(t)
-	if err := os.WriteFile(file, []byte("base line\npark me\n"), 0o644); err != nil {
+	dir, _ := wipTestRepo(t)
+	fresh := filepath.Join(dir, "fresh.txt")
+	if err := os.WriteFile(fresh, []byte("base line\npark me\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := wipCheckpoint(context.Background(), dir, "parked-session", true, 1000); err != nil {
 		t.Fatalf("checkpoint: %v", err)
 	}
-	if _, err := gitWipOut(context.Background(), dir, nil, "checkout", "--", "."); err != nil {
+	if err := os.Remove(fresh); err != nil {
 		t.Fatal(err)
 	}
 
@@ -47,14 +48,15 @@ func TestCommitLifecycleQueueMapsCheckpointStatesToExecutableActions(t *testing.
 // here is precisely how one checkpoint gets recovered twice.
 func TestCommitLifecycleQueueParksACheckpointAnotherSuccessorHolds(t *testing.T) {
 	ctx := context.Background()
-	dir, file := wipTestRepo(t)
-	if err := os.WriteFile(file, []byte("base line\nheld work\n"), 0o644); err != nil {
+	dir, _ := wipTestRepo(t)
+	fresh := filepath.Join(dir, "fresh.txt")
+	if err := os.WriteFile(fresh, []byte("base line\nheld work\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := wipCheckpoint(ctx, dir, "held-session", true, 1000); err != nil {
 		t.Fatalf("checkpoint: %v", err)
 	}
-	if _, err := gitWipOut(ctx, dir, nil, "checkout", "--", "."); err != nil {
+	if err := os.Remove(fresh); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := wipAdoptRun(ctx, dir, wipAdoptOptions{

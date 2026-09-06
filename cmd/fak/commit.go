@@ -111,6 +111,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	push := fs.Bool("push", false, "push after a VERIFIED commit through the safe sync path (never --force)")
 	lockTimeout := fs.Duration("lock-timeout", safecommit.DefaultLockTimeout, "finite deadline for waiting on the advisory commit lock (default 10s); LOCK_BUSY reports elapsed wait and holder evidence")
 	noSignoff := fs.Bool("no-signoff", false, "do not add the DCO sign-off (-s is the default)")
+	fs.Bool("s", false, "add the DCO sign-off (default: true; git-compatible flag)")
 	preview := fs.Bool("preview", false, "LINT-ONLY: check the message+paths and exit WITHOUT touching git (is the subject witness-gradeable, does it carry a bindable `(fak <leaf>)` stamp, does the leaf match the paths' lane?). Exit 0 clean, 1 issues, 2 usage")
 	requireIssue := fs.Bool("require-issue", false, "treat a missing bindable issue link (#N in subject / `Closes #N` in body) as BLOCKING, not advisory — the dispatch-worker contract so a close binds in `issue_closure_audit` (#312)")
 	noBuildCheck := fs.Bool("no-build-check", false, "skip the COMMITTED_RED prospective-tree compile gate before the commit (default: gate ON — refuses a commit that would red the committed trunk)")
@@ -237,6 +238,9 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	buildCheckOutcome, buildCheckDetail := safecommit.BuildCheckDisabled, ""
 	if !*noBuildCheck && os.Getenv("FAK_COMMIT_BUILD_CHECK") != "off" {
 		buildCheckOutcome, buildCheckDetail = commitBuildCheckGate(stderr, root, paths)
+	} else {
+		_ = os.Setenv("FLEET_BUILDCHECK_GUARD", "off")
+		_ = os.Setenv("FAK_COMMIT_BUILD_CHECK", "off")
 	}
 	buildCheck, admitBuild, buildReason := safecommit.DecideBuildCheck(buildCheckOutcome, buildCheckDetail, *allowBuildCheckTimeout)
 	if !admitBuild {
@@ -504,6 +508,7 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 	trunk := fs.String("trunk", "", "expected development branch override (default: configured development branch)")
 	push := fs.Bool("push", false, "push after a VERIFIED rollup commit through the safe sync path (never --force)")
 	noSignoff := fs.Bool("no-signoff", false, "do not add the DCO sign-off (-s is the default)")
+	fs.Bool("s", false, "add the DCO sign-off (default: true; git-compatible flag)")
 	noBuildCheck := fs.Bool("no-build-check", false, "record the rollup without prospective compile/test verification; recorded work is not eligible to mark intents done")
 	allowBuildCheckTimeout := fs.Bool("allow-build-check-timeout", os.Getenv("FAK_COMMIT_BUILD_CHECK") == "allow-timeout", "record the rollup when prospective validation times out; the unchecked receipt cannot mark intents done")
 	noRollup := fs.Bool("no-rollup", false, "disable batching and drain at most one compatible intent")
@@ -898,6 +903,9 @@ func renderCommitResult(stdout io.Writer, res safecommit.Result) {
 	if res.Reason == safecommit.ReasonLockBusy {
 		fmt.Fprintln(stdout, "  wedged? `fak commit --reclaim-stale-commit-lock` probes only the serialized commit lock (add --apply to remove a proven stale owner); `fak commit status` shows the live owner")
 		fmt.Fprintln(stdout, "  separate git residue: `fak commit --reclaim-stale-index-lock` handles only index.lock and next-index files")
+	}
+	if res.Reason == safecommit.ReasonPreStagedPathOverlap {
+		fmt.Fprintln(stdout, "  remedy: unstage pre-existing index changes via `git restore --staged <paths>` (worktree edits stay), then retry `fak commit`")
 	}
 	renderCommitScore(stdout, res)
 	renderCommitVelocity(stdout, res)

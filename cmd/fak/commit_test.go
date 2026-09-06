@@ -1371,3 +1371,32 @@ func TestRunCommit_SanctionedWorkerWorktreeSucceeds(t *testing.T) {
 		t.Fatalf("unexpected commit subject in worker worktree: %q", subj)
 	}
 }
+
+func TestRunCommit_signoffFlag_s(t *testing.T) {
+	var gotOpts safecommit.Options
+	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
+		gotOpts = o
+		return safecommit.Result{Committed: true, Verified: true, SHA: "abc", Paths: o.Paths}, nil
+	})
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{"-s", "-m", "msg", "--path", "internal/x.go"})
+	if code != 0 {
+		t.Fatalf("want exit 0 with -s flag, got %d (stderr=%q)", code, errb.String())
+	}
+	if !gotOpts.SignOff {
+		t.Fatalf("sign-off should remain true when -s is passed")
+	}
+}
+
+func TestRenderCommitResult_prestagedPathOverlapRemedy(t *testing.T) {
+	var out bytes.Buffer
+	res := safecommit.Result{
+		Reason: safecommit.ReasonPreStagedPathOverlap,
+		Detail: "staged hunks exist",
+	}
+	renderCommitResult(&out, res)
+	output := out.String()
+	if !strings.Contains(output, "remedy: unstage pre-existing index changes via `git restore --staged <paths>`") {
+		t.Fatalf("expected prestaged overlap remedy in output, got:\n%s", output)
+	}
+}
