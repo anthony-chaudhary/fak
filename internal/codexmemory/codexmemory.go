@@ -132,31 +132,8 @@ type Options struct {
 // never returns an error for a missing/partial home — an unresolved or absent
 // home is reported in the Posture itself.
 func Doctor(opts Options) Posture {
-	getenv := opts.Env
-	if getenv == nil {
-		getenv = os.Getenv
-	}
-	homeDir := opts.HomeDir
-	if homeDir == nil {
-		homeDir = os.UserHomeDir
-	}
-
 	p := Posture{Schema: Schema, RepoRoot: opts.RepoRoot}
-
-	// Resolve the effective Codex home: explicit flag > CODEX_HOME > ~/.codex.
-	switch {
-	case opts.CodexHome != "":
-		p.CodexHome = opts.CodexHome
-		p.HomeSource = "flag"
-	case strings.TrimSpace(getenv("CODEX_HOME")) != "":
-		p.CodexHome = strings.TrimSpace(getenv("CODEX_HOME"))
-		p.HomeSource = "env"
-	default:
-		if h, err := homeDir(); err == nil && h != "" {
-			p.CodexHome = filepath.Join(h, ".codex")
-			p.HomeSource = "default"
-		}
-	}
+	p.CodexHome, p.HomeSource = resolveHome(opts)
 
 	if p.CodexHome == "" {
 		p.Findings = append(p.Findings, Finding{
@@ -202,6 +179,31 @@ func Doctor(opts Options) Posture {
 		}
 	}
 	return p
+}
+
+// resolveHome resolves the effective Codex home directory and its provenance source:
+// explicit flag > CODEX_HOME > ~/.codex.
+func resolveHome(opts Options) (string, string) {
+	getenv := opts.Env
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	homeDir := opts.HomeDir
+	if homeDir == nil {
+		homeDir = os.UserHomeDir
+	}
+
+	switch {
+	case opts.CodexHome != "":
+		return opts.CodexHome, "flag"
+	case strings.TrimSpace(getenv("CODEX_HOME")) != "":
+		return strings.TrimSpace(getenv("CODEX_HOME")), "env"
+	default:
+		if h, err := homeDir(); err == nil && h != "" {
+			return filepath.Join(h, ".codex"), "default"
+		}
+	}
+	return "", ""
 }
 
 // applyConfig folds parsed TOML key/values into the posture.
