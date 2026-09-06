@@ -2,6 +2,7 @@ package codetools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -772,4 +773,210 @@ func TestSearchSingleflightEmbeddedNullBytesDoNotCollide(t *testing.T) {
 	if res2["coalesced"] != false {
 		t.Fatalf("query 2 coalesced = %v, want false", res2["coalesced"])
 	}
+}
+
+// TestSearchSingleflightSuccessiveLeaderCancellations verifies that when successive in-flight
+// leaders cancel, joiners retry iteratively within a bounded loop without unbounded recursion,
+// unblocking safely with errFlightRetriesExceeded when retries are exhausted or receiving
+// the result when a subsequent attempt succeeds.
+func TestSearchSingleflightSuccessiveLeaderCancellations(t *testing.T) {
+	type joinerResult struct {
+		val    string
+		shared bool
+		err    error
+	}
+
+	t.Run("exceeds retry limit", func(t *testing.T) {
+		var g flightGroup[string]
+		const key = "test-key-retries-exceeded"
+
+		flights := make([]*flight[string], maxFlightRetries+1)
+		for i := range flights {
+			flights[i] = &flight[string]{
+				done:     make(chan struct{}),
+				canceled: true,
+			}
+		}
+
+		g.mu.Lock()
+		g.m = make(map[string]*flight[string])
+		g.m[key] = flights[0]
+		g.mu.Unlock()
+
+		resCh := make(chan joinerResult, 1)
+		go func() {
+			val, shared, err := g.Do(context.Background(), key, func() (string, error) {
+				return "unexpected", nil
+			})
+			resCh <- joinerResult{val: val, shared: shared, err: err}
+		}()
+
+		for i := 0; i < maxFlightRetries; i++ {
+			deadline := time.Now().Add(2 * time.Second)
+			for flights[i].waiters.Load() < 1 {
+				if time.Now().After(deadline) {
+					t.Fatalf("flight %d: joiner did not arrive in time", i)
+				}
+				time.Sleep(1 * time.Millisecond)
+			}
+
+			g.mu.Lock()
+			g.m[key] = flights[i+1]
+			g.mu.Unlock()
+
+			close(flights[i].done)
+		}
+
+		// Wait for joiner to enter the final flight (flights[maxFlightRetries])
+		deadline := time.Now().Add(2 * time.Second)
+		for flights[maxFlightRetries].waiters.Load() < 1 {
+			if time.Now().After(deadline) {
+				t.Fatalf("final flight: joiner did not arrive in time")
+			}
+			time.Sleep(1 * time.Millisecond)
+		}
+
+		// Cancel the final flight
+		close(flights[maxFlightRetries].done)
+
+		select {
+		case res := <-resCh:
+			if !errors.Is(res.err, errFlightRetriesExceeded) {
+				t.Fatalf("expected errFlightRetriesExceeded, got: %v", res.err)
+			}
+			if res.shared {
+				t.Fatalf("expected shared=false on retries exceeded, got true")
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("joiner hung, did not unblock after exceeding maxFlightRetries")
+		}
+
+		// Verify waiters cleaned up
+		for i, f := range flights {
+			if w := f.waiters.Load(); w != 0 {
+				t.Fatalf("flight %d: expected 0 waiters, got %d", i, w)
+			}
+		}
+	})
+
+	t.Run("recovers after successive cancellations", func(t *testing.T) {
+		var g flightGroup[string]
+		const key = "test-key-retries-recover"
+
+		// 2 canceled flights, then 3rd flight succeeds
+		f0 := &flight[string]{done: make(chan struct{}), canceled: true}
+		f1 := &flight[string]{done: make(chan struct{}), canceled: true}
+		f2 := &flight[string]{done: make(chan struct{}), val: "recovered-value", canceled: false}
+
+		g.mu.Lock()
+		g.m = make(map[string]*flight[string])
+		g.m[key] = f0
+		g.mu.Unlock()
+
+		resCh := make(chan joinerResult, 1)
+		go func() {
+			val, shared, err := g.Do(context.Background(), key, func() (string, error) {
+				return "unexpected", nil
+			})
+			resCh <- joinerResult{val: val, shared: shared, err: err}
+		}()
+
+		// Wait for joiner on f0
+		deadline := time.Now().Add(2 * time.Second)
+		for f0.waiters.Load() < 1 {
+			if time.Now().After(deadline) {
+				t.Fatal("joiner did not arrive on f0")
+			}
+			time.Sleep(1 * time.Millisecond)
+		}
+		g.mu.Lock()
+		g.m[key] = f1
+		g.mu.Unlock()
+		close(f0.done)
+
+		// Wait for joiner on f1
+		deadline = time.Now().Add(2 * time.Second)
+		for f1.waiters.Load() < 1 {
+			if time.Now().After(deadline) {
+				t.Fatal("joiner did not arrive on f1")
+			}
+			time.Sleep(1 * time.Millisecond)
+		}
+		g.mu.Lock()
+		g.m[key] = f2
+		g.mu.Unlock()
+		close(f1.done)
+
+		// Wait for joiner on f2
+		deadline = time.Now().Add(2 * time.Second)
+		for f2.waiters.Load() < 1 {
+			if time.Now().After(deadline) {
+				t.Fatal("joiner did not arrive on f2")
+			}
+			time.Sleep(1 * time.Millisecond)
+		}
+		close(f2.done)
+
+		select {
+		case res := <-resCh:
+			if res.err != nil {
+				t.Fatalf("expected nil error, got: %v", res.err)
+			}
+			if res.val != "recovered-value" {
+				t.Fatalf("expected recovered-value, got: %s", res.val)
+			}
+			if !res.shared {
+				t.Fatalf("expected shared=true, got false")
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("joiner hung, did not unblock on recovery")
+		}
+	})
+
+	t.Run("joiner context canceled during retry", func(t *testing.T) {
+		var g flightGroup[string]
+		const key = "test-key-joiner-ctx-canceled"
+
+		f0 := &flight[string]{done: make(chan struct{}), canceled: true}
+		f1 := &flight[string]{done: make(chan struct{}), canceled: false}
+
+		g.mu.Lock()
+		g.m = make(map[string]*flight[string])
+		g.m[key] = f0
+		g.mu.Unlock()
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		resCh := make(chan joinerResult, 1)
+		go func() {
+			val, shared, err := g.Do(ctx, key, func() (string, error) {
+				return "unexpected", nil
+			})
+			resCh <- joinerResult{val: val, shared: shared, err: err}
+		}()
+
+		deadline := time.Now().Add(2 * time.Second)
+		for f0.waiters.Load() < 1 {
+			if time.Now().After(deadline) {
+				t.Fatal("joiner did not arrive on f0")
+			}
+			time.Sleep(1 * time.Millisecond)
+		}
+
+		// Cancel joiner context and close f0
+		g.mu.Lock()
+		g.m[key] = f1
+		g.mu.Unlock()
+		cancel()
+		close(f0.done)
+
+		select {
+		case res := <-resCh:
+			if !errors.Is(res.err, context.Canceled) {
+				t.Fatalf("expected context.Canceled, got: %v", res.err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("joiner hung, did not unblock on context cancellation")
+		}
+	})
 }

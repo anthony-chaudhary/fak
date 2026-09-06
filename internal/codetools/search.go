@@ -71,6 +71,14 @@ const maxMatchLineBytes = 512
 // publishing a result (a panic unwinding through Do).
 var errFlightAbandoned = errors.New("codetools: in-flight search abandoned")
 
+// maxFlightRetries bounds the consecutive times a joiner retries after finding an
+// in-flight leader canceled, preventing unbounded recursion and loop execution.
+const maxFlightRetries = 3
+
+// errFlightRetriesExceeded is returned when a joiner exhausts maxFlightRetries
+// after repeated leader cancellations.
+var errFlightRetriesExceeded = errors.New("codetools: in-flight search retries exceeded")
+
 // flightGroup coalesces concurrent identical search calls, keyed by query arguments.
 // Matching the singleflight pattern in internal/gitbroker/singleflight.go.
 type flightGroup[T any] struct {
@@ -89,73 +97,86 @@ type flight[T any] struct {
 }
 
 func (g *flightGroup[T]) Do(ctx context.Context, key string, fn func() (T, error)) (val T, shared bool, err error) {
-	g.mu.Lock()
-	if g.m == nil {
-		g.m = make(map[string]*flight[T])
-	}
-	if inflight, ok := g.m[key]; ok {
+	for retries := 0; ; retries++ {
 		if ctx != nil {
 			if err := ctx.Err(); err != nil {
-				g.mu.Unlock()
 				var zero T
 				return zero, false, err
 			}
 		}
-		inflight.waiters.Add(1)
-		g.mu.Unlock()
 
-		var ctxDone <-chan struct{}
-		if ctx != nil {
-			ctxDone = ctx.Done()
+		g.mu.Lock()
+		if g.m == nil {
+			g.m = make(map[string]*flight[T])
 		}
-		select {
-		case <-ctxDone:
-			inflight.waiters.Add(-1)
-			var zero T
-			return zero, false, ctx.Err()
-		case <-inflight.done:
-			inflight.waiters.Add(-1)
+		if inflight, ok := g.m[key]; ok {
 			if ctx != nil {
 				if err := ctx.Err(); err != nil {
+					g.mu.Unlock()
 					var zero T
 					return zero, false, err
 				}
 			}
+			inflight.waiters.Add(1)
+			g.mu.Unlock()
+
+			var ctxDone <-chan struct{}
+			if ctx != nil {
+				ctxDone = ctx.Done()
+			}
+			select {
+			case <-ctxDone:
+				inflight.waiters.Add(-1)
+				var zero T
+				return zero, false, ctx.Err()
+			case <-inflight.done:
+				inflight.waiters.Add(-1)
+				if ctx != nil {
+					if err := ctx.Err(); err != nil {
+						var zero T
+						return zero, false, err
+					}
+				}
+			}
+
+			if inflight.canceled {
+				// Leader was canceled, but this joiner's context is still valid.
+				// Retry iteratively up to maxFlightRetries to avoid unbounded loop or recursion.
+				if retries >= maxFlightRetries {
+					var zero T
+					return zero, false, errFlightRetriesExceeded
+				}
+				continue
+			}
+
+			g.coalesced.Add(1)
+			return inflight.val, true, inflight.err
 		}
-
-		if inflight.canceled {
-			// Leader was canceled, but this joiner's context is still valid.
-			// Recover by executing or joining a fresh flight.
-			return g.Do(ctx, key, fn)
+		f := &flight[T]{
+			done: make(chan struct{}),
+			err:  errFlightAbandoned,
 		}
-
-		g.coalesced.Add(1)
-		return inflight.val, true, inflight.err
-	}
-	f := &flight[T]{
-		done: make(chan struct{}),
-		err:  errFlightAbandoned,
-	}
-	g.m[key] = f
-	g.mu.Unlock()
-
-	defer func() {
-		g.mu.Lock()
-		delete(g.m, key)
+		g.m[key] = f
 		g.mu.Unlock()
-		f.doneOnce.Do(func() {
-			close(f.done)
-		})
-	}()
 
-	v, ferr := fn()
-	f.val, f.err = v, ferr
-	if (ctx != nil && ctx.Err() != nil) ||
-		errors.Is(ferr, context.Canceled) ||
-		errors.Is(ferr, context.DeadlineExceeded) {
-		f.canceled = true
+		defer func() {
+			g.mu.Lock()
+			delete(g.m, key)
+			g.mu.Unlock()
+			f.doneOnce.Do(func() {
+				close(f.done)
+			})
+		}()
+
+		v, ferr := fn()
+		f.val, f.err = v, ferr
+		if (ctx != nil && ctx.Err() != nil) ||
+			errors.Is(ferr, context.Canceled) ||
+			errors.Is(ferr, context.DeadlineExceeded) {
+			f.canceled = true
+		}
+		return v, false, ferr
 	}
-	return v, false, ferr
 }
 
 // Coalesced reports how many callers joined an in-flight search instead of executing their own.
