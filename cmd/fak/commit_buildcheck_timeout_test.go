@@ -169,10 +169,15 @@ func TestCommitBuildCheckWithinTimeoutPasses(t *testing.T) {
 
 	writeBuildCheckFile(t, repo, "p/p.go", "package p\n\nfunc Value() int { return 2 }\n")
 
+	git("config", "user.email", "t@t")
+	git("config", "user.name", "t")
+	branch := git("branch", "--show-current")
+
 	var out, errb bytes.Buffer
 	code := runCommit(&out, &errb, []string{
 		"--dir", repo,
-		"--trunk", "master",
+		"--trunk", branch,
+		"--no-signoff",
 		"--path", "p/p.go",
 		"-m", "fix(p): update value (fak p)",
 		"--build-check-timeout", "2m",
