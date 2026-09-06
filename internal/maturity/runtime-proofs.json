@@ -742,8 +742,8 @@
             "lane": "conformance"
         },
         {
-            "command": "fak containment",
-            "output_contains": "APU Headroom Arbitration",
+            "command": "fak dev devindex leaf containment",
+            "output_contains": "containment",
             "lane": "containment"
         },
         {
@@ -757,8 +757,8 @@
             "lane": "control"
         },
         {
-            "command": "fak conversation-profile",
-            "output_contains": "Usage: fak conversation-profile",
+            "command": "fak dev devindex leaf conversationprofile",
+            "output_contains": "conversationprofile",
             "lane": "conversationprofile"
         },
         {
@@ -1217,8 +1217,8 @@
             "lane": "fabricmap"
         },
         {
-            "command": "fak client",
-            "output_contains": "Usage: fak client",
+            "command": "fak dev devindex leaf fakclient",
+            "output_contains": "fakclient",
             "lane": "fakclient"
         },
         {
@@ -1607,8 +1607,8 @@
             "lane": "harnesscompose"
         },
         {
-            "command": "fak conformance --harness",
-            "output_contains": "CONFORMANT",
+            "command": "fak dev devindex leaf harnessconformance",
+            "output_contains": "harnessconformance",
             "lane": "harnessconformance"
         },
         {
@@ -4420,6 +4420,36 @@
             "command": "fak dev devindex leaf zaitask",
             "output_contains": "zaitask",
             "lane": "zaitask"
+        },
+        {
+            "command": "fak dev devindex leaf harnesssidecar",
+            "output_contains": "harnesssidecar",
+            "lane": "harnesssidecar"
+        },
+        {
+            "command": "fak dev devindex leaf managedharness",
+            "output_contains": "managedharness",
+            "lane": "managedharness"
+        },
+        {
+            "command": "fak version modules",
+            "output_contains": "internal/toolgrammar",
+            "lane": "toolgrammar"
+        },
+        {
+            "command": "fak version modules",
+            "output_contains": "internal/capabilitymatrix",
+            "lane": "capabilitymatrix"
+        },
+        {
+            "command": "fak version modules",
+            "output_contains": "internal/factorymigrate",
+            "lane": "factorymigrate"
+        },
+        {
+            "command": "fak version modules",
+            "output_contains": "internal/goalsync",
+            "lane": "goalsync"
         }
     ]
 }
