@@ -4450,6 +4450,41 @@
             "command": "fak version modules",
             "output_contains": "internal/goalsync",
             "lane": "goalsync"
+        },
+        {
+            "command": "fak dev devindex leaf allinone",
+            "output_contains": "allinone",
+            "lane": "allinone"
+        },
+        {
+            "command": "fak dev devindex leaf macobs",
+            "output_contains": "macobs",
+            "lane": "macobs"
+        },
+        {
+            "command": "fak dev devindex leaf resultstier",
+            "output_contains": "resultstier",
+            "lane": "resultstier"
+        },
+        {
+            "command": "fak dev devindex leaf sandbox",
+            "output_contains": "sandbox",
+            "lane": "sandbox"
+        },
+        {
+            "command": "fak version modules",
+            "output_contains": "internal/director",
+            "lane": "director"
+        },
+        {
+            "command": "fak version modules",
+            "output_contains": "internal/harnessversion",
+            "lane": "harnessversion"
+        },
+        {
+            "command": "fak version modules",
+            "output_contains": "internal/researcharm",
+            "lane": "researcharm"
         }
     ]
 }
