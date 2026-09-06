@@ -167,6 +167,23 @@ func TestProcessSupervisor(t *testing.T) {
 			if status.State != ProcessFailed {
 				t.Errorf("expected status state to still report %s, got %s", ProcessFailed, status.State)
 			}
+
+			// Resetting consecutive polls restores steady-state polling
+			if !sup.ResetConsecutivePolls(pid) {
+				t.Fatalf("expected ResetConsecutivePolls to succeed for PID %d", pid)
+			}
+			status, err = sup.PollProcess(pid)
+			if err != nil {
+				t.Fatalf("expected poll to succeed after reset, got: %v", err)
+			}
+			if status.State != ProcessFailed {
+				t.Errorf("expected state %s, got %s", ProcessFailed, status.State)
+			}
+
+			// Non-existent PID returns false
+			if sup.ResetConsecutivePolls(99999) {
+				t.Errorf("expected ResetConsecutivePolls on non-existent PID to return false")
+			}
 		})
 
 		t.Run("WriteCircuitBreaker", func(t *testing.T) {
@@ -202,6 +219,24 @@ func TestProcessSupervisor(t *testing.T) {
 			expectedMsg := "LIVELOCK_CIRCUIT_BROKEN: PID 402 is dead"
 			if err.Error() != expectedMsg {
 				t.Errorf("expected error %q, got %q", expectedMsg, err.Error())
+			}
+
+			// Resetting consecutive writes clears the circuit breaker
+			if !sup.ResetConsecutiveWrites(pid) {
+				t.Fatalf("expected ResetConsecutiveWrites to succeed for PID %d", pid)
+			}
+			err = sup.WriteStdin(pid, []byte("data\n"))
+			if err == nil {
+				t.Fatal("expected ErrProcessTerminated after reset, got nil")
+			}
+			var termErr *ErrProcessTerminated
+			if !errors.As(err, &termErr) {
+				t.Fatalf("expected *ErrProcessTerminated after reset, got %T: %v", err, err)
+			}
+
+			// Non-existent PID returns false
+			if sup.ResetConsecutiveWrites(99999) {
+				t.Errorf("expected ResetConsecutiveWrites on non-existent PID to return false")
 			}
 		})
 	})
