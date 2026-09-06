@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -43,6 +44,7 @@ func (p *capturingYieldPlanner) Model() string {
 // intercepts the turn with the synthetic conclusion and compaction prompt, and sets
 // X-Fak-Subturn-Yield: true header.
 func TestResponsesSubturnYieldExceedsThresholds(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_SUBTURN_YIELD", "true")
 	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", "1000")
 	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOOL_CALLS", "5")
 
@@ -123,6 +125,7 @@ func TestResponsesSubturnYieldExceedsThresholds(t *testing.T) {
 // TestResponsesSubturnYieldBelowThresholds verifies that when context and tool calls are below
 // thresholds, normal execution proceeds without yielding.
 func TestResponsesSubturnYieldBelowThresholds(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_SUBTURN_YIELD", "true")
 	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", "10000")
 	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOOL_CALLS", "10")
 
@@ -198,6 +201,7 @@ func TestResponsesSubturnYieldBelowThresholds(t *testing.T) {
 // TestResponsesSubturnYieldStreaming verifies that streaming Responses requests also
 // honor the mid-turn token yield valve.
 func TestResponsesSubturnYieldStreaming(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_SUBTURN_YIELD", "true")
 	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", "500")
 	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOOL_CALLS", "3")
 
@@ -267,6 +271,7 @@ func TestResponsesSubturnYieldStreaming(t *testing.T) {
 
 // TestSubturnYieldDefaults verifies the default constants and env overrides.
 func TestSubturnYieldDefaults(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_SUBTURN_YIELD", "true")
 	if DefaultMaxSubturnTokens != 160000 {
 		t.Fatalf("expected DefaultMaxSubturnTokens == 160000, got %d", DefaultMaxSubturnTokens)
 	}
@@ -289,6 +294,7 @@ func TestSubturnYieldDefaults(t *testing.T) {
 
 // TestCountSubturnToolCalls verifies counting of tool results and function calls.
 func TestCountSubturnToolCalls(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_SUBTURN_YIELD", "true")
 	msgs := []agent.Message{
 		{Role: agent.RoleUser, Content: "hi"},
 		{
@@ -309,6 +315,7 @@ func TestCountSubturnToolCalls(t *testing.T) {
 
 // TestSubturnLoopRunawayDetection verifies that runaway sub-turn loops trigger the valve.
 func TestSubturnLoopRunawayDetection(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_SUBTURN_YIELD", "true")
 	// Case 1: 5 identical consecutive calls.
 	var runawayMsgs []agent.Message
 	for i := 0; i < 5; i++ {
@@ -357,6 +364,7 @@ func TestSubturnLoopRunawayDetection(t *testing.T) {
 
 // TestShouldYieldSubturnMatrix verifies the threshold combination logic.
 func TestShouldYieldSubturnMatrix(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_SUBTURN_YIELD", "true")
 	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", "1000")
 	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOOL_CALLS", "5")
 
@@ -423,6 +431,7 @@ func TestShouldYieldSubturnMatrix(t *testing.T) {
 
 // TestEstimateSubturnTokens verifies token estimation.
 func TestEstimateSubturnTokens(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_SUBTURN_YIELD", "true")
 	msgs := []agent.Message{
 		{Role: agent.RoleUser, Content: strings.Repeat("A", 400)}, // 400 chars ~ 101 tokens
 	}
@@ -435,6 +444,7 @@ func TestEstimateSubturnTokens(t *testing.T) {
 // TestCountSubturnToolCallsScopedToActiveTurn verifies that historical tool calls
 // from a previous user turn do not count towards the active sub-turn tool call count.
 func TestCountSubturnToolCallsScopedToActiveTurn(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_SUBTURN_YIELD", "true")
 	// Turn 1: user prompt, 5 tool calls / results, assistant message concluding turn.
 	// Turn 2: user prompt just started (0 tool calls in current turn).
 	msgsTurnJustStarted := []agent.Message{
@@ -508,6 +518,7 @@ func TestCountSubturnToolCallsScopedToActiveTurn(t *testing.T) {
 // TestResponsesSubturnHistoricalToolCallsDoNotTriggerYield verifies that historical tool calls
 // from a previous user turn do not trigger the yield valve on a new turn.
 func TestResponsesSubturnHistoricalToolCallsDoNotTriggerYield(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_SUBTURN_YIELD", "true")
 	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", "1000")
 	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOOL_CALLS", "5")
 
@@ -583,6 +594,7 @@ func TestResponsesSubturnHistoricalToolCallsDoNotTriggerYield(t *testing.T) {
 // TestResponsesSubturnSuppressImmediateYieldLoop verifies that when the preceding assistant
 // message was SubturnYieldMessage, the next turn is not intercepted by the yield valve.
 func TestResponsesSubturnSuppressImmediateYieldLoop(t *testing.T) {
+	t.Setenv("FAK_RESPONSES_SUBTURN_YIELD", "true")
 	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", "500")
 	t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOOL_CALLS", "3")
 
@@ -678,5 +690,69 @@ func TestResponsesSubturnSuppressImmediateYieldLoop(t *testing.T) {
 	shouldYield, _, _ := shouldYieldResponsesSubturn(msgsAfterYield, nil, nil)
 	if shouldYield {
 		t.Fatal("expected shouldYieldResponsesSubturn to return false when preceding assistant message was SubturnYieldMessage")
+	}
+}
+
+// Exercise the real Responses handler and HTTP planner, not a planner stub.
+func TestResponsesSubturnYieldExplicitOptInHTTP(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, enabled := range []bool{false, true} {
+			name := "json/default-off"
+			if stream {
+				name = "sse/default-off"
+			}
+			if enabled {
+				name = strings.ReplaceAll(name, "default-off", "opt-in")
+			}
+			t.Run(name, func(t *testing.T) {
+				t.Setenv("FAK_RESPONSES_SUBTURN_YIELD", "")
+				if enabled {
+					t.Setenv("FAK_RESPONSES_SUBTURN_YIELD", "true")
+				}
+				t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", "1")
+				t.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOOL_CALLS", "1")
+				var calls atomic.Int32
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = io.WriteString(w, `{"id":"upstream","object":"chat.completion","model":"test","choices":[{"index":0,"message":{"role":"assistant","content":"upstream-ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}`)
+				}))
+				defer upstream.Close()
+				srv := newTestServer(t)
+				srv.planner = agent.NewHTTPPlanner(upstream.URL, "test", "")
+				gateway := httptest.NewServer(srv.Handler())
+				defer gateway.Close()
+				body, err := json.Marshal(map[string]any{
+					"model": "test", "stream": stream,
+					"input": []any{
+						map[string]any{"type": "message", "role": "user", "content": "continue"},
+						map[string]any{"type": "function_call", "call_id": "call_1", "name": "tool_action", "arguments": "{}"},
+						map[string]any{"type": "function_call_output", "call_id": "call_1", "output": "completed tool output"},
+					},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				resp, err := http.Post(gateway.URL+"/v1/responses", "application/json", bytes.NewReader(body))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer resp.Body.Close()
+				data, err := io.ReadAll(resp.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if resp.StatusCode != http.StatusOK {
+					t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+				}
+				if enabled {
+					if calls.Load() != 0 || !strings.Contains(string(data), SubturnYieldMessage) || resp.Header.Get(SubturnYieldHeader) == "" {
+						t.Fatalf("opt-in: upstream calls=%d yield header=%q body=%s", calls.Load(), resp.Header.Get(SubturnYieldHeader), data)
+					}
+				} else if calls.Load() != 1 || !strings.Contains(string(data), "upstream-ok") || strings.Contains(string(data), SubturnYieldMessage) || resp.Header.Get(SubturnYieldHeader) != "" {
+					t.Fatalf("default-off: upstream calls=%d yield header=%q body=%s", calls.Load(), resp.Header.Get(SubturnYieldHeader), data)
+				}
+			})
+		}
 	}
 }

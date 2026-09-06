@@ -23,7 +23,7 @@ const (
 	SubturnYieldHeader = "X-Fak-Subturn-Yield"
 
 	// SubturnYieldMessage is the synthetic concluding prompt returned to trigger native context compaction.
-	SubturnYieldMessage = "Context threshold reached (resident sub-turn token yield valve activated). Concluding current turn to trigger native context compaction. Please summarize progress and resume from the latest state."
+	SubturnYieldMessage = "Context threshold reached (resident sub-turn token yield valve activated). Concluding current turn; client-managed compaction and continuation are required. Please summarize progress and resume from the latest state."
 )
 
 // resolveSubturnYieldThresholds returns the configurable thresholds for sub-turn tokens and tool calls.
@@ -232,6 +232,12 @@ func lastAssistantMessageWasYield(messages []agent.Message, rawInput json.RawMes
 // Yields when resident context tokens exceed the threshold AND tool call count exceeds the limit,
 // or if a sub-turn repetition runaway is detected.
 func shouldYieldResponsesSubturn(messages []agent.Message, tools []agent.ToolDef, rawInput json.RawMessage) (bool, int, int) {
+	// Terminal synthetic responses require explicit client-support opt-in.
+	enabled, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("FAK_RESPONSES_SUBTURN_YIELD")))
+	if err != nil || !enabled {
+		return false, 0, 0
+	}
+
 	maxTokens, maxToolCalls := resolveSubturnYieldThresholds()
 	toolCallCount := totalSubturnToolCalls(messages, rawInput)
 	estTokens := estimateSubturnTokens(messages, tools, rawInput)

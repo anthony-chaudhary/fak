@@ -242,6 +242,7 @@ func TestResponsesElideToolAlignment(t *testing.T) {
 func TestResponsesSubturnHistoricalToolElisionPreventsPrematureYield(t *testing.T) {
 	srv := newTestServer(t)
 	const trace = "t-responses-subturn-elide-prevent-yield"
+	t.Setenv("FAK_RESPONSES_SUBTURN_YIELD", "true")
 
 	// 1. Build a multi-step conversation: 1 user turn followed by 32 tool calls and outputs.
 	// 28 historical tool calls have oversized outputs (24,000 chars ~ 6,000 tokens each),
