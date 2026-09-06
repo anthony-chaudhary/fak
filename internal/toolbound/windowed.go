@@ -25,10 +25,20 @@ var (
 	// ErrInvalidPath indicates a malformed or invalid path argument.
 	ErrInvalidPath = errors.New("invalid path")
 	// ErrFileTooLarge indicates the requested file exceeds the configured maximum file size.
-	ErrFileTooLarge = errors.New("file too large")
+	ErrFileTooLarge = errors.New("toolbound: file exceeds maximum allowed size")
 	// ErrBinaryFile indicates binary data (e.g. NUL byte) was detected in the file.
-	ErrBinaryFile = errors.New("binary file detected")
+	ErrBinaryFile = errors.New("toolbound: binary file not supported")
 )
+
+// WindowedConfig provides configuration options for WindowedFileReader.
+type WindowedConfig struct {
+	RootDir           string
+	DefaultWindowSize int
+	MaxFileSize       int64
+}
+
+// WindowedOptions is an alias for WindowedConfig.
+type WindowedOptions = WindowedConfig
 
 // WindowView represents the formatted output of a file window.
 type WindowView struct {
@@ -58,7 +68,8 @@ type WindowedFileReader struct {
 
 // NewWindowedFileReader creates a WindowedFileReader.
 // Optional arguments may provide a root confinement directory (string),
-// a default window size (int), and/or a max file size in bytes (int64).
+// a default window size (int), a max file size in bytes (int64),
+// and/or a WindowedConfig / WindowedOptions.
 // If unspecified, defaultWindowSize defaults to DefaultWindowSize (100),
 // maxFileSize defaults to DefaultMaxFileSize (50MB), and rootDir is unset.
 func NewWindowedFileReader(args ...any) *WindowedFileReader {
@@ -77,6 +88,28 @@ func NewWindowedFileReader(args ...any) *WindowedFileReader {
 			}
 		case string:
 			root = v
+		case WindowedConfig:
+			if v.RootDir != "" {
+				root = v.RootDir
+			}
+			if v.DefaultWindowSize > 0 {
+				size = v.DefaultWindowSize
+			}
+			if v.MaxFileSize > 0 {
+				maxFileSize = v.MaxFileSize
+			}
+		case *WindowedConfig:
+			if v != nil {
+				if v.RootDir != "" {
+					root = v.RootDir
+				}
+				if v.DefaultWindowSize > 0 {
+					size = v.DefaultWindowSize
+				}
+				if v.MaxFileSize > 0 {
+					maxFileSize = v.MaxFileSize
+				}
+			}
 		}
 	}
 	return &WindowedFileReader{
@@ -523,12 +556,12 @@ func (w *WindowedFileReader) readFileLocked(path string) ([]byte, error) {
 	}
 	defer f.Close()
 
-	header := make([]byte, 8192)
+	header := make([]byte, 512)
 	n, err := f.Read(header)
 	if err != nil && err != io.EOF {
 		return nil, err
 	}
-	if bytes.IndexByte(header[:n], 0) != -1 {
+	if bytes.IndexByte(header[:n], 0) >= 0 {
 		return nil, ErrBinaryFile
 	}
 	if int64(n) > maxSize {
@@ -546,7 +579,7 @@ func (w *WindowedFileReader) readFileLocked(path string) ([]byte, error) {
 		if int64(n)+int64(len(rest)) > maxSize {
 			return nil, ErrFileTooLarge
 		}
-		if bytes.IndexByte(rest, 0) != -1 {
+		if bytes.IndexByte(rest, 0) >= 0 {
 			return nil, ErrBinaryFile
 		}
 		if len(rest) == 0 {

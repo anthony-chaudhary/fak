@@ -690,6 +690,47 @@ func TestWindowedFileReader_BinaryAndSizeGuard(t *testing.T) {
 		if !errors.Is(err, ErrFileTooLarge) {
 			t.Fatalf("expected ErrFileTooLarge with constructor limit, got %v", err)
 		}
+
+		// Also test with WindowedOptions / WindowedConfig
+		wOpts := NewWindowedFileReader(WindowedOptions{MaxFileSize: 100})
+		if wOpts.MaxFileSize() != 100 {
+			t.Fatalf("expected MaxFileSize 100 from WindowedOptions, got %d", wOpts.MaxFileSize())
+		}
+		_, err = wOpts.Open(largePath, 1, 10)
+		if !errors.Is(err, ErrFileTooLarge) {
+			t.Fatalf("expected ErrFileTooLarge with WindowedOptions limit, got %v", err)
+		}
+
+		// 100MB+ file check against default limit (50MB = DefaultMaxFileSize)
+		large100MBPath := filepath.Join(dir, "large_100mb.txt")
+		f, err := os.Create(large100MBPath)
+		if err != nil {
+			t.Fatalf("failed to create 100MB file: %v", err)
+		}
+		const size105MB = int64(105 * 1024 * 1024)
+		if err := f.Truncate(size105MB); err != nil {
+			_ = f.Close()
+			t.Fatalf("failed to truncate 100MB+ file: %v", err)
+		}
+		_ = f.Close()
+
+		defaultReader := NewWindowedFileReader()
+		if defaultReader.MaxFileSize() != DefaultMaxFileSize {
+			t.Fatalf("expected default MaxFileSize %d, got %d", DefaultMaxFileSize, defaultReader.MaxFileSize())
+		}
+		lines100, err := defaultReader.Open(large100MBPath, 1, 10)
+		if err == nil {
+			t.Fatal("expected error for 100MB+ file exceeding DefaultMaxFileSize, got nil")
+		}
+		if !errors.Is(err, ErrFileTooLarge) {
+			t.Fatalf("expected ErrFileTooLarge, got %v", err)
+		}
+		if lines100 != nil {
+			t.Fatalf("expected nil lines on ErrFileTooLarge, got %v", lines100)
+		}
+		if defaultReader.IsOpen() {
+			t.Fatal("expected IsOpen to be false after 100MB+ file rejection")
+		}
 	})
 
 	// (b) File containing NUL bytes returns ErrBinaryFile
@@ -713,6 +754,37 @@ func TestWindowedFileReader_BinaryAndSizeGuard(t *testing.T) {
 		}
 		if w.IsOpen() {
 			t.Fatal("expected IsOpen to be false after binary file rejection")
+		}
+
+		// Binary file with NUL in first 512 bytes rejected early without reading full 5MB payload
+		largeBinaryHeaderPath := filepath.Join(dir, "binary_large_header.bin")
+		largeBinFile, err := os.Create(largeBinaryHeaderPath)
+		if err != nil {
+			t.Fatalf("failed to create large binary file: %v", err)
+		}
+		if _, err := largeBinFile.Write([]byte("header\x00payload")); err != nil {
+			_ = largeBinFile.Close()
+			t.Fatalf("failed to write binary header: %v", err)
+		}
+		if err := largeBinFile.Truncate(5 * 1024 * 1024); err != nil {
+			_ = largeBinFile.Close()
+			t.Fatalf("failed to truncate large binary file: %v", err)
+		}
+		_ = largeBinFile.Close()
+
+		wLargeBin := NewWindowedFileReader()
+		linesBin, err := wLargeBin.Open(largeBinaryHeaderPath, 1, 10)
+		if err == nil {
+			t.Fatal("expected error for large binary file, got nil")
+		}
+		if !errors.Is(err, ErrBinaryFile) {
+			t.Fatalf("expected ErrBinaryFile, got %v", err)
+		}
+		if linesBin != nil {
+			t.Fatalf("expected nil lines on ErrBinaryFile, got %v", linesBin)
+		}
+		if wLargeBin.IsOpen() {
+			t.Fatal("expected IsOpen to be false after binary rejection")
 		}
 
 		largeBinary := append(bytes.Repeat([]byte("x"), 9000), 0x00, 'y', '\n')
