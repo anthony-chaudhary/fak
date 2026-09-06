@@ -30,6 +30,28 @@ func BenchmarkBlockGate(b *testing.B) {
 	}
 }
 
+func BenchmarkBlockGateError(b *testing.B) {
+	block := Block{
+		Engine:                 "vllm",
+		RequestTimeCompilation: true,
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = block.Gate()
+	}
+}
+
+func BenchmarkBlockReason(b *testing.B) {
+	block := Block{
+		Engine:                 "vllm",
+		RequestTimeCompilation: true,
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = block.Reason()
+	}
+}
+
 func BenchmarkGateRows(b *testing.B) {
 	rows := []Block{
 		{Engine: "vllm", CompileCacheEnabled: Bool(true), WarmupComplete: Bool(true)},
@@ -91,5 +113,40 @@ func BenchmarkWithCacheTuple(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = base.WithCacheTuple(tuple, true)
+	}
+}
+
+func BenchmarkGateRowsMixed(b *testing.B) {
+	rows := []Block{
+		{Engine: "vllm", CompileCacheEnabled: Bool(true), WarmupComplete: Bool(true)},
+		{Engine: "vllm-cold", RequestTimeCompilation: true},
+		{Engine: "vllm-diag", WarmupComplete: Bool(true)},
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = GateRows(rows...)
+	}
+}
+
+func TestBenchmarkExecution(t *testing.T) {
+	benchmarks := []struct {
+		name string
+		fn   func(*testing.B)
+	}{
+		{"BenchmarkBlockClassify", BenchmarkBlockClassify},
+		{"BenchmarkBlockGate", BenchmarkBlockGate},
+		{"BenchmarkBlockGateError", BenchmarkBlockGateError},
+		{"BenchmarkBlockReason", BenchmarkBlockReason},
+		{"BenchmarkGateRows", BenchmarkGateRows},
+		{"BenchmarkGateRowsMixed", BenchmarkGateRowsMixed},
+		{"BenchmarkNormalizeArch", BenchmarkNormalizeArch},
+		{"BenchmarkCacheTupleKey", BenchmarkCacheTupleKey},
+		{"BenchmarkReadout", BenchmarkReadout},
+		{"BenchmarkWithCacheTuple", BenchmarkWithCacheTuple},
+	}
+	for _, bm := range benchmarks {
+		t.Run(bm.name, func(t *testing.T) {
+			bm.fn(&testing.B{N: 1})
+		})
 	}
 }
