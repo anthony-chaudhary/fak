@@ -12,6 +12,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
+func validateSmokePolicyPath() string {
+	return filepath.ToSlash(filepath.Join("examples", "customer-support-readonly-policy.json"))
+}
+
 // runValidateSmokePhase builds ./cmd/fak inside the isolated checkout directory
 // and executes hermetic real-world CLI smoke tests to verify binary execution early.
 func runValidateSmokePhase(ctx context.Context, stdout io.Writer, res *validateResult, recorder *validateRecorder, dir string, wslWorkspace, asJSON bool) (int, bool) {
@@ -40,7 +44,7 @@ func runValidateSmokePhase(ctx context.Context, stdout io.Writer, res *validateR
 	}
 
 	// 2. Preflight DENY check: verifies policy adjudication engine enforces security floor.
-	policyRel := filepath.Join("examples", "customer-support-readonly-policy.json")
+	policyRel := validateSmokePolicyPath()
 	if out, ok := runValidateSmokeExec(ctx, dir, wslWorkspace, smokeBin, []string{"preflight", "--policy", policyRel, "--tool", "refund_payment", "--args", "{}"}); !ok || !strings.Contains(out, "verdict=DENY") {
 		recordValidateFailure(res, phase, "smoke", out, errors.New("smoke check 'fak preflight' DENY failed"))
 		return 0, false
@@ -55,7 +59,8 @@ func runValidateSmokePhase(ctx context.Context, stdout io.Writer, res *validateR
 	// 4. Agent offline check: verifies full mock agent turn execution and report output.
 	tmpReport := filepath.Join(dir, "agent-smoke-report.json")
 	defer os.Remove(tmpReport)
-	if out, ok := runValidateSmokeExec(ctx, dir, wslWorkspace, smokeBin, []string{"agent", "--offline", "--out", tmpReport}); !ok || !strings.Contains(out, "booked") {
+	tmpReportArg := filepath.ToSlash(tmpReport)
+	if out, ok := runValidateSmokeExec(ctx, dir, wslWorkspace, smokeBin, []string{"agent", "--offline", "--out", tmpReportArg}); !ok || !strings.Contains(out, "booked") {
 		recordValidateFailure(res, phase, "smoke", out, errors.New("smoke check 'fak agent --offline' failed"))
 		return 0, false
 	}
@@ -67,7 +72,7 @@ func runValidateSmokePhase(ctx context.Context, stdout io.Writer, res *validateR
 func runValidateSmokeExec(ctx context.Context, dir string, wslWorkspace bool, bin string, args []string) (string, bool) {
 	if wslWorkspace {
 		cmdArgs := append([]string{"./" + bin}, args...)
-		out, err := runValidateWSLCommandWithin(ctx, dir, cmdArgs...)
+		out, err := runValidateWSLCommandWithin(ctx, filepath.ToSlash(dir), cmdArgs...)
 		return strings.TrimSpace(string(out)), err == nil
 	}
 	target := filepath.Join(dir, bin)
