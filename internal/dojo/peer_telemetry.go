@@ -91,6 +91,7 @@ func (l PeerSearchTelemetryLedger) TokensSavedRatio() float64 {
 // - conversion_rate_1_to_2: Level2Queries / Level1Queries (clamped [0, 1])
 // - tokens_saved_ratio: (AvoidedToolTokens - PeerQueryTokens) / AvoidedToolTokens (penalized to failure if TaintLeaks > 0)
 // - taint_leak_rate: zero-tolerance intentional floor (breached if TaintLeaks > 0)
+// - taint_leaks: zero-tolerance intentional count floor (breached if TaintLeaks > 0)
 func PeerSearchEpisodes(ledger PeerSearchTelemetryLedger) []ScoredInput {
 	var episodes []ScoredInput
 
@@ -198,26 +199,69 @@ func PeerSearchEpisodes(ledger PeerSearchTelemetryLedger) []ScoredInput {
 			},
 		})
 	} else if ledger.TaintLeaks > 0 {
+		sample := ledger.Level0Queries
+		if sample < 0 {
+			sample = 0
+		}
 		episodes = append(episodes, ScoredInput{
 			Prediction: taintPred,
 			Outcome: Outcome{
 				Realized:   float64(ledger.TaintLeaks),
 				Provenance: Witnessed,
 				Measured:   true,
-				Sample:     ledger.TaintLeaks,
+				Sample:     sample,
 				Source: fmt.Sprintf("%d taint leak(s) detected during peer search — zero-taint floor BREACHED (WITNESSED)",
 					ledger.TaintLeaks),
 			},
 		})
 	} else {
+		sample := ledger.Level0Queries
+		if sample < 0 {
+			sample = 0
+		}
 		episodes = append(episodes, ScoredInput{
 			Prediction: taintPred,
 			Outcome: Outcome{
 				Realized:   0.0,
 				Provenance: Witnessed,
 				Measured:   true,
-				Sample:     ledger.Level0Queries,
+				Sample:     sample,
 				Source:     "zero taint leaks detected during peer context search (zero-taint floor holds) (WITNESSED)",
+			},
+		})
+	}
+
+	// 5. taint_leaks (zero-taint floor count)
+	taintLeaksPred := Registry.MustPredict("peer-search", "taint_leaks", "count")
+	if !ledger.Recorded {
+		episodes = append(episodes, ScoredInput{
+			Prediction: taintLeaksPred,
+			Outcome: Outcome{
+				Measured: false,
+				Sample:   0,
+				Source:   "peer search telemetry not recorded — taint_leaks is UNMEASURED",
+			},
+		})
+	} else {
+		sample := ledger.Level0Queries
+		if sample < 0 {
+			sample = 0
+		}
+		var source string
+		if ledger.TaintLeaks > 0 {
+			source = fmt.Sprintf("%d taint leak(s) detected during peer search — zero-taint floor BREACHED (WITNESSED)",
+				ledger.TaintLeaks)
+		} else {
+			source = "zero taint leaks detected during peer context search (zero-taint floor holds) (WITNESSED)"
+		}
+		episodes = append(episodes, ScoredInput{
+			Prediction: taintLeaksPred,
+			Outcome: Outcome{
+				Realized:   float64(ledger.TaintLeaks),
+				Provenance: Witnessed,
+				Measured:   true,
+				Sample:     sample,
+				Source:     source,
 			},
 		})
 	}

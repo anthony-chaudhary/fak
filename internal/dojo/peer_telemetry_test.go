@@ -36,8 +36,8 @@ func TestDojo_PeerContextCalibrationAndConversionFunnel(t *testing.T) {
 	}
 
 	cleanInputs := PeerSearchEpisodes(cleanLedger)
-	if len(cleanInputs) != 4 {
-		t.Fatalf("expected 4 episodes, got %d", len(cleanInputs))
+	if len(cleanInputs) != 5 {
+		t.Fatalf("expected 5 episodes, got %d", len(cleanInputs))
 	}
 
 	if !cleanInputs[0].Outcome.Measured || cleanInputs[0].Outcome.Realized != wantCR01 {
@@ -51,6 +51,18 @@ func TestDojo_PeerContextCalibrationAndConversionFunnel(t *testing.T) {
 	}
 	if !cleanInputs[3].Outcome.Measured || cleanInputs[3].Outcome.Realized != 0.0 {
 		t.Errorf("episode 3 (taint_leak_rate) realized = %f, want 0.0", cleanInputs[3].Outcome.Realized)
+	}
+	if cleanInputs[3].Outcome.Sample != cleanLedger.Level0Queries {
+		t.Errorf("episode 3 (taint_leak_rate) sample = %d, want %d", cleanInputs[3].Outcome.Sample, cleanLedger.Level0Queries)
+	}
+	if !cleanInputs[4].Outcome.Measured || cleanInputs[4].Outcome.Realized != 0.0 {
+		t.Errorf("episode 4 (taint_leaks) realized = %f, want 0.0", cleanInputs[4].Outcome.Realized)
+	}
+	if cleanInputs[4].Outcome.Sample != cleanLedger.Level0Queries {
+		t.Errorf("episode 4 (taint_leaks) sample = %d, want %d", cleanInputs[4].Outcome.Sample, cleanLedger.Level0Queries)
+	}
+	if cleanInputs[4].Prediction.Unit != "count" {
+		t.Errorf("episode 4 (taint_leaks) unit = %q, want 'count'", cleanInputs[4].Prediction.Unit)
 	}
 
 	var cleanEpisodes []Episode
@@ -74,13 +86,24 @@ func TestDojo_PeerContextCalibrationAndConversionFunnel(t *testing.T) {
 	}
 
 	leakInputs := PeerSearchEpisodes(leakLedger)
-	if len(leakInputs) != 4 {
-		t.Fatalf("expected 4 episodes, got %d", len(leakInputs))
+	if len(leakInputs) != 5 {
+		t.Fatalf("expected 5 episodes, got %d", len(leakInputs))
 	}
 
 	// Verify token savings outcome is penalized to failure (0.0)
 	if leakInputs[2].Outcome.Realized > 0.0 {
 		t.Errorf("expected token savings outcome penalized when taint leaks > 0, got %f", leakInputs[2].Outcome.Realized)
+	}
+
+	// Verify sample size consistency for taint floors (both use Level0Queries denominator, not TaintLeaks)
+	if leakInputs[3].Outcome.Sample != leakLedger.Level0Queries {
+		t.Errorf("episode 3 (taint_leak_rate) sample = %d, want %d (Level0Queries)", leakInputs[3].Outcome.Sample, leakLedger.Level0Queries)
+	}
+	if leakInputs[4].Outcome.Sample != leakLedger.Level0Queries {
+		t.Errorf("episode 4 (taint_leaks) sample = %d, want %d (Level0Queries)", leakInputs[4].Outcome.Sample, leakLedger.Level0Queries)
+	}
+	if leakInputs[4].Outcome.Realized != float64(leakLedger.TaintLeaks) {
+		t.Errorf("episode 4 (taint_leaks) realized = %f, want %f", leakInputs[4].Outcome.Realized, float64(leakLedger.TaintLeaks))
 	}
 
 	var leakEpisodes []Episode
@@ -97,6 +120,14 @@ func TestDojo_PeerContextCalibrationAndConversionFunnel(t *testing.T) {
 		t.Errorf("expected VerdictOverClaim for breached floor, got %s", taintEp.Verdict)
 	}
 
+	taintLeaksEp := leakEpisodes[4]
+	if err := FloorRespectErr(taintLeaksEp); err <= 0.0 {
+		t.Errorf("expected FloorRespectErr > 0 for taint_leaks breach, got %f", err)
+	}
+	if taintLeaksEp.Verdict != VerdictOverClaim {
+		t.Errorf("expected VerdictOverClaim for breached taint_leaks floor, got %s", taintLeaksEp.Verdict)
+	}
+
 	// Verify FoldCalibrable penalizes the breach
 	leakFold := FoldCalibrable(leakEpisodes)
 	if leakFold.FloorBreachErr <= 0.0 {
@@ -110,13 +141,19 @@ func TestDojo_PeerContextCalibrationAndConversionFunnel(t *testing.T) {
 func TestPeerSearchEpisodes_Unrecorded(t *testing.T) {
 	unrec := PeerSearchTelemetryLedger{Recorded: false}
 	inputs := PeerSearchEpisodes(unrec)
-	if len(inputs) != 4 {
-		t.Fatalf("expected 4 inputs, got %d", len(inputs))
+	if len(inputs) != 5 {
+		t.Fatalf("expected 5 inputs, got %d", len(inputs))
 	}
 	for i, in := range inputs {
 		if in.Outcome.Measured {
 			t.Errorf("input %d expected unmeasured, got measured", i)
 		}
+	}
+	if inputs[4].Outcome.Sample != 0 {
+		t.Errorf("input 4 (taint_leaks) sample = %d, want 0", inputs[4].Outcome.Sample)
+	}
+	if inputs[4].Outcome.Source != "peer search telemetry not recorded — taint_leaks is UNMEASURED" {
+		t.Errorf("input 4 (taint_leaks) source = %q, want unmeasured message", inputs[4].Outcome.Source)
 	}
 }
 
@@ -154,5 +191,211 @@ func TestPeerSearchEpisodes_ClampingAndZeroQueries(t *testing.T) {
 	}
 	if cr12 := overLedger.ConversionRate1to2(); cr12 != 1.0 {
 		t.Errorf("ConversionRate1to2 clamped = %f, want 1.0", cr12)
+	}
+}
+
+func TestPeerSearchEpisodes_AllRegisteredClaimsCovered(t *testing.T) {
+	// Find all registered claims for lever "peer-search"
+	registeredMetrics := make(map[string]Claim)
+	for k, c := range Registry {
+		if k.Lever == "peer-search" {
+			registeredMetrics[k.Metric] = c
+		}
+	}
+	for k, c := range registered {
+		if k.Lever == "peer-search" {
+			registeredMetrics[k.Metric] = c
+		}
+	}
+
+	if len(registeredMetrics) == 0 {
+		t.Fatal("no registered claims found for lever 'peer-search'")
+	}
+
+	// Verify that taint_leaks is specifically among the registered claims
+	taintLeaksClaim, ok := registeredMetrics["taint_leaks"]
+	if !ok {
+		t.Fatal("claim 'taint_leaks' not found in registered claims for 'peer-search'")
+	}
+	if !taintLeaksClaim.IntentionalFloor {
+		t.Error("expected taint_leaks to be registered as an intentional floor")
+	}
+	if !taintLeaksClaim.LowerIsBetter {
+		t.Error("expected taint_leaks to have LowerIsBetter=true")
+	}
+	if taintLeaksClaim.Claimed != 0.0 {
+		t.Errorf("expected taint_leaks Claimed=0.0, got %f", taintLeaksClaim.Claimed)
+	}
+
+	// Generate episodes across varied ledgers (clean, leak, unrecorded)
+	ledgers := []PeerSearchTelemetryLedger{
+		{
+			Level0Queries:     50,
+			Level1Queries:     20,
+			Level2Queries:     5,
+			AvoidedToolTokens: 1000,
+			PeerQueryTokens:   200,
+			TaintLeaks:        0,
+			Recorded:          true,
+		},
+		{
+			Level0Queries:     50,
+			Level1Queries:     20,
+			Level2Queries:     5,
+			AvoidedToolTokens: 1000,
+			PeerQueryTokens:   200,
+			TaintLeaks:        3,
+			Recorded:          true,
+		},
+		{
+			Recorded: false,
+		},
+	}
+
+	for _, led := range ledgers {
+		episodes := PeerSearchEpisodes(led)
+		emittedMetrics := make(map[string]ScoredInput)
+		for _, ep := range episodes {
+			if ep.Prediction.Lever != "peer-search" {
+				t.Errorf("episode lever = %q, want 'peer-search'", ep.Prediction.Lever)
+			}
+			emittedMetrics[ep.Prediction.Metric] = ep
+		}
+
+		// Verify every registered claim has an evaluated episode in PeerSearchEpisodes
+		for metric := range registeredMetrics {
+			if _, found := emittedMetrics[metric]; !found {
+				t.Errorf("registered claim %q has no corresponding episode emitted by PeerSearchEpisodes", metric)
+			}
+		}
+
+		// Verify count of episodes matches count of registered claims
+		if len(episodes) != len(registeredMetrics) {
+			t.Errorf("emitted %d episodes, but %d claims are registered for peer-search", len(episodes), len(registeredMetrics))
+		}
+	}
+}
+
+func TestPeerSearchEpisodes_TaintLeaksSampleSizingAndRealizedCount(t *testing.T) {
+	tests := []struct {
+		name         string
+		level0       int
+		taintLeaks   int
+		recorded     bool
+		wantMeasured bool
+		wantSample   int
+		wantRealized float64
+		wantFloorErr bool
+		wantVerdict  string
+	}{
+		{
+			name:         "leaks with positive level0",
+			level0:       250,
+			taintLeaks:   7,
+			recorded:     true,
+			wantMeasured: true,
+			wantSample:   250,
+			wantRealized: 7.0,
+			wantFloorErr: true,
+			wantVerdict:  VerdictOverClaim,
+		},
+		{
+			name:         "clean with positive level0",
+			level0:       250,
+			taintLeaks:   0,
+			recorded:     true,
+			wantMeasured: true,
+			wantSample:   250,
+			wantRealized: 0.0,
+			wantFloorErr: false,
+			wantVerdict:  VerdictCalibrated,
+		},
+		{
+			name:         "leaks with zero level0 queries reconciles sample to 0",
+			level0:       0,
+			taintLeaks:   3,
+			recorded:     true,
+			wantMeasured: true,
+			wantSample:   0,
+			wantRealized: 3.0,
+			wantFloorErr: true,
+			wantVerdict:  VerdictOverClaim,
+		},
+		{
+			name:         "leaks with negative level0 queries clamped to 0",
+			level0:       -10,
+			taintLeaks:   2,
+			recorded:     true,
+			wantMeasured: true,
+			wantSample:   0,
+			wantRealized: 2.0,
+			wantFloorErr: true,
+			wantVerdict:  VerdictOverClaim,
+		},
+		{
+			name:         "unrecorded telemetry",
+			level0:       100,
+			taintLeaks:   5,
+			recorded:     false,
+			wantMeasured: false,
+			wantSample:   0,
+			wantRealized: 0.0,
+			wantFloorErr: false,
+			wantVerdict:  VerdictUnmeasured,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ledger := PeerSearchTelemetryLedger{
+				Level0Queries: tc.level0,
+				TaintLeaks:    tc.taintLeaks,
+				Recorded:      tc.recorded,
+			}
+			episodes := PeerSearchEpisodes(ledger)
+			if len(episodes) != 5 {
+				t.Fatalf("expected 5 episodes, got %d", len(episodes))
+			}
+
+			// Check taint_leak_rate (index 3)
+			rateEp := episodes[3]
+			if rateEp.Prediction.Metric != "taint_leak_rate" {
+				t.Fatalf("episode 3 metric = %q, want 'taint_leak_rate'", rateEp.Prediction.Metric)
+			}
+			if rateEp.Outcome.Measured != tc.wantMeasured {
+				t.Errorf("taint_leak_rate measured = %v, want %v", rateEp.Outcome.Measured, tc.wantMeasured)
+			}
+			if rateEp.Outcome.Sample != tc.wantSample {
+				t.Errorf("taint_leak_rate sample = %d, want %d (consistent with Level0Queries)", rateEp.Outcome.Sample, tc.wantSample)
+			}
+
+			// Check taint_leaks (index 4)
+			leaksEp := episodes[4]
+			if leaksEp.Prediction.Metric != "taint_leaks" {
+				t.Fatalf("episode 4 metric = %q, want 'taint_leaks'", leaksEp.Prediction.Metric)
+			}
+			if leaksEp.Prediction.Unit != "count" {
+				t.Errorf("taint_leaks unit = %q, want 'count'", leaksEp.Prediction.Unit)
+			}
+			if leaksEp.Outcome.Measured != tc.wantMeasured {
+				t.Errorf("taint_leaks measured = %v, want %v", leaksEp.Outcome.Measured, tc.wantMeasured)
+			}
+			if leaksEp.Outcome.Sample != tc.wantSample {
+				t.Errorf("taint_leaks sample = %d, want %d (consistent with Level0Queries)", leaksEp.Outcome.Sample, tc.wantSample)
+			}
+			if tc.wantMeasured && leaksEp.Outcome.Realized != tc.wantRealized {
+				t.Errorf("taint_leaks realized = %f, want %f", leaksEp.Outcome.Realized, tc.wantRealized)
+			}
+
+			scored := Score("test", leaksEp.Prediction, leaksEp.Outcome, DefaultCalibBand())
+			if tc.wantFloorErr && FloorRespectErr(scored) <= 0.0 {
+				t.Errorf("expected FloorRespectErr > 0 for taint_leaks breach, got %f", FloorRespectErr(scored))
+			} else if !tc.wantFloorErr && FloorRespectErr(scored) != 0.0 {
+				t.Errorf("expected FloorRespectErr == 0, got %f", FloorRespectErr(scored))
+			}
+			if scored.Verdict != tc.wantVerdict {
+				t.Errorf("expected verdict %s, got %s", tc.wantVerdict, scored.Verdict)
+			}
+		})
 	}
 }
