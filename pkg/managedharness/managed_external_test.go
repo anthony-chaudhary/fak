@@ -508,3 +508,98 @@ func BenchmarkReclaimableGenerations(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkStorePinUnpin(b *testing.B) {
+	root := b.TempDir()
+	s, err := mh.Open(root)
+	if err != nil {
+		b.Fatal(err)
+	}
+	prod := mh.Product{
+		ID:            "bench-pin",
+		Variant:       "server",
+		Compatibility: "v1",
+		Capabilities:  []string{"offline-work"},
+		Layers:        []string{"kernel"},
+	}
+	rel, err := mh.BuildRelease(prod, map[string]any{"v": 1}, mh.Provenance{Source: "bench", Revision: "r1", Builder: "bench"})
+	if err != nil {
+		b.Fatal(err)
+	}
+	if _, err := s.Publish(rel); err != nil {
+		b.Fatal(err)
+	}
+	instID := mh.InstallationID("bench-pin-inst")
+	receipt, err := s.Install(instID, rel.Release.ID, nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	genID := receipt.After
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ref := fmt.Sprintf("sess-%d", i)
+		pin := mh.GenerationPin{
+			Kind:       mh.PinOpenSession,
+			Reference:  ref,
+			Generation: genID,
+		}
+		if _, err := s.Pin(instID, pin); err != nil {
+			b.Fatalf("Pin failed: %v", err)
+		}
+		if _, err := s.Unpin(instID, mh.PinOpenSession, ref); err != nil {
+			b.Fatalf("Unpin failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkStoreGarbageCollect(b *testing.B) {
+	root := b.TempDir()
+	s, err := mh.Open(root)
+	if err != nil {
+		b.Fatal(err)
+	}
+	prod := mh.Product{
+		ID:            "bench-gc",
+		Variant:       "server",
+		Compatibility: "v1",
+		Capabilities:  []string{"offline-work"},
+		Layers:        []string{"kernel"},
+	}
+	bundles := make([]mh.Bundle, 3)
+	for g := 0; g < 3; g++ {
+		rel, err := mh.BuildRelease(prod, map[string]any{"v": g + 1}, mh.Provenance{Source: "bench", Revision: fmt.Sprintf("r%d", g+1), Builder: "bench"})
+		if err != nil {
+			b.Fatal(err)
+		}
+		if _, err := s.Publish(rel); err != nil {
+			b.Fatal(err)
+		}
+		bundles[g] = rel
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		id := mh.InstallationID(fmt.Sprintf("gc-inst-%d", i))
+		if _, err := s.Install(id, bundles[0].Release.ID, nil); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := s.Update(id, bundles[1].Release.ID, nil); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := s.Update(id, bundles[2].Release.ID, nil); err != nil {
+			b.Fatal(err)
+		}
+		b.StartTimer()
+		gcReceipt, err := s.GarbageCollect(id)
+		if err != nil {
+			b.Fatalf("GarbageCollect failed: %v", err)
+		}
+		if len(gcReceipt.Reclaimed) != 1 {
+			b.Fatalf("expected 1 reclaimed generation, got %d", len(gcReceipt.Reclaimed))
+		}
+	}
+}

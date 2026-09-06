@@ -16,26 +16,43 @@ import (
 	"time"
 )
 
+// Schema identifies the managed harness record and receipt specification version.
 const Schema = "fak.managed-harness/v1"
 
+// ProductID uniquely identifies a harness product line across variants and versions.
 type ProductID string
+
+// ReleaseID identifies an immutable release bundle by its content digest.
 type ReleaseID string
+
+// InstallationID identifies a named local deployment instance of a harness product.
 type InstallationID string
+
+// GenerationID identifies an activated generation deployment instance for an installation.
 type GenerationID string
+
+// PinKind defines the retention policy or lifecycle reason that prevents a generation
+// from being reclaimed during garbage collection.
 type PinKind string
 
 const (
+	// PinStagedCandidate retains a newly staged candidate generation undergoing qualification.
 	PinStagedCandidate PinKind = "staged_candidate"
-	PinOpenSession     PinKind = "open_session"
-	PinCheckpoint      PinKind = "checkpoint"
+	// PinOpenSession retains a generation currently referenced by an active runtime or agent session.
+	PinOpenSession PinKind = "open_session"
+	// PinCheckpoint retains a generation marked as an explicit recovery checkpoint.
+	PinCheckpoint PinKind = "checkpoint"
 )
 
+// GenerationPin records a retention lease that protects a specific generation from GC.
 type GenerationPin struct {
 	Kind       PinKind      `json:"kind"`
 	Reference  string       `json:"reference,omitempty"`
 	Generation GenerationID `json:"generation"`
 }
 
+// Product describes a harness product's identity, variant, compatibility contract,
+// capabilities, and architectural layers.
 type Product struct {
 	ID            ProductID `json:"id"`
 	Variant       string    `json:"variant"`
@@ -43,18 +60,31 @@ type Product struct {
 	Capabilities  []string  `json:"capabilities"`
 	Layers        []string  `json:"layers"`
 }
+
+// Provenance records the source repository, revision identifier, and builder
+// identity that produced a release.
 type Provenance struct{ Source, Revision, Builder string }
+
+// Release is an immutable product release descriptor with its cryptographic digest
+// and build provenance.
 type Release struct {
 	ID         ReleaseID  `json:"id"`
 	Product    Product    `json:"product"`
 	Digest     string     `json:"digest"`
 	Provenance Provenance `json:"provenance"`
 }
+
+// Generation represents an activated deployment instance of a release within an
+// installation, recording when it became active.
 type Generation struct {
 	ID          GenerationID `json:"id"`
 	Release     Release      `json:"release"`
 	ActivatedAt time.Time    `json:"activated_at"`
 }
+
+// Installation tracks the current desired release, effective generation,
+// rollback target (LastKnownGood), historical generation list, and active retention
+// pins for a named product installation.
 type Installation struct {
 	ID            InstallationID  `json:"id"`
 	Desired       ReleaseID       `json:"desired"`
@@ -63,6 +93,9 @@ type Installation struct {
 	Generations   []GenerationID  `json:"generations"`
 	Pins          []GenerationPin `json:"pins,omitempty"`
 }
+
+// Receipt records the outcome, status, and state transitions of a lifecycle
+// operation on an installation or release.
 type Receipt struct {
 	Schema        string         `json:"schema"`
 	Installation  InstallationID `json:"installation"`
@@ -79,6 +112,8 @@ type Receipt struct {
 	Reason        string         `json:"reason,omitempty"`
 }
 
+// GCReceipt records the outcome, retained and reclaimed generation lists, and
+// disk space reclaimed by a garbage collection operation.
 type GCReceipt struct {
 	Schema         string         `json:"schema"`
 	Installation   InstallationID `json:"installation"`
@@ -92,13 +127,21 @@ type GCReceipt struct {
 	Reason         string         `json:"reason,omitempty"`
 }
 
+// Bundle pairs an immutable Release descriptor with its serialized JSON payload.
 type Bundle struct {
 	Release Release         `json:"release"`
 	Payload json.RawMessage `json:"payload"`
 }
+
+// Health is a validation callback invoked before activating a new generation.
+// Returning a non-nil error triggers an automatic rollback.
 type Health func(Bundle) error
+
+// Work is an execution function run against an activated generation bundle.
 type Work func(Bundle) (string, error)
 
+// Store provides atomic, linearizable persistence for releases, installations,
+// generations, and retention pins on a local filesystem root.
 type Store struct {
 	root string
 	mu   *sync.Mutex
@@ -147,6 +190,8 @@ func sortedGenerationIDs(in []GenerationID) []GenerationID {
 	return out[:n]
 }
 
+// Open opens or initializes a managed harness Store at root, creating the
+// releases and installations directories if they do not exist.
 func Open(root string) (*Store, error) {
 	if root == "" {
 		return nil, errors.New("managed harness: root required")
@@ -164,6 +209,8 @@ func Open(root string) (*Store, error) {
 	return &Store{root: root, mu: lock.(*sync.Mutex)}, nil
 }
 
+// BuildRelease validates product metadata and provenance, normalizes capabilities
+// and layers, and constructs an immutable Bundle with its canonical SHA-256 digest.
 func BuildRelease(product Product, payload any, prov Provenance) (Bundle, error) {
 	if product.ID == "" || product.Variant == "" || product.Compatibility == "" || prov.Source == "" || prov.Revision == "" {
 		return Bundle{}, errors.New("managed harness: incomplete release identity")
@@ -183,6 +230,10 @@ func BuildRelease(product Product, payload any, prov Provenance) (Bundle, error)
 	digest := hex.EncodeToString(sum[:])
 	return Bundle{Release: Release{ID: ReleaseID(digest[:16]), Product: product, Digest: digest, Provenance: prov}, Payload: blob}, nil
 }
+
+// Publish persists an immutable release bundle into the store. It returns an error
+// if a release with the same ID exists with different content, or if the bundle
+// payload contains forbidden secret keywords.
 func (s *Store) Publish(b Bundle) (Receipt, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -202,6 +253,9 @@ func (s *Store) Publish(b Bundle) (Receipt, error) {
 	}
 	return Receipt{Schema: Schema, Action: "release", Desired: b.Release.ID, Status: "published", Capabilities: b.Release.Product.Capabilities}, nil
 }
+
+// Install creates a new named installation pointing at the specified release,
+// executing an optional health check before activating the initial generation.
 func (s *Store) Install(id InstallationID, release ReleaseID, health Health) (Receipt, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -213,6 +267,11 @@ func (s *Store) Install(id InstallationID, release ReleaseID, health Health) (Re
 	}
 	return s.activate(id, release, health, true)
 }
+
+// Update advances an existing installation to a new release. It verifies product
+// and compatibility contracts, executes the optional health check, rolls back
+// to the previous generation if health fails, and records the previous generation
+// as the last known good.
 func (s *Store) Update(id InstallationID, release ReleaseID, health Health) (Receipt, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -263,6 +322,9 @@ func (s *Store) activate(id InstallationID, release ReleaseID, health Health, cr
 	}
 	return Receipt{Schema: Schema, Installation: id, Action: action, Desired: release, Before: before, After: gen.ID, LastKnownGood: inst.LastKnownGood, Status: "activated", Capabilities: b.Release.Product.Capabilities}, nil
 }
+
+// Run executes a work function against the currently effective release bundle
+// of the specified installation, returning a receipt with the output or error.
 func (s *Store) Run(id InstallationID, work Work) (Receipt, error) {
 	s.mu.Lock()
 	inst, err := s.readInstallation(id)
@@ -283,6 +345,8 @@ func (s *Store) Run(id InstallationID, work Work) (Receipt, error) {
 	}
 	return r, nil
 }
+
+// Inspect reads and returns the current persistent state of an installation.
 func (s *Store) Inspect(id InstallationID) (Installation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
