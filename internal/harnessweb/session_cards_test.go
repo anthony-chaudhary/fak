@@ -1,8 +1,10 @@
 package harnessweb
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +18,7 @@ import (
 
 type fixtureSessionSource struct {
 	mu        sync.Mutex
+	err       error
 	cards     []SessionCard
 	controls  []SessionControlRequest
 	approvals []SessionApprovalRequest
@@ -24,6 +27,9 @@ type fixtureSessionSource struct {
 func (s *fixtureSessionSource) Sessions(context.Context) ([]SessionCard, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.err != nil {
+		return nil, s.err
+	}
 	return append([]SessionCard(nil), s.cards...), nil
 }
 
@@ -389,5 +395,183 @@ func TestSessionApprovalEndpointValidationAndResolution(t *testing.T) {
 	}
 	if len(source.approvals) != 1 || source.approvals[0].Resolution != "accept" || source.approvals[0].ApprovalID != "app-uuid-1" {
 		t.Fatalf("unexpected source approvals: %+v", source.approvals)
+	}
+}
+
+func TestSessionCardsSSEHeartbeatOnIdleStream(t *testing.T) {
+	restore := setSSEHeartbeatInterval(25 * time.Millisecond)
+	defer restore()
+
+	source := &fixtureSessionSource{cards: []SessionCard{
+		{ID: "sess-heartbeat", Provider: "codex", State: sessionWorking, LastEventAt: time.Now()},
+	}}
+	ts := httptest.NewServer(handlerWithSessionSource(newStore(), nil, nil, source))
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/sessions/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+		t.Fatalf("expected Content-Type text/event-stream, got %q", ct)
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	heartbeatSeen := make(chan bool, 1)
+	go func() {
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			if strings.HasPrefix(strings.TrimSpace(line), ": ping") {
+				heartbeatSeen <- true
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-heartbeatSeen:
+		// Heartbeat received successfully
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for keep-alive SSE heartbeat comment on idle stream")
+	}
+
+	cancel()
+}
+
+func TestSessionCardsBroadcasterErrorResilience(t *testing.T) {
+	resetSessionHubForTest()
+	defer resetSessionHubForTest()
+
+	now := time.Now()
+	initialCards := []SessionCard{
+		{ID: "session-resilient-1", Provider: "codex", State: sessionWorking, LastEventAt: now},
+		{ID: "session-resilient-2", Provider: "codex", State: sessionIdle, LastEventAt: now},
+	}
+	source := &fixtureSessionSource{
+		cards: initialCards,
+	}
+
+	subCh := SubscribeSessionEvents("")
+	defer UnsubscribeSessionEvents(subCh)
+
+	// 1. Initial successful broadcast populates card state
+	broadcastCards(source)
+
+	current := CurrentCards()
+	if len(current) != 2 {
+		t.Fatalf("expected 2 populated cards, got %d", len(current))
+	}
+	if current[0].ID != "session-resilient-1" || current[1].ID != "session-resilient-2" {
+		t.Fatalf("unexpected populated cards: %+v", current)
+	}
+
+	// Drain initial broadcast from subscriber
+	select {
+	case msg := <-subCh:
+		if !strings.Contains(string(msg), "session-resilient-1") {
+			t.Fatalf("initial broadcast missing card: %s", string(msg))
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for initial broadcast")
+	}
+
+	// Drain any secondary event (e.g. session_cards alongside session_update)
+	select {
+	case <-subCh:
+	default:
+	}
+
+	// 2. Introduce transient error in source.Sessions()
+	source.mu.Lock()
+	source.err = fmt.Errorf("transient network timeout")
+	source.mu.Unlock()
+
+	// Calling broadcastCards during transient error must NOT wipe out populated card state
+	broadcastCards(source)
+
+	currentAfterError := CurrentCards()
+	if len(currentAfterError) != 2 {
+		t.Fatalf("transient error wiped out populated card state: got %d cards, want 2", len(currentAfterError))
+	}
+	if currentAfterError[0].ID != "session-resilient-1" || currentAfterError[1].ID != "session-resilient-2" {
+		t.Fatalf("card state corrupted: %+v", currentAfterError)
+	}
+
+	// Verify no empty wipeout event was broadcast to subscribers
+	select {
+	case msg := <-subCh:
+		if strings.Contains(string(msg), `"sessions":[]`) || strings.Contains(string(msg), "No authoritative sessions are reporting") {
+			t.Fatalf("transient error broadcast empty card state wiping out client: %s", string(msg))
+		}
+	case <-time.After(100 * time.Millisecond):
+		// Expected: no wipe-out event sent
+	}
+
+	// 3. Clear transient error and verify recovery
+	source.mu.Lock()
+	source.err = nil
+	source.cards = append(source.cards, SessionCard{
+		ID: "session-resilient-3", Provider: "codex", State: sessionWorking, LastEventAt: time.Now(),
+	})
+	source.mu.Unlock()
+
+	broadcastCards(source)
+
+	currentRecovered := CurrentCards()
+	if len(currentRecovered) != 3 {
+		t.Fatalf("expected 3 cards after recovery, got %d", len(currentRecovered))
+	}
+	if currentRecovered[2].ID != "session-resilient-3" {
+		t.Fatalf("expected session-resilient-3, got: %+v", currentRecovered)
+	}
+}
+
+func TestSessionBroadcasterErrorResilience(t *testing.T) {
+	broadcaster := newSessionBroadcaster()
+	subCh, unsub := broadcaster.subscribe()
+	defer unsub()
+
+	errSource := &fixtureSessionSource{
+		err: fmt.Errorf("backend service unavailable"),
+	}
+
+	broadcaster.broadcastCards(errSource)
+
+	select {
+	case msg := <-subCh:
+		t.Fatalf("sessionBroadcaster unexpectedly broadcast card snapshot on error: %s", string(msg))
+	case <-time.After(60 * time.Millisecond):
+		// Expected: nothing broadcasted
+	}
+
+	validSource := &fixtureSessionSource{
+		cards: []SessionCard{
+			{ID: "session-broadcaster-ok", Provider: "codex", State: sessionWorking, LastEventAt: time.Now()},
+		},
+	}
+	broadcaster.broadcastCards(validSource)
+
+	select {
+	case msg := <-subCh:
+		if !strings.Contains(string(msg), "session-broadcaster-ok") {
+			t.Fatalf("expected broadcast to contain card id, got: %s", string(msg))
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for broadcast from valid source")
 	}
 }
