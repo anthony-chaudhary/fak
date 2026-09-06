@@ -113,6 +113,7 @@ type WavePlanOptions struct {
 	MaxWaves          int
 	TargetIssues      int
 	TargetPoints      int
+	Limit             int
 	LaneFilter        string
 	ExcludedIssues    []int
 	ExcludedLanes     []string

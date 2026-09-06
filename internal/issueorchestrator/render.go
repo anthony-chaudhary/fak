@@ -67,7 +67,12 @@ func RenderWaves(plan Plan) string {
 
 	if len(plan.Subdivide) > 0 {
 		b.WriteString(fmt.Sprintf("Subdivide Queue (%d epics requiring decomposition before dispatch):\n", len(plan.Subdivide)))
-		for _, s := range plan.Subdivide {
+		subLimit := len(plan.Subdivide)
+		if subLimit > 5 {
+			subLimit = 5
+		}
+		for i := 0; i < subLimit; i++ {
+			s := plan.Subdivide[i]
 			numStr := fmt.Sprintf("#%d", s.IssueNumber)
 			if s.IssueNumber == 0 {
 				numStr = s.Key
@@ -76,17 +81,28 @@ func RenderWaves(plan Plan) string {
 				numStr, s.Title, s.ExpectedSteps, s.ChildIssueBudget,
 			))
 		}
+		if len(plan.Subdivide) > subLimit {
+			b.WriteString(fmt.Sprintf("  ... and %d more (run with --subdivide to view all)\n", len(plan.Subdivide)-subLimit))
+		}
 		b.WriteString("\n")
 	}
 
 	if len(plan.Triage) > 0 {
 		b.WriteString(fmt.Sprintf("Triage Queue (%d issues requiring scope/acceptance repair):\n", len(plan.Triage)))
-		for _, t := range plan.Triage {
+		triLimit := len(plan.Triage)
+		if triLimit > 5 {
+			triLimit = 5
+		}
+		for i := 0; i < triLimit; i++ {
+			t := plan.Triage[i]
 			numStr := fmt.Sprintf("#%d", t.IssueNumber)
 			if t.IssueNumber == 0 {
 				numStr = t.Key
 			}
 			b.WriteString(fmt.Sprintf("  - %s: %s [%s]\n", numStr, t.Title, t.Dispatchability))
+		}
+		if len(plan.Triage) > triLimit {
+			b.WriteString(fmt.Sprintf("  ... and %d more (run with --triage to view all)\n", len(plan.Triage)-triLimit))
 		}
 		b.WriteString("\n")
 	}

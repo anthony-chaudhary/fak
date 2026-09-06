@@ -31,6 +31,10 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 	var targetPoints int
 	fs.IntVar(&targetPoints, "target-points", 0, "campaign target step budget points to retire")
 	fs.IntVar(&targetPoints, "points", 0, "alias for --target-points")
+	var topLimit int
+	fs.IntVar(&topLimit, "top", 0, "limit evaluation to the top N candidate issues")
+	fs.IntVar(&topLimit, "limit", 0, "alias for --top")
+	_ = fs.Bool("plan-waves", false, "plan concurrent-safe waves (default behavior; accepted for CLI compatibility)")
 	excludeIssuesStr := fs.String("exclude-issues", "", "comma-separated list of issue numbers to exclude")
 	excludeLanes := fs.String("exclude-lanes", "", "comma-separated list of lanes to exclude")
 	noDetectHeld := fs.Bool("no-detect-held", false, "disable auto-detection of currently held leases in .dos")
@@ -66,6 +70,9 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak issue-orchestrator: %v\n", err)
 		return 2
 	}
+	if topLimit > 0 && len(issues) > topLimit {
+		issues = issues[:topLimit]
+	}
 
 	// 2. Parse exclusion flags
 	var excludedIssues []int
@@ -95,6 +102,7 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 		MaxWaves:       *maxWaves,
 		TargetIssues:   *targetIssues,
 		TargetPoints:   targetPoints,
+		Limit:          topLimit,
 		ExcludedIssues: excludedIssues,
 		ExcludedLanes:  excludedLanesList,
 		AutoDetectHeld: !*noDetectHeld,
