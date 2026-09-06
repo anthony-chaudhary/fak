@@ -31,6 +31,8 @@ func runCron(stdout, stderr io.Writer, argv []string) int {
 	switch argv[0] {
 	case "emit":
 		return runCronEmit(stdout, stderr, argv[1:])
+	case "run":
+		return runCronRun(stdout, stderr, argv[1:])
 	case "fire":
 		return runCronFire(stdout, stderr, argv[1:])
 	case "audit":
@@ -53,42 +55,137 @@ func runCron(stdout, stderr io.Writer, argv []string) int {
 // `fak loop run --source` when it fires, so the ledger records which OS scheduler
 // fired it. The keys are the accepted --target values.
 var cronSources = map[string]string{
-	"launchd":       "launchd",
-	"systemd":       "systemd",
-	"taskscheduler": "task-scheduler",
+	"launchd":        "launchd",
+	"systemd":        "systemd",
+	"taskscheduler":  "task-scheduler",
+	"tasksched":      "task-scheduler",
+	"task-scheduler": "task-scheduler",
 }
 
 func runCronEmit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("cron emit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	target := fs.String("target", "", "OS scheduler to emit for: launchd|systemd|taskscheduler")
+	format := fs.String("format", "", "alias for --target (launchd|systemd|taskscheduler|tasksched)")
 	loopID := fs.String("loop", "", "loop id this unit fires (may be given positionally)")
 	command := fs.String("command", "", "emit a unit running this ARBITRARY command instead of `fak loop run` (e.g. 'fak garden --check')")
 	interval := fs.Duration("interval", time.Hour, "firing cadence the OS scheduler enforces (e.g. 5m, 1h)")
 	fakBin := fs.String("fak-bin", "fak", "path to the fak binary the unit invokes")
 	label := fs.String("label", "", "unit/task name (default fak-loop-<id>)")
 	ledger := fs.String("ledger", "", "loop ledger path passed through to fak loop run")
-	if !parseFlags(fs, argv) {
+	runner := fs.Bool("runner", false, "emit a unit invoking `fak cron run` for bounded scheduled tasks")
+	job := fs.String("job", "", "job id for the bounded runner (required with --runner)")
+	timeout := fs.Duration("timeout", 0, "command execution timeout for the bounded runner (required with --runner)")
+
+	// Find the trailing "--" separator for command arguments
+	dashIdx := -1
+	for i, arg := range argv {
+		if arg == "--" {
+			dashIdx = i
+			break
+		}
+	}
+
+	var flagArgs []string
+	var dashArgs []string
+	hasDash := false
+	if dashIdx >= 0 {
+		hasDash = true
+		flagArgs = argv[:dashIdx]
+		dashArgs = argv[dashIdx+1:]
+	} else {
+		flagArgs = argv
+	}
+
+	if !parseFlags(fs, flagArgs) {
 		return 2
 	}
 
-	// A positional job id supports the acceptance form `fak cron emit --target T <job>`.
-	// Anything after it (typically after a `--`) is the wrapped tick command. In
-	// --command mode the positional/`--` tail is the command vector instead.
 	rest := fs.Args()
+	if hasDash {
+		rest = append(rest, dashArgs...)
+	}
 
-	if strings.TrimSpace(*target) == "" {
+	schedTarget := strings.TrimSpace(*target)
+	if schedTarget == "" {
+		schedTarget = strings.TrimSpace(*format)
+	}
+	if schedTarget == "" {
 		fmt.Fprintln(stderr, "fak cron emit: --target is required (launchd|systemd|taskscheduler)")
 		return 2
 	}
-	source, ok := cronSources[*target]
+	switch schedTarget {
+	case "tasksched", "task-scheduler":
+		schedTarget = "taskscheduler"
+	}
+	source, ok := cronSources[schedTarget]
 	if !ok {
-		fmt.Fprintf(stderr, "fak cron emit: unknown --target %q (want launchd|systemd|taskscheduler)\n", *target)
+		fmt.Fprintf(stderr, "fak cron emit: unknown --target %q (want launchd|systemd|taskscheduler)\n", schedTarget)
 		return 2
 	}
 	if *interval <= 0 {
 		fmt.Fprintln(stderr, "fak cron emit: --interval must be positive")
 		return 2
+	}
+
+	bin := strings.TrimSpace(*fakBin)
+	if bin == "" {
+		if exe, err := os.Executable(); err == nil && exe != "" {
+			bin = exe
+		} else {
+			bin = "fak"
+		}
+	}
+
+	// Mode 1: --runner (Ticket #11830)
+	if *runner {
+		if strings.TrimSpace(*command) != "" {
+			fmt.Fprintln(stderr, "fak cron emit: --command is not allowed with --runner")
+			return 2
+		}
+		if strings.TrimSpace(*loopID) != "" {
+			fmt.Fprintln(stderr, "fak cron emit: --loop is not allowed with --runner")
+			return 2
+		}
+		if strings.TrimSpace(*job) == "" {
+			fmt.Fprintln(stderr, "fak cron emit: --job is required with --runner")
+			return 2
+		}
+		if strings.TrimSpace(*ledger) == "" {
+			fmt.Fprintln(stderr, "fak cron emit: --ledger is required with --runner")
+			return 2
+		}
+		if *timeout <= 0 {
+			fmt.Fprintln(stderr, "fak cron emit: --timeout must be positive with --runner")
+			return 2
+		}
+		cmdArgs := rest
+		if len(cmdArgs) == 0 {
+			fmt.Fprintln(stderr, "fak cron emit: trailing command args are required with --runner")
+			return 2
+		}
+		if strings.TrimSpace(*label) == "" {
+			*label = "fak-cron-" + cronSanitizeLabel(*job)
+		}
+
+		runArgs := []string{
+			bin, "cron", "run",
+			"--job", *job,
+			"--ledger", *ledger,
+			"--interval", interval.String(),
+			"--timeout", timeout.String(),
+			"--",
+		}
+		runArgs = append(runArgs, cmdArgs...)
+
+		joinedCmd := strings.Join(cmdArgs, " ")
+		descs := cronDescs{
+			service: fmt.Sprintf("fak cron run %s (%s)", *job, joinedCmd),
+			timer:   "Timer for " + *label,
+			task:    fmt.Sprintf("fak cron run %s (%s)", *job, joinedCmd),
+		}
+		cronRender(stdout, schedTarget, *label, descs, *interval, runArgs)
+		return 0
 	}
 
 	// --command (or a bare trailing `-- CMD ARG...` with no loop id) emits a unit
@@ -115,7 +212,7 @@ func runCronEmit(stdout, stderr io.Writer, argv []string) int {
 			timer:   "Timer for " + *label,
 			task:    "fak cron command " + joined + " (cron-emitted)",
 		}
-		cronRender(stdout, *target, *label, descs, *interval, cmdVec)
+		cronRender(stdout, schedTarget, *label, descs, *interval, cmdVec)
 		return 0
 	}
 
@@ -132,7 +229,7 @@ func runCronEmit(stdout, stderr io.Writer, argv []string) int {
 	if len(tick) == 0 {
 		// Default the wrapped tick to `fak agent`; the operator overrides it with
 		// `-- CMD ARG...`. The unit always invokes `fak loop run` either way.
-		tick = []string{*fakBin, "agent"}
+		tick = []string{bin, "agent"}
 	}
 	if strings.TrimSpace(*label) == "" {
 		*label = "fak-loop-" + cronSanitizeLabel(*loopID)
@@ -140,7 +237,7 @@ func runCronEmit(stdout, stderr io.Writer, argv []string) int {
 
 	// The action every emitted unit invokes. fak loop run owns the semantics; the
 	// OS scheduler only fires it on the interval.
-	runArgs := []string{*fakBin, "loop", "run", "--loop", *loopID, "--source", source}
+	runArgs := []string{bin, "loop", "run", "--loop", *loopID, "--source", source}
 	if strings.TrimSpace(*ledger) != "" {
 		runArgs = append(runArgs, "--ledger", *ledger)
 	}
@@ -152,7 +249,7 @@ func runCronEmit(stdout, stderr io.Writer, argv []string) int {
 		timer:   "Timer for fak loop " + *loopID,
 		task:    "fak loop " + *loopID + " (cron-emitted)",
 	}
-	cronRender(stdout, *target, *label, descs, *interval, runArgs)
+	cronRender(stdout, schedTarget, *label, descs, *interval, runArgs)
 	return 0
 }
 
@@ -259,12 +356,12 @@ func cronRenderTaskScheduler(label, desc string, interval time.Duration, args []
 }
 
 // cronSystemdExecLine joins an argv into a systemd ExecStart line, double-quoting
-// any argument that contains whitespace or a quote (systemd's own quoting rules).
+// any argument that contains whitespace, a quote, or a backslash (systemd's own quoting rules).
 func cronSystemdExecLine(args []string) string {
 	parts := make([]string, len(args))
 	for i, a := range args {
-		if strings.ContainsAny(a, " \t\"") {
-			parts[i] = `"` + strings.ReplaceAll(a, `"`, `\"`) + `"`
+		if strings.ContainsAny(a, " \t\"\\") {
+			parts[i] = `"` + strings.ReplaceAll(strings.ReplaceAll(a, `\`, `\\`), `"`, `\"`) + `"`
 		} else {
 			parts[i] = a
 		}
@@ -331,12 +428,22 @@ func cronUsage(w io.Writer) {
   fak cron emit --target launchd|systemd|taskscheduler [--loop ID | <job>]
                 [--command 'CMD ARG...'] [--interval DUR] [--fak-bin PATH]
                 [--label NAME] [--ledger FILE] [-- TICK-CMD ARG...]
+  fak cron emit --runner --target launchd|systemd|taskscheduler --job ID
+                --ledger FILE --interval DUR --timeout DUR [--fak-bin PATH]
+                [--label NAME] -- CMD ARG...
 
+  fak cron run    --job ID --ledger FILE --interval DUR --timeout DUR [--json]
+                  [--at RFC3339] [--slot KEY] -- CMD ARG...
   fak cron fire   --job ID --ledger FILE [--interval DUR] [--at RFC3339] [--slot KEY]
   fak cron audit  --ledger FILE [--job ID] [--json]
   fak cron prompt --job ID --ledger FILE [--script 'CMD'] [--context-from A,B]
                   [--base 'PROMPT'] [--interval DUR] [--at RFC3339] [--slot KEY]
   fak cron chain  --ledger FILE [--job ID] [--json]
+
+Run is the BOUNDED TASK RUNNER (#11829): it executes an admitted scheduled task
+under a timeout with deduplication and process-tree termination. Exit 0 on success,
+exit 3 on dedup, child exit code on failure, and 124 on timeout. Terminal outcomes
+(succeeded, failed, timeout) are witnessed in the ledger.
 
 Fire is the FIRE WITNESS (#2886): it records each fire in the ledger under a
 (job, slot) compare-and-set guarded by a dup-tick lock, so a duplicate or
@@ -364,6 +471,9 @@ Emit renders ONE OS scheduler unit. By default its command is `+"`fak loop run -
 — fak owns the semantics (overlap-lock via the ledger, missed-run policy) and the OS
 scheduler (launchd / systemd / Windows Task Scheduler) only owns wall-clock firing. The
 wrapped tick defaults to `+"`fak agent`"+` and is overridden with `+"`-- CMD ARG...`"+`.
+
+--runner emits a unit whose command invokes `+"`fak cron run`"+` to execute a scheduled
+task bounded by --timeout with ledger-witnessed outcomes (#11830).
 
 --command 'CMD ARG...' instead emits a unit whose action is exactly that ARBITRARY
 command (no `+"`fak loop run`"+` wrapper, no loop id) — e.g.
