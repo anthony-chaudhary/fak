@@ -39,7 +39,12 @@ package cacheobs
 //
 // Route: inspire (clean-room Go; both Apache-2.0). Source cited, no bytes vendored.
 
-import "time"
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+)
 
 // CacheTier names WHICH cache served (or failed to serve) an access. The vocabulary is
 // closed and ordered by distance from the compute: an out-of-range tier is ignored at
@@ -256,6 +261,42 @@ type TierAccess struct {
 	LatencyKnown bool
 }
 
+// TierAccessRefusal is the typed error returned when a TierAccess cannot be booked because
+// one or more dimensions fall outside its closed vocabulary. Every problem message identifies
+// the invalid dimension value and names the recovery action to fix it.
+type TierAccessRefusal struct {
+	Problems []string
+}
+
+// Error formats the refusal problems into a single message stating every violated
+// dimension and naming the required recovery action.
+func (r *TierAccessRefusal) Error() string {
+	return "tier access refusal: " + strings.Join(r.Problems, "; ")
+}
+
+// Validate reports whether every dimension of the access is inside its closed vocabulary.
+// If any dimension is invalid, it returns a *TierAccessRefusal naming every out-of-vocabulary
+// dimension and the recovery action that clears it. A valid access returns nil.
+func (a TierAccess) Validate() error {
+	var problems []string
+	if !a.Tier.valid() {
+		problems = append(problems, fmt.Sprintf("invalid cache tier %d; specify a valid CacheTier in [0, %d) (TierLocalPrefix, TierSharedStore, TierProviderManaged)", a.Tier, numCacheTiers))
+	}
+	if !a.Op.valid() {
+		problems = append(problems, fmt.Sprintf("invalid tier operation %d; specify a valid TierOp in [0, %d) (OpRead, OpWrite)", a.Op, numTierOps))
+	}
+	if !a.Outcome.valid() {
+		problems = append(problems, fmt.Sprintf("invalid tier outcome %d; specify a valid TierOutcome in [0, %d) (OutcomeHit, OutcomeMiss, OutcomeError)", a.Outcome, numTierOutcomes))
+	}
+	if !a.Backend.valid() {
+		problems = append(problems, fmt.Sprintf("invalid backend class %d; specify a valid BackendClass in [0, %d) (BackendMemory, BackendDisk, BackendRemote)", a.Backend, numBackendClasses))
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return &TierAccessRefusal{Problems: problems}
+}
+
 // valid reports whether every dimension of the access is inside its closed vocabulary. An
 // invalid access is ignored WHOLE — never partially booked and never bucketed to a catch-all
 // row, so a caller passing a raw int cannot silently mis-attribute another tier's value.
@@ -420,6 +461,27 @@ func (o *Observer) DeclareTier(tier CacheTier, status TierStatus) {
 	o.mu.Unlock()
 }
 
+// DeclareTierStrict records whether a tier is collected in this build, returning an error
+// naming the recovery action if the tier or status falls outside the closed vocabulary or
+// if the observer is nil.
+func (o *Observer) DeclareTierStrict(tier CacheTier, status TierStatus) error {
+	if o == nil {
+		return errors.New("tier declaration requires non-nil Observer; construct one with New()")
+	}
+	var problems []string
+	if !tier.valid() {
+		problems = append(problems, fmt.Sprintf("invalid cache tier %d; specify a valid CacheTier in [0, %d) (TierLocalPrefix, TierSharedStore, TierProviderManaged)", tier, numCacheTiers))
+	}
+	if !status.valid() {
+		problems = append(problems, fmt.Sprintf("invalid tier status %d; specify a valid TierStatus in [0, %d) (TierStatusUndeclared, TierStatusSupported, TierStatusUnsupported)", status, numTierStatuses))
+	}
+	if len(problems) > 0 {
+		return errors.New("tier declaration refusal: " + strings.Join(problems, "; "))
+	}
+	o.DeclareTier(tier, status)
+	return nil
+}
+
 // ObserveTier books one cache access against its explicit tier (#6422). An access whose
 // tier, operation, outcome, or backend class falls outside the closed vocabulary is ignored
 // WHOLE — never bucketed to a catch-all — so the report can under-count but never
@@ -437,6 +499,26 @@ func (o *Observer) ObserveTier(a TierAccess) {
 	}
 	o.observeTierLocked(a)
 	o.mu.Unlock()
+}
+
+// ObserveTierStrict validates the access before booking. If the access is invalid, it
+// increments RejectedTierAccesses and returns a TierAccessRefusal naming each invalid
+// dimension and the recovery action. If valid, it records the access and returns nil.
+// If the observer is nil, it returns an error requiring an initialized Observer.
+func (o *Observer) ObserveTierStrict(a TierAccess) error {
+	if o == nil {
+		return errors.New("tier observation requires non-nil Observer; construct one with New()")
+	}
+	if err := a.Validate(); err != nil {
+		o.mu.Lock()
+		o.rejectedTierAccesses = saturatingAddU64(o.rejectedTierAccesses, 1)
+		o.mu.Unlock()
+		return err
+	}
+	o.mu.Lock()
+	o.observeTierLocked(a)
+	o.mu.Unlock()
+	return nil
 }
 
 // observeTierLocked is the accumulation core. Caller holds o.mu and has already validated

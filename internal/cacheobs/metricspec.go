@@ -153,14 +153,14 @@ func CheckCoverage(specs []MetricSpec, schema []string) error {
 		case 1:
 			// exactly once: good
 		case 0:
-			problems = append(problems, fmt.Sprintf("field %q has no spec", f))
+			problems = append(problems, fmt.Sprintf("field %q has no spec; declare a MetricSpec covering this field in DefaultSpecs", f))
 		default:
-			problems = append(problems, fmt.Sprintf("field %q covered by %d specs, want exactly 1", f, covered[f]))
+			problems = append(problems, fmt.Sprintf("field %q covered by %d specs, want exactly 1; remove duplicate MetricSpec definitions", f, covered[f]))
 		}
 	}
 	for _, s := range specs {
 		if !want[s.Field] {
-			problems = append(problems, fmt.Sprintf("spec targets unknown field %q", s.Field))
+			problems = append(problems, fmt.Sprintf("spec targets unknown field %q; remove the unmapped MetricSpec or register the field in schema", s.Field))
 		}
 	}
 	if len(problems) == 0 {
