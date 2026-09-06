@@ -2,15 +2,17 @@ package wiprecon
 
 import (
 	"fmt"
+	"path/filepath"
 	"testing"
 )
 
 var (
-	sinkDecision  Decision
-	sinkDecisions []Decision
-	sinkRows      []ReclaimRow
-	sinkReceipt   Receipt
-	sinkString    string
+	sinkDecision      Decision
+	sinkAdoptDecision AdoptDecision
+	sinkDecisions     []Decision
+	sinkRows          []ReclaimRow
+	sinkReceipt       Receipt
+	sinkString        string
 )
 
 // BenchmarkDecide measures per-candidate classification across decision rules.
@@ -133,7 +135,7 @@ func BenchmarkDecideAdopt(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_ = DecideAdopt(nil, reqGrant)
+			sinkAdoptDecision = DecideAdopt(nil, reqGrant)
 		}
 	})
 
@@ -141,7 +143,7 @@ func BenchmarkDecideAdopt(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_ = DecideAdopt(&incumbent, reqGrant)
+			sinkAdoptDecision = DecideAdopt(&incumbent, reqGrant)
 		}
 	})
 
@@ -149,7 +151,7 @@ func BenchmarkDecideAdopt(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_ = DecideAdopt(&incumbent, reqResume)
+			sinkAdoptDecision = DecideAdopt(&incumbent, reqResume)
 		}
 	})
 
@@ -157,7 +159,7 @@ func BenchmarkDecideAdopt(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_ = DecideAdopt(&incumbent, reqTakeover)
+			sinkAdoptDecision = DecideAdopt(&incumbent, reqTakeover)
 		}
 	})
 }
@@ -222,7 +224,7 @@ func BenchmarkReceiptEncodeDecode(b *testing.B) {
 		DeltaDigest:   "sha256:deadbeef",
 		Successor:     "rescuer-alpha",
 		Phase:         PhaseMaterialized,
-		Target:        "/tmp/worker/target",
+		Target:        filepath.Join(b.TempDir(), "target"),
 		AdoptedAt:     1_700_000_000,
 		RenewedAt:     1_700_000_100,
 		TTLSeconds:    900,
