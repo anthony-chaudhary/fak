@@ -42,3 +42,25 @@ func TestAuditArtifactWritesExactManifestAndChecksSEO(t *testing.T) {
 		t.Fatalf("manifest = %s", b)
 	}
 }
+
+func TestAuditSourceRejectsUnterminatedLiquidInMarkdownTable(t *testing.T) {
+	d := t.TempDir()
+	content := "| * | crystal | symbol | `Sources: []SourceWitness{{Kind: Foo` |\n"
+	if err := os.WriteFile(filepath.Join(d, "bad_table.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := AuditSource(d)
+	if err == nil || !strings.Contains(err.Error(), "unterminated Liquid tag") {
+		t.Fatalf("expected unterminated Liquid error, got: %v", err)
+	}
+
+	// Terminated Liquid {{ ... }} is allowed
+	contentValid := "| * | crystal | symbol | `Sources: []SourceWitness{{Kind: Foo}}` |\n"
+	if err := os.WriteFile(filepath.Join(d, "bad_table.md"), []byte(contentValid), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = AuditSource(d)
+	if err != nil {
+		t.Fatalf("expected nil error for terminated Liquid tag, got: %v", err)
+	}
+}

@@ -77,7 +77,7 @@
       "canonical": "guard-gate implementation surface for gatescope",
       "family": "guard-gate",
       "kind": "symbol",
-      "definition": "`gatescope` is the guard-gate symbol declared or used at `internal/disambiguation/query.go:343` as `Sources: []SourceWitness{{Kind: SourceKindGoSource, Locator: \"internal/hooks/gatescope.go\", Revision: \"reason-source/1\", CheckedAt: \"2026-08-17T00:00:00Z\", Probe: \"fak-disambiguati`. This row positions that concrete implementation surface, not merely the family label.",
+      "definition": "`gatescope` is the guard-gate symbol declared or used at `internal/disambiguation/query.go:343` as `Sources: []SourceWitness{ {Kind: SourceKindGoSource, Locator: \"internal/hooks/gatescope.go\", Revision: \"reason-source/1\", CheckedAt: \"2026-08-17T00:00:00Z\", Probe: \"fak-disambiguati`. This row positions that concrete implementation surface, not merely the family label.",
       "distinction": "Use `gatescope` for the operation evidenced at `internal/disambiguation/query.go:343`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
       "distinct_from": [
         "insufficientaggregatehbm"

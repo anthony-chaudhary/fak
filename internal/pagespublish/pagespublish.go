@@ -2,6 +2,7 @@ package pagespublish
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -63,6 +64,9 @@ func AuditSource(root string) (Report, error) {
 		}
 		if ext == ".md" || ext == ".html" {
 			report.Pages++
+			if err := checkLiquidSyntax(path, b); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -166,4 +170,30 @@ func CountSitemapURLs(path string) (int, error) {
 		return 0, errors.New("sitemap contains no URLs")
 	}
 	return count, nil
+}
+
+func checkLiquidSyntax(path string, b []byte) error {
+	s := bufio.NewScanner(bytes.NewReader(b))
+	lineNum := 0
+	inRaw := false
+	for s.Scan() {
+		lineNum++
+		line := s.Text()
+		if strings.Contains(line, "{% raw %}") {
+			inRaw = true
+		}
+		if strings.Contains(line, "{% endraw %}") {
+			inRaw = false
+		}
+		if inRaw {
+			continue
+		}
+		if strings.Contains(line, "{{") && !strings.Contains(line, "}}") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "|") {
+				return fmt.Errorf("%s:%d: unterminated Liquid tag {{ in markdown table row", filepath.ToSlash(path), lineNum)
+			}
+		}
+	}
+	return s.Err()
 }

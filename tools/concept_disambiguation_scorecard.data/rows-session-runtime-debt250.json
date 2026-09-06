@@ -539,7 +539,7 @@
       "canonical": "session-runtime implementation surface for sessionrecoverycheckpoint",
       "family": "session-runtime",
       "kind": "symbol",
-      "definition": "`SessionRecoveryCheckpoint` is the session-runtime symbol declared or used at `internal/disambiguation/query.go:252` as `Sources: []SourceWitness{{Kind: SourceKindGoSource, Locator: \"internal/session/cumulative_envelope.go\", Revision: \"session-source/1\", CheckedAt: \"2026-08-17T00:00:00Z\", Probe: \"fak`. This row positions that concrete implementation surface, not merely the family label.",
+      "definition": "`SessionRecoveryCheckpoint` is the session-runtime symbol declared or used at `internal/disambiguation/query.go:252` as `Sources: []SourceWitness{ {Kind: SourceKindGoSource, Locator: \"internal/session/cumulative_envelope.go\", Revision: \"session-source/1\", CheckedAt: \"2026-08-17T00:00:00Z\", Probe: \"fak`. This row positions that concrete implementation surface, not merely the family label.",
       "distinction": "Use `SessionRecoveryCheckpoint` for the operation evidenced at `internal/disambiguation/query.go:252`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
       "distinct_from": [
         "x2-session-runtime-sessionobs"
