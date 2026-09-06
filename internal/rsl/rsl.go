@@ -5,6 +5,7 @@ package rsl
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -101,14 +102,25 @@ func recoverHead(path string) (seq uint64, lastHash string, err error) {
 	defer f.Close()
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	lineNum := 0
+	var (
+		tornErr  error
+		tornLine int
+	)
 	for sc.Scan() {
-		line := sc.Bytes()
+		lineNum++
+		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
 			continue
 		}
+		if tornErr != nil {
+			return 0, "", fmt.Errorf("rsl: recover %s: corrupted row at line %d: %w", path, tornLine, tornErr)
+		}
 		var r Row
 		if err := json.Unmarshal(line, &r); err != nil {
-			break
+			tornErr = err
+			tornLine = lineNum
+			continue
 		}
 		seq = r.Seq
 		lastHash = r.Hash
@@ -132,19 +144,30 @@ func ReadRows(path string) ([]Row, error) {
 	var out []Row
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	lineNum := 0
+	var (
+		tornErr  error
+		tornLine int
+	)
 	for sc.Scan() {
-		line := sc.Bytes()
+		lineNum++
+		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
 			continue
 		}
+		if tornErr != nil {
+			return nil, fmt.Errorf("rsl: read %s: corrupted row at line %d: %w", path, tornLine, tornErr)
+		}
 		var r Row
 		if err := json.Unmarshal(line, &r); err != nil {
-			break
+			tornErr = err
+			tornLine = lineNum
+			continue
 		}
 		out = append(out, r)
 	}
 	if err := sc.Err(); err != nil {
-		return out, fmt.Errorf("rsl: scan %s: %w", path, err)
+		return nil, fmt.Errorf("rsl: scan %s: %w", path, err)
 	}
 	return out, nil
 }

@@ -216,6 +216,37 @@ func TestRecoverHeadAndReadRows_TornLine(t *testing.T) {
 	}
 }
 
+func TestReadRows_CorruptedMiddleLineFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "corrupted_middle.jsonl")
+	content := strings.Join([]string{
+		`{"seq":1,"ref":"refs/heads/main","old_sha":"A","new_sha":"B","hash":"h1"}`,
+		`{"seq":2,"ref":"refs/heads/main",corrupted_json_row`,
+		`{"seq":3,"ref":"refs/heads/main","old_sha":"B","new_sha":"C","hash":"h2"}`,
+	}, "\n") + "\n"
+
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write corrupted file: %v", err)
+	}
+
+	rows, err := ReadRows(path)
+	if err == nil {
+		t.Fatalf("ReadRows must fail on non-terminal corrupted line, but returned %d rows and err=nil", len(rows))
+	}
+	if !strings.Contains(err.Error(), "corrupted") {
+		t.Fatalf("ReadRows error must indicate corruption, got %v", err)
+	}
+	if _, _, err := recoverHead(path); err == nil {
+		t.Fatalf("recoverHead must fail on non-terminal corrupted line, but returned err=nil")
+	} else if !strings.Contains(err.Error(), "corrupted") {
+		t.Fatalf("recoverHead error must indicate corruption, got %v", err)
+	}
+	if _, err := VerifyFile(path); err == nil {
+		t.Fatalf("VerifyFile must fail on non-terminal corrupted line, but returned err=nil")
+	} else if !strings.Contains(err.Error(), "corrupted") {
+		t.Fatalf("VerifyFile error must indicate corruption, got %v", err)
+	}
+}
+
 func makeLinearChain(n int) []Row {
 	content := make([]Row, n)
 	for i := 0; i < n; i++ {
