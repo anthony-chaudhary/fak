@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 )
@@ -362,8 +363,8 @@ func TestMacBenchManyAgent_CLI(t *testing.T) {
 		if !strings.Contains(out, "verification          : PASS") {
 			t.Errorf("expected verification PASS, got: %s", out)
 		}
-		if !strings.Contains(out, "TRUE") || !strings.Contains(out, ">= 4.0x achieved") {
-			t.Errorf("expected TRUE 4x achieved statement, got: %s", out)
+		if !strings.Contains(out, "wall-clock speedup achieved") {
+			t.Errorf("expected speedup achieved statement, got: %s", out)
 		}
 	})
 
@@ -380,8 +381,8 @@ func TestMacBenchManyAgent_CLI(t *testing.T) {
 		if rep.Schema != ManyAgentComparisonSchema {
 			t.Errorf("schema = %q, want %q", rep.Schema, ManyAgentComparisonSchema)
 		}
-		if !rep.True4xAchieved || rep.SpeedupRatio < 4.0 {
-			t.Errorf("speedup ratio = %.2f, True4xAchieved = %v, want >= 4.0", rep.SpeedupRatio, rep.True4xAchieved)
+		if rep.SpeedupRatio < 1.5 {
+			t.Errorf("speedup ratio = %.2f, want >= 1.5", rep.SpeedupRatio)
 		}
 		if rep.MemorySavedMB < 3000.0 {
 			t.Errorf("memory saved = %.1f MB, want > 3000 MB", rep.MemorySavedMB)
@@ -404,11 +405,20 @@ func TestMacBenchManyAgent_RunManyAgentComparison_True4x(t *testing.T) {
 		t.Fatalf("RunManyAgentComparison: %v", err)
 	}
 
-	if rep.SpeedupRatio < 4.0 {
-		t.Errorf("SpeedupRatio = %.2f, want >= 4.00 (True 4x)", rep.SpeedupRatio)
+	// Witness: llamaTotalWallMS matches physical serial execution without quadratic queue wait double-counting
+	// and without unevidenced 600s slot contention.
+	// Expected llamaTotalWallMS = ~732201.5 ms (~732.2 s).
+	if rep.LlamaCPP.TotalWallMS > 800000.0 {
+		t.Errorf("LlamaCPP.TotalWallMS = %.1f ms, want < 800000.0 ms (unphysical queue wait/slot penalty inflated)", rep.LlamaCPP.TotalWallMS)
 	}
-	if !rep.True4xAchieved {
-		t.Errorf("True4xAchieved = false, want true")
+	if math.Abs(rep.LlamaCPP.TotalWallMS-732201.5) > 10.0 {
+		t.Errorf("LlamaCPP.TotalWallMS = %.1f ms, want ~732201.5 ms", rep.LlamaCPP.TotalWallMS)
+	}
+	if rep.SpeedupRatio < 1.80 || rep.SpeedupRatio > 1.95 {
+		t.Errorf("SpeedupRatio = %.2f, want ~1.86x", rep.SpeedupRatio)
+	}
+	if rep.True4xAchieved {
+		t.Errorf("True4xAchieved = true, want false at honest 1.86x speedup")
 	}
 	if rep.MemorySavedMB < 3000.0 {
 		t.Errorf("MemorySavedMB = %.1f, want > 3000.0 MB", rep.MemorySavedMB)
@@ -464,11 +474,22 @@ func TestMacBenchManyAgent_20kContext_Qwen38_UD_Q2_K_XL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunManyAgentComparison failed: %v", err)
 	}
-	if !compRep.True4xAchieved {
-		t.Errorf("compRep.True4xAchieved = false, want true")
+	// At 20k context, honest physical speedup is ~2.51x (previously artificially inflated to 6.06x
+	// by double-counting 1411.8s queue contention and adding 600s slot contention).
+	if compRep.LlamaCPP.TotalWallMS > 1500000.0 {
+		t.Errorf("compRep.LlamaCPP.TotalWallMS = %.1f ms, want < 1500000.0 ms", compRep.LlamaCPP.TotalWallMS)
 	}
-	if compRep.SpeedupRatio < 4.0 {
-		t.Errorf("compRep.SpeedupRatio = %.2f, want >= 4.0", compRep.SpeedupRatio)
+	if math.Abs(compRep.LlamaCPP.TotalWallMS-1421316.5) > 10.0 {
+		t.Errorf("compRep.LlamaCPP.TotalWallMS = %.1f ms, want ~1421316.5 ms", compRep.LlamaCPP.TotalWallMS)
+	}
+	if compRep.SpeedupRatio < 2.4 || compRep.SpeedupRatio > 2.6 {
+		t.Errorf("compRep.SpeedupRatio = %.2f, want ~2.51x", compRep.SpeedupRatio)
+	}
+	if compRep.True4xAchieved {
+		t.Errorf("compRep.True4xAchieved = true, want false at honest 2.51x speedup")
+	}
+	if !compRep.Verified {
+		t.Errorf("compRep.Verified = false, want true")
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -491,11 +512,11 @@ func TestMacBenchManyAgent_20kContext_Qwen38_UD_Q2_K_XL(t *testing.T) {
 	if cliRep.Model != "Qwen3.8-27B-UD-Q2_K_XL" {
 		t.Errorf("cliRep.Model = %q, want %q", cliRep.Model, "Qwen3.8-27B-UD-Q2_K_XL")
 	}
-	if !cliRep.True4xAchieved {
-		t.Errorf("cliRep.True4xAchieved = false, want true")
+	if cliRep.SpeedupRatio < 2.4 || cliRep.SpeedupRatio > 2.6 {
+		t.Errorf("cliRep.SpeedupRatio = %.2f, want ~2.51x", cliRep.SpeedupRatio)
 	}
-	if cliRep.SpeedupRatio < 4.0 {
-		t.Errorf("cliRep.SpeedupRatio = %.2f, want >= 4.0", cliRep.SpeedupRatio)
+	if cliRep.True4xAchieved {
+		t.Errorf("cliRep.True4xAchieved = true, want false at honest 2.51x speedup")
 	}
 	if !cliRep.Verified {
 		t.Errorf("cliRep.Verified = false, want true")
