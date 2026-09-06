@@ -634,6 +634,8 @@ func TestLaneForPath_conventionFallback(t *testing.T) {
 	var empty laneTaxonomy // not loaded: pure convention
 	cases := map[string]string{
 		"internal/gateway/server.go": "gateway",
+		"pkg/scorecard/scorecard.go": "scorecard",
+		"pkg/fakclient/client.go":    "fakclient",
 		"cmd/fak/serve.go":           "cmd",
 		"docs/x.md":                  "docs",
 		"README.md":                  "docs", // allowed root doc -> docs lane
