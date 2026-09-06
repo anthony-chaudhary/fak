@@ -10,7 +10,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/managedocs"
 )
 
-func TestRunManageDocs(t *testing.T) {
+func TestManageDocs(t *testing.T) {
 	temp := t.TempDir()
 	docDir := filepath.Join(temp, "docs")
 	if err := os.MkdirAll(docDir, 0755); err != nil {
@@ -129,7 +129,11 @@ func TestRunManageDocs(t *testing.T) {
 	}
 }
 
-func TestRunManageDocs_CheckRetained(t *testing.T) {
+func TestRunManageDocs(t *testing.T) {
+	TestManageDocs(t)
+}
+
+func TestManageDocs_CheckRetained(t *testing.T) {
 	cleanWorkspace := createCleanManagedocsWorkspace(t)
 	var stdout, stderr bytes.Buffer
 	rc := runManageDocs(&stdout, &stderr, []string{"--workspace", cleanWorkspace, "--check-retained"})
@@ -155,6 +159,10 @@ func TestRunManageDocs_CheckRetained(t *testing.T) {
 	if !strings.Contains(stderr.String(), "fak managedocs retained audit failed") {
 		t.Errorf("expected retained audit failed in stderr, got: %s", stderr.String())
 	}
+}
+
+func TestRunManageDocs_CheckRetained(t *testing.T) {
+	TestManageDocs_CheckRetained(t)
 }
 
 func createCleanManagedocsWorkspace(t *testing.T) string {
@@ -192,7 +200,7 @@ func createCleanManagedocsWorkspace(t *testing.T) string {
 	return root
 }
 
-func TestRunManageDocs_ExplicitNonexistentDirFails(t *testing.T) {
+func TestManageDocs_ExplicitNonexistentDirFails(t *testing.T) {
 	temp := t.TempDir()
 	var stdout, stderr bytes.Buffer
 	rc := runManageDocs(&stdout, &stderr, []string{"--workspace", temp, "--docs-dir", "nonexistent-docs-dir-xyz-123"})
@@ -201,5 +209,80 @@ func TestRunManageDocs_ExplicitNonexistentDirFails(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "nonexistent-docs-dir-xyz-123") {
 		t.Errorf("expected stderr to contain nonexistent docs dir name, got: %s", stderr.String())
+	}
+}
+
+func TestRunManageDocs_ExplicitNonexistentDirFails(t *testing.T) {
+	TestManageDocs_ExplicitNonexistentDirFails(t)
+}
+
+func TestManageDocs_DocsDirInfersDocumentSets(t *testing.T) {
+	cleanWorkspace := createCleanManagedocsWorkspace(t)
+	// Inject a retained occurrence violation in the workspace.
+	// If runManageDocs falls back to retained occurrences audit, it will fail.
+	violatingDoc := filepath.Join(cleanWorkspace, "docs", "violating.md")
+	if err := os.WriteFile(violatingDoc, []byte("unclassified fak guard occurrence\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(violatingDoc)
+
+	// Create an explicit specs doc directory with valid bounded docs.
+	specsRel := filepath.Join("docs", "specs")
+	specsDir := filepath.Join(cleanWorkspace, specsRel)
+	if err := os.MkdirAll(specsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	specFile := filepath.Join(specsDir, "spec.md")
+	if err := os.WriteFile(specFile, []byte("# Spec\nBounded doc\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Providing --docs-dir without --document-sets executes document sets audit on that dir,
+	// and does not silently fall back to AuditRetainedOccurrences (which would fail on violating.md).
+	var stdout, stderr bytes.Buffer
+	rc := runManageDocs(&stdout, &stderr, []string{"--workspace", cleanWorkspace, "--docs-dir", specsRel})
+	if rc != 0 {
+		t.Fatalf("expected rc 0 for --docs-dir with inferred document sets, got %d, stderr: %s", rc, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "document sets audit in") {
+		t.Errorf("expected document sets audit message, got: %s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "retained occurrences audit passed") {
+		t.Errorf("expected no retained occurrences audit execution, got: %s", stdout.String())
+	}
+
+	// 2. Providing --docs-dir on directory with an oversized doc executes audit on that directory and fails.
+	oversizedDoc := filepath.Join(specsDir, "oversized.md")
+	if err := os.WriteFile(oversizedDoc, []byte(strings.Repeat("line\n", managedocs.PageLines+1)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(oversizedDoc)
+
+	stdout.Reset()
+	stderr.Reset()
+	rc = runManageDocs(&stdout, &stderr, []string{"--workspace", cleanWorkspace, "--docs-dir", specsRel})
+	if rc != 1 {
+		t.Fatalf("expected rc 1 for oversized doc in explicit --docs-dir, got %d", rc)
+	}
+	if !strings.Contains(stderr.String(), "document sets audit failed") {
+		t.Errorf("expected document sets audit failed in stderr, got: %s", stderr.String())
+	}
+	if err := os.Remove(oversizedDoc); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. When --check-retained is explicitly specified alongside --docs-dir, document-sets is not inferred,
+	// and retained occurrences audit runs (and fails due to violating.md).
+	stdout.Reset()
+	stderr.Reset()
+	rc = runManageDocs(&stdout, &stderr, []string{"--workspace", cleanWorkspace, "--docs-dir", specsRel, "--check-retained"})
+	if rc != 1 {
+		t.Fatalf("expected rc 1 when --check-retained is explicit with injected violation, got %d", rc)
+	}
+	if !strings.Contains(stderr.String(), "fak managedocs retained audit failed") {
+		t.Errorf("expected retained audit failed in stderr, got: %s", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "document sets audit in") {
+		t.Errorf("did not expect document sets audit when only --check-retained requested, stdout: %s", stdout.String())
 	}
 }
