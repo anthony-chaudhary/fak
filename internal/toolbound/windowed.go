@@ -336,41 +336,37 @@ func (w *WindowedFileReader) Status() string {
 
 // OpenView opens the file and returns a structured WindowView.
 func (w *WindowedFileReader) OpenView(path string, startLine int, windowSize int) (*WindowView, error) {
-	lines, err := w.Open(path, startLine, windowSize)
+	_, err := w.Open(path, startLine, windowSize)
 	if err != nil {
 		return nil, err
 	}
-	_ = lines
 	return w.View()
 }
 
 // ScrollDownView advances window by n lines and returns the updated WindowView.
 func (w *WindowedFileReader) ScrollDownView(n int) (*WindowView, error) {
-	lines, err := w.ScrollDown(n)
+	_, err := w.ScrollDown(n)
 	if err != nil {
 		return nil, err
 	}
-	_ = lines
 	return w.View()
 }
 
 // ScrollUpView moves window up by n lines and returns the updated WindowView.
 func (w *WindowedFileReader) ScrollUpView(n int) (*WindowView, error) {
-	lines, err := w.ScrollUp(n)
+	_, err := w.ScrollUp(n)
 	if err != nil {
 		return nil, err
 	}
-	_ = lines
 	return w.View()
 }
 
 // GotoView jumps window to start at line and returns the updated WindowView.
 func (w *WindowedFileReader) GotoView(line int) (*WindowView, error) {
-	lines, err := w.Goto(line)
+	_, err := w.Goto(line)
 	if err != nil {
 		return nil, err
 	}
-	_ = lines
 	return w.View()
 }
 
