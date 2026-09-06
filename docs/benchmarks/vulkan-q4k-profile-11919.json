@@ -1,0 +1,149 @@
+{
+  "schema": "fak.native-device-witness.v1",
+  "issue": 11919,
+  "status": "passed",
+  "scope": "Synthetic Q4_K batch-one GEMV at Qwen3.8-27B FFN geometry; no model execution or throughput comparison",
+  "source_base": "b755c5338765e1b2f1fac683c729622b1959e8de",
+  "test_source_sha256": "a136de179d7d96ade765dc69a0200e42bc418737c3aa835fd6cf8fd6aa198d09",
+  "binary_sha256": "f7c88d9fb72dc619ea9c7bad47646effbf9989c94bc8aff49e7ccffa157d043c",
+  "build": "Go1.26.6 linux/amd64 CGO_ENABLED=1 go test -c -tags vulkan ./internal/compute; same shim and29SPIRV as11902",
+  "shim_archive_sha256": "aa6c07a2fa3e15acbe7587bf4dd5fa295101b9dc33e3bd51dd4e514412a8b9b8",
+  "runtime": {
+    "driver": "RADV26.2.2",
+    "icd": "/usr/share/vulkan/icd.d/radeon_icd.json",
+    "loader": "1.4.357.0"
+  },
+  "command": "<test-binary> -test.run=^TestVulkanQ4KRealShapeProfile$ -test.v=true -test.timeout=25s",
+  "environment": {
+    "FAK_VULKAN_EXPECT_DEVICE": "8060S",
+    "FAK_VULKAN_Q4K_PROFILE": "1",
+    "FAK_VULKAN_REQUIRE_DEVICE": "1",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/radeon_icd.json",
+    "FAK_GPU_BUDGET_MB": "<unset>",
+    "FAK_VULKAN_SPIRV": "<original11902SPIRV-directory>",
+    "GOMAXPROCS": "2"
+  },
+  "admission": {
+    "concurrency": 1,
+    "swap_max_bytes": 0,
+    "memory_max_bytes": 1073741824,
+    "independent_review": "halo_backlog source/binary/quality/budget approved before execution; root independently reviewed and authorized",
+    "cpu_quota_percent": 200,
+    "wall_timeout_seconds": 30
+  },
+  "quality": {
+    "reference_norm_finite_nonzero": true,
+    "relative_l2_max": 0.0001,
+    "finite_outputs_and_reference": true,
+    "note": "100ppm primitive reduction-error envelope on identical Q4 inputs; not model quality equivalence",
+    "argmax_exact": true,
+    "cosine_min": 0.99999
+  },
+  "whole_process": {
+    "swap_bytes": 0,
+    "cpu_ms": 296,
+    "exit_code": 0,
+    "result": "success",
+    "peak_memory_display": "157.6M",
+    "note": "Includes startup, fixture, reference, upload, all6dispatches, validation, and deferred cleanup; not an inference benchmark",
+    "wall_ms": 310
+  },
+  "existing_endpoint": {
+    "healthy_before": true,
+    "restart_performed": false,
+    "healthy_after": true,
+    "service_identity_unchanged": true
+  },
+  "measurement": {
+    "allocation_note": "payload excludes driver alignment and runtime overhead; host fixture retained",
+    "batch": 1,
+    "cpu_q4_reference_ns": 74438366,
+    "device": "integrated:AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+    "dtype": "Q4_K",
+    "engine": "fak-native-compute",
+    "fixture_ns": 170883428,
+    "fixture_seed": 11919,
+    "output_payload_bytes": 69632,
+    "resident_input_payload_bytes": 50155520,
+    "resident_input_reuses_after_first_call": 5,
+    "samples": [
+      {
+        "argmax": 2841,
+        "cosine": 0.9999999999986565,
+        "dispatch_and_output_read_ns": 489365,
+        "output_free_ns": 5291,
+        "relative_l2": 1.6235524795012833E-06,
+        "step": 0,
+        "validation_ns": 37892,
+        "warmup": true
+      },
+      {
+        "argmax": 2841,
+        "cosine": 0.9999999999986565,
+        "dispatch_and_output_read_ns": 471605,
+        "output_free_ns": 290,
+        "relative_l2": 1.6235524795012833E-06,
+        "step": 1,
+        "validation_ns": 37162,
+        "warmup": false
+      },
+      {
+        "argmax": 2841,
+        "cosine": 0.9999999999986565,
+        "dispatch_and_output_read_ns": 448514,
+        "output_free_ns": 340,
+        "relative_l2": 1.6235524795012833E-06,
+        "step": 2,
+        "validation_ns": 36572,
+        "warmup": false
+      },
+      {
+        "argmax": 2841,
+        "cosine": 0.9999999999986565,
+        "dispatch_and_output_read_ns": 448213,
+        "output_free_ns": 180,
+        "relative_l2": 1.6235524795012833E-06,
+        "step": 3,
+        "validation_ns": 36492,
+        "warmup": false
+      },
+      {
+        "argmax": 2841,
+        "cosine": 0.9999999999986565,
+        "dispatch_and_output_read_ns": 454894,
+        "output_free_ns": 310,
+        "relative_l2": 1.6235524795012833E-06,
+        "step": 4,
+        "validation_ns": 36472,
+        "warmup": false
+      },
+      {
+        "argmax": 2841,
+        "cosine": 0.9999999999986565,
+        "dispatch_and_output_read_ns": 450364,
+        "output_free_ns": 160,
+        "relative_l2": 1.6235524795012833E-06,
+        "step": 5,
+        "validation_ns": 36442,
+        "warmup": false
+      }
+    ],
+    "schema": "fak.vulkan.q4k-primitive-profile.v1",
+    "scope": "synthetic Q4_K GEMV at real FFN geometry; no model execution",
+    "shape": [
+      17408,
+      5120
+    ],
+    "test_body_ns": 272007216,
+    "timing_note": "test body excludes process/backend initialization and deferred resident cleanup; capture whole-process resources separately",
+    "upload_ns": 23641310,
+    "weight_payload_bytes": 50135040
+  },
+  "limitations": [
+    "Synthetic weights use real FFN geometry; live mixed quantization artifact was not loaded.",
+    "Five warm samples are a primitive latency baseline, not tokens/s, model speedup, or measured DRAM bandwidth.",
+    "Payload bytes omit driver alignment/runtime overhead; whole-process peak is recorded separately.",
+    "Test-body timing excludes process/backend initialization and deferred resident cleanup."
+  ],
+  "route": "docs/private-comms-channel.md"
+}
