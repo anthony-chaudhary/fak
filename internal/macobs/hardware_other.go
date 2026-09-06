@@ -17,12 +17,3 @@ func CollectHardware(ctx context.Context) HardwareTelemetry {
 		PowerSource:  PowerUnknown,
 	}
 }
-
-// CollectHardwareWithRunner returns an unavailable hardware telemetry record on non-Darwin platforms.
-func CollectHardwareWithRunner(ctx context.Context, runner CommandRunner) HardwareTelemetry {
-	return HardwareTelemetry{
-		Available:    false,
-		ThermalState: ThermalUnknown,
-		PowerSource:  PowerUnknown,
-	}
-}
