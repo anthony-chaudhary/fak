@@ -4,6 +4,7 @@ description: One repeatable pass that keeps the dojo's self-improving RSI loop a
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/dojo-rsi-score/SKILL.md
+  canonical-description-hash: d79cbb96aa503753d97ae43f6848e2a312481f40b2fd6bf2ba2bfd1ab6e61279
 ---
 
 # Canonical project skill adapter

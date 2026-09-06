@@ -4,6 +4,7 @@ description: One repeatable pass that keeps fak's growing namespace CRYSTAL-CLEA
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/disambiguation-score/SKILL.md
+  canonical-description-hash: d5c3166a8c9ae33bc6a1cdaf266dd18efafa9068adc204762ad1e2ae12e43f8f
 ---
 
 # Canonical project skill adapter

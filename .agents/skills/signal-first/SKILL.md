@@ -4,6 +4,7 @@ description: Shape an answer for fast scanning with result-first sentences, conc
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/signal-first/SKILL.md
+  canonical-description-hash: 795ddd9c50ef5f0484c22a4962783192c1e7c73f50b4e66ef20466f392299c6f
 ---
 
 # Canonical project skill adapter

@@ -4,6 +4,7 @@ description: Create or customize a fak-native agent harness from a user's needs.
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/harness-creator/SKILL.md
+  canonical-description-hash: 6fa89cdf73703e335434d6b1a596cc801a233073644078911f0275de79e04443
 ---
 
 # Canonical project skill adapter

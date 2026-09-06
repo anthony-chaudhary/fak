@@ -4,6 +4,7 @@ description: One repeatable pass that keeps fak light to DRIVE — the operator-
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/operator-heaviness-score/SKILL.md
+  canonical-description-hash: e68ee90aaf5951bb18d52090ebf60ac5c17788f65af8274eb3dfae35a6f57711
 ---
 
 # Canonical project skill adapter

@@ -4,6 +4,7 @@ description: One repeatable pass that keeps every number and status fak reports 
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/conflation-score/SKILL.md
+  canonical-description-hash: 4e609bc447c7b2d9ee95fadca8b5e4945293fa5178d688bc10e33cdf0090562a
 ---
 
 # Canonical project skill adapter

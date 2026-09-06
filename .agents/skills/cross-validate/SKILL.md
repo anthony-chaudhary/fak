@@ -4,6 +4,7 @@ description: Cross-validate code changes with independent subagents, execute on-
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/cross-validate/SKILL.md
+  canonical-description-hash: 2a026ab4d6ecf0f0338437766da45b38afab7eb6323398e229b79cf7576795d4
 ---
 
 # Canonical project skill adapter

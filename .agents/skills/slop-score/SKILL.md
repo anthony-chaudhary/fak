@@ -4,6 +4,7 @@ description: One repeatable RSI pass over CODE SLOP — the slop the compiler ca
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/slop-score/SKILL.md
+  canonical-description-hash: 6c1fe9e4bf75c2103c64d9fc9e7ce0a9c367d5b2d4a4bc578abbf4ed78b5ddd1
 ---
 
 # Canonical project skill adapter

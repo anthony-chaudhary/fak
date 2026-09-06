@@ -4,6 +4,7 @@ description: Witnessed lifecycle for the project skill pack — usage-telemetry 
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/skill-lifecycle/SKILL.md
+  canonical-description-hash: 04ef75bbfb3e26db0cbc26823267138fc2acff7f9e3762cd3dff611db85ec020
 ---
 
 # Canonical project skill adapter

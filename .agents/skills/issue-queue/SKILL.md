@@ -4,6 +4,7 @@ description: One repeatable, evidence-backed pass that manages, prioritizes, and
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/issue-queue/SKILL.md
+  canonical-description-hash: d21c1ad8772283f501c37707956a090acfdc9da35f0307801aba8673434b79be
 ---
 
 # Canonical project skill adapter

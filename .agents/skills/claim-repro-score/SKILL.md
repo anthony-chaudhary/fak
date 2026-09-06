@@ -4,6 +4,7 @@ description: One repeatable RSI pass over claim reproducibility; run the claim-r
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/claim-repro-score/SKILL.md
+  canonical-description-hash: 0e775d8daaf60446bc2cb44f95ff375fa33c80350af8b0f2481b4cb3c1bcfb06
 ---
 
 # Canonical project skill adapter

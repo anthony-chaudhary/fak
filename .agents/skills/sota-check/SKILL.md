@@ -4,6 +4,7 @@ description: One repeatable pass that stops fak from re-inventing known kernel a
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/sota-check/SKILL.md
+  canonical-description-hash: 67681b64e44c57d79cc0000568de712af7fb4f12c8f1ae122cfc0e19e619f1b5
 ---
 
 # Canonical project skill adapter

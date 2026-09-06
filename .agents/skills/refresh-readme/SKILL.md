@@ -4,6 +4,7 @@ description: One repeatable pass over README.md — the front door — that keep
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/refresh-readme/SKILL.md
+  canonical-description-hash: 127534a9134877a1ce7fc7b09b59f6285f5a8bdde5d5180dc0b897c3d23abf03
 ---
 
 # Canonical project skill adapter

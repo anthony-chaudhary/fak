@@ -4,6 +4,7 @@ description: Refresh the recent-operational cachevalue numbers in a guarded doc 
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/refresh-cachedoc-numbers/SKILL.md
+  canonical-description-hash: 86f7a273905e259ad3457bd0fdc59c177e6f1e1a070a154ef0875f6e60dbad88
 ---
 
 # Canonical project skill adapter

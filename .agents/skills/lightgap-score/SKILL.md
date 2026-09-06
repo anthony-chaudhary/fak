@@ -4,6 +4,7 @@ description: One repeatable pass that answers "is fak actually worth adopting, f
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/lightgap-score/SKILL.md
+  canonical-description-hash: d3fa12c3e08035f0a13285bbeea8569ce0ddc52da8498c50fe3ac0202f566854
 ---
 
 # Canonical project skill adapter

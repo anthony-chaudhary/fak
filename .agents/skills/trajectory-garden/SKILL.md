@@ -4,6 +4,7 @@ description: One repeatable gardening pass over a trajectory corpus — the JSON
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/trajectory-garden/SKILL.md
+  canonical-description-hash: 6079002cd0ab1c9164bf8dad0beda5d8accb7a81fbb7533aea71606129bb01a4
 ---
 
 # Canonical project skill adapter

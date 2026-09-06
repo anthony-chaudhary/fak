@@ -4,6 +4,7 @@ description: The operator loop over the steer-prs overlay (`fak steer prs`) — 
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/steer-prs/SKILL.md
+  canonical-description-hash: f19ea357af7d5f00b35759b7d88765fcd008952c3ebaec628c02eea7e95899fb
 ---
 
 # Canonical project skill adapter

@@ -4,6 +4,7 @@ description: Audit and recover crashed Claude and Codex sessions through one dry
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/resume-watchdog-audit/SKILL.md
+  canonical-description-hash: 4bb396cd61d30af67a0e3a0d5d9d13fa9f41f22c669acee1de4ef97e244d708e
 ---
 
 # Canonical project skill adapter

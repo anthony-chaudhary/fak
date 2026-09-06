@@ -4,6 +4,7 @@ description: "Snapshot the repo's phased-plan portfolio into a dispatch packet: 
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/dos-next-up/SKILL.md
+  canonical-description-hash: bddc33d863337dab768e9c4a9426c61e7cec96d19b0e03fd47efee595d1cc946
 ---
 
 # Canonical project skill adapter

@@ -4,6 +4,7 @@ description: One repeatable pass that keeps fak the path of least resistance for
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/agent-readiness/SKILL.md
+  canonical-description-hash: 49d8888e8f6ded47e198aeea93a68ebc2144aaadd48fd1403dc42049ee4eb4fd
 ---
 
 # Canonical project skill adapter

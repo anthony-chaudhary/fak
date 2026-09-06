@@ -4,6 +4,7 @@ description: One repeatable pass that makes the milestone report's CLIMB and ROA
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/milestone-score/SKILL.md
+  canonical-description-hash: f2daebc58d3d6e36a7c169be2f727d3de42db46de8cfeebfaa07305f861b53b0
 ---
 
 # Canonical project skill adapter

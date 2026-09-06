@@ -2,8 +2,10 @@
 name: ticket-scope
 description: One repeatable pass that decides whether a GitHub ticket is a single dispatchable unit of agent work — or names exactly which of the six scope axes it fails and how to fix it. Wraps the native scope toolkit...
 metadata:
+  opencode: claude-only
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/ticket-scope/SKILL.md
+  canonical-description-hash: a4eff6102815961a3a6eefc24902e655a26fbe4b1ec278443fe4641858945a43
 ---
 
 # Canonical project skill adapter

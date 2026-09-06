@@ -4,6 +4,7 @@ description: Compact and structure a Claude Code auto-memory store so MEMORY.md 
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/memory-compact/SKILL.md
+  canonical-description-hash: bb62f1e683355df2091c57d145bb8c6f092edb7be9a1920320fd45711ddd4577
 ---
 
 # Canonical project skill adapter

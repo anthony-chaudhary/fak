@@ -4,6 +4,7 @@ description: Plan, partition, and coordinate sustained multi-wave parallel subag
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/debt-orchestrator/SKILL.md
+  canonical-description-hash: 58a20b5d4d634940d73c886bd9b10982e33222555b5469e3e6247cd0b856f713
 ---
 
 # Canonical project skill adapter

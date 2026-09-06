@@ -4,6 +4,7 @@ description: One focused, repeatable pass that retires the code-quality scorecar
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/modularize/SKILL.md
+  canonical-description-hash: 654c69c11ea0b2744b34b9429891df2f52d38ef7c91f2cabbab46afd46b25f83
 ---
 
 # Canonical project skill adapter

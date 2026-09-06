@@ -4,6 +4,7 @@ description: Organize and progress multi-task queues under dynamic lane leases w
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/super-workstream/SKILL.md
+  canonical-description-hash: 1fc5cbf4494e7f1eaa0afd0525d0632671501e18a8aab9bb90fe91343ac60ed9
 ---
 
 # Canonical project skill adapter

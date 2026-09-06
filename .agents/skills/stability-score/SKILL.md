@@ -2,8 +2,10 @@
 name: stability-score
 description: "One repeatable pass that keeps fak trustworthy while it iterates fast — the question no other scorecard asks: as we add items quickly, how do we KNOW a regression / tail-wag / confusion landed, and how do we REVERT..."
 metadata:
+  opencode: claude-only
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/stability-score/SKILL.md
+  canonical-description-hash: 35f671abc2f02922432d1a6172db661dd8b0a1afff32560997a24df6e51c8801
 ---
 
 # Canonical project skill adapter

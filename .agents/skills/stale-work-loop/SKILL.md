@@ -2,8 +2,10 @@
 name: stale-work-loop
 description: Turn a fak stale-work packet into dedicated, contract-valid issue units, collision-safe dispatch waves, and witness-only reconciliation. PLAN by default; use when an operator asks to adjudicate stale-work...
 metadata:
+  opencode: claude-only
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/stale-work-loop/SKILL.md
+  canonical-description-hash: 4a27d1a0e46c23818d0134a0076e47320f4a7c8997951a078cb45cf487b6e9ab
 ---
 
 # Canonical project skill adapter

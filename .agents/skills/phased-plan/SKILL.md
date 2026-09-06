@@ -2,8 +2,10 @@
 name: phased-plan
 description: Ceremony rules for shipping a phase of a phased plan — when to release, when to emit a handoff prompt, how far to go on type-strengthening, when to fold or split phases, and the hero-exit rule that prevents plans...
 metadata:
+  opencode: agent-permission
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/phased-plan/SKILL.md
+  canonical-description-hash: 69bf730e5b6a532f8f7b3169a4a5da3e0feeeb9aef8ddc6319842965810fbe5a
 ---
 
 # Canonical project skill adapter

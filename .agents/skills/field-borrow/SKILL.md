@@ -4,6 +4,7 @@ description: High-priority default "inspired by" workflow. Invoke proactively wh
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/field-borrow/SKILL.md
+  canonical-description-hash: d5b6d9dedb8e6216fff47debc967761659c3fd8b4cf7650f4a357b5be0f66033
 ---
 
 # Canonical project skill adapter

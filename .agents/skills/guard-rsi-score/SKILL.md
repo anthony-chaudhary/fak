@@ -4,6 +4,7 @@ description: One repeatable pass that keeps the RSI loop for `fak guard` actuall
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/guard-rsi-score/SKILL.md
+  canonical-description-hash: c2c2b55c169727740145bd557b5be9c9a87bda3948b23740b8a91e1172fd6348
 ---
 
 # Canonical project skill adapter

@@ -2,8 +2,10 @@
 name: score-2x
 description: The generic 2×-then-discover loop the scorecard family runs — enumerate exhaustive raw debt, drive it down 2× with genuine fixes, rescore to PROVE the drop, and continuously harden discovery under a new metric...
 metadata:
+  opencode: claude-only
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/score-2x/SKILL.md
+  canonical-description-hash: 988c49b45ae2fd1f63e55f5a285ca308a25135600d30527b2fd579d8babb733f
 ---
 
 # Canonical project skill adapter

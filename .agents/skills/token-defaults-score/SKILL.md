@@ -4,6 +4,7 @@ description: One repeatable pass that keeps fak's OUT-OF-THE-BOX token economy a
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/token-defaults-score/SKILL.md
+  canonical-description-hash: 625e35be8e62bba6f4a93b07be170da6a5bba13e4fd975ad3d1a1bd3ab24cb6d
 ---
 
 # Canonical project skill adapter

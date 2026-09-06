@@ -4,6 +4,7 @@ description: One repeatable RSI pass over CODE quality — the code-side counter
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/quality-score/SKILL.md
+  canonical-description-hash: 2732354339bb4fcd856a3ebca60fc90363f8b59c863f74392bb2e182d480e88e
 ---
 
 # Canonical project skill adapter

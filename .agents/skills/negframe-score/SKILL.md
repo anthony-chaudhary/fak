@@ -4,6 +4,7 @@ description: One repeatable pass that keeps agent-steer prose leading with the A
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/negframe-score/SKILL.md
+  canonical-description-hash: cba0c7c6d458472aa89232199a36b6eea07c2eb5546b7b3adbb6661aa2885122
 ---
 
 # Canonical project skill adapter

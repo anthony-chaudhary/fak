@@ -2,8 +2,10 @@
 name: git-subagent-sync
 description: Synchronize subagent changes to git on shared trunk across all lanes and all untracked WIP by default (or scoped via --lane/--paths). Enforces single-source-of-truth invariants, disjoint file-tree fencing via `dos...
 metadata:
+  opencode: agent-permission
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/git-subagent-sync/SKILL.md
+  canonical-description-hash: 19c261d044dd198eccc83119781ffbcb2e67d74336022849cd24c880f5e813b7
 ---
 
 # Canonical project skill adapter

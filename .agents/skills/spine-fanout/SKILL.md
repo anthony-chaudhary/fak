@@ -4,6 +4,7 @@ description: Apply the two new-work defaults — ship the minimal WORKING end-to
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/spine-fanout/SKILL.md
+  canonical-description-hash: 9a21bc9f9ba515365e17a7c36845e37aa21002b79e878ba54cf1fb6ed5decd9b
 ---
 
 # Canonical project skill adapter

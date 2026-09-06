@@ -2,8 +2,10 @@
 name: bottleneck-map
 description: Map the current "what is limiting us right now?" state across the running agent fleet and the live GitHub issue backlog. Runs fleet bottleneck detection plus issue triage, records the dominant system bottlenecks,...
 metadata:
+  opencode: claude-only
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/bottleneck-map/SKILL.md
+  canonical-description-hash: 6f6afa5435eec94989a6b868a26f1244d223412885eb6b9533229adbe9935b3c
 ---
 
 # Canonical project skill adapter

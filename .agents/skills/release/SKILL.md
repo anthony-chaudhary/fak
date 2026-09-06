@@ -4,6 +4,7 @@ description: Perform a full versioned release — bump version, draft release no
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/release/SKILL.md
+  canonical-description-hash: 6ca41f00cfd308161ea568d0fe448046eefc6be4449dda53fb2b4f1ba187ae49
 ---
 
 # Canonical project skill adapter

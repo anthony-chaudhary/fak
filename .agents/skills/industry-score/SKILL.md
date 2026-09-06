@@ -4,6 +4,7 @@ description: One repeatable pass that keeps fak's competitive story honest AND c
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/industry-score/SKILL.md
+  canonical-description-hash: f4880925ce274f57f0d2ab9ab26c991f9c8a9fffa361568ac8af563e1288db35
 ---
 
 # Canonical project skill adapter

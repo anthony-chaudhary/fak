@@ -4,6 +4,7 @@ description: Reconcile a research or documentation cluster's index with files on
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/curate-cluster/SKILL.md
+  canonical-description-hash: b4666437f36404062f4f5a349bfb07466c6e469082dadd099d0bc76bd99e0738
 ---
 
 # Canonical project skill adapter

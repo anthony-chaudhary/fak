@@ -4,6 +4,7 @@ description: Flag content-redundant SKILL.md pairs as merge candidates — pairw
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/skill-overlap/SKILL.md
+  canonical-description-hash: abc917424750ba8132e81663e5266a4ba3b9644b269219873f952d462f0eefaa
 ---
 
 # Canonical project skill adapter

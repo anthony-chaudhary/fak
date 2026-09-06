@@ -4,6 +4,7 @@ description: Reconcile every plan-state surface a project tracks into one comple
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/plan-audit/SKILL.md
+  canonical-description-hash: 00686dcfc47097902cccd6b57873398415267413d3272a12f28857822fb78bfe
 ---
 
 # Canonical project skill adapter

@@ -4,6 +4,7 @@ description: Inventory and deeply study innovation in upstream pull-request queu
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/study-pr-queue/SKILL.md
+  canonical-description-hash: cbc87cee0e30a5724d028bd0303cae3ce4478ae9648466bdcc758983fccffd7e
 ---
 
 # Canonical project skill adapter

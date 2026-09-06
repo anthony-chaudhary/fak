@@ -508,7 +508,7 @@ func Build(root string, write bool) (Receipt, error) {
 		n, _ := skillName(root, source)
 		description, descriptionErr := skillDescription(root, source)
 		meta, metaErr := skillMetadata(root, source)
-		if e != nil || descriptionErr != nil || metaErr != nil || (isGeneratedAdapter(b) && string(b) != adapter(n, description, filepath.ToSlash(rel), meta...)) {
+		if e != nil || descriptionErr != nil || metaErr != nil || (isGeneratedAdapter(b) && strings.ReplaceAll(string(b), "\r\n", "\n") != strings.ReplaceAll(adapter(n, description, filepath.ToSlash(rel), meta...), "\r\n", "\n")) {
 			stale = append(stale, target)
 		}
 	}

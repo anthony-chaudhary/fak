@@ -4,6 +4,7 @@ description: Bind a done-claim to a GREEN test run of the changed package, not j
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/verify/SKILL.md
+  canonical-description-hash: 8f8e63eca83d5c133a4f5d7b0b02b220b283bd1b0d61b084b4f1d72edc01cbce
 ---
 
 # Canonical project skill adapter

@@ -2,8 +2,10 @@
 name: wave-harvest
 description: "The honest closing half of a super loop — after a detached bulk wave (`/super-loop`) has run, HARVEST it: witness what each headless worker actually shipped (not what its log claims), re-queue the leaves that were..."
 metadata:
+  opencode: claude-only
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/wave-harvest/SKILL.md
+  canonical-description-hash: 2ffd9ef32f0742d8dfcaa02db85aa22384713aa1d0cf12d0bd3dfe20aaaa1c0e
 ---
 
 # Canonical project skill adapter

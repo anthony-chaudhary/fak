@@ -4,6 +4,7 @@ description: One repeatable pass that keeps fak as STEERABLE as it grows — the
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/steerability-score/SKILL.md
+  canonical-description-hash: 2a76d431073f08986c0d927867ad80ac15286c5415a1433b2941d28eefc6ef29
 ---
 
 # Canonical project skill adapter

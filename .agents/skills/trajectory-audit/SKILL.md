@@ -2,8 +2,10 @@
 name: trajectory-audit
 description: "Audit recent Claude and Codex transcript JSONL with the first-class Go `fak trajectory audit` verb: exact token/cache buckets, source coverage, behavior, deterministic bottlenecks, semantic confusion checks, and..."
 metadata:
+  opencode: claude-only
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/trajectory-audit/SKILL.md
+  canonical-description-hash: 580cadc5018c3d58394832e4dd9c1e578a15a11cb7148ed7ec595c279691c087
 ---
 
 # Canonical project skill adapter

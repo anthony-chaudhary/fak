@@ -4,6 +4,7 @@ description: "Plan and ship the next batch on one lane: run `dos-next-up`, acqui
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/dos-dispatch/SKILL.md
+  canonical-description-hash: f126fa66747e9691c8ff08b738aeff6444fd9bd0aa22f0f53687ee53ca8e0c80
 ---
 
 # Canonical project skill adapter

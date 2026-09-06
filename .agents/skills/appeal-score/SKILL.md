@@ -4,6 +4,7 @@ description: One repeatable pass that makes a doc read like a person wrote it, n
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/appeal-score/SKILL.md
+  canonical-description-hash: e6d05a3ad282cc92f0a407cfadbbaecf82672e6f0a9b4646392d4ea74e96efc2
 ---
 
 # Canonical project skill adapter

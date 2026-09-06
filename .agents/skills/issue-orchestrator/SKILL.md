@@ -4,6 +4,7 @@ description: Plan, partition, and coordinate multi-wave parallel subagent campai
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/issue-orchestrator/SKILL.md
+  canonical-description-hash: 3b96d8448da6feb44c221659c0e9fb7f6facfb521f5380bdf30344f320c481f4
 ---
 
 # Canonical project skill adapter
