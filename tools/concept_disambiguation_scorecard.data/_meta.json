@@ -3662,6 +3662,41 @@
           "category": "incidental",
           "reason": "sandbox tool name",
           "token": "mcp__fak_guard__sandbox_reset"
+        },
+        {
+          "category": "incidental",
+          "reason": "reasoning posture helper in child resource guard",
+          "token": "normalizeGuardReasoningPosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "reasoning posture helper in child resource guard",
+          "token": "guardReasoningPostureDebounceMultiplier"
+        },
+        {
+          "category": "incidental",
+          "reason": "reasoning posture helper in child resource guard",
+          "token": "guardReasoningPostureHeadroomMultiplier"
+        },
+        {
+          "category": "incidental",
+          "reason": "reasoning posture helper in child resource guard",
+          "token": "guardReasoningPostureMultipliers"
+        },
+        {
+          "category": "incidental",
+          "reason": "reasoning posture helper in child resource guard",
+          "token": "resolveGuardReasoningPosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "reasoning posture helper in child resource guard",
+          "token": "FAK_GUARD_REASONING_POSTURE"
+        },
+        {
+          "category": "incidental",
+          "reason": "reasoning posture helper in child resource guard",
+          "token": "FAK_GUARD_REASONING_EFFORT"
         }
       ],
       "exclude": [
@@ -3706,6 +3741,8 @@
         "FAK_CHILD_ATTEMPT_ID",
         "FAK_GUARD_HANDOFF_BLOCK_CEILING",
         "FAK_GUARD_OPERATOR_QUESTION_MODE",
+        "FAK_GUARD_REASONING_EFFORT",
+        "FAK_GUARD_REASONING_POSTURE",
         "FAK_GUARD_REFUSAL_STATE_DIR",
         "FAK_GUARD_SELF_TIGHTEN_OVERLAY",
         "FLEET_COMMENT_QUALITY_GUARD",
@@ -3958,6 +3995,9 @@
         "guardProviderSessionStart",
         "guardQuarantinedReadRecovery",
         "guardReadPath",
+        "guardReasoningPostureDebounceMultiplier",
+        "guardReasoningPostureHeadroomMultiplier",
+        "guardReasoningPostureMultipliers",
         "guardRegistration",
         "guardRegistrations",
         "guardRuntime",
@@ -4040,6 +4080,7 @@
         "next_gate_review",
         "nodeGateScript",
         "normalizeGuardOperatorQuestionMode",
+        "normalizeGuardReasoningPosture",
         "notifyGuardProviderSessionStart",
         "observer_guard",
         "optInGate",
@@ -4070,6 +4111,7 @@
         "registerGuardAdmissionFlag",
         "renderguardstartupreport",
         "reservedGuardBanner",
+        "resolveGuardReasoningPosture",
         "runCacheValueGateScore",
         "runGuardDisableUsage",
         "runGuardDisableWithUsage",
@@ -9660,6 +9702,36 @@
           "category": "incidental",
           "reason": "model capability registry leaf",
           "token": "capabilitymatrix"
+        },
+        {
+          "category": "incidental",
+          "reason": "reasoning posture helper in child resource guard",
+          "token": "normalizeGuardReasoningPosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "reasoning posture helper in child resource guard",
+          "token": "guardReasoningPostureDebounceMultiplier"
+        },
+        {
+          "category": "incidental",
+          "reason": "reasoning posture helper in child resource guard",
+          "token": "guardReasoningPostureHeadroomMultiplier"
+        },
+        {
+          "category": "incidental",
+          "reason": "reasoning posture helper in child resource guard",
+          "token": "guardReasoningPostureMultipliers"
+        },
+        {
+          "category": "incidental",
+          "reason": "reasoning posture helper in child resource guard",
+          "token": "resolveGuardReasoningPosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "reasoning posture helper in child resource guard",
+          "token": "FAK_GUARD_REASONING_POSTURE"
         }
       ],
       "exclude": [
@@ -9701,6 +9773,7 @@
         "EvidencePolicy",
         "FAK_ADMISSION_POLICY",
         "FAK_APP_CAPABILITY",
+        "FAK_GUARD_REASONING_POSTURE",
         "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_ORG_POLICY_URL",
         "FAK_PREFLIGHT_ALLOW_BIN_SKEW",
@@ -9796,6 +9869,9 @@
         "formatAmendmentPosture",
         "gradeSemanticFiles",
         "guardPolicyOriginEvidencePath",
+        "guardReasoningPostureDebounceMultiplier",
+        "guardReasoningPostureHeadroomMultiplier",
+        "guardReasoningPostureMultipliers",
         "guardWindowsArgvPreflight",
         "hookCapability",
         "hookPosture",
@@ -9820,6 +9896,7 @@
         "naturalTrafficPolicyRow",
         "normalizeDecodePolicyLabel",
         "normalizeFallbackPolicy",
+        "normalizeGuardReasoningPosture",
         "numareplicapolicyunsupported",
         "observeIncumbentPreflight",
         "orgPostureGloss",
@@ -9859,6 +9936,7 @@
         "referencePolicyForCorpusCell",
         "renderIncumbentPreflightText",
         "renderLaunchPosture",
+        "resolveGuardReasoningPosture",
         "resolveUltracodePosture",
         "routingPolicyStat",
         "runCounterfactualAdjudicator",
