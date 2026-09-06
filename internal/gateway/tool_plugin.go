@@ -41,6 +41,7 @@ type gatewayPluginExecutor struct {
 	traceID  string
 	verdict  WireVerdict
 	envelope *ResultEnvelope
+	err      error
 }
 
 func (e *gatewayPluginExecutor) Execute(ctx context.Context, p toolplugin.Proposal) (json.RawMessage, error) {
@@ -49,6 +50,7 @@ func (e *gatewayPluginExecutor) Execute(ctx context.Context, p toolplugin.Propos
 		return nil, err
 	}
 	e.verdict, e.envelope, err = e.s.executePluginCall(ctx, call, e.readOnly)
+	e.err = err
 	if err != nil {
 		return nil, err
 	}
@@ -93,8 +95,18 @@ func (s *Server) syscallWithPlugins(ctx context.Context, tool, rawArgs string, r
 	out := host.Run(ctx, toolplugin.Proposal{Tool: tool, Args: json.RawMessage(rawArgs)}, layers)
 	trace = out.Trace
 	pref = &out.Preference
-	if executor.envelope != nil {
-		return executor.verdict, executor.envelope, trace, pref, nil
+	if executor.err != nil {
+		return executor.verdict, executor.envelope, trace, pref, executor.err
+	}
+	if out.Decision.Action == toolplugin.ActionNarrow || out.Decision.Action == toolplugin.ActionDefer {
+		// Result admission is authoritative: never return the executor's saved
+		// envelope after the host has withheld or replaced its output.
+		if len(out.Result) != 0 {
+			if err := json.Unmarshal(out.Result, &env); err != nil {
+				return WireVerdict{}, nil, trace, pref, err
+			}
+		}
+		return executor.verdict, env, trace, pref, nil
 	}
 	kind := "DENY"
 	disposition := "TERMINAL"
@@ -111,6 +123,9 @@ func (s *Server) syscallWithPlugins(ctx context.Context, tool, rawArgs string, r
 // syscall/result rendering used by the legacy single-call path. The plugin host
 // does not own an engine and cannot execute directly.
 func (s *Server) executePluginCall(ctx context.Context, call *abi.ToolCall, readOnly bool) (WireVerdict, *ResultEnvelope, error) {
+	if wv, env, handled, err := s.syscallNative(ctx, call, readOnly); handled {
+		return wv, env, err
+	}
 	r, verdict := s.k.Syscall(ctx, call)
 	s.rememberOriginSeq(call.TraceID, call.Tool, string(resolveBytes(ctx, call.Args)), call.SeqNo)
 	wv := renderVerdict(verdict, resultMeta(r))

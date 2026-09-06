@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
@@ -46,6 +47,7 @@ func TestResponsesToolElisionAndCASRestoreDogfoodProbe(t *testing.T) {
 	t.Setenv("FAK_CTXRESTORE_CAS_DIR", casDir)
 
 	srv := newTestServer(t)
+	abi.RegisterAdjudicator(1, readAdj{})
 	const trace = "t-dogfood-responses-cas-restore"
 
 	largePayload := "LARGE_DOGFOOD_PAYLOAD_START: " + strings.Repeat("W", 40<<10) + " :END"
@@ -289,9 +291,21 @@ func TestResponsesToolElisionAndCASRestoreDogfoodProbe(t *testing.T) {
 		t.Fatalf("CAS file content mismatch: got %d bytes, want %d bytes", len(diskBytes), len(largePayload))
 	}
 
-	// Verify tool call was intercepted in-band and served inline
-	if !strings.Contains(respFinal.OutputText, largePayload) && !strings.Contains(respFinal.OutputText, "[fak: restored context") {
-		t.Fatalf("expected OutputText to contain restored payload, got: %q", respFinal.OutputText)
+	// The model consumes a structured restore result before answering; restored
+	// evidence itself must never masquerade as a completed assistant answer.
+	if respFinal.OutputText != "dogfood probe completed successfully with restored context" {
+		t.Fatalf("expected the model's post-restore answer, got: %q", respFinal.OutputText)
+	}
+	var restored CtxRestoreResult
+	for _, msg := range planner.capturedMsgs[len(planner.capturedMsgs)-1] {
+		if msg.Role == agent.RoleTool && msg.ToolCallID == "c_restore" {
+			if err := json.Unmarshal([]byte(msg.Content), &restored); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if restored.Bytes == "" || !strings.HasPrefix(largePayload, restored.Bytes) || !restored.HasMore || restored.Continuation == nil {
+		t.Fatalf("expected bounded restored evidence with continuation, got %d bytes", len(restored.Bytes))
 	}
 
 	// Verify telemetry counter incremented

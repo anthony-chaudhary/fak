@@ -71,6 +71,13 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 	for _, tc := range calls {
 		tool := tc.Function.Name
 		argsDigest := guardrsi.ArgsDigest(tc.Function.Arguments)
+		// Responses consumes gateway-owned restores as structured model input.
+		// Client-owned restores retain their call ID and ordinary MCP execution;
+		// converting either kind into assistant prose would terminate the task.
+		if ctx.Value(responsesRestoreContextKey{}) != nil && isRestoreTool(tool) {
+			pass = append(pass, tc)
+			continue
+		}
 		// Force-fresh escape hatch: a re-proposed read carrying the advertised _fak_fresh
 		// marker skips the cache probe and passes through to the client to actually run.
 		// Sound: this only ever turns a would-be served hit into a normal tool_use —
