@@ -213,3 +213,44 @@ func TestNamesWithSpecialBytesDoNotPanic(t *testing.T) {
 		t.Fatalf(`after "c" (name c\d): got %s, want %s`, showSet(got), showSet(set(`\`)))
 	}
 }
+
+// TestAllowedNextBytes_WhitespaceTolerance witnesses issue #11719: optional JSON
+// whitespace (spaces, tabs, newlines) within structural delimiters must be tolerated
+// without dead-ending.
+func TestAllowedNextBytes_WhitespaceTolerance(t *testing.T) {
+	schema := ToolSchema{Names: []string{"get", "get_weather", "list"}}
+
+	cases := []struct {
+		name   string
+		prefix string
+		want   map[byte]bool
+	}{
+		{"space after colon before quote", `{"name": "`, set("gl")},
+		{"space around colon", `{"name" : "`, set("gl")},
+		{"space before brace", ` {"name":"`, set("gl")},
+		{"space and newline after brace", "{\n  \"name\": \"", set("gl")},
+		{"space after colon only", `{"name": `, set(`"`)},
+		{"space before colon only", `{"name" `, set(":")},
+		{"space after brace only", `{ `, set(`"`)},
+		{"space before brace only", ` `, set("{")},
+		{"suffix space after comma", `{"name":"get", "arguments":`, nil},
+		{"suffix space around comma and colon", `{"name":"get" , "arguments" :`, nil},
+		{"suffix space after colon", `{"name":"get","arguments": `, nil},
+		{"suffix whitespace padded prefix", `{"name": "get", "arguments": `, nil},
+		{"suffix space after tool closing quote", `{"name":"get" `, set(",")},
+		{"suffix space after comma only", `{"name":"get", `, set(`"`)},
+		{"suffix arguments prefix", `{"name":"get", "arg`, set("u")},
+		{"suffix space before arguments colon", `{"name":"get", "arguments" `, set(":")},
+		{"full envelope with whitespace and args", `{"name": "get", "arguments": {"city": "NYC"}}`, nil},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := AllowedNextBytes([]byte(c.prefix), schema)
+			if !eqSet(got, c.want) {
+				t.Fatalf("AllowedNextBytes(%q)\n  got  %s\n  want %s",
+					c.prefix, showSet(got), showSet(c.want))
+			}
+		})
+	}
+}

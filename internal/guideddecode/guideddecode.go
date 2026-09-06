@@ -60,51 +60,162 @@ const pre = `{"name":"`
 // UNCONSTRAINED.
 const suf = `","arguments":`
 
+func isJSONWhitespace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
 // AllowedNextBytes returns which bytes may legally extend prefix toward a valid
 // tool-call envelope {"name":"<one of schema.Names>","arguments":<json>}.
+//
+// Optional JSON whitespace (spaces, tabs, newlines, carriage returns) is tolerated
+// in structural positions (after '{', around ':', after ',', before '{').
 //
 // See the package doc for the soundness contract and the nil / empty-non-nil /
 // non-empty return convention.
 func AllowedNextBytes(prefix []byte, schema ToolSchema) map[byte]bool {
-	// Region 1: still consuming the fixed PRE literal. PRE is enforced from the
-	// literal itself, independent of the name set — so an empty schema.Names
-	// still admits '{' at prefix=="" and only dead-ends at the enum branch.
-	if len(prefix) < len(pre) {
-		if !bytes.Equal(prefix, []byte(pre)[:len(prefix)]) {
-			return map[byte]bool{} // diverged from PRE => dead end
+	// Step 1: skip optional whitespace before '{'
+	pos := 0
+	for pos < len(prefix) && isJSONWhitespace(prefix[pos]) {
+		pos++
+	}
+	if pos == len(prefix) {
+		return map[byte]bool{'{': true}
+	}
+	if prefix[pos] != '{' {
+		return map[byte]bool{}
+	}
+	pos++
+
+	// Step 2: skip optional whitespace after '{'
+	for pos < len(prefix) && isJSONWhitespace(prefix[pos]) {
+		pos++
+	}
+	if pos == len(prefix) {
+		return map[byte]bool{'"': true}
+	}
+
+	// Step 3: match literal `"name"`
+	const nameKey = `"name"`
+	for i := 0; i < len(nameKey); i++ {
+		if pos == len(prefix) {
+			return map[byte]bool{nameKey[i]: true}
 		}
-		return map[byte]bool{pre[len(prefix)]: true}
+		if prefix[pos] != nameKey[i] {
+			return map[byte]bool{}
+		}
+		pos++
 	}
 
-	// Past PRE: the prefix must reproduce PRE exactly in its first bytes, or it
-	// has already diverged from every envelope.
-	if !bytes.HasPrefix(prefix, []byte(pre)) {
-		return map[byte]bool{} // diverged from PRE => dead end
+	// Step 4: skip optional whitespace before ':' (around ':')
+	for pos < len(prefix) && isJSONWhitespace(prefix[pos]) {
+		pos++
 	}
+	if pos == len(prefix) {
+		return map[byte]bool{':': true}
+	}
+	if prefix[pos] != ':' {
+		return map[byte]bool{}
+	}
+	pos++
 
-	// Region 2/3: the NAME enum and the fixed SUF that follows it, evaluated
-	// per still-viable name. A name stays viable while prefix matches its
-	// skeleton byte-for-byte; the next skeleton byte of each viable name is
-	// admitted. Overlapping names (e.g. "get" and "get_weather") therefore
-	// naturally admit both the closing quote of the shorter name and the next
-	// identifier byte of the longer one.
+	// Step 5: skip optional whitespace after ':' (around ':')
+	for pos < len(prefix) && isJSONWhitespace(prefix[pos]) {
+		pos++
+	}
+	if pos == len(prefix) {
+		return map[byte]bool{'"': true}
+	}
+	if prefix[pos] != '"' {
+		return map[byte]bool{}
+	}
+	pos++
+
+	// Beyond the opening quote of the tool name.
+	// rest holds the bytes from the start of the tool name.
+	rest := prefix[pos:]
+
 	unconstrained := false
 	allowed := map[byte]bool{}
+	const argKey = `"arguments"`
+
 	for _, name := range schema.Names {
-		s := []byte(pre + name + suf)
-		if len(prefix) >= len(s) {
-			// The prefix is at or beyond the end of this skeleton. If it
-			// reproduces the whole skeleton, we are in the UNCONSTRAINED region;
-			// otherwise this name is no longer viable.
-			if bytes.HasPrefix(prefix, s) {
-				unconstrained = true
+		nameBytes := []byte(name)
+		if len(rest) < len(nameBytes) {
+			if bytes.HasPrefix(nameBytes, rest) {
+				allowed[nameBytes[len(rest)]] = true
 			}
 			continue
 		}
-		if bytes.Equal(prefix, s[:len(prefix)]) {
-			allowed[s[len(prefix)]] = true
+		if len(rest) == len(nameBytes) {
+			if bytes.Equal(rest, nameBytes) {
+				allowed['"'] = true
+			}
+			continue
 		}
+		// len(rest) > len(nameBytes)
+		if !bytes.HasPrefix(rest, nameBytes) || rest[len(nameBytes)] != '"' {
+			continue
+		}
+
+		afterName := rest[len(nameBytes)+1:]
+		p := 0
+		// Step 6: skip optional whitespace before ',' (around ',')
+		for p < len(afterName) && isJSONWhitespace(afterName[p]) {
+			p++
+		}
+		if p == len(afterName) {
+			allowed[','] = true
+			continue
+		}
+		if afterName[p] != ',' {
+			continue
+		}
+		p++
+
+		// Step 7: skip optional whitespace after ',' (around ',')
+		for p < len(afterName) && isJSONWhitespace(afterName[p]) {
+			p++
+		}
+		if p == len(afterName) {
+			allowed['"'] = true
+			continue
+		}
+
+		// Step 8: match `"arguments"`
+		argKeyMatched := true
+		for i := 0; i < len(argKey); i++ {
+			if p == len(afterName) {
+				allowed[argKey[i]] = true
+				argKeyMatched = false
+				break
+			}
+			if afterName[p] != argKey[i] {
+				argKeyMatched = false
+				break
+			}
+			p++
+		}
+		if !argKeyMatched {
+			continue
+		}
+
+		// Step 9: skip optional whitespace before ':' (around ':')
+		for p < len(afterName) && isJSONWhitespace(afterName[p]) {
+			p++
+		}
+		if p == len(afterName) {
+			allowed[':'] = true
+			continue
+		}
+		if afterName[p] != ':' {
+			continue
+		}
+		p++
+
+		// Step 10: ':' matched! Tool envelope skeleton is complete.
+		unconstrained = true
 	}
+
 	if unconstrained {
 		return nil
 	}
