@@ -279,6 +279,34 @@ func TestSessionCardApprovalRendering(t *testing.T) {
 	if strings.Contains(markup, `/api/sessions/session-working-test/approval`) {
 		t.Error("working session unexpectedly rendered approval controls")
 	}
+
+	// Verify card with awaiting_approval state but nil PendingApproval also renders actionable controls
+	cardAwaitingNoStruct := SessionCard{
+		ID:                 "session-awaiting-no-struct",
+		Provider:           "codex",
+		Workspace:          "/home/user/fak",
+		State:              sessionAwaitingApproval,
+		PendingInteraction: "operator approval required for high risk bash command",
+		LastEventAt:        now,
+		HasInputLease:      true,
+		Capabilities:       map[string]SessionCapability{"cancel": {Enabled: true}},
+	}
+	markupNoStruct, err := renderSessionCardsHTML([]SessionCard{cardAwaitingNoStruct}, now, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"session-approval-modal",
+		"Action approval required",
+		"operator approval required for high risk bash command",
+		`data-approval-action="accept"`,
+		`data-approval-action="decline"`,
+		`action="/api/sessions/session-awaiting-no-struct/approval"`,
+	} {
+		if !strings.Contains(markupNoStruct, want) {
+			t.Errorf("markup for awaiting session without struct missing %q:\n%s", want, markupNoStruct)
+		}
+	}
 }
 
 func TestSessionApprovalEndpointValidationAndResolution(t *testing.T) {
