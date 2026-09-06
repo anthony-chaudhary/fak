@@ -92,6 +92,12 @@ func TestPeerWIPAttributionBounded(t *testing.T) {
 				case "-c":
 					var out strings.Builder
 					ids := args[13:]
+					for i, arg := range ids {
+						if arg == "--always" {
+							ids = ids[:i]
+							break
+						}
+					}
 					if len(ids) > 129 {
 						t.Fatalf("unbounded argv: %d objects", len(ids))
 					}
@@ -269,6 +275,112 @@ func TestPeerWIPAttributionBounded(t *testing.T) {
 			t.Logf("refs=%d unique_peer_objects=%d paths=%d attribution_subprocesses=%d bound=%d construction=%s attribution=%s fixture_total=%s", refs+1, refs, len(paths), calls, bound, constructionElapsed, attributionElapsed, time.Since(fixtureStarted))
 		})
 	}
+}
+
+func TestPeerWIPLiteralFilterPreservesRealGitOwnership(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dir := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		out, code, err := realRunner(ctx, dir, args...)
+		if err != nil || code != 0 {
+			t.Fatalf("git %v: code=%d err=%v output=%s", args, code, err, out)
+		}
+		return strings.TrimSpace(out)
+	}
+	write := func(path, body string) {
+		t.Helper()
+		p := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init")
+	git("config", "user.name", "Fixture")
+	git("config", "user.email", "fixture@example.invalid")
+	for _, p := range []string{"literal/[x].go", "literal/x.go", "deleted.go", "rename-old.go", "scope/claimed.go", "free.go"} {
+		write(p, "base\n")
+	}
+	git("add", "--", ".")
+	baseTree := git("write-tree")
+	base := git("commit-tree", baseTree, "-m", "base")
+	git("update-ref", "HEAD", base)
+	stamp, err := wipref.EncodeStamp(wipref.Stamp{SessionID: "a-scope", Scope: []string{"scope"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoped := git("commit-tree", baseTree, "-p", base, "-m", stamp)
+	git("update-ref", "refs/fak/wip/a-scope", scoped)
+	write("literal/[x].go", "owned\n")
+	write("literal/x.go", "glob decoy\n")
+	if err := os.Remove(filepath.Join(dir, "deleted.go")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dir, "rename-old.go"), filepath.Join(dir, "rename-new.go")); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 128; i++ {
+		write(fmt.Sprintf("noise/%03d.go", i), "unrelated\n")
+	}
+	git("add", "--", ".")
+	tree := git("write-tree")
+	delta := git("commit-tree", tree, "-p", base, "-m", "delta")
+	git("update-ref", "refs/fak/wip/b-delta", delta)
+	empty := git("commit-tree", tree, "-p", delta, "-m", "empty")
+	git("update-ref", "refs/fak/wip/c-empty", empty)
+	paths := []string{"literal/[x].go", "deleted.go", "rename-old.go", "rename-new.go", "scope/claimed.go", "free.go"}
+	var filteredRaw string
+	var fullBytes int
+	runner := func(unfiltered bool) Runner {
+		return func(ctx context.Context, dir string, args ...string) (string, int, error) {
+			if unfiltered {
+				for i, arg := range args {
+					if arg == "--always" {
+						args = args[:i]
+						break
+					}
+				}
+			}
+			out, code, err := realRunner(ctx, dir, args...)
+			if len(args) > 0 && args[0] == "-c" {
+				if unfiltered {
+					fullBytes += len(out)
+				} else {
+					filteredRaw += out
+				}
+			}
+			return out, code, err
+		}
+	}
+	oldOwners, err := resolveGitPeerOwners(ctx, runner(true), dir, paths, "self")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owners, err := resolveGitPeerOwners(ctx, runner(false), dir, paths, "self")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"literal/[x].go": "b-delta", "deleted.go": "b-delta", "rename-old.go": "b-delta", "rename-new.go": "b-delta", "scope/claimed.go": "a-scope"}
+	if !reflect.DeepEqual(owners, oldOwners) || !reflect.DeepEqual(owners, want) {
+		t.Fatalf("ownership changed: filtered=%v full=%v want=%v", owners, oldOwners, want)
+	}
+	if strings.Contains(filteredRaw, "noise/") || strings.Contains(filteredRaw, "literal/x.go") || len(filteredRaw)*8 >= fullBytes {
+		t.Fatalf("unrelated diff bytes were not excluded: filtered=%d full=%d", len(filteredRaw), fullBytes)
+	}
+	for _, oid := range []string{scoped, delta, empty, base} {
+		if !strings.Contains(filteredRaw, oid+"\x00") {
+			t.Fatalf("missing checkpoint or terminator %s", oid)
+		}
+	}
+	none, err := resolveGitPeerOwners(ctx, realRunner, dir, []string{"free.go"}, "self")
+	if err != nil || len(none) != 0 {
+		t.Fatalf("empty intersection: owners=%v err=%v", none, err)
+	}
+	t.Logf("full_diff_bytes=%d literal_filtered_bytes=%d identical_owners=%d", fullBytes, len(filteredRaw), len(owners))
 }
 
 func TestPeerWIPContextTimeout(t *testing.T) {

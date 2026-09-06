@@ -400,6 +400,13 @@ func resolveGitPeerOwners(ctx context.Context, run Runner, dir string, targetPat
 		args := []string{"-c", "log.showRoot=false", "log", "--no-walk=unsorted", "--format=%H", "--raw", "-z", "--no-abbrev", "--no-renames", "--no-ext-diff", "--no-textconv", "--diff-merges=off", "-r"}
 		args = append(args, batch...)
 		args = append(args, root)
+		// Keep every checkpoint header and the completeness terminator even when
+		// its delta has no requested paths. Literal pathspecs prevent glob syntax
+		// in filenames from widening or omitting the ownership evidence.
+		args = append(args, "--always", "--sparse", "--")
+		for _, path := range targetPaths {
+			args = append(args, ":(top,literal)"+path)
+		}
 		raw, err := runPeerWIPLookup(ctx, run, dir, args...)
 		if err != nil {
 			return nil, err

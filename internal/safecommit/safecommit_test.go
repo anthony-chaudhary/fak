@@ -1383,7 +1383,7 @@ func TestCommitRefusesDirectorySweepOfPeerWIP(t *testing.T) {
 		g.reply["for-each-ref --sort=refname --format=%(refname) %(objectname) refs/fak/wip"] = reply{out: "refs/fak/wip/peer-agent-3 " + oid + "\n", code: 0}
 		g.reply["for-each-ref --sort=refname --format=%(refname)%00%(objectname)%00%(objecttype)%00%(contents:size)%00%(contents)%00 refs/fak/wip"] = reply{out: "refs/fak/wip/peer-agent-3\x00" + oid + "\x00commit\x000\x00\x00\n", code: 0}
 		g.reply["rev-list --max-parents=0 --max-count=1 "+oid+" --"] = reply{out: root + "\n", code: 0}
-		g.reply["-c log.showRoot=false log --no-walk=unsorted --format=%H --raw -z --no-abbrev --no-renames --no-ext-diff --no-textconv --diff-merges=off -r "+oid+" "+root] = reply{out: oid + "\x00\n:100644 100644 " + oid + " " + root + " M\x00internal/gateway/peer_wip.go\x00" + root + "\x00", code: 0}
+		g.reply["-c log.showRoot=false log --no-walk=unsorted --format=%H --raw -z --no-abbrev --no-renames --no-ext-diff --no-textconv --diff-merges=off -r "+oid+" "+root+" --always --sparse -- :(top,literal)internal/gateway/peer_wip.go :(top,literal)internal/gateway/router.go"] = reply{out: oid + "\x00\n:100644 100644 " + oid + " " + root + " M\x00internal/gateway/peer_wip.go\x00" + root + "\x00", code: 0}
 		opts := baseOpts()
 		opts.Paths = []string{"internal/gateway"}
 		opts.SessionID = "self-session"
