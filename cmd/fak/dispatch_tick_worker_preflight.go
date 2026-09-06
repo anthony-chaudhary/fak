@@ -55,16 +55,17 @@ type dispatchWorkerPreflightRequest struct {
 }
 
 type dispatchCodexPreflightObservation struct {
-	Authenticated  bool
-	AccountType    string
-	Models         []string
-	AuthError      string
-	ModelError     string
-	QuotaError     string
-	RouteError     string
-	QuotaExhausted bool
-	RetryAt        time.Time
-	GatewayVerdict string
+	Authenticated      bool
+	AccountType        string
+	Models             []string
+	AuthError          string
+	ModelError         string
+	QuotaError         string
+	RouteError         string
+	QuotaExhausted     bool
+	RetryAt            time.Time
+	GatewayVerdict     string
+	RequiresOpenAIAuth *bool
 }
 
 type dispatchWorkerPreflightResult struct {
@@ -264,7 +265,7 @@ func dispatchWorkerPreflight(ctx context.Context, req dispatchWorkerPreflightReq
 			seat = "default"
 		}
 		cleanHome := redactLocalPath(result.accountDir)
-		result.Reason = fmt.Sprintf("Codex credential is missing for selected seat %q (source: %s); run `fak accounts enroll-current --harness codex` or `CODEX_HOME=%s fak m -- codex login`", seat, cleanHome, cleanHome)
+		result.Reason = fmt.Sprintf("Codex credential is missing for selected seat %q (source: %s, path redacted); set CODEX_HOME to the selected seat's actual directory, then run `fak m -- codex login` in an interactive terminal; retry dispatch with the same CODEX_HOME", seat, cleanHome)
 	case dispatchWorkerPreflightAuthExpired:
 		result.Reason = "Codex credential is expired for the selected seat"
 	case dispatchWorkerPreflightAuthMismatched:
@@ -619,16 +620,17 @@ func dispatchCodexObservationFromRPC(messages map[string]dispatchCodexRPCMessage
 			Account *struct {
 				Type string `json:"type"`
 			} `json:"account"`
-			RequiresOpenAIAuth bool `json:"requiresOpenaiAuth"`
+			RequiresOpenAIAuth *bool `json:"requiresOpenaiAuth"`
 		}
 		if err := json.Unmarshal(accountMsg.Result, &result); err != nil {
 			obs.AuthError = "invalid account/read response"
 		} else {
+			obs.RequiresOpenAIAuth = result.RequiresOpenAIAuth
 			obs.Authenticated = result.Account != nil
 			if result.Account != nil {
 				obs.AccountType = result.Account.Type
 			}
-			if result.RequiresOpenAIAuth && result.Account == nil {
+			if result.RequiresOpenAIAuth != nil && *result.RequiresOpenAIAuth && result.Account == nil {
 				obs.AuthError = "not logged in"
 			}
 		}

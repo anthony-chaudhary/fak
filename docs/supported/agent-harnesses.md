@@ -42,7 +42,7 @@ it carries the **guide** label.
 |---|---|---|---|---|
 | Claude Code | Anthropic Messages | `fak manage` + guide | `ANTHROPIC_BASE_URL` (or `fak manage -- claude`) | [claude.md](../integrations/claude.md) |
 | Cursor | MCP, or OpenAI Chat Completions proxy | guide | MCP server entry, or a custom OpenAI-compatible endpoint | [cursor.md](../integrations/cursor.md) |
-| OpenAI Codex | OpenAI Chat Completions | `fak manage` + guide | `OPENAI_BASE_URL` | [openai-codex.md](../integrations/openai-codex.md) |
+| OpenAI Codex (CLI / App) | OpenAI Responses / MCP | `fak manage` + guide | `-c model_providers.fak.*` / MCP (`fak codex mcp install`) | [openai-codex.md](../integrations/openai-codex.md) |
 | OpenCode | OpenAI Chat Completions | `fak manage` + guide | `OPENAI_BASE_URL` (or `fak manage --provider openai -- opencode`) | [claude.md#opencode](../integrations/claude.md#opencode) |
 | Hermes Agent (NousResearch) | OpenAI Chat Completions | `fak manage` + guide | `OPENAI_BASE_URL` / `~/.hermes/config.yaml` `model.base_url` (or `fak manage -- hermes`) | [hermes.md](../integrations/hermes.md) |
 

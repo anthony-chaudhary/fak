@@ -24,6 +24,7 @@ There are two useful fak entry points:
 | If you run... | Use this fak path | Why |
 |---|---|---|
 | Current Codex CLI or IDE extension | `fak serve --stdio` as an MCP server | Codex supports MCP, and fak exposes verdict tools without changing Codex's model wire. |
+| Codex Desktop App for Windows (UI/UX) | `fak codex mcp install` + capability floor | Connects fak as an immutable local MCP server in the desktop app's Settings -> MCP panel; lets you run `approval_policy = "never"` safely without modal prompt fatigue or destructive execution risk. |
 | Codex CLI with an OpenAI API key and you want fak in front of the model wire | `fak codex -- <codex args...>` | One command starts `fak manage`, launches Codex, and injects per-run Codex `-c model_provider=fak` overrides for the Responses wire. |
 | OpenAI SDKs, OpenAI Agents SDK, LangChain, LlamaIndex, or any Chat Completions client | `fak serve` as an OpenAI-compatible gateway | The client already calls `/v1/chat/completions`, so you repoint its base URL to fak. Endpoint-by-endpoint compatibility and current limits: [openai.md](openai.md). |
 
@@ -732,6 +733,46 @@ Good fits include:
 - OpenAI Agents SDK in Chat Completions mode.
 - LangChain, LlamaIndex, AutoGen, and Pydantic AI Chat Completions models.
 - Vercel AI SDK OpenAI-compatible providers and similar clients.
+
+## Path 3: Codex Desktop App for Windows (UI/UX Integration)
+
+The OpenAI Codex Desktop App for Windows (packaged as MSIX `OpenAI.Codex` / `ChatGPT` with the Electron `Owl` shell and background `codex.exe app-server` daemon) offers an extensive graphical engineering environment. Integrating `fak` with the Windows desktop app provides an external governance floor and performance acceleration while eliminating common Windows operational issues.
+
+### 1. Connecting `fak` to Codex Desktop via Immutable MCP
+
+The recommended integration boundary for the Codex Desktop App is **immutable MCP**. Codex Desktop automatically reads MCP server definitions from `%USERPROFILE%\.codex\config.toml`:
+
+```powershell
+# Install content-addressed immutable fak MCP server
+fak codex mcp install --policy C:\work\fak\examples\dev-agent-policy.json
+fak codex mcp status
+```
+
+In the Codex Desktop App:
+1. Open **Settings** -> **MCP**.
+2. Verify `fak` appears as a connected server exposing `fak_adjudicate` and `fak_syscall`.
+3. Restart or reload Codex Desktop to ensure the background app-server binds the updated entry.
+
+### 2. Solving Approval Prompt Fatigue with an External Capability Floor
+
+Codex Desktop introduces granular approval modes (`approval_policy = "always" | "on-request" | "never"`) and sandbox profiles (`sandbox_mode = ":workspace" | "danger-full-access"`).
+
+* **The Problem:** Operators face modal approval fatigue on every routine command, or select `approval_policy = "never"` / `danger-full-access` which exposes the system to catastrophic deletion (`rm -rf`, `Remove-Item -Force`) and repo clobbering (`git push`).
+* **The `fak` Solution:** Keep `approval_policy = "never"` in Codex Desktop while letting `fak` enforce the default-deny capability floor:
+  - Benign dev actions (`go test`, `git status`, file reads) proceed autonomously with zero modal dialogs.
+  - Destructive commands (`rm -rf`, unconstrained pipes) and self-modifications (`.git/`, kernel files) are structurally blocked (`POLICY_BLOCK`, `SELF_MODIFY`).
+
+### 3. Mitigating Windows Desktop Quirks & Upstream Issues
+
+| Codex Desktop Windows Defect | Impact | `fak` Mitigation |
+|---|---|---|
+| **Console Window Flashing** | Spawning background tasks flashes black `conhost.exe` CMD windows. | `internal/windowgate` injects Win32 `CREATE_NO_WINDOW` (`0x08000000`) into all tool process attributes. |
+| **Win32 Long Path Failures** | OS Error 206 (`The filename or extension is too long`) on repository scans. | `fak` normalizes Win32 UNC extended paths (`\\?\C:\...`) and keeps globs bounded. |
+| **MCP Process Proliferation** | Each spawned subagent creates redundant Node/Python stdio processes, leaking RAM. | `fak serve --stdio` pools downstream tool daemons into a single multiplexed gateway. |
+| **Multi-Agent Trunk Collisions** | Codex subagents (`spawn_agent`) collide on shared files, causing Git index lock errors. | Coordinate subagents through `dos_arbitrate` and isolate changes in detached worktrees (`fak worktree worker prepare\|land\|reap`). |
+| **Context Explosion** | Repetitive shell outputs and lifetime token meters accelerate context exhaustion. | Content-addressed output deduplication (`fak_admit`) stores hashes for repeat outputs, and `fak vcache score` isolates true turn occupancy. |
+
+For a deep empirical study of the local Windows install, architecture, and issue catalogue, see [`docs/notes/2026-09-05-codex-desktop-windows-uiux-harness-study.md`](../notes/2026-09-05-codex-desktop-windows-uiux-harness-study.md).
 
 ## What the kernel blocks for coding workflows
 
