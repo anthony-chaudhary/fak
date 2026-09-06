@@ -116,8 +116,8 @@ func NewWindowedFileReader(args ...any) *WindowedFileReader {
 		rootDir:           root,
 		defaultWindowSize: size,
 		maxFileSize:       maxFileSize,
-		CurrentLine:       1,
-		CurrentStart:      1,
+		CurrentLine:       0,
+		CurrentStart:      0,
 		WindowSize:        size,
 	}
 }
@@ -198,6 +198,7 @@ func (w *WindowedFileReader) Open(path string, startLine int, windowSize int) ([
 
 	data, err := w.readFileLocked(path)
 	if err != nil {
+		w.resetLocked()
 		return nil, err
 	}
 
@@ -430,14 +431,22 @@ func (w *WindowedFileReader) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	w.resetLocked()
+	return nil
+}
+
+func (w *WindowedFileReader) resetLocked() {
 	w.FilePath = ""
 	w.Path = ""
 	w.Lines = nil
 	w.TotalLines = 0
-	w.CurrentLine = 1
-	w.CurrentStart = 1
-	w.WindowSize = w.defaultWindowSize
-	return nil
+	w.CurrentLine = 0
+	w.CurrentStart = 0
+	if w.defaultWindowSize > 0 {
+		w.WindowSize = w.defaultWindowSize
+	} else {
+		w.WindowSize = DefaultWindowSize
+	}
 }
 
 // IsOpen reports whether a file is currently open in the reader.
@@ -541,6 +550,9 @@ func (w *WindowedFileReader) readFileLocked(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %s: not a regular file", ErrInvalidPath, resolved)
+	}
 
 	maxSize := w.maxFileSize
 	if maxSize <= 0 {
@@ -572,20 +584,34 @@ func (w *WindowedFileReader) readFileLocked(path string) ([]byte, error) {
 	if err == io.EOF || n == 0 {
 		data = header[:n]
 	} else {
-		rest, readErr := io.ReadAll(io.LimitReader(f, maxSize-int64(n)+1))
-		if readErr != nil {
-			return nil, readErr
-		}
-		if int64(n)+int64(len(rest)) > maxSize {
-			return nil, ErrFileTooLarge
-		}
-		if bytes.IndexByte(rest, 0) >= 0 {
-			return nil, ErrBinaryFile
-		}
-		if len(rest) == 0 {
-			data = header[:n]
+		size := fi.Size()
+		if size > 0 && size <= maxSize {
+			data = make([]byte, 0, size)
 		} else {
-			data = append(header[:n], rest...)
+			data = make([]byte, 0, int64(n)+4096)
+		}
+		data = append(data, header[:n]...)
+
+		buf := make([]byte, 32*1024)
+		var totalRead int64 = int64(n)
+		for {
+			nr, readErr := f.Read(buf)
+			if nr > 0 {
+				totalRead += int64(nr)
+				if totalRead > maxSize {
+					return nil, ErrFileTooLarge
+				}
+				if bytes.IndexByte(buf[:nr], 0) >= 0 {
+					return nil, ErrBinaryFile
+				}
+				data = append(data, buf[:nr]...)
+			}
+			if readErr != nil {
+				if readErr == io.EOF {
+					break
+				}
+				return nil, readErr
+			}
 		}
 	}
 	return data, nil

@@ -922,3 +922,171 @@ func TestWindowedFileConfig(t *testing.T) {
 		t.Errorf("expected WindowSize 50, got %d", w.WindowSize)
 	}
 }
+
+// TestWindowedFileRejectNonRegularFile verifies that non-regular files (devices, FIFOs, pipes, directories)
+// are rejected with ErrInvalidPath and a "not a regular file" error to prevent hangs.
+func TestWindowedFileRejectNonRegularFile(t *testing.T) {
+	// 1. Directory is a non-regular file and returns ErrInvalidPath
+	dir := t.TempDir()
+	wDir := NewWindowedFileReader(10)
+	linesDir, err := wDir.Open(dir, 1, 10)
+	if err == nil {
+		t.Fatal("expected error opening directory, got nil")
+	}
+	if !errors.Is(err, ErrInvalidPath) {
+		t.Errorf("expected ErrInvalidPath for directory, got %v", err)
+	}
+	if linesDir != nil {
+		t.Errorf("expected nil lines for directory, got %v", linesDir)
+	}
+	if wDir.IsOpen() {
+		t.Error("expected IsOpen to be false after failed open on directory")
+	}
+
+	// 2. Character device / non-regular file (os.DevNull)
+	fi, err := os.Stat(os.DevNull)
+	if err != nil {
+		t.Skipf("cannot stat os.DevNull on this platform: %v", err)
+	}
+	if fi.Mode().IsRegular() {
+		t.Fatalf("expected os.DevNull to be a non-regular file, got Mode=%v", fi.Mode())
+	}
+
+	w := NewWindowedFileReader(10)
+	lines, err := w.Open(os.DevNull, 1, 10)
+	if err == nil {
+		t.Fatal("expected error opening non-regular file (os.DevNull), got nil")
+	}
+	if !errors.Is(err, ErrInvalidPath) {
+		t.Errorf("expected ErrInvalidPath, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Errorf("expected 'not a regular file' in error message, got %q", err.Error())
+	}
+	if lines != nil {
+		t.Errorf("expected nil lines on error, got %v", lines)
+	}
+	if w.IsOpen() {
+		t.Error("expected IsOpen to be false after failed open on non-regular file")
+	}
+	if w.Lines != nil {
+		t.Errorf("expected Lines to be nil, got %v", w.Lines)
+	}
+	if w.FilePath != "" {
+		t.Errorf("expected FilePath to be empty, got %q", w.FilePath)
+	}
+	if w.CurrentLine != 0 {
+		t.Errorf("expected CurrentLine 0, got %d", w.CurrentLine)
+	}
+	if _, err := w.View(); !errors.Is(err, ErrNoFileOpen) {
+		t.Errorf("expected ErrNoFileOpen from View, got %v", err)
+	}
+}
+
+// TestWindowedFileResetStateOnFailedOpen verifies that when Open fails after a file was already open,
+// all internal state (Lines, FilePath, CurrentLine) is cleanly reset and IsOpen becomes false.
+func TestWindowedFileResetStateOnFailedOpen(t *testing.T) {
+	dir := t.TempDir()
+	validPath := createTestFile(t, dir, "valid.txt", "line 1\nline 2\nline 3\n")
+
+	w := NewWindowedFileReader(10)
+
+	// Step 1: Open a valid file and verify it is active
+	lines, err := w.Open(validPath, 1, 10)
+	if err != nil {
+		t.Fatalf("initial Open failed: %v", err)
+	}
+	if len(lines) != 3 || !w.IsOpen() {
+		t.Fatalf("expected file to be open with 3 lines, got IsOpen=%v, len=%d", w.IsOpen(), len(lines))
+	}
+	if w.FilePath != validPath {
+		t.Fatalf("expected FilePath %q, got %q", validPath, w.FilePath)
+	}
+	if w.CurrentLine != 1 {
+		t.Fatalf("expected CurrentLine 1, got %d", w.CurrentLine)
+	}
+
+	// Step 2: Attempt to open missing_file_xyz.txt
+	failedLines, err := w.Open("missing_file_xyz.txt", 100, 10)
+	if err == nil {
+		t.Fatal("expected error opening nonexistent file, got nil")
+	}
+	if failedLines != nil {
+		t.Errorf("expected nil lines on failed Open, got %v", failedLines)
+	}
+	if w.IsOpen() {
+		t.Error("expected IsOpen == false after failed Open")
+	}
+	if w.Lines != nil {
+		t.Errorf("expected Lines == nil, got %v", w.Lines)
+	}
+	if w.FilePath != "" {
+		t.Errorf("expected FilePath to be empty, got %q", w.FilePath)
+	}
+	if w.CurrentLine != 0 {
+		t.Errorf("expected CurrentLine 0, got %d", w.CurrentLine)
+	}
+
+	// Subsequent navigation methods must fail with ErrNoFileOpen
+	if _, err := w.View(); !errors.Is(err, ErrNoFileOpen) {
+		t.Errorf("expected ErrNoFileOpen from View, got %v", err)
+	}
+	if _, err := w.ScrollDown(1); !errors.Is(err, ErrNoFileOpen) {
+		t.Errorf("expected ErrNoFileOpen from ScrollDown, got %v", err)
+	}
+	if _, err := w.ScrollUp(1); !errors.Is(err, ErrNoFileOpen) {
+		t.Errorf("expected ErrNoFileOpen from ScrollUp, got %v", err)
+	}
+	if _, err := w.Goto(1); !errors.Is(err, ErrNoFileOpen) {
+		t.Errorf("expected ErrNoFileOpen from Goto, got %v", err)
+	}
+	if status := w.Status(); status != "no file open" {
+		t.Errorf("expected 'no file open' status, got %q", status)
+	}
+	path, curLine, winSize, totalLines := w.CurrentPosition()
+	if path != "" || curLine != 0 || winSize != 0 || totalLines != 0 {
+		t.Errorf("expected zeroed CurrentPosition, got path=%q, curLine=%d, winSize=%d, totalLines=%d",
+			path, curLine, winSize, totalLines)
+	}
+
+	// Step 3: Re-open valid file, then fail with non-regular file
+	if _, err := w.Open(validPath, 1, 10); err != nil {
+		t.Fatalf("re-opening valid file failed: %v", err)
+	}
+	if !w.IsOpen() {
+		t.Fatal("expected file to be open after re-opening")
+	}
+	if _, err := w.Open(os.DevNull, 1, 10); err == nil {
+		t.Fatal("expected error opening os.DevNull, got nil")
+	}
+	if w.IsOpen() {
+		t.Error("expected IsOpen to be false after failed Open on non-regular file")
+	}
+	if w.Lines != nil {
+		t.Errorf("expected Lines to be nil after failed Open on non-regular file")
+	}
+	if _, err := w.View(); !errors.Is(err, ErrNoFileOpen) {
+		t.Errorf("expected ErrNoFileOpen from View, got %v", err)
+	}
+
+	// Step 4: Re-open valid file, then fail with binary file
+	binaryPath := createTestFile(t, dir, "binary.bin", "text\x00binary\n")
+	if _, err := w.Open(validPath, 1, 10); err != nil {
+		t.Fatalf("re-opening valid file failed: %v", err)
+	}
+	if !w.IsOpen() {
+		t.Fatal("expected file to be open after re-opening")
+	}
+	if _, err := w.Open(binaryPath, 1, 10); err == nil {
+		t.Fatal("expected error opening binary file, got nil")
+	}
+	if w.IsOpen() {
+		t.Error("expected IsOpen to be false after failed Open on binary file")
+	}
+	if w.Lines != nil {
+		t.Errorf("expected Lines to be nil after failed Open on binary file")
+	}
+	if _, err := w.View(); !errors.Is(err, ErrNoFileOpen) {
+		t.Errorf("expected ErrNoFileOpen from View, got %v", err)
+	}
+}
