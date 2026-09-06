@@ -98,6 +98,7 @@ concurrent = [
   "observer",
   "gym",
   "sandbox",
+  "resultstier",
   "qwen38campaign",
   "factorymigrate",
   "vcachechain",
@@ -719,6 +720,7 @@ autopick = [
 qwen38campaign = ["internal/qwen38campaign/**"]
 factorymigrate = ["internal/factorymigrate/**"]
 stopgate = ["internal/stopgate/**"]
+resultstier = ["internal/resultstier/**"]
 launchguard = ["internal/launchguard/**", "cmd/fak/guard_crash_rsi.go", "cmd/fak/guard_crash_rsi_test.go", "cmd/fak/guard_failure_rsi_test.go", "cmd/fak/launchguard.go", "cmd/fak/launchguard_test.go", "docs/launchguard.md"]
 nativebench = ["internal/nativebench/**"]
 adjudicator = ["internal/adjudicator/**"]

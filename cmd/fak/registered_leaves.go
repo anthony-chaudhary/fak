@@ -104,6 +104,7 @@ import (
 	_ "github.com/anthony-chaudhary/fak/internal/residency"
 	_ "github.com/anthony-chaudhary/fak/internal/residualquant"
 	_ "github.com/anthony-chaudhary/fak/internal/resourcelifecycle"
+	_ "github.com/anthony-chaudhary/fak/internal/resultstier"
 	_ "github.com/anthony-chaudhary/fak/internal/resulttier"
 	_ "github.com/anthony-chaudhary/fak/internal/rollout"
 	_ "github.com/anthony-chaudhary/fak/internal/rotationmeta"

@@ -45,7 +45,7 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 // a leaf a conscious layering decision instead of an accident.
 var tier = map[string]int{
 
-	"qwen38campaign":     1, // Qwen3.8 subagent fan-out multi-agent benchmark harness.
+	"qwen38campaign":     3, // Qwen3.8 subagent fan-out multi-agent benchmark harness.
 	"factorymigrate":     1, // 5-Gate boundary and migration auditor across fak and fak-private.
 	"agentsched":         3, // agent thread scheduling, priority queue, and 4-gate admission governor (#11177, #11178).
 	"reflexagent":        3, // fast-dispatch micro-agent reflex loop (#11189).
@@ -71,6 +71,7 @@ var tier = map[string]int{
 	"wipreadiness":       1, // working-tree WIP readiness classification; stdlib-only, off the hot path.
 	"timeaware":          1, // time-aware duration and deadline calculation; stdlib-only, off the hot path.
 	"resulttier":         1, // standard bounded result tiers and cursor pagination; stdlib-only, off the hot path.
+	"resultstier":        1, // role-based artifact storage tiering (claim vs payload) and payload index minting (#11687, #11688).
 	"power":              1, // cross-platform OS power assertion and wake-lock management; stdlib-only, off the hot path.
 
 	"citeverify":      2, // mechanical source-line claim verification; stdlib-only, off the hot path.
@@ -655,7 +656,7 @@ var tier = map[string]int{
 	"quantmeta":             1, // stdlib-only neutral quantization descriptor, parser, and typed adjudication contract (#6222).
 	"qwen38quant":           1, // stdlib-only evidence contract and validator for the Qwen3.8 quantization campaign (#8307).
 	"qwen38quantrun":        2, // endpoint runner depends on the tier-1 campaign evidence contract (#8343).
-	"modelperfobs":          2, // OpenAI-compatible request measurement and JSONL report leaf; stdlib-only, off the hot path (#8389).
+	"modelperfobs":          3, // OpenAI-compatible request measurement and JSONL report leaf; stdlib-only, off the hot path (#8389).
 	"quantdetect":           1,
 	"fp4runtime":            2, // stdlib-only FP4/microscaling runtime, GPU-architecture, and accumulator compatibility contract; no model kernel.
 	"fp4meta":               1, // stdlib-only neutral FP4 artifact, recipe, scale, runtime, and hardware metadata contract; no model kernel.
