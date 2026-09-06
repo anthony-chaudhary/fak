@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"strings"
 	"testing"
 
@@ -98,5 +99,60 @@ func TestScoreSuffixSummarizesStructuredScore(t *testing.T) {
 func TestScoreSuffixNilIsEmpty(t *testing.T) {
 	if got := scoreSuffix(nil); got != "" {
 		t.Fatalf("nil score suffix = %q, want empty", got)
+	}
+}
+
+func TestApplyTransientFlags(t *testing.T) {
+	cases := []struct {
+		name        string
+		maxRetries  int
+		budget      int
+		wantRetries int
+		wantLimit   int
+		wantBudget  int
+	}{
+		{"positive values", 5, 10, 5, 5, 10},
+		{"zero retries disables", 0, 0, -1, -1, 0},
+		{"negative retries disables", -2, 5, -1, -1, 5},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var h rsiloop.Harness
+			applyTransientFlags(&h, c.maxRetries, c.budget)
+			if h.MaxTransientRetries != c.wantRetries {
+				t.Errorf("h.MaxTransientRetries = %d, want %d", h.MaxTransientRetries, c.wantRetries)
+			}
+			if h.TransientMeasurementRecoveryLimit != c.wantLimit {
+				t.Errorf("h.TransientMeasurementRecoveryLimit = %d, want %d", h.TransientMeasurementRecoveryLimit, c.wantLimit)
+			}
+			if h.TransientBudget != c.wantBudget {
+				t.Errorf("h.TransientBudget = %d, want %d", h.TransientBudget, c.wantBudget)
+			}
+		})
+	}
+}
+
+func TestTransientFlagsCommandLine(t *testing.T) {
+	// Verify that the flags can be parsed in a FlagSet with the exact flag names
+	fs := flag.NewFlagSet("rsiloop", flag.ContinueOnError)
+	maxRetries := fs.Int("max-transient-retries", rsiloop.DefaultTransientMeasurementRecoveryLimit, "max transient retries")
+	budget := fs.Int("transient-budget", 0, "transient budget")
+
+	args := []string{"-max-transient-retries", "4", "-transient-budget", "7"}
+	if err := fs.Parse(args); err != nil {
+		t.Fatalf("fs.Parse: %v", err)
+	}
+	if *maxRetries != 4 {
+		t.Errorf("max-transient-retries = %d, want 4", *maxRetries)
+	}
+	if *budget != 7 {
+		t.Errorf("transient-budget = %d, want 7", *budget)
+	}
+
+	var h rsiloop.Harness
+	applyTransientFlags(&h, *maxRetries, *budget)
+	if h.MaxTransientRetries != 4 || h.TransientBudget != 7 {
+		t.Errorf("harness transient fields not applied properly: %+v", h)
 	}
 }

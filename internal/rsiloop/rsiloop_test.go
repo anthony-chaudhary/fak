@@ -1236,3 +1236,171 @@ func TestRunObserved_TransientRetryBackoffAndObserverSuppression(t *testing.T) {
 		}
 	})
 }
+
+// TestHarnessMaxTransientRetries verifies that MaxTransientRetries configures
+// the per-candidate retry threshold and supports negative values to disable retries.
+func TestHarnessMaxTransientRetries(t *testing.T) {
+	// Subtest 1: MaxTransientRetries = 3 allows 3 retries (4 attempts total)
+	t.Run("AllowedRetries", func(t *testing.T) {
+		attempts := 0
+		h := Harness{
+			MetricName:          "hit_rate",
+			LowerBetter:         false,
+			BaselineRefName:     "main",
+			MaxTransientRetries: 3,
+			TransientRetrySleep: func(d time.Duration) {},
+			BaselineMetric: func() (float64, string, error) {
+				return 1.0, "sha-base", nil
+			},
+			Candidates: func() []Candidate {
+				return []Candidate{{Label: "c1"}}
+			},
+			Measure: func(c Candidate) (Measurement, error) {
+				attempts++
+				if attempts <= 3 {
+					return Measurement{}, NewTransientMeasureError(errors.New("git lock contention"))
+				}
+				return Measurement{Metric: 2.0, SuiteGreen: true, TruthClean: true}, nil
+			},
+		}
+
+		res, err := Run(h, nil, 3, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Kept != 1 {
+			t.Fatalf("res.Kept = %d, want 1", res.Kept)
+		}
+		if attempts != 4 {
+			t.Fatalf("attempts = %d, want 4", attempts)
+		}
+		if res.TransientRetries != 3 {
+			t.Fatalf("res.TransientRetries = %d, want 3", res.TransientRetries)
+		}
+	})
+
+	// Subtest 2: MaxTransientRetries = -1 disables retries
+	t.Run("DisabledRetries", func(t *testing.T) {
+		attempts := 0
+		h := Harness{
+			MetricName:          "hit_rate",
+			LowerBetter:         false,
+			BaselineRefName:     "main",
+			MaxTransientRetries: -1,
+			TransientRetrySleep: func(d time.Duration) {},
+			BaselineMetric: func() (float64, string, error) {
+				return 1.0, "sha-base", nil
+			},
+			Candidates: func() []Candidate {
+				return []Candidate{{Label: "c1"}}
+			},
+			Measure: func(c Candidate) (Measurement, error) {
+				attempts++
+				return Measurement{}, NewTransientMeasureError(errors.New("transient error"))
+			},
+		}
+
+		res, err := Run(h, nil, 3, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Kept != 0 {
+			t.Fatalf("res.Kept = %d, want 0", res.Kept)
+		}
+		if attempts != 1 {
+			t.Fatalf("attempts = %d, want 1 (retries disabled)", attempts)
+		}
+		if res.TransientRetries != 0 {
+			t.Fatalf("res.TransientRetries = %d, want 0", res.TransientRetries)
+		}
+	})
+}
+
+// TestHarnessTransientBudget proves that TransientBudget bounds total transient
+// retries across the entire run across multiple candidates.
+func TestHarnessTransientBudget(t *testing.T) {
+	calls := make(map[string]int)
+
+	h := Harness{
+		MetricName:          "hit_rate",
+		LowerBetter:         false,
+		BaselineRefName:     "main",
+		MaxTransientRetries: 2,
+		TransientBudget:     2, // run-wide budget of 2 transient retries
+		TransientRetrySleep: func(d time.Duration) {},
+		BaselineMetric: func() (float64, string, error) {
+			return 1.0, "sha-base", nil
+		},
+		Candidates: func() []Candidate {
+			return []Candidate{
+				{Label: "c1"},
+				{Label: "c2"},
+			}
+		},
+		Measure: func(c Candidate) (Measurement, error) {
+			calls[c.Label]++
+			attempt := calls[c.Label]
+			switch c.Label {
+			case "c1":
+				if attempt <= 2 {
+					return Measurement{}, NewTransientMeasureError(errors.New("transient lock on c1"))
+				}
+				return Measurement{Metric: 2.0, SuiteGreen: true, TruthClean: true}, nil
+			case "c2":
+				// c2 also hits a transient error, but budget is already exhausted (2 retries used by c1)
+				return Measurement{}, NewTransientMeasureError(errors.New("transient lock on c2"))
+			default:
+				return Measurement{}, errors.New("unknown")
+			}
+		},
+	}
+
+	res, err := Run(h, nil, 3, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if res.TransientRetries != 2 {
+		t.Fatalf("res.TransientRetries = %d, want 2", res.TransientRetries)
+	}
+	if calls["c1"] != 3 {
+		t.Fatalf("c1 calls = %d, want 3 (2 retries + 1 success)", calls["c1"])
+	}
+	if calls["c2"] != 1 {
+		t.Fatalf("c2 calls = %d, want 1 (budget exhausted, no retry allowed)", calls["c2"])
+	}
+	if res.Kept != 1 {
+		t.Fatalf("res.Kept = %d, want 1", res.Kept)
+	}
+
+	// Verify c2's final row indicates budget exhaustion
+	var c2Row Row
+	for _, r := range res.Rows {
+		if r.Candidate == "c2" {
+			c2Row = r
+		}
+	}
+	if !strings.Contains(c2Row.Note, "budget exhausted") {
+		t.Fatalf("c2 row note %q should mention budget exhausted", c2Row.Note)
+	}
+}
+
+// TestWorktreeConfigTransientPlumbing proves that WorktreeConfig fields are plumbed into Harness.
+func TestWorktreeConfigTransientPlumbing(t *testing.T) {
+	cfg := WorktreeConfig{
+		Repo:                ".",
+		BaselineRef:         "main",
+		MaxTransientRetries: 4,
+		TransientBudget:     10,
+	}
+	h := NewWorktreeHarness(cfg)
+	if h.MaxTransientRetries != 4 {
+		t.Fatalf("h.MaxTransientRetries = %d, want 4", h.MaxTransientRetries)
+	}
+	if h.TransientMeasurementRecoveryLimit != 4 {
+		t.Fatalf("h.TransientMeasurementRecoveryLimit = %d, want 4", h.TransientMeasurementRecoveryLimit)
+	}
+	if h.TransientBudget != 10 {
+		t.Fatalf("h.TransientBudget = %d, want 10", h.TransientBudget)
+	}
+}
