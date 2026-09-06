@@ -3,6 +3,8 @@ package codetools
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -18,6 +20,66 @@ import (
 // and atomic optimistic CAS replacement.
 
 var hunkHeaderRE = regexp.MustCompile(`^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@`)
+
+// PatchArgs describes arguments to the apply_patch tool.
+type PatchArgs struct {
+	Patch           string `json:"patch"`
+	ExpectedVersion string `json:"expected_version,omitempty"`
+	FuzzMargin      int    `json:"fuzz_margin,omitempty"`
+	Fuzz            int    `json:"fuzz,omitempty"` // backward-compatible alias
+}
+
+// ApplyPatchArgs is an alias for PatchArgs.
+type ApplyPatchArgs = PatchArgs
+
+func (a PatchArgs) Validate() *Refusal {
+	if strings.TrimSpace(a.Patch) == "" {
+		return refuse(CodeMalformed, "apply_patch: missing required field: patch")
+	}
+	if a.FuzzMargin < 0 || a.FuzzMargin > 5 {
+		return refuse(CodeMalformed, "apply_patch: fuzz_margin must be between 0 and 5")
+	}
+	if a.Fuzz < 0 || a.Fuzz > 5 {
+		return refuse(CodeMalformed, "apply_patch: fuzz must be between 0 and 5")
+	}
+	return nil
+}
+
+func (a PatchArgs) effectiveFuzz(body []byte) int {
+	if a.FuzzMargin > 0 {
+		return a.FuzzMargin
+	}
+	if a.Fuzz > 0 {
+		return a.Fuzz
+	}
+	if bytes.Contains(body, []byte(`"fuzz_margin"`)) || bytes.Contains(body, []byte(`"fuzz"`)) {
+		if a.FuzzMargin == 0 && bytes.Contains(body, []byte(`"fuzz_margin"`)) {
+			return 0
+		}
+		if a.Fuzz == 0 && bytes.Contains(body, []byte(`"fuzz"`)) {
+			return 0
+		}
+	}
+	return 2
+}
+
+func matchExpectedVersion(expected, actualVersion string, content []byte) bool {
+	if expected == "" {
+		return true
+	}
+	if expected == actualVersion {
+		return true
+	}
+	if strings.TrimPrefix(actualVersion, "fv1:") == strings.TrimPrefix(expected, "fv1:") {
+		return true
+	}
+	contentHash := sha256.Sum256(content)
+	contentHex := hex.EncodeToString(contentHash[:])
+	if strings.EqualFold(expected, contentHex) || strings.EqualFold(strings.TrimPrefix(expected, "sha256:"), contentHex) {
+		return true
+	}
+	return false
+}
 
 type hunkLine struct {
 	Type    byte   // ' ', '-', '+'
@@ -50,11 +112,15 @@ type PatchFileSummary struct {
 
 // PatchResult is the success envelope emitted by apply_patch.
 type PatchResult struct {
-	Path    string             `json:"path,omitempty"`
-	Action  string             `json:"action,omitempty"`
-	Bytes   int                `json:"bytes,omitempty"`
-	Version string             `json:"version,omitempty"`
-	Files   []PatchFileSummary `json:"files"`
+	FilesModified []string           `json:"files_modified"`
+	FilesCreated  []string           `json:"files_created"`
+	FilesDeleted  []string           `json:"files_deleted"`
+	HunksApplied  int                `json:"hunks_applied"`
+	Path          string             `json:"path,omitempty"`
+	Action        string             `json:"action,omitempty"`
+	Bytes         int                `json:"bytes,omitempty"`
+	Version       string             `json:"version,omitempty"`
+	Files         []PatchFileSummary `json:"files,omitempty"`
 }
 
 type plannedPatchFile struct {
@@ -83,7 +149,7 @@ func (t *Toolset) applyPatch(ctx context.Context, body []byte) ([]byte, bool) {
 	if r := canceled(ctx); r != nil {
 		return r.JSON(), true
 	}
-	var a ApplyPatchArgs
+	var a PatchArgs
 	if r := decodeArgs(body, &a); r != nil {
 		return r.JSON(), true
 	}
@@ -93,6 +159,8 @@ func (t *Toolset) applyPatch(ctx context.Context, body []byte) ([]byte, bool) {
 	if int64(len(a.Patch)) > t.limits.MaxWriteBytes {
 		return refuse(CodeTooLarge, "Patch exceeds byte bound").JSON(), true
 	}
+
+	fuzz := a.effectiveFuzz(body)
 
 	patches, r := parseUnifiedDiff(a.Patch)
 	if r != nil {
@@ -130,7 +198,7 @@ func (t *Toolset) applyPatch(ctx context.Context, body []byte) ([]byte, bool) {
 			if exists {
 				return refuse(CodeExists, "target file already exists: "+target.Rel).JSON(), true
 			}
-			newLines, err := applyHunks([]string{}, fp.Hunks, a.Fuzz)
+			newLines, err := applyHunks([]string{}, fp.Hunks, fuzz)
 			if err != nil {
 				return refuse(CodeEditConflict, err.Error()).JSON(), true
 			}
@@ -159,12 +227,12 @@ func (t *Toolset) applyPatch(ctx context.Context, body []byte) ([]byte, bool) {
 			if obs.Truncated {
 				return refuse(CodeTooLarge, "Patch target exceeds byte bound").JSON(), true
 			}
-			if a.ExpectedVersion != "" && obs.Version != a.ExpectedVersion {
+			if a.ExpectedVersion != "" && !matchExpectedVersion(a.ExpectedVersion, obs.Version, obs.Content) {
 				return staleVersion("patch target changed since it was read")
 			}
 			origLines, _ := splitLines(string(obs.Content))
 			if len(fp.Hunks) > 0 {
-				newLines, err := applyHunks(origLines, fp.Hunks, a.Fuzz)
+				newLines, err := applyHunks(origLines, fp.Hunks, fuzz)
 				if err != nil {
 					return refuse(CodeEditConflict, err.Error()).JSON(), true
 				}
@@ -193,12 +261,12 @@ func (t *Toolset) applyPatch(ctx context.Context, body []byte) ([]byte, bool) {
 			if obs.Truncated {
 				return refuse(CodeTooLarge, "Patch target exceeds byte bound").JSON(), true
 			}
-			if a.ExpectedVersion != "" && obs.Version != a.ExpectedVersion {
+			if a.ExpectedVersion != "" && !matchExpectedVersion(a.ExpectedVersion, obs.Version, obs.Content) {
 				return staleVersion("patch target changed since it was read")
 			}
 			eol := detectLineEnding(obs.Content)
 			origLines, hasTrailingNewline := splitLines(string(obs.Content))
-			newLines, err := applyHunks(origLines, fp.Hunks, a.Fuzz)
+			newLines, err := applyHunks(origLines, fp.Hunks, fuzz)
 			if err != nil {
 				return refuse(CodeEditConflict, err.Error()).JSON(), true
 			}
@@ -255,45 +323,180 @@ func (t *Toolset) applyPatch(ctx context.Context, body []byte) ([]byte, bool) {
 			}
 		}
 
-		// Phase 4: Commit changes atomically.
+		// Phase 4: Atomic application with rollback.
+		// Step 4a: Write temporary files (.fak-write-*) for all modified/created files.
+		// If writing/syncing any temp file fails, abort before renaming any files.
+		type preparedTemp struct {
+			tmpPath string
+			target  string
+			action  string
+			perm    fs.FileMode
+		}
+		prepared := make([]preparedTemp, len(planned))
+		cleanupTemps := func() {
+			for _, pt := range prepared {
+				if pt.tmpPath != "" {
+					_ = os.Remove(pt.tmpPath)
+				}
+			}
+		}
+
+		for i, p := range planned {
+			fresh := freshTargets[i]
+			if p.action == "create" || p.action == "modify" {
+				dir := filepath.Dir(fresh.Abs)
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					cleanupTemps()
+					return refuse(CodeIO, err.Error()).JSON(), true
+				}
+				f, err := os.CreateTemp(dir, ".fak-write-*")
+				if err != nil {
+					cleanupTemps()
+					return refuse(CodeIO, err.Error()).JSON(), true
+				}
+				tmpName := f.Name()
+				prepared[i] = preparedTemp{
+					tmpPath: tmpName,
+					target:  fresh.Abs,
+					action:  p.action,
+					perm:    p.perm,
+				}
+				if p.action == "create" {
+					_ = f.Chmod(0o644)
+				} else if p.perm != 0 {
+					_ = f.Chmod(p.perm)
+				}
+				if _, err = f.Write(p.content); err == nil {
+					err = f.Sync()
+				}
+				closeErr := f.Close()
+				if err == nil {
+					err = closeErr
+				}
+				if err != nil {
+					cleanupTemps()
+					return refuse(CodeIO, err.Error()).JSON(), true
+				}
+			} else {
+				prepared[i] = preparedTemp{
+					target: fresh.Abs,
+					action: p.action,
+				}
+			}
+		}
+
+		// Step 4b: Apply renames / removals with rollback on failure.
+		type rollbackAction struct {
+			path    string
+			action  string // "delete_created", "restore_file"
+			content []byte
+			perm    fs.FileMode
+		}
+		var rollbacks []rollbackAction
+		var commitErr error
+
+		for i, pt := range prepared {
+			fresh := freshTargets[i]
+			switch pt.action {
+			case "create":
+				if err := os.Rename(pt.tmpPath, fresh.Abs); err != nil {
+					commitErr = err
+					break
+				}
+				prepared[i].tmpPath = "" // safely renamed
+				rollbacks = append(rollbacks, rollbackAction{
+					path:   fresh.Abs,
+					action: "delete_created",
+				})
+
+			case "modify":
+				origContent := planned[i].observed.Content
+				origPerm := planned[i].perm
+				if err := os.Rename(pt.tmpPath, fresh.Abs); err != nil {
+					commitErr = err
+					break
+				}
+				prepared[i].tmpPath = "" // safely renamed
+				rollbacks = append(rollbacks, rollbackAction{
+					path:    fresh.Abs,
+					action:  "restore_file",
+					content: origContent,
+					perm:    origPerm,
+				})
+
+			case "delete":
+				origContent := planned[i].observed.Content
+				origPerm := planned[i].perm
+				if err := os.Remove(fresh.Abs); err != nil && !errors.Is(err, fs.ErrNotExist) {
+					commitErr = err
+					break
+				}
+				rollbacks = append(rollbacks, rollbackAction{
+					path:    fresh.Abs,
+					action:  "restore_file",
+					content: origContent,
+					perm:    origPerm,
+				})
+			}
+			if commitErr != nil {
+				break
+			}
+		}
+
+		if commitErr != nil {
+			// Roll back all already-applied changes in reverse order
+			for j := len(rollbacks) - 1; j >= 0; j-- {
+				rb := rollbacks[j]
+				switch rb.action {
+				case "delete_created":
+					_ = os.Remove(rb.path)
+				case "restore_file":
+					_ = os.WriteFile(rb.path, rb.content, rb.perm)
+				}
+			}
+			cleanupTemps()
+			return refuse(CodeIO, commitErr.Error()).JSON(), true
+		}
+
+		// Step 4c: Record results and observed versions
 		fileSummaries := make([]PatchFileSummary, len(planned))
+		filesModified := make([]string, 0)
+		filesCreated := make([]string, 0)
+		filesDeleted := make([]string, 0)
+
 		for i, p := range planned {
 			fresh := freshTargets[i]
 			switch p.action {
 			case "create":
-				if err := atomicReplace(fresh.Abs, p.content, false, 0o644); err != nil {
-					return refuse(CodeIO, err.Error()).JSON(), true
-				}
 				after, ref := observeFile(context.WithoutCancel(ctx), fresh.Abs, 0)
-				if ref != nil {
-					return ref.JSON(), true
+				version := ""
+				if ref == nil {
+					version = after.Version
 				}
+				filesCreated = append(filesCreated, fresh.Rel)
 				fileSummaries[i] = PatchFileSummary{
 					Path:    fresh.Rel,
 					Action:  "created",
 					Bytes:   len(p.content),
-					Version: after.Version,
+					Version: version,
 				}
 
 			case "modify":
-				if err := atomicReplace(fresh.Abs, p.content, true, p.perm); err != nil {
-					return refuse(CodeIO, err.Error()).JSON(), true
-				}
 				after, ref := observeFile(context.WithoutCancel(ctx), fresh.Abs, 0)
-				if ref != nil {
-					return ref.JSON(), true
+				version := ""
+				if ref == nil {
+					version = after.Version
 				}
+				filesModified = append(filesModified, fresh.Rel)
 				fileSummaries[i] = PatchFileSummary{
 					Path:    fresh.Rel,
 					Action:  "modified",
 					Bytes:   len(p.content),
-					Version: after.Version,
+					Version: version,
 				}
 
 			case "delete":
-				if err := os.Remove(fresh.Abs); err != nil && !errors.Is(err, fs.ErrNotExist) {
-					return refuse(CodeIO, err.Error()).JSON(), true
-				}
+				filesDeleted = append(filesDeleted, fresh.Rel)
 				fileSummaries[i] = PatchFileSummary{
 					Path:   fresh.Rel,
 					Action: "deleted",
@@ -302,8 +505,17 @@ func (t *Toolset) applyPatch(ctx context.Context, body []byte) ([]byte, bool) {
 			}
 		}
 
+		hunksApplied := 0
+		for _, fp := range patches {
+			hunksApplied += len(fp.Hunks)
+		}
+
 		res := PatchResult{
-			Files: fileSummaries,
+			FilesModified: filesModified,
+			FilesCreated:  filesCreated,
+			FilesDeleted:  filesDeleted,
+			HunksApplied:  hunksApplied,
+			Files:         fileSummaries,
 		}
 		if len(fileSummaries) == 1 {
 			res.Path = fileSummaries[0].Path
@@ -406,7 +618,7 @@ func parseUnifiedDiff(patch string) ([]filePatch, *Refusal) {
 			continue
 		}
 
-		// Check for hunk header: @@ -l,s +l,s @@
+		// Check for hunk header: @@ -l,s +l,s @@ [optional heading]
 		if strings.HasPrefix(line, "@@") {
 			m := hunkHeaderRE.FindStringSubmatch(line)
 			if m == nil {
@@ -491,16 +703,10 @@ func applyHunks(originalLines []string, hunks []diffHunk, fuzz int) ([]string, e
 
 	for hIdx, hunk := range hunks {
 		var oldLines []string
-		var newLines []string
 		for _, hl := range hunk.Lines {
 			switch hl.Type {
-			case ' ':
+			case ' ', '-':
 				oldLines = append(oldLines, hl.Content)
-				newLines = append(newLines, hl.Content)
-			case '-':
-				oldLines = append(oldLines, hl.Content)
-			case '+':
-				newLines = append(newLines, hl.Content)
 			}
 		}
 
@@ -522,12 +728,17 @@ func applyHunks(originalLines []string, hunks []diffHunk, fuzz int) ([]string, e
 				matchIdx = len(originalLines)
 			}
 			result = append(result, originalLines[fileIdx:matchIdx]...)
-			result = append(result, newLines...)
+			for _, hl := range hunk.Lines {
+				if hl.Type == '+' {
+					result = append(result, hl.Content)
+				}
+			}
 			fileIdx = matchIdx
 			continue
 		}
 
-		// Find match with offset drift up to fuzz lines
+		// Find match with offset drift up to fuzz lines.
+		// Check exact match first (d=0), then +/-1, +/-2, ..., up to +/-fuzz.
 		matchIdx := -1
 		for d := 0; d <= fuzz; d++ {
 			candPos := expectedIdx + d
@@ -552,8 +763,25 @@ func applyHunks(originalLines []string, hunks []diffHunk, fuzz int) ([]string, e
 			return nil, fmt.Errorf("hunk %d (line %d) failed to match context within fuzz %d", hIdx+1, hunk.OldStart, fuzz)
 		}
 
+		// Append unchanged lines before hunk match
 		result = append(result, originalLines[fileIdx:matchIdx]...)
-		result = append(result, newLines...)
+
+		// Apply hunk lines preserving context lines from original
+		currFileIdx := matchIdx
+		for _, hl := range hunk.Lines {
+			switch hl.Type {
+			case ' ':
+				if currFileIdx < len(originalLines) {
+					result = append(result, originalLines[currFileIdx])
+					currFileIdx++
+				}
+			case '-':
+				currFileIdx++
+			case '+':
+				result = append(result, hl.Content)
+			}
+		}
+
 		fileIdx = matchIdx + len(oldLines)
 	}
 
@@ -566,7 +794,11 @@ func linesMatch(a, b []string) bool {
 		return false
 	}
 	for i := range a {
-		if a[i] != b[i] {
+		if a[i] == b[i] {
+			continue
+		}
+		// Trailing whitespace tolerance
+		if strings.TrimRight(a[i], " \t\r") != strings.TrimRight(b[i], " \t\r") {
 			return false
 		}
 	}
