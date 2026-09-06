@@ -39,6 +39,7 @@ import (
 func newGitCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.Stdin = strings.NewReader("")
 	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
 	if len(args) > 0 && args[0] == "commit" {
 		cmd.Env = append(cmd.Env, "FAK_SAFECOMMIT_VETTED=1")

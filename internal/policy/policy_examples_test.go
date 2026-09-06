@@ -89,6 +89,7 @@ func TestOpenCodePolicy(t *testing.T) {
 		args       string
 		wantKind   abi.VerdictKind
 		wantReason abi.ReasonCode
+		wantFix    string
 	}{
 		{
 			name:     "read with empty args is allowed",
@@ -101,6 +102,50 @@ func TestOpenCodePolicy(t *testing.T) {
 			tool:     "bash",
 			args:     `{"command":"git status"}`,
 			wantKind: abi.VerdictAllow,
+		},
+		{
+			name:     "bash git diff is allowed",
+			tool:     "bash",
+			args:     `{"command":"git diff"}`,
+			wantKind: abi.VerdictAllow,
+		},
+		{
+			name:     "bash git log is allowed",
+			tool:     "bash",
+			args:     `{"command":"git log -n 5"}`,
+			wantKind: abi.VerdictAllow,
+		},
+		{
+			name:       "bash git commit is denied with POLICY_BLOCK",
+			tool:       "bash",
+			args:       `{"command":"git commit -m \"fix\""}`,
+			wantKind:   abi.VerdictDeny,
+			wantReason: abi.ReasonPolicyBlock,
+			wantFix:    "Raw git mutations are prohibited on the shared trunk. Use fak commit --path <paths> -m \"<msg> (fak <leaf>)\" or fak sweep --apply to commit, and fak sync push to publish.",
+		},
+		{
+			name:       "bash git add is denied with POLICY_BLOCK",
+			tool:       "bash",
+			args:       `{"command":"git add ."}`,
+			wantKind:   abi.VerdictDeny,
+			wantReason: abi.ReasonPolicyBlock,
+			wantFix:    "Raw git mutations are prohibited on the shared trunk. Use fak commit --path <paths> -m \"<msg> (fak <leaf>)\" or fak sweep --apply to commit, and fak sync push to publish.",
+		},
+		{
+			name:       "bash git checkout -b is denied with POLICY_BLOCK",
+			tool:       "bash",
+			args:       `{"command":"git checkout -b new-branch"}`,
+			wantKind:   abi.VerdictDeny,
+			wantReason: abi.ReasonPolicyBlock,
+			wantFix:    "Raw git mutations are prohibited on the shared trunk. Use fak commit --path <paths> -m \"<msg> (fak <leaf>)\" or fak sweep --apply to commit, and fak sync push to publish.",
+		},
+		{
+			name:       "bash git push is denied with POLICY_BLOCK",
+			tool:       "bash",
+			args:       `{"command":"git push origin main"}`,
+			wantKind:   abi.VerdictDeny,
+			wantReason: abi.ReasonPolicyBlock,
+			wantFix:    "Raw git mutations are prohibited on the shared trunk. Use fak commit --path <paths> -m \"<msg> (fak <leaf>)\" or fak sweep --apply to commit, and fak sync push to publish.",
 		},
 		{
 			name:       "bash rm -rf is denied with POLICY_BLOCK",
@@ -183,6 +228,9 @@ func TestOpenCodePolicy(t *testing.T) {
 			}
 			if tc.wantKind == abi.VerdictDeny && tc.wantReason != 0 && v.Reason != tc.wantReason {
 				t.Fatalf("tool %s got reason %s, want %s", tc.tool, abi.ReasonName(v.Reason), abi.ReasonName(tc.wantReason))
+			}
+			if tc.wantFix != "" && v.Meta["fix"] != tc.wantFix {
+				t.Fatalf("tool %s got fix %q, want %q", tc.tool, v.Meta["fix"], tc.wantFix)
 			}
 		})
 	}
