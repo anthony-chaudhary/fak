@@ -296,7 +296,7 @@ func recomputeLane(l *DebtLane) {
 
 func discoverLanesFromDisk(root string) ([]DebtLane, error) {
 	dosPath := filepath.Join(root, "dos.toml")
-	lanes := parseLaneTrees(dosPath)
+	lanes, laneTrees := parseLaneTrees(dosPath)
 
 	// Build dependency graph and reachability.
 	graph, internalPkgs := BuildInternalImportGraph(root)
@@ -306,7 +306,7 @@ func discoverLanesFromDisk(root string) ([]DebtLane, error) {
 	benchDocs := readBenchmarkAuthorityLanes(filepath.Join(root, "BENCHMARK-AUTHORITY.md"))
 	runtimeProofs := readRuntimeProofs(root)
 
-	// Collect all packages in internal/, pkg/, and platform/.
+	// Collect candidate lanes
 	discovered := make(map[string]bool)
 	for _, lane := range lanes {
 		discovered[lane] = true
@@ -337,13 +337,68 @@ func discoverLanesFromDisk(root string) ([]DebtLane, error) {
 
 	var result []DebtLane
 	for _, lane := range laneNames {
-		unitDir := filepath.Join("internal", lane)
-		if _, err := os.Stat(filepath.Join(root, unitDir)); err != nil {
-			if info, err := os.Stat(filepath.Join(root, "pkg", lane)); err == nil && info.IsDir() {
-				unitDir = filepath.Join("pkg", lane)
-			} else if info, err := os.Stat(filepath.Join(root, "platform", lane)); err == nil && info.IsDir() {
-				unitDir = filepath.Join("platform", lane)
-			} else if info, err := os.Stat(filepath.Join(root, "tools", lane)); err == nil && info.IsDir() {
+		if lane == "cmd" || lane == "tools" {
+			continue
+		}
+
+		trees := laneTrees[lane]
+
+		// Filter out non-Go asset directories or non-Go paths if declared.
+		if len(trees) > 0 {
+			allNonGo := true
+			for _, t := range trees {
+				if !isNonGoPath(t) {
+					allNonGo = false
+					break
+				}
+			}
+			if allNonGo {
+				continue
+			}
+		}
+
+		// Resolve unitDir
+		var unitDir string
+
+		// First, check conventional Go source directories matching the lane name.
+		// If internal/<lane> exists on disk and contains Go files, prioritize it.
+		if info, err := os.Stat(filepath.Join(root, "internal", lane)); err == nil && info.IsDir() {
+			unitDir = filepath.Join("internal", lane)
+		} else if info, err := os.Stat(filepath.Join(root, "pkg", lane)); err == nil && info.IsDir() {
+			unitDir = filepath.Join("pkg", lane)
+		} else if info, err := os.Stat(filepath.Join(root, "platform", lane)); err == nil && info.IsDir() {
+			unitDir = filepath.Join("platform", lane)
+		}
+
+		// a) If not resolved yet and a declared tree exists: extract the root directory.
+		// If that directory exists on disk, use it! (e.g. "platform/dispatch/**" -> "platform/dispatch")
+		if unitDir == "" && len(trees) > 0 {
+			// Prioritize trees that point to Go source prefixes
+			for _, t := range trees {
+				rootGlob := extractGlobRoot(t)
+				if rootGlob != "" && hasGoSourcePrefix(rootGlob) {
+					if info, err := os.Stat(filepath.Join(root, rootGlob)); err == nil && info.IsDir() {
+						unitDir = filepath.FromSlash(rootGlob)
+						break
+					}
+				}
+			}
+			if unitDir == "" {
+				for _, t := range trees {
+					rootGlob := extractGlobRoot(t)
+					if rootGlob != "" {
+						if info, err := os.Stat(filepath.Join(root, rootGlob)); err == nil && info.IsDir() {
+							unitDir = filepath.FromSlash(rootGlob)
+							break
+						}
+					}
+				}
+			}
+		}
+
+		// If unitDir not found yet, check other conventional source directories.
+		if unitDir == "" {
+			if info, err := os.Stat(filepath.Join(root, "tools", lane)); err == nil && info.IsDir() {
 				unitDir = filepath.Join("tools", lane)
 			} else if info, err := os.Stat(filepath.Join(root, "cmd", lane)); err == nil && info.IsDir() {
 				unitDir = filepath.Join("cmd", lane)
@@ -351,6 +406,23 @@ func discoverLanesFromDisk(root string) ([]DebtLane, error) {
 				unitDir = filepath.Join("cmd", "fak-"+lane)
 			}
 		}
+
+		// c) If a lane does not exist on disk, check whether its declared tree explicitly starts with a Go source root.
+		if unitDir == "" {
+			hasDeclaredGoPrefix := false
+			for _, t := range trees {
+				if hasGoSourcePrefix(t) {
+					hasDeclaredGoPrefix = true
+					break
+				}
+			}
+			if !hasDeclaredGoPrefix {
+				// Neither exists on disk nor declares a Go source tree; do NOT synthesize phantom internal/<lane>.
+				continue
+			}
+			unitDir = filepath.Join("internal", lane)
+		}
+
 		absUnitDir := filepath.Join(root, unitDir)
 
 		evidence := inspectUnitEvidence(absUnitDir, lane, graph, reachable, benchDocs, runtimeProofs)
@@ -643,16 +715,59 @@ func dirContainsGoFiles(dir string) bool {
 	return hasGo
 }
 
-func parseLaneTrees(path string) []string {
+func extractGlobRoot(glob string) string {
+	clean := filepath.ToSlash(strings.TrimSpace(glob))
+	clean = strings.Trim(clean, `"`+"'"+` `)
+	if idx := strings.Index(clean, "*"); idx >= 0 {
+		clean = clean[:idx]
+	}
+	clean = strings.TrimRight(clean, "/")
+	return clean
+}
+
+func isNonGoPath(path string) bool {
+	clean := filepath.ToSlash(strings.TrimSpace(path))
+	clean = strings.TrimPrefix(clean, "./")
+	if strings.HasPrefix(clean, "docs/") || clean == "docs" ||
+		strings.HasPrefix(clean, "scripts/") || clean == "scripts" ||
+		strings.HasPrefix(clean, ".claude/") || clean == ".claude" ||
+		strings.HasPrefix(clean, ".agents/") || clean == ".agents" ||
+		strings.HasPrefix(clean, "examples/") || clean == "examples" ||
+		strings.HasPrefix(clean, "visuals/") || clean == "visuals" ||
+		strings.HasPrefix(clean, "agent-memory/") || clean == "agent-memory" {
+		return true
+	}
+	if strings.HasSuffix(clean, ".py") || strings.HasSuffix(clean, ".sh") ||
+		strings.HasSuffix(clean, ".md") || strings.HasSuffix(clean, ".txt") ||
+		strings.HasSuffix(clean, ".json") || strings.HasSuffix(clean, ".toml") ||
+		strings.HasSuffix(clean, ".yaml") || strings.HasSuffix(clean, ".yml") {
+		return true
+	}
+	return false
+}
+
+func hasGoSourcePrefix(path string) bool {
+	clean := filepath.ToSlash(strings.TrimSpace(path))
+	clean = strings.TrimPrefix(clean, "./")
+	return strings.HasPrefix(clean, "internal/") || clean == "internal" ||
+		strings.HasPrefix(clean, "pkg/") || clean == "pkg" ||
+		strings.HasPrefix(clean, "platform/") || clean == "platform" ||
+		strings.HasPrefix(clean, "tools/") || clean == "tools" ||
+		strings.HasPrefix(clean, "cmd/") || clean == "cmd"
+}
+
+func parseLaneTrees(path string) ([]string, map[string][]string) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	defer f.Close()
 
 	var lanes []string
+	laneTrees := make(map[string][]string)
 	seen := make(map[string]bool)
 	scanner := bufio.NewScanner(f)
+	currentSection := ""
 	inConcurrent := false
 
 	for scanner.Scan() {
@@ -664,32 +779,76 @@ func parseLaneTrees(path string) []string {
 		if idx := strings.Index(line, "#"); idx >= 0 {
 			line = strings.TrimSpace(line[:idx])
 		}
-		if strings.HasPrefix(line, "concurrent = [") {
-			inConcurrent = true
-			line = strings.TrimPrefix(line, "concurrent = [")
-		}
-		if inConcurrent {
-			if strings.Contains(line, "]") {
-				inConcurrent = false
-				line = strings.TrimSuffix(line, "]")
-			}
-			parts := strings.Split(line, ",")
-			for _, part := range parts {
-				trimmed := strings.Trim(strings.TrimSpace(part), `", `)
-				if trimmed != "" && isPotentialLaneName(trimmed) && !seen[trimmed] {
-					seen[trimmed] = true
-					lanes = append(lanes, trimmed)
-				}
-			}
+		if line == "" {
 			continue
 		}
-		m := laneTreeRe.FindStringSubmatch(line)
-		if len(m) >= 2 && isPotentialLaneName(m[1]) && !seen[m[1]] {
-			seen[m[1]] = true
-			lanes = append(lanes, m[1])
+
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			currentSection = strings.ToLower(strings.TrimSpace(line[1 : len(line)-1]))
+			inConcurrent = false
+			continue
+		}
+
+		if currentSection == "lanes" {
+			if strings.HasPrefix(line, "concurrent = [") {
+				inConcurrent = true
+				line = strings.TrimPrefix(line, "concurrent = [")
+			}
+			if inConcurrent {
+				if strings.Contains(line, "]") {
+					inConcurrent = false
+					line = strings.TrimSuffix(line, "]")
+				}
+				parts := strings.Split(line, ",")
+				for _, part := range parts {
+					trimmed := strings.Trim(strings.TrimSpace(part), `", `)
+					if trimmed != "" && isPotentialLaneName(trimmed) && !seen[trimmed] {
+						seen[trimmed] = true
+						lanes = append(lanes, trimmed)
+					}
+				}
+				continue
+			}
+		}
+
+		if currentSection == "lanes.trees" || currentSection == "paths" {
+			eqIdx := strings.Index(line, "=")
+			if eqIdx >= 0 {
+				rawKey := strings.TrimSpace(line[:eqIdx])
+				lane := strings.Trim(rawKey, `"' `)
+				valPart := strings.TrimSpace(line[eqIdx+1:])
+				tokens := quotedTokens(valPart)
+				if len(tokens) > 0 {
+					laneTrees[lane] = append(laneTrees[lane], tokens...)
+				}
+			}
+
+			m := laneTreeRe.FindStringSubmatch(line)
+			if len(m) >= 2 && isPotentialLaneName(m[1]) && !seen[m[1]] {
+				seen[m[1]] = true
+				lanes = append(lanes, m[1])
+			}
 		}
 	}
-	return lanes
+	return lanes, laneTrees
+}
+
+func quotedTokens(s string) []string {
+	var out []string
+	for {
+		i := strings.IndexByte(s, '"')
+		if i < 0 {
+			return out
+		}
+		j := strings.IndexByte(s[i+1:], '"')
+		if j < 0 {
+			return out
+		}
+		if tok := s[i+1 : i+1+j]; tok != "" {
+			out = append(out, tok)
+		}
+		s = s[i+j+2:]
+	}
 }
 
 // BuildInternalImportGraph parses Go files in internal/, pkg/, and platform/ to construct a package import dependency graph.

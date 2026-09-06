@@ -1310,3 +1310,96 @@ func TestDualRepoScan(t *testing.T) {
 		t.Fatalf("expected waves planned in dual repo")
 	}
 }
+
+func TestPhantomNonCodeLanesNotDiscovered(t *testing.T) {
+	tmp := t.TempDir()
+
+	dosContent := `workspace = "."
+
+[branch_roles]
+development_branch = "main"
+
+[lanes]
+concurrent = [
+  "realleaf",
+  "docs",
+  "claude",
+  "nonexistentlane",
+]
+
+[lanes.trees]
+realleaf = ["internal/realleaf/**"]
+docs = ["docs/**"]
+claude = [".claude/**"]
+
+[paths]
+plans_glob = "docs/**/*-plan.md"
+
+[reasons.SOME_REASON]
+summary = "some reason"
+see_also = ["tools/scrub.py", "internal/hooks"]
+
+[boundary]
+issue_scrub_script = "tools/issue_scrub.py"
+scrub_script = "tools/scrub.py"
+`
+	if err := os.WriteFile(filepath.Join(tmp, "dos.toml"), []byte(dosContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create realleaf with code and test
+	realDir := filepath.Join(tmp, "internal", "realleaf")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realDir, "leaf.go"), []byte("package realleaf\nfunc Work() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realDir, "leaf_test.go"), []byte("package realleaf\nimport \"testing\"\nfunc TestWork(t *testing.T) { Work() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create docs and .claude directories with non-Go files
+	if err := os.MkdirAll(filepath.Join(tmp, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "docs", "README.md"), []byte("# Docs\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, ".claude", "settings.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lanes, err := discoverLanesFromDisk(tmp)
+	if err != nil {
+		t.Fatalf("discoverLanesFromDisk failed: %v", err)
+	}
+
+	laneMap := make(map[string]DebtLane)
+	for _, l := range lanes {
+		laneMap[l.Lane] = l
+	}
+
+	// realleaf must be discovered
+	if _, ok := laneMap["realleaf"]; !ok {
+		t.Errorf("expected 'realleaf' to be discovered")
+	}
+
+	// Phantom / non-Go lanes must NOT be discovered
+	unwanted := []string{
+		"see_also",
+		"issue_scrub_script",
+		"scrub_script",
+		"docs",
+		"claude",
+		"nonexistentlane",
+	}
+	for _, bad := range unwanted {
+		if l, ok := laneMap[bad]; ok {
+			t.Errorf("phantom/non-Go lane %q should NOT be discovered, but got %+v", bad, l)
+		}
+	}
+}
