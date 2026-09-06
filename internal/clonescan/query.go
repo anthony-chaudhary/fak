@@ -242,3 +242,362 @@ func (idx *TreeIndex) Query(want map[string]bool, selfPath string, maxResults in
 func Query(candidate string, tree map[string]string, selfPath string, maxResults int) []Match {
 	return BuildTreeIndex(tree).Query(CandidateKeys(candidate), selfPath, maxResults)
 }
+
+// CloneSite is one tracked occurrence site for a clone window.
+type CloneSite struct {
+	File      string `json:"file"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
+}
+
+// CloneWindow represents a candidate clone window and all sites where it occurs.
+type CloneWindow struct {
+	Key   string      `json:"key,omitempty"`
+	Sites []CloneSite `json:"sites"`
+}
+
+func cloneWindowsCanCoalesce(w1, w2 CloneWindow) bool {
+	if len(w1.Sites) != len(w2.Sites) || len(w1.Sites) == 0 {
+		return false
+	}
+	for i := range w1.Sites {
+		s1 := w1.Sites[i]
+		s2 := w2.Sites[i]
+		if s1.File != s2.File {
+			return false
+		}
+		// Overlap condition:
+		// [s1.StartLine, s1.EndLine] and [s2.StartLine, s2.EndLine] overlap
+		// iff s1.StartLine <= s2.EndLine && s2.StartLine <= s1.EndLine
+		if s1.StartLine > s2.EndLine || s2.StartLine > s1.EndLine {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeCloneWindowSites(w *CloneWindow) {
+	sort.Slice(w.Sites, func(i, j int) bool {
+		if w.Sites[i].File != w.Sites[j].File {
+			return w.Sites[i].File < w.Sites[j].File
+		}
+		if w.Sites[i].StartLine != w.Sites[j].StartLine {
+			return w.Sites[i].StartLine < w.Sites[j].StartLine
+		}
+		return w.Sites[i].EndLine < w.Sites[j].EndLine
+	})
+}
+
+// CoalesceGroups coalesces candidate clone windows that overlap at every site
+// and share matching site cardinality and files into coalesced clone window groups,
+// while strictly preserving disjoint clone windows and distinct occurrence sets.
+func CoalesceGroups(windows []CloneWindow) []CloneWindow {
+	n := len(windows)
+	if n == 0 {
+		return nil
+	}
+	normalized := make([]CloneWindow, n)
+	for i := range windows {
+		normalized[i] = CloneWindow{
+			Key:   windows[i].Key,
+			Sites: append([]CloneSite(nil), windows[i].Sites...),
+		}
+		normalizeCloneWindowSites(&normalized[i])
+	}
+
+	parent := make([]int, n)
+	for i := range parent {
+		parent[i] = i
+	}
+	var find func(int) int
+	find = func(x int) int {
+		if parent[x] != x {
+			parent[x] = find(parent[x])
+		}
+		return parent[x]
+	}
+	union := func(x, y int) {
+		rx, ry := find(x), find(y)
+		if rx != ry {
+			parent[rx] = ry
+		}
+	}
+
+	for i := 0; i < n; i++ {
+		for j := i + 1; j < n; j++ {
+			if cloneWindowsCanCoalesce(normalized[i], normalized[j]) {
+				union(i, j)
+			}
+		}
+	}
+
+	groups := make(map[int][]int)
+	for i := 0; i < n; i++ {
+		root := find(i)
+		groups[root] = append(groups[root], i)
+	}
+
+	var rootOrder []int
+	for root := range groups {
+		rootOrder = append(rootOrder, root)
+	}
+	sort.Ints(rootOrder)
+
+	var result []CloneWindow
+	for _, root := range rootOrder {
+		indices := groups[root]
+		firstWin := normalized[indices[0]]
+		m := len(firstWin.Sites)
+		coalescedSites := make([]CloneSite, m)
+		for s := 0; s < m; s++ {
+			f := firstWin.Sites[s].File
+			lo := firstWin.Sites[s].StartLine
+			hi := firstWin.Sites[s].EndLine
+			for _, idx := range indices[1:] {
+				st := normalized[idx].Sites[s]
+				if st.StartLine < lo {
+					lo = st.StartLine
+				}
+				if st.EndLine > hi {
+					hi = st.EndLine
+				}
+			}
+			coalescedSites[s] = CloneSite{
+				File:      f,
+				StartLine: lo,
+				EndLine:   hi,
+			}
+		}
+		result = append(result, CloneWindow{
+			Sites: coalescedSites,
+		})
+	}
+	return result
+}
+
+// CoalesceCloneWindows coalesces candidate clone windows that overlap at every site
+// and share matching site cardinality and files into representative matches, while
+// strictly preserving disjoint clone windows and distinct occurrence sets.
+func CoalesceCloneWindows(windows []CloneWindow) []Match {
+	n := len(windows)
+	if n == 0 {
+		return nil
+	}
+	normalized := make([]CloneWindow, n)
+	for i := range windows {
+		normalized[i] = CloneWindow{
+			Key:   windows[i].Key,
+			Sites: append([]CloneSite(nil), windows[i].Sites...),
+		}
+		normalizeCloneWindowSites(&normalized[i])
+	}
+
+	parent := make([]int, n)
+	for i := range parent {
+		parent[i] = i
+	}
+	var find func(int) int
+	find = func(x int) int {
+		if parent[x] != x {
+			parent[x] = find(parent[x])
+		}
+		return parent[x]
+	}
+	union := func(x, y int) {
+		rx, ry := find(x), find(y)
+		if rx != ry {
+			parent[rx] = ry
+		}
+	}
+
+	for i := 0; i < n; i++ {
+		for j := i + 1; j < n; j++ {
+			if cloneWindowsCanCoalesce(normalized[i], normalized[j]) {
+				union(i, j)
+			}
+		}
+	}
+
+	groups := make(map[int][]int)
+	for i := 0; i < n; i++ {
+		root := find(i)
+		groups[root] = append(groups[root], i)
+	}
+
+	var rootOrder []int
+	for root := range groups {
+		rootOrder = append(rootOrder, root)
+	}
+	sort.Ints(rootOrder)
+
+	var matches []Match
+	for _, root := range rootOrder {
+		indices := groups[root]
+		firstWin := normalized[indices[0]]
+		m := len(firstWin.Sites)
+		distinctKeys := make(map[string]bool)
+		for _, idx := range indices {
+			if normalized[idx].Key != "" {
+				distinctKeys[normalized[idx].Key] = true
+			}
+		}
+		numWindows := len(indices)
+		if len(distinctKeys) > 0 {
+			numWindows = len(distinctKeys)
+		}
+
+		for s := 0; s < m; s++ {
+			f := firstWin.Sites[s].File
+			lo := firstWin.Sites[s].StartLine
+			hi := firstWin.Sites[s].EndLine
+			for _, idx := range indices[1:] {
+				st := normalized[idx].Sites[s]
+				if st.StartLine < lo {
+					lo = st.StartLine
+				}
+				if st.EndLine > hi {
+					hi = st.EndLine
+				}
+			}
+			matches = append(matches, Match{
+				File:      f,
+				StartLine: lo,
+				EndLine:   hi,
+				Windows:   numWindows,
+			})
+		}
+	}
+
+	sort.SliceStable(matches, func(i, j int) bool {
+		if matches[i].Windows != matches[j].Windows {
+			return matches[i].Windows > matches[j].Windows
+		}
+		if matches[i].File != matches[j].File {
+			return matches[i].File < matches[j].File
+		}
+		return matches[i].StartLine < matches[j].StartLine
+	})
+	return matches
+}
+
+// CoalesceMatches coalesces overlapping matches within each file into a single
+// representative match, while strictly preserving disjoint matches as separately reported.
+func CoalesceMatches(matches []Match) []Match {
+	if len(matches) == 0 {
+		return nil
+	}
+	byFile := make(map[string][]Match)
+	var fileOrder []string
+	for _, m := range matches {
+		if _, seen := byFile[m.File]; !seen {
+			fileOrder = append(fileOrder, m.File)
+		}
+		byFile[m.File] = append(byFile[m.File], m)
+	}
+	sort.Strings(fileOrder)
+
+	var result []Match
+	for _, file := range fileOrder {
+		fileMatches := byFile[file]
+		sort.Slice(fileMatches, func(i, j int) bool {
+			if fileMatches[i].StartLine != fileMatches[j].StartLine {
+				return fileMatches[i].StartLine < fileMatches[j].StartLine
+			}
+			return fileMatches[i].EndLine < fileMatches[j].EndLine
+		})
+
+		var cur *Match
+		for _, m := range fileMatches {
+			if cur == nil {
+				cp := m
+				cur = &cp
+			} else if m.StartLine <= cur.EndLine && cur.StartLine <= m.EndLine {
+				if m.EndLine > cur.EndLine {
+					cur.EndLine = m.EndLine
+				}
+				if m.Windows > cur.Windows {
+					cur.Windows = m.Windows
+				}
+			} else {
+				result = append(result, *cur)
+				cp := m
+				cur = &cp
+			}
+		}
+		if cur != nil {
+			result = append(result, *cur)
+		}
+	}
+
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Windows != result[j].Windows {
+			return result[i].Windows > result[j].Windows
+		}
+		if result[i].File != result[j].File {
+			return result[i].File < result[j].File
+		}
+		return result[i].StartLine < result[j].StartLine
+	})
+	return result
+}
+
+// CandidateCloneWindows extracts candidate clone windows for the given wanted keys,
+// recording their qualifying occurrence sites across the indexed tree (excluding selfPath).
+func (idx *TreeIndex) CandidateCloneWindows(want map[string]bool, selfPath string) []CloneWindow {
+	if len(want) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(want))
+	for k, wanted := range want {
+		if wanted {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+
+	var windows []CloneWindow
+	for _, k := range keys {
+		var sites []CloneSite
+		for _, rel := range idx.files {
+			if rel == selfPath {
+				continue
+			}
+			spans := idx.byFile[rel][k]
+			for _, s := range spans {
+				sites = append(sites, CloneSite{
+					File:      rel,
+					StartLine: s[0],
+					EndLine:   s[1],
+				})
+			}
+		}
+		if len(sites) > 0 {
+			windows = append(windows, CloneWindow{
+				Key:   k,
+				Sites: sites,
+			})
+		}
+	}
+	return windows
+}
+
+// QueryCoalesced intersects a candidate's key-set against the prebuilt index and returns
+// representative matches where candidate clone windows overlapping at every site and sharing
+// matching site cardinality and files are coalesced into a single representative match,
+// while disjoint clone windows and distinct occurrence sets remain separately reported.
+func (idx *TreeIndex) QueryCoalesced(want map[string]bool, selfPath string, maxResults int) []Match {
+	windows := idx.CandidateCloneWindows(want, selfPath)
+	if len(windows) == 0 {
+		return nil
+	}
+	matches := CoalesceMatches(CoalesceCloneWindows(windows))
+	if maxResults > 0 && len(matches) > maxResults {
+		matches = matches[:maxResults]
+	}
+	return matches
+}
+
+// QueryCoalesced is the single-candidate wrapper over BuildTreeIndex + TreeIndex.QueryCoalesced.
+func QueryCoalesced(candidate string, tree map[string]string, selfPath string, maxResults int) []Match {
+	return BuildTreeIndex(tree).QueryCoalesced(CandidateKeys(candidate), selfPath, maxResults)
+}
