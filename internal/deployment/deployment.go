@@ -89,8 +89,6 @@ func (r Realization) Compatible(derivationID string, target Target) bool {
 // Store is a local content-addressed realization store on disk.
 type Store struct{ Root string }
 
-// Invariant: deployment materialization is fail-closed and deterministic.
-// Guard: path traversal and realization hash mismatches cause immediate rejection before any disk mutation.
 // Materialize verifies and atomically installs a realization without activating it.
 func (s Store) Materialize(r Realization) (string, error) {
 	if s.Root == "" {

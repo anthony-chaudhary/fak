@@ -9,11 +9,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/slackmeta"
 )
 
-// Invariant: dojo post formatting and rollup rendering are fail-closed and deterministic.
-// Guard: unmeasured episodes or empty runs safely render diagnostic status without panicking or masking lack of ground truth.
-// Guard: maximum episode limits clamp output to prevent channel flooding while preserving worst-first ordering.
-
-// Post is a render-ready Slack post.
+// Post formats structured notification messages for Slack publication.
 type Post slackmeta.Post
 
 // Text renders the post as plain text according to signal/noise scoring.
@@ -28,9 +24,7 @@ func (p Post) signalNoise() slackmeta.Score {
 	return slackmeta.New(signal, noise, "dojo calibration headline, trend/episode rows vs source/context")
 }
 
-// gradeEmoji maps a dojo letter grade to a status glyph so the channel reads the
-// calibration health at a glance: A/B is green, C/D amber, F red, n/a (nothing
-// measured) a neutral mirror.
+// gradeEmoji maps a calibration grade letter to a visual status emoji.
 func gradeEmoji(grade string) string {
 	switch strings.ToUpper(strings.TrimSpace(grade)) {
 	case "A", "B":
@@ -44,13 +38,7 @@ func gradeEmoji(grade string) string {
 	}
 }
 
-// RollupFromReport folds the latest dojo run into a Post: the per-run aggregate in
-// the lead (levers/episodes/calibrated/mean calib-err/grade) and one line per scored
-// episode, worst-first (the report's episodes are already sorted worst-first by the
-// CLI). At most maxEpisodes lines are shown; the rest is summarized so a wide run does
-// not flood the channel. Each line keeps the conflation-honest WITNESSED/OBSERVED
-// provenance the episode carries — the dojo never blurs a number fak authored with one
-// the provider billed.
+// RollupFromReport formats a single calibration run into a Slack message with worst-first episodes.
 func RollupFromReport(r dojo.Report, maxEpisodes int) Post {
 	p := Post{
 		Emoji: gradeEmoji(r.Grade),
@@ -59,8 +47,6 @@ func RollupFromReport(r dojo.Report, maxEpisodes int) Post {
 			r.LeverCount, r.EpisodeCount, r.Measured, r.Calibrated, r.MeanCalibErr, r.Grade, shortCommit(r.Commit)),
 	}
 	appendRollupOperatorLines(&p, r)
-	// A run that measured nothing is the dojo's "ACTION" state — surface the reason so
-	// the channel sees the gym needs a corpus, not a silent empty card.
 	if r.Measured == 0 {
 		if r.Reason != "" {
 			p.Lead += "\n" + r.Reason
@@ -69,8 +55,6 @@ func RollupFromReport(r dojo.Report, maxEpisodes int) Post {
 	}
 
 	eps := append([]dojo.Episode(nil), r.Episodes...)
-	// Defensive: the CLI sorts worst-first before folding, but a caller handing us an
-	// unsorted report (or the JSON round-trip) should still read worst-first.
 	sort.SliceStable(eps, func(i, j int) bool {
 		if eps[i].CalibErr != eps[j].CalibErr {
 			return eps[i].CalibErr > eps[j].CalibErr
@@ -86,8 +70,6 @@ func RollupFromReport(r dojo.Report, maxEpisodes int) Post {
 		shown = eps[:maxEpisodes]
 	}
 	for _, e := range shown {
-		// UNMEASURED episodes carry no scored gap; render them as a mirror rather than a
-		// misleading "claimed vs realized 0.000".
 		if e.Verdict == dojo.VerdictUnmeasured {
 			p.Lines = append(p.Lines,
 				fmt.Sprintf("`%s/%s` · UNMEASURED (no ground truth)", e.Lever, e.Metric))
@@ -100,21 +82,13 @@ func RollupFromReport(r dojo.Report, maxEpisodes int) Post {
 	if len(eps) > len(shown) {
 		p.Lines = append(p.Lines, fmt.Sprintf("…and %d more episode(s) (worst-first; see `fak dojo run`)", len(eps)-len(shown)))
 	}
-	// If the report attached a trend (the CLI fills it from the ledger), append the
-	// one-line across-tick direction so a rollup also answers "are we improving".
 	if r.Trend != nil && r.Trend.Summary != "" {
 		p.Lines = append(p.Lines, "trend: "+r.Trend.Summary)
 	}
 	return p
 }
 
-// TrendFromLedger folds the durable history ledger into a Post that answers the dojo's
-// reason to exist: are our predictors getting better calibrated over time? It reads the
-// committed docs/dojo/history.jsonl (parsed into rows), trends the latest row against
-// the prior one, and shows the last n rows worst-recent-first. This fold needs NO
-// corpus scan — it reports the committed evidence — so CI can post the trend cheaply on
-// a cadence. An empty ledger yields a "no history yet" card (the channel still sees the
-// state).
+// TrendFromLedger summarizes historical calibration trend rows into a Slack notification.
 func TrendFromLedger(rows []dojo.LedgerRow, n int) Post {
 	if len(rows) == 0 {
 		return Post{
@@ -124,7 +98,6 @@ func TrendFromLedger(rows []dojo.LedgerRow, n int) Post {
 			Lines: []string{"operator: append a measured dojo run before treating the channel as a trend"},
 		}
 	}
-	// Rows are in file (append) order; the latest is the last.
 	latest := rows[len(rows)-1]
 	prior := rows[:len(rows)-1]
 	trend := dojo.TrendVsLast(latest, prior)
@@ -148,7 +121,6 @@ func TrendFromLedger(rows []dojo.LedgerRow, n int) Post {
 		"operator: "+trendOperatorMeaning(trend.Direction),
 	)
 
-	// Show the last n rows, most-recent first, as a compact history strip.
 	if n <= 0 || n > len(rows) {
 		n = len(rows)
 	}
