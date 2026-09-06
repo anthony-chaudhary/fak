@@ -215,6 +215,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/fak/arms/traffic", s.handleFakArmsTraffic)
 	mux.HandleFunc("/v1/fak/arms/lease", s.handleFakArmsLease)
 	mux.HandleFunc("/v1/fak/arms/limits", s.handleFakArmsLimits)
+	mux.HandleFunc("/a2a/v1/director/digest", s.handleA2AGetDirectorDigest)
 	return s.withMetrics(s.withAuth(mux))
 }
 
@@ -605,9 +606,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Microcontext tool result elision (#11648)
-	restoreToolName, restoreToolPresent := determineChatRestoreTool(req.Tools)
+	restoreToolName, restoreToolPresent, autoAdvertise := determineChatRestoreTool(req.Tools)
 	req.Messages = s.maybeElideResponsesToolResults(reqTrace, req.Messages, restoreToolName)
-	if len(req.Tools) > 0 && !restoreToolPresent {
+	if len(req.Tools) > 0 && !restoreToolPresent && (autoAdvertise || hasElidedToolResult(req.Messages)) {
 		req.Tools = append(req.Tools, agent.ToolDef{
 			Type: "function",
 			Function: agent.ToolDefFunction{
@@ -761,31 +762,40 @@ func validateChatRequestIngress(w http.ResponseWriter, req ChatRequest) bool {
 	return true
 }
 
-func determineChatRestoreTool(tools []agent.ToolDef) (restoreToolName string, present bool) {
+func determineChatRestoreTool(tools []agent.ToolDef) (restoreToolName string, present bool, autoAdvertise bool) {
 	for _, t := range tools {
 		if t.Function.Name == "mcp__fak_guard__fak_context_restore" {
-			return "mcp__fak_guard__fak_context_restore", true
+			return "mcp__fak_guard__fak_context_restore", true, false
 		}
 	}
 	for _, t := range tools {
 		if t.Function.Name == "mcp__fak__fak_context_restore" {
-			return "mcp__fak__fak_context_restore", true
+			return "mcp__fak__fak_context_restore", true, false
 		}
 	}
 	for _, t := range tools {
 		if t.Function.Name == "fak_context_restore" {
-			return "fak_context_restore", true
+			return "fak_context_restore", true, false
 		}
 	}
 	for _, t := range tools {
 		if strings.HasPrefix(t.Function.Name, "mcp__fak_guard__") {
-			return "mcp__fak_guard__fak_context_restore", false
+			return "mcp__fak_guard__fak_context_restore", false, true
 		}
 		if strings.HasPrefix(t.Function.Name, "mcp__fak__") {
-			return "mcp__fak__fak_context_restore", false
+			return "mcp__fak__fak_context_restore", false, true
 		}
 	}
-	return "fak_context_restore", false
+	return "fak_context_restore", false, false
+}
+
+func hasElidedToolResult(messages []agent.Message) bool {
+	for _, m := range messages {
+		if strings.HasPrefix(m.Content, "...[fak: tool output elided") {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) validateChatCompletionConformance(w http.ResponseWriter, stream *chatStreamWriter, comp *agent.Completion, asst agent.Message, receiptRequested, decodeTraceRequested, decodeTokenIDsRequested bool, inputTriggerRoute *InputTriggerRouteReceipt) bool {

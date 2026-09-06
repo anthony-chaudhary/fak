@@ -27,7 +27,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/gym"
 	"github.com/anthony-chaudhary/fak/internal/shipgate"
 )
 
@@ -129,9 +131,11 @@ type Candidate struct {
 // syscall's verdict (clean worktree / dos verify). These are exactly the three
 // inputs shipgate.Evaluate folds into the non-forgeable keep-bit.
 type Measurement struct {
-	Metric     float64
-	SuiteGreen bool
-	TruthClean bool
+	Metric      float64
+	SuiteGreen  bool
+	TruthClean  bool
+	GymReceipt  *gym.GymReceipt // Attached multi-turn execution receipt (#11655)
+	GymVerified bool            // Verified passing status under Gym multi-turn execution
 	// Score carries an optional structured readout for metrics whose useful
 	// operator surface is richer than the single keep-bit scalar. The keep-bit
 	// deliberately ignores it: shipgate.Evaluate reads only Metric, SuiteGreen,
@@ -227,27 +231,66 @@ func (h Harness) transientRecoveryLimit() int {
 	return DefaultTransientMeasurementRecoveryLimit
 }
 
+// needsGymExecution inspects a candidate to determine if it touches self-improving policy
+// or gateway surfaces (or carries an explicit requirement for Gym multi-turn spherical dogfood proof).
+func needsGymExecution(c Candidate) bool {
+	labelLower := strings.ToLower(c.Label)
+	if strings.Contains(labelLower, "gateway") ||
+		strings.Contains(labelLower, "policy") ||
+		strings.Contains(labelLower, "compaction") ||
+		strings.Contains(labelLower, "subturn") {
+		return true
+	}
+	switch p := c.Payload.(type) {
+	case string:
+		pLower := strings.ToLower(p)
+		if strings.Contains(pLower, "gateway") || strings.Contains(pLower, "policy") {
+			return true
+		}
+	case []string:
+		for _, path := range p {
+			clean := strings.ReplaceAll(path, "\\", "/")
+			if strings.HasPrefix(clean, "internal/gateway/") ||
+				strings.HasPrefix(clean, "internal/policy/") ||
+				strings.HasPrefix(clean, "internal/rsiloop/policy") {
+				return true
+			}
+		}
+	case interface{ RequiresGymProof() bool }:
+		return p.RequiresGymProof()
+	}
+	return false
+}
+
+// isPolicyOrGatewayCandidate reports whether a candidate touches self-improving policy
+// or gateway surfaces requiring gym execution; it is synonymous with needsGymExecution.
+func isPolicyOrGatewayCandidate(c Candidate) bool {
+	return needsGymExecution(c)
+}
+
 // Row is one append-only journal record. The schema is stable so a downstream
 // tracker can diff runs (regression detection vs the last recorded `main` KPI).
 type Row struct {
-	Cycle        int        `json:"cycle"`
-	Mode         string     `json:"mode"` // "improve" | "track"
-	Candidate    string     `json:"candidate"`
-	MetricName   string     `json:"metric_name"`
-	Baseline     float64    `json:"baseline"`
-	Candidate_   float64    `json:"candidate_metric"`
-	Measured     bool       `json:"measured"` // false => candidate_metric is NOT a real measurement (build/probe failed)
-	LowerBetter  bool       `json:"lower_better"`
-	Improved     bool       `json:"improved"`    // strict directional gain vs the running baseline
-	SuiteGreen   bool       `json:"suite_green"` // derived from a real suite run
-	TruthClean   bool       `json:"truth_clean"` // derived from a real truth syscall
-	Decision     string     `json:"decision"`    // KEEP | REVERT | ESCALATE | TRACK | RETRY
-	Kept         bool       `json:"kept"`        // the non-forgeable keep-bit (shipgate)
-	BreakerCount int        `json:"breaker_nonkeeps"`
-	BaselineRef  string     `json:"baseline_ref"`       // the resolved SHA the baseline + every candidate forked from
-	RefName      string     `json:"ref_name,omitempty"` // the symbolic ref that SHA was resolved from (e.g. "main")
-	Score        *Scorecard `json:"score,omitempty"`    // optional structured score telemetry; not a keep-bit input
-	Note         string     `json:"note,omitempty"`
+	Cycle         int        `json:"cycle"`
+	Mode          string     `json:"mode"` // "improve" | "track"
+	Candidate     string     `json:"candidate"`
+	MetricName    string     `json:"metric_name"`
+	Baseline      float64    `json:"baseline"`
+	Candidate_    float64    `json:"candidate_metric"`
+	Measured      bool       `json:"measured"` // false => candidate_metric is NOT a real measurement (build/probe failed)
+	LowerBetter   bool       `json:"lower_better"`
+	Improved      bool       `json:"improved"`    // strict directional gain vs the running baseline
+	SuiteGreen    bool       `json:"suite_green"` // derived from a real suite run
+	TruthClean    bool       `json:"truth_clean"` // derived from a real truth syscall
+	Decision      string     `json:"decision"`    // KEEP | REVERT | ESCALATE | TRACK | RETRY
+	Kept          bool       `json:"kept"`        // the non-forgeable keep-bit (shipgate)
+	BreakerCount  int        `json:"breaker_nonkeeps"`
+	BaselineRef   string     `json:"baseline_ref"`           // the resolved SHA the baseline + every candidate forked from
+	RefName       string     `json:"ref_name,omitempty"`     // the symbolic ref that SHA was resolved from (e.g. "main")
+	Score         *Scorecard `json:"score,omitempty"`        // optional structured score telemetry; not a keep-bit input
+	GymVerified   bool       `json:"gym_verified,omitempty"` // multi-turn spherical dogfood proof status (#11655)
+	GymReceiptRef string     `json:"gym_receipt_ref,omitempty"`
+	Note          string     `json:"note,omitempty"`
 }
 
 // Result summarizes a Run.
@@ -440,6 +483,26 @@ func RunObserved(h Harness, j *Journal, k, maxCycles int, obs Observer) (Result,
 			}
 		}
 
+		if merr == nil && needsGymExecution(c) {
+			if m.GymReceipt == nil {
+				m.SuiteGreen = false
+				m.GymVerified = false
+				note = "reverted: missing required Gym multi-turn execution receipt for policy/gateway candidate (#11655)"
+			} else {
+				ok, reason := gym.VerifyReceipt(*m.GymReceipt, c.Label)
+				m.GymVerified = ok
+				if !ok {
+					m.SuiteGreen = false
+					note = "reverted: gym multi-turn spherical dogfood proof failed: " + reason
+				}
+			}
+		}
+
+		var gymReceiptRef string
+		if m.GymReceipt != nil {
+			gymReceiptRef = m.GymReceipt.ScenarioID + "@" + m.GymReceipt.TranscriptDigest
+		}
+
 		w := shipgate.Witness{
 			Class:       class,
 			Metric:      h.MetricName,
@@ -453,24 +516,26 @@ func RunObserved(h Harness, j *Journal, k, maxCycles int, obs Observer) (Result,
 		final := gate.Record(decision) // may upgrade REVERT -> ESCALATE
 
 		row := Row{
-			Cycle:        cycle,
-			Mode:         "improve",
-			Candidate:    c.Label,
-			MetricName:   h.MetricName,
-			Baseline:     running,
-			Candidate_:   m.Metric,
-			Measured:     measured,
-			LowerBetter:  h.LowerBetter,
-			Improved:     improvedDir(running, m.Metric, h.LowerBetter),
-			SuiteGreen:   m.SuiteGreen,
-			TruthClean:   m.TruthClean,
-			Decision:     final.String(),
-			Kept:         ev.Kept(),
-			BreakerCount: gate.ConsecutiveNonKeeps(),
-			BaselineRef:  baseRef,
-			RefName:      h.BaselineRefName,
-			Score:        cloneScorecard(m.Score),
-			Note:         note,
+			Cycle:         cycle,
+			Mode:          "improve",
+			Candidate:     c.Label,
+			MetricName:    h.MetricName,
+			Baseline:      running,
+			Candidate_:    m.Metric,
+			Measured:      measured,
+			LowerBetter:   h.LowerBetter,
+			Improved:      improvedDir(running, m.Metric, h.LowerBetter),
+			SuiteGreen:    m.SuiteGreen,
+			TruthClean:    m.TruthClean,
+			Decision:      final.String(),
+			Kept:          ev.Kept(),
+			BreakerCount:  gate.ConsecutiveNonKeeps(),
+			BaselineRef:   baseRef,
+			RefName:       h.BaselineRefName,
+			Score:         cloneScorecard(m.Score),
+			GymVerified:   m.GymVerified,
+			GymReceiptRef: gymReceiptRef,
+			Note:          note,
 		}
 		if j != nil {
 			if err := j.Append(row); err != nil {

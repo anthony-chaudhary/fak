@@ -35,6 +35,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/gym"
 	"github.com/anthony-chaudhary/fak/internal/shipgate"
 )
 
@@ -221,6 +222,23 @@ func EvaluateProposal(before, after []Row) (shipgate.Decision, shipgate.Witness)
 		TruthClean:  noTruthDirtyKeep(after),
 	}
 	return shipgate.Evaluate(w)
+}
+
+// EvaluateProposalWithGymProof witnesses a proposed policy change through shipgate and enforces
+// a passing Gym multi-turn execution receipt (#11655).
+func EvaluateProposalWithGymProof(before, after []Row, gymReceipt *gym.GymReceipt) (shipgate.Decision, shipgate.Witness) {
+	if gymReceipt == nil || !gymReceipt.MultiTurnPass {
+		w := shipgate.Witness{
+			Metric:      MetaMetricName,
+			Before:      KeepRateTruthClean(before),
+			After:       KeepRateTruthClean(after),
+			LowerBetter: false,
+			SuiteGreen:  false, // Gym multi-turn proof missing or refuted
+			TruthClean:  noTruthDirtyKeep(after),
+		}
+		return shipgate.REVERT, w
+	}
+	return EvaluateProposal(before, after)
 }
 
 // ApplyRecord is the logged outcome of an apply attempt — every apply (and every

@@ -361,6 +361,21 @@ func Fold(episodes []Episode, opts FoldOpts) Report {
 			r.Reason += " — advisory: over-claim(s) at " + strings.Join(overs, ", ") + " (a theory promising more than billed reality delivered)"
 		}
 		r.NextAction = nextAction(overs, unders)
+
+		// Auto-flagging for client resubmission loops (#11654)
+		var loopBreaches []string
+		for _, e := range episodes {
+			if e.IntentionalFloor && FloorRespectErr(e) > 0 {
+				if strings.Contains(e.Metric, "resubmission_loop") {
+					loopBreaches = append(loopBreaches, e.Lever+"/"+e.Metric)
+				}
+			}
+		}
+		if len(loopBreaches) > 0 {
+			r.Finding = "client_resubmission_loop_detected"
+			r.NextAction = "stand down microcontext elision / raise subturn yield thresholds; optimization induced client resubmission loops"
+			r.Reason += "; toxic optimization: client resubmission loops detected at " + strings.Join(loopBreaches, ", ")
+		}
 	}
 	return r
 }
