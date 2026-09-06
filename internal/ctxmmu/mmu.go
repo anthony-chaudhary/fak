@@ -179,6 +179,21 @@ func (m *MMU) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ver
 	atomic.AddInt64(&m.total, 1)
 	body := m.bytes(ctx, r.Payload)
 
+	if norm := m.Normalizer(); norm != nil && r != nil {
+		toolName := ""
+		if c != nil {
+			toolName = c.Tool
+		}
+		rawStr := string(body)
+		canonStr := norm.NormalizeToolOutput(toolName, rawStr)
+		if r.Meta == nil {
+			r.Meta = make(map[string]string)
+		}
+		r.Meta["canonicalized"] = "true"
+		body = []byte(canonStr)
+		r.Payload = abi.Ref{Kind: abi.RefInline, Inline: body, Len: int64(len(body))}
+	}
+
 	// 1-3. unsafe result bytes -> quarantine or permissive/override handling.
 	if reason, ok := ScreenBytes(body); ok {
 		// 1a. Model override: if the tool call explicitly supplies a justification / override reason,
