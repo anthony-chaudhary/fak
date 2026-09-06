@@ -316,3 +316,57 @@ func TestEvictColdestConcurrentFaultPreservesResident(t *testing.T) {
 		t.Errorf("measured blast radius = %+v, want Tokens=%d, DependentEntries=1", measured, len(refaultBody))
 	}
 }
+
+// TestEvictColdestConcurrentFaultWithoutDependentsPreservesEvictable verifies that
+// even when a concurrent Fault has no dependents (so state remains StateEvictable),
+// the advanced lastUse timestamp causes EvictColdest to abort rather than clobbering
+// the freshly re-admitted tokens to 0 and marking it held.
+func TestEvictColdestConcurrentFaultWithoutDependentsPreservesEvictable(t *testing.T) {
+	ctx := context.Background()
+	mmu := ctxmmu.New()
+	cr := ctxresidency.NewCapResidency(mmu)
+
+	k := skillKey("concurrent-evictable", "v1")
+	initialBody := []byte("initial body")
+	refaultBody := []byte("freshly refaulted body without dependents")
+
+	cr.Fault(k, "sha256:initial", initialBody, nil)
+
+	cr.SetEvictUnlockHookForTest(func() {
+		cr.Fault(k, "sha256:refault", refaultBody, nil)
+	})
+
+	evicted, radius, ok := cr.EvictColdest(ctx)
+	if ok {
+		t.Fatalf("EvictColdest returned ok=true (evicted=%+v, radius=%+v), want ok=false due to concurrent re-fault", evicted, radius)
+	}
+
+	snap := cr.Snapshot()
+	if snap.Evictable != 1 || snap.Held != 0 || snap.Resident != 0 {
+		t.Fatalf("snapshot counts = evictable %d, held %d, resident %d; want 1/0/0", snap.Evictable, snap.Held, snap.Resident)
+	}
+
+	var found bool
+	for _, row := range snap.Caps {
+		if row.Key == k {
+			found = true
+			if row.State != ctxresidency.StateEvictable {
+				t.Errorf("capability state = %v, want StateEvictable", row.State)
+			}
+			if row.EvictBlastRadius.Tokens != len(refaultBody) {
+				t.Errorf("token count = %d, want %d", row.EvictBlastRadius.Tokens, len(refaultBody))
+			}
+			if row.PageID != "" {
+				t.Errorf("pageID = %q, want empty (should not be marked held)", row.PageID)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("capability not found in snapshot")
+	}
+
+	measured := cr.MeasureBlastRadius(k)
+	if measured.Tokens != len(refaultBody) || measured.DependentEntries != 0 {
+		t.Errorf("measured blast radius = %+v, want Tokens=%d, DependentEntries=0", measured, len(refaultBody))
+	}
+}
