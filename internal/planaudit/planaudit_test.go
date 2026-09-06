@@ -319,3 +319,26 @@ func TestAuditPlan_NoTaskBoxesMarkerFallback(t *testing.T) {
 		}
 	})
 }
+
+func TestAuditPlan_Qwen38MacTop10Plan(t *testing.T) {
+	path := filepath.Join("..", "..", "docs", "plans", "qwen38-mac-top10-plan.md")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Skip("docs/plans/qwen38-mac-top10-plan.md does not exist")
+	}
+	plan, err := AuditPlan(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Signal != "task-boxes" {
+		t.Fatalf("Signal=%q, want task-boxes", plan.Signal)
+	}
+	if plan.TotalUnits != 10 {
+		t.Fatalf("TotalUnits=%d, want 10", plan.TotalUnits)
+	}
+	if plan.Status == "complete" {
+		t.Fatalf("Status=%q, want not complete when open tasks remain", plan.Status)
+	}
+	if plan.DoneUnits >= plan.TotalUnits {
+		t.Fatalf("DoneUnits=%d must be less than TotalUnits=%d", plan.DoneUnits, plan.TotalUnits)
+	}
+}
