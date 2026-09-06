@@ -36,8 +36,8 @@ go test ./internal/skillfootprint   # the enforcing test; -v logs the same figur
 ## Baseline (measured)
 
 ```
-skill footprint [interactive]: 71 skill(s); resident floor = 33982 bytes (~8495 tokens);
-  description floor = 33982 B; name-only floor = 956 B; at-rest card floor = 16466 bytes
+skill footprint [interactive]: 71 skill(s); resident floor = 34000 bytes (~8500 tokens);
+  description floor = 34000 B; name-only floor = 956 B; at-rest card floor = 16466 bytes
   at-rest intent slice (#5560): across 71 skill(s)
 ```
 
@@ -61,11 +61,7 @@ head is pinned here so a drift is legible in review.
 resident floor is description prose**, and every skill stays invocable by name
 without a single byte of it.
 
-**Last re-pin: 33415 → 33982 B (+567, 71 skills)** — the live `SkillResolver`
-measurement records the current catalog footprint across 71 skills after adding
-`issue-queue` and refreshing issue management skills (#11541). The
-gate banks that measured baseline; future growth retains the same narrow ratchet
-band.
+**Last re-pin: 33982 → 34000 B (+18, 71 skills)** — align goal scratch memory path in resident description.
 
 ## Provenance (Law A2 — every value carries its provenance)
 
@@ -95,7 +91,7 @@ in the twenty days that followed, the measured floor grew from 36,237 B to 47,23
 and taste lost 30% in three weeks.
 
 `internal/skillfootprint.CheckDescriptions` gates the measured floor against a
-committed ceiling, `SkillDescriptionBudgetBytes` (currently **33982**), as a one-way
+committed ceiling, `SkillDescriptionBudgetBytes` (currently **34000**), as a one-way
 ratchet:
 
 | Direction | Reason | What it means |
