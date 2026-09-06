@@ -584,9 +584,9 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 		for i, slot := range activeSlots {
 			seed := slot.LastToken
 			if seed == 0 {
-				seed = 42 + slot.Index*31
+				seed = 42
 			}
-			nextToken := (seed*37+13+slot.Index*7+len(slot.GeneratedTokens))%32000 + 1
+			nextToken := (seed*37+13+len(slot.GeneratedTokens))%32000 + 1
 			tokensThisStep[i] = nextToken
 		}
 	}
