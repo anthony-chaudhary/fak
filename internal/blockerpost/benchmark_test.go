@@ -6,7 +6,11 @@ import (
 )
 
 // TestBenchmarkSanity ensures benchmark fixtures are valid and exercisable
-// across all production severity paths and folding operations.
+// across all production severity paths and folding operations before
+// benchmark iterations run. It verifies that sample data sets (operator, status,
+// clear blockers, issue lists, triaged sets, and blast signatures) produce
+// valid Slack text and block payloads without runtime panic, ensuring all
+// benchmark loops run against vetted non-nil structures.
 func TestBenchmarkSanity(t *testing.T) {
 	op := sampleBlockerOperator()
 	if op.Text() == "" || len(op.Blocks()) == 0 {
@@ -41,6 +45,11 @@ func TestBenchmarkSanity(t *testing.T) {
 	}
 }
 
+// sampleBlockerOperator constructs an operator-tier Blocker fixture containing
+// actionable routing instructions, an urgent callout owner, and reference links
+// representative of high-priority infrastructure outages. This ensures that
+// benchmarks evaluating operator-level escalation paths measure realistic
+// payloads including multi-line diagnostics and runbook URLs.
 func sampleBlockerOperator() Blocker {
 	return Blocker{
 		Severity:  SeverityOperator,
@@ -55,6 +64,10 @@ func sampleBlockerOperator() Blocker {
 	}
 }
 
+// sampleBlockerStatus constructs an advisory status-tier Blocker fixture
+// indicating deferred or gated operations that do not require immediate manual
+// human intervention. Used to benchmark muted status cards that report queue
+// backpressure or waiting states without paging on-call operators.
 func sampleBlockerStatus() Blocker {
 	return Blocker{
 		Severity: SeverityStatus,
@@ -66,6 +79,10 @@ func sampleBlockerStatus() Blocker {
 	}
 }
 
+// sampleBlockerClear constructs a clear-tier Blocker fixture representing an
+// empty blocker backlog with all operational conditions satisfied. Used to
+// measure the minimal rendering path when no blocking issues or failing
+// signatures require attention.
 func sampleBlockerClear() Blocker {
 	return Blocker{
 		Severity: SeverityClear,
@@ -75,6 +92,11 @@ func sampleBlockerClear() Blocker {
 	}
 }
 
+// sampleIssues generates a synthetic slice of GitHub issues configured with
+// labels and assignees to simulate realistic triage ratios between claimed
+// work and unassigned blocking items. The total parameter sets the issue count,
+// while unowned specifies how many issues lack assignees to trigger operator
+// severity escalation during folding.
 func sampleIssues(total, unowned int) []Issue {
 	issues := make([]Issue, total)
 	for i := 0; i < total; i++ {
@@ -92,6 +114,10 @@ func sampleIssues(total, unowned int) []Issue {
 	return issues
 }
 
+// sampleTriagedIssuesRoutable produces an issue slice where titles and labels
+// qualify for autonomous worker routing without requiring human escalation.
+// This benchmark fixture exercises the decenter-the-human choice path where
+// routine maintenance tasks are filtered to background status cards.
 func sampleTriagedIssuesRoutable() []Issue {
 	return []Issue{
 		{Number: 1, Title: "regenerate the scorecard and rerun `fak cadence`"},
@@ -100,6 +126,10 @@ func sampleTriagedIssuesRoutable() []Issue {
 	}
 }
 
+// sampleTriagedIssuesAuthority produces an issue slice containing items tagged
+// with release and policy markers that require elevated human authorization.
+// This fixture verifies that the triage engine correctly surfaces authority-gated
+// decisions to operator severity despite de-centering heuristics.
 func sampleTriagedIssuesAuthority() []Issue {
 	return []Issue{
 		{Number: 1, Title: "regenerate the scorecard and rerun `fak cadence`"},
@@ -108,6 +138,10 @@ func sampleTriagedIssuesAuthority() []Issue {
 	}
 }
 
+// sampleSignatures generates synthetic known-bad regression signatures with
+// parameterized overdue thresholds and fixer claim statuses for blast card folding.
+// Overdue signatures trigger operator severity, claimed signatures test fixer
+// attribution display, and excess entries verify truncation bounds.
 func sampleSignatures(total, overdue, claimed int) []Signature {
 	sigs := make([]Signature, total)
 	for i := 0; i < total; i++ {
@@ -128,7 +162,9 @@ func sampleSignatures(total, overdue, claimed int) []Signature {
 	return sigs
 }
 
-// Global sinks to prevent compiler dead-code elimination.
+// Global sinks to prevent compiler dead-code elimination across benchmark runs.
+// Storing results into package-level sinks guarantees that the Go compiler
+// does not optimize away pure function calls or intermediate data structures.
 var (
 	sinkText   string
 	sinkBlocks []any
@@ -137,8 +173,25 @@ var (
 	sinkOK     bool
 )
 
-// BenchmarkBlockerText measures plain-text rendering for Slack fallback / notifications
-// across all three severity tiers.
+// BenchmarkSanity exercises baseline fixture creation, card folding, and payload
+// generation in an end-to-end composite loop to catch holistic allocation regressions.
+// It runs the full lifecycle from raw issue data to final Slack block structures
+// to establish an integrated performance baseline for the blockerpost package.
+func BenchmarkSanity(b *testing.B) {
+	repoURL := "https://github.com/anthony-chaudhary/fak"
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sinkBlock = FoldIssues(sampleIssues(15, 5), "blocked", repoURL)
+		sinkText = sinkBlock.Text()
+		sinkBlocks = sinkBlock.Blocks()
+	}
+}
+
+// BenchmarkBlockerText measures plain-text rendering throughput and allocation
+// counts for Slack fallback notifications across all three severity tiers
+// (Operator, Status, and Clear). This path is critical for terminal feeds,
+// log scrapers, and notification digests.
 func BenchmarkBlockerText(b *testing.B) {
 	cases := []struct {
 		name    string
@@ -160,7 +213,10 @@ func BenchmarkBlockerText(b *testing.B) {
 	}
 }
 
-// BenchmarkBlockerBlocks measures Slack Block Kit generation across all severity tiers.
+// BenchmarkBlockerBlocks measures Slack Block Kit JSON-compatible payload
+// generation across operator, status, and clear severity tiers. This benchmarks
+// header construction, section division, and contextual markdown formatting
+// sent to the Slack Webhook API.
 func BenchmarkBlockerBlocks(b *testing.B) {
 	cases := []struct {
 		name    string
@@ -182,7 +238,9 @@ func BenchmarkBlockerBlocks(b *testing.B) {
 	}
 }
 
-// BenchmarkFoldIssues measures folding GitHub issue lists into a single Blocker.
+// BenchmarkFoldIssues measures folding varying quantities of GitHub issues
+// into a unified Blocker card, evaluating empty, mixed unowned/owned, fully owned,
+// and large truncated issue sets to profile memory allocations and slice growth.
 func BenchmarkFoldIssues(b *testing.B) {
 	repoURL := "https://github.com/anthony-chaudhary/fak"
 	cases := []struct {
@@ -207,7 +265,8 @@ func BenchmarkFoldIssues(b *testing.B) {
 }
 
 // BenchmarkFoldIssuesTriaged measures the decenter-the-human choice triage evaluation
-// during blocker backlog folding.
+// during blocker backlog folding. It benchmarks classification throughput across
+// routable tasks, human-authority gates, and heterogeneous issue batches.
 func BenchmarkFoldIssuesTriaged(b *testing.B) {
 	repoURL := "https://github.com/anthony-chaudhary/fak"
 	cases := []struct {
@@ -232,6 +291,8 @@ func BenchmarkFoldIssuesTriaged(b *testing.B) {
 }
 
 // BenchmarkFoldBlast measures folding live known-bad signatures into blast-framed cards.
+// Evaluates empty sets, overdue uncontained regressions requiring operator action,
+// active fixer containment, and signature list truncation under large loads.
 func BenchmarkFoldBlast(b *testing.B) {
 	repoURL := "https://github.com/anthony-chaudhary/fak"
 	cases := []struct {
@@ -255,7 +316,9 @@ func BenchmarkFoldBlast(b *testing.B) {
 	}
 }
 
-// BenchmarkParseSeverity measures string severity parsing.
+// BenchmarkParseSeverity measures string severity parsing throughput across
+// canonical, empty, unknown, and whitespace-padded severity tokens, ensuring
+// lookup and normalization overhead remains minimal.
 func BenchmarkParseSeverity(b *testing.B) {
 	cases := []string{"", "status", "operator", "clear", " OPERATOR "}
 	b.ReportAllocs()
