@@ -2,6 +2,7 @@ package flowmetrics
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -50,6 +51,10 @@ const (
 	// completion is witnessed by child-issue closes rather than
 	// self-reported checkboxes. Below this, epic "progress" is narration.
 	WitnessedProgressFloor = 0.50
+
+	// UnmeasurableLimit caps the unmeasurable aggregate issues named in
+	// the defect detail.
+	UnmeasurableLimit = 20
 )
 
 // KPI is one graded criterion, matching the field shape the repo's other
@@ -91,6 +96,14 @@ type Report struct {
 	AgingTotal int `json:"aging_wip_total,omitempty"`
 	// Curve is the WIP-over-time series when a window was requested.
 	Curve []DayWIP `json:"wip_curve,omitempty"`
+
+	// Epics holds the per-aggregate progress information.
+	Epics []EpicProgress `json:"epics,omitempty"`
+	// Unmeasurable is the actionable list: unmeasurable aggregate issues, worst first,
+	// capped at UnmeasurableLimit.
+	Unmeasurable []int `json:"unmeasurable_epics,omitempty"`
+	// UnmeasurableTotal is how many unmeasurable aggregates existed before truncation.
+	UnmeasurableTotal int `json:"unmeasurable_total,omitempty"`
 }
 
 // Input is everything the fold needs. Keeping it a struct means adding a future
@@ -141,6 +154,17 @@ func Build(in Input) Report {
 		aging = aging[:in.AgingLimit]
 	}
 
+	epics := EpicsProgress(in.Issues, byNumber)
+	unmeasurableAll := UnmeasurableAggregates(epics, 0)
+	unmeasurable := unmeasurableAll
+	if len(unmeasurable) > UnmeasurableLimit {
+		unmeasurable = unmeasurable[:UnmeasurableLimit]
+	}
+	var unmeasurableNums []int
+	for _, u := range unmeasurable {
+		unmeasurableNums = append(unmeasurableNums, u.Issue)
+	}
+
 	var kpis []KPI
 	kpis = append(kpis,
 		kpiFlowEfficiency(spans, since),
@@ -158,13 +182,16 @@ func Build(in Input) Report {
 		debt += len(k.Defects)
 	}
 	rep := Report{
-		Schema:     Schema,
-		Workspace:  in.Workspace,
-		KPIs:       kpis,
-		Tree:       tree,
-		Aging:      aging,
-		AgingTotal: len(stalled),
-		Curve:      WIPCurve(spans, since, in.Now),
+		Schema:            Schema,
+		Workspace:         in.Workspace,
+		KPIs:              kpis,
+		Tree:              tree,
+		Aging:             aging,
+		AgingTotal:        len(stalled),
+		Curve:             WIPCurve(spans, since, in.Now),
+		Epics:             epics,
+		Unmeasurable:      unmeasurableNums,
+		UnmeasurableTotal: len(unmeasurableAll),
 		Corpus: map[string]any{
 			"flow_debt":   debt,
 			"grade":       GradeLetter(debt),
@@ -411,33 +438,61 @@ func kpiArrivalVsService(spans []Span, since, now time.Time) KPI {
 
 func kpiWitnessedProgress(issues []Issue, byNumber map[int]Issue) KPI {
 	k := KPI{KPI: "witnessed_progress", Group: "shape", Defects: []string{}, Soft: []string{}}
-	aggregates, witnessed, selfReported := 0, 0, 0
-	for _, iss := range issues {
-		if iss.Closed() || !IsAggregate(iss, 5) {
-			continue
-		}
-		aggregates++
-		switch BuildEpicProgress(iss, byNumber, nil).Basis {
+	epics := EpicsProgress(issues, byNumber)
+	if len(epics) == 0 {
+		k.Score, k.Value = 100, 1
+		k.Detail = "no open aggregate issues"
+		return k
+	}
+
+	witnessed, selfReported := 0, 0
+	for _, ep := range epics {
+		switch ep.Basis {
 		case "children":
 			witnessed++
 		case "checkbox":
 			selfReported++
 		}
+		k.Soft = append(k.Soft, fmt.Sprintf("witnessed_progress: %s", ep.Summary()))
 	}
-	if aggregates == 0 {
-		k.Score, k.Value = 100, 1
-		k.Detail = "no open aggregate issues"
-		return k
-	}
+
+	aggregates := len(epics)
 	share := float64(witnessed) / float64(aggregates)
 	k.Value = share
 	k.Score = score01(share)
-	k.Detail = fmt.Sprintf("%d of %d open aggregate issues (%.0f%%) report progress via child issues; %d rely on unwitnessed checkboxes",
-		witnessed, aggregates, share*100, selfReported)
+
+	unmeasurableAll := UnmeasurableAggregates(epics, 0)
+	var names []string
+	for _, u := range unmeasurableAll {
+		names = append(names, fmt.Sprintf("#%d", u.Issue))
+	}
+
+	namedList := ""
+	if len(names) > 0 {
+		capped := names
+		more := 0
+		if len(capped) > UnmeasurableLimit {
+			more = len(capped) - UnmeasurableLimit
+			capped = capped[:UnmeasurableLimit]
+		}
+		namedList = strings.Join(capped, ", ")
+		if more > 0 {
+			namedList += fmt.Sprintf(" (and %d more)", more)
+		}
+	}
+
+	if len(unmeasurableAll) == 0 {
+		k.Detail = fmt.Sprintf("%d of %d open aggregate issues (%.0f%%) report progress via child issues; %d rely on unwitnessed checkboxes",
+			witnessed, aggregates, share*100, selfReported)
+	} else {
+		k.Detail = fmt.Sprintf("%d of %d open aggregate issues (%.0f%%) report progress via child issues; %d unmeasurable (%s)",
+			witnessed, aggregates, share*100, len(unmeasurableAll), namedList)
+	}
+
 	if share < WitnessedProgressFloor {
 		k.Defects = append(k.Defects, fmt.Sprintf(
-			"witnessed_progress: only %.0f%% of open epics track progress through child issues, below the %.0f%% floor — the rest report completion as checkboxes nobody ticks, so percent-complete is unmeasurable; convert task-list lines into real child issues",
-			share*100, WitnessedProgressFloor*100))
+			"witnessed_progress: only %.0f%% of open epics track progress through child issues, below the %.0f%% floor — unmeasurable epics (%s) report completion as checkboxes nobody ticks or lack child issues, so percent-complete is unmeasurable; convert task-list lines into real child issues",
+			share*100, WitnessedProgressFloor*100, namedList))
 	}
 	return k
 }

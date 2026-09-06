@@ -1,6 +1,7 @@
 package flowmetrics
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
@@ -200,4 +201,83 @@ func IsAggregate(iss Issue, minItems int) bool {
 	}
 	c, u, _ := ParseTaskList(iss.Body)
 	return minItems > 0 && c+u >= minItems
+}
+
+// Summary returns a formatted one-line progress string for the aggregate.
+// For basis=="children", it reports fraction, basis, children closed/total,
+// and hours to each reached default threshold (25%, 50%, 75%, 100%).
+// For basis=="checkbox", it reports fraction, checked/total items, basis,
+// and emits no milestone timestamps.
+// For basis=="none", it reports unmeasurable.
+func (ep EpicProgress) Summary() string {
+	switch ep.Basis {
+	case "children":
+		total := len(ep.Children)
+		var reached []string
+		for _, pct := range DefaultThresholds {
+			if h, ok := ep.HoursTo[pct]; ok {
+				reached = append(reached, fmt.Sprintf("%d%%: %.1fh", pct, h))
+			}
+		}
+		milestones := ""
+		if len(reached) > 0 {
+			milestones = "; hours to " + strings.Join(reached, ", ")
+		}
+		return fmt.Sprintf("#%d: %.0f%% (%d/%d children, basis=children%s)",
+			ep.Issue, ep.Fraction*100, ep.ChildrenClosed, total, milestones)
+	case "checkbox":
+		total := ep.Checked + ep.Unchecked
+		return fmt.Sprintf("#%d: %.0f%% (%d/%d checkboxes, basis=checkbox)",
+			ep.Issue, ep.Fraction*100, ep.Checked, total)
+	default:
+		return fmt.Sprintf("#%d: unmeasurable (basis=none)", ep.Issue)
+	}
+}
+
+// OpenCount returns the count of unfinished items for sorting unmeasurable epics:
+// open children when children exist, otherwise unchecked checkboxes.
+func (ep EpicProgress) OpenCount() int {
+	if len(ep.Children) > 0 {
+		return len(ep.Children) - ep.ChildrenClosed
+	}
+	return ep.Unchecked
+}
+
+// EpicsProgress folds every open aggregate issue against known issues, sorted
+// deterministically by issue number.
+func EpicsProgress(issues []Issue, byNumber map[int]Issue) []EpicProgress {
+	var out []EpicProgress
+	for _, iss := range issues {
+		if iss.Closed() || !IsAggregate(iss, 5) {
+			continue
+		}
+		out = append(out, BuildEpicProgress(iss, byNumber, nil))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Issue < out[j].Issue
+	})
+	return out
+}
+
+// UnmeasurableAggregates returns open aggregate issues whose basis is not
+// "children" (i.e. checkbox-only or none), sorted worst-first by open count,
+// capped at limit (<=0 means no limit).
+func UnmeasurableAggregates(epics []EpicProgress, limit int) []EpicProgress {
+	var unmeasurable []EpicProgress
+	for _, ep := range epics {
+		if ep.Basis != "children" {
+			unmeasurable = append(unmeasurable, ep)
+		}
+	}
+	sort.Slice(unmeasurable, func(i, j int) bool {
+		oi, oj := unmeasurable[i].OpenCount(), unmeasurable[j].OpenCount()
+		if oi != oj {
+			return oi > oj
+		}
+		return unmeasurable[i].Issue < unmeasurable[j].Issue
+	})
+	if limit > 0 && len(unmeasurable) > limit {
+		unmeasurable = unmeasurable[:limit]
+	}
+	return unmeasurable
 }
