@@ -3170,5 +3170,17 @@ summary  = "The ultracode budget receipt is incomplete because one or more child
 fix      = "Ensure all launched child workers finish cleanly and report provider-authoritative token usage before admitting the aggregate envelope receipt. Floor: internal/orchestration."
 see_also = ["PARENT_TOKEN_BUDGET_EXCEEDED", "PARENT_WALL_DEADLINE_EXCEEDED", "internal/orchestration/ultracode_envelope.go", "cmd/fak/recover.go"]
 
+[reasons.NO_LEASE]
+category = "OPERATOR_GATE"
+refusal = true
+summary = "no live lease exists for the requested id (expired, reaped, or displaced)"
+fix = "reacquire the lease with fak leaseref acquire before attempting fenced operations"
+
+[reasons.STALE_LEASE]
+category = "OPERATOR_GATE"
+refusal = true
+summary = "presented lease generation or holder does not match live ref on disk"
+fix = "fetch latest ref or reacquire lease if previous hold was displaced or expired"
+
 [retention]
 audits_keep_last = 30

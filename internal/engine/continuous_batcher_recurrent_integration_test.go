@@ -556,4 +556,166 @@ func TestRecurrentBatchIsolationIntegration(t *testing.T) {
 			t.Fatalf("slotConcA RecurrentPasses %d != isolated %d", slotConcA.RecurrentPasses, slotIso.RecurrentPasses)
 		}
 	})
+
+	t.Run("interleaved_yield_and_resume_isolation", func(t *testing.T) {
+		cfg := DefaultContinuousBatcherConfig()
+		cfg.MaxSlots = 4
+
+		// Request A: depth=5, targetTokens=5, promptTokens=[101, 102]
+		newReqA := func() *SubagentRequest {
+			return &SubagentRequest{
+				SessionID:      "req-A",
+				ExecutionDepth: 5,
+				TargetTokens:   5,
+				PromptTokens:   []int{101, 102},
+			}
+		}
+
+		// Request B: depth=7, targetTokens=7, promptTokens=[201, 202, 203]
+		newReqB := func() *SubagentRequest {
+			return &SubagentRequest{
+				SessionID:      "req-B",
+				ExecutionDepth: 7,
+				TargetTokens:   7,
+				PromptTokens:   []int{201, 202, 203},
+			}
+		}
+
+		// 1. Run Request A in isolation and record generated tokens
+		cbA, err := NewContinuousBatcher(cfg)
+		if err != nil {
+			t.Fatalf("NewContinuousBatcher(cfg) failed: %v", err)
+		}
+		defer cbA.Close()
+
+		reqAIso := newReqA()
+		if _, err := cbA.Submit(reqAIso); err != nil {
+			t.Fatalf("Submit reqAIso failed: %v", err)
+		}
+
+		var isolatedTokensA []int
+		for cbA.ActiveSlotCount() > 0 {
+			res, err := cbA.Step(ctx)
+			if err != nil {
+				t.Fatalf("cbA Step failed: %v", err)
+			}
+			if tok, ok := res.GeneratedTokens[reqAIso.SessionID]; ok {
+				isolatedTokensA = append(isolatedTokensA, tok)
+			}
+		}
+
+		// 2. Run Request B in isolation and record generated tokens
+		cbB, err := NewContinuousBatcher(cfg)
+		if err != nil {
+			t.Fatalf("NewContinuousBatcher(cfg) failed: %v", err)
+		}
+		defer cbB.Close()
+
+		reqBIso := newReqB()
+		if _, err := cbB.Submit(reqBIso); err != nil {
+			t.Fatalf("Submit reqBIso failed: %v", err)
+		}
+
+		var isolatedTokensB []int
+		for cbB.ActiveSlotCount() > 0 {
+			res, err := cbB.Step(ctx)
+			if err != nil {
+				t.Fatalf("cbB Step failed: %v", err)
+			}
+			if tok, ok := res.GeneratedTokens[reqBIso.SessionID]; ok {
+				isolatedTokensB = append(isolatedTokensB, tok)
+			}
+		}
+
+		// 3. Interleaved execution with yield and resume in a concurrent batcher
+		cbInterleaved, err := NewContinuousBatcher(cfg)
+		if err != nil {
+			t.Fatalf("NewContinuousBatcher failed: %v", err)
+		}
+		defer cbInterleaved.Close()
+
+		reqAInter := newReqA()
+		reqBInter := newReqB()
+
+		if _, err := cbInterleaved.Submit(reqAInter); err != nil {
+			t.Fatalf("Submit reqAInter failed: %v", err)
+		}
+		if _, err := cbInterleaved.Submit(reqBInter); err != nil {
+			t.Fatalf("Submit reqBInter failed: %v", err)
+		}
+
+		var tokensA []int
+		var tokensB []int
+
+		// Step 3 times while both are active
+		for i := 0; i < 3; i++ {
+			res, err := cbInterleaved.Step(ctx)
+			if err != nil {
+				t.Fatalf("Step %d failed: %v", i, err)
+			}
+			if tok, ok := res.GeneratedTokens[reqAInter.SessionID]; ok {
+				tokensA = append(tokensA, tok)
+			}
+			if tok, ok := res.GeneratedTokens[reqBInter.SessionID]; ok {
+				tokensB = append(tokensB, tok)
+			}
+		}
+
+		// Request A yields for external tool I/O
+		if err := cbInterleaved.YieldSlot(reqAInter.SessionID); err != nil {
+			t.Fatalf("YieldSlot(reqAInter) failed: %v", err)
+		}
+
+		// Step 2 times while Request A is yielded: Request B generates tokens alone
+		for i := 0; i < 2; i++ {
+			res, err := cbInterleaved.Step(ctx)
+			if err != nil {
+				t.Fatalf("Step during yield failed: %v", err)
+			}
+			if _, ok := res.GeneratedTokens[reqAInter.SessionID]; ok {
+				t.Fatalf("Request A produced a token while in YieldedIO state")
+			}
+			if tok, ok := res.GeneratedTokens[reqBInter.SessionID]; ok {
+				tokensB = append(tokensB, tok)
+			}
+		}
+
+		// Resume Request A
+		if err := cbInterleaved.ResumeSlot(reqAInter.SessionID); err != nil {
+			t.Fatalf("ResumeSlot(reqAInter) failed: %v", err)
+		}
+
+		// Drain remaining tokens until both finish
+		for cbInterleaved.ActiveSlotCount() > 0 {
+			res, err := cbInterleaved.Step(ctx)
+			if err != nil {
+				t.Fatalf("Step after resume failed: %v", err)
+			}
+			if tok, ok := res.GeneratedTokens[reqAInter.SessionID]; ok {
+				tokensA = append(tokensA, tok)
+			}
+			if tok, ok := res.GeneratedTokens[reqBInter.SessionID]; ok {
+				tokensB = append(tokensB, tok)
+			}
+		}
+
+		// Verify zero KV cross contamination and exact match with isolated tokens
+		if len(tokensA) != len(isolatedTokensA) {
+			t.Fatalf("interleaved tokensA len = %d, want %d", len(tokensA), len(isolatedTokensA))
+		}
+		for i := range isolatedTokensA {
+			if tokensA[i] != isolatedTokensA[i] {
+				t.Fatalf("interleaved Request A token mismatch at index %d: got=%d, want=%d", i, tokensA[i], isolatedTokensA[i])
+			}
+		}
+
+		if len(tokensB) != len(isolatedTokensB) {
+			t.Fatalf("interleaved tokensB len = %d, want %d", len(tokensB), len(isolatedTokensB))
+		}
+		for i := range isolatedTokensB {
+			if tokensB[i] != isolatedTokensB[i] {
+				t.Fatalf("interleaved Request B token mismatch at index %d: got=%d, want=%d", i, tokensB[i], isolatedTokensB[i])
+			}
+		}
+	})
 }
