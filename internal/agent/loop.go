@@ -16,6 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 
 	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
@@ -411,6 +412,21 @@ func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int,
 	}, opts...)
 }
 
+// StreamObserver receives streamed harnesskit.Envelope events during an agent run.
+type StreamObserver func(harnesskit.Envelope)
+
+// WithEnvelopeSink registers an envelope sink callback to receive streamed harnesskit.Envelope events.
+func WithEnvelopeSink(sink func(harnesskit.Envelope)) RunOption {
+	return func(c *runConfig) {
+		c.envelopeSink = sink
+	}
+}
+
+// WithStreamObserver is an alias for WithEnvelopeSink.
+func WithStreamObserver(obs StreamObserver) RunOption {
+	return WithEnvelopeSink(obs)
+}
+
 // RunArmStream is the streaming twin of RunArm: it drives the same owned loop and
 // syscall boundary, but each model turn is requested through CompleteStream so natural
 // language content can be delivered incrementally to sink. Tool calls remain held until
@@ -526,19 +542,20 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 	}
 
 	runner := armRunner{
-		cfg:         &cfg,
-		metrics:     &m,
-		fak:         fak,
-		kernel:      k,
-		speculation: sp,
-		messages:    messages,
-		tools:       tools,
-		model:       model,
-		stream:      stream,
-		sink:        sink,
-		complete:    complete,
-		log:         log,
-		task:        task,
+		cfg:          &cfg,
+		metrics:      &m,
+		fak:          fak,
+		kernel:       k,
+		speculation:  sp,
+		messages:     messages,
+		tools:        tools,
+		model:        model,
+		stream:       stream,
+		sink:         sink,
+		complete:     complete,
+		log:          log,
+		task:         task,
+		envelopeSink: cfg.envelopeSink,
 	}
 	runner.stopTerminated = func() bool {
 		return stopTerminatedArm(ctx, cfg, terminated, fak, k, &m)

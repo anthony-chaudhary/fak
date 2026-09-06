@@ -1442,6 +1442,29 @@ func (geminiAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 			}
 		}
 	}
+	// Google Gemini GenerateContent API strictly requires alternating turns and
+	// rejects any request ending with a model turn with HTTP 400:
+	// "Requests ending with a model turn are not supported" (anomalyco/opencode #47034,
+	// decolua/9router #3816, fak #11464).
+	// If the projected transcript ends on a model turn without function calls
+	// (e.g. trailing reasoning-only or assistant text awaiting continuation), inject
+	// a user continuation prompt so the wire call satisfies turn alternation.
+	if len(req.Contents) > 0 && req.Contents[len(req.Contents)-1].Role == "model" {
+		lastContent := req.Contents[len(req.Contents)-1]
+		hasFunctionCall := false
+		for _, p := range lastContent.Parts {
+			if p.FunctionCall != nil {
+				hasFunctionCall = true
+				break
+			}
+		}
+		if !hasFunctionCall {
+			req.Contents = append(req.Contents, geminiContent{
+				Role:  "user",
+				Parts: []geminiPart{{Text: "Continue"}},
+			})
+		}
+	}
 	return json.Marshal(req)
 }
 
@@ -1586,6 +1609,21 @@ func sanitizeGeminiSchema(v any) any {
 	}
 	if items, ok := m["items"]; ok {
 		m["items"] = sanitizeGeminiSchema(items)
+	}
+
+	t, _ := m["type"].(string)
+	if strings.EqualFold(t, "array") {
+		// Gemini requires that every ARRAY schema specifies an items definition.
+		// If missing or an empty object (e.g. from MadAppGang/claudish #232), populate default type.
+		if itemsVal, hasItems := m["items"]; !hasItems || itemsVal == nil {
+			m["items"] = map[string]any{"type": "STRING"}
+		} else if itemsMap, isMap := itemsVal.(map[string]any); isMap {
+			if len(itemsMap) == 0 {
+				m["items"] = map[string]any{"type": "STRING"}
+			} else if itemsMap["type"] == nil && itemsMap["$ref"] == nil && itemsMap["properties"] == nil && itemsMap["anyOf"] == nil && itemsMap["oneOf"] == nil && itemsMap["allOf"] == nil {
+				itemsMap["type"] = "STRING"
+			}
+		}
 	}
 
 	sanitizeSchemaRequired(m)
