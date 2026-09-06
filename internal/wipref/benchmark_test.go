@@ -6,7 +6,21 @@ import (
 	"testing"
 )
 
-var benchSink any
+var (
+	sinkBool        bool
+	sinkRecord      RefRecord
+	sinkString      string
+	sinkStamp       Stamp
+	sinkStatus      StatusReport
+	sinkReap        []ReapVerdict
+	sinkCensusClass CensusClass
+	sinkCensusRep   CensusReport
+	sinkStrings     []string
+	sinkOwnership   Ownership
+	sinkOwnerRep    OwnerReport
+	sinkPublishPlan PublishPlan
+	sinkFleetRep    FleetReport
+)
 
 // BenchmarkEncodeStamp measures serializing checkpoint metadata stamps into commit message lines.
 func BenchmarkEncodeStamp(b *testing.B) {
@@ -30,7 +44,7 @@ func BenchmarkEncodeStamp(b *testing.B) {
 		if err != nil {
 			b.Fatalf("EncodeStamp failed: %v", err)
 		}
-		benchSink = msg
+		sinkString = msg
 	}
 }
 
@@ -61,7 +75,7 @@ func BenchmarkDecodeStamp(b *testing.B) {
 		if !ok {
 			b.Fatal("DecodeStamp failed to decode stamp")
 		}
-		benchSink = decoded
+		sinkStamp = decoded
 	}
 }
 
@@ -89,7 +103,7 @@ func BenchmarkFoldStatus(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		rep := Fold(recs, now)
-		benchSink = rep
+		sinkStatus = rep
 	}
 }
 
@@ -124,7 +138,7 @@ func BenchmarkFoldWithMirror(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		rep := FoldWithMirror(recs, mirror, now)
-		benchSink = rep
+		sinkStatus = rep
 	}
 }
 
@@ -162,7 +176,7 @@ func BenchmarkReconcile(b *testing.B) {
 		cand := candidates[i%len(candidates)]
 		winner, changed := Reconcile(current, cand)
 		_ = changed
-		benchSink = winner
+		sinkRecord = winner
 	}
 }
 
@@ -187,7 +201,7 @@ func BenchmarkReapDecisions(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		verdicts := Reap(recs, owners)
-		benchSink = verdicts
+		sinkReap = verdicts
 	}
 }
 
@@ -211,7 +225,7 @@ func BenchmarkCensusClassification(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		f := factsCases[i%len(factsCases)]
 		c := Classify(f)
-		benchSink = c
+		sinkCensusClass = c
 	}
 }
 
@@ -250,7 +264,7 @@ func BenchmarkBuildCensus(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		rep := BuildCensus(verdicts)
-		benchSink = rep
+		sinkCensusRep = rep
 	}
 }
 
@@ -280,7 +294,7 @@ func BenchmarkDeltaSubsumed(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ok := DeltaSubsumed(added, removed, head)
-		benchSink = ok
+		sinkBool = ok
 	}
 }
 
@@ -301,7 +315,7 @@ A	cmd/fak/newcmd.go
 	for i := 0; i < b.N; i++ {
 		absent, diverged := ParseNameStatus(diffOutput)
 		_ = absent
-		benchSink = diverged
+		sinkStrings = diverged
 	}
 }
 
@@ -323,9 +337,9 @@ func main() {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if i%2 == 0 {
-			benchSink = HasConflictMarkers(cleanData)
+			sinkBool = HasConflictMarkers(cleanData)
 		} else {
-			benchSink = HasConflictMarkers(conflictedData)
+			sinkBool = HasConflictMarkers(conflictedData)
 		}
 	}
 }
@@ -343,7 +357,7 @@ func BenchmarkOwnerOfPath(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		own := OwnerOfPath("internal/wipref/wipref.go", claims, now, DefaultClaimTTL)
-		benchSink = own
+		sinkOwnership = own
 	}
 }
 
@@ -367,21 +381,21 @@ func BenchmarkBuildOwnerReport(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		rep := BuildOwnerReport(paths, claimsMap, now, DefaultClaimTTL)
-		benchSink = rep
+		sinkOwnerRep = rep
 	}
 }
 
 // BenchmarkExtractTargetPaths measures parsing and normalizing target file paths from tool invocations.
 func BenchmarkExtractTargetPaths(b *testing.B) {
 	tools := []string{"write_file", "edit", "str_replace_editor", "fak_patch_file"}
-	argsJSON := `{"filePath": "C:\\work\\fak\\internal\\wipref\\wipref.go", "file_paths": ["cmd/fak/main.go", "./internal/leaseref/lease.go"]}`
+	argsJSON := `{"filePath": "internal/wipref/wipref.go", "file_paths": ["cmd/fak/main.go", "./internal/leaseref/lease.go"]}`
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		tool := tools[i%len(tools)]
 		paths := ExtractTargetPaths(tool, argsJSON)
-		benchSink = paths
+		sinkStrings = paths
 	}
 }
 
@@ -412,7 +426,7 @@ func BenchmarkFleetPlanPublish(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		plan := PlanPublish(recs, DefaultMaxDeltaBytes)
-		benchSink = plan
+		sinkPublishPlan = plan
 	}
 }
 
@@ -445,7 +459,7 @@ func BenchmarkFoldFleet(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		rep := FoldFleet("origin", recs, localSessions, objectPresent, now)
-		benchSink = rep
+		sinkFleetRep = rep
 	}
 }
 
@@ -481,5 +495,45 @@ func TestBenchmarkOperationsSanity(t *testing.T) {
 
 	if !HasConflictMarkers([]byte("<<<<<<<\n=======\n>>>>>>>\n")) {
 		t.Fatal("expected conflict markers to be detected")
+	}
+
+	paths := ExtractTargetPaths("write_file", `{"filePath": "internal/wipref/wipref.go"}`)
+	if len(paths) != 1 || paths[0] != "internal/wipref/wipref.go" {
+		t.Fatalf("ExtractTargetPaths got %v, want [internal/wipref/wipref.go]", paths)
+	}
+}
+
+// TestBenchmarkZeroAllocSinks verifies that typed benchmark sinks avoid interface boxing allocations.
+func TestBenchmarkZeroAllocSinks(t *testing.T) {
+	curr := RefRecord{Ref: SessionRef("sess-1"), Object: "obj1", Stamp: Stamp{CheckpointedAt: 100}}
+	cand := RefRecord{Ref: SessionRef("sess-1"), Object: "obj2", Stamp: Stamp{CheckpointedAt: 200}}
+	if a := testing.AllocsPerRun(200, func() {
+		winner, _ := Reconcile(curr, cand)
+		sinkRecord = winner
+	}); a != 0 {
+		t.Errorf("Reconcile with sinkRecord allocated %v, want 0", a)
+	}
+
+	cleanData := []byte("package main\n\nfunc main() {}\n")
+	if a := testing.AllocsPerRun(200, func() {
+		sinkBool = HasConflictMarkers(cleanData)
+	}); a != 0 {
+		t.Errorf("HasConflictMarkers with sinkBool allocated %v, want 0", a)
+	}
+
+	added := map[string][]string{"f.go": {"line1"}}
+	removed := map[string][]string{}
+	head := map[string]map[string]bool{"f.go": {"line1": true}}
+	if a := testing.AllocsPerRun(200, func() {
+		sinkBool = DeltaSubsumed(added, removed, head)
+	}); a != 0 {
+		t.Errorf("DeltaSubsumed with sinkBool allocated %v, want 0", a)
+	}
+
+	facts := CensusFacts{Live: true}
+	if a := testing.AllocsPerRun(200, func() {
+		sinkCensusClass = Classify(facts)
+	}); a != 0 {
+		t.Errorf("Classify with sinkCensusClass allocated %v, want 0", a)
 	}
 }
