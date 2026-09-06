@@ -429,6 +429,7 @@ func (g *Governor) TryAdmit() (*Task, *AdmissionVerdict, error) {
 		leaseID := dequeued.ID
 		if leaseID == "" {
 			leaseID = fmt.Sprintf("lease-%d", time.Now().UnixNano())
+			dequeued.ID = leaseID
 		}
 		g.heldLeases[leaseID] = laneadmit.Lease{
 			ID:     leaseID,

@@ -68,9 +68,11 @@ type ToolVersion struct {
 // ParseToolVersion parses one TOKEN into a typed version, reporting whether it is
 // a version at all. It accepts an optional leading "v" (node prints "v20.11.1"),
 // trims wrapping punctuation (a banner may parenthesize the field), and requires
-// every dotted component to be a non-negative decimal integer — so a token that
-// merely CONTAINS digits ("tool-1.2.3", "go1.22.3") is not a version and is
-// reported as such instead of being mined for a substring.
+// leading dotted components to be non-negative decimal integers. Dotted platform
+// or distro release tags (e.g. "windows.3", "el9.x86_64") following the numeric
+// components are treated as release metadata rather than syntax errors (#11792).
+// A token that merely CONTAINS digits ("tool-1.2.3", "go1.22.3") is not a version
+// and is reported as such instead of being mined for a substring.
 //
 // It is deliberately permissive about arity (a single component parses) because an
 // operator-authored pin may legitimately be "14"; the BANNER scanner applies the

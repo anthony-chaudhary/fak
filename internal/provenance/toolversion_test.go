@@ -371,3 +371,94 @@ func TestDottedPlatformAndDistroReleaseTags(t *testing.T) {
 		}
 	}
 }
+
+// TestWindowsGitVersionProbe (#11792) witnesses that Windows and distro-tagged git version
+// banners (e.g. "git version 2.55.0.windows.3", "git version 2.43.0.el9.x86_64") are
+// correctly parsed and verified against exact pins.
+func TestWindowsGitVersionProbe(t *testing.T) {
+	// Case 1: Windows git version output with standard .windows.<N> tag
+	probeWin := VersionProbe{
+		Tool:  "git",
+		Path:  "C:\\Program Files\\Git\\cmd\\git.exe",
+		Raw:   "git version 2.55.0.windows.3\n",
+		Found: true,
+	}
+	wWin := VerifyToolVersion("2.55.0", probeWin)
+	if !wWin.Satisfied() {
+		t.Fatalf("expected git 2.55.0.windows.3 to satisfy pin 2.55.0, got state=%s reason=%s", wWin.State, wWin.Reason)
+	}
+	if wWin.Live != "2.55.0" {
+		t.Errorf("live = %q, want %q", wWin.Live, "2.55.0")
+	}
+	if wWin.LiveToken != "2.55.0.windows.3" {
+		t.Errorf("live_token = %q, want %q", wWin.LiveToken, "2.55.0.windows.3")
+	}
+	if wWin.State != VersionMatch {
+		t.Errorf("state = %s, want match", wWin.State)
+	}
+
+	// Case 2: Windows git version output with CRLF line endings
+	probeWinCRLF := VersionProbe{
+		Tool:  "git",
+		Path:  "C:\\Program Files\\Git\\cmd\\git.exe",
+		Raw:   "git version 2.55.0.windows.3\r\n",
+		Found: true,
+	}
+	wWinCRLF := VerifyToolVersion("2.55.0", probeWinCRLF)
+	if !wWinCRLF.Satisfied() {
+		t.Fatalf("expected git with CRLF to satisfy pin 2.55.0, got state=%s reason=%s", wWinCRLF.State, wWinCRLF.Reason)
+	}
+
+	// Case 3: Windows git version output with mismatch pin
+	wWinMismatch := VerifyToolVersion("2.54.0", probeWin)
+	if wWinMismatch.Satisfied() {
+		t.Errorf("git 2.55.0.windows.3 unexpectedly satisfied pin 2.54.0")
+	}
+	if wWinMismatch.State != VersionMismatch {
+		t.Errorf("state = %s, want mismatch", wWinMismatch.State)
+	}
+
+	// Case 4: Distro release tag (e.g. RHEL/CentOS 2.43.0.el9.x86_64)
+	probeDistro := VersionProbe{
+		Tool:  "git",
+		Path:  "/usr/bin/git",
+		Raw:   "git version 2.43.0.el9.x86_64\n",
+		Found: true,
+	}
+	wDistro := VerifyToolVersion("2.43.0", probeDistro)
+	if !wDistro.Satisfied() {
+		t.Fatalf("expected git 2.43.0.el9.x86_64 to satisfy pin 2.43.0, got state=%s reason=%s", wDistro.State, wDistro.Reason)
+	}
+	if wDistro.Live != "2.43.0" {
+		t.Errorf("live = %q, want %q", wDistro.Live, "2.43.0")
+	}
+	if wDistro.LiveToken != "2.43.0.el9.x86_64" {
+		t.Errorf("live_token = %q, want %q", wDistro.LiveToken, "2.43.0.el9.x86_64")
+	}
+
+	// Case 5: parseLiveVersion directly extracts the token and parses numeric components
+	v, tok, ok := parseLiveVersion("git version 2.55.0.windows.3\n")
+	if !ok {
+		t.Fatal("parseLiveVersion failed on git 2.55.0.windows.3")
+	}
+	if tok != "2.55.0.windows.3" {
+		t.Errorf("parseLiveVersion token = %q, want %q", tok, "2.55.0.windows.3")
+	}
+	if v.String() != "2.55.0" {
+		t.Errorf("parseLiveVersion v.String() = %q, want %q", v.String(), "2.55.0")
+	}
+	if len(v.Nums) != 3 || v.Nums[0] != 2 || v.Nums[1] != 55 || v.Nums[2] != 0 {
+		t.Errorf("parseLiveVersion nums = %v, want [2, 55, 0]", v.Nums)
+	}
+
+	// Case 6: Direct ParseToolVersion verification on platform/distro tokens
+	for _, raw := range []string{"2.55.0.windows.3", "2.43.0.el9.x86_64", "2.43.0.1.windows.1"} {
+		v, ok := ParseToolVersion(raw)
+		if !ok {
+			t.Errorf("ParseToolVersion(%q) failed", raw)
+		}
+		if len(v.Nums) < 3 {
+			t.Errorf("ParseToolVersion(%q) nums too short: %v", raw, v.Nums)
+		}
+	}
+}

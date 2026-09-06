@@ -483,3 +483,63 @@ func TestGovernorEdgeCasesAndReset(t *testing.T) {
 		t.Fatalf("reset failed to restore state")
 	}
 }
+
+func TestGovernorReleaseClearsLeaseOnEmptyTaskID(t *testing.T) {
+	gov := NewGovernor(GovernorConfig{
+		BaseConcurrency: 2,
+	})
+
+	// Task 1 has no explicit ID (ID: "") but declares a lane and tree.
+	task1 := &Task{
+		Priority: abi.ThreadPriorityP1Interactive,
+		Lane:     "agentsched",
+		Tree:     []string{"internal/agentsched/*"},
+	}
+
+	if err := gov.Submit(task1); err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	admitted1, verdict1, err := gov.TryAdmit()
+	if err != nil || admitted1 == nil || !verdict1.Admitted {
+		t.Fatalf("task1 should be admitted: err=%v verdict=%+v", err, verdict1)
+	}
+
+	// The governor should assign a generated lease ID to the task.
+	if admitted1.ID == "" {
+		t.Fatalf("expected admitted1.ID to receive generated lease ID, got empty string")
+	}
+
+	// Task 2 requests the same lane and should be blocked by Gate 4 while task 1 is in flight.
+	task2 := &Task{
+		ID:       "task-2",
+		Priority: abi.ThreadPriorityP1Interactive,
+		Lane:     "agentsched",
+		Tree:     []string{"internal/agentsched/*"},
+	}
+	if err := gov.Submit(task2); err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	admitted2, verdict2, err := gov.TryAdmit()
+	if err != nil {
+		t.Fatalf("unexpected admit error: %v", err)
+	}
+	if admitted2 != nil || verdict2.Admitted {
+		t.Fatalf("expected task2 to be blocked by Gate 4 while task1 holds lease")
+	}
+	if verdict2.FailedGate != GateLaneClearance {
+		t.Fatalf("expected GateLaneClearance, got %v", verdict2.FailedGate)
+	}
+
+	// Release task 1
+	gov.Release(admitted1)
+
+	// After releasing task 1, task 2 must be admitted without being blocked by a leaked lease.
+	admitted2After, verdict2After, err := gov.TryAdmit()
+	if err != nil || admitted2After == nil || !verdict2After.Admitted {
+		t.Fatalf("expected task2 to be admitted after task1 release, but was blocked (lease leaked): err=%v verdict=%+v", err, verdict2After)
+	}
+
+	gov.Release(admitted2After)
+}
