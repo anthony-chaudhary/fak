@@ -4,10 +4,17 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestDefaultTimeout(t *testing.T) {
+	if DefaultTimeout != 60*time.Second {
+		t.Fatalf("DefaultTimeout = %v, want 60s", DefaultTimeout)
+	}
+}
 
 func TestCommandDisablesPromptingInEnv(t *testing.T) {
 	cmd := Command(context.Background(), "issue", "list")
@@ -26,13 +33,29 @@ func TestCommandDisablesPromptingInEnv(t *testing.T) {
 	if len(cmd.Args) == 0 || cmd.Args[0] != "gh" {
 		t.Errorf("Command args = %v, want gh argv[0]", cmd.Args)
 	}
+	if runtime.GOOS == "windows" {
+		if cmd.SysProcAttr == nil || !cmd.SysProcAttr.HideWindow {
+			t.Errorf("Command SysProcAttr missing HideWindow on windows: %+v", cmd.SysProcAttr)
+		}
+	}
 }
 
-// The deadline probes below repoint the command at the (always-present)
-// running test binary so they need neither `gh` installed nor a portable
-// sleep. The context wiring under test is unchanged, and because every probe
-// uses an already-done context, exec.Cmd.Start returns the context error
-// BEFORE spawning anything — the test binary is never actually re-executed.
+func TestCommandPreservesCallerEnvironment(t *testing.T) {
+	const key, val = "TEST_GHEXEC_INHERITED", "true"
+	t.Setenv(key, val)
+	cmd := Command(context.Background(), "issue", "list")
+	want := key + "=" + val
+	found := false
+	for _, e := range cmd.Env {
+		if e == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Command env missing inherited caller var %q", want)
+	}
+}
 
 func TestCommandTimeoutDeadlineIsWired(t *testing.T) {
 	cmd, cancel := CommandTimeout(context.Background(), -time.Second, "issue", "list")
@@ -41,10 +64,8 @@ func TestCommandTimeoutDeadlineIsWired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Executable: %v", err)
 	}
-	// The already-expired deadline must make Run refuse before spawning,
-	// which proves the derived context is wired to the returned command.
 	cmd.Path = exe
-	cmd.Err = nil // clear any gh-not-installed lookup error; the deadline must win
+	cmd.Err = nil
 	if err := cmd.Run(); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Run with an expired deadline = %v, want context.DeadlineExceeded", err)
 	}
@@ -52,7 +73,7 @@ func TestCommandTimeoutDeadlineIsWired(t *testing.T) {
 
 func TestCommandTimeoutNilParentAndCancelWired(t *testing.T) {
 	cmd, cancel := CommandTimeout(nil, time.Hour, "issue", "list")
-	cancel() // cancel must reach the same context the command watches
+	cancel()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatalf("os.Executable: %v", err)
@@ -61,6 +82,22 @@ func TestCommandTimeoutNilParentAndCancelWired(t *testing.T) {
 	cmd.Err = nil
 	if err := cmd.Run(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run after cancel = %v, want context.Canceled", err)
+	}
+}
+
+func TestCommandTimeoutParentCancellation(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	cmd, cancel := CommandTimeout(parent, time.Hour, "issue", "list")
+	defer cancel()
+	cancelParent()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	cmd.Path = exe
+	cmd.Err = nil
+	if err := cmd.Run(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run after parent cancel = %v, want context.Canceled", err)
 	}
 }
 
