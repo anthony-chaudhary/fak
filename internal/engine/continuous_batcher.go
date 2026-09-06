@@ -59,11 +59,28 @@ var (
 
 // SubagentRequest defines the parameters for an asynchronous subagent stream.
 type SubagentRequest struct {
-	SessionID    string
-	PromptTokens []int
-	TargetTokens int
-	Priority     int
-	Metadata     map[string]string
+	SessionID       string
+	PromptTokens    []int
+	TargetTokens    int
+	Priority        int
+	Metadata        map[string]string
+	ExecutionDepth  int   // Recurrent execution depth multiplier (default 1 if <= 0)
+	RecurrentLoops  int   // Recurrent loops count (used if > ExecutionDepth)
+	KVBytesPerToken int64 // KV cache footprint in bytes per token (uses batcher default if <= 0)
+}
+
+func (req *SubagentRequest) effectiveDepth() int {
+	if req == nil {
+		return 1
+	}
+	depth := req.ExecutionDepth
+	if req.RecurrentLoops > depth {
+		depth = req.RecurrentLoops
+	}
+	if depth <= 0 {
+		depth = 1
+	}
+	return depth
 }
 
 // Slot represents one execution lane in the continuous batcher.
@@ -82,6 +99,7 @@ type Slot struct {
 	BytesSwapped      int64         // Invariant: 0 bytes in UMA
 	ReprefillTokens   int           // Invariant: 0 re-prefill tokens on resume
 	KVCacheStationary bool          // Remains resident in UMA
+	KVCacheBytes      int64         // Allocated KV cache memory in bytes
 
 	sess        *model.Session
 	tokenCh     chan int
@@ -134,6 +152,7 @@ func (s *Slot) snapshot() *Slot {
 		BytesSwapped:      s.BytesSwapped,
 		ReprefillTokens:   s.ReprefillTokens,
 		KVCacheStationary: s.KVCacheStationary,
+		KVCacheBytes:      s.KVCacheBytes,
 		sess:              s.sess,
 		tokenCh:           s.tokenCh,
 		doneCh:            s.doneCh,
@@ -167,6 +186,7 @@ func (s *Slot) reset() {
 	s.BytesSwapped = 0
 	s.ReprefillTokens = 0
 	s.KVCacheStationary = false
+	s.KVCacheBytes = 0
 	s.sess = nil
 	s.tokenCh = nil
 	s.doneCh = nil
@@ -190,6 +210,12 @@ type ContinuousBatcherConfig struct {
 	ModelParams          int64
 	SingleAgentTokPerSec float64
 	FixedOverheadSec     float64
+
+	// MaxKVCacheBytes caps total KV cache memory capacity across active slots (0 = unconstrained).
+	MaxKVCacheBytes int64
+
+	// KVBytesPerToken is the default KV cache footprint in bytes per token (default if <= 0 is 1024).
+	KVBytesPerToken int64
 }
 
 // DefaultContinuousBatcherConfig returns calibrated defaults for Strix Halo and Qwen3.8-14B.
@@ -202,6 +228,8 @@ func DefaultContinuousBatcherConfig() ContinuousBatcherConfig {
 		ModelParams:          Qwen38_14B_Params,
 		SingleAgentTokPerSec: Qwen38_14B_SingleAgentTokSec,
 		FixedOverheadSec:     0.0025, // 2.5 ms attention & kernel dispatch overhead
+		MaxKVCacheBytes:      0,      // 0 = unconstrained
+		KVBytesPerToken:      1024,
 	}
 }
 
@@ -222,6 +250,7 @@ type BatchStepResult struct {
 	StallDuration        time.Duration // Invariant: 0s on yield/resume
 	RetiredSessionIDs    []string
 	PromotedSessionIDs   []string
+	KVCacheBytesUsed     int64
 }
 
 // ContinuousBatcher manages dynamic iteration-level continuous batching for subagent turn loops.
@@ -263,6 +292,12 @@ func NewContinuousBatcher(cfg ...ContinuousBatcherConfig) (*ContinuousBatcher, e
 		}
 		if c.FixedOverheadSec <= 0 {
 			c.FixedOverheadSec = 0.0025
+		}
+		if c.KVBytesPerToken <= 0 {
+			c.KVBytesPerToken = 1024
+		}
+		if c.MaxKVCacheBytes < 0 {
+			c.MaxKVCacheBytes = 0
 		}
 	}
 
@@ -328,7 +363,11 @@ func (cb *ContinuousBatcher) Submit(req *SubagentRequest) (string, error) {
 		}
 	}
 
-	if emptyIdx != -1 {
+	reqBytes := cb.RequiredKVCacheBytes(req)
+	canAdmit := emptyIdx != -1 && len(cb.waitingQueue) == 0 &&
+		(cb.cfg.MaxKVCacheBytes <= 0 || cb.currentKVCacheBytesLocked()+reqBytes <= cb.cfg.MaxKVCacheBytes)
+
+	if canAdmit {
 		cb.initSlot(emptyIdx, req)
 	} else {
 		cb.waitingQueue = append(cb.waitingQueue, req)
@@ -338,6 +377,7 @@ func (cb *ContinuousBatcher) Submit(req *SubagentRequest) (string, error) {
 }
 
 func (cb *ContinuousBatcher) initSlot(index int, req *SubagentRequest) *Slot {
+	reqKVBytes := cb.RequiredKVCacheBytes(req)
 	slot := &Slot{
 		Index:             index,
 		SessionID:         req.SessionID,
@@ -352,6 +392,7 @@ func (cb *ContinuousBatcher) initSlot(index int, req *SubagentRequest) *Slot {
 		BytesSwapped:      0,
 		ReprefillTokens:   0,
 		KVCacheStationary: true,
+		KVCacheBytes:      reqKVBytes,
 		AdmittedAt:        time.Now(),
 		tokenCh:           make(chan int, req.TargetTokens+16),
 		doneCh:            make(chan struct{}),
@@ -467,23 +508,7 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 	stepStart := time.Now()
 
 	// 1. Pull queued requests into any empty slots before gathering active batch
-	var promotedIDs []string
-	for len(cb.waitingQueue) > 0 {
-		emptyIdx := -1
-		for i, s := range cb.slots {
-			if s.State == SlotStateEmpty {
-				emptyIdx = i
-				break
-			}
-		}
-		if emptyIdx == -1 {
-			break
-		}
-		req := cb.waitingQueue[0]
-		cb.waitingQueue = cb.waitingQueue[1:]
-		cb.initSlot(emptyIdx, req)
-		promotedIDs = append(promotedIDs, req.SessionID)
-	}
+	promotedIDs := cb.tryPromoteWaitingLocked()
 
 	// 2. Gather active decode slots and count other states
 	var activeSlots []*Slot
@@ -527,6 +552,7 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 			StallDuration:        0,
 			RetiredSessionIDs:    nil,
 			PromotedSessionIDs:   promotedIDs,
+			KVCacheBytesUsed:     cb.currentKVCacheBytesLocked(),
 		}, nil
 	}
 
@@ -598,18 +624,14 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 		delete(cb.sessionMap, slot.SessionID)
 
 		idx := slot.Index
-		if len(cb.waitingQueue) > 0 {
-			req := cb.waitingQueue[0]
-			cb.waitingQueue = cb.waitingQueue[1:]
-			cb.initSlot(idx, req)
-			promotedIDs = append(promotedIDs, req.SessionID)
-		} else {
-			cb.slots[idx] = &Slot{
-				Index: idx,
-				State: SlotStateEmpty,
-			}
+		cb.slots[idx] = &Slot{
+			Index: idx,
+			State: SlotStateEmpty,
 		}
 	}
+
+	promotedAfterRetire := cb.tryPromoteWaitingLocked()
+	promotedIDs = append(promotedIDs, promotedAfterRetire...)
 
 	cb.iteration++
 
@@ -632,6 +654,7 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 		StallDuration:        0, // Invariant: zero compute stalls on yield/resume
 		RetiredSessionIDs:    retiredIDs,
 		PromotedSessionIDs:   promotedIDs,
+		KVCacheBytesUsed:     cb.currentKVCacheBytesLocked(),
 	}
 
 	return result, nil
@@ -844,18 +867,90 @@ func (cb *ContinuousBatcher) Cancel(sessionID string) error {
 	delete(cb.sessionMap, sessionID)
 
 	idx := slot.Index
-	if len(cb.waitingQueue) > 0 {
-		req := cb.waitingQueue[0]
-		cb.waitingQueue = cb.waitingQueue[1:]
-		cb.initSlot(idx, req)
-	} else {
-		cb.slots[idx] = &Slot{
-			Index: idx,
-			State: SlotStateEmpty,
-		}
+	cb.slots[idx] = &Slot{
+		Index: idx,
+		State: SlotStateEmpty,
 	}
+	cb.tryPromoteWaitingLocked()
 
 	return nil
+}
+
+// RequiredKVCacheBytes calculates the required KV cache footprint for a request based on
+// token dimensions, KV bytes per token, and recurrent execution depth:
+// KV capacity required = (len(PromptTokens) + TargetTokens) * KVBytesPerToken * ExecutionDepth.
+func (cb *ContinuousBatcher) RequiredKVCacheBytes(req *SubagentRequest) int64 {
+	if req == nil {
+		return 0
+	}
+	depth := int64(req.effectiveDepth())
+	bpt := req.KVBytesPerToken
+	if bpt <= 0 {
+		bpt = cb.cfg.KVBytesPerToken
+	}
+	if bpt <= 0 {
+		bpt = 1024
+	}
+	tokens := int64(len(req.PromptTokens) + req.TargetTokens)
+	return tokens * bpt * depth
+}
+
+// CurrentKVCacheBytes returns the total KV cache memory footprint in bytes allocated across active and yielded slots.
+func (cb *ContinuousBatcher) CurrentKVCacheBytes() int64 {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	return cb.currentKVCacheBytesLocked()
+}
+
+// MaxKVCacheBytes returns the configured maximum KV cache memory capacity in bytes (0 = unconstrained).
+func (cb *ContinuousBatcher) MaxKVCacheBytes() int64 {
+	return cb.cfg.MaxKVCacheBytes
+}
+
+func (cb *ContinuousBatcher) currentKVCacheBytesLocked() int64 {
+	var total int64
+	for _, s := range cb.slots {
+		if s.State == SlotStateActiveDecode || s.State == SlotStateYieldedIO {
+			total += s.KVCacheBytes
+		}
+	}
+	return total
+}
+
+func (cb *ContinuousBatcher) tryPromoteWaitingLocked() []string {
+	var promoted []string
+	for len(cb.waitingQueue) > 0 {
+		emptyIdx := -1
+		for i, s := range cb.slots {
+			if s.State == SlotStateEmpty {
+				emptyIdx = i
+				break
+			}
+		}
+		if emptyIdx == -1 {
+			break
+		}
+
+		req := cb.waitingQueue[0]
+		reqBytes := cb.RequiredKVCacheBytes(req)
+		if cb.cfg.MaxKVCacheBytes > 0 && cb.currentKVCacheBytesLocked()+reqBytes > cb.cfg.MaxKVCacheBytes {
+			break
+		}
+
+		cb.waitingQueue = cb.waitingQueue[1:]
+		cb.initSlot(emptyIdx, req)
+		promoted = append(promoted, req.SessionID)
+	}
+	return promoted
+}
+
+// WaitingQueue returns a shallow copy of the pending subagent requests in the waiting queue.
+func (cb *ContinuousBatcher) WaitingQueue() []*SubagentRequest {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	res := make([]*SubagentRequest, len(cb.waitingQueue))
+	copy(res, cb.waitingQueue)
+	return res
 }
 
 // Close closes the batcher and marks remaining active sessions finished.
