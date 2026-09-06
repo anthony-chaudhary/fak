@@ -1,10 +1,9 @@
 ---
 name: debt-orchestrator
-description: Plan, partition, and coordinate sustained multi-wave parallel subagent campaigns to retire large volumes of maturity debt across both the public fak engine and private fak-private platform repositories. Defaults to...
+description: Coordinate bounded, evidence-backed maturity debt work in the current repository, with isolated workers and independent verification. Use for debt burndowns or explicitly requested sustained campaigns.
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/debt-orchestrator/SKILL.md
-  canonical-description-hash: 58a20b5d4d634940d73c886bd9b10982e33222555b5469e3e6247cd0b856f713
 ---
 
 # Canonical project skill adapter
