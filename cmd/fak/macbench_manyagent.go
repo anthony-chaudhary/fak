@@ -187,6 +187,9 @@ type manyAgentModelSpec struct {
 	Name                 string
 	WeightMB             float64
 	Layers               uint64
+	FullAttnLayers       uint64
+	RecurrentLayers      uint64
+	RecurrentStateBytes  uint64
 	KVHeads              uint64
 	HeadDim              uint64
 	BytesPerElement      uint64
@@ -194,6 +197,61 @@ type manyAgentModelSpec struct {
 	DeltaBaseMS          float64
 	OverheadMB           float64
 }
+
+// EffectiveKVLayers returns the number of layers that allocate token-indexed KV cache rows.
+// For hybrid models (such as Qwen3.8 3:1 GDN), this returns FullAttnLayers.
+func (s manyAgentModelSpec) EffectiveKVLayers() uint64 {
+	if s.FullAttnLayers > 0 {
+		return s.FullAttnLayers
+	}
+	return s.Layers
+}
+
+// HybridRatio returns the ratio of full-attention layers to total layers (e.g. 0.25 for 3:1 GDN).
+func (s manyAgentModelSpec) HybridRatio() float64 {
+	if s.Layers == 0 {
+		return 1.0
+	}
+	return float64(s.EffectiveKVLayers()) / float64(s.Layers)
+}
+
+// KVBytesPerToken returns the token-indexed KV cache bytes required per token.
+// For hybrid architectures (like Qwen3.8 3:1 GDN), only full-attention layers maintain
+// token-indexed KV cache rows; linear-attention layers maintain fixed O(1) recurrent state.
+func (s manyAgentModelSpec) KVBytesPerToken() uint64 {
+	return 2 * s.EffectiveKVLayers() * s.KVHeads * s.HeadDim * s.BytesPerElement
+}
+
+// KVBytes returns the token-indexed KV cache bytes for a given token count.
+func (s manyAgentModelSpec) KVBytes(tokens uint64) uint64 {
+	return tokens * s.KVBytesPerToken()
+}
+
+// RecurrentStateMB returns the per-agent fixed recurrent state memory in MB.
+func (s manyAgentModelSpec) RecurrentStateMB() float64 {
+	return float64(s.RecurrentStateBytes) / (1024.0 * 1024.0)
+}
+
+// EstimateKVMemoryBytes returns the total KV cache bytes for a given token count and agent concurrency,
+// including token-indexed KV cache rows and O(1) recurrent state.
+func (s manyAgentModelSpec) EstimateKVMemoryBytes(tokens uint64, concurrency int) uint64 {
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	return tokens*s.KVBytesPerToken() + uint64(concurrency)*s.RecurrentStateBytes
+}
+
+// EstimateKVMemoryMB returns the KV cache memory in MB for a given token count and agent concurrency.
+func (s manyAgentModelSpec) EstimateKVMemoryMB(tokens uint64, concurrency int) float64 {
+	return float64(s.EstimateKVMemoryBytes(tokens, concurrency)) / (1024.0 * 1024.0)
+}
+
+const (
+	// DefaultQwen38RecurrentStateBytes is the fixed O(1) recurrent matrix and short-convolution
+	// state per agent for Qwen3.8-27B (48 linear-attention layers, 156,893,184 bytes ~= 149.6 MB,
+	// matching internal/model/contextsize.go).
+	DefaultQwen38RecurrentStateBytes uint64 = 156893184
+)
 
 func resolveManyAgentModelSpec(modelName string) manyAgentModelSpec {
 	lower := strings.ToLower(strings.TrimSpace(modelName))
@@ -209,6 +267,9 @@ func resolveManyAgentModelSpec(modelName string) manyAgentModelSpec {
 			Name:                 modelName,
 			WeightMB:             weightMB,
 			Layers:               64,
+			FullAttnLayers:       16,
+			RecurrentLayers:      48,
+			RecurrentStateBytes:  DefaultQwen38RecurrentStateBytes,
 			KVHeads:              8,
 			HeadDim:              128,
 			BytesPerElement:      2,
@@ -221,6 +282,9 @@ func resolveManyAgentModelSpec(modelName string) manyAgentModelSpec {
 			Name:                 modelName,
 			WeightMB:             2048.0,
 			Layers:               28,
+			FullAttnLayers:       28,
+			RecurrentLayers:      0,
+			RecurrentStateBytes:  0,
 			KVHeads:              8,
 			HeadDim:              128,
 			BytesPerElement:      2,
@@ -233,6 +297,9 @@ func resolveManyAgentModelSpec(modelName string) manyAgentModelSpec {
 			Name:                 modelName,
 			WeightMB:             2800.0,
 			Layers:               32,
+			FullAttnLayers:       32,
+			RecurrentLayers:      0,
+			RecurrentStateBytes:  0,
 			KVHeads:              8,
 			HeadDim:              128,
 			BytesPerElement:      2,
@@ -245,6 +312,9 @@ func resolveManyAgentModelSpec(modelName string) manyAgentModelSpec {
 			Name:                 modelName,
 			WeightMB:             4608.0,
 			Layers:               28,
+			FullAttnLayers:       28,
+			RecurrentLayers:      0,
+			RecurrentStateBytes:  0,
 			KVHeads:              4,
 			HeadDim:              128,
 			BytesPerElement:      2,
@@ -257,6 +327,9 @@ func resolveManyAgentModelSpec(modelName string) manyAgentModelSpec {
 			Name:                 modelName,
 			WeightMB:             16384.0, // ~16.0 GB for Q4_K_M weights
 			Layers:               64,
+			FullAttnLayers:       16,
+			RecurrentLayers:      48,
+			RecurrentStateBytes:  DefaultQwen38RecurrentStateBytes,
 			KVHeads:              8,
 			HeadDim:              128,
 			BytesPerElement:      2,
@@ -334,8 +407,8 @@ func RunManyAgentSpine(opts ManyAgentOptions) (ManyAgentReport, error) {
 	}
 
 	// 3. Memory calculation.
-	// KV bytes per token = 2 * layers * kv_heads * head_dim * bytes_per_element.
-	kvBytesPerToken := 2 * spec.Layers * spec.KVHeads * spec.HeadDim * spec.BytesPerElement
+	// KV bytes per token = 2 * effective_layers * kv_heads * head_dim * bytes_per_element.
+	kvBytesPerToken := spec.KVBytesPerToken()
 	sharedPrefixKVBytes := uint64(prefix) * kvBytesPerToken
 	tailTokensPerAgent := opts.Horizon*DefaultTurnDeltaTokens + (opts.Horizon-1)*DefaultTurnOutputTokens
 
@@ -348,6 +421,9 @@ func RunManyAgentSpine(opts ManyAgentOptions) (ManyAgentReport, error) {
 		fullContextTokens := uint64(prefix + tailTokensPerAgent)
 		totalKVBytes = uint64(opts.Concurrency) * fullContextTokens * kvBytesPerToken
 	}
+
+	// Fixed O(1) recurrent state per concurrent agent.
+	totalKVBytes += uint64(opts.Concurrency) * spec.RecurrentStateBytes
 
 	kvMemoryMB := float64(totalKVBytes) / (1024.0 * 1024.0)
 	peakMemoryMB := spec.WeightMB + kvMemoryMB + spec.OverheadMB
@@ -554,9 +630,10 @@ func RunManyAgentComparison(opts ManyAgentOptions) (ManyAgentComparisonReport, e
 	}
 
 	// Memory footprint for llama.cpp: K independent full contexts
-	kvBytesPerToken := 2 * spec.Layers * spec.KVHeads * spec.HeadDim * spec.BytesPerElement
+	kvBytesPerToken := spec.KVBytesPerToken()
 	tailTokensPerAgent := opts.Horizon*DefaultTurnDeltaTokens + (opts.Horizon-1)*DefaultTurnOutputTokens
 	llamaTotalKVBytes := uint64(opts.Concurrency) * uint64(prefix+tailTokensPerAgent) * kvBytesPerToken
+	llamaTotalKVBytes += uint64(opts.Concurrency) * spec.RecurrentStateBytes
 	llamaKVMB := float64(llamaTotalKVBytes) / (1024.0 * 1024.0)
 	llamaPeakMemoryMB := spec.WeightMB + llamaKVMB + spec.OverheadMB
 	llamaAgentsPerGB := 0.0

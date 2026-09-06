@@ -184,15 +184,16 @@ func TestMacBenchManyAgent_MetricsCalculation(t *testing.T) {
 	}
 
 	// 1. Peak memory with cache=true must be significantly lower than cache=false
-	// For K=4, 3 copies of 4096-token prefix (3 * 1024 MB = 3072 MB) are saved.
+	// For K=4, 3 copies of 4096-token prefix (3 * 256 MB = 768 MB) are saved under 16 full-attention layers (3:1 GDN cadence).
 	savedMB := repOff.PeakMemoryMB - repOn.PeakMemoryMB
-	if savedMB < 3000.0 || savedMB > 3150.0 {
-		t.Errorf("expected ~3072 MB saved by caching 4096 prefix across 4 agents, got %.1f MB", savedMB)
+	if savedMB < 750.0 || savedMB > 780.0 {
+		t.Errorf("expected ~768 MB saved by caching 4096 prefix across 4 agents under 16 full-attention layers, got %.1f MB", savedMB)
 	}
 
-	// 2. Agents per GB must be higher with cache=true
-	if repOn.AgentsPerGB <= repOff.AgentsPerGB {
-		t.Errorf("expected AgentsPerGB on (%.2f) > off (%.2f)", repOn.AgentsPerGB, repOff.AgentsPerGB)
+	// 2. Peak memory must be strictly lower with cache=true and AgentsPerGB must not regress (equal or higher after 2-decimal rounding)
+	if repOn.PeakMemoryMB >= repOff.PeakMemoryMB || repOn.AgentsPerGB < repOff.AgentsPerGB {
+		t.Errorf("expected PeakMemoryMB on (%.1f) < off (%.1f) and AgentsPerGB on (%.2f) >= off (%.2f)",
+			repOn.PeakMemoryMB, repOff.PeakMemoryMB, repOn.AgentsPerGB, repOff.AgentsPerGB)
 	}
 
 	// 3. TTFT must be order-of-magnitude faster with cache=true (< 25 ms vs > 500 ms)
@@ -423,8 +424,8 @@ func TestMacBenchManyAgent_CLI(t *testing.T) {
 		if rep.SpeedupRatio < 1.5 {
 			t.Errorf("speedup ratio = %.2f, want >= 1.5", rep.SpeedupRatio)
 		}
-		if rep.MemorySavedMB < 3000.0 {
-			t.Errorf("memory saved = %.1f MB, want > 3000 MB", rep.MemorySavedMB)
+		if rep.MemorySavedMB < 700.0 {
+			t.Errorf("memory saved = %.1f MB, want > 700 MB", rep.MemorySavedMB)
 		}
 		if !rep.Verified {
 			t.Errorf("expected Verified == true")
@@ -471,8 +472,8 @@ func TestMacBenchManyAgent_RunManyAgentComparison_True4x(t *testing.T) {
 	if len(rep.UnmodeledEffects) < 3 {
 		t.Errorf("UnmodeledEffects len = %d, want >= 3", len(rep.UnmodeledEffects))
 	}
-	if rep.MemorySavedMB < 3000.0 {
-		t.Errorf("MemorySavedMB = %.1f, want > 3000.0 MB", rep.MemorySavedMB)
+	if rep.MemorySavedMB < 700.0 {
+		t.Errorf("MemorySavedMB = %.1f, want > 700.0 MB", rep.MemorySavedMB)
 	}
 	if rep.TTFTSpeedupP50 < 1.5 || rep.TTFTSpeedupP50 > 2.0 {
 		t.Errorf("TTFTSpeedupP50 = %.2f, want ~1.71x (matched distribution)", rep.TTFTSpeedupP50)
@@ -800,4 +801,89 @@ func TestManyAgentComparison(t *testing.T) {
 
 func TestMacBenchManyAgent_SymmetricTTFTDistribution(t *testing.T) {
 	TestManyAgentComparison(t)
+}
+
+func TestManyAgent_Qwen38HybridKVCacheDiscount(t *testing.T) {
+	spec := resolveManyAgentModelSpec("Qwen3.8-27B")
+
+	// 1. Verify model architecture parameters for Qwen3.8-27B:
+	// 64 total layers, 16 full-attention layers, 48 recurrent layers (3:1 linear-to-full attention cadence).
+	if spec.Layers != 64 {
+		t.Errorf("Layers = %d, want 64", spec.Layers)
+	}
+	if spec.FullAttnLayers != 16 {
+		t.Errorf("FullAttnLayers = %d, want 16", spec.FullAttnLayers)
+	}
+	if spec.RecurrentLayers != 48 {
+		t.Errorf("RecurrentLayers = %d, want 48", spec.RecurrentLayers)
+	}
+	if spec.EffectiveKVLayers() != 16 {
+		t.Errorf("EffectiveKVLayers = %d, want 16", spec.EffectiveKVLayers())
+	}
+	if spec.HybridRatio() != 0.25 {
+		t.Errorf("HybridRatio = %.4f, want 0.25 (3:1 GDN ratio)", spec.HybridRatio())
+	}
+	if spec.RecurrentStateBytes != DefaultQwen38RecurrentStateBytes {
+		t.Errorf("RecurrentStateBytes = %d, want %d", spec.RecurrentStateBytes, DefaultQwen38RecurrentStateBytes)
+	}
+
+	// 2. Verify token-indexed KV cache bytes per token:
+	// 2 * 16 layers * 8 heads * 128 head_dim * 2 bytes = 65,536 bytes/token.
+	// Uniform 64-layer calculation would be 262,144 bytes/token (4x higher).
+	wantBytesPerToken := uint64(2 * 16 * 8 * 128 * 2) // 65,536 bytes
+	if spec.KVBytesPerToken() != wantBytesPerToken {
+		t.Errorf("KVBytesPerToken = %d, want %d", spec.KVBytesPerToken(), wantBytesPerToken)
+	}
+	uniformBytesPerToken := uint64(2 * spec.Layers * spec.KVHeads * spec.HeadDim * spec.BytesPerElement)
+	if uniformBytesPerToken != 4*wantBytesPerToken {
+		t.Errorf("uniformBytesPerToken = %d, want 4x %d", uniformBytesPerToken, wantBytesPerToken)
+	}
+
+	// 3. Analytical memory calculation at large context (20k context, e.g. 60,000 total tokens across 3 sessions):
+	// Token-indexed KV cache with 16 layers: 60,000 * 65,536 = 3,932,160,000 bytes (~3.93 GB).
+	// Overestimated uniform 64 layers: 60,000 * 262,144 = 15,728,640,000 bytes (~15.7 GB).
+	const tokens60k = uint64(60000)
+	kvBytes60k := spec.KVBytes(tokens60k)
+	wantKVBytes60k := uint64(3932160000)
+	if kvBytes60k != wantKVBytes60k {
+		t.Errorf("KVBytes(60000) = %d, want %d (~3.93 GB)", kvBytes60k, wantKVBytes60k)
+	}
+	uniformKVBytes60k := tokens60k * uniformBytesPerToken
+	wantUniformKVBytes60k := uint64(15728640000)
+	if uniformKVBytes60k != wantUniformKVBytes60k {
+		t.Errorf("uniform KV bytes = %d, want %d (~15.7 GB)", uniformKVBytes60k, wantUniformKVBytes60k)
+	}
+	if float64(uniformKVBytes60k)/float64(kvBytes60k) != 4.0 {
+		t.Errorf("expected 4.0x ratio between uniform and hybrid KV bytes, got %.2f", float64(uniformKVBytes60k)/float64(kvBytes60k))
+	}
+
+	// 4. Verify simulation memory with RunManyAgentSpine reflects the 16 full-attention layers:
+	// For K=4, prefix=4096:
+	// Prefix caching saves 3 copies of 4096 tokens = 3 * 4096 * 65,536 = 805,306,368 bytes = 768.0 MB.
+	optsOn := ManyAgentOptions{
+		Concurrency:        4,
+		Model:              "Qwen3.8-27B",
+		Horizon:            20,
+		Cache:              true,
+		SharedPrefixTokens: 4096,
+	}
+	repOn, err := RunManyAgentSpine(optsOn)
+	if err != nil {
+		t.Fatalf("RunManyAgentSpine on failed: %v", err)
+	}
+	optsOff := optsOn
+	optsOff.Cache = false
+	repOff, err := RunManyAgentSpine(optsOff)
+	if err != nil {
+		t.Fatalf("RunManyAgentSpine off failed: %v", err)
+	}
+	savedMB := repOff.PeakMemoryMB - repOn.PeakMemoryMB
+	const expectedSavedMB = 768.0
+	if math.Abs(savedMB-expectedSavedMB) > 1.0 {
+		t.Errorf("savedMB = %.1f, want %.1f MB (4x discount from 3072 MB)", savedMB, expectedSavedMB)
+	}
+}
+
+func TestMacBenchManyAgent_Qwen38HybridKVCacheDiscount(t *testing.T) {
+	TestManyAgent_Qwen38HybridKVCacheDiscount(t)
 }
