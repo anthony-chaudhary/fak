@@ -28,7 +28,7 @@ func conciseFlagSummary(s string) string {
 	if i := strings.Index(s, ". "); i >= 0 {
 		s = s[:i+1]
 	}
-	const max = 96
+	const max = 160
 	r := []rune(s)
 	if len(r) > max {
 		r = r[:max-1]

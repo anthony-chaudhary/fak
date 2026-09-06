@@ -115,6 +115,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	preview := fs.Bool("preview", false, "LINT-ONLY: check the message+paths and exit WITHOUT touching git (is the subject witness-gradeable, does it carry a bindable `(fak <leaf>)` stamp, does the leaf match the paths' lane?). Exit 0 clean, 1 issues, 2 usage")
 	requireIssue := fs.Bool("require-issue", false, "treat a missing bindable issue link (#N in subject / `Closes #N` in body) as BLOCKING, not advisory — the dispatch-worker contract so a close binds in `issue_closure_audit` (#312)")
 	noBuildCheck := fs.Bool("no-build-check", false, "skip the COMMITTED_RED prospective-tree compile gate before the commit (default: gate ON — refuses a commit that would red the committed trunk)")
+	buildCheckTimeout := fs.Duration("build-check-timeout", defaultValidateTimeout, "maximum duration for prospective validation (default 4m); controls prospective validation, not advisory-lock waiting or earlier build/materialization phases")
 	allowBuildCheckTimeout := fs.Bool("allow-build-check-timeout", os.Getenv("FAK_COMMIT_BUILD_CHECK") == "allow-timeout", "land the commit even when the build gate TIMES OUT instead of refusing BUILD_CHECK_TIMEOUT (exit 3): an explicit opt-in to fail open on an unchecked tree, reported as build_check.failed_open in --json and docked in the score (#6006)")
 	reviewModel := fs.String("review-model", envOrDefault("FAK_REVIEW_MODEL", ""), "optional scout model id, or comma-separated model ids, that must pass/refute this diff before commit; a multi-model quorum blocks on any refute")
 	reviewMinModels := fs.Int("review-min-models", envIntOrDefault("FAK_REVIEW_MIN_MODELS", 0), "minimum usable review verdicts required when --review-model names multiple models (default: 2, or 1 for a single model)")
@@ -135,6 +136,10 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	}
 	if *lockTimeout <= 0 {
 		fmt.Fprintln(stderr, "fak commit: --lock-timeout must be greater than zero")
+		return 2
+	}
+	if *buildCheckTimeout <= 0 {
+		fmt.Fprintln(stderr, "fak commit: --build-check-timeout must be greater than zero")
 		return 2
 	}
 	*dir = pathutil.ExpandTilde(*dir)
@@ -237,7 +242,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	// and a gate that could not FINISH refuses unless the caller opted into fail-open (#6006).
 	buildCheckOutcome, buildCheckDetail := safecommit.BuildCheckDisabled, ""
 	if !*noBuildCheck && os.Getenv("FAK_COMMIT_BUILD_CHECK") != "off" {
-		buildCheckOutcome, buildCheckDetail = commitBuildCheckGate(stderr, root, paths)
+		buildCheckOutcome, buildCheckDetail = executeCommitBuildCheck(stderr, root, paths, *buildCheckTimeout)
 	} else {
 		_ = os.Setenv("FLEET_BUILDCHECK_GUARD", "off")
 		_ = os.Setenv("FAK_COMMIT_BUILD_CHECK", "off")
@@ -511,10 +516,15 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 	fs.Bool("s", false, "add the DCO sign-off (default: true; git-compatible flag)")
 	noBuildCheck := fs.Bool("no-build-check", false, "record the rollup without prospective compile/test verification; recorded work is not eligible to mark intents done")
 	allowBuildCheckTimeout := fs.Bool("allow-build-check-timeout", os.Getenv("FAK_COMMIT_BUILD_CHECK") == "allow-timeout", "record the rollup when prospective validation times out; the unchecked receipt cannot mark intents done")
+	buildCheckTimeout := fs.Duration("build-check-timeout", defaultValidateTimeout, "maximum duration for prospective validation (default 4m); controls prospective validation, not advisory-lock waiting or earlier build/materialization phases")
 	noRollup := fs.Bool("no-rollup", false, "disable batching and drain at most one compatible intent")
 	dryRun := fs.Bool("dry-run", false, "plan only; do not commit or update queue state")
 	asJSON := fs.Bool("json", false, "emit the drain result as JSON")
 	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if *buildCheckTimeout <= 0 {
+		fmt.Fprintln(stderr, "fak commit drain: --build-check-timeout must be greater than zero")
 		return 2
 	}
 	if len(fs.Args()) != 0 {
@@ -565,7 +575,7 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 
 	buildCheckOutcome, buildCheckDetail := safecommit.BuildCheckDisabled, ""
 	if !*noBuildCheck && os.Getenv("FAK_COMMIT_BUILD_CHECK") != "off" {
-		buildCheckOutcome, buildCheckDetail = commitBuildCheckGate(stderr, root, plan.UnionPaths)
+		buildCheckOutcome, buildCheckDetail = executeCommitBuildCheck(stderr, root, plan.UnionPaths, *buildCheckTimeout)
 	}
 	buildCheck, admitBuild, buildReason := safecommit.DecideBuildCheck(buildCheckOutcome, buildCheckDetail, *allowBuildCheckTimeout)
 	if !admitBuild {

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -104,7 +105,35 @@ func extractUndefinedSymbol(buildOutput string) string {
 // not decide the commit's fate: safecommit.DecideBuildCheck owns that, so "the check could not
 // run" is a first-class state on the wire instead of a stderr line the caller never sees
 // (#6006).
-var commitBuildCheckGate = func(stderr io.Writer, root string, paths []string) (safecommit.BuildCheckOutcome, string) {
+var (
+	defaultCommitBuildCheckGateWithTimeout = func(stderr io.Writer, root string, paths []string, timeout time.Duration) (safecommit.BuildCheckOutcome, string) {
+		return runCommitBuildCheck(stderr, root, paths, timeout)
+	}
+	commitBuildCheckGateWithTimeout = defaultCommitBuildCheckGateWithTimeout
+
+	defaultCommitBuildCheckGate = func(stderr io.Writer, root string, paths []string) (safecommit.BuildCheckOutcome, string) {
+		return commitBuildCheckGateWithTimeout(stderr, root, paths, defaultValidateTimeout)
+	}
+	commitBuildCheckGate = defaultCommitBuildCheckGate
+)
+
+// executeCommitBuildCheck routes prospective validation to the active gate function: honoring
+// an explicit timeout while preserving existing test mocks on commitBuildCheckGate or
+// commitBuildCheckGateWithTimeout.
+func executeCommitBuildCheck(stderr io.Writer, root string, paths []string, timeout time.Duration) (safecommit.BuildCheckOutcome, string) {
+	if commitBuildCheckGateWithTimeout != nil && reflect.ValueOf(commitBuildCheckGateWithTimeout).Pointer() != reflect.ValueOf(defaultCommitBuildCheckGateWithTimeout).Pointer() {
+		return commitBuildCheckGateWithTimeout(stderr, root, paths, timeout)
+	}
+	if commitBuildCheckGate != nil && reflect.ValueOf(commitBuildCheckGate).Pointer() != reflect.ValueOf(defaultCommitBuildCheckGate).Pointer() {
+		return commitBuildCheckGate(stderr, root, paths)
+	}
+	if commitBuildCheckGateWithTimeout != nil {
+		return commitBuildCheckGateWithTimeout(stderr, root, paths, timeout)
+	}
+	return runCommitBuildCheck(stderr, root, paths, timeout)
+}
+
+func runCommitBuildCheck(stderr io.Writer, root string, paths []string, timeout time.Duration) (safecommit.BuildCheckOutcome, string) {
 	pkgs := commitBuildCheckPackages(paths)
 	if len(pkgs) == 0 {
 		return safecommit.BuildCheckNotApplicable, "" // non-Go commit: nothing to gate
@@ -150,7 +179,7 @@ var commitBuildCheckGate = func(stderr io.Writer, root string, paths []string) (
 	}
 	buildDetail, buildOK := goBuildPackages(propDir, propPkgs)
 	if buildOK || commitBuildCheckOnlyUnbuildable(buildDetail) {
-		return commitValidateOwnedPaths(stderr, root, paths)
+		return commitValidateOwnedPaths(stderr, root, paths, timeout)
 	}
 
 	// The prospective tree is RED. Differential attribution: build the SAME packages at HEAD's
@@ -184,8 +213,11 @@ var commitBuildCheckGate = func(stderr io.Writer, root string, paths []string) (
 // safecommit can stage anything in the caller's real index. Its JSON result gives this older
 // build-check wire vocabulary a typed failed/timeout/infra outcome without inventing a second
 // refusal protocol.
-func commitValidateOwnedPaths(stderr io.Writer, root string, paths []string) (safecommit.BuildCheckOutcome, string) {
-	args := []string{"--root", root, "--ref", "HEAD", "--json", "--progress=false"}
+func commitValidateOwnedPaths(stderr io.Writer, root string, paths []string, timeout time.Duration) (safecommit.BuildCheckOutcome, string) {
+	if timeout <= 0 {
+		timeout = defaultValidateTimeout
+	}
+	args := []string{"--root", root, "--ref", "HEAD", "--json", "--progress=false", "--timeout", timeout.String()}
 	for _, path := range paths {
 		args = append(args, "--mine", path)
 	}
