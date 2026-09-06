@@ -489,70 +489,81 @@ func TestGovernorReleaseClearsLeaseOnEmptyTaskID(t *testing.T) {
 		BaseConcurrency: 2,
 	})
 
-	task := &Task{
-		ID:       "",
+	// Task 1 has no explicit ID (ID: "") but declares a lane and tree.
+	task1 := &Task{
 		Priority: abi.ThreadPriorityP1Interactive,
-		Lane:     "lane-empty-id",
+		Lane:     "agentsched",
+		Tree:     []string{"internal/agentsched/*"},
 	}
 
-	if err := gov.Submit(task); err != nil {
-		t.Fatalf("failed to submit task: %v", err)
+	if err := gov.Submit(task1); err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
 	}
 
-	admitted, verdict, err := gov.TryAdmit()
-	if err != nil {
-		t.Fatalf("unexpected error on TryAdmit: %v", err)
-	}
-	if !verdict.Admitted || admitted == nil {
-		t.Fatalf("expected task to be admitted, got verdict: %+v", verdict)
-	}
-	if task.ID == "" || admitted.ID == "" {
-		t.Fatalf("expected admitted task to have a non-empty ID assigned")
-	}
-	if len(gov.heldLeases) != 1 {
-		t.Fatalf("expected 1 held lease, got %d", len(gov.heldLeases))
+	admitted1, verdict1, err := gov.TryAdmit()
+	if err != nil || admitted1 == nil || !verdict1.Admitted {
+		t.Fatalf("task1 should be admitted: err=%v verdict=%+v", err, verdict1)
 	}
 
-	gov.Release(task)
-	if len(gov.heldLeases) != 0 {
-		t.Fatalf("expected 0 held leases after release, got %d (leak detected)", len(gov.heldLeases))
+	// The governor should assign a generated lease ID to the task.
+	if admitted1.ID == "" || task1.ID == "" {
+		t.Fatalf("expected admitted task to receive generated lease ID, got empty string")
+	}
+	if gov.HeldLeasesCount() != 1 {
+		t.Fatalf("expected 1 held lease, got %d", gov.HeldLeasesCount())
 	}
 
-	// Submits a subsequent task with the same lane and verifies it can be admitted immediately
-	// without being blocked by a leaked lane lease.
+	// Task 2 requests the same lane and should be blocked by Gate 4 while task 1 is in flight.
 	task2 := &Task{
-		ID:       "task-subsequent",
+		ID:       "task-2",
 		Priority: abi.ThreadPriorityP1Interactive,
-		Lane:     "lane-empty-id",
+		Lane:     "agentsched",
+		Tree:     []string{"internal/agentsched/*"},
 	}
 	if err := gov.Submit(task2); err != nil {
-		t.Fatalf("failed to submit subsequent task: %v", err)
+		t.Fatalf("unexpected submit error: %v", err)
 	}
 
 	admitted2, verdict2, err := gov.TryAdmit()
 	if err != nil {
-		t.Fatalf("unexpected error on TryAdmit for subsequent task: %v", err)
+		t.Fatalf("unexpected admit error: %v", err)
 	}
-	if !verdict2.Admitted || admitted2 == nil {
-		t.Fatalf("expected subsequent task with same lane to be admitted immediately, got verdict: %+v", verdict2)
+	if admitted2 != nil || verdict2.Admitted {
+		t.Fatalf("expected task2 to be blocked by Gate 4 while task1 holds lease")
 	}
-	if admitted2.ID != "task-subsequent" {
-		t.Fatalf("expected admitted task ID %q, got %q", "task-subsequent", admitted2.ID)
-	}
-	if len(gov.heldLeases) != 1 {
-		t.Fatalf("expected 1 held lease, got %d", len(gov.heldLeases))
+	if verdict2.FailedGate != GateLaneClearance {
+		t.Fatalf("expected GateLaneClearance, got %v", verdict2.FailedGate)
 	}
 
-	gov.Release(admitted2)
-	if len(gov.heldLeases) != 0 {
-		t.Fatalf("expected 0 held leases after release of subsequent task, got %d", len(gov.heldLeases))
+	// Release task 1
+	gov.Release(task1)
+	if gov.HeldLeasesCount() != 0 {
+		t.Fatalf("expected 0 held leases after release of task1, got %d (leak detected)", gov.HeldLeasesCount())
+	}
+
+	// After releasing task 1, task 2 must be admitted without being blocked by a leaked lease.
+	admitted2After, verdict2After, err := gov.TryAdmit()
+	if err != nil || admitted2After == nil || !verdict2After.Admitted {
+		t.Fatalf("expected task2 to be admitted after task1 release, but was blocked (lease leaked): err=%v verdict=%+v", err, verdict2After)
+	}
+	if admitted2After.ID != "task-2" {
+		t.Fatalf("expected admitted task ID %q, got %q", "task-2", admitted2After.ID)
+	}
+	if gov.HeldLeasesCount() != 1 {
+		t.Fatalf("expected 1 held lease for task2, got %d", gov.HeldLeasesCount())
+	}
+
+	gov.Release(admitted2After)
+	if gov.HeldLeasesCount() != 0 {
+		t.Fatalf("expected 0 held leases after release of task2, got %d", gov.HeldLeasesCount())
 	}
 
 	// Defensively verify releasing a task with empty ID clears matching lane lease
 	task3 := &Task{
 		ID:       "task-3-empty-release",
 		Priority: abi.ThreadPriorityP1Interactive,
-		Lane:     "lane-empty-id",
+		Lane:     "agentsched",
+		Tree:     []string{"internal/agentsched/*"},
 	}
 	if err := gov.Submit(task3); err != nil {
 		t.Fatalf("failed to submit task3: %v", err)
@@ -561,10 +572,13 @@ func TestGovernorReleaseClearsLeaseOnEmptyTaskID(t *testing.T) {
 	if err != nil || !verdict3.Admitted || admitted3 == nil {
 		t.Fatalf("expected task3 to be admitted: err=%v verdict=%+v", err, verdict3)
 	}
+	if gov.HeldLeasesCount() != 1 {
+		t.Fatalf("expected 1 held lease for task3, got %d", gov.HeldLeasesCount())
+	}
 	// Defensively pass a task with ID == "" and matching lane to Release
-	gov.Release(&Task{ID: "", Lane: "lane-empty-id"})
-	if len(gov.heldLeases) != 0 {
-		t.Fatalf("expected 0 held leases after defensive release with empty task ID, got %d", len(gov.heldLeases))
+	gov.Release(&Task{ID: "", Lane: "agentsched", Tree: []string{"internal/agentsched/*"}})
+	if gov.HeldLeasesCount() != 0 {
+		t.Fatalf("expected 0 held leases after defensive release with empty task ID, got %d", gov.HeldLeasesCount())
 	}
 }
 

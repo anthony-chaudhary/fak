@@ -440,18 +440,17 @@ func (g *Governor) TryAdmit() (*Task, *AdmissionVerdict, error) {
 	g.inFlight++
 
 	// Register held lane lease if task declared a lane or tree
-	candidate := dequeued
-	if candidate.Lane != "" || len(candidate.Tree) > 0 {
-		leaseID := candidate.ID
+	if dequeued.Lane != "" || len(dequeued.Tree) > 0 {
+		leaseID := dequeued.ID
 		if leaseID == "" {
 			leaseID = fmt.Sprintf("lease-%d", time.Now().UnixNano())
-			candidate.ID = leaseID
+			dequeued.ID = leaseID
 		}
 		g.heldLeases[leaseID] = laneadmit.Lease{
 			ID:     leaseID,
-			Lane:   candidate.Lane,
-			Tree:   candidate.Tree,
-			Holder: candidate.ID,
+			Lane:   dequeued.Lane,
+			Tree:   dequeued.Tree,
+			Holder: dequeued.ID,
 		}
 	}
 

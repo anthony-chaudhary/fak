@@ -125,18 +125,112 @@ func TestAdmitAllOrNothing(t *testing.T) {
 // duplicating or evicting entries.
 func TestReAdmitIsTouch(t *testing.T) {
 	r := New(300)
-	if _, err := r.Admit("A", newModel(t), 100, "fam", "", false); err != nil {
+	mA := newModel(t)
+	if _, err := r.Admit("A", mA, 100, "fam", "", false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.Admit("B", newModel(t), 100, "fam", "", false); err != nil {
 		t.Fatal(err)
 	}
-	evicted, err := r.Admit("A", newModel(t), 100, "fam", "", false)
+	evicted, err := r.Admit("A", mA, 100, "fam", "", false)
 	if err != nil || len(evicted) != 0 {
 		t.Fatalf("re-admit A should be a no-op Touch, got err=%v evicted=%v", err, evicted)
 	}
 	if r.Len() != 2 {
 		t.Fatalf("re-admit changed len: %d", r.Len())
+	}
+}
+
+// TestReAdmitMismatchedDescriptor verifies that attempting to re-admit an already resident
+// model with a different weight pointer or mismatched descriptor is rejected without
+// overwriting the existing weight handle, mutating the descriptor, or corrupting state.
+func TestReAdmitMismatchedDescriptor(t *testing.T) {
+	r := New(500)
+	mA := newModel(t)
+	const (
+		id          polymodel.ModelID = "model-A"
+		weightBytes int64             = 100
+		family      string            = "llama"
+		digest      string            = "sha256:prefix-aaa"
+		pinned      bool              = false
+	)
+
+	// Initial admit of model-A.
+	if _, err := r.Admit(id, mA, weightBytes, family, digest, pinned); err != nil {
+		t.Fatalf("initial admit: %v", err)
+	}
+
+	// 1. Re-admitting with a different *model.Model pointer must be rejected.
+	mOther := newModel(t)
+	if _, err := r.Admit(id, mOther, weightBytes, family, digest, pinned); !errors.Is(err, ErrModelAlreadyResident) {
+		t.Fatalf("expected ErrModelAlreadyResident for different model pointer, got: %v", err)
+	}
+	if got, _ := r.Get(id); got != mA {
+		t.Fatalf("weight pointer was overwritten on rejected admit: got %p, want %p", got, mA)
+	}
+
+	// 2. Re-admitting with mismatched weightBytes must be rejected.
+	if _, err := r.Admit(id, mA, 200, family, digest, pinned); !errors.Is(err, ErrDescriptorMismatch) {
+		t.Fatalf("expected ErrDescriptorMismatch for mismatched weightBytes, got: %v", err)
+	}
+
+	// 3. Re-admitting with mismatched family must be rejected.
+	if _, err := r.Admit(id, mA, weightBytes, "qwen", digest, pinned); !errors.Is(err, ErrDescriptorMismatch) {
+		t.Fatalf("expected ErrDescriptorMismatch for mismatched family, got: %v", err)
+	}
+
+	// 4. Re-admitting with mismatched prefixDigest must be rejected.
+	if _, err := r.Admit(id, mA, weightBytes, family, "sha256:different", pinned); !errors.Is(err, ErrDescriptorMismatch) {
+		t.Fatalf("expected ErrDescriptorMismatch for mismatched prefixDigest, got: %v", err)
+	}
+
+	// 5. Re-admitting with mismatched pinned must be rejected.
+	if _, err := r.Admit(id, mA, weightBytes, family, digest, true); !errors.Is(err, ErrDescriptorMismatch) {
+		t.Fatalf("expected ErrDescriptorMismatch for mismatched pinned, got: %v", err)
+	}
+
+	// 6. Re-admitting with both different model pointer and mismatched descriptor must be rejected.
+	if _, err := r.Admit(id, mOther, 250, "other-fam", "sha256:other", true); err == nil {
+		t.Fatal("expected error for mismatched pointer and descriptor, got nil")
+	}
+
+	// Verify all-or-nothing: state must remain completely unchanged.
+	if got, _ := r.Get(id); got != mA {
+		t.Fatalf("model handle corrupted after rejected admits: got %p, want %p", got, mA)
+	}
+	desc, ok := r.Descriptor(id)
+	if !ok {
+		t.Fatal("descriptor missing")
+	}
+	if desc.WeightBytes != weightBytes || desc.Family != family || desc.PrefixDigest != digest || desc.Pinned != pinned {
+		t.Fatalf("descriptor modified after rejected admits: %+v", desc)
+	}
+	if r.Len() != 1 || r.Used() != weightBytes {
+		t.Fatalf("residency accounting corrupted: len=%d used=%d", r.Len(), r.Used())
+	}
+
+	// 7. Legitimate re-admit with identical handle and descriptor must succeed (Touch).
+	evicted, err := r.Admit(id, mA, weightBytes, family, digest, pinned)
+	if err != nil || len(evicted) != 0 {
+		t.Fatalf("identical re-admit failed: err=%v, evicted=%v", err, evicted)
+	}
+	if got, _ := r.Get(id); got != mA {
+		t.Fatalf("model handle changed after Touch: got %p, want %p", got, mA)
+	}
+
+	// 8. After explicit eviction, a new model handle or descriptor may be admitted under the same ID.
+	if evictedModel, ok := r.Evict(id); !ok || evictedModel != mA {
+		t.Fatalf("evict failed or returned wrong model: %v, %v", ok, evictedModel)
+	}
+	if _, err := r.Admit(id, mOther, 200, "qwen", "sha256:new", true); err != nil {
+		t.Fatalf("admit after evict failed: %v", err)
+	}
+	if got, _ := r.Get(id); got != mOther {
+		t.Fatalf("expected new model handle after eviction: got %p, want %p", got, mOther)
+	}
+	desc, _ = r.Descriptor(id)
+	if desc.WeightBytes != 200 || desc.Family != "qwen" || desc.PrefixDigest != "sha256:new" || !desc.Pinned {
+		t.Fatalf("descriptor not updated after new admit: %+v", desc)
 	}
 }
 
@@ -309,13 +403,18 @@ func TestNonResidentOperations(t *testing.T) {
 // TestConcurrentAdmit verifies concurrent safety and budget enforcement under contention.
 func TestConcurrentAdmit(t *testing.T) {
 	r := New(400)
+	models := make([]*model.Model, 10)
+	for i := range models {
+		models[i] = newModel(t)
+	}
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			id := polymodel.ModelID(string(rune('a' + i%10)))
-			_, _ = r.Admit(id, newModel(t), 100, "fam", "", false)
+			idx := i % 10
+			id := polymodel.ModelID(string(rune('a' + idx)))
+			_, _ = r.Admit(id, models[idx], 100, "fam", "", false)
 			_ = r.Touch(id)
 		}(i)
 	}
