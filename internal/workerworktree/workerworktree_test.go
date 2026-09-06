@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1825,5 +1826,83 @@ func TestSweepDeadWorktrees_PreservesDirtyWorktree(t *testing.T) {
 	}
 	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
 		t.Fatalf("clean dead worktree %q still exists on disk after sweep", wtPath)
+	}
+}
+
+func TestSweepDeadWorktrees_PreservesForeignPlatformRegistration(t *testing.T) {
+	root := t.TempDir()
+	wtRoot := t.TempDir()
+
+	wtName := "fak-worker-wt-testforeign"
+	wtAdminDir := filepath.Join(root, ".git", "worktrees", wtName)
+	if err := os.MkdirAll(wtAdminDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Choose a foreign OS path based on the current platform
+	foreignPath := "/mnt/c/work/fak/_scratch/fak-worker-wt-foreign/gitdir"
+	if runtime.GOOS != "windows" {
+		foreignPath = `C:\work\fak\_scratch\fak-worker-wt-foreign\gitdir`
+	}
+
+	gitdirFile := filepath.Join(wtAdminDir, "gitdir")
+	if err := os.WriteFile(gitdirFile, []byte(foreignPath+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run sweep; the foreign-platform worktree registration must NOT be reaped
+	report := SweepDeadWorktrees(root, wtRoot, nil)
+	if report.Pruned != 0 {
+		t.Fatalf("expected 0 worktrees pruned for foreign platform registration, got %d (paths: %v)", report.Pruned, report.Paths)
+	}
+	if _, err := os.Stat(wtAdminDir); os.IsNotExist(err) {
+		t.Fatalf("foreign worktree admin dir %q was deleted, should be preserved", wtAdminDir)
+	}
+}
+
+func TestSweepDeadWorktrees_ReapsLocalDeadRegistration(t *testing.T) {
+	root := t.TempDir()
+	wtRoot := t.TempDir()
+
+	wtName := "fak-worker-wt-testlocaldead"
+	wtAdminDir := filepath.Join(root, ".git", "worktrees", wtName)
+	if err := os.MkdirAll(wtAdminDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Choose a local OS path that does not exist
+	localDeadPath := filepath.Join(root, "_scratch", "nonexistent", "gitdir")
+	gitdirFile := filepath.Join(wtAdminDir, "gitdir")
+	if err := os.WriteFile(gitdirFile, []byte(localDeadPath+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report := SweepDeadWorktrees(root, wtRoot, nil)
+	if report.Pruned != 1 {
+		t.Fatalf("expected 1 worktree pruned for dead local registration, got %d", report.Pruned)
+	}
+	if _, err := os.Stat(wtAdminDir); !os.IsNotExist(err) {
+		t.Fatalf("dead local worktree admin dir %q was not reaped", wtAdminDir)
+	}
+}
+
+func TestIsWindowsAbsolutePath(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{`C:\work\fak\_scratch\fak-worker-wt-test\gitdir`, true},
+		{`c:\work\fak\_scratch\fak-worker-wt-test\gitdir`, true},
+		{`D:/work/fak/_scratch/fak-worker-wt-test/gitdir`, true},
+		{`\\server\share\worktree`, true},
+		{`/mnt/c/work/fak/_scratch/fak-worker-wt-test/gitdir`, false},
+		{`/home/user/repo`, false},
+		{`relative/path`, false},
+		{``, false},
+	}
+	for _, tc := range cases {
+		if got := isWindowsAbsolutePath(tc.path); got != tc.want {
+			t.Errorf("isWindowsAbsolutePath(%q) = %v, want %v", tc.path, got, tc.want)
+		}
 	}
 }
