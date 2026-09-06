@@ -474,8 +474,11 @@ func TestMacBenchManyAgent_RunManyAgentComparison_True4x(t *testing.T) {
 	if rep.MemorySavedMB < 3000.0 {
 		t.Errorf("MemorySavedMB = %.1f, want > 3000.0 MB", rep.MemorySavedMB)
 	}
-	if rep.TTFTSpeedupP50 < 1000.0 {
-		t.Errorf("TTFTSpeedupP50 = %.1f, want > 1000.0x", rep.TTFTSpeedupP50)
+	if rep.TTFTSpeedupP50 < 1.5 || rep.TTFTSpeedupP50 > 2.0 {
+		t.Errorf("TTFTSpeedupP50 = %.2f, want ~1.71x (matched distribution)", rep.TTFTSpeedupP50)
+	}
+	if rep.Turn1ColdTTFTLlamaMS/rep.Turn1ColdTTFTFakMS < 1000.0 {
+		t.Errorf("Turn 1 cold TTFT speedup = %.1f, want > 1000.0x", rep.Turn1ColdTTFTLlamaMS/rep.Turn1ColdTTFTFakMS)
 	}
 	if !rep.Verified {
 		t.Errorf("Verified = false, want true")
@@ -648,4 +651,153 @@ func TestManyAgent_ExplicitZeroPrefixTokens(t *testing.T) {
 	if !strings.Contains(stdout.String(), "prefix        : 0 tokens") {
 		t.Errorf("summary output missing 'prefix        : 0 tokens':\n%s", stdout.String())
 	}
+}
+
+func TestManyAgentComparison(t *testing.T) {
+	opts := ManyAgentOptions{
+		Concurrency:        4,
+		Model:              "Qwen3.8-27B",
+		Horizon:            20,
+		SharedPrefixTokens: DefaultSharedPrefixTokens,
+	}
+	rep, err := RunManyAgentComparison(opts)
+	if err != nil {
+		t.Fatalf("RunManyAgentComparison: %v", err)
+	}
+
+	t.Run("SymmetricTTFTDistribution", func(t *testing.T) {
+		// Verify both arms evaluate TTFT over all K * H turns (80 turns for K=4, H=20).
+		// Fak-native has 1 cold prefill and 79 warm cache hits -> p50 is warm (~12.3 ms).
+		if rep.FakNative.P50TTFTMS >= 25.0 || rep.FakNative.P50TTFTMS <= 0 {
+			t.Errorf("FakNative.P50TTFTMS = %.1f ms, want warm (< 25 ms, > 0)", rep.FakNative.P50TTFTMS)
+		}
+		// Llama.cpp has 4 cold turns and 76 steady-state turns -> p50 falls in steady-state delta (~21 ms).
+		// If unaligned (sampling only Turn 1), p50 would be > 100,000 ms.
+		if rep.LlamaCPP.P50TTFTMS > 100.0 || rep.LlamaCPP.P50TTFTMS <= 0 {
+			t.Errorf("LlamaCPP.P50TTFTMS = %.1f ms, want steady-state (< 100 ms, > 0); was it evaluated over symmetric turns?", rep.LlamaCPP.P50TTFTMS)
+		}
+		// Overall P50 speedup reflects matched K*H distribution (~1.71x).
+		if rep.TTFTSpeedupP50 < 1.5 || rep.TTFTSpeedupP50 > 2.0 {
+			t.Errorf("TTFTSpeedupP50 = %.2f, want ~1.71x (matched distribution)", rep.TTFTSpeedupP50)
+		}
+	})
+
+	t.Run("ColdAndSteadyStateFields", func(t *testing.T) {
+		// 1. Verify populated cold and steady-state TTFT fields
+		if rep.Turn1ColdTTFTFakMS <= 0 {
+			t.Errorf("Turn1ColdTTFTFakMS = %.1f, want > 0", rep.Turn1ColdTTFTFakMS)
+		}
+		if rep.Turn1ColdTTFTLlamaMS <= 0 {
+			t.Errorf("Turn1ColdTTFTLlamaMS = %.1f, want > 0", rep.Turn1ColdTTFTLlamaMS)
+		}
+		if rep.SteadyStateTTFTFakMS <= 0 {
+			t.Errorf("SteadyStateTTFTFakMS = %.1f, want > 0", rep.SteadyStateTTFTFakMS)
+		}
+		if rep.SteadyStateTTFTLlamaMS <= 0 {
+			t.Errorf("SteadyStateTTFTLlamaMS = %.1f, want > 0", rep.SteadyStateTTFTLlamaMS)
+		}
+
+		// 2. Physical invariants:
+		// Turn 1 cold prefill for llama.cpp is heavily serialized across slots (> 100s)
+		if rep.Turn1ColdTTFTLlamaMS < 100000.0 {
+			t.Errorf("Turn1ColdTTFTLlamaMS = %.1f ms, want > 100,000 ms", rep.Turn1ColdTTFTLlamaMS)
+		}
+		// Fak-native Turn 1 cold median benefits from prefix reuse for agents 2..K (< 50ms)
+		if rep.Turn1ColdTTFTFakMS > 50.0 {
+			t.Errorf("Turn1ColdTTFTFakMS = %.1f ms, want < 50 ms", rep.Turn1ColdTTFTFakMS)
+		}
+		// Steady state for llama.cpp operates at delta prefill with contention (~21ms)
+		if rep.SteadyStateTTFTLlamaMS < 20.0 || rep.SteadyStateTTFTLlamaMS > 25.0 {
+			t.Errorf("SteadyStateTTFTLlamaMS = %.1f ms, want ~21 ms", rep.SteadyStateTTFTLlamaMS)
+		}
+		// Steady state for fak-native operates at delta prefill with RadixAttention hit (~12ms)
+		if rep.SteadyStateTTFTFakMS < 11.0 || rep.SteadyStateTTFTFakMS > 15.0 {
+			t.Errorf("SteadyStateTTFTFakMS = %.1f ms, want ~12 ms", rep.SteadyStateTTFTFakMS)
+		}
+
+		// 3. Valid speedup calculations on matched distributions
+		// Steady-state speedup is matched (~1.68x)
+		steadySpeedup := rep.SteadyStateTTFTLlamaMS / rep.SteadyStateTTFTFakMS
+		if steadySpeedup < 1.5 || steadySpeedup > 2.0 {
+			t.Errorf("steadySpeedup = %.2f, want ~1.68x", steadySpeedup)
+		}
+		// Cold Turn 1 speedup remains massive (> 1000x)
+		coldSpeedup := rep.Turn1ColdTTFTLlamaMS / rep.Turn1ColdTTFTFakMS
+		if coldSpeedup < 1000.0 {
+			t.Errorf("coldSpeedup = %.1f, want > 1000.0x", coldSpeedup)
+		}
+	})
+
+	t.Run("JSONSerialization", func(t *testing.T) {
+		// Verify JSON marshaling/unmarshaling includes and preserves new fields
+		data, err := json.Marshal(rep)
+		if err != nil {
+			t.Fatalf("json.Marshal failed: %v", err)
+		}
+		jsonStr := string(data)
+		for _, key := range []string{
+			`"turn1_cold_ttft_fak_ms"`,
+			`"turn1_cold_ttft_llama_ms"`,
+			`"steady_state_ttft_fak_ms"`,
+			`"steady_state_ttft_llama_ms"`,
+		} {
+			if !strings.Contains(jsonStr, key) {
+				t.Errorf("JSON missing key %q: %s", key, jsonStr)
+			}
+		}
+		var unmarshaled ManyAgentComparisonReport
+		if err := json.Unmarshal(data, &unmarshaled); err != nil {
+			t.Fatalf("json.Unmarshal failed: %v", err)
+		}
+		if unmarshaled.Turn1ColdTTFTFakMS != rep.Turn1ColdTTFTFakMS ||
+			unmarshaled.Turn1ColdTTFTLlamaMS != rep.Turn1ColdTTFTLlamaMS ||
+			unmarshaled.SteadyStateTTFTFakMS != rep.SteadyStateTTFTFakMS ||
+			unmarshaled.SteadyStateTTFTLlamaMS != rep.SteadyStateTTFTLlamaMS {
+			t.Errorf("unmarshaled fields mismatch: %+v vs %+v", unmarshaled, rep)
+		}
+	})
+
+	t.Run("Horizon1EdgeCase", func(t *testing.T) {
+		// Verify edge case: horizon = 1 (only Turn 1, no steady state)
+		optsH1 := ManyAgentOptions{
+			Concurrency:        2,
+			Model:              "Qwen3.8-27B",
+			Horizon:            1,
+			SharedPrefixTokens: DefaultSharedPrefixTokens,
+		}
+		repH1, err := RunManyAgentComparison(optsH1)
+		if err != nil {
+			t.Fatalf("RunManyAgentComparison (H=1) failed: %v", err)
+		}
+		if repH1.Turn1ColdTTFTFakMS <= 0 || repH1.Turn1ColdTTFTLlamaMS <= 0 {
+			t.Errorf("H=1 cold TTFT fields must be positive: fak=%.1f, llama=%.1f",
+				repH1.Turn1ColdTTFTFakMS, repH1.Turn1ColdTTFTLlamaMS)
+		}
+		if repH1.SteadyStateTTFTFakMS != 0 || repH1.SteadyStateTTFTLlamaMS != 0 {
+			t.Errorf("H=1 steady-state TTFT fields must be 0: fak=%.1f, llama=%.1f",
+				repH1.SteadyStateTTFTFakMS, repH1.SteadyStateTTFTLlamaMS)
+		}
+	})
+
+	t.Run("CLISummaryFormatting", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runMacBenchManyAgent(&stdout, &stderr, []string{"--compare-llama", "-c", "4", "--horizon", "20"})
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d, stderr: %s", code, stderr.String())
+		}
+		out := stdout.String()
+		for _, want := range []string{
+			"p50_ttft_ms",
+			"turn1_cold_ttft_ms",
+			"steady_ttft_ms",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("CLI summary missing %q:\n%s", want, out)
+			}
+		}
+	})
+}
+
+func TestMacBenchManyAgent_SymmetricTTFTDistribution(t *testing.T) {
+	TestManyAgentComparison(t)
 }

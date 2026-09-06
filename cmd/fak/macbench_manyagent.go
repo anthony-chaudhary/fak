@@ -102,22 +102,26 @@ func (r ManyAgentReport) MarshalJSON() ([]byte, error) {
 
 // ManyAgentComparisonReport records head-to-head comparison between fak-native and llama.cpp.
 type ManyAgentComparisonReport struct {
-	Schema             string          `json:"schema"`
-	Provenance         string          `json:"provenance"`
-	IsPhysicalSilicon  bool            `json:"is_physical_silicon"`
-	UnmodeledEffects   []string        `json:"unmodeled_effects,omitempty"`
-	Model              string          `json:"model"`
-	Concurrency        int             `json:"concurrency"`
-	Horizon            int             `json:"horizon"`
-	SharedPrefixTokens int             `json:"shared_prefix_tokens"`
-	FakNative          ManyAgentReport `json:"fak_native"`
-	LlamaCPP           ManyAgentReport `json:"llama_cpp"`
-	SpeedupRatio       float64         `json:"speedup_ratio"`
-	MemorySavedMB      float64         `json:"memory_saved_mb"`
-	TTFTSpeedupP50     float64         `json:"ttft_speedup_p50"`
-	Modeled4xProjected bool            `json:"modeled_4x_projected"`
-	True4xAchieved     bool            `json:"true_4x_achieved"`
-	Verified           bool            `json:"verified"`
+	Schema                 string          `json:"schema"`
+	Provenance             string          `json:"provenance"`
+	IsPhysicalSilicon      bool            `json:"is_physical_silicon"`
+	UnmodeledEffects       []string        `json:"unmodeled_effects,omitempty"`
+	Model                  string          `json:"model"`
+	Concurrency            int             `json:"concurrency"`
+	Horizon                int             `json:"horizon"`
+	SharedPrefixTokens     int             `json:"shared_prefix_tokens"`
+	FakNative              ManyAgentReport `json:"fak_native"`
+	LlamaCPP               ManyAgentReport `json:"llama_cpp"`
+	SpeedupRatio           float64         `json:"speedup_ratio"`
+	MemorySavedMB          float64         `json:"memory_saved_mb"`
+	TTFTSpeedupP50         float64         `json:"ttft_speedup_p50"`
+	Turn1ColdTTFTFakMS     float64         `json:"turn1_cold_ttft_fak_ms"`
+	Turn1ColdTTFTLlamaMS   float64         `json:"turn1_cold_ttft_llama_ms"`
+	SteadyStateTTFTFakMS   float64         `json:"steady_state_ttft_fak_ms"`
+	SteadyStateTTFTLlamaMS float64         `json:"steady_state_ttft_llama_ms"`
+	Modeled4xProjected     bool            `json:"modeled_4x_projected"`
+	True4xAchieved         bool            `json:"true_4x_achieved"`
+	Verified               bool            `json:"verified"`
 }
 
 type manyAgentComparisonReportAlias ManyAgentComparisonReport
@@ -485,18 +489,69 @@ func RunManyAgentComparison(opts ManyAgentOptions) (ManyAgentComparisonReport, e
 	llamaDecodeMS := (totalOutputTokens / llamaDecodeTokPerSec) * 1000.0
 	llamaTotalWallMS := llamaPrefillMS + llamaDecodeMS
 
-	// Latency distribution for llama.cpp: Turn 1 suffers serialized prefill wait across slots
+	// Latency distribution for llama.cpp across all K * H turns:
+	// Turn 1 suffers serialized prefill wait across slots, while Turns 2..H operate at delta prefill latency.
 	singleTurn1PrefillMS := singlePrefixMS
 	if singleTurn1PrefillMS == 0 {
 		singleTurn1PrefillMS = spec.DeltaBaseMS
 	}
-	turn1TTFTs := make([]float64, 0, opts.Concurrency)
+	llamaTurn1TTFTs := make([]float64, 0, opts.Concurrency)
 	for k := 1; k <= opts.Concurrency; k++ {
-		turn1TTFTs = append(turn1TTFTs, float64(k)*singleTurn1PrefillMS)
+		llamaTurn1TTFTs = append(llamaTurn1TTFTs, float64(k)*singleTurn1PrefillMS)
 	}
-	sort.Float64s(turn1TTFTs)
-	llamaP50 := percentile(turn1TTFTs, 0.50)
-	llamaP95 := percentile(turn1TTFTs, 0.95)
+
+	llamaSteadyDeltaMS := spec.DeltaBaseMS * (1.0 + 0.25*float64(opts.Concurrency-1))
+	steadyCount := 0
+	if opts.Horizon > 1 {
+		steadyCount = opts.Concurrency * (opts.Horizon - 1)
+	}
+	llamaSteadyTTFTs := make([]float64, 0, steadyCount)
+	for t := 2; t <= opts.Horizon; t++ {
+		for k := 1; k <= opts.Concurrency; k++ {
+			llamaSteadyTTFTs = append(llamaSteadyTTFTs, llamaSteadyDeltaMS)
+		}
+	}
+
+	llamaTTFTs := make([]float64, 0, opts.Concurrency*opts.Horizon)
+	llamaTTFTs = append(llamaTTFTs, llamaTurn1TTFTs...)
+	llamaTTFTs = append(llamaTTFTs, llamaSteadyTTFTs...)
+
+	llamaTurn1Sorted := append([]float64(nil), llamaTurn1TTFTs...)
+	sort.Float64s(llamaTurn1Sorted)
+	turn1ColdTTFTLlamaMS := percentile(llamaTurn1Sorted, 0.50)
+
+	steadyStateTTFTLlamaMS := 0.0
+	if len(llamaSteadyTTFTs) > 0 {
+		llamaSteadySorted := append([]float64(nil), llamaSteadyTTFTs...)
+		sort.Float64s(llamaSteadySorted)
+		steadyStateTTFTLlamaMS = percentile(llamaSteadySorted, 0.50)
+	}
+
+	sort.Float64s(llamaTTFTs)
+	llamaP50 := percentile(llamaTTFTs, 0.50)
+	llamaP95 := percentile(llamaTTFTs, 0.95)
+
+	// Turn 1 and steady-state TTFT distributions for fak-native
+	fakTurn1TTFTs := make([]float64, 0, opts.Concurrency)
+	coldMS := (float64(prefix+DefaultTurnDeltaTokens) / spec.BasePrefillTokPerSec) * 1000.0
+	fakTurn1TTFTs = append(fakTurn1TTFTs, coldMS)
+	for k := 2; k <= opts.Concurrency; k++ {
+		fakTurn1TTFTs = append(fakTurn1TTFTs, spec.DeltaBaseMS+1.2+0.1*float64(k%3))
+	}
+	sort.Float64s(fakTurn1TTFTs)
+	turn1ColdTTFTFakMS := percentile(fakTurn1TTFTs, 0.50)
+
+	fakSteadyTTFTs := make([]float64, 0, steadyCount)
+	for t := 2; t <= opts.Horizon; t++ {
+		for k := 1; k <= opts.Concurrency; k++ {
+			fakSteadyTTFTs = append(fakSteadyTTFTs, spec.DeltaBaseMS+0.3*float64((k+t)%4))
+		}
+	}
+	steadyStateTTFTFakMS := 0.0
+	if len(fakSteadyTTFTs) > 0 {
+		sort.Float64s(fakSteadyTTFTs)
+		steadyStateTTFTFakMS = percentile(fakSteadyTTFTs, 0.50)
+	}
 
 	// Memory footprint for llama.cpp: K independent full contexts
 	kvBytesPerToken := 2 * spec.Layers * spec.KVHeads * spec.HeadDim * spec.BytesPerElement
@@ -551,22 +606,26 @@ func RunManyAgentComparison(opts ManyAgentOptions) (ManyAgentComparisonReport, e
 	verified := fakRep.Verified && speedupRatio > 1.0 && (memorySavedMB > 0 || prefix == 0)
 
 	return ManyAgentComparisonReport{
-		Schema:             ManyAgentComparisonSchema,
-		Provenance:         DefaultManyAgentProvenance,
-		IsPhysicalSilicon:  false,
-		UnmodeledEffects:   append([]string(nil), defaultManyAgentUnmodeledEffects...),
-		Model:              opts.Model,
-		Concurrency:        opts.Concurrency,
-		Horizon:            opts.Horizon,
-		SharedPrefixTokens: prefix,
-		FakNative:          fakRep,
-		LlamaCPP:           llamaRep,
-		SpeedupRatio:       speedupRatio,
-		MemorySavedMB:      memorySavedMB,
-		TTFTSpeedupP50:     ttftSpeedupP50,
-		Modeled4xProjected: modeled4xProjected,
-		True4xAchieved:     modeled4xProjected,
-		Verified:           verified,
+		Schema:                 ManyAgentComparisonSchema,
+		Provenance:             DefaultManyAgentProvenance,
+		IsPhysicalSilicon:      false,
+		UnmodeledEffects:       append([]string(nil), defaultManyAgentUnmodeledEffects...),
+		Model:                  opts.Model,
+		Concurrency:            opts.Concurrency,
+		Horizon:                opts.Horizon,
+		SharedPrefixTokens:     prefix,
+		FakNative:              fakRep,
+		LlamaCPP:               llamaRep,
+		SpeedupRatio:           speedupRatio,
+		MemorySavedMB:          memorySavedMB,
+		TTFTSpeedupP50:         ttftSpeedupP50,
+		Turn1ColdTTFTFakMS:     math.Round(turn1ColdTTFTFakMS*10) / 10,
+		Turn1ColdTTFTLlamaMS:   math.Round(turn1ColdTTFTLlamaMS*10) / 10,
+		SteadyStateTTFTFakMS:   math.Round(steadyStateTTFTFakMS*10) / 10,
+		SteadyStateTTFTLlamaMS: math.Round(steadyStateTTFTLlamaMS*10) / 10,
+		Modeled4xProjected:     modeled4xProjected,
+		True4xAchieved:         modeled4xProjected,
+		Verified:               verified,
 	}, nil
 }
 
@@ -675,6 +734,18 @@ func printManyAgentComparisonSummary(w io.Writer, rep ManyAgentComparisonReport)
 		fmt.Sprintf("%.1f ms", rep.FakNative.P50TTFTMS),
 		fmt.Sprintf("%.1f ms", rep.LlamaCPP.P50TTFTMS),
 		fmt.Sprintf("%.1fx faster", rep.TTFTSpeedupP50))
+	if rep.Turn1ColdTTFTFakMS > 0 && rep.Turn1ColdTTFTLlamaMS > 0 {
+		fmt.Fprintf(w, "%-22s %-24s %-24s %s\n", "turn1_cold_ttft_ms",
+			fmt.Sprintf("%.1f ms", rep.Turn1ColdTTFTFakMS),
+			fmt.Sprintf("%.1f ms", rep.Turn1ColdTTFTLlamaMS),
+			fmt.Sprintf("%.1fx faster", rep.Turn1ColdTTFTLlamaMS/rep.Turn1ColdTTFTFakMS))
+	}
+	if rep.SteadyStateTTFTFakMS > 0 && rep.SteadyStateTTFTLlamaMS > 0 {
+		fmt.Fprintf(w, "%-22s %-24s %-24s %s\n", "steady_ttft_ms",
+			fmt.Sprintf("%.1f ms", rep.SteadyStateTTFTFakMS),
+			fmt.Sprintf("%.1f ms", rep.SteadyStateTTFTLlamaMS),
+			fmt.Sprintf("%.1fx faster", rep.SteadyStateTTFTLlamaMS/rep.SteadyStateTTFTFakMS))
+	}
 	fmt.Fprintf(w, "%-22s %-24s %-24s %s\n", "total_wall_clock",
 		fmt.Sprintf("%.1f s", rep.FakNative.TotalWallMS/1000.0),
 		fmt.Sprintf("%.1f s", rep.LlamaCPP.TotalWallMS/1000.0),
