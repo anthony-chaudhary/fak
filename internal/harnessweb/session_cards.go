@@ -664,7 +664,39 @@ func handleSessionSSEWithInterval(scoped bool, interval time.Duration) http.Hand
 		lastHTML := defaultSessionHub.lastHTML
 		defaultSessionHub.mu.RUnlock()
 		if len(lastCards) > 0 || lastHTML != "" {
-			if data, err := json.Marshal(map[string]any{"sessions": lastCards, "html": lastHTML}); err == nil {
+			cards := lastCards
+			htmlPayload := lastHTML
+			if sessionID != "" {
+				filteredCards := make([]SessionCard, 0)
+				for _, card := range lastCards {
+					if card.ID == sessionID {
+						filteredCards = append(filteredCards, card)
+						break
+					}
+				}
+				cards = filteredCards
+				if len(filteredCards) > 0 {
+					noColor := false
+					if r != nil && r.URL != nil {
+						noColor = r.URL.Query().Get("no_color") == "1"
+					}
+					if markup, err := renderSessionCardsHTML(filteredCards, time.Now(), noColor); err == nil {
+						htmlPayload = markup
+					} else {
+						htmlPayload = ""
+					}
+				} else {
+					htmlPayload = ""
+				}
+			}
+
+			payload := map[string]any{"sessions": cards}
+			if htmlPayload != "" {
+				payload["html"] = htmlPayload
+			} else if sessionID == "" {
+				payload["html"] = lastHTML
+			}
+			if data, err := json.Marshal(payload); err == nil {
 				fmt.Fprintf(w, "event: session_update\ndata: %s\n\n", data)
 			}
 		}

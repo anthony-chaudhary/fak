@@ -664,3 +664,188 @@ func TestSessionCardsSSEInitialConnectionEmitsSessionUpdate(t *testing.T) {
 		t.Fatalf("expected html markup to contain session id: %s", payload.HTML)
 	}
 }
+
+func TestSessionSSE_ScopedReplayFiltering(t *testing.T) {
+	resetSessionHubForTest()
+	defer resetSessionHubForTest()
+
+	now := time.Now()
+	source := &fixtureSessionSource{cards: []SessionCard{
+		{ID: "session-alpha", Provider: "codex", State: sessionWorking, LastEventAt: now},
+		{ID: "session-beta", Provider: "claude", State: sessionIdle, LastEventAt: now},
+	}}
+
+	broadcastCards(source)
+
+	ts := httptest.NewServer(handlerWithSessionSource(newStore(), nil, nil, source))
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 1. Scoped subscription for session-alpha
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/fak/sessions/session-alpha/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	event1Type, data1 := readSSEEvent(t, reader)
+	if event1Type != "connected" {
+		t.Fatalf("expected first event to be connected, got %q (data: %s)", event1Type, data1)
+	}
+	if !strings.Contains(data1, "session-alpha") {
+		t.Fatalf("expected connected event to include session-alpha, got %s", data1)
+	}
+
+	event2Type, data2 := readSSEEvent(t, reader)
+	if event2Type != "session_update" {
+		t.Fatalf("expected second event to be session_update, got %q (data: %s)", event2Type, data2)
+	}
+
+	var payload struct {
+		Sessions []SessionCard `json:"sessions"`
+		HTML     string        `json:"html"`
+	}
+	if err := json.Unmarshal([]byte(data2), &payload); err != nil {
+		t.Fatalf("failed to parse session_update json data: %v", err)
+	}
+
+	if len(payload.Sessions) != 1 || payload.Sessions[0].ID != "session-alpha" {
+		t.Fatalf("expected only session-alpha in sessions payload, got %d cards: %+v", len(payload.Sessions), payload.Sessions)
+	}
+	if !strings.Contains(payload.HTML, "session-alpha") {
+		t.Fatalf("expected html markup to contain session-alpha: %s", payload.HTML)
+	}
+	if strings.Contains(payload.HTML, "session-beta") {
+		t.Fatalf("html markup leaked session-beta: %s", payload.HTML)
+	}
+	if strings.Contains(data2, "session-beta") {
+		t.Fatalf("raw session_update data leaked session-beta: %s", data2)
+	}
+
+	// 2. Scoped subscription for an unknown/non-existent session
+	reqUnknown, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/fak/sessions/session-nonexistent/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	respUnknown, err := ts.Client().Do(reqUnknown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respUnknown.Body.Close()
+
+	if respUnknown.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", respUnknown.StatusCode)
+	}
+
+	readerUnknown := bufio.NewReader(respUnknown.Body)
+	ev1Type, ev1Data := readSSEEvent(t, readerUnknown)
+	if ev1Type != "connected" || !strings.Contains(ev1Data, "session-nonexistent") {
+		t.Fatalf("unexpected connected event: %s (%s)", ev1Type, ev1Data)
+	}
+
+	ev2Type, ev2Data := readSSEEvent(t, readerUnknown)
+	if ev2Type != "session_update" {
+		t.Fatalf("expected session_update event, got %q", ev2Type)
+	}
+	var payloadUnknown struct {
+		Sessions []SessionCard `json:"sessions"`
+		HTML     string        `json:"html"`
+	}
+	if err := json.Unmarshal([]byte(ev2Data), &payloadUnknown); err != nil {
+		t.Fatalf("failed to parse session_update json data: %v", err)
+	}
+	if len(payloadUnknown.Sessions) != 0 {
+		t.Fatalf("expected 0 sessions for nonexistent session, got %d", len(payloadUnknown.Sessions))
+	}
+	if payloadUnknown.HTML != "" {
+		t.Fatalf("expected empty/omitted HTML payload, got %q", payloadUnknown.HTML)
+	}
+	if strings.Contains(ev2Data, "session-alpha") || strings.Contains(ev2Data, "session-beta") {
+		t.Fatalf("raw session_update data leaked sessions for nonexistent stream: %s", ev2Data)
+	}
+
+	// 3. Global subscription for /v1/fak/sessions/events receives all cards
+	reqGlobalV1, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/fak/sessions/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	respGlobalV1, err := ts.Client().Do(reqGlobalV1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respGlobalV1.Body.Close()
+
+	if respGlobalV1.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", respGlobalV1.StatusCode)
+	}
+	readerGlobalV1 := bufio.NewReader(respGlobalV1.Body)
+	g1Ev1Type, g1Ev1Data := readSSEEvent(t, readerGlobalV1)
+	if g1Ev1Type != "connected" {
+		t.Fatalf("expected connected event, got %q (data: %s)", g1Ev1Type, g1Ev1Data)
+	}
+	g1Ev2Type, g1Ev2Data := readSSEEvent(t, readerGlobalV1)
+	if g1Ev2Type != "session_update" {
+		t.Fatalf("expected session_update event, got %q", g1Ev2Type)
+	}
+	var payloadGlobalV1 struct {
+		Sessions []SessionCard `json:"sessions"`
+		HTML     string        `json:"html"`
+	}
+	if err := json.Unmarshal([]byte(g1Ev2Data), &payloadGlobalV1); err != nil {
+		t.Fatalf("failed to parse session_update json data: %v", err)
+	}
+	if len(payloadGlobalV1.Sessions) != 2 {
+		t.Fatalf("expected 2 sessions for global v1 stream, got %d", len(payloadGlobalV1.Sessions))
+	}
+	if !strings.Contains(payloadGlobalV1.HTML, "session-alpha") || !strings.Contains(payloadGlobalV1.HTML, "session-beta") {
+		t.Fatalf("expected html markup to contain both sessions: %s", payloadGlobalV1.HTML)
+	}
+
+	// 4. Global subscription for /api/sessions/events receives all cards
+	reqGlobalAPI, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/sessions/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	respGlobalAPI, err := ts.Client().Do(reqGlobalAPI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respGlobalAPI.Body.Close()
+
+	if respGlobalAPI.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", respGlobalAPI.StatusCode)
+	}
+	readerGlobalAPI := bufio.NewReader(respGlobalAPI.Body)
+	g2Ev1Type, g2Ev1Data := readSSEEvent(t, readerGlobalAPI)
+	if g2Ev1Type != "connected" {
+		t.Fatalf("expected connected event, got %q (data: %s)", g2Ev1Type, g2Ev1Data)
+	}
+	g2Ev2Type, g2Ev2Data := readSSEEvent(t, readerGlobalAPI)
+	if g2Ev2Type != "session_update" {
+		t.Fatalf("expected session_update event, got %q", g2Ev2Type)
+	}
+	var payloadGlobalAPI struct {
+		Sessions []SessionCard `json:"sessions"`
+		HTML     string        `json:"html"`
+	}
+	if err := json.Unmarshal([]byte(g2Ev2Data), &payloadGlobalAPI); err != nil {
+		t.Fatalf("failed to parse session_update json data: %v", err)
+	}
+	if len(payloadGlobalAPI.Sessions) != 2 {
+		t.Fatalf("expected 2 sessions for global api stream, got %d", len(payloadGlobalAPI.Sessions))
+	}
+	if !strings.Contains(payloadGlobalAPI.HTML, "session-alpha") || !strings.Contains(payloadGlobalAPI.HTML, "session-beta") {
+		t.Fatalf("expected html markup to contain both sessions: %s", payloadGlobalAPI.HTML)
+	}
+}
