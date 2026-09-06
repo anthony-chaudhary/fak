@@ -365,3 +365,146 @@ func contains(in []string, w string) bool {
 	}
 	return false
 }
+
+func BenchmarkGenerationHashing(b *testing.B) {
+	prod := mh.Product{
+		ID:            "bench-product",
+		Variant:       "standard",
+		Compatibility: "v1",
+		Capabilities:  []string{"inference", "memory", "tool-use"},
+		Layers:        []string{"base", "security", "cache"},
+	}
+	payload := map[string]any{
+		"model":       "qwen3.8",
+		"context_len": 32768,
+		"quant":       "q4_k_m",
+		"parameters": map[string]any{
+			"temperature": 0.7,
+			"top_p":       0.95,
+		},
+	}
+	prov := mh.Provenance{
+		Source:   "git@github.com:anthony-chaudhary/fak.git",
+		Revision: "r100+gabcdef12",
+		Builder:  "go-test",
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bundle, err := mh.BuildRelease(prod, payload, prov)
+		if err != nil {
+			b.Fatalf("BuildRelease failed: %v", err)
+		}
+		if bundle.Release.Digest == "" {
+			b.Fatal("empty release digest")
+		}
+	}
+}
+
+func BenchmarkProductLifecycle(b *testing.B) {
+	root := b.TempDir()
+	s, err := mh.Open(root)
+	if err != nil {
+		b.Fatal(err)
+	}
+	prod := mh.Product{
+		ID:            "bench-lifecycle",
+		Variant:       "server",
+		Compatibility: "v1",
+		Capabilities:  []string{"offline-work"},
+		Layers:        []string{"kernel"},
+	}
+	rel1, err := mh.BuildRelease(prod, map[string]any{"version": 1}, mh.Provenance{Source: "bench", Revision: "r1", Builder: "bench"})
+	if err != nil {
+		b.Fatal(err)
+	}
+	rel2, err := mh.BuildRelease(prod, map[string]any{"version": 2}, mh.Provenance{Source: "bench", Revision: "r2", Builder: "bench"})
+	if err != nil {
+		b.Fatal(err)
+	}
+	if _, err := s.Publish(rel1); err != nil {
+		b.Fatal(err)
+	}
+	if _, err := s.Publish(rel2); err != nil {
+		b.Fatal(err)
+	}
+
+	work := func(bundle mh.Bundle) (string, error) {
+		return string(bundle.Payload), nil
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		id := mh.InstallationID(fmt.Sprintf("inst-%d", i))
+		instReceipt, err := s.Install(id, rel1.Release.ID, nil)
+		if err != nil || instReceipt.Status != "activated" {
+			b.Fatalf("Install failed: receipt=%+v, err=%v", instReceipt, err)
+		}
+		updReceipt, err := s.Update(id, rel2.Release.ID, nil)
+		if err != nil || updReceipt.Status != "activated" {
+			b.Fatalf("Update failed: receipt=%+v, err=%v", updReceipt, err)
+		}
+		runReceipt, err := s.Run(id, work)
+		if err != nil || runReceipt.Status != "completed" {
+			b.Fatalf("Run failed: receipt=%+v, err=%v", runReceipt, err)
+		}
+		state, err := s.Inspect(id)
+		if err != nil || state.Effective != updReceipt.After {
+			b.Fatalf("Inspect failed: state=%+v, err=%v", state, err)
+		}
+	}
+}
+
+func BenchmarkRetainedGenerations(b *testing.B) {
+	inst := mh.Installation{
+		ID:            "bench-inst",
+		Effective:     "gen-10",
+		LastKnownGood: "gen-08",
+		Generations: []mh.GenerationID{
+			"gen-01", "gen-02", "gen-03", "gen-04", "gen-05",
+			"gen-06", "gen-07", "gen-08", "gen-09", "gen-10",
+		},
+		Pins: []mh.GenerationPin{
+			{Kind: mh.PinStagedCandidate, Generation: "gen-09"},
+			{Kind: mh.PinOpenSession, Reference: "sess-1", Generation: "gen-05"},
+			{Kind: mh.PinCheckpoint, Reference: "ckpt-1", Generation: "gen-03"},
+		},
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		retained := mh.RetainedGenerations(inst)
+		if len(retained) == 0 {
+			b.Fatal("unexpected empty retained generations")
+		}
+	}
+}
+
+func BenchmarkReclaimableGenerations(b *testing.B) {
+	inst := mh.Installation{
+		ID:            "bench-inst",
+		Effective:     "gen-10",
+		LastKnownGood: "gen-08",
+		Generations: []mh.GenerationID{
+			"gen-01", "gen-02", "gen-03", "gen-04", "gen-05",
+			"gen-06", "gen-07", "gen-08", "gen-09", "gen-10",
+		},
+		Pins: []mh.GenerationPin{
+			{Kind: mh.PinStagedCandidate, Generation: "gen-09"},
+			{Kind: mh.PinOpenSession, Reference: "sess-1", Generation: "gen-05"},
+			{Kind: mh.PinCheckpoint, Reference: "ckpt-1", Generation: "gen-03"},
+		},
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		reclaimable := mh.ReclaimableGenerations(inst)
+		if len(reclaimable) == 0 {
+			b.Fatal("unexpected empty reclaimable generations")
+		}
+	}
+}
