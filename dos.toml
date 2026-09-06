@@ -98,6 +98,8 @@ concurrent = [
   "observer",
   "gym",
   "sandbox",
+  "qwen38campaign",
+  "factorymigrate",
   "vcachechain",
   "dropin",
   "comm",
@@ -714,6 +716,8 @@ autopick = [
 # stripped to the real layout, and the leaves that existed in internal/ but had no
 # lane are added, so arbitrate now actually detects same-tree collisions.
 [lanes.trees]
+qwen38campaign = ["internal/qwen38campaign/**"]
+factorymigrate = ["internal/factorymigrate/**"]
 stopgate = ["internal/stopgate/**"]
 launchguard = ["internal/launchguard/**", "cmd/fak/guard_crash_rsi.go", "cmd/fak/guard_crash_rsi_test.go", "cmd/fak/guard_failure_rsi_test.go", "cmd/fak/launchguard.go", "cmd/fak/launchguard_test.go", "docs/launchguard.md"]
 nativebench = ["internal/nativebench/**"]
@@ -1527,7 +1531,6 @@ quantmeta = ["internal/quantmeta/**"]
 quantobs = ["internal/quantobs/**"]
 quantroute = ["internal/quantroute/**"]
 quantwatch = ["internal/quantwatch/**"]
-qwen38campaign = ["internal/qwen38campaign/**"]
 qwen38ladder = ["internal/qwen38ladder/**"]
 qwen38quant = ["internal/qwen38quant/**"]
 qwen38quantrun = ["internal/qwen38quantrun/**"]

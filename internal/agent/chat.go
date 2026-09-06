@@ -44,9 +44,10 @@ const (
 // or alias-shaped argument object survives to the kernel exactly as the model
 // emitted it (the whole point of the repair measurement).
 type ToolCall struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Function Func   `json:"function"`
+	ID               string `json:"id"`
+	Type             string `json:"type"`
+	Function         Func   `json:"function"`
+	ThoughtSignature string `json:"thought_signature,omitempty"`
 }
 
 // Func is the function half of a tool call.

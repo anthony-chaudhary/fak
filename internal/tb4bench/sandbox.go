@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const (
@@ -669,6 +671,9 @@ func (m *MockContainerEngine) ExecCommand(ctx context.Context, id string, cmd Ex
 	if len(cmd.Cmd) == 1 {
 		shell := resolveShell()
 		execCmd = exec.CommandContext(ctx, shell, "-c", cmd.Cmd[0])
+	} else if cmd.Cmd[0] == "sh" || cmd.Cmd[0] == "bash" {
+		shell := resolveShell()
+		execCmd = exec.CommandContext(ctx, shell, cmd.Cmd[1:]...)
 	} else {
 		if _, err := exec.LookPath(cmd.Cmd[0]); err == nil {
 			execCmd = exec.CommandContext(ctx, cmd.Cmd[0], cmd.Cmd[1:]...)
@@ -690,6 +695,7 @@ func (m *MockContainerEngine) ExecCommand(ctx context.Context, id string, cmd Ex
 	execCmd.Stdout = &stdout
 	execCmd.Stderr = &stderr
 
+	windowgate.ConfigureBackgroundCommand(execCmd)
 	err := execCmd.Run()
 	exitCode := 0
 	if err != nil {

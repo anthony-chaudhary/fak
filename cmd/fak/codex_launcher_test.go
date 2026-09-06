@@ -247,6 +247,8 @@ func TestCodexDryRunSubprocessPermissions(t *testing.T) {
 		{name: "bare uses managed bypass default", wantBypass: true, wantBanner: "approval/sandbox bypass (managed default)"},
 		{name: "native opt-out restores Codex layer", extra: []string{"--native-permissions"}, wantBanner: "native approvals + sandbox explicitly restored"},
 		{name: "legacy explicit flag still selects bypass", extra: []string{"--skip-permissions"}, wantBypass: true, wantBanner: "approval/sandbox bypass (managed default)"},
+		{name: "native permissions with approve-for-me uses automated reviewer without sandbox bypass", extra: []string{"--native-permissions", "--approve-for-me"}, wantBypass: false, wantBanner: "automated approval reviewer (sandbox active)"},
+		{name: "approve-for-me alone preserves sandbox and uses automated reviewer", extra: []string{"--approve-for-me"}, wantBypass: false, wantBanner: "automated approval reviewer (sandbox active)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			args := []string{"codex", "--freshness-gate", "off", "--dry-run", "--split", "off"}
@@ -262,6 +264,11 @@ func TestCodexDryRunSubprocessPermissions(t *testing.T) {
 			got := string(output)
 			if has := strings.Contains(got, "--dangerously-bypass-approvals-and-sandbox"); has != tc.wantBypass {
 				t.Fatalf("subprocess bypass present=%v, want %v:\n%s", has, tc.wantBypass, got)
+			}
+			if strings.Contains(strings.Join(tc.extra, " "), "--approve-for-me") {
+				if !strings.Contains(got, `approvals_reviewer="auto_review"`) {
+					t.Fatalf("subprocess output missing auto_review config:\n%s", got)
+				}
 			}
 			for _, want := range []string{tc.wantBanner, "Codex subagents inherit this mode", "fak gates remain active"} {
 				if !strings.Contains(got, want) {
@@ -965,4 +972,153 @@ func TestRunCodexVerboseFlagsAccepted(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildCodexLaunchArgvApproveForMe(t *testing.T) {
+	got := buildCodexLaunchArgv("/bin/fak", codexLaunchOptions{
+		approveForMe:  true,
+		splitMode:     "auto",
+		splitWhere:    "bottom",
+		splitInterval: 2 * time.Second,
+		codexConfig:   true,
+		passthrough:   []string{"exec", "--json", "check the repo"},
+	})
+	want := []string{
+		"/bin/fak", "guard",
+		"--split", "auto",
+		"--split-where", "bottom",
+		"--split-interval", "2s",
+		"--approve-for-me",
+		"--",
+		"codex",
+		"-c", "model_auto_compact_token_limit=96000",
+		"-c", `approvals_reviewer="auto_review"`,
+		"exec", "--json", "check the repo",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("buildCodexLaunchArgv approveForMe = %#v\nwant %#v", got, want)
+	}
+}
+
+func TestRunCodexDryRunNativePermissionsApproveForMe(t *testing.T) {
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{
+		"--dry-run",
+		"--split", "off",
+		"--native-permissions",
+		"--approve-for-me",
+		"--",
+		"exec", "--json", "check the repo",
+	})
+	if rc != 0 {
+		t.Fatalf("runCodex dry-run rc=%d stderr=%s", rc, errb.String())
+	}
+	gotOut := out.String()
+	if strings.Contains(gotOut, "--dangerously-bypass-approvals-and-sandbox") {
+		t.Fatalf("stdout unexpectedly contains sandbox bypass: %s", gotOut)
+	}
+	for _, want := range []string{
+		"--approve-for-me",
+		`codex -c model_auto_compact_token_limit=96000 -c approvals_reviewer="auto_review" exec --json check the repo`,
+	} {
+		if !strings.Contains(gotOut, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, gotOut)
+		}
+	}
+	gotErr := errb.String()
+	for _, want := range []string{
+		"automated approval reviewer (sandbox active)",
+		"Codex subagents inherit this mode",
+		"fak gates remain active",
+	} {
+		if !strings.Contains(gotErr, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, gotErr)
+		}
+	}
+}
+
+func TestRunCodexDryRunApproveForMeWithoutNativePermissionsFlag(t *testing.T) {
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{
+		"--dry-run",
+		"--split", "off",
+		"--approve-for-me",
+		"--",
+		"exec", "--json", "check the repo",
+	})
+	if rc != 0 {
+		t.Fatalf("runCodex dry-run rc=%d stderr=%s", rc, errb.String())
+	}
+	gotOut := out.String()
+	if strings.Contains(gotOut, "--dangerously-bypass-approvals-and-sandbox") {
+		t.Fatalf("stdout unexpectedly contains sandbox bypass: %s", gotOut)
+	}
+	if !strings.Contains(gotOut, `-c approvals_reviewer="auto_review"`) {
+		t.Fatalf("stdout missing auto_review config: %s", gotOut)
+	}
+}
+
+func TestRunCodexExecSeamApproveForMe(t *testing.T) {
+	orig := codexLaunchRun
+	var gotArgv, gotEnv []string
+	codexLaunchRun = func(_, _ io.Writer, argv, env []string) int {
+		gotArgv = append([]string{}, argv...)
+		gotEnv = append([]string{}, env...)
+		return 17
+	}
+	t.Cleanup(func() { codexLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{
+		"--split", "off",
+		"--loop-gate", "off",
+		"--native-permissions",
+		"--approve-for-me",
+		"--",
+		"exec", "--json", "do x",
+	})
+	if rc != 17 {
+		t.Fatalf("runCodex rc=%d, want seam rc 17; stderr=%s", rc, errb.String())
+	}
+	joined := strings.Join(gotArgv, " ")
+	if strings.Contains(joined, "--dangerously-bypass-approvals-and-sandbox") {
+		t.Fatalf("approve-for-me launch unexpectedly passed bypass flag: %#v", gotArgv)
+	}
+	if !strings.Contains(joined, `approvals_reviewer="auto_review"`) {
+		t.Fatalf("approve-for-me launch omitted auto_review config: %#v", gotArgv)
+	}
+	if !strings.Contains(joined, "--approve-for-me") {
+		t.Fatalf("approve-for-me flag not forwarded to guard: %#v", gotArgv)
+	}
+	if len(gotEnv) == 0 {
+		t.Fatal("expected environment to be forwarded to child")
+	}
+}
+
+func TestConfigureGuardCodexApproveForMe(t *testing.T) {
+	t.Run("inserts auto_review when missing", func(t *testing.T) {
+		cmd := []string{"codex", "exec", "--json", "do task"}
+		got := configureGuardCodexApproveForMe(cmd)
+		want := []string{"codex", "-c", `approvals_reviewer="auto_review"`, "exec", "--json", "do task"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("configureGuardCodexApproveForMe = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("strips dangerous sandbox bypass flag", func(t *testing.T) {
+		cmd := []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "exec", "--json", "do task"}
+		got := configureGuardCodexApproveForMe(cmd)
+		want := []string{"codex", "-c", `approvals_reviewer="auto_review"`, "exec", "--json", "do task"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("configureGuardCodexApproveForMe = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("does not duplicate auto_review when already configured", func(t *testing.T) {
+		cmd := []string{"codex", "-c", `approvals_reviewer="auto_review"`, "exec", "--json", "do task"}
+		got := configureGuardCodexApproveForMe(cmd)
+		if !reflect.DeepEqual(got, cmd) {
+			t.Fatalf("configureGuardCodexApproveForMe duplicated flag = %#v, want %#v", got, cmd)
+		}
+	})
 }

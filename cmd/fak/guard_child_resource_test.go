@@ -914,3 +914,246 @@ func TestGuardHeadroomDebounceConfiguration(t *testing.T) {
 		}
 	})
 }
+
+func TestGuardChildResourceDynamicReasoningPostureDebouncing(t *testing.T) {
+	t.Run("allocation spike absorbed under xhigh posture without emitting reap_tree", func(t *testing.T) {
+		stop := make(chan struct{})
+		defer close(stop)
+
+		var yieldCalled bool
+		oldYield := guardYieldMemory
+		guardYieldMemory = func(pids ...int) {
+			yieldCalled = true
+		}
+		t.Cleanup(func() { guardYieldMemory = oldYield })
+
+		policy := guardResourcePolicy{
+			PollInterval:      10 * time.Millisecond,
+			Metric:            procguard.MemoryMetricCommit,
+			MaxTreeBytes:      1000,
+			MinSystemHeadroom: 100,
+			HeadroomDebounce:  60 * time.Millisecond,
+			ReasoningPosture:  EffortXHigh,
+			Stop:              stop,
+		}
+
+		// With xhigh posture, debounce window is 60ms * 3.0 = 180ms.
+		// A transient allocation spike lasting 80ms (ticks 1..8) should be absorbed without reap_tree.
+		tickCount := 0
+		ch := startGuardChildResourceMonitorWithCollector(42, "trace-xhigh-spike", "test-agent", policy, func(pid int) (procguard.MemorySnapshot, bool, string) {
+			tickCount++
+			systemBytes := uint64(500) // healthy (500 headroom >= 100)
+			if tickCount <= 8 {
+				// ticks 1..8: deficit (50 headroom < 100) during CoT generation
+				systemBytes = 950
+			}
+			return procguard.MemorySnapshot{
+				Metric:      procguard.MemoryMetricCommit,
+				RootPID:     42,
+				TreeBytes:   10,
+				SystemBytes: systemBytes,
+				SystemLimit: 1000,
+				Processes:   []procguard.MemoryProcess{{PID: 42, Bytes: 10}},
+			}, true, ""
+		})
+
+		// Sleep 120ms (exceeds baseline 60ms debounce window, but within 180ms xhigh window)
+		time.Sleep(120 * time.Millisecond)
+
+		select {
+		case ev := <-ch:
+			t.Fatalf("unexpected reap event emitted for transient CoT spike under xhigh posture: %+v", ev)
+		default:
+			// Absorbed successfully!
+		}
+
+		if !yieldCalled {
+			t.Fatal("expected guardYieldMemory to be called during transient spike")
+		}
+	})
+
+	t.Run("allocation spike under low posture trips debounce and emits reap_tree", func(t *testing.T) {
+		stop := make(chan struct{})
+		defer close(stop)
+
+		policy := guardResourcePolicy{
+			PollInterval:      10 * time.Millisecond,
+			Metric:            procguard.MemoryMetricCommit,
+			MaxTreeBytes:      1000,
+			MinSystemHeadroom: 100,
+			HeadroomDebounce:  60 * time.Millisecond,
+			ReasoningPosture:  EffortLow,
+			Stop:              stop,
+		}
+
+		// With low posture, debounce multiplier is 1.0 (60ms).
+		// An 80ms spike trips the debounce window and emits a reap_tree event.
+		tickCount := 0
+		ch := startGuardChildResourceMonitorWithCollector(42, "trace-low-spike", "test-agent", policy, func(pid int) (procguard.MemorySnapshot, bool, string) {
+			tickCount++
+			systemBytes := uint64(500)
+			if tickCount <= 8 {
+				systemBytes = 950
+			}
+			return procguard.MemorySnapshot{
+				Metric:      procguard.MemoryMetricCommit,
+				RootPID:     42,
+				TreeBytes:   10,
+				SystemBytes: systemBytes,
+				SystemLimit: 1000,
+				Processes:   []procguard.MemoryProcess{{PID: 42, Bytes: 10}},
+			}, true, ""
+		})
+
+		select {
+		case ev := <-ch:
+			if ev.Kind != guardChildResourceLimit || ev.Resource == nil {
+				t.Fatalf("unexpected event: %+v", ev)
+			}
+			if ev.Resource.Reason != "SYSTEM_COMMIT_HEADROOM" {
+				t.Fatalf("reason = %q, want SYSTEM_COMMIT_HEADROOM", ev.Resource.Reason)
+			}
+			receipt := newGuardResourceReceipt("trace-low-spike", "test-agent", 42, *ev.Resource)
+			if receipt.Action != "reap_tree" {
+				t.Fatalf("receipt action = %q, want reap_tree", receipt.Action)
+			}
+			if receipt.DescendantsSurvive {
+				t.Fatal("expected descendants_survive=false for reap_tree")
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("timed out waiting for debounce trip under low posture")
+		}
+	})
+
+	t.Run("sustained leak under xhigh posture eventually trips debounce and emits reap_tree", func(t *testing.T) {
+		stop := make(chan struct{})
+		defer close(stop)
+
+		policy := guardResourcePolicy{
+			PollInterval:      10 * time.Millisecond,
+			Metric:            procguard.MemoryMetricCommit,
+			MaxTreeBytes:      1000,
+			MinSystemHeadroom: 100,
+			HeadroomDebounce:  40 * time.Millisecond,
+			ReasoningPosture:  EffortXHigh,
+			Stop:              stop,
+		}
+
+		// With xhigh posture, debounce window is 40ms * 3.0 = 120ms.
+		// A sustained leak (never recovering) must still trip and emit reap_tree.
+		started := time.Now()
+		ch := startGuardChildResourceMonitorWithCollector(42, "trace-xhigh-sustained", "test-agent", policy, func(pid int) (procguard.MemorySnapshot, bool, string) {
+			return procguard.MemorySnapshot{
+				Metric:      procguard.MemoryMetricCommit,
+				RootPID:     42,
+				TreeBytes:   10,
+				SystemBytes: 950,
+				SystemLimit: 1000,
+				Processes:   []procguard.MemoryProcess{{PID: 42, Bytes: 10}},
+			}, true, ""
+		})
+
+		// At 60ms (well before 120ms), no event yet
+		time.Sleep(60 * time.Millisecond)
+		select {
+		case ev := <-ch:
+			t.Fatalf("event emitted too early under xhigh: %+v", ev)
+		default:
+		}
+
+		// Wait for sustained leak to trip after 120ms
+		select {
+		case ev := <-ch:
+			elapsed := time.Since(started)
+			if elapsed < 90*time.Millisecond {
+				t.Fatalf("sustained leak tripped prematurely: elapsed=%v", elapsed)
+			}
+			if ev.Kind != guardChildResourceLimit || ev.Resource == nil {
+				t.Fatalf("unexpected event: %+v", ev)
+			}
+			receipt := newGuardResourceReceipt("trace-xhigh-sustained", "test-agent", 42, *ev.Resource)
+			if receipt.Action != "reap_tree" {
+				t.Fatalf("receipt action = %q, want reap_tree", receipt.Action)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("timed out waiting for sustained leak trip under xhigh posture")
+		}
+	})
+
+	t.Run("reasoning posture multipliers scale headroom threshold and debounce window", func(t *testing.T) {
+		tests := []struct {
+			posture          string
+			canonical        string
+			wantDebounceMult float64
+			wantHeadroomMult float64
+		}{
+			{posture: EffortNone, canonical: EffortNone, wantDebounceMult: 1.0, wantHeadroomMult: 1.0},
+			{posture: "0", canonical: EffortNone, wantDebounceMult: 1.0, wantHeadroomMult: 1.0},
+			{posture: EffortLow, canonical: EffortLow, wantDebounceMult: 1.0, wantHeadroomMult: 1.0},
+			{posture: "1", canonical: EffortLow, wantDebounceMult: 1.0, wantHeadroomMult: 1.0},
+			{posture: EffortMedium, canonical: EffortMedium, wantDebounceMult: 1.0, wantHeadroomMult: 1.0},
+			{posture: "default", canonical: EffortMedium, wantDebounceMult: 1.0, wantHeadroomMult: 1.0},
+			{posture: "", canonical: EffortMedium, wantDebounceMult: 1.0, wantHeadroomMult: 1.0},
+			{posture: EffortHigh, canonical: EffortHigh, wantDebounceMult: 2.0, wantHeadroomMult: 1.5},
+			{posture: "3", canonical: EffortHigh, wantDebounceMult: 2.0, wantHeadroomMult: 1.5},
+			{posture: "EffortHigh", canonical: EffortHigh, wantDebounceMult: 2.0, wantHeadroomMult: 1.5},
+			{posture: EffortXHigh, canonical: EffortXHigh, wantDebounceMult: 3.0, wantHeadroomMult: 2.0},
+			{posture: "extra-high", canonical: EffortXHigh, wantDebounceMult: 3.0, wantHeadroomMult: 2.0},
+			{posture: "4", canonical: EffortXHigh, wantDebounceMult: 3.0, wantHeadroomMult: 2.0},
+			{posture: EffortMax, canonical: EffortMax, wantDebounceMult: 4.0, wantHeadroomMult: 2.5},
+			{posture: "5", canonical: EffortMax, wantDebounceMult: 4.0, wantHeadroomMult: 2.5},
+		}
+
+		for _, tc := range tests {
+			if got := normalizeGuardReasoningPosture(tc.posture); got != tc.canonical {
+				t.Errorf("normalizeGuardReasoningPosture(%q) = %q, want %q", tc.posture, got, tc.canonical)
+			}
+			hMult, dMult := guardReasoningPostureMultipliers(tc.posture)
+			if dMult != tc.wantDebounceMult {
+				t.Errorf("debounce multiplier for %q = %v, want %v", tc.posture, dMult, tc.wantDebounceMult)
+			}
+			if hMult != tc.wantHeadroomMult {
+				t.Errorf("headroom multiplier for %q = %v, want %v", tc.posture, hMult, tc.wantHeadroomMult)
+			}
+
+			p := guardResourcePolicy{
+				HeadroomDebounce:  10 * time.Second,
+				MinSystemHeadroom: 1000,
+				ReasoningPosture:  tc.posture,
+			}
+			wantDebounce := time.Duration(float64(10*time.Second) * tc.wantDebounceMult)
+			if gotDebounce := p.effectiveHeadroomDebounce(); gotDebounce != wantDebounce {
+				t.Errorf("effectiveHeadroomDebounce(%q) = %v, want %v", tc.posture, gotDebounce, wantDebounce)
+			}
+			wantHeadroom := uint64(float64(1000) * tc.wantHeadroomMult)
+			if gotHeadroom := p.effectiveMinSystemHeadroom(); gotHeadroom != wantHeadroom {
+				t.Errorf("effectiveMinSystemHeadroom(%q) = %v, want %v", tc.posture, gotHeadroom, wantHeadroom)
+			}
+		}
+	})
+
+	t.Run("configuration via config and env vars", func(t *testing.T) {
+		oldConfig := guardResourceConfigured
+		t.Cleanup(func() { setGuardResourceConfig(oldConfig) })
+
+		setGuardResourceConfig(guardResourceConfig{ReasoningPosture: EffortXHigh})
+		p := guardResourcePolicyConfigured()
+		if p.ReasoningPosture != EffortXHigh {
+			t.Fatalf("policy ReasoningPosture = %q, want %q", p.ReasoningPosture, EffortXHigh)
+		}
+
+		setGuardResourceConfig(guardResourceConfig{})
+		t.Setenv("FAK_GUARD_REASONING_POSTURE", "high")
+		p2 := guardResourcePolicyConfigured()
+		if p2.ReasoningPosture != EffortHigh {
+			t.Fatalf("policy ReasoningPosture from env = %q, want %q", p2.ReasoningPosture, EffortHigh)
+		}
+
+		t.Setenv("FAK_GUARD_REASONING_POSTURE", "")
+		t.Setenv("FAK_GUARD_REASONING_EFFORT", "max")
+		p3 := guardResourcePolicyConfigured()
+		if p3.ReasoningPosture != EffortMax {
+			t.Fatalf("policy ReasoningPosture from FAK_GUARD_REASONING_EFFORT = %q, want %q", p3.ReasoningPosture, EffortMax)
+		}
+	})
+}

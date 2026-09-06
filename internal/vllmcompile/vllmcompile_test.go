@@ -183,3 +183,132 @@ func TestBlockJSONSchema(t *testing.T) {
 		t.Fatalf("round-tripped block should be tuned: %+v", back.VLLMCompile)
 	}
 }
+
+func TestBlockReasonDetails(t *testing.T) {
+	cases := []struct {
+		name       string
+		block      Block
+		wantReason string
+	}{
+		{
+			name: "request time compilation",
+			block: Block{
+				Engine:                 "vllm",
+				RequestTimeCompilation: true,
+			},
+			wantReason: "a request triggered compilation during the measured window",
+		},
+		{
+			name: "cache disabled",
+			block: Block{
+				Engine:              "vllm",
+				CompileCacheEnabled: Bool(false),
+			},
+			wantReason: "torch.compile artifact cache disabled",
+		},
+		{
+			name: "warmup incomplete",
+			block: Block{
+				Engine:              "vllm",
+				CompileCacheEnabled: Bool(true),
+				WarmupComplete:      Bool(false),
+			},
+			wantReason: "warmup did not complete before the measured window",
+		},
+		{
+			name: "cache state unobserved",
+			block: Block{
+				Engine:         "vllm",
+				WarmupComplete: Bool(true),
+			},
+			wantReason: "compile cache state not observed",
+		},
+		{
+			name: "warmup state unobserved",
+			block: Block{
+				Engine:              "vllm",
+				CompileCacheEnabled: Bool(true),
+			},
+			wantReason: "warmup completion not observed",
+		},
+		{
+			name: "fully tuned",
+			block: Block{
+				Engine:              "vllm",
+				CompileCacheEnabled: Bool(true),
+				WarmupComplete:      Bool(true),
+			},
+			wantReason: "tuned",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.block.Reason(); got != tc.wantReason {
+				t.Fatalf("Reason() = %q, want %q", got, tc.wantReason)
+			}
+		})
+	}
+}
+
+func TestGateErrorMessageFormatting(t *testing.T) {
+	namedBlock := Block{
+		Engine:                 "vllm-serve",
+		RequestTimeCompilation: true,
+	}
+	err := namedBlock.Gate()
+	if err == nil || !strings.Contains(err.Error(), "vllm-serve row is cold-start") {
+		t.Fatalf("Gate() error %v missing engine name", err)
+	}
+
+	unnamedBlock := Block{
+		Engine:                 "   ",
+		RequestTimeCompilation: true,
+	}
+	errUnnamed := unnamedBlock.Gate()
+	if errUnnamed == nil || !strings.Contains(errUnnamed.Error(), "engine row is cold-start") {
+		t.Fatalf("Gate() error %v missing fallback label 'engine'", errUnnamed)
+	}
+}
+
+func TestGateRowsEmptyAndUniform(t *testing.T) {
+	repEmpty := GateRows()
+	if repEmpty.Tuned || len(repEmpty.Rows) != 0 {
+		t.Fatalf("empty GateRows() should not be tuned and have 0 rows: %+v", repEmpty)
+	}
+
+	repAllTuned := GateRows(
+		Block{Engine: "vllm", CompileCacheEnabled: Bool(true), WarmupComplete: Bool(true)},
+		Block{Engine: "sglang", CompileCacheEnabled: Bool(true), WarmupComplete: Bool(true)},
+	)
+	if !repAllTuned.Tuned || len(repAllTuned.Rows) != 2 {
+		t.Fatalf("all-tuned GateRows() should be tuned: %+v", repAllTuned)
+	}
+
+	repAllDiag := GateRows(
+		Block{Engine: "vllm"},
+		Block{Engine: "sglang"},
+	)
+	if repAllDiag.Tuned {
+		t.Fatalf("diagnostic GateRows() must not be tuned: %+v", repAllDiag)
+	}
+	for i, r := range repAllDiag.Rows {
+		if r.Class != ClassDiagnostic || r.Reason == "" {
+			t.Fatalf("row %d expected diagnostic with reason: %+v", i, r)
+		}
+	}
+}
+
+func TestBool(t *testing.T) {
+	bTrue := Bool(true)
+	bFalse := Bool(false)
+	if bTrue == nil || !*bTrue {
+		t.Fatalf("Bool(true) = %v", bTrue)
+	}
+	if bFalse == nil || *bFalse {
+		t.Fatalf("Bool(false) = %v", bFalse)
+	}
+	if bTrue == bFalse {
+		t.Fatal("Bool instances should have distinct pointers")
+	}
+}

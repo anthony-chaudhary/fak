@@ -45,6 +45,8 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 // a leaf a conscious layering decision instead of an accident.
 var tier = map[string]int{
 
+	"qwen38campaign":     1, // Qwen3.8 subagent fan-out multi-agent benchmark harness.
+	"factorymigrate":     1, // 5-Gate boundary and migration auditor across fak and fak-private.
 	"agentsched":         3, // agent thread scheduling, priority queue, and 4-gate admission governor (#11177, #11178).
 	"reflexagent":        3, // fast-dispatch micro-agent reflex loop (#11189).
 	"workspaceslot":      5, // pre-allocated workspace slot ring and fast in-place recycling (#11180).
@@ -57,7 +59,7 @@ var tier = map[string]int{
 	"ops":                4, // autonomous operations daemon and machine maintenance subsystem (#11156, #11158).
 	"observability":      2,
 	"sandbox":            2, // multi-tier local execution sandbox (wazero WebAssembly, OS container, Job Object/cgroups).
-	"gym":                3, // sandbox evaluation gym and RSI calibration loop (#11666).
+	"gym":                5, // sandbox evaluation gym, scenario runner, and closed-loop multi-turn harness simulation (#11652, #11666).
 	"observer":           1, // in-kernel observer worker pool for zero-cost step-by-step agent output interpretation (#11408).
 	"director":           3, // autonomous multi-agent roll-up digest for zero-self-report supervisor steering (#11411).
 	"studyreceipt":       1,
@@ -1550,6 +1552,8 @@ var chatEndpointRole = map[string]string{
 	"quality":           "the off-path bounded pre-dataset capability probe (#10030/#10162): one-token generation/reasoning calls classify endpoint support, infrastructure, and provenance (not a live planner)",
 	"serveradapter":     "independent local llama-server adapter and readiness probe owned by the serveradapter leaf",
 	"tb4bench":          "the off-path Terminal-Bench 4 benchmark client comparing fak harness vs reference runner (not a live planner)",
+	"agentxbench":       "the off-path AgentX benchmark client against a declared OpenAI-compatible endpoint (not a live planner)",
+	"gym":               "the off-path sandbox evaluation gym scenario runner against an ephemeral gateway (not a live planner)",
 }
 
 // TestSingleOpenAIChatClient pins the T4 fix as an architecture invariant: the

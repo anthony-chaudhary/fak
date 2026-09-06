@@ -21,12 +21,20 @@ import (
 )
 
 const (
-	guardResourcePollDefault    = time.Second
-	guardTreeCommitDefault      = uint64(64) << 30
-	guardTreeRSSFallback        = uint64(4) << 30
-	guardTreeRSSMinimum         = uint64(1) << 30
-	guardResourceDetailMaxBytes = 512
+	guardResourcePollDefault     = time.Second
+	guardTreeCommitDefault       = uint64(64) << 30
+	guardTreeRSSFallback         = uint64(4) << 30
+	guardTreeRSSMinimum          = uint64(1) << 30
+	guardResourceDetailMaxBytes  = 512
 	guardHeadroomDebounceDefault = 15 * time.Second
+
+	// Reasoning posture tiers for tuning watchdog debounce and headroom multipliers.
+	EffortNone   = "none"
+	EffortLow    = "low"
+	EffortMedium = "medium"
+	EffortHigh   = "high"
+	EffortXHigh  = "xhigh"
+	EffortMax    = "max"
 )
 
 var (
@@ -42,21 +50,23 @@ type guardResourcePolicy struct {
 	MaxTreeBytes      uint64
 	MinSystemHeadroom uint64
 	HeadroomDebounce  time.Duration
+	ReasoningPosture  string
 	Stop              <-chan struct{}
 }
 
 type guardResourceDecision struct {
-	Stop           bool
-	Reason         string
-	Metric         procguard.MemoryMetric
-	Offender       procguard.MemoryProcess
-	TreeBytes      uint64
-	SystemBytes    uint64
-	SystemLimit    uint64
-	ThresholdBytes uint64
-	HeadroomBytes  uint64
-	OwnedPIDs      []int
-	Detail         string
+	Stop             bool
+	Reason           string
+	Metric           procguard.MemoryMetric
+	Offender         procguard.MemoryProcess
+	TreeBytes        uint64
+	SystemBytes      uint64
+	SystemLimit      uint64
+	ThresholdBytes   uint64
+	HeadroomBytes    uint64
+	OwnedPIDs        []int
+	Detail           string
+	ReasoningPosture string
 }
 
 type guardResourceReceipt struct {
@@ -87,6 +97,7 @@ type guardResourceReceipt struct {
 	BuildModule        string  `json:"build_module,omitempty"`
 	BuildDirty         bool    `json:"build_dirty,omitempty"`
 	ActivationID       string  `json:"activation_id,omitempty"`
+	ReasoningPosture   string  `json:"reasoning_posture,omitempty"`
 }
 
 type guardResourceConfig struct {
@@ -95,12 +106,119 @@ type guardResourceConfig struct {
 	ReceiptPath      string
 	UsagePath        string
 	HeadroomDebounce time.Duration
+	ReasoningPosture string
 }
 
 var guardResourceConfigured guardResourceConfig
 
 func setGuardResourceConfig(config guardResourceConfig) {
 	guardResourceConfigured = config
+}
+
+func normalizeGuardReasoningPosture(s string) string {
+	clean := strings.ToLower(strings.TrimSpace(s))
+	clean = strings.TrimPrefix(clean, "effort")
+	clean = strings.ReplaceAll(clean, "-", "")
+	clean = strings.ReplaceAll(clean, "_", "")
+	switch clean {
+	case "none", "off", "disabled", "0":
+		return EffortNone
+	case "low", "1":
+		return EffortLow
+	case "medium", "med", "default", "balanced", "2", "":
+		return EffortMedium
+	case "high", "3":
+		return EffortHigh
+	case "xhigh", "extrahigh", "4":
+		return EffortXHigh
+	case "max", "maximum", "5":
+		return EffortMax
+	default:
+		return clean
+	}
+}
+
+// guardReasoningPostureDebounceMultiplier returns the debounce window multiplier for a given posture.
+// Higher reasoning postures scale debounce windows to absorb transient CoT memory spikes.
+func guardReasoningPostureDebounceMultiplier(posture string) float64 {
+	switch normalizeGuardReasoningPosture(posture) {
+	case EffortHigh:
+		return 2.0
+	case EffortXHigh:
+		return 3.0
+	case EffortMax:
+		return 4.0
+	case EffortLow, EffortNone, EffortMedium:
+		return 1.0
+	default:
+		return 1.0
+	}
+}
+
+// guardReasoningPostureHeadroomMultiplier returns the headroom threshold multiplier for a given posture.
+// Scaled headroom thresholds ensure appropriate safety margins for reasoning-heavy workloads.
+func guardReasoningPostureHeadroomMultiplier(posture string) float64 {
+	switch normalizeGuardReasoningPosture(posture) {
+	case EffortHigh:
+		return 1.5
+	case EffortXHigh:
+		return 2.0
+	case EffortMax:
+		return 2.5
+	case EffortLow, EffortNone, EffortMedium:
+		return 1.0
+	default:
+		return 1.0
+	}
+}
+
+func guardReasoningPostureMultipliers(posture string) (headroomMultiplier float64, debounceMultiplier float64) {
+	return guardReasoningPostureHeadroomMultiplier(posture), guardReasoningPostureDebounceMultiplier(posture)
+}
+
+func (p guardResourcePolicy) effectiveHeadroomDebounce() time.Duration {
+	base := p.HeadroomDebounce
+	if base == 0 {
+		base = guardHeadroomDebounceDefault
+	} else if base < 0 {
+		return 0
+	}
+	mult := guardReasoningPostureDebounceMultiplier(p.ReasoningPosture)
+	if mult <= 0 {
+		return base
+	}
+	return time.Duration(float64(base) * mult)
+}
+
+func (p guardResourcePolicy) effectiveMinSystemHeadroom() uint64 {
+	base := p.MinSystemHeadroom
+	if base == 0 {
+		return 0
+	}
+	mult := guardReasoningPostureHeadroomMultiplier(p.ReasoningPosture)
+	if mult <= 0 {
+		return base
+	}
+	return uint64(float64(base) * mult)
+}
+
+func resolveGuardReasoningPosture(val string, envVal string) string {
+	if v := strings.TrimSpace(val); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(envVal); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("FAK_GUARD_REASONING_POSTURE")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("FAK_GUARD_REASONING_EFFORT")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv(guardCodexReasoningEffortEnv)); v != "" {
+		return v
+	}
+	return ""
 }
 
 func resolveGuardHeadroomDebounce(flagVal time.Duration, envVal string) time.Duration {
@@ -141,6 +259,10 @@ func guardResourcePolicyConfigured() guardResourcePolicy {
 	if guardResourceConfigured.HeadroomDebounce > 0 {
 		p.HeadroomDebounce = guardResourceConfigured.HeadroomDebounce
 	}
+	posture := resolveGuardReasoningPosture(guardResourceConfigured.ReasoningPosture, "")
+	if posture != "" {
+		p.ReasoningPosture = normalizeGuardReasoningPosture(posture)
+	}
 	return p
 }
 
@@ -159,12 +281,20 @@ func guardTreeRSSDefault(hostPhysicalBytes uint64) uint64 {
 }
 
 func decideGuardResource(p guardResourcePolicy, s procguard.MemorySnapshot) guardResourceDecision {
-	d := guardResourceDecision{Metric: s.Metric, TreeBytes: s.TreeBytes, SystemBytes: s.SystemBytes, SystemLimit: s.SystemLimit, ThresholdBytes: p.MaxTreeBytes}
+	minHeadroom := p.effectiveMinSystemHeadroom()
+	d := guardResourceDecision{
+		Metric:           s.Metric,
+		TreeBytes:        s.TreeBytes,
+		SystemBytes:      s.SystemBytes,
+		SystemLimit:      s.SystemLimit,
+		ThresholdBytes:   p.MaxTreeBytes,
+		ReasoningPosture: normalizeGuardReasoningPosture(p.ReasoningPosture),
+	}
 	for _, process := range s.Processes {
 		d.OwnedPIDs = append(d.OwnedPIDs, process.PID)
 	}
 	sort.Ints(d.OwnedPIDs)
-	headroom := procguard.EvaluateSystemCommitHeadroom(s, p.MinSystemHeadroom)
+	headroom := procguard.EvaluateSystemCommitHeadroom(s, minHeadroom)
 	d.HeadroomBytes = headroom.ObservedBytes
 	if len(s.Processes) > 0 {
 		procs := make([]procguard.MemoryProcess, len(s.Processes))
@@ -185,7 +315,7 @@ func decideGuardResource(p guardResourcePolicy, s procguard.MemorySnapshot) guar
 	if headroom.Refuse {
 		d.Stop = true
 		d.Reason = headroom.Reason
-		d.ThresholdBytes = p.MinSystemHeadroom
+		d.ThresholdBytes = minHeadroom
 		d.Offender = procguard.MemoryProcess{
 			PID:  0,
 			PPID: 0,
@@ -400,12 +530,7 @@ func startGuardChildResourceMonitor(rootPID int, traceID, agent string, policy g
 func startGuardChildResourceMonitorWithCollector(rootPID int, traceID, agent string, policy guardResourcePolicy, collect func(int) (procguard.MemorySnapshot, bool, string)) <-chan guardChildWaitEvent {
 	recordGuardChildResourceUsage(traceID, agent, rootPID, policy)
 	out := make(chan guardChildWaitEvent, 1)
-	debounceWindow := policy.HeadroomDebounce
-	if debounceWindow == 0 {
-		debounceWindow = guardHeadroomDebounceDefault
-	} else if debounceWindow < 0 {
-		debounceWindow = 0
-	}
+	debounceWindow := policy.effectiveHeadroomDebounce()
 	go func() {
 		ticker := time.NewTicker(policy.PollInterval)
 		defer ticker.Stop()
@@ -560,7 +685,7 @@ func newGuardResourceInvocationReceipt(traceID, agent string, rootPID int, polic
 		RootPID:            rootPID,
 		MemoryMetric:       string(metric),
 		ThresholdBytes:     policy.MaxTreeBytes,
-		HeadroomBytes:      policy.MinSystemHeadroom,
+		HeadroomBytes:      policy.effectiveMinSystemHeadroom(),
 		Reason:             "CHILD_RESOURCE_CONTAINMENT_ACTIVE",
 		Action:             "containment_active",
 		DescendantsSurvive: true,
@@ -568,6 +693,7 @@ func newGuardResourceInvocationReceipt(traceID, agent string, rootPID int, polic
 		BuildModule:        identity.ModuleVersion,
 		BuildDirty:         identity.Dirty,
 		ActivationID:       guardResourceActivationID,
+		ReasoningPosture:   normalizeGuardReasoningPosture(policy.ReasoningPosture),
 	}
 	if receipt.BuildModule == "" {
 		receipt.BuildModule = "cmd/fak"
@@ -597,7 +723,7 @@ func newGuardResourceReceipt(traceID, agent string, rootPID int, d guardResource
 		action = "observe_only"
 		descendantsSurvive = true
 	}
-	receipt := guardResourceReceipt{Schema: "fak.guard.child-resource.v1", At: time.Now().UTC().Format(time.RFC3339Nano), TraceID: traceID, Agent: agent, RootPID: rootPID, OffenderPID: d.Offender.PID, OffenderPPID: d.Offender.PPID, OffenderName: d.Offender.Name, MemoryMetric: string(d.Metric), TreeMemoryBytes: d.TreeBytes, SystemMemoryBytes: d.SystemBytes, SystemMemoryLimit: d.SystemLimit, ThresholdBytes: d.ThresholdBytes, HeadroomBytes: d.HeadroomBytes, Reason: d.Reason, Action: action, DescendantsSurvive: descendantsSurvive, Detail: scrubGuardResourceDetail(d.Detail), BuildCommit: identity.Commit, BuildModule: identity.ModuleVersion, BuildDirty: identity.Dirty, ActivationID: guardResourceActivationID}
+	receipt := guardResourceReceipt{Schema: "fak.guard.child-resource.v1", At: time.Now().UTC().Format(time.RFC3339Nano), TraceID: traceID, Agent: agent, RootPID: rootPID, OffenderPID: d.Offender.PID, OffenderPPID: d.Offender.PPID, OffenderName: d.Offender.Name, MemoryMetric: string(d.Metric), TreeMemoryBytes: d.TreeBytes, SystemMemoryBytes: d.SystemBytes, SystemMemoryLimit: d.SystemLimit, ThresholdBytes: d.ThresholdBytes, HeadroomBytes: d.HeadroomBytes, Reason: d.Reason, Action: action, DescendantsSurvive: descendantsSurvive, Detail: scrubGuardResourceDetail(d.Detail), BuildCommit: identity.Commit, BuildModule: identity.ModuleVersion, BuildDirty: identity.Dirty, ActivationID: guardResourceActivationID, ReasoningPosture: d.ReasoningPosture}
 	if receipt.BuildModule == "" {
 		receipt.BuildModule = "cmd/fak"
 	}

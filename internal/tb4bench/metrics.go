@@ -2,7 +2,6 @@ package tb4bench
 
 import (
 	"errors"
-	"math"
 )
 
 // BenchmarkTierMetrics contains the official, authoritative solve and duration numbers.
@@ -60,7 +59,7 @@ func ComputeArmMetrics(armID string, results []OracleResult, telemetry Telemetry
 	if solved > 0 {
 		tokenEfficiency = float64(totalTokens) / float64(solved)
 	} else {
-		tokenEfficiency = math.NaN()
+		tokenEfficiency = 0.0
 	}
 	telemetry.TokenEfficiency = tokenEfficiency
 

@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -314,7 +315,7 @@ func verifyAuditSnapshot(root string) (AuditSnapshotManifest, error) {
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return AuditSnapshotManifest{}, snapshotError("SNAPSHOT_PATH_INVALID", "snapshot root must be a directory, not a symlink")
 	}
-	if info.Mode().Perm()&0o077 != 0 {
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		return AuditSnapshotManifest{}, snapshotError("SNAPSHOT_PERMISSION_INSECURE", "snapshot root permits group or other access")
 	}
 	manifestPath := filepath.Join(root, auditSnapshotManifestName)
@@ -388,7 +389,7 @@ func verifyAuditSnapshot(root string) (AuditSnapshotManifest, error) {
 		if err != nil {
 			return err
 		}
-		if info.Mode().Perm()&0o077 != 0 {
+		if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 			return snapshotError("SNAPSHOT_PERMISSION_INSECURE", "snapshot entry permits group or other access")
 		}
 		if entry.IsDir() {

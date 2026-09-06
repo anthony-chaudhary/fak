@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -206,6 +207,9 @@ func TestAuditSnapshotRefusalEnvelope(t *testing.T) {
 		{"insecure permissions", "SNAPSHOT_PERMISSION_INSECURE", func(t *testing.T, root string) { os.Chmod(snapshotFirstFile(t, root), 0o644) }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			if test.name == "insecure permissions" && runtime.GOOS == "windows" {
+				t.Skip("POSIX file permissions not supported on Windows")
+			}
 			root := freshAuditSnapshot(t)
 			test.edit(t, root)
 			_, _, err := ReplayAuditSnapshot(root)
@@ -291,6 +295,9 @@ func renderAuditSnapshotResult(t *testing.T, result AuditResult) ([]byte, []byte
 
 func assertAuditSnapshotPrivateTree(t *testing.T, root string) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
 	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err

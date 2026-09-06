@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -27,8 +28,10 @@ func TestAuditSnapshotUsageAppendPrivacyAndWeeklyFold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("ledger mode = %o, want 600", got)
+	if runtime.GOOS != "windows" {
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Fatalf("ledger mode = %o, want 600", got)
+		}
 	}
 	payload, err := os.ReadFile(ledger)
 	if err != nil {

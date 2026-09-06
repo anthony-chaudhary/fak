@@ -75,9 +75,9 @@ func init() {
 	})
 }
 
-// TestNightrunTB4BenchcatalogRegistration verifies that tb4bench is registered in benchcatalog
+// TestNightrunBenchTB4CatalogRegistration verifies that tb4bench is registered in benchcatalog
 // and discoverable through the fak benchmarks CLI.
-func TestNightrunTB4BenchcatalogRegistration(t *testing.T) {
+func TestNightrunBenchTB4CatalogRegistration(t *testing.T) {
 	b, ok := benchcatalog.Get("tb4bench")
 	if !ok {
 		t.Fatal("tb4bench benchmark missing from benchcatalog registry")
@@ -152,9 +152,9 @@ func TestNightrunTB4BenchcatalogRegistration(t *testing.T) {
 	}
 }
 
-// TestNightrunTB4TaskResolution verifies that the nightly collector backlog
+// TestNightrunBenchTB4TaskResolution verifies that the nightly collector backlog
 // resolves the TB4 benchmark into a feasible collection task.
-func TestNightrunTB4TaskResolution(t *testing.T) {
+func TestNightrunBenchTB4TaskResolution(t *testing.T) {
 	tasks, err := nightrun.Backlog("")
 	if err != nil {
 		t.Fatalf("nightrun.Backlog() failed: %v", err)
@@ -211,9 +211,9 @@ func TestNightrunTB4TaskResolution(t *testing.T) {
 	}
 }
 
-// TestNightrunTB4RegressionSmoke verifies that RunTB4NightrunRegression executes
+// TestNightrunBenchTB4RegressionSmoke verifies that RunTB4NightrunRegression executes
 // and verifies the synthetic regression suite.
-func TestNightrunTB4RegressionSmoke(t *testing.T) {
+func TestNightrunBenchTB4RegressionSmoke(t *testing.T) {
 	tempDir := t.TempDir()
 	ctx := context.Background()
 

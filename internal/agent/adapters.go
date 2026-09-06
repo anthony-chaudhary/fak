@@ -1329,6 +1329,7 @@ type geminiContent struct {
 
 type geminiPart struct {
 	Text             string                  `json:"text,omitempty"`
+	ThoughtSignature string                  `json:"thoughtSignature,omitempty"`
 	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
 }
@@ -1376,8 +1377,9 @@ type geminiResponseContent struct {
 }
 
 type geminiResponsePart struct {
-	Text         string `json:"text,omitempty"`
-	FunctionCall *struct {
+	Text             string `json:"text,omitempty"`
+	ThoughtSignature string `json:"thoughtSignature,omitempty"`
+	FunctionCall     *struct {
 		Name string          `json:"name"`
 		Args json.RawMessage `json:"args,omitempty"`
 		ID   string          `json:"id,omitempty"`
@@ -1400,15 +1402,16 @@ func (geminiAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 			StopSequences: r.Stop,
 		},
 	}
-	if r.ThinkingBudget != nil || r.ReasoningEffort != "" {
-		tc := &geminiThinkingConfig{}
-		if r.ThinkingBudget != nil {
-			tc.ThinkingBudget = r.ThinkingBudget
+	if r.ThinkingBudget != nil {
+		if *r.ThinkingBudget > 0 {
+			req.GenerationConfig.ThinkingConfig = &geminiThinkingConfig{
+				ThinkingBudget: r.ThinkingBudget,
+			}
 		}
-		if r.ReasoningEffort != "" {
-			tc.ThinkingLevel = strings.ToLower(r.ReasoningEffort)
+	} else if r.ReasoningEffort != "" {
+		req.GenerationConfig.ThinkingConfig = &geminiThinkingConfig{
+			ThinkingLevel: strings.ToLower(r.ReasoningEffort),
 		}
-		req.GenerationConfig.ThinkingConfig = tc
 	}
 	for _, m := range r.Messages {
 		switch m.Role {
@@ -1448,11 +1451,14 @@ func geminiAssistantParts(m Message) []geminiPart {
 		parts = append(parts, geminiPart{Text: m.Content})
 	}
 	for _, tc := range m.ToolCalls {
-		parts = append(parts, geminiPart{FunctionCall: &geminiFunctionCall{
-			Name: tc.Function.Name,
-			Args: jsonObjectOrRaw(tc.Function.Arguments),
-			ID:   tc.ID,
-		}})
+		parts = append(parts, geminiPart{
+			ThoughtSignature: tc.ThoughtSignature,
+			FunctionCall: &geminiFunctionCall{
+				Name: tc.Function.Name,
+				Args: jsonObjectOrRaw(tc.Function.Arguments),
+				ID:   tc.ID,
+			},
+		})
 	}
 	return parts
 }
@@ -1523,6 +1529,9 @@ func sanitizeGeminiSchema(v any) any {
 		return v
 	}
 
+	delete(m, "additionalProperties")
+	delete(m, "$schema")
+
 	for _, key := range []string{"anyOf", "any_of", "oneOf", "one_of"} {
 		if alts, ok := m[key].([]any); ok {
 			validAlts := make([]any, 0, len(alts))
@@ -1577,9 +1586,6 @@ func sanitizeGeminiSchema(v any) any {
 	}
 	if items, ok := m["items"]; ok {
 		m["items"] = sanitizeGeminiSchema(items)
-	}
-	if addl, ok := m["additionalProperties"].(map[string]any); ok {
-		m["additionalProperties"] = sanitizeGeminiSchema(addl)
 	}
 
 	sanitizeSchemaRequired(m)
@@ -1670,8 +1676,9 @@ func (geminiAdapter) ParseResponse(raw []byte) (*Completion, error) {
 				args = "{}"
 			}
 			calls = append(calls, ToolCall{
-				ID:   p.FunctionCall.ID,
-				Type: "function",
+				ID:               p.FunctionCall.ID,
+				Type:             "function",
+				ThoughtSignature: p.ThoughtSignature,
 				Function: Func{
 					Name:      p.FunctionCall.Name,
 					Arguments: args,

@@ -482,3 +482,26 @@ func TestNonExistentRootFailsGracefully(t *testing.T) {
 		t.Fatalf("expected StatusFailed for StageFiles, got %s", snap.Status(StageFiles))
 	}
 }
+
+func TestInvalidateFailedStage(t *testing.T) {
+	nonExistent := filepath.Join(t.TempDir(), "does_not_exist")
+
+	engine := NewEngine(nonExistent, Options{})
+	defer engine.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	engine.Start(ctx)
+
+	_ = engine.WaitStage(ctx, StageFiles)
+	if engine.Snapshot().Status(StageFiles) != StatusFailed {
+		t.Fatalf("expected StatusFailed")
+	}
+
+	// Invalidate should not panic and should properly transition failed stage to stale with fresh channel
+	engine.Invalidate("does_not_exist/file.go")
+	if engine.Snapshot().Status(StageFiles) != StatusFailed && engine.Snapshot().Status(StageFiles) != StatusStale && engine.Snapshot().Status(StageFiles) != StatusWarming {
+		t.Fatalf("unexpected status after invalidate: %s", engine.Snapshot().Status(StageFiles))
+	}
+}

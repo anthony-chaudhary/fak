@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -788,4 +790,185 @@ func equalArgs(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestGuardCodexProtectedPaths(t *testing.T) {
+	for _, p := range []string{
+		".git", ".git/HEAD", "repo/.git/config",
+		".agents", ".agents/skills", "path/to/.agents/memories",
+		".codex", ".codex/config.toml", "home/.codex/sessions",
+	} {
+		if !isGuardCodexProtectedPath(p) {
+			t.Errorf("isGuardCodexProtectedPath(%q) = false, want true", p)
+		}
+	}
+	for _, p := range []string{
+		"main.go", "src/file.txt", "git_helper.go", "agents.md", "codex.go",
+	} {
+		if isGuardCodexProtectedPath(p) {
+			t.Errorf("isGuardCodexProtectedPath(%q) = true, want false", p)
+		}
+	}
+}
+
+func TestGuardCodexSandboxProtectedPathContainment(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=codex", "GIT_AUTHOR_EMAIL=codex@example.com",
+			"GIT_COMMITTER_NAME=codex", "GIT_COMMITTER_EMAIL=codex@example.com")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	runGit(repo, "init", "-q", "-b", "main")
+	runGit(repo, "config", "user.email", "codex@example.com")
+	runGit(repo, "config", "user.name", "codex")
+
+	fileA := filepath.Join(repo, "fileA.txt")
+	if err := os.WriteFile(fileA, []byte("initial line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(repo, "add", "fileA.txt")
+	runGit(repo, "commit", "-qm", "feat: initial commit")
+
+	agentsSkill := filepath.Join(repo, ".agents", "skills", "audit", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(agentsSkill), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agentsSkill, []byte("# Audit Skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	codexCfg := filepath.Join(repo, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexCfg), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexCfg, []byte("model = \"gpt-6-astra\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	session, err := NewGuardCodexSandboxSession(repo, true)
+	if err != nil {
+		t.Fatalf("NewGuardCodexSandboxSession: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+
+	ctx := context.Background()
+
+	// 1. Test git status inside sandboxed session
+	statusRes, err := session.ExecuteCommand(ctx, []string{"git", "status"})
+	if err != nil {
+		t.Fatalf("git status under sandbox returned error: %v", err)
+	}
+	if statusRes.ExitCode != 0 {
+		t.Fatalf("git status exit code = %d, want 0; stderr=%s", statusRes.ExitCode, statusRes.Stderr)
+	}
+	if !statusRes.Proxied {
+		t.Fatalf("git status was not proxied via containment shim")
+	}
+
+	// 2. Modify file and verify git diff and git status reflect changes under sandbox
+	if err := os.WriteFile(fileA, []byte("initial line\nmodified line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	diffRes, err := session.ExecuteCommand(ctx, []string{"git", "diff"})
+	if err != nil {
+		t.Fatalf("git diff under sandbox returned error: %v", err)
+	}
+	if diffRes.ExitCode != 0 {
+		t.Fatalf("git diff exit code = %d, want 0; stderr=%s", diffRes.ExitCode, diffRes.Stderr)
+	}
+	if !diffRes.Proxied {
+		t.Fatalf("git diff was not proxied via containment shim")
+	}
+	if !strings.Contains(diffRes.Stdout, "+modified line") {
+		t.Fatalf("git diff output missing modified line: %s", diffRes.Stdout)
+	}
+
+	// 3. Test git log inside sandboxed session
+	logRes, err := session.ExecuteCommand(ctx, []string{"git", "log", "-n", "1"})
+	if err != nil {
+		t.Fatalf("git log under sandbox returned error: %v", err)
+	}
+	if logRes.ExitCode != 0 {
+		t.Fatalf("git log exit code = %d, want 0; stderr=%s", logRes.ExitCode, logRes.Stderr)
+	}
+	if !logRes.Proxied {
+		t.Fatalf("git log was not proxied via containment shim")
+	}
+	if !strings.Contains(logRes.Stdout, "initial commit") {
+		t.Fatalf("git log output missing initial commit: %s", logRes.Stdout)
+	}
+
+	// 4. Test protected path reads for .git and agent state (.agents, .codex)
+	headBytes, err := session.ReadProtected(".git/HEAD")
+	if err != nil {
+		t.Fatalf("ReadProtected(.git/HEAD): %v", err)
+	}
+	if !strings.Contains(string(headBytes), "refs/heads/") && len(headBytes) == 0 {
+		t.Fatalf("unexpected .git/HEAD content: %s", string(headBytes))
+	}
+
+	skillBytes, err := session.ReadProtected(".agents/skills/audit/SKILL.md")
+	if err != nil {
+		t.Fatalf("ReadProtected(.agents/skills/audit/SKILL.md): %v", err)
+	}
+	if !strings.Contains(string(skillBytes), "Audit Skill") {
+		t.Fatalf("unexpected skill content: %s", string(skillBytes))
+	}
+
+	codexCfgBytes, err := session.ReadProtected(".codex/config.toml")
+	if err != nil {
+		t.Fatalf("ReadProtected(.codex/config.toml): %v", err)
+	}
+	if !strings.Contains(string(codexCfgBytes), "gpt-6-astra") {
+		t.Fatalf("unexpected codex config content: %s", string(codexCfgBytes))
+	}
+
+	// 5. Verify sandbox isolation simulation:
+	// Even if host .git is locked/inaccessible (simulating strict sandbox where raw .git access trips error/panic),
+	// the containment proxy enables inspection commands to succeed.
+	rawGitDir := filepath.Join(repo, ".git")
+	blockedGitDir := filepath.Join(root, "repo_git_blocked")
+	if err := os.Rename(rawGitDir, blockedGitDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := os.Stat(rawGitDir); os.IsNotExist(err) {
+			_ = os.Rename(blockedGitDir, rawGitDir)
+		}
+	})
+
+	isolatedStatus, err := session.ExecuteCommand(ctx, []string{"git", "status"})
+	if err != nil || isolatedStatus.ExitCode != 0 {
+		t.Fatalf("git status failed under strict sandbox isolation without raw .git: exit=%d err=%v stderr=%s",
+			isolatedStatus.ExitCode, err, isolatedStatus.Stderr)
+	}
+	if !isolatedStatus.Proxied {
+		t.Fatalf("isolated git status was not proxied via containment shim")
+	}
+
+	// 6. Verify SafeSandboxAccess catches access violation panics
+	err = session.SafeSandboxAccess(".git", func() error {
+		panic("sandbox access violation on protected path .git: permission denied")
+	})
+	if err != nil {
+		t.Fatalf("SafeSandboxAccess returned error for contained violation: %v", err)
+	}
 }

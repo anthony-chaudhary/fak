@@ -21,6 +21,7 @@ type Block struct {
 // Class classifies whether an engine block meets tuned baseline criteria.
 type Class string
 
+// Classification constants for served-engine baseline evaluation.
 const (
 	// ClassTuned indicates cache was enabled, warmup completed, and no request compilation occurred.
 	ClassTuned Class = "tuned"

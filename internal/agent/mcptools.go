@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,6 +13,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/refutil"
+	"github.com/anthony-chaudhary/fak/internal/sandbox"
 )
 
 // mcptools.go — native Model Context Protocol (MCP) tool arming and in-process
@@ -54,7 +57,8 @@ func (mcpToolGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict 
 		return abi.Verdict{Kind: abi.VerdictAllow, By: "mcp"}
 	}
 	switch norm {
-	case "fak_tools_search", "fak_adjudicate", "fak_syscall", "fak_capabilities":
+	case "fak_tools_search", "fak_adjudicate", "fak_syscall", "fak_capabilities",
+		"sandbox_exec", "sandbox_read", "sandbox_write", "sandbox_reset":
 		c.Engine = "inprocess_mcp"
 		return abi.Verdict{Kind: abi.VerdictAllow, By: "mcp"}
 	default:
@@ -144,6 +148,38 @@ func rawMCPToolCatalog() []ToolDef {
 				Parameters:  rawSchema(`{"type":"object","properties":{"query":{"type":"string","description":"optional capability or feature query filter"}}}`),
 			},
 		},
+		{
+			Type: "function",
+			Function: ToolDefFunction{
+				Name:        "sandbox_exec",
+				Description: "Execute a command inside the active sandbox environment.",
+				Parameters:  rawSchema(`{"type":"object","properties":{"command":{"type":"string","description":"the command to execute inside the sandbox"},"argv":{"type":"array","items":{"type":"string"},"description":"optional argument list"},"cwd":{"type":"string","description":"working directory inside sandbox (defaults to /workspace)"},"env":{"type":"array","items":{"type":"string"},"description":"environment variables (KEY=VALUE)"},"timeout_ms":{"type":"integer","description":"optional execution timeout in milliseconds"}},"required":["command"]}`),
+			},
+		},
+		{
+			Type: "function",
+			Function: ToolDefFunction{
+				Name:        "sandbox_read",
+				Description: "Read a file from the sandboxed workspace.",
+				Parameters:  rawSchema(`{"type":"object","properties":{"path":{"type":"string","description":"relative path of the file to read within the sandbox workspace"},"offset":{"type":"integer","description":"optional 1-indexed line offset to start reading from"},"limit":{"type":"integer","description":"optional maximum number of lines to read"}},"required":["path"]}`),
+			},
+		},
+		{
+			Type: "function",
+			Function: ToolDefFunction{
+				Name:        "sandbox_write",
+				Description: "Write a file inside the sandboxed workspace.",
+				Parameters:  rawSchema(`{"type":"object","properties":{"path":{"type":"string","description":"relative path of the file to write within the sandbox workspace"},"content":{"type":"string","description":"content to write to the file"}},"required":["path","content"]}`),
+			},
+		},
+		{
+			Type: "function",
+			Function: ToolDefFunction{
+				Name:        "sandbox_reset",
+				Description: "Reset the sandbox to pristine state.",
+				Parameters:  rawSchema(`{"type":"object","properties":{}}`),
+			},
+		},
 	}
 }
 
@@ -158,6 +194,10 @@ func mcpToolAllow() []string {
 		"fak_adjudicate", "mcp__fak__fak_adjudicate", "mcp__fak_guard__fak_adjudicate",
 		"fak_syscall", "mcp__fak__fak_syscall", "mcp__fak_guard__fak_syscall",
 		"fak_capabilities", "mcp__fak__fak_capabilities", "mcp__fak_guard__fak_capabilities",
+		"sandbox_exec", "mcp__fak__sandbox_exec", "mcp__fak_guard__sandbox_exec",
+		"sandbox_read", "mcp__fak__sandbox_read", "mcp__fak_guard__sandbox_read",
+		"sandbox_write", "mcp__fak__sandbox_write", "mcp__fak_guard__sandbox_write",
+		"sandbox_reset", "mcp__fak__sandbox_reset", "mcp__fak_guard__sandbox_reset",
 	}
 }
 
@@ -168,9 +208,9 @@ func mcpToolMeta(tool string) (map[string]string, bool) {
 	}
 	norm := normalizeMCPTool(tool)
 	switch norm {
-	case "fak_read", "fak_tools_search", "fak_adjudicate", "fak_capabilities":
+	case "fak_read", "fak_tools_search", "fak_adjudicate", "fak_capabilities", "sandbox_read":
 		return map[string]string{"readOnlyHint": "true", "idempotentHint": "true"}, true
-	case "fak_syscall":
+	case "fak_syscall", "sandbox_exec", "sandbox_write", "sandbox_reset":
 		return map[string]string{"readOnlyHint": "false", "idempotentHint": "false"}, true
 	default:
 		return nil, false
@@ -209,6 +249,42 @@ func (inProcessMCPEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.R
 
 	case "fak_capabilities":
 		res := handleCapabilities(m)
+		respBytes, _ := json.Marshal(res)
+		return engineResult(ctx, c, body, respBytes, false, "inprocess_mcp"), nil
+
+	case "sandbox_exec":
+		res, err := handleSandboxExec(ctx, m)
+		if err != nil {
+			errBytes, _ := json.Marshal(map[string]any{"error": err.Error()})
+			return engineResult(ctx, c, body, errBytes, true, "inprocess_mcp"), nil
+		}
+		respBytes, _ := json.Marshal(res)
+		return engineResult(ctx, c, body, respBytes, false, "inprocess_mcp"), nil
+
+	case "sandbox_read":
+		res, err := handleSandboxRead(ctx, m)
+		if err != nil {
+			errBytes, _ := json.Marshal(map[string]any{"error": err.Error()})
+			return engineResult(ctx, c, body, errBytes, true, "inprocess_mcp"), nil
+		}
+		respBytes, _ := json.Marshal(res)
+		return engineResult(ctx, c, body, respBytes, false, "inprocess_mcp"), nil
+
+	case "sandbox_write":
+		res, err := handleSandboxWrite(ctx, m)
+		if err != nil {
+			errBytes, _ := json.Marshal(map[string]any{"error": err.Error()})
+			return engineResult(ctx, c, body, errBytes, true, "inprocess_mcp"), nil
+		}
+		respBytes, _ := json.Marshal(res)
+		return engineResult(ctx, c, body, respBytes, false, "inprocess_mcp"), nil
+
+	case "sandbox_reset":
+		res, err := handleSandboxReset(ctx, m)
+		if err != nil {
+			errBytes, _ := json.Marshal(map[string]any{"error": err.Error()})
+			return engineResult(ctx, c, body, errBytes, true, "inprocess_mcp"), nil
+		}
 		respBytes, _ := json.Marshal(res)
 		return engineResult(ctx, c, body, respBytes, false, "inprocess_mcp"), nil
 
@@ -406,7 +482,8 @@ func handleSyscall(ctx context.Context, m map[string]any) map[string]any {
 	norm := normalizeMCPTool(toolName)
 	if norm == "fak_read" {
 		call.Engine = FakReadEngineID
-	} else if norm == "fak_tools_search" || norm == "fak_adjudicate" || norm == "fak_syscall" || norm == "fak_capabilities" {
+	} else if norm == "fak_tools_search" || norm == "fak_adjudicate" || norm == "fak_syscall" || norm == "fak_capabilities" ||
+		norm == "sandbox_exec" || norm == "sandbox_read" || norm == "sandbox_write" || norm == "sandbox_reset" {
 		call.Engine = "inprocess_mcp"
 	}
 	if call.Engine == "" {
@@ -463,4 +540,259 @@ func handleCapabilities(_ map[string]any) map[string]any {
 			"mcp_features",
 		},
 	}
+}
+
+// ---------------------------------------------------------------------------
+// SANDBOX MCP STATE & HANDLERS
+// ---------------------------------------------------------------------------
+
+var (
+	activeSandboxMu     sync.RWMutex
+	activeSandboxInst   sandbox.Instance
+	sandboxWorkspaceDir string
+)
+
+// SetActiveSandbox sets the process-wide active sandbox instance for in-process MCP tools.
+func SetActiveSandbox(inst sandbox.Instance) {
+	activeSandboxMu.Lock()
+	defer activeSandboxMu.Unlock()
+	activeSandboxInst = inst
+}
+
+// GetActiveSandbox returns the active sandbox instance, or nil if none is configured.
+func GetActiveSandbox() sandbox.Instance {
+	activeSandboxMu.RLock()
+	defer activeSandboxMu.RUnlock()
+	return activeSandboxInst
+}
+
+// SetSandboxWorkspace sets the default sandbox workspace directory.
+func SetSandboxWorkspace(dir string) {
+	activeSandboxMu.Lock()
+	defer activeSandboxMu.Unlock()
+	sandboxWorkspaceDir = dir
+}
+
+// GetSandboxWorkspace returns the active or configured sandbox workspace directory.
+func GetSandboxWorkspace() string {
+	activeSandboxMu.RLock()
+	inst := activeSandboxInst
+	ws := sandboxWorkspaceDir
+	activeSandboxMu.RUnlock()
+
+	if inst != nil && inst.Spec().WorkspaceDir != "" {
+		return inst.Spec().WorkspaceDir
+	}
+	if ws != "" {
+		return ws
+	}
+	if envWs := os.Getenv("FAK_WORKSPACE"); envWs != "" {
+		return envWs
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	return "."
+}
+
+func resolveSandboxTier() sandbox.Tier {
+	tierStr := os.Getenv("FAK_SANDBOX_TIER")
+	switch strings.ToLower(strings.TrimSpace(tierStr)) {
+	case "runsc", "l2", "virtual", "l2_virtual":
+		return sandbox.TierL2Virtual
+	case "l1", "native", "host", "l1_native_os":
+		return sandbox.TierL1NativeOS
+	case "wasi", "wazero", "l0", "l0_wasm":
+		return sandbox.TierL0Wasm
+	default: // "auto" or ""
+		if p, ok := sandbox.GetProvider("runsc"); ok && p.Available() {
+			return sandbox.TierL2Virtual
+		}
+		if p, ok := sandbox.GetProvider("l1_native_os"); ok && p.Available() {
+			return sandbox.TierL1NativeOS
+		}
+		return sandbox.TierL0Wasm
+	}
+}
+
+func handleSandboxExec(ctx context.Context, m map[string]any) (map[string]any, error) {
+	cmdStr, _ := m["command"].(string)
+	var argv []string
+	if rawArgv, ok := m["argv"].([]any); ok {
+		for _, a := range rawArgv {
+			if s, ok := a.(string); ok {
+				argv = append(argv, s)
+			}
+		}
+	}
+	cwd, _ := m["cwd"].(string)
+	var env []string
+	if rawEnv, ok := m["env"].([]any); ok {
+		for _, e := range rawEnv {
+			if s, ok := e.(string); ok {
+				env = append(env, s)
+			}
+		}
+	}
+	var timeoutMS int64
+	if t, ok := m["timeout_ms"].(float64); ok {
+		timeoutMS = int64(t)
+	} else if t, ok := m["timeout_ms"].(int); ok {
+		timeoutMS = int64(t)
+	}
+
+	req := sandbox.ExecutionRequest{
+		Command:    cmdStr,
+		Argv:       argv,
+		WorkingDir: cwd,
+		Env:        env,
+		TimeoutMS:  timeoutMS,
+	}
+
+	inst := GetActiveSandbox()
+	if inst != nil {
+		res, err := inst.Execute(ctx, req)
+		if err != nil && res.ExitCode == 0 {
+			return nil, err
+		}
+		return map[string]any{
+			"exit_code":         res.ExitCode,
+			"stdout":            string(res.Stdout),
+			"stderr":            string(res.Stderr),
+			"normalized_stdout": string(res.NormalizedStdout),
+			"normalized_stderr": string(res.NormalizedStderr),
+			"duration_ms":       res.DurationMS,
+		}, nil
+	}
+
+	wsDir := cwd
+	if wsDir == "" || wsDir == "/workspace" {
+		wsDir = GetSandboxWorkspace()
+	}
+	tier := resolveSandboxTier()
+	spec := sandbox.Spec{
+		Tier:             tier,
+		WorkspaceDir:     wsDir,
+		EgressPolicy:     sandbox.EgressBlocked,
+		MemoryLimitBytes: 512 * 1024 * 1024,
+		TimeoutMS:        30000,
+	}
+	res, err := sandbox.DefaultRegistry().Execute(ctx, spec, req)
+	if err != nil && res.ExitCode == 0 {
+		return nil, err
+	}
+	return map[string]any{
+		"exit_code":         res.ExitCode,
+		"stdout":            string(res.Stdout),
+		"stderr":            string(res.Stderr),
+		"normalized_stdout": string(res.NormalizedStdout),
+		"normalized_stderr": string(res.NormalizedStderr),
+		"duration_ms":       res.DurationMS,
+	}, nil
+}
+
+func handleSandboxRead(_ context.Context, m map[string]any) (map[string]any, error) {
+	relPath, _ := m["path"].(string)
+	if strings.TrimSpace(relPath) == "" {
+		return nil, fmt.Errorf("path parameter is required")
+	}
+
+	ws := GetSandboxWorkspace()
+	cleanWS := filepath.Clean(ws)
+	target := filepath.Clean(filepath.Join(cleanWS, filepath.FromSlash(relPath)))
+
+	rel, err := filepath.Rel(cleanWS, target)
+	if err != nil || hasDotDotPrefix(rel) || rel == ".." {
+		return nil, fmt.Errorf("path %q escapes sandbox workspace", relPath)
+	}
+
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return nil, err
+	}
+
+	var offset int
+	if o, ok := m["offset"].(float64); ok {
+		offset = int(o)
+	} else if o, ok := m["offset"].(int); ok {
+		offset = o
+	}
+
+	var limit int
+	if l, ok := m["limit"].(float64); ok {
+		limit = int(l)
+	} else if l, ok := m["limit"].(int); ok {
+		limit = l
+	}
+
+	contentStr := string(data)
+	lines := strings.Split(contentStr, "\n")
+	totalLines := len(lines)
+
+	start := 0
+	if offset > 1 {
+		start = offset - 1
+	}
+	if start > totalLines {
+		start = totalLines
+	}
+	end := totalLines
+	if limit > 0 && start+limit < end {
+		end = start + limit
+	}
+
+	selected := lines[start:end]
+	return map[string]any{
+		"path":    relPath,
+		"content": strings.Join(selected, "\n"),
+		"lines":   totalLines,
+		"offset":  offset,
+		"limit":   limit,
+	}, nil
+}
+
+func handleSandboxWrite(_ context.Context, m map[string]any) (map[string]any, error) {
+	relPath, _ := m["path"].(string)
+	if strings.TrimSpace(relPath) == "" {
+		return nil, fmt.Errorf("path parameter is required")
+	}
+	content, ok := m["content"].(string)
+	if !ok {
+		return nil, fmt.Errorf("content parameter is required")
+	}
+
+	ws := GetSandboxWorkspace()
+	cleanWS := filepath.Clean(ws)
+	target := filepath.Clean(filepath.Join(cleanWS, filepath.FromSlash(relPath)))
+
+	rel, err := filepath.Rel(cleanWS, target)
+	if err != nil || hasDotDotPrefix(rel) || rel == ".." {
+		return nil, fmt.Errorf("path %q escapes sandbox workspace", relPath)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		return nil, fmt.Errorf("failed to create directory: %w", err)
+	}
+	if err := os.WriteFile(target, []byte(content), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return map[string]any{
+		"path":          relPath,
+		"bytes_written": len(content),
+		"status":        "ok",
+	}, nil
+}
+
+func handleSandboxReset(ctx context.Context, _ map[string]any) (map[string]any, error) {
+	inst := GetActiveSandbox()
+	if inst != nil {
+		if err := inst.Reset(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return map[string]any{
+		"status":  "ok",
+		"message": "sandbox reset to pristine state",
+	}, nil
 }

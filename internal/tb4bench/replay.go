@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -21,6 +22,16 @@ func NewReplayViewer(compact bool) *ReplayViewer {
 
 // LoadTranscriptJSONL loads an ArmExecutionResult or series of TurnRecords from JSONL.
 func LoadTranscriptJSONL(path string) (*ArmExecutionResult, error) {
+	if filepath.Base(path) == "transcript.jsonl" {
+		resultPath := filepath.Join(filepath.Dir(path), "result.json")
+		if data, err := os.ReadFile(resultPath); err == nil {
+			var fullRes ArmExecutionResult
+			if err := json.Unmarshal(data, &fullRes); err == nil && fullRes.ArmID != "" {
+				return &fullRes, nil
+			}
+		}
+	}
+
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
