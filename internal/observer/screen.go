@@ -167,6 +167,32 @@ func (s ObserverSemanticScreen) ScreenResult(ctx context.Context, c *abi.ToolCal
 
 	res, err := s.pool.ObserveSyncBarrier(ctx, obs)
 
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		digest := res.Reason
+		if digest == "" {
+			digest = "observer sync barrier context deadline exceeded"
+		}
+		return abi.ScreenAdvice{
+			Disposition: abi.ScreenQuarantine,
+			Reason:      abi.ReasonIntegrityRefuted,
+			Digest:      digest,
+			By:          "observer:context_deadline",
+		}
+	}
+
+	if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) || ctx.Err() != nil {
+		digest := res.Reason
+		if digest == "" {
+			digest = "observer sync barrier context canceled"
+		}
+		return abi.ScreenAdvice{
+			Disposition: abi.ScreenQuarantine,
+			Reason:      abi.ReasonIntegrityRefuted,
+			Digest:      digest,
+			By:          "observer:context_canceled",
+		}
+	}
+
 	if errors.Is(err, ErrBarrierTimeout) {
 		if obs.IsMutating() {
 			digest := res.Reason

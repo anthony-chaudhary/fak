@@ -863,6 +863,67 @@ func TestObserverSemanticScreen_BarrierTimeoutReadOnlyAllowed(t *testing.T) {
 	}
 }
 
+func TestObserverSemanticScreen_ScreenResult_ContextDeadlineExceeded(t *testing.T) {
+	pool := NewPool(Config{
+		WorkerCount:        1,
+		QueueSize:          16,
+		BarrierTimeout:     500 * time.Millisecond,
+		RequireWitnessDiff: true,
+	})
+	_ = pool.Start()
+	defer pool.Close()
+
+	screen := NewObserverSemanticScreen(pool)
+	sessionID := "sess-screen-context-deadline"
+
+	sess := pool.getOrCreateSession(sessionID)
+	// Simulate an un-settled in-flight task that forces the barrier to wait
+	atomic.StoreInt64(&sess.inFlight, 1)
+	defer atomic.StoreInt64(&sess.inFlight, 0)
+
+	call := &abi.ToolCall{
+		Tool:    "Edit",
+		TraceID: sessionID,
+		Meta: map[string]string{
+			"diff": "@@ -1 +1 @@\n-old\n+new",
+		},
+	}
+	body := []byte("applied edit successfully")
+
+	// 1. Context deadline exceeded during barrier wait
+	ctxDeadline, cancelDeadline := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancelDeadline()
+
+	adviceDeadline := screen.ScreenResult(ctxDeadline, call, body)
+	if adviceDeadline.Disposition == abi.ScreenAllow && adviceDeadline.By == "observer:advance" {
+		t.Fatalf("expected context deadline exceeded not to return ScreenAllow with observer:advance, got %+v", adviceDeadline)
+	}
+	if adviceDeadline.Disposition != abi.ScreenQuarantine {
+		t.Fatalf("expected ScreenQuarantine on context deadline exceeded, got %v", adviceDeadline.Disposition)
+	}
+	if adviceDeadline.Reason != abi.ReasonIntegrityRefuted {
+		t.Fatalf("expected ReasonIntegrityRefuted on context deadline exceeded, got %v", adviceDeadline.Reason)
+	}
+
+	// 2. Context cancellation during barrier wait
+	ctxCancel, cancelNow := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		cancelNow()
+	}()
+
+	adviceCancel := screen.ScreenResult(ctxCancel, call, body)
+	if adviceCancel.Disposition == abi.ScreenAllow && adviceCancel.By == "observer:advance" {
+		t.Fatalf("expected context cancellation not to return ScreenAllow with observer:advance, got %+v", adviceCancel)
+	}
+	if adviceCancel.Disposition != abi.ScreenQuarantine {
+		t.Fatalf("expected ScreenQuarantine on context cancellation, got %v", adviceCancel.Disposition)
+	}
+	if adviceCancel.Reason != abi.ReasonIntegrityRefuted {
+		t.Fatalf("expected ReasonIntegrityRefuted on context cancellation, got %v", adviceCancel.Reason)
+	}
+}
+
 func TestObserverSemanticScreen_VerifyToolCall_PreExecution(t *testing.T) {
 	pool := NewPool(Config{ChurnThreshold: 2, RegressThreshold: 3})
 	_ = pool.Start()
