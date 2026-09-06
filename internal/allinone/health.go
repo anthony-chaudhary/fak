@@ -50,6 +50,18 @@ func (h *HealthAggregator) GetStatus(name string) (SubsystemStatus, bool) {
 	return s, ok
 }
 
+// IsHealthy returns true if all registered subsystems are ready without error.
+func (h *HealthAggregator) IsHealthy() bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, v := range h.subsystems {
+		if !v.Ready {
+			return false
+		}
+	}
+	return true
+}
+
 // Snapshot returns the aggregated health response. If all mandatory subsystems are ready,
 // status is "ok". If any subsystem is not ready, status is "unavailable".
 func (h *HealthAggregator) Snapshot() HealthResponse {

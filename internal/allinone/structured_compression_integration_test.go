@@ -34,6 +34,7 @@ func init() {
 // TestStructuredMCPHelper acts as the test target when the subprocess is invoked with -test.run.
 func TestStructuredMCPHelper(t *testing.T) {
 	if os.Getenv(testHelperEnv) != "1" || os.Getenv("MOCK_SERVER_ID") != testServerID {
+		t.Skip("helper process only")
 		return
 	}
 	runStructuredMCPHelper()
@@ -266,8 +267,18 @@ func TestStructuredMCPResultReachesProvider(t *testing.T) {
 		t.Setenv("FAK_COMPRESSOR", "")
 
 		recEng := &recordingEngine{}
-		_, baseURL, cleanup := setupSupervisorWithEngine(t, recEng)
+		sup, baseURL, cleanup := setupSupervisorWithEngine(t, recEng)
 		defer cleanup()
+
+		// Verify child process tracking for active supervised subprocess
+		tracked := sup.TrackChildProcesses()
+		procInfo, ok := tracked[testServerID]
+		if !ok || !procInfo.Running || procInfo.PID <= 0 {
+			t.Fatalf("expected running child process tracked for %q: %+v", testServerID, procInfo)
+		}
+		if statusInfo, ok := sup.ChildProcessStatus(testServerID); !ok || statusInfo.PID != procInfo.PID {
+			t.Fatalf("ChildProcessStatus mismatch: got %+v, want PID %d", statusInfo, procInfo.PID)
+		}
 
 		events, status := callAgentSession(t, baseURL)
 		if status != http.StatusOK {

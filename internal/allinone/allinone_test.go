@@ -122,11 +122,26 @@ func TestAllInOneBootstrapLifecycle(t *testing.T) {
 	if health.Status != "ok" {
 		t.Fatalf("health status = %q, want 'ok'", health.Status)
 	}
+	if !sup.IsHealthy() {
+		t.Fatal("expected sup.IsHealthy() to be true")
+	}
+	if eval := sup.EvaluateHealth(); eval.Status != "ok" {
+		t.Fatalf("expected EvaluateHealth status 'ok', got %q", eval.Status)
+	}
 	for _, subName := range []string{SubsystemHTTP, SubsystemInference, SubsystemMCPBroker, SubsystemMemoryStore} {
 		s, ok := health.Subsystems[subName]
 		if !ok || !s.Ready {
 			t.Fatalf("subsystem %q not ready: %+v", subName, s)
 		}
+	}
+
+	// Verify child process tracking APIs
+	childProcs := sup.TrackChildProcesses()
+	if childProcs == nil {
+		t.Fatal("expected non-nil child process map")
+	}
+	if _, ok := sup.ChildProcessStatus("non-existent-server"); ok {
+		t.Fatal("expected non-existent process status ok=false")
 	}
 
 	// 4. Submits request to /v1/fak/agent/sessions and verifies response
@@ -193,6 +208,12 @@ func TestAllInOneBootstrapLifecycle(t *testing.T) {
 
 	// 5. Injects subsystem failure and verifies /healthz returns 503 Service Unavailable with failing component
 	sup.SetSubsystemHealth(SubsystemMCPBroker, false, "broker socket terminated")
+	if sup.IsHealthy() {
+		t.Fatal("expected sup.IsHealthy() to be false after failure injection")
+	}
+	if eval := sup.EvaluateHealth(); eval.Status != "unavailable" {
+		t.Fatalf("expected EvaluateHealth status 'unavailable', got %q", eval.Status)
+	}
 
 	failResp, err := http.Get(baseURL + "/healthz")
 	if err != nil {

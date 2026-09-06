@@ -37,3 +37,12 @@ type TopologySpec struct {
 	Engine      string   `json:"engine"`
 	Addr        string   `json:"addr"`
 }
+
+// ChildProcessInfo captures the runtime state and tracking metadata of a supervised child process.
+type ChildProcessInfo struct {
+	ID       string `json:"id"`
+	PID      int    `json:"pid"`
+	Running  bool   `json:"running"`
+	Crashed  bool   `json:"crashed"`
+	Restarts int    `json:"restarts"`
+}

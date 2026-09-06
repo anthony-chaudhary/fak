@@ -199,6 +199,72 @@ func (s *Supervisor) Addr() string {
 	return s.boundAddr
 }
 
+// TrackChildProcesses inspects all child processes declared in the supervisor topology
+// and returns their operational state mapped by server ID.
+func (s *Supervisor) TrackChildProcesses() map[string]ChildProcessInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make(map[string]ChildProcessInfo)
+	if s.broker == nil {
+		return out
+	}
+	if s.lock != nil {
+		for _, c := range s.lock.Components {
+			if !isMCPComponent(c) {
+				continue
+			}
+			if procSup, ok := s.broker.GetSupervisor(c.ID); ok {
+				out[c.ID] = ChildProcessInfo{
+					ID:       c.ID,
+					PID:      procSup.PID(),
+					Running:  procSup.IsRunning(),
+					Crashed:  procSup.IsCrashed(),
+					Restarts: procSup.Restarts(),
+				}
+			}
+		}
+	}
+	return out
+}
+
+// ChildProcessStatus returns the tracking status of a specific child process by server ID.
+func (s *Supervisor) ChildProcessStatus(serverID string) (ChildProcessInfo, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.broker == nil {
+		return ChildProcessInfo{}, false
+	}
+	procSup, ok := s.broker.GetSupervisor(serverID)
+	if !ok {
+		return ChildProcessInfo{}, false
+	}
+	return ChildProcessInfo{
+		ID:       serverID,
+		PID:      procSup.PID(),
+		Running:  procSup.IsRunning(),
+		Crashed:  procSup.IsCrashed(),
+		Restarts: procSup.Restarts(),
+	}, true
+}
+
+// IsHealthy returns whether all mandatory subsystems in the supervisor are currently ready.
+func (s *Supervisor) IsHealthy() bool {
+	if s.health == nil {
+		return false
+	}
+	return s.health.IsHealthy()
+}
+
+// EvaluateHealth returns the aggregated snapshot of health across all managed subsystems.
+func (s *Supervisor) EvaluateHealth() HealthResponse {
+	if s.health == nil {
+		return HealthResponse{Status: "unavailable"}
+	}
+	return s.health.Snapshot()
+}
+
 func isMCPComponent(c lockv2.LockedComponent) bool {
 	if c.IsMCP() {
 		return true
