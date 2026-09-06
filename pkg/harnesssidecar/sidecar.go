@@ -41,6 +41,19 @@ func (l Limits) normalized() Limits {
 	return l
 }
 
+func (l Limits) Validate() error {
+	if l.MaxFrame == 0 {
+		return fmt.Errorf("%w: invalid max_frame", ErrProtocol)
+	}
+	if l.MaxInflight <= 0 {
+		return fmt.Errorf("%w: invalid max_inflight", ErrProtocol)
+	}
+	if l.CancelGrace <= 0 {
+		return fmt.Errorf("%w: invalid cancel_grace", ErrProtocol)
+	}
+	return nil
+}
+
 type Identity struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
