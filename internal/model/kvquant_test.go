@@ -987,3 +987,339 @@ func BenchmarkDequantizeKVAsymmetric(b *testing.B) {
 		_, _ = DequantizeKVAsymmetric(asym)
 	}
 }
+
+// -------------------------------------------------------------------------
+// Asymmetric TurboQuant Tests (#11909)
+// -------------------------------------------------------------------------
+
+func TestKVQuantTurboQuantConstantsAndCodebook(t *testing.T) {
+	if KVQuantQ8_0BlockSize != 32 {
+		t.Fatalf("KVQuantQ8_0BlockSize = %d, want 32", KVQuantQ8_0BlockSize)
+	}
+	if KVQuantTurbo4BlockSize != 32 {
+		t.Fatalf("KVQuantTurbo4BlockSize = %d, want 32", KVQuantTurbo4BlockSize)
+	}
+
+	if len(Turbo4LloydMaxCodebook) != 16 {
+		t.Fatalf("len(Turbo4LloydMaxCodebook) = %d, want 16", len(Turbo4LloydMaxCodebook))
+	}
+	if len(Turbo4Thresholds) != 15 {
+		t.Fatalf("len(Turbo4Thresholds) = %d, want 15", len(Turbo4Thresholds))
+	}
+
+	// Verify thresholds are exact midpoints between adjacent centroids.
+	for i := 0; i < 15; i++ {
+		mid := (Turbo4LloydMaxCodebook[i] + Turbo4LloydMaxCodebook[i+1]) / 2
+		diff := math.Abs(float64(Turbo4Thresholds[i] - mid))
+		if diff > 1e-4 {
+			t.Fatalf("threshold %d: got %f, want midpoint %f (diff %e)",
+				i, Turbo4Thresholds[i], mid, diff)
+		}
+	}
+
+	// Verify centroid symmetry around 0.
+	for i := 0; i < 8; i++ {
+		diff := math.Abs(float64(Turbo4LloydMaxCodebook[i] + Turbo4LloydMaxCodebook[15-i]))
+		if diff > 1e-4 {
+			t.Fatalf("codebook asymmetry between index %d (%f) and %d (%f)",
+				i, Turbo4LloydMaxCodebook[i], 15-i, Turbo4LloydMaxCodebook[15-i])
+		}
+	}
+}
+
+func TestKVQuantQ8_0RoundTripAndAngularFidelity(t *testing.T) {
+	rng := rand.New(rand.NewSource(11909))
+
+	// Test zero block handling.
+	zeroSrc := make([]float32, 64)
+	qZero := QuantizeKVQ8_0(zeroSrc)
+	if qZero.ErrorBound() != 0 {
+		t.Fatalf("zero ErrorBound = %v, want 0", qZero.ErrorBound())
+	}
+	zeroDq := qZero.Dequantize()
+	for i, v := range zeroDq {
+		if v != 0 {
+			t.Fatalf("zeroDq[%d] = %v, want 0", i, v)
+		}
+	}
+	if sim := qZero.AngularCosineSimilarity(zeroSrc); sim != 1.0 {
+		t.Fatalf("zero AngularCosineSimilarity = %v, want 1.0", sim)
+	}
+
+	// Test non-trivial Gaussian vector: angular routing cos(q, k) > 0.9999 and zero-mean noise E[e] ≈ 0.
+	const n = 128
+	src := make([]float32, n)
+	for i := range src {
+		src[i] = float32(rng.NormFloat64() * 2.5)
+	}
+
+	q := QuantizeKVQ8_0(src)
+	if q.N != n {
+		t.Fatalf("N = %d, want %d", q.N, n)
+	}
+	if len(q.Codes) != n {
+		t.Fatalf("len(Codes) = %d, want %d", len(q.Codes), n)
+	}
+	if len(q.Scale) != n/KVQuantQ8_0BlockSize {
+		t.Fatalf("len(Scale) = %d, want %d", len(q.Scale), n/KVQuantQ8_0BlockSize)
+	}
+
+	// Bytes check: 1 byte/int8 code + 4 bytes/f32 scale -> 128 + 4*4 = 144 bytes.
+	if wantBytes := n + 4*(n/KVQuantQ8_0BlockSize); q.Bytes() != wantBytes {
+		t.Fatalf("Bytes() = %d, want %d", q.Bytes(), wantBytes)
+	}
+
+	bound := q.ErrorBound()
+	if bound <= 0 {
+		t.Fatalf("ErrorBound = %v, want > 0", bound)
+	}
+
+	dq := q.Dequantize()
+	var errSum float64
+	for i := 0; i < n; i++ {
+		err := float64(dq[i] - src[i])
+		errSum += err
+		if math.Abs(err) > float64(bound)*1.001+1e-5 {
+			t.Fatalf("element %d error %v exceeds ErrorBound %v", i, err, bound)
+		}
+	}
+
+	// E[e] ≈ 0 (zero-mean noise property).
+	meanErr := errSum / float64(n)
+	if math.Abs(meanErr) > 0.05 {
+		t.Fatalf("mean error E[e] = %v, want ≈ 0 (zero-mean property)", meanErr)
+	}
+
+	// Angular routing fidelity: cos(q, k) > 0.9999.
+	cosSim := q.AngularCosineSimilarity(src)
+	if cosSim < 0.9999 {
+		t.Fatalf("AngularCosineSimilarity = %.6f, want > 0.9999", cosSim)
+	}
+}
+
+func TestKVQuantTurbo4LloydMaxRoundTrip(t *testing.T) {
+	rng := rand.New(rand.NewSource(1190902))
+
+	for _, n := range []int{1, 31, 32, 33, 64, 128} {
+		src := make([]float32, n)
+		for i := range src {
+			src[i] = float32(rng.NormFloat64() * 1.8)
+		}
+
+		q := QuantizeKVTurbo4(src)
+		if q.N != n {
+			t.Fatalf("n=%d: N = %d", n, q.N)
+		}
+		wantBytesLen := (n + 1) / 2
+		if len(q.Codes) != wantBytesLen {
+			t.Fatalf("n=%d: len(Codes) = %d, want %d", n, len(q.Codes), wantBytesLen)
+		}
+
+		wantGroups := (n + KVQuantTurbo4BlockSize - 1) / KVQuantTurbo4BlockSize
+		if len(q.Scale) != wantGroups {
+			t.Fatalf("n=%d: len(Scale) = %d, want %d", n, len(q.Scale), wantGroups)
+		}
+
+		// Bytes check: packed nibbles + 4 bytes scale per block of 32.
+		if wantBytes := wantBytesLen + 4*wantGroups; q.Bytes() != wantBytes {
+			t.Fatalf("n=%d: Bytes() = %d, want %d", n, q.Bytes(), wantBytes)
+		}
+
+		bound := q.ErrorBound()
+		dq := q.Dequantize()
+		if len(dq) != n {
+			t.Fatalf("n=%d: len(Dequantize) = %d, want %d", n, len(dq), n)
+		}
+
+		// Check every element respects the ErrorBound.
+		for i := 0; i < n; i++ {
+			err := math.Abs(float64(dq[i] - src[i]))
+			if err > float64(bound)*1.001+1e-5 {
+				t.Fatalf("n=%d element %d: error %v > bound %v", n, i, err, bound)
+			}
+		}
+
+		// Test nibble store decoding independently.
+		for i := 0; i < n; i++ {
+			b := q.Codes[i/2]
+			if i%2 == 0 {
+				b &= 0x0f
+			} else {
+				b >>= 4
+			}
+			g := i / KVQuantTurbo4BlockSize
+			expected := q.Scale[g] * Turbo4LloydMaxCodebook[b]
+			if dq[i] != expected {
+				t.Fatalf("n=%d element %d: dq=%v != expected=%v", n, i, dq[i], expected)
+			}
+		}
+	}
+}
+
+func TestKVQuantTurboQuantAsymmetric(t *testing.T) {
+	rng := rand.New(rand.NewSource(1190903))
+	const n = 64
+	k := make([]float32, n)
+	v := make([]float32, n)
+	for i := 0; i < n; i++ {
+		k[i] = float32(rng.NormFloat64() * 2.0)
+		v[i] = float32(rng.NormFloat64() * 1.5)
+	}
+
+	tq := QuantizeTurboQuantAsymmetric(k, v)
+	if tq.Bytes() != tq.K.Bytes()+tq.V.Bytes() {
+		t.Fatalf("tq.Bytes() %d != K.Bytes() %d + V.Bytes() %d",
+			tq.Bytes(), tq.K.Bytes(), tq.V.Bytes())
+	}
+
+	// Angular cosine similarity on K.
+	sim := tq.AngularCosineSimilarity(k)
+	if sim < 0.9999 {
+		t.Fatalf("tq.AngularCosineSimilarity = %.6f, want > 0.9999", sim)
+	}
+
+	kOut, vOut := DequantizeTurboQuantAsymmetric(tq)
+	if len(kOut) != n || len(vOut) != n {
+		t.Fatalf("dequantized len k=%d v=%d, want %d", len(kOut), len(vOut), n)
+	}
+}
+
+func TestKVQuantTurboQuantVRAMFootprintAndAccounting(t *testing.T) {
+	// Issue #11909 target proof:
+	// Proves 62.5% VRAM footprint reduction (40.5 GiB -> 15.2 GiB on 262,144 context length where elementsPerToken is 41,472,
+	// exactly 43,486,543,872 bytes down to 16,307,453,952 bytes).
+	const contextTokens = 262144
+	const elementsPerToken = 41472
+
+	report := TurboQuantVRAMFootprint(contextTokens, elementsPerToken)
+	if report.BaselineFP16Bytes != 43486543872 {
+		t.Fatalf("BaselineFP16Bytes = %d, want 43486543872", report.BaselineFP16Bytes)
+	}
+	if report.TurboQuantBytes != 16307453952 {
+		t.Fatalf("TurboQuantBytes = %d, want 16307453952", report.TurboQuantBytes)
+	}
+	if math.Abs(report.BaselineFP16GiB-40.5) > 0.01 {
+		t.Fatalf("BaselineFP16GiB = %.2f, want 40.5 GiB", report.BaselineFP16GiB)
+	}
+	if math.Abs(report.TurboQuantGiB-15.1875) > 0.01 {
+		t.Fatalf("TurboQuantGiB = %.2f, want 15.1875 (≈ 15.2 GiB)", report.TurboQuantGiB)
+	}
+	if report.ReductionPercentage != 62.5 {
+		t.Fatalf("ReductionPercentage = %.2f%%, want 62.5%%", report.ReductionPercentage)
+	}
+
+	// Guards for non-positive inputs.
+	if r := TurboQuantVRAMFootprint(0, 41472); r.BaselineFP16Bytes != 0 {
+		t.Fatalf("contextTokens=0 should return 0 bytes, got %d", r.BaselineFP16Bytes)
+	}
+	if r := TurboQuantVRAMFootprint(262144, 0); r.BaselineFP16Bytes != 0 {
+		t.Fatalf("elementsPerToken=0 should return 0 bytes, got %d", r.BaselineFP16Bytes)
+	}
+
+	// Config accounting: KVCacheBytesTurboQuant
+	dense := Config{NumLayers: 4, NumKVHeads: 8, HeadDim: 128}
+	p1024 := dense.KVCacheBytesTurboQuant(1024)
+	p2048 := dense.KVCacheBytesTurboQuant(2048)
+	if p2048 != 2*p1024 {
+		t.Fatalf("doubling positions = %d, want 2 * %d = %d", p2048, p1024, 2*p1024)
+	}
+
+	// Input guards on Config.KVCacheBytesTurboQuant
+	if dense.KVCacheBytesTurboQuant(0) != 0 {
+		t.Fatal("positions=0 should return 0")
+	}
+	if dense.KVCacheBytesTurboQuant(-1) != 0 {
+		t.Fatal("positions<0 should return 0")
+	}
+
+	// All-linear layer model returns 0
+	allLinear := Config{NumLayers: 4, NumKVHeads: 8, HeadDim: 128,
+		LayerTypes: []string{"linear_attention", "linear_attention", "linear_attention", "linear_attention"}}
+	if allLinear.KVCacheBytesTurboQuant(1024) != 0 {
+		t.Fatal("all-linear should return 0 bytes")
+	}
+
+	// Single layer footprint matches codec.Bytes()
+	mlaCfg := Config{NumLayers: 1, NumKVHeads: 4, HeadDim: 128, VHeadDim: 64}
+	kRow := make([]float32, 4*128)
+	vRow := make([]float32, 4*64)
+	codecBytes := int64(QuantizeTurboQuantAsymmetric(kRow, vRow).Bytes())
+	sizerBytes := mlaCfg.KVCacheBytesTurboQuant(1)
+	if sizerBytes != codecBytes {
+		t.Fatalf("sizerBytes %d != codecBytes %d", sizerBytes, codecBytes)
+	}
+}
+
+func TestKVQuantAttentionCosineEntropyLoss(t *testing.T) {
+	rng := rand.New(rand.NewSource(1190904))
+	const tokens = 32
+	const dim = 64
+
+	query := make([]float32, dim)
+	for i := range query {
+		query[i] = float32(rng.NormFloat64())
+	}
+
+	keysOrig := make([][]float32, tokens)
+	valsOrig := make([][]float32, tokens)
+	keysDq := make([][]float32, tokens)
+	valsDq := make([][]float32, tokens)
+
+	for i := 0; i < tokens; i++ {
+		k := make([]float32, dim)
+		v := make([]float32, dim)
+		for j := range k {
+			k[j] = float32(rng.NormFloat64() * 2.0)
+			v[j] = float32(rng.NormFloat64() * 1.5)
+		}
+		keysOrig[i] = k
+		valsOrig[i] = v
+
+		tq := QuantizeTurboQuantAsymmetric(k, v)
+		kD, vD := DequantizeTurboQuantAsymmetric(tq)
+		keysDq[i] = kD
+		valsDq[i] = vD
+	}
+
+	loss := ComputeAttentionCosineEntropyLoss(query, keysOrig, valsOrig, keysDq, valsDq)
+
+	if loss.CosineDistanceLoss < 0 {
+		t.Fatalf("CosineDistanceLoss %f < 0", loss.CosineDistanceLoss)
+	}
+	if loss.RelativeEntropyLoss < 0 {
+		t.Fatalf("RelativeEntropyLoss %f < 0", loss.RelativeEntropyLoss)
+	}
+	if loss.CombinedLoss < 0 {
+		t.Fatalf("CombinedLoss %f < 0", loss.CombinedLoss)
+	}
+
+	// Requirement: ensure < 0.01 loss in attention fidelity
+	if loss.CombinedLoss >= 0.01 {
+		t.Fatalf("CombinedLoss = %f, want < 0.01", loss.CombinedLoss)
+	}
+	if loss.CosineDistanceLoss >= 0.01 {
+		t.Fatalf("CosineDistanceLoss = %f, want < 0.01", loss.CosineDistanceLoss)
+	}
+	if loss.RelativeEntropyLoss >= 0.01 {
+		t.Fatalf("RelativeEntropyLoss = %f, want < 0.01", loss.RelativeEntropyLoss)
+	}
+
+	// Verify both OrigEntropy and DequantEntropy are reasonable positive Shannon entropies
+	if loss.OrigEntropy <= 0 || loss.DequantEntropy <= 0 {
+		t.Fatalf("Shannon entropy: orig=%f, dequant=%f; want > 0", loss.OrigEntropy, loss.DequantEntropy)
+	}
+
+	// Aliases
+	if loss.OriginalEntropy != loss.OrigEntropy {
+		t.Fatalf("OriginalEntropy != OrigEntropy")
+	}
+	if loss.DequantizedEntropy != loss.DequantEntropy {
+		t.Fatalf("DequantizedEntropy != DequantEntropy")
+	}
+
+	// Empty guards
+	emptyLoss := ComputeAttentionCosineEntropyLoss(nil, nil, nil, nil, nil)
+	if emptyLoss.CombinedLoss != 0 {
+		t.Fatalf("empty loss CombinedLoss = %f, want 0", emptyLoss.CombinedLoss)
+	}
+}
