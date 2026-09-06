@@ -498,7 +498,7 @@ func (h *sessionHub) broadcastSession(sessionID string, eventType string, data [
 	defer h.mu.RUnlock()
 	msg := []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, string(data)))
 	for ch, sub := range h.subscribers {
-		if sub.sessionID == "" || sessionID == "" || sub.sessionID == sessionID {
+		if sub.sessionID == "" || sub.sessionID == sessionID {
 			select {
 			case ch <- msg:
 			default:
@@ -567,7 +567,7 @@ func resetSessionHubForTest() {
 // broadcastCards fetches the latest session cards from source, renders the HTML markup,
 // and broadcasts the update to all connected SSE clients. If source.Sessions() returns
 // a transient error, previously populated card state is preserved and not wiped out.
-func broadcastCards(source SessionSource) {
+func broadcastCards(source any) {
 	defaultSessionHub.broadcastCards(source)
 }
 
@@ -577,13 +577,19 @@ func BroadcastCards(source SessionSource) {
 	defaultSessionHub.broadcastCards(source)
 }
 
-func (h *sessionHub) broadcastCards(source SessionSource) {
+func (h *sessionHub) broadcastCards(source any) {
 	if h == nil || source == nil {
+		return
+	}
+	lister, ok := source.(interface {
+		Sessions(context.Context) ([]SessionCard, error)
+	})
+	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cards, err := source.Sessions(ctx)
+	cards, err := lister.Sessions(ctx)
 	if err != nil {
 		// Transient error from source.Sessions(): preserve existing populated card state.
 		// Do not overwrite lastCards with empty/nil and do not broadcast empty markup.
@@ -618,7 +624,7 @@ func newSessionBroadcaster() *sessionBroadcaster {
 	return &sessionBroadcaster{hub: defaultSessionHub}
 }
 
-func (b *sessionBroadcaster) broadcastCards(source SessionSource) {
+func (b *sessionBroadcaster) broadcastCards(source any) {
 	if b == nil || b.hub == nil {
 		defaultSessionHub.broadcastCards(source)
 		return
@@ -659,7 +665,7 @@ func setSSEHeartbeatInterval(d time.Duration) func() {
 }
 
 // handleSessionSSE serves Server-Sent Events (SSE) for session cards and approval notifications.
-// If scoped is true, it only streams events matching the path parameter {id} and global broadcasts.
+// If scoped is true, it only streams events matching the path parameter {id}.
 // It emits periodic comment heartbeats (: ping\n\n) every 15 seconds during idle periods to prevent
 // intermediate proxies from closing idle connections.
 func handleSessionSSE(scoped bool) http.HandlerFunc {

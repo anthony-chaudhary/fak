@@ -591,18 +591,17 @@ func TestSessionBroadcasterErrorResilience(t *testing.T) {
 	}
 }
 
-func readSSEEvent(t *testing.T, reader *bufio.Reader) (string, string) {
-	t.Helper()
+func readNextSSEEvent(reader *bufio.Reader) (string, string, error) {
 	var eventType, data string
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			t.Fatalf("error reading SSE stream: %v", err)
+			return "", "", err
 		}
 		line = strings.TrimRight(line, "\r\n")
 		if line == "" {
 			if eventType != "" || data != "" {
-				return eventType, data
+				return eventType, data, nil
 			}
 			continue
 		}
@@ -618,6 +617,15 @@ func readSSEEvent(t *testing.T, reader *bufio.Reader) (string, string) {
 			data += strings.TrimPrefix(line, "data: ")
 		}
 	}
+}
+
+func readSSEEvent(t *testing.T, reader *bufio.Reader) (string, string) {
+	t.Helper()
+	evType, data, err := readNextSSEEvent(reader)
+	if err != nil {
+		t.Fatalf("error reading SSE stream: %v", err)
+	}
+	return evType, data
 }
 
 func TestSessionCardsSSEInitialConnectionEmitsSessionUpdate(t *testing.T) {
@@ -858,6 +866,220 @@ func TestSessionSSE_ScopedReplayFiltering(t *testing.T) {
 	}
 	if !strings.Contains(payloadGlobalAPI.HTML, "session-alpha") || !strings.Contains(payloadGlobalAPI.HTML, "session-beta") {
 		t.Fatalf("expected html markup to contain both sessions: %s", payloadGlobalAPI.HTML)
+	}
+}
+
+func TestSessionSSE_ScopedDynamicBroadcastFiltering(t *testing.T) {
+	resetSessionHubForTest()
+	defer resetSessionHubForTest()
+
+	now := time.Now()
+	source := &fixtureSessionSource{cards: []SessionCard{
+		{ID: "session-alpha", Provider: "codex", State: sessionWorking, LastEventAt: now},
+		{ID: "session-beta", Provider: "claude", State: sessionIdle, LastEventAt: now},
+	}}
+
+	broadcastCards(source)
+
+	ts := httptest.NewServer(handlerWithSessionSource(newStore(), nil, nil, source))
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 1. Connect scoped SSE client for session-alpha
+	reqScoped, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/fak/sessions/session-alpha/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	respScoped, err := ts.Client().Do(reqScoped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respScoped.Body.Close()
+	if respScoped.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 for scoped client, got %d", respScoped.StatusCode)
+	}
+
+	// 2. Connect global SSE client for all sessions
+	reqGlobal, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/fak/sessions/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	respGlobal, err := ts.Client().Do(reqGlobal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respGlobal.Body.Close()
+	if respGlobal.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 for global client, got %d", respGlobal.StatusCode)
+	}
+
+	type sseMsg struct {
+		eventType string
+		data      string
+	}
+
+	scopedReader := bufio.NewReader(respScoped.Body)
+	scopedEvents := make(chan sseMsg, 16)
+	go func() {
+		for {
+			evType, evData, err := readNextSSEEvent(scopedReader)
+			if err != nil {
+				return
+			}
+			scopedEvents <- sseMsg{eventType: evType, data: evData}
+		}
+	}()
+
+	globalReader := bufio.NewReader(respGlobal.Body)
+	globalEvents := make(chan sseMsg, 16)
+	go func() {
+		for {
+			evType, evData, err := readNextSSEEvent(globalReader)
+			if err != nil {
+				return
+			}
+			globalEvents <- sseMsg{eventType: evType, data: evData}
+		}
+	}()
+
+	// Verify initial connection events on scoped stream
+	select {
+	case ev := <-scopedEvents:
+		if ev.eventType != "connected" || !strings.Contains(ev.data, "session-alpha") {
+			t.Fatalf("expected connected event for session-alpha, got: %+v", ev)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for scoped connected event")
+	}
+	select {
+	case ev := <-scopedEvents:
+		if ev.eventType != "session_update" || !strings.Contains(ev.data, "session-alpha") {
+			t.Fatalf("expected initial session_update for session-alpha, got: %+v", ev)
+		}
+		if strings.Contains(ev.data, "session-beta") {
+			t.Fatalf("initial replay leaked session-beta on scoped stream: %s", ev.data)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for scoped initial session_update")
+	}
+
+	// Verify initial connection events on global stream
+	select {
+	case ev := <-globalEvents:
+		if ev.eventType != "connected" {
+			t.Fatalf("expected global connected event, got: %+v", ev)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for global connected event")
+	}
+	select {
+	case ev := <-globalEvents:
+		if ev.eventType != "session_update" || !strings.Contains(ev.data, "session-alpha") || !strings.Contains(ev.data, "session-beta") {
+			t.Fatalf("expected global initial session_update with all sessions, got: %+v", ev)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for global initial session_update")
+	}
+
+	// 3. Dynamic broadcast via broadcastCards: updates include new session-gamma
+	source.mu.Lock()
+	source.cards = []SessionCard{
+		{ID: "session-alpha", Provider: "codex", State: sessionWorking, LastEventAt: time.Now()},
+		{ID: "session-beta", Provider: "claude", State: sessionWorking, LastEventAt: time.Now()},
+		{ID: "session-gamma", Provider: "codex", State: sessionIdle, LastEventAt: time.Now()},
+	}
+	source.mu.Unlock()
+
+	broadcastCards(source)
+
+	// Global stream MUST receive this dynamic broadcast with all sessions
+	select {
+	case ev := <-globalEvents:
+		if ev.eventType != "session_update" {
+			t.Fatalf("expected session_update on global stream, got: %s", ev.eventType)
+		}
+		if !strings.Contains(ev.data, "session-gamma") {
+			t.Fatalf("expected session-gamma in dynamic broadcast on global stream, got: %s", ev.data)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for dynamic session_update on global stream")
+	}
+
+	// Scoped stream for session-alpha MUST NOT receive this global broadcast
+	select {
+	case ev := <-scopedEvents:
+		t.Fatalf("scoped stream unexpectedly received global broadcast: %+v", ev)
+	case <-time.After(100 * time.Millisecond):
+		// Expected: no event delivered to scoped subscriber
+	}
+
+	// 4. Scoped event targeted to session-beta
+	BroadcastSessionEvent("session-beta", "approval_requested", []byte(`{"session_id":"session-beta","approval_id":"app-beta"}`))
+
+	// Scoped stream for session-alpha MUST NOT receive session-beta's event
+	select {
+	case ev := <-scopedEvents:
+		t.Fatalf("scoped stream for session-alpha unexpectedly received event for session-beta: %+v", ev)
+	case <-time.After(100 * time.Millisecond):
+		// Expected: no event delivered
+	}
+
+	// Global stream MUST receive session-beta's event
+	select {
+	case ev := <-globalEvents:
+		if ev.eventType != "approval_requested" || !strings.Contains(ev.data, "app-beta") {
+			t.Fatalf("expected approval_requested for session-beta on global stream, got: %+v", ev)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for session-beta event on global stream")
+	}
+
+	// 5. Scoped event targeted to session-alpha
+	BroadcastSessionEvent("session-alpha", "approval_requested", []byte(`{"session_id":"session-alpha","approval_id":"app-alpha"}`))
+
+	// Scoped stream for session-alpha MUST receive its own event
+	select {
+	case ev := <-scopedEvents:
+		if ev.eventType != "approval_requested" || !strings.Contains(ev.data, "app-alpha") {
+			t.Fatalf("expected approval_requested for session-alpha on scoped stream, got: %+v", ev)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for session-alpha event on scoped stream")
+	}
+
+	// Global stream MUST also receive session-alpha's event
+	select {
+	case ev := <-globalEvents:
+		if ev.eventType != "approval_requested" || !strings.Contains(ev.data, "app-alpha") {
+			t.Fatalf("expected approval_requested for session-alpha on global stream, got: %+v", ev)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for session-alpha event on global stream")
+	}
+
+	// 6. Direct sessionHub subscriber filtering check
+	subScoped := SubscribeSessionEvents("session-alpha")
+	defer UnsubscribeSessionEvents(subScoped)
+	subGlobal := SubscribeSessionEvents("")
+	defer UnsubscribeSessionEvents(subGlobal)
+
+	BroadcastSessionUpdate([]byte(`{"dynamic":"global_update"}`))
+
+	select {
+	case msg := <-subScoped:
+		t.Fatalf("scoped hub subscriber unexpectedly received global BroadcastSessionUpdate: %s", string(msg))
+	default:
+	}
+
+	select {
+	case msg := <-subGlobal:
+		if !strings.Contains(string(msg), "global_update") {
+			t.Fatalf("expected global hub subscriber to receive BroadcastSessionUpdate, got: %s", string(msg))
+		}
+	default:
+		t.Fatal("global hub subscriber did not receive BroadcastSessionUpdate")
 	}
 }
 
