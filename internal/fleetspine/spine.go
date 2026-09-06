@@ -36,6 +36,7 @@ type Heartbeat struct {
 	AppVersion   string `json:"app_version"`
 	Sessions     int    `json:"sessions"`
 	GeneratedUTC string `json:"generated_utc"`
+	Endpoint     string `json:"endpoint,omitempty"`
 }
 
 // HeartbeatSchema tags the wire format so a future field add is non-breaking: a receiver on an
@@ -217,7 +218,7 @@ func (r *Registry) MachineMaps(now time.Time) []map[string]any {
 		if p.Stale || state == "" {
 			state = "STALE"
 		}
-		out = append(out, map[string]any{
+		m := map[string]any{
 			"id":            p.ID,
 			"host":          p.Host,
 			"state":         state,
@@ -226,7 +227,11 @@ func (r *Registry) MachineMaps(now time.Time) []map[string]any {
 			"app_version":   p.AppVersion,
 			"generated_utc": p.GeneratedUTC,
 			"source":        "spine",
-		})
+		}
+		if p.Endpoint != "" {
+			m["endpoint"] = p.Endpoint
+		}
+		out = append(out, m)
 	}
 	return out
 }
