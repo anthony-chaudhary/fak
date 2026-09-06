@@ -8,21 +8,17 @@ import (
 	"testing"
 )
 
-// fakeGit is a scripted git Runner: it answers the handful of git subcommands Run
-// issues (rev-parse, worktree add/remove/prune, status, diff) and records every
-// call so a test can assert on the sequence. It never shells out.
+// fakeGit records git invocations and provides scripted responses for tests.
 type fakeGit struct {
 	sha         string
 	top         string
-	statusOut   string // porcelain output for `status --porcelain` (dirty iff non-empty)
-	removeFails bool   // force `worktree remove` to a non-zero exit (drives prune fallback)
+	statusOut   string
+	removeFails bool
 	calls       []string
 }
 
 func (g *fakeGit) run(dir, name string, args ...string) (string, int, error) {
 	g.calls = append(g.calls, strings.Join(args, " "))
-	// name=="git"; args==["-C", dir, <subcommand>...]. The subcommand starts at
-	// args[2] (after the "-C <dir>" prefix Run always passes).
 	sub := args[2:]
 	switch {
 	case len(sub) >= 2 && sub[0] == "rev-parse" && sub[1] == "--show-toplevel":
@@ -48,8 +44,7 @@ func (g *fakeGit) run(dir, name string, args ...string) (string, int, error) {
 	return "", 0, nil
 }
 
-// fakeCmd is a scripted command Runner returning a fixed exit code + output, and
-// recording the module dir it was asked to run in.
+// fakeCmd records command execution arguments and provides scripted outputs.
 type fakeCmd struct {
 	code     int
 	out      string
@@ -65,9 +60,7 @@ func (c *fakeCmd) run(dir, name string, args ...string) (string, int, error) {
 	return c.out, c.code, nil
 }
 
-// repoAbs is the OS-absolute form of the fake repo path, so top (what git
-// rev-parse --show-toplevel returns) matches filepath.Abs(repo) and the module-rel
-// resolution yields "." on every platform (on Windows "/repo" -> "C:\\repo").
+// repoAbs resolves the absolute path of the mock repo across platforms.
 func repoAbs(t *testing.T) string {
 	t.Helper()
 	abs, err := filepath.Abs("/repo")
@@ -89,7 +82,7 @@ func TestClassifyGreen(t *testing.T) {
 	}{
 		{0, true, true},
 		{1, true, false},
-		{0, false, false}, // never started => not green even with a zero code
+		{0, false, false},
 		{2, true, false},
 	}
 	for _, tc := range cases {
@@ -118,11 +111,9 @@ func TestRun_GreenCleanTree(t *testing.T) {
 	if res.Ref != DefaultRef {
 		t.Errorf("Ref=%q want %q", res.Ref, DefaultRef)
 	}
-	// A clean tree must not archive.
 	if res.Archived != "" {
 		t.Errorf("clean tree archived %q", res.Archived)
 	}
-	// The worktree must have been removed (reaped).
 	if !containsCall(git.calls, "worktree remove --force") {
 		t.Errorf("worktree not reaped; calls=%v", git.calls)
 	}
@@ -159,7 +150,6 @@ func TestRun_DirtyWorktreeArchivesBeforeReap(t *testing.T) {
 	if res.Archived == "" {
 		t.Fatalf("dirty tree should have archived")
 	}
-	// The diff.patch must exist with the fake diff content.
 	patch, rerr := os.ReadFile(filepath.Join(res.Archived, "diff.patch"))
 	if rerr != nil {
 		t.Fatalf("read archived patch: %v", rerr)
@@ -167,7 +157,6 @@ func TestRun_DirtyWorktreeArchivesBeforeReap(t *testing.T) {
 	if string(patch) != "the-diff" {
 		t.Errorf("archived patch=%q want the-diff", patch)
 	}
-	// Archive must happen BEFORE remove.
 	ai, ri := callIndex(git.calls, "diff HEAD"), callIndex(git.calls, "worktree remove --force")
 	if ai < 0 || ri < 0 || ai > ri {
 		t.Errorf("archive(diff) must precede reap(remove); calls=%v", git.calls)
@@ -209,7 +198,6 @@ func TestRun_CommandStartFailureIsError(t *testing.T) {
 	if res.Green {
 		t.Errorf("a non-started command is not green")
 	}
-	// Even a start failure must reap.
 	if !containsCall(git.calls, "worktree remove --force") {
 		t.Errorf("start failure must still reap; calls=%v", git.calls)
 	}
@@ -221,8 +209,6 @@ func TestRun_RunsCommandInModuleDir(t *testing.T) {
 	if _, err := Run(baseCfg(), git.run, cmd.run); err != nil {
 		t.Fatalf("Run err: %v", err)
 	}
-	// moduleRel is "." for this repo, so the command runs in the worktree root —
-	// which must be a fak-witness-* temp path, never the caller's repo.
 	if !strings.Contains(cmd.ranInDir, "fak-witness-") {
 		t.Errorf("command ran in %q, want a fak-witness- worktree", cmd.ranInDir)
 	}
@@ -253,8 +239,6 @@ func TestShortSHA(t *testing.T) {
 		t.Errorf("short SHA changed")
 	}
 }
-
-// --- helpers ---
 
 func containsCall(calls []string, want string) bool { return callIndex(calls, want) >= 0 }
 
