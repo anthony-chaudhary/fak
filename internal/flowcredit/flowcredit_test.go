@@ -1,6 +1,16 @@
 package flowcredit
 
-import "testing"
+import (
+	"bufio"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"unicode"
+)
 
 // laneA is the lane under test; laneB exists to prove isolation.
 var (
@@ -213,4 +223,285 @@ func TestFlowCreditOutOfOrderOpsHoldInvariant(t *testing.T) {
 	if v.Granted != 10 || v.Reserved != 10 || v.Available != 0 {
 		t.Fatalf("final window %+v; want granted=10 reserved=10 available=0", v)
 	}
+}
+
+func TestFlowCreditZeroAmountOperations(t *testing.T) {
+	g := NewLedger()
+	if !g.TryReserve(laneA, 0) {
+		t.Fatal("TryReserve 0 on empty lane failed; want true")
+	}
+	if v := mustInvariant(t, g, laneA); v.Granted != 0 || v.Reserved != 0 {
+		t.Fatalf("lane mutated after zero reserve: %+v", v)
+	}
+	if restored := g.Rollback(laneA, 0); restored != 0 {
+		t.Fatalf("Rollback 0 returned %d; want 0", restored)
+	}
+
+	g.Grant(laneA, 1, 10)
+	g.TryReserve(laneA, 4)
+	before := g.View(laneA)
+	if !g.TryReserve(laneA, 0) {
+		t.Fatal("TryReserve 0 on active lane failed; want true")
+	}
+	if after := g.View(laneA); after != before {
+		t.Fatalf("lane mutated after zero reserve: before %+v, after %+v", before, after)
+	}
+	if restored := g.Rollback(laneA, 0); restored != 0 {
+		t.Fatalf("Rollback 0 returned %d; want 0", restored)
+	}
+	if after := g.View(laneA); after != before {
+		t.Fatalf("lane mutated after zero rollback: before %+v, after %+v", before, after)
+	}
+	mustInvariant(t, g, laneA)
+}
+
+func TestFlowCreditConcurrentSafety(t *testing.T) {
+	g := NewLedger()
+	const workers = 8
+	const iterations = 500
+	var wg sync.WaitGroup
+
+	g.Grant(laneA, 1, 1000)
+
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				switch (id + i) % 4 {
+				case 0:
+					g.TryReserve(laneA, 5)
+				case 1:
+					g.Rollback(laneA, 3)
+				case 2:
+					seq := uint64(2 + i)
+					cum := uint64(1000 + i*10)
+					g.Grant(laneA, seq, cum)
+				case 3:
+					snap := g.View(laneA)
+					if snap.Reserved > snap.Granted {
+						t.Errorf("concurrent violation: reserved %d > granted %d", snap.Reserved, snap.Granted)
+					}
+					if snap.Available != snap.Granted-snap.Reserved {
+						t.Errorf("concurrent violation: available %d != %d - %d", snap.Available, snap.Granted, snap.Reserved)
+					}
+				}
+			}
+		}(w)
+	}
+
+	wg.Wait()
+	mustInvariant(t, g, laneA)
+}
+
+func TestFlowCreditCommentHygieneAndNoFormulaicNoise(t *testing.T) {
+	fset := token.NewFileSet()
+	filename := "flowcredit.go"
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", filename, err)
+	}
+
+	node, err := parser.ParseFile(fset, filename, content, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("failed to parse %s: %v", filename, err)
+	}
+
+	codeLines := countNonEmptyLines(content)
+	commentLines := 0
+	formulaicCount := 0
+	hasFiller := false
+
+	for _, cg := range node.Comments {
+		for _, c := range cg.List {
+			commentLines += strings.Count(c.Text, "\n") + 1
+		}
+		isForm, isFill := checkFormulaicComment(cg)
+		if isForm {
+			formulaicCount++
+			t.Logf("%s: detected formulaic comment: %q", filename, strings.TrimSpace(cg.Text()))
+		}
+		if isFill {
+			hasFiller = true
+		}
+	}
+
+	commentRatio := float64(commentLines) / float64(codeLines)
+	if codeLines > 30 && commentRatio > 0.35 {
+		t.Errorf("%s: comment bloat ratio %.3f exceeds 0.35 (comments: %d, code: %d)",
+			filename, commentRatio, commentLines, codeLines)
+	}
+
+	if formulaicCount > 0 || hasFiller {
+		t.Errorf("%s: formulaic comments detected: count=%d, filler=%v",
+			filename, formulaicCount, hasFiller)
+	}
+
+	exportedCount := 0
+	documentedCount := 0
+	for _, decl := range node.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			if ast.IsExported(d.Name.Name) {
+				exportedCount++
+				if isSubstantiveDoc(d.Name.Name, d.Doc) {
+					documentedCount++
+				} else {
+					t.Errorf("exported func %s missing substantive doc", d.Name.Name)
+				}
+			}
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				if s, ok := spec.(*ast.TypeSpec); ok && ast.IsExported(s.Name.Name) {
+					exportedCount++
+					doc := s.Doc
+					if doc == nil {
+						doc = d.Doc
+					}
+					if isSubstantiveDoc(s.Name.Name, doc) {
+						documentedCount++
+					} else {
+						t.Errorf("exported type %s missing substantive doc", s.Name.Name)
+					}
+				}
+			}
+		}
+	}
+
+	if exportedCount > 0 {
+		ratio := float64(documentedCount) / float64(exportedCount)
+		if ratio < 0.75 {
+			t.Errorf("documented exports ratio %.2f < 0.75 (%d/%d)", ratio, documentedCount, exportedCount)
+		}
+	}
+}
+
+func countNonEmptyLines(b []byte) int {
+	scanner := bufio.NewScanner(strings.NewReader(string(b)))
+	lines := 0
+	for scanner.Scan() {
+		if strings.TrimSpace(scanner.Text()) != "" {
+			lines++
+		}
+	}
+	return lines
+}
+
+func checkFormulaicComment(cg *ast.CommentGroup) (bool, bool) {
+	if cg == nil {
+		return false, false
+	}
+	text := strings.TrimSpace(cg.Text())
+	lower := strings.ToLower(text)
+
+	hasMarker := strings.Contains(lower, "invariant:") ||
+		strings.Contains(lower, "invariants:") ||
+		strings.Contains(lower, "key invariant:") ||
+		strings.Contains(lower, "contract:") ||
+		strings.Contains(lower, "fail-closed:") ||
+		strings.Contains(lower, "fail-closed guard:") ||
+		strings.HasPrefix(lower, "invariant") ||
+		strings.HasPrefix(lower, "guard") ||
+		strings.HasPrefix(lower, "contract") ||
+		strings.HasPrefix(lower, "fail-closed")
+
+	if !hasMarker {
+		return false, false
+	}
+
+	words := strings.Fields(lower)
+	if len(words) <= 3 {
+		return true, true
+	}
+
+	keywordCount := 0
+	for _, w := range words {
+		clean := strings.Trim(w, ":,.-*#")
+		if clean == "invariant" || clean == "invariants" || clean == "assumption" ||
+			clean == "assumptions" || clean == "guard" || clean == "fail-closed" ||
+			clean == "contract" || clean == "precondition" || clean == "postcondition" {
+			keywordCount++
+		}
+	}
+	if float64(keywordCount)/float64(len(words)) > 0.25 || keywordCount >= 3 {
+		return true, true
+	}
+
+	return true, false
+}
+
+func isSubstantiveDoc(name string, doc *ast.CommentGroup) bool {
+	if doc == nil || len(doc.List) == 0 {
+		return false
+	}
+	text := strings.TrimSpace(doc.Text())
+	if len(text) < 12 {
+		return false
+	}
+	return !isTautologicalDoc(name, text)
+}
+
+func splitIdentifierWords(name string) map[string]bool {
+	set := make(map[string]bool)
+	set[strings.ToLower(name)] = true
+	var curr strings.Builder
+	for i, r := range name {
+		if r == '_' || r == '-' {
+			if curr.Len() > 0 {
+				set[strings.ToLower(curr.String())] = true
+				curr.Reset()
+			}
+			continue
+		}
+		if unicode.IsUpper(r) && i > 0 && curr.Len() > 0 {
+			set[strings.ToLower(curr.String())] = true
+			curr.Reset()
+		}
+		curr.WriteRune(r)
+	}
+	if curr.Len() > 0 {
+		set[strings.ToLower(curr.String())] = true
+	}
+	return set
+}
+
+func isTautologicalDoc(name string, text string) bool {
+	nameLower := strings.ToLower(name)
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return true
+	}
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return true
+	}
+	firstWord := strings.Trim(strings.ToLower(fields[0]), ":,.-()")
+	if firstWord != nameLower && !strings.HasPrefix(strings.ToLower(text), nameLower) {
+		return false
+	}
+	remainder := strings.TrimSpace(text[len(firstWord):])
+	words := strings.FieldsFunc(remainder, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsPunct(r)
+	})
+
+	fillers := map[string]bool{
+		"is": true, "are": true, "does": true, "do": true, "returns": true, "return": true,
+		"represents": true, "represent": true, "holds": true, "hold": true, "the": true,
+		"a": true, "an": true, "of": true, "for": true, "to": true, "that": true, "which": true,
+		"will": true, "can": true, "provides": true, "provide": true, "specifies": true,
+		"specify": true, "defines": true, "define": true, "indicates": true, "indicate": true,
+		"details": true, "detail": true, "records": true, "record": true, "encapsulates": true,
+		"encapsulate": true, "captures": true, "capture": true, "contains": true, "contain": true,
+	}
+
+	nameParts := splitIdentifierWords(name)
+	meaningfulWords := 0
+	for _, w := range words {
+		wl := strings.ToLower(w)
+		if fillers[wl] || nameParts[wl] {
+			continue
+		}
+		meaningfulWords++
+	}
+	return meaningfulWords < 2
 }
