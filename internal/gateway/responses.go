@@ -278,6 +278,13 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string","description":"the content-address handle (sha256 hex) a compaction tombstone embedded as id=<hex>, or a recall page digest"},"trace_id":{"type":"string","description":"session trace id; omitted uses the gateway default trace"}},"required":["id"]}`),
 		})
 	}
+	cleanInstructions, sortedTools, stabilizedMessages, prefixReuse := CanonicalizeResponsesPrefix(req.Instructions, req.Tools, messages)
+	req.Instructions = cleanInstructions
+	req.Tools = sortedTools
+	messages = stabilizedMessages
+	if prefixReuse > 0 {
+		s.logf("fak_gateway_compaction_prefix_reuse_ratio: %.4f", prefixReuse)
+	}
 	tools := responsesToolsToToolDefs(req.Tools)
 
 	reqModel := strings.TrimSpace(req.Model)
