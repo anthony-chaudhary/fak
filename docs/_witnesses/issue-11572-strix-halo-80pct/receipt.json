@@ -4,7 +4,8 @@
   "title": "bench(nativeperf): Strix Halo 80-percent measured roofline subagent fan-out witness",
   "captured_at": "2026-09-05T08:00:00Z",
   "timestamp": "2026-09-05T08:00:00Z",
-  "verdict": "VERIFIED_80PCT_ROOFLINE_ATTAINMENT",
+  "verdict": "UNVERIFIED_SYNTHETIC_WITNESS",
+  "provenance": "synthetic",
   "workload": {
     "workload_type": "subagent_fanout",
     "model": "Qwen/Qwen3.8-27B-Instruct",
@@ -39,37 +40,29 @@
   "numerical_parity": {
     "metric": "logit_cosine_similarity",
     "reference_gemv": "FP16 golden reference GEMV (gfx1151)",
-    "logit_cosine_similarity": 0.999948,
+    "logit_cosine_similarity": 0,
     "min_threshold": 0.9999,
-    "passed": true
+    "passed": false
   },
   "statistics": {
-    "repetitions": 5,
-    "noise_percentage": 1.84,
-    "max_noise_percentage": 5,
-    "useful_throughput_samples": [
-      183.6,
-      185.1,
-      184.2,
-      182.9,
-      184.7
-    ],
-    "sample_mean": 184.1,
-    "sample_std_dev": 0.85
+    "repetitions": 0,
+    "noise_percentage": 0,
+    "max_noise_percentage": 5
   },
   "roofline_attainment": {
     "measured_roofline": 225,
-    "useful_throughput": 184.1,
-    "attainment_ratio": 0.818222,
+    "useful_throughput": 0,
+    "attainment_ratio": 0,
     "efficiency_floor": 0.8,
-    "achieved": true
+    "achieved": false
   },
   "reproducibility": {
     "artifact_path": "docs/_witnesses/issue-11572-strix-halo-80pct/receipt.json",
     "command": "fak validate --acceptance=strix-halo-80pct",
+    "provenance": "synthetic",
     "scrubbed": true,
-    "digest": "sha256:26b0c701944fa0d6a65643fa5156cc2c6982d1df40deb7dda1264e2bcd606f5b"
+    "digest": "sha256:a7a03ddb963134da9fe1f8667e2e40831ff70515d4bb84aff244688c68c14fb8"
   },
-  "digest": "sha256:26b0c701944fa0d6a65643fa5156cc2c6982d1df40deb7dda1264e2bcd606f5b",
-  "verified": true
+  "digest": "sha256:a7a03ddb963134da9fe1f8667e2e40831ff70515d4bb84aff244688c68c14fb8",
+  "verified": false
 }

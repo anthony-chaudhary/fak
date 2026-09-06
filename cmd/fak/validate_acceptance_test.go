@@ -15,11 +15,12 @@ import (
 func makeValidSubagentFanoutReceipt() SubagentFanoutReceipt {
 	r := SubagentFanoutReceipt{
 		Schema:     SubagentFanoutReceiptSchema,
-		Issue:      11572,
-		Title:      "bench(nativeperf): Strix Halo 80-percent measured roofline subagent fan-out witness",
+		Issue:      11802,
+		Title:      "bench(nativeperf): Strix Halo 80-percent measured roofline physical execution witness",
 		CapturedAt: "2026-09-05T08:00:00Z",
 		Timestamp:  "2026-09-05T08:00:00Z",
 		Verdict:    "VERIFIED_80PCT_ROOFLINE_ATTAINMENT",
+		Provenance: "hardware_execution",
 		Workload: SubagentFanoutWorkload{
 			WorkloadType:       "subagent_fanout",
 			Model:              "Qwen/Qwen3.8-27B-Instruct",
@@ -60,22 +61,23 @@ func makeValidSubagentFanoutReceipt() SubagentFanoutReceipt {
 		},
 		Statistics: SubagentFanoutStatistics{
 			Repetitions:             5,
-			NoisePercentage:         1.84,
+			NoisePercentage:         0.16,
 			MaxNoisePercentage:      MaxStatisticalNoisePct,
-			UsefulThroughputSamples: []float64{183.6, 185.1, 184.2, 182.9, 184.7},
-			SampleMean:              184.10,
-			SampleStdDev:            0.85,
+			UsefulThroughputSamples: []float64{184.2, 184.5, 184.0, 184.3, 184.6},
+			SampleMean:              184.32,
+			SampleStdDev:            0.24,
 		},
 		RooflineAttainment: SubagentRooflineAttainment{
 			MeasuredRoofline: 225.0,
-			UsefulThroughput: 184.10,
-			AttainmentRatio:  0.818222,
+			UsefulThroughput: 184.32,
+			AttainmentRatio:  184.32 / 225.0,
 			EfficiencyFloor:  EfficiencyFloorThreshold,
 			Achieved:         true,
 		},
 		Reproducibility: SubagentReproducibility{
 			ArtifactPath: DefaultWitnessArtifactPath,
 			Command:      "fak validate --acceptance=strix-halo-80pct",
+			Provenance:   "hardware_execution",
 			Scrubbed:     true,
 		},
 		Verified: true,
@@ -158,6 +160,10 @@ func TestAcceptance_UnderAttainment_FAIL(t *testing.T) {
 	r.RooflineAttainment.MeasuredRoofline = 225.0
 	r.RooflineAttainment.AttainmentRatio = 160.0 / 225.0
 	r.RooflineAttainment.Achieved = false
+	if d, err := r.ComputeDigest(); err == nil {
+		r.Digest = d
+		r.Reproducibility.Digest = d
+	}
 	path := writeReceiptToTemp(t, r)
 
 	var stdout, stderr bytes.Buffer
@@ -184,6 +190,10 @@ func TestAcceptance_ParityRegression_FAIL(t *testing.T) {
 	// Numerical parity regression: 0.998500 < 0.999900
 	r.NumericalParity.LogitCosineSimilarity = 0.998500
 	r.NumericalParity.Passed = false
+	if d, err := r.ComputeDigest(); err == nil {
+		r.Digest = d
+		r.Reproducibility.Digest = d
+	}
 	path := writeReceiptToTemp(t, r)
 
 	var stdout, stderr bytes.Buffer
@@ -240,6 +250,10 @@ func TestAcceptance_FallbackDetected_FAIL(t *testing.T) {
 			r.Engine.PrimaryEngine = tt.primaryEngine
 			r.Engine.FallbackCount = tt.fallbackCount
 			r.Engine.ZeroFallback = tt.zeroFallback
+			if d, err := r.ComputeDigest(); err == nil {
+				r.Digest = d
+				r.Reproducibility.Digest = d
+			}
 			path := writeReceiptToTemp(t, r)
 
 			var stdout, stderr bytes.Buffer
@@ -284,6 +298,10 @@ func TestAcceptance_InsufficientRepetitions_FAIL(t *testing.T) {
 			r.Statistics.Repetitions = tt.reps
 			r.Statistics.NoisePercentage = tt.noisePct
 			r.Statistics.UsefulThroughputSamples = tt.samples
+			if d, err := r.ComputeDigest(); err == nil {
+				r.Digest = d
+				r.Reproducibility.Digest = d
+			}
 			path := writeReceiptToTemp(t, r)
 
 			var stdout, stderr bytes.Buffer
@@ -304,6 +322,10 @@ func TestAcceptance_InsufficientRepetitions_FAIL(t *testing.T) {
 func TestAcceptance_UnscrubbedArtifact_FAIL(t *testing.T) {
 	r := makeValidSubagentFanoutReceipt()
 	r.Reproducibility.Scrubbed = false
+	if d, err := r.ComputeDigest(); err == nil {
+		r.Digest = d
+		r.Reproducibility.Digest = d
+	}
 	path := writeReceiptToTemp(t, r)
 
 	var stdout, stderr bytes.Buffer
@@ -318,7 +340,7 @@ func TestAcceptance_UnscrubbedArtifact_FAIL(t *testing.T) {
 	}
 }
 
-// TestAcceptance_WitnessPacketGeneration verifies generation of the public reproducibility artifact.
+// TestAcceptance_WitnessPacketGeneration verifies generation of the unverified public template witness artifact.
 func TestAcceptance_WitnessPacketGeneration(t *testing.T) {
 	tmpDir := t.TempDir()
 	outPath := filepath.Join(tmpDir, "witness", "receipt.json")
@@ -334,6 +356,27 @@ func TestAcceptance_WitnessPacketGeneration(t *testing.T) {
 	if receipt.Digest == "" {
 		t.Errorf("expected non-empty verification digest")
 	}
+	if receipt.Verified {
+		t.Errorf("expected generated template to have Verified: false")
+	}
+	if receipt.Verdict != VerdictUnverifiedSyntheticWitness {
+		t.Errorf("verdict = %q, want %q", receipt.Verdict, VerdictUnverifiedSyntheticWitness)
+	}
+	if receipt.Provenance != "synthetic" {
+		t.Errorf("provenance = %q, want synthetic", receipt.Provenance)
+	}
+	if len(receipt.Statistics.UsefulThroughputSamples) != 0 {
+		t.Errorf("expected zero throughput samples, got %v", receipt.Statistics.UsefulThroughputSamples)
+	}
+	if receipt.Statistics.SampleMean != 0.0 {
+		t.Errorf("expected SampleMean 0.0, got %f", receipt.Statistics.SampleMean)
+	}
+	if receipt.Statistics.Repetitions != 0 {
+		t.Errorf("expected Repetitions 0, got %d", receipt.Statistics.Repetitions)
+	}
+	if receipt.RooflineAttainment.UsefulThroughput != 0.0 {
+		t.Errorf("expected UsefulThroughput 0.0, got %f", receipt.RooflineAttainment.UsefulThroughput)
+	}
 
 	// Verify the written file on disk
 	data, err := os.ReadFile(outPath)
@@ -348,12 +391,21 @@ func TestAcceptance_WitnessPacketGeneration(t *testing.T) {
 	if diskReceipt.Digest != receipt.Digest {
 		t.Errorf("disk digest %q != memory digest %q", diskReceipt.Digest, receipt.Digest)
 	}
+	if diskReceipt.Verified {
+		t.Errorf("disk receipt verified = true, want false")
+	}
 
-	// Validate the generated witness packet
+	// Validating the generated template must fail with exit code 1 and emit no ACCEPTANCE PASSED
 	var stdout, stderr bytes.Buffer
 	code := runAcceptanceValidation(&stdout, &stderr, "strix-halo-80pct", outPath, false)
-	if code != 0 {
-		t.Fatalf("expected generated witness to pass validation with exit code 0, got %d; stdout: %s", code, stdout.String())
+	if code != 1 {
+		t.Fatalf("expected generated witness to fail validation with exit code 1, got %d; stdout: %s", code, stdout.String())
+	}
+	if strings.Contains(stdout.String(), "ACCEPTANCE PASSED") {
+		t.Errorf("expected no ACCEPTANCE PASSED in output, got:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "ACCEPTANCE FAILED") {
+		t.Errorf("expected ACCEPTANCE FAILED in output, got:\n%s", stdout.String())
 	}
 }
 
@@ -460,33 +512,145 @@ func TestAcceptance_CorruptReceiptFile_Returns2(t *testing.T) {
 	}
 }
 
-// TestAcceptance_AutoLocateCommittedWitness verifies auto-locating the committed default witness in docs/_witnesses/issue-11572-strix-halo-80pct/receipt.json.
-func TestAcceptance_AutoLocateCommittedWitness(t *testing.T) {
-	root := resolveRepoRoot()
-	committedWitnessPath := filepath.Join(root, filepath.FromSlash(DefaultWitnessArtifactPath))
-	if _, err := os.Stat(committedWitnessPath); os.IsNotExist(err) {
-		if _, err := GenerateDefaultStrixHaloWitness(committedWitnessPath); err != nil {
-			t.Fatalf("failed to generate committed witness at %s: %v", committedWitnessPath, err)
-		}
-	}
-
+// TestAcceptance_AutoLocateCommittedWitness_RejectsSynthetic verifies auto-locating the committed quarantined synthetic witness in docs/_witnesses/issue-11572-strix-halo-80pct/receipt.json rejects it.
+func TestAcceptance_AutoLocateCommittedWitness_RejectsSynthetic(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runAcceptanceValidation(&stdout, &stderr, "strix-halo-80pct", "", false)
-	if code != 0 {
-		t.Fatalf("expected exit code 0 when auto-locating default witness, got %d; stderr: %s; stdout: %s", code, stderr.String(), stdout.String())
+	if code != 1 {
+		t.Fatalf("expected exit code 1 when auto-locating quarantined synthetic witness, got %d; stderr: %s; stdout: %s", code, stderr.String(), stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "OVERALL VERDICT: ACCEPTANCE PASSED") {
-		t.Errorf("expected passing overall verdict, got:\n%s", stdout.String())
+	if strings.Contains(stdout.String(), "OVERALL VERDICT: ACCEPTANCE PASSED") {
+		t.Errorf("expected no ACCEPTANCE PASSED in output, got:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "OVERALL VERDICT: ACCEPTANCE FAILED") {
+		t.Errorf("expected failing overall verdict, got:\n%s", stdout.String())
 	}
 }
 
 func TestAcceptance_RunValidateCLIIntegration(t *testing.T) {
+	// Running without --receipt against default synthetic witness fails closed with exit code 1.
 	var stdout, stderr bytes.Buffer
 	code := runValidate(&stdout, &stderr, []string{"--acceptance=strix-halo-80pct"})
-	if code != 0 {
-		t.Fatalf("expected exit code 0 from runValidate, got %d; stderr: %s; stdout: %s", code, stderr.String(), stdout.String())
+	if code != 1 {
+		t.Fatalf("expected exit code 1 from runValidate without --receipt, got %d; stderr: %s; stdout: %s", code, stderr.String(), stdout.String())
+	}
+	if strings.Contains(stdout.String(), "ACCEPTANCE PASSED") {
+		t.Errorf("expected no ACCEPTANCE PASSED without receipt, got:\n%s", stdout.String())
+	}
+
+	// Running with --receipt=<path_to_genuine> passes with exit code 0 and emits ACCEPTANCE PASSED.
+	r := makeValidSubagentFanoutReceipt()
+	genuinePath := writeReceiptToTemp(t, r)
+	stdout.Reset()
+	stderr.Reset()
+	codePass := runValidate(&stdout, &stderr, []string{"--acceptance=strix-halo-80pct", "--receipt=" + genuinePath})
+	if codePass != 0 {
+		t.Fatalf("expected exit code 0 from runValidate with genuine receipt, got %d; stderr: %s; stdout: %s", codePass, stderr.String(), stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "ACCEPTANCE PASSED") {
 		t.Errorf("expected passing acceptance message, got:\n%s", stdout.String())
 	}
+}
+
+func TestAcceptance_MissingOrSyntheticEvidenceFailsClosed(t *testing.T) {
+	t.Run("missing_default_evidence_fails_closed", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Chdir(tmpDir)
+
+		var stdout, stderr bytes.Buffer
+		code := runAcceptanceValidation(&stdout, &stderr, "strix-halo-80pct", "", false)
+		if code == 0 {
+			t.Fatalf("expected nonzero exit code on missing default witness, got 0")
+		}
+		if strings.Contains(stdout.String(), "ACCEPTANCE PASSED") {
+			t.Errorf("expected no ACCEPTANCE PASSED, got:\n%s", stdout.String())
+		}
+		// Verify no files were created
+		entries, err := os.ReadDir(tmpDir)
+		if err != nil {
+			t.Fatalf("failed to read tmpDir: %v", err)
+		}
+		if len(entries) > 0 {
+			t.Errorf("expected no files to be created in tmpDir, found %d entries", len(entries))
+		}
+	})
+
+	t.Run("explicit_generate_witness_fails_closed", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		outPath := filepath.Join(tmpDir, "generated_witness.json")
+
+		var stdout, stderr bytes.Buffer
+		code := runValidateAcceptanceCLI(&stdout, &stderr, []string{
+			"--acceptance=strix-halo-80pct",
+			"--generate-witness",
+			"--out=" + outPath,
+		})
+		if code == 0 {
+			t.Fatalf("expected nonzero exit code for generated witness validation, got 0")
+		}
+		if strings.Contains(stdout.String(), "ACCEPTANCE PASSED") {
+			t.Errorf("expected no ACCEPTANCE PASSED, got:\n%s", stdout.String())
+		}
+
+		// Verify unverified template written with verified: false and 0 samples
+		data, err := os.ReadFile(outPath)
+		if err != nil {
+			t.Fatalf("failed to read generated witness file: %v", err)
+		}
+		var r SubagentFanoutReceipt
+		if err := json.Unmarshal(data, &r); err != nil {
+			t.Fatalf("failed to decode generated witness: %v", err)
+		}
+		if r.Verified {
+			t.Errorf("expected r.Verified to be false, got true")
+		}
+		if r.Verdict != VerdictUnverifiedSyntheticWitness {
+			t.Errorf("expected verdict %q, got %q", VerdictUnverifiedSyntheticWitness, r.Verdict)
+		}
+		if len(r.Statistics.UsefulThroughputSamples) != 0 {
+			t.Errorf("expected 0 samples, got %v", r.Statistics.UsefulThroughputSamples)
+		}
+		if r.Statistics.Repetitions != 0 {
+			t.Errorf("expected 0 repetitions, got %d", r.Statistics.Repetitions)
+		}
+		if r.RooflineAttainment.UsefulThroughput != 0.0 {
+			t.Errorf("expected 0.0 throughput, got %f", r.RooflineAttainment.UsefulThroughput)
+		}
+	})
+
+	t.Run("quarantined_synthetic_artifact_fails_closed", func(t *testing.T) {
+		r := makeValidSubagentFanoutReceipt()
+		// Inject quarantined synthetic digest
+		r.Digest = QuarantinedSyntheticDigest
+		r.Reproducibility.Digest = QuarantinedSyntheticDigest
+		path := writeReceiptToTemp(t, r)
+
+		var stdout, stderr bytes.Buffer
+		code := runAcceptanceValidation(&stdout, &stderr, "strix-halo-80pct", path, false)
+		if code != 1 {
+			t.Fatalf("expected exit code 1 on quarantined synthetic digest, got %d; stdout: %s", code, stdout.String())
+		}
+		outStr := stdout.String()
+		if !strings.Contains(outStr, "[FAIL] Pillar 5 (Reproducibility Packet)") {
+			t.Errorf("expected Pillar 5 failure, got:\n%s", outStr)
+		}
+		if !strings.Contains(outStr, QuarantinedSyntheticDigest) {
+			t.Errorf("expected failure message to mention quarantined digest %s, got:\n%s", QuarantinedSyntheticDigest, outStr)
+		}
+	})
+
+	t.Run("genuine_physical_receipt_passes", func(t *testing.T) {
+		r := makeValidSubagentFanoutReceipt()
+		path := writeReceiptToTemp(t, r)
+
+		var stdout, stderr bytes.Buffer
+		code := runAcceptanceValidation(&stdout, &stderr, "strix-halo-80pct", path, false)
+		if code != 0 {
+			t.Fatalf("expected exit code 0 on genuine physical receipt, got %d; stderr: %s; stdout: %s", code, stderr.String(), stdout.String())
+		}
+		outStr := stdout.String()
+		if !strings.Contains(outStr, "OVERALL VERDICT: ACCEPTANCE PASSED (5/5 PILLARS SATISFIED)") {
+			t.Errorf("expected 5/5 pillars satisfied, got:\n%s", outStr)
+		}
+	})
 }

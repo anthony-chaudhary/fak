@@ -17,6 +17,12 @@ import (
 )
 
 const (
+	// QuarantinedSyntheticDigest is the quarantined digest of the unverified 184.10 tok/s constants from #11572.
+	QuarantinedSyntheticDigest = "sha256:26b0c701944fa0d6a65643fa5156cc2c6982d1df40deb7dda1264e2bcd606f5b"
+
+	// VerdictUnverifiedSyntheticWitness indicates an unverified template witness without hardware execution backing.
+	VerdictUnverifiedSyntheticWitness = "UNVERIFIED_SYNTHETIC_WITNESS"
+
 	// AcceptanceTypeStrixHalo80Pct is the identifier for the AMD Strix Halo 80% roofline attainment campaign.
 	AcceptanceTypeStrixHalo80Pct = "strix-halo-80pct"
 
@@ -51,6 +57,7 @@ type SubagentFanoutReceipt struct {
 	CapturedAt         string                     `json:"captured_at,omitempty"`
 	Timestamp          string                     `json:"timestamp,omitempty"`
 	Verdict            string                     `json:"verdict"`
+	Provenance         string                     `json:"provenance,omitempty"`
 	Workload           SubagentFanoutWorkload     `json:"workload"`
 	Hardware           SubagentFanoutHardware     `json:"hardware"`
 	Engine             SubagentFanoutEngine       `json:"engine"`
@@ -139,6 +146,7 @@ type SubagentRooflineAttainment struct {
 type SubagentReproducibility struct {
 	ArtifactPath string `json:"artifact_path"`
 	Command      string `json:"command"`
+	Provenance   string `json:"provenance,omitempty"`
 	Scrubbed     bool   `json:"scrubbed"`
 	Digest       string `json:"digest,omitempty"`
 }
@@ -287,17 +295,26 @@ func runAcceptanceValidation(stdout, stderr io.Writer, acceptanceType string, re
 		candidate := filepath.Join(root, filepath.FromSlash(DefaultWitnessArtifactPath))
 		if _, err := os.Stat(candidate); err == nil {
 			resolvedPath = candidate
+		} else if _, err := os.Stat(filepath.FromSlash(DefaultWitnessArtifactPath)); err == nil {
+			resolvedPath = filepath.FromSlash(DefaultWitnessArtifactPath)
 		} else {
-			if _, err := os.Stat(filepath.FromSlash(DefaultWitnessArtifactPath)); err == nil {
-				resolvedPath = filepath.FromSlash(DefaultWitnessArtifactPath)
-			} else {
-				if _, err := GenerateDefaultStrixHaloWitness(candidate); err == nil {
-					resolvedPath = candidate
-				} else {
-					fmt.Fprintf(stderr, "fak validate: default witness receipt not found at %q and generation failed\n", candidate)
-					return 2
+			failMsg := fmt.Sprintf("default witness receipt not found at %q (fails closed; physical hardware execution witness required)", candidate)
+			fmt.Fprintf(stderr, "fak validate: %s\n", failMsg)
+			if asJSON {
+				report := AcceptanceValidationReport{
+					Schema:         AcceptanceValidationSchema,
+					AcceptanceType: AcceptanceTypeStrixHalo80Pct,
+					ReceiptPath:    candidate,
+					Passed:         false,
+					Verdict:        "ACCEPTANCE_FAILED",
+					Failures:       []string{failMsg},
+					Timestamp:      time.Now().UTC().Format(time.RFC3339),
+				}
+				if raw, err := json.MarshalIndent(report, "", "  "); err == nil {
+					fmt.Fprintln(stdout, string(raw))
 				}
 			}
+			return 1
 		}
 	}
 
@@ -371,14 +388,16 @@ func validateSubagentFanout(stdout, stderr io.Writer, receiptPath string, data [
 	// Pillar 4: Statistical Rigor (Repetitions >= 5 and noise percentage <= 5.0%)
 	reps := r.Statistics.Repetitions
 	noisePct := r.Statistics.NoisePercentage
-	if noisePct <= 1.0 && noisePct > 0 {
-		noisePct *= 100.0
-	}
 	if len(r.Statistics.UsefulThroughputSamples) >= 2 {
 		_, _, sampleNoise := calculateSampleVariation(r.Statistics.UsefulThroughputSamples)
+		if sampleNoise > 1.0 && noisePct <= 1.0 && noisePct > 0 {
+			noisePct *= 100.0
+		}
 		if sampleNoise > noisePct {
 			noisePct = sampleNoise
 		}
+	} else if noisePct <= 1.0 && noisePct > 0 {
+		noisePct *= 100.0
 	}
 	p4Pass := reps >= MinStatisticalRepetitions && noisePct <= MaxStatisticalNoisePct && reps > 0
 	if !p4Pass {
@@ -386,16 +405,40 @@ func validateSubagentFanout(stdout, stderr io.Writer, receiptPath string, data [
 			reps, MinStatisticalRepetitions, noisePct, MaxStatisticalNoisePct))
 	}
 
-	// Pillar 5: Reproducibility Packet (scrubbed, no secret/private host leaks, valid digest)
+	// Pillar 5: Reproducibility Packet (scrubbed, no secret/private host leaks, valid digest, physical execution witness)
 	rawStr := string(data)
 	hasSecretOrPathLeak := strings.Contains(rawStr, `C:\Users\`) ||
 		strings.Contains(rawStr, `C:/Users/`) ||
 		strings.Contains(rawStr, `/home/`) ||
 		strings.Contains(rawStr, `fak-token-`) ||
 		strings.Contains(rawStr, `sk-ant-`)
-	p5Pass := r.Reproducibility.Scrubbed && !hasSecretOrPathLeak
-	if !p5Pass {
-		failures = append(failures, "Pillar 5 (Reproducibility Packet): artifact is unscrubbed or contains private host information")
+
+	isQuarantined := r.Digest == QuarantinedSyntheticDigest || r.Reproducibility.Digest == QuarantinedSyntheticDigest
+	isSynthetic := strings.Contains(strings.ToUpper(r.Verdict), "SYNTHETIC") ||
+		strings.Contains(strings.ToUpper(r.Verdict), "UNVERIFIED") ||
+		strings.EqualFold(r.Provenance, "synthetic") ||
+		strings.EqualFold(r.Reproducibility.Provenance, "synthetic")
+
+	var p5Failures []string
+	if !r.Verified {
+		p5Failures = append(p5Failures, "Pillar 5 (Reproducibility Packet): artifact is unverified (verified=false; physical hardware execution witness required)")
+	}
+	if isQuarantined {
+		p5Failures = append(p5Failures, fmt.Sprintf("Pillar 5 (Reproducibility Packet): artifact matches quarantined synthetic digest %s (unverified 184.10 tok/s constants from #11572)", QuarantinedSyntheticDigest))
+	}
+	if isSynthetic {
+		p5Failures = append(p5Failures, "Pillar 5 (Reproducibility Packet): artifact marked with synthetic or unverified execution provenance")
+	}
+	if !r.Reproducibility.Scrubbed || hasSecretOrPathLeak {
+		p5Failures = append(p5Failures, "Pillar 5 (Reproducibility Packet): artifact is unscrubbed or contains private host information")
+	}
+	if computedDigest, err := r.ComputeDigest(); err == nil && r.Digest != "" && r.Digest != computedDigest {
+		p5Failures = append(p5Failures, fmt.Sprintf("Pillar 5 (Reproducibility Packet): digest mismatch (recorded %s != computed %s)", r.Digest, computedDigest))
+	}
+
+	p5Pass := r.Verified && !isQuarantined && !isSynthetic && r.Reproducibility.Scrubbed && !hasSecretOrPathLeak && len(p5Failures) == 0
+	if !p5Pass && len(p5Failures) > 0 {
+		failures = append(failures, p5Failures...)
 	}
 
 	overallPassed := p1Pass && p2Pass && p3Pass && p4Pass && p5Pass
@@ -638,15 +681,17 @@ func printEmpiricalRooflineReport(w io.Writer, rep AcceptanceValidationReport, r
 	fmt.Fprintln(w, "================================================================================")
 }
 
-// GenerateDefaultStrixHaloWitness builds and saves the canonical scrubbed public reproducibility artifact.
+// GenerateDefaultStrixHaloWitness builds and saves the unverified template witness artifact.
 func GenerateDefaultStrixHaloWitness(outPath string) (*SubagentFanoutReceipt, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
 	receipt := &SubagentFanoutReceipt{
 		Schema:     SubagentFanoutReceiptSchema,
 		Issue:      11572,
 		Title:      "bench(nativeperf): Strix Halo 80-percent measured roofline subagent fan-out witness",
-		CapturedAt: "2026-09-05T08:00:00Z",
-		Timestamp:  "2026-09-05T08:00:00Z",
-		Verdict:    "VERIFIED_80PCT_ROOFLINE_ATTAINMENT",
+		CapturedAt: now,
+		Timestamp:  now,
+		Verdict:    VerdictUnverifiedSyntheticWitness,
+		Provenance: "synthetic",
 		Workload: SubagentFanoutWorkload{
 			WorkloadType:       "subagent_fanout",
 			Model:              "Qwen/Qwen3.8-27B-Instruct",
@@ -681,31 +726,32 @@ func GenerateDefaultStrixHaloWitness(outPath string) (*SubagentFanoutReceipt, er
 		NumericalParity: SubagentFanoutParity{
 			Metric:                "logit_cosine_similarity",
 			ReferenceGEMV:         "FP16 golden reference GEMV (gfx1151)",
-			LogitCosineSimilarity: 0.999948,
+			LogitCosineSimilarity: 0.0,
 			MinThreshold:          LogitCosineParityThreshold,
-			Passed:                true,
+			Passed:                false,
 		},
 		Statistics: SubagentFanoutStatistics{
-			Repetitions:             5,
-			NoisePercentage:         1.84,
+			Repetitions:             0,
+			NoisePercentage:         0.0,
 			MaxNoisePercentage:      MaxStatisticalNoisePct,
-			UsefulThroughputSamples: []float64{183.6, 185.1, 184.2, 182.9, 184.7},
-			SampleMean:              184.10,
-			SampleStdDev:            0.85,
+			UsefulThroughputSamples: nil,
+			SampleMean:              0.0,
+			SampleStdDev:            0.0,
 		},
 		RooflineAttainment: SubagentRooflineAttainment{
 			MeasuredRoofline: 225.0,
-			UsefulThroughput: 184.10,
-			AttainmentRatio:  0.818222,
+			UsefulThroughput: 0.0,
+			AttainmentRatio:  0.0,
 			EfficiencyFloor:  EfficiencyFloorThreshold,
-			Achieved:         true,
+			Achieved:         false,
 		},
 		Reproducibility: SubagentReproducibility{
 			ArtifactPath: DefaultWitnessArtifactPath,
 			Command:      "fak validate --acceptance=strix-halo-80pct",
+			Provenance:   "synthetic",
 			Scrubbed:     true,
 		},
-		Verified: true,
+		Verified: false,
 	}
 
 	digest, err := receipt.ComputeDigest()
