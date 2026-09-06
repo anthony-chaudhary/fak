@@ -76,8 +76,10 @@ func AccountAcceptedDeliveries(records []DeliveryLifecycleRecord, totalWindowSec
 	}
 
 	for _, r := range records {
-		acc.Spend += r.Spend
-		if r.SpendUnknown || math.IsNaN(r.Spend) {
+		if !math.IsNaN(r.Spend) && !math.IsInf(r.Spend, 0) {
+			acc.Spend += r.Spend
+		}
+		if r.SpendUnknown || math.IsNaN(r.Spend) || math.IsInf(r.Spend, 0) {
 			acc.SpendUnknown = true
 		}
 
