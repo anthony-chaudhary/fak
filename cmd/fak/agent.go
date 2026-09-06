@@ -72,7 +72,7 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.reasoningProfile = fs.String("reasoning-profile", agent.ReasoningProfileDefault, "named reasoning profile: default|baseline|deep-reason (default: default)")
 	af.effort = fs.String("effort", "", "reasoning effort for model inference: none|low|medium|balanced|adaptive|high")
 	af.thinkingBudget = fs.Int("thinking-budget", -1, "explicit thinking token budget ceiling (>=0 overrides --effort; 0 disables thinking)")
-	af.provider = fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
+	af.provider = fs.String("provider", "openai", "provider transcript wire: openai, openai-responses, astra, anthropic, gemini, or xai")
 	af.baseURL = fs.String("base-url", "", "provider base URL (OpenAI-compatible: .../v1; Gemini native: .../v1beta; Anthropic native: https://api.anthropic.com)")
 	af.model = fs.String("model", "gemini-2.5-flash", "model id")
 	af.apiKeyEnv = fs.String("api-key-env", "GEMINI_API_KEY", "env var holding the API key")

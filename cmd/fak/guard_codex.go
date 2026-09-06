@@ -272,8 +272,8 @@ var codexReasoningModelRE = regexp.MustCompile(`(^|/)(gpt-5\.6|gpt-[6-9]|o[1-9]|
 
 // guardCodexReasoningEffort is the no-opt-in effort for the model Codex is being pointed at:
 // medium for Astra, the configured default for other reasoning model families (e.g. GPT-5.6*, GPT-6.*,
-// GPT-7.*, o1.*-o5.*), and no pin at all for a custom or local model
-// whose supported-effort set the guard cannot know.
+// GPT-7.*, o1.*-o5.*, Astra models including astra-gpt-6, gpt-6-astra, and aliases),
+// and no pin at all for a custom or local model whose supported-effort set the guard cannot know.
 func guardCodexReasoningEffort(model string) string {
 	m := strings.ToLower(configaccounts.NormalizeCodexModelSlug(model))
 	if m == configaccounts.GPT6AstraModel {

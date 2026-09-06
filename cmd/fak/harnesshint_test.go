@@ -30,3 +30,20 @@ func TestRunHarnessHint(t *testing.T) {
 		t.Errorf("expected model in text output, got: %s", stdout.String())
 	}
 }
+
+func TestHarnessHintAstraGPT6(t *testing.T) {
+	for _, model := range []string{"astra-gpt-6", "gpt-6-astra"} {
+		var stdout, stderr bytes.Buffer
+		rc := runHarnessHint(&stdout, &stderr, []string{"--model", model, "--json"})
+		if rc != 0 {
+			t.Fatalf("expected rc 0 for %s, got %d, stderr: %s", model, rc, stderr.String())
+		}
+		out := stdout.String()
+		if !strings.Contains(out, `"canonical_model": "gpt-6-astra"`) {
+			t.Errorf("expected canonical_model gpt-6-astra for %s, got: %s", model, out)
+		}
+		if !strings.Contains(out, `"posture": "cost_heavy"`) {
+			t.Errorf("expected posture cost_heavy for %s, got: %s", model, out)
+		}
+	}
+}

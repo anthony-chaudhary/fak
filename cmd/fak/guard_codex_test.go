@@ -250,6 +250,14 @@ func TestGuardCodexGatewayModel(t *testing.T) {
 	}
 }
 
+func TestGuardCodexReasoningEffortAstraAliases(t *testing.T) {
+	for _, m := range []string{"astra-gpt-6", "astra gpt 6", "gpt-6 astra"} {
+		if got := guardCodexReasoningEffort(m); got != guardCodexDefaultReasoningEffort {
+			t.Errorf("guardCodexReasoningEffort(%q) = %q, want %q", m, got, guardCodexDefaultReasoningEffort)
+		}
+	}
+}
+
 func TestGuardCodexLoopGateConfigCodexOnly(t *testing.T) {
 	cfg, ok := guardCodexLoopGateConfig([]string{"codex", "exec"}, "loop", "C:/tmp/codex", 12, 7, true)
 	if !ok {
