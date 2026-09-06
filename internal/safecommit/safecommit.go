@@ -786,11 +786,15 @@ func precommitGates(ctx context.Context, run Runner, opts Options, trunk string,
 	branch = strings.TrimSpace(branch)
 	isSanctionedWorker := false
 	if code != 0 {
-		if workerworktree.IsWorkerWorktree(opts.Dir) {
-			isSanctionedWorker = true
-		} else if cwd, err := os.Getwd(); err == nil && workerworktree.IsWorkerWorktree(cwd) {
-			isSanctionedWorker = true
-		} else if isSanctionedWorkerWorktreeDir(opts.Dir) || isSanctionedWorkerWorktreeDir("") {
+		if opts.Dir == "" || opts.Dir == "." {
+			if workerworktree.IsWorkerWorktree(opts.Dir) {
+				isSanctionedWorker = true
+			} else if cwd, err := os.Getwd(); err == nil && workerworktree.IsWorkerWorktree(cwd) {
+				isSanctionedWorker = true
+			} else if isSanctionedWorkerWorktreeDir(opts.Dir) || isSanctionedWorkerWorktreeDir("") {
+				isSanctionedWorker = true
+			}
+		} else if workerworktree.IsWorkerWorktree(opts.Dir) || isSanctionedWorkerWorktreeDir(opts.Dir) {
 			isSanctionedWorker = true
 		}
 	}

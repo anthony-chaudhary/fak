@@ -610,15 +610,24 @@ func TestDetachedHead_isOffTrunk(t *testing.T) {
 		}
 		t.Chdir(hostWorkerDir)
 
-		// Without isolation, being inside a worker worktree suppresses ReasonOffTrunk.
-		resUnisolated, _ := CommitWith(context.Background(), g.run, okLock(nil), baseOpts())
+		// When opts.Dir is empty, being inside a worker worktree suppresses ReasonOffTrunk.
+		optsEmpty := baseOpts()
+		optsEmpty.Dir = ""
+		resUnisolated, _ := CommitWith(context.Background(), g.run, okLock(nil), optsEmpty)
 		if resUnisolated.Reason == ReasonOffTrunk {
-			t.Fatalf("unisolated commit in worker worktree unexpectedly produced ReasonOffTrunk")
+			t.Fatalf("unisolated commit in worker worktree with empty Dir unexpectedly produced ReasonOffTrunk")
 		}
 
-		// With clean CWD isolation (#11828), the fixture produces ReasonOffTrunk.
+		// When opts.Dir explicitly points to a non-worker repo, running from within a worker
+		// worktree CWD must NOT suppress ReasonOffTrunk (#11861).
+		resExplicit, _ := CommitWith(context.Background(), g.run, okLock(nil), baseOpts())
+		if resExplicit.Reason != ReasonOffTrunk {
+			t.Fatalf("explicit non-worker opts.Dir should produce ReasonOffTrunk even if parent CWD was worker worktree, got %q", resExplicit.Reason)
+		}
+
+		// With clean CWD isolation (#11828), empty opts.Dir produces ReasonOffTrunk.
 		t.Chdir(t.TempDir())
-		resIsolated, _ := CommitWith(context.Background(), g.run, okLock(nil), baseOpts())
+		resIsolated, _ := CommitWith(context.Background(), g.run, okLock(nil), optsEmpty)
 		if resIsolated.Reason != ReasonOffTrunk {
 			t.Fatalf("isolated detached HEAD should produce ReasonOffTrunk even if parent CWD was worker worktree, got %q", resIsolated.Reason)
 		}
@@ -652,6 +661,62 @@ func TestDetachedHead_inSanctionedWorkerWorktreeAllowed(t *testing.T) {
 	}
 	if res.Reason == ReasonOffTrunk {
 		t.Fatalf("sanctioned worker worktree must not be refused as OFF_TRUNK")
+	}
+}
+
+func TestDetachedHead_explicitNonWorkerDirRejectedInWorkerCwd(t *testing.T) {
+	// If a caller explicitly specifies Options{Dir: "/path/to/other/repo"} pointing to a
+	// non-worker repo, running from within a worker worktree directory must not grant
+	// detached-HEAD commit privileges to the foreign repository (#11861).
+	workerDir := filepath.Join(t.TempDir(), "fak-worker-wt-active-worker")
+	if err := os.MkdirAll(workerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workerDir)
+
+	foreignRepo := filepath.Join(t.TempDir(), "foreign-repo")
+	if err := os.MkdirAll(foreignRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	g := &fakeGit{reply: onTrunkBase()}
+	g.reply["symbolic-ref"] = reply{out: "fatal: ref HEAD is not a symbolic ref\n", code: 128}
+
+	// 1. Explicit foreign repo is rejected as ReasonOffTrunk.
+	opts := baseOpts()
+	opts.Dir = foreignRepo
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Reason != ReasonOffTrunk {
+		t.Fatalf("expected explicit non-worker opts.Dir to be rejected as ReasonOffTrunk, got %q", res.Reason)
+	}
+	if !strings.Contains(res.Detail, "detached") {
+		t.Fatalf("detail should mention detached, got %q", res.Detail)
+	}
+
+	// 2. Empty Dir inherits worker CWD and is permitted.
+	optsEmpty := baseOpts()
+	optsEmpty.Dir = ""
+	resEmpty, err := CommitWith(context.Background(), g.run, okLock(nil), optsEmpty)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resEmpty.Reason == ReasonOffTrunk {
+		t.Fatalf("empty opts.Dir inside worker worktree should be permitted, got ReasonOffTrunk")
+	}
+
+	// 3. Dot Dir inherits worker CWD and is permitted.
+	optsDot := baseOpts()
+	optsDot.Dir = "."
+	resDot, err := CommitWith(context.Background(), g.run, okLock(nil), optsDot)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resDot.Reason == ReasonOffTrunk {
+		t.Fatalf("opts.Dir = \".\" inside worker worktree should be permitted, got ReasonOffTrunk")
 	}
 }
 
