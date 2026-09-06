@@ -3,9 +3,121 @@ package scoreboard
 import (
 	"fmt"
 	"math"
+	"strings"
 )
 
 const WorktreeABSchema = "fak-worktree-ab/1"
+
+type DeliveryOutcome string
+
+const (
+	OutcomeAccepted   DeliveryOutcome = "ACCEPTED"
+	OutcomeRejected   DeliveryOutcome = "REJECTED"
+	OutcomeDuplicate  DeliveryOutcome = "DUPLICATE"
+	OutcomeUnverified DeliveryOutcome = "UNVERIFIED"
+)
+
+type DeliveryLifecycleRecord struct {
+	IssueID              int             `json:"issue_id"`
+	Outcome              DeliveryOutcome `json:"outcome"`
+	SetupDuration        float64         `json:"setup_duration"`
+	ExecutionDuration    float64         `json:"execution_duration"`
+	LandingDuration      float64         `json:"landing_duration"`
+	VerificationDuration float64         `json:"verification_duration"`
+	TotalElapsed         float64         `json:"total_elapsed"`
+	Spend                float64         `json:"spend"`
+	SpendUnknown         bool            `json:"spend_unknown"`
+}
+
+type AcceptedDeliveryAccounting struct {
+	TotalDeliveries        int     `json:"total_deliveries"`
+	AcceptedDeliveries     int     `json:"accepted_deliveries"`
+	RejectedDeliveries     int     `json:"rejected_deliveries"`
+	DuplicateDeliveries    int     `json:"duplicate_deliveries"`
+	UnverifiedDeliveries   int     `json:"unverified_deliveries"`
+	TotalElapsedSeconds    float64 `json:"total_elapsed_seconds"`
+	AcceptedPerElapsedHour float64 `json:"accepted_per_elapsed_hour"`
+	Verified               bool    `json:"verified"`
+	Spend                  float64 `json:"spend"`
+	SpendUnknown           bool    `json:"spend_unknown"`
+	Status                 string  `json:"status"`
+}
+
+func normalizeDeliveryOutcome(o DeliveryOutcome) DeliveryOutcome {
+	switch strings.ToUpper(strings.TrimSpace(string(o))) {
+	case "ACCEPTED":
+		return OutcomeAccepted
+	case "REJECTED":
+		return OutcomeRejected
+	case "DUPLICATE":
+		return OutcomeDuplicate
+	case "UNVERIFIED":
+		return OutcomeUnverified
+	default:
+		return OutcomeUnverified
+	}
+}
+
+// AccountAcceptedDeliveries folds lifecycle records into accepted-delivery accounting.
+// It counts distinct verified landed deliveries (OutcomeAccepted), excludes rejected,
+// duplicate, and unverified outcomes from the accepted count, derives throughput
+// across the full elapsed window rather than summing overlapping phases, and marks
+// incomplete/unverified when acceptance or boundary evidence is missing.
+func AccountAcceptedDeliveries(records []DeliveryLifecycleRecord, totalWindowSeconds float64) AcceptedDeliveryAccounting {
+	acc := AcceptedDeliveryAccounting{
+		TotalDeliveries:     len(records),
+		TotalElapsedSeconds: totalWindowSeconds,
+	}
+
+	seenAccepted := make(map[int]bool)
+	var incompleteBoundary bool
+	if totalWindowSeconds <= 0 || math.IsNaN(totalWindowSeconds) || math.IsInf(totalWindowSeconds, 0) {
+		incompleteBoundary = true
+	}
+
+	for _, r := range records {
+		acc.Spend += r.Spend
+		if r.SpendUnknown || math.IsNaN(r.Spend) {
+			acc.SpendUnknown = true
+		}
+
+		if r.TotalElapsed < 0 || r.SetupDuration < 0 || r.ExecutionDuration < 0 || r.LandingDuration < 0 || r.VerificationDuration < 0 ||
+			math.IsNaN(r.TotalElapsed) || math.IsNaN(r.SetupDuration) || math.IsNaN(r.ExecutionDuration) || math.IsNaN(r.LandingDuration) || math.IsNaN(r.VerificationDuration) {
+			incompleteBoundary = true
+		}
+
+		norm := normalizeDeliveryOutcome(r.Outcome)
+		switch norm {
+		case OutcomeAccepted:
+			if seenAccepted[r.IssueID] {
+				acc.DuplicateDeliveries++
+			} else {
+				seenAccepted[r.IssueID] = true
+				acc.AcceptedDeliveries++
+			}
+		case OutcomeRejected:
+			acc.RejectedDeliveries++
+		case OutcomeDuplicate:
+			acc.DuplicateDeliveries++
+		case OutcomeUnverified:
+			acc.UnverifiedDeliveries++
+		}
+	}
+
+	if totalWindowSeconds > 0 && !math.IsNaN(totalWindowSeconds) && !math.IsInf(totalWindowSeconds, 0) {
+		acc.AcceptedPerElapsedHour = float64(acc.AcceptedDeliveries) * 3600.0 / totalWindowSeconds
+	}
+
+	if incompleteBoundary || len(records) == 0 || acc.AcceptedDeliveries == 0 {
+		acc.Status = "INCOMPLETE"
+		acc.Verified = false
+	} else {
+		acc.Status = "COMPLETE"
+		acc.Verified = true
+	}
+
+	return acc
+}
 
 type WorktreeABArm struct {
 	Name            string  `json:"name"`
