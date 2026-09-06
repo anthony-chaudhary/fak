@@ -606,6 +606,8 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdFused(args)
 	case "experiments":
 		cmdExperiments(args)
+	case "results":
+		cmdResults(args)
 	case "coverage-matrix":
 		cmdCoverageMatrix(args)
 	case "conformance":
