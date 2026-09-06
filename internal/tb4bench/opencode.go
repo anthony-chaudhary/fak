@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -163,7 +164,7 @@ func (a *OpenCodeAdapter) Execute(ctx context.Context, task TaskManifest, wsDir 
 // Regex patterns for parsing OpenCode transcript lines
 var (
 	toolCallPattern = regexp.MustCompile(`(?i)(?:call|tool|executing):\s*([a-zA-Z0-9_-]+)\s*(?:with|args)?:?\s*(.*)`)
-	tokenUsageRegex = regexp.MustCompile(`(?i)tokens:\s*(\d+)\s*prompt,\s*(\d+)\s*completion`)
+	tokenUsageRegex = regexp.MustCompile(`(?i)^tokens:\s*(\d+)\s*prompt,\s*(\d+)\s*completion$`)
 )
 
 // ParseOpenCodeTranscript extracts turns, tool executions, and token metrics from OpenCode outputs.
@@ -177,6 +178,7 @@ func ParseOpenCodeTranscript(stdout, stderr []byte, taskID string) (*ArmExecutio
 	lines := strings.Split(string(stdout), "\n")
 	var currentTurn TurnRecord
 	turnNum := 1
+	hasReportedUsage := false
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -185,9 +187,17 @@ func ParseOpenCodeTranscript(stdout, stderr []byte, taskID string) (*ArmExecutio
 		}
 
 		// Check for token usage line
-		if tokenMatch := tokenUsageRegex.FindStringSubmatch(trimmed); len(tokenMatch) == 3 {
-			p, _ := strconv.ParseInt(tokenMatch[1], 10, 64)
-			c, _ := strconv.ParseInt(tokenMatch[2], 10, 64)
+		if strings.Contains(strings.ToLower(trimmed), "tokens:") {
+			tokenMatch := tokenUsageRegex.FindStringSubmatch(trimmed)
+			if len(tokenMatch) != 3 {
+				return nil, fmt.Errorf("opencode: invalid reported token usage")
+			}
+			p, promptErr := strconv.ParseInt(tokenMatch[1], 10, 64)
+			c, completionErr := strconv.ParseInt(tokenMatch[2], 10, 64)
+			if promptErr != nil || completionErr != nil || p > math.MaxInt64-result.TotalPromptTokens || c > math.MaxInt64-result.TotalCompletionTokens {
+				return nil, fmt.Errorf("opencode: invalid reported token usage")
+			}
+			hasReportedUsage = true
 			result.TotalPromptTokens += p
 			result.TotalCompletionTokens += c
 			continue
@@ -240,13 +250,11 @@ func ParseOpenCodeTranscript(stdout, stderr []byte, taskID string) (*ArmExecutio
 		})
 	}
 
+	// Missing usage is not a measured zero; fail closed before comparisons.
+	if !hasReportedUsage {
+		return nil, fmt.Errorf("opencode: missing reported token usage")
+	}
 	result.TotalTurns = len(result.Turns)
-	if result.TotalPromptTokens == 0 {
-		result.TotalPromptTokens = int64(len(stdout) / 4)
-	}
-	if result.TotalCompletionTokens == 0 {
-		result.TotalCompletionTokens = int64(len(stdout) / 8)
-	}
 
 	return result, nil
 }
