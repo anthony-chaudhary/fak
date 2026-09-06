@@ -94,24 +94,32 @@ func (g *flightGroup[T]) Do(ctx context.Context, key string, fn func() (T, error
 		g.m = make(map[string]*flight[T])
 	}
 	if inflight, ok := g.m[key]; ok {
-		if err := ctx.Err(); err != nil {
-			g.mu.Unlock()
-			var zero T
-			return zero, false, err
+		if ctx != nil {
+			if err := ctx.Err(); err != nil {
+				g.mu.Unlock()
+				var zero T
+				return zero, false, err
+			}
 		}
 		inflight.waiters.Add(1)
 		g.mu.Unlock()
 
+		var ctxDone <-chan struct{}
+		if ctx != nil {
+			ctxDone = ctx.Done()
+		}
 		select {
-		case <-ctx.Done():
+		case <-ctxDone:
 			inflight.waiters.Add(-1)
 			var zero T
 			return zero, false, ctx.Err()
 		case <-inflight.done:
 			inflight.waiters.Add(-1)
-			if err := ctx.Err(); err != nil {
-				var zero T
-				return zero, false, err
+			if ctx != nil {
+				if err := ctx.Err(); err != nil {
+					var zero T
+					return zero, false, err
+				}
 			}
 		}
 
