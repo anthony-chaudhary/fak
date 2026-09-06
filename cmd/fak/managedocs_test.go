@@ -193,8 +193,9 @@ func createCleanManagedocsWorkspace(t *testing.T) string {
 }
 
 func TestRunManageDocs_ExplicitNonexistentDirFails(t *testing.T) {
+	temp := t.TempDir()
 	var stdout, stderr bytes.Buffer
-	rc := runManageDocs(&stdout, &stderr, []string{"--docs-dir", "nonexistent-docs-dir-xyz-123"})
+	rc := runManageDocs(&stdout, &stderr, []string{"--workspace", temp, "--docs-dir", "nonexistent-docs-dir-xyz-123"})
 	if rc == 0 {
 		t.Fatalf("expected non-zero rc for nonexistent --docs-dir, got %d, stdout: %s", rc, stdout.String())
 	}
