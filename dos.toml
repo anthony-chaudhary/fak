@@ -1885,6 +1885,13 @@ summary  = "The exact whole-tree disambiguation oracle exceeded its bounded pre-
 fix      = "For the one bootstrap land that repairs the cold oracle, rerun the same managed `fak worktree worker land` command with `FAK_WORKTREE_DISAMBIGUATION_TIMEOUT_MS=<milliseconds>` set explicitly in the inclusive range 1..900000. The default remains 120000 ms; the override changes time only and never skips, weakens, or retries any witness. Remove the override after #9580 restores the ordinary default path."
 see_also = ["internal/workerworktree/disambiguation.go", "https://github.com/anthony-chaudhary/fak/issues/9580", "https://github.com/anthony-chaudhary/fak/issues/9655", "https://github.com/anthony-chaudhary/fak/issues/9657"]
 
+[reasons.BUILD_CHECK_TIMEOUT]
+category = "OPERATOR_GATE"
+refusal = true
+summary = "Prospective commit validation exceeded its bounded execution deadline before index mutation; no unchecked commit was admitted."
+fix = "Inspect which phase timed out (build, vet, or tests). Run isolated prospective validation with `fak validate --mine <paths>...` to determine duration. When commit validation legitimately requires more time, declare a finite prospective validation budget or let background contention clear. Do not bypass validation without authorization."
+see_also = ["fak validate", "fak commit", "cmd/fak/commit_buildcheck.go", "fak recover BUILD_CHECK_TIMEOUT"]
+
 [reasons.SYSTEM_COMMIT_HEADROOM]
 category = "OPERATOR_GATE"
 refusal  = true

@@ -180,6 +180,7 @@ var emittedRecoveryReasons = []string{
 	"BEHIND",
 	"BEHIND_FASTFORWARDABLE",
 	"BUDGET_RECEIPT_INCOMPLETE",
+	"BUILD_CHECK_TIMEOUT",
 	"COMMITTED_RED",
 	"CONCEPT_ADMISSION",
 	"CONCEPT_FRESHNESS",
@@ -365,6 +366,24 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 		}},
 		"PATHSPEC_RACE":     {Reason: "PATHSPEC_RACE", Summary: "a peer changed the index while the path-scoped commit was being sealed", Steps: []recoveryStep{{Argv: []string{"git", "show", "--stat", "--oneline", "HEAD"}, Summary: "inspect the intact commit and verify which paths landed"}}, Notes: []string{"do not amend or force-push; if an extra peer path landed, report the intact commit and let its owner reconcile it"}, Executable: true},
 		"COMMITTED_RED":     {Reason: "COMMITTED_RED", Summary: "the committed tip fails its isolated build or formatting gate", Steps: []recoveryStep{{Argv: []string{"fak-dev", "ci-preflight"}, Summary: "reproduce the committed-tip failure outside the peer-dirty tree"}}, Notes: []string{"fix the committed failure before attempting another commit or push"}, Executable: true},
+		"BUILD_CHECK_TIMEOUT": {
+			Reason:     "BUILD_CHECK_TIMEOUT",
+			Summary:    "prospective commit validation exceeded its bounded execution deadline before index mutation",
+			Executable: false,
+			Steps: []recoveryStep{
+				{
+					Argv:    []string{"fak", "validate", "--mine", "<paths>..."},
+					Summary: "run isolated prospective validation to measure build, vet, and test duration outside commit lock",
+				},
+			},
+			Notes: []string{
+				"the timeout refused the commit before index mutation; no unchecked commit was admitted to trunk",
+				"distinguish an observation timeout from a terminal receipt: deadline expiration is not a pass verdict or completed witness",
+				"inspect which phase timed out (build, vet, or tests) and check for live owner or background contention before retrying",
+				"declare a finite prospective validation budget or run isolated prospective validation with `fak validate --mine <paths>...` to determine required duration",
+				"commit validation remains strictly fail-closed: retain refusal if validation does not complete; never bypass the gate or fail open without explicit authorization",
+			},
+		},
 		"LOCK_BUSY":         {Reason: "LOCK_BUSY", Summary: "another committer owns the serialized commit lock", Steps: []recoveryStep{{Argv: []string{"fak", "commit", "--reclaim-stale-commit-lock"}, Summary: "probe only the commit lock and reclaim only when its recorded owner is proven stale"}}, Notes: []string{"the actuator is a dry-run unless you explicitly add --apply; if the owner is live, wait and retry; never delete the lock by hand"}, Executable: true},
 		"CONCEPT_ADMISSION": {Reason: "CONCEPT_ADMISSION", Summary: "a new concept-family identifier is absent from the staged concept corpus", Notes: []string{"add or reuse the concept-corpus row named by the refusal, then stage that evidence in the same commit as the identifier"}},
 		"CONCEPT_FRESHNESS": {Reason: "CONCEPT_FRESHNESS", Summary: "the staged concept corpus is stale relative to the staged source tree", Steps: []recoveryStep{{Argv: []string{"fak", "concept", "generate", "--staged"}, Summary: "regenerate against the exact staged tree"}}, Notes: []string{"stage the generated corpus paths in the same commit; the gate intentionally evaluates the staged tree"}, Executable: true},
