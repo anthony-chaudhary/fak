@@ -83,7 +83,7 @@ func OpencodeSessionEpisodes(led OpencodeSessionLedger) []ScoredInput {
 
 	// 2. turns_per_task
 	turnsPred := Registry.MustPredict("opencode-session", "turns_per_task", "turns")
-	if !led.TurnsRecorded || led.TotalTurns < 0 || led.CompletedTasks <= 0 {
+	if !led.TurnsRecorded || led.CompletedTasks <= 0 || led.TotalTurns < 0 {
 		episodes = append(episodes, ScoredInput{
 			Prediction: turnsPred,
 			Outcome: Outcome{

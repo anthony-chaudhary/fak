@@ -418,36 +418,39 @@ func TestOpencodeSessionTurnsPerTaskLowerIsBetterPolarity(t *testing.T) {
 // TestOpencodeSessionNegativeTurnsUnmeasured verifies that an OpencodeSessionLedger
 // with TotalTurns < 0 produces an unmeasured episode (Measured: false) (#11940).
 func TestOpencodeSessionNegativeTurnsUnmeasured(t *testing.T) {
-	led := OpencodeSessionLedger{
-		SessionID:      "ses-negative-turns",
-		TurnsRecorded:  true,
-		TotalTurns:     -5,
-		CompletedTasks: 1,
-	}
-
-	inputs := OpencodeSessionEpisodes(led)
-	if len(inputs) != 3 {
-		t.Fatalf("expected 3 inputs, got %d", len(inputs))
-	}
-
-	var turnsInput *ScoredInput
-	for i := range inputs {
-		if inputs[i].Prediction.Metric == "turns_per_task" {
-			turnsInput = &inputs[i]
-			break
+	for _, negTurns := range []int{-1, -5, -10} {
+		led := OpencodeSessionLedger{
+			SessionID:      "ses-negative-turns",
+			TurnsRecorded:  true,
+			TotalTurns:     negTurns,
+			CompletedTasks: 1,
 		}
-	}
-	if turnsInput == nil {
-		t.Fatalf("turns_per_task metric not found in episodes")
-	}
 
-	if turnsInput.Outcome.Measured {
-		t.Errorf("turns_per_task with negative TotalTurns must be unmeasured, got Measured = true (Realized = %v)", turnsInput.Outcome.Realized)
-	}
+		inputs := OpencodeSessionEpisodes(led)
+		if len(inputs) != 3 {
+			t.Fatalf("expected 3 inputs, got %d", len(inputs))
+		}
 
-	ep := Score("test-negative-turns", turnsInput.Prediction, turnsInput.Outcome, DefaultCalibBand())
-	if ep.Verdict != VerdictUnmeasured {
-		t.Errorf("verdict = %s, want UNMEASURED", ep.Verdict)
+		var turnsInput *ScoredInput
+		for i := range inputs {
+			if inputs[i].Prediction.Metric == "turns_per_task" {
+				turnsInput = &inputs[i]
+				break
+			}
+		}
+		if turnsInput == nil {
+			t.Fatalf("turns_per_task metric not found in episodes")
+		}
+
+		if turnsInput.Outcome.Measured {
+			t.Errorf("turns_per_task with negative TotalTurns=%d must be unmeasured, got Measured = true (Realized = %v)",
+				negTurns, turnsInput.Outcome.Realized)
+		}
+
+		ep := Score("test-negative-turns", turnsInput.Prediction, turnsInput.Outcome, DefaultCalibBand())
+		if ep.Verdict != VerdictUnmeasured {
+			t.Errorf("turns=%d verdict = %s, want UNMEASURED", negTurns, ep.Verdict)
+		}
 	}
 }
 
