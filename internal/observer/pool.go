@@ -52,6 +52,7 @@ type asyncTask struct {
 
 type sessionState struct {
 	mu             sync.Mutex
+	cond           *sync.Cond
 	sessionID      string
 	history        []StepObservation
 	repeatCount    int
@@ -62,6 +63,65 @@ type sessionState struct {
 	flaggedRegress bool
 	kvPrefixWarm   bool
 	inFlight       int64
+	settleCh       chan struct{}
+}
+
+func (s *sessionState) initCondLocked() {
+	if s.cond == nil {
+		s.cond = sync.NewCond(&s.mu)
+	}
+}
+
+func (s *sessionState) incInFlight() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.initCondLocked()
+	atomic.AddInt64(&s.inFlight, 1)
+	if s.settleCh == nil {
+		s.settleCh = make(chan struct{})
+	}
+}
+
+func (s *sessionState) decInFlight() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.initCondLocked()
+	rem := atomic.AddInt64(&s.inFlight, -1)
+	if rem <= 0 {
+		if rem < 0 {
+			atomic.StoreInt64(&s.inFlight, 0)
+		}
+		s.cond.Broadcast()
+		if s.settleCh != nil {
+			close(s.settleCh)
+			s.settleCh = nil
+		}
+	}
+}
+
+func (s *sessionState) setInFlight(n int64) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.initCondLocked()
+	atomic.StoreInt64(&s.inFlight, n)
+	if n <= 0 {
+		s.cond.Broadcast()
+		if s.settleCh != nil {
+			close(s.settleCh)
+			s.settleCh = nil
+		}
+	} else if s.settleCh == nil {
+		s.settleCh = make(chan struct{})
+	}
 }
 
 func (s *sessionState) isFlagged() bool {
@@ -179,6 +239,7 @@ type Pool struct {
 	observationsTotal int64
 	asyncTotal        int64
 	barriersTotal     int64
+	barrierTimeouts   int64
 	cacheHits         int64
 	cacheMisses       int64
 	churnCount        int64
@@ -273,7 +334,11 @@ func (p *Pool) worker(id int) {
 }
 
 func (p *Pool) processTask(t asyncTask) {
-	defer atomic.AddInt64(&t.sess.inFlight, -1)
+	defer func() {
+		if t.sess != nil {
+			t.sess.decInFlight()
+		}
+	}()
 	defer close(t.res)
 
 	if t.ctx.Err() != nil {
@@ -319,6 +384,7 @@ func (p *Pool) getOrCreateSession(sessionID string) *sessionState {
 			sessionID: sessionID,
 			history:   make([]StepObservation, 0, p.cfg.MaxHistoryPerSession),
 		}
+		s.cond = sync.NewCond(&s.mu)
 		p.sessions[sessionID] = s
 	}
 	return s
@@ -331,6 +397,17 @@ func (p *Pool) ResetSession(sessionID string) {
 	}
 	p.sessionsMu.Lock()
 	defer p.sessionsMu.Unlock()
+	if s, ok := p.sessions[sessionID]; ok {
+		s.mu.Lock()
+		if s.settleCh != nil {
+			close(s.settleCh)
+			s.settleCh = nil
+		}
+		if s.cond != nil {
+			s.cond.Broadcast()
+		}
+		s.mu.Unlock()
+	}
 	delete(p.sessions, sessionID)
 }
 
@@ -383,7 +460,7 @@ func (p *Pool) ObserveAsync(ctx context.Context, obs StepObservation) <-chan Ste
 	atomic.AddInt64(&p.observationsTotal, 1)
 	atomic.AddInt64(&p.asyncTotal, 1)
 
-	atomic.AddInt64(&sess.inFlight, 1)
+	sess.incInFlight()
 	task := asyncTask{
 		ctx:  ctx,
 		obs:  obs,
@@ -431,35 +508,88 @@ func (p *Pool) ObserveSyncBarrier(ctx context.Context, obs StepObservation) (Ste
 
 	sess := p.getOrCreateSession(obs.SessionID)
 
-	// Mutating operations wait for concurrent async exploration turns in this session to settle.
+	// Mutating operations or flagged sessions wait for concurrent async exploration turns in this session to settle.
+	// Read-only non-flagged observations bypass the wait loop entirely.
 	timeout := p.cfg.BarrierTimeout
 	if timeout <= 0 {
 		timeout = 50 * time.Millisecond
 	}
-	deadline := time.Now().Add(timeout)
-	if atomic.LoadInt64(&sess.inFlight) > 0 {
-		pollInterval := 50 * time.Microsecond
-		if timeout < pollInterval {
-			pollInterval = timeout
-		}
-		timer := time.NewTimer(pollInterval)
+	if (obs.IsMutating() || !obs.IsReadOnly() || sess.isFlagged()) && atomic.LoadInt64(&sess.inFlight) > 0 {
+		timer := time.NewTimer(timeout)
 		defer timer.Stop()
 
-		for atomic.LoadInt64(&sess.inFlight) > 0 {
+	waitLoop:
+		for {
 			if err := ctx.Err(); err != nil {
 				return obs, err
 			}
-			if time.Now().After(deadline) {
-				return obs, ErrBarrierTimeout
+
+			sess.mu.Lock()
+			if atomic.LoadInt64(&sess.inFlight) == 0 {
+				sess.mu.Unlock()
+				break waitLoop
 			}
+			settleCh := sess.settleCh
+			if settleCh == nil {
+				settleCh = make(chan struct{})
+				sess.settleCh = settleCh
+			}
+			sess.mu.Unlock()
+
 			select {
 			case <-ctx.Done():
 				return obs, ctx.Err()
 			case <-timer.C:
-				timer.Reset(pollInterval)
+				sess.mu.Lock()
+				if atomic.LoadInt64(&sess.inFlight) == 0 {
+					sess.mu.Unlock()
+					break waitLoop
+				}
+				atomic.AddInt64(&p.barrierTimeouts, 1)
+				wasChurn := sess.flaggedChurn
+				wasRegress := sess.flaggedRegress
+				wasFlagged := wasChurn || wasRegress
+				sess.mu.Unlock()
+
+				sess.evaluate(p.cfg, &obs)
+				obs.BarrierLatency = time.Since(start)
+				obs.Duration = obs.BarrierLatency
+
+				if obs.CachedPrefix {
+					atomic.AddInt64(&p.cacheHits, 1)
+				} else {
+					atomic.AddInt64(&p.cacheMisses, 1)
+				}
+
+				if wasFlagged || sess.isFlagged() {
+					sess.mu.Lock()
+					if wasRegress || sess.flaggedRegress {
+						sess.flaggedRegress = true
+						sess.flaggedChurn = false
+						sess.kvPrefixWarm = false
+						obs.CachedPrefix = false
+						obs.StepVerdict = StepRegress
+						if obs.Reason == "" || obs.Reason == "step completed forward progress" {
+							obs.Reason = "step refused due to regression loop (barrier timeout)"
+						}
+					} else if wasChurn || sess.flaggedChurn {
+						sess.flaggedChurn = true
+						obs.StepVerdict = StepChurn
+						if obs.Reason == "" || obs.Reason == "step completed forward progress" {
+							obs.Reason = "step refused due to churn loop (barrier timeout)"
+						}
+					}
+					if len(sess.history) > 0 {
+						sess.history[len(sess.history)-1].StepVerdict = obs.StepVerdict
+						sess.history[len(sess.history)-1].Reason = obs.Reason
+					}
+					sess.mu.Unlock()
+				}
+
+				return obs, ErrBarrierTimeout
+			case <-settleCh:
 			}
 		}
-		timer.Stop()
 	}
 
 	sess.evaluate(p.cfg, &obs)
@@ -489,8 +619,48 @@ func (p *Pool) ObserveSyncBarrier(ctx context.Context, obs StepObservation) (Ste
 	return obs, nil
 }
 
+// PoolStats captures detailed telemetry metrics for the observer pool.
+type PoolStats struct {
+	TotalObservations int64 `json:"total_observations"`
+	AsyncTotal        int64 `json:"async_total"`
+	BarriersTotal     int64 `json:"barriers_total"`
+	BarrierTimeouts   int64 `json:"barrier_timeouts"`
+	CacheHits         int64 `json:"cache_hits"`
+	CacheMisses       int64 `json:"cache_misses"`
+	ChurnCount        int64 `json:"churn_count"`
+	RegressCount      int64 `json:"regress_count"`
+}
+
+// BarrierTimeouts returns the number of sync barriers that timed out waiting for in-flight tasks.
+func (p *Pool) BarrierTimeouts() int64 {
+	if p == nil {
+		return 0
+	}
+	return atomic.LoadInt64(&p.barrierTimeouts)
+}
+
+// DetailedStats returns a structured snapshot of pool telemetry counters.
+func (p *Pool) DetailedStats() PoolStats {
+	if p == nil {
+		return PoolStats{}
+	}
+	return PoolStats{
+		TotalObservations: atomic.LoadInt64(&p.observationsTotal),
+		AsyncTotal:        atomic.LoadInt64(&p.asyncTotal),
+		BarriersTotal:     atomic.LoadInt64(&p.barriersTotal),
+		BarrierTimeouts:   atomic.LoadInt64(&p.barrierTimeouts),
+		CacheHits:         atomic.LoadInt64(&p.cacheHits),
+		CacheMisses:       atomic.LoadInt64(&p.cacheMisses),
+		ChurnCount:        atomic.LoadInt64(&p.churnCount),
+		RegressCount:      atomic.LoadInt64(&p.regressCount),
+	}
+}
+
 // Stats returns atomic telemetry counters for the pool.
 func (p *Pool) Stats() (total, async, barriers, hits, misses, churns, regresses int64) {
+	if p == nil {
+		return 0, 0, 0, 0, 0, 0, 0
+	}
 	return atomic.LoadInt64(&p.observationsTotal),
 		atomic.LoadInt64(&p.asyncTotal),
 		atomic.LoadInt64(&p.barriersTotal),

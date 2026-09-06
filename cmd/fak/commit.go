@@ -111,7 +111,9 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	push := fs.Bool("push", false, "push after a VERIFIED commit through the safe sync path (never --force)")
 	lockTimeout := fs.Duration("lock-timeout", safecommit.DefaultLockTimeout, "finite deadline for waiting on the advisory commit lock (default 10s); LOCK_BUSY reports elapsed wait and holder evidence")
 	noSignoff := fs.Bool("no-signoff", false, "do not add the DCO sign-off (-s is the default)")
-	fs.Bool("s", false, "add the DCO sign-off (default: true; git-compatible flag)")
+	var signoff bool
+	fs.BoolVar(&signoff, "s", false, "add the DCO sign-off (default: true; git-compatible flag)")
+	fs.BoolVar(&signoff, "signoff", false, "add the DCO sign-off (default: true; git-compatible flag)")
 	preview := fs.Bool("preview", false, "LINT-ONLY: check the message+paths and exit WITHOUT touching git (is the subject witness-gradeable, does it carry a bindable `(fak <leaf>)` stamp, does the leaf match the paths' lane?). Exit 0 clean, 1 issues, 2 usage")
 	requireIssue := fs.Bool("require-issue", false, "treat a missing bindable issue link (#N in subject / `Closes #N` in body) as BLOCKING, not advisory — the dispatch-worker contract so a close binds in `issue_closure_audit` (#312)")
 	noBuildCheck := fs.Bool("no-build-check", false, "skip the COMMITTED_RED prospective-tree compile gate before the commit (default: gate ON — refuses a commit that would red the committed trunk)")
@@ -274,7 +276,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		Paths:                      paths,
 		Message:                    message,
 		Trunk:                      *trunk,
-		SignOff:                    !*noSignoff,
+		SignOff:                    !*noSignoff || signoff,
 		Push:                       *push,
 		Lock:                       safecommit.LockOptions{Timeout: *lockTimeout},
 		Review:                     review,
@@ -519,7 +521,9 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 	trunk := fs.String("trunk", "", "expected development branch override (default: configured development branch)")
 	push := fs.Bool("push", false, "push after a VERIFIED rollup commit through the safe sync path (never --force)")
 	noSignoff := fs.Bool("no-signoff", false, "do not add the DCO sign-off (-s is the default)")
-	fs.Bool("s", false, "add the DCO sign-off (default: true; git-compatible flag)")
+	var signoff bool
+	fs.BoolVar(&signoff, "s", false, "add the DCO sign-off (default: true; git-compatible flag)")
+	fs.BoolVar(&signoff, "signoff", false, "add the DCO sign-off (default: true; git-compatible flag)")
 	noBuildCheck := fs.Bool("no-build-check", false, "record the rollup without prospective compile/test verification; recorded work is not eligible to mark intents done")
 	allowBuildCheckTimeout := fs.Bool("allow-build-check-timeout", os.Getenv("FAK_COMMIT_BUILD_CHECK") == "allow-timeout", "record the rollup when prospective validation times out; the unchecked receipt cannot mark intents done")
 	buildCheckTimeout := fs.Duration("build-check-timeout", defaultValidateTimeout, "maximum duration for prospective validation (default 4m); controls prospective validation, not advisory-lock waiting or earlier build/materialization phases")
@@ -612,7 +616,7 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 		Paths:   plan.UnionPaths,
 		Message: plan.Subject,
 		Trunk:   *trunk,
-		SignOff: !*noSignoff,
+		SignOff: !*noSignoff || signoff,
 		Push:    *push,
 	})
 	if err != nil {
@@ -767,6 +771,9 @@ func renderCommitDrainResult(stdout io.Writer, res commitDrainResult) {
 			fmt.Fprintf(stdout, " (%s)", refusal.Detail)
 		}
 		fmt.Fprintln(stdout)
+		if refusal.Reason == safecommit.ReasonPreStagedPathOverlap || strings.Contains(string(refusal.Reason), safecommit.ReasonPreStagedPathOverlap) || strings.Contains(refusal.Detail, safecommit.ReasonPreStagedPathOverlap) {
+			fmt.Fprintln(stdout, "    remedy: unstage pre-existing index changes via `git restore --staged <paths>` (worktree edits stay), then retry `fak commit`")
+		}
 	}
 	if res.Pathset != nil && !res.Pathset.OK {
 		fmt.Fprintf(stdout, "  pathset mismatch: missing=%v extra=%v\n", res.Pathset.Missing, res.Pathset.Extra)
@@ -920,7 +927,7 @@ func renderCommitResult(stdout io.Writer, res safecommit.Result) {
 		fmt.Fprintln(stdout, "  wedged? `fak commit --reclaim-stale-commit-lock` probes only the serialized commit lock (add --apply to remove a proven stale owner); `fak commit status` shows the live owner")
 		fmt.Fprintln(stdout, "  separate git residue: `fak commit --reclaim-stale-index-lock` handles only index.lock and next-index files")
 	}
-	if res.Reason == safecommit.ReasonPreStagedPathOverlap {
+	if res.Reason == safecommit.ReasonPreStagedPathOverlap || strings.Contains(res.Reason, safecommit.ReasonPreStagedPathOverlap) || strings.Contains(res.Detail, safecommit.ReasonPreStagedPathOverlap) {
 		fmt.Fprintln(stdout, "  remedy: unstage pre-existing index changes via `git restore --staged <paths>` (worktree edits stay), then retry `fak commit`")
 	}
 	renderCommitScore(stdout, res)

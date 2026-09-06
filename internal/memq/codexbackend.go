@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 )
@@ -32,6 +33,7 @@ import (
 // suspicion attr so a policy can exclude them wholesale, independent of the
 // per-cell content screen.
 type CodexBackend struct {
+	mu               sync.RWMutex
 	home             string
 	includeChronicle bool
 	cells            []Cell
@@ -176,6 +178,8 @@ func codexDurability(kind string) string {
 // Cells returns the scanned page table (safe metadata only) — a snapshot copy so
 // the executor never mutates the backend's slice.
 func (b *CodexBackend) Cells(_ context.Context) ([]Cell, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	return snapshotCells(b.cells), nil
 }
 
@@ -184,12 +188,17 @@ func (b *CodexBackend) Cells(_ context.Context) ([]Cell, error) {
 // time (the same independent content re-screen recall runs, so a file that changed
 // shape since the scan, or that the scan-time heuristic missed, is still caught)
 // before any byte crosses the gate. The Codex file itself is never modified.
-func (b *CodexBackend) Materialize(_ context.Context, id string) ([]byte, error) {
-	for _, c := range b.cells {
-		if c.ID != id {
+func (b *CodexBackend) Materialize(ctx context.Context, id string) ([]byte, error) {
+	if ctx != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.cells {
+		if b.cells[i].ID != id {
 			continue
 		}
-		if c.Sealed {
+		if b.cells[i].Sealed {
 			return nil, fmt.Errorf("%w: codex cell %s", ErrSealed, id)
 		}
 		body, ok := b.bodies[id]
@@ -199,6 +208,8 @@ func (b *CodexBackend) Materialize(_ context.Context, id string) ([]byte, error)
 		// Read-time re-screen: poison never enters context even if it slipped the
 		// scan-time seal. This is the page-in gate the issue requires.
 		if _, caught := ctxmmu.ScreenBytes(body); caught {
+			b.cells[i].Sealed = true
+			b.cells[i].Descriptor = fmt.Sprintf("%s: [sealed external memory: %d bytes]", b.cells[i].Kind, len(body))
 			return nil, fmt.Errorf("%w: codex cell %s failed the read-time screen", ErrSealed, id)
 		}
 		return append([]byte(nil), body...), nil
@@ -220,7 +231,19 @@ func isMarkdown(name string) bool {
 // be used to mutate the backend's own stored slice.
 func snapshotCells(cells []Cell) []Cell {
 	out := make([]Cell, len(cells))
-	copy(out, cells)
+	for i, c := range cells {
+		out[i] = c
+		if c.Attrs != nil {
+			attrs := make(map[string]string, len(c.Attrs))
+			for k, v := range c.Attrs {
+				attrs[k] = v
+			}
+			out[i].Attrs = attrs
+		}
+		if len(c.Refs) > 0 {
+			out[i].Refs = append([]string(nil), c.Refs...)
+		}
+	}
 	return out
 }
 

@@ -197,13 +197,25 @@ func (s *Store) AcquireFenced(ctx context.Context, rec Record, now time.Time) (R
 	out := rec
 	switch {
 	case !hasRef:
-		out.Generation = 1
+		startGen := int64(1)
+		if hist, ok, err := s.resolveHistoryRef(ctx, rec.ID); err != nil {
+			return Record{}, FenceVerdict{}, err
+		} else if ok && hist.Generation >= startGen {
+			startGen = hist.Generation + 1
+		}
+		out.Generation = startGen
 		out.AcquiredAt = now.Unix()
 		out.RenewedAt = 0
 	case cur.Expired(now):
 		// TRANSITION: reap a dead holder's lease and take over. The strict bump is the
 		// fence — A's later write, presenting the pre-bump generation, will read STALE.
-		out.Generation = cur.Generation + 1
+		nextGen := cur.Generation + 1
+		if hist, ok, err := s.resolveHistoryRef(ctx, rec.ID); err != nil {
+			return Record{}, FenceVerdict{}, err
+		} else if ok && hist.Generation >= nextGen {
+			nextGen = hist.Generation + 1
+		}
+		out.Generation = nextGen
 		out.AcquiredAt = now.Unix()
 		out.RenewedAt = 0
 	case cur.Holder == rec.Holder && rec.Holder != "":
@@ -375,4 +387,81 @@ func (s *Store) zeroOID(ctx context.Context) (string, error) {
 		return strings.Repeat("0", 64), nil
 	}
 	return strings.Repeat("0", 40), nil
+}
+
+// historyRefPrefix is the dedicated ref namespace where retired lease generation
+// tombstones are preserved across lease release (#11850). Storing retained history
+// under refs/fak/history/<id> separates it by ref namespace from live leases under
+// refs/fak/locks/<id>, ensuring that historical generation floors are absent from
+// live admission scans (List, Live, LiveLeases, Get).
+const historyRefPrefix = "refs/fak/history/"
+
+// HistoryRecord is the durable generation floor retained across lease release (#11850).
+type HistoryRecord struct {
+	ID         string `json:"id"`
+	Generation int64  `json:"generation"`
+	ReleasedAt int64  `json:"released_unix,omitempty"`
+}
+
+// HistoryRef returns the canonical git ref path where generation history for id is stored.
+func HistoryRef(id string) string {
+	return historyRefPrefix + id
+}
+
+// resolveHistoryRef reads the retained generation record for id if present.
+func (s *Store) resolveHistoryRef(ctx context.Context, id string) (Record, bool, error) {
+	if !validID(id) {
+		return Record{}, false, fmt.Errorf("leaseref: invalid lease id %q", id)
+	}
+	ref := historyRefPrefix + id
+	exists, err := s.has(ctx, ref)
+	if err != nil {
+		return Record{}, false, err
+	}
+	if !exists {
+		return Record{}, false, nil
+	}
+	rec, err := s.readRef(ctx, ref)
+	if err != nil {
+		return Record{}, false, err
+	}
+	if rec.ID == "" {
+		rec.ID = id
+	}
+	return rec, true, nil
+}
+
+// ResolveHistoryRef exposes the retained generation record for id if present.
+func (s *Store) ResolveHistoryRef(ctx context.Context, id string) (Record, bool, error) {
+	return s.resolveHistoryRef(ctx, id)
+}
+
+// ReadHistory reads the typed HistoryRecord for id if present.
+func (s *Store) ReadHistory(ctx context.Context, id string) (HistoryRecord, bool, error) {
+	if !validID(id) {
+		return HistoryRecord{}, false, fmt.Errorf("leaseref: invalid lease id %q", id)
+	}
+	ref := historyRefPrefix + id
+	exists, err := s.has(ctx, ref)
+	if err != nil {
+		return HistoryRecord{}, false, err
+	}
+	if !exists {
+		return HistoryRecord{}, false, nil
+	}
+	out, code, err := s.run(ctx, s.dir, "cat-file", "blob", ref)
+	if err != nil {
+		return HistoryRecord{}, false, fmt.Errorf("leaseref: git not executable: %w", err)
+	}
+	if code != 0 {
+		return HistoryRecord{}, false, fmt.Errorf("leaseref: cat-file blob %s exited %d", ref, code)
+	}
+	var hr HistoryRecord
+	if err := json.Unmarshal([]byte(out), &hr); err != nil {
+		return HistoryRecord{}, false, fmt.Errorf("leaseref: unmarshal history record at %s: %w", ref, err)
+	}
+	if hr.ID == "" {
+		hr.ID = id
+	}
+	return hr, true, nil
 }

@@ -773,6 +773,25 @@ func BenchmarkWatchdogChildEnv(b *testing.B) {
 	}
 }
 
+// BenchmarkCodexWatchdogChildEnv measures Codex child environment sanitization and isolation.
+func BenchmarkCodexWatchdogChildEnv(b *testing.B) {
+	environ := make([]string, 60)
+	for i := 0; i < 60; i++ {
+		environ[i] = fmt.Sprintf("VAR_%d=value_%d", i, i)
+	}
+	// Inject the forbidden keys
+	for _, key := range WatchdogChildEnvDrop {
+		environ = append(environ, key+"=secret_or_inherited")
+	}
+	environ = append(environ, "CLAUDE_CONFIG_DIR=secret_or_inherited")
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sinkEnv = CodexWatchdogChildEnv(environ)
+	}
+}
+
 // BenchmarkClassifyAttemptError measures child stderr pattern parsing into typed causes.
 func BenchmarkClassifyAttemptError(b *testing.B) {
 	cases := []struct {

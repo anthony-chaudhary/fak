@@ -67,6 +67,9 @@ type Table struct {
 	// the moment the session enters Terminating — the loop-side wake-up that cancels
 	// in-flight work mid-turn (the drain waits for the boundary; terminate does not).
 	terminateSignals map[string]chan struct{}
+
+	// inputLeases coordinates single-writer input leases per session trace (#11438).
+	inputLeases map[string]*InputLeaseCoordinator
 }
 
 // NewTable returns a Table bounded by DefaultTableLimit sessions.
@@ -99,6 +102,9 @@ func (t *Table) ensureLocked() {
 	if t.index == nil {
 		t.index = map[string]*list.Element{}
 	}
+	if t.inputLeases == nil {
+		t.inputLeases = map[string]*InputLeaseCoordinator{}
+	}
 }
 
 func (t *Table) touchLocked(trace string) {
@@ -122,6 +128,7 @@ func (t *Table) trimLocked() {
 		delete(t.relayArmed, trace)
 		delete(t.resumeWaiters, trace)
 		delete(t.terminateSignals, trace)
+		delete(t.inputLeases, trace)
 	}
 }
 
@@ -220,6 +227,7 @@ func (t *Table) Reset(trace string) {
 	delete(t.relayArmed, trace)
 	delete(t.resumeWaiters, trace)
 	delete(t.terminateSignals, trace)
+	delete(t.inputLeases, trace)
 	t.mu.Unlock()
 }
 

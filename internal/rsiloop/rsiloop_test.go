@@ -1,6 +1,7 @@
 package rsiloop
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/shipgate"
 )
@@ -1004,4 +1006,233 @@ func TestTransientMeasureErrorExhaustionProducesRetryAndRevertRows(t *testing.T)
 	if p2.Window != 2 {
 		t.Errorf("separated proposal window = %d, want 2", p2.Window)
 	}
+}
+
+// TestRunObserved_TransientRetryBackoffAndObserverSuppression verifies issue #11692:
+//  1. Exponential backoff pacing is applied between transient retries (doubling from
+//     base up to the cap).
+//  2. Intermediate RETRY rows are suppressed from Observer dispatch; obs is invoked
+//     only for terminal cycle decisions so external observers do not receive duplicate
+//     cycle IDs or unfinalized decisions.
+//  3. Backoff duration formula and context cancellation during backoff behave correctly.
+func TestRunObserved_TransientRetryBackoffAndObserverSuppression(t *testing.T) {
+	t.Run("HookedBackoffAndObserverSuppression", func(t *testing.T) {
+		var (
+			sleeps       []time.Duration
+			observedRows []Row
+			measureCalls = make(map[string]int)
+		)
+
+		h := Harness{
+			MetricName:      "latency_p50",
+			LowerBetter:     true,
+			BaselineRefName: "main",
+			BaselineMetric: func() (float64, string, error) {
+				return 100.0, "sha-base", nil
+			},
+			TransientMeasurementRecoveryLimit: 2,
+			TransientRetrySleep: func(d time.Duration) {
+				sleeps = append(sleeps, d)
+			},
+			Candidates: func() []Candidate {
+				return []Candidate{
+					{Label: "c1"},
+					{Label: "c2"},
+				}
+			},
+			Measure: func(c Candidate) (Measurement, error) {
+				measureCalls[c.Label]++
+				call := measureCalls[c.Label]
+				switch c.Label {
+				case "c1":
+					// attempt 0: transient fail
+					// attempt 1: transient fail
+					// attempt 2: succeed and keep
+					if call == 1 {
+						return Measurement{}, NewTransientMeasureError(errors.New("lock contention"))
+					}
+					if call == 2 {
+						return Measurement{}, NewTransientMeasureError(errors.New("timeout transient"))
+					}
+					return Measurement{Metric: 50.0, SuiteGreen: true, TruthClean: true}, nil
+				case "c2":
+					// attempt 0: transient fail
+					// attempt 1: transient fail
+					// attempt 2: transient fail -> exhaustion -> REVERT
+					return Measurement{}, NewTransientMeasureError(fmt.Errorf("exhaustion fail %d", call))
+				default:
+					return Measurement{}, errors.New("unknown")
+				}
+			},
+		}
+
+		obs := func(r Row) {
+			observedRows = append(observedRows, r)
+		}
+
+		res, err := RunObserved(h, nil, 3, 0, obs)
+		if err != nil {
+			t.Fatalf("RunObserved: %v", err)
+		}
+
+		// (a) Verify exponential backoff pacing:
+		// c1 fails attempt 0 (sleep 10ms), fails attempt 1 (sleep 20ms), succeeds on attempt 2 (no sleep).
+		// c2 fails attempt 0 (sleep 10ms), fails attempt 1 (sleep 20ms), fails attempt 2 (exhausted -> no sleep).
+		wantSleeps := []time.Duration{
+			10 * time.Millisecond,
+			20 * time.Millisecond,
+			10 * time.Millisecond,
+			20 * time.Millisecond,
+		}
+		if len(sleeps) != len(wantSleeps) {
+			t.Fatalf("recorded sleeps count = %d, want %d: %v", len(sleeps), len(wantSleeps), sleeps)
+		}
+		for i, want := range wantSleeps {
+			if sleeps[i] != want {
+				t.Errorf("sleep[%d] = %v, want %v", i, sleeps[i], want)
+			}
+		}
+
+		// (b) Verify observer suppression:
+		// res.Rows has all attempt rows:
+		// c1: 2 RETRY rows + 1 KEEP row = 3
+		// c2: 2 RETRY rows + 1 REVERT row = 3
+		// Total res.Rows = 6
+		if len(res.Rows) != 6 {
+			t.Fatalf("len(res.Rows) = %d, want 6", len(res.Rows))
+		}
+
+		// But observedRows must have ONLY terminal rows (exactly 2, one per cycle):
+		if len(observedRows) != 2 {
+			t.Fatalf("len(observedRows) = %d, want 2 (RETRY rows must be suppressed)", len(observedRows))
+		}
+
+		// Check row 0 (cycle 1 terminal decision):
+		r1 := observedRows[0]
+		if r1.Cycle != 1 {
+			t.Errorf("observedRows[0].Cycle = %d, want 1", r1.Cycle)
+		}
+		if r1.Candidate != "c1" {
+			t.Errorf("observedRows[0].Candidate = %q, want c1", r1.Candidate)
+		}
+		if r1.Decision != "KEEP" {
+			t.Errorf("observedRows[0].Decision = %q, want KEEP", r1.Decision)
+		}
+		if !r1.Kept {
+			t.Errorf("observedRows[0].Kept = false, want true")
+		}
+
+		// Check row 1 (cycle 2 terminal decision):
+		r2 := observedRows[1]
+		if r2.Cycle != 2 {
+			t.Errorf("observedRows[1].Cycle = %d, want 2", r2.Cycle)
+		}
+		if r2.Candidate != "c2" {
+			t.Errorf("observedRows[1].Candidate = %q, want c2", r2.Candidate)
+		}
+		if r2.Decision != "REVERT" {
+			t.Errorf("observedRows[1].Decision = %q, want REVERT", r2.Decision)
+		}
+		if r2.Kept {
+			t.Errorf("observedRows[1].Kept = true, want false")
+		}
+
+		// Confirm no duplicate cycle IDs or RETRY decisions were seen by the observer
+		seenCycles := make(map[int]int)
+		for _, r := range observedRows {
+			if r.Decision == "RETRY" {
+				t.Errorf("observer received intermediate RETRY row: %+v", r)
+			}
+			seenCycles[r.Cycle]++
+			if seenCycles[r.Cycle] > 1 {
+				t.Errorf("observer received duplicate cycle ID %d", r.Cycle)
+			}
+		}
+	})
+
+	t.Run("CustomBackoffDurationOverride", func(t *testing.T) {
+		var sleeps []time.Duration
+		h := Harness{
+			MetricName:                        "p50",
+			LowerBetter:                       true,
+			BaselineRefName:                   "main",
+			BaselineMetric:                    func() (float64, string, error) { return 10.0, "sha", nil },
+			TransientMeasurementRecoveryLimit: 2,
+			TransientRetryBackoff: func(attempt int) time.Duration {
+				return time.Duration(100*(attempt+1)) * time.Millisecond
+			},
+			TransientRetrySleep: func(d time.Duration) {
+				sleeps = append(sleeps, d)
+			},
+			Candidates: func() []Candidate { return []Candidate{{Label: "custom"}} },
+			Measure: func(c Candidate) (Measurement, error) {
+				if len(sleeps) < 2 {
+					return Measurement{}, NewTransientMeasureError(errors.New("retry me"))
+				}
+				return Measurement{Metric: 5.0, SuiteGreen: true, TruthClean: true}, nil
+			},
+		}
+
+		_, err := RunObserved(h, nil, 2, 0, nil)
+		if err != nil {
+			t.Fatalf("RunObserved: %v", err)
+		}
+		if len(sleeps) != 2 {
+			t.Fatalf("len(sleeps) = %d, want 2", len(sleeps))
+		}
+		if sleeps[0] != 100*time.Millisecond || sleeps[1] != 200*time.Millisecond {
+			t.Errorf("sleeps = %v, want [100ms, 200ms]", sleeps)
+		}
+	})
+
+	t.Run("ContextCancellationAbortsDuringBackoff", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		h := Harness{
+			MetricName:                        "p50",
+			LowerBetter:                       true,
+			BaselineRefName:                   "main",
+			BaselineMetric:                    func() (float64, string, error) { return 10.0, "sha", nil },
+			TransientMeasurementRecoveryLimit: 3,
+			Context:                           ctx,
+			TransientRetrySleep: func(d time.Duration) {
+				cancel()
+			},
+			Candidates: func() []Candidate { return []Candidate{{Label: "cancel_cand"}} },
+			Measure: func(c Candidate) (Measurement, error) {
+				return Measurement{}, NewTransientMeasureError(errors.New("transient lock"))
+			},
+		}
+
+		_, err := RunObserved(h, nil, 2, 0, nil)
+		if err == nil {
+			t.Fatal("expected error on cancelled context, got nil")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("got error %v, want errors.Is(..., context.Canceled)", err)
+		}
+	})
+
+	t.Run("DefaultTransientRetryBackoffCapAndDoubling", func(t *testing.T) {
+		cases := []struct {
+			attempt int
+			want    time.Duration
+		}{
+			{-1, 10 * time.Millisecond},
+			{0, 10 * time.Millisecond},
+			{1, 20 * time.Millisecond},
+			{2, 40 * time.Millisecond},
+			{3, 80 * time.Millisecond},
+			{4, 160 * time.Millisecond},
+			{5, 320 * time.Millisecond},
+			{6, 500 * time.Millisecond}, // capped
+			{7, 500 * time.Millisecond},
+			{15, 500 * time.Millisecond},
+		}
+		for _, tc := range cases {
+			got := DefaultTransientRetryBackoff(tc.attempt)
+			if got != tc.want {
+				t.Errorf("DefaultTransientRetryBackoff(%d) = %v, want %v", tc.attempt, got, tc.want)
+			}
+		}
+	})
 }

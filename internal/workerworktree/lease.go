@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -188,12 +189,22 @@ func SweepDeadWorktrees(root, wtRoot string, git GitRunner) DeadWorktreeSweepRep
 			lockedFile := filepath.Join(wtAdminDir, "locked")
 
 			var wtPath string
+			var rawGitdir string
 			if content, err := os.ReadFile(gitdirFile); err == nil {
-				wtPath = filepath.Dir(strings.TrimSpace(string(content)))
+				rawGitdir = strings.TrimSpace(string(content))
+				rawGitdir = strings.TrimPrefix(rawGitdir, "gitdir: ")
+				rawGitdir = strings.TrimSpace(rawGitdir)
+				wtPath = filepath.Dir(rawGitdir)
 			}
 
 			dead := false
 			stale := false
+
+			if isForeignPlatformRegistration(rawGitdir, wtPath) {
+				// Foreign-platform worktree that cannot be stat-ed locally.
+				// Preserve the registration so cross-platform worker checkouts are not wiped (#11814).
+				continue
+			}
 
 			if wtPath == "" {
 				dead = true
@@ -321,4 +332,49 @@ func SweepDeadWorktrees(root, wtRoot string, git GitRunner) DeadWorktreeSweepRep
 
 func sweepDeadWorktrees(root, wtRoot string, git GitRunner) {
 	_ = SweepDeadWorktrees(root, wtRoot, git)
+}
+
+// isForeignPlatformRegistration reports whether rawGitdir or wtPath represents a
+// foreign-platform absolute path that cannot be stat-ed locally (e.g. POSIX /mnt/... or
+// /home/... on Windows, or Windows C:\... or C:/... on Linux/macOS) (#11814).
+func isForeignPlatformRegistration(rawGitdir, wtPath string) bool {
+	if rawGitdir == "" && wtPath == "" {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		// On Windows, a foreign-platform path (e.g. Linux/WSL/macOS) starts with '/'
+		// and cannot be stat-ed on the local filesystem.
+		if strings.HasPrefix(rawGitdir, "/") || strings.HasPrefix(wtPath, "/") {
+			if !canStatLocally(wtPath) && !canStatLocally(rawGitdir) {
+				return true
+			}
+		}
+		return false
+	}
+	// On non-Windows, a foreign-platform path is a Windows absolute path (e.g. C:\... or C:/... or \\...).
+	if isWindowsAbsolutePath(rawGitdir) || isWindowsAbsolutePath(wtPath) {
+		if !canStatLocally(rawGitdir) && (wtPath == "." || !canStatLocally(wtPath)) {
+			return true
+		}
+	}
+	return false
+}
+
+func isWindowsAbsolutePath(p string) bool {
+	if len(p) >= 3 && isDriveLetter(p[0]) && p[1] == ':' && (p[2] == '/' || p[2] == '\\') {
+		return true
+	}
+	return strings.HasPrefix(p, `\\`)
+}
+
+func isDriveLetter(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+func canStatLocally(p string) bool {
+	if p == "" {
+		return false
+	}
+	_, err := os.Stat(p)
+	return err == nil
 }

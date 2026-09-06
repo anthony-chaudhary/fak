@@ -1,6 +1,8 @@
 package fleetspine
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -155,5 +157,107 @@ func TestMachineMapsShapeMatchesFold(t *testing.T) {
 	}
 	if age, ok := m["age_min"].(float64); !ok || age <= 0 {
 		t.Fatalf("age_min = %v, want positive float minutes", m["age_min"])
+	}
+}
+
+// TestHeartbeatEndpointEncodingAndRegistry tests that an optional Endpoint in Heartbeat:
+// 1. Is correctly encoded to and decoded from JSON.
+// 2. Defaults to empty string when omitted from JSON, maintaining backward compatibility.
+// 3. Omits the "endpoint" JSON key when empty (omitempty).
+// 4. Is preserved in Registry records, Snapshot Peer objects, and MachineMaps.
+func TestHeartbeatEndpointEncodingAndRegistry(t *testing.T) {
+	t0 := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+
+	// 1. Round-trip encoding/decoding with Endpoint populated.
+	hbWithEP := mkHB("peer-ep", t0)
+	hbWithEP.Endpoint = "http://10.0.1.5:8080"
+
+	dataWithEP, err := json.Marshal(hbWithEP)
+	if err != nil {
+		t.Fatalf("Marshal hbWithEP: %v", err)
+	}
+	if !strings.Contains(string(dataWithEP), `"endpoint":"http://10.0.1.5:8080"`) {
+		t.Fatalf("marshaled JSON missing endpoint: %s", string(dataWithEP))
+	}
+
+	decodedEP, ok := decodeHeartbeat(dataWithEP)
+	if !ok {
+		t.Fatalf("decodeHeartbeat failed for heartbeat with endpoint")
+	}
+	if decodedEP.Endpoint != "http://10.0.1.5:8080" {
+		t.Fatalf("decoded Endpoint = %q, want %q", decodedEP.Endpoint, "http://10.0.1.5:8080")
+	}
+
+	// 2. Backward compatibility: missing endpoint in JSON defaults to empty string.
+	legacyJSON := []byte(`{
+		"schema":"fak.fleetspine.heartbeat/v1",
+		"id":"peer-legacy",
+		"host":"legacy-host",
+		"state":"OK",
+		"app_version":"v1.0.0",
+		"sessions":1,
+		"generated_utc":"2026-07-01T12:00:00Z"
+	}`)
+	decodedLegacy, ok := decodeHeartbeat(legacyJSON)
+	if !ok {
+		t.Fatalf("decodeHeartbeat failed for legacy JSON")
+	}
+	if decodedLegacy.Endpoint != "" {
+		t.Fatalf("legacy decoded Endpoint = %q, want empty string", decodedLegacy.Endpoint)
+	}
+
+	// 3. omitempty: empty endpoint should not be present in marshaled JSON.
+	hbNoEP := mkHB("peer-no-ep", t0)
+	dataNoEP, err := json.Marshal(hbNoEP)
+	if err != nil {
+		t.Fatalf("Marshal hbNoEP: %v", err)
+	}
+	if strings.Contains(string(dataNoEP), `"endpoint"`) {
+		t.Fatalf("marshaled JSON should omit empty endpoint: %s", string(dataNoEP))
+	}
+
+	// 4. Registry and Snapshot preserve the Endpoint.
+	r := NewRegistry(RegistryConfig{SelfID: "me", MissWindow: 10 * time.Minute})
+	r.Ingest(hbWithEP, t0)
+	r.Ingest(decodedLegacy, t0)
+
+	snaps := r.Snapshot(t0)
+	if len(snaps) != 2 {
+		t.Fatalf("snapshot len = %d, want 2", len(snaps))
+	}
+
+	foundEP := false
+	foundLegacy := false
+	for _, p := range snaps {
+		if p.ID == "peer-ep" {
+			foundEP = true
+			if p.Endpoint != "http://10.0.1.5:8080" {
+				t.Errorf("snapshot peer-ep Endpoint = %q, want %q", p.Endpoint, "http://10.0.1.5:8080")
+			}
+		}
+		if p.ID == "peer-legacy" {
+			foundLegacy = true
+			if p.Endpoint != "" {
+				t.Errorf("snapshot peer-legacy Endpoint = %q, want empty string", p.Endpoint)
+			}
+		}
+	}
+	if !foundEP || !foundLegacy {
+		t.Fatalf("snapshot missing expected peers: foundEP=%v, foundLegacy=%v", foundEP, foundLegacy)
+	}
+
+	// 5. MachineMaps preserves endpoint when present.
+	maps := r.MachineMaps(t0.Add(time.Minute))
+	for _, m := range maps {
+		if m["id"] == "peer-ep" {
+			if ep, ok := m["endpoint"].(string); !ok || ep != "http://10.0.1.5:8080" {
+				t.Errorf("machine map peer-ep endpoint = %v, want %q", m["endpoint"], "http://10.0.1.5:8080")
+			}
+		}
+		if m["id"] == "peer-legacy" {
+			if _, ok := m["endpoint"]; ok {
+				t.Errorf("machine map peer-legacy should not carry endpoint, got %v", m["endpoint"])
+			}
+		}
 	}
 }

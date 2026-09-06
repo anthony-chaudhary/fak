@@ -826,6 +826,290 @@ func TestObserverSemanticScreen_BarrierTimeoutQuarantined(t *testing.T) {
 	}
 }
 
+func TestObserverSemanticScreen_BarrierTimeoutReadOnlyAllowed(t *testing.T) {
+	pool := NewPool(Config{
+		WorkerCount:        1,
+		QueueSize:          16,
+		BarrierTimeout:     10 * time.Millisecond,
+		RequireWitnessDiff: true,
+	})
+	_ = pool.Start()
+	defer pool.Close()
+
+	screen := NewObserverSemanticScreen(pool)
+	ctx := context.Background()
+	sessionID := "sess-screen-barrier-timeout-readonly"
+
+	sess := pool.getOrCreateSession(sessionID)
+	// Simulate an un-settled in-flight task that triggers barrier timeout
+	atomic.StoreInt64(&sess.inFlight, 1)
+	defer atomic.StoreInt64(&sess.inFlight, 0)
+
+	readTools := []string{"Read", "Grep", "Glob", "fak_read"}
+	for _, tool := range readTools {
+		call := &abi.ToolCall{
+			Tool:    tool,
+			TraceID: sessionID,
+			Meta: map[string]string{
+				"args": "query",
+			},
+		}
+		body := []byte("read contents safely")
+
+		advice := screen.ScreenResult(ctx, call, body)
+		if advice.Disposition != abi.ScreenAllow {
+			t.Fatalf("expected ScreenAllow on barrier timeout for read-only tool %s, got %v (reason: %v)", tool, advice.Disposition, advice.Reason)
+		}
+	}
+}
+
+func TestObserverSemanticScreen_BarrierTimeout_FailClosedOnUnknownTools(t *testing.T) {
+	pool := NewPool(Config{
+		WorkerCount:        1,
+		QueueSize:          16,
+		BarrierTimeout:     10 * time.Millisecond,
+		RequireWitnessDiff: true,
+	})
+	_ = pool.Start()
+	defer pool.Close()
+
+	screen := NewObserverSemanticScreen(pool)
+	ctx := context.Background()
+	sessionID := "sess-screen-barrier-timeout-unknown"
+
+	sess := pool.getOrCreateSession(sessionID)
+	// Simulate an un-settled in-flight task that triggers barrier timeout
+	atomic.StoreInt64(&sess.inFlight, 1)
+	defer atomic.StoreInt64(&sess.inFlight, 0)
+
+	unknownTools := []string{"powershell", "pwsh", "cmd", "sh", "zsh", "delete_file", "custom_mcp_op"}
+	for _, tool := range unknownTools {
+		call := &abi.ToolCall{
+			Tool:    tool,
+			TraceID: sessionID,
+			Meta: map[string]string{
+				"args": "exec",
+			},
+		}
+		body := []byte("command output")
+
+		advice := screen.ScreenResult(ctx, call, body)
+		if advice.Disposition != abi.ScreenQuarantine {
+			t.Fatalf("expected ScreenQuarantine on barrier timeout for unclassified tool %s, got %v", tool, advice.Disposition)
+		}
+		if advice.Reason != abi.ReasonIntegrityRefuted {
+			t.Fatalf("expected ReasonIntegrityRefuted for %s, got %v", tool, advice.Reason)
+		}
+		if advice.By != "observer:barrier_timeout" {
+			t.Fatalf("expected By='observer:barrier_timeout' for %s, got %q", tool, advice.By)
+		}
+	}
+
+	// Also verify that a read-only tool on a flagged session is quarantined on barrier timeout
+	flaggedSessionID := "sess-screen-barrier-timeout-flagged"
+	flaggedSess := pool.getOrCreateSession(flaggedSessionID)
+	flaggedSess.mu.Lock()
+	flaggedSess.flaggedChurn = true
+	flaggedSess.mu.Unlock()
+	atomic.StoreInt64(&flaggedSess.inFlight, 1)
+	defer atomic.StoreInt64(&flaggedSess.inFlight, 0)
+
+	readCall := &abi.ToolCall{
+		Tool:    "Read",
+		TraceID: flaggedSessionID,
+	}
+	advice := screen.ScreenResult(ctx, readCall, []byte("content"))
+	if advice.Disposition != abi.ScreenQuarantine {
+		t.Fatalf("expected ScreenQuarantine on barrier timeout for flagged session, got %v", advice.Disposition)
+	}
+	if advice.Reason != abi.ReasonIntegrityRefuted {
+		t.Fatalf("expected ReasonIntegrityRefuted for flagged session, got %v", advice.Reason)
+	}
+	if advice.By != "observer:barrier_timeout_flagged" {
+		t.Fatalf("expected By='observer:barrier_timeout_flagged' for flagged session, got %q", advice.By)
+	}
+}
+
+func TestObserverSemanticScreen_BarrierTimeout_PreservesFlaggedQuarantine(t *testing.T) {
+	pool := NewPool(Config{
+		WorkerCount:        1,
+		QueueSize:          16,
+		BarrierTimeout:     10 * time.Millisecond,
+		RequireWitnessDiff: true,
+	})
+	_ = pool.Start()
+	defer pool.Close()
+
+	screen := NewObserverSemanticScreen(pool)
+	ctx := context.Background()
+
+	// 1. Churn flagged session
+	sessionChurnID := "sess-screen-preserve-quarantine-churn"
+	sessChurn := pool.getOrCreateSession(sessionChurnID)
+	sessChurn.mu.Lock()
+	sessChurn.flaggedChurn = true
+	sessChurn.mu.Unlock()
+
+	atomic.StoreInt64(&sessChurn.inFlight, 1)
+	defer atomic.StoreInt64(&sessChurn.inFlight, 0)
+
+	callChurn := &abi.ToolCall{
+		Tool:    "Read",
+		TraceID: sessionChurnID,
+	}
+	adviceChurn := screen.ScreenResult(ctx, callChurn, []byte("content"))
+	if adviceChurn.Disposition != abi.ScreenQuarantine {
+		t.Fatalf("expected ScreenQuarantine on barrier timeout for churn-flagged session, got %v", adviceChurn.Disposition)
+	}
+	if adviceChurn.Reason != abi.ReasonIntegrityRefuted {
+		t.Fatalf("expected ReasonIntegrityRefuted for churn-flagged session, got %v", adviceChurn.Reason)
+	}
+	if adviceChurn.By != "observer:barrier_timeout_flagged" {
+		t.Fatalf("expected By='observer:barrier_timeout_flagged', got %q", adviceChurn.By)
+	}
+	if !sessChurn.isFlagged() {
+		t.Fatal("expected session to remain flagged after barrier timeout")
+	}
+
+	// Verify that evaluation happened on timeout: observation history is updated
+	histChurn := pool.GetSessionHistory(sessionChurnID)
+	if len(histChurn) != 1 {
+		t.Fatalf("expected 1 evaluated observation in history on barrier timeout, got %d", len(histChurn))
+	}
+	if histChurn[0].Tool != "Read" {
+		t.Fatalf("expected evaluated tool 'Read', got %s", histChurn[0].Tool)
+	}
+	if histChurn[0].StepVerdict != StepChurn {
+		t.Fatalf("expected evaluated StepVerdict=StepChurn, got %s", histChurn[0].StepVerdict)
+	}
+
+	// Second read call maintains repeat count and preserves quarantine
+	adviceChurn2 := screen.ScreenResult(ctx, callChurn, []byte("content 2"))
+	if adviceChurn2.Disposition != abi.ScreenQuarantine {
+		t.Fatalf("expected ScreenQuarantine on second barrier timeout, got %v", adviceChurn2.Disposition)
+	}
+	if adviceChurn2.By != "observer:barrier_timeout_flagged" {
+		t.Fatalf("expected By='observer:barrier_timeout_flagged' on second timeout, got %q", adviceChurn2.By)
+	}
+	histChurn2 := pool.GetSessionHistory(sessionChurnID)
+	if len(histChurn2) != 2 {
+		t.Fatalf("expected 2 evaluated observations in history on second barrier timeout, got %d", len(histChurn2))
+	}
+	sessChurn.mu.Lock()
+	repCount := sessChurn.repeatCount
+	sessChurn.mu.Unlock()
+	if repCount != 2 {
+		t.Fatalf("expected repeat count=2 after second evaluated timeout call, got %d", repCount)
+	}
+
+	// 2. Regress flagged session
+	sessionRegressID := "sess-screen-preserve-quarantine-regress"
+	sessRegress := pool.getOrCreateSession(sessionRegressID)
+	sessRegress.mu.Lock()
+	sessRegress.flaggedRegress = true
+	sessRegress.mu.Unlock()
+
+	atomic.StoreInt64(&sessRegress.inFlight, 1)
+	defer atomic.StoreInt64(&sessRegress.inFlight, 0)
+
+	callRegress := &abi.ToolCall{
+		Tool:    "Grep",
+		TraceID: sessionRegressID,
+	}
+	adviceRegress := screen.ScreenResult(ctx, callRegress, []byte("content"))
+	if adviceRegress.Disposition != abi.ScreenQuarantine {
+		t.Fatalf("expected ScreenQuarantine on barrier timeout for regress-flagged session, got %v", adviceRegress.Disposition)
+	}
+	if adviceRegress.Reason != abi.ReasonIntegrityRefuted {
+		t.Fatalf("expected ReasonIntegrityRefuted for regress-flagged session, got %v", adviceRegress.Reason)
+	}
+	if adviceRegress.By != "observer:barrier_timeout_flagged" {
+		t.Fatalf("expected By='observer:barrier_timeout_flagged' for regress session, got %q", adviceRegress.By)
+	}
+	if !sessRegress.isFlagged() {
+		t.Fatal("expected regress session to remain flagged after barrier timeout")
+	}
+	sessRegress.mu.Lock()
+	if sessRegress.kvPrefixWarm {
+		sessRegress.mu.Unlock()
+		t.Fatal("expected regress session kvPrefixWarm to remain false after barrier timeout")
+	}
+	sessRegress.mu.Unlock()
+
+	// Verify evaluation happened on timeout for regress session
+	histRegress := pool.GetSessionHistory(sessionRegressID)
+	if len(histRegress) != 1 {
+		t.Fatalf("expected 1 evaluated observation in history on barrier timeout for regress session, got %d", len(histRegress))
+	}
+	if histRegress[0].Tool != "Grep" {
+		t.Fatalf("expected evaluated tool 'Grep', got %s", histRegress[0].Tool)
+	}
+	if histRegress[0].StepVerdict != StepRegress {
+		t.Fatalf("expected evaluated StepVerdict=StepRegress, got %s", histRegress[0].StepVerdict)
+	}
+}
+
+func TestObserverSemanticScreen_ScreenResult_ContextDeadlineExceeded(t *testing.T) {
+	pool := NewPool(Config{
+		WorkerCount:        1,
+		QueueSize:          16,
+		BarrierTimeout:     500 * time.Millisecond,
+		RequireWitnessDiff: true,
+	})
+	_ = pool.Start()
+	defer pool.Close()
+
+	screen := NewObserverSemanticScreen(pool)
+	sessionID := "sess-screen-context-deadline"
+
+	sess := pool.getOrCreateSession(sessionID)
+	// Simulate an un-settled in-flight task that forces the barrier to wait
+	atomic.StoreInt64(&sess.inFlight, 1)
+	defer atomic.StoreInt64(&sess.inFlight, 0)
+
+	call := &abi.ToolCall{
+		Tool:    "Edit",
+		TraceID: sessionID,
+		Meta: map[string]string{
+			"diff": "@@ -1 +1 @@\n-old\n+new",
+		},
+	}
+	body := []byte("applied edit successfully")
+
+	// 1. Context deadline exceeded during barrier wait
+	ctxDeadline, cancelDeadline := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancelDeadline()
+
+	adviceDeadline := screen.ScreenResult(ctxDeadline, call, body)
+	if adviceDeadline.Disposition == abi.ScreenAllow && adviceDeadline.By == "observer:advance" {
+		t.Fatalf("expected context deadline exceeded not to return ScreenAllow with observer:advance, got %+v", adviceDeadline)
+	}
+	if adviceDeadline.Disposition != abi.ScreenQuarantine {
+		t.Fatalf("expected ScreenQuarantine on context deadline exceeded, got %v", adviceDeadline.Disposition)
+	}
+	if adviceDeadline.Reason != abi.ReasonIntegrityRefuted {
+		t.Fatalf("expected ReasonIntegrityRefuted on context deadline exceeded, got %v", adviceDeadline.Reason)
+	}
+
+	// 2. Context cancellation during barrier wait
+	ctxCancel, cancelNow := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		cancelNow()
+	}()
+
+	adviceCancel := screen.ScreenResult(ctxCancel, call, body)
+	if adviceCancel.Disposition == abi.ScreenAllow && adviceCancel.By == "observer:advance" {
+		t.Fatalf("expected context cancellation not to return ScreenAllow with observer:advance, got %+v", adviceCancel)
+	}
+	if adviceCancel.Disposition != abi.ScreenQuarantine {
+		t.Fatalf("expected ScreenQuarantine on context cancellation, got %v", adviceCancel.Disposition)
+	}
+	if adviceCancel.Reason != abi.ReasonIntegrityRefuted {
+		t.Fatalf("expected ReasonIntegrityRefuted on context cancellation, got %v", adviceCancel.Reason)
+	}
+}
+
 func TestObserverSemanticScreen_VerifyToolCall_PreExecution(t *testing.T) {
 	pool := NewPool(Config{ChurnThreshold: 2, RegressThreshold: 3})
 	_ = pool.Start()
@@ -928,12 +1212,12 @@ func TestObserveSyncBarrier_InFlightTaskWait(t *testing.T) {
 	sess := p.getOrCreateSession(sessionID)
 
 	// Simulate an in-flight async task
-	atomic.StoreInt64(&sess.inFlight, 1)
+	sess.incInFlight()
 
 	// In a background goroutine, simulate task finishing after 5ms
 	go func() {
 		time.Sleep(5 * time.Millisecond)
-		atomic.StoreInt64(&sess.inFlight, 0)
+		sess.decInFlight()
 	}()
 
 	obs := StepObservation{
@@ -954,6 +1238,117 @@ func TestObserveSyncBarrier_InFlightTaskWait(t *testing.T) {
 	}
 	if elapsed < 4*time.Millisecond {
 		t.Fatalf("expected barrier to wait for in-flight task, elapsed %s", elapsed)
+	}
+}
+
+func TestObserveSyncBarrier_ConditionVariableNotification(t *testing.T) {
+	p := NewPool(Config{
+		WorkerCount:    2,
+		QueueSize:      16,
+		BarrierTimeout: 200 * time.Millisecond,
+	})
+	if err := p.Start(); err != nil {
+		t.Fatalf("failed to start pool: %v", err)
+	}
+	defer p.Close()
+
+	ctx := context.Background()
+	sessionID := "sess-cond-var"
+	sess := p.getOrCreateSession(sessionID)
+
+	// 1. Verify sync.Cond on sess.mu is signaled/broadcast when inFlight drops to 0
+	sess.incInFlight()
+	condWoken := make(chan struct{})
+	go func() {
+		sess.mu.Lock()
+		for atomic.LoadInt64(&sess.inFlight) > 0 {
+			sess.cond.Wait()
+		}
+		sess.mu.Unlock()
+		close(condWoken)
+	}()
+
+	time.Sleep(5 * time.Millisecond)
+	sess.decInFlight()
+
+	select {
+	case <-condWoken:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timed out waiting for sess.cond.Wait() condition broadcast")
+	}
+
+	// 2. Real async exploration turn settles barrier without 50µs polling timer
+	readCh := p.ObserveAsync(ctx, StepObservation{
+		SessionID: sessionID,
+		Tool:      "Read",
+		Args:      "main.go",
+		Result:    "package main",
+	})
+
+	writeObs := StepObservation{
+		SessionID: sessionID,
+		Tool:      "Write",
+		Diff:      "@@ -1 +1 @@\n+new",
+	}
+	res, err := p.ObserveSyncBarrier(ctx, writeObs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.StepVerdict != STEP_ADVANCE {
+		t.Fatalf("expected STEP_ADVANCE, got %s", res.StepVerdict)
+	}
+	<-readCh
+}
+
+func TestObserveSyncBarrier_ReadOnlyBypassesInFlightWait(t *testing.T) {
+	p := NewPool(Config{
+		WorkerCount:    1,
+		QueueSize:      16,
+		BarrierTimeout: 100 * time.Millisecond,
+	})
+	_ = p.Start()
+	defer p.Close()
+
+	ctx := context.Background()
+	sessionID := "sess-readonly-bypass-inflight"
+	sess := p.getOrCreateSession(sessionID)
+
+	// Simulate an active in-flight async task that does not finish
+	atomic.StoreInt64(&sess.inFlight, 1)
+	defer atomic.StoreInt64(&sess.inFlight, 0)
+
+	readTools := []string{"Read", "Grep", "Glob", "fak_read"}
+	for _, tool := range readTools {
+		obs := StepObservation{
+			SessionID: sessionID,
+			Tool:      tool,
+			Args:      "path/to/target",
+			Result:    "sample content",
+		}
+
+		start := time.Now()
+		res, err := p.ObserveSyncBarrier(ctx, obs)
+		elapsed := time.Since(start)
+
+		if err != nil {
+			t.Fatalf("expected read-only tool %s to succeed without timeout error, got %v", tool, err)
+		}
+		if elapsed >= 10*time.Millisecond {
+			t.Fatalf("expected read-only tool %s to bypass in-flight wait (<10ms), took %s", tool, elapsed)
+		}
+		if res.BarrierLatency > 2*time.Millisecond {
+			t.Fatalf("expected BarrierLatency < 2ms for read-only bypass on %s, got %s", tool, res.BarrierLatency)
+		}
+		if res.StepVerdict != STEP_ADVANCE {
+			t.Fatalf("expected STEP_ADVANCE for %s, got %s", tool, res.StepVerdict)
+		}
+	}
+
+	if got := p.BarrierTimeouts(); got != 0 {
+		t.Fatalf("expected BarrierTimeouts to be 0 for read-only bypasses, got %d", got)
+	}
+	if got := p.DetailedStats().BarrierTimeouts; got != 0 {
+		t.Fatalf("expected DetailedStats().BarrierTimeouts to be 0, got %d", got)
 	}
 }
 
@@ -983,6 +1378,99 @@ func TestObserveSyncBarrier_TimeoutWaitingForInFlight(t *testing.T) {
 	_, err := p.ObserveSyncBarrier(ctx, obs)
 	if !errors.Is(err, ErrBarrierTimeout) {
 		t.Fatalf("expected ErrBarrierTimeout, got %v", err)
+	}
+	if got := p.BarrierTimeouts(); got != 1 {
+		t.Fatalf("expected BarrierTimeouts to be 1, got %d", got)
+	}
+	if got := p.DetailedStats().BarrierTimeouts; got != 1 {
+		t.Fatalf("expected DetailedStats().BarrierTimeouts to be 1, got %d", got)
+	}
+}
+
+func TestObserveSyncBarrier_IncrementsBarrierTimeouts(t *testing.T) {
+	p := NewPool(Config{
+		WorkerCount:    1,
+		QueueSize:      16,
+		BarrierTimeout: 10 * time.Millisecond,
+	})
+	_ = p.Start()
+	defer p.Close()
+
+	if p.BarrierTimeouts() != 0 {
+		t.Fatalf("expected initial BarrierTimeouts=0, got %d", p.BarrierTimeouts())
+	}
+	if p.DetailedStats().BarrierTimeouts != 0 {
+		t.Fatalf("expected initial DetailedStats().BarrierTimeouts=0, got %d", p.DetailedStats().BarrierTimeouts)
+	}
+
+	ctx := context.Background()
+
+	// 1. Successful barrier does not increment timeout counter
+	obsSuccess := StepObservation{
+		SessionID: "sess-timeouts",
+		Tool:      "Edit",
+		Diff:      "@@ -1 +1 @@\n+added",
+	}
+	if _, err := p.ObserveSyncBarrier(ctx, obsSuccess); err != nil {
+		t.Fatalf("unexpected error on successful barrier: %v", err)
+	}
+	if p.BarrierTimeouts() != 0 {
+		t.Fatalf("expected BarrierTimeouts=0 after successful barrier, got %d", p.BarrierTimeouts())
+	}
+
+	// 2. Timeout increment
+	sess := p.getOrCreateSession("sess-timeouts")
+	atomic.StoreInt64(&sess.inFlight, 1)
+	defer atomic.StoreInt64(&sess.inFlight, 0)
+
+	obsTimeout := StepObservation{
+		SessionID: "sess-timeouts",
+		Tool:      "Write",
+		Diff:      "@@ -1 +1 @@\n+added",
+	}
+
+	_, err := p.ObserveSyncBarrier(ctx, obsTimeout)
+	if !errors.Is(err, ErrBarrierTimeout) {
+		t.Fatalf("expected ErrBarrierTimeout, got %v", err)
+	}
+	if got := p.BarrierTimeouts(); got != 1 {
+		t.Fatalf("expected BarrierTimeouts=1 after first timeout, got %d", got)
+	}
+
+	// 3. Second timeout increment
+	_, err = p.ObserveSyncBarrier(ctx, obsTimeout)
+	if !errors.Is(err, ErrBarrierTimeout) {
+		t.Fatalf("expected ErrBarrierTimeout on second call, got %v", err)
+	}
+	if got := p.BarrierTimeouts(); got != 2 {
+		t.Fatalf("expected BarrierTimeouts=2 after second timeout, got %d", got)
+	}
+
+	// 4. Verify DetailedStats and backwards-compatible Stats()
+	st := p.DetailedStats()
+	if st.BarrierTimeouts != 2 {
+		t.Fatalf("expected DetailedStats().BarrierTimeouts=2, got %d", st.BarrierTimeouts)
+	}
+	if st.BarriersTotal != 3 {
+		t.Fatalf("expected DetailedStats().BarriersTotal=3, got %d", st.BarriersTotal)
+	}
+
+	total, asyncCount, barriers, _, _, _, _ := p.Stats()
+	if barriers != 3 || total != 3 || asyncCount != 0 {
+		t.Fatalf("expected Stats() total=3, barriers=3, got total=%d, async=%d, barriers=%d", total, asyncCount, barriers)
+	}
+
+	// 5. Nil safety
+	var nilPool *Pool
+	if nilPool.BarrierTimeouts() != 0 {
+		t.Fatalf("expected nil pool BarrierTimeouts()=0, got %d", nilPool.BarrierTimeouts())
+	}
+	if nilPool.DetailedStats().BarrierTimeouts != 0 {
+		t.Fatalf("expected nil pool DetailedStats().BarrierTimeouts=0, got %d", nilPool.DetailedStats().BarrierTimeouts)
+	}
+	nTotal, _, _, _, _, _, _ := nilPool.Stats()
+	if nTotal != 0 {
+		t.Fatalf("expected nil pool Stats() total=0, got %d", nTotal)
 	}
 }
 

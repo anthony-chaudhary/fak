@@ -432,7 +432,9 @@ func BenchmarkRenderRepeatReport(b *testing.B) {
 func BenchmarkProcessSupervisor(b *testing.B) {
 	b.Run("PollActive", func(b *testing.B) {
 		sup := NewProcessSupervisor()
-		_ = sup.RegisterProcess(42, "worker --sync")
+		if handle := sup.RegisterProcess(42, "worker --sync"); handle == nil {
+			b.Fatal("RegisterProcess returned nil handle")
+		}
 
 		b.ReportAllocs()
 		b.ResetTimer()
@@ -446,15 +448,89 @@ func BenchmarkProcessSupervisor(b *testing.B) {
 	})
 
 	b.Run("PollTombstoned", func(b *testing.B) {
-		sup := NewProcessSupervisor(WithPollLivelockThreshold(1_000_000_000))
-		sup.RegisterProcess(99, "worker --sync")
+		sup := NewProcessSupervisor(WithPollLivelockThreshold(DefaultPollLivelockThreshold))
+		if handle := sup.RegisterProcess(99, "worker --sync"); handle == nil {
+			b.Fatal("RegisterProcess returned nil handle")
+		}
 		sup.RecordExit(99, 0, "ok", "", 500*time.Millisecond)
+
+		sup.ResetConsecutivePolls(99)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if (i % DefaultPollLivelockThreshold) == 0 {
+				sup.ResetConsecutivePolls(99)
+			}
+			st, err := sup.PollProcess(99)
+			if err != nil {
+				b.Fatalf("PollProcess: %v", err)
+			}
+			benchProcessStatus = st
+		}
+	})
+
+	b.Run("PollTombstonedCircuitBroken", func(b *testing.B) {
+		sup := NewProcessSupervisor(WithPollLivelockThreshold(DefaultPollLivelockThreshold))
+		if handle := sup.RegisterProcess(99, "worker --sync"); handle == nil {
+			b.Fatal("RegisterProcess returned nil handle")
+		}
+		sup.RecordExit(99, 0, "ok", "", 500*time.Millisecond)
+
+		// Exceed threshold so suppression is permanently tripped
+		for i := 0; i <= DefaultPollLivelockThreshold; i++ {
+			st, err := sup.PollProcess(99)
+			benchProcessStatus = st
+			if i < DefaultPollLivelockThreshold && err != nil {
+				b.Fatalf("pre-trip poll %d failed: %v", i, err)
+			}
+			if i == DefaultPollLivelockThreshold && err == nil {
+				b.Fatal("expected livelock suppression on trip attempt, got nil")
+			}
+		}
 
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			st, _ := sup.PollProcess(99)
+			st, err := sup.PollProcess(99)
+			if err == nil {
+				b.Fatal("PollProcess expected livelock suppression error, got nil")
+			}
+			if _, ok := err.(*ErrLivelockSuppressed); !ok {
+				b.Fatalf("PollProcess expected *ErrLivelockSuppressed, got %T: %v", err, err)
+			}
 			benchProcessStatus = st
 		}
 	})
+}
+
+// TestBenchmarkOperationsSanity ensures all benchmark operations run cleanly without panics.
+func TestBenchmarkOperationsSanity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping benchmark sanity in short mode")
+	}
+	benchmarks := []struct {
+		name string
+		fn   func(b *testing.B)
+	}{
+		{"BenchmarkFold_Sample", BenchmarkFold_Sample},
+		{"BenchmarkFold_Scaling", BenchmarkFold_Scaling},
+		{"BenchmarkTable_Subtree", BenchmarkTable_Subtree},
+		{"BenchmarkParseEvents", BenchmarkParseEvents},
+		{"BenchmarkParseTail", BenchmarkParseTail},
+		{"BenchmarkCompactJournal", BenchmarkCompactJournal},
+		{"BenchmarkNormalize", BenchmarkNormalize},
+		{"BenchmarkClassifyRepeats", BenchmarkClassifyRepeats},
+		{"BenchmarkReuseStore_Admit", BenchmarkReuseStore_Admit},
+		{"BenchmarkRenderRepeatReport", BenchmarkRenderRepeatReport},
+		{"BenchmarkProcessSupervisor", BenchmarkProcessSupervisor},
+	}
+
+	for _, bm := range benchmarks {
+		t.Run(bm.name, func(t *testing.T) {
+			res := testing.Benchmark(bm.fn)
+			if res.N <= 0 {
+				t.Fatalf("%s failed to execute iterations: res.N=%d", bm.name, res.N)
+			}
+		})
+	}
 }

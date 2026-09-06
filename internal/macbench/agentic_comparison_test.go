@@ -42,7 +42,7 @@ func validAgenticComparisonPacket() AgenticComparisonPacket {
 		PromptTokens:      483840,
 		ReusedTokens:      469504,
 		ReuseRatio:        0.97037,
-		TotalWallMS:       412500.0,
+		TotalWallMS:       410900.0,
 		PrefillMS:         182400.0,
 		DecodeMS:          228500.0,
 		QueueContentionMS: 1600.0,
@@ -50,7 +50,7 @@ func validAgenticComparisonPacket() AgenticComparisonPacket {
 		P95TTFTMS:         12.9,
 		PeakMemoryMB:      22208.0,
 		AgentsPerGB:       0.18,
-		EffectiveTokS:     12.41,
+		EffectiveTokS:     12.46,
 		Quality: ComparisonQualityResult{
 			PolicyRef:     "strict-token-parity",
 			PolicyVersion: "1",
@@ -78,7 +78,7 @@ func validAgenticComparisonPacket() AgenticComparisonPacket {
 		PromptTokens:      483840,
 		ReusedTokens:      0,
 		ReuseRatio:        0.0,
-		TotalWallMS:       1732500.0,
+		TotalWallMS:       786100.0,
 		PrefillMS:         504800.0,
 		DecodeMS:          281300.0,
 		QueueContentionMS: 946400.0,
@@ -86,7 +86,7 @@ func validAgenticComparisonPacket() AgenticComparisonPacket {
 		P95TTFTMS:         253440.0,
 		PeakMemoryMB:      25792.0,
 		AgentsPerGB:       0.16,
-		EffectiveTokS:     2.96,
+		EffectiveTokS:     6.51,
 		Quality: ComparisonQualityResult{
 			PolicyRef:     "strict-token-parity",
 			PolicyVersion: "1",
@@ -128,11 +128,12 @@ func validAgenticComparisonPacket() AgenticComparisonPacket {
 		QualityPolicy: qualityPolicy,
 		Arms:          []AgenticComparisonArm{fakArm, llamaArm},
 		Summary: AgenticSummary{
-			SpeedupRatio:   4.20,
+			SpeedupRatio:   1.91,
 			MemorySavedMB:  3584.0,
 			TTFTSpeedupP50: 6704.76,
 			Verified:       true,
 		},
+		MinSpeedupRatio: 1.50,
 	}
 }
 
@@ -140,6 +141,59 @@ func TestValidateAgenticComparisonPacket_HappyPath(t *testing.T) {
 	packet := validAgenticComparisonPacket()
 	if err := ValidateAgenticComparisonPacket(packet); err != nil {
 		t.Fatalf("ValidateAgenticComparisonPacket failed on valid packet: %v", err)
+	}
+}
+
+func TestValidateAgenticComparisonPacket_LegacyAccounting(t *testing.T) {
+	packet := validAgenticComparisonPacket()
+	for i := range packet.Arms {
+		packet.Arms[i].TotalWallMS = packet.Arms[i].PrefillMS + packet.Arms[i].DecodeMS + packet.Arms[i].QueueContentionMS
+	}
+	packet.Summary.SpeedupRatio = packet.Arms[1].TotalWallMS / packet.Arms[0].TotalWallMS
+	if err := ValidateAgenticComparisonPacket(packet); err != nil {
+		t.Fatalf("expected legacy packet with queue contention in total_wall_ms to pass: %v", err)
+	}
+}
+
+func TestValidateAgenticComparisonPacket_HonestBaselineQueueContention(t *testing.T) {
+	packet := validAgenticComparisonPacket()
+
+	// Ensure QueueContentionMS > 0 on both arms, but not included in TotalWallMS.
+	for i := range packet.Arms {
+		arm := &packet.Arms[i]
+		if arm.QueueContentionMS <= 0 {
+			t.Fatalf("expected arm %s to have QueueContentionMS > 0, got %f", arm.Name, arm.QueueContentionMS)
+		}
+		if arm.TotalWallMS != arm.PrefillMS+arm.DecodeMS {
+			t.Fatalf("expected arm %s TotalWallMS to equal PrefillMS + DecodeMS, got %f != %f + %f",
+				arm.Name, arm.TotalWallMS, arm.PrefillMS, arm.DecodeMS)
+		}
+	}
+
+	// 1. Honest packet with explicit MinSpeedupRatio (1.50) passes.
+	packet.MinSpeedupRatio = 1.50
+	if err := ValidateAgenticComparisonPacket(packet); err != nil {
+		t.Fatalf("expected honest packet with MinSpeedupRatio=1.50 to pass: %v", err)
+	}
+
+	// 2. Honest packet with MinSpeedupRatio=0 (default honest baseline >= 1.50) passes.
+	packet.MinSpeedupRatio = 0
+	if err := ValidateAgenticComparisonPacket(packet); err != nil {
+		t.Fatalf("expected honest packet with default MinSpeedupRatio=0 to pass: %v", err)
+	}
+
+	// 3. Honest packet with MinSpeedupRatio set below actual speedup (e.g. 1.80 <= 1.91) passes.
+	packet.MinSpeedupRatio = 1.80
+	if err := ValidateAgenticComparisonPacket(packet); err != nil {
+		t.Fatalf("expected honest packet with MinSpeedupRatio=1.80 to pass: %v", err)
+	}
+
+	// 4. Honest packet with MinSpeedupRatio set above actual speedup (e.g. 2.00 > 1.91) fails closed.
+	packet.MinSpeedupRatio = 2.00
+	if err := ValidateAgenticComparisonPacket(packet); err == nil {
+		t.Fatal("expected packet with MinSpeedupRatio=2.00 to fail when speedup is 1.91, got nil")
+	} else if !strings.Contains(err.Error(), "summary.speedup_ratio") {
+		t.Fatalf("expected error containing summary.speedup_ratio, got: %v", err)
 	}
 }
 
@@ -263,11 +317,36 @@ func TestValidateAgenticComparisonPacket_FailsClosed(t *testing.T) {
 			wantErr: "llama.cpp.runtime",
 		},
 		{
-			name: "speedup ratio below 4.0x threshold",
+			name: "speedup ratio below 1.50x threshold",
 			mutate: func(p *AgenticComparisonPacket) {
-				p.Summary.SpeedupRatio = 3.50
-				p.Arms[1].TotalWallMS = p.Arms[0].TotalWallMS * 3.50
-				p.Arms[1].PrefillMS = p.Arms[1].TotalWallMS - p.Arms[1].DecodeMS - p.Arms[1].QueueContentionMS
+				p.Summary.SpeedupRatio = 1.20
+				p.Arms[1].TotalWallMS = p.Arms[0].TotalWallMS * 1.20
+				p.Arms[1].PrefillMS = p.Arms[1].TotalWallMS - p.Arms[1].DecodeMS
+			},
+			wantErr: "summary.speedup_ratio",
+		},
+		{
+			name: "speedup ratio below default 1.50x threshold when MinSpeedupRatio is 0",
+			mutate: func(p *AgenticComparisonPacket) {
+				p.MinSpeedupRatio = 0
+				p.Summary.SpeedupRatio = 1.20
+				p.Arms[1].TotalWallMS = p.Arms[0].TotalWallMS * 1.20
+				p.Arms[1].PrefillMS = p.Arms[1].TotalWallMS - p.Arms[1].DecodeMS
+			},
+			wantErr: "summary.speedup_ratio",
+		},
+		{
+			name: "speedup ratio below explicit MinSpeedupRatio",
+			mutate: func(p *AgenticComparisonPacket) {
+				p.MinSpeedupRatio = 2.00
+			},
+			wantErr: "summary.speedup_ratio",
+		},
+		{
+			name: "policy requesting true 4x fails closed on honest speedup",
+			mutate: func(p *AgenticComparisonPacket) {
+				p.MinSpeedupRatio = 0
+				p.QualityPolicy.ID = "strict-token-parity-true-4x"
 			},
 			wantErr: "summary.speedup_ratio",
 		},

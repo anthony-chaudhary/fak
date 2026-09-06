@@ -62,6 +62,11 @@ func TestNormalizeTree(t *testing.T) {
 		`C:\`:                          "",
 		"c:/work/fak/internal/gateway": "",
 		`c:\work\fak\internal\gateway`: "",
+		"C:internal/gateway":           "",
+		"d:foo/bar.go":                 "",
+		"./C:foo":                      "",
+		`.\C:\work\fak`:                "",
+		"a/../C:foo":                   "",
 	}
 	for in, want := range cases {
 		if got := NormalizeTree(in); got != want {

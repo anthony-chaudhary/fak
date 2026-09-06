@@ -464,24 +464,70 @@ func Build(root string, write bool) (Receipt, error) {
 }
 
 // EnsureSync checks parity with Build(root, false) and synchronizes adapters with Build(root, true) if needed.
-// If Build(root, false) is in parity (ZeroUnexplainedGaps with no stale), returns (r, false, nil).
-// Otherwise, calls Build(root, true) and returns (syncedReceipt, true, syncErr).
+// When the workspace defines an .opencode directory or plugin asset, it also verifies and synchronizes the
+// OpenCode plugin asset enforcing cross-harness lease admission.
+// If workspace assets are in parity, returns (r, false, nil).
+// Otherwise, synchronizes missing/stale assets and returns (syncedReceipt, true, syncErr).
 func EnsureSync(root string) (Receipt, bool, error) {
 	r, err := Build(root, false)
-	if err == nil && r.ZeroUnexplainedGaps && len(r.Harnesses["codex"].Stale) == 0 && len(r.Harnesses["opencode"].Stale) == 0 {
+	opencodeDir := filepath.Join(root, ".opencode")
+	pluginPath := filepath.Join(root, filepath.FromSlash(OpenCodePluginPath))
+	hasOpenCode := false
+	if info, statErr := os.Stat(opencodeDir); statErr == nil && info.IsDir() {
+		hasOpenCode = true
+	} else if _, statErr := os.Stat(pluginPath); statErr == nil {
+		hasOpenCode = true
+	}
+
+	pluginNeedsSync := false
+	if hasOpenCode {
+		if pluginErr := VerifyOpenCodePlugin(root); pluginErr != nil {
+			pluginNeedsSync = true
+		}
+	}
+
+	if err == nil && r.ZeroUnexplainedGaps && len(r.Harnesses["codex"].Stale) == 0 && len(r.Harnesses["opencode"].Stale) == 0 && !pluginNeedsSync {
 		return r, false, nil
 	}
+
 	syncedReceipt, syncErr := Build(root, true)
-	return syncedReceipt, true, syncErr
+	if syncErr != nil {
+		return syncedReceipt, true, syncErr
+	}
+	if hasOpenCode {
+		if pluginErr := EnsureOpenCodePlugin(root, true); pluginErr != nil {
+			return syncedReceipt, true, pluginErr
+		}
+	}
+	return syncedReceipt, true, nil
 }
 
 // Ensure checks parity with Build(root, false) and synchronizes adapters with Build(root, true) if autoSync is true.
+// When autoSync is true and the workspace defines an .opencode directory, it also ensures the OpenCode plugin asset
+// is synchronized. When autoSync is false and an .opencode directory or plugin exists, its lease admission invariants are verified.
 func Ensure(root string, autoSync bool) (Receipt, error) {
 	if autoSync {
 		r, _, err := EnsureSync(root)
 		return r, err
 	}
-	return Build(root, false)
+	r, err := Build(root, false)
+	if err != nil {
+		return r, err
+	}
+	opencodeDir := filepath.Join(root, ".opencode")
+	pluginPath := filepath.Join(root, filepath.FromSlash(OpenCodePluginPath))
+	hasOpenCode := false
+	if info, statErr := os.Stat(opencodeDir); statErr == nil && info.IsDir() {
+		hasOpenCode = true
+	} else if _, statErr := os.Stat(pluginPath); statErr == nil {
+		hasOpenCode = true
+	}
+	if hasOpenCode {
+		if pluginErr := VerifyOpenCodePlugin(root); pluginErr != nil {
+			return r, pluginErr
+		}
+	}
+	return r, nil
 }
 
 // VerifyOpenCodeSnapshot asserts that opencode.json exists in root and explicitly sets "snapshot": false
@@ -506,3 +552,215 @@ func VerifyOpenCodeSnapshot(root string) error {
 	}
 	return nil
 }
+
+// OpenCodePluginPath is the workspace-relative path to the OpenCode DOS proof guard plugin.
+const OpenCodePluginPath = ".opencode/plugins/dos-proof-guard.js"
+
+// VerifyOpenCodePlugin asserts that .opencode/plugins/dos-proof-guard.js exists in root,
+// is non-empty, and enforces cross-harness lease admission before native OpenCode mutations.
+func VerifyOpenCodePlugin(root string) error {
+	path := filepath.Join(root, filepath.FromSlash(OpenCodePluginPath))
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read opencode plugin %s: %w", path, err)
+	}
+	content := string(b)
+	if strings.TrimSpace(content) == "" {
+		return fmt.Errorf("opencode plugin %s is empty", path)
+	}
+	requiredChecks := []struct {
+		pattern string
+		desc    string
+	}{
+		{"tool.execute.before", "pre-mutation execution hook"},
+		{"write", "write tool mutation interception"},
+		{"edit", "edit tool mutation interception"},
+		{"apply_patch", "apply_patch tool mutation interception"},
+		{"leaseref", "FAK leaseref admission verification"},
+		{"loop", "FAK loop region admission check"},
+		{"live_leases", "DOS live leases snapshot inspection"},
+		{"arbitrate", "DOS lane lease arbitration check"},
+	}
+	for _, req := range requiredChecks {
+		if !strings.Contains(content, req.pattern) {
+			return fmt.Errorf("opencode plugin %s missing %s (%q)", path, req.desc, req.pattern)
+		}
+	}
+	return nil
+}
+
+// SyncOpenCodePlugin writes the canonical dos-proof-guard.js plugin into .opencode/plugins/
+// under root, ensuring cross-harness lease admission is active for OpenCode.
+func SyncOpenCodePlugin(root string) error {
+	path := filepath.Join(root, filepath.FromSlash(OpenCodePluginPath))
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("create opencode plugin dir: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(DefaultOpenCodePlugin), 0644); err != nil {
+		return fmt.Errorf("write opencode plugin: %w", err)
+	}
+	return nil
+}
+
+// EnsureOpenCodePlugin verifies that the OpenCode plugin asset exists and enforces cross-harness
+// lease admission. When autoSync is true and the plugin is missing or invalid, it synchronizes it first.
+func EnsureOpenCodePlugin(root string, autoSync bool) error {
+	if autoSync {
+		if err := VerifyOpenCodePlugin(root); err != nil {
+			if syncErr := SyncOpenCodePlugin(root); syncErr != nil {
+				return syncErr
+			}
+		}
+	}
+	return VerifyOpenCodePlugin(root)
+}
+
+// DefaultOpenCodePlugin is the canonical dos-proof-guard.js script enforcing
+// cross-harness FAK reference fences and DOS lane lease admission before OpenCode native mutations.
+const DefaultOpenCodePlugin = `import { execFile } from "node:child_process";
+import { realpath } from "node:fs/promises";
+import path from "node:path";
+import { promisify } from "node:util";
+
+const execute = promisify(execFile);
+const mutations = new Set(["write", "edit", "apply_patch"]);
+
+async function jsonCommand(command, args, cwd) {
+  let stdout;
+  try {
+    ({ stdout } = await execute(command, args, {
+      cwd, timeout: 30000, maxBuffer: 4 * 1024 * 1024, windowsHide: true,
+    }));
+  } catch (error) {
+    throw new Error(` + "`" + `[dos-proof-guard] Lease admission unavailable or refused: ${command}: ${error.stdout || error.stderr || error.message}` + "`" + `);
+  }
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    throw new Error(` + "`" + `[dos-proof-guard] Malformed lease admission response from ${command}` + "`" + `);
+  }
+}
+
+// Resolve existing ancestors as well as new files so a symlink cannot disguise
+// a write to a leased path. External writes need their own workspace admission.
+async function canonicalPath(filename) {
+  try {
+    return await realpath(filename);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    const parent = path.dirname(filename);
+    if (parent === filename) throw error;
+    return path.join(await canonicalPath(parent), path.basename(filename));
+  }
+}
+
+function mutationPaths(tool, args) {
+  if (tool !== "apply_patch") return [args?.filePath];
+  if (typeof args?.patchText !== "string") return [];
+  return [...args.patchText.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)\r?$/gm)]
+    .map((match) => match[1].trim());
+}
+
+/**
+ * dos-proof-guard.js — opencode plugin for DOS on-device proof & cross-validation lifecycle.
+ *
+ * Reminds agents after file modifications to:
+ * 1. Run on-device tests (CLAIM_TEST_GREEN)
+ * 2. Validate commit with DOS (dos commit-audit / dos verify)
+ * 3. Spawn cross-validator subagent for independent verification
+ * 4. File follow-on GitHub tickets by default for discovered edge cases
+ */
+
+export default async function dosProofGuardPlugin({ client, directory }) {
+  let fileModifiedCount = 0;
+  // Capture host configuration once; tool arguments never supply ownership.
+  const hostOwner = process.env.FAK_LEASE_OWNER;
+  const hostSession = process.env.FAK_LEASE_SESSION;
+  const hostLease = process.env.FAK_LEASE_ID;
+  const root = await realpath(directory);
+
+  return {
+    "tool.execute.before": async (input, output) => {
+      if (!mutations.has(input?.tool)) return;
+      if (!input.sessionID || (!!hostOwner !== !!hostSession)) {
+        throw new Error("[dos-proof-guard] A harness session and paired host lease owner/session are required");
+      }
+      const session = hostSession || input.sessionID;
+      const owner = hostOwner || ` + "`" + `opencode:${session}` + "`" + `;
+      const filenames = mutationPaths(input.tool, output?.args);
+      if (!filenames.length || filenames.some((name) => typeof name !== "string" || !name.trim())) {
+        throw new Error("[dos-proof-guard] Explicit mutation paths are required for lease admission");
+      }
+      const trees = [];
+      for (const filename of filenames) {
+        const target = await canonicalPath(path.resolve(root, filename));
+        const relative = path.relative(root, target);
+        if (!relative || relative === ".." || relative.startsWith(` + "`" + `..${path.sep}` + "`" + `) || path.isAbsolute(relative)) {
+          throw new Error("[dos-proof-guard] Mutation path is outside this lease workspace");
+        }
+        trees.push(relative.split(path.sep).join("/"));
+      }
+
+      const refs = await jsonCommand("fak", ["leaseref", "liveness", "--dir", root, "--session", session], root);
+      if (!Array.isArray(refs)) throw new Error("[dos-proof-guard] Invalid FAK lease snapshot");
+      const own = refs.filter((row) => row.holder === owner && row.session_id === session && (!hostLease || row.id === hostLease));
+      if (hostLease && own.length !== 1) throw new Error("[dos-proof-guard] Host lease identity is not current");
+      if (own.length > 1) throw new Error("[dos-proof-guard] Set host FAK_LEASE_ID to identify the active lease");
+      const regionArgs = ["loop", "region", "--dir", root, "--actor", owner, "--no-queue", "--json"];
+      for (const tree of trees) regionArgs.push("--tree", tree);
+      if (own.length === 1) {
+        const lease = own[0];
+        if (!lease.id || !Number.isInteger(lease.generation) || lease.generation < 1) {
+          throw new Error("[dos-proof-guard] Own FAK lease lacks a fencing generation");
+        }
+        const fence = await jsonCommand("fak", ["leaseref", "fence", "--dir", root, "--id", lease.id, "--holder", owner, "--generation", String(lease.generation)], root);
+        if (fence.ok !== true) throw new Error("[dos-proof-guard] Own FAK lease fence refused");
+        regionArgs.push("--self", lease.id);
+      }
+      const region = await jsonCommand("fak", regionArgs, root);
+      if (region.schema !== "fak.loop-region.v1" || region.admit !== true) {
+        throw new Error("[dos-proof-guard] FAK lease admission refused");
+      }
+
+      // DOS owns WAL parsing, corruption handling, expiry and locking. Older DOS
+      // versions reject strict=True, so a missing prerequisite blocks mutations.
+      const snapshot = await jsonCommand("python", ["-c",
+        "import json,sys; from dos import config,lane_lease; cfg=config.load_workspace_config(sys.argv[1],gather_env=False); print(json.dumps(lane_lease.live_leases(cfg, strict=True, expire_dead=True)))", root], root);
+      if (!Array.isArray(snapshot) || snapshot.some((row) => !row || typeof row.lane !== "string" || !Array.isArray(row.tree))) {
+        throw new Error("[dos-proof-guard] Invalid DOS lease snapshot");
+      }
+      const peers = snapshot.filter((row) => !(row.holder === owner && row.run_id === session));
+      const decision = await jsonCommand("dos", ["arbitrate", "--workspace", root, "--lane", "opencode-native-write", "--kind", "keyword", "--output", "json", "--leases", JSON.stringify(peers), "--tree", ...trees], root);
+      if (decision.outcome !== "acquire") throw new Error("[dos-proof-guard] DOS lease admission refused");
+      // These are pre-execution observations, not an atomic filesystem fence.
+      // Shell/MCP mutations and late lease changes need separate mediation.
+    },
+    "tool.execute.after": async (input, output) => {
+      const tool = input?.tool || "";
+      if (tool === "edit" || tool === "write") {
+        fileModifiedCount++;
+        const reminder = "\n\n[dos-proof-guard] Code modified. On-device proof required before completion:\n" +
+          "1. Run tests: .\\test.ps1 ./internal/<pkg>/... -> CLAIM_TEST_GREEN\n" +
+          "2. DOS commit audit: dos commit-audit HEAD -> diff-witnessed\n" +
+          "3. Spawn cross-validator subagent to adversarial-audit the diff\n" +
+          "4. Auto-ticket follow-ons/edge-cases by default (gh issue create / fak issue fanout)\n";
+
+        if (output && typeof output === "object") {
+          if (typeof output.content === "string") {
+            output.content += reminder;
+          } else if (Array.isArray(output.content)) {
+            output.content.push({ type: "text", text: reminder });
+          }
+        }
+        console.log(reminder);
+      }
+    },
+    "chat.message": async (input, output) => {
+      // Reset modification counter when new user message arrives
+      if (input?.role === "user") {
+        fileModifiedCount = 0;
+      }
+    }
+  };
+}
+`

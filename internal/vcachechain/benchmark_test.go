@@ -216,3 +216,36 @@ func BenchmarkCorrectionChainEvaluateRefresh(b *testing.B) {
 		benchRefreshEvalSink = chain.EvaluateRefresh(policy)
 	}
 }
+
+func TestBenchmarkOperationsSanity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping benchmark sanity in short mode")
+	}
+	benchmarks := []struct {
+		name string
+		fn   func(b *testing.B)
+	}{
+		{"BenchmarkPrefixDAGValidate", BenchmarkPrefixDAGValidate},
+		{"BenchmarkChainTo", BenchmarkChainTo},
+		{"BenchmarkPrefixTokens", BenchmarkPrefixTokens},
+		{"BenchmarkTopologicalReplay", BenchmarkTopologicalReplay},
+		{"BenchmarkPlaceBreakpoints", BenchmarkPlaceBreakpoints},
+		{"BenchmarkMergeBreakpoints", BenchmarkMergeBreakpoints},
+		{"BenchmarkPlanRecall_SingleUnitRefused", BenchmarkPlanRecall_SingleUnitRefused},
+		{"BenchmarkPlanRecall_AmortizedRebuild", BenchmarkPlanRecall_AmortizedRebuild},
+		{"BenchmarkProveRecall", BenchmarkProveRecall},
+		{"BenchmarkDescribeWarmPrefix", BenchmarkDescribeWarmPrefix},
+		{"BenchmarkVerifyWarmPrefixReplay", BenchmarkVerifyWarmPrefixReplay},
+		{"BenchmarkCorrectionChainEffectiveFacts", BenchmarkCorrectionChainEffectiveFacts},
+		{"BenchmarkCorrectionChainEvaluateRefresh", BenchmarkCorrectionChainEvaluateRefresh},
+	}
+
+	for _, bm := range benchmarks {
+		t.Run(bm.name, func(t *testing.T) {
+			res := testing.Benchmark(bm.fn)
+			if res.N <= 0 {
+				t.Fatalf("%s failed to execute iterations (N=%d, expected > 0)", bm.name, res.N)
+			}
+		})
+	}
+}

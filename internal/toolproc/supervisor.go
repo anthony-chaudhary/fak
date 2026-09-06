@@ -429,6 +429,31 @@ func (s *ProcessSupervisor) TombstoneCount() int {
 	return len(s.tombstones)
 }
 
+// ResetConsecutivePolls resets the consecutive poll counter for a tombstoned process,
+// restoring it to steady-state polling below the livelock suppression threshold.
+// Returns true if the tombstone exists.
+func (s *ProcessSupervisor) ResetConsecutivePolls(pid int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if tb, ok := s.tombstones[pid]; ok {
+		tb.ConsecutivePolls = 0
+		return true
+	}
+	return false
+}
+
+// ResetConsecutiveWrites resets the consecutive write counter for a tombstoned process,
+// clearing the livelock circuit breaker. Returns true if the tombstone exists.
+func (s *ProcessSupervisor) ResetConsecutiveWrites(pid int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if tb, ok := s.tombstones[pid]; ok {
+		tb.ConsecutiveWrites = 0
+		return true
+	}
+	return false
+}
+
 func truncateTail(s string, maxBytes int) string {
 	if maxBytes <= 0 || len(s) <= maxBytes {
 		return s

@@ -142,12 +142,12 @@ func (m *Manager) Apply(patch ConfigPatch, dryRun bool) (*ApplyResult, error) {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	// Re-fetch under lock to guarantee monotonic epoch ordering
 	cur = *m.active.Load()
 	candidate = cur.Config.Apply(patch)
 	if errs := Validate(candidate); errs.HasErrors() {
+		m.mu.Unlock()
 		return nil, errs
 	}
 
@@ -172,9 +172,12 @@ func (m *Manager) Apply(patch ConfigPatch, dryRun bool) (*ApplyResult, error) {
 		Config:    candidate,
 	})
 
-	// Notify observers
+	// Snapshot observers under lock before invoking them outside the lock
 	observers := make([]EpochObserver, len(m.observers))
 	copy(observers, m.observers)
+	m.mu.Unlock()
+
+	// Notify observers outside lock to prevent reentrancy deadlock
 	for _, obs := range observers {
 		obs(*nextVersioned)
 	}
@@ -201,7 +204,6 @@ func (m *Manager) Rollback(trigger, detail string) (*VersionedConfig, error) {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	cur := *m.active.Load()
 	lkg := *m.lkg.Load()
@@ -230,9 +232,12 @@ func (m *Manager) Rollback(trigger, detail string) (*VersionedConfig, error) {
 		Config:    lkg.Config,
 	})
 
-	// Notify observers
+	// Snapshot observers under lock before invoking them outside the lock
 	observers := make([]EpochObserver, len(m.observers))
 	copy(observers, m.observers)
+	m.mu.Unlock()
+
+	// Notify observers outside lock to prevent reentrancy deadlock
 	for _, obs := range observers {
 		obs(*restored)
 	}

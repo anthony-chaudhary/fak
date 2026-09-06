@@ -71,6 +71,14 @@ func (s *Store) ReleaseFenced(ctx context.Context, id, holder string, generation
 		}
 	}
 
+	genFloor := cur.Generation
+	if hist, ok, err := s.resolveHistoryRef(ctx, id); err == nil && ok && hist.Generation > genFloor {
+		genFloor = hist.Generation
+	}
+	if err := s.writeHistoryRecord(ctx, id, genFloor, now); err != nil {
+		return FenceVerdict{}, err
+	}
+
 	deleted, err := s.casDelete(ctx, ref, oldOID)
 	if err != nil {
 		return FenceVerdict{}, err
@@ -96,4 +104,16 @@ func (s *Store) casDelete(ctx context.Context, ref, oldOID string) (bool, error)
 		return false, fmt.Errorf("leaseref: git not executable: %w", err)
 	}
 	return code == 0, nil
+}
+
+// writeHistoryRecord writes a historical generation floor record under refs/fak/history/<id>.
+func (s *Store) writeHistoryRecord(ctx context.Context, id string, generation int64, now time.Time) error {
+	ref := historyRefPrefix + id
+	hr := HistoryRecord{
+		ID:         id,
+		Generation: generation,
+		ReleasedAt: now.Unix(),
+	}
+	_, err := s.putBlobRef(ctx, ref, hr)
+	return err
 }

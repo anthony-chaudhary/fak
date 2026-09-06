@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"io"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/commitintent"
+	"github.com/anthony-chaudhary/fak/internal/commitrollup"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
@@ -1388,6 +1390,79 @@ func TestRunCommit_signoffFlag_s(t *testing.T) {
 	}
 }
 
+func TestCommitSignoffFlag(t *testing.T) {
+	t.Setenv("FAK_COMMIT_BUILD_CHECK", "off")
+	var gotOpts safecommit.Options
+	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
+		gotOpts = o
+		return safecommit.Result{Committed: true, Verified: true, SHA: "abc", Paths: o.Paths}, nil
+	})
+
+	// 1. fak commit -s -m "..." -- <path>
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{"-s", "-m", "feat(commit): test signoff flag (fak cmd)", "--", "cmd/fak/commit.go"})
+	if code != 0 {
+		t.Fatalf("want exit 0 with -s flag and -- delimiter, got %d (stderr=%q)", code, errb.String())
+	}
+	if !gotOpts.SignOff {
+		t.Fatalf("sign-off should remain true when -s is passed")
+	}
+	if len(gotOpts.Paths) != 1 || gotOpts.Paths[0] != "cmd/fak/commit.go" {
+		t.Fatalf("expected path [cmd/fak/commit.go], got: %v", gotOpts.Paths)
+	}
+
+	// 2. fak commit -s --preview -m "..." -- <path>
+	out.Reset()
+	errb.Reset()
+	code = runCommit(&out, &errb, []string{"-s", "--preview", "-m", "feat(commit): test preview signoff flag (fak cmd)", "--", "cmd/fak/commit.go"})
+	if code != 0 {
+		t.Fatalf("want exit 0 for commit -s --preview, got %d (stderr=%q)", code, errb.String())
+	}
+
+	// 2b. fak commit --signoff --preview -m "..." -- <path>
+	out.Reset()
+	errb.Reset()
+	code = runCommit(&out, &errb, []string{"--signoff", "--preview", "-m", "feat(commit): test preview signoff long flag (fak cmd)", "--", "cmd/fak/commit.go"})
+	if code != 0 {
+		t.Fatalf("want exit 0 for commit --signoff --preview, got %d (stderr=%q)", code, errb.String())
+	}
+
+	// 2c. fak commit -s via runCommitCommand
+	out.Reset()
+	errb.Reset()
+	code = runCommitCommand(&out, &errb, []string{"-s", "--preview", "-m", "feat(commit): test runCommitCommand -s (fak cmd)", "--", "cmd/fak/commit.go"})
+	if code != 0 {
+		t.Fatalf("want exit 0 for runCommitCommand -s --preview, got %d (stderr=%q)", code, errb.String())
+	}
+
+	// 3. flag parsing validation
+	fs := flag.NewFlagSet("commit", flag.ContinueOnError)
+	noSignoff := fs.Bool("no-signoff", false, "")
+	var signoff bool
+	fs.BoolVar(&signoff, "s", false, "")
+	fs.BoolVar(&signoff, "signoff", false, "")
+	if err := fs.Parse([]string{"-s"}); err != nil {
+		t.Fatalf("unexpected flag parse error for -s: %v", err)
+	}
+	if !signoff {
+		t.Fatalf("expected -s flag to be true")
+	}
+	if !(!*noSignoff || signoff) {
+		t.Fatalf("expected effective signoff to be true")
+	}
+
+	fsLong := flag.NewFlagSet("commit", flag.ContinueOnError)
+	var signoffLong bool
+	fsLong.BoolVar(&signoffLong, "s", false, "")
+	fsLong.BoolVar(&signoffLong, "signoff", false, "")
+	if err := fsLong.Parse([]string{"--signoff"}); err != nil {
+		t.Fatalf("unexpected flag parse error for --signoff: %v", err)
+	}
+	if !signoffLong {
+		t.Fatalf("expected --signoff flag to be true")
+	}
+}
+
 func TestRenderCommitResult_prestagedPathOverlapRemedy(t *testing.T) {
 	var out bytes.Buffer
 	res := safecommit.Result{
@@ -1398,5 +1473,32 @@ func TestRenderCommitResult_prestagedPathOverlapRemedy(t *testing.T) {
 	output := out.String()
 	if !strings.Contains(output, "remedy: unstage pre-existing index changes via `git restore --staged <paths>`") {
 		t.Fatalf("expected prestaged overlap remedy in output, got:\n%s", output)
+	}
+
+	out.Reset()
+	resDetail := safecommit.Result{
+		Reason: "REFUSAL",
+		Detail: "PRESTAGED_PATH_OVERLAP (warn): staged changes exist",
+	}
+	renderCommitResult(&out, resDetail)
+	if !strings.Contains(out.String(), "remedy: unstage pre-existing index changes via `git restore --staged <paths>`") {
+		t.Fatalf("expected prestaged overlap remedy in output for Detail containing PRESTAGED_PATH_OVERLAP, got:\n%s", out.String())
+	}
+
+	out.Reset()
+	drainRes := commitDrainResult{
+		Plan: commitrollup.Plan{
+			Refusals: []commitrollup.Refusal{
+				{
+					IntentID: "intent-1",
+					Reason:   safecommit.ReasonPreStagedPathOverlap,
+					Detail:   "staged changes exist",
+				},
+			},
+		},
+	}
+	renderCommitDrainResult(&out, drainRes)
+	if !strings.Contains(out.String(), "remedy: unstage pre-existing index changes via `git restore --staged <paths>`") {
+		t.Fatalf("expected prestaged overlap remedy in drain output, got:\n%s", out.String())
 	}
 }

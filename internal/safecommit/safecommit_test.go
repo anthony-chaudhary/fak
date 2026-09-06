@@ -586,6 +586,10 @@ func TestOffTrunk_refusesBeforeCommitting(t *testing.T) {
 }
 
 func TestDetachedHead_isOffTrunk(t *testing.T) {
+	// Isolate from host/parent process CWD in case the test process is run
+	// from within a sanctioned worker worktree directory (#11828).
+	t.Chdir(t.TempDir())
+
 	g := &fakeGit{reply: onTrunkBase()}
 	// symbolic-ref exits non-zero on a detached HEAD.
 	g.reply["symbolic-ref"] = reply{out: "", code: 128}
@@ -597,6 +601,40 @@ func TestDetachedHead_isOffTrunk(t *testing.T) {
 	if !strings.Contains(res.Detail, "detached") {
 		t.Fatalf("detail should mention detached, got %q", res.Detail)
 	}
+
+	t.Run("isolated_from_worker_cwd", func(t *testing.T) {
+		// Simulate host or parent process running inside a sanctioned worker worktree.
+		hostWorkerDir := filepath.Join(t.TempDir(), "fak-worker-wt-parent-sim")
+		if err := os.MkdirAll(hostWorkerDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Chdir(hostWorkerDir)
+
+		// When opts.Dir is empty, being inside a worker worktree suppresses ReasonOffTrunk.
+		optsEmpty := baseOpts()
+		optsEmpty.Dir = ""
+		resUnisolated, _ := CommitWith(context.Background(), g.run, okLock(nil), optsEmpty)
+		if resUnisolated.Reason == ReasonOffTrunk {
+			t.Fatalf("unisolated commit in worker worktree with empty Dir unexpectedly produced ReasonOffTrunk")
+		}
+
+		// When opts.Dir explicitly points to a non-worker repo, running from within a worker
+		// worktree CWD must NOT suppress ReasonOffTrunk (#11861).
+		resExplicit, _ := CommitWith(context.Background(), g.run, okLock(nil), baseOpts())
+		if resExplicit.Reason != ReasonOffTrunk {
+			t.Fatalf("explicit non-worker opts.Dir should produce ReasonOffTrunk even if parent CWD was worker worktree, got %q", resExplicit.Reason)
+		}
+
+		// With clean CWD isolation (#11828), empty opts.Dir produces ReasonOffTrunk.
+		t.Chdir(t.TempDir())
+		resIsolated, _ := CommitWith(context.Background(), g.run, okLock(nil), optsEmpty)
+		if resIsolated.Reason != ReasonOffTrunk {
+			t.Fatalf("isolated detached HEAD should produce ReasonOffTrunk even if parent CWD was worker worktree, got %q", resIsolated.Reason)
+		}
+		if !strings.Contains(resIsolated.Detail, "detached") {
+			t.Fatalf("detail should mention detached, got %q", resIsolated.Detail)
+		}
+	})
 }
 
 func TestDetachedHead_inSanctionedWorkerWorktreeAllowed(t *testing.T) {
@@ -623,6 +661,95 @@ func TestDetachedHead_inSanctionedWorkerWorktreeAllowed(t *testing.T) {
 	}
 	if res.Reason == ReasonOffTrunk {
 		t.Fatalf("sanctioned worker worktree must not be refused as OFF_TRUNK")
+	}
+}
+
+func TestDetachedHead_explicitNonWorkerDirRejectedInWorkerCwd(t *testing.T) {
+	// If a caller explicitly specifies Options{Dir: "/path/to/other/repo"} pointing to a
+	// non-worker repo, running from within a worker worktree directory must not grant
+	// detached-HEAD commit privileges to the foreign repository (#11861).
+	workerDir := filepath.Join(t.TempDir(), "fak-worker-wt-active-worker")
+	if err := os.MkdirAll(workerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workerDir)
+
+	foreignRepo := filepath.Join(t.TempDir(), "foreign-repo")
+	if err := os.MkdirAll(foreignRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	g := &fakeGit{reply: onTrunkBase()}
+	g.reply["symbolic-ref"] = reply{out: "fatal: ref HEAD is not a symbolic ref\n", code: 128}
+
+	// 1. Explicit foreign repo is rejected as ReasonOffTrunk.
+	opts := baseOpts()
+	opts.Dir = foreignRepo
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Reason != ReasonOffTrunk {
+		t.Fatalf("expected explicit non-worker opts.Dir to be rejected as ReasonOffTrunk, got %q", res.Reason)
+	}
+	if !strings.Contains(res.Detail, "detached") {
+		t.Fatalf("detail should mention detached, got %q", res.Detail)
+	}
+
+	// 2. Empty Dir inherits worker CWD and is permitted.
+	optsEmpty := baseOpts()
+	optsEmpty.Dir = ""
+	resEmpty, err := CommitWith(context.Background(), g.run, okLock(nil), optsEmpty)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resEmpty.Reason == ReasonOffTrunk {
+		t.Fatalf("empty opts.Dir inside worker worktree should be permitted, got ReasonOffTrunk")
+	}
+
+	// 3. Dot Dir inherits worker CWD and is permitted.
+	optsDot := baseOpts()
+	optsDot.Dir = "."
+	resDot, err := CommitWith(context.Background(), g.run, okLock(nil), optsDot)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resDot.Reason == ReasonOffTrunk {
+		t.Fatalf("opts.Dir = \".\" inside worker worktree should be permitted, got ReasonOffTrunk")
+	}
+}
+
+func TestDetachedHead_foreignExplicitDirRejectedEvenInWorkerCWD(t *testing.T) {
+	// When the current process working directory is inside a sanctioned worker worktree,
+	// passing an explicit non-worker opts.Dir must still reject a detached HEAD with
+	// ReasonOffTrunk ("detached HEAD") even if CWD happens to be inside a worker worktree (#11861).
+	workerDir := filepath.Join(t.TempDir(), "fak-worker-wt-isolated-worker")
+	if err := os.MkdirAll(workerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workerDir)
+
+	foreignRepo := filepath.Join(t.TempDir(), "foreign-repo")
+	if err := os.MkdirAll(foreignRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	g := &fakeGit{reply: onTrunkBase()}
+	g.reply["symbolic-ref"] = reply{out: "fatal: ref HEAD is not a symbolic ref\n", code: 128}
+
+	opts := baseOpts()
+	opts.Dir = foreignRepo
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Reason != ReasonOffTrunk {
+		t.Fatalf("expected explicit non-worker opts.Dir to be rejected as ReasonOffTrunk, got %q", res.Reason)
+	}
+	if !strings.Contains(res.Detail, "detached") {
+		t.Fatalf("detail should mention detached, got %q", res.Detail)
 	}
 }
 
@@ -1349,4 +1476,219 @@ func TestCommitRefusesDirectorySweepOfPeerWIP(t *testing.T) {
 			t.Fatalf("want CollidingPaths=[internal/gateway/peer.go], got %v", attrRes.CollidingPaths)
 		}
 	})
+}
+
+func TestPostValidationLockWaitStallBoundedWithPhaseEvidence(t *testing.T) {
+	g := &fakeGit{reply: onTrunkBase()}
+	opts := baseOpts()
+	opts.PostValidationTimeout = 50 * time.Millisecond
+
+	// stallingLock simulates a lock wait that stalls until context is done or 10s
+	stallingLock := func(lockOpts LockOptions) (func(), error) {
+		if lockOpts.Context != nil {
+			<-lockOpts.Context.Done()
+			return nil, ErrLockBusy
+		}
+		time.Sleep(10 * time.Second)
+		return func() {}, nil
+	}
+
+	start := time.Now()
+	res, err := CommitWith(context.Background(), g.run, stallingLock, opts)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("unexpected infra error: %v", err)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("execution was not bounded by PostValidationTimeout: took %s", elapsed)
+	}
+	if res.Reason != ReasonLockBusy {
+		t.Fatalf("want reason %q, got %q (detail=%q)", ReasonLockBusy, res.Reason, res.Detail)
+	}
+	if res.Phase != PhaseLockWait {
+		t.Fatalf("want phase %q, got %q", PhaseLockWait, res.Phase)
+	}
+	if res.PhaseEvidence == nil {
+		t.Fatal("res.PhaseEvidence must not be nil")
+	}
+	if !res.PhaseEvidence.Stalled {
+		t.Fatalf("PhaseEvidence.Stalled must be true")
+	}
+	if res.PhaseEvidence.StallPhase != PhaseLockWait {
+		t.Fatalf("want StallPhase %q, got %q", PhaseLockWait, res.PhaseEvidence.StallPhase)
+	}
+	if res.PhaseEvidence.StallReason != ReasonLockBusy {
+		t.Fatalf("want StallReason %q, got %q", ReasonLockBusy, res.PhaseEvidence.StallReason)
+	}
+	if len(res.Phases) == 0 {
+		t.Fatal("res.Phases must have receipts")
+	}
+	hasValidationPassed := false
+	hasLockWait := false
+	for _, p := range res.Phases {
+		if p.Phase == PhaseValidation && p.Status == PhaseStatusPassed {
+			hasValidationPassed = true
+		}
+		if p.Phase == PhaseLockWait && (p.Status == PhaseStatusTimeout || p.Status == PhaseStatusStalled || p.Status == PhaseStatusFailed) {
+			hasLockWait = true
+		}
+	}
+	if !hasValidationPassed {
+		t.Fatalf("missing passed validation phase in receipts: %+v", res.Phases)
+	}
+	if !hasLockWait {
+		t.Fatalf("missing timeout/stalled lock_wait phase in receipts: %+v", res.Phases)
+	}
+}
+
+func TestPostValidationMutationStallBoundedWithPhaseEvidence(t *testing.T) {
+	g := &fakeGit{reply: onTrunkBase()}
+	// Runner that stalls during git add (staging phase)
+	stallingRun := Runner(func(ctx context.Context, dir string, args ...string) (string, int, error) {
+		if len(args) > 0 && args[0] == "add" {
+			<-ctx.Done()
+			return "", -1, ctx.Err()
+		}
+		return g.run(ctx, dir, args...)
+	})
+
+	opts := baseOpts()
+	opts.PostValidationTimeout = 50 * time.Millisecond
+
+	start := time.Now()
+	res, err := CommitWith(context.Background(), stallingRun, okLock(nil), opts)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("unexpected infra error: %v", err)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("execution was not bounded by PostValidationTimeout: took %s", elapsed)
+	}
+	if res.Reason != ReasonCommitStalled {
+		t.Fatalf("want reason %q, got %q (detail=%q)", ReasonCommitStalled, res.Reason, res.Detail)
+	}
+	if res.Phase != PhaseStage {
+		t.Fatalf("want phase %q, got %q", PhaseStage, res.Phase)
+	}
+	if res.PhaseEvidence == nil {
+		t.Fatal("res.PhaseEvidence must not be nil")
+	}
+	if !res.PhaseEvidence.Stalled {
+		t.Fatalf("PhaseEvidence.Stalled must be true")
+	}
+	if res.PhaseEvidence.StallPhase != PhaseStage {
+		t.Fatalf("want StallPhase %q, got %q", PhaseStage, res.PhaseEvidence.StallPhase)
+	}
+	if res.PhaseEvidence.StallReason != ReasonCommitStalled {
+		t.Fatalf("want StallReason %q, got %q", ReasonCommitStalled, res.PhaseEvidence.StallReason)
+	}
+	if len(res.Phases) == 0 {
+		t.Fatal("res.Phases must have receipts")
+	}
+	hasStage := false
+	for _, p := range res.Phases {
+		if p.Phase == PhaseStage && (p.Status == PhaseStatusTimeout || p.Status == PhaseStatusStalled || p.Status == PhaseStatusFailed) {
+			hasStage = true
+		}
+	}
+	if !hasStage {
+		t.Fatalf("missing timeout/stalled stage phase in receipts: %+v", res.Phases)
+	}
+}
+
+func TestPostValidationPhaseProgressionReceiptEmission(t *testing.T) {
+	g := &fakeGit{reply: onTrunkBase()}
+	var emitted []PhaseReceipt
+	opts := baseOpts()
+	opts.OnPhase = func(receipt PhaseReceipt) {
+		emitted = append(emitted, receipt)
+	}
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("unexpected infra error: %v", err)
+	}
+	if !res.Committed || !res.Verified {
+		t.Fatalf("commit should be committed and verified, got %+v", res)
+	}
+	if res.PhaseEvidence == nil {
+		t.Fatal("res.PhaseEvidence must not be nil")
+	}
+	if res.PhaseEvidence.Stalled {
+		t.Fatalf("expected successful commit, but stalled was true: %+v", res.PhaseEvidence)
+	}
+	if res.Phase != PhaseVerify {
+		t.Fatalf("want terminal phase %q, got %q", PhaseVerify, res.Phase)
+	}
+
+	// Verify the phase sequence in res.Phases
+	expectedPhases := []CommitPhase{PhaseValidation, PhaseLockWait, PhaseWriterLease, PhaseStage, PhaseCommit, PhaseVerify}
+	found := make(map[CommitPhase]bool)
+	for _, p := range res.Phases {
+		if p.Status == PhaseStatusPassed {
+			found[p.Phase] = true
+		}
+	}
+	for _, ep := range expectedPhases {
+		if !found[ep] {
+			t.Fatalf("expected phase %q to pass in res.Phases, got: %+v", ep, res.Phases)
+		}
+	}
+
+	// Verify OnPhase received progression receipts
+	if len(emitted) == 0 {
+		t.Fatal("opts.OnPhase should have received progression events")
+	}
+	emittedStarted := false
+	emittedPassed := false
+	for _, r := range emitted {
+		if r.Status == PhaseStatusStarted {
+			emittedStarted = true
+		}
+		if r.Status == PhaseStatusPassed {
+			emittedPassed = true
+		}
+	}
+	if !emittedStarted || !emittedPassed {
+		t.Fatalf("expected both started and passed events, got: %+v", emitted)
+	}
+}
+
+func TestPostValidationPerPhaseTimeoutBounded(t *testing.T) {
+	g := &fakeGit{reply: onTrunkBase()}
+	stallingRun := Runner(func(ctx context.Context, dir string, args ...string) (string, int, error) {
+		if len(args) > 0 && args[0] == "commit" {
+			<-ctx.Done()
+			return "", -1, ctx.Err()
+		}
+		return g.run(ctx, dir, args...)
+	})
+
+	opts := baseOpts()
+	opts.PhaseTimeout = 30 * time.Millisecond
+
+	start := time.Now()
+	res, err := CommitWith(context.Background(), stallingRun, okLock(nil), opts)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("unexpected infra error: %v", err)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("execution was not bounded by PhaseTimeout: took %s", elapsed)
+	}
+	if res.Reason != ReasonCommitStalled {
+		t.Fatalf("want reason %q, got %q", ReasonCommitStalled, res.Reason)
+	}
+	if res.Phase != PhaseCommit {
+		t.Fatalf("want phase %q, got %q", PhaseCommit, res.Phase)
+	}
+	if res.PhaseEvidence == nil || !res.PhaseEvidence.Stalled {
+		t.Fatalf("expected stalled phase evidence, got: %+v", res.PhaseEvidence)
+	}
+	if res.PhaseEvidence.StallPhase != PhaseCommit {
+		t.Fatalf("want stall phase %q, got %q", PhaseCommit, res.PhaseEvidence.StallPhase)
+	}
 }

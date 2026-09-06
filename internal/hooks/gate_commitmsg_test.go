@@ -37,13 +37,22 @@ func TestSuggestGradeableSubject_correctsDeterministicFailures(t *testing.T) {
 		// Both wrong at once: near-miss type AND inflected verb.
 		{"type+verb", "feature(gateway): added a retry", "feat(gateway): add a retry"},
 
+		// Unsupported imperative verb with unambiguous synonym (#11811)
+		{"synonym-synchronize", "feat(gateway): synchronize the routing table", "feat(gateway): sync the routing table"},
+		{"synonym-inspect", "test(core): inspect the buffer state", "test(core): verify the buffer state"},
+		{"synonym-modify", "refactor(core): modify cache config", "refactor(core): update cache config"},
+		{"inflected-synonym-synchronized", "feat(gateway): synchronized the routing table", "feat(gateway): sync the routing table"},
+		{"inflected-retained", "fix(agent): retained Responses SSE terminal failures (#11548) (fak agent)", "fix(agent): retain Responses SSE terminal failures (#11548) (fak agent)"},
+
 		// No safe suggestion — must stay "".
 		{"empty", "", ""},
 		{"no-conventional-prefix", "fixed the parser crash", ""},
 		{"unknown-type-no-correction", "improvement(x): add a thing", ""},
 		{"genuinely-noun-led", "feat(gateway): posture improvements", ""},
+		{"genuinely-noun-led-performance", "feat(core): performance overview", ""},
 		{"decorated-lead", "feat(x): `added` a retry", ""},
 		{"already-gradeable", "feat(gateway): add a retry", ""},
+		{"already-gradeable-retain", "fix(agent): retain Responses SSE terminal failures (#11548) (fak agent)", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -363,5 +372,108 @@ func TestCommitMsgVerdict_rejectsSilentDropMerge(t *testing.T) {
 	}
 	if !strings.Contains(why, "SILENT_DROP_MERGE_FORBIDDEN") {
 		t.Errorf("why %q does not contain SILENT_DROP_MERGE_FORBIDDEN", why)
+	}
+}
+
+// TestCommitMsgVerdict_retainAndConcreteVerbsAccepted proves issue #11811:
+// Verbs like "retain", "quarantine", and "scavenge" are valid imperative verbs describing concrete
+// code actions. They must be recognized as witness-gradeable by CommitMsgVerdict and LintCommitMessage.
+func TestCommitMsgVerdict_retainAndConcreteVerbsAccepted(t *testing.T) {
+	cases := []string{
+		"fix(agent): retain Responses SSE terminal failures (#11548) (fak agent)",
+		"feat(core): quarantine corrupted files (fak core)",
+		"refactor(mem): scavenge dead sessions (fak mem)",
+	}
+	for _, subject := range cases {
+		ok, why := CommitMsgVerdict(subject)
+		if !ok {
+			t.Fatalf("CommitMsgVerdict rejected valid imperative subject %q: %s", subject, why)
+		}
+	}
+
+	root := writeLintRepo(t)
+	r := LintCommitMessage("fix(agent): retain Responses SSE terminal failures (#11548) (fak agent)", []string{"internal/gateway/server.go"}, root)
+	if !r.Gradeable {
+		t.Fatalf("expected retain subject to be gradeable, got GradeWhy=%q issues=%v", r.GradeWhy, r.Issues)
+	}
+}
+
+// TestLintCommitMessage_distinguishesUnsupportedImperativeFromNounLed proves issue #11811:
+// An unsupported imperative verb (e.g. "synchronize", "calculate") is distinguished from a genuinely
+// noun-led phrase (e.g. "posture improvements", "performance overview"). The refusal message clearly
+// identifies an unsupported imperative verb rather than falsely claiming the subject is noun-led.
+func TestLintCommitMessage_distinguishesUnsupportedImperativeFromNounLed(t *testing.T) {
+	root := writeLintRepo(t)
+
+	// 1. Unsupported imperative verb with a supported synonym ("synchronize" -> "sync").
+	syncSub := "feat(gateway): synchronize the routing table"
+	ok, why := CommitMsgVerdict(syncSub)
+	if ok {
+		t.Fatalf("CommitMsgVerdict should reject unsupported verb synchronize")
+	}
+	if !strings.Contains(why, "unsupported imperative verb 'synchronize'") {
+		t.Errorf("why should name unsupported imperative verb; got %q", why)
+	}
+	if !strings.Contains(why, "sync") {
+		t.Errorf("why should suggest 'sync'; got %q", why)
+	}
+	if strings.Contains(why, "noun-led") {
+		t.Errorf("why must NOT claim 'synchronize' is noun-led; got %q", why)
+	}
+
+	rSync := LintCommitMessage(syncSub, []string{"internal/gateway/server.go"}, root)
+	if rSync.Gradeable {
+		t.Fatalf("unsupported verb should not be gradeable")
+	}
+	wantSync := "feat(gateway): sync the routing table (fak gateway)"
+	if rSync.SuggestedSubject != wantSync {
+		t.Fatalf("SuggestedSubject = %q, want %q", rSync.SuggestedSubject, wantSync)
+	}
+
+	// 2. Unsupported imperative verb without 1:1 synonym ("calculate").
+	calcSub := "feat(crypto): calculate the merkle root"
+	ok, why = CommitMsgVerdict(calcSub)
+	if ok {
+		t.Fatalf("CommitMsgVerdict should reject unsupported verb calculate")
+	}
+	if !strings.Contains(why, "unsupported imperative verb 'calculate'") {
+		t.Errorf("why should name unsupported imperative verb; got %q", why)
+	}
+	if strings.Contains(why, "noun-led") {
+		t.Errorf("why must NOT claim 'calculate' is noun-led; got %q", why)
+	}
+
+	rCalc := LintCommitMessage(calcSub, []string{"internal/gateway/server.go"}, root)
+	if rCalc.Gradeable {
+		t.Fatalf("calculate should not be gradeable")
+	}
+	if rCalc.SuggestedSubject != "" {
+		t.Fatalf("must not fabricate a guess for calculate without an unambiguous synonym, got %q", rCalc.SuggestedSubject)
+	}
+
+	// 3. Genuinely noun-led descriptions continue to be flagged as noun-led without rewrites.
+	nounCases := []string{
+		"feat(gateway): posture improvements",
+		"feat(core): performance overview",
+	}
+	for _, sub := range nounCases {
+		ok, why = CommitMsgVerdict(sub)
+		if ok {
+			t.Fatalf("CommitMsgVerdict should reject noun-led subject %q", sub)
+		}
+		if !strings.Contains(why, "the witness ABSTAINs on a noun-led subject") {
+			t.Errorf("why for %q should report noun-led subject; got %q", sub, why)
+		}
+
+		rNoun := LintCommitMessage(sub, []string{"internal/gateway/server.go"}, root)
+		if rNoun.Gradeable {
+			t.Fatalf("noun-led %q should not be gradeable", sub)
+		}
+		if rNoun.SuggestedSubject != "" {
+			t.Fatalf("must not fabricate rewrite for noun-led %q, got %q", sub, rNoun.SuggestedSubject)
+		}
+		if !hasIssueContaining(rNoun, "noun-led subject") {
+			t.Errorf("Issues for %q should contain 'noun-led subject', got %v", sub, rNoun.Issues)
+		}
 	}
 }

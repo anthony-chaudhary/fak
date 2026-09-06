@@ -633,6 +633,128 @@ func TestWebApprovalResolution(t *testing.T) {
 	}
 }
 
+type nonResolverSource struct {
+	cards []SessionCard
+}
+
+func (n *nonResolverSource) Sessions(context.Context) ([]SessionCard, error) {
+	return n.cards, nil
+}
+
+func (n *nonResolverSource) Control(context.Context, SessionControlRequest) error {
+	return nil
+}
+
+func TestSessionApprovalNonResolverSourceFallbackAndError(t *testing.T) {
+	s := newStore()
+	runID := s.create("approval: inspect workspace")
+	cardWithStore := SessionCard{
+		ID:                 runID,
+		Provider:           "codex",
+		Workspace:          "/test/ws",
+		State:              sessionAwaitingApproval,
+		PendingInteraction: "approval requested",
+		PendingApproval: &SessionApproval{
+			ApprovalID: "approval-1",
+		},
+		HasInputLease: true,
+	}
+	cardWithoutStore := SessionCard{
+		ID:                 "sess-no-store",
+		Provider:           "codex",
+		Workspace:          "/test/ws",
+		State:              sessionAwaitingApproval,
+		PendingInteraction: "approval requested",
+		PendingApproval: &SessionApproval{
+			ApprovalID: "approval-orphan",
+		},
+		HasInputLease: true,
+	}
+
+	source := &nonResolverSource{
+		cards: []SessionCard{cardWithStore, cardWithoutStore},
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/sessions/{id}/approval", HandleSessionApproval(source, s))
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// 1. Invoking approval for sess-no-store (no store fallback) must return HTTP 501 Not Implemented,
+	// never falsely reporting resolved: true.
+	noStoreRes, err := ts.Client().Post(
+		ts.URL+"/api/sessions/sess-no-store/approval",
+		"application/json",
+		strings.NewReader(`{"decision":"approve","approval_id":"approval-orphan"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer noStoreRes.Body.Close()
+	if noStoreRes.StatusCode != http.StatusNotImplemented {
+		body, _ := io.ReadAll(noStoreRes.Body)
+		t.Fatalf("expected 501 Not Implemented for non-resolver session source without store fallback, got %d: %s", noStoreRes.StatusCode, body)
+	}
+	var noStoreBody map[string]any
+	if err := json.NewDecoder(noStoreRes.Body).Decode(&noStoreBody); err != nil {
+		t.Fatal(err)
+	}
+	if noStoreBody["resolved"] == true {
+		t.Fatalf("endpoint falsely reported resolved=true when resolver is unsupported and no store fallback exists")
+	}
+
+	// 2. Invoking approval for runID with wrong approval ID triggers store fallback and returns 409 Conflict.
+	badStoreRes, err := ts.Client().Post(
+		ts.URL+"/api/sessions/"+runID+"/approval",
+		"application/json",
+		strings.NewReader(`{"resolution":"accept","approval_id":"wrong-approval"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer badStoreRes.Body.Close()
+	if badStoreRes.StatusCode != http.StatusConflict {
+		body, _ := io.ReadAll(badStoreRes.Body)
+		t.Fatalf("expected 409 Conflict when store fallback resolution fails, got %d: %s", badStoreRes.StatusCode, body)
+	}
+	var badStoreBody map[string]any
+	if err := json.NewDecoder(badStoreRes.Body).Decode(&badStoreBody); err != nil {
+		t.Fatal(err)
+	}
+	if badStoreBody["resolved"] == true {
+		t.Fatalf("endpoint falsely reported resolved=true on failed store resolution")
+	}
+
+	// 3. Invoking approval for runID with valid approval ID triggers store fallback and resolves approval in store.
+	goodRes, err := ts.Client().Post(
+		ts.URL+"/api/sessions/"+runID+"/approval",
+		"application/json",
+		strings.NewReader(`{"resolution":"accept","approval_id":"approval-1"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer goodRes.Body.Close()
+	if goodRes.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(goodRes.Body)
+		t.Fatalf("expected 200 OK for successful store fallback, got %d: %s", goodRes.StatusCode, body)
+	}
+	var goodBody map[string]any
+	if err := json.NewDecoder(goodRes.Body).Decode(&goodBody); err != nil {
+		t.Fatal(err)
+	}
+	if goodBody["status"] != "accepted" || goodBody["resolved"] != true || goodBody["session_id"] != runID {
+		t.Fatalf("unexpected response body for store fallback: %+v", goodBody)
+	}
+
+	// Verify that the run in store was genuinely resolved
+	s.mu.RLock()
+	st := s.runs[runID]
+	s.mu.RUnlock()
+	if st == nil || !st.resolved {
+		t.Fatalf("expected store run %s to be resolved, got %+v", runID, st)
+	}
+}
+
 type mockCoordinator struct {
 	sessionsCalled bool
 	resolvedID     string

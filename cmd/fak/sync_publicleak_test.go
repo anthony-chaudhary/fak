@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/safesync"
 )
 
@@ -224,4 +225,48 @@ func runSyncPublicLeakTest(t *testing.T, repo string, extra ...string) (int, str
 	var stdout, stderr bytes.Buffer
 	code := runSync(&stdout, &stderr, args)
 	return code, stdout.String(), stderr.String()
+}
+
+func TestSyncPublicLeakCRLFBaselineInherited(t *testing.T) {
+	repo := t.TempDir()
+	syncGit(t, repo, "init", "-b", "main")
+	syncGit(t, repo, "config", "user.name", "test")
+	syncGit(t, repo, "config", "user.email", "test@example.com")
+
+	filePath := filepath.Join("docs", "inherited.txt")
+	syncPublicLeakWriteFile(t, filepath.Join(repo, filePath), syncPublicLeakFixtureLines(1))
+	syncGit(t, repo, "add", ".")
+	syncGit(t, repo, "commit", "-m", "baseline")
+	syncGit(t, repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+	finding := hooks.Finding{
+		Gate:   syncPublicLeakGate,
+		File:   filePath,
+		Line:   1,
+		Detail: "host=lab-dgx1",
+	}
+
+	// Working tree has CRLF line endings matching baseline LF logical content.
+	crlfContent := strings.ReplaceAll(syncPublicLeakFixtureLines(1), "\n", "\r\n")
+	syncPublicLeakWriteFile(t, filepath.Join(repo, filePath), crlfContent)
+
+	if !syncPublicLeakExistsAtBaseline(repo, "HEAD", finding) {
+		t.Fatalf("syncPublicLeakExistsAtBaseline() = false, want true for CRLF working tree matching LF baseline")
+	}
+
+	info := safesync.Assessment{
+		Branch: "main",
+		Head:   syncRev(t, repo, "HEAD"),
+		Target: syncRev(t, repo, "HEAD"),
+	}
+	report, err := assessSyncPublicLeak(repo, "origin", info, nil)
+	if err != nil {
+		t.Fatalf("assessSyncPublicLeak failed: %v", err)
+	}
+	if report.InheritedCount != 1 || report.BlockingCount != 0 || !report.OK {
+		t.Fatalf("assessSyncPublicLeak report = %+v, want 1 inherited, 0 blocking, ok=true", report)
+	}
+	if len(report.Findings) != 1 || report.Findings[0].Provenance != "inherited" || report.Findings[0].Blocking {
+		t.Fatalf("finding = %+v, want provenance=inherited blocking=false", report.Findings)
+	}
 }

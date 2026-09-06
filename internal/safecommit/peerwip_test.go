@@ -34,7 +34,7 @@ func TestPeerWIPAttributionBounded(t *testing.T) {
 		{name: "many-refs"}, {name: "real-git", real: true},
 		{name: "self-shared-object"}, {name: "metadata-record-truncated"}, {name: "delta-record-truncated"},
 		{name: "root-failure", fail: "rev-list"},
-		{name: "default-deadline"}, {name: "deadline-expiry"},
+		{name: "default-deadline"}, {name: "deadline-expiry"}, {name: "already-expired"},
 		{name: "status-failure", fail: "status"}, {name: "metadata-failure", fail: "for-each-ref"},
 		{name: "delta-failure", fail: "log"}, {name: "metadata-truncated"}, {name: "delta-truncated"},
 		{name: "missing-object"}, {name: "callback-cancellation"}, {name: "cancellation", cancel: true},
@@ -48,6 +48,11 @@ func TestPeerWIPAttributionBounded(t *testing.T) {
 			if tc.name == "deadline-expiry" {
 				var stop context.CancelFunc
 				ctx, stop = context.WithTimeout(ctx, 10*time.Millisecond)
+				defer stop()
+			}
+			if tc.name == "already-expired" {
+				var stop context.CancelFunc
+				ctx, stop = context.WithDeadline(context.Background(), time.Now().Add(-1*time.Second))
 				defer stop()
 			}
 			fixtureStarted := time.Now()
@@ -229,7 +234,7 @@ func TestPeerWIPAttributionBounded(t *testing.T) {
 			attributionStarted := time.Now()
 			result, err := ValidatePathAttribution(ctx, counted, dir, paths, opts)
 			attributionElapsed := time.Since(attributionStarted)
-			failure := tc.fail != "" || tc.cancel || strings.Contains(tc.name, "truncated") || tc.name == "missing-object" || tc.name == "deadline-expiry" || tc.name == "callback-cancellation"
+			failure := tc.fail != "" || tc.cancel || strings.Contains(tc.name, "truncated") || tc.name == "missing-object" || tc.name == "deadline-expiry" || tc.name == "already-expired" || tc.name == "callback-cancellation"
 			if failure {
 				if err == nil || result.OK {
 					t.Fatalf("incomplete attribution allowed: %+v, %v", result, err)
@@ -237,8 +242,11 @@ func TestPeerWIPAttributionBounded(t *testing.T) {
 				if (tc.cancel || tc.name == "callback-cancellation") && !errors.Is(err, context.Canceled) {
 					t.Fatalf("lost cancellation: %v", err)
 				}
-				if tc.name == "deadline-expiry" && !errors.Is(err, context.DeadlineExceeded) {
+				if (tc.name == "deadline-expiry" || tc.name == "already-expired") && !errors.Is(err, context.DeadlineExceeded) {
 					t.Fatalf("lost deadline: %v", err)
+				}
+				if tc.name == "already-expired" && calls != 0 {
+					t.Fatalf("subprocesses run on expired context: %d calls", calls)
 				}
 				if calls > 5 {
 					t.Fatalf("continued after failure: %d calls", calls)
@@ -261,4 +269,131 @@ func TestPeerWIPAttributionBounded(t *testing.T) {
 			t.Logf("refs=%d unique_peer_objects=%d paths=%d attribution_subprocesses=%d bound=%d construction=%s attribution=%s fixture_total=%s", refs+1, refs, len(paths), calls, bound, constructionElapsed, attributionElapsed, time.Since(fixtureStarted))
 		})
 	}
+}
+
+func TestPeerWIPContextTimeout(t *testing.T) {
+	t.Run("ExpiredContextYieldsZeroSubprocesses", func(t *testing.T) {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-1*time.Second))
+		defer cancel()
+		calls := 0
+		run := Runner(func(ctx context.Context, dir string, args ...string) (string, int, error) {
+			calls++
+			return "", 0, nil
+		})
+		res, err := ValidatePathAttribution(ctx, run, "", []string{"internal/gateway"}, PathAttributionOptions{})
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected context.DeadlineExceeded, got %v", err)
+		}
+		if res.OK {
+			t.Fatalf("expected res.OK to be false, got true")
+		}
+		if calls != 0 {
+			t.Fatalf("expected 0 subprocess calls on expired context, got %d", calls)
+		}
+	})
+
+	t.Run("CanceledContextYieldsZeroSubprocesses", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		calls := 0
+		run := Runner(func(ctx context.Context, dir string, args ...string) (string, int, error) {
+			calls++
+			return "", 0, nil
+		})
+		res, err := ValidatePathAttribution(ctx, run, "", []string{"internal/gateway"}, PathAttributionOptions{})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got %v", err)
+		}
+		if res.OK {
+			t.Fatalf("expected res.OK to be false, got true")
+		}
+		if calls != 0 {
+			t.Fatalf("expected 0 subprocess calls on canceled context, got %d", calls)
+		}
+	})
+
+	t.Run("ShortTimeoutAbortsWithoutSubprocessLeakage", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		calls := 0
+		run := Runner(func(ctx context.Context, dir string, args ...string) (string, int, error) {
+			calls++
+			<-ctx.Done()
+			return "", -1, ctx.Err()
+		})
+		res, err := ValidatePathAttribution(ctx, run, "", []string{"internal/gateway"}, PathAttributionOptions{})
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected context.DeadlineExceeded, got %v", err)
+		}
+		if res.OK {
+			t.Fatalf("expected res.OK to be false, got true")
+		}
+		if calls > 1 {
+			t.Fatalf("expected at most 1 subprocess call before deadline abort, got %d", calls)
+		}
+	})
+
+	t.Run("UnboundedContextReceivesDefensiveTimeout", func(t *testing.T) {
+		ctx := context.Background()
+		calls := 0
+		var observedDeadline time.Time
+		run := Runner(func(ctx context.Context, dir string, args ...string) (string, int, error) {
+			calls++
+			d, ok := ctx.Deadline()
+			if !ok {
+				t.Fatal("expected runner to receive bounded context deadline")
+			}
+			observedDeadline = d
+			return "", 0, nil
+		})
+		res, err := ValidatePathAttribution(ctx, run, "", []string{"internal/gateway"}, PathAttributionOptions{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !res.OK {
+			t.Fatalf("expected res.OK, got %+v", res)
+		}
+		if calls != 1 {
+			t.Fatalf("expected 1 status call, got %d", calls)
+		}
+		if observedDeadline.IsZero() {
+			t.Fatal("no deadline was set on context")
+		}
+		remaining := time.Until(observedDeadline)
+		if remaining <= 0 || remaining > peerWIPAttributionTimeout {
+			t.Fatalf("expected deadline within (0, %v], got %v", peerWIPAttributionTimeout, remaining)
+		}
+	})
+
+	t.Run("SubprocessesShareExactSameDeadline", func(t *testing.T) {
+		ctx := context.Background()
+		var deadlines []time.Time
+		run := Runner(func(ctx context.Context, dir string, args ...string) (string, int, error) {
+			d, ok := ctx.Deadline()
+			if !ok {
+				t.Fatal("expected runner to receive bounded context deadline")
+			}
+			deadlines = append(deadlines, d)
+			switch args[0] {
+			case "status":
+				return " M internal/gateway/foo.go\n", 0, nil
+			case "for-each-ref":
+				return "", 0, nil
+			default:
+				return "", 0, nil
+			}
+		})
+		_, err := ValidatePathAttribution(ctx, run, "", []string{"internal/gateway"}, PathAttributionOptions{SessionID: "self"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(deadlines) < 2 {
+			t.Fatalf("expected at least 2 subprocess calls, got %d", len(deadlines))
+		}
+		for i := 1; i < len(deadlines); i++ {
+			if !deadlines[i].Equal(deadlines[0]) {
+				t.Fatalf("deadline reset between subprocess %d and 0: %v vs %v", i, deadlines[i], deadlines[0])
+			}
+		}
+	})
 }

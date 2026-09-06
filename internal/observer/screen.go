@@ -167,7 +167,52 @@ func (s ObserverSemanticScreen) ScreenResult(ctx context.Context, c *abi.ToolCal
 
 	res, err := s.pool.ObserveSyncBarrier(ctx, obs)
 
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		digest := res.Reason
+		if digest == "" {
+			digest = "observer sync barrier context deadline exceeded"
+		}
+		return abi.ScreenAdvice{
+			Disposition: abi.ScreenQuarantine,
+			Reason:      abi.ReasonIntegrityRefuted,
+			Digest:      digest,
+			By:          "observer:context_deadline",
+		}
+	}
+
+	if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) || ctx.Err() != nil {
+		digest := res.Reason
+		if digest == "" {
+			digest = "observer sync barrier context canceled"
+		}
+		return abi.ScreenAdvice{
+			Disposition: abi.ScreenQuarantine,
+			Reason:      abi.ReasonIntegrityRefuted,
+			Digest:      digest,
+			By:          "observer:context_canceled",
+		}
+	}
+
 	if errors.Is(err, ErrBarrierTimeout) {
+		sess := s.pool.getOrCreateSession(sessionID)
+		if (sess != nil && sess.isFlagged()) || res.StepVerdict == StepRegress || res.StepVerdict == StepChurn || obs.StepVerdict == StepRegress || obs.StepVerdict == StepChurn {
+			digest := res.Reason
+			if digest == "" {
+				digest = "observer sync barrier timed out on flagged session"
+			}
+			return abi.ScreenAdvice{
+				Disposition: abi.ScreenQuarantine,
+				Reason:      abi.ReasonIntegrityRefuted,
+				Digest:      digest,
+				By:          "observer:barrier_timeout_flagged",
+			}
+		}
+		if obs.IsReadOnly() && sess != nil && !sess.isFlagged() {
+			return abi.ScreenAdvice{
+				Disposition: abi.ScreenAllow,
+				By:          "observer:advance",
+			}
+		}
 		digest := res.Reason
 		if digest == "" {
 			digest = "observer sync barrier timed out waiting for in-flight tasks"

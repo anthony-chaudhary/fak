@@ -92,6 +92,9 @@ type Slot struct {
 	PromptTokens      []int
 	GeneratedTokens   []int
 	TargetTokens      int
+	ExecutionDepth    int           // Configured recurrent depth limit (default 1)
+	CurrentDepth      int           // Current recurrent depth reached (0..ExecutionDepth)
+	RecurrentPasses   int           // Recurrent execution passes completed
 	YieldCount        int
 	ResumeCount       int
 	LastToken         int
@@ -135,6 +138,34 @@ func (s *Slot) TokensGenerated() int {
 	return len(s.GeneratedTokens)
 }
 
+// CurrentExecutionDepth returns the current recurrent execution depth reached by this slot.
+func (s *Slot) CurrentExecutionDepth() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.CurrentDepth
+}
+
+// RecurrentPassCount returns the count of completed recurrent passes.
+func (s *Slot) RecurrentPassCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.RecurrentPasses
+}
+
+// Depth returns the current execution depth reached by this slot.
+func (s *Slot) Depth() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.CurrentDepth
+}
+
+// RecurrentDepth returns the configured recurrent execution depth limit.
+func (s *Slot) RecurrentDepth() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ExecutionDepth
+}
+
 func (s *Slot) snapshot() *Slot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -145,6 +176,9 @@ func (s *Slot) snapshot() *Slot {
 		State:             s.State,
 		Request:           s.Request,
 		TargetTokens:      s.TargetTokens,
+		ExecutionDepth:    s.ExecutionDepth,
+		CurrentDepth:      s.CurrentDepth,
+		RecurrentPasses:   s.RecurrentPasses,
 		YieldCount:        s.YieldCount,
 		ResumeCount:       s.ResumeCount,
 		LastToken:         s.LastToken,
@@ -179,6 +213,9 @@ func (s *Slot) reset() {
 	s.PromptTokens = nil
 	s.GeneratedTokens = nil
 	s.TargetTokens = 0
+	s.ExecutionDepth = 0
+	s.CurrentDepth = 0
+	s.RecurrentPasses = 0
 	s.YieldCount = 0
 	s.ResumeCount = 0
 	s.LastToken = 0
@@ -251,6 +288,7 @@ type BatchStepResult struct {
 	RetiredSessionIDs    []string
 	PromotedSessionIDs   []string
 	KVCacheBytesUsed     int64
+	SlotDepths           map[string]int // Current execution depth per session ID
 }
 
 // ContinuousBatcher manages dynamic iteration-level continuous batching for subagent turn loops.
@@ -328,7 +366,11 @@ func (cb *ContinuousBatcher) Submit(req *SubagentRequest) (string, error) {
 		return "", ErrNilRequest
 	}
 	if req.TargetTokens <= 0 {
-		return "", ErrInvalidTargetTokens
+		if req.ExecutionDepth > 0 || req.RecurrentLoops > 0 {
+			req.TargetTokens = req.effectiveDepth()
+		} else {
+			return "", ErrInvalidTargetTokens
+		}
 	}
 
 	cb.mu.Lock()
@@ -378,6 +420,7 @@ func (cb *ContinuousBatcher) Submit(req *SubagentRequest) (string, error) {
 
 func (cb *ContinuousBatcher) initSlot(index int, req *SubagentRequest) *Slot {
 	reqKVBytes := cb.RequiredKVCacheBytes(req)
+	depth := req.effectiveDepth()
 	slot := &Slot{
 		Index:             index,
 		SessionID:         req.SessionID,
@@ -386,6 +429,9 @@ func (cb *ContinuousBatcher) initSlot(index int, req *SubagentRequest) *Slot {
 		PromptTokens:      append([]int(nil), req.PromptTokens...),
 		GeneratedTokens:   make([]int, 0, req.TargetTokens),
 		TargetTokens:      req.TargetTokens,
+		ExecutionDepth:    depth,
+		CurrentDepth:      0,
+		RecurrentPasses:   0,
 		YieldCount:        0,
 		ResumeCount:       0,
 		EvictionDuration:  0,
@@ -553,12 +599,14 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 			RetiredSessionIDs:    nil,
 			PromotedSessionIDs:   promotedIDs,
 			KVCacheBytesUsed:     cb.currentKVCacheBytesLocked(),
+			SlotDepths:           make(map[string]int),
 		}, nil
 	}
 
 	activeCount := len(activeSlots)
 	tokensThisStep := make([]int, activeCount)
 	generatedTokens := make(map[string]int, activeCount)
+	slotDepths := make(map[string]int, activeCount)
 
 	// 3. Forward pass over all active slots simultaneously
 	if cb.cfg.Model != nil {
@@ -598,15 +646,25 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 		slot.mu.Lock()
 		slot.LastToken = tok
 		slot.GeneratedTokens = append(slot.GeneratedTokens, tok)
+		slot.CurrentDepth++
+		slot.RecurrentPasses++
 		cb.totalTokens++
 		generatedTokens[slot.SessionID] = tok
+		slotDepths[slot.SessionID] = slot.CurrentDepth
 
 		select {
 		case slot.tokenCh <- tok:
 		default:
 		}
 
-		if len(slot.GeneratedTokens) >= slot.TargetTokens {
+		isFinished := false
+		if slot.ExecutionDepth > 1 {
+			isFinished = slot.CurrentDepth >= slot.ExecutionDepth
+		} else {
+			isFinished = len(slot.GeneratedTokens) >= slot.TargetTokens
+		}
+
+		if isFinished {
 			slot.State = SlotStateFinished
 			slot.CompletedAt = time.Now()
 			close(slot.doneCh)
@@ -655,6 +713,7 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 		RetiredSessionIDs:    retiredIDs,
 		PromotedSessionIDs:   promotedIDs,
 		KVCacheBytesUsed:     cb.currentKVCacheBytesLocked(),
+		SlotDepths:           slotDepths,
 	}
 
 	return result, nil
@@ -891,7 +950,11 @@ func (cb *ContinuousBatcher) RequiredKVCacheBytes(req *SubagentRequest) int64 {
 	if bpt <= 0 {
 		bpt = 1024
 	}
-	tokens := int64(len(req.PromptTokens) + req.TargetTokens)
+	targetTokens := req.TargetTokens
+	if targetTokens <= 0 {
+		targetTokens = req.effectiveDepth()
+	}
+	tokens := int64(len(req.PromptTokens) + targetTokens)
 	return tokens * bpt * depth
 }
 

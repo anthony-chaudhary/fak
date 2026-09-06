@@ -652,3 +652,164 @@ func TestMCPSandboxTools(t *testing.T) {
 		t.Fatalf("sandbox_exec stdout = %q, want it to contain 'sandbox_ok'", stdoutStr)
 	}
 }
+
+func TestSandboxSymlinkConfinement(t *testing.T) {
+	temp := t.TempDir()
+	wsDir := filepath.Join(temp, "ws")
+	outsideDir := filepath.Join(temp, "outside")
+	if err := os.Mkdir(wsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(outsideDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	secretFile := filepath.Join(outsideDir, "secret.txt")
+	if err := os.WriteFile(secretFile, []byte("super-secret-content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	outsideFileSymlink := filepath.Join(wsDir, "link_outside_file.txt")
+	if err := os.Symlink(secretFile, outsideFileSymlink); err != nil {
+		t.Skipf("skipping symlink test: symlink creation not permitted: %v", err)
+	}
+
+	outsideDirSymlink := filepath.Join(wsDir, "link_outside_dir")
+	if err := os.Symlink(outsideDir, outsideDirSymlink); err != nil {
+		t.Skipf("skipping symlink test: symlink creation not permitted: %v", err)
+	}
+
+	SetSandboxWorkspace(wsDir)
+	defer SetSandboxWorkspace("")
+
+	_, err := ArmMCPTools()
+	if err != nil {
+		t.Fatalf("ArmMCPTools failed: %v", err)
+	}
+	defer DisarmMCPTools()
+
+	ctx := context.Background()
+	eng := abi.Engine("inprocess_mcp")
+	if eng == nil {
+		t.Fatal("inprocess_mcp engine is nil")
+	}
+
+	// 1. sandbox_read through a symlink file pointing outside must fail
+	readArgs, _ := json.Marshal(map[string]any{
+		"path": "link_outside_file.txt",
+	})
+	cRead := &abi.ToolCall{
+		Tool: "sandbox_read",
+		Args: putBytes(ctx, readArgs),
+	}
+	resRead, _ := eng.Complete(ctx, cRead)
+	if resRead == nil || resRead.Status != abi.StatusError {
+		t.Fatalf("sandbox_read through symlink should return StatusError: %+v", resRead)
+	}
+	readPayload := string(refutil.Bytes(ctx, resRead.Payload))
+	if !strings.Contains(readPayload, "escapes sandbox workspace via symlink") {
+		t.Fatalf("sandbox_read error payload = %q, want confinement failure mentioning escapes via symlink", readPayload)
+	}
+
+	// Direct check on handleSandboxRead
+	_, directReadErr := handleSandboxRead(ctx, map[string]any{"path": "link_outside_file.txt"})
+	if directReadErr == nil || !strings.Contains(directReadErr.Error(), "escapes sandbox workspace via symlink") {
+		t.Fatalf("handleSandboxRead direct error = %v, want 'escapes sandbox workspace via symlink'", directReadErr)
+	}
+
+	// 2. sandbox_read through a symlinked directory pointing outside must fail
+	readDirArgs, _ := json.Marshal(map[string]any{
+		"path": "link_outside_dir/secret.txt",
+	})
+	cReadDir := &abi.ToolCall{
+		Tool: "sandbox_read",
+		Args: putBytes(ctx, readDirArgs),
+	}
+	resReadDir, _ := eng.Complete(ctx, cReadDir)
+	if resReadDir == nil || resReadDir.Status != abi.StatusError {
+		t.Fatalf("sandbox_read through dir symlink should return StatusError: %+v", resReadDir)
+	}
+	readDirPayload := string(refutil.Bytes(ctx, resReadDir.Payload))
+	if !strings.Contains(readDirPayload, "escapes sandbox workspace via symlink") {
+		t.Fatalf("sandbox_read dir error payload = %q, want confinement failure", readDirPayload)
+	}
+
+	// 3. sandbox_write through a symlink file pointing outside must fail
+	writeLinkArgs, _ := json.Marshal(map[string]any{
+		"path":    "link_outside_file.txt",
+		"content": "overwritten-secret",
+	})
+	cWriteLink := &abi.ToolCall{
+		Tool: "sandbox_write",
+		Args: putBytes(ctx, writeLinkArgs),
+	}
+	resWriteLink, _ := eng.Complete(ctx, cWriteLink)
+	if resWriteLink == nil || resWriteLink.Status != abi.StatusError {
+		t.Fatalf("sandbox_write through symlink file should return StatusError: %+v", resWriteLink)
+	}
+	writeLinkPayload := string(refutil.Bytes(ctx, resWriteLink.Payload))
+	if !strings.Contains(writeLinkPayload, "escapes sandbox workspace via symlink") {
+		t.Fatalf("sandbox_write error payload = %q, want confinement failure", writeLinkPayload)
+	}
+
+	// Verify outside file was NOT overwritten
+	contentAfter, err := os.ReadFile(secretFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contentAfter) != "super-secret-content" {
+		t.Fatalf("outside file content was modified: %q", string(contentAfter))
+	}
+
+	// 4. sandbox_write to a new file through a symlinked directory pointing outside must fail
+	writeDirArgs, _ := json.Marshal(map[string]any{
+		"path":    "link_outside_dir/escaped_write.txt",
+		"content": "escaped-payload",
+	})
+	cWriteDir := &abi.ToolCall{
+		Tool: "sandbox_write",
+		Args: putBytes(ctx, writeDirArgs),
+	}
+	resWriteDir, _ := eng.Complete(ctx, cWriteDir)
+	if resWriteDir == nil || resWriteDir.Status != abi.StatusError {
+		t.Fatalf("sandbox_write through dir symlink should return StatusError: %+v", resWriteDir)
+	}
+	writeDirPayload := string(refutil.Bytes(ctx, resWriteDir.Payload))
+	if !strings.Contains(writeDirPayload, "escapes sandbox workspace via symlink") {
+		t.Fatalf("sandbox_write dir error payload = %q, want confinement failure", writeDirPayload)
+	}
+
+	// Direct check on handleSandboxWrite
+	_, directWriteErr := handleSandboxWrite(ctx, map[string]any{
+		"path":    "link_outside_dir/escaped_write.txt",
+		"content": "escaped-payload",
+	})
+	if directWriteErr == nil || !strings.Contains(directWriteErr.Error(), "escapes sandbox workspace via symlink") {
+		t.Fatalf("handleSandboxWrite direct error = %v, want 'escapes sandbox workspace via symlink'", directWriteErr)
+	}
+
+	// Verify the file was NOT created outside
+	if _, err := os.Stat(filepath.Join(outsideDir, "escaped_write.txt")); err == nil {
+		t.Fatalf("escaped_write.txt was created in outside directory!")
+	}
+
+	// 5. Legitimate symlink inside workspace should succeed
+	insideFile := filepath.Join(wsDir, "inside.txt")
+	if err := os.WriteFile(insideFile, []byte("valid-inside"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	insideLink := filepath.Join(wsDir, "link_inside.txt")
+	if err := os.Symlink(insideFile, insideLink); err == nil {
+		readInsideArgs, _ := json.Marshal(map[string]any{
+			"path": "link_inside.txt",
+		})
+		cReadInside := &abi.ToolCall{
+			Tool: "sandbox_read",
+			Args: putBytes(ctx, readInsideArgs),
+		}
+		resReadInside, err := eng.Complete(ctx, cReadInside)
+		if err != nil || resReadInside.Status != abi.StatusOK {
+			t.Fatalf("sandbox_read through valid inside symlink failed: %+v", resReadInside)
+		}
+	}
+}

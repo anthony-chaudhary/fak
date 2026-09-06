@@ -398,17 +398,50 @@ func BenchmarkCooldownStore(b *testing.B) {
 	})
 
 	b.Run("Prune", func(b *testing.B) {
+		template := &CooldownStore{entries: make(map[string]CooldownEntry, 100)}
+		for j := 0; j < 50; j++ {
+			template.Cool(fmt.Sprintf("live-%02d", j), CooldownUsageLimit, "limit", now, now.Add(time.Hour))
+			template.Cool(fmt.Sprintf("expired-%02d", j), CooldownUsageLimit, "limit", now.Add(-2*time.Hour), now.Add(-time.Hour))
+		}
+
+		const poolSize = 1024
+		stores := make([]*CooldownStore, poolSize)
+		for i := 0; i < poolSize; i++ {
+			entries := make(map[string]CooldownEntry, len(template.entries))
+			for k, v := range template.entries {
+				entries[k] = v
+			}
+			stores[i] = &CooldownStore{
+				entries:       entries,
+				degraded:      template.degraded,
+				degradedSince: template.degradedSince,
+			}
+		}
+
+		type entryPair struct {
+			key   string
+			entry CooldownEntry
+		}
+		expired := make([]entryPair, 50)
+		for j := 0; j < 50; j++ {
+			k := fmt.Sprintf("expired-%02d", j)
+			expired[j] = entryPair{key: k, entry: template.entries[k]}
+		}
+
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			b.StopTimer()
-			store := &CooldownStore{entries: map[string]CooldownEntry{}}
-			for j := 0; j < 50; j++ {
-				store.Cool(fmt.Sprintf("live-%02d", j), CooldownUsageLimit, "limit", now, now.Add(time.Hour))
-				store.Cool(fmt.Sprintf("expired-%02d", j), CooldownUsageLimit, "limit", now.Add(-2*time.Hour), now.Add(-time.Hour))
+			idx := i % poolSize
+			if i > 0 && idx == 0 {
+				b.StopTimer()
+				for k := 0; k < poolSize; k++ {
+					for _, ep := range expired {
+						stores[k].entries[ep.key] = ep.entry
+					}
+				}
+				b.StartTimer()
 			}
-			b.StartTimer()
-			pruned := store.Prune(now)
+			pruned := stores[idx].Prune(now)
 			if pruned != 50 {
 				b.Fatalf("got %d pruned, want 50", pruned)
 			}

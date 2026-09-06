@@ -446,3 +446,64 @@ func TestManager_ConcurrentApplyAndTelemetryRollback_NoDeadlock(t *testing.T) {
 		t.Fatal("deadlock detected: timed out waiting for concurrent apply, telemetry rollback, and stabilization checks")
 	}
 }
+
+func TestManager_ObserverReentrancyNoDeadlock(t *testing.T) {
+	initial := DefaultConfig()
+	mgr, err := NewManager(initial, DefaultWatchdogConfig(), nil)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	var reentrantApplyDone bool
+	var reentrantRollbackDone bool
+	var reentrantRegisterDone bool
+
+	mgr.RegisterObserver(func(vc VersionedConfig) {
+		if vc.Epoch == 2 && !reentrantApplyDone {
+			reentrantApplyDone = true
+			newDepth := uint32(7)
+			// Reentrant Apply from within Apply observer callback
+			_, err := mgr.Apply(ConfigPatch{SpeculativeDraftDepth: &newDepth}, false)
+			if err != nil {
+				t.Errorf("reentrant Apply failed: %v", err)
+			}
+		} else if vc.Epoch == 3 && !reentrantRollbackDone {
+			reentrantRollbackDone = true
+			// Reentrant Rollback from within Apply observer callback
+			_, err := mgr.Rollback("manual", "reentrant rollback")
+			if err != nil {
+				t.Errorf("reentrant Rollback failed: %v", err)
+			}
+		} else if vc.Epoch == 4 && !reentrantRegisterDone {
+			reentrantRegisterDone = true
+			// Reentrant RegisterObserver from within Rollback observer callback
+			mgr.RegisterObserver(func(VersionedConfig) {})
+		}
+	})
+
+	done := make(chan struct{})
+	go func() {
+		newDepth := uint32(4)
+		_, err := mgr.Apply(ConfigPatch{SpeculativeDraftDepth: &newDepth}, false)
+		if err != nil {
+			t.Errorf("initial Apply failed: %v", err)
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("deadlock detected: timed out waiting for reentrant observer operations")
+	}
+
+	if !reentrantApplyDone {
+		t.Error("reentrant Apply was not executed")
+	}
+	if !reentrantRollbackDone {
+		t.Error("reentrant Rollback was not executed")
+	}
+	if !reentrantRegisterDone {
+		t.Error("reentrant RegisterObserver was not executed")
+	}
+}

@@ -203,7 +203,7 @@ func syncPublicLeakExistsAtBaseline(repo, target string, finding hooks.Finding) 
 	baseLines := strings.Split(string(baseline), "\n")
 	currentLines := strings.Split(string(current), "\n")
 	line := finding.Line - 1
-	return line >= 0 && line < len(baseLines) && line < len(currentLines) && baseLines[line] == currentLines[line]
+	return line >= 0 && line < len(baseLines) && line < len(currentLines) && strings.TrimRight(baseLines[line], "\r") == strings.TrimRight(currentLines[line], "\r")
 }
 
 func syncPublicLeakActionablePaths(findings []syncPublicLeakFinding) []string {
