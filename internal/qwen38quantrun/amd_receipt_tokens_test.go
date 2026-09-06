@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -413,5 +415,120 @@ func TestAMDDefaultOpenAIFormattingUntouched(t *testing.T) {
 	}
 	if resultsDef[0].NativeInferenceReceipt != nil {
 		t.Fatal("expected nil Result.NativeInferenceReceipt for default config")
+	}
+}
+
+// This executes the production JSON ingestion path, including report readback.
+func TestAMDNativeEvidenceFileBinding(t *testing.T) {
+	for _, tc := range []struct {
+		name, engine, backend, kind string
+		fallback, accept            bool
+	}{
+		{"matched", "fak-native", "vulkan", "selected-token-logprobs", false, true},
+		{"missing-receipt", "fak-native", "vulkan", "selected-token-logprobs", false, false},
+		{"altered-tokens", "fak-native", "vulkan", "selected-token-logprobs", false, false},
+		{"altered-logprobs", "fak-native", "vulkan", "selected-token-logprobs", false, false},
+		{"missing-step", "fak-native", "vulkan", "selected-token-logprobs", false, false},
+		{"unknown-semantics", "fak-native", "vulkan", "unknown", false, false},
+		{"foreign-engine", "llama.cpp", "vulkan", "selected-token-logprobs", false, false},
+		{"fallback", "fak-native", "vulkan", "selected-token-logprobs", true, false},
+		{"backend-mismatch", "fak-native", "cpu", "selected-token-logprobs", false, false},
+		{"raw-versus-logprob", "fak-native", "vulkan", "raw-logits", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := validAMDScoreboardInput()
+			raw, err := json.Marshal(in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var doc map[string]any
+			if err := json.Unmarshal(raw, &doc); err != nil {
+				t.Fatal(err)
+			}
+			for _, role := range []string{"candidate", "reference"} {
+				arm := doc[role].(map[string]any)
+				for _, value := range arm["trials"].([]any) {
+					trial := value.(map[string]any)
+					trial["logits"] = []float64{-1, -2, -3, -4}
+					trial["evidence_kind"] = "selected-token-logprobs"
+					if role == "candidate" {
+						trial["native_inference_receipt"] = model.NativeInferenceReceipt{Engine: tc.engine, Backend: tc.backend, FallbackActive: tc.fallback, TokenIDs: []int{4, 5, 6, 7}, TokenLogprobs: []float64{-1, -2, -3, -4}}
+						switch tc.name {
+						case "missing-receipt":
+							delete(trial, "native_inference_receipt")
+						case "altered-tokens":
+							trial["output_token_ids"] = []int{4, 5, 6, 8}
+						case "altered-logprobs":
+							trial["logits"] = []float64{-1, -2, -3, -5}
+						case "missing-step":
+							trial["logits"] = []float64{-1, -2, -3}
+						}
+
+					} else {
+						trial["evidence_kind"] = tc.kind
+					}
+				}
+			}
+			raw, err = json.Marshal(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			input, output := filepath.Join(dir, "input.json"), filepath.Join(dir, "report.json")
+			if err := os.WriteFile(input, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			report, err := BuildAMDScoreboardFile(input, output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.Comparable != tc.accept || (report.ReferenceOverCandidate != nil) != tc.accept {
+				t.Fatalf("report=%+v", report)
+			}
+			raw, err = os.ReadFile(output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var saved AMDScoreboardReport
+			if err := json.Unmarshal(raw, &saved); err != nil {
+				t.Fatal(err)
+			}
+			if tc.accept && (saved.Candidate.MedianColdSetupSeconds != 300 || saved.Reference.MedianColdSetupSeconds != 300) {
+				t.Fatalf("cold setup accounting lost in file report: candidate=%g reference=%g", saved.Candidate.MedianColdSetupSeconds, saved.Reference.MedianColdSetupSeconds)
+			}
+			if saved.Comparable != tc.accept {
+				t.Fatalf("saved=%+v", saved)
+			}
+		})
+	}
+}
+
+func TestAMDNativeCaptureRejectsForeignProvenance(t *testing.T) {
+	for _, r := range []*model.NativeInferenceReceipt{
+		{Engine: "llama.cpp", Backend: "vulkan", TokenIDs: []int{4}, TokenLogprobs: []float64{-1}},
+		{Engine: "fak-native", Backend: "vulkan", FallbackActive: true, TokenIDs: []int{4}, TokenLogprobs: []float64{-1}},
+		{Engine: "fak-native", Backend: "vulkan", TokenIDs: []int{4}},
+	} {
+		if _, err := CaptureAMDScoreboardTrial(1, r, 1, 1, 1, 1, 1, 1, 1); err == nil {
+			t.Fatalf("accepted invalid receipt: %+v", r)
+		}
+	}
+}
+
+func TestAMDNativeCaptureCannotCompareRawLogits(t *testing.T) {
+	in := validAMDScoreboardInput()
+	for i := range in.Candidate.Trials {
+		old := in.Candidate.Trials[i]
+		r := &model.NativeInferenceReceipt{Engine: "fak-native", Backend: "vulkan", TokenIDs: []int{4, 5, 6, 7}, TokenLogprobs: []float64{-1, -2, -3, -4}, PrefillSeconds: old.PrefillSeconds, DecodeSeconds: old.WarmDecodeSeconds}
+		trial, err := CaptureAMDScoreboardTrial(i+1, r, old.ColdSetupSeconds, old.PrefillTokensPerSecond, old.WarmDecodeTokensPerSecond, old.H2DBytes, old.D2HBytes, old.D2DBytes, old.QueueSubmissions)
+		if err != nil {
+			t.Fatal(err)
+		}
+		in.Candidate.Trials[i] = trial
+		in.Reference.Trials[i].Logits = slices.Clone(r.TokenLogprobs)
+	}
+	report := BuildAMDScoreboard(in)
+	if report.Comparable || report.ReferenceOverCandidate != nil {
+		t.Fatalf("normalized logprobs accepted as raw logits: %+v", report)
 	}
 }

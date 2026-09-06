@@ -63,6 +63,14 @@ type AMDArmReceipt struct {
 }
 
 type AMDScoreboardTrial struct {
+	// Empty evidence_kind retains the legacy raw-logit contract. Native receipts
+	// contain log_softmax values, never raw logits; both arms must name that basis.
+	// "selected-token-logprobs" means one normalized log probability per output
+	// token, in token order. The legacy logits/selected_token_logits JSON fields
+	// remain unchanged; evidence_kind declares the numeric basis of their values.
+	EvidenceKind           string                        `json:"evidence_kind,omitempty"`
+	NativeInferenceReceipt *model.NativeInferenceReceipt `json:"native_inference_receipt,omitempty"`
+
 	Repetition                int       `json:"repetition"`
 	ColdSetupSeconds          float64   `json:"cold_setup_seconds"`
 	PrefillSeconds            float64   `json:"prefill_seconds"`
@@ -236,6 +244,9 @@ func validateAMDScoreboard(in AMDScoreboardInput) []string {
 	if len(in.Candidate.Trials) == len(in.Reference.Trials) {
 		for i := range in.Candidate.Trials {
 			c, r := in.Candidate.Trials[i], in.Reference.Trials[i]
+			if amdEvidenceKind(c) != amdEvidenceKind(r) {
+				add("evidence-kind-mismatch")
+			}
 			cTokens, rTokens := c.EffectiveTokenIDs(), r.EffectiveTokenIDs()
 			if c.Repetition != r.Repetition || !slices.Equal(cTokens, rTokens) {
 				add("output-token-mismatch")
@@ -284,6 +295,40 @@ func validateAMDArm(arm AMDArmReceipt, role string, add func(string)) {
 	}
 	seen := map[int]bool{}
 	for _, t := range arm.Trials {
+		kind := amdEvidenceKind(t)
+		if kind != "raw-logits" && kind != "selected-token-logprobs" {
+			add(prefix + "evidence-kind-unsupported")
+		}
+		if kind == "selected-token-logprobs" {
+			if len(t.EffectiveTokenIDs()) != len(t.EffectiveLogits()) {
+				add(prefix + "logprob-shape-mismatch")
+			}
+			for _, v := range t.EffectiveLogits() {
+				if v > 0 {
+					add(prefix + "logprob-invalid")
+				}
+			}
+			if role == "candidate" && t.NativeInferenceReceipt == nil {
+				add(prefix + "native-receipt-missing")
+			}
+		}
+		if r := t.NativeInferenceReceipt; r != nil {
+			if role != "candidate" || r.Engine != arm.Engine || r.Backend != arm.Backend || validateAMDNativeReceipt(r) != nil {
+				add(prefix + "native-provenance-mismatch")
+			}
+			if t.EvidenceKind != "selected-token-logprobs" {
+				add(prefix + "native-evidence-kind-mismatch")
+			}
+			if !slices.Equal(t.EffectiveTokenIDs(), r.TokenIDs) || !slices.Equal(t.EffectiveLogits(), r.TokenLogprobs) {
+				add(prefix + "native-evidence-mismatch")
+			}
+		}
+		if len(t.OutputTokenIDs) > 0 && len(t.SelectedTokenIDs) > 0 && !slices.Equal(t.OutputTokenIDs, t.SelectedTokenIDs) {
+			add(prefix + "token-alias-mismatch")
+		}
+		if len(t.Logits) > 0 && len(t.SelectedTokenLogits) > 0 && !slices.Equal(t.Logits, t.SelectedTokenLogits) {
+			add(prefix + "logit-alias-mismatch")
+		}
 		if t.Repetition <= 0 || seen[t.Repetition] {
 			add(prefix + "trial-index-invalid")
 		}
@@ -379,6 +424,9 @@ func ValidateLogitsTolerance(candidateLogits, referenceLogits []float64, toleran
 
 // ValidateTrialTokensAndLogits validates that trial tokens match exactly and logits are within tolerance.
 func ValidateTrialTokensAndLogits(candidate, reference AMDScoreboardTrial, tolerance float64) error {
+	if amdEvidenceKind(candidate) != amdEvidenceKind(reference) {
+		return errors.New("evidence-kind-mismatch")
+	}
 	if candidate.Repetition != reference.Repetition {
 		return fmt.Errorf("trial repetition mismatch: candidate=%d reference=%d", candidate.Repetition, reference.Repetition)
 	}
@@ -414,12 +462,17 @@ func CaptureAMDScoreboardTrial(repetition int, receipt *model.NativeInferenceRec
 	if repetition <= 0 {
 		return AMDScoreboardTrial{}, errors.New("repetition must be positive")
 	}
-	if receipt == nil {
-		return AMDScoreboardTrial{}, errors.New("native inference receipt is required")
+	if err := validateAMDNativeReceipt(receipt); err != nil {
+		return AMDScoreboardTrial{}, err
 	}
 	tokenIDs := append([]int(nil), receipt.TokenIDs...)
 	logits := append([]float64(nil), receipt.TokenLogprobs...)
+	captured := *receipt
+	captured.TokenIDs = slices.Clone(receipt.TokenIDs)
+	captured.TokenLogprobs = slices.Clone(receipt.TokenLogprobs)
 	return AMDScoreboardTrial{
+		EvidenceKind:              "selected-token-logprobs",
+		NativeInferenceReceipt:    &captured,
 		Repetition:                repetition,
 		ColdSetupSeconds:          coldSetupS,
 		PrefillSeconds:            receipt.PrefillSeconds,
@@ -435,4 +488,29 @@ func CaptureAMDScoreboardTrial(repetition int, receipt *model.NativeInferenceRec
 		D2DBytes:                  d2d,
 		QueueSubmissions:          queueSubmissions,
 	}, nil
+}
+
+func amdEvidenceKind(t AMDScoreboardTrial) string {
+	if t.EvidenceKind == "" {
+		return "raw-logits"
+	}
+	return t.EvidenceKind
+}
+
+func validateAMDNativeReceipt(r *model.NativeInferenceReceipt) error {
+	if r == nil {
+		return errors.New("native-receipt-missing")
+	}
+	if r.Engine != "fak-native" || r.Backend == "" || r.FallbackActive {
+		return errors.New("native-provenance-mismatch")
+	}
+	if len(r.TokenIDs) == 0 || len(r.TokenIDs) != len(r.TokenLogprobs) {
+		return errors.New("native-evidence-incomplete")
+	}
+	for i, v := range r.TokenLogprobs {
+		if r.TokenIDs[i] < 0 || math.IsNaN(v) || math.IsInf(v, 0) || v > 0 {
+			return errors.New("native-evidence-invalid")
+		}
+	}
+	return nil
 }
