@@ -3,13 +3,12 @@ package harvest
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 )
-
-// ---- test doubles (a minimal kernel harness, local to this leaf) -------------
 
 type inlineRes struct{}
 
@@ -31,7 +30,6 @@ func (e *countEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Resul
 }
 func (e *countEngine) Caps() []abi.Capability { return nil }
 
-// denyTool denies one named tool (POLICY_BLOCK) and allows everything else.
 type denyTool struct{ deny string }
 
 func (d denyTool) Caps() []abi.Capability { return nil }
@@ -48,9 +46,6 @@ func newKernel(t *testing.T, id string) *kernel.Kernel {
 	return kernel.New(id)
 }
 
-// TestHarvestsDeniesAsLabels — a Deny event becomes a positive LabelRow carrying the
-// verdict kind + reason; an Allow does not (it would be a negative, only collected
-// on an explicit decide event).
 func TestHarvestsDeniesAsLabels(t *testing.T) {
 	c := NewCorpus()
 	h := New(c)
@@ -70,10 +65,6 @@ func TestHarvestsDeniesAsLabels(t *testing.T) {
 	}
 }
 
-// A denied call must contribute ONE training row, not two. The kernel pairs an
-// EvDecide(DENY) with a dedicated EvDeny for the same call (see kernel.Decide /
-// kernel.Submit); deriving a LabelRow from both would double every catch in the
-// corpus. This reproduces the exact emit pair and asserts a single positive.
 func TestDeniedCallHarvestedOnce(t *testing.T) {
 	c := NewCorpus()
 	h := New(c)
@@ -106,8 +97,6 @@ func TestHarvestsResultDeniesAsLabels(t *testing.T) {
 	}
 }
 
-// TestExplicitLabelRowTakenVerbatim — the pre-flight ladder's typed EvRungLabel
-// (RungPassed/RungFailed) is collected verbatim, and surfaces as a HARD NEGATIVE.
 func TestExplicitLabelRowTakenVerbatim(t *testing.T) {
 	c := NewCorpus()
 	h := New(c)
@@ -124,10 +113,6 @@ func TestExplicitLabelRowTakenVerbatim(t *testing.T) {
 	}
 }
 
-// TestCompiledLoopDataPath is the integration: drive the kernel over a benign call
-// and an attacker exfil, with the harvester attached as an Emitter. The corpus must
-// capture the exfil DENY as a labeled training example — the defender-side loop's
-// data path (attack -> kernel verdict -> labeled corpus) end to end.
 func TestCompiledLoopDataPath(t *testing.T) {
 	abi.ResetForTest()
 	abi.RegisterRegionBackend(inlineBackend{})
@@ -135,7 +120,6 @@ func TestCompiledLoopDataPath(t *testing.T) {
 	corpus := NewCorpus()
 	abi.RegisterEmitter(New(corpus))
 
-	// a monitor that allows the planned read but denies the exfil tool.
 	abi.RegisterAdjudicator(100, denyTool{deny: "send_email"})
 	eng := &countEngine{}
 	abi.RegisterEngine("e", eng)
@@ -143,8 +127,8 @@ func TestCompiledLoopDataPath(t *testing.T) {
 	k := newKernel(t, "e")
 	ctx := context.Background()
 
-	k.Syscall(ctx, &abi.ToolCall{Tool: "search_flights", Args: inlineArgs(`{}`)})     // allowed
-	k.Syscall(ctx, &abi.ToolCall{Tool: "send_email", Args: inlineArgs(`{"to":"a"}`)}) // denied
+	k.Syscall(ctx, &abi.ToolCall{Tool: "search_flights", Args: inlineArgs(`{}`)})
+	k.Syscall(ctx, &abi.ToolCall{Tool: "send_email", Args: inlineArgs(`{"to":"a"}`)})
 
 	pos := corpus.Positives()
 	if len(pos) == 0 {
@@ -164,9 +148,6 @@ func TestCompiledLoopDataPath(t *testing.T) {
 	}
 }
 
-// TestCorpusRetentionBounded proves the collector does not grow without limit: with
-// a small row cap, folding far more rows than the cap holds Len() at the cap (the
-// OLDEST rows drop — recent-window retention), while below the cap every row stays.
 func TestCorpusRetentionBounded(t *testing.T) {
 	c := NewCorpus()
 	c.SetMaxRows(4)
@@ -183,8 +164,6 @@ func TestCorpusRetentionBounded(t *testing.T) {
 	}
 }
 
-// TestCorpusUnboundedOptOut proves SetMaxRows(-1) disables the bound — the batch
-// caller (a digest/export over a fixed battery) keeps every row.
 func TestCorpusUnboundedOptOut(t *testing.T) {
 	c := NewCorpus()
 	c.SetMaxRows(-1)
@@ -194,5 +173,154 @@ func TestCorpusUnboundedOptOut(t *testing.T) {
 	}
 	if c.Len() != n {
 		t.Fatalf("unbounded corpus retained %d, want all %d", c.Len(), n)
+	}
+}
+
+func TestCorpusRetentionDynamicTrimAndRestoreDefault(t *testing.T) {
+	c := NewCorpus()
+	for i := 0; i < 10; i++ {
+		c.add(abi.LabelRow{CallHash: fmt.Sprintf("call-%d", i), Verdict: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock})
+	}
+	if c.Len() != 10 {
+		t.Fatalf("expected 10 rows, got %d", c.Len())
+	}
+
+	c.SetMaxRows(4)
+	if c.Len() != 4 {
+		t.Fatalf("expected 4 rows after downsize, got %d", c.Len())
+	}
+	rows := c.Rows()
+	if rows[0].CallHash != "call-6" || rows[len(rows)-1].CallHash != "call-9" {
+		t.Fatalf("expected [call-6..call-9], got [%s..%s]", rows[0].CallHash, rows[len(rows)-1].CallHash)
+	}
+
+	c.SetMaxRows(0)
+	for i := 10; i < defaultMaxCorpusRows+50; i++ {
+		c.add(abi.LabelRow{CallHash: fmt.Sprintf("call-%d", i), Verdict: abi.VerdictAllow})
+	}
+	if c.Len() != defaultMaxCorpusRows {
+		t.Fatalf("expected default cap %d, got %d", defaultMaxCorpusRows, c.Len())
+	}
+}
+
+func TestCorpusSnapshotIsolation(t *testing.T) {
+	c := NewCorpus()
+	c.add(abi.LabelRow{CallHash: "call-1", Verdict: abi.VerdictAllow})
+	c.add(abi.LabelRow{CallHash: "call-2", Verdict: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock})
+
+	snap1 := c.Rows()
+	if len(snap1) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(snap1))
+	}
+	snap1[0].CallHash = "mutated"
+
+	snap2 := c.Rows()
+	if snap2[0].CallHash != "call-1" {
+		t.Fatalf("corpus internal state mutated via returned slice: got %s", snap2[0].CallHash)
+	}
+}
+
+func TestHardNegativesInvariant(t *testing.T) {
+	c := NewCorpus()
+	cases := []struct {
+		passed int
+		failed int
+		wantHN bool
+	}{
+		{passed: -1, failed: -1, wantHN: false},
+		{passed: 2, failed: 2, wantHN: false},
+		{passed: 3, failed: 1, wantHN: false},
+		{passed: 0, failed: 1, wantHN: true},
+		{passed: 1, failed: 3, wantHN: true},
+	}
+	for i, tc := range cases {
+		c.add(abi.LabelRow{
+			CallHash:   fmt.Sprintf("call-%d", i),
+			RungPassed: tc.passed,
+			RungFailed: tc.failed,
+			Verdict:    abi.VerdictDeny,
+			Reason:     abi.ReasonMalformed,
+		})
+	}
+
+	hn := c.HardNegatives()
+	if len(hn) != 2 {
+		t.Fatalf("expected 2 hard negatives, got %d", len(hn))
+	}
+	for _, r := range hn {
+		if r.RungPassed < 0 || r.RungFailed <= r.RungPassed {
+			t.Fatalf("violates hard negative invariant: passed=%d failed=%d", r.RungPassed, r.RungFailed)
+		}
+	}
+}
+
+func TestEmitIgnoredEvents(t *testing.T) {
+	c := NewCorpus()
+	h := New(c)
+
+	h.Emit(abi.Event{Kind: abi.EvDecide})
+	h.Emit(abi.Event{Kind: abi.EvComplete})
+	if c.Len() != 0 {
+		t.Fatalf("expected 0 rows for unhandled events, got %d", c.Len())
+	}
+
+	h.Emit(abi.Event{
+		Kind:    abi.EvDeny,
+		Call:    nil,
+		Verdict: &abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock},
+	})
+	if c.Len() != 1 {
+		t.Fatalf("expected 1 row, got %d", c.Len())
+	}
+	if c.Rows()[0].CallHash != "" {
+		t.Fatalf("expected empty CallHash for nil call, got %q", c.Rows()[0].CallHash)
+	}
+}
+
+func TestCorpusConcurrentSafety(t *testing.T) {
+	c := NewCorpus()
+	h := New(c)
+	const goroutines = 8
+	const iters = 200
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines * 3)
+
+	for g := 0; g < goroutines; g++ {
+		go func(id int) {
+			defer wg.Done()
+			for i := 0; i < iters; i++ {
+				h.Emit(abi.Event{
+					Kind:    abi.EvDeny,
+					Call:    &abi.ToolCall{Tool: "tool", Args: abi.Ref{Kind: abi.RefInline, Digest: fmt.Sprintf("d-%d-%d", id, i)}},
+					Verdict: &abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonTrustViolation},
+				})
+			}
+		}(g)
+
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iters; i++ {
+				_ = c.Rows()
+				_ = c.Positives()
+				_ = c.HardNegatives()
+				_ = c.ByReason()
+				_ = c.Len()
+			}
+		}()
+
+		go func(id int) {
+			defer wg.Done()
+			for i := 0; i < iters; i++ {
+				if i%20 == 0 {
+					c.SetMaxRows(50 + (i % 100))
+				}
+			}
+		}(g)
+	}
+
+	wg.Wait()
+	if c.Len() == 0 {
+		t.Fatal("expected non-empty corpus after concurrent run")
 	}
 }

@@ -10,7 +10,7 @@ import (
 )
 
 // makeBenchCorpus returns a populated corpus with n rows matching a realistic
-// distribution: ~75% allows, ~15% regular denies, ~5% hard negatives, ~5% quarantines.
+// distribution of allows, denies, hard negatives, and quarantines.
 func makeBenchCorpus(n int) *Corpus {
 	c := NewCorpus()
 	c.SetMaxRows(n)
@@ -24,7 +24,6 @@ func makeBenchCorpus(n int) *Corpus {
 		hash := "tool@" + strconv.Itoa(i)
 		switch {
 		case i%20 == 0:
-			// Hard negative: cheap rung passed (1), expensive rung failed (3).
 			c.add(abi.LabelRow{
 				CallHash:   hash,
 				RungPassed: 1,
@@ -33,7 +32,6 @@ func makeBenchCorpus(n int) *Corpus {
 				Reason:     reasons[i%len(reasons)],
 			})
 		case i%20 == 1:
-			// Quarantine verdict.
 			c.add(abi.LabelRow{
 				CallHash:   hash,
 				RungPassed: -1,
@@ -42,7 +40,6 @@ func makeBenchCorpus(n int) *Corpus {
 				Reason:     abi.ReasonTrustViolation,
 			})
 		case i%5 == 0:
-			// Regular deny (positive catch).
 			c.add(abi.LabelRow{
 				CallHash:   hash,
 				RungPassed: -1,
@@ -51,7 +48,6 @@ func makeBenchCorpus(n int) *Corpus {
 				Reason:     reasons[i%len(reasons)],
 			})
 		default:
-			// Benign allow.
 			c.add(abi.LabelRow{
 				CallHash:   hash,
 				RungPassed: -1,
@@ -170,7 +166,6 @@ func BenchmarkHarvesterEmit(b *testing.B) {
 			Reason: abi.ReasonPolicyBlock,
 			By:     "policy-gate",
 		}
-		// An EvDecide with VerdictDeny is redundant because EvDeny follows it.
 		ev := abi.Event{
 			Kind:    abi.EvDecide,
 			Call:    call,
@@ -321,7 +316,6 @@ func BenchmarkHarvesterEmit_Parallel(b *testing.B) {
 func BenchmarkCorpusAdd(b *testing.B) {
 	b.Run("BoundedDefault_1024", func(b *testing.B) {
 		c := NewCorpus()
-		// Pre-fill to steady-state capacity so every add exercises the eviction path.
 		for i := 0; i < defaultMaxCorpusRows; i++ {
 			c.add(abi.LabelRow{CallHash: "prefill", Verdict: abi.VerdictAllow})
 		}
