@@ -127,10 +127,16 @@ The subagent executes the concrete work needed:
 The coordinator does NOT trust worker narration—it independently witnesses the result (the `dos-witness-claim` invariant):
 
 1. **Verify toolchain execution**:
-   ```bash
-   go vet ./internal/<target>
-   go test -v ./internal/<target>
-   ```
+   - For public `fak` units (`internal/<target>` or `pkg/<target>`):
+     ```bash
+     go vet ./<unit_of_work>
+     go test -v ./<unit_of_work>
+     ```
+   - For private `fak-private` units (`platform/<target>`):
+     ```bash
+     go -C ..\fak-private vet ./platform/<target>
+     go -C ..\fak-private test -v ./platform/<target>
+     ```
 
 2. **Verify maturity curve ascent**:
    ```bash
@@ -147,7 +153,7 @@ Verify that:
 
 ## Step 5 — Re-Measure and Prove Debt Drop
 
-Run the whole-workspace scorecard against the saved baseline to prove the drop:
+Run the scorecard against the saved baseline to prove the drop:
 
 ```bash
 fak debt-lanes --compare baseline.json
@@ -164,12 +170,18 @@ Confirm:
 ## Step 6 — Commit Cleanly by Explicit Path
 
 Follow trunk discipline: stage only the explicit paths modified for this single unit of
-work. Include a Conventional-Commits subject, signed-off DCO (`-s`), and the required
-`(fak <leaf>)` trailer:
+work. Include a Conventional-Commits subject, signed-off DCO (`-s`), and the required repo trailer:
 
-```bash
-git add internal/<target>
-git commit -s -m "fix(<target>): advance maturity curve and retire debt (fak <target>)" -- internal/<target>
-```
+- **For public `fak` commits**:
+  ```bash
+  git add <unit_of_work>
+  python tools/scrub_public_copy.py --audit-staged --root .
+  git commit -s -m "fix(<target>): advance maturity curve and retire debt (fak <target>)" -- <unit_of_work>
+  ```
+- **For private `fak-private` commits**:
+  ```bash
+  git -C ..\fak-private add platform/<target>
+  git -C ..\fak-private commit -s -m "fix(<target>): advance maturity curve and retire debt (fak-private <target>)" -- platform/<target>
+  ```
 
 Verify `git status` shows your lane is committed and no peer WIP was touched.
