@@ -8,7 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -63,12 +66,75 @@ type GrepMatch struct {
 // nothing they could act on.
 const maxMatchLineBytes = 512
 
+// errFlightAbandoned is what joiners see if a leader's execution dies without
+// publishing a result (a panic unwinding through Do).
+var errFlightAbandoned = errors.New("codetools: in-flight search abandoned")
+
+// flightGroup coalesces concurrent identical search calls, keyed by query arguments.
+// Matching the singleflight pattern in internal/gitbroker/singleflight.go.
+type flightGroup[T any] struct {
+	mu        sync.Mutex
+	m         map[string]*flight[T]
+	coalesced atomic.Int64
+}
+
+type flight[T any] struct {
+	wg      sync.WaitGroup
+	val     T
+	err     error
+	waiters atomic.Int32
+}
+
+func (g *flightGroup[T]) Do(key string, fn func() (T, error)) (val T, shared bool, err error) {
+	g.mu.Lock()
+	if g.m == nil {
+		g.m = make(map[string]*flight[T])
+	}
+	if inflight, ok := g.m[key]; ok {
+		inflight.waiters.Add(1)
+		g.mu.Unlock()
+		inflight.wg.Wait()
+		g.coalesced.Add(1)
+		return inflight.val, true, inflight.err
+	}
+	f := new(flight[T])
+	f.err = errFlightAbandoned
+	f.wg.Add(1)
+	g.m[key] = f
+	g.mu.Unlock()
+
+	defer func() {
+		g.mu.Lock()
+		delete(g.m, key)
+		g.mu.Unlock()
+		f.wg.Done()
+	}()
+
+	v, ferr := fn()
+	f.val, f.err = v, ferr
+	return v, false, ferr
+}
+
+// Coalesced reports how many callers joined an in-flight search instead of executing their own.
+func (g *flightGroup[T]) Coalesced() int64 { return g.coalesced.Load() }
+
+// Waiters reports how many joiners are currently waiting on key.
+func (g *flightGroup[T]) Waiters(key string) int32 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if f, ok := g.m[key]; ok {
+		return f.waiters.Load()
+	}
+	return 0
+}
+
 type grepRecord struct {
 	pattern          string
 	matches          []GrepMatch
 	filesScanned     int
 	truncated        bool
 	truncationReason string
+	coalesced        bool
 	errJSON          []byte
 	isErr            bool
 }
@@ -84,6 +150,7 @@ func (r *grepRecord) toOutput() ([]byte, bool) {
 		"files_scanned":     r.filesScanned,
 		"truncated":         r.truncated,
 		"truncation_reason": r.truncationReason,
+		"coalesced":         r.coalesced,
 	}), false
 }
 
@@ -149,8 +216,20 @@ func (t *Toolset) grep(ctx context.Context, body []byte) ([]byte, bool) {
 	if a.MaxMatches > 0 && a.MaxMatches < limit {
 		limit = a.MaxMatches
 	}
-	rec := t.executeGrep(ctx, a, re, root, limit)
-	return rec.toOutput()
+
+	key := root.Abs + "\x00" + a.Pattern + "\x00" + a.Glob + "\x00" + strconv.Itoa(limit)
+	rec, shared, err := t.grepFlight.Do(key, func() (*grepRecord, error) {
+		return t.executeGrep(ctx, a, re, root, limit), nil
+	})
+	if err != nil {
+		return refuse(CodeIO, "Grep: in-flight search abandoned").JSON(), true
+	}
+	if rec.isErr {
+		return rec.toOutput()
+	}
+	outRec := *rec
+	outRec.coalesced = shared
+	return outRec.toOutput()
 }
 
 func (t *Toolset) executeGrep(ctx context.Context, a GrepArgs, re *regexp.Regexp, root Resolved, limit int) *grepRecord {
@@ -274,6 +353,30 @@ func (e globEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result,
 	return result(ctx, c, in, out, isErr, EngineGlob), nil
 }
 
+type globRecord struct {
+	pattern          string
+	files            []string
+	truncated        bool
+	truncationReason string
+	coalesced        bool
+	errJSON          []byte
+	isErr            bool
+}
+
+func (r *globRecord) toOutput() ([]byte, bool) {
+	if r.isErr {
+		return r.errJSON, true
+	}
+	return okJSON(map[string]any{
+		"pattern":           r.pattern,
+		"files":             r.files,
+		"count":             len(r.files),
+		"truncated":         r.truncated,
+		"truncation_reason": r.truncationReason,
+		"coalesced":         r.coalesced,
+	}), false
+}
+
 // glob decodes, confines, and executes a Glob. The pattern is matched against the path
 // relative to the SEARCH ROOT and, for a leading-`**` pattern, against the base name too,
 // so the familiar "**/*.go" spelling works without the caller having to know how deep the
@@ -294,6 +397,23 @@ func (t *Toolset) glob(ctx context.Context, body []byte) ([]byte, bool) {
 	if r != nil {
 		return r.JSON(), true
 	}
+
+	key := root.Abs + "\x00" + a.Pattern
+	rec, shared, err := t.globFlight.Do(key, func() (*globRecord, error) {
+		return t.executeGlob(ctx, a, root), nil
+	})
+	if err != nil {
+		return refuse(CodeIO, "Glob: in-flight search abandoned").JSON(), true
+	}
+	if rec.isErr {
+		return rec.toOutput()
+	}
+	outRec := *rec
+	outRec.coalesced = shared
+	return outRec.toOutput()
+}
+
+func (t *Toolset) executeGlob(ctx context.Context, a GlobArgs, root Resolved) *globRecord {
 	pattern := a.Pattern
 	base := strings.TrimPrefix(pattern, "**/")
 	files := make([]string, 0, 16)
@@ -325,25 +445,25 @@ func (t *Toolset) glob(ctx context.Context, body []byte) ([]byte, bool) {
 	if walkErr != nil {
 		var halt *haltError
 		if errors.As(walkErr, &halt) {
-			return halt.r.JSON(), true
+			return &globRecord{errJSON: halt.r.JSON(), isErr: true}
 		}
 		if errors.Is(walkErr, context.Canceled) || errors.Is(walkErr, context.DeadlineExceeded) {
-			return refuse(CodeCanceled, "operation canceled").JSON(), true
+			return &globRecord{errJSON: refuse(CodeCanceled, "operation canceled").JSON(), isErr: true}
 		}
 		if errors.Is(walkErr, errWalkBudget) {
 			truncated = true
 			truncationReason = upgradeTruncationReason(truncationReason, "walk_budget")
 		} else if !errors.Is(walkErr, errStopWalk) {
-			return refuse(CodeIO, "Glob: "+walkErr.Error()).JSON(), true
+			return &globRecord{errJSON: refuse(CodeIO, "Glob: "+walkErr.Error()).JSON(), isErr: true}
 		}
 	}
-	return okJSON(map[string]any{
-		"pattern":           a.Pattern,
-		"files":             files,
-		"count":             len(files),
-		"truncated":         truncated,
-		"truncation_reason": truncationReason,
-	}), false
+	return &globRecord{
+		pattern:          a.Pattern,
+		files:            files,
+		truncated:        truncated,
+		truncationReason: truncationReason,
+		isErr:            false,
+	}
 }
 
 // searchRoot resolves and confines the subtree a search runs over, defaulting to the
@@ -377,6 +497,9 @@ func (h *haltError) Error() string { return h.r.Error() }
 // search never wants and the trees the toolset protects), does not follow symlinks, and
 // enforces the visit budget and ctx cancellation between entries.
 func (t *Toolset) walk(ctx context.Context, root Resolved, fn func(abs, rel string) error) error {
+	if t.searchHook != nil {
+		t.searchHook()
+	}
 	visited := 0
 	return filepath.WalkDir(root.Abs, func(abs string, d fs.DirEntry, err error) error {
 		if err != nil {

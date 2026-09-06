@@ -134,6 +134,9 @@ type Toolset struct {
 	focusedCommands bool
 	mutationMu      sync.Mutex
 	mutationLocks   map[string]*mutationLock
+	grepFlight      flightGroup[*grepRecord]
+	globFlight      flightGroup[*globRecord]
+	searchHook      func()
 }
 
 type mutationLock struct {
@@ -216,10 +219,16 @@ func (t *Toolset) Grep(ctx context.Context, body []byte) ([]byte, bool) {
 	return t.grep(ctx, body)
 }
 
+// GrepCoalesced reports the number of concurrent Grep calls that joined an in-flight search.
+func (t *Toolset) GrepCoalesced() int64 { return t.grepFlight.Coalesced() }
+
 // Glob executes a Glob operation with JSON body arguments.
 func (t *Toolset) Glob(ctx context.Context, body []byte) ([]byte, bool) {
 	return t.glob(ctx, body)
 }
+
+// GlobCoalesced reports the number of concurrent Glob calls that joined an in-flight search.
+func (t *Toolset) GlobCoalesced() int64 { return t.globFlight.Coalesced() }
 
 // Write executes a Write operation with JSON body arguments.
 func (t *Toolset) Write(ctx context.Context, body []byte) ([]byte, bool) {
