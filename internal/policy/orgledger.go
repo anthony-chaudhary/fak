@@ -196,7 +196,7 @@ func (l *OrgLedger) Accept(raw []byte, opts VerifyOptions) (Verified, error) {
 
 	v, err := VerifyEnvelope(raw, opts)
 	if err != nil {
-		// Fail-closed AND inert: unauthenticated bytes do not move the counter.
+		// Inert rejection: unauthenticated bytes do not move the counter.
 		return Verified{}, err
 	}
 

@@ -283,7 +283,7 @@ type Runtime struct {
 	InheritedCapabilities *InheritedTable
 	// SubagentDepth is the compiled subagent fan-out depth cap (#2603); nil when
 	// the manifest declares none, in which case AdmitDepth still enforces the
-	// fail-closed DefaultMaxSubagentDepth on the nil receiver.
+	// DefaultMaxSubagentDepth conservative default on the nil receiver.
 	SubagentDepth    *SubagentDepthRule
 	PolicyContext    abi.PolicyContext
 	StrictGatedSinks bool

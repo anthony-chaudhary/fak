@@ -64,7 +64,7 @@ const (
 	PresetAutonomous   = "autonomous"
 )
 
-// presetLadder is the ascending write-agency order. It is the ladder's contract:
+// presetLadder defines the ascending write-agency order:
 // upgrading a tier is the one-line change of naming the next rung.
 var presetLadder = []string{
 	PresetReadOnly,

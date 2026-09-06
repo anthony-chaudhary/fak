@@ -111,7 +111,7 @@ func compileIsolation(r *IsolationRule) (*IsolationRule, error) {
 }
 
 // BackendFor resolves a task's declared trust level to the ToolExec backend it
-// must run on. Deterministic and fail-closed:
+// must run on. Deterministic and default-deny:
 //
 //   - a level the dial declares returns its mapped backend (load-time
 //     validation already guaranteed untrusted ≠ goroutine);

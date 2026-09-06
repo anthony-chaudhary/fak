@@ -13,7 +13,7 @@ var harnessProfilesJSON []byte
 //go:embed testdata/codex-tool-schema.json
 var codexToolSchemaJSON []byte
 
-// guard-floor profile lint (issue #2595).
+// Profile lint for harness policy floors (issue #2595).
 //
 // The embedded guard floor (cmd/fak/guard-default-policy.json) admits a growing
 // set of harness tool aliases — Claude Code's PascalCase names, Codex's

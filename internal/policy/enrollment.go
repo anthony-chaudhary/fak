@@ -437,7 +437,7 @@ func isAllZero(b []byte) bool {
 //
 // A store that fails to LOAD is still removed: revoke is the documented cure for
 // a damaged anchor, and refusing to clear one would leave the box permanently
-// fail-closed with no route back.
+// locked with no route back.
 func RevokeOrgEnrollment(path string) (bool, error) {
 	if strings.TrimSpace(path) == "" {
 		return false, fail(abi.ReasonMalformed, "enrollment_path",
