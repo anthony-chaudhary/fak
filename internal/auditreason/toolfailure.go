@@ -198,11 +198,14 @@ func ToolFailurePayloadFromMessageWithExitCode(msg string, exitCode int) (ToolFa
 // PowerShell NextCommand instead of the placeholder template — the exact recovery
 // pre-filled. Non-shell classes keep their static NextCommand.
 // An optional exitCode argument may be supplied; clean commands (exitCode == 0)
-// never resolve to a tool failure.
+// and benign negative query commands (e.g. grep/diff exit 1) never resolve to a tool failure.
 func ToolFailurePayloadForCommand(msg, cmd string, exitCode ...int) (ToolFailurePayload, bool) {
 	code := -1
 	if len(exitCode) > 0 {
 		code = exitCode[0]
+	}
+	if code >= 0 && strings.TrimSpace(cmd) != "" && IsBenignExit(cmd, code) {
+		return ToolFailurePayload{}, false
 	}
 	payload, ok := ToolFailurePayloadFromMessageWithExitCode(msg, code)
 	if !ok {
@@ -216,6 +219,15 @@ func ToolFailurePayloadForCommand(msg, cmd string, exitCode ...int) (ToolFailure
 		payload.NextCommand = powershellRecovery(cmd)
 	}
 	return payload, true
+}
+
+// ToolFailureForCommand classifies a tool failure for a specific command and exit code,
+// returning false if the exit code represents a clean exit (0) or a benign query outcome.
+func ToolFailureForCommand(msg, cmd string, exitCode int) (ToolFailureSpec, bool) {
+	if exitCode == 0 || (strings.TrimSpace(cmd) != "" && IsBenignExit(cmd, exitCode)) {
+		return ToolFailureSpec{}, false
+	}
+	return ToolFailureFromMessageWithExitCode(msg, exitCode)
 }
 
 // ToolFailurePayloadForCommandWithExitCode is ToolFailurePayloadForCommand with an explicit exit code.
