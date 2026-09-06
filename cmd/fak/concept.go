@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/conceptcatalog"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
@@ -167,11 +168,34 @@ func runConceptGenerate(out, errw io.Writer, c conceptcatalog.Catalog, args []st
 func runConceptAdmission(out, errw io.Writer, root string, args []string) int {
 	fs := flag.NewFlagSet("concept admission", flag.ContinueOnError)
 	fs.SetOutput(errw)
+	var pathsFlag string
+	fs.StringVar(&pathsFlag, "paths", "", "repo-relative paths to evaluate for concept admission (comma-separated)")
+	fs.StringVar(&pathsFlag, "path", "", "alias for --paths")
 	jsonOut := fs.Bool("json", false, "emit all staged findings as JSON")
 	if fs.Parse(args) != nil {
 		return 2
 	}
-	d, err := hooks.ReadStagedDiff(root)
+	var targetPaths []string
+	if pathsFlag != "" {
+		for _, p := range strings.Split(pathsFlag, ",") {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				targetPaths = append(targetPaths, trimmed)
+			}
+		}
+	}
+	for _, p := range fs.Args() {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			targetPaths = append(targetPaths, trimmed)
+		}
+	}
+
+	var d *hooks.StagedDiff
+	var err error
+	if len(targetPaths) > 0 {
+		d, err = hooks.ReadPathsDiff(root, targetPaths)
+	} else {
+		d, err = hooks.ReadStagedDiff(root)
+	}
 	if err != nil {
 		fmt.Fprintln(errw, "fak concept admission:", err)
 		return 1
@@ -180,6 +204,19 @@ func runConceptAdmission(out, errw io.Writer, root string, args []string) int {
 	if err != nil {
 		fmt.Fprintln(errw, "fak concept admission:", err)
 		return 1
+	}
+	if len(targetPaths) > 0 {
+		filter := make(map[string]bool, len(targetPaths))
+		for _, p := range targetPaths {
+			filter[filepath.ToSlash(p)] = true
+		}
+		var filtered []hooks.Finding
+		for _, f := range findings {
+			if filter[filepath.ToSlash(f.File)] {
+				filtered = append(filtered, f)
+			}
+		}
+		findings = filtered
 	}
 	if *jsonOut {
 		_ = json.NewEncoder(out).Encode(struct {
@@ -264,7 +301,11 @@ func emitConceptPlan(out, errw io.Writer, root string, p conceptcatalog.Plan, dr
 		}
 	}
 	if stage {
-		if e := stageConceptFiles(root, p.Files); e != nil {
+		filesToStage := p.Files
+		if len(filesToStage) == 0 {
+			filesToStage = []string{filepath.Join(root, "tools", "concept_disambiguation_scorecard.data", "_meta.json")}
+		}
+		if e := stageConceptFiles(root, filesToStage); e != nil {
 			fmt.Fprintln(errw, "fak concept: stage remedy:", e)
 			return 1
 		}
@@ -291,13 +332,23 @@ func stageConceptFiles(root string, files []string) error {
 	if len(args) == 2 {
 		return nil
 	}
-	cmd := exec.Command("git", args...)
-	cmd.Dir = root
-	windowgate.ConfigureBackgroundCommand(cmd)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git add: %w: %s", err, strings.TrimSpace(string(output)))
+	var lastErr error
+	for attempt := 0; attempt < 60; attempt++ {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		windowgate.ConfigureBackgroundCommand(cmd)
+		output, err := cmd.CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		outStr := strings.TrimSpace(string(output))
+		lastErr = fmt.Errorf("git add: %w: %s", err, outStr)
+		if !strings.Contains(outStr, "index.lock") {
+			return lastErr
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
-	return nil
+	return lastErr
 }
 
 func conceptCSV(s string) []string {
