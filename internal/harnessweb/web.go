@@ -38,7 +38,7 @@ const page = `<!doctype html>
 <title>fak local harness</title><style>
 :root{color-scheme:dark;--ink:#edf5ef;--muted:#9dafaa;--panel:#101c17;--panel2:#0a1510;--line:#294038;--accent:#8ee8bd;--accent2:#8eb5ff;--warn:#f6c453;--danger:#fb7185;--bg:#07100c}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 16% 0,#173326 0,var(--bg) 38%);color:var(--ink);font:15px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}a{color:inherit}button,input{font:inherit}main{width:min(1180px,94vw);margin:24px auto 64px}.eyebrow{margin:0;color:var(--accent);font-weight:800;letter-spacing:.16em;text-transform:uppercase;font-size:.78rem}.topbar{display:flex;justify-content:space-between;gap:18px;align-items:center;margin-bottom:18px}.brand{display:flex;align-items:center;gap:12px}.mark{display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--accent);border-radius:9px;color:var(--accent);font-weight:900}.mode{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:.86rem}.dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}.shell{border:1px solid var(--line);border-radius:18px;background:color-mix(in srgb,var(--panel) 94%,transparent);box-shadow:0 24px 80px #0008;overflow:hidden}.top{padding:26px 30px 22px;border-bottom:1px solid var(--line)}h1{font:650 clamp(2rem,5vw,3.6rem)/1 ui-sans-serif,system-ui;margin:.12em 0 .25em}.sub{margin:0;color:var(--muted);max-width:72ch}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}.button,.skin{display:inline-flex;align-items:center;justify-content:center;min-height:38px;border:1px solid var(--line);border-radius:9px;background:transparent;color:var(--ink);padding:8px 12px;font-weight:750;text-decoration:none;cursor:pointer}.button.primary{background:var(--accent);border-color:var(--accent);color:#062116}.button[aria-disabled="true"]{color:var(--muted);cursor:default}.nav{display:flex;gap:5px;overflow:auto;padding:10px 22px;border-bottom:1px solid var(--line);background:#09130f}.nav a{white-space:nowrap;text-decoration:none;color:var(--muted);padding:7px 9px;border-radius:7px}.nav a:hover,.nav a:focus-visible{background:var(--panel);color:var(--ink);outline:none}.content{padding:24px 30px 30px}.section{scroll-margin-top:16px;margin-bottom:32px}.section:last-child{margin-bottom:0}.sectionhead{display:flex;align-items:end;justify-content:space-between;gap:16px;margin-bottom:13px}.sectionhead h2{font:650 1.2rem/1.2 ui-sans-serif,system-ui;margin:0}.sectionhead p{margin:0;color:var(--muted);font-size:.84rem}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.stat{border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:16px}.stat .value{display:block;font:700 1.8rem/1 ui-sans-serif,system-ui;margin-bottom:7px}.stat .label{display:block;color:var(--ink);font-weight:750}.stat .detail{display:block;color:var(--muted);font-size:.78rem;margin-top:3px}.twocol{display:grid;grid-template-columns:1fr 1fr;gap:12px}.panel{border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:16px;min-width:0}.panel h3{font:650 1rem/1.2 ui-sans-serif,system-ui;margin:0 0 12px}.rows{display:grid;gap:8px}.row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:10px 0;border-top:1px solid var(--line)}.row:first-child{border-top:0;padding-top:0}.row:last-child{padding-bottom:0}.row strong{display:block;overflow-wrap:anywhere}.meta{color:var(--muted);font-size:.78rem}.tag{align-self:start;border:1px solid var(--line);border-radius:99px;padding:3px 7px;color:var(--muted);font-size:.72rem}.dashboards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.dashboard{display:block;min-height:116px;border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:14px;text-decoration:none}.dashboard[href]:hover,.dashboard[href]:focus-visible{border-color:var(--accent2);transform:translateY(-1px);outline:none}.dashboard.disabled{opacity:.58}.dashboard strong{display:block;margin-bottom:5px}.dashboard span{display:block;color:var(--muted);font-size:.8rem}.path{margin-top:12px!important;color:var(--accent2)!important;overflow-wrap:anywhere}.composer{display:flex;gap:10px}.composer input{flex:1;min-width:0;background:#06100b;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:14px}.composer button,.approval button{background:var(--accent);color:#062116;border:0;border-radius:10px;padding:0 20px;font-weight:800;cursor:pointer}.examples{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 0}.examples button{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:99px;padding:6px 10px;cursor:pointer}.events{display:grid;gap:9px;margin-top:18px}.event{border-left:3px solid var(--line);background:#07110c;padding:11px 13px}.event[data-kind^="message"]{border-color:var(--accent)}.event[data-kind^="tool"],.event[data-kind^="approval"]{border-color:var(--warn)}.event[data-kind="error"]{border-color:var(--danger)}.kind{color:var(--muted);font-size:.74rem;text-transform:uppercase}.approval{display:flex;gap:8px;margin-top:10px}.approval button:last-child{background:transparent;border:1px solid var(--danger);color:var(--danger)}.empty{margin:0;color:var(--muted);border:1px dashed var(--line);padding:18px;border-radius:10px}code{color:var(--accent)}body[data-skin="minimal"]{--accent:#93c5fd;--panel:#111827;--panel2:#08101d;--line:#334155;--bg:#020617}@media(max-width:900px){.stats,.dashboards{grid-template-columns:repeat(2,minmax(0,1fr))}.twocol{grid-template-columns:1fr}}@media(max-width:600px){main{width:min(100% - 20px,1180px);margin-top:14px}.top,.content{padding-left:18px;padding-right:18px}.topbar{align-items:flex-start}.mode{max-width:45%;text-align:right}.stats,.dashboards{grid-template-columns:1fr}.composer{display:grid}.composer button{padding:13px}.sectionhead{align-items:start;flex-direction:column}}
 .startup-grid{display:grid;grid-template-columns:minmax(220px,.7fr) minmax(0,1.3fr);gap:12px}.startup-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.startup-summary .stat{padding:13px}.startup-summary .value{font-size:1.35rem}.startup-stack{display:grid;gap:12px}.startup-message{border-left:3px solid var(--accent2);padding-left:10px}.startup-message strong,.startup-message .meta{display:block}.startup-message[data-level="warn"],.startup-message[data-level="warning"]{border-color:var(--warn)}.startup-message[data-level="error"],.startup-message[data-level="failed"]{border-color:var(--danger)}@media(max-width:900px){.startup-grid{grid-template-columns:1fr}}@media(max-width:600px){.startup-summary{grid-template-columns:1fr}}
-.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.session-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.session-card{min-width:0;border:1px solid var(--line);border-radius:16px;padding:14px;background:var(--panel);outline:none}.session-card:focus{box-shadow:0 0 0 3px var(--accent-soft)}.session-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.provider,.session-state{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:3px 7px}.session-state{font-weight:700}.state-awaiting-approval,.state-awaiting-input{color:var(--warn)}.state-failed,.state-disconnected{color:var(--bad)}.state-working{color:var(--good)}.session-card dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}.session-card dl div{min-width:0}.session-card dt{font-size:11px;color:var(--muted);text-transform:uppercase}.session-card dd{margin:2px 0;overflow-wrap:anywhere}.pending{padding:8px;border-left:3px solid var(--warn);background:var(--warn-soft)}.session-controls{display:flex;gap:6px;flex-wrap:wrap}.session-controls button[disabled]{opacity:.55;cursor:not-allowed}.session-approval{margin:8px 0;padding:8px;border-left:3px solid var(--accent);background:color-mix(in srgb,var(--panel2) 80%,transparent)}.approval-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:4px 0}.approval-actions{display:flex;gap:6px;margin-top:6px}.button-accept{background:var(--accent);border:1px solid var(--accent);color:#062116;border-radius:6px;padding:4px 10px;font-weight:700;cursor:pointer}.button-decline{background:transparent;border:1px solid var(--danger);color:var(--danger);border-radius:6px;padding:4px 10px;font-weight:700;cursor:pointer}@media(max-width:560px){.session-grid{grid-template-columns:minmax(0,1fr)}.session-title{align-items:flex-start}.session-state{margin-left:0}.session-card dl{grid-template-columns:minmax(0,1fr)}.session-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.session-controls button{width:100%;min-height:44px}}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.session-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.session-card{min-width:0;border:1px solid var(--line);border-radius:16px;padding:14px;background:var(--panel);outline:none}.session-card:focus{box-shadow:0 0 0 3px var(--accent-soft)}.session-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.provider,.session-state{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:3px 7px}.session-state{font-weight:700}.state-awaiting-approval,.state-awaiting-input{color:var(--warn)}.state-failed,.state-disconnected{color:var(--bad)}.state-working{color:var(--good)}.session-card dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}.session-card dl div{min-width:0}.session-card dt{font-size:11px;color:var(--muted);text-transform:uppercase}.session-card dd{margin:2px 0;overflow-wrap:anywhere}.pending{padding:8px;border-left:3px solid var(--warn);background:var(--warn-soft)}.session-approval{margin:10px 0;padding:10px;border:1px solid var(--warn);border-radius:10px;background:rgba(246,196,83,0.06)}.session-approval-controls{display:flex;gap:8px;margin-top:10px}.button-approval-accept{background:var(--accent);color:#062116;border:1px solid var(--accent);border-radius:8px;padding:6px 14px;font-weight:700;cursor:pointer}.button-approval-decline{background:transparent;color:var(--danger);border:1px solid var(--danger);border-radius:8px;padding:6px 14px;font-weight:700;cursor:pointer}.approval-details{display:grid;gap:6px;margin:8px 0;font-size:12px}.approval-details dt{color:var(--muted);font-size:10px;text-transform:uppercase}.approval-details dd{margin:0}.session-controls{display:flex;gap:6px;flex-wrap:wrap}.session-controls button[disabled]{opacity:.55;cursor:not-allowed}@media(max-width:560px){.session-grid{grid-template-columns:minmax(0,1fr)}.session-title{align-items:flex-start}.session-state{margin-left:0}.session-card dl{grid-template-columns:minmax(0,1fr)}.session-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.session-controls button{width:100%;min-height:44px}}
 </style></head><body><main><div class="topbar"><div class="brand"><span class="mark">f</span><p class="eyebrow">fak operator home</p></div><p class="mode"><span class="dot"></span><span id="status">loading local state…</span></p></div><section class="shell"><header class="top"><h1>Harness overview</h1><p class="sub">Agents, goals, and live operating surfaces in one place. Start a run after you know what is active.</p><div class="actions"><a id="gateway-link" class="button primary" aria-disabled="true">Web gateway</a><button id="refresh" class="button" type="button">Refresh status</button><button id="skin" class="skin" type="button">Theme</button></div></header><nav class="nav" aria-label="Harness pages"><a href="#overview">Overview</a><a href="#gateway-startup">Gateway startup</a><a href="#agents">Agent stats</a><a href="#goals">Goals</a><a href="#dashboards">Live dashboards</a><a href="#sessions">Sessions</a><a href="#run">Run agent</a></nav><div class="content">
 <section id="overview" class="section"><div class="sectionhead"><h2>Overview</h2><p id="overview-note">reading current state</p></div><div id="stats" class="stats" aria-live="polite"><p class="empty">Loading operational totals…</p></div><div id="local-work" class="rows" aria-label="Active local work"></div></section>
 <section id="gateway-startup" class="section"><div class="sectionhead"><h2>Gateway startup</h2><p id="startup-note">reading structured /debug/vars.startup</p></div><div id="startup-content" class="startup-grid" aria-live="polite"><p class="empty">Loading startup state...</p></div></section>
@@ -63,9 +63,9 @@ async function pull(){const r=await fetch('/api/events?run_id='+encodeURICompone
 async function start(message){list.replaceChildren();after=0;const r=await fetch("/api/runs",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({message})});run=(await r.json()).run_id;history.replaceState(null,"","?run="+encodeURIComponent(run));await pull();await refreshOverview()}
 document.querySelector("#prompt").addEventListener("submit",async e=>{e.preventDefault();await start(text.value)});document.querySelector(".examples").addEventListener("click",async e=>{const x=e.target.dataset.example;if(!x)return;text.value=x==="approval"?"approval: inspect workspace":x==="failure"?"failure: demonstrate typed error":"show the native harness works";await start(text.value)});document.querySelector("#skin").addEventListener("click",()=>{skin=skin==="forest"?"minimal":"forest";document.body.dataset.skin=skin});const scenario=new URLSearchParams(location.search).get("scenario");if(scenario){text.value=scenario==="approval"?"approval: inspect workspace":scenario==="failure"?"failure: demonstrate typed error":"show the native harness works";start(text.value)}
 async function loadSessions(focusID=""){sessionCards.setAttribute("aria-busy","true");try{const r=await fetch("/api/sessions"+(query.get("no_color")==="1"?"?no_color=1":""));const d=await r.json();if(!r.ok)throw new Error(d.error||"session load failed");sessionCards.innerHTML=d.html;bindSessionCards();if(focusID){const card=[...sessionCards.querySelectorAll(".session-card")].find(item=>item.dataset.sessionId===focusID);if(card){sessionCards.querySelectorAll(".session-card").forEach(item=>item.tabIndex=-1);card.tabIndex=0;card.focus()}}}catch(e){sessionCards.innerHTML='<p class="empty">Session state unavailable.</p>';sessionFeedback.textContent=e.message}finally{sessionCards.setAttribute("aria-busy","false")}}
-function bindSessionCards(){const cards=[...sessionCards.querySelectorAll(".session-card")];const moveFocus=index=>{cards.forEach((card,i)=>card.tabIndex=i===index?0:-1);cards[index]?.focus()};cards.forEach((card,index)=>card.addEventListener("keydown",e=>{let next;if(["ArrowDown","ArrowRight"].includes(e.key))next=(index+1)%cards.length;else if(["ArrowUp","ArrowLeft"].includes(e.key))next=(index-1+cards.length)%cards.length;else if(e.key==="Home")next=0;else if(e.key==="End")next=cards.length-1;else return;e.preventDefault();moveFocus(next)}));sessionCards.querySelectorAll("[data-session-action]").forEach(button=>button.addEventListener("click",async()=>{const id=button.dataset.sessionId,action=button.dataset.sessionAction;button.disabled=true;sessionFeedback.textContent=action+" requested for "+id;try{const r=await fetch("/api/sessions/"+encodeURIComponent(id)+"/controls/"+action,{method:"POST"});const d=await r.json();if(!r.ok)throw new Error(d.error||"control failed");sessionFeedback.textContent=action+" sent to "+id;await loadSessions(id)}catch(e){sessionFeedback.textContent=e.message;button.disabled=false}}));sessionCards.querySelectorAll("[data-approval-action]").forEach(button=>button.addEventListener("click",async()=>{const id=button.dataset.sessionId,res=button.dataset.approvalAction;button.disabled=true;sessionFeedback.textContent="approval "+res+" requested for "+id;try{const r=await fetch("/api/sessions/"+encodeURIComponent(id)+"/approval",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({resolution:res,reason:"operator "+res})});const d=await r.json();if(!r.ok)throw new Error(d.error||"approval resolution failed");sessionFeedback.textContent="approval "+res+" sent to "+id;await loadSessions(id)}catch(e){sessionFeedback.textContent=e.message;button.disabled=false}}))}
-if(window.EventSource){try{const es=new EventSource("/api/sessions/events");const applyCards=e=>{try{const d=JSON.parse(e.data);if(d&&d.html){sessionCards.innerHTML=d.html;bindSessionCards();}}catch(err){}};es.addEventListener("session_cards",applyCards);es.onmessage=applyCards;}catch(e){}}
-document.querySelector("#refresh").addEventListener("click",()=>{refreshOverview();loadSessions()});refreshOverview();loadSessions();if(run)pull();setInterval(refreshOverview,5000);
+function bindSessionCards(){const cards=[...sessionCards.querySelectorAll(".session-card")];const moveFocus=index=>{cards.forEach((card,i)=>card.tabIndex=i===index?0:-1);cards[index]?.focus()};cards.forEach((card,index)=>card.addEventListener("keydown",e=>{let next;if(["ArrowDown","ArrowRight"].includes(e.key))next=(index+1)%cards.length;else if(["ArrowUp","ArrowLeft"].includes(e.key))next=(index-1+cards.length)%cards.length;else if(e.key==="Home")next=0;else if(e.key==="End")next=cards.length-1;else return;e.preventDefault();moveFocus(next)}));sessionCards.querySelectorAll("[data-session-action]").forEach(button=>button.addEventListener("click",async()=>{const id=button.dataset.sessionId,action=button.dataset.sessionAction;button.disabled=true;sessionFeedback.textContent=action+" requested for "+id;try{const r=await fetch("/api/sessions/"+encodeURIComponent(id)+"/controls/"+action,{method:"POST"});const d=await r.json();if(!r.ok)throw new Error(d.error||"control failed");sessionFeedback.textContent=action+" sent to "+id;await loadSessions(id)}catch(e){sessionFeedback.textContent=e.message;button.disabled=false}}));sessionCards.querySelectorAll("[data-approval-action]").forEach(button=>button.addEventListener("click",async e=>{e.preventDefault();const id=button.dataset.sessionId,action=button.dataset.approvalAction,approvalId=button.dataset.approvalId||"";button.disabled=true;sessionFeedback.textContent="Approval "+action+" requested for "+id;try{const r=await fetch("/api/sessions/"+encodeURIComponent(id)+"/approval",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({resolution:action,approval_id:approvalId,reason:"web operator "+action})});const d=await r.json();if(!r.ok)throw new Error(d.error||"approval resolution failed");sessionFeedback.textContent="Approval "+action+" sent to "+id;await loadSessions(id)}catch(err){sessionFeedback.textContent=err.message;button.disabled=false}}));sessionCards.querySelectorAll(".approval-form").forEach(form=>form.addEventListener("submit",async e=>{e.preventDefault();const submitter=e.submitter;const action=submitter?.dataset?.approvalAction||submitter?.value||"accept";const id=form.dataset.sessionId;const approvalId=form.dataset.approvalId||form.querySelector('input[name="approval_id"]')?.value||"";sessionFeedback.textContent="Approval "+action+" requested for "+id;try{const r=await fetch("/api/sessions/"+encodeURIComponent(id)+"/approval",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({resolution:action,approval_id:approvalId,reason:"web operator "+action})});const d=await r.json();if(!r.ok)throw new Error(d.error||"approval resolution failed");sessionFeedback.textContent="Approval "+action+" sent to "+id;await loadSessions(id)}catch(err){sessionFeedback.textContent=err.message}}))}
+function subscribeSessionEvents(){if(!window.EventSource)return;try{const es=new EventSource("/api/sessions/events");es.addEventListener("session_update",e=>{if(e.data){try{const p=JSON.parse(e.data);if(p.html){sessionCards.innerHTML=p.html;bindSessionCards();return}}catch(_){}}loadSessions()});es.addEventListener("approval_requested",e=>{if(e.data){try{const p=JSON.parse(e.data);sessionFeedback.textContent="Approval requested for "+(p.session_id||"session")}catch(_){}}loadSessions()});es.addEventListener("approval_resolved",e=>{if(e.data){try{const p=JSON.parse(e.data);sessionFeedback.textContent="Approval "+(p.resolution||"resolved")+" for "+(p.session_id||"session")}catch(_){}}loadSessions()});es.onmessage=()=>{loadSessions()}}catch(_){}}
+subscribeSessionEvents();document.querySelector("#refresh").addEventListener("click",()=>{refreshOverview();loadSessions()});refreshOverview();loadSessions();if(run)pull();setInterval(refreshOverview,5000);setInterval(loadSessions,5000);
 </script></body></html>`
 
 type runState struct {
@@ -678,7 +678,13 @@ func (s *store) resolve(runID, approvalID, decision string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state := s.runs[runID]
-	if state == nil || state.approval != approvalID || state.resolved || (decision != "approve" && decision != "deny") {
+	if state == nil {
+		return harnesskit.ErrInvalidProtocol
+	}
+	if approvalID == "" {
+		approvalID = state.approval
+	}
+	if state.approval != approvalID || state.resolved || (decision != "approve" && decision != "deny") {
 		return harnesskit.ErrInvalidProtocol
 	}
 	state.resolved = true
@@ -698,6 +704,12 @@ func (s *store) resolve(runID, approvalID, decision string) error {
 	return s.saveLocked()
 }
 
+func (s *store) hasRun(runID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.runs[runID] != nil
+}
+
 func handler(s *store) http.Handler { return handlerWithSources(s, nil, nil) }
 
 func handlerWithLive(s *store, live *liveAdapter) http.Handler {
@@ -714,108 +726,7 @@ func handlerWithSessionSource(s *store, live *liveAdapter, goals goalLister, ses
 
 func handlerWithAllSources(s *store, live *liveAdapter, goals goalLister, sessions SessionSource, local LocalWorkSource, root string) http.Handler {
 	mux := http.NewServeMux()
-	broadcaster := newSessionBroadcaster()
-	installSessionRoutes(mux, sessions, broadcaster)
-	mux.HandleFunc("POST /api/sessions/{id}/approval", func(w http.ResponseWriter, r *http.Request) {
-		id, err := url.PathUnescape(r.PathValue("id"))
-		if err != nil || strings.TrimSpace(id) == "" {
-			if qid := strings.TrimSpace(r.URL.Query().Get("id")); qid != "" {
-				id = qid
-			} else if sid := strings.TrimSpace(r.URL.Query().Get("session_id")); sid != "" {
-				id = sid
-			} else {
-				writeSessionJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid session id"})
-				return
-			}
-		}
-		id = strings.TrimSpace(id)
-
-		var input struct {
-			Resolution string `json:"resolution"`
-			Reason     string `json:"reason,omitempty"`
-			Decision   string `json:"decision,omitempty"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-			writeSessionJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json payload: " + err.Error()})
-			return
-		}
-		res := strings.ToLower(strings.TrimSpace(input.Resolution))
-		if res == "" {
-			res = strings.ToLower(strings.TrimSpace(input.Decision))
-		}
-		if res != "accept" && res != "decline" && res != "approve" && res != "deny" {
-			writeSessionJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid resolution; must be accept or decline"})
-			return
-		}
-		if res == "approve" {
-			res = "accept"
-		} else if res == "deny" {
-			res = "decline"
-		}
-
-		resolved := false
-		sessionFound := false
-		if sessions != nil {
-			if cards, err := sessions.Sessions(r.Context()); err == nil {
-				for _, c := range cards {
-					if c.ID == id {
-						sessionFound = true
-						break
-					}
-				}
-			}
-			if sessionFound {
-				if resolver, ok := sessions.(SessionApprovalResolver); ok {
-					req := SessionApprovalRequest{
-						SessionID:  id,
-						Resolution: res,
-						Reason:     strings.TrimSpace(input.Reason),
-					}
-					if err := resolver.ResolveApproval(r.Context(), req); err != nil {
-						writeSessionJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
-						return
-					}
-				}
-				resolved = true
-			}
-		}
-
-		if !resolved && s != nil {
-			s.mu.RLock()
-			runState := s.runs[id]
-			s.mu.RUnlock()
-			if runState != nil {
-				decision := "approve"
-				if res == "decline" {
-					decision = "deny"
-				}
-				approvalID := runState.approval
-				if approvalID == "" {
-					approvalID = "approval-1"
-				}
-				if err := s.resolve(id, approvalID, decision); err != nil {
-					writeSessionJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
-					return
-				}
-				resolved = true
-			}
-		}
-
-		if !resolved {
-			writeSessionJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
-			return
-		}
-
-		broadcaster.broadcastCards(sessions)
-
-		writeSessionJSON(w, http.StatusOK, map[string]any{
-			"status":     "accepted",
-			"session_id": id,
-			"resolution": res,
-			"reason":     input.Reason,
-			"resolved":   true,
-		})
-	})
+	installSessionRoutesWithStore(mux, sessions, s)
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
@@ -884,6 +795,7 @@ func handlerWithAllSources(s *store, live *liveAdapter, goals goalLister, sessio
 			http.Error(w, "invalid approval", http.StatusBadRequest)
 			return
 		}
+		defaultSessionHub.broadcast("approval_resolved", []byte(fmt.Sprintf(`{"session_id":%q,"approval_id":%q,"resolution":%q}`, input.RunID, input.ApprovalID, input.Decision)))
 		writeJSON(w, map[string]string{"status": "accepted"})
 	})
 	return mux

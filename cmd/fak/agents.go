@@ -403,7 +403,7 @@ func runAgentsList(stdout, stderr io.Writer, argv []string) int {
 		*dir = fs.Arg(0)
 	}
 
-	descs, err := agent.DiscoverAgentDescriptors(*dir)
+	descs, err := agent.FindWorkspaceAgentDescriptors(*dir)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak agents list: %v\n", err)
 		return 1

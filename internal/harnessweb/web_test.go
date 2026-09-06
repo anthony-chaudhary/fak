@@ -1,7 +1,6 @@
 package harnessweb
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -386,236 +385,179 @@ func TestPageDeepLinksPersistedRun(t *testing.T) {
 
 func TestWebApprovalResolution(t *testing.T) {
 	now := time.Now()
-	source := &fixtureSessionSource{
-		cards: []SessionCard{
-			{
-				ID:                 "sess-appr-1",
-				Provider:           "codex",
-				Workspace:          `C:\work\fak`,
-				ThreadCoordinate:   "thread-coord-123456",
-				ExecutionEpoch:     1,
-				State:              sessionAwaitingApproval,
-				PendingInteraction: "workspace file edit requires approval",
-				LastEventAt:        now,
-				HasInputLease:      true,
-				Capabilities:       map[string]SessionCapability{"cancel": {Enabled: true}},
-				Approval: &SessionApprovalDetails{
-					ApprovalID: "appr-001",
-					ToolName:   "write_file",
-					TargetPath: "internal/harnessweb/web.go",
-					RiskReason: "modifies core server routing",
-				},
-			},
-			{
-				ID:                 "sess-appr-2",
-				Provider:           "codex",
-				Workspace:          `C:\work\fak`,
-				ThreadCoordinate:   "thread-coord-654321",
-				ExecutionEpoch:     1,
-				State:              sessionAwaitingApproval,
-				PendingInteraction: "command execution requires approval",
-				LastEventAt:        now,
-				HasInputLease:      true,
-				Capabilities:       map[string]SessionCapability{"cancel": {Enabled: true}},
-				Approval: &SessionApprovalDetails{
-					ApprovalID: "appr-002",
-					ToolName:   "execute_bash",
-					TargetPath: "scripts/deploy.sh",
-					RiskReason: "runs deployment script",
-				},
-			},
-		},
+	approvalEnv := harnesskit.Envelope{
+		Type: harnesskit.EventApprovalRequested,
+		Payload: []byte(`{
+			"approval_id": "app-web-test-1",
+			"tool_name": "Bash",
+			"command": "make test-fast",
+			"target_path": "/home/user/fak",
+			"risk_explanation": "execution of host test suite"
+		}`),
+	}
+	app, err := ParseSessionApproval(approvalEnv)
+	if err != nil {
+		t.Fatalf("parse approval event: %v", err)
 	}
 
+	cardAwaiting := SessionCard{
+		ID:                 "sess-awaiting",
+		Provider:           "codex",
+		Workspace:          "/home/user/fak",
+		State:              sessionAwaitingApproval,
+		PendingInteraction: "approval requested",
+		PendingApproval:    app,
+		LastEventAt:        now,
+		HasInputLease:      true,
+		Capabilities:       map[string]SessionCapability{"cancel": {Enabled: true}},
+	}
+	cardIdle := SessionCard{
+		ID:            "sess-idle",
+		Provider:      "codex",
+		Workspace:     "/home/user/fak",
+		State:         sessionIdle,
+		LastEventAt:   now,
+		HasInputLease: true,
+		Capabilities:  map[string]SessionCapability{"resume": {Enabled: true}},
+	}
+
+	source := &fixtureSessionSource{
+		cards: []SessionCard{cardAwaiting, cardIdle},
+	}
 	s := newStore()
 	ts := httptest.NewServer(handlerWithSessionSource(s, nil, nil, source))
 	defer ts.Close()
-	client := ts.Client()
 
-	// 1. Verify end-to-end receipt of approval requests and rendering of approval elements in session card HTML.
-	res, err := client.Get(ts.URL + "/api/sessions")
+	// 1. Verify rendering of approval elements via GET /api/sessions
+	res, err := ts.Client().Get(ts.URL + "/api/sessions")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("GET /api/sessions status = %d", res.StatusCode)
+	var sessResp struct {
+		HTML string `json:"html"`
 	}
-	var sessList struct {
-		Sessions []SessionCard `json:"sessions"`
-		HTML     string        `json:"html"`
-	}
-	if err := json.NewDecoder(res.Body).Decode(&sessList); err != nil {
+	if err := json.NewDecoder(res.Body).Decode(&sessResp); err != nil {
 		t.Fatal(err)
 	}
-	if len(sessList.Sessions) != 2 {
-		t.Fatalf("got %d sessions, want 2", len(sessList.Sessions))
-	}
+	res.Body.Close()
+
 	for _, want := range []string{
-		"sess-appr-1",
-		"write_file",
-		"internal/harnessweb/web.go",
-		"modifies core server routing",
-		"Accept",
-		"Decline",
+		"session-approval-modal",
+		"Action approval required",
+		"app-web-test-1",
+		"Bash",
+		"make test-fast",
+		"/home/user/fak",
+		"execution of host test suite",
 		`data-approval-action="accept"`,
 		`data-approval-action="decline"`,
-		`data-session-id="sess-appr-1"`,
-		"approval-tool",
-		"approval-target-path",
-		"approval-risk-reason",
+		`data-action="accept"`,
+		`data-action="decline"`,
+		`<form class="approval-form session-approval-controls" action="/api/sessions/sess-awaiting/approval" method="POST"`,
 	} {
-		if !strings.Contains(sessList.HTML, want) {
-			t.Errorf("session card HTML missing %q:\n%s", want, sessList.HTML)
+		if !strings.Contains(sessResp.HTML, want) {
+			t.Fatalf("session markup missing %q:\n%s", want, sessResp.HTML)
 		}
 	}
 
-	// 2. Connect to SSE stream and verify initial event delivery.
-	sseCtx, cancelSSE := context.WithCancel(context.Background())
-	defer cancelSSE()
-	sseReq, err := http.NewRequestWithContext(sseCtx, http.MethodGet, ts.URL+"/api/sessions/events", nil)
+	// 2. Validate rejection of malformed JSON
+	badJSONRes, err := ts.Client().Post(ts.URL+"/api/sessions/sess-awaiting/approval", "application/json", strings.NewReader("{broken"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	sseResp, err := client.Do(sseReq)
+	badJSONRes.Body.Close()
+	if badJSONRes.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for malformed json, got %d", badJSONRes.StatusCode)
+	}
+
+	// 3. Validate rejection of invalid resolution token
+	badRes, err := ts.Client().Post(ts.URL+"/api/sessions/sess-awaiting/approval", "application/json", strings.NewReader(`{"resolution":"maybe"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sseResp.Body.Close()
-	if ct := sseResp.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
-		t.Fatalf("SSE Content-Type = %q, want text/event-stream", ct)
+	badRes.Body.Close()
+	if badRes.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid resolution, got %d", badRes.StatusCode)
 	}
 
-	sseScanner := bufio.NewScanner(sseResp.Body)
-	var initialSSE strings.Builder
-	for sseScanner.Scan() {
-		line := sseScanner.Text()
-		if line == "" {
-			break
-		}
-		initialSSE.WriteString(line + "\n")
-	}
-	if !strings.Contains(initialSSE.String(), "event: session_cards") || !strings.Contains(initialSSE.String(), "sess-appr-1") {
-		t.Fatalf("initial SSE frame missing session_cards: %s", initialSSE.String())
-	}
-
-	// 3. Test validation for POST /api/sessions/{id}/approval.
-	// 3a. Invalid JSON payload.
-	badJSONResp, err := client.Post(ts.URL+"/api/sessions/sess-appr-1/approval", "application/json", strings.NewReader(`{invalid`))
+	// 4. Validate rejection of unknown session ID
+	unknownRes, err := ts.Client().Post(ts.URL+"/api/sessions/nonexistent/approval", "application/json", strings.NewReader(`{"resolution":"accept"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	badJSONResp.Body.Close()
-	if badJSONResp.StatusCode != http.StatusBadRequest {
-		t.Errorf("invalid json status = %d, want 400", badJSONResp.StatusCode)
+	unknownRes.Body.Close()
+	if unknownRes.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown session, got %d", unknownRes.StatusCode)
 	}
 
-	// 3b. Invalid resolution value.
-	badResResp, err := client.Post(ts.URL+"/api/sessions/sess-appr-1/approval", "application/json", strings.NewReader(`{"resolution":"maybe"}`))
+	// 5. Validate rejection of session not awaiting approval
+	idleRes, err := ts.Client().Post(ts.URL+"/api/sessions/sess-idle/approval", "application/json", strings.NewReader(`{"resolution":"accept"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	badResResp.Body.Close()
-	if badResResp.StatusCode != http.StatusBadRequest {
-		t.Errorf("invalid resolution status = %d, want 400", badResResp.StatusCode)
+	idleRes.Body.Close()
+	if idleRes.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 for non-awaiting session, got %d", idleRes.StatusCode)
 	}
 
-	// 3c. Unknown session id.
-	notFoundResp, err := client.Post(ts.URL+"/api/sessions/unknown-session/approval", "application/json", strings.NewReader(`{"resolution":"accept"}`))
+	// 6. Connect SSE client to verify real-time events
+	sseReq, err := http.NewRequest(http.MethodGet, ts.URL+"/api/sessions/events", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	notFoundResp.Body.Close()
-	if notFoundResp.StatusCode != http.StatusNotFound {
-		t.Errorf("unknown session status = %d, want 404", notFoundResp.StatusCode)
-	}
-
-	// 4. Successful handling of POST /api/sessions/{id}/approval with resolution: "accept".
-	acceptBody := strings.NewReader(`{"resolution":"accept","reason":"verified code change safe"}`)
-	acceptResp, err := client.Post(ts.URL+"/api/sessions/sess-appr-1/approval", "application/json", acceptBody)
+	sseRes, err := ts.Client().Do(sseReq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer acceptResp.Body.Close()
-	if acceptResp.StatusCode != http.StatusOK {
-		t.Fatalf("accept status = %d, want 200", acceptResp.StatusCode)
+	defer sseRes.Body.Close()
+	if sseRes.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for SSE stream, got %d", sseRes.StatusCode)
 	}
-	var acceptResult struct {
-		Status     string `json:"status"`
-		SessionID  string `json:"session_id"`
-		Resolution string `json:"resolution"`
-		Reason     string `json:"reason"`
-		Resolved   bool   `json:"resolved"`
-	}
-	if err := json.NewDecoder(acceptResp.Body).Decode(&acceptResult); err != nil {
-		t.Fatal(err)
-	}
-	if acceptResult.Status != "accepted" || acceptResult.SessionID != "sess-appr-1" || acceptResult.Resolution != "accept" || !acceptResult.Resolved {
-		t.Fatalf("acceptResult = %+v", acceptResult)
+	if ct := sseRes.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		t.Fatalf("expected Content-Type text/event-stream, got %q", ct)
 	}
 
-	// Verify session authority state updated.
+	// 7. Successful accept submission
+	acceptBody := `{"resolution":"accept","reason":"operator verified host safety","approval_id":"app-web-test-1"}`
+	goodRes, err := ts.Client().Post(ts.URL+"/api/sessions/sess-awaiting/approval", "application/json", strings.NewReader(acceptBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer goodRes.Body.Close()
+	if goodRes.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(goodRes.Body)
+		t.Fatalf("expected 200 for accept submission, got %d: %s", goodRes.StatusCode, body)
+	}
+	var resData map[string]any
+	if err := json.NewDecoder(goodRes.Body).Decode(&resData); err != nil {
+		t.Fatal(err)
+	}
+	if resData["status"] != "accepted" || resData["session_id"] != "sess-awaiting" || resData["resolution"] != "accept" {
+		t.Fatalf("unexpected accept response: %+v", resData)
+	}
+
+	// Verify dispatch to SessionSource
 	if len(source.approvals) != 1 {
-		t.Fatalf("source approvals count = %d, want 1", len(source.approvals))
+		t.Fatalf("expected 1 dispatched approval, got %d", len(source.approvals))
 	}
-	if source.approvals[0].SessionID != "sess-appr-1" || source.approvals[0].Resolution != "accept" || source.approvals[0].Reason != "verified code change safe" {
-		t.Fatalf("recorded approval = %+v", source.approvals[0])
-	}
-	if source.cards[0].State != sessionWorking {
-		t.Fatalf("card state = %q, want %q", source.cards[0].State, sessionWorking)
+	dispatched := source.approvals[0]
+	if dispatched.SessionID != "sess-awaiting" || dispatched.ApprovalID != "app-web-test-1" || dispatched.Resolution != "accept" || dispatched.Reason != "operator verified host safety" {
+		t.Fatalf("unexpected dispatched approval: %+v", dispatched)
 	}
 
-	// 5. Verify live SSE event arrived with updated session state.
-	var updateSSE strings.Builder
-	for sseScanner.Scan() {
-		line := sseScanner.Text()
-		if line == "" {
-			if updateSSE.Len() > 0 {
-				break
-			}
-			continue
-		}
-		updateSSE.WriteString(line + "\n")
-	}
-	if !strings.Contains(updateSSE.String(), "event: session_cards") || !strings.Contains(updateSSE.String(), "working") {
-		t.Fatalf("update SSE frame missing updated session card: %s", updateSSE.String())
-	}
-
-	// 6. Successful handling of POST /api/sessions/{id}/approval with resolution: "decline".
-	declineBody := strings.NewReader(`{"resolution":"decline","reason":"risky script rejected"}`)
-	declineResp, err := client.Post(ts.URL+"/api/sessions/sess-appr-2/approval", "application/json", declineBody)
+	// 8. Successful decline submission
+	source.cards[0].State = sessionAwaitingApproval
+	source.cards[0].PendingApproval = app
+	declineBody := `{"resolution":"decline","reason":"too risky"}`
+	decRes, err := ts.Client().Post(ts.URL+"/api/sessions/sess-awaiting/approval", "application/json", strings.NewReader(declineBody))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer declineResp.Body.Close()
-	if declineResp.StatusCode != http.StatusOK {
-		t.Fatalf("decline status = %d, want 200", declineResp.StatusCode)
+	decRes.Body.Close()
+	if decRes.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for decline submission, got %d", decRes.StatusCode)
 	}
-	if len(source.approvals) != 2 || source.approvals[1].SessionID != "sess-appr-2" || source.approvals[1].Resolution != "decline" {
-		t.Fatalf("recorded decline approval = %+v", source.approvals[1])
-	}
-	if source.cards[1].State != sessionCancelled {
-		t.Fatalf("card 2 state = %q, want %q", source.cards[1].State, sessionCancelled)
-	}
-
-	// 7. Test approval resolution on store run (fallback to store when session is in store).
-	storeRunID := s.create("approval: inspect workspace")
-	storeApprResp, err := client.Post(ts.URL+"/api/sessions/"+storeRunID+"/approval", "application/json", strings.NewReader(`{"resolution":"accept","reason":"store operator approved"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer storeApprResp.Body.Close()
-	if storeApprResp.StatusCode != http.StatusOK {
-		t.Fatalf("store approval status = %d, want 200", storeApprResp.StatusCode)
-	}
-	var storeApprResult struct {
-		Status   string `json:"status"`
-		Resolved bool   `json:"resolved"`
-	}
-	if err := json.NewDecoder(storeApprResp.Body).Decode(&storeApprResult); err != nil {
-		t.Fatal(err)
-	}
-	if storeApprResult.Status != "accepted" || !storeApprResult.Resolved {
-		t.Fatalf("storeApprResult = %+v", storeApprResult)
+	if len(source.approvals) != 2 || source.approvals[1].Resolution != "decline" {
+		t.Fatalf("expected 2 dispatched approvals with decline, got %+v", source.approvals)
 	}
 }

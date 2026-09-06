@@ -65,6 +65,10 @@ const (
 // ErrDeviceNotFound is returned when the target GPU architecture is not detected and mock fallback is disabled.
 var ErrDeviceNotFound = errors.New("amdgpu: gfx1151 device not detected on host and mock fallback is disabled")
 
+// ErrPhysicalExecutionUnwitnessed is returned when physical kernel execution witness is unavailable,
+// preventing analytical software calibration from being relabeled as physical device execution.
+var ErrPhysicalExecutionUnwitnessed = errors.New("amdgpu: physical execution witness not available: refusing analytical relabeling")
+
 // ProbeConfig specifies the parameters for the empirical micro-roofline probe.
 type ProbeConfig struct {
 	TargetArch        string        `json:"target_arch"`          // Target GPU architecture (default: "gfx1151")
@@ -167,6 +171,7 @@ type EmpiricalRooflineReceipt struct {
 	Signature                  string  `json:"signature,omitempty"`
 	Digest                     string  `json:"digest,omitempty"`
 	Simulated                  bool    `json:"simulated"`
+	ExecutionWitness           string  `json:"execution_witness,omitempty"`
 	Verified                   bool    `json:"verified"`
 
 	// Nested sub-probe reports for granular telemetry and cross-package schema compatibility
@@ -297,6 +302,9 @@ func (r *EmpiricalRooflineReceipt) Verify() error {
 	if r.RidgePoint <= 0 {
 		return fmt.Errorf("amdgpu roofline: non-positive ridge point: %.2f", r.RidgePoint)
 	}
+	if !r.Simulated && r.ExecutionWitness == "" {
+		return errors.New("amdgpu roofline: receipt claims physical execution (simulated=false) but lacks execution witness")
+	}
 	if r.Digest == "" {
 		return errors.New("amdgpu roofline: missing verification digest")
 	}
@@ -419,7 +427,7 @@ func RunRooflineProbeWithContext(ctx context.Context, cfg ProbeConfig) (*Empiric
 	// Check if physical gfx1151 hardware is available
 	hasPhysical := false
 	if !cfg.ForceMock {
-		hasPhysical = isPhysicalGFX1151()
+		hasPhysical = isPhysicalGFX1151Fn()
 	}
 
 	if hasPhysical {
@@ -429,7 +437,7 @@ func RunRooflineProbeWithContext(ctx context.Context, cfg ProbeConfig) (*Empiric
 		}
 		// If physical execution fails and mock fallback is not enabled, return the error
 		if !cfg.MockFallback {
-			return nil, fmt.Errorf("amdgpu: physical roofline probe failed: %w", err)
+			return nil, err
 		}
 	} else if !cfg.ForceMock && !cfg.MockFallback {
 		return nil, ErrDeviceNotFound
@@ -598,25 +606,18 @@ func runMockSoftwareProbe(ctx context.Context, cfg ProbeConfig) (*EmpiricalRoofl
 }
 
 // runPhysicalProbe attempts hardware-level probe execution when a physical gfx1151 GPU is present.
+// It fails closed when a physical kernel execution witness is unavailable, preventing analytical
+// software calibration from being relabeled as physical device execution.
 func runPhysicalProbe(ctx context.Context, cfg ProbeConfig) (*EmpiricalRooflineReceipt, error) {
 	// For testing and hardware integration, verify context and perform physical dispatch
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-
-	// If physical device is present, query actual hardware properties and run calibrated probe
-	receipt, err := runMockSoftwareProbe(ctx, cfg)
-	if err != nil {
-		return nil, err
-	}
-	receipt.Simulated = false
-	if err := receipt.Sign(nil); err != nil {
-		return nil, err
-	}
-	return receipt, nil
+	return nil, ErrPhysicalExecutionUnwitnessed
 }
 
 var (
+	isPhysicalGFX1151Fn  = isPhysicalGFX1151
 	physicalGFX1151Once  sync.Once
 	physicalGFX1151Found bool
 )

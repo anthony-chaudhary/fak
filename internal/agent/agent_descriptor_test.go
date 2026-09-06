@@ -268,9 +268,9 @@ Duplicate explore
 		t.Fatal(err)
 	}
 
-	discovered, err := DiscoverAgentDescriptors(tmpDir)
+	discovered, err := FindWorkspaceAgentDescriptors(tmpDir)
 	if err != nil {
-		t.Fatalf("DiscoverAgentDescriptors failed: %v", err)
+		t.Fatalf("FindWorkspaceAgentDescriptors failed: %v", err)
 	}
 
 	if len(discovered) != 3 {

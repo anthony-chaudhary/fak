@@ -3,6 +3,44 @@
   "updated_at": "2026-09-04",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
+{
+    "repository":  "seal-rg/recurrent-pretraining",
+    "url":  "https://github.com/seal-rg/recurrent-pretraining",
+    "status":  "studied",
+    "priority":  2,
+    "why":  "Recurrent-depth reference; scoped source audit, not native execution evidence.",
+    "last_checked":  "2026-09-05",
+    "checked_revision":  "1ea7220ec7eb42d13e89db0663df254d0bcdc28e",
+    "study_note":  "docs/research/astra-recurrent-depth-support.md",
+    "receipt_id":  "study_bbc18af0e9160e542a0708e04f7ffb20640100eafa2f90920c10ccaf83f04ca1",
+    "inventory":  {
+                      "filed_issue_count":  1,
+                      "issue_refs":  [
+                                         "#11700"
+                                     ],
+                      "mode":  "scoped",
+                      "candidate_count":  2
+                  }
+},
+{
+    "repository":  "Nanbeige/vllm",
+    "url":  "https://github.com/Nanbeige/vllm",
+    "status":  "studied",
+    "priority":  2,
+    "why":  "Recurrent-depth reference; scoped source audit, not native execution evidence.",
+    "last_checked":  "2026-09-05",
+    "checked_revision":  "62f6de733d7ae63b759329993bc209e67afdf431",
+    "study_note":  "docs/research/astra-recurrent-depth-support.md",
+    "receipt_id":  "study_bbc18af0e9160e542a0708e04f7ffb20640100eafa2f90920c10ccaf83f04ca1",
+    "inventory":  {
+                      "filed_issue_count":  1,
+                      "issue_refs":  [
+                                         "#11700"
+                                     ],
+                      "mode":  "scoped",
+                      "candidate_count":  2
+                  }
+},
     {
       "repository": "mitkox/Personal-AI-Router",
       "url": "https://github.com/mitkox/Personal-AI-Router",
@@ -4790,6 +4828,134 @@
           "#10733",
           "#10734",
           "#10735"
+        ]
+      }
+    },
+    {
+      "repository": "aic0d3r/qwen38-strix-halo-harness",
+      "url": "https://github.com/aic0d3r/qwen38-strix-halo-harness",
+      "status": "studied",
+      "priority": 1,
+      "why": "Local coding-agent harness for AMD Strix Halo APUs: runs Qwen3.8-27B (256k ctx) + Flash-Next 125B on 70-80W, bundling 6 pi extensions (compaction, repomap, branch-summary, triage, commit, /tune), Ling-3.0-tiny aux model on loopback :8090, deep-context ubatch throttling, and playtest-graded game verification benchmark.",
+      "last_checked": "2026-09-05",
+      "checked_revision": "e34ecf3f4b08c4f499be6eda86618f2d0518adfb",
+      "stars_at_check": 2,
+      "last_push_at_check": "2026-09-05T00:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-STRIX-HALO-ECOSYSTEM-2026-09-05.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "e34ecf3f4b08c4f499be6eda86618f2d0518adfb",
+        "subsystem_count": 5,
+        "candidate_count": 5,
+        "filed_issue_count": 0,
+        "issue_refs": []
+      }
+    },
+    {
+      "repository": "Hal0ai/hal0",
+      "url": "https://github.com/Hal0ai/hal0",
+      "status": "studied",
+      "priority": 1,
+      "why": "24/7 self-hosted home/office AI appliance platform for unified-memory APUs. Manages container slots via systemd Quadlets, FastFlowLM NPU trio coresidence (chat, STT, embeddings on AMDXDNA), GpuArbiter exclusive LLM vs ComfyUI time-multiplexing, hybrid cgroup memory max-pooling, and 2-tier administrative MCP approval queue.",
+      "last_checked": "2026-09-05",
+      "checked_revision": "108b366d545e7c3a8c13bf2dd2cb4fc74c59458f",
+      "stars_at_check": 69,
+      "last_push_at_check": "2026-09-05T00:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-STRIX-HALO-ECOSYSTEM-2026-09-05.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "108b366d545e7c3a8c13bf2dd2cb4fc74c59458f",
+        "subsystem_count": 5,
+        "candidate_count": 5,
+        "filed_issue_count": 1,
+        "issue_refs": [
+          "#11748"
+        ]
+      }
+    },
+    {
+      "repository": "Nathanw1014/strix-halo-llamacpp",
+      "url": "https://github.com/Nathanw1014/strix-halo-llamacpp",
+      "status": "studied",
+      "priority": 1,
+      "why": "Performance-tuned Vulkan/HIP llama.cpp fork for AMD Strix Halo (gfx1151): dequant-once quantized Flash Attention (+47% prefill), f16 KV contiguization eliminating the 16-channel LPDDR5X stride penalty (2.69x speedup to 190 t/s at 64k), bytes-aware command buffer submission gating solving >137k watchdog crashes, and dense Wave32 retiling.",
+      "last_checked": "2026-09-05",
+      "checked_revision": "45bec945dd4c7944fba45ebd02e6b713b342d0ba",
+      "stars_at_check": 162,
+      "last_push_at_check": "2026-09-04T00:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-STRIX-HALO-ECOSYSTEM-2026-09-05.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "45bec945dd4c7944fba45ebd02e6b713b342d0ba",
+        "subsystem_count": 4,
+        "candidate_count": 4,
+        "filed_issue_count": 1,
+        "issue_refs": [
+          "#11746"
+        ]
+      }
+    },
+    {
+      "repository": "julianmb/halofpx",
+      "url": "https://github.com/julianmb/halofpx",
+      "status": "studied",
+      "priority": 1,
+      "why": "Turnkey FastAPI model serving daemon and CLI for AMD Strix Halo: auto-detects gfx1151/gfx1201, defaults to Mesa RADV Wave64 cooperative matrices (KHR_coopmat) over ROCm, fixes MTP speculative decoding prompt-cache coexistence via empty-spec decoupling patch, and audits Linux TTM/GTT kernel parameters (strix_doctor.py).",
+      "last_checked": "2026-09-05",
+      "checked_revision": "8790f91dedc1b6eecab5c361d410b312da726342",
+      "stars_at_check": 52,
+      "last_push_at_check": "2026-09-05T00:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-STRIX-HALO-ECOSYSTEM-2026-09-05.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "8790f91dedc1b6eecab5c361d410b312da726342",
+        "subsystem_count": 4,
+        "candidate_count": 3,
+        "filed_issue_count": 0,
+        "issue_refs": []
+      }
+    },
+    {
+      "repository": "otheru-ai/ember",
+      "url": "https://github.com/otheru-ai/ember",
+      "status": "studied",
+      "priority": 1,
+      "why": "High-performance C99/C++ inference server for DeepSeek-V4-Flash on AMD Strix Halo (gfx1151): stable C backend ABI, cross-session asynchronous GPU target verification + NPU/CPU DSpark drafting (1.48x throughput), full-prompt cut-point prefix caching (194 ms warm TTFT), and discriminated union DSML EBNF grammar compilation via xgrammar.",
+      "last_checked": "2026-09-05",
+      "checked_revision": "c8a55a851ad245b82b20a624b9a56c243005c30a",
+      "stars_at_check": 21,
+      "last_push_at_check": "2026-09-05T00:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-STRIX-HALO-ECOSYSTEM-2026-09-05.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "c8a55a851ad245b82b20a624b9a56c243005c30a",
+        "subsystem_count": 5,
+        "candidate_count": 4,
+        "filed_issue_count": 1,
+        "issue_refs": [
+          "#11747"
+        ]
+      }
+    },
+    {
+      "repository": "kyuz0/amd-strix-halo-toolboxes",
+      "url": "https://github.com/kyuz0/amd-strix-halo-toolboxes",
+      "status": "studied",
+      "priority": 1,
+      "why": "Canonical community container toolbox for AMD Strix Halo: pre-built OCI containers for Vulkan RADV and ROCm 10.0 on gfx1151, llama.cpp host buffer fixes (#25992), gguf-vram-estimator.py, and gpu-workload-watch autonomous systemd power and 100% fan duty governor.",
+      "last_checked": "2026-09-05",
+      "checked_revision": "687d9b6c63093ca7bc925dcfc60bf10e5a55449c",
+      "stars_at_check": 1913,
+      "last_push_at_check": "2026-09-05T00:00:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-STRIX-HALO-ECOSYSTEM-2026-09-05.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "687d9b6c63093ca7bc925dcfc60bf10e5a55449c",
+        "subsystem_count": 4,
+        "candidate_count": 3,
+        "filed_issue_count": 1,
+        "issue_refs": [
+          "#11749"
         ]
       }
     }

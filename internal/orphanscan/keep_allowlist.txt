@@ -31,7 +31,17 @@
 
 # --- cmd/fak (lane `cmd`, held by another loop at the time of writing) ---
 
+cmd/fak applyPolicyWithProfile # baseline: policy helper unreferenced in cmd/fak; owning cmd lane must wire or delete it.
+cmd/fak cmdAMDGPU # baseline: subcommand func unreferenced in cmd/fak; owning cmd lane must wire or delete it.
+cmd/fak cmdArms # baseline: subcommand func unreferenced in cmd/fak; owning cmd lane must wire or delete it.
+cmd/fak cmdEdgequal # baseline: subcommand func unreferenced in cmd/fak; owning cmd lane must wire or delete it.
+cmd/fak cmdFp4meta # baseline: subcommand func unreferenced in cmd/fak; owning cmd lane must wire or delete it.
+cmd/fak cmdKVQuantQuality # baseline: subcommand func unreferenced in cmd/fak; owning cmd lane must wire or delete it.
+cmd/fak cmdKVVectorEval # baseline: subcommand func unreferenced in cmd/fak; owning cmd lane must wire or delete it.
+cmd/fak cmdLightRotEval # baseline: subcommand func unreferenced in cmd/fak; owning cmd lane must wire or delete it.
+cmd/fak guardStopHookSameStageFor # baseline: hook helper unreferenced in cmd/fak; owning cmd lane must wire or delete it.
+cmd/fak guardStopHookStageFor # baseline: hook helper unreferenced in cmd/fak; owning cmd lane must wire or delete it.
+cmd/fak inspectWorktreeWorker # baseline: worker helper unreferenced in cmd/fak; owning cmd lane must wire or delete it.
 cmd/fak joinArgs # baseline: render helper has no current call site; owning cmd lane must wire or delete it.
+cmd/fak worktreeWorkerGitOutput # baseline: worker helper unreferenced in cmd/fak; owning cmd lane must wire or delete it.
 cmd/fak writeIndexRepo # baseline: test helper has no current call site; owning cmd lane must wire or delete it.
-cmd/fak parseCodexFreshnessCheckNow # baseline: compatibility wrapper retained for the legacy check-now parser while callers migrate to parseCodexFreshnessSettings.
-cmd/fak codexFreshnessWriteLease # baseline: compatibility wrapper retained for legacy lease writers while receipt callers carry commit identity.

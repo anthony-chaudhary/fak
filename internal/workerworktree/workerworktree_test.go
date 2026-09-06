@@ -1536,3 +1536,139 @@ func TestVerifyPreparedWorktree_IndexLockTransientPoll(t *testing.T) {
 		t.Fatalf("expected verifyPreparedWorktree to succeed after lock released, got %+v", res)
 	}
 }
+
+func TestSweepDeadWorktrees_PreservesActiveWorkerWithStaleHeartbeat(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := t.TempDir()
+	mustGit(t, root, "init", "-q", "-b", "main")
+	mustGit(t, root, "config", "user.email", "active@test")
+	mustGit(t, root, "config", "user.name", "active")
+	mustGit(t, root, "config", "commit.gpgsign", "false")
+
+	seedFile := filepath.Join(root, "init.txt")
+	if err := os.WriteFile(seedFile, []byte("init\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", "init.txt")
+	mustGit(t, root, "commit", "-q", "-m", "init")
+
+	wtRoot := t.TempDir()
+	prep := Prepare(root, "activelane", "activekey", "", wtRoot, nil)
+	if !prep.OK {
+		t.Fatalf("prepare failed: %+v", prep)
+	}
+	wtPath := prep.Path
+
+	// Set lease with an active living PID (os.Getpid()) and heartbeat older than DefaultHeartbeatStaleThreshold
+	oldTS := time.Now().Add(-2 * time.Hour)
+	activeLease := WorkerLease{
+		PID:         os.Getpid(),
+		SessionID:   "active-worker-session",
+		CreatedAt:   oldTS,
+		HeartbeatTS: oldTS,
+	}
+	if err := WriteWorkerLease(wtPath, activeLease); err != nil {
+		t.Fatalf("WriteWorkerLease failed: %v", err)
+	}
+	_ = writeOwnerStamp(wtPath, OwnerStamp{
+		Schema:    ownerStampSchema,
+		PID:       os.Getpid(),
+		LeaseID:   "active-worker-session",
+		CreatedAt: oldTS,
+	})
+
+	// Run dead worktree sweep; the active worker must NOT be reaped
+	report := SweepDeadWorktrees(root, wtRoot, nil)
+	if report.Pruned != 0 {
+		t.Fatalf("expected 0 worktrees pruned for active worker, got %d (paths: %v)", report.Pruned, report.Paths)
+	}
+	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
+		t.Fatalf("active worktree %q was reaped even though process is alive", wtPath)
+	}
+
+	// Also verify git worktree list still tracks wtPath
+	_, listOut := rawGit(t, root, "worktree", "list")
+	if !strings.Contains(filepath.ToSlash(listOut), filepath.ToSlash(wtPath)) {
+		t.Fatalf("active worktree %q missing from git worktree list:\n%s", wtPath, listOut)
+	}
+}
+
+func TestSweepDeadWorktrees_PreservesDirtyWorktree(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := t.TempDir()
+	mustGit(t, root, "init", "-q", "-b", "main")
+	mustGit(t, root, "config", "user.email", "dirty@test")
+	mustGit(t, root, "config", "user.name", "dirty")
+	mustGit(t, root, "config", "commit.gpgsign", "false")
+
+	seedFile := filepath.Join(root, "init.txt")
+	if err := os.WriteFile(seedFile, []byte("init\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", "init.txt")
+	mustGit(t, root, "commit", "-q", "-m", "init")
+
+	wtRoot := t.TempDir()
+	prep := Prepare(root, "dirtylane", "dirtykey", "", wtRoot, nil)
+	if !prep.OK {
+		t.Fatalf("prepare failed: %+v", prep)
+	}
+	wtPath := prep.Path
+
+	// Set lease with a dead PID (99999999) and stale timestamp so it would be eligible for reaping if clean
+	staleTime := time.Now().Add(-2 * time.Hour)
+	deadLease := WorkerLease{
+		PID:         99999999,
+		SessionID:   "dead-session",
+		CreatedAt:   staleTime,
+		HeartbeatTS: staleTime,
+	}
+	if err := WriteWorkerLease(wtPath, deadLease); err != nil {
+		t.Fatalf("WriteWorkerLease failed: %v", err)
+	}
+	_ = writeOwnerStamp(wtPath, OwnerStamp{
+		Schema:    ownerStampSchema,
+		PID:       99999999,
+		LeaseID:   "dead-session",
+		CreatedAt: staleTime,
+	})
+
+	// Make the worktree dirty with an uncommitted file
+	uncommittedFile := filepath.Join(wtPath, "wip.txt")
+	uncommittedContent := []byte("valuable worker diff to preserve\n")
+	if err := os.WriteFile(uncommittedFile, uncommittedContent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run sweep; the dirty worktree must be preserved to protect uncommitted worker diffs
+	report := SweepDeadWorktrees(root, wtRoot, nil)
+	if report.Pruned != 0 {
+		t.Fatalf("expected 0 worktrees pruned for dirty worktree, got %d (paths: %v)", report.Pruned, report.Paths)
+	}
+	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
+		t.Fatalf("dirty worktree %q was deleted, should be preserved", wtPath)
+	}
+	gotContent, err := os.ReadFile(uncommittedFile)
+	if err != nil {
+		t.Fatalf("uncommitted file %q was lost: %v", uncommittedFile, err)
+	}
+	if string(gotContent) != string(uncommittedContent) {
+		t.Fatalf("uncommitted file content corrupted: got %q, want %q", string(gotContent), string(uncommittedContent))
+	}
+
+	// When uncommitted changes are removed, verify that the clean dead worktree is subsequently pruned
+	if err := os.Remove(uncommittedFile); err != nil {
+		t.Fatal(err)
+	}
+	cleanReport := SweepDeadWorktrees(root, wtRoot, nil)
+	if cleanReport.Pruned != 1 {
+		t.Fatalf("expected 1 worktree pruned after becoming clean, got %d", cleanReport.Pruned)
+	}
+	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+		t.Fatalf("clean dead worktree %q still exists on disk after sweep", wtPath)
+	}
+}
