@@ -34,6 +34,7 @@ type taskRecord[T any] struct {
 	id        string
 	done      chan struct{}
 	committed bool
+	finished  bool
 	result    *OverlapResult[T]
 }
 
@@ -122,6 +123,7 @@ func (s *OverlapRunner[T]) Submit(ctx context.Context, task InFlightTask[T]) (*O
 		abortTask := func() {
 			s.mu.Lock()
 			delete(s.tasks, taskID)
+			rec.finished = true
 			close(rec.done)
 			s.mu.Unlock()
 		}
@@ -154,6 +156,7 @@ func (s *OverlapRunner[T]) Submit(ctx context.Context, task InFlightTask[T]) (*O
 
 		s.mu.Lock()
 		rec.committed = true
+		rec.finished = true
 		rec.result = res
 		close(rec.done)
 		s.results = append(s.results, res)
@@ -190,6 +193,7 @@ func (s *OverlapRunner[T]) Submit(ctx context.Context, task InFlightTask[T]) (*O
 	abortTask := func() {
 		s.mu.Lock()
 		delete(s.tasks, taskID)
+		rec.finished = true
 		close(rec.done)
 		s.mu.Unlock()
 	}
@@ -230,7 +234,6 @@ func (s *OverlapRunner[T]) Submit(ctx context.Context, task InFlightTask[T]) (*O
 					Committed: true,
 				}
 				rec.result = res
-				close(rec.done)
 				s.results = append(s.results, res)
 				s.buffered = append(s.buffered, res)
 				s.mu.Unlock()
@@ -238,6 +241,10 @@ func (s *OverlapRunner[T]) Submit(ctx context.Context, task InFlightTask[T]) (*O
 			s.inFlight.Add(-1)
 			<-s.sem
 			s.wg.Done()
+			s.mu.Lock()
+			rec.finished = true
+			close(rec.done)
+			s.mu.Unlock()
 		}()
 
 		start := time.Now()
@@ -255,7 +262,6 @@ func (s *OverlapRunner[T]) Submit(ctx context.Context, task InFlightTask[T]) (*O
 		s.mu.Lock()
 		rec.committed = true
 		rec.result = res
-		close(rec.done)
 		s.results = append(s.results, res)
 		s.buffered = append(s.buffered, res)
 		s.mu.Unlock()
@@ -275,18 +281,37 @@ func (s *OverlapRunner[T]) Submit(ctx context.Context, task InFlightTask[T]) (*O
 
 // Drain awaits pending in-flight tasks and collects remaining results.
 func (s *OverlapRunner[T]) Drain(ctx context.Context) ([]*OverlapResult[T], error) {
-	done := make(chan struct{})
-	go func() {
-		s.wg.Wait()
-		close(done)
-	}()
-
 	select {
-	case <-done:
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-s.closeCh:
 		return nil, errors.New("scheduler closed")
+	default:
+	}
+
+	for {
+		var pending []<-chan struct{}
+		s.mu.Lock()
+		for _, rec := range s.tasks {
+			if !rec.finished {
+				pending = append(pending, rec.done)
+			}
+		}
+		s.mu.Unlock()
+
+		if len(pending) == 0 {
+			break
+		}
+
+		for _, ch := range pending {
+			select {
+			case <-ch:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-s.closeCh:
+				return nil, errors.New("scheduler closed")
+			}
+		}
 	}
 
 	s.mu.Lock()

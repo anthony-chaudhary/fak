@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"errors"
+	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -320,6 +322,120 @@ func TestOverlapSchedule(t *testing.T) {
 		}
 		if len(drained) != 1 || drained[0].ID != "b-2" {
 			t.Fatalf("expected b-2 in drained, got %+v", drained)
+		}
+	})
+}
+
+func countDrainWaitGoroutines() int {
+	buf := make([]byte, 256*1024)
+	n := runtime.Stack(buf, true)
+	stack := string(buf[:n])
+	count := 0
+	for _, line := range strings.Split(stack, "\n") {
+		if strings.Contains(line, "Drain.func") {
+			count++
+		}
+	}
+	return count
+}
+
+func TestOverlapRunner_Drain_ContextCancellationLeaksNoGoroutines(t *testing.T) {
+	t.Run("already-canceled context", func(t *testing.T) {
+		s := NewOverlapRunner[string](2)
+		defer s.Close()
+
+		taskBlock := make(chan struct{})
+		defer close(taskBlock)
+
+		_, err := s.Submit(context.Background(), InFlightTask[string]{
+			ID: "block-1",
+			Execute: func(ctx context.Context) (string, error) {
+				<-taskBlock
+				return "ok", nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("submit failed: %v", err)
+		}
+
+		for i := 0; i < 50; i++ {
+			if s.InFlightCount() == 1 {
+				break
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+		if s.InFlightCount() != 1 {
+			t.Fatalf("expected 1 in-flight task, got %d", s.InFlightCount())
+		}
+
+		baseGoroutines := runtime.NumGoroutine()
+
+		canceledCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		const iters = 10
+		for i := 0; i < iters; i++ {
+			_, err := s.Drain(canceledCtx)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("expected context.Canceled, got %v", err)
+			}
+		}
+
+		time.Sleep(20 * time.Millisecond)
+		if count := countDrainWaitGoroutines(); count > 0 {
+			t.Fatalf("expected 0 drain wait goroutines, found %d", count)
+		}
+		if leaked := runtime.NumGoroutine() - baseGoroutines; leaked >= iters {
+			t.Fatalf("goroutine leak: %d goroutines leaked across %d calls", leaked, iters)
+		}
+	})
+
+	t.Run("timing-out context", func(t *testing.T) {
+		s := NewOverlapRunner[string](2)
+		defer s.Close()
+
+		taskBlock := make(chan struct{})
+		defer close(taskBlock)
+
+		_, err := s.Submit(context.Background(), InFlightTask[string]{
+			ID: "block-2",
+			Execute: func(ctx context.Context) (string, error) {
+				<-taskBlock
+				return "ok", nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("submit failed: %v", err)
+		}
+
+		for i := 0; i < 50; i++ {
+			if s.InFlightCount() == 1 {
+				break
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+		if s.InFlightCount() != 1 {
+			t.Fatalf("expected 1 in-flight task, got %d", s.InFlightCount())
+		}
+
+		baseGoroutines := runtime.NumGoroutine()
+
+		const iters = 5
+		for i := 0; i < iters; i++ {
+			timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+			_, err := s.Drain(timeoutCtx)
+			cancel()
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("expected context.DeadlineExceeded, got %v", err)
+			}
+		}
+
+		time.Sleep(20 * time.Millisecond)
+		if count := countDrainWaitGoroutines(); count > 0 {
+			t.Fatalf("expected 0 drain wait goroutines, found %d", count)
+		}
+		if leaked := runtime.NumGoroutine() - baseGoroutines; leaked >= iters {
+			t.Fatalf("goroutine leak: %d goroutines leaked across %d calls", leaked, iters)
 		}
 	})
 }
