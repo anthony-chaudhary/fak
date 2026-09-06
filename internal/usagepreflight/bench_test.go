@@ -7,7 +7,10 @@ import (
 
 func BenchmarkUsagePreflight(b *testing.B) {
 	reader := &fakeReader{
-		reading: Reading{Remaining: 15, Limit: 100, Known: true},
+		bySeat: map[string]Reading{
+			"seat-a": {Remaining: 15, Limit: 100, Known: true},
+			"seat-b": {Remaining: 80, Limit: 100, Known: true},
+		},
 	}
 	selector := &fakeSelector{
 		seat: "seat-b",

@@ -136,6 +136,13 @@ func (h Hook) Decide(ctx context.Context, seat string) (string, Record, error) {
 	case PolicyAuto:
 		if h.Selector != nil {
 			if alternate, ok := h.Selector.Alternate(ctx, seat); ok && alternate != "" && alternate != seat {
+				altReading, err := h.Reader.Remaining(ctx, alternate)
+				if err == nil && altReading.Known && altReading.Limit > 0 {
+					if altReading.Remaining*100 <= altReading.Limit*int64(reserve) {
+						rec.Action = ActionRefuse
+						return seat, rec, ErrNoAlternateSeat
+					}
+				}
 				rec.Action, rec.SelectedSeat = ActionSwitch, alternate
 				return alternate, rec, nil
 			}

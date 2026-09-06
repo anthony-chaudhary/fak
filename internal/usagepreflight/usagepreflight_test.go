@@ -8,13 +8,25 @@ import (
 )
 
 type fakeReader struct {
-	reading Reading
-	err     error
-	calls   int
+	reading   Reading
+	bySeat    map[string]Reading
+	err       error
+	bySeatErr map[string]error
+	calls     int
 }
 
-func (f *fakeReader) Remaining(context.Context, string) (Reading, error) {
+func (f *fakeReader) Remaining(_ context.Context, seat string) (Reading, error) {
 	f.calls++
+	if f.bySeatErr != nil {
+		if err, ok := f.bySeatErr[seat]; ok {
+			return f.reading, err
+		}
+	}
+	if f.bySeat != nil {
+		if r, ok := f.bySeat[seat]; ok {
+			return r, f.err
+		}
+	}
 	return f.reading, f.err
 }
 
@@ -61,7 +73,11 @@ func TestPolicyMatrix(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := &fakeReader{reading: tt.reading, err: tt.readErr}
+			bySeat := map[string]Reading{"seat-a": tt.reading}
+			if tt.alternate != "" {
+				bySeat[tt.alternate] = Reading{Remaining: 100, Limit: 100, Known: true}
+			}
+			reader := &fakeReader{reading: tt.reading, bySeat: bySeat, err: tt.readErr}
 			selector := &fakeSelector{seat: tt.alternate, ok: tt.alternate != ""}
 			selected, got, err := (Hook{Config: Config{Enabled: true, ReservePercent: 20, Policy: tt.policy}, Reader: reader, Selector: selector}).Decide(context.Background(), "seat-a")
 			if !errors.Is(err, tt.wantErr) {
@@ -75,7 +91,12 @@ func TestPolicyMatrix(t *testing.T) {
 }
 
 func TestCallSwitchesBeforeSpendAndRecordsDecision(t *testing.T) {
-	reader := &fakeReader{reading: Reading{Remaining: 5, Limit: 100, Known: true}}
+	reader := &fakeReader{
+		bySeat: map[string]Reading{
+			"seat-a": {Remaining: 5, Limit: 100, Known: true},
+			"seat-b": {Remaining: 50, Limit: 100, Known: true},
+		},
+	}
 	selector := &fakeSelector{seat: "seat-b", ok: true}
 	recorder := &fakeRecorder{}
 	var called []string
@@ -125,7 +146,13 @@ func TestAutoWithoutAlternateRefusesWithoutCallingProvider(t *testing.T) {
 
 func TestSelectorIsOnlyBackoffInteraction(t *testing.T) {
 	selector := &fakeSelector{seat: "seat-b", ok: true}
-	hook := Hook{Config: Config{Enabled: true, ReservePercent: 50, Policy: PolicyAuto}, Reader: &fakeReader{reading: Reading{Remaining: 1, Limit: 100, Known: true}}, Selector: selector}
+	reader := &fakeReader{
+		bySeat: map[string]Reading{
+			"seat-a": {Remaining: 1, Limit: 100, Known: true},
+			"seat-b": {Remaining: 90, Limit: 100, Known: true},
+		},
+	}
+	hook := Hook{Config: Config{Enabled: true, ReservePercent: 50, Policy: PolicyAuto}, Reader: reader, Selector: selector}
 	if _, _, err := hook.Decide(context.Background(), "seat-a"); err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +218,12 @@ func TestReserveClamping(t *testing.T) {
 }
 
 func TestDecideDeterministic(t *testing.T) {
-	reader := &fakeReader{reading: Reading{Remaining: 10, Limit: 100, Known: true}}
+	reader := &fakeReader{
+		bySeat: map[string]Reading{
+			"seat-a": {Remaining: 10, Limit: 100, Known: true},
+			"seat-b": {Remaining: 80, Limit: 100, Known: true},
+		},
+	}
 	selector := &fakeSelector{seat: "seat-b", ok: true}
 	hook := Hook{
 		Config:   Config{Enabled: true, ReservePercent: 20, Policy: PolicyAuto},
@@ -214,5 +246,85 @@ func TestUnknownPolicyFailsClosed(t *testing.T) {
 	seat, rec, err := hook.Decide(context.Background(), "seat-a")
 	if err == nil || rec.Action != ActionRefuse || seat != "seat-a" {
 		t.Fatalf("unknown policy must refuse: seat=%q rec=%+v err=%v", seat, rec, err)
+	}
+}
+
+func TestAutoSwitchChecksAlternateQuota(t *testing.T) {
+	tests := []struct {
+		name       string
+		altReading Reading
+		wantErr    error
+		wantAction Action
+		wantSeat   string
+	}{
+		{
+			name:       "alternate at reserve boundary refuses",
+			altReading: Reading{Remaining: 20, Limit: 100, Known: true},
+			wantErr:    ErrNoAlternateSeat,
+			wantAction: ActionRefuse,
+			wantSeat:   "seat-a",
+		},
+		{
+			name:       "alternate depleted refuses",
+			altReading: Reading{Remaining: 0, Limit: 100, Known: true},
+			wantErr:    ErrNoAlternateSeat,
+			wantAction: ActionRefuse,
+			wantSeat:   "seat-a",
+		},
+		{
+			name:       "alternate above reserve switches",
+			altReading: Reading{Remaining: 21, Limit: 100, Known: true},
+			wantErr:    nil,
+			wantAction: ActionSwitch,
+			wantSeat:   "seat-b",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &fakeReader{
+				bySeat: map[string]Reading{
+					"seat-a": {Remaining: 10, Limit: 100, Known: true},
+					"seat-b": tt.altReading,
+				},
+			}
+			selector := &fakeSelector{seat: "seat-b", ok: true}
+			recorder := &fakeRecorder{}
+			hook := Hook{
+				Config:   Config{Enabled: true, ReservePercent: 20, Policy: PolicyAuto},
+				Reader:   reader,
+				Selector: selector,
+				Recorder: recorder,
+			}
+
+			selected, rec, err := hook.Decide(context.Background(), "seat-a")
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Decide error = %v, want %v", err, tt.wantErr)
+			}
+			if selected != tt.wantSeat {
+				t.Fatalf("selected seat = %q, want %q", selected, tt.wantSeat)
+			}
+			if rec.Action != tt.wantAction {
+				t.Fatalf("record action = %q, want %q", rec.Action, tt.wantAction)
+			}
+
+			called := false
+			callErr := hook.Call(context.Background(), "seat-a", func(_ context.Context, s string) error {
+				called = true
+				if s != tt.wantSeat {
+					t.Fatalf("send seat = %q, want %q", s, tt.wantSeat)
+				}
+				return nil
+			})
+			if !errors.Is(callErr, tt.wantErr) {
+				t.Fatalf("Call error = %v, want %v", callErr, tt.wantErr)
+			}
+			if tt.wantErr != nil && called {
+				t.Fatal("send must not be called when alternate seat quota is at or below reserve")
+			}
+			if tt.wantErr == nil && !called {
+				t.Fatal("send must be called when alternate seat quota is above reserve")
+			}
+		})
 	}
 }
