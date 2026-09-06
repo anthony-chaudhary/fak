@@ -86,18 +86,24 @@ type modelSpec struct {
 // builtins maps canonical model identifiers and common aliases to modelSpec.
 var builtins = map[string]modelSpec{
 	// Small/Flash models -> PostureSupportHeavy
-	"gemini-1.5-flash": {canonical: "gemini-1.5-flash", posture: PostureSupportHeavy},
-	"gemini-2.0-flash": {canonical: "gemini-2.0-flash", posture: PostureSupportHeavy},
-	"gemini-2.5-flash": {canonical: "gemini-2.5-flash", posture: PostureSupportHeavy},
-	"gemini-3.8-flash": {canonical: "gemini-3.8-flash", posture: PostureSupportHeavy},
-	"llama-3-8b":       {canonical: "llama-3-8b", posture: PostureSupportHeavy},
-	"llama-3.1-8b":     {canonical: "llama-3.1-8b", posture: PostureSupportHeavy},
-	"llama-3.2-3b":     {canonical: "llama-3.2-3b", posture: PostureSupportHeavy},
-	"qwen-2.5-7b":      {canonical: "qwen-2.5-7b", posture: PostureSupportHeavy},
-	"qwen-2.5-3b":      {canonical: "qwen-2.5-3b", posture: PostureSupportHeavy},
-	"claude-3-haiku":   {canonical: "claude-3-haiku", posture: PostureSupportHeavy},
-	"claude-3.5-haiku": {canonical: "claude-3.5-haiku", posture: PostureSupportHeavy},
-	"gpt-4o-mini":      {canonical: "gpt-4o-mini", posture: PostureSupportHeavy},
+	"gemini-1.5-flash":         {canonical: "gemini-1.5-flash", posture: PostureSupportHeavy},
+	"gemini-2.0-flash":         {canonical: "gemini-2.0-flash", posture: PostureSupportHeavy},
+	"gemini-2.5-flash":         {canonical: "gemini-2.5-flash", posture: PostureSupportHeavy},
+	"gemini-3.8-flash":         {canonical: "gemini-3.8-flash", posture: PostureSupportHeavy},
+	"gemini-3.8-flash-cyber":   {canonical: "gemini-3.8-flash", posture: PostureSupportHeavy},
+	"gemini-3.8-flash-high":    {canonical: "gemini-3.8-flash", posture: PostureSupportHeavy},
+	"gemini-3.8-flash-medium":  {canonical: "gemini-3.8-flash", posture: PostureSupportHeavy},
+	"gemini-3.8-flash-low":     {canonical: "gemini-3.8-flash", posture: PostureSupportHeavy},
+	"gemini-3.8-flash-minimal": {canonical: "gemini-3.8-flash", posture: PostureSupportHeavy},
+	"gemini-3.8-pro":           {canonical: "gemini-3.8-pro", posture: PostureBalanced},
+	"llama-3-8b":               {canonical: "llama-3-8b", posture: PostureSupportHeavy},
+	"llama-3.1-8b":             {canonical: "llama-3.1-8b", posture: PostureSupportHeavy},
+	"llama-3.2-3b":             {canonical: "llama-3.2-3b", posture: PostureSupportHeavy},
+	"qwen-2.5-7b":              {canonical: "qwen-2.5-7b", posture: PostureSupportHeavy},
+	"qwen-2.5-3b":              {canonical: "qwen-2.5-3b", posture: PostureSupportHeavy},
+	"claude-3-haiku":           {canonical: "claude-3-haiku", posture: PostureSupportHeavy},
+	"claude-3.5-haiku":         {canonical: "claude-3.5-haiku", posture: PostureSupportHeavy},
+	"gpt-4o-mini":              {canonical: "gpt-4o-mini", posture: PostureSupportHeavy},
 
 	// Aliases for Small/Flash models
 	"claude-3-5-haiku":      {canonical: "claude-3.5-haiku", posture: PostureSupportHeavy},
@@ -223,6 +229,15 @@ func stripVersionSuffix(s string) string {
 	return s
 }
 
+func stripReasoningEffortSuffix(s string) string {
+	for _, suffix := range []string{"-minimal", "-low", "-medium", "-high"} {
+		if strings.HasSuffix(s, suffix) {
+			return strings.TrimSuffix(s, suffix)
+		}
+	}
+	return s
+}
+
 func normalizeLookupKey(id string) (string, string) {
 	trimmed := strings.TrimSpace(id)
 	lower := strings.ToLower(trimmed)
@@ -263,6 +278,12 @@ func lookupModel(id string) (modelSpec, bool) {
 	// 4. Strip version/tag suffixes (e.g. :latest, -latest)
 	if trimmedTag := stripVersionSuffix(candidate); trimmedTag != candidate {
 		if spec, ok := builtins[trimmedTag]; ok {
+			return spec, true
+		}
+	}
+	// 5. Strip reasoning/thinking effort suffix (e.g. -high, -medium, -low, -minimal)
+	if trimmedEffort := stripReasoningEffortSuffix(candidate); trimmedEffort != candidate {
+		if spec, ok := builtins[trimmedEffort]; ok {
 			return spec, true
 		}
 	}
