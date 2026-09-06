@@ -826,6 +826,8 @@ func handleSessionApproval(source any, s *store) http.HandlerFunc {
 			Resolution string `json:"resolution"`
 			Reason     string `json:"reason,omitempty"`
 			ApprovalID string `json:"approval_id,omitempty"`
+			Decision   string `json:"decision,omitempty"`
+			Feedback   string `json:"feedback,omitempty"`
 		}
 
 		contentType := r.Header.Get("Content-Type")
@@ -837,17 +839,60 @@ func handleSessionApproval(source any, s *store) http.HandlerFunc {
 			payload.Resolution = r.FormValue("resolution")
 			payload.Reason = r.FormValue("reason")
 			payload.ApprovalID = r.FormValue("approval_id")
+			if payload.Resolution == "" {
+				payload.Resolution = r.FormValue("decision")
+			}
+			if payload.Reason == "" {
+				payload.Reason = r.FormValue("feedback")
+			}
 		} else {
 			if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); err != nil {
 				http.Error(w, "invalid approval payload: invalid JSON", http.StatusBadRequest)
 				return
 			}
+			if payload.Resolution == "" && payload.Decision != "" {
+				payload.Resolution = payload.Decision
+			}
+			if payload.Reason == "" && payload.Feedback != "" {
+				payload.Reason = payload.Feedback
+			}
 		}
 
 		resolution := strings.ToLower(strings.TrimSpace(payload.Resolution))
+		if resolution == "approve" {
+			resolution = "accept"
+		} else if resolution == "deny" || resolution == "reject" {
+			resolution = "decline"
+		}
 		if resolution != "accept" && resolution != "decline" {
 			http.Error(w, `invalid approval resolution: must be "accept" or "decline"`, http.StatusBadRequest)
 			return
+		}
+
+		resolveViaStore := func(approvalID string) {
+			decision := "approve"
+			if resolution == "decline" {
+				decision = "deny"
+			}
+			if approvalID == "" && s != nil {
+				s.mu.RLock()
+				if state := s.runs[id]; state != nil {
+					approvalID = state.approval
+				}
+				s.mu.RUnlock()
+			}
+			if err := s.resolve(id, approvalID, decision); err != nil {
+				writeSessionJSON(w, http.StatusConflict, map[string]string{"error": "approval resolution failed: " + err.Error()})
+				return
+			}
+			defaultSessionHub.broadcastSession(id, "approval_resolved", []byte(fmt.Sprintf(`{"session_id":%q,"resolution":%q,"approval_id":%q}`, id, resolution, approvalID)))
+			writeSessionJSON(w, http.StatusOK, map[string]any{
+				"status":      "accepted",
+				"session_id":  id,
+				"approval_id": approvalID,
+				"resolution":  resolution,
+				"resolved":    true,
+			})
 		}
 
 		if source != nil {
@@ -875,6 +920,10 @@ func handleSessionApproval(source any, s *store) http.HandlerFunc {
 				}
 			}
 			if len(cards) > 0 && selected == nil {
+				if s != nil && s.hasRun(id) {
+					resolveViaStore(payload.ApprovalID)
+					return
+				}
 				http.Error(w, "logical session not found", http.StatusNotFound)
 				return
 			}
@@ -900,14 +949,29 @@ func handleSessionApproval(source any, s *store) http.HandlerFunc {
 			}
 
 			var resolveErr error
+			resolved := false
 			if direct, ok := source.(SessionApprovalDirectResolver); ok {
 				resolveErr = direct.ResolveApproval(id, resolution, payload.Reason)
+				if resolveErr == nil {
+					resolved = true
+				}
+			} else if resolver, ok := source.(SessionApprovalResolver); ok {
+				resolveErr = resolver.ResolveApproval(r.Context(), req)
+				if resolveErr == nil {
+					resolved = true
+				}
 			} else if resolver, ok := source.(interface {
 				ResolveApproval(context.Context, SessionApprovalRequest) error
 			}); ok {
 				resolveErr = resolver.ResolveApproval(r.Context(), req)
+				if resolveErr == nil {
+					resolved = true
+				}
+			} else if s != nil && s.hasRun(id) {
+				resolveViaStore(approvalID)
+				return
 			} else {
-				http.Error(w, "session authority does not support approval resolution", http.StatusInternalServerError)
+				writeSessionJSON(w, http.StatusNotImplemented, map[string]string{"error": "session authority does not support approval resolution"})
 				return
 			}
 
@@ -916,33 +980,24 @@ func handleSessionApproval(source any, s *store) http.HandlerFunc {
 				return
 			}
 
-			defaultSessionHub.broadcastSession(id, "approval_resolved", []byte(fmt.Sprintf(`{"session_id":%q,"resolution":%q,"approval_id":%q}`, id, resolution, approvalID)))
-			writeSessionJSON(w, http.StatusOK, map[string]any{
-				"status":      "accepted",
-				"session_id":  id,
-				"approval_id": approvalID,
-				"resolution":  resolution,
-			})
+			if resolved {
+				defaultSessionHub.broadcastSession(id, "approval_resolved", []byte(fmt.Sprintf(`{"session_id":%q,"resolution":%q,"approval_id":%q}`, id, resolution, approvalID)))
+				writeSessionJSON(w, http.StatusOK, map[string]any{
+					"status":      "accepted",
+					"session_id":  id,
+					"approval_id": approvalID,
+					"resolution":  resolution,
+					"resolved":    true,
+				})
+				return
+			}
+
+			writeSessionJSON(w, http.StatusNotImplemented, map[string]string{"error": "approval could not be resolved"})
 			return
 		}
 
 		if s != nil && s.hasRun(id) {
-			decision := "approve"
-			if resolution == "decline" {
-				decision = "deny"
-			}
-			approvalID := payload.ApprovalID
-			if err := s.resolve(id, approvalID, decision); err != nil {
-				writeSessionJSON(w, http.StatusConflict, map[string]string{"error": "approval resolution failed: " + err.Error()})
-				return
-			}
-			defaultSessionHub.broadcastSession(id, "approval_resolved", []byte(fmt.Sprintf(`{"session_id":%q,"resolution":%q,"approval_id":%q}`, id, resolution, approvalID)))
-			writeSessionJSON(w, http.StatusOK, map[string]any{
-				"status":      "accepted",
-				"session_id":  id,
-				"approval_id": approvalID,
-				"resolution":  resolution,
-			})
+			resolveViaStore(payload.ApprovalID)
 			return
 		}
 
@@ -1022,13 +1077,13 @@ func handleSessionEventHook(source SessionSource, s *store) http.HandlerFunc {
 		app, parseErr := ParseSessionApproval(body)
 		if parseErr == nil && app != nil {
 			approvalPayload, _ := json.Marshal(map[string]any{
-				"session_id":        id,
-				"approval_id":       app.ApprovalID,
-				"tool_name":         app.ToolName,
-				"command":           app.Command,
-				"arguments":         app.Arguments,
-				"target_path":       app.TargetPath,
-				"risk_explanation":  app.RiskExplanation,
+				"session_id":       id,
+				"approval_id":      app.ApprovalID,
+				"tool_name":        app.ToolName,
+				"command":          app.Command,
+				"arguments":        app.Arguments,
+				"target_path":      app.TargetPath,
+				"risk_explanation": app.RiskExplanation,
 			})
 			defaultSessionHub.broadcastSession(id, "approval_requested", approvalPayload)
 			defaultSessionHub.broadcastSession(id, "session_update", approvalPayload)
