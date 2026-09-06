@@ -480,9 +480,12 @@ func TestSessionCardsBroadcasterErrorResilience(t *testing.T) {
 		t.Fatalf("unexpected populated cards: %+v", current)
 	}
 
-	// Drain initial broadcast from subscriber
+	// Verify initial broadcast from subscriber emits session_update
 	select {
 	case msg := <-subCh:
+		if !strings.Contains(string(msg), "event: session_update") {
+			t.Fatalf("expected broadcast event to be session_update, got: %s", string(msg))
+		}
 		if !strings.Contains(string(msg), "session-resilient-1") {
 			t.Fatalf("initial broadcast missing card: %s", string(msg))
 		}
@@ -490,9 +493,10 @@ func TestSessionCardsBroadcasterErrorResilience(t *testing.T) {
 		t.Fatal("timed out waiting for initial broadcast")
 	}
 
-	// Drain any secondary event (e.g. session_cards alongside session_update)
+	// Verify no secondary duplicate broadcast event was emitted
 	select {
-	case <-subCh:
+	case dup := <-subCh:
+		t.Fatalf("unexpected duplicate broadcast event received: %s", string(dup))
 	default:
 	}
 
@@ -573,5 +577,90 @@ func TestSessionBroadcasterErrorResilience(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timed out waiting for broadcast from valid source")
+	}
+}
+
+func readSSEEvent(t *testing.T, reader *bufio.Reader) (string, string) {
+	t.Helper()
+	var eventType, data string
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("error reading SSE stream: %v", err)
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			if eventType != "" || data != "" {
+				return eventType, data
+			}
+			continue
+		}
+		if strings.HasPrefix(line, ":") {
+			continue
+		}
+		if strings.HasPrefix(line, "event: ") {
+			eventType = strings.TrimPrefix(line, "event: ")
+		} else if strings.HasPrefix(line, "data: ") {
+			if data != "" {
+				data += "\n"
+			}
+			data += strings.TrimPrefix(line, "data: ")
+		}
+	}
+}
+
+func TestSessionCardsSSEInitialConnectionEmitsSessionUpdate(t *testing.T) {
+	resetSessionHubForTest()
+	defer resetSessionHubForTest()
+
+	now := time.Now()
+	source := &fixtureSessionSource{cards: []SessionCard{
+		{ID: "sess-sse-init", Provider: "codex", State: sessionWorking, LastEventAt: now},
+	}}
+
+	broadcastCards(source)
+
+	ts := httptest.NewServer(handlerWithSessionSource(newStore(), nil, nil, source))
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/sessions/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	event1Type, data1 := readSSEEvent(t, reader)
+	if event1Type != "connected" {
+		t.Fatalf("expected first event to be connected, got %q (data: %s)", event1Type, data1)
+	}
+
+	event2Type, data2 := readSSEEvent(t, reader)
+	if event2Type != "session_update" {
+		t.Fatalf("expected second event to be session_update, got %q (data: %s)", event2Type, data2)
+	}
+	var payload struct {
+		Sessions []SessionCard `json:"sessions"`
+		HTML     string        `json:"html"`
+	}
+	if err := json.Unmarshal([]byte(data2), &payload); err != nil {
+		t.Fatalf("failed to parse session_update json data: %v", err)
+	}
+	if len(payload.Sessions) != 1 || payload.Sessions[0].ID != "sess-sse-init" {
+		t.Fatalf("unexpected sessions payload: %+v", payload.Sessions)
+	}
+	if !strings.Contains(payload.HTML, "sess-sse-init") {
+		t.Fatalf("expected html markup to contain session id: %s", payload.HTML)
 	}
 }

@@ -570,7 +570,6 @@ func (h *sessionHub) broadcastCards(source SessionSource) {
 		return
 	}
 	h.broadcast("session_update", data)
-	h.broadcast("session_cards", data)
 }
 
 // sessionBroadcaster manages active SSE subscriptions and broadcasts session card updates.
@@ -666,7 +665,7 @@ func handleSessionSSEWithInterval(scoped bool, interval time.Duration) http.Hand
 		defaultSessionHub.mu.RUnlock()
 		if len(lastCards) > 0 || lastHTML != "" {
 			if data, err := json.Marshal(map[string]any{"sessions": lastCards, "html": lastHTML}); err == nil {
-				fmt.Fprintf(w, "event: session_cards\ndata: %s\n\n", data)
+				fmt.Fprintf(w, "event: session_update\ndata: %s\n\n", data)
 			}
 		}
 		flusher.Flush()
