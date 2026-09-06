@@ -51,6 +51,10 @@ func runDebtLanesInternal(stdout, stderr io.Writer, flagSetName string, defaultP
 	check := fs.Bool("check", false, "gate mode: exit non-zero if active maturity debt exists")
 	comparePath := fs.String("compare", "", "compare against a prior --json payload")
 	laneFilter := fs.String("lane", "", "filter to a specific lane name")
+	query := fs.String("query", "", "filter lanes by query substring over name, unit, drivers, health, and related items")
+	fs.StringVar(query, "q", "", "alias for --query")
+	health := fs.String("health", "", "filter lanes by health status (healthy, degraded, critical)")
+	crossIndex := fs.Bool("cross-index", false, "display cross-indexed related items and dual-repo companions")
 	criticality := fs.String("criticality", "", "filter by criticality (core, enabling, stewardship, peripheral)")
 	minGap := fs.Float64("min-gap", 0, "filter lanes with maturity gap >= min-gap")
 	topN := fs.Int("top", 10, "number of top debt hotspots to display")
@@ -89,6 +93,9 @@ func runDebtLanesInternal(stdout, stderr io.Writer, flagSetName string, defaultP
 		TargetRepo:        *targetRepo,
 		PrivateRoot:       privRoot,
 		LaneFilter:        *laneFilter,
+		QueryFilter:       *query,
+		HealthFilter:      *health,
+		CrossIndex:        *crossIndex,
 		CriticalityFilter: *criticality,
 		MinGap:            *minGap,
 		TopN:              *topN,
@@ -162,6 +169,8 @@ func runDebtLanesInternal(stdout, stderr io.Writer, flagSetName string, defaultP
 		}
 	case *asMarkdown:
 		fmt.Fprint(stdout, debtlane.Markdown(report))
+	case *crossIndex:
+		fmt.Fprint(stdout, debtlane.RenderCrossIndex(report))
 	default:
 		fmt.Fprint(stdout, debtlane.Render(report))
 	}

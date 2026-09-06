@@ -45,6 +45,11 @@ Public scan and plan examples (replace placeholders with resolved paths):
 ```text
 fak debt-lanes --workspace <public-root> --target-repo fak --json
 fak debt-orchestrator --workspace <public-root> --target-repo fak --wave-size 3 --max-waves 1 --json
+
+# Queryability, health filtering, and cross-indexing:
+fak debt-lanes --workspace <public-root> --target-repo both --query <keyword> --health degraded,critical --json
+fak debt-lanes --workspace <public-root> --target-repo both --cross-index --top 10
+fak debt-orchestrator --workspace <public-root> --target-repo both --health degraded,critical --wave-size 6 --max-waves 3 --json
 ```
 
 For private scope, explicitly pass `--target-repo fak-private --private-root <private-root>`
@@ -57,12 +62,24 @@ The orchestrator emits **WavePlan** JSON (`fak.debt-orchestrator-wave-plan.v1`),
 not a compare baseline. `--compare <baseline>` emits text even with `--json`; confirm
 schema and matching roots, target-repo, and filters before comparing because the parser does not check them.
 
-Use `--lane`, `--criticality`, and `--min-gap` to narrow candidate work. `--top` limits
-hotspot display, not the full set planned. `--max-waves 0` plans all candidate waves;
+Use `--lane`, `--query` (`-q`), `--health`, `--criticality`, and `--min-gap` to narrow candidate work:
+- `--query <text>`: filters lanes across lane name, unit of work, companion, drivers, or health issue tokens (e.g. `missing_tests`, `excess_comments`, `gateway`).
+- `--health <status>`: filters lanes by health classification (`healthy`, `degraded`, `critical`).
+- `--cross-index`: displays dual-repo companions, inbound blast radius, and DOS trees.
+`--top` limits hotspot display, not the full set planned. `--max-waves 0` plans all candidate waves;
 it does not authorize an endless execution loop. Validate user targets before passing
 `--target-grade` or `--target-points` (`--points` alias): malformed grades may be ignored,
 and point-based planning can stop on debt in the plan or potential realized points.
 Those projections do not establish achieved gains.
+
+### Multi-Dimensional Health Matrix & Cross-Indexing in Wave Burndowns
+1. **Health Prioritization**: Prioritize `critical` lanes (compounding interest > 25% or untested core leaves) and `degraded` lanes with high blast radius (`Related.Dependents > 10`).
+2. **Cross-Indexed Companion Awareness**: When scheduling a wave with dual-repo scope (`--target-repo both`), inspect `Related.CompanionLane` and `Related.CompanionUnitOfWork` to avoid cross-repo interface skew.
+3. **Artifact Cross-Indexing**: Confirm the subagent fulfills missing artifacts recorded on the lane:
+   - Missing tests -> create `<unit>/*_test.go`
+   - Unproven runtime -> add entry to `runtime-proofs.json`
+   - Unbenchmarked -> add benchmark function or record in `BENCHMARK-AUTHORITY.md`
+   - Comment bloat -> prune formulaic headers and noise to clean health status
 
 Save one plan per fresh scope. Inspect a small candidate batch until the first useful,
 ready unit is found; advance through saved candidates on holds. Refresh planning only

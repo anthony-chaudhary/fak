@@ -53,6 +53,39 @@ type Interest struct {
 	Drivers   []string     `json:"drivers"`    // Structural reasons determining this rate.
 }
 
+// HealthStatus categorizes the operational and maturity health of a lane.
+type HealthStatus string
+
+const (
+	HealthHealthy  HealthStatus = "healthy"  // High maturity, passing tests, integrated, clean comments.
+	HealthDegraded HealthStatus = "degraded" // Untested stubs, excess comments, disconnected, or unbenchmarked.
+	HealthCritical HealthStatus = "critical" // Critical compounding carrying cost (>25%) or untested core paths.
+)
+
+// LaneHealth captures multi-dimensional health metrics and specific findings for a debt lane.
+type LaneHealth struct {
+	Status          HealthStatus `json:"status"`           // healthy, degraded, critical.
+	Score           float64      `json:"score"`            // 0.0 - 1.0 composite health score.
+	TestStatus      string       `json:"test_status"`      // passing, missing, failing.
+	CommentHygiene  string       `json:"comment_hygiene"`  // clean, bloat.
+	WiringStatus    string       `json:"wiring_status"`    // integrated, disconnected.
+	ProofStatus     string       `json:"proof_status"`     // dogfooded, unproven.
+	BenchmarkStatus string       `json:"benchmark_status"` // benchmarked, unmeasured.
+	Issues          []string     `json:"issues,omitempty"` // specific health issue tokens.
+}
+
+// RelatedThings cross-indexes related items, companions, dependencies, and artifacts for a debt lane.
+type RelatedThings struct {
+	CompanionRepo       string   `json:"companion_repo,omitempty"`        // Opposing repo (fak <-> fak-private).
+	CompanionLane       string   `json:"companion_lane,omitempty"`        // Corresponding companion lane name.
+	CompanionUnitOfWork string   `json:"companion_unit_of_work,omitempty"` // Directory path in companion repo.
+	Dependents          []string `json:"dependents,omitempty"`            // Internal packages importing this lane.
+	Dependencies        []string `json:"dependencies,omitempty"`          // Internal packages imported by this lane.
+	DosTrees            []string `json:"dos_trees,omitempty"`             // Tree globs declared in dos.toml.
+	ProofWitnesses      []string `json:"proof_witnesses,omitempty"`       // Runtime proof entries / IDs.
+	BenchmarkWitnesses  []string `json:"benchmark_witnesses,omitempty"`   // Benchmark authority mentions.
+}
+
 // Evidence captures verified facts discovered from disk for a unit of work.
 type Evidence struct {
 	FilesCount             int     `json:"files_count"`
@@ -93,6 +126,8 @@ type DebtLane struct {
 	RealizedContribution    float64         `json:"realized_contribution"`    // Maturity * Weight.
 	Bounds                  BoundsAndLimits `json:"bounds"`                   // Declared or derived constraints.
 	Evidence                Evidence        `json:"evidence"`                 // Ground-truth facts.
+	Related                 RelatedThings   `json:"related"`                  // Cross-indexed related items and companions.
+	Health                  LaneHealth      `json:"health"`                   // Multi-dimensional health verdict and score.
 	NextAction              string          `json:"next_action"`              // Concrete action to retire debt.
 }
 
@@ -115,6 +150,14 @@ type InterestSummary struct {
 	MaxRate     float64        `json:"max_rate"`     // Peak interest rate in the system.
 }
 
+// HealthSummary summarizes health distribution and average health score across the system.
+type HealthSummary struct {
+	HealthyCount  int     `json:"healthy_count"`
+	DegradedCount int     `json:"degraded_count"`
+	CriticalCount int     `json:"critical_count"`
+	AverageScore  float64 `json:"average_score"`
+}
+
 // Report is the top-level scorecard payload for dedicated maturity debt lanes.
 type Report struct {
 	Schema          string          `json:"schema"`
@@ -129,6 +172,7 @@ type Report struct {
 	Corpus          map[string]any  `json:"corpus"`
 	ProductionGrade ProductionGrade `json:"production_grade"`
 	InterestSummary InterestSummary `json:"interest_summary"`
+	HealthSummary   HealthSummary   `json:"health_summary"`
 	Lanes           []DebtLane      `json:"lanes"`
 	Hotspots        []DebtLane      `json:"hotspots"` // Top debt lanes ranked worst-first.
 	WavePlan        *WavePlan       `json:"wave_plan,omitempty"`
@@ -140,6 +184,9 @@ type Options struct {
 	TargetRepo        string // "fak", "fak-private", "both" (default: "fak")
 	PrivateRoot       string // optional explicit path to fak-private
 	LaneFilter        string
+	QueryFilter       string // substring/regex query over lane name, unit, drivers, issues, related
+	HealthFilter      string // filter by health status: "healthy", "degraded", "critical"
+	CrossIndex        bool   // output rich cross-indexed related items
 	MinGap            float64
 	CriticalityFilter string
 	TopN              int

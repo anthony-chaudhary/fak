@@ -333,3 +333,72 @@ func TestDebtLanesCLITargetRepoPrivate(t *testing.T) {
 		}
 	}
 }
+
+func TestDebtLanesCLIQuery(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDebtLanes(&stdout, &stderr, []string{
+		"--workspace", repoRoot(),
+		"--query", "gateway",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runDebtLanes --query gateway failed: code %d, stderr: %s", code, stderr.String())
+	}
+
+	var report debtlane.Report
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+	if len(report.Lanes) == 0 {
+		t.Fatalf("expected at least 1 lane matching query 'gateway', got 0")
+	}
+	for _, l := range report.Lanes {
+		if !strings.Contains(strings.ToLower(l.Lane), "gateway") &&
+			!strings.Contains(strings.ToLower(l.UnitOfWork), "gateway") &&
+			!strings.Contains(strings.ToLower(l.Related.CompanionLane), "gateway") {
+			t.Errorf("lane %q does not match query 'gateway'", l.Lane)
+		}
+	}
+}
+
+func TestDebtLanesCLIHealth(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDebtLanes(&stdout, &stderr, []string{
+		"--workspace", repoRoot(),
+		"--health", "healthy,degraded",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runDebtLanes --health failed: code %d, stderr: %s", code, stderr.String())
+	}
+
+	var report debtlane.Report
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+	for _, l := range report.Lanes {
+		if l.Health.Status != debtlane.HealthHealthy && l.Health.Status != debtlane.HealthDegraded {
+			t.Errorf("lane %s health status %q not in [healthy, degraded]", l.Lane, l.Health.Status)
+		}
+	}
+}
+
+func TestDebtLanesCLICrossIndex(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDebtLanes(&stdout, &stderr, []string{
+		"--workspace", repoRoot(),
+		"--cross-index",
+		"--top", "5",
+	})
+	if code != 0 {
+		t.Fatalf("runDebtLanes --cross-index failed: code %d, stderr: %s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "FAK DEBT CROSS-INDEX & COMPANIONS") {
+		t.Errorf("expected cross-index header, got:\n%s", out)
+	}
+	if !strings.Contains(out, "COMPANION (REPO:UNIT)") {
+		t.Errorf("expected COMPANION column header, got:\n%s", out)
+	}
+}

@@ -1403,3 +1403,193 @@ scrub_script = "tools/scrub.py"
 		}
 	}
 }
+
+func TestEvaluateLaneHealth(t *testing.T) {
+	healthyLane := DebtLane{
+		Lane:        "gateway",
+		UnitOfWork:  "internal/gateway",
+		Criticality: CriticalityCore,
+		Maturity:    9.5,
+		Evidence: Evidence{
+			HasCode:         true,
+			HasTests:        true,
+			TestFilesCount:  2,
+			Integrated:      true,
+			Dogfooded:       true,
+			Benchmarked:     true,
+			CodeLines:       200,
+			ExcessComments:  false,
+		},
+		Interest: Interest{Band: InterestLow, Rate: 0.05},
+	}
+	hHealth := EvaluateLaneHealth(healthyLane)
+	if hHealth.Status != HealthHealthy {
+		t.Errorf("expected healthy lane to have HealthHealthy, got %q (score=%.2f, issues=%v)", hHealth.Status, hHealth.Score, hHealth.Issues)
+	}
+	if hHealth.TestStatus != "passing" {
+		t.Errorf("expected test_status 'passing', got %q", hHealth.TestStatus)
+	}
+	if len(hHealth.Issues) != 0 {
+		t.Errorf("expected 0 issues for healthy lane, got %v", hHealth.Issues)
+	}
+
+	degradedLane := DebtLane{
+		Lane:        "untested_util",
+		UnitOfWork:  "internal/untested_util",
+		Criticality: CriticalityEnabling,
+		Maturity:    2.0,
+		Evidence: Evidence{
+			HasCode:        true,
+			HasTests:       false,
+			ExcessComments: true,
+			Integrated:     false,
+		},
+		Interest: Interest{Band: InterestModerate, Rate: 0.15},
+	}
+	dHealth := EvaluateLaneHealth(degradedLane)
+	if dHealth.Status != HealthDegraded {
+		t.Errorf("expected degraded status, got %q", dHealth.Status)
+	}
+	if dHealth.TestStatus != "missing" {
+		t.Errorf("expected test_status 'missing', got %q", dHealth.TestStatus)
+	}
+	if dHealth.CommentHygiene != "bloat" {
+		t.Errorf("expected comment_hygiene 'bloat', got %q", dHealth.CommentHygiene)
+	}
+
+	criticalLane := DebtLane{
+		Lane:        "critical_core",
+		UnitOfWork:  "internal/critical_core",
+		Criticality: CriticalityCore,
+		Maturity:    1.0,
+		Evidence: Evidence{
+			HasCode:  true,
+			HasTests: false,
+		},
+		Interest: Interest{Band: InterestCritical, Rate: 0.30},
+	}
+	cHealth := EvaluateLaneHealth(criticalLane)
+	if cHealth.Status != HealthCritical {
+		t.Errorf("expected critical status, got %q", cHealth.Status)
+	}
+}
+
+func TestQueryFilterAndHealthFilter(t *testing.T) {
+	facts := []DebtLane{
+		{
+			Lane:        "gateway",
+			UnitOfWork:  "internal/gateway",
+			Criticality: CriticalityCore,
+			Maturity:    9.0,
+			Evidence: Evidence{
+				HasCode:     true,
+				HasTests:    true,
+				Integrated:  true,
+				Dogfooded:   true,
+				Benchmarked: true,
+			},
+			Related: RelatedThings{
+				CompanionRepo:       "fak-private",
+				CompanionLane:       "gateway",
+				CompanionUnitOfWork: "platform/gateway",
+			},
+		},
+		{
+			Lane:        "auth_stub",
+			UnitOfWork:  "internal/auth_stub",
+			Criticality: CriticalityEnabling,
+			Maturity:    1.0,
+			Evidence: Evidence{
+				HasCode:   true,
+				CodeLines: 50,
+				HasTests:  false,
+			},
+		},
+	}
+
+	// Query by lane name
+	rep, err := Scan(Options{Facts: facts, QueryFilter: "gate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Lanes) != 1 || rep.Lanes[0].Lane != "gateway" {
+		t.Fatalf("expected 1 lane 'gateway', got %d", len(rep.Lanes))
+	}
+
+	// Query by companion unit of work
+	rep, err = Scan(Options{Facts: facts, QueryFilter: "platform/gateway"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Lanes) != 1 || rep.Lanes[0].Lane != "gateway" {
+		t.Fatalf("expected 1 lane matching companion, got %d", len(rep.Lanes))
+	}
+
+	// Query by issue token
+	rep, err = Scan(Options{Facts: facts, QueryFilter: "missing_tests"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Lanes) != 1 || rep.Lanes[0].Lane != "auth_stub" {
+		t.Fatalf("expected 1 lane matching missing_tests issue, got %d", len(rep.Lanes))
+	}
+
+	// Health filter: healthy
+	rep, err = Scan(Options{Facts: facts, HealthFilter: "healthy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Lanes) != 1 || rep.Lanes[0].Lane != "gateway" {
+		t.Fatalf("expected 1 healthy lane, got %d", len(rep.Lanes))
+	}
+
+	// Health filter: degraded
+	rep, err = Scan(Options{Facts: facts, HealthFilter: "degraded"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Lanes) != 1 || rep.Lanes[0].Lane != "auth_stub" {
+		t.Fatalf("expected 1 degraded lane, got %d", len(rep.Lanes))
+	}
+
+	// Verify HealthSummary
+	if rep.HealthSummary.HealthyCount != 1 || rep.HealthSummary.DegradedCount != 1 {
+		t.Errorf("unexpected HealthSummary: %+v", rep.HealthSummary)
+	}
+}
+
+func TestRenderCrossIndexOutput(t *testing.T) {
+	facts := []DebtLane{
+		{
+			Lane:        "gateway",
+			Repo:        "fak",
+			UnitOfWork:  "internal/gateway",
+			Criticality: CriticalityCore,
+			Maturity:    8.0,
+			Evidence:    Evidence{HasCode: true, HasTests: true, Integrated: true},
+			Related: RelatedThings{
+				CompanionRepo:       "fak-private",
+				CompanionLane:       "gateway",
+				CompanionUnitOfWork: "platform/gateway",
+				Dependents:          []string{"cmd/fak", "internal/session"},
+				Dependencies:        []string{"internal/abi", "internal/ctxmmu"},
+				DosTrees:            []string{"internal/gateway/**"},
+			},
+		},
+	}
+	rep, err := Scan(Options{Facts: facts})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out := RenderCrossIndex(rep)
+	if !strings.Contains(out, "FAK DEBT CROSS-INDEX & COMPANIONS") {
+		t.Errorf("expected header in cross-index output: %s", out)
+	}
+	if !strings.Contains(out, "fak-private:platform/gateway") {
+		t.Errorf("expected companion in cross-index output: %s", out)
+	}
+	if !strings.Contains(out, "internal/gateway/**") {
+		t.Errorf("expected dos trees in cross-index output: %s", out)
+	}
+}

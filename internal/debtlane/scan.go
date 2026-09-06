@@ -40,6 +40,24 @@ func resolvePrivateRoot(fakRoot, explicit string) string {
 	return ""
 }
 
+func resolveFakRoot(privRoot, explicit string) string {
+	if explicit != "" {
+		if info, err := os.Stat(explicit); err == nil && info.IsDir() {
+			return explicit
+		}
+	}
+	if env := os.Getenv("FAK_ROOT"); env != "" {
+		if info, err := os.Stat(env); err == nil && info.IsDir() {
+			return env
+		}
+	}
+	candidate := filepath.Join(filepath.Dir(privRoot), "fak")
+	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		return candidate
+	}
+	return ""
+}
+
 // Scan evaluates debt lanes across the workspace or against provided facts.
 func Scan(opts Options) (Report, error) {
 	root := opts.WorkspaceRoot
@@ -76,20 +94,45 @@ func Scan(opts Options) (Report, error) {
 		if privRoot == "" {
 			return Report{}, fmt.Errorf("fak-private repository not found: specify private root or set FAK_PRIVATE_ROOT")
 		}
-		fakLanes, err := discoverLanesFromDisk(absRoot)
+		fakLanes, err := discoverLanesFromDisk(absRoot, privRoot)
 		if err != nil {
 			return Report{}, fmt.Errorf("scan fak: %w", err)
 		}
 		for i := range fakLanes {
 			fakLanes[i].Repo = "fak"
 		}
-		privLanes, err := discoverLanesFromDisk(privRoot)
+		privLanes, err := discoverLanesFromDisk(privRoot, absRoot)
 		if err != nil {
 			return Report{}, fmt.Errorf("scan fak-private: %w", err)
 		}
 		for i := range privLanes {
 			privLanes[i].Repo = "fak-private"
 		}
+
+		// Cross-index dual-repo companions
+		privMap := make(map[string]DebtLane)
+		for _, pl := range privLanes {
+			privMap[pl.Lane] = pl
+		}
+		for i := range fakLanes {
+			if pl, ok := privMap[fakLanes[i].Lane]; ok {
+				fakLanes[i].Related.CompanionRepo = "fak-private"
+				fakLanes[i].Related.CompanionLane = pl.Lane
+				fakLanes[i].Related.CompanionUnitOfWork = pl.UnitOfWork
+			}
+		}
+		fakMap := make(map[string]DebtLane)
+		for _, fl := range fakLanes {
+			fakMap[fl.Lane] = fl
+		}
+		for i := range privLanes {
+			if fl, ok := fakMap[privLanes[i].Lane]; ok {
+				privLanes[i].Related.CompanionRepo = "fak"
+				privLanes[i].Related.CompanionLane = fl.Lane
+				privLanes[i].Related.CompanionUnitOfWork = fl.UnitOfWork
+			}
+		}
+
 		allLanes = append(fakLanes, privLanes...)
 	} else if targetRepo == "fak-private" {
 		privRoot := absRoot
@@ -99,7 +142,8 @@ func Scan(opts Options) (Report, error) {
 				return Report{}, fmt.Errorf("fak-private repository not found: specify private root or set FAK_PRIVATE_ROOT")
 			}
 		}
-		allLanes, err = discoverLanesFromDisk(privRoot)
+		fakRoot := resolveFakRoot(privRoot, "")
+		allLanes, err = discoverLanesFromDisk(privRoot, fakRoot)
 		if err != nil {
 			return Report{}, err
 		}
@@ -108,7 +152,8 @@ func Scan(opts Options) (Report, error) {
 		}
 		absRoot = privRoot
 	} else {
-		allLanes, err = discoverLanesFromDisk(absRoot)
+		privRoot := resolvePrivateRoot(absRoot, opts.PrivateRoot)
+		allLanes, err = discoverLanesFromDisk(absRoot, privRoot)
 		if err != nil {
 			return Report{}, err
 		}
@@ -126,6 +171,12 @@ func Scan(opts Options) (Report, error) {
 	filtered := make([]DebtLane, 0, len(allLanes))
 	for _, l := range allLanes {
 		if opts.LaneFilter != "" && !strings.EqualFold(l.Lane, opts.LaneFilter) {
+			continue
+		}
+		if opts.QueryFilter != "" && !matchesQuery(l, opts.QueryFilter) {
+			continue
+		}
+		if opts.HealthFilter != "" && !matchesHealth(l, opts.HealthFilter) {
 			continue
 		}
 		if opts.CriticalityFilter != "" && !strings.EqualFold(string(l.Criticality), opts.CriticalityFilter) {
@@ -171,6 +222,24 @@ func Scan(opts Options) (Report, error) {
 		Bands:       bands,
 		AverageRate: avgRate,
 		MaxRate:     math.Round(maxRate*1000) / 1000,
+	}
+
+	// Calculate health summary.
+	healthSummary := HealthSummary{}
+	var healthScoreSum float64
+	for _, l := range allLanes {
+		switch l.Health.Status {
+		case HealthHealthy:
+			healthSummary.HealthyCount++
+		case HealthDegraded:
+			healthSummary.DegradedCount++
+		case HealthCritical:
+			healthSummary.CriticalCount++
+		}
+		healthScoreSum += l.Health.Score
+	}
+	if len(allLanes) > 0 {
+		healthSummary.AverageScore = math.Round((healthScoreSum/float64(len(allLanes)))*100) / 100
 	}
 
 	// Rank hotspots worst-first.
@@ -243,6 +312,10 @@ func Scan(opts Options) (Report, error) {
 		"average_interest_rate":        interestSummary.AverageRate,
 		"critical_interest_lanes":      interestSummary.Bands[string(InterestCritical)],
 		"high_interest_lanes":          interestSummary.Bands[string(InterestHigh)],
+		"health_healthy_lanes":         healthSummary.HealthyCount,
+		"health_degraded_lanes":        healthSummary.DegradedCount,
+		"health_critical_lanes":        healthSummary.CriticalCount,
+		"health_average_score":         healthSummary.AverageScore,
 	}
 
 	return Report{
@@ -258,9 +331,159 @@ func Scan(opts Options) (Report, error) {
 		Corpus:          corpus,
 		ProductionGrade: productionGrade,
 		InterestSummary: interestSummary,
+		HealthSummary:   healthSummary,
 		Lanes:           filtered,
 		Hotspots:        hotspots,
 	}, nil
+}
+
+// EvaluateLaneHealth computes the multi-dimensional health verdict, composite score, and issues.
+func EvaluateLaneHealth(l DebtLane) LaneHealth {
+	testStatus := "passing"
+	if !l.Evidence.HasTests || l.Evidence.TestFilesCount == 0 {
+		testStatus = "missing"
+	}
+
+	commentHygiene := "clean"
+	if l.Evidence.ExcessComments {
+		commentHygiene = "bloat"
+	}
+
+	wiringStatus := "integrated"
+	if !l.Evidence.Integrated {
+		wiringStatus = "disconnected"
+	}
+
+	proofStatus := "dogfooded"
+	if !l.Evidence.Dogfooded {
+		proofStatus = "unproven"
+	}
+
+	benchStatus := "benchmarked"
+	if !l.Evidence.Benchmarked {
+		benchStatus = "unmeasured"
+	}
+
+	var issues []string
+	if !l.Evidence.HasTests {
+		issues = append(issues, "missing_tests")
+	}
+	if l.Evidence.ExcessComments {
+		issues = append(issues, "excess_comments")
+	}
+	if !l.Evidence.Integrated {
+		issues = append(issues, "disconnected_wiring")
+	}
+	if l.Interest.Band == InterestCritical {
+		issues = append(issues, "critical_interest")
+	}
+	if l.MaturityGap >= 4.0 {
+		issues = append(issues, "high_maturity_gap")
+	}
+	if !l.Evidence.Dogfooded && (l.Criticality == CriticalityCore || l.Criticality == CriticalityEnabling) {
+		issues = append(issues, "unproven_runtime")
+	}
+	if !l.Evidence.Benchmarked && (l.Criticality == CriticalityCore || l.Criticality == CriticalityEnabling) {
+		issues = append(issues, "unbenchmarked")
+	}
+
+	score := 1.0
+	if !l.Evidence.HasTests {
+		score -= 0.30
+	}
+	if l.Evidence.ExcessComments {
+		score -= 0.10
+	}
+	if !l.Evidence.Integrated {
+		score -= 0.15
+	}
+	if !l.Evidence.Dogfooded && (l.Criticality == CriticalityCore || l.Criticality == CriticalityEnabling) {
+		score -= 0.05
+	}
+	if !l.Evidence.Benchmarked && (l.Criticality == CriticalityCore || l.Criticality == CriticalityEnabling) {
+		score -= 0.05
+	}
+	if l.Interest.Band == InterestCritical {
+		score -= 0.20
+	} else if l.Interest.Band == InterestHigh {
+		score -= 0.10
+	}
+	if score < 0 {
+		score = 0
+	}
+	score = math.Round(score*100) / 100
+
+	status := HealthHealthy
+	if l.Interest.Band == InterestCritical || (!l.Evidence.HasTests && l.Criticality == CriticalityCore) || score < 0.30 {
+		status = HealthCritical
+	} else if len(issues) > 0 || score < 0.85 {
+		status = HealthDegraded
+	}
+
+	return LaneHealth{
+		Status:          status,
+		Score:           score,
+		TestStatus:      testStatus,
+		CommentHygiene:  commentHygiene,
+		WiringStatus:    wiringStatus,
+		ProofStatus:     proofStatus,
+		BenchmarkStatus: benchStatus,
+		Issues:          issues,
+	}
+}
+
+func matchesQuery(l DebtLane, q string) bool {
+	q = strings.ToLower(strings.TrimSpace(q))
+	if q == "" {
+		return true
+	}
+	if strings.Contains(strings.ToLower(l.Lane), q) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(l.UnitOfWork), q) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(string(l.Criticality)), q) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(l.MaturityRung), q) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(string(l.Health.Status)), q) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(l.NextAction), q) {
+		return true
+	}
+	for _, issue := range l.Health.Issues {
+		if strings.Contains(strings.ToLower(issue), q) {
+			return true
+		}
+	}
+	for _, d := range l.Interest.Drivers {
+		if strings.Contains(strings.ToLower(d), q) {
+			return true
+		}
+	}
+	if strings.Contains(strings.ToLower(l.Related.CompanionLane), q) || strings.Contains(strings.ToLower(l.Related.CompanionUnitOfWork), q) {
+		return true
+	}
+	return false
+}
+
+func matchesHealth(l DebtLane, h string) bool {
+	h = strings.ToLower(strings.TrimSpace(h))
+	if h == "" {
+		return true
+	}
+	parts := strings.Split(h, ",")
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if strings.EqualFold(string(l.Health.Status), trimmed) {
+			return true
+		}
+	}
+	return false
 }
 
 func recomputeLane(l *DebtLane) {
@@ -292,15 +515,30 @@ func recomputeLane(l *DebtLane) {
 	if l.NextAction == "" {
 		l.NextAction = NextActionForGap(l.Lane, l.UnitOfWork, l.Maturity, l.TargetMaturity, l.Evidence)
 	}
+	l.Health = EvaluateLaneHealth(*l)
 }
 
-func discoverLanesFromDisk(root string) ([]DebtLane, error) {
+func discoverLanesFromDisk(root string, companionRoots ...string) ([]DebtLane, error) {
+	var compRoot string
+	if len(companionRoots) > 0 {
+		compRoot = companionRoots[0]
+	}
 	dosPath := filepath.Join(root, "dos.toml")
 	lanes, laneTrees := parseLaneTrees(dosPath)
 
 	// Build dependency graph and reachability.
 	graph, internalPkgs := BuildInternalImportGraph(root)
 	reachable := scanReachableFromCmd(root, graph)
+
+	inboundDependents := make(map[string][]string)
+	for pkg, edges := range graph {
+		for dep := range edges {
+			inboundDependents[dep] = append(inboundDependents[dep], pkg)
+		}
+	}
+	for k := range inboundDependents {
+		sort.Strings(inboundDependents[k])
+	}
 
 	// Read benchmarks authority mentions.
 	benchDocs := readBenchmarkAuthorityLanes(filepath.Join(root, "BENCHMARK-AUTHORITY.md"))
@@ -447,6 +685,66 @@ func discoverLanesFromDisk(root string) ([]DebtLane, error) {
 			repoName = "fak-private"
 		}
 
+		// Build related cross-indexed artifacts
+		var proofWitnesses []string
+		if runtimeProofs[lane] {
+			proofWitnesses = []string{lane}
+		}
+		var benchWitnesses []string
+		if benchDocs[lane] {
+			benchWitnesses = []string{lane}
+		}
+
+		var deps []string
+		if edges, ok := graph[lane]; ok {
+			for dep := range edges {
+				deps = append(deps, dep)
+			}
+			sort.Strings(deps)
+		}
+		dependents := append([]string(nil), inboundDependents[lane]...)
+
+		var compRepo, compLane, compUnit string
+		if compRoot != "" {
+			isPriv := filepath.Base(root) == "fak-private" || strings.HasPrefix(filepath.ToSlash(unitDir), "platform/")
+			if isPriv {
+				compRepo = "fak"
+				if info, err := os.Stat(filepath.Join(compRoot, "internal", lane)); err == nil && info.IsDir() {
+					compLane = lane
+					compUnit = filepath.Join("internal", lane)
+				} else if info, err := os.Stat(filepath.Join(compRoot, "pkg", lane)); err == nil && info.IsDir() {
+					compLane = lane
+					compUnit = filepath.Join("pkg", lane)
+				}
+			} else {
+				compRepo = "fak-private"
+				if info, err := os.Stat(filepath.Join(compRoot, "platform", lane)); err == nil && info.IsDir() {
+					compLane = lane
+					compUnit = filepath.Join("platform", lane)
+				} else if info, err := os.Stat(filepath.Join(compRoot, "tools", lane)); err == nil && info.IsDir() {
+					compLane = lane
+					compUnit = filepath.Join("tools", lane)
+				} else if info, err := os.Stat(filepath.Join(compRoot, "cmd", lane)); err == nil && info.IsDir() {
+					compLane = lane
+					compUnit = filepath.Join("cmd", lane)
+				} else if info, err := os.Stat(filepath.Join(compRoot, "cmd", "fak-"+lane)); err == nil && info.IsDir() {
+					compLane = lane
+					compUnit = filepath.Join("cmd", "fak-"+lane)
+				}
+			}
+		}
+
+		related := RelatedThings{
+			CompanionRepo:       compRepo,
+			CompanionLane:       compLane,
+			CompanionUnitOfWork: compUnit,
+			Dependents:          dependents,
+			Dependencies:        deps,
+			DosTrees:            append([]string(nil), trees...),
+			ProofWitnesses:      proofWitnesses,
+			BenchmarkWitnesses:  benchWitnesses,
+		}
+
 		dl := DebtLane{
 			Lane:                    lane,
 			Repo:                    repoName,
@@ -465,8 +763,10 @@ func discoverLanesFromDisk(root string) ([]DebtLane, error) {
 			RealizedContribution:    math.Round(maturityScore*weight*10) / 10,
 			Bounds:                  bounds,
 			Evidence:                evidence,
+			Related:                 related,
 			NextAction:              NextActionForGap(lane, unitDir, maturityScore, target, evidence),
 		}
+		dl.Health = EvaluateLaneHealth(dl)
 		result = append(result, dl)
 	}
 

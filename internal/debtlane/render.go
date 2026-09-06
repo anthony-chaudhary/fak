@@ -24,7 +24,7 @@ func Render(r Report) string {
 		r.Corpus["carrying_cost"],
 		r.ProductionGrade.WIPUnits,
 	))
-	b.WriteString(fmt.Sprintf("Interest Bands:   low: %d · moderate: %d · high: %d · critical: %d (avg rate: %.1f%%, max: %.1f%%)\n\n",
+	b.WriteString(fmt.Sprintf("Interest Bands:   low: %d · moderate: %d · high: %d · critical: %d (avg rate: %.1f%%, max: %.1f%%)\n",
 		r.InterestSummary.Bands[string(InterestLow)],
 		r.InterestSummary.Bands[string(InterestModerate)],
 		r.InterestSummary.Bands[string(InterestHigh)],
@@ -32,14 +32,21 @@ func Render(r Report) string {
 		r.InterestSummary.AverageRate*100,
 		r.InterestSummary.MaxRate*100,
 	))
+	b.WriteString(fmt.Sprintf("Health Status:    healthy: %d · degraded: %d · critical: %d (avg score: %.2f)\n\n",
+		r.HealthSummary.HealthyCount,
+		r.HealthSummary.DegradedCount,
+		r.HealthSummary.CriticalCount,
+		r.HealthSummary.AverageScore,
+	))
 
 	if len(r.Hotspots) > 0 {
 		b.WriteString("TOP DEBT HOTSPOTS (worst-first carrying cost):\n")
 		tw := tabwriter.NewWriter(&b, 2, 4, 2, ' ', 0)
-		fmt.Fprintln(tw, "LANE\tCRITICALITY\tCURVE\tGAP\tWT\tPRINCIPAL\tRATE\tCARRYING\tTOTAL DEBT\tNEXT ACTION")
+		fmt.Fprintln(tw, "LANE\tHEALTH\tCRITICALITY\tCURVE\tGAP\tWT\tPRINCIPAL\tRATE\tCARRYING\tTOTAL DEBT\tNEXT ACTION")
 		for _, h := range r.Hotspots {
-			fmt.Fprintf(tw, "%s\t%s\t%.1f/%.1f (%s)\t%.1f\t%.1f\t%.1f\t%.1f%% (%s)\t%.1f\t%.1f\t%s\n",
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%.1f/%.1f (%s)\t%.1f\t%.1f\t%.1f\t%.1f%% (%s)\t%.1f\t%.1f\t%s\n",
 				h.Lane,
+				h.Health.Status,
 				h.Criticality,
 				h.Maturity,
 				h.TargetMaturity,
@@ -58,6 +65,42 @@ func Render(r Report) string {
 	}
 
 	b.WriteString("\nNext Action: " + r.NextAction + "\n")
+	return b.String()
+}
+
+// RenderCrossIndex formats a Report focusing on cross-indexed related items and companions.
+func RenderCrossIndex(r Report) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("=== FAK DEBT CROSS-INDEX & COMPANIONS (%s) ===\n", r.Verdict))
+	b.WriteString(fmt.Sprintf("Total Lanes: %d · Healthy: %d · Degraded: %d · Critical: %d\n\n",
+		len(r.Lanes),
+		r.HealthSummary.HealthyCount,
+		r.HealthSummary.DegradedCount,
+		r.HealthSummary.CriticalCount,
+	))
+
+	tw := tabwriter.NewWriter(&b, 2, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "LANE\tREPO\tHEALTH\tCOMPANION (REPO:UNIT)\tDEP-IN\tDEP-OUT\tTREES")
+	for _, l := range r.Lanes {
+		comp := "-"
+		if l.Related.CompanionLane != "" {
+			comp = fmt.Sprintf("%s:%s", l.Related.CompanionRepo, l.Related.CompanionUnitOfWork)
+		}
+		trees := "-"
+		if len(l.Related.DosTrees) > 0 {
+			trees = strings.Join(l.Related.DosTrees, ", ")
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%d\t%s\n",
+			l.Lane,
+			l.Repo,
+			l.Health.Status,
+			comp,
+			len(l.Related.Dependents),
+			len(l.Related.Dependencies),
+			truncProse(trees, 40),
+		)
+	}
+	tw.Flush()
 	return b.String()
 }
 
@@ -93,12 +136,19 @@ func Markdown(r Report) string {
 	b.WriteString(fmt.Sprintf("| `high` | 16%% – 25%% (accelerating) | %d | Core or high-blast-radius leaves with maturity gaps |\n", r.InterestSummary.Bands[string(InterestHigh)]))
 	b.WriteString(fmt.Sprintf("| `critical` | > 25%% (compounding) | %d | Critical paths or untested code in production paths |\n\n", r.InterestSummary.Bands[string(InterestCritical)]))
 
+	b.WriteString("## Lane Health & Cross-Indexing\n\n")
+	b.WriteString(fmt.Sprintf("- **Healthy lanes:** `%d` (score >= 0.80, passing tests, integrated, clean)\n", r.HealthSummary.HealthyCount))
+	b.WriteString(fmt.Sprintf("- **Degraded lanes:** `%d` (missing tests, excess comment bloat, or disconnected)\n", r.HealthSummary.DegradedCount))
+	b.WriteString(fmt.Sprintf("- **Critical lanes:** `%d` (compounding interest > 25%% or untested core path)\n", r.HealthSummary.CriticalCount))
+	b.WriteString(fmt.Sprintf("- **Fleet health score:** `%.2f / 1.00` average\n\n", r.HealthSummary.AverageScore))
+
 	b.WriteString("## Debt Hotspots (Worst-First)\n\n")
-	b.WriteString("| Lane | Criticality | Maturity Curve | Gap | Weight | Principal | Rate (Band) | Carrying Cost | Total Debt | Next Action |\n")
-	b.WriteString("|---|---|---|---:|---:|---:|---|---:|---:|---|\n")
+	b.WriteString("| Lane | Health | Criticality | Maturity Curve | Gap | Weight | Principal | Rate (Band) | Carrying Cost | Total Debt | Next Action |\n")
+	b.WriteString("|---|---|---|---|---:|---:|---:|---|---:|---:|---|\n")
 	for _, h := range r.Hotspots {
-		b.WriteString(fmt.Sprintf("| `%s` | %s | %.1f / %.1f (`%s`) | %.1f | %.1f | %.1f | %.1f%% (`%s`) | %.1f | **%.1f** | %s |\n",
+		b.WriteString(fmt.Sprintf("| `%s` | `%s` | %s | %.1f / %.1f (`%s`) | %.1f | %.1f | %.1f | %.1f%% (`%s`) | %.1f | **%.1f** | %s |\n",
 			h.Lane,
+			h.Health.Status,
 			h.Criticality,
 			h.Maturity,
 			h.TargetMaturity,

@@ -1,6 +1,6 @@
 ---
 name: debt-clean
-description: One repeatable, evidence-backed pass that retires a bounded batch of maturity debt worst-first across the system's dedicated debt lanes. Inspects `fak debt-lanes`, targets the highest-carrying-cost hotspots (or compounding-interest core lanes), advances maturity with tests, integration, and benchmarks, re-measures with `--compare` to prove the denominator was level-set and total debt dropped, and commits by explicit path with `(fak <leaf>)`. Use when cleaning or retiring maturity debt across units of work.
+description: One repeatable, evidence-backed pass that retires a bounded batch of maturity debt worst-first across the system's dedicated debt lanes. Features rich queryability (--query, --health), cross-indexes related items (dual-repo companions, tests, runtime-proofs, benchmarks, inbound blast radius), targets high-carrying-cost or degraded hotspots, advances maturity with tests, integration, and benchmarks, re-measures with --compare to prove the denominator was level-set, and commits by explicit path with (fak <leaf>). Use when cleaning or retiring maturity debt across units of work.
 metadata:
   canonical: ../../../.claude/skills/debt-clean/SKILL.md
 ---

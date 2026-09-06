@@ -1,10 +1,10 @@
 ---
 name: debt-clean
-description: One repeatable, evidence-backed pass that retires a bounded batch of maturity debt worst-first across the system's dedicated debt lanes. Inspects `fak debt-lanes`, targets the highest-carrying-cost hotspots (or compounding-interest core lanes), advances maturity with tests, integration, and benchmarks, re-measures with `--compare` to prove the denominator was level-set and total debt dropped, and commits by explicit path with `(fak <leaf>)`. Use when cleaning or retiring maturity debt across units of work.
+description: One repeatable, evidence-backed pass that retires a bounded batch of maturity debt worst-first across the system's dedicated debt lanes. Features rich queryability (--query, --health), cross-indexes related items (dual-repo companions, tests, runtime-proofs, benchmarks, inbound blast radius), targets high-carrying-cost or degraded hotspots, advances maturity with tests, integration, and benchmarks, re-measures with --compare to prove the denominator was level-set, and commits by explicit path with (fak <leaf>). Use when cleaning or retiring maturity debt across units of work.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob
-argument-hint: "[--lane <name>] [--top N] [--critical-only]  (no args = baseline + clean top 1-3 debt hotspots)"
+argument-hint: "[--lane <name>] [--query <text>] [--health healthy|degraded|critical] [--cross-index] [--target-repo both|fak|fak-private] [--top N]  (no args = baseline + clean top 1-3 debt hotspots)"
 ---
 
 # /debt-clean — retire maturity debt worst-first in bounded batches
@@ -14,13 +14,14 @@ argument-hint: "[--lane <name>] [--top N] [--critical-only]  (no args = baseline
 > at a partial maturity (e.g. 1/10 stub), it immediately enters the production grade
 > denominator as debt with an accrued carrying cost.
 >
-> This skill executes a **bounded, disciplined cleaning pass**: baseline the debt lanes,
-> pick 1–3 high-leverage hotspots (worst carrying cost or critical compounding interest),
-> fulfill the exact next action that advances the maturity curve, prove the debt dropped with
-> `--compare`, and commit by explicit path.
+> This skill executes a **bounded, disciplined cleaning pass**: query and baseline the debt lanes,
+> cross-index related things (dual-repo companions, dependents, proofs, benchmarks), run pre-flight
+> health diagnostics, pick 1–3 high-leverage hotspots (worst carrying cost, critical compounding interest,
+> or degraded health), fulfill the exact next action that advances the maturity curve, prove the debt dropped
+> and health upgraded with `--compare`, and commit by explicit path.
 
-The shape: **baseline debt lanes → pick bounded batch (1–3 units) → execute next action
-(tests/integration/benchmarks/clean bloat) → verify package → prove debt drop with `--compare` → commit by
+The shape: **query & baseline debt lanes → cross-index related things & pre-flight health → pick bounded batch (1–3 units) → execute next action
+(tests/integration/benchmarks/clean bloat) → verify package → prove debt drop & health upgrade with `--compare` → commit by
 explicit path.**
 
 ---
@@ -40,45 +41,73 @@ not be rushed in a single turn). Enforce strict scoping:
    keyword clutter) are penalized as BAD debt with interest rate penalties.
 4. **Denominator honesty**: Advancing maturity increases realized points without shrinking
    the denominator, genuinely raising the production-grade percentage.
+5. **Multi-dimensional health upgrade**: Debt retirement must elevate the lane's health status
+   from `degraded` or `critical` toward `healthy`, resolving flagged issue tokens.
 
 ---
 
-## Step 1 — Measure Baseline
+## Step 1 — Measure Baseline & Query Health
 
-Run `fak debt-lanes` to capture the current state and identify top hotspots:
+Run `fak debt-lanes` to capture the current state, query candidate work, and audit system health:
 
 ```bash
+# Capture full baseline:
 fak debt-lanes --json > baseline.json
 fak debt-lanes --top 5
+
+# Query lanes by keyword (matches lane name, unit of work, companion, drivers, or health issues):
+fak debt-lanes --query <keyword> --top 5
+
+# Filter lanes by multi-dimensional health verdict (healthy, degraded, critical):
+fak debt-lanes --health degraded,critical --top 5
+
+# Cross-index related things, dual-repo companions, and blast radius:
+fak debt-lanes --cross-index --top 10
 ```
+
+### Multi-Dimensional Lane Health Dimensions
+- **`healthy`**: Score >= 0.85, test passing, clean comment hygiene, integrated into production graph, documented/benchmarked if core, low carrying interest.
+- **`degraded`**: Untested stubs (`missing_tests`), excess comment bloat (`comment_ratio > 35%` or formulaic keyword noise), disconnected wiring (`integrated=false`), unbenchmarked, or unproven in runtime.
+- **`critical`**: Compounding carrying cost (>25% interest rate) or untested core paths (`criticality=core && has_tests=false`) with high inbound dependents.
 
 Note the headline figures:
 - **Production Grade**: current letter and percentage (e.g. `Grade C, 75.4%`).
+- **Fleet Health**: healthy, degraded, and critical counts with average health score.
 - **Denominator Points**: total production baseline points.
 - **Total Debt**: total principal + carrying cost.
 - **Top Hotspots**: lanes carrying the highest carrying cost or highest maturity gap.
 
 ---
 
-## Step 2 — Select Bounded Target (1–3 Units)
+## Step 2 — Cross-Index Related Things & Select Target (1–3 Units)
 
-Choose targets based on leverage:
-
-- **Option A: High Carrying Risk (Critical Compounding Interest)**:
-  Lanes where `interest.band == "critical"` (>25% rate) because they are core runtime
-  modules with high inbound dependents (e.g. `internal/abi`, `internal/adjudicator`).
-  Retiring even 1.0–2.0 points of gap here yields massive carrying-cost relief.
-
-- **Option B: Untested / Skeleton Stubs (Highest Maturity Gap)**:
-  Lanes sitting at `0.0` or `1.0/8.0` (`proposed` or `stub`). Writing their initial core
-  declarations and unit tests jumps their maturity from `1.0` to `4.0+`, cutting their gap
-  in half.
-
-Inspect the specific target's status and evidence:
+Inspect the specific target's status, evidence, health findings, and cross-indexed artifacts:
 
 ```bash
 fak debt-lanes --lane <lane-name> --json
 ```
+
+### Cross-Indexing Checklist for Target Lane
+1. **Dual-Repo Companion**:
+   - If working in `fak` (`internal/<lane>`), check `Related.CompanionUnitOfWork` for counterpart in `fak-private` (`platform/<lane>`).
+   - If working in `fak-private`, check counterpart in `fak` (`internal/<lane>` or `pkg/<lane>`).
+   - Run `go run ./cmd/fak-boundary explain <unit_of_work>` before making cross-repo edits to ensure 5-gate compliance.
+2. **Blast Radius & Inbound Dependents**:
+   - Inspect `Related.Dependents` (packages importing this lane). Core leaves with >10 dependents require non-breaking public APIs.
+   - Inspect `Related.Dependencies` (packages imported by this lane).
+3. **Registered DOS Trees**:
+   - Check `Related.DosTrees` declared in `dos.toml` to verify directory boundaries for subagent task fencing.
+4. **Witness Proofs & Benchmarks**:
+   - Check `Related.ProofWitnesses` against `internal/maturity/runtime-proofs.json`.
+   - Check `Related.BenchmarkWitnesses` against `BENCHMARK-AUTHORITY.md`.
+
+Choose targets based on leverage:
+- **Option A: High Carrying Risk (Critical Compounding Interest)**:
+  Lanes where `interest.band == "critical"` (>25% rate) or `health.status == "critical"`.
+- **Option B: Untested / Skeleton Stubs (Highest Maturity Gap)**:
+  Lanes sitting at `0.0` or `1.0/8.0` (`proposed` or `stub`). Adding core types and tests jumps maturity from `1.0` to `4.0+`.
+- **Option C: Comment Bloat / Hygiene Cleanup**:
+  Lanes flagged with `excess_comments` where pruning formulaic comments restores clean structure and cuts bad debt interest.
 
 Read the lane's `next_action` field—this is the exact action required to climb the curve.
 
@@ -138,9 +167,9 @@ The coordinator does NOT trust worker narration—it independently witnesses the
      go -C ..\fak-private test -v ./platform/<target>
      ```
 
-2. **Verify maturity curve ascent**:
+2. **Verify maturity curve ascent & health upgrade**:
    ```bash
-   fak debt-lanes --lane <target>
+   fak debt-lanes --lane <target> --json
    ```
 
 Verify that:
@@ -148,19 +177,23 @@ Verify that:
 - `MaturityGap` decreased.
 - `DebtPrincipal` and `CarryingCost` dropped.
 - `RealizedContribution` increased.
+- `Health.Status` improved (e.g. from `critical` to `degraded`, or `degraded` to `healthy`).
+- `Health.Issues` resolved target issue tokens (e.g. `missing_tests`, `excess_comments`, `disconnected_wiring`).
 
 ---
 
-## Step 5 — Re-Measure and Prove Debt Drop
+## Step 5 — Re-Measure and Prove Debt Drop & Health Upgrade
 
 Run the scorecard against the saved baseline to prove the drop:
 
 ```bash
 fak debt-lanes --compare baseline.json
+fak debt-lanes --lane <target>
 ```
 
 Confirm:
 - `Total Debt` shows a negative delta (`-X.X pts`).
+- `Health Status` shows the lane upgraded with no regression in companion lanes.
 - `Production Grade` percentage improved or held steady.
 - `Denominator` remained stable (no work was deleted to cheat the score).
 - `WIP Dilution` decreased.
