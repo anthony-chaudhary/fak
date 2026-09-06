@@ -1,0 +1,107 @@
+{
+  "schema": "fak.vulkan.gdn-profile-witness/1",
+  "issue": 11920,
+  "date": "2026-09-06",
+  "source_base": "b755c5338765e1b2f1fac683c729622b1959e8de",
+  "test_source_sha256": "ad83a2ae719d6b1ff8652b4cdd04491522d81a5497215829552aebc288ae5c65",
+  "test_binary_sha256": "10cafe47ec269a7148422bb3ff9f607706ea42905644bed5ec9398138b214e47",
+  "driver_package": "vulkan-radeon 1:26.2.2-1",
+  "loader_package": "vulkan-icd-loader 1.4.357.0-1",
+  "kernel": "7.2.3-arch1-3",
+  "expected_device_substring": "8060S",
+  "required_device": true,
+  "explicit_icd": "RADV",
+  "test": "TestVulkanGDNRealShapeProfile",
+  "result": "PASS",
+  "skipped": false,
+  "test_timeout_seconds": 25,
+  "wall_timeout_seconds": 30,
+  "memory_limit_bytes": 1073741824,
+  "swap_limit_bytes": 0,
+  "cpu_quota_percent": 200,
+  "concurrency": 1,
+  "systemd_service_runtime_ms": 80,
+  "systemd_cpu_time_ms": 67,
+  "systemd_reported_memory_peak": "27.8M",
+  "systemd_reported_swap": "0B",
+  "timing_scope": "profile.total_ns is test-body time including setup, sample verification and tensor cleanup; it excludes process/backend initialization. systemd_service_runtime_ms records the complete measured unit runtime. No inference or startup speedup is claimed.",
+  "resident_memory_scope": "resident_tensor_payload_bytes excludes driver alignment and scratch. Process peak is reported separately.",
+  "serving_endpoint_health_before": true,
+  "serving_endpoint_health_after": true,
+  "serving_endpoint_pid_unchanged": true,
+  "profile": {
+    "cleanup_ns": 7620,
+    "device": "integrated:AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+    "dtype": "f32",
+    "measured_samples": 5,
+    "model_loaded": false,
+    "payload_excludes_driver_alignment_and_scratch": true,
+    "quality": "finite output and evolved states match CPU oracle within 0.0002; persistent state identity preserved",
+    "resident_reuses_after_first_step": 5,
+    "resident_tensor_payload_bytes": 3499264,
+    "samples": [
+      {
+        "cpu_oracle_ns": 1340182,
+        "dispatch_and_output_read_ns": 203290,
+        "state_readback_ns": 3300256,
+        "validation_ns": 1250836,
+        "warmup": true,
+        "whole_step_ns": 6096414
+      },
+      {
+        "cpu_oracle_ns": 1171632,
+        "dispatch_and_output_read_ns": 559420,
+        "state_readback_ns": 3708888,
+        "validation_ns": 1249857,
+        "warmup": false,
+        "whole_step_ns": 6690937
+      },
+      {
+        "cpu_oracle_ns": 1117950,
+        "dispatch_and_output_read_ns": 481145,
+        "state_readback_ns": 3528618,
+        "validation_ns": 1252577,
+        "warmup": false,
+        "whole_step_ns": 6381060
+      },
+      {
+        "cpu_oracle_ns": 1261117,
+        "dispatch_and_output_read_ns": 525048,
+        "state_readback_ns": 3493396,
+        "validation_ns": 1261807,
+        "warmup": false,
+        "whole_step_ns": 6541698
+      },
+      {
+        "cpu_oracle_ns": 1145701,
+        "dispatch_and_output_read_ns": 502007,
+        "state_readback_ns": 3549329,
+        "validation_ns": 1254957,
+        "warmup": false,
+        "whole_step_ns": 6452254
+      },
+      {
+        "cpu_oracle_ns": 1232556,
+        "dispatch_and_output_read_ns": 491026,
+        "state_readback_ns": 3719618,
+        "validation_ns": 1520231,
+        "warmup": false,
+        "whole_step_ns": 6964171
+      }
+    ],
+    "schema": "fak.vulkan.gdn-profile/1",
+    "scope": "preprojected recurrence only; synchronized host timings include transfers; no full-model throughput claim",
+    "setup_ns": 3476305,
+    "shape": [
+      1,
+      16,
+      48,
+      128,
+      128,
+      4
+    ],
+    "shape_order": "tokens,key_heads,value_heads,key_dim,value_dim,conv_kernel",
+    "total_ns": 42613469,
+    "warmups": 1
+  }
+}
