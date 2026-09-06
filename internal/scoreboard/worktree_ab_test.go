@@ -374,4 +374,29 @@ func TestWorktreeABFoldAcceptedDeliveryAccounting(t *testing.T) {
 			t.Fatalf("expected pre-populated accounting to be preserved, got %+v", r.Baseline.Accounting)
 		}
 	})
+
+	t.Run("lifecycle_records_alias", func(t *testing.T) {
+		trunk := WorktreeABArm{
+			WaveID:          "wave-lifecycle",
+			DurationSeconds: 1800.0,
+			LifecycleRecords: []AcceptedDeliveryRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, TotalElapsed: 60},
+			},
+		}
+		worktree := WorktreeABArm{
+			WaveID:          "wave-lifecycle",
+			DurationSeconds: 900.0,
+			LifecycleRecords: []AcceptedDeliveryRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, TotalElapsed: 60},
+			},
+		}
+		r := FoldWorktreeAB(trunk, worktree)
+		if r.Baseline.Accounting.AcceptedDeliveries != 1 || r.Isolated.Accounting.AcceptedDeliveries != 1 {
+			t.Fatalf("expected 1 accepted delivery in both arms, got baseline=%d isolated=%d",
+				r.Baseline.Accounting.AcceptedDeliveries, r.Isolated.Accounting.AcceptedDeliveries)
+		}
+		if !WorktreeABEquivalentWave(r.Baseline, r.Isolated) {
+			t.Fatal("expected arms to be equivalent wave")
+		}
+	})
 }

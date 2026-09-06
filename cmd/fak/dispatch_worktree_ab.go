@@ -11,8 +11,10 @@ import (
 )
 
 type worktreeABInput struct {
-	Baseline scoreboard.WorktreeABArm `json:"baseline"`
-	Isolated scoreboard.WorktreeABArm `json:"isolated"`
+	Baseline scoreboard.WorktreeABArm  `json:"baseline"`
+	Isolated scoreboard.WorktreeABArm  `json:"isolated"`
+	Trunk    *scoreboard.WorktreeABArm `json:"trunk,omitempty"`
+	Worktree *scoreboard.WorktreeABArm `json:"worktree,omitempty"`
 }
 
 // runDispatchWorktreeAB folds two back-to-back executions of the same fixed wave.
@@ -41,6 +43,64 @@ func runDispatchWorktreeAB(stdout, stderr io.Writer, argv []string) int {
 	if err := json.Unmarshal(raw, &input); err != nil {
 		fmt.Fprintf(stderr, "fak dispatch worktree-ab: parse: %v\n", err)
 		return 2
+	}
+	if input.Trunk != nil {
+		if input.Baseline.WaveID == "" {
+			input.Baseline.WaveID = input.Trunk.WaveID
+		}
+		if input.Baseline.Resolved == 0 {
+			input.Baseline.Resolved = input.Trunk.Resolved
+		}
+		if input.Baseline.DurationSeconds == 0 {
+			input.Baseline.DurationSeconds = input.Trunk.DurationSeconds
+		}
+		if input.Baseline.PoisonIncidents == 0 {
+			input.Baseline.PoisonIncidents = input.Trunk.PoisonIncidents
+		}
+		if input.Baseline.PeakConcurrency == 0 {
+			input.Baseline.PeakConcurrency = input.Trunk.PeakConcurrency
+		}
+		if input.Baseline.HostID == "" {
+			input.Baseline.HostID = input.Trunk.HostID
+		}
+		if len(input.Baseline.DeliveryRecords) == 0 {
+			input.Baseline.DeliveryRecords = input.Trunk.DeliveryRecords
+		}
+		if len(input.Baseline.LifecycleRecords) == 0 {
+			input.Baseline.LifecycleRecords = input.Trunk.LifecycleRecords
+		}
+		if input.Baseline.Accounting.Status == "" && input.Trunk.Accounting.Status != "" {
+			input.Baseline.Accounting = input.Trunk.Accounting
+		}
+	}
+	if input.Worktree != nil {
+		if input.Isolated.WaveID == "" {
+			input.Isolated.WaveID = input.Worktree.WaveID
+		}
+		if input.Isolated.Resolved == 0 {
+			input.Isolated.Resolved = input.Worktree.Resolved
+		}
+		if input.Isolated.DurationSeconds == 0 {
+			input.Isolated.DurationSeconds = input.Worktree.DurationSeconds
+		}
+		if input.Isolated.PoisonIncidents == 0 {
+			input.Isolated.PoisonIncidents = input.Worktree.PoisonIncidents
+		}
+		if input.Isolated.PeakConcurrency == 0 {
+			input.Isolated.PeakConcurrency = input.Worktree.PeakConcurrency
+		}
+		if input.Isolated.HostID == "" {
+			input.Isolated.HostID = input.Worktree.HostID
+		}
+		if len(input.Isolated.DeliveryRecords) == 0 {
+			input.Isolated.DeliveryRecords = input.Worktree.DeliveryRecords
+		}
+		if len(input.Isolated.LifecycleRecords) == 0 {
+			input.Isolated.LifecycleRecords = input.Worktree.LifecycleRecords
+		}
+		if input.Isolated.Accounting.Status == "" && input.Worktree.Accounting.Status != "" {
+			input.Isolated.Accounting = input.Worktree.Accounting
+		}
 	}
 	rep := scoreboard.FoldWorktreeAB(input.Baseline, input.Isolated)
 	if !scoreboard.WorktreeABEquivalentWave(rep.Baseline, rep.Isolated) {

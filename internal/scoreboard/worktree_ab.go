@@ -124,16 +124,17 @@ func AccountAcceptedDeliveries(records []DeliveryLifecycleRecord, totalWindowSec
 }
 
 type WorktreeABArm struct {
-	Name            string                     `json:"name"`
-	Worktree        bool                       `json:"worktree"`
-	Resolved        int                        `json:"resolved"`
-	DurationSeconds float64                    `json:"duration_seconds"`
-	PoisonIncidents int                        `json:"poison_incidents"`
-	PeakConcurrency int                        `json:"peak_concurrency"`
-	WaveID          string                     `json:"wave_id"`
-	HostID          string                     `json:"host_id,omitempty"`
-	DeliveryRecords []AcceptedDeliveryRecord   `json:"delivery_records,omitempty"`
-	Accounting      AcceptedDeliveryAccounting `json:"accounting,omitempty"`
+	Name             string                     `json:"name"`
+	Worktree         bool                       `json:"worktree"`
+	Resolved         int                        `json:"resolved"`
+	DurationSeconds  float64                    `json:"duration_seconds"`
+	PoisonIncidents  int                        `json:"poison_incidents"`
+	PeakConcurrency  int                        `json:"peak_concurrency"`
+	WaveID           string                     `json:"wave_id"`
+	HostID           string                     `json:"host_id,omitempty"`
+	DeliveryRecords  []AcceptedDeliveryRecord   `json:"delivery_records,omitempty"`
+	LifecycleRecords []AcceptedDeliveryRecord   `json:"lifecycle_records,omitempty"`
+	Accounting       AcceptedDeliveryAccounting `json:"accounting,omitempty"`
 }
 
 func (a WorktreeABArm) IssuesPerHour() float64 {
@@ -162,17 +163,34 @@ func FoldWorktreeAB(baseline, isolated WorktreeABArm) WorktreeABReport {
 	baseline.Name, baseline.Worktree = "baseline", false
 	isolated.Name, isolated.Worktree = "isolated", true
 
+	if len(baseline.DeliveryRecords) == 0 && len(baseline.LifecycleRecords) > 0 {
+		baseline.DeliveryRecords = baseline.LifecycleRecords
+	}
+	if len(isolated.DeliveryRecords) == 0 && len(isolated.LifecycleRecords) > 0 {
+		isolated.DeliveryRecords = isolated.LifecycleRecords
+	}
+	if len(baseline.LifecycleRecords) == 0 && len(baseline.DeliveryRecords) > 0 {
+		baseline.LifecycleRecords = baseline.DeliveryRecords
+	}
+	if len(isolated.LifecycleRecords) == 0 && len(isolated.DeliveryRecords) > 0 {
+		isolated.LifecycleRecords = isolated.DeliveryRecords
+	}
+
 	if len(baseline.DeliveryRecords) > 0 && baseline.Accounting.Status == "" {
 		baseline.Accounting = AccountAcceptedDeliveries(baseline.DeliveryRecords, baseline.DurationSeconds)
 	}
-	if baseline.Resolved == 0 && baseline.Accounting.AcceptedDeliveries > 0 {
+	if baseline.Accounting.Status != "" {
+		baseline.Resolved = baseline.Accounting.AcceptedDeliveries
+	} else if baseline.Resolved == 0 && baseline.Accounting.AcceptedDeliveries > 0 {
 		baseline.Resolved = baseline.Accounting.AcceptedDeliveries
 	}
 
 	if len(isolated.DeliveryRecords) > 0 && isolated.Accounting.Status == "" {
 		isolated.Accounting = AccountAcceptedDeliveries(isolated.DeliveryRecords, isolated.DurationSeconds)
 	}
-	if isolated.Resolved == 0 && isolated.Accounting.AcceptedDeliveries > 0 {
+	if isolated.Accounting.Status != "" {
+		isolated.Resolved = isolated.Accounting.AcceptedDeliveries
+	} else if isolated.Resolved == 0 && isolated.Accounting.AcceptedDeliveries > 0 {
 		isolated.Resolved = isolated.Accounting.AcceptedDeliveries
 	}
 
@@ -196,11 +214,8 @@ func CompareWorktreeAB(trunk, worktree WorktreeABArm) (WorktreeABComparison, err
 }
 
 func WorktreeABUpdate(r WorktreeABReport) Update {
-	hasBothAccounting := len(r.Baseline.DeliveryRecords) > 0 && len(r.Isolated.DeliveryRecords) > 0 &&
-		r.Baseline.Accounting.Status != "" && r.Isolated.Accounting.Status != ""
-
 	line := func(a WorktreeABArm) string {
-		if hasBothAccounting || (len(a.DeliveryRecords) > 0 && a.Accounting.Status != "") {
+		if a.Accounting.Status != "" {
 			return fmt.Sprintf("%s: %.2f issues/h (%d accepted, %s), %d poison, %.1fs, peak %d",
 				a.Name, a.IssuesPerHour(), a.Accounting.AcceptedDeliveries, a.Accounting.Status, a.PoisonIncidents, a.DurationSeconds, a.PeakConcurrency)
 		}
@@ -211,12 +226,24 @@ func WorktreeABUpdate(r WorktreeABReport) Update {
 }
 
 func WorktreeABEquivalentWave(a, b WorktreeABArm) bool {
+	if len(a.DeliveryRecords) == 0 && len(a.LifecycleRecords) > 0 {
+		a.DeliveryRecords = a.LifecycleRecords
+	}
+	if len(b.DeliveryRecords) == 0 && len(b.LifecycleRecords) > 0 {
+		b.DeliveryRecords = b.LifecycleRecords
+	}
+	if len(a.DeliveryRecords) > 0 && a.Accounting.Status == "" {
+		a.Accounting = AccountAcceptedDeliveries(a.DeliveryRecords, a.DurationSeconds)
+	}
+	if len(b.DeliveryRecords) > 0 && b.Accounting.Status == "" {
+		b.Accounting = AccountAcceptedDeliveries(b.DeliveryRecords, b.DurationSeconds)
+	}
 	resA := a.Resolved
-	if resA == 0 && a.Accounting.AcceptedDeliveries > 0 {
+	if (resA == 0 || a.Accounting.Status != "") && a.Accounting.AcceptedDeliveries > 0 {
 		resA = a.Accounting.AcceptedDeliveries
 	}
 	resB := b.Resolved
-	if resB == 0 && b.Accounting.AcceptedDeliveries > 0 {
+	if (resB == 0 || b.Accounting.Status != "") && b.Accounting.AcceptedDeliveries > 0 {
 		resB = b.Accounting.AcceptedDeliveries
 	}
 	return a.WaveID != "" && a.WaveID == b.WaveID && resA == resB && resA > 0 &&
