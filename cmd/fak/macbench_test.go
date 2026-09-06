@@ -1021,3 +1021,133 @@ func TestMacBenchValidateAgenticComparison_CLI(t *testing.T) {
 		t.Fatalf("expected failure for < 4.0x speedup, code=%d stderr=%q", code, stderr.String())
 	}
 }
+
+func TestMacbenchManyAgent_ModeledProvenanceAndProjection(t *testing.T) {
+	opts := ManyAgentOptions{
+		Concurrency:        4,
+		Model:              "Qwen3.8-27B",
+		Horizon:            20,
+		Cache:              true,
+		SharedPrefixTokens: DefaultSharedPrefixTokens,
+	}
+
+	// 1. Verify single-arm ManyAgentReport provenance and physical silicon fields.
+	rep, err := RunManyAgentSpine(opts)
+	if err != nil {
+		t.Fatalf("RunManyAgentSpine failed: %v", err)
+	}
+	if rep.Provenance != "MODELED" {
+		t.Errorf("rep.Provenance = %q, want %q", rep.Provenance, "MODELED")
+	}
+	if rep.IsPhysicalSilicon {
+		t.Errorf("rep.IsPhysicalSilicon = true, want false")
+	}
+	if len(rep.UnmodeledEffects) < 3 {
+		t.Errorf("rep.UnmodeledEffects len = %d, want >= 3", len(rep.UnmodeledEffects))
+	}
+
+	// 2. Verify head-to-head comparison report provenance, arms, and modeled_4x_projected.
+	compRep, err := RunManyAgentComparison(opts)
+	if err != nil {
+		t.Fatalf("RunManyAgentComparison failed: %v", err)
+	}
+	if compRep.Provenance != "MODELED" {
+		t.Errorf("compRep.Provenance = %q, want %q", compRep.Provenance, "MODELED")
+	}
+	if compRep.IsPhysicalSilicon {
+		t.Errorf("compRep.IsPhysicalSilicon = true, want false")
+	}
+	if len(compRep.UnmodeledEffects) < 3 {
+		t.Errorf("compRep.UnmodeledEffects len = %d, want >= 3", len(compRep.UnmodeledEffects))
+	}
+	if compRep.FakNative.Provenance != "MODELED" || compRep.FakNative.IsPhysicalSilicon {
+		t.Errorf("compRep.FakNative provenance/silicon mismatch: %+v", compRep.FakNative)
+	}
+	if compRep.LlamaCPP.Provenance != "MODELED" || compRep.LlamaCPP.IsPhysicalSilicon {
+		t.Errorf("compRep.LlamaCPP provenance/silicon mismatch: %+v", compRep.LlamaCPP)
+	}
+	// Verify modeled_4x_projected is validated (honest speedup is ~1.86x, so false)
+	if compRep.Modeled4xProjected {
+		t.Errorf("compRep.Modeled4xProjected = true, want false at 1.86x")
+	}
+	if compRep.True4xAchieved {
+		t.Errorf("compRep.True4xAchieved = true, want false at 1.86x")
+	}
+	if compRep.IsModeled4xProjected() {
+		t.Errorf("compRep.IsModeled4xProjected() = true, want false")
+	}
+
+	// 3. Verify JSON serialization includes modeled provenance and both projections.
+	rawJSON, err := json.Marshal(compRep)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	jsonStr := string(rawJSON)
+	for _, expectedKey := range []string{
+		`"provenance":"MODELED"`,
+		`"is_physical_silicon":false`,
+		`"unmodeled_effects"`,
+		`"modeled_4x_projected"`,
+		`"true_4x_achieved"`,
+	} {
+		if !strings.Contains(jsonStr, expectedKey) {
+			t.Errorf("JSON output missing key %q:\n%s", expectedKey, jsonStr)
+		}
+	}
+
+	// 4. Verify JSON backward compatibility: legacy payload with true_4x_achieved
+	legacyJSON := `{"schema":"fak.macbench.manyagent-compare.v1","true_4x_achieved":true}`
+	var legacyDeser ManyAgentComparisonReport
+	if err := json.Unmarshal([]byte(legacyJSON), &legacyDeser); err != nil {
+		t.Fatalf("Unmarshal legacy JSON: %v", err)
+	}
+	if !legacyDeser.Modeled4xProjected || !legacyDeser.True4xAchieved || !legacyDeser.IsModeled4xProjected() {
+		t.Errorf("legacy true_4x_achieved mapping failed: Modeled4xProjected=%v True4xAchieved=%v",
+			legacyDeser.Modeled4xProjected, legacyDeser.True4xAchieved)
+	}
+	if legacyDeser.Provenance != "MODELED" || legacyDeser.IsPhysicalSilicon {
+		t.Errorf("legacy default provenance failed: %+v", legacyDeser)
+	}
+
+	// 5. Verify JSON modern payload with modeled_4x_projected
+	modernJSON := `{"schema":"fak.macbench.manyagent-compare.v1","modeled_4x_projected":true}`
+	var modernDeser ManyAgentComparisonReport
+	if err := json.Unmarshal([]byte(modernJSON), &modernDeser); err != nil {
+		t.Fatalf("Unmarshal modern JSON: %v", err)
+	}
+	if !modernDeser.Modeled4xProjected || !modernDeser.True4xAchieved || !modernDeser.IsModeled4xProjected() {
+		t.Errorf("modern modeled_4x_projected mapping failed: Modeled4xProjected=%v True4xAchieved=%v",
+			modernDeser.Modeled4xProjected, modernDeser.True4xAchieved)
+	}
+
+	// 6. Verify CLI text output formatting and sanitization of 'TRUE 4x achieved'.
+	var stdout, stderr bytes.Buffer
+	code := runMacBenchManyAgent(&stdout, &stderr, []string{"--compare-llama", "-c", "4", "--horizon", "20"})
+	if code != 0 {
+		t.Fatalf("runMacBenchManyAgent returned %d: %s", code, stderr.String())
+	}
+	cliOut := stdout.String()
+	if !strings.Contains(cliOut, "[MODELED PROJECTION]") {
+		t.Errorf("CLI output missing [MODELED PROJECTION] banner:\n%s", cliOut)
+	}
+	if !strings.Contains(cliOut, "verification          : PROJECTED (MODELED") {
+		t.Errorf("CLI output missing PROJECTED (MODELED:\n%s", cliOut)
+	}
+	if strings.Contains(cliOut, "TRUE") || strings.Contains(cliOut, "achieved") {
+		t.Errorf("CLI output still contains unsanitized claim:\n%s", cliOut)
+	}
+
+	// 7. Verify that when modeled speedup >= 4.0x is simulated, output prints PROJECTED without TRUE.
+	stdout.Reset()
+	mock4xRep := compRep
+	mock4xRep.SpeedupRatio = 4.25
+	mock4xRep.SetModeled4xProjected(true)
+	printManyAgentComparisonSummary(&stdout, mock4xRep)
+	mockOut := stdout.String()
+	if !strings.Contains(mockOut, "verification          : PROJECTED (MODELED 4.25x wall-clock speedup >= 4.0x projected)") {
+		t.Errorf("mock 4x projection verification line mismatch:\n%s", mockOut)
+	}
+	if strings.Contains(mockOut, "TRUE") || strings.Contains(mockOut, "achieved") {
+		t.Errorf("mock 4x projection output still contains TRUE or achieved:\n%s", mockOut)
+	}
+}

@@ -290,6 +290,15 @@ func TestMacBenchManyAgent_CLI(t *testing.T) {
 		if rep.Schema != ManyAgentSchema {
 			t.Errorf("schema = %q, want %q", rep.Schema, ManyAgentSchema)
 		}
+		if rep.Provenance != "MODELED" {
+			t.Errorf("provenance = %q, want %q", rep.Provenance, "MODELED")
+		}
+		if rep.IsPhysicalSilicon {
+			t.Errorf("is_physical_silicon = true, want false")
+		}
+		if len(rep.UnmodeledEffects) < 3 {
+			t.Errorf("unmodeled_effects len = %d, want >= 3", len(rep.UnmodeledEffects))
+		}
 		if rep.Model != "Qwen3.8-27B" || rep.Concurrency != 4 || rep.Horizon != 20 || !rep.Cache {
 			t.Errorf("unexpected parameters in report: %+v", rep)
 		}
@@ -313,6 +322,15 @@ func TestMacBenchManyAgent_CLI(t *testing.T) {
 		}
 		if rep.Schema != ManyAgentSchema {
 			t.Errorf("schema = %q, want %q", rep.Schema, ManyAgentSchema)
+		}
+		if rep.Provenance != "MODELED" {
+			t.Errorf("provenance = %q, want %q", rep.Provenance, "MODELED")
+		}
+		if rep.IsPhysicalSilicon {
+			t.Errorf("is_physical_silicon = true, want false")
+		}
+		if len(rep.UnmodeledEffects) < 3 {
+			t.Errorf("unmodeled_effects len = %d, want >= 3", len(rep.UnmodeledEffects))
 		}
 	})
 
@@ -360,11 +378,17 @@ func TestMacBenchManyAgent_CLI(t *testing.T) {
 		if !strings.Contains(out, "fak macbench many-agent head-to-head") {
 			t.Errorf("output missing comparison header: %s", out)
 		}
-		if !strings.Contains(out, "verification          : PASS") {
-			t.Errorf("expected verification PASS, got: %s", out)
+		if !strings.Contains(out, "[MODELED PROJECTION]") {
+			t.Errorf("output missing [MODELED PROJECTION] banner: %s", out)
 		}
-		if !strings.Contains(out, "wall-clock speedup achieved") {
-			t.Errorf("expected speedup achieved statement, got: %s", out)
+		if !strings.Contains(out, "verification          : PROJECTED (MODELED") {
+			t.Errorf("expected verification PROJECTED (MODELED, got: %s", out)
+		}
+		if !strings.Contains(out, "wall-clock speedup projected") {
+			t.Errorf("expected speedup projected statement, got: %s", out)
+		}
+		if strings.Contains(out, "TRUE") || strings.Contains(out, "achieved") {
+			t.Errorf("unwanted un-sanitized claim in output: %s", out)
 		}
 	})
 
@@ -380,6 +404,21 @@ func TestMacBenchManyAgent_CLI(t *testing.T) {
 		}
 		if rep.Schema != ManyAgentComparisonSchema {
 			t.Errorf("schema = %q, want %q", rep.Schema, ManyAgentComparisonSchema)
+		}
+		if rep.Provenance != "MODELED" {
+			t.Errorf("provenance = %q, want %q", rep.Provenance, "MODELED")
+		}
+		if rep.IsPhysicalSilicon {
+			t.Errorf("is_physical_silicon = true, want false")
+		}
+		if len(rep.UnmodeledEffects) < 3 {
+			t.Errorf("unmodeled_effects len = %d, want >= 3", len(rep.UnmodeledEffects))
+		}
+		if rep.Modeled4xProjected {
+			t.Errorf("modeled_4x_projected = true, want false")
+		}
+		if rep.True4xAchieved {
+			t.Errorf("true_4x_achieved = true, want false")
 		}
 		if rep.SpeedupRatio < 1.5 {
 			t.Errorf("speedup ratio = %.2f, want >= 1.5", rep.SpeedupRatio)
@@ -419,6 +458,18 @@ func TestMacBenchManyAgent_RunManyAgentComparison_True4x(t *testing.T) {
 	}
 	if rep.True4xAchieved {
 		t.Errorf("True4xAchieved = true, want false at honest 1.86x speedup")
+	}
+	if rep.Modeled4xProjected {
+		t.Errorf("Modeled4xProjected = true, want false at honest 1.86x speedup")
+	}
+	if rep.Provenance != "MODELED" {
+		t.Errorf("Provenance = %q, want %q", rep.Provenance, "MODELED")
+	}
+	if rep.IsPhysicalSilicon {
+		t.Errorf("IsPhysicalSilicon = true, want false")
+	}
+	if len(rep.UnmodeledEffects) < 3 {
+		t.Errorf("UnmodeledEffects len = %d, want >= 3", len(rep.UnmodeledEffects))
 	}
 	if rep.MemorySavedMB < 3000.0 {
 		t.Errorf("MemorySavedMB = %.1f, want > 3000.0 MB", rep.MemorySavedMB)
@@ -488,6 +539,18 @@ func TestMacBenchManyAgent_20kContext_Qwen38_UD_Q2_K_XL(t *testing.T) {
 	if compRep.True4xAchieved {
 		t.Errorf("compRep.True4xAchieved = true, want false at honest 2.51x speedup")
 	}
+	if compRep.Modeled4xProjected {
+		t.Errorf("compRep.Modeled4xProjected = true, want false at honest 2.51x speedup")
+	}
+	if compRep.Provenance != "MODELED" {
+		t.Errorf("compRep.Provenance = %q, want %q", compRep.Provenance, "MODELED")
+	}
+	if compRep.IsPhysicalSilicon {
+		t.Errorf("compRep.IsPhysicalSilicon = true, want false")
+	}
+	if len(compRep.UnmodeledEffects) < 3 {
+		t.Errorf("compRep.UnmodeledEffects len = %d, want >= 3", len(compRep.UnmodeledEffects))
+	}
 	if !compRep.Verified {
 		t.Errorf("compRep.Verified = false, want true")
 	}
@@ -506,6 +569,15 @@ func TestMacBenchManyAgent_20kContext_Qwen38_UD_Q2_K_XL(t *testing.T) {
 	if cliRep.Schema != ManyAgentComparisonSchema {
 		t.Errorf("cliRep.Schema = %q, want %q", cliRep.Schema, ManyAgentComparisonSchema)
 	}
+	if cliRep.Provenance != "MODELED" {
+		t.Errorf("cliRep.Provenance = %q, want %q", cliRep.Provenance, "MODELED")
+	}
+	if cliRep.IsPhysicalSilicon {
+		t.Errorf("cliRep.IsPhysicalSilicon = true, want false")
+	}
+	if len(cliRep.UnmodeledEffects) < 3 {
+		t.Errorf("cliRep.UnmodeledEffects len = %d, want >= 3", len(cliRep.UnmodeledEffects))
+	}
 	if cliRep.SharedPrefixTokens != 20000 {
 		t.Errorf("cliRep.SharedPrefixTokens = %d, want 20000", cliRep.SharedPrefixTokens)
 	}
@@ -517,6 +589,9 @@ func TestMacBenchManyAgent_20kContext_Qwen38_UD_Q2_K_XL(t *testing.T) {
 	}
 	if cliRep.True4xAchieved {
 		t.Errorf("cliRep.True4xAchieved = true, want false at honest 2.51x speedup")
+	}
+	if cliRep.Modeled4xProjected {
+		t.Errorf("cliRep.Modeled4xProjected = true, want false at honest 2.51x speedup")
 	}
 	if !cliRep.Verified {
 		t.Errorf("cliRep.Verified = false, want true")

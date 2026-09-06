@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -19,7 +20,14 @@ const (
 	DefaultManyAgentConcurrency = 4
 	DefaultManyAgentHorizon     = 20
 	DefaultManyAgentModel       = "Qwen3.8-27B"
+	DefaultManyAgentProvenance  = "MODELED"
 )
+
+var defaultManyAgentUnmodeledEffects = []string{
+	"thermal_dvfs_throttling",
+	"memory_bus_contention",
+	"queue_sync_jitter",
+}
 
 func init() {
 	if len(os.Args) > 2 && os.Args[1] == "macbench" && os.Args[2] == "many-agent" {
@@ -40,29 +48,64 @@ type ManyAgentOptions struct {
 
 // ManyAgentReport contains the computed cache value metrics and verification status.
 type ManyAgentReport struct {
-	Schema             string  `json:"schema"`
-	Model              string  `json:"model"`
-	Concurrency        int     `json:"concurrency"`
-	Horizon            int     `json:"horizon"`
-	Cache              bool    `json:"cache"`
-	SharedPrefixTokens int     `json:"shared_prefix_tokens"`
-	PromptTokens       uint64  `json:"prompt_tokens"`
-	ReusedTokens       uint64  `json:"reused_tokens"`
-	ReuseRatio         float64 `json:"reuse_ratio"`
-	AgentsPerGB        float64 `json:"agents_per_gb"`
-	P50TTFTMS          float64 `json:"p50_ttft_ms"`
-	P95TTFTMS          float64 `json:"p95_ttft_ms"`
-	PeakMemoryMB       float64 `json:"peak_memory_mb"`
-	PrefixEvalCount    int     `json:"prefix_eval_count"`
-	TotalWallMS        float64 `json:"total_wall_ms,omitempty"`
-	EffectiveTokS      float64 `json:"effective_tok_s,omitempty"`
-	TTFTFlat           bool    `json:"ttft_flat"`
-	Verified           bool    `json:"verified"`
+	Schema             string   `json:"schema"`
+	Provenance         string   `json:"provenance"`
+	IsPhysicalSilicon  bool     `json:"is_physical_silicon"`
+	UnmodeledEffects   []string `json:"unmodeled_effects,omitempty"`
+	Model              string   `json:"model"`
+	Concurrency        int      `json:"concurrency"`
+	Horizon            int      `json:"horizon"`
+	Cache              bool     `json:"cache"`
+	SharedPrefixTokens int      `json:"shared_prefix_tokens"`
+	PromptTokens       uint64   `json:"prompt_tokens"`
+	ReusedTokens       uint64   `json:"reused_tokens"`
+	ReuseRatio         float64  `json:"reuse_ratio"`
+	AgentsPerGB        float64  `json:"agents_per_gb"`
+	P50TTFTMS          float64  `json:"p50_ttft_ms"`
+	P95TTFTMS          float64  `json:"p95_ttft_ms"`
+	PeakMemoryMB       float64  `json:"peak_memory_mb"`
+	PrefixEvalCount    int      `json:"prefix_eval_count"`
+	TotalWallMS        float64  `json:"total_wall_ms,omitempty"`
+	EffectiveTokS      float64  `json:"effective_tok_s,omitempty"`
+	TTFTFlat           bool     `json:"ttft_flat"`
+	Verified           bool     `json:"verified"`
+}
+
+type manyAgentReportAlias ManyAgentReport
+
+func (r *ManyAgentReport) UnmarshalJSON(data []byte) error {
+	var aux manyAgentReportAlias
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	*r = ManyAgentReport(aux)
+	if r.Provenance == "" {
+		r.Provenance = DefaultManyAgentProvenance
+	}
+	if len(r.UnmodeledEffects) == 0 {
+		r.UnmodeledEffects = append([]string(nil), defaultManyAgentUnmodeledEffects...)
+	}
+	return nil
+}
+
+func (r ManyAgentReport) MarshalJSON() ([]byte, error) {
+	type alias ManyAgentReport
+	copy := alias(r)
+	if copy.Provenance == "" {
+		copy.Provenance = DefaultManyAgentProvenance
+	}
+	if len(copy.UnmodeledEffects) == 0 {
+		copy.UnmodeledEffects = append([]string(nil), defaultManyAgentUnmodeledEffects...)
+	}
+	return json.Marshal(copy)
 }
 
 // ManyAgentComparisonReport records head-to-head comparison between fak-native and llama.cpp.
 type ManyAgentComparisonReport struct {
 	Schema             string          `json:"schema"`
+	Provenance         string          `json:"provenance"`
+	IsPhysicalSilicon  bool            `json:"is_physical_silicon"`
+	UnmodeledEffects   []string        `json:"unmodeled_effects,omitempty"`
 	Model              string          `json:"model"`
 	Concurrency        int             `json:"concurrency"`
 	Horizon            int             `json:"horizon"`
@@ -72,8 +115,68 @@ type ManyAgentComparisonReport struct {
 	SpeedupRatio       float64         `json:"speedup_ratio"`
 	MemorySavedMB      float64         `json:"memory_saved_mb"`
 	TTFTSpeedupP50     float64         `json:"ttft_speedup_p50"`
+	Modeled4xProjected bool            `json:"modeled_4x_projected"`
 	True4xAchieved     bool            `json:"true_4x_achieved"`
 	Verified           bool            `json:"verified"`
+}
+
+type manyAgentComparisonReportAlias ManyAgentComparisonReport
+
+func (r *ManyAgentComparisonReport) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		manyAgentComparisonReportAlias
+		LegacyTrue4x *bool `json:"true_4x_achieved"`
+		Modern4x     *bool `json:"modeled_4x_projected"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	*r = ManyAgentComparisonReport(aux.manyAgentComparisonReportAlias)
+	if r.Provenance == "" {
+		r.Provenance = DefaultManyAgentProvenance
+	}
+	if len(r.UnmodeledEffects) == 0 {
+		r.UnmodeledEffects = append([]string(nil), defaultManyAgentUnmodeledEffects...)
+	}
+	if aux.Modern4x != nil {
+		r.Modeled4xProjected = *aux.Modern4x
+		r.True4xAchieved = *aux.Modern4x
+	} else if aux.LegacyTrue4x != nil {
+		r.Modeled4xProjected = *aux.LegacyTrue4x
+		r.True4xAchieved = *aux.LegacyTrue4x
+	} else {
+		val := r.Modeled4xProjected || r.True4xAchieved
+		r.Modeled4xProjected = val
+		r.True4xAchieved = val
+	}
+	return nil
+}
+
+func (r ManyAgentComparisonReport) MarshalJSON() ([]byte, error) {
+	type alias ManyAgentComparisonReport
+	copy := alias(r)
+	if copy.Provenance == "" {
+		copy.Provenance = DefaultManyAgentProvenance
+	}
+	if len(copy.UnmodeledEffects) == 0 {
+		copy.UnmodeledEffects = append([]string(nil), defaultManyAgentUnmodeledEffects...)
+	}
+	val := copy.Modeled4xProjected || copy.True4xAchieved
+	copy.Modeled4xProjected = val
+	copy.True4xAchieved = val
+	return json.Marshal(copy)
+}
+
+// IsModeled4xProjected returns whether 4x speedup was projected under the model.
+// Also supports legacy True4xAchieved.
+func (r ManyAgentComparisonReport) IsModeled4xProjected() bool {
+	return r.Modeled4xProjected || r.True4xAchieved
+}
+
+// SetModeled4xProjected sets both Modeled4xProjected and True4xAchieved.
+func (r *ManyAgentComparisonReport) SetModeled4xProjected(v bool) {
+	r.Modeled4xProjected = v
+	r.True4xAchieved = v
 }
 
 type manyAgentModelSpec struct {
@@ -319,6 +422,9 @@ func RunManyAgentSpine(opts ManyAgentOptions) (ManyAgentReport, error) {
 
 	rep := ManyAgentReport{
 		Schema:             ManyAgentSchema,
+		Provenance:         DefaultManyAgentProvenance,
+		IsPhysicalSilicon:  false,
+		UnmodeledEffects:   append([]string(nil), defaultManyAgentUnmodeledEffects...),
 		Model:              opts.Model,
 		Concurrency:        opts.Concurrency,
 		Horizon:            opts.Horizon,
@@ -410,6 +516,9 @@ func RunManyAgentComparison(opts ManyAgentOptions) (ManyAgentComparisonReport, e
 
 	llamaRep := ManyAgentReport{
 		Schema:             ManyAgentSchema,
+		Provenance:         DefaultManyAgentProvenance,
+		IsPhysicalSilicon:  false,
+		UnmodeledEffects:   append([]string(nil), defaultManyAgentUnmodeledEffects...),
 		Model:              opts.Model,
 		Concurrency:        opts.Concurrency,
 		Horizon:            opts.Horizon,
@@ -438,11 +547,14 @@ func RunManyAgentComparison(opts ManyAgentOptions) (ManyAgentComparisonReport, e
 	if fakRep.P50TTFTMS > 0 {
 		ttftSpeedupP50 = math.Round((llamaRep.P50TTFTMS/fakRep.P50TTFTMS)*100) / 100
 	}
-	true4xAchieved := speedupRatio >= 4.0
+	modeled4xProjected := speedupRatio >= 4.0
 	verified := fakRep.Verified && speedupRatio > 1.0 && (memorySavedMB > 0 || prefix == 0)
 
 	return ManyAgentComparisonReport{
 		Schema:             ManyAgentComparisonSchema,
+		Provenance:         DefaultManyAgentProvenance,
+		IsPhysicalSilicon:  false,
+		UnmodeledEffects:   append([]string(nil), defaultManyAgentUnmodeledEffects...),
 		Model:              opts.Model,
 		Concurrency:        opts.Concurrency,
 		Horizon:            opts.Horizon,
@@ -452,7 +564,8 @@ func RunManyAgentComparison(opts ManyAgentOptions) (ManyAgentComparisonReport, e
 		SpeedupRatio:       speedupRatio,
 		MemorySavedMB:      memorySavedMB,
 		TTFTSpeedupP50:     ttftSpeedupP50,
-		True4xAchieved:     true4xAchieved,
+		Modeled4xProjected: modeled4xProjected,
+		True4xAchieved:     modeled4xProjected,
 		Verified:           verified,
 	}, nil
 }
@@ -571,10 +684,10 @@ func printManyAgentComparisonSummary(w io.Writer, rep ManyAgentComparisonReport)
 		fmt.Sprintf("%.2f tok/s", rep.LlamaCPP.EffectiveTokS),
 		fmt.Sprintf("%.2fx throughput", rep.SpeedupRatio))
 	if rep.Verified {
-		if rep.True4xAchieved {
-			fmt.Fprintf(w, "verification          : PASS (TRUE %.2fx wall-clock speedup >= 4.0x achieved)\n", rep.SpeedupRatio)
+		if rep.Modeled4xProjected || rep.True4xAchieved {
+			fmt.Fprintf(w, "verification          : PROJECTED (MODELED %.2fx wall-clock speedup >= 4.0x projected)\n", rep.SpeedupRatio)
 		} else {
-			fmt.Fprintf(w, "verification          : PASS (%.2fx wall-clock speedup achieved)\n", rep.SpeedupRatio)
+			fmt.Fprintf(w, "verification          : PROJECTED (MODELED %.2fx wall-clock speedup projected)\n", rep.SpeedupRatio)
 		}
 	} else {
 		fmt.Fprintf(w, "verification          : FAIL (speedup %.2fx <= 1.0x or unverified)\n", rep.SpeedupRatio)
@@ -582,6 +695,11 @@ func printManyAgentComparisonSummary(w io.Writer, rep ManyAgentComparisonReport)
 }
 
 func printManyAgentSummary(w io.Writer, rep ManyAgentReport) {
+	fmt.Fprintf(w, "======================================================================\n")
+	fmt.Fprintf(w, "[MODELED PROJECTION] Grounded in measured single-stream rates (#2723/#9513)\n")
+	fmt.Fprintf(w, "Hardware target: Apple Silicon Metal (Apple M3 Pro 36GB, node-macos-a)\n")
+	fmt.Fprintf(w, "Unmodeled effects: Thermal DVFS, memory bus contention, queue sync jitter\n")
+	fmt.Fprintf(w, "======================================================================\n")
 	fmt.Fprintf(w, "fak macbench many-agent: model=%s concurrency=%d horizon=%d cache=%v\n",
 		rep.Model, rep.Concurrency, rep.Horizon, rep.Cache)
 	fmt.Fprintf(w, "prefix        : %d tokens (system + tools)\n", rep.SharedPrefixTokens)
