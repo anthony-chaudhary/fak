@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -37,7 +38,8 @@ func runSessionSearch(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	journalPath := *journal
-	if journalPath == "" {
+	isDefaultJournal := *journal == ""
+	if isDefaultJournal {
 		defaultJournal := filepath.Join(".fak", "toolproc", "journal.jsonl")
 		if _, err := os.Stat(defaultJournal); err == nil {
 			journalPath = defaultJournal
@@ -48,17 +50,22 @@ func runSessionSearch(stdout, stderr io.Writer, argv []string) int {
 	if journalPath != "" {
 		f, err := toolproc.OpenShareDelete(journalPath)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak sessionsearch: open journal: %v\n", err)
-			return 2
-		}
-		defer f.Close()
-		docs, err := sessionsearch.DocsFromJournal(f)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak sessionsearch: read journal: %v\n", err)
-			return 2
-		}
-		for _, d := range docs {
-			idx.Add(d)
+			if isDefaultJournal && (os.IsNotExist(err) || errors.Is(err, os.ErrNotExist)) {
+				// Default journal disappeared in TOCTOU race (compaction/rotation/cleanup); treat as empty.
+			} else {
+				fmt.Fprintf(stderr, "fak sessionsearch: open journal: %v\n", err)
+				return 2
+			}
+		} else {
+			defer f.Close()
+			docs, err := sessionsearch.DocsFromJournal(f)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak sessionsearch: read journal: %v\n", err)
+				return 2
+			}
+			for _, d := range docs {
+				idx.Add(d)
+			}
 		}
 	}
 

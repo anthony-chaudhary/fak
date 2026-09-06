@@ -6,6 +6,7 @@
 package sessionsearch
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -193,24 +194,85 @@ const DefaultK = 5
 // DefaultWindow is the fallback ordinal radius attached as surrounding context to each hit.
 const DefaultWindow = 5
 
+// maxEventLineBytes caps a single journal line scanned by DocsFromJournal,
+// aligning with toolproc's 4MB line cap.
+const maxEventLineBytes = 4 * 1024 * 1024
+
 // DocsFromJournal parses a toolproc journal reader into searchable Doc descriptors.
+// It tolerates trailing torn or incomplete JSON lines caused by concurrent
+// appenders, returning all valid documents parsed before the torn write.
 func DocsFromJournal(r io.Reader) ([]Doc, error) {
 	if r == nil {
 		return nil, fmt.Errorf("sessionsearch: reader is nil")
 	}
-	events, err := toolproc.ParseEvents(r)
-	if err != nil {
-		return nil, err
-	}
-	docs := make([]Doc, 0, len(events))
-	for i, ev := range events {
-		docs = append(docs, Doc{
-			ID:      fmt.Sprintf("ev:%d", i),
-			Ordinal: i,
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), maxEventLineBytes)
+
+	docs := make([]Doc, 0)
+	var pendingLine string
+	var pendingLineNum int
+	hasPending := false
+	line := 0
+
+	parseLine := func(raw string, lineNum int) (Doc, error) {
+		var ev toolproc.Event
+		if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+			return Doc{}, fmt.Errorf("toolproc: line %d: %v", lineNum, err)
+		}
+		if err := toolproc.ValidateEvent(ev); err != nil {
+			return Doc{}, fmt.Errorf("toolproc: line %d: %v", lineNum, err)
+		}
+		idx := len(docs)
+		return Doc{
+			ID:      fmt.Sprintf("ev:%d", idx),
+			Ordinal: idx,
 			Source:  classifySource(ev.Session),
 			Text:    eventText(ev),
-		})
+		}, nil
 	}
+
+	for sc.Scan() {
+		line++
+		raw := strings.TrimSpace(sc.Text())
+		if raw == "" || strings.HasPrefix(raw, "#") {
+			continue
+		}
+		if hasPending {
+			doc, err := parseLine(pendingLine, pendingLineNum)
+			if err != nil {
+				return nil, err
+			}
+			docs = append(docs, doc)
+		}
+		pendingLine = raw
+		pendingLineNum = line
+		hasPending = true
+	}
+
+	if err := sc.Err(); err != nil {
+		if hasPending {
+			if doc, perr := parseLine(pendingLine, pendingLineNum); perr == nil {
+				docs = append(docs, doc)
+			}
+		}
+		if len(docs) > 0 {
+			return docs, nil
+		}
+		return nil, fmt.Errorf("toolproc: %v", err)
+	}
+
+	if hasPending {
+		doc, err := parseLine(pendingLine, pendingLineNum)
+		if err != nil {
+			if len(docs) > 0 {
+				// Tolerate trailing torn or incomplete line when prior lines are valid.
+				return docs, nil
+			}
+			return nil, err
+		}
+		docs = append(docs, doc)
+	}
+
 	return docs, nil
 }
 

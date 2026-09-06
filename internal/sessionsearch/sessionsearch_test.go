@@ -245,6 +245,43 @@ func TestDocsFromJournalNilAndEmpty(t *testing.T) {
 	}
 }
 
+func TestDocsFromJournal_TrailingTornLineTolerance(t *testing.T) {
+	// Case 1: Valid event followed by truncated JSON without trailing newline.
+	tornWithoutNewline := "{\"kind\":\"spawn\",\"call_id\":\"c1\",\"session\":\"s1\",\"tool\":\"tool_a\",\"at_unix_ms\":1000}\n{\"kind\":\"spawn\",\"call_id\":\"c2"
+	docs, err := DocsFromJournal(strings.NewReader(tornWithoutNewline))
+	if err != nil {
+		t.Fatalf("expected nil error on trailing torn line, got: %v", err)
+	}
+	if len(docs) != 1 {
+		t.Fatalf("expected 1 doc, got %d", len(docs))
+	}
+	if !strings.Contains(docs[0].Text, "tool_a") {
+		t.Fatalf("expected doc text to contain tool_a, got: %s", docs[0].Text)
+	}
+
+	// Case 2: Valid event followed by incomplete event with trailing newline.
+	tornWithNewline := "{\"kind\":\"spawn\",\"call_id\":\"c1\",\"session\":\"s1\",\"tool\":\"tool_a\",\"at_unix_ms\":1000}\n{\"kind\":\"spawn\"}\n"
+	docs, err = DocsFromJournal(strings.NewReader(tornWithNewline))
+	if err != nil {
+		t.Fatalf("expected nil error on trailing incomplete event, got: %v", err)
+	}
+	if len(docs) != 1 {
+		t.Fatalf("expected 1 doc, got %d", len(docs))
+	}
+
+	// Case 3: Middle corruption must fail closed (not tolerated).
+	middleCorrupt := "{\"kind\":\"spawn\",\"call_id\":\"c1\",\"session\":\"s1\",\"tool\":\"tool_a\",\"at_unix_ms\":1000}\n{\"kind\":\"bogus\"}\n{\"kind\":\"spawn\",\"call_id\":\"c2\",\"session\":\"s1\",\"tool\":\"tool_b\",\"at_unix_ms\":2000}\n"
+	if _, err := DocsFromJournal(strings.NewReader(middleCorrupt)); err == nil {
+		t.Fatal("expected error on middle corrupt line, got nil")
+	}
+
+	// Case 4: Single torn line without previous valid lines must fail.
+	singleTorn := "{\"kind\":\"spawn\",\"call_id\":\"c1"
+	if _, err := DocsFromJournal(strings.NewReader(singleTorn)); err == nil {
+		t.Fatal("expected error on single torn line with no prior valid docs, got nil")
+	}
+}
+
 func TestSearchEdgeCasesAndDefaults(t *testing.T) {
 	ix := NewIndex()
 	ix.Add(Doc{ID: "doc1", Ordinal: 0, Source: SourceInteractive, Text: "alpha beta gamma delta"})

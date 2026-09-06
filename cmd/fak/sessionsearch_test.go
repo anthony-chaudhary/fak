@@ -209,3 +209,167 @@ func TestRunSessionSearch_WindowsCompactionShareMode(t *testing.T) {
 		}
 	}
 }
+
+func TestRunSessionSearch_DefaultJournalDisappearsGracefully(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+
+	journalDir := filepath.Join(tmpDir, ".fak", "toolproc")
+	if err := os.MkdirAll(journalDir, 0o755); err != nil {
+		t.Fatalf("failed to create default journal dir: %v", err)
+	}
+	journalPath := filepath.Join(journalDir, "journal.jsonl")
+
+	// 1. Absent default journal: returns 0 hits and exit code 0.
+	var stdout, stderr bytes.Buffer
+	rc := runSessionSearch(&stdout, &stderr, []string{"--query", "fak", "--json"})
+	if rc != 0 {
+		t.Fatalf("expected rc 0 with absent default journal, got %d, stderr: %s", rc, stderr.String())
+	}
+	var env sessionSearchResultsEnvelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("failed to unmarshal json envelope: %v", err)
+	}
+	if env.Total != 0 {
+		t.Fatalf("expected total 0, got %d", env.Total)
+	}
+
+	// 2. Concurrent churn: rapidly create and rotate/remove default journal while searching.
+	// In the TOCTOU window between os.Stat and OpenShareDelete, OpenShareDelete encounters
+	// ErrNotExist when the journal is rotated/removed. With the fix, runSessionSearch must
+	// handle this gracefully and never return exit code 2.
+	rotatedPath := filepath.Join(tmpDir, "journal.rotated.jsonl")
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		content := []byte(`{"kind":"spawn","call_id":"c1","session":"s1","tool":"churn_tool","at_unix_ms":1000}` + "\n")
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				if err := os.WriteFile(journalPath, content, 0o600); err == nil {
+					_ = os.Rename(journalPath, rotatedPath)
+					_ = os.Remove(rotatedPath)
+				}
+			}
+		}
+	}()
+
+	for i := 0; i < 100; i++ {
+		stdout.Reset()
+		stderr.Reset()
+		rc := runSessionSearch(&stdout, &stderr, []string{"--query", "churn_tool", "--json"})
+		if rc != 0 {
+			close(stop)
+			<-done
+			t.Fatalf("iteration %d: expected rc 0 during concurrent disappearance, got %d, stderr: %s", i, rc, stderr.String())
+		}
+	}
+	close(stop)
+	<-done
+
+	// 3. Contrast: an explicit non-existent --journal flag must still return exit code 2.
+	stdout.Reset()
+	stderr.Reset()
+	missingExplicit := filepath.Join(tmpDir, "missing_explicit.jsonl")
+	rc = runSessionSearch(&stdout, &stderr, []string{"--journal", missingExplicit, "--query", "churn_tool"})
+	if rc != 2 {
+		t.Fatalf("expected rc 2 for explicit missing journal, got %d", rc)
+	}
+	if !strings.Contains(stderr.String(), "open journal") {
+		t.Fatalf("expected 'open journal' error in stderr, got: %s", stderr.String())
+	}
+}
+
+func TestRunSessionSearch_ConcurrentTornLineTolerance(t *testing.T) {
+	tmpDir := t.TempDir()
+	journalPath := filepath.Join(tmpDir, "journal.jsonl")
+
+	// Journal with two valid events followed by a truncated / torn trailing write without newline.
+	content := []byte(`{"kind":"spawn","call_id":"c1","session":"s1","tool":"search_index","at_unix_ms":1000}
+{"kind":"exit","call_id":"c1","session":"s1","status":"ok","at_unix_ms":2000}
+{"kind":"spawn","call_id":"c2","session":"s1","tool":"torn_wr`)
+
+	if err := os.WriteFile(journalPath, content, 0o600); err != nil {
+		t.Fatalf("failed to write journal: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	rc := runSessionSearch(&stdout, &stderr, []string{"--journal", journalPath, "--query", "search_index", "--json"})
+	if rc != 0 {
+		t.Fatalf("expected rc 0 despite trailing torn line, got %d, stderr: %s", rc, stderr.String())
+	}
+
+	var env sessionSearchResultsEnvelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("failed to unmarshal json envelope: %v, output: %s", err, stdout.String())
+	}
+	if env.Total != 1 {
+		t.Fatalf("expected 1 hit for valid event, got %d", env.Total)
+	}
+	if !strings.Contains(env.Hits[0].Doc.Text, "search_index") {
+		t.Fatalf("expected hit to contain search_index, got: %s", env.Hits[0].Doc.Text)
+	}
+
+	// Querying for terms present only in the torn line yields 0 hits, but succeeds with rc 0.
+	stdout.Reset()
+	stderr.Reset()
+	rc = runSessionSearch(&stdout, &stderr, []string{"--journal", journalPath, "--query", "torn_wr", "--json"})
+	if rc != 0 {
+		t.Fatalf("expected rc 0 for torn line query, got %d, stderr: %s", rc, stderr.String())
+	}
+	env = sessionSearchResultsEnvelope{}
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("failed to unmarshal json envelope: %v", err)
+	}
+	if env.Total != 0 {
+		t.Fatalf("expected total 0 for torn write terms, got %d", env.Total)
+	}
+
+	// Also verify default journal path with trailing incomplete event.
+	t.Chdir(tmpDir)
+	defaultJournalDir := filepath.Join(tmpDir, ".fak", "toolproc")
+	if err := os.MkdirAll(defaultJournalDir, 0o755); err != nil {
+		t.Fatalf("failed to create default journal dir: %v", err)
+	}
+	defaultJournalPath := filepath.Join(defaultJournalDir, "journal.jsonl")
+	defaultContent := []byte(`{"kind":"spawn","call_id":"c1","session":"s1","tool":"default_tool","at_unix_ms":1000}
+{"kind":"spawn"}` + "\n")
+	if err := os.WriteFile(defaultJournalPath, defaultContent, 0o600); err != nil {
+		t.Fatalf("failed to write default journal: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	rc = runSessionSearch(&stdout, &stderr, []string{"--query", "default_tool", "--json"})
+	if rc != 0 {
+		t.Fatalf("expected rc 0 with trailing incomplete event in default journal, got %d, stderr: %s", rc, stderr.String())
+	}
+	env = sessionSearchResultsEnvelope{}
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("failed to unmarshal json envelope: %v", err)
+	}
+	if env.Total != 1 {
+		t.Fatalf("expected 1 hit from default journal, got %d", env.Total)
+	}
+
+	// Contrast: corruption in the middle of the journal must fail with rc 2.
+	middleCorruptPath := filepath.Join(tmpDir, "middle_corrupt.jsonl")
+	middleCorruptContent := []byte(`{"kind":"spawn","call_id":"c1","session":"s1","tool":"valid_first","at_unix_ms":1000}
+{"kind":"bogus_kind","at_unix_ms":1500}
+{"kind":"spawn","call_id":"c2","session":"s1","tool":"valid_second","at_unix_ms":2000}` + "\n")
+	if err := os.WriteFile(middleCorruptPath, middleCorruptContent, 0o600); err != nil {
+		t.Fatalf("failed to write middle corrupt journal: %v", err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	rc = runSessionSearch(&stdout, &stderr, []string{"--journal", middleCorruptPath, "--query", "valid_first"})
+	if rc != 2 {
+		t.Fatalf("expected rc 2 for middle-corrupt journal, got %d", rc)
+	}
+	if !strings.Contains(stderr.String(), "read journal") {
+		t.Fatalf("expected 'read journal' error in stderr, got: %s", stderr.String())
+	}
+}
