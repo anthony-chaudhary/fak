@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -848,4 +849,209 @@ func TestSessionSSE_ScopedReplayFiltering(t *testing.T) {
 	if !strings.Contains(payloadGlobalAPI.HTML, "session-alpha") || !strings.Contains(payloadGlobalAPI.HTML, "session-beta") {
 		t.Fatalf("expected html markup to contain both sessions: %s", payloadGlobalAPI.HTML)
 	}
+}
+
+func TestSessionCardApprovalFormURLPathEscapesSessionID(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	slashSessionID := "worker/leaf-1"
+	approval := &SessionApproval{
+		ApprovalID:      "app-slash-1",
+		ToolName:        "Bash",
+		Command:         "go test ./...",
+		TargetPath:      "/workspace/fak",
+		RiskExplanation: "command execution",
+	}
+	card := SessionCard{
+		ID:                 slashSessionID,
+		Provider:           "codex",
+		Workspace:          "/workspace/fak",
+		State:              sessionAwaitingApproval,
+		PendingInteraction: "approval requested",
+		PendingApproval:    approval,
+		LastEventAt:        now,
+		HasInputLease:      true,
+		Capabilities:       map[string]SessionCapability{"cancel": {Enabled: true}},
+	}
+
+	markup, err := renderSessionCardsHTML([]SessionCard{card}, now, false)
+	if err != nil {
+		t.Fatalf("renderSessionCardsHTML failed: %v", err)
+	}
+
+	// Verify approval form URL has path-escaped session ID
+	wantAction := `action="/api/sessions/worker%2Fleaf-1/approval"`
+	if !strings.Contains(markup, wantAction) {
+		t.Errorf("rendered markup missing path-escaped action %q\n%s", wantAction, markup)
+	}
+	unwantedAction := `action="/api/sessions/worker/leaf-1/approval"`
+	if strings.Contains(markup, unwantedAction) {
+		t.Errorf("rendered markup contains unescaped slash action %q\n%s", unwantedAction, markup)
+	}
+
+	// Verify data-session-id preserves unescaped logical session ID for UI/DOM binding
+	if !strings.Contains(markup, `data-session-id="worker/leaf-1"`) {
+		t.Errorf("rendered markup missing data-session-id with unescaped logical session ID")
+	}
+
+	// Verify end-to-end routing to the path-escaped URL
+	source := &fixtureSessionSource{cards: []SessionCard{card}}
+	ts := httptest.NewServer(handlerWithSessionSource(newStore(), nil, nil, source))
+	defer ts.Close()
+
+	// 1. Submit JSON resolution to path-escaped URL
+	escapedURL := fmt.Sprintf("%s/api/sessions/%s/approval", ts.URL, url.PathEscape(slashSessionID))
+	res, err := ts.Client().Post(escapedURL, "application/json", strings.NewReader(`{"resolution":"accept","approval_id":"app-slash-1"}`))
+	if err != nil {
+		t.Fatalf("POST to escaped approval URL failed: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 for escaped approval URL, got %d", res.StatusCode)
+	}
+	if len(source.approvals) != 1 || source.approvals[0].SessionID != slashSessionID || source.approvals[0].Resolution != "accept" {
+		t.Fatalf("source did not receive expected approval: %+v", source.approvals)
+	}
+
+	// 2. Submit form URL-encoded resolution to path-escaped URL (matching HTML form submission)
+	card.State = sessionAwaitingApproval
+	card.PendingApproval = approval
+	source.cards = []SessionCard{card}
+	formBody := strings.NewReader("resolution=decline&approval_id=app-slash-1&reason=denied+by+test")
+	formRes, err := ts.Client().Post(escapedURL, "application/x-www-form-urlencoded", formBody)
+	if err != nil {
+		t.Fatalf("POST form to escaped approval URL failed: %v", err)
+	}
+	defer formRes.Body.Close()
+	if formRes.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 for form POST to escaped approval URL, got %d", formRes.StatusCode)
+	}
+	if len(source.approvals) != 2 || source.approvals[1].SessionID != slashSessionID || source.approvals[1].Resolution != "decline" {
+		t.Fatalf("source did not receive expected second approval: %+v", source.approvals)
+	}
+}
+
+func TestSessionCardCapabilitiesDeepCopyPreventsDataRaces(t *testing.T) {
+	initialCaps := map[string]SessionCapability{
+		"open":      {Enabled: true},
+		"interrupt": {Enabled: true},
+		"cancel":    {Enabled: false, UnavailableReason: "not cancellable"},
+	}
+
+	card := SessionCard{
+		ID:           "session-deep-copy-test",
+		Provider:     "codex",
+		State:        sessionWorking,
+		Capabilities: initialCaps,
+	}
+
+	// 1. Structural independence: normalizeSessionCards deep-copies Capabilities
+	normalized, err := normalizeSessionCards([]SessionCard{card})
+	if err != nil {
+		t.Fatalf("normalizeSessionCards failed: %v", err)
+	}
+	cloned := card.Clone()
+
+	// Mutating the original map must not mutate normalized or cloned
+	initialCaps["archive"] = SessionCapability{Enabled: true}
+	initialCaps["interrupt"] = SessionCapability{Enabled: false}
+
+	if _, exists := normalized[0].Capabilities["archive"]; exists {
+		t.Errorf("normalized card saw mutation on original map ('archive' key added)")
+	}
+	if !normalized[0].Capabilities["interrupt"].Enabled {
+		t.Errorf("normalized card 'interrupt' was unexpectedly mutated through original map")
+	}
+	if _, exists := cloned.Capabilities["archive"]; exists {
+		t.Errorf("cloned card saw mutation on original map ('archive' key added)")
+	}
+	if !cloned.Capabilities["interrupt"].Enabled {
+		t.Errorf("cloned card 'interrupt' was unexpectedly mutated through original map")
+	}
+
+	// Mutating normalized card must not mutate cloned or original
+	normalized[0].Capabilities["resume"] = SessionCapability{Enabled: true}
+	if _, exists := cloned.Capabilities["resume"]; exists {
+		t.Errorf("cloned card saw mutation from normalized card ('resume' key added)")
+	}
+	if _, exists := initialCaps["resume"]; exists {
+		t.Errorf("original map saw mutation from normalized card ('resume' key added)")
+	}
+
+	// 2. Concurrency test: concurrent map writes on original map while readers
+	// iterate over normalized/cloned cards' Capabilities (e.g. SSE broadcast & HTML rendering).
+	mutableMap := map[string]SessionCapability{
+		"open":      {Enabled: true},
+		"interrupt": {Enabled: true},
+		"cancel":    {Enabled: false},
+	}
+	sourceCard := SessionCard{
+		ID:           "session-race-target",
+		Provider:     "codex",
+		State:        sessionWorking,
+		Capabilities: mutableMap,
+	}
+
+	normalizedCards, err := normalizeSessionCards([]SessionCard{sourceCard})
+	if err != nil {
+		t.Fatalf("normalizeSessionCards: %v", err)
+	}
+	cardCopy := sourceCard.Clone()
+
+	var wg sync.WaitGroup
+	var readerWg sync.WaitGroup
+	stopWriter := make(chan struct{})
+
+	// Writer goroutine: constantly writes, updates, and deletes from original map
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		i := 0
+		for {
+			select {
+			case <-stopWriter:
+				return
+			default:
+				k := fmt.Sprintf("cap-%d", i%8)
+				mutableMap[k] = SessionCapability{Enabled: i%2 == 0}
+				if i > 5 {
+					delete(mutableMap, fmt.Sprintf("cap-%d", (i+3)%8))
+				}
+				i++
+			}
+		}
+	}()
+
+	// Reader goroutines: simulate concurrent HTML rendering, SSE broadcasting (json.Marshal),
+	// and map iteration over normalized & cloned cards
+	for g := 0; g < 4; g++ {
+		readerWg.Add(1)
+		go func() {
+			defer readerWg.Done()
+			for iter := 0; iter < 150; iter++ {
+				// Direct map iteration
+				for k, v := range normalizedCards[0].Capabilities {
+					_ = k
+					_ = v.Enabled
+				}
+				for k, v := range cardCopy.Capabilities {
+					_ = k
+					_ = v.Enabled
+				}
+				// HTML render (sessionAction reads card.Capabilities)
+				if _, err := renderSessionCardsHTML(normalizedCards, time.Now(), false); err != nil {
+					t.Errorf("renderSessionCardsHTML error: %v", err)
+				}
+				// JSON marshal (simulates SSE broadcast / API JSON response serialization)
+				if _, err := json.Marshal(normalizedCards); err != nil {
+					t.Errorf("json.Marshal error: %v", err)
+				}
+				// Further cloning
+				_ = normalizedCards[0].Clone()
+			}
+		}()
+	}
+
+	readerWg.Wait()
+	close(stopWriter)
+	wg.Wait()
 }

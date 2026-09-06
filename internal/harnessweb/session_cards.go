@@ -285,10 +285,47 @@ func sessionAction(c SessionCard, action string) SessionCapability {
 	return capability
 }
 
+// Clone returns a deep copy of the session card, allocating a separate map for
+// Capabilities to prevent data races between concurrent readers and writers.
+func (c SessionCard) Clone() SessionCard {
+	cp := c
+	if c.Capabilities != nil {
+		cp.Capabilities = make(map[string]SessionCapability, len(c.Capabilities))
+		for k, v := range c.Capabilities {
+			cp.Capabilities[k] = v
+		}
+	}
+	if c.PendingApproval != nil {
+		app := *c.PendingApproval
+		cp.PendingApproval = &app
+	}
+	if c.Usage != nil {
+		u := *c.Usage
+		cp.Usage = &u
+	}
+	return cp
+}
+
+// cloneSessionCards returns a deep copy of the given slice of session cards.
+func cloneSessionCards(cards []SessionCard) []SessionCard {
+	if cards == nil {
+		return nil
+	}
+	out := make([]SessionCard, len(cards))
+	for i := range cards {
+		out[i] = cards[i].Clone()
+	}
+	return out
+}
+
 func normalizeSessionCards(cards []SessionCard) ([]SessionCard, error) {
-	out := append([]SessionCard(nil), cards...)
+	if cards == nil {
+		return nil, nil
+	}
+	out := make([]SessionCard, len(cards))
 	seen := map[string]bool{}
-	for i := range out {
+	for i := range cards {
+		out[i] = cards[i].Clone()
 		if err := out[i].validate(); err != nil {
 			return nil, err
 		}
@@ -401,7 +438,7 @@ func renderSessionCardsHTML(cards []SessionCard, now time.Time, noColor bool) (s
 				}
 				fmt.Fprintf(&b, `</dl>`)
 			}
-			fmt.Fprintf(&b, `<form class="approval-form session-approval-controls" action="/api/sessions/%s/approval" method="POST" data-session-id="%s" data-approval-id="%s">`, html.EscapeString(c.ID), html.EscapeString(c.ID), html.EscapeString(approvalID))
+			fmt.Fprintf(&b, `<form class="approval-form session-approval-controls" action="/api/sessions/%s/approval" method="POST" data-session-id="%s" data-approval-id="%s">`, url.PathEscape(c.ID), html.EscapeString(c.ID), html.EscapeString(approvalID))
 			fmt.Fprintf(&b, `<input type="hidden" name="session_id" value="%s">`, html.EscapeString(c.ID))
 			fmt.Fprintf(&b, `<input type="hidden" name="approval_id" value="%s">`, html.EscapeString(approvalID))
 			fmt.Fprintf(&b, `<button type="submit" name="resolution" value="accept" class="button-approval-accept" data-approval-action="accept" data-action="accept" data-session-id="%s" data-approval-id="%s" aria-label="Accept approval for session %s">Accept</button>`, html.EscapeString(c.ID), html.EscapeString(approvalID), html.EscapeString(c.ID))
@@ -513,7 +550,7 @@ func CurrentCards() []SessionCard {
 func (h *sessionHub) currentCards() []SessionCard {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return append([]SessionCard(nil), h.lastCards...)
+	return cloneSessionCards(h.lastCards)
 }
 
 func (h *sessionHub) resetForTest() {
@@ -561,7 +598,7 @@ func (h *sessionHub) broadcastCards(source SessionSource) {
 		return
 	}
 	h.mu.Lock()
-	h.lastCards = norm
+	h.lastCards = cloneSessionCards(norm)
 	h.lastHTML = markup
 	h.mu.Unlock()
 
@@ -660,7 +697,7 @@ func handleSessionSSEWithInterval(scoped bool, interval time.Duration) http.Hand
 			fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"connected\"}\n\n")
 		}
 		defaultSessionHub.mu.RLock()
-		lastCards := defaultSessionHub.lastCards
+		lastCards := cloneSessionCards(defaultSessionHub.lastCards)
 		lastHTML := defaultSessionHub.lastHTML
 		defaultSessionHub.mu.RUnlock()
 		if len(lastCards) > 0 || lastHTML != "" {
@@ -764,7 +801,7 @@ func installSessionRoutesWithStore(mux *http.ServeMux, source SessionSource, s *
 			return
 		}
 		defaultSessionHub.mu.Lock()
-		defaultSessionHub.lastCards = cards
+		defaultSessionHub.lastCards = cloneSessionCards(cards)
 		defaultSessionHub.lastHTML = markup
 		defaultSessionHub.mu.Unlock()
 		writeSessionJSON(w, http.StatusOK, map[string]any{"sessions": cards, "html": markup})
