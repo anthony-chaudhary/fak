@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
+	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/versionskew"
 )
 
@@ -311,6 +313,23 @@ func TestAccountsLaunchSkipPermissionsHelpDistinguishesCodexFromFakGates(t *test
 		if !strings.Contains(errb.String(), want) {
 			t.Fatalf("accounts launch help missing %q:\n%s", want, errb.String())
 		}
+	}
+}
+
+func TestPrintAccountsLaunchPlanShowsVersion(t *testing.T) {
+	var errb bytes.Buffer
+	p := launchParams{}
+	home := accounts.Home{Name: "test-seat"}
+	id := accounts.Identity{Email: "test@example.com"}
+	printAccountsLaunchPlan(&errb, p, "claude", home, id, launchBrokerGrant{}, "auto", false)
+
+	ver := appversion.Current()
+	if id := guardShortBuildID(); id != "" {
+		ver += " (" + id + ")"
+	}
+	want := fmt.Sprintf("fak %s · accounts launch — seat %q", ver, "test-seat")
+	if !strings.Contains(errb.String(), want) {
+		t.Fatalf("printAccountsLaunchPlan output missing %q, got:\n%s", want, errb.String())
 	}
 }
 

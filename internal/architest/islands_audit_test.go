@@ -55,6 +55,7 @@ func bodyCallsFuncOrSelector(t *testing.T, dir, fnName, callee string) bool {
 func TestIslandsAudit(t *testing.T) {
 	TestFeatureIslandsWiredAudit(t)
 }
+
 // All 13 feature islands from September 1–4 must be actively wired into production
 // runtime entry points and must never regress into unwired ghost implementations.
 func TestFeatureIslandsWiredAudit(t *testing.T) {

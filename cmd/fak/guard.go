@@ -1356,7 +1356,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// provider overrides, not OPENAI_BASE_URL. Repoint only Codex children, after the
 	// Claude-specific hook installers have had a chance to no-op.
 	command, codexInstall := installGuardCodexConfigForProfile(command, launchPlan.harnessProfile(), *codexConfig, gwURL, *apiKeyEnv, *codexHome)
-	if *approveForMe && len(command) > 0 && guardIsCodex(command[0]) {
+	if *approveForMe && len(command) > 0 && launchPlan.isCodex() {
 		command = configureGuardCodexApproveForMe(command)
 	}
 	launchPlan = launchPlan.withExecutableCommand(command)

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
@@ -530,7 +531,11 @@ func renderClaudeMacPreflight(h claudeMacHealth, v claudeMacDebugVars, gatewayUR
 	// It is a constant brand line, not a claim; the live gateway/health facts follow
 	// immediately below. The `== … ==` framing matches the --metrics output (runClaudeMacMetrics).
 	fmt.Fprintln(&b, "== fak · Claude Code -> your own Mac's local model ==")
-	fmt.Fprintf(&b, "fak debug · gateway %s\n", gatewayURL)
+	ver := appversion.Current()
+	if id := guardShortBuildID(); id != "" {
+		ver += " (" + id + ")"
+	}
+	fmt.Fprintf(&b, "fak debug %s · gateway %s\n", ver, gatewayURL)
 	healthWord := "ok"
 	if !h.OK {
 		healthWord = "DOWN"

@@ -85,6 +85,10 @@ func (p guardLaunchPlan) agentName() string {
 
 func (p guardLaunchPlan) agentBaseName() string { return p.baseName }
 
+func (p guardLaunchPlan) isCodex() bool {
+	return p.profile.HasRepoint(harnessprofile.RepointCLIConfig) || p.baseName == "codex"
+}
+
 func (p guardLaunchPlan) interactive() bool {
 	if p.baseName == "codex" && guardCodexSemanticSubcommand(p.semantic) == "exec" {
 		return false

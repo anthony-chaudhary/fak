@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/allinone"
+	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
 
 func printUpHelp(w io.Writer) {
@@ -114,7 +115,11 @@ func cmdUp(argv []string) {
 		fmt.Fprintf(os.Stderr, "fak up start failed: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("fak up running on %s\n", sup.Addr())
+	ver := appversion.Current()
+	if id := guardShortBuildID(); id != "" {
+		ver += " (" + id + ")"
+	}
+	fmt.Printf("fak up %s running on %s\n", ver, sup.Addr())
 
 	<-ctx.Done()
 	shutdownTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)

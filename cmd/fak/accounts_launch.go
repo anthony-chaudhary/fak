@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
+	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 	"github.com/anthony-chaudhary/fak/internal/versionskew"
@@ -429,7 +430,11 @@ func printAccountsLaunchPlan(stderr io.Writer, p launchParams, command string, h
 			permWord = fmt.Sprintf("fak floor is the permission system; %s keeps its own prompts (no known kernel-bypass flag)", command)
 		}
 	}
-	fmt.Fprintf(stderr, "fak accounts launch — seat %q\n", home.Name)
+	ver := appversion.Current()
+	if id := guardShortBuildID(); id != "" {
+		ver += " (" + id + ")"
+	}
+	fmt.Fprintf(stderr, "fak %s · accounts launch — seat %q\n", ver, home.Name)
 	if guardAgentBaseName(command) == "codex" {
 		fmt.Fprintln(stderr, "  CODEX_HOME        = <account-dir> (child-local; guard hard-pinned)")
 	} else {

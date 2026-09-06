@@ -139,7 +139,9 @@ func runDesktopConsoleSelfcheck(stdout, stderr io.Writer, asJSON bool) int {
 			rootPID = p.PID
 		}
 		if p.WindowHandle != 0 {
-			visibleHandles[p.WindowHandle] = true
+			if v, _, _ := codexMCPWindowIsWindowVisible.Call(p.WindowHandle); v != 0 {
+				visibleHandles[p.WindowHandle] = true
+			}
 		}
 	}
 	if rootPID == 0 {

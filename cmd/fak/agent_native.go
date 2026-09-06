@@ -97,15 +97,18 @@ func computeGitDiffHash(workspace string) string {
 	}
 	checkCmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
 	checkCmd.Dir = ws
+	configureDispatchHelperCommand(checkCmd)
 	if err := checkCmd.Run(); err != nil {
 		return ""
 	}
 	cmd := exec.Command("git", "diff", "HEAD")
 	cmd.Dir = ws
+	configureDispatchHelperCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		cmd = exec.Command("git", "diff")
 		cmd.Dir = ws
+		configureDispatchHelperCommand(cmd)
 		out, err = cmd.Output()
 		if err != nil {
 			return ""

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
 
 // TestGuardLaunchAnimEnabled pins the render-site gate: the animation plays ONLY for the
@@ -53,8 +55,8 @@ func TestGuardLaunchAnimFramesAreCleanAndFill(t *testing.T) {
 		if strings.ContainsAny(f, "\x1b\r\n") {
 			t.Fatalf("frame %d carries escape/CR/LF bytes (%q); frames must be byte-clean", i, f)
 		}
-		if !strings.Contains(f, "fak") {
-			t.Fatalf("frame %d %q lost the fak mark", i, f)
+		if !strings.Contains(f, "fak "+appversion.Current()) {
+			t.Fatalf("frame %d %q lost the fak version mark", i, f)
 		}
 	}
 	first, last := frames[0], frames[len(frames)-1]

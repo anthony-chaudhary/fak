@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
 
 func TestClaudeMacFakDryRunDefaultsToInteractive(t *testing.T) {
@@ -556,7 +558,7 @@ func TestRenderClaudeMacPreflightWarnsOnMockWithoutBearerLeak(t *testing.T) {
 	)
 	for _, want := range []string{
 		"== fak · Claude Code -> your own Mac's local model ==",
-		"fak debug",
+		"fak debug " + appversion.Current(),
 		"planner(live)=mock",
 		"vdso=on",
 		"cache-hit 0.88",

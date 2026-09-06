@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"golang.org/x/term"
 )
 
@@ -102,6 +103,7 @@ func guardLaunchAnimFrames(width int) []string {
 	// One frame per floor cell, plus a final fully-filled frame, so the floor visibly completes.
 	n := guardLaunchTrackCells + 1
 	frames := make([]string, 0, n)
+	ver := appversion.Current()
 	for i := 0; i < n; i++ {
 		fill := i
 		if fill > guardLaunchTrackCells {
@@ -111,7 +113,7 @@ func guardLaunchAnimFrames(width int) []string {
 			strings.Repeat(string(guardLaunchEmptyCell), guardLaunchTrackCells-fill)
 		glyph := guardLaunchSpinner[i%len(guardLaunchSpinner)]
 		phase := guardLaunchPhases[i*len(guardLaunchPhases)/n]
-		line := fmt.Sprintf("%c fak  %s  %s", glyph, bar, phase)
+		line := fmt.Sprintf("%c fak %s  %s  %s", glyph, ver, bar, phase)
 		frames = append(frames, takeCellsTUI(line, width))
 	}
 	return frames
