@@ -143,13 +143,14 @@ fak operator heaviness --markdown > docs/OPERATOR-HEAVINESS.md   # use Bash '>';
 ## Step 5 — Commit ONLY your lane, by explicit path
 
 The scorecard reads five files across three lanes (`cmd`, `tools`, `docs`/`claude`). Commit
-each lane's files in their OWN commit by explicit path — never `git add -A`:
+each lane's files in their OWN commit by explicit path via `fak commit --path` — never `git add -A`:
 
 ```bash
-git commit -s -F msg -- cmd/fak/<changed>.go                    # the surface edit (cmd lane)
-git commit -s -F msg -- docs/OPERATOR-HEAVINESS.md llms.txt     # the snapshot + doc-map (docs lane)
+fak sync check                                                   # or fak sync reconcile --apply to integrate trunk safely
+fak commit --path cmd/fak/<changed>.go -F msg                    # the surface edit (cmd lane)
+fak commit --path docs/OPERATOR-HEAVINESS.md --path llms.txt -F msg     # the snapshot + doc-map (docs lane)
 dos commit-audit HEAD                                            # MUST print [diff-witnessed] / verdict OK
-git push
+fak sync push
 ```
 
 Subject honesty: a real surface consolidation → `refactor(cmd):`; a doc-map/snapshot

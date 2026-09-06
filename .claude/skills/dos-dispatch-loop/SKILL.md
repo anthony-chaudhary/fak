@@ -215,10 +215,10 @@ uncommitted change is a phase the kernel reports `NOT_SHIPPED` (the "a commit IS
 ship-stamp" contract). So at close-out, commit your lane's writes — driven by the
 same `dos` verbs the loop already uses, with generic git:
 
-- **Commit your lane's writes by explicit pathspec** — stage exactly the files
-  under the lane region you leased (the `tree` globs `dos lease-lane acquire` granted),
-  then commit naming those paths: `git add <lane paths>`; `git commit -m "<subject>"
-  -- <lane paths>`. **Never a bare `git add -A`** — when sibling loops hold disjoint
+- **Commit your lane's writes by explicit pathspec** — stage and commit exactly the files
+  under the lane region you leased (the `tree` globs `dos lease-lane acquire` granted)
+  via `fak sync check` and `fak commit --path <lane paths> -m "<subject>" [--push]` (or `fak sync push`).
+  (Fallback: `git commit -s -m "<subject>" -- <lane paths>`). **Never a bare `git add -A`** — when sibling loops hold disjoint
   lanes on the same tree, a blanket add sweeps another loop's in-flight edits into
   your commit. The lane lease you held names exactly which paths are yours; commit
   only those.

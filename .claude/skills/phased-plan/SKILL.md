@@ -12,7 +12,7 @@ metadata:
 
 Load this skill when you finish (or are about to finish) a phase of a phased plan. It governs four things: handoff prompts, releases, plan-shape rules (hero-exit, phase-split, hygiene-queue), type-strengthening. "The project's release skill" referenced below is this repo's own `/release`.
 
-**Git authorization.** Loading this skill is the user's explicit authorization to run `git add` and `git commit` for the phase-ship commit and for any Phase-0 baseline snapshot the ceremony spells out. The "never commit unless asked" default does NOT apply here — committing the phase artifact IS the skill's job. The skill does NOT authorize `git push` or `git tag` directly — those happen via the project's release skill (which has its own authorization), or require explicit user confirmation if invoked outside it. Force-push, history rewrites, branch deletion, and `git reset --hard` always require explicit user confirmation. Use targeted pathspecs only — never `git add -A`/`-u`/`.`.
+**Git authorization.** Loading this skill is the user's explicit authorization to run `fak commit` (or explicit-path `git commit`) for the phase-ship commit and for any Phase-0 baseline snapshot the ceremony spells out. The "never commit unless asked" default does NOT apply here — committing the phase artifact IS the skill's job. The skill does NOT authorize `git push` or `git tag` directly — those happen via the project's release skill (which has its own authorization), or require explicit user confirmation if invoked outside it. Force-push, history rewrites, branch deletion, and `git reset --hard` always require explicit user confirmation. Use targeted pathspecs only — never `git add -A`/`-u`/`.`.
 
 ## Handoff prompts — session-boundary only
 
@@ -124,10 +124,10 @@ When a phase DOES produce a measure-then-change baseline, it **must** land in gi
 
 ```bash
 # Atomic — one commit, both assets. Never just the dir, never just the row.
-git add <baseline-dir>/ <baseline-registry-file>
-git diff --cached --name-only      # AUDIT — both paths present
-git commit -m "<plan>: <phase> — baseline snapshot (measure-then-change)" -- \
-        <baseline-dir>/ <baseline-registry-file>
+fak sync check
+fak commit \
+  --path <baseline-dir>/ --path <baseline-registry-file> \
+  -m "<plan>: <phase> — baseline snapshot (measure-then-change)"
 ```
 
 The registry row encodes "this baseline exists, here's what it measures, here's its rebaseline cadence." Without it, future tools can't audit the on-disk dir against ground truth — only the operator's memory ties them.

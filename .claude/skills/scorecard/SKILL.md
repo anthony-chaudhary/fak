@@ -140,9 +140,9 @@ Whichever surface you're on, the pass is the same five steps:
    to zero. A token added only to move a metric is the gaming this refuses.
 4. **Re-measure + prove** — `--compare baseline.json` prints the debt delta and the
    2×/3× verdict; regenerate the committed snapshot so the doc matches the tree.
-5. **Commit only the scorecard lane, by explicit path** — `git commit -s -F msg --
-   tools/<x>_scorecard.py tools/<x>_scorecard_test.py <data dir> <doc dir>`. Never
-   `git add -A`. End the subject with the `(fak <leaf>)` trailer.
+5. **Commit only the scorecard lane, by explicit path** — run `fak sync check` (or `fak sync reconcile --apply`), then commit via `fak commit --path`:
+   `fak commit --path tools/<x>_scorecard.py --path tools/<x>_scorecard_test.py --path <data dir> --path <doc dir> -F msg [--push]`. Never
+   `git add -A`. Push via `fak sync push`. End the subject with the `(fak <leaf>)` trailer.
 
 ---
 

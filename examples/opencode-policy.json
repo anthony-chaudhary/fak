@@ -40,6 +40,13 @@
     {
       "tool": "bash",
       "arg": "command",
+      "deny_regex": "(?i)\\bgit\\s+(commit|add|checkout\\s+-b|push)\\b",
+      "reason": "POLICY_BLOCK",
+      "fix": "Raw git mutations are prohibited on the shared trunk. Use fak commit --path <paths> -m \"<msg> (fak <leaf>)\" or fak sweep --apply to commit, and fak sync push to publish."
+    },
+    {
+      "tool": "bash",
+      "arg": "command",
       "deny_regex": "(?i)\\bgo(?:\\.exe)?\\b[^|;&\\n]*\\bclean\\b[^|;&\\n]*(?:[ \\t])--?cache(?:=(?:true|1))?(?:[ \\t]|$|[;&|])",
       "reason": "POLICY_BLOCK",
       "fix": "use the managed isolated paths: fak-dev buildcheck --vet, or fak validate --mine <paths>. For raw work, set GOCACHE to an explicitly allocated OS-temp directory and move only that exact owned directory to the platform Trash/Recycle Bin afterward. Go creates and trims caches automatically; do not clear the ambient cache opportunistically. For coordinated host maintenance only, launch the guarded session with FAK_REPO_GUARD_SEVERITY=BUILD_CACHE_CLEAN_RACE=off"

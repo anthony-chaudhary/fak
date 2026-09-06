@@ -167,8 +167,8 @@ commit discipline:
 - **Stage by explicit path, never `git add -A`** — commit *your* README, not a
   peer's half-written code:
   ```bash
-  git pull --no-rebase --no-edit          # merge integrates fine alongside dirty files
-  git commit -F <msgfile> -- README.md    # options BEFORE --, paths AFTER
+  fak sync check                          # or fak sync reconcile --apply to integrate trunk safely
+  fak commit --path README.md -F <msgfile> [--push]
   ```
 - **Doc-only diff → `docs(readme): …` subject**, NOT `fix(`/`feat(`. A
   code-effect prefix on a docs-only diff overclaims — keep the prefix honest to
@@ -179,7 +179,7 @@ commit discipline:
   merge`): **wait for it to clear** — don't abort or work around it. Markdown
   self-heals; re-try the pathspec commit once `MERGE_HEAD` is gone.
 - **Stay on the trunk (`main`)** — never branch or worktree to dodge a
-  dirty/diverged tree. Push promptly: `git push`.
+  dirty/diverged tree. Push promptly via `fak sync push` (or `--push`).
 
 If a release just happened, this pass typically only needs Step 4 (re-stamp to
 the new VERSION) — the auditor catches the bump immediately.

@@ -66,9 +66,13 @@ structural debt, so it retires first.
    prints the debt delta; the worklist must have shrunk and `milestone_debt` must not have
    risen. There is no per-surface markdown snapshot to regenerate (the report itself is the
    snapshot); the proof is the `--compare` delta plus the re-pinned baseline.
-5. **Commit only the milestone lane, by explicit path** —
-   `git commit -s -- docs/milestones/baseline.json <the cell/epic evidence you moved>`.
-   End the subject with the `(fak milestonereport)` trailer (or `(fak <leaf>` for the
+5. **Commit only the milestone lane, by explicit path** — run `fak sync check` (or `fak sync reconcile --apply`), then commit via `fak commit --path`:
+   ```bash
+   fak sync check
+   fak commit --path docs/milestones/baseline.json --path <the cell/epic evidence you moved> -m "<subject>" [--push]
+   fak sync push
+   ```
+   End the subject with the `(fak milestonereport)` trailer (or `(fak <leaf>)` for the
    concrete code a rung climb touched). Never `git add -A`.
 
 ## The anti-gaming law

@@ -30,7 +30,7 @@ Coordinated, conflict-free synchronization protocol for parallel subagents and i
               │
       Coordinator Process
     ┌─────────┴─────────┐
-    │  - Pre-flight checks & git fetch
+    │  - Pre-flight checks & fak sync check
     │  - Full working-tree inventory (modified + all untracked WIP)
     │  - Lane classification via `fak sweep --json` & `dos.toml`
     │  - Multi-lane arbitration loop: `dos arbitrate` per lane
@@ -77,7 +77,7 @@ Coordinated, conflict-free synchronization protocol for parallel subagents and i
 
 1. **Refresh upstream tracking without churn**:
    ```bash
-   git fetch origin main
+   fak sync check --fetch
    ```
    Inspect for mid-flight merges:
    ```bash
@@ -211,7 +211,7 @@ For each verified lane:
 3. **Push to trunk**:
    If `--push` was requested or trunk is green, push landed commits:
    ```bash
-   git push origin main
+   fak sync push
    ```
 
 4. **Emit structured sync receipt**:
@@ -247,11 +247,11 @@ For each verified lane:
 | `WRITER_LEASE_HELD` | 3 | Worktree writer lease held by an active sync-apply window (#4240). | Transient contention. Back off and poll until writer lease clears, then retry landing. |
 | `MERGE_IN_PROGRESS` | 4 | A git merge is active (`.git/MERGE_HEAD` exists). | Do not attempt path-scoped staging. Wait for merge completion or unstage local paths and halt. |
 | `PATHSPEC_RACE` | 1 | Staged commit contained files outside the requested explicit pathspec. | Commit was held locally unpushed. Inspect `git show --stat HEAD`, verify unrequested paths, unstage them, and never force-push. |
-| `PUSH_REJECTED` | 1 | Remote rejected push (non-fast-forward conflict on origin). | Run `git fetch origin main`, reconcile in place via trunk pull without `--autostash`, re-verify, and push without force. |
+| `PUSH_REJECTED` | 1 | Remote rejected push (non-fast-forward conflict on origin). | Run `fak sync reconcile --apply` (or `fak sync apply`), re-verify, and push with `fak sync push`. |
 | `STALE_BASE_DELETION` | 4 | Working copy predates upstream modifications and would silently overwrite peer lines. | Refresh modified paths from `origin/main`, reapply the subagent delta onto the fresh baseline, re-run tests, and re-commit. |
-| `STALE_UNTRACKED` | 4 | Path is untracked locally but already exists on origin/main. | Local HEAD is behind remote. Run `git fetch origin main` and compare via `git show origin/main:<path>` before landing. |
+| `STALE_UNTRACKED` | 4 | Path is untracked locally but already exists on origin/main. | Local HEAD is behind remote. Run `fak sync check --fetch` and compare via `git show origin/main:<path>` before landing. |
 | `COLLISION_RISK` | 4 | Requested write tree overlaps with a concurrent active lease holder. | Run `dos arbitrate --workspace .` to inspect conflicting holders. Wait for lease expiration or select an alternate disjoint lane from `free_clusters`. |
-| `OFF_TRUNK` | 4 | Current working tree is detached or checked out on a branch other than `main`. | Return to trunk: `git checkout main`. Sanctioned worker worktrees (`fak worktree worker`) are exempt when landing via CAS. |
+| `OFF_TRUNK` | 4 | Current working tree is detached or checked out on a branch other than `main`. | Return to trunk via `fak sync apply` (or `git checkout main`). Sanctioned worker worktrees (`fak worktree worker`) are exempt when landing via CAS. |
 | `CORE_SELF_MODIFY` | 4 | Attempted modification of frozen/core-locked files (e.g. `internal/abi/**`, policy anchors). | Abort unauthorized modification. If permitted by maintenance mandate, provide explicit `--core-lock-maintenance-witness <claim>`. |
 
 ## Verification and Witness Gate
@@ -311,10 +311,10 @@ Every execution of `git-subagent-sync` must pass the following checkable verific
 | `WRITER_LEASE_HELD` | 3 | Worktree writer lease held by an active sync-apply window (#4240). | Transient contention. Back off and poll until writer lease clears, then retry landing. |
 | `MERGE_IN_PROGRESS` | 4 | A git merge is active (`.git/MERGE_HEAD` exists). | Do not attempt path-scoped staging. Wait for merge completion or unstage local paths and halt. |
 | `PATHSPEC_RACE` | 1 | Staged commit contained files outside the requested explicit pathspec. | Commit was held locally unpushed. Inspect `git show --stat HEAD`, verify unrequested paths, unstage them, and never force-push. |
-| `PUSH_REJECTED` | 1 | Remote rejected push (non-fast-forward conflict on origin). | Run `git fetch origin main`, reconcile in place via trunk pull without `--autostash`, re-verify, and push without force. |
+| `PUSH_REJECTED` | 1 | Remote rejected push (non-fast-forward conflict on origin). | Run `fak sync reconcile --apply` (or `fak sync apply`), re-verify, and push with `fak sync push`. |
 | `STALE_BASE_DELETION` | 4 | Working copy predates upstream modifications and would silently overwrite peer lines. | Refresh modified paths from `origin/main`, reapply the subagent delta onto the fresh baseline, re-run tests, and re-commit. |
 | `COLLISION_RISK` | 4 | Requested write tree overlaps with a concurrent active lease holder. | Run `dos arbitrate --workspace .` to inspect conflicting holders. Wait for lease expiration or select an alternate disjoint lane from `free_clusters`. |
-| `OFF_TRUNK` | 4 | Current working tree is detached or checked out on a branch other than `main`. | Return to trunk: `git checkout main`. Sanctioned worker worktrees (`fak worktree worker`) are exempt when landing via CAS. |
+| `OFF_TRUNK` | 4 | Current working tree is detached or checked out on a branch other than `main`. | Return to trunk via `fak sync apply` (or `git checkout main`). Sanctioned worker worktrees (`fak worktree worker`) are exempt when landing via CAS. |
 | `CORE_SELF_MODIFY` | 4 | Attempted modification of frozen/core-locked files (e.g. `internal/abi/**`, policy anchors). | Abort unauthorized modification. If permitted by maintenance mandate, provide explicit `--core-lock-maintenance-witness <claim>`. |
 
 ## Verification and Witness Gate

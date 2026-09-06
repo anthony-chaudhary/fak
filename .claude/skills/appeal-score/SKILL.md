@@ -118,18 +118,19 @@ trip a freshness FAIL (a dead link, a stale version pin), and re-stamp the
 This is a shared trunk; commit *your* doc, never a peer's work:
 
 ```bash
-git commit -s -F <msgfile> -- README.md          # options BEFORE --, paths AFTER
+fak sync check                                   # or fak sync reconcile --apply to integrate trunk safely
+fak commit --path README.md -F <msgfile> [--push]
+fak sync push
 ```
 
-- **Stage by explicit path, never `git add -A`.** Stage and commit in one shell
-  call so a peer's bare commit can't sweep your staged files.
+- **Stage by explicit path via `fak commit --path`, never `git add -A`.**
 - **Doc-only diff → a `docs(scope): <verb> …` subject** (lead with a recognized
   verb: rewrite/cut/split/trim), end with the `(fak <leaf>)` trailer. A
   code-effect prefix on a docs-only diff overclaims.
 - **On Windows, pass the message via a file** (`-F`), not a here-string.
 - **If a peer's `MERGE_HEAD` is set**, wait for it to clear; don't abort or work
   around it. Then commit by explicit path.
-- **Stay on the trunk (`main`)**; push promptly.
+- **Stay on the trunk (`main`)**; push promptly via `fak sync push` (or `--push`).
 
 ---
 

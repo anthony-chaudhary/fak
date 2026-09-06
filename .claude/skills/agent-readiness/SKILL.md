@@ -161,12 +161,17 @@ If you added or removed a scorecard surface, also re-fold the portfolio:
 This is a shared trunk; commit *your* lane, never a peer's work:
 
 ```bash
-git commit -s -F <msgfile> -- internal/agentreadinessscore/agentreadinessscore.go \
-  internal/agentreadinessscore/agentreadinessscore_test.go cmd/fak/agentreadinessscore.go \
-  docs/AGENT-READINESS-SCORECARD.md
+fak sync check                                   # or fak sync reconcile --apply to integrate trunk safely
+fak commit \
+  --path internal/agentreadinessscore/agentreadinessscore.go \
+  --path internal/agentreadinessscore/agentreadinessscore_test.go \
+  --path cmd/fak/agentreadinessscore.go \
+  --path docs/AGENT-READINESS-SCORECARD.md \
+  -F <msgfile> [--push]
+fak sync push
 ```
 
-- **Stage by explicit path, never `git add -A`** — stage + commit in one shell
+- **Stage by explicit path via `fak commit --path`, never `git add -A`** — stage + commit in one shell
   call so a peer's bare commit can't sweep your files.
 - **Subject:** a code change to the tool → `feat(tools): … (fak tools)`; a
   docs-only snapshot regen → `docs(scorecard): … (fak docs)`. End with the

@@ -204,18 +204,23 @@ to confirm the portfolio still folds.
 This is a shared trunk; commit *your* lane, never a peer's work:
 
 ```bash
-git commit -s -F <msgfile> -- \
-  tools/industry_scorecard.py tools/industry_scorecard_test.py \
-  tools/industry_scorecard.data docs/industry-scorecard
+fak sync check                                   # or fak sync reconcile --apply to integrate trunk safely
+fak commit \
+  --path tools/industry_scorecard.py \
+  --path tools/industry_scorecard_test.py \
+  --path tools/industry_scorecard.data \
+  --path docs/industry-scorecard \
+  -F <msgfile> [--push]
+fak sync push
 ```
 
-- **Stage by explicit path, never `git add -A`.** Stage and commit in one shell call.
+- **Stage by explicit path via `fak commit --path`, never `git add -A`.** Stage and commit in one shell call.
 - **Data + generated-doc diff → a `docs(benchmark): …` or `chore(scorecard): …`
   subject**, lead with a verb, end with the `(fak tools)` trailer. A code-effect prefix
   on a data/doc diff overclaims.
 - **On Windows, pass the message via a file** (`-F`), not a here-string.
 - **If a peer's `MERGE_HEAD` is set**, wait for it to clear; commit by explicit path.
-- **Stay on the trunk (`main`)**; push promptly.
+- **Stay on the trunk (`main`)**; push promptly via `fak sync push` (or `--push`).
 
 ---
 

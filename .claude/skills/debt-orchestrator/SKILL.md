@@ -239,9 +239,9 @@ When the parallel subagents finish:
    fak code-debt --path internal/<lane>
    ```
 6. **Mandatory Leak Audit (For `fak` Public Commits)**:
-   Before staging or committing any public change, execute the leak scrubber audit:
+   Before staging or committing any public change, run `fak sync check` (which audits `PUBLIC_LEAK` before commit) or execute the leak scrubber audit:
    ```bash
-   git add internal/<lane>
+   fak sync check
    python tools/scrub_public_copy.py --audit-staged --root .
    ```
    *MUST pass with 0 exit code before proceeding.*

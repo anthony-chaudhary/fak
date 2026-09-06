@@ -58,10 +58,13 @@ rest of the family.
    /tmp/stability-before.json` prints the debt delta and the ≥2× verdict; regenerate the
    committed snapshot: `python tools/stability_scorecard.py --markdown --stamp DATE >
    docs/STABILITY-SCORECARD.md`.
-5. **Commit only the scorecard lane, by explicit path** —
-   `git commit -s -- tools/stability_scorecard.py tools/stability_scorecard_test.py
-   docs/STABILITY-SCORECARD.md <the affordance you added>`. End the subject with the
-   `(fak stability)` trailer. Never `git add -A`.
+5. **Commit only the scorecard lane, by explicit path** — run `fak sync check` (or `fak sync reconcile --apply`), then commit via `fak commit --path`:
+   ```bash
+   fak sync check
+   fak commit --path tools/stability_scorecard.py --path tools/stability_scorecard_test.py --path docs/STABILITY-SCORECARD.md --path <the affordance you added> -m "<subject>" [--push]
+   fak sync push
+   ```
+   End the subject with the `(fak stability)` trailer. Never `git add -A`.
 
 ## The anti-gaming law
 

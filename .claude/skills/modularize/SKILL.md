@@ -201,24 +201,25 @@ pass is **the heaviest architecture defect retired with behaviour proven green**
 ## Step 6 — Commit ONLY your packages, by explicit path
 
 ```bash
+fak sync check                                 # or fak sync reconcile --apply
 git status --porcelain                         # see which files peers are editing RIGHT NOW
-git add -- <your new files only>               # NEVER git add -A on this shared tree
-git commit -s \
+fak commit \
+  --path <orig.go> --path <your new files> \
   -m "refactor(<leaf>): split <file> by concern" \
   -m "Pure code motion, no behavior change. <file> N->M lines; extracted <a.go>, <b.go>. Verified build/vet/test green." \
-  -- <orig.go> <your new files>                # path-scoped: excludes peer-staged files
-git push
+  [--push]
+fak sync push
 ```
 
 - **Route around peer WIP.** A file showing in `git status --porcelain` is being edited by a
   peer — do NOT split it this pass; pick a clean target. A path-scoped commit leaves peer-staged
-  files alone (you'll see them in `git diff --cached` — that's expected; your `-- <paths>` excludes
+  files alone (you'll see them in `git diff --cached` — that's expected; your `--path` excludes
   them from the commit).
 - **Honest subject.** A split/extraction is `refactor(<scope>):` — never `feat(`/`fix(`. End every
   ship commit with a `(fak <leaf>)` trailer (`(fak gateway)`, `(fak model)`; a `cmd/<dir>` demo →
   `(fak <dir>)`).
 - **Shared-trunk law.** Stay on `main` (the `OFF_TRUNK` guard refuses a branch — this is why
-  worktrees don't work, see below). Commit by explicit path; if a peer's `MERGE_HEAD` is set, wait
+  worktrees don't work, see below). Commit by explicit path via `fak commit --path`; if a peer's `MERGE_HEAD` is set, wait
   for it to clear; never force-push.
 
 ## Parallelizing across many targets (when there are several god-files)

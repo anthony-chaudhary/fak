@@ -23,9 +23,9 @@ and never route around the guard.** The refusals you will actually meet:
 
 | refusal | what it means | the move |
 |---|---|---|
-| `OFF_TRUNK` | you are not on `main` | `git checkout main`. Never open a feature branch — the trunk guard refuses off-trunk commits by design |
+| `OFF_TRUNK` | you are not on `main` | Return to main: `fak sync apply` (or `git checkout main`). Never open a feature branch — the trunk guard refuses off-trunk commits by design |
 | `COLLISION_RISK` | your write overlaps a live sibling's lease | re-read `dos arbitrate --workspace .`; take a leaf in YOUR lane. **Never `--force`** |
-| `STALE_BASE_DELETION` | you are deleting a file a peer just landed | `git fetch` / re-read the file at HEAD; you are working from a stale base |
+| `STALE_BASE_DELETION` | you are deleting a file a peer just landed | `fak sync check --fetch` / re-read the file at HEAD; you are working from a stale base |
 | `MERGE_IN_PROGRESS` | a peer merge is in flight | wait and retry the commit; it clears on its own |
 | `SELF_MODIFY` / `ESCALATE` | you touched a core-lock path (`policy.json`, `.mcp.json`, `.claude/**`, `dos.toml`) | that work is **not dispatchable as lane work** — Write/Edit are refused on the path too, so the lease is moot. File it as an issue and take a different leaf |
 | `PUBLIC_LEAK` | your text carries an absolute path, hostname, or personal identifier | rewrite the text relative-and-anonymous, then re-propose |

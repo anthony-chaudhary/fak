@@ -102,15 +102,17 @@ actively-written tree.
 
 ## Step 5 — Commit the quiescent curation lane (explicit path only)
 
-Stage every doc/index/tool path you curated **by explicit path** — never
+Stage every doc/index/tool path you curated **by explicit path** via `fak commit --path` — never
 `git add -A`, never an exclude-glob sweep. List exactly the files you touched:
 
 ```bash
-git add -- INDEX.md <each curated doc> <each tool>   # explicit paths only
+fak sync check
 # guard: confirm no live code lane or ignored artifact slipped in
-git diff --cached --name-only | grep -iE '\.exe$|\.dos/' && echo VIOLATION || echo OK
-git commit -m "Curate cluster: <one-line of what changed>" -- \
-  INDEX.md <each curated doc> <each tool>
+git status --porcelain | grep -iE '\.exe$|\.dos/' && echo VIOLATION || echo OK
+fak commit \
+  --path INDEX.md --path <each curated doc> --path <each tool> \
+  -m "Curate cluster: <one-line of what changed>" [--push]
+fak sync push
 ```
 
 Keep the commit body to a few bullets: index entries added, counts/context fixed,

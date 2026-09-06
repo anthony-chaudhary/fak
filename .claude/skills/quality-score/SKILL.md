@@ -146,11 +146,10 @@ commit too, so "I fixed it" is backed by evidence the committing agent can't
 author:
 
 ```bash
-git pull --no-rebase --no-edit                   # merge integrates fine alongside dirty peer files
-git add <your explicit paths>                    # NEVER git add -A on this shared tree
-git commit -s -m "<conventional subject>" -m "<body: N→M debt, what changed>" -m "(fak <leaf>)"
+fak sync check                                    # or fak sync reconcile --apply to integrate trunk safely
+fak commit --path <your explicit paths> -m "<conventional subject>" -m "<body: N→M debt, what changed>" -m "(fak <leaf>)"
 dos commit-audit HEAD                             # MUST print [diff-witnessed] / verdict OK
-git push
+fak sync push
 ```
 
 - **Subject honesty.** New tests + fmt → `test(<scope>):` or `style(fmt):`. A
@@ -163,7 +162,7 @@ git push
   verdict is the green light. This is the same rung the `ship_integrity` KPI
   scores, applied to your own work.
 - **Shared-trunk discipline.** Stay on `main` (the `OFF_TRUNK` guard refuses a
-  branch). Commit by explicit path. If a peer's `MERGE_HEAD` is set
+  branch). Commit by explicit path via `fak commit --path`. If a peer's `MERGE_HEAD` is set
   (`cannot do a partial commit during a merge`): wait for it to clear, then
   re-try the pathspec commit. Never force-push.
 

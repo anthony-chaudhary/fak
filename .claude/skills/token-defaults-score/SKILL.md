@@ -68,10 +68,14 @@ unwitnessed lever on to score.** Produce the witness first.
    (`go run ./cmd/fak token-defaults-scorecard --markdown > docs/serving/token-defaults-scorecard.md`);
    run the locks (`go test ./cmd/fak -run TestTokenDefault`).
 
-5. **Commit only the scorecard lane, by explicit path** — never `git add -A`. End the
+5. **Commit only the scorecard lane, by explicit path** — run `fak sync check` (or `fak sync reconcile --apply`), then commit via `fak commit --path` (never `git add -A`). End the
    subject with the `(fak <leaf>)` trailer (stamp the dominant leaf — `tools` for a
-   scorecard-only pass, `gateway`/`cmd` when the same pass flips a default). e.g.
-   `git commit -s -F msg -- cmd/fak/token_defaults.go cmd/fak/token_defaults_test.go docs/serving/token-defaults-scorecard.md`
+   scorecard-only pass, `gateway`/`cmd` when the same pass flips a default). Push via `fak sync push` or `[--push]`. e.g.
+   ```bash
+   fak sync check
+   fak commit --path cmd/fak/token_defaults.go --path cmd/fak/token_defaults_test.go --path docs/serving/token-defaults-scorecard.md -F msg [--push]
+   fak sync push
+   ```
 
 ## The anti-gaming rule (this surface)
 

@@ -145,10 +145,10 @@ Commit `tools/scorecard_baseline.json` in the same lane (the control pane reads 
 ## Step 5 — Ground the ship in DOS, then commit ONLY your lane
 
 ```bash
-git pull --no-rebase --no-edit                   # merge integrates alongside dirty peer files
-git commit -s -F <msgfile> -- <your explicit paths>   # options BEFORE --, paths AFTER
+fak sync check                                    # or fak sync reconcile --apply to integrate trunk safely
+fak commit --path <your explicit paths> -F <msgfile>
 dos commit-audit HEAD                             # MUST print [diff-witnessed] / verdict OK
-git push
+fak sync push
 ```
 
 - **Subject honesty.** A de-dup extraction → `refactor(<scope>): extract … (#776)`. A
@@ -161,8 +161,7 @@ git push
   diff doesn't back your subject — reword to what the diff actually did. `[diff-witnessed]`
   is the green light.
 - **Shared-trunk discipline.** Stay on `main` (the `OFF_TRUNK` guard refuses a branch).
-  Stage and commit by explicit path in ONE shell call so a peer's bare commit can't sweep
-  your staged files — NEVER `git add -A`. If a peer's `MERGE_HEAD` is set
+  Stage and commit by explicit path via `fak commit --path` — NEVER `git add -A`. If a peer's `MERGE_HEAD` is set
   (`cannot do a partial commit during a merge`), wait for it to clear, then re-try the
   pathspec commit. Never force-push.
 

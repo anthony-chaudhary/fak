@@ -1,6 +1,6 @@
 ---
 name: debt-orchestrator
-description: Plan, partition, and coordinate sustained multi-wave parallel subagent campaigns to retire large volumes of maturity debt across both the public fak engine and private fak-private platform repositories. Uses `fak debt-orchestrator` to partition candidate lanes into pairwise...
+description: Plan, partition, and coordinate sustained multi-wave parallel subagent campaigns to retire large volumes of maturity debt across both the public fak engine and private fak-private platform repositories. Defaults to...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/debt-orchestrator/SKILL.md

@@ -174,9 +174,10 @@ work. Include a Conventional-Commits subject, signed-off DCO (`-s`), and the req
 
 - **For public `fak` commits**:
   ```bash
-  git add <unit_of_work>
+  fak sync check
   python tools/scrub_public_copy.py --audit-staged --root .
-  git commit -s -m "fix(<target>): advance maturity curve and retire debt (fak <target>)" -- <unit_of_work>
+  fak commit --path <unit_of_work> -m "fix(<target>): advance maturity curve and retire debt (fak <target>)" [--push]
+  fak sync push
   ```
 - **For private `fak-private` commits**:
   ```bash

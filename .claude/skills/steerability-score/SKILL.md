@@ -148,10 +148,10 @@ and mangles the `·`/`×`/`—` glyphs.)
 ## Step 5 — Commit ONLY your lane, by explicit path
 
 ```bash
-git pull --no-rebase --no-edit
-git commit -s -F msg -- tools/steerability_scorecard.py tools/steerability_scorecard_test.py docs/STEERABILITY-SCORECARD.md
+fak sync check                                    # or fak sync reconcile --apply to integrate trunk safely
+fak commit --path tools/steerability_scorecard.py --path tools/steerability_scorecard_test.py --path docs/STEERABILITY-SCORECARD.md -F msg
 dos commit-audit HEAD                             # MUST print [diff-witnessed] / verdict OK
-git push
+fak sync push
 ```
 
 If your pass did real refactoring in a kernel package, commit that package in its OWN

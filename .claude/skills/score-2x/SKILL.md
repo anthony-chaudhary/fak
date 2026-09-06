@@ -188,11 +188,10 @@ Stay on `main` (the `OFF_TRUNK` guard refuses a branch). Commit by explicit path
 never `git add -A` on this shared tree:
 
 ```bash
-git pull --no-rebase --no-edit
-git add <your genuine-fix paths> docs/<X>-SCORECARD.md      # + tools/<x>_scorecard.py tools/scorecard_baseline.json on a harden
-git commit -s -m "<conventional subject>" -m "<body: N→M debt (or 'harden: bar X→Y'), what changed>" -m "(fak <leaf>)"
+fak sync check                                               # or fak sync reconcile --apply to integrate trunk safely
+fak commit --path <your genuine-fix paths> --path docs/<X>-SCORECARD.md -m "<conventional subject>" -m "<body: N→M debt (or 'harden: bar X→Y'), what changed>" -m "(fak <leaf>)"
 dos commit-audit HEAD                                        # MUST print [diff-witnessed] / verdict OK
-git push
+fak sync push
 ```
 
 - **Subject honesty.** A debt-retiring pass → the verb that matches the fix
@@ -202,7 +201,7 @@ git push
 - **`dos commit-audit HEAD` is the gate.** `[diff-witnessed]` is the green light;
   `subject-only` / CLAIM_UNWITNESSED means your diff doesn't back your subject —
   reword to what the diff did (or add the missing change).
-- **Default is to ship.** Once the lane is green (`make ci`), commit AND push; don't
+- **Default is to ship.** Once the lane is green (`make ci`), commit AND push via `fak sync push` (or `--push`); don't
   wait to be asked. Defer to the guard (`OFF_TRUNK`, a peer `MERGE_HEAD` in flight —
   wait for it to clear, then re-try the pathspec commit). Never force-push.
 

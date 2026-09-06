@@ -108,14 +108,13 @@ version and re-pin the control pane. Zero is a current observation, not a comple
 ## Step 4 — Commit ONLY the skill lane, by explicit path
 
 ```bash
-git pull --no-rebase --no-edit
-git add <the SKILL.md files you fixed> cmd/fak/skill_effectiveness.go docs/SKILL-EFFECTIVENESS-SCORECARD.md
-git commit -s -m "<subject>" -m "<body: N→M skill-debt, what changed>" -m "(fak <leaf>)"
+fak sync check                                           # or fak sync reconcile --apply to integrate trunk safely
+fak commit --path <the SKILL.md files you fixed> --path cmd/fak/skill_effectiveness.go --path docs/SKILL-EFFECTIVENESS-SCORECARD.md -m "<subject>" -m "<body: N→M skill-debt, what changed>" -m "(fak <leaf>)"
 dos commit-audit HEAD                                    # MUST print [diff-witnessed] / verdict OK
-git push
+fak sync push
 ```
 
-- **Commit by explicit path**, never `git add -A` on this shared tree (the exact rule
+- **Commit by explicit path via `fak commit --path`**, never `git add -A` on this shared tree (the exact rule
   the `commit_discipline` KPI enforces — eat the dogfood). Stay on `main`; if a peer's
   `MERGE_HEAD` is set, wait for it to clear, then re-try the pathspec commit.
 - End the subject with a `(fak <leaf>)` trailer; `docs(skills):` for a skill-text pass.

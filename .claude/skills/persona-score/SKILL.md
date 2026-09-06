@@ -151,14 +151,17 @@ If you added or removed a scorecard surface, re-fold the portfolio and re-pin:
 This is a shared trunk; commit *your* lane, never a peer's work:
 
 ```bash
-git commit -s -F <msgfile> -- \
-  tools/persona_readiness_scorecard.py \
-  tools/persona_readiness_scorecard_test.py \
-  tools/persona_readiness_scorecard.data/ \
-  docs/persona-scorecard/
+fak sync check                                   # or fak sync reconcile --apply to integrate trunk safely
+fak commit \
+  --path tools/persona_readiness_scorecard.py \
+  --path tools/persona_readiness_scorecard_test.py \
+  --path tools/persona_readiness_scorecard.data \
+  --path docs/persona-scorecard \
+  -F <msgfile> [--push]
+fak sync push
 ```
 
-- **Stage by explicit path, never `git add -A`** — stage + commit in one shell call
+- **Stage by explicit path via `fak commit --path`, never `git add -A`** — stage + commit in one shell call
   so a peer's bare commit can't sweep your files.
 - **Subject:** a tool/data change → `feat(tools): … (fak tools)`; a docs-only
   snapshot regen → `docs(scorecard): … (fak docs)`. End with the `(fak <leaf>)`
