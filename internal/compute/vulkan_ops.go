@@ -1,4 +1,4 @@
-//go:build vulkan && windows
+//go:build vulkan && (windows || linux) && cgo
 
 package compute
 
@@ -9,6 +9,8 @@ package compute
 #include "vulkan_backend.h"
 */
 import "C"
+
+import "fmt"
 
 // RMSNorm applies row-wise RMS normalization scaled by weight (eps in the denominator)
 // to each row of x, returning a new device tensor of the same shape.

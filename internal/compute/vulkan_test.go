@@ -1,4 +1,4 @@
-//go:build vulkan && windows && cgo
+//go:build vulkan && (windows || linux) && cgo
 
 package compute
 
@@ -24,7 +24,16 @@ import (
 func vk(t *testing.T) *vulkanBackend {
 	b, ok := Lookup("vulkan")
 	if !ok {
+		if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
+			t.Fatal("required Vulkan device is not registered")
+		}
 		t.Skip("vulkan backend not registered (no reachable Vulkan device)")
+	}
+	if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
+		t.Logf("Vulkan device: %s", b.Tier())
+		if expected := os.Getenv("FAK_VULKAN_EXPECT_DEVICE"); expected != "" && !strings.Contains(strings.ToLower(b.Tier()), strings.ToLower(expected)) {
+			t.Fatalf("Vulkan device %q does not match required device %q", b.Tier(), expected)
+		}
 	}
 	return b.(*vulkanBackend)
 }

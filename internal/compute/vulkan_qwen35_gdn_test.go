@@ -1,4 +1,4 @@
-//go:build vulkan && windows && cgo
+//go:build vulkan && (windows || linux) && cgo
 
 package compute
 

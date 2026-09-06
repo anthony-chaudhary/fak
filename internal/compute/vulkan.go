@@ -1,9 +1,10 @@
-//go:build vulkan && windows
+//go:build vulkan && (windows || linux) && cgo
 
-// vulkan.go registers a Windows Vulkan compute backend behind the compute.Backend seam.
+// vulkan.go registers a Vulkan compute backend behind the compute.Backend seam.
 // It mirrors cuda.go closely: default builds exclude it, it is Approx rather than
 // Reference, and device buffers are opaque handles that the Go forward loop never
-// dereferences. The C++ shim is built offline by build_vulkan.ps1 into libfakvulkan.a.
+// dereferences. The C++ shim is built offline into libfakvulkan.a; see
+// docs/compute/vulkan-linux.md for Linux and build_vulkan.ps1 for Windows.
 
 package compute
 

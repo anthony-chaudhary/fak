@@ -1,10 +1,10 @@
-//go:build vulkan && windows
+//go:build vulkan && (windows || linux) && cgo
 
 package compute
 
 // vulkan_plan_vulkan.go — the Vulkan half of the issue #10 command-buffer wiring. It is
-// compiled ONLY under -tags vulkan (and Windows, where the AMD GPU is reachable through the
-// Vulkan loader) and does nothing but pin the contract: the Vulkan backend, which already
+// compiled ONLY under -tags vulkan on Linux or Windows and pins the contract: the
+// Vulkan backend, which already
 // exposes BeginBatch/FlushBatch (vulkan.go), MUST satisfy the BatchRecorder seam declared in
 // the always-compiled vulkan_plan.go. If a future edit changes either side's signature, this
 // assertion fails the Vulkan build instead of silently degrading the forward pass back to a
