@@ -885,6 +885,42 @@ func handleSessionApproval(source any, s *store) http.HandlerFunc {
 				writeSessionJSON(w, http.StatusConflict, map[string]string{"error": "approval resolution failed: " + err.Error()})
 				return
 			}
+			if sessSrc, ok := source.(SessionSource); ok {
+				broadcastCards(sessSrc)
+			} else if source != nil {
+				broadcastCards(source)
+			} else {
+				hubCards := defaultSessionHub.currentCards()
+				updated := false
+				for i := range hubCards {
+					if hubCards[i].ID == id {
+						if hubCards[i].PendingApproval != nil || hubCards[i].State == sessionAwaitingApproval {
+							hubCards[i].State = sessionWorking
+							hubCards[i].PendingApproval = nil
+							hubCards[i].PendingInteraction = ""
+							updated = true
+						}
+						break
+					}
+				}
+				if updated {
+					if norm, err := normalizeSessionCards(hubCards); err == nil {
+						if markup, err := renderSessionCardsHTML(norm, time.Now(), false); err == nil {
+							defaultSessionHub.mu.Lock()
+							defaultSessionHub.lastCards = cloneSessionCards(norm)
+							defaultSessionHub.lastHTML = markup
+							defaultSessionHub.mu.Unlock()
+
+							if updatePayload, err := json.Marshal(map[string]any{
+								"sessions": norm,
+								"html":     markup,
+							}); err == nil {
+								defaultSessionHub.broadcast("session_update", updatePayload)
+							}
+						}
+					}
+				}
+			}
 			defaultSessionHub.broadcastSession(id, "approval_resolved", []byte(fmt.Sprintf(`{"session_id":%q,"resolution":%q,"approval_id":%q}`, id, resolution, approvalID)))
 			writeSessionJSON(w, http.StatusOK, map[string]any{
 				"status":      "accepted",
@@ -983,6 +1019,8 @@ func handleSessionApproval(source any, s *store) http.HandlerFunc {
 			if resolved {
 				if sessSrc, ok := source.(SessionSource); ok {
 					broadcastCards(sessSrc)
+				} else if source != nil {
+					broadcastCards(source)
 				}
 				defaultSessionHub.broadcastSession(id, "approval_resolved", []byte(fmt.Sprintf(`{"session_id":%q,"resolution":%q,"approval_id":%q}`, id, resolution, approvalID)))
 				writeSessionJSON(w, http.StatusOK, map[string]any{

@@ -1,6 +1,7 @@
 package harnessweb
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -682,6 +683,7 @@ func TestSessionApprovalNonResolverSourceFallbackAndError(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/sessions/{id}/approval", HandleSessionApproval(source, s))
+	mux.HandleFunc("GET /api/sessions/events", handleSessionSSE(false))
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
@@ -730,6 +732,25 @@ func TestSessionApprovalNonResolverSourceFallbackAndError(t *testing.T) {
 		t.Fatalf("endpoint falsely reported resolved=true on failed store resolution")
 	}
 
+	// Subscribe an SSE client to verify that store fallback triggers a card broadcast
+	resetSessionHubForTest()
+	defer resetSessionHubForTest()
+
+	sseReq, err := http.NewRequest(http.MethodGet, ts.URL+"/api/sessions/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sseRes, err := ts.Client().Do(sseReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sseRes.Body.Close()
+	sseReader := bufio.NewReader(sseRes.Body)
+	evConn, _ := readSSEEvent(t, sseReader)
+	if evConn != "connected" {
+		t.Fatalf("expected connected event on SSE, got %q", evConn)
+	}
+
 	// 3. Invoking approval for runID with valid approval ID triggers store fallback and resolves approval in store.
 	goodRes, err := ts.Client().Post(
 		ts.URL+"/api/sessions/"+runID+"/approval",
@@ -752,12 +773,286 @@ func TestSessionApprovalNonResolverSourceFallbackAndError(t *testing.T) {
 		t.Fatalf("unexpected response body for store fallback: %+v", goodBody)
 	}
 
+	// Verify that resolveViaStore triggered a card broadcast (session_update event)
+	evUpdate, updateData := readSSEEvent(t, sseReader)
+	if evUpdate != "session_update" {
+		t.Fatalf("expected session_update event from card broadcast on store fallback, got %q", evUpdate)
+	}
+	if !strings.Contains(updateData, runID) {
+		t.Fatalf("expected session_update payload to contain runID %q: %s", runID, updateData)
+	}
+
+	// Verify that approval_resolved event follows the card broadcast
+	evResolved, resolvedData := readSSEEvent(t, sseReader)
+	if evResolved != "approval_resolved" {
+		t.Fatalf("expected approval_resolved event on store fallback, got %q", evResolved)
+	}
+	if !strings.Contains(resolvedData, runID) || !strings.Contains(resolvedData, "accept") {
+		t.Fatalf("unexpected approval_resolved payload: %s", resolvedData)
+	}
+
 	// Verify that the run in store was genuinely resolved
 	s.mu.RLock()
 	st := s.runs[runID]
 	s.mu.RUnlock()
 	if st == nil || !st.resolved {
 		t.Fatalf("expected store run %s to be resolved, got %+v", runID, st)
+	}
+}
+
+type storeAwareSessionSource struct {
+	s     *store
+	runID string
+}
+
+func (m *storeAwareSessionSource) Sessions(context.Context) ([]SessionCard, error) {
+	state := sessionAwaitingApproval
+	var app *SessionApproval
+	interaction := "approval requested"
+	if m.s != nil {
+		m.s.mu.RLock()
+		st := m.s.runs[m.runID]
+		if st != nil && st.resolved {
+			state = sessionWorking
+			interaction = ""
+		} else {
+			app = &SessionApproval{
+				ApprovalID: "approval-store-1",
+				ToolName:   "Bash",
+				Command:    "make test-fast",
+			}
+		}
+		m.s.mu.RUnlock()
+	}
+	return []SessionCard{
+		{
+			ID:                 m.runID,
+			Provider:           "codex",
+			Workspace:          "/test/ws",
+			State:              state,
+			PendingInteraction: interaction,
+			PendingApproval:    app,
+			LastEventAt:        time.Now(),
+			HasInputLease:      true,
+			Capabilities:       map[string]SessionCapability{"cancel": {Enabled: true}},
+		},
+	}, nil
+}
+
+func (m *storeAwareSessionSource) Control(context.Context, SessionControlRequest) error {
+	return nil
+}
+
+func TestSessionApprovalStoreFallbackBroadcastsUpdatedCards(t *testing.T) {
+	resetSessionHubForTest()
+	defer resetSessionHubForTest()
+
+	s := newStore()
+	runID := s.create("approval: inspect workspace")
+	source := &storeAwareSessionSource{s: s, runID: runID}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/sessions/events", handleSessionSSE(false))
+	mux.HandleFunc("POST /api/sessions/{id}/approval", HandleSessionApproval(source, s))
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sseReq, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/sessions/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sseRes, err := ts.Client().Do(sseReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sseRes.Body.Close()
+
+	reader := bufio.NewReader(sseRes.Body)
+	evConn, _ := readSSEEvent(t, reader)
+	if evConn != "connected" {
+		t.Fatalf("expected connected event, got %q", evConn)
+	}
+
+	// Post approval resolution targeting the store run (store fallback resolution path)
+	postBody := `{"resolution":"accept","approval_id":"approval-1"}`
+	res, err := ts.Client().Post(ts.URL+"/api/sessions/"+runID+"/approval", "application/json", strings.NewReader(postBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("expected 200 OK, got %d: %s", res.StatusCode, body)
+	}
+
+	// 1. Immediately assert receipt of session_update containing updated cards
+	evType, evData := readSSEEvent(t, reader)
+	if evType != "session_update" {
+		t.Fatalf("expected immediate session_update event on store fallback, got %q", evType)
+	}
+
+	var updatePayload struct {
+		Sessions []SessionCard `json:"sessions"`
+		HTML     string        `json:"html"`
+	}
+	if err := json.Unmarshal([]byte(evData), &updatePayload); err != nil {
+		t.Fatalf("failed to decode session_update payload: %v", err)
+	}
+
+	if len(updatePayload.Sessions) != 1 {
+		t.Fatalf("expected 1 session card in update, got %d", len(updatePayload.Sessions))
+	}
+	updatedCard := updatePayload.Sessions[0]
+	if updatedCard.ID != runID {
+		t.Fatalf("expected card ID %q, got %q", runID, updatedCard.ID)
+	}
+	if updatedCard.State != sessionWorking {
+		t.Fatalf("expected card state %q, got %q", sessionWorking, updatedCard.State)
+	}
+	if updatedCard.PendingApproval != nil {
+		t.Fatalf("expected nil PendingApproval after resolution, got %+v", updatedCard.PendingApproval)
+	}
+	if strings.Contains(updatePayload.HTML, "Action approval required") {
+		t.Fatalf("broadcast HTML unexpectedly contains approval modal:\n%s", updatePayload.HTML)
+	}
+
+	// 2. Assert receipt of approval_resolved event
+	evResolvedType, evResolvedData := readSSEEvent(t, reader)
+	if evResolvedType != "approval_resolved" {
+		t.Fatalf("expected approval_resolved event, got %q", evResolvedType)
+	}
+	if !strings.Contains(evResolvedData, runID) || !strings.Contains(evResolvedData, "accept") {
+		t.Fatalf("unexpected approval_resolved payload: %s", evResolvedData)
+	}
+
+	// 3. Confirm store run resolution
+	s.mu.RLock()
+	st := s.runs[runID]
+	s.mu.RUnlock()
+	if st == nil || !st.resolved {
+		t.Fatalf("store run %q was not marked resolved", runID)
+	}
+}
+
+func TestSessionApprovalStoreFallbackNilSourceHubBroadcast(t *testing.T) {
+	resetSessionHubForTest()
+	defer resetSessionHubForTest()
+
+	s := newStore()
+	runID := s.create("approval: inspect workspace")
+
+	initialCard := SessionCard{
+		ID:                 runID,
+		Provider:           "codex",
+		Workspace:          "/test/ws",
+		State:              sessionAwaitingApproval,
+		PendingInteraction: "approval requested",
+		PendingApproval: &SessionApproval{
+			ApprovalID: "approval-1",
+			ToolName:   "Bash",
+			Command:    "make test-fast",
+		},
+		LastEventAt:   time.Now(),
+		HasInputLease: true,
+		Capabilities:  map[string]SessionCapability{"cancel": {Enabled: true}},
+	}
+	normInitial, _ := normalizeSessionCards([]SessionCard{initialCard})
+	markupInitial, _ := renderSessionCardsHTML(normInitial, time.Now(), false)
+
+	defaultSessionHub.mu.Lock()
+	defaultSessionHub.lastCards = cloneSessionCards(normInitial)
+	defaultSessionHub.lastHTML = markupInitial
+	defaultSessionHub.mu.Unlock()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/sessions/events", handleSessionSSE(false))
+	mux.HandleFunc("POST /api/sessions/{id}/approval", HandleSessionApproval(nil, s))
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sseReq, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/sessions/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sseRes, err := ts.Client().Do(sseReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sseRes.Body.Close()
+
+	reader := bufio.NewReader(sseRes.Body)
+	evConn, _ := readSSEEvent(t, reader)
+	if evConn != "connected" {
+		t.Fatalf("expected connected event, got %q", evConn)
+	}
+	evInit, _ := readSSEEvent(t, reader)
+	if evInit != "session_update" {
+		t.Fatalf("expected initial session_update, got %q", evInit)
+	}
+
+	postBody := `{"resolution":"accept","approval_id":"approval-1"}`
+	res, err := ts.Client().Post(ts.URL+"/api/sessions/"+runID+"/approval", "application/json", strings.NewReader(postBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("expected 200 OK, got %d: %s", res.StatusCode, body)
+	}
+
+	// 1. Immediately assert receipt of session_update containing updated cards
+	evType, evData := readSSEEvent(t, reader)
+	if evType != "session_update" {
+		t.Fatalf("expected immediate session_update event on store fallback with nil source, got %q", evType)
+	}
+
+	var updatePayload struct {
+		Sessions []SessionCard `json:"sessions"`
+		HTML     string        `json:"html"`
+	}
+	if err := json.Unmarshal([]byte(evData), &updatePayload); err != nil {
+		t.Fatalf("failed to decode session_update payload: %v", err)
+	}
+
+	if len(updatePayload.Sessions) != 1 {
+		t.Fatalf("expected 1 session card in update, got %d", len(updatePayload.Sessions))
+	}
+	updatedCard := updatePayload.Sessions[0]
+	if updatedCard.ID != runID {
+		t.Fatalf("expected card ID %q, got %q", runID, updatedCard.ID)
+	}
+	if updatedCard.State != sessionWorking {
+		t.Fatalf("expected card state %q, got %q", sessionWorking, updatedCard.State)
+	}
+	if updatedCard.PendingApproval != nil {
+		t.Fatalf("expected nil PendingApproval after resolution, got %+v", updatedCard.PendingApproval)
+	}
+	if strings.Contains(updatePayload.HTML, "Action approval required") {
+		t.Fatalf("broadcast HTML unexpectedly contains approval modal:\n%s", updatePayload.HTML)
+	}
+
+	// 2. Assert receipt of approval_resolved event
+	evResolvedType, evResolvedData := readSSEEvent(t, reader)
+	if evResolvedType != "approval_resolved" {
+		t.Fatalf("expected approval_resolved event, got %q", evResolvedType)
+	}
+	if !strings.Contains(evResolvedData, runID) || !strings.Contains(evResolvedData, "accept") {
+		t.Fatalf("unexpected approval_resolved payload: %s", evResolvedData)
+	}
+
+	// 3. Confirm store run resolution
+	s.mu.RLock()
+	st := s.runs[runID]
+	s.mu.RUnlock()
+	if st == nil || !st.resolved {
+		t.Fatalf("store run %q was not marked resolved", runID)
 	}
 }
 
