@@ -37,6 +37,11 @@ import (
 // Kind fields is gone, while the public ctxresidency spelling remains stable.
 type CapKey = capindex.CapRef
 
+// StateEvicting marks an in-flight eviction candidate while page-out is prepared.
+// It prevents multi-evictor collision by taking the candidate out of the evictable
+// pool while the lock is temporarily released.
+const StateEvicting State = "evicting"
+
 // capState is one resident capability's tracked residency. It is the
 // per-capability analogue of a kvmmu Segment row: its residency class, its
 // coldness clock (for the LRU eviction pick), its CAS-pin (in-flight) flag, the
@@ -50,7 +55,7 @@ type capState struct {
 	pinned     bool     // CAS-pinned: an in-flight invocation holds it; NEVER evicted.
 	tier       Tier     // base-context layout tier (Rung 4, #1262); spine/policy are NEVER paged.
 	lastUse    int64    // monotonic access seq; the smallest is the COLDEST.
-	state      State    // resident (has dependents) | evictable (none) | held (evicted).
+	state      State    // resident (has dependents) | evictable (none) | evicting (in-flight) | held (evicted).
 	pageID     string   // ctxmmu held id once paged out (re-fault pages in through it).
 }
 
@@ -210,6 +215,7 @@ func blastOf(st *capState) BlastRadius {
 //   - HELD capabilities are already evicted (skipped).
 //   - PINNED (in-flight) and RESIDENT (has live dependents) capabilities are
 //     NEVER evicted — held in residence.
+//   - EVICTING capabilities are currently in-flight by another evictor (skipped).
 //   - Among the remaining EVICTABLE capabilities, the COLDEST (smallest lastUse)
 //     is chosen; ties break on the capability key for determinism.
 //
@@ -231,29 +237,16 @@ func (cr *CapResidency) EvictColdest(ctx context.Context) (evicted CapKey, radiu
 		cr.mu.Unlock()
 		return CapKey{}, BlastRadius{}, false
 	}
+	// Reserve candidate in StateEvicting so concurrent evictors select different candidates.
+	victim.state = StateEvicting
+
 	// MEASURE before the drop: this is the cost an evict actually incurs.
 	radius = blastOf(victim)
 	key := victim.key
-	body := victim.tokens
 	victimLastUse := victim.lastUse
 	mmu := cr.mmu
 	hook := cr.unlockHook
 	cr.mu.Unlock()
-
-	// WITNESS the eviction through the shared ctxmmu gate (outside the tracker
-	// lock — the gate has its own lock). A page-out keys the re-fault on a held
-	// id and pins the bytes in CAS so the gated PageInBody can restore them.
-	var pageID string
-	if mmu != nil && body > 0 {
-		// Page out a body-sized marker through the real gate. The capability
-		// body itself is owned by the resolver; what the gate holds is the
-		// witnessed, CAS-pinned page-out the re-fault round-trips. A
-		// body-length placeholder keeps the held-ledger accounting honest
-		// (a >0 length the gate will pin and a Clear() must re-admit).
-		if id, paged := mmu.PageOutBody(ctx, make([]byte, body)); paged {
-			pageID = id
-		}
-	}
 
 	if hook != nil {
 		hook()
@@ -261,14 +254,33 @@ func (cr *CapResidency) EvictColdest(ctx context.Context) (evicted CapKey, radiu
 
 	cr.mu.Lock()
 	defer cr.mu.Unlock()
-	// Re-read under the lock: a concurrent Fault may have re-admitted it,
-	// advanced its lastUse, or transitioned its state away from evictable.
+	// Re-read under the lock: a concurrent Fault or Touch may have re-admitted it,
+	// advanced its lastUse, or transitioned its state away from evicting.
 	// If the capability was re-faulted, pinned, or altered while the lock was
-	// released, abort the eviction to preserve the live resident capability.
+	// released, abort the eviction and restore proper state.
 	st, still := cr.caps[key]
-	if !still || st.lastUse > victimLastUse || st.state != StateEvictable {
+	if !still || st.lastUse > victimLastUse || st.state != StateEvicting {
+		if still && st.state == StateEvicting {
+			st.state = classify(st)
+		}
 		return CapKey{}, BlastRadius{}, false
 	}
+
+	// WITNESS the eviction through the shared ctxmmu gate only after confirming
+	// the candidate was not invalidated while unlocked. This prevents orphaned
+	// CAS page-out handles and skewed MMUCapPaged counters if eviction aborts.
+	var pageID string
+	if mmu != nil && st.tokens > 0 {
+		// Page out a body-sized marker through the real gate. The capability
+		// body itself is owned by the resolver; what the gate holds is the
+		// witnessed, CAS-pinned page-out the re-fault round-trips. A
+		// body-length placeholder keeps the held-ledger accounting honest
+		// (a >0 length the gate will pin and a Clear() must re-admit).
+		if id, paged := mmu.PageOutBody(ctx, make([]byte, st.tokens)); paged {
+			pageID = id
+		}
+	}
+
 	st.pageID = pageID
 	st.tokens = 0 // body no longer resident.
 	st.state = StateHeld
@@ -428,7 +440,7 @@ func (cr *CapResidency) Snapshot() CapSnapshot {
 		switch st.state {
 		case StateResident:
 			out.Resident++
-		case StateEvictable:
+		case StateEvictable, StateEvicting:
 			out.Evictable++
 		case StateHeld:
 			out.Held++

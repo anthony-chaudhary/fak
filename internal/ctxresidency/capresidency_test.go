@@ -3,6 +3,8 @@ package ctxresidency_test
 import (
 	"context"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	_ "github.com/anthony-chaudhary/fak/internal/blob" // registers the "blob" PageOut backend the gate pages bodies through.
@@ -290,6 +292,9 @@ func TestEvictColdestConcurrentFaultPreservesResident(t *testing.T) {
 	if snap.Resident != 1 || snap.Held != 0 || snap.Evictable != 0 {
 		t.Fatalf("snapshot counts = resident %d, held %d, evictable %d; want 1/0/0", snap.Resident, snap.Held, snap.Evictable)
 	}
+	if snap.MMUCapPaged != 0 {
+		t.Errorf("MMUCapPaged = %d, want 0 (aborted eviction must not leak speculative page-out)", snap.MMUCapPaged)
+	}
 
 	var found bool
 	for _, row := range snap.Caps {
@@ -345,6 +350,9 @@ func TestEvictColdestConcurrentFaultWithoutDependentsPreservesEvictable(t *testi
 	if snap.Evictable != 1 || snap.Held != 0 || snap.Resident != 0 {
 		t.Fatalf("snapshot counts = evictable %d, held %d, resident %d; want 1/0/0", snap.Evictable, snap.Held, snap.Resident)
 	}
+	if snap.MMUCapPaged != 0 {
+		t.Errorf("MMUCapPaged = %d, want 0 (aborted eviction must not leak speculative page-out)", snap.MMUCapPaged)
+	}
 
 	var found bool
 	for _, row := range snap.Caps {
@@ -368,5 +376,129 @@ func TestEvictColdestConcurrentFaultWithoutDependentsPreservesEvictable(t *testi
 	measured := cr.MeasureBlastRadius(k)
 	if measured.Tokens != len(refaultBody) || measured.DependentEntries != 0 {
 		t.Errorf("measured blast radius = %+v, want Tokens=%d, DependentEntries=0", measured, len(refaultBody))
+	}
+}
+
+// TestEvictColdestConcurrentEvictionPicksDistinctCapabilities witnesses that two
+// concurrent EvictColdest calls select and evict distinct capabilities rather than
+// colliding on the same coldest candidate and having one abort with ok=false (issue #11868).
+func TestEvictColdestConcurrentEvictionPicksDistinctCapabilities(t *testing.T) {
+	ctx := context.Background()
+	mmu := ctxmmu.New()
+	cr := ctxresidency.NewCapResidency(mmu)
+
+	capCold := skillKey("cold", "v1")
+	capWarm := skillKey("warm", "v1")
+
+	cr.Fault(capCold, "sha256:cold", []byte("cold body bytes"), nil)
+	cr.Fault(capWarm, "sha256:warm", []byte("warm body bytes"), nil)
+
+	// Interleaving witness using unlock hook:
+	// When evictor 1 selects capCold and releases cr.mu, evictor 2 calls EvictColdest.
+	// Under the bug, evictor 2 selected the same candidate capCold, evicted it, and
+	// evictor 1 aborted with ok=false upon relock.
+	// Under the fix, capCold is reserved in StateEvicting, so evictor 2 picks capWarm,
+	// and both evictions succeed for distinct capabilities.
+	var (
+		evicted2 ctxresidency.CapKey
+		radius2  ctxresidency.BlastRadius
+		ok2      bool
+		hookRan  int32
+	)
+
+	cr.SetEvictUnlockHookForTest(func() {
+		if atomic.CompareAndSwapInt32(&hookRan, 0, 1) {
+			evicted2, radius2, ok2 = cr.EvictColdest(ctx)
+		}
+	})
+
+	evicted1, radius1, ok1 := cr.EvictColdest(ctx)
+	if !ok1 {
+		t.Fatalf("evictor 1 failed: ok=false (aborted instead of evicting)")
+	}
+	if !ok2 {
+		t.Fatalf("evictor 2 failed: ok=false (aborted instead of evicting)")
+	}
+	if evicted1 == evicted2 {
+		t.Fatalf("multi-evictor collision: both evicted same capability %+v", evicted1)
+	}
+	if (evicted1 != capCold && evicted1 != capWarm) || (evicted2 != capCold && evicted2 != capWarm) {
+		t.Fatalf("unexpected evicted capabilities: evicted1=%+v, evicted2=%+v", evicted1, evicted2)
+	}
+	if radius1.Tokens != len("cold body bytes") && radius1.Tokens != len("warm body bytes") {
+		t.Errorf("unexpected radius1: %+v", radius1)
+	}
+	if radius2.Tokens != len("cold body bytes") && radius2.Tokens != len("warm body bytes") {
+		t.Errorf("unexpected radius2: %+v", radius2)
+	}
+
+	snap := cr.Snapshot()
+	if snap.Held != 2 || snap.Evictable != 0 || snap.Resident != 0 {
+		t.Errorf("snapshot counts: held=%d, evictable=%d, resident=%d; want 2/0/0", snap.Held, snap.Evictable, snap.Resident)
+	}
+	if snap.MMUCapPaged != 2 {
+		t.Errorf("MMUCapPaged=%d, want 2 (both capabilities witnessed page-out without orphaned CAS handles)", snap.MMUCapPaged)
+	}
+}
+
+// TestEvictColdestConcurrentGoroutinesEvictDistinct verifies that under true concurrent
+// goroutine execution, concurrent EvictColdest calls evict distinct capabilities
+// without collision or orphaned page-outs.
+func TestEvictColdestConcurrentGoroutinesEvictDistinct(t *testing.T) {
+	ctx := context.Background()
+	mmu := ctxmmu.New()
+	cr := ctxresidency.NewCapResidency(mmu)
+
+	const n = 8
+	caps := make([]ctxresidency.CapKey, n)
+	for i := 0; i < n; i++ {
+		caps[i] = skillKey(fmt.Sprintf("concurrent-cap-%02d", i), "v1")
+		cr.Fault(caps[i], fmt.Sprintf("sha256:%d", i), []byte(fmt.Sprintf("body %d", i)), nil)
+	}
+
+	type result struct {
+		key ctxresidency.CapKey
+		ok  bool
+	}
+	results := make([]result, n)
+	var wg sync.WaitGroup
+	startGate := make(chan struct{})
+
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-startGate
+			k, _, ok := cr.EvictColdest(ctx)
+			results[idx] = result{key: k, ok: ok}
+		}(i)
+	}
+
+	close(startGate)
+	wg.Wait()
+
+	evictedMap := make(map[ctxresidency.CapKey]int)
+	for i, res := range results {
+		if !res.ok {
+			t.Fatalf("goroutine %d failed to evict: ok=false", i)
+		}
+		evictedMap[res.key]++
+	}
+
+	if len(evictedMap) != n {
+		t.Fatalf("expected %d distinct evicted capabilities, got %d: %+v", n, len(evictedMap), evictedMap)
+	}
+	for k, count := range evictedMap {
+		if count != 1 {
+			t.Errorf("capability %+v evicted %d times, want 1", k, count)
+		}
+	}
+
+	snap := cr.Snapshot()
+	if snap.Held != n || snap.Evictable != 0 || snap.Resident != 0 {
+		t.Errorf("snapshot counts: held=%d, evictable=%d, resident=%d; want %d/0/0", snap.Held, snap.Evictable, snap.Resident, n)
+	}
+	if snap.MMUCapPaged != int64(n) {
+		t.Errorf("MMUCapPaged=%d, want %d", snap.MMUCapPaged, n)
 	}
 }
