@@ -62,13 +62,13 @@ func (c AgentCapabilities) Clone() AgentCapabilities {
 type AgentDescriptor struct {
 	Name         string            `json:"name"`
 	Description  string            `json:"description"`
-	Mode         string            `json:"mode"`          // "primary" | "subagent"
-	Model        string            `json:"model"`         // model name or tier1|tier2|tier3
-	Variant      string            `json:"variant"`       // "default" | "high" | "adaptive"
-	MaxTurns     int               `json:"max_turns"`     // maximum turn budget
+	Mode         string            `json:"mode"`      // "primary" | "subagent"
+	Model        string            `json:"model"`     // model name or tier1|tier2|tier3
+	Variant      string            `json:"variant"`   // "default" | "high" | "adaptive"
+	MaxTurns     int               `json:"max_turns"` // maximum turn budget
 	Capabilities AgentCapabilities `json:"capabilities"`
-	Prompt       string            `json:"prompt"`        // markdown persona system prompt overlay
-	Path         string            `json:"path"`          // origin file path
+	Prompt       string            `json:"prompt"` // markdown persona system prompt overlay
+	Path         string            `json:"path"`   // origin file path
 }
 
 // FormatPrompt renders the agent descriptor as a persona system prompt overlay.
@@ -136,9 +136,9 @@ func (d *AgentDescriptor) BuildSystemBlock(additionalOverlays [][]byte, witness 
 	return BuildOwnedSystemBlock(items, witness)
 }
 
-// ApplyToPlan applies the descriptor's persona overlay edit to an existing syspromptmmu.Segment plan.
-func (d *AgentDescriptor) ApplyToPlan(plan []syspromptmmu.Segment, witness func(syspromptmmu.BaseEdit) bool) ([]syspromptmmu.Segment, syspromptmmu.EditVerdict) {
-	return syspromptmmu.ApplyEdit(plan, d.AsPromptEdit(), witness)
+// ApplyToSegments applies the descriptor's persona overlay edit to an existing syspromptmmu.Segment collection.
+func (d *AgentDescriptor) ApplyToSegments(segments []syspromptmmu.Segment, witness func(syspromptmmu.BaseEdit) bool) ([]syspromptmmu.Segment, syspromptmmu.EditVerdict) {
+	return syspromptmmu.ApplyEdit(segments, d.AsPromptEdit(), witness)
 }
 
 // Narrow returns a copy of the descriptor with its capabilities monotonically narrowed
@@ -472,13 +472,13 @@ func ScanAgentDescriptors(dir string) ([]*AgentDescriptor, error) {
 	return out, nil
 }
 
-// DiscoverAgentDescriptors scans canonical workspace directories (.fak/agents/*.md and .agents/*.md)
+// FindWorkspaceAgentDescriptors scans canonical workspace directories (.fak/agents/*.md and .agents/*.md)
 // for declarative agent descriptors, deduplicating by descriptor name (.fak/agents precedence).
-func DiscoverAgentDescriptors(workspace string) ([]*AgentDescriptor, error) {
+func FindWorkspaceAgentDescriptors(workspace string) ([]*AgentDescriptor, error) {
 	if workspace == "" {
 		workspace = "."
 	}
-	candidateDirs := []string{
+	scanDirs := []string{
 		filepath.Join(workspace, ".fak", "agents"),
 		filepath.Join(workspace, ".agents"),
 		filepath.Join(workspace, ".agents", "agents"),
@@ -487,7 +487,7 @@ func DiscoverAgentDescriptors(workspace string) ([]*AgentDescriptor, error) {
 	seen := make(map[string]bool)
 	out := make([]*AgentDescriptor, 0)
 
-	for _, dir := range candidateDirs {
+	for _, dir := range scanDirs {
 		descs, err := ScanAgentDescriptors(dir)
 		if err != nil {
 			if os.IsNotExist(err) {
