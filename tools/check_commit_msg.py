@@ -81,7 +81,7 @@ VERBS = {
     # and scored 100/A — the preview/mutation grade divergence of #3912. "isolate" leads a
     # genuine action (isolate a code path / behavior under test); kept in lockstep with the Go
     # commitVerbs set (internal/hooks/gate_commitmsg.go).
-    "isolate",
+    "isolate", "retain", "quarantine", "scavenge",
 }
 SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(\([^)]+\))?(?P<bang>!)?:\s+(?P<rest>.+)$")
 EXEMPT_PREFIXES = ("Merge ", "Revert ", "fixup! ", "squash! ", "amend! ")
