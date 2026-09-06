@@ -78,8 +78,14 @@ func PlanComponents(components []Component) ([]ComponentPlan, error) {
 		activation := ComponentActivate
 		rollback := "restore_installed_artifact"
 		if desired == installed {
-			activation = ComponentNoop
-			rollback = "none"
+			needsRepair, err := executableModeNeedsRepair(component.Source, target)
+			if err != nil {
+				return nil, fmt.Errorf("component %q mode check: %w", component.Name, err)
+			}
+			if !needsRepair {
+				activation = ComponentNoop
+				rollback = "none"
+			}
 		}
 		acquisition := component.Acquisition
 		if acquisition == "" {

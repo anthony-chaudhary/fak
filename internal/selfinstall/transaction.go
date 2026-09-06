@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -105,7 +106,13 @@ func runTransaction(copies []Copy, launchTarget string, swap Swapper) Transactio
 			return RolledBack{Err: fmt.Errorf("compare %q: %w", item.Target, err)}
 		}
 		if equal {
-			continue
+			needsRepair, err := executableModeNeedsRepair(item.Source, item.Target)
+			if err != nil {
+				return RolledBack{Err: fmt.Errorf("mode %q: %w", item.Target, err)}
+			}
+			if !needsRepair {
+				continue
+			}
 		}
 		candidate, err := stageCopy(item.Source, item.Target, "stage")
 		if err != nil {
@@ -257,4 +264,27 @@ func rollback(changed []preparedCopy, swap Swapper) []error {
 		_ = os.Remove(candidate)
 	}
 	return rollbackErrors
+}
+
+func supportsPOSIXPermissions() bool {
+	return runtime.GOOS != "windows" && runtime.GOOS != "plan9" && runtime.GOOS != "js" && runtime.GOOS != "wasip1"
+}
+
+func executableModeNeedsRepairFromPerm(sourcePerm, targetPerm os.FileMode) bool {
+	return sourcePerm&0111 != 0 && targetPerm&0111 == 0
+}
+
+func executableModeNeedsRepair(source, target string) (bool, error) {
+	if !supportsPOSIXPermissions() {
+		return false, nil
+	}
+	sourceInfo, err := os.Stat(source)
+	if err != nil {
+		return false, err
+	}
+	targetInfo, err := os.Stat(target)
+	if err != nil {
+		return false, err
+	}
+	return executableModeNeedsRepairFromPerm(sourceInfo.Mode().Perm(), targetInfo.Mode().Perm()), nil
 }
