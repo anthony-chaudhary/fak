@@ -69,15 +69,36 @@ func TestRunManageDocs(t *testing.T) {
 	}
 
 	// Verify default audit does not enforce document sets budget and runs retained occurrences audit
+	cleanWorkspace := createCleanManagedocsWorkspace(t)
 	stdout.Reset()
 	stderr.Reset()
-	runManageDocs(&stdout, &stderr, []string{"--workspace", repoRoot()})
-	if !strings.Contains(stdout.String(), "retained occurrences audit passed") &&
-		!strings.Contains(stderr.String(), "fak managedocs retained audit failed") {
-		t.Errorf("expected retained occurrences audit to run, stdout: %s, stderr: %s", stdout.String(), stderr.String())
+	rc = runManageDocs(&stdout, &stderr, []string{"--workspace", cleanWorkspace})
+	if rc != 0 {
+		t.Fatalf("expected rc 0 for default audit on clean workspace, got %d, stderr: %s", rc, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "retained occurrences audit passed") {
+		t.Errorf("expected retained occurrences audit to pass, stdout: %s, stderr: %s", stdout.String(), stderr.String())
 	}
 	if strings.Contains(stdout.String(), "document sets audit") || strings.Contains(stderr.String(), "document sets audit") {
 		t.Errorf("default audit should not enforce document sets budget, stdout: %s, stderr: %s", stdout.String(), stderr.String())
+	}
+
+	// Verify default audit fails with injected violation
+	violatingDoc := filepath.Join(cleanWorkspace, "docs", "violating.md")
+	if err := os.WriteFile(violatingDoc, []byte("unclassified fak guard occurrence\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	rc = runManageDocs(&stdout, &stderr, []string{"--workspace", cleanWorkspace})
+	if rc != 1 {
+		t.Fatalf("expected rc 1 for default audit with injected violation, got %d", rc)
+	}
+	if !strings.Contains(stderr.String(), "fak managedocs retained audit failed") {
+		t.Errorf("expected retained audit failed in stderr, got: %s", stderr.String())
+	}
+	if err := os.Remove(violatingDoc); err != nil {
+		t.Fatal(err)
 	}
 
 	// Verify --docs-dir without --document-sets/--budget infers document sets audit
@@ -109,12 +130,66 @@ func TestRunManageDocs(t *testing.T) {
 }
 
 func TestRunManageDocs_CheckRetained(t *testing.T) {
+	cleanWorkspace := createCleanManagedocsWorkspace(t)
 	var stdout, stderr bytes.Buffer
-	runManageDocs(&stdout, &stderr, []string{"--workspace", repoRoot(), "--check-retained"})
-	if !strings.Contains(stdout.String(), "retained occurrences audit passed") &&
-		!strings.Contains(stderr.String(), "fak managedocs retained audit failed") {
-		t.Errorf("expected retained occurrences audit to run, stdout: %s, stderr: %s", stdout.String(), stderr.String())
+	rc := runManageDocs(&stdout, &stderr, []string{"--workspace", cleanWorkspace, "--check-retained"})
+	if rc != 0 {
+		t.Fatalf("expected rc 0 for clean workspace with --check-retained, got %d, stderr: %s", rc, stderr.String())
 	}
+	if !strings.Contains(stdout.String(), "retained occurrences audit passed") {
+		t.Errorf("expected retained occurrences audit to pass, stdout: %s, stderr: %s", stdout.String(), stderr.String())
+	}
+
+	// Verify --check-retained fails with injected violation
+	violatingDoc := filepath.Join(cleanWorkspace, "docs", "violating.md")
+	if err := os.WriteFile(violatingDoc, []byte("unclassified fak guard occurrence\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(violatingDoc)
+	stdout.Reset()
+	stderr.Reset()
+	rc = runManageDocs(&stdout, &stderr, []string{"--workspace", cleanWorkspace, "--check-retained"})
+	if rc != 1 {
+		t.Fatalf("expected rc 1 for --check-retained with injected violation, got %d", rc)
+	}
+	if !strings.Contains(stderr.String(), "fak managedocs retained audit failed") {
+		t.Errorf("expected retained audit failed in stderr, got: %s", stderr.String())
+	}
+}
+
+func createCleanManagedocsWorkspace(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "examples"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	byPath := make(map[string][]string)
+	for _, occ := range managedocs.RetainedOccurrences {
+		count := occ.Count
+		if count <= 0 {
+			count = 1
+		}
+		for i := 0; i < count; i++ {
+			byPath[occ.Path] = append(byPath[occ.Path], occ.Line)
+		}
+	}
+	if _, ok := byPath["README.md"]; !ok {
+		byPath["README.md"] = []string{"# Readme"}
+	}
+	for relPath, lines := range byPath {
+		fullPath := filepath.Join(root, filepath.FromSlash(relPath))
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			t.Fatal(err)
+		}
+		content := strings.Join(lines, "\n") + "\n"
+		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
 }
 
 func TestRunManageDocs_ExplicitNonexistentDirFails(t *testing.T) {
