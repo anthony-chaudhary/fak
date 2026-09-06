@@ -229,19 +229,28 @@ func TestAllowedNextBytes_WhitespaceTolerance(t *testing.T) {
 		{"space around colon", `{"name" : "`, set("gl")},
 		{"space before brace", ` {"name":"`, set("gl")},
 		{"space and newline after brace", "{\n  \"name\": \"", set("gl")},
+		{"tab after colon before quote", "{\"name\":\t\"", set("gl")},
 		{"space after colon only", `{"name": `, set(`"`)},
 		{"space before colon only", `{"name" `, set(":")},
 		{"space after brace only", `{ `, set(`"`)},
 		{"space before brace only", ` `, set("{")},
+		{"space after colon transitions to tool prefix", `{"name": "g`, set("e")},
+		{"space after colon transitions to tool mid", `{"name": "ge`, set("t")},
+		{"space after colon transitions to tool overlap", `{"name": "get`, set(`"_`)},
 		{"suffix space after comma", `{"name":"get", "arguments":`, nil},
 		{"suffix space around comma and colon", `{"name":"get" , "arguments" :`, nil},
 		{"suffix space after colon", `{"name":"get","arguments": `, nil},
 		{"suffix whitespace padded prefix", `{"name": "get", "arguments": `, nil},
 		{"suffix space after tool closing quote", `{"name":"get" `, set(",")},
 		{"suffix space after comma only", `{"name":"get", `, set(`"`)},
+		{"suffix space after comma to arguments opening quote", `{"name": "get", "`, set("a")},
 		{"suffix arguments prefix", `{"name":"get", "arg`, set("u")},
 		{"suffix space before arguments colon", `{"name":"get", "arguments" `, set(":")},
+		{"suffix tab around comma and colon", "{\"name\":\"get\"\t,\t\"arguments\"\t:", nil},
+		{"crlf whitespace in delimiters", "{\r\n  \"name\": \"get\",\r\n  \"arguments\": ", nil},
 		{"full envelope with whitespace and args", `{"name": "get", "arguments": {"city": "NYC"}}`, nil},
+		{"list tool envelope with whitespace", `{"name": "list", "arguments": []}`, nil},
+		{"get_weather tool envelope with whitespace", `{"name": "get_weather", "arguments": {"loc": "SF"}}`, nil},
 	}
 
 	for _, c := range cases {
@@ -252,6 +261,54 @@ func TestAllowedNextBytes_WhitespaceTolerance(t *testing.T) {
 					c.prefix, showSet(got), showSet(c.want))
 			}
 		})
+	}
+}
+
+// TestWhitespacePaddedPrefixTransitions witnesses issue #11719 by walking through
+// whitespace-padded envelope prefixes byte-by-byte, verifying that at every step
+// the decoder transitions toward valid tool names and arguments payloads without
+// dead-ending.
+func TestWhitespacePaddedPrefixTransitions(t *testing.T) {
+	schema := ToolSchema{Names: []string{"get", "get_weather", "list"}}
+
+	// Sequence of prefixes simulating a decoder completing a tool call with
+	// realistic whitespace emitted by frontier tokenizers:
+	// {"name": "get", "arguments": {"query": "test"}}
+	steps := []struct {
+		prefix string
+		want   map[byte]bool
+	}{
+		{`{"name": "`, set("gl")},
+		{`{"name": "g`, set("e")},
+		{`{"name": "ge`, set("t")},
+		{`{"name": "get`, set(`"_`)},
+		{`{"name": "get"`, set(",")},
+		{`{"name": "get", `, set(`"`)},
+		{`{"name": "get", "`, set("a")},
+		{`{"name": "get", "a`, set("r")},
+		{`{"name": "get", "ar`, set("g")},
+		{`{"name": "get", "arg`, set("u")},
+		{`{"name": "get", "argu`, set("m")},
+		{`{"name": "get", "argum`, set("e")},
+		{`{"name": "get", "argume`, set("n")},
+		{`{"name": "get", "argumen`, set("t")},
+		{`{"name": "get", "argument`, set("s")},
+		{`{"name": "get", "arguments`, set(`"`)},
+		{`{"name": "get", "arguments"`, set(":")},
+		{`{"name": "get", "arguments":`, nil},
+		{`{"name": "get", "arguments": `, nil},
+		{`{"name": "get", "arguments": {`, nil},
+		{`{"name": "get", "arguments": {"query": "test"}}`, nil},
+	}
+
+	for _, s := range steps {
+		got := AllowedNextBytes([]byte(s.prefix), schema)
+		if !eqSet(got, s.want) {
+			t.Fatalf("prefix %q:\n  got  %s\n  want %s", s.prefix, showSet(got), showSet(s.want))
+		}
+		if got != nil && len(got) == 0 {
+			t.Fatalf("prefix %q reached unexpected DEAD END", s.prefix)
+		}
 	}
 }
 
@@ -377,6 +434,8 @@ func TestAllowedNextByteBitset_Equivalence(t *testing.T) {
 		preLit + "unknown",
 		`{"wrong_key`,
 		` {"name" : "get" , "arguments" : `,
+		`{"name": "`,
+		`{"name": "get", "arguments": `,
 	}
 
 	for _, p := range prefixes {
