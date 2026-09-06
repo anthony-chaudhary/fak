@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -123,6 +124,10 @@ type CallRequest struct {
 
 	// Metadata carries optional arbitrary contextual tags or attributes.
 	Metadata map[string]string `json:"metadata,omitempty"`
+
+	// Compression optionally specifies the compression policy for this call (e.g. CompressionIdentity).
+	// When set to CompressionIdentity, structured compression is bypassed for this call.
+	Compression CompressionPolicy `json:"compression,omitempty"`
 }
 
 // CallResponse represents the outcome of an MCP tool invocation routed through the broker.
@@ -150,6 +155,12 @@ type CallResponse struct {
 
 	// Latency is the measured execution time of the call within the broker.
 	Latency time.Duration `json:"latency"`
+
+	// CompressionReceipt carries the structured compression decision receipt, if evaluated.
+	CompressionReceipt *CompressionReceipt `json:"compression_receipt,omitempty"`
+
+	// Metadata carries optional arbitrary contextual tags or attributes.
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // BrokerStats captures running operational counters and metrics for the broker.
@@ -197,14 +208,15 @@ func WithDefaultTimeout(d time.Duration) BrokerOption {
 // Broker mediates access to MCP tool servers, enforcing security policies, routing
 // execution requests, and collecting operational statistics.
 type Broker struct {
-	mu             sync.RWMutex
-	closed         bool
-	servers        map[string]ServerConfig
-	tools          map[string]ToolRegistration
-	sessions       map[string]time.Time
-	supervisors    map[string]*ProcessSupervisor
-	globalFilter   SecurityFilter
-	defaultTimeout time.Duration
+	mu                 sync.RWMutex
+	closed             bool
+	servers            map[string]ServerConfig
+	tools              map[string]ToolRegistration
+	sessions           map[string]time.Time
+	sessionCompression map[string]CompressionPolicy
+	supervisors        map[string]*ProcessSupervisor
+	globalFilter       SecurityFilter
+	defaultTimeout     time.Duration
 
 	// Atomic telemetry counters
 	totalCalls    int64
@@ -216,10 +228,11 @@ type Broker struct {
 // NewBroker initializes and returns a new Broker ready to accept registrations and calls.
 func NewBroker(opts ...BrokerOption) *Broker {
 	b := &Broker{
-		servers:     make(map[string]ServerConfig),
-		tools:       make(map[string]ToolRegistration),
-		sessions:    make(map[string]time.Time),
-		supervisors: make(map[string]*ProcessSupervisor),
+		servers:            make(map[string]ServerConfig),
+		tools:              make(map[string]ToolRegistration),
+		sessions:           make(map[string]time.Time),
+		sessionCompression: make(map[string]CompressionPolicy),
+		supervisors:        make(map[string]*ProcessSupervisor),
 	}
 	for _, opt := range opts {
 		opt(b)
@@ -362,12 +375,33 @@ func (b *Broker) RouteCall(ctx context.Context, req CallRequest) (*CallResponse,
 
 	atomic.AddInt64(&b.totalCalls, 1)
 
-	// Record session activity
+	// Record session activity and resolve session compression policy
+	var sessionPolicy CompressionPolicy
 	if req.SessionID != "" {
 		b.mu.Lock()
 		b.sessions[req.SessionID] = start
+		if b.sessionCompression == nil {
+			b.sessionCompression = make(map[string]CompressionPolicy)
+		}
+		for k, v := range req.Metadata {
+			if strings.EqualFold(strings.TrimSpace(k), "session_compression") {
+				if IsCompressionOptOut(v) {
+					b.sessionCompression[req.SessionID] = CompressionIdentity
+				} else {
+					b.sessionCompression[req.SessionID] = CompressionAuto
+				}
+				break
+			}
+		}
+		sessionPolicy = b.sessionCompression[req.SessionID]
 		b.mu.Unlock()
 	}
+
+	// Forward metadata and effective compression policy onto context so downstream
+	// handlers, filters, and transports observe the caller's compression preference.
+	ctx = WithCallMetadata(ctx, req.Metadata)
+	effPolicy := ResolveEffectiveCompression(ctx, req, sessionPolicy)
+	ctx = WithCompressionPolicy(ctx, effPolicy)
 
 	if !found {
 		atomic.AddInt64(&b.errorCalls, 1)
@@ -504,6 +538,33 @@ func (b *Broker) Stats() BrokerStats {
 	}
 }
 
+// SetSessionCompression configures the default compression policy for a session ID.
+func (b *Broker) SetSessionCompression(sessionID string, policy CompressionPolicy) {
+	if sessionID == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.sessionCompression == nil {
+		b.sessionCompression = make(map[string]CompressionPolicy)
+	}
+	b.sessionCompression[sessionID] = policy
+}
+
+// GetSessionCompression retrieves the configured compression policy for a session ID, if any.
+func (b *Broker) GetSessionCompression(sessionID string) (CompressionPolicy, bool) {
+	if sessionID == "" {
+		return "", false
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.sessionCompression == nil {
+		return "", false
+	}
+	p, ok := b.sessionCompression[sessionID]
+	return p, ok
+}
+
 // UnregisterTool removes a registered tool by name. Returns true if the tool was found and removed.
 func (b *Broker) UnregisterTool(name string) bool {
 	b.mu.Lock()
@@ -625,6 +686,8 @@ func (b *Broker) Close() error {
 	for _, s := range sups {
 		_ = s.Stop()
 	}
+
+	cleanupBrokerRestore(b)
 
 	return nil
 }

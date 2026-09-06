@@ -38,6 +38,17 @@ type Gate struct {
 	skippedPoison   int64 // left raw for the security gates (the load-bearing skip)
 	skippedNoSaving int64 // the compressor found no smaller rendering
 	skippedNotWorth int64 // a real saving that did not clear the worth-it floor
+
+	// Dedicated MCP normalization counters (separate from native headroom)
+	mcpConsidered      int64
+	mcpNormalized      int64
+	mcpBytesIn         int64
+	mcpBytesOut        int64
+	mcpSavedBytes      int64
+	mcpSkippedPoison   int64
+	mcpSkippedOptOut   int64
+	mcpSkippedAlready  int64
+	mcpSkippedNoSaving int64
 }
 
 // NewGate builds a fresh gate (its counters are independent).
@@ -68,6 +79,11 @@ func (g *Gate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ve
 func (g *Gate) admitStandard(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Verdict {
 	if r == nil {
 		return admitAsIs()
+	}
+	if isMCPCall(c, r) {
+		if admRes, err := g.AdmitMCP(ctx, MCPAdmissionRequest{Call: c, Result: r}); err == nil {
+			return admRes.Verdict
+		}
 	}
 	comp := Selected()
 	if comp.Name() == NoopName {
@@ -155,6 +171,11 @@ func (g *Gate) AdmitWithReserves(ctx context.Context, c *abi.ToolCall, r *abi.Re
 	bMeta := budgetMeta(receipt)
 	if r == nil {
 		return admitAsIs(bMeta), receipt
+	}
+	if isMCPCall(c, r) {
+		if admRes, err := g.AdmitMCP(ctx, MCPAdmissionRequest{Call: c, Result: r, Reserves: reserves}); err == nil {
+			return admRes.Verdict, admRes.BudgetReceipt
+		}
 	}
 	comp := Selected()
 	if comp.Name() == NoopName {
@@ -448,6 +469,25 @@ func reservesFromToolCall(c *abi.ToolCall) (ReserveState, bool) {
 		}
 	}
 	return res, has
+}
+
+func isMCPCall(c *abi.ToolCall, r *abi.Result) bool {
+	if c != nil {
+		if strings.HasPrefix(c.Tool, "mcp__") {
+			return true
+		}
+		if c.Meta != nil {
+			if c.Meta["mcp"] == "true" || c.Meta["protocol"] == "mcp" {
+				return true
+			}
+		}
+	}
+	if r != nil && r.Meta != nil {
+		if r.Meta["mcp"] == "true" || r.Meta["protocol"] == "mcp" {
+			return true
+		}
+	}
+	return false
 }
 
 func init() {

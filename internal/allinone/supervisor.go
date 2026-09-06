@@ -24,6 +24,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/fakpack"
 	"github.com/anthony-chaudhary/fak/internal/mcpbroker"
 	"github.com/anthony-chaudhary/fak/internal/ociartifact"
+	"github.com/anthony-chaudhary/fak/internal/refutil"
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit/lockv2"
 )
 
@@ -177,6 +178,13 @@ func (s *Supervisor) Health() *HealthAggregator {
 // Broker returns the active MCP broker.
 func (s *Supervisor) Broker() *mcpbroker.Broker {
 	return s.broker
+}
+
+// Engine returns the active model engine driver.
+func (s *Supervisor) Engine() abi.EngineDriver {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.engine
 }
 
 // Memory exposes the durable session memory journal for verification and entry auditing.
@@ -356,8 +364,14 @@ func (s *Supervisor) DryRunTopology() (*TopologySpec, error) {
 	}
 
 	eng := s.cfg.Engine
-	if eng == "" || s.cfg.Mock {
-		eng = "mock"
+	if eng == "" {
+		if s.cfg.EngineDriver != nil {
+			eng = "custom"
+		} else if s.cfg.Mock {
+			eng = "mock"
+		} else {
+			eng = "mock"
+		}
 	}
 
 	addr := s.cfg.Addr
@@ -522,7 +536,10 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	s.health.SetStatus(SubsystemMCPBroker, true, "")
 
 	// 4. Initialize model engine
-	if s.cfg.Mock || s.cfg.Engine == "mock" || s.cfg.Engine == "" {
+	if s.cfg.EngineDriver != nil {
+		s.engine = s.cfg.EngineDriver
+		s.health.SetStatus(SubsystemInference, true, "")
+	} else if s.cfg.Mock || s.cfg.Engine == "mock" || s.cfg.Engine == "" {
 		s.engine = &engine.Mock{}
 		s.health.SetStatus(SubsystemInference, true, "")
 	} else {
@@ -654,6 +671,30 @@ func (s *Supervisor) handleAgentWire(w http.ResponseWriter, r *http.Request) {
 					Data:      callResp.Content,
 				})
 			}
+			if s.engine != nil {
+				engineRes, engineErr := s.engine.Complete(r.Context(), &abi.ToolCall{
+					Tool: req.Tool,
+					Args: abi.Ref{Kind: abi.RefInline, Inline: callResp.Content, Len: int64(len(callResp.Content))},
+				})
+				if engineErr != nil {
+					emit(map[string]any{
+						"event": "error",
+						"error": engineErr.Error(),
+					})
+				} else if engineRes != nil {
+					pBytes := refutil.Bytes(r.Context(), engineRes.Payload)
+					if len(pBytes) > 0 {
+						var payloadAny any = string(pBytes)
+						if json.Valid(pBytes) {
+							payloadAny = json.RawMessage(pBytes)
+						}
+						emit(map[string]any{
+							"event":   "step",
+							"payload": payloadAny,
+						})
+					}
+				}
+			}
 		}
 	} else if s.broker != nil {
 		tools := s.broker.ListTools()
@@ -677,6 +718,30 @@ func (s *Supervisor) handleAgentWire(w http.ResponseWriter, r *http.Request) {
 						Tool:      t.Name,
 						Data:      callResp.Content,
 					})
+				}
+				if s.engine != nil {
+					engineRes, engineErr := s.engine.Complete(r.Context(), &abi.ToolCall{
+						Tool: t.Name,
+						Args: abi.Ref{Kind: abi.RefInline, Inline: callResp.Content, Len: int64(len(callResp.Content))},
+					})
+					if engineErr != nil {
+						emit(map[string]any{
+							"event": "error",
+							"error": engineErr.Error(),
+						})
+					} else if engineRes != nil {
+						pBytes := refutil.Bytes(r.Context(), engineRes.Payload)
+						if len(pBytes) > 0 {
+							var payloadAny any = string(pBytes)
+							if json.Valid(pBytes) {
+								payloadAny = json.RawMessage(pBytes)
+							}
+							emit(map[string]any{
+								"event":   "step",
+								"payload": payloadAny,
+							})
+						}
+					}
 				}
 			}
 		}

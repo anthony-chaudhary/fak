@@ -1,15 +1,18 @@
 package allinone
 
+import "github.com/anthony-chaudhary/fak/internal/abi"
+
 // Config defines the execution parameters for the all-in-one bootstrap orchestrator.
 type Config struct {
-	LockPath        string `json:"lock_path"`
-	BundlePath      string `json:"bundle_path"`
-	BundleVerifyKey string `json:"bundle_verify_key"`
-	Addr            string `json:"addr"`
-	PolicyPath      string `json:"policy_path"`
-	Engine          string `json:"engine"`
-	DryRun          bool   `json:"dry_run"`
-	Mock            bool   `json:"mock"`
+	LockPath        string           `json:"lock_path"`
+	BundlePath      string           `json:"bundle_path"`
+	BundleVerifyKey string           `json:"bundle_verify_key"`
+	Addr            string           `json:"addr"`
+	PolicyPath      string           `json:"policy_path"`
+	Engine          string           `json:"engine"`
+	EngineDriver    abi.EngineDriver `json:"-"`
+	DryRun          bool             `json:"dry_run"`
+	Mock            bool             `json:"mock"`
 }
 
 // SubsystemStatus captures the operational health and readiness of an individual subsystem.

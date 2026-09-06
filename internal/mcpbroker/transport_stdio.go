@@ -457,11 +457,35 @@ func (t *StdioTransport) CallTool(ctx context.Context, toolName string, args jso
 		if err := json.Unmarshal(resp.Result, &mcpResult); err == nil && len(mcpResult.Content) > 0 {
 			callResp.Content = mcpResult.Content
 			callResp.IsError = mcpResult.IsError
-			if !mcpResult.IsError && len(mcpResult.StructuredContent) > 0 {
-				callResp.Content = compactStructuredContent(resp.Result, mcpResult.Content)
+			compressed, receipt := CompactStructuredContentWithReceipt(resp.Result, mcpResult.Content, WithCompressionContext(ctx))
+			callResp.Content = compressed
+			callResp.CompressionReceipt = receipt
+			if receipt != nil && len(receipt.Metadata) > 0 {
+				callResp.Metadata = make(map[string]string, len(receipt.Metadata))
+				for k, v := range receipt.Metadata {
+					callResp.Metadata[k] = v
+				}
+			}
+		} else if err != nil {
+			callResp.Content = resp.Result
+			_, receipt := CompactStructuredContentWithReceipt(resp.Result, resp.Result, WithCompressionContext(ctx))
+			callResp.CompressionReceipt = receipt
+			if receipt != nil && len(receipt.Metadata) > 0 {
+				callResp.Metadata = make(map[string]string, len(receipt.Metadata))
+				for k, v := range receipt.Metadata {
+					callResp.Metadata[k] = v
+				}
 			}
 		} else {
 			callResp.Content = resp.Result
+			_, receipt := CompactStructuredContentWithReceipt(resp.Result, nil, WithCompressionContext(ctx))
+			callResp.CompressionReceipt = receipt
+			if receipt != nil && len(receipt.Metadata) > 0 {
+				callResp.Metadata = make(map[string]string, len(receipt.Metadata))
+				for k, v := range receipt.Metadata {
+					callResp.Metadata[k] = v
+				}
+			}
 		}
 	}
 
@@ -497,9 +521,15 @@ func (t *StdioTransport) Close() error {
 	t.closed = true
 	t.pendingMu.Unlock()
 
-	_ = t.stdin.Close()
-	_ = t.stdout.Close()
-	_ = t.stderr.Close()
+	if t.stdin != nil {
+		_ = t.stdin.Close()
+	}
+	if t.stdout != nil {
+		_ = t.stdout.Close()
+	}
+	if t.stderr != nil {
+		_ = t.stderr.Close()
+	}
 
 	if wasClosed {
 		return nil
