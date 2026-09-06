@@ -21,11 +21,11 @@ func skillCard(name, desc string) capindex.CapCard {
 
 // repoRootForTest locates the module root from THIS test's own source path, so the
 // real-tree probes below are independent of the working directory a runner picks.
-func repoRootForTest(t *testing.T) string {
-	t.Helper()
+func repoRootForTest(tb testing.TB) string {
+	tb.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatal("runtime.Caller(0) failed — cannot locate the test source path")
+		tb.Fatal("runtime.Caller(0) failed — cannot locate the test source path")
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 }
