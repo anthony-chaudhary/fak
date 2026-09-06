@@ -55,6 +55,11 @@ func ResolveRun(opts Options) (Result, error) {
 	return Result{Path: path, Root: root, RunID: runID, Created: created}, nil
 }
 
+// ResolveRoot resolves the private repository root from options, environment, or relative sibling directory.
+func ResolveRoot(opts Options) (string, error) {
+	return resolveRoot(opts)
+}
+
 func resolveRoot(opts Options) (string, error) {
 	root := strings.TrimSpace(opts.Root)
 	if root == "" {

@@ -28,6 +28,8 @@ func runMaturity(stdout, stderr io.Writer, argv []string) int {
 			return runMaturityAnatomy(stdout, stderr, argv[1:])
 		case "debt-lanes":
 			return runMaturityDebtLanes(stdout, stderr, argv[1:])
+		case "debt-orchestrator":
+			return runDebtOrchestrator(stdout, stderr, argv[1:])
 		}
 	}
 	nextSubcommand := false

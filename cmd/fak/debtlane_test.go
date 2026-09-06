@@ -196,9 +196,15 @@ func TestDebtLanesCLIPlanWavesTargetGrade(t *testing.T) {
 	if plan.ProjectedGrade != "B" && plan.ProjectedGrade != "A" {
 		t.Errorf("expected projected grade B or A, got %s", plan.ProjectedGrade)
 	}
-	// Total waves should be bounded, not the entire backlog.
-	if plan.TotalWaves <= 0 || plan.TotalWaves > 50 {
-		t.Errorf("expected 1-50 planned waves for target grade 80%%, got %d", plan.TotalWaves)
+	// If starting grade is already >= 80%, 0 waves are needed; otherwise waves are planned.
+	if plan.StartingPercent < 80.0 {
+		if plan.TotalWaves <= 0 || plan.TotalWaves > 50 {
+			t.Errorf("expected 1-50 planned waves for target grade 80%%, got %d", plan.TotalWaves)
+		}
+	} else {
+		if plan.TotalWaves != 0 {
+			t.Errorf("expected 0 planned waves when already >= 80%%, got %d", plan.TotalWaves)
+		}
 	}
 	for _, w := range plan.Waves {
 		if w.WaveSize > 4 {
@@ -230,6 +236,100 @@ func TestDebtLanesCLIPlanWavesTargetPointsAlias(t *testing.T) {
 	for _, w := range plan.Waves {
 		if w.WaveSize > 3 {
 			t.Errorf("wave size %d exceeds wave size cap 3", w.WaveSize)
+		}
+	}
+}
+
+func TestDebtOrchestratorCLI(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDebtOrchestrator(&stdout, &stderr, []string{
+		"--workspace", repoRoot(),
+		"--wave-size", "5",
+		"--max-waves", "2",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runDebtOrchestrator failed with exit code %d; stderr: %s", code, stderr.String())
+	}
+
+	var plan debtlane.WavePlan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("failed to decode json wave plan: %v", err)
+	}
+	if plan.Schema != debtlane.WavePlanSchema {
+		t.Errorf("expected schema %q, got %q", debtlane.WavePlanSchema, plan.Schema)
+	}
+	if plan.TotalWaves != 2 {
+		t.Errorf("expected 2 waves with --max-waves 2, got %d", plan.TotalWaves)
+	}
+	if plan.WaveSizeCap != 5 {
+		t.Errorf("expected wave size cap 5, got %d", plan.WaveSizeCap)
+	}
+}
+
+func TestDebtOrchestratorCLIDualRepo(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDebtOrchestrator(&stdout, &stderr, []string{
+		"--workspace", repoRoot(),
+		"--target-repo", "both",
+		"--wave-size", "6",
+		"--max-waves", "3",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runDebtOrchestrator --target-repo both failed: code %d, stderr: %s", code, stderr.String())
+	}
+
+	var plan debtlane.WavePlan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("failed to decode json wave plan: %v", err)
+	}
+	if plan.TargetRepo != "both" {
+		t.Errorf("expected TargetRepo 'both', got %q", plan.TargetRepo)
+	}
+	if len(plan.Waves) == 0 {
+		t.Fatalf("expected waves planned in dual-repo mode")
+	}
+
+	// Verify repo tags exist on lanes in the plan
+	foundFak := false
+	for _, w := range plan.Waves {
+		for _, l := range w.Lanes {
+			if l.Repo == "fak" {
+				foundFak = true
+			}
+		}
+	}
+	if !foundFak {
+		t.Errorf("expected to find at least one lane with repo 'fak'")
+	}
+}
+
+func TestDebtLanesCLITargetRepoPrivate(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runDebtLanes(&stdout, &stderr, []string{
+		"--workspace", repoRoot(),
+		"--target-repo", "fak-private",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runDebtLanes --target-repo fak-private failed: code %d, stderr: %s", code, stderr.String())
+	}
+
+	var report debtlane.Report
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+	if report.TargetRepo != "fak-private" {
+		t.Errorf("expected TargetRepo 'fak-private', got %q", report.TargetRepo)
+	}
+	if report.ProductionGrade.TotalUnits == 0 {
+		t.Errorf("expected total units > 0 in fak-private scan")
+	}
+	for _, l := range report.Lanes {
+		if l.Repo != "fak-private" {
+			t.Errorf("expected lane %s repo to be 'fak-private', got %q", l.Lane, l.Repo)
+			break
 		}
 	}
 }

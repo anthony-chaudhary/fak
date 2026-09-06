@@ -1167,3 +1167,146 @@ func TestDiscoverLanes100PercentWorkspaceCoverageAndAutoRegistration(t *testing.
 		t.Errorf("expected brandnewpkg UnitOfWork == pkg/brandnewpkg, got %s", l.UnitOfWork)
 	}
 }
+
+func TestDiscoverLanesPlatformSupport(t *testing.T) {
+	tmp := t.TempDir()
+	dosContent := `workspace = "."
+repository = "fak-private"
+
+[lanes]
+concurrent = [
+  "dispatch",
+]
+
+[paths]
+"dispatch" = "platform/dispatch/**"
+`
+	if err := os.WriteFile(filepath.Join(tmp, "dos.toml"), []byte(dosContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dispatchDir := filepath.Join(tmp, "platform", "dispatch")
+	if err := os.MkdirAll(dispatchDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code := `package dispatch
+
+// Runner dispatches tasks.
+type Runner struct{}
+
+// Run executes a dispatch run.
+func (r *Runner) Run() error {
+	return nil
+}
+`
+	if err := os.WriteFile(filepath.Join(dispatchDir, "runner.go"), []byte(code), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testCode := `package dispatch
+
+import "testing"
+
+func TestRunner(t *testing.T) {
+	r := &Runner{}
+	if err := r.Run(); err != nil {
+		t.Fatal(err)
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(dispatchDir, "runner_test.go"), []byte(testCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lanes, err := discoverLanesFromDisk(tmp)
+	if err != nil {
+		t.Fatalf("discoverLanesFromDisk failed: %v", err)
+	}
+	if len(lanes) == 0 {
+		t.Fatalf("expected at least 1 lane discovered in platform workspace, got 0")
+	}
+
+	found := false
+	for _, l := range lanes {
+		if l.Lane == "dispatch" {
+			found = true
+			if l.Repo != "fak-private" {
+				t.Errorf("expected Repo == 'fak-private', got %q", l.Repo)
+			}
+			if l.UnitOfWork != filepath.Join("platform", "dispatch") {
+				t.Errorf("expected UnitOfWork == platform/dispatch, got %q", l.UnitOfWork)
+			}
+			if !l.Evidence.HasCode || !l.Evidence.HasTests {
+				t.Errorf("expected HasCode and HasTests to be true, got code=%v tests=%v", l.Evidence.HasCode, l.Evidence.HasTests)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected lane 'dispatch' to be discovered")
+	}
+}
+
+func TestDualRepoScan(t *testing.T) {
+	baseDir := t.TempDir()
+	fakDir := filepath.Join(baseDir, "fak")
+	privDir := filepath.Join(baseDir, "fak-private")
+
+	// Setup fak
+	if err := os.MkdirAll(filepath.Join(fakDir, "internal", "fakleaf"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fakDir, "dos.toml"), []byte("[lanes.trees]\nfakleaf = [\"internal/fakleaf/**\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fakDir, "internal", "fakleaf", "leaf.go"), []byte("package fakleaf\nfunc F() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fakDir, "internal", "fakleaf", "leaf_test.go"), []byte("package fakleaf\nimport \"testing\"\nfunc TestF(t *testing.T){F()}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Setup fak-private
+	if err := os.MkdirAll(filepath.Join(privDir, "platform", "privleaf"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(privDir, "dos.toml"), []byte("[paths]\n\"privleaf\" = \"platform/privleaf/**\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(privDir, "platform", "privleaf", "leaf.go"), []byte("package privleaf\nfunc P() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(privDir, "platform", "privleaf", "leaf_test.go"), []byte("package privleaf\nimport \"testing\"\nfunc TestP(t *testing.T){P()}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Scan(Options{
+		WorkspaceRoot: fakDir,
+		PrivateRoot:   privDir,
+		TargetRepo:    "both",
+	})
+	if err != nil {
+		t.Fatalf("Scan with TargetRepo: both failed: %v", err)
+	}
+	if report.TargetRepo != "both" {
+		t.Errorf("expected report.TargetRepo == 'both', got %q", report.TargetRepo)
+	}
+	if len(report.Lanes) != 2 {
+		t.Fatalf("expected 2 lanes across both repos, got %d", len(report.Lanes))
+	}
+
+	reposFound := make(map[string]bool)
+	for _, l := range report.Lanes {
+		reposFound[l.Repo] = true
+	}
+	if !reposFound["fak"] || !reposFound["fak-private"] {
+		t.Errorf("expected both 'fak' and 'fak-private' repos represented, got %v", reposFound)
+	}
+
+	// Verify wave planning over dual repo
+	plan := PlanWaves(report, WavePlanOptions{WaveSize: 4})
+	if plan.TargetRepo != "both" {
+		t.Errorf("expected plan.TargetRepo == 'both', got %q", plan.TargetRepo)
+	}
+	if len(plan.Waves) == 0 {
+		t.Fatalf("expected waves planned in dual repo")
+	}
+}

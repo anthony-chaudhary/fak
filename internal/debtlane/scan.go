@@ -18,9 +18,27 @@ import (
 )
 
 var (
-	laneTreeRe = regexp.MustCompile(`^([A-Za-z0-9_]+)\s*=\s*\[\s*"(?:internal|pkg)/([A-Za-z0-9_]+)/\*\*"`)
-	importRe   = regexp.MustCompile(`github\.com/anthony-chaudhary/fak/(?:internal|pkg)/([A-Za-z0-9_]+)`)
+	laneTreeRe = regexp.MustCompile(`^(?:")?([A-Za-z0-9_-]+)(?:")?\s*=\s*(?:\[\s*)?"(?:internal|pkg|platform|tools|cmd)/([A-Za-z0-9_-]+)`)
+	importRe   = regexp.MustCompile(`github\.com/anthony-chaudhary/(?:fak|fak-private)/(?:internal|pkg|platform|tools|cmd)/([A-Za-z0-9_-]+)`)
 )
+
+func resolvePrivateRoot(fakRoot, explicit string) string {
+	if explicit != "" {
+		if info, err := os.Stat(explicit); err == nil && info.IsDir() {
+			return explicit
+		}
+	}
+	if env := os.Getenv("FAK_PRIVATE_ROOT"); env != "" {
+		if info, err := os.Stat(env); err == nil && info.IsDir() {
+			return env
+		}
+	}
+	candidate := filepath.Join(filepath.Dir(fakRoot), "fak-private")
+	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		return candidate
+	}
+	return ""
+}
 
 // Scan evaluates debt lanes across the workspace or against provided facts.
 func Scan(opts Options) (Report, error) {
@@ -31,6 +49,14 @@ func Scan(opts Options) (Report, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return Report{}, err
+	}
+
+	targetRepo := strings.ToLower(strings.TrimSpace(opts.TargetRepo))
+	if targetRepo == "" {
+		targetRepo = "fak"
+		if filepath.Base(absRoot) == "fak-private" {
+			targetRepo = "fak-private"
+		}
 	}
 
 	evalTime := time.Now().UTC()
@@ -45,10 +71,49 @@ func Scan(opts Options) (Report, error) {
 		for i := range allLanes {
 			recomputeLane(&allLanes[i])
 		}
+	} else if targetRepo == "both" {
+		privRoot := resolvePrivateRoot(absRoot, opts.PrivateRoot)
+		if privRoot == "" {
+			return Report{}, fmt.Errorf("fak-private repository not found: specify private root or set FAK_PRIVATE_ROOT")
+		}
+		fakLanes, err := discoverLanesFromDisk(absRoot)
+		if err != nil {
+			return Report{}, fmt.Errorf("scan fak: %w", err)
+		}
+		for i := range fakLanes {
+			fakLanes[i].Repo = "fak"
+		}
+		privLanes, err := discoverLanesFromDisk(privRoot)
+		if err != nil {
+			return Report{}, fmt.Errorf("scan fak-private: %w", err)
+		}
+		for i := range privLanes {
+			privLanes[i].Repo = "fak-private"
+		}
+		allLanes = append(fakLanes, privLanes...)
+	} else if targetRepo == "fak-private" {
+		privRoot := absRoot
+		if filepath.Base(absRoot) != "fak-private" {
+			privRoot = resolvePrivateRoot(absRoot, opts.PrivateRoot)
+			if privRoot == "" {
+				return Report{}, fmt.Errorf("fak-private repository not found: specify private root or set FAK_PRIVATE_ROOT")
+			}
+		}
+		allLanes, err = discoverLanesFromDisk(privRoot)
+		if err != nil {
+			return Report{}, err
+		}
+		for i := range allLanes {
+			allLanes[i].Repo = "fak-private"
+		}
+		absRoot = privRoot
 	} else {
 		allLanes, err = discoverLanesFromDisk(absRoot)
 		if err != nil {
 			return Report{}, err
+		}
+		for i := range allLanes {
+			allLanes[i].Repo = "fak"
 		}
 	}
 
@@ -188,6 +253,7 @@ func Scan(opts Options) (Report, error) {
 		Reason:          reason,
 		NextAction:      nextAction,
 		Workspace:       absRoot,
+		TargetRepo:      targetRepo,
 		EvaluatedAt:     evalTime.Format(time.RFC3339),
 		Corpus:          corpus,
 		ProductionGrade: productionGrade,
@@ -240,7 +306,7 @@ func discoverLanesFromDisk(root string) ([]DebtLane, error) {
 	benchDocs := readBenchmarkAuthorityLanes(filepath.Join(root, "BENCHMARK-AUTHORITY.md"))
 	runtimeProofs := readRuntimeProofs(root)
 
-	// Collect all packages in internal/ and pkg/.
+	// Collect all packages in internal/, pkg/, and platform/.
 	discovered := make(map[string]bool)
 	for _, lane := range lanes {
 		discovered[lane] = true
@@ -249,14 +315,16 @@ func discoverLanesFromDisk(root string) ([]DebtLane, error) {
 		discovered[pkg] = true
 	}
 
-	pkgDir := filepath.Join(root, "pkg")
-	if entries, err := os.ReadDir(pkgDir); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			if dirContainsGoFiles(filepath.Join(pkgDir, e.Name())) {
-				discovered[e.Name()] = true
+	for _, sub := range []string{"pkg", "platform"} {
+		subDir := filepath.Join(root, sub)
+		if entries, err := os.ReadDir(subDir); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				if dirContainsGoFiles(filepath.Join(subDir, e.Name())) {
+					discovered[e.Name()] = true
+				}
 			}
 		}
 	}
@@ -273,6 +341,14 @@ func discoverLanesFromDisk(root string) ([]DebtLane, error) {
 		if _, err := os.Stat(filepath.Join(root, unitDir)); err != nil {
 			if info, err := os.Stat(filepath.Join(root, "pkg", lane)); err == nil && info.IsDir() {
 				unitDir = filepath.Join("pkg", lane)
+			} else if info, err := os.Stat(filepath.Join(root, "platform", lane)); err == nil && info.IsDir() {
+				unitDir = filepath.Join("platform", lane)
+			} else if info, err := os.Stat(filepath.Join(root, "tools", lane)); err == nil && info.IsDir() {
+				unitDir = filepath.Join("tools", lane)
+			} else if info, err := os.Stat(filepath.Join(root, "cmd", lane)); err == nil && info.IsDir() {
+				unitDir = filepath.Join("cmd", lane)
+			} else if info, err := os.Stat(filepath.Join(root, "cmd", "fak-"+lane)); err == nil && info.IsDir() {
+				unitDir = filepath.Join("cmd", "fak-"+lane)
 			}
 		}
 		absUnitDir := filepath.Join(root, unitDir)
@@ -293,8 +369,15 @@ func discoverLanesFromDisk(root string) ([]DebtLane, error) {
 		interest := CalculateInterest(crit, bounds, evidence, gap)
 		principal, carrying, total := CalculateDebt(maturityScore, target, weight, interest, bounds)
 
+		repoName := "fak"
+		cleanUnit := filepath.ToSlash(unitDir)
+		if strings.HasPrefix(cleanUnit, "platform/") || strings.HasPrefix(cleanUnit, "tools/") || filepath.Base(root) == "fak-private" {
+			repoName = "fak-private"
+		}
+
 		dl := DebtLane{
 			Lane:                    lane,
+			Repo:                    repoName,
 			UnitOfWork:              unitDir,
 			Criticality:             crit,
 			Weight:                  weight,
@@ -570,9 +653,38 @@ func parseLaneTrees(path string) []string {
 	var lanes []string
 	seen := make(map[string]bool)
 	scanner := bufio.NewScanner(f)
+	inConcurrent := false
+
 	for scanner.Scan() {
-		m := laneTreeRe.FindStringSubmatch(scanner.Text())
-		if len(m) == 3 && !seen[m[1]] {
+		rawLine := scanner.Text()
+		line := strings.TrimSpace(rawLine)
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if idx := strings.Index(line, "#"); idx >= 0 {
+			line = strings.TrimSpace(line[:idx])
+		}
+		if strings.HasPrefix(line, "concurrent = [") {
+			inConcurrent = true
+			line = strings.TrimPrefix(line, "concurrent = [")
+		}
+		if inConcurrent {
+			if strings.Contains(line, "]") {
+				inConcurrent = false
+				line = strings.TrimSuffix(line, "]")
+			}
+			parts := strings.Split(line, ",")
+			for _, part := range parts {
+				trimmed := strings.Trim(strings.TrimSpace(part), `", `)
+				if trimmed != "" && isPotentialLaneName(trimmed) && !seen[trimmed] {
+					seen[trimmed] = true
+					lanes = append(lanes, trimmed)
+				}
+			}
+			continue
+		}
+		m := laneTreeRe.FindStringSubmatch(line)
+		if len(m) >= 2 && isPotentialLaneName(m[1]) && !seen[m[1]] {
 			seen[m[1]] = true
 			lanes = append(lanes, m[1])
 		}
@@ -580,12 +692,12 @@ func parseLaneTrees(path string) []string {
 	return lanes
 }
 
-// BuildInternalImportGraph parses Go files in internal/ and pkg/ to construct a package import dependency graph.
+// BuildInternalImportGraph parses Go files in internal/, pkg/, and platform/ to construct a package import dependency graph.
 func BuildInternalImportGraph(root string) (map[string]map[string]struct{}, map[string]struct{}) {
 	graph := make(map[string]map[string]struct{})
 	internalPkgs := make(map[string]struct{})
 
-	for _, base := range []string{"internal", "pkg"} {
+	for _, base := range []string{"internal", "pkg", "platform"} {
 		baseDir := filepath.Join(root, base)
 		entries, err := os.ReadDir(baseDir)
 		if err != nil {
@@ -880,7 +992,7 @@ func isPotentialLaneName(s string) bool {
 	}
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
 			return false
 		}
 	}
@@ -927,6 +1039,8 @@ func readBenchmarkAuthorityLanes(path string) map[string]bool {
 					token := strings.ToLower(m[1])
 					token = strings.TrimPrefix(token, "internal/")
 					token = strings.TrimPrefix(token, "pkg/")
+					token = strings.TrimPrefix(token, "platform/")
+					token = strings.TrimPrefix(token, "tools/")
 					if token != "" {
 						set[token] = true
 					}
@@ -939,17 +1053,19 @@ func readBenchmarkAuthorityLanes(path string) map[string]bool {
 
 func readRuntimeProofs(root string) map[string]bool {
 	set := make(map[string]bool)
-	path := filepath.Join(root, "internal", "maturity", "runtime-proofs.json")
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return set
-	}
-	// Extract lanes quickly using regex across the witness registry.
-	re := regexp.MustCompile(`"lane":\s*"([A-Za-z0-9_]+)"`)
-	matches := re.FindAllStringSubmatch(string(content), -1)
-	for _, m := range matches {
-		if len(m) == 2 {
-			set[m[1]] = true
+	for _, sub := range []string{"internal", "platform"} {
+		path := filepath.Join(root, sub, "maturity", "runtime-proofs.json")
+		content, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		// Extract lanes quickly using regex across the witness registry.
+		re := regexp.MustCompile(`"lane":\s*"([A-Za-z0-9_]+)"`)
+		matches := re.FindAllStringSubmatch(string(content), -1)
+		for _, m := range matches {
+			if len(m) == 2 {
+				set[m[1]] = true
+			}
 		}
 	}
 	return set

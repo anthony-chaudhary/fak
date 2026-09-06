@@ -9,24 +9,43 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/debtlane"
+	"github.com/anthony-chaudhary/fak/internal/privatepath"
 )
 
 func cmdDebtLanes(argv []string) {
 	os.Exit(runDebtLanes(os.Stdout, os.Stderr, argv))
 }
 
+func cmdDebtOrchestrator(argv []string) {
+	os.Exit(runDebtOrchestrator(os.Stdout, os.Stderr, argv))
+}
+
 func cmdDebtLanesScorecard(argv []string) {
 	os.Exit(runDebtLanes(os.Stdout, os.Stderr, argv))
+}
+
+func cmdDebtOrchestratorScorecard(argv []string) {
+	os.Exit(runDebtOrchestrator(os.Stdout, os.Stderr, argv))
 }
 
 func runMaturityDebtLanes(stdout, stderr io.Writer, argv []string) int {
 	return runDebtLanes(stdout, stderr, argv)
 }
 
+func runDebtOrchestrator(stdout, stderr io.Writer, argv []string) int {
+	return runDebtLanesInternal(stdout, stderr, "fak debt-orchestrator", true, argv)
+}
+
 func runDebtLanes(stdout, stderr io.Writer, argv []string) int {
-	fs := flag.NewFlagSet("fak debt-lanes", flag.ContinueOnError)
+	return runDebtLanesInternal(stdout, stderr, "fak debt-lanes", false, argv)
+}
+
+func runDebtLanesInternal(stdout, stderr io.Writer, flagSetName string, defaultPlanWaves bool, argv []string) int {
+	fs := flag.NewFlagSet(flagSetName, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
+	targetRepo := fs.String("target-repo", "", "target repository: fak, fak-private, or both (default: fak)")
+	privateRoot := fs.String("private-root", "", "path to private fak-private repository root (default: auto-detected)")
 	asJSON := fs.Bool("json", false, "emit control-pane JSON")
 	asMarkdown := fs.Bool("markdown", false, "emit scorecard markdown")
 	check := fs.Bool("check", false, "gate mode: exit non-zero if active maturity debt exists")
@@ -35,7 +54,7 @@ func runDebtLanes(stdout, stderr io.Writer, argv []string) int {
 	criticality := fs.String("criticality", "", "filter by criticality (core, enabling, stewardship, peripheral)")
 	minGap := fs.Float64("min-gap", 0, "filter lanes with maturity gap >= min-gap")
 	topN := fs.Int("top", 10, "number of top debt hotspots to display")
-	planWaves := fs.Bool("plan-waves", false, "plan concurrent-safe multi-wave campaign to retire debt")
+	planWaves := fs.Bool("plan-waves", defaultPlanWaves, "plan concurrent-safe multi-wave campaign to retire debt")
 	waveSize := fs.Int("wave-size", 4, "maximum concurrent workers per wave")
 	maxWaves := fs.Int("max-waves", 0, "maximum number of waves to plan (0 = all necessary)")
 	excludeLanes := fs.String("exclude-lanes", "", "comma-separated list of lanes to exclude from wave plan")
@@ -49,7 +68,7 @@ func runDebtLanes(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak debt-lanes: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "%s: unexpected argument %q\n", flagSetName, fs.Arg(0))
 		return 2
 	}
 
@@ -58,27 +77,36 @@ func runDebtLanes(stdout, stderr io.Writer, argv []string) int {
 		root = repoRoot()
 	}
 
+	privRoot := *privateRoot
+	if privRoot == "" {
+		if resolved, err := privatepath.ResolveRoot(privatepath.Options{RepoRoot: root}); err == nil {
+			privRoot = resolved
+		}
+	}
+
 	report, err := debtlane.Scan(debtlane.Options{
 		WorkspaceRoot:     root,
+		TargetRepo:        *targetRepo,
+		PrivateRoot:       privRoot,
 		LaneFilter:        *laneFilter,
 		CriticalityFilter: *criticality,
 		MinGap:            *minGap,
 		TopN:              *topN,
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "fak debt-lanes: %v\n", err)
+		fmt.Fprintf(stderr, "%s: %v\n", flagSetName, err)
 		return 2
 	}
 
 	if *comparePath != "" {
 		baseBytes, err := os.ReadFile(*comparePath)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak debt-lanes: read compare baseline: %v\n", err)
+			fmt.Fprintf(stderr, "%s: read compare baseline: %v\n", flagSetName, err)
 			return 2
 		}
 		var base debtlane.Report
 		if err := json.Unmarshal(baseBytes, &base); err != nil {
-			fmt.Fprintf(stderr, "fak debt-lanes: decode compare baseline JSON: %v\n", err)
+			fmt.Fprintf(stderr, "%s: decode compare baseline JSON: %v\n", flagSetName, err)
 			return 2
 		}
 		fmt.Fprintln(stdout, debtlane.Compare(report, base))
@@ -111,7 +139,7 @@ func runDebtLanes(stdout, stderr io.Writer, argv []string) int {
 		switch {
 		case *asJSON:
 			if err := writeIndentedJSON(stdout, plan); err != nil {
-				fmt.Fprintf(stderr, "fak debt-lanes: encode json: %v\n", err)
+				fmt.Fprintf(stderr, "%s: encode json: %v\n", flagSetName, err)
 				return 1
 			}
 		case *asMarkdown:
@@ -129,7 +157,7 @@ func runDebtLanes(stdout, stderr io.Writer, argv []string) int {
 	switch {
 	case *asJSON:
 		if err := writeIndentedJSON(stdout, report); err != nil {
-			fmt.Fprintf(stderr, "fak debt-lanes: encode json: %v\n", err)
+			fmt.Fprintf(stderr, "%s: encode json: %v\n", flagSetName, err)
 			return 1
 		}
 	case *asMarkdown:

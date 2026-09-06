@@ -675,6 +675,8 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdAntipatternScorecard(args)
 	case "debt-lanes":
 		cmdDebtLanes(args)
+	case "debt-orchestrator":
+		cmdDebtOrchestrator(args)
 	case "issue-orchestrator", "issue-queue", "issue-lanes":
 		cmdIssueOrchestrator(args)
 	case "bench-effort":

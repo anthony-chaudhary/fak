@@ -77,7 +77,8 @@ type Evidence struct {
 // DebtLane represents a dedicated maturity debt lane for one single unit of work.
 type DebtLane struct {
 	Lane                    string          `json:"lane"`                     // Unique lane identifier (leaf package or subsystem name).
-	UnitOfWork              string          `json:"unit_of_work"`             // Primary directory path (e.g. "internal/gateway").
+	Repo                    string          `json:"repo,omitempty"`           // Repository name (e.g. "fak", "fak-private").
+	UnitOfWork              string          `json:"unit_of_work"`             // Primary directory path (e.g. "internal/gateway" or "platform/dispatch").
 	Criticality             Criticality     `json:"criticality"`              // core, enabling, stewardship, peripheral.
 	Weight                  float64         `json:"weight"`                   // Relative weight in production denominator (e.g. 3.0 for core).
 	Maturity                float64         `json:"maturity"`                 // Current maturity on 0.0 - 10.0 curve.
@@ -123,6 +124,7 @@ type Report struct {
 	Reason          string          `json:"reason"`
 	NextAction      string          `json:"next_action"`
 	Workspace       string          `json:"workspace"`
+	TargetRepo      string          `json:"target_repo,omitempty"` // "fak", "fak-private", "both"
 	EvaluatedAt     string          `json:"evaluated_at"`
 	Corpus          map[string]any  `json:"corpus"`
 	ProductionGrade ProductionGrade `json:"production_grade"`
@@ -135,6 +137,8 @@ type Report struct {
 // Options parameters for scanning and evaluating debt lanes.
 type Options struct {
 	WorkspaceRoot     string
+	TargetRepo        string // "fak", "fak-private", "both" (default: "fak")
+	PrivateRoot       string // optional explicit path to fak-private
 	LaneFilter        string
 	MinGap            float64
 	CriticalityFilter string

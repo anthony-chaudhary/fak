@@ -54,3 +54,21 @@ func TestResolveRunRefusesMissingPrivateRoot(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestResolveRoot(t *testing.T) {
+	base := t.TempDir()
+	public := filepath.Join(base, "fak")
+	private := filepath.Join(base, "fak-private")
+	for _, dir := range []string{public, private} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := ResolveRoot(Options{RepoRoot: public})
+	if err != nil {
+		t.Fatalf("ResolveRoot failed: %v", err)
+	}
+	if filepath.Clean(got) != filepath.Clean(private) {
+		t.Fatalf("ResolveRoot = %q, want %q", got, private)
+	}
+}

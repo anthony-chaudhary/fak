@@ -49,6 +49,7 @@ type Wave struct {
 type WavePlan struct {
 	Schema           string   `json:"schema"`
 	Workspace        string   `json:"workspace"`
+	TargetRepo       string   `json:"target_repo,omitempty"`
 	TargetGrade      string   `json:"target_grade,omitempty"`
 	TargetPoints     float64  `json:"target_points,omitempty"`
 	WaveSizeCap      int      `json:"wave_size_cap"`
@@ -205,6 +206,7 @@ func PlanWaves(report Report, opts WavePlanOptions) WavePlan {
 		return WavePlan{
 			Schema:           WavePlanSchema,
 			Workspace:        report.Workspace,
+			TargetRepo:       report.TargetRepo,
 			TargetGrade:      opts.TargetGrade,
 			TargetPoints:     opts.TargetPoints,
 			WaveSizeCap:      waveSizeCap,
@@ -290,6 +292,7 @@ func PlanWaves(report Report, opts WavePlanOptions) WavePlan {
 	return WavePlan{
 		Schema:           WavePlanSchema,
 		Workspace:        report.Workspace,
+		TargetRepo:       report.TargetRepo,
 		TargetGrade:      opts.TargetGrade,
 		TargetPoints:     opts.TargetPoints,
 		WaveSizeCap:      waveSizeCap,
