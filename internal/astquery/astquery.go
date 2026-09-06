@@ -29,6 +29,7 @@ import (
 // metavariable bindings that made it match (rendered back to source text).
 type Match struct {
 	Pos      token.Position    `json:"pos"`
+	EndPos   token.Position    `json:"end_pos,omitempty"`
 	Text     string            `json:"text"`
 	Bindings map[string]string `json:"bindings"`
 }
@@ -224,6 +225,7 @@ func searchNode(root ast.Node, pat ast.Node, fset *token.FileSet) []Match {
 				if matchExpr(p, expr, binds, fset) {
 					out = append(out, Match{
 						Pos:      fset.Position(expr.Pos()),
+						EndPos:   fset.Position(expr.End()),
 						Text:     nodeText(fset, expr),
 						Bindings: binds,
 					})
@@ -235,6 +237,7 @@ func searchNode(root ast.Node, pat ast.Node, fset *token.FileSet) []Match {
 				if matchStmt(p, stmt, binds, fset) {
 					out = append(out, Match{
 						Pos:      fset.Position(stmt.Pos()),
+						EndPos:   fset.Position(stmt.End()),
 						Text:     nodeText(fset, stmt),
 						Bindings: binds,
 					})
@@ -246,6 +249,7 @@ func searchNode(root ast.Node, pat ast.Node, fset *token.FileSet) []Match {
 				if matchDecl(p, decl, binds, fset) {
 					out = append(out, Match{
 						Pos:      fset.Position(decl.Pos()),
+						EndPos:   fset.Position(decl.End()),
 						Text:     nodeText(fset, decl),
 						Bindings: binds,
 					})
