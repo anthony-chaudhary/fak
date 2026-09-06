@@ -76,6 +76,7 @@ type DiscoverOptions struct {
 	NamespacePrefix  string
 	IncludeSubagents bool
 	IncludeGemini    bool
+	GeminiRoots      []string
 }
 
 type Transcript struct {

@@ -15,6 +15,9 @@ import (
 // ErrInvalidGeminiSession is returned when JSON content is not a recognized Gemini CLI chat transcript.
 var ErrInvalidGeminiSession = errors.New("sessionaudit: invalid gemini session transcript")
 
+// KindGemini identifies Gemini CLI session transcripts.
+const KindGemini = "gemini"
+
 // geminiUsageMeta holds token usage metrics from Gemini generateContent responses.
 type geminiUsageMeta struct {
 	PromptTokens          int64 `json:"promptTokenCount"`
