@@ -36,8 +36,8 @@ func TestDojo_PeerContextCalibrationAndConversionFunnel(t *testing.T) {
 	}
 
 	cleanInputs := PeerSearchEpisodes(cleanLedger)
-	if len(cleanInputs) != 5 {
-		t.Fatalf("expected 5 episodes, got %d", len(cleanInputs))
+	if len(cleanInputs) != 9 {
+		t.Fatalf("expected 9 episodes, got %d", len(cleanInputs))
 	}
 
 	if !cleanInputs[0].Outcome.Measured || cleanInputs[0].Outcome.Realized != wantCR01 {
@@ -86,8 +86,8 @@ func TestDojo_PeerContextCalibrationAndConversionFunnel(t *testing.T) {
 	}
 
 	leakInputs := PeerSearchEpisodes(leakLedger)
-	if len(leakInputs) != 5 {
-		t.Fatalf("expected 5 episodes, got %d", len(leakInputs))
+	if len(leakInputs) != 9 {
+		t.Fatalf("expected 9 episodes, got %d", len(leakInputs))
 	}
 
 	// Verify token savings outcome is penalized to failure (0.0)
@@ -141,8 +141,8 @@ func TestDojo_PeerContextCalibrationAndConversionFunnel(t *testing.T) {
 func TestPeerSearchEpisodes_Unrecorded(t *testing.T) {
 	unrec := PeerSearchTelemetryLedger{Recorded: false}
 	inputs := PeerSearchEpisodes(unrec)
-	if len(inputs) != 5 {
-		t.Fatalf("expected 5 inputs, got %d", len(inputs))
+	if len(inputs) != 9 {
+		t.Fatalf("expected 9 inputs, got %d", len(inputs))
 	}
 	for i, in := range inputs {
 		if in.Outcome.Measured {
@@ -353,8 +353,8 @@ func TestPeerSearchEpisodes_TaintLeaksSampleSizingAndRealizedCount(t *testing.T)
 				Recorded:      tc.recorded,
 			}
 			episodes := PeerSearchEpisodes(ledger)
-			if len(episodes) != 5 {
-				t.Fatalf("expected 5 episodes, got %d", len(episodes))
+			if len(episodes) != 9 {
+				t.Fatalf("expected 9 episodes, got %d", len(episodes))
 			}
 
 			// Check taint_leak_rate (index 3)
@@ -397,5 +397,198 @@ func TestPeerSearchEpisodes_TaintLeaksSampleSizingAndRealizedCount(t *testing.T)
 				t.Errorf("expected verdict %s, got %s", tc.wantVerdict, scored.Verdict)
 			}
 		})
+	}
+}
+
+// TestPeerSearchParameterTuningLevers validates tuning levers for excerpt budget,
+// timeline lookback window, query-to-progress latency, and tool deduplication (#11931).
+func TestPeerSearchParameterTuningLevers(t *testing.T) {
+	// 1. Calibration and claim registration verification
+	cases := []struct {
+		metric        string
+		wantClaimed   float64
+		wantUnit      string
+		lowerIsBetter bool
+	}{
+		{"excerpt_budget_tokens", 512.0, "tokens", false},
+		{"timeline_window_seconds", 1800.0, "seconds", false},
+		{"query_to_progress_latency_ms", 250.0, "ms", true},
+		{"tool_dedup_ratio", 0.30, "fraction", false},
+	}
+
+	for _, tc := range cases {
+		c, ok := Registry.Lookup("peer-search", tc.metric)
+		if !ok {
+			t.Fatalf("claim %q not found for lever 'peer-search'", tc.metric)
+		}
+		if c.Claimed != tc.wantClaimed {
+			t.Errorf("%s Claimed = %f, want %f", tc.metric, c.Claimed, tc.wantClaimed)
+		}
+		if c.IntentionalFloor {
+			t.Errorf("%s should not be an intentional floor", tc.metric)
+		}
+		if c.LowerIsBetter != tc.lowerIsBetter {
+			t.Errorf("%s LowerIsBetter = %v, want %v", tc.metric, c.LowerIsBetter, tc.lowerIsBetter)
+		}
+
+		pred := Registry.MustPredict("peer-search", tc.metric, tc.wantUnit)
+		if pred.Claimed != tc.wantClaimed {
+			t.Errorf("pred.%s Claimed = %f, want %f", tc.metric, pred.Claimed, tc.wantClaimed)
+		}
+		if pred.Unit != tc.wantUnit {
+			t.Errorf("pred.%s Unit = %q, want %q", tc.metric, pred.Unit, tc.wantUnit)
+		}
+		if pred.LowerIsBetter != tc.lowerIsBetter {
+			t.Errorf("pred.%s LowerIsBetter = %v, want %v", tc.metric, pred.LowerIsBetter, tc.lowerIsBetter)
+		}
+	}
+
+	// 2. Parameter adjustment and defaults
+	emptyLedger := PeerSearchTelemetryLedger{}
+	if eb := emptyLedger.EffectiveExcerptBudgetTokens(); eb != DefaultExcerptBudgetTokens {
+		t.Errorf("empty ledger EffectiveExcerptBudgetTokens = %d, want %d", eb, DefaultExcerptBudgetTokens)
+	}
+	if tw := emptyLedger.EffectiveTimelineWindowSeconds(); tw != DefaultTimelineWindowSeconds {
+		t.Errorf("empty ledger EffectiveTimelineWindowSeconds = %f, want %f", tw, DefaultTimelineWindowSeconds)
+	}
+	if lat := emptyLedger.EffectiveQueryToProgressLatencyMs(); lat != DefaultQueryToProgressLatencyMs {
+		t.Errorf("empty ledger EffectiveQueryToProgressLatencyMs = %f, want %f", lat, DefaultQueryToProgressLatencyMs)
+	}
+	if dr := emptyLedger.EffectiveToolDedupRatio(); dr != 0.0 {
+		t.Errorf("empty ledger EffectiveToolDedupRatio = %f, want 0.0", dr)
+	}
+
+	// Fluent chaining and parameter adjustments
+	tuned := emptyLedger.
+		WithExcerptBudget(1024).
+		WithTimelineWindow(3600.0).
+		WithQueryToProgressLatency(180.0).
+		WithToolDedupRatio(0.45)
+
+	if tuned.ExcerptBudgetTokens != 1024 || tuned.EffectiveExcerptBudgetTokens() != 1024 {
+		t.Errorf("WithExcerptBudget failed: got %d", tuned.ExcerptBudgetTokens)
+	}
+	if tuned.TimelineWindowSeconds != 3600.0 || tuned.EffectiveTimelineWindowSeconds() != 3600.0 {
+		t.Errorf("WithTimelineWindow failed: got %f", tuned.TimelineWindowSeconds)
+	}
+	if tuned.QueryToProgressLatencyMs != 180.0 || tuned.EffectiveQueryToProgressLatencyMs() != 180.0 {
+		t.Errorf("WithQueryToProgressLatency failed: got %f", tuned.QueryToProgressLatencyMs)
+	}
+	if tuned.ToolDedupRatio != 0.45 || tuned.EffectiveToolDedupRatio() != 0.45 {
+		t.Errorf("WithToolDedupRatio failed: got %f", tuned.ToolDedupRatio)
+	}
+
+	// Direct TuneParameters call
+	reTuned := emptyLedger.TuneParameters(256, 900.0)
+	if reTuned.ExcerptBudgetTokens != 256 || reTuned.TimelineWindowSeconds != 900.0 {
+		t.Errorf("TuneParameters failed: got budget=%d, window=%f", reTuned.ExcerptBudgetTokens, reTuned.TimelineWindowSeconds)
+	}
+
+	// Clamping checks for ToolDedupRatio
+	clampedLow := PeerSearchTelemetryLedger{ToolDedupRatio: -0.2}.EffectiveToolDedupRatio()
+	if clampedLow != 0.0 {
+		t.Errorf("EffectiveToolDedupRatio low clamp = %f, want 0.0", clampedLow)
+	}
+	clampedHigh := PeerSearchTelemetryLedger{ToolDedupRatio: 1.5}.EffectiveToolDedupRatio()
+	if clampedHigh != 1.0 {
+		t.Errorf("EffectiveToolDedupRatio high clamp = %f, want 1.0", clampedHigh)
+	}
+
+	// 3. Ledger calculation, episode evaluation, and scoring
+	activeLedger := PeerSearchTelemetryLedger{
+		Level0Queries:            100,
+		Level1Queries:            40,
+		Level2Queries:            10,
+		AvoidedToolTokens:        5000,
+		PeerQueryTokens:          2000,
+		TaintLeaks:               0,
+		ExcerptBudgetTokens:      512,
+		TimelineWindowSeconds:    1800.0,
+		QueryToProgressLatencyMs: 250.0,
+		ToolDedupRatio:           0.30,
+		Recorded:                 true,
+	}
+
+	episodes := activeLedger.Episodes()
+	if len(episodes) != 9 {
+		t.Fatalf("expected 9 episodes from activeLedger, got %d", len(episodes))
+	}
+
+	// Episode 5: excerpt_budget_tokens
+	epBudget := episodes[5]
+	if epBudget.Prediction.Metric != "excerpt_budget_tokens" {
+		t.Errorf("episode 5 metric = %q, want 'excerpt_budget_tokens'", epBudget.Prediction.Metric)
+	}
+	if !epBudget.Outcome.Measured || epBudget.Outcome.Realized != 512.0 {
+		t.Errorf("episode 5 realized = %f (measured=%v), want 512.0", epBudget.Outcome.Realized, epBudget.Outcome.Measured)
+	}
+
+	// Episode 6: timeline_window_seconds
+	epWindow := episodes[6]
+	if epWindow.Prediction.Metric != "timeline_window_seconds" {
+		t.Errorf("episode 6 metric = %q, want 'timeline_window_seconds'", epWindow.Prediction.Metric)
+	}
+	if !epWindow.Outcome.Measured || epWindow.Outcome.Realized != 1800.0 {
+		t.Errorf("episode 6 realized = %f (measured=%v), want 1800.0", epWindow.Outcome.Realized, epWindow.Outcome.Measured)
+	}
+
+	// Episode 7: query_to_progress_latency_ms
+	epLatency := episodes[7]
+	if epLatency.Prediction.Metric != "query_to_progress_latency_ms" {
+		t.Errorf("episode 7 metric = %q, want 'query_to_progress_latency_ms'", epLatency.Prediction.Metric)
+	}
+	if !epLatency.Outcome.Measured || epLatency.Outcome.Realized != 250.0 {
+		t.Errorf("episode 7 realized = %f (measured=%v), want 250.0", epLatency.Outcome.Realized, epLatency.Outcome.Measured)
+	}
+	if !epLatency.Prediction.LowerIsBetter {
+		t.Errorf("episode 7 LowerIsBetter = false, want true")
+	}
+
+	// Episode 8: tool_dedup_ratio
+	epDedup := episodes[8]
+	if epDedup.Prediction.Metric != "tool_dedup_ratio" {
+		t.Errorf("episode 8 metric = %q, want 'tool_dedup_ratio'", epDedup.Prediction.Metric)
+	}
+	if !epDedup.Outcome.Measured || epDedup.Outcome.Realized != 0.30 {
+		t.Errorf("episode 8 realized = %f (measured=%v), want 0.30", epDedup.Outcome.Realized, epDedup.Outcome.Measured)
+	}
+
+	// Verify scoring of perfectly calibrated baseline
+	for i := 5; i <= 8; i++ {
+		scored := Score("test-calibrated", episodes[i].Prediction, episodes[i].Outcome, DefaultCalibBand())
+		if scored.Verdict != VerdictCalibrated {
+			t.Errorf("metric %s scored verdict = %s, want %s", episodes[i].Prediction.Metric, scored.Verdict, VerdictCalibrated)
+		}
+	}
+
+	// 4. Latency LowerIsBetter polarity check
+	fastLedger := activeLedger.WithQueryToProgressLatency(150.0)
+	fastEp := Score("fast", fastLedger.Episodes()[7].Prediction, fastLedger.Episodes()[7].Outcome, DefaultCalibBand())
+	if fastEp.Verdict != VerdictUnderClaim {
+		t.Errorf("faster latency scored verdict = %s, want %s (under-claim / win)", fastEp.Verdict, VerdictUnderClaim)
+	}
+
+	slowLedger := activeLedger.WithQueryToProgressLatency(400.0)
+	slowEp := Score("slow", slowLedger.Episodes()[7].Prediction, slowLedger.Episodes()[7].Outcome, DefaultCalibBand())
+	if slowEp.Verdict != VerdictOverClaim {
+		t.Errorf("slower latency scored verdict = %s, want %s (over-claim / regression)", slowEp.Verdict, VerdictOverClaim)
+	}
+
+	// 5. Taint breach penalty on tool deduplication ratio
+	taintBreachLedger := activeLedger
+	taintBreachLedger.TaintLeaks = 2
+	taintBreachEpisodes := taintBreachLedger.Episodes()
+	if taintBreachEpisodes[8].Outcome.Realized != 0.0 {
+		t.Errorf("expected tool_dedup_ratio to be penalized to 0.0 on taint leak, got %f", taintBreachEpisodes[8].Outcome.Realized)
+	}
+
+	// 6. Unrecorded telemetry leaves tuning metrics unmeasured
+	unrecorded := activeLedger
+	unrecorded.Recorded = false
+	unrecEpisodes := unrecorded.Episodes()
+	for i := 5; i <= 8; i++ {
+		if unrecEpisodes[i].Outcome.Measured {
+			t.Errorf("metric %s was unexpectedly measured on unrecorded ledger", unrecEpisodes[i].Prediction.Metric)
+		}
 	}
 }
