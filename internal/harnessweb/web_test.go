@@ -560,4 +560,89 @@ func TestWebApprovalResolution(t *testing.T) {
 	if len(source.approvals) != 2 || source.approvals[1].Resolution != "decline" {
 		t.Fatalf("expected 2 dispatched approvals with decline, got %+v", source.approvals)
 	}
+
+	// 9. Successful form urlencoded submission
+	source.cards[0].State = sessionAwaitingApproval
+	source.cards[0].PendingApproval = app
+	formBody := "resolution=accept&reason=approved+via+form&approval_id=app-web-test-1"
+	formRes, err := ts.Client().Post(ts.URL+"/api/sessions/sess-awaiting/approval", "application/x-www-form-urlencoded", strings.NewReader(formBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	formRes.Body.Close()
+	if formRes.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for form submission, got %d", formRes.StatusCode)
+	}
+	if len(source.approvals) != 3 || source.approvals[2].Resolution != "accept" || source.approvals[2].Reason != "approved via form" {
+		t.Fatalf("expected 3 dispatched approvals with form accept, got %+v", source.approvals)
+	}
+
+	// 10. Test session-scoped SSE streaming hook: GET /v1/fak/sessions/{id}/events
+	scopedSSEReq, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/fak/sessions/sess-awaiting/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopedSSERes, err := ts.Client().Do(scopedSSEReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer scopedSSERes.Body.Close()
+	if scopedSSERes.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for scoped SSE stream, got %d", scopedSSERes.StatusCode)
+	}
+
+	// 11. Test event streaming ingestion hook: POST /v1/fak/sessions/{id}/events
+	eventHookPayload := `{"type":"approval.requested","approval_id":"app-hook-1","tool_name":"Bash","command":"make ci","target_path":"/repo","risk_explanation":"high risk"}`
+	hookRes, err := ts.Client().Post(ts.URL+"/v1/fak/sessions/sess-awaiting/events", "application/json", strings.NewReader(eventHookPayload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hookRes.Body.Close()
+	if hookRes.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected 202 for event hook, got %d", hookRes.StatusCode)
+	}
+
+	// 12. Test store-backed session approval resolution when source is nil
+	storeOnly := newStore()
+	runID := storeOnly.create("approval: inspect workspace")
+	storeTS := httptest.NewServer(handler(storeOnly))
+	defer storeTS.Close()
+
+	storeRes, err := storeTS.Client().Post(storeTS.URL+"/api/sessions/"+runID+"/approval", "application/json", strings.NewReader(`{"resolution":"accept","approval_id":"approval-1"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer storeRes.Body.Close()
+	if storeRes.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(storeRes.Body)
+		t.Fatalf("expected 200 for store-backed session approval, got %d: %s", storeRes.StatusCode, body)
+	}
+
+	// 13. Test direct 3-argument coordinator resolution
+	coord := &mockCoordinator{}
+	coordHandler := HandleSessionApproval(coord, nil)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/sess-coord/approval", strings.NewReader(`{"resolution":"accept","reason":"coordinator authorized"}`))
+	req.SetPathValue("id", "sess-coord")
+	coordHandler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for coordinator resolution, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if coord.resolvedID != "sess-coord" || coord.resolution != "accept" || coord.reason != "coordinator authorized" {
+		t.Fatalf("coordinator unexpected values: id=%q, res=%q, reason=%q", coord.resolvedID, coord.resolution, coord.reason)
+	}
+}
+
+type mockCoordinator struct {
+	sessionsCalled bool
+	resolvedID     string
+	resolution     string
+	reason         string
+}
+
+func (m *mockCoordinator) ResolveApproval(sessionID string, resolution string, reason string) error {
+	m.resolvedID = sessionID
+	m.resolution = resolution
+	m.reason = reason
+	return nil
 }

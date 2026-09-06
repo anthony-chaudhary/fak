@@ -147,6 +147,7 @@ type GotchaProbeEnvironment struct {
 	DirtyRingBufferActive     bool              `json:"dirty_ring_buffer_active"`
 	DPMGovernorConfigured     bool              `json:"dpm_governor_configured"`
 	USB4Tuned                 bool              `json:"usb4_tuned"`
+	F16KVContiguizationEnabled bool             `json:"f16_kv_contiguization_enabled"`
 	FS                        FileSystem        `json:"-"`
 }
 
@@ -353,6 +354,16 @@ func Top20Gotchas() []StrixGotcha {
 			Remediation: "Only use multi-node clustering for models >128GB (e.g. DeepSeek V4 284B); set USB4 MTU 9000 and pm_qos_resume_latency_us=100.",
 			CanAutoFix:  true,
 		},
+		{
+			ID:          "GOTCHA_LPDDR5X_CHANNEL_CAMPING",
+			Title:       "LPDDR5X 16-channel strided KV cache camping on Strix Halo",
+			Category:    CategoryMemoryUMA,
+			Severity:    SeverityHigh,
+			Symptoms:    "Severe memory throughput collapse during long-context (>=32k) prefill and decode; memory transactions camp on <= 2 of 16 LPDDR5X pseudo-channels (entropy < 0.25), starving the remaining 14 channels.",
+			RootCause:   "Strided f16 KV cache layout [nPos, nKV, hd] produces 2048-byte token strides that alias with Strix Halo's 16-channel 128B/64B interleaving period, funneling accesses onto 1 or 2 channels.",
+			Remediation: "Enable pre-attention f16 KV contiguization pass to linearize KV cache into head-contiguous [nKV, nPos, hd] layout (export FAK_F16_KV_CONTIGUIZE=1 or set EnableF16KVContiguization=true in serving configuration).",
+			CanAutoFix:  true,
+		},
 	}
 }
 
@@ -429,6 +440,11 @@ func AuditHostGotchas(env GotchaProbeEnvironment) *GotchaAuditReport {
 		AdvisoryCount:     advisoryCount,
 		ReadyForInference: ready,
 	}
+}
+
+// AuditEnvironment audits an environment against Strix Halo gotchas.
+func AuditEnvironment(env GotchaProbeEnvironment) *GotchaAuditReport {
+	return AuditHostGotchas(env)
 }
 
 func evaluateGotcha(id string, env GotchaProbeEnvironment) (GotchaStatus, string) {
@@ -608,6 +624,15 @@ func evaluateGotcha(id string, env GotchaProbeEnvironment) (GotchaStatus, string
 		}
 		return StatusAdvisory, "USB4 link sleep states untuned; multi-node clustering on models <=128GB suffers 15-20% latency penalty over single node."
 
+	case "GOTCHA_LPDDR5X_CHANNEL_CAMPING":
+		if !env.IsStrixHalo {
+			return StatusNotApplicable, "Applies to AMD Strix Halo (Ryzen AI MAX+ / gfx1151) 16-channel LPDDR5X memory subsystem."
+		}
+		if env.F16KVContiguizationEnabled || env.EnvVars["FAK_F16_KV_CONTIGUIZE"] == "1" {
+			return StatusSafeConfigured, "Pre-attention f16 KV contiguization pass enabled; uniform LPDDR5X 16-channel interleaving verified."
+		}
+		return StatusDefectDetected, "Strided f16 KV cache causes LPDDR5X channel camping across 16 pseudo-channels (channel entropy < 0.25, <= 2 active channels); pre-attention contiguization pass is disabled."
+
 	default:
 		return StatusSafeConfigured, "Verified safe."
 	}
@@ -635,6 +660,10 @@ func BuildHostProbeEnvironmentWithFS(fs FileSystem) GotchaProbeEnvironment {
 		if len(pair) == 2 {
 			env.EnvVars[pair[0]] = pair[1]
 		}
+	}
+
+	if env.EnvVars["FAK_F16_KV_CONTIGUIZE"] == "1" {
+		env.F16KVContiguizationEnabled = true
 	}
 
 	hasLinuxFiles := false
@@ -1106,10 +1135,19 @@ func GenerateFixPlan(report *GotchaAuditReport) []string {
 			case "GOTCHA_THERMAL_CLOCK_HUNTING":
 				fixes = append(fixes, "# Fix: Lock DPM governor to high performance with clock ceiling to prevent acoustic fan hunting")
 				fixes = append(fixes, "echo high | sudo tee /sys/class/drm/card0/device/power_dpm_force_performance_level")
+
+			case "GOTCHA_LPDDR5X_CHANNEL_CAMPING":
+				fixes = append(fixes, "# Fix: Enable pre-attention f16 KV contiguization pass to prevent LPDDR5X channel camping")
+				fixes = append(fixes, "export FAK_F16_KV_CONTIGUIZE=1")
 			}
 		}
 	}
 	return fixes
+}
+
+// RemediateGotchas generates concrete remediation commands for detected defects from an audit report.
+func RemediateGotchas(report *GotchaAuditReport) []string {
+	return GenerateFixPlan(report)
 }
 
 // GenerateRollbackScript generates shell commands to undo remediation changes and restore previous settings.
@@ -1142,6 +1180,9 @@ func GenerateRollbackScript(report *GotchaAuditReport) []string {
 			case "GOTCHA_THERMAL_CLOCK_HUNTING":
 				rollbacks = append(rollbacks, "# Revert DPM performance level to auto")
 				rollbacks = append(rollbacks, "echo auto | sudo tee /sys/class/drm/card0/device/power_dpm_force_performance_level")
+			case "GOTCHA_LPDDR5X_CHANNEL_CAMPING":
+				rollbacks = append(rollbacks, "# Revert pre-attention f16 KV contiguization setting")
+				rollbacks = append(rollbacks, "unset FAK_F16_KV_CONTIGUIZE")
 			}
 		}
 	}

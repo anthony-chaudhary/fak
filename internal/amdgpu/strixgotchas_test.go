@@ -8,8 +8,8 @@ import (
 
 func TestTop20GotchasCountAndIntegrity(t *testing.T) {
 	gotchas := Top20Gotchas()
-	if len(gotchas) != 20 {
-		t.Fatalf("expected exactly 20 gotchas, got %d", len(gotchas))
+	if len(gotchas) != 21 {
+		t.Fatalf("expected exactly 21 gotchas, got %d", len(gotchas))
 	}
 
 	seenIDs := make(map[string]bool)
@@ -68,8 +68,9 @@ func TestAuditHostGotchas_SafeEnvironment(t *testing.T) {
 		BatchFlagsConfigured:      true,
 		NPUOffloadEnabled:         true,
 		DirtyRingBufferActive:     true,
-		DPMGovernorConfigured:     true,
-		USB4Tuned:                 true,
+		DPMGovernorConfigured:      true,
+		USB4Tuned:                  true,
+		F16KVContiguizationEnabled: true,
 	}
 
 	report := AuditHostGotchas(env)
@@ -190,8 +191,8 @@ func TestAuditHostGotchas_ZeroAndBoundaryEnvironment(t *testing.T) {
 	if report == nil {
 		t.Fatal("expected non-nil report for zero environment")
 	}
-	if len(report.Findings) != 20 {
-		t.Fatalf("expected 20 findings for zero environment, got %d", len(report.Findings))
+	if len(report.Findings) != 21 {
+		t.Fatalf("expected 21 findings for zero environment, got %d", len(report.Findings))
 	}
 
 	summary := report.Summary()
@@ -816,6 +817,86 @@ func TestAuditHostGotchas_LiveGotchasEvaluations(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("GOTCHA_LPDDR5X_CHANNEL_CAMPING", func(t *testing.T) {
+		// Defect detected when running on Strix Halo without contiguization pass enabled
+		envDefect := GotchaProbeEnvironment{
+			GOOS:                       "linux",
+			IsStrixHalo:                true,
+			F16KVContiguizationEnabled: false,
+		}
+		rep := AuditEnvironment(envDefect)
+		var campingFinding *GotchaAuditFinding
+		for i := range rep.Findings {
+			if rep.Findings[i].Gotcha.ID == "GOTCHA_LPDDR5X_CHANNEL_CAMPING" {
+				campingFinding = &rep.Findings[i]
+				break
+			}
+		}
+		if campingFinding == nil {
+			t.Fatal("GOTCHA_LPDDR5X_CHANNEL_CAMPING not evaluated")
+		}
+		if campingFinding.Status != StatusDefectDetected {
+			t.Errorf("expected DEFECT_DETECTED when contiguization disabled, got %s", campingFinding.Status)
+		}
+
+		// Verify remediation plan generated via RemediateGotchas
+		fixes := RemediateGotchas(rep)
+		foundFix := false
+		for _, fix := range fixes {
+			if strings.Contains(fix, "FAK_F16_KV_CONTIGUIZE=1") {
+				foundFix = true
+				break
+			}
+		}
+		if !foundFix {
+			t.Errorf("expected remediation plan to contain FAK_F16_KV_CONTIGUIZE=1, got %v", fixes)
+		}
+
+		// Safe when F16KVContiguizationEnabled is true
+		envSafe := GotchaProbeEnvironment{
+			GOOS:                       "linux",
+			IsStrixHalo:                true,
+			F16KVContiguizationEnabled: true,
+		}
+		repSafe := AuditEnvironment(envSafe)
+		for _, f := range repSafe.Findings {
+			if f.Gotcha.ID == "GOTCHA_LPDDR5X_CHANNEL_CAMPING" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED when contiguization enabled, got %s", f.Status)
+				}
+			}
+		}
+
+		// Safe when env var FAK_F16_KV_CONTIGUIZE=1
+		envVarSafe := GotchaProbeEnvironment{
+			GOOS:        "linux",
+			IsStrixHalo: true,
+			EnvVars:     map[string]string{"FAK_F16_KV_CONTIGUIZE": "1"},
+		}
+		repEnv := AuditEnvironment(envVarSafe)
+		for _, f := range repEnv.Findings {
+			if f.Gotcha.ID == "GOTCHA_LPDDR5X_CHANNEL_CAMPING" {
+				if f.Status != StatusSafeConfigured {
+					t.Errorf("expected SAFE_CONFIGURED when FAK_F16_KV_CONTIGUIZE=1, got %s", f.Status)
+				}
+			}
+		}
+
+		// Not applicable when host is not Strix Halo
+		envNonStrix := GotchaProbeEnvironment{
+			GOOS:        "linux",
+			IsStrixHalo: false,
+		}
+		repNonStrix := AuditHostGotchas(envNonStrix)
+		for _, f := range repNonStrix.Findings {
+			if f.Gotcha.ID == "GOTCHA_LPDDR5X_CHANNEL_CAMPING" {
+				if f.Status != StatusNotApplicable {
+					t.Errorf("expected NOT_APPLICABLE for non-Strix host, got %s", f.Status)
+				}
+			}
+		}
+	})
 }
 
 func TestAuditHostGotchas_ContainerAndWSL2(t *testing.T) {
@@ -1209,7 +1290,7 @@ func TestAuditHostGotchas_ReadOnlySysfs(t *testing.T) {
 	if rep == nil {
 		t.Fatal("expected non-nil report for empty/read-only sysfs")
 	}
-	if len(rep.Findings) != 20 {
-		t.Errorf("expected 20 findings, got %d", len(rep.Findings))
+	if len(rep.Findings) != 21 {
+		t.Errorf("expected 21 findings, got %d", len(rep.Findings))
 	}
 }

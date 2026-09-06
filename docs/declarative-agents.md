@@ -83,7 +83,9 @@ The descriptor's markdown body represents the persona system prompt. It integrat
 List discovered declarative agent descriptors in the current workspace:
 
 ```bash
-# Tabular overview
+# Tabular overview (fak agents, fak agents list, or fak agent list)
+fak agents
+fak agent list
 fak agents list
 
 # Custom directory search

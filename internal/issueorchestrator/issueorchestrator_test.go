@@ -323,3 +323,28 @@ func TestRenderAndMarkdown(t *testing.T) {
 		t.Errorf("round trip mismatch: got %d, want %d", roundTrip.PlannedIssues, plan.PlannedIssues)
 	}
 }
+
+func TestPlanWavesLimitAndCompactRender(t *testing.T) {
+	var issues []Issue
+	for i := 1; i <= 20; i++ {
+		issues = append(issues, Issue{
+			Number:          i,
+			Key:             "issue-" + string(rune('a'+i)),
+			Title:           "Triage item",
+			Dispatchability: "triage_only",
+		})
+	}
+
+	// 1. Test Limit option
+	planLimited := PlanWaves(issues, WavePlanOptions{Limit: 5})
+	if planLimited.TotalIssues != 5 {
+		t.Fatalf("expected 5 limited issues, got %d", planLimited.TotalIssues)
+	}
+
+	// 2. Test Compact Render with > 5 triage items
+	planFull := PlanWaves(issues, WavePlanOptions{})
+	rendered := RenderWaves(planFull)
+	if !strings.Contains(rendered, "... and 15 more (run with --triage to view all)") {
+		t.Errorf("expected compact triage truncation note, got:\n%s", rendered)
+	}
+}

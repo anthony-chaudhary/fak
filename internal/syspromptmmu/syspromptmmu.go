@@ -187,3 +187,16 @@ func PlanDigest() string {
 	}
 	return witnessPrefix + hex.EncodeToString(h.Sum(nil))
 }
+
+// NewOverlaySegment creates an overlay-tier segment with content-derived witness and estimated tokens.
+func NewOverlaySegment(content []byte) Segment {
+	return Segment{
+		Tier: TierOverlay,
+		PromptSegment: cachemeta.PromptSegment{
+			Kind:    cachemeta.SegMessage,
+			Content: append([]byte(nil), content...),
+			Tokens:  estTokens(content),
+			Witness: WitnessFor(content),
+		},
+	}
+}

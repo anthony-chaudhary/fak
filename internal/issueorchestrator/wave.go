@@ -17,6 +17,10 @@ func PlanWaves(issues []Issue, opts WavePlanOptions) Plan {
 		waveSizeCap = 4
 	}
 
+	if opts.Limit > 0 && len(issues) > opts.Limit {
+		issues = issues[:opts.Limit]
+	}
+
 	workspace := opts.WorkspaceRoot
 	if workspace == "" {
 		workspace = "."

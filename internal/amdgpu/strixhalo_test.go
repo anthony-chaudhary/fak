@@ -71,6 +71,15 @@ func TestStrixHalo128GB_27BModel(t *testing.T) {
 		if cfg.KVPrecisionLabel != "f16" {
 			t.Errorf("KVPrecisionLabel = %q, want \"f16\"", cfg.KVPrecisionLabel)
 		}
+		if !cfg.EnableF16KVContiguization {
+			t.Errorf("EnableF16KVContiguization = false, want true for f16")
+		}
+		if cfg.ContiguizationScratchGiB != 1.0 {
+			t.Errorf("ContiguizationScratchGiB = %.2f, want 1.0", cfg.ContiguizationScratchGiB)
+		}
+		if cfg.ContiguizationMinContext != 32768 {
+			t.Errorf("ContiguizationMinContext = %d, want 32768", cfg.ContiguizationMinContext)
+		}
 		if cfg.DecoupledDraftUBatch != 512 {
 			t.Errorf("DecoupledDraftUBatch = %d, want 512", cfg.DecoupledDraftUBatch)
 		}
@@ -123,6 +132,15 @@ func TestStrixHalo64GB_14BModel(t *testing.T) {
 		}
 		if cfg.KVPrecisionLabel != "f16" {
 			t.Errorf("KVPrecisionLabel = %q, want \"f16\"", cfg.KVPrecisionLabel)
+		}
+		if !cfg.EnableF16KVContiguization {
+			t.Errorf("EnableF16KVContiguization = false, want true for f16")
+		}
+		if cfg.ContiguizationScratchGiB != 0.5 {
+			t.Errorf("ContiguizationScratchGiB = %.2f, want 0.5", cfg.ContiguizationScratchGiB)
+		}
+		if cfg.ContiguizationMinContext != 32768 {
+			t.Errorf("ContiguizationMinContext = %d, want 32768", cfg.ContiguizationMinContext)
 		}
 		if cfg.DecoupledDraftUBatch != 512 {
 			t.Errorf("DecoupledDraftUBatch = %d, want 512", cfg.DecoupledDraftUBatch)
@@ -211,6 +229,12 @@ func TestStrixHaloQ8Fallback(t *testing.T) {
 	}
 	if cfg.KVPrecisionLabel != "q8" {
 		t.Errorf("KVPrecisionLabel = %q, want \"q8\"", cfg.KVPrecisionLabel)
+	}
+	if cfg.EnableF16KVContiguization {
+		t.Errorf("EnableF16KVContiguization = true, want false when Q8 fallback is selected")
+	}
+	if cfg.ContiguizationScratchGiB != 0 {
+		t.Errorf("ContiguizationScratchGiB = %f, want 0 when Q8 fallback is selected", cfg.ContiguizationScratchGiB)
 	}
 }
 

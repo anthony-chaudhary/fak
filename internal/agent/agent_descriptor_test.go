@@ -268,9 +268,15 @@ Duplicate explore
 		t.Fatal(err)
 	}
 
-	discovered, err := FindWorkspaceAgentDescriptors(tmpDir)
+	discovered, err := DiscoverAgentDescriptors(tmpDir)
 	if err != nil {
-		t.Fatalf("FindWorkspaceAgentDescriptors failed: %v", err)
+		t.Fatalf("DiscoverAgentDescriptors failed: %v", err)
+	}
+
+	// Verify FindWorkspaceAgentDescriptors alias returns identical count
+	discoveredAlias, err := FindWorkspaceAgentDescriptors(tmpDir)
+	if err != nil || len(discoveredAlias) != len(discovered) {
+		t.Fatalf("FindWorkspaceAgentDescriptors mismatch: err=%v, count=%d", err, len(discoveredAlias))
 	}
 
 	if len(discovered) != 3 {
@@ -456,5 +462,60 @@ func TestAgentDescriptor_Registry(t *testing.T) {
 	list := reg.List()
 	if len(list) != 2 || list[0].Name != "Alpha" || list[1].Name != "Beta" {
 		t.Errorf("List() unexpected: %+v", list)
+	}
+}
+
+func TestAgentDescriptor_ParseString_And_SyspromptmmuPlan(t *testing.T) {
+	content := `---
+name: plan-worker
+description: Plan execution worker
+mode: subagent
+model: tier2
+variant: adaptive
+max_turns: 12
+capabilities:
+  tools: [read, edit]
+  paths: [internal/**]
+  allow_mutation: true
+---
+# Plan Worker Instructions
+Execute tasks according to plan.
+`
+	// Test ParseAgentDescriptor with string directly
+	desc, err := ParseAgentDescriptor(content)
+	if err != nil {
+		t.Fatalf("ParseAgentDescriptor(string) failed: %v", err)
+	}
+	if desc.Name != "plan-worker" {
+		t.Errorf("Name = %q, want %q", desc.Name, "plan-worker")
+	}
+	if desc.MaxTurns != 12 {
+		t.Errorf("MaxTurns = %d, want 12", desc.MaxTurns)
+	}
+	if !desc.Capabilities.AllowMutation {
+		t.Errorf("AllowMutation = false, want true")
+	}
+
+	// Test AsOverlaySegment and syspromptmmu.NewOverlaySegment
+	overlaySeg := desc.AsOverlaySegment()
+	if overlaySeg.Tier != syspromptmmu.TierOverlay {
+		t.Errorf("overlaySeg.Tier = %v, want TierOverlay", overlaySeg.Tier)
+	}
+	if overlaySeg.Tokens <= 0 {
+		t.Errorf("overlaySeg.Tokens = %d, want > 0", overlaySeg.Tokens)
+	}
+
+	// Test ApplyToPlan
+	basePlan := syspromptmmu.BaseContext()
+	witness := func(e syspromptmmu.BaseEdit) bool { return true }
+	newPlan, verdict := desc.ApplyToPlan(basePlan, witness)
+	if !verdict.Applied || verdict.Reason != syspromptmmu.EditOK {
+		t.Fatalf("ApplyToPlan failed: applied=%t, reason=%s", verdict.Applied, verdict.Reason)
+	}
+	if len(newPlan) != len(basePlan)+1 {
+		t.Errorf("newPlan length = %d, want %d", len(newPlan), len(basePlan)+1)
+	}
+	if newPlan[len(newPlan)-1].Tier != syspromptmmu.TierOverlay {
+		t.Errorf("appended segment tier = %v, want TierOverlay", newPlan[len(newPlan)-1].Tier)
 	}
 }

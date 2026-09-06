@@ -141,6 +141,16 @@ func (d *AgentDescriptor) ApplyToSegments(segments []syspromptmmu.Segment, witne
 	return syspromptmmu.ApplyEdit(segments, d.AsPromptEdit(), witness)
 }
 
+// ApplyToPlan applies the descriptor's persona overlay edit to an existing syspromptmmu.Segment plan.
+func (d *AgentDescriptor) ApplyToPlan(plan []syspromptmmu.Segment, witness func(syspromptmmu.BaseEdit) bool) ([]syspromptmmu.Segment, syspromptmmu.EditVerdict) {
+	return d.ApplyToSegments(plan, witness)
+}
+
+// AsOverlaySegment converts the descriptor prompt into a syspromptmmu.Segment in TierOverlay.
+func (d *AgentDescriptor) AsOverlaySegment() syspromptmmu.Segment {
+	return syspromptmmu.NewOverlaySegment(d.PromptOverlayBytes())
+}
+
 // Narrow returns a copy of the descriptor with its capabilities monotonically narrowed
 // by parent capabilities and turn budget capped.
 func (d *AgentDescriptor) Narrow(parent AgentCapabilities, maxTurnsBudget ...int) *AgentDescriptor {
@@ -267,8 +277,27 @@ func pathWithin(root, requested string) bool {
 }
 
 // ParseAgentDescriptor parses an agent markdown document with YAML frontmatter.
-func ParseAgentDescriptor(content []byte, path string) (*AgentDescriptor, error) {
-	raw := strings.ReplaceAll(string(content), "\r\n", "\n")
+// content can be string or []byte. An optional path can be passed to attribute the source.
+func ParseAgentDescriptor(content any, optionalPath ...string) (*AgentDescriptor, error) {
+	var raw string
+	switch c := content.(type) {
+	case string:
+		raw = c
+	case []byte:
+		raw = string(c)
+	default:
+		return nil, fmt.Errorf("agent descriptor: unsupported content type %T, expected string or []byte", content)
+	}
+
+	path := ""
+	if len(optionalPath) > 0 {
+		path = optionalPath[0]
+	}
+
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	if strings.TrimSpace(raw) == "" {
+		return nil, fmt.Errorf("agent descriptor %s: empty content", path)
+	}
 	lines := strings.Split(raw, "\n")
 	if len(lines) == 0 {
 		return nil, fmt.Errorf("agent descriptor %s: empty content", path)
@@ -472,9 +501,9 @@ func ScanAgentDescriptors(dir string) ([]*AgentDescriptor, error) {
 	return out, nil
 }
 
-// FindWorkspaceAgentDescriptors scans canonical workspace directories (.fak/agents/*.md and .agents/*.md)
+// DiscoverAgentDescriptors scans canonical workspace directories (.fak/agents/*.md and .agents/*.md)
 // for declarative agent descriptors, deduplicating by descriptor name (.fak/agents precedence).
-func FindWorkspaceAgentDescriptors(workspace string) ([]*AgentDescriptor, error) {
+func DiscoverAgentDescriptors(workspace string) ([]*AgentDescriptor, error) {
 	if workspace == "" {
 		workspace = "."
 	}
@@ -508,6 +537,11 @@ func FindWorkspaceAgentDescriptors(workspace string) ([]*AgentDescriptor, error)
 		return out[i].Name < out[j].Name
 	})
 	return out, nil
+}
+
+// FindWorkspaceAgentDescriptors is an alias for DiscoverAgentDescriptors.
+func FindWorkspaceAgentDescriptors(workspace string) ([]*AgentDescriptor, error) {
+	return DiscoverAgentDescriptors(workspace)
 }
 
 // AgentDescriptorRegistry holds discovered agent descriptors with thread-safe access.

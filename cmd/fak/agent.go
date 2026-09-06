@@ -118,6 +118,13 @@ func cmdAgent(argv []string) {
 }
 
 func runAgent(argv []string) {
+	if len(argv) > 0 && (argv[0] == "list" || argv[0] == "descriptors" || argv[0] == "declarative") {
+		code := runAgentsList(os.Stdout, os.Stderr, argv[1:])
+		if code != 0 {
+			os.Exit(code)
+		}
+		return
+	}
 	if len(argv) > 0 && argv[0] == "profiles" {
 		if err := printAgentOutputProfiles(os.Stdout, argv[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)

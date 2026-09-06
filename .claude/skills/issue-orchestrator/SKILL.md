@@ -4,7 +4,7 @@ description: Plan, partition, and coordinate multi-wave parallel subagent campai
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob, Task
-argument-hint: "[--target-issues 10] [--points 50] [--wave-size 4] [--max-waves 3] [--from-issues issues.json]  (no args = default reasonable campaign: wave-size 4, max 3 waves over open backlog)"
+argument-hint: "[--top 10] [--target-issues 5] [--wave-size 4] [--max-waves 2] [--from-issues issues.json]  (no args = default focused wave: top 10 candidates, max 2 waves)"
 ---
 
 # /issue-orchestrator — campaign-scale multi-wave issue resolution
@@ -26,9 +26,11 @@ The shape: **baseline campaign (`fak issue-orchestrator --json`) → automated s
 
 When invoked without explicit arguments or under underspecified requests, apply these reasonable defaults:
 
-- **Target Issues**: Default to resolving a focused campaign cohort of **5–10 issues** (or the top open milestone/priority bucket).
+- **Bounded Evaluation (`--top 10`)**: ALWAYS bound backlog evaluation to the top 10–15 candidate issues (e.g. `fak issue-orchestrator --top 10`). Never run unbounded sweeps across hundreds of backlog tickets, which wastes tokens evaluating irrelevant triage queues.
+- **Action-First Velocity**: Prioritize immediate wave execution over prolonged baseline analysis. Plan Wave 1, arbitrate, dispatch workers, and land code.
+- **Target Issues**: Default to resolving a focused cohort of **3–5 issues** per session.
 - **Wave Concurrency (`--wave-size`)**: Default to **4 concurrent workers** per wave (or 3 on constrained platforms). Never exceed 5 concurrent workers.
-- **Max Waves per Run (`--max-waves`)**: Default to **3 waves** (or 1 wave when running quick verification). Avoid unbounded multi-wave loops without checkpoints.
+- **Max Waves per Run (`--max-waves`)**: Default to **1–2 waves** per run. Avoid unbounded multi-wave loops without checkpoints.
 - **Scratch & State Hygiene**: Baseline snapshots belong in allocated scratch or temporary JSON files (`fak tree-doctor --scratch-path issue-orchestrator/baseline.json`), never untracked root dumps. Clean them up on completion.
 - **Worker Isolation**: Each subagent gets exactly one issue and one package lane (`internal/<lane>`), touches only declared files, runs only package-scoped tests (`go test -v ./internal/<lane>`, `go vet ./internal/<lane>`), and returns a 3-line receipt.
 - **Witness & Commit Cadence**: Coordinator independently verifies (`go vet`, `go test`) and commits each successful worker leaf individually with DCO sign-off, Conventional Commits, issue number citation `(#N)`, and lane ship-stamp `(fak <lane>)` before proceeding to the next wave.
@@ -76,41 +78,41 @@ When invoked without explicit arguments or under underspecified requests, apply 
 
 ---
 
-## Phase 1 — Campaign Sizing & Baseline
+## Phase 1 — Quick Bounded Planning & Target Selection
 
-Capture the campaign baseline and calculate the distance to the target milestone:
+Plan the immediate actionable wave bounded to top candidate issues:
 
 ```bash
-# Capture baseline snapshot to scratch (or campaign-baseline.json):
-fak issue-orchestrator --json > campaign-baseline.json
+# Fast path: plan immediate actionable wave bounded to top candidate issues:
+fak issue-orchestrator --top 10 --max-waves 1
 
-# View current backlog wave plan and queues:
-fak issue-orchestrator --top 10
+# If tracking a formal burndown comparison, capture baseline bounded to cohort:
+fak issue-orchestrator --top 15 --max-waves 2 --json > campaign-baseline.json
 ```
 
 From the output, determine:
-- **Starting Scope**: e.g., `42 total issue(s) evaluated · 28 dispatchable · 4 subdivide · 10 triage`.
+- **Starting Scope**: e.g., `10 total issue(s) evaluated · 2 dispatchable · 0 subdivide · 8 triage`.
 - **Campaign Target**:
-  - *Default Reasonable Target*: Resolve **5–10 issues** in the current session.
-  - *Alternative Point Target*: Retire a fixed step budget (e.g. `--target-points 30`).
-- **Wave Capacity**: Standard reasonable wave size is **4 parallel subagents** (`--wave-size 4`, max 5).
-- **Campaign Horizon**: Standard execution batch is **3 waves** (`--max-waves 3`).
+  - *Default Focused Target*: Resolve **2–4 issues** in Wave 1 immediately.
+  - *Alternative Point Target*: Retire a fixed step budget (e.g. `--target-points 15`).
+- **Wave Capacity**: Standard reasonable wave size is **2–4 parallel subagents** (`--wave-size 4`, max 5).
+- **Campaign Horizon**: Standard execution batch is **1–2 waves** (`--max-waves 1` or `2`).
 
 ---
 
 ## Phase 2 — Automated Concurrent-Safe Wave Planning
 
-Generate provably collision-free, concurrent-safe waves using `fak issue-orchestrator --plan-waves`:
+Generate provably collision-free, concurrent-safe waves using `fak issue-orchestrator`:
 
 ```bash
-# Plan campaign waves with default reasonable settings (wave size 4, max 3 waves):
-fak issue-orchestrator --plan-waves --wave-size 4 --max-waves 3
+# Plan campaign waves bounded to top candidate issues (wave size 4, max 2 waves):
+fak issue-orchestrator --top 15 --wave-size 4 --max-waves 2
 
 # Or plan from a specific issue source (e.g. local snapshot or gh export):
-fak issue-orchestrator --from-issues issues.json --wave-size 4 --max-waves 3
+fak issue-orchestrator --from-issues issues.json --wave-size 4 --max-waves 2
 
 # Or emit machine-readable wave plan JSON:
-fak issue-orchestrator --plan-waves --wave-size 4 --max-waves 3 --json > wave-plan.json
+fak issue-orchestrator --top 15 --wave-size 4 --max-waves 2 --json > wave-plan.json
 ```
 
 The planner automatically:
