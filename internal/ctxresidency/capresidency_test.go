@@ -322,6 +322,65 @@ func TestEvictColdestConcurrentFaultPreservesResident(t *testing.T) {
 	}
 }
 
+// TestEvictColdestConcurrentFaultPreserved simulates a concurrent Fault() occurring
+// while EvictColdest() has released the lock, verifying that the capability remains in
+// StateResident with its token count intact (issue #11715).
+func TestEvictColdestConcurrentFaultPreserved(t *testing.T) {
+	ctx := context.Background()
+	mmu := ctxmmu.New()
+	cr := ctxresidency.NewCapResidency(mmu)
+
+	k := skillKey("concurrent-victim", "v1")
+	child := skillKey("child", "v1")
+	initialBody := []byte("initial evictable body")
+	refaultBody := []byte("freshly refaulted resident body with live dependent")
+
+	// Initially faulted with no dependents -> StateEvictable.
+	cr.Fault(k, "sha256:initial", initialBody, nil)
+
+	// Simulate concurrent Fault(key) while EvictColdest has released the lock.
+	cr.SetEvictUnlockHookForTest(func() {
+		cr.Fault(k, "sha256:refault", refaultBody, []ctxresidency.CapKey{child})
+	})
+
+	evicted, radius, ok := cr.EvictColdest(ctx)
+	if ok {
+		t.Fatalf("EvictColdest returned ok=true (evicted=%+v, radius=%+v), want ok=false due to concurrent re-fault abort", evicted, radius)
+	}
+
+	snap := cr.Snapshot()
+	if snap.Resident != 1 || snap.Held != 0 || snap.Evictable != 0 {
+		t.Fatalf("snapshot counts = resident %d, held %d, evictable %d; want 1/0/0", snap.Resident, snap.Held, snap.Evictable)
+	}
+	if snap.MMUCapPaged != 0 {
+		t.Errorf("MMUCapPaged = %d, want 0 (aborted eviction must not leak speculative page-out)", snap.MMUCapPaged)
+	}
+
+	var found bool
+	for _, row := range snap.Caps {
+		if row.Key == k {
+			found = true
+			if row.State != ctxresidency.StateResident {
+				t.Errorf("capability state = %v, want StateResident", row.State)
+			}
+			if row.EvictBlastRadius.Tokens != len(refaultBody) {
+				t.Errorf("token count = %d, want %d", row.EvictBlastRadius.Tokens, len(refaultBody))
+			}
+			if row.PageID != "" {
+				t.Errorf("pageID = %q, want empty (should not be marked held)", row.PageID)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("capability not found in snapshot")
+	}
+
+	measured := cr.MeasureBlastRadius(k)
+	if measured.Tokens != len(refaultBody) || measured.DependentEntries != 1 {
+		t.Errorf("measured blast radius = %+v, want Tokens=%d, DependentEntries=1", measured, len(refaultBody))
+	}
+}
+
 // TestEvictColdestConcurrentFaultWithoutDependentsPreservesEvictable verifies that
 // even when a concurrent Fault has no dependents (so state remains StateEvictable),
 // the advanced lastUse timestamp causes EvictColdest to abort rather than clobbering

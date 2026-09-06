@@ -255,9 +255,10 @@ func (cr *CapResidency) EvictColdest(ctx context.Context) (evicted CapKey, radiu
 	cr.mu.Lock()
 	defer cr.mu.Unlock()
 	// Re-read under the lock: a concurrent Fault or Touch may have re-admitted it,
-	// advanced its lastUse, or transitioned its state away from evicting.
+	// advanced its lastUse, or transitioned its state away from evicting (issue #11715).
 	// If the capability was re-faulted, pinned, or altered while the lock was
-	// released, abort the eviction and restore proper state.
+	// released, abort the eviction finalize and restore proper state without
+	// clobbering the freshly admitted resident state.
 	st, still := cr.caps[key]
 	if !still || st.lastUse > victimLastUse || st.state != StateEvicting {
 		if still && st.state == StateEvicting {
