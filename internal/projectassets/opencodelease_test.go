@@ -2,6 +2,7 @@ package projectassets
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,14 +21,48 @@ func TestOpenCodeLeaseAdmissionIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := os.Stat(plugin); err != nil {
+		t.Fatalf("plugin not found at %s: %v", plugin, err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "node", "--input-type=module", "-", plugin, t.TempDir())
+	cmd := exec.CommandContext(ctx, "node", "--no-warnings", "--input-type=module", "-", plugin, t.TempDir())
 	cmd.Stdin = strings.NewReader(openCodeLeaseWitness)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("real OpenCode lease witness: %v\n%s", err, out)
 	} else {
-		t.Log(string(out))
+		var witnessFound bool
+		for _, line := range strings.Split(string(out), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, `{"schema":"fak.opencode-lease-witness.v1"`) {
+				var witness struct {
+					Schema            string `json:"schema"`
+					ForeignRefBlocked bool   `json:"foreign_ref_blocked"`
+					OwnRefAdmitted    bool   `json:"own_ref_admitted"`
+					DisjointAdmitted  bool   `json:"disjoint_admitted"`
+					ReleaseAdmitted   bool   `json:"release_admitted"`
+					PatchBlocked      bool   `json:"patch_blocked"`
+					ForeignDOSBlocked bool   `json:"foreign_dos_blocked"`
+					OwnDOSAdmitted    bool   `json:"own_dos_admitted"`
+					ReadsAdmitted     bool   `json:"reads_admitted"`
+					CorruptDOSBlocked bool   `json:"corrupt_dos_blocked"`
+				}
+				if err := json.Unmarshal([]byte(line), &witness); err != nil {
+					t.Fatalf("failed to parse witness JSON: %v\n%s", err, line)
+				}
+				if !witness.ForeignRefBlocked || !witness.OwnRefAdmitted || !witness.DisjointAdmitted ||
+					!witness.ReleaseAdmitted || !witness.PatchBlocked || !witness.ForeignDOSBlocked ||
+					!witness.OwnDOSAdmitted || !witness.ReadsAdmitted || !witness.CorruptDOSBlocked {
+					t.Fatalf("witness assertion failure: %+v", witness)
+				}
+				witnessFound = true
+				t.Logf("witness: %s", line)
+				break
+			}
+		}
+		if !witnessFound {
+			t.Fatalf("real OpenCode lease witness did not emit expected schema:\n%s", out)
+		}
 	}
 }
 
@@ -44,6 +79,8 @@ const invoke = (command, args) => execFileSync(command, args, {
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 for (const key of ['FAK_LEASE_OWNER', 'FAK_LEASE_SESSION', 'FAK_LEASE_ID']) delete process.env[key];
+// Child commands must never inherit an override pointing at the live fleet WAL.
+for (const key of ['DISPATCH_LANE_JOURNAL_PATH', 'JOB_LANE_JOURNAL_PATH', 'DISPATCH_LANE_LEASE_LOCK_PATH', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR']) delete process.env[key];
 await mkdir(path.join(root, 'owned'), {recursive:true});
 await mkdir(path.join(root, 'free'), {recursive:true});
 await writeFile(path.join(root, 'dos.toml'), 'workspace = "."\n[lanes]\nconcurrent = ["owned", "free"]\n[lanes.trees]\nowned = ["owned/**"]\nfree = ["free/**"]\n');
@@ -83,4 +120,4 @@ await writeFile(journal, (await readFile(journal, 'utf8')) + '{corrupt}\n');
 await assert.rejects(mutate('dos-self', path.join(root, 'free', 'file.txt'), 'corrupt-admit'), /dos-proof-guard/);
 assert.equal(await readFile(path.join(root, 'free', 'file.txt'), 'utf8'), 'disjoint');
 console.log(JSON.stringify({schema:'fak.opencode-lease-witness.v1', foreign_ref_blocked:true, own_ref_admitted:true, disjoint_admitted:true, release_admitted:true, patch_blocked:true, foreign_dos_blocked:true, own_dos_admitted:true, reads_admitted:true, corrupt_dos_blocked:true}));
-`;
+`

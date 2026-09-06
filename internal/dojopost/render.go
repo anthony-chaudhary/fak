@@ -38,6 +38,9 @@ func gradeEmoji(grade string) string {
 	}
 }
 
+// DefaultMaxEpisodes defines the fallback ceiling for worst-first episodes in a rollup.
+const DefaultMaxEpisodes = 5
+
 // RollupFromReport formats a single calibration run into a Slack message with worst-first episodes.
 func RollupFromReport(r dojo.Report, maxEpisodes int) Post {
 	p := Post{
@@ -65,8 +68,11 @@ func RollupFromReport(r dojo.Report, maxEpisodes int) Post {
 		return eps[i].Metric < eps[j].Metric
 	})
 
+	if maxEpisodes <= 0 {
+		maxEpisodes = DefaultMaxEpisodes
+	}
 	shown := eps
-	if maxEpisodes > 0 && len(eps) > maxEpisodes {
+	if len(eps) > maxEpisodes {
 		shown = eps[:maxEpisodes]
 	}
 	for _, e := range shown {

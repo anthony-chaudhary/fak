@@ -172,6 +172,9 @@ func ValidateManyAgentOptions(opts ManyAgentOptions) error {
 	if opts.Horizon <= 0 {
 		return fmt.Errorf("--horizon must be positive (got %d)", opts.Horizon)
 	}
+	if opts.SharedPrefixTokens < 0 {
+		return fmt.Errorf("--prefix-tokens must be non-negative")
+	}
 	if strings.TrimSpace(opts.Model) == "" {
 		return fmt.Errorf("--model must not be empty")
 	}
@@ -466,6 +469,8 @@ func runMacBenchManyAgent(stdout, stderr io.Writer, argv []string) int {
 
 	concurrency := fs.Int("concurrency", DefaultManyAgentConcurrency, "number of concurrent agents K")
 	fs.IntVar(concurrency, "c", DefaultManyAgentConcurrency, "number of concurrent agents K (shorthand)")
+	prefixTokens := fs.Int("prefix-tokens", DefaultSharedPrefixTokens, "shared prefix length in tokens")
+	fs.IntVar(prefixTokens, "p", DefaultSharedPrefixTokens, "shared prefix length in tokens (shorthand)")
 	model := fs.String("model", DefaultManyAgentModel, "model identifier")
 	horizon := fs.Int("horizon", DefaultManyAgentHorizon, "turns per agent")
 	cache := fs.Bool("cache", true, "enable fak KV prefix caching")
@@ -488,7 +493,7 @@ func runMacBenchManyAgent(stdout, stderr io.Writer, argv []string) int {
 		Horizon:            *horizon,
 		Cache:              *cache,
 		Output:             outFmt,
-		SharedPrefixTokens: DefaultSharedPrefixTokens,
+		SharedPrefixTokens: *prefixTokens,
 		CompareLlama:       *compareLlama,
 	}
 

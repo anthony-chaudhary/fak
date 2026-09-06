@@ -1,6 +1,7 @@
 package deployment
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -175,6 +176,99 @@ func TestFailClosedInvariants(t *testing.T) {
 	}
 	if _, err := activator.Rollback("valid"); err == nil {
 		t.Fatal("expected error on rollback when sequence <= 1")
+	}
+}
+
+func TestMaterializeRejectsWindowsReservedDeviceNames(t *testing.T) {
+	reservedPaths := []string{
+		"aux",
+		"nul.txt",
+		"com1",
+		"COM2",
+		"prn",
+		"con.json",
+		"lpt1",
+		"LPT9.txt",
+		"dir/aux",
+		"dir/nul.txt",
+		"dir/com1/file.txt",
+		"nested/PRN.log",
+		"sub/LPT3.dat",
+	}
+
+	for _, badPath := range reservedPaths {
+		t.Run(badPath, func(t *testing.T) {
+			files := map[string][]byte{
+				badPath: []byte("malicious payload"),
+			}
+
+			// 1. Direct validation check on NewRealization
+			_, err := NewRealization("d1", Target{}, files)
+			if err == nil {
+				t.Fatalf("expected NewRealization error for reserved path %q, got nil", badPath)
+			}
+			var valErr *ValidationError
+			if !errors.As(err, &valErr) {
+				t.Fatalf("expected *ValidationError, got %T (%v)", err, err)
+			}
+			if !errors.Is(err, ErrReservedDeviceName) {
+				t.Fatalf("expected errors.Is(err, ErrReservedDeviceName) for %q, got %v", badPath, err)
+			}
+			if valErr.Path != badPath {
+				t.Fatalf("valErr.Path = %q, want %q", valErr.Path, badPath)
+			}
+
+			// 2. Materialize must fail before performing disk operations
+			storeDir := filepath.Join(t.TempDir(), "store")
+			store := Store{Root: storeDir}
+			r := Realization{
+				DerivationID: "d1",
+				Target:       Target{OS: "linux", Architecture: "amd64"},
+				Files:        files,
+			}
+			_, matErr := store.Materialize(r)
+			if matErr == nil {
+				t.Fatalf("expected Materialize error for reserved path %q, got nil", badPath)
+			}
+			if !errors.Is(matErr, ErrReservedDeviceName) {
+				t.Fatalf("expected Materialize to return ErrReservedDeviceName for %q, got %v", badPath, matErr)
+			}
+
+			// 3. Verify zero disk operations occurred in store directory
+			if _, statErr := os.Stat(storeDir); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("store directory was created on disk despite rejection of %q: %v", badPath, statErr)
+			}
+		})
+	}
+
+	// Verify that valid paths with overlapping substrings are not rejected
+	validPaths := []string{
+		"auxiliary.txt",
+		"community.json",
+		"console.log",
+		"printer.go",
+		"null.txt",
+		"com0.bin",
+		"com10.dat",
+		"lpt0.log",
+		"lpt10.log",
+	}
+	for _, goodPath := range validPaths {
+		t.Run("valid_"+goodPath, func(t *testing.T) {
+			goodFiles := map[string][]byte{goodPath: []byte("valid content")}
+			r, err := NewRealization("d1", Target{OS: "linux", Architecture: "amd64"}, goodFiles)
+			if err != nil {
+				t.Fatalf("valid path %q unexpectedly rejected: %v", goodPath, err)
+			}
+			store := Store{Root: filepath.Join(t.TempDir(), "store")}
+			outPath, err := store.Materialize(r)
+			if err != nil {
+				t.Fatalf("valid path %q failed to materialize: %v", goodPath, err)
+			}
+			if _, statErr := os.Stat(outPath); statErr != nil {
+				t.Fatalf("materialized directory not found for valid path %q: %v", goodPath, statErr)
+			}
+		})
 	}
 }
 

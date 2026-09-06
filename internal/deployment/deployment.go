@@ -301,6 +301,79 @@ func realizationID(files map[string][]byte) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// ErrReservedDeviceName indicates that a realization path contains a DOS/Windows reserved device name.
+var ErrReservedDeviceName = errors.New("reserved device name")
+
+// ValidationError records a path or realization validation failure.
+type ValidationError struct {
+	Path   string
+	Reason string
+	Err    error
+}
+
+func (e ValidationError) Error() string {
+	if e.Path != "" {
+		if e.Reason != "" {
+			return fmt.Sprintf("invalid realization path %q: %s", e.Path, e.Reason)
+		}
+		if e.Err != nil {
+			return fmt.Sprintf("invalid realization path %q: %v", e.Path, e.Err)
+		}
+		return fmt.Sprintf("invalid realization path %q", e.Path)
+	}
+	if e.Reason != "" {
+		return e.Reason
+	}
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return "validation error"
+}
+
+func (e ValidationError) Unwrap() error {
+	return e.Err
+}
+
+func isReservedDeviceToken(token string) bool {
+	switch token {
+	case "CON", "PRN", "AUX", "NUL":
+		return true
+	case "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9":
+		return true
+	case "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9":
+		return true
+	default:
+		return false
+	}
+}
+
+func checkReservedSegment(seg string) string {
+	base := seg
+	if colon := strings.IndexByte(base, ':'); colon >= 0 {
+		base = base[:colon]
+	}
+	if dot := strings.IndexByte(base, '.'); dot >= 0 {
+		base = base[:dot]
+	}
+	base = strings.TrimRight(base, " ")
+	upper := strings.ToUpper(base)
+	if isReservedDeviceToken(upper) {
+		return upper
+	}
+	return ""
+}
+
+func findReservedDeviceName(path string) string {
+	for _, seg := range strings.FieldsFunc(path, func(r rune) bool {
+		return r == '/' || r == '\\'
+	}) {
+		if dev := checkReservedSegment(seg); dev != "" {
+			return dev
+		}
+	}
+	return ""
+}
+
 func validateFiles(files map[string][]byte) error {
 	if len(files) == 0 {
 		return errors.New("realization must contain at least one file")
@@ -309,6 +382,20 @@ func validateFiles(files map[string][]byte) error {
 		clean := filepath.Clean(filepath.FromSlash(name))
 		if name == "" || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == "realization.json" {
 			return fmt.Errorf("unsafe realization path %q", name)
+		}
+		if dev := findReservedDeviceName(name); dev != "" {
+			return &ValidationError{
+				Path:   name,
+				Reason: fmt.Sprintf("reserved device name %q", dev),
+				Err:    ErrReservedDeviceName,
+			}
+		}
+		if dev := findReservedDeviceName(clean); dev != "" {
+			return &ValidationError{
+				Path:   name,
+				Reason: fmt.Sprintf("reserved device name %q", dev),
+				Err:    ErrReservedDeviceName,
+			}
 		}
 	}
 	return nil

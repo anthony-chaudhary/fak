@@ -421,3 +421,44 @@ func TestRecoverPolicyBlockRecommendsScopedAbstain(t *testing.T) {
 		t.Fatalf("expected operator-only qualification for manual guard overrides in POLICY_BLOCK output:\n%s", got)
 	}
 }
+
+func TestRecoverBuildCheckTimeoutIsFailClosedAndDetailed(t *testing.T) {
+	plan, ok := recoveryPlans("main")["BUILD_CHECK_TIMEOUT"]
+	if !ok {
+		t.Fatal("BUILD_CHECK_TIMEOUT plan missing from recovery catalog")
+	}
+	if plan.Executable {
+		t.Fatal("BUILD_CHECK_TIMEOUT must not be executable; expected fail-closed manual recovery")
+	}
+	if plan.Summary == "" {
+		t.Fatal("BUILD_CHECK_TIMEOUT has empty summary")
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runRecover(&out, &errb, []string{"BUILD_CHECK_TIMEOUT", "--dry-run"}); rc != 0 {
+		t.Fatalf("dry-run rc = %d, stderr=%s", rc, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{
+		"recover BUILD_CHECK_TIMEOUT",
+		"terminal receipt",
+		"observation timeout",
+		"live owner",
+		"validation budget",
+		"refusal",
+		"bypass",
+	} {
+		if !strings.Contains(strings.ToLower(got), strings.ToLower(want)) {
+			t.Fatalf("plan missing %q:\n%s", want, got)
+		}
+	}
+
+	out.Reset()
+	errb.Reset()
+	if rc := runRecover(&out, &errb, []string{"BUILD_CHECK_TIMEOUT", "--execute"}); rc != 3 {
+		t.Fatalf("execute rc = %d, want 3 (fail-closed); stdout=%s stderr=%s", rc, out.String(), errb.String())
+	}
+	if !strings.Contains(errb.String(), "no safe executable recovery") {
+		t.Fatalf("stderr missing refusal: %s", errb.String())
+	}
+}

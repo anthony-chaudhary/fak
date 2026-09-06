@@ -66,3 +66,29 @@ certify every installed harness, a restarted live MCP server, or universal
 cross-host exclusion. Each integrated adapter needs its own executed witness:
 held-tree refusal, disjoint/read-only success, exact owner behavior, release,
 and unavailable-authority refusal.
+
+## Same-session repair witnesses
+
+The OpenCode native edit adapter's real fixture witness passed nine checks,
+including conflicting reference/DOS leases, disjoint paths, reads, release and
+corrupt DOS journal rejection. The coordinator independently executed that witness.
+After the native binding repair, live DOS MCP arbitration refused the held gateway
+lane. This establishes that operation's health without upgrading the original FAK
+capability verdict into a lease-enforcement claim.
+
+The installed native hook treated the exact `collaborationlist_agents` tool as
+an unknown file footprint and warned on every observation. A narrow native alias
+change recognizes list/wait, DOS doctor, and FAK read/tool-search calls. The
+regression failed before the change and passed afterward; the hook package and
+vet passed. The installed backend then changed that observation from advisory to
+passthrough, while an identical proposed write into a held gateway tree retained
+its collision warning. A subsequent live coordinator list-agents call emitted no
+advisory. Only this user's active plugin binary was replaced, with a retained
+backup; Python fallback alias coverage remains tracked in DOS #270. Spawn and
+unknown tool names remain conservative.
+
+This is also evidence against treating a held lease as sufficient protection:
+while the OpenCode worker held its declared path lease, another worker swept the
+plugin and test into a broader commit (`54af19455af8`). A lease needs enforcement
+at every relevant write and landing surface. The incident reinforces #11835's
+scope rather than demonstrating that universal ownership is solved.
