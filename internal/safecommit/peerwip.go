@@ -2,10 +2,13 @@ package safecommit
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gitgate"
 	"github.com/anthony-chaudhary/fak/internal/wipref"
@@ -16,6 +19,9 @@ import (
 const ReasonPeerWIPCollision = "PEER_WIP_COLLISION"
 
 const peerWIPGuardEnvVar = "FAK_PEER_WIP_GUARD"
+
+// One budget covers the entire attribution scan, not each path or subprocess.
+const peerWIPAttributionTimeout = 30 * time.Second
 
 // peerWIPGuardMode reads FAK_PEER_WIP_GUARD (block|warn|off, default block).
 func peerWIPGuardMode() staleBaseMode {
@@ -52,17 +58,16 @@ type PathAttributionResult struct {
 // ValidatePathAttribution validates that requested paths (including directory pathspecs)
 // do not sweep peer WIP or untracked conflicting peer work.
 func ValidatePathAttribution(ctx context.Context, run Runner, dir string, requestedPaths []string, opts PathAttributionOptions) (PathAttributionResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, peerWIPAttributionTimeout)
+	defer cancel()
 	norm, ok := normalizePaths(requestedPaths)
 	if !ok || len(norm) == 0 {
 		return PathAttributionResult{OK: false, Reason: ReasonNoPath, Detail: "no valid repo-relative pathspec given"}, nil
 	}
 	statusArgs := append([]string{"status", "--porcelain", "--"}, norm...)
-	statusOut, code, err := run(ctx, dir, statusArgs...)
+	statusOut, err := runPeerWIPLookup(ctx, run, dir, statusArgs...)
 	if err != nil {
-		return PathAttributionResult{}, fmt.Errorf("safecommit: git not executable: %w", err)
-	}
-	if code != 0 {
-		return PathAttributionResult{OK: true, EffectivePaths: norm}, nil
+		return PathAttributionResult{}, err
 	}
 	return checkPathAttributionFromStatus(ctx, run, dir, norm, statusOut, opts)
 }
@@ -70,7 +75,15 @@ func ValidatePathAttribution(ctx context.Context, run Runner, dir string, reques
 // checkPathAttributionFromStatus checks whether dirty/staged/untracked paths under requested
 // directory pathspecs collide with peer WIP or untracked peer work.
 func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string, requestedPaths []string, statusOut string, opts PathAttributionOptions) (PathAttributionResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, peerWIPAttributionTimeout)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return PathAttributionResult{}, err
+	}
 	changedPaths := statusChangedPaths(statusOut)
+	if err := ctx.Err(); err != nil {
+		return PathAttributionResult{}, err
+	}
 	if len(changedPaths) == 0 {
 		return PathAttributionResult{
 			OK:             true,
@@ -104,12 +117,24 @@ func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string,
 		}
 	}
 
+	var gitOwners map[string]string
+	if len(opts.PeerWIP) == 0 && opts.PeerWIPChecker == nil && run != nil {
+		var err error
+		gitOwners, err = resolveGitPeerOwners(ctx, run, dir, changedPaths, sessionID)
+		if err != nil {
+			return PathAttributionResult{}, err
+		}
+	}
+
 	var collidingPaths []string
 	var peerSessions []string
 	seenPeers := make(map[string]bool)
 	var descriptions []string
 
 	for _, cp := range changedPaths {
+		if err := ctx.Err(); err != nil {
+			return PathAttributionResult{}, err
+		}
 		isDirSweep := false
 		for _, req := range requestedPaths {
 			if gitgate.TreeContains(req, cp) && req != cp {
@@ -129,6 +154,10 @@ func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string,
 			}
 		}
 
+		if err := ctx.Err(); err != nil {
+			return PathAttributionResult{}, err
+		}
+
 		// 2. PeerWIP map
 		if !isPeer && opts.PeerWIP != nil {
 			if peer, exists := opts.PeerWIP[cp]; exists && peer != "" {
@@ -141,7 +170,7 @@ func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string,
 
 		// 3. Git peer checkpoints
 		if !isPeer && len(opts.PeerWIP) == 0 && opts.PeerWIPChecker == nil && run != nil {
-			peerOwner = resolveGitPeerOwner(ctx, run, dir, cp, sessionID)
+			peerOwner = gitOwners[cp]
 			if peerOwner != "" {
 				isPeer = true
 			}
@@ -176,6 +205,9 @@ func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string,
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return PathAttributionResult{}, err
+	}
 	if len(collidingPaths) == 0 {
 		return PathAttributionResult{
 			OK:             true,
@@ -195,6 +227,9 @@ func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string,
 		}
 		var kept []string
 		for _, cp := range changedPaths {
+			if err := ctx.Err(); err != nil {
+				return PathAttributionResult{}, err
+			}
 			if !collidingSet[cp] && gitgate.CoveredByAnyTree(cp, opts.SessionScope) {
 				kept = append(kept, cp)
 			}
@@ -202,6 +237,9 @@ func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string,
 		if len(kept) > 0 {
 			sort.Strings(kept)
 			kept = dedupeStrings(kept)
+			if err := ctx.Err(); err != nil {
+				return PathAttributionResult{}, err
+			}
 			return PathAttributionResult{
 				OK:             true,
 				CollidingPaths: collidingPaths,
@@ -225,39 +263,211 @@ func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string,
 	}, nil
 }
 
-// resolveGitPeerOwner queries refs/fak/wip/* to determine if targetPath is owned/checkpointed by a peer session.
-func resolveGitPeerOwner(ctx context.Context, run Runner, dir, targetPath, selfSession string) string {
-	out, code, err := run(ctx, dir, "for-each-ref", "--format=%(refname)", "refs/fak/wip")
-	if err != nil || code != 0 || strings.TrimSpace(out) == "" {
-		return ""
+// runPeerWIPLookup never interprets an incomplete lookup as an unowned path.
+// Runner can report a killed process as an exit code without a Go error.
+func runPeerWIPLookup(ctx context.Context, run Runner, dir string, args ...string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
-	for _, ref := range strings.Split(out, "\n") {
-		ref = strings.TrimSpace(ref)
-		if ref == "" || !strings.HasPrefix(ref, "refs/fak/wip/") {
-			continue
+	out, code, err := run(ctx, dir, args...)
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	if err != nil {
+		return "", fmt.Errorf("safecommit: peer WIP %s: %w", args[0], err)
+	}
+	if code != 0 {
+		return "", fmt.Errorf("safecommit: peer WIP %s exited %d", args[0], code)
+	}
+	return out, nil
+}
+
+// Git object IDs bound argv size on Windows as well as subprocess amplification.
+const peerWIPBatchSize = 128
+const peerWIPRefFormat = "--format=%(refname)%00%(objectname)%00%(objecttype)%00%(contents:size)%00%(contents)%00"
+
+// resolveGitPeerOwners snapshots ordered refs and their messages in one process.
+// Messages are byte-length framed; embedded newlines/NULs cannot forge records.
+// Deltas are fetched by immutable object ID in bounded, deduplicated chunks.
+// Evaluate refs in snapshot order, so an earlier delta still beats a later scope.
+func resolveGitPeerOwners(ctx context.Context, run Runner, dir string, targetPaths []string, selfSession string) (map[string]string, error) {
+	// Cross-check the length-framed metadata against a compact ordered manifest.
+	// This also detects successful output truncated at a whole-record boundary;
+	// concurrent ref updates refuse rather than combining different snapshots.
+	manifest, err := runPeerWIPLookup(ctx, run, dir, "for-each-ref", "--sort=refname", "--format=%(refname) %(objectname)", "refs/fak/wip")
+	if err != nil {
+		return nil, err
+	}
+	expected := strings.Split(strings.TrimSuffix(manifest, "\n"), "\n")
+	if manifest == "" {
+		expected = nil
+	}
+	out, err := runPeerWIPLookup(ctx, run, dir, "for-each-ref", "--sort=refname", peerWIPRefFormat, "refs/fak/wip")
+	if err != nil {
+		return nil, err
+	}
+	type checkpoint struct {
+		peer, oid string
+		scope     []string
+	}
+	var checkpoints []checkpoint
+	var objects []string
+	seen := make(map[string]bool)
+	previous := ""
+	record := 0
+	for out != "" {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
+		var fields [4]string
+		for i := range fields {
+			var ok bool
+			fields[i], out, ok = strings.Cut(out, "\x00")
+			if !ok {
+				return nil, fmt.Errorf("safecommit: incomplete peer WIP metadata")
+			}
+		}
+		ref, oid, kind := fields[0], fields[1], fields[2]
+		size, err := strconv.Atoi(fields[3])
+		if err != nil || size < 0 || size > len(out) || !strings.HasPrefix(out[size:], "\x00\n") {
+			return nil, fmt.Errorf("safecommit: invalid peer WIP message frame")
+		}
+		msg := out[:size]
+		out = out[size+2:]
+		if !strings.HasPrefix(ref, "refs/fak/wip/") || ref <= previous || !peerWIPObjectID(oid) {
+			return nil, fmt.Errorf("safecommit: invalid peer WIP ref snapshot")
+		}
+		if record >= len(expected) || expected[record] != ref+" "+oid {
+			return nil, fmt.Errorf("safecommit: incomplete or changed peer WIP snapshot")
+		}
+		record++
+		previous = ref
 		peer := strings.TrimPrefix(ref, "refs/fak/wip/")
-		if peer == selfSession || peer == "" {
+		if peer == "" {
+			return nil, fmt.Errorf("safecommit: empty peer WIP owner")
+		}
+		// Exclude the ref, not its object: peers can point at the same commit as self.
+		if peer == selfSession {
 			continue
 		}
-		// 1. Check commit message for Stamp
-		msg, logCode, _ := run(ctx, dir, "log", "-1", "--format=%B", ref)
-		if logCode == 0 {
-			if stamp, ok := wipref.DecodeStamp(msg); ok && len(stamp.Scope) > 0 {
-				if gitgate.CoveredByAnyTree(targetPath, stamp.Scope) {
-					return peer
-				}
-			}
+		if kind != "commit" {
+			return nil, fmt.Errorf("safecommit: peer WIP %s is not a commit", ref)
 		}
-		// 2. Check diff-tree for files touched in this checkpoint
-		diffOut, diffCode, _ := run(ctx, dir, "diff-tree", "--no-commit-id", "--name-only", "-r", ref)
-		if diffCode == 0 {
-			for _, line := range strings.Split(diffOut, "\n") {
-				if strings.TrimSpace(line) == targetPath {
-					return peer
+		stamp, _ := wipref.DecodeStamp(msg)
+		checkpoints = append(checkpoints, checkpoint{peer, oid, stamp.Scope})
+		if !seen[oid] {
+			seen[oid] = true
+			objects = append(objects, oid)
+		}
+	}
+	if record != len(expected) {
+		return nil, fmt.Errorf("safecommit: incomplete peer WIP snapshot")
+	}
+	deltas := make(map[string]map[string]bool)
+	if len(objects) == 0 {
+		return make(map[string]string), ctx.Err()
+	}
+	// A root commit is a no-delta terminator under log.showRoot=false. Appending
+	// it to every batch proves that even the final delta was received in full.
+	rootOut, err := runPeerWIPLookup(ctx, run, dir, "rev-list", "--max-parents=0", "--max-count=1", objects[0], "--")
+	if err != nil {
+		return nil, err
+	}
+	root := strings.TrimSpace(rootOut)
+	if !peerWIPObjectID(root) {
+		return nil, fmt.Errorf("safecommit: invalid peer WIP batch terminator")
+	}
+	deltas[root] = make(map[string]bool)
+	filtered := objects[:0]
+	for _, oid := range objects {
+		if oid != root {
+			filtered = append(filtered, oid)
+		}
+	}
+	objects = filtered
+	for start := 0; start < len(objects); start += peerWIPBatchSize {
+		end := min(start+peerWIPBatchSize, len(objects))
+		batch := objects[start:end]
+		args := []string{"-c", "log.showRoot=false", "log", "--no-walk=unsorted", "--format=%H", "--raw", "-z", "--no-abbrev", "--no-renames", "--no-ext-diff", "--no-textconv", "--diff-merges=off", "-r"}
+		args = append(args, batch...)
+		args = append(args, root)
+		raw, err := runPeerWIPLookup(ctx, run, dir, args...)
+		if err != nil {
+			return nil, err
+		}
+		want := make(map[string]bool, len(batch))
+		for _, oid := range batch {
+			want[oid] = true
+		}
+		current := ""
+		terminated := false
+		for raw != "" {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			token, rest, ok := strings.Cut(raw, "\x00")
+			if !ok {
+				return nil, fmt.Errorf("safecommit: truncated peer WIP delta")
+			}
+			raw = rest
+			token = strings.TrimPrefix(token, "\n")
+			if token == root {
+				if raw != "" {
+					return nil, fmt.Errorf("safecommit: invalid peer WIP batch terminator")
 				}
+				terminated = true
+				break
+			}
+			if want[token] {
+				if deltas[token] != nil {
+					return nil, fmt.Errorf("safecommit: duplicate peer WIP delta")
+				}
+				current = token
+				deltas[current] = make(map[string]bool)
+				continue
+			}
+			// With rename detection disabled, every raw record has exactly one path.
+			fields := strings.Fields(token)
+			if current == "" || len(fields) != 5 || len(fields[0]) != 7 || fields[0][0] != ':' || len(fields[1]) != 6 || !peerWIPObjectID(fields[2]) || !peerWIPObjectID(fields[3]) || len(fields[4]) != 1 || !strings.Contains("ACDMTUXB", fields[4]) {
+				return nil, fmt.Errorf("safecommit: invalid peer WIP delta record")
+			}
+			path, rest, ok := strings.Cut(raw, "\x00")
+			if !ok || path == "" {
+				return nil, fmt.Errorf("safecommit: truncated peer WIP delta path")
+			}
+			raw = rest
+			deltas[current][path] = true
+		}
+		if !terminated {
+			return nil, fmt.Errorf("safecommit: truncated peer WIP batch")
+		}
+		for _, oid := range batch {
+			if deltas[oid] == nil {
+				return nil, fmt.Errorf("safecommit: missing peer WIP delta %s", oid)
 			}
 		}
 	}
-	return ""
+	owners := make(map[string]string)
+	for _, checkpoint := range checkpoints {
+		for _, path := range targetPaths {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if owners[path] == "" && (gitgate.CoveredByAnyTree(path, checkpoint.scope) || deltas[checkpoint.oid][path]) {
+				owners[path] = checkpoint.peer
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return owners, nil
+}
+
+func peerWIPObjectID(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
 }

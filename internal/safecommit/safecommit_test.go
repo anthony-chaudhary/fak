@@ -1252,8 +1252,11 @@ func TestCommitRefusesDirectorySweepOfPeerWIP(t *testing.T) {
 	t.Run("DiscoveredViaGitCheckpointsRefuses", func(t *testing.T) {
 		g := &fakeGit{reply: onTrunkBase()}
 		g.reply["status"] = reply{out: " M internal/gateway/router.go\n M internal/gateway/peer_wip.go\n", code: 0}
-		g.reply["for-each-ref --format=%(refname) refs/fak/wip"] = reply{out: "refs/fak/wip/peer-agent-3\n", code: 0}
-		g.reply["diff-tree --no-commit-id --name-only -r refs/fak/wip/peer-agent-3"] = reply{out: "internal/gateway/peer_wip.go\n", code: 0}
+		oid, root := strings.Repeat("1", 40), strings.Repeat("2", 40)
+		g.reply["for-each-ref --sort=refname --format=%(refname) %(objectname) refs/fak/wip"] = reply{out: "refs/fak/wip/peer-agent-3 " + oid + "\n", code: 0}
+		g.reply["for-each-ref --sort=refname --format=%(refname)%00%(objectname)%00%(objecttype)%00%(contents:size)%00%(contents)%00 refs/fak/wip"] = reply{out: "refs/fak/wip/peer-agent-3\x00" + oid + "\x00commit\x000\x00\x00\n", code: 0}
+		g.reply["rev-list --max-parents=0 --max-count=1 "+oid+" --"] = reply{out: root + "\n", code: 0}
+		g.reply["-c log.showRoot=false log --no-walk=unsorted --format=%H --raw -z --no-abbrev --no-renames --no-ext-diff --no-textconv --diff-merges=off -r "+oid+" "+root] = reply{out: oid + "\x00\n:100644 100644 " + oid + " " + root + " M\x00internal/gateway/peer_wip.go\x00" + root + "\x00", code: 0}
 		opts := baseOpts()
 		opts.Paths = []string{"internal/gateway"}
 		opts.SessionID = "self-session"
@@ -1264,6 +1267,11 @@ func TestCommitRefusesDirectorySweepOfPeerWIP(t *testing.T) {
 		}
 		if res.Committed {
 			t.Fatalf("checkpointed peer file must not be committed")
+		}
+		for _, args := range g.calls {
+			if len(args) > 0 && args[0] == "commit" {
+				t.Fatalf("peer collision must not invoke git commit: %v", args)
+			}
 		}
 		if res.Reason != ReasonPeerWIPCollision {
 			t.Fatalf("want reason %q, got %q (detail=%q)", ReasonPeerWIPCollision, res.Reason, res.Detail)
