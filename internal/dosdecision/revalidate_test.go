@@ -6,9 +6,6 @@ import (
 	"testing"
 )
 
-// refuseRow is the row `dos decisions --json` emits for an OP_REFUSE: the kernel
-// lifts the journal entry's lane and prose verbatim (dos/decisions.py
-// `_from_lane_journal`), and the prose is the arbiter/admission refusal string.
 func refuseRow(lane, reason string) Row {
 	return Row{
 		"kind":          KindArbiterRefuse,
@@ -22,23 +19,15 @@ func refuseRow(lane, reason string) Row {
 	}
 }
 
-// TestReleasedCollisionLeavesTheActiveQueue is the #6494 witness: a lane
-// collision refusal is real work while the blocking lease is live, and stops being
-// work the moment that lease is released — even though the refusal row itself is
-// unchanged (its journal entry never learned the blocker went away).
 func TestReleasedCollisionLeavesTheActiveQueue(t *testing.T) {
-	// 1. `dos lease-lane acquire --lane devcmd` succeeded for a sibling, then this
-	//    loop asked for `cmd` and the arbiter refused on an exact-glob collision.
 	row := refuseRow("cmd", "lane 'cmd' cannot share live lane 'devcmd': exact-glob overlap: "+
 		"identical glob claimed by both lanes (2: cmd/fak/**) — same write region, hard collision regardless of ratio.")
 
-	// 2. While `devcmd` is held, the refusal is genuine unresolved human work.
 	held := Revalidate([]Row{row}, LiveSet{Lanes: []string{"devcmd"}, Known: true})
 	if len(held.Active) != 1 || len(held.Superseded) != 0 || held.Cleared != 0 {
 		t.Fatalf("blocker live: active=%d superseded=%d cleared=%d", len(held.Active), len(held.Superseded), held.Cleared)
 	}
 
-	// 3. `dos lease-lane release --lane devcmd` — the live set is now empty.
 	after := Revalidate([]Row{row}, LiveSet{Lanes: []string{}, Known: true})
 	if len(after.Active) != 0 {
 		t.Fatalf("released blocker still active: %+v", after.Active)
@@ -47,7 +36,6 @@ func TestReleasedCollisionLeavesTheActiveQueue(t *testing.T) {
 		t.Fatalf("cleared=%d superseded=%d, want 1/1", after.Cleared, len(after.Superseded))
 	}
 
-	// 4. History is preserved, annotated, and still carries the original fields.
 	hist := after.Superseded[0]
 	if hist["resolved"] != true || hist["resolution"] != ResolutionLeaseReleased {
 		t.Fatalf("history not annotated: %+v", hist)
@@ -60,14 +48,11 @@ func TestReleasedCollisionLeavesTheActiveQueue(t *testing.T) {
 		t.Fatalf("history lost original fields: %+v", hist)
 	}
 
-	// 5. The caller's row is untouched — annotation happens on a copy.
 	if _, mutated := row["resolved"]; mutated {
 		t.Fatalf("input row mutated: %+v", row)
 	}
 }
 
-// TestUnreadableLiveSetClearsNothing pins the fail-closed rule: a kernel we could
-// not read is not an empty kernel.
 func TestUnreadableLiveSetClearsNothing(t *testing.T) {
 	rows := []Row{refuseRow("hooks", "lane 'hooks' is already held by a live loop — pick a different --lane or wait.")}
 	got := Revalidate(rows, LiveSet{Known: false})
@@ -77,8 +62,6 @@ func TestUnreadableLiveSetClearsNothing(t *testing.T) {
 }
 
 func TestOwnLaneStillHeldKeepsTheRowActive(t *testing.T) {
-	// An "already held" refusal names no other lane: its blocker is the prior
-	// holder of its OWN lane, so a live `hooks` lease must keep it active.
 	rows := []Row{refuseRow("hooks", "lane 'hooks' is already held by a live loop — pick a different --lane or wait.")}
 	got := Revalidate(rows, LiveSet{Lanes: []string{"HOOKS"}, Known: true})
 	if len(got.Active) != 1 || got.Cleared != 0 {
@@ -103,8 +86,6 @@ func TestNonRefusalKindsPassThrough(t *testing.T) {
 }
 
 func TestUndecidableRefusalStaysActive(t *testing.T) {
-	// No lane field and prose that names no lane: we cannot prove the contention
-	// is over, so the row is never dropped.
 	rows := []Row{{"kind": KindArbiterRefuse, "resolver_kind": "HUMAN", "reason_text": "lane refused"}}
 	got := Revalidate(rows, LiveSet{Lanes: nil, Known: true})
 	if len(got.Active) != 1 || got.Cleared != 0 {
@@ -168,5 +149,75 @@ func TestRevalidatePreservesInputOrder(t *testing.T) {
 	}
 	if got.Cleared != 1 || got.Superseded[0]["lane"] != "hooks" {
 		t.Fatalf("wrong row cleared: %+v", got)
+	}
+}
+
+func TestLaneKeyNormalization(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"devcmd", "devcmd"},
+		{"  devcmd  ", "devcmd"},
+		{"DEVCMD", "devcmd"},
+		{"a/b/apply cluster (AFR, ALO)", "apply"},
+		{"apply (AFR)", "apply"},
+		{"internal/dosdecision", "dosdecision"},
+		{"internal\\dosdecision", "dosdecision"},
+		{"", ""},
+		{"   ", ""},
+	}
+	for _, tc := range cases {
+		if got := LaneKey(tc.input); got != tc.want {
+			t.Errorf("LaneKey(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestNeedsLiveSet(t *testing.T) {
+	if NeedsLiveSet(nil) {
+		t.Fatal("nil rows should not need live set")
+	}
+	if NeedsLiveSet([]Row{{"kind": "LIVENESS"}}) {
+		t.Fatal("non-refusal row should not need live set")
+	}
+	resolved := refuseRow("cmd", "lane 'cmd' held")
+	resolved["resolved"] = true
+	if NeedsLiveSet([]Row{resolved}) {
+		t.Fatal("resolved refusal should not need live set")
+	}
+	active := refuseRow("cmd", "lane 'cmd' held")
+	if !NeedsLiveSet([]Row{resolved, active}) {
+		t.Fatal("unresolved refusal must need live set")
+	}
+}
+
+func TestRevalidatePartialBlockersHeld(t *testing.T) {
+	row := refuseRow("cmd", "lane 'cmd' cannot share live lane 'devcmd'")
+	// When one blocker is held and another is free, the row remains active.
+	res := Revalidate([]Row{row}, LiveSet{Lanes: []string{"devcmd"}, Known: true})
+	if len(res.Active) != 1 || res.Cleared != 0 {
+		t.Fatalf("expected active when devcmd held: %+v", res)
+	}
+	res = Revalidate([]Row{row}, LiveSet{Lanes: []string{"cmd"}, Known: true})
+	if len(res.Active) != 1 || res.Cleared != 0 {
+		t.Fatalf("expected active when cmd held: %+v", res)
+	}
+	res = Revalidate([]Row{row}, LiveSet{Lanes: []string{}, Known: true})
+	if len(res.Active) != 0 || res.Cleared != 1 || len(res.Superseded) != 1 {
+		t.Fatalf("expected cleared when all blockers free: %+v", res)
+	}
+}
+
+func TestRevalidateNilAndEmptyInput(t *testing.T) {
+	empty := Revalidate(nil, LiveSet{Known: true})
+	if len(empty.Active) != 0 || len(empty.Superseded) != 0 || empty.Cleared != 0 {
+		t.Fatalf("unexpected result for nil input: %+v", empty)
+	}
+
+	row := refuseRow("cmd", "lane 'cmd' held")
+	withNil := Revalidate([]Row{nil, row, nil}, LiveSet{Lanes: []string{}, Known: true})
+	if len(withNil.Active) != 0 || len(withNil.Superseded) != 1 || withNil.Cleared != 1 {
+		t.Fatalf("unexpected result with nil elements: %+v", withNil)
 	}
 }

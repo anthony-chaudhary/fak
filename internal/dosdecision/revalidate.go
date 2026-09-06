@@ -1,22 +1,5 @@
-// Package dosdecision revalidates DOS decision rows against the kernel's live
-// lane-lease set.
-//
-// An `ARBITER_REFUSE` row is not a point-in-time artifact whose staleness is its
-// age: it is a refusal *relative to a live contended lane* ("lane L cannot share
-// live lane B", "lane L is already held by a live loop"). The moment the blocking
-// lease is released, re-requesting L would be admitted, so the row is resolved —
-// it is no longer human work. The kernel supersedes such a row when a LATER
-// RELEASE/SCAVENGE entry survives in the lane journal, but a released lease whose
-// freeing entry never reached the journal (a truncated/rotated/corrupt WAL tail)
-// leaves the refusal standing forever: `dos lease-lane live` reports zero live
-// leases while `dos decisions --all --json` still shows hours-old HUMAN rows
-// citing lanes nobody holds (#6494).
-//
-// This package closes that gap on the read side: it revalidates each
-// lease-dependent refusal against the CURRENT live set rather than against the
-// journal's memory of how the lease ended. Nothing is deleted — a superseded row
-// is annotated and moved to the history bucket, which the caller can still render
-// explicitly.
+// Package dosdecision revalidates lease-dependent DOS decision rows against the
+// kernel's live lane leases, moving resolved contention rows to history.
 package dosdecision
 
 import (
@@ -26,59 +9,36 @@ import (
 	"strings"
 )
 
-// KindArbiterRefuse is the only decision kind whose liveness this package judges.
-// Every other kind (LIVENESS, WEDGE, SOAK_GATE, host queue items, …) is passed
-// through untouched: their resolution has nothing to do with a lane lease.
+// KindArbiterRefuse is the decision kind whose contention liveness is judged.
 const KindArbiterRefuse = "ARBITER_REFUSE"
 
-// ResolutionLeaseReleased is written into a superseded row's `resolution` field.
+// ResolutionLeaseReleased marks a decision superseded by a released lane lease.
 const ResolutionLeaseReleased = "LEASE_RELEASED"
 
-// Row is one decision as the kernel (or the host adapter) emitted it. It is kept
-// as the raw object so every field a future DOS release adds survives the
-// round trip; this package only reads `kind`/`lane`/`reason_text` and adds the
-// resolution annotation.
+// Row is a raw decision object emitted by the kernel or host adapter.
 type Row map[string]any
 
-// LiveSet is the current lane-lease live set (`dos lease-lane live`).
-//
-// Known distinguishes "the kernel answered, and holds zero leases" from "we could
-// not read the kernel at all". Only the first may clear a refusal: an unreadable
-// kernel must never be mistaken for an empty one, or a decision queue would empty
-// itself the moment `dos` is missing from PATH.
+// LiveSet represents the kernel's active lane leases. Known is false when the
+// live lease set could not be determined.
 type LiveSet struct {
 	Lanes []string
 	Known bool
 }
 
-// Result is the partition Revalidate produced.
+// Result is the partition produced by Revalidate.
 type Result struct {
-	// Active are the rows that are still unresolved work, in input order.
-	Active []Row
-	// Superseded are the lease-dependent refusals whose blocking lease is gone,
-	// annotated with the resolution, in input order.
+	Active     []Row
 	Superseded []Row
-	// Cleared counts the rows this call moved from Active to Superseded — the
-	// cleanup number an unstick/replan loop reports so the work is measurable.
-	Cleared int
+	Cleared    int
 }
 
-// laneRefRe lifts every lane NAME a refusal's prose quotes: the kernel writes
-// `lane 'X' cannot share live lane 'Y'`, `lane 'X' is already held by a live
-// loop`, and `an exclusive lane is live (lane='Y', kind='K', …)`. Matching the
-// generic `lane <quoted>` shape over-collects rather than under-collects, which is
-// the safe direction: an extra watched lane can only keep a row ACTIVE.
-var laneRefRe = regexp.MustCompile(`(?i)lane[\s=]+['"]([^'"]{1,120})['"]`)
+var (
+	laneRefRe           = regexp.MustCompile(`(?i)lane[\s=]+['"]([^'"]{1,120})['"]`)
+	clusterDecorationRe = regexp.MustCompile(`\s*(?:cluster\s*)?\([^)]*\)\s*$`)
+)
 
-// clusterDecorationRe strips the curated-cluster relic tail the kernel's own
-// `_dynamic_lane_handle` drops, so `apply cluster (AFR, ALO)` and `apply` compare
-// equal.
-var clusterDecorationRe = regexp.MustCompile(`\s*(?:cluster\s*)?\([^)]*\)\s*$`)
-
-// LaneKey normalizes a lane name for comparison: cluster decoration removed, the
-// last path segment kept, case-folded. Decision rows carry the bare dynamic lane
-// handle while live-lease records carry the raw lane name, so both sides are
-// normalized before the membership test.
+// LaneKey normalizes a lane name by stripping cluster decoration, keeping the
+// terminal path segment, and lowercasing.
 func LaneKey(s string) string {
 	v := strings.TrimSpace(s)
 	if v == "" {
@@ -92,7 +52,6 @@ func LaneKey(s string) string {
 	return strings.ToLower(strings.TrimSpace(v))
 }
 
-// holds reports whether the live set still holds lane.
 func (s LiveSet) holds(lane string) bool {
 	key := LaneKey(lane)
 	if key == "" {
@@ -106,11 +65,8 @@ func (s LiveSet) holds(lane string) bool {
 	return false
 }
 
-// BlockingLanes is the set of lanes a refusal is waiting on: the lanes its prose
-// names plus the refused lane itself. The refused lane belongs in the set because
-// an "already held by a live loop" refusal names no other lane and is resolved
-// when the prior holder of that same lane lets go. The result is sorted so the
-// resolution evidence is deterministic.
+// BlockingLanes extracts all unique normalized lane keys a refusal depends on,
+// including the refused lane itself, sorted deterministically.
 func BlockingLanes(r Row) []string {
 	seen := map[string]bool{}
 	add := func(s string) {
@@ -130,9 +86,7 @@ func BlockingLanes(r Row) []string {
 	return out
 }
 
-// NeedsLiveSet reports whether any row's status depends on the live lane-lease
-// set. A caller reading the kernel is doing a subprocess round trip, so a page of
-// LIVENESS/host rows should not pay for it.
+// NeedsLiveSet reports whether any active row requires live-lease revalidation.
 func NeedsLiveSet(rows []Row) bool {
 	for _, r := range rows {
 		if !strings.EqualFold(rowString(r, "kind"), KindArbiterRefuse) {
@@ -146,14 +100,8 @@ func NeedsLiveSet(rows []Row) bool {
 	return false
 }
 
-// Revalidate partitions rows into what is still unresolved and what the live set
-// proves is over.
-//
-// A row is moved to Superseded only when all of the following hold: the live set
-// is Known, the row is an ARBITER_REFUSE that is not already resolved, at least
-// one blocking lane could be identified, and NONE of those lanes is live. A
-// refusal whose blockers cannot be identified stays Active — an undecidable row is
-// never silently dropped.
+// Revalidate partitions rows into active work and superseded records whose
+// blocking leases are no longer held.
 func Revalidate(rows []Row, live LiveSet) Result {
 	res := Result{Active: []Row{}, Superseded: []Row{}}
 	for _, r := range rows {
@@ -165,8 +113,6 @@ func Revalidate(rows []Row, live LiveSet) Result {
 			continue
 		}
 		if resolved, ok := r["resolved"].(bool); ok && resolved {
-			// Already history when it reached us: keep it out of the active
-			// queue, but it is not cleanup this call performed.
 			res.Superseded = append(res.Superseded, r)
 			continue
 		}
@@ -175,13 +121,14 @@ func Revalidate(rows []Row, live LiveSet) Result {
 			res.Active = append(res.Active, r)
 			continue
 		}
-		stillHeld := []string{}
+		stillHeld := false
 		for _, lane := range blockers {
 			if live.holds(lane) {
-				stillHeld = append(stillHeld, lane)
+				stillHeld = true
+				break
 			}
 		}
-		if len(stillHeld) > 0 {
+		if stillHeld {
 			res.Active = append(res.Active, r)
 			continue
 		}
@@ -191,9 +138,6 @@ func Revalidate(rows []Row, live LiveSet) Result {
 	return res
 }
 
-// supersede returns an annotated COPY of the row: the caller's map is never
-// mutated, and every original field is preserved so `--all` renders real history
-// rather than a stub.
 func supersede(r Row, blockers []string) Row {
 	out := make(Row, len(r)+3)
 	for k, v := range r {
@@ -207,7 +151,6 @@ func supersede(r Row, blockers []string) Row {
 	return out
 }
 
-// rowString reads a string field, tolerating a missing or wrongly-typed value.
 func rowString(r Row, key string) string {
 	s, _ := r[key].(string)
 	return s
