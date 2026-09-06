@@ -1,6 +1,7 @@
 package sessionaudit
 
 import (
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
@@ -23,6 +24,9 @@ func TestParseGeminiChatFileSyntheticFixture(t *testing.T) {
 	// b) Model name, turn counts, prompt counts, and token counts
 	if s.Session != "gemini-chat-sample-10738" {
 		t.Errorf("s.Session = %q, want %q", s.Session, "gemini-chat-sample-10738")
+	}
+	if s.Kind != KindGemini {
+		t.Errorf("s.Kind = %q, want %q", s.Kind, KindGemini)
 	}
 	if s.AssistantTurns != 4 {
 		t.Errorf("s.AssistantTurns = %d, want 4", s.AssistantTurns)
@@ -126,8 +130,180 @@ func TestAnalyzeDelegatesToGeminiParser(t *testing.T) {
 	}
 }
 
+func TestParseGeminiChatsDirectoryFixtures(t *testing.T) {
+	chatsDir := filepath.Join("testdata", "gemini_chats")
+
+	// 1. Sample with tool calls, thoughts, and usageMetadata
+	samplePath := filepath.Join(chatsDir, "chat-sample.json")
+	s1 := Analyze(samplePath)
+	if s1.Error != "" {
+		t.Fatalf("chat-sample.json failed: %v", s1.Error)
+	}
+	if s1.Session != "gemini-sample-001" {
+		t.Errorf("s1.Session = %q, want gemini-sample-001", s1.Session)
+	}
+	if s1.AssistantTurns != 2 {
+		t.Errorf("s1.AssistantTurns = %d, want 2", s1.AssistantTurns)
+	}
+	if s1.NPrompts != 2 {
+		t.Errorf("s1.NPrompts = %d, want 2", s1.NPrompts)
+	}
+	if s1.Models["gemini-2.5-pro"] != 2 {
+		t.Errorf("s1.Models = %+v, want gemini-2.5-pro: 2", s1.Models)
+	}
+	// Turn 1: 1000 prompt, 300 cached -> fresh 700; output 100
+	// Turn 2: 1500 prompt, 1000 cached -> fresh 500; output 50
+	// Total fresh input: 1200; CacheRead: 1300; Output: 150; Total input: 2500
+	if s1.Tokens.Input != 1200 {
+		t.Errorf("s1.Tokens.Input = %d, want 1200", s1.Tokens.Input)
+	}
+	if s1.Tokens.CacheRead != 1300 {
+		t.Errorf("s1.Tokens.CacheRead = %d, want 1300", s1.Tokens.CacheRead)
+	}
+	if s1.Tokens.Output != 150 {
+		t.Errorf("s1.Tokens.Output = %d, want 150", s1.Tokens.Output)
+	}
+	if s1.TotalInputTokens != 2500 {
+		t.Errorf("s1.TotalInputTokens = %d, want 2500", s1.TotalInputTokens)
+	}
+	if s1.CacheHitFrac == nil || math.Abs(*s1.CacheHitFrac-(1300.0/2500.0)) > 1e-6 {
+		t.Errorf("s1.CacheHitFrac = %v, want 0.52", s1.CacheHitFrac)
+	}
+	if s1.NToolUse != 3 {
+		t.Errorf("s1.NToolUse = %d, want 3", s1.NToolUse)
+	}
+	if s1.NToolResult != 3 {
+		t.Errorf("s1.NToolResult = %d, want 3", s1.NToolResult)
+	}
+	if s1.ReadOnlyToolCalls != 2 {
+		t.Errorf("s1.ReadOnlyToolCalls = %d, want 2 (read_file, list_directory)", s1.ReadOnlyToolCalls)
+	}
+	if s1.NThinking != 1 {
+		t.Errorf("s1.NThinking = %d, want 1", s1.NThinking)
+	}
+
+	// 2. Turns with parts, functionCall, and functionResponse
+	turnsPath := filepath.Join(chatsDir, "chat-turns-parts.json")
+	s2 := Analyze(turnsPath)
+	if s2.Error != "" {
+		t.Fatalf("chat-turns-parts.json failed: %v", s2.Error)
+	}
+	if s2.Session != "gemini-turns-002" {
+		t.Errorf("s2.Session = %q, want gemini-turns-002", s2.Session)
+	}
+	if s2.AssistantTurns != 2 {
+		t.Errorf("s2.AssistantTurns = %d, want 2", s2.AssistantTurns)
+	}
+	if s2.NPrompts != 1 {
+		t.Errorf("s2.NPrompts = %d, want 1", s2.NPrompts)
+	}
+	if s2.Models["gemini-1.5-pro"] != 2 {
+		t.Errorf("s2.Models = %+v, want gemini-1.5-pro: 2", s2.Models)
+	}
+	// Turn 1: 500 prompt, 100 cached -> fresh 400; output 45
+	// Turn 2: 600 prompt, 500 cached -> fresh 100; output 20
+	// Total fresh input: 500; CacheRead: 600; Output: 65; Total input: 1100
+	if s2.Tokens.Input != 500 {
+		t.Errorf("s2.Tokens.Input = %d, want 500", s2.Tokens.Input)
+	}
+	if s2.Tokens.CacheRead != 600 {
+		t.Errorf("s2.Tokens.CacheRead = %d, want 600", s2.Tokens.CacheRead)
+	}
+	if s2.Tokens.Output != 65 {
+		t.Errorf("s2.Tokens.Output = %d, want 65", s2.Tokens.Output)
+	}
+	if s2.NToolUse != 1 || s2.Tools["Glob"] != 1 {
+		t.Errorf("s2.NToolUse = %d, tools = %+v", s2.NToolUse, s2.Tools)
+	}
+
+	// 3. Tokens field format
+	tokensPath := filepath.Join(chatsDir, "chat-tokens.json")
+	s3 := Analyze(tokensPath)
+	if s3.Error != "" {
+		t.Fatalf("chat-tokens.json failed: %v", s3.Error)
+	}
+	if s3.Session != "gemini-tokens-003" {
+		t.Errorf("s3.Session = %q, want gemini-tokens-003", s3.Session)
+	}
+	if s3.AssistantTurns != 1 {
+		t.Errorf("s3.AssistantTurns = %d, want 1", s3.AssistantTurns)
+	}
+	// Input 3000, cached 1000 -> fresh 2000; Output 60 + thoughts 20 = 80
+	if s3.Tokens.Input != 2000 {
+		t.Errorf("s3.Tokens.Input = %d, want 2000", s3.Tokens.Input)
+	}
+	if s3.Tokens.CacheRead != 1000 {
+		t.Errorf("s3.Tokens.CacheRead = %d, want 1000", s3.Tokens.CacheRead)
+	}
+	if s3.Tokens.Output != 80 {
+		t.Errorf("s3.Tokens.Output = %d, want 80", s3.Tokens.Output)
+	}
+	if s3.NToolUse != 1 || s3.Tools["run_shell_command"] != 1 {
+		t.Errorf("s3.NToolUse = %d, tools = %+v", s3.NToolUse, s3.Tools)
+	}
+
+	// 4. Corrupted JSON file
+	corruptedPath := filepath.Join(chatsDir, "corrupted.json")
+	s4 := Analyze(corruptedPath)
+	if s4.Error == "" {
+		t.Fatalf("expected s4.Error on corrupted JSON, got empty")
+	}
+}
+
+func TestParseGeminiTokensFixture(t *testing.T) {
+	fixturePath := filepath.Join("testdata", "gemini_chat_tokens.json")
+	s := Analyze(fixturePath)
+	if s.Error != "" {
+		t.Fatalf("Analyze failed: %v", s.Error)
+	}
+
+	if s.Session != "gemini-tokens-session-002" {
+		t.Errorf("session ID = %q, want %q", s.Session, "gemini-tokens-session-002")
+	}
+	if s.Kind != KindGemini {
+		t.Errorf("session Kind = %q, want %q", s.Kind, KindGemini)
+	}
+	if s.NPrompts != 1 {
+		t.Errorf("n_prompts = %d, want 1", s.NPrompts)
+	}
+	if s.AssistantTurns != 1 {
+		t.Errorf("assistant turns = %d, want 1", s.AssistantTurns)
+	}
+	if s.Models["gemini-2.5-flash"] != 1 {
+		t.Errorf("models[gemini-2.5-flash] = %d, want 1", s.Models["gemini-2.5-flash"])
+	}
+
+	// Tokens: input 5000, cached 2000 -> fresh 3000; output 50 + thoughts 30 = 80
+	if s.Tokens.Input != 3000 {
+		t.Errorf("tokens.input = %d, want 3000", s.Tokens.Input)
+	}
+	if s.Tokens.CacheRead != 2000 {
+		t.Errorf("tokens.cache_read = %d, want 2000", s.Tokens.CacheRead)
+	}
+	if s.Tokens.Output != 80 {
+		t.Errorf("tokens.output = %d, want 80", s.Tokens.Output)
+	}
+	if s.TotalInputTokens != 5000 {
+		t.Errorf("total_input_tokens = %d, want 5000", s.TotalInputTokens)
+	}
+	if s.CacheHitFrac == nil || math.Abs(*s.CacheHitFrac-0.4) > 1e-6 {
+		t.Errorf("cache_hit_frac = %v, want 0.4", s.CacheHitFrac)
+	}
+
+	// Tool: list_directory is read-only
+	if s.NToolUse != 1 {
+		t.Errorf("n_tool_use = %d, want 1", s.NToolUse)
+	}
+	if s.ReadOnlyToolCalls != 1 {
+		t.Errorf("read_only_tool_calls = %d, want 1", s.ReadOnlyToolCalls)
+	}
+	if s.ReadOnlyFrac == nil || *s.ReadOnlyFrac != 1.0 {
+		t.Errorf("read_only_frac = %v, want 1.0", s.ReadOnlyFrac)
+	}
+}
+
 func TestParseGeminiSessionCorruptedJSON(t *testing.T) {
-	// c) Corrupted/invalid JSON returns an error or Session.Error cleanly
+	// Corrupted/invalid JSON returns an error or Session.Error cleanly
 	cases := []struct {
 		name    string
 		content string
@@ -267,62 +443,174 @@ func TestParseGeminiSessionPricedModel(t *testing.T) {
 	}
 }
 
-func TestDiscoverGeminiAndDiscoverWithGemini(t *testing.T) {
-	dir := t.TempDir()
-	// Create layout: dir/proj-hash/chats/chat1.json
-	wsDir := filepath.Join(dir, "proj-hash", "chats")
-	if err := os.MkdirAll(wsDir, 0755); err != nil {
-		t.Fatalf("MkdirAll error: %v", err)
-	}
-	chatPath := filepath.Join(wsDir, "session_alpha.json")
-	content := `{
-		"sessionId": "session-alpha",
-		"model": "gemini-2.5-flash",
-		"turns": [
-			{"role": "user", "text": "hello"},
-			{"role": "model", "text": "hi", "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5}}
-		]
-	}`
-	if err := os.WriteFile(chatPath, []byte(content), 0644); err != nil {
-		t.Fatalf("WriteFile error: %v", err)
-	}
+func TestGeminiDiscovery(t *testing.T) {
+	root := t.TempDir()
 
-	// 1. DiscoverGemini
-	transcripts, err := DiscoverGemini(DiscoverOptions{Roots: []string{dir}})
+	// Write mock Gemini sessions
+	// root/proj-a/chats/session-a.json
+	// root/proj-b/chats/session-b.json
+	// root/proj-b/chats/sub1/session-sub.json
+	chatA := filepath.Join(root, "proj-a", "chats", "session-a.json")
+	chatB := filepath.Join(root, "proj-b", "chats", "session-b.json")
+	chatSub := filepath.Join(root, "proj-b", "chats", "sub1", "session-sub.json")
+
+	writeJSONFile(t, chatA, map[string]any{
+		"sessionId": "sess-a",
+		"messages": []map[string]any{
+			{"type": "user", "content": "hello from a"},
+			{"type": "gemini", "model": "gemini-2.5-pro", "content": "hi from a", "usageMetadata": map[string]any{"promptTokenCount": 100, "candidatesTokenCount": 20}},
+		},
+	})
+	writeJSONFile(t, chatB, map[string]any{
+		"sessionId": "sess-b",
+		"messages": []map[string]any{
+			{"type": "user", "content": "hello from b"},
+			{"type": "gemini", "model": "gemini-2.5-flash", "content": "hi from b", "usageMetadata": map[string]any{"promptTokenCount": 200, "candidatesTokenCount": 40}},
+		},
+	})
+	writeJSONFile(t, chatSub, map[string]any{
+		"sessionId": "sess-sub",
+		"messages": []map[string]any{
+			{"type": "user", "content": "sub task"},
+			{"type": "gemini", "model": "gemini-2.5-flash", "content": "sub done", "usageMetadata": map[string]any{"promptTokenCount": 50, "candidatesTokenCount": 10}},
+		},
+	})
+
+	// 1. Discover without subagents
+	recs, err := Discover(DiscoverOptions{Roots: []string{root}})
 	if err != nil {
-		t.Fatalf("DiscoverGemini error: %v", err)
+		t.Fatalf("Discover failed: %v", err)
 	}
-	if len(transcripts) != 1 {
-		t.Fatalf("DiscoverGemini found %d transcripts, want 1", len(transcripts))
+	if len(recs) != 2 {
+		t.Fatalf("discovered %d records, want 2 (top-level only)", len(recs))
 	}
-	if transcripts[0].Path != chatPath {
-		t.Errorf("transcript.Path = %q, want %q", transcripts[0].Path, chatPath)
-	}
-	if transcripts[0].NS != "proj-hash" {
-		t.Errorf("transcript.NS = %q, want %q", transcripts[0].NS, "proj-hash")
+	for _, r := range recs {
+		if r.Kind != KindGemini {
+			t.Errorf("record kind = %q, want %q", r.Kind, KindGemini)
+		}
+		if r.NS != "proj-a" && r.NS != "proj-b" {
+			t.Errorf("unexpected NS %q", r.NS)
+		}
 	}
 
-	// 2. Discover with Roots pointing to dir
-	allTranscripts, err := Discover(DiscoverOptions{Roots: []string{dir}})
+	// 2. Discover with subagents
+	recsAll, err := Discover(DiscoverOptions{Roots: []string{root}, IncludeSubagents: true})
 	if err != nil {
-		t.Fatalf("Discover error: %v", err)
+		t.Fatalf("Discover with subagents failed: %v", err)
 	}
-	if len(allTranscripts) != 1 {
-		t.Fatalf("Discover found %d transcripts, want 1", len(allTranscripts))
+	if len(recsAll) != 3 {
+		t.Fatalf("discovered %d records with subagents, want 3", len(recsAll))
 	}
-	if allTranscripts[0].Path != chatPath {
-		t.Errorf("allTranscripts[0].Path = %q, want %q", allTranscripts[0].Path, chatPath)
+	var foundSub bool
+	for _, r := range recsAll {
+		if r.Kind == KindSpawned {
+			foundSub = true
+			if r.NS != "proj-b" {
+				t.Errorf("subagent NS = %q, want proj-b", r.NS)
+			}
+		}
+	}
+	if !foundSub {
+		t.Error("expected to find KindSpawned record for nested chat")
 	}
 
-	// 3. Analyze through the discovered path
-	sess := Analyze(allTranscripts[0].Path)
-	if sess.Error != "" {
-		t.Fatalf("Analyze on discovered path failed: %s", sess.Error)
+	// 3. Namespace filtering
+	recsA, err := Discover(DiscoverOptions{Roots: []string{root}, NamespacePrefix: "proj-a"})
+	if err != nil {
+		t.Fatalf("Discover with ns prefix failed: %v", err)
 	}
-	if sess.AssistantTurns != 1 || sess.NPrompts != 1 {
-		t.Errorf("sess turns = %d / %d, want 1 / 1", sess.AssistantTurns, sess.NPrompts)
+	if len(recsA) != 1 || recsA[0].NS != "proj-a" {
+		t.Fatalf("expected 1 record for proj-a, got %d", len(recsA))
 	}
-	if sess.Tokens.Input != 10 || sess.Tokens.Output != 5 {
-		t.Errorf("sess tokens = %d / %d, want 10 / 5", sess.Tokens.Input, sess.Tokens.Output)
+
+	// 4. Test DiscoverGemini specifically
+	gRecs, err := DiscoverGemini(DiscoverOptions{GeminiRoots: []string{root}})
+	if err != nil {
+		t.Fatalf("DiscoverGemini failed: %v", err)
+	}
+	if len(gRecs) != 2 {
+		t.Fatalf("DiscoverGemini found %d records, want 2", len(gRecs))
+	}
+}
+
+func TestDefaultDiscoveryHonorsGeminiHome(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("GEMINI_HOME", tmpDir)
+
+	chatPath := filepath.Join(tmpDir, "tmp", "myproj", "chats", "session-1.json")
+	writeJSONFile(t, chatPath, map[string]any{
+		"sessionId": "sess-default-1",
+		"messages": []map[string]any{
+			{"type": "user", "content": "test prompt"},
+			{"type": "gemini", "model": "gemini-2.5-pro", "content": "response"},
+		},
+	})
+
+	roots := DefaultGeminiRoots()
+	if len(roots) != 1 || roots[0] != filepath.Join(tmpDir, "tmp") {
+		t.Fatalf("DefaultGeminiRoots() = %v, want [%s]", roots, filepath.Join(tmpDir, "tmp"))
+	}
+
+	recs, err := Discover(DiscoverOptions{})
+	if err != nil {
+		t.Fatalf("Discover default failed: %v", err)
+	}
+	var found bool
+	for _, r := range recs {
+		if r.NS == "myproj" && r.Kind == KindGemini {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("Discover default did not find Gemini session under GEMINI_HOME: %+v", recs)
+	}
+}
+
+func TestAnalyzeGeminiJSONL(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "session-test.jsonl")
+
+	lines := []string{
+		`{"sessionId":"sess-jsonl-1","projectHash":"hash123","startTime":"2026-06-01T00:00:00Z","kind":"main"}`,
+		`{"id":"m1","timestamp":"2026-06-01T00:00:01Z","type":"user","content":[{"text":"say hi"}]}`,
+		`{"id":"m2","timestamp":"2026-06-01T00:00:05Z","type":"gemini","model":"gemini-2.5-flash","content":"hi!","tokens":{"input":100,"output":10,"cached":0,"total":110}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := Analyze(path)
+	if s.Error != "" {
+		t.Fatalf("Analyze JSONL failed: %v", s.Error)
+	}
+	if s.Session != "sess-jsonl-1" {
+		t.Errorf("session = %q, want sess-jsonl-1", s.Session)
+	}
+	if s.Kind != KindGemini {
+		t.Errorf("kind = %q, want %q", s.Kind, KindGemini)
+	}
+	if s.NPrompts != 1 {
+		t.Errorf("n_prompts = %d, want 1", s.NPrompts)
+	}
+	if s.AssistantTurns != 1 {
+		t.Errorf("assistant turns = %d, want 1", s.AssistantTurns)
+	}
+	if s.Tokens.Input != 100 || s.Tokens.Output != 10 {
+		t.Errorf("tokens = %+v, want input=100 output=10", s.Tokens)
+	}
+}
+
+func writeJSONFile(t *testing.T, path string, v any) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

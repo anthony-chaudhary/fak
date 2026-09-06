@@ -57,6 +57,8 @@ var ReadOnlyTools = map[string]bool{
 	"ReadMcpResourceTool":    true,
 	"ListMcpResourcesTool":   true,
 	"ReadMcpResourceDirTool": true,
+	"read_file":              true,
+	"list_directory":         true,
 }
 
 var ExcludeNamespaceSubstrings = []string{"pytest-of-USER", "AppData-Local-Temp", "workspace", "-ws", "test_"}
@@ -76,6 +78,7 @@ type DiscoverOptions struct {
 	NamespacePrefix  string
 	IncludeSubagents bool
 	IncludeGemini    bool
+	NoGemini         bool
 	GeminiRoots      []string
 }
 
@@ -418,6 +421,7 @@ func Discover(opts DiscoverOptions) ([]Transcript, error) {
 	if opts.SinceDays != nil {
 		cutoff = time.Now().Add(-time.Duration(*opts.SinceDays * float64(24*time.Hour)))
 	}
+	seen := map[string]bool{}
 	var out []Transcript
 	for _, root := range roots {
 		entries, err := os.ReadDir(root)
@@ -427,6 +431,39 @@ func Discover(opts DiscoverOptions) ([]Transcript, error) {
 			}
 			return nil, err
 		}
+
+		// Check if root directly contains transcript files (*.json or *.jsonl)
+		var directFiles []string
+		if !opts.NoGemini {
+			if jfiles, err := filepath.Glob(filepath.Join(root, "*.json")); err == nil {
+				directFiles = append(directFiles, jfiles...)
+			}
+		}
+		if lfiles, err := filepath.Glob(filepath.Join(root, "*.jsonl")); err == nil {
+			directFiles = append(directFiles, lfiles...)
+		}
+		if len(directFiles) > 0 {
+			ns := namespaceName(directFiles[0])
+			if opts.NamespacePrefix == "" || strings.HasPrefix(ns, opts.NamespacePrefix) {
+				if !excludedNamespace(ns) {
+					for _, p := range directFiles {
+						if (!opts.NoGemini && isGeminiChatFile(p)) || strings.HasSuffix(p, ".jsonl") {
+							kind := KindTop
+							if isGeminiChatFile(p) {
+								kind = KindGemini
+							}
+							if rec, ok := statTranscript(root, ns, p, kind, cutoff); ok {
+								if !seen[p] {
+									seen[p] = true
+									out = append(out, rec)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
 		for _, entry := range entries {
 			if !entry.IsDir() {
 				continue
@@ -440,32 +477,37 @@ func Discover(opts DiscoverOptions) ([]Transcript, error) {
 				continue
 			}
 			nsdir := filepath.Join(root, ns)
-			top := map[string]bool{}
 			files, err := filepath.Glob(filepath.Join(nsdir, "*.jsonl"))
 			if err != nil {
 				return nil, err
 			}
 			for _, p := range files {
-				top[p] = true
-				if rec, ok := statTranscript(root, ns, p, KindTop, cutoff); ok {
-					out = append(out, rec)
-				}
-			}
-			// Discover Gemini chat JSON transcripts in nsdir/chats/*.json or nsdir/*.json
-			if gfiles, err := filepath.Glob(filepath.Join(nsdir, "chats", "*.json")); err == nil {
-				for _, p := range gfiles {
-					top[p] = true
+				if !seen[p] {
+					seen[p] = true
 					if rec, ok := statTranscript(root, ns, p, KindTop, cutoff); ok {
 						out = append(out, rec)
 					}
 				}
 			}
-			if jfiles, err := filepath.Glob(filepath.Join(nsdir, "*.json")); err == nil {
-				for _, p := range jfiles {
-					if isGeminiChatFile(p) && !top[p] {
-						top[p] = true
-						if rec, ok := statTranscript(root, ns, p, KindTop, cutoff); ok {
-							out = append(out, rec)
+			// Discover Gemini chat JSON transcripts in nsdir/chats/*.json or nsdir/*.json
+			if !opts.NoGemini {
+				if gfiles, err := filepath.Glob(filepath.Join(nsdir, "chats", "*.json")); err == nil {
+					for _, p := range gfiles {
+						if !seen[p] {
+							seen[p] = true
+							if rec, ok := statTranscript(root, ns, p, KindGemini, cutoff); ok {
+								out = append(out, rec)
+							}
+						}
+					}
+				}
+				if jfiles, err := filepath.Glob(filepath.Join(nsdir, "*.json")); err == nil {
+					for _, p := range jfiles {
+						if isGeminiChatFile(p) && !seen[p] {
+							seen[p] = true
+							if rec, ok := statTranscript(root, ns, p, KindGemini, cutoff); ok {
+								out = append(out, rec)
+							}
 						}
 					}
 				}
@@ -474,10 +516,18 @@ func Discover(opts DiscoverOptions) ([]Transcript, error) {
 				continue
 			}
 			err = filepath.WalkDir(nsdir, func(path string, d os.DirEntry, err error) error {
-				if err != nil || d.IsDir() || filepath.Ext(path) != ".jsonl" || top[path] {
+				if err != nil || d.IsDir() || seen[path] {
+					return nil
+				}
+				ext := strings.ToLower(filepath.Ext(path))
+				if ext != ".jsonl" && ext != ".json" {
+					return nil
+				}
+				if ext == ".json" && (opts.NoGemini || !isGeminiChatFile(path)) {
 					return nil
 				}
 				if rec, ok := statTranscript(root, ns, path, KindSpawned, cutoff); ok {
+					seen[path] = true
 					out = append(out, rec)
 				}
 				return nil
@@ -487,9 +537,30 @@ func Discover(opts DiscoverOptions) ([]Transcript, error) {
 			}
 		}
 	}
-	if opts.IncludeGemini {
-		if geminiRecs, err := DiscoverGemini(opts); err == nil {
-			out = append(out, geminiRecs...)
+	if len(opts.GeminiRoots) > 0 {
+		gOpts := opts
+		gOpts.Roots = opts.GeminiRoots
+		if geminiRecs, err := DiscoverGemini(gOpts); err == nil {
+			for _, rec := range geminiRecs {
+				if !seen[rec.Path] {
+					seen[rec.Path] = true
+					out = append(out, rec)
+				}
+			}
+		}
+	} else if len(opts.Roots) == 0 && (opts.IncludeGemini || !opts.NoGemini) {
+		gRoots := DefaultGeminiRoots()
+		if len(gRoots) > 0 {
+			gOpts := opts
+			gOpts.Roots = gRoots
+			if geminiRecs, err := DiscoverGemini(gOpts); err == nil {
+				for _, rec := range geminiRecs {
+					if !seen[rec.Path] {
+						seen[rec.Path] = true
+						out = append(out, rec)
+					}
+				}
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {

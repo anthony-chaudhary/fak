@@ -1,0 +1,42 @@
+{
+  "sessionId": "gemini-tokens-003",
+  "startTime": "2026-07-03T15:00:00.000Z",
+  "lastUpdated": "2026-07-03T15:02:00.000Z",
+  "messages": [
+    {
+      "id": "m1",
+      "type": "user",
+      "timestamp": "2026-07-03T15:00:01.000Z",
+      "content": "Run tests please"
+    },
+    {
+      "id": "m2",
+      "type": "gemini",
+      "model": "gemini-2.5-flash",
+      "timestamp": "2026-07-03T15:00:10.000Z",
+      "content": "Running tests now.",
+      "tokens": {
+        "input": 3000,
+        "output": 60,
+        "cached": 1000,
+        "thoughts": 20,
+        "total": 3080
+      },
+      "toolCalls": [
+        {
+          "id": "tc-1",
+          "name": "run_shell_command",
+          "args": {
+            "command": "go test ./..."
+          },
+          "result": [
+            {
+              "output": "PASS"
+            }
+          ],
+          "status": "success"
+        }
+      ]
+    }
+  ]
+}

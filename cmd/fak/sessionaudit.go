@@ -54,10 +54,10 @@ func runSessionAudit(stdout, stderr io.Writer, argv []string) int {
 }
 
 func sessionAuditUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: fak session-audit discover [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N]")
-	fmt.Fprintln(w, "       fak session-audit audit    [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json OUT] [--md OUT]")
-	fmt.Fprintln(w, "       fak session-audit summary  [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json]")
-	fmt.Fprintln(w, "       fak session-audit actions  [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json] [--fail-on high|medium|none]")
+	fmt.Fprintln(w, "usage: fak session-audit discover [--since-days N] [--root DIR ...] [--gemini-root DIR ...] [--no-gemini] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N]")
+	fmt.Fprintln(w, "       fak session-audit audit    [--since-days N] [--root DIR ...] [--gemini-root DIR ...] [--no-gemini] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json OUT] [--md OUT]")
+	fmt.Fprintln(w, "       fak session-audit summary  [--since-days N] [--root DIR ...] [--gemini-root DIR ...] [--no-gemini] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json]")
+	fmt.Fprintln(w, "       fak session-audit actions  [--since-days N] [--root DIR ...] [--gemini-root DIR ...] [--no-gemini] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json] [--fail-on high|medium|none]")
 	fmt.Fprintln(w, "       fak session-audit deep <session.jsonl>")
 	fmt.Fprintln(w, "       fak session-audit budget  [--json] [--target-tokens N] [--target-turns N] <session.jsonl>")
 	fmt.Fprintln(w, "       fak session-audit batch   [--json] [--ledger docs/nightrun/turnbatch.jsonl] [--dry-run] <session.jsonl>")
@@ -80,21 +80,24 @@ func (r *rootFlags) Set(v string) error {
 	return nil
 }
 
-func sessionAuditCommonFlags(name string, stderr io.Writer) (*flag.FlagSet, *rootFlags, *float64, *string, *bool, *bool, *bool, *int) {
+func sessionAuditCommonFlags(name string, stderr io.Writer) (*flag.FlagSet, *rootFlags, *rootFlags, *float64, *string, *bool, *bool, *bool, *bool, *int) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	roots := rootFlags{}
+	geminiRoots := rootFlags{}
 	sinceDays := fs.Float64("since-days", -1, "only include transcripts modified within N days")
 	nsPrefix := fs.String("ns-prefix", sessionaudit.NamespaceIncludePrefix, "namespace prefix filter")
 	here := fs.Bool("here", false, "use the current working directory's Claude projects namespace as --ns-prefix")
 	allNS := fs.Bool("all", false, "include all non-excluded namespaces")
 	includeSubagents := fs.Bool("include-subagents", false, "include subagent/workflow transcripts")
+	noGemini := fs.Bool("no-gemini", false, "exclude Gemini CLI transcripts from discovery")
 	max := fs.Int("max", 0, "maximum transcripts to read or render")
 	fs.Var(&roots, "root", "transcript projects root (repeatable)")
-	return fs, &roots, sinceDays, nsPrefix, here, allNS, includeSubagents, max
+	fs.Var(&geminiRoots, "gemini-root", "Gemini CLI chats root (repeatable; default ~/.gemini/tmp, honoring GEMINI_HOME)")
+	return fs, &roots, &geminiRoots, sinceDays, nsPrefix, here, allNS, includeSubagents, noGemini, max
 }
 
-func discoverOptions(roots rootFlags, sinceDays float64, nsPrefix string, here bool, allNS bool, includeSubagents bool) sessionaudit.DiscoverOptions {
+func discoverOptions(roots rootFlags, geminiRoots rootFlags, sinceDays float64, nsPrefix string, here bool, allNS bool, includeSubagents bool, noGemini bool) sessionaudit.DiscoverOptions {
 	var since *float64
 	if sinceDays >= 0 {
 		v := sinceDays
@@ -109,14 +112,17 @@ func discoverOptions(roots rootFlags, sinceDays float64, nsPrefix string, here b
 	}
 	return sessionaudit.DiscoverOptions{
 		Roots:            []string(roots),
+		GeminiRoots:      []string(geminiRoots),
 		SinceDays:        since,
 		NamespacePrefix:  nsPrefix,
 		IncludeSubagents: includeSubagents,
+		IncludeGemini:    !noGemini,
+		NoGemini:         noGemini,
 	}
 }
 
 func runSessionAuditDiscover(stdout, stderr io.Writer, argv []string) int {
-	fs, roots, sinceDays, nsPrefix, here, allNS, includeSubagents, max := sessionAuditCommonFlags("session-audit discover", stderr)
+	fs, roots, geminiRoots, sinceDays, nsPrefix, here, allNS, includeSubagents, noGemini, max := sessionAuditCommonFlags("session-audit discover", stderr)
 	asJSON := fs.Bool("json", false, "emit discovered transcript records as JSON")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -125,7 +131,7 @@ func runSessionAuditDiscover(stdout, stderr io.Writer, argv []string) int {
 		fs.Usage()
 		return 2
 	}
-	recs, err := sessionaudit.Discover(discoverOptions(*roots, *sinceDays, *nsPrefix, *here, *allNS, *includeSubagents))
+	recs, err := sessionaudit.Discover(discoverOptions(*roots, *geminiRoots, *sinceDays, *nsPrefix, *here, *allNS, *includeSubagents, *noGemini))
 	if err != nil {
 		fmt.Fprintf(stderr, "fak session-audit discover: %v\n", err)
 		return 1
@@ -158,7 +164,7 @@ func runSessionAuditDiscover(stdout, stderr io.Writer, argv []string) int {
 }
 
 func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
-	fs, roots, sinceDays, nsPrefix, here, allNS, includeSubagents, max := sessionAuditCommonFlags("session-audit audit", stderr)
+	fs, roots, geminiRoots, sinceDays, nsPrefix, here, allNS, includeSubagents, noGemini, max := sessionAuditCommonFlags("session-audit audit", stderr)
 	jsonOut := fs.String("json", "", "write JSON payload to OUT")
 	mdOut := fs.String("md", "", "write markdown report to OUT")
 	if !parseFlags(fs, argv) {
@@ -168,7 +174,7 @@ func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
 		fs.Usage()
 		return 2
 	}
-	opts := discoverOptions(*roots, *sinceDays, *nsPrefix, *here, *allNS, *includeSubagents)
+	opts := discoverOptions(*roots, *geminiRoots, *sinceDays, *nsPrefix, *here, *allNS, *includeSubagents, *noGemini)
 	recs, err := sessionaudit.Discover(opts)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak session-audit audit: discover: %v\n", err)
@@ -302,7 +308,7 @@ func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
 }
 
 func runSessionAuditSummary(stdout, stderr io.Writer, argv []string) int {
-	fs, roots, sinceDays, nsPrefix, here, allNS, includeSubagents, max := sessionAuditCommonFlags("session-audit summary", stderr)
+	fs, roots, geminiRoots, sinceDays, nsPrefix, here, allNS, includeSubagents, noGemini, max := sessionAuditCommonFlags("session-audit summary", stderr)
 	asJSON := fs.Bool("json", false, "emit compact summary as JSON")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -311,7 +317,7 @@ func runSessionAuditSummary(stdout, stderr io.Writer, argv []string) int {
 		fs.Usage()
 		return 2
 	}
-	opts := discoverOptions(*roots, *sinceDays, *nsPrefix, *here, *allNS, *includeSubagents)
+	opts := discoverOptions(*roots, *geminiRoots, *sinceDays, *nsPrefix, *here, *allNS, *includeSubagents, *noGemini)
 	rep, rc := buildSessionAuditCompactReport(stderr, "summary", opts, *includeSubagents, *max)
 	if rc != 0 {
 		return rc
@@ -324,7 +330,7 @@ func runSessionAuditSummary(stdout, stderr io.Writer, argv []string) int {
 }
 
 func runSessionAuditActions(stdout, stderr io.Writer, argv []string) int {
-	fs, roots, sinceDays, nsPrefix, here, allNS, includeSubagents, max := sessionAuditCommonFlags("session-audit actions", stderr)
+	fs, roots, geminiRoots, sinceDays, nsPrefix, here, allNS, includeSubagents, noGemini, max := sessionAuditCommonFlags("session-audit actions", stderr)
 	asJSON := fs.Bool("json", false, "emit action plan as JSON")
 	failOn := fs.String("fail-on", "", "exit 1 when actions at or above this severity exist: high, medium, or none")
 	if !parseFlags(fs, argv) {
@@ -334,7 +340,7 @@ func runSessionAuditActions(stdout, stderr io.Writer, argv []string) int {
 		fs.Usage()
 		return 2
 	}
-	opts := discoverOptions(*roots, *sinceDays, *nsPrefix, *here, *allNS, *includeSubagents)
+	opts := discoverOptions(*roots, *geminiRoots, *sinceDays, *nsPrefix, *here, *allNS, *includeSubagents, *noGemini)
 	rep, rc := buildSessionAuditCompactReport(stderr, "actions", opts, *includeSubagents, *max)
 	if rc != 0 {
 		return rc
@@ -371,7 +377,7 @@ func runSessionAuditActions(stdout, stderr io.Writer, argv []string) int {
 // row shape `fak cachevalue feed` uses, so session health becomes a trendable time series
 // with a regression witness instead of a one-off report.
 func runSessionAuditFeed(stdout, stderr io.Writer, argv []string) int {
-	fs, roots, sinceDays, nsPrefix, here, allNS, includeSubagents, max := sessionAuditCommonFlags("session-audit feed", stderr)
+	fs, roots, geminiRoots, sinceDays, nsPrefix, here, allNS, includeSubagents, noGemini, max := sessionAuditCommonFlags("session-audit feed", stderr)
 	ledger := fs.String("ledger", sessionaudit.DefaultFeedLedgerRel, "durable ledger to append one scrubbed row to")
 	asJSON := fs.Bool("json", false, "also print the appended row as JSON to stdout")
 	dryRun := fs.Bool("dry-run", false, "compute and print the row but do NOT append")
@@ -382,7 +388,7 @@ func runSessionAuditFeed(stdout, stderr io.Writer, argv []string) int {
 		fs.Usage()
 		return 2
 	}
-	opts := discoverOptions(*roots, *sinceDays, *nsPrefix, *here, *allNS, *includeSubagents)
+	opts := discoverOptions(*roots, *geminiRoots, *sinceDays, *nsPrefix, *here, *allNS, *includeSubagents, *noGemini)
 	rep, rc := buildSessionAuditCompactReport(stderr, "feed", opts, *includeSubagents, *max)
 	if rc != 0 {
 		return rc

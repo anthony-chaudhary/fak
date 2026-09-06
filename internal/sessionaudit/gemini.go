@@ -1,13 +1,16 @@
 package sessionaudit
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -33,6 +36,8 @@ type geminiUsageMeta struct {
 	TotalTokensShort      int64 `json:"totalTokens"`
 	CachedTokens          int64 `json:"cachedContentTokenCount"`
 	CachedTokensSnake     int64 `json:"cached_content_token_count"`
+	ThoughtsTokens        int64 `json:"thoughtsTokenCount"`
+	ThoughtsTokensSnake   int64 `json:"thoughts_token_count"`
 }
 
 func (u *geminiUsageMeta) Prompt() int64 {
@@ -52,19 +57,24 @@ func (u *geminiUsageMeta) Candidates() int64 {
 	if u == nil {
 		return 0
 	}
-	if u.CandidatesTokens > 0 {
-		return u.CandidatesTokens
+	cand := u.CandidatesTokens
+	if cand == 0 {
+		cand = u.CandidatesTokensSnake
 	}
-	if u.CandidatesTokensSnake > 0 {
-		return u.CandidatesTokensSnake
+	if cand == 0 {
+		cand = u.CandidatesTokensShort
 	}
-	if u.CandidatesTokensShort > 0 {
-		return u.CandidatesTokensShort
+	if cand == 0 {
+		cand = u.OutputTokensSnake
 	}
-	if u.OutputTokensSnake > 0 {
-		return u.OutputTokensSnake
+	if cand == 0 {
+		cand = u.OutputTokens
 	}
-	return u.OutputTokens
+	thoughts := u.ThoughtsTokens
+	if thoughts == 0 {
+		thoughts = u.ThoughtsTokensSnake
+	}
+	return cand + thoughts
 }
 
 func (u *geminiUsageMeta) Total() int64 {
@@ -143,18 +153,40 @@ func (p *geminiPart) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+type geminiThought struct {
+	Subject     string `json:"subject"`
+	Description string `json:"description"`
+	Timestamp   string `json:"timestamp"`
+}
+
+type geminiTokens struct {
+	Input    int64 `json:"input"`
+	Output   int64 `json:"output"`
+	Cached   int64 `json:"cached"`
+	Thoughts int64 `json:"thoughts"`
+	Tool     int64 `json:"tool"`
+	Total    int64 `json:"total"`
+}
+
 type geminiToolCall struct {
-	Name     string          `json:"name"`
-	Args     json.RawMessage `json:"args"`
-	Function *struct {
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Args      json.RawMessage `json:"args"`
+	Result    []any           `json:"result"`
+	Status    string          `json:"status"`
+	Timestamp string          `json:"timestamp"`
+	Function  *struct {
 		Name string          `json:"name"`
 		Args json.RawMessage `json:"arguments"`
 	} `json:"function"`
 }
 
 type geminiTurn struct {
+	ID             string           `json:"id"`
 	Role           string           `json:"role"`
+	Type           string           `json:"type"`
 	Model          string           `json:"model"`
+	ModelVersion   string           `json:"modelVersion"`
 	ModelName      string           `json:"modelName"`
 	ModelNameSnake string           `json:"model_name"`
 	Timestamp      string           `json:"timestamp"`
@@ -163,16 +195,23 @@ type geminiTurn struct {
 	Parts          []geminiPart     `json:"parts"`
 	Content        json.RawMessage  `json:"content"`
 	Text           string           `json:"text"`
+	Thoughts       []geminiThought  `json:"thoughts"`
 	UsageMetadata  *geminiUsageMeta `json:"usageMetadata"`
 	Usage          *geminiUsageMeta `json:"usage"`
+	Tokens         *geminiTokens    `json:"tokens"`
 	ToolCalls      []geminiToolCall `json:"toolCalls"`
 	ToolCallsSnake []geminiToolCall `json:"tool_calls"`
 }
 
 func (t *geminiTurn) getRole() string {
-	r := strings.ToLower(strings.TrimSpace(t.Role))
-	if r != "" {
-		return r
+	for _, r := range []string{t.Role, t.Type} {
+		r = strings.ToLower(strings.TrimSpace(r))
+		if r == "gemini" || r == "assistant" {
+			return "model"
+		}
+		if r != "" {
+			return r
+		}
 	}
 	for _, p := range t.getParts() {
 		if p.FunctionCall != nil || p.FunctionCallSnake != nil {
@@ -185,14 +224,14 @@ func (t *geminiTurn) getRole() string {
 	if len(t.ToolCalls) > 0 || len(t.ToolCallsSnake) > 0 {
 		return "model"
 	}
-	if t.UsageMetadata != nil || t.Usage != nil {
+	if t.UsageMetadata != nil || t.Usage != nil || t.Tokens != nil {
 		return "model"
 	}
 	return "user"
 }
 
 func (t *geminiTurn) getModel(defaultModel string) string {
-	for _, m := range []string{t.Model, t.ModelName, t.ModelNameSnake, defaultModel} {
+	for _, m := range []string{t.Model, t.ModelVersion, t.ModelName, t.ModelNameSnake, defaultModel} {
 		m = strings.TrimSpace(m)
 		if m != "" {
 			return m
@@ -215,7 +254,19 @@ func (t *geminiTurn) getUsage() *geminiUsageMeta {
 	if t.UsageMetadata != nil {
 		return t.UsageMetadata
 	}
-	return t.Usage
+	if t.Usage != nil {
+		return t.Usage
+	}
+	if t.Tokens != nil {
+		return &geminiUsageMeta{
+			PromptTokens:     t.Tokens.Input,
+			CandidatesTokens: t.Tokens.Output,
+			ThoughtsTokens:   t.Tokens.Thoughts,
+			CachedTokens:     t.Tokens.Cached,
+			TotalTokens:      t.Tokens.Total,
+		}
+	}
+	return nil
 }
 
 func (t *geminiTurn) getParts() []geminiPart {
@@ -249,14 +300,18 @@ type geminiChatFile struct {
 	SessionIDSnake string           `json:"session_id"`
 	ID             string           `json:"id"`
 	UUID           string           `json:"uuid"`
+	ProjectHash    string           `json:"projectHash"`
 	StartTime      string           `json:"startTime"`
 	Timestamp      string           `json:"timestamp"`
 	CreatedAt      string           `json:"created_at"`
 	LastUpdateTime string           `json:"lastUpdateTime"`
+	LastUpdated    string           `json:"lastUpdated"`
 	UpdatedAt      string           `json:"updated_at"`
 	Model          string           `json:"model"`
+	ModelVersion   string           `json:"modelVersion"`
 	ModelName      string           `json:"modelName"`
 	ModelNameSnake string           `json:"model_name"`
+	Kind           string           `json:"kind"`
 	Turns          []geminiTurn     `json:"turns"`
 	Messages       []geminiTurn     `json:"messages"`
 	History        []geminiTurn     `json:"history"`
@@ -275,7 +330,7 @@ func (f *geminiChatFile) getSessionID() string {
 }
 
 func (f *geminiChatFile) getModel() string {
-	for _, m := range []string{f.Model, f.ModelName, f.ModelNameSnake} {
+	for _, m := range []string{f.Model, f.ModelVersion, f.ModelName, f.ModelNameSnake} {
 		m = strings.TrimSpace(m)
 		if m != "" {
 			return m
@@ -335,6 +390,7 @@ func ParseGeminiSession(r io.Reader, path string) (Session, error) {
 	s := Session{
 		Path:        path,
 		Session:     strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+		Kind:        KindGemini,
 		RecordTypes: map[string]int64{},
 		Models:      map[string]int64{},
 		PerModel:    map[string]ModelCounts{},
@@ -363,11 +419,47 @@ func ParseGeminiSession(r io.Reader, path string) (Session, error) {
 			return s, err
 		}
 	} else if trimmed[0] == '{' {
-		if err := json.Unmarshal(trimmed, &root); err != nil {
-			s.Error = err.Error()
-			return s, err
+		// First try unmarshaling as a single geminiChatFile object
+		if err := json.Unmarshal(trimmed, &root); err == nil && (len(root.Turns) > 0 || len(root.Messages) > 0 || len(root.History) > 0 || root.getUsage() != nil) {
+			turns = root.getTurns()
+		} else {
+			// If not a standard single object, scan line by line for JSONL formats
+			scanner := bufio.NewScanner(bytes.NewReader(trimmed))
+			var lineNum int
+			for scanner.Scan() {
+				lineNum++
+				line := bytes.TrimSpace(scanner.Bytes())
+				if len(line) == 0 {
+					continue
+				}
+				if lineNum == 1 {
+					_ = json.Unmarshal(line, &root)
+				}
+				// Check for $set wrapper
+				var setWrapper struct {
+					Set struct {
+						Messages []geminiTurn `json:"messages"`
+						Turns    []geminiTurn `json:"turns"`
+					} `json:"$set"`
+				}
+				if err := json.Unmarshal(line, &setWrapper); err == nil && (len(setWrapper.Set.Messages) > 0 || len(setWrapper.Set.Turns) > 0) {
+					if len(setWrapper.Set.Messages) > 0 {
+						turns = append(turns, setWrapper.Set.Messages...)
+					} else {
+						turns = append(turns, setWrapper.Set.Turns...)
+					}
+					continue
+				}
+				// Check if line is a single turn
+				var t geminiTurn
+				if err := json.Unmarshal(line, &t); err == nil && (t.Role != "" || t.Type != "" || len(t.Parts) > 0 || len(t.Content) > 0 || t.Text != "" || t.Tokens != nil || t.UsageMetadata != nil) {
+					turns = append(turns, t)
+				}
+			}
+			if len(turns) == 0 && root.getTurns() != nil {
+				turns = root.getTurns()
+			}
 		}
-		turns = root.getTurns()
 	} else {
 		err := ErrInvalidGeminiSession
 		s.Error = err.Error()
@@ -385,9 +477,12 @@ func ParseGeminiSession(r io.Reader, path string) (Session, error) {
 	}
 	rootModel := root.getModel()
 
-	for _, ts := range []string{root.StartTime, root.Timestamp, root.CreatedAt, root.LastUpdateTime, root.UpdatedAt} {
+	for _, ts := range []string{root.StartTime, root.Timestamp, root.CreatedAt, root.LastUpdateTime, root.LastUpdated, root.UpdatedAt} {
 		updateTimestamp(&s.TSMin, &s.TSMax, ts)
 	}
+
+	lens := newBehaviorLens()
+	clens := newConfusionLens()
 
 	for _, turn := range turns {
 		s.NRecords++
@@ -405,22 +500,27 @@ func ParseGeminiSession(r io.Reader, path string) (Session, error) {
 				if p.FunctionResponse != nil {
 					s.NToolResult++
 					s.ToolResultChars += int64(len(p.FunctionResponse.Response))
+					lens.noteToolResult(p.FunctionResponse.ID, false, string(p.FunctionResponse.Response))
 				}
 				if txt := strings.TrimSpace(p.Text); txt != "" {
 					hasPromptText = true
-					if len(txt) > 400 {
-						txt = txt[:400]
+					if looksLikeTypedPrompt(txt) {
+						if len(txt) > 400 {
+							txt = txt[:400]
+						}
+						s.Prompts = append(s.Prompts, Prompt{Timestamp: ts, Text: txt})
 					}
-					s.Prompts = append(s.Prompts, Prompt{Timestamp: ts, Text: txt})
 					s.NText++
 				}
 			}
 			if !hasPromptText && turn.Text != "" {
 				txt := strings.TrimSpace(turn.Text)
-				if len(txt) > 400 {
-					txt = txt[:400]
+				if looksLikeTypedPrompt(txt) {
+					if len(txt) > 400 {
+						txt = txt[:400]
+					}
+					s.Prompts = append(s.Prompts, Prompt{Timestamp: ts, Text: txt})
 				}
-				s.Prompts = append(s.Prompts, Prompt{Timestamp: ts, Text: txt})
 				s.NText++
 			}
 
@@ -435,6 +535,7 @@ func ParseGeminiSession(r io.Reader, path string) (Session, error) {
 				}
 				if txt := strings.TrimSpace(p.Text); txt != "" {
 					s.NText++
+					clens.noteText(json.RawMessage(strconv.Quote(txt)))
 				}
 				if p.FunctionCall != nil {
 					name := p.FunctionCall.Name
@@ -443,24 +544,60 @@ func ParseGeminiSession(r io.Reader, path string) (Session, error) {
 					}
 					s.NToolUse++
 					s.Tools[name]++
-					s.ToolInputChars += int64(len(p.FunctionCall.GetArgs()))
+					args := p.FunctionCall.GetArgs()
+					s.ToolInputChars += int64(len(args))
+					id := p.FunctionCall.ID
+					if id == "" {
+						id = fmt.Sprintf("call-%d", s.NToolUse)
+					}
+					lens.noteToolUse(id, name, args, canonicalArgs(args))
 				}
 			}
 
-			// Also capture any direct toolCalls on the turn object
-			allCalls := append(turn.ToolCalls, turn.ToolCallsSnake...)
-			for _, tc := range allCalls {
-				name := tc.Name
-				if name == "" && tc.Function != nil {
-					name = tc.Function.Name
+			for _, th := range turn.Thoughts {
+				s.NThinking++
+				if desc := strings.TrimSpace(th.Description); desc != "" {
+					clens.noteText(json.RawMessage(strconv.Quote(desc)))
 				}
-				if name == "" {
-					name = "?"
+			}
+
+			// Capture any direct toolCalls on the turn object
+			hasPartFuncCall := false
+			for _, p := range parts {
+				if p.FunctionCall != nil {
+					hasPartFuncCall = true
+					break
 				}
-				// Only increment if not already counted in parts
-				if len(parts) == 0 {
+			}
+			if !hasPartFuncCall {
+				allCalls := append(turn.ToolCalls, turn.ToolCallsSnake...)
+				for _, tc := range allCalls {
+					name := tc.Name
+					if name == "" && tc.Function != nil {
+						name = tc.Function.Name
+					}
+					if name == "" {
+						name = "?"
+					}
 					s.NToolUse++
 					s.Tools[name]++
+					args := tc.Args
+					if len(args) == 0 && tc.Function != nil {
+						args = tc.Function.Args
+					}
+					s.ToolInputChars += int64(len(args))
+					id := tc.ID
+					if id == "" {
+						id = fmt.Sprintf("call-%d", s.NToolUse)
+					}
+					lens.noteToolUse(id, name, args, canonicalArgs(args))
+					if len(tc.Result) > 0 {
+						s.NToolResult++
+						resBytes, _ := json.Marshal(tc.Result)
+						s.ToolResultChars += int64(len(resBytes))
+						isErr := strings.EqualFold(tc.Status, "error") || strings.EqualFold(tc.Status, "failed")
+						lens.noteToolResult(id, isErr, string(resBytes))
+					}
 				}
 			}
 
@@ -470,28 +607,33 @@ func ParseGeminiSession(r io.Reader, path string) (Session, error) {
 				out := u.Candidates()
 				cached := u.Cached()
 
-				s.Tokens.Input += in
+				fresh := in
+				if cached > 0 && in >= cached {
+					fresh = in - cached
+				}
+
+				s.Tokens.Input += fresh
 				s.Tokens.Output += out
 				s.Tokens.CacheRead += cached
 
 				pm := s.PerModel[model]
 				pm.Turns++
-				pm.Input += in
+				pm.Input += fresh
 				pm.Output += out
 				pm.CacheRead += cached
 				s.PerModel[model] = pm
 
 				pt := s.PerTrack[TrackMain]
 				pt.Turns++
-				pt.Input += in
+				pt.Input += fresh
 				pt.Output += out
 				pt.CacheRead += cached
 				s.PerTrack[TrackMain] = pt
 
-				if cost, err := StrictModelCostUSD(model, in, 0, cached, out); err == nil {
+				if cost, err := StrictModelCostUSD(model, fresh, 0, cached, out); err == nil {
 					s.CostUSD += cost
 				} else if r, ok := PriceFor(model); ok {
-					s.CostUSD += rawCostUSD(r, in, 0, cached, out)
+					s.CostUSD += rawCostUSD(r, fresh, 0, cached, out)
 				}
 			} else {
 				pm := s.PerModel[model]
@@ -508,6 +650,7 @@ func ParseGeminiSession(r io.Reader, path string) (Session, error) {
 				if p.FunctionResponse != nil {
 					s.NToolResult++
 					s.ToolResultChars += int64(len(p.FunctionResponse.Response))
+					lens.noteToolResult(p.FunctionResponse.ID, false, string(p.FunctionResponse.Response))
 				}
 			}
 		}
@@ -520,27 +663,32 @@ func ParseGeminiSession(r io.Reader, path string) (Session, error) {
 			out := u.Candidates()
 			cached := u.Cached()
 
-			s.Tokens.Input = in
+			fresh := in
+			if cached > 0 && in >= cached {
+				fresh = in - cached
+			}
+
+			s.Tokens.Input = fresh
 			s.Tokens.Output = out
 			s.Tokens.CacheRead += cached
 
 			if len(s.Models) == 1 {
 				for m := range s.Models {
 					pm := s.PerModel[m]
-					pm.Input = in
+					pm.Input = fresh
 					pm.Output = out
 					pm.CacheRead = cached
 					s.PerModel[m] = pm
 
-					if cost, err := StrictModelCostUSD(m, in, 0, cached, out); err == nil {
+					if cost, err := StrictModelCostUSD(m, fresh, 0, cached, out); err == nil {
 						s.CostUSD += cost
 					} else if r, ok := PriceFor(m); ok {
-						s.CostUSD += rawCostUSD(r, in, 0, cached, out)
+						s.CostUSD += rawCostUSD(r, fresh, 0, cached, out)
 					}
 				}
 			}
 			pt := s.PerTrack[TrackMain]
-			pt.Input = in
+			pt.Input = fresh
 			pt.Output = out
 			pt.CacheRead = cached
 			s.PerTrack[TrackMain] = pt
@@ -548,6 +696,8 @@ func ParseGeminiSession(r io.Reader, path string) (Session, error) {
 	}
 
 	finalizeSession(&s)
+	s.Behavior = lens.summary()
+	s.Confusion = clens.summary()
 	return s, nil
 }
 
@@ -558,32 +708,35 @@ func isGeminiChatFile(path string) bool {
 		return true
 	}
 	if ext == ".jsonl" {
-		return false
+		f, err := os.Open(path)
+		if err != nil {
+			return false
+		}
+		defer f.Close()
+		buf := make([]byte, 4096)
+		n, err := f.Read(buf)
+		if err != nil && err != io.EOF {
+			return false
+		}
+		content := string(buf[:n])
+		return strings.Contains(content, "usageMetadata") ||
+			strings.Contains(content, "candidatesTokenCount") ||
+			strings.Contains(content, "promptTokenCount") ||
+			strings.Contains(content, "sessionId") ||
+			strings.Contains(content, "session_id") ||
+			strings.Contains(content, "modelVersion")
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	buf := make([]byte, 4096)
-	n, err := f.Read(buf)
-	if err != nil && err != io.EOF {
-		return false
-	}
-	content := string(buf[:n])
-	return strings.Contains(content, "usageMetadata") ||
-		strings.Contains(content, "candidatesTokenCount") ||
-		strings.Contains(content, "promptTokenCount")
+	return false
 }
 
 // ParseGeminiChatFile parses a Gemini CLI chat session transcript from a file path.
-
 func ParseGeminiChatFile(path string) (Session, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		s := Session{
 			Path:        path,
 			Session:     strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+			Kind:        KindGemini,
 			Error:       err.Error(),
 			RecordTypes: map[string]int64{},
 			Models:      map[string]int64{},
@@ -599,23 +752,45 @@ func ParseGeminiChatFile(path string) (Session, error) {
 
 // DefaultGeminiRoots returns the standard Gemini CLI chat session transcript directories.
 func DefaultGeminiRoots() []string {
+	if tmp := os.Getenv("GEMINI_TMP_DIR"); tmp != "" {
+		return []string{tmp}
+	}
 	base := os.Getenv("GEMINI_CLI_HOME")
 	if base == "" {
 		base = os.Getenv("GEMINI_HOME")
 	}
 	if base == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			base = filepath.Join(home, ".gemini")
-		} else {
-			base = ".gemini"
-		}
+		base = os.Getenv("GEMINI_CONFIG_DIR")
 	}
-	return []string{filepath.Join(base, "tmp")}
+	if base != "" {
+		return []string{filepath.Join(base, "tmp")}
+	}
+	// If CLAUDE_CONFIG_DIR was explicitly set to isolate tests, do not touch real user home directory.
+	if claudeDir := os.Getenv("CLAUDE_CONFIG_DIR"); claudeDir != "" {
+		candidates := []string{
+			filepath.Join(claudeDir, ".gemini", "tmp"),
+			filepath.Join(claudeDir, "gemini", "tmp"),
+			filepath.Join(filepath.Dir(claudeDir), ".gemini", "tmp"),
+		}
+		for _, c := range candidates {
+			if st, err := os.Stat(c); err == nil && st.IsDir() {
+				return []string{c}
+			}
+		}
+		return nil
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return []string{filepath.Join(home, ".gemini", "tmp")}
+	}
+	return nil
 }
 
 // DiscoverGemini scans candidate roots for Gemini CLI chat session JSON transcripts (~/.gemini/tmp/**/chats/*.json).
 func DiscoverGemini(opts DiscoverOptions) ([]Transcript, error) {
 	roots := opts.Roots
+	if len(roots) == 0 {
+		roots = opts.GeminiRoots
+	}
 	if len(roots) == 0 {
 		roots = DefaultGeminiRoots()
 	}
@@ -632,7 +807,11 @@ func DiscoverGemini(opts DiscoverOptions) ([]Transcript, error) {
 			if err != nil || d.IsDir() {
 				return nil
 			}
-			if !strings.EqualFold(filepath.Ext(path), ".json") {
+			ext := strings.ToLower(filepath.Ext(path))
+			if ext != ".json" && ext != ".jsonl" {
+				return nil
+			}
+			if ext == ".jsonl" && !isGeminiChatFile(path) {
 				return nil
 			}
 			rel, err := filepath.Rel(root, path)
@@ -644,12 +823,32 @@ func DiscoverGemini(opts DiscoverOptions) ([]Transcript, error) {
 			if len(parts) > 1 {
 				ns = parts[0]
 			}
+			// Check if parent directory of chats has a .project_root file
+			dir := filepath.Dir(path)
+			baseDir := filepath.Base(dir)
+			if baseDir == "chats" {
+				parent := filepath.Dir(dir)
+				if prData, err := os.ReadFile(filepath.Join(parent, ".project_root")); err == nil {
+					prClean := strings.TrimSpace(string(prData))
+					if prClean != "" {
+						ns = ProjectNamespace(prClean)
+					}
+				}
+			}
 			if opts.NamespacePrefix != "" && !strings.HasPrefix(ns, opts.NamespacePrefix) {
 				return nil
 			} else if excludedNamespace(ns) {
 				return nil
 			}
-			if rec, ok := statTranscript(root, ns, path, KindTop, cutoff); ok {
+			kind := KindGemini
+			if len(parts) > 3 {
+				// e.g. proj/chats/sub1/session.json is a subagent chat
+				if !opts.IncludeSubagents {
+					return nil
+				}
+				kind = KindSpawned
+			}
+			if rec, ok := statTranscript(root, ns, path, kind, cutoff); ok {
 				out = append(out, rec)
 			}
 			return nil
