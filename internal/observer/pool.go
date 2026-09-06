@@ -179,6 +179,7 @@ type Pool struct {
 	observationsTotal int64
 	asyncTotal        int64
 	barriersTotal     int64
+	barrierTimeouts   int64
 	cacheHits         int64
 	cacheMisses       int64
 	churnCount        int64
@@ -450,6 +451,7 @@ func (p *Pool) ObserveSyncBarrier(ctx context.Context, obs StepObservation) (Ste
 				return obs, err
 			}
 			if time.Now().After(deadline) {
+				atomic.AddInt64(&p.barrierTimeouts, 1)
 				return obs, ErrBarrierTimeout
 			}
 			select {
@@ -489,8 +491,48 @@ func (p *Pool) ObserveSyncBarrier(ctx context.Context, obs StepObservation) (Ste
 	return obs, nil
 }
 
+// PoolStats captures detailed telemetry metrics for the observer pool.
+type PoolStats struct {
+	TotalObservations int64 `json:"total_observations"`
+	AsyncTotal        int64 `json:"async_total"`
+	BarriersTotal     int64 `json:"barriers_total"`
+	BarrierTimeouts   int64 `json:"barrier_timeouts"`
+	CacheHits         int64 `json:"cache_hits"`
+	CacheMisses       int64 `json:"cache_misses"`
+	ChurnCount        int64 `json:"churn_count"`
+	RegressCount      int64 `json:"regress_count"`
+}
+
+// BarrierTimeouts returns the number of sync barriers that timed out waiting for in-flight tasks.
+func (p *Pool) BarrierTimeouts() int64 {
+	if p == nil {
+		return 0
+	}
+	return atomic.LoadInt64(&p.barrierTimeouts)
+}
+
+// DetailedStats returns a structured snapshot of pool telemetry counters.
+func (p *Pool) DetailedStats() PoolStats {
+	if p == nil {
+		return PoolStats{}
+	}
+	return PoolStats{
+		TotalObservations: atomic.LoadInt64(&p.observationsTotal),
+		AsyncTotal:        atomic.LoadInt64(&p.asyncTotal),
+		BarriersTotal:     atomic.LoadInt64(&p.barriersTotal),
+		BarrierTimeouts:   atomic.LoadInt64(&p.barrierTimeouts),
+		CacheHits:         atomic.LoadInt64(&p.cacheHits),
+		CacheMisses:       atomic.LoadInt64(&p.cacheMisses),
+		ChurnCount:        atomic.LoadInt64(&p.churnCount),
+		RegressCount:      atomic.LoadInt64(&p.regressCount),
+	}
+}
+
 // Stats returns atomic telemetry counters for the pool.
 func (p *Pool) Stats() (total, async, barriers, hits, misses, churns, regresses int64) {
+	if p == nil {
+		return 0, 0, 0, 0, 0, 0, 0
+	}
 	return atomic.LoadInt64(&p.observationsTotal),
 		atomic.LoadInt64(&p.asyncTotal),
 		atomic.LoadInt64(&p.barriersTotal),

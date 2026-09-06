@@ -984,6 +984,99 @@ func TestObserveSyncBarrier_TimeoutWaitingForInFlight(t *testing.T) {
 	if !errors.Is(err, ErrBarrierTimeout) {
 		t.Fatalf("expected ErrBarrierTimeout, got %v", err)
 	}
+	if got := p.BarrierTimeouts(); got != 1 {
+		t.Fatalf("expected BarrierTimeouts to be 1, got %d", got)
+	}
+	if got := p.DetailedStats().BarrierTimeouts; got != 1 {
+		t.Fatalf("expected DetailedStats().BarrierTimeouts to be 1, got %d", got)
+	}
+}
+
+func TestObserveSyncBarrier_IncrementsBarrierTimeouts(t *testing.T) {
+	p := NewPool(Config{
+		WorkerCount:    1,
+		QueueSize:      16,
+		BarrierTimeout: 10 * time.Millisecond,
+	})
+	_ = p.Start()
+	defer p.Close()
+
+	if p.BarrierTimeouts() != 0 {
+		t.Fatalf("expected initial BarrierTimeouts=0, got %d", p.BarrierTimeouts())
+	}
+	if p.DetailedStats().BarrierTimeouts != 0 {
+		t.Fatalf("expected initial DetailedStats().BarrierTimeouts=0, got %d", p.DetailedStats().BarrierTimeouts)
+	}
+
+	ctx := context.Background()
+
+	// 1. Successful barrier does not increment timeout counter
+	obsSuccess := StepObservation{
+		SessionID: "sess-timeouts",
+		Tool:      "Edit",
+		Diff:      "@@ -1 +1 @@\n+added",
+	}
+	if _, err := p.ObserveSyncBarrier(ctx, obsSuccess); err != nil {
+		t.Fatalf("unexpected error on successful barrier: %v", err)
+	}
+	if p.BarrierTimeouts() != 0 {
+		t.Fatalf("expected BarrierTimeouts=0 after successful barrier, got %d", p.BarrierTimeouts())
+	}
+
+	// 2. Timeout increment
+	sess := p.getOrCreateSession("sess-timeouts")
+	atomic.StoreInt64(&sess.inFlight, 1)
+	defer atomic.StoreInt64(&sess.inFlight, 0)
+
+	obsTimeout := StepObservation{
+		SessionID: "sess-timeouts",
+		Tool:      "Write",
+		Diff:      "@@ -1 +1 @@\n+added",
+	}
+
+	_, err := p.ObserveSyncBarrier(ctx, obsTimeout)
+	if !errors.Is(err, ErrBarrierTimeout) {
+		t.Fatalf("expected ErrBarrierTimeout, got %v", err)
+	}
+	if got := p.BarrierTimeouts(); got != 1 {
+		t.Fatalf("expected BarrierTimeouts=1 after first timeout, got %d", got)
+	}
+
+	// 3. Second timeout increment
+	_, err = p.ObserveSyncBarrier(ctx, obsTimeout)
+	if !errors.Is(err, ErrBarrierTimeout) {
+		t.Fatalf("expected ErrBarrierTimeout on second call, got %v", err)
+	}
+	if got := p.BarrierTimeouts(); got != 2 {
+		t.Fatalf("expected BarrierTimeouts=2 after second timeout, got %d", got)
+	}
+
+	// 4. Verify DetailedStats and backwards-compatible Stats()
+	st := p.DetailedStats()
+	if st.BarrierTimeouts != 2 {
+		t.Fatalf("expected DetailedStats().BarrierTimeouts=2, got %d", st.BarrierTimeouts)
+	}
+	if st.BarriersTotal != 3 {
+		t.Fatalf("expected DetailedStats().BarriersTotal=3, got %d", st.BarriersTotal)
+	}
+
+	total, asyncCount, barriers, _, _, _, _ := p.Stats()
+	if barriers != 3 || total != 3 || asyncCount != 0 {
+		t.Fatalf("expected Stats() total=3, barriers=3, got total=%d, async=%d, barriers=%d", total, asyncCount, barriers)
+	}
+
+	// 5. Nil safety
+	var nilPool *Pool
+	if nilPool.BarrierTimeouts() != 0 {
+		t.Fatalf("expected nil pool BarrierTimeouts()=0, got %d", nilPool.BarrierTimeouts())
+	}
+	if nilPool.DetailedStats().BarrierTimeouts != 0 {
+		t.Fatalf("expected nil pool DetailedStats().BarrierTimeouts=0, got %d", nilPool.DetailedStats().BarrierTimeouts)
+	}
+	nTotal, _, _, _, _, _, _ := nilPool.Stats()
+	if nTotal != 0 {
+		t.Fatalf("expected nil pool Stats() total=0, got %d", nTotal)
+	}
 }
 
 func TestObserveSyncBarrier_ContextCancelWhileWaiting(t *testing.T) {
