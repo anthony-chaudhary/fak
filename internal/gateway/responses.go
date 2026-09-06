@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -269,13 +270,14 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if rejectInvalidSampling(w, validateResponsesSampling(req)) {
 		return
 	}
+	restoreContinuation := newResponsesRestoreContinuation(req.Tools)
 	restoreToolName, restoreToolPresent := determineResponsesRestoreTool(req.Tools)
 	if !restoreToolPresent {
 		req.Tools = append(req.Tools, responsesTool{
 			Type:        "function",
 			Name:        restoreToolName,
 			Description: "Restore dropped context by content-addressed sha256 id. Returns verbatim stashed bytes plus orientation; optional trace_id defaults to the current guarded session. Read-only and trust-gated.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string","description":"the content-address handle (sha256 hex) a compaction tombstone embedded as id=<hex>, or a recall page digest"},"trace_id":{"type":"string","description":"session trace id; omitted uses the gateway default trace"}},"required":["id"]}`),
+			Parameters:  responsesRestoreSchema(),
 		})
 	}
 	cleanInstructions, sortedTools, stabilizedMessages, prefixReuse := CanonicalizeResponsesPrefix(req.Instructions, req.Tools, messages)
@@ -300,6 +302,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if !admitted {
 		return
 	}
+	ctx = context.WithValue(ctx, responsesRestoreContextKey{}, restoreContinuation)
 	resultAdmissions, err := s.admitInboundResults(ctx, messages, tools, reqTrace)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "upstream cache invalidation failed")
@@ -384,6 +387,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	comp, messages = restoreContinuation.continueRestores(ctx, s, sessionTurn, comp, messages, tools, sampleOpts...)
 	asst := comp.Message
 	asst.Role = agent.RoleAssistant
 
@@ -412,8 +416,11 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		if rc, ok := s.recoverDeniedResponsesTurn(ctx, sessionTurn, messages, comp.Message, adjs, tools, sampleOpts...); ok {
 			refusedFirst = adjs
 			firstUsage := comp.Usage
-			comp = rc
+			messages = deniedRecoveryMessages(messages, comp.Message, adjs)
+			copyRecovered := *rc
+			comp = &copyRecovered
 			comp.Usage = foldRecoveryUsage(firstUsage, rc.Usage)
+			comp, messages = restoreContinuation.continueRestores(ctx, s, sessionTurn, comp, messages, tools, sampleOpts...)
 			asst = comp.Message
 			asst.Role = agent.RoleAssistant
 			kept, adjs, dropped, servedText, servedHits, bodyRefused = s.adjudicateProposedTurn(ctx, asst, reqTrace)
@@ -423,7 +430,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	// model-authored answer. That is a blocked turn, and it is rendered as one below
 	// rather than dressed up as a completion.
 	blocked := len(refusedFirst) > 0 && turnIsDenialOnly(kept, dropped, asst.Content, bodyRefused, servedText)
-	turnAdjs := turnAdjudications(refusedFirst, adjs)
+	turnAdjs := turnAdjudications(restoreContinuation.adjudications, turnAdjudications(refusedFirst, adjs))
 
 	// #5212: fold this turn's adjudication SHAPE into the same turn-control signal the
 	// Anthropic wire already records (messages.go). The Responses wire recorded NOTHING
@@ -514,6 +521,10 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		// distinction between "the model is done" and "the guard stopped this turn".
 		resp.Status = "incomplete"
 		resp.IncompleteDetails = &responsesIncomplete{Reason: deniedGuardIncompleteReason}
+	}
+	if restoreContinuation.blocked {
+		resp.Status = "incomplete"
+		resp.IncompleteDetails = &responsesIncomplete{Reason: responsesRestoreIncompleteReason}
 	}
 	for i := range turnAdjs {
 		AttachOperatorRemedyMetadata(&turnAdjs[i])

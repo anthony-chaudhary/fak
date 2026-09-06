@@ -458,8 +458,36 @@ func TestDispatchWorkerPreflightAuthMissingIdentifiesSeatAndRemediation(t *testi
 	if !strings.Contains(res.Reason, `seat "worker-seat-1"`) {
 		t.Fatalf("reason missing seat identity: %q", res.Reason)
 	}
-	if !strings.Contains(res.Reason, "fak accounts") || !strings.Contains(res.Reason, "fak m -- codex login") {
+	if strings.Contains(res.Reason, "enroll-current") || strings.Contains(res.Reason, "CODEX_HOME=") {
+		t.Fatalf("reason advertises unsupported enrollment or a redacted runnable path: %q", res.Reason)
+	}
+	if !strings.Contains(res.Reason, "set CODEX_HOME to the selected seat's actual directory") || !strings.Contains(res.Reason, "same CODEX_HOME") {
+		t.Fatalf("recovery must preserve the selected credential source: %q", res.Reason)
+	}
+	if strings.Contains(res.Reason, home) {
+		t.Fatalf("reason exposes the private source directory: %q", res.Reason)
+	}
+	t.Setenv("CODEX_HOME", home)
+	if selected, source := resolveCodexHome("", true); selected != req.Account.Dir || source != "env" {
+		t.Fatalf("recovery switched the selected seat: home=%q source=%q", selected, source)
+	}
+	_, recovery, ok := strings.Cut(res.Reason, "`fak m ")
+	recovery, _, closed := strings.Cut(recovery, "`")
+	if !ok || !closed {
 		t.Fatalf("reason missing actionable remediation: %q", res.Reason)
+	}
+	// Exercise the emitted command through manage's real routing and Codex auth
+	// admission. No subprocess or login is started by this regression witness.
+	var routed []string
+	dispatchManageLaunch(strings.Fields(recovery), func([]string) {
+		t.Fatal("login was redirected to the ordinary task launcher")
+	}, func(args []string) { routed = args })
+	if len(routed) < 2 || routed[0] != "--" || !guardCodexAuthManagementCommand(routed[1:]) {
+		t.Fatalf("recovery did not reach the supported auth-management route: %v", routed)
+	}
+	command, install := installGuardCodexConfig(routed[1:], true, "http://127.0.0.1:8137", "", home)
+	if install.Applied || !slices.Equal(command, []string{"codex", "login"}) {
+		t.Fatalf("login was rewritten to require the missing provider credential: %v", command)
 	}
 }
 
@@ -716,5 +744,91 @@ func TestDispatchTransientStartupProviderDenials(t *testing.T) {
 	}
 	if !dispatchTransientProviderCheck(map[string]any{"reason": "guarded provider health returned HTTP 503", "status": 503}) {
 		t.Fatal("503 refused")
+	}
+}
+
+func TestDispatchTickWorkerPreflightRequiresOpenAIAuthTriState(t *testing.T) {
+	boolPtr := func(b bool) *bool { return &b }
+	now := time.Date(2026, 8, 19, 3, 30, 0, 0, time.UTC)
+
+	tests := []struct {
+		name                   string
+		rpcResult              string
+		wantAuthenticated      bool
+		wantRequiresOpenAIAuth *bool
+		wantAuthError          string
+	}{
+		{
+			name:                   "explicit false with null account",
+			rpcResult:              `{"account": null, "requiresOpenaiAuth": false}`,
+			wantAuthenticated:      false,
+			wantRequiresOpenAIAuth: boolPtr(false),
+			wantAuthError:          "",
+		},
+		{
+			name:                   "explicit true with null account",
+			rpcResult:              `{"account": null, "requiresOpenaiAuth": true}`,
+			wantAuthenticated:      false,
+			wantRequiresOpenAIAuth: boolPtr(true),
+			wantAuthError:          "not logged in",
+		},
+		{
+			name:                   "absent with null account",
+			rpcResult:              `{"account": null}`,
+			wantAuthenticated:      false,
+			wantRequiresOpenAIAuth: nil,
+			wantAuthError:          "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			messages := map[string]dispatchCodexRPCMessage{
+				"1": {
+					Result: json.RawMessage(tc.rpcResult),
+				},
+			}
+			obs := dispatchCodexObservationFromRPC(messages)
+
+			if obs.Authenticated != tc.wantAuthenticated {
+				t.Errorf("Authenticated = %v, want %v", obs.Authenticated, tc.wantAuthenticated)
+			}
+			if obs.AuthError != tc.wantAuthError {
+				t.Errorf("AuthError = %q, want %q", obs.AuthError, tc.wantAuthError)
+			}
+			if tc.wantRequiresOpenAIAuth == nil {
+				if obs.RequiresOpenAIAuth != nil {
+					t.Errorf("RequiresOpenAIAuth = %v, want nil", *obs.RequiresOpenAIAuth)
+				}
+			} else {
+				if obs.RequiresOpenAIAuth == nil {
+					t.Errorf("RequiresOpenAIAuth = nil, want %v", *tc.wantRequiresOpenAIAuth)
+				} else if *obs.RequiresOpenAIAuth != *tc.wantRequiresOpenAIAuth {
+					t.Errorf("RequiresOpenAIAuth = %v, want %v", *obs.RequiresOpenAIAuth, *tc.wantRequiresOpenAIAuth)
+				}
+			}
+
+			// Verify preflight integration maintains Authenticated=false on null account
+			setDispatchWorkerPreflightProbe(t, func(context.Context, dispatchWorkerPreflightRequest) (dispatchCodexPreflightObservation, error) {
+				return obs, nil
+			})
+			req := dispatchWorkerPreflightRequest{
+				Backend:         "codex",
+				Account:         dispatchtick.Account{Tag: "seat-a", Dir: filepath.Join("C:", "codex-a")},
+				Model:           "gpt-5.6-sol",
+				Workspace:       filepath.Join("C:", "repo"),
+				WorkKind:        "implementation",
+				DeadlineSeconds: 3600,
+				Guarded:         true,
+				RouteDigest:     "sha256:route",
+			}
+			res := dispatchWorkerPreflight(context.Background(), req, now)
+			if res.Ready {
+				t.Errorf("preflight Ready = true, want false for unauthenticated null account")
+			}
+			if res.Verdict != dispatchWorkerPreflightAuthMissing {
+				t.Errorf("preflight Verdict = %q, want %q", res.Verdict, dispatchWorkerPreflightAuthMissing)
+			}
+		})
 	}
 }

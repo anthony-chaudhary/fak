@@ -157,6 +157,10 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 	}
 	opTrace, opTool = tc.TraceID, tc.Tool
 
+	if wv, env, handled, err := s.syscallNative(ctx, tc, readOnly); handled {
+		return wv, env, err
+	}
+
 	// In-process read optimization (#11035): promote pure read-only shell commands (cat, head, tail)
 	// directly without spawning subprocess shells.
 	if promotedEnv, promotedWv, ok := s.PromoteShellReadToInProcess(ctx, tool, rawArgs, traceID); ok {
@@ -237,6 +241,77 @@ func isCapabilitiesTool(tool string) bool {
 	return tool == "fak_capabilities" ||
 		tool == "mcp__fak__fak_capabilities" ||
 		tool == "mcp__fak_guard__fak_capabilities"
+}
+
+// nativeToolName identifies gateway-owned operations before any model route is selected.
+func nativeToolName(tool string) string {
+	for _, prefix := range []string{"functions.", "mcp__fak__", "mcp__fak_guard__"} {
+		tool = strings.TrimPrefix(tool, prefix)
+	}
+	switch tool {
+	case "fak_context_restore", "fak_memory_run":
+		return tool
+	default:
+		return ""
+	}
+}
+
+// syscallNative keeps gateway-owned tools on their native implementation even
+// when called through fak_syscall. The call and result cross the kernel floors,
+// but neither a model route nor a cached mock result can replace the operation.
+func (s *Server) syscallNative(ctx context.Context, tc *abi.ToolCall, readOnly bool) (WireVerdict, *ResultEnvelope, bool, error) {
+	tool := nativeToolName(tc.Tool)
+	if tool == "" {
+		return WireVerdict{}, nil, false, nil
+	}
+	if tc.SeqNo == 0 {
+		tc.SeqNo = s.nextOriginSeq()
+	}
+	v := s.k.Decide(ctx, tc)
+	if v.Kind != abi.VerdictAllow {
+		// Transforms and witness requests remain a client-visible preview. Native
+		// execution requires a fresh affirmative admission of the actual arguments.
+		return renderVerdict(v, nil), nil, true, nil
+	}
+	args := resolveBytes(ctx, tc.Args)
+	var value any
+	var err error
+	switch tool {
+	case "fak_context_restore":
+		var req ContextRestoreRequest
+		if err = json.Unmarshal(args, &req); err == nil {
+			if req.TraceID == "" {
+				req.TraceID = tc.TraceID
+			}
+			value, err = s.restoreContext(principalFromContext(ctx), req)
+		}
+	case "fak_memory_run":
+		var req MemoryRequest
+		if err = json.Unmarshal(args, &req); err == nil {
+			if readOnly && req.Apply {
+				err = errors.New("fak_memory_run apply requires a write-capable call")
+			} else {
+				value, err = s.memoryRun(ctx, req)
+			}
+		}
+	}
+	if err != nil {
+		return renderVerdict(v, nil), nil, true, err
+	}
+	body, err := json.Marshal(value)
+	if err != nil {
+		return renderVerdict(v, nil), nil, true, err
+	}
+	r := &abi.Result{Call: tc, Status: abi.StatusOK,
+		Payload: abi.Ref{Kind: abi.RefInline, Inline: body, Len: int64(len(body)), Taint: abi.TaintTainted, Scope: abi.ScopeAgent},
+		Meta:    map[string]string{"engine": "fak-mcp", "served_by": "native", "tool": tool}}
+	admitted := s.k.AdmitResult(ctx, tc, r)
+	s.rememberOriginSeq(tc.TraceID, tc.Tool, string(args), tc.SeqNo)
+	if abi.FoldRank(admitted.Kind) > abi.FoldRank(v.Kind) {
+		v = admitted
+	}
+	env := &ResultEnvelope{Status: statusName(r.Status), Content: string(resolveBytes(ctx, r.Payload)), Meta: r.Meta}
+	return renderVerdict(v, resultMeta(r)), env, true, nil
 }
 
 // dispatchEnsemble executes a multi-member routing Plan (issue #597): it runs each
@@ -481,6 +556,12 @@ func (s *Server) buildCall(ctx context.Context, tool, rawArgs string, readOnly b
 	// back to the empty shared-default trace (which would pool every served session
 	// onto one taint high-water mark).
 	tc := fusedturn.Tag(&abi.ToolCall{Tool: canonical, Args: ref, TraceID: s.traceFor(traceID), Meta: meta}, fusedturn.ClassClassical)
+	if nativeToolName(canonical) != "" {
+		// Local gateway operations retain the same policy/principal metadata but
+		// do not borrow a model account's route or remote residency constraints.
+		tc.Engine = "local:fak-mcp"
+		return tc, nil
+	}
 	// Per-call model routing (opt-in): classify this tool call into a routing Subject
 	// and, for a single-model PICK, bind the chosen model to Engine HERE — before the
 	// caller hands tc to k.Syscall. That is the load-bearing residency contract: the
