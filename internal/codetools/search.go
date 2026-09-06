@@ -173,26 +173,13 @@ func (t *Toolset) executeGrep(ctx context.Context, a GrepArgs, re *regexp.Regexp
 		if err != nil {
 			return nil // an unreadable file is skipped, never fatal to the whole search
 		}
-		info, err := f.Stat()
-		if err != nil {
-			_ = f.Close()
-			return nil
-		}
-		readCap := t.limits.MaxReadBytes
-		if info.Size() == 0 {
-			readCap = ArenaClass64K
-		} else if info.Size() < readCap {
-			readCap = info.Size()
-		}
-		buf := AcquireBuffer(int(readCap))
-		n, readErr := io.ReadFull(f, buf[:readCap])
+		data, readErr := io.ReadAll(io.LimitReader(f, t.limits.MaxReadBytes+1))
 		_ = f.Close()
-		if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
-			ReleaseBuffer(buf)
+		if readErr != nil {
 			return nil
 		}
-		data := buf[:n]
-		if info.Size() > t.limits.MaxReadBytes {
+		if int64(len(data)) > t.limits.MaxReadBytes {
+			data = data[:t.limits.MaxReadBytes]
 			truncated = true
 			truncationReason = upgradeTruncationReason(truncationReason, "file_size")
 		}
@@ -205,7 +192,6 @@ func (t *Toolset) executeGrep(ctx context.Context, a GrepArgs, re *regexp.Regexp
 			if len(matches) >= limit {
 				truncated = true
 				truncationReason = upgradeTruncationReason(truncationReason, "match_limit")
-				ReleaseBuffer(buf)
 				return errStopWalk
 			}
 			matchTruncated := false
@@ -245,7 +231,6 @@ func (t *Toolset) executeGrep(ctx context.Context, a GrepArgs, re *regexp.Regexp
 				Truncated: matchTruncated,
 			})
 		}
-		ReleaseBuffer(buf)
 		return nil
 	})
 	if walkErr != nil {
