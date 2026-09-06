@@ -376,6 +376,12 @@ func TestDottedPlatformAndDistroReleaseTags(t *testing.T) {
 // banners (e.g. "git version 2.55.0.windows.3", "git version 2.43.0.el9.x86_64") are
 // correctly parsed and verified against exact pins.
 func TestWindowsGitVersionProbe(t *testing.T) {
+	p := VersionProbe{Tool: "git", Raw: "git version 2.55.0.windows.3\n", Found: true}
+	w := VerifyToolVersion("2.55.0", p)
+	if !w.Satisfied() {
+		t.Fatalf("expected 2.55.0 to match Windows git version, got %s: %s", w.State, w.Reason)
+	}
+
 	// Case 1: Windows git version output with standard .windows.<N> tag
 	probeWin := VersionProbe{
 		Tool:  "git",
