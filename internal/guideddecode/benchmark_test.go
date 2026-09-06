@@ -8,6 +8,8 @@ import (
 
 var (
 	sinkAllowed map[byte]bool
+	sinkBitset  ByteBitset
+	sinkUnc     bool
 	sinkBool    bool
 	sinkSlice   []bool
 )
@@ -43,6 +45,37 @@ func BenchmarkAllowedNextBytes_PrefixPhases(b *testing.B) {
 	}
 }
 
+// BenchmarkAllowedNextByteBitset_PrefixPhases measures zero-allocation bitset
+// mask computation across each structural region of tool-call envelope decoding.
+func BenchmarkAllowedNextByteBitset_PrefixPhases(b *testing.B) {
+	schema := ToolSchema{
+		Names: []string{"get_weather", "get_forecast", "list_files", "read_file", "search_web"},
+	}
+
+	cases := []struct {
+		name   string
+		prefix string
+	}{
+		{"PreSkeleton", `{"na`},
+		{"EnumBranch", preLit},
+		{"MidName", preLit + "get_"},
+		{"SuffixSkeleton", preLit + "get_weather" + `","arg`},
+		{"Unconstrained", preLit + "get_weather" + sufLit},
+		{"DeadEnd", preLit + "unknown_tool"},
+	}
+
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			prefix := []byte(tc.prefix)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				sinkBitset, sinkUnc = AllowedNextByteBitset(prefix, schema)
+			}
+		})
+	}
+}
+
 // BenchmarkAllowedNextBytes_SchemaScaling measures matcher performance at the
 // tool-name selection branch as the registered tool schema scales from 5 to 100 tools.
 func BenchmarkAllowedNextBytes_SchemaScaling(b *testing.B) {
@@ -68,6 +101,23 @@ func BenchmarkAllowedNextBytes_SchemaScaling(b *testing.B) {
 // loop, stepping byte-by-byte through an entire valid envelope prefix until
 // the unconstrained arguments payload is reached.
 func BenchmarkAllowedNextBytes_EnvelopeByteWalk(b *testing.B) {
+	schema := ToolSchema{
+		Names: []string{"get_weather", "get_forecast", "list_files"},
+	}
+	envelope := []byte(preLit + "get_weather" + sufLit + `{"city":"San Francisco"}}`)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for j := 0; j <= len(envelope); j++ {
+			sinkBitset, sinkUnc = AllowedNextByteBitset(envelope[:j], schema)
+		}
+	}
+}
+
+// BenchmarkAllowedNextBytes_EnvelopeByteWalk_MapLegacy benchmarks the legacy map-allocating
+// return path for historical comparison.
+func BenchmarkAllowedNextBytes_EnvelopeByteWalk_MapLegacy(b *testing.B) {
 	schema := ToolSchema{
 		Names: []string{"get_weather", "get_forecast", "list_files"},
 	}

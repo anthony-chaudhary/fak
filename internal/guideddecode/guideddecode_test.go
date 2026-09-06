@@ -254,3 +254,169 @@ func TestAllowedNextBytes_WhitespaceTolerance(t *testing.T) {
 		})
 	}
 }
+
+// TestByteBitset exercises bitset creation, membership, removal, counting,
+// and single-byte extraction across all 4 64-bit words (0-255).
+func TestByteBitset(t *testing.T) {
+	var bs ByteBitset
+	if !bs.Empty() {
+		t.Fatal("new bitset must be empty")
+	}
+	if bs.Count() != 0 {
+		t.Fatalf("expected count 0, got %d", bs.Count())
+	}
+	if _, ok := bs.SingleByte(); ok {
+		t.Fatal("empty bitset SingleByte must report ok=false")
+	}
+
+	testBytes := []byte{0, 1, 63, 64, 65, 127, 128, 129, 191, 192, 193, 254, 255}
+	for _, b := range testBytes {
+		if bs.Contains(b) {
+			t.Fatalf("Contains(%d) reported true before Add", b)
+		}
+	}
+
+	// Add testBytes one by one and test SingleByte & Count
+	var singleBs ByteBitset
+	singleBs.Add('x')
+	if b, ok := singleBs.SingleByte(); !ok || b != 'x' {
+		t.Fatalf("SingleByte on single element want ('x', true), got (%q, %v)", b, ok)
+	}
+
+	for i, b := range testBytes {
+		bs.Add(b)
+		if !bs.Contains(b) || !bs.Has(b) {
+			t.Fatalf("Contains/Has(%d) reported false after Add", b)
+		}
+		if bs.Empty() {
+			t.Fatal("bitset must not be empty after Add")
+		}
+		if bs.Count() != i+1 {
+			t.Fatalf("count after %d adds: want %d, got %d", i+1, i+1, bs.Count())
+		}
+	}
+
+	// Verify Bytes() matches testBytes in ascending order
+	bytesList := bs.Bytes()
+	if len(bytesList) != len(testBytes) {
+		t.Fatalf("Bytes() len want %d, got %d", len(testBytes), len(bytesList))
+	}
+	for i, b := range bytesList {
+		if b != testBytes[i] {
+			t.Fatalf("Bytes()[%d] want %d, got %d", i, testBytes[i], b)
+		}
+	}
+
+	// Test Set and Clear
+	var bs2 ByteBitset
+	bs2.Set('z')
+	if !bs2.Has('z') {
+		t.Fatal("Has('z') should be true after Set('z')")
+	}
+	bs2.Clear('z')
+	if bs2.Has('z') || !bs2.Empty() {
+		t.Fatal("bitset should be empty after Clear('z')")
+	}
+
+	// Test SingleByteBitset
+	sbb := SingleByteBitset('q')
+	if !sbb.Has('q') || sbb.Count() != 1 {
+		t.Fatalf("SingleByteBitset('q') invalid: Has=%v, Count=%d", sbb.Has('q'), sbb.Count())
+	}
+	if b, ok := sbb.SingleByte(); !ok || b != 'q' {
+		t.Fatalf("SingleByte on SingleByteBitset want ('q', true), got (%q, %v)", b, ok)
+	}
+
+	if _, ok := bs.SingleByte(); ok {
+		t.Fatal("multi-element bitset SingleByte must report ok=false")
+	}
+
+	// Verify ToMap produces an identical map
+	m := bs.ToMap()
+	if len(m) != len(testBytes) {
+		t.Fatalf("ToMap len want %d, got %d", len(testBytes), len(m))
+	}
+	for _, b := range testBytes {
+		if !m[b] {
+			t.Fatalf("ToMap missing byte %d", b)
+		}
+	}
+
+	// Remove bytes and check
+	for i, b := range testBytes {
+		bs.Remove(b)
+		if bs.Contains(b) {
+			t.Fatalf("Contains(%d) reported true after Remove", b)
+		}
+		remaining := len(testBytes) - (i + 1)
+		if bs.Count() != remaining {
+			t.Fatalf("count after %d removes: want %d, got %d", i+1, remaining, bs.Count())
+		}
+	}
+	if !bs.Empty() {
+		t.Fatal("bitset should be empty after removing all elements")
+	}
+}
+
+// TestAllowedNextByteBitset_Equivalence verifies that AllowedNextByteBitset and
+// AllowedNextBytes produce equivalent decisions across all test prefixes.
+func TestAllowedNextByteBitset_Equivalence(t *testing.T) {
+	schema := ToolSchema{Names: []string{"get", "get_weather", "list"}}
+	prefixes := []string{
+		"",
+		"{",
+		`{"`,
+		preLit,
+		preLit + "g",
+		preLit + "get",
+		preLit + "get_",
+		preLit + "get_weather",
+		preLit + "get_weather" + `"`,
+		preLit + "get_weather" + sufLit,
+		preLit + "get_weather" + sufLit + `{"city":"NYC"}}`,
+		preLit + "unknown",
+		`{"wrong_key`,
+		` {"name" : "get" , "arguments" : `,
+	}
+
+	for _, p := range prefixes {
+		prefixBytes := []byte(p)
+		legacy := AllowedNextBytes(prefixBytes, schema)
+		bitset, unconstrained := AllowedNextByteBitset(prefixBytes, schema)
+
+		if unconstrained != (legacy == nil) {
+			t.Fatalf("prefix %q unconstrained mismatch: bitset unconstrained=%v, legacy nil=%v",
+				p, unconstrained, legacy == nil)
+		}
+		if unconstrained {
+			if !bitset.Empty() {
+				t.Fatalf("prefix %q: unconstrained bitset must be empty, got count=%d", p, bitset.Count())
+			}
+		} else {
+			gotMap := bitset.ToMap()
+			if !eqSet(gotMap, legacy) {
+				t.Fatalf("prefix %q map mismatch:\n  bitset map: %s\n  legacy map: %s",
+					p, showSet(gotMap), showSet(legacy))
+			}
+		}
+	}
+}
+
+// TestAllowedNextBitset_ZeroAllocs witnesses issue #11858: AllowedNextBitset
+// executes with 0 heap allocations across the entire tool envelope skeleton walk.
+func TestAllowedNextBitset_ZeroAllocs(t *testing.T) {
+	schema := ToolSchema{
+		Names: []string{"get_weather", "get_forecast", "list_files"},
+	}
+	envelope := []byte(preLit + "get_weather" + sufLit + `{"city":"San Francisco"}}`)
+
+	allocs := testing.AllocsPerRun(100, func() {
+		for j := 0; j <= len(envelope); j++ {
+			sinkBitset, sinkUnc = AllowedNextByteBitset(envelope[:j], schema)
+		}
+	})
+
+	if allocs != 0 {
+		t.Fatalf("AllowedNextBitset incurred %v allocs/run during envelope walk; want 0", allocs)
+	}
+}
