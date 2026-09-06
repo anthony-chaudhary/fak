@@ -683,6 +683,96 @@ func TestStore_Close(t *testing.T) {
 	}
 }
 
+func TestInvariants_ValidationAndStoreGuards(t *testing.T) {
+	// Config invariants: non-positive page size rejected, empty policy defaults to LRU, whitespace direct-io backing file rejected.
+	badPageCfg := kv.Config{
+		PageSize:       -1,
+		EvictionPolicy: "",
+	}
+	if err := badPageCfg.Validate(); !errors.Is(err, kv.ErrInvalidConfig) {
+		t.Fatalf("expected ErrInvalidConfig for negative page size, got: %v", err)
+	}
+
+	defaultPolicyCfg := kv.Config{
+		PageSize:       4096,
+		EvictionPolicy: "",
+	}
+	if err := defaultPolicyCfg.Validate(); err != nil {
+		t.Fatalf("validation failed for empty eviction policy: %v", err)
+	}
+	if defaultPolicyCfg.EvictionPolicy != kv.EvictionPolicyLRU {
+		t.Errorf("expected default eviction policy LRU, got: %q", defaultPolicyCfg.EvictionPolicy)
+	}
+
+	wsBackingCfg := kv.Config{
+		PageSize:    4096,
+		DirectIO:    true,
+		BackingFile: "   ",
+	}
+	if err := wsBackingCfg.Validate(); !errors.Is(err, kv.ErrInvalidConfig) {
+		t.Fatalf("expected ErrInvalidConfig for whitespace BackingFile, got: %v", err)
+	}
+
+	// New rejects invalid config
+	if _, err := kv.New(badPageCfg); !errors.Is(err, kv.ErrInvalidConfig) {
+		t.Fatalf("expected New to reject invalid config with ErrInvalidConfig, got: %v", err)
+	}
+
+	// CacheKey invariants: coordinates and token sizes must be non-negative, session ID must be non-empty.
+	validKey := kv.CacheKey{
+		SessionID:   "sess-invariants",
+		Turn:        0,
+		Layer:       0,
+		TokenOffset: 0,
+		NumTokens:   16,
+	}
+
+	invalidCases := []struct {
+		name string
+		key  kv.CacheKey
+	}{
+		{"negative layer", kv.CacheKey{SessionID: "s", Turn: 0, Layer: -1, TokenOffset: 0, NumTokens: 16}},
+		{"negative token offset", kv.CacheKey{SessionID: "s", Turn: 0, Layer: 0, TokenOffset: -5, NumTokens: 16}},
+		{"negative num tokens", kv.CacheKey{SessionID: "s", Turn: 0, Layer: 0, TokenOffset: 0, NumTokens: -1}},
+		{"empty session ID", kv.CacheKey{SessionID: "\t  \n", Turn: 0, Layer: 0, TokenOffset: 0, NumTokens: 16}},
+	}
+	for _, tc := range invalidCases {
+		if err := tc.key.Validate(); !errors.Is(err, kv.ErrInvalidKey) {
+			t.Errorf("%s: expected ErrInvalidKey, got: %v", tc.name, err)
+		}
+	}
+
+	// Store API invariants: methods validate keys and fail closed on invalid inputs.
+	store, err := kv.DefaultStore()
+	if err != nil {
+		t.Fatalf("DefaultStore: %v", err)
+	}
+	defer store.Close()
+
+	badKey := kv.CacheKey{SessionID: "", Turn: -1}
+	if _, err := store.AllocatePage(badKey); !errors.Is(err, kv.ErrInvalidKey) {
+		t.Errorf("AllocatePage: expected ErrInvalidKey, got %v", err)
+	}
+
+	batch := []kv.CacheKey{validKey, badKey}
+	if _, err := store.AllocateBatch(batch); !errors.Is(err, kv.ErrInvalidKey) {
+		t.Errorf("AllocateBatch: expected ErrInvalidKey, got %v", err)
+	}
+
+	if _, err := store.Put(badKey, []byte("data")); !errors.Is(err, kv.ErrInvalidKey) {
+		t.Errorf("Put: expected ErrInvalidKey, got %v", err)
+	}
+
+	if err := store.PutPage(nil); err == nil {
+		t.Errorf("PutPage(nil): expected error, got nil")
+	}
+
+	badPage := &kv.Page{Key: badKey}
+	if err := store.PutPage(badPage); !errors.Is(err, kv.ErrInvalidKey) {
+		t.Errorf("PutPage(badPage): expected ErrInvalidKey, got %v", err)
+	}
+}
+
 func BenchmarkStore_PutGet(b *testing.B) {
 	store, err := kv.DefaultStore()
 	if err != nil {

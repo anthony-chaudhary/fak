@@ -86,12 +86,8 @@ func DefaultConfig() Config {
 	}
 }
 
-// Validate checks that the configuration values are well-formed and consistent.
-//
-// Contract:
-//   - PageSize must be greater than zero.
-//   - EvictionPolicy must be empty, "lru", or "fifo". Empty defaults to "lru".
-//   - If DirectIO is true, BackingFile must not be empty.
+// Validate checks that configuration values are well-formed and consistent,
+// ensuring positive page sizing, valid eviction policy selection, and backing paths.
 func (c *Config) Validate() error {
 	if c.PageSize <= 0 {
 		return fmt.Errorf("%w: page size must be positive, got %d", ErrInvalidConfig, c.PageSize)
@@ -131,11 +127,8 @@ type CacheKey struct {
 	Tag string `json:"tag,omitempty"`
 }
 
-// Validate verifies that the cache key possesses valid identification fields.
-//
-// Contract:
-//   - SessionID must not be empty.
-//   - Turn, Layer, TokenOffset, and NumTokens must be non-negative.
+// Validate checks that the cache key possesses a non-empty session identifier
+// and non-negative turn, layer, offset, and token count coordinates.
 func (k CacheKey) Validate() error {
 	if strings.TrimSpace(k.SessionID) == "" {
 		return fmt.Errorf("%w: session ID cannot be empty", ErrInvalidKey)
@@ -313,7 +306,7 @@ func (s Stats) Snapshot() Stats {
 	return s
 }
 
-// Store defines the high-level contract for KV cache storage management,
+// Store defines the interface for KV cache storage management,
 // supporting allocation, retrieval, eviction, session grouping, and block lookup.
 type Store interface {
 	// AllocatePage reserves a new page for the given key, evicting if necessary.
@@ -398,11 +391,8 @@ type KVStore struct {
 	closed       bool
 }
 
-// New creates and initializes a new KVStore instance conforming to the provided configuration.
-//
-// Contract:
-//   - cfg is validated via cfg.Validate().
-//   - If cfg.DirectIO is enabled, cfg.BackingFile is opened via directio.OpenLoopbackKVStore.
+// New creates and initializes a new KVStore instance conforming to the provided configuration,
+// validating options and initializing any configured direct I/O backing store.
 func New(cfg Config) (*KVStore, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
