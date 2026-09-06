@@ -55,6 +55,16 @@ func (s *fixtureSessionSource) ResolveApproval(_ context.Context, request Sessio
 	return nil
 }
 
+func (s *fixtureSessionSource) ApplyApproval(sessionID string, app *SessionApproval) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.cards {
+		if s.cards[i].ID == sessionID {
+			s.cards[i].ApplyApproval(app)
+		}
+	}
+}
+
 func allSessionFixtures(now time.Time) []SessionCard {
 	states := []SessionState{sessionWorking, sessionAwaitingApproval, sessionAwaitingInput, sessionIdle, sessionDisconnected, sessionCancelled, sessionFailed}
 	cards := make([]SessionCard, 0, len(states))
@@ -1054,4 +1064,158 @@ func TestSessionCardCapabilitiesDeepCopyPreventsDataRaces(t *testing.T) {
 	readerWg.Wait()
 	close(stopWriter)
 	wg.Wait()
+}
+
+func TestSessionEventHookApprovalBroadcastValidCardInventoryAndReplay(t *testing.T) {
+	resetSessionHubForTest()
+	defer resetSessionHubForTest()
+
+	now := time.Now()
+	sessionID := "session-hook-approval-test"
+	initialCard := SessionCard{
+		ID:          sessionID,
+		Provider:    "codex",
+		Workspace:   "/workspace/fak",
+		State:       sessionWorking,
+		LastEventAt: now,
+		Capabilities: map[string]SessionCapability{
+			"cancel": {Enabled: true},
+		},
+	}
+	source := &fixtureSessionSource{cards: []SessionCard{initialCard}}
+
+	ts := httptest.NewServer(handlerWithSessionSource(newStore(), nil, nil, source))
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 1. Connect initial SSE client to /api/sessions/events
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/sessions/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for SSE stream, got %d", resp.StatusCode)
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	evConnected, _ := readSSEEvent(t, reader)
+	if evConnected != "connected" {
+		t.Fatalf("expected first event to be connected, got %q", evConnected)
+	}
+
+	// 2. Post an approval event to /api/sessions/{id}/events
+	approvalJSON := `{
+		"type": "approval.requested",
+		"approval_id": "app-hook-99",
+		"tool_name": "Bash",
+		"command": "git reset --hard HEAD",
+		"target_path": "/workspace/fak",
+		"risk_explanation": "hard reset of working tree"
+	}`
+	postResp, err := ts.Client().Post(ts.URL+"/api/sessions/"+sessionID+"/events", "application/json", strings.NewReader(approvalJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer postResp.Body.Close()
+	if postResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted for event hook, got %d", postResp.StatusCode)
+	}
+
+	// 3. Receive approval_requested event on SSE channel
+	evApprovalType, evApprovalData := readSSEEvent(t, reader)
+	if evApprovalType != "approval_requested" {
+		t.Fatalf("expected approval_requested event, got %q (data: %s)", evApprovalType, evApprovalData)
+	}
+	if !strings.Contains(evApprovalData, "app-hook-99") {
+		t.Fatalf("expected approval data to contain app-hook-99, got %s", evApprovalData)
+	}
+
+	// 4. Receive session_update event and verify it is a valid card inventory payload (sessions slice + html)
+	evUpdateType, evUpdateData := readSSEEvent(t, reader)
+	if evUpdateType != "session_update" {
+		t.Fatalf("expected session_update event, got %q (data: %s)", evUpdateType, evUpdateData)
+	}
+
+	var updatePayload struct {
+		Sessions []SessionCard `json:"sessions"`
+		HTML     string        `json:"html"`
+	}
+	if err := json.Unmarshal([]byte(evUpdateData), &updatePayload); err != nil {
+		t.Fatalf("failed to parse session_update json: %v (raw: %s)", err, evUpdateData)
+	}
+	if len(updatePayload.Sessions) != 1 {
+		t.Fatalf("expected 1 session card in session_update payload, got %d", len(updatePayload.Sessions))
+	}
+	card := updatePayload.Sessions[0]
+	if card.ID != sessionID {
+		t.Fatalf("card ID = %q, want %q", card.ID, sessionID)
+	}
+	if card.State != sessionAwaitingApproval {
+		t.Fatalf("card State = %q, want %q", card.State, sessionAwaitingApproval)
+	}
+	if card.PendingApproval == nil || card.PendingApproval.ApprovalID != "app-hook-99" {
+		t.Fatalf("card PendingApproval = %+v, want app-hook-99", card.PendingApproval)
+	}
+	if card.PendingApproval.ToolName != "Bash" || card.PendingApproval.Command != "git reset --hard HEAD" {
+		t.Fatalf("card PendingApproval details mismatch: %+v", card.PendingApproval)
+	}
+	if !strings.Contains(updatePayload.HTML, "app-hook-99") {
+		t.Fatalf("session_update HTML lacks approval ID: %s", updatePayload.HTML)
+	}
+	if !strings.Contains(updatePayload.HTML, sessionID) {
+		t.Fatalf("session_update HTML lacks session ID: %s", updatePayload.HTML)
+	}
+
+	// 5. Connect a new SSE client to verify replayed state receives updated card state
+	reqReplay, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/sessions/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	respReplay, err := ts.Client().Do(reqReplay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respReplay.Body.Close()
+
+	readerReplay := bufio.NewReader(respReplay.Body)
+	rEv1Type, _ := readSSEEvent(t, readerReplay)
+	if rEv1Type != "connected" {
+		t.Fatalf("expected connected event on reconnect, got %q", rEv1Type)
+	}
+
+	rEv2Type, rEv2Data := readSSEEvent(t, readerReplay)
+	if rEv2Type != "session_update" {
+		t.Fatalf("expected replayed session_update event, got %q (data: %s)", rEv2Type, rEv2Data)
+	}
+
+	var replayedPayload struct {
+		Sessions []SessionCard `json:"sessions"`
+		HTML     string        `json:"html"`
+	}
+	if err := json.Unmarshal([]byte(rEv2Data), &replayedPayload); err != nil {
+		t.Fatalf("failed to parse replayed session_update json: %v (raw: %s)", err, rEv2Data)
+	}
+	if len(replayedPayload.Sessions) != 1 {
+		t.Fatalf("expected 1 replayed session card, got %d", len(replayedPayload.Sessions))
+	}
+	rCard := replayedPayload.Sessions[0]
+	if rCard.ID != sessionID || rCard.State != sessionAwaitingApproval || rCard.PendingApproval == nil || rCard.PendingApproval.ApprovalID != "app-hook-99" {
+		t.Fatalf("replayed card mismatch: %+v", rCard)
+	}
+	if !strings.Contains(replayedPayload.HTML, "app-hook-99") {
+		t.Fatalf("replayed HTML lacks approval ID: %s", replayedPayload.HTML)
+	}
+
+	// 6. Verify CurrentCards reflects updated state
+	current := CurrentCards()
+	if len(current) != 1 || current[0].ID != sessionID || current[0].State != sessionAwaitingApproval || current[0].PendingApproval == nil || current[0].PendingApproval.ApprovalID != "app-hook-99" {
+		t.Fatalf("CurrentCards() mismatch: %+v", current)
+	}
 }

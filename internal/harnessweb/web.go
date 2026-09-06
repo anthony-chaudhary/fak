@@ -1028,7 +1028,24 @@ func handleSessionEventHook(source SessionSource, s *store) http.HandlerFunc {
 		}
 
 		app, parseErr := ParseSessionApproval(body)
-		if parseErr == nil && app != nil {
+		var raw map[string]any
+		_ = json.Unmarshal(body, &raw)
+		eventType, _ := raw["type"].(string)
+
+		isApproval := (parseErr == nil && app != nil && (app.ApprovalID != "" || app.ToolName != "" || app.Command != "" || app.RiskExplanation != "")) ||
+			strings.Contains(eventType, "approval") || strings.Contains(string(body), "approval")
+
+		if isApproval {
+			if app == nil {
+				app = &SessionApproval{}
+			}
+			if app.ApprovalID == "" {
+				if appID, ok := raw["approval_id"].(string); ok && appID != "" {
+					app.ApprovalID = appID
+				} else {
+					app.ApprovalID = "approval-" + id
+				}
+			}
 			approvalPayload, _ := json.Marshal(map[string]any{
 				"session_id":       id,
 				"approval_id":      app.ApprovalID,
@@ -1039,13 +1056,84 @@ func handleSessionEventHook(source SessionSource, s *store) http.HandlerFunc {
 				"risk_explanation": app.RiskExplanation,
 			})
 			defaultSessionHub.broadcastSession(id, "approval_requested", approvalPayload)
-			defaultSessionHub.broadcastSession(id, "session_update", approvalPayload)
+
+			if rec, ok := source.(interface {
+				ApplyApproval(sessionID string, app *SessionApproval)
+			}); ok {
+				rec.ApplyApproval(id, app)
+			}
+
+			var cards []SessionCard
+			if source != nil {
+				ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+				if fetched, err := source.Sessions(ctx); err == nil && len(fetched) > 0 {
+					cards = fetched
+				}
+				cancel()
+			}
+			if len(cards) == 0 {
+				cards = defaultSessionHub.currentCards()
+			}
+
+			found := false
+			for i := range cards {
+				if cards[i].ID == id {
+					cards[i].ApplyApproval(app)
+					found = true
+					break
+				}
+			}
+			if !found {
+				for _, dc := range defaultSessionHub.currentCards() {
+					if dc.ID == id {
+						dc.ApplyApproval(app)
+						cards = append(cards, dc)
+						found = true
+						break
+					}
+				}
+			}
+			if !found {
+				card := SessionCard{
+					ID:                 id,
+					Provider:           "session",
+					State:              sessionAwaitingApproval,
+					PendingInteraction: "approval requested",
+					PendingApproval:    app,
+					LastEventAt:        time.Now(),
+					Capabilities: map[string]SessionCapability{
+						"cancel": {Enabled: true},
+					},
+				}
+				cards = append(cards, card)
+			}
+
+			norm, err := normalizeSessionCards(cards)
+			if err != nil {
+				norm = cards
+			}
+			markup, err := renderSessionCardsHTML(norm, time.Now(), false)
+			if err != nil {
+				markup = ""
+			}
+
+			defaultSessionHub.mu.Lock()
+			defaultSessionHub.lastCards = cloneSessionCards(norm)
+			defaultSessionHub.lastHTML = markup
+			defaultSessionHub.mu.Unlock()
+
+			updatePayload, err := json.Marshal(map[string]any{
+				"sessions": norm,
+				"html":     markup,
+			})
+			if err == nil {
+				defaultSessionHub.broadcastSession(id, "session_update", updatePayload)
+			}
 		} else {
-			var raw map[string]any
-			_ = json.Unmarshal(body, &raw)
-			eventType, _ := raw["type"].(string)
-			if strings.Contains(eventType, "approval") || strings.Contains(string(body), "approval") {
-				defaultSessionHub.broadcastSession(id, "approval_requested", body)
+			if _, hasSessions := raw["sessions"]; hasSessions {
+				defaultSessionHub.broadcastSession(id, "session_update", body)
+			} else if source != nil {
+				broadcastCards(source)
 			} else {
 				defaultSessionHub.broadcastSession(id, "session_update", body)
 			}
