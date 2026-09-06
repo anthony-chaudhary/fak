@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -245,6 +248,187 @@ func TestLeasePublishQueueCoalescesWithoutDroppingAWrite(t *testing.T) {
 	case <-q.idleC():
 	default:
 		t.Fatal("idleC on a drained queue did not answer immediately")
+	}
+}
+
+// TestLeaseCoordinatorDistinctIDTreeRace is the #11848 witness: two real HTTP clients racing
+// distinct lease IDs against one real-Git coordinator for the same exclusive tree produce
+// exactly one grant and one LEASE_HELD refusal explaining the tree collision, while distinct
+// IDs with disjoint trees both succeed, and current-ID renew semantics are preserved.
+func TestLeaseCoordinatorDistinctIDTreeRace(t *testing.T) {
+	useLeaseWriteTestRepo(t)
+
+	prev := leasePublish
+	leasePublish = func(ctx context.Context, s *leaseref.Store) {}
+	t.Cleanup(func() {
+		<-leasePublishes.idleC()
+		leasePublish = prev
+	})
+
+	srv, err := gateway.New(gateway.Config{ExposeProfile: "headless"})
+	if err != nil {
+		t.Fatalf("gateway.New: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	client := ts.Client()
+	acquire := func(req gateway.LeaseWriteRequest) (gateway.LeaseWriteResult, int, error) {
+		b, err := json.Marshal(req)
+		if err != nil {
+			return gateway.LeaseWriteResult{}, 0, err
+		}
+		resp, err := client.Post(ts.URL+"/v1/leases/acquire", "application/json", bytes.NewReader(b))
+		if err != nil {
+			return gateway.LeaseWriteResult{}, 0, err
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return gateway.LeaseWriteResult{}, resp.StatusCode, err
+		}
+		var res gateway.LeaseWriteResult
+		if err := json.Unmarshal(body, &res); err != nil {
+			return gateway.LeaseWriteResult{}, resp.StatusCode, fmt.Errorf("json.Unmarshal(%s): %w", string(body), err)
+		}
+		return res, resp.StatusCode, nil
+	}
+
+	type clientResult struct {
+		id     string
+		res    gateway.LeaseWriteResult
+		status int
+		err    error
+	}
+
+	// 1. Race two distinct IDs for the same exclusive tree (overlapping).
+	reqA := gateway.LeaseWriteRequest{
+		ID:         "lane-race-a",
+		Holder:     "worker-a",
+		TreeGlobs:  []string{"internal/kernel/**"},
+		TTLSeconds: 300,
+	}
+	reqB := gateway.LeaseWriteRequest{
+		ID:         "lane-race-b",
+		Holder:     "worker-b",
+		TreeGlobs:  []string{"internal/kernel/**"},
+		TTLSeconds: 300,
+	}
+
+	chOverlap := make(chan clientResult, 2)
+	startOverlap := make(chan struct{})
+	var wgOverlap sync.WaitGroup
+	wgOverlap.Add(2)
+
+	for _, req := range []gateway.LeaseWriteRequest{reqA, reqB} {
+		go func(r gateway.LeaseWriteRequest) {
+			defer wgOverlap.Done()
+			<-startOverlap
+			res, status, err := acquire(r)
+			chOverlap <- clientResult{id: r.ID, res: res, status: status, err: err}
+		}(req)
+	}
+
+	close(startOverlap)
+	wgOverlap.Wait()
+	close(chOverlap)
+
+	var granted, refused []clientResult
+	for r := range chOverlap {
+		if r.err != nil {
+			t.Fatalf("client error during overlapping race: %v", r.err)
+		}
+		if r.status != http.StatusOK {
+			t.Fatalf("client status = %d, want 200 (deny-as-value)", r.status)
+		}
+		if r.res.OK {
+			granted = append(granted, r)
+		} else {
+			refused = append(refused, r)
+		}
+	}
+
+	if len(granted) != 1 || len(refused) != 1 {
+		t.Fatalf("two distinct IDs racing for same tree produced %d grants and %d refusals, want exactly 1 grant and 1 refusal",
+			len(granted), len(refused))
+	}
+
+	winner := granted[0]
+	loser := refused[0]
+
+	if loser.res.Reason != leaseref.ReasonLeaseHeld {
+		t.Fatalf("refused reason = %q, want %q", loser.res.Reason, leaseref.ReasonLeaseHeld)
+	}
+	if !strings.Contains(loser.res.Detail, "tree overlap") {
+		t.Fatalf("refused detail = %q, want to mention tree overlap", loser.res.Detail)
+	}
+	if loser.res.Holder != winner.res.Holder {
+		t.Fatalf("refused holder = %q, want winner holder %q", loser.res.Holder, winner.res.Holder)
+	}
+
+	// 2. Race two distinct IDs with disjoint trees (disjoint from each other and the winner).
+	reqC := gateway.LeaseWriteRequest{
+		ID:         "lane-disjoint-c",
+		Holder:     "worker-c",
+		TreeGlobs:  []string{"docs/**"},
+		TTLSeconds: 300,
+	}
+	reqD := gateway.LeaseWriteRequest{
+		ID:         "lane-disjoint-d",
+		Holder:     "worker-d",
+		TreeGlobs:  []string{"cmd/fak/**"},
+		TTLSeconds: 300,
+	}
+
+	chDisjoint := make(chan clientResult, 2)
+	startDisjoint := make(chan struct{})
+	var wgDisjoint sync.WaitGroup
+	wgDisjoint.Add(2)
+
+	for _, req := range []gateway.LeaseWriteRequest{reqC, reqD} {
+		go func(r gateway.LeaseWriteRequest) {
+			defer wgDisjoint.Done()
+			<-startDisjoint
+			res, status, err := acquire(r)
+			chDisjoint <- clientResult{id: r.ID, res: res, status: status, err: err}
+		}(req)
+	}
+
+	close(startDisjoint)
+	wgDisjoint.Wait()
+	close(chDisjoint)
+
+	for r := range chDisjoint {
+		if r.err != nil {
+			t.Fatalf("disjoint client error: %v", r.err)
+		}
+		if r.status != http.StatusOK {
+			t.Fatalf("disjoint client status = %d, want 200", r.status)
+		}
+		if !r.res.OK {
+			t.Fatalf("disjoint acquire %s was refused: %+v", r.id, r.res)
+		}
+	}
+
+	// 3. Current-ID renew semantics: same ID and same holder re-acquires/renews successfully.
+	renewReq := gateway.LeaseWriteRequest{
+		ID:         winner.id,
+		Holder:     winner.res.Holder,
+		TreeGlobs:  []string{"internal/kernel/**"},
+		TTLSeconds: 300,
+	}
+	renewRes, status, err := acquire(renewReq)
+	if err != nil {
+		t.Fatalf("renew client error: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("renew status = %d, want 200", status)
+	}
+	if !renewRes.OK {
+		t.Fatalf("re-acquire with same ID and same holder was refused: %+v", renewRes)
+	}
+	if renewRes.Generation != winner.res.Generation {
+		t.Fatalf("renew generation = %d, want original generation %d", renewRes.Generation, winner.res.Generation)
 	}
 }
 

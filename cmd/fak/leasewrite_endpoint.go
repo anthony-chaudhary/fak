@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 )
@@ -62,6 +64,34 @@ func serveLeaseWrite(ctx context.Context, op string, req gateway.LeaseWriteReque
 
 	switch op {
 	case "acquire":
+		live, _, err := store.StrictLiveSnapshot(ctx, now)
+		if err != nil {
+			return gateway.LeaseWriteResult{
+				OK:     false,
+				Reason: leaseref.ReasonLeaseHeld,
+				Op:     op,
+				ID:     req.ID,
+				Detail: fmt.Sprintf("coordinator authority check failed: %v", err),
+			}, nil
+		}
+		for _, active := range live {
+			if active.ID == req.ID {
+				continue
+			}
+			if leaseTreesOverlap(req.TreeGlobs, active.TreeGlobs) {
+				return gateway.LeaseWriteResult{
+					OK:                false,
+					Reason:            leaseref.ReasonLeaseHeld,
+					Op:                op,
+					ID:                req.ID,
+					Generation:        req.Generation,
+					CurrentGeneration: active.Generation,
+					Holder:            active.Holder,
+					Detail:            fmt.Sprintf("tree overlap with live lease %s held by %q (generation %d)", active.ID, active.Holder, active.Generation),
+				}, nil
+			}
+		}
+
 		return settle(store.AcquireFenced(ctx, leaseref.Record{
 			ID:          req.ID,
 			TreeGlobs:   req.TreeGlobs,
@@ -231,4 +261,13 @@ func (q *leasePublishQueue) idleC() <-chan struct{} {
 		return drained
 	}
 	return q.idle
+}
+
+// leaseTreesOverlap reports whether two lease tree glob sets overlap geometrically.
+// If either set is empty, there is no spatial tree collision.
+func leaseTreesOverlap(a, b []string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	return dispatchorder.TreesOverlap(a, b)
 }
