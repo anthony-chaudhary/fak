@@ -74,6 +74,17 @@ type CapResidency struct {
 	// defaultMaxHeldCaps and pruneHeldLocked. 0 = the default cap; <0 = unbounded
 	// (the original behavior); >0 = a custom cap.
 	maxHeld int
+
+	unlockHook func() // for testing concurrent eviction interleavings
+}
+
+// SetEvictUnlockHookForTest installs a callback invoked while cr.mu is released
+// during EvictColdest, before the lock is re-acquired. For testing concurrent
+// interleavings only.
+func (cr *CapResidency) SetEvictUnlockHookForTest(hook func()) {
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
+	cr.unlockHook = hook
 }
 
 // NewCapResidency builds a tracker over the shared ctxmmu gate.
@@ -224,7 +235,9 @@ func (cr *CapResidency) EvictColdest(ctx context.Context) (evicted CapKey, radiu
 	radius = blastOf(victim)
 	key := victim.key
 	body := victim.tokens
+	victimLastUse := victim.lastUse
 	mmu := cr.mmu
+	hook := cr.unlockHook
 	cr.mu.Unlock()
 
 	// WITNESS the eviction through the shared ctxmmu gate (outside the tracker
@@ -242,12 +255,19 @@ func (cr *CapResidency) EvictColdest(ctx context.Context) (evicted CapKey, radiu
 		}
 	}
 
+	if hook != nil {
+		hook()
+	}
+
 	cr.mu.Lock()
 	defer cr.mu.Unlock()
-	// Re-read under the lock: a concurrent Fault may have re-paged it in.
+	// Re-read under the lock: a concurrent Fault may have re-admitted it,
+	// advanced its lastUse, or transitioned its state away from evictable.
+	// If the capability was re-faulted, pinned, or altered while the lock was
+	// released, abort the eviction to preserve the live resident capability.
 	st, still := cr.caps[key]
-	if !still {
-		return key, radius, true
+	if !still || st.lastUse > victimLastUse || st.state != StateEvictable {
+		return CapKey{}, BlastRadius{}, false
 	}
 	st.pageID = pageID
 	st.tokens = 0 // body no longer resident.

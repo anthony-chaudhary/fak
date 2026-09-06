@@ -256,3 +256,63 @@ func TestEvictedTombstonesAreBounded(t *testing.T) {
 		t.Errorf("most-recent eviction %+v should still be a retained HELD tombstone", last)
 	}
 }
+
+// TestEvictColdestConcurrentFaultPreservesResident verifies that when a concurrent
+// Fault re-admits a victim capability while EvictColdest has released the lock,
+// EvictColdest aborts the eviction and preserves the freshly faulted capability in
+// StateResident with its tokens intact instead of clobbering it to StateHeld with 0 tokens.
+func TestEvictColdestConcurrentFaultPreservesResident(t *testing.T) {
+	ctx := context.Background()
+	mmu := ctxmmu.New()
+	cr := ctxresidency.NewCapResidency(mmu)
+
+	k := skillKey("concurrent-victim", "v1")
+	child := skillKey("child", "v1")
+	initialBody := []byte("initial evictable body")
+	refaultBody := []byte("freshly refaulted resident body with live dependent")
+
+	// Initially faulted with no dependents -> StateEvictable.
+	cr.Fault(k, "sha256:initial", initialBody, nil)
+
+	// Simulate concurrent Fault(key) between unlock and relock of EvictColdest.
+	// The re-fault admits the capability with a dependent, advancing lastUse
+	// and transitioning its state to StateResident.
+	cr.SetEvictUnlockHookForTest(func() {
+		cr.Fault(k, "sha256:refault", refaultBody, []ctxresidency.CapKey{child})
+	})
+
+	evicted, radius, ok := cr.EvictColdest(ctx)
+	if ok {
+		t.Fatalf("EvictColdest returned ok=true (evicted=%+v, radius=%+v), want ok=false due to concurrent re-fault abort", evicted, radius)
+	}
+
+	snap := cr.Snapshot()
+	if snap.Resident != 1 || snap.Held != 0 || snap.Evictable != 0 {
+		t.Fatalf("snapshot counts = resident %d, held %d, evictable %d; want 1/0/0", snap.Resident, snap.Held, snap.Evictable)
+	}
+
+	var found bool
+	for _, row := range snap.Caps {
+		if row.Key == k {
+			found = true
+			if row.State != ctxresidency.StateResident {
+				t.Errorf("capability state = %v, want StateResident", row.State)
+			}
+			if row.EvictBlastRadius.Tokens != len(refaultBody) {
+				t.Errorf("token count = %d, want %d", row.EvictBlastRadius.Tokens, len(refaultBody))
+			}
+			if row.PageID != "" {
+				t.Errorf("pageID = %q, want empty (should not be marked held)", row.PageID)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("capability not found in snapshot")
+	}
+
+	// Verify that MeasureBlastRadius reports the full resident token count and dependent.
+	measured := cr.MeasureBlastRadius(k)
+	if measured.Tokens != len(refaultBody) || measured.DependentEntries != 1 {
+		t.Errorf("measured blast radius = %+v, want Tokens=%d, DependentEntries=1", measured, len(refaultBody))
+	}
+}
