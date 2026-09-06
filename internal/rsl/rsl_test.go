@@ -207,12 +207,15 @@ func TestRecoverHeadAndReadRows_TornLine(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("want 1 well-formed row, got %d", len(rows))
 	}
-	seq, hash, err := recoverHead(path)
+	seq, hash, validOffset, err := recoverHead(path)
 	if err != nil {
 		t.Fatalf("recoverHead with torn line should not error, got %v", err)
 	}
 	if seq != 1 || hash != "h1" {
 		t.Fatalf("recoverHead: want seq=1 hash=h1, got seq=%d hash=%q", seq, hash)
+	}
+	if want := int64(len("{\"seq\":1,\"ref\":\"refs/heads/main\",\"old_sha\":\"A\",\"new_sha\":\"B\",\"hash\":\"h1\"}\n")); validOffset != want {
+		t.Fatalf("recoverHead: want validOffset=%d, got %d", want, validOffset)
 	}
 }
 
@@ -235,7 +238,7 @@ func TestReadRows_CorruptedMiddleLineFails(t *testing.T) {
 	if !strings.Contains(err.Error(), "corrupted") {
 		t.Fatalf("ReadRows error must indicate corruption, got %v", err)
 	}
-	if _, _, err := recoverHead(path); err == nil {
+	if _, _, _, err := recoverHead(path); err == nil {
 		t.Fatalf("recoverHead must fail on non-terminal corrupted line, but returned err=nil")
 	} else if !strings.Contains(err.Error(), "corrupted") {
 		t.Fatalf("recoverHead error must indicate corruption, got %v", err)
@@ -245,6 +248,142 @@ func TestReadRows_CorruptedMiddleLineFails(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "corrupted") {
 		t.Fatalf("VerifyFile error must indicate corruption, got %v", err)
 	}
+}
+
+func TestAppend_TornTailTruncatedOnRestart(t *testing.T) {
+	t.Run("TornFinalLineWithoutNewline", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "torn_no_nl.jsonl")
+		r1, err := Append(path, Row{Ref: "refs/heads/main", OldSHA: "A", NewSHA: "B"})
+		if err != nil {
+			t.Fatalf("Append row 1: %v", err)
+		}
+		if r1.Seq != 1 {
+			t.Fatalf("want seq 1, got %d", r1.Seq)
+		}
+
+		// Simulate crash mid-write producing unparseable bytes without a trailing newline.
+		tornTail := []byte(`{"seq":2,"ref":"refs/heads/main",`)
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			t.Fatalf("open for torn tail: %v", err)
+		}
+		if _, err := f.Write(tornTail); err != nil {
+			f.Close()
+			t.Fatalf("write torn tail: %v", err)
+		}
+		f.Close()
+
+		// Calling Append should truncate the torn tail and append row 2 cleanly.
+		r2, err := Append(path, Row{Ref: "refs/heads/main", OldSHA: "B", NewSHA: "C"})
+		if err != nil {
+			t.Fatalf("Append row 2 after torn tail: %v", err)
+		}
+		if r2.Seq != 2 {
+			t.Fatalf("want seq 2, got %d", r2.Seq)
+		}
+		if r2.PrevHash != r1.Hash {
+			t.Fatalf("want prev_hash %q, got %q", r1.Hash, r2.PrevHash)
+		}
+
+		// VerifyFile must succeed without corruption errors.
+		n, err := VerifyFile(path)
+		if err != nil {
+			t.Fatalf("VerifyFile after restart append: %v", err)
+		}
+		if n != 2 {
+			t.Fatalf("want 2 verified rows, got %d", n)
+		}
+
+		// ReadRows must succeed without corruption errors.
+		rows, err := ReadRows(path)
+		if err != nil {
+			t.Fatalf("ReadRows after restart append: %v", err)
+		}
+		if len(rows) != 2 {
+			t.Fatalf("want 2 rows, got %d", len(rows))
+		}
+		if rows[0].Seq != 1 || rows[1].Seq != 2 {
+			t.Fatalf("unexpected sequence numbers: %v, %v", rows[0].Seq, rows[1].Seq)
+		}
+	})
+
+	t.Run("TornFinalLineWithNewline", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "torn_with_nl.jsonl")
+		r1, err := Append(path, Row{Ref: "refs/heads/main", OldSHA: "A", NewSHA: "B"})
+		if err != nil {
+			t.Fatalf("Append row 1: %v", err)
+		}
+
+		// Simulate crash leaving unparseable JSON followed by a newline.
+		tornTail := []byte("{\"seq\":2,\"ref\":\"refs/heads/main\",corrupted_json\n")
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			t.Fatalf("open for torn tail: %v", err)
+		}
+		if _, err := f.Write(tornTail); err != nil {
+			f.Close()
+			t.Fatalf("write torn tail: %v", err)
+		}
+		f.Close()
+
+		// Calling Append should truncate the torn tail and append row 2 cleanly.
+		r2, err := Append(path, Row{Ref: "refs/heads/main", OldSHA: "B", NewSHA: "C"})
+		if err != nil {
+			t.Fatalf("Append row 2 after torn tail: %v", err)
+		}
+		if r2.Seq != 2 {
+			t.Fatalf("want seq 2, got %d", r2.Seq)
+		}
+		if r2.PrevHash != r1.Hash {
+			t.Fatalf("want prev_hash %q, got %q", r1.Hash, r2.PrevHash)
+		}
+
+		// VerifyFile and ReadRows must succeed without corruption errors.
+		n, err := VerifyFile(path)
+		if err != nil {
+			t.Fatalf("VerifyFile: %v", err)
+		}
+		if n != 2 {
+			t.Fatalf("want 2 verified rows, got %d", n)
+		}
+		rows, err := ReadRows(path)
+		if err != nil {
+			t.Fatalf("ReadRows: %v", err)
+		}
+		if len(rows) != 2 {
+			t.Fatalf("want 2 rows, got %d", len(rows))
+		}
+	})
+
+	t.Run("TornTailAtGenesis", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "torn_genesis.jsonl")
+		if err := os.WriteFile(path, []byte(`{"seq":1,"ref":"broken`), 0o644); err != nil {
+			t.Fatalf("write torn genesis file: %v", err)
+		}
+
+		r1, err := Append(path, Row{Ref: "refs/heads/main", OldSHA: "A", NewSHA: "B"})
+		if err != nil {
+			t.Fatalf("Append row 1 on torn genesis: %v", err)
+		}
+		if r1.Seq != 1 {
+			t.Fatalf("want seq 1, got %d", r1.Seq)
+		}
+
+		n, err := VerifyFile(path)
+		if err != nil {
+			t.Fatalf("VerifyFile: %v", err)
+		}
+		if n != 1 {
+			t.Fatalf("want 1 verified row, got %d", n)
+		}
+		rows, err := ReadRows(path)
+		if err != nil {
+			t.Fatalf("ReadRows: %v", err)
+		}
+		if len(rows) != 1 {
+			t.Fatalf("want 1 row, got %d", len(rows))
+		}
+	})
 }
 
 func makeLinearChain(n int) []Row {
@@ -378,7 +517,7 @@ func BenchmarkRecoverHead(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				seq, hash, err := recoverHead(path)
+				seq, hash, _, err := recoverHead(path)
 				if err != nil || seq != uint64(size) || hash == "" {
 					b.Fatalf("recoverHead failed: seq=%d err=%v", seq, err)
 				}

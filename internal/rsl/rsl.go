@@ -53,7 +53,7 @@ func AppendSigned(path string, row Row, s Signer) (Row, error) {
 }
 
 func appendRow(path string, row Row, s Signer) (Row, error) {
-	seq, last, err := recoverHead(path)
+	seq, last, validOffset, err := recoverHead(path)
 	if err != nil {
 		return Row{}, err
 	}
@@ -75,60 +75,95 @@ func appendRow(path string, row Row, s Signer) (Row, error) {
 			return Row{}, fmt.Errorf("rsl: create dir %s: %w", dir, err)
 		}
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return Row{}, fmt.Errorf("rsl: open %s: %w", path, err)
 	}
 	defer f.Close()
+	if err := f.Truncate(validOffset); err != nil {
+		return Row{}, fmt.Errorf("rsl: truncate %s: %w", path, err)
+	}
+	if _, err := f.Seek(validOffset, io.SeekStart); err != nil {
+		return Row{}, fmt.Errorf("rsl: seek %s: %w", path, err)
+	}
 	b, err := json.Marshal(row)
 	if err != nil {
 		return Row{}, err
 	}
-	if _, err := f.Write(append(b, '\n')); err != nil {
+	var toWrite []byte
+	if validOffset > 0 {
+		lastByte := make([]byte, 1)
+		if _, rerr := f.ReadAt(lastByte, validOffset-1); rerr == nil && lastByte[0] != '\n' {
+			toWrite = append(toWrite, '\n')
+		}
+	}
+	toWrite = append(toWrite, b...)
+	toWrite = append(toWrite, '\n')
+	if _, err := f.Write(toWrite); err != nil {
 		return Row{}, fmt.Errorf("rsl: append %s: %w", path, err)
 	}
 	return row, nil
 }
 
-// recoverHead reads the last committed sequence number and hash from path.
-func recoverHead(path string) (seq uint64, lastHash string, err error) {
+// recoverHead reads the last committed sequence number, hash, and valid byte offset from path.
+func recoverHead(path string) (seq uint64, lastHash string, validOffset int64, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return 0, "", nil
+			return 0, "", 0, nil
 		}
-		return 0, "", fmt.Errorf("rsl: stat %s: %w", path, err)
+		return 0, "", 0, fmt.Errorf("rsl: stat %s: %w", path, err)
 	}
 	defer f.Close()
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	br := bufio.NewReaderSize(f, 64*1024)
 	lineNum := 0
 	var (
-		tornErr  error
-		tornLine int
+		tornErr       error
+		tornLine      int
+		currentOffset int64
 	)
-	for sc.Scan() {
+	for {
+		chunk, rerr := br.ReadBytes('\n')
+		if len(chunk) == 0 {
+			if rerr == nil || rerr == io.EOF {
+				break
+			}
+			return 0, "", 0, fmt.Errorf("rsl: scan %s: %w", path, rerr)
+		}
+		if rerr != nil && rerr != io.EOF {
+			return 0, "", 0, fmt.Errorf("rsl: scan %s: %w", path, rerr)
+		}
 		lineNum++
-		line := bytes.TrimSpace(sc.Bytes())
+		line := bytes.TrimSpace(chunk)
 		if len(line) == 0 {
+			currentOffset += int64(len(chunk))
+			if rerr == io.EOF {
+				break
+			}
 			continue
 		}
 		if tornErr != nil {
-			return 0, "", fmt.Errorf("rsl: recover %s: corrupted row at line %d: %w", path, tornLine, tornErr)
+			return 0, "", 0, fmt.Errorf("rsl: recover %s: corrupted row at line %d: %w", path, tornLine, tornErr)
 		}
 		var r Row
 		if err := json.Unmarshal(line, &r); err != nil {
 			tornErr = err
 			tornLine = lineNum
+			currentOffset += int64(len(chunk))
+			if rerr == io.EOF {
+				break
+			}
 			continue
 		}
 		seq = r.Seq
 		lastHash = r.Hash
+		currentOffset += int64(len(chunk))
+		validOffset = currentOffset
+		if rerr == io.EOF {
+			break
+		}
 	}
-	if err := sc.Err(); err != nil {
-		return 0, "", fmt.Errorf("rsl: scan %s: %w", path, err)
-	}
-	return seq, lastHash, nil
+	return seq, lastHash, validOffset, nil
 }
 
 // ReadRows reads all committed rows from an RSL file in order.
