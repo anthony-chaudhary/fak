@@ -7,7 +7,7 @@ import (
 )
 
 func TestUMAStridedCopyNumericalParity(t *testing.T) {
-	guard := NewUMAStridedCopyGuard("gfx1151")
+	guard := NewUMAStridedCopier("gfx1151")
 	rng := rand.New(rand.NewSource(1337))
 
 	const iterations = 10000
@@ -46,7 +46,7 @@ func TestUMAStridedCopyNumericalParity(t *testing.T) {
 }
 
 func TestUMAStridedCopyZeroCopyIdentity(t *testing.T) {
-	guard := NewUMAStridedCopyGuard("gfx1151")
+	guard := NewUMAStridedCopier("gfx1151")
 	data := make([]byte, 4096)
 	rand.New(rand.NewSource(42)).Read(data)
 
@@ -61,7 +61,7 @@ func TestUMAStridedCopyZeroCopyIdentity(t *testing.T) {
 }
 
 func BenchmarkUMAIdentityFastPath(b *testing.B) {
-	guard := NewUMAStridedCopyGuard("gfx1151")
+	guard := NewUMAStridedCopier("gfx1151")
 	data := make([]byte, 4096)
 
 	b.ReportAllocs()
@@ -72,7 +72,7 @@ func BenchmarkUMAIdentityFastPath(b *testing.B) {
 }
 
 func BenchmarkUMAContiguousFastPath(b *testing.B) {
-	guard := NewUMAStridedCopyGuard("gfx1151")
+	guard := NewUMAStridedCopier("gfx1151")
 	src := make([]byte, 4096)
 	dst := make([]byte, 4096)
 
@@ -86,7 +86,7 @@ func BenchmarkUMAContiguousFastPath(b *testing.B) {
 func TestUMAStridedCopyAutoregressiveGather(t *testing.T) {
 	// Simulate 16-step autoregressive gather of 2D KV tiles (DeepSeek V4 / Qwen sparse attention style)
 	// Single-call 2D strided gather across all 16 steps for head 3.
-	guard := NewUMAStridedCopyGuard("gfx1151")
+	guard := NewUMAStridedCopier("gfx1151")
 	const steps = 16
 	const headDim = 128
 	const heads = 8
@@ -125,7 +125,7 @@ func TestUMAStridedCopyAutoregressiveGather(t *testing.T) {
 }
 
 func TestUMAStridedCopyErrors(t *testing.T) {
-	guard := NewUMAStridedCopyGuard("gfx1151")
+	guard := NewUMAStridedCopier("gfx1151")
 	buf := make([]byte, 100)
 
 	// Non-positive dimensions

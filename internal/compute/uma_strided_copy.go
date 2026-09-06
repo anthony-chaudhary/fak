@@ -16,24 +16,24 @@ var (
 	ErrBufferOverflow = errors.New("compute: buffer overflow for strided copy")
 )
 
-// UMAStridedCopyGuard guards strided 2D tensor copies on unified memory architectures (UMA)
+// UMAStridedCopier executes safe strided 2D tensor copies on unified memory architectures (UMA)
 // to prevent silent SDMA pitch corruption on AMD APUs (such as Strix Halo gfx1151 / gfx1150).
-type UMAStridedCopyGuard struct {
+type UMAStridedCopier struct {
 	TargetArch string
 	// Telemetry
 	BypassedSDMACount     uint64
 	IdentityZeroCopyCount uint64
 }
 
-// NewUMAStridedCopyGuard creates a guard configured for a target GPU/APU architecture.
-func NewUMAStridedCopyGuard(targetArch string) *UMAStridedCopyGuard {
-	return &UMAStridedCopyGuard{
+// NewUMAStridedCopier creates a copier configured for a target GPU/APU architecture.
+func NewUMAStridedCopier(targetArch string) *UMAStridedCopier {
+	return &UMAStridedCopier{
 		TargetArch: strings.ToLower(strings.TrimSpace(targetArch)),
 	}
 }
 
 // IsAPU reports whether the architecture is an AMD integrated APU target subject to SDMA pitch defects.
-func (g *UMAStridedCopyGuard) IsAPU() bool {
+func (g *UMAStridedCopier) IsAPU() bool {
 	arch := g.TargetArch
 	return strings.Contains(arch, "gfx1151") ||
 		strings.Contains(arch, "gfx1150") ||
@@ -51,7 +51,7 @@ func (g *UMAStridedCopyGuard) IsAPU() bool {
 //   - srcPitch: byte distance between consecutive rows in src
 //   - width: byte width of each row to copy
 //   - height: number of rows to copy
-func (g *UMAStridedCopyGuard) Copy2D(dst []byte, dstPitch int, src []byte, srcPitch int, width, height int) error {
+func (g *UMAStridedCopier) Copy2D(dst []byte, dstPitch int, src []byte, srcPitch int, width, height int) error {
 	if width <= 0 || height <= 0 || dstPitch <= 0 || srcPitch <= 0 {
 		return ErrInvalidDimensions
 	}
