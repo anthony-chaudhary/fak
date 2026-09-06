@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/commitintent"
+	"github.com/anthony-chaudhary/fak/internal/commitrollup"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
@@ -1426,6 +1427,14 @@ func TestCommitSignoffFlag(t *testing.T) {
 		t.Fatalf("want exit 0 for commit --signoff --preview, got %d (stderr=%q)", code, errb.String())
 	}
 
+	// 2c. fak commit -s via runCommitCommand
+	out.Reset()
+	errb.Reset()
+	code = runCommitCommand(&out, &errb, []string{"-s", "--preview", "-m", "feat(commit): test runCommitCommand -s (fak cmd)", "--", "cmd/fak/commit.go"})
+	if code != 0 {
+		t.Fatalf("want exit 0 for runCommitCommand -s --preview, got %d (stderr=%q)", code, errb.String())
+	}
+
 	// 3. flag parsing validation
 	fs := flag.NewFlagSet("commit", flag.ContinueOnError)
 	noSignoff := fs.Bool("no-signoff", false, "")
@@ -1474,5 +1483,22 @@ func TestRenderCommitResult_prestagedPathOverlapRemedy(t *testing.T) {
 	renderCommitResult(&out, resDetail)
 	if !strings.Contains(out.String(), "remedy: unstage pre-existing index changes via `git restore --staged <paths>`") {
 		t.Fatalf("expected prestaged overlap remedy in output for Detail containing PRESTAGED_PATH_OVERLAP, got:\n%s", out.String())
+	}
+
+	out.Reset()
+	drainRes := commitDrainResult{
+		Plan: commitrollup.Plan{
+			Refusals: []commitrollup.Refusal{
+				{
+					IntentID: "intent-1",
+					Reason:   safecommit.ReasonPreStagedPathOverlap,
+					Detail:   "staged changes exist",
+				},
+			},
+		},
+	}
+	renderCommitDrainResult(&out, drainRes)
+	if !strings.Contains(out.String(), "remedy: unstage pre-existing index changes via `git restore --staged <paths>`") {
+		t.Fatalf("expected prestaged overlap remedy in drain output, got:\n%s", out.String())
 	}
 }

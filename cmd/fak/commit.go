@@ -771,7 +771,7 @@ func renderCommitDrainResult(stdout io.Writer, res commitDrainResult) {
 			fmt.Fprintf(stdout, " (%s)", refusal.Detail)
 		}
 		fmt.Fprintln(stdout)
-		if refusal.Reason == safecommit.ReasonPreStagedPathOverlap || strings.Contains(refusal.Detail, safecommit.ReasonPreStagedPathOverlap) {
+		if refusal.Reason == safecommit.ReasonPreStagedPathOverlap || strings.Contains(string(refusal.Reason), safecommit.ReasonPreStagedPathOverlap) || strings.Contains(refusal.Detail, safecommit.ReasonPreStagedPathOverlap) {
 			fmt.Fprintln(stdout, "    remedy: unstage pre-existing index changes via `git restore --staged <paths>` (worktree edits stay), then retry `fak commit`")
 		}
 	}
