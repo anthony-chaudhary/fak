@@ -268,6 +268,28 @@ func TestGenerateStrixInstallerPackage_LANCommunications(t *testing.T) {
 			t.Errorf("clients/.mcp.json missing %q:\n%s", item, mcp)
 		}
 	}
+
+	// 7. Check install.sh does NOT leak plaintext gateway key
+	installSh := string(pkg.Files["install.sh"])
+	if strings.Contains(installSh, cfg.GatewayKey) {
+		t.Errorf("install.sh contains raw gateway key: %s", cfg.GatewayKey)
+	}
+	wantInstallRedaction := `Gateway Key:     [configured in /etc/fak/strix-halo.env]`
+	if !strings.Contains(installSh, wantInstallRedaction) {
+		t.Errorf("install.sh missing redacted gateway key note:\n%s", installSh)
+	}
+
+	// 8. Check clients/README.md does NOT leak plaintext gateway key and uses ${FAK_GATEWAY_KEY}
+	readme := string(pkg.Files["clients/README.md"])
+	if strings.Contains(readme, cfg.GatewayKey) {
+		t.Errorf("clients/README.md contains raw gateway key: %s", cfg.GatewayKey)
+	}
+	if !strings.Contains(readme, "${FAK_GATEWAY_KEY}") {
+		t.Errorf("clients/README.md missing ${FAK_GATEWAY_KEY} placeholder:\n%s", readme)
+	}
+	if !strings.Contains(readme, "clients/lan-agent.env") {
+		t.Errorf("clients/README.md missing reference to clients/lan-agent.env:\n%s", readme)
+	}
 }
 
 func TestGenerateStrixInstallerPackage_GotchaSettings(t *testing.T) {
@@ -369,10 +391,98 @@ func TestStrixPackage_WriteToDir(t *testing.T) {
 			if strings.HasSuffix(relPath, ".sh") && perm&0111 == 0 {
 				t.Errorf("script %q should be executable, got perm: %o", relPath, perm)
 			}
-			if (strings.HasSuffix(relPath, ".env") || strings.HasSuffix(relPath, ".ps1") || (strings.HasSuffix(relPath, ".json") && strings.Contains(relPath, "clients"))) && perm != 0600 {
+			if isSecretBearingFile(relPath) && perm != 0600 {
 				t.Errorf("secret file %q should have 0600 perm, got perm: %o", relPath, perm)
 			}
 		}
+	}
+
+	if runtime.GOOS != "windows" {
+		targetInfo, err := os.Stat(targetDir)
+		if err != nil {
+			t.Fatalf("failed to stat targetDir: %v", err)
+		}
+		if targetInfo.Mode().Perm() != 0700 {
+			t.Errorf("targetDir perm = %o, want 0700", targetInfo.Mode().Perm())
+		}
+
+		for _, sub := range []string{"conf", "clients"} {
+			subPath := filepath.Join(targetDir, sub)
+			subInfo, err := os.Stat(subPath)
+			if err != nil {
+				t.Fatalf("failed to stat subDir %q: %v", sub, err)
+			}
+			if subInfo.Mode().Perm() != 0700 {
+				t.Errorf("subDir %q perm = %o, want 0700", sub, subInfo.Mode().Perm())
+			}
+		}
+
+		// Test preexisting permissive file and directory get restricted to 0600 / 0700
+		preexistingDir := filepath.Join(tmpDir, "preexisting-pkg")
+		if err := os.MkdirAll(filepath.Join(preexistingDir, "conf"), 0777); err != nil {
+			t.Fatalf("failed to create preexisting dir: %v", err)
+		}
+		if err := os.Chmod(filepath.Join(preexistingDir, "conf"), 0777); err != nil {
+			t.Fatalf("failed to chmod preexisting dir: %v", err)
+		}
+		preexistingFile := filepath.Join(preexistingDir, "manifest.json")
+		if err := os.WriteFile(preexistingFile, []byte("{}"), 0666); err != nil {
+			t.Fatalf("failed to write preexisting file: %v", err)
+		}
+		if err := os.Chmod(preexistingFile, 0666); err != nil {
+			t.Fatalf("failed to chmod preexisting file: %v", err)
+		}
+
+		if err := pkg.WriteToDir(preexistingDir); err != nil {
+			t.Fatalf("WriteToDir on preexisting dir failed: %v", err)
+		}
+
+		confInfo, err := os.Stat(filepath.Join(preexistingDir, "conf"))
+		if err != nil {
+			t.Fatalf("failed to stat conf: %v", err)
+		}
+		if confInfo.Mode().Perm() != 0700 {
+			t.Errorf("preexisting conf dir perm = %o, want 0700", confInfo.Mode().Perm())
+		}
+
+		manifestInfo, err := os.Stat(preexistingFile)
+		if err != nil {
+			t.Fatalf("failed to stat manifest: %v", err)
+		}
+		if manifestInfo.Mode().Perm() != 0600 {
+			t.Errorf("preexisting manifest file perm = %o, want 0600", manifestInfo.Mode().Perm())
+		}
+	}
+}
+
+func TestStrixInstaller_CredentialRedaction(t *testing.T) {
+	cfg := DefaultStrixInstallerConfig()
+	cfg.GatewayKey = "testkey0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	pkg, err := GenerateStrixInstallerPackage(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// install.sh must not contain plaintext GatewayKey
+	installSh := string(pkg.Files["install.sh"])
+	if strings.Contains(installSh, cfg.GatewayKey) {
+		t.Errorf("install.sh leaks plaintext GatewayKey: %s", cfg.GatewayKey)
+	}
+	wantInstallNote := `Gateway Key:     [configured in /etc/fak/strix-halo.env]`
+	if !strings.Contains(installSh, wantInstallNote) {
+		t.Errorf("install.sh missing expected note %q:\n%s", wantInstallNote, installSh)
+	}
+
+	// clients/README.md must not contain plaintext GatewayKey
+	readme := string(pkg.Files["clients/README.md"])
+	if strings.Contains(readme, cfg.GatewayKey) {
+		t.Errorf("clients/README.md leaks plaintext GatewayKey: %s", cfg.GatewayKey)
+	}
+	if !strings.Contains(readme, "${FAK_GATEWAY_KEY}") {
+		t.Errorf("clients/README.md missing ${FAK_GATEWAY_KEY} placeholder:\n%s", readme)
+	}
+	if !strings.Contains(readme, "clients/lan-agent.env") {
+		t.Errorf("clients/README.md missing reference to clients/lan-agent.env:\n%s", readme)
 	}
 }
 

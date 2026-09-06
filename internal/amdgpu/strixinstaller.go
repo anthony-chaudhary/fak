@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -468,7 +469,7 @@ echo "==========================================================================
 echo "          fak AMD Strix Halo Node Installed Successfully!                       "
 echo "================================================================================"
 echo "Gateway URL:     http://%s:%d"
-echo "Gateway Key:     %s"
+echo "Gateway Key:     [configured in /etc/fak/strix-halo.env]"
 echo "Model Upstream:  http://127.0.0.1:%d/v1 (model: %s)"
 echo "Fleet Spine:     %s:%d"
 echo ""
@@ -486,7 +487,6 @@ echo "==========================================================================
 `,
 		cfg.LANIP,
 		cfg.Port,
-		cfg.GatewayKey,
 		cfg.ModelPort,
 		cfg.ModelID,
 		cfg.FleetSpineGroup,
@@ -749,12 +749,12 @@ Run:
 ### 3. Claude Code / Cursor / MCP Agents
 Copy `+"`clients/.mcp.json`"+` to your project root or configure your MCP client with:
 - **Server URL:** `+"`http://%s:%d/mcp`"+`
-- **Header:** `+"`Authorization: Bearer %s`"+`
+- **Header:** `+"`Authorization: Bearer ${FAK_GATEWAY_KEY}` (refer to `clients/lan-agent.env`)"+`
 
 ### 4. Health Check
 Verify network reachability from your client machine:
 `+"```bash"+`
-curl -H "Authorization: Bearer %s" http://%s:%d/healthz
+curl -H "Authorization: Bearer ${FAK_GATEWAY_KEY}" http://%s:%d/healthz
 `+"```"+`
 `,
 		cfg.LANIP, cfg.Port,
@@ -762,8 +762,7 @@ curl -H "Authorization: Bearer %s" http://%s:%d/healthz
 		cfg.ModelID,
 		cfg.FleetSpineGroup, cfg.FleetSpinePort,
 		cfg.LANIP, cfg.Port,
-		cfg.GatewayKey,
-		cfg.GatewayKey, cfg.LANIP, cfg.Port,
+		cfg.LANIP, cfg.Port,
 	)
 	files["clients/README.md"] = []byte(clientReadme)
 
@@ -799,6 +798,16 @@ curl -H "Authorization: Bearer %s" http://%s:%d/healthz
 	}, nil
 }
 
+// isSecretBearingFile reports whether relPath contains sensitive gateway credentials or secrets.
+func isSecretBearingFile(relPath string) bool {
+	clean := filepath.ToSlash(relPath)
+	return strings.HasSuffix(clean, ".env") ||
+		strings.HasSuffix(clean, ".ps1") ||
+		clean == "manifest.json" ||
+		strings.HasSuffix(clean, "/manifest.json") ||
+		(strings.HasSuffix(clean, ".json") && strings.Contains(clean, "clients"))
+}
+
 // WriteToDir writes all installer package files to the target directory on disk,
 // creating subdirectories and applying appropriate execution and read permissions.
 func (p *StrixPackage) WriteToDir(dir string) error {
@@ -808,23 +817,57 @@ func (p *StrixPackage) WriteToDir(dir string) error {
 	if dir == "" {
 		dir = "fak-strix-halo-pkg"
 	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
+
+	sensitiveDirs := make(map[string]bool)
+	sensitiveDirs["."] = true
+	for relPath := range p.Files {
+		if isSecretBearingFile(relPath) {
+			cleanRel := filepath.ToSlash(relPath)
+			for d := path.Dir(cleanRel); d != "." && d != "/"; d = path.Dir(d) {
+				sensitiveDirs[d] = true
+			}
+		}
+	}
+
+	dirPerm := os.FileMode(0755)
+	if sensitiveDirs["."] {
+		dirPerm = 0700
+	}
+	if err := os.MkdirAll(dir, dirPerm); err != nil {
 		return fmt.Errorf("amdgpu: failed to create output directory %q: %w", dir, err)
+	}
+	if err := os.Chmod(dir, dirPerm); err != nil {
+		return fmt.Errorf("amdgpu: failed to chmod output directory %q: %w", dir, err)
 	}
 
 	for relPath, content := range p.Files {
+		cleanRel := filepath.ToSlash(relPath)
+		parentRel := path.Dir(cleanRel)
 		fullPath := filepath.Join(dir, filepath.FromSlash(relPath))
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		parentDir := filepath.Dir(fullPath)
+
+		subDirPerm := os.FileMode(0755)
+		if sensitiveDirs[parentRel] {
+			subDirPerm = 0700
+		}
+		if err := os.MkdirAll(parentDir, subDirPerm); err != nil {
 			return fmt.Errorf("amdgpu: failed to create parent directory for %q: %w", relPath, err)
 		}
+		if err := os.Chmod(parentDir, subDirPerm); err != nil {
+			return fmt.Errorf("amdgpu: failed to chmod directory %q: %w", parentDir, err)
+		}
+
 		perm := os.FileMode(0644)
 		if strings.HasSuffix(relPath, ".sh") {
 			perm = 0755
-		} else if strings.HasSuffix(relPath, ".env") || strings.HasSuffix(relPath, ".ps1") || (strings.HasSuffix(relPath, ".json") && strings.Contains(relPath, "clients")) {
+		} else if isSecretBearingFile(relPath) {
 			perm = 0600
 		}
 		if err := os.WriteFile(fullPath, content, perm); err != nil {
 			return fmt.Errorf("amdgpu: failed to write file %q: %w", relPath, err)
+		}
+		if err := os.Chmod(fullPath, perm); err != nil {
+			return fmt.Errorf("amdgpu: failed to chmod file %q: %w", relPath, err)
 		}
 	}
 	return nil

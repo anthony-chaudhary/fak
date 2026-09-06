@@ -315,6 +315,19 @@ func TestEmpiricalReceipt_ValidationAndSerialization(t *testing.T) {
 			t.Error("expected error when Verified=false, got nil")
 		}
 	})
+
+	t.Run("physical execution without witness fails verify", func(t *testing.T) {
+		tampered := *receipt
+		tampered.Simulated = false
+		tampered.ExecutionWitness = ""
+		err := tampered.Verify()
+		if err == nil {
+			t.Error("expected error when Simulated=false without ExecutionWitness, got nil")
+		}
+		if !strings.Contains(err.Error(), "lacks execution witness") {
+			t.Errorf("expected error mentioning 'lacks execution witness', got: %v", err)
+		}
+	})
 }
 
 // TestFallbackBehavior_MockPlatform verifies automatic software probe activation
@@ -449,5 +462,105 @@ func TestRunRooflineProbeCLI(t *testing.T) {
 	code = RunRooflineProbeCLI(&stdout, &stderr, []string{"--unrecognized-flag"})
 	if code != 2 {
 		t.Errorf("expected exit code 2 for invalid flag, got %d", code)
+	}
+}
+
+// TestRooflineProbe_RunPhysicalProbe_Unwitnessed verifies that runPhysicalProbe fails closed
+// and returns ErrPhysicalExecutionUnwitnessed instead of relabeling analytical probe receipts.
+func TestRooflineProbe_RunPhysicalProbe_Unwitnessed(t *testing.T) {
+	cfg := DefaultProbeConfig()
+
+	// 1. Normal call fails closed with ErrPhysicalExecutionUnwitnessed
+	receipt, err := runPhysicalProbe(context.Background(), cfg)
+	if receipt != nil {
+		t.Errorf("expected nil receipt from runPhysicalProbe, got %+v", receipt)
+	}
+	if !errors.Is(err, ErrPhysicalExecutionUnwitnessed) {
+		t.Fatalf("expected ErrPhysicalExecutionUnwitnessed, got: %v", err)
+	}
+
+	// 2. Pre-cancelled context returns context error
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = runPhysicalProbe(ctx, cfg)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got: %v", err)
+	}
+}
+
+// TestRooflineProbe_Verify_PhysicalRequiresExecutionWitness verifies that receipts claiming physical device
+// execution (Simulated=false) must supply an ExecutionWitness to pass Verify().
+func TestRooflineProbe_Verify_PhysicalRequiresExecutionWitness(t *testing.T) {
+	cfg := DefaultProbeConfig()
+	cfg.ForceMock = true
+
+	receipt, err := RunRooflineProbe(cfg)
+	if err != nil {
+		t.Fatalf("RunRooflineProbe failed: %v", err)
+	}
+
+	// Claim physical execution without an execution witness
+	unwitnessed := *receipt
+	unwitnessed.Simulated = false
+	unwitnessed.ExecutionWitness = ""
+	if err := unwitnessed.Sign(nil); err != nil {
+		t.Fatalf("Sign failed: %v", err)
+	}
+
+	err = unwitnessed.Verify()
+	if err == nil {
+		t.Fatal("expected error when Simulated=false without ExecutionWitness, got nil")
+	}
+	if !strings.Contains(err.Error(), "lacks execution witness") {
+		t.Errorf("expected error mentioning 'lacks execution witness', got: %v", err)
+	}
+
+	// Supply a valid execution witness and re-sign -> should pass Verify()
+	witnessed := *receipt
+	witnessed.Simulated = false
+	witnessed.ExecutionWitness = "rocm:kfd:gfx1151:kernel_dispatch:0xdeadbeef"
+	if err := witnessed.Sign(nil); err != nil {
+		t.Fatalf("Sign failed: %v", err)
+	}
+	if err := witnessed.Verify(); err != nil {
+		t.Errorf("expected successful Verify() with ExecutionWitness, got: %v", err)
+	}
+}
+
+// TestRooflineProbe_PhysicalHostFallback verifies that when physical GFX1151 detection is active,
+// runPhysicalProbe returns ErrPhysicalExecutionUnwitnessed, falling back to mock software probe
+// if MockFallback is enabled, or returning ErrPhysicalExecutionUnwitnessed if MockFallback is disabled.
+func TestRooflineProbe_PhysicalHostFallback(t *testing.T) {
+	origFn := isPhysicalGFX1151Fn
+	defer func() { isPhysicalGFX1151Fn = origFn }()
+	isPhysicalGFX1151Fn = func() bool { return true }
+
+	// 1. With MockFallback=true (default): falls through to software calibration with Simulated=true
+	cfgFallback := DefaultProbeConfig()
+	cfgFallback.MockFallback = true
+	cfgFallback.ForceMock = false
+
+	receipt, err := RunRooflineProbe(cfgFallback)
+	if err != nil {
+		t.Fatalf("RunRooflineProbe with MockFallback=true failed: %v", err)
+	}
+	if !receipt.Simulated {
+		t.Errorf("expected fallback receipt to have Simulated=true, got %v", receipt.Simulated)
+	}
+	if err := receipt.Verify(); err != nil {
+		t.Errorf("fallback receipt failed Verify(): %v", err)
+	}
+
+	// 2. With MockFallback=false: returns ErrPhysicalExecutionUnwitnessed
+	cfgStrict := DefaultProbeConfig()
+	cfgStrict.MockFallback = false
+	cfgStrict.ForceMock = false
+
+	_, err = RunRooflineProbe(cfgStrict)
+	if err == nil {
+		t.Fatal("expected error when MockFallback=false on physical host with unwitnessed probe, got nil")
+	}
+	if !errors.Is(err, ErrPhysicalExecutionUnwitnessed) {
+		t.Fatalf("expected ErrPhysicalExecutionUnwitnessed, got: %v", err)
 	}
 }
