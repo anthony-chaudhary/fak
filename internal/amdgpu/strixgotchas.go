@@ -123,32 +123,32 @@ func (r *GotchaAuditReport) ToJSON() ([]byte, error) {
 
 // GotchaProbeEnvironment supplies environmental facts to the gotcha auditor.
 type GotchaProbeEnvironment struct {
-	GOOS                      string            `json:"goos"`
-	KernelCmdline             string            `json:"kernel_cmdline"`
-	ProcCPUInfo               string            `json:"proc_cpuinfo"`
-	TotalRAMBytes             uint64            `json:"total_ram_bytes"`
-	GPUName                   string            `json:"gpu_name"`
-	EnvVars                   map[string]string `json:"env_vars"`
-	SysfsLockupVal            string            `json:"sysfs_lockup_val"`
-	SysfsTTMPagesVal          uint64            `json:"sysfs_ttm_pages_val"`
-	SysfsVRAMTotalBytes       uint64            `json:"sysfs_vram_total_bytes"`
-	MesaVersion               string            `json:"mesa_version"`
-	KernelVersion             string            `json:"kernel_version"`
-	IsStrixHalo               bool              `json:"is_strix_halo"`
-	IsContainer               bool              `json:"is_container"`
-	IsWSL2                    bool              `json:"is_wsl2"`
-	DistroID                  string            `json:"distro_id"`
-	HasOllamaProcess          bool              `json:"has_ollama_process"`
-	HasOllamaInstalled        bool              `json:"has_ollama_installed"`
-	VulkanEngineType          string            `json:"vulkan_engine_type"`
-	SpecDraftUbatchConfigured bool              `json:"spec_draft_ubatch_configured"`
-	BatchFlagsConfigured      bool              `json:"batch_flags_configured"`
-	NPUOffloadEnabled         bool              `json:"npu_offload_enabled"`
-	DirtyRingBufferActive     bool              `json:"dirty_ring_buffer_active"`
-	DPMGovernorConfigured     bool              `json:"dpm_governor_configured"`
-	USB4Tuned                 bool              `json:"usb4_tuned"`
-	F16KVContiguizationEnabled bool             `json:"f16_kv_contiguization_enabled"`
-	FS                        FileSystem        `json:"-"`
+	GOOS                       string            `json:"goos"`
+	KernelCmdline              string            `json:"kernel_cmdline"`
+	ProcCPUInfo                string            `json:"proc_cpuinfo"`
+	TotalRAMBytes              uint64            `json:"total_ram_bytes"`
+	GPUName                    string            `json:"gpu_name"`
+	EnvVars                    map[string]string `json:"env_vars"`
+	SysfsLockupVal             string            `json:"sysfs_lockup_val"`
+	SysfsTTMPagesVal           uint64            `json:"sysfs_ttm_pages_val"`
+	SysfsVRAMTotalBytes        uint64            `json:"sysfs_vram_total_bytes"`
+	MesaVersion                string            `json:"mesa_version"`
+	KernelVersion              string            `json:"kernel_version"`
+	IsStrixHalo                bool              `json:"is_strix_halo"`
+	IsContainer                bool              `json:"is_container"`
+	IsWSL2                     bool              `json:"is_wsl2"`
+	DistroID                   string            `json:"distro_id"`
+	HasOllamaProcess           bool              `json:"has_ollama_process"`
+	HasOllamaInstalled         bool              `json:"has_ollama_installed"`
+	VulkanEngineType           string            `json:"vulkan_engine_type"`
+	SpecDraftUbatchConfigured  bool              `json:"spec_draft_ubatch_configured"`
+	BatchFlagsConfigured       bool              `json:"batch_flags_configured"`
+	NPUOffloadEnabled          bool              `json:"npu_offload_enabled"`
+	DirtyRingBufferActive      bool              `json:"dirty_ring_buffer_active"`
+	DPMGovernorConfigured      bool              `json:"dpm_governor_configured"`
+	USB4Tuned                  bool              `json:"usb4_tuned"`
+	F16KVContiguizationEnabled bool              `json:"f16_kv_contiguization_enabled"`
+	FS                         FileSystem        `json:"-"`
 }
 
 // Top20Gotchas returns the authoritative list of the top 20 gotchas with technical specs.
