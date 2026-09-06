@@ -2,6 +2,7 @@ package harnessweb
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,9 +13,10 @@ import (
 )
 
 type fixtureSessionSource struct {
-	mu       sync.Mutex
-	cards    []SessionCard
-	controls []SessionControlRequest
+	mu        sync.Mutex
+	cards     []SessionCard
+	controls  []SessionControlRequest
+	approvals []SessionApprovalRequest
 }
 
 func (s *fixtureSessionSource) Sessions(context.Context) ([]SessionCard, error) {
@@ -22,11 +24,31 @@ func (s *fixtureSessionSource) Sessions(context.Context) ([]SessionCard, error) 
 	defer s.mu.Unlock()
 	return append([]SessionCard(nil), s.cards...), nil
 }
+
 func (s *fixtureSessionSource) Control(_ context.Context, request SessionControlRequest) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.controls = append(s.controls, request)
 	return nil
+}
+
+func (s *fixtureSessionSource) ResolveApproval(_ context.Context, request SessionApprovalRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.cards {
+		if s.cards[i].ID == request.SessionID {
+			s.approvals = append(s.approvals, request)
+			if request.Resolution == "accept" || request.Resolution == "approve" {
+				s.cards[i].State = sessionWorking
+			} else {
+				s.cards[i].State = sessionCancelled
+			}
+			s.cards[i].PendingInteraction = ""
+			s.cards[i].Approval = nil
+			return nil
+		}
+	}
+	return fmt.Errorf("session not found: %s", request.SessionID)
 }
 
 func allSessionFixtures(now time.Time) []SessionCard {

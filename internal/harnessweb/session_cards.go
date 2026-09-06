@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,6 +18,36 @@ import (
 type SessionSource interface {
 	Sessions(context.Context) ([]SessionCard, error)
 	Control(context.Context, SessionControlRequest) error
+}
+
+// SessionApprovalResolver is an optional extension for SessionSource implementations
+// that support resolving pending interactive approvals.
+type SessionApprovalResolver interface {
+	ResolveApproval(context.Context, SessionApprovalRequest) error
+}
+
+type SessionApprovalRequest struct {
+	SessionID  string `json:"session_id"`
+	Resolution string `json:"resolution"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+type SessionApprovalDetails struct {
+	ApprovalID string `json:"approval_id,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
+	Tool       string `json:"tool,omitempty"`
+	TargetPath string `json:"target_path,omitempty"`
+	RiskReason string `json:"risk_reason,omitempty"`
+}
+
+func (a *SessionApprovalDetails) EffectiveTool() string {
+	if a == nil {
+		return ""
+	}
+	if a.ToolName != "" {
+		return a.ToolName
+	}
+	return a.Tool
 }
 
 type SessionState string
@@ -54,6 +85,7 @@ type SessionCard struct {
 	Usage              *SessionUsage                `json:"usage,omitempty"`
 	HasInputLease      bool                         `json:"has_input_lease"`
 	Capabilities       map[string]SessionCapability `json:"capabilities"`
+	Approval           *SessionApprovalDetails      `json:"approval,omitempty"`
 }
 
 type SessionControlRequest struct {
@@ -62,6 +94,64 @@ type SessionControlRequest struct {
 }
 
 var sessionActions = []string{"open", "resume", "interrupt", "cancel", "archive"}
+
+type sessionBroadcaster struct {
+	mu      sync.RWMutex
+	clients map[chan []byte]struct{}
+}
+
+func newSessionBroadcaster() *sessionBroadcaster {
+	return &sessionBroadcaster{
+		clients: make(map[chan []byte]struct{}),
+	}
+}
+
+func (b *sessionBroadcaster) subscribe() (chan []byte, func()) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	ch := make(chan []byte, 16)
+	b.clients[ch] = struct{}{}
+	return ch, func() {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		delete(b.clients, ch)
+	}
+}
+
+func (b *sessionBroadcaster) broadcast(msg []byte) {
+	if b == nil {
+		return
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for ch := range b.clients {
+		select {
+		case ch <- msg:
+		default:
+		}
+	}
+}
+
+func (b *sessionBroadcaster) broadcastCards(source SessionSource) {
+	if b == nil || source == nil {
+		return
+	}
+	var c []SessionCard
+	if cards, err := source.Sessions(context.Background()); err == nil {
+		if norm, err := normalizeSessionCards(cards); err == nil {
+			c = norm
+		}
+	}
+	markup, err := renderSessionCardsHTML(c, time.Now(), false)
+	if err != nil {
+		return
+	}
+	data, err := json.Marshal(map[string]any{"sessions": c, "html": markup})
+	if err != nil {
+		return
+	}
+	b.broadcast([]byte(fmt.Sprintf("event: session_cards\ndata: %s\n\n", data)))
+}
 
 func (c SessionCard) validate() error {
 	if strings.TrimSpace(c.ID) == "" {
@@ -173,6 +263,29 @@ func renderSessionCardsHTML(cards []SessionCard, now time.Time, noColor bool) (s
 		if c.PendingInteraction != "" {
 			fmt.Fprintf(&b, `<p class="pending"><strong>Needs action:</strong> %s</p>`, html.EscapeString(c.PendingInteraction))
 		}
+		if c.Approval != nil {
+			tool := c.Approval.EffectiveTool()
+			b.WriteString(`<div class="session-approval"><dl class="approval-details">`)
+			if tool != "" {
+				fmt.Fprintf(&b, `<div><dt>Tool</dt><dd class="approval-tool">%s</dd></div>`, html.EscapeString(tool))
+			}
+			if c.Approval.TargetPath != "" {
+				fmt.Fprintf(&b, `<div><dt>Target path</dt><dd class="approval-target-path">%s</dd></div>`, html.EscapeString(c.Approval.TargetPath))
+			}
+			if c.Approval.RiskReason != "" {
+				fmt.Fprintf(&b, `<div><dt>Risk reason</dt><dd class="approval-risk-reason">%s</dd></div>`, html.EscapeString(c.Approval.RiskReason))
+			}
+			b.WriteString(`</dl>`)
+			fmt.Fprintf(&b, `<div class="approval-actions" role="group" aria-label="Approval resolution for session %s">`, html.EscapeString(c.ID))
+			fmt.Fprintf(&b, `<button type="button" class="button-accept" data-approval-action="accept" data-session-id="%s" aria-label="Accept approval for session %s">Accept</button>`, html.EscapeString(c.ID), html.EscapeString(c.ID))
+			fmt.Fprintf(&b, `<button type="button" class="button-decline" data-approval-action="decline" data-session-id="%s" aria-label="Decline approval for session %s">Decline</button>`, html.EscapeString(c.ID), html.EscapeString(c.ID))
+			b.WriteString(`</div></div>`)
+		} else if c.State == sessionAwaitingApproval {
+			fmt.Fprintf(&b, `<div class="session-approval"><div class="approval-actions" role="group" aria-label="Approval resolution for session %s">`, html.EscapeString(c.ID))
+			fmt.Fprintf(&b, `<button type="button" class="button-accept" data-approval-action="accept" data-session-id="%s" aria-label="Accept approval for session %s">Accept</button>`, html.EscapeString(c.ID), html.EscapeString(c.ID))
+			fmt.Fprintf(&b, `<button type="button" class="button-decline" data-approval-action="decline" data-session-id="%s" aria-label="Decline approval for session %s">Decline</button>`, html.EscapeString(c.ID), html.EscapeString(c.ID))
+			b.WriteString(`</div></div>`)
+		}
 		fmt.Fprintf(&b, `<div class="session-controls" role="group" aria-label="Controls for session %s">`, html.EscapeString(c.ID))
 		for _, action := range sessionActions {
 			capability := sessionAction(c, action)
@@ -188,7 +301,7 @@ func renderSessionCardsHTML(cards []SessionCard, now time.Time, noColor bool) (s
 	return b.String(), nil
 }
 
-func installSessionRoutes(mux *http.ServeMux, source SessionSource) {
+func installSessionRoutes(mux *http.ServeMux, source SessionSource, broadcaster *sessionBroadcaster) {
 	mux.HandleFunc("GET /api/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if source == nil {
 			writeSessionJSON(w, http.StatusOK, map[string]any{"sessions": []SessionCard{}, "html": `<p class="empty">Session authority is not connected.</p>`})
@@ -210,6 +323,12 @@ func installSessionRoutes(mux *http.ServeMux, source SessionSource) {
 			return
 		}
 		writeSessionJSON(w, http.StatusOK, map[string]any{"sessions": cards, "html": markup})
+	})
+	mux.HandleFunc("GET /api/sessions/events", func(w http.ResponseWriter, r *http.Request) {
+		handleSessionSSE(w, r, source, broadcaster)
+	})
+	mux.HandleFunc("GET /api/sessions/stream", func(w http.ResponseWriter, r *http.Request) {
+		handleSessionSSE(w, r, source, broadcaster)
 	})
 	mux.HandleFunc("POST /api/sessions/{id}/controls/{action}", func(w http.ResponseWriter, r *http.Request) {
 		if source == nil {
@@ -260,8 +379,60 @@ func installSessionRoutes(mux *http.ServeMux, source SessionSource) {
 			writeSessionJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
+		if broadcaster != nil {
+			broadcaster.broadcastCards(source)
+		}
 		writeSessionJSON(w, http.StatusAccepted, SessionControlRequest{SessionID: id, Action: action})
 	})
+}
+
+func handleSessionSSE(w http.ResponseWriter, r *http.Request, source SessionSource, broadcaster *sessionBroadcaster) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	var cards []SessionCard
+	if source != nil {
+		if c, err := source.Sessions(r.Context()); err == nil {
+			if norm, err := normalizeSessionCards(c); err == nil {
+				cards = norm
+			}
+		}
+	}
+	markup, _ := renderSessionCardsHTML(cards, time.Now(), r.URL.Query().Get("no_color") == "1")
+	initialData, _ := json.Marshal(map[string]any{
+		"sessions": cards,
+		"html":     markup,
+	})
+	fmt.Fprintf(w, "event: session_cards\ndata: %s\n\n", initialData)
+	flusher.Flush()
+
+	if broadcaster == nil {
+		<-r.Context().Done()
+		return
+	}
+
+	ch, unsubscribe := broadcaster.subscribe()
+	defer unsubscribe()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			_, _ = w.Write(msg)
+			flusher.Flush()
+		}
+	}
 }
 
 func writeSessionJSON(w http.ResponseWriter, status int, value any) {
