@@ -20,13 +20,19 @@ import (
 func cmdAgents(argv []string) { os.Exit(runAgents(os.Stdout, os.Stderr, argv)) }
 
 func runAgents(stdout, stderr io.Writer, argv []string) int {
-	if len(argv) > 0 && (argv[0] == "list" || argv[0] == "descriptors" || argv[0] == "declarative") {
-		return runAgentsList(stdout, stderr, argv[1:])
+	if len(argv) == 0 || (len(argv) > 0 && (argv[0] == "list" || argv[0] == "descriptors" || argv[0] == "declarative")) {
+		if len(argv) > 0 {
+			return runAgentsList(stdout, stderr, argv[1:])
+		}
+		return runAgentsList(stdout, stderr, argv)
 	}
 	for i, arg := range argv {
-		if arg == "--descriptors" || arg == "--declarative" {
+		if arg == "--descriptors" || arg == "--declarative" || arg == "--list" {
 			remaining := append(append([]string(nil), argv[:i]...), argv[i+1:]...)
 			return runAgentsList(stdout, stderr, remaining)
+		}
+		if arg == "--dir" {
+			return runAgentsList(stdout, stderr, argv)
 		}
 	}
 	fs := flag.NewFlagSet("agents", flag.ContinueOnError)
@@ -403,7 +409,7 @@ func runAgentsList(stdout, stderr io.Writer, argv []string) int {
 		*dir = fs.Arg(0)
 	}
 
-	descs, err := agent.FindWorkspaceAgentDescriptors(*dir)
+	descs, err := agent.DiscoverAgentDescriptors(*dir)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak agents list: %v\n", err)
 		return 1
