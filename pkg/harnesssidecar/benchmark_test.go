@@ -2,9 +2,12 @@ package harnesssidecar
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -145,6 +148,224 @@ func BenchmarkContractDigest(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		benchSinkDigest = ContractDigest(caps)
 	}
+}
+
+func BenchmarkServerUnary(b *testing.B) {
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	caps := []string{"stream", "tools"}
+	serverHello := Handshake{
+		Protocol:     ProtocolVersion,
+		Identity:     Identity{Name: "server", Version: "1.0", Digest: ContractDigest(caps)},
+		Capabilities: caps,
+		Limits:       Limits{MaxFrame: 64 * 1024, MaxInflight: 64, CancelGrace: time.Second},
+	}
+	clientHello := Handshake{
+		Protocol:     ProtocolVersion,
+		Identity:     Identity{Name: "client", Version: "1.0", Digest: ContractDigest(caps)},
+		Capabilities: caps,
+		Limits:       Limits{MaxFrame: 64 * 1024, MaxInflight: 64, CancelGrace: time.Second},
+	}
+
+	handler := HandlerFunc(func(_ context.Context, _ string, _ json.RawMessage, _ func(json.RawMessage) error) error {
+		return nil
+	})
+
+	server := NewServer(serverConn, serverConn, serverHello, clientHello, handler)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverDone := make(chan error, 1)
+	go func() {
+		serverDone <- server.Serve(ctx)
+	}()
+
+	clientCodec := NewCodec(clientConn, clientConn, 64*1024)
+	if err := clientCodec.Write(frame{Kind: "handshake", Handshake: &clientHello}); err != nil {
+		b.Fatal(err)
+	}
+	var ack frame
+	if err := clientCodec.Read(&ack); err != nil {
+		b.Fatal(err)
+	}
+
+	payload := json.RawMessage(`{"ping":true}`)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		req := frame{
+			Kind: "request",
+			Request: &Request{
+				ID:      strconv.Itoa(i),
+				Method:  "ping",
+				Payload: payload,
+			},
+		}
+		if err := clientCodec.Write(req); err != nil {
+			b.Fatal(err)
+		}
+		var resp frame
+		if err := clientCodec.Read(&resp); err != nil {
+			b.Fatal(err)
+		}
+		benchSinkFrame = resp
+	}
+	b.StopTimer()
+	clientConn.Close()
+	<-serverDone
+}
+
+func BenchmarkServerStreaming(b *testing.B) {
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	caps := []string{"stream", "tools"}
+	serverHello := Handshake{
+		Protocol:     ProtocolVersion,
+		Identity:     Identity{Name: "server", Version: "1.0", Digest: ContractDigest(caps)},
+		Capabilities: caps,
+		Limits:       Limits{MaxFrame: 64 * 1024, MaxInflight: 64, CancelGrace: time.Second},
+	}
+	clientHello := Handshake{
+		Protocol:     ProtocolVersion,
+		Identity:     Identity{Name: "client", Version: "1.0", Digest: ContractDigest(caps)},
+		Capabilities: caps,
+		Limits:       Limits{MaxFrame: 64 * 1024, MaxInflight: 64, CancelGrace: time.Second},
+	}
+
+	chunk := json.RawMessage(`{"chunk":1}`)
+	handler := HandlerFunc(func(_ context.Context, _ string, _ json.RawMessage, send func(json.RawMessage) error) error {
+		if err := send(chunk); err != nil {
+			return err
+		}
+		return send(chunk)
+	})
+
+	server := NewServer(serverConn, serverConn, serverHello, clientHello, handler)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverDone := make(chan error, 1)
+	go func() {
+		serverDone <- server.Serve(ctx)
+	}()
+
+	clientCodec := NewCodec(clientConn, clientConn, 64*1024)
+	if err := clientCodec.Write(frame{Kind: "handshake", Handshake: &clientHello}); err != nil {
+		b.Fatal(err)
+	}
+	var ack frame
+	if err := clientCodec.Read(&ack); err != nil {
+		b.Fatal(err)
+	}
+
+	payload := json.RawMessage(`{"stream":true}`)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		req := frame{
+			Kind: "request",
+			Request: &Request{
+				ID:      strconv.Itoa(i),
+				Method:  "stream",
+				Payload: payload,
+			},
+		}
+		if err := clientCodec.Write(req); err != nil {
+			b.Fatal(err)
+		}
+		for {
+			var resp frame
+			if err := clientCodec.Read(&resp); err != nil {
+				b.Fatal(err)
+			}
+			if resp.Response != nil && resp.Response.Done {
+				break
+			}
+		}
+	}
+	b.StopTimer()
+	clientConn.Close()
+	<-serverDone
+}
+
+func BenchmarkServerAuthorized(b *testing.B) {
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	caps := []string{"tools"}
+	serverHello := Handshake{
+		Protocol:     ProtocolVersion,
+		Identity:     Identity{Name: "server", Version: "1.0", Digest: ContractDigest(caps)},
+		Capabilities: caps,
+		Limits:       Limits{MaxFrame: 64 * 1024, MaxInflight: 64, CancelGrace: time.Second},
+	}
+	clientHello := Handshake{
+		Protocol:     ProtocolVersion,
+		Identity:     Identity{Name: "client", Version: "1.0", Digest: ContractDigest(caps)},
+		Capabilities: caps,
+		Limits:       Limits{MaxFrame: 64 * 1024, MaxInflight: 64, CancelGrace: time.Second},
+	}
+
+	auth := AuthorizerFunc(func(_ context.Context, capability, token string) error {
+		if capability == "tools" && token == "tok-secret" {
+			return nil
+		}
+		return errors.New("unauthorized")
+	})
+
+	handler := HandlerFunc(func(_ context.Context, _ string, _ json.RawMessage, _ func(json.RawMessage) error) error {
+		return nil
+	})
+
+	server := NewAuthorizedServer(serverConn, serverConn, serverHello, clientHello, handler, auth)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverDone := make(chan error, 1)
+	go func() {
+		serverDone <- server.Serve(ctx)
+	}()
+
+	clientCodec := NewCodec(clientConn, clientConn, 64*1024)
+	if err := clientCodec.Write(frame{Kind: "handshake", Handshake: &clientHello}); err != nil {
+		b.Fatal(err)
+	}
+	var ack frame
+	if err := clientCodec.Read(&ack); err != nil {
+		b.Fatal(err)
+	}
+
+	payload := json.RawMessage(`{"tool":"calc"}`)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		req := frame{
+			Kind: "request",
+			Request: &Request{
+				ID:              strconv.Itoa(i),
+				Method:          "tool.exec",
+				Capability:      "tools",
+				CapabilityToken: "tok-secret",
+				Payload:         payload,
+			},
+		}
+		if err := clientCodec.Write(req); err != nil {
+			b.Fatal(err)
+		}
+		var resp frame
+		if err := clientCodec.Read(&resp); err != nil {
+			b.Fatal(err)
+		}
+		benchSinkFrame = resp
+	}
+	b.StopTimer()
+	clientConn.Close()
+	<-serverDone
 }
 
 func TestLimitsValidate(t *testing.T) {

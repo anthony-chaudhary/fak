@@ -16,15 +16,25 @@ import (
 	"time"
 )
 
+// ProtocolVersion identifies the supported wire protocol specification for harness sidecars.
 const ProtocolVersion = "fak.harness-sidecar/v1"
 
+// ErrProtocol is returned when a wire payload or message sequence violates protocol semantics.
 var ErrProtocol = errors.New("harness sidecar protocol violation")
+
+// ErrWidening is returned when a peer requests or offers capabilities exceeding the allowed contract.
 var ErrWidening = errors.New("harness sidecar capability widening")
+
+// ErrClosed is returned when operations are attempted on a closed sidecar transport.
 var ErrClosed = errors.New("harness sidecar closed")
 
+// Limits defines bounds and timeouts enforced on sidecar communication frames and concurrency.
 type Limits struct {
-	MaxFrame    uint32        `json:"max_frame"`
-	MaxInflight int           `json:"max_inflight"`
+	// MaxFrame is the maximum allowed size in bytes for an incoming or outgoing frame.
+	MaxFrame uint32 `json:"max_frame"`
+	// MaxInflight is the maximum number of concurrent requests allowed to be processed.
+	MaxInflight int `json:"max_inflight"`
+	// CancelGrace is the time window allowed for a canceled request to terminate before hard teardown.
 	CancelGrace time.Duration `json:"cancel_grace"`
 }
 
@@ -41,6 +51,7 @@ func (l Limits) normalized() Limits {
 	return l
 }
 
+// Validate checks whether all limit parameters meet minimum non-zero invariants.
 func (l Limits) Validate() error {
 	if l.MaxFrame == 0 {
 		return fmt.Errorf("%w: invalid max_frame", ErrProtocol)
@@ -54,33 +65,54 @@ func (l Limits) Validate() error {
 	return nil
 }
 
+// Identity contains metadata uniquely identifying a sidecar participant and its contract digest.
 type Identity struct {
-	Name    string `json:"name"`
+	// Name is the logical identifier of the sidecar peer (e.g. "python-worker", "host").
+	Name string `json:"name"`
+	// Version is the semantic or build version of the sidecar implementation.
 	Version string `json:"version"`
-	Digest  string `json:"digest"`
+	// Digest is the sha256 hex string validating the declared capabilities under ProtocolVersion.
+	Digest string `json:"digest"`
 }
 
+// Handshake represents the initial negotiation frame exchanged between the host and sidecar.
 type Handshake struct {
-	Protocol     string   `json:"protocol"`
-	Identity     Identity `json:"identity"`
+	// Protocol is the wire protocol version string (must match ProtocolVersion).
+	Protocol string `json:"protocol"`
+	// Identity specifies the peer's identifying metadata and contract digest.
+	Identity Identity `json:"identity"`
+	// Capabilities lists the capability tokens negotiated for this session.
 	Capabilities []string `json:"capabilities"`
-	Limits       Limits   `json:"limits"`
+	// Limits specifies the operating boundaries requested or enforced by the peer.
+	Limits Limits `json:"limits"`
 }
 
+// Request is an invocation frame dispatched from the host to the sidecar server.
 type Request struct {
-	ID               string          `json:"id"`
-	Method           string          `json:"method"`
-	Capability       string          `json:"capability,omitempty"`
-	CapabilityToken  string          `json:"capability_token,omitempty"`
-	Payload          json.RawMessage `json:"payload,omitempty"`
-	DeadlineUnixNano int64           `json:"deadline_unix_nano,omitempty"`
+	// ID is the correlation identifier unique to this request.
+	ID string `json:"id"`
+	// Method is the RPC method or tool name being invoked.
+	Method string `json:"method"`
+	// Capability is the optional required capability name for gated operations.
+	Capability string `json:"capability,omitempty"`
+	// CapabilityToken is the security bearer token presented to authorize the capability.
+	CapabilityToken string `json:"capability_token,omitempty"`
+	// Payload is the method-specific JSON input arguments.
+	Payload json.RawMessage `json:"payload,omitempty"`
+	// DeadlineUnixNano is an optional absolute Unix timestamp in nanoseconds after which the call expires.
+	DeadlineUnixNano int64 `json:"deadline_unix_nano,omitempty"`
 }
 
+// Response is an execution result or streaming event sent from the sidecar server to the caller.
 type Response struct {
-	ID      string          `json:"id"`
+	// ID is the correlation identifier matching the originating Request.
+	ID string `json:"id"`
+	// Payload is the optional intermediate or final JSON result data.
 	Payload json.RawMessage `json:"payload,omitempty"`
-	Error   string          `json:"error,omitempty"`
-	Done    bool            `json:"done"`
+	// Error contains the failure description if the request was denied or faulted.
+	Error string `json:"error,omitempty"`
+	// Done indicates whether this response terminates the request stream.
+	Done bool `json:"done"`
 }
 
 type frame struct {
@@ -91,6 +123,7 @@ type frame struct {
 	CancelID  string     `json:"cancel_id,omitempty"`
 }
 
+// ContractDigest computes a deterministic sha256 hex digest for a set of capabilities under ProtocolVersion.
 func ContractDigest(capabilities []string) string {
 	blob, _ := json.Marshal(struct {
 		Protocol     string   `json:"protocol"`
@@ -100,6 +133,9 @@ func ContractDigest(capabilities []string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// ValidateHandshake verifies that a peer's handshake matches the expected protocol, identity, and capabilities.
+// It fails closed if the protocol mismatches, identity fields are incomplete, the digest does not match,
+// duplicate capabilities exist, or unadvertised capabilities (widening) are claimed.
 func ValidateHandshake(want, got Handshake) error {
 	if got.Protocol != ProtocolVersion || got.Protocol != want.Protocol {
 		return fmt.Errorf("%w: version %q", ErrProtocol, got.Protocol)
@@ -127,6 +163,7 @@ func ValidateHandshake(want, got Handshake) error {
 	return nil
 }
 
+// Codec provides length-prefixed JSON framing over an underlying io.Reader and io.Writer.
 type Codec struct {
 	r   *bufio.Reader
 	w   io.Writer
@@ -134,12 +171,16 @@ type Codec struct {
 	mu  sync.Mutex
 }
 
+// NewCodec constructs a length-prefixed JSON codec bounded by maxFrame bytes.
+// If maxFrame is 0, a 1MB default limit is applied.
 func NewCodec(r io.Reader, w io.Writer, maxFrame uint32) *Codec {
 	if maxFrame == 0 {
 		maxFrame = 1 << 20
 	}
 	return &Codec{r: bufio.NewReader(r), w: w, max: maxFrame}
 }
+
+// Write encodes v as JSON and writes it prefixed with a 4-byte big-endian length header.
 func (c *Codec) Write(v any) error {
 	blob, err := json.Marshal(v)
 	if err != nil {
@@ -158,6 +199,9 @@ func (c *Codec) Write(v any) error {
 	_, err = c.w.Write(blob)
 	return err
 }
+
+// Read reads a 4-byte big-endian length header, reads the bounded frame payload,
+// and decodes it as strict JSON into v with unknown fields disallowed.
 func (c *Codec) Read(v any) error {
 	var head [4]byte
 	if _, err := io.ReadFull(c.r, head[:]); err != nil {
@@ -191,24 +235,35 @@ func (r *byteReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+// Authorizer validates whether an invocation with a specific capability and bearer token is permitted.
 type Authorizer interface {
+	// Authorize evaluates capability access under ctx, returning an error if unauthorized.
 	Authorize(context.Context, string, string) error
 }
+
+// AuthorizerFunc allows ordinary functions to satisfy the Authorizer interface.
 type AuthorizerFunc func(context.Context, string, string) error
 
+// Authorize calls f(ctx, capability, token).
 func (f AuthorizerFunc) Authorize(ctx context.Context, capability, token string) error {
 	return f(ctx, capability, token)
 }
 
+// Handler processes incoming requests and streams intermediate and final results.
 type Handler interface {
+	// Handle executes method with payload, calling send to stream intermediate payloads.
 	Handle(context.Context, string, json.RawMessage, func(json.RawMessage) error) error
 }
+
+// HandlerFunc allows ordinary functions to satisfy the Handler interface.
 type HandlerFunc func(context.Context, string, json.RawMessage, func(json.RawMessage) error) error
 
+// Handle calls f(c, m, p, s).
 func (f HandlerFunc) Handle(c context.Context, m string, p json.RawMessage, s func(json.RawMessage) error) error {
 	return f(c, m, p, s)
 }
 
+// Server manages a sidecar peer lifecycle, concurrency limits, cancellation, and dispatch.
 type Server struct {
 	codec           *Codec
 	local, expected Handshake
@@ -222,15 +277,19 @@ type Server struct {
 	once            sync.Once
 }
 
+// NewServer creates a Server that processes requests without token-based capability authorization.
 func NewServer(r io.Reader, w io.Writer, local, expected Handshake, h Handler) *Server {
 	return NewAuthorizedServer(r, w, local, expected, h, nil)
 }
 
+// NewAuthorizedServer creates a Server configured with an Authorizer for gated capability enforcement.
 func NewAuthorizedServer(r io.Reader, w io.Writer, local, expected Handshake, h Handler, auth Authorizer) *Server {
 	l := local.Limits.normalized()
 	return &Server{codec: NewCodec(r, w, l.MaxFrame), local: local, expected: expected, handler: h,
 		authorizer: auth, limits: l, active: map[string]context.CancelFunc{}, sem: make(chan struct{}, l.MaxInflight), closed: make(chan struct{})}
 }
+
+// Serve performs the initial handshake exchange and enters the dispatch loop until EOF or error.
 func (s *Server) Serve(ctx context.Context) error {
 	defer s.closeAll()
 	var hello frame
