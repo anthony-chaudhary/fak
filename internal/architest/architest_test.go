@@ -314,6 +314,7 @@ var tier = map[string]int{
 	"guardtrace":  5, // guard replay fixture harness plus session->ablate bridge; composes bench(4)+engine(2), off the hot path.
 
 	"tokenizer":           1,
+	"toolgrammar":         1, // discriminated union EBNF grammar compiler with byte-level space protection and literal parameter escaping (#11747); stdlib-only primitive.
 	"answershape":         1, // pure degeneration/verbosity metric over text; stdlib-only, imports nothing internal.
 	"codelint":            1,
 	"codexmcpdiag":        2, // pure Codex MCP startup evidence classifier (#5980); stdlib-only, off the hot path.

@@ -511,6 +511,7 @@ concurrent = [
   "harnesswarm",
   "macobs",
   "researcharm",
+  "toolgrammar",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -701,6 +702,7 @@ autopick = [
   "decodemigrate",
   "dosadapter",
   "interactivesession",
+  "toolgrammar",
   # new-leaf:lane
 ]
 
@@ -747,6 +749,7 @@ engine = ["internal/engine/**"]
 gateway = ["internal/gateway/**"]
 ggufload = ["internal/ggufload/**"]
 grammar = ["internal/grammar/**"]
+toolgrammar = ["internal/toolgrammar/**"]
 harvest = ["internal/harvest/**"]
 ifc = ["internal/ifc/**"]
 kernel = ["internal/kernel/**"]
