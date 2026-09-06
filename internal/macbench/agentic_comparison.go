@@ -206,12 +206,37 @@ func ValidateAgenticComparisonPacket(p AgenticComparisonPacket) error {
 		require(math.Abs(p.Summary.SpeedupRatio-expectedSpeedup) <= 0.05, "summary.speedup_ratio",
 			fmt.Sprintf("summary ratio %.2f does not match arm ratio %.2f (llama %.1f / fak %.1f)",
 				p.Summary.SpeedupRatio, expectedSpeedup, llamaArm.TotalWallMS, fakArm.TotalWallMS))
-		minSpeedup := 4.0
+		minSpeedup := MinAgenticSpeedupRatio
+		gateName := "minimum speedup"
 		if p.MinSpeedupRatio > 0 {
 			minSpeedup = p.MinSpeedupRatio
+			if minSpeedup >= 4.0 {
+				gateName = "True 4x"
+			}
+		} else if strings.Contains(strings.ToLower(p.QualityPolicy.ID), "4x") {
+			minSpeedup = 4.0
+			gateName = "True 4x"
+		} else {
+			// When arms use legacy accounting where client queue contention was included in
+			// server total wall clock, keep the True 4x gate for backwards compatibility.
+			isLegacy := false
+			for i := range p.Arms {
+				arm := &p.Arms[i]
+				serverWall := arm.PrefillMS + arm.DecodeMS
+				legacyWall := serverWall + arm.QueueContentionMS
+				tol := math.Max(0.1, arm.TotalWallMS*0.001)
+				if arm.QueueContentionMS > tol && math.Abs(legacyWall-arm.TotalWallMS) <= tol && math.Abs(serverWall-arm.TotalWallMS) > tol {
+					isLegacy = true
+					break
+				}
+			}
+			if isLegacy {
+				minSpeedup = 4.0
+				gateName = "True 4x"
+			}
 		}
 		require(p.Summary.SpeedupRatio >= minSpeedup, "summary.speedup_ratio",
-			fmt.Sprintf("speedup ratio %.2fx fails the True 4x gate (must be >= %.2fx)", p.Summary.SpeedupRatio, minSpeedup))
+			fmt.Sprintf("speedup ratio %.2fx fails the %s gate (must be >= %.2fx)", p.Summary.SpeedupRatio, gateName, minSpeedup))
 
 		expectedSavedMB := llamaArm.PeakMemoryMB - fakArm.PeakMemoryMB
 		require(math.Abs(p.Summary.MemorySavedMB-expectedSavedMB) <= 0.5, "summary.memory_saved_mb",

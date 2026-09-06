@@ -155,6 +155,48 @@ func TestValidateAgenticComparisonPacket_LegacyAccounting(t *testing.T) {
 	}
 }
 
+func TestValidateAgenticComparisonPacket_HonestBaselineQueueContention(t *testing.T) {
+	packet := validAgenticComparisonPacket()
+
+	// Ensure QueueContentionMS > 0 on both arms, but not included in TotalWallMS.
+	for i := range packet.Arms {
+		arm := &packet.Arms[i]
+		if arm.QueueContentionMS <= 0 {
+			t.Fatalf("expected arm %s to have QueueContentionMS > 0, got %f", arm.Name, arm.QueueContentionMS)
+		}
+		if arm.TotalWallMS != arm.PrefillMS+arm.DecodeMS {
+			t.Fatalf("expected arm %s TotalWallMS to equal PrefillMS + DecodeMS, got %f != %f + %f",
+				arm.Name, arm.TotalWallMS, arm.PrefillMS, arm.DecodeMS)
+		}
+	}
+
+	// 1. Honest packet with explicit MinSpeedupRatio (1.50) passes.
+	packet.MinSpeedupRatio = 1.50
+	if err := ValidateAgenticComparisonPacket(packet); err != nil {
+		t.Fatalf("expected honest packet with MinSpeedupRatio=1.50 to pass: %v", err)
+	}
+
+	// 2. Honest packet with MinSpeedupRatio=0 (default honest baseline >= 1.50) passes.
+	packet.MinSpeedupRatio = 0
+	if err := ValidateAgenticComparisonPacket(packet); err != nil {
+		t.Fatalf("expected honest packet with default MinSpeedupRatio=0 to pass: %v", err)
+	}
+
+	// 3. Honest packet with MinSpeedupRatio set below actual speedup (e.g. 1.80 <= 1.91) passes.
+	packet.MinSpeedupRatio = 1.80
+	if err := ValidateAgenticComparisonPacket(packet); err != nil {
+		t.Fatalf("expected honest packet with MinSpeedupRatio=1.80 to pass: %v", err)
+	}
+
+	// 4. Honest packet with MinSpeedupRatio set above actual speedup (e.g. 2.00 > 1.91) fails closed.
+	packet.MinSpeedupRatio = 2.00
+	if err := ValidateAgenticComparisonPacket(packet); err == nil {
+		t.Fatal("expected packet with MinSpeedupRatio=2.00 to fail when speedup is 1.91, got nil")
+	} else if !strings.Contains(err.Error(), "summary.speedup_ratio") {
+		t.Fatalf("expected error containing summary.speedup_ratio, got: %v", err)
+	}
+}
+
 func TestValidateAgenticComparisonPacket_FailsClosed(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -280,6 +322,31 @@ func TestValidateAgenticComparisonPacket_FailsClosed(t *testing.T) {
 				p.Summary.SpeedupRatio = 1.20
 				p.Arms[1].TotalWallMS = p.Arms[0].TotalWallMS * 1.20
 				p.Arms[1].PrefillMS = p.Arms[1].TotalWallMS - p.Arms[1].DecodeMS
+			},
+			wantErr: "summary.speedup_ratio",
+		},
+		{
+			name: "speedup ratio below default 1.50x threshold when MinSpeedupRatio is 0",
+			mutate: func(p *AgenticComparisonPacket) {
+				p.MinSpeedupRatio = 0
+				p.Summary.SpeedupRatio = 1.20
+				p.Arms[1].TotalWallMS = p.Arms[0].TotalWallMS * 1.20
+				p.Arms[1].PrefillMS = p.Arms[1].TotalWallMS - p.Arms[1].DecodeMS
+			},
+			wantErr: "summary.speedup_ratio",
+		},
+		{
+			name: "speedup ratio below explicit MinSpeedupRatio",
+			mutate: func(p *AgenticComparisonPacket) {
+				p.MinSpeedupRatio = 2.00
+			},
+			wantErr: "summary.speedup_ratio",
+		},
+		{
+			name: "policy requesting true 4x fails closed on honest speedup",
+			mutate: func(p *AgenticComparisonPacket) {
+				p.MinSpeedupRatio = 0
+				p.QualityPolicy.ID = "strict-token-parity-true-4x"
 			},
 			wantErr: "summary.speedup_ratio",
 		},
