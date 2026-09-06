@@ -235,11 +235,11 @@ type rawDiscriminator struct {
 }
 
 type rawProperty struct {
-	Type        string   `json:"type"`
-	Description string   `json:"description"`
-	Const       any      `json:"const"`
-	Enum        []any    `json:"enum"`
-	Default     any      `json:"default"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	Const       any    `json:"const"`
+	Enum        []any  `json:"enum"`
+	Default     any    `json:"default"`
 }
 
 // CompiledGrammar holds structured metadata and the compiled EBNF output.
