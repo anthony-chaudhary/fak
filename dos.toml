@@ -514,6 +514,11 @@ concurrent = [
   "researcharm",
   "toolgrammar",
   "containment",
+  "conversationprofile",
+  "fakclient",
+  "harnessconformance",
+  "harnesssidecar",
+  "managedharness",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -1234,7 +1239,7 @@ sessionread = ["internal/sessionread/**"]
 sessionreplay = ["internal/sessionreplay/**"]
 sessionreset = ["internal/sessionreset/**"]
 sessionsearch = ["internal/sessionsearch/**"]
-sessionsignals = ["internal/sessionsignals/**"]
+sessionsignals = ["internal/sessionsignals/**", "pkg/sessionsignals/**"]
 sessionsteer = ["internal/sessionsteer/**"]
 shadowgit = ["internal/shadowgit/**"]
 sidecar = ["internal/sidecar/**"]
@@ -1637,6 +1642,11 @@ harnesswarm = ["internal/harnesswarm/**"]
 macobs = ["internal/macobs/**"]
 researcharm = ["internal/researcharm/**"]
 containment = ["internal/containment/**"]
+conversationprofile = ["pkg/conversationprofile/**"]
+fakclient = ["pkg/fakclient/**"]
+harnessconformance = ["pkg/harnessconformance/**"]
+harnesssidecar = ["pkg/harnesssidecar/**"]
+managedharness = ["pkg/managedharness/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
@@ -1654,7 +1664,7 @@ scripts     = ["scripts/**"]
 visuals     = ["visuals/**"]
 claude      = [".claude/**", ".agents/**"]
 ci          = [".github/**"]
-abi         = ["internal/abi/**"]
+abi         = ["internal/abi/**", "pkg/abi/**"]
 # internal/release joins the release lane's tree rather than getting a concurrent lane of its
 # own: `release` is EXCLUSIVE (a release cut is the serial gate), and `(fak release)` is the only
 # stamp internal/release/ can carry. Left off, that leaf resolved to an empty tree -- which

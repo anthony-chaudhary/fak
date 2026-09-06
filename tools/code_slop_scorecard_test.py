@@ -1376,6 +1376,8 @@ def test_claude_worktree_go_files_excluded_from_gather():
     # are the same phantom-checkout class — pruned by name too.
     assert cs._excluded_go(".tmp/pin-check/cmd/fak/main.go")
     assert cs._excluded_go(".tmp/prplan-check/internal/model/arch.go")
+    assert cs._excluded_go("_scratch/issue123/scratch.go")
+    assert cs._excluded_go(".head_build_check/internal/pkg/foo.go")
     # RECALL GUARD: a first-party kernel file is still gathered.
     assert not cs._excluded_go("internal/model/arch.go")
     assert not cs._excluded_go("cmd/fak/main.go")
@@ -1501,6 +1503,52 @@ def test_since_absent_is_inert_output_unchanged():
         _, human_default, _ = _run_card(["--workspace", d])
         _, human_empty, _ = _run_card(["--workspace", d, "--since", ""])
         assert human_default == human_empty, (human_default, human_empty)
+
+
+def test_git_tracked_source_paths_discovers_untracked_and_excludes_scratch():
+    if not _have_git():
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _git(str(root), "init", "-q")
+        tracked_go = root / "cmd" / "fak" / "main.go"
+        tracked_go.parent.mkdir(parents=True)
+        tracked_go.write_text("package main\nfunc main() {}\n", encoding="utf-8")
+        tracked_s = root / "internal" / "model" / "arch.s"
+        tracked_s.parent.mkdir(parents=True)
+        tracked_s.write_text("TEXT ·foo(SB), $0\n", encoding="utf-8")
+        _git(str(root), "add", "cmd/fak/main.go", "internal/model/arch.s")
+        _git(str(root), "commit", "-qm", "base")
+
+        # Untracked (others) files:
+        untracked_go = root / "cmd" / "fak" / "new.go"
+        untracked_go.write_text("package main\nfunc newFunc() {}\n", encoding="utf-8")
+        untracked_s = root / "internal" / "model" / "new.s"
+        untracked_s.write_text("TEXT ·newAsm(SB), $0\n", encoding="utf-8")
+
+        # Gitignored file:
+        (root / ".gitignore").write_text("ignored/\n", encoding="utf-8")
+        ignored_dir = root / "ignored"
+        ignored_dir.mkdir(parents=True)
+        (ignored_dir / "ignored.go").write_text("package ignored\n", encoding="utf-8")
+
+        # Excluded directories:
+        scratch_dir = root / "_scratch" / "pkg"
+        scratch_dir.mkdir(parents=True)
+        (scratch_dir / "scratch.go").write_text("package scratch\n", encoding="utf-8")
+        build_check_dir = root / ".head_build_check" / "pkg"
+        build_check_dir.mkdir(parents=True)
+        (build_check_dir / "check.go").write_text("package check\n", encoding="utf-8")
+
+        go_paths = cs._git_tracked_source_paths(root, ".go")
+        assert go_paths is not None
+        go_rels = [p.relative_to(root).as_posix() for p in go_paths]
+        assert go_rels == ["cmd/fak/main.go", "cmd/fak/new.go"]
+
+        s_paths = cs._git_tracked_source_paths(root, ".s")
+        assert s_paths is not None
+        s_rels = [p.relative_to(root).as_posix() for p in s_paths]
+        assert s_rels == ["internal/model/arch.s", "internal/model/new.s"]
 
 
 def main() -> int:

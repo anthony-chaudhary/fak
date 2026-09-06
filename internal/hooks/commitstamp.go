@@ -426,7 +426,7 @@ func laneForPath(path string, tax laneTaxonomy) string {
 	seg := strings.Split(p, "/")
 	if len(seg) >= 2 {
 		switch seg[0] {
-		case "internal":
+		case "internal", "pkg":
 			return strings.ToLower(seg[1])
 		case "cmd":
 			return "cmd"

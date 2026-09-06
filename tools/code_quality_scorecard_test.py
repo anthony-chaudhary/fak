@@ -594,6 +594,27 @@ def test_since_gate_full_scans_when_corpus_changed():
         assert rc in (0, 1), rc
 
 
+def test_since_gate_full_scans_when_claims_changed():
+    # Edits to CLAIMS.md are in CORPUS_GLOBS so they must NOT be skipped by --since.
+    if not _have_git():
+        print("code_quality_scorecard_test: git unavailable, skipping since-gate claims case")
+        return
+    with tempfile.TemporaryDirectory() as d:
+        _seed_repo(d)
+        _write(d, "CLAIMS.md", "# Claims\n\n| Claim | Status |\n")
+        _git(d, "add", "CLAIMS.md")
+        _git(d, "commit", "-qm", "add claims")
+        _write(d, "CLAIMS.md", "# Claims\n\n| Claim | Status |\n| New | OK |\n")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = cq.main(["--workspace", d, "--json", "--no-toolchain", "--no-dos",
+                          "--since", "HEAD"])
+        out = buf.getvalue()
+        assert '"schema"' in out, out
+        assert "unchanged since" not in out, out
+        assert rc in (0, 1), rc
+
+
 def test_since_gate_inert_and_output_identical_without_since():
     # (c) contract preserved: with --since absent (default "") the gate is completely
     # inert, so --json output is byte-identical whether or not an (empty) --since is

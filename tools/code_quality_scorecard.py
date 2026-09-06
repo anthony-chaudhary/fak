@@ -156,9 +156,9 @@ CLAIMS_REL = "CLAIMS.md"
 
 # The set of files whose change could move this card's code-debt: the card scans every
 # .go file and shells the go toolchain (build/vet/gofmt) over the module, so any .go /
-# go.mod / go.sum edit can move a KPI. The --since skip-gate short-circuits the whole
-# (holistic) scan when none of these changed vs a git ref.
-CORPUS_GLOBS = ["**/*.go", "go.mod", "go.sum"]
+# go.mod / go.sum / CLAIMS.md edit can move a KPI. The --since skip-gate short-circuits
+# the whole (holistic) scan when none of these changed vs a git ref.
+CORPUS_GLOBS = ["**/*.go", "go.mod", "go.sum", "CLAIMS.md", "**/CLAIMS.md"]
 
 # ---------------------------------------------------------------------------
 # Thresholds. Generous on purpose: a *legitimately* large file (a tensor

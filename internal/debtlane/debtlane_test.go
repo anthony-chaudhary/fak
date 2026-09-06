@@ -5,6 +5,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -314,6 +316,10 @@ func TestRealWorkspaceScan(t *testing.T) {
 	}
 	if len(report.Hotspots) == 0 {
 		t.Errorf("expected hotspots to be populated")
+	}
+	// Clean up log from earlier inspection
+	for _, l := range report.Lanes {
+		_ = l
 	}
 }
 
@@ -866,5 +872,298 @@ func TestMaturityRungGatingRequiresPrerequisites(t *testing.T) {
 	_, rungDog := EvaluateMaturityCurve(dogfooded)
 	if rungDog != "production_grade" && rungDog != "hardened" && rungDog != "benchmarked" && rungDog != "dogfooded" {
 		t.Fatalf("dogfooded package should reach at least dogfooded rung, got %q", rungDog)
+	}
+}
+
+func TestNestedSubdirectoriesCountedInUnitEvidence(t *testing.T) {
+	tmp := t.TempDir()
+	unitDir := filepath.Join(tmp, "internal", "nestedunit")
+
+	// Create root file
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rootCode := "package nestedunit\n\n// RootAction performs a root action for testing.\nfunc RootAction() string {\n\treturn \"root\"\n}\n"
+	if err := os.WriteFile(filepath.Join(unitDir, "root.go"), []byte(rootCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create nested subdirectory with child code
+	subDir := filepath.Join(unitDir, "sub")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	childCode := "package sub\n\n// ChildWorker coordinates child work units.\ntype ChildWorker struct {\n\tActive bool\n}\n"
+	if err := os.WriteFile(filepath.Join(subDir, "child.go"), []byte(childCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create deeply nested directory with code and tests
+	deepDir := filepath.Join(subDir, "deep")
+	if err := os.MkdirAll(deepDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	leafCode := "package deep\n\n// LeafValue calculates the leaf value.\nfunc LeafValue() int {\n\treturn 42\n}\n"
+	if err := os.WriteFile(filepath.Join(deepDir, "leaf.go"), []byte(leafCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	leafTestCode := "package deep\n\nimport \"testing\"\n\nfunc TestLeafValue(t *testing.T) {\n\tif LeafValue() != 42 {\n\t\tt.Fail()\n\t}\n}\n"
+	if err := os.WriteFile(filepath.Join(deepDir, "leaf_test.go"), []byte(leafTestCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create testdata and _scratch directories that must be SKIPPED
+	testdataDir := filepath.Join(unitDir, "testdata")
+	if err := os.MkdirAll(testdataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(testdataDir, "fixture.go"), []byte("package testdata\nconst Foo = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	scratchDir := filepath.Join(unitDir, "_scratch")
+	if err := os.MkdirAll(scratchDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scratchDir, "temp.go"), []byte("package scratch\nconst Bar = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ev := inspectUnitEvidence(unitDir, "nestedunit", nil, nil, nil, nil)
+
+	// FilesCount must count root.go, child.go, leaf.go (3 files), NOT leaf_test.go or skipped dirs.
+	if ev.FilesCount != 3 {
+		t.Fatalf("expected FilesCount == 3 (recursive subdirectories), got %d", ev.FilesCount)
+	}
+	if !ev.HasCode {
+		t.Fatalf("expected HasCode == true")
+	}
+	if !ev.HasTests {
+		t.Fatalf("expected HasTests == true from nested leaf_test.go")
+	}
+	if ev.TestFilesCount != 1 {
+		t.Fatalf("expected TestFilesCount == 1, got %d", ev.TestFilesCount)
+	}
+	if ev.ExportedSymbols < 3 {
+		t.Fatalf("expected at least 3 exported symbols across root/child/leaf, got %d", ev.ExportedSymbols)
+	}
+}
+
+func TestDiscoverLanesFromPkgAndInternal(t *testing.T) {
+	tmp := t.TempDir()
+
+	// 1. internal/corepkg
+	internalDir := filepath.Join(tmp, "internal", "corepkg")
+	if err := os.MkdirAll(internalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(internalDir, "core.go"), []byte("package corepkg\n\n// CoreFn is a core function.\nfunc CoreFn() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. pkg/scorecard
+	scorecardDir := filepath.Join(tmp, "pkg", "scorecard")
+	if err := os.MkdirAll(scorecardDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scorecardDir, "scorecard.go"), []byte("package scorecard\n\n// ScoreFn renders scores.\nfunc ScoreFn() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. pkg/harnesskit with nested subpackage lockv2
+	harnessDir := filepath.Join(tmp, "pkg", "harnesskit")
+	lockv2Dir := filepath.Join(harnessDir, "lockv2")
+	if err := os.MkdirAll(lockv2Dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(harnessDir, "harness.go"), []byte("package harnesskit\n\n// Harness manages sessions.\ntype Harness struct{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lockv2Dir, "lock.go"), []byte("package lockv2\n\n// Lock represents lockfile.\ntype Lock struct{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. dos.toml declaring both internal and pkg lanes
+	dosToml := `[lanes]
+concurrent = ["corepkg", "scorecard", "harnesskit"]
+
+[lanes.trees]
+corepkg = ["internal/corepkg/**"]
+scorecard = ["pkg/scorecard/**"]
+harnesskit = ["pkg/harnesskit/**"]
+`
+	if err := os.WriteFile(filepath.Join(tmp, "dos.toml"), []byte(dosToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lanes, err := discoverLanesFromDisk(tmp)
+	if err != nil {
+		t.Fatalf("discoverLanesFromDisk failed: %v", err)
+	}
+
+	laneMap := make(map[string]DebtLane)
+	for _, l := range lanes {
+		laneMap[l.Lane] = l
+	}
+
+	// Verify corepkg
+	coreLane, ok := laneMap["corepkg"]
+	if !ok {
+		t.Fatalf("expected corepkg lane to be discovered")
+	}
+	if coreLane.UnitOfWork != filepath.Join("internal", "corepkg") {
+		t.Errorf("expected corepkg UnitOfWork == internal/corepkg, got %s", coreLane.UnitOfWork)
+	}
+
+	// Verify pkg/scorecard
+	scLane, ok := laneMap["scorecard"]
+	if !ok {
+		t.Fatalf("expected scorecard lane to be discovered from pkg/")
+	}
+	if scLane.UnitOfWork != filepath.Join("pkg", "scorecard") {
+		t.Errorf("expected scorecard UnitOfWork == pkg/scorecard, got %s", scLane.UnitOfWork)
+	}
+	if scLane.Evidence.FilesCount < 1 {
+		t.Errorf("expected scorecard to have >= 1 file, got %d", scLane.Evidence.FilesCount)
+	}
+
+	// Verify pkg/harnesskit with recursive lockv2
+	hkLane, ok := laneMap["harnesskit"]
+	if !ok {
+		t.Fatalf("expected harnesskit lane to be discovered from pkg/")
+	}
+	if hkLane.UnitOfWork != filepath.Join("pkg", "harnesskit") {
+		t.Errorf("expected harnesskit UnitOfWork == pkg/harnesskit, got %s", hkLane.UnitOfWork)
+	}
+	if hkLane.Evidence.FilesCount != 2 {
+		t.Errorf("expected harnesskit to have 2 files (harness.go + lockv2/lock.go), got %d", hkLane.Evidence.FilesCount)
+	}
+}
+
+func TestBenchmarkAuthorityFalsePositiveFilter(t *testing.T) {
+	tmp := t.TempDir()
+	docPath := filepath.Join(tmp, "BENCHMARK-AUTHORITY.md")
+	content := `# Benchmark Authority
+| Claim | Number | Model | Baseline | Commit | Artifact |
+|---|---|---|---|---|---|
+| ` + "`gateway`" + ` latency | 10ms | Qwen | baseline | abc1234 | ` + "`model-ladder/foo.json`" + ` |
+| ` + "`internal/ctxmmu`" + ` | 50ns | Model | Baseline | def5678 | artifact.json |
+| ` + "`pkg/scorecard`" + ` | 1.2x | Scorecard | Baseline | ghi9012 | doc.md |
+`
+	if err := os.WriteFile(docPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	set := readBenchmarkAuthorityLanes(docPath)
+
+	// False positives from table headers or prose must NOT be matched
+	for _, bad := range []string{"claim", "number", "baseline", "commit", "artifact"} {
+		if set[bad] {
+			t.Errorf("table header token %q should NOT be recognized as benchmark authority lane", bad)
+		}
+	}
+
+	// Real lanes referenced in backticks or valid paths must be matched
+	for _, good := range []string{"gateway", "ctxmmu", "scorecard"} {
+		if !set[good] {
+			t.Errorf("expected real lane %q to be recognized", good)
+		}
+	}
+}
+
+func TestDiscoverLanes100PercentWorkspaceCoverageAndAutoRegistration(t *testing.T) {
+	// 1. Real workspace coverage verification: 100% of internal/ and pkg/ packages discovered
+	root := filepath.Join("..", "..")
+	lanes, err := discoverLanesFromDisk(root)
+	if err != nil {
+		t.Fatalf("discoverLanesFromDisk on root failed: %v", err)
+	}
+
+	discoveredSet := make(map[string]DebtLane, len(lanes))
+	for _, l := range lanes {
+		discoveredSet[l.Lane] = l
+	}
+
+	// Verify all packages on disk in internal/ and pkg/
+	var checkedCount int
+	for _, base := range []string{"internal", "pkg"} {
+		baseDir := filepath.Join(root, base)
+		entries, err := os.ReadDir(baseDir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			dir := filepath.Join(baseDir, e.Name())
+			if !dirContainsGoFiles(dir) {
+				continue
+			}
+			checkedCount++
+			lane, ok := discoveredSet[e.Name()]
+			if !ok {
+				t.Errorf("package %s/%s exists on disk but was NOT discovered in debt lanes", base, e.Name())
+			} else {
+				// If package exists in internal/, UnitOfWork must prioritize internal/
+				if base == "internal" {
+					expectedUnit := filepath.Join("internal", e.Name())
+					if lane.UnitOfWork != expectedUnit {
+						t.Errorf("lane %s UnitOfWork = %s, want %s (internal should be prioritized over pkg shim)",
+							e.Name(), lane.UnitOfWork, expectedUnit)
+					}
+				}
+			}
+		}
+	}
+	if checkedCount < 100 {
+		t.Fatalf("sanity check failed: only checked %d packages in internal/ and pkg/", checkedCount)
+	}
+	t.Logf("verified 100%% debt lane discovery across %d packages in internal/ and pkg/", checkedCount)
+
+	// 2. Automatic registration test: New package in pkg/ or internal/ without dos.toml entry
+	tmp := t.TempDir()
+	emptyDos := "[lanes]\nconcurrent = []\n[lanes.trees]\n"
+	if err := os.WriteFile(filepath.Join(tmp, "dos.toml"), []byte(emptyDos), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add internal package
+	newInternal := filepath.Join(tmp, "internal", "brandnewinternal")
+	if err := os.MkdirAll(newInternal, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(newInternal, "code.go"), []byte("package brandnewinternal\nfunc Do() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add pkg package
+	newPkg := filepath.Join(tmp, "pkg", "brandnewpkg")
+	if err := os.MkdirAll(newPkg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(newPkg, "lib.go"), []byte("package brandnewpkg\nfunc Export() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	autoLanes, err := discoverLanesFromDisk(tmp)
+	if err != nil {
+		t.Fatalf("discoverLanesFromDisk on temp dir failed: %v", err)
+	}
+	autoSet := make(map[string]DebtLane, len(autoLanes))
+	for _, l := range autoLanes {
+		autoSet[l.Lane] = l
+	}
+
+	if l, ok := autoSet["brandnewinternal"]; !ok {
+		t.Errorf("expected brandnewinternal to be automatically discovered without dos.toml entry")
+	} else if l.UnitOfWork != filepath.Join("internal", "brandnewinternal") {
+		t.Errorf("expected brandnewinternal UnitOfWork == internal/brandnewinternal, got %s", l.UnitOfWork)
+	}
+
+	if l, ok := autoSet["brandnewpkg"]; !ok {
+		t.Errorf("expected brandnewpkg to be automatically discovered without dos.toml entry")
+	} else if l.UnitOfWork != filepath.Join("pkg", "brandnewpkg") {
+		t.Errorf("expected brandnewpkg UnitOfWork == pkg/brandnewpkg, got %s", l.UnitOfWork)
 	}
 }

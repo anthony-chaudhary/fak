@@ -21,46 +21,56 @@ import (
 // LeafGap names a real Go-package leaf with no declared dos.toml lane.
 type LeafGap struct {
 	Leaf string `json:"leaf"`
-	Base string `json:"base"` // "internal"
+	Base string `json:"base"` // "internal" or "pkg"
 }
 
-// UndeclaredLeaves returns every internal/<leaf> that holds a real Go package but has no declared
-// dos.toml lane, sorted by name. cmd/<dir> is intentionally NOT audited: the `cmd` lane owns
-// `cmd/**` as a single tree (#518), so a cmd demo legitimately has no lane of its own. Returns an
-// error when dos.toml (the lane source of truth) cannot be read — the caller decides whether to
-// treat that as could-not-run rather than a clean zero.
+// UndeclaredLeaves returns every internal/<leaf> and pkg/<leaf> that holds a real Go package
+// but has no declared dos.toml lane, sorted by name. cmd/<dir> is intentionally NOT audited:
+// the `cmd` lane owns `cmd/**` as a single tree (#518), so a cmd demo legitimately has no lane
+// of its own. Returns an error when dos.toml (the lane source of truth) cannot be read — the
+// caller decides whether to treat that as could-not-run rather than a clean zero.
 func UndeclaredLeaves(root string) ([]LeafGap, error) {
 	tax := readLaneTaxonomy(root)
 	if !tax.loaded {
 		return nil, fmt.Errorf("dos.toml not readable under %q (lane taxonomy unavailable)", root)
 	}
-	dir := filepath.Join(root, "internal")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
 	var gaps []LeafGap
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+	for _, base := range []string{"internal", "pkg"} {
+		dir := filepath.Join(root, base)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) && base != "internal" {
+				continue
+			}
+			return nil, err
 		}
-		name := e.Name()
-		if tax.declared[strings.ToLower(name)] {
-			continue
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if tax.declared[strings.ToLower(name)] {
+				continue
+			}
+			if !dirHasGoFiles(filepath.Join(dir, name)) {
+				continue // not a Go package (e.g. a testdata-only or doc dir): not a leaf
+			}
+			// Some established composite lanes intentionally differ from the package
+			// basename. An explicit tree owner is authoritative even when the lane is
+			// named studyreceipt and the package is internal/study.
+			probe := filepath.ToSlash(filepath.Join(base, name, "_lane_ownership.go"))
+			if explicitTreeLaneForPath(probe, tax) != "" {
+				continue
+			}
+			gaps = append(gaps, LeafGap{Leaf: name, Base: base})
 		}
-		if !dirHasGoFiles(filepath.Join(dir, name)) {
-			continue // not a Go package (e.g. a testdata-only or doc dir): not a leaf
-		}
-		// Some established composite lanes intentionally differ from the package
-		// basename. An explicit tree owner is authoritative even when the lane is
-		// named studyreceipt and the package is internal/study.
-		probe := filepath.ToSlash(filepath.Join("internal", name, "_lane_ownership.go"))
-		if explicitTreeLaneForPath(probe, tax) != "" {
-			continue
-		}
-		gaps = append(gaps, LeafGap{Leaf: name, Base: "internal"})
 	}
-	sort.Slice(gaps, func(i, j int) bool { return gaps[i].Leaf < gaps[j].Leaf })
+	sort.Slice(gaps, func(i, j int) bool {
+		if gaps[i].Leaf != gaps[j].Leaf {
+			return gaps[i].Leaf < gaps[j].Leaf
+		}
+		return gaps[i].Base < gaps[j].Base
+	})
 	return gaps, nil
 }
 

@@ -161,34 +161,49 @@ func TestEveryLeafDeclaresLane(t *testing.T) {
 	roster := readLaneRoster(t)
 	touched, scoped := leavesTouchedByPush(internal)
 
-	var missing, missingLeaves []string
+	type targetLeaf struct {
+		base string
+		leaf string
+	}
+	var targets []targetLeaf
 	for _, leaf := range goPackageDirs(t, internal) {
+		targets = append(targets, targetLeaf{base: "internal", leaf: leaf})
+	}
+	pkgDir := filepath.Join(filepath.Dir(internal), "pkg")
+	if info, err := os.Stat(pkgDir); err == nil && info.IsDir() {
+		for _, leaf := range goPackageDirs(t, pkgDir) {
+			targets = append(targets, targetLeaf{base: "pkg", leaf: leaf})
+		}
+	}
+
+	var missing, missingLeaves []string
+	for _, tgt := range targets {
 		var why []string
-		if !roster.declared(leaf) {
+		if !roster.declared(tgt.leaf) {
 			why = append(why, "no [lanes] declaration")
 		}
-		if !treeCoversLeaf(roster.trees[leaf], leaf) {
-			why = append(why, "no [lanes.trees] entry rooted at internal/"+leaf+"/")
+		if !treeCoversLeaf(roster.trees[tgt.leaf], tgt.leaf) {
+			why = append(why, "no [lanes.trees] entry rooted at "+tgt.base+"/"+tgt.leaf+"/")
 		}
 		if len(why) == 0 {
 			continue
 		}
-		detail := "internal/" + leaf + ": " + strings.Join(why, " and ")
-		if undeclaredLeafVerdict(scoped, touched[leaf]) {
+		detail := tgt.base + "/" + tgt.leaf + ": " + strings.Join(why, " and ")
+		if undeclaredLeafVerdict(scoped, touched[tgt.leaf]) {
 			t.Logf("advisory: %s, but this push's commits do not touch it (a peer's leaf, or "+
 				"pre-existing trunk debt). Its owner should declare it with:\n  %s\n"+
-				"This push is not blocked for it.", detail, laneDeclarationFix(leaf))
+				"This push is not blocked for it.", detail, laneDeclarationFix(tgt.leaf))
 			continue
 		}
 		missing = append(missing, detail)
-		missingLeaves = append(missingLeaves, leaf)
+		missingLeaves = append(missingLeaves, tgt.leaf)
 	}
 	if len(missing) == 0 {
 		return
 	}
 	sort.Strings(missing)
 	sort.Strings(missingLeaves)
-	t.Errorf("%d internal leaf/leaves have no lane of their own:\n  %s\n"+
+	t.Errorf("%d leaf/leaves have no lane of their own:\n  %s\n"+
 		"An undeclared leaf is NOT a cosmetic gap. laneadmit.Decide falls back to the lane's "+
 		"declared tree when a request carries none, and an empty tree conservatively overlaps "+
 		"EVERYTHING — so a worker on an undeclared leaf collides with every live lease and the "+
@@ -199,11 +214,13 @@ func TestEveryLeafDeclaresLane(t *testing.T) {
 
 // treeCoversLeaf reports whether a lane's declared globs actually root at the leaf's own
 // subtree. A lane declared with someone else's glob is the same empty-tree hazard wearing
-// a name, so the entry has to point at internal/<leaf>/.
+// a name, so the entry has to point at internal/<leaf>/ or pkg/<leaf>/.
 func treeCoversLeaf(globs []string, leaf string) bool {
-	want := "internal/" + leaf + "/"
+	wantInternal := "internal/" + leaf + "/"
+	wantPkg := "pkg/" + leaf + "/"
 	for _, g := range globs {
-		if strings.HasPrefix(strings.TrimSpace(g), want) {
+		trimmed := strings.TrimSpace(g)
+		if strings.HasPrefix(trimmed, wantInternal) || strings.HasPrefix(trimmed, wantPkg) {
 			return true
 		}
 	}
@@ -329,9 +346,11 @@ func TestLaneCoverageRulesRejectTheRegression(t *testing.T) {
 		want  bool
 	}{
 		{"own subtree", []string{"internal/agent/**"}, "agent", true},
+		{"pkg subtree", []string{"pkg/fakclient/**"}, "fakclient", true},
 		{"one of several", []string{"experiments/**", "internal/experiments/**"}, "experiments", true},
 		{"no entry at all", nil, "agent", false},
 		{"someone else's tree", []string{"internal/agenttopo/**"}, "agent", false},
+		{"someone else's pkg tree", []string{"pkg/fakclientextra/**"}, "fakclient", false},
 		{"prefix is not a path boundary", []string{"internal/agentdojo/**"}, "agent", false},
 		{"repo-wide glob does not claim a leaf", []string{"**/*"}, "agent", false},
 	} {
@@ -359,6 +378,57 @@ func TestLaneCoverageRulesRejectTheRegression(t *testing.T) {
 	}
 	if got := duplicateLanes([]string{"a", "b", "c"}); len(got) != 0 {
 		t.Errorf("duplicateLanes reported %v on a clean roster — false positive.", got)
+	}
+}
+
+func TestSyntheticUndeclaredPackageFiresLaneGate(t *testing.T) {
+	roster := laneRoster{
+		concurrent: []string{"gateway", "fakclient"},
+		trees: map[string][]string{
+			"gateway":   {"internal/gateway/**"},
+			"fakclient": {"pkg/fakclient/**"},
+		},
+	}
+
+	targets := []struct {
+		base string
+		leaf string
+	}{
+		{"internal", "gateway"},         // declared & covered -> ok
+		{"pkg", "fakclient"},            // declared & covered in pkg -> ok
+		{"internal", "mockinternalgap"}, // undeclared in internal -> must fail
+		{"pkg", "mockpkggap"},           // undeclared in pkg -> must fail
+		{"pkg", "notree"},               // declared in concurrent but missing tree -> must fail
+	}
+	roster.concurrent = append(roster.concurrent, "notree")
+
+	var missing []string
+	for _, tgt := range targets {
+		var why []string
+		if !roster.declared(tgt.leaf) {
+			why = append(why, "no [lanes] declaration")
+		}
+		if !treeCoversLeaf(roster.trees[tgt.leaf], tgt.leaf) {
+			why = append(why, "no [lanes.trees] entry rooted at "+tgt.base+"/"+tgt.leaf+"/")
+		}
+		if len(why) > 0 {
+			missing = append(missing, tgt.base+"/"+tgt.leaf+": "+strings.Join(why, " and "))
+		}
+	}
+
+	if len(missing) != 3 {
+		t.Fatalf("expected 3 failures (mockinternalgap, mockpkggap, notree), got %d: %v", len(missing), missing)
+	}
+
+	wantMissing := []string{
+		"internal/mockinternalgap: no [lanes] declaration and no [lanes.trees] entry rooted at internal/mockinternalgap/",
+		"pkg/mockpkggap: no [lanes] declaration and no [lanes.trees] entry rooted at pkg/mockpkggap/",
+		"pkg/notree: no [lanes.trees] entry rooted at pkg/notree/",
+	}
+	for i, want := range wantMissing {
+		if missing[i] != want {
+			t.Errorf("missing[%d] = %q, want %q", i, missing[i], want)
+		}
 	}
 }
 

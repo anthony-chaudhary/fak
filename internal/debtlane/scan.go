@@ -18,9 +18,8 @@ import (
 )
 
 var (
-	laneTreeRe = regexp.MustCompile(`^([A-Za-z0-9_]+)\s*=\s*\[\s*"internal/([A-Za-z0-9_]+)/\*\*"`)
-	importRe   = regexp.MustCompile(`github\.com/anthony-chaudhary/fak/internal/([A-Za-z0-9_]+)`)
-	benchRe    = regexp.MustCompile(`(?m)^func Benchmark`)
+	laneTreeRe = regexp.MustCompile(`^([A-Za-z0-9_]+)\s*=\s*\[\s*"(?:internal|pkg)/([A-Za-z0-9_]+)/\*\*"`)
+	importRe   = regexp.MustCompile(`github\.com/anthony-chaudhary/fak/(?:internal|pkg)/([A-Za-z0-9_]+)`)
 )
 
 // Scan evaluates debt lanes across the workspace or against provided facts.
@@ -241,13 +240,25 @@ func discoverLanesFromDisk(root string) ([]DebtLane, error) {
 	benchDocs := readBenchmarkAuthorityLanes(filepath.Join(root, "BENCHMARK-AUTHORITY.md"))
 	runtimeProofs := readRuntimeProofs(root)
 
-	// Collect all packages in internal/.
+	// Collect all packages in internal/ and pkg/.
 	discovered := make(map[string]bool)
 	for _, lane := range lanes {
 		discovered[lane] = true
 	}
 	for pkg := range internalPkgs {
 		discovered[pkg] = true
+	}
+
+	pkgDir := filepath.Join(root, "pkg")
+	if entries, err := os.ReadDir(pkgDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			if dirContainsGoFiles(filepath.Join(pkgDir, e.Name())) {
+				discovered[e.Name()] = true
+			}
+		}
 	}
 
 	laneNames := make([]string, 0, len(discovered))
@@ -259,6 +270,11 @@ func discoverLanesFromDisk(root string) ([]DebtLane, error) {
 	var result []DebtLane
 	for _, lane := range laneNames {
 		unitDir := filepath.Join("internal", lane)
+		if _, err := os.Stat(filepath.Join(root, unitDir)); err != nil {
+			if info, err := os.Stat(filepath.Join(root, "pkg", lane)); err == nil && info.IsDir() {
+				unitDir = filepath.Join("pkg", lane)
+			}
+		}
 		absUnitDir := filepath.Join(root, unitDir)
 
 		evidence := inspectUnitEvidence(absUnitDir, lane, graph, reachable, benchDocs, runtimeProofs)
@@ -369,29 +385,36 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 	}
 
 	fset := token.NewFileSet()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return ev
-	}
-
 	formulaicCount := 0
 	hasFormulaicFiller := false
 
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
-			continue
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
 		}
-		fullPath := filepath.Join(dir, entry.Name())
-		isTest := strings.HasSuffix(entry.Name(), "_test.go")
+		if d.IsDir() {
+			if path != dir {
+				name := d.Name()
+				if name == "testdata" || name == "vendor" || name == ".git" || name == "_scratch" {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".go") {
+			return nil
+		}
+		fullPath := path
+		isTest := strings.HasSuffix(d.Name(), "_test.go")
 
 		if isTest {
 			content, err := os.ReadFile(fullPath)
 			if err != nil {
-				continue
+				return nil
 			}
 			testNode, err := parser.ParseFile(fset, fullPath, content, 0)
 			if err != nil {
-				continue
+				return nil
 			}
 
 			hasRealTests := false
@@ -414,7 +437,7 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 				ev.HasTests = true
 				ev.TestFilesCount++
 			}
-			continue
+			return nil
 		}
 
 		ev.FilesCount++
@@ -423,13 +446,13 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 		// Parse non-test files for exported symbols and comment metrics.
 		content, err := os.ReadFile(fullPath)
 		if err != nil {
-			continue
+			return nil
 		}
 		ev.CodeLines += countNonEmptyLines(content)
 
 		node, err := parser.ParseFile(fset, fullPath, content, parser.ParseComments)
 		if err != nil {
-			continue
+			return nil
 		}
 
 		for _, cg := range node.Comments {
@@ -485,7 +508,8 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 				}
 			}
 		}
-	}
+		return nil
+	})
 
 	if ev.CodeLines > 0 {
 		ev.CommentRatio = math.Round((float64(ev.CommentLines)/float64(ev.CodeLines))*1000) / 1000
@@ -512,6 +536,30 @@ func countNonEmptyLines(b []byte) int {
 	return lines
 }
 
+func dirContainsGoFiles(dir string) bool {
+	hasGo := false
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || hasGo {
+			return nil
+		}
+		if d.IsDir() {
+			if path != dir {
+				name := d.Name()
+				if name == "testdata" || name == "vendor" || name == ".git" || name == "_scratch" {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if strings.HasSuffix(d.Name(), ".go") {
+			hasGo = true
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	return hasGo
+}
+
 func parseLaneTrees(path string) []string {
 	f, err := os.Open(path)
 	if err != nil {
@@ -532,44 +580,68 @@ func parseLaneTrees(path string) []string {
 	return lanes
 }
 
-// BuildInternalImportGraph parses Go files in internal/ to construct a package import dependency graph.
+// BuildInternalImportGraph parses Go files in internal/ and pkg/ to construct a package import dependency graph.
 func BuildInternalImportGraph(root string) (map[string]map[string]struct{}, map[string]struct{}) {
 	graph := make(map[string]map[string]struct{})
 	internalPkgs := make(map[string]struct{})
 
-	internalDir := filepath.Join(root, "internal")
-	entries, err := os.ReadDir(internalDir)
-	if err != nil {
-		return graph, internalPkgs
-	}
-
-	for _, e := range entries {
-		if !e.IsDir() {
+	for _, base := range []string{"internal", "pkg"} {
+		baseDir := filepath.Join(root, base)
+		entries, err := os.ReadDir(baseDir)
+		if err != nil {
 			continue
 		}
-		pkgName := e.Name()
-		internalPkgs[pkgName] = struct{}{}
-		dirPath := filepath.Join(internalDir, pkgName)
-		edges := make(map[string]struct{})
 
-		_ = filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, walkErr error) error {
-			if walkErr != nil || d.IsDir() || !strings.HasSuffix(path, ".go") {
-				return nil
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
 			}
-			content, readErr := os.ReadFile(path)
-			if readErr != nil {
+			pkgName := e.Name()
+			dirPath := filepath.Join(baseDir, pkgName)
+			edges := make(map[string]struct{})
+			hasGo := false
+
+			_ = filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return nil
+				}
+				if d.IsDir() {
+					if path != dirPath {
+						name := d.Name()
+						if name == "testdata" || name == "vendor" || name == ".git" || name == "_scratch" {
+							return filepath.SkipDir
+						}
+					}
+					return nil
+				}
+				if !strings.HasSuffix(path, ".go") {
+					return nil
+				}
+				hasGo = true
+				content, readErr := os.ReadFile(path)
+				if readErr != nil {
+					return nil
+				}
+				matches := importRe.FindAllStringSubmatch(string(content), -1)
+				for _, m := range matches {
+					if len(m) == 2 && m[1] != pkgName {
+						edges[m[1]] = struct{}{}
+					}
+				}
 				return nil
-			}
-			matches := importRe.FindAllStringSubmatch(string(content), -1)
-			for _, m := range matches {
-				if len(m) == 2 && m[1] != pkgName {
-					edges[m[1]] = struct{}{}
+			})
+
+			if hasGo {
+				internalPkgs[pkgName] = struct{}{}
+				if existing, ok := graph[pkgName]; ok {
+					for edge := range edges {
+						existing[edge] = struct{}{}
+					}
+				} else {
+					graph[pkgName] = edges
 				}
 			}
-			return nil
-		})
-
-		graph[pkgName] = edges
+		}
 	}
 
 	return graph, internalPkgs
@@ -779,6 +851,42 @@ func isFormulaicGamingComment(cg *ast.CommentGroup) (isFormulaic bool, isFiller 
 	return true, false
 }
 
+var nonLaneTokens = map[string]bool{
+	"claim": true, "number": true, "model": true, "baseline": true,
+	"commit": true, "artifact": true, "metric": true, "speedup": true,
+	"regime": true, "measures": true, "example": true, "status": true,
+	"target": true, "notes": true, "result": true, "date": true,
+	"scope": true, "action": true, "verdict": true, "value": true,
+	"lane": true, "summary": true, "piece": true, "syscall": true,
+	"route": true, "context": true, "description": true, "owner": true,
+	"purpose": true, "visual": true, "relevance": true, "diff": true,
+	"file": true, "path": true, "type": true, "name": true,
+	"pass": true, "fail": true, "none": true, "same": true,
+	"true": true, "false": true, "stale": true, "todo": true,
+	"item": true, "field": true, "layer": true, "gate": true,
+	"fak": true, "raw": true, "allow": true, "deny": true,
+	"all": true, "yes": true, "no": true, "turns": true,
+	"agents": true, "state": true, "pending": true, "optimized": true,
+	"replacement": true, "arm": true, "caught": true, "quarantine": true,
+	"provenance": true, "prefix": true, "radix": true, "hardware": true,
+}
+
+func isPotentialLaneName(s string) bool {
+	if len(s) < 3 || len(s) > 30 {
+		return false
+	}
+	if s[0] < 'a' || s[0] > 'z' {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 func readBenchmarkAuthorityLanes(path string) map[string]bool {
 	set := make(map[string]bool)
 	content, err := os.ReadFile(path)
@@ -795,24 +903,30 @@ func readBenchmarkAuthorityLanes(path string) map[string]bool {
 					token := strings.ToLower(m[1])
 					token = strings.TrimPrefix(token, "internal/")
 					token = strings.TrimPrefix(token, "cmd/")
+					token = strings.TrimPrefix(token, "pkg/")
 					if token != "" {
 						set[token] = true
 					}
 				}
 			}
+			if strings.Contains(line, "---") {
+				continue
+			}
 			parts := strings.Split(line, "|")
 			for _, part := range parts {
 				cell := strings.TrimSpace(strings.ToLower(part))
 				cell = strings.Trim(cell, "`*_-")
-				if cell != "" && !strings.Contains(cell, " ") && len(cell) >= 3 {
-					set[cell] = true
+				if !isPotentialLaneName(cell) || nonLaneTokens[cell] {
+					continue
 				}
+				set[cell] = true
 			}
 		} else if strings.HasPrefix(line, "#") {
 			for _, m := range backtickRe.FindAllStringSubmatch(line, -1) {
 				if len(m) == 2 {
 					token := strings.ToLower(m[1])
 					token = strings.TrimPrefix(token, "internal/")
+					token = strings.TrimPrefix(token, "pkg/")
 					if token != "" {
 						set[token] = true
 					}

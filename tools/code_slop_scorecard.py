@@ -189,7 +189,8 @@ KPI_WEIGHTS: dict[str, float] = {
 
 # Directories whose .go is NOT first-party shipped kernel code (same exclusion the
 # code-quality scorecard uses): fixtures, vendored/generated trees.
-GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", ".dos", ".tmp", "node_modules", "testdata", "vendor", "__pycache__"}
+GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", ".dos", ".tmp", ".head_build_check",
+                   "_scratch", "node_modules", "testdata", "vendor", "__pycache__"}
 # `.claude`, `.fak`, `.dos`, and `.tmp` all hold full repo CHECKOUTS / source copies created
 # by the agent machinery: `.claude/worktrees/<wt>/` (the worktree-isolation feature),
 # `.tmp/pin-check/` + `.tmp/prplan-check/` (the release pin/prplan verification checkouts),
@@ -1758,10 +1759,11 @@ def _excluded_go(rel: str) -> bool:
 
 
 def _git_tracked_source_paths(root: Path, suffix: str) -> list[Path] | None:
-    """Tracked source paths for a git checkout, or None when git is unavailable."""
+    """Tracked and untracked (non-ignored) source paths for a git checkout,
+    or None when git is unavailable."""
     try:
         proc = subprocess.run(
-            ["git", "ls-files", "-z", "--"],
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"],
             cwd=str(root),
             capture_output=True,
             timeout=15,
@@ -1773,13 +1775,15 @@ def _git_tracked_source_paths(root: Path, suffix: str) -> list[Path] | None:
         return None
 
     paths: list[Path] = []
+    seen: set[Path] = set()
     for raw in proc.stdout.split(b"\0"):
         if not raw:
             continue
         rel = raw.decode("utf-8", "surrogateescape")
         if rel.endswith(suffix) and not _excluded_go(rel):
             p = root / rel
-            if p.is_file():
+            if p not in seen and p.is_file():
+                seen.add(p)
                 paths.append(p)
     return sorted(paths)
 
