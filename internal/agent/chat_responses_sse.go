@@ -73,6 +73,21 @@ func openAIResponsesSSEPayloadResponse(raw []byte, event string) ([]byte, bool, 
 		return nil, false, fmt.Errorf("decode SSE data: %w (data: %s)", err, truncate(raw, 200))
 	}
 	typ := strings.Trim(string(top["type"]), `"`)
+	for _, terminal := range []string{"response.failed", "response.incomplete"} {
+		if event != terminal && typ != terminal {
+			continue
+		}
+		// Reject before output reconstruction: even item-done tool arguments
+		// cannot be released from an unsuccessful enclosing response.
+		var response struct {
+			Error             json.RawMessage `json:"error"`
+			IncompleteDetails json.RawMessage `json:"incomplete_details"`
+		}
+		if err := json.Unmarshal(top["response"], &response); err != nil {
+			return nil, false, fmt.Errorf("%s: decode response: %w", terminal, err)
+		}
+		return nil, false, fmt.Errorf("%s: error=%s incomplete_details=%s", terminal, response.Error, response.IncompleteDetails)
+	}
 	if resp := top["response"]; len(resp) > 0 && (event == "response.completed" || typ == "response.completed") {
 		return append([]byte(nil), resp...), true, nil
 	}

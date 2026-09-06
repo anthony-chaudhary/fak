@@ -309,6 +309,7 @@ func allSearchableTools() []ToolDef {
 	add(CodeToolCatalog())
 	add(SysToolCatalog())
 	add(TodoToolCatalog())
+	add(TaskToolCatalog())
 	add(MCPToolCatalog())
 	return out
 }

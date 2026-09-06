@@ -877,6 +877,66 @@ func TestHTTPPlannerSendsExtraUpstreamHeaders(t *testing.T) {
 	}
 }
 
+func TestResponsesSSETerminalEnvelopes(t *testing.T) {
+	const tool = `{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"city\":"}`
+	for _, tt := range []struct {
+		name, event, payload string
+		want                 []string
+	}{
+		{"failed_type", "", `{"type":"response.failed","response":{"status":"failed","error":{"code":"server_error","message":"upstream unavailable"}}}`, []string{"failed", "server_error", "upstream unavailable"}},
+		{"failed_event", "response.failed", `{"response":{"status":"failed","error":{"code":"server_error","message":"upstream unavailable"}}}`, []string{"failed", "server_error", "upstream unavailable"}},
+		{"incomplete_type", "", `{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[` + tool + `]}}`, []string{"incomplete", "max_output_tokens"}},
+		{"incomplete_event", "response.incomplete", `{"response":{"status":"incomplete","incomplete_details":{"reason":"content_filter"},"output":[]}}`, []string{"incomplete", "content_filter"}},
+		{"completed", "response.completed", `{"type":"response.completed","response":{"status":"completed","model":"gpt-test","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]},{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"city\":\"SFO\"}"}],"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}`, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/responses" {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				// An item-done event is not permission to execute a tool when the
+				// enclosing response terminates unsuccessfully.
+				_, _ = io.WriteString(w, "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":"+tool+"}\n\n")
+				if tt.event != "" {
+					_, _ = io.WriteString(w, "event: "+tt.event+"\n")
+				}
+				_, _ = io.WriteString(w, "data: "+tt.payload+"\n\ndata: [DONE]\n\n")
+			}))
+			defer ts.Close()
+			planner, err := NewProviderHTTPPlanner(string(ProviderOpenAIResponses), ts.URL, "gpt-test", "loopback-only")
+			if err != nil {
+				t.Fatal(err)
+			}
+			planner.ForceResponsesStream = true
+			comp, err := planner.Complete(context.Background(), adapterTestMessages(""), nil)
+			if len(tt.want) > 0 {
+				if err == nil || comp != nil {
+					t.Fatalf("terminal failure returned completion=%+v error=%v", comp, err)
+				}
+				for _, want := range tt.want {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q missing %q", err, want)
+					}
+				}
+				if strings.Contains(err.Error(), "no response.completed payload") {
+					t.Errorf("terminal response misclassified: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if comp.Message.Content != "ok" || comp.Model != "gpt-test" || comp.Usage.TotalTokens != 3 || comp.FinishReason != "tool_calls" || len(comp.Message.ToolCalls) != 1 {
+				t.Fatalf("completed response changed: %+v", comp)
+			}
+			if call := comp.Message.ToolCalls[0]; call.ID != "call_1" || call.Function.Name != "lookup" || call.Function.Arguments != `{"city":"SFO"}` {
+				t.Fatalf("completed tool changed: %+v", call)
+			}
+		})
+	}
+}
+
 func TestHTTPPlannerForceResponsesStreamBuffersSSE(t *testing.T) {
 	var gotStream bool
 	var gotAccept string

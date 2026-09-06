@@ -504,3 +504,56 @@ func TestMCPAdmission_BudgetClamping(t *testing.T) {
 		t.Errorf("total saved mismatch: got %d, want %d", res.Receipt.TotalBytesSaved, expectedTotal)
 	}
 }
+
+// TestMCPAdmission_BudgetClamping_ReservesByteLimitBounded proves that when context reserves
+// are configured with low headroom (BudgetLow: 8192 bytes), an oversized serialized result
+// (including any excerpts or metadata) exceeding the byte budget is strictly clamped.
+func TestMCPAdmission_BudgetClamping_ReservesByteLimitBounded(t *testing.T) {
+	g := NewGate()
+
+	items := make([]string, 120)
+	for i := 0; i < 120; i++ {
+		items[i] = fmt.Sprintf("extended_cluster_event_log_item_%04d_with_long_diagnostic_trace_and_metadata", i)
+	}
+	structData := map[string]any{
+		"events": items,
+	}
+	dataBytes, _ := json.MarshalIndent(structData, "", "  ")
+	textJSON, _ := json.Marshal(string(dataBytes))
+	env, content := makeMCPResultEnvelope(string(textJSON), structData)
+
+	req := MCPAdmissionRequest{
+		Call:        &abi.ToolCall{Tool: "mcp__cluster__events"},
+		RawEnvelope: env,
+		RawContent:  content,
+		Reserves: ReserveState{
+			Status: HeadroomStatusLow,
+		},
+	}
+
+	res, err := g.AdmitMCP(context.Background(), req)
+	if err != nil {
+		t.Fatalf("AdmitMCP failed: %v", err)
+	}
+
+	if !res.Receipt.BudgetClamped {
+		t.Errorf("expected BudgetClamped=true when serialized result exceeds ByteLimit under low headroom")
+	}
+	if len(res.AdmittedBytes) > res.BudgetReceipt.Budget.ByteLimit {
+		t.Errorf("admitted bytes (%d) exceeds budget limit (%d)", len(res.AdmittedBytes), res.BudgetReceipt.Budget.ByteLimit)
+	}
+	if res.Receipt.FinalBytes != len(res.AdmittedBytes) {
+		t.Errorf("receipt.FinalBytes (%d) != len(res.AdmittedBytes) (%d)", res.Receipt.FinalBytes, len(res.AdmittedBytes))
+	}
+	if res.Receipt.BudgetBytesSaved <= 0 {
+		t.Errorf("expected positive BudgetBytesSaved, got %d", res.Receipt.BudgetBytesSaved)
+	}
+	expectedTotal := res.Receipt.MCPBytesSaved + res.Receipt.HeadroomBytesSaved + res.Receipt.BudgetBytesSaved
+	if res.Receipt.TotalBytesSaved != expectedTotal {
+		t.Errorf("total saved mismatch: got %d, want %d", res.Receipt.TotalBytesSaved, expectedTotal)
+	}
+	if res.Verdict.Kind != abi.VerdictTransform {
+		t.Errorf("expected VerdictTransform on clamped result, got %v", res.Verdict.Kind)
+	}
+}
+

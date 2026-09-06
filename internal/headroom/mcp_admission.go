@@ -407,14 +407,16 @@ func (g *Gate) AdmitMCP(ctx context.Context, req MCPAdmissionRequest) (*MCPAdmis
 	// Stage 4: Budgeting and Page-out
 	budgetStart := time.Now()
 	bReceipt := ComputeBudget(req.Reserves)
+	hasReserves := req.Reserves.Status != "" || req.Reserves.RemainingTokens > 0 || req.Reserves.ReserveTokens > 0 || req.Reserves.CompressionRisk != ""
 	var budgetSaved int
-	if bReceipt.Status == HeadroomStatusCritical || bReceipt.Clamped {
+	if bReceipt.Status == HeadroomStatusCritical || bReceipt.Clamped || (hasReserves && ((bReceipt.Budget.ByteLimit > 0 && len(workingBytes) > bReceipt.Budget.ByteLimit) || (bReceipt.Budget.MaxItems > 0 && bytes.Count(workingBytes, []byte{'\n'})+1 > bReceipt.Budget.MaxItems))) {
 		preBudgetLen := len(workingBytes)
 		clamped, didClamp := ClampToolResult(workingBytes, bReceipt.Budget)
 		if didClamp && len(clamped) < preBudgetLen {
 			budgetSaved = preBudgetLen - len(clamped)
 			receipt.BudgetClamped = true
 			receipt.BudgetBytesSaved = budgetSaved
+			bReceipt.Clamped = true
 			receipt.Stages = append(receipt.Stages, StageAttribution{
 				Stage:      "budget_clamp",
 				Executed:   true,

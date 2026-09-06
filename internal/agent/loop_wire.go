@@ -109,6 +109,15 @@ func WithTodoTools() RunOption {
 	}
 }
 
+// WithTaskTools arms the kernel-mediated child task tools (task_spawn, task_wait, task_status, task_cancel)
+// and merges them into the run's tool catalog.
+func WithTaskTools() RunOption {
+	return func(c *runConfig) {
+		_, _ = ArmTaskTools()
+		c.taskTools = true
+	}
+}
+
 // WithContextControl arms the context_control tool and merges it into the run's tool catalog.
 func WithContextControl(opts ...ContextControlOption) RunOption {
 	return func(c *runConfig) {
@@ -138,6 +147,22 @@ func (c runConfig) seedTools() []ToolDef {
 				todoDefs = todoToolDefs()
 			}
 			base = append(append([]ToolDef(nil), base...), todoDefs...)
+		}
+	}
+	if c.taskTools {
+		hasTask := false
+		for _, t := range base {
+			if t.Function.Name == ToolTaskSpawn {
+				hasTask = true
+				break
+			}
+		}
+		if !hasTask {
+			taskDefs := TaskToolCatalog()
+			if len(taskDefs) == 0 {
+				taskDefs = taskToolDefs()
+			}
+			base = append(append([]ToolDef(nil), base...), taskDefs...)
 		}
 	}
 	if c.contextControl {

@@ -222,6 +222,7 @@ type runConfig struct {
 	conversation   []Message
 	toolCatalog    []ToolDef
 	todoTools      bool
+	taskTools      bool
 	contextControl bool
 	systemPrompt   string
 	memoryDigest   string
