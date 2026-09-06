@@ -138,6 +138,24 @@ func TestWorktreeABAcceptedDeliveryAccounting(t *testing.T) {
 			{"sub-phase duration exceeds total elapsed", []DeliveryLifecycleRecord{
 				{IssueID: 101, Outcome: OutcomeAccepted, SetupDuration: 10, ExecutionDuration: 50, TotalElapsed: 50},
 			}, 3600.0},
+			{"+Inf total elapsed duration", []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, TotalElapsed: math.Inf(1)},
+			}, 3600.0},
+			{"+Inf setup duration", []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, SetupDuration: math.Inf(1), TotalElapsed: 50},
+			}, 3600.0},
+			{"+Inf execution duration", []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, ExecutionDuration: math.Inf(1), TotalElapsed: 50},
+			}, 3600.0},
+			{"+Inf landing duration", []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, LandingDuration: math.Inf(1), TotalElapsed: 50},
+			}, 3600.0},
+			{"+Inf verification duration", []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, VerificationDuration: math.Inf(1), TotalElapsed: 50},
+			}, 3600.0},
+			{"negative spend", []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: -10.0, TotalElapsed: 50},
+			}, 3600.0},
 		}
 
 		for _, bc := range boundaryCases {
@@ -216,6 +234,62 @@ func TestWorktreeABAcceptedDeliveryAccounting(t *testing.T) {
 		if math.Abs(gotUnknown.Spend-2.00) > 1e-6 {
 			t.Errorf("Spend = %.4f, want 2.00 (accumulated known spends)", gotUnknown.Spend)
 		}
+
+		// Case C: Negative spend triggers SpendUnknown and Status=INCOMPLETE
+		negativeSpendRecords := []DeliveryLifecycleRecord{
+			{IssueID: 601, Outcome: OutcomeAccepted, Spend: 1.25, TotalElapsed: 60},
+			{IssueID: 602, Outcome: OutcomeAccepted, Spend: -0.50, TotalElapsed: 60},
+		}
+		gotNeg := AccountAcceptedDeliveries(negativeSpendRecords, 3600.0)
+		if !gotNeg.SpendUnknown {
+			t.Errorf("expected SpendUnknown=true for negative spend, got false")
+		}
+		if gotNeg.Verified {
+			t.Errorf("expected Verified=false for negative spend, got true")
+		}
+		if gotNeg.Status != "INCOMPLETE" {
+			t.Errorf("expected Status=INCOMPLETE for negative spend, got %q", gotNeg.Status)
+		}
+		if math.Abs(gotNeg.Spend-1.25) > 1e-6 {
+			t.Errorf("Spend = %.4f, want 1.25 (negative spend must not be accumulated)", gotNeg.Spend)
+		}
+
+		// Case D: Non-finite spend (NaN / +Inf) triggers SpendUnknown and Status=INCOMPLETE
+		nanSpendRecords := []DeliveryLifecycleRecord{
+			{IssueID: 701, Outcome: OutcomeAccepted, Spend: 1.50, TotalElapsed: 60},
+			{IssueID: 702, Outcome: OutcomeAccepted, Spend: math.NaN(), TotalElapsed: 60},
+		}
+		gotNaN := AccountAcceptedDeliveries(nanSpendRecords, 3600.0)
+		if !gotNaN.SpendUnknown {
+			t.Errorf("expected SpendUnknown=true for NaN spend, got false")
+		}
+		if gotNaN.Verified {
+			t.Errorf("expected Verified=false for NaN spend, got true")
+		}
+		if gotNaN.Status != "INCOMPLETE" {
+			t.Errorf("expected Status=INCOMPLETE for NaN spend, got %q", gotNaN.Status)
+		}
+		if math.Abs(gotNaN.Spend-1.50) > 1e-6 {
+			t.Errorf("Spend = %.4f, want 1.50 (NaN spend must not be accumulated)", gotNaN.Spend)
+		}
+
+		infSpendRecords := []DeliveryLifecycleRecord{
+			{IssueID: 801, Outcome: OutcomeAccepted, Spend: 2.00, TotalElapsed: 60},
+			{IssueID: 802, Outcome: OutcomeAccepted, Spend: math.Inf(1), TotalElapsed: 60},
+		}
+		gotInf := AccountAcceptedDeliveries(infSpendRecords, 3600.0)
+		if !gotInf.SpendUnknown {
+			t.Errorf("expected SpendUnknown=true for +Inf spend, got false")
+		}
+		if gotInf.Verified {
+			t.Errorf("expected Verified=false for +Inf spend, got true")
+		}
+		if gotInf.Status != "INCOMPLETE" {
+			t.Errorf("expected Status=INCOMPLETE for +Inf spend, got %q", gotInf.Status)
+		}
+		if math.Abs(gotInf.Spend-2.00) > 1e-6 {
+			t.Errorf("Spend = %.4f, want 2.00 (+Inf spend must not be accumulated)", gotInf.Spend)
+		}
 	})
 }
 
@@ -229,10 +303,10 @@ func TestWorktreeABFoldAcceptedDeliveryAccounting(t *testing.T) {
 			DeliveryRecords: []AcceptedDeliveryRecord{
 				{IssueID: 101, Outcome: OutcomeAccepted, Spend: 1.0, TotalElapsed: 60},
 				{IssueID: 102, Outcome: OutcomeAccepted, Spend: 1.5, TotalElapsed: 60},
-				{IssueID: 101, Outcome: OutcomeAccepted, Spend: 0.5, TotalElapsed: 60},  // duplicate IssueID
-				{IssueID: 103, Outcome: OutcomeDuplicate, Spend: 0.2, TotalElapsed: 60}, // explicit duplicate
-				{IssueID: 104, Outcome: OutcomeRejected, Spend: 0.8, TotalElapsed: 60},  // rejected
-				{IssueID: 105, Outcome: OutcomeUnverified, Spend: 0.4, TotalElapsed: 60},// unverified
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: 0.5, TotalElapsed: 60},   // duplicate IssueID
+				{IssueID: 103, Outcome: OutcomeDuplicate, Spend: 0.2, TotalElapsed: 60},  // explicit duplicate
+				{IssueID: 104, Outcome: OutcomeRejected, Spend: 0.8, TotalElapsed: 60},   // rejected
+				{IssueID: 105, Outcome: OutcomeUnverified, Spend: 0.4, TotalElapsed: 60}, // unverified
 			},
 		}
 
@@ -245,8 +319,8 @@ func TestWorktreeABFoldAcceptedDeliveryAccounting(t *testing.T) {
 				{IssueID: 201, Outcome: OutcomeAccepted, Spend: 1.0, TotalElapsed: 40},
 				{IssueID: 202, Outcome: OutcomeAccepted, Spend: 1.0, TotalElapsed: 40},
 				{IssueID: 203, Outcome: OutcomeAccepted, Spend: 1.0, TotalElapsed: 40},
-				{IssueID: 201, Outcome: OutcomeAccepted, Spend: 0.5, TotalElapsed: 40},  // duplicate IssueID
-				{IssueID: 204, Outcome: OutcomeUnverified, Spend: 0.5, TotalElapsed: 40},// unverified
+				{IssueID: 201, Outcome: OutcomeAccepted, Spend: 0.5, TotalElapsed: 40},   // duplicate IssueID
+				{IssueID: 204, Outcome: OutcomeUnverified, Spend: 0.5, TotalElapsed: 40}, // unverified
 			},
 		}
 
@@ -1408,6 +1482,186 @@ func TestWorktreeABSubPhaseDurationConsistency(t *testing.T) {
 			}
 			if got.Status != tc.wantStatus {
 				t.Errorf("Status = %q, want %q", got.Status, tc.wantStatus)
+			}
+		})
+	}
+}
+
+func TestWorktreeABRejectsInfiniteDurationsAndNegativeSpend(t *testing.T) {
+	tests := []struct {
+		name             string
+		records          []DeliveryLifecycleRecord
+		window           float64
+		wantStatus       string
+		wantVerified     bool
+		wantSpendUnknown bool
+	}{
+		{
+			name: "positive infinity total elapsed duration",
+			records: []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: 1.0, TotalElapsed: math.Inf(1)},
+			},
+			window:           3600.0,
+			wantStatus:       "INCOMPLETE",
+			wantVerified:     false,
+			wantSpendUnknown: false,
+		},
+		{
+			name: "positive infinity setup duration",
+			records: []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: 1.0, SetupDuration: math.Inf(1), TotalElapsed: 60.0},
+			},
+			window:           3600.0,
+			wantStatus:       "INCOMPLETE",
+			wantVerified:     false,
+			wantSpendUnknown: false,
+		},
+		{
+			name: "positive infinity execution duration",
+			records: []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: 1.0, ExecutionDuration: math.Inf(1), TotalElapsed: 60.0},
+			},
+			window:           3600.0,
+			wantStatus:       "INCOMPLETE",
+			wantVerified:     false,
+			wantSpendUnknown: false,
+		},
+		{
+			name: "positive infinity landing duration",
+			records: []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: 1.0, LandingDuration: math.Inf(1), TotalElapsed: 60.0},
+			},
+			window:           3600.0,
+			wantStatus:       "INCOMPLETE",
+			wantVerified:     false,
+			wantSpendUnknown: false,
+		},
+		{
+			name: "positive infinity verification duration",
+			records: []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: 1.0, VerificationDuration: math.Inf(1), TotalElapsed: 60.0},
+			},
+			window:           3600.0,
+			wantStatus:       "INCOMPLETE",
+			wantVerified:     false,
+			wantSpendUnknown: false,
+		},
+		{
+			name: "negative infinity total elapsed duration",
+			records: []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: 1.0, TotalElapsed: math.Inf(-1)},
+			},
+			window:           3600.0,
+			wantStatus:       "INCOMPLETE",
+			wantVerified:     false,
+			wantSpendUnknown: false,
+		},
+		{
+			name: "negative infinity setup duration",
+			records: []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: 1.0, SetupDuration: math.Inf(-1), TotalElapsed: 60.0},
+			},
+			window:           3600.0,
+			wantStatus:       "INCOMPLETE",
+			wantVerified:     false,
+			wantSpendUnknown: false,
+		},
+		{
+			name: "negative infinity execution duration",
+			records: []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: 1.0, ExecutionDuration: math.Inf(-1), TotalElapsed: 60.0},
+			},
+			window:           3600.0,
+			wantStatus:       "INCOMPLETE",
+			wantVerified:     false,
+			wantSpendUnknown: false,
+		},
+		{
+			name: "negative infinity landing duration",
+			records: []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: 1.0, LandingDuration: math.Inf(-1), TotalElapsed: 60.0},
+			},
+			window:           3600.0,
+			wantStatus:       "INCOMPLETE",
+			wantVerified:     false,
+			wantSpendUnknown: false,
+		},
+		{
+			name: "negative infinity verification duration",
+			records: []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: 1.0, VerificationDuration: math.Inf(-1), TotalElapsed: 60.0},
+			},
+			window:           3600.0,
+			wantStatus:       "INCOMPLETE",
+			wantVerified:     false,
+			wantSpendUnknown: false,
+		},
+		{
+			name: "negative spend marks incomplete and spend unknown",
+			records: []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: -2.5, TotalElapsed: 60.0},
+			},
+			window:           3600.0,
+			wantStatus:       "INCOMPLETE",
+			wantVerified:     false,
+			wantSpendUnknown: true,
+		},
+		{
+			name: "NaN spend marks incomplete and spend unknown",
+			records: []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: math.NaN(), TotalElapsed: 60.0},
+			},
+			window:           3600.0,
+			wantStatus:       "INCOMPLETE",
+			wantVerified:     false,
+			wantSpendUnknown: true,
+		},
+		{
+			name: "positive infinity spend marks incomplete and spend unknown",
+			records: []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: math.Inf(1), TotalElapsed: 60.0},
+			},
+			window:           3600.0,
+			wantStatus:       "INCOMPLETE",
+			wantVerified:     false,
+			wantSpendUnknown: true,
+		},
+		{
+			name: "negative infinity spend marks incomplete and spend unknown",
+			records: []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: math.Inf(-1), TotalElapsed: 60.0},
+			},
+			window:           3600.0,
+			wantStatus:       "INCOMPLETE",
+			wantVerified:     false,
+			wantSpendUnknown: true,
+		},
+		{
+			name: "positive infinity duration and negative spend combined",
+			records: []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: -1.0, ExecutionDuration: math.Inf(1), TotalElapsed: 60.0},
+			},
+			window:           3600.0,
+			wantStatus:       "INCOMPLETE",
+			wantVerified:     false,
+			wantSpendUnknown: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := AccountAcceptedDeliveries(tc.records, tc.window)
+			if got.Status != tc.wantStatus {
+				t.Errorf("Status = %q, want %q", got.Status, tc.wantStatus)
+			}
+			if got.Verified != tc.wantVerified {
+				t.Errorf("Verified = %v, want %v", got.Verified, tc.wantVerified)
+			}
+			if got.SpendUnknown != tc.wantSpendUnknown {
+				t.Errorf("SpendUnknown = %v, want %v", got.SpendUnknown, tc.wantSpendUnknown)
+			}
+			if tc.wantSpendUnknown && got.Spend < 0 {
+				t.Errorf("accumulated spend is negative: %f", got.Spend)
 			}
 		})
 	}

@@ -82,14 +82,13 @@ func AccountAcceptedDeliveries(records []DeliveryLifecycleRecord, totalWindowSec
 			incompleteBoundary = true
 		}
 
-		if !math.IsNaN(r.Spend) && !math.IsInf(r.Spend, 0) {
-			if r.Spend >= 0 {
-				acc.Spend += r.Spend
-			} else {
-				incompleteBoundary = true
-			}
+		if r.Spend < 0 || math.IsNaN(r.Spend) || math.IsInf(r.Spend, 0) {
+			acc.SpendUnknown = true
+			incompleteBoundary = true
+		} else {
+			acc.Spend += r.Spend
 		}
-		if r.SpendUnknown || math.IsNaN(r.Spend) || math.IsInf(r.Spend, 0) || r.Spend < 0 {
+		if r.SpendUnknown {
 			acc.SpendUnknown = true
 		}
 
@@ -99,7 +98,7 @@ func AccountAcceptedDeliveries(records []DeliveryLifecycleRecord, totalWindowSec
 			incompleteBoundary = true
 		}
 
-		if r.TotalElapsed > 0 &&
+		if isFinitePositive(r.TotalElapsed) &&
 			isFiniteNonNegative(r.SetupDuration) &&
 			isFiniteNonNegative(r.ExecutionDuration) &&
 			isFiniteNonNegative(r.LandingDuration) &&
