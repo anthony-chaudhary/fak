@@ -238,6 +238,26 @@ func TestStrixHaloQ8Fallback(t *testing.T) {
 	}
 }
 
+func TestInspectHostStrixHaloUppercaseLinuxCPU(t *testing.T) {
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "/proc/cpuinfo":
+			return []byte("model name\t: AMD RYZEN AI MAX+ 395 w/ Radeon 8060S\n"), nil
+		case "/proc/meminfo":
+			return []byte("MemTotal:       125829120 kB\n"), nil
+		default:
+			return nil, errors.New("unexpected path " + path)
+		}
+	}
+	config, err := inspectHostStrixHaloInternal("linux", nil, nil, readFile)
+	if err != nil {
+		t.Fatalf("live Halo CPU model was rejected: %v", err)
+	}
+	if config == nil {
+		t.Fatal("missing Strix Halo serving configuration")
+	}
+}
+
 // TestInspectHostStrixHaloInternal verifies host detection logic for Strix Halo / gfx1151.
 func TestInspectHostStrixHaloInternal(t *testing.T) {
 	fakeWindowsRunner128GB := func(script string, timeout time.Duration) (bool, string, string) {

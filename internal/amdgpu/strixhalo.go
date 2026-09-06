@@ -271,8 +271,8 @@ func inspectHostStrixHaloInternal(
 		// Linux sysfs / proc inspection
 		if readFileFn != nil {
 			if cpuinfo, err := readFileFn("/proc/cpuinfo"); err == nil {
-				s := string(cpuinfo)
-				if strings.Contains(s, "Ryzen AI MAX") || strings.Contains(s, "Strix Halo") {
+				s := strings.ToLower(string(cpuinfo))
+				if strings.Contains(s, "ryzen ai max") || strings.Contains(s, "strix halo") {
 					isStrix = true
 					detectedName = "AMD Strix Halo APU (CPU model)"
 				}
