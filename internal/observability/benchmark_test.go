@@ -4,9 +4,6 @@ import (
 	"testing"
 )
 
-// Invariant: Benchmark execution verifies telemetry alarm checks execute in bounded time without allocations.
-// Guard: Telemetry checks must remain sub-microsecond in hot evaluation paths.
-
 func BenchmarkCheckPromptTokenAlarm(b *testing.B) {
 	const turnTokens = 12000
 	const baselineTokens = 6000

@@ -1,9 +1,3 @@
-// Package observability provides pure Go telemetry monitoring, SQLite header analysis,
-// and automated alarm evaluation for tokens, latency, and database growth.
-//
-// Invariant: telemetry alarms enforce fail-closed evaluation and deterministic thresholds.
-// Invariant: database inspection parses SQLite headers directly without CGO dependencies or locks.
-// Invariant: evaluations execute without network I/O, background routines, or mutable global state.
 package observability
 
 import (
@@ -37,20 +31,20 @@ const (
 	SeverityWarn TelemetryAlarmSeverity = "WARN"
 )
 
-// Default threshold constants for telemetry alarms (#11147).
+// Default threshold constants for telemetry alarms.
 const (
 	// DefaultHardPromptCapTokens defines the ceiling token count before triggering an alarm.
-	DefaultHardPromptCapTokens = 30000 // >30k tokens
+	DefaultHardPromptCapTokens = 30000
 	// DefaultPromptDoublingFactor defines the maximum relative growth multiple permitted against baseline token count.
-	DefaultPromptDoublingFactor = 2.0 // >2x baseline
+	DefaultPromptDoublingFactor = 2.0
 	// DefaultLatencySpikeThresholdSec defines the maximum wall-clock turn duration in seconds before flagging latency.
-	DefaultLatencySpikeThresholdSec = 15.0 // >15s turn latency
+	DefaultLatencySpikeThresholdSec = 15.0
 	// DefaultLatencySpikeMultiplier defines the factor over median latency that triggers a latency spike alarm.
-	DefaultLatencySpikeMultiplier = 2.5 // >2.5x median latency
+	DefaultLatencySpikeMultiplier = 2.5
 	// DefaultMaxDatabaseBytes defines the size threshold in bytes above which database bloat is flagged.
-	DefaultMaxDatabaseBytes int64 = 1 * 1024 * 1024 * 1024 // >1GB DB bloat
+	DefaultMaxDatabaseBytes int64 = 1 * 1024 * 1024 * 1024
 	// DefaultFreelistRatioThreshold defines the maximum tolerable ratio of freelist pages to total database pages.
-	DefaultFreelistRatioThreshold = 0.25 // >25% large freelist
+	DefaultFreelistRatioThreshold = 0.25
 )
 
 // TelemetryAlarm captures the evaluation result and diagnostic findings of a single telemetry check.
@@ -83,7 +77,6 @@ type TelemetryHealthReport struct {
 }
 
 // CheckPromptTokenAlarm evaluates turn prompt tokens against doubling factor and hard capacity thresholds.
-// Invariant: evaluations are deterministic and purely arithmetic based on input token counts.
 func CheckPromptTokenAlarm(turnTokens int, baselineTokens int) TelemetryAlarm {
 	triggered := turnTokens > DefaultHardPromptCapTokens || (baselineTokens > 0 && float64(turnTokens) > DefaultPromptDoublingFactor*float64(baselineTokens))
 	if triggered {
@@ -113,7 +106,6 @@ func CheckPromptTokenAlarm(turnTokens int, baselineTokens int) TelemetryAlarm {
 }
 
 // CheckLatencyAlarm evaluates turn latency against duration caps and median multipliers.
-// Invariant: non-positive median latencies evaluate safely without division-by-zero or panics.
 func CheckLatencyAlarm(currentLatencySec float64, medianLatencySec float64, consecutiveSpikes int) TelemetryAlarm {
 	triggered := currentLatencySec > DefaultLatencySpikeThresholdSec || (medianLatencySec > 0 && currentLatencySec > DefaultLatencySpikeMultiplier*medianLatencySec)
 	if triggered {
@@ -143,7 +135,6 @@ func CheckLatencyAlarm(currentLatencySec float64, medianLatencySec float64, cons
 }
 
 // CheckDatabaseBloatAlarm evaluates SQLite storage footprint and freelist page fragmentation.
-// Invariant: zero page counts evaluate without division-by-zero and yield zero freelist ratios.
 func CheckDatabaseBloatAlarm(dbBytes int64, freelistPages int64, pageCount int64, pageSize int64) TelemetryAlarm {
 	freelistRatio := 0.0
 	if pageCount > 0 {
@@ -177,7 +168,6 @@ func CheckDatabaseBloatAlarm(dbBytes int64, freelistPages int64, pageCount int64
 }
 
 // InspectSQLiteFileHeader reads file stat and parses the 100-byte SQLite header in pure Go without CGO.
-// Invariant: inspects SQLite file metadata directly from header bytes without locking or side effects.
 func InspectSQLiteFileHeader(dbPath string) (dbBytes, freelistPages, pageCount, pageSize int64, err error) {
 	if dbPath == "" {
 		return 0, 0, 0, 0, errors.New("empty database path")
@@ -227,21 +217,16 @@ func InspectSQLiteFileHeader(dbPath string) (dbBytes, freelistPages, pageCount, 
 }
 
 // CheckLatencySpikeAlarm evaluates turn latency against spike thresholds and median multipliers.
-// It delegates to CheckLatencyAlarm to verify whether current turn latency exceeds safe bounds.
 func CheckLatencySpikeAlarm(currentLatencySec float64, medianLatencySec float64, consecutiveSpikes int) TelemetryAlarm {
 	return CheckLatencyAlarm(currentLatencySec, medianLatencySec, consecutiveSpikes)
 }
 
 // EvaluateHealth evaluates prompt, latency, and database telemetry against alarm thresholds.
-// It delegates to EvaluateTelemetryHealth to produce an aggregated TelemetryHealthReport.
 func EvaluateHealth(promptTokens, baselinePrompt int, latencies []float64, dbPath string) TelemetryHealthReport {
 	return EvaluateTelemetryHealth(promptTokens, baselinePrompt, latencies, dbPath)
 }
 
 // EvaluateTelemetryHealth evaluates prompt, latency, and database telemetry against alarm thresholds.
-// Invariant: telemetry alarms enforce fail-closed evaluation and deterministic thresholds.
-// Invariant: an empty latency sequence evaluates to a normal latency alarm rather than panicking.
-// Invariant: an unreachable database path results in a triggered warning alarm to fail safe.
 func EvaluateTelemetryHealth(promptTokens, baselinePrompt int, latencies []float64, dbPath string) TelemetryHealthReport {
 	promptAlarm := CheckPromptTokenAlarm(promptTokens, baselinePrompt)
 
