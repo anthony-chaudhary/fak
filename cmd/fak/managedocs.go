@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/anthony-chaudhary/fak/internal/managedocs"
 )
@@ -41,6 +42,13 @@ func runManageDocs(stdout, stderr io.Writer, argv []string) int {
 		targetDir := *docsDir
 		if targetDir == "" {
 			targetDir = "docs"
+		}
+		if docsDirExplicit {
+			stat, err := os.Stat(filepath.Join(root, targetDir))
+			if err != nil || !stat.IsDir() {
+				fmt.Fprintf(stderr, "fak managedocs: documentation directory %q does not exist\n", targetDir)
+				return 1
+			}
 		}
 		if err := managedocs.AuditDocumentSets(root, targetDir); err != nil {
 			fmt.Fprintf(stderr, "fak managedocs document sets audit failed: %v\n", err)

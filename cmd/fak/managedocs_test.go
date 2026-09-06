@@ -116,3 +116,14 @@ func TestRunManageDocs_CheckRetained(t *testing.T) {
 		t.Errorf("expected retained occurrences audit to run, stdout: %s, stderr: %s", stdout.String(), stderr.String())
 	}
 }
+
+func TestRunManageDocs_ExplicitNonexistentDirFails(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	rc := runManageDocs(&stdout, &stderr, []string{"--docs-dir", "nonexistent-docs-dir-xyz-123"})
+	if rc == 0 {
+		t.Fatalf("expected non-zero rc for nonexistent --docs-dir, got %d, stdout: %s", rc, stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "nonexistent-docs-dir-xyz-123") {
+		t.Errorf("expected stderr to contain nonexistent docs dir name, got: %s", stderr.String())
+	}
+}
