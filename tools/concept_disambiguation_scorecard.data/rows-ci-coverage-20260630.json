@@ -477,7 +477,8 @@
       "definition": "fakcompactionshedtokens is the concrete context-ctx identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring context-ctx concepts.",
       "distinction": "fakcompactionshedtokens is a specific tree identifier in the context-ctx namespace, not the broader sibling concept referenced by x2-context-ctx-commandcontext.",
       "distinct_from": [
-        "x2-context-ctx-commandcontext"
+        "x2-context-ctx-commandcontext",
+        "trajectory-compaction-events"
       ],
       "aliases": [],
       "grounding": "fakcompactionshedtokens",

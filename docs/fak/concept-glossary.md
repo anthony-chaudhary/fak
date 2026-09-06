@@ -489,3 +489,10 @@ guardSessionStartInstall is the typed receipt returned while fak guard installs 
 **Distinct from:** The INSTALL RECEIPT describing one launch-time hook mutation, not guardsessionstart (the hook command that later emits the first-turn hint) and not a running session record.
 
 
+
+
+### CompactionEvents (transcript content retention receipts)
+
+Per-file Codex compacted event receipts measuring supported explicit transcript UTF8 content before and after replacement history.
+
+**Distinct from:** Counts reconstructed transcript content bytes with incomplete-history coverage; does not measure provider prompt tokens, attribute the compaction engine, or stitch separate transcript fragments.

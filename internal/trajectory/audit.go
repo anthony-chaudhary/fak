@@ -155,6 +155,7 @@ type AuditTranscriptRow struct {
 	BuildIdentities              []AuditBuildIdentity          `json:"build_identities"`
 	Tokens                       AuditTokens                   `json:"tokens"`
 	CodexCache                   *AuditCodexCacheObservation   `json:"codex_cache,omitempty"`
+	CompactionEvents             []AuditCompactionEvent        `json:"compaction_events,omitempty"`
 	ToolCalls                    int                           `json:"tool_calls"`
 	ToolErrors                   int                           `json:"tool_errors"`
 	Distribution                 []AuditDistributionRow        `json:"distribution,omitempty"`

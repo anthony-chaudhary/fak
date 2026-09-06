@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "trajectory-compaction-events",
+      "canonical": "CompactionEvents (transcript content retention receipts)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Per-file Codex compacted event receipts measuring supported explicit transcript UTF8 content before and after replacement history.",
+      "distinction": "Counts reconstructed transcript content bytes with incomplete-history coverage; does not measure provider prompt tokens, attribute the compaction engine, or stitch separate transcript fragments.",
+      "distinct_from": [
+        "x-ci-coverage-context-ctx-fakcompactionshedtokens"
+      ],
+      "aliases": [],
+      "grounding": "CompactionEvents",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

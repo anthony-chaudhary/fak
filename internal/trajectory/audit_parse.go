@@ -29,6 +29,7 @@ type auditToolCall struct {
 }
 
 type auditParseState struct {
+	compaction                   auditCompactionState
 	row                          AuditTranscriptRow
 	models                       map[string]struct{}
 	calls                        map[string]auditToolCall
@@ -114,6 +115,9 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 		decoder := json.NewDecoder(bytes.NewReader(line))
 		decoder.UseNumber()
 		if err := decoder.Decode(&record); err != nil {
+			if source == AuditSourceCodex {
+				state.compaction.incomplete = true
+			}
 			refusals = append(refusals, newAuditRefusal(source, rel, lineNumber, "malformed_json", err.Error()))
 			denominator.RefusedRecords++
 			continue
@@ -346,6 +350,7 @@ func parseClaudeAuditHook(record map[string]any, state *auditParseState) {
 }
 
 func parseCodexAuditRecord(record map[string]any, line int, rel string, state *auditParseState, refusals *[]AuditRefusalRow) {
+	state.compaction.observe(record, line, &state.row)
 	recordType, _ := record["type"].(string)
 	if _, supported := auditCodexRowSubtypes[recordType]; !supported {
 		return

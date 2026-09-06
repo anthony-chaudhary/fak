@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **185** (clarity 0 + coverage 185) |
-| **Crystal-clear concepts (and climbing)** | **1072** crystal of 2792 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2902 / 3087** (94.0% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **197** (clarity 0 + coverage 197) |
+| **Crystal-clear concepts (and climbing)** | **1073** crystal of 2793 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2903 / 3100** (93.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 215 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **84** of 3991 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **84** of 3992 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 96.1/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 95.8/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2792 concepts - score 96.1/100 (grade A) - disambiguation-debt 185
+concept-disambiguation chart - 2793 concepts - score 95.8/100 (grade A) - disambiguation-debt 197
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #################........... 1072
+  * crystal       #################........... 1073
   o defined       ############################ 1720
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -41,7 +41,7 @@ clarity ladder (count of concepts, best -> fog):
 clarity mix by family (each cell = one concept):
   attention        ****************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (81 concept(s); 16 crystal)
   cache            **********************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (274 concept(s); 94 crystal)
-  context-ctx      ***********************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (228 concept(s); 71 crystal)
+  context-ctx      ************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (229 concept(s); 72 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
@@ -62,16 +62,16 @@ clarity mix by family (each cell = one concept):
   witness-proof    *******************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (159 concept(s); 79 crystal)
 
 coverage by family (positioned / discovered):
+  session-runtime  #########################... 278/307
   plan             ##########################.. 416/440
-  session-runtime  ##########################.. 278/300
-  context-ctx      ##########################.. 239/259
+  context-ctx      ##########################.. 240/261
   witness-proof    #########################... 164/182
   policy-capability ##########################.. 216/233
   guard-gate       ###########################. 506/522
   pool             ####################........ 40/55
+  cache            ###########################. 320/333
   evict            #######################..... 55/68
-  cache            ###########################. 320/331
-  gateway-engine   ###########################. 204/215
+  gateway-engine   ##########################.. 204/217
   render-materialize ###########################. 212/221
   loop             ##########################.. 100/106
   support-maturity ##########################.. 69/73
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##############################..] 94.0%  (2902/3087 confusable tokens positioned)
+namespace coverage  [##############################..] 93.6%  (2903/3100 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 215
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 215/215
 
-name index: 3991 lookup name(s) -> 2792 concept(s), 84 ambiguous
+name index: 3992 lookup name(s) -> 2793 concept(s), 84 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **215 / 215** (215 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1890 / 4963 |
+| Boundaries drawn (mutual / total) | 1892 / 4965 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3991 over 2792 concepts |
+| Lookup names indexed | 3992 over 2793 concepts |
 | Lookup names landing on several concepts | 84 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2792 |
+| Concepts carrying a contrast set | 2793 |
 
 ## The concepts (best verdict first)
 
@@ -317,6 +317,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | context-ctx | **FAK_RECALL_MMR_LAMBDA** - The relevance/diversity trade-off weight for armed MMR recall reranking, in [0,1]: 1 is pure relevance (the rerank becomes a no-op reordering), 0 is pure novelty. Out-of-range values clamp and an unparseable one falls back to 0.7, which keeps relevance dominant so the diversity term breaks near-ties rather than dragging a weak-but-novel row past a strongly relevant one. |
 | * | crystal | symbol | context-ctx | **compaction_summary** - Regrowth attribution class for the compacted row's replacement_history: the summary transcript the Codex compactor injects into the fresh window after a fire (#4768), measured by row length only. |
 | * | crystal | symbol | context-ctx | **environment_context** - Upstream Codex marker (<environment_context>) that tags an injected environment header message in rollout transcripts; the #4768 regrowth scanner classifies rows containing it as reinjected instruction payload. |
+| * | crystal | symbol | context-ctx | **CompactionEvents (transcript content retention receipts)** - Per-file Codex compacted event receipts measuring supported explicit transcript UTF8 content before and after replacement history. |
 | * | crystal | symbol | cross-cluster | **core-image manifest** - internal/recall's Manifest: the persisted core image of a finished session - the page table, the frozen quarantine-clearance state, and a frozen world-version marker, with the bytes themselves living in a sibling cas.json swap device. |
 | * | crystal | symbol | cross-cluster | **policy manifest (on-disk JSON)** - internal/policy's Manifest: the on-disk capability-floor JSON an operator edits to configure the authorization intent - the abstract policy is compiled from this into an in-memory decision table. |
 | * | crystal | symbol | cross-cluster | **session.Verdict** - internal/session's Verdict: what Decide returns to the agent turn loop at each boundary - Proceed (gate the next turn), MaxTokens (per-turn output cap), the drive State, Stop, and a closed Reason naming why the slot freed. |
@@ -3064,8 +3065,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 24 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3073/4963 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2792 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3073/4965 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2793 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3074,23 +3075,23 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3991 lookup name(s) resolves - 84 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3992 lookup name(s) resolves - 84 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
+| session-runtime | 278 | 307 | 29 |
 | plan | 416 | 440 | 24 |
-| session-runtime | 278 | 300 | 22 |
-| context-ctx | 239 | 259 | 20 |
+| context-ctx | 240 | 261 | 21 |
 | witness-proof | 164 | 182 | 18 |
 | policy-capability | 216 | 233 | 17 |
 | guard-gate | 506 | 522 | 16 |
 | pool | 40 | 55 | 15 |
+| cache | 320 | 333 | 13 |
 | evict | 55 | 68 | 13 |
-| cache | 320 | 331 | 11 |
-| gateway-engine | 204 | 215 | 11 |
+| gateway-engine | 204 | 217 | 13 |
 | render-materialize | 212 | 221 | 9 |
 | loop | 100 | 106 | 6 |
 | support-maturity | 69 | 73 | 4 |
