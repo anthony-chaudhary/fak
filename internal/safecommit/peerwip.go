@@ -58,8 +58,14 @@ type PathAttributionResult struct {
 // ValidatePathAttribution validates that requested paths (including directory pathspecs)
 // do not sweep peer WIP or untracked conflicting peer work.
 func ValidatePathAttribution(ctx context.Context, run Runner, dir string, requestedPaths []string, opts PathAttributionOptions) (PathAttributionResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, peerWIPAttributionTimeout)
-	defer cancel()
+	if d, ok := ctx.Deadline(); !ok || time.Until(d) > peerWIPAttributionTimeout {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, peerWIPAttributionTimeout)
+		defer cancel()
+	}
+	if err := ctx.Err(); err != nil {
+		return PathAttributionResult{}, err
+	}
 	norm, ok := normalizePaths(requestedPaths)
 	if !ok || len(norm) == 0 {
 		return PathAttributionResult{OK: false, Reason: ReasonNoPath, Detail: "no valid repo-relative pathspec given"}, nil
@@ -75,8 +81,11 @@ func ValidatePathAttribution(ctx context.Context, run Runner, dir string, reques
 // checkPathAttributionFromStatus checks whether dirty/staged/untracked paths under requested
 // directory pathspecs collide with peer WIP or untracked peer work.
 func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string, requestedPaths []string, statusOut string, opts PathAttributionOptions) (PathAttributionResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, peerWIPAttributionTimeout)
-	defer cancel()
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, peerWIPAttributionTimeout)
+		defer cancel()
+	}
 	if err := ctx.Err(); err != nil {
 		return PathAttributionResult{}, err
 	}
