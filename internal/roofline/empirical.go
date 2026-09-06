@@ -51,6 +51,11 @@ const (
 	StrixHaloWMMAINT8TOPS = 120.0
 )
 
+var (
+	inspectHostStrixHaloFn    = amdgpu.InspectHostStrixHalo
+	forceHostInspectionInTest bool
+)
+
 // SweepPoint records measured or modeled throughput at a specific working-set footprint.
 type SweepPoint struct {
 	SizeMB        int     `json:"size_mb"`
@@ -100,21 +105,22 @@ type RooflineKneePoints struct {
 
 // EmpiricalRooflineReceipt represents an exportable, verified empirical micro-roofline measurement receipt.
 type EmpiricalRooflineReceipt struct {
-	Schema         string             `json:"schema"`
-	Device         string             `json:"device"`
-	DeviceName     string             `json:"device_name"`
-	Architecture   string             `json:"architecture"`
-	ComputeUnits   int                `json:"compute_units"`
-	BusWidthBits   int                `json:"bus_width_bits"`
-	MemoryType     string             `json:"memory_type"`
-	Simulated      bool               `json:"simulated"`
-	Timestamp      string             `json:"timestamp"`
-	DRAMBandwidth  DRAMBandwidthProbe `json:"dram_bandwidth"`
-	MALLSweep      MALLSweepProbe     `json:"mall_sweep"`
-	ComputeCeiling WMMAComputeCeiling `json:"compute_ceiling"`
-	KneePoints     RooflineKneePoints `json:"knee_points"`
-	Digest         string             `json:"digest,omitempty"`
-	Verified       bool               `json:"verified"`
+	Schema           string             `json:"schema"`
+	Device           string             `json:"device"`
+	DeviceName       string             `json:"device_name"`
+	Architecture     string             `json:"architecture"`
+	ComputeUnits     int                `json:"compute_units"`
+	BusWidthBits     int                `json:"bus_width_bits"`
+	MemoryType       string             `json:"memory_type"`
+	Simulated        bool               `json:"simulated"`
+	ExecutionWitness string             `json:"execution_witness,omitempty"`
+	Timestamp        string             `json:"timestamp"`
+	DRAMBandwidth    DRAMBandwidthProbe `json:"dram_bandwidth"`
+	MALLSweep        MALLSweepProbe     `json:"mall_sweep"`
+	ComputeCeiling   WMMAComputeCeiling `json:"compute_ceiling"`
+	KneePoints       RooflineKneePoints `json:"knee_points"`
+	Digest           string             `json:"digest,omitempty"`
+	Verified         bool               `json:"verified"`
 }
 
 // ComputeDigest calculates the canonical SHA-256 digest of the receipt payload.
@@ -137,6 +143,9 @@ func (r *EmpiricalRooflineReceipt) Verify() error {
 	}
 	if r.Device == "" {
 		return errors.New("roofline: missing device identifier")
+	}
+	if !r.Simulated && strings.TrimSpace(r.ExecutionWitness) == "" {
+		return errors.New("roofline: receipt claims physical execution (simulated=false) but lacks execution witness")
 	}
 	if r.ComputeUnits <= 0 {
 		return fmt.Errorf("roofline: invalid compute units: %d", r.ComputeUnits)
@@ -188,6 +197,9 @@ func (r *EmpiricalRooflineReceipt) String() string {
 	fmt.Fprintf(&b, "Schema:            %s\n", r.Schema)
 	fmt.Fprintf(&b, "Device:            %s (%s)\n", r.Device, r.DeviceName)
 	fmt.Fprintf(&b, "Execution Mode:    %s\n", mode)
+	if r.ExecutionWitness != "" {
+		fmt.Fprintf(&b, "Execution Witness: %s\n", r.ExecutionWitness)
+	}
 	fmt.Fprintf(&b, "Compute Units:     %d CUs (%s)\n", r.ComputeUnits, r.Architecture)
 	fmt.Fprintf(&b, "Memory Interface:  %d-bit %s (Theoretical Peak: %.2f GB/s)\n",
 		r.BusWidthBits, r.MemoryType, r.DRAMBandwidth.TheoreticalPeakGBps)
@@ -336,11 +348,14 @@ func MeasureEmpiricalRoofline(ctx context.Context, targetArch string) (*Empirica
 	isTestEnv := flag.Lookup("test.v") != nil || os.Getenv("GO_TEST") != ""
 	forceSim := os.Getenv("FAK_ROOFLINE_FORCE_SIM") == "1" || os.Getenv("FAK_ROOFLINE_SIM") == "1"
 
-	var isPhysical bool
-	if !isTestEnv && !forceSim {
-		// Attempt probing physical hardware
-		if _, hostErr := amdgpu.InspectHostStrixHalo(); hostErr == nil {
-			isPhysical = true
+	if (!isTestEnv || forceHostInspectionInTest) && !forceSim {
+		// Attempt probing physical hardware topology if available.
+		// Host APU inspection detects device presence on the system, but does not execute
+		// physical compute or memory kernels. Modeled empirical receipts retain Simulated=true
+		// and do not relabel analytical values as physical evidence merely because host APU
+		// inspection succeeds, until actual physical kernel execution occurs.
+		if _, hostErr := inspectHostStrixHaloFn(); hostErr == nil {
+			// Host APU detected, but physical kernel execution has not occurred.
 		}
 	}
 
@@ -416,14 +431,15 @@ func MeasureEmpiricalRoofline(ctx context.Context, targetArch string) (*Empirica
 	}
 
 	receipt := &EmpiricalRooflineReceipt{
-		Schema:         EmpiricalRooflineSchema,
-		Device:         normArch,
-		DeviceName:     profile.MarketingName,
-		Architecture:   "RDNA 3.5",
-		ComputeUnits:   profile.ComputeUnits,
-		BusWidthBits:   busWidth,
-		MemoryType:     profile.MemoryType,
-		Simulated:      !isPhysical,
+		Schema:       EmpiricalRooflineSchema,
+		Device:       normArch,
+		DeviceName:   profile.MarketingName,
+		Architecture: "RDNA 3.5",
+		ComputeUnits: profile.ComputeUnits,
+		BusWidthBits: busWidth,
+		MemoryType:   profile.MemoryType,
+		// Modeled empirical receipts retain Simulated=true until actual physical kernel execution occurs.
+		Simulated:      true,
 		Timestamp:      time.Now().UTC().Format(time.RFC3339),
 		DRAMBandwidth:  dramProbe,
 		MALLSweep:      mallProbe,

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/amdgpu"
 )
 
 // TestMeasureEmpiricalRoofline_SchemaCompliance verifies schema, invariants, and cryptographic digest.
@@ -43,6 +45,9 @@ func TestMeasureEmpiricalRoofline_SchemaCompliance(t *testing.T) {
 	}
 	if !receipt.Verified {
 		t.Errorf("receipt.Verified = false, want true")
+	}
+	if !receipt.Simulated {
+		t.Errorf("receipt.Simulated = %v, want true", receipt.Simulated)
 	}
 	if !strings.HasPrefix(receipt.Digest, "sha256:") {
 		t.Errorf("digest %q does not start with sha256:", receipt.Digest)
@@ -130,6 +135,83 @@ func TestMeasureEmpiricalRoofline_TamperingFailsVerification(t *testing.T) {
 	tampered.Verified = false
 	if err := tampered.Verify(); err == nil {
 		t.Errorf("expected error when Verified=false, got nil")
+	}
+
+	// 8. Physical execution without execution witness
+	tampered = *receipt
+	tampered.Simulated = false
+	tampered.ExecutionWitness = ""
+	if err := tampered.Verify(); err == nil {
+		t.Errorf("expected error when Simulated=false without execution witness, got nil")
+	}
+
+	// 8b. Physical execution with whitespace-only execution witness
+	tampered = *receipt
+	tampered.Simulated = false
+	tampered.ExecutionWitness = "   "
+	if err := tampered.Verify(); err == nil {
+		t.Errorf("expected error when Simulated=false with whitespace execution witness, got nil")
+	}
+
+	// 9. Physical execution with execution witness and recomputed digest
+	tampered = *receipt
+	tampered.Simulated = false
+	tampered.ExecutionWitness = "rocm:kfd:gfx1151:kernel_dispatch:0x1234abcd"
+	witnessDigest, err := tampered.ComputeDigest()
+	if err != nil {
+		t.Fatalf("failed to compute digest for witnessed physical receipt: %v", err)
+	}
+	tampered.Digest = witnessDigest
+	if err := tampered.Verify(); err != nil {
+		t.Errorf("expected witnessed physical receipt to pass Verify(), got: %v", err)
+	}
+	if !strings.Contains(tampered.String(), "Execution Witness: rocm:kfd:gfx1151:kernel_dispatch:0x1234abcd") {
+		t.Errorf("expected string output to contain formatted execution witness")
+	}
+}
+
+// TestMeasureEmpiricalRoofline_HostInspectionRetainsSimulated verifies that successful host
+// APU inspection alone does not relabel modeled empirical receipts as physical execution.
+func TestMeasureEmpiricalRoofline_HostInspectionRetainsSimulated(t *testing.T) {
+	origInspectFn := inspectHostStrixHaloFn
+	origForce := forceHostInspectionInTest
+	defer func() {
+		inspectHostStrixHaloFn = origInspectFn
+		forceHostInspectionInTest = origForce
+	}()
+
+	var invoked bool
+	inspectHostStrixHaloFn = func() (*amdgpu.StrixHaloServingConfig, error) {
+		invoked = true
+		return &amdgpu.StrixHaloServingConfig{Platform: amdgpu.StrixHalo128GB}, nil
+	}
+	forceHostInspectionInTest = true
+
+	ctx := context.Background()
+	receipt, err := MeasureEmpiricalRoofline(ctx, "gfx1151")
+	if err != nil {
+		t.Fatalf("MeasureEmpiricalRoofline failed: %v", err)
+	}
+
+	if !invoked {
+		t.Errorf("expected inspectHostStrixHaloFn mock to be invoked, but was not")
+	}
+	if !receipt.Simulated {
+		t.Errorf("receipt.Simulated = %v, want true", receipt.Simulated)
+	}
+	if receipt.ExecutionWitness != "" {
+		t.Errorf("receipt.ExecutionWitness = %q, want empty", receipt.ExecutionWitness)
+	}
+	if err := receipt.Verify(); err != nil {
+		t.Errorf("receipt.Verify() failed: %v", err)
+	}
+
+	str := receipt.String()
+	if !strings.Contains(str, "Calibrated Architecture Model (Simulated)") {
+		t.Errorf("receipt.String() missing %q, got:\n%s", "Calibrated Architecture Model (Simulated)", str)
+	}
+	if strings.Contains(str, "Physical Device Execution") {
+		t.Errorf("receipt.String() unexpectedly contains %q, got:\n%s", "Physical Device Execution", str)
 	}
 }
 
