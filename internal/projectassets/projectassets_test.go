@@ -637,3 +637,219 @@ func TestOpenCodeHarnessReceiptAndZeroUnexplainedGaps(t *testing.T) {
 		t.Fatalf("repo root opencode harness has stale adapters: %v", repoOpenCode.Stale)
 	}
 }
+
+func TestOpenCodePluginAssetByteParity(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	canonicalPath := filepath.Join(repoRoot, filepath.FromSlash(OpenCodePluginPath))
+	b, err := os.ReadFile(canonicalPath)
+	if err != nil {
+		t.Fatalf("failed to read canonical plugin at %s: %v", canonicalPath, err)
+	}
+	canonical := strings.ReplaceAll(string(b), "\r\n", "\n")
+	embedded := strings.ReplaceAll(DefaultOpenCodePlugin, "\r\n", "\n")
+	if canonical != embedded {
+		t.Fatalf("embedded DefaultOpenCodePlugin does not match disk asset %s", canonicalPath)
+	}
+}
+
+func TestVerifyOpenCodePlugin(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	if err := VerifyOpenCodePlugin(repoRoot); err != nil {
+		t.Fatalf("VerifyOpenCodePlugin failed on repo root: %v", err)
+	}
+
+	// Test missing plugin in empty temp directory
+	tmp := t.TempDir()
+	if err := VerifyOpenCodePlugin(tmp); err == nil {
+		t.Fatal("expected error for missing plugin, got nil")
+	}
+
+	// Test empty plugin file
+	write(t, tmp, OpenCodePluginPath, "   \n\t  ")
+	if err := VerifyOpenCodePlugin(tmp); err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("expected empty plugin error, got: %v", err)
+	}
+
+	// Test missing execution hook
+	write(t, tmp, OpenCodePluginPath, "export default function() {}")
+	if err := VerifyOpenCodePlugin(tmp); err == nil || !strings.Contains(err.Error(), "tool.execute.before") {
+		t.Fatalf("expected missing tool.execute.before error, got: %v", err)
+	}
+
+	// Test missing mutation interception
+	write(t, tmp, OpenCodePluginPath, "export default function() { return { 'tool.execute.before': async () => {} }; }")
+	if err := VerifyOpenCodePlugin(tmp); err == nil || !strings.Contains(err.Error(), "write") {
+		t.Fatalf("expected missing mutation tool interception error, got: %v", err)
+	}
+
+	// Test missing FAK lease checks
+	write(t, tmp, OpenCodePluginPath, "export default function() { return { 'tool.execute.before': async () => { const m = ['write', 'edit', 'apply_patch']; } }; }")
+	if err := VerifyOpenCodePlugin(tmp); err == nil || !strings.Contains(err.Error(), "leaseref") {
+		t.Fatalf("expected missing leaseref error, got: %v", err)
+	}
+
+	// Test missing DOS arbitration checks
+	write(t, tmp, OpenCodePluginPath, "export default function() { return { 'tool.execute.before': async () => { const m = ['write', 'edit', 'apply_patch']; fak('leaseref'); fak('loop'); } }; }")
+	if err := VerifyOpenCodePlugin(tmp); err == nil || !strings.Contains(err.Error(), "live_leases") {
+		t.Fatalf("expected missing live_leases error, got: %v", err)
+	}
+}
+
+func TestSyncAndEnsureOpenCodePlugin(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Initially missing
+	if err := EnsureOpenCodePlugin(tmp, false); err == nil {
+		t.Fatal("expected EnsureOpenCodePlugin with autoSync=false to fail on empty dir")
+	}
+
+	// autoSync=true writes and verifies the plugin
+	if err := EnsureOpenCodePlugin(tmp, true); err != nil {
+		t.Fatalf("EnsureOpenCodePlugin with autoSync=true failed: %v", err)
+	}
+	if err := VerifyOpenCodePlugin(tmp); err != nil {
+		t.Fatalf("VerifyOpenCodePlugin failed after autoSync: %v", err)
+	}
+
+	// Explicit SyncOpenCodePlugin also succeeds
+	tmp2 := t.TempDir()
+	if err := SyncOpenCodePlugin(tmp2); err != nil {
+		t.Fatalf("SyncOpenCodePlugin failed: %v", err)
+	}
+	if err := VerifyOpenCodePlugin(tmp2); err != nil {
+		t.Fatalf("VerifyOpenCodePlugin failed after SyncOpenCodePlugin: %v", err)
+	}
+
+	// Corrupted plugin repaired by autoSync
+	write(t, tmp, OpenCodePluginPath, "corrupted plugin missing all checks")
+	if err := EnsureOpenCodePlugin(tmp, false); err == nil {
+		t.Fatal("expected EnsureOpenCodePlugin with autoSync=false to fail on corrupted plugin")
+	}
+	if err := EnsureOpenCodePlugin(tmp, true); err != nil {
+		t.Fatalf("EnsureOpenCodePlugin with autoSync=true failed to repair corrupted plugin: %v", err)
+	}
+	if err := VerifyOpenCodePlugin(tmp); err != nil {
+		t.Fatalf("VerifyOpenCodePlugin failed after repair: %v", err)
+	}
+}
+
+func TestEnsureVerifiesOpenCodePluginWithoutBreaking(t *testing.T) {
+	// 1. Repo root Ensure works cleanly both without and with autoSync
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	receipt, err := Ensure(repoRoot, false)
+	if err != nil {
+		t.Fatalf("Ensure(repoRoot, false) failed: %v", err)
+	}
+	if !receipt.ZeroUnexplainedGaps {
+		t.Fatal("expected repoRoot to have ZeroUnexplainedGaps=true")
+	}
+	receiptSync, err := Ensure(repoRoot, true)
+	if err != nil {
+		t.Fatalf("Ensure(repoRoot, true) failed: %v", err)
+	}
+	if !receiptSync.ZeroUnexplainedGaps {
+		t.Fatal("expected repoRoot to have ZeroUnexplainedGaps=true after sync")
+	}
+
+	// 2. Fixture without .opencode directory: Ensure works without breaking
+	r := fixture(t)
+	receiptNoOpenCode, err := Ensure(r, true)
+	if err != nil {
+		t.Fatalf("Ensure on fixture without .opencode failed: %v", err)
+	}
+	if !receiptNoOpenCode.ZeroUnexplainedGaps {
+		t.Fatal("expected fixture to have ZeroUnexplainedGaps=true after Ensure")
+	}
+	// Verify that .opencode was not spuriously created when absent
+	if _, err := os.Stat(filepath.Join(r, ".opencode")); !os.IsNotExist(err) {
+		t.Fatal("expected .opencode to not be created on workspace without .opencode directory")
+	}
+
+	// 3. Workspace with .opencode directory: Ensure and EnsureSync synchronize and verify the plugin
+	rWithOpenCode := fixture(t)
+	if err := os.MkdirAll(filepath.Join(rWithOpenCode, ".opencode"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Ensure(autoSync=false) on workspace with .opencode directory but missing plugin must fail
+	if _, err := Ensure(rWithOpenCode, false); err == nil {
+		t.Fatal("expected Ensure(autoSync=false) to fail on missing OpenCode plugin in workspace with .opencode")
+	}
+
+	// EnsureSync on workspace with .opencode directory and missing plugin must sync the plugin and return synced=true
+	receiptSyncOpenCode, syncedOpenCode, err := EnsureSync(rWithOpenCode)
+	if err != nil {
+		t.Fatalf("EnsureSync failed on workspace with .opencode: %v", err)
+	}
+	if !syncedOpenCode {
+		t.Fatal("expected EnsureSync to return synced=true when OpenCode plugin was missing")
+	}
+	if !receiptSyncOpenCode.ZeroUnexplainedGaps {
+		t.Fatal("expected workspace with .opencode to have ZeroUnexplainedGaps=true after EnsureSync")
+	}
+	if err := VerifyOpenCodePlugin(rWithOpenCode); err != nil {
+		t.Fatalf("VerifyOpenCodePlugin failed on workspace after EnsureSync: %v", err)
+	}
+
+	// Second run of EnsureSync on clean workspace returns synced=false
+	_, syncedAgain, err := EnsureSync(rWithOpenCode)
+	if err != nil {
+		t.Fatalf("EnsureSync failed on clean workspace: %v", err)
+	}
+	if syncedAgain {
+		t.Fatal("expected EnsureSync to return synced=false when workspace is already in parity")
+	}
+
+	receiptWithOpenCode, err := Ensure(rWithOpenCode, true)
+	if err != nil {
+		t.Fatalf("Ensure on workspace with .opencode failed: %v", err)
+	}
+	if !receiptWithOpenCode.ZeroUnexplainedGaps {
+		t.Fatal("expected workspace with .opencode to have ZeroUnexplainedGaps=true")
+	}
+	if err := VerifyOpenCodePlugin(rWithOpenCode); err != nil {
+		t.Fatalf("VerifyOpenCodePlugin failed on workspace after Ensure(autoSync=true): %v", err)
+	}
+
+	// Ensure(autoSync=false) on workspace with valid plugin succeeds
+	cleanReceipt, err := Ensure(rWithOpenCode, false)
+	if err != nil {
+		t.Fatalf("Ensure(autoSync=false) on clean workspace failed: %v", err)
+	}
+	if !cleanReceipt.ZeroUnexplainedGaps {
+		t.Fatal("expected cleanReceipt.ZeroUnexplainedGaps=true")
+	}
+
+	// If the plugin is corrupted, Ensure(autoSync=false) catches the defect
+	write(t, rWithOpenCode, OpenCodePluginPath, "corrupted plugin")
+	if _, err := Ensure(rWithOpenCode, false); err == nil {
+		t.Fatal("expected Ensure(autoSync=false) to fail on corrupted plugin in workspace")
+	}
+
+	// EnsureSync heals the corrupted plugin and returns synced=true
+	healedSyncReceipt, syncedHealed, err := EnsureSync(rWithOpenCode)
+	if err != nil {
+		t.Fatalf("EnsureSync failed to heal corrupted plugin: %v", err)
+	}
+	if !syncedHealed {
+		t.Fatal("expected EnsureSync to return synced=true when healing corrupted plugin")
+	}
+	if !healedSyncReceipt.ZeroUnexplainedGaps {
+		t.Fatal("expected healedSyncReceipt.ZeroUnexplainedGaps=true")
+	}
+	if err := VerifyOpenCodePlugin(rWithOpenCode); err != nil {
+		t.Fatalf("VerifyOpenCodePlugin failed after EnsureSync heal: %v", err)
+	}
+
+	// Ensure(autoSync=true) succeeds when already in parity
+	healedReceipt, err := Ensure(rWithOpenCode, true)
+	if err != nil {
+		t.Fatalf("Ensure(autoSync=true) failed on healed workspace: %v", err)
+	}
+	if !healedReceipt.ZeroUnexplainedGaps {
+		t.Fatal("expected healedReceipt.ZeroUnexplainedGaps=true")
+	}
+	if err := VerifyOpenCodePlugin(rWithOpenCode); err != nil {
+		t.Fatalf("VerifyOpenCodePlugin failed after heal: %v", err)
+	}
+}
