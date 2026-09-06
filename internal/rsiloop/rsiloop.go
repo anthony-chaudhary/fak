@@ -22,12 +22,14 @@ package rsiloop
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gym"
 	"github.com/anthony-chaudhary/fak/internal/shipgate"
@@ -36,6 +38,31 @@ import (
 // DefaultTransientMeasurementRecoveryLimit is the default maximum number of
 // recovery retries permitted for transient measurement errors per candidate.
 const DefaultTransientMeasurementRecoveryLimit = 2
+
+// DefaultTransientRetryBaseBackoff is the default base backoff duration between
+// transient measurement retries (10ms).
+const DefaultTransientRetryBaseBackoff = 10 * time.Millisecond
+
+// DefaultTransientRetryMaxBackoff is the maximum backoff duration cap between
+// transient measurement retries (500ms).
+const DefaultTransientRetryMaxBackoff = 500 * time.Millisecond
+
+// DefaultTransientRetryBackoff computes the exponential backoff duration for a given
+// retry attempt (0-indexed: attempt 0 is the delay after the 1st failure, before attempt 1).
+// The backoff doubles from DefaultTransientRetryBaseBackoff (10ms) up to DefaultTransientRetryMaxBackoff (500ms).
+func DefaultTransientRetryBackoff(attempt int) time.Duration {
+	if attempt < 0 {
+		attempt = 0
+	}
+	if attempt > 10 {
+		return DefaultTransientRetryMaxBackoff
+	}
+	d := DefaultTransientRetryBaseBackoff * (1 << attempt)
+	if d > DefaultTransientRetryMaxBackoff {
+		return DefaultTransientRetryMaxBackoff
+	}
+	return d
+}
 
 // TransientMeasureError marks an error as a recoverable transient measurement
 // condition (e.g. temporary environment/infrastructure failure, lock contention,
@@ -209,6 +236,15 @@ type Harness struct {
 	// a transient/recoverable infrastructure failure rather than candidate regression.
 	// When nil, rsiloop.IsTransientMeasureError is used.
 	IsTransientMeasureError func(error) bool
+	// TransientRetryBackoff optionally provides a custom backoff calculation for
+	// transient retry attempts. When nil, DefaultTransientRetryBackoff is used.
+	TransientRetryBackoff func(attempt int) time.Duration
+	// TransientRetrySleep optionally hooks or overrides the delay applied between
+	// transient measurement retries. If nil, time.Sleep is used (or context-aware
+	// waiting if Context is provided).
+	TransientRetrySleep func(d time.Duration)
+	// Context optionally allows cancellation of Run/RunObserved during retry delays.
+	Context context.Context
 }
 
 func (h Harness) isTransientError(err error) bool {
@@ -229,6 +265,41 @@ func (h Harness) transientRecoveryLimit() int {
 		return h.TransientMeasurementRecoveryLimit
 	}
 	return DefaultTransientMeasurementRecoveryLimit
+}
+
+func (h Harness) transientRetryBackoff(attempt int) time.Duration {
+	if h.TransientRetryBackoff != nil {
+		return h.TransientRetryBackoff(attempt)
+	}
+	return DefaultTransientRetryBackoff(attempt)
+}
+
+func (h Harness) sleep(delay time.Duration) error {
+	if h.Context != nil && h.Context.Err() != nil {
+		return h.Context.Err()
+	}
+	if h.TransientRetrySleep != nil {
+		h.TransientRetrySleep(delay)
+		if h.Context != nil {
+			return h.Context.Err()
+		}
+		return nil
+	}
+	if delay <= 0 {
+		return nil
+	}
+	if h.Context != nil {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-h.Context.Done():
+			return h.Context.Err()
+		case <-timer.C:
+			return nil
+		}
+	}
+	time.Sleep(delay)
+	return nil
 }
 
 // needsGymExecution inspects a candidate to determine if it touches self-improving policy
@@ -398,6 +469,9 @@ func RunObserved(h Harness, j *Journal, k, maxCycles int, obs Observer) (Result,
 
 	cands := h.Candidates()
 	for i, c := range cands {
+		if h.Context != nil && h.Context.Err() != nil {
+			return res, h.Context.Err()
+		}
 		if maxCycles > 0 && i >= maxCycles {
 			break
 		}
@@ -478,8 +552,13 @@ func RunObserved(h Harness, j *Journal, k, maxCycles int, obs Observer) (Result,
 				}
 			}
 			res.Rows = append(res.Rows, attemptRow)
-			if obs != nil {
-				obs(attemptRow)
+
+			// Intermediate RETRY rows are suppressed from obs dispatch (#11692)
+			// so external observers receive only terminal decisions and no duplicate cycle IDs.
+
+			delay := h.transientRetryBackoff(attempt)
+			if err := h.sleep(delay); err != nil {
+				return res, fmt.Errorf("transient retry delay: %w", err)
 			}
 		}
 
