@@ -10,10 +10,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
 )
 
-// tinyCfg is a minimal valid model.Config; NewSynthetic on it is cheap. The weights are
-// meaningless (synthetic) — what is faithful is that each id binds a distinct, real
-// *model.Model handle, which is exactly what the residency binding + page-out hand-back
-// witness need. (Mirrors modelengine.SyntheticConfig's shape.)
+// tinyCfg returns a minimal valid model.Config for synthetic test models.
 func tinyCfg() model.Config {
 	return model.Config{
 		HiddenSize: 64, NumLayers: 2, NumHeads: 4, NumKVHeads: 2, HeadDim: 16,
@@ -27,10 +24,8 @@ func newModel(t *testing.T) *model.Model {
 	return model.NewSynthetic(tinyCfg())
 }
 
-// TestBudgetNeverExceeded drives an over-budget admit sequence and asserts the
-// polymodel invariant — used <= budget — after every Admit. The residency layer
-// inherits it by delegating the budget test to polymodel.Pool; this witness proves the
-// delegation is wired (not just claimed).
+// TestBudgetNeverExceeded verifies that resident weight bytes never exceed the configured budget
+// and that resident count matches Len().
 func TestBudgetNeverExceeded(t *testing.T) {
 	r := New(500)
 	for i, id := range []string{"a", "b", "c", "d", "e"} {
@@ -40,12 +35,14 @@ func TestBudgetNeverExceeded(t *testing.T) {
 		if r.Used() > r.Budget() {
 			t.Fatalf("after %s: used %d > budget %d", id, r.Used(), r.Budget())
 		}
+		if r.Len() != len(r.Resident()) {
+			t.Fatalf("Len() %d != len(Resident()) %d", r.Len(), len(r.Resident()))
+		}
 	}
 }
 
-// TestLRUEvictsColdestUnpinned proves a hot model survives an over-budget admit while a
-// cold one is paged out, and that the evicted *model.Model handle is handed back (the
-// page-out signal polymodel.Pool alone cannot give — it returns only IDs).
+// TestLRUEvictsColdestUnpinned verifies that over-budget admission evicts coldest unpinned
+// models in LRU order and returns their weight handles.
 func TestLRUEvictsColdestUnpinned(t *testing.T) {
 	r := New(200)
 	mA, mB := newModel(t), newModel(t)
@@ -55,7 +52,7 @@ func TestLRUEvictsColdestUnpinned(t *testing.T) {
 	if _, err := r.Admit("B", mB, 100, "fam", "", false); err != nil {
 		t.Fatal(err)
 	}
-	if !r.Touch("A") { // A hot → B is the coldest
+	if !r.Touch("A") {
 		t.Fatal("Touch A: not resident")
 	}
 	evicted, err := r.Admit("C", newModel(t), 100, "fam", "", false)
@@ -66,7 +63,7 @@ func TestLRUEvictsColdestUnpinned(t *testing.T) {
 		t.Fatalf("expected [B] evicted, got %v", evicted)
 	}
 	if evicted[0].Weights != mB {
-		t.Fatal("evicted handle is not B's *model.Model — page-out hand-back lost the binding")
+		t.Fatal("evicted handle is not B's *model.Model")
 	}
 	if _, ok := r.Get("B"); ok {
 		t.Fatal("B still resident after eviction")
@@ -76,18 +73,16 @@ func TestLRUEvictsColdestUnpinned(t *testing.T) {
 	}
 }
 
-// TestPinnedNeverEvicted proves a pinned model is exempt from LRU eviction, and that an
-// admit which would require dropping a pinned resident fails CLOSED (ErrPinnedNoRoom)
-// leaving the resident set unchanged.
+// TestPinnedNeverEvicted verifies that pinned models are exempt from LRU eviction and
+// admissions failing due to pinned capacity leave state unchanged.
 func TestPinnedNeverEvicted(t *testing.T) {
 	r := New(150)
 	if _, err := r.Admit("P", newModel(t), 100, "fam", "", true); err != nil {
 		t.Fatal(err)
-	} // pinned; 100/150
+	}
 	if _, err := r.Admit("Q", newModel(t), 50, "fam", "", false); err != nil {
 		t.Fatal(err)
-	} // 150/150
-	// R(50) fits by evicting Q (the only unpinned resident); P stays.
+	}
 	evicted, err := r.Admit("R", newModel(t), 50, "fam", "", false)
 	if err != nil {
 		t.Fatalf("R should fit by evicting Q: %v", err)
@@ -98,8 +93,6 @@ func TestPinnedNeverEvicted(t *testing.T) {
 	if _, ok := r.Get("P"); !ok {
 		t.Fatal("pinned P was evicted")
 	}
-	// Now P(100,pinned)+R(50). S(60) needs 60; only R(50,unpinned) is evictable, freeing
-	// 50 < 60 → ErrPinnedNoRoom, set unchanged.
 	_, err = r.Admit("S", newModel(t), 60, "fam", "", false)
 	if !errors.Is(err, polymodel.ErrPinnedNoRoom) {
 		t.Fatalf("expected ErrPinnedNoRoom, got %v", err)
@@ -109,8 +102,7 @@ func TestPinnedNeverEvicted(t *testing.T) {
 	}
 }
 
-// TestAdmitAllOrNothing proves an erroring admit leaves the resident set byte-for-byte
-// unchanged (no half-eviction): a too-large model neither evicts nor admits.
+// TestAdmitAllOrNothing verifies that failed admission leaves the resident set unchanged.
 func TestAdmitAllOrNothing(t *testing.T) {
 	r := New(100)
 	if _, err := r.Admit("A", newModel(t), 100, "fam", "", false); err != nil {
@@ -129,8 +121,8 @@ func TestAdmitAllOrNothing(t *testing.T) {
 	}
 }
 
-// TestReAdmitIsTouch proves re-admitting a resident id is a recency update, not a new
-// entry — and that it evicts nothing.
+// TestReAdmitIsTouch verifies that re-admitting an existing model updates recency without
+// duplicating or evicting entries.
 func TestReAdmitIsTouch(t *testing.T) {
 	r := New(300)
 	if _, err := r.Admit("A", newModel(t), 100, "fam", "", false); err != nil {
@@ -148,8 +140,7 @@ func TestReAdmitIsTouch(t *testing.T) {
 	}
 }
 
-// TestEvictHandBack proves explicit Evict returns the bound weight handle and clears
-// residency, and is a no-op (false) on a non-resident id.
+// TestEvictHandBack verifies that Evict unbinds the model and returns its weight handle.
 func TestEvictHandBack(t *testing.T) {
 	r := New(1000)
 	m := newModel(t)
@@ -168,8 +159,7 @@ func TestEvictHandBack(t *testing.T) {
 	}
 }
 
-// TestNilWeightsRejected proves Admit requires a real weight handle (the binding is the
-// point of this layer — a nil handle has nothing to bind).
+// TestNilWeightsRejected verifies that Admit rejects nil weight models with ErrNilWeights.
 func TestNilWeightsRejected(t *testing.T) {
 	r := New(1000)
 	if _, err := r.Admit("N", nil, 10, "fam", "", false); !errors.Is(err, ErrNilWeights) {
@@ -177,9 +167,7 @@ func TestNilWeightsRejected(t *testing.T) {
 	}
 }
 
-// TestDescriptorRoundTrip proves the family / prefixDigest / pinned / weightBytes keys
-// survive the descriptor→weights binding (they are what cross-model prefill share and
-// ensemble speculation key on).
+// TestDescriptorRoundTrip verifies that descriptor metadata survives admission.
 func TestDescriptorRoundTrip(t *testing.T) {
 	r := New(1000)
 	if _, err := r.Admit("M", newModel(t), 100, "qwen", "digest42", true); err != nil {
@@ -194,9 +182,8 @@ func TestDescriptorRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSetBudgetShrinkPagesOutLRU shrinks the resident budget at runtime and asserts the
-// coldest UNPINNED residents are paged out in LRU order with their weight handles handed
-// back — the page-out signal polymodel.Pool.Resize alone cannot give (it returns only IDs).
+// TestSetBudgetShrinkPagesOutLRU verifies that decreasing budget evicts coldest unpinned
+// models in LRU order.
 func TestSetBudgetShrinkPagesOutLRU(t *testing.T) {
 	r := New(300)
 	mA, mB, mC := newModel(t), newModel(t), newModel(t)
@@ -209,8 +196,6 @@ func TestSetBudgetShrinkPagesOutLRU(t *testing.T) {
 	if _, err := r.Admit("C", mC, 100, "fam", "", false); err != nil {
 		t.Fatal(err)
 	}
-	// Hotten B then C; A stays coldest. Shrinking 300→150 frees 150: evict A then B
-	// (coldest-first), leaving C (100 <= 150).
 	r.Touch("B")
 	r.Touch("C")
 	evicted, err := r.SetBudget(150)
@@ -234,8 +219,7 @@ func TestSetBudgetShrinkPagesOutLRU(t *testing.T) {
 	}
 }
 
-// TestSetBudgetGrowPagesOutNothing proves growing the budget evicts nothing and keeps every
-// binding — the hot-add-headroom direction of the runtime knob.
+// TestSetBudgetGrowPagesOutNothing verifies that increasing budget does not evict models.
 func TestSetBudgetGrowPagesOutNothing(t *testing.T) {
 	r := New(200)
 	if _, err := r.Admit("A", newModel(t), 100, "fam", "", false); err != nil {
@@ -250,19 +234,17 @@ func TestSetBudgetGrowPagesOutNothing(t *testing.T) {
 	}
 }
 
-// TestSetBudgetPinnedOverflowRefused shrinks below the pinned footprint: no eviction can
-// make room, so SetBudget refuses with ErrPinnedNoRoom and the resident set (and its
-// bindings) are byte-for-byte unchanged — the runtime re-budget fails CLOSED.
+// TestSetBudgetPinnedOverflowRefused verifies that shrinking budget below pinned footprint
+// fails without mutating state.
 func TestSetBudgetPinnedOverflowRefused(t *testing.T) {
 	r := New(200)
 	if _, err := r.Admit("P", newModel(t), 120, "fam", "", true); err != nil {
-		t.Fatal(err) // pinned
+		t.Fatal(err)
 	}
 	if _, err := r.Admit("Q", newModel(t), 60, "fam", "", false); err != nil {
 		t.Fatal(err)
 	}
 	before, ln := r.Used(), r.Len()
-	// Shrink to 100 < pinned 120: evicting all unpinned (Q=60) still leaves 120 > 100.
 	if _, err := r.SetBudget(100); !errors.Is(err, polymodel.ErrPinnedNoRoom) {
 		t.Fatalf("SetBudget below pinned footprint: err=%v, want ErrPinnedNoRoom", err)
 	}
@@ -274,9 +256,57 @@ func TestSetBudgetPinnedOverflowRefused(t *testing.T) {
 	}
 }
 
-// TestConcurrentAdmit proves the Manager is safe under concurrent admitters and that the
-// budget invariant survives the race (run with -race). The mutex makes each Admit atomic;
-// used can never exceed budget regardless of interleaving.
+// TestNegativeBudgetClamped verifies that negative budgets clamp to zero on New and SetBudget.
+func TestNegativeBudgetClamped(t *testing.T) {
+	r := New(-500)
+	if r.Budget() != 0 {
+		t.Fatalf("expected budget 0, got %d", r.Budget())
+	}
+	_, err := r.Admit("A", newModel(t), 100, "fam", "", false)
+	if !errors.Is(err, polymodel.ErrTooLarge) {
+		t.Fatalf("expected ErrTooLarge, got %v", err)
+	}
+
+	r2 := New(200)
+	if _, err := r2.Admit("B", newModel(t), 100, "fam", "", false); err != nil {
+		t.Fatal(err)
+	}
+	evicted, err := r2.SetBudget(-100)
+	if err != nil {
+		t.Fatalf("SetBudget negative: %v", err)
+	}
+	if r2.Budget() != 0 {
+		t.Fatalf("expected clamped budget 0, got %d", r2.Budget())
+	}
+	if len(evicted) != 1 || evicted[0].ID != "B" {
+		t.Fatalf("expected B evicted, got %v", evicted)
+	}
+	if r2.Len() != 0 || r2.Used() != 0 {
+		t.Fatalf("expected empty manager, len=%d used=%d", r2.Len(), r2.Used())
+	}
+}
+
+// TestNonResidentOperations verifies that operations on missing IDs return zero values without mutation.
+func TestNonResidentOperations(t *testing.T) {
+	r := New(500)
+	if _, ok := r.Get("missing"); ok {
+		t.Fatal("expected Get on missing to return false")
+	}
+	if ok := r.Touch("missing"); ok {
+		t.Fatal("expected Touch on missing to return false")
+	}
+	if _, ok := r.Descriptor("missing"); ok {
+		t.Fatal("expected Descriptor on missing to return false")
+	}
+	if _, ok := r.Evict("missing"); ok {
+		t.Fatal("expected Evict on missing to return false")
+	}
+	if r.Len() != 0 || len(r.Resident()) != 0 {
+		t.Fatalf("state mutated: len=%d resident=%v", r.Len(), r.Resident())
+	}
+}
+
+// TestConcurrentAdmit verifies concurrent safety and budget enforcement under contention.
 func TestConcurrentAdmit(t *testing.T) {
 	r := New(400)
 	var wg sync.WaitGroup
