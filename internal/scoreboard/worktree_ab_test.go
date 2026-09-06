@@ -135,6 +135,9 @@ func TestWorktreeABAcceptedDeliveryAccounting(t *testing.T) {
 			{"negative phase duration", []DeliveryLifecycleRecord{
 				{IssueID: 101, Outcome: OutcomeAccepted, ExecutionDuration: -10, TotalElapsed: 50},
 			}, 3600.0},
+			{"sub-phase duration exceeds total elapsed", []DeliveryLifecycleRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, SetupDuration: 10, ExecutionDuration: 50, TotalElapsed: 50},
+			}, 3600.0},
 		}
 
 		for _, bc := range boundaryCases {
@@ -1126,6 +1129,44 @@ func TestWorktreeABIssuesPerHourFailsClosed(t *testing.T) {
 				DurationSeconds: 3600,
 				Accounting: AcceptedDeliveryAccounting{
 					Status:                 "COMPLETE",
+					Verified:               true,
+					AcceptedPerElapsedHour: 10.0,
+				},
+			},
+			want: 10.0,
+		},
+		{
+			name: "accounting status incomplete with positive rate suppresses throughput",
+			arm: WorktreeABArm{
+				DurationSeconds: 3600,
+				Accounting: AcceptedDeliveryAccounting{
+					Status:                 "INCOMPLETE",
+					Verified:               false,
+					AcceptedDeliveries:     2,
+					AcceptedPerElapsedHour: 10.0,
+				},
+			},
+			want: 0,
+		},
+		{
+			name: "accounting status unverified suppresses throughput",
+			arm: WorktreeABArm{
+				DurationSeconds: 3600,
+				Accounting: AcceptedDeliveryAccounting{
+					Status:                 "COMPLETE",
+					Verified:               false,
+					AcceptedDeliveries:     2,
+					AcceptedPerElapsedHour: 10.0,
+				},
+			},
+			want: 0,
+		},
+		{
+			name: "accounting status VERIFIED with valid rate",
+			arm: WorktreeABArm{
+				DurationSeconds: 3600,
+				Accounting: AcceptedDeliveryAccounting{
+					Status:                 "VERIFIED",
 					AcceptedPerElapsedHour: 10.0,
 				},
 			},
@@ -1138,6 +1179,235 @@ func TestWorktreeABIssuesPerHourFailsClosed(t *testing.T) {
 			got := tc.arm.IssuesPerHour()
 			if math.IsNaN(got) || math.IsInf(got, 0) || math.Abs(got-tc.want) > 1e-6 {
 				t.Fatalf("IssuesPerHour() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWorktreeABIncompleteAccountingSuppressesThroughput(t *testing.T) {
+	arm := WorktreeABArm{
+		Name:            "isolated",
+		DurationSeconds: 3600.0,
+		Accounting: AcceptedDeliveryAccounting{
+			Status:                 "INCOMPLETE",
+			Verified:               false,
+			AcceptedDeliveries:     3,
+			AcceptedPerElapsedHour: 3.0,
+		},
+		PoisonIncidents: 0,
+		PeakConcurrency: 4,
+	}
+
+	if got := arm.IssuesPerHour(); got != 0.0 {
+		t.Fatalf("arm.IssuesPerHour() = %v, want 0.0", got)
+	}
+
+	rep := WorktreeABReport{
+		Baseline: WorktreeABArm{
+			Name:            "baseline",
+			DurationSeconds: 3600.0,
+			Accounting: AcceptedDeliveryAccounting{
+				Status:                 "COMPLETE",
+				Verified:               true,
+				AcceptedDeliveries:     3,
+				AcceptedPerElapsedHour: 3.0,
+			},
+			PoisonIncidents: 1,
+			PeakConcurrency: 2,
+		},
+		Isolated: arm,
+		Verdict:  "NOT_PROVEN",
+	}
+
+	update := WorktreeABUpdate(rep)
+	text := update.Text()
+	if !strings.Contains(text, "0.00 issues/h") {
+		t.Fatalf("WorktreeABUpdate output missing '0.00 issues/h':\n%s", text)
+	}
+	wantLine := "isolated: 0.00 issues/h (3 accepted, INCOMPLETE), 0 poison, 3600.0s, peak 4"
+	if !strings.Contains(text, wantLine) {
+		t.Fatalf("WorktreeABUpdate output missing %q:\n%s", wantLine, text)
+	}
+}
+
+func TestWorktreeABIncompleteBoundarySuppressesIssuesPerHour(t *testing.T) {
+	// Delivery with negative execution duration causes incomplete boundary
+	records := []DeliveryLifecycleRecord{
+		{IssueID: 101, Outcome: OutcomeAccepted, ExecutionDuration: -10, TotalElapsed: 60},
+	}
+	acc := AccountAcceptedDeliveries(records, 3600.0)
+	if acc.Status != "INCOMPLETE" || acc.Verified {
+		t.Fatalf("expected incomplete unverified accounting, got status=%q verified=%v", acc.Status, acc.Verified)
+	}
+	if acc.AcceptedPerElapsedHour <= 0 {
+		t.Fatalf("expected positive raw accepted per elapsed hour, got %v", acc.AcceptedPerElapsedHour)
+	}
+
+	arm := WorktreeABArm{
+		Name:            "isolated",
+		DurationSeconds: 3600.0,
+		Accounting:      acc,
+	}
+	if got := arm.IssuesPerHour(); got != 0.0 {
+		t.Fatalf("expected IssuesPerHour() = 0 for incomplete boundary, got %v", got)
+	}
+
+	rep := FoldWorktreeAB(
+		WorktreeABArm{Name: "baseline", DurationSeconds: 3600.0, WaveID: "w1", Resolved: 1},
+		arm,
+	)
+	text := WorktreeABUpdate(rep).Text()
+	if !strings.Contains(text, "0.00 issues/h") {
+		t.Fatalf("WorktreeABUpdate text missing '0.00 issues/h':\n%s", text)
+	}
+}
+
+func TestWorktreeABSubPhaseDurationConsistency(t *testing.T) {
+	tests := []struct {
+		name         string
+		records      []DeliveryLifecycleRecord
+		window       float64
+		wantVerified bool
+		wantStatus   string
+	}{
+		{
+			name: "sub-phases exceed total elapsed rejected as incomplete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:              101,
+					Outcome:              OutcomeAccepted,
+					SetupDuration:        15.0,
+					ExecutionDuration:    80.0,
+					LandingDuration:      10.0,
+					VerificationDuration: 15.0,
+					TotalElapsed:         100.0, // 15 + 80 + 10 + 15 = 120 > 100
+				},
+			},
+			window:       3600.0,
+			wantVerified: false,
+			wantStatus:   "INCOMPLETE",
+		},
+		{
+			name: "single execution phase exceeds total elapsed rejected as incomplete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:           102,
+					Outcome:           OutcomeAccepted,
+					ExecutionDuration: 120.0,
+					TotalElapsed:      100.0, // 120 > 100
+				},
+			},
+			window:       3600.0,
+			wantVerified: false,
+			wantStatus:   "INCOMPLETE",
+		},
+		{
+			name: "setup phase alone exceeds total elapsed rejected as incomplete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:       103,
+					Outcome:       OutcomeAccepted,
+					SetupDuration: 105.0,
+					TotalElapsed:  100.0, // 105 > 100
+				},
+			},
+			window:       3600.0,
+			wantVerified: false,
+			wantStatus:   "INCOMPLETE",
+		},
+		{
+			name: "landing phase alone exceeds total elapsed rejected as incomplete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:         104,
+					Outcome:         OutcomeAccepted,
+					LandingDuration: 105.0,
+					TotalElapsed:    100.0, // 105 > 100
+				},
+			},
+			window:       3600.0,
+			wantVerified: false,
+			wantStatus:   "INCOMPLETE",
+		},
+		{
+			name: "verification phase alone exceeds total elapsed rejected as incomplete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:              105,
+					Outcome:              OutcomeAccepted,
+					VerificationDuration: 105.0,
+					TotalElapsed:         100.0, // 105 > 100
+				},
+			},
+			window:       3600.0,
+			wantVerified: false,
+			wantStatus:   "INCOMPLETE",
+		},
+		{
+			name: "sub-phases exactly equal to total elapsed accepted as complete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:              106,
+					Outcome:              OutcomeAccepted,
+					SetupDuration:        10.0,
+					ExecutionDuration:    70.0,
+					LandingDuration:      10.0,
+					VerificationDuration: 10.0,
+					TotalElapsed:         100.0, // 10 + 70 + 10 + 10 = 100 == 100
+				},
+			},
+			window:       3600.0,
+			wantVerified: true,
+			wantStatus:   "COMPLETE",
+		},
+		{
+			name: "sub-phases strictly less than total elapsed accepted as complete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:              107,
+					Outcome:              OutcomeAccepted,
+					SetupDuration:        10.0,
+					ExecutionDuration:    50.0,
+					LandingDuration:      10.0,
+					VerificationDuration: 10.0,
+					TotalElapsed:         100.0, // 10 + 50 + 10 + 10 = 80 < 100
+				},
+			},
+			window:       3600.0,
+			wantVerified: true,
+			wantStatus:   "COMPLETE",
+		},
+		{
+			name: "multiple records with one exceeding rejected as incomplete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:           201,
+					Outcome:           OutcomeAccepted,
+					ExecutionDuration: 50.0,
+					TotalElapsed:      60.0,
+				},
+				{
+					IssueID:           202,
+					Outcome:           OutcomeAccepted,
+					SetupDuration:     20.0,
+					ExecutionDuration: 60.0,
+					TotalElapsed:      60.0, // 20 + 60 = 80 > 60
+				},
+			},
+			window:       3600.0,
+			wantVerified: false,
+			wantStatus:   "INCOMPLETE",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := AccountAcceptedDeliveries(tc.records, tc.window)
+			if got.Verified != tc.wantVerified {
+				t.Errorf("Verified = %v, want %v", got.Verified, tc.wantVerified)
+			}
+			if got.Status != tc.wantStatus {
+				t.Errorf("Status = %q, want %q", got.Status, tc.wantStatus)
 			}
 		})
 	}

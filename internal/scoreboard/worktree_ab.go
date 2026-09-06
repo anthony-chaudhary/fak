@@ -99,6 +99,15 @@ func AccountAcceptedDeliveries(records []DeliveryLifecycleRecord, totalWindowSec
 			incompleteBoundary = true
 		}
 
+		if r.TotalElapsed > 0 &&
+			isFiniteNonNegative(r.SetupDuration) &&
+			isFiniteNonNegative(r.ExecutionDuration) &&
+			isFiniteNonNegative(r.LandingDuration) &&
+			isFiniteNonNegative(r.VerificationDuration) &&
+			r.SetupDuration+r.ExecutionDuration+r.LandingDuration+r.VerificationDuration > r.TotalElapsed {
+			incompleteBoundary = true
+		}
+
 		norm := normalizeDeliveryOutcome(r.Outcome)
 		switch norm {
 		case OutcomeAccepted:
@@ -151,6 +160,12 @@ func (a WorktreeABArm) IssuesPerHour() float64 {
 		return 0
 	}
 	if a.Accounting.Status != "" {
+		st := strings.TrimSpace(a.Accounting.Status)
+		if strings.EqualFold(st, "INCOMPLETE") ||
+			strings.EqualFold(st, "UNVERIFIED") ||
+			(!a.Accounting.Verified && !strings.EqualFold(st, "VERIFIED")) {
+			return 0
+		}
 		if !isFiniteNonNegative(a.Accounting.AcceptedPerElapsedHour) {
 			return 0
 		}
