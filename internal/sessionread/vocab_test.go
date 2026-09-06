@@ -7,30 +7,14 @@ import (
 	"testing"
 )
 
-// vocab_test.go — the fidelity pin for the read-op vocabulary spine (#4191). It mirrors
-// the four checks internal/sessionctl/vocab_test.go makes on the control plane, adapted
-// to the read plane's four fixed properties (capability / disclosure / evidence /
-// refusal): every op is complete over closed sets, the registry covers EXACTLY the
-// shipped read seams (worst-first children deliberately absent), every refusal token is
-// grounded in the closed read-refusal vocabulary and disjoint from the control-plane and
-// tool-refusal vocabularies, and Spec/Vocabulary hand out mutation-safe deep copies.
-
-// closedTokenShape is the SCREAMING_SNAKE grammar every refusal token must match — the
-// same discipline the abi and session refusal vocabularies hold.
 var closedTokenShape = regexp.MustCompile(`^[A-Z][A-Z0-9_]+$`)
 
-// knownCapabilities / knownDisclosures / knownEvidence are the closed property sets. A
-// spec property outside its set is a completeness failure — the enum grew without the
-// vocabulary (or the test) keeping up.
 var (
 	knownCapabilities = map[Capability]bool{CapReadSelf: true, CapReadFleet: true}
 	knownDisclosures  = map[Disclosure]bool{DisclosureMetadata: true, DisclosureRedacted: true, DisclosureFull: true}
 	knownEvidence     = map[Evidence]bool{EvidenceObserved: true, EvidenceWitnessed: true}
 )
 
-// TestReadVocabularyCompleteness pins that every registered op is complete over the
-// closed property sets: a capability, disclosure, and evidence each drawn from its set;
-// at least one well-formed refusal token; a non-empty summary; and no duplicate op.
 func TestReadVocabularyCompleteness(t *testing.T) {
 	seen := make(map[ReadOp]bool)
 	for _, s := range Vocabulary() {
@@ -62,20 +46,17 @@ func TestReadVocabularyCompleteness(t *testing.T) {
 		if s.Summary == "" {
 			t.Errorf("op %q: empty summary", s.Op)
 		}
+
+		if s.Capability == CapReadFleet && !slices.Contains(s.RefusalReasons, ReasonReadScopeDenied) {
+			t.Errorf("op %q: fleet capability must declare %s", s.Op, ReasonReadScopeDenied)
+		}
 	}
 
-	// Ops() and the registry must agree on the op set.
 	if got, want := len(Ops()), len(Vocabulary()); got != want {
 		t.Fatalf("Ops() len %d != Vocabulary() len %d", got, want)
 	}
 }
 
-// TestReadVocabularyCoversShippedSeams pins the registered op set to EXACTLY the read
-// seams that ship at HEAD. A not-yet-shipped read op (a durable content-addressed store,
-// a live transcript query, a transcript-event subscribe, an MCP resource surface, the
-// supervisor observe loop) is deliberately absent — it registers its row when its child
-// lands. This test fails loudly if a seam is added to (or dropped from) the registry
-// without updating the expected set, so the spine cannot silently drift from what ships.
 func TestReadVocabularyCoversShippedSeams(t *testing.T) {
 	shipped := []ReadOp{
 		OpContextValue,
@@ -108,17 +89,6 @@ func TestReadVocabularyCoversShippedSeams(t *testing.T) {
 	}
 }
 
-// TestReadRefusalTokensGrounded pins three invariants on the read-refusal vocabulary:
-//   - closure: every token any op declares is in ReadRefusalTokens(), and every token in
-//     ReadRefusalTokens() is declared by at least one op (nothing invented, nothing dangling);
-//   - category disjointness by namespace: every read-refusal token lives in the READ_
-//     namespace. Unlike the control plane — whose vocabulary REUSES the abi/session tokens
-//     and so grounds against them directly — this spine DEFINES its own tokens, so the
-//     honest, self-contained guarantee that a read refusal never masquerades as a
-//     tool-refusal (abi: TRUST_VIOLATION, POLICY_BLOCK, …) or a control-write refusal
-//     (session: CONTROL_*) is that read tokens occupy a disjoint prefix. This holds against
-//     every current AND future foreign vocabulary, not just today's two, and keeps this
-//     tier-1 pure primitive's test hermetic (it imports no churny sibling to enumerate).
 func TestReadRefusalTokensGrounded(t *testing.T) {
 	const readNamespace = "READ_"
 
@@ -129,7 +99,7 @@ func TestReadRefusalTokensGrounded(t *testing.T) {
 			t.Errorf("closed read-refusal token %q is not SCREAMING_SNAKE", tok)
 		}
 		if !strings.HasPrefix(tok, readNamespace) {
-			t.Errorf("read-refusal token %q is outside the %q namespace that keeps it disjoint from the abi and control-write vocabularies", tok, readNamespace)
+			t.Errorf("read-refusal token %q is outside namespace %q", tok, readNamespace)
 		}
 		closedSet[tok] = true
 	}
@@ -150,11 +120,6 @@ func TestReadRefusalTokensGrounded(t *testing.T) {
 	}
 }
 
-// TestContextRestoreIsFullWitnessedTaintGated binds the spine to the one seam where the
-// taint-safe-outbound invariant is load-bearing today: context-restore is the sole
-// full-disclosure op, it is WITNESSED (verbatim bytes fak authored), and it carries the
-// READ_TAINT_WITHHELD token — the real ctxplan seal/tombstone gate. If a future edit
-// relaxes any of these, the read plane's outbound trust floor has moved and this fails.
 func TestContextRestoreIsFullWitnessedTaintGated(t *testing.T) {
 	spec, ok := Spec(OpContextRestore)
 	if !ok {
@@ -167,11 +132,9 @@ func TestContextRestoreIsFullWitnessedTaintGated(t *testing.T) {
 		t.Errorf("context-restore evidence = %q, want %q", spec.Evidence, EvidenceWitnessed)
 	}
 	if !slices.Contains(spec.RefusalReasons, ReasonReadTaintWithheld) {
-		t.Errorf("context-restore must carry %q (the seal/tombstone gate); has %v", ReasonReadTaintWithheld, spec.RefusalReasons)
+		t.Errorf("context-restore must carry %q; has %v", ReasonReadTaintWithheld, spec.RefusalReasons)
 	}
 
-	// It must be the ONLY full-disclosure op — full bytes crossing the boundary is the
-	// exception the plane isolates, not a default.
 	var full []ReadOp
 	for _, s := range Vocabulary() {
 		if s.Disclosure == DisclosureFull {
@@ -183,8 +146,6 @@ func TestContextRestoreIsFullWitnessedTaintGated(t *testing.T) {
 	}
 }
 
-// TestReadSpecCopyIsMutationSafe pins that Vocabulary() and Spec() hand out deep copies:
-// mutating a returned spec's RefusalReasons slice must not corrupt the registry.
 func TestReadSpecCopyIsMutationSafe(t *testing.T) {
 	spec, ok := Spec(OpContextRestore)
 	if !ok {
@@ -200,14 +161,43 @@ func TestReadSpecCopyIsMutationSafe(t *testing.T) {
 		t.Error("mutating a Spec() copy corrupted the registry")
 	}
 
-	// Unknown op is rejected.
+	vocab := Vocabulary()
+	if len(vocab) == 0 || len(vocab[0].RefusalReasons) == 0 {
+		t.Fatal("vocabulary returned empty specs")
+	}
+	vocab[0].RefusalReasons[0] = "MUTATED_VOCAB"
+	vocab[0].Op = "MUTATED_OP"
+
+	freshVocab := Vocabulary()
+	if slices.Contains(freshVocab[0].RefusalReasons, "MUTATED_VOCAB") || freshVocab[0].Op == "MUTATED_OP" {
+		t.Error("mutating a Vocabulary() copy corrupted the registry")
+	}
+
+	tokens := ReadRefusalTokens()
+	if len(tokens) == 0 {
+		t.Fatal("empty refusal tokens")
+	}
+	tokens[0] = "MUTATED_TOKEN"
+	freshTokens := ReadRefusalTokens()
+	if freshTokens[0] == "MUTATED_TOKEN" {
+		t.Error("mutating a ReadRefusalTokens() copy corrupted the registry")
+	}
+
+	ops := Ops()
+	if len(ops) == 0 {
+		t.Fatal("empty ops")
+	}
+	ops[0] = "MUTATED_OP"
+	freshOps := Ops()
+	if freshOps[0] == "MUTATED_OP" {
+		t.Error("mutating an Ops() copy corrupted the registry")
+	}
+
 	if _, ok := Spec(ReadOp("no-such-read")); ok {
 		t.Error("Spec() reported an unknown op as known")
 	}
 }
 
-// BenchmarkVocabulary measures the retrieval and deep-copying (slice cloning) of the
-// complete registered read-op vocabulary.
 func BenchmarkVocabulary(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -219,8 +209,6 @@ func BenchmarkVocabulary(b *testing.B) {
 	}
 }
 
-// BenchmarkOps measures the extraction and allocation of the registered ReadOp
-// identifier slice.
 func BenchmarkOps(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -232,7 +220,6 @@ func BenchmarkOps(b *testing.B) {
 	}
 }
 
-// BenchmarkSpec_Hit measures lookup and deep-copying of a single known ReadOp spec.
 func BenchmarkSpec_Hit(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -244,7 +231,6 @@ func BenchmarkSpec_Hit(b *testing.B) {
 	}
 }
 
-// BenchmarkSpec_Miss measures lookup behavior when probing an unregistered ReadOp token.
 func BenchmarkSpec_Miss(b *testing.B) {
 	unknown := ReadOp("unregistered-read-op")
 	b.ReportAllocs()
@@ -257,8 +243,6 @@ func BenchmarkSpec_Miss(b *testing.B) {
 	}
 }
 
-// BenchmarkSpec_CycleAll measures cycling lookup across all registered ReadOp tokens,
-// simulating varied read operation dispatches.
 func BenchmarkSpec_CycleAll(b *testing.B) {
 	ops := Ops()
 	if len(ops) == 0 {
@@ -275,8 +259,6 @@ func BenchmarkSpec_CycleAll(b *testing.B) {
 	}
 }
 
-// BenchmarkReadRefusalTokens measures the retrieval and cloning of the closed
-// read-refusal token set.
 func BenchmarkReadRefusalTokens(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
