@@ -10,9 +10,6 @@ import (
 	"time"
 )
 
-// Invariant: customization index checks are fail-closed and deterministic.
-// Guard: malformed schema versions, unknown fields, or missing evidence reject the entire index.
-
 // Schema identifies the supported agent customization index schema version.
 const Schema = "fak-agent-customization-index/1"
 
@@ -80,7 +77,7 @@ type Group struct {
 	Count  int    `json:"count"`
 }
 
-// Report provides the evaluated freshness, grouping, and contract validation results for an index.
+// Report provides the evaluated freshness, grouping, and validation results for an index.
 type Report struct {
 	Schema     string            `json:"schema"`
 	AsOf       string            `json:"as_of"`

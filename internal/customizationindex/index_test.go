@@ -66,3 +66,159 @@ func TestReadRejectsUnknownShape(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestCheckFailClosedInvariants(t *testing.T) {
+	asOf := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)
+
+	cases := []struct {
+		name      string
+		mutate    func(idx *Index)
+		wantError string
+	}{
+		{
+			name: "schema_mismatch",
+			mutate: func(idx *Index) {
+				idx.Schema = "fak-agent-customization-index/99"
+			},
+			wantError: `schema "fak-agent-customization-index/99", want "fak-agent-customization-index/1"`,
+		},
+		{
+			name: "non_positive_review_interval",
+			mutate: func(idx *Index) {
+				idx.Maintenance.ReviewIntervalDays = 0
+			},
+			wantError: "maintenance.review_interval_days must be positive",
+		},
+		{
+			name: "empty_axis_id",
+			mutate: func(idx *Index) {
+				idx.Axes[0].ID = "   "
+			},
+			wantError: "axis requires axis_id and user_need",
+		},
+		{
+			name: "empty_user_need",
+			mutate: func(idx *Index) {
+				idx.Axes[0].UserNeed = ""
+			},
+			wantError: "axis requires axis_id and user_need",
+		},
+		{
+			name: "unknown_layer",
+			mutate: func(idx *Index) {
+				idx.Axes[0].Layer = "nonexistent_layer"
+			},
+			wantError: "references unknown layer",
+		},
+		{
+			name: "duplicate_layer",
+			mutate: func(idx *Index) {
+				idx.Layers = append(idx.Layers, Layer{ID: idx.Layers[0].ID})
+			},
+			wantError: "duplicate layer",
+		},
+		{
+			name: "duplicate_source",
+			mutate: func(idx *Index) {
+				idx.Sources = append(idx.Sources, Source{ID: idx.Sources[0].ID, ObservedAt: "2026-08-10"})
+			},
+			wantError: "duplicate source",
+		},
+		{
+			name: "invalid_disposition",
+			mutate: func(idx *Index) {
+				idx.Axes[0].Disposition = "unsupported_disposition"
+			},
+			wantError: "has invalid disposition",
+		},
+		{
+			name: "missing_evidence",
+			mutate: func(idx *Index) {
+				idx.Axes[0].Evidence = nil
+			},
+			wantError: "requires evidence",
+		},
+		{
+			name: "invalid_observed_at",
+			mutate: func(idx *Index) {
+				idx.Sources[0].ObservedAt = "not-a-date"
+			},
+			wantError: "has invalid observed_at",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			idxCopy, err := Read(strings.NewReader(fixture))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.mutate(&idxCopy)
+			report := Check(idxCopy, asOf)
+			if report.Valid {
+				t.Fatalf("expected report to be invalid for %s", tc.name)
+			}
+			joined := strings.Join(report.Errors, "\n")
+			if !strings.Contains(joined, tc.wantError) {
+				t.Fatalf("missing expected error %q in:\n%s", tc.wantError, joined)
+			}
+		})
+	}
+}
+
+func TestCheckDeterminism(t *testing.T) {
+	index, err := Read(strings.NewReader(fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	asOf := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)
+	first := Check(index, asOf)
+
+	for i := 0; i < 5; i++ {
+		repeat := Check(index, asOf)
+		if repeat.Valid != first.Valid || repeat.DueSources != first.DueSources || repeat.Axes != first.Axes {
+			t.Fatalf("nondeterministic summary: got %+v, want %+v", repeat, first)
+		}
+		if len(repeat.Sources) != len(first.Sources) {
+			t.Fatalf("nondeterministic sources length")
+		}
+		for j := range repeat.Sources {
+			if repeat.Sources[j] != first.Sources[j] {
+				t.Fatalf("nondeterministic source at index %d: %+v vs %+v", j, repeat.Sources[j], first.Sources[j])
+			}
+		}
+		if len(repeat.Groups) != len(first.Groups) {
+			t.Fatalf("nondeterministic groups length")
+		}
+		for j := range repeat.Groups {
+			if repeat.Groups[j] != first.Groups[j] {
+				t.Fatalf("nondeterministic group at index %d: %+v vs %+v", j, repeat.Groups[j], first.Groups[j])
+			}
+		}
+	}
+}
+
+func TestParseAsOf(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.FixedZone("TEST", -4*3600))
+	fallback, err := ParseAsOf("", now)
+	if err != nil {
+		t.Fatalf("unexpected error on empty asOf: %v", err)
+	}
+	if fallback != now.UTC() {
+		t.Fatalf("got %v, want UTC fallback %v", fallback, now.UTC())
+	}
+
+	parsed, err := ParseAsOf("2026-08-17", now)
+	if err != nil {
+		t.Fatalf("unexpected error on valid date: %v", err)
+	}
+	want := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)
+	if !parsed.Equal(want) {
+		t.Fatalf("got %v, want %v", parsed, want)
+	}
+
+	_, err = ParseAsOf("invalid-date", now)
+	if err == nil || !strings.Contains(err.Error(), "as-of must be YYYY-MM-DD") {
+		t.Fatalf("expected error on malformed date, got %v", err)
+	}
+}
