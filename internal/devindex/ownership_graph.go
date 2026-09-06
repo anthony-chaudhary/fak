@@ -21,7 +21,7 @@ type PackageOwnership struct {
 // intrinsically repository-development control-plane work. The list expands as
 // command families move; every entry is enforced immediately by GraphLeaks.
 var DevOnlyPackages = []PackageOwnership{
-	{Path: moduleInternalPrefix + "amdgpu", Owner: OwnerDev, Rationale: "probes development-host AMD GPU diagnostics and counters"},
+	{Path: moduleInternalPrefix + "amdgpu", Owner: OwnerShared, Rationale: "shares AMD GPU hardware probe and counters between runtime and fak-dev commands"},
 	{Path: moduleInternalPrefix + "commitsubject", Owner: OwnerDev, Rationale: "audits repository commit-subject grammar coverage"},
 	{Path: moduleInternalPrefix + "codexmemory", Owner: OwnerDev, Rationale: "diagnoses development-agent Codex memory posture"},
 	{Path: moduleInternalPrefix + "devcmd", Owner: OwnerDev, Rationale: "hosts repository-development command implementations for fak-dev"},
@@ -42,7 +42,7 @@ var DevOnlyPackages = []PackageOwnership{
 	{Path: moduleInternalPrefix + "studyclass", Owner: OwnerDev, Rationale: "classifies repository study evidence"},
 	{Path: moduleInternalPrefix + "studyforge", Owner: OwnerDev, Rationale: "captures forge-history research evidence"},
 	{Path: moduleInternalPrefix + "studylink", Owner: OwnerShared, Rationale: "shares the deterministic study-evidence join with the runtime learning-mesh compiler while fak-dev owns repository study-link orchestration"},
-	{Path: moduleInternalPrefix + "studymonitor", Owner: OwnerDev, Rationale: "tracks recurring repository study sources"},
+	{Path: moduleInternalPrefix + "studymonitor", Owner: OwnerShared, Rationale: "shares study registry types and verification with runtime studydrift while fak-dev owns study monitor CLI"},
 	{Path: moduleInternalPrefix + "studyprio", Owner: OwnerDev, Rationale: "prioritizes uncovered repository study joins"},
 	{Path: moduleInternalPrefix + "studytickets", Owner: OwnerDev, Rationale: "constructs repository ticket closure from study evidence"},
 }
