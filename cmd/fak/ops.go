@@ -14,7 +14,7 @@ import (
 
 func runOps(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak ops <status|sweep|log|daemon> [options]")
+		fmt.Fprintln(stderr, "usage: fak ops <status|sweep|log|daemon|run> [options]")
 		return 2
 	}
 
@@ -25,6 +25,8 @@ func runOps(stdout, stderr io.Writer, argv []string) int {
 	cfg := ops.DefaultConfig()
 
 	switch verb {
+	case "run":
+		return runOpsRun(stdout, stderr, args)
 	case "status":
 		return runOpsStatus(stdout, stderr, root, cfg, args)
 	case "sweep":

@@ -532,6 +532,12 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 		case "TRANSFORM":
 			adj.Admitted = true
 			if repaired != "" {
+				// The in-kernel read redirect targets fak_read's schema. Here
+				// execution stays in the client and retains its original tool name,
+				// so restore its path spelling without undoing repaired values.
+				if wv.By == "monitor/read_to_fak_read" && strings.EqualFold(tool, "read") {
+					repaired = clientReadArguments(tc.Function.Arguments, repaired)
+				}
 				tc.Function.Arguments = repaired
 				adj.RepairedArguments = json.RawMessage(repaired)
 			}
@@ -550,6 +556,30 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 		}
 	}
 	return kept, adjs, dropped
+}
+
+func clientReadArguments(original, repaired string) string {
+	var before, after map[string]json.RawMessage
+	if json.Unmarshal([]byte(original), &before) != nil || json.Unmarshal([]byte(repaired), &after) != nil || after == nil {
+		return repaired
+	}
+	if _, canonical := before["file_path"]; canonical {
+		return repaired
+	}
+	for _, alias := range []string{"filePath", "path"} {
+		if _, present := before[alias]; !present {
+			continue
+		}
+		if value, present := after["file_path"]; present {
+			after[alias] = value
+			delete(after, "file_path")
+			if encoded, err := json.Marshal(after); err == nil {
+				return string(encoded)
+			}
+		}
+		break
+	}
+	return repaired
 }
 
 func (s *Server) adjudicateProposedTurn(ctx context.Context, asst agent.Message, reqTrace string) (kept []agent.ToolCall, adjs []ToolAdjudication, dropped int, servedText string, servedHits int, bodyRefused bool) {

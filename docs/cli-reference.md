@@ -19,6 +19,44 @@ in-process, served from a local **tool vDSO** when possible, screened by a
 **pre-flight + grammar ladder** before it fires, and admitted through a
 **context-MMU** before tool results enter model context.
 
+## `ops run`: execute a bounded OpenCode task through guard
+
+```text
+fak ops run --harness opencode --prompt-file task.txt --model MODEL --base-url URL --receipt run.json [--provider openai|gemini] [--policy policy.json] [--audit audit.jsonl] [--api-key-env KEY_ENV] [--timeout 5m] [--opencode-bin PATH] [--auto] [--pure] [--dry-run]
+```
+
+Runs an installed OpenCode CLI through `fak guard`. `--provider openai` (default)
+uses OpenAI Chat Completions; `--provider gemini` uses OpenCode's native Google
+adapter and guard's native Gemini wire, preserving tool-call thought signatures.
+For Google, use `--base-url https://generativelanguage.googleapis.com/v1beta`
+and `--api-key-env` naming the upstream key; the child uses a placeholder key.
+`MODEL` is the upstream model identifier, without an OpenCode provider
+prefix. The prompt travels on stdin. Output is streamed; the receipt contains
+execution metadata without the prompt or provider response. The working directory
+is inherited, so invoke it from the task's checkout.
+
+The runner pins the main and small model to a fresh guarded provider and enables
+only that provider. Existing permissions and plugins are preserved. A configured
+agent that requires a different provider fails closed. `--auto` explicitly enables
+OpenCode's automatic permission approval while preserving explicit denials;
+`--pure` explicitly disables external OpenCode plugins. These settings configure a
+trusted harness; they are not an operating-system sandbox for malicious plugins.
+On Windows, the default discovers npm's native OpenCode executable. Other installs
+can provide `--opencode-bin`.
+
+`--receipt` is required for execution. Its parent directory must exist and its
+path must differ from the prompt, policy and audit files. Schema `fak-ops-run/1`
+reports `status`, `exit_code`, `started_at` and `finished_at`. Success requires
+exit zero, a final completed OpenCode turn, and no provider/tool error events.
+It proves harness completion, not that the task's assertions are independently
+true. Timeout kills the launched process tree and returns 124 with `timed_out`;
+cancellation returns 130 with `cancelled`. A scheduler should require both exit
+zero and a fresh `succeeded` receipt before running its own artifact checks.
+
+`--dry-run` validates inputs and prints launch metadata without executing OpenCode
+or writing a receipt. It does not verify credentials, provider reachability or
+OpenCode availability.
+
 ## `runtime-capabilities`: inspect the deployable runtime before payload load
 
 ```text
