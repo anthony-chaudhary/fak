@@ -153,7 +153,19 @@ type Options struct {
 	// to only those within SessionScope instead of refusing. When false (default),
 	// sweeps of peer/unscoped paths under a directory pathspec are refused.
 	RestrictToSessionScope bool
+
+	// AuthorityFence is the opt-in authority lease/token fence (#11849) that must be valid
+	// immediately before staging paths. When nil or empty, unconfigured commits proceed
+	// as normal.
+	AuthorityFence *AuthorityFence
+
+	// AuthorityValidator is an optional custom validator func for authority checking (#11849).
+	// When non-nil, it is called immediately before staging paths.
+	AuthorityValidator AuthorityValidator
 }
+
+// CommitOptions is an alias for Options for callers using that naming convention (#11849).
+type CommitOptions = Options
 
 type ReviewFunc func(context.Context, modelroute.ReviewRequest) (modelroute.ReviewResult, error)
 
@@ -255,12 +267,29 @@ type Result struct {
 	// Delivery records only the authoring/recording transition. Compile admission, verification,
 	// integration, and release readiness remain independent receipts.
 	Delivery *workdelivery.AdapterObservation `json:"delivery,omitempty"`
+	// Authority records the receipt of the opt-in pre-staging authority fence (#11849).
+	Authority *AuthorityReceipt `json:"authority,omitempty"`
 	// Velocity is the effect-qualified ship-speed reading (#4241): separate local and
 	// push legs, each scored only after the command's authoritative effect fields
 	// qualify it (Committed&&Verified for local, additionally Pushed for push). It is
 	// distinct from Score (outcome quality) and always populated by CommitWith; a
 	// refusal/no-op still carries it with UNSCORED legs and retained timing.
 	Velocity *CommitVelocity `json:"velocity,omitempty"`
+}
+
+// Outcome returns the typed authority outcome if authority was evaluated, or OutcomeRefused
+// if res.Reason is non-empty, or OutcomeAdmitted if committed and verified (#11849).
+func (r Result) Outcome() AuthorityOutcome {
+	if r.Reason != "" {
+		return OutcomeRefused
+	}
+	if r.Authority != nil {
+		return r.Authority.Outcome
+	}
+	if r.Committed && r.Verified {
+		return OutcomeAdmitted
+	}
+	return ""
 }
 
 // Commit runs the safe-commit algorithm against the real git binary and a real advisory
@@ -274,6 +303,12 @@ func Commit(ctx context.Context, opts Options) (Result, error) {
 	}
 	if opts.Window == nil {
 		opts.Window = DefaultWindow
+	}
+	if opts.Lock.Path == "" && opts.Dir != "" {
+		gitDir := filepath.Join(opts.Dir, ".git")
+		if fi, err := os.Stat(gitDir); err == nil && fi.IsDir() {
+			opts.Lock.Path = filepath.Join(gitDir, "fak-commit.lock")
+		}
 	}
 	return CommitWith(ctx, realRunner, realLock, opts)
 }
@@ -420,6 +455,19 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		return res, herr
 	} else {
 		res.HeadBefore = sha
+	}
+
+	// (6a) Opt-in authority fence revalidation (#11849): revalidate immediately
+	// before staging paths. Refuses stale, foreign or unavailable authority before
+	// any index mutation or staging occurs, leaving index and HEAD completely unchanged.
+	authConfigured := (opts.AuthorityFence != nil && !opts.AuthorityFence.IsZero()) || opts.AuthorityValidator != nil
+	if authReceipt, refused := checkAuthorityFence(ctx, run, opts.Dir, opts.AuthorityFence, opts.AuthorityValidator, paths); refused {
+		res.Reason = authReceipt.Reason
+		res.Detail = authReceipt.Detail
+		res.Authority = &authReceipt
+		return res, nil
+	} else if authReceipt.Outcome == OutcomeAdmitted && authConfigured {
+		res.Authority = &authReceipt
 	}
 
 	if augmented, changed, aerr := autoIndexDatedNotes(ctx, run, opts.Dir, paths); aerr != nil {
