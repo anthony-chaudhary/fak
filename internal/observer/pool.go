@@ -52,6 +52,7 @@ type asyncTask struct {
 
 type sessionState struct {
 	mu             sync.Mutex
+	cond           *sync.Cond
 	sessionID      string
 	history        []StepObservation
 	repeatCount    int
@@ -62,6 +63,65 @@ type sessionState struct {
 	flaggedRegress bool
 	kvPrefixWarm   bool
 	inFlight       int64
+	settleCh       chan struct{}
+}
+
+func (s *sessionState) initCondLocked() {
+	if s.cond == nil {
+		s.cond = sync.NewCond(&s.mu)
+	}
+}
+
+func (s *sessionState) incInFlight() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.initCondLocked()
+	atomic.AddInt64(&s.inFlight, 1)
+	if s.settleCh == nil {
+		s.settleCh = make(chan struct{})
+	}
+}
+
+func (s *sessionState) decInFlight() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.initCondLocked()
+	rem := atomic.AddInt64(&s.inFlight, -1)
+	if rem <= 0 {
+		if rem < 0 {
+			atomic.StoreInt64(&s.inFlight, 0)
+		}
+		s.cond.Broadcast()
+		if s.settleCh != nil {
+			close(s.settleCh)
+			s.settleCh = nil
+		}
+	}
+}
+
+func (s *sessionState) setInFlight(n int64) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.initCondLocked()
+	atomic.StoreInt64(&s.inFlight, n)
+	if n <= 0 {
+		s.cond.Broadcast()
+		if s.settleCh != nil {
+			close(s.settleCh)
+			s.settleCh = nil
+		}
+	} else if s.settleCh == nil {
+		s.settleCh = make(chan struct{})
+	}
 }
 
 func (s *sessionState) isFlagged() bool {
@@ -274,7 +334,11 @@ func (p *Pool) worker(id int) {
 }
 
 func (p *Pool) processTask(t asyncTask) {
-	defer atomic.AddInt64(&t.sess.inFlight, -1)
+	defer func() {
+		if t.sess != nil {
+			t.sess.decInFlight()
+		}
+	}()
 	defer close(t.res)
 
 	if t.ctx.Err() != nil {
@@ -320,6 +384,7 @@ func (p *Pool) getOrCreateSession(sessionID string) *sessionState {
 			sessionID: sessionID,
 			history:   make([]StepObservation, 0, p.cfg.MaxHistoryPerSession),
 		}
+		s.cond = sync.NewCond(&s.mu)
 		p.sessions[sessionID] = s
 	}
 	return s
@@ -332,6 +397,17 @@ func (p *Pool) ResetSession(sessionID string) {
 	}
 	p.sessionsMu.Lock()
 	defer p.sessionsMu.Unlock()
+	if s, ok := p.sessions[sessionID]; ok {
+		s.mu.Lock()
+		if s.settleCh != nil {
+			close(s.settleCh)
+			s.settleCh = nil
+		}
+		if s.cond != nil {
+			s.cond.Broadcast()
+		}
+		s.mu.Unlock()
+	}
 	delete(p.sessions, sessionID)
 }
 
@@ -384,7 +460,7 @@ func (p *Pool) ObserveAsync(ctx context.Context, obs StepObservation) <-chan Ste
 	atomic.AddInt64(&p.observationsTotal, 1)
 	atomic.AddInt64(&p.asyncTotal, 1)
 
-	atomic.AddInt64(&sess.inFlight, 1)
+	sess.incInFlight()
 	task := asyncTask{
 		ctx:  ctx,
 		obs:  obs,
@@ -438,22 +514,38 @@ func (p *Pool) ObserveSyncBarrier(ctx context.Context, obs StepObservation) (Ste
 	if timeout <= 0 {
 		timeout = 50 * time.Millisecond
 	}
-	deadline := time.Now().Add(timeout)
 	if (obs.IsMutating() || !obs.IsReadOnly() || sess.isFlagged()) && atomic.LoadInt64(&sess.inFlight) > 0 {
-		pollInterval := 50 * time.Microsecond
-		if timeout < pollInterval {
-			pollInterval = timeout
-		}
-		timer := time.NewTimer(pollInterval)
+		timer := time.NewTimer(timeout)
 		defer timer.Stop()
 
-		for atomic.LoadInt64(&sess.inFlight) > 0 {
+	waitLoop:
+		for {
 			if err := ctx.Err(); err != nil {
 				return obs, err
 			}
-			if time.Now().After(deadline) {
-				atomic.AddInt64(&p.barrierTimeouts, 1)
+
+			sess.mu.Lock()
+			if atomic.LoadInt64(&sess.inFlight) == 0 {
+				sess.mu.Unlock()
+				break waitLoop
+			}
+			settleCh := sess.settleCh
+			if settleCh == nil {
+				settleCh = make(chan struct{})
+				sess.settleCh = settleCh
+			}
+			sess.mu.Unlock()
+
+			select {
+			case <-ctx.Done():
+				return obs, ctx.Err()
+			case <-timer.C:
 				sess.mu.Lock()
+				if atomic.LoadInt64(&sess.inFlight) == 0 {
+					sess.mu.Unlock()
+					break waitLoop
+				}
+				atomic.AddInt64(&p.barrierTimeouts, 1)
 				wasChurn := sess.flaggedChurn
 				wasRegress := sess.flaggedRegress
 				wasFlagged := wasChurn || wasRegress
@@ -494,15 +586,9 @@ func (p *Pool) ObserveSyncBarrier(ctx context.Context, obs StepObservation) (Ste
 				}
 
 				return obs, ErrBarrierTimeout
-			}
-			select {
-			case <-ctx.Done():
-				return obs, ctx.Err()
-			case <-timer.C:
-				timer.Reset(pollInterval)
+			case <-settleCh:
 			}
 		}
-		timer.Stop()
 	}
 
 	sess.evaluate(p.cfg, &obs)

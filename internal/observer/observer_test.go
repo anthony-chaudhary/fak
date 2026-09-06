@@ -1160,12 +1160,12 @@ func TestObserveSyncBarrier_InFlightTaskWait(t *testing.T) {
 	sess := p.getOrCreateSession(sessionID)
 
 	// Simulate an in-flight async task
-	atomic.StoreInt64(&sess.inFlight, 1)
+	sess.incInFlight()
 
 	// In a background goroutine, simulate task finishing after 5ms
 	go func() {
 		time.Sleep(5 * time.Millisecond)
-		atomic.StoreInt64(&sess.inFlight, 0)
+		sess.decInFlight()
 	}()
 
 	obs := StepObservation{
@@ -1187,6 +1187,65 @@ func TestObserveSyncBarrier_InFlightTaskWait(t *testing.T) {
 	if elapsed < 4*time.Millisecond {
 		t.Fatalf("expected barrier to wait for in-flight task, elapsed %s", elapsed)
 	}
+}
+
+func TestObserveSyncBarrier_ConditionVariableNotification(t *testing.T) {
+	p := NewPool(Config{
+		WorkerCount:    2,
+		QueueSize:      16,
+		BarrierTimeout: 200 * time.Millisecond,
+	})
+	if err := p.Start(); err != nil {
+		t.Fatalf("failed to start pool: %v", err)
+	}
+	defer p.Close()
+
+	ctx := context.Background()
+	sessionID := "sess-cond-var"
+	sess := p.getOrCreateSession(sessionID)
+
+	// 1. Verify sync.Cond on sess.mu is signaled/broadcast when inFlight drops to 0
+	sess.incInFlight()
+	condWoken := make(chan struct{})
+	go func() {
+		sess.mu.Lock()
+		for atomic.LoadInt64(&sess.inFlight) > 0 {
+			sess.cond.Wait()
+		}
+		sess.mu.Unlock()
+		close(condWoken)
+	}()
+
+	time.Sleep(5 * time.Millisecond)
+	sess.decInFlight()
+
+	select {
+	case <-condWoken:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timed out waiting for sess.cond.Wait() condition broadcast")
+	}
+
+	// 2. Real async exploration turn settles barrier without 50µs polling timer
+	readCh := p.ObserveAsync(ctx, StepObservation{
+		SessionID: sessionID,
+		Tool:      "Read",
+		Args:      "main.go",
+		Result:    "package main",
+	})
+
+	writeObs := StepObservation{
+		SessionID: sessionID,
+		Tool:      "Write",
+		Diff:      "@@ -1 +1 @@\n+new",
+	}
+	res, err := p.ObserveSyncBarrier(ctx, writeObs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.StepVerdict != STEP_ADVANCE {
+		t.Fatalf("expected STEP_ADVANCE, got %s", res.StepVerdict)
+	}
+	<-readCh
 }
 
 func TestObserveSyncBarrier_ReadOnlyBypassesInFlightWait(t *testing.T) {
