@@ -340,7 +340,7 @@ func (e *Engine) Invalidate(paths ...string) {
 			continue
 		}
 		st := e.stages[stage]
-		if st.status == StatusWarm {
+		if st.status == StatusWarm || st.status == StatusFailed {
 			transitions = append(transitions, transition{
 				stage: stage,
 				from:  st.status,
