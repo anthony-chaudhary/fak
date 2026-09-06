@@ -39,6 +39,17 @@ func (e readEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result,
 	return result(ctx, c, in, out, isErr, EngineRead), nil
 }
 
+// applyPatchEngine serves apply_patch: atomic unified diff application with optimistic CAS.
+type applyPatchEngine struct{ t *Toolset }
+
+func (applyPatchEngine) Caps() []abi.Capability { return nil }
+func (applyPatchEngine) WeightBearing() bool    { return false }
+func (e applyPatchEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
+	in := bytesOf(ctx, c.Args)
+	out, bad := e.t.applyPatch(ctx, in)
+	return result(ctx, c, in, out, bad, EngineApplyPatch), nil
+}
+
 // read decodes, confines, and executes a Read, returning the JSON payload and whether it
 // is an error.
 func (t *Toolset) read(ctx context.Context, body []byte) ([]byte, bool) {
