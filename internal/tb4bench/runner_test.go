@@ -2,6 +2,7 @@ package tb4bench
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -212,4 +213,155 @@ func TestRunCampaignValidationErrors(t *testing.T) {
 	if err == nil {
 		t.Errorf("expected error for invalid arm")
 	}
+}
+
+type mockCountingPseudoAdapter struct {
+	invocations int
+}
+
+func (a *mockCountingPseudoAdapter) Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {
+	a.invocations++
+	return &CompletionResponse{
+		Text:         "TASK_COMPLETED",
+		FinishReason: "stop",
+	}, nil
+}
+
+func (a *mockCountingPseudoAdapter) Reset() {}
+
+func (a *mockCountingPseudoAdapter) Telemetry() EngineTelemetry {
+	return EngineTelemetry{}
+}
+
+func (a *mockCountingPseudoAdapter) IsPseudo() bool {
+	return true
+}
+
+func TestRejectStrictRealPseudoAdapter(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "tb4-reject-pseudo-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	ctx := context.Background()
+	tasks := []TaskManifest{
+		{
+			TaskID:                 "tb4-synth-01-syntax-fix",
+			Prompt:                 "Fix syntax in main.py",
+			EnvironmentImageDigest: "ghcr.io/fak/tb4-sandbox@sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+		},
+	}
+
+	// 1. Explicit pseudo adapter with StrictRealParity = true
+	adapter := &mockCountingPseudoAdapter{}
+	contract := DefaultRunContract("qwen3.8-coder.gguf", "sha256:pinned", "Q4_K_M", []string{"tb4-synth-01-syntax-fix"})
+	contract.TaskSelection.Parity.StrictRealParityRequired = true
+
+	runCfg := RunCampaignConfig{
+		Tasks:            tasks,
+		Arm:              "fak",
+		ModelPath:        "qwen3.8-coder.gguf",
+		OutDir:           tempDir,
+		StrictRealParity: true,
+		Contract:         contract,
+		Adapter:          adapter,
+	}
+
+	res, err := RunCampaign(ctx, runCfg)
+	if err == nil {
+		t.Fatalf("expected typed refusal error under strict real parity with pseudo adapter, got nil")
+	}
+
+	// Assert typed refusal
+	var refusalErr *RefusalError
+	if !errors.As(err, &refusalErr) {
+		t.Fatalf("expected typed refusal error (*RefusalError), got %T: %v", err, err)
+	}
+	if refusalErr.Reason != ReasonStrictRealParityViolation {
+		t.Errorf("expected refusal reason %q, got %q", ReasonStrictRealParityViolation, refusalErr.Reason)
+	}
+
+	// Assert zero adapter invocations
+	if adapter.invocations != 0 {
+		t.Errorf("expected 0 adapter invocations, got %d", adapter.invocations)
+	}
+
+	// Assert no successful strict-real receipt
+	if res != nil {
+		t.Errorf("expected nil result on refusal, got %+v", res)
+	}
+	for _, cand := range []string{
+		filepath.Join(tempDir, "fak", "tasks", "tb4-synth-01-syntax-fix", "receipt.json"),
+		filepath.Join(tempDir, "fak", "tasks", "tb4-synth-01-syntax-fix", "result.json"),
+	} {
+		if _, err := os.Stat(cand); !os.IsNotExist(err) {
+			t.Errorf("expected file %s to not exist, found it on disk", cand)
+		}
+	}
+
+	// 2. Default InKernelModelAdapter (pseudo) under strict real parity contract
+	t.Run("DefaultInKernelAdapterRejected", func(t *testing.T) {
+		tempDir2, err := os.MkdirTemp("", "tb4-reject-inkernel-*")
+		if err != nil {
+			t.Fatalf("failed to create temp dir: %v", err)
+		}
+		defer os.RemoveAll(tempDir2)
+
+		runCfg2 := RunCampaignConfig{
+			Tasks:            tasks,
+			Arm:              "fak",
+			ModelPath:        "qwen3.8-coder.gguf",
+			OutDir:           tempDir2,
+			StrictRealParity: true,
+			Contract:         contract,
+		}
+
+		res2, err2 := RunCampaign(ctx, runCfg2)
+		if err2 == nil {
+			t.Fatalf("expected typed refusal error for default in-kernel pseudo adapter, got nil")
+		}
+		var refErr2 *RefusalError
+		if !errors.As(err2, &refErr2) {
+			t.Fatalf("expected typed refusal error (*RefusalError), got %T: %v", err2, err2)
+		}
+		if refErr2.Reason != ReasonStrictRealParityViolation {
+			t.Errorf("expected reason %q, got %q", ReasonStrictRealParityViolation, refErr2.Reason)
+		}
+		if res2 != nil {
+			t.Errorf("expected nil result on refusal, got %+v", res2)
+		}
+	})
+
+	// 3. Mock mode execution under strict real parity contract
+	t.Run("MockModeRejected", func(t *testing.T) {
+		tempDir3, err := os.MkdirTemp("", "tb4-reject-mock-*")
+		if err != nil {
+			t.Fatalf("failed to create temp dir: %v", err)
+		}
+		defer os.RemoveAll(tempDir3)
+
+		runCfg3 := RunCampaignConfig{
+			Tasks:            tasks,
+			Arm:              "fak",
+			OutDir:           tempDir3,
+			MockMode:         true,
+			StrictRealParity: true,
+		}
+
+		res3, err3 := RunCampaign(ctx, runCfg3)
+		if err3 == nil {
+			t.Fatalf("expected typed refusal error for mock mode under strict real parity, got nil")
+		}
+		var refErr3 *RefusalError
+		if !errors.As(err3, &refErr3) {
+			t.Fatalf("expected typed refusal error (*RefusalError), got %T: %v", err3, err3)
+		}
+		if refErr3.Reason != ReasonStrictRealParityViolation {
+			t.Errorf("expected reason %q, got %q", ReasonStrictRealParityViolation, refErr3.Reason)
+		}
+		if res3 != nil {
+			t.Errorf("expected nil result on refusal, got %+v", res3)
+		}
+	})
 }

@@ -61,11 +61,46 @@ type ArmConfig struct {
 
 // ParityConstraints defines strict parity rules between benchmark arms.
 type ParityConstraints struct {
-	SameTaskIDsRequired bool `json:"same_task_ids_required"`
-	SameImageRequired   bool `json:"same_image_required"`
-	SameBudgetRequired  bool `json:"same_budget_required"`
-	SameWeightsRequired bool `json:"same_weights_required"`
+	SameTaskIDsRequired      bool `json:"same_task_ids_required"`
+	SameImageRequired        bool `json:"same_image_required"`
+	SameBudgetRequired       bool `json:"same_budget_required"`
+	SameWeightsRequired      bool `json:"same_weights_required"`
+	StrictRealParityRequired bool `json:"strict_real_parity_required,omitempty"`
+	StrictRealRequired       bool `json:"strict_real_required,omitempty"`
 }
+
+// ReasonStrictRealParityViolation indicates a rejection of pseudo/simulated model adapters under strict real parity.
+const (
+	ReasonStrictRealParityViolation = "TRUST_VIOLATION"
+)
+
+// RefusalError represents a typed refusal when execution contract or parity constraints are violated.
+type RefusalError struct {
+	Reason string `json:"reason"`
+	Detail string `json:"detail"`
+}
+
+func (e *RefusalError) Error() string {
+	if e.Detail == "" {
+		return e.Reason
+	}
+	return fmt.Sprintf("%s: %s", e.Reason, e.Detail)
+}
+
+func (e *RefusalError) Is(target error) bool {
+	if t, ok := target.(*RefusalError); ok {
+		return e.Reason == t.Reason
+	}
+	return false
+}
+
+var (
+	// ErrStrictRealPseudoAdapter is the sentinel refusal error for pseudo adapters in strict real parity mode.
+	ErrStrictRealPseudoAdapter = &RefusalError{
+		Reason: ReasonStrictRealParityViolation,
+		Detail: "pseudo/simulated model adapter execution is rejected under strict real parity",
+	}
+)
 
 // TaskSelection captures the dataset and task roster to evaluate.
 type TaskSelection struct {
@@ -197,6 +232,16 @@ func (c *OfficialRunContract) Validate(strictDeterminism bool) error {
 		}
 		if c.ArmB.Model.Sha256 != c.Model.Sha256 {
 			return fmt.Errorf("arm_b model sha256 %q does not match contract model sha256 %q", c.ArmB.Model.Sha256, c.Model.Sha256)
+		}
+	}
+
+	if c.TaskSelection.Parity.StrictRealParityRequired || c.TaskSelection.Parity.StrictRealRequired {
+		if c.ArmA.ServingEngine == "pseudo" || c.ArmB.ServingEngine == "pseudo" ||
+			c.ArmA.Harness == "pseudo" || c.ArmB.Harness == "pseudo" {
+			return &RefusalError{
+				Reason: ReasonStrictRealParityViolation,
+				Detail: "pseudo serving engine or harness is rejected under strict real parity",
+			}
 		}
 	}
 

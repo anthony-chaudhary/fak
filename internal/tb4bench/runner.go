@@ -14,13 +14,16 @@ import (
 
 // RunCampaignConfig defines configuration for executing a TB4 benchmark campaign.
 type RunCampaignConfig struct {
-	Tasks       []TaskManifest       `json:"tasks"`
-	Arm         string               `json:"arm"` // "fak", "opencode", or "both"
-	ModelPath   string               `json:"model_path"`
-	OutDir      string               `json:"out_dir"`
-	MockMode    bool                 `json:"mock_mode"`
-	Determinism DeterminismEnvelope  `json:"determinism"`
-	Contract    *OfficialRunContract `json:"contract,omitempty"`
+	Tasks            []TaskManifest       `json:"tasks"`
+	Arm              string               `json:"arm"` // "fak", "opencode", or "both"
+	ModelPath        string               `json:"model_path"`
+	OutDir           string               `json:"out_dir"`
+	MockMode         bool                 `json:"mock_mode"`
+	Determinism      DeterminismEnvelope  `json:"determinism"`
+	Contract         *OfficialRunContract `json:"contract,omitempty"`
+	StrictRealParity bool                 `json:"strict_real_parity,omitempty"`
+	Adapter          ModelAdapter         `json:"-"`
+	ContainerEngine  ContainerEngine      `json:"-"`
 }
 
 // RunCampaignResult summarizes the completed execution of tasks across arms.
@@ -33,9 +36,11 @@ type RunCampaignResult struct {
 
 // EvaluateCampaignConfig defines configuration for evaluating completed task workspaces.
 type EvaluateCampaignConfig struct {
-	RunDir  string         `json:"run_dir"`
-	Dataset string         `json:"dataset,omitempty"`
-	Tasks   []TaskManifest `json:"tasks,omitempty"`
+	RunDir           string               `json:"run_dir"`
+	Dataset          string               `json:"dataset,omitempty"`
+	Tasks            []TaskManifest       `json:"tasks,omitempty"`
+	StrictRealParity bool                 `json:"strict_real_parity,omitempty"`
+	Contract         *OfficialRunContract `json:"contract,omitempty"`
 }
 
 // EvaluateCampaignResult summarizes grading outcomes across evaluated arms.
@@ -55,6 +60,53 @@ type CompareCampaignConfig struct {
 	ContractPath string         `json:"contract_path,omitempty"`
 	OutJSON      string         `json:"out_json,omitempty"`
 	OutMD        string         `json:"out_md,omitempty"`
+}
+
+// PseudoModelAdapter indicates an adapter that uses synthetic, simulated, or pseudo token generation.
+type PseudoModelAdapter interface {
+	IsPseudo() bool
+}
+
+// IsPseudo reports that InKernelModelAdapter runs deterministic pseudo-generation rather than live tensor ops.
+func (a *InKernelModelAdapter) IsPseudo() bool {
+	return true
+}
+
+func isPseudoAdapter(adapter ModelAdapter) bool {
+	if adapter == nil {
+		return true
+	}
+	if p, ok := adapter.(PseudoModelAdapter); ok {
+		return p.IsPseudo()
+	}
+	if p, ok := adapter.(interface{ IsPseudo() bool }); ok {
+		return p.IsPseudo()
+	}
+	if p, ok := adapter.(interface{ Pseudo() bool }); ok {
+		return p.Pseudo()
+	}
+	if s, ok := adapter.(interface{ IsSimulated() bool }); ok {
+		return s.IsSimulated()
+	}
+	if s, ok := adapter.(interface{ Simulated() bool }); ok {
+		return s.Simulated()
+	}
+	if _, ok := adapter.(*InKernelModelAdapter); ok {
+		return true
+	}
+	return false
+}
+
+func isStrictRealParity(cfg RunCampaignConfig, contract *OfficialRunContract) bool {
+	if cfg.StrictRealParity {
+		return true
+	}
+	if contract != nil {
+		if contract.TaskSelection.Parity.StrictRealParityRequired || contract.TaskSelection.Parity.StrictRealRequired {
+			return true
+		}
+	}
+	return false
 }
 
 // RunCampaign executes the benchmark campaign across the requested arms.
@@ -97,6 +149,24 @@ func RunCampaign(ctx context.Context, cfg RunCampaignConfig) (*RunCampaignResult
 		}
 		contract = DefaultRunContract(cfg.ModelPath, "sha256:pinned", "Q4_K_M", taskIDs)
 		contract.Determinism = cfg.Determinism
+	}
+	if cfg.StrictRealParity {
+		contract.TaskSelection.Parity.StrictRealParityRequired = true
+	}
+
+	if isStrictRealParity(cfg, contract) {
+		if cfg.MockMode {
+			return nil, &RefusalError{
+				Reason: ReasonStrictRealParityViolation,
+				Detail: "mock/synthetic execution mode is rejected under strict real parity",
+			}
+		}
+		if cfg.Adapter != nil && isPseudoAdapter(cfg.Adapter) {
+			return nil, &RefusalError{
+				Reason: ReasonStrictRealParityViolation,
+				Detail: "pseudo/simulated model adapter execution is rejected under strict real parity",
+			}
+		}
 	}
 	contractData, err := json.MarshalIndent(contract, "", "  ")
 	if err == nil {
@@ -371,22 +441,38 @@ func runRealCampaign(
 	runFak, runOpenCode bool,
 	result *RunCampaignResult,
 ) (*RunCampaignResult, error) {
-	dockerEngine := NewDockerEngine("")
-	if !dockerEngine.IsAvailable(ctx) {
-		return nil, errors.New("docker container runtime is not accessible; pass --mock for synthetic execution or start container daemon")
+	dockerEngine := cfg.ContainerEngine
+	if dockerEngine == nil {
+		dockerEngine = NewDockerEngine("")
 	}
 
 	if runFak {
-		if cfg.ModelPath == "" {
+		if cfg.ModelPath == "" && cfg.Adapter == nil {
 			return nil, errors.New("model checkpoint path (--model) is required for real Arm A execution")
 		}
+
+		var adapter ModelAdapter = cfg.Adapter
+		if adapter == nil {
+			var err error
+			adapter, err = NewInKernelModelAdapter(cfg.ModelPath, contract.Model.Sha256)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load in-kernel model adapter: %w", err)
+			}
+		}
+
+		if isStrictRealParity(cfg, contract) && isPseudoAdapter(adapter) {
+			return nil, &RefusalError{
+				Reason: ReasonStrictRealParityViolation,
+				Detail: "pseudo/simulated model adapter execution is rejected under strict real parity",
+			}
+		}
+
+		if !dockerEngine.IsAvailable(ctx) {
+			return nil, errors.New("docker container runtime is not accessible; pass --mock for synthetic execution or start container daemon")
+		}
+
 		result.ArmExecuted = append(result.ArmExecuted, "fak")
 		fakResults := make(map[string]*ArmExecutionResult)
-
-		adapter, err := NewInKernelModelAdapter(cfg.ModelPath, contract.Model.Sha256)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load in-kernel model adapter: %w", err)
-		}
 
 		for _, task := range cfg.Tasks {
 			taskDir := filepath.Join(cfg.OutDir, "fak", "tasks", task.TaskID)
@@ -433,6 +519,9 @@ func runRealCampaign(
 	}
 
 	if runOpenCode {
+		if !runFak && !dockerEngine.IsAvailable(ctx) {
+			return nil, errors.New("docker container runtime is not accessible; pass --mock for synthetic execution or start container daemon")
+		}
 		result.ArmExecuted = append(result.ArmExecuted, "opencode")
 		opencodeResults := make(map[string]*ArmExecutionResult)
 
@@ -465,6 +554,33 @@ func runRealCampaign(
 func EvaluateCampaign(ctx context.Context, cfg EvaluateCampaignConfig) (*EvaluateCampaignResult, error) {
 	if cfg.RunDir == "" {
 		return nil, errors.New("runDir cannot be empty")
+	}
+
+	contract := cfg.Contract
+	if contract == nil {
+		contractPath := filepath.Join(cfg.RunDir, "contract.json")
+		if _, err := os.Stat(contractPath); err == nil {
+			contract, _ = LoadContractFile(contractPath, false)
+		}
+	}
+	strictReal := cfg.StrictRealParity
+	if contract != nil && (contract.TaskSelection.Parity.StrictRealParityRequired || contract.TaskSelection.Parity.StrictRealRequired) {
+		strictReal = true
+	}
+	if strictReal {
+		if contract == nil {
+			return nil, &RefusalError{
+				Reason: ReasonStrictRealParityViolation,
+				Detail: "missing official run contract under strict real parity evaluation",
+			}
+		}
+		if contract.ArmA.ServingEngine == "pseudo" || contract.ArmB.ServingEngine == "pseudo" ||
+			contract.ArmA.Harness == "pseudo" || contract.ArmB.Harness == "pseudo" {
+			return nil, &RefusalError{
+				Reason: ReasonStrictRealParityViolation,
+				Detail: "cannot evaluate pseudo execution run under strict real parity",
+			}
+		}
 	}
 
 	tasks := cfg.Tasks
