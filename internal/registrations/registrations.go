@@ -145,4 +145,8 @@ import (
 	_ "github.com/anthony-chaudhary/fak/internal/tokenprofile"
 	_ "github.com/anthony-chaudhary/fak/internal/toollint"
 	_ "github.com/anthony-chaudhary/fak/internal/toolprocgate"
+	_ "github.com/anthony-chaudhary/fak/internal/toolgrammar"
+	_ "github.com/anthony-chaudhary/fak/internal/worktreewitness"
+	_ "github.com/anthony-chaudhary/fak/pkg/harnesssidecar"
+	_ "github.com/anthony-chaudhary/fak/pkg/managedharness"
 )
