@@ -634,6 +634,14 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdConceptUsageScore(args)
 	case "propagation-scorecard":
 		cmdPropagationScorecard(args)
+	case "amdgpu":
+		cmdAMDGPU(args)
+	case "containment":
+		cmdAMDGPU(append([]string{"containment"}, args...))
+	case "client":
+		cmdClient(args)
+	case "conversation-profile":
+		cmdConversationProfile(args)
 	default:
 		return false
 	}

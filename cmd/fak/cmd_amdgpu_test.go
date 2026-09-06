@@ -72,3 +72,18 @@ func TestRunAMDGPU_UnknownSubcommand(t *testing.T) {
 		t.Errorf("expected stderr to mention unknown subcommand, got: %s", stderr.String())
 	}
 }
+
+func TestRunAMDGPU_Containment(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runAMDGPU(&stdout, &stderr, []string{"containment", "--aperture-gb=64", "--json"})
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
+	}
+	var res map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatalf("failed to unmarshal JSON: %v", err)
+	}
+	if res["has_capacity"] != true {
+		t.Errorf("expected has_capacity=true, got %v", res["has_capacity"])
+	}
+}

@@ -742,6 +742,11 @@
             "lane": "conformance"
         },
         {
+            "command": "fak containment",
+            "output_contains": "APU Headroom Arbitration",
+            "lane": "containment"
+        },
+        {
             "command": "fak version modules",
             "output_contains": "internal/contextq",
             "lane": "contextq"
@@ -750,6 +755,11 @@
             "command": "fak version modules",
             "output_contains": "internal/control",
             "lane": "control"
+        },
+        {
+            "command": "fak conversation-profile",
+            "output_contains": "Usage: fak conversation-profile",
+            "lane": "conversationprofile"
         },
         {
             "command": "fak version modules",
@@ -1207,6 +1217,11 @@
             "lane": "fabricmap"
         },
         {
+            "command": "fak client",
+            "output_contains": "Usage: fak client",
+            "lane": "fakclient"
+        },
+        {
             "command": "fak version modules",
             "output_contains": "internal/fakrpc",
             "lane": "fakrpc"
@@ -1590,6 +1605,11 @@
             "command": "fak version modules",
             "output_contains": "internal/harnesscompose",
             "lane": "harnesscompose"
+        },
+        {
+            "command": "fak conformance --harness",
+            "output_contains": "CONFORMANT",
+            "lane": "harnessconformance"
         },
         {
             "command": "fak version modules",

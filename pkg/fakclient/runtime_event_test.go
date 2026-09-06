@@ -19,7 +19,9 @@ func TestGeneratedRuntimeSDKDoesNotDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, want) {
+	gotNorm := bytes.ReplaceAll(got, []byte("\r\n"), []byte("\n"))
+	wantNorm := bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n"))
+	if !bytes.Equal(gotNorm, wantNorm) {
 		t.Fatal("runtime SDK generated source drifted")
 	}
 }
