@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func createTestFixtures(t *testing.T) (dir, lockPath, policyPath, assetsDir, binDir, modelPath string) {
+func createTestFixtures(t testing.TB) (dir, lockPath, policyPath, assetsDir, binDir, modelPath string) {
 	t.Helper()
 	dir = t.TempDir()
 
