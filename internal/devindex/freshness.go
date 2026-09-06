@@ -242,45 +242,50 @@ func (c *Catalog) ExplicitTreeLaneForPath(path string) string {
 }
 
 // undeclaredLeaves is UndeclaredLeaves plus the reason it could not finish, if any:
-// an unreadable internal/ (nothing was scanned at all) or an unreadable package
+// an unreadable internal/ or pkg/ (nothing was scanned at all) or an unreadable package
 // directory (a leaf that might hold Go files was skipped). First failure wins — one
 // named unchecked source is enough to disqualify a fresh verdict, and the scan keeps
 // going so proven drift elsewhere still outranks it.
 func (c *Catalog) undeclaredLeaves() ([]string, *Unchecked) {
-	dir := filepath.Join(c.Root, "internal")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, &Unchecked{Detector: DriftUndeclaredLeaf, Source: "internal", Reason: err.Error()}
-	}
 	var gaps []string
 	var unchecked *Unchecked
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		name := strings.ToLower(e.Name())
-		if c.declared[name] {
-			continue
-		}
-		hasGo, readErr := dirHasGoFiles(filepath.Join(dir, e.Name()))
-		if readErr != nil {
-			if unchecked == nil {
-				unchecked = &Unchecked{Detector: DriftUndeclaredLeaf, Source: "internal/" + e.Name(), Reason: readErr.Error()}
+	for _, base := range []string{"internal", "pkg"} {
+		dir := filepath.Join(c.Root, base)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) && base != "internal" {
+				continue
 			}
-			continue
+			return nil, &Unchecked{Detector: DriftUndeclaredLeaf, Source: base, Reason: err.Error()}
 		}
-		if !hasGo {
-			continue // not a Go package (testdata/doc dir): not a leaf
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			name := strings.ToLower(e.Name())
+			if c.declared[name] {
+				continue
+			}
+			hasGo, readErr := dirHasGoFiles(filepath.Join(dir, e.Name()))
+			if readErr != nil {
+				if unchecked == nil {
+					unchecked = &Unchecked{Detector: DriftUndeclaredLeaf, Source: base + "/" + e.Name(), Reason: readErr.Error()}
+				}
+				continue
+			}
+			if !hasGo {
+				continue // not a Go package (testdata/doc dir): not a leaf
+			}
+			// A composite lane may deliberately own a differently named package
+			// (internal/study is part of studyreceipt). Resolve the authored tree before
+			// calling the package undeclared; requiring owner == basename would report a
+			// gap even though arbitration already has an exact region for every file.
+			probe := filepath.ToSlash(filepath.Join(base, e.Name(), "_lane_ownership.go"))
+			if c.ExplicitTreeLaneForPath(probe) != "" {
+				continue
+			}
+			gaps = append(gaps, name)
 		}
-		// A composite lane may deliberately own a differently named package
-		// (internal/study is part of studyreceipt). Resolve the authored tree before
-		// calling the package undeclared; requiring owner == basename would report a
-		// gap even though arbitration already has an exact region for every file.
-		probe := filepath.ToSlash(filepath.Join("internal", e.Name(), "_lane_ownership.go"))
-		if c.ExplicitTreeLaneForPath(probe) != "" {
-			continue
-		}
-		gaps = append(gaps, name)
 	}
 	sort.Strings(gaps)
 	return gaps, unchecked

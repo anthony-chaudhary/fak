@@ -68,9 +68,9 @@ When invoked without explicit arguments or under underspecified requests, apply 
    isolates them into dedicated, single-worker serial waves (`serial_singleton`). Deploy `subagent_type="deep-reason"`
    for these leaves to ensure lock invariants, concurrency safety, and frozen ABI contracts are strictly preserved.
 5. **Strict Subagent Fences & Scoped Verification**:
-   Subagents must edit ONLY within their assigned `internal/<lane>/` package directory. They must NEVER
+   Subagents must edit ONLY within their assigned `<unit_of_work>/` (`internal/<lane>/` or `pkg/<lane>/`) package directory. They must NEVER
    touch root files, `go.mod`, `go.sum`, `dos.toml`, or sibling packages. Subagents must run ONLY package-scoped
-   tests (`go test -v ./internal/<lane>`, `go vet ./internal/<lane>`), NEVER broad `go test ./...` which
+   tests (`go test -v ./<unit_of_work>`, `go vet ./<unit_of_work>`), NEVER broad `go test ./...` which
    could fail on unrelated in-flight peer edits.
 6. **Coordinator Stays Clean & O(1) Carryover**:
    The coordinator dispatches, adjudicates conflicts, witnesses proofs, and tracks the campaign burndown.
@@ -159,7 +159,7 @@ dos arbitrate --workspace . --lane <lane> --kind keyword --mode exclusive
 ### 2. Partitioning by Action Type
 
 Partition each lane by its scheduled maturity action type:
-- **Package-Isolated Actions** (`implement`, `test`, `benchmark`, `clean comments`): Run directly in parallel fenced subagents bounded strictly to `internal/<lane>/`.
+- **Package-Isolated Actions** (`implement`, `test`, `benchmark`, `clean comments`): Run directly in parallel fenced subagents bounded strictly to their package directory (`internal/<lane>/` or `pkg/<lane>/`).
 - **Integration Actions** (`integrate` into `cmd/`, `dogfood` in `internal/maturity/runtime-proofs.json`): Require cross-package coordinator wiring. Do not assign cross-package modifications to package-fenced subagents; wire integration actions from the coordinator.
 
 ### 3. Select Specialized Subagent Type

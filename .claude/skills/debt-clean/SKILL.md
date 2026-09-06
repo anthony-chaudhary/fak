@@ -93,17 +93,17 @@ Launch a targeted subagent:
 {
   "subagent_type": "general",
   "description": "Clean debt in <lane>",
-  "prompt": "You are an isolated worker advancing the maturity curve for internal/<lane>.\nGoal: fulfill the exact next action: <next_action>.\nTarget Directory: internal/<lane>\nBoundaries: Edit ONLY files inside internal/<lane>/. Do not touch sibling packages.\nVerification: Execute `go test -v ./internal/<lane>` and `go vet ./internal/<lane>`.\nReturn Contract: Return a compact receipt with: (1) files modified/created, (2) test result receipt, (3) brief 1-line rationale. Do not return full command logs."
+  "prompt": "You are an isolated worker advancing the maturity curve for <unit_of_work> (internal/<lane> or pkg/<lane>).\nGoal: fulfill the exact next action: <next_action>.\nTarget Directory: <unit_of_work>\nBoundaries: Edit ONLY files inside <unit_of_work>/. Do not touch sibling packages.\nVerification: Execute `go test -v ./<unit_of_work>` and `go vet ./<unit_of_work>`.\nReturn Contract: Return a compact receipt with: (1) files modified/created, (2) test result receipt, (3) brief 1-line rationale. Do not return full command logs."
 }
 ```
 
 The subagent executes the concrete work needed:
 - **If missing tests (`HasTests == false`)**:
-  Writes real unit tests (`<name>_test.go`) in `internal/<lane>/`. Covers positive and
-  negative branches, edge cases, and ensures `go test ./internal/<lane>/...` passes cleanly.
+  Writes real unit tests (`<name>_test.go`) in `<unit_of_work>/`. Covers positive and
+  negative branches, edge cases, and ensures `go test ./<unit_of_work>/...` passes cleanly.
 
 - **If missing implementation (`HasCode == false` or stub)**:
-  Implements core functions, types, and logic in `internal/<lane>/`. Adheres to existing
+  Implements core functions, types, and logic in `<unit_of_work>/`. Adheres to existing
   patterns and keeps the package focused.
 
 - **If unintegrated (`Integrated == false`)**:
