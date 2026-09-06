@@ -391,3 +391,58 @@ func TestManager_ConcurrentReadAndMutations(t *testing.T) {
 		t.Errorf("expected epoch to advance under concurrent apply, got %d", finalActive.Epoch)
 	}
 }
+
+func TestManager_ConcurrentApplyAndTelemetryRollback_NoDeadlock(t *testing.T) {
+	initial := DefaultConfig()
+	wcfg := DefaultWatchdogConfig()
+	wcfg.StabilizationWindow = 1 * time.Millisecond
+
+	mgr, err := NewManager(initial, wcfg, nil)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	const iterations = 1000
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	// Goroutine 1: Repeatedly applies configuration patches (mgr.Apply(..., false))
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			depth := uint32((i % 8) + 1)
+			_, _ = mgr.Apply(ConfigPatch{SpeculativeDraftDepth: &depth}, false)
+		}
+	}()
+
+	// Goroutine 2: Repeatedly feeds telemetry samples triggering rollbacks (mgr.IngestTelemetry(...))
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			mgr.IngestTelemetry(TelemetrySample{
+				Timestamp:    time.Now().UTC(),
+				Error5xxRate: 0.05,
+			})
+		}
+	}()
+
+	// Goroutine 3: Repeatedly checks stabilization (mgr.Watchdog().CheckStabilization(...))
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			mgr.Watchdog().CheckStabilization(time.Now().UTC().Add(time.Hour))
+		}
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("deadlock detected: timed out waiting for concurrent apply, telemetry rollback, and stabilization checks")
+	}
+}

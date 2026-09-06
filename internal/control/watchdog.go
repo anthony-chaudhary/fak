@@ -121,9 +121,9 @@ func (w *Watchdog) StartEvaluation(epoch uint64, slaMS float64, initialAcceptanc
 // Returns (triggered, triggerName, detail).
 func (w *Watchdog) IngestTelemetry(sample TelemetrySample) (bool, string, string) {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 
 	if w.state != CanaryStateEvaluating {
+		w.mu.Unlock()
 		return false, "", ""
 	}
 
@@ -132,53 +132,70 @@ func (w *Watchdog) IngestTelemetry(sample TelemetrySample) (bool, string, string
 		sample.Error5xxRate = float64(sample.Errors5xx) / float64(sample.TotalRequests)
 	}
 
+	var (
+		doRollback     bool
+		triggerName    string
+		detail         string
+		rollbackFn     RollbackHandler
+		doPromote      bool
+		evaluatedEpoch uint64
+		promoteFn      PromoteHandler
+	)
+
 	// Check 1: 5xx error rate exceeds threshold (default 0.1%)
 	if sample.Error5xxRate > w.cfg.Max5xxErrorRate {
-		trigger := Trigger5xxErrorRateExceeded
-		detail := fmt.Sprintf("5xx error rate (%.4f%%) exceeded ceiling (%.4f%%)", sample.Error5xxRate*100, w.cfg.Max5xxErrorRate*100)
+		triggerName = Trigger5xxErrorRateExceeded
+		detail = fmt.Sprintf("5xx error rate (%.4f%%) exceeded ceiling (%.4f%%)", sample.Error5xxRate*100, w.cfg.Max5xxErrorRate*100)
 		w.state = CanaryStateRolledBack
-		if w.onRollback != nil {
-			_ = w.onRollback(trigger, detail)
-		}
-		return true, trigger, detail
-	}
-
-	// Check 2: TTFT p99 latency breaches declared SLA
-	if sample.TTFTp99MS > 0 && w.slaMS > 0 && sample.TTFTp99MS > w.slaMS {
-		trigger := TriggerLatencySLABreach
-		detail := fmt.Sprintf("TTFT p99 (%.2f ms) breached declared SLA (%.2f ms)", sample.TTFTp99MS, w.slaMS)
+		doRollback = true
+		rollbackFn = w.onRollback
+	} else if sample.TTFTp99MS > 0 && w.slaMS > 0 && sample.TTFTp99MS > w.slaMS {
+		// Check 2: TTFT p99 latency breaches declared SLA
+		triggerName = TriggerLatencySLABreach
+		detail = fmt.Sprintf("TTFT p99 (%.2f ms) breached declared SLA (%.2f ms)", sample.TTFTp99MS, w.slaMS)
 		w.state = CanaryStateRolledBack
-		if w.onRollback != nil {
-			_ = w.onRollback(trigger, detail)
-		}
-		return true, trigger, detail
-	}
-
-	// Check 3: Speculative acceptance rate collapses by > 50%
-	if sample.SpeculativeAcceptanceRate > 0 {
+		doRollback = true
+		rollbackFn = w.onRollback
+	} else if sample.SpeculativeAcceptanceRate > 0 {
+		// Check 3: Speculative acceptance rate collapses by > 50%
 		if w.baselineAcceptance == 0 {
 			w.baselineAcceptance = sample.SpeculativeAcceptanceRate
 		} else {
 			collapseThreshold := w.baselineAcceptance * (1.0 - w.cfg.MaxAcceptanceDropRatio)
 			if sample.SpeculativeAcceptanceRate < collapseThreshold {
-				trigger := TriggerSpeculativeCollapse
-				detail := fmt.Sprintf("speculative acceptance rate collapsed to %.2f (baseline: %.2f, drop > %.0f%%)",
+				triggerName = TriggerSpeculativeCollapse
+				detail = fmt.Sprintf("speculative acceptance rate collapsed to %.2f (baseline: %.2f, drop > %.0f%%)",
 					sample.SpeculativeAcceptanceRate, w.baselineAcceptance, w.cfg.MaxAcceptanceDropRatio*100)
 				w.state = CanaryStateRolledBack
-				if w.onRollback != nil {
-					_ = w.onRollback(trigger, detail)
-				}
-				return true, trigger, detail
+				doRollback = true
+				rollbackFn = w.onRollback
 			}
 		}
 	}
 
-	// Check stabilization window completion
-	now := time.Now().UTC()
-	if !w.startedAt.IsZero() && now.Sub(w.startedAt) >= w.cfg.StabilizationWindow {
-		w.state = CanaryStateStabilized
-		if w.onPromote != nil {
-			_ = w.onPromote(w.evaluatedEpoch)
+	if !doRollback {
+		// Check stabilization window completion
+		now := time.Now().UTC()
+		if !w.startedAt.IsZero() && now.Sub(w.startedAt) >= w.cfg.StabilizationWindow {
+			w.state = CanaryStateStabilized
+			doPromote = true
+			evaluatedEpoch = w.evaluatedEpoch
+			promoteFn = w.onPromote
+		}
+	}
+
+	w.mu.Unlock()
+
+	if doRollback {
+		if rollbackFn != nil {
+			_ = rollbackFn(triggerName, detail)
+		}
+		return true, triggerName, detail
+	}
+
+	if doPromote {
+		if promoteFn != nil {
+			_ = promoteFn(evaluatedEpoch)
 		}
 	}
 
@@ -188,19 +205,26 @@ func (w *Watchdog) IngestTelemetry(sample TelemetrySample) (bool, string, string
 // CheckStabilization checks if the evaluation period has successfully elapsed without anomaly.
 func (w *Watchdog) CheckStabilization(now time.Time) bool {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 
 	if w.state != CanaryStateEvaluating {
-		return w.state == CanaryStateStabilized
+		stabilized := (w.state == CanaryStateStabilized)
+		w.mu.Unlock()
+		return stabilized
 	}
 
 	if now.Sub(w.startedAt) >= w.cfg.StabilizationWindow {
 		w.state = CanaryStateStabilized
-		if w.onPromote != nil {
-			_ = w.onPromote(w.evaluatedEpoch)
+		evaluatedEpoch := w.evaluatedEpoch
+		promoteFn := w.onPromote
+		w.mu.Unlock()
+
+		if promoteFn != nil {
+			_ = promoteFn(evaluatedEpoch)
 		}
 		return true
 	}
+
+	w.mu.Unlock()
 	return false
 }
 
