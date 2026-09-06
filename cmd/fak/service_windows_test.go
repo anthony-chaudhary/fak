@@ -3,6 +3,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -190,14 +192,20 @@ func runningWindowsService(events *[]string) (*fakeWindowsSCMService, mgr.Config
 }
 
 func TestWindowsServiceHandlerReportsRunningAndStops(t *testing.T) {
-	oldCrash, oldResume := windowsControlCrashTick, windowsControlResumeTick
+	oldCrash, oldResume, oldOps := windowsControlCrashTick, windowsControlResumeTick, serviceOpsTick
 	windowsControlCrashTick = func(io.Writer, io.Writer, string) int { return 0 }
 	windowsControlResumeTick = func(io.Writer, io.Writer) int { return 0 }
-	t.Cleanup(func() { windowsControlCrashTick, windowsControlResumeTick = oldCrash, oldResume })
+	serviceOpsTick = func(context.Context, io.Writer, io.Writer) {}
+	t.Cleanup(func() {
+		windowsControlCrashTick, windowsControlResumeTick, serviceOpsTick = oldCrash, oldResume, oldOps
+	})
 	changes := make(chan svc.ChangeRequest, 1)
 	statuses := make(chan svc.Status, 8)
 	done := make(chan struct{})
-	go func() { fakWindowsService{io.Discard, io.Discard}.Execute(nil, changes, statuses); close(done) }()
+	go func() {
+		fakWindowsService{stdout: io.Discard, stderr: io.Discard}.Execute(nil, changes, statuses)
+		close(done)
+	}()
 	seenRunning := false
 	deadline := time.After(time.Second)
 	for !seenRunning {
@@ -641,5 +649,227 @@ func TestWindowsServiceBinaryACLIsLeastPrivilege(t *testing.T) {
 				t.Fatalf("ACL inherits broad parent grants: %s", sddl)
 			}
 		})
+	}
+}
+
+func TestWindowsServiceWorkspaceValidation(t *testing.T) {
+	// Relative path should fail
+	if _, err := validateOpsWorkspace("relative/path"); err == nil {
+		t.Fatal("expected error for relative path, got nil")
+	} else if !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("expected error mentioning 'absolute', got %v", err)
+	}
+
+	// Non-existent path should fail
+	nonExistent := filepath.Join(t.TempDir(), "does_not_exist")
+	if _, err := validateOpsWorkspace(nonExistent); err == nil {
+		t.Fatal("expected error for non-existent path, got nil")
+	} else if !strings.Contains(err.Error(), "inaccessible") {
+		t.Fatalf("expected error mentioning 'inaccessible', got %v", err)
+	}
+
+	// File (not directory) should fail
+	tmpFile := filepath.Join(t.TempDir(), "file.txt")
+	if err := os.WriteFile(tmpFile, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validateOpsWorkspace(tmpFile); err == nil {
+		t.Fatal("expected error for file path, got nil")
+	} else if !strings.Contains(err.Error(), "directory") {
+		t.Fatalf("expected error mentioning 'directory', got %v", err)
+	}
+
+	// Empty path should fail
+	if _, err := validateOpsWorkspace(""); err == nil {
+		t.Fatal("expected error for empty path, got nil")
+	}
+
+	// Valid directory should succeed
+	validDir := t.TempDir()
+	got, err := validateOpsWorkspace(validDir)
+	if err != nil {
+		t.Fatalf("unexpected error for valid directory: %v", err)
+	}
+	if got != filepath.Clean(validDir) {
+		t.Fatalf("got %q, want %q", got, filepath.Clean(validDir))
+	}
+}
+
+func TestWindowsServiceBinaryPathGeneration(t *testing.T) {
+	bin := `C:\ProgramData\fak\bin\fak-123.exe`
+	ws := `C:\work\my repo`
+
+	// Explicit workspace with spaces
+	got := windowsServiceBinaryPath(bin, ws)
+	want := `"C:\ProgramData\fak\bin\fak-123.exe" service windows-run --ops-workspace "C:\work\my repo"`
+	if got != want {
+		t.Fatalf("windowsServiceBinaryPath got %q, want %q", got, want)
+	}
+
+	// BinaryPath in mgr.Config
+	cfg := windowsServiceConfig(bin, ws)
+	if cfg.BinaryPathName != want {
+		t.Fatalf("cfg.BinaryPathName got %q, want %q", cfg.BinaryPathName, want)
+	}
+
+	// Extract workspace back from BinaryPathName
+	extracted := extractWindowsServiceWorkspace(cfg.BinaryPathName)
+	if extracted != filepath.Clean(ws) {
+		t.Fatalf("extracted workspace %q, want %q", extracted, filepath.Clean(ws))
+	}
+
+	// Without workspace
+	gotNoWS := windowsServiceBinaryPath(bin, "")
+	wantNoWS := `"C:\ProgramData\fak\bin\fak-123.exe" service windows-run`
+	if gotNoWS != wantNoWS {
+		t.Fatalf("gotNoWS %q, want %q", gotNoWS, wantNoWS)
+	}
+	if extractedNoWS := extractWindowsServiceWorkspace(gotNoWS); extractedNoWS != "" {
+		t.Fatalf("expected empty extracted workspace, got %q", extractedNoWS)
+	}
+
+	// Variations: -ops-workspace, --workspace, -workspace, --ops-workspace=...
+	cases := []struct {
+		cmd  string
+		want string
+	}{
+		{`"C:\fak.exe" service windows-run -ops-workspace "C:\work"`, `C:\work`},
+		{`"C:\fak.exe" service windows-run --workspace "C:\work"`, `C:\work`},
+		{`"C:\fak.exe" service windows-run -workspace "C:\work"`, `C:\work`},
+		{`"C:\fak.exe" service windows-run --ops-workspace="C:\work"`, `C:\work`},
+		{`"C:\fak.exe" service windows-run --workspace="C:\work"`, `C:\work`},
+	}
+	for _, tc := range cases {
+		if ext := extractWindowsServiceWorkspace(tc.cmd); ext != filepath.Clean(tc.want) {
+			t.Errorf("cmd %q extracted %q, want %q", tc.cmd, ext, tc.want)
+		}
+	}
+}
+
+func TestWindowsServiceSCMUnrelatedCwdResolvesConfiguredWorkspace(t *testing.T) {
+	unrelatedDir := t.TempDir()
+	workspaceDir := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(workspaceDir, ".fak"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(unrelatedDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(origWd) }()
+
+	// Verify discoverRepoRoot() is empty in this unrelated directory
+	if root := discoverRepoRoot(); root != "" {
+		t.Skipf("unrelatedDir unexpectedly resolved a repo root: %q", root)
+	}
+
+	// 1. Install service specifying --ops-workspace
+	events := []string{}
+	target := `C:\ProgramData\fak\bin\fak-new.exe`
+	stubWindowsInstallFilesystem(t, &events, target)
+	created := &fakeWindowsSCMService{events: &events, status: svc.Status{State: svc.Stopped}}
+	manager := &fakeWindowsSCMManager{openErr: windows.ERROR_SERVICE_DOES_NOT_EXIST, created: created, events: &events}
+
+	_, err = installWindowsService(manager, `C:\incoming\fak.exe`, `C:\ProgramData\fak\guard-control`, workspaceDir)
+	if err != nil {
+		t.Fatalf("installWindowsService failed: %v", err)
+	}
+
+	// Verify BinaryPathName persisted in SCM contains the explicit workspace
+	binaryPath := manager.createCfg.BinaryPathName
+	if !strings.Contains(binaryPath, "--ops-workspace") || !strings.Contains(binaryPath, workspaceDir) {
+		t.Fatalf("BinaryPathName %q does not contain --ops-workspace %q", binaryPath, workspaceDir)
+	}
+
+	// 2. Read back config from SCM
+	extractedWS := extractWindowsServiceWorkspace(binaryPath)
+	if extractedWS != filepath.Clean(workspaceDir) {
+		t.Fatalf("extracted workspace %q, want %q", extractedWS, filepath.Clean(workspaceDir))
+	}
+
+	// 3. Dispatcher parses --ops-workspace and sets serviceOpsWorkspace
+	oldEngine, oldWS := serviceOpsEngine, serviceOpsWorkspace
+	defer func() {
+		serviceOpsEngine, serviceOpsWorkspace = oldEngine, oldWS
+	}()
+	serviceOpsEngine = nil
+	serviceOpsWorkspace = ""
+
+	validWS, err := validateOpsWorkspace(extractedWS)
+	if err != nil {
+		t.Fatalf("validateOpsWorkspace failed: %v", err)
+	}
+	serviceOpsWorkspace = validWS
+
+	// 4. Invoke serviceOpsTick in the unrelated cwd
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	serviceOpsTick(ctx, io.Discard, io.Discard)
+
+	// 5. Verify Ops resolved the configured workspace rather than failing or defaulting to cwd/empty
+	if serviceOpsEngine == nil {
+		t.Fatal("serviceOpsEngine was not initialized")
+	}
+	if serviceOpsEngine.RepoRoot != filepath.Clean(workspaceDir) {
+		t.Fatalf("serviceOpsEngine.RepoRoot = %q, want %q", serviceOpsEngine.RepoRoot, filepath.Clean(workspaceDir))
+	}
+}
+
+func TestWindowsServiceUpgradePreservesWorkspace(t *testing.T) {
+	events := []string{}
+	target := `C:\ProgramData\fak\bin\fak-new.exe`
+	stubWindowsInstallFilesystem(t, &events, target)
+
+	workspaceDir := t.TempDir()
+	oldCfg := windowsServiceConfig(`C:\ProgramData\fak\bin\fak-old.exe`, workspaceDir)
+	oldRecovery := []mgr.RecoveryAction{{Type: mgr.ServiceRestart, Delay: time.Minute}}
+	existingService := &fakeWindowsSCMService{
+		config:          oldCfg,
+		recoveryActions: append([]mgr.RecoveryAction(nil), oldRecovery...),
+		resetPeriod:     42,
+		status:          svc.Status{State: svc.Running},
+		queryStates:     []svc.Status{{State: svc.Running}, {State: svc.Stopped}},
+		events:          &events,
+	}
+	manager := &fakeWindowsSCMManager{existing: existingService, events: &events}
+
+	// Upgrade without passing explicit workspace: should preserve workspaceDir
+	_, err := installWindowsService(manager, `C:\incoming\fak.exe`, `C:\ProgramData\fak\guard-control`)
+	if err != nil {
+		t.Fatalf("installWindowsService upgrade failed: %v", err)
+	}
+
+	updatedPath := existingService.config.BinaryPathName
+	if !strings.Contains(updatedPath, "--ops-workspace") || !strings.Contains(updatedPath, workspaceDir) {
+		t.Fatalf("upgraded BinaryPathName %q did not preserve workspace %q", updatedPath, workspaceDir)
+	}
+
+	// Upgrade with new explicit workspace: should overwrite
+	newWorkspaceDir := t.TempDir()
+	existingService.queryStates = []svc.Status{{State: svc.Running}, {State: svc.Stopped}}
+	_, err = installWindowsService(manager, `C:\incoming\fak.exe`, `C:\ProgramData\fak\guard-control`, newWorkspaceDir)
+	if err != nil {
+		t.Fatalf("installWindowsService upgrade with new ws failed: %v", err)
+	}
+
+	newUpdatedPath := existingService.config.BinaryPathName
+	if !strings.Contains(newUpdatedPath, newWorkspaceDir) {
+		t.Fatalf("upgraded BinaryPathName %q did not use new workspace %q", newUpdatedPath, newWorkspaceDir)
+	}
+}
+
+func TestWindowsServiceDispatcherInvalidWorkspaceRejection(t *testing.T) {
+	var out, errout bytes.Buffer
+	rc := runWindowsServiceDispatcher(&out, &errout, "--ops-workspace", "relative/path")
+	if rc != 2 {
+		t.Fatalf("expected rc 2, got %d", rc)
+	}
+	if !strings.Contains(errout.String(), "absolute") {
+		t.Fatalf("expected stderr to mention 'absolute', got %q", errout.String())
 	}
 }

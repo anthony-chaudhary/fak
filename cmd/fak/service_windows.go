@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -122,9 +123,37 @@ func renameWindowsServiceExecutableNoReplace(source, target string) error {
 	return windows.MoveFileEx(from, to, windows.MOVEFILE_WRITE_THROUGH)
 }
 
-type fakWindowsService struct{ stdout, stderr io.Writer }
+var defaultServiceWorkspace = func() string {
+	if root := discoverRepoRoot(); root != "" {
+		return root
+	}
+	wd, err := os.Getwd()
+	if err == nil {
+		return wd
+	}
+	return ""
+}
 
-func (h fakWindowsService) Execute(_ []string, changes <-chan svc.ChangeRequest, statuses chan<- svc.Status) (bool, uint32) {
+type fakWindowsService struct {
+	stdout, stderr io.Writer
+	workspace      string
+}
+
+func (h fakWindowsService) Execute(args []string, changes <-chan svc.ChangeRequest, statuses chan<- svc.Status) (bool, uint32) {
+	if h.workspace != "" {
+		serviceOpsWorkspace = h.workspace
+	}
+	if len(args) > 0 {
+		fs := flag.NewFlagSet("service execute", flag.ContinueOnError)
+		var ws string
+		fs.StringVar(&ws, "ops-workspace", "", "")
+		fs.StringVar(&ws, "workspace", "", "")
+		if err := fs.Parse(args); err == nil && ws != "" {
+			if validWS, err := validateOpsWorkspace(ws); err == nil {
+				serviceOpsWorkspace = validWS
+			}
+		}
+	}
 	statuses <- svc.Status{State: svc.StartPending}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -178,13 +207,30 @@ func runWindowsControlLoop(ctx context.Context, stdout, stderr io.Writer, interv
 		}
 	}
 }
-func runWindowsServiceDispatcher(stdout, stderr io.Writer) int {
+func runWindowsServiceDispatcher(stdout, stderr io.Writer, args ...string) int {
+	fs := flag.NewFlagSet("service windows-run", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var ws string
+	fs.StringVar(&ws, "ops-workspace", "", "repository or workspace root for ops engine ticks")
+	fs.StringVar(&ws, "workspace", "", "alias for --ops-workspace")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if ws != "" {
+		validWS, err := validateOpsWorkspace(ws)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak service windows-run: %v\n", err)
+			return 2
+		}
+		serviceOpsWorkspace = validWS
+	}
 	isService, err := svc.IsWindowsService()
 	if err != nil || !isService {
 		fmt.Fprintln(stderr, "fak service windows-run must be launched by SCM")
 		return 2
 	}
-	if err := svc.Run(windowsGuardServiceName, fakWindowsService{stdout, stderr}); err != nil {
+	if err := svc.Run(windowsGuardServiceName, fakWindowsService{stdout: stdout, stderr: stderr, workspace: serviceOpsWorkspace}); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -293,8 +339,73 @@ func stageWindowsServiceExecutable(source, target string) error {
 	}
 	return nil
 }
-func windowsServiceConfig(binary string) mgr.Config {
-	return mgr.Config{StartType: mgr.StartAutomatic, ErrorControl: mgr.ErrorNormal, BinaryPathName: fmt.Sprintf("\"%s\" service windows-run", binary), DisplayName: "fak Guard control plane", Description: "Session-0 Guard sensor, policy, durable state, and recovery control plane", ServiceStartName: "NT AUTHORITY\\LocalService", SidType: windows.SERVICE_SID_TYPE_RESTRICTED}
+func windowsServiceBinaryPath(binary string, workspace string) string {
+	cleanBin := strings.Trim(binary, `"`)
+	if workspace != "" {
+		cleanWS := strings.Trim(workspace, `"`)
+		return fmt.Sprintf("\"%s\" service windows-run --ops-workspace \"%s\"", cleanBin, cleanWS)
+	}
+	return fmt.Sprintf("\"%s\" service windows-run", cleanBin)
+}
+
+func windowsServiceConfig(binary string, workspace ...string) mgr.Config {
+	ws := ""
+	if len(workspace) > 0 {
+		ws = workspace[0]
+	}
+	return mgr.Config{
+		StartType:        mgr.StartAutomatic,
+		ErrorControl:     mgr.ErrorNormal,
+		BinaryPathName:   windowsServiceBinaryPath(binary, ws),
+		DisplayName:      "fak Guard control plane",
+		Description:      "Session-0 Guard sensor, policy, durable state, and recovery control plane",
+		ServiceStartName: "NT AUTHORITY\\LocalService",
+		SidType:          windows.SERVICE_SID_TYPE_RESTRICTED,
+	}
+}
+
+func splitCommandLine(cmd string) []string {
+	var args []string
+	var current strings.Builder
+	inQuotes := false
+	for i := 0; i < len(cmd); i++ {
+		c := cmd[i]
+		if c == '"' {
+			inQuotes = !inQuotes
+			continue
+		}
+		if !inQuotes && (c == ' ' || c == '\t') {
+			if current.Len() > 0 {
+				args = append(args, current.String())
+				current.Reset()
+			}
+			continue
+		}
+		current.WriteByte(c)
+	}
+	if current.Len() > 0 {
+		args = append(args, current.String())
+	}
+	return args
+}
+
+func extractWindowsServiceWorkspace(commandLine string) string {
+	args := splitCommandLine(commandLine)
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--ops-workspace" || arg == "-ops-workspace" || arg == "--workspace" || arg == "-workspace" {
+			if i+1 < len(args) {
+				return filepath.Clean(strings.Trim(args[i+1], `"`))
+			}
+		}
+		for _, prefix := range []string{"--ops-workspace=", "-ops-workspace=", "--workspace=", "-workspace="} {
+			if strings.HasPrefix(arg, prefix) {
+				val := strings.TrimPrefix(arg, prefix)
+				return filepath.Clean(strings.Trim(val, `"`))
+			}
+		}
+	}
+	return ""
 }
 
 func windowsServiceConfigExecutable(commandLine string) string {
@@ -456,7 +567,7 @@ func windowsInstallFailure(phase string, cause, rollbackErr error, oldImagePath,
 	return fmt.Errorf("%s: %w; previous service configuration preserved at [%s]", phase, cause, oldImagePath)
 }
 
-func installWindowsService(m windowsSCMManager, sourceExe, state string) (string, error) {
+func installWindowsService(m windowsSCMManager, sourceExe, state string, explicitWorkspace ...string) (string, error) {
 	service, openErr := m.OpenService(windowsGuardServiceName)
 	var snapshot windowsServiceSnapshot
 	existing := openErr == nil
@@ -472,6 +583,33 @@ func installWindowsService(m windowsSCMManager, sourceExe, state string) (string
 		}
 	} else if !errors.Is(openErr, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return "", fmt.Errorf("open existing service: %w", openErr)
+	}
+
+	var targetWorkspace string
+	if len(explicitWorkspace) > 0 && explicitWorkspace[0] != "" {
+		validWS, err := validateOpsWorkspace(explicitWorkspace[0])
+		if err != nil {
+			return "", fmt.Errorf("ops workspace invalid: %w", err)
+		}
+		targetWorkspace = validWS
+	} else if existing {
+		existingWS := extractWindowsServiceWorkspace(snapshot.config.BinaryPathName)
+		if existingWS != "" {
+			validWS, err := validateOpsWorkspace(existingWS)
+			if err != nil {
+				return "", fmt.Errorf("existing service workspace invalid: %w", err)
+			}
+			targetWorkspace = validWS
+		}
+	}
+	if targetWorkspace == "" {
+		if defWS := defaultServiceWorkspace(); defWS != "" {
+			validWS, err := validateOpsWorkspace(defWS)
+			if err != nil {
+				return "", fmt.Errorf("default ops workspace invalid: %w", err)
+			}
+			targetWorkspace = validWS
+		}
 	}
 
 	var (
@@ -495,7 +633,7 @@ func installWindowsService(m windowsSCMManager, sourceExe, state string) (string
 	if err := windowsStageServiceExecutable(sourceExe, target); err != nil {
 		return failExisting("stage service executable", err, false)
 	}
-	cfg := windowsServiceConfig(target)
+	cfg := windowsServiceConfig(target, targetWorkspace)
 	if existing {
 		if err := service.UpdateConfig(cfg); err != nil {
 			return failExisting("update service configuration", err, true)
@@ -509,7 +647,11 @@ func installWindowsService(m windowsSCMManager, sourceExe, state string) (string
 		return target, nil
 	}
 
-	service, err = m.CreateService(windowsGuardServiceName, target, cfg, "service", "windows-run")
+	serviceArgs := []string{"service", "windows-run"}
+	if targetWorkspace != "" {
+		serviceArgs = append(serviceArgs, "--ops-workspace", targetWorkspace)
+	}
+	service, err = m.CreateService(windowsGuardServiceName, target, cfg, serviceArgs...)
 	if err != nil {
 		return "", fmt.Errorf("create service: %w", err)
 	}
@@ -529,7 +671,11 @@ func installWindowsService(m windowsSCMManager, sourceExe, state string) (string
 	return target, nil
 }
 
-func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (serviceResult, int) {
+func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool, explicitWorkspace ...string) (serviceResult, int) {
+	ws := ""
+	if len(explicitWorkspace) > 0 {
+		ws = explicitWorkspace[0]
+	}
 	sourceExe, err := windowsServiceExecutable()
 	if err != nil {
 		return serviceResult{}, 1
@@ -537,6 +683,12 @@ func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (se
 	state := windowsServiceStateDir()
 	result := serviceResult{Manager: "windows-scm", Unit: windowsGuardServiceName}
 	if action == "install" {
+		if ws != "" {
+			if _, err := validateOpsWorkspace(ws); err != nil {
+				fmt.Fprintln(stderr, "install service:", err)
+				return result, 1
+			}
+		}
 		if selectedPath, planErr := windowsPlanStagedServiceExecutable(sourceExe); planErr == nil {
 			result.Path = selectedPath
 		}
@@ -555,7 +707,7 @@ func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (se
 	defer m.Disconnect()
 	switch action {
 	case "install":
-		result.Path, err = installWindowsService(m, sourceExe, state)
+		result.Path, err = installWindowsService(m, sourceExe, state, ws)
 		if err != nil {
 			fmt.Fprintln(stderr, "install service:", err)
 			return result, 1

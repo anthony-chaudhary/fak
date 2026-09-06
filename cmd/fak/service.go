@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -42,10 +43,14 @@ var serviceCommandOutput = exec.Command
 var serviceTick = func(stdout, stderr io.Writer) int {
 	return runResumeWatchdog(stdout, stderr, []string{"--live", "--json"})
 }
+var serviceOpsWorkspace string
 var serviceOpsEngine *ops.Engine
 var serviceOpsTick = func(ctx context.Context, stdout, stderr io.Writer) {
-	if serviceOpsEngine == nil {
-		root := discoverRepoRoot()
+	root := serviceOpsWorkspace
+	if root == "" {
+		root = discoverRepoRoot()
+	}
+	if serviceOpsEngine == nil || serviceOpsEngine.RepoRoot != root {
 		engine, err := ops.NewEngine(root, ops.DefaultConfig())
 		if err == nil {
 			serviceOpsEngine = engine
@@ -54,6 +59,23 @@ var serviceOpsTick = func(ctx context.Context, stdout, stderr io.Writer) {
 	if serviceOpsEngine != nil {
 		_ = serviceOpsEngine.Tick(ctx, false)
 	}
+}
+
+func validateOpsWorkspace(ws string) (string, error) {
+	if strings.TrimSpace(ws) == "" {
+		return "", errors.New("ops workspace path cannot be empty")
+	}
+	if !filepath.IsAbs(ws) {
+		return "", fmt.Errorf("ops workspace path must be an absolute path: %q", ws)
+	}
+	fi, err := os.Stat(ws)
+	if err != nil {
+		return "", fmt.Errorf("ops workspace inaccessible: %w", err)
+	}
+	if !fi.IsDir() {
+		return "", fmt.Errorf("ops workspace must be a directory: %q", ws)
+	}
+	return filepath.Clean(ws), nil
 }
 
 // defaultRootedPath fills an unset path flag with a default anchored at the filesystem
@@ -86,7 +108,7 @@ func runService(stdout, stderr io.Writer, args []string) int {
 		return 2
 	}
 	if args[0] == "windows-run" {
-		return runWindowsServiceDispatcher(stdout, stderr)
+		return runWindowsServiceDispatcher(stdout, stderr, args[1:]...)
 	}
 	if args[0] == "run" {
 		return runServiceLoop(stdout, stderr, args[1:])
@@ -112,8 +134,18 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	stateDir := fs.String("state-dir", "", "durable control-plane state directory")
 	principal := fs.String("principal", "", "unprivileged account used by the system service")
 	execPath := fs.String("exec-path", "", "stable OS-owned executable path")
+	opsWorkspace := fs.String("ops-workspace", "", "repository or workspace root for ops engine ticks")
+	fs.StringVar(opsWorkspace, "workspace", "", "alias for --ops-workspace")
 	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
 		return 2
+	}
+	if *opsWorkspace != "" {
+		validWS, err := validateOpsWorkspace(*opsWorkspace)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak service %s: %v\n", action, err)
+			return 2
+		}
+		*opsWorkspace = validWS
 	}
 	exe, err := os.Executable()
 	if err != nil {
@@ -124,7 +156,7 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	var systemdStatus func() (servicewatchdog.SystemdState, error)
 	switch runtime.GOOS {
 	case "windows":
-		result, rc := windowsServiceAction(action, stdout, stderr, *dry)
+		result, rc := windowsServiceAction(action, stdout, stderr, *dry, *opsWorkspace)
 		if *asJSON {
 			_ = json.NewEncoder(stdout).Encode(result)
 		} else if rc == 0 {
@@ -317,12 +349,22 @@ func runServiceLoop(stdout, stderr io.Writer, args []string) int {
 	interval := fs.Duration("interval", 15*time.Second, "control-plane tick interval")
 	once := fs.Bool("once", false, "run one tick and exit")
 	notifyMode := fs.String("notify", "none", "service notification protocol: none or systemd")
+	opsWorkspace := fs.String("ops-workspace", "", "repository or workspace root for ops engine ticks")
+	fs.StringVar(opsWorkspace, "workspace", "", "alias for --ops-workspace")
 	if fs.Parse(args) != nil || fs.NArg() != 0 || *interval <= 0 {
 		return 2
 	}
 	if *notifyMode != "none" && *notifyMode != "systemd" {
 		fmt.Fprintln(stderr, "fak service run: --notify must be none or systemd")
 		return 2
+	}
+	if *opsWorkspace != "" {
+		validWS, err := validateOpsWorkspace(*opsWorkspace)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak service run: %v\n", err)
+			return 2
+		}
+		serviceOpsWorkspace = validWS
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -332,8 +374,8 @@ func runServiceLoop(stdout, stderr io.Writer, args []string) int {
 	return runServiceLoopContext(ctx, stdout, stderr, *interval, *notifyMode)
 }
 func serviceUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: fak service install|remove|start|stop|restart|status|run [--dry-run] [--json]")
-	fmt.Fprintln(w, "       fak service run [--interval D] [--once] [--notify none|systemd]")
+	fmt.Fprintln(w, "usage: fak service install|remove|start|stop|restart|status|run [--dry-run] [--json] [--ops-workspace DIR]")
+	fmt.Fprintln(w, "       fak service run [--interval D] [--once] [--notify none|systemd] [--ops-workspace DIR]")
 	fmt.Fprintln(w, "       fak service events [--json] [--ledger-dir D] [--service S]")
 	fmt.Fprintln(w, "       fak service events --ingest windows-xml|journald-json|launchd-ndjson --file F --node N --service S [--workload W] [--unit U] [--json]")
 	fmt.Fprintln(w, "       fak service status --ledger-dir D [--json]    (observed-event rollup; also picked when FAK_SERVICE_LEDGER_DIR is set)")
