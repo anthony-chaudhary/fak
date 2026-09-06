@@ -47,11 +47,42 @@ func (s *Supervisor) BindPID(callID string, pid int) error {
 		return fmt.Errorf("toolprocgate: bind for call %s: refusing self pid %d", callID, pid)
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.spawned[callID] {
+		s.mu.Unlock()
 		return fmt.Errorf("toolprocgate: bind for unknown call %s", callID)
 	}
 	s.pids[callID] = pid
+
+	var reaper OSReaper
+	var needReap bool
+	if rec := s.settlements[callID]; rec != nil {
+		rec.WasBound = true
+		if rec.State == settlementReaped {
+			if rec.TerminalClassification == TerminalPreDispatchAbort {
+				rec.TerminalClassification = TerminalDeliveredButUnknown
+			}
+			if !rec.Reaped && s.reaper != nil {
+				needReap = true
+				reaper = s.reaper
+				delete(s.pids, callID)
+			}
+		} else if rec.State == settlementSettled {
+			if rec.TerminalClassification == TerminalPreDispatchAbort {
+				rec.TerminalClassification = TerminalDeliveredAndSettled
+			}
+		}
+	}
+	s.mu.Unlock()
+
+	if needReap && reaper != nil {
+		ok, detail := reaper(pid)
+		s.mu.Lock()
+		if rec := s.settlements[callID]; rec != nil {
+			rec.Reaped = ok
+			rec.ReapDetail = detail
+		}
+		s.mu.Unlock()
+	}
 	return nil
 }
 

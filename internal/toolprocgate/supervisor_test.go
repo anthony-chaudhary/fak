@@ -1104,6 +1104,250 @@ func TestSupervisorProcessGraceOverride(t *testing.T) {
 	}
 }
 
+// TestSettlementGrace_CancelThenBindPID verifies that when cancellation is requested
+// before PID registration (e.g. during launch preflight), subsequent BindPID correctly
+// marks WasBound = true and grace expiry classifies the terminal outcome as
+// TerminalDeliveredButUnknown with reaped = true.
+func TestSettlementGrace_CancelThenBindPID(t *testing.T) {
+	t.Run("tick_within_grace_then_expiry", func(t *testing.T) {
+		Reset()
+		t.Cleanup(Reset)
+
+		sup := NewSupervisor(toolproc.Config{})
+		sup.SettlementGrace = 500 * time.Millisecond
+		rec := &recordingReaper{ok: true, detail: "tree terminated"}
+		sup.SetReaper(rec.reap)
+
+		cancelled := false
+		cancel := func() {
+			cancelled = true
+		}
+
+		// 1. Spawn call without binding PID yet (launch preflight).
+		if err := sup.Spawn("p-late-bind", "worker", "s1", 60_000, 0, 1_000, cancel); err != nil {
+			t.Fatal(err)
+		}
+
+		// 2. Cancellation requested before child PID is captured.
+		if err := sup.Cancel("p-late-bind", 2_000, "PREFLIGHT_CANCEL"); err != nil {
+			t.Fatal(err)
+		}
+		if !cancelled {
+			t.Fatal("cancel lever must fire")
+		}
+		if !sup.SettlementPending("p-late-bind") {
+			t.Fatal("call must be in settlement pending")
+		}
+
+		// 3. Child PID is captured and bound to supervisor.
+		if err := sup.BindPID("p-late-bind", 7777); err != nil {
+			t.Fatal(err)
+		}
+		if !sup.WasBound("p-late-bind") {
+			t.Fatal("WasBound must report true after BindPID")
+		}
+		if preTickInfo, ok := sup.SettlementInfo("p-late-bind"); !ok || !preTickInfo.WasBound {
+			t.Fatalf("want WasBound=true immediately after BindPID, got %+v", preTickInfo)
+		}
+
+		// 4. Tick within grace window (2_200 < 2_500): pending, reaper not invoked yet.
+		rep, err := sup.Tick(2_200)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rec.pids) != 0 {
+			t.Fatalf("reaper must not be called within grace window, got %v", rec.pids)
+		}
+
+		// 5. Tick past grace expiry (2_600 >= 2_500): grace expired, forceful reap executed.
+		rep, err = sup.Tick(2_600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rep.Actions) != 1 {
+			t.Fatalf("want 1 action on grace expiry, got %+v", rep.Actions)
+		}
+		act := rep.Actions[0]
+		if !act.Reaped || act.Settled {
+			t.Fatalf("want Reaped=true, Settled=false; got %+v", act)
+		}
+		if act.TerminalClassification != TerminalDeliveredButUnknown {
+			t.Fatalf("want TerminalDeliveredButUnknown, got %q", act.TerminalClassification)
+		}
+		if tc := sup.TerminalClassification("p-late-bind"); tc != TerminalDeliveredButUnknown {
+			t.Fatalf("TerminalClassification: want %q, got %q", TerminalDeliveredButUnknown, tc)
+		}
+		if len(rec.pids) != 1 || rec.pids[0] != 7777 {
+			t.Fatalf("reaper must be invoked with PID 7777, got %v", rec.pids)
+		}
+		settled, reaped, pending := sup.SettlementStatus("p-late-bind")
+		if settled || !reaped || pending {
+			t.Fatalf("SettlementStatus: want (false, true, false), got (%v, %v, %v)", settled, reaped, pending)
+		}
+		info, ok := sup.SettlementInfo("p-late-bind")
+		if !ok || info.TerminalClassification != TerminalDeliveredButUnknown || !info.Reaped || !info.WasBound {
+			t.Fatalf("SettlementInfo: unexpected info %+v", info)
+		}
+	})
+
+	t.Run("direct_tick_past_expiry", func(t *testing.T) {
+		Reset()
+		t.Cleanup(Reset)
+
+		sup := NewSupervisor(toolproc.Config{})
+		sup.SettlementGrace = 500 * time.Millisecond
+		rec := &recordingReaper{ok: true, detail: "tree terminated"}
+		sup.SetReaper(rec.reap)
+
+		cancelled := false
+		cancel := func() {
+			cancelled = true
+		}
+
+		if err := sup.Spawn("p-direct-expiry", "worker", "s1", 60_000, 0, 1_000, cancel); err != nil {
+			t.Fatal(err)
+		}
+		if err := sup.Cancel("p-direct-expiry", 2_000, "OPERATOR_KILL"); err != nil {
+			t.Fatal(err)
+		}
+		if !cancelled {
+			t.Fatal("cancel lever must fire")
+		}
+		if err := sup.BindPID("p-direct-expiry", 6666); err != nil {
+			t.Fatal(err)
+		}
+		if !sup.WasBound("p-direct-expiry") {
+			t.Fatal("WasBound must report true after BindPID")
+		}
+
+		// Direct tick past grace expiry without intermediate pending tick.
+		rep, err := sup.Tick(2_600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rep.Actions) != 1 {
+			t.Fatalf("want 1 action on grace expiry, got %+v", rep.Actions)
+		}
+		act := rep.Actions[0]
+		if !act.Reaped || act.Settled {
+			t.Fatalf("want Reaped=true, Settled=false; got %+v", act)
+		}
+		if act.TerminalClassification != TerminalDeliveredButUnknown {
+			t.Fatalf("want TerminalDeliveredButUnknown, got %q", act.TerminalClassification)
+		}
+		if tc := sup.TerminalClassification("p-direct-expiry"); tc != TerminalDeliveredButUnknown {
+			t.Fatalf("TerminalClassification: want %q, got %q", TerminalDeliveredButUnknown, tc)
+		}
+		if len(rec.pids) != 1 || rec.pids[0] != 6666 {
+			t.Fatalf("reaper must be invoked with PID 6666, got %v", rec.pids)
+		}
+		info, ok := sup.SettlementInfo("p-direct-expiry")
+		if !ok || info.TerminalClassification != TerminalDeliveredButUnknown || !info.Reaped || !info.WasBound {
+			t.Fatalf("SettlementInfo: unexpected info %+v", info)
+		}
+	})
+
+	t.Run("bind_pid_after_grace_expiry", func(t *testing.T) {
+		Reset()
+		t.Cleanup(Reset)
+
+		sup := NewSupervisor(toolproc.Config{})
+		sup.SettlementGrace = 500 * time.Millisecond
+		rec := &recordingReaper{ok: true, detail: "tree terminated"}
+		sup.SetReaper(rec.reap)
+
+		if err := sup.Spawn("p-after-expiry", "worker", "s1", 60_000, 0, 1_000, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := sup.Cancel("p-after-expiry", 2_000, "ABORT"); err != nil {
+			t.Fatal(err)
+		}
+
+		// Grace expires at 2_500. Tick at 2_600 reaps without bound PID.
+		rep, err := sup.Tick(2_600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rep.Actions) != 1 {
+			t.Fatalf("want 1 action, got %+v", rep.Actions)
+		}
+		if rep.Actions[0].TerminalClassification != TerminalPreDispatchAbort {
+			t.Fatalf("before bind, classification should be PreDispatchAbort, got %q", rep.Actions[0].TerminalClassification)
+		}
+		if len(rec.pids) != 0 {
+			t.Fatalf("reaper must not be called when no PID bound, got %v", rec.pids)
+		}
+
+		// Now PID is bound late after grace expiry.
+		if err := sup.BindPID("p-after-expiry", 8888); err != nil {
+			t.Fatal(err)
+		}
+		if !sup.WasBound("p-after-expiry") {
+			t.Fatal("WasBound must report true after BindPID")
+		}
+		if len(rec.pids) != 1 || rec.pids[0] != 8888 {
+			t.Fatalf("reaper must be invoked on late bound PID, got %v", rec.pids)
+		}
+		if tc := sup.TerminalClassification("p-after-expiry"); tc != TerminalDeliveredButUnknown {
+			t.Fatalf("TerminalClassification: want %q, got %q", TerminalDeliveredButUnknown, tc)
+		}
+		settled, reaped, pending := sup.SettlementStatus("p-after-expiry")
+		if settled || !reaped || pending {
+			t.Fatalf("SettlementStatus: want (false, true, false), got (%v, %v, %v)", settled, reaped, pending)
+		}
+		info, ok := sup.SettlementInfo("p-after-expiry")
+		if !ok || info.TerminalClassification != TerminalDeliveredButUnknown || !info.Reaped || !info.WasBound {
+			t.Fatalf("SettlementInfo: unexpected info %+v", info)
+		}
+	})
+
+	t.Run("bind_pid_then_clean_settle", func(t *testing.T) {
+		Reset()
+		t.Cleanup(Reset)
+
+		sup := NewSupervisor(toolproc.Config{})
+		sup.SettlementGrace = 500 * time.Millisecond
+		rec := &recordingReaper{ok: true, detail: "tree terminated"}
+		sup.SetReaper(rec.reap)
+
+		if err := sup.Spawn("p-clean-settle", "worker", "s1", 60_000, 0, 1_000, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := sup.Cancel("p-clean-settle", 2_000, "ABORT"); err != nil {
+			t.Fatal(err)
+		}
+		if err := sup.BindPID("p-clean-settle", 9999); err != nil {
+			t.Fatal(err)
+		}
+
+		// Settles cleanly at 2_300.
+		if err := sup.Settle("p-clean-settle", 2_300); err != nil {
+			t.Fatal(err)
+		}
+
+		rep, err := sup.Tick(2_400)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rep.Actions) != 1 {
+			t.Fatalf("want 1 action, got %+v", rep.Actions)
+		}
+		act := rep.Actions[0]
+		if !act.Settled || act.Reaped {
+			t.Fatalf("want Settled=true, Reaped=false; got %+v", act)
+		}
+		if act.TerminalClassification != TerminalDeliveredAndSettled {
+			t.Fatalf("want TerminalDeliveredAndSettled, got %q", act.TerminalClassification)
+		}
+		if tc := sup.TerminalClassification("p-clean-settle"); tc != TerminalDeliveredAndSettled {
+			t.Fatalf("TerminalClassification: want %q, got %q", TerminalDeliveredAndSettled, tc)
+		}
+		if len(rec.pids) != 0 {
+			t.Fatalf("clean settle must not invoke reaper, got %v", rec.pids)
+		}
+	})
+}
+
 func procOf(t *testing.T, tab toolproc.Table, id string) toolproc.Proc {
 	t.Helper()
 	for _, p := range tab.Procs {

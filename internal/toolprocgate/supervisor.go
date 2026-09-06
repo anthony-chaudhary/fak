@@ -110,6 +110,7 @@ type SettlementInfo struct {
 	Settled                bool                   `json:"settled,omitempty"`
 	Reaped                 bool                   `json:"reaped,omitempty"`
 	Pending                bool                   `json:"pending,omitempty"`
+	WasBound               bool                   `json:"was_bound,omitempty"`
 	CancelRequestedAt      time.Time              `json:"cancel_requested_at,omitempty"`
 	RequestedAtMS          int64                  `json:"requested_at_ms,omitempty"`
 	DeadlineMS             int64                  `json:"deadline_ms,omitempty"`
@@ -278,8 +279,12 @@ func (s *Supervisor) Cancel(callID string, nowMS int64, reason string) error {
 	reaper := s.reaper
 	s.events = append(s.events, toolproc.Event{
 		Kind: toolproc.EvKill, CallID: callID, AtMS: nowMS, Reason: reason})
+	wasBound := bound
+	if rec := s.settlements[callID]; rec != nil && rec.WasBound {
+		wasBound = true
+	}
 	term := TerminalPreDispatchAbort
-	if bound {
+	if wasBound {
 		term = TerminalDeliveredButUnknown
 	}
 	rec := &settlementRecord{
@@ -294,7 +299,7 @@ func (s *Supervisor) Cancel(callID string, nowMS int64, reason string) error {
 		State:                  settlementReaped,
 		Cancelled:              cancel != nil,
 		ReportedReaped:         true,
-		WasBound:               bound,
+		WasBound:               wasBound,
 		TerminalClassification: term,
 	}
 	if s.settlements == nil {
@@ -312,6 +317,10 @@ func (s *Supervisor) Cancel(callID string, nowMS int64, reason string) error {
 		s.mu.Lock()
 		rec.Reaped = ok
 		rec.ReapDetail = detail
+		if ok && rec.TerminalClassification == TerminalPreDispatchAbort {
+			rec.WasBound = true
+			rec.TerminalClassification = TerminalDeliveredButUnknown
+		}
 		s.mu.Unlock()
 	}
 	return nil
@@ -335,6 +344,7 @@ func (s *Supervisor) Settle(callID string, nowMS int64) error {
 			rec.SettledAt = time.UnixMilli(nowMS)
 			rec.SettledAtMS = nowMS
 			if rec.WasBound || bound {
+				rec.WasBound = true
 				rec.TerminalClassification = TerminalDeliveredAndSettled
 			} else {
 				rec.TerminalClassification = TerminalPreDispatchAbort
@@ -484,6 +494,17 @@ func (s *Supervisor) TerminalClassification(callID string) TerminalClassificatio
 	return ""
 }
 
+// WasBound reports whether callID was bound to an OS process PID.
+func (s *Supervisor) WasBound(callID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if rec, ok := s.settlements[callID]; ok && rec.WasBound {
+		return true
+	}
+	_, ok := s.pids[callID]
+	return ok
+}
+
 // SettlementInfo returns a snapshot of the settlement record for callID, if any.
 func (s *Supervisor) SettlementInfo(callID string) (SettlementInfo, bool) {
 	s.mu.Lock()
@@ -492,6 +513,8 @@ func (s *Supervisor) SettlementInfo(callID string) (SettlementInfo, bool) {
 	if !ok {
 		return SettlementInfo{}, false
 	}
+	_, bound := s.pids[callID]
+	wasBound := rec.WasBound || bound
 	return SettlementInfo{
 		CallID:                 rec.CallID,
 		Reason:                 rec.Reason,
@@ -500,6 +523,7 @@ func (s *Supervisor) SettlementInfo(callID string) (SettlementInfo, bool) {
 		Settled:                rec.Settled,
 		Reaped:                 rec.Reaped,
 		Pending:                rec.State == settlementPending,
+		WasBound:               wasBound,
 		CancelRequestedAt:      rec.CancelRequestedAt,
 		RequestedAtMS:          rec.RequestedAtMS,
 		DeadlineMS:             rec.DeadlineMS,
@@ -605,6 +629,7 @@ func (s *Supervisor) Exit(callID string, nowMS int64, status string) error {
 		rec.SettledAt = time.UnixMilli(nowMS)
 		rec.SettledAtMS = nowMS
 		if rec.WasBound || bound {
+			rec.WasBound = true
 			rec.TerminalClassification = TerminalDeliveredAndSettled
 		} else {
 			rec.TerminalClassification = TerminalPreDispatchAbort
@@ -681,8 +706,12 @@ func (s *Supervisor) Tick(nowMS int64) (TickReport, error) {
 					reaper := s.reaper
 					s.events = append(s.events, toolproc.Event{
 						Kind: toolproc.EvKill, CallID: p.CallID, AtMS: nowMS, Reason: f.Reason})
+					wasBound := bound
+					if rec := s.settlements[p.CallID]; rec != nil && rec.WasBound {
+						wasBound = true
+					}
 					term := TerminalPreDispatchAbort
-					if bound {
+					if wasBound {
 						term = TerminalDeliveredButUnknown
 					}
 					rec := &settlementRecord{
@@ -697,7 +726,7 @@ func (s *Supervisor) Tick(nowMS int64) (TickReport, error) {
 						State:                  settlementReaped,
 						Cancelled:              cancel != nil,
 						ReportedReaped:         true,
-						WasBound:               bound,
+						WasBound:               wasBound,
 						TerminalClassification: term,
 					}
 					if s.settlements == nil {
@@ -717,9 +746,14 @@ func (s *Supervisor) Tick(nowMS int64) (TickReport, error) {
 						s.mu.Lock()
 						rec.Reaped = act.Reaped
 						rec.ReapDetail = act.ReapDetail
+						if act.Reaped && rec.TerminalClassification == TerminalPreDispatchAbort {
+							rec.WasBound = true
+							rec.TerminalClassification = TerminalDeliveredButUnknown
+							act.TerminalClassification = TerminalDeliveredButUnknown
+						}
 						s.mu.Unlock()
 					}
-					act.TerminalClassification = term
+					act.TerminalClassification = rec.TerminalClassification
 				} else {
 					rec := s.settlements[p.CallID]
 					firstRequest := false
@@ -780,14 +814,17 @@ func (s *Supervisor) Tick(nowMS int64) (TickReport, error) {
 					rec.ReportedReaped = true
 					rec.ReapedAt = time.UnixMilli(nowMS)
 					rec.ReapedAtMS = nowMS
+					pid, bound := s.pids[p.CallID]
+					delete(s.pids, p.CallID)
 					term := TerminalDeliveredButUnknown
-					if !rec.WasBound {
+					if !rec.WasBound && !bound {
 						term = TerminalPreDispatchAbort
+					}
+					if bound {
+						rec.WasBound = true
 					}
 					rec.TerminalClassification = term
 					act.TerminalClassification = term
-					pid, bound := s.pids[p.CallID]
-					delete(s.pids, p.CallID)
 					reaper := s.reaper
 					s.events = append(s.events, toolproc.Event{
 						Kind: toolproc.EvKill, CallID: p.CallID, AtMS: nowMS, Reason: f.Reason})
@@ -799,6 +836,11 @@ func (s *Supervisor) Tick(nowMS int64) (TickReport, error) {
 						s.mu.Lock()
 						rec.Reaped = act.Reaped
 						rec.ReapDetail = act.ReapDetail
+						if (act.Reaped || bound) && rec.TerminalClassification == TerminalPreDispatchAbort {
+							rec.WasBound = true
+							rec.TerminalClassification = TerminalDeliveredButUnknown
+							act.TerminalClassification = TerminalDeliveredButUnknown
+						}
 						s.mu.Unlock()
 					}
 					act.Settled = false
@@ -843,13 +885,16 @@ func (s *Supervisor) Tick(nowMS int64) (TickReport, error) {
 			rec.ReportedReaped = true
 			rec.ReapedAt = time.UnixMilli(nowMS)
 			rec.ReapedAtMS = nowMS
-			term := TerminalDeliveredButUnknown
-			if !rec.WasBound {
-				term = TerminalPreDispatchAbort
-			}
-			rec.TerminalClassification = term
 			pid, bound := s.pids[callID]
 			delete(s.pids, callID)
+			term := TerminalDeliveredButUnknown
+			if !rec.WasBound && !bound {
+				term = TerminalPreDispatchAbort
+			}
+			if bound {
+				rec.WasBound = true
+			}
+			rec.TerminalClassification = term
 			s.events = append(s.events, toolproc.Event{
 				Kind: toolproc.EvKill, CallID: callID, AtMS: nowMS, Reason: rec.Reason})
 			reapsToExecute = append(reapsToExecute, pendingReap{
@@ -884,6 +929,10 @@ func (s *Supervisor) Tick(nowMS int64) (TickReport, error) {
 		s.mu.Lock()
 		pr.rec.Reaped = reaped
 		pr.rec.ReapDetail = reapDetail
+		if (reaped || pr.bound) && pr.rec.TerminalClassification == TerminalPreDispatchAbort {
+			pr.rec.WasBound = true
+			pr.rec.TerminalClassification = TerminalDeliveredButUnknown
+		}
 		s.mu.Unlock()
 		report.Actions = append(report.Actions, TickAction{
 			CallID:                 pr.callID,
