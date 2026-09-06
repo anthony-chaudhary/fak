@@ -1,6 +1,3 @@
-// Package usagepreflight decides whether an outbound provider request may spend
-// the selected seat's quota. It is deliberately provider-neutral: providers
-// that expose usage implement Reader without coupling admission to 429 parsing.
 package usagepreflight
 
 import (
@@ -106,10 +103,8 @@ func (h Hook) Call(ctx context.Context, seat string, send func(context.Context, 
 	return send(ctx, selected)
 }
 
-// Invariant: usage preflight policy decisions are fail-closed and deterministic.
-// Guard: outbound admission never permits spend if reserve boundaries are reached without an alternate seat.
-//
-// Decide returns the seat to use and a structured decision.
+// Decide evaluates quota against reserve and returns the chosen seat, a structured
+// record, and any admission refusal.
 func (h Hook) Decide(ctx context.Context, seat string) (string, Record, error) {
 	rec := Record{Seat: seat, SelectedSeat: seat, Action: ActionProceed, Policy: h.Config.Policy, ReservePercent: h.Config.ReservePercent}
 	if !h.Config.Enabled {

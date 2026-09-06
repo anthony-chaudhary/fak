@@ -56,6 +56,8 @@ func TestPolicyMatrix(t *testing.T) {
 		{"boundary fail closed", Reading{Remaining: 20, Limit: 100, Known: true}, nil, PolicyFailClosed, "seat-b", ActionRefuse, "seat-a", ErrReserveReached, true},
 		{"unknown fails open", Reading{}, nil, PolicyFailClosed, "seat-b", ActionProceed, "seat-a", nil, false},
 		{"unreadable fails open", Reading{}, errors.New("usage unavailable"), PolicyFailClosed, "seat-b", ActionProceed, "seat-a", nil, false},
+		{"zero limit fails open", Reading{Remaining: 0, Limit: 0, Known: true}, nil, PolicyFailClosed, "seat-b", ActionProceed, "seat-a", nil, false},
+		{"negative limit fails open", Reading{Remaining: 0, Limit: -1, Known: true}, nil, PolicyFailClosed, "seat-b", ActionProceed, "seat-a", nil, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -121,8 +123,6 @@ func TestAutoWithoutAlternateRefusesWithoutCallingProvider(t *testing.T) {
 	}
 }
 
-// Preflight selection only reads usage and selects a seat. It never calls the
-// reactive cooldown/seatpark APIs, so it cannot double-count their backoff.
 func TestSelectorIsOnlyBackoffInteraction(t *testing.T) {
 	selector := &fakeSelector{seat: "seat-b", ok: true}
 	hook := Hook{Config: Config{Enabled: true, ReservePercent: 50, Policy: PolicyAuto}, Reader: &fakeReader{reading: Reading{Remaining: 1, Limit: 100, Known: true}}, Selector: selector}
@@ -131,5 +131,88 @@ func TestSelectorIsOnlyBackoffInteraction(t *testing.T) {
 	}
 	if selector.calls != 1 {
 		t.Fatalf("selector calls=%d; preflight must make exactly one non-mutating selection", selector.calls)
+	}
+}
+
+func TestCallRefusalFailsClosedAndRecordsDecision(t *testing.T) {
+	for _, policy := range []Policy{PolicyFailClosed, PolicyConfirm} {
+		t.Run(string(policy), func(t *testing.T) {
+			reader := &fakeReader{reading: Reading{Remaining: 5, Limit: 100, Known: true}}
+			selector := &fakeSelector{seat: "seat-b", ok: true}
+			recorder := &fakeRecorder{}
+			hook := Hook{
+				Config:   Config{Enabled: true, ReservePercent: 10, Policy: policy},
+				Reader:   reader,
+				Selector: selector,
+				Recorder: recorder,
+			}
+			called := false
+			err := hook.Call(context.Background(), "seat-a", func(context.Context, string) error {
+				called = true
+				return nil
+			})
+			if err == nil {
+				t.Fatal("expected refusal error, got nil")
+			}
+			if called {
+				t.Fatal("send must never be called on refusal")
+			}
+			if len(recorder.records) != 1 {
+				t.Fatalf("expected 1 recorded decision, got %d", len(recorder.records))
+			}
+			rec := recorder.records[0]
+			if rec.Action != ActionRefuse || rec.SelectedSeat != "seat-a" {
+				t.Fatalf("unexpected record: %+v", rec)
+			}
+		})
+	}
+}
+
+func TestReserveClamping(t *testing.T) {
+	reader := &fakeReader{reading: Reading{Remaining: 10, Limit: 100, Known: true}}
+
+	hookNeg := Hook{
+		Config: Config{Enabled: true, ReservePercent: -20, Policy: PolicyFailClosed},
+		Reader: reader,
+	}
+	seat, rec, err := hookNeg.Decide(context.Background(), "seat-a")
+	if err != nil || seat != "seat-a" || rec.Action != ActionProceed {
+		t.Fatalf("negative reserve should clamp to 0 and proceed: seat=%q rec=%+v err=%v", seat, rec, err)
+	}
+
+	hookOver := Hook{
+		Config: Config{Enabled: true, ReservePercent: 150, Policy: PolicyFailClosed},
+		Reader: reader,
+	}
+	seat, rec, err = hookOver.Decide(context.Background(), "seat-a")
+	if !errors.Is(err, ErrReserveReached) || rec.Action != ActionRefuse {
+		t.Fatalf("over-100 reserve should clamp to 100 and refuse: seat=%q rec=%+v err=%v", seat, rec, err)
+	}
+}
+
+func TestDecideDeterministic(t *testing.T) {
+	reader := &fakeReader{reading: Reading{Remaining: 10, Limit: 100, Known: true}}
+	selector := &fakeSelector{seat: "seat-b", ok: true}
+	hook := Hook{
+		Config:   Config{Enabled: true, ReservePercent: 20, Policy: PolicyAuto},
+		Reader:   reader,
+		Selector: selector,
+	}
+	seat1, rec1, err1 := hook.Decide(context.Background(), "seat-a")
+	seat2, rec2, err2 := hook.Decide(context.Background(), "seat-a")
+	if seat1 != seat2 || !reflect.DeepEqual(rec1, rec2) || !errors.Is(err1, err2) {
+		t.Fatalf("decisions not deterministic: (%q, %+v, %v) vs (%q, %+v, %v)", seat1, rec1, err1, seat2, rec2, err2)
+	}
+}
+
+func TestUnknownPolicyFailsClosed(t *testing.T) {
+	reader := &fakeReader{reading: Reading{Remaining: 5, Limit: 100, Known: true}}
+	hook := Hook{
+		Config: Config{Enabled: true, ReservePercent: 10, Policy: Policy("bogus")},
+		Reader: reader,
+	}
+	seat, rec, err := hook.Decide(context.Background(), "seat-a")
+	if err == nil || rec.Action != ActionRefuse || seat != "seat-a" {
+		t.Fatalf("unknown policy must refuse: seat=%q rec=%+v err=%v", seat, rec, err)
 	}
 }
