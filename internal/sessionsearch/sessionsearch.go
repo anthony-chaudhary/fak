@@ -7,6 +7,7 @@ package sessionsearch
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -208,15 +209,35 @@ func DocsFromJournal(r io.Reader) ([]Doc, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), maxEventLineBytes)
 
+	var currentLineHadNewline bool
+	sc.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		if atEOF && len(data) == 0 {
+			return 0, nil, nil
+		}
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			currentLineHadNewline = true
+			return i + 1, dropCR(data[:i]), nil
+		}
+		if atEOF {
+			currentLineHadNewline = false
+			return len(data), dropCR(data), nil
+		}
+		return 0, nil, nil
+	})
+
 	docs := make([]Doc, 0)
 	var pendingLine string
 	var pendingLineNum int
+	var pendingHadNewline bool
 	hasPending := false
 	line := 0
 
+	var lastIsJSONErr bool
 	parseLine := func(raw string, lineNum int) (Doc, error) {
+		lastIsJSONErr = false
 		var ev toolproc.Event
 		if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+			lastIsJSONErr = true
 			return Doc{}, fmt.Errorf("toolproc: line %d: %v", lineNum, err)
 		}
 		if err := toolproc.ValidateEvent(ev); err != nil {
@@ -233,6 +254,7 @@ func DocsFromJournal(r io.Reader) ([]Doc, error) {
 
 	for sc.Scan() {
 		line++
+		lineHadNewline := currentLineHadNewline
 		raw := strings.TrimSpace(sc.Text())
 		if raw == "" || strings.HasPrefix(raw, "#") {
 			continue
@@ -246,19 +268,12 @@ func DocsFromJournal(r io.Reader) ([]Doc, error) {
 		}
 		pendingLine = raw
 		pendingLineNum = line
+		pendingHadNewline = lineHadNewline
 		hasPending = true
 	}
 
 	if err := sc.Err(); err != nil {
-		if hasPending {
-			if doc, perr := parseLine(pendingLine, pendingLineNum); perr == nil {
-				docs = append(docs, doc)
-			}
-		}
-		if len(docs) > 0 {
-			return docs, nil
-		}
-		return nil, fmt.Errorf("toolproc: %v", err)
+		return nil, fmt.Errorf("toolproc scanner: %w", err)
 	}
 
 	if hasPending {
@@ -268,12 +283,23 @@ func DocsFromJournal(r io.Reader) ([]Doc, error) {
 				// Tolerate trailing torn or incomplete line when prior lines are valid.
 				return docs, nil
 			}
+			if !pendingHadNewline && lastIsJSONErr {
+				// Single torn write on an empty or newly initialized journal reached EOF without newline.
+				return docs, nil
+			}
 			return nil, err
 		}
 		docs = append(docs, doc)
 	}
 
 	return docs, nil
+}
+
+func dropCR(data []byte) []byte {
+	if len(data) > 0 && data[len(data)-1] == '\r' {
+		return data[:len(data)-1]
+	}
+	return data
 }
 
 func eventText(ev toolproc.Event) string {

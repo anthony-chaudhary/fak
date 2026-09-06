@@ -1,7 +1,10 @@
 package sessionsearch
 
 import (
+	"bufio"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -275,10 +278,14 @@ func TestDocsFromJournal_TrailingTornLineTolerance(t *testing.T) {
 		t.Fatal("expected error on middle corrupt line, got nil")
 	}
 
-	// Case 4: Single torn line without previous valid lines must fail.
+	// Case 4: Single torn line without previous valid lines on new/empty journal is tolerated.
 	singleTorn := "{\"kind\":\"spawn\",\"call_id\":\"c1"
-	if _, err := DocsFromJournal(strings.NewReader(singleTorn)); err == nil {
-		t.Fatal("expected error on single torn line with no prior valid docs, got nil")
+	docs, err = DocsFromJournal(strings.NewReader(singleTorn))
+	if err != nil {
+		t.Fatalf("expected nil error on single torn line on empty journal, got: %v", err)
+	}
+	if len(docs) != 0 {
+		t.Fatalf("expected 0 docs on single torn line, got %d", len(docs))
 	}
 }
 
@@ -375,5 +382,160 @@ func TestWitnessUsefulnessEdgeCases(t *testing.T) {
 	uWindow := WitnessUsefulness(hitsWithWindow, "prior context", "outcome contains clue")
 	if uWindow.Referenced != 1 || uWindow.Blindness {
 		t.Fatalf("reference via window text should count: %+v", uWindow)
+	}
+}
+
+type faultReader struct {
+	r   io.Reader
+	err error
+}
+
+func (f *faultReader) Read(p []byte) (int, error) {
+	n, err := f.r.Read(p)
+	if n > 0 {
+		return n, nil
+	}
+	if err == io.EOF {
+		return 0, f.err
+	}
+	return n, err
+}
+
+func TestDocsFromJournal_ScannerErrorsFailClosed(t *testing.T) {
+	validEvent := `{"kind":"spawn","call_id":"c1","session":"s1","tool":"tool_a","at_unix_ms":1000}`
+
+	t.Run("MidJournalIOError", func(t *testing.T) {
+		simErr := errors.New("simulated network or disk i/o failure")
+		fr := &faultReader{
+			r:   strings.NewReader(validEvent + "\n"),
+			err: simErr,
+		}
+
+		docs, err := DocsFromJournal(fr)
+		if err == nil {
+			t.Fatalf("expected error on mid-journal scanner I/O failure, got nil (docs=%d)", len(docs))
+		}
+		if docs != nil {
+			t.Fatalf("expected nil docs on scanner error, got %d docs", len(docs))
+		}
+		if !errors.Is(err, simErr) && !strings.Contains(err.Error(), simErr.Error()) {
+			t.Fatalf("expected error to wrap or contain simulated I/O error, got: %v", err)
+		}
+	})
+
+	t.Run("MidJournalLineTooLong", func(t *testing.T) {
+		oversizedLine := strings.Repeat("x", maxEventLineBytes+128) + "\n"
+		r := strings.NewReader(validEvent + "\n" + oversizedLine + validEvent + "\n")
+
+		docs, err := DocsFromJournal(r)
+		if err == nil {
+			t.Fatalf("expected error on line exceeding maxEventLineBytes, got nil (docs=%d)", len(docs))
+		}
+		if docs != nil {
+			t.Fatalf("expected nil docs on buffer overflow error, got %d docs", len(docs))
+		}
+		if !errors.Is(err, bufio.ErrTooLong) {
+			t.Fatalf("expected error to wrap bufio.ErrTooLong, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "toolproc scanner:") {
+			t.Fatalf("expected error message to contain 'toolproc scanner:', got: %v", err)
+		}
+	})
+}
+
+func TestDocsFromJournal_TornLineVsScannerError(t *testing.T) {
+	validEvent := `{"kind":"spawn","call_id":"c1","session":"s1","tool":"tool_a","at_unix_ms":1000}`
+
+	// 1. Trailing torn line without newline: tolerated because scanner reached clean EOF (sc.Err() == nil).
+	tornLineAtEOF := validEvent + "\n" + `{"kind":"spawn","call_id":"c2`
+	docs, err := DocsFromJournal(strings.NewReader(tornLineAtEOF))
+	if err != nil {
+		t.Fatalf("expected nil error on trailing torn line at clean EOF, got: %v", err)
+	}
+	if len(docs) != 1 {
+		t.Fatalf("expected 1 valid doc before trailing torn line, got %d", len(docs))
+	}
+
+	// 2. Mid-journal scanner error: fails closed, never returns partial docs.
+	simErr := errors.New("mid-stream failure")
+	fr := &faultReader{
+		r:   strings.NewReader(validEvent + "\n"),
+		err: simErr,
+	}
+	docs, err = DocsFromJournal(fr)
+	if err == nil {
+		t.Fatal("expected failure on scanner error, got nil")
+	}
+	if docs != nil {
+		t.Fatalf("expected nil docs on scanner error, got %d", len(docs))
+	}
+
+	// 3. Single torn line without previous valid lines (no newline): tolerated as torn write on new/empty journal.
+	singleTornNoNL := `{"kind":"spawn","call_id":"c1`
+	docs, err = DocsFromJournal(strings.NewReader(singleTornNoNL))
+	if err != nil {
+		t.Fatalf("expected nil error on single torn line without newline on empty journal, got: %v", err)
+	}
+	if len(docs) != 0 {
+		t.Fatalf("expected 0 docs, got %d", len(docs))
+	}
+
+	// 4. Single torn line without previous valid lines (with newline): fails closed.
+	singleTornWithNL := "{\"kind\":\"spawn\"}\n"
+	docs, err = DocsFromJournal(strings.NewReader(singleTornWithNL))
+	if err == nil {
+		t.Fatal("expected error on single incomplete line with newline, got nil")
+	}
+	if docs != nil {
+		t.Fatalf("expected nil docs, got %d", len(docs))
+	}
+
+	// 5. Empty journal: returns 0 docs and nil error.
+	docs, err = DocsFromJournal(strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("expected nil error on empty journal, got: %v", err)
+	}
+	if len(docs) != 0 {
+		t.Fatalf("expected 0 docs on empty journal, got %d", len(docs))
+	}
+}
+
+func TestDocsFromJournal_SingleLineTornWriteOnEmptyJournal(t *testing.T) {
+	// Truncated JSON without trailing newline on new/empty journal: tolerated as torn write in progress.
+	singleTornNoNL := `{"kind":"spawn","call_id":"c1`
+	docs, err := DocsFromJournal(strings.NewReader(singleTornNoNL))
+	if err != nil {
+		t.Fatalf("expected nil error on single torn write without newline, got: %v", err)
+	}
+	if len(docs) != 0 {
+		t.Fatalf("expected 0 docs from single torn line, got %d", len(docs))
+	}
+
+	// Truncated JSON with preceding comments and blank lines on new journal: tolerated.
+	withComments := "# initial comment\n\n" + `{"kind":"spawn","call_id":"c1`
+	docs, err = DocsFromJournal(strings.NewReader(withComments))
+	if err != nil {
+		t.Fatalf("expected nil error on single torn write preceded by comments, got: %v", err)
+	}
+	if len(docs) != 0 {
+		t.Fatalf("expected 0 docs, got %d", len(docs))
+	}
+
+	// Contrast 1: Incomplete event with trailing newline: fails closed.
+	singleIncompleteWithNL := "{\"kind\":\"spawn\"}\n"
+	if _, err := DocsFromJournal(strings.NewReader(singleIncompleteWithNL)); err == nil {
+		t.Fatal("expected error on single incomplete event with newline, got nil")
+	}
+
+	// Contrast 2: Semantically corrupt event (valid JSON, invalid event) without newline: fails closed.
+	singleCorruptNoNL := `{"kind":"bogus_kind","at_unix_ms":1}`
+	if _, err := DocsFromJournal(strings.NewReader(singleCorruptNoNL)); err == nil {
+		t.Fatal("expected error on corrupt event without newline, got nil")
+	}
+
+	// Contrast 3: Semantically corrupt event with newline: fails closed.
+	singleCorruptWithNL := "{\"kind\":\"bogus_kind\",\"at_unix_ms\":1}\n"
+	if _, err := DocsFromJournal(strings.NewReader(singleCorruptWithNL)); err == nil {
+		t.Fatal("expected error on corrupt event with newline, got nil")
 	}
 }
