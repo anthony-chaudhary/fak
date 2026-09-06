@@ -109,6 +109,75 @@ func TestMaterializeRejectsTraversalAndTamperedIdentity(t *testing.T) {
 	}
 }
 
+func TestFailClosedInvariants(t *testing.T) {
+	if _, err := NewRealization("", Target{}, map[string][]byte{"ok": []byte("1")}); err == nil {
+		t.Fatal("expected error on empty derivation ID")
+	}
+	if _, err := NewRealization("d", Target{}, map[string][]byte{}); err == nil {
+		t.Fatal("expected error on empty files map")
+	}
+	if _, err := NewRealization("d", Target{}, map[string][]byte{"": []byte("empty")}); err == nil {
+		t.Fatal("expected error on empty file path")
+	}
+	if _, err := NewRealization("d", Target{}, map[string][]byte{"realization.json": []byte("manifest")}); err == nil {
+		t.Fatal("expected error on reserved realization.json file")
+	}
+	absPath, err := filepath.Abs("safe_rel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewRealization("d", Target{}, map[string][]byte{absPath: []byte("abs")}); err == nil {
+		t.Fatal("expected error on absolute path")
+	}
+
+	valid, err := NewRealization("d", Target{}, map[string][]byte{"payload": []byte("content")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := (Store{Root: ""}).Materialize(valid); err == nil {
+		t.Fatal("expected error on empty store root")
+	}
+
+	store := Store{Root: filepath.Join(t.TempDir(), "store")}
+	path1, err := store.Materialize(valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path2, err := store.Materialize(valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path1 != path2 {
+		t.Fatalf("idempotent materialize returned differing paths: %s != %s", path1, path2)
+	}
+
+	activator := Activator{Root: filepath.Join(t.TempDir(), "machine")}
+	for _, badName := range []string{"", ".", "..", "invalid/name", "invalid\\name"} {
+		if _, err := activator.Activate(badName, []string{valid.ID}, []byte("cfg")); err == nil {
+			t.Fatalf("expected error on invalid name %q", badName)
+		}
+		if _, err := activator.Active(badName); err == nil {
+			t.Fatalf("expected error on Active with invalid name %q", badName)
+		}
+		if _, err := activator.Rollback(badName); err == nil {
+			t.Fatalf("expected error on Rollback with invalid name %q", badName)
+		}
+	}
+	if _, err := activator.Activate("valid", nil, []byte("cfg")); err == nil {
+		t.Fatal("expected error on empty realization IDs")
+	}
+	if _, err := activator.Rollback("valid"); err == nil {
+		t.Fatal("expected error on rollback when no generation is active")
+	}
+	if _, err := activator.Activate("valid", []string{valid.ID}, []byte("cfg")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := activator.Rollback("valid"); err == nil {
+		t.Fatal("expected error on rollback when sequence <= 1")
+	}
+}
+
 func representativeDesired() DesiredContext {
 	return DesiredContext{
 		Objects:        []ManagedObject{{Type: "skill", ID: "review", Content: []byte("locked-skill")}, {Type: "policy", ID: "readonly", Content: []byte("deny-write")}},
