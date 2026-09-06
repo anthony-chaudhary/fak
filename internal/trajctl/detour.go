@@ -25,8 +25,9 @@ package trajctl
 // The fold stays pure and tier-1: DetectDetourSpans and DetourRows read only
 // the injected event stream and objective; the transcript walk is a bounded
 // tool_use/tool_result pairing (ReadToolStream), heuristics only — model-based
-// topic detection and budget ENFORCEMENT (the return-to-main loop, #2552) are
-// out of scope here.
+// topic detection is out of scope; budget ENFORCEMENT (the return-to-main loop, #2552)
+// fires a return-to-main nudge via the spine steer channel when DETOUR_OVERRUN trips,
+// escalating to warn on repeat.
 
 import (
 	"encoding/json"
@@ -344,7 +345,7 @@ func detourSpanRows(parent Objective, sp DetourSpan, k int, streamRef string, un
 			sp.OpenIndex, sp.Errors, sp.BurstIndex, strings.Join(sp.Topics, ", ")), unixMillis, stamp)),
 	}
 	if !sp.Closed() {
-		return open, nil // parent stays paused; budget enforcement is #2552's rung
+		return open, nil // parent stays paused; budget enforcement is handled by the return-to-main loop (#2552)
 	}
 	met := child
 	met.Status = StatusMet
@@ -406,7 +407,8 @@ func LiveDetourRows(parent Objective, spans []DetourSpan, state State, streamRef
 // is a bounded, fail-open pass over the transcript path and the folded ledger. No
 // spans, or no open root, yields nil. A detour opens under the ROOT because the
 // detector reads the session-global tool stream, not a single sub-objective;
-// budget enforcement and the return-to-main nudge stay #2552's rung.
+// budget enforcement and the return-to-main nudge (#2552) enforce budgets via the
+// steer channel when a detour overruns.
 func TurnEndDetourRows(state State, events []ToolEvent, streamRef string, unixMillis int64, stamp Stamp) []Row {
 	spans := DetectDetourSpans(events)
 	if len(spans) == 0 {
@@ -552,4 +554,105 @@ func streamTarget(input json.RawMessage) string {
 		}
 	}
 	return ""
+}
+
+// ComposeReturnToMain serializes the return-to-main nudge or warn packet: detour statement,
+// budget overrun details, and an explicit reference to the paused parent objective and plan.
+func ComposeReturnToMain(detour, parent Objective, oc ObjectiveCurve, warn bool) string {
+	var b strings.Builder
+	prefix := "[fak trajctl return-to-main]"
+	if warn {
+		prefix = "[fak trajctl return-to-main WARN]"
+	}
+	fmt.Fprintf(&b, "%s Detour %q has overrun its budget: %s\n", prefix, detour.ID, oc.Detail)
+	fmt.Fprintf(&b, "Detour objective: %s\n", detour.Statement)
+	fmt.Fprintf(&b, "Paused parent objective %q: %s\n", parent.ID, parent.Statement)
+	if len(parent.Plan) > 0 {
+		b.WriteString("Parent plan state:")
+		for _, p := range parent.Plan {
+			if p.Title != "" {
+				fmt.Fprintf(&b, " %s (%s);", p.ID, p.Title)
+			} else {
+				fmt.Fprintf(&b, " %s;", p.ID)
+			}
+		}
+		b.WriteString("\n")
+	}
+	if pts := progressPoints(oc.Methods); len(pts) > 0 {
+		if len(pts) > reAnchorExcerptPoints {
+			pts = pts[len(pts)-reAnchorExcerptPoints:]
+		}
+		vals := make([]string, 0, len(pts))
+		for _, p := range pts {
+			vals = append(vals, fmt.Sprintf("%.2f", p.Value))
+		}
+		fmt.Fprintf(&b, "Curve excerpt (%s, last %d): %s (latest %.2f, delta %+.2f)\n",
+			CommitScorerMethod, len(pts), strings.Join(vals, " -> "), oc.Latest, oc.Delta)
+	}
+	if warn {
+		fmt.Fprintf(&b, "WARNING: Detour %q is repeatedly over budget while parent %q remains paused. Conclude or abandon the detour immediately and return to the parent objective.", detour.ID, parent.ID)
+	} else {
+		fmt.Fprintf(&b, "The detour has exceeded its allocated budget while parent %q remains paused. Wrap up the side-quest and return to the parent objective before your next action.", parent.ID)
+	}
+	return b.String()
+}
+
+// DecideReturnToMain enforces detour budgets when a detour child overruns its
+// budget while its parent is paused (the return-to-main loop, #2552). Pure:
+// the first overrun composes a return-to-main nudge referencing the paused parent;
+// repeated overrun escalates one rung to warn; outstanding delivered warns hold.
+func (s State) DecideReturnToMain(oc ObjectiveCurve) SteerDecision {
+	d := SteerDecision{ObjectiveID: oc.ObjectiveID, Action: ActionNone, Signal: oc.Signal}
+	if oc.Signal != SignalDetourOverrun {
+		d.Reason = "regime gate: return-to-main only enforces DETOUR_OVERRUN"
+		return d
+	}
+	obj, ok := s.Objectives[oc.ObjectiveID]
+	if !ok {
+		d.Reason = "regime gate: objective was never declared — nothing to re-anchor on"
+		return d
+	}
+	parentID := oc.ParentID
+	if parentID == "" {
+		parentID = obj.ParentID
+	}
+	parent, okParent := s.Objectives[parentID]
+	if parentID == "" || !okParent || parent.Status != StatusPaused {
+		d.Reason = "regime gate: DETOUR_OVERRUN belongs to the return-to-main rung, not the re-anchor nudge"
+		return d
+	}
+	steers := s.SteersFor(oc.ObjectiveID)
+	deliveredNudge, deliveredWarn := detourOverrunHistory(steers)
+	if deliveredWarn {
+		d.Reason = "regime gate: a delivered warn is outstanding for this episode — re-arms when the curve returns to HEALTHY"
+		return d
+	}
+	if deliveredNudge {
+		d.Action = ActionWarn
+		d.Reason = fmt.Sprintf("regime gate: repeated %s — %s (escalated to warn)", oc.Signal, oc.Detail)
+		d.Packet = ComposeReturnToMain(obj, parent, oc, true)
+		return d
+	}
+	d.Action = ActionNudge
+	d.Reason = fmt.Sprintf("regime gate: %s — %s", oc.Signal, oc.Detail)
+	d.Packet = ComposeReturnToMain(obj, parent, oc, false)
+	return d
+}
+
+// detourOverrunHistory scans steer decisions for an objective in DETOUR_OVERRUN:
+// a delivered nudge marks the first overrun response; a delivered warn marks
+// the escalation. A decision on a HEALTHY curve re-arms the episode.
+func detourOverrunHistory(steers []SteerDecision) (deliveredNudge bool, deliveredWarn bool) {
+	for _, d := range steers {
+		switch {
+		case d.Signal == SignalHealthy:
+			deliveredNudge = false
+			deliveredWarn = false
+		case d.Signal == SignalDetourOverrun && d.Action == ActionNudge && d.Delivered:
+			deliveredNudge = true
+		case d.Signal == SignalDetourOverrun && d.Action == ActionWarn && d.Delivered:
+			deliveredWarn = true
+		}
+	}
+	return deliveredNudge, deliveredWarn
 }
