@@ -53,6 +53,33 @@ func TestParseShortSHA(t *testing.T) {
 	}
 }
 
+// TestParseSHA256Hash proves a 64-character SHA-256 commit hash is accepted on a shipped result.
+func TestParseSHA256Hash(t *testing.T) {
+	const sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	if !looksLikeSHA(sha256) {
+		t.Fatalf("looksLikeSHA rejected 64-char sha: %s", sha256)
+	}
+
+	r := Result{
+		Status:    StatusShipped,
+		Issue:     11795,
+		CommitSHA: sha256,
+		Witness:   "commit " + sha256[:8],
+	}
+	if err := r.Validate(); err != nil {
+		t.Fatalf("Result.Validate() with 64-char commit_sha failed: %v", err)
+	}
+
+	fixture := `{"status":"shipped","issue":11795,"commit_sha":"` + sha256 + `","witness":"commit e3b0c442"}`
+	parsed, err := Parse([]byte(fixture))
+	if err != nil {
+		t.Fatalf("Parse() with 64-char commit_sha failed: %v", err)
+	}
+	if parsed.CommitSHA != sha256 {
+		t.Fatalf("parsed.CommitSHA = %q, want %q", parsed.CommitSHA, sha256)
+	}
+}
+
 // TestValidateBlockedAndNotYet proves the two non-shipped statuses validate
 // when they name a blocker.
 func TestValidateBlockedAndNotYet(t *testing.T) {
@@ -110,6 +137,11 @@ func TestValidateMalformed(t *testing.T) {
 		{
 			name:    "bad sha shape (too short)",
 			r:       Result{Status: StatusShipped, Issue: 1, CommitSHA: "abc12", Witness: "w"},
+			wantSub: "hex sha",
+		},
+		{
+			name:    "bad sha shape (too long >64)",
+			r:       Result{Status: StatusShipped, Issue: 1, CommitSHA: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b8551", Witness: "w"},
 			wantSub: "hex sha",
 		},
 		{
@@ -194,9 +226,11 @@ func TestLooksLikeSHAInvariants(t *testing.T) {
 		{"1234567", true}, // 7 chars, min bound
 		{"abcdef0", true},
 		{"ABCDEF0", true},
-		{"c99f5c02a1b2c3d4e5f60718293a4b5c6d7e8f90", true}, // 40 chars, max bound
+		{"c99f5c02a1b2c3d4e5f60718293a4b5c6d7e8f90", true}, // 40 chars
 		{"C99F5C02A1B2C3D4E5F60718293A4B5C6D7E8F90", true},
-		{"c99f5c02a1b2c3d4e5f60718293a4b5c6d7e8f901", false}, // 41 chars, too long
+		{"c99f5c02a1b2c3d4e5f60718293a4b5c6d7e8f901", true},                          // 41 chars
+		{"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", true},   // 64 chars, max bound
+		{"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b8551", false}, // 65 chars, too long
 		{"123456g", false},  // non-hex char 'g'
 		{"123456z", false},  // non-hex char 'z'
 		{"123456 ", false},  // trailing space

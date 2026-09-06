@@ -92,23 +92,95 @@ func ParseToolVersion(s string) (ToolVersion, bool) {
 	}
 	parts := strings.Split(core, ".")
 	nums := make([]int, 0, len(parts))
-	for _, p := range parts {
+	for i := 0; i < len(parts); i++ {
+		p := parts[i]
+		if p == "" {
+			return ToolVersion{}, false
+		}
+		if hasNonDigit(p) {
+			// A platform or prerelease tag must follow at least one numeric component
+			// and must start with a letter (distinguishing it from numeric components with suffixes).
+			if len(nums) < 1 || !isLetter(p[0]) {
+				return ToolVersion{}, false
+			}
+			for j := i; j < len(parts); j++ {
+				if !isReleaseIdent(parts[j]) {
+					return ToolVersion{}, false
+				}
+			}
+			// Dotted prerelease tags (e.g. .rc1, .beta, .alpha, .preview) populate Pre
+			// rather than being discarded as platform tags.
+			if isPrereleaseTag(p) {
+				preTag := strings.ToLower(strings.Join(parts[i:], "."))
+				if pre == "" {
+					pre = preTag
+				} else {
+					pre = preTag + "-" + pre
+				}
+			}
+			break
+		}
 		// Bound the component length so a pathological token cannot overflow the
 		// accumulator; no real version component approaches nine digits.
-		if p == "" || len(p) > 9 {
+		if len(p) > 9 {
 			return ToolVersion{}, false
 		}
 		n := 0
-		for i := 0; i < len(p); i++ {
-			c := p[i]
-			if c < '0' || c > '9' {
-				return ToolVersion{}, false
-			}
-			n = n*10 + int(c-'0')
+		for j := 0; j < len(p); j++ {
+			n = n*10 + int(p[j]-'0')
 		}
 		nums = append(nums, n)
 	}
+	if len(nums) == 0 {
+		return ToolVersion{}, false
+	}
 	return ToolVersion{Nums: nums, Pre: pre}, true
+}
+
+func isLetter(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+func isPrereleaseTag(s string) bool {
+	low := strings.ToLower(s)
+	for _, prefix := range []string{"rc", "alpha", "beta", "preview", "pre", "dev"} {
+		if strings.HasPrefix(low, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func isReleaseIdent(s string) bool {
+	if s == "" || isWildcard(s) {
+		return false
+	}
+	hasAlphaNum := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+			hasAlphaNum = true
+			continue
+		}
+		if c == '_' || c == '-' {
+			continue
+		}
+		return false
+	}
+	return hasAlphaNum
+}
+
+func isWildcard(s string) bool {
+	return s == "*" || (len(s) == 1 && (s[0] == 'x' || s[0] == 'X'))
+}
+
+func hasNonDigit(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return true
+		}
+	}
+	return false
 }
 
 // Equal is the identity comparison: same ARITY, same components elementwise, same

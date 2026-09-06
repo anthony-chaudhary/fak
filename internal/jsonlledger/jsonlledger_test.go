@@ -75,6 +75,65 @@ func TestLatestBefore(t *testing.T) {
 	if _, ok := LatestBefore(row{}, nil, date, date); ok {
 		t.Errorf("empty prior should return ok=false")
 	}
+
+	// all prior rows excluded by self-tiebreak -> zero,false
+	allSelf := []grow{
+		{Date: "2026-07-01", Gen: "self"},
+		{Date: "2026-07-02", Gen: "self"},
+	}
+	if _, ok := LatestBefore(grow{Date: "2026-07-03", Gen: "self"}, allSelf, d, tb); ok {
+		t.Errorf("all prior matching self tiebreak should return ok=false")
+	}
+
+	// same date, tiebreak breaks tie
+	sameDate := []grow{
+		{Date: "2026-07-01", Gen: "alpha"},
+		{Date: "2026-07-01", Gen: "beta"},
+	}
+	if got, ok := LatestBefore(grow{Date: "2026-07-02", Gen: "ref"}, sameDate, d, tb); !ok || got.Gen != "beta" {
+		t.Fatalf("want beta by tiebreak, got %+v ok=%v", got, ok)
+	}
+
+	// same date and same tiebreak: later element in prior wins (stable ordering)
+	sameDateSameTiebreak := []grow{
+		{Date: "2026-07-01", Gen: "same"},
+		{Date: "2026-07-01", Gen: "same"},
+	}
+	sameDateSameTiebreak[0].Date = "2026-07-01-first"
+	sameDateSameTiebreak[1].Date = "2026-07-01-second"
+	dateKey := func(r grow) string { return "2026-07-01" } // both return same date
+	if got, ok := LatestBefore(grow{Date: "2026-07-02", Gen: "ref"}, sameDateSameTiebreak, dateKey, tb); !ok || got.Date != "2026-07-01-second" {
+		t.Fatalf("want later candidate on tie, got %+v ok=%v", got, ok)
+	}
+}
+
+func TestLatestBeforeZeroAllocations(t *testing.T) {
+	type grow struct {
+		Date string
+		Gen  string
+	}
+	d := func(r grow) string { return r.Date }
+	tb := func(r grow) string { return r.Gen }
+
+	prior := []grow{
+		{Date: "2026-07-01", Gen: "a"},
+		{Date: "2026-07-03", Gen: "b"},
+		{Date: "2026-07-02", Gen: "c"},
+	}
+	ref := grow{Date: "2026-07-04", Gen: "self"}
+
+	// Warm up
+	LatestBefore(ref, prior, d, tb)
+
+	allocs := testing.AllocsPerRun(100, func() {
+		got, ok := LatestBefore(ref, prior, d, tb)
+		if !ok || got.Gen != "b" {
+			t.Fatalf("unexpected result: %+v, ok=%v", got, ok)
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("want 0 allocs/op, got %f", allocs)
+	}
 }
 
 func TestParseHandlesLineLongerThanDefaultScannerBuffer(t *testing.T) {

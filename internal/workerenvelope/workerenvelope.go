@@ -41,9 +41,9 @@ type Result struct {
 	Witness   string   `json:"witness,omitempty"`
 }
 
-// looksLikeSHA reports whether s is a valid 7-40 character hexadecimal commit SHA.
+// looksLikeSHA reports whether s is a valid 7-64 character hexadecimal commit SHA.
 func looksLikeSHA(s string) bool {
-	if len(s) < 7 || len(s) > 40 {
+	if len(s) < 7 || len(s) > 64 {
 		return false
 	}
 	for _, r := range s {
@@ -60,7 +60,7 @@ func looksLikeSHA(s string) bool {
 
 // Validate verifies that the envelope conforms to dispatch requirements:
 // status must be known, issue must be positive, and any present commit SHA
-// must be 7-40 hex characters. Shipped results require a commit SHA and witness
+// must be 7-64 hex characters. Shipped results require a commit SHA and witness
 // with no blocker; blocked or not_yet results require a blocker.
 func (r Result) Validate() error {
 	if !r.Status.valid() {
@@ -70,7 +70,7 @@ func (r Result) Validate() error {
 		return fmt.Errorf("workerenvelope: issue must be > 0, got %d", r.Issue)
 	}
 	if r.CommitSHA != "" && !looksLikeSHA(r.CommitSHA) {
-		return fmt.Errorf("workerenvelope: commit_sha %q is not a 7-40 char hex sha", r.CommitSHA)
+		return fmt.Errorf("workerenvelope: commit_sha %q is not a 7-64 char hex sha", r.CommitSHA)
 	}
 
 	switch r.Status {
@@ -79,7 +79,7 @@ func (r Result) Validate() error {
 			return fmt.Errorf("workerenvelope: shipped result requires a commit_sha")
 		}
 		if !looksLikeSHA(r.CommitSHA) {
-			return fmt.Errorf("workerenvelope: shipped result commit_sha %q is not a 7-40 char hex sha", r.CommitSHA)
+			return fmt.Errorf("workerenvelope: shipped result commit_sha %q is not a 7-64 char hex sha", r.CommitSHA)
 		}
 		if strings.TrimSpace(r.Witness) == "" {
 			return fmt.Errorf("workerenvelope: shipped result requires a witness (commit ref / test path / log path)")

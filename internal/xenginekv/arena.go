@@ -77,10 +77,11 @@ type span struct {
 // NOT reclaimed for reuse (a freelist would let a later Put alias an offset a stale
 // handle still names — the kind of confusion the quarantine exists to prevent).
 type Arena struct {
-	mu   sync.RWMutex
-	buf  []byte         // the co-resident region (shared-memory stand-in)
-	used int64          // bump pointer: next free offset
-	live map[int64]span // off -> live span; an evicted span is removed
+	mu      sync.RWMutex
+	buf     []byte         // the co-resident region (shared-memory stand-in)
+	used    int64          // bump pointer: next free offset
+	zeroSeq int64          // monotonic counter for zero-length allocation handles
+	live    map[int64]span // off -> live span; an evicted span is removed
 }
 
 // NewArena allocates a fresh co-resident region of the given size in bytes. Use this
@@ -113,6 +114,19 @@ func (a *Arena) Put(ctx context.Context, b []byte) (abi.Ref, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	n := int64(len(b))
+	if n == 0 {
+		a.zeroSeq++
+		handle := -a.zeroSeq
+		a.live[handle] = span{off: 0, n: 0}
+		return abi.Ref{
+			Kind:   abi.RefRegion,
+			Handle: uint64(handle),
+			Digest: digest(b),
+			Len:    0,
+			Taint:  abi.TaintTainted, // fail-closed default, mirroring blob.Put
+			Scope:  abi.ScopeAgent,
+		}, nil
+	}
 	off := a.used
 	if off+n > int64(len(a.buf)) {
 		return abi.Ref{}, fmt.Errorf("xenginekv: arena full — need %d bytes at offset %d, region is %d", n, off, len(a.buf))
@@ -150,6 +164,9 @@ func (a *Arena) Resolve(ctx context.Context, r abi.Ref) ([]byte, error) {
 		s, ok := a.live[int64(r.Handle)]
 		if !ok {
 			return nil, fmt.Errorf("xenginekv: region handle %d is not resident (evicted or never allocated)", r.Handle)
+		}
+		if s.n == 0 {
+			return []byte{}, nil
 		}
 		return a.buf[s.off : s.off+s.n : s.off+s.n], nil // zero-copy view (cap-bounded so an append never clobbers a neighbour)
 	default:
@@ -194,6 +211,14 @@ func (a *Arena) Clone(src abi.Ref) (abi.Ref, error) {
 	s, ok := a.live[int64(src.Handle)]
 	if !ok {
 		return abi.Ref{}, fmt.Errorf("xenginekv: region handle %d is not resident", src.Handle)
+	}
+	if s.n == 0 {
+		a.zeroSeq++
+		handle := -a.zeroSeq
+		a.live[handle] = span{off: 0, n: 0}
+		out := src
+		out.Handle = uint64(handle)
+		return out, nil
 	}
 	off := a.used
 	if off+s.n > int64(len(a.buf)) {

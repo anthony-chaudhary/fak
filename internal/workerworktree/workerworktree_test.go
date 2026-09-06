@@ -1200,6 +1200,161 @@ func TestPrepareOwnedBoundedTimeoutEmitsNoOwnerReceipt(t *testing.T) {
 	}
 }
 
+func TestPreparePreservesDirtyReusedWorktree(t *testing.T) {
+	t.Run("preserves_dirty_reused_checkout", func(t *testing.T) {
+		fixture := newReapProofFixture(t)
+		wtRoot := t.TempDir()
+		lane := "reused-lane"
+		key := "dirty-worker"
+		owner := OwnerStamp{PID: os.Getpid(), LeaseID: "lease-dirty-worker"}
+
+		// First prepare: creates clean worktree
+		res1 := PrepareOwned(fixture.repo, lane, key, fixture.base, wtRoot, defaultGit, owner)
+		if !res1.OK || res1.Reused {
+			t.Fatalf("first prepare = %+v", res1)
+		}
+
+		// Add tracked modifications
+		trackedFile := filepath.Join(res1.Path, "target.txt")
+		if err := os.WriteFile(trackedFile, []byte("dirty tracked content\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		// Add untracked file
+		untrackedFile := filepath.Join(res1.Path, "new-untracked.txt")
+		if err := os.WriteFile(untrackedFile, []byte("untracked content\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		// Second prepare on same key with verifyReady=true (PrepareOwnedBounded verifies readiness)
+		res2 := prepareOwnedWithBackend(fixture.repo, lane, key, fixture.base, wtRoot, defaultGit, defaultIsolationBackend, owner, true)
+		if res2.OK {
+			t.Fatalf("expected readiness refusal for dirty reused worktree, got %+v", res2)
+		}
+		if res2.Code != "PREPARE_NOT_READY" {
+			t.Fatalf("expected Code PREPARE_NOT_READY, got %q", res2.Code)
+		}
+		if !res2.Reused {
+			t.Fatalf("expected Reused=true for same-key prepare, got %+v", res2)
+		}
+
+		// Verify existing worktree files remain intact
+		trackedData, err := os.ReadFile(trackedFile)
+		if err != nil || string(trackedData) != "dirty tracked content\n" {
+			t.Fatalf("expected tracked file to be preserved, got %q, err %v", string(trackedData), err)
+		}
+		untrackedData, err := os.ReadFile(untrackedFile)
+		if err != nil || string(untrackedData) != "untracked content\n" {
+			t.Fatalf("expected untracked file to be preserved, got %q, err %v", string(untrackedData), err)
+		}
+
+		// Verify git administrative registration remains intact (not pruned/removed)
+		wtList := reapProofGit(t, fixture.repo, "worktree", "list", "--porcelain")
+		found := false
+		for _, p := range parseWorktreePaths(wtList) {
+			if samePath(p, res1.Path) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected worktree %s to remain registered in git worktree list", res1.Path)
+		}
+	})
+
+	t.Run("cleans_up_new_unready_worktree", func(t *testing.T) {
+		fixture := newReapProofFixture(t)
+		wtRoot := t.TempDir()
+		lane := "new-lane"
+		key := "unready-new-worker"
+		owner := OwnerStamp{PID: os.Getpid(), LeaseID: "lease-new-worker"}
+		expectedPath := Path(lane, key, wtRoot)
+
+		// Wrap git so that status --porcelain reports dirty during readiness verification of a newly created worktree
+		wrappedGit := func(dir string, args []string) (int, string) {
+			joined := strings.Join(args, " ")
+			if joined == "status --porcelain" && samePath(dir, expectedPath) {
+				return 0, " M dirty.go\n"
+			}
+			return defaultGit(dir, args)
+		}
+
+		res := prepareOwnedWithBackend(fixture.repo, lane, key, fixture.base, wtRoot, wrappedGit, defaultIsolationBackend, owner, true)
+		if res.OK || res.Code != "PREPARE_NOT_READY" || res.Reused {
+			t.Fatalf("expected PREPARE_NOT_READY for unready new worktree, got %+v", res)
+		}
+
+		// Verify that cleanup occurred for newly created partial worktree (!res.Reused)
+		if _, err := os.Stat(expectedPath); !os.IsNotExist(err) {
+			t.Fatalf("expected new worktree at %s to be cleaned up, stat err: %v", expectedPath, err)
+		}
+		wtList := reapProofGit(t, fixture.repo, "worktree", "list", "--porcelain")
+		for _, p := range parseWorktreePaths(wtList) {
+			if samePath(p, expectedPath) {
+				t.Fatalf("expected worktree %s to be removed from git administrative registration", expectedPath)
+			}
+		}
+	})
+
+	t.Run("preserves_reused_checkout_on_timeout", func(t *testing.T) {
+		fixture := newReapProofFixture(t)
+		wtRoot := t.TempDir()
+		lane := "reused-timeout-lane"
+		key := "timeout-worker"
+		owner := OwnerStamp{PID: os.Getpid(), LeaseID: "lease-timeout-worker"}
+
+		// First prepare: creates clean worktree
+		res1 := PrepareOwnedBounded(fixture.repo, lane, key, fixture.base, wtRoot, owner, 10*time.Second)
+		if !res1.OK || res1.Reused {
+			t.Fatalf("first prepare = %+v", res1)
+		}
+
+		keepFile := filepath.Join(res1.Path, "preserve-me.txt")
+		if err := os.WriteFile(keepFile, []byte("timeout preserved content\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		// Wrap git: allow worktree list so MaterializeOwned detects reuse, but return ReapTimeoutExitCode on status --porcelain
+		wrappedGit := func(dir string, args []string) (int, string) {
+			joined := strings.Join(args, " ")
+			if joined == "status --porcelain" && samePath(dir, res1.Path) {
+				return ReapTimeoutExitCode, "timeout"
+			}
+			return defaultGit(dir, args)
+		}
+
+		res2 := prepareOwnedWithBackend(fixture.repo, lane, key, fixture.base, wtRoot, wrappedGit, defaultIsolationBackend, owner, true)
+		if res2.OK {
+			t.Fatalf("expected timeout refusal, got %+v", res2)
+		}
+		if res2.Code != "PREPARE_TIMEOUT" {
+			t.Fatalf("expected Code PREPARE_TIMEOUT, got %q", res2.Code)
+		}
+		if !res2.Reused {
+			t.Fatalf("expected Reused=true for same-key prepare, got %+v", res2)
+		}
+
+		// Verify existing worktree files remain intact
+		keepData, err := os.ReadFile(keepFile)
+		if err != nil || string(keepData) != "timeout preserved content\n" {
+			t.Fatalf("expected file to be preserved on timeout, got %q, err %v", string(keepData), err)
+		}
+
+		// Verify git administrative registration remains intact
+		wtList := reapProofGit(t, fixture.repo, "worktree", "list", "--porcelain")
+		found := false
+		for _, p := range parseWorktreePaths(wtList) {
+			if samePath(p, res1.Path) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected worktree %s to remain registered in git worktree list", res1.Path)
+		}
+	})
+}
+
 func TestVerifyPreparedWorktreeRejectsDirtyAndLockedCheckout(t *testing.T) {
 	base := strings.Repeat("b", 40)
 	wt := filepath.Join(t.TempDir(), "fak-worker-wt-verify")

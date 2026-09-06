@@ -488,11 +488,14 @@ func PrepareOwnedBounded(root, lane, key, baseSHA, wtRoot string, owner OwnerSta
 		base = strings.TrimSpace(out)
 	}
 	res := prepareOwnedWithBackend(root, lane, key, base, wtRoot, git, defaultIsolationBackend, owner, true)
-	if !res.OK && res.Path != "" && (res.Code == "PREPARE_TIMEOUT" || ctx.Err() != nil) {
+	if !res.OK && res.Path != "" && !res.Reused && (res.Code == "PREPARE_TIMEOUT" || ctx.Err() != nil) {
 		cleanupPartialPrepareBounded(root, res.Path)
 	}
 	if ctx.Err() != nil && !res.OK {
-		return prepareTimeoutResult(res.Path, base, "materialization/readiness", ctx.Err())
+		out := prepareTimeoutResult(res.Path, base, "materialization/readiness", ctx.Err())
+		out.Reused = res.Reused
+		out.Preserved = res.Reused
+		return out
 	}
 	return res
 }
@@ -531,14 +534,21 @@ func prepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRun
 	}
 	if !res.OK || res.Path == "" {
 		if verifyReady && res.Path != "" && res.Code == "PREPARE_TIMEOUT" {
-			cleanupPartialPrepare(root, res.Path, git)
-			return prepareTimeoutResult(res.Path, res.BaseSHA, "materialization", fmt.Errorf("%s", res.Detail))
+			if !res.Reused {
+				cleanupPartialPrepare(root, res.Path, git)
+			}
+			out := prepareTimeoutResult(res.Path, res.BaseSHA, "materialization", fmt.Errorf("%s", res.Detail))
+			out.Reused = res.Reused
+			out.Preserved = res.Reused
+			return out
 		}
 		return res
 	}
 	if verifyReady {
 		if ready := verifyPreparedWorktree(res, git); !ready.OK {
-			cleanupPartialPrepare(root, res.Path, git)
+			if !res.Reused {
+				cleanupPartialPrepare(root, res.Path, git)
+			}
 			return ready
 		}
 	}
@@ -593,6 +603,7 @@ func prepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRun
 func verifyPreparedWorktree(res Result, git GitRunner) Result {
 	fail := func(code, reason, detail string) Result {
 		return Result{OK: false, Code: code, Path: res.Path, BaseSHA: res.BaseSHA,
+			Reused: res.Reused, Preserved: res.Reused,
 			Reason: reason + " - no ready receipt emitted", Detail: detail}
 	}
 	rc, out := run(git, res.Path, []string{"rev-parse", "HEAD"})

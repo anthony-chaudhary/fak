@@ -245,3 +245,129 @@ func TestReceiptGolden(t *testing.T) {
 		t.Errorf("receipt drifted from the committed golden.\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
+
+// TestDottedPlatformAndDistroReleaseTags (#11792) verifies support for platform and
+// distro release tags (e.g. windows.3, el9.x86_64) while preserving arity strictness
+// and prerelease distinction.
+func TestDottedPlatformAndDistroReleaseTags(t *testing.T) {
+	// 1. git version 2.55.0.windows.3 is verified against pin "2.55.0"
+	winProbe := VersionProbe{
+		Tool:  "git",
+		Raw:   "git version 2.55.0.windows.3\n",
+		Found: true,
+	}
+	wWin := VerifyToolVersion("2.55.0", winProbe)
+	if !wWin.Satisfied() {
+		t.Errorf("git 2.55.0.windows.3 against 2.55.0 not satisfied: state=%s reason=%s", wWin.State, wWin.Reason)
+	}
+	if wWin.Live != "2.55.0" {
+		t.Errorf("git 2.55.0.windows.3 live = %q, want %q", wWin.Live, "2.55.0")
+	}
+
+	// 2. Linux release tags like 2.43.0.el9.x86_64 are verified against pin "2.43.0"
+	linuxProbe := VersionProbe{
+		Tool:  "git",
+		Raw:   "git version 2.43.0.el9.x86_64\n",
+		Found: true,
+	}
+	wLinux := VerifyToolVersion("2.43.0", linuxProbe)
+	if !wLinux.Satisfied() {
+		t.Errorf("git 2.43.0.el9.x86_64 against 2.43.0 not satisfied: state=%s reason=%s", wLinux.State, wLinux.Reason)
+	}
+	if wLinux.Live != "2.43.0" {
+		t.Errorf("git 2.43.0.el9.x86_64 live = %q, want %q", wLinux.Live, "2.43.0")
+	}
+
+	// 3. Arity strictness is preserved (1.2.3.4 does NOT match pin 1.2.3)
+	arityProbe := VersionProbe{
+		Tool:  "mytool",
+		Raw:   "mytool 1.2.3.4\n",
+		Found: true,
+	}
+	wArity := VerifyToolVersion("1.2.3", arityProbe)
+	if wArity.Satisfied() {
+		t.Errorf("1.2.3.4 unexpectedly satisfied pin 1.2.3")
+	}
+	if wArity.State != VersionMismatch {
+		t.Errorf("1.2.3.4 state = %s, want mismatch", wArity.State)
+	}
+
+	// 4. Prereleases (both hyphenated like 1.2.3-rc1 and dotted like 1.2.3.rc1) do NOT match pin 1.2.3
+	preProbe := VersionProbe{
+		Tool:  "mytool",
+		Raw:   "mytool version 1.2.3-rc1\n",
+		Found: true,
+	}
+	wPre := VerifyToolVersion("1.2.3", preProbe)
+	if wPre.Satisfied() {
+		t.Errorf("1.2.3-rc1 unexpectedly satisfied pin 1.2.3")
+	}
+	if wPre.State != VersionMismatch {
+		t.Errorf("1.2.3-rc1 state = %s, want mismatch", wPre.State)
+	}
+
+	dottedPreProbe := VersionProbe{
+		Tool:  "mytool",
+		Raw:   "mytool version 1.2.3.rc1\n",
+		Found: true,
+	}
+	wDottedPre := VerifyToolVersion("1.2.3", dottedPreProbe)
+	if wDottedPre.Satisfied() {
+		t.Errorf("1.2.3.rc1 unexpectedly satisfied pin 1.2.3")
+	}
+	if wDottedPre.State != VersionMismatch {
+		t.Errorf("1.2.3.rc1 state = %s, want mismatch", wDottedPre.State)
+	}
+	if wDottedPre.Live != "1.2.3-rc1" {
+		t.Errorf("1.2.3.rc1 live = %q, want %q", wDottedPre.Live, "1.2.3-rc1")
+	}
+
+	// Dotted prereleases (alpha, beta, preview) must not be stripped as platform tags
+	for _, preTag := range []string{"1.2.3.beta", "1.2.3.alpha", "1.2.3.preview"} {
+		p := VersionProbe{
+			Tool:  "mytool",
+			Raw:   "mytool version " + preTag + "\n",
+			Found: true,
+		}
+		w := VerifyToolVersion("1.2.3", p)
+		if w.Satisfied() {
+			t.Errorf("%s unexpectedly satisfied pin 1.2.3", preTag)
+		}
+		if w.State != VersionMismatch {
+			t.Errorf("%s state = %s, want mismatch", preTag, w.State)
+		}
+	}
+
+	// 5. Alphanumeric segment truncation: "1.2.3a" does NOT truncate arity to [1, 2].
+	if v, ok := ParseToolVersion("1.2.3a"); ok && len(v.Nums) == 2 {
+		t.Errorf("1.2.3a unexpectedly truncated arity to [1, 2]: %v", v.Nums)
+	}
+	if v, ok := ParseToolVersion("1.1.1w"); ok && len(v.Nums) == 2 {
+		t.Errorf("1.1.1w unexpectedly truncated arity to [1, 1]: %v", v.Nums)
+	}
+	truncProbe := VersionProbe{
+		Tool:  "mytool",
+		Raw:   "mytool 1.2.3a\n",
+		Found: true,
+	}
+	wTrunc := VerifyToolVersion("1.2", truncProbe)
+	if wTrunc.Satisfied() {
+		t.Errorf("1.2.3a unexpectedly satisfied pin 1.2 via arity truncation")
+	}
+
+	// 6. Edge cases: invalid characters, wildcards, degenerate tags ("_"), and leading non-digits are refused.
+	invalidCases := []string{
+		"2.55.0.windows@1",
+		"2.55.0.windows.x",
+		"2.55.0.windows.*",
+		"2.55.0..windows",
+		"windows.2.55.0",
+		"2.55.0._",
+		"2.55.0.windows._",
+	}
+	for _, raw := range invalidCases {
+		if v, ok := ParseToolVersion(raw); ok {
+			t.Errorf("ParseToolVersion(%q) unexpectedly accepted as %v", raw, v)
+		}
+	}
+}
