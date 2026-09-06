@@ -1,5 +1,3 @@
-// Invariant: guard corpus entries maintain deterministic immutable hash signatures and valid category taxonomy.
-
 package guardcorpus
 
 import (
