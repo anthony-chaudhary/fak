@@ -400,3 +400,745 @@ func TestWorktreeABFoldAcceptedDeliveryAccounting(t *testing.T) {
 		}
 	})
 }
+
+func TestWorktreeABRequiresComparableMeasuredArms(t *testing.T) {
+	validBaseline := WorktreeABArm{
+		WaveID:          "fixed-wave",
+		Resolved:        4,
+		DurationSeconds: 1200.0,
+		PoisonIncidents: 2,
+		PeakConcurrency: 4,
+		HostID:          "node-1",
+	}
+	validIsolated := WorktreeABArm{
+		WaveID:          "fixed-wave",
+		Resolved:        4,
+		DurationSeconds: 800.0,
+		PoisonIncidents: 0,
+		PeakConcurrency: 8,
+		HostID:          "node-1",
+	}
+
+	tests := []struct {
+		name           string
+		mutateBaseline func(a *WorktreeABArm)
+		mutateIsolated func(a *WorktreeABArm)
+		wantVerdict    string
+		wantEquivalent bool
+	}{
+		{
+			name:           "valid comparable measured arms emit positive verdict",
+			wantVerdict:    "ISOLATION_POISON_FREE",
+			wantEquivalent: true,
+		},
+		{
+			name: "missing wave ID on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.WaveID = ""
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "missing wave ID on isolated",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.WaveID = ""
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "both wave IDs empty",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.WaveID = ""
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.WaveID = ""
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "whitespace wave ID on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.WaveID = "   "
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "mismatched wave ID",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.WaveID = "different-wave"
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "zero completed work on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.Resolved = 0
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "zero completed work on isolated",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.Resolved = 0
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "zero completed work on both",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.Resolved = 0
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.Resolved = 0
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "negative completed work on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.Resolved = -2
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "mismatched completed work between arms",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.Resolved = 2 // baseline has 4
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "zero duration on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.DurationSeconds = 0
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "zero duration on isolated",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.DurationSeconds = 0
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "negative duration on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.DurationSeconds = -100.0
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "negative duration on isolated",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.DurationSeconds = -100.0
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "NaN duration on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.DurationSeconds = math.NaN()
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "NaN duration on isolated",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.DurationSeconds = math.NaN()
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "infinite duration on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.DurationSeconds = math.Inf(1)
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "infinite duration on isolated",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.DurationSeconds = math.Inf(1)
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "mismatched host IDs",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.HostID = "node-2" // baseline has node-1
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "compatible empty host IDs on both",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.HostID = ""
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.HostID = ""
+			},
+			wantVerdict:    "ISOLATION_POISON_FREE",
+			wantEquivalent: true,
+		},
+		{
+			name: "compatible one empty host ID",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.HostID = ""
+			},
+			wantVerdict:    "ISOLATION_POISON_FREE",
+			wantEquivalent: true,
+		},
+		{
+			name: "compatible case-insensitive host IDs",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.HostID = "NODE-1"
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.HostID = "node-1"
+			},
+			wantVerdict:    "ISOLATION_POISON_FREE",
+			wantEquivalent: true,
+		},
+		{
+			name: "poison incidents on isolated arm",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.PoisonIncidents = 1
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: true, // arms are equivalent wave, but isolated is poisoned so verdict is NOT_PROVEN
+		},
+		{
+			name: "negative poison incidents on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.PoisonIncidents = -1
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "negative poison incidents on isolated",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.PoisonIncidents = -1
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "incomplete delivery accounting on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 1, Outcome: OutcomeRejected, TotalElapsed: 60},
+				}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "incomplete delivery accounting on isolated",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 1, Outcome: OutcomeRejected, TotalElapsed: 60},
+				}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "complete delivery accounting on both matching",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 101, Outcome: OutcomeAccepted, TotalElapsed: 60},
+					{IssueID: 102, Outcome: OutcomeAccepted, TotalElapsed: 60},
+				}
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 201, Outcome: OutcomeAccepted, TotalElapsed: 60},
+					{IssueID: 202, Outcome: OutcomeAccepted, TotalElapsed: 60},
+				}
+			},
+			wantVerdict:    "ISOLATION_POISON_FREE",
+			wantEquivalent: true,
+		},
+		{
+			name: "whitespace wave ID on isolated",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.WaveID = "   "
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "matching wave IDs with whitespace padding",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.WaveID = "  fixed-wave "
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.WaveID = "fixed-wave  "
+			},
+			wantVerdict:    "ISOLATION_POISON_FREE",
+			wantEquivalent: true,
+		},
+		{
+			name: "negative completed work on isolated",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.Resolved = -4
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "negative infinite duration on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.DurationSeconds = math.Inf(-1)
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "negative infinite duration on isolated",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.DurationSeconds = math.Inf(-1)
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "compatible one empty host ID on isolated",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.HostID = ""
+			},
+			wantVerdict:    "ISOLATION_POISON_FREE",
+			wantEquivalent: true,
+		},
+		{
+			name: "compatible host IDs with whitespace padding",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.HostID = "  NODE-1 "
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.HostID = "node-1  "
+			},
+			wantVerdict:    "ISOLATION_POISON_FREE",
+			wantEquivalent: true,
+		},
+		{
+			name: "negative peak concurrency on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.PeakConcurrency = -1
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "negative peak concurrency on isolated",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.PeakConcurrency = -1
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "zero peak concurrency is valid non-negative",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.PeakConcurrency = 0
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.PeakConcurrency = 0
+			},
+			wantVerdict:    "ISOLATION_POISON_FREE",
+			wantEquivalent: true,
+		},
+		{
+			name: "delivery records with negative phase duration on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 101, Outcome: OutcomeAccepted, SetupDuration: -10, TotalElapsed: 60},
+				}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "delivery records with negative phase duration on isolated",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 101, Outcome: OutcomeAccepted, ExecutionDuration: -10, TotalElapsed: 60},
+				}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "delivery records with NaN phase duration on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 101, Outcome: OutcomeAccepted, TotalElapsed: math.NaN()},
+				}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "delivery records with NaN phase duration on isolated",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 101, Outcome: OutcomeAccepted, TotalElapsed: math.NaN()},
+				}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "complete delivery accounting on baseline but mismatched accepted count with isolated",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 101, Outcome: OutcomeAccepted, TotalElapsed: 60},
+					{IssueID: 102, Outcome: OutcomeAccepted, TotalElapsed: 60},
+				}
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 201, Outcome: OutcomeAccepted, TotalElapsed: 60},
+					{IssueID: 202, Outcome: OutcomeAccepted, TotalElapsed: 60},
+					{IssueID: 203, Outcome: OutcomeAccepted, TotalElapsed: 60},
+				}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "lifecycle records alias complete and matching",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.LifecycleRecords = []AcceptedDeliveryRecord{
+					{IssueID: 101, Outcome: OutcomeAccepted, TotalElapsed: 60},
+					{IssueID: 102, Outcome: OutcomeAccepted, TotalElapsed: 60},
+				}
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.LifecycleRecords = []AcceptedDeliveryRecord{
+					{IssueID: 201, Outcome: OutcomeAccepted, TotalElapsed: 60},
+					{IssueID: 202, Outcome: OutcomeAccepted, TotalElapsed: 60},
+				}
+			},
+			wantVerdict:    "ISOLATION_POISON_FREE",
+			wantEquivalent: true,
+		},
+		{
+			name: "lifecycle records incomplete on isolated",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.LifecycleRecords = []AcceptedDeliveryRecord{
+					{IssueID: 201, Outcome: OutcomeRejected, TotalElapsed: 60},
+				}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "poison incidents on baseline arm permitted for isolated poison-free verdict",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.PoisonIncidents = 5
+			},
+			wantVerdict:    "ISOLATION_POISON_FREE",
+			wantEquivalent: true,
+		},
+		{
+			name: "both wave IDs whitespace",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.WaveID = "   "
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.WaveID = "   "
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "delivery accounting on baseline but missing on isolated",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 101, Outcome: OutcomeAccepted, TotalElapsed: 60},
+					{IssueID: 102, Outcome: OutcomeAccepted, TotalElapsed: 60},
+				}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "delivery accounting on isolated but missing on baseline",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 201, Outcome: OutcomeAccepted, TotalElapsed: 60},
+					{IssueID: 202, Outcome: OutcomeAccepted, TotalElapsed: 60},
+				}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "infinite phase duration in baseline delivery records",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 101, Outcome: OutcomeAccepted, ExecutionDuration: math.Inf(1), TotalElapsed: 60},
+				}
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 201, Outcome: OutcomeAccepted, TotalElapsed: 60},
+				}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "infinite phase duration in isolated delivery records",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 101, Outcome: OutcomeAccepted, TotalElapsed: 60},
+				}
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 201, Outcome: OutcomeAccepted, SetupDuration: math.Inf(1), TotalElapsed: 60},
+				}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "negative spend in delivery records on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 101, Outcome: OutcomeAccepted, Spend: -2.5, TotalElapsed: 60},
+				}
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 201, Outcome: OutcomeAccepted, TotalElapsed: 60},
+				}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "negative spend in delivery records on isolated",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 101, Outcome: OutcomeAccepted, TotalElapsed: 60},
+				}
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.DeliveryRecords = []AcceptedDeliveryRecord{
+					{IssueID: 201, Outcome: OutcomeAccepted, Spend: -2.5, TotalElapsed: 60},
+				}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "pre-populated accounting with NaN elapsed seconds on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.Accounting = AcceptedDeliveryAccounting{Status: "COMPLETE", Verified: true, AcceptedDeliveries: 4, TotalElapsedSeconds: math.NaN()}
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.Accounting = AcceptedDeliveryAccounting{Status: "COMPLETE", Verified: true, AcceptedDeliveries: 4, TotalElapsedSeconds: 800.0}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "pre-populated accounting with infinite elapsed seconds on isolated",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.Accounting = AcceptedDeliveryAccounting{Status: "COMPLETE", Verified: true, AcceptedDeliveries: 4, TotalElapsedSeconds: 1200.0}
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.Accounting = AcceptedDeliveryAccounting{Status: "COMPLETE", Verified: true, AcceptedDeliveries: 4, TotalElapsedSeconds: math.Inf(1)}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "pre-populated accounting with unverified status on baseline",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.Accounting = AcceptedDeliveryAccounting{Status: "COMPLETE", Verified: false, AcceptedDeliveries: 4, TotalElapsedSeconds: 1200.0}
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.Accounting = AcceptedDeliveryAccounting{Status: "COMPLETE", Verified: true, AcceptedDeliveries: 4, TotalElapsedSeconds: 800.0}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "pre-populated accounting with mismatched status",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.Accounting = AcceptedDeliveryAccounting{Status: "COMPLETE", Verified: true, AcceptedDeliveries: 4, TotalElapsedSeconds: 1200.0}
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.Accounting = AcceptedDeliveryAccounting{Status: "CUSTOM", Verified: true, AcceptedDeliveries: 4, TotalElapsedSeconds: 800.0}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "pre-populated accounting with negative accepted deliveries on isolated",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.Accounting = AcceptedDeliveryAccounting{Status: "COMPLETE", Verified: true, AcceptedDeliveries: 4, TotalElapsedSeconds: 1200.0}
+			},
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.Accounting = AcceptedDeliveryAccounting{Status: "COMPLETE", Verified: true, AcceptedDeliveries: -1, TotalElapsedSeconds: 800.0}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "pre-populated accounting on baseline but missing on isolated",
+			mutateBaseline: func(a *WorktreeABArm) {
+				a.Accounting = AcceptedDeliveryAccounting{Status: "COMPLETE", Verified: true, AcceptedDeliveries: 4, TotalElapsedSeconds: 1200.0}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+		{
+			name: "pre-populated accounting on isolated but missing on baseline",
+			mutateIsolated: func(a *WorktreeABArm) {
+				a.Accounting = AcceptedDeliveryAccounting{Status: "COMPLETE", Verified: true, AcceptedDeliveries: 4, TotalElapsedSeconds: 800.0}
+			},
+			wantVerdict:    "NOT_PROVEN",
+			wantEquivalent: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bArm := validBaseline
+			iArm := validIsolated
+			if tc.mutateBaseline != nil {
+				tc.mutateBaseline(&bArm)
+			}
+			if tc.mutateIsolated != nil {
+				tc.mutateIsolated(&iArm)
+			}
+
+			gotReport := FoldWorktreeAB(bArm, iArm)
+			if gotReport.Verdict != tc.wantVerdict {
+				t.Errorf("FoldWorktreeAB().Verdict = %q, want %q", gotReport.Verdict, tc.wantVerdict)
+			}
+
+			gotEq := WorktreeABEquivalentWave(bArm, iArm)
+			if gotEq != tc.wantEquivalent {
+				t.Errorf("WorktreeABEquivalentWave() = %v, want %v", gotEq, tc.wantEquivalent)
+			}
+
+			gotComp := WorktreeABComparableArms(bArm, iArm)
+			if gotComp != tc.wantEquivalent {
+				t.Errorf("WorktreeABComparableArms() = %v, want %v", gotComp, tc.wantEquivalent)
+			}
+		})
+	}
+}
+
+func TestWorktreeABIssuesPerHourFailsClosed(t *testing.T) {
+	cases := []struct {
+		name string
+		arm  WorktreeABArm
+		want float64
+	}{
+		{
+			name: "zero duration",
+			arm:  WorktreeABArm{Resolved: 4, DurationSeconds: 0},
+			want: 0,
+		},
+		{
+			name: "negative duration",
+			arm:  WorktreeABArm{Resolved: 4, DurationSeconds: -100},
+			want: 0,
+		},
+		{
+			name: "NaN duration",
+			arm:  WorktreeABArm{Resolved: 4, DurationSeconds: math.NaN()},
+			want: 0,
+		},
+		{
+			name: "infinite duration",
+			arm:  WorktreeABArm{Resolved: 4, DurationSeconds: math.Inf(1)},
+			want: 0,
+		},
+		{
+			name: "zero resolved",
+			arm:  WorktreeABArm{Resolved: 0, DurationSeconds: 100},
+			want: 0,
+		},
+		{
+			name: "negative resolved",
+			arm:  WorktreeABArm{Resolved: -2, DurationSeconds: 100},
+			want: 0,
+		},
+		{
+			name: "valid calculation",
+			arm:  WorktreeABArm{Resolved: 2, DurationSeconds: 3600},
+			want: 2.0,
+		},
+		{
+			name: "accounting status with non-finite rate",
+			arm: WorktreeABArm{
+				DurationSeconds: 3600,
+				Accounting: AcceptedDeliveryAccounting{
+					Status:                 "COMPLETE",
+					AcceptedPerElapsedHour: math.NaN(),
+				},
+			},
+			want: 0,
+		},
+		{
+			name: "accounting status with negative rate",
+			arm: WorktreeABArm{
+				DurationSeconds: 3600,
+				Accounting: AcceptedDeliveryAccounting{
+					Status:                 "COMPLETE",
+					AcceptedPerElapsedHour: -5.0,
+				},
+			},
+			want: 0,
+		},
+		{
+			name: "accounting status with valid rate",
+			arm: WorktreeABArm{
+				DurationSeconds: 3600,
+				Accounting: AcceptedDeliveryAccounting{
+					Status:                 "COMPLETE",
+					AcceptedPerElapsedHour: 10.0,
+				},
+			},
+			want: 10.0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.arm.IssuesPerHour()
+			if math.IsNaN(got) || math.IsInf(got, 0) || math.Abs(got-tc.want) > 1e-6 {
+				t.Fatalf("IssuesPerHour() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

@@ -73,20 +73,29 @@ func AccountAcceptedDeliveries(records []DeliveryLifecycleRecord, totalWindowSec
 
 	seenAccepted := make(map[int]bool)
 	var incompleteBoundary bool
-	if totalWindowSeconds <= 0 || math.IsNaN(totalWindowSeconds) || math.IsInf(totalWindowSeconds, 0) {
+	if !isFinitePositive(totalWindowSeconds) {
 		incompleteBoundary = true
 	}
 
 	for _, r := range records {
-		if !math.IsNaN(r.Spend) && !math.IsInf(r.Spend, 0) {
-			acc.Spend += r.Spend
+		if r.IssueID <= 0 {
+			incompleteBoundary = true
 		}
-		if r.SpendUnknown || math.IsNaN(r.Spend) || math.IsInf(r.Spend, 0) {
+
+		if !math.IsNaN(r.Spend) && !math.IsInf(r.Spend, 0) {
+			if r.Spend >= 0 {
+				acc.Spend += r.Spend
+			} else {
+				incompleteBoundary = true
+			}
+		}
+		if r.SpendUnknown || math.IsNaN(r.Spend) || math.IsInf(r.Spend, 0) || r.Spend < 0 {
 			acc.SpendUnknown = true
 		}
 
 		if r.TotalElapsed < 0 || r.SetupDuration < 0 || r.ExecutionDuration < 0 || r.LandingDuration < 0 || r.VerificationDuration < 0 ||
-			math.IsNaN(r.TotalElapsed) || math.IsNaN(r.SetupDuration) || math.IsNaN(r.ExecutionDuration) || math.IsNaN(r.LandingDuration) || math.IsNaN(r.VerificationDuration) {
+			math.IsNaN(r.TotalElapsed) || math.IsNaN(r.SetupDuration) || math.IsNaN(r.ExecutionDuration) || math.IsNaN(r.LandingDuration) || math.IsNaN(r.VerificationDuration) ||
+			math.IsInf(r.TotalElapsed, 0) || math.IsInf(r.SetupDuration, 0) || math.IsInf(r.ExecutionDuration, 0) || math.IsInf(r.LandingDuration, 0) || math.IsInf(r.VerificationDuration, 0) {
 			incompleteBoundary = true
 		}
 
@@ -108,7 +117,7 @@ func AccountAcceptedDeliveries(records []DeliveryLifecycleRecord, totalWindowSec
 		}
 	}
 
-	if totalWindowSeconds > 0 && !math.IsNaN(totalWindowSeconds) && !math.IsInf(totalWindowSeconds, 0) {
+	if isFinitePositive(totalWindowSeconds) {
 		acc.AcceptedPerElapsedHour = float64(acc.AcceptedDeliveries) * 3600.0 / totalWindowSeconds
 	}
 
@@ -138,11 +147,17 @@ type WorktreeABArm struct {
 }
 
 func (a WorktreeABArm) IssuesPerHour() float64 {
-	if a.DurationSeconds <= 0 {
+	if !isFinitePositive(a.DurationSeconds) {
 		return 0
 	}
 	if a.Accounting.Status != "" {
+		if !isFiniteNonNegative(a.Accounting.AcceptedPerElapsedHour) {
+			return 0
+		}
 		return a.Accounting.AcceptedPerElapsedHour
+	}
+	if a.Resolved <= 0 {
+		return 0
 	}
 	return float64(a.Resolved) * 3600 / a.DurationSeconds
 }
@@ -158,6 +173,21 @@ type WorktreeABReport struct {
 
 // WorktreeABComparison is an alias for WorktreeABReport.
 type WorktreeABComparison = WorktreeABReport
+
+func isFinitePositive(v float64) bool {
+	return v > 0 && !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+func isFiniteNonNegative(v float64) bool {
+	return v >= 0 && !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+// WorktreeABComparableArms reports whether two arms represent comparable,
+// non-empty measured arms (valid wave matching, non-zero completed work,
+// finite positive durations, and host comparability).
+func WorktreeABComparableArms(a, b WorktreeABArm) bool {
+	return WorktreeABEquivalentWave(a, b)
+}
 
 func FoldWorktreeAB(baseline, isolated WorktreeABArm) WorktreeABReport {
 	baseline.Name, baseline.Worktree = "baseline", false
@@ -195,7 +225,7 @@ func FoldWorktreeAB(baseline, isolated WorktreeABArm) WorktreeABReport {
 	}
 
 	verdict := "NOT_PROVEN"
-	if baseline.DurationSeconds > 0 && isolated.DurationSeconds > 0 && isolated.PoisonIncidents == 0 {
+	if isolated.PoisonIncidents == 0 && WorktreeABComparableArms(baseline, isolated) {
 		verdict = "ISOLATION_POISON_FREE"
 	}
 	return WorktreeABReport{
@@ -226,11 +256,31 @@ func WorktreeABUpdate(r WorktreeABReport) Update {
 }
 
 func WorktreeABEquivalentWave(a, b WorktreeABArm) bool {
+	if !isFinitePositive(a.DurationSeconds) || !isFinitePositive(b.DurationSeconds) {
+		return false
+	}
+	waveA := strings.TrimSpace(a.WaveID)
+	waveB := strings.TrimSpace(b.WaveID)
+	if waveA == "" || waveA != waveB {
+		return false
+	}
+	hostA := strings.TrimSpace(a.HostID)
+	hostB := strings.TrimSpace(b.HostID)
+	if hostA != "" && hostB != "" && !strings.EqualFold(hostA, hostB) {
+		return false
+	}
+
 	if len(a.DeliveryRecords) == 0 && len(a.LifecycleRecords) > 0 {
 		a.DeliveryRecords = a.LifecycleRecords
 	}
 	if len(b.DeliveryRecords) == 0 && len(b.LifecycleRecords) > 0 {
 		b.DeliveryRecords = b.LifecycleRecords
+	}
+	if len(a.LifecycleRecords) == 0 && len(a.DeliveryRecords) > 0 {
+		a.LifecycleRecords = a.DeliveryRecords
+	}
+	if len(b.LifecycleRecords) == 0 && len(b.DeliveryRecords) > 0 {
+		b.LifecycleRecords = b.DeliveryRecords
 	}
 	if len(a.DeliveryRecords) > 0 && a.Accounting.Status == "" {
 		a.Accounting = AccountAcceptedDeliveries(a.DeliveryRecords, a.DurationSeconds)
@@ -238,14 +288,73 @@ func WorktreeABEquivalentWave(a, b WorktreeABArm) bool {
 	if len(b.DeliveryRecords) > 0 && b.Accounting.Status == "" {
 		b.Accounting = AccountAcceptedDeliveries(b.DeliveryRecords, b.DurationSeconds)
 	}
+
+	if (len(a.DeliveryRecords) > 0) != (len(b.DeliveryRecords) > 0) {
+		return false
+	}
+	if (a.Accounting.Status != "") != (b.Accounting.Status != "") {
+		return false
+	}
+
+	if len(a.DeliveryRecords) > 0 && (a.Accounting.Status != "COMPLETE" || !a.Accounting.Verified) {
+		return false
+	}
+	if len(b.DeliveryRecords) > 0 && (b.Accounting.Status != "COMPLETE" || !b.Accounting.Verified) {
+		return false
+	}
+
 	resA := a.Resolved
-	if (resA == 0 || a.Accounting.Status != "") && a.Accounting.AcceptedDeliveries > 0 {
+	if a.Accounting.Status != "" {
+		if a.Accounting.Status == "INCOMPLETE" || !a.Accounting.Verified {
+			return false
+		}
+		if !strings.EqualFold(a.Accounting.Status, b.Accounting.Status) {
+			return false
+		}
+		if !isFiniteNonNegative(a.Accounting.TotalElapsedSeconds) ||
+			!isFiniteNonNegative(a.Accounting.AcceptedPerElapsedHour) ||
+			!isFiniteNonNegative(a.Accounting.Spend) ||
+			a.Accounting.AcceptedDeliveries <= 0 ||
+			a.Accounting.TotalDeliveries < 0 ||
+			a.Accounting.RejectedDeliveries < 0 ||
+			a.Accounting.DuplicateDeliveries < 0 ||
+			a.Accounting.UnverifiedDeliveries < 0 {
+			return false
+		}
+		resA = a.Accounting.AcceptedDeliveries
+	} else if resA == 0 && a.Accounting.AcceptedDeliveries > 0 {
 		resA = a.Accounting.AcceptedDeliveries
 	}
+
 	resB := b.Resolved
-	if (resB == 0 || b.Accounting.Status != "") && b.Accounting.AcceptedDeliveries > 0 {
+	if b.Accounting.Status != "" {
+		if b.Accounting.Status == "INCOMPLETE" || !b.Accounting.Verified {
+			return false
+		}
+		if !isFiniteNonNegative(b.Accounting.TotalElapsedSeconds) ||
+			!isFiniteNonNegative(b.Accounting.AcceptedPerElapsedHour) ||
+			!isFiniteNonNegative(b.Accounting.Spend) ||
+			b.Accounting.AcceptedDeliveries <= 0 ||
+			b.Accounting.TotalDeliveries < 0 ||
+			b.Accounting.RejectedDeliveries < 0 ||
+			b.Accounting.DuplicateDeliveries < 0 ||
+			b.Accounting.UnverifiedDeliveries < 0 {
+			return false
+		}
+		resB = b.Accounting.AcceptedDeliveries
+	} else if resB == 0 && b.Accounting.AcceptedDeliveries > 0 {
 		resB = b.Accounting.AcceptedDeliveries
 	}
-	return a.WaveID != "" && a.WaveID == b.WaveID && resA == resB && resA > 0 &&
-		(a.HostID == "" || b.HostID == "" || a.HostID == b.HostID) && !math.IsNaN(a.DurationSeconds) && !math.IsNaN(b.DurationSeconds)
+
+	if resA <= 0 || resB <= 0 || resA != resB {
+		return false
+	}
+	if a.PoisonIncidents < 0 || b.PoisonIncidents < 0 {
+		return false
+	}
+	if a.PeakConcurrency < 0 || b.PeakConcurrency < 0 {
+		return false
+	}
+
+	return true
 }
