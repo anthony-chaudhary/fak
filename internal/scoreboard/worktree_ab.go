@@ -29,6 +29,8 @@ type DeliveryLifecycleRecord struct {
 	SpendUnknown         bool            `json:"spend_unknown"`
 }
 
+type AcceptedDeliveryRecord = DeliveryLifecycleRecord
+
 type AcceptedDeliveryAccounting struct {
 	TotalDeliveries        int     `json:"total_deliveries"`
 	AcceptedDeliveries     int     `json:"accepted_deliveries"`
@@ -122,48 +124,101 @@ func AccountAcceptedDeliveries(records []DeliveryLifecycleRecord, totalWindowSec
 }
 
 type WorktreeABArm struct {
-	Name            string  `json:"name"`
-	Worktree        bool    `json:"worktree"`
-	Resolved        int     `json:"resolved"`
-	DurationSeconds float64 `json:"duration_seconds"`
-	PoisonIncidents int     `json:"poison_incidents"`
-	PeakConcurrency int     `json:"peak_concurrency"`
-	WaveID          string  `json:"wave_id"`
-	HostID          string  `json:"host_id,omitempty"`
+	Name            string                     `json:"name"`
+	Worktree        bool                       `json:"worktree"`
+	Resolved        int                        `json:"resolved"`
+	DurationSeconds float64                    `json:"duration_seconds"`
+	PoisonIncidents int                        `json:"poison_incidents"`
+	PeakConcurrency int                        `json:"peak_concurrency"`
+	WaveID          string                     `json:"wave_id"`
+	HostID          string                     `json:"host_id,omitempty"`
+	DeliveryRecords []AcceptedDeliveryRecord   `json:"delivery_records,omitempty"`
+	Accounting      AcceptedDeliveryAccounting `json:"accounting,omitempty"`
 }
 
 func (a WorktreeABArm) IssuesPerHour() float64 {
 	if a.DurationSeconds <= 0 {
 		return 0
 	}
+	if a.Accounting.Status != "" {
+		return a.Accounting.AcceptedPerElapsedHour
+	}
 	return float64(a.Resolved) * 3600 / a.DurationSeconds
 }
 
 type WorktreeABReport struct {
-	Schema   string        `json:"schema"`
-	Baseline WorktreeABArm `json:"baseline"`
-	Isolated WorktreeABArm `json:"isolated"`
-	Verdict  string        `json:"verdict"`
+	Schema             string                     `json:"schema"`
+	Baseline           WorktreeABArm              `json:"baseline"`
+	Isolated           WorktreeABArm              `json:"isolated"`
+	Verdict            string                     `json:"verdict"`
+	TrunkAccounting    AcceptedDeliveryAccounting `json:"trunk_accounting,omitempty"`
+	WorktreeAccounting AcceptedDeliveryAccounting `json:"worktree_accounting,omitempty"`
 }
+
+// WorktreeABComparison is an alias for WorktreeABReport.
+type WorktreeABComparison = WorktreeABReport
 
 func FoldWorktreeAB(baseline, isolated WorktreeABArm) WorktreeABReport {
 	baseline.Name, baseline.Worktree = "baseline", false
 	isolated.Name, isolated.Worktree = "isolated", true
+
+	if len(baseline.DeliveryRecords) > 0 && baseline.Accounting.Status == "" {
+		baseline.Accounting = AccountAcceptedDeliveries(baseline.DeliveryRecords, baseline.DurationSeconds)
+	}
+	if baseline.Resolved == 0 && baseline.Accounting.AcceptedDeliveries > 0 {
+		baseline.Resolved = baseline.Accounting.AcceptedDeliveries
+	}
+
+	if len(isolated.DeliveryRecords) > 0 && isolated.Accounting.Status == "" {
+		isolated.Accounting = AccountAcceptedDeliveries(isolated.DeliveryRecords, isolated.DurationSeconds)
+	}
+	if isolated.Resolved == 0 && isolated.Accounting.AcceptedDeliveries > 0 {
+		isolated.Resolved = isolated.Accounting.AcceptedDeliveries
+	}
+
 	verdict := "NOT_PROVEN"
 	if baseline.DurationSeconds > 0 && isolated.DurationSeconds > 0 && isolated.PoisonIncidents == 0 {
 		verdict = "ISOLATION_POISON_FREE"
 	}
-	return WorktreeABReport{Schema: WorktreeABSchema, Baseline: baseline, Isolated: isolated, Verdict: verdict}
+	return WorktreeABReport{
+		Schema:             WorktreeABSchema,
+		Baseline:           baseline,
+		Isolated:           isolated,
+		Verdict:            verdict,
+		TrunkAccounting:    baseline.Accounting,
+		WorktreeAccounting: isolated.Accounting,
+	}
+}
+
+// CompareWorktreeAB folds trunk and worktree arms and returns the comparison report.
+func CompareWorktreeAB(trunk, worktree WorktreeABArm) (WorktreeABComparison, error) {
+	return FoldWorktreeAB(trunk, worktree), nil
 }
 
 func WorktreeABUpdate(r WorktreeABReport) Update {
+	hasBothAccounting := len(r.Baseline.DeliveryRecords) > 0 && len(r.Isolated.DeliveryRecords) > 0 &&
+		r.Baseline.Accounting.Status != "" && r.Isolated.Accounting.Status != ""
+
 	line := func(a WorktreeABArm) string {
-		return fmt.Sprintf("%s: %.2f issues/h, %d poison, %.1fs, peak %d", a.Name, a.IssuesPerHour(), a.PoisonIncidents, a.DurationSeconds, a.PeakConcurrency)
+		if hasBothAccounting || (len(a.DeliveryRecords) > 0 && a.Accounting.Status != "") {
+			return fmt.Sprintf("%s: %.2f issues/h (%d accepted, %s), %d poison, %.1fs, peak %d",
+				a.Name, a.IssuesPerHour(), a.Accounting.AcceptedDeliveries, a.Accounting.Status, a.PoisonIncidents, a.DurationSeconds, a.PeakConcurrency)
+		}
+		return fmt.Sprintf("%s: %.2f issues/h, %d poison, %.1fs, peak %d",
+			a.Name, a.IssuesPerHour(), a.PoisonIncidents, a.DurationSeconds, a.PeakConcurrency)
 	}
 	return Update{Title: "Dispatch worktree A/B", Verdict: r.Verdict, Lines: []string{line(r.Baseline), line(r.Isolated)}}
 }
 
 func WorktreeABEquivalentWave(a, b WorktreeABArm) bool {
-	return a.WaveID != "" && a.WaveID == b.WaveID && a.Resolved == b.Resolved && a.Resolved > 0 &&
+	resA := a.Resolved
+	if resA == 0 && a.Accounting.AcceptedDeliveries > 0 {
+		resA = a.Accounting.AcceptedDeliveries
+	}
+	resB := b.Resolved
+	if resB == 0 && b.Accounting.AcceptedDeliveries > 0 {
+		resB = b.Accounting.AcceptedDeliveries
+	}
+	return a.WaveID != "" && a.WaveID == b.WaveID && resA == resB && resA > 0 &&
 		(a.HostID == "" || b.HostID == "" || a.HostID == b.HostID) && !math.IsNaN(a.DurationSeconds) && !math.IsNaN(b.DurationSeconds)
 }

@@ -215,3 +215,163 @@ func TestWorktreeABAcceptedDeliveryAccounting(t *testing.T) {
 		}
 	})
 }
+
+func TestWorktreeABFoldAcceptedDeliveryAccounting(t *testing.T) {
+	t.Run("computes_and_deduplicates_both_arms_complete", func(t *testing.T) {
+		trunk := WorktreeABArm{
+			WaveID:          "wave-test",
+			DurationSeconds: 3600.0,
+			PoisonIncidents: 1,
+			PeakConcurrency: 4,
+			DeliveryRecords: []AcceptedDeliveryRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: 1.0, TotalElapsed: 60},
+				{IssueID: 102, Outcome: OutcomeAccepted, Spend: 1.5, TotalElapsed: 60},
+				{IssueID: 101, Outcome: OutcomeAccepted, Spend: 0.5, TotalElapsed: 60},  // duplicate IssueID
+				{IssueID: 103, Outcome: OutcomeDuplicate, Spend: 0.2, TotalElapsed: 60}, // explicit duplicate
+				{IssueID: 104, Outcome: OutcomeRejected, Spend: 0.8, TotalElapsed: 60},  // rejected
+				{IssueID: 105, Outcome: OutcomeUnverified, Spend: 0.4, TotalElapsed: 60},// unverified
+			},
+		}
+
+		worktree := WorktreeABArm{
+			WaveID:          "wave-test",
+			DurationSeconds: 1800.0,
+			PoisonIncidents: 0,
+			PeakConcurrency: 8,
+			DeliveryRecords: []AcceptedDeliveryRecord{
+				{IssueID: 201, Outcome: OutcomeAccepted, Spend: 1.0, TotalElapsed: 40},
+				{IssueID: 202, Outcome: OutcomeAccepted, Spend: 1.0, TotalElapsed: 40},
+				{IssueID: 203, Outcome: OutcomeAccepted, Spend: 1.0, TotalElapsed: 40},
+				{IssueID: 201, Outcome: OutcomeAccepted, Spend: 0.5, TotalElapsed: 40},  // duplicate IssueID
+				{IssueID: 204, Outcome: OutcomeUnverified, Spend: 0.5, TotalElapsed: 40},// unverified
+			},
+		}
+
+		r := FoldWorktreeAB(trunk, worktree)
+
+		// Trunk accounting assertions
+		if r.Baseline.Accounting.TotalDeliveries != 6 {
+			t.Errorf("Baseline.Accounting.TotalDeliveries = %d, want 6", r.Baseline.Accounting.TotalDeliveries)
+		}
+		if r.Baseline.Accounting.AcceptedDeliveries != 2 {
+			t.Errorf("Baseline.Accounting.AcceptedDeliveries = %d, want 2 (deduplicated)", r.Baseline.Accounting.AcceptedDeliveries)
+		}
+		if r.Baseline.Accounting.DuplicateDeliveries != 2 {
+			t.Errorf("Baseline.Accounting.DuplicateDeliveries = %d, want 2", r.Baseline.Accounting.DuplicateDeliveries)
+		}
+		if r.Baseline.Accounting.RejectedDeliveries != 1 {
+			t.Errorf("Baseline.Accounting.RejectedDeliveries = %d, want 1", r.Baseline.Accounting.RejectedDeliveries)
+		}
+		if r.Baseline.Accounting.UnverifiedDeliveries != 1 {
+			t.Errorf("Baseline.Accounting.UnverifiedDeliveries = %d, want 1", r.Baseline.Accounting.UnverifiedDeliveries)
+		}
+		if r.Baseline.Accounting.Status != "COMPLETE" {
+			t.Errorf("Baseline.Accounting.Status = %q, want COMPLETE", r.Baseline.Accounting.Status)
+		}
+		if !r.Baseline.Accounting.Verified {
+			t.Errorf("Baseline.Accounting.Verified = false, want true")
+		}
+		if r.TrunkAccounting != r.Baseline.Accounting {
+			t.Errorf("TrunkAccounting mismatch: %+v != %+v", r.TrunkAccounting, r.Baseline.Accounting)
+		}
+
+		// Worktree accounting assertions
+		if r.Isolated.Accounting.TotalDeliveries != 5 {
+			t.Errorf("Isolated.Accounting.TotalDeliveries = %d, want 5", r.Isolated.Accounting.TotalDeliveries)
+		}
+		if r.Isolated.Accounting.AcceptedDeliveries != 3 {
+			t.Errorf("Isolated.Accounting.AcceptedDeliveries = %d, want 3 (deduplicated)", r.Isolated.Accounting.AcceptedDeliveries)
+		}
+		if r.Isolated.Accounting.DuplicateDeliveries != 1 {
+			t.Errorf("Isolated.Accounting.DuplicateDeliveries = %d, want 1", r.Isolated.Accounting.DuplicateDeliveries)
+		}
+		if r.Isolated.Accounting.UnverifiedDeliveries != 1 {
+			t.Errorf("Isolated.Accounting.UnverifiedDeliveries = %d, want 1", r.Isolated.Accounting.UnverifiedDeliveries)
+		}
+		if r.Isolated.Accounting.Status != "COMPLETE" {
+			t.Errorf("Isolated.Accounting.Status = %q, want COMPLETE", r.Isolated.Accounting.Status)
+		}
+		if !r.Isolated.Accounting.Verified {
+			t.Errorf("Isolated.Accounting.Verified = false, want true")
+		}
+		if r.WorktreeAccounting != r.Isolated.Accounting {
+			t.Errorf("WorktreeAccounting mismatch: %+v != %+v", r.WorktreeAccounting, r.Isolated.Accounting)
+		}
+
+		// Formatted text reflections
+		text := WorktreeABUpdate(r).Text()
+		for _, want := range []string{"2 accepted, COMPLETE", "3 accepted, COMPLETE"} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("render missing %q:\n%s", want, text)
+			}
+		}
+
+		// Verify CompareWorktreeAB returns identical comparison
+		comp, err := CompareWorktreeAB(trunk, worktree)
+		if err != nil {
+			t.Fatalf("CompareWorktreeAB error: %v", err)
+		}
+		if comp.TrunkAccounting != r.TrunkAccounting || comp.WorktreeAccounting != r.WorktreeAccounting {
+			t.Fatalf("CompareWorktreeAB mismatch: %+v vs %+v", comp, r)
+		}
+	})
+
+	t.Run("incomplete_status_reflection", func(t *testing.T) {
+		trunk := WorktreeABArm{
+			DurationSeconds: 1800.0,
+			DeliveryRecords: []AcceptedDeliveryRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted, TotalElapsed: 60},
+			},
+		}
+
+		worktree := WorktreeABArm{
+			DurationSeconds: 1800.0,
+			DeliveryRecords: []AcceptedDeliveryRecord{
+				{IssueID: 301, Outcome: OutcomeRejected, TotalElapsed: 60},
+				{IssueID: 302, Outcome: OutcomeUnverified, TotalElapsed: 60},
+			},
+		}
+
+		r := FoldWorktreeAB(trunk, worktree)
+		if r.Isolated.Accounting.AcceptedDeliveries != 0 {
+			t.Errorf("Isolated.Accounting.AcceptedDeliveries = %d, want 0", r.Isolated.Accounting.AcceptedDeliveries)
+		}
+		if r.Isolated.Accounting.Status != "INCOMPLETE" {
+			t.Errorf("Isolated.Accounting.Status = %q, want INCOMPLETE", r.Isolated.Accounting.Status)
+		}
+		if r.Isolated.Accounting.Verified {
+			t.Errorf("Isolated.Accounting.Verified = true, want false")
+		}
+		if r.WorktreeAccounting.Status != "INCOMPLETE" {
+			t.Errorf("WorktreeAccounting.Status = %q, want INCOMPLETE", r.WorktreeAccounting.Status)
+		}
+
+		text := WorktreeABUpdate(r).Text()
+		if !strings.Contains(text, "0 accepted, INCOMPLETE") {
+			t.Fatalf("render missing incomplete status:\n%s", text)
+		}
+	})
+
+	t.Run("preserves_pre_populated_accounting", func(t *testing.T) {
+		custom := AcceptedDeliveryAccounting{
+			Status:             "PRE_POPULATED",
+			AcceptedDeliveries: 42,
+			Verified:           true,
+		}
+		trunk := WorktreeABArm{
+			DurationSeconds: 3600.0,
+			DeliveryRecords: []AcceptedDeliveryRecord{
+				{IssueID: 101, Outcome: OutcomeAccepted},
+			},
+			Accounting: custom,
+		}
+		worktree := WorktreeABArm{
+			DurationSeconds: 3600.0,
+		}
+
+		r := FoldWorktreeAB(trunk, worktree)
+		if r.Baseline.Accounting.Status != "PRE_POPULATED" || r.Baseline.Accounting.AcceptedDeliveries != 42 {
+			t.Fatalf("expected pre-populated accounting to be preserved, got %+v", r.Baseline.Accounting)
+		}
+	})
+}
