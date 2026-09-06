@@ -2039,7 +2039,7 @@ extern "C" int fak_qwen35_causal_attention_panel_f32(
     const float *dQ, const float *dK, const float *dV, float *dOut,
     int tokens, int prefix, int nH, int nKV, int hd, float scale) {
   if (!dQ || !dK || !dV || !dOut ||
-      tokens != 2 || prefix != 1 || nH != 24 || nKV != 4 ||
+      tokens <= 0 || prefix < 0 || nH != 24 || nKV != 4 ||
       hd != QWEN38_PROMPT_HEAD_DIM ||
       tokens > INT_MAX / nH || prefix > INT_MAX - tokens ||
       !isfinite(scale) || scale <= 0.f) return -1;

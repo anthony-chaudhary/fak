@@ -8,8 +8,32 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
 )
 
-// ErrNilWeights is returned by Admit when the supplied *model.Model is nil.
-var ErrNilWeights = errors.New("residency: admit requires a non-nil *model.Model")
+var (
+	// ErrNilWeights is returned by Admit when the supplied *model.Model is nil.
+	ErrNilWeights = errors.New("residency: admit requires a non-nil *model.Model")
+
+	// ErrModelAlreadyResident is returned by Admit when attempting to re-admit an
+	// existing model with a different model handle without first evicting.
+	ErrModelAlreadyResident = errors.New("residency: model already resident with different weights")
+
+	// ErrDescriptorMismatch is returned by Admit when attempting to re-admit an
+	// existing model with a mismatched descriptor without first evicting.
+	ErrDescriptorMismatch error = descriptorMismatchErr{}
+)
+
+type descriptorMismatchErr struct{}
+
+func (descriptorMismatchErr) Error() string {
+	return "residency: descriptor mismatch on re-admission"
+}
+
+func (descriptorMismatchErr) Unwrap() error {
+	return ErrModelAlreadyResident
+}
+
+func (descriptorMismatchErr) Is(target error) bool {
+	return target == ErrDescriptorMismatch || target == ErrModelAlreadyResident
+}
 
 // Evicted represents a resident model paged out by Admit, Evict, or SetBudget.
 type Evicted struct {
@@ -39,7 +63,10 @@ func New(budgetBytes int64) *Manager {
 // unpinned models as needed to remain within the configured budget.
 //
 // Returns ErrNilWeights if m is nil. If admission fails, the resident set
-// remains unchanged. Re-admitting an existing ID updates its LRU recency.
+// remains unchanged. Re-admitting an existing ID with identical weights and
+// descriptor updates its LRU recency (Touch). Re-admitting an existing ID
+// with a different model handle or mismatched descriptor returns an error
+// (ErrModelAlreadyResident or ErrDescriptorMismatch) without mutating state.
 func (r *Manager) Admit(id polymodel.ModelID, m *model.Model, weightBytes int64, family, prefixDigest string, pinned bool) ([]Evicted, error) {
 	if m == nil {
 		return nil, ErrNilWeights
@@ -52,6 +79,18 @@ func (r *Manager) Admit(id polymodel.ModelID, m *model.Model, weightBytes int64,
 		WeightBytes:  weightBytes,
 		Pinned:       pinned,
 		PrefixDigest: prefixDigest,
+	}
+	if desc.WeightBytes < 0 {
+		desc.WeightBytes = 0
+	}
+	if existingM, ok := r.weights[id]; ok {
+		existingDesc, _ := r.pool.Get(id)
+		if existingDesc != desc {
+			return nil, ErrDescriptorMismatch
+		}
+		if existingM != m {
+			return nil, ErrModelAlreadyResident
+		}
 	}
 	evictedIDs, err := r.pool.Admit(desc)
 	if err != nil {

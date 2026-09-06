@@ -244,8 +244,14 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	if !*noBuildCheck && os.Getenv("FAK_COMMIT_BUILD_CHECK") != "off" {
 		buildCheckOutcome, buildCheckDetail = executeCommitBuildCheck(stderr, root, paths, *buildCheckTimeout)
 	} else {
+		oldFleet := os.Getenv("FLEET_BUILDCHECK_GUARD")
+		oldFak := os.Getenv("FAK_COMMIT_BUILD_CHECK")
 		_ = os.Setenv("FLEET_BUILDCHECK_GUARD", "off")
 		_ = os.Setenv("FAK_COMMIT_BUILD_CHECK", "off")
+		defer func() {
+			_ = os.Setenv("FLEET_BUILDCHECK_GUARD", oldFleet)
+			_ = os.Setenv("FAK_COMMIT_BUILD_CHECK", oldFak)
+		}()
 	}
 	buildCheck, admitBuild, buildReason := safecommit.DecideBuildCheck(buildCheckOutcome, buildCheckDetail, *allowBuildCheckTimeout)
 	if !admitBuild {
