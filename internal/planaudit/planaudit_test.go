@@ -342,3 +342,137 @@ func TestAuditPlan_Qwen38MacTop10Plan(t *testing.T) {
 		t.Fatalf("DoneUnits=%d must be less than TotalUnits=%d", plan.DoneUnits, plan.TotalUnits)
 	}
 }
+
+func TestAuditPlan_TableDrivenPrecedence(t *testing.T) {
+	cases := []struct {
+		name        string
+		content     string
+		wantTotal   int
+		wantDone    int
+		wantPct     int
+		wantStatus  string
+		wantSignal  string
+		wantRepComp int
+	}{
+		{
+			name: "all unchecked task boxes + incidental prose shipped",
+			content: strings.Join([]string{
+				"# Plan 1 - Unchecked With Incidental Shipped",
+				"Status: shipped",
+				"Phase A shipped in v1.0, but follow-up tasks remain open.",
+				"",
+				"## Tasks",
+				"- [ ] M1: Task one",
+				"- [ ] M2: Task two",
+				"- [ ] M3: Task three",
+			}, "\n"),
+			wantTotal:   3,
+			wantDone:    0,
+			wantPct:     0,
+			wantStatus:  "not_started",
+			wantSignal:  "task-boxes",
+			wantRepComp: 0,
+		},
+		{
+			name: "mixed checks (1 checked out of 3)",
+			content: strings.Join([]string{
+				"# Plan 2 - Mixed Tasks",
+				"Status: active",
+				"",
+				"## Tasks",
+				"- [x] M1: Task one finished",
+				"- [ ] M2: Task two open",
+				"- [ ] M3: Task three open",
+			}, "\n"),
+			wantTotal:   3,
+			wantDone:    1,
+			wantPct:     33,
+			wantStatus:  "in_progress",
+			wantSignal:  "task-boxes",
+			wantRepComp: 0,
+		},
+		{
+			name: "all checked",
+			content: strings.Join([]string{
+				"# Plan 3 - All Checked",
+				"",
+				"## Tasks",
+				"- [x] M1: Task one done",
+				"- [x] M2: Task two done",
+				"- [x] M3: Task three done",
+			}, "\n"),
+			wantTotal:   3,
+			wantDone:    3,
+			wantPct:     100,
+			wantStatus:  "complete",
+			wantSignal:  "task-boxes",
+			wantRepComp: 1,
+		},
+		{
+			name: "no task boxes at all with coarse shipped marker fallback",
+			content: strings.Join([]string{
+				"# Plan 4 - Coarse Shipped Marker",
+				"Status: complete",
+				"",
+				"## 1. First Phase",
+				"## 2. Second Phase",
+			}, "\n"),
+			wantTotal:   2,
+			wantDone:    2,
+			wantPct:     100,
+			wantStatus:  "complete",
+			wantSignal:  "shipped-marker",
+			wantRepComp: 1,
+		},
+		{
+			name: "no task boxes at all without shipped marker",
+			content: strings.Join([]string{
+				"# Plan 5 - No Marker",
+				"Status: draft",
+				"",
+				"## 1. First Phase",
+				"## 2. Second Phase",
+			}, "\n"),
+			wantTotal:   2,
+			wantDone:    0,
+			wantPct:     0,
+			wantStatus:  "not_started",
+			wantSignal:  "none",
+			wantRepComp: 0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "PLAN-table.md")
+			if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			plan, err := AuditPlan(path)
+			if err != nil {
+				t.Fatalf("AuditPlan failed: %v", err)
+			}
+			if plan.TotalUnits != tc.wantTotal {
+				t.Errorf("TotalUnits = %d, want %d", plan.TotalUnits, tc.wantTotal)
+			}
+			if plan.DoneUnits != tc.wantDone {
+				t.Errorf("DoneUnits = %d, want %d", plan.DoneUnits, tc.wantDone)
+			}
+			if plan.PercentComplete != tc.wantPct {
+				t.Errorf("PercentComplete = %d, want %d", plan.PercentComplete, tc.wantPct)
+			}
+			if plan.Status != tc.wantStatus {
+				t.Errorf("Status = %q, want %q", plan.Status, tc.wantStatus)
+			}
+			if plan.Signal != tc.wantSignal {
+				t.Errorf("Signal = %q, want %q", plan.Signal, tc.wantSignal)
+			}
+
+			report := BuildReport([]Plan{plan})
+			if got := report.Counts["complete"]; got != tc.wantRepComp {
+				t.Errorf("report.Counts[complete] = %d, want %d", got, tc.wantRepComp)
+			}
+		})
+	}
+}
