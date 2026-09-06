@@ -1666,3 +1666,286 @@ func TestWorktreeABRejectsInfiniteDurationsAndNegativeSpend(t *testing.T) {
 		})
 	}
 }
+
+// TestAccountAcceptedDeliveries_SubPhaseDurationConsistency tests issue #11939:
+// audit(scoreboard): validate sub-phase duration consistency against total elapsed time in delivery lifecycle records.
+// Demonstrates that lifecycle records with sub-phase durations exceeding total elapsed window
+// (and edge cases like exact equality vs excess) are rejected as incomplete boundaries.
+func TestAccountAcceptedDeliveries_SubPhaseDurationConsistency(t *testing.T) {
+	tests := []struct {
+		name         string
+		records      []DeliveryLifecycleRecord
+		window       float64
+		wantVerified bool
+		wantStatus   string
+	}{
+		{
+			name: "#11939 sub-phase durations exceeding total elapsed rejected as incomplete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:              11939,
+					Outcome:              OutcomeAccepted,
+					SetupDuration:        20.0,
+					ExecutionDuration:    80.0,
+					LandingDuration:      15.0,
+					VerificationDuration: 10.0,
+					TotalElapsed:         100.0, // 20 + 80 + 15 + 10 = 125 > 100
+				},
+			},
+			window:       3600.0,
+			wantVerified: false,
+			wantStatus:   "INCOMPLETE",
+		},
+		{
+			name: "#11939 minute excess over total elapsed rejected as incomplete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:              11939,
+					Outcome:              OutcomeAccepted,
+					SetupDuration:        10.0,
+					ExecutionDuration:    70.0,
+					LandingDuration:      10.0,
+					VerificationDuration: 10.001,
+					TotalElapsed:         100.0, // sum = 100.001 > 100.0
+				},
+			},
+			window:       3600.0,
+			wantVerified: false,
+			wantStatus:   "INCOMPLETE",
+		},
+		{
+			name: "#11939 floating point rounding sum within tolerance accepted as complete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:              11939,
+					Outcome:              OutcomeAccepted,
+					SetupDuration:        0.1,
+					ExecutionDuration:    0.2,
+					LandingDuration:      0.3,
+					VerificationDuration: 0.4,
+					TotalElapsed:         1.0, // 0.1+0.2+0.3+0.4 = 1.0000000000000002 in IEEE 754
+				},
+			},
+			window:       3600.0,
+			wantVerified: true,
+			wantStatus:   "COMPLETE",
+		},
+		{
+			name: "#11939 sub-phase excess within allowable tolerance accepted as complete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:              11939,
+					Outcome:              OutcomeAccepted,
+					SetupDuration:        10.0,
+					ExecutionDuration:    70.0,
+					LandingDuration:      10.0,
+					VerificationDuration: 10.0000005, // excess 5e-7 <= 1e-6 tolerance
+					TotalElapsed:         100.0,
+				},
+			},
+			window:       3600.0,
+			wantVerified: true,
+			wantStatus:   "COMPLETE",
+		},
+		{
+			name: "#11939 sub-phase excess exceeding allowable tolerance rejected as incomplete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:              11939,
+					Outcome:              OutcomeAccepted,
+					SetupDuration:        10.0,
+					ExecutionDuration:    70.0,
+					LandingDuration:      10.0,
+					VerificationDuration: 10.000002, // excess 2e-6 > 1e-6 tolerance
+					TotalElapsed:         100.0,
+				},
+			},
+			window:       3600.0,
+			wantVerified: false,
+			wantStatus:   "INCOMPLETE",
+		},
+		{
+			name: "#11939 exact equality of sub-phases to total elapsed accepted as complete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:              11939,
+					Outcome:              OutcomeAccepted,
+					SetupDuration:        10.0,
+					ExecutionDuration:    70.0,
+					LandingDuration:      10.0,
+					VerificationDuration: 10.0,
+					TotalElapsed:         100.0, // 10 + 70 + 10 + 10 = 100.0 == 100.0
+				},
+			},
+			window:       3600.0,
+			wantVerified: true,
+			wantStatus:   "COMPLETE",
+		},
+		{
+			name: "#11939 sub-phases strictly less than total elapsed accepted as complete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:              11939,
+					Outcome:              OutcomeAccepted,
+					SetupDuration:        5.0,
+					ExecutionDuration:    50.0,
+					LandingDuration:      5.0,
+					VerificationDuration: 5.0,
+					TotalElapsed:         100.0, // sum = 65.0 < 100.0
+				},
+			},
+			window:       3600.0,
+			wantVerified: true,
+			wantStatus:   "COMPLETE",
+		},
+		{
+			name: "#11939 setup duration alone exceeds total elapsed",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:       11939,
+					Outcome:       OutcomeAccepted,
+					SetupDuration: 101.0,
+					TotalElapsed:  100.0,
+				},
+			},
+			window:       3600.0,
+			wantVerified: false,
+			wantStatus:   "INCOMPLETE",
+		},
+		{
+			name: "#11939 execution duration alone exceeds total elapsed",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:           11939,
+					Outcome:           OutcomeAccepted,
+					ExecutionDuration: 101.0,
+					TotalElapsed:      100.0,
+				},
+			},
+			window:       3600.0,
+			wantVerified: false,
+			wantStatus:   "INCOMPLETE",
+		},
+		{
+			name: "#11939 landing duration alone exceeds total elapsed",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:         11939,
+					Outcome:         OutcomeAccepted,
+					LandingDuration: 101.0,
+					TotalElapsed:    100.0,
+				},
+			},
+			window:       3600.0,
+			wantVerified: false,
+			wantStatus:   "INCOMPLETE",
+		},
+		{
+			name: "#11939 verification duration alone exceeds total elapsed",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:              11939,
+					Outcome:              OutcomeAccepted,
+					VerificationDuration: 101.0,
+					TotalElapsed:         100.0,
+				},
+			},
+			window:       3600.0,
+			wantVerified: false,
+			wantStatus:   "INCOMPLETE",
+		},
+		{
+			name: "#11939 zero total elapsed with positive sub-phase duration rejected as incomplete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:           11939,
+					Outcome:           OutcomeAccepted,
+					ExecutionDuration: 1.0,
+					TotalElapsed:      0.0,
+				},
+			},
+			window:       3600.0,
+			wantVerified: false,
+			wantStatus:   "INCOMPLETE",
+		},
+		{
+			name: "#11939 zero total elapsed with zero sub-phases accepted as complete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:      11939,
+					Outcome:      OutcomeAccepted,
+					TotalElapsed: 0.0,
+				},
+			},
+			window:       3600.0,
+			wantVerified: true,
+			wantStatus:   "COMPLETE",
+		},
+		{
+			name: "#11939 multi-record batch with one exceeding rejected as incomplete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:           11939,
+					Outcome:           OutcomeAccepted,
+					ExecutionDuration: 40.0,
+					TotalElapsed:      60.0,
+				},
+				{
+					IssueID:              11940,
+					Outcome:              OutcomeAccepted,
+					SetupDuration:        20.0,
+					ExecutionDuration:    50.0,
+					LandingDuration:      10.0,
+					VerificationDuration: 10.0,
+					TotalElapsed:         60.0, // 20 + 50 + 10 + 10 = 90 > 60
+				},
+			},
+			window:       3600.0,
+			wantVerified: false,
+			wantStatus:   "INCOMPLETE",
+		},
+		{
+			name: "#11939 non-accepted outcome with sub-phase excess marks boundary incomplete",
+			records: []DeliveryLifecycleRecord{
+				{
+					IssueID:           11939,
+					Outcome:           OutcomeAccepted,
+					ExecutionDuration: 50.0,
+					TotalElapsed:      100.0,
+				},
+				{
+					IssueID:           11941,
+					Outcome:           OutcomeRejected,
+					ExecutionDuration: 150.0,
+					TotalElapsed:      100.0, // 150 > 100
+				},
+			},
+			window:       3600.0,
+			wantVerified: false,
+			wantStatus:   "INCOMPLETE",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := AccountAcceptedDeliveries(tc.records, tc.window)
+			if got.Verified != tc.wantVerified {
+				t.Errorf("Verified = %v, want %v", got.Verified, tc.wantVerified)
+			}
+			if got.Status != tc.wantStatus {
+				t.Errorf("Status = %q, want %q", got.Status, tc.wantStatus)
+			}
+			if !tc.wantVerified {
+				arm := WorktreeABArm{
+					Name:            "isolated",
+					Worktree:        true,
+					DurationSeconds: tc.window,
+					Accounting:      got,
+				}
+				if iph := arm.IssuesPerHour(); iph != 0 {
+					t.Errorf("IssuesPerHour = %f, want 0.0 on incomplete boundary", iph)
+				}
+			}
+		})
+	}
+}

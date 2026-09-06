@@ -6,7 +6,10 @@ import (
 	"strings"
 )
 
-const WorktreeABSchema = "fak-worktree-ab/1"
+const (
+	WorktreeABSchema  = "fak-worktree-ab/1"
+	durationTolerance = 1e-6
+)
 
 type DeliveryOutcome string
 
@@ -98,12 +101,12 @@ func AccountAcceptedDeliveries(records []DeliveryLifecycleRecord, totalWindowSec
 			incompleteBoundary = true
 		}
 
-		if isFinitePositive(r.TotalElapsed) &&
+		if isFiniteNonNegative(r.TotalElapsed) &&
 			isFiniteNonNegative(r.SetupDuration) &&
 			isFiniteNonNegative(r.ExecutionDuration) &&
 			isFiniteNonNegative(r.LandingDuration) &&
 			isFiniteNonNegative(r.VerificationDuration) &&
-			r.SetupDuration+r.ExecutionDuration+r.LandingDuration+r.VerificationDuration > r.TotalElapsed {
+			r.SetupDuration+r.ExecutionDuration+r.LandingDuration+r.VerificationDuration > r.TotalElapsed+durationTolerance {
 			incompleteBoundary = true
 		}
 
