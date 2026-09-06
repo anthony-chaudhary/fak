@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/goalregistry"
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
@@ -379,5 +380,184 @@ func TestLiveAdapterFailureBecomesTypedRunFailure(t *testing.T) {
 func TestPageDeepLinksPersistedRun(t *testing.T) {
 	if !strings.Contains(page, `query.get("run")`) || !strings.Contains(page, `history.replaceState`) {
 		t.Fatal("page does not deep-link persisted run")
+	}
+}
+
+func TestWebApprovalResolution(t *testing.T) {
+	now := time.Now()
+	approvalEnv := harnesskit.Envelope{
+		Type: harnesskit.EventApprovalRequested,
+		Payload: []byte(`{
+			"approval_id": "app-web-test-1",
+			"tool_name": "Bash",
+			"command": "make test-fast",
+			"target_path": "/home/user/fak",
+			"risk_explanation": "execution of host test suite"
+		}`),
+	}
+	app, err := ParseSessionApproval(approvalEnv)
+	if err != nil {
+		t.Fatalf("parse approval event: %v", err)
+	}
+
+	cardAwaiting := SessionCard{
+		ID:                 "sess-awaiting",
+		Provider:           "codex",
+		Workspace:          "/home/user/fak",
+		State:              sessionAwaitingApproval,
+		PendingInteraction: "approval requested",
+		PendingApproval:    app,
+		LastEventAt:        now,
+		HasInputLease:      true,
+		Capabilities:       map[string]SessionCapability{"cancel": {Enabled: true}},
+	}
+	cardIdle := SessionCard{
+		ID:            "sess-idle",
+		Provider:      "codex",
+		Workspace:     "/home/user/fak",
+		State:         sessionIdle,
+		LastEventAt:   now,
+		HasInputLease: true,
+		Capabilities:  map[string]SessionCapability{"resume": {Enabled: true}},
+	}
+
+	source := &fixtureSessionSource{
+		cards: []SessionCard{cardAwaiting, cardIdle},
+	}
+	s := newStore()
+	ts := httptest.NewServer(handlerWithSessionSource(s, nil, nil, source))
+	defer ts.Close()
+
+	// 1. Verify rendering of approval elements via GET /api/sessions
+	res, err := ts.Client().Get(ts.URL + "/api/sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sessResp struct {
+		HTML string `json:"html"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&sessResp); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+
+	for _, want := range []string{
+		"session-approval-modal",
+		"Action approval required",
+		"app-web-test-1",
+		"Bash",
+		"make test-fast",
+		"/home/user/fak",
+		"execution of host test suite",
+		`data-approval-action="accept"`,
+		`data-approval-action="decline"`,
+		`data-action="accept"`,
+		`data-action="decline"`,
+		`<form class="approval-form session-approval-controls" action="/api/sessions/sess-awaiting/approval" method="POST"`,
+	} {
+		if !strings.Contains(sessResp.HTML, want) {
+			t.Fatalf("session markup missing %q:\n%s", want, sessResp.HTML)
+		}
+	}
+
+	// 2. Validate rejection of malformed JSON
+	badJSONRes, err := ts.Client().Post(ts.URL+"/api/sessions/sess-awaiting/approval", "application/json", strings.NewReader("{broken"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	badJSONRes.Body.Close()
+	if badJSONRes.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for malformed json, got %d", badJSONRes.StatusCode)
+	}
+
+	// 3. Validate rejection of invalid resolution token
+	badRes, err := ts.Client().Post(ts.URL+"/api/sessions/sess-awaiting/approval", "application/json", strings.NewReader(`{"resolution":"maybe"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	badRes.Body.Close()
+	if badRes.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid resolution, got %d", badRes.StatusCode)
+	}
+
+	// 4. Validate rejection of unknown session ID
+	unknownRes, err := ts.Client().Post(ts.URL+"/api/sessions/nonexistent/approval", "application/json", strings.NewReader(`{"resolution":"accept"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknownRes.Body.Close()
+	if unknownRes.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown session, got %d", unknownRes.StatusCode)
+	}
+
+	// 5. Validate rejection of session not awaiting approval
+	idleRes, err := ts.Client().Post(ts.URL+"/api/sessions/sess-idle/approval", "application/json", strings.NewReader(`{"resolution":"accept"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	idleRes.Body.Close()
+	if idleRes.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 for non-awaiting session, got %d", idleRes.StatusCode)
+	}
+
+	// 6. Connect SSE client to verify real-time events
+	sseReq, err := http.NewRequest(http.MethodGet, ts.URL+"/api/sessions/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sseRes, err := ts.Client().Do(sseReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sseRes.Body.Close()
+	if sseRes.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for SSE stream, got %d", sseRes.StatusCode)
+	}
+	if ct := sseRes.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		t.Fatalf("expected Content-Type text/event-stream, got %q", ct)
+	}
+
+	// 7. Successful accept submission
+	acceptBody := `{"resolution":"accept","reason":"operator verified host safety","approval_id":"app-web-test-1"}`
+	goodRes, err := ts.Client().Post(ts.URL+"/api/sessions/sess-awaiting/approval", "application/json", strings.NewReader(acceptBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer goodRes.Body.Close()
+	if goodRes.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(goodRes.Body)
+		t.Fatalf("expected 200 for accept submission, got %d: %s", goodRes.StatusCode, body)
+	}
+	var resData map[string]any
+	if err := json.NewDecoder(goodRes.Body).Decode(&resData); err != nil {
+		t.Fatal(err)
+	}
+	if resData["status"] != "accepted" || resData["session_id"] != "sess-awaiting" || resData["resolution"] != "accept" {
+		t.Fatalf("unexpected accept response: %+v", resData)
+	}
+
+	// Verify dispatch to SessionSource
+	if len(source.approvals) != 1 {
+		t.Fatalf("expected 1 dispatched approval, got %d", len(source.approvals))
+	}
+	dispatched := source.approvals[0]
+	if dispatched.SessionID != "sess-awaiting" || dispatched.ApprovalID != "app-web-test-1" || dispatched.Resolution != "accept" || dispatched.Reason != "operator verified host safety" {
+		t.Fatalf("unexpected dispatched approval: %+v", dispatched)
+	}
+
+	// 8. Successful decline submission
+	source.cards[0].State = sessionAwaitingApproval
+	source.cards[0].PendingApproval = app
+	declineBody := `{"resolution":"decline","reason":"too risky"}`
+	decRes, err := ts.Client().Post(ts.URL+"/api/sessions/sess-awaiting/approval", "application/json", strings.NewReader(declineBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decRes.Body.Close()
+	if decRes.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for decline submission, got %d", decRes.StatusCode)
+	}
+	if len(source.approvals) != 2 || source.approvals[1].Resolution != "decline" {
+		t.Fatalf("expected 2 dispatched approvals with decline, got %+v", source.approvals)
 	}
 }

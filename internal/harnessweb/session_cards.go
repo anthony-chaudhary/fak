@@ -5,11 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
 // SessionSource is the renderer-side boundary to authoritative session state.
@@ -17,6 +21,37 @@ import (
 type SessionSource interface {
 	Sessions(context.Context) ([]SessionCard, error)
 	Control(context.Context, SessionControlRequest) error
+	ResolveApproval(context.Context, SessionApprovalRequest) error
+}
+
+// SessionApproval captures structured details of a pending approval requested by a session.
+type SessionApproval struct {
+	ApprovalID      string `json:"approval_id"`
+	ToolName        string `json:"tool_name,omitempty"`
+	Command         string `json:"command,omitempty"`
+	Arguments       string `json:"arguments,omitempty"`
+	TargetPath      string `json:"target_path,omitempty"`
+	RiskExplanation string `json:"risk_explanation,omitempty"`
+}
+
+// SessionApprovalRequest conveys an approval resolution to an authoritative session source.
+type SessionApprovalRequest struct {
+	SessionID  string `json:"session_id"`
+	ApprovalID string `json:"approval_id,omitempty"`
+	Resolution string `json:"resolution"` // "accept" | "decline"
+	Reason     string `json:"reason,omitempty"`
+}
+
+// SessionApprovalResolver resolves pending approvals for a session.
+type SessionApprovalResolver interface {
+	ResolveApproval(context.Context, SessionApprovalRequest) error
+}
+
+// SessionApprovalFunc is an adapter allowing the use of ordinary functions as approval resolvers.
+type SessionApprovalFunc func(context.Context, SessionApprovalRequest) error
+
+func (f SessionApprovalFunc) ResolveApproval(ctx context.Context, req SessionApprovalRequest) error {
+	return f(ctx, req)
 }
 
 type SessionState string
@@ -49,11 +84,172 @@ type SessionCard struct {
 	ExecutionEpoch     uint64                       `json:"execution_epoch"`
 	State              SessionState                 `json:"state"`
 	PendingInteraction string                       `json:"pending_interaction,omitempty"`
+	PendingApproval    *SessionApproval             `json:"pending_approval,omitempty"`
 	LastEventAt        time.Time                    `json:"last_event_at"`
 	Model              string                       `json:"model,omitempty"`
 	Usage              *SessionUsage                `json:"usage,omitempty"`
 	HasInputLease      bool                         `json:"has_input_lease"`
 	Capabilities       map[string]SessionCapability `json:"capabilities"`
+}
+
+// ApplyApproval associates a structured pending approval with this session card
+// and transitions its state to sessionAwaitingApproval.
+func (c *SessionCard) ApplyApproval(app *SessionApproval) {
+	if app == nil {
+		return
+	}
+	c.PendingApproval = app
+	c.State = sessionAwaitingApproval
+	if c.PendingInteraction == "" {
+		c.PendingInteraction = "approval requested"
+	}
+}
+
+// ApplyApprovalEvent extracts structured approval details from an approval.requested
+// envelope and applies them to this session card.
+func (c *SessionCard) ApplyApprovalEvent(env harnesskit.Envelope) error {
+	app, err := ParseSessionApproval(env)
+	if err != nil {
+		return err
+	}
+	c.ApplyApproval(app)
+	return nil
+}
+
+// ParseSessionApproval extracts structured approval details (tool name, arguments/command,
+// target path, risk explanation, approval ID) from an approval.requested event, payload, or JSON.
+func ParseSessionApproval(v any) (*SessionApproval, error) {
+	if v == nil {
+		return nil, fmt.Errorf("session approval: nil input")
+	}
+
+	var rawBytes []byte
+	switch val := v.(type) {
+	case harnesskit.Envelope:
+		rawBytes = val.Payload
+	case *harnesskit.Envelope:
+		if val == nil {
+			return nil, fmt.Errorf("session approval: nil envelope")
+		}
+		rawBytes = val.Payload
+	case []byte:
+		rawBytes = val
+	case string:
+		rawBytes = []byte(val)
+	case harnesskit.ApprovalPayload:
+		cmd := val.Summary
+		risk := firstNonEmpty(val.Risk, val.PolicyReason, val.Prompt, val.Consequence)
+		if val.Risk != "" && val.PolicyReason != "" {
+			risk = val.Risk + ": " + val.PolicyReason
+		}
+		return &SessionApproval{
+			ApprovalID:      val.ApprovalID,
+			ToolName:        val.Kind,
+			Command:         cmd,
+			Arguments:       cmd,
+			TargetPath:      firstNonEmpty(val.Scope, val.Workspace),
+			RiskExplanation: risk,
+		}, nil
+	default:
+		data, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("session approval: marshal error: %w", err)
+		}
+		rawBytes = data
+	}
+
+	if len(rawBytes) == 0 {
+		return nil, fmt.Errorf("session approval: empty payload")
+	}
+
+	var raw struct {
+		ApprovalID      string          `json:"approval_id"`
+		ApprovalId      string          `json:"approvalId"`
+		ID              string          `json:"id"`
+		ToolName        string          `json:"tool_name"`
+		Tool            string          `json:"tool"`
+		Name            string          `json:"name"`
+		Kind            string          `json:"kind"`
+		Command         string          `json:"command"`
+		Arguments       json.RawMessage `json:"arguments"`
+		Args            json.RawMessage `json:"args"`
+		Summary         string          `json:"summary"`
+		TargetPath      string          `json:"target_path"`
+		Path            string          `json:"path"`
+		Scope           string          `json:"scope"`
+		Workspace       string          `json:"workspace"`
+		GrantRoot       string          `json:"grantRoot"`
+		Grant_Root      string          `json:"grant_root"`
+		Cwd             string          `json:"cwd"`
+		RiskExplanation string          `json:"risk_explanation"`
+		Risk            string          `json:"risk"`
+		PolicyReason    string          `json:"policy_reason"`
+		Reason          string          `json:"reason"`
+		Prompt          string          `json:"prompt"`
+		Consequence     string          `json:"consequence"`
+	}
+
+	if err := json.Unmarshal(rawBytes, &raw); err != nil {
+		return nil, fmt.Errorf("session approval: unmarshal error: %w", err)
+	}
+
+	approvalID := firstNonEmpty(raw.ApprovalID, raw.ApprovalId, raw.ID)
+	toolName := firstNonEmpty(raw.ToolName, raw.Tool, raw.Name, raw.Kind)
+	targetPath := firstNonEmpty(raw.TargetPath, raw.Path, raw.Scope, raw.GrantRoot, raw.Grant_Root, raw.Cwd, raw.Workspace)
+
+	cmd := firstNonEmpty(raw.Command, raw.Summary)
+	args := extractRawString(raw.Arguments)
+	if args == "" {
+		args = extractRawString(raw.Args)
+	}
+	if cmd != "" && args == "" {
+		args = cmd
+	}
+	if args != "" && cmd == "" {
+		cmd = args
+	}
+
+	risk := raw.RiskExplanation
+	if risk == "" {
+		if raw.Risk != "" && raw.PolicyReason != "" {
+			risk = raw.Risk + ": " + raw.PolicyReason
+		} else {
+			risk = firstNonEmpty(raw.PolicyReason, raw.Reason, raw.Risk, raw.Prompt, raw.Consequence)
+		}
+	}
+
+	if approvalID == "" && toolName == "" && cmd == "" && targetPath == "" && risk == "" {
+		return nil, fmt.Errorf("session approval: no structured approval details found")
+	}
+
+	return &SessionApproval{
+		ApprovalID:      approvalID,
+		ToolName:        toolName,
+		Command:         cmd,
+		Arguments:       args,
+		TargetPath:      targetPath,
+		RiskExplanation: risk,
+	}, nil
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func extractRawString(rm json.RawMessage) string {
+	if len(rm) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(rm, &s); err == nil {
+		return strings.TrimSpace(s)
+	}
+	return strings.TrimSpace(string(rm))
 }
 
 type SessionControlRequest struct {
@@ -173,6 +369,45 @@ func renderSessionCardsHTML(cards []SessionCard, now time.Time, noColor bool) (s
 		if c.PendingInteraction != "" {
 			fmt.Fprintf(&b, `<p class="pending"><strong>Needs action:</strong> %s</p>`, html.EscapeString(c.PendingInteraction))
 		}
+		if c.State == sessionAwaitingApproval || c.PendingApproval != nil {
+			approvalID := ""
+			if c.PendingApproval != nil && c.PendingApproval.ApprovalID != "" {
+				approvalID = c.PendingApproval.ApprovalID
+			} else {
+				approvalID = "approval-" + c.ID
+			}
+			fmt.Fprintf(&b, `<div class="session-approval-modal session-approval" role="region" aria-label="Approval required for session %s">`, html.EscapeString(c.ID))
+			fmt.Fprintf(&b, `<div class="approval-title"><strong>Action approval required</strong></div>`)
+			if c.PendingApproval != nil {
+				fmt.Fprintf(&b, `<dl class="approval-details">`)
+				if c.PendingApproval.ApprovalID != "" {
+					fmt.Fprintf(&b, `<div><dt>Approval ID</dt><dd class="approval-id">%s</dd></div>`, html.EscapeString(c.PendingApproval.ApprovalID))
+				}
+				if c.PendingApproval.ToolName != "" {
+					fmt.Fprintf(&b, `<div><dt>Tool</dt><dd class="approval-tool">%s</dd></div>`, html.EscapeString(c.PendingApproval.ToolName))
+				}
+				cmd := c.PendingApproval.Command
+				if cmd == "" {
+					cmd = c.PendingApproval.Arguments
+				}
+				if cmd != "" {
+					fmt.Fprintf(&b, `<div><dt>Command</dt><dd class="approval-command"><code>%s</code></dd></div>`, html.EscapeString(cmd))
+				}
+				if c.PendingApproval.TargetPath != "" {
+					fmt.Fprintf(&b, `<div><dt>Target path</dt><dd class="approval-target-path">%s</dd></div>`, html.EscapeString(c.PendingApproval.TargetPath))
+				}
+				if c.PendingApproval.RiskExplanation != "" {
+					fmt.Fprintf(&b, `<div><dt>Risk explanation</dt><dd class="approval-risk">%s</dd></div>`, html.EscapeString(c.PendingApproval.RiskExplanation))
+				}
+				fmt.Fprintf(&b, `</dl>`)
+			}
+			fmt.Fprintf(&b, `<form class="approval-form session-approval-controls" action="/api/sessions/%s/approval" method="POST" data-session-id="%s" data-approval-id="%s">`, html.EscapeString(c.ID), html.EscapeString(c.ID), html.EscapeString(approvalID))
+			fmt.Fprintf(&b, `<input type="hidden" name="session_id" value="%s">`, html.EscapeString(c.ID))
+			fmt.Fprintf(&b, `<input type="hidden" name="approval_id" value="%s">`, html.EscapeString(approvalID))
+			fmt.Fprintf(&b, `<button type="submit" name="resolution" value="accept" class="button-approval-accept" data-approval-action="accept" data-action="accept" data-session-id="%s" data-approval-id="%s" aria-label="Accept approval for session %s">Accept</button>`, html.EscapeString(c.ID), html.EscapeString(approvalID), html.EscapeString(c.ID))
+			fmt.Fprintf(&b, `<button type="submit" name="resolution" value="decline" class="button-approval-decline" data-approval-action="decline" data-action="decline" data-session-id="%s" data-approval-id="%s" aria-label="Decline approval for session %s">Decline</button>`, html.EscapeString(c.ID), html.EscapeString(approvalID), html.EscapeString(c.ID))
+			fmt.Fprintf(&b, `</form></div>`)
+		}
 		fmt.Fprintf(&b, `<div class="session-controls" role="group" aria-label="Controls for session %s">`, html.EscapeString(c.ID))
 		for _, action := range sessionActions {
 			capability := sessionAction(c, action)
@@ -188,7 +423,96 @@ func renderSessionCardsHTML(cards []SessionCard, now time.Time, noColor bool) (s
 	return b.String(), nil
 }
 
+type sessionHub struct {
+	mu      sync.RWMutex
+	clients map[chan []byte]struct{}
+}
+
+var defaultSessionHub = &sessionHub{
+	clients: make(map[chan []byte]struct{}),
+}
+
+func (h *sessionHub) subscribe() chan []byte {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	ch := make(chan []byte, 32)
+	h.clients[ch] = struct{}{}
+	return ch
+}
+
+func (h *sessionHub) unsubscribe(ch chan []byte) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, ok := h.clients[ch]; ok {
+		delete(h.clients, ch)
+		close(ch)
+	}
+}
+
+func (h *sessionHub) broadcast(eventType string, data []byte) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	msg := []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, string(data)))
+	for ch := range h.clients {
+		select {
+		case ch <- msg:
+		default:
+		}
+	}
+}
+
+// BroadcastSessionUpdate notifies all connected SSE clients of a session update.
+func BroadcastSessionUpdate(data []byte) {
+	defaultSessionHub.broadcast("session_update", data)
+}
+
+// BroadcastApprovalResolved notifies all connected SSE clients that an approval was resolved.
+func BroadcastApprovalResolved(data []byte) {
+	defaultSessionHub.broadcast("approval_resolved", data)
+}
+
+// BroadcastApprovalRequested notifies all connected SSE clients that an approval is requested.
+func BroadcastApprovalRequested(data []byte) {
+	defaultSessionHub.broadcast("approval_requested", data)
+}
+
 func installSessionRoutes(mux *http.ServeMux, source SessionSource) {
+	installSessionRoutesWithStore(mux, source, nil)
+}
+
+func installSessionRoutesWithStore(mux *http.ServeMux, source SessionSource, s *store) {
+	mux.HandleFunc("GET /api/sessions/events", func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		ch := defaultSessionHub.subscribe()
+		defer defaultSessionHub.unsubscribe(ch)
+
+		fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"connected\"}\n\n")
+		flusher.Flush()
+
+		ctx := r.Context()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
+				_, _ = w.Write(msg)
+				flusher.Flush()
+			}
+		}
+	})
+
 	mux.HandleFunc("GET /api/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if source == nil {
 			writeSessionJSON(w, http.StatusOK, map[string]any{"sessions": []SessionCard{}, "html": `<p class="empty">Session authority is not connected.</p>`})
@@ -261,6 +585,100 @@ func installSessionRoutes(mux *http.ServeMux, source SessionSource) {
 			return
 		}
 		writeSessionJSON(w, http.StatusAccepted, SessionControlRequest{SessionID: id, Action: action})
+	})
+	mux.HandleFunc("POST /api/sessions/{id}/approval", func(w http.ResponseWriter, r *http.Request) {
+		id, err := url.PathUnescape(r.PathValue("id"))
+		if err != nil || strings.TrimSpace(id) == "" {
+			http.Error(w, "invalid session id", http.StatusBadRequest)
+			return
+		}
+
+		var payload struct {
+			Resolution string `json:"resolution"`
+			Reason     string `json:"reason,omitempty"`
+			ApprovalID string `json:"approval_id,omitempty"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); err != nil {
+			http.Error(w, "invalid approval payload: invalid JSON", http.StatusBadRequest)
+			return
+		}
+		resolution := strings.ToLower(strings.TrimSpace(payload.Resolution))
+		if resolution != "accept" && resolution != "decline" {
+			http.Error(w, `invalid approval resolution: must be "accept" or "decline"`, http.StatusBadRequest)
+			return
+		}
+
+		if source != nil {
+			cards, err := source.Sessions(r.Context())
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			cards, err = normalizeSessionCards(cards)
+			if err != nil {
+				writeSessionJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+				return
+			}
+			var selected *SessionCard
+			for i := range cards {
+				if cards[i].ID == id {
+					selected = &cards[i]
+					break
+				}
+			}
+			if selected == nil {
+				http.Error(w, "logical session not found", http.StatusNotFound)
+				return
+			}
+			if selected.State != sessionAwaitingApproval && selected.PendingApproval == nil && selected.PendingInteraction == "" {
+				writeSessionJSON(w, http.StatusConflict, map[string]string{"error": "session is not awaiting approval"})
+				return
+			}
+			approvalID := payload.ApprovalID
+			if approvalID == "" && selected.PendingApproval != nil {
+				approvalID = selected.PendingApproval.ApprovalID
+			}
+			req := SessionApprovalRequest{
+				SessionID:  id,
+				ApprovalID: approvalID,
+				Resolution: resolution,
+				Reason:     payload.Reason,
+			}
+			if err := source.ResolveApproval(r.Context(), req); err != nil {
+				writeSessionJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+				return
+			}
+			defaultSessionHub.broadcast("approval_resolved", []byte(fmt.Sprintf(`{"session_id":%q,"resolution":%q,"approval_id":%q}`, id, resolution, approvalID)))
+			writeSessionJSON(w, http.StatusOK, map[string]any{
+				"status":      "accepted",
+				"session_id":  id,
+				"approval_id": approvalID,
+				"resolution":  resolution,
+			})
+			return
+		}
+
+		if s != nil && s.hasRun(id) {
+			decision := "approve"
+			if resolution == "decline" {
+				decision = "deny"
+			}
+			approvalID := payload.ApprovalID
+			if err := s.resolve(id, approvalID, decision); err != nil {
+				writeSessionJSON(w, http.StatusConflict, map[string]string{"error": "approval resolution failed: " + err.Error()})
+				return
+			}
+			defaultSessionHub.broadcast("approval_resolved", []byte(fmt.Sprintf(`{"session_id":%q,"resolution":%q,"approval_id":%q}`, id, resolution, approvalID)))
+			writeSessionJSON(w, http.StatusOK, map[string]any{
+				"status":      "accepted",
+				"session_id":  id,
+				"approval_id": approvalID,
+				"resolution":  resolution,
+			})
+			return
+		}
+
+		writeSessionJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "session authority is not connected"})
 	})
 }
 
