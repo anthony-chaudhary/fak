@@ -1,5 +1,10 @@
 package dojo
 
+import (
+	"sort"
+	"sync"
+)
+
 // run.go holds the environment/lever contract and the pure orchestration that
 // turns (scenarios x levers) into scored episodes. A Scenario is the workload
 // (an offline corpus of real transcripts today, a live feed later); a Lever is
@@ -33,6 +38,52 @@ type ScoredInput struct {
 type Lever interface {
 	Name() string
 	Episodes(s Scenario) ([]ScoredInput, error)
+}
+
+var (
+	leverRegistryMu sync.RWMutex
+	leverRegistry   = map[string]Lever{}
+)
+
+// RegisterLever registers a Lever in the package-level registry so it is recognized
+// across the dojo gym. It panics on a nil lever, an empty name, or a duplicate name.
+func RegisterLever(l Lever) Lever {
+	if l == nil {
+		panic("dojo: cannot register nil lever")
+	}
+	name := l.Name()
+	if name == "" {
+		panic("dojo: cannot register lever with empty name")
+	}
+	leverRegistryMu.Lock()
+	defer leverRegistryMu.Unlock()
+	if _, exists := leverRegistry[name]; exists {
+		panic("dojo: lever already registered: " + name)
+	}
+	leverRegistry[name] = l
+	return l
+}
+
+// LookupLever retrieves a registered Lever by name.
+func LookupLever(name string) (Lever, bool) {
+	leverRegistryMu.RLock()
+	defer leverRegistryMu.RUnlock()
+	l, ok := leverRegistry[name]
+	return l, ok
+}
+
+// RegisteredLevers returns all registered levers sorted by name.
+func RegisteredLevers() []Lever {
+	leverRegistryMu.RLock()
+	defer leverRegistryMu.RUnlock()
+	res := make([]Lever, 0, len(leverRegistry))
+	for _, l := range leverRegistry {
+		res = append(res, l)
+	}
+	sort.Slice(res, func(i, j int) bool {
+		return res[i].Name() < res[j].Name()
+	})
+	return res
 }
 
 // RunError records a lever that failed to run against a scenario, so a single
