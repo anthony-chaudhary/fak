@@ -74,3 +74,37 @@ TASK_COMPLETED
 		t.Errorf("expected at least 2 tool calls, got %d", len(res.Turns[0].ToolCalls))
 	}
 }
+
+func TestOpenCodeTranscriptReportedTokensOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		usage              string
+		prompt, completion int64
+		wantErr            string
+	}{
+		{name: "missing", wantErr: "missing reported token usage"},
+		{name: "invalid prompt", usage: "Tokens: 9223372036854775808 prompt, 0 completion", wantErr: "invalid reported token usage"},
+		{name: "invalid completion", usage: "Tokens: 0 prompt, 9223372036854775808 completion", wantErr: "invalid reported token usage"},
+		{name: "malformed after valid", usage: "Tokens: 1 prompt, 2 completion\nTokens: -1 prompt, 2 completion", wantErr: "invalid reported token usage"},
+		{name: "accumulation overflow", usage: "Tokens: 9223372036854775807 prompt, 9223372036854775807 completion\nTokens: 1 prompt, 1 completion", wantErr: "invalid reported token usage"},
+		{name: "reported zero", usage: "Tokens: 0 prompt, 0 completion"},
+		{name: "reported nonzero", usage: "Tokens: 250 prompt, 45 completion", prompt: 250, completion: 45},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout := strings.Repeat("diagnostic output without token usage\n", 100) + tc.usage + "\nTASK_COMPLETED\n"
+			result, err := ParseOpenCodeTranscript([]byte(stdout), nil, "reported-tokens")
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) || result != nil {
+					t.Fatalf("result = %v, err = %v; want nil result and %q", result, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.TotalPromptTokens != tc.prompt || result.TotalCompletionTokens != tc.completion {
+				t.Fatalf("tokens = (%d, %d), want reported (%d, %d)", result.TotalPromptTokens, result.TotalCompletionTokens, tc.prompt, tc.completion)
+			}
+		})
+	}
+}
