@@ -812,8 +812,8 @@ func installSessionRoutesWithStore(mux *http.ServeMux, source SessionSource, s *
 			return
 		}
 		id, err := url.PathUnescape(r.PathValue("id"))
-		if err != nil || id == "" {
-			http.Error(w, "invalid session id", http.StatusBadRequest)
+		if err != nil || strings.TrimSpace(id) == "" {
+			writeSessionJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid session id"})
 			return
 		}
 		action := r.PathValue("action")
@@ -822,7 +822,7 @@ func installSessionRoutesWithStore(mux *http.ServeMux, source SessionSource, s *
 			valid = valid || candidate == action
 		}
 		if !valid {
-			http.Error(w, "unknown session control", http.StatusNotFound)
+			writeSessionJSON(w, http.StatusNotFound, map[string]string{"error": "unknown session control"})
 			return
 		}
 		cards, err := source.Sessions(r.Context())
@@ -843,7 +843,7 @@ func installSessionRoutesWithStore(mux *http.ServeMux, source SessionSource, s *
 			}
 		}
 		if selected == nil {
-			http.Error(w, "logical session not found", http.StatusNotFound)
+			writeSessionJSON(w, http.StatusNotFound, map[string]string{"error": "logical session not found"})
 			return
 		}
 		capability := sessionAction(*selected, action)

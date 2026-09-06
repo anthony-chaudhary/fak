@@ -818,7 +818,7 @@ func handleSessionApproval(source any, s *store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := url.PathUnescape(r.PathValue("id"))
 		if err != nil || strings.TrimSpace(id) == "" {
-			http.Error(w, "invalid session id", http.StatusBadRequest)
+			writeSessionJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid session id"})
 			return
 		}
 
@@ -833,7 +833,7 @@ func handleSessionApproval(source any, s *store) http.HandlerFunc {
 		contentType := r.Header.Get("Content-Type")
 		if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
 			if err := r.ParseForm(); err != nil {
-				http.Error(w, "invalid form payload", http.StatusBadRequest)
+				writeSessionJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid form payload"})
 				return
 			}
 			payload.Resolution = r.FormValue("resolution")
@@ -847,7 +847,7 @@ func handleSessionApproval(source any, s *store) http.HandlerFunc {
 			}
 		} else {
 			if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); err != nil {
-				http.Error(w, "invalid approval payload: invalid JSON", http.StatusBadRequest)
+				writeSessionJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid approval payload: invalid JSON"})
 				return
 			}
 			if payload.Resolution == "" && payload.Decision != "" {
@@ -865,7 +865,7 @@ func handleSessionApproval(source any, s *store) http.HandlerFunc {
 			resolution = "decline"
 		}
 		if resolution != "accept" && resolution != "decline" {
-			http.Error(w, `invalid approval resolution: must be "accept" or "decline"`, http.StatusBadRequest)
+			writeSessionJSON(w, http.StatusBadRequest, map[string]string{"error": `invalid approval resolution: must be "accept" or "decline"`})
 			return
 		}
 
@@ -903,7 +903,7 @@ func handleSessionApproval(source any, s *store) http.HandlerFunc {
 				var err error
 				cards, err = lister.Sessions(r.Context())
 				if err != nil {
-					http.Error(w, err.Error(), http.StatusServiceUnavailable)
+					writeSessionJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 					return
 				}
 				cards, err = normalizeSessionCards(cards)
@@ -924,7 +924,7 @@ func handleSessionApproval(source any, s *store) http.HandlerFunc {
 					resolveViaStore(payload.ApprovalID)
 					return
 				}
-				http.Error(w, "logical session not found", http.StatusNotFound)
+				writeSessionJSON(w, http.StatusNotFound, map[string]string{"error": "logical session not found"})
 				return
 			}
 

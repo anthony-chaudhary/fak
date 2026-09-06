@@ -460,45 +460,51 @@ func TestWebApprovalResolution(t *testing.T) {
 		}
 	}
 
+	assertJSONError := func(res *http.Response, expectedStatus int, expectedSubstr string) {
+		t.Helper()
+		defer res.Body.Close()
+		if res.StatusCode != expectedStatus {
+			t.Fatalf("expected status %d, got %d", expectedStatus, res.StatusCode)
+		}
+		if ct := res.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+			t.Fatalf("expected Content-Type application/json, got %q", ct)
+		}
+		var errPayload map[string]string
+		if err := json.NewDecoder(res.Body).Decode(&errPayload); err != nil {
+			t.Fatalf("failed to decode JSON error: %v", err)
+		}
+		if expectedSubstr != "" && !strings.Contains(errPayload["error"], expectedSubstr) {
+			t.Fatalf("expected error containing %q, got %q", expectedSubstr, errPayload["error"])
+		}
+	}
+
 	// 2. Validate rejection of malformed JSON
 	badJSONRes, err := ts.Client().Post(ts.URL+"/api/sessions/sess-awaiting/approval", "application/json", strings.NewReader("{broken"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	badJSONRes.Body.Close()
-	if badJSONRes.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected 400 for malformed json, got %d", badJSONRes.StatusCode)
-	}
+	assertJSONError(badJSONRes, http.StatusBadRequest, "invalid approval payload: invalid JSON")
 
 	// 3. Validate rejection of invalid resolution token
 	badRes, err := ts.Client().Post(ts.URL+"/api/sessions/sess-awaiting/approval", "application/json", strings.NewReader(`{"resolution":"maybe"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	badRes.Body.Close()
-	if badRes.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected 400 for invalid resolution, got %d", badRes.StatusCode)
-	}
+	assertJSONError(badRes, http.StatusBadRequest, "invalid approval resolution")
 
 	// 4. Validate rejection of unknown session ID
 	unknownRes, err := ts.Client().Post(ts.URL+"/api/sessions/nonexistent/approval", "application/json", strings.NewReader(`{"resolution":"accept"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	unknownRes.Body.Close()
-	if unknownRes.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected 404 for unknown session, got %d", unknownRes.StatusCode)
-	}
+	assertJSONError(unknownRes, http.StatusNotFound, "logical session not found")
 
 	// 5. Validate rejection of session not awaiting approval
 	idleRes, err := ts.Client().Post(ts.URL+"/api/sessions/sess-idle/approval", "application/json", strings.NewReader(`{"resolution":"accept"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	idleRes.Body.Close()
-	if idleRes.StatusCode != http.StatusConflict {
-		t.Fatalf("expected 409 for non-awaiting session, got %d", idleRes.StatusCode)
-	}
+	assertJSONError(idleRes, http.StatusConflict, "session is not awaiting approval")
 
 	// 6. Connect SSE client to verify real-time events
 	sseReq, err := http.NewRequest(http.MethodGet, ts.URL+"/api/sessions/events", nil)
@@ -767,4 +773,211 @@ func (m *mockCoordinator) ResolveApproval(sessionID string, resolution string, r
 	m.resolution = resolution
 	m.reason = reason
 	return nil
+}
+
+type erroringSessionSource struct {
+	sessionsErr error
+	controlErr  error
+	cards       []SessionCard
+}
+
+func (m *erroringSessionSource) Sessions(context.Context) ([]SessionCard, error) {
+	if m.sessionsErr != nil {
+		return nil, m.sessionsErr
+	}
+	return m.cards, nil
+}
+
+func (m *erroringSessionSource) Control(context.Context, SessionControlRequest) error {
+	return m.controlErr
+}
+
+func (m *erroringSessionSource) ResolveApproval(context.Context, SessionApprovalRequest) error {
+	return nil
+}
+
+func TestSessionApprovalAndControlJSONErrorPayloads(t *testing.T) {
+	now := time.Now()
+	workingCard := SessionCard{
+		ID:            "sess-active",
+		Provider:      "codex",
+		State:         sessionWorking,
+		LastEventAt:   now,
+		HasInputLease: true,
+		Capabilities:  map[string]SessionCapability{"interrupt": {Enabled: true}},
+	}
+	idleCard := SessionCard{
+		ID:            "sess-idle",
+		Provider:      "codex",
+		State:         sessionIdle,
+		LastEventAt:   now,
+		HasInputLease: true,
+		Capabilities:  map[string]SessionCapability{"interrupt": {Enabled: false, UnavailableReason: "session is idle"}},
+	}
+
+	src := &erroringSessionSource{
+		cards: []SessionCard{workingCard, idleCard},
+	}
+	ts := httptest.NewServer(handlerWithSessionSource(newStore(), nil, nil, src))
+	defer ts.Close()
+
+	nilTS := httptest.NewServer(handlerWithSessionSource(nil, nil, nil, nil))
+	defer nilTS.Close()
+
+	failingSrc := &erroringSessionSource{
+		sessionsErr: fmt.Errorf("session store backend failure"),
+	}
+	failingTS := httptest.NewServer(handlerWithSessionSource(newStore(), nil, nil, failingSrc))
+	defer failingTS.Close()
+
+	controlErrSrc := &erroringSessionSource{
+		cards:      []SessionCard{workingCard},
+		controlErr: fmt.Errorf("rpc dispatch failure"),
+	}
+	controlErrTS := httptest.NewServer(handlerWithSessionSource(newStore(), nil, nil, controlErrSrc))
+	defer controlErrTS.Close()
+
+	assertJSONErrorResponse := func(res *http.Response, wantStatus int, wantErrSubstr string) {
+		t.Helper()
+		defer res.Body.Close()
+		if res.StatusCode != wantStatus {
+			t.Fatalf("expected HTTP status %d, got %d", wantStatus, res.StatusCode)
+		}
+		ct := res.Header.Get("Content-Type")
+		if !strings.HasPrefix(ct, "application/json") {
+			t.Fatalf("expected Content-Type application/json, got %q", ct)
+		}
+		var payload struct {
+			Error string `json:"error"`
+		}
+		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+			t.Fatalf("failed to decode JSON response: %v", err)
+		}
+		if payload.Error == "" {
+			t.Fatalf("expected non-empty error field in JSON response, got %+v", payload)
+		}
+		if wantErrSubstr != "" && !strings.Contains(payload.Error, wantErrSubstr) {
+			t.Fatalf("expected error containing %q, got %q", wantErrSubstr, payload.Error)
+		}
+	}
+
+	t.Run("approval invalid session id returns JSON 400", func(t *testing.T) {
+		res, err := ts.Client().Post(ts.URL+"/api/sessions/%20/approval", "application/json", strings.NewReader(`{"resolution":"accept"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONErrorResponse(res, http.StatusBadRequest, "invalid session id")
+	})
+
+	t.Run("approval malformed form payload returns JSON 400", func(t *testing.T) {
+		res, err := ts.Client().Post(ts.URL+"/api/sessions/sess-active/approval", "application/x-www-form-urlencoded", strings.NewReader("resolution=%zz"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONErrorResponse(res, http.StatusBadRequest, "invalid form payload")
+	})
+
+	t.Run("approval malformed JSON returns JSON 400", func(t *testing.T) {
+		res, err := ts.Client().Post(ts.URL+"/api/sessions/sess-active/approval", "application/json", strings.NewReader("{broken-json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONErrorResponse(res, http.StatusBadRequest, "invalid approval payload: invalid JSON")
+	})
+
+	t.Run("approval invalid resolution returns JSON 400", func(t *testing.T) {
+		res, err := ts.Client().Post(ts.URL+"/api/sessions/sess-active/approval", "application/json", strings.NewReader(`{"resolution":"maybe"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONErrorResponse(res, http.StatusBadRequest, `invalid approval resolution: must be "accept" or "decline"`)
+	})
+
+	t.Run("approval logical session not found returns JSON 404", func(t *testing.T) {
+		res, err := ts.Client().Post(ts.URL+"/api/sessions/nonexistent/approval", "application/json", strings.NewReader(`{"resolution":"accept"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONErrorResponse(res, http.StatusNotFound, "logical session not found")
+	})
+
+	t.Run("approval session not awaiting returns JSON 409", func(t *testing.T) {
+		res, err := ts.Client().Post(ts.URL+"/api/sessions/sess-active/approval", "application/json", strings.NewReader(`{"resolution":"accept"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONErrorResponse(res, http.StatusConflict, "session is not awaiting approval")
+	})
+
+	t.Run("approval sessions listing error returns JSON 503", func(t *testing.T) {
+		res, err := failingTS.Client().Post(failingTS.URL+"/api/sessions/sess-active/approval", "application/json", strings.NewReader(`{"resolution":"accept"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONErrorResponse(res, http.StatusServiceUnavailable, "session store backend failure")
+	})
+
+	t.Run("approval disconnected authority returns JSON 503", func(t *testing.T) {
+		res, err := nilTS.Client().Post(nilTS.URL+"/api/sessions/sess-active/approval", "application/json", strings.NewReader(`{"resolution":"accept"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONErrorResponse(res, http.StatusServiceUnavailable, "session authority is not connected")
+	})
+
+	t.Run("control invalid session id returns JSON 400", func(t *testing.T) {
+		res, err := ts.Client().Post(ts.URL+"/api/sessions/%20/controls/interrupt", "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONErrorResponse(res, http.StatusBadRequest, "invalid session id")
+	})
+
+	t.Run("control unknown action returns JSON 404", func(t *testing.T) {
+		res, err := ts.Client().Post(ts.URL+"/api/sessions/sess-active/controls/unknown_action", "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONErrorResponse(res, http.StatusNotFound, "unknown session control")
+	})
+
+	t.Run("control logical session not found returns JSON 404", func(t *testing.T) {
+		res, err := ts.Client().Post(ts.URL+"/api/sessions/nonexistent/controls/interrupt", "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONErrorResponse(res, http.StatusNotFound, "logical session not found")
+	})
+
+	t.Run("control disabled capability returns JSON 409", func(t *testing.T) {
+		res, err := ts.Client().Post(ts.URL+"/api/sessions/sess-idle/controls/interrupt", "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONErrorResponse(res, http.StatusConflict, "session is idle")
+	})
+
+	t.Run("control execution failure returns JSON 409", func(t *testing.T) {
+		res, err := controlErrTS.Client().Post(controlErrTS.URL+"/api/sessions/sess-active/controls/interrupt", "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONErrorResponse(res, http.StatusConflict, "rpc dispatch failure")
+	})
+
+	t.Run("control sessions listing error returns JSON 503", func(t *testing.T) {
+		res, err := failingTS.Client().Post(failingTS.URL+"/api/sessions/sess-active/controls/interrupt", "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONErrorResponse(res, http.StatusServiceUnavailable, "session store backend failure")
+	})
+
+	t.Run("control disconnected authority returns JSON 503", func(t *testing.T) {
+		res, err := nilTS.Client().Post(nilTS.URL+"/api/sessions/sess-active/controls/interrupt", "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertJSONErrorResponse(res, http.StatusServiceUnavailable, "session authority is not connected")
+	})
 }
