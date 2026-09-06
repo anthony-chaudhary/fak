@@ -586,6 +586,10 @@ func TestOffTrunk_refusesBeforeCommitting(t *testing.T) {
 }
 
 func TestDetachedHead_isOffTrunk(t *testing.T) {
+	// Isolate from host/parent process CWD in case the test process is run
+	// from within a sanctioned worker worktree directory (#11828).
+	t.Chdir(t.TempDir())
+
 	g := &fakeGit{reply: onTrunkBase()}
 	// symbolic-ref exits non-zero on a detached HEAD.
 	g.reply["symbolic-ref"] = reply{out: "", code: 128}
@@ -597,6 +601,31 @@ func TestDetachedHead_isOffTrunk(t *testing.T) {
 	if !strings.Contains(res.Detail, "detached") {
 		t.Fatalf("detail should mention detached, got %q", res.Detail)
 	}
+
+	t.Run("isolated_from_worker_cwd", func(t *testing.T) {
+		// Simulate host or parent process running inside a sanctioned worker worktree.
+		hostWorkerDir := filepath.Join(t.TempDir(), "fak-worker-wt-parent-sim")
+		if err := os.MkdirAll(hostWorkerDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Chdir(hostWorkerDir)
+
+		// Without isolation, being inside a worker worktree suppresses ReasonOffTrunk.
+		resUnisolated, _ := CommitWith(context.Background(), g.run, okLock(nil), baseOpts())
+		if resUnisolated.Reason == ReasonOffTrunk {
+			t.Fatalf("unisolated commit in worker worktree unexpectedly produced ReasonOffTrunk")
+		}
+
+		// With clean CWD isolation (#11828), the fixture produces ReasonOffTrunk.
+		t.Chdir(t.TempDir())
+		resIsolated, _ := CommitWith(context.Background(), g.run, okLock(nil), baseOpts())
+		if resIsolated.Reason != ReasonOffTrunk {
+			t.Fatalf("isolated detached HEAD should produce ReasonOffTrunk even if parent CWD was worker worktree, got %q", resIsolated.Reason)
+		}
+		if !strings.Contains(resIsolated.Detail, "detached") {
+			t.Fatalf("detail should mention detached, got %q", resIsolated.Detail)
+		}
+	})
 }
 
 func TestDetachedHead_inSanctionedWorkerWorktreeAllowed(t *testing.T) {
