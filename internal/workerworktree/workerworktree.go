@@ -798,7 +798,11 @@ func cleanStatusWithoutLease(status string) string {
 	var clean []string
 	for _, line := range strings.Split(status, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if trimmed != "" && !strings.HasSuffix(trimmed, WorkerLeaseFileName) && !strings.HasSuffix(trimmed, WorkerLeaseFileName+".tmp") {
+		if trimmed != "" &&
+			!strings.HasSuffix(trimmed, WorkerLeaseFileName) &&
+			!strings.HasSuffix(trimmed, WorkerLeaseFileName+".tmp") &&
+			!strings.HasSuffix(trimmed, `"`+WorkerLeaseFileName+`"`) &&
+			!strings.HasSuffix(trimmed, `"`+WorkerLeaseFileName+`.tmp"`) {
 			clean = append(clean, line)
 		}
 	}
