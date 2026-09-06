@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 )
 
 func createTestFile(t *testing.T, dir, name, content string) string {
@@ -21,352 +23,484 @@ func createTestFile(t *testing.T, dir, name, content string) string {
 	return path
 }
 
-func TestWindowedFileReader_Open(t *testing.T) {
+func TestWindowedFileOpen(t *testing.T) {
 	dir := t.TempDir()
 	content := "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n"
-	createTestFile(t, dir, "sample.txt", content)
+	filePath := createTestFile(t, dir, "sample.txt", content)
 
-	w := NewWindowedFileReader(dir)
+	w := NewWindowedFileReader(5)
 
-	// Basic open with line 1 and window size 3
-	lines, err := w.Open("sample.txt", 1, 3)
+	// Open with line 1 and window size 3
+	view, err := w.Open(filePath, 1, 3)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 lines, got %d", len(lines))
+
+	if view.Path != filePath {
+		t.Errorf("expected Path %q, got %q", filePath, view.Path)
 	}
-	expected := []string{"1: line 1", "2: line 2", "3: line 3"}
-	for i, exp := range expected {
-		if lines[i] != exp {
-			t.Errorf("line %d: expected %q, got %q", i, exp, lines[i])
-		}
+	if view.StartLine != 1 {
+		t.Errorf("expected StartLine 1, got %d", view.StartLine)
+	}
+	if view.EndLine != 3 {
+		t.Errorf("expected EndLine 3, got %d", view.EndLine)
+	}
+	if view.TotalLines != 10 {
+		t.Errorf("expected TotalLines 10, got %d", view.TotalLines)
 	}
 
-	path, line, size, total := w.CurrentPosition()
-	if path != "sample.txt" || line != 1 || size != 3 || total != 10 {
-		t.Errorf("CurrentPosition unexpected: path=%q, line=%d, size=%d, total=%d", path, line, size, total)
+	// Verify Header
+	expectedHeader := fmt.Sprintf("=== [%s] (lines 1-3 of 10) ===\n", filePath)
+	if !strings.HasPrefix(view.Content, expectedHeader) {
+		t.Errorf("expected header %q, got content:\n%s", expectedHeader, view.Content)
 	}
 
-	// Open with defaults (windowSize <= 0, line <= 0)
-	lines, err = w.Open("sample.txt", 0, 0)
+	// Verify Body line numbering
+	expectedBody := "1: line 1\n2: line 2\n3: line 3\n"
+	if !strings.Contains(view.Content, expectedBody) {
+		t.Errorf("expected body %q, got content:\n%s", expectedBody, view.Content)
+	}
+
+	// Verify Footer (not EOF, so End of Window)
+	expectedFooter := "\n=== Navigation: ScrollDown(n), ScrollUp(n), Goto(line) | End of Window ==="
+	if !strings.HasSuffix(view.Content, expectedFooter) {
+		t.Errorf("expected footer %q, got content:\n%s", expectedFooter, view.Content)
+	}
+
+	// Open with defaults (startLine <= 0, windowSize <= 0)
+	view, err = w.Open(filePath, 0, 0)
 	if err != nil {
 		t.Fatalf("Open with defaults failed: %v", err)
 	}
-	if len(lines) != 10 {
-		t.Fatalf("expected 10 lines with default windowSize, got %d", len(lines))
+	if view.StartLine != 1 {
+		t.Errorf("expected StartLine 1 with default, got %d", view.StartLine)
 	}
-	path, line, size, total = w.CurrentPosition()
-	if line != 1 || size != DefaultWindowSize || total != 10 {
-		t.Errorf("CurrentPosition defaults unexpected: line=%d, size=%d, total=%d", line, size, total)
-	}
-
-	// Open non-existent file
-	if _, err := w.Open("missing.txt", 1, 10); err == nil {
-		t.Error("expected error opening missing file, got nil")
+	if view.EndLine != 5 { // defaultWindowSize = 5
+		t.Errorf("expected EndLine 5 with default, got %d", view.EndLine)
 	}
 
-	// Open directory
-	if _, err := w.Open(".", 1, 10); err == nil {
-		t.Error("expected error opening directory, got nil")
-	}
-}
-
-func TestWindowedFileReader_LineNumberFormatting(t *testing.T) {
-	dir := t.TempDir()
-	content := "first line\n\n  indented line\n"
-	createTestFile(t, dir, "format.txt", content)
-
-	w := NewWindowedFileReader(dir)
-	lines, err := w.Open("format.txt", 1, 10)
+	// Open with startLine > TotalLines clamps to TotalLines
+	view, err = w.Open(filePath, 50, 3)
 	if err != nil {
-		t.Fatalf("Open failed: %v", err)
+		t.Fatalf("Open with startLine > total failed: %v", err)
 	}
-
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 lines, got %d", len(lines))
+	if view.StartLine != 10 {
+		t.Errorf("expected StartLine 10 when clamped, got %d", view.StartLine)
 	}
-
-	if lines[0] != "1: first line" {
-		t.Errorf("expected %q, got %q", "1: first line", lines[0])
+	if view.EndLine != 10 {
+		t.Errorf("expected EndLine 10 when clamped, got %d", view.EndLine)
 	}
-	if lines[1] != "2: " {
-		t.Errorf("expected %q, got %q", "2: ", lines[1])
-	}
-	if lines[2] != "3:   indented line" {
-		t.Errorf("expected %q, got %q", "3:   indented line", lines[2])
+	if !strings.HasSuffix(view.Content, "| [EOF] ===") {
+		t.Errorf("expected [EOF] in footer, got:\n%s", view.Content)
 	}
 }
 
-func TestWindowedFileReader_ScrollDown(t *testing.T) {
+func TestWindowedFileScrollDown(t *testing.T) {
 	dir := t.TempDir()
 	content := "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n"
-	createTestFile(t, dir, "scroll.txt", content)
+	filePath := createTestFile(t, dir, "scroll.txt", content)
 
-	w := NewWindowedFileReader(dir)
-	_, err := w.Open("scroll.txt", 1, 3)
+	w := NewWindowedFileReader(100)
+	view, err := w.Open(filePath, 1, 3)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
+	if view.StartLine != 1 || view.EndLine != 3 {
+		t.Fatalf("initial view unexpected: %d-%d", view.StartLine, view.EndLine)
+	}
 
-	// Scroll down 2 lines -> line 3
-	lines, err := w.ScrollDown(2)
+	// ScrollDown(2) -> advances to line 3 (lines 3-5)
+	view, err = w.ScrollDown(2)
 	if err != nil {
-		t.Fatalf("ScrollDown failed: %v", err)
+		t.Fatalf("ScrollDown(2) failed: %v", err)
 	}
-	if len(lines) != 3 || lines[0] != "3: l3" || lines[2] != "5: l5" {
-		t.Errorf("unexpected lines after ScrollDown(2): %v", lines)
+	if view.StartLine != 3 || view.EndLine != 5 {
+		t.Errorf("expected lines 3-5, got %d-%d", view.StartLine, view.EndLine)
 	}
-	_, line, _, _ := w.CurrentPosition()
-	if line != 3 {
-		t.Errorf("expected line 3, got %d", line)
+	if !strings.Contains(view.Content, "3: l3\n4: l4\n5: l5\n") {
+		t.Errorf("unexpected content:\n%s", view.Content)
+	}
+	if strings.Contains(view.Content, "[EOF]") {
+		t.Errorf("expected not EOF at line 5 of 10")
 	}
 
-	// Scroll down 3 lines -> line 6
-	lines, err = w.ScrollDown(3)
+	// ScrollDown(3) -> advances to line 6 (lines 6-8)
+	view, err = w.ScrollDown(3)
 	if err != nil {
-		t.Fatalf("ScrollDown failed: %v", err)
+		t.Fatalf("ScrollDown(3) failed: %v", err)
 	}
-	if len(lines) != 3 || lines[0] != "6: l6" || lines[2] != "8: l8" {
-		t.Errorf("unexpected lines after ScrollDown(3): %v", lines)
+	if view.StartLine != 6 || view.EndLine != 8 {
+		t.Errorf("expected lines 6-8, got %d-%d", view.StartLine, view.EndLine)
 	}
 
-	// Scroll down 0 lines -> no-op
-	lines, err = w.ScrollDown(0)
+	// ScrollDown(5) -> clamps gracefully at EOF (maxStart = 10 - 3 + 1 = 8, lines 8-10)
+	view, err = w.ScrollDown(5)
+	if err != nil {
+		t.Fatalf("ScrollDown(5) failed: %v", err)
+	}
+	if view.StartLine != 8 || view.EndLine != 10 {
+		t.Errorf("expected lines 8-10 at EOF, got %d-%d", view.StartLine, view.EndLine)
+	}
+	if !strings.HasSuffix(view.Content, "| [EOF] ===") {
+		t.Errorf("expected [EOF] footer when clamped at EOF, got:\n%s", view.Content)
+	}
+
+	// Further ScrollDown stays clamped at EOF
+	view, err = w.ScrollDown(10)
+	if err != nil {
+		t.Fatalf("ScrollDown(10) failed: %v", err)
+	}
+	if view.StartLine != 8 || view.EndLine != 10 {
+		t.Errorf("expected lines 8-10, got %d-%d", view.StartLine, view.EndLine)
+	}
+
+	// ScrollDown(0) is a no-op
+	view, err = w.ScrollDown(0)
 	if err != nil {
 		t.Fatalf("ScrollDown(0) failed: %v", err)
 	}
-	if len(lines) != 3 || lines[0] != "6: l6" {
-		t.Errorf("unexpected lines after ScrollDown(0): %v", lines)
+	if view.StartLine != 8 || view.EndLine != 10 {
+		t.Errorf("expected lines 8-10, got %d-%d", view.StartLine, view.EndLine)
 	}
 
-	// Scroll down negative lines -> retreats backward
-	lines, err = w.ScrollDown(-2)
+	// Negative ScrollDown scrolls up
+	view, err = w.ScrollDown(-2)
 	if err != nil {
 		t.Fatalf("ScrollDown(-2) failed: %v", err)
 	}
-	if len(lines) != 3 || lines[0] != "4: l4" {
-		t.Errorf("unexpected lines after ScrollDown(-2): %v", lines)
+	if view.StartLine != 6 || view.EndLine != 8 {
+		t.Errorf("expected lines 6-8 after ScrollDown(-2), got %d-%d", view.StartLine, view.EndLine)
 	}
 }
 
-func TestWindowedFileReader_ScrollUp(t *testing.T) {
+func TestWindowedFileScrollUp(t *testing.T) {
 	dir := t.TempDir()
 	content := "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n"
-	createTestFile(t, dir, "scrollup.txt", content)
+	filePath := createTestFile(t, dir, "scrollup.txt", content)
 
-	w := NewWindowedFileReader(dir)
-	_, err := w.Open("scrollup.txt", 8, 3)
+	w := NewWindowedFileReader(100)
+	view, err := w.Open(filePath, 8, 3)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
+	if view.StartLine != 8 || view.EndLine != 10 {
+		t.Fatalf("initial view unexpected: %d-%d", view.StartLine, view.EndLine)
+	}
 
-	// Scroll up 3 lines -> line 5
-	lines, err := w.ScrollUp(3)
+	// ScrollUp(3) -> moves back to line 5 (lines 5-7)
+	view, err = w.ScrollUp(3)
 	if err != nil {
-		t.Fatalf("ScrollUp failed: %v", err)
+		t.Fatalf("ScrollUp(3) failed: %v", err)
 	}
-	if len(lines) != 3 || lines[0] != "5: l5" || lines[2] != "7: l7" {
-		t.Errorf("unexpected lines after ScrollUp(3): %v", lines)
-	}
-	_, line, _, _ := w.CurrentPosition()
-	if line != 5 {
-		t.Errorf("expected line 5, got %d", line)
+	if view.StartLine != 5 || view.EndLine != 7 {
+		t.Errorf("expected lines 5-7, got %d-%d", view.StartLine, view.EndLine)
 	}
 
-	// Scroll up past start (10 lines from 5) -> clamped to line 1
-	lines, err = w.ScrollUp(10)
+	// ScrollUp(10) -> clamps to line 1 (lines 1-3)
+	view, err = w.ScrollUp(10)
 	if err != nil {
 		t.Fatalf("ScrollUp(10) failed: %v", err)
 	}
-	if len(lines) != 3 || lines[0] != "1: l1" || lines[2] != "3: l3" {
-		t.Errorf("unexpected lines after ScrollUp(10): %v", lines)
-	}
-	_, line, _, _ = w.CurrentPosition()
-	if line != 1 {
-		t.Errorf("expected line 1, got %d", line)
+	if view.StartLine != 1 || view.EndLine != 3 {
+		t.Errorf("expected lines 1-3 when clamped at top, got %d-%d", view.StartLine, view.EndLine)
 	}
 
-	// Scroll up 0 lines -> no-op
-	lines, err = w.ScrollUp(0)
+	// Further ScrollUp stays clamped at line 1
+	view, err = w.ScrollUp(5)
+	if err != nil {
+		t.Fatalf("ScrollUp(5) failed: %v", err)
+	}
+	if view.StartLine != 1 || view.EndLine != 3 {
+		t.Errorf("expected lines 1-3, got %d-%d", view.StartLine, view.EndLine)
+	}
+
+	// ScrollUp(0) is a no-op
+	view, err = w.ScrollUp(0)
 	if err != nil {
 		t.Fatalf("ScrollUp(0) failed: %v", err)
 	}
-	if len(lines) != 3 || lines[0] != "1: l1" {
-		t.Errorf("unexpected lines after ScrollUp(0): %v", lines)
+	if view.StartLine != 1 || view.EndLine != 3 {
+		t.Errorf("expected lines 1-3, got %d-%d", view.StartLine, view.EndLine)
 	}
 
-	// Scroll up negative lines -> advances forward
-	lines, err = w.ScrollUp(-2)
+	// Negative ScrollUp scrolls down
+	view, err = w.ScrollUp(-2)
 	if err != nil {
 		t.Fatalf("ScrollUp(-2) failed: %v", err)
 	}
-	if len(lines) != 3 || lines[0] != "3: l3" {
-		t.Errorf("unexpected lines after ScrollUp(-2): %v", lines)
+	if view.StartLine != 3 || view.EndLine != 5 {
+		t.Errorf("expected lines 3-5 after ScrollUp(-2), got %d-%d", view.StartLine, view.EndLine)
 	}
 }
 
-func TestWindowedFileReader_Goto(t *testing.T) {
+func TestWindowedFileGoto(t *testing.T) {
 	dir := t.TempDir()
 	content := "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n"
-	createTestFile(t, dir, "goto.txt", content)
+	filePath := createTestFile(t, dir, "goto.txt", content)
 
-	w := NewWindowedFileReader(dir)
-	_, err := w.Open("goto.txt", 1, 3)
+	w := NewWindowedFileReader(100)
+	_, err := w.Open(filePath, 1, 3)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
 
-	// Goto line 5
-	lines, err := w.Goto(5)
+	// Goto(5) -> target line 5 is at top (lines 5-7)
+	view, err := w.Goto(5)
 	if err != nil {
 		t.Fatalf("Goto(5) failed: %v", err)
 	}
-	if len(lines) != 3 || lines[0] != "5: l5" || lines[2] != "7: l7" {
-		t.Errorf("unexpected lines after Goto(5): %v", lines)
+	if view.StartLine != 5 || view.EndLine != 7 {
+		t.Errorf("expected lines 5-7, got %d-%d", view.StartLine, view.EndLine)
 	}
-	_, line, _, _ := w.CurrentPosition()
-	if line != 5 {
-		t.Errorf("expected line 5, got %d", line)
+	if !strings.Contains(view.Content, "5: l5\n6: l6\n7: l7\n") {
+		t.Errorf("unexpected content:\n%s", view.Content)
 	}
 
-	// Goto line <= 0 -> clamped to 1
-	lines, err = w.Goto(-5)
+	// Goto(-10) -> clamps to line 1
+	view, err = w.Goto(-10)
 	if err != nil {
-		t.Fatalf("Goto(-5) failed: %v", err)
+		t.Fatalf("Goto(-10) failed: %v", err)
 	}
-	if len(lines) != 3 || lines[0] != "1: l1" {
-		t.Errorf("unexpected lines after Goto(-5): %v", lines)
-	}
-	_, line, _, _ = w.CurrentPosition()
-	if line != 1 {
-		t.Errorf("expected line 1, got %d", line)
+	if view.StartLine != 1 || view.EndLine != 3 {
+		t.Errorf("expected lines 1-3 after clamping to min, got %d-%d", view.StartLine, view.EndLine)
 	}
 
-	// Goto past EOF -> clamped to totalLines (10)
-	lines, err = w.Goto(50)
+	// Goto(50) -> clamps to TotalLines (10)
+	view, err = w.Goto(50)
 	if err != nil {
 		t.Fatalf("Goto(50) failed: %v", err)
 	}
-	if len(lines) != 1 || lines[0] != "10: l10" {
-		t.Errorf("unexpected lines after Goto(50): %v", lines)
+	if view.StartLine != 10 || view.EndLine != 10 {
+		t.Errorf("expected lines 10-10 after clamping to EOF, got %d-%d", view.StartLine, view.EndLine)
 	}
-	_, line, _, _ = w.CurrentPosition()
-	if line != 10 {
-		t.Errorf("expected line 10, got %d", line)
+	if !strings.HasSuffix(view.Content, "| [EOF] ===") {
+		t.Errorf("expected [EOF] footer, got:\n%s", view.Content)
+	}
+
+	// Goto(1) returns to line 1
+	view, err = w.Goto(1)
+	if err != nil {
+		t.Fatalf("Goto(1) failed: %v", err)
+	}
+	if view.StartLine != 1 || view.EndLine != 3 {
+		t.Errorf("expected lines 1-3, got %d-%d", view.StartLine, view.EndLine)
 	}
 }
 
-func TestWindowedFileReader_EOFClamping(t *testing.T) {
+func TestWindowedFileEmptyAndSmall(t *testing.T) {
 	dir := t.TempDir()
-	content := "a\nb\nc\nd\ne\n"
-	createTestFile(t, dir, "five.txt", content)
 
-	w := NewWindowedFileReader(dir)
+	// 1. Empty file
+	emptyPath := createTestFile(t, dir, "empty.txt", "")
+	w := NewWindowedFileReader(100)
 
-	// Open near EOF with window size 3
-	lines, err := w.Open("five.txt", 4, 3)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	if len(lines) != 2 {
-		t.Fatalf("expected 2 lines clamped at EOF, got %d", len(lines))
-	}
-	if lines[0] != "4: d" || lines[1] != "5: e" {
-		t.Errorf("unexpected lines: %v", lines)
-	}
-
-	// Scroll down past EOF -> clamped to line 5
-	lines, err = w.ScrollDown(10)
-	if err != nil {
-		t.Fatalf("ScrollDown failed: %v", err)
-	}
-	if len(lines) != 1 || lines[0] != "5: e" {
-		t.Errorf("expected single EOF line [5: e], got %v", lines)
-	}
-	_, line, _, _ := w.CurrentPosition()
-	if line != 5 {
-		t.Errorf("expected line 5, got %d", line)
-	}
-
-	// Scroll down again -> stays at EOF
-	lines, err = w.ScrollDown(5)
-	if err != nil {
-		t.Fatalf("ScrollDown failed: %v", err)
-	}
-	if len(lines) != 1 || lines[0] != "5: e" {
-		t.Errorf("expected single EOF line [5: e], got %v", lines)
-	}
-
-	// Open past EOF directly -> clamped to line 5
-	lines, err = w.Open("five.txt", 999, 3)
-	if err != nil {
-		t.Fatalf("Open past EOF failed: %v", err)
-	}
-	if len(lines) != 1 || lines[0] != "5: e" {
-		t.Errorf("expected single EOF line [5: e], got %v", lines)
-	}
-
-	// Window size larger than file -> returns all lines, clamped at EOF
-	lines, err = w.Open("five.txt", 1, 100)
-	if err != nil {
-		t.Fatalf("Open large window failed: %v", err)
-	}
-	if len(lines) != 5 {
-		t.Fatalf("expected 5 lines, got %d", len(lines))
-	}
-	if lines[4] != "5: e" {
-		t.Errorf("expected last line 5: e, got %s", lines[4])
-	}
-}
-
-func TestWindowedFileReader_EmptyFile(t *testing.T) {
-	dir := t.TempDir()
-	createTestFile(t, dir, "empty.txt", "")
-
-	w := NewWindowedFileReader(dir)
-	lines, err := w.Open("empty.txt", 1, 10)
+	view, err := w.Open(emptyPath, 1, 10)
 	if err != nil {
 		t.Fatalf("Open empty file failed: %v", err)
 	}
-	if len(lines) != 0 {
-		t.Fatalf("expected 0 lines from empty file, got %d", len(lines))
+	if view.TotalLines != 0 {
+		t.Errorf("expected 0 TotalLines, got %d", view.TotalLines)
+	}
+	if view.StartLine != 0 || view.EndLine != 0 {
+		t.Errorf("expected start=0, end=0 for empty file, got start=%d, end=%d", view.StartLine, view.EndLine)
+	}
+	expectedHeader := fmt.Sprintf("=== [%s] (lines 0-0 of 0) ===\n", emptyPath)
+	if !strings.HasPrefix(view.Content, expectedHeader) {
+		t.Errorf("expected header %q, got content:\n%s", expectedHeader, view.Content)
+	}
+	if !strings.HasSuffix(view.Content, "| [EOF] ===") {
+		t.Errorf("expected [EOF] footer for empty file, got:\n%s", view.Content)
 	}
 
-	path, line, size, total := w.CurrentPosition()
-	if path != "empty.txt" || line != 1 || size != 10 || total != 0 {
-		t.Errorf("CurrentPosition unexpected for empty file: path=%q, line=%d, size=%d, total=%d", path, line, size, total)
+	// Navigation on empty file remains safe
+	view, err = w.ScrollDown(5)
+	if err != nil || view.TotalLines != 0 {
+		t.Errorf("ScrollDown on empty file failed: err=%v, view=%v", err, view)
+	}
+	view, err = w.ScrollUp(5)
+	if err != nil || view.TotalLines != 0 {
+		t.Errorf("ScrollUp on empty file failed: err=%v, view=%v", err, view)
+	}
+	view, err = w.Goto(5)
+	if err != nil || view.TotalLines != 0 {
+		t.Errorf("Goto on empty file failed: err=%v, view=%v", err, view)
 	}
 
-	// Navigation on empty file remains empty and error-free
-	lines, err = w.ScrollDown(5)
-	if err != nil || len(lines) != 0 {
-		t.Errorf("ScrollDown on empty file failed: err=%v, lines=%v", err, lines)
+	// 2. Small file (smaller than window size)
+	smallPath := createTestFile(t, dir, "small.txt", "alpha\nbeta\ngamma\n")
+	view, err = w.Open(smallPath, 1, 10)
+	if err != nil {
+		t.Fatalf("Open small file failed: %v", err)
 	}
-	lines, err = w.ScrollUp(5)
-	if err != nil || len(lines) != 0 {
-		t.Errorf("ScrollUp on empty file failed: err=%v, lines=%v", err, lines)
+	if view.TotalLines != 3 || view.StartLine != 1 || view.EndLine != 3 {
+		t.Errorf("expected lines 1-3 of 3, got start=%d, end=%d, total=%d", view.StartLine, view.EndLine, view.TotalLines)
 	}
-	lines, err = w.Goto(5)
-	if err != nil || len(lines) != 0 {
-		t.Errorf("Goto on empty file failed: err=%v, lines=%v", err, lines)
+	if !strings.HasSuffix(view.Content, "| [EOF] ===") {
+		t.Errorf("expected [EOF] footer for small file fitting in window, got:\n%s", view.Content)
+	}
+
+	// ScrollDown on small file stays clamped at line 1
+	view, err = w.ScrollDown(5)
+	if err != nil {
+		t.Fatalf("ScrollDown on small file failed: %v", err)
+	}
+	if view.StartLine != 1 || view.EndLine != 3 {
+		t.Errorf("expected lines 1-3 after ScrollDown, got %d-%d", view.StartLine, view.EndLine)
 	}
 }
 
-func TestWindowedFileReader_PathConfinement(t *testing.T) {
+func TestWindowedFileNonExistent(t *testing.T) {
+	w := NewWindowedFileReader(100)
+
+	// Open missing file
+	if _, err := w.Open("this/file/does/not/exist.txt", 1, 10); err == nil {
+		t.Error("expected error for non-existent file, got nil")
+	}
+
+	// Open directory
+	dir := t.TempDir()
+	if _, err := w.Open(dir, 1, 10); err == nil {
+		t.Error("expected error for directory, got nil")
+	}
+
+	// Open empty path
+	if _, err := w.Open("", 1, 10); err == nil {
+		t.Error("expected error for empty path, got nil")
+	}
+
+	// Navigation before open
+	if _, err := w.ScrollDown(1); !errors.Is(err, ErrNoFileOpen) {
+		t.Errorf("expected ErrNoFileOpen from ScrollDown, got %v", err)
+	}
+	if _, err := w.ScrollUp(1); !errors.Is(err, ErrNoFileOpen) {
+		t.Errorf("expected ErrNoFileOpen from ScrollUp, got %v", err)
+	}
+	if _, err := w.Goto(1); !errors.Is(err, ErrNoFileOpen) {
+		t.Errorf("expected ErrNoFileOpen from Goto, got %v", err)
+	}
+	if _, err := w.View(); !errors.Is(err, ErrNoFileOpen) {
+		t.Errorf("expected ErrNoFileOpen from View, got %v", err)
+	}
+
+	// Close resets open state
+	filePath := createTestFile(t, dir, "close_test.txt", "one\ntwo\n")
+	if _, err := w.Open(filePath, 1, 10); err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	if !w.IsOpen() {
+		t.Error("expected IsOpen to be true")
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+	if w.IsOpen() {
+		t.Error("expected IsOpen to be false after Close")
+	}
+	if _, err := w.ScrollDown(1); !errors.Is(err, ErrNoFileOpen) {
+		t.Errorf("expected ErrNoFileOpen after Close, got %v", err)
+	}
+}
+
+func TestWindowedFileConcurrency(t *testing.T) {
+	dir := t.TempDir()
+	var content strings.Builder
+	for i := 1; i <= 100; i++ {
+		fmt.Fprintf(&content, "line %d\n", i)
+	}
+	filePath := createTestFile(t, dir, "concurrency.txt", content.String())
+
+	w := NewWindowedFileReader(10)
+	if _, err := w.Open(filePath, 1, 10); err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	workers := 8
+	iterations := 50
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				switch (id + j) % 5 {
+				case 0:
+					_, _ = w.ScrollDown(2)
+				case 1:
+					_, _ = w.ScrollUp(2)
+				case 2:
+					_, _ = w.Goto((id*7 + j) % 100)
+				case 3:
+					_, _, _, _ = w.CurrentPosition()
+				case 4:
+					_, _ = w.View()
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+}
+
+func TestWindowedFileLineEndings(t *testing.T) {
+	dir := t.TempDir()
+
+	crlfPath := createTestFile(t, dir, "crlf.txt", "line1\r\nline2\r\nline3\r\n")
+	crPath := createTestFile(t, dir, "cr.txt", "lineA\rlineB\rlineC\r")
+	mixedPath := createTestFile(t, dir, "mixed.txt", "alpha\r\nbeta\rgamma\ndelta")
+
+	w := NewWindowedFileReader(100)
+
+	// CRLF
+	view, err := w.Open(crlfPath, 1, 10)
+	if err != nil {
+		t.Fatalf("Open CRLF failed: %v", err)
+	}
+	if view.TotalLines != 3 || !strings.Contains(view.Content, "1: line1\n2: line2\n3: line3\n") {
+		t.Errorf("unexpected CRLF view: %v", view)
+	}
+
+	// CR
+	view, err = w.Open(crPath, 1, 10)
+	if err != nil {
+		t.Fatalf("Open CR failed: %v", err)
+	}
+	if view.TotalLines != 3 || !strings.Contains(view.Content, "1: lineA\n2: lineB\n3: lineC\n") {
+		t.Errorf("unexpected CR view: %v", view)
+	}
+
+	// Mixed without trailing newline
+	view, err = w.Open(mixedPath, 1, 10)
+	if err != nil {
+		t.Fatalf("Open mixed failed: %v", err)
+	}
+	if view.TotalLines != 4 || !strings.Contains(view.Content, "1: alpha\n2: beta\n3: gamma\n4: delta\n") {
+		t.Errorf("unexpected mixed view: %v", view)
+	}
+}
+
+func TestWindowedFilePathConfinement(t *testing.T) {
 	root := t.TempDir()
-	createTestFile(t, root, "inside.txt", "inside content")
-	createTestFile(t, root, "sub/deep.txt", "deep content")
+	createTestFile(t, root, "inside.txt", "inside content\nline 2\n")
+	createTestFile(t, root, "sub/deep.txt", "deep content\n")
 
 	outsideDir := t.TempDir()
-	createTestFile(t, outsideDir, "secret.txt", "secret content")
+	createTestFile(t, outsideDir, "secret.txt", "secret content\n")
 
 	w := NewWindowedFileReader(root)
+	if w.RootDir() != root {
+		t.Errorf("expected RootDir %q, got %q", root, w.RootDir())
+	}
 
 	// Valid relative paths
-	if _, err := w.Open("inside.txt", 1, 10); err != nil {
-		t.Errorf("failed to open valid relative path: %v", err)
+	view, err := w.Open("inside.txt", 1, 10)
+	if err != nil {
+		t.Fatalf("failed to open valid relative path: %v", err)
 	}
+	if view.TotalLines != 2 {
+		t.Errorf("expected 2 lines, got %d", view.TotalLines)
+	}
+
 	if _, err := w.Open("sub/deep.txt", 1, 10); err != nil {
 		t.Errorf("failed to open valid nested relative path: %v", err)
 	}
@@ -427,89 +561,99 @@ func TestWindowedFileReader_PathConfinement(t *testing.T) {
 			t.Errorf("expected valid internal symlink to succeed, got: %v", err)
 		}
 	}
-}
 
-func TestWindowedFileReader_NotOpenedAndClose(t *testing.T) {
-	w := NewWindowedFileReader()
-
-	if w.IsOpen() {
-		t.Error("expected IsOpen to be false initially")
+	// Dynamic SetRootDir
+	newRoot := t.TempDir()
+	createTestFile(t, newRoot, "new.txt", "new content\n")
+	w.SetRootDir(newRoot)
+	if w.RootDir() != newRoot {
+		t.Errorf("expected new root %q, got %q", newRoot, w.RootDir())
 	}
-
-	path, line, size, total := w.CurrentPosition()
-	if path != "" || line != 0 || size != 0 || total != 0 {
-		t.Errorf("expected empty position, got (%q, %d, %d, %d)", path, line, size, total)
+	if _, err := w.Open("new.txt", 1, 10); err != nil {
+		t.Errorf("expected Open under new root to succeed, got: %v", err)
 	}
-
-	if _, err := w.ScrollDown(1); !errors.Is(err, ErrNoFileOpen) {
-		t.Errorf("expected ErrNoFileOpen, got %v", err)
-	}
-	if _, err := w.ScrollUp(1); !errors.Is(err, ErrNoFileOpen) {
-		t.Errorf("expected ErrNoFileOpen, got %v", err)
-	}
-	if _, err := w.Goto(1); !errors.Is(err, ErrNoFileOpen) {
-		t.Errorf("expected ErrNoFileOpen, got %v", err)
-	}
-
-	// Open and then close
-	dir := t.TempDir()
-	createTestFile(t, dir, "test.txt", "one\ntwo\n")
-	w.SetRootDir(dir)
-
-	if _, err := w.Open("test.txt", 1, 5); err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	if !w.IsOpen() {
-		t.Error("expected IsOpen to be true after Open")
-	}
-
-	if err := w.Close(); err != nil {
-		t.Fatalf("Close failed: %v", err)
-	}
-	if w.IsOpen() {
-		t.Error("expected IsOpen to be false after Close")
-	}
-
-	if _, err := w.ScrollDown(1); !errors.Is(err, ErrNoFileOpen) {
-		t.Errorf("expected ErrNoFileOpen after Close, got %v", err)
+	// Old path now escapes new root
+	if _, err := w.Open(absInside, 1, 10); !errors.Is(err, ErrPathEscape) {
+		t.Errorf("expected old path to escape new root with ErrPathEscape, got: %v", err)
 	}
 }
 
-func TestWindowedFileReader_Concurrency(t *testing.T) {
+func TestWindowedFileUTF8Safety(t *testing.T) {
 	dir := t.TempDir()
-	content := ""
-	for i := 1; i <= 100; i++ {
-		content += fmt.Sprintf("line %d\n", i)
-	}
-	createTestFile(t, dir, "concurrency.txt", content)
 
-	w := NewWindowedFileReader(dir)
-	if _, err := w.Open("concurrency.txt", 1, 10); err != nil {
+	// 1. Multibyte UTF-8 characters (emojis, CJK, accents)
+	utf8Content := "Line 1: こんにちは世界\nLine 2: 🚀 Rocket Launch\nLine 3: Café & résumé\n"
+	utf8Path := createTestFile(t, dir, "multibyte.txt", utf8Content)
+
+	w := NewWindowedFileReader(100)
+	view, err := w.Open(utf8Path, 1, 10)
+	if err != nil {
+		t.Fatalf("Open multibyte UTF-8 file failed: %v", err)
+	}
+	if !utf8.ValidString(view.Content) {
+		t.Errorf("expected valid UTF-8 in view content")
+	}
+	if !strings.Contains(view.Content, "こんにちは世界") || !strings.Contains(view.Content, "🚀 Rocket Launch") {
+		t.Errorf("expected multibyte runes preserved, got:\n%s", view.Content)
+	}
+
+	// 2. Invalid UTF-8 bytes sanitized
+	invalidBytes := []byte("header\ncorrupt: \xff\xfe data\nfooter\n")
+	invalidPath := filepath.Join(dir, "invalid.txt")
+	if err := os.WriteFile(invalidPath, invalidBytes, 0644); err != nil {
+		t.Fatalf("write invalid UTF-8 file failed: %v", err)
+	}
+
+	view, err = w.Open(invalidPath, 1, 10)
+	if err != nil {
+		t.Fatalf("Open invalid UTF-8 file failed: %v", err)
+	}
+	if !utf8.ValidString(view.Content) {
+		t.Errorf("expected output to be sanitized to valid UTF-8, but got invalid UTF-8 string")
+	}
+	if !strings.Contains(view.Content, "\uFFFD") {
+		t.Errorf("expected replacement character \\uFFFD for invalid bytes, got:\n%s", view.Content)
+	}
+
+	// 3. UTF-8 BOM stripped cleanly
+	bomBytes := append([]byte("\xef\xbb\xbf"), []byte("bom line 1\nbom line 2\n")...)
+	bomPath := filepath.Join(dir, "bom.txt")
+	if err := os.WriteFile(bomPath, bomBytes, 0644); err != nil {
+		t.Fatalf("write BOM file failed: %v", err)
+	}
+
+	view, err = w.Open(bomPath, 1, 10)
+	if err != nil {
+		t.Fatalf("Open BOM file failed: %v", err)
+	}
+	if !utf8.ValidString(view.Content) {
+		t.Errorf("expected valid UTF-8 with BOM file")
+	}
+	if !strings.Contains(view.Content, "1: bom line 1") {
+		t.Errorf("expected clean BOM stripping on line 1, got:\n%s", view.Content)
+	}
+	if strings.Contains(view.Content, "\ufeff") {
+		t.Errorf("expected BOM character to be stripped from content")
+	}
+}
+
+func TestWindowedFileSetWindowSize(t *testing.T) {
+	dir := t.TempDir()
+	filePath := createTestFile(t, dir, "sample.txt", "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
+	w := NewWindowedFileReader(3)
+	view, err := w.Open(filePath, 1, 3)
+	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-
-	var wg sync.WaitGroup
-	workers := 8
-	iterations := 50
-
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-			for j := 0; j < iterations; j++ {
-				switch (workerID + j) % 4 {
-				case 0:
-					_, _ = w.ScrollDown(2)
-				case 1:
-					_, _ = w.ScrollUp(2)
-				case 2:
-					_, _ = w.Goto(workerID*5 + j)
-				case 3:
-					_, _, _, _ = w.CurrentPosition()
-				}
-			}
-		}(i)
+	if view.EndLine != 3 {
+		t.Errorf("expected EndLine 3, got %d", view.EndLine)
 	}
-
-	wg.Wait()
+	w.SetWindowSize(5)
+	view, err = w.View()
+	if err != nil {
+		t.Fatalf("View failed: %v", err)
+	}
+	if view.EndLine != 5 {
+		t.Errorf("expected EndLine 5 after SetWindowSize(5), got %d", view.EndLine)
+	}
 }

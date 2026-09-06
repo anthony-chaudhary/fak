@@ -1,6 +1,7 @@
 package toolbound
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -21,32 +22,51 @@ var (
 	ErrInvalidPath = errors.New("invalid path")
 )
 
-// WindowedFileReader provides stateful, windowed file reading with relative
-// line navigation to bound tool observation bloat.
+// WindowView represents the formatted output of a file window.
+type WindowView struct {
+	Path       string
+	StartLine  int
+	EndLine    int
+	TotalLines int
+	Content    string
+}
+
+// WindowedFileReader represents an active windowed file reader state with relative line navigation.
 type WindowedFileReader struct {
-	mu                sync.RWMutex
+	mu sync.RWMutex
+
 	rootDir           string
 	defaultWindowSize int
 
-	path         string
-	resolvedPath string
-	currentLine  int
-	windowSize   int
-	totalLines   int
-	lines        []string
+	Path         string
+	Lines        []string
+	TotalLines   int
+	CurrentStart int
+	WindowSize   int
 }
 
-// NewWindowedFileReader creates a WindowedFileReader confined to rootDir.
-// If rootDir is omitted or empty, it defaults to the current working directory.
-func NewWindowedFileReader(rootDir ...string) *WindowedFileReader {
+// NewWindowedFileReader creates a WindowedFileReader.
+// Optional arguments may provide a root confinement directory (string)
+// and/or a default window size (int).
+// If unspecified, defaultWindowSize defaults to DefaultWindowSize (100) and rootDir is unset.
+func NewWindowedFileReader(args ...any) *WindowedFileReader {
+	size := DefaultWindowSize
 	root := ""
-	if len(rootDir) > 0 {
-		root = rootDir[0]
+	for _, arg := range args {
+		switch v := arg.(type) {
+		case int:
+			if v > 0 {
+				size = v
+			}
+		case string:
+			root = v
+		}
 	}
 	return &WindowedFileReader{
 		rootDir:           root,
-		defaultWindowSize: DefaultWindowSize,
-		currentLine:       1,
+		defaultWindowSize: size,
+		CurrentStart:      1,
+		WindowSize:        size,
 	}
 }
 
@@ -57,7 +77,7 @@ func (w *WindowedFileReader) RootDir() string {
 	return w.rootDir
 }
 
-// SetRootDir sets the root confinement directory.
+// SetRootDir sets the root confinement directory for path confinement.
 func (w *WindowedFileReader) SetRootDir(root string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -84,13 +104,25 @@ func (w *WindowedFileReader) SetDefaultWindowSize(size int) {
 	w.defaultWindowSize = size
 }
 
-// Open opens the file at path, sets the initial line and window size, and
-// returns the window slice formatted with 1-based line numbers.
-//
-// If windowSize <= 0, it defaults to 100.
-// If line <= 0, it defaults to 1.
-// If line exceeds total lines, it is clamped to EOF (totalLines, or 1 if empty).
-func (w *WindowedFileReader) Open(path string, line int, windowSize int) ([]string, error) {
+// SetWindowSize updates the active window size.
+func (w *WindowedFileReader) SetWindowSize(size int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if size <= 0 {
+		if w.defaultWindowSize > 0 {
+			size = w.defaultWindowSize
+		} else {
+			size = DefaultWindowSize
+		}
+	}
+	w.WindowSize = size
+}
+
+// Open reads the file at path (using os.ReadFile), splits it into lines with UTF-8 safety,
+// clamps startLine to [1, TotalLines] (or line 1 if empty),
+// sets WindowSize (defaulting to defaultWindowSize if <= 0), and returns the WindowView.
+// If rootDir is configured, path confinement is enforced against rootDir.
+func (w *WindowedFileReader) Open(path string, startLine int, windowSize int) (*WindowView, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -101,10 +133,11 @@ func (w *WindowedFileReader) Open(path string, line int, windowSize int) ([]stri
 
 	data, err := os.ReadFile(resolved)
 	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
+		return nil, err
 	}
 
 	parsedLines := splitLines(data)
+	total := len(parsedLines)
 
 	if windowSize <= 0 {
 		if w.defaultWindowSize > 0 {
@@ -114,86 +147,114 @@ func (w *WindowedFileReader) Open(path string, line int, windowSize int) ([]stri
 		}
 	}
 
-	total := len(parsedLines)
-	if line <= 0 {
-		line = 1
-	}
-	if total > 0 && line > total {
-		line = total
-	} else if total == 0 {
-		line = 1
+	if total == 0 {
+		startLine = 1
+	} else {
+		if startLine < 1 {
+			startLine = 1
+		} else if startLine > total {
+			startLine = total
+		}
 	}
 
-	w.path = path
-	w.resolvedPath = resolved
-	w.lines = parsedLines
-	w.totalLines = total
-	w.currentLine = line
-	w.windowSize = windowSize
+	w.Path = path
+	w.Lines = parsedLines
+	w.TotalLines = total
+	w.CurrentStart = startLine
+	w.WindowSize = windowSize
 
-	return w.windowSliceLocked(), nil
+	return w.viewLocked(), nil
 }
 
-// ScrollDown advances the window forward by n lines and returns the new window slice.
-// If n is negative, it retreats backwards by -n lines.
-// Window start line is clamped to totalLines (EOF clamping).
-func (w *WindowedFileReader) ScrollDown(n int) ([]string, error) {
+// ScrollDown advances CurrentStart by n lines. If CurrentStart + WindowSize > TotalLines, it clamps gracefully.
+// If n < 0, it calls ScrollUp(-n).
+// Returns the updated WindowView.
+func (w *WindowedFileReader) ScrollDown(n int) (*WindowView, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	if !w.isOpenLocked() {
 		return nil, ErrNoFileOpen
 	}
+
+	if n < 0 {
+		return w.scrollUpLocked(-n), nil
+	}
+	if n == 0 {
+		return w.viewLocked(), nil
+	}
+
 	return w.scrollDownLocked(n), nil
 }
 
-// ScrollUp retreats the window backward by n lines and returns the new window slice.
-// If n is negative, it advances forward by -n lines.
-// Window start line is clamped to line 1.
-func (w *WindowedFileReader) ScrollUp(n int) ([]string, error) {
+// ScrollUp decrements CurrentStart by n lines. Clamps to line 1.
+// If n < 0, it calls ScrollDown(-n).
+// Returns the updated WindowView.
+func (w *WindowedFileReader) ScrollUp(n int) (*WindowView, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	if !w.isOpenLocked() {
 		return nil, ErrNoFileOpen
 	}
+
+	if n < 0 {
+		return w.scrollDownLocked(-n), nil
+	}
+	if n == 0 {
+		return w.viewLocked(), nil
+	}
+
 	return w.scrollUpLocked(n), nil
 }
 
-// Goto jumps the window start to the specified line number and returns the new window slice.
-// Line numbers are clamped between 1 and totalLines (or 1 for an empty file).
-func (w *WindowedFileReader) Goto(line int) ([]string, error) {
+// Goto jumps CurrentStart so that target line is at the top.
+// Clamps to valid range [1, TotalLines] (or line 1 if empty).
+// Returns the updated WindowView.
+func (w *WindowedFileReader) Goto(line int) (*WindowView, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	if !w.isOpenLocked() {
 		return nil, ErrNoFileOpen
+	}
+
+	if w.TotalLines == 0 {
+		w.CurrentStart = 1
+		return w.viewLocked(), nil
 	}
 
 	if line < 1 {
 		line = 1
-	}
-	if w.totalLines > 0 && line > w.totalLines {
-		line = w.totalLines
-	} else if w.totalLines == 0 {
-		line = 1
+	} else if line > w.TotalLines {
+		line = w.TotalLines
 	}
 
-	w.currentLine = line
-	return w.windowSliceLocked(), nil
+	w.CurrentStart = line
+	return w.viewLocked(), nil
 }
 
-// CurrentPosition returns the state of the currently open file:
-// path, 1-based start line, windowSize, and totalLines.
+// CurrentPosition returns the current path, start line, window size, and total lines.
 // If no file is open, it returns ("", 0, 0, 0).
-func (w *WindowedFileReader) CurrentPosition() (path string, line int, windowSize int, totalLines int) {
+func (w *WindowedFileReader) CurrentPosition() (path string, currentStart int, windowSize int, totalLines int) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
 	if !w.isOpenLocked() {
 		return "", 0, 0, 0
 	}
-	return w.path, w.currentLine, w.windowSize, w.totalLines
+	return w.Path, w.CurrentStart, w.WindowSize, w.TotalLines
+}
+
+// View returns the current WindowView without moving the current line position.
+func (w *WindowedFileReader) View() (*WindowView, error) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if !w.isOpenLocked() {
+		return nil, ErrNoFileOpen
+	}
+	return w.viewLocked(), nil
 }
 
 // Close unloads the currently opened file and resets position.
@@ -201,15 +262,14 @@ func (w *WindowedFileReader) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	w.path = ""
-	w.resolvedPath = ""
-	w.lines = nil
-	w.totalLines = 0
-	w.currentLine = 1
+	w.Path = ""
+	w.Lines = nil
+	w.TotalLines = 0
+	w.CurrentStart = 1
 	return nil
 }
 
-// IsOpen reports whether a file is currently open.
+// IsOpen reports whether a file is currently open in the reader.
 func (w *WindowedFileReader) IsOpen() bool {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -217,72 +277,100 @@ func (w *WindowedFileReader) IsOpen() bool {
 }
 
 func (w *WindowedFileReader) isOpenLocked() bool {
-	return w.lines != nil
+	return w.Lines != nil
 }
 
-func (w *WindowedFileReader) scrollDownLocked(n int) []string {
-	if n < 0 {
-		return w.scrollUpLocked(-n)
-	}
-	if n == 0 {
-		return w.windowSliceLocked()
+func (w *WindowedFileReader) scrollDownLocked(n int) *WindowView {
+	if w.TotalLines == 0 {
+		w.CurrentStart = 1
+		return w.viewLocked()
 	}
 
-	newLine := w.currentLine + n
-	if w.totalLines > 0 && newLine > w.totalLines {
-		newLine = w.totalLines
-	} else if w.totalLines == 0 {
-		newLine = 1
+	target := w.CurrentStart + n
+	maxStart := w.TotalLines - w.WindowSize + 1
+	if maxStart < 1 {
+		maxStart = 1
 	}
-	w.currentLine = newLine
-	return w.windowSliceLocked()
+
+	if target > maxStart {
+		if w.CurrentStart > maxStart {
+			// Positioned past maxStart (e.g. from Goto); clamp to TotalLines
+			if target > w.TotalLines {
+				target = w.TotalLines
+			}
+		} else {
+			target = maxStart
+		}
+	}
+	w.CurrentStart = target
+	return w.viewLocked()
 }
 
-func (w *WindowedFileReader) scrollUpLocked(n int) []string {
-	if n < 0 {
-		return w.scrollDownLocked(-n)
-	}
-	if n == 0 {
-		return w.windowSliceLocked()
+func (w *WindowedFileReader) scrollUpLocked(n int) *WindowView {
+	if w.TotalLines == 0 {
+		w.CurrentStart = 1
+		return w.viewLocked()
 	}
 
-	newLine := w.currentLine - n
-	if newLine < 1 {
-		newLine = 1
+	target := w.CurrentStart - n
+	if target < 1 {
+		target = 1
 	}
-	w.currentLine = newLine
-	return w.windowSliceLocked()
+	w.CurrentStart = target
+	return w.viewLocked()
 }
 
-func (w *WindowedFileReader) windowSliceLocked() []string {
-	if len(w.lines) == 0 {
-		return []string{}
+func (w *WindowedFileReader) viewLocked() *WindowView {
+	total := w.TotalLines
+	path := w.Path
+	windowSize := w.WindowSize
+
+	if total == 0 {
+		content := fmt.Sprintf("=== [%s] (lines 0-0 of 0) ===\n\n=== Navigation: ScrollDown(n), ScrollUp(n), Goto(line) | [EOF] ===", path)
+		return &WindowView{
+			Path:       path,
+			StartLine:  0,
+			EndLine:    0,
+			TotalLines: 0,
+			Content:    content,
+		}
 	}
 
-	start := w.currentLine
-	if start < 1 {
-		start = 1
-	}
-	if start > len(w.lines) {
-		start = len(w.lines)
-	}
-
-	end := start + w.windowSize - 1
-	if end > len(w.lines) {
-		end = len(w.lines)
+	startLine := w.CurrentStart
+	if startLine < 1 {
+		startLine = 1
+	} else if startLine > total {
+		startLine = total
 	}
 
-	count := end - start + 1
-	if count <= 0 {
-		return []string{}
+	endLine := startLine + windowSize - 1
+	if endLine > total {
+		endLine = total
 	}
 
-	res := make([]string, count)
-	for i := 0; i < count; i++ {
-		lineNum := start + i
-		res[i] = fmt.Sprintf("%d: %s", lineNum, w.lines[lineNum-1])
+	var sb strings.Builder
+	// Header: === [path] (lines <start>-<end> of <total>) ===\n
+	fmt.Fprintf(&sb, "=== [%s] (lines %d-%d of %d) ===\n", path, startLine, endLine, total)
+
+	// Body: <line>: <text>\n for each line in window
+	for i := startLine; i <= endLine; i++ {
+		fmt.Fprintf(&sb, "%d: %s\n", i, w.Lines[i-1])
 	}
-	return res
+
+	// Footer: \n=== Navigation: ScrollDown(n), ScrollUp(n), Goto(line) | End of Window === (or [EOF] if end of file reached).
+	navStatus := "End of Window"
+	if endLine >= total {
+		navStatus = "[EOF]"
+	}
+	fmt.Fprintf(&sb, "\n=== Navigation: ScrollDown(n), ScrollUp(n), Goto(line) | %s ===", navStatus)
+
+	return &WindowView{
+		Path:       path,
+		StartLine:  startLine,
+		EndLine:    endLine,
+		TotalLines: total,
+		Content:    sb.String(),
+	}
 }
 
 func (w *WindowedFileReader) resolvePathLocked(path string) (string, error) {
@@ -294,46 +382,53 @@ func (w *WindowedFileReader) resolvePathLocked(path string) (string, error) {
 		return "", fmt.Errorf("%w: path contains NUL byte", ErrInvalidPath)
 	}
 
-	root := w.rootDir
-	if root == "" {
-		root = "."
-	}
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return "", fmt.Errorf("resolve root directory: %w", err)
-	}
-	absRoot = filepath.Clean(absRoot)
-
-	// Normalize separators for cross-platform traversal checks
-	normalized := filepath.FromSlash(strings.ReplaceAll(trimmed, "\\", "/"))
-
-	var target string
-	if filepath.IsAbs(normalized) {
-		target = filepath.Clean(normalized)
-	} else {
-		target = filepath.Clean(filepath.Join(absRoot, normalized))
-	}
-
-	// 1. Lexical confinement check
-	if !isPathWithin(absRoot, target) {
-		return "", fmt.Errorf("%w: path %q escapes root %q", ErrPathEscape, path, absRoot)
-	}
-
-	// 2. Symlink evaluation check
-	evalRoot, err := filepath.EvalSymlinks(absRoot)
-	if err == nil {
-		absRoot = evalRoot
-	}
-
-	evalTarget, err := filepath.EvalSymlinks(target)
-	if err == nil {
-		if !isPathWithin(absRoot, evalTarget) {
-			return "", fmt.Errorf("%w: path %q escapes root via symlink to %q", ErrPathEscape, path, evalTarget)
+	if w.rootDir != "" {
+		absRoot, err := filepath.Abs(w.rootDir)
+		if err != nil {
+			return "", fmt.Errorf("resolve root directory: %w", err)
 		}
-		target = evalTarget
+		absRoot = filepath.Clean(absRoot)
+
+		normalized := filepath.FromSlash(strings.ReplaceAll(trimmed, "\\", "/"))
+
+		var target string
+		if filepath.IsAbs(normalized) {
+			target = filepath.Clean(normalized)
+		} else {
+			target = filepath.Clean(filepath.Join(absRoot, normalized))
+		}
+
+		// 1. Lexical confinement check
+		if !isPathWithin(absRoot, target) {
+			return "", fmt.Errorf("%w: path %q escapes root %q", ErrPathEscape, path, absRoot)
+		}
+
+		// 2. Symlink evaluation check
+		evalRoot, err := filepath.EvalSymlinks(absRoot)
+		if err == nil {
+			absRoot = evalRoot
+		}
+
+		evalTarget, err := filepath.EvalSymlinks(target)
+		if err == nil {
+			if !isPathWithin(absRoot, evalTarget) {
+				return "", fmt.Errorf("%w: path %q escapes root via symlink to %q", ErrPathEscape, path, evalTarget)
+			}
+			target = evalTarget
+		}
+
+		info, err := os.Stat(target)
+		if err != nil {
+			return "", err
+		}
+		if info.IsDir() {
+			return "", fmt.Errorf("%w: path %q is a directory", ErrInvalidPath, path)
+		}
+
+		return target, nil
 	}
 
-	info, err := os.Stat(target)
+	info, err := os.Stat(trimmed)
 	if err != nil {
 		return "", err
 	}
@@ -341,7 +436,7 @@ func (w *WindowedFileReader) resolvePathLocked(path string) (string, error) {
 		return "", fmt.Errorf("%w: path %q is a directory", ErrInvalidPath, path)
 	}
 
-	return target, nil
+	return trimmed, nil
 }
 
 func isPathWithin(base, target string) bool {
@@ -366,8 +461,14 @@ func splitLines(data []byte) []string {
 	if len(data) == 0 {
 		return []string{}
 	}
-	s := string(data)
+	// Strip UTF-8 BOM if present
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
+	if len(data) == 0 {
+		return []string{}
+	}
+	s := strings.ToValidUTF8(string(data), "\uFFFD")
 	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
 	hasTrailingNewline := strings.HasSuffix(s, "\n")
 	if hasTrailingNewline {
 		s = s[:len(s)-1]
