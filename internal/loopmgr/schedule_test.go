@@ -1,6 +1,7 @@
 package loopmgr
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -50,11 +51,11 @@ func TestScheduleValidateRequiresNamedMissedPolicy(t *testing.T) {
 			t.Fatalf("Validate(%q) = %v, want ok", p, err)
 		}
 	}
-	if err := (Schedule{JobID: "", IntervalSeconds: 60, MissedRun: MissedSkip}).Validate(); err == nil {
-		t.Fatalf("Validate accepted an empty job id")
+	if err := (Schedule{JobID: "", IntervalSeconds: 60, MissedRun: MissedSkip}).Validate(); err == nil || !errors.Is(err, ErrInvalidSchedule) {
+		t.Fatalf("Validate accepted an empty job id or did not wrap ErrInvalidSchedule: %v", err)
 	}
-	if err := (Schedule{JobID: "j", IntervalSeconds: 0, MissedRun: MissedSkip}).Validate(); err == nil {
-		t.Fatalf("Validate accepted interval <= 0")
+	if err := (Schedule{JobID: "j", IntervalSeconds: 0, MissedRun: MissedSkip}).Validate(); err == nil || !errors.Is(err, ErrInvalidSchedule) {
+		t.Fatalf("Validate accepted interval <= 0 with no at_unix_nano or did not wrap ErrInvalidSchedule: %v", err)
 	}
 }
 
@@ -190,5 +191,178 @@ func TestJitterDeterministicPerJobID(t *testing.T) {
 	a2 := Schedule{JobID: "job-a", IntervalSeconds: 999, MissedRun: MissedCatchUp, JitterSeconds: 60}
 	if a.JitterOffsetNanos() != a2.JitterOffsetNanos() {
 		t.Fatalf("jitter offset depends on more than the job id")
+	}
+}
+
+func TestScheduleTimingModeMutualExclusion(t *testing.T) {
+	// Both unset / zero -> ErrInvalidSchedule
+	bothZero := Schedule{JobID: "bad-zero", MissedRun: MissedSkip}
+	if err := bothZero.Validate(); err == nil || !errors.Is(err, ErrInvalidSchedule) {
+		t.Fatalf("Validate accepted both timing modes zero; got err: %v", err)
+	}
+
+	// Both set (>0) -> ErrInvalidSchedule
+	bothSet := Schedule{JobID: "bad-both", IntervalSeconds: 60, AtUnixNano: 1_000_000, MissedRun: MissedSkip}
+	if err := bothSet.Validate(); err == nil || !errors.Is(err, ErrInvalidSchedule) {
+		t.Fatalf("Validate accepted both timing modes set; got err: %v", err)
+	}
+
+	// Negative IntervalSeconds -> ErrInvalidSchedule
+	negInterval := Schedule{JobID: "bad-neg-int", IntervalSeconds: -10, MissedRun: MissedSkip}
+	if err := negInterval.Validate(); err == nil || !errors.Is(err, ErrInvalidSchedule) {
+		t.Fatalf("Validate accepted negative IntervalSeconds; got err: %v", err)
+	}
+
+	// Negative AtUnixNano -> ErrInvalidSchedule
+	negAt := Schedule{JobID: "bad-neg-at", AtUnixNano: -500, MissedRun: MissedSkip}
+	if err := negAt.Validate(); err == nil || !errors.Is(err, ErrInvalidSchedule) {
+		t.Fatalf("Validate accepted negative AtUnixNano; got err: %v", err)
+	}
+
+	// Valid recurring mode
+	rec := Schedule{JobID: "ok-recurring", IntervalSeconds: 60, MissedRun: MissedSkip}
+	if err := rec.Validate(); err != nil {
+		t.Fatalf("Validate rejected valid recurring schedule: %v", err)
+	}
+	if !rec.IsRecurring() || rec.IsOneShot() {
+		t.Fatalf("rec.IsRecurring() = %v, rec.IsOneShot() = %v, want true, false", rec.IsRecurring(), rec.IsOneShot())
+	}
+
+	// Valid one-shot mode
+	oneShot := Schedule{JobID: "ok-oneshot", AtUnixNano: 1_700_000_000_000_000_000, MissedRun: MissedSkip}
+	if err := oneShot.Validate(); err != nil {
+		t.Fatalf("Validate rejected valid one-shot schedule: %v", err)
+	}
+	if !oneShot.IsOneShot() || oneShot.IsRecurring() {
+		t.Fatalf("oneShot.IsOneShot() = %v, oneShot.IsRecurring() = %v, want true, false", oneShot.IsOneShot(), oneShot.IsRecurring())
+	}
+}
+
+func TestScheduleOneShotDueFutureAndConsumed(t *testing.T) {
+	targetTime := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	targetNanos := targetTime.UnixNano()
+
+	s := Schedule{
+		JobID:      "one-shot-job",
+		AtUnixNano: targetNanos,
+		MissedRun:  MissedSkip,
+	}
+
+	loop := LoopSnapshot{LoopID: s.JobID}
+
+	// 1. Future (not yet due)
+	before := targetTime.Add(-10 * time.Second)
+	dBefore := s.Next(loop, before, 0)
+	if dBefore.Fire {
+		t.Fatalf("expected one-shot in future not to fire, got %+v", dBefore)
+	}
+	if dBefore.Reason != ReasonScheduleNotDue {
+		t.Fatalf("reason = %q, want %q", dBefore.Reason, ReasonScheduleNotDue)
+	}
+	if dBefore.FireAtUnixNano != targetNanos {
+		t.Fatalf("FireAtUnixNano = %d, want %d", dBefore.FireAtUnixNano, targetNanos)
+	}
+
+	// 2. Exactly due
+	dDue := s.Next(loop, targetTime, 0)
+	if !dDue.Fire {
+		t.Fatalf("expected one-shot at target time to fire, got %+v", dDue)
+	}
+	if dDue.Reason != ReasonScheduleFire {
+		t.Fatalf("reason = %q, want %q", dDue.Reason, ReasonScheduleFire)
+	}
+	if dDue.FireAtUnixNano != targetNanos {
+		t.Fatalf("FireAtUnixNano = %d, want %d", dDue.FireAtUnixNano, targetNanos)
+	}
+
+	// 3. Past due (due in the past, unconsumed)
+	after := targetTime.Add(10 * time.Minute)
+	dAfter := s.Next(loop, after, 0)
+	if !dAfter.Fire {
+		t.Fatalf("expected unconsumed past-due one-shot to fire, got %+v", dAfter)
+	}
+	if dAfter.Reason != ReasonScheduleFire {
+		t.Fatalf("reason = %q, want %q", dAfter.Reason, ReasonScheduleFire)
+	}
+	if dAfter.FireAtUnixNano != targetNanos {
+		t.Fatalf("FireAtUnixNano = %d, want %d", dAfter.FireAtUnixNano, targetNanos)
+	}
+
+	// 4. Consumed via Schedule.Consumed field -> never re-fires
+	sConsumed := s
+	sConsumed.Consumed = true
+	if !sConsumed.IsConsumed() {
+		t.Fatalf("expected sConsumed.IsConsumed() == true")
+	}
+	dConsumed := sConsumed.Next(loop, after, 0)
+	if dConsumed.Fire {
+		t.Fatalf("expected consumed one-shot not to fire, got %+v", dConsumed)
+	}
+	if dConsumed.Reason != ReasonScheduleConsumed {
+		t.Fatalf("reason = %q, want %q", dConsumed.Reason, ReasonScheduleConsumed)
+	}
+
+	// 5. Consumed via NextWithConsumed argument -> overrides unconsumed schedule
+	dConsumedArg := s.NextWithConsumed(loop, after, 0, true)
+	if dConsumedArg.Fire {
+		t.Fatalf("expected NextWithConsumed(..., consumed=true) not to fire, got %+v", dConsumedArg)
+	}
+	if dConsumedArg.Reason != ReasonScheduleConsumed {
+		t.Fatalf("reason = %q, want %q", dConsumedArg.Reason, ReasonScheduleConsumed)
+	}
+
+	// 6. Overlap lock wins even for due one-shot
+	loopInFlight := LoopSnapshot{LoopID: s.JobID, Started: 1, Ended: 0}
+	dOverlap := s.Next(loopInFlight, targetTime, 0)
+	if dOverlap.Fire {
+		t.Fatalf("expected overlap lock to block due one-shot, got %+v", dOverlap)
+	}
+	if dOverlap.Reason != ReasonOverlapLock {
+		t.Fatalf("reason = %q, want %q", dOverlap.Reason, ReasonOverlapLock)
+	}
+}
+
+func TestScheduleOneShotWithJitter(t *testing.T) {
+	targetTime := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	targetNanos := targetTime.UnixNano()
+
+	s := Schedule{
+		JobID:         "jittered-oneshot",
+		AtUnixNano:    targetNanos,
+		MissedRun:     MissedSkip,
+		JitterSeconds: 30,
+	}
+
+	jitter := s.JitterOffsetNanos()
+	if jitter <= 0 || jitter >= 30*int64(time.Second) {
+		t.Fatalf("expected deterministic jitter > 0 and < 30s, got %d", jitter)
+	}
+
+	expectedFireNanos := targetNanos + jitter
+	loop := LoopSnapshot{LoopID: s.JobID}
+
+	// At nominal target time (before jitter boundary): not due
+	dNominal := s.Next(loop, targetTime, 0)
+	if dNominal.Fire {
+		t.Fatalf("fired before jitter offset: %+v", dNominal)
+	}
+	if dNominal.Reason != ReasonScheduleNotDue {
+		t.Fatalf("reason = %q, want %q", dNominal.Reason, ReasonScheduleNotDue)
+	}
+	if dNominal.FireAtUnixNano != expectedFireNanos {
+		t.Fatalf("FireAtUnixNano = %d, want %d", dNominal.FireAtUnixNano, expectedFireNanos)
+	}
+
+	// At jitter boundary: due
+	atJitter := time.Unix(0, expectedFireNanos).UTC()
+	dDue := s.Next(loop, atJitter, 0)
+	if !dDue.Fire {
+		t.Fatalf("expected fire at jittered boundary, got %+v", dDue)
+	}
+	if dDue.Reason != ReasonScheduleFire {
+		t.Fatalf("reason = %q, want %q", dDue.Reason, ReasonScheduleFire)
+	}
+	if dDue.FireAtUnixNano != expectedFireNanos {
+		t.Fatalf("FireAtUnixNano = %d, want %d", dDue.FireAtUnixNano, expectedFireNanos)
 	}
 }

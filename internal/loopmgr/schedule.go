@@ -3,10 +3,15 @@ package loopmgr
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
+
+// ErrInvalidSchedule indicates that a Schedule specification is malformed or
+// violates timing mode mutual exclusivity.
+var ErrInvalidSchedule = errors.New("loopmgr: invalid schedule")
 
 // Schedule decides WHEN a recurring job fires, with correctness as a primitive.
 // It is the schedule half the field re-debugs per vendor, written once over the
@@ -49,18 +54,27 @@ func ValidMissedRunPolicy(p MissedRunPolicy) bool {
 	}
 }
 
-// Schedule is the recurring-fire definition for one loop. It carries the
-// cadence (IntervalSeconds), the explicit missed-run policy, and the jitter
-// window — all pure data, validated by Validate. The cron-expression projection
-// (P4.3, the OS scheduler) consumes Schedule; loopmgr itself decides the fire.
+// Schedule is the fire definition for one loop. It specifies either a recurring
+// cadence (IntervalSeconds > 0) or an absolute one-shot timestamp (AtUnixNano > 0),
+// along with the explicit missed-run policy and jitter window — all pure data,
+// validated by Validate. The cron-expression projection (P4.3, the OS scheduler)
+// consumes Schedule; loopmgr itself decides the fire.
 type Schedule struct {
 	// JobID is the schedule identity. Jitter is derived from it, so two jobs
 	// with distinct ids get distinct (but each deterministic) offsets.
 	JobID string `json:"job_id"`
 
 	// IntervalSeconds is the nominal cadence: a fire is due every this-many
-	// seconds from the schedule's anchor. Must be > 0.
-	IntervalSeconds int64 `json:"interval_seconds"`
+	// seconds from the schedule's anchor. Must be > 0 when AtUnixNano == 0.
+	IntervalSeconds int64 `json:"interval_seconds,omitempty"`
+
+	// AtUnixNano is an absolute one-shot fire timestamp in unix nanoseconds.
+	// Must be > 0 when IntervalSeconds == 0.
+	AtUnixNano int64 `json:"at_unix_nano,omitempty"`
+
+	// Consumed indicates whether a one-shot schedule has already fired / completed.
+	// Once consumed, subsequent Next calls will not re-fire.
+	Consumed bool `json:"consumed,omitempty"`
 
 	// MissedRun is the explicit, named policy for elapsed-unobserved windows.
 	// There is no default: Validate rejects an empty policy.
@@ -81,6 +95,8 @@ const (
 	ReasonScheduleFire = "SCHEDULE_FIRE"
 	// ReasonScheduleNotDue: now is before the next due boundary.
 	ReasonScheduleNotDue = "SCHEDULE_NOT_DUE"
+	// ReasonScheduleConsumed: a one-shot schedule has already fired or completed.
+	ReasonScheduleConsumed = "SCHEDULE_CONSUMED"
 	// ReasonOverlapLock: the prior run's start has no matching end — refuse so a
 	// wake-from-sleep cannot double-fire the same job.
 	ReasonOverlapLock = "OVERLAP_LOCK"
@@ -103,15 +119,38 @@ type FireDecision struct {
 	FireAtUnixNano int64  `json:"fire_at_unix_nano,omitempty"`
 }
 
-// Validate checks a Schedule is well-formed: a job id, a positive interval, and
-// a NAMED missed-run policy. The policy check is the load-bearing one — a zero
+// IsOneShot reports whether s represents an absolute one-shot schedule.
+func (s Schedule) IsOneShot() bool {
+	return s.AtUnixNano > 0 && s.IntervalSeconds == 0
+}
+
+// IsRecurring reports whether s represents a recurring interval schedule.
+func (s Schedule) IsRecurring() bool {
+	return s.IntervalSeconds > 0 && s.AtUnixNano == 0
+}
+
+// IsConsumed reports whether s is a consumed one-shot schedule.
+func (s Schedule) IsConsumed() bool {
+	return s.Consumed
+}
+
+// Validate checks a Schedule is well-formed: a job id, exactly one timing mode
+// (either positive IntervalSeconds or positive AtUnixNano, strictly mutually exclusive),
+// and a NAMED missed-run policy. The policy check is the load-bearing one — a zero
 // MissedRun is rejected so the policy can never be silently defaulted.
 func (s Schedule) Validate() error {
 	if strings.TrimSpace(s.JobID) == "" {
-		return fmt.Errorf("schedule job_id is required")
+		return fmt.Errorf("%w: schedule job_id is required", ErrInvalidSchedule)
 	}
-	if s.IntervalSeconds <= 0 {
-		return fmt.Errorf("schedule %q interval_seconds = %d, want > 0", s.JobID, s.IntervalSeconds)
+	if s.IntervalSeconds < 0 {
+		return fmt.Errorf("%w: schedule %q interval_seconds = %d, want >= 0", ErrInvalidSchedule, s.JobID, s.IntervalSeconds)
+	}
+	if s.AtUnixNano < 0 {
+		return fmt.Errorf("%w: schedule %q at_unix_nano = %d, want >= 0", ErrInvalidSchedule, s.JobID, s.AtUnixNano)
+	}
+	if (s.IntervalSeconds > 0 && s.AtUnixNano > 0) || (s.IntervalSeconds == 0 && s.AtUnixNano == 0) {
+		return fmt.Errorf("%w: schedule %q requires exactly one timing mode (interval_seconds > 0 XOR at_unix_nano > 0), got interval_seconds=%d at_unix_nano=%d",
+			ErrInvalidSchedule, s.JobID, s.IntervalSeconds, s.AtUnixNano)
 	}
 	if !ValidMissedRunPolicy(s.MissedRun) {
 		return fmt.Errorf("schedule %q missed_run = %q, want an explicit %q or %q (never defaulted)",
@@ -167,14 +206,23 @@ func (s Schedule) anchorUnixNano(loop LoopSnapshot, startUnixNano int64) int64 {
 //
 //  1. overlap-lock first — a live run always wins, even past a due boundary, so
 //     a wake-from-sleep cannot double-fire.
-//  2. not-due — now is before the next boundary; nothing owed.
-//  3. due, with at most the current window owed — a normal fire.
-//  4. due, with one or more EARLIER windows missed — honor MissedRun: skip
+//  2. consumed check (for one-shot schedules) — once consumed, never fire again.
+//  3. for one-shot schedules: check whether due (now >= AtUnixNano + jitter).
+//  4. for recurring schedules:
+//     a. not-due — now is before the next boundary; nothing owed.
+//     b. due, with at most the current window owed — a normal fire.
+//     c. due, with one or more EARLIER windows missed — honor MissedRun: skip
 //     re-aligns (no run), catch-up fires once now.
 //
 // The returned FireAtUnixNano is the jittered boundary, so the caller journals a
 // stable fire time independent of when Next was invoked within the window.
 func (s Schedule) Next(loop LoopSnapshot, now time.Time, startUnixNano int64) FireDecision {
+	return s.NextWithConsumed(loop, now, startUnixNano, s.Consumed)
+}
+
+// NextWithConsumed decides whether the job should fire at time now, with an explicit
+// consumed flag that overrides or supplies the consumed status of a one-shot schedule.
+func (s Schedule) NextWithConsumed(loop LoopSnapshot, now time.Time, startUnixNano int64, consumed bool) FireDecision {
 	d := FireDecision{JobID: s.JobID}
 
 	// (1) Overlap-lock: a prior run is still in flight. Refuse unconditionally.
@@ -184,10 +232,37 @@ func (s Schedule) Next(loop LoopSnapshot, now time.Time, startUnixNano int64) Fi
 		return d
 	}
 
+	// (2) Consumed check: one-shot schedule has already fired / completed.
+	if s.IsOneShot() && (consumed || s.Consumed) {
+		d.Reason = ReasonScheduleConsumed
+		d.Summary = "one-shot schedule already consumed — refusing to re-fire"
+		return d
+	}
+
 	nowNanos := now.UTC().UnixNano()
+	jitter := s.JitterOffsetNanos()
+
+	// Handle one-shot timing mode.
+	if s.IsOneShot() {
+		targetNanos := s.AtUnixNano + jitter
+		if nowNanos < targetNanos {
+			d.Reason = ReasonScheduleNotDue
+			d.FireAtUnixNano = targetNanos
+			d.Summary = "not due: one-shot target timestamp not reached"
+			return d
+		}
+
+		// Target has arrived or passed.
+		d.Fire = true
+		d.Reason = ReasonScheduleFire
+		d.FireAtUnixNano = targetNanos
+		d.Summary = "due: firing one-shot schedule"
+		return d
+	}
+
+	// Recurring timing mode.
 	anchor := s.anchorUnixNano(loop, startUnixNano)
 	intervalNanos := s.IntervalSeconds * int64(time.Second)
-	jitter := s.JitterOffsetNanos()
 
 	// Boundaries recur every intervalNanos starting one interval AFTER the
 	// anchor (the anchor is when the job last ran, not a due boundary). We count
@@ -196,7 +271,7 @@ func (s Schedule) Next(loop LoopSnapshot, now time.Time, startUnixNano int64) Fi
 	// were missed.
 	elapsed := nowNanos - (anchor + jitter)
 	windows := int64(0)
-	if elapsed >= 0 {
+	if elapsed >= 0 && intervalNanos > 0 {
 		windows = elapsed / intervalNanos
 	}
 
