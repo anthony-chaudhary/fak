@@ -192,6 +192,9 @@ func (s *Supervisor) Addr() string {
 }
 
 func isMCPComponent(c lockv2.LockedComponent) bool {
+	if c.IsMCP() {
+		return true
+	}
 	lowerID := strings.ToLower(c.ID)
 	lowerProv := strings.ToLower(c.Provider)
 	lowerSrc := strings.ToLower(c.Source)
