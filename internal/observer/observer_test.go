@@ -1878,3 +1878,128 @@ func BenchmarkStepObservation_Validate(b *testing.B) {
 		_ = obs.Validate()
 	}
 }
+
+func TestSessionHistory_TrailingElementsClearedUpToCap(t *testing.T) {
+	const maxHistory = 5
+	const totalCap = 12
+
+	sess := &sessionState{
+		sessionID: "test-gc-dirty-cap",
+		history:   make([]StepObservation, maxHistory, totalCap),
+	}
+
+	// Populate the entire backing array (including beyond len) with dirty data
+	fullBacking := sess.history[:totalCap]
+	for i := 0; i < totalCap; i++ {
+		fullBacking[i] = StepObservation{
+			Tool:   fmt.Sprintf("Tool_%d", i),
+			Args:   map[string]any{"data": fmt.Sprintf("payload_%d", i)},
+			Result: fmt.Sprintf("result_%d", i),
+			Diff:   fmt.Sprintf("diff_%d", i),
+		}
+	}
+
+	cfg := Config{MaxHistoryPerSession: maxHistory}
+
+	// Append a new observation to trigger overflow truncation
+	newObs := StepObservation{
+		Tool:   "Write",
+		Diff:   "new diff",
+		Result: "new result",
+	}
+	sess.evaluate(cfg, &newObs)
+
+	if len(sess.history) != maxHistory {
+		t.Fatalf("expected len(history) == %d, got %d", maxHistory, len(sess.history))
+	}
+
+	// Verify all elements in the backing array beyond len (from maxHistory to totalCap)
+	// have been zeroed/cleared so GC can collect old structures.
+	fullBackingAfter := sess.history[:totalCap]
+	for i := maxHistory; i < totalCap; i++ {
+		slot := fullBackingAfter[i]
+		if slot.Args != nil || slot.Result != nil || slot.Diff != "" || slot.Tool != "" {
+			t.Fatalf("slot %d in backing array was not cleared: %+v", i, slot)
+		}
+	}
+}
+
+func TestObserveSyncBarrier_EliminatesCPUBusySpin(t *testing.T) {
+	p := NewPool(Config{
+		WorkerCount:    2,
+		QueueSize:      16,
+		BarrierTimeout: 50 * time.Millisecond,
+	})
+	if err := p.Start(); err != nil {
+		t.Fatalf("failed to start pool: %v", err)
+	}
+	defer p.Close()
+
+	ctx := context.Background()
+	sessionID := "sess-nobusyspin"
+	sess := p.getOrCreateSession(sessionID)
+
+	// Simulate an in-flight task that stays active for 15ms
+	sess.incInFlight()
+	go func() {
+		time.Sleep(15 * time.Millisecond)
+		sess.decInFlight()
+	}()
+
+	obs := StepObservation{
+		SessionID: sessionID,
+		Tool:      "Write",
+		Diff:      "@@ -1 +1 @@\n+change",
+	}
+
+	start := time.Now()
+	res, err := p.ObserveSyncBarrier(ctx, obs)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.StepVerdict != STEP_ADVANCE {
+		t.Fatalf("expected STEP_ADVANCE, got %s", res.StepVerdict)
+	}
+	if elapsed < 12*time.Millisecond {
+		t.Fatalf("expected barrier to wait for task completion, took only %s", elapsed)
+	}
+}
+
+func TestPool_ResetSession_ClearsHistoryBackingMemory(t *testing.T) {
+	p := NewPool(Config{WorkerCount: 2, QueueSize: 16, MaxHistoryPerSession: 10})
+	if err := p.Start(); err != nil {
+		t.Fatalf("failed to start pool: %v", err)
+	}
+	defer p.Close()
+
+	ctx := context.Background()
+	sessionID := "sess-reset-clear"
+
+	for i := 0; i < 5; i++ {
+		_, err := p.ObserveSyncBarrier(ctx, StepObservation{
+			SessionID: sessionID,
+			Tool:      "Read",
+			Args:      map[string]any{"key": fmt.Sprintf("val_%d", i)},
+			Result:    fmt.Sprintf("result_%d", i),
+		})
+		if err != nil {
+			t.Fatalf("step %d failed: %v", i, err)
+		}
+	}
+
+	sess := p.getOrCreateSession(sessionID)
+	sess.mu.Lock()
+	backing := sess.history[:cap(sess.history)]
+	sess.mu.Unlock()
+
+	p.ResetSession(sessionID)
+
+	// Verify backing array was cleared
+	for i, slot := range backing {
+		if slot.Args != nil || slot.Result != nil || slot.Tool != "" {
+			t.Fatalf("backing slot %d not zeroed after ResetSession: %+v", i, slot)
+		}
+	}
+}
