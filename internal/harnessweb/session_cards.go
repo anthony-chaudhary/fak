@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
-	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -423,42 +422,53 @@ func renderSessionCardsHTML(cards []SessionCard, now time.Time, noColor bool) (s
 	return b.String(), nil
 }
 
+type sseSubscriber struct {
+	ch        chan []byte
+	sessionID string
+}
+
 type sessionHub struct {
-	mu      sync.RWMutex
-	clients map[chan []byte]struct{}
+	mu          sync.RWMutex
+	subscribers map[chan []byte]*sseSubscriber
 }
 
 var defaultSessionHub = &sessionHub{
-	clients: make(map[chan []byte]struct{}),
+	subscribers: make(map[chan []byte]*sseSubscriber),
 }
 
-func (h *sessionHub) subscribe() chan []byte {
+func (h *sessionHub) subscribe(sessionID string) chan []byte {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	ch := make(chan []byte, 32)
-	h.clients[ch] = struct{}{}
+	h.subscribers[ch] = &sseSubscriber{ch: ch, sessionID: sessionID}
 	return ch
 }
 
 func (h *sessionHub) unsubscribe(ch chan []byte) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if _, ok := h.clients[ch]; ok {
-		delete(h.clients, ch)
+	if _, ok := h.subscribers[ch]; ok {
+		delete(h.subscribers, ch)
 		close(ch)
 	}
 }
 
-func (h *sessionHub) broadcast(eventType string, data []byte) {
+func (h *sessionHub) broadcastSession(sessionID string, eventType string, data []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	msg := []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, string(data)))
-	for ch := range h.clients {
-		select {
-		case ch <- msg:
-		default:
+	for ch, sub := range h.subscribers {
+		if sub.sessionID == "" || sessionID == "" || sub.sessionID == sessionID {
+			select {
+			case ch <- msg:
+			default:
+			}
 		}
 	}
+}
+
+func (h *sessionHub) broadcast(eventType string, data []byte) {
+	h.broadcastSession("", eventType, data)
 }
 
 // BroadcastSessionUpdate notifies all connected SSE clients of a session update.
@@ -476,42 +486,32 @@ func BroadcastApprovalRequested(data []byte) {
 	defaultSessionHub.broadcast("approval_requested", data)
 }
 
+// BroadcastSessionEvent notifies SSE clients listening to a specific session (and global subscribers).
+func BroadcastSessionEvent(sessionID string, eventType string, data []byte) {
+	defaultSessionHub.broadcastSession(sessionID, eventType, data)
+}
+
+// SubscribeSessionEvents registers a channel to receive live SSE events for a session
+// (or all sessions if sessionID is empty).
+func SubscribeSessionEvents(sessionID string) chan []byte {
+	return defaultSessionHub.subscribe(sessionID)
+}
+
+// UnsubscribeSessionEvents removes an SSE subscriber channel.
+func UnsubscribeSessionEvents(ch chan []byte) {
+	defaultSessionHub.unsubscribe(ch)
+}
+
 func installSessionRoutes(mux *http.ServeMux, source SessionSource) {
 	installSessionRoutesWithStore(mux, source, nil)
 }
 
 func installSessionRoutesWithStore(mux *http.ServeMux, source SessionSource, s *store) {
-	mux.HandleFunc("GET /api/sessions/events", func(w http.ResponseWriter, r *http.Request) {
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "streaming unsupported", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("X-Accel-Buffering", "no")
-
-		ch := defaultSessionHub.subscribe()
-		defer defaultSessionHub.unsubscribe(ch)
-
-		fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"connected\"}\n\n")
-		flusher.Flush()
-
-		ctx := r.Context()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case msg, ok := <-ch:
-				if !ok {
-					return
-				}
-				_, _ = w.Write(msg)
-				flusher.Flush()
-			}
-		}
-	})
+	mux.HandleFunc("GET /api/sessions/events", handleSessionSSE(false))
+	mux.HandleFunc("GET /v1/fak/sessions/events", handleSessionSSE(false))
+	mux.HandleFunc("GET /v1/fak/sessions/{id}/events", handleSessionSSE(true))
+	mux.HandleFunc("POST /v1/fak/sessions/{id}/events", handleSessionEventHook(source, s))
+	mux.HandleFunc("POST /api/sessions/{id}/events", handleSessionEventHook(source, s))
 
 	mux.HandleFunc("GET /api/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if source == nil {
@@ -586,100 +586,7 @@ func installSessionRoutesWithStore(mux *http.ServeMux, source SessionSource, s *
 		}
 		writeSessionJSON(w, http.StatusAccepted, SessionControlRequest{SessionID: id, Action: action})
 	})
-	mux.HandleFunc("POST /api/sessions/{id}/approval", func(w http.ResponseWriter, r *http.Request) {
-		id, err := url.PathUnescape(r.PathValue("id"))
-		if err != nil || strings.TrimSpace(id) == "" {
-			http.Error(w, "invalid session id", http.StatusBadRequest)
-			return
-		}
-
-		var payload struct {
-			Resolution string `json:"resolution"`
-			Reason     string `json:"reason,omitempty"`
-			ApprovalID string `json:"approval_id,omitempty"`
-		}
-		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); err != nil {
-			http.Error(w, "invalid approval payload: invalid JSON", http.StatusBadRequest)
-			return
-		}
-		resolution := strings.ToLower(strings.TrimSpace(payload.Resolution))
-		if resolution != "accept" && resolution != "decline" {
-			http.Error(w, `invalid approval resolution: must be "accept" or "decline"`, http.StatusBadRequest)
-			return
-		}
-
-		if source != nil {
-			cards, err := source.Sessions(r.Context())
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusServiceUnavailable)
-				return
-			}
-			cards, err = normalizeSessionCards(cards)
-			if err != nil {
-				writeSessionJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
-				return
-			}
-			var selected *SessionCard
-			for i := range cards {
-				if cards[i].ID == id {
-					selected = &cards[i]
-					break
-				}
-			}
-			if selected == nil {
-				http.Error(w, "logical session not found", http.StatusNotFound)
-				return
-			}
-			if selected.State != sessionAwaitingApproval && selected.PendingApproval == nil && selected.PendingInteraction == "" {
-				writeSessionJSON(w, http.StatusConflict, map[string]string{"error": "session is not awaiting approval"})
-				return
-			}
-			approvalID := payload.ApprovalID
-			if approvalID == "" && selected.PendingApproval != nil {
-				approvalID = selected.PendingApproval.ApprovalID
-			}
-			req := SessionApprovalRequest{
-				SessionID:  id,
-				ApprovalID: approvalID,
-				Resolution: resolution,
-				Reason:     payload.Reason,
-			}
-			if err := source.ResolveApproval(r.Context(), req); err != nil {
-				writeSessionJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
-				return
-			}
-			defaultSessionHub.broadcast("approval_resolved", []byte(fmt.Sprintf(`{"session_id":%q,"resolution":%q,"approval_id":%q}`, id, resolution, approvalID)))
-			writeSessionJSON(w, http.StatusOK, map[string]any{
-				"status":      "accepted",
-				"session_id":  id,
-				"approval_id": approvalID,
-				"resolution":  resolution,
-			})
-			return
-		}
-
-		if s != nil && s.hasRun(id) {
-			decision := "approve"
-			if resolution == "decline" {
-				decision = "deny"
-			}
-			approvalID := payload.ApprovalID
-			if err := s.resolve(id, approvalID, decision); err != nil {
-				writeSessionJSON(w, http.StatusConflict, map[string]string{"error": "approval resolution failed: " + err.Error()})
-				return
-			}
-			defaultSessionHub.broadcast("approval_resolved", []byte(fmt.Sprintf(`{"session_id":%q,"resolution":%q,"approval_id":%q}`, id, resolution, approvalID)))
-			writeSessionJSON(w, http.StatusOK, map[string]any{
-				"status":      "accepted",
-				"session_id":  id,
-				"approval_id": approvalID,
-				"resolution":  resolution,
-			})
-			return
-		}
-
-		writeSessionJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "session authority is not connected"})
-	})
+	mux.HandleFunc("POST /api/sessions/{id}/approval", handleSessionApproval(source, s))
 }
 
 func writeSessionJSON(w http.ResponseWriter, status int, value any) {

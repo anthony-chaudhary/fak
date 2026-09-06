@@ -801,6 +801,255 @@ func handlerWithAllSources(s *store, live *liveAdapter, goals goalLister, sessio
 	return mux
 }
 
+// SessionApprovalDirectResolver resolves approvals directly via sessionID, resolution ("accept" or "decline"), and reason.
+type SessionApprovalDirectResolver interface {
+	ResolveApproval(sessionID string, resolution string, reason string) error
+}
+
+// HandleSessionApproval exposes the HTTP handler for POST /api/sessions/{id}/approval.
+func HandleSessionApproval(source any, s *store) http.HandlerFunc {
+	return handleSessionApproval(source, s)
+}
+
+// handleSessionApproval returns an HTTP handler for POST /api/sessions/{id}/approval.
+// It validates the request payload (accept or decline resolution) and dispatches
+// the resolution to the underlying SessionSource or session coordinator, or the fallback store.
+func handleSessionApproval(source any, s *store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := url.PathUnescape(r.PathValue("id"))
+		if err != nil || strings.TrimSpace(id) == "" {
+			http.Error(w, "invalid session id", http.StatusBadRequest)
+			return
+		}
+
+		var payload struct {
+			Resolution string `json:"resolution"`
+			Reason     string `json:"reason,omitempty"`
+			ApprovalID string `json:"approval_id,omitempty"`
+		}
+
+		contentType := r.Header.Get("Content-Type")
+		if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "invalid form payload", http.StatusBadRequest)
+				return
+			}
+			payload.Resolution = r.FormValue("resolution")
+			payload.Reason = r.FormValue("reason")
+			payload.ApprovalID = r.FormValue("approval_id")
+		} else {
+			if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); err != nil {
+				http.Error(w, "invalid approval payload: invalid JSON", http.StatusBadRequest)
+				return
+			}
+		}
+
+		resolution := strings.ToLower(strings.TrimSpace(payload.Resolution))
+		if resolution != "accept" && resolution != "decline" {
+			http.Error(w, `invalid approval resolution: must be "accept" or "decline"`, http.StatusBadRequest)
+			return
+		}
+
+		if source != nil {
+			var cards []SessionCard
+			if lister, ok := source.(interface {
+				Sessions(context.Context) ([]SessionCard, error)
+			}); ok {
+				var err error
+				cards, err = lister.Sessions(r.Context())
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusServiceUnavailable)
+					return
+				}
+				cards, err = normalizeSessionCards(cards)
+				if err != nil {
+					writeSessionJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+					return
+				}
+			}
+			var selected *SessionCard
+			for i := range cards {
+				if cards[i].ID == id {
+					selected = &cards[i]
+					break
+				}
+			}
+			if len(cards) > 0 && selected == nil {
+				http.Error(w, "logical session not found", http.StatusNotFound)
+				return
+			}
+
+			if selected != nil {
+				isAwaiting := selected.State == sessionAwaitingApproval || selected.PendingApproval != nil || strings.Contains(strings.ToLower(selected.PendingInteraction), "approval")
+				if !isAwaiting {
+					writeSessionJSON(w, http.StatusConflict, map[string]string{"error": "session is not awaiting approval"})
+					return
+				}
+			}
+
+			approvalID := payload.ApprovalID
+			if approvalID == "" && selected != nil && selected.PendingApproval != nil {
+				approvalID = selected.PendingApproval.ApprovalID
+			}
+
+			req := SessionApprovalRequest{
+				SessionID:  id,
+				ApprovalID: approvalID,
+				Resolution: resolution,
+				Reason:     payload.Reason,
+			}
+
+			var resolveErr error
+			if direct, ok := source.(SessionApprovalDirectResolver); ok {
+				resolveErr = direct.ResolveApproval(id, resolution, payload.Reason)
+			} else if resolver, ok := source.(interface {
+				ResolveApproval(context.Context, SessionApprovalRequest) error
+			}); ok {
+				resolveErr = resolver.ResolveApproval(r.Context(), req)
+			} else {
+				http.Error(w, "session authority does not support approval resolution", http.StatusInternalServerError)
+				return
+			}
+
+			if resolveErr != nil {
+				writeSessionJSON(w, http.StatusConflict, map[string]string{"error": resolveErr.Error()})
+				return
+			}
+
+			defaultSessionHub.broadcastSession(id, "approval_resolved", []byte(fmt.Sprintf(`{"session_id":%q,"resolution":%q,"approval_id":%q}`, id, resolution, approvalID)))
+			writeSessionJSON(w, http.StatusOK, map[string]any{
+				"status":      "accepted",
+				"session_id":  id,
+				"approval_id": approvalID,
+				"resolution":  resolution,
+			})
+			return
+		}
+
+		if s != nil && s.hasRun(id) {
+			decision := "approve"
+			if resolution == "decline" {
+				decision = "deny"
+			}
+			approvalID := payload.ApprovalID
+			if err := s.resolve(id, approvalID, decision); err != nil {
+				writeSessionJSON(w, http.StatusConflict, map[string]string{"error": "approval resolution failed: " + err.Error()})
+				return
+			}
+			defaultSessionHub.broadcastSession(id, "approval_resolved", []byte(fmt.Sprintf(`{"session_id":%q,"resolution":%q,"approval_id":%q}`, id, resolution, approvalID)))
+			writeSessionJSON(w, http.StatusOK, map[string]any{
+				"status":      "accepted",
+				"session_id":  id,
+				"approval_id": approvalID,
+				"resolution":  resolution,
+			})
+			return
+		}
+
+		writeSessionJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "session authority is not connected"})
+	}
+}
+
+// handleSessionSSE serves Server-Sent Events (SSE) for session cards and approval notifications.
+// If scoped is true, it only streams events matching the path parameter {id} and global broadcasts.
+func handleSessionSSE(scoped bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusBadRequest)
+			return
+		}
+		sessionID := ""
+		if scoped {
+			var err error
+			sessionID, err = url.PathUnescape(r.PathValue("id"))
+			if err != nil || strings.TrimSpace(sessionID) == "" {
+				http.Error(w, "invalid session id", http.StatusBadRequest)
+				return
+			}
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		ch := defaultSessionHub.subscribe(sessionID)
+		defer defaultSessionHub.unsubscribe(ch)
+
+		if sessionID != "" {
+			fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"connected\",\"session_id\":%q}\n\n", sessionID)
+		} else {
+			fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"connected\"}\n\n")
+		}
+		flusher.Flush()
+
+		ctx := r.Context()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
+				_, _ = w.Write(msg)
+				flusher.Flush()
+			}
+		}
+	}
+}
+
+// handleSessionEventHook receives external event streams or webhook envelopes for a session
+// and broadcasts them into the live web SSE hub so cards refresh without polling.
+func handleSessionEventHook(source SessionSource, s *store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := url.PathUnescape(r.PathValue("id"))
+		if err != nil || strings.TrimSpace(id) == "" {
+			http.Error(w, "invalid session id", http.StatusBadRequest)
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil {
+			http.Error(w, "failed to read event body", http.StatusBadRequest)
+			return
+		}
+		if len(body) == 0 {
+			http.Error(w, "empty event body", http.StatusBadRequest)
+			return
+		}
+
+		app, parseErr := ParseSessionApproval(body)
+		if parseErr == nil && app != nil {
+			approvalPayload, _ := json.Marshal(map[string]any{
+				"session_id":        id,
+				"approval_id":       app.ApprovalID,
+				"tool_name":         app.ToolName,
+				"command":           app.Command,
+				"arguments":         app.Arguments,
+				"target_path":       app.TargetPath,
+				"risk_explanation":  app.RiskExplanation,
+			})
+			defaultSessionHub.broadcastSession(id, "approval_requested", approvalPayload)
+			defaultSessionHub.broadcastSession(id, "session_update", approvalPayload)
+		} else {
+			var raw map[string]any
+			_ = json.Unmarshal(body, &raw)
+			eventType, _ := raw["type"].(string)
+			if strings.Contains(eventType, "approval") || strings.Contains(string(body), "approval") {
+				defaultSessionHub.broadcastSession(id, "approval_requested", body)
+			} else {
+				defaultSessionHub.broadcastSession(id, "session_update", body)
+			}
+		}
+
+		writeSessionJSON(w, http.StatusAccepted, map[string]string{
+			"status":     "admitted",
+			"session_id": id,
+		})
+	}
+}
+
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(value)
