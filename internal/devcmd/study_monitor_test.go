@@ -169,3 +169,112 @@ func TestStudyMonitorInventoryCheckAcceptsMachineMap(t *testing.T) {
 		t.Fatalf("stdout = %s, want ok true", stdout.String())
 	}
 }
+
+func TestStudyMonitorResolvesFromEnv(t *testing.T) {
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+
+	regDir := t.TempDir()
+	regPath := filepath.Join(regDir, "env-repos.json")
+	data := `{"schema":"fak-monitored-repositories/1","updated_at":"2026-08-14","methodology":"ranked","repositories":[{"repository":"env/repo","url":"https://github.com/env/repo","status":"candidate","priority":1,"why":"env test","last_checked":"2026-08-01","checked_revision":"abcdef1234567890","stars_at_check":10,"last_push_at_check":"2026-08-13T00:00:00Z"}]}`
+	if err := os.WriteFile(regPath, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAK_STUDY_REGISTRY", regPath)
+
+	var stdout, stderr bytes.Buffer
+	code := RunStudyMonitor(&stdout, &stderr, []string{"--as-of", "2026-08-14", "--due-days", "7"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "env/repo status=candidate") {
+		t.Fatalf("expected env/repo in stdout, got:\n%s", stdout.String())
+	}
+}
+
+func TestStudyMonitorResolvesFromPrivateSibling(t *testing.T) {
+	root := t.TempDir()
+	fakDir := filepath.Join(root, "fak")
+	privDir := filepath.Join(root, "fak-private")
+	regPath := filepath.Join(privDir, "docs", "research", "monitored-repositories.json")
+	if err := os.MkdirAll(filepath.Dir(regPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(fakDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `{"schema":"fak-monitored-repositories/1","updated_at":"2026-08-14","methodology":"ranked","repositories":[{"repository":"private/repo","url":"https://github.com/private/repo","status":"candidate","priority":1,"why":"private test","last_checked":"2026-08-01","checked_revision":"abcdef1234567890","stars_at_check":10,"last_push_at_check":"2026-08-13T00:00:00Z"}]}`
+	if err := os.WriteFile(regPath, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(fakDir)
+	t.Setenv("FAK_STUDY_REGISTRY", "")
+
+	var stdout, stderr bytes.Buffer
+	code := RunStudyMonitor(&stdout, &stderr, []string{"--as-of", "2026-08-14", "--due-days", "7"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "private/repo status=candidate") {
+		t.Fatalf("expected private/repo in stdout, got:\n%s", stdout.String())
+	}
+}
+
+func TestStudyMonitorResolvesFromCommonLayout(t *testing.T) {
+	root := t.TempDir()
+	fakDir := filepath.Join(root, "fak")
+	privDir := filepath.Join(root, "fak-private")
+	regPath := filepath.Join(fakDir, "docs", "research", "monitored-repositories.json")
+	if err := os.MkdirAll(filepath.Dir(regPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(privDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `{"schema":"fak-monitored-repositories/1","updated_at":"2026-08-14","methodology":"ranked","repositories":[{"repository":"layout/repo","url":"https://github.com/layout/repo","status":"candidate","priority":1,"why":"layout test","last_checked":"2026-08-01","checked_revision":"abcdef1234567890","stars_at_check":10,"last_push_at_check":"2026-08-13T00:00:00Z"}]}`
+	if err := os.WriteFile(regPath, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(privDir)
+	t.Setenv("FAK_STUDY_REGISTRY", "")
+
+	var stdout, stderr bytes.Buffer
+	code := RunStudyMonitor(&stdout, &stderr, []string{"--as-of", "2026-08-14", "--due-days", "7"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "layout/repo status=candidate") {
+		t.Fatalf("expected layout/repo in stdout, got:\n%s", stdout.String())
+	}
+}
+
+func TestStudyMonitorResolvesFromModuleRootSubdir(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	regPath := filepath.Join(root, "docs", "research", "monitored-repositories.json")
+	if err := os.MkdirAll(filepath.Dir(regPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	subDir := filepath.Join(root, "cmd", "nested", "sub")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `{"schema":"fak-monitored-repositories/1","updated_at":"2026-08-14","methodology":"ranked","repositories":[{"repository":"modroot/repo","url":"https://github.com/modroot/repo","status":"candidate","priority":1,"why":"modroot test","last_checked":"2026-08-01","checked_revision":"abcdef1234567890","stars_at_check":10,"last_push_at_check":"2026-08-13T00:00:00Z"}]}`
+	if err := os.WriteFile(regPath, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(subDir)
+	t.Setenv("FAK_STUDY_REGISTRY", "")
+
+	var stdout, stderr bytes.Buffer
+	code := RunStudyMonitor(&stdout, &stderr, []string{"--as-of", "2026-08-14", "--due-days", "7"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "modroot/repo status=candidate") {
+		t.Fatalf("expected modroot/repo in stdout, got:\n%s", stdout.String())
+	}
+}
+

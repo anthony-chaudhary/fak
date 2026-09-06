@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/studymonitor"
@@ -28,6 +30,9 @@ func RunStudyMonitor(stdout, stderr io.Writer, args []string) int {
 	if fs.NArg() != 0 || *dueDays < 1 {
 		fmt.Fprintln(stderr, "usage: fak study-monitor [--registry PATH] [--due-days N] [--as-of YYYY-MM-DD] [--json] [--inventory-check]")
 		return 2
+	}
+	if *registryPath == defaultStudyMonitorRegistry {
+		*registryPath = resolveStudyMonitorRegistry(*registryPath)
 	}
 	now := time.Now().UTC()
 	if *asOf != "" {
@@ -69,3 +74,63 @@ func RunStudyMonitor(stdout, stderr io.Writer, args []string) int {
 	studymonitor.RenderHuman(stdout, report)
 	return 0
 }
+
+func resolveStudyMonitorRegistry(registryPath string) string {
+	if fileExists(registryPath) {
+		return registryPath
+	}
+	if env := os.Getenv("FAK_STUDY_REGISTRY"); env != "" && fileExists(env) {
+		return env
+	}
+	privateCandidate := filepath.Join("..", "fak-private", "docs", "research", "monitored-repositories.json")
+	if fileExists(privateCandidate) {
+		return privateCandidate
+	}
+	if layoutCandidate := findCommonLayoutRegistry(); layoutCandidate != "" {
+		return layoutCandidate
+	}
+	return registryPath
+}
+
+func findCommonLayoutRegistry() string {
+	target := filepath.Join("docs", "research", "monitored-repositories.json")
+	candidates := []string{
+		filepath.Join("..", "fak", target),
+		filepath.Join("fak", target),
+		filepath.Join("fak-private", target),
+		filepath.Join("..", target),
+		filepath.Join("..", "..", target),
+		filepath.Join("..", "..", "fak", target),
+		filepath.Join("..", "..", "fak-private", target),
+	}
+	for _, c := range candidates {
+		if fileExists(c) {
+			return c
+		}
+	}
+	if dir, err := os.Getwd(); err == nil {
+		cur := dir
+		for i := 0; i < 8; i++ {
+			if _, err := os.Stat(filepath.Join(cur, "go.mod")); err == nil {
+				rootCandidates := []string{
+					filepath.Join(cur, target),
+					filepath.Join(cur, "..", "fak", target),
+					filepath.Join(cur, "..", "fak-private", target),
+				}
+				for _, rc := range rootCandidates {
+					if fileExists(rc) {
+						return rc
+					}
+				}
+				break
+			}
+			parent := filepath.Dir(cur)
+			if parent == cur {
+				break
+			}
+			cur = parent
+		}
+	}
+	return ""
+}
+
