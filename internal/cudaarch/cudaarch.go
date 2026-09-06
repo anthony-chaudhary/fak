@@ -16,17 +16,9 @@ func Validate(root string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	arches := nonEmptyLines(string(archText))
-	errors := make([]string, 0)
-	if len(arches) == 0 || hasDuplicate(arches) {
-		errors = append(errors, "cuda_arch.txt must contain a non-empty unique architecture list")
-	}
-	for _, arch := range arches {
-		if !validArch(arch) {
-			errors = append(errors, "cuda_arch.txt entries must use sm_<digits>")
-			break
-		}
-	}
+	arches, parseErrors := ParseArchitectures(string(archText))
+	errors := make([]string, 0, len(parseErrors))
+	errors = append(errors, parseErrors...)
 
 	files := []struct {
 		name    string
@@ -43,17 +35,42 @@ func Validate(root string) ([]string, error) {
 		if readErr != nil {
 			return nil, readErr
 		}
-		contents := strings.TrimPrefix(string(text), string(rune(0xFEFF)))
-		for _, needle := range file.needles {
-			if !strings.Contains(contents, needle) {
-				errors = append(errors, fmt.Sprintf("%s: missing arch-matrix contract %q", file.name, needle))
-			}
-		}
+		errors = append(errors, ValidateSourceFile(file.name, string(text), file.needles)...)
 	}
 	if len(arches) > 0 && arches[len(arches)-1] != "sm_120" {
 		errors = append(errors, fmt.Sprintf("PTX floor must follow highest declared arch sm_120, got %q", arches[len(arches)-1]))
 	}
 	return errors, nil
+}
+
+// ParseArchitectures parses and validates the architecture declarations from raw text (e.g. cuda_arch.txt).
+// It returns the slice of non-empty architecture lines and any syntax or duplication errors encountered.
+func ParseArchitectures(text string) ([]string, []string) {
+	arches := nonEmptyLines(text)
+	errors := make([]string, 0)
+	if len(arches) == 0 || hasDuplicate(arches) {
+		errors = append(errors, "cuda_arch.txt must contain a non-empty unique architecture list")
+	}
+	for _, arch := range arches {
+		if !validArch(arch) {
+			errors = append(errors, "cuda_arch.txt entries must use sm_<digits>")
+			break
+		}
+	}
+	return arches, errors
+}
+
+// ValidateSourceFile validates that a source file's contents conform to the required architecture contracts.
+// It strips UTF-8 BOM if present and checks that all required needle strings are contained.
+func ValidateSourceFile(name, contents string, needles []string) []string {
+	clean := strings.TrimPrefix(contents, string(rune(0xFEFF)))
+	var errors []string
+	for _, needle := range needles {
+		if !strings.Contains(clean, needle) {
+			errors = append(errors, fmt.Sprintf("%s: missing arch-matrix contract %q", name, needle))
+		}
+	}
+	return errors
 }
 
 func nonEmptyLines(text string) []string {

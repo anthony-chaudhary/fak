@@ -16,39 +16,39 @@ var fixtureFiles = []string{
 	"docs/cuda-dev.md",
 }
 
-func fixture(t *testing.T) string {
-	t.Helper()
+func fixture(tb testing.TB) string {
+	tb.Helper()
 	root := filepath.Clean(filepath.Join("..", ".."))
-	dstRoot := t.TempDir()
+	dstRoot := tb.TempDir()
 	for _, rel := range fixtureFiles {
 		contents, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
 		if err != nil {
-			t.Fatal(err)
+			tb.Fatal(err)
 		}
 		dst := filepath.Join(dstRoot, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			t.Fatal(err)
+			tb.Fatal(err)
 		}
 		if err := os.WriteFile(dst, contents, 0o644); err != nil {
-			t.Fatal(err)
+			tb.Fatal(err)
 		}
 	}
 	return dstRoot
 }
 
-func replaceFixture(t *testing.T, root, rel, old, replacement string) {
-	t.Helper()
+func replaceFixture(tb testing.TB, root, rel, old, replacement string) {
+	tb.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
 	contents, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	updated := strings.Replace(string(contents), old, replacement, 1)
 	if updated == string(contents) {
-		t.Fatalf("fixture %s did not contain %q", rel, old)
+		tb.Fatalf("fixture %s did not contain %q", rel, old)
 	}
 	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 }
 
@@ -118,4 +118,67 @@ func assertErrorContains(t *testing.T, root, want string) {
 		}
 	}
 	t.Fatalf("Validate() errors = %v, want substring %q", errors, want)
+}
+
+func TestParseArchitectures(t *testing.T) {
+	t.Run("ValidMatrix", func(t *testing.T) {
+		text := "  sm_80 \n\n sm_90\nsm_120\n"
+		arches, errs := ParseArchitectures(text)
+		if len(errs) != 0 {
+			t.Fatalf("unexpected errors: %v", errs)
+		}
+		if len(arches) != 3 || arches[0] != "sm_80" || arches[1] != "sm_90" || arches[2] != "sm_120" {
+			t.Fatalf("unexpected arches: %v", arches)
+		}
+	})
+
+	t.Run("EmptyText", func(t *testing.T) {
+		arches, errs := ParseArchitectures("   \n\n  ")
+		if len(arches) != 0 {
+			t.Fatalf("expected 0 arches, got %v", arches)
+		}
+		if len(errs) == 0 {
+			t.Fatal("expected error on empty architecture list")
+		}
+	})
+
+	t.Run("Duplicates", func(t *testing.T) {
+		_, errs := ParseArchitectures("sm_80\nsm_80\nsm_120")
+		if len(errs) == 0 || !strings.Contains(errs[0], "unique architecture list") {
+			t.Fatalf("expected duplicate error, got %v", errs)
+		}
+	})
+
+	t.Run("MalformedArch", func(t *testing.T) {
+		_, errs := ParseArchitectures("sm_80\nsm_abc\nsm_120")
+		if len(errs) == 0 || !strings.Contains(errs[0], "sm_<digits>") {
+			t.Fatalf("expected malformed error, got %v", errs)
+		}
+	})
+}
+
+func TestValidateSourceFile(t *testing.T) {
+	t.Run("MatchesAllNeedles", func(t *testing.T) {
+		content := "alpha beta gamma"
+		errs := ValidateSourceFile("test", content, []string{"alpha", "gamma"})
+		if len(errs) != 0 {
+			t.Fatalf("unexpected errors: %v", errs)
+		}
+	})
+
+	t.Run("StripsBOM", func(t *testing.T) {
+		content := "\xef\xbb\xbfalpha beta"
+		errs := ValidateSourceFile("test", content, []string{"alpha"})
+		if len(errs) != 0 {
+			t.Fatalf("unexpected errors: %v", errs)
+		}
+	})
+
+	t.Run("ReportsMissingNeedles", func(t *testing.T) {
+		content := "alpha beta"
+		errs := ValidateSourceFile("test", content, []string{"alpha", "delta"})
+		if len(errs) != 1 || !strings.Contains(errs[0], "delta") {
+			t.Fatalf("expected missing delta error, got %v", errs)
+		}
+	})
 }
