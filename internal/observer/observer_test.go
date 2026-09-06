@@ -826,6 +826,43 @@ func TestObserverSemanticScreen_BarrierTimeoutQuarantined(t *testing.T) {
 	}
 }
 
+func TestObserverSemanticScreen_BarrierTimeoutReadOnlyAllowed(t *testing.T) {
+	pool := NewPool(Config{
+		WorkerCount:        1,
+		QueueSize:          16,
+		BarrierTimeout:     10 * time.Millisecond,
+		RequireWitnessDiff: true,
+	})
+	_ = pool.Start()
+	defer pool.Close()
+
+	screen := NewObserverSemanticScreen(pool)
+	ctx := context.Background()
+	sessionID := "sess-screen-barrier-timeout-readonly"
+
+	sess := pool.getOrCreateSession(sessionID)
+	// Simulate an un-settled in-flight task that triggers barrier timeout
+	atomic.StoreInt64(&sess.inFlight, 1)
+	defer atomic.StoreInt64(&sess.inFlight, 0)
+
+	readTools := []string{"Read", "Grep", "Glob", "fak_read"}
+	for _, tool := range readTools {
+		call := &abi.ToolCall{
+			Tool:    tool,
+			TraceID: sessionID,
+			Meta: map[string]string{
+				"args": "query",
+			},
+		}
+		body := []byte("read contents safely")
+
+		advice := screen.ScreenResult(ctx, call, body)
+		if advice.Disposition != abi.ScreenAllow {
+			t.Fatalf("expected ScreenAllow on barrier timeout for read-only tool %s, got %v (reason: %v)", tool, advice.Disposition, advice.Reason)
+		}
+	}
+}
+
 func TestObserverSemanticScreen_VerifyToolCall_PreExecution(t *testing.T) {
 	pool := NewPool(Config{ChurnThreshold: 2, RegressThreshold: 3})
 	_ = pool.Start()
