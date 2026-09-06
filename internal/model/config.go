@@ -26,9 +26,11 @@ type Config struct {
 
 	HiddenSize        int     `json:"hidden_size"`
 	NumLayers         int     `json:"num_hidden_layers"`
+	NumLoops          int     `json:"num_loops"`
 	NumHeads          int     `json:"num_attention_heads"`
 	NumKVHeads        int     `json:"num_key_value_heads"`
 	HeadDim           int     `json:"head_dim"`
+	SharedCache       bool    `json:"shared_cache,omitempty"`
 	IntermediateSize  int     `json:"intermediate_size"`
 	VocabSize         int     `json:"vocab_size"`
 	RMSNormEps        float64 `json:"rms_norm_eps"`
@@ -421,6 +423,13 @@ type configJSONHints struct {
 	Window                      []int  `json:"sliding_window_per_layer"`
 	HiddenAct                   string `json:"hidden_act"`
 	HiddenActivation            string `json:"hidden_activation"`
+
+	// Nanbeige hints / alternative loop field names & variant flags.
+	LoopsAlt          *int  `json:"loops"`
+	RecurrentLoopsAlt *int  `json:"recurrent_loops"`
+	SharedCache       *bool `json:"shared_cache"`
+	LoopShareKV       *bool `json:"loop_share_kv"`
+	SkipLoopFinalNorm *bool `json:"skip_loop_final_norm"`
 }
 
 // UnmarshalJSON decodes config.json, then folds the scalar-or-list eos_token_id into
@@ -467,6 +476,15 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 		if wrapperHints.NormTopKProb != nil {
 			hints.NormTopKProb = wrapperHints.NormTopKProb
 		}
+		if wrapperHints.SharedCache != nil {
+			hints.SharedCache = wrapperHints.SharedCache
+		}
+		if wrapperHints.LoopsAlt != nil {
+			hints.LoopsAlt = wrapperHints.LoopsAlt
+		}
+		if wrapperHints.RecurrentLoopsAlt != nil {
+			hints.RecurrentLoopsAlt = wrapperHints.RecurrentLoopsAlt
+		}
 	}
 	c.EOSTokenIDs = aux.EOS.ids
 	if len(c.EOSTokenIDs) > 0 {
@@ -506,8 +524,73 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 	if c.HeadDim == 0 && c.QKNopeHeadDim > 0 && c.QKRopeHeadDim > 0 {
 		c.HeadDim = c.QKNopeHeadDim + c.QKRopeHeadDim
 	}
-	if c.HeadDim == 0 && c.HiddenSize != 0 && c.NumHeads != 0 {
+	// Nanbeige4.2 explicitly fixes head_dim = 128 and must NOT derive hidden_size/num_heads (e.g. 3072/48=64).
+	if !c.isNanbeige() && c.HeadDim == 0 && c.HiddenSize != 0 && c.NumHeads != 0 {
 		c.HeadDim = c.HiddenSize / c.NumHeads
+	}
+	if c.NumLoops == 0 && h.LoopsAlt != nil {
+		c.NumLoops = *h.LoopsAlt
+	}
+	if c.NumLoops == 0 && h.RecurrentLoopsAlt != nil {
+		c.NumLoops = *h.RecurrentLoopsAlt
+	}
+	if c.isNanbeige() {
+		if c.NumLoops == 0 {
+			c.NumLoops = 2
+		}
+		sharedCache := c.SharedCache || (h.SharedCache != nil && *h.SharedCache)
+		if sharedCache {
+			return &UnsupportedNanbeigeVariantError{
+				Reason:      "shared_cache=true is not supported",
+				NumLayers:   c.NumLayers,
+				NumLoops:    c.NumLoops,
+				HeadDim:     c.HeadDim,
+				SharedCache: true,
+			}
+		}
+		if h.LoopShareKV != nil && *h.LoopShareKV {
+			return &UnsupportedNanbeigeVariantError{
+				Reason:    "loop_share_kv=true is not supported",
+				NumLayers: c.NumLayers,
+				NumLoops:  c.NumLoops,
+				HeadDim:   c.HeadDim,
+			}
+		}
+		if h.SkipLoopFinalNorm != nil && *h.SkipLoopFinalNorm {
+			return &UnsupportedNanbeigeVariantError{
+				Reason:    "skip_loop_final_norm=true is not supported",
+				NumLayers: c.NumLayers,
+				NumLoops:  c.NumLoops,
+				HeadDim:   c.HeadDim,
+			}
+		}
+		if c.NumLayers != 22 {
+			return &UnsupportedNanbeigeVariantError{
+				Reason:      fmt.Sprintf("num_hidden_layers must be 22, got %d", c.NumLayers),
+				NumLayers:   c.NumLayers,
+				NumLoops:    c.NumLoops,
+				HeadDim:     c.HeadDim,
+				SharedCache: sharedCache,
+			}
+		}
+		if c.NumLoops != 2 {
+			return &UnsupportedNanbeigeVariantError{
+				Reason:      fmt.Sprintf("num_loops must be 2, got %d", c.NumLoops),
+				NumLayers:   c.NumLayers,
+				NumLoops:    c.NumLoops,
+				HeadDim:     c.HeadDim,
+				SharedCache: sharedCache,
+			}
+		}
+		if c.HeadDim != 128 {
+			return &UnsupportedNanbeigeVariantError{
+				Reason:      fmt.Sprintf("head_dim must be 128, got %d", c.HeadDim),
+				NumLayers:   c.NumLayers,
+				NumLoops:    c.NumLoops,
+				HeadDim:     c.HeadDim,
+				SharedCache: sharedCache,
+			}
+		}
 	}
 	if c.HiddenActivation == "" {
 		c.HiddenActivation = h.HiddenActivation
@@ -876,6 +959,34 @@ func (c Config) isGPTNeoX() bool {
 
 func (c Config) isGPTOSS() bool {
 	return strings.Contains(c.archFamilyKey(), "gptoss")
+}
+
+// IsNanbeige reports whether this config declares a Nanbeige-family architecture
+// (model_type "nanbeige" or architecture contains "nanbeige").
+func (c Config) IsNanbeige() bool {
+	return strings.EqualFold(c.ModelType, "nanbeige") || strings.Contains(c.archFamilyKey(), "nanbeige")
+}
+
+func (c Config) isNanbeige() bool {
+	return c.IsNanbeige()
+}
+
+// UnsupportedNanbeigeVariantError is returned when a Nanbeige configuration specifies
+// an unsupported architecture variant (e.g. num_hidden_layers != 22, num_loops != 2,
+// head_dim != 128, or shared_cache=true).
+type UnsupportedNanbeigeVariantError struct {
+	Reason      string
+	NumLayers   int
+	NumLoops    int
+	HeadDim     int
+	SharedCache bool
+}
+
+func (e *UnsupportedNanbeigeVariantError) Error() string {
+	if e.Reason != "" {
+		return "model: unsupported nanbeige variant: " + e.Reason
+	}
+	return "model: unsupported nanbeige variant"
 }
 
 // isGLM reports a GLM-family model (zai-org GLM lineage: glm, glm4, chatglm,
