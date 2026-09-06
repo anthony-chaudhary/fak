@@ -1,6 +1,7 @@
 package toolbound
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -656,4 +657,128 @@ func TestWindowedFileSetWindowSize(t *testing.T) {
 	if view.EndLine != 5 {
 		t.Errorf("expected EndLine 5 after SetWindowSize(5), got %d", view.EndLine)
 	}
+}
+
+func TestWindowedFileReader_BinaryAndSizeGuard(t *testing.T) {
+	dir := t.TempDir()
+
+	// (a) A file exceeding MaxFileSize returns ErrFileTooLarge.
+	t.Run("ExceedsMaxFileSize", func(t *testing.T) {
+		largeContent := strings.Repeat("a", 200)
+		largePath := createTestFile(t, dir, "large.txt", largeContent)
+
+		w := NewWindowedFileReader()
+		w.SetMaxFileSize(100)
+		if w.MaxFileSize() != 100 {
+			t.Fatalf("expected MaxFileSize 100, got %d", w.MaxFileSize())
+		}
+
+		view, err := w.Open(largePath, 1, 10)
+		if err == nil {
+			t.Fatal("expected error for file exceeding MaxFileSize, got nil")
+		}
+		if !errors.Is(err, ErrFileTooLarge) {
+			t.Fatalf("expected ErrFileTooLarge, got %v", err)
+		}
+		if view != nil {
+			t.Fatalf("expected nil view on ErrFileTooLarge, got %v", view)
+		}
+		if w.IsOpen() {
+			t.Fatal("expected IsOpen to be false after failed Open")
+		}
+
+		// Also test with int64 constructor arg
+		w2 := NewWindowedFileReader(int64(50))
+		if w2.MaxFileSize() != 50 {
+			t.Fatalf("expected MaxFileSize 50, got %d", w2.MaxFileSize())
+		}
+		_, err = w2.Open(largePath, 1, 10)
+		if !errors.Is(err, ErrFileTooLarge) {
+			t.Fatalf("expected ErrFileTooLarge with constructor limit, got %v", err)
+		}
+	})
+
+	// (b) A file containing NUL bytes returns ErrBinaryFile.
+	t.Run("BinaryFileDetected", func(t *testing.T) {
+		// NUL in header
+		headerBinaryContent := "hello\x00world\nline 2\n"
+		headerBinaryPath := filepath.Join(dir, "binary_header.bin")
+		if err := os.WriteFile(headerBinaryPath, []byte(headerBinaryContent), 0644); err != nil {
+			t.Fatalf("failed to write binary file: %v", err)
+		}
+
+		w := NewWindowedFileReader()
+		view, err := w.Open(headerBinaryPath, 1, 10)
+		if err == nil {
+			t.Fatal("expected error for binary file, got nil")
+		}
+		if !errors.Is(err, ErrBinaryFile) {
+			t.Fatalf("expected ErrBinaryFile, got %v", err)
+		}
+		if view != nil {
+			t.Fatalf("expected nil view on ErrBinaryFile, got %v", view)
+		}
+		if w.IsOpen() {
+			t.Fatal("expected IsOpen to be false after binary file rejection")
+		}
+
+		// NUL past 8KB buffer
+		largeBinary := append(bytes.Repeat([]byte("x"), 9000), 0x00, 'y', '\n')
+		deepBinaryPath := filepath.Join(dir, "binary_deep.bin")
+		if err := os.WriteFile(deepBinaryPath, largeBinary, 0644); err != nil {
+			t.Fatalf("failed to write deep binary file: %v", err)
+		}
+		_, err = w.Open(deepBinaryPath, 1, 10)
+		if !errors.Is(err, ErrBinaryFile) {
+			t.Fatalf("expected ErrBinaryFile for deep NUL, got %v", err)
+		}
+	})
+
+	// (c) Normal text files continue to open and paginate cleanly.
+	t.Run("NormalTextFilePaginatesCleanly", func(t *testing.T) {
+		textContent := "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\n"
+		textPath := createTestFile(t, dir, "normal.txt", textContent)
+
+		w := NewWindowedFileReader(3)
+		view, err := w.Open(textPath, 1, 3)
+		if err != nil {
+			t.Fatalf("unexpected error opening normal text file: %v", err)
+		}
+		if view == nil {
+			t.Fatal("expected non-nil view")
+		}
+		if view.TotalLines != 8 {
+			t.Fatalf("expected 8 TotalLines, got %d", view.TotalLines)
+		}
+		if view.StartLine != 1 || view.EndLine != 3 {
+			t.Fatalf("expected lines 1-3, got %d-%d", view.StartLine, view.EndLine)
+		}
+
+		// Scroll down
+		view, err = w.ScrollDown(2)
+		if err != nil {
+			t.Fatalf("ScrollDown failed: %v", err)
+		}
+		if view.StartLine != 3 || view.EndLine != 5 {
+			t.Fatalf("expected lines 3-5 after ScrollDown(2), got %d-%d", view.StartLine, view.EndLine)
+		}
+
+		// Scroll up
+		view, err = w.ScrollUp(1)
+		if err != nil {
+			t.Fatalf("ScrollUp failed: %v", err)
+		}
+		if view.StartLine != 2 || view.EndLine != 4 {
+			t.Fatalf("expected lines 2-4 after ScrollUp(1), got %d-%d", view.StartLine, view.EndLine)
+		}
+
+		// Goto
+		view, err = w.Goto(6)
+		if err != nil {
+			t.Fatalf("Goto failed: %v", err)
+		}
+		if view.StartLine != 6 || view.EndLine != 8 {
+			t.Fatalf("expected lines 6-8 after Goto(6), got %d-%d", view.StartLine, view.EndLine)
+		}
+	})
 }

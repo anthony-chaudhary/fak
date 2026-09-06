@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,9 @@ import (
 // DefaultWindowSize is the default number of lines displayed in a window when unspecified.
 const DefaultWindowSize = 100
 
+// DefaultMaxFileSize is the default maximum file size in bytes (50MB) allowed for windowed reading.
+const DefaultMaxFileSize int64 = 50 * 1024 * 1024
+
 var (
 	// ErrNoFileOpen indicates navigation was attempted when no file is open.
 	ErrNoFileOpen = errors.New("no file open")
@@ -20,6 +24,10 @@ var (
 	ErrPathEscape = errors.New("path escapes root directory")
 	// ErrInvalidPath indicates a malformed or invalid path argument.
 	ErrInvalidPath = errors.New("invalid path")
+	// ErrFileTooLarge indicates the requested file exceeds the configured maximum file size.
+	ErrFileTooLarge = errors.New("file too large")
+	// ErrBinaryFile indicates binary data (e.g. NUL byte) was detected in the file.
+	ErrBinaryFile = errors.New("binary file detected")
 )
 
 // WindowView represents the formatted output of a file window.
@@ -37,26 +45,35 @@ type WindowedFileReader struct {
 
 	rootDir           string
 	defaultWindowSize int
+	maxFileSize       int64
 
+	FilePath     string
 	Path         string
 	Lines        []string
-	TotalLines   int
+	CurrentLine  int
 	CurrentStart int
 	WindowSize   int
+	TotalLines   int
 }
 
 // NewWindowedFileReader creates a WindowedFileReader.
-// Optional arguments may provide a root confinement directory (string)
-// and/or a default window size (int).
-// If unspecified, defaultWindowSize defaults to DefaultWindowSize (100) and rootDir is unset.
+// Optional arguments may provide a root confinement directory (string),
+// a default window size (int), and/or a max file size in bytes (int64).
+// If unspecified, defaultWindowSize defaults to DefaultWindowSize (100),
+// maxFileSize defaults to DefaultMaxFileSize (50MB), and rootDir is unset.
 func NewWindowedFileReader(args ...any) *WindowedFileReader {
 	size := DefaultWindowSize
 	root := ""
+	var maxFileSize int64 = DefaultMaxFileSize
 	for _, arg := range args {
 		switch v := arg.(type) {
 		case int:
 			if v > 0 {
 				size = v
+			}
+		case int64:
+			if v > 0 {
+				maxFileSize = v
 			}
 		case string:
 			root = v
@@ -65,6 +82,8 @@ func NewWindowedFileReader(args ...any) *WindowedFileReader {
 	return &WindowedFileReader{
 		rootDir:           root,
 		defaultWindowSize: size,
+		maxFileSize:       maxFileSize,
+		CurrentLine:       1,
 		CurrentStart:      1,
 		WindowSize:        size,
 	}
@@ -104,6 +123,26 @@ func (w *WindowedFileReader) SetDefaultWindowSize(size int) {
 	w.defaultWindowSize = size
 }
 
+// MaxFileSize returns the configured maximum file size in bytes.
+func (w *WindowedFileReader) MaxFileSize() int64 {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	if w.maxFileSize <= 0 {
+		return DefaultMaxFileSize
+	}
+	return w.maxFileSize
+}
+
+// SetMaxFileSize updates the maximum file size in bytes.
+func (w *WindowedFileReader) SetMaxFileSize(size int64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if size <= 0 {
+		size = DefaultMaxFileSize
+	}
+	w.maxFileSize = size
+}
+
 // SetWindowSize updates the active window size.
 func (w *WindowedFileReader) SetWindowSize(size int) {
 	w.mu.Lock()
@@ -118,20 +157,13 @@ func (w *WindowedFileReader) SetWindowSize(size int) {
 	w.WindowSize = size
 }
 
-// Open reads the file at path (using os.ReadFile), splits it into lines with UTF-8 safety,
-// clamps startLine to [1, TotalLines] (or line 1 if empty),
-// sets WindowSize (defaulting to defaultWindowSize if <= 0), and returns the WindowView.
-// If rootDir is configured, path confinement is enforced against rootDir.
-func (w *WindowedFileReader) Open(path string, startLine int, windowSize int) (*WindowView, error) {
+// Open opens the file at path, reads lines, sets current window starting at startLine
+// (1-based, clamped to 1..totalLines), and returns lines formatted with "<line>: <content>" prefix.
+func (w *WindowedFileReader) Open(path string, startLine int, windowSize int) ([]string, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	resolved, err := w.resolvePathLocked(path)
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := os.ReadFile(resolved)
+	data, err := w.readFileLocked(path)
 	if err != nil {
 		return nil, err
 	}
@@ -157,19 +189,20 @@ func (w *WindowedFileReader) Open(path string, startLine int, windowSize int) (*
 		}
 	}
 
+	w.FilePath = path
 	w.Path = path
 	w.Lines = parsedLines
 	w.TotalLines = total
+	w.CurrentLine = startLine
 	w.CurrentStart = startLine
 	w.WindowSize = windowSize
 
-	return w.viewLocked(), nil
+	return w.formatWindowLocked(), nil
 }
 
-// ScrollDown advances CurrentStart by n lines. If CurrentStart + WindowSize > TotalLines, it clamps gracefully.
-// If n < 0, it calls ScrollUp(-n).
-// Returns the updated WindowView.
-func (w *WindowedFileReader) ScrollDown(n int) (*WindowView, error) {
+// ScrollDown advances window by n lines (if n <= 0, defaults to WindowSize),
+// clamped so window doesn't go past the last line. Returns formatted lines.
+func (w *WindowedFileReader) ScrollDown(n int) ([]string, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -177,73 +210,168 @@ func (w *WindowedFileReader) ScrollDown(n int) (*WindowView, error) {
 		return nil, ErrNoFileOpen
 	}
 
-	if n < 0 {
-		return w.scrollUpLocked(-n), nil
-	}
-	if n == 0 {
-		return w.viewLocked(), nil
-	}
-
-	return w.scrollDownLocked(n), nil
-}
-
-// ScrollUp decrements CurrentStart by n lines. Clamps to line 1.
-// If n < 0, it calls ScrollDown(-n).
-// Returns the updated WindowView.
-func (w *WindowedFileReader) ScrollUp(n int) (*WindowView, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if !w.isOpenLocked() {
-		return nil, ErrNoFileOpen
+	if n <= 0 {
+		n = w.WindowSize
+		if n <= 0 {
+			n = DefaultWindowSize
+		}
 	}
 
-	if n < 0 {
-		return w.scrollDownLocked(-n), nil
-	}
-	if n == 0 {
-		return w.viewLocked(), nil
-	}
-
-	return w.scrollUpLocked(n), nil
-}
-
-// Goto jumps CurrentStart so that target line is at the top.
-// Clamps to valid range [1, TotalLines] (or line 1 if empty).
-// Returns the updated WindowView.
-func (w *WindowedFileReader) Goto(line int) (*WindowView, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if !w.isOpenLocked() {
-		return nil, ErrNoFileOpen
-	}
-
-	if w.TotalLines == 0 {
+	total := len(w.Lines)
+	if total == 0 {
+		w.CurrentLine = 1
 		w.CurrentStart = 1
-		return w.viewLocked(), nil
+		return []string{}, nil
+	}
+
+	target := w.CurrentLine + n
+	if target > total {
+		target = total
+	}
+	if target < 1 {
+		target = 1
+	}
+	w.CurrentLine = target
+	w.CurrentStart = target
+
+	return w.formatWindowLocked(), nil
+}
+
+// ScrollUp moves window up by n lines (if n <= 0, defaults to WindowSize),
+// clamped at line 1. Returns formatted lines.
+func (w *WindowedFileReader) ScrollUp(n int) ([]string, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if !w.isOpenLocked() {
+		return nil, ErrNoFileOpen
+	}
+
+	if n <= 0 {
+		n = w.WindowSize
+		if n <= 0 {
+			n = DefaultWindowSize
+		}
+	}
+
+	total := len(w.Lines)
+	if total == 0 {
+		w.CurrentLine = 1
+		w.CurrentStart = 1
+		return []string{}, nil
+	}
+
+	target := w.CurrentLine - n
+	if target < 1 {
+		target = 1
+	}
+	if target > total {
+		target = total
+	}
+	w.CurrentLine = target
+	w.CurrentStart = target
+
+	return w.formatWindowLocked(), nil
+}
+
+// Goto jumps window to start at line (clamped to 1..totalLines). Returns formatted lines.
+func (w *WindowedFileReader) Goto(line int) ([]string, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if !w.isOpenLocked() {
+		return nil, ErrNoFileOpen
+	}
+
+	total := len(w.Lines)
+	if total == 0 {
+		w.CurrentLine = 1
+		w.CurrentStart = 1
+		return []string{}, nil
 	}
 
 	if line < 1 {
 		line = 1
-	} else if line > w.TotalLines {
-		line = w.TotalLines
+	} else if line > total {
+		line = total
 	}
 
+	w.CurrentLine = line
 	w.CurrentStart = line
-	return w.viewLocked(), nil
+	return w.formatWindowLocked(), nil
 }
 
-// CurrentPosition returns the current path, start line, window size, and total lines.
-// If no file is open, it returns ("", 0, 0, 0).
-func (w *WindowedFileReader) CurrentPosition() (path string, currentStart int, windowSize int, totalLines int) {
+// GetWindow returns the currently active window formatted lines without moving the cursor.
+func (w *WindowedFileReader) GetWindow() []string {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
 	if !w.isOpenLocked() {
-		return "", 0, 0, 0
+		return []string{}
 	}
-	return w.Path, w.CurrentStart, w.WindowSize, w.TotalLines
+	return w.formatWindowLocked()
+}
+
+// Status returns path, total lines, and current line range.
+func (w *WindowedFileReader) Status() string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if !w.isOpenLocked() {
+		return "no file open"
+	}
+
+	total := len(w.Lines)
+	if total == 0 {
+		return fmt.Sprintf("%s: lines 0-0 of 0", w.FilePath)
+	}
+
+	end := w.CurrentLine + w.WindowSize - 1
+	if end > total {
+		end = total
+	}
+
+	return fmt.Sprintf("%s: lines %d-%d of %d", w.FilePath, w.CurrentLine, end, total)
+}
+
+// OpenView opens the file and returns a structured WindowView.
+func (w *WindowedFileReader) OpenView(path string, startLine int, windowSize int) (*WindowView, error) {
+	lines, err := w.Open(path, startLine, windowSize)
+	if err != nil {
+		return nil, err
+	}
+	_ = lines
+	return w.View()
+}
+
+// ScrollDownView advances window by n lines and returns the updated WindowView.
+func (w *WindowedFileReader) ScrollDownView(n int) (*WindowView, error) {
+	lines, err := w.ScrollDown(n)
+	if err != nil {
+		return nil, err
+	}
+	_ = lines
+	return w.View()
+}
+
+// ScrollUpView moves window up by n lines and returns the updated WindowView.
+func (w *WindowedFileReader) ScrollUpView(n int) (*WindowView, error) {
+	lines, err := w.ScrollUp(n)
+	if err != nil {
+		return nil, err
+	}
+	_ = lines
+	return w.View()
+}
+
+// GotoView jumps window to start at line and returns the updated WindowView.
+func (w *WindowedFileReader) GotoView(line int) (*WindowView, error) {
+	lines, err := w.Goto(line)
+	if err != nil {
+		return nil, err
+	}
+	_ = lines
+	return w.View()
 }
 
 // View returns the current WindowView without moving the current line position.
@@ -257,15 +385,29 @@ func (w *WindowedFileReader) View() (*WindowView, error) {
 	return w.viewLocked(), nil
 }
 
+// CurrentPosition returns the path, current start line, window size, and total lines.
+func (w *WindowedFileReader) CurrentPosition() (path string, currentLine int, windowSize int, totalLines int) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if !w.isOpenLocked() {
+		return "", 0, 0, 0
+	}
+	return w.FilePath, w.CurrentLine, w.WindowSize, len(w.Lines)
+}
+
 // Close unloads the currently opened file and resets position.
 func (w *WindowedFileReader) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	w.FilePath = ""
 	w.Path = ""
 	w.Lines = nil
 	w.TotalLines = 0
+	w.CurrentLine = 1
 	w.CurrentStart = 1
+	w.WindowSize = w.defaultWindowSize
 	return nil
 }
 
@@ -280,49 +422,40 @@ func (w *WindowedFileReader) isOpenLocked() bool {
 	return w.Lines != nil
 }
 
-func (w *WindowedFileReader) scrollDownLocked(n int) *WindowView {
-	if w.TotalLines == 0 {
-		w.CurrentStart = 1
-		return w.viewLocked()
+func (w *WindowedFileReader) formatWindowLocked() []string {
+	total := len(w.Lines)
+	if total == 0 {
+		return []string{}
 	}
 
-	target := w.CurrentStart + n
-	maxStart := w.TotalLines - w.WindowSize + 1
-	if maxStart < 1 {
-		maxStart = 1
+	start := w.CurrentLine
+	if start < 1 {
+		start = 1
+	} else if start > total {
+		start = total
 	}
 
-	if target > maxStart {
-		if w.CurrentStart > maxStart {
-			// Positioned past maxStart (e.g. from Goto); clamp to TotalLines
-			if target > w.TotalLines {
-				target = w.TotalLines
-			}
-		} else {
-			target = maxStart
-		}
-	}
-	w.CurrentStart = target
-	return w.viewLocked()
-}
-
-func (w *WindowedFileReader) scrollUpLocked(n int) *WindowView {
-	if w.TotalLines == 0 {
-		w.CurrentStart = 1
-		return w.viewLocked()
+	end := start + w.WindowSize - 1
+	if end > total {
+		end = total
 	}
 
-	target := w.CurrentStart - n
-	if target < 1 {
-		target = 1
+	count := end - start + 1
+	if count <= 0 {
+		return []string{}
 	}
-	w.CurrentStart = target
-	return w.viewLocked()
+
+	res := make([]string, count)
+	for i := 0; i < count; i++ {
+		lineNum := start + i
+		res[i] = fmt.Sprintf("%d: %s", lineNum, w.Lines[lineNum-1])
+	}
+	return res
 }
 
 func (w *WindowedFileReader) viewLocked() *WindowView {
-	total := w.TotalLines
-	path := w.Path
+	total := len(w.Lines)
+	path := w.FilePath
 	windowSize := w.WindowSize
 
 	if total == 0 {
@@ -336,7 +469,7 @@ func (w *WindowedFileReader) viewLocked() *WindowView {
 		}
 	}
 
-	startLine := w.CurrentStart
+	startLine := w.CurrentLine
 	if startLine < 1 {
 		startLine = 1
 	} else if startLine > total {
@@ -349,15 +482,11 @@ func (w *WindowedFileReader) viewLocked() *WindowView {
 	}
 
 	var sb strings.Builder
-	// Header: === [path] (lines <start>-<end> of <total>) ===\n
 	fmt.Fprintf(&sb, "=== [%s] (lines %d-%d of %d) ===\n", path, startLine, endLine, total)
-
-	// Body: <line>: <text>\n for each line in window
 	for i := startLine; i <= endLine; i++ {
 		fmt.Fprintf(&sb, "%d: %s\n", i, w.Lines[i-1])
 	}
 
-	// Footer: \n=== Navigation: ScrollDown(n), ScrollUp(n), Goto(line) | End of Window === (or [EOF] if end of file reached).
 	navStatus := "End of Window"
 	if endLine >= total {
 		navStatus = "[EOF]"
@@ -371,6 +500,66 @@ func (w *WindowedFileReader) viewLocked() *WindowView {
 		TotalLines: total,
 		Content:    sb.String(),
 	}
+}
+
+func (w *WindowedFileReader) readFileLocked(path string) ([]byte, error) {
+	resolved, err := w.resolvePathLocked(path)
+	if err != nil {
+		return nil, err
+	}
+
+	fi, err := os.Stat(resolved)
+	if err != nil {
+		return nil, err
+	}
+
+	maxSize := w.maxFileSize
+	if maxSize <= 0 {
+		maxSize = DefaultMaxFileSize
+	}
+	if fi.Size() > maxSize {
+		return nil, ErrFileTooLarge
+	}
+
+	f, err := os.Open(resolved)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	header := make([]byte, 8192)
+	n, err := f.Read(header)
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	if bytes.IndexByte(header[:n], 0) != -1 {
+		return nil, ErrBinaryFile
+	}
+	if int64(n) > maxSize {
+		return nil, ErrFileTooLarge
+	}
+
+	var data []byte
+	if err == io.EOF || n == 0 {
+		data = header[:n]
+	} else {
+		rest, readErr := io.ReadAll(io.LimitReader(f, maxSize-int64(n)+1))
+		if readErr != nil {
+			return nil, readErr
+		}
+		if int64(n)+int64(len(rest)) > maxSize {
+			return nil, ErrFileTooLarge
+		}
+		if bytes.IndexByte(rest, 0) != -1 {
+			return nil, ErrBinaryFile
+		}
+		if len(rest) == 0 {
+			data = header[:n]
+		} else {
+			data = append(header[:n], rest...)
+		}
+	}
+	return data, nil
 }
 
 func (w *WindowedFileReader) resolvePathLocked(path string) (string, error) {
@@ -398,12 +587,10 @@ func (w *WindowedFileReader) resolvePathLocked(path string) (string, error) {
 			target = filepath.Clean(filepath.Join(absRoot, normalized))
 		}
 
-		// 1. Lexical confinement check
 		if !isPathWithin(absRoot, target) {
 			return "", fmt.Errorf("%w: path %q escapes root %q", ErrPathEscape, path, absRoot)
 		}
 
-		// 2. Symlink evaluation check
 		evalRoot, err := filepath.EvalSymlinks(absRoot)
 		if err == nil {
 			absRoot = evalRoot
