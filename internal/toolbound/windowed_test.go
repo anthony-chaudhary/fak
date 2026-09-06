@@ -652,8 +652,8 @@ func TestWindowedFileConcurrency(t *testing.T) {
 	wg.Wait()
 }
 
-// TestWindowedFileBinaryAndSizeGuard asserts size and binary file checks.
-func TestWindowedFileBinaryAndSizeGuard(t *testing.T) {
+// TestWindowedFileReader_BinaryAndSizeGuard asserts size and binary file checks.
+func TestWindowedFileReader_BinaryAndSizeGuard(t *testing.T) {
 	dir := t.TempDir()
 
 	// (a) File exceeding MaxFileSize returns ErrFileTooLarge
@@ -773,6 +773,11 @@ func TestWindowedFileBinaryAndSizeGuard(t *testing.T) {
 			t.Fatalf("expected CurrentLine 6, got %d", w.CurrentLine)
 		}
 	})
+}
+
+// TestWindowedFileBinaryAndSizeGuard is an alias for TestWindowedFileReader_BinaryAndSizeGuard.
+func TestWindowedFileBinaryAndSizeGuard(t *testing.T) {
+	TestWindowedFileReader_BinaryAndSizeGuard(t)
 }
 
 // TestWindowedFileWindowView verifies companion WindowView methods.
