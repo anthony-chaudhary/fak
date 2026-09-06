@@ -58,6 +58,72 @@ type Report struct {
 	Items      []Item          `json:"items"`
 }
 
+// MigrationPlan represents a partitioned wave plan for migrating a batch of tools.
+type MigrationPlan struct {
+	CohortFilter string   `json:"cohort_filter,omitempty"`
+	BatchSize    int      `json:"batch_size"`
+	TotalPending int      `json:"total_pending"`
+	Waves        [][]Item `json:"waves"`
+	Candidates   []Item   `json:"candidates"`
+}
+
+// PlanMigration organizes unmigrated or partial items from a report into sequential execution waves.
+func PlanMigration(report Report, batchSize int, cohortFilter string) MigrationPlan {
+	if batchSize <= 0 {
+		batchSize = 5
+	}
+	candidates := NextCandidates(report, 0, cohortFilter)
+	var waves [][]Item
+	for i := 0; i < len(candidates); i += batchSize {
+		end := i + batchSize
+		if end > len(candidates) {
+			end = len(candidates)
+		}
+		wave := make([]Item, end-i)
+		copy(wave, candidates[i:end])
+		waves = append(waves, wave)
+	}
+	return MigrationPlan{
+		CohortFilter: cohortFilter,
+		BatchSize:    batchSize,
+		TotalPending: len(candidates),
+		Waves:        waves,
+		Candidates:   candidates,
+	}
+}
+
+// ValidateItem checks that an Item has valid metadata and paths adhering to 5-Gate taxonomy.
+func ValidateItem(item Item) error {
+	if item.Number <= 0 {
+		return fmt.Errorf("invalid item number %d: must be positive", item.Number)
+	}
+	if strings.TrimSpace(item.SourcePath) == "" {
+		return fmt.Errorf("item %d: source_path cannot be empty", item.Number)
+	}
+	if strings.TrimSpace(item.TargetPath) == "" {
+		return fmt.Errorf("item %d: target_path cannot be empty", item.Number)
+	}
+	if !strings.HasSuffix(item.TargetPath, ".go") {
+		return fmt.Errorf("item %d: target_path %q must end with .go", item.Number, item.TargetPath)
+	}
+	if strings.TrimSpace(item.TargetPkg) == "" {
+		return fmt.Errorf("item %d: target_pkg cannot be empty", item.Number)
+	}
+	return nil
+}
+
+// ValidateReport verifies internal consistency of a migration report.
+func ValidateReport(report Report) error {
+	if report.Total != report.Migrated+report.Partial+report.Unmigrated {
+		return fmt.Errorf("report count mismatch: total=%d != migrated(%d)+partial(%d)+unmigrated(%d)",
+			report.Total, report.Migrated, report.Partial, report.Unmigrated)
+	}
+	if len(report.Items) != report.Total {
+		return fmt.Errorf("report items length %d != total %d", len(report.Items), report.Total)
+	}
+	return nil
+}
+
 // BoundaryViolation records an invalid import in fak-private crossing the 5-Gate boundary.
 type BoundaryViolation struct {
 	File       string `json:"file"`
@@ -521,6 +587,24 @@ func Test{{TYPE}}_Run(t *testing.T) {
 	}
 
 	return scaffolded, nil
+}
+
+// ScaffoldBatch generates scaffolding for multiple items, returning all generated file paths.
+func ScaffoldBatch(fakRoot, privateRoot string, items []Item, dryRun bool) ([]string, error) {
+	var allFiles []string
+	for _, item := range items {
+		files, err := Scaffold(fakRoot, privateRoot, item, dryRun)
+		if err != nil {
+			return allFiles, fmt.Errorf("failed scaffolding item %d (%s): %w", item.Number, item.TargetPath, err)
+		}
+		allFiles = append(allFiles, files...)
+	}
+	return allFiles, nil
+}
+
+// PascalCase converts snake_case, kebab-case, or dot-separated names to PascalCase.
+func PascalCase(s string) string {
+	return pascalCase(s)
 }
 
 func pascalCase(s string) string {
