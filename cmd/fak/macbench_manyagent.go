@@ -192,7 +192,7 @@ func RunManyAgentSpine(opts ManyAgentOptions) (ManyAgentReport, error) {
 	}
 
 	prefix := opts.SharedPrefixTokens
-	if prefix <= 0 {
+	if prefix < 0 {
 		prefix = DefaultSharedPrefixTokens
 	}
 
@@ -348,7 +348,7 @@ func RunManyAgentComparison(opts ManyAgentOptions) (ManyAgentComparisonReport, e
 		return ManyAgentComparisonReport{}, err
 	}
 	prefix := opts.SharedPrefixTokens
-	if prefix <= 0 {
+	if prefix < 0 {
 		prefix = DefaultSharedPrefixTokens
 	}
 	spec := resolveManyAgentModelSpec(opts.Model)
@@ -376,9 +376,13 @@ func RunManyAgentComparison(opts ManyAgentOptions) (ManyAgentComparisonReport, e
 	llamaTotalWallMS := llamaPrefillMS + llamaDecodeMS + llamaQueueContentionMS + llamaSlotContentionMS
 
 	// Latency distribution for llama.cpp: Turn 1 suffers serialized prefill wait across slots
+	singleTurn1PrefillMS := singlePrefixMS
+	if singleTurn1PrefillMS == 0 {
+		singleTurn1PrefillMS = spec.DeltaBaseMS
+	}
 	turn1TTFTs := make([]float64, 0, opts.Concurrency)
 	for k := 1; k <= opts.Concurrency; k++ {
-		turn1TTFTs = append(turn1TTFTs, float64(k)*singlePrefixMS)
+		turn1TTFTs = append(turn1TTFTs, float64(k)*singleTurn1PrefillMS)
 	}
 	sort.Float64s(turn1TTFTs)
 	llamaP50 := percentile(turn1TTFTs, 0.50)
@@ -431,7 +435,7 @@ func RunManyAgentComparison(opts ManyAgentOptions) (ManyAgentComparisonReport, e
 		ttftSpeedupP50 = math.Round((llamaRep.P50TTFTMS/fakRep.P50TTFTMS)*100) / 100
 	}
 	true4xAchieved := speedupRatio >= 4.0
-	verified := fakRep.Verified && true4xAchieved && memorySavedMB > 0
+	verified := fakRep.Verified && true4xAchieved && (memorySavedMB > 0 || prefix == 0)
 
 	return ManyAgentComparisonReport{
 		Schema:             ManyAgentComparisonSchema,

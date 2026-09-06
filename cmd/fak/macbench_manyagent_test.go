@@ -100,10 +100,11 @@ func TestMacBenchManyAgent_Validation(t *testing.T) {
 
 func TestMacBenchManyAgent_PrefixSharingComputation(t *testing.T) {
 	optsOn := ManyAgentOptions{
-		Concurrency: 4,
-		Model:       "Qwen3.8-27B",
-		Horizon:     20,
-		Cache:       true,
+		Concurrency:        4,
+		Model:              "Qwen3.8-27B",
+		Horizon:            20,
+		Cache:              true,
+		SharedPrefixTokens: DefaultSharedPrefixTokens,
 	}
 	repOn, err := RunManyAgentSpine(optsOn)
 	if err != nil {
@@ -128,10 +129,11 @@ func TestMacBenchManyAgent_PrefixSharingComputation(t *testing.T) {
 
 	// Now test with Cache: false
 	optsOff := ManyAgentOptions{
-		Concurrency: 4,
-		Model:       "Qwen3.8-27B",
-		Horizon:     20,
-		Cache:       false,
+		Concurrency:        4,
+		Model:              "Qwen3.8-27B",
+		Horizon:            20,
+		Cache:              false,
+		SharedPrefixTokens: DefaultSharedPrefixTokens,
 	}
 	repOff, err := RunManyAgentSpine(optsOff)
 	if err != nil {
@@ -157,10 +159,11 @@ func TestMacBenchManyAgent_PrefixSharingComputation(t *testing.T) {
 
 func TestMacBenchManyAgent_MetricsCalculation(t *testing.T) {
 	optsOn := ManyAgentOptions{
-		Concurrency: 4,
-		Model:       "Qwen3.8-27B",
-		Horizon:     20,
-		Cache:       true,
+		Concurrency:        4,
+		Model:              "Qwen3.8-27B",
+		Horizon:            20,
+		Cache:              true,
+		SharedPrefixTokens: DefaultSharedPrefixTokens,
 	}
 	repOn, err := RunManyAgentSpine(optsOn)
 	if err != nil {
@@ -168,10 +171,11 @@ func TestMacBenchManyAgent_MetricsCalculation(t *testing.T) {
 	}
 
 	optsOff := ManyAgentOptions{
-		Concurrency: 4,
-		Model:       "Qwen3.8-27B",
-		Horizon:     20,
-		Cache:       false,
+		Concurrency:        4,
+		Model:              "Qwen3.8-27B",
+		Horizon:            20,
+		Cache:              false,
+		SharedPrefixTokens: DefaultSharedPrefixTokens,
 	}
 	repOff, err := RunManyAgentSpine(optsOff)
 	if err != nil {
@@ -209,10 +213,11 @@ func TestMacBenchManyAgent_FlatTTFTUnderConcurrency(t *testing.T) {
 
 	for i, k := range concurrencies {
 		opts := ManyAgentOptions{
-			Concurrency: k,
-			Model:       "Qwen3.8-27B",
-			Horizon:     20,
-			Cache:       true,
+			Concurrency:        k,
+			Model:              "Qwen3.8-27B",
+			Horizon:            20,
+			Cache:              true,
+			SharedPrefixTokens: DefaultSharedPrefixTokens,
 		}
 		rep, err := RunManyAgentSpine(opts)
 		if err != nil {
@@ -389,9 +394,10 @@ func TestMacBenchManyAgent_CLI(t *testing.T) {
 
 func TestMacBenchManyAgent_RunManyAgentComparison_True4x(t *testing.T) {
 	opts := ManyAgentOptions{
-		Concurrency: 4,
-		Model:       "Qwen3.8-27B",
-		Horizon:     20,
+		Concurrency:        4,
+		Model:              "Qwen3.8-27B",
+		Horizon:            20,
+		SharedPrefixTokens: DefaultSharedPrefixTokens,
 	}
 	rep, err := RunManyAgentComparison(opts)
 	if err != nil {
@@ -493,5 +499,57 @@ func TestMacBenchManyAgent_20kContext_Qwen38_UD_Q2_K_XL(t *testing.T) {
 	}
 	if !cliRep.Verified {
 		t.Errorf("cliRep.Verified = false, want true")
+	}
+}
+
+func TestManyAgent_ExplicitZeroPrefixTokens(t *testing.T) {
+	opts := ManyAgentOptions{
+		Concurrency:        4,
+		Model:              "Qwen3.8-27B",
+		Horizon:            20,
+		Cache:              true,
+		SharedPrefixTokens: 0,
+	}
+
+	rep, err := RunManyAgentSpine(opts)
+	if err != nil {
+		t.Fatalf("RunManyAgentSpine failed: %v", err)
+	}
+	if rep.SharedPrefixTokens != 0 {
+		t.Errorf("rep.SharedPrefixTokens = %d, want 0 (did silent fallback to %d occur?)",
+			rep.SharedPrefixTokens, DefaultSharedPrefixTokens)
+	}
+
+	compRep, err := RunManyAgentComparison(opts)
+	if err != nil {
+		t.Fatalf("RunManyAgentComparison failed: %v", err)
+	}
+	if compRep.SharedPrefixTokens != 0 {
+		t.Errorf("compRep.SharedPrefixTokens = %d, want 0", compRep.SharedPrefixTokens)
+	}
+
+	// Verify via CLI flag --prefix-tokens 0
+	var stdout, stderr bytes.Buffer
+	code := runMacBenchManyAgent(&stdout, &stderr, []string{"--prefix-tokens", "0", "--json"})
+	if code != 0 {
+		t.Fatalf("runMacBenchManyAgent --prefix-tokens 0 returned code %d, stderr: %s", code, stderr.String())
+	}
+	var cliRep ManyAgentReport
+	if err := json.Unmarshal(stdout.Bytes(), &cliRep); err != nil {
+		t.Fatalf("failed to parse CLI JSON output: %v\nOutput: %s", err, stdout.String())
+	}
+	if cliRep.SharedPrefixTokens != 0 {
+		t.Errorf("cliRep.SharedPrefixTokens = %d, want 0", cliRep.SharedPrefixTokens)
+	}
+
+	// Verify summary format prints 0 tokens
+	stdout.Reset()
+	stderr.Reset()
+	code = runMacBenchManyAgent(&stdout, &stderr, []string{"-p", "0"})
+	if code != 0 {
+		t.Fatalf("runMacBenchManyAgent -p 0 returned code %d, stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "prefix        : 0 tokens") {
+		t.Errorf("summary output missing 'prefix        : 0 tokens':\n%s", stdout.String())
 	}
 }
