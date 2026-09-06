@@ -21,7 +21,7 @@ package ctxmmu
 //
 // Honest bound: a paged-out schema's handle lives in the MMU's FIFO-bounded held
 // ledger (DefaultMaxHeld). If churn ages a handle out, Fault returns an ERROR —
-// fail-closed and visible, never a silent byte loss; Evict itself refuses
+// safe and visible, never a silent byte loss; Evict itself refuses
 // (keeps the page resident) when no durable CAS handle resolves.
 
 import (
@@ -108,8 +108,8 @@ func (t *ToolPageTable) Register(name string, schema []byte) (hash string, dedup
 // (PageOutBody → the abi.PageOut codec seam): the bytes leave the table for the
 // shared CAS and the page's entry records the held handle a Fault re-faults
 // through. The PAGE STAYS IN THE CATALOG — eviction changes residency, never
-// membership, which is exactly the "compaction can only evict, never lose"
-// contract. Fail-closed: an unknown hash, an already-evicted page, or a pager
+// membership, which preserves the rule that compaction can only evict, never lose bytes.
+// An unknown hash, an already-evicted page, or a pager
 // that cannot mint a durable handle returns false and the page stays resident.
 func (t *ToolPageTable) Evict(ctx context.Context, hash string) bool {
 	if t == nil {

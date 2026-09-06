@@ -32,7 +32,7 @@ func taintRank(t abi.TaintLabel) int {
 	case abi.TaintQuarantined:
 		return 2
 	default:
-		return 1 // fail-closed: unknown taint treated as tainted
+		return 1 // default safely treats unknown taint as tainted
 	}
 }
 
@@ -431,7 +431,7 @@ func (g *PeerSearchGuard) FilterAndClamp(items []PeerContextItem, query string) 
 	effectiveScope := abi.ScopeFleet
 
 	for _, item := range items {
-		// 1. Scope exclusion invariant: Filter out ScopeAgent or non-shared private scope
+		// 1. Scope exclusion: Filter out ScopeAgent or non-shared private scope
 		if !isShareableScope(item.Scope) {
 			continue
 		}

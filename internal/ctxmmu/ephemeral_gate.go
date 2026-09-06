@@ -15,8 +15,8 @@
 // (timestamp, current-step, mood/state), so a caller/test can see WHY an observation
 // was refused, not just THAT it was, and (b) a closed Reclassification vocabulary an
 // explicit override can supply, mirroring memq's ConsentExplicit and disposition.go's
-// EvidenceUserConfirmed/EvidenceEstablishedPattern. The default is refuse — the same
-// fail-closed posture as classifyDurability and GateDisposition: a false-negative
+// EvidenceUserConfirmed/EvidenceEstablishedPattern. The default is refuse, sharing the
+// same conservative posture as classifyDurability and GateDisposition: a false-negative
 // (an un-promoted-but-true fact) is a recoverable re-ask; a false-positive (a promoted
 // timestamp/step/mood) is a silent, standing, wrong belief.
 package ctxmmu
