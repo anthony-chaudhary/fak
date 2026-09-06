@@ -461,19 +461,33 @@ func spacedJSON(raw string) string {
 // byte-for-byte identical to the historical renderTranscript.
 func renderTranscriptTools(messages []Message, tools []ToolDef) string {
 	var b strings.Builder
-	var sys []string
+	hasSys := false
+	var n int
 	for _, m := range messages {
 		if m.Role == "system" && strings.TrimSpace(m.Content) != "" {
-			sys = append(sys, m.Content)
+			hasSys = true
 		}
+		n += len(m.Content) + 32
 	}
 	spec := toolSpecBlock(tools)
+	n += len(spec)
+	b.Grow(n)
+
 	// Emit a leading system block when there is any system text OR a tool spec to
 	// advertise. The spec folds into the SAME block (after the system text) so it is part
 	// of every token-prefix.
-	if len(sys) > 0 || spec != "" {
+	if hasSys || spec != "" {
 		b.WriteString("<|im_start|>system\n")
-		b.WriteString(strings.Join(sys, "\n"))
+		firstSys := true
+		for _, m := range messages {
+			if m.Role == "system" && strings.TrimSpace(m.Content) != "" {
+				if !firstSys {
+					b.WriteByte('\n')
+				}
+				b.WriteString(m.Content)
+				firstSys = false
+			}
+		}
 		b.WriteString(spec)
 		b.WriteString("<|im_end|>\n")
 	}
