@@ -23,7 +23,7 @@ These concise answers cover the decisions people most often make when configurin
   "name": "fak configuration answers",
   "description": "Direct answers and authoritative documentation links for configuring the Fused Agent Kernel (fak).",
   "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md",
-  "dateModified": "2026-08-10",
+  "dateModified": "2026-09-06",
   "mainEntity": [
     {
       "@type": "Question",

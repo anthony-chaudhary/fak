@@ -10,7 +10,7 @@ are copy-paste ready. The programmatic ones are already handled in the repo and 
 form:
 
 - **Glama** — auto-indexes from [`glama.json`](https://github.com/anthony-chaudhary/fak/blob/main/glama.json) (committed; approves in minutes).
-- **Official MCP Registry** — wired via [`server.json`](https://github.com/anthony-chaudhary/fak/blob/main/server.json) + the ghcr image, now at **0.37.0** (the `server.json` `version` and its `oci` `identifier` both pin `ghcr.io/anthony-chaudhary/fak:0.37.0`; `release-container.yml` pushes `:{version,latest}` on each `v*` tag). The remaining steps are owner-only and interactive — see Fresh leads #6 below.
+- **Official MCP Registry** — wired via [`server.json`](https://github.com/anthony-chaudhary/fak/blob/main/server.json) + the ghcr image, now at **0.51.0** (the `server.json` `version` and its `oci` `identifier` both pin `ghcr.io/anthony-chaudhary/fak:0.51.0`; `release-container.yml` pushes `:{version,latest}` on each `v*` tag). The remaining steps are owner-only and interactive — see Fresh leads #6 below.
 - **Awesome-list PRs** — already submitted across ~12 lists (don't duplicate).
 
 Reusable description (≈140 chars): *Agent kernel for AI agents: one Go binary that fronts OpenAI/Anthropic/MCP wires, keeps long sessions cache-efficient, routes per call, and audits every tool-call verdict.*
@@ -88,7 +88,7 @@ project `DOS` was already submitted ([cline/mcp-marketplace#1794](https://github
 **Submit:** open a new issue on [`cline/mcp-marketplace`](https://github.com/cline/mcp-marketplace/issues/new/choose) with the *Server Submission* template.
 
 - **GitHub Repo URL:** `https://github.com/anthony-chaudhary/fak`
-- **Logo:** a **400×400 PNG** attached to the issue. *This is the one missing asset — the repo has wide diagrams (`visuals/*.png`) and a 1200×630 `visuals/social-preview.png`, but no square icon. Make/crop a 400×400 fak icon and drag it onto the issue (GitHub issue image upload is web-UI only).* 
+- **Logo:** a **400×400 PNG** attached to the issue. The repo ships square raster brand assets in visuals/brand/ (fak-icon-512.png and fak-mark-512.png); downscale or crop fak-icon-512.png to 400×400 and drag it onto the issue (GitHub issue image upload is web-UI only).
 - **Reason for addition (paste):**
   ```
   fak is the Fused Agent Kernel: one static Go binary you put in front of an agent over MCP. Its server (fak serve --stdio) exposes fak_adjudicate / fak_syscall / fak_admit so Cline can get a kernel verdict for a proposed tool call before running it, run one through the kernel, or hold distrusted tool results out of context. It also keeps long sessions cache-efficient, supports per-call routing, and emits an auditable verdict trail. Apache-2.0, two golang.org/x deps.
@@ -97,7 +97,7 @@ project `DOS` was already submitted ([cline/mcp-marketplace#1794](https://github
 
 ### 6. Official MCP Registry — the final publish is now unblocked
 
-The blocker the old notes flagged (no OCI artifact) is **gone**: `release-container.yml` builds + pushes `ghcr.io/anthony-chaudhary/fak:{version,latest}` on each `v*` tag (the v0.34.0 image was confirmed anonymously pullable via an anonymous ghcr token when this was first wired on 2026-06-27). `server.json` now tracks the current release — **0.37.0** — with its `oci` `identifier` pinned to `ghcr.io/anthony-chaudhary/fak:0.37.0`. Remaining steps (owner-only, can't be automated; re-confirm the `:0.37.0` image is anonymously pullable before publishing):
+The blocker the old notes flagged (no OCI artifact) is **gone**: `release-container.yml` builds + pushes `ghcr.io/anthony-chaudhary/fak:{version,latest}` on each `v*` tag (the v0.34.0 image was confirmed anonymously pullable via an anonymous ghcr token when this was first wired on 2026-06-27). `server.json` now tracks the current release — **0.51.0** — with its `oci` `identifier` pinned to `ghcr.io/anthony-chaudhary/fak:0.51.0`. Remaining steps (owner-only, can't be automated; re-confirm the `:0.51.0` image is anonymously pullable before publishing):
 
 1. **Make the ghcr `fak` package public** (first publish only) — repo *Packages* tab → set visibility to public.
 2. `brew install mcp-publisher` (or the release tarball — see [`docs/fak/mcp-registry.md`](../fak/mcp-registry.md)).
@@ -136,7 +136,7 @@ Spaces are the one directory where a visitor **runs** a claim instead of reading
 no weights (so no model card — that's the fence, not a gap), but the committed
 [`spaces/hf-demo/`](https://github.com/anthony-chaudhary/fak/tree/main/spaces/hf-demo) **Docker
 Space** runs three offline witnesses in-browser: policy DENY/ALLOW, provable deletion
-(`max|Δ|=0`), and the turn tax — no key, no GPU. Runnable source: [`spaces/hf-demo/`](../../spaces/hf-demo/README.md).
+(`max|Δ|=0`), and the turn tax — no key, no GPU. Runnable source: [spaces/hf-demo/](https://github.com/anthony-chaudhary/fak/blob/main/spaces/hf-demo/README.md).
 
 - **Create:** <https://huggingface.co/new-space> → SDK **Docker**, name `fak-demo`, license `apache-2.0`, public.
 - **Push:** the three files in `spaces/hf-demo/` (`README.md` carries the HF `sdk: docker` front-matter, plus `Dockerfile` and `app.py`) to the Space git remote — it builds automatically.
@@ -148,3 +148,5 @@ Space** runs three offline witnesses in-browser: policy DENY/ALLOW, provable del
 
 *Every description here is agent-kernel-first and traces to [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md). No
 performance multipliers are claimed in any listing — keep it that way if you edit them.*
+
+<!-- Freshness review 2026-09-06: directory availability, submission status, and copy remain current against repository artifacts and current release v0.51.0. -->

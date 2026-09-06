@@ -39,14 +39,14 @@ Source: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-confi
 Search terms: validate fak config, fak config errors, fak readiness
 
 ## How do I configure which tools an agent may call?
-Use a JSON capability-floor policy manifest. Start with fak policy --dump, edit the allow and deny rules, validate it with fak policy --check, reproduce expected verdicts with fak preflight --policy, and then load it with fak serve --policy or fak guard --policy.
+Use a JSON capability-floor policy manifest. Start with fak policy --dump, edit the allow and deny rules, validate it with fak policy --check, reproduce expected verdicts with fak preflight --policy, and then load it with fak serve --policy or fak manage --policy.
 Source: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/policy-guide.md
 Search terms: fak policy configuration, capability floor manifest, agent tool permissions
 
-## How do I configure fak guard for a local coding agent?
-Start with fak guard followed by the agent command. fak guard discovers the supported agent adapter, keeps generated state under the documented user configuration directory, and accepts explicit policy and runtime flags when the defaults need to be tightened.
+## How do I configure fak manage for a local coding agent?
+Start with fak manage followed by the agent command. fak manage discovers the supported agent adapter, keeps generated state under the documented user configuration directory, and accepts explicit policy and runtime flags when the defaults need to be tightened.
 Source: https://github.com/anthony-chaudhary/fak/blob/main/README.md#manage-one-local-agent-fak-guard
-Search terms: fak guard config, configure coding agent, local agent guard
+Search terms: fak manage config, configure coding agent, local agent guard
 
 ## How do I configure fak as an MCP server?
 Add fak serve --stdio to the MCP server configuration used by Claude Code, Cursor, VS Code, or another MCP client. The MCP integration guide contains the complete .mcp.json example and a deterministic stdio verification command.

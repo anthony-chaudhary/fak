@@ -1,3 +1,8 @@
+---
+title: "Production brief: fak microcontext, end to end"
+description: "Production brief and script notes for the fak microcontext end-to-end video."
+---
+
 # Production brief: fak microcontext, end to end
 
 The master leads with outcomes, then earns them. The first twelve seconds cut
