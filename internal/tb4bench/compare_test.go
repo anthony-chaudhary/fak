@@ -88,3 +88,33 @@ func TestCompareArtifactGeneration(t *testing.T) {
 		t.Errorf("compare.md not created")
 	}
 }
+
+func TestCompareArtifactGenerationZeroSolved(t *testing.T) {
+	contract := DefaultRunContract("qwen3.8-coder.gguf", "sha256:1234abcd", "Q4_K_M", []string{"task-1"})
+	tasks := []TaskManifest{
+		{TaskID: "task-1", Category: CategoryRefactor},
+	}
+	receiptsA := map[string]*GradingReceipt{
+		"task-1": {TaskID: "task-1", Arm: "fak_inkernel", Verdict: "FAILED", FailureReason: ReasonTestFailed, DurationMs: 100},
+	}
+	receiptsB := map[string]*GradingReceipt{
+		"task-1": {TaskID: "task-1", Arm: "opencode_llamacpp", Verdict: "FAILED", FailureReason: ReasonTestFailed, DurationMs: 100},
+	}
+
+	report, err := BuildCompareReport(contract, receiptsA, receiptsB, TelemetryTierMetrics{}, TelemetryTierMetrics{}, tasks)
+	if err != nil {
+		t.Fatalf("failed to build compare report with zero solved: %v", err)
+	}
+
+	tempDir, err := os.MkdirTemp("", "tb4-compare-zero-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	jsonPath := filepath.Join(tempDir, "compare.json")
+	mdPath := filepath.Join(tempDir, "compare.md")
+	if err := report.Save(jsonPath, mdPath); err != nil {
+		t.Fatalf("failed to save compare report with zero solved (NaN regression): %v", err)
+	}
+}
