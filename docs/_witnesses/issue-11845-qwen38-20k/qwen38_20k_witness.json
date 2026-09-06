@@ -1,0 +1,65 @@
+{
+  "schema": "fak.cloud-gpu-witness.v1",
+  "verdict": "PASS_20K_NATIVE_CUDA",
+  "timestamp_utc": "2026-09-06T08:34:15Z",
+  "environment": {
+    "node": "fak-qwen-serve",
+    "zone": "us-central1-f",
+    "platform": "GCP Compute Engine",
+    "gpu": {
+      "model": "NVIDIA A100-SXM4-40GB",
+      "driver_version": "580.159.03",
+      "cuda_driver_version": "13.0",
+      "cuda_toolkit_version": "12.9.41",
+      "total_vram_mib": 40960
+    },
+    "engine": "fak-native",
+    "backend": "cuda",
+    "git_commit": "8a8acb6da",
+    "listener": "127.0.0.1:8160"
+  },
+  "model": {
+    "id": "Qwen3.8-27B-UD-Q2_K_XL",
+    "gguf_path": "/opt/qwen38-ud-q2kxl/Qwen3.8-27B-UD-Q2_K_XL.gguf",
+    "file_size_bytes": 9828981664,
+    "sha256": "fd4730dd8aad070517978752b63d530aeb1740d2283cab9fa24f1e404032ddb0",
+    "quantization": "UD-Q2_K_XL"
+  },
+  "configuration": {
+    "context_budget_tokens": 32768,
+    "native_admission_token_budget": 32768,
+    "prefill_chunk_tokens": 2048,
+    "stream": true
+  },
+  "measurements": {
+    "prompt_tokens": 20480,
+    "completion_tokens": 16,
+    "ttft_seconds": 230.196,
+    "ttft_ms": 230196.1,
+    "total_latency_seconds": 241.456,
+    "total_latency_ms": 241456.0,
+    "prefill": {
+      "tokens": 20480,
+      "duration_seconds": 218.69,
+      "throughput_tok_per_sec": 93.6
+    },
+    "decode": {
+      "tokens": 16,
+      "duration_seconds": 11.26,
+      "throughput_tok_per_sec": 1.42
+    },
+    "gpu_telemetry": {
+      "vram_baseline_mib": 33478,
+      "vram_peak_during_mib": 35246,
+      "vram_after_mib": 33478,
+      "temp_c": 34,
+      "power_draw_w": 54.36
+    },
+    "response_text": "Based on the input provided, here is the response:\n\nThe text consists of"
+  },
+  "witness": {
+    "inkernel_chat_log": "2026/09/06 08:34:15 inkernel_chat model=Qwen3.8-27B-UD-Q2_K_XL backend=cuda forward_path=cuda/qwen35-gdn-ssm-decode-v1 q4k=true q8dec=avx512+fused/12w prompt=20480tok cacheable=0tok reused=0tok prefill=20480tok/218.69s/93.6tok/s decode=16tok/11.26s/1.4tok/s",
+    "gateway_event_log": "2026/09/06 08:34:15 {\"cache_creation_input_tokens\":0,\"cache_creation_span\":\"none\",\"cache_read_input_tokens\":0,\"cached_prompt_tokens\":0,\"compaction_fired\":false,\"completion_tokens\":16,\"context_event\":false,\"duration_ms\":230163.02,\"event\":\"gateway_inference_turn\",\"finish_reason\":\"length\",\"model\":\"Qwen3.8-27B-UD-Q2_K_XL\",\"prompt_tokens\":20480,\"stream\":true,\"total_tokens\":20496,\"trace_id\":\"default\",\"wire\":\"openai_chat_completions\"}",
+    "raw_response_tokens": 16
+  }
+}
