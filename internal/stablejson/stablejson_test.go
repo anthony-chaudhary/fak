@@ -30,3 +30,26 @@ func TestMarshalNilAndErrorPropagation(t *testing.T) {
 		t.Fatal("marshal error not propagated")
 	}
 }
+
+func BenchmarkMarshal(b *testing.B) {
+	payload := map[string]any{
+		"schema":  "fak-receipt/1",
+		"outcome": "executed_cold_read",
+		"witness": "git:a1b2c3d4e5f6",
+		"bytes":   4096,
+		"metrics": map[string]any{
+			"duration_ns": 1250000,
+			"tokens":      512,
+			"cache_hit":   true,
+		},
+		"tags": []string{"receipt", "kernel", "vCache"},
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := Marshal(payload); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
