@@ -96,6 +96,8 @@ type Report struct {
 	AgingTotal int `json:"aging_wip_total,omitempty"`
 	// Curve is the WIP-over-time series when a window was requested.
 	Curve []DayWIP `json:"wip_curve,omitempty"`
+	// ArrivalWindows holds the arrival vs service measurements over standard windows (7d, 30d, 60d).
+	ArrivalWindows []ArrivalServiceWindow `json:"arrival_windows,omitempty"`
 
 	// Epics holds the per-aggregate progress information.
 	Epics []EpicProgress `json:"epics,omitempty"`
@@ -181,14 +183,24 @@ func Build(in Input) Report {
 	for _, k := range kpis {
 		debt += len(k.Defects)
 	}
+	curveDays := in.WindowDays
+	if curveDays < 14 {
+		curveDays = 14
+	}
+	curveSince := in.Now.Add(-time.Duration(curveDays) * 24 * time.Hour)
 	rep := Report{
-		Schema:            Schema,
-		Workspace:         in.Workspace,
-		KPIs:              kpis,
-		Tree:              tree,
-		Aging:             aging,
-		AgingTotal:        len(stalled),
-		Curve:             WIPCurve(spans, since, in.Now),
+		Schema:     Schema,
+		Workspace:  in.Workspace,
+		KPIs:       kpis,
+		Tree:       tree,
+		Aging:      aging,
+		AgingTotal: len(stalled),
+		Curve:      WIPCurve(spans, curveSince, in.Now),
+		ArrivalWindows: []ArrivalServiceWindow{
+			MeasureArrivalService(spans, in.Now.Add(-7*24*time.Hour), in.Now),
+			MeasureArrivalService(spans, in.Now.Add(-30*24*time.Hour), in.Now),
+			MeasureArrivalService(spans, in.Now.Add(-60*24*time.Hour), in.Now),
+		},
 		Epics:             epics,
 		Unmeasurable:      unmeasurableNums,
 		UnmeasurableTotal: len(unmeasurableAll),

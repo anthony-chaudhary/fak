@@ -169,5 +169,6 @@ func RenderScore(w io.Writer, rep Report, now time.Time) {
 	// other axis is answered by changing intake, but this one is answered by
 	// finishing specific rotting work, and a count alone names nothing.
 	RenderAging(w, rep, now)
+	RenderArrivalServiceReadout(w, rep, now)
 	fmt.Fprintf(w, "reason: %s\nnext: %s\n", rep.Reason, rep.NextAction)
 }

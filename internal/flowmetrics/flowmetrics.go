@@ -333,6 +333,7 @@ type DayWIP struct {
 	Started  int    `json:"started"`
 	Closed   int    `json:"closed"`
 	InFlight int    `json:"in_flight"`
+	Backlog  int    `json:"backlog"`
 }
 
 // WIPCurve reports, for each UTC day in [from,to], how many issues opened,
@@ -372,6 +373,9 @@ func WIPCurve(spans []Span, from, to time.Time) []DayWIP {
 			}
 			if s.Started() && s.StartedAt.Before(end) && (!s.Closed() || !s.ClosedAt.Before(d)) {
 				row.InFlight++
+			}
+			if s.OpenedAt.Before(end) && (!s.Closed() || !s.ClosedAt.Before(d)) && (!s.Started() || !s.StartedAt.Before(end)) {
+				row.Backlog++
 			}
 		}
 		out = append(out, row)
