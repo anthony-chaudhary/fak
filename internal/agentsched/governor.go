@@ -440,16 +440,18 @@ func (g *Governor) TryAdmit() (*Task, *AdmissionVerdict, error) {
 	g.inFlight++
 
 	// Register held lane lease if task declared a lane or tree
-	if dequeued.Lane != "" || len(dequeued.Tree) > 0 {
-		if dequeued.ID == "" {
-			dequeued.ID = fmt.Sprintf("lease-%d", time.Now().UnixNano())
+	candidate := dequeued
+	if candidate.Lane != "" || len(candidate.Tree) > 0 {
+		leaseID := candidate.ID
+		if leaseID == "" {
+			leaseID = fmt.Sprintf("lease-%d", time.Now().UnixNano())
+			candidate.ID = leaseID
 		}
-		leaseID := dequeued.ID
 		g.heldLeases[leaseID] = laneadmit.Lease{
 			ID:     leaseID,
-			Lane:   dequeued.Lane,
-			Tree:   dequeued.Tree,
-			Holder: dequeued.ID,
+			Lane:   candidate.Lane,
+			Tree:   candidate.Tree,
+			Holder: candidate.ID,
 		}
 	}
 
@@ -465,8 +467,53 @@ func (g *Governor) Release(task *Task) {
 		g.inFlight--
 	}
 	if task != nil {
-		delete(g.heldLeases, task.ID)
+		if task.ID != "" {
+			delete(g.heldLeases, task.ID)
+			for k, l := range g.heldLeases {
+				if l.Holder == task.ID {
+					delete(g.heldLeases, k)
+					break
+				}
+			}
+		} else if task.Lane != "" || len(task.Tree) > 0 {
+			for k, l := range g.heldLeases {
+				if l.Holder == "" || (task.Lane != "" && l.Lane == task.Lane) || (len(task.Tree) > 0 && equalSlices(l.Tree, task.Tree)) {
+					delete(g.heldLeases, k)
+					break
+				}
+			}
+		}
 	}
+}
+
+// HeldLeasesCount returns the count of currently active lane leases.
+func (g *Governor) HeldLeasesCount() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.heldLeases)
+}
+
+// HeldLeases returns a copy of the currently active lane leases.
+func (g *Governor) HeldLeases() map[string]laneadmit.Lease {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	leases := make(map[string]laneadmit.Lease, len(g.heldLeases))
+	for k, v := range g.heldLeases {
+		leases[k] = v
+	}
+	return leases
+}
+
+func equalSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // Reset clears all in-flight workers, held leases, and resets concurrency to base.
