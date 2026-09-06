@@ -32,13 +32,14 @@ func TestOpencodeSessionLeverRecognized(t *testing.T) {
 
 	// 3. Claims registry lookup for the 3 metrics
 	expectedClaims := []struct {
-		metric  string
-		claimed float64
-		unit    string
+		metric        string
+		claimed       float64
+		unit          string
+		lowerIsBetter bool
 	}{
-		{"cache_read_share", 0.80, "fraction"},
-		{"turns_per_task", 16.0, "turns"},
-		{"compaction_shed_ratio", 0.40, "fraction"},
+		{"cache_read_share", 0.80, "fraction", false},
+		{"turns_per_task", 16.0, "turns", true},
+		{"compaction_shed_ratio", 0.40, "fraction", false},
 	}
 
 	for _, tc := range expectedClaims {
@@ -52,15 +53,15 @@ func TestOpencodeSessionLeverRecognized(t *testing.T) {
 		if c.IntentionalFloor {
 			t.Errorf("%s/%s is an estimate, must not be marked IntentionalFloor", OpencodeSessionLeverName, tc.metric)
 		}
-		if c.LowerIsBetter {
-			t.Errorf("%s/%s must not be marked LowerIsBetter", OpencodeSessionLeverName, tc.metric)
+		if c.LowerIsBetter != tc.lowerIsBetter {
+			t.Errorf("%s/%s LowerIsBetter = %v, want %v", OpencodeSessionLeverName, tc.metric, c.LowerIsBetter, tc.lowerIsBetter)
 		}
 		if c.Basis == "" {
 			t.Errorf("%s/%s missing prose basis", OpencodeSessionLeverName, tc.metric)
 		}
 
 		pred, ok := Registry.Predict(OpencodeSessionLeverName, tc.metric, tc.unit)
-		if !ok || pred.Claimed != tc.claimed || pred.Unit != tc.unit {
+		if !ok || pred.Claimed != tc.claimed || pred.Unit != tc.unit || pred.LowerIsBetter != tc.lowerIsBetter {
 			t.Errorf("Registry.Predict(%q, %q, %q) = %+v, ok=%v", OpencodeSessionLeverName, tc.metric, tc.unit, pred, ok)
 		}
 
@@ -170,15 +171,8 @@ func TestOpencodeSessionCalibrationErrorsAgainstEpisodes(t *testing.T) {
 		if ep.Grade != "C" {
 			t.Errorf("%s: grade = %s, want C", in.Prediction.Metric, ep.Grade)
 		}
-		var wantVerdict string
-		switch in.Prediction.Metric {
-		case "turns_per_task":
-			wantVerdict = VerdictUnderClaim
-		default:
-			wantVerdict = VerdictOverClaim
-		}
-		if ep.Verdict != wantVerdict {
-			t.Errorf("%s: verdict = %s, want %s", in.Prediction.Metric, ep.Verdict, wantVerdict)
+		if ep.Verdict != VerdictOverClaim {
+			t.Errorf("%s: verdict = %s, want %s", in.Prediction.Metric, ep.Verdict, VerdictOverClaim)
 		}
 	}
 
@@ -372,3 +366,88 @@ func TestOpencodeSessionLeverRunIntegration(t *testing.T) {
 		}
 	}
 }
+
+// TestOpencodeSessionTurnsPerTaskLowerIsBetterPolarity explicitly tests that
+// turns_per_task has LowerIsBetter == true and that 20 turns vs 16 claimed
+// scores VerdictOverClaim ("worse than claimed / regression") rather than
+// VerdictUnderClaim (#11928).
+func TestOpencodeSessionTurnsPerTaskLowerIsBetterPolarity(t *testing.T) {
+	c, ok := Registry.Lookup(OpencodeSessionLeverName, "turns_per_task")
+	if !ok {
+		t.Fatalf("Registry.Lookup(%q, %q) failed", OpencodeSessionLeverName, "turns_per_task")
+	}
+	if !c.LowerIsBetter {
+		t.Fatalf("expected turns_per_task LowerIsBetter == true, got false")
+	}
+
+	pred, ok := Registry.Predict(OpencodeSessionLeverName, "turns_per_task", "turns")
+	if !ok {
+		t.Fatalf("Registry.Predict(%q, %q, %q) failed", OpencodeSessionLeverName, "turns_per_task", "turns")
+	}
+	if !pred.LowerIsBetter {
+		t.Fatalf("expected Prediction.LowerIsBetter == true, got false")
+	}
+
+	// 20 turns vs 16 claimed -> excessive turns is worse than claimed -> VerdictOverClaim
+	outcomeOver := Outcome{
+		Realized:   20.0,
+		Provenance: Witnessed,
+		Measured:   true,
+		Sample:     1,
+		Source:     "20 turns across 1 task",
+	}
+	epOver := Score("test-polarity", pred, outcomeOver, DefaultCalibBand())
+	if epOver.Verdict != VerdictOverClaim {
+		t.Errorf("excessive turns verdict = %s, want %s", epOver.Verdict, VerdictOverClaim)
+	}
+
+	// 12 turns vs 16 claimed -> fewer turns is better than claimed -> VerdictUnderClaim
+	outcomeUnder := Outcome{
+		Realized:   12.0,
+		Provenance: Witnessed,
+		Measured:   true,
+		Sample:     1,
+		Source:     "12 turns across 1 task",
+	}
+	epUnder := Score("test-polarity", pred, outcomeUnder, DefaultCalibBand())
+	if epUnder.Verdict != VerdictUnderClaim {
+		t.Errorf("fewer turns verdict = %s, want %s", epUnder.Verdict, VerdictUnderClaim)
+	}
+}
+
+// TestOpencodeSessionNegativeTurnsUnmeasured verifies that an OpencodeSessionLedger
+// with TotalTurns < 0 produces an unmeasured episode (Measured: false) (#11940).
+func TestOpencodeSessionNegativeTurnsUnmeasured(t *testing.T) {
+	led := OpencodeSessionLedger{
+		SessionID:      "ses-negative-turns",
+		TurnsRecorded:  true,
+		TotalTurns:     -5,
+		CompletedTasks: 1,
+	}
+
+	inputs := OpencodeSessionEpisodes(led)
+	if len(inputs) != 3 {
+		t.Fatalf("expected 3 inputs, got %d", len(inputs))
+	}
+
+	var turnsInput *ScoredInput
+	for i := range inputs {
+		if inputs[i].Prediction.Metric == "turns_per_task" {
+			turnsInput = &inputs[i]
+			break
+		}
+	}
+	if turnsInput == nil {
+		t.Fatalf("turns_per_task metric not found in episodes")
+	}
+
+	if turnsInput.Outcome.Measured {
+		t.Errorf("turns_per_task with negative TotalTurns must be unmeasured, got Measured = true (Realized = %v)", turnsInput.Outcome.Realized)
+	}
+
+	ep := Score("test-negative-turns", turnsInput.Prediction, turnsInput.Outcome, DefaultCalibBand())
+	if ep.Verdict != VerdictUnmeasured {
+		t.Errorf("verdict = %s, want UNMEASURED", ep.Verdict)
+	}
+}
+

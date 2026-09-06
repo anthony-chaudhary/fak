@@ -12,8 +12,11 @@ import (
 var _ = RegisterClaim("opencode-session", "cache_read_share", claim(0.80,
 	"seed theory (#11669): ~80% of billed input tokens in opencode agentic sessions are served as prefix cache reads; a genuine estimate the RSI loop recalibrates toward measured reality"))
 
-var _ = RegisterClaim("opencode-session", "turns_per_task", claim(16.0,
-	"seed theory (#11669): opencode completes an agentic task in about 16 assistant turns; a genuine estimate the RSI loop recalibrates toward measured reality"))
+var _ = RegisterClaim("opencode-session", "turns_per_task", Claim{
+	Claimed:       16.0,
+	LowerIsBetter: true,
+	Basis:         "seed theory (#11669): opencode completes an agentic task in about 16 assistant turns; a genuine estimate the RSI loop recalibrates toward measured reality",
+})
 
 var _ = RegisterClaim("opencode-session", "compaction_shed_ratio", claim(0.40,
 	"seed theory (#11669): opencode compaction shed line sheds ~40% of context tokens upon trigger threshold; a genuine estimate the RSI loop recalibrates toward measured reality"))
@@ -80,7 +83,7 @@ func OpencodeSessionEpisodes(led OpencodeSessionLedger) []ScoredInput {
 
 	// 2. turns_per_task
 	turnsPred := Registry.MustPredict("opencode-session", "turns_per_task", "turns")
-	if !led.TurnsRecorded || led.CompletedTasks <= 0 {
+	if !led.TurnsRecorded || led.TotalTurns < 0 || led.CompletedTasks <= 0 {
 		episodes = append(episodes, ScoredInput{
 			Prediction: turnsPred,
 			Outcome: Outcome{
