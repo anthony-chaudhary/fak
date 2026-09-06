@@ -481,9 +481,11 @@ func TestSearchSingleflightLeaderCancellationJoinerRecovers(t *testing.T) {
 	ctxLeader, cancelLeader := context.WithCancel(context.Background())
 	defer cancelLeader()
 
+	leaderStarted := make(chan struct{})
 	var hookOnce sync.Once
 	ts.searchHook = func() {
 		hookOnce.Do(func() {
+			close(leaderStarted)
 			deadline := time.Now().Add(2 * time.Second)
 			for ts.grepFlight.Waiters(key) < 1 {
 				if time.Now().After(deadline) {
@@ -507,6 +509,12 @@ func TestSearchSingleflightLeaderCancellationJoinerRecovers(t *testing.T) {
 		defer wg.Done()
 		leaderOut, leaderErr = ts.grep(ctxLeader, argsOf(t, GrepArgs{Pattern: matchToken}))
 	}()
+
+	select {
+	case <-leaderStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("leader did not start in time")
+	}
 
 	go func() {
 		defer wg.Done()
@@ -541,7 +549,7 @@ func TestSearchSingleflightGlobJoinerTimeoutUnblocksImmediately(t *testing.T) {
 	}
 
 	mustWrite(t, filepath.Join(dir, "src/main.go"), "package main\n")
-	key := ts.root + "\x00**/*.go"
+	key := globFlightKey(ts.root, "**/*.go")
 
 	leaderHold := make(chan struct{})
 	leaderStarted := make(chan struct{})
@@ -612,14 +620,16 @@ func TestSearchSingleflightGlobLeaderCancellationJoinerRecovers(t *testing.T) {
 	}
 
 	mustWrite(t, filepath.Join(dir, "src/lib.go"), "package lib\n")
-	key := ts.root + "\x00**/*.go"
+	key := globFlightKey(ts.root, "**/*.go")
 
 	ctxLeader, cancelLeader := context.WithCancel(context.Background())
 	defer cancelLeader()
 
+	leaderStarted := make(chan struct{})
 	var hookOnce sync.Once
 	ts.searchHook = func() {
 		hookOnce.Do(func() {
+			close(leaderStarted)
 			deadline := time.Now().Add(2 * time.Second)
 			for ts.globFlight.Waiters(key) < 1 {
 				if time.Now().After(deadline) {
@@ -644,6 +654,12 @@ func TestSearchSingleflightGlobLeaderCancellationJoinerRecovers(t *testing.T) {
 		leaderOut, leaderErr = ts.glob(ctxLeader, argsOf(t, GlobArgs{Pattern: "**/*.go"}))
 	}()
 
+	select {
+	case <-leaderStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("leader did not start in time")
+	}
+
 	go func() {
 		defer wg.Done()
 		joinerOut, joinerErr = ts.glob(context.Background(), argsOf(t, GlobArgs{Pattern: "**/*.go"}))
@@ -664,5 +680,96 @@ func TestSearchSingleflightGlobLeaderCancellationJoinerRecovers(t *testing.T) {
 	joinerData := decodeResult(t, joinerOut)
 	if joinerData["count"] != float64(1) {
 		t.Fatalf("joiner count = %v, want 1", joinerData["count"])
+	}
+}
+
+// TestSearchSingleflightEmbeddedNullBytesDoNotCollide verifies that queries with embedded
+// null bytes do not collide across parameter boundaries.
+func TestSearchSingleflightEmbeddedNullBytesDoNotCollide(t *testing.T) {
+	dir := t.TempDir()
+	ts, err := New(Config{Root: dir})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// 1. Direct unit verification that length-prefixed formatting prevents parameter boundary collision.
+	// In unescaped raw NUL concatenation (root + "\x00" + pattern + "\x00" + glob + "\x00" + limit),
+	// pattern "target\x00" with glob "extra" and pattern "target" with glob "\x00extra" produce
+	// the identical key string (root + "\x00target\x00\x00extra\x00" + limit).
+	k1 := grepFlightKey(ts.root, "target\x00", "extra", 100)
+	k2 := grepFlightKey(ts.root, "target", "\x00extra", 100)
+	if k1 == k2 {
+		t.Fatalf("grep flight keys collided across parameter boundaries: %q == %q", k1, k2)
+	}
+
+	gk1 := globFlightKey(ts.root, "target\x00extra")
+	gk2 := globFlightKey(ts.root+"\x00target", "extra")
+	if gk1 == gk2 {
+		t.Fatalf("glob flight keys collided across parameter boundaries: %q == %q", gk1, gk2)
+	}
+
+	// 2. End-to-end concurrency test: execute two concurrent grep calls that would have
+	// collided under raw NUL concatenation.
+	mustWrite(t, filepath.Join(dir, "target.txt"), "target\x00alpha in file\n")
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	start := make(chan struct{})
+
+	var res1, res2 map[string]any
+	var err1, err2 error
+
+	go func() {
+		defer wg.Done()
+		<-start
+		out, isErr := ts.grep(context.Background(), argsOf(t, GrepArgs{
+			Pattern: "target\x00",
+			Glob:    "target.txt",
+		}))
+		if isErr {
+			err1 = fmt.Errorf("query 1 failed: %s", string(out))
+			return
+		}
+		res1 = decodeResult(t, out)
+	}()
+
+	go func() {
+		defer wg.Done()
+		<-start
+		out, isErr := ts.grep(context.Background(), argsOf(t, GrepArgs{
+			Pattern: "target",
+			Glob:    "\x00target.txt",
+		}))
+		if isErr {
+			err2 = fmt.Errorf("query 2 failed: %s", string(out))
+			return
+		}
+		res2 = decodeResult(t, out)
+	}()
+
+	close(start)
+	wg.Wait()
+
+	if err1 != nil {
+		t.Fatalf("query 1 err: %v", err1)
+	}
+	if err2 != nil {
+		t.Fatalf("query 2 err: %v", err2)
+	}
+
+	// Query 1 matches "target\x00" in target.txt.
+	if res1["match_count"] != float64(1) {
+		t.Fatalf("query 1 match_count = %v, want 1", res1["match_count"])
+	}
+	// Query 2 has glob "\x00target.txt" which does not match "target.txt", so 0 matches.
+	if res2["match_count"] != float64(0) {
+		t.Fatalf("query 2 match_count = %v, want 0", res2["match_count"])
+	}
+	// Crucially, neither query coalesced into the other.
+	if res1["coalesced"] != false {
+		t.Fatalf("query 1 coalesced = %v, want false", res1["coalesced"])
+	}
+	if res2["coalesced"] != false {
+		t.Fatalf("query 2 coalesced = %v, want false", res2["coalesced"])
 	}
 }
