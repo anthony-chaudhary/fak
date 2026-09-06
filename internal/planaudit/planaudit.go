@@ -19,6 +19,7 @@ var (
 	unitHeadingRE = regexp.MustCompile(`^#{2,6}\s+\d+(?:\.\d+)*[.)]?(?:\s|[—–-]|$)`)
 	headingRE     = regexp.MustCompile(`^#\s+(.*)`)
 	shippedRE     = regexp.MustCompile(`(?i)shipped|built|✅|\bdone\b|complete[d]?`)
+	taskBoxRE     = regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)])\s*\[([ xX]*)](\s|$)`)
 )
 
 const HeaderLines = 60
@@ -28,6 +29,7 @@ type Plan struct {
 	Name            string `json:"name"`
 	File            string `json:"file"`
 	TotalUnits      int    `json:"total_units"`
+	DoneUnits       int    `json:"done_units"`
 	Signal          string `json:"signal"`
 	PercentComplete int    `json:"percent_complete"`
 	Status          string `json:"status"`
@@ -73,7 +75,33 @@ func ExpandGlob(root, pattern string) ([]string, error) {
 	return out, nil
 }
 
+func CountTasks(lines []string) (total, checked int) {
+	inCode := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inCode = !inCode
+			continue
+		}
+		if inCode {
+			continue
+		}
+		m := taskBoxRE.FindStringSubmatch(line)
+		if m != nil {
+			total++
+			if strings.ContainsAny(m[1], "xX") {
+				checked++
+			}
+		}
+	}
+	return total, checked
+}
+
 func CountUnits(lines []string) int {
+	totalTasks, _ := CountTasks(lines)
+	if totalTasks > 0 {
+		return totalTasks
+	}
 	n := 0
 	for _, line := range lines {
 		if unitRowRE.MatchString(line) || unitHeadingRE.MatchString(line) {
@@ -96,25 +124,58 @@ func AuditPlan(path string) (Plan, error) {
 			break
 		}
 	}
-	end := HeaderLines
-	if len(lines) < end {
-		end = len(lines)
+
+	totalTasks, checkedTasks := CountTasks(lines)
+	totalUnits := CountUnits(lines)
+
+	var percent int
+	var status string
+	var signal string
+	var doneUnits int
+
+	if totalTasks > 0 {
+		signal = "task-boxes"
+		doneUnits = checkedTasks
+		if checkedTasks == totalTasks {
+			percent = 100
+			status = "complete"
+		} else if checkedTasks == 0 {
+			percent = 0
+			status = "not_started"
+		} else {
+			status = "in_progress"
+			percent = int(float64(checkedTasks)*100.0/float64(totalTasks) + 0.5)
+			if percent == 0 {
+				percent = 1
+			} else if percent == 100 {
+				percent = 99
+			}
+		}
+	} else {
+		end := HeaderLines
+		if len(lines) < end {
+			end = len(lines)
+		}
+		header := strings.Join(lines[:end], "\n")
+		shipped := shippedRE.MatchString(header)
+		percent = 0
+		status = "not_started"
+		signal = "none"
+		doneUnits = 0
+		if shipped {
+			percent = 100
+			status = "complete"
+			signal = "shipped-marker"
+			doneUnits = totalUnits
+		}
 	}
-	header := strings.Join(lines[:end], "\n")
-	shipped := shippedRE.MatchString(header)
-	percent := 0
-	status := "not_started"
-	signal := "none"
-	if shipped {
-		percent = 100
-		status = "complete"
-		signal = "shipped-marker"
-	}
+
 	return Plan{
 		ID:              strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
 		Name:            name,
 		File:            filepath.Base(path),
-		TotalUnits:      CountUnits(lines),
+		TotalUnits:      totalUnits,
+		DoneUnits:       doneUnits,
 		Signal:          signal,
 		PercentComplete: percent,
 		Status:          status,
@@ -140,7 +201,9 @@ func BuildReport(plans []Plan) Report {
 		if p.TotalUnits > 0 {
 			coveragePlans++
 			totalUnits += p.TotalUnits
-			if p.Status == "complete" {
+			if p.DoneUnits > 0 {
+				doneUnits += p.DoneUnits
+			} else if p.Status == "complete" {
 				doneUnits += p.TotalUnits
 			}
 		}
