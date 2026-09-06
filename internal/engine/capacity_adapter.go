@@ -161,7 +161,7 @@ func (a *CapacityAdapter) Execute(ctx context.Context, mv PlacementMove) (Placem
 			// Retain the live span; record the fault — never a silent recompute.
 			return a.record(mv, d, cachemeta.KVTransferFault, bytesMoved, staged.Reason, 0, false), nil
 		default:
-			// A staging MISS / unset outcome is fail-closed: the colder tier declined the
+			// A staging MISS / unset outcome is conservative: the colder tier declined the
 			// span, so the live copy MUST be retained.
 			reason := "stage " + staged.Outcome.String() + ": colder tier declined the span"
 			return a.record(mv, d, cachemeta.KVTransferFault, bytesMoved, reason, 0, false), nil

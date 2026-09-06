@@ -33,7 +33,7 @@ package engine
 // requirement 4 (the tier-1 mirror needs no copy of this policy, so it cannot
 // drift from it; residency and trust are answered by different predicates).
 //
-// FAIL-CLOSED IN EVERY DIRECTION:
+// DEFAULT-DENY IN EVERY DIRECTION:
 //   - the default boundary is EMPTY; nothing is admitted until an operator declares.
 //   - a declaration is verified WHOLE-OR-NOTHING: one bad host installs no policy.
 //   - https ONLY, non-loopback, and a cred_env whose variable is actually SET, so

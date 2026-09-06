@@ -21,7 +21,7 @@ import (
 //
 //   PROMOTION EVIDENCE. This is the SGLang sibling of the vLLM observation adapter: it
 //   turns an SGLang upstream's RadixAttention hit-rate gauge into the CacheCapability
-//   contract, so an SGLang-fronted session can now report observed radix reuse OR an
+//   format, so an SGLang-fronted session can now report observed radix reuse OR an
 //   explicit "unavailable" on the SAME axes as vLLM (#1551) and llama.cpp (#1553) — the
 //   evidence source the later item-39 same-geometry value comparison and item-40
 //   /debug/vars surfacing read. It re-witnesses the #1549 inventory row (SGLang =

@@ -310,7 +310,7 @@ func sensitiveRoute(c *abi.ToolCall) bool {
 	// retention is treated exactly like a sensitive payload, so it can never be
 	// adjudicated onto a remote (data-retaining) engine. Recognizing these can only
 	// ADD a deny (a sensitive route to a remote engine), never remove one — strictly
-	// fail-closed-er.
+	// conservative.
 	return metaWantsZeroRetention(c.Meta)
 }
 
@@ -346,7 +346,7 @@ func truthyMeta(v string) bool {
 }
 
 // remoteRoute reports whether an engine route leaves this box — the residency
-// floor's "is this engine remote?" predicate. It is FAIL-CLOSED: only a route the
+// floor's "is this engine remote?" predicate. It is default-remote: only a route the
 // kernel can prove names a KNOWN on-box engine family (the fused in-kernel model,
 // the offline mock, a cassette replay, or a route an operator explicitly marked
 // local / on-device / kernel) is treated as local; EVERY other route is remote.

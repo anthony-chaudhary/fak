@@ -7,7 +7,7 @@ package engine
 // The problem it solves: engine-specific cache knowledge is scattered —
 // internal/enginecache hard-codes the SGLang/vLLM control endpoints and the gateway
 // imports it directly — so every new engine drags a coupling into core. This
-// contract is the SEAM: a small value type plus a producer interface that lets the
+// interface is the SEAM: a small value type plus a producer interface that lets the
 // gateway report what an upstream engine can expose about its cache WITHOUT importing
 // any engine-specific adapter package. The #1551–#1553 per-engine adapters implement
 // the interface behind the seam; core depends on the interface, not on them.

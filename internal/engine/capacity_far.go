@@ -52,7 +52,7 @@ func NUMAFarPressure(residentBytes int64) (pressure float64, capacityBytes int64
 
 // CXLPressure derives the CXL tier's live fullness and capacity from the box's
 // CPU-less expansion memory (memory-only NUMA nodes, CXL.mem the canonical instance)
-// — the CXL analogue of NUMAFarPressure, with the identical fail-open contract: a box
+// — the CXL analogue of NUMAFarPressure, with identical fallback behavior: a box
 // with no expansion node reports known=false and the caller keeps today's behavior.
 func CXLPressure(residentBytes int64) (pressure float64, capacityBytes int64, known bool) {
 	total, free, ok := compute.CXLMemoryInfo()

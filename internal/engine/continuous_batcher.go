@@ -98,9 +98,9 @@ type Slot struct {
 	YieldCount        int
 	ResumeCount       int
 	LastToken         int
-	EvictionDuration  time.Duration // Invariant: 0 ms in UMA
-	BytesSwapped      int64         // Invariant: 0 bytes in UMA
-	ReprefillTokens   int           // Invariant: 0 re-prefill tokens on resume
+	EvictionDuration  time.Duration // 0 ms in UMA
+	BytesSwapped      int64         // 0 bytes in UMA
+	ReprefillTokens   int           // 0 re-prefill tokens on resume
 	KVCacheStationary bool          // Remains resident in UMA
 	KVCacheBytes      int64         // Allocated KV cache memory in bytes
 
@@ -284,7 +284,7 @@ type BatchStepResult struct {
 	ArithmeticIntensity  float64
 	AggregateThroughput  float64
 	StepDuration         time.Duration
-	StallDuration        time.Duration // Invariant: 0s on yield/resume
+	StallDuration        time.Duration // 0s on yield/resume
 	RetiredSessionIDs    []string
 	PromotedSessionIDs   []string
 	KVCacheBytesUsed     int64
@@ -709,7 +709,7 @@ func (cb *ContinuousBatcher) Step(ctx context.Context) (*BatchStepResult, error)
 		ArithmeticIntensity:  opIntensity,
 		AggregateThroughput:  aggTPS,
 		StepDuration:         time.Since(stepStart),
-		StallDuration:        0, // Invariant: zero compute stalls on yield/resume
+		StallDuration:        0, // zero compute stalls on yield/resume
 		RetiredSessionIDs:    retiredIDs,
 		PromotedSessionIDs:   promotedIDs,
 		KVCacheBytesUsed:     cb.currentKVCacheBytesLocked(),

@@ -98,8 +98,8 @@ type LlamaSessionCache struct {
 }
 
 // Capability maps the decoded signal onto the wire-neutral engine.CacheCapability
-// contract. A present symptom surface is CachePassiveObserve; an absent one is the
-// fail-closed CacheUnknown with an explicit passive/no-evidence Evidence string. Both
+// model. A present symptom surface is CachePassiveObserve; an absent one is the
+// safe CacheUnknown with an explicit passive/no-evidence Evidence string. Both
 // carry ProvenanceProvider (an observed provider counter, not a kernel witness) and
 // ColdPathCorrect true (observation never changes the request's cold path).
 func (s LlamaSessionCache) Capability() CacheCapability {

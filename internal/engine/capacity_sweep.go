@@ -47,7 +47,7 @@ type CapacityPressureSweep struct {
 	// HostDRAMPressure" half of issue #1073's wire on the executor side (PlanPlacementForDeviceAndHost
 	// is the planless sibling of the same fold).
 	//
-	// DRAMKnown gates the fold and is the fail-open contract: false (the default — an unsupported
+	// DRAMKnown gates the fold and provides fallback: false (the default — an unsupported
 	// host probe, or a caller that does not probe DRAM) folds nothing, so the sweep plans exactly
 	// as it did before these fields existed. The probe is the caller's; the sweep only ACTS on it,
 	// staying a pure, deterministic function of its config.
