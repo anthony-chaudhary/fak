@@ -326,3 +326,104 @@ func TestBuildDoesNotInheritProblemFrameFromParentMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildDerivesPerCandidateTreeFromScope(t *testing.T) {
+	plan, err := Build(spineInput())
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	bySlug := map[string]issuepolicy.Candidate{}
+	for _, c := range plan.Candidates {
+		for _, tmpl := range taxonomy {
+			if strings.HasSuffix(c.Key, "-"+tmpl.slug) {
+				bySlug[tmpl.slug] = c
+				break
+			}
+		}
+	}
+
+	// Done condition: docs-doctrine-linkage / release-claims / int-dos-wiring
+	// do NOT carry internal/issuefanout/.
+	for _, slug := range []string{"docs-doctrine-linkage", "release-claims", "int-dos-wiring"} {
+		c, ok := bySlug[slug]
+		if !ok {
+			t.Fatalf("candidate %s missing from plan", slug)
+		}
+		for _, p := range c.Paths {
+			if strings.Contains(p, "internal/issuefanout") {
+				t.Errorf("candidate %s path %q carries internal/issuefanout", slug, p)
+			}
+		}
+		for _, coord := range c.Coordination {
+			if strings.Contains(coord, "internal/issuefanout") {
+				t.Errorf("candidate %s coordination %q carries internal/issuefanout", slug, coord)
+			}
+		}
+		if c.Lane == "issuefanout" {
+			t.Errorf("candidate %s lane = %q, want non-leaf lane", slug, c.Lane)
+		}
+	}
+
+	// All 8 templates whose scope lands outside the spine leaf declare their own tree and lane.
+	wantScope := map[string]struct {
+		lane  string
+		paths []string
+	}{
+		"docs-doctrine-linkage": {lane: "docs", paths: []string{"docs/INDEX.md", "llms.txt", "AGENTS.md", "README.md"}},
+		"release-claims":        {lane: "release", paths: []string{"CLAIMS.md", "docs/releases/"}},
+		"int-dos-wiring":        {lane: "dos", paths: []string{"./dos.toml"}},
+		"int-guard-gate":        {lane: "hooks", paths: []string{"internal/hooks/"}},
+		"int-superloop":         {lane: "superloop", paths: []string{"internal/superloop/"}},
+		"product-cli-reference": {lane: "docs", paths: []string{"docs/cli-reference.md"}},
+		"product-lcd-demo":      {lane: "cmd", paths: []string{"cmd/*demo", "examples/"}},
+		"dogfood-self-run":      {lane: "docs", paths: []string{"docs/notes/"}},
+	}
+
+	for slug, want := range wantScope {
+		c, ok := bySlug[slug]
+		if !ok {
+			t.Fatalf("candidate %s missing from plan", slug)
+		}
+		if c.Lane != want.lane {
+			t.Errorf("candidate %s lane = %q, want %q", slug, c.Lane, want.lane)
+		}
+		if !reflect.DeepEqual(c.Paths, want.paths) {
+			t.Errorf("candidate %s paths = %v, want %v", slug, c.Paths, want.paths)
+		}
+		for _, coord := range c.Coordination {
+			if strings.Contains(coord, "internal/issuefanout") {
+				t.Errorf("candidate %s coordination %q carries internal/issuefanout", slug, coord)
+			}
+			if !strings.Contains(coord, strings.Join(want.paths, ", ")) {
+				t.Errorf("candidate %s coordination %q does not carry its paths", slug, coord)
+			}
+		}
+	}
+
+	// Genuinely in-leaf QA/observability rows retain internal/<leaf>/.
+	inLeafSlugs := []string{
+		"qa-edge-sweep",
+		"qa-failure-paths",
+		"qa-determinism",
+		"dogfood-usage-ledger",
+		"product-error-ux",
+		"obs-outcome-counters",
+		"obs-scorecard",
+	}
+	for _, slug := range inLeafSlugs {
+		c, ok := bySlug[slug]
+		if !ok {
+			t.Fatalf("candidate %s missing from plan", slug)
+		}
+		if c.Lane != "issuefanout" {
+			t.Errorf("in-leaf candidate %s lane = %q, want issuefanout", slug, c.Lane)
+		}
+		if !reflect.DeepEqual(c.Paths, []string{"internal/issuefanout/"}) {
+			t.Errorf("in-leaf candidate %s paths = %v, want [internal/issuefanout/]", slug, c.Paths)
+		}
+		if len(c.Coordination) == 0 || !strings.Contains(c.Coordination[0], "internal/issuefanout/") {
+			t.Errorf("in-leaf candidate %s coordination = %v, want to contain internal/issuefanout/", slug, c.Coordination)
+		}
+	}
+}
