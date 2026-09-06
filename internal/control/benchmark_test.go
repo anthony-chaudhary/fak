@@ -1,7 +1,6 @@
 package control
 
 import (
-	"sync"
 	"testing"
 	"time"
 )
@@ -44,15 +43,12 @@ func BenchmarkManager_Active_Parallel(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	var mu sync.Mutex
 	b.RunParallel(func(pb *testing.PB) {
 		var local VersionedConfig
 		for pb.Next() {
 			local = mgr.Active()
 		}
-		mu.Lock()
-		sinkVersionedConfig = local
-		mu.Unlock()
+		_ = local
 	})
 }
 
