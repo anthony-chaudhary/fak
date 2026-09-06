@@ -448,14 +448,18 @@ func (t *StdioTransport) CallTool(ctx context.Context, toolName string, args jso
 
 	// Parse MCP ToolCall result format
 	var mcpResult struct {
-		Content json.RawMessage `json:"content"`
-		IsError bool            `json:"isError"`
+		Content           json.RawMessage `json:"content"`
+		StructuredContent json.RawMessage `json:"structuredContent"`
+		IsError           bool            `json:"isError"`
 	}
 
 	if len(resp.Result) > 0 {
 		if err := json.Unmarshal(resp.Result, &mcpResult); err == nil && len(mcpResult.Content) > 0 {
 			callResp.Content = mcpResult.Content
 			callResp.IsError = mcpResult.IsError
+			if !mcpResult.IsError && len(mcpResult.StructuredContent) > 0 {
+				callResp.Content = compactStructuredContent(resp.Result, mcpResult.Content)
+			}
 		} else {
 			callResp.Content = resp.Result
 		}
