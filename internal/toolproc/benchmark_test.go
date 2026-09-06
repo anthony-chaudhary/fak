@@ -502,3 +502,35 @@ func BenchmarkProcessSupervisor(b *testing.B) {
 		}
 	})
 }
+
+// TestBenchmarkOperationsSanity ensures all benchmark operations run cleanly without panics.
+func TestBenchmarkOperationsSanity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping benchmark sanity in short mode")
+	}
+	benchmarks := []struct {
+		name string
+		fn   func(b *testing.B)
+	}{
+		{"BenchmarkFold_Sample", BenchmarkFold_Sample},
+		{"BenchmarkFold_Scaling", BenchmarkFold_Scaling},
+		{"BenchmarkTable_Subtree", BenchmarkTable_Subtree},
+		{"BenchmarkParseEvents", BenchmarkParseEvents},
+		{"BenchmarkParseTail", BenchmarkParseTail},
+		{"BenchmarkCompactJournal", BenchmarkCompactJournal},
+		{"BenchmarkNormalize", BenchmarkNormalize},
+		{"BenchmarkClassifyRepeats", BenchmarkClassifyRepeats},
+		{"BenchmarkReuseStore_Admit", BenchmarkReuseStore_Admit},
+		{"BenchmarkRenderRepeatReport", BenchmarkRenderRepeatReport},
+		{"BenchmarkProcessSupervisor", BenchmarkProcessSupervisor},
+	}
+
+	for _, bm := range benchmarks {
+		t.Run(bm.name, func(t *testing.T) {
+			res := testing.Benchmark(bm.fn)
+			if res.N <= 0 {
+				t.Fatalf("%s failed to execute iterations: res.N=%d", bm.name, res.N)
+			}
+		})
+	}
+}
