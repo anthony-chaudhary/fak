@@ -1,6 +1,8 @@
 package dispatchtick
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"slices"
@@ -255,6 +257,15 @@ func TestGuardedLaunchCommand(t *testing.T) {
 	subscriptionCodex, guarded := GuardedLaunchCommand([]string{"codex", "exec", "-"}, "fak", "docs", "codex", "/repo", "")
 	if !guarded || slices.Contains(subscriptionCodex, "--provider") || slices.Contains(subscriptionCodex, "--base-url") {
 		t.Fatalf("subscription Codex dispatch must defer upstream selection to guard: %v", subscriptionCodex)
+	}
+
+	if runtime.GOOS == "windows" {
+		dir := t.TempDir()
+		shim := filepath.Join(dir, "codex.cmd")
+		if err := os.WriteFile(shim, []byte("@echo off\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
 
 	codex, guarded := GuardedLaunchCommand([]string{"codex", "exec", "-"}, "fak", "docs", "codex", "/repo", "http://127.0.0.1:18080/v1")
