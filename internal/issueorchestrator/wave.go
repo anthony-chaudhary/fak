@@ -285,6 +285,17 @@ func PlanWaves(issues []Issue, opts WavePlanOptions) Plan {
 		}
 	}
 
+	if opts.IncludeOpencodeCommands {
+		for wi := range selectedWaves {
+			w := &selectedWaves[wi]
+			for ii := range w.Issues {
+				chat := BuildOpencodeChat(w.Issues[ii], opts.OpencodeOptions)
+				w.Issues[ii].OpencodeCommand = chat.Command
+				w.OpencodeChats = append(w.OpencodeChats, chat)
+			}
+		}
+	}
+
 	plan.Waves = selectedWaves
 	plan.TotalWaves = len(selectedWaves)
 	plan.PlannedIssues = plannedIssuesCount

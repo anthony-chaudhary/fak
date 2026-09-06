@@ -348,3 +348,151 @@ func TestPlanWavesLimitAndCompactRender(t *testing.T) {
 		t.Errorf("expected compact triage truncation note, got:\n%s", rendered)
 	}
 }
+
+func TestBuildOpencodeChatAndFormatPrompt(t *testing.T) {
+	iss := Issue{
+		Number: 42,
+		Key:    "issue-42",
+		Title:  "Fix memory leak in kvcache",
+		Lane:   "ctxmmu",
+		Paths:  []string{"internal/ctxmmu/cache.go"},
+	}
+
+	prompt := FormatOpencodePrompt(iss)
+	if !strings.Contains(prompt, "Issue #42: Fix memory leak in kvcache") {
+		t.Fatalf("prompt missing issue header: %s", prompt)
+	}
+	if !strings.Contains(prompt, "Lane: ctxmmu") {
+		t.Fatalf("prompt missing lane: %s", prompt)
+	}
+	if !strings.Contains(prompt, "Boundary Paths: internal/ctxmmu/cache.go") {
+		t.Fatalf("prompt missing boundary paths: %s", prompt)
+	}
+	if !strings.Contains(prompt, "go test -v ./internal/ctxmmu/...") {
+		t.Fatalf("prompt missing test command: %s", prompt)
+	}
+	if !strings.Contains(prompt, "go vet ./internal/ctxmmu/...") {
+		t.Fatalf("prompt missing vet command: %s", prompt)
+	}
+	if !strings.Contains(prompt, "Do not touch root files") {
+		t.Fatalf("prompt missing instructions: %s", prompt)
+	}
+	if !strings.Contains(prompt, "3-line receipt") {
+		t.Fatalf("prompt missing receipt instruction: %s", prompt)
+	}
+
+	// 1. Interactive chat
+	interactiveChat := BuildOpencodeChat(iss, OpencodeChatOptions{
+		Interactive: true,
+		Model:       "glm-5.2",
+		Agent:       "general",
+		WorktreeDir: "C:/tmp/worktree-42",
+		ExtraArgs:   []string{"--verbose"},
+	})
+
+	if interactiveChat.SessionTitle != "Issue #42: Fix memory leak in kvcache" {
+		t.Errorf("unexpected session title: %q", interactiveChat.SessionTitle)
+	}
+	if interactiveChat.Worktree != "C:/tmp/worktree-42" {
+		t.Errorf("unexpected worktree: %q", interactiveChat.Worktree)
+	}
+	expectedInteractiveCmd := []string{
+		"opencode", "run", "-i", "--title", "Issue #42: Fix memory leak in kvcache",
+		"-m", "glm-5.2",
+		"--agent", "general",
+		"--dir", "C:/tmp/worktree-42",
+		"--verbose",
+		prompt,
+	}
+	if len(interactiveChat.Command) != len(expectedInteractiveCmd) {
+		t.Fatalf("interactive command len mismatch: got %v, want %v", interactiveChat.Command, expectedInteractiveCmd)
+	}
+	for i := range expectedInteractiveCmd {
+		if interactiveChat.Command[i] != expectedInteractiveCmd[i] {
+			t.Errorf("cmd arg %d: got %q, want %q", i, interactiveChat.Command[i], expectedInteractiveCmd[i])
+		}
+	}
+
+	// 2. Non-interactive chat with PrintLogs and AutoApprove
+	nonInteractiveChat := BuildOpencodeChat(iss, OpencodeChatOptions{
+		Interactive: false,
+		PrintLogs:   true,
+		AutoApprove: true,
+		Model:       "claude-sonnet-4-6",
+	})
+	expectedNonInteractiveCmd := []string{
+		"opencode", "run",
+		"--print-logs",
+		"--dangerously-skip-permissions",
+		"--title", "Issue #42: Fix memory leak in kvcache",
+		"-m", "claude-sonnet-4-6",
+		prompt,
+	}
+	if len(nonInteractiveChat.Command) != len(expectedNonInteractiveCmd) {
+		t.Fatalf("non-interactive command len mismatch: got %v, want %v", nonInteractiveChat.Command, expectedNonInteractiveCmd)
+	}
+	for i := range expectedNonInteractiveCmd {
+		if nonInteractiveChat.Command[i] != expectedNonInteractiveCmd[i] {
+			t.Errorf("cmd arg %d: got %q, want %q", i, nonInteractiveChat.Command[i], expectedNonInteractiveCmd[i])
+		}
+	}
+}
+
+func TestPlanWavesIncludeOpencodeCommands(t *testing.T) {
+	issues := []Issue{
+		testIssue(1, "issue-1", "Fix gateway timeout", "gateway", []string{"internal/gateway/timeout.go"}, 3),
+		testIssue(2, "issue-2", "Add model kv cache", "model", []string{"internal/model/kv.go"}, 4),
+	}
+
+	opts := WavePlanOptions{
+		WaveSize:                4,
+		IncludeOpencodeCommands: true,
+		OpencodeOptions: OpencodeChatOptions{
+			Interactive: false,
+			PrintLogs:   true,
+			AutoApprove: true,
+			Model:       "glm-5.2",
+		},
+	}
+
+	plan := PlanWaves(issues, opts)
+
+	if len(plan.Waves) == 0 {
+		t.Fatalf("expected at least 1 wave, got 0")
+	}
+
+	wave := plan.Waves[0]
+	if len(wave.OpencodeChats) != len(wave.Issues) {
+		t.Fatalf("expected %d opencode chats in wave, got %d", len(wave.Issues), len(wave.OpencodeChats))
+	}
+
+	for i, iss := range wave.Issues {
+		if len(iss.OpencodeCommand) == 0 {
+			t.Errorf("issue %d missing OpencodeCommand", iss.Number)
+		}
+		chat := wave.OpencodeChats[i]
+		if chat.IssueNumber != iss.Number {
+			t.Errorf("chat issue number mismatch: got %d, want %d", chat.IssueNumber, iss.Number)
+		}
+		if len(chat.Command) == 0 {
+			t.Errorf("chat command is empty for issue %d", iss.Number)
+		}
+	}
+
+	// Verify text and markdown rendering contain OpenCode chats
+	rendered := RenderWaves(plan)
+	if !strings.Contains(rendered, "OpenCode Chats:") {
+		t.Errorf("rendered output missing 'OpenCode Chats:':\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "opencode run") {
+		t.Errorf("rendered output missing 'opencode run':\n%s", rendered)
+	}
+
+	md := MarkdownWaves(plan)
+	if !strings.Contains(md, "#### OpenCode Chats") {
+		t.Errorf("markdown output missing '#### OpenCode Chats':\n%s", md)
+	}
+	if !strings.Contains(md, "opencode run") {
+		t.Errorf("markdown output missing 'opencode run':\n%s", md)
+	}
+}

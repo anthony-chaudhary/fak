@@ -4,7 +4,7 @@ description: Plan, partition, and coordinate multi-wave parallel subagent campai
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob, Task
-argument-hint: "[--top 10] [--target-issues 5] [--wave-size 4] [--max-waves 2] [--from-issues issues.json]  (no args = default focused wave: top 10 candidates, max 2 waves)"
+argument-hint: "[--top 10] [--target-issues 5] [--wave-size 4] [--max-waves 2] [--spawn-opencode] [--dry-run] [--worktree] [--model <model>] [--interactive] [--from-issues issues.json]"
 ---
 
 # /issue-orchestrator — campaign-scale multi-wave issue resolution
@@ -14,11 +14,24 @@ argument-hint: "[--top 10] [--target-issues 5] [--wave-size 4] [--max-waves 2] [
 > `/issue-orchestrator` coordinates **large volumes of general issue work**
 > across multiple concurrent subagent waves. It partitions the active issue backlog into
 > **pairwise tree-disjoint, concurrent-safe cohorts**, verifies or acquires lane leases via
-> `dos arbitrate`, dispatches parallel worker subagents via the `task` tool, independently
-> witnesses each worker's effects, commits explicit paths with issue citations `(#N)`, and
+> `dos arbitrate`, dispatches parallel workers (via in-harness subagents or fresh OpenCode chat sessions),
+> independently witnesses each worker's effects, commits explicit paths with issue citations `(#N)`, and
 > tracks campaign burndown velocity against a baseline.
 
-The shape: **baseline campaign (`fak issue-orchestrator --json`) → automated safe wave planning (`fak issue-orchestrator --plan-waves`) → pre-dispatch arbitration (`dos arbitrate`) → parallel subagent wave dispatch (`task`) → harvest & independently witness → commit leaf-by-leaf with `(#N)` → compare burndown → loop.**
+The shape: **baseline campaign (`fak issue-orchestrator --json`) → automated safe wave planning (`fak issue-orchestrator --plan-waves`) → pre-dispatch arbitration (`dos arbitrate`) → parallel dispatch (in-harness `task` or `fak issue-orchestrator --spawn-opencode`) → harvest & independently witness → commit leaf-by-leaf with `(#N)` → compare burndown → loop.**
+
+---
+
+## Dual Dispatch Execution Modes
+
+`/issue-orchestrator` supports two first-class dispatch execution modes depending on the execution context:
+
+- **Mode A: In-Harness Subagents (`task` tool calls with `subagent_type="worker"`)**
+  - Best when running inside an interactive harness session that supports nested subagent orchestration.
+  - Workers run as child tasks within the coordinator harness, returning receipts directly into the coordinator turn.
+- **Mode B: Spawning Fresh OpenCode Chats of Their Own (`fak issue-orchestrator --spawn-opencode`)**
+  - Best when running headless, batch, or multi-session campaigns where each issue needs an independent, isolated agent process.
+  - Spawns fresh OpenCode chat processes (`opencode run` or interactive `opencode run -i`) with distinct session titles (`Issue #<N>: <title>`), independent database sessions (`ses_...`), dedicated output logs, and optional detached worker worktrees.
 
 ---
 
@@ -111,8 +124,11 @@ fak issue-orchestrator --top 15 --wave-size 4 --max-waves 2
 # Or plan from a specific issue source (e.g. local snapshot or gh export):
 fak issue-orchestrator --from-issues issues.json --wave-size 4 --max-waves 2
 
-# Or emit machine-readable wave plan JSON:
-fak issue-orchestrator --top 15 --wave-size 4 --max-waves 2 --json > wave-plan.json
+# Include ready-to-run OpenCode spawn commands in JSON/Markdown wave plan:
+fak issue-orchestrator --top 15 --wave-size 4 --max-waves 2 --opencode-commands
+
+# Or emit machine-readable wave plan JSON (includes opencode_command per issue and opencode_chats per wave):
+fak issue-orchestrator --top 15 --wave-size 4 --max-waves 2 --opencode-commands --json > wave-plan.json
 ```
 
 The planner automatically:
@@ -121,10 +137,11 @@ The planner automatically:
 3. **Decouples Package Import Contention**: Checks the Go internal import graph to ensure workers in the same wave do not contend on shared internal package APIs.
 4. **Isolates Serial Singletons**: Identifies critical core leaves and schedules them into dedicated `serial_singleton` single-worker waves.
 5. **Extracts Subdivide & Triage Queues**: Pulls oversized epics into `Subdivide` with a child-issue budget and unready tickets into `Triage`.
+6. **Renders OpenCode Commands (`--opencode-commands`)**: Emits structured, copy-pasteable or machine-readable `opencode run` CLI invocations for each planned wave issue with appropriate titles, boundary path instructions, and verification commands.
 
 ---
 
-## Phase 3 — Pre-Dispatch Arbitration & Parallel Subagent Dispatch
+## Phase 3 — Pre-Dispatch Arbitration & Parallel Worker Dispatch
 
 For each wave in the plan:
 
@@ -140,7 +157,11 @@ dos arbitrate --workspace . --lane <lane> --kind keyword --mode exclusive
 - **Admitted (`outcome: acquire`)**: Proceed to dispatch worker on `<lane>`.
 - **Refused (`outcome: refuse`)**: Another peer agent took the lane. Log refusal, skip this lane, and advance the next candidate issue from the wave plan.
 
-### 2. Launch Parallel Subagents
+### 2. Dispatch Workers (Option A or Option B)
+
+Choose between in-harness subagents (Option A) or spawning fresh OpenCode chat sessions (Option B):
+
+#### Option A: In-Harness Subagents (`task` tool)
 
 Launch all admitted workers in parallel in a single turn using multiple `task` tool calls with `subagent_type="worker"` under strict fences (using Gemini 3.8 Flash high `variant: high` for hard work):
 
@@ -165,35 +186,87 @@ Launch all admitted workers in parallel in a single turn using multiple `task` t
 ]
 ```
 
+#### Option B: Spawn Fresh OpenCode Chats of Their Own (`fak issue-orchestrator --spawn-opencode`)
+
+Spawn fresh OpenCode chat processes directly from the CLI to resolve the planned wave:
+
+```bash
+# Standard batch headless spawn for Wave 1 (top 10 candidates):
+fak issue-orchestrator --spawn-opencode --top 10
+
+# Spawn with isolated detached worker worktrees:
+fak issue-orchestrator --spawn-opencode --top 10 --worktree
+
+# Preview spawn commands, titles, and prompts without launching processes:
+fak issue-orchestrator --spawn-opencode --top 10 --dry-run
+
+# Specify a target model or launch interactively:
+fak issue-orchestrator --spawn-opencode --top 10 --model "anthropic/claude-3-7-sonnet"
+fak issue-orchestrator --spawn-opencode --top 10 --interactive
+```
+
+**What happens during `--spawn-opencode`**:
+- **Fresh Process Execution**: Spawns fresh OpenCode chat processes (headless `opencode run` with `--print-logs --dangerously-skip-permissions` or interactive `opencode run -i`) titled explicitly with `Issue #<N>: <title>`.
+- **Database Isolation**: OpenCode automatically registers a brand-new session ID (`ses_...`) in its storage database for each issue, guaranteeing zero cross-session state or context pollution.
+- **Process Supervision & Logs**: Redirects stdout/stderr to `.dispatch-runs/resolve-<issue>-<stamp>.log` and writes the child process PID to `.dispatch-runs/resolve-<issue>-<stamp>.pid` for reliable status inspection and reaping.
+- **Detached Worker Worktrees (`--worktree`)**: When `--worktree` is specified, prepares an isolated Git worktree per worker using `fak worktree worker prepare`, hands off process ownership, and scopes changes away from the root working tree.
+- **Dry-Run Preview (`--dry-run`)**: Simulates planning and displays full command lines and session parameters without executing child processes.
+
 ---
 
 ## Phase 4 — Wave Harvest, Cross-Validation & Independent Witnessing
 
-When the parallel subagents finish:
+When the parallel workers or spawned OpenCode chats finish:
 
-1. **Audit Receipts**: Verify each subagent reported green tests strictly within its declared package.
-2. **Parallel Adversarial Verification & Gap Audit**:
-   Launch parallel `cross-validator` and `issue-auditor` subagents to independently evaluate the changes:
-   - `cross-validator`: Independently verifies git diff boundaries, executes on-device package tests, and produces DOS-style proof verdicts.
-   - `issue-auditor`: Inspects diffs for unhandled edge cases, failure modes, and QA gaps, filing or drafting structured follow-on tickets.
-3. **Independent Verification**: Coordinator independently runs package-scoped checks:
-   ```bash
-   go vet ./internal/<laneA> ./internal/<laneB>
-   go test -v ./internal/<laneA> ./internal/<laneB>
-   ```
-4. **Commit by Explicit Path**:
-   Commit each finished leaf independently on the trunk with the issue citation and ship-stamp trailer:
-   ```bash
-   fak commit --path internal/<laneA> -m "fix(<laneA>): resolve gateway streaming timeout (#1024) (fak <laneA>)"
-   fak commit --path internal/<laneB> -m "feat(<laneB>): add model KV cache recycling (#1035) (fak <laneB>)"
-   ```
-   *(Fallback: `git commit -s -m "..." -- internal/<laneA>` without `git add -A`).*
-5. **Release Lane Leases**:
-   Release the acquired lane leases so peer agents can work on the lanes:
-   ```bash
-   dos lease-lane release --lane <laneA>
-   dos lease-lane release --lane <laneB>
-   ```
+### 1. Harvest & Audit Results
+
+- **For Option A (In-Harness Subagents)**:
+  - Verify each subagent returned green test receipts strictly within its declared package lane.
+- **For Option B (Spawned OpenCode Chats)**:
+  - **List Active & Completed Sessions**: Check registered OpenCode sessions and status:
+    ```bash
+    opencode session list
+    ```
+  - **Inspect Execution Logs**: Read the background run logs in `.dispatch-runs/`:
+    ```bash
+    # Tail or grep recent run logs
+    Get-Content .dispatch-runs\resolve-<issue>-*.log -Tail 50
+    ```
+  - **Inspect Session Transcripts**: Export or inspect the exact turn history and tool calls:
+    ```bash
+    opencode export <sessionID>
+    ```
+
+### 2. Parallel Adversarial Verification & Gap Audit
+
+Launch parallel `cross-validator` and `issue-auditor` subagents (or run verification checks) to independently evaluate the changes:
+- `cross-validator`: Independently verifies git diff boundaries, executes on-device package tests, and produces DOS-style proof verdicts.
+- `issue-auditor`: Inspects diffs for unhandled edge cases, failure modes, and QA gaps, filing or drafting structured follow-on tickets.
+
+### 3. Independent Verification
+
+Coordinator independently executes package-scoped checks on the trunk or worker worktrees:
+```bash
+go vet ./internal/<laneA> ./internal/<laneB>
+go test -v ./internal/<laneA> ./internal/<laneB>
+```
+
+### 4. Commit by Explicit Path
+
+Commit each finished leaf independently on the trunk with the issue citation and ship-stamp trailer:
+```bash
+fak commit --path internal/<laneA> -m "fix(<laneA>): resolve gateway streaming timeout (#1024) (fak <laneA>)"
+fak commit --path internal/<laneB> -m "feat(<laneB>): add model KV cache recycling (#1035) (fak <laneB>)"
+```
+*(If changes were developed in detached worktrees via `--worktree`, land them with `fak worktree worker land` or merge the verified commits).*
+
+### 5. Release Lane Leases
+
+Release the acquired lane leases so peer agents can work on the lanes:
+```bash
+dos lease-lane release --lane <laneA>
+dos lease-lane release --lane <laneB>
+```
 
 ---
 

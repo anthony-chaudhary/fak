@@ -61,6 +61,12 @@ func RenderWaves(plan Plan) string {
 				)
 			}
 			tw.Flush()
+			if len(w.OpencodeChats) > 0 {
+				b.WriteString("  OpenCode Chats:\n")
+				for _, chat := range w.OpencodeChats {
+					b.WriteString(fmt.Sprintf("    - [%s] %s\n", chat.SessionTitle, formatCommandLine(chat.Command)))
+				}
+			}
 			b.WriteString("\n")
 		}
 	}
@@ -149,6 +155,12 @@ func MarkdownWaves(plan Plan) string {
 					numStr, iss.Lane, iss.ExpectedSteps, iss.Title, pathsStr,
 				))
 			}
+			if len(w.OpencodeChats) > 0 {
+				b.WriteString("\n#### OpenCode Chats\n\n")
+				for _, chat := range w.OpencodeChats {
+					b.WriteString(fmt.Sprintf("**%s**\n\n```bash\n%s\n```\n\n", chat.SessionTitle, formatCommandLine(chat.Command)))
+				}
+			}
 			b.WriteString("\n")
 		}
 	}
@@ -170,4 +182,16 @@ func MarkdownWaves(plan Plan) string {
 	}
 
 	return b.String()
+}
+
+func formatCommandLine(args []string) string {
+	quoted := make([]string, len(args))
+	for i, arg := range args {
+		if strings.ContainsAny(arg, " \t\n\"'") {
+			quoted[i] = fmt.Sprintf("%q", arg)
+		} else {
+			quoted[i] = arg
+		}
+	}
+	return strings.Join(quoted, " ")
 }

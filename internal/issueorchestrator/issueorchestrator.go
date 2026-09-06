@@ -37,21 +37,23 @@ type Issue struct {
 	Centrality      string                   `json:"centrality,omitempty"`
 	ProblemFrame    issuepolicy.ProblemFrame `json:"problem_frame,omitempty"`
 	Dispatchability string                   `json:"dispatchability,omitempty"`
+	OpencodeCommand []string                 `json:"opencode_command,omitempty"`
 }
 
 // Wave represents one execution wave of concurrent-safe issues.
 type Wave struct {
-	Index        int        `json:"index"`                  // 1-based wave sequence number
-	ID           string     `json:"id"`                     // e.g. "wave-1"
-	Safety       WaveSafety `json:"safety"`                 // pairwise_tree_disjoint or serial_singleton
-	WaveSize     int        `json:"wave_size"`              // Number of concurrent workers in this wave
-	StepBudget   int        `json:"step_budget"`            // Sum of expected steps across issues in this wave
-	Issues       []Issue    `json:"issues"`                 // Issues allocated to this wave
-	IssueNumbers []int      `json:"issue_numbers"`          // Slice of issue numbers
-	Lanes        []string   `json:"lanes"`                  // Slice of lane identifiers
-	Paths        []string   `json:"paths"`                  // Normalized tree paths touched
-	LeaseRegion  []string   `json:"lease_region,omitempty"` // Minimal tree roots for `dos arbitrate --tree`
-	LeaseLanes   []string   `json:"lease_lanes,omitempty"`  // Lanes taking their whole lane
+	Index         int            `json:"index"`                    // 1-based wave sequence number
+	ID            string         `json:"id"`                       // e.g. "wave-1"
+	Safety        WaveSafety     `json:"safety"`                   // pairwise_tree_disjoint or serial_singleton
+	WaveSize      int            `json:"wave_size"`                // Number of concurrent workers in this wave
+	StepBudget    int            `json:"step_budget"`              // Sum of expected steps across issues in this wave
+	Issues        []Issue        `json:"issues"`                   // Issues allocated to this wave
+	IssueNumbers  []int          `json:"issue_numbers"`            // Slice of issue numbers
+	Lanes         []string       `json:"lanes"`                    // Slice of lane identifiers
+	Paths         []string       `json:"paths"`                    // Normalized tree paths touched
+	LeaseRegion   []string       `json:"lease_region,omitempty"`   // Minimal tree roots for `dos arbitrate --tree`
+	LeaseLanes    []string       `json:"lease_lanes,omitempty"`    // Lanes taking their whole lane
+	OpencodeChats []OpencodeChat `json:"opencode_chats,omitempty"` // Ready-to-run OpenCode chat sessions
 }
 
 // SubdivideRow records an epic or oversized issue that must be decomposed before dispatch.
@@ -109,16 +111,41 @@ type Plan struct {
 
 // WavePlanOptions configures campaign wave generation.
 type WavePlanOptions struct {
-	WaveSize          int
-	MaxWaves          int
-	TargetIssues      int
-	TargetPoints      int
-	Limit             int
-	LaneFilter        string
-	ExcludedIssues    []int
-	ExcludedLanes     []string
-	AutoDetectHeld    bool
-	StrictProjectWork bool
-	WorkspaceRoot     string
-	Graph             map[string]map[string]struct{}
+	WaveSize                int
+	MaxWaves                int
+	TargetIssues            int
+	TargetPoints            int
+	Limit                   int
+	LaneFilter              string
+	ExcludedIssues          []int
+	ExcludedLanes           []string
+	AutoDetectHeld          bool
+	StrictProjectWork       bool
+	WorkspaceRoot           string
+	Graph                   map[string]map[string]struct{}
+	IncludeOpencodeCommands bool
+	OpencodeOptions         OpencodeChatOptions
+}
+
+// OpencodeChatOptions configures fresh OpenCode chat generation.
+type OpencodeChatOptions struct {
+	Model       string   `json:"model,omitempty"`
+	Agent       string   `json:"agent,omitempty"`
+	Interactive bool     `json:"interactive,omitempty"`
+	WorktreeDir string   `json:"worktree_dir,omitempty"`
+	AutoApprove bool     `json:"auto_approve,omitempty"`
+	PrintLogs   bool     `json:"print_logs,omitempty"`
+	ExtraArgs   []string `json:"extra_args,omitempty"`
+}
+
+// OpencodeChat describes a fresh OpenCode chat session for an issue.
+type OpencodeChat struct {
+	IssueNumber  int      `json:"issue_number"`
+	Key          string   `json:"key"`
+	Title        string   `json:"title"`
+	Lane         string   `json:"lane"`
+	SessionTitle string   `json:"session_title"`
+	Worktree     string   `json:"worktree,omitempty"`
+	Command      []string `json:"command"`
+	Prompt       string   `json:"prompt"`
 }

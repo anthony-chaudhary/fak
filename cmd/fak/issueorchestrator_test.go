@@ -223,3 +223,144 @@ func TestIssueOrchestratorCLISubdivideAndTriageFilters(t *testing.T) {
 		t.Errorf("--triage output missing #402: %s", triOut.String())
 	}
 }
+
+func TestIssueOrchestratorSpawnOpencodeDryRun(t *testing.T) {
+	issues := []issueorchestrator.Issue{
+		{
+			Number:          501,
+			Key:             "issue-501",
+			Title:           "Implement OpenCode worker spawner",
+			Lane:            "issueorchestrator",
+			Paths:           []string{"internal/issueorchestrator/opencode.go"},
+			ExpectedSteps:   3,
+			Dispatchability: "dispatchable",
+		},
+		{
+			Number:          502,
+			Key:             "issue-502",
+			Title:           "Add chat options tests",
+			Lane:            "testing",
+			Paths:           []string{"cmd/fak/issueorchestrator_test.go"},
+			ExpectedSteps:   2,
+			Dispatchability: "dispatchable",
+		},
+	}
+	issuesPath := writeTestIssuesFile(t, issues)
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath,
+		"--spawn-opencode",
+		"--dry-run",
+		"--json",
+		"--model", "gpt-4o",
+		"--agent", "worker",
+	})
+	if code != 0 {
+		t.Fatalf("runIssueOrchestrator failed with exit code %d; stderr: %s", code, stderr.String())
+	}
+
+	var receipt OpencodeSpawnReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
+		t.Fatalf("failed to decode JSON receipt: %v; raw: %s", err, stdout.String())
+	}
+
+	if receipt.Schema != "fak.issue-orchestrator-opencode-spawn.v1" {
+		t.Errorf("expected schema %q, got %q", "fak.issue-orchestrator-opencode-spawn.v1", receipt.Schema)
+	}
+	if !receipt.DryRun {
+		t.Errorf("expected DryRun to be true, got false")
+	}
+	if receipt.TotalSpawned != 2 {
+		t.Errorf("expected 2 spawned chats, got %d", receipt.TotalSpawned)
+	}
+	if len(receipt.Chats) != 2 {
+		t.Fatalf("expected 2 chats in slice, got %d", len(receipt.Chats))
+	}
+	for _, c := range receipt.Chats {
+		if c.Status != "dry_run" {
+			t.Errorf("expected chat status dry_run, got %q", c.Status)
+		}
+		if len(c.Command) == 0 {
+			t.Errorf("expected non-empty command for chat")
+		}
+	}
+}
+
+func TestIssueOrchestratorOpencodeCommandsFlag(t *testing.T) {
+	issues := []issueorchestrator.Issue{
+		{
+			Number:          601,
+			Key:             "issue-601",
+			Title:           "Build OpenCode commands in plan",
+			Lane:            "testing-opencode-lane",
+			Paths:           []string{"internal/testing-opencode-lane/gw.go"},
+			ExpectedSteps:   3,
+			Dispatchability: "dispatchable",
+		},
+	}
+	issuesPath := writeTestIssuesFile(t, issues)
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath,
+		"--opencode-commands",
+		"--json",
+		"--no-detect-held",
+	})
+	if code != 0 {
+		t.Fatalf("runIssueOrchestrator failed with exit code %d; stderr: %s", code, stderr.String())
+	}
+
+	var plan issueorchestrator.Plan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("failed to decode JSON plan: %v; raw: %s", err, stdout.String())
+	}
+
+	if len(plan.Waves) == 0 {
+		t.Fatalf("expected waves in plan, got 0")
+	}
+	wave := plan.Waves[0]
+	if len(wave.OpencodeChats) == 0 {
+		t.Errorf("expected opencode_chats to be populated on wave")
+	}
+	if len(wave.Issues) == 0 || len(wave.Issues[0].OpencodeCommand) == 0 {
+		t.Errorf("expected opencode_command to be populated on issue")
+	}
+}
+
+func TestIssueOrchestratorSpawnOpencodeTextRender(t *testing.T) {
+	issues := []issueorchestrator.Issue{
+		{
+			Number:          701,
+			Key:             "issue-701",
+			Title:           "Test text rendering banner",
+			Lane:            "cli",
+			Paths:           []string{"cmd/fak/main.go"},
+			ExpectedSteps:   1,
+			Dispatchability: "dispatchable",
+		},
+	}
+	issuesPath := writeTestIssuesFile(t, issues)
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath,
+		"--spawn-opencode",
+		"--dry-run",
+	})
+	if code != 0 {
+		t.Fatalf("runIssueOrchestrator failed with exit code %d; stderr: %s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "OpenCode Chat Spawner") {
+		t.Errorf("expected OpenCode Chat Spawner banner in output: %s", out)
+	}
+	if !strings.Contains(out, "#701") {
+		t.Errorf("expected issue #701 in output: %s", out)
+	}
+	if !strings.Contains(out, "DRY RUN") {
+		t.Errorf("expected DRY RUN indicator in output: %s", out)
+	}
+}
