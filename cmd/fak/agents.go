@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/agentquery"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
@@ -19,6 +20,15 @@ import (
 func cmdAgents(argv []string) { os.Exit(runAgents(os.Stdout, os.Stderr, argv)) }
 
 func runAgents(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && (argv[0] == "list" || argv[0] == "descriptors" || argv[0] == "declarative") {
+		return runAgentsList(stdout, stderr, argv[1:])
+	}
+	for i, arg := range argv {
+		if arg == "--descriptors" || arg == "--declarative" {
+			remaining := append(append([]string(nil), argv[:i]...), argv[i+1:]...)
+			return runAgentsList(stdout, stderr, remaining)
+		}
+	}
 	fs := flag.NewFlagSet("agents", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	addr := fs.String("addr", defaultSessionAddr(), "gateway base URL for live rows")
@@ -54,6 +64,7 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 	nowUnix := fs.Int64("now", 0, "observation Unix timestamp (tests/replay)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak agents [--source live|history|union] [--journal FILE] [--all] [--json]")
+		fmt.Fprintln(stderr, "       fak agents list [--dir WORKSPACE] [--json]")
 		fmt.Fprintln(stderr, "       fak agents --history 168h --group-by lane,state --count [--all-aggregates] [--json]")
 		fmt.Fprintln(stderr, "       fak agents --query \"SELECT lane,state,count(*) AS agents,max(elapsed_ms) AS max_elapsed_ms FROM agents WHERE started_at >= now()-interval '7 day' GROUP BY lane,state ORDER BY max_elapsed_ms DESC\"")
 		fmt.Fprintln(stderr, "--query is a constrained read-only grammar, not arbitrary SQL")
@@ -374,4 +385,55 @@ func parseBenchmarkSizes(raw string) ([]int, error) {
 		out = append(out, n)
 	}
 	return out, nil
+}
+
+func runAgentsList(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("agents list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", ".", "workspace directory to search for agent descriptors")
+	asJSON := fs.Bool("json", false, "emit JSON format")
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: fak agents list [--dir WORKSPACE] [--json]")
+		fmt.Fprintln(stderr, "       lists declarative agent descriptors (.fak/agents/*.md and .agents/*.md)")
+	}
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
+	}
+	if fs.NArg() > 0 && *dir == "." {
+		*dir = fs.Arg(0)
+	}
+
+	descs, err := agent.DiscoverAgentDescriptors(*dir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak agents list: %v\n", err)
+		return 1
+	}
+
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(descs); err != nil {
+			fmt.Fprintf(stderr, "fak agents list: encode JSON: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+
+	if len(descs) == 0 {
+		fmt.Fprintln(stdout, "no declarative agents found (.fak/agents/*.md, .agents/*.md)")
+		return 0
+	}
+
+	tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tMODE\tMODEL\tVARIANT\tTURNS\tMUTATION\tTOOLS\tPATH")
+	for _, d := range descs {
+		tools := "-"
+		if len(d.Capabilities.Tools) > 0 {
+			tools = strings.Join(d.Capabilities.Tools, ",")
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%t\t%s\t%s\n",
+			d.Name, d.Mode, d.Model, d.Variant, d.MaxTurns, d.Capabilities.AllowMutation, tools, d.Path)
+	}
+	tw.Flush()
+	return 0
 }
