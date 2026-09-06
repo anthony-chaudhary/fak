@@ -88,6 +88,8 @@ var commitVerbs = setOf(
 	// "isolate" leads a genuine action (isolate a code path / behavior under test); accepting it
 	// makes both commands grade the one subject the one way.
 	"isolate",
+	// Concrete imperative verbs describing real code actions (#11811).
+	"retain", "quarantine", "scavenge",
 )
 
 var subjectRE = regexp.MustCompile(`^([a-z]+)(\([^)]+\))?(!)?:\s+(.+)$`)
@@ -308,8 +310,8 @@ func CommitMsgVerdictWithGitRef(msg string, root string, ref string) (ok bool, w
 	rest := strings.TrimSpace(m[4])
 	first := strings.ToLower(splitFirstWordOrColon(rest))
 	first = strings.Trim(first, "`*\"'")
-	if !commitVerbs[first] {
-		return false, "description leads with '" + first + "', not a recognized verb — the witness ABSTAINs on a noun-led subject. Lead with a verb (add/fix/implement/…)."
+	if ok, why := lintSubjectVerb(first); !ok {
+		return false, why
 	}
 	return true, ""
 }
@@ -336,6 +338,136 @@ func splitFirstWordOrColon(s string) string {
 		return s
 	}
 	return s[:i]
+}
+
+// verbSynonyms maps common unsupported imperative verbs or synonyms to their canonical
+// recognized counterpart in commitVerbs (#11811).
+var verbSynonyms = map[string]string{
+	"synchronize": "sync",
+	"synchronise": "sync",
+	"inspect":     "verify",
+	"examine":     "verify",
+	"audit":       "witness",
+	"probe":       "sample",
+	"survey":      "sample",
+	"monitor":     "log",
+	"terminate":   "kill",
+	"persist":     "record",
+	"store":       "cache",
+	"broadcast":   "publish",
+	"notify":      "emit",
+	"signal":      "emit",
+	"modify":      "update",
+	"alter":       "update",
+	"change":      "update",
+	"adjust":      "tune",
+	"reorganize":  "restructure",
+	"reorganise":  "restructure",
+	"rearrange":   "restructure",
+	"reconfigure": "tune",
+	"configure":   "set",
+	"truncate":    "cap",
+	"clip":        "cap",
+	"clamp":       "bound",
+	"intercept":   "gate",
+	"prohibit":    "prevent",
+	"disallow":    "deny",
+	"forbid":      "deny",
+	"unblock":     "allow",
+	"bypass":      "ignore",
+	"discard":     "drop",
+	"abandon":     "drop",
+	"gather":      "accumulate",
+	"collect":     "accumulate",
+	"rerun":       "run",
+	"retry":       "run",
+	"teardown":    "reap",
+	"coalesce":    "consolidate",
+	"orchestrate": "dispatch",
+	"instantiate": "create",
+	"construct":   "build",
+	"setup":       "scaffold",
+	"bootstrap":   "scaffold",
+	"initialize":  "introduce",
+	"initialise":  "introduce",
+	"init":        "introduce",
+}
+
+// unsupportedImperativeVerbs is a set of known imperative verbs that are not in commitVerbs
+// and lack an unambiguous 1:1 rewrite, but are genuine verbs rather than nouns (#11811).
+var unsupportedImperativeVerbs = setOf(
+	"calculate", "compute", "evaluate", "estimate", "quantify", "measure",
+	"abort", "halt", "stop", "pause", "resume", "restart",
+	"retrieve", "fetch", "query", "poll", "listen",
+	"trigger", "invoke", "call", "fire",
+	"parse", "tokenize", "compile", "assemble", "interpret",
+	"convert", "transform", "translate", "encode", "decode",
+	"marshal", "unmarshal", "deserialize",
+	"allocate", "deallocate", "free",
+	"attach", "detach", "unbind",
+	"connect", "disconnect", "reconnect",
+	"override", "overwrite",
+	"inject", "eject", "insert",
+	"instrument", "trace", "profile",
+	"compress", "decompress", "deflate", "inflate",
+	"provision", "deprovision",
+	"schedule", "reschedule", "defer", "delay",
+	"throttle", "rate-limit",
+	"unlock", "unmount", "mount",
+	"clone", "copy",
+	"coordinate",
+	"escape", "unescape",
+	"redirect", "reroute",
+	"rearchitect",
+	"mitigate", "alleviate", "relieve", "offload",
+	"distribute", "partition", "shard",
+	"wrap", "unwrap",
+	"suppress", "silence",
+	"invalidate",
+	"check", "observe", "watch",
+	"clean", "cleanup",
+)
+
+// lookupVerbSynonym finds the supported verb synonym for an unsupported verb or its inflections (#11811).
+func lookupVerbSynonym(w string) (string, bool) {
+	if syn, ok := verbSynonyms[w]; ok {
+		return syn, true
+	}
+	for _, cand := range imperativeBaseForms(w) {
+		if syn, ok := verbSynonyms[cand]; ok {
+			return syn, true
+		}
+	}
+	return "", false
+}
+
+// isUnsupportedImperativeVerb reports whether w (or one of its base forms) is an imperative verb
+// that is unsupported in commitVerbs, rather than a noun (#11811).
+func isUnsupportedImperativeVerb(w string) bool {
+	if unsupportedImperativeVerbs[w] || verbSynonyms[w] != "" {
+		return true
+	}
+	for _, cand := range imperativeBaseForms(w) {
+		if unsupportedImperativeVerbs[cand] || verbSynonyms[cand] != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// lintSubjectVerb checks if the subject description starts with a recognized verb,
+// distinguishing unsupported imperative verbs from genuinely noun-led phrases (#11811).
+func lintSubjectVerb(first string) (ok bool, why string) {
+	if commitVerbs[first] {
+		return true, ""
+	}
+	if syn, ok := lookupVerbSynonym(first); ok {
+		return false, "description leads with unsupported imperative verb '" + first + "' (consider '" + syn + "' or a recognized verb: add/fix/implement/…)."
+	}
+	if isUnsupportedImperativeVerb(first) {
+		return false, "description leads with unsupported imperative verb '" + first + "', not a recognized verb. Lead with a recognized verb (add/fix/implement/…)."
+	}
+	return false, "description leads with '" + first + "', not a recognized verb — the witness ABSTAINs on a noun-led subject. Lead with a verb (add/fix/implement/…)."
 }
 
 func setOf(xs ...string) map[string]bool {
@@ -430,12 +562,14 @@ func deDoubleConsonant(s string) string {
 }
 
 // suggestGradeableSubject proposes a concrete rewrite of a subject that CommitMsgVerdict rejected,
-// for the two DETERMINISTIC failure modes where the author's intent is unambiguous:
+// for the three DETERMINISTIC failure modes where the author's intent is unambiguous:
 //
 //  1. a near-miss conventional type — `feature(x): add …` -> `feat(x): add …`, `fixes:` -> `fix:`;
 //  2. a non-imperative leading verb — the description IS verb-led but inflected
 //     (`added` -> `add`, `caching` -> `cache`, `wiring` -> `wire`), which the exact-match verb gate
-//     rejects even though a real verb was clearly meant.
+//     rejects even though a real verb was clearly meant;
+//  3. an unsupported imperative verb with an unambiguous supported synonym (#11811)
+//     (`synchronize` -> `sync`, `inspect` -> `verify`), which has an exact counterpart in commitVerbs.
 //
 // It returns "" whenever a mechanical fix would be a guess — an empty subject, a subject with no
 // `type(scope): …` shape at all, an unknown type with no known correction, or a genuinely noun-led
@@ -466,13 +600,19 @@ func suggestGradeableSubject(subject string) string {
 		typ = canon
 	}
 	firstWord := splitFirstWordOrColon(rest)
-	if !commitVerbs[strings.ToLower(firstWord)] {
+	firstLower := strings.ToLower(firstWord)
+	if !commitVerbs[firstLower] {
 		// Only rewrite a bare leading token (no surrounding backticks/quotes/emphasis) so the swap
 		// can never mangle formatting; a decorated lead is left for the human/agent to resolve.
 		if strings.Trim(firstWord, "`*\"'") != firstWord {
 			return ""
 		}
-		base := imperativeBase(strings.ToLower(firstWord))
+		base := imperativeBase(firstLower)
+		if base == "" {
+			if syn, ok := lookupVerbSynonym(firstLower); ok {
+				base = syn
+			}
+		}
 		if base == "" {
 			return ""
 		}
