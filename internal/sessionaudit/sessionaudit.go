@@ -75,6 +75,7 @@ type DiscoverOptions struct {
 	SinceDays        *float64
 	NamespacePrefix  string
 	IncludeSubagents bool
+	IncludeGemini    bool
 }
 
 type Transcript struct {
@@ -449,6 +450,25 @@ func Discover(opts DiscoverOptions) ([]Transcript, error) {
 					out = append(out, rec)
 				}
 			}
+			// Discover Gemini chat JSON transcripts in nsdir/chats/*.json or nsdir/*.json
+			if gfiles, err := filepath.Glob(filepath.Join(nsdir, "chats", "*.json")); err == nil {
+				for _, p := range gfiles {
+					top[p] = true
+					if rec, ok := statTranscript(root, ns, p, KindTop, cutoff); ok {
+						out = append(out, rec)
+					}
+				}
+			}
+			if jfiles, err := filepath.Glob(filepath.Join(nsdir, "*.json")); err == nil {
+				for _, p := range jfiles {
+					if isGeminiChatFile(p) && !top[p] {
+						top[p] = true
+						if rec, ok := statTranscript(root, ns, p, KindTop, cutoff); ok {
+							out = append(out, rec)
+						}
+					}
+				}
+			}
 			if !opts.IncludeSubagents {
 				continue
 			}
@@ -466,6 +486,11 @@ func Discover(opts DiscoverOptions) ([]Transcript, error) {
 			}
 		}
 	}
+	if opts.IncludeGemini {
+		if geminiRecs, err := DiscoverGemini(opts); err == nil {
+			out = append(out, geminiRecs...)
+		}
+	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].MTime == out[j].MTime {
 			return out[i].Path < out[j].Path
@@ -476,6 +501,10 @@ func Discover(opts DiscoverOptions) ([]Transcript, error) {
 }
 
 func Analyze(path string) Session {
+	if isGeminiChatFile(path) {
+		s, _ := ParseGeminiChatFile(path)
+		return s
+	}
 	s := Session{
 		Path:        path,
 		Session:     strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
