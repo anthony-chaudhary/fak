@@ -126,6 +126,7 @@ func TestRunSoakArmCapturesCodingAndFailureReadbacks(t *testing.T) {
 		nativeEvents[i] = map[string]any{"token_index": i + 1, "elapsed_ns": int64(i/2+1) * 1_000_000}
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		time.Sleep(time.Millisecond)
 		if req.URL.Path == "/v1/models" {
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"id": "exact"}}})
 			return
