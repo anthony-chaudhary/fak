@@ -146,3 +146,163 @@ func TestResponsesPromptCacheKeyRidesBehindHead(t *testing.T) {
 		t.Errorf("body no longer starts with the model head:\n%s", s)
 	}
 }
+
+// TestResponsesPromptCacheKeyLeadingDeveloperMessage verifies that leading developer
+// instructions are folded into the cache key as part of the instruction head, while
+// late developer messages (post-user turn) are treated as suffix and ignored.
+func TestResponsesPromptCacheKeyLeadingDeveloperMessage(t *testing.T) {
+	tools := adapterTestTools()
+	base := []Message{
+		{Role: RoleDeveloper, Content: "developer instructions v1"},
+		{Role: RoleUser, Content: "book a flight"},
+	}
+	baseKey, _ := responsesCacheKeyOf(t, "gpt-test", base, tools)
+
+	// Changing leading developer message content must alter the key.
+	alt := []Message{
+		{Role: RoleDeveloper, Content: "developer instructions v2"},
+		{Role: RoleUser, Content: "book a flight"},
+	}
+	altKey, _ := responsesCacheKeyOf(t, "gpt-test", alt, tools)
+	if altKey == baseKey {
+		t.Error("changing leading developer message must alter prompt_cache_key")
+	}
+
+	// Contiguous run of system followed by developer message must both feed the key.
+	multiHead := []Message{
+		{Role: RoleSystem, Content: "system prompt"},
+		{Role: RoleDeveloper, Content: "developer instructions v1"},
+		{Role: RoleUser, Content: "book a flight"},
+	}
+	multiHeadKey, _ := responsesCacheKeyOf(t, "gpt-test", multiHead, tools)
+	multiHeadAlt := []Message{
+		{Role: RoleSystem, Content: "system prompt"},
+		{Role: RoleDeveloper, Content: "developer instructions v2"},
+		{Role: RoleUser, Content: "book a flight"},
+	}
+	multiHeadAltKey, _ := responsesCacheKeyOf(t, "gpt-test", multiHeadAlt, tools)
+	if multiHeadKey == multiHeadAltKey {
+		t.Error("changing leading developer message following system prompt must alter prompt_cache_key")
+	}
+
+	// Developer message spliced after a user turn is suffix and must NOT alter the key.
+	lateDev := append(append([]Message(nil), base...),
+		Message{Role: RoleDeveloper, Content: "late developer steering"})
+	lateDevKey, _ := responsesCacheKeyOf(t, "gpt-test", lateDev, tools)
+	if lateDevKey != baseKey {
+		t.Errorf("developer message after user turn must not change prompt_cache_key:\n base %s\n late %s", baseKey, lateDevKey)
+	}
+}
+
+// TestResponsesPromptCacheKeyToolDescription verifies that changing only a tool's description
+// alters the prompt_cache_key even when the name and parameters remain identical.
+func TestResponsesPromptCacheKeyToolDescription(t *testing.T) {
+	baseMsgs := adapterTestMessages(`{"fare":"$420"}`)
+	params := rawSchema(`{"type":"object","properties":{"query":{"type":"string"}}}`)
+
+	toolV1 := []ToolDef{{
+		Type: "function",
+		Function: ToolDefFunction{
+			Name:        "search",
+			Description: "Search catalog version 1.",
+			Parameters:  params,
+		},
+	}}
+	toolV2 := []ToolDef{{
+		Type: "function",
+		Function: ToolDefFunction{
+			Name:        "search",
+			Description: "Search catalog version 2 with expanded query rules.",
+			Parameters:  params,
+		},
+	}}
+
+	k1, _ := responsesCacheKeyOf(t, "gpt-test", baseMsgs, toolV1)
+	k2, _ := responsesCacheKeyOf(t, "gpt-test", baseMsgs, toolV2)
+
+	if k1 == k2 {
+		t.Errorf("changing tool description must alter prompt_cache_key:\n toolV1 %s\n toolV2 %s", k1, k2)
+	}
+}
+
+// TestResponsesPromptCacheKeyCustomResponsesWire verifies that custom ResponsesWire payloads
+// are hashed into the prompt_cache_key and distinct wire representations yield distinct keys.
+func TestResponsesPromptCacheKeyCustomResponsesWire(t *testing.T) {
+	baseMsgs := adapterTestMessages(`{"fare":"$420"}`)
+	standardTool := []ToolDef{{
+		Type: "function",
+		Function: ToolDefFunction{
+			Name:        "custom_tool",
+			Description: "Standard tool definition.",
+			Parameters:  rawSchema(`{"type":"object"}`),
+		},
+	}}
+	wireTool1 := []ToolDef{{
+		Type:          "function",
+		ResponsesWire: json.RawMessage(`{"type":"custom_endpoint","endpoint":"https://api.example.com/v1"}`),
+	}}
+	wireTool2 := []ToolDef{{
+		Type:          "function",
+		ResponsesWire: json.RawMessage(`{"type":"custom_endpoint","endpoint":"https://api.example.com/v2"}`),
+	}}
+
+	stdKey, _ := responsesCacheKeyOf(t, "gpt-test", baseMsgs, standardTool)
+	wire1Key, _ := responsesCacheKeyOf(t, "gpt-test", baseMsgs, wireTool1)
+	wire2Key, _ := responsesCacheKeyOf(t, "gpt-test", baseMsgs, wireTool2)
+
+	if wire1Key == stdKey {
+		t.Error("custom ResponsesWire must yield a different prompt_cache_key than standard tool definition")
+	}
+	if wire1Key == wire2Key {
+		t.Errorf("different ResponsesWire payloads must alter prompt_cache_key:\n wire1 %s\n wire2 %s", wire1Key, wire2Key)
+	}
+}
+
+// TestResponsesPromptCacheKeyConversationTurnExtension verifies that extending conversation
+// turns (adding user, assistant tool-calls, and tool results) keeps the exact same cache key.
+func TestResponsesPromptCacheKeyConversationTurnExtension(t *testing.T) {
+	tools := adapterTestTools()
+	turn0 := []Message{
+		{Role: RoleSystem, Content: "system prompt rules"},
+		{Role: RoleDeveloper, Content: "developer guidelines"},
+		{Role: RoleUser, Content: "find flights"},
+	}
+	turn0Key, _ := responsesCacheKeyOf(t, "gpt-test", turn0, tools)
+
+	// Step 1: Add assistant turn with tool call.
+	turn1 := append(append([]Message(nil), turn0...), Message{
+		Role:    RoleAssistant,
+		Content: "Looking up flights",
+		ToolCalls: []ToolCall{{
+			ID:       "call_1",
+			Type:     "function",
+			Function: Func{Name: "lookup", Arguments: `{"city":"SFO"}`},
+		}},
+	})
+	turn1Key, _ := responsesCacheKeyOf(t, "gpt-test", turn1, tools)
+	if turn1Key != turn0Key {
+		t.Errorf("adding assistant tool call must preserve prompt_cache_key:\n turn0 %s\n turn1 %s", turn0Key, turn1Key)
+	}
+
+	// Step 2: Add tool result.
+	turn2 := append(append([]Message(nil), turn1...), Message{
+		Role:       RoleTool,
+		ToolCallID: "call_1",
+		Name:       "lookup",
+		Content:    `{"status":"found"}`,
+	})
+	turn2Key, _ := responsesCacheKeyOf(t, "gpt-test", turn2, tools)
+	if turn2Key != turn0Key {
+		t.Errorf("adding tool result must preserve prompt_cache_key:\n turn0 %s\n turn2 %s", turn0Key, turn2Key)
+	}
+
+	// Step 3: Add assistant follow-up and next user message.
+	turn3 := append(append([]Message(nil), turn2...),
+		Message{Role: RoleAssistant, Content: "Flights found for SFO."},
+		Message{Role: RoleUser, Content: "Now book flight #123"},
+	)
+	turn3Key, _ := responsesCacheKeyOf(t, "gpt-test", turn3, tools)
+	if turn3Key != turn0Key {
+		t.Errorf("extending conversation turns must preserve prompt_cache_key:\n turn0 %s\n turn3 %s", turn0Key, turn3Key)
+	}
+}

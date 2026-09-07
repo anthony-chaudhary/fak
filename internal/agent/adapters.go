@@ -723,17 +723,21 @@ func (openAIResponsesAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 // place the invariant lives. A NUL separator between components guards against
 // concatenation collisions; an empty head still hashes to a deterministic key, so even
 // a bare request is pinned rather than left to per-request routing.
+// RoleDeveloper is the OpenAI developer message role, treated equivalently to RoleSystem
+// in the leading instruction head.
+const RoleDeveloper = "developer"
+
 func responsesPromptCacheKey(model string, messages []Message, tools []ToolDef) string {
 	h := sha256.New()
 	_, _ = h.Write([]byte(strings.TrimSpace(model)))
 	_, _ = h.Write([]byte{0})
 	for _, m := range messages {
 		// Only the LEADING contiguous run of system/developer turns is the instruction
-		// head; the first non-system message anchors it. Everything after — including a
-		// late RoleSystem steering item spliced mid-conversation — is conversation suffix
+		// head; the first non-system/non-developer message anchors it. Everything after — including a
+		// late RoleSystem or RoleDeveloper steering item spliced mid-conversation — is conversation suffix
 		// and is deliberately excluded so the key stays stable turn-to-turn and shareable
 		// across sessions with the same harness prompt.
-		if m.Role != RoleSystem {
+		if m.Role != RoleSystem && m.Role != RoleDeveloper && m.Role != "developer" {
 			break
 		}
 		_, _ = h.Write([]byte(m.Content))
@@ -741,7 +745,14 @@ func responsesPromptCacheKey(model string, messages []Message, tools []ToolDef) 
 	}
 	_, _ = h.Write([]byte{0})
 	for _, t := range tools {
+		if len(t.ResponsesWire) > 0 {
+			_, _ = h.Write(t.ResponsesWire)
+			_, _ = h.Write([]byte{0})
+			continue
+		}
 		_, _ = h.Write([]byte(t.Function.Name))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(t.Function.Description))
 		_, _ = h.Write([]byte{0})
 		_, _ = h.Write([]byte(t.Function.Parameters))
 		_, _ = h.Write([]byte{0})
