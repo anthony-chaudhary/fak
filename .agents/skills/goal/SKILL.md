@@ -1,6 +1,6 @@
 ---
 name: goal
-description: Autonomous goal-directed execution loop. Establishes an immutable objective pin, durable scratch state, deterministic witness exit-gate, atomic task execution, and autonomous safe fak git landing by default.
+description: Autonomous goal-directed execution loop. Establishes an immutable objective pin, durable scratch state (_scratch/goals/GOAL.md & todowrite), a deterministic witness exit-gate, and executes atomic steps until verified.
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/goal/SKILL.md

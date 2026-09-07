@@ -549,6 +549,21 @@ func Build(root string, write bool) (Receipt, error) {
 	_, nok := m.Harnesses["fak-native"]
 	_, ook := m.Harnesses["opencode"]
 	r.ZeroUnexplainedGaps = len(dup) == 0 && len(stale) == 0 && cok && nok && ook
+	if write {
+		opencodeDir := filepath.Join(root, ".opencode")
+		pluginPath := filepath.Join(root, filepath.FromSlash(OpenCodePluginPath))
+		hasOpenCode := false
+		if info, statErr := os.Stat(opencodeDir); statErr == nil && info.IsDir() {
+			hasOpenCode = true
+		} else if _, statErr := os.Stat(pluginPath); statErr == nil {
+			hasOpenCode = true
+		}
+		if hasOpenCode {
+			if err := SyncOpenCodePlugin(root); err != nil {
+				return r, err
+			}
+		}
+	}
 	return r, nil
 }
 
@@ -669,6 +684,8 @@ func VerifyOpenCodePlugin(root string) error {
 		{"loop", "FAK loop region admission check"},
 		{"live_leases", "DOS live leases snapshot inspection"},
 		{"arbitrate", "DOS lane lease arbitration check"},
+		{"timeout: 120000", "120s execution timeout"},
+		{"win32", "Windows platform binary extension check"},
 	}
 	for _, req := range requiredChecks {
 		if !strings.Contains(content, req.pattern) {
@@ -716,8 +733,9 @@ const mutations = new Set(["write", "edit", "apply_patch"]);
 
 async function jsonCommand(command, args, cwd) {
   let stdout;
+  const binary = process.platform === "win32" && !command.endsWith(".exe") ? ` + "`" + `${command}.exe` + "`" + ` : command;
   try {
-    ({ stdout } = await execute(process.platform === 'win32' && !command.endsWith('.exe') ? command + '.exe' : command, args, {
+    ({ stdout } = await execute(binary, args, {
       cwd, timeout: 120000, maxBuffer: 4 * 1024 * 1024, windowsHide: true,
     }));
   } catch (error) {
