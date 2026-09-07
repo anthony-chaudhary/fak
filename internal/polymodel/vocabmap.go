@@ -461,3 +461,170 @@ func BridgeRolesVocab(drafter, verifier ModelID, pool *Pool, m *VocabMap) (SpecW
 		VocabBridged:       true,
 	}, nil
 }
+
+// findVocabMap looks up a VocabMap for a candidate-target pair in vocabMaps.
+// It checks candidate ID, candidate->target pair notations, family-level pairs,
+// and candidate family. Returns nil if no matching VocabMap with Len() > 0 is found.
+func findVocabMap(cand, target Model, vocabMaps map[string]*VocabMap) *VocabMap {
+	if vocabMaps == nil {
+		return nil
+	}
+	// Direct candidate ID
+	if vm, ok := vocabMaps[string(cand.ID)]; ok && vm != nil && vm.Len() > 0 {
+		return vm
+	}
+	// Pair notations
+	pairs := []string{
+		string(cand.ID) + "->" + string(target.ID),
+		string(cand.ID) + ":" + string(target.ID),
+		string(cand.ID) + "_" + string(target.ID),
+		string(cand.ID) + "/" + string(target.ID),
+	}
+	for _, k := range pairs {
+		if vm, ok := vocabMaps[k]; ok && vm != nil && vm.Len() > 0 {
+			return vm
+		}
+	}
+	// Family-level pair notations
+	if cand.Family != "" && target.Family != "" {
+		famPairs := []string{
+			cand.Family + "->" + target.Family,
+			cand.Family + ":" + target.Family,
+			cand.Family + "_" + target.Family,
+			cand.Family + "/" + target.Family,
+		}
+		for _, k := range famPairs {
+			if vm, ok := vocabMaps[k]; ok && vm != nil && vm.Len() > 0 {
+				return vm
+			}
+		}
+	}
+	// Family-level key
+	if cand.Family != "" {
+		if vm, ok := vocabMaps[cand.Family]; ok && vm != nil && vm.Len() > 0 {
+			return vm
+		}
+	}
+	return nil
+}
+
+// PickDrafter chooses, among the other resident models in p, the best speculator for the
+// active decoder (#4208). When a default VocabBridge or registered VocabMaps are configured
+// on p, it uses PickDrafterBridged to lift the shared-family restriction; otherwise it
+// delegates to PickDrafter(active, p) enforcing that the drafter shares the active model's
+// non-empty Family.
+func (p *Pool) PickDrafter(active ModelID) ModelID {
+	if p == nil {
+		return ""
+	}
+	if p.bridge != nil {
+		return PickDrafterBridged(active, p, p.bridge)
+	}
+	if len(p.vocabMaps) > 0 {
+		return PickDrafterBridged(active, p, func(cand, target Model) bool {
+			return findVocabMap(cand, target, p.vocabMaps) != nil
+		})
+	}
+	return PickDrafter(active, p)
+}
+
+// PickDrafterBridged chooses, among the other resident models in p, the best speculator for the
+// active decoder, lifting the shared-Family restriction using bridge (#4208).
+func (p *Pool) PickDrafterBridged(active ModelID, bridge VocabBridge) ModelID {
+	return PickDrafterBridged(active, p, bridge)
+}
+
+// SetVocabBridge configures the default VocabBridge predicate for p (#4208).
+func (p *Pool) SetVocabBridge(b VocabBridge) {
+	if p != nil {
+		p.bridge = b
+	}
+}
+
+// SetVocabMap registers a VocabMap under key in p's vocabulary map cache (#4208).
+func (p *Pool) SetVocabMap(key string, vm *VocabMap) {
+	if p == nil {
+		return
+	}
+	if p.vocabMaps == nil {
+		p.vocabMaps = make(map[string]*VocabMap)
+	}
+	p.vocabMaps[key] = vm
+}
+
+// PickDrafterWithBridge selects the best speculator for target among the resident models in p (#4208).
+//
+// Selection order:
+//  1. Same-Family (fast path): If another resident model shares target's non-empty Family, the
+//     cheapest (smallest WeightBytes, tie-broken by ID) is selected with nil *VocabMap and true,
+//     since same-family models share tokenizers and need no translation.
+//  2. Heterogeneous-Vocabulary (Vocab-Bridged): When no same-family drafter exists, if a valid
+//     VocabMap (Len() > 0) exists in vocabMaps (or p's registered vocab maps) for a resident
+//     candidate and target, the cheapest bridged candidate (tie-broken by ID) is selected with
+//     its *VocabMap and true.
+//
+// Returns (nil, nil, false) if target is nil, target.ID is empty, or no candidate is eligible.
+func (p *Pool) PickDrafterWithBridge(target *Model, vocabMaps map[string]*VocabMap) (*Model, *VocabMap, bool) {
+	if p == nil || target == nil || target.ID == "" {
+		return nil, nil, false
+	}
+	targetModel := *target
+	if want, ok := p.Get(target.ID); ok {
+		if targetModel.Family == "" {
+			targetModel.Family = want.Family
+		}
+	}
+
+	// Tier 1: SAME-FAMILY (the fast, lossless path).
+	var bestSame *Model
+	for _, id := range p.Resident() {
+		if id == targetModel.ID {
+			continue
+		}
+		cand, _ := p.Get(id)
+		if targetModel.Family != "" && cand.Family == targetModel.Family {
+			if bestSame == nil || cand.WeightBytes < bestSame.WeightBytes {
+				c := cand
+				bestSame = &c
+			}
+		}
+	}
+	if bestSame != nil {
+		return bestSame, nil, true
+	}
+
+	// Tier 2: VOCAB-BRIDGED.
+	var bestBridged *Model
+	var bestVM *VocabMap
+	for _, id := range p.Resident() {
+		if id == targetModel.ID {
+			continue
+		}
+		cand, _ := p.Get(id)
+		vm := findVocabMap(cand, targetModel, vocabMaps)
+		if vm == nil && p.vocabMaps != nil {
+			vm = findVocabMap(cand, targetModel, p.vocabMaps)
+		}
+		if vm == nil || vm.Len() == 0 {
+			continue
+		}
+		if bestBridged == nil || cand.WeightBytes < bestBridged.WeightBytes {
+			c := cand
+			bestBridged = &c
+			bestVM = vm
+		}
+	}
+	if bestBridged != nil {
+		return bestBridged, bestVM, true
+	}
+
+	return nil, nil, false
+}
+
+// PickDrafterWithBridge chooses the best drafter for target among the resident models in pool (#4208).
+func PickDrafterWithBridge(target *Model, vocabMaps map[string]*VocabMap, pool *Pool) (*Model, *VocabMap, bool) {
+	if pool == nil {
+		return nil, nil, false
+	}
+	return pool.PickDrafterWithBridge(target, vocabMaps)
+}

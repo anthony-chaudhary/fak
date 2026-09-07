@@ -776,3 +776,229 @@ func TestSpecDecodeVocabBridgedHonorsStopToken(t *testing.T) {
 		t.Errorf("run ended on %d, want the stop token %d", last, stop)
 	}
 }
+
+// TestPickDrafterBridgedWithVocabMap tests selecting cross-family drafters via VocabMap (#4208).
+func TestPickDrafterBridgedWithVocabMap(t *testing.T) {
+	dv, tv := testVocabs()
+	vm := NewVocabMap(dv, tv)
+	emptyVM := NewVocabMap(dv, map[string]int{"unmatched": 999}) // Len() == 0
+
+	p := NewPool(2000)
+	target := Model{ID: "target", Family: "targetfam", WeightBytes: 1000}
+	sameFam := Model{ID: "samefam", Family: "targetfam", WeightBytes: 300}
+	crossCheap := Model{ID: "cross_cheap", Family: "other", WeightBytes: 50}
+	crossExp := Model{ID: "cross_exp", Family: "other", WeightBytes: 150}
+	alien := Model{ID: "alien", Family: "alien", WeightBytes: 10}
+
+	mustAdmit(t, p, target)
+	mustAdmit(t, p, sameFam)
+	mustAdmit(t, p, crossCheap)
+	mustAdmit(t, p, crossExp)
+	mustAdmit(t, p, alien)
+
+	vocabMaps := map[string]*VocabMap{
+		"cross_cheap": vm,
+		"cross_exp":   vm,
+		"alien":       emptyVM,
+	}
+
+	// 1. Tier 1 preference: same-family model wins even though cross_cheap has lower weight (300 vs 50).
+	cand, mapOut, ok := p.PickDrafterWithBridge(&target, vocabMaps)
+	if !ok || cand == nil {
+		t.Fatalf("PickDrafterWithBridge failed to pick a drafter")
+	}
+	if cand.ID != "samefam" {
+		t.Errorf("PickDrafterWithBridge selected %q, want same-family %q", cand.ID, "samefam")
+	}
+	if mapOut != nil {
+		t.Errorf("PickDrafterWithBridge returned non-nil VocabMap for same-family drafter")
+	}
+
+	// 2. Package-level function PickDrafterWithBridge matches method.
+	candPkg, mapPkg, okPkg := PickDrafterWithBridge(&target, vocabMaps, p)
+	if !okPkg || candPkg == nil || candPkg.ID != "samefam" || mapPkg != nil {
+		t.Errorf("package PickDrafterWithBridge = (%v, %v, %v), want (samefam, nil, true)", candPkg, mapPkg, okPkg)
+	}
+
+	// 3. Evict same-family peer: now cross_cheap (cheapest valid bridged candidate) is selected.
+	p.Evict("samefam")
+	cand, mapOut, ok = p.PickDrafterWithBridge(&target, vocabMaps)
+	if !ok || cand == nil {
+		t.Fatalf("PickDrafterWithBridge failed to pick cross-family drafter")
+	}
+	if cand.ID != "cross_cheap" {
+		t.Errorf("PickDrafterWithBridge selected %q, want cheapest bridged %q", cand.ID, "cross_cheap")
+	}
+	if mapOut != vm {
+		t.Errorf("PickDrafterWithBridge mapOut = %v, want vm", mapOut)
+	}
+
+	// 4. Evict cross_cheap: next cheapest bridged candidate (cross_exp) is selected.
+	p.Evict("cross_cheap")
+	cand, mapOut, ok = p.PickDrafterWithBridge(&target, vocabMaps)
+	if !ok || cand == nil {
+		t.Fatalf("PickDrafterWithBridge failed to pick cross_exp")
+	}
+	if cand.ID != "cross_exp" {
+		t.Errorf("PickDrafterWithBridge selected %q, want %q", cand.ID, "cross_exp")
+	}
+	if mapOut != vm {
+		t.Errorf("PickDrafterWithBridge mapOut = %v, want vm", mapOut)
+	}
+
+	// 5. Evict cross_exp: only alien remains, whose VocabMap has Len() == 0 (no overlap) -> rejected!
+	p.Evict("cross_exp")
+	cand, mapOut, ok = p.PickDrafterWithBridge(&target, vocabMaps)
+	if ok || cand != nil || mapOut != nil {
+		t.Errorf("PickDrafterWithBridge with zero-overlap map = (%v, %v, %v), want (nil, nil, false)", cand, mapOut, ok)
+	}
+
+	// 6. Integration with Pool.SetVocabMap and Pool.PickDrafter.
+	mustAdmit(t, p, crossCheap)
+	p.SetVocabMap("cross_cheap", vm)
+	if got := p.PickDrafter("target"); got != "cross_cheap" {
+		t.Errorf("p.PickDrafter() after SetVocabMap = %q, want %q", got, "cross_cheap")
+	}
+
+	// 7. Pool.PickDrafterBridged directly delegates to PickDrafterBridged.
+	if got := p.PickDrafterBridged("target", func(d, _ Model) bool { return d.ID == "alien" }); got != "alien" {
+		t.Errorf("p.PickDrafterBridged() = %q, want alien", got)
+	}
+
+	// 8. Nil pool or nil target returns (nil, nil, false).
+	var nilPool *Pool
+	if c, _, ok := nilPool.PickDrafterWithBridge(&target, vocabMaps); ok || c != nil {
+		t.Error("nilPool.PickDrafterWithBridge: want (!ok, nil)")
+	}
+	if c, _, ok := p.PickDrafterWithBridge(nil, vocabMaps); ok || c != nil {
+		t.Error("p.PickDrafterWithBridge(nil): want (!ok, nil)")
+	}
+}
+
+// TestSpecDecodeVocabBridgedConfigIntegration tests SpecDecodeConfig.VocabMap integration (#4208).
+func TestSpecDecodeVocabBridgedConfigIntegration(t *testing.T) {
+	dv, tv := testVocabs()
+	m := NewVocabMap(dv, tv)
+	prompt := []int{5, 12}
+	const budget = 40
+
+	// Baseline sequential greedy decode of target without drafter.
+	base, err := SpecDecode(prompt, nil, testVerifier, SpecDecodeConfig{MaxNewTokens: budget})
+	if err != nil {
+		t.Fatalf("baseline SpecDecode err = %v", err)
+	}
+
+	// A raw drafter operating in DRAFTER's id space (not manually wrapped with vm.BridgeDrafter).
+	// Proposes target-matching tokens translated into drafter space.
+	rawDrafter := func(dctx []int) []int {
+		tctx := make([]int, 0, len(dctx))
+		for _, d := range dctx {
+			if tid, ok := m.ToTarget(d); ok {
+				tctx = append(tctx, tid)
+			}
+		}
+		out := make([]int, 0, 4)
+		for i := 0; i < 4; i++ {
+			tid := targetOracle(tctx)
+			tctx = append(tctx, tid)
+			did, ok := m.ToDrafter(tid)
+			if !ok {
+				break
+			}
+			out = append(out, did)
+		}
+		return out
+	}
+
+	// Run SpecDecode with VocabMap set in SpecDecodeConfig. SpecDecode must auto-bridge.
+	cfg := SpecDecodeConfig{
+		MaxNewTokens: budget,
+		MaxDraft:     4,
+		VocabMap:     m,
+	}
+	run, err := SpecDecode(prompt, rawDrafter, testVerifier, cfg)
+	if err != nil {
+		t.Fatalf("SpecDecode with VocabMap in config err = %v", err)
+	}
+
+	// Verify losslessness: bit-exact to no-drafter greedy decode.
+	if !reflect.DeepEqual(run.Output, base.Output) {
+		t.Fatalf("SpecDecodeConfig.VocabMap output diverged from baseline:\n got: %v\nwant: %v", run.Output, base.Output)
+	}
+
+	// Verify throughput was bought.
+	if run.MeanAcceptanceLength <= 1.5 {
+		t.Errorf("MeanAcceptanceLength = %v, want > 1.5", run.MeanAcceptanceLength)
+	}
+
+	// Verify KV accounting reconciliation.
+	if run.DraftedTokens != run.AcceptedDrafts+run.EvictKV {
+		t.Errorf("drafted %d != accepted %d + evict %d", run.DraftedTokens, run.AcceptedDrafts, run.EvictKV)
+	}
+}
+
+// TestSpecDecodeVocabBridgedGreedyEquivalenceAcrossTokenizers explicitly asserts greedy
+// equivalence across heterogeneous tokenizers for various prompts and draft lengths.
+func TestSpecDecodeVocabBridgedGreedyEquivalenceAcrossTokenizers(t *testing.T) {
+	dv, tv := testVocabs()
+	m := NewVocabMap(dv, tv)
+
+	testPrompts := [][]int{
+		{0},
+		{1, 2},
+		{15, 25, 35},
+		{42}, // target-only token in prompt!
+	}
+
+	for _, prompt := range testPrompts {
+		for _, k := range []int{1, 2, 4, 8} {
+			cfgBase := SpecDecodeConfig{MaxNewTokens: 30}
+			base, err := SpecDecode(prompt, nil, testVerifier, cfgBase)
+			if err != nil {
+				t.Fatalf("baseline err = %v", err)
+			}
+
+			// Drafter operating in drafter space.
+			rawDrafter := func(dctx []int) []int {
+				tctx := make([]int, 0, len(dctx))
+				for _, d := range dctx {
+					if tid, ok := m.ToTarget(d); ok {
+						tctx = append(tctx, tid)
+					}
+				}
+				out := make([]int, 0, k)
+				for i := 0; i < k; i++ {
+					tid := targetOracle(tctx)
+					tctx = append(tctx, tid)
+					did, ok := m.ToDrafter(tid)
+					if !ok {
+						break
+					}
+					out = append(out, did)
+				}
+				return out
+			}
+
+			cfgSpec := SpecDecodeConfig{
+				MaxNewTokens: 30,
+				MaxDraft:     k,
+				VocabMap:     m,
+			}
+			run, err := SpecDecode(prompt, rawDrafter, testVerifier, cfgSpec)
+			if err != nil {
+				t.Fatalf("specdecode err = %v", err)
+			}
+
+			// Token-for-token greedy equivalence.
+			if len(run.Output) != len(base.Output) {
+				t.Fatalf("length mismatch: got %d, want %d", len(run.Output), len(base.Output))
+			}
+			for pos := range run.Output {
+				if run.Output[pos] != base.Output[pos] {
+					t.Fatalf("token mismatch at pos %d for prompt %v k=%d: got %d, want %d",
+						pos, prompt, k, run.Output[pos], base.Output[pos])
+				}
+			}
+		}
+	}
+}
