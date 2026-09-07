@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -183,9 +184,41 @@ func TestStreamQ4KProfilerIdentity(t *testing.T) {
 		t.Fatalf("profile identity = mode %q source %q", profile.Mode, profile.Source)
 	}
 
-	*f.streamQ4K = false
+}
+
+// Exercise the real mixed-quant loader without creating a session or GPU backend.
+func TestResidentQ4KDefaultProgress(t *testing.T) {
+	t.Setenv("FAK_GGUF_LOAD_WORKERS", "1")
+	f := testCompleteBenchFlags()
+	*f.gguf, *f.q4k, *f.backendName = benchMixedQuantGGUF(t), true, "vulkan"
+	lp := newGGUFLoadProfiler(f)
+	if lp == nil || lp.Progress != os.Stderr {
+		t.Fatal("resident Q4_K must report default load progress to stderr")
+	}
+	var progress bytes.Buffer
+	lp.Progress = &progress
+	m, _, err := loadModel(f, lp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.CloseWeights()
+	if output := progress.String(); !strings.Contains(output, "fak: loading model ") || !strings.Contains(output, "100% (12/12 tensors") {
+		t.Fatalf("mixed-GGUF load omitted collected-tensor progress: %q", output)
+	}
+	if got := snapshotGGUFLoadProfile(f, lp, 123); got != nil {
+		t.Fatal("default progress must not add a detailed load profile")
+	}
+	*f.phaseProfile = true
+	if got := snapshotGGUFLoadProfile(f, lp, 123); got != nil {
+		t.Fatal("resident progress must not masquerade as a lean-Q8 phase profile")
+	}
+	*f.loadProgress = false
 	if got := newGGUFLoadProfiler(f); got != nil {
-		t.Fatal("resident Q4_K default unexpectedly changed its historical profiler behavior")
+		t.Fatal("load-progress=false must silence the resident loader")
+	}
+	*f.loadProfile = true
+	if err := validateFlagCombinations(f); err == nil || !strings.Contains(err.Error(), "-load-profile requires") {
+		t.Fatalf("resident detailed-profile restriction changed: %v", err)
 	}
 }
 

@@ -22,6 +22,7 @@ type benchObservedBackend struct {
 type benchQuantBackend struct {
 	benchObservedBackend
 	q4Payload []int8
+	q2Payload []int8
 }
 
 func (b *benchQuantBackend) Caps() compute.Caps {
@@ -33,6 +34,9 @@ func (b *benchQuantBackend) Caps() compute.Caps {
 func (b *benchQuantBackend) Upload(t compute.Tensor, as compute.Dtype) compute.Tensor {
 	if as == compute.Q4_K {
 		b.q4Payload = append([]int8(nil), t.Buf().(compute.HostBuffer).I8()...)
+	}
+	if as == compute.Q2_K {
+		b.q2Payload = append([]int8(nil), t.Buf().(compute.HostBuffer).I8()...)
 	}
 	return b.Backend.Upload(t, as)
 }
@@ -50,11 +54,12 @@ func TestModelbenchMixedQuantBackendLoadAndForward(t *testing.T) {
 		t.Fatal("HAL conversion fit must use the conservative F32 upper bound")
 	}
 	_, precision, report := describeEngine(f, be, nil)
-	if precision != "resident Q4_K + dense non-Q4_K converted to Q8" || report["dense_non_q4k_load"] == nil {
+	if precision != "resident Q4_K/Q2_K + unsupported dense formats converted to Q8" || report["dense_non_q4k_load"] == nil {
 		t.Fatal("HAL conversion is missing from execution identity")
 	}
 	for _, streamed := range []bool{false, true} {
 		be.q4Payload = nil
+		be.q2Payload = nil
 		*f.streamQ4K = streamed
 		m, _, err := loadModel(f, nil)
 		if err != nil {
@@ -69,9 +74,12 @@ func TestModelbenchMixedQuantBackendLoadAndForward(t *testing.T) {
 			if len(prefill) != 4 || len(decode) != 4 || !allFinite(prefill) || !allFinite(decode) || be.matmuls == 0 {
 				t.Fatal("mixed-quant prefill/decode did not produce finite logits through HAL")
 			}
-			for _, name := range []string{"lm_head.weight", "model.layers.0.self_attn.v_proj.weight", "model.layers.0.self_attn.o_proj.weight", "model.layers.0.mlp.gate_proj.weight", "model.layers.0.mlp.down_proj.weight"} {
+			if !m.HasKQuant("lm_head.weight") || m.HasQ8("lm_head.weight") || len(be.q2Payload) != 4*84 {
+				t.Fatal("eligible Q2_K did not stay packed and reach the backend")
+			}
+			for _, name := range []string{"model.layers.0.self_attn.v_proj.weight", "model.layers.0.self_attn.o_proj.weight", "model.layers.0.mlp.gate_proj.weight", "model.layers.0.mlp.down_proj.weight"} {
 				if m.HasKQuant(name) || !m.HasQ8(name) {
-					t.Fatalf("%s must take the same dense Q8 conversion as serve", name)
+					t.Fatalf("unsupported dense format %s must take the Q8 conversion path", name)
 				}
 			}
 			if !m.HasQ4K("model.layers.0.mlp.up_proj.weight") || len(be.q4Payload) != 256*144 || m.HasQ8("model.layers.0.mlp.up_proj.weight") {
