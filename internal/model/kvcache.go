@@ -292,3 +292,25 @@ func reserveFloat64(src []float64, extra int) []float64 {
 	copy(dst, src)
 	return dst
 }
+
+// Truncate rolls back the KV cache to keep at most targetLen tokens.
+// This is an O(1) slice-header pointer adjustment without memory copying,
+// used by speculative decoding / Context MMU to roll back uncommitted speculative branches.
+func (c *KVCache) Truncate(targetLen int) {
+	if c == nil || targetLen >= len(c.pos) || targetLen < 0 {
+		return
+	}
+	w := c.kvStride()
+	for l := 0; l < c.cfg.NumLayers; l++ {
+		if l < len(c.K) && len(c.K[l]) >= targetLen*w {
+			c.K[l] = c.K[l][:targetLen*w]
+		}
+		if l < len(c.Kraw) && len(c.Kraw[l]) >= targetLen*w {
+			c.Kraw[l] = c.Kraw[l][:targetLen*w]
+		}
+		if l < len(c.V) && len(c.V[l]) >= targetLen*w {
+			c.V[l] = c.V[l][:targetLen*w]
+		}
+	}
+	c.pos = c.pos[:targetLen]
+}

@@ -112,15 +112,10 @@ func (w expertWeight) ringStaging() (key string, mk func() compute.Tensor, dt co
 		}, compute.Q4_K, q4kResidentBytes(qt), true
 	case w.kq != nil:
 		qt := w.kq
-		switch qt.kind {
-		case kindQ5K:
+		if desc, ok := LookupQuantDescriptor(qt.kind); ok && desc.SupportsHAL() {
 			return w.halKey(), func() compute.Tensor {
-				return compute.NewQ5K(compute.Default(), []int{qt.out, qt.in}, qt.raw)
-			}, compute.Q5_K, kQuantResidentBytes(qt), true
-		case kindQ6K:
-			return w.halKey(), func() compute.Tensor {
-				return compute.NewQ6K(compute.Default(), []int{qt.out, qt.in}, qt.raw)
-			}, compute.Q6_K, kQuantResidentBytes(qt), true
+				return desc.NewHostTensor(qt.out, qt.in, qt.raw)
+			}, desc.Dtype(), kQuantResidentBytes(qt), true
 		}
 	}
 	return "", nil, 0, 0, false
