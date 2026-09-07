@@ -26,12 +26,12 @@ import (
 // the harness-conventional spellings so a model already fluent in Read/Grep/Glob needs
 // no retraining to drive the kernel-mediated versions.
 const (
-	ToolRead       = "Read"
-	ToolGrep       = "Grep"
-	ToolGlob       = "Glob"
-	ToolWrite      = "Write"
-	ToolEdit       = "Edit"
-	ToolBash       = "Bash"
+	ToolRead  = "Read"
+	ToolGrep  = "Grep"
+	ToolGlob  = "Glob"
+	ToolWrite = "Write"
+	ToolEdit  = "Edit"
+	ToolBash  = "Bash"
 )
 
 // ReadArgs names one file and an optional line window. Offset is 1-based (line 1 is the
