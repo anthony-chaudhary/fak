@@ -69,30 +69,6 @@ var inventory = []Coverage{
 			"yields a witnessed numeric benchmark — `fak bench-loop install` refuses to arm it before that.",
 	},
 	{
-		Task:    "FakMetaSuperloopNight100",
-		Status:  StatusXML,
-		Capture: "tools/scheduled-tasks/FakMetaSuperloopNight100.xml",
-		Reason: "launches _scratch/run-meta-superloop-100.ps1 (gitignored), so the capture versions a " +
-			"pointer to a file the repo does not carry. A parked overnight campaign one-shot, not " +
-			"durable boot posture; retire the row with the campaign.",
-	},
-	{
-		Task:    "FakOvernightMixedProfiles100",
-		Status:  StatusXML,
-		Capture: "tools/scheduled-tasks/FakOvernightMixedProfiles100.xml",
-		Reason: "launches _scratch/overnight-mixed-profiles.ps1 (gitignored) with campaign-specific " +
-			"-Baseline/-Target arguments; the capture preserves those arguments but not the script. " +
-			"A one-shot campaign loop, not durable boot posture.",
-	},
-	{
-		Task:    "FleetGLM52CampaignStop",
-		Status:  StatusXML,
-		Capture: "tools/scheduled-tasks/FleetGLM52CampaignStop.xml",
-		Reason: "an inline one-shot kill switch that disables a named set of campaign dispatch tasks. " +
-			"There is no script to version, so the capture IS the whole loop — this row is fully " +
-			"restorable, and retires with the campaign it stops.",
-	},
-	{
 		Task:    "FakReapOrphanTails",
 		Status:  StatusXML,
 		Capture: "tools/scheduled-tasks/FakReapOrphanTails.xml",

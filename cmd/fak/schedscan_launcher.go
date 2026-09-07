@@ -97,7 +97,71 @@ const (
 	schedVerdictWarn   = "warn"
 	schedVerdictFail   = "fail"
 	schedVerdictExempt = "exempt"
+	schedVerdictBroken = "broken"
 )
+
+// schedStatFn abstracts os.Stat so tests can mock filesystem existence hermetically.
+var schedStatFn = os.Stat
+
+var winEnvVarRe = regexp.MustCompile(`%([^%]+)%`)
+
+func schedExpandEnv(s string) string {
+	s = winEnvVarRe.ReplaceAllStringFunc(s, func(m string) string {
+		v := strings.Trim(m, "%")
+		if val, ok := os.LookupEnv(v); ok {
+			return val
+		}
+		return m
+	})
+	return os.ExpandEnv(s)
+}
+
+func schedResolveScriptPath(script, provenance, repoRoot string) string {
+	if provenance == schedProvenanceInTree {
+		norm := schedNormalizePath(script)
+		root := schedNormalizePath(repoRoot)
+		if root != "" && strings.HasPrefix(norm, root+"/") {
+			rel := strings.TrimPrefix(norm, root+"/")
+			return filepath.Join(repoRoot, filepath.FromSlash(rel))
+		}
+		if !filepath.IsAbs(script) {
+			return filepath.Join(repoRoot, filepath.FromSlash(script))
+		}
+		return filepath.FromSlash(script)
+	}
+
+	expanded := schedExpandEnv(script)
+	norm := schedNormalizePath(expanded)
+	root := schedNormalizePath(repoRoot)
+	if root != "" && strings.HasPrefix(norm, root+"/") {
+		rel := strings.TrimPrefix(norm, root+"/")
+		return filepath.Join(repoRoot, filepath.FromSlash(rel))
+	}
+	if strings.HasPrefix(norm, "_scratch/") || strings.HasPrefix(expanded, "_scratch\\") {
+		if repoRoot != "" {
+			return filepath.Join(repoRoot, filepath.FromSlash(expanded))
+		}
+	}
+	if repoRoot != "" && !filepath.IsAbs(expanded) && !strings.Contains(expanded, ":") {
+		return filepath.Join(repoRoot, filepath.FromSlash(expanded))
+	}
+	return filepath.FromSlash(expanded)
+}
+
+// schedLauncherPostureWorst returns the more severe of two launcher posture verdicts.
+func schedLauncherPostureWorst(v1, v2 string) string {
+	rank := map[string]int{
+		schedVerdictPass:   0,
+		schedVerdictExempt: 1,
+		schedVerdictWarn:   2,
+		schedVerdictFail:   3,
+		schedVerdictBroken: 3,
+	}
+	if rank[v2] > rank[v1] {
+		return v2
+	}
+	return v1
+}
 
 // schedLauncherShells are the interpreter executables that make an action a
 // "raw shell" launch. Matched on the basename with any .exe suffix and directory
@@ -343,10 +407,7 @@ func schedLauncherAudit(row schedScanTaskInfo, repoRoot string) schedLauncherPos
 
 	verdict := schedVerdictPass
 	worse := func(v string) {
-		rank := map[string]int{schedVerdictPass: 0, schedVerdictExempt: 1, schedVerdictWarn: 2, schedVerdictFail: 3}
-		if rank[v] > rank[verdict] {
-			verdict = v
-		}
+		verdict = schedLauncherPostureWorst(verdict, v)
 	}
 
 	if session == schedSessionDesktop {
@@ -389,6 +450,17 @@ func schedLauncherAudit(row schedScanTaskInfo, repoRoot string) schedLauncherPos
 		worse(schedVerdictWarn)
 	}
 
+	if script != "" {
+		targetPath := schedResolveScriptPath(script, provenance, repoRoot)
+		if _, err := schedStatFn(targetPath); err != nil {
+			worse(schedVerdictBroken)
+			add(
+				fmt.Sprintf("script file missing on disk (%s): target file does not exist at %s", script, targetPath),
+				"restore the deleted script or unregister the orphaned scheduled task",
+			)
+		}
+	}
+
 	p.Verdict = verdict
 	p.Allowed = verdict == schedVerdictPass || verdict == schedVerdictExempt
 	return p
@@ -427,9 +499,9 @@ func buildSchedLauncherDoc(rows []schedScanTaskInfo, filter *regexp.Regexp, repo
 		doc.Counts[p.Verdict]++
 	}
 	doc.Count = len(doc.Tasks)
-	doc.FailCount = doc.Counts[schedVerdictFail]
+	doc.FailCount = doc.Counts[schedVerdictFail] + doc.Counts[schedVerdictBroken]
 	doc.WarnCount = doc.Counts[schedVerdictWarn]
-	rank := map[string]int{schedVerdictFail: 0, schedVerdictWarn: 1, schedVerdictExempt: 2, schedVerdictPass: 3}
+	rank := map[string]int{schedVerdictBroken: 0, schedVerdictFail: 1, schedVerdictWarn: 2, schedVerdictExempt: 3, schedVerdictPass: 4}
 	sort.SliceStable(doc.Tasks, func(i, j int) bool {
 		if rank[doc.Tasks[i].Verdict] != rank[doc.Tasks[j].Verdict] {
 			return rank[doc.Tasks[i].Verdict] < rank[doc.Tasks[j].Verdict]
