@@ -2,11 +2,32 @@ package ggufload
 
 import (
 	"errors"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
+
+type dualCapacityBackend struct {
+	capBackend
+	hostTotal int64
+	hostFree  int64
+	hostKnown bool
+}
+
+func (b dualCapacityBackend) Caps() compute.Caps {
+	c := b.capBackend.Caps()
+	c.HostCapacityProbe = b.hostKnown
+	return c
+}
+
+func (b dualCapacityBackend) HostMemory() (int64, int64, bool) {
+	return b.hostTotal, b.hostFree, b.hostKnown
+}
+
+var _ compute.HostCapacity = dualCapacityBackend{}
 
 // readyWeightSource builds a header that BOTH parses an architecture (so File.Config succeeds)
 // AND carries the same two synth tensors as synthWeightSource, so the lean EstimateLoadBytes is
@@ -49,6 +70,131 @@ func archlessWeightSource(t *testing.T) *WeightSource {
 		t.Fatalf("NewWeightSource: %v", err)
 	}
 	return ws
+}
+
+// mixedVulkanWeightSource is the smallest header that exercises every dense Vulkan
+// -q4k storage class: Q4_K/Q2_K packed residency, unsupported Q3_K -> Q8,
+// an until-#11942 Q2_K embedding -> F32, and a small F32 norm.
+func mixedVulkanWeightSource(t *testing.T) *WeightSource {
+	t.Helper()
+	f := &File{
+		Metadata: map[string]Value{
+			"general.architecture":                   {Type: TypeString, Value: "llama"},
+			"llama.embedding_length":                 {Type: TypeUint32, Value: uint32(256)},
+			"llama.block_count":                      {Type: TypeUint32, Value: uint32(1)},
+			"llama.attention.head_count":             {Type: TypeUint32, Value: uint32(1)},
+			"llama.feed_forward_length":              {Type: TypeUint32, Value: uint32(256)},
+			"llama.attention.layer_norm_rms_epsilon": {Type: TypeFloat32, Value: float32(1e-5)},
+		},
+		Tensors: []TensorInfo{
+			{Name: "token_embd.weight", Dims: []uint64{256, 4}, Type: TensorQ2_K},
+			{Name: "output.weight", Dims: []uint64{256, 4}, Type: TensorQ2_K},
+			{Name: "blk.0.ffn_up.weight", Dims: []uint64{256, 256}, Type: TensorQ4_K},
+			{Name: "blk.0.attn_v.weight", Dims: []uint64{256, 256}, Type: TensorQ3_K},
+			{Name: "output_norm.weight", Dims: []uint64{256}, Type: TensorF32},
+		},
+	}
+	ws, err := NewWeightSource(f, nil, 0)
+	if err != nil {
+		t.Fatalf("NewWeightSource: %v", err)
+	}
+	return ws
+}
+
+func conservativeTestAllocation(n int64) int64 {
+	if n <= 0 {
+		return 0
+	}
+	page := int64(os.Getpagesize())
+	return ((n + page - 1) / page * page) + page
+}
+
+func TestPreflightVulkanMixedQ4KAccountsPackedQ8F32AndBoundedStaging(t *testing.T) {
+	t.Setenv("FAK_GGUF_LOAD_WORKERS", "2")
+	ws := mixedVulkanWeightSource(t)
+	pf := BuildModelPreflight(PreflightInput{
+		Source:         ws,
+		Backend:        dualCapacityBackend{capBackend: capBackend{total: 8 << 20, free: 8 << 20, known: true}, hostTotal: 8 << 20, hostFree: 8 << 20, hostKnown: true},
+		Headroom:       0.15,
+		VulkanMixedQ4K: true,
+	})
+	if pf.Verdict != PreflightReady || pf.FitState != FitOK {
+		t.Fatalf("mixed preflight = %+v, want READY/FIT_OK", pf)
+	}
+
+	// Packed: output Q2_K=4 blocks*84, Q4_K=256 blocks*144.
+	// Q8 fallback: 256*256 codes + (256*8) f32 scales.
+	const q2Payload = int64(4 * 84)
+	const q4Payload = int64(256 * 144)
+	const q3Payload = int64(256 * 110)
+	const q8Codes = int64(256 * 256)
+	const q8Scales = int64(256 * 8 * 4)
+	const embedF32 = int64(256 * 4 * 4)
+	const normF32 = int64(256 * 4)
+
+	wantDevice := q2Payload + q4Payload + q8Codes + q8Scales + embedF32 + normF32
+	wantHostResident := conservativeTestAllocation(q2Payload) + conservativeTestAllocation(q4Payload) +
+		conservativeTestAllocation(q8Codes) + conservativeTestAllocation(q8Scales) + 2*(embedF32+normF32)
+	// Two worker slots: Q3 conversion (raw + old/new f32 normalization buffers)
+	// and retained Q4_K are the two largest simultaneous staging demands.
+	wantStaging := (q3Payload + 2*256*256*4) + q4Payload
+	wantRead := 2*q2Payload + q4Payload + q3Payload + normF32
+	if pf.EstDeviceResidentBytes != wantDevice || pf.EstHostResidentBytes != wantHostResident ||
+		pf.EstLoadStagingBytes != wantStaging || pf.EstReadBytes != wantRead {
+		t.Fatalf("mixed estimate = read/device/host/stage %d/%d/%d/%d, want %d/%d/%d/%d",
+			pf.EstReadBytes, pf.EstDeviceResidentBytes, pf.EstHostResidentBytes, pf.EstLoadStagingBytes,
+			wantRead, wantDevice, wantHostResident, wantStaging)
+	}
+	if pf.EstLoadBytes != wantDevice+wantHostResident+wantStaging {
+		t.Fatalf("total = %d, want %d", pf.EstLoadBytes, wantDevice+wantHostResident+wantStaging)
+	}
+	// The embedding is Q2_K on disk but not a matmul weight before #11942. Its
+	// host F32 reservation and raw+2*f32 staging are both included above.
+	if pf.EstHostResidentBytes <= conservativeTestAllocation(q2Payload)+conservativeTestAllocation(q4Payload) {
+		t.Fatal("Q2_K embedding was incorrectly treated as packed resident")
+	}
+}
+
+func TestPreflightVulkanMixedQ4KUsesHostCapacityAndHeadroom(t *testing.T) {
+	t.Setenv("FAK_GGUF_LOAD_WORKERS", "1")
+	ws := mixedVulkanWeightSource(t)
+	pf := BuildModelPreflight(PreflightInput{
+		Source: ws,
+		Backend: dualCapacityBackend{
+			capBackend: capBackend{total: 8 << 20, free: 8 << 20, known: true},
+			hostTotal:  512 << 10, hostFree: 512 << 10, hostKnown: true,
+		},
+		Headroom:       0.15,
+		VulkanMixedQ4K: true,
+	})
+	if pf.Verdict != PreflightRefuseTooBig || pf.FitState != FitTooBigState || pf.FitScope != string(compute.MemoryScopeHost) {
+		t.Fatalf("host-constrained mixed preflight = %+v, want host REFUSE_TOO_BIG", pf)
+	}
+	wantAvail := compute.BudgetAfterHeadroom(512<<10, 0.15)
+	if pf.HostAvailBytes != wantAvail {
+		t.Fatalf("headroom-adjusted host availability = %d, want %d", pf.HostAvailBytes, wantAvail)
+	}
+}
+
+func TestPreflightVulkanMixedQ4KFailsClosedForUnknownAndSplit(t *testing.T) {
+	tests := map[string]func(*WeightSource){
+		"unknown_tensor": func(ws *WeightSource) {
+			ws.File.Tensors = append(ws.File.Tensors, TensorInfo{Name: "mystery.weight", Dims: []uint64{256, 256}, Type: TensorQ2_K})
+		},
+		"split_source": func(ws *WeightSource) {
+			ws.readerFor = make([]io.ReaderAt, len(ws.File.Tensors))
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			ws := mixedVulkanWeightSource(t)
+			mutate(ws)
+			pf := BuildModelPreflight(PreflightInput{Source: ws, VulkanMixedQ4K: true})
+			if pf.Verdict != PreflightRefuseHeader || !pf.Refused() {
+				t.Fatalf("mixed preflight = %+v, want fail-closed REFUSE_BAD_HEADER", pf)
+			}
+		})
+	}
 }
 
 func TestPreflightReadyFitOKOnKnownBigDevice(t *testing.T) {

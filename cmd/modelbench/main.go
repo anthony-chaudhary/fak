@@ -1320,18 +1320,20 @@ const modelbenchDeviceHeadroom = 0.15
 // OpenErr field carries any header-open failure so the classifier reports REFUSE_BAD_HEADER.
 func preflightInputFor(f *benchFlags, be compute.Backend) ggufload.PreflightInput {
 	ws, err := ggufload.OpenWeights(*f.gguf)
-	// Raw GGUF bytes undercount the dense Q8 conversion used by HAL Q4_K
-	// sessions. Use the existing F32 upper bound until a mixed-store estimator
-	// exists; independent capacity admission can explicitly override the fit gate.
+	// Backed, non-streaming Vulkan Q4_K uses mixed packed/Q8/F32 storage. Other
+	// backed Q4_K paths keep the historical F32 upper bound; streaming owns a
+	// different lifecycle and remains on that conservative path too.
 	convertedDense := *f.q4k && be != nil
+	vulkanMixed := convertedDense && *f.backendName == "vulkan" && !streamQ4KEnabled(f)
 	return ggufload.PreflightInput{
-		Path:     *f.gguf,
-		OpenErr:  err,
-		Source:   ws,
-		Backend:  be,
-		Headroom: modelbenchDeviceHeadroom,
-		Lean:     *f.lean && !convertedDense,
-		Q4K:      *f.q4k && !convertedDense,
+		Path:           *f.gguf,
+		OpenErr:        err,
+		Source:         ws,
+		Backend:        be,
+		Headroom:       modelbenchDeviceHeadroom,
+		Lean:           *f.lean && !convertedDense,
+		Q4K:            *f.q4k && !convertedDense,
+		VulkanMixedQ4K: vulkanMixed,
 	}
 }
 
