@@ -26,6 +26,8 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 	model := fs.String("model", "", "explicit upstream model")
 	baseURL := fs.String("base-url", "", "explicit upstream endpoint (required)")
 	keyEnv := fs.String("api-key-env", "", "environment variable holding upstream key")
+	codexAuth := fs.Bool("codex-auth", false, "explicitly reuse a Codex-managed ChatGPT login read-only; Codex owns renewal")
+	codexHome := fs.String("codex-home", "", "Codex credential home for --codex-auth (default: existing discovery)")
 	promptFile := fs.String("prompt-file", "", "UTF-8 task file")
 	receiptPath := fs.String("receipt", "", "metadata-only execution receipt")
 	policy := fs.String("policy", "", "native capability floor policy file")
@@ -53,6 +55,14 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 	case "openai", "openai-responses", "astra", "anthropic", "gemini", "xai":
 	default:
 		fmt.Fprintln(stderr, "ops run native: unsupported provider wire")
+		return 2
+	}
+	if *codexHome != "" && !*codexAuth {
+		fmt.Fprintln(stderr, "ops run native: --codex-home requires --codex-auth")
+		return 2
+	}
+	if *codexAuth && (*provider != "openai-responses" || strings.TrimRight(*baseURL, "/") != guardCodexChatGPTBackendBaseURL || *keyEnv != "") {
+		fmt.Fprintf(stderr, "ops run native: --codex-auth requires --provider openai-responses, --base-url %s and no API key environment\n", guardCodexChatGPTBackendBaseURL)
 		return 2
 	}
 	prompt, err := os.ReadFile(*promptFile)
@@ -95,6 +105,12 @@ func runOpsNative(stdout, stderr io.Writer, args []string) int {
 	for _, pair := range [][2]string{{"--policy", *policy}, {"--code-workspace", *workspace}, {"--effort", *effort}} {
 		if pair[1] != "" {
 			argv = append(argv, pair[0], pair[1])
+		}
+	}
+	if *codexAuth {
+		argv = append(argv, "--codex-auth")
+		if *codexHome != "" {
+			argv = append(argv, "--codex-home", *codexHome)
 		}
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), terminatingSignals()...)
