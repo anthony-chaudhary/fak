@@ -52,15 +52,59 @@ func (e *BusyError) Unwrap() error { return ErrBusy }
 // ErrTimeout is returned by Acquire when Timeout elapses before the lease is free.
 var ErrTimeout = errors.New("gpulease: timed out waiting for the lease")
 
+// Mode specifies the admission mode for a GPU lease.
+type Mode int
+
+const (
+	// ModeExclusive requires sole ownership of the machine-wide lease (default).
+	ModeExclusive Mode = iota
+	// ModeShared permits concurrent inspection while excluding GPU-heavy callers.
+	ModeShared
+)
+
+func (m Mode) String() string {
+	switch m {
+	case ModeShared:
+		return "shared"
+	default:
+		return "exclusive"
+	}
+}
+
 // Lease is a held machine-wide GPU lease. Release frees it; the OS also drops the
 // underlying flock if the process exits without calling Release.
 type Lease struct {
-	f    *os.File
-	path string
+	f      *os.File
+	path   string
+	shared bool
 }
 
-// Options configures Acquire.
+// Mode returns the lease admission mode (ModeExclusive or ModeShared).
+func (l *Lease) Mode() Mode {
+	if l == nil || !l.shared {
+		return ModeExclusive
+	}
+	return ModeShared
+}
+
+// Shared reports whether the lease is held in shared inspection mode.
+func (l *Lease) Shared() bool {
+	if l == nil {
+		return false
+	}
+	return l.shared
+}
+
+// Options configures Acquire and AcquireShared.
 type Options struct {
+	// Mode specifies exclusive or shared admission. If ModeShared is specified,
+	// shared admission is used. Defaults to ModeExclusive.
+	Mode Mode
+	// Shared permits concurrent inspections while excluding GPU-heavy callers.
+	// False preserves exclusive admission. True is equivalent to Mode: ModeShared.
+	// Every participant must use the same lockfile on the hardware host; this is
+	// not a distributed network lease.
+	Shared bool
 	// Path is the lockfile. Empty means $FAK_GPU_LEASE, else <tmp>/fak-gpu.lease.
 	Path string
 	// NoWait makes Acquire fail with ErrBusy immediately instead of waiting.
@@ -80,6 +124,17 @@ func DefaultPath() string {
 		return p
 	}
 	return filepath.Join(os.TempDir(), "fak-gpu.lease")
+}
+
+// AcquireShared takes the machine-wide GPU lease in shared inspection mode.
+// By default it blocks until the lease is free of exclusive holders, allowing
+// concurrent readers to share the lock while excluding GPU-heavy workloads.
+// With Options.NoWait it returns ErrBusy immediately when an exclusive holder
+// owns the lease.
+func AcquireShared(opts Options) (*Lease, error) {
+	opts.Mode = ModeShared
+	opts.Shared = true
+	return Acquire(opts)
 }
 
 // Acquire takes the machine-wide GPU lease. By default it blocks until the lease is
@@ -110,30 +165,38 @@ func Acquire(opts Options) (*Lease, error) {
 		deadline = time.Now().Add(opts.Timeout)
 	}
 	waited := false
+	isShared := opts.Shared || opts.Mode == ModeShared
+	lock := flock.TryLock
+	if isShared {
+		lock = flock.TryLockShared
+	}
 	for {
-		err := flock.TryLock(f)
+		err := lock(f)
 		if err == nil {
 			// Record our pid so a future waiter can name the holder (best-effort).
 			// Write-THEN-truncate (not truncate-then-write): a concurrent waiter's
 			// holderPID read must never catch a zero-length window between the two.
-			rec := []byte(strconv.Itoa(os.Getpid()) + "\n")
-			if _, werr := f.WriteAt(rec, 0); werr == nil {
-				_ = f.Truncate(int64(len(rec)))
+			// Readers cannot name one owner or race writes to shared metadata.
+			if !isShared {
+				rec := []byte(strconv.Itoa(os.Getpid()) + "\n")
+				if _, werr := f.WriteAt(rec, 0); werr == nil {
+					_ = f.Truncate(int64(len(rec)))
+				}
 			}
-			return &Lease{f: f, path: path}, nil
+			return &Lease{f: f, path: path, shared: isShared}, nil
 		}
 		if !errors.Is(err, flock.ErrLockBusy) {
 			f.Close()
 			return nil, fmt.Errorf("gpulease: lock %s: %w", path, err)
 		}
 		if opts.NoWait {
-			pid := readHolderPID(f)
+			pid := busyHolderPID(f)
 			f.Close()
 			return nil, &BusyError{Path: path, PID: pid}
 		}
 		if !waited {
 			waited = true
-			logf("gpulease: GPU busy (held by %s); waiting for %s", holderPID(f), path)
+			logf("gpulease: GPU busy (held by %s); waiting for %s", formatHolderPID(busyHolderPID(f)), path)
 		}
 		// Sleep until the next poll, but never past the deadline (otherwise a Timeout
 		// shorter than poll would overshoot by most of a poll interval).
@@ -152,10 +215,27 @@ func Acquire(opts Options) (*Lease, error) {
 	}
 }
 
+// busyHolderPID probes shared admission after a failed lock attempt. If readers
+// hold the file, there is no single owner and any exclusive PID is stale. This
+// never breaks a live lock; the transient shared probe uses the same descriptor
+// on which admission failed, and is released immediately.
+func busyHolderPID(f *os.File) int {
+	if err := flock.TryLockShared(f); err == nil {
+		_ = flock.Unlock(f)
+		return 0
+	}
+	return readHolderPID(f)
+}
+
 // Release frees the lease. Safe to call once; subsequent calls are no-ops.
 func (l *Lease) Release() {
 	if l == nil || l.f == nil {
 		return
+	}
+	if !l.shared {
+		// Clear exclusive-owner metadata before readers can enter. Never truncate
+		// the file: on Windows that can overlap the mandatory lock byte.
+		_, _ = l.f.WriteAt([]byte("0\n"), 0)
 	}
 	_ = flock.Unlock(l.f)
 	_ = l.f.Close()

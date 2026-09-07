@@ -2,10 +2,10 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
 #extension GL_EXT_shader_8bit_storage : require
 
-// Single-token Q8_0 matmul. Eight outputs share a workgroup, with 32 lanes
+// Multi-token Q8_0 matmul. Eight outputs share a workgroup, with 32 lanes
 // computing whole integer blocks per output. The output owner accumulates
 // scaled blocks in the scalar kernel's original block/window order.
-// A separate pipeline leaves the prefill shader and its resource use unchanged.
+// Dispatch is two-dimensional: output groups on x, token rows on y.
 layout(local_size_x = 256) in;
 const uint BLOCK = 32u;
 const uint SHARED_CAP = 2048u;
@@ -29,7 +29,10 @@ int8_t q8round(float x) {
 }
 
 void main() {
-    if (pc.P != 1) return;
+    uint tokenRow = gl_WorkGroupID.y;
+    if (tokenRow >= uint(pc.P)) return;
+    uint inputBase = tokenRow * uint(pc.inDim);
+    uint outputBase = tokenRow * uint(pc.outDim);
     uint tid = gl_LocalInvocationID.x;
     uint lane = tid % BLOCK;
     uint row = tid / BLOCK;
@@ -45,12 +48,12 @@ void main() {
             uint gbase = (wb + b) * BLOCK;
             float amax = 0.0;
             for (uint i = 0u; i < BLOCK; ++i)
-                amax = max(amax, abs(X[gbase + i]));
+                amax = max(amax, abs(X[inputBase + gbase + i]));
             float d = amax / 127.0;
             Xs[b] = d;
             float inv = d > 0.0 ? 1.0 / d : 0.0;
             for (uint i = 0u; i < BLOCK; ++i)
-                Xq[base + i] = d > 0.0 ? q8round(X[gbase + i] * inv) : int8_t(0);
+                Xq[base + i] = d > 0.0 ? q8round(X[inputBase + gbase + i] * inv) : int8_t(0);
         }
         barrier();
 
@@ -78,5 +81,5 @@ void main() {
         barrier();
     }
     if (lane == 0u && outputRow < uint(pc.outDim))
-        Y[outputRow] = acc;
+        Y[outputBase + outputRow] = acc;
 }

@@ -50,9 +50,29 @@ func TestModelbenchMixedQuantBackendLoadAndForward(t *testing.T) {
 	if in.Source != nil {
 		defer in.Source.Close()
 	}
-	if in.Lean || in.Q4K {
-		t.Fatal("HAL conversion fit must use the conservative F32 upper bound")
+	if in.Lean || in.Q4K || !in.VulkanMixedQ4K {
+		t.Fatal("Vulkan mixed-quant load must select the mixed Q4_K/Q2_K/Q8 preflight plan")
 	}
+	pf := ggufload.BuildModelPreflight(in)
+	if pf.Refused() {
+		t.Fatalf("mixed-quant preflight refused fixture: %s", pf.Reason)
+	}
+	if pf.EstReadBytes <= 0 || pf.EstHostResidentBytes <= 0 || pf.EstDeviceResidentBytes <= 0 || pf.EstLoadStagingBytes <= 0 {
+		t.Fatalf("mixed-quant preflight omitted classed demand: %+v", pf)
+	}
+	if want := pf.EstHostResidentBytes + pf.EstDeviceResidentBytes + pf.EstLoadStagingBytes; pf.EstLoadBytes != want {
+		t.Fatalf("mixed-quant total = %d, want host %d + device %d + staging %d = %d",
+			pf.EstLoadBytes, pf.EstHostResidentBytes, pf.EstDeviceResidentBytes, pf.EstLoadStagingBytes, want)
+	}
+	*f.streamQ4K = true
+	streamIn := preflightInputFor(f, be)
+	if streamIn.Source != nil {
+		defer streamIn.Source.Close()
+	}
+	if streamIn.Lean || streamIn.Q4K || streamIn.VulkanMixedQ4K {
+		t.Fatal("streaming Vulkan Q4_K must retain the conservative F32 preflight path")
+	}
+	*f.streamQ4K = false
 	_, precision, report := describeEngine(f, be, nil)
 	if precision != "resident Q4_K/Q2_K + unsupported dense formats converted to Q8" || report["dense_non_q4k_load"] == nil {
 		t.Fatal("HAL conversion is missing from execution identity")

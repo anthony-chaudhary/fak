@@ -193,6 +193,7 @@ type rawRepOutput struct {
 	firstSampleDur  time.Duration
 	decodeDur       time.Duration
 	teardownDur     time.Duration
+	cpuVerifyDur    time.Duration
 	prefillOutputID int
 	stepTokens      []int
 	generatedTokens []int
@@ -203,7 +204,7 @@ type rawRepOutput struct {
 }
 
 // executeRawDecode runs raw greedy decode across reps, returning the structured report map.
-func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS float64, be compute.Backend, registeredBackends []string) (map[string]any, error) {
+func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, quantMS float64, be compute.Backend, registeredBackends []string) (map[string]any, error) {
 	if err := validateRawDecodeFlags(f); err != nil {
 		return nil, err
 	}
@@ -252,20 +253,18 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS fl
 	for r := 0; r < reps; r++ {
 		t0 := time.Now()
 		s := newBenchSession(m, f, be)
-		sessionSetupDur := time.Since(t0)
-
 		t1 := time.Now()
+		sessionSetupDur := t1.Sub(t0)
 		prefillLogits := s.Prefill(promptIDs)
-		prefillDur := time.Since(t1)
+		t2 := time.Now()
+		prefillDur := t2.Sub(t1)
 
 		if !allFinite(prefillLogits) {
 			s.Close()
 			return nil, errors.New("raw decode: prefill produced non-finite logits")
 		}
 
-		t2 := time.Now()
 		top1Idx, top1, top2 := logitTop2(prefillLogits)
-		firstSampleDur := time.Since(t2)
 
 		prefillOutputID := top1Idx
 		stepsInfo := []rawStepInfo{
@@ -279,7 +278,14 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS fl
 		}
 		generatedTokens := []int{prefillOutputID}
 		stepTokens := make([]int, 0, requestedSteps-1)
-		deviceStepLogits := make([][]float32, 0, requestedSteps-1)
+		// Quantized sessions reuse their output buffers. Keep snapshots only when
+		// CPU replay needs them after later calls and candidate teardown.
+		var verifyPrefillLogits []float32
+		var deviceStepLogits [][]float32
+		if verifyCPU {
+			verifyPrefillLogits = append([]float32(nil), prefillLogits...)
+			deviceStepLogits = make([][]float32, 0, requestedSteps-1)
+		}
 
 		eosStopped := false
 		if isEOS(prefillOutputID) && !ignoreEOS {
@@ -287,6 +293,9 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS fl
 		}
 
 		t3 := time.Now()
+		// This boundary is shared with prefill and decode: finite checks, first
+		// token evidence, optional snapshot and bookkeeping stay in the interval.
+		firstSampleDur := t3.Sub(t2)
 		if !eosStopped && requestedSteps > 1 {
 			prevTok := prefillOutputID
 			for step := 1; step < requestedSteps; step++ {
@@ -301,7 +310,9 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS fl
 				tokIdx, sTop1, sTop2 := logitTop2(stepLogits)
 				stepTokens = append(stepTokens, tokIdx)
 				generatedTokens = append(generatedTokens, tokIdx)
-				deviceStepLogits = append(deviceStepLogits, stepLogits)
+				if verifyCPU {
+					deviceStepLogits = append(deviceStepLogits, append([]float32(nil), stepLogits...))
+				}
 				stepsInfo = append(stepsInfo, rawStepInfo{
 					Step:    step,
 					TokenID: tokIdx,
@@ -316,13 +327,14 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS fl
 				}
 			}
 		}
-		decodeDur := time.Since(t3)
-
 		t4 := time.Now()
+		decodeDur := t4.Sub(t3)
 		s.Close()
-		teardownDur := time.Since(t4)
+		t5 := time.Now()
+		teardownDur := t5.Sub(t4)
 
 		var cpuVerify *cpuVerifyResult
+		var cpuVerifyDur time.Duration
 		if verifyCPU {
 			cpuSession := m.NewSession()
 			if f != nil {
@@ -342,8 +354,8 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS fl
 				return nil, errors.New("raw verify cpu: CPU prefill produced non-finite logits")
 			}
 			cpuArgmax := mathx.ArgmaxF32(cpuPrefillLogits)
-			cos0 := cosineF32(prefillLogits, cpuPrefillLogits)
-			maxDelta0 := maxAbsDelta(prefillLogits, cpuPrefillLogits)
+			cos0 := cosineF32(verifyPrefillLogits, cpuPrefillLogits)
+			maxDelta0 := maxAbsDelta(verifyPrefillLogits, cpuPrefillLogits)
 			agree0 := (prefillOutputID == cpuArgmax)
 
 			minCos := cos0
@@ -403,6 +415,8 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS fl
 			if !allAgree {
 				return nil, fmt.Errorf("raw decode CPU verification failed: argmax divergence between device and CPU reference")
 			}
+			// Includes fresh CPU session setup, replay, comparisons and Close.
+			cpuVerifyDur = time.Since(t5)
 		}
 
 		hostStages := []map[string]any{
@@ -412,6 +426,9 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS fl
 			{"stage": "decode", "duration_ms": float64(decodeDur.Nanoseconds()) / 1e6},
 			{"stage": "teardown", "duration_ms": float64(teardownDur.Nanoseconds()) / 1e6},
 		}
+		if verifyCPU {
+			hostStages = append(hostStages, map[string]any{"stage": "verify_cpu", "duration_ms": float64(cpuVerifyDur.Nanoseconds()) / 1e6})
+		}
 
 		repOutputs = append(repOutputs, rawRepOutput{
 			sessionSetupDur: sessionSetupDur,
@@ -419,6 +436,7 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS fl
 			firstSampleDur:  firstSampleDur,
 			decodeDur:       decodeDur,
 			teardownDur:     teardownDur,
+			cpuVerifyDur:    cpuVerifyDur,
 			prefillOutputID: prefillOutputID,
 			stepTokens:      stepTokens,
 			generatedTokens: generatedTokens,
@@ -439,6 +457,7 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS fl
 	firstSampleDurs := make([]time.Duration, reps)
 	decodeDurs := make([]time.Duration, reps)
 	teardownDurs := make([]time.Duration, reps)
+	cpuVerifyDurs := make([]time.Duration, reps)
 	totalDurs := make([]time.Duration, reps)
 
 	for i, ro := range repOutputs {
@@ -447,16 +466,19 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS fl
 		firstSampleDurs[i] = ro.firstSampleDur
 		decodeDurs[i] = ro.decodeDur
 		teardownDurs[i] = ro.teardownDur
-		totalDurs[i] = ro.sessionSetupDur + ro.prefillDur + ro.firstSampleDur + ro.decodeDur + ro.teardownDur
+		cpuVerifyDurs[i] = ro.cpuVerifyDur
+		totalDurs[i] = ro.sessionSetupDur + ro.prefillDur + ro.firstSampleDur + ro.decodeDur + ro.teardownDur + ro.cpuVerifyDur
 	}
 
 	timings := map[string]any{
 		"load_ms":          loadMS,
+		"quant_ms":         quantMS,
 		"session_setup_ms": medianMS(setupDurs),
 		"prefill_ms":       medianMS(prefillDurs),
 		"first_sample_ms":  medianMS(firstSampleDurs),
 		"decode_ms":        medianMS(decodeDurs),
 		"teardown_ms":      medianMS(teardownDurs),
+		"verify_cpu_ms":    medianMS(cpuVerifyDurs),
 		"total_ms":         medianMS(totalDurs),
 	}
 
@@ -475,10 +497,14 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS fl
 				"first_sample_ms":  float64(ro.firstSampleDur.Nanoseconds()) / 1e6,
 				"decode_ms":        float64(ro.decodeDur.Nanoseconds()) / 1e6,
 				"teardown_ms":      float64(ro.teardownDur.Nanoseconds()) / 1e6,
-				"total_ms":         float64((ro.sessionSetupDur + ro.prefillDur + ro.firstSampleDur + ro.decodeDur + ro.teardownDur).Nanoseconds()) / 1e6,
+				"verify_cpu_ms":    float64(ro.cpuVerifyDur.Nanoseconds()) / 1e6,
+				"total_ms":         float64((ro.sessionSetupDur + ro.prefillDur + ro.firstSampleDur + ro.decodeDur + ro.teardownDur + ro.cpuVerifyDur).Nanoseconds()) / 1e6,
 			},
 			"steps":       ro.stepsInfo,
 			"host_stages": ro.hostStages,
+		}
+		if ro.cpuVerify != nil {
+			runs[i]["verify_cpu"] = ro.cpuVerify
 		}
 	}
 
@@ -524,6 +550,7 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS fl
 		"eos_stopped":             rep0.eosStopped,
 		"finite_logits":           true,
 		"timings":                 timings,
+		"timing_scope":            "load_ms and quant_ms occur once; per-repetition total_ms covers candidate setup through teardown plus optional CPU verification, excluding report assembly",
 		"steps":                   rep0.stepsInfo,
 		"margin_summary":          marginSummary,
 		"host_stages":             rep0.hostStages,
@@ -550,8 +577,8 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS fl
 }
 
 // runRawDecode performs raw greedy decode and writes the resulting JSON report.
-func runRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS float64, be compute.Backend, registeredBackends []string) error {
-	report, err := executeRawDecode(f, m, modelName, loadMS, be, registeredBackends)
+func runRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, quantMS float64, be compute.Backend, registeredBackends []string) error {
+	report, err := executeRawDecode(f, m, modelName, loadMS, quantMS, be, registeredBackends)
 	if err != nil {
 		return err
 	}

@@ -3,9 +3,13 @@ package ggufload
 import (
 	"errors"
 	"fmt"
+	"math"
+	"os"
+	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // preflight.go — the FAIL-FAST, header-only pre-check that lets a benchmark or test loop
@@ -63,6 +67,10 @@ type PreflightInput struct {
 	Lean           bool
 	Q4K            bool
 	OffloadExperts bool
+	// VulkanMixedQ4K selects the backed Vulkan -q4k loader's actual storage policy:
+	// eligible Q4_K/Q2_K matrices remain packed while unsupported dense formats make
+	// the bounded f32 -> Q8 round trip.
+	VulkanMixedQ4K bool
 
 	// AssumedGiBPerSec drives the ROUGH ETA; 0 uses defaultAssumedGiBPerSec.
 	AssumedGiBPerSec float64
@@ -71,18 +79,24 @@ type PreflightInput struct {
 // ModelPreflight is the header-only readiness artifact: a verdict plus the cheap facts an
 // operator (or a smoke arm) needs to decide whether to pay the full load.
 type ModelPreflight struct {
-	Schema           string  `json:"schema"`
-	Path             string  `json:"path,omitempty"`
-	Verdict          string  `json:"verdict"`
-	Arch             string  `json:"arch,omitempty"`
-	TensorCount      int     `json:"tensor_count,omitempty"`
-	EstLoadBytes     int64   `json:"est_load_bytes,omitempty"`
-	EstLoadGiB       float64 `json:"est_load_gib,omitempty"`
-	FitState         string  `json:"fit_state"`
-	DeviceAvailBytes int64   `json:"device_avail_bytes,omitempty"`
-	ETASecondsEst    float64 `json:"eta_seconds_est,omitempty"` // bytes / assumed GiB/s — an ESTIMATE, never witnessed
-	Reason           string  `json:"reason,omitempty"`
-	NextAction       string  `json:"next_action,omitempty"`
+	Schema                 string  `json:"schema"`
+	Path                   string  `json:"path,omitempty"`
+	Verdict                string  `json:"verdict"`
+	Arch                   string  `json:"arch,omitempty"`
+	TensorCount            int     `json:"tensor_count,omitempty"`
+	EstLoadBytes           int64   `json:"est_load_bytes,omitempty"`
+	EstLoadGiB             float64 `json:"est_load_gib,omitempty"`
+	EstReadBytes           int64   `json:"est_read_bytes,omitempty"`
+	EstHostResidentBytes   int64   `json:"est_host_resident_bytes,omitempty"`
+	EstDeviceResidentBytes int64   `json:"est_device_resident_bytes,omitempty"`
+	EstLoadStagingBytes    int64   `json:"est_load_staging_bytes,omitempty"`
+	FitState               string  `json:"fit_state"`
+	FitScope               string  `json:"fit_scope,omitempty"`
+	DeviceAvailBytes       int64   `json:"device_avail_bytes,omitempty"`
+	HostAvailBytes         int64   `json:"host_avail_bytes,omitempty"`
+	ETASecondsEst          float64 `json:"eta_seconds_est,omitempty"` // bytes / assumed GiB/s — an ESTIMATE, never witnessed
+	Reason                 string  `json:"reason,omitempty"`
+	NextAction             string  `json:"next_action,omitempty"`
 }
 
 // Refused reports whether the verdict is any REFUSE_* (the caller exits non-zero on true).
@@ -121,26 +135,41 @@ func BuildModelPreflight(in PreflightInput) ModelPreflight {
 	out.Arch = cfg.ModelType
 	out.TensorCount = len(in.Source.File.Tensors)
 
-	// Rung 3: estimate the load bytes off the header (the make/append the loader will demand).
-	estBytes, estErr := estimateLoadBytesFor(in)
+	// Rung 3: estimate the simultaneous load demands off the header. Ordinary regimes keep
+	// their historical single-demand estimate; Vulkan mixed Q4_K additionally separates the
+	// retained host store, device copy, and bounded worker staging peak.
+	est, estErr := estimateLoadFor(in)
 	if estErr != nil {
 		out.Verdict = PreflightRefuseHeader
 		out.Reason = estErr.Error()
 		out.NextAction = "the tensor directory could not be sized from the header; the checkpoint may be malformed"
 		return out
 	}
-	out.EstLoadBytes = estBytes
-	out.EstLoadGiB = float64(estBytes) / (1 << 30)
-	out.ETASecondsEst = etaSeconds(out.EstLoadGiB, in.AssumedGiBPerSec)
+	out.EstLoadBytes = est.plan.Total()
+	out.EstLoadGiB = float64(out.EstLoadBytes) / (1 << 30)
+	out.EstReadBytes = est.readBytes
+	out.EstHostResidentBytes = est.hostResidentBytes
+	out.EstDeviceResidentBytes = est.deviceResidentBytes
+	out.EstLoadStagingBytes = est.stagingBytes
+	etaGiB := out.EstLoadGiB
+	if est.readBytes > 0 {
+		etaGiB = float64(est.readBytes) / (1 << 30)
+	}
+	out.ETASecondsEst = etaSeconds(etaGiB, in.AssumedGiBPerSec)
 
 	// Rung 4: the device-fit check (fail-open). REFUSE only when a capacity-reporting backend
 	// KNOWS the model exceeds its ceiling.
-	if fitErr := fitOnDeviceFor(in); fitErr != nil {
+	if fitErr := compute.RefuseMemoryPlanIfTooBig(in.Backend, est.plan, in.Headroom); fitErr != nil {
 		var fe *compute.FitError
 		if errors.As(fitErr, &fe) {
 			out.Verdict = PreflightRefuseTooBig
 			out.FitState = FitTooBigState
-			out.DeviceAvailBytes = fe.Avail
+			out.FitScope = string(fe.Scope)
+			if fe.Scope == compute.MemoryScopeHost {
+				out.HostAvailBytes = fe.Avail
+			} else {
+				out.DeviceAvailBytes = fe.Avail
+			}
 			out.Reason = fe.Error()
 			out.NextAction = "this model does not fit the named device; use a bigger device, --cpu-offload-experts, a smaller quant, or omit -backend to run on the portable floor"
 			return out
@@ -153,9 +182,10 @@ func BuildModelPreflight(in PreflightInput) ModelPreflight {
 	}
 
 	out.Verdict = PreflightReady
-	if deviceProbes(in.Backend) {
+	if memoryPlanProbes(in.Backend, est.plan) {
 		out.FitState = FitOK
 		out.DeviceAvailBytes = deviceAvailBytes(in.Backend, in.Headroom)
+		out.HostAvailBytes = hostAvailBytes(in.Backend, in.Headroom)
 	} else {
 		out.FitState = FitUnknown
 	}
@@ -163,53 +193,306 @@ func BuildModelPreflight(in PreflightInput) ModelPreflight {
 	return out
 }
 
-// estimateLoadBytesFor selects the byte estimate matching the load regime, mirroring loadModel's
-// dispatch: lean/q4k read the raw quantized payload; --cpu-offload-experts sums the offload plan;
-// the default GGUF path dequantizes to f32 resident.
-func estimateLoadBytesFor(in PreflightInput) (int64, error) {
+type preflightEstimate struct {
+	plan                compute.MemoryPlan
+	readBytes           int64
+	hostResidentBytes   int64
+	deviceResidentBytes int64
+	stagingBytes        int64
+}
+
+// estimateLoadFor selects the memory plan matching loadModel's dispatch. The Vulkan mixed
+// regime is the only multi-pool plan; all older regimes retain their prior plan and total.
+func estimateLoadFor(in PreflightInput) (preflightEstimate, error) {
+	var plan compute.MemoryPlan
+	var err error
 	switch {
+	case in.VulkanMixedQ4K:
+		return estimateVulkanMixedQ4K(in.Source)
 	case in.OffloadExperts:
-		plan, err := in.Source.EstimateCPUOffloadExpertsMemoryPlan()
+		plan, err = in.Source.EstimateCPUOffloadExpertsMemoryPlan()
+	case in.Lean || in.Q4K:
+		plan, err = in.Source.EstimateLoadMemoryPlan()
+	default:
+		plan, err = in.Source.EstimateF32LoadMemoryPlan()
+	}
+	if err != nil {
+		return preflightEstimate{}, err
+	}
+	return preflightEstimate{
+		plan:                plan,
+		readBytes:           plan.Total(),
+		hostResidentBytes:   plan.HostTotal(),
+		deviceResidentBytes: plan.DeviceTotal(),
+	}, nil
+}
+
+// estimateVulkanMixedQ4K mirrors modelbench's dense Vulkan loader: eligible Q4_K and Q2_K
+// matmul weights remain packed, while unsupported formats are dequantized, canonicalized,
+// and stored as Q8 or f32. The header-only plan conservatively includes page-aligned host
+// backing, the device copy, and the largest W raw+two-f32 worker windows. W is loadWorkers(),
+// the exact runtime concurrency including FAK_GGUF_LOAD_WORKERS. Split/MoE/unknown layouts
+// fail closed until they share their exact transform and sharding contract with this estimator.
+func estimateVulkanMixedQ4K(s *WeightSource) (preflightEstimate, error) {
+	if s == nil || s.File == nil {
+		return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate has no weight source")
+	}
+	if len(s.readerFor) > 0 || len(s.closers) > 1 {
+		return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate does not yet support split checkpoints")
+	}
+	cfg, err := s.File.Config()
+	if err != nil {
+		return preflightEstimate{}, err
+	}
+	if cfg.IsMoE() {
+		return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate does not yet support MoE tensor splitting")
+	}
+
+	var readBytes, hostPacked, hostQ8, hostF32Logical, deviceBytes int64
+	staging := make([]int64, 0, len(s.File.Tensors))
+	for _, info := range s.File.Tensors {
+		payload, err := tensorPayloadBytes(info)
 		if err != nil {
-			return 0, err
+			return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate tensor %s: %w", info.Name, err)
 		}
-		return plan.Total(), nil
-	case in.Lean || in.Q4K:
-		return in.Source.EstimateLoadBytes()
-	default:
-		return in.Source.EstimateF32LoadBytes()
+		payloadBytes, err := checkedEstimateUint64(payload, "payload", info.Name)
+		if err != nil {
+			return preflightEstimate{}, err
+		}
+		if readBytes, err = checkedEstimateAdd(readBytes, payloadBytes, "read bytes"); err != nil {
+			return preflightEstimate{}, err
+		}
+
+		canon, ok := CanonicalTensorNameArch(info.Name, cfg.ModelType)
+		if !ok {
+			return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate has no canonical mapping for tensor %s", info.Name)
+		}
+		shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
+		if err != nil {
+			return preflightEstimate{}, err
+		}
+		elems, err := tensorElems(info)
+		if err != nil {
+			return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate tensor %s: %w", info.Name, err)
+		}
+		f32Bytes, err := checkedEstimateMulUint64(elems, 4, "f32 bytes", info.Name)
+		if err != nil {
+			return preflightEstimate{}, err
+		}
+
+		retained := (info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon)) ||
+			(info.Type == TensorQ2_K && model.ResidentKQuantEligible(cfg, canon))
+		if retained {
+			alloc, err := conservativePageAllocation(payloadBytes)
+			if err != nil {
+				return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate tensor %s: %w", info.Name, err)
+			}
+			if hostPacked, err = checkedEstimateAdd(hostPacked, alloc, "host packed bytes"); err != nil {
+				return preflightEstimate{}, err
+			}
+			if deviceBytes, err = checkedEstimateAdd(deviceBytes, payloadBytes, "device packed bytes"); err != nil {
+				return preflightEstimate{}, err
+			}
+			staging = append(staging, payloadBytes)
+			continue
+		}
+
+		stage, err := checkedEstimateAdd(payloadBytes, f32Bytes, "load staging bytes")
+		if err == nil {
+			stage, err = checkedEstimateAdd(stage, f32Bytes, "load staging bytes")
+		}
+		if err != nil {
+			return preflightEstimate{}, err
+		}
+		staging = append(staging, stage)
+
+		q8Weight := model.IsQuantWeight(canon) && len(shape) == 2
+		tiedEmbedding := cfg.TieWordEmbeddings && canon == "model.embed_tokens.weight" && len(shape) == 2
+		if q8Weight || tiedEmbedding {
+			q8Logical, q8Host, err := estimateQ8Allocation(info.Name, shape)
+			if err != nil {
+				return preflightEstimate{}, err
+			}
+			if hostQ8, err = checkedEstimateAdd(hostQ8, q8Host, "host Q8 bytes"); err != nil {
+				return preflightEstimate{}, err
+			}
+			if deviceBytes, err = checkedEstimateAdd(deviceBytes, q8Logical, "device Q8 bytes"); err != nil {
+				return preflightEstimate{}, err
+			}
+		}
+		if !q8Weight || tiedEmbedding {
+			if hostF32Logical, err = checkedEstimateAdd(hostF32Logical, f32Bytes, "host f32 bytes"); err != nil {
+				return preflightEstimate{}, err
+			}
+			// These tensors remain in the builder's F32 store and may be materialized as
+			// F32 by the backed session. A tied embedding needs this copy and its Q8 head.
+			if deviceBytes, err = checkedEstimateAdd(deviceBytes, f32Bytes, "device f32 bytes"); err != nil {
+				return preflightEstimate{}, err
+			}
+		}
 	}
+
+	hostF32Reserved, err := checkedEstimateAdd(hostF32Logical, hostF32Logical, "host f32 growth reserve")
+	if err != nil {
+		return preflightEstimate{}, err
+	}
+	hostResident, err := checkedEstimateAdd(hostPacked, hostQ8, "host resident bytes")
+	if err == nil {
+		hostResident, err = checkedEstimateAdd(hostResident, hostF32Reserved, "host resident bytes")
+	}
+	if err != nil {
+		return preflightEstimate{}, err
+	}
+
+	sort.Slice(staging, func(i, j int) bool { return staging[i] > staging[j] })
+	workers := loadWorkers()
+	if workers > len(staging) {
+		workers = len(staging)
+	}
+	var stagingBytes int64
+	for _, n := range staging[:workers] {
+		if stagingBytes, err = checkedEstimateAdd(stagingBytes, n, "load staging bytes"); err != nil {
+			return preflightEstimate{}, err
+		}
+	}
+
+	plan := make(compute.MemoryPlan, 0, 3)
+	if deviceBytes > 0 {
+		plan = append(plan, compute.MemoryDemand{Class: compute.MemoryWeights, Scope: compute.MemoryScopeDevice, Bytes: deviceBytes, Detail: "gguf-vulkan-mixed-device-resident", DType: "mixed"})
+	}
+	if hostResident > 0 {
+		plan = append(plan, compute.MemoryDemand{Class: compute.MemoryWeights, Scope: compute.MemoryScopeHost, Bytes: hostResident, Detail: "gguf-vulkan-mixed-host-resident", DType: "mixed"})
+	}
+	if stagingBytes > 0 {
+		plan = append(plan, compute.MemoryDemand{Class: compute.MemoryScratchpad, Scope: compute.MemoryScopeHost, Bytes: stagingBytes, Detail: fmt.Sprintf("gguf-vulkan-mixed-load-staging-w%d", workers), DType: compute.F32.String()})
+	}
+	return preflightEstimate{
+		plan:                plan,
+		readBytes:           readBytes,
+		hostResidentBytes:   hostResident,
+		deviceResidentBytes: deviceBytes,
+		stagingBytes:        stagingBytes,
+	}, nil
 }
 
-// fitOnDeviceFor runs the device-fit refusal matching the load regime. Each underlying
-// Fit*OnDevice is fail-open (nil for an unprobeable/nil backend), so this returns nil unless a
-// capacity-reporting backend knows the model is too big.
-func fitOnDeviceFor(in PreflightInput) error {
-	switch {
-	case in.OffloadExperts:
-		return in.Source.FitCPUOffloadExpertsOnDevice(in.Backend, in.Headroom)
-	case in.Lean || in.Q4K:
-		return in.Source.FitOnDevice(in.Backend, in.Headroom)
-	default:
-		return in.Source.FitF32OnDevice(in.Backend, in.Headroom)
+func estimateQ8Allocation(name string, shape []int) (logical, host int64, err error) {
+	if len(shape) != 2 || shape[0] <= 0 || shape[1] <= 0 || shape[1]%32 != 0 {
+		return 0, 0, fmt.Errorf("gguf: mixed Vulkan estimate tensor %s has unsupported Q8 shape %v", name, shape)
 	}
+	codes, err := checkedEstimateMul(int64(shape[0]), int64(shape[1]), "Q8 code bytes")
+	if err != nil {
+		return 0, 0, err
+	}
+	scales, err := checkedEstimateMul(int64(shape[0]), int64(shape[1]/32), "Q8 scale count")
+	if err == nil {
+		scales, err = checkedEstimateMul(scales, 4, "Q8 scale bytes")
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	logical, err = checkedEstimateAdd(codes, scales, "Q8 logical bytes")
+	if err != nil {
+		return 0, 0, err
+	}
+	codeAlloc, err := conservativePageAllocation(codes)
+	if err != nil {
+		return 0, 0, err
+	}
+	scaleAlloc, err := conservativePageAllocation(scales)
+	if err != nil {
+		return 0, 0, err
+	}
+	host, err = checkedEstimateAdd(codeAlloc, scaleAlloc, "Q8 host allocation")
+	return logical, host, err
 }
 
-// deviceProbes reports whether the backend can report its capacity (so FIT_OK is meaningful).
-// A nil or non-probing backend cannot, so the fit state stays FIT_UNKNOWN.
-func deviceProbes(be compute.Backend) bool {
-	_, _, known := compute.DeviceMemoryInfo(be)
-	return known
+func conservativePageAllocation(n int64) (int64, error) {
+	if n <= 0 {
+		return 0, nil
+	}
+	page := int64(os.Getpagesize())
+	if page <= 1 {
+		return n, nil
+	}
+	if n > math.MaxInt64-(page-1) {
+		return 0, fmt.Errorf("page-rounded allocation overflows int64")
+	}
+	pages := (n + page - 1) / page
+	if pages > math.MaxInt64/page {
+		return 0, fmt.Errorf("page-rounded allocation overflows int64")
+	}
+	rounded := pages * page
+	return checkedEstimateAdd(rounded, page, "page-aligned allocation")
+}
+
+func checkedEstimateUint64(n uint64, what, name string) (int64, error) {
+	if n > math.MaxInt64 {
+		return 0, fmt.Errorf("gguf: mixed Vulkan estimate %s for tensor %s overflows int64", what, name)
+	}
+	return int64(n), nil
+}
+
+func checkedEstimateMulUint64(a, b uint64, what, name string) (int64, error) {
+	if a != 0 && b > math.MaxUint64/a {
+		return 0, fmt.Errorf("gguf: mixed Vulkan estimate %s for tensor %s overflows uint64", what, name)
+	}
+	return checkedEstimateUint64(a*b, what, name)
+}
+
+func checkedEstimateMul(a, b int64, what string) (int64, error) {
+	if a < 0 || b < 0 || (a != 0 && b > math.MaxInt64/a) {
+		return 0, fmt.Errorf("gguf: mixed Vulkan estimate %s overflows int64", what)
+	}
+	return a * b, nil
+}
+
+func checkedEstimateAdd(a, b int64, what string) (int64, error) {
+	if a < 0 || b < 0 || a > math.MaxInt64-b {
+		return 0, fmt.Errorf("gguf: mixed Vulkan estimate %s overflows int64", what)
+	}
+	return a + b, nil
+}
+
+// memoryPlanProbes requires every non-empty scope to have a real capacity source. A missing
+// host probe for a mixed plan remains READY/FIT_UNKNOWN (fail open), never falsely FIT_OK.
+func memoryPlanProbes(be compute.Backend, plan compute.MemoryPlan) bool {
+	if plan.DeviceTotal() > 0 {
+		if _, _, known := compute.DeviceMemoryInfo(be); !known {
+			return false
+		}
+	}
+	if plan.HostTotal() > 0 {
+		if _, _, known := compute.HostMemoryInfo(be); !known {
+			return false
+		}
+	}
+	return len(plan) > 0
 }
 
 // deviceAvailBytes reports the backend's known free device bytes for the READY/FIT_OK report,
 // 0 when the backend cannot probe.
 func deviceAvailBytes(be compute.Backend, headroom float64) int64 {
-	_, free, known := compute.DeviceMemoryInfo(be)
+	total, free, known := compute.DeviceMemoryInfo(be)
 	if !known {
 		return 0
 	}
-	return free
+	if free < 0 {
+		free = total
+	}
+	return compute.BudgetAfterHeadroom(free, headroom)
+}
+
+// hostAvailBytes reports the backend's headroom-adjusted host-memory budget for the
+// READY/FIT_OK report, or 0 when the backend cannot probe it.
+func hostAvailBytes(be compute.Backend, headroom float64) int64 {
+	total, free, known := compute.HostMemoryInfo(be)
+	if !known {
+		return 0
+	}
+	if free < 0 {
+		free = total
+	}
+	return compute.BudgetAfterHeadroom(free, headroom)
 }
 
 // etaSeconds is the ROUGH load-time estimate: GiB / assumed GiB-per-second. It is always an
@@ -245,12 +528,26 @@ func (p ModelPreflight) Render() string {
 		fmt.Fprintf(&b, "  arch:   %s (%d tensors)\n", p.Arch, p.TensorCount)
 	}
 	if p.EstLoadBytes > 0 {
-		fmt.Fprintf(&b, "  load:   ~%.2f GiB estimated, ~%.0fs ETA (estimate: %.2f GiB / %.2f GiB/s)\n",
-			p.EstLoadGiB, p.ETASecondsEst, p.EstLoadGiB, gibPerSecFromETA(p.EstLoadGiB, p.ETASecondsEst))
+		etaGiB := p.EstLoadGiB
+		if p.EstReadBytes > 0 {
+			etaGiB = float64(p.EstReadBytes) / (1 << 30)
+		}
+		fmt.Fprintf(&b, "  load:   ~%.2f GiB peak estimated, ~%.0fs ETA (estimate: %.2f GiB read / %.2f GiB/s)\n",
+			p.EstLoadGiB, p.ETASecondsEst, etaGiB, gibPerSecFromETA(etaGiB, p.ETASecondsEst))
+		if p.EstHostResidentBytes > 0 || p.EstDeviceResidentBytes > 0 || p.EstLoadStagingBytes > 0 {
+			fmt.Fprintf(&b, "  memory: ~%.2f GiB host resident + ~%.2f GiB device resident + ~%.2f GiB load staging\n",
+				float64(p.EstHostResidentBytes)/(1<<30), float64(p.EstDeviceResidentBytes)/(1<<30), float64(p.EstLoadStagingBytes)/(1<<30))
+		}
 	}
 	fmt.Fprintf(&b, "  fit:    %s", p.FitState)
+	if p.FitScope != "" {
+		fmt.Fprintf(&b, " (%s)", p.FitScope)
+	}
 	if p.DeviceAvailBytes > 0 {
-		fmt.Fprintf(&b, " (device has ~%.2f GiB free)", float64(p.DeviceAvailBytes)/(1<<30))
+		fmt.Fprintf(&b, " (device budget ~%.2f GiB)", float64(p.DeviceAvailBytes)/(1<<30))
+	}
+	if p.HostAvailBytes > 0 {
+		fmt.Fprintf(&b, " (host budget ~%.2f GiB)", float64(p.HostAvailBytes)/(1<<30))
 	}
 	b.WriteString("\n")
 	if p.Reason != "" {
