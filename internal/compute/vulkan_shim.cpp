@@ -684,8 +684,8 @@ void recycleDescriptorSet(DescriptorSetRecord rec) {
     if (rec.set) g_descSetPool[rec.layout].push_back(rec);
 }
 
-// dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX workgroups.
-void dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX) {
+// dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX*groupsY workgroups.
+void dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1) {
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
                 k.nbuf, MAX_DISPATCH_BUFS);
@@ -736,7 +736,7 @@ void dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
         vkCmdBindDescriptorSets(g_batchCmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.layout, 0, 1, &rec.set, 0, nullptr);
         if (pcsize > 0) vkCmdPushConstants(g_batchCmd, k.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pcsize, pc);
         dpDispatch(k);
-        vkCmdDispatch(g_batchCmd, groupsX, 1, 1);
+        vkCmdDispatch(g_batchCmd, groupsX, groupsY, 1);
         g_batchSets.push_back(rec);
         ++g_batchOps;
         return;
@@ -748,7 +748,7 @@ void dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.layout, 0, 1, &rec.set, 0, nullptr);
     if (pcsize > 0) vkCmdPushConstants(cmd, k.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pcsize, pc);
     dpDispatch(k);
-    vkCmdDispatch(cmd, groupsX, 1, 1);
+    vkCmdDispatch(cmd, groupsX, groupsY, 1);
     dpOneShot(g_dp.oneShotCompute);
     endSubmitWait(cmd);
     recycleDescriptorSet(rec);
@@ -1118,10 +1118,10 @@ void fvk_q8_matmul_f32(const void* dWcodes, const void* dWscale, const void* dX,
     }
     struct { int outDim, inDim, P; } pc{out, in, P};
     Buffer* bufs[4] = {B((void*)dWcodes), B((void*)dWscale), B((void*)dX), B(dY)};
-    uint32_t outputsPerGroup = P == 1 ? 8u : 256u;
+    uint32_t outputsPerGroup = 8u;
     uint32_t outGroups = ((uint32_t)out + outputsPerGroup - 1u) / outputsPerGroup;
-    Kernel& kernel = g_kern[P == 1 ? K_Q8_MATMUL_DECODE : K_Q8_MATMUL];
-    dispatch(kernel, bufs, &pc, sizeof(pc), (uint32_t)P * outGroups);
+    Kernel& kernel = g_kern[K_Q8_MATMUL_DECODE];
+    dispatch(kernel, bufs, &pc, sizeof(pc), outGroups, (uint32_t)P);
 }
 
 void fvk_q8_matmul2_f32(const void* dW0codes, const void* dW0scale,
