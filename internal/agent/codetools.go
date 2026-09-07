@@ -100,6 +100,8 @@ type CodeToolsOptions struct {
 	ExtraDirs            []string
 	EnableContextControl bool
 	ExactAllowedCommands []string
+	EnableQuestion       bool
+	QuestionResolver     QuestionResolver
 }
 
 // ArmCodeToolsWithOptions arms coding tools with optional fine-grained skills control.
@@ -119,6 +121,14 @@ func ArmCodeToolsWithOptions(opts CodeToolsOptions) ([]ToolDef, error) {
 			return nil, err
 		}
 		defs = append(defs, ccDefs...)
+	}
+	if opts.EnableQuestion {
+		r := opts.QuestionResolver
+		if r == nil {
+			r = &FallbackResolver{}
+		}
+		ArmQuestionTool(r)
+		defs = append(defs, QuestionToolCatalog()...)
 	}
 	return defs, nil
 }
@@ -156,16 +166,20 @@ func DisarmCodeTools() {
 	armedCodeTools.Store(nil)
 	armedSkills.Store(nil)
 	DisarmContextControl()
+	DisarmQuestionTool()
 }
 
 // CodeToolCatalog renders the coding tools as loop ToolDefs. Empty when unarmed, so
 // a caller can splice it into a catalog unconditionally.
 func CodeToolCatalog() []ToolDef {
 	if armedCodeTools.Load() == nil {
+		if armedQuestion.Load() != nil {
+			return QuestionToolCatalog()
+		}
 		return nil
 	}
 	defs := codetools.Catalog()
-	out := make([]ToolDef, 0, len(defs)+2)
+	out := make([]ToolDef, 0, len(defs)+3)
 	for _, d := range defs {
 		out = append(out, ToolDef{Type: "function", Function: ToolDefFunction{
 			Name:        d.Name,
@@ -179,6 +193,9 @@ func CodeToolCatalog() []ToolDef {
 	if armedContextControl.Load() != nil {
 		out = append(out, ContextControlCatalog()...)
 	}
+	if armedQuestion.Load() != nil {
+		out = append(out, QuestionToolCatalog()...)
+	}
 	return out
 }
 
@@ -187,6 +204,11 @@ func CodeToolCatalog() []ToolDef {
 // is what keeps the catalog's read-only bit and the cache key from drifting apart: one
 // source of truth for "does this tool mutate", consulted by both.
 func codeToolMeta(tool string) map[string]string {
+	if tool == ToolQuestion && armedQuestion.Load() != nil {
+		if m, ok := questionMeta(tool); ok {
+			return m
+		}
+	}
 	if armedCodeTools.Load() == nil {
 		return nil
 	}
@@ -213,9 +235,12 @@ func codeToolMeta(tool string) map[string]string {
 // into the loop's adjudicator policy. Empty when unarmed.
 func codeToolAllow() []string {
 	if armedCodeTools.Load() == nil {
+		if armedQuestion.Load() != nil {
+			return []string{ToolQuestion}
+		}
 		return nil
 	}
-	names := make([]string, 0, len(codetools.Catalog())+2)
+	names := make([]string, 0, len(codetools.Catalog())+3)
 	for _, d := range codetools.Catalog() {
 		names = append(names, d.Name)
 	}
@@ -224,6 +249,9 @@ func codeToolAllow() []string {
 	}
 	if armedContextControl.Load() != nil {
 		names = append(names, ToolContextControl)
+	}
+	if armedQuestion.Load() != nil {
+		names = append(names, ToolQuestion)
 	}
 	return names
 }
