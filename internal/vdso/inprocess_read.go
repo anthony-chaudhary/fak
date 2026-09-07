@@ -61,6 +61,7 @@ type ShellReadSpec struct {
 	Tail        bool             `json:"tail,omitempty"`
 	NameOnly    bool             `json:"name_only,omitempty"`
 	HasLines    bool             `json:"has_lines,omitempty"`
+	PathType    string           `json:"path_type,omitempty"`
 	SubSpecs    []*ShellReadSpec `json:"sub_specs,omitempty"`
 	Connectors  []string         `json:"connectors,omitempty"`
 }
@@ -334,6 +335,9 @@ func parseSingleShellRead(cmd string) (*ShellReadSpec, bool) {
 	case "get-childitem", "gci", "dir":
 		args := splitPowerShellTokens(cmd)
 		return parseGetChildItemCommand(args)
+	case "test-path":
+		args := splitPowerShellTokens(cmd)
+		return parseTestPathCommand(args)
 	default:
 		return nil, false
 	}
@@ -754,6 +758,53 @@ func parseGetChildItemCommand(args []string) (*ShellReadSpec, bool) {
 	return spec, true
 }
 
+func parseTestPathCommand(args []string) (*ShellReadSpec, bool) {
+	spec := &ShellReadSpec{Op: "test-path"}
+	var paths []string
+
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "-") {
+			lower := strings.ToLower(arg)
+			flagName, flagVal, hasColon := strings.Cut(lower, ":")
+			switch flagName {
+			case "-path", "-literalpath":
+				var p string
+				if hasColon {
+					p = flagVal
+				} else if i+1 < len(args) {
+					i++
+					p = args[i]
+				} else {
+					return nil, false
+				}
+				paths = append(paths, p)
+			case "-pathtype":
+				var t string
+				if hasColon {
+					t = flagVal
+				} else if i+1 < len(args) {
+					i++
+					t = args[i]
+				} else {
+					return nil, false
+				}
+				spec.PathType = strings.ToLower(t)
+			default:
+				return nil, false
+			}
+		} else {
+			paths = append(paths, arg)
+		}
+	}
+
+	if len(paths) != 1 || paths[0] == "" {
+		return nil, false
+	}
+	spec.FilePath = paths[0]
+	return spec, true
+}
+
 func isAllDigits(s string) bool {
 	if s == "" {
 		return false
@@ -808,6 +859,35 @@ func ExecuteInProcessRead(spec *ShellReadSpec, workDir string) ShellReadResult {
 
 	if spec.Op == "get-childitem" {
 		return executeGetChildItem(spec, workDir)
+	}
+
+	if spec.Op == "test-path" {
+		targetPath := spec.FilePath
+		if !filepath.IsAbs(targetPath) && workDir != "" {
+			targetPath = filepath.Join(workDir, targetPath)
+		}
+		targetPath = filepath.Clean(targetPath)
+		fi, err := os.Stat(targetPath)
+		if err != nil {
+			return ShellReadResult{
+				Stdout:   "False\n",
+				ExitCode: 0,
+			}
+		}
+		switch spec.PathType {
+		case "leaf":
+			if !fi.IsDir() {
+				return ShellReadResult{Stdout: "True\n", ExitCode: 0}
+			}
+			return ShellReadResult{Stdout: "False\n", ExitCode: 0}
+		case "container":
+			if fi.IsDir() {
+				return ShellReadResult{Stdout: "True\n", ExitCode: 0}
+			}
+			return ShellReadResult{Stdout: "False\n", ExitCode: 0}
+		default:
+			return ShellReadResult{Stdout: "True\n", ExitCode: 0}
+		}
 	}
 
 	targetPath := spec.FilePath

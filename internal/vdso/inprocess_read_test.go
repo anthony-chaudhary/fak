@@ -90,6 +90,18 @@ func TestParseShellRead(t *testing.T) {
 		{"dir -Name", "get-childitem", ".", 0, false, false, true, true},
 		{"dir C:\\test", "get-childitem", "C:\\test", 0, false, false, false, true},
 
+		// Test-Path tests
+		{"Test-Path file.txt", "test-path", "file.txt", 0, false, false, false, true},
+		{"Test-Path \"file with space.txt\"", "test-path", "file with space.txt", 0, false, false, false, true},
+		{"Test-Path -Path file.txt", "test-path", "file.txt", 0, false, false, false, true},
+		{"Test-Path -LiteralPath 'C:\\work\\fak\\file.txt'", "test-path", `C:\work\fak\file.txt`, 0, false, false, false, true},
+		{"Test-Path -Path:file.txt", "test-path", "file.txt", 0, false, false, false, true},
+		{"Test-Path -LiteralPath:file.txt", "test-path", "file.txt", 0, false, false, false, true},
+		{"Test-Path -Path dir -PathType Container", "test-path", "dir", 0, false, false, false, true},
+		{"Test-Path -Path file.txt -PathType Leaf", "test-path", "file.txt", 0, false, false, false, true},
+		{"Test-Path", "", "", 0, false, false, false, false},
+		{"Test-Path -UnknownFlag file.txt", "", "", 0, false, false, false, false},
+
 		// Disallowed / chaining / redirection tests
 		{"cat file.txt > out.txt", "", "", 0, false, false, false, false},
 		{"cat file.txt | grep foo", "", "", 0, false, false, false, false},
@@ -354,6 +366,41 @@ func TestExecuteInProcessRead(t *testing.T) {
 		}
 		if res.Stdout != "" {
 			t.Fatalf("expected empty stdout for empty dir name only, got: %q", res.Stdout)
+		}
+	})
+
+	t.Run("test-path existing file", func(t *testing.T) {
+		res := ExecuteInProcessRead(&ShellReadSpec{Op: "test-path", FilePath: filePath}, "")
+		if res.ExitCode != 0 {
+			t.Fatalf("test-path failed: %v", res.Stderr)
+		}
+		if res.Stdout != "True\n" {
+			t.Fatalf("expected True\\n, got %q", res.Stdout)
+		}
+	})
+
+	t.Run("test-path non-existent file", func(t *testing.T) {
+		res := ExecuteInProcessRead(&ShellReadSpec{Op: "test-path", FilePath: filepath.Join(dir, "nonexistent.txt")}, "")
+		if res.ExitCode != 0 {
+			t.Fatalf("test-path non-existent failed with error exit: %v", res.Stderr)
+		}
+		if res.Stdout != "False\n" {
+			t.Fatalf("expected False\\n, got %q", res.Stdout)
+		}
+	})
+
+	t.Run("test-path with pathtype", func(t *testing.T) {
+		resLeaf := ExecuteInProcessRead(&ShellReadSpec{Op: "test-path", FilePath: filePath, PathType: "leaf"}, "")
+		if resLeaf.Stdout != "True\n" {
+			t.Fatalf("expected leaf True, got %q", resLeaf.Stdout)
+		}
+		resContainer := ExecuteInProcessRead(&ShellReadSpec{Op: "test-path", FilePath: filePath, PathType: "container"}, "")
+		if resContainer.Stdout != "False\n" {
+			t.Fatalf("expected container False for file, got %q", resContainer.Stdout)
+		}
+		resDirContainer := ExecuteInProcessRead(&ShellReadSpec{Op: "test-path", FilePath: dir, PathType: "container"}, "")
+		if resDirContainer.Stdout != "True\n" {
+			t.Fatalf("expected container True for dir, got %q", resDirContainer.Stdout)
 		}
 	})
 
