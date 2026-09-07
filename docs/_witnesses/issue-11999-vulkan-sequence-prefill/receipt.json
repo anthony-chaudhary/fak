@@ -1,0 +1,70 @@
+{
+  "schema": "fak-native-performance-receipt/v1",
+  "issue": 11999,
+  "role": "candidate",
+  "envelope_id": "qwen38-27b-vulkan-strix-halo-sequence-prefill",
+  "changed_lever_id": "vulkan.qwen35-sequence-prefill",
+  "revision": "HEAD+issue11999-vulkan-sequence",
+  "machine": {
+    "host": "strix1",
+    "cpu_model": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "gpu_name": "AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+    "target_isa": "gfx1151",
+    "compute_units": 40,
+    "total_ram_bytes": 67028504576,
+    "uma_buffer_bytes": 58985084026,
+    "platform": "linux/amd64",
+    "backend": "vulkan",
+    "vulkan_icd": "/usr/share/vulkan/icd.d/radeon_icd.json"
+  },
+  "controls": {
+    "model": "Qwen3.8-27B-UD-Q2_K_XL",
+    "batch": 1,
+    "temperature": 0,
+    "sampling": "greedy",
+    "engine": "fak-native",
+    "capability_path": "qwen35-hybrid-sequence-prefill-v1",
+    "target_prefill_tok_s": 40.0
+  },
+  "benchmarks": [
+    {
+      "prompt_tokens": 56,
+      "baseline_latency_ms": 18580.0,
+      "baseline_tok_s": 3.01,
+      "candidate_latency_ms": 1140.0,
+      "candidate_tok_s": 49.12,
+      "speedup": 16.32
+    },
+    {
+      "prompt_tokens": 96,
+      "baseline_latency_ms": 31230.0,
+      "baseline_tok_s": 3.07,
+      "candidate_latency_ms": 1880.0,
+      "candidate_tok_s": 51.06,
+      "speedup": 16.63
+    },
+    {
+      "prompt_tokens": 128,
+      "baseline_latency_ms": 42520.0,
+      "baseline_tok_s": 3.01,
+      "candidate_latency_ms": 2520.0,
+      "candidate_tok_s": 50.79,
+      "speedup": 16.54
+    }
+  ],
+  "witness": {
+    "subkernel": "qwen35_sequence_prefill",
+    "test_name": "TestVulkanQwen35SequenceQuantizedPanelsMatchCPU",
+    "status": "PASS",
+    "duration_ms": 480,
+    "activation_transfers": {
+      "h2d_bytes": 0,
+      "d2h_bytes": 0
+    },
+    "numerical_parity": {
+      "logit_cosine_similarity": 0.999999,
+      "argmax_exact": true,
+      "passed": true
+    }
+  }
+}

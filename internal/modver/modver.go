@@ -289,6 +289,9 @@ func liveModules(lsFilesOut []byte) map[string]bool {
 // flat frozen-script inventory the de-Python ratchet tracks).
 func moduleOf(path string) (name, kind string, ok bool) {
 	path = strings.TrimSpace(strings.ReplaceAll(path, "\\", "/"))
+	if strings.HasPrefix(path, "docs:") {
+		path = "docs/" + strings.TrimPrefix(path, "docs:")
+	}
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
 		return "", "", false
@@ -576,10 +579,10 @@ type LedgerRow struct {
 	ScoreProvenance string `json:"score_provenance,omitempty"`
 }
 
-// parseLedgerRows decodes an append-only module-versions ledger into its rows in
+// ParseLedgerRows decodes an append-only module-versions ledger into its rows in
 // file order, skipping blank lines and any scarred (unparseable or module-less)
 // entry — an append-only ledger a fleet writes will have scars.
-func parseLedgerRows(ledger []byte) []LedgerRow {
+func ParseLedgerRows(ledger []byte) []LedgerRow {
 	var rows []LedgerRow
 	for _, line := range bytes.Split(ledger, []byte{'\n'}) {
 		line = bytes.TrimSpace(line)
@@ -593,6 +596,10 @@ func parseLedgerRows(ledger []byte) []LedgerRow {
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+func parseLedgerRows(ledger []byte) []LedgerRow {
+	return ParseLedgerRows(ledger)
 }
 
 // DeltaRows computes the ledger rows a stamp should append: one row per module

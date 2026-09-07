@@ -596,6 +596,7 @@ func runDoctorTelemetry(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak doctor telemetry", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dbFlag := fs.String("db", "", "path to SQLite DB (default: auto-discover opencode.db)")
+	reclaim := fs.Bool("reclaim", false, "reclaim SQLite freelist pages via VACUUM compaction")
 	promptTokens := fs.Int("prompt-tokens", 0, "observed prompt tokens in turn")
 	baselineTokens := fs.Int("baseline-tokens", 0, "baseline prompt tokens")
 	var latencies float64SliceFlag
@@ -615,7 +616,32 @@ func runDoctorTelemetry(stdout, stderr io.Writer, argv []string) int {
 		dbPath = discoverOpencodeDB()
 	}
 
+	var reclaimedFreelist string
+	var reclaimRes *trajectory.DatabaseReclaimResult
+	if *reclaim && dbPath != "" {
+		beforeBytes, afterBytes, beforeFreelist, afterFreelist, err := trajectory.ReclaimDatabaseFreelist(dbPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak doctor telemetry: freelist reclaim failed: %v\n", err)
+			return 1
+		}
+		reclaimedFreelist = fmt.Sprintf("before=%d (%d pages), after=%d (%d pages), freed=%d", beforeBytes, beforeFreelist, afterBytes, afterFreelist, beforeBytes-afterBytes)
+		reclaimRes = &trajectory.DatabaseReclaimResult{
+			BeforeBytes:    beforeBytes,
+			AfterBytes:     afterBytes,
+			BeforeFreelist: beforeFreelist,
+			AfterFreelist:  afterFreelist,
+			FreedBytes:     beforeBytes - afterBytes,
+		}
+		if !*asJSON {
+			fmt.Fprintf(stdout, "reclaimed freelist: %s\n", reclaimedFreelist)
+		}
+	}
+
 	report := trajectory.EvaluateTelemetryHealth(*promptTokens, *baselineTokens, latencies, dbPath)
+	if reclaimedFreelist != "" {
+		report.ReclaimedFreelist = reclaimedFreelist
+		report.Reclaim = reclaimRes
+	}
 
 	return renderJSONOrHuman(stdout, *asJSON, report, writeDoctorTelemetryHuman, report.Findings > 0)
 }

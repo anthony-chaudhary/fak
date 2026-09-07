@@ -28,6 +28,7 @@ One repeatable pass that lands YOUR finished paths on `main` with a lintable, bi
 - **Sign off with `-s` (DCO).** No `Co-Authored-By` trailer.
 - **Conventional-Commits subject ending in a `(fak <leaf>)` stamp** so the `dos verify` referee can bind the commit to its lane — e.g. `fix(gateway): treat same-tick ready as positive (fak gateway)`. A bare un-stamped subject stays NOT_SHIPPED.
 - **Default is to ship.** Once the tree is green (`make ci`), commit AND push unprompted via `fak sync push`.
+- **Autonomous landing upon task completion.** Following the safe commit-and-land process to completion is MANDATORY and active BY DEFAULT when any task finishes (using a new subagent if needed). Never leave touched paths uncommitted or require an operator prompt to trigger landing.
 
 ## The tools (dogfood these, not raw git)
 

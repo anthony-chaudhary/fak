@@ -28,8 +28,9 @@ const (
 const AuditSchema = "fak-trajectory-audit/1"
 
 const (
-	AuditSourceClaude = "claude"
-	AuditSourceCodex  = "codex"
+	AuditSourceClaude   = "claude"
+	AuditSourceCodex    = "codex"
+	AuditSourceOpencode = "opencode"
 )
 
 // AuditSource is one supported harness transcript root. RootLabel is safe to
@@ -318,7 +319,7 @@ type AuditResult struct {
 	Partial           bool                  `json:"partial,omitempty"`
 }
 
-// DefaultAuditSources discovers the two supported harness homes.
+// DefaultAuditSources discovers the supported harness homes.
 func DefaultAuditSources() []AuditSource {
 	home, _ := os.UserHomeDir()
 	claudeHome := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR"))
@@ -329,9 +330,18 @@ func DefaultAuditSources() []AuditSource {
 	if codexHome == "" {
 		codexHome = filepath.Join(home, ".codex")
 	}
+	opencodeHome := strings.TrimSpace(os.Getenv("OPENCODE_HOME"))
+	if opencodeHome == "" {
+		if xdg := strings.TrimSpace(os.Getenv("XDG_DATA_HOME")); xdg != "" {
+			opencodeHome = filepath.Join(xdg, "opencode")
+		} else {
+			opencodeHome = filepath.Join(home, ".local", "share", "opencode")
+		}
+	}
 	return []AuditSource{
 		{Name: AuditSourceClaude, Root: filepath.Join(claudeHome, "projects"), RootLabel: "claude/projects"},
 		{Name: AuditSourceCodex, Root: filepath.Join(codexHome, "sessions"), RootLabel: "codex/sessions"},
+		{Name: AuditSourceOpencode, Root: opencodeHome, RootLabel: "opencode/storage"},
 	}
 }
 
@@ -699,6 +709,22 @@ func doAuditSource(ctx context.Context, source AuditSource, opts AuditOptions, f
 		res.denominator.TokenSemantics = "message usage buckets are disjoint; duplicate message ids are counted once"
 	case AuditSourceCodex:
 		res.denominator.TokenSemantics = "final cumulative input per segment; only a versioned task_started boundary may begin a segment after a decrease; cached/cache-write subsets remain exact subtraction"
+	case AuditSourceOpencode:
+		res.denominator.TokenSemantics = "unsupported; OpenCode corpus discovery/storage parser is not enabled in this cross-harness report"
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
+		if strings.TrimSpace(source.Root) == "" {
+			return res, nil
+		}
+		if _, err := os.Stat(source.Root); err != nil {
+			if os.IsNotExist(err) {
+				return res, nil
+			}
+			return res, fmt.Errorf("trajectory audit: stat %s root: %w", source.Name, err)
+		}
+		res.denominator.RootPresent = true
+		return res, nil
 	default:
 		return res, fmt.Errorf("trajectory audit: source %q has no parser", source.Name)
 	}

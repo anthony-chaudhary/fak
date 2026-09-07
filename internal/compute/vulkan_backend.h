@@ -178,6 +178,25 @@ bool fvk_batch_active(void);
 /* Request retirement uses the same completion fence without counting an extra public
  * FlushBatch call when the token path already closed its batch. */
 void fvk_retire_request(void);
+/* Sticky VkResult from recording/submission/completion; nonzero poisons the
+ * device context. Reset never clears a device failure or pending batch. */
+int fvk_submission_status(void);
+void fvk_submission_reset(void);
+int fvk_batch_flush_status(void);
+/* Cumulative host transfer bytes, independent of optional profiling. */
+uint64_t fvk_h2d_bytes(void);
+uint64_t fvk_d2h_bytes(void);
+
+int fvk_qwen35_split_qg_panel_f32(const void* qg, void* q, void* gate,
+    int tokens, int nHeads, int headDim);
+int fvk_qwen35_partial_rope_panel_f32(const void* q, const void* k,
+    void* qOut, void* kOut, int tokens, int startPos, int nQHeads,
+    int nKHeads, int headDim, int rotaryDim, double theta);
+/* K/V contain prefix+tokens contiguous rows; query/output contain tokens rows. */
+int fvk_qwen35_causal_attention_panel_f32(const void* q, const void* k,
+    const void* v, void* out, int tokens, int prefix, int nHeads,
+    int nKVHeads, int headDim, float scale);
+int fvk_sigmoid_mul_f32(void* x, const void* gate, int n);
 
 int fvk_qwen35_gdn_preprojected_f32(
     const void* mixed, const void* z, const void* beta, const void* alpha,

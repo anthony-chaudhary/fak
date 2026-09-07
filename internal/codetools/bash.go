@@ -64,11 +64,11 @@ func (t *Toolset) bash(ctx context.Context, body []byte) ([]byte, bool) {
 	if r := decodeArgs(body, &a); r != nil {
 		return r.JSON(), true
 	}
-	if r := a.Validate(); r != nil {
-		return r.JSON(), true
-	}
 	if t.focusedCommands && !(focusedCommandAllowed(a.Command) || t.exactCommandAllowed(a.Command)) {
 		return refuse(CodeCommandDeny, "command is outside the focused coding allowlist").JSON(), true
+	}
+	if r := a.Validate(); r != nil {
+		return r.JSON(), true
 	}
 	cwd := t.root
 	var cwdWarning string
@@ -162,6 +162,9 @@ func focusedCommandAllowed(command string) bool {
 }
 
 func (t *Toolset) exactCommandAllowed(cmd string) bool {
+	if strings.TrimSpace(cmd) == "" {
+		return false
+	}
 	for _, allowed := range t.exactAllowedCommands {
 		if cmd == allowed {
 			return true

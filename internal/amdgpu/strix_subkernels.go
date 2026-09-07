@@ -139,6 +139,12 @@ var DefaultSubkernelSpecs = []SubkernelSpec{
 		Category:    "linear_attention",
 	},
 	{
+		Name:        "qwen35_sequence_prefill",
+		Description: "Whole-sequence Qwen3.5 hybrid prefill on Vulkan",
+		TestPattern: "^TestVulkanQwen35Sequence",
+		Category:    "prefill",
+	},
+	{
 		Name:        "f16_kv_contiguize",
 		Description: "Pre-attention f16 KV cache contiguization (eliminates LPDDR5X channel camping)",
 		TestPattern: "^TestRADVContiguizeShader$",
@@ -147,12 +153,24 @@ var DefaultSubkernelSpecs = []SubkernelSpec{
 }
 
 // RunSubkernelTests executes a set of sub-kernel test specs on the target Strix Halo machine.
+// It validates sub-kernel selectors and fails fast before attempting network or dispatch.
 func RunSubkernelTests(ctx context.Context, target *StrixTarget, selected []string) ([]StrixSubkernelResult, error) {
-	if !target.Reachable {
-		return nil, fmt.Errorf("amdgpu: target %s is not reachable", target.Host)
+	specs, err := FilterSubkernelSpecs(selected)
+	if err != nil {
+		return nil, err
+	}
+	if len(specs) == 0 {
+		return nil, fmt.Errorf("amdgpu: zero subkernels selected for execution")
 	}
 
-	specs := filterSubkernelSpecs(selected)
+	if target == nil || !target.Reachable {
+		host := "unknown"
+		if target != nil {
+			host = target.Host
+		}
+		return nil, fmt.Errorf("amdgpu: target %s is not reachable", host)
+	}
+
 	results := make([]StrixSubkernelResult, 0, len(specs))
 
 	for _, spec := range specs {
@@ -163,21 +181,71 @@ func RunSubkernelTests(ctx context.Context, target *StrixTarget, selected []stri
 	return results, nil
 }
 
-func filterSubkernelSpecs(selected []string) []SubkernelSpec {
+// FilterSubkernelSpecs resolves and filters sub-kernel specs by selector.
+// Selectors may be a sub-kernel spec name, a category name, or "all" (case-insensitive).
+// If selected is empty, all DefaultSubkernelSpecs are returned.
+// Returns an error if any selector is unknown or if no specs match.
+func FilterSubkernelSpecs(selected []string) ([]SubkernelSpec, error) {
 	if len(selected) == 0 {
-		return DefaultSubkernelSpecs
+		return DefaultSubkernelSpecs, nil
 	}
+
+	knownNames := make(map[string]bool, len(DefaultSubkernelSpecs))
+	knownCategories := make(map[string]bool)
+	for _, spec := range DefaultSubkernelSpecs {
+		knownNames[strings.ToLower(spec.Name)] = true
+		if spec.Category != "" {
+			knownCategories[strings.ToLower(spec.Category)] = true
+		}
+	}
+
 	selMap := make(map[string]bool)
-	for _, s := range selected {
-		selMap[strings.ToLower(strings.TrimSpace(s))] = true
+	var unknown []string
+	hasAll := false
+
+	for _, raw := range selected {
+		trimmed := strings.TrimSpace(raw)
+		norm := strings.ToLower(trimmed)
+		if norm == "" {
+			unknown = append(unknown, raw)
+			continue
+		}
+		if norm == "all" {
+			hasAll = true
+			selMap["all"] = true
+			continue
+		}
+		if !knownNames[norm] && !knownCategories[norm] {
+			unknown = append(unknown, raw)
+			continue
+		}
+		selMap[norm] = true
 	}
+
+	if len(unknown) > 0 {
+		return nil, fmt.Errorf("amdgpu: unknown subkernel selector(s): %s", strings.Join(unknown, ", "))
+	}
+
+	if hasAll {
+		return DefaultSubkernelSpecs, nil
+	}
+
 	var out []SubkernelSpec
 	for _, spec := range DefaultSubkernelSpecs {
-		if selMap[spec.Name] || selMap[strings.ToLower(spec.Category)] {
+		if selMap[strings.ToLower(spec.Name)] || selMap[strings.ToLower(spec.Category)] {
 			out = append(out, spec)
 		}
 	}
-	return out
+
+	if len(out) == 0 {
+		return nil, fmt.Errorf("amdgpu: no subkernel specs matched selector(s): %s", strings.Join(selected, ", "))
+	}
+
+	return out, nil
+}
+
+func filterSubkernelSpecs(selected []string) ([]SubkernelSpec, error) {
+	return FilterSubkernelSpecs(selected)
 }
 
 func executeOneSubkernel(ctx context.Context, target *StrixTarget, spec SubkernelSpec) StrixSubkernelResult {
@@ -196,7 +264,7 @@ func executeOneSubkernel(ctx context.Context, target *StrixTarget, spec Subkerne
 	// Build remote test command
 	remoteDir := os.Getenv("FAK_STRIX_DIR")
 	if remoteDir == "" {
-		remoteDir = "/home/fak/repo/fak"
+		remoteDir = "/var/lib/fak/repo"
 	}
 	testCmd := fmt.Sprintf(
 		`cd %s && FAK_VULKAN_SPIRV="$(pwd)/_scratch/vulkan-linux/spirv" FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_EXPECT_DEVICE=8060S ./_scratch/vulkan-linux/compute.test -test.run "%s" -test.v`,

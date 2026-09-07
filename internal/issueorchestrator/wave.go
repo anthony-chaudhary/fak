@@ -17,10 +17,6 @@ func PlanWaves(issues []Issue, opts WavePlanOptions) Plan {
 		waveSizeCap = 4
 	}
 
-	if opts.Limit > 0 && len(issues) > opts.Limit {
-		issues = issues[:opts.Limit]
-	}
-
 	workspace := opts.WorkspaceRoot
 	if workspace == "" {
 		workspace = "."
@@ -29,7 +25,6 @@ func PlanWaves(issues []Issue, opts WavePlanOptions) Plan {
 	plan := Plan{
 		Schema:         WavePlanSchema,
 		Workspace:      workspace,
-		TotalIssues:    len(issues),
 		WaveSizeCap:    waveSizeCap,
 		TargetIssues:   opts.TargetIssues,
 		TargetPoints:   opts.TargetPoints,
@@ -64,6 +59,16 @@ func PlanWaves(issues []Issue, opts WavePlanOptions) Plan {
 		}
 		sort.Strings(plan.HeldLanes)
 	}
+
+	if opts.AutoExpand {
+		var diag PlanDiagnostics
+		issues, diag = DynamicSlidingWindow(issues, opts, heldLanesMap, excludedIssuesMap, excludedLanesMap)
+		plan.Diagnostics = &diag
+	} else if opts.Limit > 0 && len(issues) > opts.Limit {
+		issues = issues[:opts.Limit]
+	}
+
+	plan.TotalIssues = len(issues)
 
 	graph := opts.Graph
 	if graph == nil && workspace != "" {
@@ -520,4 +525,164 @@ func parseNumberFromKey(key string) int {
 		}
 	}
 	return n
+}
+
+// DynamicSlidingWindow calculates the candidate slice to evaluate based on adaptive discovery.
+func DynamicSlidingWindow(
+	issues []Issue,
+	opts WavePlanOptions,
+	heldLanesMap map[string]bool,
+	excludedIssuesMap map[int]bool,
+	excludedLanesMap map[string]bool,
+) ([]Issue, PlanDiagnostics) {
+	if len(issues) == 0 {
+		return issues, PlanDiagnostics{}
+	}
+
+	minWindow := opts.MinWindow
+	if minWindow <= 0 {
+		minWindow = 20
+	}
+	if opts.Limit > 0 {
+		minWindow = opts.Limit
+	}
+	maxWindow := opts.MaxWindow
+	if maxWindow <= 0 {
+		maxWindow = 500
+	}
+	if minWindow > maxWindow {
+		minWindow = maxWindow
+	}
+	warnRatio := opts.UnplannableWarnRatio
+	if warnRatio <= 0 {
+		warnRatio = 0.65
+	}
+	step := opts.WaveSize * 2
+	if step <= 0 {
+		step = 8
+	}
+
+	initialWindow := minWindow
+	if opts.WaveSize*2 > initialWindow {
+		initialWindow = opts.WaveSize * 2
+	}
+	if opts.TargetIssues*2 > initialWindow {
+		initialWindow = opts.TargetIssues * 2
+	}
+	if initialWindow > maxWindow {
+		initialWindow = maxWindow
+	}
+	if initialWindow > len(issues) {
+		initialWindow = len(issues)
+	}
+
+	isCandidateDispatchable := func(iss Issue) bool {
+		if iss.Number > 0 && excludedIssuesMap[iss.Number] {
+			return false
+		}
+		laneLower := strings.ToLower(strings.TrimSpace(iss.Lane))
+		if laneLower != "" && excludedLanesMap[laneLower] {
+			return false
+		}
+		if opts.LaneFilter != "" && !strings.EqualFold(iss.Lane, opts.LaneFilter) {
+			return false
+		}
+		if isHeld(iss, heldLanesMap) {
+			return false
+		}
+		if isSubdivideTarget(iss) {
+			return false
+		}
+		if isTriageTarget(iss) {
+			return false
+		}
+		return true
+	}
+
+	currentWindow := initialWindow
+	windowExpansions := 0
+
+	for {
+		dispatchableCount := 0
+		dispatchableSteps := 0
+		seenKeysInWindow := make(map[string]bool)
+
+		for _, iss := range issues[:currentWindow] {
+			key := strings.TrimSpace(iss.Key)
+			if key != "" {
+				if seenKeysInWindow[key] {
+					continue
+				}
+				seenKeysInWindow[key] = true
+			}
+			if isCandidateDispatchable(iss) {
+				dispatchableCount++
+				dispatchableSteps += iss.ExpectedSteps
+			}
+		}
+
+		needMore := false
+		if opts.TargetIssues > 0 && dispatchableCount < opts.TargetIssues {
+			needMore = true
+		}
+		if opts.TargetPoints > 0 && dispatchableSteps < opts.TargetPoints {
+			needMore = true
+		}
+
+		if needMore && currentWindow < len(issues) && currentWindow < maxWindow {
+			nextWindow := currentWindow + step
+			if nextWindow > len(issues) {
+				nextWindow = len(issues)
+			}
+			if nextWindow > maxWindow {
+				nextWindow = maxWindow
+			}
+			if nextWindow > currentWindow {
+				currentWindow = nextWindow
+				windowExpansions++
+				continue
+			}
+		}
+		break
+	}
+
+	scanned := currentWindow
+	dispatchableCount := 0
+	nonDispatchableCount := 0
+	seenKeysInWindow := make(map[string]bool)
+
+	for _, iss := range issues[:currentWindow] {
+		key := strings.TrimSpace(iss.Key)
+		if key != "" {
+			if seenKeysInWindow[key] {
+				nonDispatchableCount++
+				continue
+			}
+			seenKeysInWindow[key] = true
+		}
+		if isCandidateDispatchable(iss) {
+			dispatchableCount++
+		} else {
+			nonDispatchableCount++
+		}
+	}
+
+	var unplannableRatio float64
+	if scanned > 0 {
+		unplannableRatio = float64(nonDispatchableCount) / float64(scanned)
+	}
+
+	diag := PlanDiagnostics{
+		ScannedCandidates:   scanned,
+		DiscoveryWindowSize: currentWindow,
+		WindowExpansions:    windowExpansions,
+		UnplannableRatio:    unplannableRatio,
+	}
+
+	if unplannableRatio > warnRatio {
+		msg := fmt.Sprintf("[advisory] high unplannable ratio: %d/%d non-dispatchable; dynamically expanded horizon to %d candidates", nonDispatchableCount, scanned, currentWindow)
+		diag.AdvisoryWarnings = append(diag.AdvisoryWarnings, msg)
+	}
+
+	return issues[:currentWindow], diag
 }

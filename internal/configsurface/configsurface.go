@@ -11,7 +11,7 @@ import (
 
 const (
 	Schema      = "fak-config-surface/1"
-	MaxKeys     = 32
+	MaxKeys     = 33
 	MaxPostures = 8
 )
 

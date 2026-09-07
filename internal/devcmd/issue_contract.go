@@ -45,6 +45,8 @@ func RunIssue(stdout, stderr io.Writer, argv []string) int {
 		return runIssueDedup(stdout, stderr, argv[1:])
 	case "finding":
 		return runIssueFinding(stdout, stderr, argv[1:])
+	case "audit-discoverability", "discoverability":
+		return runIssueDiscoverability(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		issueUsage(stdout)
 		return 0
@@ -1261,6 +1263,8 @@ func issueUsage(w io.Writer) {
                      [--live --dedupe-checked --dedupe-cap N] [--max-wave N]
   fak-dev issue fanout   --title T --leaf L --spine REF [--parent REF]
                      [--paths p1,p2] [--areas a1,a2] [--max N] [--json]
+  fak-dev issue discoverability (--title T (--body B | --body-file F) | --file F | --from-issues ISSUES.json|- | --issue N)
+                     [--repo owner/name] [--strict-born-routed] [--json]
   fak-dev issue create   --title T (--body B | --body-file F) [--labels l1,l2] [--category C --layer L]
                      [--repo owner/name] [--dry-run] [--json]
   fak-dev issue edit     --issue N [--title T] [--body B | --body-file F]
@@ -1287,6 +1291,13 @@ shared labels/paths, matched excerpts). It never writes to GitHub — the
 confirm-before-closing-as-dup discipline stands. Default reads the live backlog
 via gh; --from-issues reads a cached array (offline-safe). Exit 0 report; exit 2
 bad flags/input; exit 1 gh/encode failure.
+
+The discoverability command audits draft or existing GitHub issues against the
+wave orchestrator's discovery and admission invariants, predicting whether an
+issue will land in parallel_wave, serial_wave, subdivide_queue, or triage_queue.
+Exit 0 means all issues are dispatchable; exit 3 means one or more issues land in
+triage or subdivide queues with structured reasons and repair actions; exit 2 on
+invalid flags; exit 1 on fetch errors.
 
 The finding command is the live adapter over the pure cross-audit finding
 planner (#3857): it reads a batch of verified audit receipts (--ledger, the

@@ -480,3 +480,142 @@ func ReadTracesJSONL(r io.Reader) (*MicroTracer, error) {
 	}
 	return t, nil
 }
+
+// PerfettoTraceContainer formats trace events in the Chrome / Perfetto Trace Event format (#4262, epic #3236).
+type PerfettoTraceContainer struct {
+	DisplayTimeUnit string               `json:"displayTimeUnit"`
+	TraceEvents     []PerfettoTraceEvent `json:"traceEvents"`
+}
+
+// PerfettoTraceEvent represents a single complete event in Chrome / Perfetto Trace Event format.
+type PerfettoTraceEvent struct {
+	Name string         `json:"name"`
+	Cat  string         `json:"cat"`
+	Ph   string         `json:"ph"`
+	TS   float64        `json:"ts"`
+	Dur  float64        `json:"dur"`
+	PID  string         `json:"pid"`
+	TID  int            `json:"tid"`
+	Args map[string]any `json:"args"`
+}
+
+// toPerfettoEvents projects a sequence of MicroSpans onto Chrome Trace Events.
+func toPerfettoEvents(traceID string, spans []MicroSpan) []PerfettoTraceEvent {
+	if len(spans) == 0 {
+		return []PerfettoTraceEvent{}
+	}
+	pid := traceID
+	if pid == "" {
+		pid = "agent"
+	}
+	events := make([]PerfettoTraceEvent, 0, len(spans))
+	var currentTS float64
+	for _, s := range spans {
+		durUS := float64(s.Dur.Nanoseconds()) / 1000.0
+		if durUS < 0 {
+			durUS = 0
+		}
+		name := s.Label
+		if name == "" {
+			name = string(s.Kind)
+		}
+		if name == "" {
+			name = "span"
+		}
+		args := make(map[string]any)
+		if s.Verdict != "" {
+			args["verdict"] = s.Verdict
+		}
+		if s.Tokens != 0 {
+			args["tokens"] = s.Tokens
+		}
+		if s.Seat != "" {
+			args["seat"] = s.Seat
+		}
+		if s.Kind != "" {
+			args["kind"] = string(s.Kind)
+		}
+		if s.Label != "" {
+			args["label"] = s.Label
+		}
+		if s.Event != "" {
+			args["event"] = string(s.Event)
+		}
+		if s.SpanID != 0 {
+			args["span_id"] = s.SpanID
+		}
+		if s.Seq != 0 {
+			args["seq"] = s.Seq
+		}
+		events = append(events, PerfettoTraceEvent{
+			Name: name,
+			Cat:  "microtrace",
+			Ph:   "X",
+			TS:   currentTS,
+			Dur:  durUS,
+			PID:  pid,
+			TID:  s.Seq,
+			Args: args,
+		})
+		currentTS += durUS
+	}
+	return events
+}
+
+// Perfetto converts the trace into a PerfettoTraceContainer in Chrome Trace Event format.
+func (t *MicroTrace) Perfetto() PerfettoTraceContainer {
+	if t == nil {
+		return PerfettoTraceContainer{
+			DisplayTimeUnit: "ms",
+			TraceEvents:     []PerfettoTraceEvent{},
+		}
+	}
+	return PerfettoTraceContainer{
+		DisplayTimeUnit: "ms",
+		TraceEvents:     toPerfettoEvents(t.TraceID, t.Spans),
+	}
+}
+
+// WritePerfetto outputs the trace in Chrome Trace Event Format JSON so it can be
+// opened directly in ui.perfetto.dev or chrome://tracing (#4262, epic #3236).
+func (t *MicroTrace) WritePerfetto(w io.Writer) error {
+	if w == nil {
+		return fmt.Errorf("microtrace: nil writer")
+	}
+	container := t.Perfetto()
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(container); err != nil {
+		return fmt.Errorf("microtrace: write perfetto: %w", err)
+	}
+	return nil
+}
+
+// Perfetto converts all traces in the tracer to a single PerfettoTraceContainer.
+func (t *MicroTracer) Perfetto() PerfettoTraceContainer {
+	events := make([]PerfettoTraceEvent, 0)
+	if t != nil {
+		for _, tr := range t.Traces() {
+			events = append(events, toPerfettoEvents(tr.TraceID, tr.Spans)...)
+		}
+	}
+	return PerfettoTraceContainer{
+		DisplayTimeUnit: "ms",
+		TraceEvents:     events,
+	}
+}
+
+// WritePerfetto outputs all traces in Chrome Trace Event Format JSON, multiplexed
+// by trace id (pid) (#4262, epic #3236).
+func (t *MicroTracer) WritePerfetto(w io.Writer) error {
+	if w == nil {
+		return fmt.Errorf("microtrace: nil writer")
+	}
+	container := t.Perfetto()
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(container); err != nil {
+		return fmt.Errorf("microtrace: write perfetto: %w", err)
+	}
+	return nil
+}

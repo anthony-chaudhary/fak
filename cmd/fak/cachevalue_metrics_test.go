@@ -208,6 +208,32 @@ func TestRenderCachevalueExposition_Families(t *testing.T) {
 	}
 }
 
+func TestRenderCachevalueExposition_GeneratedAtFallback(t *testing.T) {
+	now := fixedNow(t)
+	wantUnix := now.Unix()
+
+	for _, invalidAt := range []string{"", "invalid-timestamp"} {
+		t.Run("GeneratedAt="+invalidAt, func(t *testing.T) {
+			rep := richReport()
+			rep.GeneratedAt = invalidAt
+			out := renderCachevalueExposition(rep, nil, gatewayusageledger.CompactionReport{}, now)
+
+			got := sampleLine(t, out, "fak_cachevalue_generated_timestamp_seconds", "")
+			fields := strings.Fields(got)
+			if len(fields) < 2 {
+				t.Fatalf("fak_cachevalue_generated_timestamp_seconds sample line malformed: %q", got)
+			}
+			val, err := strconv.ParseInt(fields[1], 10, 64)
+			if err != nil {
+				t.Fatalf("failed to parse generated_timestamp value as integer %q: %v", fields[1], err)
+			}
+			if val != wantUnix {
+				t.Errorf("generated_timestamp = %d, want %d (fallback to now.Unix())", val, wantUnix)
+			}
+		})
+	}
+}
+
 func TestRenderCachevalueExposition_CompactionSegments(t *testing.T) {
 	out := renderCachevalueExposition(richReport(), nil, richCompaction(), fixedNow(t))
 

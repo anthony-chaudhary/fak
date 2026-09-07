@@ -377,8 +377,14 @@ func TestBuildOpencodeChatAndFormatPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "Do not touch root files") {
 		t.Fatalf("prompt missing instructions: %s", prompt)
 	}
-	if !strings.Contains(prompt, "parallel subagents") {
-		t.Fatalf("prompt missing subagents instruction: %s", prompt)
+	if strings.Contains(prompt, "parallel subagents") {
+		t.Fatalf("prompt should not encourage nested subagent task calls: %s", prompt)
+	}
+	if !strings.Contains(prompt, "leaf worker") {
+		t.Fatalf("prompt missing leaf worker direct execution instruction: %s", prompt)
+	}
+	if !strings.Contains(prompt, "nested subagent delegation") {
+		t.Fatalf("prompt missing nested subagent delegation prohibition: %s", prompt)
 	}
 	if !strings.Contains(prompt, "gh issue comment") {
 		t.Fatalf("prompt missing gh issue comment instruction: %s", prompt)

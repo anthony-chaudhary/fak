@@ -20,6 +20,12 @@ import (
 	"time"
 )
 
+// Strix Halo cluster modes for single-node standalone vs dual-node TP=2 over USB4 RoCEv2.
+const (
+	ClusterModeStandalone = "standalone"
+	ClusterModeDualTP2    = "dual_tp2"
+)
+
 // StrixInstallerConfig configures the AMD Strix Halo installer package generation,
 // including LAN communication coordinates, fleet spine discovery parameters, and
 // Linux kernel gotcha mitigation settings.
@@ -41,6 +47,8 @@ type StrixInstallerConfig struct {
 	KVBufferGiB          int               `json:"kv_buffer_gib"`
 	FakBinaryPath        string            `json:"fak_binary_path"`
 	OutputDir            string            `json:"output_dir"`
+	ClusterMode          string            `json:"cluster_mode"`
+	ClusterPeerIP        string            `json:"cluster_peer_ip,omitempty"`
 }
 
 // StrixPackageManifest records metadata, connectivity parameters, and cryptographic
@@ -114,6 +122,8 @@ func DefaultStrixInstallerConfig() StrixInstallerConfig {
 		KVBufferGiB:          4,
 		FakBinaryPath:        "/usr/local/bin/fak",
 		OutputDir:            "fak-strix-halo-pkg",
+		ClusterMode:          ClusterModeStandalone,
+		ClusterPeerIP:        "",
 	}
 }
 
@@ -179,6 +189,14 @@ func GenerateStrixInstallerPackage(cfg StrixInstallerConfig) (*StrixPackage, err
 	if cfg.OutputDir == "" {
 		cfg.OutputDir = "fak-strix-halo-pkg"
 	}
+	if cfg.ClusterMode == "" {
+		cfg.ClusterMode = ClusterModeStandalone
+	} else if cfg.ClusterMode != ClusterModeStandalone && cfg.ClusterMode != ClusterModeDualTP2 {
+		return nil, fmt.Errorf("amdgpu: unsupported cluster mode %q (must be %q or %q)", cfg.ClusterMode, ClusterModeStandalone, ClusterModeDualTP2)
+	}
+	if cfg.ClusterMode == ClusterModeDualTP2 && cfg.ClusterPeerIP == "" {
+		cfg.ClusterPeerIP = "169.254.1.2"
+	}
 
 	var (
 		ttmPages string
@@ -234,6 +252,10 @@ FAK_HTTP_WRITE_TIMEOUT_S=1800
 	files["conf/strix-halo.env"] = []byte(envContent)
 
 	// 2. conf/fak-serve.service
+	clusterFlags := ""
+	if cfg.ClusterMode == ClusterModeDualTP2 {
+		clusterFlags = fmt.Sprintf(" --tp 2 --cluster-peer %s", cfg.ClusterPeerIP)
+	}
 	serveService := fmt.Sprintf(`[Unit]
 Description=fak Agent Kernel Gateway & Inference Service (Strix Halo)
 After=network.target fak-strix-governor.service
@@ -243,7 +265,7 @@ Wants=fak-strix-governor.service
 Type=simple
 EnvironmentFile=/etc/fak/strix-halo.env
 UnsetEnvironment=GGML_CUDA_ENABLE_UNIFIED_MEMORY HSA_OVERRIDE_GFX_VERSION
-ExecStart=%s serve --provider openai --base-url http://127.0.0.1:%d/v1 --model %s --addr 0.0.0.0:%d --policy /etc/fak/policy.json --require-key-env FAK_GATEWAY_KEY
+ExecStart=%s serve%s --provider openai --base-url http://127.0.0.1:%d/v1 --model %s --addr 0.0.0.0:%d --policy /etc/fak/policy.json --require-key-env FAK_GATEWAY_KEY
 Restart=always
 RestartSec=5s
 LimitNOFILE=65536
@@ -252,6 +274,7 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 `,
 		cfg.FakBinaryPath,
+		clusterFlags,
 		cfg.ModelPort,
 		cfg.ModelID,
 		cfg.Port,
@@ -417,6 +440,69 @@ fi
 	)
 	files["scripts/setup-firewall.sh"] = []byte(setupFirewall)
 
+	// 6.5 scripts/setup-usb4-rdma.sh (dual_tp2 mode)
+	if cfg.ClusterMode == ClusterModeDualTP2 {
+		localIP := "169.254.1.1"
+		if cfg.ClusterPeerIP == "169.254.1.1" {
+			localIP = "169.254.1.2"
+		}
+		setupUsb4Rdma := fmt.Sprintf(`#!/usr/bin/env bash
+# USB4 RoCEv2 and NHI interrupt moderation setup for dual Strix Halo TP=2
+set -euo pipefail
+
+if [[ $EUID -ne 0 ]]; then
+  echo "Error: setup-usb4-rdma.sh must be run as root" >&2
+  exit 1
+fi
+
+PEER_IP="%s"
+LOCAL_IP="%s"
+IFACE="${USB4_IFACE:-thunderbolt0}"
+
+echo "=== Configuring USB4 RoCEv2 for Strix Halo TP=2 (Peer: ${PEER_IP}) ==="
+
+# 1. Configure USB4 NHI Interrupt Moderation to 8 us (register 0x38c00, value 32)
+echo "--> Programming USB4 NHI interrupt moderation (8 us, register 0x38c00, value 32)..."
+for pci in /sys/bus/pci/devices/*; do
+  if [[ -f "$pci/class" ]]; then
+    pci_class=$(cat "$pci/class")
+    # USB4 / Thunderbolt NHI class code is 0x0c0340
+    if [[ "$pci_class" == "0x0c0340"* ]]; then
+      echo "    Setting 8 us interrupt moderation (value 32) on USB4 controller at $pci (register 0x38c00)"
+      if [[ -f "$pci/nhi_interrupt_moderation" ]]; then
+        echo "32" > "$pci/nhi_interrupt_moderation"
+      fi
+    fi
+  done
+fi
+
+# 2. Configure Point-to-Point IPv4 Link-Local Interface
+if ip link show "$IFACE" >/dev/null 2>&1; then
+  echo "--> Configuring point-to-point IP on $IFACE (Local: ${LOCAL_IP}, Peer: ${PEER_IP})..."
+  ip link set "$IFACE" up
+  ip addr flush dev "$IFACE" || true
+  ip addr add "${LOCAL_IP}/30" dev "$IFACE"
+  ip route replace "${PEER_IP}/32" dev "$IFACE"
+else
+  echo "--> Interface $IFACE not yet present; udev/hotplug will assign ${LOCAL_IP}/30 when connected"
+fi
+
+# 3. Soft-RoCE (RXE) device setup if hardware RoCE not native
+if command -v rdma >/dev/null 2>&1; then
+  echo "--> Verifying RDMA link on $IFACE..."
+  if ! rdma link show 2>/dev/null | grep -q "$IFACE"; then
+    rdma link add "roce_${IFACE}" type rxe netdev "$IFACE" 2>/dev/null || true
+  fi
+fi
+
+echo "--> USB4 RoCEv2 dual-node network configuration applied."
+`,
+			cfg.ClusterPeerIP,
+			localIP,
+		)
+		files["scripts/setup-usb4-rdma.sh"] = []byte(setupUsb4Rdma)
+	}
+
 	// 7. install.sh
 	installSh := fmt.Sprintf(`#!/usr/bin/env bash
 # Idempotent installation script for fak AMD Strix Halo APU node
@@ -447,6 +533,56 @@ chmod 0600 /etc/fak/strix-halo.env
 cp "${SCRIPT_DIR}/conf/policy.json" /etc/fak/policy.json
 chmod 0644 /etc/fak/policy.json
 
+# 2.5 Compile Vulkan SPIR-V compute shaders
+echo "--> Compiling Vulkan SPIR-V compute shaders..."
+mkdir -p /var/lib/fak/spirv
+SHADER_SRC=""
+for cand in "${SCRIPT_DIR}/shaders" "${SCRIPT_DIR}/internal/compute/shaders" "/var/lib/fak/repo/internal/compute/shaders" "$(pwd)/internal/compute/shaders" "${SCRIPT_DIR}/../internal/compute/shaders"; do
+  if [[ -d "$cand" && -n "$(ls "$cand"/*.comp 2>/dev/null)" ]]; then
+    SHADER_SRC="$cand"
+    break
+  fi
+done
+
+if [[ -n "$SHADER_SRC" ]] && command -v glslc >/dev/null 2>&1; then
+  for shader in "$SHADER_SRC"/*.comp; do
+    sname=$(basename "$shader" .comp)
+    glslc -O --target-env=vulkan1.2 -fshader-stage=comp "$shader" -o "/var/lib/fak/spirv/${sname}.spv"
+  done
+  echo "    Compiled compute shaders into /var/lib/fak/spirv"
+elif [[ -d "${SCRIPT_DIR}/spirv" ]]; then
+  cp "${SCRIPT_DIR}/spirv"/*.spv /var/lib/fak/spirv/ 2>/dev/null || true
+  echo "    Copied bundled SPIR-V shaders into /var/lib/fak/spirv"
+else
+  echo "    Note: glslc not found or shader sources absent; shaders can be placed in /var/lib/fak/spirv later"
+fi
+
+# 2.6 Auto-detect AMD Strix Halo GPU (1002:1586 / gfx1151)
+HAS_STRIX=0
+if [[ -d /sys/bus/pci/devices ]]; then
+  for dev in /sys/bus/pci/devices/*; do
+    if [[ -f "$dev/vendor" && -f "$dev/device" ]]; then
+      v=$(cat "$dev/vendor" 2>/dev/null || true)
+      d=$(cat "$dev/device" 2>/dev/null || true)
+      if [[ "$v" == "0x1002" && "$d" == "0x1586" ]]; then
+        HAS_STRIX=1
+        break
+      fi
+    fi
+  done
+fi
+if [[ $HAS_STRIX -eq 0 ]] && command -v lspci >/dev/null 2>&1; then
+  if lspci -nn | grep -Ei "1002:1586|gfx1151" >/dev/null 2>&1; then
+    HAS_STRIX=1
+  fi
+fi
+
+# 2.7 USB4 RoCEv2 dual-node TP=2 network setup if present
+if [[ -f "${SCRIPT_DIR}/scripts/setup-usb4-rdma.sh" ]]; then
+  echo "--> Configuring USB4 RoCEv2 peer networking..."
+  bash "${SCRIPT_DIR}/scripts/setup-usb4-rdma.sh"
+fi
+
 # 3. Setup firewall
 echo "--> Configuring firewall rules..."
 bash "${SCRIPT_DIR}/scripts/setup-firewall.sh"
@@ -455,6 +591,10 @@ bash "${SCRIPT_DIR}/scripts/setup-firewall.sh"
 echo "--> Installing systemd services..."
 cp "${SCRIPT_DIR}/conf/fak-strix-governor.service" /etc/systemd/system/fak-strix-governor.service
 cp "${SCRIPT_DIR}/conf/fak-serve.service" /etc/systemd/system/fak-serve.service
+if [[ $HAS_STRIX -eq 1 ]]; then
+  echo "--> Detected AMD Strix Halo GPU (1002:1586 / gfx1151); configuring --engine inkernel --backend vulkan"
+  sed -i 's/serve /serve --engine inkernel --backend vulkan /' /etc/systemd/system/fak-serve.service
+fi
 chmod 0644 /etc/systemd/system/fak-strix-governor.service
 chmod 0644 /etc/systemd/system/fak-serve.service
 
@@ -640,7 +780,20 @@ else
   echo "[PASS]"
 fi
 
-# Vulkan SPIR-V acceleration asset directory
+# Vulkan runtime capabilities and SPIR-V acceleration assets
+echo -n "  - Vulkan runtime capabilities: "
+FAK_BIN="%s"
+if command -v "$FAK_BIN" >/dev/null 2>&1; then
+  cap_out=$("$FAK_BIN" runtime-capabilities --backend vulkan 2>&1 || true)
+  if echo "$cap_out" | grep -q '"status":\s*"available"'; then
+    echo "[PASS] (backend: vulkan status: available)"
+  else
+    echo "[WARN] (fak runtime-capabilities does not report status: available for vulkan)"
+  fi
+else
+  echo "[SKIP] ($FAK_BIN not found)"
+fi
+
 echo -n "  - Vulkan SPIR-V acceleration assets: "
 if [[ -d /var/lib/fak/spirv ]]; then
   echo "[PASS]"
@@ -667,6 +820,7 @@ else
 fi
 `,
 		cfg.Port,
+		cfg.FakBinaryPath,
 	)
 	files["verify.sh"] = []byte(verifySh)
 
@@ -896,6 +1050,9 @@ func RunStrixInstallerCLI(stdout, stderr io.Writer, argv []string) int {
 	model := fs.String("model", "qwen3.6-27b", "upstream model ID")
 	platform := fs.String("platform", "strix-halo-128", "hardware platform preset (strix-halo-128, strix-halo-64)")
 	key := fs.String("key", "", "gateway authentication key (32-byte hex; generated if empty)")
+	clusterMode := fs.String("cluster-mode", "standalone", "cluster mode (standalone, dual_tp2)")
+	tp2 := fs.Bool("tp2", false, "enable dual-node Tensor Parallelism (TP=2) over USB4 RoCEv2")
+	clusterPeer := fs.String("cluster-peer", "", "peer IPv4 address for dual-node TP=2 (default: 169.254.1.2)")
 	apply := fs.Bool("apply", false, "write installer package files to disk")
 	jsonOut := fs.Bool("json", false, "output package manifest as JSON")
 
@@ -915,6 +1072,14 @@ func RunStrixInstallerCLI(stdout, stderr io.Writer, argv []string) int {
 
 	cfg := DefaultStrixInstallerConfig()
 	cfg.Platform = parsedPlatform
+	if *tp2 {
+		cfg.ClusterMode = ClusterModeDualTP2
+	} else if *clusterMode != "" {
+		cfg.ClusterMode = *clusterMode
+	}
+	if *clusterPeer != "" {
+		cfg.ClusterPeerIP = *clusterPeer
+	}
 	if *lanIP != "" {
 		cfg.LANIP = *lanIP
 	}

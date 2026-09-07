@@ -1,0 +1,88 @@
+#version 450
+layout(local_size_x = 128) in;
+
+layout(std430, binding = 0) readonly  buffer Qbuf { float Q[]; };
+layout(std430, binding = 1) readonly  buffer Kbuf { float K[]; };
+layout(std430, binding = 2) readonly  buffer Vbuf { float V[]; };
+layout(std430, binding = 3) writeonly buffer Obuf { float Outp[]; };
+
+layout(push_constant) uniform Push {
+    int tokens;
+    int prefix;
+    int nH;
+    int nKV;
+    int hd;
+    float scale;
+} pc;
+
+shared float qs[256];
+shared float red[128];
+
+void main() {
+    uint flatIdx = gl_WorkGroupID.x;
+    uint h = flatIdx % uint(pc.nH);
+    uint token = flatIdx / uint(pc.nH);
+    if (token >= uint(pc.tokens)) return;
+
+    uint tid = gl_LocalInvocationID.x;
+    int grp = pc.nH / pc.nKV;
+    int kvh = int(h) / grp;
+    int w = pc.nKV * pc.hd;
+    int nPos = pc.prefix + int(token) + 1;
+
+    uint qbase = token * uint(pc.nH) * uint(pc.hd) + h * uint(pc.hd);
+    for (uint d = tid; d < uint(pc.hd); d += 128u) {
+        qs[d] = Q[qbase + d];
+    }
+    barrier();
+
+    float m = -1e30;
+    float l = 0.0;
+    float acc0 = 0.0;
+    float acc1 = 0.0;
+
+    for (int j = 0; j < nPos; j++) {
+        uint kbase = uint(j) * uint(w) + uint(kvh) * uint(pc.hd);
+        float partial = 0.0;
+        for (uint d = tid; d < uint(pc.hd); d += 128u) {
+            partial += qs[d] * K[kbase + d];
+        }
+        red[tid] = partial;
+        barrier();
+
+        for (uint s = 64u; s > 0u; s >>= 1) {
+            if (tid < s) red[tid] += red[tid + s];
+            barrier();
+        }
+        float score = red[0] * pc.scale;
+        barrier();
+
+        uint vbase = uint(j) * uint(w) + uint(kvh) * uint(pc.hd);
+        float v0 = (tid < uint(pc.hd)) ? V[vbase + tid] : 0.0;
+        float v1 = (tid + 128u < uint(pc.hd)) ? V[vbase + tid + 128u] : 0.0;
+
+        if (j == 0) {
+            m = score;
+            l = 1.0;
+            acc0 = v0;
+            acc1 = v1;
+        } else {
+            float nextM = max(m, score);
+            float correction = exp(m - nextM);
+            float probability = exp(score - nextM);
+            l = l * correction + probability;
+            acc0 = acc0 * correction + probability * v0;
+            acc1 = acc1 * correction + probability * v1;
+            m = nextM;
+        }
+    }
+
+    float invL = (l > 0.0) ? (1.0 / l) : 0.0;
+    uint outbase = token * uint(pc.nH) * uint(pc.hd) + h * uint(pc.hd);
+    if (tid < uint(pc.hd)) {
+        Outp[outbase + tid] = acc0 * invL;
+    }
+    if (tid + 128u < uint(pc.hd)) {
+        Outp[outbase + tid + 128u] = acc1 * invL;
+    }
+}

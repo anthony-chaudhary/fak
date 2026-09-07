@@ -1,0 +1,13 @@
+#version 450
+layout(local_size_x = 256) in;
+layout(std430,binding=0) readonly buffer QG { float qg[]; };
+layout(std430,binding=1) writeonly buffer Q { float q[]; };
+layout(std430,binding=2) writeonly buffer G { float gate[]; };
+layout(push_constant) uniform PC { int tokens; int heads; int hd; } pc;
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= uint(pc.tokens * pc.heads * pc.hd)) return;
+    uint head = i / uint(pc.hd), d = i % uint(pc.hd);
+    q[i] = qg[head * uint(2 * pc.hd) + d];
+    gate[i] = qg[head * uint(2 * pc.hd) + uint(pc.hd) + d];
+}

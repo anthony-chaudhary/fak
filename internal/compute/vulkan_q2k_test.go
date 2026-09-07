@@ -183,3 +183,36 @@ func TestVulkanQ2KMatMulMatchesCPUReference(t *testing.T) {
 		t.Fatalf("cosine %.8f < 0.995", c)
 	}
 }
+
+func BenchmarkVulkanQ2KMatMul(b *testing.B) {
+	v, ok := Lookup("vulkan")
+	if !ok {
+		b.Skip("Vulkan backend unavailable")
+	}
+	const out, in = 8, 512
+	raw := make([]byte, out*(in/q2kSuper)*q2kSuperBlock)
+	rng := rand.New(rand.NewSource(9718))
+	for bIdx := 0; bIdx < out*(in/q2kSuper); bIdx++ {
+		blk := raw[bIdx*q2kSuperBlock : (bIdx+1)*q2kSuperBlock]
+		for i := 0; i < 80; i++ {
+			blk[i] = byte(rng.Intn(256))
+		}
+		binaryPutFloat16(blk[80:82], 1.0)
+		binaryPutFloat16(blk[82:84], 0.2)
+	}
+	x := make([]float32, in)
+	for i := range x {
+		x[i] = rng.Float32()*2 - 1
+	}
+	hw := NewQ2K(Default(), []int{out, in}, raw)
+	dw := v.Upload(hw, Q2_K)
+	defer v.Free(dw)
+	dx := v.Upload(NewF32(Default(), []int{in}, x), F32)
+	defer v.Free(dx)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		dy := v.MatMul(dw, dx)
+		v.Free(dy)
+	}
+}

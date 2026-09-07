@@ -131,6 +131,9 @@ func CaptureAuditSnapshot(target string, opts AuditOptions) (AuditSnapshotManife
 		Selection:     AuditSnapshotSelection{SinceNanoseconds: int64(opts.Since), UserContainsSet: opts.UserContains != ""},
 	}
 	for _, source := range opts.Sources {
+		if source.Name != AuditSourceClaude && source.Name != AuditSourceCodex {
+			continue
+		}
 		meta, files, err := captureAuditSnapshotSource(temp, source, opts)
 		if err != nil {
 			return AuditSnapshotManifest{}, AuditResult{}, err

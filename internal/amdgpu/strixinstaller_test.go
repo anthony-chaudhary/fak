@@ -110,6 +110,68 @@ func TestGenerateStrixInstallerPackage_ExpectedFiles(t *testing.T) {
 	}
 }
 
+func TestGenerateStrixInstallerPackage_DualTP2(t *testing.T) {
+	cfg := DefaultStrixInstallerConfig()
+	cfg.ClusterMode = ClusterModeDualTP2
+	cfg.ClusterPeerIP = "169.254.1.2"
+
+	pkg, err := GenerateStrixInstallerPackage(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error generating dual_tp2 package: %v", err)
+	}
+
+	// Dual TP2 mode should have 15 files (including scripts/setup-usb4-rdma.sh)
+	if len(pkg.Files) != 15 {
+		t.Errorf("got %d files in dual_tp2 package, want 15", len(pkg.Files))
+	}
+
+	rdmaScript, ok := pkg.Files["scripts/setup-usb4-rdma.sh"]
+	if !ok {
+		t.Fatalf("scripts/setup-usb4-rdma.sh missing from dual_tp2 package")
+	}
+	rdmaStr := string(rdmaScript)
+
+	for _, token := range []string{
+		"0x38c00",
+		"8 us",
+		"value 32",
+		"169.254.1.2",
+		"169.254.1.1",
+		"roce_",
+		"thunderbolt0",
+	} {
+		if !strings.Contains(rdmaStr, token) {
+			t.Errorf("scripts/setup-usb4-rdma.sh missing required token %q:\n%s", token, rdmaStr)
+		}
+	}
+
+	// Verify conf/fak-serve.service contains cluster flags
+	serveService := string(pkg.Files["conf/fak-serve.service"])
+	if !strings.Contains(serveService, "--tp 2 --cluster-peer 169.254.1.2") {
+		t.Errorf("conf/fak-serve.service missing dual_tp2 flags:\n%s", serveService)
+	}
+
+	// Test peer IP toggle: when peer is 169.254.1.1, local is 169.254.1.2
+	cfg2 := DefaultStrixInstallerConfig()
+	cfg2.ClusterMode = ClusterModeDualTP2
+	cfg2.ClusterPeerIP = "169.254.1.1"
+	pkg2, err := GenerateStrixInstallerPackage(cfg2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	rdmaStr2 := string(pkg2.Files["scripts/setup-usb4-rdma.sh"])
+	if !strings.Contains(rdmaStr2, `LOCAL_IP="169.254.1.2"`) || !strings.Contains(rdmaStr2, `PEER_IP="169.254.1.1"`) {
+		t.Errorf("setup-usb4-rdma.sh did not invert local/peer IPs:\n%s", rdmaStr2)
+	}
+
+	// Verify invalid cluster mode error
+	cfgInvalid := DefaultStrixInstallerConfig()
+	cfgInvalid.ClusterMode = "invalid_cluster_mode"
+	if _, err := GenerateStrixInstallerPackage(cfgInvalid); err == nil {
+		t.Errorf("expected error for invalid cluster mode, got nil")
+	}
+}
+
 func TestGenerateStrixInstallerPackage_ManifestChecksums(t *testing.T) {
 	cfg := DefaultStrixInstallerConfig()
 	pkg, err := GenerateStrixInstallerPackage(cfg)
@@ -352,7 +414,7 @@ func TestGenerateStrixInstallerPackage_GotchaSettings(t *testing.T) {
 		t.Errorf("conf/strix-halo.env missing documentation for Gotchas #9 and #5:\n%s", env)
 	}
 
-	// 6. Verify Vulkan SPIR-V acceleration asset defaults
+	// 6. Verify Vulkan SPIR-V acceleration asset defaults and shader compilation
 	if !strings.Contains(env, "FAK_VULKAN_SPIRV=/var/lib/fak/spirv") {
 		t.Errorf("conf/strix-halo.env missing FAK_VULKAN_SPIRV=/var/lib/fak/spirv:\n%s", env)
 	}
@@ -360,8 +422,20 @@ func TestGenerateStrixInstallerPackage_GotchaSettings(t *testing.T) {
 	if !strings.Contains(installSh, "/var/lib/fak/spirv") {
 		t.Errorf("install.sh missing /var/lib/fak/spirv directory creation:\n%s", installSh)
 	}
+	if !strings.Contains(installSh, "glslc -O --target-env=vulkan1.2 -fshader-stage=comp") {
+		t.Errorf("install.sh missing glslc SPIR-V shader compilation step:\n%s", installSh)
+	}
+	if !strings.Contains(installSh, "1002:1586") || !strings.Contains(installSh, "gfx1151") {
+		t.Errorf("install.sh missing AMD Strix Halo GPU (1002:1586 / gfx1151) auto-detection:\n%s", installSh)
+	}
+	if !strings.Contains(installSh, "--engine inkernel --backend vulkan") {
+		t.Errorf("install.sh missing --engine inkernel --backend vulkan injection:\n%s", installSh)
+	}
 	if !strings.Contains(verify, "/var/lib/fak/spirv") || !strings.Contains(verify, "Vulkan SPIR-V") {
 		t.Errorf("verify.sh missing Vulkan SPIR-V verification:\n%s", verify)
+	}
+	if !strings.Contains(verify, "runtime-capabilities --backend vulkan") || !strings.Contains(verify, "status: available") {
+		t.Errorf("verify.sh missing fak runtime-capabilities --backend vulkan status: available check:\n%s", verify)
 	}
 }
 
@@ -588,6 +662,33 @@ func TestRunStrixInstallerCLI(t *testing.T) {
 		code := RunStrixInstallerCLI(&out, &errOut, []string{"extra", "argument"})
 		if code != 2 {
 			t.Errorf("expected exit code 2 for unexpected args, got %d", code)
+		}
+	})
+
+	t.Run("DualTP2Flag", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		code := RunStrixInstallerCLI(&out, &errOut, []string{
+			"--tp2",
+			"--cluster-peer", "10.0.0.99",
+			"--json",
+		})
+		if code != 0 {
+			t.Fatalf("expected exit code 0 for --tp2 --json, got %d (err: %s)", code, errOut.String())
+		}
+		var manifest StrixPackageManifest
+		if err := json.Unmarshal(out.Bytes(), &manifest); err != nil {
+			t.Fatalf("failed to unmarshal JSON output: %v\noutput: %s", err, out.String())
+		}
+		if _, ok := manifest.Files["scripts/setup-usb4-rdma.sh"]; !ok {
+			t.Errorf("manifest missing scripts/setup-usb4-rdma.sh in dual_tp2 mode")
+		}
+	})
+
+	t.Run("InvalidClusterMode", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		code := RunStrixInstallerCLI(&out, &errOut, []string{"--cluster-mode", "invalid_cluster"})
+		if code == 0 {
+			t.Errorf("expected non-zero exit code for invalid cluster mode, got 0")
 		}
 	})
 }

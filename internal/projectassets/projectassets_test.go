@@ -704,6 +704,18 @@ func TestVerifyOpenCodePlugin(t *testing.T) {
 	if err := VerifyOpenCodePlugin(tmp); err == nil || !strings.Contains(err.Error(), "live_leases") {
 		t.Fatalf("expected missing live_leases error, got: %v", err)
 	}
+
+	// Test missing 120s timeout
+	write(t, tmp, OpenCodePluginPath, "export default function() { return { 'tool.execute.before': async () => { const m = ['write', 'edit', 'apply_patch']; fak('leaseref'); fak('loop'); live_leases; arbitrate; } }; }")
+	if err := VerifyOpenCodePlugin(tmp); err == nil || !strings.Contains(err.Error(), "timeout: 120000") {
+		t.Fatalf("expected missing timeout: 120000 error, got: %v", err)
+	}
+
+	// Test missing Windows platform binary extension check
+	write(t, tmp, OpenCodePluginPath, "export default function() { return { 'tool.execute.before': async () => { const m = ['write', 'edit', 'apply_patch']; fak('leaseref'); fak('loop'); live_leases; arbitrate; timeout: 120000; } }; }")
+	if err := VerifyOpenCodePlugin(tmp); err == nil || !strings.Contains(err.Error(), "win32") {
+		t.Fatalf("expected missing win32 error, got: %v", err)
+	}
 }
 
 func TestSyncAndEnsureOpenCodePlugin(t *testing.T) {
@@ -999,5 +1011,49 @@ func TestParityDetectsPostTruncationDescriptionChanges(t *testing.T) {
 	}
 	if !resyncReceipt.ZeroUnexplainedGaps {
 		t.Fatalf("expected ZeroUnexplainedGaps=true after resync, got %#v", resyncReceipt.Harnesses["codex"])
+	}
+}
+
+func TestOpenCodePluginWindowsExtensionAndTimeout(t *testing.T) {
+	// Verify DefaultOpenCodePlugin contains Windows command extension resolution and 120000ms timeout.
+	if !strings.Contains(DefaultOpenCodePlugin, `process.platform === "win32"`) &&
+		!strings.Contains(DefaultOpenCodePlugin, `process.platform === 'win32'`) {
+		t.Fatal("DefaultOpenCodePlugin missing win32 platform check")
+	}
+	if !strings.Contains(DefaultOpenCodePlugin, `.endsWith(".exe")`) &&
+		!strings.Contains(DefaultOpenCodePlugin, `.endsWith('.exe')`) {
+		t.Fatal("DefaultOpenCodePlugin missing .endsWith('.exe') check")
+	}
+	if !strings.Contains(DefaultOpenCodePlugin, "timeout: 120000") {
+		t.Fatal("DefaultOpenCodePlugin missing 120000ms timeout")
+	}
+	if strings.Contains(DefaultOpenCodePlugin, "timeout: 30000") {
+		t.Fatal("DefaultOpenCodePlugin must not contain obsolete 30000ms timeout")
+	}
+
+	// Also verify the disk asset .opencode/plugins/dos-proof-guard.js
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	canonicalPath := filepath.Join(repoRoot, filepath.FromSlash(OpenCodePluginPath))
+	b, err := os.ReadFile(canonicalPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			t.Skipf("skipping: %s does not exist in worktree", canonicalPath)
+		}
+		t.Fatalf("failed to read %s: %v", canonicalPath, err)
+	}
+	content := string(b)
+	if !strings.Contains(content, `process.platform === "win32"`) &&
+		!strings.Contains(content, `process.platform === 'win32'`) {
+		t.Fatal("disk plugin missing win32 platform check")
+	}
+	if !strings.Contains(content, `.endsWith(".exe")`) &&
+		!strings.Contains(content, `.endsWith('.exe')`) {
+		t.Fatal("disk plugin missing .endsWith('.exe') check")
+	}
+	if !strings.Contains(content, "timeout: 120000") {
+		t.Fatal("disk plugin missing 120000ms timeout")
+	}
+	if strings.Contains(content, "timeout: 30000") {
+		t.Fatal("disk plugin must not contain obsolete 30000ms timeout")
 	}
 }

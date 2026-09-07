@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -237,5 +238,81 @@ func TestDoctorTelemetry_UsageError(t *testing.T) {
 	rc := runDoctor(strings.NewReader(""), &stdout, &stderr, argv)
 	if rc != 2 {
 		t.Fatalf("expected exit code 2 for bad flag, got %d", rc)
+	}
+}
+
+func createBloatedSQLiteDBWithPython(t *testing.T) string {
+	t.Helper()
+	pyBin, err := exec.LookPath("python3")
+	if err != nil {
+		pyBin, err = exec.LookPath("python")
+	}
+	if err != nil {
+		t.Skip("python not found, skipping SQLite freelist creation test")
+	}
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "bloated.db")
+
+	script := `import sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+cur = con.cursor()
+cur.execute("create table t(id int, data text)")
+for i in range(1000):
+    cur.execute("insert into t values(?, ?)", (i, "x"*1000))
+con.commit()
+cur.execute("delete from t where id > 100")
+con.commit()
+con.close()
+`
+	cmd := exec.Command(pyBin, "-c", script, dbPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to create bloated sqlite db with python: %v (output: %s)", err, string(out))
+	}
+
+	_, freelist, _, _, err := trajectory.InspectSQLiteFileHeader(dbPath)
+	if err != nil {
+		t.Fatalf("inspect header failed: %v", err)
+	}
+	if freelist <= 0 {
+		t.Fatalf("expected freelist pages > 0, got %d", freelist)
+	}
+
+	return dbPath
+}
+
+func TestDoctorTelemetryReclaim(t *testing.T) {
+	dbPath := createBloatedSQLiteDBWithPython(t)
+
+	var stdout, stderr bytes.Buffer
+	argv := []string{
+		"telemetry",
+		"--reclaim",
+		"--db", dbPath,
+	}
+
+	rc := runDoctor(strings.NewReader(""), &stdout, &stderr, argv)
+	if rc != 0 {
+		t.Fatalf("expected exit code 0, got %d, stderr: %s", rc, stderr.String())
+	}
+
+	_, freelistAfter, _, _, err := trajectory.InspectSQLiteFileHeader(dbPath)
+	if err != nil {
+		t.Fatalf("failed to re-inspect sqlite header: %v", err)
+	}
+	if freelistAfter != 0 {
+		t.Errorf("expected freelist pages to drop to 0, got %d", freelistAfter)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "reclaimed freelist:") {
+		t.Errorf("expected output to contain 'reclaimed freelist:', got:\n%s", out)
+	}
+	if !strings.Contains(out, "[OK  ] DATABASE_BLOAT") {
+		t.Errorf("expected output to contain '[OK  ] DATABASE_BLOAT', got:\n%s", out)
+	}
+	if !strings.Contains(out, "doctor: healthy (0 findings)") {
+		t.Errorf("expected output to contain 'doctor: healthy (0 findings)', got:\n%s", out)
 	}
 }

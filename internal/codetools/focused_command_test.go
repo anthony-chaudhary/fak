@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -121,4 +122,250 @@ func TestFocusedToolsetExactAllowedCommands(t *testing.T) {
 	if bad && errCode(t, out) == CodeCommandDeny {
 		t.Fatalf("expected default focused command git status --short not to return CodeCommandDeny, got: %s", out)
 	}
+}
+
+func TestFocusedToolsetExactAllowedCommandsMatrix(t *testing.T) {
+	t.Run("multi_command_slice_focused", func(t *testing.T) {
+		exactList := []string{
+			"go test ./...",
+			"git status --short",
+			"git diff",
+			"powershell -NoProfile -Command Get-Date",
+			"powershell -NoProfile -Command Get-Process",
+		}
+		ts, err := New(Config{
+			Root:                 t.TempDir(),
+			FocusedCommands:      true,
+			ExactAllowedCommands: exactList,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Verify ExactAllowedCommands returns an independent copy preserving all configured commands.
+		got := ts.ExactAllowedCommands()
+		if len(got) != len(exactList) {
+			t.Fatalf("expected %d commands, got %d", len(exactList), len(got))
+		}
+		for i, cmd := range exactList {
+			if got[i] != cmd {
+				t.Errorf("expected ExactAllowedCommands[%d]=%q, got %q", i, cmd, got[i])
+			}
+		}
+
+		// Verify that ts.ExactAllowedCommands() returns a slice copy that cannot mutate internal state.
+		got[0] = "mutated_returned_copy"
+		if ts.ExactAllowedCommands()[0] == "mutated_returned_copy" {
+			t.Fatal("expected ExactAllowedCommands to return a copy that cannot mutate internal state")
+		}
+		ts.ExactAllowedCommands()[1] = "mutated_direct_indexing"
+		if ts.ExactAllowedCommands()[1] == "mutated_direct_indexing" {
+			t.Fatal("expected ExactAllowedCommands to remain immutable after direct indexing mutation")
+		}
+
+		// Verify that mutating the input slice passed to Config does not mutate internal state.
+		exactList[0] = "mutated_input_slice"
+		if ts.ExactAllowedCommands()[0] == "mutated_input_slice" {
+			t.Fatal("expected internal state to remain immutable after mutating config input slice")
+		}
+
+		// Multi-command slices: each listed command is allowed without CodeCommandDeny.
+		for _, cmd := range []string{
+			"go test ./...",
+			"git status --short",
+			"git diff",
+			"powershell -NoProfile -Command Get-Date",
+			"powershell -NoProfile -Command Get-Process",
+		} {
+			out, bad := ts.bash(context.Background(), argsOf(t, BashArgs{Command: cmd}))
+			if bad && errCode(t, out) == CodeCommandDeny {
+				t.Fatalf("expected exact allowed command %q not to return CodeCommandDeny, got: %s", cmd, out)
+			}
+		}
+
+		// Unlisted commands outside both default allowlist and exact allowlist are denied with CodeCommandDeny.
+		for _, unlisted := range []string{
+			"rm -rf .",
+			"env",
+			"cat /etc/passwd",
+			"git reset --hard",
+			"powershell -NoProfile -Command Stop-Process",
+			"go run main.go",
+			"git checkout main",
+			"echo disallowed",
+		} {
+			out, bad := ts.bash(context.Background(), argsOf(t, BashArgs{Command: unlisted}))
+			if !bad || errCode(t, out) != CodeCommandDeny {
+				t.Errorf("command %q: expected denial with CodeCommandDeny, got bad=%v out=%s", unlisted, bad, out)
+			}
+		}
+	})
+
+	t.Run("unfocused_passthrough", func(t *testing.T) {
+		// When FocusedCommands is false, configuring ExactAllowedCommands should NOT restrict
+		// or deny normal commands (passthrough behavior).
+		exactList := []string{
+			"git status --short",
+			"powershell -NoProfile -Command Get-Date",
+		}
+		ts, err := New(Config{
+			Root:                 t.TempDir(),
+			FocusedCommands:      false,
+			ExactAllowedCommands: exactList,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Verify ExactAllowedCommands returns an independent copy in unfocused mode.
+		unfocusedGot := ts.ExactAllowedCommands()
+		if len(unfocusedGot) != len(exactList) {
+			t.Fatalf("expected %d commands in unfocused ExactAllowedCommands(), got %d", len(exactList), len(unfocusedGot))
+		}
+		unfocusedGot[0] = "mutated_unfocused"
+		if ts.ExactAllowedCommands()[0] == "mutated_unfocused" {
+			t.Fatal("expected unfocused ExactAllowedCommands to return a copy that cannot mutate internal state")
+		}
+
+		// Unlisted commands that would be denied under FocusedCommands must NOT return CodeCommandDeny.
+		for _, cmd := range []string{
+			"env",
+			"git log",
+			"git reset --hard",
+			"echo unfocused-passthrough",
+			bashEcho("unfocused-echo"),
+		} {
+			out, bad := ts.bash(context.Background(), argsOf(t, BashArgs{Command: cmd}))
+			if bad && errCode(t, out) == CodeCommandDeny {
+				t.Errorf("unfocused toolset denied command %q with CodeCommandDeny: %s", cmd, out)
+			}
+		}
+
+		// Verify passthrough execution actually runs and returns stdout.
+		echoCmd := bashEcho("passthrough-verified")
+		out, bad := ts.bash(context.Background(), argsOf(t, BashArgs{Command: echoCmd}))
+		if bad {
+			t.Fatalf("expected unfocused command %q to succeed, got refusal: %s", echoCmd, out)
+		}
+		res := decodeResult(t, out)
+		if stdout, ok := res["stdout"].(string); !ok || !strings.Contains(stdout, "passthrough-verified") {
+			t.Fatalf("expected stdout to contain 'passthrough-verified', got: %v", res)
+		}
+
+		// Verify unconfigured toolset returns nil for ExactAllowedCommands.
+		tsUnconfigured, err := New(Config{Root: t.TempDir()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := tsUnconfigured.ExactAllowedCommands(); got != nil {
+			t.Fatalf("expected nil from ExactAllowedCommands() when unconfigured, got %v", got)
+		}
+	})
+
+	t.Run("edge_cases_empty_and_whitespace", func(t *testing.T) {
+		ts, err := New(Config{
+			Root:                 t.TempDir(),
+			FocusedCommands:      true,
+			ExactAllowedCommands: []string{"git status --short"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// When FocusedCommands is true, empty strings and whitespace-only commands
+		// are cleanly denied with CodeCommandDeny.
+		for _, cmd := range []string{"", " ", "   ", "\t", "\r\n", "  \t  "} {
+			out, bad := ts.bash(context.Background(), argsOf(t, BashArgs{Command: cmd}))
+			if !bad || errCode(t, out) != CodeCommandDeny {
+				t.Errorf("command %q: expected CodeCommandDeny, got bad=%v out=%s", cmd, bad, out)
+			}
+		}
+
+		// In unfocused mode (FocusedCommands: false), empty/whitespace commands fail validation with CodeMalformed.
+		tsUnfocused, err := New(Config{
+			Root:                 t.TempDir(),
+			FocusedCommands:      false,
+			ExactAllowedCommands: []string{"git status --short"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, cmd := range []string{"", "   "} {
+			out, bad := tsUnfocused.bash(context.Background(), argsOf(t, BashArgs{Command: cmd}))
+			if !bad || errCode(t, out) != CodeMalformed {
+				t.Errorf("unfocused command %q: expected CodeMalformed, got bad=%v out=%s", cmd, bad, out)
+			}
+		}
+
+		// Even if whitespace-only strings are configured in ExactAllowedCommands,
+		// command invocation still cleanly denies them with CodeCommandDeny when FocusedCommands is true.
+		tsWhitespaceConfig, err := New(Config{
+			Root:                 t.TempDir(),
+			FocusedCommands:      true,
+			ExactAllowedCommands: []string{"", "   "},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, cmd := range []string{"", "   "} {
+			out, bad := tsWhitespaceConfig.bash(context.Background(), argsOf(t, BashArgs{Command: cmd}))
+			if !bad || errCode(t, out) != CodeCommandDeny {
+				t.Errorf("configured command %q: expected CodeCommandDeny, got bad=%v out=%s", cmd, bad, out)
+			}
+		}
+	})
+
+	t.Run("edge_cases_prefixes_and_near_matches", func(t *testing.T) {
+		exactList := []string{
+			"powershell -NoProfile -Command Get-Date",
+			"powershell -NoProfile -Command Get-Process",
+		}
+		ts, err := New(Config{
+			Root:                 t.TempDir(),
+			FocusedCommands:      true,
+			ExactAllowedCommands: exactList,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		nearMatches := []string{
+			// Prefixes of allowed commands
+			"powershell",
+			"powershell -NoProfile",
+			"powershell -NoProfile -Command",
+			"powershell -NoProfile -Command Get-",
+			"powershell -NoProfile -Command Get-Dat",
+			"powershell -NoProfile -Command Get-Proc",
+			// Extensions / superstrings
+			"powershell -NoProfile -Command Get-Date -Format s",
+			"powershell -NoProfile -Command Get-Process -Name svchost",
+			// Leading and trailing whitespace variations
+			" powershell -NoProfile -Command Get-Date",
+			"powershell -NoProfile -Command Get-Date ",
+			"  powershell -NoProfile -Command Get-Process",
+			"powershell -NoProfile -Command Get-Process  ",
+			"powershell -NoProfile -Command Get-Date\n",
+			"powershell -NoProfile -Command Get-Date\r\n",
+			// Internal whitespace variations
+			"powershell  -NoProfile -Command Get-Date",
+			"powershell -NoProfile  -Command Get-Date",
+			// Case variations
+			"POWERSHELL -NoProfile -Command Get-Date",
+			"powershell -noprofile -command get-date",
+			"powershell -NoProfile -Command get-date",
+			// Near-matches of default commands
+			"git status",                     // missing --short
+			"git status --short --branch",    // extra argument
+			"git diff; rm -rf /",             // command injection with semicolon
+			"git diff && git status --short", // command chaining with &&
+			"git diff | grep foo",            // command piping
+		}
+		for _, cmd := range nearMatches {
+			out, bad := ts.bash(context.Background(), argsOf(t, BashArgs{Command: cmd}))
+			if !bad || errCode(t, out) != CodeCommandDeny {
+				t.Errorf("near-match command %q: expected denial with CodeCommandDeny, got bad=%v out=%s", cmd, bad, out)
+			}
+		}
+	})
 }

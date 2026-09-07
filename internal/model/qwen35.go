@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 
@@ -337,20 +338,26 @@ func (m *Model) linearAttnSeq(l int, xn [][]float32) [][]float32 {
 	}
 
 	// Causal depthwise conv1d (kernel K, no bias, left-padded) + SiLU over each channel.
-	convOut := make([][]float32, seq)
-	for t := 0; t < seq; t++ {
-		row := make([]float32, convDim)
-		for c := 0; c < convDim; c++ {
-			var acc float32
-			cb := c * K
-			for j := 0; j < K; j++ {
-				if ti := t - (K - 1) + j; ti >= 0 {
-					acc += conv[cb+j] * mixed[ti][c]
+	// Uses tiled memory channel transpose (Issue #464) on gfx1151 / Zen 5 to eliminate strided DRAM bank thrashing.
+	var convOut [][]float32
+	if tiledOut, _, _, err := compute.TiledConvConcatForwardSlices(mixed, conv, convDim, K, nil); err == nil {
+		convOut = tiledOut
+	} else {
+		convOut = make([][]float32, seq)
+		for t := 0; t < seq; t++ {
+			row := make([]float32, convDim)
+			for c := 0; c < convDim; c++ {
+				var acc float32
+				cb := c * K
+				for j := 0; j < K; j++ {
+					if ti := t - (K - 1) + j; ti >= 0 {
+						acc += conv[cb+j] * mixed[ti][c]
+					}
 				}
+				row[c] = silu(acc)
 			}
-			row[c] = silu(acc)
+			convOut[t] = row
 		}
-		convOut[t] = row
 	}
 
 	// Recurrent gated delta rule. State per v-head is [kHd*vHd] row-major st[i*vHd+d].
@@ -623,3 +630,190 @@ func ForwardSpeculativeMTP(ctx context.Context, s *Session, drafts [4]int) (acce
 func (m *Model) ForwardSpeculativeMTP(ctx context.Context, s *Session, drafts [4]int) (accepted int, nextTokens []int, err error) {
 	return ForwardSpeculativeMTP(ctx, s, drafts)
 }
+
+// HasQSASparseAttn reports whether the model configuration utilizes QSA full-attention layers.
+func (c Config) HasQSASparseAttn() bool {
+	if !c.IsQwen35Hybrid() {
+		return false
+	}
+	for _, t := range c.LayerTypes {
+		if t == "full_attention" || t == "qsa" {
+			return true
+		}
+	}
+	return false
+}
+
+// IsQSALayer reports whether decoder layer l is a QSA sparse full-attention layer.
+func (c Config) IsQSALayer(l int) bool {
+	if l < 0 || l >= len(c.LayerTypes) {
+		return false
+	}
+	t := c.LayerTypes[l]
+	return t == "full_attention" || t == "qsa"
+}
+
+// ShouldUseQSASparseGather evaluates whether QSA sparse row gather should be triggered.
+// Criteria:
+//  1. Layer must be a QSA sparse full-attention layer.
+//  2. Context depth must exceed dynamic gating threshold (N_kv >= 16,384 tokens).
+//  3. Multi-sequence safety: batch size must be 1 (diverging streams fall back to dense masked attention).
+func (c Config) ShouldUseQSASparseGather(l int, nKV int, batchSize int) bool {
+	if !c.IsQSALayer(l) {
+		return false
+	}
+	if nKV < compute.QSADynamicGatingThreshold {
+		return false
+	}
+	if batchSize > 1 {
+		return false
+	}
+	return true
+}
+
+// ValidateQSAPerplexityParity verifies numerical equivalence between dense masked attention
+// and true sparse row gather attention, asserting relative L2 delta < QSAPerplexityDeltaTolerance (0.05%).
+func ValidateQSAPerplexityParity(denseScores, sparseScores []float32) (float64, error) {
+	if len(denseScores) == 0 || len(sparseScores) == 0 {
+		return 0, errors.New("model: empty attention scores for parity check")
+	}
+
+	var sumSqDiff, sumDense float64
+	n := len(sparseScores)
+	if len(denseScores) < n {
+		n = len(denseScores)
+	}
+	for i := 0; i < n; i++ {
+		d := float64(denseScores[i])
+		s := float64(sparseScores[i])
+		diff := d - s
+		sumSqDiff += diff * diff
+		sumDense += d * d
+	}
+
+	if sumDense == 0 {
+		return 0, nil
+	}
+
+	relL2 := math.Sqrt(sumSqDiff / sumDense)
+	if relL2 > compute.QSAPerplexityDeltaTolerance {
+		return relL2, fmt.Errorf("model: QSA relative L2 delta %f exceeds tolerance %f", relL2, compute.QSAPerplexityDeltaTolerance)
+	}
+	return relL2, nil
+}
+
+// -----------------------------------------------------------------------------
+// 51B Per-Layer Embedding (PLE) / Engram Auxiliary Table Support (#469)
+// -----------------------------------------------------------------------------
+
+// PLEConfig configures the SSD-backed 51B Per-Layer Embedding table for Qwen 3.8 Flash-Next.
+type PLEConfig struct {
+	NumHeads          int     `json:"num_heads"`
+	HeadDim           int     `json:"head_dim"`
+	VocabPerHead      int     `json:"vocab_per_head"`
+	RowSizeBytes      int     `json:"row_size_bytes"`
+	TotalRows         int64   `json:"total_rows"`
+	TotalSizeBytes    int64   `json:"total_size_bytes"`
+	PinEngramRAM      bool    `json:"pin_engram_ram"`
+	HostMapped        bool    `json:"host_mapped"`
+	MaxResidentRSS    int64   `json:"max_resident_rss"`
+	TargetPrefillTokS float64 `json:"target_prefill_tok_s"`
+}
+
+// DefaultPLEConfig returns canonical settings for Qwen 3.8 Flash-Next 51B PLE tables on Strix Halo APUs.
+func DefaultPLEConfig() PLEConfig {
+	return PLEConfig{
+		NumHeads:          16,
+		HeadDim:           160,
+		VocabPerHead:      20000000,
+		RowSizeBytes:      130, // 4-bit quant (~130 bytes/row)
+		TotalRows:         320000000,
+		TotalSizeBytes:    int64(320000000) * 130, // ~41.6 GB uncompacted / ~26.8 GiB packed
+		PinEngramRAM:      false,                  // Default: SSD-backed lazy gather with MADV_RANDOM
+		HostMapped:        true,                   // Invariant: strictly host-mapped, never uploaded to GTT
+		MaxResidentRSS:    2 * 1024 * 1024 * 1024, // 2.0 GiB ceiling
+		TargetPrefillTokS: 300.0,                  // Minimum prefill floor (>= 300 tok/s)
+	}
+}
+
+// HasPLEEngram reports whether this configuration uses a 51B Per-Layer Embedding table.
+func (c Config) HasPLEEngram() bool {
+	if !c.IsQwen35Hybrid() {
+		return false
+	}
+	return c.ModelType == "qwen3_8_flash_next" || c.ModelType == "qwen3_5_text" || c.VocabSize >= 150000
+}
+
+// ComputePLERowIndex computes the 1D table row index for a token and attention head.
+func ComputePLERowIndex(tokenID int, headIdx int, vocabPerHead int) int64 {
+	if vocabPerHead <= 0 {
+		vocabPerHead = 20000000
+	}
+	vTok := int64(tokenID % vocabPerHead)
+	if vTok < 0 {
+		vTok = -vTok
+	}
+	return int64(headIdx)*int64(vocabPerHead) + vTok
+}
+
+// ComputePLERowOffset calculates the exact byte offset into the auxiliary embedding table.
+func ComputePLERowOffset(tokenID int, headIdx int, vocabPerHead int, rowSizeBytes int) int64 {
+	if rowSizeBytes <= 0 {
+		rowSizeBytes = 130
+	}
+	rowIdx := ComputePLERowIndex(tokenID, headIdx, vocabPerHead)
+	return rowIdx * int64(rowSizeBytes)
+}
+
+// PrefetchPLEUBatchRows calculates unique row indices required by a micro-batch across all PLE heads.
+func PrefetchPLEUBatchRows(tokens []int, cfg PLEConfig) []int64 {
+	if len(tokens) == 0 {
+		return nil
+	}
+	heads := cfg.NumHeads
+	if heads <= 0 {
+		heads = 16
+	}
+	vocab := cfg.VocabPerHead
+	if vocab <= 0 {
+		vocab = 20000000
+	}
+
+	seen := make(map[int64]struct{}, len(tokens)*heads)
+	rows := make([]int64, 0, len(tokens)*heads)
+
+	for _, tok := range tokens {
+		for h := 0; h < heads; h++ {
+			r := ComputePLERowIndex(tok, h, vocab)
+			if _, exists := seen[r]; !exists {
+				seen[r] = struct{}{}
+				rows = append(rows, r)
+			}
+		}
+	}
+	return rows
+}
+
+// ValidatePLEMemoryCarveout asserts that the engram table remains host-mapped and does not exceed 2.0 GiB RSS.
+func ValidatePLEMemoryCarveout(hostMapped, gttAllocated bool, residentRSSBytes int64) error {
+	if !hostMapped {
+		return errors.New("model: memory carveout violation: PLE engram table must remain host-mapped")
+	}
+	if gttAllocated {
+		return errors.New("model: memory carveout violation: PLE engram table must never be uploaded to GTT")
+	}
+	const maxRSS = int64(2) * 1024 * 1024 * 1024
+	if residentRSSBytes > maxRSS {
+		return fmt.Errorf("model: resident RAM footprint %d bytes exceeds 2.0 GiB limit", residentRSSBytes)
+	}
+	return nil
+}
+
+// ValidatePLEPrefillThroughput verifies that prefill throughput exceeds the 300 tok/s threshold.
+func ValidatePLEPrefillThroughput(tokPerSec float64) error {
+	if tokPerSec < 300.0 {
+		return fmt.Errorf("model: prefill throughput %.2f tok/s below 300 tok/s floor", tokPerSec)
+	}
+	return nil
+}
+

@@ -160,6 +160,9 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 	category := fs.String("category", "", "explicit category for baseline-aware dispatch")
 	layer := fs.String("layer", "", "ordered layer within --category")
 	repo := fs.String("repo", "", "owner/name override (default: gh infers from cwd)")
+	auditDiscoverability := fs.Bool("audit-discoverability", true, "audit issue discoverability for orchestrator wave admission before creation")
+	noAuditDiscoverability := fs.Bool("no-audit-discoverability", false, "bypass discoverability audit check")
+	allowNonDispatchable := fs.Bool("allow-non-dispatchable", false, "allow filing issues that land in triage or subdivide queues")
 	dryRun := fs.Bool("dry-run", false, "render the issue + gh argv without calling gh")
 	asJSON := fs.Bool("json", false, "emit the machine-readable result")
 	if !parseFlags(fs, argv) {
@@ -255,6 +258,43 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 		}
 		fmt.Fprintf(stdout, "fak-dev issue create --dry-run: would run `gh %s`\n", strings.Join(args, " "))
 		return 0
+	}
+
+	if *auditDiscoverability && !*noAuditDiscoverability && !*allowNonDispatchable && !*rawBody {
+		draft := issuepolicy.IssueDraft{
+			Title: *title,
+			Body:  resolvedBody,
+		}
+		for _, l := range labelList {
+			draft.Labels = append(draft.Labels, issuepolicy.IssueLabel{Name: l})
+		}
+		audit := auditIssueDraftDiscoverability(draft, issuepolicy.Options{})
+		if !audit.Dispatchable {
+			errMsg := fmt.Sprintf("issue is not dispatchable for wave orchestrator (placement: %s)", audit.Placement)
+			fmt.Fprintf(stderr, "fak-dev issue create: %s\n", errMsg)
+			if len(audit.MissingSections) > 0 {
+				fmt.Fprintf(stderr, "  missing sections: %s\n", strings.Join(audit.MissingSections, ", "))
+			}
+			if len(audit.Reasons) > 0 {
+				fmt.Fprintln(stderr, "  reasons:")
+				for _, r := range audit.Reasons {
+					fmt.Fprintf(stderr, "    - %s\n", r)
+				}
+			}
+			if len(audit.RepairActions) > 0 {
+				fmt.Fprintln(stderr, "  repair actions:")
+				for i, a := range audit.RepairActions {
+					fmt.Fprintf(stderr, "    %d. %s\n", i+1, a)
+				}
+			}
+			fmt.Fprintln(stderr, "  (bypass with --no-audit-discoverability or --allow-non-dispatchable)")
+			if *asJSON {
+				result.OK = false
+				result.Error = errMsg
+				encodeJSONOrFail(stdout, stderr, result, "fak-dev issue create")
+			}
+			return 3
+		}
 	}
 
 	run := runner

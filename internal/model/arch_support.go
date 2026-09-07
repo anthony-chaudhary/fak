@@ -97,6 +97,8 @@ const (
 	ForwardGemma4 ForwardPathKind = "gemma4"
 	// ForwardGLMDsaMLA is the GLM-DSA / DeepSeek MLA-latent + MoE layout path.
 	ForwardGLMDsaMLA ForwardPathKind = "glm-dsa-mla"
+	// ForwardGLM5Next is the GLM-5.3-Flash KDA/DSA hybrid attention and sparse MoE path.
+	ForwardGLM5Next ForwardPathKind = "glm5-next"
 	// ForwardMiniMax is the MiniMax-M3 lightning-indexer sparse-attention path.
 	ForwardMiniMax ForwardPathKind = "minimax-msa"
 	// ForwardQwen35GDN is the qwen35-family gated full-attention + Gated-DeltaNet
@@ -120,7 +122,13 @@ const (
 // the qwen35 GDN hybrid, with standard GQA as the default.
 func ClassifyForwardPath(cfg Config, man map[string]tensorMeta) (ForwardPathKind, error) {
 	if cfg.GLM5Next {
-		return "", &GLM5NextUnsupportedError{ModelType: glm5NextModelType, Architecture: glm5NextArchitecture}
+		if man == nil {
+			return "", &GLM5NextUnsupportedError{ModelType: glm5NextModelType, Architecture: glm5NextArchitecture}
+		}
+		if err := ValidateGLM5NextManifest(man); err != nil {
+			return "", err
+		}
+		return ForwardGLM5Next, nil
 	}
 	if err := refuseUnsupportedHybridArch(cfg, man); err != nil {
 		return "", err

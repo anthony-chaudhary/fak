@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -42,11 +43,17 @@ type OpencodeSpawnReceipt struct {
 
 const opencodeSpawnReceiptSchema = "fak.issue-orchestrator-opencode-spawn.v1"
 
+var newWorkerSupervisorFunc = issueorchestrator.NewWorkerSupervisor
+
 func cmdIssueOrchestrator(argv []string) {
 	os.Exit(runIssueOrchestrator(os.Stdout, os.Stderr, argv))
 }
 
 func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "adjust-steps" {
+		return runIssueOrchestratorAdjustSteps(stdout, stderr, argv[1:])
+	}
+
 	fs := flag.NewFlagSet("fak issue-orchestrator", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -64,6 +71,15 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 	var topLimit int
 	fs.IntVar(&topLimit, "top", 0, "limit evaluation to the top N candidate issues")
 	fs.IntVar(&topLimit, "limit", 0, "alias for --top")
+	autoExpand := fs.Bool("auto-expand", true, "dynamically expand discovery window when candidates are unplannable")
+	minWindow := fs.Int("min-window", 20, "minimum candidate discovery window")
+	maxWindow := fs.Int("max-window", 500, "maximum candidate discovery window")
+	unplannableWarnRatio := fs.Float64("unplannable-warn-ratio", 0.65, "threshold ratio of non-dispatchable issues to trigger advisory warning")
+	adaptiveConcurrency := fs.Bool("adaptive-concurrency", true, "derive wave size dynamically from host resources and SQLite contention")
+	live := fs.Bool("live", false, "fetch issues directly from GitHub via live ingestion")
+	view := fs.String("view", "", "view slug from .github/issue-views.json (default: ready-leaves)")
+	pageSize := fs.Int("page-size", 50, "page size for dynamic live ingestion")
+	rateLimitTimeout := fs.Duration("rate-limit-timeout", 30*time.Second, "timeout for rate-limit backoff before soft degradation")
 	_ = fs.Bool("plan-waves", false, "plan concurrent-safe waves (default behavior; accepted for CLI compatibility)")
 	excludeIssuesStr := fs.String("exclude-issues", "", "comma-separated list of issue numbers to exclude")
 	excludeLanes := fs.String("exclude-lanes", "", "comma-separated list of lanes to exclude")
@@ -83,6 +99,12 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 	worktree := fs.Bool("worktree", false, "prepare detached worker worktrees for each spawned chat")
 	dryRun := fs.Bool("dry-run", false, "preview OpenCode chat spawn commands without executing")
 	logDir := fs.String("log-dir", "", "directory for OpenCode session logs (default: .dispatch-runs)")
+	supervise := fs.Bool("supervise", true, "enables adaptive process supervision for spawned OpenCode chats")
+
+	harvest := fs.Bool("harvest", false, "trigger harvest and progressive reconciliation of wave runs")
+	autoLand := fs.Bool("auto-land", false, "automatically land verified cleared leaves")
+	minClearRate := fs.Float64("min-clear-rate", 0.0, "minimum clear rate threshold")
+	receipt := fs.String("receipt", "", "path to wave receipt JSON (defaults to latest in .dispatch-runs or workspace)")
 
 	if !parseFlags(fs, argv) {
 		return 2
@@ -97,21 +119,107 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 		root = repoRoot()
 	}
 
+	if *harvest {
+		receiptPath := *receipt
+		if receiptPath == "" {
+			receiptPath = findLatestReceipt(root)
+		}
+		if receiptPath == "" {
+			fmt.Fprintf(stderr, "fak issue-orchestrator: no wave receipt found in %s\n", filepath.Join(root, ".dispatch-runs"))
+			return 2
+		}
+		if !filepath.IsAbs(receiptPath) {
+			if _, err := os.Stat(receiptPath); os.IsNotExist(err) && root != "" {
+				candidate := filepath.Join(root, receiptPath)
+				if _, err2 := os.Stat(candidate); err2 == nil {
+					receiptPath = candidate
+				}
+			}
+		}
+		opts := issueorchestrator.HarvestOptions{
+			WaveReceiptPath: receiptPath,
+			Workspace:       root,
+			MinClearRate:    *minClearRate,
+			AutoLand:        *autoLand,
+		}
+		harvestReceipt, err := issueorchestrator.ReconcileWave(opts)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak issue-orchestrator: harvest: %v\n", err)
+			return 1
+		}
+		if *asJSON {
+			if err := writeIndentedJSON(stdout, harvestReceipt); err != nil {
+				fmt.Fprintf(stderr, "fak issue-orchestrator: encode json: %v\n", err)
+				return 1
+			}
+			return 0
+		}
+		fmt.Fprintf(stdout, "=== Wave Harvest Reconciliation: %s ===\n", harvestReceipt.WaveID)
+		fmt.Fprintf(stdout, "Total Leaves:   %d\n", harvestReceipt.TotalLeaves)
+		fmt.Fprintf(stdout, "Cleared:        %d (%.1f%%)\n", harvestReceipt.ClearedCount, harvestReceipt.ClearRate*100)
+		fmt.Fprintf(stdout, "Residual:       %d\n", harvestReceipt.ResidualCount)
+		fmt.Fprintf(stdout, "Quiet:          %d\n", harvestReceipt.QuietCount)
+		fmt.Fprintf(stdout, "Stalled:        %d\n", harvestReceipt.StalledCount)
+		if len(harvestReceipt.LandedSHAs) > 0 {
+			fmt.Fprintf(stdout, "Landed Commits: %d\n", len(harvestReceipt.LandedSHAs))
+			for _, sha := range harvestReceipt.LandedSHAs {
+				fmt.Fprintf(stdout, "  - %s\n", sha)
+			}
+		}
+		if len(harvestReceipt.Leaves) > 0 {
+			fmt.Fprintln(stdout, "\nLeaves:")
+			for _, l := range harvestReceipt.Leaves {
+				fmt.Fprintf(stdout, "  - #%d [%s]: %s (state: %s)\n", l.IssueNumber, l.Lane, l.Title, l.State)
+			}
+		}
+		if len(harvestReceipt.ReviewQueue) > 0 {
+			fmt.Fprintf(stdout, "\nReview Queue (%d leaves):\n", len(harvestReceipt.ReviewQueue))
+			for _, rq := range harvestReceipt.ReviewQueue {
+				fmt.Fprintf(stdout, "  - #%d: %s\n", rq.IssueNumber, rq.Title)
+			}
+		}
+		if len(harvestReceipt.AdvisoryLogs) > 0 {
+			fmt.Fprintln(stdout, "\nAdvisories:")
+			for _, adv := range harvestReceipt.AdvisoryLogs {
+				fmt.Fprintf(stdout, "  %s\n", adv)
+			}
+		}
+		return 0
+	}
+
 	// 1. Load issues from input
 	var issues []issueorchestrator.Issue
 	var err error
 
-	inputPath := *fromIssues
-	if inputPath == "" {
-		inputPath = *fromPlan
-	}
+	if *live {
+		liveOpts := issueorchestrator.LiveIngestOptions{
+			Workspace:        root,
+			View:             *view,
+			PageSize:         *pageSize,
+			RateLimitTimeout: *rateLimitTimeout,
+			TargetIssues:     *targetIssues,
+			LogWarning: func(w string) {
+				fmt.Fprintln(stderr, w)
+			},
+		}
+		issues, err = issueorchestrator.FetchLiveIssues(context.Background(), liveOpts)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak issue-orchestrator: live ingest: %v\n", err)
+			return 2
+		}
+	} else {
+		inputPath := *fromIssues
+		if inputPath == "" {
+			inputPath = *fromPlan
+		}
 
-	issues, err = issueorchestrator.LoadIssues(inputPath, root)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak issue-orchestrator: %v\n", err)
-		return 2
+		issues, err = issueorchestrator.LoadIssues(inputPath, root)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak issue-orchestrator: %v\n", err)
+			return 2
+		}
 	}
-	if topLimit > 0 && len(issues) > topLimit {
+	if !*autoExpand && topLimit > 0 && len(issues) > topLimit {
 		issues = issues[:topLimit]
 	}
 
@@ -138,16 +246,25 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	// 3. Generate wave plan
+	effectiveWaveSize := *waveSize
+	if *adaptiveConcurrency {
+		effectiveWaveSize = issueorchestrator.AdaptiveWaveSize(issueorchestrator.WavePlanOptions{WaveSize: *waveSize})
+	}
+
 	waveOpts := issueorchestrator.WavePlanOptions{
-		WaveSize:       *waveSize,
-		MaxWaves:       *maxWaves,
-		TargetIssues:   *targetIssues,
-		TargetPoints:   targetPoints,
-		Limit:          topLimit,
-		ExcludedIssues: excludedIssues,
-		ExcludedLanes:  excludedLanesList,
-		AutoDetectHeld: !*noDetectHeld,
-		WorkspaceRoot:  root,
+		WaveSize:             effectiveWaveSize,
+		MaxWaves:             *maxWaves,
+		TargetIssues:         *targetIssues,
+		TargetPoints:         targetPoints,
+		Limit:                topLimit,
+		ExcludedIssues:       excludedIssues,
+		ExcludedLanes:        excludedLanesList,
+		AutoDetectHeld:       !*noDetectHeld,
+		WorkspaceRoot:        root,
+		AutoExpand:           *autoExpand,
+		MinWindow:            *minWindow,
+		MaxWindow:            *maxWindow,
+		UnplannableWarnRatio: *unplannableWarnRatio,
 	}
 	if *spawnOpencode || *opencodeCommands {
 		waveOpts.IncludeOpencodeCommands = true
@@ -161,6 +278,11 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	plan := issueorchestrator.PlanWaves(issues, waveOpts)
+	if plan.Diagnostics != nil && len(plan.Diagnostics.AdvisoryWarnings) > 0 {
+		for _, warn := range plan.Diagnostics.AdvisoryWarnings {
+			fmt.Fprintln(stderr, warn)
+		}
+	}
 
 	// 4. Handle baseline comparison if requested
 	if *comparePath != "" {
@@ -269,7 +391,14 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 		}
 
 		hasError := false
-		for _, issue := range selectedWave.Issues {
+		for issueIdx, issue := range selectedWave.Issues {
+			if issueIdx > 0 && !*dryRun {
+				res := issueorchestrator.CurrentSystemResources("")
+				delay := issueorchestrator.CalculateSpawnDelay(res, func(w string) {
+					fmt.Fprintln(stderr, w)
+				})
+				time.Sleep(delay)
+			}
 			var wtDir string
 			if *worktree {
 				res := workerworktree.Prepare(root, issue.Lane, strconv.Itoa(issue.Number), "", "", nil)
@@ -339,7 +468,7 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 			cmd := exec.Command(exe, cmdArgs...)
 			if chat.Worktree != "" {
 				cmd.Dir = chat.Worktree
-				cmd.Env = envSliceFromMap(workerworktree.WorktreeEnv(nil, chat.Worktree))
+				cmd.Env = envSliceFromMap(workerworktree.WorktreeEnv(envMap(os.Environ()), chat.Worktree))
 			} else {
 				cmd.Dir = root
 			}
@@ -376,6 +505,15 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 				_ = workerworktree.HandoffOwner(chat.Worktree, pid)
 			}
 			_ = cmd.Process.Release()
+
+			if *supervise {
+				supCfg := issueorchestrator.WorkerSupervisorConfig{
+					PID:         pid,
+					WorktreeDir: chat.Worktree,
+					LogFile:     logFile,
+				}
+				_ = newWorkerSupervisorFunc(supCfg)
+			}
 
 			record.PID = pid
 			record.Status = "spawned"
@@ -442,4 +580,167 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	return 0
+}
+
+func runIssueOrchestratorAdjustSteps(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak issue-orchestrator adjust-steps", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	issueNum := fs.Int("issue", 0, "issue number to adjust (required)")
+	steps := fs.Int("steps", -1, "new expected steps budget (required)")
+	reason := fs.String("reason", "", "reason for adjusting steps")
+	planPath := fs.String("plan", "", "path to plan JSON to modify in-place")
+	fromPlan := fs.String("from-plan", "", "alias for --plan")
+	workspace := fs.String("workspace", "", "workspace root")
+	asJSON := fs.Bool("json", false, "emit updated plan JSON")
+
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak issue-orchestrator adjust-steps: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+
+	if *issueNum <= 0 {
+		fmt.Fprintln(stderr, "fak issue-orchestrator adjust-steps: --issue is required and must be positive")
+		return 2
+	}
+	if *steps < 0 {
+		fmt.Fprintln(stderr, "fak issue-orchestrator adjust-steps: --steps is required and must be non-negative")
+		return 2
+	}
+
+	targetPlanPath := *planPath
+	if targetPlanPath == "" {
+		targetPlanPath = *fromPlan
+	}
+
+	if targetPlanPath != "" && !filepath.IsAbs(targetPlanPath) && *workspace != "" {
+		if _, err := os.Stat(targetPlanPath); os.IsNotExist(err) {
+			candidate := filepath.Join(*workspace, targetPlanPath)
+			if _, err2 := os.Stat(candidate); err2 == nil {
+				targetPlanPath = candidate
+			}
+		}
+	}
+
+	var plan issueorchestrator.Plan
+	if targetPlanPath != "" {
+		data, err := os.ReadFile(targetPlanPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak issue-orchestrator adjust-steps: read plan: %v\n", err)
+			return 2
+		}
+		if err := json.Unmarshal(data, &plan); err != nil {
+			fmt.Fprintf(stderr, "fak issue-orchestrator adjust-steps: decode plan JSON: %v\n", err)
+			return 2
+		}
+	} else {
+		plan = issueorchestrator.Plan{
+			Schema:        issueorchestrator.WavePlanSchema,
+			TotalIssues:   1,
+			PlannedIssues: 1,
+			TotalWaves:    1,
+			Waves: []issueorchestrator.Wave{
+				{
+					ID:       "wave-1",
+					WaveSize: 1,
+					Issues: []issueorchestrator.Issue{
+						{
+							Number:          *issueNum,
+							ExpectedSteps:   0,
+							Dispatchability: "dispatchable",
+						},
+					},
+				},
+			},
+		}
+	}
+
+	if err := issueorchestrator.AdjustIssueSteps(&plan, *issueNum, *steps, *reason); err != nil {
+		fmt.Fprintf(stderr, "fak issue-orchestrator adjust-steps: %v\n", err)
+		return 1
+	}
+
+	if targetPlanPath != "" {
+		b, err := json.MarshalIndent(plan, "", "  ")
+		if err != nil {
+			fmt.Fprintf(stderr, "fak issue-orchestrator adjust-steps: marshal plan: %v\n", err)
+			return 1
+		}
+		b = append(b, '\n')
+		if err := os.WriteFile(targetPlanPath, b, 0o644); err != nil {
+			fmt.Fprintf(stderr, "fak issue-orchestrator adjust-steps: write plan: %v\n", err)
+			return 1
+		}
+	}
+
+	if *asJSON {
+		if err := writeIndentedJSON(stdout, plan); err != nil {
+			fmt.Fprintf(stderr, "fak issue-orchestrator adjust-steps: encode json: %v\n", err)
+			return 1
+		}
+	} else {
+		if targetPlanPath != "" {
+			fmt.Fprintf(stdout, "Adjusted issue #%d steps to %d in plan\n", *issueNum, *steps)
+		} else {
+			fmt.Fprintf(stdout, "Adjusted issue #%d steps to %d\n", *issueNum, *steps)
+		}
+		if *reason != "" {
+			fmt.Fprintf(stdout, "Reason: %s\n", *reason)
+		}
+	}
+
+	return 0
+}
+
+func findLatestReceipt(root string) string {
+	dirs := []string{
+		filepath.Join(root, ".dispatch-runs"),
+		root,
+	}
+	var latestPath string
+	var latestMod time.Time
+
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if !strings.HasSuffix(strings.ToLower(name), ".json") {
+				continue
+			}
+			fullPath := filepath.Join(dir, name)
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			data, err := os.ReadFile(fullPath)
+			if err != nil {
+				continue
+			}
+			var probe struct {
+				Schema string `json:"schema"`
+				WaveID string `json:"wave_id"`
+				Leaves []any  `json:"leaves"`
+				Chats  []any  `json:"chats"`
+			}
+			if err := json.Unmarshal(data, &probe); err == nil {
+				if probe.WaveID != "" || len(probe.Leaves) > 0 || len(probe.Chats) > 0 ||
+					strings.Contains(probe.Schema, "harvest") || strings.Contains(probe.Schema, "spawn") {
+					if info.ModTime().After(latestMod) {
+						latestMod = info.ModTime()
+						latestPath = fullPath
+					}
+				}
+			}
+		}
+	}
+	return latestPath
 }

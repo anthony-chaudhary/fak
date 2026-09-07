@@ -35,6 +35,10 @@
     "cross-validator": {
       "variant": "high",
       "description": "Adversarial cross-validation subagent for verifying code changes, inspecting diffs, executing tests, and producing proof verdicts"
+    },
+    "lander": {
+      "variant": "high",
+      "description": "Safe git landing subagent for executing pre-commit package validation, lint checks, explicit-path commits, and unprompted push"
     }
   },
   "mcp": {
