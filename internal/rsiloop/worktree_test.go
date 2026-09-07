@@ -115,6 +115,9 @@ func TestWithWorktree_GitWorktreeAddLockContention(t *testing.T) {
 		t.Fatal("withWorktree should fail when git worktree add fails with lock")
 	}
 
+	if !IsTransient(err) {
+		t.Fatalf("expected IsTransient(err) == true, got: %v", err)
+	}
 	if !IsTransientMeasureError(err) {
 		t.Fatalf("expected transient measurement error, got: %v", err)
 	}
@@ -164,10 +167,48 @@ func TestWithWorktree_FnGitLockContention(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from fn")
 	}
+	if !IsTransient(err) {
+		t.Fatalf("expected IsTransient(err) == true, got: %v", err)
+	}
 	if !IsTransientMeasureError(err) {
 		t.Fatalf("expected transient measurement error, got: %v", err)
 	}
 	if !IsGitLockError(err) {
 		t.Fatalf("expected git lock error, got: %v", err)
+	}
+}
+
+func TestGitLockContention_IsTransient(t *testing.T) {
+	lockErrors := []string{
+		"fatal: Unable to create '.git/index.lock': File exists.",
+		"error: cannot lock ref 'refs/heads/main': is at abc but expected def",
+		"fatal: Another git process seems to be running in this repository",
+		"error: lock_busy: another process holds lock",
+		"fatal: packed-refs.lock: File exists",
+		"could not reset index",
+		"unable to write new index file",
+	}
+
+	for _, msg := range lockErrors {
+		err := errors.New(msg)
+		if !IsTransient(err) {
+			t.Errorf("IsTransient(errors.New(%q)) = false, want true", msg)
+		}
+		gle := &GitLockError{Err: err, Msg: msg}
+		if !IsTransient(gle) {
+			t.Errorf("IsTransient(&GitLockError{%q}) = false, want true", msg)
+		}
+		wrapped := NewTransientMeasureError(gle)
+		if !IsTransient(wrapped) {
+			t.Errorf("IsTransient(NewTransientMeasureError(&GitLockError{%q})) = false, want true", msg)
+		}
+	}
+
+	nonLock := errors.New("compilation failed: undefined symbol")
+	if IsTransient(nonLock) {
+		t.Errorf("IsTransient(nonLock) = true, want false")
+	}
+	if IsTransient(nil) {
+		t.Errorf("IsTransient(nil) = true, want false")
 	}
 }

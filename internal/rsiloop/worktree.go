@@ -214,9 +214,13 @@ func shortSHA(sha string) string {
 func repoTopAndRel(repoArg string) (top, moduleRel string, err error) {
 	cmd := windowgate.Command("git", "-C", repoArg, "rev-parse", "--show-toplevel")
 	windowgate.ConfigureBackgroundCommand(cmd)
-	out, rerr := cmd.Output()
+	out, rerr := cmd.CombinedOutput()
 	if rerr != nil {
-		return "", "", fmt.Errorf("rev-parse --show-toplevel: %w", rerr)
+		topErr := fmt.Errorf("rev-parse --show-toplevel: %w", rerr)
+		if isGitLockMessage(string(out)) || isGitLockMessage(rerr.Error()) {
+			return "", "", NewTransientMeasureError(&GitLockError{Err: topErr, Msg: string(out)})
+		}
+		return "", "", topErr
 	}
 	top = filepath.Clean(strings.TrimSpace(string(out)))
 	abs, aerr := filepath.Abs(repoArg)
