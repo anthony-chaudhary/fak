@@ -22,6 +22,7 @@ Coordinated, conflict-free synchronization protocol for parallel subagents and i
 5. **Detached worktrees only**: Concurrent filesystem isolation utilizes detached HEAD worktrees pinned at an explicit trunk SHA (`git worktree add --detach <path> <sha>` managed via `fak worktree worker prepare`). Never attach branch worktrees.
 6. **Coordinator owns git**: Workers and subagents never execute mutating git commands (`commit`, `push`, `merge`, `rebase`, `checkout`, `add`, `reset`). The coordinator process exclusively manages index operations, CAS trunk landing, and push interactions.
 7. **Package-scoped verification only**: Verification executes within isolated scopes (`fak validate --mine <p>...` and targeted package tests under WSL/Linux) without running unisolated global sweeps that contaminate clean builds with peer WIP.
+8. **Autonomous landing upon task completion by default**: When an agent, worker, or subagent completes any assigned task, it must follow the safe landing process itself by default rather than leaving uncommitted edits or waiting for interactive prompts. If coordinator context preservation or build isolation is required, the coordinator dispatches a dedicated landing/worker subagent to execute the verification and landing steps autonomously.
 
 ## Architecture & Roles
 
