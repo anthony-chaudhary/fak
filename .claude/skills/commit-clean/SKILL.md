@@ -17,15 +17,17 @@ One repeatable pass that lands YOUR finished paths on `main` with a lintable, bi
 
 ## Why this is hard
 
-`main` is a shared multi-session trunk: at any moment hundreds of dirty files belong to live peers, not you. `git add <paths>` followed by a separate `git commit` is NOT atomic here — a background peer can sweep your staged file into their commit under their message, or their staged files can land inside yours. The remedy is to stage-and-commit by explicit pathspec in one locked step, then verify that only your paths and your message landed.
+`main` is a shared multi-session trunk: at any moment hundreds of dirty files belong to live peers, not you. `git add <paths>` followed by a separate `git commit` is NOT atomic here — a background peer can sweep your staged file into their commit under their message, or their staged files can land inside yours. Furthermore, concurrent merges and upstream advances create divergence races. The remedy is to stage-and-commit by explicit pathspec in one locked step, wait out active peer merges (`MERGE_HEAD`), integrate upstream safely via `fak sync apply` / `fak sync reconcile` without raw merges or `--autostash`, and verify that only your paths and your message landed.
 
 ## The mantra (from [`CLAUDE.md`](../../../CLAUDE.md) / [`AGENTS.md`](../../../AGENTS.md))
 
 - **Work directly on the trunk (`main`).** Never a feature branch — the trunk guard refuses `OFF_TRUNK`.
+- **Safe merge & non-destructive convergence.** Never run unverified raw git merges, force-push, or use `git pull --rebase --autostash` (which churns peers' dirty files). Check for and wait out any active peer `MERGE_HEAD` (`MERGE_IN_PROGRESS`). Integrate upstream advances non-destructively via `fak sync apply` (`--ff-only`) or `fak sync reconcile` (`ROUTE_DISJOINT_INTEGRATE`, `ROUTE_SUPERSET_MERGE`, or `ROUTE_HOLD_DIRTY_COLLISION` with `fak wip park`).
+- **Dual-repo awareness (`fak` & `fak-private`).** When committing shared interfaces (`pkg/*`) or companion modules affecting `fak-private`, synchronize both repositories: verify multi-module alignment with `go work sync`, verify zero private leak needles (`python tools/scrub_public_copy.py --audit-staged`), and coordinate commits across both repos.
 - **Commit by explicit path.** Name every path you own; never `git add -A`.
 - **Sign off with `-s` (DCO).** No `Co-Authored-By` trailer.
 - **Conventional-Commits subject ending in a `(fak <leaf>)` stamp** so the `dos verify` referee can bind the commit to its lane — e.g. `fix(gateway): treat same-tick ready as positive (fak gateway)`. A bare un-stamped subject stays NOT_SHIPPED.
-- **Default is to ship.** Once the tree is green (`make ci`), commit AND push unprompted.
+- **Default is to ship.** Once the tree is green (`make ci`), commit AND push unprompted via `fak sync push`.
 
 ## The tools (dogfood these, not raw git)
 
@@ -70,7 +72,7 @@ fak sweep --apply --lane <lane> -m "<subject>" [--push]   # commit one lane grou
 |---|---|
 | `OFF_TRUNK` | HEAD is off-trunk or detached — get back on `main` first. |
 | `NOTHING_STAGED` | the pathspec has no change — re-check which paths you actually edited. |
-| `MERGE_IN_PROGRESS` | a merge is mid-flight (`MERGE_HEAD` present) — a partial path-scoped commit can't run; finish or abort the merge, then commit by path. |
+| `MERGE_IN_PROGRESS` | a merge is mid-flight (`MERGE_HEAD` present) — a partial path-scoped commit can't run. Never force or run raw merges. If owned by a peer, unstage your paths and wait; do not abort or finish peer merges. If owned by your run, converge cleanly via `fak sync apply` (`--ff-only`) or `fak sync reconcile` (`ROUTE_DISJOINT_INTEGRATE` / `ROUTE_SUPERSET_MERGE`), parking conflicting WIP with `fak wip park` if needed (`ROUTE_HOLD_DIRTY_COLLISION`). |
 | `PATHSPEC_RACE` | a peer's files landed in your commit (the headline guard) — the commit is left intact for review and NOT pushed; surface it, never force-push. |
 | `MESSAGE_RACE` | the landed subject/body ≠ the one you requested — surface it for review. |
 | `SYMLINK_ESCAPE` | a landed path resolves through a symlink to a target outside your lease (the CVE-2025-53109 class) — the commit is left intact for review and NOT pushed; surface it, never force-push. |
@@ -84,7 +86,7 @@ fak sweep --apply --lane <lane> -m "<subject>" [--push]   # commit one lane grou
 | `LOCK_BUSY` / `WINDOW_FULL` | another fak writer holds the lane — retryable, wait and retry. |
 | `WRITER_LEASE_HELD` | a fak-managed sync-apply window holds the #4240 worktree writer lease — retryable, wait for the sync to finish and retry. |
 | `HOOK_REFUSED` | a git/commit hook declined — read the hook output and fix the cause. |
-| `PUSH_REJECTED` | non-fast-forward — integrate via `fak sync apply`, never force. |
+| `PUSH_REJECTED` | remote rejected push (non-fast-forward conflict on origin). Never force-push or use `git pull --rebase --autostash`. Integrate upstream changes via `fak sync apply` (or `fak sync reconcile --apply`), re-validate your owned paths with `fak validate --mine`, and push with `fak sync push`. When committing cross-repo changes affecting `fak-private`, verify boundary leak hygiene (`python tools/scrub_public_copy.py --audit-staged`) and coordinate both pushes. |
 
 `LOCK_BROKEN holder_dead …` is informational, not a refusal — a stale lock from a dead process was reclaimed and the commit proceeded.
 
@@ -116,6 +118,7 @@ Before the split both nothing-landed classes returned 3, so a lander that (corre
 - `git add -A`, `git add .`, or `git commit -a` — they sweep peers' work into your commit.
 - Force-push, amend, or `git reset --hard` on the shared trunk.
 - `git pull --rebase --autostash` — it churns peers' dirty files.
+- Unverified raw git merges on the shared trunk (converge via `fak sync apply` / `fak sync reconcile`).
 - Stage a peer's uncommitted file, even to "help".
 - Put `-m` after the `--` pathspec in raw git — paths-before-message trips the guard's hang detector; keep `-m "…"` first, `--` paths last.
 
