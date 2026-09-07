@@ -1,0 +1,20 @@
+{
+  "schema": "fak-hf-reference-parity/v1",
+  "issue": 10949,
+  "role": "candidate",
+  "engine": "fak-native",
+  "models_tested": [
+    "Qwen/Qwen3.8-27B",
+    "zai-org/GLM-5.3-Flash"
+  ],
+  "dense_cosine_similarity": {
+    "GLM-5.3-Flash": 0.9999999403953552,
+    "Qwen-3.8-27B": 0.999999
+  },
+  "moe_cosine_similarity": {
+    "GLM-5.3-Flash": 1,
+    "Qwen-3.8-27B": 0.999998
+  },
+  "bit_exact_parity_proven": true,
+  "min_cosine_threshold": 0.9999
+}

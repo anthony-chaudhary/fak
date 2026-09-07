@@ -1,0 +1,22 @@
+{
+  "schema": "fak-native-decode-session/v1",
+  "issue": 9440,
+  "role": "candidate",
+  "engine": "fak-native",
+  "model": "zai-org/GLM-5.3-Flash",
+  "artifact_revision": "04c4e9e95c5da8862dced7e5056455116f83a7e0",
+  "formats_tested": [
+    "FP8",
+    "BF16"
+  ],
+  "chat_template": "canonical-glm5next-thinking-v1",
+  "prompt_tokens": 5,
+  "generated_tokens": 3,
+  "stop_reason": "stop_token",
+  "state_cleaned": true,
+  "memory_breakdown_bytes": {
+    "dsa_sparse_kv_bytes": 16384,
+    "moe_active_slice_bytes": 18874368,
+    "recurrent_kda_state_bytes": 1536
+  }
+}

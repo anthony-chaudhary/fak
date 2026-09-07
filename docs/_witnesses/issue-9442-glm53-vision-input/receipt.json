@@ -1,0 +1,14 @@
+{
+  "schema": "fak-native-vision-pipeline/v1",
+  "issue": 9442,
+  "role": "candidate",
+  "engine": "fak-native",
+  "model": "zai-org/GLM-5.3-Flash",
+  "input_image_dimensions": "448x448x3",
+  "patch_grid": "32x32 patches (14x14)",
+  "spatial_merge": "2x2 spatial merge (4096 merged dim)",
+  "projected_tokens": 256,
+  "output_hidden_dim": 4096,
+  "token_budget_formula": "totalTiles * 256 + 2",
+  "task_output_parity": true
+}

@@ -1,0 +1,67 @@
+{
+  "schema": "fak-native-operating-envelope/v1",
+  "issue": 9438,
+  "role": "candidate",
+  "engine": "fak-native",
+  "model": "zai-org/GLM-5.3-Flash",
+  "total_parameters": 320000000000,
+  "active_parameters": 18000000000,
+  "layers_total": 45,
+  "kda_recurrent_layers": 34,
+  "dsa_sparse_layers": 11,
+  "fixed_kda_ballast_bytes": 142606336,
+  "evaluated_stages": [
+    {
+      "name": "short",
+      "context_tokens": 4096,
+      "kda_ballast_bytes": 142606336,
+      "dsa_kv_bytes": 46137344,
+      "active_moe_bytes": 18200000000,
+      "total_required_bytes": 18388743680,
+      "feasible_on_96gb": true,
+      "feasible_on_128gb": true
+    },
+    {
+      "name": "32k",
+      "context_tokens": 32768,
+      "kda_ballast_bytes": 142606336,
+      "dsa_kv_bytes": 369098752,
+      "active_moe_bytes": 18200000000,
+      "total_required_bytes": 18711705088,
+      "feasible_on_96gb": true,
+      "feasible_on_128gb": true
+    },
+    {
+      "name": "128k",
+      "context_tokens": 131072,
+      "kda_ballast_bytes": 142606336,
+      "dsa_kv_bytes": 1476395008,
+      "active_moe_bytes": 18200000000,
+      "total_required_bytes": 19819001344,
+      "feasible_on_96gb": true,
+      "feasible_on_128gb": true
+    },
+    {
+      "name": "256k",
+      "context_tokens": 262144,
+      "kda_ballast_bytes": 142606336,
+      "dsa_kv_bytes": 2952790016,
+      "active_moe_bytes": 18200000000,
+      "total_required_bytes": 21295396352,
+      "feasible_on_96gb": true,
+      "feasible_on_128gb": true
+    },
+    {
+      "name": "1m",
+      "context_tokens": 1048576,
+      "kda_ballast_bytes": 142606336,
+      "dsa_kv_bytes": 11811160064,
+      "active_moe_bytes": 18200000000,
+      "total_required_bytes": 30153766400,
+      "feasible_on_96gb": true,
+      "feasible_on_128gb": true
+    }
+  ],
+  "admission_checks_verified": true,
+  "comparison_baseline": "SGLang / vLLM (explicitly selected and engine-labelled)"
+}

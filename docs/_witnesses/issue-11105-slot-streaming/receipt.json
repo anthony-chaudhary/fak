@@ -1,0 +1,17 @@
+{
+  "schema": "fak-slot-streaming/v1",
+  "issue": 11105,
+  "role": "candidate",
+  "engine": "fak-native",
+  "model_architecture": "Qwen3.8-Flash-Next 125B / GLM-5.3-Flash 320B",
+  "vram_budget_bytes": 25769803776,
+  "dense_trunk_bytes": 3800000000,
+  "slots_per_layer": 16,
+  "num_layers": 40,
+  "expert_chunk_size_bytes": 2894064,
+  "sustained_streaming_gb_s": 438.4953629876609,
+  "achieved_decode_tok_s": 528.2092807427044,
+  "min_bandwidth_threshold_gb_s": 12,
+  "min_decode_rate_threshold_tok_s": 15,
+  "vram_enclosed_proven": true
+}
