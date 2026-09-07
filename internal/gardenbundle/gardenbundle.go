@@ -87,9 +87,10 @@ var Members = []Member{
 	{
 		Key:   "fresh_status",
 		Label: "fresh status",
-		Argv:  []string{"tools/fresh_status.py", "--json"},
+		Argv:  []string{"fak", "fresh-status", "--json"},
 		Gates: false,
 		Kind:  "envelope",
+		Exec:  "command",
 	},
 	{
 		// The closure rung: review the latest guarded session's decision journal
