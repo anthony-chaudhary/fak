@@ -50,6 +50,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cacheprice"
@@ -71,6 +72,38 @@ const (
 	SnapshotTierHostL2   SnapshotTier = "host_dram_l2"
 	SnapshotTierRemoteL3 SnapshotTier = "remote_http_l3"
 )
+
+// NodeState models the lifecycle and computation states of a radix tree node.
+type NodeState uint32
+
+const (
+	// NodeWarm indicates the node has completed prefill and holds a valid KV cache.
+	NodeWarm NodeState = iota
+	// NodeComputingPrefill indicates the node is actively undergoing prefill by a leader subagent.
+	NodeComputingPrefill
+	// NodeFailed indicates prefill computation failed or was abandoned.
+	NodeFailed
+	// NodeEvicted indicates the node has been evicted from the tree.
+	NodeEvicted
+)
+
+func (s NodeState) String() string {
+	switch s {
+	case NodeWarm:
+		return "warm"
+	case NodeComputingPrefill:
+		return "computing_prefill"
+	case NodeFailed:
+		return "failed"
+	case NodeEvicted:
+		return "evicted"
+	default:
+		return "unknown"
+	}
+}
+
+// Node is an alias for node to make the tree node handle accessible to external callers.
+type Node = node
 
 // node is one vertex of the compressed radix tree. The edge parent→node carries `key`
 // (a run of token ids); the path root→node spells the token prefix this node caches.
@@ -108,6 +141,84 @@ type node struct {
 	lastUsed uint64 // logical clock of the most recent match/insert touching this node — LRU key
 	hits     int    // subsequent demand lookups that found this node resident
 	chunkID  int    // physical backing page / allocation chunk identifier (0 = unassigned)
+
+	state     uint32        // lifecycle state (warm, computing prefill, failed, evicted); accessed atomically
+	ready     chan struct{} // completion broadcast for in-flight prefill promises
+	flightErr error         // terminal error if in-flight prefill failed or was abandoned
+}
+
+var closedReadyChan = func() <-chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}()
+
+// State returns the current lifecycle state of this node.
+func (n *node) State() NodeState {
+	if n == nil {
+		return NodeWarm
+	}
+	return NodeState(atomic.LoadUint32(&n.state))
+}
+
+// SetState updates the lifecycle state of this node atomically.
+func (n *node) SetState(s NodeState) {
+	if n != nil {
+		atomic.StoreUint32(&n.state, uint32(s))
+	}
+}
+
+// Ready returns a channel that is closed when prefill computation finishes (or immediately if already warm).
+func (n *node) Ready() <-chan struct{} {
+	if n == nil || n.ready == nil {
+		return closedReadyChan
+	}
+	return n.ready
+}
+
+// WaitReady blocks until prefill computation for this node completes or ctx is cancelled.
+func (n *node) WaitReady(ctx context.Context) error {
+	if n == nil {
+		return nil
+	}
+	select {
+	case <-n.Ready():
+		if n.flightErr != nil {
+			return n.flightErr
+		}
+		if n.State() == NodeFailed {
+			return ErrFlightAbandoned
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// FlightErr returns the error recorded if prefill failed during in-flight computation.
+func (n *node) FlightErr() error {
+	if n == nil {
+		return nil
+	}
+	return n.flightErr
+}
+
+// IsComputing reports whether this node is currently undergoing prefill computation.
+func (n *node) IsComputing() bool {
+	return n != nil && n.State() == NodeComputingPrefill
+}
+
+// IsWarm reports whether this node is resident and has completed prefill.
+func (n *node) IsWarm() bool {
+	return n != nil && n.State() == NodeWarm
+}
+
+// CloneKV returns an independently cloneable handle to the node's full-prefix KV cache.
+func (n *node) CloneKV() *model.KVCache {
+	if n == nil || n.kv == nil {
+		return nil
+	}
+	return n.kv.Clone()
 }
 
 // ChunkID returns the physical backing page or allocation chunk identifier for this node.
@@ -493,6 +604,11 @@ func (t *Tree) split(parent, child *node, oi int) *node {
 		t.cpuCacheCanClone(child.kv) {
 		mid.kv = truncatePrefix(child.kv, mid.plen)
 	}
+	if child.IsComputing() {
+		mid.SetState(NodeComputingPrefill)
+		mid.ready = child.ready
+		mid.flightErr = child.flightErr
+	}
 	child.key = append([]int(nil), child.key[oi:]...)
 	child.parent = mid
 	mid.children[child.key[0]] = child
@@ -699,7 +815,7 @@ func (t *Tree) snapshotVictim(exclude *node) *node {
 	var victim *node
 	var walk func(*node)
 	walk = func(n *node) {
-		if n != exclude && n.refs == 0 && n.snapshot != nil {
+		if n != exclude && n.refs == 0 && !n.IsComputing() && n.snapshot != nil {
 			if victim == nil || strat.Priority(n).less(strat.Priority(victim)) {
 				victim = n
 			}
@@ -945,7 +1061,7 @@ func (t *Tree) selectVictimLeaf(record bool) *node {
 		stack = stack[:len(stack)-1]
 		if len(n.children) == 0 {
 			candidates++
-			if n.refs > 0 {
+			if n.refs > 0 || n.IsComputing() {
 				locked++
 				continue
 			}

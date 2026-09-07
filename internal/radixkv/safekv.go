@@ -61,6 +61,14 @@ func WrapScopedWithLocker(tree *Tree, lock sync.Locker) *ScopedTree {
 	return &ScopedTree{tree: tree, lock: lock}
 }
 
+// FlightGroup returns a PrefixFlightGroup synchronized with this ScopedTree.
+func (s *ScopedTree) FlightGroup() *PrefixFlightGroup {
+	if s == nil {
+		return NewPrefixFlightGroup(nil)
+	}
+	return NewPrefixFlightGroupWithLocker(s.tree, s.lock)
+}
+
 func scopeNamespace(scope ShareScope, owner CacheIdentity) (string, error) {
 	tenant := strings.TrimSpace(owner.Tenant)
 	agent := strings.TrimSpace(owner.Agent)
