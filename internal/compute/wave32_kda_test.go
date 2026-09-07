@@ -1,6 +1,7 @@
 package compute
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"testing"
@@ -908,5 +909,424 @@ func BenchmarkWave32GatedDeltaNetStep(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		Wave32GatedDeltaNetStep(st, qn, kn, vh, bt, g, od, kvmem, delta)
+	}
+}
+
+// TestTiledChannelTranspose_Roundtrip verifies that TiledChannelTranspose followed by
+// TiledChannelTransposeInverse exactly reproduces the input tensor across a variety of
+// sequence lengths and channel dimensions (including prime and non-power-of-two sizes).
+func TestTiledChannelTranspose_Roundtrip(t *testing.T) {
+	testCases := []struct {
+		T       int
+		convDim int
+	}{
+		{T: 1, convDim: 1},
+		{T: 7, convDim: 13},
+		{T: 16, convDim: 32},
+		{T: 32, convDim: 32},
+		{T: 33, convDim: 33},
+		{T: 64, convDim: 128},
+		{T: 128, convDim: 256},
+		{T: 64, convDim: 10240}, // Qwen 3.8 GDN dimension
+	}
+
+	cfg := DefaultTiledChannelTransposeConfig()
+
+	for _, tc := range testCases {
+		t.Run(fmt.Sprintf("T%d_C%d", tc.T, tc.convDim), func(t *testing.T) {
+			rng := rand.New(rand.NewSource(int64(tc.T*1000 + tc.convDim)))
+			total := tc.T * tc.convDim
+			input := make([]float32, total)
+			for i := range input {
+				input[i] = rng.Float32()*2.0 - 1.0
+			}
+
+			aud := &TiledChannelTransposeAudit{}
+			transposed, err := TiledChannelTranspose(input, tc.T, tc.convDim, cfg, aud)
+			if err != nil {
+				t.Fatalf("TiledChannelTranspose failed: %v", err)
+			}
+			if len(transposed) != total {
+				t.Fatalf("transposed length = %d, want %d", len(transposed), total)
+			}
+
+			// Verify element transposition: transposed[c*T + t] == input[t*convDim + c]
+			for step := 0; step < tc.T; step++ {
+				for c := 0; c < tc.convDim; c++ {
+					expected := input[step*tc.convDim+c]
+					got := transposed[c*tc.T+step]
+					if expected != got {
+						t.Fatalf("transposition mismatch at t=%d, c=%d: got %g, want %g", step, c, got, expected)
+					}
+				}
+			}
+
+			// Invert transpose
+			restored, err := TiledChannelTransposeInverse(transposed, tc.convDim, tc.T, cfg, aud)
+			if err != nil {
+				t.Fatalf("TiledChannelTransposeInverse failed: %v", err)
+			}
+			if len(restored) != total {
+				t.Fatalf("restored length = %d, want %d", len(restored), total)
+			}
+
+			// Verify exact bitwise roundtrip
+			for i := range input {
+				if input[i] != restored[i] {
+					t.Fatalf("roundtrip mismatch at index %d: got %g, want %g", i, restored[i], input[i])
+				}
+			}
+		})
+	}
+}
+
+// TestTiledChannelTranspose_LDSBankConflicts verifies that stride-33 padding completely
+// eliminates 32-way LDS bank conflicts on AMD Strix Halo (gfx1151 / Wave32), whereas
+// stride-32 (unpadded) incurs severe bank conflicts.
+func TestTiledChannelTranspose_LDSBankConflicts(t *testing.T) {
+	const T = 64
+	const convDim = 128
+	input := make([]float32, T*convDim)
+	for i := range input {
+		input[i] = float32(i)
+	}
+
+	// 1. Padded config (stride 33): expect ZERO bank conflicts
+	paddedCfg := DefaultTiledChannelTransposeConfig()
+	if paddedCfg.LDSBankStride != 33 {
+		t.Fatalf("expected DefaultTiledChannelTransposeConfig LDSBankStride == 33, got %d", paddedCfg.LDSBankStride)
+	}
+
+	paddedAudit := &TiledChannelTransposeAudit{}
+	_, err := TiledChannelTranspose(input, T, convDim, paddedCfg, paddedAudit)
+	if err != nil {
+		t.Fatalf("padded transpose failed: %v", err)
+	}
+	if err := paddedAudit.AssertZeroBankConflicts(); err != nil {
+		t.Errorf("padded audit reported bank conflicts: %v", err)
+	}
+	if paddedAudit.LDSBankConflicts != 0 {
+		t.Errorf("padded LDSBankConflicts = %d, want 0", paddedAudit.LDSBankConflicts)
+	}
+
+	// 2. Unpadded config (stride 32): expect POSITIVE bank conflicts
+	unpaddedCfg := paddedCfg
+	unpaddedCfg.LDSBankStride = 32
+
+	unpaddedAudit := &TiledChannelTransposeAudit{}
+	_, err = TiledChannelTranspose(input, T, convDim, unpaddedCfg, unpaddedAudit)
+	if err != nil {
+		t.Fatalf("unpadded transpose failed: %v", err)
+	}
+	if unpaddedAudit.LDSBankConflicts == 0 {
+		t.Errorf("unpadded LDSBankConflicts = 0, expected 32-way bank conflicts on unpadded stride 32")
+	}
+	if err := unpaddedAudit.AssertZeroBankConflicts(); err == nil {
+		t.Errorf("expected AssertZeroBankConflicts() to fail on unpadded stride 32")
+	}
+}
+
+// TestTiledConvConcatForward_EndToEndParity compares TiledConvConcatForward against
+// the naive scalar reference causal convolution across multiple sequence lengths T
+// and Qwen 3.8 GDN dimension (convDim = 10,240, K = 4).
+func TestTiledConvConcatForward_EndToEndParity(t *testing.T) {
+	const convDim = 10240
+	const K = 4
+	cfg := DefaultTiledChannelTransposeConfig()
+
+	for _, T := range []int{1, 4, 16, 64} {
+		t.Run(fmt.Sprintf("T%d", T), func(t *testing.T) {
+			rng := rand.New(rand.NewSource(int64(T * 42)))
+			input := make([]float32, T*convDim)
+			for i := range input {
+				input[i] = rng.Float32()*2.0 - 1.0
+			}
+			convW := make([]float32, convDim*K)
+			for i := range convW {
+				convW[i] = rng.Float32()*0.5 - 0.25
+			}
+
+			// 1. Reference token-major causal depthwise conv (as in qwen35.go)
+			refOut := make([]float32, T*convDim)
+			for step := 0; step < T; step++ {
+				for c := 0; c < convDim; c++ {
+					var acc float32
+					cb := c * K
+					for j := 0; j < K; j++ {
+						ti := step - (K - 1) + j
+						if ti >= 0 {
+							acc += convW[cb+j] * input[ti*convDim+c]
+						}
+					}
+					refOut[step*convDim+c] = Silu(acc)
+				}
+			}
+
+			// 2. Tiled memory channel transpose conv
+			tiledOut, _, aud, err := TiledConvConcatForward(input, convW, T, convDim, K, nil, cfg)
+			if err != nil {
+				t.Fatalf("TiledConvConcatForward failed: %v", err)
+			}
+
+			// Parity verification
+			if err := aud.AssertZeroBankConflicts(); err != nil {
+				t.Errorf("audit bank conflicts: %v", err)
+			}
+			if aud.TokensProcessed != T || aud.ChannelsProcessed != convDim {
+				t.Errorf("audit tokens/channels mismatch: %d / %d", aud.TokensProcessed, aud.ChannelsProcessed)
+			}
+			expectedEliminated := int64((K - 1) * T * convDim * 4)
+			if aud.DRAMReadsEliminated != expectedEliminated {
+				t.Errorf("DRAMReadsEliminated = %d, want %d", aud.DRAMReadsEliminated, expectedEliminated)
+			}
+
+			maxDelta := MaxAbsDelta(refOut, tiledOut)
+			if maxDelta > 1e-6 {
+				t.Errorf("T=%d max abs delta %g > 1e-6", T, maxDelta)
+			}
+			cosine := CosineSimilarity(refOut, tiledOut)
+			if cosine < 0.999999 {
+				t.Errorf("T=%d cosine similarity %g < 0.999999", T, cosine)
+			}
+		})
+	}
+}
+
+// TestTiledConvConcatForward_StateContinuity verifies that executing two consecutive
+// sequence chunks with persistent convState produces identical outputs to a single
+// concatenated sequence pass.
+func TestTiledConvConcatForward_StateContinuity(t *testing.T) {
+	const convDim = 128
+	const K = 4
+	const T1 = 16
+	const T2 = 16
+	const TTotal = T1 + T2
+
+	rng := rand.New(rand.NewSource(999))
+	fullInput := make([]float32, TTotal*convDim)
+	for i := range fullInput {
+		fullInput[i] = rng.Float32()*2.0 - 1.0
+	}
+	convW := make([]float32, convDim*K)
+	for i := range convW {
+		convW[i] = rng.Float32()*0.5 - 0.25
+	}
+	cfg := DefaultTiledChannelTransposeConfig()
+
+	// 1. Single pass over full sequence
+	fullOut, fullFinalState, _, err := TiledConvConcatForward(fullInput, convW, TTotal, convDim, K, nil, cfg)
+	if err != nil {
+		t.Fatalf("full pass failed: %v", err)
+	}
+
+	// 2. Chunk 1 pass
+	chunk1Input := fullInput[:T1*convDim]
+	chunk1Out, chunk1State, _, err := TiledConvConcatForward(chunk1Input, convW, T1, convDim, K, nil, cfg)
+	if err != nil {
+		t.Fatalf("chunk 1 pass failed: %v", err)
+	}
+
+	// 3. Chunk 2 pass using chunk1State
+	chunk2Input := fullInput[T1*convDim:]
+	chunk2Out, chunk2State, _, err := TiledConvConcatForward(chunk2Input, convW, T2, convDim, K, chunk1State, cfg)
+	if err != nil {
+		t.Fatalf("chunk 2 pass failed: %v", err)
+	}
+
+	// Concatenate chunked outputs
+	stitchedOut := append(chunk1Out, chunk2Out...)
+
+	// Assert output equivalence
+	maxDelta := MaxAbsDelta(fullOut, stitchedOut)
+	if maxDelta > 1e-6 {
+		t.Errorf("stitched output max delta %g > 1e-6", maxDelta)
+	}
+	cosine := CosineSimilarity(fullOut, stitchedOut)
+	if cosine < 0.999999 {
+		t.Errorf("stitched output cosine similarity %g < 0.999999", cosine)
+	}
+
+	// Assert final state equivalence
+	stateDelta := MaxAbsDelta(fullFinalState, chunk2State)
+	if stateDelta > 1e-6 {
+		t.Errorf("final state delta %g > 1e-6", stateDelta)
+	}
+}
+
+// TestTiledConvConcatForwardSlices verifies the [][]float32 slice-of-slices API used by model/qwen35.go.
+func TestTiledConvConcatForwardSlices(t *testing.T) {
+	const T = 8
+	const convDim = 64
+	const K = 4
+
+	rng := rand.New(rand.NewSource(123))
+	mixed := make([][]float32, T)
+	for step := 0; step < T; step++ {
+		row := make([]float32, convDim)
+		for c := 0; c < convDim; c++ {
+			row[c] = rng.Float32()*2.0 - 1.0
+		}
+		mixed[step] = row
+	}
+
+	convW := make([]float32, convDim*K)
+	for i := range convW {
+		convW[i] = rng.Float32()*0.5 - 0.25
+	}
+
+	convOut, nextState, aud, err := TiledConvConcatForwardSlices(mixed, convW, convDim, K, nil)
+	if err != nil {
+		t.Fatalf("TiledConvConcatForwardSlices failed: %v", err)
+	}
+	if len(convOut) != T {
+		t.Fatalf("convOut length = %d, want %d", len(convOut), T)
+	}
+	if len(nextState) != (K-1)*convDim {
+		t.Fatalf("nextState length = %d, want %d", len(nextState), (K-1)*convDim)
+	}
+	if err := aud.AssertZeroBankConflicts(); err != nil {
+		t.Errorf("audit bank conflicts: %v", err)
+	}
+
+	// Verify against reference
+	for step := 0; step < T; step++ {
+		for c := 0; c < convDim; c++ {
+			var acc float32
+			cb := c * K
+			for j := 0; j < K; j++ {
+				ti := step - (K - 1) + j
+				if ti >= 0 {
+					acc += convW[cb+j] * mixed[ti][c]
+				}
+			}
+			expected := Silu(acc)
+			if math.Abs(float64(convOut[step][c]-expected)) > 1e-6 {
+				t.Fatalf("mismatch at t=%d, c=%d: got %g, want %g", step, c, convOut[step][c], expected)
+			}
+		}
+	}
+}
+
+// TestHasTiledChannelTranspose verifies feature registration for Strix Halo / gfx1151.
+func TestHasTiledChannelTranspose(t *testing.T) {
+	if !HasTiledChannelTranspose() {
+		t.Fatal("expected HasTiledChannelTranspose() == true")
+	}
+}
+
+// TestWave32_Ticket516_DeltaNet16ChannelTranspose verifies Ticket #516 requirements:
+// - Implement 2D tiled channel transpose helper for DeltaNet linear attention conv-state concatenation.
+// - Distribute reads across all 16 memory channels on the 256-bit bus, eliminating single-channel stride camping.
+// - Add unit tests verifying 16-channel interleaving and stride alignment.
+func TestWave32_Ticket516_DeltaNet16ChannelTranspose(t *testing.T) {
+	const (
+		convDim = 10240 // Qwen 3.8 GDN dimension
+		T       = 32
+		K       = 4
+	)
+
+	// 1. Verify 256-bit bus alignment invariant validation
+	validStrideBytes := convDim * 4 // 40,960 bytes (multiple of 32)
+	if !ValidateDeltaNet256BitBusAlignment(validStrideBytes) {
+		t.Errorf("expected ValidateDeltaNet256BitBusAlignment(%d) = true", validStrideBytes)
+	}
+	invalidStrideBytes := 40960 + 12 // not divisible by 32
+	if ValidateDeltaNet256BitBusAlignment(invalidStrideBytes) {
+		t.Errorf("expected ValidateDeltaNet256BitBusAlignment(%d) = false", invalidStrideBytes)
+	}
+	if ValidateDeltaNet256BitBusAlignment(0) || ValidateDeltaNet256BitBusAlignment(-32) {
+		t.Errorf("expected false for <= 0 stride bytes")
+	}
+
+	// 2. Verify channel camping on untiled access vs uniform spread on 2D tiled transpose
+	untiledRep := SimulateDeltaNet16ChannelInterleaving(T, convDim, false)
+	if !untiledRep.ChannelCamping {
+		t.Errorf("expected untiled ChannelCamping = true")
+	}
+	if untiledRep.ActiveChannels > 2 {
+		t.Errorf("untiled ActiveChannels = %d, expected <= 2 (single-channel camping)", untiledRep.ActiveChannels)
+	}
+	if untiledRep.Entropy >= 0.25 {
+		t.Errorf("untiled Entropy = %f, expected < 0.25", untiledRep.Entropy)
+	}
+	if untiledRep.EstimatedBW_GBps != 13.7 {
+		t.Errorf("untiled EstimatedBW_GBps = %f, want 13.7 GB/s", untiledRep.EstimatedBW_GBps)
+	}
+
+	tiledRep := SimulateDeltaNet16ChannelInterleaving(T, convDim, true)
+	if tiledRep.ChannelCamping {
+		t.Errorf("expected tiled ChannelCamping = false")
+	}
+	if tiledRep.ActiveChannels != StrixHaloBusChannels {
+		t.Errorf("tiled ActiveChannels = %d, want %d", tiledRep.ActiveChannels, StrixHaloBusChannels)
+	}
+	if tiledRep.Entropy <= 0.95 {
+		t.Errorf("tiled Entropy = %f, expected > 0.95 (uniform 16-channel spread)", tiledRep.Entropy)
+	}
+	if tiledRep.EstimatedBW_GBps < 138.0 {
+		t.Errorf("tiled EstimatedBW_GBps = %f, want >= 138.0 GB/s (138.9 GB/s)", tiledRep.EstimatedBW_GBps)
+	}
+	if tiledRep.ThroughputLift < 1.07 {
+		t.Errorf("tiled ThroughputLift = %f, want >= 1.07 (+7.2%% lift)", tiledRep.ThroughputLift)
+	}
+	if !tiledRep.BusAlignmentValid {
+		t.Errorf("tiled BusAlignmentValid = false, want true")
+	}
+
+	// Verify all 16 channels receive non-zero, balanced accesses
+	for ch := 0; ch < StrixHaloBusChannels; ch++ {
+		if tiledRep.ChannelCounts[ch] == 0 {
+			t.Errorf("channel %d has 0 accesses in tiled layout: %v", ch, tiledRep.ChannelCounts)
+		}
+	}
+
+	// 3. Verify Tiled16ChannelTransposeConcat end-to-end execution and numerical parity
+	rng := rand.New(rand.NewSource(516))
+	input := make([]float32, T*convDim)
+	for i := range input {
+		input[i] = rng.Float32()*2.0 - 1.0
+	}
+	convW := make([]float32, convDim*K)
+	for i := range convW {
+		convW[i] = rng.Float32()*0.5 - 0.25
+	}
+
+	output, nextState, report, err := Tiled16ChannelTransposeConcat(input, convW, T, convDim, K, nil)
+	if err != nil {
+		t.Fatalf("Tiled16ChannelTransposeConcat failed: %v", err)
+	}
+	if len(output) != T*convDim {
+		t.Fatalf("output length = %d, want %d", len(output), T*convDim)
+	}
+	if len(nextState) != (K-1)*convDim {
+		t.Fatalf("nextState length = %d, want %d", len(nextState), (K-1)*convDim)
+	}
+	if report.ActiveChannels != 16 {
+		t.Errorf("report.ActiveChannels = %d, want 16", report.ActiveChannels)
+	}
+	if report.Entropy <= 0.95 {
+		t.Errorf("report.Entropy = %f, want > 0.95", report.Entropy)
+	}
+	if report.ChannelCamping {
+		t.Errorf("report.ChannelCamping = true, want false")
+	}
+
+	// Verify against direct reference calculation
+	for step := 0; step < T; step++ {
+		for c := 0; c < 16; c++ { // sample check first 16 channels
+			var acc float32
+			cb := c * K
+			for j := 0; j < K; j++ {
+				ti := step - (K - 1) + j
+				if ti >= 0 {
+					acc += convW[cb+j] * input[ti*convDim+c]
+				}
+			}
+			expected := Silu(acc)
+			got := output[step*convDim+c]
+			if math.Abs(float64(got-expected)) > 1e-6 {
+				t.Fatalf("mismatch at step %d, c %d: got %f, want %f", step, c, got, expected)
+			}
+		}
 	}
 }

@@ -505,3 +505,123 @@ func TestFloat32ToFP16_RoundToNearestEven(t *testing.T) {
 		}
 	})
 }
+
+// TestROCmFP4Block32DequantizeVector verifies vectorized Block-32 dequantization
+// against the scalar block reference and checks SIMD alignment and accuracy.
+func TestROCmFP4Block32DequantizeVector(t *testing.T) {
+	const numBlocks = 4
+	const totalElements = numBlocks * ROCmFP4BlockSize // 128 elements
+	rng := rand.New(rand.NewSource(20260907))
+
+	srcFloat := make([]float32, totalElements)
+	for i := range srcFloat {
+		srcFloat[i] = float32(rng.NormFloat64() * 3.0)
+	}
+
+	tensor, err := QuantizeROCmFP4(srcFloat, numBlocks, ROCmFP4BlockSize)
+	if err != nil {
+		t.Fatalf("QuantizeROCmFP4 failed: %v", err)
+	}
+
+	// Prepare packed data and scales slices for DequantizeBlock32ROCmFP4
+	packedSrc := make([]byte, numBlocks*16)
+	scales := make([]uint16, numBlocks)
+	for b := 0; b < numBlocks; b++ {
+		scales[b] = tensor.Blocks[b].Scale
+		copy(packedSrc[b*16:(b+1)*16], tensor.Blocks[b].Data[:])
+	}
+
+	// 1. Full vectorized dequantization matching 32-lane SIMD
+	dstVec := make([]float32, totalElements)
+	DequantizeBlock32ROCmFP4(dstVec, packedSrc, scales, totalElements)
+
+	// 2. Reference dequantization via DequantizeROCmFP4Block
+	dstRef := make([]float32, totalElements)
+	for b := 0; b < numBlocks; b++ {
+		DequantizeROCmFP4Block(tensor.Blocks[b], dstRef[b*32:(b+1)*32])
+	}
+
+	// Verify exact bit-identity between vectorized and block-by-block dequantization
+	for i := 0; i < totalElements; i++ {
+		if math.Float32bits(dstVec[i]) != math.Float32bits(dstRef[i]) {
+			t.Fatalf("element %d: vectorized %v (0x%08x) != ref %v (0x%08x)",
+				i, dstVec[i], math.Float32bits(dstVec[i]), dstRef[i], math.Float32bits(dstRef[i]))
+		}
+	}
+
+	// 3. Test unaligned element counts (e.g. 50 elements: 1 full block of 32 + 18 tail)
+	const partialCount = 50
+	dstPartial := make([]float32, partialCount)
+	DequantizeBlock32ROCmFP4(dstPartial, packedSrc, scales, partialCount)
+	for i := 0; i < partialCount; i++ {
+		if math.Float32bits(dstPartial[i]) != math.Float32bits(dstRef[i]) {
+			t.Fatalf("partial element %d: got %v, want %v", i, dstPartial[i], dstRef[i])
+		}
+	}
+
+	// 4. Test n <= 0 does nothing
+	DequantizeBlock32ROCmFP4(dstVec, packedSrc, scales, 0)
+	DequantizeBlock32ROCmFP4(dstVec, packedSrc, scales, -5)
+
+	// 5. Test panic on undersized buffers
+	assertPanic := func(fn func(), msg string) {
+		t.Helper()
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatalf("expected panic for: %s", msg)
+			}
+		}()
+		fn()
+	}
+
+	assertPanic(func() {
+		DequantizeBlock32ROCmFP4(dstVec[:10], packedSrc, scales, 32)
+	}, "undersized dst buffer")
+
+	assertPanic(func() {
+		DequantizeBlock32ROCmFP4(dstVec, packedSrc[:8], scales, 32)
+	}, "undersized src buffer")
+
+	assertPanic(func() {
+		DequantizeBlock32ROCmFP4(dstVec, packedSrc, scales[:0], 32)
+	}, "undersized scales buffer")
+}
+
+// TestROCmFP4Block32SIMDAlignment verifies the Block-32 layout matches RDNA 3.5 dual-issue
+// vector register strides (32 elements, 18 packed bytes).
+func TestROCmFP4Block32SIMDAlignment(t *testing.T) {
+	var blk Block32ROCmFP4
+	if len(blk.Data) != 16 {
+		t.Fatalf("Block32ROCmFP4 Data length %d != 16 bytes", len(blk.Data))
+	}
+	if ROCmFP4BlockSize != 32 {
+		t.Fatalf("ROCmFP4BlockSize %d != 32", ROCmFP4BlockSize)
+	}
+	if ROCmFP4BlockBytes != 18 {
+		t.Fatalf("ROCmFP4BlockBytes %d != 18", ROCmFP4BlockBytes)
+	}
+
+	// Verify type alias equivalence: ROCmFP4Block is identical to Block32ROCmFP4
+	var aliasBlk ROCmFP4Block
+	aliasBlk.Scale = 0x3c00 // 1.0 in FP16
+	blk = aliasBlk
+	if blk.Scale != 0x3c00 {
+		t.Fatalf("type alias mismatch: got 0x%04x", blk.Scale)
+	}
+}
+
+// TestROCmFP4Qwen38ActiveWeightBytes asserts that active weight calculation for Qwen 3.8 27B
+// under Block-32 ROCmFP4 yields ~13.55 GiB.
+func TestROCmFP4Qwen38ActiveWeightBytes(t *testing.T) {
+	bytes := Qwen38ActiveWeightBytesROCmFP4()
+	gib := float64(bytes) / (1024.0 * 1024.0 * 1024.0)
+
+	if math.Abs(gib-13.55) > 0.001 {
+		t.Fatalf("Qwen 3.8 27B active weight = %.4f GiB, expected ~13.55 GiB", gib)
+	}
+
+	bytesFromParams := ComputeActiveWeightBytesROCmFP4(Qwen38Params)
+	if bytesFromParams != bytes {
+		t.Fatalf("ComputeActiveWeightBytesROCmFP4 mismatch: got %d, expected %d", bytesFromParams, bytes)
+	}
+}

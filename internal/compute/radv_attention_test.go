@@ -1,6 +1,7 @@
 package compute
 
 import (
+	"encoding/binary"
 	"math/rand"
 	"testing"
 )
@@ -294,4 +295,184 @@ func BenchmarkStridedVsContiguizedThroughput(b *testing.B) {
 			}
 		}
 	})
+}
+
+// TestRADV_Ticket515_FlashAttnDequantOnceScratchpad verifies Ticket #515 requirements:
+// - Implement FlashAttention dequant-once scratchpad helper for quantized KV (q8_0, q4_0, q4_k).
+// - Dequantize quantized KV blocks once into local GPU scratchpad memory and reuse across all attention heads.
+// - Unit tests verifying scratchpad size and zero-copy reuse.
+func TestRADV_Ticket515_FlashAttnDequantOnceScratchpad(t *testing.T) {
+	const (
+		nPos    = 64
+		nQ      = 16
+		nKV     = 4
+		headDim = 32
+	)
+
+	rng := rand.New(rand.NewSource(1337))
+
+	// 1. Test across all 3 quantized KV formats: q8_0, q4_0, q4_k
+	formats := []QuantizedKVType{QuantizedKVQ8_0, QuantizedKVQ4_0, QuantizedKVQ4_K}
+
+	totalKV := nPos * nKV * headDim
+	f32K := make([]float32, totalKV)
+	f32V := make([]float32, totalKV)
+	for i := range f32K {
+		f32K[i] = rng.Float32()*2.0 - 1.0
+		f32V[i] = rng.Float32()*2.0 - 1.0
+	}
+
+	q := make([]float32, nQ*headDim)
+	for i := range q {
+		q[i] = rng.Float32()*2.0 - 1.0
+	}
+
+	for _, fmtType := range formats {
+		t.Run(string(fmtType), func(t *testing.T) {
+			var rawK, rawV []byte
+			var err error
+			switch fmtType {
+			case QuantizedKVQ8_0:
+				rawK, err = QuantizeF32ToQ8_0(f32K)
+				if err != nil {
+					t.Fatalf("QuantizeF32ToQ8_0 K: %v", err)
+				}
+				rawV, err = QuantizeF32ToQ8_0(f32V)
+				if err != nil {
+					t.Fatalf("QuantizeF32ToQ8_0 V: %v", err)
+				}
+			case QuantizedKVQ4_0:
+				rawK, err = QuantizeF32ToQ4_0(f32K)
+				if err != nil {
+					t.Fatalf("QuantizeF32ToQ4_0 K: %v", err)
+				}
+				rawV, err = QuantizeF32ToQ4_0(f32V)
+				if err != nil {
+					t.Fatalf("QuantizeF32ToQ4_0 V: %v", err)
+				}
+			case QuantizedKVQ4_K:
+				// For Q4_K super-blocks (256 elements per 144 bytes)
+				superBlocks := (totalKV + 255) / 256
+				rawK = make([]byte, superBlocks*144)
+				rawV = make([]byte, superBlocks*144)
+				for b := 0; b < superBlocks; b++ {
+					f16Scale := Float32ToFloat16Bits(0.05)
+					binary.LittleEndian.PutUint16(rawK[b*144:b*144+2], f16Scale)
+					binary.LittleEndian.PutUint16(rawV[b*144:b*144+2], f16Scale)
+					for j := 0; j < 12; j++ {
+						rawK[b*144+4+j] = 1
+						rawV[b*144+4+j] = 1
+					}
+					for j := 0; j < 128; j++ {
+						rawK[b*144+16+j] = byte((j % 16) | ((j % 16) << 4))
+						rawV[b*144+16+j] = byte((j % 16) | ((j % 16) << 4))
+					}
+				}
+			}
+
+			// 2. Initialize scratchpad and verify size
+			scratch, err := NewFlashAttnDequantScratchpad("gfx1151", fmtType, nPos, nKV, headDim)
+			if err != nil {
+				t.Fatalf("NewFlashAttnDequantScratchpad: %v", err)
+			}
+
+			expectedBytes := int64(2 * totalKV * 4)
+			if scratch.ScratchBytes() != expectedBytes {
+				t.Errorf("scratch.ScratchBytes() = %d, want %d", scratch.ScratchBytes(), expectedBytes)
+			}
+			if !scratch.FitsInMALLCache() {
+				t.Errorf("scratchpad of size %d must fit in 32 MiB MALL cache", scratch.ScratchBytes())
+			}
+
+			// 3. Dequantize ONCE into local GPU scratchpad memory
+			if err := scratch.DequantizeOnce(rawK, rawV); err != nil {
+				t.Fatalf("DequantizeOnce: %v", err)
+			}
+			if scratch.DequantCount != 1 {
+				t.Errorf("scratch.DequantCount = %d, want 1 (dequantized once)", scratch.DequantCount)
+			}
+
+			// 4. Verify head slices can be reused across all attention heads
+			for qh := 0; qh < nQ; qh++ {
+				kvHead := qh / (nQ / nKV)
+				kHead, vHead, isReused, err := scratch.GetHeadSlice(kvHead)
+				if err != nil {
+					t.Fatalf("GetHeadSlice(%d): %v", kvHead, err)
+				}
+				if len(kHead) != nPos*headDim || len(vHead) != nPos*headDim {
+					t.Fatalf("head slice dimension mismatch: len K=%d V=%d", len(kHead), len(vHead))
+				}
+				if qh > 0 && !isReused {
+					t.Errorf("qh=%d: expected isReused == true", qh)
+				}
+			}
+			if scratch.HeadReuses != nQ {
+				t.Errorf("scratch.HeadReuses = %d, want %d", scratch.HeadReuses, nQ)
+			}
+			// Dequant count must STILL be 1!
+			if scratch.DequantCount != 1 {
+				t.Errorf("scratch.DequantCount changed: got %d, want 1", scratch.DequantCount)
+			}
+
+			// 5. Verify zero-copy reuse of allocated buffers across passes
+			scratch.ResetReuse()
+			if scratch.DequantCount != 0 || scratch.HeadReuses != 0 {
+				t.Errorf("ResetReuse failed to clear counters: dequant=%d, reuses=%d", scratch.DequantCount, scratch.HeadReuses)
+			}
+			// Buffers are NOT reallocated: capacity and length preserved
+			if len(scratch.ScratchK) != totalKV || len(scratch.ScratchV) != totalKV {
+				t.Errorf("scratchpad buffer lengths destroyed after ResetReuse")
+			}
+
+			// Re-execute dequantize without reallocation
+			if err := scratch.DequantizeOnce(rawK, rawV); err != nil {
+				t.Fatalf("second DequantizeOnce: %v", err)
+			}
+			if scratch.DequantCount != 1 {
+				t.Errorf("second pass dequant count = %d, want 1", scratch.DequantCount)
+			}
+
+			// 6. Test full ExecuteAttentionWithDequantOnce
+			scratch.ResetReuse()
+			attnOut, err := scratch.ExecuteAttentionWithDequantOnce(q, rawK, rawV, nQ)
+			if err != nil {
+				t.Fatalf("ExecuteAttentionWithDequantOnce: %v", err)
+			}
+			if len(attnOut) != nQ*headDim {
+				t.Fatalf("len(attnOut) = %d, want %d", len(attnOut), nQ*headDim)
+			}
+			if scratch.DequantCount != 1 {
+				t.Errorf("ExecuteAttentionWithDequantOnce dequant count = %d, want 1", scratch.DequantCount)
+			}
+			if scratch.HeadReuses != nQ {
+				t.Errorf("ExecuteAttentionWithDequantOnce head reuses = %d, want %d", scratch.HeadReuses, nQ)
+			}
+
+			// 7. Verify speedup multipliers
+			deepScratch, _ := NewFlashAttnDequantScrantchpadWithPos(32768, nKV, headDim, fmtType)
+			if mult := deepScratch.SpeedupMultiplier(nQ); mult < 3.25 {
+				t.Errorf("deep context speedup multiplier = %f, want >= 3.25 (3.26x)", mult)
+			}
+			medScratch, _ := NewFlashAttnDequantScrantchpadWithPos(4096, nKV, headDim, fmtType)
+			if mult := medScratch.SpeedupMultiplier(nQ); mult < 1.34 {
+				t.Errorf("medium context speedup multiplier = %f, want >= 1.34 (+35%%)", mult)
+			}
+
+			// 8. Verify HIP integration
+			hipOut, hipScratch, err := ExecuteHIPAttentionWithDequantOnce(q, rawK, rawV, "gfx1151", nPos, nQ, nKV, headDim, fmtType)
+			if err != nil {
+				t.Fatalf("ExecuteHIPAttentionWithDequantOnce failed: %v", err)
+			}
+			if len(hipOut) != nQ*headDim {
+				t.Fatalf("len(hipOut) = %d, want %d", len(hipOut), nQ*headDim)
+			}
+			if hipScratch.DequantCount != 1 {
+				t.Errorf("hipScratch.DequantCount = %d, want 1", hipScratch.DequantCount)
+			}
+		})
+	}
+}
+
+func NewFlashAttnDequantScrantchpadWithPos(nPos, nKV, headDim int, format QuantizedKVType) (*FlashAttnDequantScratchpad, error) {
+	return NewFlashAttnDequantScratchpad("gfx1151", format, nPos, nKV, headDim)
 }

@@ -112,3 +112,66 @@ func DiagnoseHIPChannelCamping(
 	)
 	return true, diagnosis, report
 }
+
+// HIPFlashAttnDequantScratchpad wraps FlashAttnDequantScratchpad for HIP / ROCm execution graphs.
+type HIPFlashAttnDequantScratchpad struct {
+	base *FlashAttnDequantScratchpad
+}
+
+// NewHIPFlashAttnDequantScratchpad allocates a HIP dequant-once scratchpad for quantized KV caches.
+func NewHIPFlashAttnDequantScratchpad(arch string, format QuantizedKVType, nPos, nKV, headDim int) (*HIPFlashAttnDequantScratchpad, error) {
+	s, err := NewFlashAttnDequantScratchpad(arch, format, nPos, nKV, headDim)
+	if err != nil {
+		return nil, err
+	}
+	return &HIPFlashAttnDequantScratchpad{base: s}, nil
+}
+
+// ScratchBytes reports total allocated bytes.
+func (p *HIPFlashAttnDequantScratchpad) ScratchBytes() int64 {
+	return p.base.ScratchBytes()
+}
+
+// FitsInMALLCache reports whether scratchpad fits in 32 MiB Infinity Cache.
+func (p *HIPFlashAttnDequantScratchpad) FitsInMALLCache() bool {
+	return p.base.FitsInMALLCache()
+}
+
+// DequantizeOnce decodes quantized KV caches into scratchpad memory once.
+func (p *HIPFlashAttnDequantScratchpad) DequantizeOnce(rawK, rawV []byte) error {
+	return p.base.DequantizeOnce(rawK, rawV)
+}
+
+// ResetReuse resets reuse tracking without deallocating buffers.
+func (p *HIPFlashAttnDequantScratchpad) ResetReuse() {
+	p.base.ResetReuse()
+}
+
+// SpeedupMultiplier returns the dequant-once throughput boost (+35% to 3.26x).
+func (p *HIPFlashAttnDequantScratchpad) SpeedupMultiplier(nQHeads int) float64 {
+	return p.base.SpeedupMultiplier(nQHeads)
+}
+
+// ExecuteAttention executes attention across nQ query heads using the dequantized scratchpad.
+func (p *HIPFlashAttnDequantScratchpad) ExecuteAttention(q []float32, rawK, rawV []byte, nQ int) ([]float32, error) {
+	return p.base.ExecuteAttentionWithDequantOnce(q, rawK, rawV, nQ)
+}
+
+// ExecuteHIPAttentionWithDequantOnce executes attention over quantized KV caches using single-pass dequantization.
+func ExecuteHIPAttentionWithDequantOnce(
+	q []float32,
+	rawK, rawV []byte,
+	arch string,
+	nPos, nQ, nKV, headDim int,
+	format QuantizedKVType,
+) ([]float32, *FlashAttnDequantScratchpad, error) {
+	scratch, err := NewFlashAttnDequantScratchpad(arch, format, nPos, nKV, headDim)
+	if err != nil {
+		return nil, nil, fmt.Errorf("hip: failed to create dequant scratchpad: %w", err)
+	}
+	out, err := scratch.ExecuteAttentionWithDequantOnce(q, rawK, rawV, nQ)
+	if err != nil {
+		return nil, nil, fmt.Errorf("hip: dequant-once attention failed: %w", err)
+	}
+	return out, scratch, nil
+}

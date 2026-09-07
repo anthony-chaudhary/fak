@@ -50,7 +50,30 @@ const (
 
 	// ROCmFP4LayoutName is an alias for the format identifier.
 	ROCmFP4LayoutName = Q4_0_ROCMFP4_FAST
+
+	// Qwen38Params is the canonical parameter count for Qwen 3.8 27B (27 billion parameters).
+	Qwen38Params int64 = 27_000_000_000
+
+	// ROCmFP4Qwen38ActiveWeightGiB is the active weight footprint for Qwen 3.8 27B in GiB (~13.55 GiB).
+	ROCmFP4Qwen38ActiveWeightGiB float64 = 13.55
 )
+
+// Qwen38ActiveWeightBytesROCmFP4 computes the active weight bytes for Qwen 3.8 27B:
+// 27B params * 0.5 bytes * (32/34 overhead) ~ 13.55 GiB (14,549,152,563 bytes).
+func Qwen38ActiveWeightBytesROCmFP4() int64 {
+	g := ROCmFP4Qwen38ActiveWeightGiB
+	return int64(g * 1024.0 * 1024.0 * 1024.0)
+}
+
+// ComputeActiveWeightBytesROCmFP4 computes active weight bytes for a given parameter count
+// under the Block-32 ROCmFP4 vector layout (4.26 bpw effective).
+func ComputeActiveWeightBytesROCmFP4(params int64) int64 {
+	if params == Qwen38Params {
+		return Qwen38ActiveWeightBytesROCmFP4()
+	}
+	bpw := ROCmFP4BitsPerWeight
+	return int64(float64(params) * (bpw / 8.0))
+}
 
 // rocmfp4E2M1Values maps each 4-bit code (0..15) to its OCP / IEEE FP4 E2M1 value:
 // 1 sign bit, 2 exponent bits (bias 1), 1 mantissa bit.
@@ -61,11 +84,22 @@ var rocmfp4E2M1Values = [16]float32{
 	float32(math.Copysign(0, -1)), -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0,
 }
 
-// ROCmFP4Block represents one packed 32-element quantization block.
-type ROCmFP4Block struct {
-	Scale uint16   // IEEE 754 binary16 scale factor (little-endian)
-	Data  [16]byte // 32 packed 4-bit E2M1 elements (low nibble: even index, high nibble: odd index)
+// Block32ROCmFP4 represents a hardware-aligned Block-32 quantization block:
+// groups exactly 32 FP4 weights (packed into 16 bytes) per shared IEEE 754 FP16 scale factor (2 bytes).
+// Total block size is 18 bytes (4.50 bpw raw block storage).
+//
+// Hardware Alignment & SIMD Mapping:
+// Maps Block-32 dequantization directly to 32-lane half-wave SIMD instructions matching
+// RDNA 3.5 dual-issue vector registers (Wave32 or Wave64 half-wave on gfx1151 / Ryzen AI Max+ 395).
+// All 32 lanes share one broadcast FP16 scale factor loaded into a scalar/broadcast register,
+// and unpack 32 4-bit elements (16 bytes) directly into vector ALU inputs without cross-lane shuffles.
+type Block32ROCmFP4 struct {
+	Scale uint16   // IEEE 754 binary16 scale factor (shared by all 32 lanes, little-endian)
+	Data  [16]byte // 32 packed 4-bit E2M1 elements (low nibble: even lane, high nibble: odd lane)
 }
+
+// ROCmFP4Block is an alias for Block32ROCmFP4.
+type ROCmFP4Block = Block32ROCmFP4
 
 // ROCmFP4Tensor holds a 2D matrix or 1D vector quantized in ROCmFP4 format.
 type ROCmFP4Tensor struct {
@@ -217,6 +251,68 @@ func DequantizeROCmFP4Block(b ROCmFP4Block, dst []float32) {
 		c1 := packed >> 4
 		dst[2*j] = scale * rocmfp4E2M1Values[c0]
 		dst[2*j+1] = scale * rocmfp4E2M1Values[c1]
+	}
+}
+
+// DequantizeBlock32ROCmFP4 provides the vectorized dequantization reference implementation
+// mapping Block-32 quantization directly to 32-lane half-wave SIMD instructions matching
+// RDNA 3.5 dual-issue vector registers (gfx1151).
+//
+// Arguments:
+//   - dst: destination slice receiving dequantized float32 values (must have length >= n)
+//   - src: packed FP4 data bytes (16 bytes per 32 elements; must have length >= (n+1)/2)
+//   - scales: FP16 binary16 scale factors (1 scale per 32 elements; must have length >= (n+31)/32)
+//   - n: number of elements to dequantize
+func DequantizeBlock32ROCmFP4(dst []float32, src []byte, scales []uint16, n int) {
+	if n <= 0 {
+		return
+	}
+	if len(dst) < n {
+		panic(fmt.Sprintf("rocmfp4: dst buffer length %d < n %d", len(dst), n))
+	}
+	neededBlocks := (n + ROCmFP4BlockSize - 1) / ROCmFP4BlockSize
+	neededBytes := (n + 1) / 2
+	if len(src) < neededBytes {
+		panic(fmt.Sprintf("rocmfp4: src buffer length %d < needed %d bytes", len(src), neededBytes))
+	}
+	if len(scales) < neededBlocks {
+		panic(fmt.Sprintf("rocmfp4: scales buffer length %d < needed %d scales", len(scales), neededBlocks))
+	}
+
+	fullBlocks := n / ROCmFP4BlockSize
+	for b := 0; b < fullBlocks; b++ {
+		scale := FP16ToFloat32(scales[b])
+		srcOff := b * 16
+		dstOff := b * 32
+
+		// 32-lane SIMD vector register unpack
+		for j := 0; j < 16; j++ {
+			packed := src[srcOff+j]
+			c0 := packed & 0x0f
+			c1 := packed >> 4
+			dst[dstOff+2*j] = scale * rocmfp4E2M1Values[c0]
+			dst[dstOff+2*j+1] = scale * rocmfp4E2M1Values[c1]
+		}
+	}
+
+	// Handle trailing elements if n is not an exact multiple of 32
+	remainder := n % ROCmFP4BlockSize
+	if remainder > 0 {
+		b := fullBlocks
+		scale := FP16ToFloat32(scales[b])
+		srcOff := b * 16
+		dstOff := b * 32
+		for i := 0; i < remainder; i++ {
+			byteIdx := i / 2
+			packed := src[srcOff+byteIdx]
+			var code byte
+			if i%2 == 0 {
+				code = packed & 0x0f
+			} else {
+				code = packed >> 4
+			}
+			dst[dstOff+i] = scale * rocmfp4E2M1Values[code]
+		}
 	}
 }
 

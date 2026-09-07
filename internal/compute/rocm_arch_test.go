@@ -172,3 +172,301 @@ func TestROCmGfx1151CompilerFlagsAndLDS(t *testing.T) {
 		t.Errorf("lds.MaxWavesPerCU = %d, want 32", lds.MaxWavesPerCU)
 	}
 }
+
+// TestTuneQSASparseGather verifies QSA sparse row gather tuning on AMD Strix Halo (gfx1151).
+func TestTuneQSASparseGather(t *testing.T) {
+	if !HasQSASparseRowGather() {
+		t.Fatal("HasQSASparseRowGather must be true")
+	}
+
+	a, ok := LookupROCmArch("gfx1151")
+	if !ok {
+		t.Fatal("gfx1151 not found")
+	}
+
+	cfg := a.TuneQSASparseGather(256, 2, 2)
+	if cfg.Arch != "gfx1151" {
+		t.Errorf("cfg.Arch = %q, want gfx1151", cfg.Arch)
+	}
+	if cfg.TopKTokens != 2048 {
+		t.Errorf("cfg.TopKTokens = %d, want 2048", cfg.TopKTokens)
+	}
+	if cfg.LocalTailTokens != 256 {
+		t.Errorf("cfg.LocalTailTokens = %d, want 256", cfg.LocalTailTokens)
+	}
+	if cfg.TotalGatherTokens != 2304 {
+		t.Errorf("cfg.TotalGatherTokens = %d, want 2304", cfg.TotalGatherTokens)
+	}
+	if cfg.NumTiles != 9 {
+		t.Errorf("cfg.NumTiles = %d, want 9 (2304 / 256)", cfg.NumTiles)
+	}
+	if cfg.RadixLDSBytes != 1024 {
+		t.Errorf("cfg.RadixLDSBytes = %d, want 1024", cfg.RadixLDSBytes)
+	}
+	if !cfg.FitsInInfinityCache {
+		t.Errorf("cfg.FitsInInfinityCache = false, gathered scratch (%d bytes) must fit in 32MB MALL", cfg.GatherScratchBytes)
+	}
+	if cfg.MaxWavesPerCU != 32 {
+		t.Errorf("cfg.MaxWavesPerCU = %d, want 32", cfg.MaxWavesPerCU)
+	}
+	if cfg.BandwidthSavingEst <= 0.50 {
+		t.Errorf("cfg.BandwidthSavingEst = %f, want > 0.50", cfg.BandwidthSavingEst)
+	}
+}
+
+// TestRadixTopKBlockSelect_DynamicGating verifies that below 16k tokens, dense attention is preserved.
+func TestRadixTopKBlockSelect_DynamicGating(t *testing.T) {
+	totalBlocks := 200 // 200 * 64 = 12,800 tokens (< 16,384)
+	scores := make([]float32, totalBlocks)
+	for i := range scores {
+		scores[i] = float32(i) * 0.1
+	}
+
+	selected, receipt, err := RadixTopKBlockSelect(scores, totalBlocks, 32, 4)
+	if err != nil {
+		t.Fatalf("RadixTopKBlockSelect: %v", err)
+	}
+	if !receipt.DynamicGatingBypassed {
+		t.Error("receipt.DynamicGatingBypassed must be true for < 16,384 tokens")
+	}
+	if len(selected) != totalBlocks {
+		t.Errorf("len(selected) = %d, want all %d blocks", len(selected), totalBlocks)
+	}
+	for i, b := range selected {
+		if b != int32(i) {
+			t.Fatalf("selected[%d] = %d, want %d", i, b, i)
+		}
+	}
+}
+
+// TestRadixTopKBlockSelect_LongContext verifies top-k (2048 tok) + tail (256 tok) selection at long context.
+func TestRadixTopKBlockSelect_LongContext(t *testing.T) {
+	// 78k context: 78,000 / 64 = 1219 blocks
+	totalBlocks := 1219
+	scores := make([]float32, totalBlocks)
+	for i := range scores {
+		scores[i] = 1.0 // default baseline score
+	}
+
+	// Elevate 32 specific candidate blocks to high score
+	highBlocks := []int{10, 25, 42, 100, 150, 200, 300, 400, 500, 600, 700, 800, 900, 1000}
+	for _, hb := range highBlocks {
+		scores[hb] = 99.0
+	}
+
+	topKBlocks := 32
+	tailBlocks := 4
+	selected, receipt, err := RadixTopKBlockSelect(scores, totalBlocks, topKBlocks, tailBlocks)
+	if err != nil {
+		t.Fatalf("RadixTopKBlockSelect: %v", err)
+	}
+	if receipt.DynamicGatingBypassed {
+		t.Error("DynamicGatingBypassed must be false at 78k context")
+	}
+
+	// Check tail blocks are present: totalBlocks-4 .. totalBlocks-1
+	for b := totalBlocks - 4; b < totalBlocks; b++ {
+		found := false
+		for _, s := range selected {
+			if s == int32(b) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("tail block %d missing from selection", b)
+		}
+	}
+
+	// Check high score candidate blocks are present
+	for _, hb := range highBlocks {
+		found := false
+		for _, s := range selected {
+			if s == int32(hb) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("high score block %d missing from selection", hb)
+		}
+	}
+
+	// Verify ascending ordering
+	for i := 1; i < len(selected); i++ {
+		if selected[i] <= selected[i-1] {
+			t.Errorf("selected not strictly ascending: selected[%d]=%d <= selected[%d]=%d", i, selected[i], i-1, selected[i-1])
+		}
+	}
+
+	if receipt.BandwidthSavingsRatio <= 0.50 {
+		t.Errorf("BandwidthSavingsRatio = %f, want > 0.50 (>50%% savings)", receipt.BandwidthSavingsRatio)
+	}
+	if receipt.DRAMBytesEliminated <= 0 {
+		t.Errorf("DRAMBytesEliminated = %d, want > 0", receipt.DRAMBytesEliminated)
+	}
+}
+
+// TestSparseRowGatherKV_ContiguousReconstruction tests extracting selected rows into contiguous scratch.
+func TestSparseRowGatherKV_ContiguousReconstruction(t *testing.T) {
+	totalTokens := 1024
+	blockSize := 64
+	numKVHeads := 2
+	headDim := 128
+	rowWidth := numKVHeads * headDim
+
+	srcK := make([]float32, totalTokens*rowWidth)
+	srcV := make([]float32, totalTokens*rowWidth)
+	for i := range srcK {
+		srcK[i] = float32(i) * 0.01
+		srcV[i] = float32(i) * 0.02
+	}
+
+	selectedBlocks := []int32{0, 3, 7, 15}
+	gK, gV, err := SparseRowGatherKV(srcK, srcV, selectedBlocks, blockSize, numKVHeads, headDim, totalTokens)
+	if err != nil {
+		t.Fatalf("SparseRowGatherKV: %v", err)
+	}
+
+	expectedTokens := len(selectedBlocks) * blockSize
+	if len(gK) != expectedTokens*rowWidth || len(gV) != expectedTokens*rowWidth {
+		t.Fatalf("gathered len K=%d, V=%d, want %d", len(gK), len(gV), expectedTokens*rowWidth)
+	}
+
+	// Verify exact row contents
+	dstTok := 0
+	for _, b := range selectedBlocks {
+		srcStartTok := int(b) * blockSize
+		for row := 0; row < blockSize; row++ {
+			srcRowOffset := (srcStartTok + row) * rowWidth
+			dstRowOffset := (dstTok + row) * rowWidth
+			for c := 0; c < rowWidth; c++ {
+				if gK[dstRowOffset+c] != srcK[srcRowOffset+c] {
+					t.Fatalf("K mismatch at block %d row %d c %d: got %f, want %f", b, row, c, gK[dstRowOffset+c], srcK[srcRowOffset+c])
+				}
+				if gV[dstRowOffset+c] != srcV[srcRowOffset+c] {
+					t.Fatalf("V mismatch at block %d row %d c %d: got %f, want %f", b, row, c, gV[dstRowOffset+c], srcV[srcRowOffset+c])
+				}
+			}
+		}
+		dstTok += blockSize
+	}
+}
+
+// TestROCm_Ticket514_Wave32WMMAAndPad2 verifies Ticket #514 requirements:
+// - CompilerFlags() for gfx1151 enforces -mwavefrontsize32 and native Wave32 SIMD.
+// - Cooperative matrix tile geometry tuned for RDNA 3.5 dual-issue WMMA (16x16x16 and 16x16x32 primitives).
+// - LDS bank conflict Pad-2 alignment helper (+13% matmul speedup) with numerical bit-identity.
+func TestROCm_Ticket514_Wave32WMMAAndPad2(t *testing.T) {
+	a, ok := LookupROCmArch("gfx1151")
+	if !ok {
+		t.Fatal("gfx1151 not found in ROCm arch taxonomy")
+	}
+
+	// 1. Verify CompilerFlags() enforces -mwavefrontsize32 and native Wave32 SIMD
+	flags := a.CompilerFlags()
+	hasWave32 := false
+	for _, f := range flags {
+		if f == "-mwavefrontsize32" {
+			hasWave32 = true
+		}
+	}
+	if !hasWave32 {
+		t.Fatalf("CompilerFlags() for gfx1151 missing -mwavefrontsize32: %v", flags)
+	}
+	if !a.HasNativeWave32WMMA() {
+		t.Fatalf("gfx1151 HasNativeWave32WMMA() = false, want true")
+	}
+
+	// 2. Verify cooperative matrix tile geometry for dual-issue WMMA
+	tiles := a.SupportedWMMATiles()
+	if len(tiles) != 2 {
+		t.Fatalf("SupportedWMMATiles() length = %d, want 2", len(tiles))
+	}
+	has16x16x16 := false
+	has16x16x32 := false
+	for _, tile := range tiles {
+		if tile.Primitive == WMMAPrimitive16x16x16 {
+			has16x16x16 = true
+			if tile.M != 16 || tile.N != 16 || tile.K != 16 || tile.Lanes != 32 || !tile.DualIssue {
+				t.Errorf("invalid 16x16x16 tile config: %+v", tile)
+			}
+		}
+		if tile.Primitive == WMMAPrimitive16x16x32 {
+			has16x16x32 = true
+			if tile.M != 16 || tile.N != 16 || tile.K != 32 || tile.Lanes != 32 || !tile.DualIssue {
+				t.Errorf("invalid 16x16x32 tile config: %+v", tile)
+			}
+		}
+	}
+	if !has16x16x16 || !has16x16x32 {
+		t.Fatalf("missing WMMA primitives: has16x16x16=%v has16x16x32=%v", has16x16x16, has16x16x32)
+	}
+
+	// Verify GEMM tuning selects correct primitives
+	fp16Cfg, err := a.TuneCooperativeMatrixGEMM(128, 128, 128, "fp16")
+	if err != nil {
+		t.Fatalf("TuneCooperativeMatrixGEMM(fp16): %v", err)
+	}
+	if fp16Cfg.Primitive != WMMAPrimitive16x16x16 || fp16Cfg.TileK != 16 || !fp16Cfg.DualIssue {
+		t.Errorf("fp16Cfg = %+v, want 16x16x16 dual-issue", fp16Cfg)
+	}
+	if fp16Cfg.PaddedStride != fp16Cfg.UnpaddedStride+2 {
+		t.Errorf("fp16Cfg padded stride %d != unpadded %d + 2", fp16Cfg.PaddedStride, fp16Cfg.UnpaddedStride)
+	}
+
+	int8Cfg, err := a.TuneCooperativeMatrixGEMM(128, 128, 128, "int8")
+	if err != nil {
+		t.Fatalf("TuneCooperativeMatrixGEMM(int8): %v", err)
+	}
+	if int8Cfg.Primitive != WMMAPrimitive16x16x32 || int8Cfg.TileK != 32 || !int8Cfg.DualIssue {
+		t.Errorf("int8Cfg = %+v, want 16x16x32 dual-issue", int8Cfg)
+	}
+
+	// 3. Verify LDS bank conflict Pad-2 alignment helper (+13% matmul speedup)
+	unpaddedCols := 16
+	unpaddedReport := AnalyzeLDSBankConflicts(unpaddedCols, false)
+	paddedReport := AnalyzeLDSBankConflicts(unpaddedCols, true)
+
+	if unpaddedReport.ActiveBanks >= 16 {
+		t.Errorf("unpadded active banks = %d, expected bank collision (<= 8)", unpaddedReport.ActiveBanks)
+	}
+	if unpaddedReport.BankConflictStalls == 0 {
+		t.Errorf("unpadded bank conflict stalls = 0, expected stalls")
+	}
+
+	if paddedReport.ActiveBanks != 16 {
+		t.Errorf("padded active banks = %d, want 16 (expanded bank coverage)", paddedReport.ActiveBanks)
+	}
+	if paddedReport.SpeedupEstimate != 1.13 {
+		t.Errorf("padded speedup estimate = %f, want 1.13 (+13%% matmul speedup)", paddedReport.SpeedupEstimate)
+	}
+	if paddedReport.PaddedStrideWords != LDSBankPad2Stride(unpaddedCols) {
+		t.Errorf("padded stride = %d, want %d", paddedReport.PaddedStrideWords, LDSBankPad2Stride(unpaddedCols))
+	}
+
+	// 4. Verify in-tree numerical bit-identity (zero degradation)
+	M, N, K := 16, 16, 32
+	A := make([]float32, M*K)
+	B := make([]float32, K*N)
+	for i := range A {
+		A[i] = float32(i)*0.05 - 1.0
+	}
+	for i := range B {
+		B[i] = float32(i)*0.03 - 0.5
+	}
+
+	C, report, err := VerifyLDSBankPad2MatMul(A, B, M, N, K)
+	if err != nil {
+		t.Fatalf("VerifyLDSBankPad2MatMul failed: %v", err)
+	}
+	if len(C) != M*N {
+		t.Fatalf("len(C) = %d, want %d", len(C), M*N)
+	}
+	if report.ActiveBanks != 16 {
+		t.Errorf("report.ActiveBanks = %d, want 16", report.ActiveBanks)
+	}
+	if report.SpeedupEstimate != 1.13 {
+		t.Errorf("report.SpeedupEstimate = %f, want 1.13", report.SpeedupEstimate)
+	}
+}
