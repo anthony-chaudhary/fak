@@ -493,10 +493,33 @@ func (h *sessionHub) unsubscribe(ch chan []byte) {
 	}
 }
 
+// formatSSEEvent formats an eventType and raw data payload into a W3C-compliant SSE frame.
+// Under the W3C Server-Sent Events specification, if data contains newlines (\n or \r\n),
+// each line of data MUST begin with "data: ".
+func formatSSEEvent(eventType string, data []byte) []byte {
+	var b strings.Builder
+	if eventType != "" {
+		b.WriteString("event: ")
+		b.WriteString(eventType)
+		b.WriteByte('\n')
+	}
+	s := string(data)
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	lines := strings.Split(s, "\n")
+	for _, line := range lines {
+		b.WriteString("data: ")
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	b.WriteByte('\n')
+	return []byte(b.String())
+}
+
 func (h *sessionHub) broadcastSession(sessionID string, eventType string, data []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	msg := []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, string(data)))
+	msg := formatSSEEvent(eventType, data)
 	for ch, sub := range h.subscribers {
 		if sub.sessionID == "" || sub.sessionID == sessionID {
 			select {
@@ -698,9 +721,14 @@ func handleSessionSSEWithInterval(scoped bool, interval time.Duration) http.Hand
 		defer defaultSessionHub.unsubscribe(ch)
 
 		if sessionID != "" {
-			fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"connected\",\"session_id\":%q}\n\n", sessionID)
+			connectedData := fmt.Sprintf("{\"status\":\"connected\",\"session_id\":%q}", sessionID)
+			if _, err := w.Write(formatSSEEvent("connected", []byte(connectedData))); err != nil {
+				return
+			}
 		} else {
-			fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"connected\"}\n\n")
+			if _, err := w.Write(formatSSEEvent("connected", []byte(`{"status":"connected"}`))); err != nil {
+				return
+			}
 		}
 		defaultSessionHub.mu.RLock()
 		lastCards := cloneSessionCards(defaultSessionHub.lastCards)
@@ -740,7 +768,9 @@ func handleSessionSSEWithInterval(scoped bool, interval time.Duration) http.Hand
 				payload["html"] = lastHTML
 			}
 			if data, err := json.Marshal(payload); err == nil {
-				fmt.Fprintf(w, "event: session_update\ndata: %s\n\n", data)
+				if _, err := w.Write(formatSSEEvent("session_update", data)); err != nil {
+					return
+				}
 			}
 		}
 		flusher.Flush()
