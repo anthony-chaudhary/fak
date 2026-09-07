@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -40,6 +42,54 @@ type guardCrashRSIRequest struct {
 	BuildModule     string
 	ReceiptIdentity string
 	Prompt          string
+	Provider        string
+	Model           string
+	FallbackModel   string
+	Env             []string
+	Stderr          io.Writer
+	OnWait          func(guardCrashRSITerminalRecord)
+}
+
+// guardCrashRSITerminalRecord records the observable terminal outcome of an RSI child process.
+type guardCrashRSITerminalRecord struct {
+	Tag       string    `json:"tag"`
+	Agent     string    `json:"agent"`
+	Provider  string    `json:"provider,omitempty"`
+	Model     string    `json:"model,omitempty"`
+	ExitCode  int       `json:"exit_code"`
+	Error     string    `json:"error,omitempty"`
+	Stderr    string    `json:"stderr,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+var (
+	guardCrashRSITerminalMu      sync.Mutex
+	guardCrashRSITerminalRecords []guardCrashRSITerminalRecord
+	guardCrashRSITerminalHook    func(guardCrashRSITerminalRecord)
+)
+
+func recordGuardCrashRSITerminal(rec guardCrashRSITerminalRecord) {
+	guardCrashRSITerminalMu.Lock()
+	guardCrashRSITerminalRecords = append(guardCrashRSITerminalRecords, rec)
+	hook := guardCrashRSITerminalHook
+	guardCrashRSITerminalMu.Unlock()
+	if hook != nil {
+		hook(rec)
+	}
+}
+
+func getGuardCrashRSITerminalRecords() []guardCrashRSITerminalRecord {
+	guardCrashRSITerminalMu.Lock()
+	defer guardCrashRSITerminalMu.Unlock()
+	out := make([]guardCrashRSITerminalRecord, len(guardCrashRSITerminalRecords))
+	copy(out, guardCrashRSITerminalRecords)
+	return out
+}
+
+func resetGuardCrashRSITerminalRecords() {
+	guardCrashRSITerminalMu.Lock()
+	defer guardCrashRSITerminalMu.Unlock()
+	guardCrashRSITerminalRecords = nil
 }
 
 var guardCrashRSILaunch = launchGuardCrashRSI
@@ -138,6 +188,9 @@ func guardLaunchCrashRSI(stderr io.Writer, req guardCrashRSIRequest) bool {
 		}
 		return false
 	}
+	if req.Stderr == nil {
+		req.Stderr = stderr
+	}
 	if err := guardCrashRSILaunch(req); err != nil {
 		_ = finish(false)
 		if stderr != nil {
@@ -188,6 +241,26 @@ func admitGuardCrashRSILaunch(identity string) (func(bool) error, launchguard.De
 	return lease.Finish, decision, nil
 }
 
+func guardCrashRSIDefaultProvider(agent string) string {
+	if p := strings.TrimSpace(os.Getenv("FAK_GUARD_CRASH_RSI_PROVIDER")); p != "" {
+		return p
+	}
+	if agent == "codex" {
+		return guardCodexProviderID
+	}
+	return ""
+}
+
+func guardCrashRSIDefaultModel(agent string) string {
+	if m := strings.TrimSpace(os.Getenv("FAK_GUARD_CRASH_RSI_MODEL")); m != "" {
+		return m
+	}
+	if agent == "codex" {
+		return guardCodexDefaultModelID
+	}
+	return ""
+}
+
 func guardCrashRSIAdmission(guardTraceID, agentName, class string, code, restartsSoFar int) (guardCrashRSIRequest, bool) {
 	if restartsSoFar != 0 || strings.TrimSpace(os.Getenv(guardCrashRSIMarkerEnv)) != "" {
 		return guardCrashRSIRequest{}, false
@@ -208,12 +281,15 @@ func guardCrashRSIAdmission(guardTraceID, agentName, class string, code, restart
 	source := guardRSIDigest(trace)
 	tag := "guard-crash-rsi/" + source
 	req := guardCrashRSIRequest{
-		Tag:       tag,
-		Source:    source,
-		Agent:     agent,
-		Class:     class,
-		ExitCode:  code,
-		Workspace: workspace,
+		Tag:           tag,
+		Source:        source,
+		Agent:         agent,
+		Class:         class,
+		ExitCode:      code,
+		Workspace:     workspace,
+		Provider:      guardCrashRSIDefaultProvider(agent),
+		Model:         guardCrashRSIDefaultModel(agent),
+		FallbackModel: guardCrashRSIDefaultModel(agent),
 	}
 	req.Prompt = guardCrashRSIPrompt(req)
 	return req, true
@@ -262,6 +338,9 @@ func guardFailureRSIAdmission(guardTraceID, agentName string, receiptErr error) 
 		BuildCommit:     buildCommit,
 		BuildModule:     buildModule,
 		ReceiptIdentity: guardFailureRSIReceiptChildResource,
+		Provider:        guardCrashRSIDefaultProvider(agent),
+		Model:           guardCrashRSIDefaultModel(agent),
+		FallbackModel:   guardCrashRSIDefaultModel(agent),
 	}
 	req.Prompt = guardFailureRSIPrompt(req)
 	return req, true
@@ -313,46 +392,201 @@ Bounded failure context:
 Perform read-only root-cause analysis, identify the smallest durable prevention, and report evidence plus a checkable next step. Do not expose credentials, paths, process IDs, receipt payloads, or ambient environment values.`, req.Tag, req.Trigger, req.Reason, req.Subsystem, req.Agent, req.BuildCommit, req.BuildModule, req.Source, req.ReceiptIdentity, req.Signature)
 }
 
-func launchGuardCrashRSI(req guardCrashRSIRequest) error {
+var (
+	guardCrashRSILookPath = exec.LookPath
+	guardCrashRSICommand  = exec.Command
+)
+
+type boundedBufferWriter struct {
+	buf *bytes.Buffer
+	max int
+}
+
+func (w *boundedBufferWriter) Write(p []byte) (int, error) {
+	if w.buf == nil {
+		return len(p), nil
+	}
+	if w.buf.Len() >= w.max {
+		return len(p), nil
+	}
+	remaining := w.max - w.buf.Len()
+	if len(p) > remaining {
+		w.buf.Write(p[:remaining])
+		return len(p), nil
+	}
+	return w.buf.Write(p)
+}
+
+func guardCrashRSICommandArgs(req guardCrashRSIRequest) (string, []string, error) {
 	var name string
 	var args []string
 	switch req.Agent {
 	case "claude":
 		name = "claude"
 		args = []string{"-p", req.Prompt, "--permission-mode", "plan"}
+		model := strings.TrimSpace(req.Model)
+		if model == "" {
+			model = strings.TrimSpace(req.FallbackModel)
+		}
+		if model == "" {
+			model = guardCrashRSIDefaultModel("claude")
+		}
+		if model != "" {
+			args = append(args, "--model", model)
+		}
 	case "codex":
 		name = "codex"
-		args = []string{"exec", "--sandbox", "read-only", "--json", req.Prompt}
+		args = []string{"exec", "--sandbox", "read-only", "--json"}
+		provider := strings.TrimSpace(req.Provider)
+		if provider == "" {
+			provider = guardCrashRSIDefaultProvider("codex")
+		}
+		if provider != "" {
+			args = append(args, "-c", "model_provider="+provider)
+		}
+		model := strings.TrimSpace(req.Model)
+		if model == "" {
+			model = strings.TrimSpace(req.FallbackModel)
+		}
+		if model == "" {
+			model = guardCrashRSIDefaultModel("codex")
+		}
+		if model != "" {
+			args = append(args, "--model", model)
+		}
+		if req.Prompt != "" {
+			args = append(args, req.Prompt)
+		}
 	default:
-		return fmt.Errorf("unsupported harness %q", req.Agent)
+		return "", nil, fmt.Errorf("unsupported harness %q", req.Agent)
 	}
-	path, err := exec.LookPath(name)
+	return name, args, nil
+}
+
+func launchGuardCrashRSI(req guardCrashRSIRequest) error {
+	name, args, err := guardCrashRSICommandArgs(req)
+	if err != nil {
+		return err
+	}
+	path, err := guardCrashRSILookPath(name)
 	if err != nil {
 		return fmt.Errorf("resolve %s: %w", name, err)
 	}
-	cmd := exec.Command(path, args...)
+	cmd := guardCrashRSICommand(path, args...)
 	cmd.Dir = req.Workspace
-	cmd.Env = guardCrashRSIEnvironment(req.Tag)
+
+	effectiveProvider := strings.TrimSpace(req.Provider)
+	if effectiveProvider == "" {
+		effectiveProvider = guardCrashRSIDefaultProvider(req.Agent)
+	}
+	effectiveModel := strings.TrimSpace(req.Model)
+	if effectiveModel == "" {
+		effectiveModel = strings.TrimSpace(req.FallbackModel)
+	}
+	if effectiveModel == "" {
+		effectiveModel = guardCrashRSIDefaultModel(req.Agent)
+	}
+
+	extraEnv := append([]string(nil), req.Env...)
+	if effectiveProvider != "" {
+		extraEnv = append(extraEnv, "FAK_GUARD_CRASH_RSI_PROVIDER="+effectiveProvider)
+	}
+	if effectiveModel != "" {
+		extraEnv = append(extraEnv, "FAK_GUARD_CRASH_RSI_MODEL="+effectiveModel)
+	}
+	cmd.Env = guardCrashRSIEnvironment(req.Tag, extraEnv...)
 	cmd.Stdin = nil
 	cmd.Stdout = nil
-	cmd.Stderr = nil
+
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &boundedBufferWriter{buf: &stderrBuf, max: 4096}
+
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	go func() { _ = cmd.Wait() }()
+
+	go func() {
+		waitErr := cmd.Wait()
+		record := guardCrashRSITerminalRecord{
+			Tag:       req.Tag,
+			Agent:     req.Agent,
+			Provider:  effectiveProvider,
+			Model:     effectiveModel,
+			Timestamp: time.Now(),
+		}
+		if waitErr != nil {
+			var exitErr *exec.ExitError
+			if errors.As(waitErr, &exitErr) {
+				record.ExitCode = exitErr.ExitCode()
+			} else {
+				record.ExitCode = -1
+			}
+			record.Error = waitErr.Error()
+			record.Stderr = strings.TrimSpace(stderrBuf.String())
+
+			stderrDest := req.Stderr
+			if stderrDest == nil {
+				stderrDest = os.Stderr
+			}
+			if stderrDest != nil {
+				kind := "crash"
+				if req.Reason != "" {
+					kind = "failure"
+				}
+				fmt.Fprintf(stderrDest, "fak guard: %s RSI child process failed (%s, exit %d): %v\n", kind, req.Tag, record.ExitCode, waitErr)
+				if record.Stderr != "" {
+					fmt.Fprintf(stderrDest, "fak guard: %s RSI child stderr (%s): %s\n", kind, req.Tag, record.Stderr)
+				}
+			}
+		}
+		recordGuardCrashRSITerminal(record)
+		if req.OnWait != nil {
+			req.OnWait(record)
+		}
+	}()
 	return nil
 }
 
 // The investigation receives only process-bootstrap paths and the recursion marker. In
 // particular, provider keys, original argv, and the parent's full ambient environment are not
 // forwarded.
-func guardCrashRSIEnvironment(tag string) []string {
-	allow := []string{"PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP", "CLAUDE_CONFIG_DIR", "CODEX_HOME"}
-	env := make([]string, 0, len(allow)+1)
+func guardCrashRSIEnvironment(tag string, extraEnv ...string) []string {
+	allow := []string{
+		"PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+		"SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP",
+		"CLAUDE_CONFIG_DIR", "CODEX_HOME",
+		"FAK_GUARD_CRASH_RSI_PROVIDER", "FAK_GUARD_CRASH_RSI_MODEL",
+		"FAK_MODEL_PROVIDER", "FAK_MODEL",
+	}
+	env := make([]string, 0, len(allow)+1+len(extraEnv))
 	for _, key := range allow {
 		if value, ok := os.LookupEnv(key); ok && strings.TrimSpace(value) != "" {
 			env = append(env, key+"="+value)
 		}
 	}
-	return append(env, guardCrashRSIMarkerEnv+"="+tag)
+	env = append(env, guardCrashRSIMarkerEnv+"="+tag)
+	for _, kv := range extraEnv {
+		kv = strings.TrimSpace(kv)
+		if kv == "" {
+			continue
+		}
+		parts := strings.SplitN(kv, "=", 2)
+		if len(parts) == 2 {
+			k := strings.ToUpper(parts[0])
+			replaced := false
+			for i, existing := range env {
+				if strings.HasPrefix(strings.ToUpper(existing), k+"=") {
+					env[i] = kv
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				env = append(env, kv)
+			}
+		} else {
+			env = append(env, kv)
+		}
+	}
+	return env
 }

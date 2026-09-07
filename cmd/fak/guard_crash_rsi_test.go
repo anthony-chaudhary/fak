@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -403,6 +404,10 @@ func TestGuardCrashRSIHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
 	}
+	if os.Getenv("GO_HELPER_MODE") == "crash_rsi_child_witness" {
+		runGuardCrashRSIChildWitnessHelper()
+		return
+	}
 	args := os.Args
 	for len(args) > 0 {
 		if args[0] == "--" {
@@ -419,7 +424,16 @@ func TestGuardCrashRSIHelperProcess(t *testing.T) {
 	guardCrashRSIDir = dir
 	guardCrashRSIAdmit = admitGuardCrashRSILaunch
 
-	finish, decision, err := guardCrashRSIAdmit(tag)
+	var finish func(bool) error
+	var decision launchguard.Decision
+	var err error
+	for attempt := 0; attempt < 5; attempt++ {
+		finish, decision, err = guardCrashRSIAdmit(tag)
+		if err == nil || !strings.Contains(err.Error(), "used by another process") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "admit error: %v\n", err)
 		os.Exit(4)
@@ -429,8 +443,16 @@ func TestGuardCrashRSIHelperProcess(t *testing.T) {
 		os.Exit(2)
 	}
 	time.Sleep(20 * time.Millisecond)
-	if err := finish(true); err != nil {
-		fmt.Fprintf(os.Stderr, "finish error: %v\n", err)
+	var finishErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		finishErr = finish(true)
+		if finishErr == nil || !strings.Contains(finishErr.Error(), "used by another process") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if finishErr != nil {
+		fmt.Fprintf(os.Stderr, "finish error: %v\n", finishErr)
 		os.Exit(5)
 	}
 	os.Exit(0)
@@ -504,5 +526,367 @@ func TestGuardCrashRSIMultiProcessConcurrentClaim(t *testing.T) {
 	cmdOther.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
 	if out, err := cmdOther.CombinedOutput(); err != nil {
 		t.Fatalf("different tag launch failed: %v output=%s", err, out)
+	}
+}
+
+func runGuardCrashRSIChildWitnessHelper() {
+	args := os.Args
+	for len(args) > 0 {
+		if args[0] == "--" {
+			args = args[1:]
+			break
+		}
+		args = args[1:]
+	}
+
+	provider := ""
+	model := ""
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-c" && i+1 < len(args) {
+			val := args[i+1]
+			if strings.HasPrefix(val, "model_provider=") {
+				provider = strings.TrimPrefix(val, "model_provider=")
+			}
+		}
+		if args[i] == "--model" && i+1 < len(args) {
+			model = args[i+1]
+		}
+	}
+
+	if provider == "" {
+		provider = os.Getenv("FAK_GUARD_CRASH_RSI_PROVIDER")
+	}
+	if model == "" {
+		model = os.Getenv("FAK_GUARD_CRASH_RSI_MODEL")
+	}
+
+	hasSecrets := false
+	for _, envVar := range os.Environ() {
+		upper := strings.ToUpper(envVar)
+		if strings.HasPrefix(upper, "OPENAI_API_KEY=") ||
+			strings.HasPrefix(upper, "ANTHROPIC_API_KEY=") ||
+			strings.HasPrefix(upper, "FAK_SECRET_") {
+			hasSecrets = true
+			break
+		}
+	}
+
+	exitCode := 0
+	if codeStr := os.Getenv("FAK_WITNESS_EXIT_CODE"); codeStr != "" {
+		fmt.Sscanf(codeStr, "%d", &exitCode)
+	}
+
+	errMsg := os.Getenv("FAK_WITNESS_ERROR_MESSAGE")
+	if errMsg != "" && exitCode != 0 {
+		fmt.Fprintln(os.Stderr, errMsg)
+	}
+
+	receiptPath := os.Getenv("FAK_WITNESS_RECEIPT")
+	if receiptPath != "" {
+		receipt := map[string]any{
+			"tag":           os.Getenv(guardCrashRSIMarkerEnv),
+			"provider":      provider,
+			"model":         model,
+			"has_secrets":   hasSecrets,
+			"exit_code":     exitCode,
+			"error_message": errMsg,
+			"args":          args,
+		}
+		data, _ := json.Marshal(receipt)
+		_ = os.WriteFile(receiptPath, data, 0o600)
+	}
+
+	os.Exit(exitCode)
+}
+
+func assertArgContains(t *testing.T, args []string, flag, val string) {
+	t.Helper()
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == flag && args[i+1] == val {
+			return
+		}
+	}
+	t.Fatalf("args %v missing flag %q followed by %q", args, flag, val)
+}
+
+func TestGuardCrashRSILaunchCodexInjectsProviderAndModelOverrides(t *testing.T) {
+	// Test 1: Default fallback provider ("fak") and default model (guardCodexDefaultModelID)
+	reqDefault := guardCrashRSIRequest{
+		Agent:     "codex",
+		Workspace: t.TempDir(),
+		Prompt:    "investigate",
+	}
+	name, args, err := guardCrashRSICommandArgs(reqDefault)
+	if err != nil {
+		t.Fatalf("guardCrashRSICommandArgs failed: %v", err)
+	}
+	if name != "codex" {
+		t.Fatalf("name = %q, want 'codex'", name)
+	}
+	assertArgContains(t, args, "-c", "model_provider="+guardCodexProviderID)
+	assertArgContains(t, args, "--model", guardCodexDefaultModelID)
+	if args[len(args)-1] != "investigate" {
+		t.Fatalf("last arg = %q, want prompt 'investigate'", args[len(args)-1])
+	}
+
+	// Test 2: Explicit provider override
+	reqProvider := guardCrashRSIRequest{
+		Agent:     "codex",
+		Provider:  "custom-provider",
+		Workspace: t.TempDir(),
+		Prompt:    "investigate",
+	}
+	_, argsProvider, err := guardCrashRSICommandArgs(reqProvider)
+	if err != nil {
+		t.Fatalf("guardCrashRSICommandArgs failed: %v", err)
+	}
+	assertArgContains(t, argsProvider, "-c", "model_provider=custom-provider")
+
+	// Test 3: Explicit model override
+	reqModel := guardCrashRSIRequest{
+		Agent:     "codex",
+		Model:     "gpt-5.6-sol",
+		Workspace: t.TempDir(),
+		Prompt:    "investigate",
+	}
+	_, argsModel, err := guardCrashRSICommandArgs(reqModel)
+	if err != nil {
+		t.Fatalf("guardCrashRSICommandArgs failed: %v", err)
+	}
+	assertArgContains(t, argsModel, "--model", "gpt-5.6-sol")
+
+	// Test 4: Explicit fallback model when model is empty
+	reqFallback := guardCrashRSIRequest{
+		Agent:         "codex",
+		FallbackModel: "fallback-model-x",
+		Workspace:     t.TempDir(),
+		Prompt:        "investigate",
+	}
+	_, argsFallback, err := guardCrashRSICommandArgs(reqFallback)
+	if err != nil {
+		t.Fatalf("guardCrashRSICommandArgs failed: %v", err)
+	}
+	assertArgContains(t, argsFallback, "--model", "fallback-model-x")
+
+	// Test 5: Environment variable overrides
+	t.Setenv("FAK_GUARD_CRASH_RSI_PROVIDER", "env-provider")
+	t.Setenv("FAK_GUARD_CRASH_RSI_MODEL", "env-model")
+	reqEnv := guardCrashRSIRequest{
+		Agent:     "codex",
+		Workspace: t.TempDir(),
+		Prompt:    "investigate",
+	}
+	_, argsEnv, err := guardCrashRSICommandArgs(reqEnv)
+	if err != nil {
+		t.Fatalf("guardCrashRSICommandArgs failed: %v", err)
+	}
+	assertArgContains(t, argsEnv, "-c", "model_provider=env-provider")
+	assertArgContains(t, argsEnv, "--model", "env-model")
+
+	// Test 6: Verify launchGuardCrashRSI passes args through to exec.Command
+	var capturedName string
+	var capturedArgs []string
+	oldLookPath, oldCommand := guardCrashRSILookPath, guardCrashRSICommand
+	t.Cleanup(func() {
+		guardCrashRSILookPath = oldLookPath
+		guardCrashRSICommand = oldCommand
+	})
+	guardCrashRSILookPath = func(name string) (string, error) {
+		return "/mock/" + name, nil
+	}
+	guardCrashRSICommand = func(name string, args ...string) *exec.Cmd {
+		capturedName = name
+		capturedArgs = args
+		return exec.Command("cmd.exe", "/c", "exit 0")
+	}
+
+	reqLaunch := guardCrashRSIRequest{
+		Tag:       "guard-crash-rsi/test",
+		Agent:     "codex",
+		Provider:  "test-provider",
+		Model:     "test-model",
+		Workspace: t.TempDir(),
+		Prompt:    "launch prompt",
+	}
+	_ = launchGuardCrashRSI(reqLaunch)
+	if capturedName != "/mock/codex" {
+		t.Fatalf("captured executable name = %q, want '/mock/codex'", capturedName)
+	}
+	assertArgContains(t, capturedArgs, "-c", "model_provider=test-provider")
+	assertArgContains(t, capturedArgs, "--model", "test-model")
+
+	// Test 7: Claude agent supports model flag
+	reqClaude := guardCrashRSIRequest{
+		Agent:     "claude",
+		Model:     "claude-haiku-4-5",
+		Workspace: t.TempDir(),
+		Prompt:    "claude prompt",
+	}
+	_, argsClaude, err := guardCrashRSICommandArgs(reqClaude)
+	if err != nil {
+		t.Fatalf("guardCrashRSICommandArgs claude failed: %v", err)
+	}
+	assertArgContains(t, argsClaude, "--model", "claude-haiku-4-5")
+}
+
+func TestGuardCrashRSIChildRouteIdentityAndTerminalFailureWitness(t *testing.T) {
+	resetGuardCrashRSITerminalRecords()
+	t.Cleanup(resetGuardCrashRSITerminalRecords)
+
+	oldLookPath, oldCommand := guardCrashRSILookPath, guardCrashRSICommand
+	t.Cleanup(func() {
+		guardCrashRSILookPath = oldLookPath
+		guardCrashRSICommand = oldCommand
+	})
+
+	guardCrashRSILookPath = func(name string) (string, error) {
+		return os.Args[0], nil
+	}
+	guardCrashRSICommand = func(name string, args ...string) *exec.Cmd {
+		testArgs := []string{"-test.run=^TestGuardCrashRSIHelperProcess$", "--"}
+		testArgs = append(testArgs, args...)
+		return exec.Command(name, testArgs...)
+	}
+
+	dir := t.TempDir()
+	receiptPath := filepath.Join(dir, "receipt.json")
+
+	t.Setenv("OPENAI_API_KEY", "secret-key-12345")
+	t.Setenv("ANTHROPIC_API_KEY", "secret-anthropic-key")
+
+	waitDone := make(chan guardCrashRSITerminalRecord, 1)
+	var stderrBuf bytes.Buffer
+
+	req := guardCrashRSIRequest{
+		Tag:       "guard-crash-rsi/witness-test-tag",
+		Source:    "witness-test-tag",
+		Agent:     "codex",
+		Class:     "NONZERO_EXIT",
+		ExitCode:  1,
+		Workspace: dir,
+		Provider:  "fak",
+		Model:     "gpt-6-astra",
+		Prompt:    "investigate crash root cause",
+		Stderr:    &stderrBuf,
+		Env: []string{
+			"GO_WANT_HELPER_PROCESS=1",
+			"GO_HELPER_MODE=crash_rsi_child_witness",
+			"FAK_WITNESS_RECEIPT=" + receiptPath,
+			"FAK_WITNESS_EXIT_CODE=42",
+			"FAK_WITNESS_ERROR_MESSAGE=OpenAI error: model 'gpt-5.6-sol' rejected with HTTP 400 Bad Request",
+		},
+		OnWait: func(rec guardCrashRSITerminalRecord) {
+			waitDone <- rec
+		},
+	}
+
+	err := launchGuardCrashRSI(req)
+	if err != nil {
+		t.Fatalf("launchGuardCrashRSI failed: %v", err)
+	}
+
+	var termRec guardCrashRSITerminalRecord
+	select {
+	case termRec = <-waitDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for child terminal failure record")
+	}
+
+	// 1. Verify terminal record captured failure details
+	if termRec.ExitCode != 42 {
+		t.Fatalf("terminal record exit code = %d, want 42", termRec.ExitCode)
+	}
+	if termRec.Tag != req.Tag {
+		t.Fatalf("terminal record tag = %q, want %q", termRec.Tag, req.Tag)
+	}
+	if termRec.Provider != "fak" {
+		t.Fatalf("terminal record provider = %q, want 'fak'", termRec.Provider)
+	}
+	if termRec.Model != "gpt-6-astra" {
+		t.Fatalf("terminal record model = %q, want 'gpt-6-astra'", termRec.Model)
+	}
+	if !strings.Contains(termRec.Stderr, "HTTP 400 Bad Request") {
+		t.Fatalf("terminal record stderr = %q, want to contain 'HTTP 400 Bad Request'", termRec.Stderr)
+	}
+
+	// 2. Verify stderr output logged the terminal failure
+	loggedStderr := stderrBuf.String()
+	if !strings.Contains(loggedStderr, "exit 42") {
+		t.Fatalf("logged stderr missing exit 42: %s", loggedStderr)
+	}
+	if !strings.Contains(loggedStderr, req.Tag) {
+		t.Fatalf("logged stderr missing tag: %s", loggedStderr)
+	}
+	if !strings.Contains(loggedStderr, "HTTP 400 Bad Request") {
+		t.Fatalf("logged stderr missing child error message: %s", loggedStderr)
+	}
+
+	// 3. Verify integration receipt written by child
+	data, err := os.ReadFile(receiptPath)
+	if err != nil {
+		t.Fatalf("failed to read witness receipt: %v", err)
+	}
+	var receipt map[string]any
+	if err := json.Unmarshal(data, &receipt); err != nil {
+		t.Fatalf("failed to parse witness receipt: %v", err)
+	}
+	if receipt["provider"] != "fak" {
+		t.Fatalf("witness receipt provider = %v, want 'fak'", receipt["provider"])
+	}
+	if receipt["model"] != "gpt-6-astra" {
+		t.Fatalf("witness receipt model = %v, want 'gpt-6-astra'", receipt["model"])
+	}
+	if receipt["has_secrets"] != false {
+		t.Fatal("witness receipt indicates child received secrets in environment")
+	}
+	if receipt["exit_code"] != float64(42) {
+		t.Fatalf("witness receipt exit_code = %v, want 42", receipt["exit_code"])
+	}
+
+	// 4. Test read-only child baseline with exit code 0
+	cleanReceiptPath := filepath.Join(dir, "clean_receipt.json")
+	var cleanStderr bytes.Buffer
+	cleanDone := make(chan guardCrashRSITerminalRecord, 1)
+
+	cleanReq := guardCrashRSIRequest{
+		Tag:       "guard-crash-rsi/clean-baseline",
+		Source:    "clean-baseline",
+		Agent:     "codex",
+		Class:     "NONZERO_EXIT",
+		ExitCode:  1,
+		Workspace: dir,
+		Provider:  "fak",
+		Model:     "gpt-6-astra",
+		Prompt:    "clean run",
+		Stderr:    &cleanStderr,
+		Env: []string{
+			"GO_WANT_HELPER_PROCESS=1",
+			"GO_HELPER_MODE=crash_rsi_child_witness",
+			"FAK_WITNESS_RECEIPT=" + cleanReceiptPath,
+			"FAK_WITNESS_EXIT_CODE=0",
+		},
+		OnWait: func(rec guardCrashRSITerminalRecord) {
+			cleanDone <- rec
+		},
+	}
+
+	if err := launchGuardCrashRSI(cleanReq); err != nil {
+		t.Fatalf("launchGuardCrashRSI clean run failed: %v", err)
+	}
+
+	select {
+	case cleanRec := <-cleanDone:
+		if cleanRec.ExitCode != 0 {
+			t.Fatalf("clean run exit code = %d, want 0", cleanRec.ExitCode)
+		}
+		if cleanRec.Error != "" {
+			t.Fatalf("clean run error = %q, want empty", cleanRec.Error)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for clean run completion")
+	}
+
+	if cleanStderr.Len() != 0 {
+		t.Fatalf("clean run produced unexpected stderr output: %s", cleanStderr.String())
 	}
 }
