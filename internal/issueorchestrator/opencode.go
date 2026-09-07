@@ -6,6 +6,32 @@ import (
 	"strings"
 )
 
+// isHaloHardwareRelevant checks if the issue is relevant to AMD GPU or Strix Halo hardware validation.
+func isHaloHardwareRelevant(issue Issue) bool {
+	switch strings.ToLower(strings.TrimSpace(issue.Lane)) {
+	case "amdgpu", "compute", "modelperfobs", "nativeperf":
+		return true
+	}
+
+	for _, p := range issue.Paths {
+		pLower := strings.ToLower(p)
+		for _, kw := range []string{"amdgpu", "compute", "strix", "halo", "gfx115", "vulkan"} {
+			if strings.Contains(pLower, kw) {
+				return true
+			}
+		}
+	}
+
+	titleLower := strings.ToLower(issue.Title)
+	for _, kw := range []string{"strix", "halo", "gfx115", "amdgpu", "rocm", "vulkan", "rdna"} {
+		if strings.Contains(titleLower, kw) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // FormatOpencodePrompt formats a standard task prompt for an OpenCode worker.
 func FormatOpencodePrompt(issue Issue) string {
 	var b strings.Builder
@@ -43,6 +69,9 @@ func FormatOpencodePrompt(issue Issue) string {
 		b.WriteString("- go test -v ./...\n")
 		b.WriteString("- go vet ./...\n")
 	}
+	if isHaloHardwareRelevant(issue) {
+		b.WriteString("- fak-dev amd-strix-probe (or fak validate --strix)\n")
+	}
 
 	b.WriteString("\nInstructions:\n")
 	b.WriteString("- Strictly adhere to the assigned lane and boundary paths. Do not touch root files (e.g. go.mod, go.sum, dos.toml) or files in other packages.\n")
@@ -53,6 +82,12 @@ func FormatOpencodePrompt(issue Issue) string {
 	b.WriteString(fmt.Sprintf("  2. Stage-and-commit by explicit path: fak commit --path <changed-paths> -m \"<type>(%s): <description> (fak %s)\"\n", lane, lane))
 	b.WriteString("  3. Safe unprompted push: fak sync push\n")
 	b.WriteString("  Never leave finished work uncommitted or rely on external manual landing.\n")
+	if isHaloHardwareRelevant(issue) {
+		b.WriteString("- Leased Halo Hardware Validation Protocol:\n")
+		b.WriteString("  - Mandate executing an early low-cost probe (e.g. `fak-dev amd-strix-probe` or `fak validate --strix`).\n")
+		b.WriteString("  - Mandate coordinated resource access against leased LAN Halo hardware (`strix1`).\n")
+		b.WriteString("  - Mandate actual source-bound physical execution evidence, or emit a structured pending hardware status when hardware is busy or unavailable.\n")
+	}
 	b.WriteString("- Provide a 3-line receipt upon completion: status/verdict, changed files & commit SHA, and test output summary, and post directly to the GitHub issue with gh issue comment.\n")
 	b.WriteString("- Milestone Progress Protocol: Report milestone progress using structured comment tags in your commentary:\n")
 	b.WriteString("  <!-- fak:progress milestone=\"<name>\" delta=\"+N files\" tests=\"<pass|fail>\" -->\n")
