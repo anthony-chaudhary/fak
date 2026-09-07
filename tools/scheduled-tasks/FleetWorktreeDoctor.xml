@@ -35,7 +35,7 @@
   <Actions Context="Author">
     <Exec>
       <Command>powershell.exe</Command>
-      <Arguments>-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "===== $((Get-Date -Format o)) =====" | Out-File -FilePath '%LOCALAPPDATA%\Fleet\watchdog\worktree_doctor.log' -Append -Encoding UTF8; &amp; 'C:\Program Files\Python313\python.exe' -X utf8 "C:\work\fleet\tools\worktree_doctor.py" --repo "C:\work\fleet" --fetch --prune --prune-branches --allow-branch fak-v0.1 2&gt;&amp;1 | Out-File -FilePath '%LOCALAPPDATA%\Fleet\watchdog\worktree_doctor.log' -Append -Encoding UTF8"</Arguments>
+      <Arguments>-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "===== $((Get-Date -Format o)) =====" | Out-File -FilePath '%LOCALAPPDATA%\Fleet\watchdog\worktree_doctor.log' -Append -Encoding UTF8; &amp; 'C:\Program Files\Python313\python.exe' -X utf8 "C:\work\fleet\tools\worktree_doctor.py" --repo "C:\work\fleet" --repo "C:\work\fak" --fetch --prune --prune-branches --allow-branch fak-v0.1 2&gt;&amp;1 | Out-File -FilePath '%LOCALAPPDATA%\Fleet\watchdog\worktree_doctor.log' -Append -Encoding UTF8"</Arguments>
       <WorkingDirectory>C:\work\fleet</WorkingDirectory>
     </Exec>
   </Actions>
