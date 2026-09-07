@@ -467,6 +467,14 @@ func TestWatchdogAutohealPlatformProjection(t *testing.T) {
 	if !serviceProjectionHas(win, "taskscheduler", "FleetProcResourceGuard") {
 		t.Fatalf("windows projection missing proc-resource-guard task (self-heal on deletion, #3324): %+v", win)
 	}
+	// #4610: the reboot advisor and stall monitor must be in the autoheal target set
+	// so a deleted task self-reinstalls on the next autoheal tick and survives cold boots.
+	if !serviceProjectionHas(win, "taskscheduler", "FleetRebootAdvisor") {
+		t.Fatalf("windows projection missing reboot-advisor task (#4610): %+v", win)
+	}
+	if !serviceProjectionHas(win, "taskscheduler", "FakStallMonitor") {
+		t.Fatalf("windows projection missing stall-monitor task (#4610): %+v", win)
+	}
 
 	darwin := watchdogAutohealServicesForGOOS("darwin")
 	if !serviceProjectionHas(darwin, "launchd", "com.fleet.dispatch-supervisor") {

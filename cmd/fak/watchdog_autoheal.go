@@ -371,6 +371,13 @@ func watchdogAutohealServicesForGOOS(goos string) []watchdogService {
 			// no-op, installed-but-stopped is auto-restarted. Install with
 			// tools/register_proc_resource_guard.ps1 (TaskName FleetProcResourceGuard).
 			{ID: "fleet-proc-resource-guard", Manager: "taskscheduler", Unit: "FleetProcResourceGuard"},
+			// The host reboot advisor: standing watchdog monitoring handle/thread pressure
+			// and terminal leaks before an unrecoverable system freeze (#4610).
+			// Installed-but-stopped is auto-restarted via schtasks /Run.
+			{ID: "fleet-reboot-advisor", Manager: "taskscheduler", Unit: "FleetRebootAdvisor"},
+			// The host stall monitor: background self-monitor catching kernel churn storms
+			// and stall conditions (#4610).
+			{ID: "fak-stall-monitor", Manager: "taskscheduler", Unit: "FakStallMonitor"},
 		}
 	case "darwin":
 		home, _ := os.UserHomeDir()
