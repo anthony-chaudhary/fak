@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -61,7 +62,7 @@ func TestRawDecodeSynthetic(t *testing.T) {
 	m := model.NewSynthetic(syntheticTestConfig())
 	f := testRawDecodeFlags(5, 1)
 
-	report, err := executeRawDecode(f, m, "synthetic-test", 12.5, nil, nil)
+	report, err := executeRawDecode(f, m, "synthetic-test", 12.5, 0, nil, nil)
 	if err != nil {
 		t.Fatalf("executeRawDecode failed: %v", err)
 	}
@@ -137,7 +138,7 @@ func TestRawDecodeGreedyFeedbackDiffersFromSyntheticSchedule(t *testing.T) {
 	m := model.NewSynthetic(cfg)
 	f := testRawDecodeFlags(5, 1)
 
-	report, err := executeRawDecode(f, m, "synthetic-feedback", 5.0, nil, nil)
+	report, err := executeRawDecode(f, m, "synthetic-feedback", 5.0, 0, nil, nil)
 	if err != nil {
 		t.Fatalf("executeRawDecode failed: %v", err)
 	}
@@ -172,7 +173,7 @@ func TestRawDecodeFirstTokenSampledFromPrefill(t *testing.T) {
 
 	// N = 1 requested output
 	f1 := testRawDecodeFlags(1, 1)
-	report1, err := executeRawDecode(f1, m, "first-token-n1", 1.0, nil, nil)
+	report1, err := executeRawDecode(f1, m, "first-token-n1", 1.0, 0, nil, nil)
 	if err != nil {
 		t.Fatalf("executeRawDecode N=1 failed: %v", err)
 	}
@@ -191,7 +192,7 @@ func TestRawDecodeFirstTokenSampledFromPrefill(t *testing.T) {
 
 	// N = 4 requested outputs (requires at most 3 step calls)
 	f4 := testRawDecodeFlags(4, 1)
-	report4, err := executeRawDecode(f4, m, "first-token-n4", 1.0, nil, nil)
+	report4, err := executeRawDecode(f4, m, "first-token-n4", 1.0, 0, nil, nil)
 	if err != nil {
 		t.Fatalf("executeRawDecode N=4 failed: %v", err)
 	}
@@ -214,7 +215,7 @@ func TestRawDecodeEOSHandlingAndIgnoreEOS(t *testing.T) {
 	// Step 1: probe natural continuation to discover generated token
 	probeCleanup := setRawDecodeTestFlags(true, promptIDs, 256, true, false)
 	fProbe := testRawDecodeFlags(5, 1)
-	probeReport, err := executeRawDecode(fProbe, m, "eos-probe", 1.0, nil, nil)
+	probeReport, err := executeRawDecode(fProbe, m, "eos-probe", 1.0, 0, nil, nil)
 	probeCleanup()
 	if err != nil {
 		t.Fatalf("probe execution failed: %v", err)
@@ -228,7 +229,7 @@ func TestRawDecodeEOSHandlingAndIgnoreEOS(t *testing.T) {
 	// 1a: raw-ignore-eos = false -> stops immediately on EOS
 	cleanup1a := setRawDecodeTestFlags(true, promptIDs, 256, false, false)
 	f1a := testRawDecodeFlags(5, 1)
-	rep1a, err := executeRawDecode(f1a, m, "eos-prefill-stop", 1.0, nil, nil)
+	rep1a, err := executeRawDecode(f1a, m, "eos-prefill-stop", 1.0, 0, nil, nil)
 	cleanup1a()
 	if err != nil {
 		t.Fatalf("Case 1a failed: %v", err)
@@ -246,7 +247,7 @@ func TestRawDecodeEOSHandlingAndIgnoreEOS(t *testing.T) {
 	// 1b: raw-ignore-eos = true -> continues past EOS for all requested steps
 	cleanup1b := setRawDecodeTestFlags(true, promptIDs, 256, true, false)
 	f1b := testRawDecodeFlags(5, 1)
-	rep1b, err := executeRawDecode(f1b, m, "eos-prefill-ignore", 1.0, nil, nil)
+	rep1b, err := executeRawDecode(f1b, m, "eos-prefill-ignore", 1.0, 0, nil, nil)
 	cleanup1b()
 	if err != nil {
 		t.Fatalf("Case 1b failed: %v", err)
@@ -267,7 +268,7 @@ func TestRawDecodeEOSHandlingAndIgnoreEOS(t *testing.T) {
 
 	cleanup2 := setRawDecodeTestFlags(true, promptIDs, 256, false, false)
 	f2 := testRawDecodeFlags(5, 1)
-	rep2, err := executeRawDecode(f2, m, "no-eos", 1.0, nil, nil)
+	rep2, err := executeRawDecode(f2, m, "no-eos", 1.0, 0, nil, nil)
 	cleanup2()
 	if err != nil {
 		t.Fatalf("Case 2 failed: %v", err)
@@ -289,7 +290,7 @@ func TestRawDecodeEOSHandlingAndIgnoreEOS(t *testing.T) {
 	// 3a: raw-ignore-eos = false -> stops immediately on list EOS
 	cleanup3a := setRawDecodeTestFlags(true, promptIDs, 256, false, false)
 	f3a := testRawDecodeFlags(5, 1)
-	rep3a, err := executeRawDecode(f3a, m, "eos-list-stop", 1.0, nil, nil)
+	rep3a, err := executeRawDecode(f3a, m, "eos-list-stop", 1.0, 0, nil, nil)
 	cleanup3a()
 	if err != nil {
 		t.Fatalf("Case 3a failed: %v", err)
@@ -304,7 +305,7 @@ func TestRawDecodeEOSHandlingAndIgnoreEOS(t *testing.T) {
 	// 3b: raw-ignore-eos = true -> continues past list EOS
 	cleanup3b := setRawDecodeTestFlags(true, promptIDs, 256, true, false)
 	f3b := testRawDecodeFlags(5, 1)
-	rep3b, err := executeRawDecode(f3b, m, "eos-list-ignore", 1.0, nil, nil)
+	rep3b, err := executeRawDecode(f3b, m, "eos-list-ignore", 1.0, 0, nil, nil)
 	cleanup3b()
 	if err != nil {
 		t.Fatalf("Case 3b failed: %v", err)
@@ -355,7 +356,7 @@ func TestRawDecodeVerifyCPUAgreement(t *testing.T) {
 	m := model.NewSynthetic(syntheticTestConfig())
 	f := testRawDecodeFlags(4, 1)
 
-	report, err := executeRawDecode(f, m, "verify-cpu-test", 1.0, nil, nil)
+	report, err := executeRawDecode(f, m, "verify-cpu-test", 1.0, 0, nil, nil)
 	if err != nil {
 		t.Fatalf("executeRawDecode with verify-cpu failed: %v", err)
 	}
@@ -554,7 +555,7 @@ func TestRunRawDecodeWriteReportFile(t *testing.T) {
 	f := testRawDecodeFlags(3, 2)
 	*f.out = outPath
 
-	if err := runRawDecode(f, m, "synthetic-write-test", 10.0, nil, nil); err != nil {
+	if err := runRawDecode(f, m, "synthetic-write-test", 10.0, 7.25, nil, nil); err != nil {
 		t.Fatalf("runRawDecode failed: %v", err)
 	}
 
@@ -568,6 +569,10 @@ func TestRunRawDecodeWriteReportFile(t *testing.T) {
 		t.Fatalf("failed to unmarshal written report JSON: %v", err)
 	}
 
+	timings := parsed["timings"].(map[string]any)
+	if timings["quant_ms"] != 7.25 || timings["verify_cpu_ms"] != float64(0) {
+		t.Fatalf("written phase timings = %v", timings)
+	}
 	if parsed["raw_decode"] != true {
 		t.Errorf("expected raw_decode: true in written file")
 	}
@@ -577,5 +582,131 @@ func TestRunRawDecodeWriteReportFile(t *testing.T) {
 	runs, ok := parsed["runs"].([]any)
 	if !ok || len(runs) != 2 {
 		t.Errorf("expected 2 runs in written file, got %v", parsed["runs"])
+	}
+}
+
+func TestRawDecodePhaseTimings(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		verify bool
+	}{{"disabled", false}, {"enabled", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer setRawDecodeTestFlags(true, "2,4,6", 256, true, tc.verify)()
+			cfg := syntheticTestConfig()
+			cfg.HiddenSize, cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim = 128, 8, 4, 16
+			cfg.IntermediateSize, cfg.VocabSize = 256, 257
+			m := model.NewSynthetic(cfg)
+			f := testRawDecodeFlags(4, 2)
+			*f.quant = true
+			quantMS := quantizeIfNeeded(f, m)
+			if quantMS <= 0 {
+				t.Fatal("actual quantization was not timed")
+			}
+			report, err := executeRawDecode(f, m, "phase-timings", 3.0, quantMS, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			timings := report["timings"].(map[string]any)
+			if timings["quant_ms"] != quantMS {
+				t.Fatalf("quantization time = %v, want actual %v", timings["quant_ms"], quantMS)
+			}
+			verifyMS, ok := timings["verify_cpu_ms"].(float64)
+			if !ok || (tc.verify && verifyMS <= 0) || (!tc.verify && verifyMS != 0) {
+				t.Fatalf("verification time = %v, enabled=%v", timings["verify_cpu_ms"], tc.verify)
+			}
+			if _, present := report["verify_cpu"]; present != tc.verify {
+				t.Fatalf("verification result presence = %v, enabled=%v", present, tc.verify)
+			}
+			for _, run := range report["runs"].([]map[string]any) {
+				timing := run["timings"].(map[string]any)
+				v, ok := timing["verify_cpu_ms"].(float64)
+				if !ok || (tc.verify && v <= 0) || (!tc.verify && v != 0) {
+					t.Fatalf("per-run verification time = %v, enabled=%v", timing["verify_cpu_ms"], tc.verify)
+				}
+				var sum float64
+				seenVerification := false
+				for _, stage := range run["host_stages"].([]map[string]any) {
+					sum += stage["duration_ms"].(float64)
+					seenVerification = seenVerification || stage["stage"] == "verify_cpu"
+				}
+				if seenVerification != tc.verify || math.Abs(timing["total_ms"].(float64)-sum) > 1e-9 {
+					t.Fatalf("per-run total %v differs from measured phases %v (verification=%v)", timing["total_ms"], sum, seenVerification)
+				}
+			}
+		})
+	}
+}
+
+// TestRawDecodePackedCPUReplaySnapshots covers real packed Q4_K/Q8 logits whose
+// backing buffer is reused by a legacy CPU session. The loader still follows the
+// published non-Vulkan dense-non-Q4_K conversion policy; no GPU backend is constructed.
+func TestRawDecodePackedCPUReplaySnapshots(t *testing.T) {
+	t.Setenv("FAK_GGUF_LOAD_WORKERS", "1")
+	t.Setenv("FAK_PAGED_KV", "0")
+	defer setRawDecodeTestFlags(true, "0,1", 16, true, true)()
+	f := testRawDecodeFlags(4, 1)
+	*f.gguf, *f.q4k, *f.backendName = benchMixedQuantGGUF(t), true, "cpu-ref"
+	*f.quant, *f.metal = false, false
+	m, _, err := loadModel(f, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.CloseWeights()
+	if !m.HasQ4K("model.layers.0.mlp.up_proj.weight") || m.HasQ8("model.layers.0.mlp.up_proj.weight") {
+		t.Fatal("fixture must retain its packed Q4_K projection")
+	}
+	for _, name := range []string{"lm_head.weight", "model.layers.0.self_attn.v_proj.weight", "model.layers.0.self_attn.o_proj.weight", "model.layers.0.mlp.gate_proj.weight", "model.layers.0.mlp.down_proj.weight"} {
+		if !m.HasQ8(name) || m.HasKQuant(name) {
+			t.Fatalf("fixture must load %s into the converted Q8 store", name)
+		}
+	}
+
+	// Prove this fixture exercises the public borrow contract and has changing
+	// logits, so a constant-output fixture cannot conceal missing snapshots.
+	probe := newBenchSession(m, f, nil)
+	defer probe.Close()
+	borrowed := probe.Prefill([]int{0, 1})
+	if len(borrowed) == 0 || !allFinite(borrowed) {
+		t.Fatal("fixture prefill logits must be nonempty and finite")
+	}
+	prefillCopy := append([]float32(nil), borrowed...)
+	stepOne := probe.Step(mathx.ArgmaxF32(prefillCopy))
+	if len(stepOne) != len(borrowed) || &stepOne[0] != &borrowed[0] {
+		t.Fatal("fixture must exercise the reused quantized logits buffer")
+	}
+	stepOneCopy := append([]float32(nil), stepOne...)
+	stepTwo := probe.Step(mathx.ArgmaxF32(stepOneCopy))
+	if len(stepTwo) != len(stepOne) || &stepTwo[0] != &stepOne[0] || !allFinite(stepTwo) {
+		t.Fatal("fixture must reuse finite logits across consecutive Steps")
+	}
+	stepTwoCopy := append([]float32(nil), stepTwo...)
+	prefillDelta := maxAbsDelta(prefillCopy, stepOneCopy)
+	stepDelta := maxAbsDelta(stepOneCopy, stepTwoCopy)
+	t.Logf("packed fixture: reused=true prefill_to_step_delta=%g step_to_step_delta=%g", prefillDelta, stepDelta)
+	if !(prefillDelta > 0) || !(stepDelta > 0) {
+		t.Fatal("fixture logits must change across Prefill and successive Steps")
+	}
+
+	// Both candidate and reference now execute the same loaded model on native
+	// CPU with identical resident flags and token inputs. Any nonzero replay
+	// delta is a bookkeeping error, not a CPU/GPU numerical tolerance question.
+	report, err := executeRawDecode(f, m, "packed-cpu-replay", 1.0, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("same-CPU packed replay failed: %v", err)
+	}
+	verify, ok := report["verify_cpu"].(*cpuVerifyResult)
+	if !ok || verify == nil {
+		t.Fatal("missing packed CPU replay evidence")
+	}
+	if !verify.Passed || !verify.AllAgree || verify.MaxDelta != 0 || verify.MinCosine < 0.999999 {
+		t.Fatalf("same-CPU replay must compare each preserved output: passed=%v agree=%v max_delta=%g min_cosine=%g", verify.Passed, verify.AllAgree, verify.MaxDelta, verify.MinCosine)
+	}
+	if len(verify.Steps) != 3 {
+		t.Fatalf("want three actual replay Steps, got %d", len(verify.Steps))
+	}
+	for _, step := range append([]stepVerify{verify.Prefill}, verify.Steps...) {
+		if !step.Agree || step.MaxDelta != 0 || step.Cosine < 0.999999 {
+			t.Fatalf("output %d was not compared with its own preserved logits: %+v", step.Step, step)
+		}
 	}
 }

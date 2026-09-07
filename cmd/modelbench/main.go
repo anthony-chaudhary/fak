@@ -1261,7 +1261,7 @@ func main() {
 		return
 	}
 	if rawDecodeEnabled() {
-		if err := runRawDecode(f, m, modelName, loadMS, be, registeredBackends); err != nil {
+		if err := runRawDecode(f, m, modelName, loadMS, quantMS, be, registeredBackends); err != nil {
 			fmt.Fprintln(os.Stderr, "raw decode:", err)
 			f.exit(1)
 		}
