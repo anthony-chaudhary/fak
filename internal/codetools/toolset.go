@@ -117,26 +117,28 @@ func DefaultPolicy() Policy {
 // Config configures a Toolset. Root is the workspace every path is confined to; empty
 // means the process working directory, matching RegisterReadEngine's convention.
 type Config struct {
-	Root            string
-	Limits          Limits
-	Policy          Policy
-	FocusedCommands bool // restrict Bash to the browser coding spine command set
+	Root                 string
+	Limits               Limits
+	Policy               Policy
+	FocusedCommands      bool     // restrict Bash to the browser coding spine command set
+	ExactAllowedCommands []string // explicit commands permitted under FocusedCommands
 }
 
 // Toolset is a configured, confinement-bound instance of the coding engines plus the
 // adjudicator rung that admits them. Configuration is immutable after construction; the
 // synchronized mutation-lock registry serializes competing updates to one target.
 type Toolset struct {
-	root            string
-	evalRoot        string // root with symlinks resolved — the base every escape check compares against
-	limits          Limits
-	policy          Policy
-	focusedCommands bool
-	mutationMu      sync.Mutex
-	mutationLocks   map[string]*mutationLock
-	grepFlight      flightGroup[*grepRecord]
-	globFlight      flightGroup[*globRecord]
-	searchHook      func()
+	root                 string
+	evalRoot             string // root with symlinks resolved — the base every escape check compares against
+	limits               Limits
+	policy               Policy
+	focusedCommands      bool
+	exactAllowedCommands []string
+	mutationMu           sync.Mutex
+	mutationLocks        map[string]*mutationLock
+	grepFlight           flightGroup[*grepRecord]
+	globFlight           flightGroup[*globRecord]
+	searchHook           func()
 }
 
 type mutationLock struct {
@@ -174,9 +176,15 @@ func New(cfg Config) (*Toolset, error) {
 	if pol.Allow == nil {
 		pol = DefaultPolicy()
 	}
+	var exactAllowedCommands []string
+	if len(cfg.ExactAllowedCommands) > 0 {
+		exactAllowedCommands = make([]string, len(cfg.ExactAllowedCommands))
+		copy(exactAllowedCommands, cfg.ExactAllowedCommands)
+	}
 	return &Toolset{
 		root: abs, evalRoot: evalRoot, limits: cfg.Limits.normalize(), policy: pol,
-		focusedCommands: cfg.FocusedCommands, mutationLocks: map[string]*mutationLock{},
+		focusedCommands: cfg.FocusedCommands, exactAllowedCommands: exactAllowedCommands,
+		mutationLocks: map[string]*mutationLock{},
 	}, nil
 }
 
@@ -208,6 +216,16 @@ func (t *Toolset) Root() string { return t.root }
 
 // Limits reports the bounds in force.
 func (t *Toolset) Limits() Limits { return t.limits }
+
+// ExactAllowedCommands reports the explicit commands permitted under FocusedCommands.
+func (t *Toolset) ExactAllowedCommands() []string {
+	if len(t.exactAllowedCommands) == 0 {
+		return nil
+	}
+	out := make([]string, len(t.exactAllowedCommands))
+	copy(out, t.exactAllowedCommands)
+	return out
+}
 
 // Read executes a Read operation with JSON body arguments.
 func (t *Toolset) Read(ctx context.Context, body []byte) ([]byte, bool) {

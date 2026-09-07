@@ -351,6 +351,18 @@ func TestGenerateStrixInstallerPackage_GotchaSettings(t *testing.T) {
 	if !strings.Contains(env, "GGML_CUDA_ENABLE_UNIFIED_MEMORY") || !strings.Contains(env, "HSA_OVERRIDE_GFX_VERSION") {
 		t.Errorf("conf/strix-halo.env missing documentation for Gotchas #9 and #5:\n%s", env)
 	}
+
+	// 6. Verify Vulkan SPIR-V acceleration asset defaults
+	if !strings.Contains(env, "FAK_VULKAN_SPIRV=/var/lib/fak/spirv") {
+		t.Errorf("conf/strix-halo.env missing FAK_VULKAN_SPIRV=/var/lib/fak/spirv:\n%s", env)
+	}
+	installSh := string(pkg.Files["install.sh"])
+	if !strings.Contains(installSh, "/var/lib/fak/spirv") {
+		t.Errorf("install.sh missing /var/lib/fak/spirv directory creation:\n%s", installSh)
+	}
+	if !strings.Contains(verify, "/var/lib/fak/spirv") || !strings.Contains(verify, "Vulkan SPIR-V") {
+		t.Errorf("verify.sh missing Vulkan SPIR-V verification:\n%s", verify)
+	}
 }
 
 func TestStrixPackage_WriteToDir(t *testing.T) {

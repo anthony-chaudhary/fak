@@ -211,6 +211,7 @@ type AuthorizeRule struct {
 //   - deny_regex: the arg value matching this RE2 pattern is DENIED. A missing
 //     arg is not a match.
 //   - max_bytes: a string arg longer than this many bytes is DENIED.
+//   - cli_read_only: validates one gh/git invocation against a positive grammar.
 //
 // reason (optional) is the closed-vocabulary refusal code cited on a violation;
 // it defaults to POLICY_BLOCK when omitted.
@@ -243,6 +244,93 @@ type ArgRule struct {
 	// rule-granular false-positive softener, so one noisy rule can warn while
 	// the rest of the floor stays enforcing. Maps to ArgPredicate.Advisory.
 	Advisory bool `json:"advisory,omitempty"`
+}
+
+// ArgumentPredicate is an alias for ArgRule to support both naming conventions.
+type ArgumentPredicate = ArgRule
+
+// ArgAllowExact is the ArgKind for byte-exact argument matching.
+const ArgAllowExact = adjudicator.ArgAllowExact
+
+// Matches reports whether the argument value matches this predicate.
+// For AllowExact, it matches the argument value byte-for-byte against AllowExact.
+// Returns true if exact string match, false if missing/non-string or mismatch.
+func (r ArgRule) Matches(val any) bool {
+	if r.AllowExact != nil {
+		return r.matchAllowExact(val)
+	}
+	return false
+}
+
+// Match is an alias for Matches.
+func (r ArgRule) Match(val any) bool {
+	return r.Matches(val)
+}
+
+// Evaluate evaluates args against this ArgRule, returning true if allowed.
+func (r ArgRule) Evaluate(args any) bool {
+	return r.Matches(args)
+}
+
+// EvaluateVerdict evaluates args against this ArgRule and returns an abi.Verdict.
+// It returns VerdictAllow on match, or VerdictDeny (with the rule's Reason,
+// defaulting to POLICY_BLOCK) on mismatch or missing/non-string arg.
+func (r ArgRule) EvaluateVerdict(args any) abi.Verdict {
+	if r.Matches(args) {
+		return abi.Verdict{Kind: abi.VerdictAllow}
+	}
+	reason := abi.ReasonPolicyBlock
+	if r.Reason != "" {
+		if code, ok := abi.ReasonByName(r.Reason); ok {
+			reason = code
+		}
+	}
+	return abi.Verdict{
+		Kind:   abi.VerdictDeny,
+		Reason: reason,
+	}
+}
+
+func (r ArgRule) matchAllowExact(val any) bool {
+	if r.AllowExact == nil || val == nil {
+		return false
+	}
+	switch v := val.(type) {
+	case string:
+		if v == *r.AllowExact {
+			return true
+		}
+		trimmed := strings.TrimSpace(v)
+		if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+			var m map[string]any
+			if err := json.Unmarshal([]byte(trimmed), &m); err == nil {
+				return r.matchAllowExactFromMap(m)
+			}
+		}
+		return false
+	case map[string]any:
+		return r.matchAllowExactFromMap(v)
+	case map[string]string:
+		argVal, ok := v[r.Arg]
+		if !ok {
+			return false
+		}
+		return argVal == *r.AllowExact
+	default:
+		return false
+	}
+}
+
+func (r ArgRule) matchAllowExactFromMap(m map[string]any) bool {
+	raw, ok := m[r.Arg]
+	if !ok || raw == nil {
+		return false
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return false
+	}
+	return s == *r.AllowExact
 }
 
 // RateLimitRule is the declarative throughput/cost cap (Epic 8, issue #699): the
@@ -709,6 +797,8 @@ func FromPolicy(p adjudicator.Policy) Manifest {
 				}
 			case adjudicator.ArgMaxBytes:
 				r.MaxBytes = pred.N
+			case adjudicator.ArgCLIReadOnly:
+				r.CLIReadOnly = true
 			}
 			m.ArgRules = append(m.ArgRules, r)
 		}
@@ -1169,7 +1259,7 @@ func describeArgPredicate(p adjudicator.ArgPredicate) string {
 	}
 	switch p.Kind {
 	case adjudicator.ArgAllowExact:
-		return fmt.Sprintf("%s.%s allow_exact %q -> %s", p.Tool, p.Arg, p.Glob, reason)
+		return fmt.Sprintf("%s.%s allow_exact %s -> %s", p.Tool, p.Arg, p.Glob, reason)
 	case adjudicator.ArgAllowGlob:
 		return fmt.Sprintf("%s.%s allow_glob %s -> %s", p.Tool, p.Arg, p.Glob, reason)
 	case adjudicator.ArgDenyRegex:

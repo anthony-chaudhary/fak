@@ -397,6 +397,9 @@ func renderSyncDrain(w io.Writer, r syncDrainReport) {
 		for _, e := range r.Queued {
 			fmt.Fprintf(w, "  QUEUED  %s  %s  (%s)\n", short(e.SHA), e.Subject, e.RefusalReason)
 		}
+		if r.Attempts >= 2 {
+			fmt.Fprintln(w, "  hint: trunk is red; invoke /ci-repair or run 'fak-dev ci-preflight' to diagnose and auto-heal")
+		}
 	case "FLUSH_REFUSED":
 		fmt.Fprintf(w, "[HELD] window green but push refused (%s); %d commit(s) held, backing off %ds (attempt %d)\n",
 			r.Detail, len(r.Queued), r.BackoffSeconds, r.Attempts)

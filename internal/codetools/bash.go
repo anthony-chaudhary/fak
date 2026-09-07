@@ -67,7 +67,7 @@ func (t *Toolset) bash(ctx context.Context, body []byte) ([]byte, bool) {
 	if r := a.Validate(); r != nil {
 		return r.JSON(), true
 	}
-	if t.focusedCommands && !focusedCommandAllowed(a.Command) {
+	if t.focusedCommands && !(focusedCommandAllowed(a.Command) || t.exactCommandAllowed(a.Command)) {
 		return refuse(CodeCommandDeny, "command is outside the focused coding allowlist").JSON(), true
 	}
 	cwd := t.root
@@ -159,4 +159,13 @@ func focusedCommandAllowed(command string) bool {
 	default:
 		return false
 	}
+}
+
+func (t *Toolset) exactCommandAllowed(cmd string) bool {
+	for _, allowed := range t.exactAllowedCommands {
+		if cmd == allowed {
+			return true
+		}
+	}
+	return false
 }

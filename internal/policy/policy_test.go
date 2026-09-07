@@ -601,3 +601,232 @@ func TestCLIReadOnlyArgRuleCompiles(t *testing.T) {
 		t.Fatal("cli_read_only plus deny_regex must fail exactly-one matcher validation")
 	}
 }
+
+func TestAllowExactArgumentPredicate(t *testing.T) {
+	exactCmd := "systemctl restart nginx"
+	rule := ArgRule{
+		Tool:       "run_shell",
+		Arg:        "cmd",
+		AllowExact: &exactCmd,
+		Reason:     "POLICY_BLOCK",
+	}
+
+	// 1. Exact command matches (returns allow)
+	t.Run("exact matches allow", func(t *testing.T) {
+		if !rule.Matches(exactCmd) {
+			t.Errorf("Matches(%q) should be true", exactCmd)
+		}
+		if !rule.Match(exactCmd) {
+			t.Errorf("Match(%q) should be true", exactCmd)
+		}
+		if !rule.Evaluate(exactCmd) {
+			t.Errorf("Evaluate(%q) should be true", exactCmd)
+		}
+		if v := rule.EvaluateVerdict(exactCmd); v.Kind != abi.VerdictAllow {
+			t.Errorf("EvaluateVerdict(%q) got %v, want VerdictAllow", exactCmd, v)
+		}
+		// Via map of arguments
+		argsMap := map[string]any{"cmd": exactCmd}
+		if !rule.Matches(argsMap) {
+			t.Errorf("Matches(map) should be true for exact command")
+		}
+		if v := rule.EvaluateVerdict(argsMap); v.Kind != abi.VerdictAllow {
+			t.Errorf("EvaluateVerdict(map) got %v, want VerdictAllow", v)
+		}
+		// Via map[string]string
+		argsStrMap := map[string]string{"cmd": exactCmd}
+		if !rule.Matches(argsStrMap) {
+			t.Errorf("Matches(map[string]string) should be true for exact command")
+		}
+		// Via JSON string
+		argsJSON := `{"cmd":"systemctl restart nginx"}`
+		if !rule.Matches(argsJSON) {
+			t.Errorf("Matches(json) should be true for exact command")
+		}
+		if v := rule.EvaluateVerdict(argsJSON); v.Kind != abi.VerdictAllow {
+			t.Errorf("EvaluateVerdict(json) got %v, want VerdictAllow", v)
+		}
+	})
+
+	// 2. Near-matches return deny
+	t.Run("near matches deny", func(t *testing.T) {
+		nearMatches := []struct {
+			name string
+			val  string
+		}{
+			{"trailing space", "systemctl restart nginx "},
+			{"leading space", " systemctl restart nginx"},
+			{"different casing upper", "Systemctl restart nginx"},
+			{"different casing allcaps", "SYSTEMCTL RESTART NGINX"},
+			{"appended flag", "systemctl restart nginx --force"},
+			{"prepended command", "sudo systemctl restart nginx"},
+			{"missing token", "systemctl restart"},
+			{"inner double space", "systemctl  restart nginx"},
+			{"newline appended", "systemctl restart nginx\n"},
+		}
+		for _, tc := range nearMatches {
+			t.Run(tc.name, func(t *testing.T) {
+				if rule.Matches(tc.val) {
+					t.Errorf("near-match %q should return false", tc.val)
+				}
+				if v := rule.EvaluateVerdict(tc.val); v.Kind != abi.VerdictDeny {
+					t.Errorf("near-match %q got verdict %v, want VerdictDeny", tc.val, v)
+				}
+				// Also via args map
+				m := map[string]any{"cmd": tc.val}
+				if rule.Matches(m) {
+					t.Errorf("near-match map %q should return false", tc.val)
+				}
+				if v := rule.EvaluateVerdict(m); v.Kind != abi.VerdictDeny {
+					t.Errorf("near-match map %q got verdict %v, want VerdictDeny", tc.val, v)
+				}
+			})
+		}
+	})
+
+	// 3. Missing argument or non-string argument fails closed
+	t.Run("fails closed on missing or non-string", func(t *testing.T) {
+		badInputs := []struct {
+			name string
+			val  any
+		}{
+			{"missing key in map", map[string]any{"other_arg": exactCmd}},
+			{"empty map", map[string]any{}},
+			{"nil map value", map[string]any{"cmd": nil}},
+			{"nil input", nil},
+			{"integer argument", map[string]any{"cmd": 123}},
+			{"boolean argument", map[string]any{"cmd": true}},
+			{"array argument", map[string]any{"cmd": []string{"systemctl", "restart", "nginx"}}},
+			{"raw integer", 123},
+			{"raw bool", true},
+		}
+		for _, tc := range badInputs {
+			t.Run(tc.name, func(t *testing.T) {
+				if rule.Matches(tc.val) {
+					t.Errorf("input %s (%v) should fail closed (return false)", tc.name, tc.val)
+				}
+				if v := rule.EvaluateVerdict(tc.val); v.Kind != abi.VerdictDeny {
+					t.Errorf("input %s (%v) got verdict %v, want VerdictDeny", tc.name, tc.val, v)
+				}
+			})
+		}
+
+		// Explicit empty string AllowExact
+		emptyStr := ""
+		emptyRule := ArgRule{Tool: "run_shell", Arg: "cmd", AllowExact: &emptyStr}
+		if !emptyRule.Matches("") {
+			t.Errorf("explicit empty string should match empty string")
+		}
+		if emptyRule.Matches(" ") {
+			t.Errorf("explicit empty string should not match space")
+		}
+		if emptyRule.Matches(nil) {
+			t.Errorf("explicit empty string should fail closed on nil")
+		}
+		if emptyRule.Matches(map[string]any{"cmd": nil}) {
+			t.Errorf("explicit empty string should fail closed on nil map value")
+		}
+		if emptyRule.Matches(map[string]any{}) {
+			t.Errorf("explicit empty string should fail closed on missing map key")
+		}
+	})
+
+	// 4. JSON manifest round-trip serialization/deserialization
+	t.Run("JSON manifest round-trip", func(t *testing.T) {
+		manifestJSON := `{
+  "version": "fak-policy/v1",
+  "allow": [
+    "run_shell"
+  ],
+  "arg_rules": [
+    {
+      "tool": "run_shell",
+      "arg": "cmd",
+      "allow_exact": "systemctl restart nginx",
+      "reason": "POLICY_BLOCK"
+    }
+  ]
+}`
+		m, err := ParseManifest([]byte(manifestJSON))
+		if err != nil {
+			t.Fatalf("ParseManifest failed: %v", err)
+		}
+		if len(m.ArgRules) != 1 {
+			t.Fatalf("expected 1 arg_rule, got %d", len(m.ArgRules))
+		}
+		r := m.ArgRules[0]
+		if r.AllowExact == nil || *r.AllowExact != exactCmd {
+			t.Fatalf("expected AllowExact %q, got %v", exactCmd, r.AllowExact)
+		}
+
+		// Verify ToRuntime / ToPolicy compiles
+		rt, err := m.ToRuntime()
+		if err != nil {
+			t.Fatalf("ToRuntime failed: %v", err)
+		}
+		if len(rt.Adjudicator.ArgPredicates) != 1 {
+			t.Fatalf("expected 1 ArgPredicate in Adjudicator, got %d", len(rt.Adjudicator.ArgPredicates))
+		}
+		pred := rt.Adjudicator.ArgPredicates[0]
+		if pred.Kind != ArgAllowExact || pred.Glob != exactCmd {
+			t.Fatalf("expected ArgAllowExact predicate with glob %q, got kind=%v glob=%q", exactCmd, pred.Kind, pred.Glob)
+		}
+
+		// Re-serialize to JSON and re-parse
+		serialized := m.JSON()
+		m2, err := ParseManifest(serialized)
+		if err != nil {
+			t.Fatalf("ParseManifest(m.JSON()) failed: %v", err)
+		}
+		if len(m2.ArgRules) != 1 || m2.ArgRules[0].AllowExact == nil || *m2.ArgRules[0].AllowExact != exactCmd {
+			t.Fatalf("JSON round-trip mismatch: got %+v", m2.ArgRules)
+		}
+
+		// Policy round-trip FromPolicy
+		fromPol := FromPolicy(rt.Adjudicator)
+		if len(fromPol.ArgRules) != 1 || fromPol.ArgRules[0].AllowExact == nil || *fromPol.ArgRules[0].AllowExact != exactCmd {
+			t.Fatalf("FromPolicy round-trip mismatch: got %+v", fromPol.ArgRules)
+		}
+
+		// Summary includes allow_exact
+		summary := Summary(rt.Adjudicator)
+		if !strings.Contains(summary, "allow_exact systemctl restart nginx") {
+			t.Fatalf("Summary missing allow_exact: %s", summary)
+		}
+	})
+
+	// 5. Exclusivity validation
+	t.Run("exclusivity validation", func(t *testing.T) {
+		// allow_exact + allow_glob
+		bad1 := `{
+  "allow": ["run_shell"],
+  "arg_rules": [
+    {
+      "tool": "run_shell",
+      "arg": "cmd",
+      "allow_exact": "ls",
+      "allow_glob": "./*"
+    }
+  ]
+}`
+		if _, err := Parse([]byte(bad1)); err == nil {
+			t.Fatal("expected error when setting both allow_exact and allow_glob")
+		}
+
+		// allow_exact + deny_regex
+		bad2 := `{
+  "allow": ["run_shell"],
+  "arg_rules": [
+    {
+      "tool": "run_shell",
+      "arg": "cmd",
+      "allow_exact": "ls",
+      "deny_regex": "rm"
+    }
+  ]
+}`
+		if _, err := Parse([]byte(bad2)); err == nil {
+			t.Fatal("expected error when setting both allow_exact and deny_regex")
+		}
+	})
+}

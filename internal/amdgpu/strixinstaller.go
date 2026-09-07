@@ -206,6 +206,8 @@ FLEET_SPINE_GROUP=%s
 FLEET_SPINE_PORT=%d
 FLEET_SPINE_ADVERTISE_S=%.1f
 FAK_CORS_ALLOWED_ORIGINS=%s
+FAK_VULKAN_SPIRV=/var/lib/fak/spirv
+VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
 OLLAMA_VULKAN=1
 OLLAMA_IGPU_ENABLE=1
 HIP_VISIBLE_DEVICES=-1
@@ -436,9 +438,9 @@ echo "=== Installing fak Strix Halo Node from ${SCRIPT_DIR} ==="
 echo "--> Configuring kernel parameters..."
 bash "${SCRIPT_DIR}/scripts/setup-grub.sh"
 
-# 2. Setup /etc/fak configuration
+# 2. Setup /etc/fak configuration and state directories
 echo "--> Installing configuration in /etc/fak..."
-mkdir -p /etc/fak
+mkdir -p /etc/fak /var/lib/fak/spirv /var/lib/fak/models
 cp "${SCRIPT_DIR}/conf/strix-halo.env" /etc/fak/strix-halo.env
 chmod 0600 /etc/fak/strix-halo.env
 
@@ -636,6 +638,14 @@ elif [[ "${HSA_OVERRIDE_GFX_VERSION:-}" == "11.0.0" ]]; then
   echo "[WARN] (HSA_OVERRIDE_GFX_VERSION=11.0.0 is set; must be unset to avoid SIGSEGV in libamdhip64)"
 else
   echo "[PASS]"
+fi
+
+# Vulkan SPIR-V acceleration asset directory
+echo -n "  - Vulkan SPIR-V acceleration assets: "
+if [[ -d /var/lib/fak/spirv ]]; then
+  echo "[PASS]"
+else
+  echo "[WARN] (/var/lib/fak/spirv not found; GPU acceleration requires compiled SPIR-V shaders)"
 fi
 
 # 3. Check systemd services

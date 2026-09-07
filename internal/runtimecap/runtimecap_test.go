@@ -132,7 +132,10 @@ func TestProbeSeparatesNotCompiledUnavailableAndUnsupportedPlatforms(t *testing.
 		{"cuda not compiled", "cuda", "linux", "amd64", nil, "backend_not_compiled", "unavailable"},
 		{"cuda runtime unavailable", "cuda", "linux", "amd64", []string{"cuda"}, "backend_unavailable", "unavailable"},
 		{"metal unsupported", "metal", "linux", "amd64", nil, "unsupported_platform", "unsupported"},
-		{"vulkan unsupported", "vulkan", "linux", "amd64", []string{"vulkan"}, "unsupported_platform", "unsupported"},
+		{"vulkan unsupported darwin", "vulkan", "darwin", "arm64", []string{"vulkan"}, "unsupported_platform", "unsupported"},
+		{"vulkan not compiled linux", "vulkan", "linux", "amd64", nil, "backend_not_compiled", "unavailable"},
+		{"vulkan runtime unavailable linux", "vulkan", "linux", "amd64", []string{"vulkan"}, "backend_unavailable", "unavailable"},
+		{"vulkan runtime unavailable windows", "vulkan", "windows", "amd64", []string{"vulkan"}, "backend_unavailable", "unavailable"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

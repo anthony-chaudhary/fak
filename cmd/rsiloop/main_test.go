@@ -156,3 +156,28 @@ func TestTransientFlagsCommandLine(t *testing.T) {
 		t.Errorf("harness transient fields not applied properly: %+v", h)
 	}
 }
+
+func TestTransientFlagsDefaults(t *testing.T) {
+	fs := flag.NewFlagSet("rsiloop", flag.ContinueOnError)
+	maxRetries := fs.Int("max-transient-retries", rsiloop.DefaultTransientMeasurementRecoveryLimit, "max transient retries")
+	budget := fs.Int("transient-budget", 0, "transient budget")
+
+	if err := fs.Parse([]string{}); err != nil {
+		t.Fatalf("fs.Parse: %v", err)
+	}
+	if *maxRetries != rsiloop.DefaultTransientMeasurementRecoveryLimit {
+		t.Errorf("default max-transient-retries = %d, want %d", *maxRetries, rsiloop.DefaultTransientMeasurementRecoveryLimit)
+	}
+	if *budget != 0 {
+		t.Errorf("default transient-budget = %d, want 0", *budget)
+	}
+
+	var h rsiloop.Harness
+	applyTransientFlags(&h, *maxRetries, *budget)
+	if h.MaxTransientRetries != rsiloop.DefaultTransientMeasurementRecoveryLimit {
+		t.Errorf("h.MaxTransientRetries = %d, want %d", h.MaxTransientRetries, rsiloop.DefaultTransientMeasurementRecoveryLimit)
+	}
+	if h.TransientBudget != 0 {
+		t.Errorf("h.TransientBudget = %d, want 0", h.TransientBudget)
+	}
+}
