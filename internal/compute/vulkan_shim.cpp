@@ -922,7 +922,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_QWEN35_CAUSAL_ATTENTION_PANEL], P("qwen35_causal_attention_panel.spv"), 4, 5 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_SIGMOID_MUL], P("sigmoid_mul.spv"), 2, sizeof(int));
     ok &= buildKernel(g_kern[K_Q4K_MATMUL], P("q4k_matmul.spv"), 3, 3 * sizeof(int));
-    buildKernel(g_kern[K_Q2K_MATMUL], P("q2k_matmul.spv"), 3, 3 * sizeof(int));
+    ok &= buildKernel(g_kern[K_Q2K_MATMUL], P("q2k_matmul.spv"), 3, 3 * sizeof(int));
     if (!ok) return 8;
     // Q8 kernel is built only when the device advertised the int8/8-bit-storage features; its
     // SPIR-V uses them, so loading it without the enabled device feature would be invalid. If
@@ -1483,7 +1483,10 @@ extern "C" void fvk_q2k_matmul_f32(const void* dQ2K, const void* dX, void* dY,
                          int out, int in, int P) {
     struct PC { int out, in, p; } pc{out, in, P};
     Buffer* bufs[3] = {B((void*)dQ2K), B((void*)dX), B(dY)};
-    dispatch(g_kern[K_Q2K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)(((size_t)out * P + 63) / 64));
+    // One Wave32 workgroup owns one output row and a panel of up to four tokens.
+    // Keep the multiplication in size_t until the final Vulkan group-count cast.
+    const size_t tokenPanels = ((size_t)P + 3u) / 4u;
+    dispatch(g_kern[K_Q2K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)((size_t)out * tokenPanels));
 }
 extern "C" void fvk_dispatch_profile_snapshot(fvk_dispatch_profile* out) {
     if (!out) return;
