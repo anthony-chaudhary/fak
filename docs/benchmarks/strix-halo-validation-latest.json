@@ -1,6 +1,6 @@
-{
+﻿{
   "schema": "fak.strix.validation/v1",
-  "timestamp": "2026-09-07T00:40:00Z",
+  "timestamp": "2026-09-07T05:55:53Z",
   "verdict": "PASS",
   "target": {
     "mode": "ssh",
@@ -15,8 +15,8 @@
     "power_dpm_level": "manual",
     "lockup_timeout": -1,
     "vulkan_icd": "/usr/share/vulkan/icd.d/radeon_icd.json",
-    "roundtrip_latency_ms": 395.3415,
-    "discovered_at": "2026-09-07T00:39:19Z"
+    "roundtrip_latency_ms": 442.6651,
+    "discovered_at": "2026-09-07T05:54:57Z"
   },
   "provenance": {
     "git_ref": "HEAD",
@@ -28,7 +28,7 @@
     {
       "name": "argmax",
       "status": "PASS",
-      "duration_us": 792638,
+      "duration_us": 829863,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (argmax)",
@@ -40,13 +40,13 @@
       },
       "metrics": {
         "category": "reduction",
-        "wall_ms": 792
+        "wall_ms": 829
       }
     },
     {
       "name": "matmul_f32",
       "status": "PASS",
-      "duration_us": 894141,
+      "duration_us": 780377,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (matmul_f32)",
@@ -58,13 +58,13 @@
       },
       "metrics": {
         "category": "gemv",
-        "wall_ms": 894
+        "wall_ms": 780
       }
     },
     {
       "name": "matmul2_f32",
       "status": "PASS",
-      "duration_us": 1070999,
+      "duration_us": 618973,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (matmul2_f32)",
@@ -76,13 +76,13 @@
       },
       "metrics": {
         "category": "gemv",
-        "wall_ms": 1070
+        "wall_ms": 618
       }
     },
     {
       "name": "matmul3_f32",
       "status": "PASS",
-      "duration_us": 1130572,
+      "duration_us": 555106,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (matmul3_f32)",
@@ -94,13 +94,13 @@
       },
       "metrics": {
         "category": "gemv",
-        "wall_ms": 1130
+        "wall_ms": 555
       }
     },
     {
       "name": "q8_matmul",
       "status": "PASS",
-      "duration_us": 1178819,
+      "duration_us": 613932,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (q8_matmul)",
@@ -112,13 +112,13 @@
       },
       "metrics": {
         "category": "quant",
-        "wall_ms": 1178
+        "wall_ms": 613
       }
     },
     {
       "name": "q8_matmul_wide",
       "status": "PASS",
-      "duration_us": 926300,
+      "duration_us": 597134,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (q8_matmul_wide)",
@@ -130,13 +130,13 @@
       },
       "metrics": {
         "category": "quant",
-        "wall_ms": 926
+        "wall_ms": 597
       }
     },
     {
       "name": "q8_matmul_vocab",
       "status": "PASS",
-      "duration_us": 1391449,
+      "duration_us": 819693,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (q8_matmul_vocab)",
@@ -148,13 +148,13 @@
       },
       "metrics": {
         "category": "quant",
-        "wall_ms": 1391
+        "wall_ms": 819
       }
     },
     {
       "name": "q4k_matmul",
       "status": "PASS",
-      "duration_us": 803615,
+      "duration_us": 715857,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (q4k_matmul)",
@@ -166,13 +166,13 @@
       },
       "metrics": {
         "category": "quant",
-        "wall_ms": 803
+        "wall_ms": 715
       }
     },
     {
       "name": "q2k_matmul",
       "status": "PASS",
-      "duration_us": 512942,
+      "duration_us": 1127285,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (q2k_matmul)",
@@ -184,13 +184,13 @@
       },
       "metrics": {
         "category": "quant",
-        "wall_ms": 512
+        "wall_ms": 1127
       }
     },
     {
       "name": "rmsnorm",
       "status": "PASS",
-      "duration_us": 479183,
+      "duration_us": 564887,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (rmsnorm)",
@@ -202,13 +202,13 @@
       },
       "metrics": {
         "category": "norm",
-        "wall_ms": 479
+        "wall_ms": 564
       }
     },
     {
       "name": "rmsnorm_matmul",
       "status": "PASS",
-      "duration_us": 1180624,
+      "duration_us": 586984,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (rmsnorm_matmul)",
@@ -220,13 +220,13 @@
       },
       "metrics": {
         "category": "fused",
-        "wall_ms": 1180
+        "wall_ms": 586
       }
     },
     {
       "name": "rmsnorm_matmul2",
       "status": "PASS",
-      "duration_us": 546011,
+      "duration_us": 592157,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (rmsnorm_matmul2)",
@@ -238,13 +238,13 @@
       },
       "metrics": {
         "category": "fused",
-        "wall_ms": 546
+        "wall_ms": 592
       }
     },
     {
       "name": "rmsnorm_matmul3",
       "status": "PASS",
-      "duration_us": 564204,
+      "duration_us": 614689,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (rmsnorm_matmul3)",
@@ -256,13 +256,13 @@
       },
       "metrics": {
         "category": "fused",
-        "wall_ms": 564
+        "wall_ms": 614
       }
     },
     {
       "name": "swiglu",
       "status": "PASS",
-      "duration_us": 836732,
+      "duration_us": 562894,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (swiglu)",
@@ -274,13 +274,13 @@
       },
       "metrics": {
         "category": "activation",
-        "wall_ms": 836
+        "wall_ms": 562
       }
     },
     {
       "name": "swiglu_matmul_add",
       "status": "PASS",
-      "duration_us": 1425462,
+      "duration_us": 717119,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (swiglu_matmul_add)",
@@ -292,13 +292,13 @@
       },
       "metrics": {
         "category": "fused",
-        "wall_ms": 1425
+        "wall_ms": 717
       }
     },
     {
       "name": "rope",
       "status": "PASS",
-      "duration_us": 1158744,
+      "duration_us": 624330,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (rope)",
@@ -310,13 +310,13 @@
       },
       "metrics": {
         "category": "positional",
-        "wall_ms": 1158
+        "wall_ms": 624
       }
     },
     {
       "name": "attention",
       "status": "PASS",
-      "duration_us": 348781,
+      "duration_us": 611909,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (attention)",
@@ -328,13 +328,13 @@
       },
       "metrics": {
         "category": "attention",
-        "wall_ms": 348
+        "wall_ms": 611
       }
     },
     {
       "name": "qwen35_gdn_decode",
       "status": "PASS",
-      "duration_us": 717766,
+      "duration_us": 579486,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (qwen35_gdn_decode)",
@@ -346,13 +346,13 @@
       },
       "metrics": {
         "category": "linear_attention",
-        "wall_ms": 717
+        "wall_ms": 579
       }
     },
     {
       "name": "qwen35_gdn_preprojected",
       "status": "PASS",
-      "duration_us": 5550738,
+      "duration_us": 598055,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (qwen35_gdn_preprojected)",
@@ -364,13 +364,31 @@
       },
       "metrics": {
         "category": "linear_attention",
-        "wall_ms": 5550
+        "wall_ms": 598
+      }
+    },
+    {
+      "name": "qwen35_sequence_prefill",
+      "status": "PASS",
+      "duration_us": 555273,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (qwen35_sequence_prefill)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "prefill",
+        "wall_ms": 555
       }
     },
     {
       "name": "f16_kv_contiguize",
       "status": "PASS",
-      "duration_us": 483167,
+      "duration_us": 701159,
       "iterations": 1,
       "parity": {
         "reference_gemv": "CPU reference (f16_kv_contiguize)",
@@ -382,7 +400,7 @@
       },
       "metrics": {
         "category": "kv_cache",
-        "wall_ms": 483
+        "wall_ms": 701
       }
     }
   ],
@@ -392,17 +410,17 @@
       "feature": "cpu_vs_vulkan_gpu",
       "baseline_arm": {
         "name": "cpu_q4_reference",
-        "latency_us": 88654,
+        "latency_us": 82831,
         "allocated_bytes": 50135040
       },
       "candidate_arm": {
         "name": "vulkan_gpu_q4k",
-        "latency_us": 438,
+        "latency_us": 459,
         "dram_bandwidth_gbps": 117.1,
         "allocated_bytes": 50135040
       },
-      "speedup": 202.40639269406392,
-      "lift_ratio": 202.40639269406392,
+      "speedup": 180.45969498910677,
+      "lift_ratio": 180.45969498910677,
       "cosine_parity": 0.9999999999986565,
       "verdict": "VERIFIED_LIFT"
     },
@@ -411,11 +429,11 @@
       "feature": "fused_vs_discrete_norm_matmul",
       "baseline_arm": {
         "name": "discrete_rmsnorm_then_matmul",
-        "latency_us": 30420
+        "latency_us": 34255
       },
       "candidate_arm": {
         "name": "fused_rmsnorm_matmul",
-        "latency_us": 18720
+        "latency_us": 21080
       },
       "speedup": 1.625,
       "lift_ratio": 1.625,
@@ -481,22 +499,22 @@
       "feature": "strided_vs_contiguized_f16_kv",
       "baseline_arm": {
         "name": "strided_f16_kv_camping",
-        "latency_us": 177002,
+        "latency_us": 68433,
         "dram_bandwidth_gbps": 28.4,
         "allocated_bytes": 67108864
       },
       "candidate_arm": {
         "name": "contiguized_f16_kv_scratch",
-        "latency_us": 65800,
+        "latency_us": 25440,
         "dram_bandwidth_gbps": 184.2,
         "allocated_bytes": 134217728
       },
-      "speedup": 2.69,
-      "lift_ratio": 2.69,
+      "speedup": 2.6899764150943395,
+      "lift_ratio": 2.6899764150943395,
       "cosine_parity": 1,
       "verdict": "VERIFIED_LIFT"
     }
   ],
-  "digest": "sha256:ce20189b2f95d491a28c7ba7897c33fdbe6578efe20e1f72432a469b1cb2dd77",
+  "digest": "sha256:a8a3cdabebd068cf8c971f2a2f218ac4b4de1a671e8ae8a756dc14dc0471f203",
   "verified": true
 }

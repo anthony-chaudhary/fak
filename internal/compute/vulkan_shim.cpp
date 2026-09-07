@@ -70,6 +70,11 @@ VkDeviceSize      g_maxMemoryAllocationSize = 0;
 VkDeviceSize      g_maxBufferBytes = 0;
 VkDeviceSize      g_totalDeviceLocalMemory = 0;
 bool              g_haveMemoryBudget = false;
+bool              g_batching = false;
+void              batchFlush();
+VkResult          g_submissionStatus = VK_SUCCESS;
+std::atomic<uint64_t> g_h2dBytes{0};
+std::atomic<uint64_t> g_d2hBytes{0};
 
 // A device buffer: VkBuffer + its memory + byte size. The opaque handle Go holds is a
 // Buffer* — never a host address.
@@ -104,7 +109,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_Q4K_MATMUL, K_Q2K_MATMUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_Q4K_MATMUL, K_Q2K_MATMUL, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -117,19 +122,19 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_RMSNORM: case K_RMSNORM_MATMUL: case K_RMSNORM_MATMUL2: case K_RMSNORM_MATMUL3:
     case K_RMSNORM_MATMUL_ARGMAX_BLOCKS: case K_RMSNORM_Q8_MATMUL2: case K_RMSNORM_Q8_MATMUL3:
         return g_dp.otherNorm;
-    case K_ROPE:
+    case K_ROPE: case K_QWEN35_PARTIAL_ROPE_PANEL:
         return g_dp.otherRope;
-    case K_SWIGLU: case K_SWIGLU_MATMUL_ADD: case K_SWIGLU_Q8_MATMUL_ADD:
+    case K_SWIGLU: case K_SWIGLU_MATMUL_ADD: case K_SWIGLU_Q8_MATMUL_ADD: case K_SIGMOID_MUL:
         return g_dp.otherSwiGLU;
     case K_ADD: case K_ADD_BIAS:
         return g_dp.otherAdd;
-    case K_ATTENTION:
+    case K_ATTENTION: case K_QWEN35_CAUSAL_ATTENTION_PANEL:
         return g_dp.otherAttention;
     case K_ARGMAX: case K_ARGMAX_PAIRS:
         return g_dp.otherArgmax;
     case K_QWEN35_GDN_CONV: case K_QWEN35_GDN_RECURRENT:
         return g_dp.otherGDN;
-    case K_Q4K_MATMUL: case K_Q2K_MATMUL: case K_COUNT:
+    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q2K_MATMUL: case K_COUNT:
         return g_dp.otherUnclassified;
     }
     return g_dp.otherUnclassified;
@@ -444,6 +449,39 @@ void freeAttentionScratch() {
     g_attentionScratchCursor = 0;
 }
 
+Buffer*                       g_gdn_conv_out = nullptr;
+
+Buffer* gdnConvOutScratch(size_t bytes) {
+    if (bytes == 0) bytes = 4;
+    if (g_gdn_conv_out && g_gdn_conv_out->bytes >= bytes) return g_gdn_conv_out;
+
+    if (g_gdn_conv_out) {
+        if (g_batching) batchFlush();
+        destroyBuffer(g_gdn_conv_out);
+        g_gdn_conv_out = nullptr;
+        clearDescriptorBindingCache();
+    }
+    size_t cap = scratchCapacity(bytes);
+    if (g_maxBufferBytes > 0 && cap > g_maxBufferBytes) cap = bytes;
+    g_gdn_conv_out = allocBuffer(cap, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
+    if (!g_gdn_conv_out && cap != bytes) {
+        g_gdn_conv_out = allocBuffer(bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
+    }
+    if (!g_gdn_conv_out) {
+        fprintf(stderr, "fak-vulkan: GDN conv_out scratch allocation failed (%zu bytes)\n", bytes);
+        return nullptr;
+    }
+    return g_gdn_conv_out;
+}
+
+void freeGdnScratch() {
+    if (g_gdn_conv_out) {
+        destroyBuffer(g_gdn_conv_out);
+        g_gdn_conv_out = nullptr;
+        clearDescriptorBindingCache();
+    }
+}
+
 // ---- one-shot command buffer helper --------------------------------------------
 VkCommandBuffer beginCmd() {
     VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
@@ -479,7 +517,6 @@ void endSubmitWait(VkCommandBuffer cmd) {
 // descriptor sets recorded into the open buffer must outlive recording, so they are parked
 // in g_batchSets and freed after the single submit. g_batchOps counts recorded ops so an
 // empty flush is a cheap no-op.
-bool                          g_batching  = false;
 VkCommandBuffer               g_batchCmd  = VK_NULL_HANDLE;
 std::vector<DescriptorSetRecord> g_batchSets;
 std::vector<Buffer*>          g_batchFreed;   // buffers freed mid-batch, recycled after submit
@@ -542,6 +579,7 @@ void batchFlush() {
 // staging copy host<->device through one persistent HOST_VISIBLE scratch buffer.
 void copyHostToDevice(Buffer* dst, const void* host, size_t bytes) {
     if (bytes == 0 || !dst || !host) return;
+    g_h2dBytes.fetch_add(bytes, std::memory_order_relaxed);
     Buffer* stage = stagingBuffer(bytes);
     if (!stage) return;
     memcpy(g_stageMapped, host, bytes);
@@ -554,6 +592,7 @@ void copyHostToDevice(Buffer* dst, const void* host, size_t bytes) {
 
 void copyDeviceToHost(void* host, Buffer* src, size_t bytes) {
     if (bytes == 0 || !host || !src) return;
+    g_d2hBytes.fetch_add(bytes, std::memory_order_relaxed);
     Buffer* stage = stagingBuffer(bytes);
     if (!stage) return;
     VkCommandBuffer cmd = beginCmd();
@@ -878,6 +917,10 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_ARGMAX_PAIRS], P("argmax_pairs.spv"), 3, sizeof(int));
     ok &= buildKernel(g_kern[K_QWEN35_GDN_CONV], P("qwen35_gdn_conv.spv"), 4, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_QWEN35_GDN_RECURRENT], P("qwen35_gdn_recurrent.spv"), 9, 6 * sizeof(int) + sizeof(float));
+    ok &= buildKernel(g_kern[K_QWEN35_SPLIT_QG_PANEL], P("qwen35_split_qg_panel.spv"), 3, 3 * sizeof(int));
+    ok &= buildKernel(g_kern[K_QWEN35_PARTIAL_ROPE_PANEL], P("qwen35_partial_rope_panel.spv"), 4, 6 * sizeof(int) + sizeof(float));
+    ok &= buildKernel(g_kern[K_QWEN35_CAUSAL_ATTENTION_PANEL], P("qwen35_causal_attention_panel.spv"), 4, 5 * sizeof(int) + sizeof(float));
+    ok &= buildKernel(g_kern[K_SIGMOID_MUL], P("sigmoid_mul.spv"), 2, sizeof(int));
     ok &= buildKernel(g_kern[K_Q4K_MATMUL], P("q4k_matmul.spv"), 3, 3 * sizeof(int));
     buildKernel(g_kern[K_Q2K_MATMUL], P("q2k_matmul.spv"), 3, 3 * sizeof(int));
     if (!ok) return 8;
@@ -1001,6 +1044,14 @@ void fvk_batch_begin(void) { batchBegin(); }
 void fvk_batch_flush(void) { dp_inc(g_dp.batchFlushes); batchFlush(); }
 bool fvk_batch_active(void) { return g_batching; }
 void fvk_retire_request(void) { batchFlush(); }
+int fvk_submission_status(void) { return (int)g_submissionStatus; }
+void fvk_submission_reset(void) {
+    // A Vulkan failure is a context failure, not a per-request diagnostic.
+    // Callers must retire the context instead of clearing an unconfirmed fence.
+}
+int fvk_batch_flush_status(void) { fvk_batch_flush(); return (int)g_submissionStatus; }
+uint64_t fvk_h2d_bytes(void) { return g_h2dBytes.load(std::memory_order_relaxed); }
+uint64_t fvk_d2h_bytes(void) { return g_d2hBytes.load(std::memory_order_relaxed); }
 
 void fvk_sync(void) { if (g_dev) vkDeviceWaitIdle(g_dev); }
 
@@ -1041,6 +1092,7 @@ void fvk_trim_pool(void) {
     if (g_batching) batchFlush();
     drainPool();
     freeAttentionScratch();
+    freeGdnScratch();
 }
 
 void fvk_trim_pool_if_over(size_t max_buffers) {
@@ -1348,7 +1400,7 @@ extern "C" int fvk_qwen35_gdn_preprojected_f32(
         return 1;
     if (tokens <= 0 || conv_dim <= 0 || n_k <= 0 || n_v <= 0 || k_hd <= 0 || v_hd <= 0 || kernel <= 0 || n_v % n_k != 0 || v_hd > 1024)
         return 2;
-    Buffer* conv_out = (Buffer*)fvk_malloc((size_t)tokens * conv_dim * sizeof(float));
+    Buffer* conv_out = gdnConvOutScratch((size_t)tokens * conv_dim * sizeof(float));
     if (!conv_out) return 3;
     struct ConvPC { int tokens, conv_dim, kernel; } cpc{tokens, conv_dim, kernel};
     Buffer* cbufs[4] = {B((void*)mixed), B((void*)conv1d), B(conv_state), conv_out};
@@ -1356,9 +1408,70 @@ extern "C" int fvk_qwen35_gdn_preprojected_f32(
     struct RecPC { int tokens, conv_dim, n_k, n_v, k_hd, v_hd; float eps; } rpc{tokens, conv_dim, n_k, n_v, k_hd, v_hd, eps};
     Buffer* rbufs[9] = {conv_out, B((void*)z), B((void*)beta), B((void*)alpha), B((void*)a_log), B((void*)dt_bias), B((void*)norm), B(recurrent_state), B(core)};
     dispatch(g_kern[K_QWEN35_GDN_RECURRENT], rbufs, &rpc, sizeof(rpc), (uint32_t)n_v);
-    if (g_batching) batchFlush();
-    fvk_free(conv_out);
     return 0;
+}
+// Panel ABI uses signed GLSL indices; validate products before narrowing.
+static bool panelFits(const void* ptr, int tokens, int heads, int dim) {
+    if (!ptr || tokens <= 0 || heads <= 0 || dim <= 0) return false;
+    uint64_t rows = (uint64_t)tokens * (uint64_t)heads;
+    if (rows > 2147483647u / (uint64_t)dim) return false;
+    return rows * (uint64_t)dim * sizeof(float) <= B(ptr)->bytes;
+}
+extern "C" int fvk_qwen35_split_qg_panel_f32(const void* qg, void* q, void* gate,
+    int tokens, int nHeads, int headDim) {
+    if (!g_ready) return 1;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (headDim <= 0 || headDim > 1073741823 || !panelFits(qg,tokens,nHeads,2*headDim) ||
+        !panelFits(q,tokens,nHeads,headDim) || !panelFits(gate,tokens,nHeads,headDim) ||
+        qg == q || qg == gate || q == gate) return 2;
+    struct { int tokens, heads, hd; } pc{tokens,nHeads,headDim};
+    Buffer* bufs[] = {B(qg),B(q),B(gate)};
+    dispatch(g_kern[K_QWEN35_SPLIT_QG_PANEL],bufs,&pc,sizeof(pc),
+        (uint32_t)(((uint64_t)tokens*nHeads*headDim+255)/256));
+    return (int)g_submissionStatus;
+}
+extern "C" int fvk_qwen35_partial_rope_panel_f32(const void* q, const void* k,
+    void* qOut, void* kOut, int tokens, int startPos, int nQHeads,
+    int nKHeads, int headDim, int rotaryDim, double theta) {
+    if (!g_ready) return 1;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (!panelFits(q,tokens,nQHeads,headDim) || !panelFits(k,tokens,nKHeads,headDim) ||
+        !panelFits(qOut,tokens,nQHeads,headDim) || !panelFits(kOut,tokens,nKHeads,headDim) ||
+        startPos<0 || (uint64_t)startPos+tokens>2147483647u || rotaryDim<0 ||
+        rotaryDim>headDim || rotaryDim%2 || !std::isfinite(theta) || theta<=0 ||
+        theta>3.402823466e38 || qOut==q || qOut==k || kOut==q || kOut==k || qOut==kOut)
+        return 2;
+    uint64_t count = (uint64_t)tokens*((uint64_t)nQHeads+nKHeads)*headDim;
+    if (count>2147483647u) return 2;
+    struct { int tokens,startPos,qHeads,kHeads,hd,rotary; float theta; }
+        pc{tokens,startPos,nQHeads,nKHeads,headDim,rotaryDim,(float)theta};
+    Buffer* bufs[] = {B(q),B(k),B(qOut),B(kOut)};
+    dispatch(g_kern[K_QWEN35_PARTIAL_ROPE_PANEL],bufs,&pc,sizeof(pc),(uint32_t)((count+255)/256));
+    return (int)g_submissionStatus;
+}
+extern "C" int fvk_qwen35_causal_attention_panel_f32(const void* q, const void* k,
+    const void* v, void* out, int tokens, int prefix, int nHeads,
+    int nKVHeads, int headDim, float scale) {
+    if (!g_ready) return 1;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (prefix<0 || tokens<=0 || (uint64_t)tokens+prefix>2147483647u ||
+        headDim>1024 || nKVHeads<=0 || nHeads%nKVHeads || !std::isfinite(scale) ||
+        !panelFits(q,tokens,nHeads,headDim) || !panelFits(out,tokens,nHeads,headDim) ||
+        !panelFits(k,tokens+prefix,nKVHeads,headDim) || !panelFits(v,tokens+prefix,nKVHeads,headDim) ||
+        out==q || out==k || out==v) return 2;
+    struct { int tokens,prefix,heads,kvHeads,hd; float scale; }
+        pc{tokens,prefix,nHeads,nKVHeads,headDim,scale};
+    Buffer* bufs[] = {B(q),B(k),B(v),B(out)};
+    dispatch(g_kern[K_QWEN35_CAUSAL_ATTENTION_PANEL],bufs,&pc,sizeof(pc),(uint32_t)((uint64_t)tokens*nHeads));
+    return (int)g_submissionStatus;
+}
+extern "C" int fvk_sigmoid_mul_f32(void* x, const void* gate, int n) {
+    if (!g_ready) return 1;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (!panelFits(x,1,1,n) || !panelFits(gate,1,1,n)) return 2;
+    Buffer* bufs[] = {B(x),B(gate)};
+    dispatch(g_kern[K_SIGMOID_MUL],bufs,&n,sizeof(n),(uint32_t)(((uint64_t)n+255)/256));
+    return (int)g_submissionStatus;
 }
 extern "C" void fvk_q4k_matmul_f32(const void* dQ4K, const void* dX, void* dY,
                          int out, int in, int P) {
