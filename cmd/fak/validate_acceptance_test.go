@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,15 +15,27 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/roofline"
 )
 
+const defaultRawArtifactData = "{\"benchmark\":\"subagent_fanout\",\"target\":\"gfx1151\",\"samples\":[184.2,184.5,184.0,184.3,184.6]}\n"
+
+func defaultRawArtifactDigest() string {
+	sum := sha256.Sum256([]byte(defaultRawArtifactData))
+	return fmt.Sprintf("sha256:%s", hex.EncodeToString(sum[:]))
+}
+
 func makeValidSubagentFanoutReceipt() SubagentFanoutReceipt {
 	r := SubagentFanoutReceipt{
-		Schema:     SubagentFanoutReceiptSchema,
-		Issue:      11802,
-		Title:      "bench(nativeperf): Strix Halo 80-percent measured roofline physical execution witness",
-		CapturedAt: "2026-09-05T08:00:00Z",
-		Timestamp:  "2026-09-05T08:00:00Z",
-		Verdict:    "VERIFIED_80PCT_ROOFLINE_ATTAINMENT",
-		Provenance: "hardware_execution",
+		Schema:            SubagentFanoutReceiptSchema,
+		Issue:             11802,
+		Title:             "bench(nativeperf): Strix Halo 80-percent measured roofline physical execution witness",
+		CapturedAt:        "2026-09-05T08:00:00Z",
+		Timestamp:         "2026-09-05T08:00:00Z",
+		Verdict:           "VERIFIED_80PCT_ROOFLINE_ATTAINMENT",
+		Provenance:        "hardware_execution",
+		ProvenanceDetails: "Executed on AMD Strix Halo appliance (gfx1151, 40 CUs, LPDDR5X-8533)",
+		CaptureCommand:    "fak bench subagent-fanout --model Qwen/Qwen3.8-27B-Instruct --concurrency 8 --target gfx1151",
+		RawArtifactPath:   "raw_benchmark_captured.json",
+		RawArtifactDigest: defaultRawArtifactDigest(),
+		HardwareAttested:  true,
 		Workload: SubagentFanoutWorkload{
 			WorkloadType:       "subagent_fanout",
 			Model:              "Qwen/Qwen3.8-27B-Instruct",
@@ -75,10 +90,15 @@ func makeValidSubagentFanoutReceipt() SubagentFanoutReceipt {
 			Achieved:         true,
 		},
 		Reproducibility: SubagentReproducibility{
-			ArtifactPath: DefaultWitnessArtifactPath,
-			Command:      "fak validate --acceptance=strix-halo-80pct",
-			Provenance:   "hardware_execution",
-			Scrubbed:     true,
+			ArtifactPath:      DefaultWitnessArtifactPath,
+			Command:           "fak validate --acceptance=strix-halo-80pct",
+			CaptureCommand:    "fak bench subagent-fanout --model Qwen/Qwen3.8-27B-Instruct --concurrency 8 --target gfx1151",
+			Provenance:        "hardware_execution",
+			ProvenanceDetails: "Executed on AMD Strix Halo appliance (gfx1151, 40 CUs, LPDDR5X-8533)",
+			RawArtifactPath:   "raw_benchmark_captured.json",
+			RawArtifactDigest: defaultRawArtifactDigest(),
+			HardwareAttested:  true,
+			Scrubbed:          true,
 		},
 		Verified: true,
 	}
@@ -94,6 +114,27 @@ func writeReceiptToTemp(t *testing.T, r any) string {
 	t.Helper()
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "receipt.json")
+
+	// If r is SubagentFanoutReceipt and references a relative raw artifact path,
+	// ensure the default raw artifact exists in the temp directory so path resolution succeeds.
+	if sfr, ok := r.(SubagentFanoutReceipt); ok {
+		rawPath := sfr.EffectiveRawArtifactPath()
+		if rawPath != "" && !filepath.IsAbs(rawPath) {
+			rawDest := filepath.Join(tmpDir, rawPath)
+			if _, err := os.Stat(rawDest); os.IsNotExist(err) {
+				_ = os.WriteFile(rawDest, []byte(defaultRawArtifactData), 0644)
+			}
+		}
+	} else if sfrPtr, ok := r.(*SubagentFanoutReceipt); ok && sfrPtr != nil {
+		rawPath := sfrPtr.EffectiveRawArtifactPath()
+		if rawPath != "" && !filepath.IsAbs(rawPath) {
+			rawDest := filepath.Join(tmpDir, rawPath)
+			if _, err := os.Stat(rawDest); os.IsNotExist(err) {
+				_ = os.WriteFile(rawDest, []byte(defaultRawArtifactData), 0644)
+			}
+		}
+	}
+
 	raw, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
 		t.Fatalf("failed to marshal receipt: %v", err)
@@ -417,6 +458,16 @@ func TestAcceptance_EmpiricalRooflineReceipt_PASS(t *testing.T) {
 		t.Fatalf("failed to generate empirical roofline receipt: %v", err)
 	}
 
+	// Modeled empirical receipts default to Simulated=true. Acceptance verification
+	// requires genuine physical device execution evidence (Simulated=false) with execution witness.
+	rooflineReceipt.Simulated = false
+	rooflineReceipt.ExecutionWitness = "hardware:strix-halo:gfx1151:wmma-gemm:coalesced-stream"
+	digest, err := rooflineReceipt.ComputeDigest()
+	if err != nil {
+		t.Fatalf("failed to recompute digest: %v", err)
+	}
+	rooflineReceipt.Digest = digest
+
 	path := writeReceiptToTemp(t, rooflineReceipt)
 
 	var stdout, stderr bytes.Buffer
@@ -444,18 +495,28 @@ func TestAcceptance_EmpiricalRooflineReceipt_PASS(t *testing.T) {
 	if !report.Passed || report.EmpiricalRoofline == nil || report.EmpiricalRoofline.Device != "gfx1151" {
 		t.Errorf("unexpected empirical roofline report: %+v", report)
 	}
+	if report.EmpiricalRoofline.Simulated {
+		t.Errorf("expected Simulated=false in passing report, got true")
+	}
 }
 
-// TestAcceptance_EmpiricalRooflineReceipt_FAIL verifies that an invalid empirical roofline receipt fails.
+// TestAcceptance_EmpiricalRooflineReceipt_FAIL verifies that a tampered empirical roofline receipt fails.
 func TestAcceptance_EmpiricalRooflineReceipt_FAIL(t *testing.T) {
 	ctx := context.Background()
 	rooflineReceipt, err := roofline.MeasureEmpiricalRoofline(ctx, "gfx1151")
 	if err != nil {
 		t.Fatalf("failed to generate empirical roofline receipt: %v", err)
 	}
+	rooflineReceipt.Simulated = false
+	rooflineReceipt.ExecutionWitness = "hardware:strix-halo:gfx1151:wmma-gemm:coalesced-stream"
 
 	// Tamper with DRAM bandwidth to be sub-floor
 	rooflineReceipt.DRAMBandwidth.SustainedGBps = 150.0
+	digest, err := rooflineReceipt.ComputeDigest()
+	if err != nil {
+		t.Fatalf("failed to recompute digest: %v", err)
+	}
+	rooflineReceipt.Digest = digest
 	path := writeReceiptToTemp(t, rooflineReceipt)
 
 	var stdout, stderr bytes.Buffer
@@ -467,6 +528,59 @@ func TestAcceptance_EmpiricalRooflineReceipt_FAIL(t *testing.T) {
 	outStr := stdout.String()
 	if !strings.Contains(outStr, "ROOFLINE VERIFICATION FAILED") {
 		t.Errorf("expected failure verdict in output, got:\n%s", outStr)
+	}
+}
+
+// TestAcceptance_EmpiricalRooflineReceipt_Simulated_FAIL verifies that a modeled receipt (Simulated=true) fails closed.
+func TestAcceptance_EmpiricalRooflineReceipt_Simulated_FAIL(t *testing.T) {
+	ctx := context.Background()
+	rooflineReceipt, err := roofline.MeasureEmpiricalRoofline(ctx, "gfx1151")
+	if err != nil {
+		t.Fatalf("failed to generate empirical roofline receipt: %v", err)
+	}
+	if !rooflineReceipt.Simulated {
+		t.Fatalf("expected MeasureEmpiricalRoofline to produce Simulated=true")
+	}
+
+	path := writeReceiptToTemp(t, rooflineReceipt)
+
+	var stdout, stderr bytes.Buffer
+	code := runAcceptanceValidation(&stdout, &stderr, "strix-halo-80pct", path, false)
+	if code != 1 {
+		t.Fatalf("expected exit code 1 for simulated empirical roofline, got %d; stdout: %s", code, stdout.String())
+	}
+
+	outStr := stdout.String()
+	if !strings.Contains(outStr, "ROOFLINE VERIFICATION FAILED") {
+		t.Errorf("expected failure verdict in output, got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "simulated") {
+		t.Errorf("expected simulated failure message, got:\n%s", outStr)
+	}
+
+	// JSON mode check
+	stdout.Reset()
+	stderr.Reset()
+	codeJSON := runAcceptanceValidation(&stdout, &stderr, "strix-halo-80pct", path, true)
+	if codeJSON != 1 {
+		t.Fatalf("expected exit code 1 in JSON mode, got %d", codeJSON)
+	}
+	var report AcceptanceValidationReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("failed to parse JSON report: %v", err)
+	}
+	if report.Passed || report.Verdict != "ACCEPTANCE_FAILED" {
+		t.Errorf("expected report.Passed=false, Verdict=ACCEPTANCE_FAILED, got %+v", report)
+	}
+	foundSim := false
+	for _, f := range report.Failures {
+		if strings.Contains(strings.ToLower(f), "simulated") {
+			foundSim = true
+			break
+		}
+	}
+	if !foundSim {
+		t.Errorf("expected failure reason mentioning simulated in %v", report.Failures)
 	}
 }
 
@@ -652,5 +766,146 @@ func TestAcceptance_MissingOrSyntheticEvidenceFailsClosed(t *testing.T) {
 		if !strings.Contains(outStr, "OVERALL VERDICT: ACCEPTANCE PASSED (5/5 PILLARS SATISFIED)") {
 			t.Errorf("expected 5/5 pillars satisfied, got:\n%s", outStr)
 		}
+	})
+}
+
+// TestAcceptance_Issue11965_EvidenceRequirementsRegression tests the rejection of simulated
+// empirical roofline receipts and fanout receipts with missing or mismatching raw evidence across
+// real acceptance entry points (runAcceptanceValidation, runValidateAcceptanceCLI, runValidate).
+func TestAcceptance_Issue11965_EvidenceRequirementsRegression(t *testing.T) {
+	invokeAllEntryPoints := func(t *testing.T, path string, expectFailStr string) {
+		t.Helper()
+		// Entry point 1: runAcceptanceValidation
+		var stdout1, stderr1 bytes.Buffer
+		code1 := runAcceptanceValidation(&stdout1, &stderr1, "strix-halo-80pct", path, false)
+		if code1 != 1 {
+			t.Errorf("runAcceptanceValidation expected exit 1, got %d; stdout: %s", code1, stdout1.String())
+		}
+		if !strings.Contains(stdout1.String(), expectFailStr) {
+			t.Errorf("runAcceptanceValidation output missing expected %q; got:\n%s", expectFailStr, stdout1.String())
+		}
+
+		// Entry point 2: runValidateAcceptanceCLI
+		var stdout2, stderr2 bytes.Buffer
+		code2 := runValidateAcceptanceCLI(&stdout2, &stderr2, []string{"--acceptance=strix-halo-80pct", "--receipt=" + path})
+		if code2 != 1 {
+			t.Errorf("runValidateAcceptanceCLI expected exit 1, got %d; stdout: %s", code2, stdout2.String())
+		}
+		if !strings.Contains(stdout2.String(), expectFailStr) {
+			t.Errorf("runValidateAcceptanceCLI output missing expected %q; got:\n%s", expectFailStr, stdout2.String())
+		}
+
+		// Entry point 3: runValidate
+		var stdout3, stderr3 bytes.Buffer
+		code3 := runValidate(&stdout3, &stderr3, []string{"--acceptance=strix-halo-80pct", "--receipt=" + path})
+		if code3 != 1 {
+			t.Errorf("runValidate expected exit 1, got %d; stdout: %s", code3, stdout3.String())
+		}
+		if !strings.Contains(stdout3.String(), expectFailStr) {
+			t.Errorf("runValidate output missing expected %q; got:\n%s", expectFailStr, stdout3.String())
+		}
+	}
+
+	t.Run("modeled_roofline_simulated_true_fails_closed", func(t *testing.T) {
+		ctx := context.Background()
+		rooflineReceipt, err := roofline.MeasureEmpiricalRoofline(ctx, "gfx1151")
+		if err != nil {
+			t.Fatalf("failed to generate empirical roofline receipt: %v", err)
+		}
+		if !rooflineReceipt.Simulated {
+			t.Fatalf("expected MeasureEmpiricalRoofline to produce Simulated=true")
+		}
+		path := writeReceiptToTemp(t, rooflineReceipt)
+		invokeAllEntryPoints(t, path, "simulated")
+	})
+
+	t.Run("fanout_missing_raw_artifact_path_fails_closed", func(t *testing.T) {
+		r := makeValidSubagentFanoutReceipt()
+		r.RawArtifactPath = ""
+		r.Reproducibility.RawArtifactPath = ""
+		if d, err := r.ComputeDigest(); err == nil {
+			r.Digest = d
+			r.Reproducibility.Digest = d
+		}
+		path := writeReceiptToTemp(t, r)
+		invokeAllEntryPoints(t, path, "missing raw artifact path")
+	})
+
+	t.Run("fanout_missing_raw_artifact_digest_fails_closed", func(t *testing.T) {
+		r := makeValidSubagentFanoutReceipt()
+		r.RawArtifactDigest = ""
+		r.Reproducibility.RawArtifactDigest = ""
+		if d, err := r.ComputeDigest(); err == nil {
+			r.Digest = d
+			r.Reproducibility.Digest = d
+		}
+		path := writeReceiptToTemp(t, r)
+		invokeAllEntryPoints(t, path, "missing raw artifact digest")
+	})
+
+	t.Run("fanout_missing_raw_artifact_file_on_disk_fails_closed", func(t *testing.T) {
+		r := makeValidSubagentFanoutReceipt()
+		// Point to an absolute path that definitely does not exist
+		tmpDir := t.TempDir()
+		nonexistentPath := filepath.Join(tmpDir, "does_not_exist_raw_evidence.json")
+		r.RawArtifactPath = nonexistentPath
+		r.Reproducibility.RawArtifactPath = nonexistentPath
+		if d, err := r.ComputeDigest(); err == nil {
+			r.Digest = d
+			r.Reproducibility.Digest = d
+		}
+		path := writeReceiptToTemp(t, r)
+		invokeAllEntryPoints(t, path, "missing raw evidence")
+	})
+
+	t.Run("fanout_raw_artifact_sha256_mismatch_fails_closed", func(t *testing.T) {
+		r := makeValidSubagentFanoutReceipt()
+		mismatchDigest := "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+		r.RawArtifactDigest = mismatchDigest
+		r.Reproducibility.RawArtifactDigest = mismatchDigest
+		if d, err := r.ComputeDigest(); err == nil {
+			r.Digest = d
+			r.Reproducibility.Digest = d
+		}
+		path := writeReceiptToTemp(t, r)
+		invokeAllEntryPoints(t, path, "raw artifact SHA256 mismatch")
+	})
+
+	t.Run("fanout_simulated_provenance_fails_closed", func(t *testing.T) {
+		r := makeValidSubagentFanoutReceipt()
+		r.Provenance = "simulated"
+		r.Reproducibility.Provenance = "simulated"
+		if d, err := r.ComputeDigest(); err == nil {
+			r.Digest = d
+			r.Reproducibility.Digest = d
+		}
+		path := writeReceiptToTemp(t, r)
+		invokeAllEntryPoints(t, path, "invalid provenance")
+	})
+
+	t.Run("fanout_empty_provenance_fails_closed", func(t *testing.T) {
+		r := makeValidSubagentFanoutReceipt()
+		r.Provenance = ""
+		r.Reproducibility.Provenance = ""
+		if d, err := r.ComputeDigest(); err == nil {
+			r.Digest = d
+			r.Reproducibility.Digest = d
+		}
+		path := writeReceiptToTemp(t, r)
+		invokeAllEntryPoints(t, path, "missing device-execution provenance")
+	})
+
+	t.Run("fanout_missing_capture_command_and_provenance_details_fails_closed", func(t *testing.T) {
+		r := makeValidSubagentFanoutReceipt()
+		r.CaptureCommand = ""
+		r.ProvenanceDetails = ""
+		r.Reproducibility.CaptureCommand = ""
+		r.Reproducibility.ProvenanceDetails = ""
+		if d, err := r.ComputeDigest(); err == nil {
+			r.Digest = d
+			r.Reproducibility.Digest = d
+		}
+		path := writeReceiptToTemp(t, r)
+		invokeAllEntryPoints(t, path, "missing capture command and provenance details")
 	})
 }

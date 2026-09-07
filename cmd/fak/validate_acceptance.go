@@ -58,6 +58,11 @@ type SubagentFanoutReceipt struct {
 	Timestamp          string                     `json:"timestamp,omitempty"`
 	Verdict            string                     `json:"verdict"`
 	Provenance         string                     `json:"provenance,omitempty"`
+	ProvenanceDetails  string                     `json:"provenance_details,omitempty"`
+	CaptureCommand     string                     `json:"capture_command,omitempty"`
+	RawArtifactPath    string                     `json:"raw_artifact_path,omitempty"`
+	RawArtifactDigest  string                     `json:"raw_artifact_digest,omitempty"`
+	HardwareAttested   bool                       `json:"hardware_attested,omitempty"`
 	Workload           SubagentFanoutWorkload     `json:"workload"`
 	Hardware           SubagentFanoutHardware     `json:"hardware"`
 	Engine             SubagentFanoutEngine       `json:"engine"`
@@ -144,11 +149,56 @@ type SubagentRooflineAttainment struct {
 
 // SubagentReproducibility records commands, artifact references, and scrubbing attestation.
 type SubagentReproducibility struct {
-	ArtifactPath string `json:"artifact_path"`
-	Command      string `json:"command"`
-	Provenance   string `json:"provenance,omitempty"`
-	Scrubbed     bool   `json:"scrubbed"`
-	Digest       string `json:"digest,omitempty"`
+	ArtifactPath        string `json:"artifact_path"`
+	Command             string `json:"command"`
+	CaptureCommand      string `json:"capture_command,omitempty"`
+	Provenance          string `json:"provenance,omitempty"`
+	ProvenanceDetails   string `json:"provenance_details,omitempty"`
+	RawArtifactPath     string `json:"raw_artifact_path,omitempty"`
+	RawArtifactDigest   string `json:"raw_artifact_digest,omitempty"`
+	HardwareAttested    bool   `json:"hardware_attested,omitempty"`
+	Scrubbed            bool   `json:"scrubbed"`
+	Digest              string `json:"digest,omitempty"`
+}
+
+// EffectiveProvenance returns the non-empty provenance declared on receipt or reproducibility.
+func (r *SubagentFanoutReceipt) EffectiveProvenance() string {
+	if p := strings.TrimSpace(r.Provenance); p != "" {
+		return p
+	}
+	return strings.TrimSpace(r.Reproducibility.Provenance)
+}
+
+// EffectiveCaptureCommand returns the non-empty capture command on receipt or reproducibility.
+func (r *SubagentFanoutReceipt) EffectiveCaptureCommand() string {
+	if cmd := strings.TrimSpace(r.CaptureCommand); cmd != "" {
+		return cmd
+	}
+	return strings.TrimSpace(r.Reproducibility.CaptureCommand)
+}
+
+// EffectiveProvenanceDetails returns non-empty provenance details on receipt or reproducibility.
+func (r *SubagentFanoutReceipt) EffectiveProvenanceDetails() string {
+	if det := strings.TrimSpace(r.ProvenanceDetails); det != "" {
+		return det
+	}
+	return strings.TrimSpace(r.Reproducibility.ProvenanceDetails)
+}
+
+// EffectiveRawArtifactPath returns non-empty raw artifact path on receipt or reproducibility.
+func (r *SubagentFanoutReceipt) EffectiveRawArtifactPath() string {
+	if path := strings.TrimSpace(r.RawArtifactPath); path != "" {
+		return path
+	}
+	return strings.TrimSpace(r.Reproducibility.RawArtifactPath)
+}
+
+// EffectiveRawArtifactDigest returns non-empty raw artifact digest on receipt or reproducibility.
+func (r *SubagentFanoutReceipt) EffectiveRawArtifactDigest() string {
+	if dig := strings.TrimSpace(r.RawArtifactDigest); dig != "" {
+		return dig
+	}
+	return strings.TrimSpace(r.Reproducibility.RawArtifactDigest)
 }
 
 // ComputeDigest calculates canonical SHA-256 digest of receipt payload.
@@ -219,10 +269,16 @@ type Pillar4Report struct {
 }
 
 type Pillar5Report struct {
-	Passed       bool   `json:"passed"`
-	ArtifactPath string `json:"artifact_path"`
-	Scrubbed     bool   `json:"scrubbed"`
-	Verified     bool   `json:"verified"`
+	Passed            bool   `json:"passed"`
+	ArtifactPath      string `json:"artifact_path"`
+	RawArtifactPath   string `json:"raw_artifact_path,omitempty"`
+	RawArtifactDigest string `json:"raw_artifact_digest,omitempty"`
+	RawArtifactBound  bool   `json:"raw_artifact_bound"`
+	HardwareAttested  bool   `json:"hardware_attested"`
+	Provenance        string `json:"provenance,omitempty"`
+	CaptureCommand    string `json:"capture_command,omitempty"`
+	Scrubbed          bool   `json:"scrubbed"`
+	Verified          bool   `json:"verified"`
 }
 
 type AcceptanceEmpiricalReport struct {
@@ -231,6 +287,8 @@ type AcceptanceEmpiricalReport struct {
 	SustainedDRAMGBps float64 `json:"sustained_dram_gbps"`
 	WithinMALLGBps    float64 `json:"within_mall_gbps"`
 	FP16TFLOPS        float64 `json:"fp16_tflops"`
+	Simulated         bool    `json:"simulated"`
+	ExecutionWitness  string  `json:"execution_witness,omitempty"`
 	Verified          bool    `json:"verified"`
 	Digest            string  `json:"digest"`
 }
@@ -344,6 +402,36 @@ func runAcceptanceValidation(stdout, stderr io.Writer, acceptanceType string, re
 	}
 }
 
+func isDeviceExecutionProvenance(p string) bool {
+	norm := strings.ToLower(strings.TrimSpace(p))
+	if norm == "" {
+		return false
+	}
+	if strings.Contains(norm, "synthetic") ||
+		strings.Contains(norm, "simulat") ||
+		strings.Contains(norm, "model") ||
+		strings.Contains(norm, "unspecified") ||
+		strings.Contains(norm, "mock") ||
+		strings.Contains(norm, "emulat") {
+		return false
+	}
+	return strings.Contains(norm, "hardware") ||
+		strings.Contains(norm, "device") ||
+		strings.Contains(norm, "physical")
+}
+
+func isHexString(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
 func validateSubagentFanout(stdout, stderr io.Writer, receiptPath string, data []byte, asJSON bool) int {
 	var r SubagentFanoutReceipt
 	if err := json.Unmarshal(data, &r); err != nil {
@@ -436,7 +524,91 @@ func validateSubagentFanout(stdout, stderr io.Writer, receiptPath string, data [
 		p5Failures = append(p5Failures, fmt.Sprintf("Pillar 5 (Reproducibility Packet): digest mismatch (recorded %s != computed %s)", r.Digest, computedDigest))
 	}
 
-	p5Pass := r.Verified && !isQuarantined && !isSynthetic && r.Reproducibility.Scrubbed && !hasSecretOrPathLeak && len(p5Failures) == 0
+	provenance := r.EffectiveProvenance()
+	if provenance == "" {
+		p5Failures = append(p5Failures, "Pillar 5 (Reproducibility Packet): missing device-execution provenance (empty provenance; explicit hardware_execution required)")
+	} else if !isDeviceExecutionProvenance(provenance) {
+		p5Failures = append(p5Failures, fmt.Sprintf("Pillar 5 (Reproducibility Packet): invalid provenance %q (explicit device execution required; modeled, simulated, or unspecified rejected)", provenance))
+	}
+	if r.Provenance != "" && !isDeviceExecutionProvenance(r.Provenance) {
+		p5Failures = append(p5Failures, fmt.Sprintf("Pillar 5 (Reproducibility Packet): receipt provenance %q rejected (modeled/simulated/unspecified)", r.Provenance))
+	}
+	if r.Reproducibility.Provenance != "" && !isDeviceExecutionProvenance(r.Reproducibility.Provenance) {
+		p5Failures = append(p5Failures, fmt.Sprintf("Pillar 5 (Reproducibility Packet): reproducibility provenance %q rejected (modeled/simulated/unspecified)", r.Reproducibility.Provenance))
+	}
+
+	captureCmd := r.EffectiveCaptureCommand()
+	provDetails := r.EffectiveProvenanceDetails()
+	if captureCmd == "" && provDetails == "" {
+		p5Failures = append(p5Failures, "Pillar 5 (Reproducibility Packet): missing capture command and provenance details (capture_command or provenance_details required)")
+	}
+
+	rawArtifactPath := r.EffectiveRawArtifactPath()
+	rawArtifactDigest := r.EffectiveRawArtifactDigest()
+	rawArtifactBound := false
+
+	if rawArtifactPath == "" {
+		p5Failures = append(p5Failures, "Pillar 5 (Reproducibility Packet): missing raw artifact path (raw_artifact_path required for hardware evidence)")
+	}
+	if rawArtifactDigest == "" {
+		p5Failures = append(p5Failures, "Pillar 5 (Reproducibility Packet): missing raw artifact digest (raw_artifact_digest SHA256 binding required)")
+	}
+
+	cleanRawDigest := strings.TrimPrefix(strings.ToLower(rawArtifactDigest), "sha256:")
+	if rawArtifactDigest != "" && (len(cleanRawDigest) != 64 || !isHexString(cleanRawDigest)) {
+		p5Failures = append(p5Failures, fmt.Sprintf("Pillar 5 (Reproducibility Packet): invalid raw artifact digest %q (must be 64-hex SHA256)", rawArtifactDigest))
+	}
+
+	if rawArtifactPath != "" && rawArtifactDigest != "" && len(cleanRawDigest) == 64 && isHexString(cleanRawDigest) {
+		var resolvedRawPath string
+		var rawCandidates []string
+		if filepath.IsAbs(rawArtifactPath) {
+			rawCandidates = []string{rawArtifactPath}
+		} else {
+			if receiptDir := filepath.Dir(receiptPath); receiptDir != "" {
+				rawCandidates = append(rawCandidates, filepath.Join(receiptDir, rawArtifactPath))
+			}
+			rawCandidates = append(rawCandidates, rawArtifactPath)
+			root := resolveRepoRoot()
+			rawCandidates = append(rawCandidates, filepath.Join(root, filepath.FromSlash(rawArtifactPath)))
+		}
+
+		for _, cand := range rawCandidates {
+			if _, err := os.Stat(cand); err == nil {
+				resolvedRawPath = cand
+				break
+			}
+		}
+
+		if resolvedRawPath == "" {
+			p5Failures = append(p5Failures, fmt.Sprintf("Pillar 5 (Reproducibility Packet): raw artifact not found at %q (missing raw evidence)", rawArtifactPath))
+		} else {
+			info, err := os.Stat(resolvedRawPath)
+			if err != nil {
+				p5Failures = append(p5Failures, fmt.Sprintf("Pillar 5 (Reproducibility Packet): failed to stat raw artifact %q: %v", rawArtifactPath, err))
+			} else if !info.Mode().IsRegular() {
+				p5Failures = append(p5Failures, fmt.Sprintf("Pillar 5 (Reproducibility Packet): raw artifact %q is not a regular file", rawArtifactPath))
+			} else if info.Size() == 0 {
+				p5Failures = append(p5Failures, fmt.Sprintf("Pillar 5 (Reproducibility Packet): raw artifact %q is empty (zero bytes)", rawArtifactPath))
+			} else {
+				rawBytes, err := os.ReadFile(resolvedRawPath)
+				if err != nil {
+					p5Failures = append(p5Failures, fmt.Sprintf("Pillar 5 (Reproducibility Packet): failed to read raw artifact %q: %v", rawArtifactPath, err))
+				} else {
+					sum := sha256.Sum256(rawBytes)
+					computedRawHex := hex.EncodeToString(sum[:])
+					if computedRawHex != cleanRawDigest {
+						p5Failures = append(p5Failures, fmt.Sprintf("Pillar 5 (Reproducibility Packet): raw artifact SHA256 mismatch (recorded %s != computed sha256:%s)", rawArtifactDigest, computedRawHex))
+					} else {
+						rawArtifactBound = true
+					}
+				}
+			}
+		}
+	}
+
+	hardwareAttested := isDeviceExecutionProvenance(provenance) && !isSynthetic && !isQuarantined
+	p5Pass := r.Verified && !isQuarantined && !isSynthetic && r.Reproducibility.Scrubbed && !hasSecretOrPathLeak && rawArtifactBound && hardwareAttested && len(p5Failures) == 0
 	if !p5Pass && len(p5Failures) > 0 {
 		failures = append(failures, p5Failures...)
 	}
@@ -482,10 +654,16 @@ func validateSubagentFanout(stdout, stderr io.Writer, receiptPath string, data [
 				MaxNoisePercentage: MaxStatisticalNoisePct,
 			},
 			Pillar5Reproducibility: Pillar5Report{
-				Passed:       p5Pass,
-				ArtifactPath: r.Reproducibility.ArtifactPath,
-				Scrubbed:     r.Reproducibility.Scrubbed,
-				Verified:     r.Verified,
+				Passed:            p5Pass,
+				ArtifactPath:      r.Reproducibility.ArtifactPath,
+				RawArtifactPath:   rawArtifactPath,
+				RawArtifactDigest: rawArtifactDigest,
+				RawArtifactBound:  rawArtifactBound,
+				HardwareAttested:  hardwareAttested,
+				Provenance:        provenance,
+				CaptureCommand:    captureCmd,
+				Scrubbed:          r.Reproducibility.Scrubbed,
+				Verified:          r.Verified,
 			},
 		},
 		Failures:  failures,
@@ -520,6 +698,9 @@ func validateEmpiricalRoofline(stdout, stderr io.Writer, receiptPath string, dat
 
 	if err := r.Verify(); err != nil {
 		failures = append(failures, fmt.Sprintf("empirical roofline verification: %v", err))
+	}
+	if r.Simulated {
+		failures = append(failures, "empirical roofline receipt is marked simulated (physical hardware execution witness required)")
 	}
 
 	normArch, err := roofline.NormalizeArchitecture(r.Device)
@@ -558,6 +739,8 @@ func validateEmpiricalRoofline(stdout, stderr io.Writer, receiptPath string, dat
 			SustainedDRAMGBps: r.DRAMBandwidth.SustainedGBps,
 			WithinMALLGBps:    r.MALLSweep.WithinMALLBandwidthGBps,
 			FP16TFLOPS:        r.ComputeCeiling.FP16TFLOPS,
+			Simulated:         r.Simulated,
+			ExecutionWitness:  r.ExecutionWitness,
 			Verified:          r.Verified,
 			Digest:            r.Digest,
 		},
@@ -641,8 +824,19 @@ func printSubagentFanoutReport(w io.Writer, rep AcceptanceValidationReport, r Su
 		p5Status = "FAIL"
 	}
 	fmt.Fprintf(w, "[%s] Pillar 5 (Reproducibility Packet):\n", p5Status)
-	fmt.Fprintf(w, "       Artifact: %s | Scrubbed: %v | Verified: %v\n",
+	fmt.Fprintf(w, "       Artifact:     %s | Scrubbed: %v | Verified: %v\n",
 		p.Pillar5Reproducibility.ArtifactPath, p.Pillar5Reproducibility.Scrubbed, p.Pillar5Reproducibility.Verified)
+	if p.Pillar5Reproducibility.RawArtifactPath != "" {
+		fmt.Fprintf(w, "       Raw Evidence: %s | SHA256 Bound: %v\n",
+			p.Pillar5Reproducibility.RawArtifactPath, p.Pillar5Reproducibility.RawArtifactBound)
+	}
+	if p.Pillar5Reproducibility.Provenance != "" {
+		fmt.Fprintf(w, "       Provenance:   %s | Hardware Attested: %v\n",
+			p.Pillar5Reproducibility.Provenance, p.Pillar5Reproducibility.HardwareAttested)
+	}
+	if p.Pillar5Reproducibility.CaptureCommand != "" {
+		fmt.Fprintf(w, "       Capture Cmd:  %s\n", p.Pillar5Reproducibility.CaptureCommand)
+	}
 
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "================================================================================")
@@ -665,6 +859,10 @@ func printEmpiricalRooflineReport(w io.Writer, rep AcceptanceValidationReport, r
 	fmt.Fprintf(w, "Receipt Path:    %s\n", rep.ReceiptPath)
 	fmt.Fprintf(w, "Device:          %s (%s)\n", r.Device, r.DeviceName)
 	fmt.Fprintf(w, "Compute Units:   %d CUs\n", r.ComputeUnits)
+	fmt.Fprintf(w, "Simulated:       %v\n", r.Simulated)
+	if r.ExecutionWitness != "" {
+		fmt.Fprintf(w, "Witness:         %s\n", r.ExecutionWitness)
+	}
 	fmt.Fprintf(w, "Sustained DRAM:  %.2f GB/s\n", r.DRAMBandwidth.SustainedGBps)
 	fmt.Fprintf(w, "Within MALL:     %.2f GB/s\n", r.MALLSweep.WithinMALLBandwidthGBps)
 	fmt.Fprintf(w, "WMMA FP16:       %.2f TFLOPS\n", r.ComputeCeiling.FP16TFLOPS)
