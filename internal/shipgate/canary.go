@@ -3,6 +3,7 @@ package shipgate
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 
@@ -87,16 +88,42 @@ func (p CanaryProvenance) scrubbed() CanaryProvenance {
 
 // QualitySlice represents one measured metric cohort in a canary evaluation.
 type QualitySlice struct {
-	Name      string  `json:"name"`
-	Critical  bool    `json:"critical"`
-	Baseline  float64 `json:"baseline"`
-	Candidate float64 `json:"candidate"`
-	Tolerance float64 `json:"tolerance"`
-	Samples   int     `json:"samples"`
-	Measured  bool    `json:"measured"`
+	Name              string  `json:"name"`
+	Critical          bool    `json:"critical"`
+	Baseline          float64 `json:"baseline"`
+	Candidate         float64 `json:"candidate"`
+	Tolerance         float64 `json:"tolerance"`
+	Samples           int     `json:"samples"`
+	Measured          bool    `json:"measured"`
+	AdverseDelta      float64 `json:"adverse_delta,omitempty"`
+	UncertaintyMargin float64 `json:"uncertainty_margin,omitempty"`
+	IntervalMethod    string  `json:"interval_method,omitempty"`
 }
 
 func (s QualitySlice) delta() float64 { return s.Candidate - s.Baseline }
+
+// DefaultIntervalMethod identifies the default bounded uncertainty interval estimator.
+const DefaultIntervalMethod = "conservative-normal-95"
+
+// ComputeSliceUncertainty calculates the one-sided 95% uncertainty margin (z = 1.645)
+// based on the sample metric proportion/mean.
+func ComputeSliceUncertainty(p float64, samples int) (margin float64, adverseDelta float64, method string) {
+	method = DefaultIntervalMethod
+	if samples <= 0 {
+		return 0, 0, method
+	}
+	// Bounded proportion variance: p*(1-p), clamped to [0.01, 0.99]
+	clamped := p
+	if clamped < 0.01 {
+		clamped = 0.01
+	} else if clamped > 0.99 {
+		clamped = 0.99
+	}
+	variance := clamped * (1.0 - clamped)
+	se := math.Sqrt(variance / float64(samples))
+	margin = 1.645 * se
+	return margin, -margin, method
+}
 
 // CanaryCase specifies the full configuration and measurements for a canary run.
 type CanaryCase struct {
@@ -110,12 +137,16 @@ type CanaryCase struct {
 
 // CanaryDivergence localizes the first detected critical-slice regression.
 type CanaryDivergence struct {
-	Slice     string  `json:"slice"`
-	Baseline  float64 `json:"baseline"`
-	Candidate float64 `json:"candidate"`
-	Delta     float64 `json:"delta"`
-	Tolerance float64 `json:"tolerance"`
-	Reason    string  `json:"reason"`
+	Slice             string  `json:"slice"`
+	Baseline          float64 `json:"baseline"`
+	Candidate         float64 `json:"candidate"`
+	Delta             float64 `json:"delta"`
+	Tolerance         float64 `json:"tolerance"`
+	Samples           int     `json:"samples,omitempty"`
+	AdverseDelta      float64 `json:"adverse_delta,omitempty"`
+	UncertaintyMargin float64 `json:"uncertainty_margin,omitempty"`
+	IntervalMethod    string  `json:"interval_method,omitempty"`
+	Reason            string  `json:"reason"`
 }
 
 // CanaryReplay holds sanitized execution data for offline reproduction.
@@ -178,13 +209,18 @@ func AdjudicateCanary(c CanaryCase) CanaryResult {
 		return res.hold(c, "no quality slices measured")
 	}
 	nCritical := 0
-	for _, s := range c.Slices {
+	for i := range c.Slices {
+		s := &c.Slices[i]
 		if !s.Measured {
 			return res.hold(c, fmt.Sprintf("slice %q is unmeasured - inconclusive evidence is never pass", s.Name))
 		}
 		if s.Samples < c.MinSamples {
 			return res.hold(c, fmt.Sprintf("slice %q has %d sample(s), below the promotion evidence floor of %d", s.Name, s.Samples, c.MinSamples))
 		}
+		margin, _, method := ComputeSliceUncertainty(s.Candidate, s.Samples)
+		s.UncertaintyMargin = margin
+		s.AdverseDelta = s.delta() - margin
+		s.IntervalMethod = method
 		if s.Critical {
 			nCritical++
 		}
@@ -194,23 +230,61 @@ func AdjudicateCanary(c CanaryCase) CanaryResult {
 	}
 
 	for _, s := range c.Slices {
-		if s.Critical && -s.delta() > s.Tolerance {
-			d := &CanaryDivergence{
-				Slice: s.Name, Baseline: s.Baseline, Candidate: s.Candidate,
-				Delta: s.delta(), Tolerance: s.Tolerance,
-				Reason: fmt.Sprintf("critical slice %q dropped %.4f (tolerance %.4f)", s.Name, -s.delta(), s.Tolerance),
+		if s.Critical {
+			rawBreach := -s.delta() > s.Tolerance
+			adverseBreach := -s.AdverseDelta > s.Tolerance
+			if rawBreach || adverseBreach {
+				var reason string
+				if rawBreach {
+					reason = fmt.Sprintf("critical slice %q dropped %.4f (tolerance %.4f)", s.Name, -s.delta(), s.Tolerance)
+				} else {
+					reason = fmt.Sprintf("critical slice %q adverse drop %.4f breached tolerance %.4f at %d samples (margin %.4f, %s)",
+						s.Name, -s.AdverseDelta, s.Tolerance, s.Samples, s.UncertaintyMargin, s.IntervalMethod)
+				}
+				d := &CanaryDivergence{
+					Slice:             s.Name,
+					Baseline:          s.Baseline,
+					Candidate:         s.Candidate,
+					Delta:             s.delta(),
+					Tolerance:         s.Tolerance,
+					Samples:           s.Samples,
+					AdverseDelta:      s.AdverseDelta,
+					UncertaintyMargin: s.UncertaintyMargin,
+					IntervalMethod:    s.IntervalMethod,
+					Reason:            reason,
+				}
+				res.Verdict, res.FirstDivergence = CanaryRollback.String(), d
+				res.Reason = fmt.Sprintf("%s; candidate mean %.4f vs baseline %.4f does not rescue it",
+					d.Reason, res.CandidateMean, res.BaselineMean)
+				res.Replay = c.replay(d)
+				return res
 			}
-			res.Verdict, res.FirstDivergence = CanaryRollback.String(), d
-			res.Reason = fmt.Sprintf("%s; candidate mean %.4f vs baseline %.4f does not rescue it",
-				d.Reason, res.CandidateMean, res.BaselineMean)
-			res.Replay = c.replay(d)
-			return res
 		}
 	}
 
-	if res.CandidateMean < res.BaselineMean {
+	meanDelta := res.CandidateMean - res.BaselineMean
+	if meanDelta < 0 {
 		return res.hold(c, fmt.Sprintf("aggregate quality delta %.4f is negative without a critical breach - held, not promoted",
-			res.CandidateMean-res.BaselineMean))
+			meanDelta))
+	}
+
+	var sumSq float64
+	for _, s := range c.Slices {
+		if s.Samples > 0 {
+			clamped := s.Candidate
+			if clamped < 0.01 {
+				clamped = 0.01
+			} else if clamped > 0.99 {
+				clamped = 0.99
+			}
+			sumSq += (clamped * (1.0 - clamped)) / float64(s.Samples)
+		}
+	}
+	aggSE := math.Sqrt(sumSq) / float64(len(c.Slices))
+	aggMargin := 1.0 * aggSE
+	if meanDelta-aggMargin < 0 {
+		return res.hold(c, fmt.Sprintf("aggregate quality delta %.4f adverse bound %.4f is negative at sparse samples (margin %.4f, %s) - held, not promoted",
+			meanDelta, meanDelta-aggMargin, aggMargin, DefaultIntervalMethod))
 	}
 
 	res.Verdict, res.Promoted = CanaryPromote.String(), true

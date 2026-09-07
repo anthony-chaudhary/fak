@@ -214,3 +214,94 @@ func TestCanaryInconclusiveEvidenceNeverPromotes(t *testing.T) {
 		t.Fatalf("healthy control case verdict=%s want PROMOTE (reason: %s)", res.Verdict, res.Reason)
 	}
 }
+
+// TestCanaryDirectionalUncertainty proves issue #10278:
+// 1. Sparse critical slices with point drop within tolerance roll back if the adverse bound breaches.
+// 2. Ample samples with the same drop clear the adverse bound and promote.
+// 3. Thin apparent aggregate gains at sparse sample counts hold (do not false-green promote).
+// 4. Uncertainty fields round-trip through replay artifacts.
+func TestCanaryDirectionalUncertainty(t *testing.T) {
+	t.Run("sparse_adverse_breach_rolls_back", func(t *testing.T) {
+		// Point drop: candidate 0.93 vs baseline 0.94 -> drop = 0.01 (within tolerance 0.02).
+		// But at Samples = 50, margin is ~0.055, adverse drop is ~0.065 > 0.02 tolerance!
+		c := healthyCase()
+		c.Slices[0].Samples = 50
+		c.Slices[0].Candidate = 0.93
+		c.Slices[1].Samples = 5000
+		c.Slices[1].Candidate = 0.99 // boost aggregate mean so mean rises
+
+		res := AdjudicateCanary(c)
+		if res.Verdict != "ROLLBACK" {
+			t.Fatalf("sparse adverse breach verdict=%s want ROLLBACK (reason: %s)", res.Verdict, res.Reason)
+		}
+		if res.FirstDivergence == nil {
+			t.Fatalf("expected divergence recorded on adverse rollback")
+		}
+		if res.FirstDivergence.UncertaintyMargin <= 0 {
+			t.Fatalf("expected positive uncertainty margin, got %f", res.FirstDivergence.UncertaintyMargin)
+		}
+		if !strings.Contains(res.FirstDivergence.Reason, "adverse drop") {
+			t.Fatalf("expected reason to mention adverse drop, got %q", res.FirstDivergence.Reason)
+		}
+	})
+
+	t.Run("ample_samples_clears_adverse_bound_promotes", func(t *testing.T) {
+		// Same drop: candidate 0.93 vs baseline 0.94 -> drop = 0.01.
+		// At Samples = 10,000, margin is ~0.004, adverse drop is ~0.014 <= 0.02 tolerance!
+		c := healthyCase()
+		c.Slices[0].Samples = 10000
+		c.Slices[0].Candidate = 0.93
+		c.Slices[1].Samples = 10000
+		c.Slices[1].Candidate = 0.90 // aggregate mean delta: (0.93+0.90)/2 - (0.94+0.81)/2 = 0.915 - 0.875 = +0.04 > 0
+
+		res := AdjudicateCanary(c)
+		if res.Verdict != "PROMOTE" {
+			t.Fatalf("ample samples verdict=%s want PROMOTE (reason: %s)", res.Verdict, res.Reason)
+		}
+		if c.Slices[0].UncertaintyMargin <= 0 || c.Slices[0].UncertaintyMargin >= 0.01 {
+			t.Fatalf("expected tight margin at 10k samples, got %f", c.Slices[0].UncertaintyMargin)
+		}
+	})
+
+	t.Run("sparse_thin_improvement_holds_not_promotes", func(t *testing.T) {
+		// Candidate mean is slightly higher (+0.001), but with sparse samples (50),
+		// adverse lower bound of aggregate improvement is negative.
+		// Use generous tolerance so critical slices don't roll back first.
+		c := healthyCase()
+		c.Slices[0].Tolerance = 0.10
+		c.Slices[0].Samples = 50
+		c.Slices[0].Candidate = 0.941 // +0.001
+		c.Slices[1].Tolerance = 0.10
+		c.Slices[1].Samples = 50
+		c.Slices[1].Candidate = 0.811 // +0.001
+
+		res := AdjudicateCanary(c)
+		if res.Verdict != "HOLD" {
+			t.Fatalf("sparse thin improvement verdict=%s want HOLD (reason: %s)", res.Verdict, res.Reason)
+		}
+		if !strings.Contains(res.Reason, "adverse bound") {
+			t.Fatalf("expected HOLD reason to mention adverse bound, got %q", res.Reason)
+		}
+	})
+
+	t.Run("replay_artifact_preserves_uncertainty_fields", func(t *testing.T) {
+		c := healthyCase()
+		res := AdjudicateCanary(c)
+		artifact, err := res.MarshalReplay()
+		if err != nil {
+			t.Fatalf("MarshalReplay failed: %v", err)
+		}
+
+		var replayed CanaryReplay
+		if err := json.Unmarshal(artifact, &replayed); err != nil {
+			t.Fatalf("Unmarshal replay failed: %v", err)
+		}
+
+		if len(replayed.Slices) == 0 || replayed.Slices[0].UncertaintyMargin <= 0 {
+			t.Fatalf("replay lost uncertainty margin: %+v", replayed.Slices)
+		}
+		if replayed.Slices[0].IntervalMethod != DefaultIntervalMethod {
+			t.Fatalf("replay interval method=%q want %q", replayed.Slices[0].IntervalMethod, DefaultIntervalMethod)
+		}
+	})
+}
