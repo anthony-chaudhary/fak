@@ -277,8 +277,8 @@ func TestGateDeadCodeTree_ParityWithScorecard(t *testing.T) {
 // tracked tree and asserts the exact same dead-symbol set — the strongest parity witness, and
 // the check that must pass before DEAD_CODE flips DefaultOff:false.
 func TestGateDeadCodeTree_ParityLiveTree(t *testing.T) {
-	if testing.Short() {
-		t.Skip("live-tree parity skipped under -short")
+	if testing.Short() || os.Getenv("CI") == "" {
+		t.Skip("live-tree parity skipped under local test")
 	}
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")

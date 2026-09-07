@@ -91,6 +91,7 @@ func gateScopes() []gateScopeRow {
 		// a no-op for it (it takes no reads through fileProbe), and that is the point — one gate
 		// solved this for itself, and #5931 is the same answer applied to the shared seam.
 		{"CONCEPT_FRESHNESS", "gate_conceptfreshness.go", SeamPreCommit, ClassLandsTree, ""},
+		{"IMPORT_WITNESS", "gate_importwitness.go", SeamPreCommit, ClassLandsTree, ""},
 
 		// ---- pre-commit, deliberately NOT moved ----------------------------------------------
 		{"PUBLIC_LEAK", "gate_publicleak.go", SeamPreCommit, ClassWorktree,
