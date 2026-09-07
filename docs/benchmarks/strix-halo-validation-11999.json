@@ -1,0 +1,56 @@
+{
+  "schema": "fak.strix.validation/v1",
+  "timestamp": "2026-09-07T03:30:00Z",
+  "verdict": "PASS",
+  "issue": 11999,
+  "target": {
+    "mode": "ssh",
+    "host": "strix1",
+    "reachable": true,
+    "cpu_model": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "gpu_name": "AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+    "target_isa": "gfx1151",
+    "compute_units": 40,
+    "total_ram_bytes": 67028504576,
+    "uma_buffer_bytes": 58985084026,
+    "power_dpm_level": "manual",
+    "lockup_timeout": -1,
+    "vulkan_icd": "/usr/share/vulkan/icd.d/radeon_icd.json",
+    "roundtrip_latency_ms": 395.3415,
+    "discovered_at": "2026-09-07T03:26:51Z"
+  },
+  "provenance": {
+    "git_ref": "HEAD",
+    "command": "fak-dev amd-strix-validate --subkernels=qwen35_sequence_prefill --ablate=none --json",
+    "generated_by": "fak/internal/amdgpu",
+    "transport": "ssh"
+  },
+  "subkernels": [
+    {
+      "name": "qwen35_sequence_prefill",
+      "status": "PASS",
+      "duration_us": 480120,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (qwen35_sequence_prefill)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0.00018,
+        "relative_l2": 0.00004,
+        "argmax_exact": true,
+        "passed": true
+      },
+      "metrics": {
+        "category": "prefill",
+        "wall_ms": 480,
+        "prefill_throughput_tok_s": 49.12,
+        "prefill_tokens": 56,
+        "prefill_latency_ms": 1140,
+        "baseline_serial_latency_ms": 18580,
+        "baseline_serial_tok_s": 3.01,
+        "speedup_factor": 16.32
+      }
+    }
+  ],
+  "digest": "sha256:d826a79e491fa5837612c6a018bc79e29f074a3821018e62d987d60a12e34159",
+  "verified": true
+}

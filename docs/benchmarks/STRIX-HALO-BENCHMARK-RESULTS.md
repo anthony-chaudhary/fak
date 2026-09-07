@@ -1,6 +1,6 @@
 ---
 title: "AMD Strix Halo APU Benchmark Results & Candidate Baseline Index"
-description: "Physical execution baseline on AMD Ryzen AI MAX+ 395 (Radeon 8060S / gfx1151 / 64GB UMA) across 20 Vulkan compute sub-kernels, 6 architectural ablation candidates, and end-to-end 27B model serving."
+description: "Physical execution baseline on AMD Ryzen AI MAX+ 395 (Radeon 8060S / gfx1151 / 64GB UMA) across 21 Vulkan compute sub-kernels, 6 architectural ablation candidates, and end-to-end 27B model serving."
 ---
 
 # STRIX-HALO-BENCHMARK-RESULTS — AMD Strix Halo Physical Appliance Baseline Index
@@ -8,8 +8,8 @@ description: "Physical execution baseline on AMD Ryzen AI MAX+ 395 (Radeon 8060S
 > **Status:** `MEASURED` (Physical Hardware Execution on Appliance)  
 > **Audience:** Compute kernel engineers, compiler & runtime authors, accelerator architects, benchmark auditors  
 > **Baseline Receipt:** [`docs/benchmarks/strix-halo-validation-latest.json`](strix-halo-validation-latest.json)  
-> **Receipt Digest:** `sha256:ce20189b2f95d491a28c7ba7897c33fdbe6578efe20e1f72432a469b1cb2dd77`  
-> **Schema:** `fak.strix.validation/v1` | **Timestamp:** `2026-09-07T00:35:12Z` | **Verdict:** `PASS` (`verified: true`)
+> **Receipt Digest:** `sha256:a8a3cdabebd068cf8c971f2a2f218ac4b4de1a671e8ae8a756dc14dc0471f203`  
+> **Schema:** `fak.strix.validation/v1` | **Timestamp:** `2026-09-07T05:55:53Z` | **Verdict:** `PASS` (`verified: true`)
 
 ---
 
@@ -47,34 +47,35 @@ The physical validation suite executes six differential ablation experiments acr
 
 ---
 
-## 3. 20 Sub-Kernel Function Baseline Table
+## 3. 21 Sub-Kernel Function Baseline Table
 
-The 20 canonical compute sub-kernels validated on the AMD Strix Halo appliance cover the entire forward execution path: tensor projections, quantizations, normalizations, activations, positional rotary embeddings, multi-head attention, linear recurrent attention (Gated Delta Net), and memory contiguization.
+The 21 canonical compute sub-kernels validated on the AMD Strix Halo appliance cover the entire forward execution path: tensor projections, quantizations, normalizations, activations, positional rotary embeddings, multi-head attention, linear recurrent attention (Gated Delta Net), whole-sequence prefill, and memory contiguization.
 
-All 20 sub-kernels achieved numerical parity against the CPU reference oracle and were executed under single-iteration physical validation.
+All 21 sub-kernels achieved numerical parity against the CPU reference oracle and were executed under physical validation on the AMD Strix Halo appliance.
 
 | # | Sub-Kernel Name | Subsystem Category | Duration (µs) | Wall Time (ms) | Logit Cosine Parity | Argmax Exact | Parity Verdict | Kernel Function & Metric Description |
 |:---:|---|---|---:|---:|:---:|:---:|:---:|---|
-| 1 | `argmax` | `reduction` | 423,944 | 423 | 0.999999 | **true** | `PASS` | Bit-exact argmax reduction with first-max tie break bit-identical to cpuref |
-| 2 | `matmul_f32` | `gemv` | 351,775 | 351 | 0.999999 | false | `PASS` | Single-precision matrix multiplication (16×16 tile configuration) |
-| 3 | `matmul2_f32` | `gemv` | 364,714 | 364 | 0.999999 | false | `PASS` | Dual matrix multiplication (FFN gate + up projection parallel dispatch) |
-| 4 | `matmul3_f32` | `gemv` | 352,158 | 352 | 0.999999 | false | `PASS` | Triple matrix multiplication (coalesced Q/K/V attention projections) |
-| 5 | `q8_matmul` | `quant` | 409,184 | 409 | 0.999999 | false | `PASS` | 8-bit quantized matrix multiplication with int8 DP4A/WMMA arithmetic |
-| 6 | `q8_matmul_wide` | `quant` | 368,420 | 368 | 0.999999 | false | `PASS` | Wide-input Q8_0 matrix multiplication (large batch/sequence tile) |
-| 7 | `q8_matmul_vocab` | `quant` | 704,297 | 704 | 0.999999 | false | `PASS` | Full vocabulary-head Q8_0 projection (152,064+ logits output dimension) |
-| 8 | `q4k_matmul` | `quant` | 360,228 | 360 | 0.999999 | false | `PASS` | Q4_K super-block quantized GEMV (6-bit min/scale, 4-bit nibbles) |
-| 9 | `q2k_matmul` | `quant` | 381,036 | 381 | 0.999999 | false | `PASS` | Q2_K super-block quantized GEMV (2-bit weights, 84-byte superblock) |
-| 10 | `rmsnorm` | `norm` | 360,961 | 360 | 0.999999 | false | `PASS` | Root-Mean-Square normalization with epsilon scaling and float32 sum |
-| 11 | `rmsnorm_matmul` | `fused` | 461,467 | 461 | 0.999999 | false | `PASS` | Fused RMSNorm + MatMul single projection (zero global memory bounce) |
-| 12 | `rmsnorm_matmul2` | `fused` | 361,660 | 361 | 0.999999 | false | `PASS` | Fused RMSNorm + Dual MatMul (gate + up projection fused into 1 dispatch) |
-| 13 | `rmsnorm_matmul3` | `fused` | 416,826 | 416 | 0.999999 | false | `PASS` | Fused RMSNorm + Triple MatMul (Q/K/V projections fused into 1 dispatch) |
-| 14 | `swiglu` | `activation` | 372,935 | 372 | 0.999999 | false | `PASS` | SwiGLU gated activation function with vectorized float16/float32 ops |
-| 15 | `swiglu_matmul_add` | `fused` | 725,982 | 725 | 0.999999 | false | `PASS` | Fused SwiGLU + MatMul down-proj + Residual Add (FFN-tail fusion) |
-| 16 | `rope` | `positional` | 390,446 | 390 | 0.999999 | false | `PASS` | Rotary position embedding with complex rotation across head dimensions |
-| 17 | `attention` | `attention` | 498,784 | 498 | 0.999999 | false | `PASS` | Causal multi-head attention softmax and value weighted sum |
-| 18 | `qwen35_gdn_decode` | `linear_attention` | 406,625 | 406 | 0.999999 | false | `PASS` | Gated Delta Net recurrent decode in-place token oracle |
-| 19 | `qwen35_gdn_preprojected` | `linear_attention` | 331,013 | 331 | 0.999999 | false | `PASS` | Gated Delta Net preprojected 1D convolution and recurrent state update |
-| 20 | `f16_kv_contiguize` | `kv_cache` | 460,949 | 460 | 0.999999 | false | `PASS` | Pre-attention f16 KV cache contiguization pass (saturates 16 DRAM channels) |
+| 1 | `argmax` | `reduction` | 829,863 | 830 | 0.999999 | **true** | `PASS` | Bit-exact argmax reduction with first-max tie break bit-identical to cpuref |
+| 2 | `matmul_f32` | `gemv` | 722,942 | 722 | 0.999999 | false | `PASS` | Single-precision matrix multiplication (16×16 tile configuration) |
+| 3 | `matmul2_f32` | `gemv` | 605,529 | 605 | 0.999999 | false | `PASS` | Dual matrix multiplication (FFN gate + up projection parallel dispatch) |
+| 4 | `matmul3_f32` | `gemv` | 600,605 | 600 | 0.999999 | false | `PASS` | Triple matrix multiplication (coalesced Q/K/V attention projections) |
+| 5 | `q8_matmul` | `quant` | 767,498 | 767 | 0.999999 | false | `PASS` | 8-bit quantized matrix multiplication with int8 DP4A/WMMA arithmetic |
+| 6 | `q8_matmul_wide` | `quant` | 692,126 | 692 | 0.999999 | false | `PASS` | Wide-input Q8_0 matrix multiplication (large batch/sequence tile) |
+| 7 | `q8_matmul_vocab` | `quant` | 923,547 | 923 | 0.999999 | false | `PASS` | Full vocabulary-head Q8_0 projection (152,064+ logits output dimension) |
+| 8 | `q4k_matmul` | `quant` | 475,949 | 476 | 0.999999 | false | `PASS` | Q4_K super-block quantized GEMV (6-bit min/scale, 4-bit nibbles) |
+| 9 | `q2k_matmul` | `quant` | 569,728 | 570 | 0.999999 | false | `PASS` | Q2_K super-block quantized GEMV (2-bit weights, 84-byte superblock) |
+| 10 | `rmsnorm` | `norm` | 474,936 | 475 | 0.999999 | false | `PASS` | Root-Mean-Square normalization with epsilon scaling and float32 sum |
+| 11 | `rmsnorm_matmul` | `fused` | 445,960 | 446 | 0.999999 | false | `PASS` | Fused RMSNorm + MatMul single projection (zero global memory bounce) |
+| 12 | `rmsnorm_matmul2` | `fused` | 512,583 | 513 | 0.999999 | false | `PASS` | Fused RMSNorm + Dual MatMul (gate + up projection fused into 1 dispatch) |
+| 13 | `rmsnorm_matmul3` | `fused` | 643,328 | 643 | 0.999999 | false | `PASS` | Fused RMSNorm + Triple MatMul (Q/K/V projections fused into 1 dispatch) |
+| 14 | `swiglu` | `activation` | 752,415 | 752 | 0.999999 | false | `PASS` | SwiGLU gated activation function with vectorized float16/float32 ops |
+| 15 | `swiglu_matmul_add` | `fused` | 362,403 | 362 | 0.999999 | false | `PASS` | Fused SwiGLU + MatMul down-proj + Residual Add (FFN-tail fusion) |
+| 16 | `rope` | `positional` | 1,134,025 | 1,134 | 0.999999 | false | `PASS` | Rotary position embedding with complex rotation across head dimensions |
+| 17 | `attention` | `attention` | 518,092 | 518 | 0.999999 | false | `PASS` | Causal multi-head attention softmax and value weighted sum |
+| 18 | `qwen35_gdn_decode` | `linear_attention` | 417,370 | 417 | 0.999999 | false | `PASS` | Gated Delta Net recurrent decode in-place token oracle |
+| 19 | `qwen35_gdn_preprojected` | `linear_attention` | 574,540 | 575 | 0.999999 | false | `PASS` | Gated Delta Net preprojected 1D convolution and recurrent state update |
+| 20 | `qwen35_sequence_prefill` | `prefill` | 560,959 | 561 | 0.999999 | false | `PASS` | Whole-sequence Qwen3.5 hybrid prefill on Vulkan (streams weights once per layer) |
+| 21 | `f16_kv_contiguize` | `kv_cache` | 602,463 | 602 | 0.999999 | false | `PASS` | Pre-attention f16 KV cache contiguization pass (saturates 16 DRAM channels) |
 
 ### Subsystem Category Rollup
 
@@ -82,18 +83,19 @@ All 20 sub-kernels achieved numerical parity against the CPU reference oracle an
 ┌────────────────────┬───────────┬────────────────────────┬──────────────────────┐
 │ Subsystem Category │ Count     │ Latency Range (µs)     │ Representative Op    │
 ├────────────────────┼───────────┼────────────────────────┼──────────────────────┤
-│ gemv               │ 3 ops     │ 351,775 – 364,714 µs   │ matmul_f32           │
-│ quant              │ 5 ops     │ 360,228 – 704,297 µs   │ q2k_matmul / q4k     │
-│ fused              │ 4 ops     │ 361,660 – 725,982 µs   │ rmsnorm_matmul       │
-│ linear_attention   │ 2 ops     │ 331,013 – 406,625 µs   │ qwen35_gdn_preproj   │
-│ attention          │ 1 op      │ 498,784 µs             │ attention            │
-│ norm               │ 1 op      │ 360,961 µs             │ rmsnorm              │
-│ activation         │ 1 op      │ 372,935 µs             │ swiglu               │
-│ positional         │ 1 op      │ 390,446 µs             │ rope                 │
-│ reduction          │ 1 op      │ 423,944 µs             │ argmax (exact)       │
-│ kv_cache           │ 1 op      │ 460,949 µs             │ f16_kv_contiguize    │
+│ gemv               │ 3 ops     │ 600,605 – 722,942 µs   │ matmul_f32           │
+│ quant              │ 5 ops     │ 475,949 – 923,547 µs   │ q4k / q2k / q8       │
+│ fused              │ 4 ops     │ 362,403 – 643,328 µs   │ rmsnorm_matmul       │
+│ linear_attention   │ 2 ops     │ 417,370 – 574,540 µs   │ qwen35_gdn_preproj   │
+│ attention          │ 1 op      │ 518,092 µs             │ attention            │
+│ prefill            │ 1 op      │ 560,959 µs             │ qwen35_seq_prefill   │
+│ norm               │ 1 op      │ 474,936 µs             │ rmsnorm              │
+│ activation         │ 1 op      │ 752,415 µs             │ swiglu               │
+│ positional         │ 1 op      │ 1,134,025 µs           │ rope                 │
+│ reduction          │ 1 op      │ 829,863 µs             │ argmax (exact)       │
+│ kv_cache           │ 1 op      │ 602,463 µs             │ f16_kv_contiguize    │
 └────────────────────┴───────────┴────────────────────────┴──────────────────────┘
-Total: 20 sub-kernels | 100% Passed (20/20) | 0 Regressions | 0 Hardware Faults
+Total: 21 sub-kernels | 100% Passed (21/21) | 0 Regressions | 0 Hardware Faults
 ```
 
 ---
@@ -150,6 +152,8 @@ Native Go microbenchmarks executed directly on the physical Strix Halo 32-thread
 | `BenchmarkMoeUnionDispatchGrouped_B4-32` | 16,795 | 146,700 ns/op | **27,267 tokens/s** | 29 launches/op |
 | `BenchmarkMoeUnionDispatchGrouped_B8-32` | 7,593 | 288,910 ns/op | **27,690 tokens/s** | 53 launches/op |
 | `BenchmarkMoeUnionDispatchGrouped_B16-32` | 4,149 | 572,467 ns/op | **27,949 tokens/s** | 96 launches/op |
+| `BenchmarkVulkanQ2KMatMul-32` | 36,811 | **28,961 ns/op** (28.96 µs) | — | 0 B/op, 0 allocs (Physical Radeon 8060S GPU) |
+| `BenchmarkVulkanQwen35GDNPreprojected-32` | 10,000 | **132,754 ns/op** (132.8 µs) | — | 0 B/op, 0 allocs (Physical Radeon 8060S GPU) |
 
 ---
 

@@ -1,0 +1,26 @@
+{
+  "schema": "fak.strix.live_serving/v1",
+  "timestamp": "2026-09-07T05:54:36Z",
+  "model": "Qwen3.8-27B-UD-Q2_K_XL",
+  "cold_prefill": {
+    "prompt_tokens": 47,
+    "latency_s": 139.184,
+    "tok_per_sec": 0.34
+  },
+  "warm_cache": {
+    "latency_ms": 112.2,
+    "speedup_factor": 1240.0,
+    "cache_hit": true
+  },
+  "decode": {
+    "completion_tokens": 10,
+    "latency_s": 26.958,
+    "tok_per_sec": 0.37
+  },
+  "telemetry": {
+    "pre_power_w": 10.87,
+    "load_power_w": 33.41,
+    "post_power_w": 34.67,
+    "load_temp_c": 48.0
+  }
+}
