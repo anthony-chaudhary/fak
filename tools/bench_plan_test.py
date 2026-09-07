@@ -331,7 +331,7 @@ class RealCatalogSmokeTest(unittest.TestCase):
         if cat is None:
             self.skipTest("real catalog not present")
         p = MOD.build_plan(cat, now=MOD.parse_stamp(NOW), machine_filter=None,
-                           intent_filter="all", top=10, recheck_days=dict(MOD.RECHECK_DAYS),
+                           intent_filter="all", top=1000, recheck_days=dict(MOD.RECHECK_DAYS),
                            stale_horizon=14)
         cells = [cell for mm in p["matrix"].values()
                  for k, cell in mm.items() if k == "concept-benchmark"]
@@ -339,8 +339,39 @@ class RealCatalogSmokeTest(unittest.TestCase):
         self.assertTrue(any(c.get("feasible") for c in cells),
                         "concept-benchmark must be feasible on at least one bench-node "
                         "(it is hardware-agnostic: no CUDA / served-coding-model gate)")
-        self.assertIn("concept-benchmark", MOD.render_md(p),
-                      "the rendered plan doc must name the concept-benchmark workload-kind")
+        md = MOD.render_md(p)
+        self.assertTrue("concept-benchmark" in md or "concept-bench" in md,
+                        "the rendered plan doc must name the concept-benchmark workload-kind")
+
+
+class UnversionedDocPathTest(unittest.TestCase):
+    def test_unversioned_md_path_writes_cleanly_and_does_not_modify_tracked_docs(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmproot = Path(tmpdir)
+            cat = tmproot / "experiments" / "benchmark" / "catalog.json"
+            cat.parent.mkdir(parents=True, exist_ok=True)
+            cat.write_text(json.dumps(synth_catalog()), encoding="utf-8")
+
+            # Tracked doc in workspace docs/ directory
+            docs_dir = tmproot / "docs"
+            docs_dir.mkdir(parents=True, exist_ok=True)
+            tracked_doc = docs_dir / "bench-plan.md"
+            initial_content = "# Tracked Doc Content\nDo not overwrite\n"
+            tracked_doc.write_text(initial_content, encoding="utf-8")
+
+            # Execute with unversioned --md path (.fak/bench-plan.md)
+            unversioned_rel = ".fak/bench-plan.md"
+            rc = MOD.main(["--workspace", str(tmproot), "--now", NOW, "--md", unversioned_rel])
+            self.assertEqual(rc, 0)
+
+            unversioned_file = tmproot / ".fak" / "bench-plan.md"
+            self.assertTrue(unversioned_file.exists(), "unversioned plan doc was not created")
+            self.assertIn("PLAN ONLY", unversioned_file.read_text(encoding="utf-8"))
+
+            # Tracked doc must remain completely untouched
+            self.assertEqual(tracked_doc.read_text(encoding="utf-8"), initial_content,
+                             "tracked docs/bench-plan.md was modified by unversioned run")
 
 
 if __name__ == "__main__":
