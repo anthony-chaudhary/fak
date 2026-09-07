@@ -1,6 +1,6 @@
 ---
 name: opencode-wave
-description: Spawn and coordinate a wave of user-visible, detached OpenCode worker sessions running with high reasoning effort (--variant high), automated approvals (--auto), and instructions to delegate to parallel subagents (task) to resolve tracked GitHub issues end-to-end with deterministic test witnesses and GitHub comment receipts.
+description: Spawn and coordinate a wave of user-visible, detached OpenCode leaf worker sessions running with high reasoning effort (--variant high), automated approvals (--auto), and direct leaf execution within package boundaries (prohibiting nested task calls) to resolve tracked GitHub issues end-to-end with deterministic test witnesses and GitHub comment receipts.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Edit, Write, Grep, Glob, Bash, Task
@@ -9,7 +9,7 @@ argument-hint: "[--top 10] [--wave-size 4] [--variant high] [--dry-run] [--workt
 
 # /opencode-wave — High-Effort OpenCode Multi-Agent Wave Dispatch
 
-The goal-directed campaign coordinator for running multi-issue resolution waves in OpenCode. It takes a cohort of tracked GitHub issues, verifies pairwise tree-disjoint package boundaries, spawns user-visible detached OpenCode processes (`opencode run --variant high --auto`), instructs child sessions to delegate implementation to parallel subagents (`task`: worker, researcher, deep-reason, cross-validator), and monitors execution until verified receipts land on GitHub.
+The goal-directed campaign coordinator for running multi-issue resolution waves in OpenCode. It takes a cohort of tracked GitHub issues, verifies pairwise tree-disjoint package boundaries, spawns user-visible detached OpenCode processes (`opencode run --variant high --auto`), instructs leaf worker sessions to execute deliverables directly within assigned package boundaries (prohibiting nested `task` calls to prevent depth limit recursion failures, #12028), and monitors execution until verified receipts land on GitHub.
 
 ---
 
@@ -17,7 +17,7 @@ The goal-directed campaign coordinator for running multi-issue resolution waves 
 
 1. **GitHub Issues Tracked First**: Every substantive unit of work must be tracked in a GitHub issue before worker execution begins. If candidate tasks lack issues, create them first via `gh issue create` following the standard contract: Parent epic, Centrality (Core, Enabling, Stewardship), and the For / Problem / Today / Better because / Witness schema.
 2. **High-Reasoning Effort by Default**: Child OpenCode workers are launched with `--variant high`. This activates Gemini 3.8 Flash high reasoning mode for complex debugging, concurrency verification, and kernel implementation.
-3. **Child Subagent Delegation by Default**: Every child session receives prompt instructions mandating subagent delegation via the `task` tool (`subagent_type="worker"`, `"deep-reason"`, `"researcher"`, `"cross-validator"`). Child coordinators keep their own context clean by delegating compilation, test execution, and research to parallel subagents.
+3. **Leaf Worker Direct Execution (No Nested Subagents)**: Dispatched child OpenCode sessions act as depth-1 leaf workers focused on their assigned lane and boundary paths. Workers execute their deliverables directly within package boundaries, author reproduction tests, and run package verification without calling the 'task' tool or attempting nested subagent delegation. The top-level coordinator manages wave fan-out; leaf workers execute directly to prevent recursion depth limit failures (`Subagent depth limit reached (1)`, #12028, #12029).
 4. **User-Visible & Machine-Auditable**: Child workers run as identifiable processes on the host. Every session registers in `opencode session list`, receives a distinct session title (`Issue #<N>: <title>`), writes logs to `_scratch/logs/`, and posts final verification receipts directly to its GitHub issue (`gh issue comment <N>`).
 5. **Pairwise Tree-Disjoint Concurrency**: Workers dispatched in the same wave must touch mutually disjoint packages and directories. Concurrent edits across shared Go packages break compilation. Partition candidate issues into verified disjoint waves using `fak issue-orchestrator --plan-waves`.
 
@@ -75,7 +75,7 @@ Alternatively, launch detached child sessions using PowerShell with prompt files
 
 ```powershell
 $exe = "C:\Users\USER\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe"
-$argStr = "run --variant high --auto --title `"Issue #$($issue): $($title)`" `"Resolve GitHub issue #$($issue): please read _scratch/prompts/issue-$($issue).txt and execute the required deliverables using parallel subagents by default, run tests, and post receipts with gh issue comment.`""
+$argStr = "run --variant high --auto --title `"Issue #$($issue): $($title)`" `"Resolve GitHub issue #$($issue): please read _scratch/prompts/issue-$($issue).txt and execute the required deliverables directly as a leaf worker (do not call the task tool or spawn nested subagents), run tests, land via fak sync and fak commit --path by default, and post receipts with gh issue comment.`""
 
 Start-Process -FilePath $exe -ArgumentList $argStr -WorkingDirectory (Get-Location) -RedirectStandardOutput "_scratch\logs\opencode-issue-$issue.out.log" -RedirectStandardError "_scratch\logs\opencode-issue-$issue.err.log" -PassThru
 ```
@@ -112,6 +112,7 @@ Verify that:
 1. The code changes remain bounded to the declared lane and boundary paths.
 2. The package test suite exits 0.
 3. The worker posted an implementation receipt containing status, touched paths, and test command output.
+4. Autonomous safe git sync landing (`fak sync`, `fak commit --path`, `fak sync push`) was executed directly within the worker process by default.
 
 ---
 
