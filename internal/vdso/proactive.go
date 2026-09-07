@@ -144,8 +144,8 @@ var (
 	backtickRe        = regexp.MustCompile("`([^`]+)`")
 	doubleQuoteRe     = regexp.MustCompile(`"([^"]+)"`)
 	singleQuoteRe     = regexp.MustCompile(`'([^']+)'`)
-	pathWithSlashRe   = regexp.MustCompile(`(?:^|[\s(])([a-zA-Z0-9_\-\.]+(?:/[a-zA-Z0-9_\-\.]+)+)(?:$|[\s),;:?])`)
-	fileWithExtRe     = regexp.MustCompile(`(?:^|[\s(])([a-zA-Z0-9_\-\./\\]+\.(?:go|txt|md|json|toml|yaml|yml|c|h|cpp|py|ts|js|sh|rs|proto|sql|html|css))(?:$|[\s),;:?])`)
+	pathWithSlashRe   = regexp.MustCompile(`(?:^|[\s(])((?:[a-zA-Z]:)?[a-zA-Z0-9_\-\.]+(?:[/\\][a-zA-Z0-9_\-\.]+)+)(?:$|[\s),;:?])`)
+	fileWithExtRe     = regexp.MustCompile(`(?:^|[\s(])([a-zA-Z0-9_\-\./\\:]+\.(?:go|txt|md|json|toml|yaml|yml|c|h|cpp|py|ts|js|sh|rs|proto|sql|html|css))(?:$|[\s),;:?])`)
 )
 
 func isMutationCommand(s string) bool {
@@ -784,23 +784,41 @@ func (pi *ProactiveInterceptor) probeVDSO(
 	switch target.tool {
 	case ToolClaudeRead:
 		candidateArgs = append(candidateArgs, fmt.Sprintf(`{"filePath":%q}`, target.path))
+		if fromSlash := filepath.FromSlash(target.path); fromSlash != target.path {
+			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"filePath":%q}`, fromSlash))
+		}
 		if diskPath != target.path && diskPath != "" {
 			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"filePath":%q}`, diskPath))
 			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"filePath":%q}`, filepath.ToSlash(diskPath)))
+			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"filePath":%q}`, filepath.FromSlash(diskPath)))
 		}
 		candidateArgs = append(candidateArgs, fmt.Sprintf(`{"file_path":%q}`, target.path))
+		if fromSlash := filepath.FromSlash(target.path); fromSlash != target.path {
+			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"file_path":%q}`, fromSlash))
+		}
 		candidateArgs = append(candidateArgs, fmt.Sprintf(`{"path":%q}`, target.path))
+		if fromSlash := filepath.FromSlash(target.path); fromSlash != target.path {
+			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"path":%q}`, fromSlash))
+		}
 		if diskPath != target.path && diskPath != "" {
 			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"file_path":%q}`, diskPath))
 			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"path":%q}`, diskPath))
+			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"file_path":%q}`, filepath.FromSlash(diskPath)))
+			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"path":%q}`, filepath.FromSlash(diskPath)))
 		}
 	case ToolClaudeGlob:
 		candidateArgs = append(candidateArgs, fmt.Sprintf(`{"pattern":%q,"path":%q}`, target.pattern, target.path))
+		if fromSlash := filepath.FromSlash(target.path); fromSlash != target.path {
+			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"pattern":%q,"path":%q}`, target.pattern, fromSlash))
+		}
 		if target.path == "." || target.path == "" {
 			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"pattern":%q}`, target.pattern))
 		}
 	case ToolClaudeGrep:
 		candidateArgs = append(candidateArgs, fmt.Sprintf(`{"pattern":%q,"path":%q}`, target.pattern, target.path))
+		if fromSlash := filepath.FromSlash(target.path); fromSlash != target.path {
+			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"pattern":%q,"path":%q}`, target.pattern, fromSlash))
+		}
 		if target.path == "." || target.path == "" {
 			candidateArgs = append(candidateArgs, fmt.Sprintf(`{"pattern":%q}`, target.pattern))
 		}
@@ -962,6 +980,18 @@ func (pi *ProactiveInterceptor) tryZeroChoiceDiskRead(
 		Call:   call,
 		Result: emitRes,
 	})
+	if fromSlash := filepath.FromSlash(target.path); fromSlash != target.path {
+		callNative := &abi.ToolCall{
+			Tool: target.tool,
+			Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(fmt.Sprintf(`{"filePath":%q}`, fromSlash)), Len: int64(len(fmt.Sprintf(`{"filePath":%q}`, fromSlash)))},
+			Meta: call.Meta,
+		}
+		v.Emit(abi.Event{
+			Kind:   abi.EvComplete,
+			Call:   callNative,
+			Result: emitRes,
+		})
+	}
 
 	return pi.synthesizeInlineResult(ctx, v, call, emitRes, target, turn)
 }

@@ -143,7 +143,7 @@ func TestProactive_DeterministicFileReadServedInline(t *testing.T) {
 			if result.Tool != ToolClaudeRead {
 				t.Errorf("Tool = %q, want %q", result.Tool, ToolClaudeRead)
 			}
-			if result.Path != testFile {
+			if filepath.ToSlash(result.Path) != filepath.ToSlash(testFile) {
 				t.Errorf("Path = %q, want %q", result.Path, testFile)
 			}
 

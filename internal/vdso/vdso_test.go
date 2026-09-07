@@ -853,6 +853,77 @@ func TestConcurrentVerifiedFreshReuse_ScalingWithoutLockSerialization(t *testing
 	}
 }
 
+// TestCheckDiskFreshnessStatOnly verifies that checkDiskFreshnessLocked verifies
+// file freshness on disk using lightweight stat metadata (mtime and size) without
+// reading the entire file or computing SHA-256 hashes under v.mu.Lock().
+func TestCheckDiskFreshnessStatOnly(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "stat_only_fixture.txt")
+	content := []byte("hello world for stat-only freshness verification")
+	if err := os.WriteFile(filePath, content, 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	call := &abi.ToolCall{
+		Tool: "Read",
+		Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"filePath":` + strconv.Quote(filePath) + `}`)},
+		Meta: map[string]string{"readOnlyHint": "true", "idempotentHint": "true"},
+	}
+	expectedPayload := `{"content":` + strconv.Quote(string(content)) + `}`
+
+	v := New(16)
+	v.Emit(completeEvent(call, expectedPayload))
+
+	ctx := context.Background()
+
+	// 1. Initial lookup hits cache via stat metadata
+	res, ok := v.Lookup(ctx, call)
+	if !ok || res == nil {
+		t.Fatalf("expected initial lookup hit")
+	}
+	if res.Meta["served_by"] != "vdso" || res.Meta["tier"] != "2" {
+		t.Fatalf("res.Meta = %+v; want served_by=vdso tier=2", res.Meta)
+	}
+
+	// 2. Modifying file size triggers fast-path invalidation on next lookup
+	if err := os.WriteFile(filePath, append(content, '!'), 0644); err != nil {
+		t.Fatalf("WriteFile size update: %v", err)
+	}
+	if _, hit := v.Lookup(ctx, call); hit {
+		t.Fatalf("lookup on modified size should have missed and invalidated")
+	}
+
+	// 3. Re-admit and test mtime modification
+	v.Emit(completeEvent(call, `{"content":"updated"}`))
+	if _, hit := v.Lookup(ctx, call); !hit {
+		t.Fatalf("expected lookup hit after re-admission")
+	}
+
+	st, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	futureMtime := st.ModTime().Add(5 * time.Second)
+	if err := os.Chtimes(filePath, futureMtime, futureMtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+	if _, hit := v.Lookup(ctx, call); hit {
+		t.Fatalf("lookup on modified mtime should have missed and invalidated")
+	}
+
+	// 4. Test file deletion invalidation
+	v.Emit(completeEvent(call, `{"content":"re-admitted"}`))
+	if _, hit := v.Lookup(ctx, call); !hit {
+		t.Fatalf("expected hit before deletion")
+	}
+	if err := os.Remove(filePath); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if _, hit := v.Lookup(ctx, call); hit {
+		t.Fatalf("lookup on deleted file should have missed and invalidated")
+	}
+}
+
 // BenchmarkConcurrentVerifiedFreshReuse measures concurrent cache hit throughput
 // for verified_fresh_reuse without lock serialization.
 func BenchmarkConcurrentVerifiedFreshReuse(b *testing.B) {

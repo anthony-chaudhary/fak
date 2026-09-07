@@ -111,6 +111,8 @@ func fileCanonPath(s string) string {
 	if isWindowsDrivePath(s) {
 		s = strings.ReplaceAll(s, "\\", "/")
 		s = filepath.ToSlash(filepath.Clean(s))
+	} else if strings.HasPrefix(s, "/") || strings.HasPrefix(s, "\\") {
+		s = filepath.ToSlash(filepath.Clean(s))
 	} else {
 		if !filepath.IsAbs(s) {
 			if abs, err := filepath.Abs(s); err == nil {
