@@ -12,8 +12,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/grammar"
 	"github.com/anthony-chaudhary/fak/internal/preflight"
-
 	"github.com/anthony-chaudhary/fak/internal/refutil"
+	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
 // The local toolset is a small, deterministic airline-support world (the same
@@ -238,8 +238,11 @@ func metaFor(tool string) map[string]string {
 	if m, ok := mcpToolMeta(tool); ok {
 		return m
 	}
-	if readOnlyTools[tool] {
+	if readOnlyTools[tool] || vdso.IsClaudeNativeReadTool(tool) {
 		return map[string]string{"readOnlyHint": "true", "idempotentHint": "true"}
+	}
+	if tool == "Bash" || tool == "bash" {
+		return map[string]string{"readOnlyHint": "false", "idempotentHint": "false"}
 	}
 	return map[string]string{"readOnlyHint": "false", "idempotentHint": "false", "destructive": "true"}
 }

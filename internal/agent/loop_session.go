@@ -249,6 +249,24 @@ type runConfig struct {
 	circuitBreakerThreshold      int
 	envelopeSink                 func(harnesskit.Envelope)
 	policySnapshot               *adjudicator.Policy
+	streamingSpeculation         bool
+	streamingFSMHook             func(*StreamingToolFSM)
+}
+
+// WithStreamingSpeculation enables speculative tool execution driven by StreamingToolFSM
+// as token chunks arrive from the streaming planner.
+func WithStreamingSpeculation(enabled bool) RunOption {
+	return func(c *runConfig) {
+		c.streamingSpeculation = enabled
+	}
+}
+
+// WithStreamingFSMHook registers an observer or configuration hook called whenever
+// a StreamingToolFSM is instantiated for a turn.
+func WithStreamingFSMHook(hook func(*StreamingToolFSM)) RunOption {
+	return func(c *runConfig) {
+		c.streamingFSMHook = hook
+	}
 }
 
 // WithCircuitBreakerThreshold configures the threshold of consecutive identical
