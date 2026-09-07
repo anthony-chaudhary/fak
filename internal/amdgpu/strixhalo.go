@@ -50,6 +50,9 @@ func ParseStrixHaloPlatform(s string) (StrixHaloPlatform, error) {
 // allocations for AMD Strix Halo (Ryzen AI MAX+ 395 / Radeon 8060S / gfx1151).
 type StrixHaloServingConfig struct {
 	Platform                  StrixHaloPlatform   `json:"platform"`
+	InstalledRAMGiB           float64             `json:"installed_ram_gib,omitempty"`
+	ReservedGPURAMGiB         float64             `json:"reserved_gpu_ram_gib,omitempty"`
+	AllocatableHostRAMGiB     float64             `json:"allocatable_host_ram_gib,omitempty"`
 	UMAAllocatedGiB           float64             `json:"uma_allocated_gib"`
 	OSReservedGiB             float64             `json:"os_reserved_gib"`
 	KVPrecision               compute.KVPrecision `json:"kv_precision"`
@@ -74,6 +77,18 @@ func CalculateStrixHaloServingEnvelope(
 	targetContextTokens int,
 	targetConcurrency int,
 ) (*StrixHaloServingConfig, error) {
+	return CalculateStrixHaloServingEnvelopeWithBudget(platform, modelWeightsBytes, targetContextTokens, targetConcurrency, 0)
+}
+
+// CalculateStrixHaloServingEnvelopeWithBudget derives the serving configuration with an explicit
+// UMA allocated budget, preventing dedicated/reserved memory from being budgeted twice.
+func CalculateStrixHaloServingEnvelopeWithBudget(
+	platform StrixHaloPlatform,
+	modelWeightsBytes int64,
+	targetContextTokens int,
+	targetConcurrency int,
+	customUMAAllocatedGiB float64,
+) (*StrixHaloServingConfig, error) {
 	var (
 		umaAllocatedGiB float64
 		osReservedGiB   float64
@@ -91,6 +106,13 @@ func CalculateStrixHaloServingEnvelope(
 		scratchGiB = 4.0
 	default:
 		return nil, fmt.Errorf("amdgpu: unsupported Strix Halo platform %q", platform)
+	}
+
+	if customUMAAllocatedGiB > 0 {
+		umaAllocatedGiB = customUMAAllocatedGiB
+		if umaAllocatedGiB <= 64.0 {
+			scratchGiB = 4.0
+		}
 	}
 
 	umaAllocatedBytes := int64(umaAllocatedGiB * 1024 * 1024 * 1024)
@@ -242,6 +264,7 @@ func inspectHostStrixHaloInternal(
 	var isStrix bool
 	var detectedName string
 	var totalRAMBytes uint64
+	var reservedGPURAMBytes uint64
 
 	if goos == "windows" {
 		if factsFn != nil {
@@ -282,6 +305,19 @@ func inspectHostStrixHaloInternal(
 					totalRAMBytes = ram
 				}
 			}
+			// Probe dedicated GPU VRAM reservation (e.g. 64 GiB BIOS carveout reducing MemTotal)
+			for _, cardPath := range []string{
+				"/sys/class/drm/card0/device/mem_info_vram_total",
+				"/sys/class/drm/card1/device/mem_info_vram_total",
+			} {
+				if vramData, err := readFileFn(cardPath); err == nil {
+					vStr := strings.TrimSpace(string(vramData))
+					if vBytes, err := strconv.ParseUint(vStr, 10, 64); err == nil && vBytes > 0 {
+						reservedGPURAMBytes = vBytes
+						break
+					}
+				}
+			}
 		}
 	}
 
@@ -292,18 +328,40 @@ func inspectHostStrixHaloInternal(
 		return nil, fmt.Errorf("amdgpu: host is not an AMD Strix Halo platform (detected: %s)", detectedName)
 	}
 
-	// Classify 128GB vs 64GB
+	// Calculate installed physical RAM: host-visible MemTotal plus dedicated GPU reservation
+	installedRAMBytes := totalRAMBytes + reservedGPURAMBytes
+
+	// Classify physical hardware platform tier (128GB vs 64GB) based on installed physical RAM
 	platform := StrixHalo128GB
-	if totalRAMBytes > 0 && totalRAMBytes < 96*1024*1024*1024 {
+	if installedRAMBytes > 0 && installedRAMBytes < 96*1024*1024*1024 {
 		platform = StrixHalo64GB
 	}
 
-	if platform == StrixHalo128GB {
-		// Default 128GB configuration for 27B model (Q4_K ~16 GiB)
-		return CalculateStrixHaloServingEnvelope(StrixHalo128GB, 16*1024*1024*1024, 262144, 64)
+	var cfg *StrixHaloServingConfig
+	var err error
+	if reservedGPURAMBytes > 0 {
+		// Dedicated GPU reservation exists (e.g. 64 GiB): bound UMA allocation to the dedicated VRAM
+		// to avoid budgeting the reserved bytes twice or overcommitting the remaining host RAM.
+		customUMAGiB := float64(reservedGPURAMBytes) / (1024 * 1024 * 1024)
+		if platform == StrixHalo128GB {
+			cfg, err = CalculateStrixHaloServingEnvelopeWithBudget(StrixHalo128GB, 16*1024*1024*1024, 262144, 64, customUMAGiB)
+		} else {
+			cfg, err = CalculateStrixHaloServingEnvelopeWithBudget(StrixHalo64GB, 9*1024*1024*1024, 131072, 32, customUMAGiB)
+		}
+	} else {
+		if platform == StrixHalo128GB {
+			cfg, err = CalculateStrixHaloServingEnvelope(StrixHalo128GB, 16*1024*1024*1024, 262144, 64)
+		} else {
+			cfg, err = CalculateStrixHaloServingEnvelope(StrixHalo64GB, 9*1024*1024*1024, 131072, 32)
+		}
 	}
-	// Default 64GB configuration for 14B model (Q4_K ~9 GiB)
-	return CalculateStrixHaloServingEnvelope(StrixHalo64GB, 9*1024*1024*1024, 131072, 32)
+	if err != nil {
+		return nil, err
+	}
+	cfg.InstalledRAMGiB = float64(installedRAMBytes) / (1024 * 1024 * 1024)
+	cfg.ReservedGPURAMGiB = float64(reservedGPURAMBytes) / (1024 * 1024 * 1024)
+	cfg.AllocatableHostRAMGiB = float64(totalRAMBytes) / (1024 * 1024 * 1024)
+	return cfg, nil
 }
 
 // DetectAPU inspects an AMD device name and reports whether it is an APU (integrated GPU sharing system RAM)
