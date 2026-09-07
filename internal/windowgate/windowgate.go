@@ -431,11 +431,16 @@ func liveBrowserAutomationProcess(proc LiveProcess) bool {
 // review because they can be intentional or deliberately off-screen.
 func ClassifyVisibleWindows(windows []VisibleWindow) VisibleWindowReport {
 	rep := VisibleWindowReport{Scanned: len(windows)}
+	seen := make(map[string]bool)
 	for _, win := range windows {
 		finding, ok := classifyVisibleWindow(win)
 		if !ok {
 			continue
 		}
+		if seen[finding.Message] {
+			continue
+		}
+		seen[finding.Message] = true
 		rep.Findings = append(rep.Findings, finding)
 		routeFinding(finding.Level, finding.Message, &rep.Violations, &rep.Watchlist)
 	}
@@ -516,7 +521,11 @@ func visibleWindowIgnored(win VisibleWindow) bool {
 	case "", "applicationframehost", "dwm", "systemsettings", "textinputhost", "shellexperiencehost", "searchhost", "startmenuexperiencehost":
 		return true
 	}
-	return false
+	text := strings.ToLower(win.CommandLine + " " + win.ParentCommandLine + " " + win.GrandparentCommandLine)
+	return strmatch.ContainsAny(text,
+		"windowgate",
+		"get-ciminstance win32_process",
+		"go run ./cmd/fak")
 }
 
 func visibleConsoleTool(win VisibleWindow) bool {
@@ -536,6 +545,10 @@ func visibleGitHubCLIWindow(win VisibleWindow) bool {
 }
 
 func visibleAutomationOwned(win VisibleWindow) bool {
+	name := strings.ToLower(strings.TrimSuffix(filepath.Base(strings.ReplaceAll(win.Name, "\\", "/")), ".exe"))
+	if name == "windowsterminal" {
+		return false
+	}
 	text := strings.ToLower(strings.Join([]string{
 		win.Path,
 		win.CommandLine,

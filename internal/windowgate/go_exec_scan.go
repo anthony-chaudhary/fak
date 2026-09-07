@@ -16,22 +16,47 @@ var (
 )
 
 var hardGoBackgroundFiles = map[string]bool{
-	"internal/gardenbundle/gardenbundle.go": true,
-	"internal/fleetpane/fleetpane.go":       true,
-	"cmd/fak/taskmgr.go":                    true,
-	"cmd/fak/tui_issues_garden.go":          true,
-	"cmd/fak/steering.go":                   true,
-	"cmd/fak/watchdog_autoheal.go":          true,
-	"cmd/fak/treedoctor.go":                 true,
-	"cmd/fak/release_status.go":             true,
+	"internal/gardenbundle/gardenbundle.go":             true,
+	"internal/fleetpane/fleetpane.go":                   true,
+	"internal/agentqueue/actuator.go":                   true,
+	"internal/codetools/bash_windows.go":                true,
+	"internal/accounts/credrefresh_treekill_windows.go": true,
+	"internal/codexsession/adapter.go":                  true,
+	"internal/appversion/binarydoctor.go":               true,
+	"internal/codelint/packs.go":                        true,
+	"cmd/fak/taskmgr.go":                                true,
+	"cmd/fak/tui_issues_garden.go":                      true,
+	"cmd/fak/steering.go":                               true,
+	"cmd/fak/watchdog_autoheal.go":                      true,
+	"cmd/fak/watchdog_audit_run.go":                     true,
+	"cmd/fak/treedoctor.go":                             true,
+	"cmd/fak/release_status.go":                         true,
+	"cmd/fak/progress.go":                               true,
+	"cmd/fak/resume_watchdog_candidates.go":             true,
+	"cmd/fak/superloop_liveness.go":                     true,
+	"cmd/fak/superloop_drive_exec.go":                   true,
+	"cmd/fak/dispatch_done_claim_audit.go":              true,
+	"cmd/fak/guard_codex.go":                            true,
+	"cmd/fak/guard_operator_question.go":                true,
+	"cmd/fak/guard_plan_oracles.go":                     true,
+	"cmd/fak/cron_chain.go":                             true,
+	"cmd/fak/cron_run.go":                               true,
+	"cmd/fak/loop.go":                                   true,
+	"cmd/fak/benchloop_fleet.go":                        true,
+	"cmd/fak/benchpost.go":                              true,
+	"cmd/fak/codequalityscore.go":                       true,
+	"cmd/rsiloop/dosobserve.go":                         true,
 }
 
 var candidateConsoleTools = map[string]bool{
+	"claude": true, "claude.exe": true,
 	"cmd": true, "cmd.exe": true,
+	"codex": true, "codex.exe": true,
 	"dos": true,
 	"fak": true, "fak.exe": true,
 	"gh": true, "gh.exe": true, "git": true, "git.exe": true,
 	"go": true, "go.exe": true,
+	"opencode": true, "opencode.exe": true,
 	"powershell": true, "powershell.exe": true, "pwsh": true, "pwsh.exe": true,
 	"python": true, "python.exe": true, "python3": true, "python3.exe": true,
 	"schtasks": true, "schtasks.exe": true,
@@ -68,7 +93,13 @@ func GoExecCandidates(rel, src string) []string {
 }
 
 func hardGoBackgroundPath(rel string) bool {
-	return strings.HasPrefix(rel, "cmd/fak/dispatch") || hardGoBackgroundFiles[rel]
+	return strings.HasPrefix(rel, "cmd/fak/dispatch") ||
+		strings.HasPrefix(rel, "cmd/fak/watchdog") ||
+		strings.HasPrefix(rel, "cmd/fak/superloop") ||
+		strings.HasPrefix(rel, "cmd/fak/resume_watchdog") ||
+		strings.HasPrefix(rel, "cmd/fak/cron") ||
+		strings.HasPrefix(rel, "cmd/fak/bench") ||
+		hardGoBackgroundFiles[rel]
 }
 
 func goExecFindings(rel, src string, hard, onlyGo bool) []string {
@@ -94,11 +125,13 @@ func goExecFindings(rel, src string, hard, onlyGo bool) []string {
 		}
 		name := m[1]
 		configured := false
-		for j := i + 1; j < len(lines) && j <= i+16; j++ {
+		for j := i + 1; j < len(lines) && j <= i+36; j++ {
 			text := stripGoLineComment(lines[j])
 			if strings.Contains(text, "configureDispatchHelperCommand("+name+")") ||
 				strings.Contains(text, "configureDispatchSpawn("+name+")") ||
 				strings.Contains(text, "windowgate.ConfigureBackgroundCommand("+name+")") ||
+				strings.Contains(text, "windowgate.ConfigureWorkerCommand("+name+")") ||
+				strings.Contains(text, "ConfigureWorkerCommand("+name+")") ||
 				strings.Contains(text, "ConfigureBackgroundCommand("+name+")") {
 				configured = true
 				continue

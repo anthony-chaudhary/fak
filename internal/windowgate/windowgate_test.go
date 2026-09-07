@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -260,6 +261,56 @@ func TestClassifyVisibleWindows(t *testing.T) {
 	}
 }
 
+func TestClassifyVisibleWindowsDeduplicatesAndIgnoresSelf(t *testing.T) {
+	rep := ClassifyVisibleWindows([]VisibleWindow{
+		// Two duplicate windows with identical attributes
+		{
+			PID: 101, Name: "pwsh", Title: "worker", Path: `C:\Program Files\PowerShell\7\pwsh.exe`,
+			CommandLine: `pwsh.exe -File C:\work\fak\tools\tick.ps1`,
+		},
+		{
+			PID: 101, Name: "pwsh", Title: "worker", Path: `C:\Program Files\PowerShell\7\pwsh.exe`,
+			CommandLine: `pwsh.exe -File C:\work\fak\tools\tick.ps1`,
+		},
+		// Self-process running windowgate
+		{
+			PID: 102, Name: "powershell", Title: "scanner",
+			CommandLine: `powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process"`,
+		},
+		{
+			PID: 103, Name: "fak", Title: "windowgate run",
+			CommandLine: `fak.exe windowgate --visible-windows`,
+		},
+		// WindowsTerminal launched in repo directory should be advisory watchlist, not a violation
+		{
+			PID: 104, Name: "WindowsTerminal", Title: "repo terminal",
+			CommandLine: `"C:\Program Files\WindowsApps\Microsoft.WindowsTerminal_1.0\WindowsTerminal.exe" -d C:\work\fak`,
+		},
+	})
+	if len(rep.Violations) != 1 {
+		t.Fatalf("violations = %d %v, want exactly 1 deduplicated pwsh violation (self-processes ignored, WindowsTerminal on watchlist)", len(rep.Violations), rep.Violations)
+	}
+	if len(rep.Watchlist) != 1 {
+		t.Fatalf("watchlist = %d %v, want exactly 1 WindowsTerminal entry", len(rep.Watchlist), rep.Watchlist)
+	}
+	if len(rep.Findings) != 2 {
+		t.Fatalf("findings = %d %+v, want 2 findings (1 violation, 1 watchlist)", len(rep.Findings), rep.Findings)
+	}
+	hasRepoTool := false
+	hasConsoleTool := false
+	for _, f := range rep.Findings {
+		if f.Category == "repo_console_tool" {
+			hasRepoTool = true
+		}
+		if f.Category == "console_tool" {
+			hasConsoleTool = true
+		}
+	}
+	if !hasRepoTool || !hasConsoleTool {
+		t.Fatalf("expected repo_console_tool and console_tool in findings: %+v", rep.Findings)
+	}
+}
+
 func TestClassifyLiveProcesses(t *testing.T) {
 	rep := ClassifyLiveProcesses([]LiveProcess{
 		{
@@ -505,6 +556,52 @@ func f() {
 	}
 }
 
+func TestGoExecViolationsAcceptsWorkerCommandAndFlagsHardBackgroundPaths(t *testing.T) {
+	cleanWorker := `package main
+import "os/exec"
+import "github.com/anthony-chaudhary/fak/internal/windowgate"
+func f() {
+	cmd := exec.Command("cmd.exe", "/c", "echo ok")
+	windowgate.ConfigureWorkerCommand(cmd)
+	_ = cmd.Run()
+}`
+	if got := GoExecViolations("internal/codetools/bash_windows.go", cleanWorker); len(got) != 0 {
+		t.Fatalf("ConfigureWorkerCommand must satisfy window suppression, got %v", got)
+	}
+
+	unsuppressed := `package main
+import "os/exec"
+func f() {
+	cmd := exec.Command("powershell.exe", "-File", "audit.ps1")
+	_ = cmd.Run()
+}`
+	for _, rel := range []string{
+		"cmd/fak/watchdog_audit_run.go",
+		"cmd/fak/progress.go",
+		"cmd/fak/resume_watchdog_candidates.go",
+		"cmd/fak/superloop_liveness.go",
+		"cmd/fak/superloop_drive_exec.go",
+		"cmd/fak/cron_chain.go",
+		"cmd/fak/cron_run.go",
+		"cmd/fak/loop.go",
+		"cmd/fak/benchloop_fleet.go",
+		"cmd/fak/benchpost.go",
+		"cmd/fak/codequalityscore.go",
+		"cmd/fak/guard_codex.go",
+		"cmd/fak/guard_operator_question.go",
+		"cmd/fak/guard_plan_oracles.go",
+		"internal/agentqueue/actuator.go",
+		"internal/codexsession/adapter.go",
+		"internal/appversion/binarydoctor.go",
+		"internal/codelint/packs.go",
+		"cmd/rsiloop/dosobserve.go",
+	} {
+		if got := GoExecViolations(rel, unsuppressed); len(got) == 0 {
+			t.Fatalf("GoExecViolations(%q) should flag unsuppressed console tool, got none", rel)
+		}
+	}
+}
+
 func TestGoExecCandidatesSurfaceLiteralConsoleTools(t *testing.T) {
 	src := "package main\nimport \"os/exec\"\nfunc f(){\n cmd := exec.Command(\"gh\", \"issue\", \"list\")\n _, _ = cmd.Output()\n}\n"
 	got := GoExecCandidates("cmd/fak/feature.go", src)
@@ -613,6 +710,56 @@ func TestTrackedTreeHasNoPopups(t *testing.T) {
 	if !rep.OK() {
 		t.Errorf("fix: give every task installer an off-desktop principal (S4U/SYSTEM); " +
 			"flag Python spawns with creationflags=no_window_creationflags(); configure Go helper execs")
+	}
+}
+
+// TestWindowgateTestsHaveNoUnsuppressedStartProcess ensures all Start-Process invocations
+// in internal/windowgate test suites include -NoNewWindow to prevent Windows Terminal
+// ConPTY launch error 0x800700e8 (2147942632).
+func TestWindowgateTestsHaveNoUnsuppressedStartProcess(t *testing.T) {
+	gateDir := filepath.Join(repoRoot(t), "internal", "windowgate")
+	entries, err := os.ReadDir(gateDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", gateDir, err)
+	}
+
+	reNoNewWindow := regexp.MustCompile(`(?i)-NoNewWindow\b`)
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasSuffix(name, "_test.go") || name == "windowgate_test.go" {
+			continue
+		}
+		path := filepath.Join(gateDir, name)
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", path, err)
+		}
+		src := string(content)
+		rel := filepath.ToSlash(filepath.Join("internal", "windowgate", name))
+
+		violations := PSStartProcessViolations(rel, src)
+		for _, v := range violations {
+			t.Errorf("unsuppressed Start-Process in %s: %s", name, v)
+		}
+
+		lines := strings.Split(src, "\n")
+		for i, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if !reStartProcess.MatchString(trimmed) || strings.HasPrefix(trimmed, "//") {
+				continue
+			}
+			call := line
+			for j := i + 1; j < len(lines) && j <= i+12; j++ {
+				next := strings.TrimSpace(lines[j])
+				if next == "" {
+					break
+				}
+				call += "\n" + next
+			}
+			if !reNoNewWindow.MatchString(call) {
+				t.Errorf("%s:%d: Start-Process missing -NoNewWindow flag (required to prevent Windows Terminal ConPTY 0x800700e8)", rel, i+1)
+			}
+		}
 	}
 }
 
