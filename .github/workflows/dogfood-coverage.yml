@@ -64,7 +64,7 @@ jobs:
       # HARD KPI regresses (guard disabled / no fak binary), so a green `--check`
       # below is a real signal and not a tool that always passes.
       - name: dogfood-coverage gate self-test
-        run: python tools/dogfood_coverage_gate_test.py
+        run: go test -v ./internal/dogfoodcoverage
 
       # Build a real `fak` into tools/.bin/ — the exact path `resolve_fak_bin`
       # probes — so `fak_bin_resolvable` / `fleet_leaf_guarded` are met by a binary
@@ -75,7 +75,7 @@ jobs:
       # The GATE: exit 1 on any HARD dogfood_debt. Green today (debt 0 with a built
       # fak + guard default-on); a regression flips a HARD KPI and fails here.
       - name: dogfood-coverage gate (--check; HARD debt must be 0)
-        run: python tools/dogfood_coverage.py --check
+        run: ./tools/.bin/fak dogfood-coverage --check
 
       # The CADENCE payload: surface the control-pane JSON + the human report to the
       # run summary so the coverage % is tracked over time (esp. on the daily cron).
@@ -85,12 +85,12 @@ jobs:
           {
             echo "## dogfood-coverage"
             echo '```'
-            python tools/dogfood_coverage.py
+            ./tools/.bin/fak dogfood-coverage
             echo '```'
             echo '<details><summary>control-pane payload</summary>'
             echo
             echo '```json'
-            python tools/dogfood_coverage.py --json
+            ./tools/.bin/fak dogfood-coverage --json
             echo '```'
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"

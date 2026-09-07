@@ -172,7 +172,7 @@ def test_run_suite_fails_when_required_probe_fails() -> None:
             return completed(0, {"schema": "fak.vcache.score.v1", "two_x_better": True, "active_multiplier": 2.5})
         if "code_slop_scorecard.py" in joined:
             return completed(1, {"schema": "fleet-code-slop-scorecard/1", "corpus": {"slop_debt": 1}})
-        if "dogfood_coverage.py" in joined:
+        if "dogfood-coverage" in joined or "dogfood_coverage.py" in joined:
             return completed(0, {"schema": "dogfood-coverage/1", "dogfood_debt": 0})
         if "internal/promptmmu" in joined:
             return completed(1)
