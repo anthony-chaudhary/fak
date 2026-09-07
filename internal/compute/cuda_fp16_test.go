@@ -3,7 +3,6 @@
 package compute
 
 import (
-	"math"
 	"testing"
 )
 
@@ -36,16 +35,6 @@ func uploadF16Layout(cb *cudaBackend, out, in int, w []float32, layout Layout) T
 	src := NewF32(cb, []int{out, in}, w)
 	src.Layout = layout
 	return cb.Upload(src, F16)
-}
-
-func maxAbsDelta(a, b []float32) float64 {
-	var m float64
-	for i := range a {
-		if d := math.Abs(float64(a[i] - b[i])); d > m {
-			m = d
-		}
-	}
-	return m
 }
 
 // TestCUDAMatMulF16ApproxMatchesRef — op-level fp16 first light: a single device HGEMM (decode

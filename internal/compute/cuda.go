@@ -826,7 +826,7 @@ func (c *cudaBackend) devRawKQuant(dt Dtype, shape []int, nbytes int) (Tensor, *
 	case Q6_K:
 		bits = 6
 	}
-	q := &QuantSpec{Block: 256, Axis: 2, Bits: bits, Symmetric: false}
+	q := &QuantSpec{Block: 256, Axis: 2, Bits: uint8(bits), Symmetric: false}
 	return makeTensor(c, dt, RowMajor, append([]int(nil), shape...), q, buf), buf
 }
 

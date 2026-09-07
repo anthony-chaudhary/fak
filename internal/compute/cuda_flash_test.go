@@ -165,7 +165,11 @@ func TestCUDASpecVerifyAttentionMatchesRef(t *testing.T) {
 			vRef := NewF32(ref, []int{c.kvLen, c.nHkv, c.d}, vData)
 			var outRef Tensor
 
-			if err := ref.SpecVerifyAttention(&qRef, &kRef, &vRef, &outRef, qLen, c.kvLen, c.nH, c.nHkv, c.d); err != nil {
+			svRef, ok := ref.(SpecVerifyAttentionBackend)
+			if !ok {
+				t.Fatal("cpu backend does not implement SpecVerifyAttentionBackend")
+			}
+			if err := svRef.SpecVerifyAttention(&qRef, &kRef, &vRef, &outRef, qLen, c.kvLen, c.nH, c.nHkv, c.d); err != nil {
 				t.Fatalf("ref.SpecVerifyAttention failed: %v", err)
 			}
 			oRef := ref.Read(outRef)
