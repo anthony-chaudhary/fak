@@ -96,6 +96,35 @@ func testCPURMSNormMultiRow(t *testing.T) {
 			}
 		}
 	}
+
+	// Test case 3: 2 rows of width 64 (2D shape [2, 64])
+	rows3, width3 := 2, 64
+	x3 := randVec(&s, rows3*width3)
+	w3 := randVec(&s, width3)
+
+	xTensor3 := NewF32(c, []int{rows3, width3}, x3)
+	wTensor3 := NewF32(c, []int{width3}, w3)
+	outTensor3 := c.RMSNorm(xTensor3, wTensor3, eps)
+
+	if len(outTensor3.Shape) != 2 || outTensor3.Shape[0] != rows3 || outTensor3.Shape[1] != width3 {
+		t.Fatalf("unexpected 2-row shape: got %v, want [%d, %d]", outTensor3.Shape, rows3, width3)
+	}
+
+	got3 := c.Read(outTensor3)
+	for r := 0; r < rows3; r++ {
+		rowSlice := x3[r*width3 : (r+1)*width3]
+		rowTensor := NewF32(c, []int{width3}, rowSlice)
+		refTensor := c.RMSNorm(rowTensor, wTensor3, eps)
+		ref := c.Read(refTensor)
+
+		for i := 0; i < width3; i++ {
+			idx := r*width3 + i
+			if math.Float32bits(got3[idx]) != math.Float32bits(ref[i]) {
+				t.Fatalf("2-row case row %d elem %d mismatch: multi-row got %g (bits %x), single-row ref %g (bits %x)",
+					r, i, got3[idx], math.Float32bits(got3[idx]), ref[i], math.Float32bits(ref[i]))
+			}
+		}
+	}
 }
 
 func testCPURMSNormInvalidGeometry(t *testing.T) {
