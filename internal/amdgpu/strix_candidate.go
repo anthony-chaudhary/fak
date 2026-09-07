@@ -1,6 +1,8 @@
 package amdgpu
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -15,6 +17,8 @@ const (
 	CandidateIDQuantQ4KvsF32   = "quant.q4k_vs_f32"
 	CandidateIDResidencyDevLoc = "residency.device_local"
 	CandidateIDLayoutF16Contig = "layout.f16_contiguize"
+	CandidateIDPrefillSequence = "prefill.sequence_prefill"
+	CandidateIDDecodeResident  = "decode.resident_attn_gdn"
 )
 
 // Default thresholds for candidate promotion and classification.
@@ -293,6 +297,64 @@ func (r *StrixCandidateRegistry) seedCanonicalBaselines() {
 				"contiguized_f16_kv_scratch",
 			},
 		},
+		// 6. prefill.sequence_prefill (baseline: baseline_serial_prefill 18.58s @ 3.01 tok/s, candidate: vulkan_sequence_prefill 1.14s @ 49.12 tok/s)
+		{
+			baseline: StrixCandidateBaseline{
+				CandidateID: CandidateIDPrefillSequence,
+				Dimension:   "prefill",
+				Feature:     "prefill_sequence_vs_serial",
+				Description: "Whole-sequence hybrid prefill vs token-by-token serial prefill on AMD Radeon 8060S Vulkan",
+				BaselineArm: StrixArmResult{
+					Name:           "baseline_serial_prefill",
+					LatencyUS:      18580000,
+					AllocatedBytes: 50135040,
+				},
+				PinnedCandidate: StrixArmResult{
+					Name:           "vulkan_sequence_prefill",
+					LatencyUS:      1140000,
+					AllocatedBytes: 50135040,
+				},
+				SpeedupThreshold: DefaultSpeedupThreshold,
+				MinParity:        DefaultMinParity,
+				NoiseBand:        DefaultNoiseBand,
+			},
+			aliases: []string{
+				"prefill.sequence_prefill",
+				"prefill_sequence_vs_serial",
+				"prefill.prefill_sequence_vs_serial",
+				"sequence_prefill",
+				"vulkan_sequence_prefill",
+			},
+		},
+		// 7. decode.resident_attn_gdn (baseline: host_fallback_decode 2695.8ms @ 0.37 tok/s, candidate: vulkan_resident_decode 59.5ms @ 16.8 tok/s)
+		{
+			baseline: StrixCandidateBaseline{
+				CandidateID: CandidateIDDecodeResident,
+				Dimension:   "decode",
+				Feature:     "decode_resident_vs_host_fallback",
+				Description: "Device-resident full attention & GDN decode vs host-roundtrip fallback on AMD Radeon 8060S Vulkan",
+				BaselineArm: StrixArmResult{
+					Name:           "host_fallback_decode",
+					LatencyUS:      2695800,
+					AllocatedBytes: 50135040,
+				},
+				PinnedCandidate: StrixArmResult{
+					Name:           "vulkan_resident_decode",
+					LatencyUS:      59500,
+					AllocatedBytes: 50135040,
+				},
+				SpeedupThreshold: DefaultSpeedupThreshold,
+				MinParity:        DefaultMinParity,
+				NoiseBand:        DefaultNoiseBand,
+			},
+			aliases: []string{
+				"decode.resident_attn_gdn",
+				"decode_resident_vs_host_fallback",
+				"decode.decode_resident_vs_host_fallback",
+				"resident_decode",
+				"vulkan_resident_decode",
+			},
+		},
 	}
 
 	canonicalParities := map[string]float64{
@@ -301,6 +363,8 @@ func (r *StrixCandidateRegistry) seedCanonicalBaselines() {
 		CandidateIDQuantQ4KvsF32:   0.999998,
 		CandidateIDResidencyDevLoc: 1.0,
 		CandidateIDLayoutF16Contig: 1.0,
+		CandidateIDPrefillSequence: 0.999999,
+		CandidateIDDecodeResident:  0.999999,
 	}
 
 	for _, entry := range canonical {
@@ -434,9 +498,24 @@ func (r *StrixCandidateRegistry) EvaluateCandidateWithOptions(result StrixAblati
 }
 
 // EvaluateReceipt evaluates all ablations contained in a validation receipt against the registry.
+// It enforces digest validation and fails closed on receipt invalidity or digest mismatch
+// rather than accepting mismatched or fabricated ablation evidence.
 func (r *StrixCandidateRegistry) EvaluateReceipt(receipt *StrixValidationReceipt) ([]StrixCandidateComparison, error) {
 	if receipt == nil {
 		return nil, fmt.Errorf("amdgpu: receipt is nil")
+	}
+	if receipt.Digest == "" {
+		return nil, fmt.Errorf("amdgpu: receipt missing required digest")
+	}
+	expectedDigest, err := receipt.ComputeDigest()
+	if err != nil {
+		return nil, fmt.Errorf("amdgpu: compute receipt digest: %w", err)
+	}
+	if receipt.Digest != expectedDigest {
+		return nil, fmt.Errorf("amdgpu: validation artifact digest mismatch: recorded %s != computed %s", receipt.Digest, expectedDigest)
+	}
+	if err := receipt.Validate(); err != nil {
+		return nil, fmt.Errorf("amdgpu: validation artifact invalid: %w", err)
 	}
 
 	var comparisons []StrixCandidateComparison
@@ -448,6 +527,31 @@ func (r *StrixCandidateRegistry) EvaluateReceipt(receipt *StrixValidationReceipt
 		comparisons = append(comparisons, *comp)
 	}
 	return comparisons, nil
+}
+
+// ValidateBenchmarkArtifact parses, verifies, and validates a benchmark artifact.
+// It fails closed if the artifact data is invalid, the claimed digest does not match
+// the computed SHA256 digest of the source/receipt bytes, or the receipt fails validation.
+func ValidateBenchmarkArtifact(data []byte) (*StrixValidationReceipt, error) {
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
+	var receipt StrixValidationReceipt
+	if err := json.Unmarshal(data, &receipt); err != nil {
+		return nil, fmt.Errorf("amdgpu: unmarshal benchmark artifact: %w", err)
+	}
+	if receipt.Digest == "" {
+		return nil, fmt.Errorf("amdgpu: benchmark artifact missing required digest")
+	}
+	expectedDigest, err := receipt.ComputeDigest()
+	if err != nil {
+		return nil, fmt.Errorf("amdgpu: compute artifact digest: %w", err)
+	}
+	if receipt.Digest != expectedDigest {
+		return nil, fmt.Errorf("amdgpu: benchmark artifact digest mismatch: recorded %s != computed %s", receipt.Digest, expectedDigest)
+	}
+	if err := receipt.Validate(); err != nil {
+		return nil, fmt.Errorf("amdgpu: validate benchmark artifact: %w", err)
+	}
+	return &receipt, nil
 }
 
 // Scoreboard returns all current candidate comparisons in canonical order.

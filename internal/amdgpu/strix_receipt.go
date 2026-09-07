@@ -15,11 +15,11 @@ const (
 
 // StrixValidationReceipt represents a verified hardware execution artifact on AMD Strix Halo.
 type StrixValidationReceipt struct {
-	Schema     string                 `json:"schema"`
-	Timestamp  string                 `json:"timestamp"`
-	Verdict    string                 `json:"verdict"` // PASS | FAIL | SKIPPED
-	Target     StrixTarget            `json:"target"`
-	Provenance StrixProvenance        `json:"provenance"`
+	Schema             string                 `json:"schema"`
+	Timestamp          string                 `json:"timestamp"`
+	Verdict            string                 `json:"verdict"` // PASS | FAIL | SKIPPED
+	Target             StrixTarget            `json:"target"`
+	Provenance         StrixProvenance        `json:"provenance"`
 	SelectedCount      int                    `json:"selected_count,omitempty"`
 	ExecutedCount      int                    `json:"executed_count,omitempty"`
 	SelectedSubkernels int                    `json:"selected_subkernels,omitempty"`
@@ -105,6 +105,16 @@ func (r *StrixValidationReceipt) Validate() error {
 	if r.Verdict != "PASS" && r.Verdict != "FAIL" && r.Verdict != "SKIPPED" {
 		return fmt.Errorf("invalid verdict %q (want PASS, FAIL, or SKIPPED)", r.Verdict)
 	}
+	if r.Digest == "" {
+		return fmt.Errorf("receipt digest is required")
+	}
+	expectedDigest, err := r.ComputeDigest()
+	if err != nil {
+		return fmt.Errorf("cannot compute digest for verification: %w", err)
+	}
+	if r.Digest != expectedDigest {
+		return fmt.Errorf("digest mismatch (recorded %s != computed %s)", r.Digest, expectedDigest)
+	}
 	if r.Verdict == "PASS" {
 		if !r.Target.Reachable {
 			return fmt.Errorf("verdict is PASS but target is not reachable")
@@ -128,15 +138,6 @@ func (r *StrixValidationReceipt) Validate() error {
 		for _, ab := range r.Ablations {
 			if ab.Verdict == "REGRESSION" {
 				return fmt.Errorf("verdict is PASS but ablation %q suffered regression (speedup=%.2fx)", ab.Feature, ab.Speedup)
-			}
-		}
-		if r.Verified && r.Digest != "" {
-			expectedDigest, err := r.ComputeDigest()
-			if err != nil {
-				return fmt.Errorf("cannot compute digest for verification: %w", err)
-			}
-			if r.Digest != expectedDigest {
-				return fmt.Errorf("digest mismatch (recorded %s != computed %s)", r.Digest, expectedDigest)
 			}
 		}
 	}

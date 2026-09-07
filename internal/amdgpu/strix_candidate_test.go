@@ -1,10 +1,13 @@
 package amdgpu
 
 import (
+	"encoding/json"
 	"math"
+	"os"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestNewStrixCandidateRegistry_CanonicalBaselines(t *testing.T) {
@@ -67,6 +70,24 @@ func TestNewStrixCandidateRegistry_CanonicalBaselines(t *testing.T) {
 			expectedCandArm:     "contiguized_f16_kv_scratch",
 			expectedCandLatency: 16680,
 		},
+		{
+			id:                  CandidateIDPrefillSequence,
+			expectedDimension:   "prefill",
+			expectedFeature:     "prefill_sequence_vs_serial",
+			expectedBaseArm:     "baseline_serial_prefill",
+			expectedBaseLatency: 18580000,
+			expectedCandArm:     "vulkan_sequence_prefill",
+			expectedCandLatency: 1140000,
+		},
+		{
+			id:                  CandidateIDDecodeResident,
+			expectedDimension:   "decode",
+			expectedFeature:     "decode_resident_vs_host_fallback",
+			expectedBaseArm:     "host_fallback_decode",
+			expectedBaseLatency: 2695800,
+			expectedCandArm:     "vulkan_resident_decode",
+			expectedCandLatency: 59500,
+		},
 	}
 
 	for _, tc := range tests {
@@ -109,6 +130,10 @@ func TestNewStrixCandidateRegistry_CanonicalBaselines(t *testing.T) {
 		{"quant_q4k_vs_q8_vs_f32", CandidateIDQuantQ4KvsF32},
 		{"device_local_vs_host_visible", CandidateIDResidencyDevLoc},
 		{"strided_vs_contiguized_f16_kv", CandidateIDLayoutF16Contig},
+		{"prefill_sequence_vs_serial", CandidateIDPrefillSequence},
+		{"sequence_prefill", CandidateIDPrefillSequence},
+		{"decode_resident_vs_host_fallback", CandidateIDDecodeResident},
+		{"resident_decode", CandidateIDDecodeResident},
 	}
 
 	for _, at := range aliasTests {
@@ -133,8 +158,8 @@ func TestScoreboard_InitialCanonicalState(t *testing.T) {
 	reg := NewStrixCandidateRegistry()
 	sb := reg.Scoreboard()
 
-	if len(sb) != 5 {
-		t.Fatalf("expected 5 canonical items in scoreboard, got %d", len(sb))
+	if len(sb) != 7 {
+		t.Fatalf("expected 7 canonical items in scoreboard, got %d", len(sb))
 	}
 
 	expectedOrder := []string{
@@ -143,6 +168,8 @@ func TestScoreboard_InitialCanonicalState(t *testing.T) {
 		CandidateIDQuantQ4KvsF32,
 		CandidateIDResidencyDevLoc,
 		CandidateIDLayoutF16Contig,
+		CandidateIDPrefillSequence,
+		CandidateIDDecodeResident,
 	}
 
 	for i, expID := range expectedOrder {
@@ -463,6 +490,11 @@ func TestEvaluateReceipt(t *testing.T) {
 	receipt := &StrixValidationReceipt{
 		Schema:  StrixValidationSchema,
 		Verdict: "PASS",
+		Target: StrixTarget{
+			Reachable: true,
+			GPUName:   "AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+			TargetISA: "gfx1151",
+		},
 		Ablations: []StrixAblationResult{
 			{
 				Dimension: "target",
@@ -492,6 +524,12 @@ func TestEvaluateReceipt(t *testing.T) {
 			},
 		},
 	}
+
+	digest, err := receipt.ComputeDigest()
+	if err != nil {
+		t.Fatalf("ComputeDigest failed: %v", err)
+	}
+	receipt.Digest = digest
 
 	comparisons, err := reg.EvaluateReceipt(receipt)
 	if err != nil {
@@ -641,4 +679,183 @@ func TestConcurrency_SafeRegistry(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestStrixValidationBenchmarkArtifact(t *testing.T) {
+	artifacts := []string{
+		"../../docs/benchmarks/strix-halo-validation-11940.json",
+		"../../docs/benchmarks/strix-halo-validation-latest.json",
+	}
+
+	for _, artifactPath := range artifacts {
+		data, err := os.ReadFile(artifactPath)
+		if err != nil {
+			t.Skipf("benchmark artifact not found at %s: %v", artifactPath, err)
+		}
+
+		// 1. Genuine benchmark artifact must validate and evaluate cleanly
+		receipt, err := ValidateBenchmarkArtifact(data)
+		if err != nil {
+			t.Fatalf("ValidateBenchmarkArtifact failed for %s: %v", artifactPath, err)
+		}
+		if receipt.Digest == "" {
+			t.Fatalf("expected non-empty digest for %s", artifactPath)
+		}
+		if !receipt.Verified {
+			t.Fatalf("expected verified=true for %s", artifactPath)
+		}
+
+		reg := NewStrixCandidateRegistry()
+		comparisons, err := reg.EvaluateReceipt(receipt)
+		if err != nil {
+			t.Fatalf("EvaluateReceipt failed for genuine artifact %s: %v", artifactPath, err)
+		}
+		if len(comparisons) == 0 {
+			t.Fatalf("expected non-empty comparisons from artifact %s", artifactPath)
+		}
+
+		// 2. Direct digest corruption must cause failure
+		corruptedReceipt := *receipt
+		corruptedReceipt.Digest = "sha256:corrupted_digest_deadbeef_0123456789abcdef"
+		if err := corruptedReceipt.Validate(); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+			t.Errorf("expected digest mismatch error from Validate(), got: %v", err)
+		}
+		if _, err := reg.EvaluateReceipt(&corruptedReceipt); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+			t.Errorf("expected digest mismatch error from EvaluateReceipt(), got: %v", err)
+		}
+
+		corruptedData, err := json.Marshal(corruptedReceipt)
+		if err != nil {
+			t.Fatalf("marshal corrupted receipt failed: %v", err)
+		}
+		if _, err := ValidateBenchmarkArtifact(corruptedData); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+			t.Errorf("expected digest mismatch error from ValidateBenchmarkArtifact(), got: %v", err)
+		}
+
+		// 3. Fabricated ablation evidence with unchanged digest must fail closed
+		fabricatedReceipt := *receipt
+		fabricatedReceipt.Ablations = append([]StrixAblationResult(nil), receipt.Ablations...)
+		if len(fabricatedReceipt.Ablations) > 0 {
+			// Fabricate an impossibly low candidate latency (1µs) to fake promotion
+			fabricatedReceipt.Ablations[0].CandidateArm.LatencyUS = 1
+			if err := fabricatedReceipt.Validate(); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+				t.Errorf("expected fabricated ablation to trigger digest mismatch in Validate(), got: %v", err)
+			}
+			if _, err := reg.EvaluateReceipt(&fabricatedReceipt); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+				t.Errorf("expected fabricated ablation to trigger digest mismatch in EvaluateReceipt(), got: %v", err)
+			}
+
+			fabricatedData, err := json.Marshal(fabricatedReceipt)
+			if err != nil {
+				t.Fatalf("marshal fabricated receipt failed: %v", err)
+			}
+			if _, err := ValidateBenchmarkArtifact(fabricatedData); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+				t.Errorf("expected fabricated ablation to trigger digest mismatch in ValidateBenchmarkArtifact(), got: %v", err)
+			}
+		}
+
+		// 4. Missing digest in benchmark artifact must fail closed
+		noDigestReceipt := *receipt
+		noDigestReceipt.Digest = ""
+		noDigestData, err := json.Marshal(noDigestReceipt)
+		if err != nil {
+			t.Fatalf("marshal no-digest receipt failed: %v", err)
+		}
+		if _, err := ValidateBenchmarkArtifact(noDigestData); err == nil || !strings.Contains(err.Error(), "missing required digest") {
+			t.Errorf("expected missing required digest error from ValidateBenchmarkArtifact(), got: %v", err)
+		}
+	}
+
+	// 5. Synthetic benchmark artifact verification with deterministic failure matrix
+	t.Run("synthetic_artifact_digest_mismatch", func(t *testing.T) {
+		receipt := NewStrixValidationReceipt(
+			StrixTarget{
+				Mode:         "ssh",
+				Host:         "strix1",
+				Reachable:    true,
+				GPUName:      "AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+				TargetISA:    "gfx1151",
+				ComputeUnits: 40,
+				DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
+			},
+			"HEAD",
+			"tip123",
+			"fak validate --strix",
+		)
+		receipt.Ablations = []StrixAblationResult{
+			{
+				Dimension: "target",
+				Feature:   "cpu_vs_vulkan_gpu",
+				BaselineArm: StrixArmResult{
+					Name:      "cpu_q4_reference",
+					LatencyUS: 75561,
+				},
+				CandidateArm: StrixArmResult{
+					Name:      "vulkan_gpu_q4k",
+					LatencyUS: 451,
+				},
+				Speedup:      167.5,
+				CosineParity: 0.999999,
+				Verdict:      "VERIFIED_LIFT",
+			},
+		}
+		digest, err := receipt.ComputeDigest()
+		if err != nil {
+			t.Fatalf("ComputeDigest failed: %v", err)
+		}
+		receipt.Digest = digest
+
+		// Valid synthetic receipt passes
+		if err := receipt.Validate(); err != nil {
+			t.Fatalf("synthetic receipt should validate: %v", err)
+		}
+		reg := NewStrixCandidateRegistry()
+		if _, err := reg.EvaluateReceipt(receipt); err != nil {
+			t.Fatalf("EvaluateReceipt failed on valid synthetic receipt: %v", err)
+		}
+
+		// Tampered digest fails closed
+		tampered := *receipt
+		tampered.Digest = "sha256:badf00d_mismatched_digest"
+		if err := tampered.Validate(); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+			t.Errorf("expected digest mismatch error in Validate(), got: %v", err)
+		}
+		if _, err := reg.EvaluateReceipt(&tampered); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+			t.Errorf("expected digest mismatch error in EvaluateReceipt(), got: %v", err)
+		}
+
+		// Fabricated ablation with original digest fails closed
+		fabricated := *receipt
+		fabricated.Ablations = []StrixAblationResult{
+			{
+				Dimension: "target",
+				Feature:   "cpu_vs_vulkan_gpu",
+				BaselineArm: StrixArmResult{
+					Name:      "cpu_q4_reference",
+					LatencyUS: 75561,
+				},
+				CandidateArm: StrixArmResult{
+					Name:      "vulkan_gpu_q4k",
+					LatencyUS: 10, // Fabricated
+				},
+				Speedup:      7556.1,
+				CosineParity: 0.999999,
+				Verdict:      "VERIFIED_LIFT",
+			},
+		}
+		if err := fabricated.Validate(); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+			t.Errorf("expected fabricated ablation to fail Validate() with digest mismatch, got: %v", err)
+		}
+		if _, err := reg.EvaluateReceipt(&fabricated); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+			t.Errorf("expected fabricated ablation to fail EvaluateReceipt() with digest mismatch, got: %v", err)
+		}
+
+		// Verified receipt missing digest fails closed in EvaluateReceipt
+		unsealedVerified := *receipt
+		unsealedVerified.Digest = ""
+		unsealedVerified.Verified = true
+		if _, err := reg.EvaluateReceipt(&unsealedVerified); err == nil || !strings.Contains(err.Error(), "missing required digest") {
+			t.Errorf("expected unsealed verified receipt to fail EvaluateReceipt, got: %v", err)
+		}
+	})
 }

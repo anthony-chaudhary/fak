@@ -49,10 +49,6 @@ func TestStrixValidationReceiptValidate(t *testing.T) {
 		Verdict:   "VERIFIED_LIFT",
 	})
 
-	if err := receipt.Validate(); err != nil {
-		t.Fatalf("receipt should validate: %v", err)
-	}
-
 	digest, err := receipt.ComputeDigest()
 	if err != nil {
 		t.Fatalf("ComputeDigest failed: %v", err)
@@ -60,6 +56,27 @@ func TestStrixValidationReceiptValidate(t *testing.T) {
 	if !strings.HasPrefix(digest, "sha256:") {
 		t.Errorf("digest %q missing sha256 prefix", digest)
 	}
+	receipt.Digest = digest
+
+	if err := receipt.Validate(); err != nil {
+		t.Fatalf("receipt should validate: %v", err)
+	}
+
+	// Assert empty digest fails closed in Validate
+	receipt.Digest = ""
+	if err := receipt.Validate(); err == nil || !strings.Contains(err.Error(), "receipt digest is required") {
+		t.Errorf("expected 'receipt digest is required' error for empty digest, got: %v", err)
+	}
+
+	// Assert empty digest fails closed in EvaluateReceipt (both verified and unverified)
+	reg := NewStrixCandidateRegistry()
+	receipt.Verified = false
+	if _, err := reg.EvaluateReceipt(receipt); err == nil || !strings.Contains(err.Error(), "receipt missing required digest") {
+		t.Errorf("expected 'receipt missing required digest' error for empty digest, got: %v", err)
+	}
+
+	// Restore digest for subsequent checks
+	receipt.Digest = digest
 
 	// Corrupt verdict and check validation
 	receipt.Verdict = "UNKNOWN_VERDICT"
