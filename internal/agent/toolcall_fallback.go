@@ -39,11 +39,13 @@ var llamaPythonTagRe = regexp.MustCompile(`(?s)<\|python_tag\|>\s*(\{.*?\})\s*(?
 // even for a single call), parsed by the array-aware extractor below.
 var mistralToolCallsRe = regexp.MustCompile(`(?s)\[TOOL_CALLS\]\s*(\[.*\])`)
 
-// fencedJSONRe matches a ```json … ``` fence (or a bare ``` … ``` fence). The
-// capture group is the fence body, which the fenced extractor then parses as a
-// single call object or an array of them. A fence whose body is not a name-bearing
-// tool-call object is left untouched (it is ordinary fenced output, not a call).
-var fencedJSONRe = regexp.MustCompile("(?s)```(?:json)?\\s*(\\{.*?\\}|\\[.*?\\])\\s*```")
+// fencedJSONRe matches a ```json … ```, ```tool_call … ```, or bare ``` … ``` fence.
+// Group 1 captures the optional fence tag, and group 2 captures the fence body.
+var fencedJSONRe = regexp.MustCompile("(?s)```(json|tool_call)?\\s*(\\{.*?\\}|\\[.*?\\])\\s*```")
+
+// exampleProseRe matches prose phrases that introduce a tool call as an example
+// rather than an executable instruction (#12042).
+var exampleProseRe = regexp.MustCompile(`(?i)(?:here(?:'s|\s+is)\s+an?\s+example|for\s+example|\bexample\s*:|\bsample\b|e\.g\.|eg\s*:)`)
 
 // hermesToolCallPayload is the inner JSON of a text-embedded tool call. arguments
 // is intentionally a RawMessage: models emit it as either a JSON object (Hermes)
@@ -349,11 +351,20 @@ func arrayLiftedBlocks(raws []json.RawMessage, start, end int) []liftedBlock {
 	return blocks
 }
 
-// extractFenced lifts a tool call emitted inside a ```json … ``` fence (or a bare
-// ``` … ``` fence). A fence body is lifted ONLY when it parses as a name-bearing
-// tool-call object (or an array of them); an ordinary fenced JSON blob with no
-// "name" is left as content, so we never turn a model's example output into a real
-// call. The whole fence (group 0) is stripped when lifted.
+// isPrecededByExampleProse reports whether the preceding text indicates the following
+// fenced block is an illustrative example rather than an intended execution (#12042).
+func isPrecededByExampleProse(preceding string) bool {
+	if idx := strings.LastIndex(preceding, "```"); idx >= 0 {
+		preceding = preceding[idx+3:]
+	}
+	return exampleProseRe.MatchString(preceding)
+}
+
+// extractFenced lifts a tool call emitted inside a ```json … ```, ```tool_call … ```,
+// or bare ``` … ``` fence. A fence body is lifted ONLY when it parses as a name-bearing
+// tool-call object (or an array of them). If the fence tag is not "tool_call" and the
+// preceding text is example prose, the block is left as content text (#12042).
+// The whole fence (group 0) is stripped when lifted.
 func extractFenced(content string) []liftedBlock {
 	matches := fencedJSONRe.FindAllStringSubmatchIndex(content, -1)
 	if len(matches) == 0 {
@@ -361,7 +372,14 @@ func extractFenced(content string) []liftedBlock {
 	}
 	var blocks []liftedBlock
 	for _, loc := range matches {
-		body := strings.TrimSpace(content[loc[2]:loc[3]])
+		tag := ""
+		if loc[2] >= 0 && loc[3] >= 0 {
+			tag = content[loc[2]:loc[3]]
+		}
+		if tag != "tool_call" && isPrecededByExampleProse(content[:loc[0]]) {
+			continue
+		}
+		body := strings.TrimSpace(content[loc[4]:loc[5]])
 		if strings.HasPrefix(body, "[") {
 			var raws []json.RawMessage
 			if err := json.Unmarshal([]byte(body), &raws); err != nil {

@@ -365,3 +365,131 @@ func TestLiftTextToolCalls_MalformedBareQwenFunctionNotLifted(t *testing.T) {
 		t.Fatalf("content was modified: %q", m.Content)
 	}
 }
+
+// TestFencedToolExampleDoesNotDispatch asserts that an assistant stop response
+// containing prose followed by a fenced JSON object naming a registered tool
+// does not dispatch the tool and preserves the prose as content, while valid
+// explicit tool call dialects continue to work (#12042).
+func TestFencedToolExampleDoesNotDispatch(t *testing.T) {
+	exampleCases := []struct {
+		name    string
+		content string
+	}{
+		{
+			name:    "here_is_an_example_parameters",
+			content: "Here is an example:\n```json\n{\"name\": \"sentinel\", \"parameters\": {}}\n```",
+		},
+		{
+			name:    "here_is_an_example_arguments",
+			content: "Here is an example:\n```json\n{\"name\": \"sentinel\", \"arguments\": {\"target\": \"prod\"}}\n```",
+		},
+		{
+			name:    "for_example_call",
+			content: "For example, you can call sentinel like this:\n```json\n{\"name\": \"sentinel\", \"parameters\": {\"mode\": \"dry-run\"}}\n```",
+		},
+		{
+			name:    "bare_example_colon",
+			content: "Example:\n```json\n{\"name\": \"sentinel\", \"parameters\": {}}\n```",
+		},
+		{
+			name:    "sample_call",
+			content: "Here is a sample tool call:\n```json\n{\"name\": \"sentinel\", \"arguments\": {\"target\": \"host\"}}\n```",
+		},
+		{
+			name:    "eg_call",
+			content: "e.g.:\n```json\n{\"name\": \"sentinel\", \"parameters\": {}}\n```",
+		},
+	}
+
+	for _, tc := range exampleCases {
+		t.Run(tc.name, func(t *testing.T) {
+			comp := &Completion{
+				Message: Message{
+					Role:    RoleAssistant,
+					Content: tc.content,
+				},
+				FinishReason: "stop",
+			}
+			got := normalizeCompletionToolCalls(comp)
+			if len(got.Message.ToolCalls) != 0 {
+				t.Fatalf("expected 0 tool calls (no dispatch), got %d: %+v", len(got.Message.ToolCalls), got.Message.ToolCalls)
+			}
+			if got.FinishReason != "stop" {
+				t.Errorf("finish_reason = %q, want stop", got.FinishReason)
+			}
+			if got.Message.Content != tc.content {
+				t.Errorf("content was not preserved as content:\ngot:  %q\nwant: %q", got.Message.Content, tc.content)
+			}
+		})
+	}
+
+	// While valid explicit tool call dialects continue to work:
+	t.Run("explicit_hermes_dialect_works", func(t *testing.T) {
+		comp := &Completion{
+			Message: Message{
+				Role:    RoleAssistant,
+				Content: "Running tool:\n<tool_call>{\"name\": \"sentinel\", \"arguments\": {\"target\": \"prod\"}}</tool_call>",
+			},
+			FinishReason: "stop",
+		}
+		got := normalizeCompletionToolCalls(comp)
+		if len(got.Message.ToolCalls) != 1 {
+			t.Fatalf("expected 1 tool call, got %d", len(got.Message.ToolCalls))
+		}
+		if got.Message.ToolCalls[0].Function.Name != "sentinel" {
+			t.Errorf("tool name = %q, want sentinel", got.Message.ToolCalls[0].Function.Name)
+		}
+		if got.FinishReason != "tool_calls" {
+			t.Errorf("finish_reason = %q, want tool_calls", got.FinishReason)
+		}
+		if got.Message.Content != "Running tool:" {
+			t.Errorf("content = %q, want %q", got.Message.Content, "Running tool:")
+		}
+	})
+
+	t.Run("explicit_tool_call_fence_works", func(t *testing.T) {
+		comp := &Completion{
+			Message: Message{
+				Role:    RoleAssistant,
+				Content: "Here is the call to run:\n```tool_call\n{\"name\": \"sentinel\", \"arguments\": {\"target\": \"prod\"}}\n```",
+			},
+			FinishReason: "stop",
+		}
+		got := normalizeCompletionToolCalls(comp)
+		if len(got.Message.ToolCalls) != 1 {
+			t.Fatalf("expected 1 tool call, got %d", len(got.Message.ToolCalls))
+		}
+		if got.Message.ToolCalls[0].Function.Name != "sentinel" {
+			t.Errorf("tool name = %q, want sentinel", got.Message.ToolCalls[0].Function.Name)
+		}
+		if got.FinishReason != "tool_calls" {
+			t.Errorf("finish_reason = %q, want tool_calls", got.FinishReason)
+		}
+		if got.Message.Content != "Here is the call to run:" {
+			t.Errorf("content = %q, want %q", got.Message.Content, "Here is the call to run:")
+		}
+	})
+
+	t.Run("action_fenced_json_works", func(t *testing.T) {
+		comp := &Completion{
+			Message: Message{
+				Role:    RoleAssistant,
+				Content: "Let me run it:\n```json\n{\"name\": \"sentinel\", \"arguments\": {\"target\": \"prod\"}}\n```",
+			},
+			FinishReason: "stop",
+		}
+		got := normalizeCompletionToolCalls(comp)
+		if len(got.Message.ToolCalls) != 1 {
+			t.Fatalf("expected 1 tool call, got %d", len(got.Message.ToolCalls))
+		}
+		if got.Message.ToolCalls[0].Function.Name != "sentinel" {
+			t.Errorf("tool name = %q, want sentinel", got.Message.ToolCalls[0].Function.Name)
+		}
+		if got.FinishReason != "tool_calls" {
+			t.Errorf("finish_reason = %q, want tool_calls", got.FinishReason)
+		}
+		if got.Message.Content != "Let me run it:" {
+			t.Errorf("content = %q, want %q", got.Message.Content, "Let me run it:")
+		}
+	})
+}
