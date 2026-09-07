@@ -28,6 +28,8 @@ type chatFlags struct {
 	policyPath            *string
 	posture               *string
 	task                  *string
+	taskFile              *string
+	effort                *string
 	tools                 *string
 	codeTools             *bool
 	codeWorkspace         *string
@@ -58,6 +60,8 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 	cf.policyPath = fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor)")
 	cf.posture = fs.String("posture", "fail_closed", "adjudication posture: fail_closed|default_open|admit_and_log (default: fail_closed developer floor; env: FAK_AGENT_POSTURE or FAK_GUARD_POSTURE)")
 	cf.task = fs.String("task", "", "run a single non-interactive task turn (headless mode) and exit")
+	cf.taskFile = fs.String("task-file", "", "read a non-interactive UTF-8 task from a file (mutually exclusive with --task)")
+	cf.effort = fs.String("effort", "", "reasoning effort for the native task")
 	cf.tools = fs.String("tools", "code", "toolset to arm: code (Read/Write/Edit/Bash/Grep/Glob), demo (airline fixture), or none")
 	cf.codeTools = fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the workspace (alias for --tools=code)")
 	cf.codeWorkspace = fs.String("code-workspace", "", "override workspace root for code tools (default: current directory)")
@@ -90,6 +94,17 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 func cmdChat(argv []string) {
 	fs, cf := newChatFlagSet()
 	_ = fs.Parse(argv)
+	if *cf.taskFile != "" {
+		if *cf.task != "" {
+			must(fmt.Errorf("fak chat: --task and --task-file are mutually exclusive"))
+		}
+		data, err := os.ReadFile(*cf.taskFile)
+		must(err)
+		if len(strings.TrimSpace(string(data))) == 0 {
+			must(fmt.Errorf("fak chat: task file must be nonempty"))
+		}
+		*cf.task = string(data)
+	}
 
 	if *cf.workflow != "" {
 		if err := runWorkflowCLI(*cf.workflow, *cf.workflowStep, *cf.workflowCheckpointDir); err != nil {
@@ -142,6 +157,9 @@ func cmdChat(argv []string) {
 	}
 
 	var runOpts []agent.RunOption
+	if *cf.effort != "" {
+		runOpts = append(runOpts, agent.WithRunReasoningEffort(*cf.effort))
+	}
 	var catalog []agent.ToolDef
 	hasCustomCatalog := false
 	root := strings.TrimSpace(*cf.codeWorkspace)
