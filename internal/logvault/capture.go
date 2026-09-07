@@ -83,7 +83,8 @@ func pathWithin(path, p string) bool {
 // a valid empty source; an unreadable subtree is returned as a problem, never
 // silently skipped. Excluded directory prefixes are pruned without descent.
 func (v *Vault) walkSource(src Source, fn func(relPath string, info fs.FileInfo) error) (missing bool, problems []walkProblem, err error) {
-	if _, statErr := os.Stat(src.Root); statErr != nil {
+	fi, statErr := os.Stat(src.Root)
+	if statErr != nil {
 		return true, nil, nil
 	}
 	vaultAbs, _ := filepath.Abs(v.Dir)
@@ -93,6 +94,19 @@ func (v *Vault) walkSource(src Source, fn func(relPath string, info fs.FileInfo)
 	// vault living inside a source root is fine — the walk prunes it below.
 	if vaultAbs != "" && pathWithin(srcAbs, vaultAbs) {
 		return false, nil, fmt.Errorf("logvault: source %s root %s overlaps the vault %s", src.ID, src.Root, v.Dir)
+	}
+	if !fi.IsDir() {
+		rel := filepath.ToSlash(filepath.Base(src.Root))
+		if !admitted(src, rel) || excluded(src, rel) {
+			return false, nil, nil
+		}
+		if src.MaxBytes > 0 && fi.Size() > src.MaxBytes {
+			return false, nil, nil
+		}
+		if err := fn(rel, fi); err != nil {
+			return false, nil, err
+		}
+		return false, nil, nil
 	}
 	// budget bounds an opt-in tier (src.MaxBytes>0): once the cumulative admitted
 	// file size reaches the cap the walk stops, so a multi-GB scratchpad tree can
@@ -304,6 +318,9 @@ func (v *Vault) Capture() ([]SourceStats, error) {
 // op of "" with a nil error means the content was verified unchanged.
 func (v *Vault) captureFile(src Source, rel string, prev fileState, seen bool, size int64) (op string, written int64, sha string, err error) {
 	srcPath := filepath.Join(src.Root, filepath.FromSlash(rel))
+	if fi, statErr := os.Stat(src.Root); statErr == nil && !fi.IsDir() {
+		srcPath = src.Root
+	}
 	mirror := v.mirrorPath(src.ID, rel)
 
 	if seen && size > prev.SizeAfter {

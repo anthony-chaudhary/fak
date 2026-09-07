@@ -115,6 +115,63 @@ func DefaultSources(repoRoot, home string) []Source {
 			Note:     "user-level fleet ledgers (shadow switch ledger, memory co-travel) + harness telemetry/session state",
 		})
 	}
+	for _, envSrc := range EnvSourcesForRoot(repoRoot) {
+		srcs = MergeSources(srcs, []Source{envSrc})
+	}
+	return srcs
+}
+
+type envSourceSpec struct {
+	envVar string
+	id     string
+	note   string
+}
+
+// Recognized environment variables that automatically register durable log sources:
+var envSourceSpecs = []envSourceSpec{
+	{envVar: "FAK_AUDIT_JOURNAL", id: "audit-journal", note: "env-registered audit journal"},
+	{envVar: "FAK_LOOP_LEDGER", id: "loop-ledger", note: "env-registered loop ledger"},
+	{envVar: "FAK_TOOLPROC_JOURNAL", id: "toolproc-journal", note: "env-registered toolproc journal"},
+	{envVar: "FAK_SLACK_OUTBOX_DIR", id: "slack-outbox", note: "env-registered Slack outbox"},
+	{envVar: "FAK_WATCHDOG_AUTOHEAL_DIR", id: "watchdog-autoheal", note: "env-registered watchdog autoheal directory"},
+	{envVar: "FLEET_REG_DIR", id: "fleet-reg", note: "env-registered fleet registry"},
+	{envVar: "FAK_BLOB_DIR", id: "blob-cas", note: "env-registered blob CAS payload store"},
+}
+
+// EnvSources returns sources derived from recognized environment variables:
+// FAK_AUDIT_JOURNAL, FAK_LOOP_LEDGER, FAK_TOOLPROC_JOURNAL, FAK_SLACK_OUTBOX_DIR,
+// FAK_WATCHDOG_AUTOHEAL_DIR, FLEET_REG_DIR, FAK_BLOB_DIR.
+func EnvSources() []Source {
+	return EnvSourcesForRoot("")
+}
+
+// EnvSourcesForRoot returns sources derived from recognized environment variables,
+// resolving relative paths against repoRoot when non-empty.
+func EnvSourcesForRoot(repoRoot string) []Source {
+	return EnvSourcesFrom(os.Getenv, repoRoot)
+}
+
+// EnvSourcesFrom returns sources derived from environment variables looked up via
+// the provided lookup function, resolving relative paths against repoRoot.
+func EnvSourcesFrom(lookup func(string) string, repoRoot string) []Source {
+	var srcs []Source
+	for _, spec := range envSourceSpecs {
+		val := strings.TrimSpace(lookup(spec.envVar))
+		if val == "" {
+			continue
+		}
+		root := val
+		if repoRoot != "" && !filepath.IsAbs(root) {
+			root = filepath.Join(repoRoot, root)
+		} else {
+			root = filepath.Clean(root)
+		}
+		srcs = append(srcs, Source{
+			ID:   spec.id,
+			Root: root,
+			Note: spec.note,
+		})
+	}
 	return srcs
 }
 
