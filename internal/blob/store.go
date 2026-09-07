@@ -244,6 +244,11 @@ func (s *Store) Bytes() int64 {
 	return s.bytes
 }
 
+// Get returns the unpinned bytes for a digest, or an error if missing.
+func (s *Store) Get(digest string) ([]byte, error) {
+	return s.Resolve(context.Background(), abi.Ref{Kind: abi.RefBlob, Digest: digest})
+}
+
 // Reset purges all stored blobs and clears resident memory while retaining activity counters.
 func (s *Store) Reset() {
 	s.mu.Lock()
