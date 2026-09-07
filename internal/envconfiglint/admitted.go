@@ -379,5 +379,7 @@ var admittedPostFreeze = []string{
 	"ODL_VERBS_WC_STREAM_COPY",
 	"OPENAI_API_BASE",
 	"OPENCODE_CONFIG_CONTENT",
+	"OPENCODE_HOME",
 	"PYTHON",
+	"XDG_DATA_HOME",
 }

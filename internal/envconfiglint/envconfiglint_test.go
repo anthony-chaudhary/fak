@@ -194,6 +194,16 @@ func TestAdmittedPostFreezeCoversTrunkAdvances(t *testing.T) {
 	if len(admittedPostFreeze) == 0 {
 		t.Fatal("expected non-empty admittedPostFreeze")
 	}
+	want := []string{"OPENCODE_HOME", "XDG_DATA_HOME"}
+	admitted := map[string]bool{}
+	for _, name := range admittedPostFreeze {
+		admitted[name] = true
+	}
+	for _, name := range want {
+		if !admitted[name] {
+			t.Errorf("admittedPostFreeze missing expected post-freeze entry %s", name)
+		}
+	}
 }
 
 func TestAdmittedPostFreezeStaysHonest(t *testing.T) {
