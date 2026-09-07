@@ -612,13 +612,13 @@ func unavailableReason(name, goos, goarch string, tags []string) Reason {
 		}
 		return Reason{Code: "backend_unavailable", Detail: "cuda is compiled but no reachable CUDA device/runtime registered", Remediation: "install a compatible NVIDIA driver/runtime and verify device access"}
 	case "vulkan":
-		if goos != "windows" {
-			return Reason{Code: "unsupported_platform", Detail: "the fak Vulkan backend currently requires windows", Remediation: "request cpu-ref or a backend supported on this operating system"}
+		if goos != "windows" && goos != "linux" {
+			return Reason{Code: "unsupported_platform", Detail: "the fak Vulkan backend currently requires windows or linux", Remediation: "request cpu-ref or a backend supported on this operating system"}
 		}
 		if !hasTag("vulkan") {
-			return Reason{Code: "backend_not_compiled", Detail: "vulkan is not compiled into this binary", Remediation: "use a Windows fak build produced with the vulkan tag and bundled Vulkan shim"}
+			return Reason{Code: "backend_not_compiled", Detail: "vulkan is not compiled into this binary", Remediation: "use a fak build produced with the vulkan tag and bundled Vulkan shim"}
 		}
-		return Reason{Code: "backend_unavailable", Detail: "vulkan is compiled but no compatible Vulkan device/runtime registered", Remediation: "install a compatible Vulkan driver and verify device access"}
+		return Reason{Code: "backend_unavailable", Detail: "vulkan is compiled but no compatible Vulkan device/runtime registered", Remediation: "install a compatible Vulkan driver (e.g. Mesa RADV on Linux) and verify device access"}
 	default:
 		return Reason{Code: "unsupported_backend", Detail: "the requested backend name is not recognized or registered", Remediation: "choose an exact name from registered_backends; fak will not silently substitute another backend"}
 	}
