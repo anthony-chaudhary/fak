@@ -302,6 +302,12 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if !admitted {
 		return
 	}
+	if len(messages) > 0 {
+		messages = CanonicalizePromptOrder(messages)
+	}
+	if len(tools) > 1 {
+		tools = CanonicalizeToolDefs(tools)
+	}
 	ctx = context.WithValue(ctx, responsesRestoreContextKey{}, restoreContinuation)
 	resultAdmissions, err := s.admitInboundResults(ctx, messages, tools, reqTrace)
 	if err != nil {
