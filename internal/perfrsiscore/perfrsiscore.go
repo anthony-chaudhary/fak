@@ -426,6 +426,8 @@ func ScoreLoopTurnFromEnvironment() LoopTurnReceipt {
 	return ScoreLoopTurn(os.Getenv(LoopTurnInputEnv))
 }
 
+const ReasonPerformanceRSIDebt = "PERFORMANCE_RSI_DEBT"
+
 // ScoreLoopTurn loads and scores one evidence document using the same strict
 // Load and Score path as the performance-rsi-scorecard command.
 func ScoreLoopTurn(input string) LoopTurnReceipt {
@@ -457,6 +459,9 @@ func ScoreLoopTurn(input string) LoopTurnReceipt {
 	health, debt := reportHealth(report)
 	receipt.Status = LoopTurnScored
 	receipt.Reason = "SCORE_COMPLETE"
+	if debt.PerformanceRSIDebt > 0 {
+		receipt.Reason = ReasonPerformanceRSIDebt
+	}
 	receipt.Snapshot = report.Snapshot
 	receipt.LoopHealth = &health
 	receipt.PerformanceRSIDebt = intPointer(debt.PerformanceRSIDebt)

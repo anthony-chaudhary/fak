@@ -13,7 +13,7 @@ import (
 
 func TestScoreLoopTurnScoresConfiguredInput(t *testing.T) {
 	receipt := ScoreLoopTurn("testdata/complete.json")
-	if receipt.Schema != LoopTurnSchema || receipt.Status != LoopTurnScored || receipt.Reason != "SCORE_COMPLETE" {
+	if receipt.Schema != LoopTurnSchema || receipt.Status != LoopTurnScored || receipt.Reason != ReasonPerformanceRSIDebt {
 		t.Fatalf("receipt header=%+v", receipt)
 	}
 	if receipt.Snapshot == "" || receipt.LoopHealth == nil || receipt.PerformanceRSIDebt == nil || receipt.DominantBottleneck == "" {
@@ -21,7 +21,7 @@ func TestScoreLoopTurnScoresConfiguredInput(t *testing.T) {
 	}
 	assertSingleInvocationOutcome(t, receipt.InvocationOutcomes, OutcomeSuccess)
 	rendered := FormatLoopTurnReceipt(receipt)
-	for _, want := range []string{`"schema":"fak-performance-rsi-loop-turn/1"`, `"status":"scored"`, `"reason":"SCORE_COMPLETE"`, `"invocation_outcomes":{"success":1,"refusal":0,"error":0}`} {
+	for _, want := range []string{`"schema":"fak-performance-rsi-loop-turn/1"`, `"status":"scored"`, `"reason":"PERFORMANCE_RSI_DEBT"`, `"invocation_outcomes":{"success":1,"refusal":0,"error":0}`} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered receipt missing %q: %s", want, rendered)
 		}

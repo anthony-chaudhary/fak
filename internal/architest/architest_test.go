@@ -1489,7 +1489,7 @@ func selfRegisters(t *testing.T, internal, pkg string) bool {
 // wired by its constructor at the Submit seam, not as a passive driver.
 // A leaf added here is a conscious "wired elsewhere" decision, the same review
 // chokepoint as the tier table.
-var regOffList = map[string]bool{"agent": true, "gateway": true, "computeadmit": true, "codetools": true, "systools": true, "observer": true, "trajhook": true}
+var regOffList = map[string]bool{"agent": true, "gateway": true, "computeadmit": true, "codetools": true, "systools": true, "observer": true, "trajhook": true, "gym": true}
 
 // TestRequestPathLeavesRegistered closes the registration-completeness hole: a leaf whose
 // production init() calls abi.Register* MUST be either blank-imported by the defconfig
@@ -1693,6 +1693,7 @@ var interpreterExecAllow = map[string]string{
 	"accounts":    "credential-refresh spawn (DefaultRefreshSpawn) execs the resolved claude COMPILED binary via ClaudeExe() (env/PATH/conventional-install lookup, never a script interpreter); the path is platform/config-dependent so it cannot be a literal, and the spawn is a token-rotation host seam, not a tool-call adjudication dependency",
 	"modelroute":  "cross-audit corpus self-check executes a structured, declaration-matched witness argv (normally the compiled crossauditfixture binary); the dynamic path is test/CLI calibration evidence, not a script interpreter dependency of tool-call adjudication",
 	"compute":     "host hardware topology probe queries the Windows display subsystem for AMD GPUs via Win32_VideoController in ProbeWindowsDisplayTopology; host-observation seam, not a tool-call adjudication dependency",
+	"mcpbroker":   "mcpbroker executes client-configured MCP tool servers through stdio; server command is caller-provided and validated at broker initialization",
 }
 
 // oracleSeamFiles names the off-path Python oracle/baseline seam scripts (DIRECTION.md
@@ -2968,6 +2969,18 @@ var engineDriverRole = map[string]map[string]string{
 	"agent.skill": {
 		"agent": "dynamic agent skill loader engine",
 	},
+	"agent.task_cancel": {
+		"agent": "bounded subagent task cancellation engine",
+	},
+	"agent.task_spawn": {
+		"agent": "bounded subagent task spawn engine",
+	},
+	"agent.task_status": {
+		"agent": "bounded subagent task status query engine",
+	},
+	"agent.task_wait": {
+		"agent": "bounded subagent task synchronization engine",
+	},
 	"agent.todoread": {
 		"agent": "native harness task list query engine",
 	},
@@ -2976,6 +2989,9 @@ var engineDriverRole = map[string]map[string]string{
 	},
 	"inprocess_mcp": {
 		"agent": "in-process MCP tool server engine",
+	},
+	"codetools.apply_patch": {
+		"codetools": "bounded coding patch application engine",
 	},
 	"codetools.bash": {
 		"codetools": "bounded coding Bash engine",

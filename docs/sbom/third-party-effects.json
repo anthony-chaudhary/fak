@@ -419,15 +419,27 @@
     },
     {
       "class": "subprocess_tool",
+      "reference": "cmd.exe",
+      "consumer_domains": [
+        "internal"
+      ],
       "status": "used",
       "pin": "host_provided",
       "digest": "",
       "license_record": "none",
-      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
       "reference": "codex",
       "consumer_domains": [
         "cmd"
-      ]
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
     },
     {
       "class": "subprocess_tool",
@@ -535,6 +547,19 @@
       "reference": "launchctl",
       "consumer_domains": [
         "cmd"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "lsof",
+      "consumer_domains": [
+        "cmd",
+        "internal"
       ],
       "status": "used",
       "pin": "host_provided",
@@ -708,6 +733,30 @@
       "reference": "sh",
       "consumer_domains": [
         "cmd",
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "ss",
+      "consumer_domains": [
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "ssh",
+      "consumer_domains": [
         "internal"
       ],
       "status": "used",
