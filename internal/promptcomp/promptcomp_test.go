@@ -535,3 +535,57 @@ func TestRegistryOperations(t *testing.T) {
 		t.Fatalf("unexpected list: %+v", list)
 	}
 }
+
+// BenchmarkCompileParts benchmarks end-to-end prompt fragment compilation with multi-tier parts.
+func BenchmarkCompileParts(b *testing.B) {
+	parts := []PromptPart{
+		NewPromptPart("spine.core", "Root spine instructions for the agent runtime.", KindSpine, 0),
+		NewPromptPart("policy.floor", "Default deny policy for all unlisted capabilities.", KindPolicy, 1),
+		NewPromptPart("contract.worker", "Worker boundary specification and invariant guarantees.", KindContract, 2, WithDependsOn("policy.floor")),
+		NewPromptPart("tools.exec", "Execution tools and command runner profiles.", KindTools, 3),
+		NewPromptPart("overlay.custom", "Dynamic session overlay and temporary prompt overrides.", KindOverlay, 4),
+	}
+	env := Env{AgentTier: "coordinator", Model: "qwen3.8"}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		cp, err := CompileParts(parts, env)
+		if err != nil || cp == nil {
+			b.Fatalf("CompileParts failed: %v", err)
+		}
+	}
+}
+
+// BenchmarkResolve benchmarks topological ordering and cycle detection across a prompt graph.
+func BenchmarkResolve(b *testing.B) {
+	parts := []PromptPart{
+		NewPromptPart("spine.core", "Root spine instructions.", KindSpine, 0),
+		NewPromptPart("policy.floor", "Default deny.", KindPolicy, 1),
+		NewPromptPart("contract.worker", "Worker boundary.", KindContract, 2, WithDependsOn("policy.floor")),
+		NewPromptPart("tools.exec", "Execution tools.", KindTools, 3, WithDependsOn("contract.worker")),
+		NewPromptPart("overlay.custom", "Dynamic overlay.", KindOverlay, 4, WithDependsOn("tools.exec")),
+	}
+	asm := NewAssemblerWithParts(parts)
+	env := Env{AgentTier: "leaf"}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		resolved, err := asm.Resolve(env)
+		if err != nil || len(resolved) != 5 {
+			b.Fatalf("Resolve failed: %v", err)
+		}
+	}
+}
+
+// BenchmarkComputeDigest benchmarks cryptographic SHA-256 digest computation for prompt parts.
+func BenchmarkComputeDigest(b *testing.B) {
+	content := "Universal Fak Agent Kernel Root Spine with capability contracts and invariants."
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		digest := ComputeDigest(content)
+		if digest == "" {
+			b.Fatal("empty digest")
+		}
+	}
+}
