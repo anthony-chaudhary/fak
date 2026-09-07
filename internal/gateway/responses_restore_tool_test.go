@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
@@ -107,6 +108,10 @@ func TestResponsesRestoreToolAutoAdvertise(t *testing.T) {
 }
 
 func TestResponsesRestoreToolInBandInterception(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterAdjudicator(1, readAdj{})
+
 	srv := newTestServer(t)
 	const trace = "t-restore-in-band"
 
@@ -118,21 +123,10 @@ func TestResponsesRestoreToolInBandInterception(t *testing.T) {
 	srv.stashRestore(trace, "sha256:"+digest, "recovery test", originalBytes)
 
 	// Planner returns a tool call to mcp__fak__fak_context_restore
-	planner := &capturingResponsesPlanner{
-		comp: &agent.Completion{
-			Message: agent.Message{
-				Role: agent.RoleAssistant,
-				ToolCalls: []agent.ToolCall{
-					{
-						ID:   "call_restore_1",
-						Type: "function",
-						Function: agent.Func{
-							Name:      "mcp__fak__fak_context_restore",
-							Arguments: `{"id":"sha256:` + digest + `"}`,
-						},
-					},
-				},
-			},
+	planner := &scriptedMultiTurnPlanner{
+		turns: []*agent.Completion{
+			toolCallTurn("call_restore_1", "mcp__fak__fak_context_restore", `{"id":"sha256:`+digest+`"}`),
+			{Message: agent.Message{Role: agent.RoleAssistant, Content: "Restored: " + string(originalBytes)}},
 		},
 	}
 	srv.planner = planner

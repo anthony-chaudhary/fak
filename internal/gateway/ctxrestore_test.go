@@ -2,14 +2,18 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 )
@@ -617,5 +621,164 @@ func TestRestoreContextIncrementsCompactionRestoredTurns(t *testing.T) {
 
 	if got := srv.AdjudicationSummary().CompactionRestoredTurns; got != 2 {
 		t.Fatalf("CompactionRestoredTurns after 2 restores = %d, want 2", got)
+	}
+}
+
+func TestFakRead_PagedRefImmediatelyRestorableWithBounds(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterAdjudicator(0, readAdj{})
+	abi.RegisterResultAdmitter(10, ctxmmu.New())
+
+	t.Setenv("FAK_READ_OVERSIZE_BYTES", "4096")
+
+	dir := t.TempDir()
+	agent.RegisterReadEngine(dir)
+
+	// Write a file of ~16 KiB (> 4096).
+	filePath := filepath.Join(dir, "large.txt")
+	line := "0123456789abcdef0123456789abcdef\n" // 33 bytes
+	fileData := strings.Repeat(line, 500)             // 16,500 bytes
+	if err := os.WriteFile(filePath, []byte(fileData), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := New(Config{EngineID: agent.FakReadEngineID, Model: "test-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	const traceID = "test-paged-read"
+	wv, env, err := srv.fakReadWithOptions(context.Background(), filePath, 0, 0, false, traceID, "")
+	if err != nil {
+		t.Fatalf("fakReadWithOptions: %v", err)
+	}
+	if wv.Kind != "ALLOW" && wv.Kind != "TRANSFORM" {
+		t.Fatalf("unexpected verdict: %+v", wv)
+	}
+	if env == nil {
+		t.Fatal("expected non-nil result envelope")
+	}
+
+	var pagedStub map[string]any
+	if err := json.Unmarshal([]byte(env.Content), &pagedStub); err != nil {
+		t.Fatalf("unmarshal env.Content: %v, content=%s", err, env.Content)
+	}
+	if paged, _ := pagedStub["_paged"].(bool); !paged {
+		t.Fatalf("expected _paged=true, got %+v", pagedStub)
+	}
+	ref, _ := pagedStub["ref"].(string)
+	if ref == "" {
+		t.Fatalf("expected non-empty ref in %+v", pagedStub)
+	}
+	if rTool, _ := pagedStub["retrieval_tool"].(string); rTool != "fak_context_restore" {
+		t.Fatalf("retrieval_tool = %q, want fak_context_restore", rTool)
+	}
+	rc, ok := pagedStub["retrieval_call"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected retrieval_call map, got %+v", pagedStub["retrieval_call"])
+	}
+	if rc["id"] != ref {
+		t.Fatalf("retrieval_call[id] = %v, want %v", rc["id"], ref)
+	}
+
+	// Restore full content via srv.restoreContext or srv.ResolveRestorableContext:
+	// assert exact bytes match original content.
+	fullRes, err := srv.ResolveRestorableContext("", ContextRestoreRequest{ID: ref, TraceID: traceID})
+	if err != nil {
+		t.Fatalf("ResolveRestorableContext full: %v", err)
+	}
+	originalContent := fullRes.Bytes
+	if len(originalContent) == 0 {
+		t.Fatal("restored original content is empty")
+	}
+	if sizeVal, ok := pagedStub["size"].(float64); !ok || int(sizeVal) != len(originalContent) {
+		t.Fatalf("stub size = %v, want len(originalContent) = %d", pagedStub["size"], len(originalContent))
+	}
+
+	// Restore bounded slice with Offset: 0, Limit: 1000:
+	// assert len(slice1.Bytes) == 1000, slice1.HasMore == true, slice1.NextOffset == 1000, slice1.Bytes == originalContent[:1000].
+	slice1, err := srv.ResolveRestorableContext("", ContextRestoreRequest{
+		ID:      ref,
+		TraceID: traceID,
+		Offset:  0,
+		Limit:   1000,
+	})
+	if err != nil {
+		t.Fatalf("restore slice1: %v", err)
+	}
+	if len(slice1.Bytes) != 1000 {
+		t.Fatalf("len(slice1.Bytes) = %d, want 1000", len(slice1.Bytes))
+	}
+	if !slice1.HasMore {
+		t.Fatal("slice1.HasMore = false, want true")
+	}
+	if slice1.NextOffset != 1000 {
+		t.Fatalf("slice1.NextOffset = %d, want 1000", slice1.NextOffset)
+	}
+	if slice1.Bytes != originalContent[:1000] {
+		t.Fatalf("slice1.Bytes does not match originalContent[:1000]")
+	}
+	if slice1.ContinuationToken == "" {
+		t.Fatal("slice1.ContinuationToken is empty")
+	}
+
+	// Restore bounded slice with ContinuationToken: slice1.ContinuationToken, Limit: 1000:
+	// assert slice2.Bytes == originalContent[1000:2000].
+	slice2, err := srv.ResolveRestorableContext("", ContextRestoreRequest{
+		ID:                ref,
+		TraceID:           traceID,
+		ContinuationToken: slice1.ContinuationToken,
+		Limit:             1000,
+	})
+	if err != nil {
+		t.Fatalf("restore slice2: %v", err)
+	}
+	if slice2.Bytes != originalContent[1000:2000] {
+		t.Fatalf("slice2.Bytes does not match originalContent[1000:2000]")
+	}
+
+	// Also test via MCP HTTP endpoint /mcp tool call for fak_context_restore.
+	mcpCall := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "fak_context_restore",
+			"arguments": map[string]any{
+				"id":       ref,
+				"trace_id": traceID,
+			},
+		},
+	}
+	mcpBytes, _ := json.Marshal(mcpCall)
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/mcp", bytes.NewReader(mcpBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /mcp: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("mcp status = %d, want 200", resp.StatusCode)
+	}
+	var rpcResp rpcResponse
+	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+		t.Fatalf("decode mcp response: %v", err)
+	}
+	if rpcResp.Error != nil {
+		t.Fatalf("mcp rpc error: %+v", rpcResp.Error)
+	}
+	var mcpRestore CtxRestoreResult
+	decodeMCPResult(t, rpcResp.Result, &mcpRestore)
+	if mcpRestore.Bytes != originalContent {
+		t.Fatalf("mcp restored bytes do not match original content")
 	}
 }
