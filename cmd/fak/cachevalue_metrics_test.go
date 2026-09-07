@@ -144,9 +144,18 @@ func TestRenderCachevalueExposition_Families(t *testing.T) {
 	}
 	// GeneratedAt (2026-07-04T00:00:00Z) drives the timestamp, not `now` (12:00Z).
 	genAt, _ := time.Parse(time.RFC3339, "2026-07-04T00:00:00Z")
-	wantTS := strconv.FormatFloat(float64(genAt.Unix()), 'g', -1, 64)
-	if got := sampleLine(t, out, "fak_cachevalue_generated_timestamp_seconds", ""); !strings.HasSuffix(got, " "+wantTS) {
-		t.Errorf("generated_timestamp = %q, want suffix %q (from GeneratedAt, not now)", got, wantTS)
+	got := sampleLine(t, out, "fak_cachevalue_generated_timestamp_seconds", "")
+	fields := strings.Fields(got)
+	if len(fields) < 2 {
+		t.Fatalf("fak_cachevalue_generated_timestamp_seconds sample line malformed: %q", got)
+	}
+	valStr := fields[1]
+	val, err := strconv.ParseFloat(valStr, 64)
+	if err != nil || math.IsNaN(val) || math.IsInf(val, 0) {
+		t.Fatalf("failed to parse generated_timestamp value %q: %v", valStr, err)
+	}
+	if int64(val) != genAt.Unix() {
+		t.Errorf("generated_timestamp = %v, want %d (from GeneratedAt, not now)", val, genAt.Unix())
 	}
 
 	// Track 1 WITNESSED
