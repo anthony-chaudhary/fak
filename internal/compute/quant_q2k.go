@@ -20,12 +20,28 @@ const q2kSuper = 256
 // HostBuffer.I8() view (one int8 per byte, value-preserving two's-complement reinterpret) — the
 // same layout cpuBackend.MatMul reads and backend Upload copies resident.
 func NewQ2K(be Backend, shape []int, raw []byte) Tensor {
+	if len(shape) != 2 || shape[0] <= 0 || shape[1] <= 0 || shape[1]%q2kSuper != 0 {
+		panic("compute: invalid Q2_K shape")
+	}
+	// Bound each multiplication before checking storage: wrapped products can
+	// otherwise admit an empty buffer for a large, nonempty tensor.
+	blocks := shape[1] / q2kSuper
+	maxInt := int(^uint(0) >> 1)
+	if blocks > maxInt/q2kSuperBlock || shape[0] > maxInt/(blocks*q2kSuperBlock) || len(raw) != shape[0]*blocks*q2kSuperBlock {
+		panic("compute: invalid Q2_K byte length")
+	}
 	return newRawKQuant(be, Q2_K, 2, q2kSuperBlock, shape, raw)
 }
 
 // q2kDequantSuperBlock writes the 256 weights of one 84-byte Q2_K super-block into dst (len >= 256).
 // Byte-for-byte ggufload.dequantQ2KScalar factored to one super-block.
 func q2kDequantSuperBlock(dst []float32, blk []byte) {
+	if len(blk) < q2kSuperBlock {
+		panic("compute: short Q2_K super-block")
+	}
+	if len(dst) < q2kSuper {
+		panic("compute: short destination for Q2_K dequant")
+	}
 	scales := blk[:q2kSuper/16]
 	q := blk[q2kSuper/16 : q2kSuper/16+q2kSuper/4]
 	dm := q2kSuper/16 + q2kSuper/4
@@ -74,6 +90,16 @@ func dequantQ2K(dst []float32, blk []byte) {
 // q2kRowDot computes one output element y[o] = dot(weight row, x) over a Q2_K weight row.
 // raw is the [in/256 * 84]-byte weight row.
 func q2kRowDot(raw []byte, x []float32, scratch []float32) float32 {
+	if len(raw)%q2kSuperBlock != 0 {
+		panic("compute: misaligned Q2_K raw weight row")
+	}
+	blocks := len(raw) / q2kSuperBlock
+	if len(x) < blocks*q2kSuper {
+		panic("compute: short input vector for Q2_K row dot")
+	}
+	if len(scratch) < q2kSuper {
+		panic("compute: short scratch buffer for Q2_K row dot")
+	}
 	var sum float32
 	for off, xi := 0, 0; off < len(raw); off, xi = off+q2kSuperBlock, xi+q2kSuper {
 		q2kDequantSuperBlock(scratch, raw[off:off+q2kSuperBlock])
