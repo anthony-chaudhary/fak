@@ -1500,3 +1500,142 @@ func TestAuditContextCancellationPartialReport(t *testing.T) {
 		t.Fatalf("WriteAuditMarkdown on pre-cancelled report: %v", err)
 	}
 }
+
+func TestAuditOpenCodeCoverageExplicit(t *testing.T) {
+	// Case 1: OpenCode directory present on disk
+	presentRoot := t.TempDir()
+	opencodeDir := filepath.Join(presentRoot, "opencode")
+	if err := os.MkdirAll(opencodeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	sourcesPresent := []AuditSource{
+		{Name: AuditSourceClaude, Root: filepath.Join("testdata", "audit", "claude", "projects"), RootLabel: "claude/projects"},
+		{Name: AuditSourceCodex, Root: filepath.Join("testdata", "audit", "codex", "sessions"), RootLabel: "codex/sessions"},
+		{Name: AuditSourceOpencode, Root: opencodeDir, RootLabel: "opencode/storage"},
+	}
+
+	resultPresent, err := RunAudit(AuditOptions{Sources: sourcesPresent})
+	if err != nil {
+		t.Fatalf("RunAudit (present) error: %v", err)
+	}
+
+	var opencodeDenomPresent *AuditDenominatorRow
+	for i := range resultPresent.Denominators {
+		if resultPresent.Denominators[i].Source == AuditSourceOpencode {
+			opencodeDenomPresent = &resultPresent.Denominators[i]
+			break
+		}
+	}
+	if opencodeDenomPresent == nil {
+		t.Fatalf("Denominators missing opencode entry; got: %+v", resultPresent.Denominators)
+	}
+	if !opencodeDenomPresent.RootPresent {
+		t.Errorf("expected RootPresent == true for present opencode directory, got false")
+	}
+	if !strings.Contains(strings.ToLower(opencodeDenomPresent.TokenSemantics), "unsupported") {
+		t.Errorf("expected TokenSemantics to mention 'unsupported', got %q", opencodeDenomPresent.TokenSemantics)
+	}
+	if opencodeDenomPresent.FilesDiscovered != 0 || opencodeDenomPresent.FilesScanned != 0 {
+		t.Errorf("expected 0 files scanned for unsupported opencode, got discovered=%d scanned=%d", opencodeDenomPresent.FilesDiscovered, opencodeDenomPresent.FilesScanned)
+	}
+
+	for _, transcript := range resultPresent.Transcripts {
+		if transcript.Source == AuditSourceOpencode {
+			t.Errorf("expected 0 fake OpenCode transcripts, but found transcript with ID %q", transcript.TranscriptID)
+		}
+	}
+
+	// Case 2: OpenCode directory absent from disk
+	absentDir := filepath.Join(t.TempDir(), "nonexistent_opencode_storage")
+	sourcesAbsent := []AuditSource{
+		{Name: AuditSourceClaude, Root: filepath.Join("testdata", "audit", "claude", "projects"), RootLabel: "claude/projects"},
+		{Name: AuditSourceCodex, Root: filepath.Join("testdata", "audit", "codex", "sessions"), RootLabel: "codex/sessions"},
+		{Name: AuditSourceOpencode, Root: absentDir, RootLabel: "opencode/storage"},
+	}
+
+	resultAbsent, err := RunAudit(AuditOptions{Sources: sourcesAbsent})
+	if err != nil {
+		t.Fatalf("RunAudit (absent) error: %v", err)
+	}
+
+	var opencodeDenomAbsent *AuditDenominatorRow
+	for i := range resultAbsent.Denominators {
+		if resultAbsent.Denominators[i].Source == AuditSourceOpencode {
+			opencodeDenomAbsent = &resultAbsent.Denominators[i]
+			break
+		}
+	}
+	if opencodeDenomAbsent == nil {
+		t.Fatalf("Denominators missing opencode entry when absent; got: %+v", resultAbsent.Denominators)
+	}
+	if opencodeDenomAbsent.RootPresent {
+		t.Errorf("expected RootPresent == false for absent opencode directory, got true")
+	}
+	if !strings.Contains(strings.ToLower(opencodeDenomAbsent.TokenSemantics), "unsupported") {
+		t.Errorf("expected TokenSemantics to mention 'unsupported', got %q", opencodeDenomAbsent.TokenSemantics)
+	}
+	if opencodeDenomAbsent.RefusedRecords != 0 {
+		t.Errorf("expected RefusedRecords == 0 when absent, got %d", opencodeDenomAbsent.RefusedRecords)
+	}
+	for _, refusal := range resultAbsent.Refusals {
+		if refusal.Source == AuditSourceOpencode {
+			t.Errorf("expected no OpenCode refusal when directory is absent, got: %+v", refusal)
+		}
+	}
+	for _, transcript := range resultAbsent.Transcripts {
+		if transcript.Source == AuditSourceOpencode {
+			t.Errorf("expected 0 fake OpenCode transcripts when absent, found: %q", transcript.TranscriptID)
+		}
+	}
+
+	// Case 3: DefaultAuditSources discovery tests
+	home, _ := os.UserHomeDir()
+	customHome := filepath.Join(t.TempDir(), "custom-opencode")
+	t.Setenv("OPENCODE_HOME", customHome)
+	sources := DefaultAuditSources()
+	var opencodeSource *AuditSource
+	for i := range sources {
+		if sources[i].Name == AuditSourceOpencode {
+			opencodeSource = &sources[i]
+			break
+		}
+	}
+	if opencodeSource == nil {
+		t.Fatalf("DefaultAuditSources() missing opencode source")
+	}
+	if opencodeSource.Root != customHome {
+		t.Errorf("DefaultAuditSources() with OPENCODE_HOME = %q, want %q", opencodeSource.Root, customHome)
+	}
+	if opencodeSource.RootLabel != "opencode/storage" {
+		t.Errorf("DefaultAuditSources() RootLabel = %q, want opencode/storage", opencodeSource.RootLabel)
+	}
+
+	t.Setenv("OPENCODE_HOME", "")
+	customXDG := filepath.Join(t.TempDir(), "custom-xdg")
+	t.Setenv("XDG_DATA_HOME", customXDG)
+	sources = DefaultAuditSources()
+	for i := range sources {
+		if sources[i].Name == AuditSourceOpencode {
+			opencodeSource = &sources[i]
+			break
+		}
+	}
+	if opencodeSource.Root != filepath.Join(customXDG, "opencode") {
+		t.Errorf("DefaultAuditSources() with XDG_DATA_HOME = %q, want %q", opencodeSource.Root, filepath.Join(customXDG, "opencode"))
+	}
+
+	t.Setenv("OPENCODE_HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	sources = DefaultAuditSources()
+	for i := range sources {
+		if sources[i].Name == AuditSourceOpencode {
+			opencodeSource = &sources[i]
+			break
+		}
+	}
+	expectedDefault := filepath.Join(home, ".local", "share", "opencode")
+	if opencodeSource.Root != expectedDefault {
+		t.Errorf("DefaultAuditSources() fallback = %q, want %q", opencodeSource.Root, expectedDefault)
+	}
+}

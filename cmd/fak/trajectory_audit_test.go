@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -301,7 +302,7 @@ func TestRunTrajectoryAuditSnapshotCaptureDeleteRootsReplay(t *testing.T) {
 			t.Fatalf("manifest leaked %q: %s", forbidden, manifest)
 		}
 	}
-	if info, err := os.Stat(snapshot); err != nil || info.Mode().Perm() != 0o700 {
+	if info, err := os.Stat(snapshot); err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o700) {
 		t.Fatalf("snapshot mode = %v err=%v", info.Mode().Perm(), err)
 	}
 	if err := os.RemoveAll(filepath.Dir(claudeRoot)); err != nil {
@@ -421,7 +422,7 @@ func TestRunTrajectoryAuditSnapshotUsageLedgerAndFold(t *testing.T) {
 			t.Fatalf("usage ledger leaked %q: %s", forbidden, payload)
 		}
 	}
-	if info, err := os.Stat(ledger); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(ledger); err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o600) {
 		t.Fatalf("ledger mode=%v err=%v", info.Mode().Perm(), err)
 	}
 	stdout.Reset()

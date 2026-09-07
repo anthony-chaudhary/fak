@@ -106,6 +106,7 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 	userContains := flags.String("user-contains", "", "keep transcripts whose user-authored prompts contain this case-insensitive literal")
 	claudeRoot := flags.String("claude-root", "", "override Claude projects root")
 	codexRoot := flags.String("codex-root", "", "override Codex sessions root")
+	opencodeRoot := flags.String("opencode-root", "", "override the opencode storage root")
 	snapshotOut := flags.String("snapshot-out", "", "capture selected private inputs into a new replayable snapshot directory")
 	snapshot := flags.String("snapshot", "", "verify and replay a private audit snapshot without reading live roots")
 	snapshotUsageLedger := flags.String("snapshot-usage-ledger", "", "append privacy-safe capture/replay outcomes to this explicit JSONL file")
@@ -177,7 +178,7 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 		return finish(trajectoryAuditSnapshotFlagRefusal(stderr, "--snapshot-out and --snapshot are mutually exclusive"), "refused", "SNAPSHOT_FLAGS_INCOMPATIBLE")
 	}
 	if strings.TrimSpace(*snapshot) != "" {
-		for _, name := range []string{"since", "user-contains", "claude-root", "codex-root", "baseline"} {
+		for _, name := range []string{"since", "user-contains", "claude-root", "codex-root", "opencode-root", "baseline"} {
 			if explicit[name] {
 				return finish(trajectoryAuditSnapshotFlagRefusal(stderr, "--snapshot rejects live selection flag --"+name), "refused", "SNAPSHOT_FLAGS_INCOMPATIBLE")
 			}
@@ -193,6 +194,7 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 	}
 
 	sources := trajectory.DefaultAuditSources()
+	opencodeFound := false
 	for i := range sources {
 		switch sources[i].Name {
 		case trajectory.AuditSourceClaude:
@@ -203,7 +205,19 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 			if strings.TrimSpace(*codexRoot) != "" {
 				sources[i].Root = *codexRoot
 			}
+		case trajectory.AuditSourceOpencode:
+			opencodeFound = true
+			if strings.TrimSpace(*opencodeRoot) != "" {
+				sources[i].Root = *opencodeRoot
+			}
 		}
+	}
+	if strings.TrimSpace(*opencodeRoot) != "" && !opencodeFound {
+		sources = append(sources, trajectory.AuditSource{
+			Name:      trajectory.AuditSourceOpencode,
+			Root:      *opencodeRoot,
+			RootLabel: "opencode/storage",
+		})
 	}
 	var baseline *trajectory.AuditSummaryRow
 	if strings.TrimSpace(*baselinePath) != "" {
