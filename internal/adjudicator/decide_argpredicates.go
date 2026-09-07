@@ -118,6 +118,9 @@ func evalDenyRegexArgRule(pr *ArgPredicate, val string, present bool, note func(
 	if v, denied, claimed := evalDeviceOpArgRule(pr, val, present, note); claimed {
 		return v, denied
 	}
+	if v, denied, claimed := evalGitPushArgRule(pr, val, present, note); claimed {
+		return v, denied
+	}
 	// Every OTHER deny_regex rule matches the CANONICAL form (#2407): the raw
 	// arg string alone let a backslash, dot-segment, env-alias, or quote-style
 	// spelling of the same value slip a rule written against its canonical
@@ -375,6 +378,31 @@ func evalDeviceOpArgRule(pr *ArgPredicate, val string, present bool, note func(*
 		return commandPerformsDeviceOperation(raw) || commandPerformsDeviceOperation(canon)
 	})
 	return verdict, denied, handled
+}
+
+// evalGitPushArgRule claims the git push family, decided STRUCTURALLY by
+// resolving executed command words so that quoted mentions in commit messages,
+// grep patterns, echo statements, and inert heredocs are admitted.
+// Returns (verdict, denied, claimed).
+func evalGitPushArgRule(pr *ArgPredicate, val string, present bool, note func(*ArgPredicate, string)) (abi.Verdict, bool, bool) {
+	if !isGitPushArgRule(pr) {
+		return abi.Verdict{}, false, false
+	}
+	if !present {
+		return abi.Verdict{}, false, true
+	}
+	canon, ok := canonicalizeArgValue(val)
+	if !ok {
+		return argMalformed(pr), true, true
+	}
+	if commandExecutesGitPush(val) || commandExecutesGitPush(canon) {
+		if pr.Advisory {
+			note(pr, "git_push invocation blocked by capability floor")
+			return abi.Verdict{}, false, true
+		}
+		return argDeny(pr, "git_push invocation blocked by capability floor"), true, true
+	}
+	return abi.Verdict{}, false, true
 }
 
 // canonicalArgRegexMatch decodes a rule argument once and reports whether the
