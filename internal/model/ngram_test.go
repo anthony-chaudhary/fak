@@ -343,10 +343,14 @@ func TestNgramAVX512BitIdenticalToScalar(t *testing.T) {
 				}
 			}
 
-			// Verify Draft(history) matches tree.Tokens
+			// Verify Draft(history) matches the most recent branch
 			draftTokens := d.Draft(history)
-			if !reflect.DeepEqual(draftTokens, treeAVX.Tokens) {
-				t.Fatalf("size=%d Draft() tokens %v != DraftTree() tokens %v", size, draftTokens, treeAVX.Tokens)
+			var latestBranch []int
+			if len(treeAVX.Branches) > 0 {
+				latestBranch = treeAVX.Branches[len(treeAVX.Branches)-1]
+			}
+			if !reflect.DeepEqual(draftTokens, latestBranch) {
+				t.Fatalf("size=%d Draft() tokens %v != latest branch %v", size, draftTokens, latestBranch)
 			}
 		}
 
@@ -449,4 +453,196 @@ func ngramEqualInts(a, b []int) bool {
 		}
 	}
 	return true
+}
+
+func TestNgramDrafterBackwardMatchPreference(t *testing.T) {
+	// A phrase appears multiple times in context with different continuations:
+	// Occurrence 1 (earliest): [10, 20, 30] followed by [100, 101, 102]
+	// Occurrence 2 (middle):   [10, 20, 30] followed by [200, 201, 202]
+	// Occurrence 3 (latest):   [10, 20, 30] followed by [300, 301, 302]
+	// Current suffix:          [10, 20, 30]
+	history := []int{
+		10, 20, 30, 100, 101, 102,
+		99,
+		10, 20, 30, 200, 201, 202,
+		98,
+		10, 20, 30, 300, 301, 302,
+		97,
+		10, 20, 30,
+	}
+
+	d := NgramDrafter{
+		Enabled:  true,
+		MinMatch: 3,
+		MaxMatch: 3,
+		MaxDraft: 3,
+	}
+
+	got := d.Draft(history)
+	want := []int{300, 301, 302}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Draft got %v, want continuation from most recent match %v", got, want)
+	}
+
+	// Also verify with MinN / MaxN aliases
+	dAliases := NgramDrafter{
+		Enabled:  true,
+		MinN:     3,
+		MaxN:     3,
+		MaxDraft: 3,
+	}
+	gotAliases := dAliases.Draft(history)
+	if !reflect.DeepEqual(gotAliases, want) {
+		t.Fatalf("Draft with MinN/MaxN got %v, want %v", gotAliases, want)
+	}
+}
+
+func TestNgramDrafterAdaptiveBlockExpansion(t *testing.T) {
+	d := NgramDrafter{
+		Enabled:           true,
+		MinN:              3,
+		MaxN:              5,
+		MaxDraft:          4,
+		AdaptiveExpansion: true,
+		MaxAdaptiveDraft:  16,
+	}
+
+	// Baseline draft length should be 4
+	if eff := d.EffectiveDraftLen(); eff != 4 {
+		t.Fatalf("initial EffectiveDraftLen = %d, want 4", eff)
+	}
+
+	// Saturated round 1: 4 proposed, 4 accepted -> expands to 8
+	d.RecordVerificationResult(4, 4)
+	if d.ConsecutiveHits != 1 || d.ConsecutiveSaturatedRounds != 1 {
+		t.Fatalf("after round 1, ConsecutiveHits = %d, want 1", d.ConsecutiveHits)
+	}
+	if eff := d.EffectiveDraftLen(); eff != 8 {
+		t.Fatalf("after round 1, EffectiveDraftLen = %d, want 8", eff)
+	}
+
+	// Saturated round 2: 8 proposed, 8 accepted -> expands to 12
+	d.RecordVerificationResult(8, 8)
+	if d.ConsecutiveHits != 2 || d.ConsecutiveSaturatedRounds != 2 {
+		t.Fatalf("after round 2, ConsecutiveHits = %d, want 2", d.ConsecutiveHits)
+	}
+	if eff := d.EffectiveDraftLen(); eff != 12 {
+		t.Fatalf("after round 2, EffectiveDraftLen = %d, want 12", eff)
+	}
+
+	// Saturated round 3: 12 proposed, 12 accepted -> expands to 16
+	d.RecordVerificationResult(12, 12)
+	if d.ConsecutiveHits != 3 || d.ConsecutiveSaturatedRounds != 3 {
+		t.Fatalf("after round 3, ConsecutiveHits = %d, want 3", d.ConsecutiveHits)
+	}
+	if eff := d.EffectiveDraftLen(); eff != 16 {
+		t.Fatalf("after round 3, EffectiveDraftLen = %d, want 16", eff)
+	}
+
+	// Saturated round 4: 16 proposed, 16 accepted -> capped at MaxAdaptiveDraft (16)
+	d.RecordVerificationResult(16, 16)
+	if d.ConsecutiveHits != 4 || d.ConsecutiveSaturatedRounds != 4 {
+		t.Fatalf("after round 4, ConsecutiveHits = %d, want 4", d.ConsecutiveHits)
+	}
+	if eff := d.EffectiveDraftLen(); eff != 16 {
+		t.Fatalf("after round 4 capped, EffectiveDraftLen = %d, want 16", eff)
+	}
+
+	// Verify Draft() actually proposes up to 16 tokens when context allows
+	history := make([]int, 0, 50)
+	history = append(history, 1, 2, 3)
+	for i := 100; i < 120; i++ {
+		history = append(history, i)
+	}
+	history = append(history, 999, 1, 2, 3)
+
+	draft := d.Draft(history)
+	if len(draft) != 16 {
+		t.Fatalf("Draft length = %d, want 16 (expanded)", len(draft))
+	}
+	for i := 0; i < 16; i++ {
+		if draft[i] != 100+i {
+			t.Fatalf("draft[%d] = %d, want %d", i, draft[i], 100+i)
+		}
+	}
+}
+
+func TestNgramDrafterAdaptiveContractionUponRejection(t *testing.T) {
+	d := NgramDrafter{
+		Enabled:           true,
+		MinN:              3,
+		MaxN:              5,
+		MaxDraft:          4,
+		AdaptiveExpansion: true,
+		MaxAdaptiveDraft:  16,
+	}
+
+	// Expand to 16
+	d.RecordVerificationResult(4, 4)
+	d.RecordVerificationResult(8, 8)
+	d.RecordVerificationResult(12, 12)
+	if eff := d.EffectiveDraftLen(); eff != 16 {
+		t.Fatalf("EffectiveDraftLen before rejection = %d, want 16", eff)
+	}
+
+	// Case 1: Partial acceptance (short match): 10 accepted out of 16 -> resets to baseline 4
+	d.RecordVerificationResult(10, 16)
+	if d.ConsecutiveHits != 0 || d.ConsecutiveSaturatedRounds != 0 {
+		t.Fatalf("after partial match, ConsecutiveHits = %d, want 0", d.ConsecutiveHits)
+	}
+	if eff := d.EffectiveDraftLen(); eff != 4 {
+		t.Fatalf("after partial match, EffectiveDraftLen = %d, want baseline 4", eff)
+	}
+
+	// Expand again to 8
+	d.RecordVerificationResult(4, 4)
+	if eff := d.EffectiveDraftLen(); eff != 8 {
+		t.Fatalf("EffectiveDraftLen = %d, want 8", eff)
+	}
+
+	// Case 2: Zero acceptance: 0 accepted out of 8 -> resets to baseline 4
+	d.RecordVerificationResult(0, 8)
+	if d.ConsecutiveHits != 0 || d.ConsecutiveSaturatedRounds != 0 {
+		t.Fatalf("after zero acceptance, ConsecutiveHits = %d, want 0", d.ConsecutiveHits)
+	}
+	if eff := d.EffectiveDraftLen(); eff != 4 {
+		t.Fatalf("after zero acceptance, EffectiveDraftLen = %d, want baseline 4", eff)
+	}
+
+	// Case 3: Draft proposed with baseline
+	history := make([]int, 0, 50)
+	history = append(history, 1, 2, 3)
+	for i := 100; i < 120; i++ {
+		history = append(history, i)
+	}
+	history = append(history, 999, 1, 2, 3)
+
+	draft := d.Draft(history)
+	if len(draft) != 4 {
+		t.Fatalf("Draft length after reset = %d, want 4 (baseline)", len(draft))
+	}
+}
+
+func TestNgramDrafterAdaptiveDisabled(t *testing.T) {
+	d := NgramDrafter{
+		Enabled:           true,
+		MinN:              3,
+		MaxN:              5,
+		MaxDraft:          4,
+		AdaptiveExpansion: false,
+		MaxAdaptiveDraft:  16,
+	}
+
+	// When adaptive expansion is disabled, EffectiveDraftLen stays at baseline
+	if eff := d.EffectiveDraftLen(); eff != 4 {
+		t.Fatalf("EffectiveDraftLen = %d, want 4", eff)
+	}
+
+	d.RecordVerificationResult(4, 4)
+	if d.ConsecutiveHits != 1 {
+		t.Fatalf("ConsecutiveHits = %d, want 1", d.ConsecutiveHits)
+	}
+	if eff := d.EffectiveDraftLen(); eff != 4 {
+		t.Fatalf("EffectiveDraftLen = %d, want 4 when adaptive is disabled", eff)
+	}
 }
