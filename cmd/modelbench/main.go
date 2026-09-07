@@ -80,9 +80,12 @@ func loadModel(f *benchFlags, lp *ggufload.LoadProfiler) (*model.Model, string, 
 func loadModelContext(ctx context.Context, f *benchFlags, lp *ggufload.LoadProfiler) (*model.Model, string, error) {
 	if *f.q4k {
 		if *f.backendName != "legacy" {
-			// Match serve: dense formats without a HAL path must remain reachable
-			// through Q8. Eligible Q4_K payloads retain their original encoding.
+			// Dense formats without a HAL path must remain reachable through Q8.
+			// Vulkan also retains eligible Q2_K payloads for its native kernel.
 			opts := []ggufload.Q4KLoadOption{ggufload.WithDenseKQuantResident(false)}
+			if *f.backendName == "vulkan" {
+				opts = append(opts, ggufload.WithDenseQ2KResident(true))
+			}
 			loader := ggufload.LoadModelQ4KProfileOptionsContext
 			label := " [gguf-q4k]"
 			if streamQ4KEnabled(f) {
@@ -371,8 +374,13 @@ func describeEngine(f *benchFlags, be compute.Backend, registeredBackends []stri
 			"registered_backends": registeredBackends,
 		}
 		if *f.q4k {
-			precision = "resident Q4_K + dense non-Q4_K converted to Q8"
-			backendReport["dense_non_q4k_load"] = "dequantize then quantize to Q8; source encoding not retained"
+			if *f.backendName == "vulkan" {
+				precision = "resident Q4_K/Q2_K + unsupported dense formats converted to Q8"
+				backendReport["dense_non_q4k_load"] = "retain eligible Q2_K; dequantize other dense formats then quantize to Q8"
+			} else {
+				precision = "resident Q4_K + dense non-Q4_K converted to Q8"
+				backendReport["dense_non_q4k_load"] = "dequantize then quantize to Q8; source encoding not retained"
+			}
 			backendReport["fit_estimate"] = "conservative full-F32 upper bound; not actual resident bytes"
 		}
 	}

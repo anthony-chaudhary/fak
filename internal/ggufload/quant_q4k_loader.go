@@ -64,6 +64,7 @@ type q4kLoadOptions struct {
 	expertShardSet      bool
 	expertShard         ExpertShard
 	residentDenseKQuant bool
+	residentDenseQ2K    bool
 	streamedExperts     bool
 	streamedExpertBytes int64
 	streamedDenseQ4K    bool
@@ -77,6 +78,13 @@ type Q4KLoadOption func(*q4kLoadOptions)
 // tensors follow the proven dequant-to-Q8 path instead of becoming unreachable at decode.
 func WithDenseKQuantResident(enabled bool) Q4KLoadOption {
 	return func(o *q4kLoadOptions) { o.residentDenseKQuant = enabled }
+}
+
+// WithDenseQ2KResident retains eligible dense Q2_K tensors even when blanket dense
+// k-quant residency is disabled. This lets a backend with a Q2_K HAL path avoid the
+// dequant-to-Q8 round trip without stranding unsupported IQ/Q3 formats.
+func WithDenseQ2KResident(enabled bool) Q4KLoadOption {
+	return func(o *q4kLoadOptions) { o.residentDenseQ2K = enabled }
 }
 
 // WithExpertShard keeps only routed experts in [lo,hi) when splitting batched MoE expert GGUF
@@ -653,7 +661,8 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 		tw.acctResident = true
 		return tw
 	}
-	if _, _, residentable := residentExpertBlockGeometry(info.Type); loadOpts.residentDenseKQuant && residentable &&
+	retainDenseKQuant := loadOpts.residentDenseKQuant || (loadOpts.residentDenseQ2K && info.Type == TensorQ2_K)
+	if _, _, residentable := residentExpertBlockGeometry(info.Type); retainDenseKQuant && residentable &&
 		info.Type != TensorQ4_K && !archUsesMLAMoELayout(cfg.ModelType) &&
 		model.ResidentKQuantEligible(cfg, canon) {
 		tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
