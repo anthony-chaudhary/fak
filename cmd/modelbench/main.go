@@ -380,14 +380,27 @@ func describeEngine(f *benchFlags, be compute.Backend, registeredBackends []stri
 }
 
 func applyLegacySessionFlags(s *model.Session, f *benchFlags) {
-	s.Quant = *f.quant
-	s.Q4K = *f.q4k
-	s.Q4KGateUpOutputSlab = *f.q4kGateUpSlab
-	if *f.q4k {
-		s.MetalQ4K = *f.metal
+	if f == nil {
 		return
 	}
-	s.Metal = *f.metal
+	if f.quant != nil {
+		s.Quant = *f.quant
+	}
+	if f.q4k != nil {
+		s.Q4K = *f.q4k
+	}
+	if f.q4kGateUpSlab != nil {
+		s.Q4KGateUpOutputSlab = *f.q4kGateUpSlab
+	}
+	if f.q4k != nil && *f.q4k {
+		if f.metal != nil {
+			s.MetalQ4K = *f.metal
+		}
+		return
+	}
+	if f.metal != nil {
+		s.Metal = *f.metal
+	}
 }
 
 // Smoke and timed execution must use the same backend and resident-weight flags.
@@ -399,9 +412,17 @@ func newBenchSession(m *model.Model, f *benchFlags, be compute.Backend) *model.S
 		return s
 	}
 	s := m.NewBackendSession(be)
-	s.Quant = *f.quant || *f.q4k
-	s.Q4K = *f.q4k
-	s.Q4KGateUpOutputSlab = *f.q4kGateUpSlab
+	if f != nil {
+		quant := f.quant != nil && *f.quant
+		q4k := f.q4k != nil && *f.q4k
+		s.Quant = quant || q4k
+		if f.q4k != nil {
+			s.Q4K = *f.q4k
+		}
+		if f.q4kGateUpSlab != nil {
+			s.Q4KGateUpOutputSlab = *f.q4kGateUpSlab
+		}
+	}
 	return s
 }
 
@@ -1140,6 +1161,12 @@ func assembleBenchReport(f *benchFlags, be compute.Backend, registeredBackends [
 func main() {
 	f := parseFlags()
 	validateFlags(f)
+	if rawDecodeEnabled() {
+		if err := validateRawDecodeFlags(f); err != nil {
+			fmt.Fprintln(os.Stderr, "flags:", err)
+			f.exit(2)
+		}
+	}
 	if maybeCompareNativeProfiles(f) {
 		return
 	}
@@ -1219,6 +1246,13 @@ func main() {
 	// whole grid is set up. The load already happened under -smoke-deadline above.
 	if *f.smoke {
 		runSmoke(f, m, modelName, loadMS, vocab)
+		return
+	}
+	if rawDecodeEnabled() {
+		if err := runRawDecode(f, m, modelName, loadMS, be, registeredBackends); err != nil {
+			fmt.Fprintln(os.Stderr, "raw decode:", err)
+			f.exit(1)
+		}
 		return
 	}
 	newSession := func() *model.Session {
