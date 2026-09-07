@@ -1,3 +1,5 @@
+//go:build wip_subkernels
+
 package amdgpu
 
 import (

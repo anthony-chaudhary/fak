@@ -20,11 +20,15 @@ type StrixValidationReceipt struct {
 	Verdict    string                 `json:"verdict"` // PASS | FAIL | SKIPPED
 	Target     StrixTarget            `json:"target"`
 	Provenance StrixProvenance        `json:"provenance"`
-	Subkernels []StrixSubkernelResult `json:"subkernels,omitempty"`
-	Ablations  []StrixAblationResult  `json:"ablations,omitempty"`
-	Failures   []string               `json:"failures,omitempty"`
-	Digest     string                 `json:"digest,omitempty"`
-	Verified   bool                   `json:"verified"`
+	SelectedCount      int                    `json:"selected_count,omitempty"`
+	ExecutedCount      int                    `json:"executed_count,omitempty"`
+	SelectedSubkernels int                    `json:"selected_subkernels,omitempty"`
+	ExecutedSubkernels int                    `json:"executed_subkernels,omitempty"`
+	Subkernels         []StrixSubkernelResult `json:"subkernels,omitempty"`
+	Ablations          []StrixAblationResult  `json:"ablations,omitempty"`
+	Failures           []string               `json:"failures,omitempty"`
+	Digest             string                 `json:"digest,omitempty"`
+	Verified           bool                   `json:"verified"`
 }
 
 // StrixProvenance records the software revision, command, and run mode.
@@ -114,6 +118,12 @@ func (r *StrixValidationReceipt) Validate() error {
 			if sk.Status == "FAIL" {
 				return fmt.Errorf("verdict is PASS but subkernel %q failed: %s", sk.Name, sk.Error)
 			}
+		}
+		if (r.SelectedCount > 0 && r.ExecutedCount == 0) || (r.SelectedSubkernels > 0 && r.ExecutedSubkernels == 0) {
+			return fmt.Errorf("verdict is PASS but subkernels were selected and 0 were executed")
+		}
+		if len(r.Failures) > 0 {
+			return fmt.Errorf("verdict is PASS but receipt contains failures: %s", strings.Join(r.Failures, "; "))
 		}
 		for _, ab := range r.Ablations {
 			if ab.Verdict == "REGRESSION" {

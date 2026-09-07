@@ -1,6 +1,7 @@
 package amdgpu
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"strings"
@@ -88,6 +89,7 @@ func TestStrixValidationBenchmarkArtifact(t *testing.T) {
 		if err != nil {
 			t.Skipf("benchmark artifact not found at %s: %v", artifactPath, err)
 		}
+		data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
 
 		var receipt StrixValidationReceipt
 		if err := json.Unmarshal(data, &receipt); err != nil {

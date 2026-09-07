@@ -59,7 +59,7 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	receipt, err := amdgpu.RunStrixValidation(ctx, opts)
-	if err != nil && (receipt == nil || receipt.Verdict == "FAIL") {
+	if err != nil {
 		if receipt != nil && *asJSON {
 			data, _ := json.MarshalIndent(receipt, "", "  ")
 			fmt.Fprintln(stdout, string(data))
@@ -68,10 +68,15 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
+	if receipt == nil {
+		fmt.Fprintf(stderr, "amd-strix-validate: validation failed: no receipt generated\n")
+		return 1
+	}
+
 	if *asJSON {
 		data, _ := json.MarshalIndent(receipt, "", "  ")
 		fmt.Fprintln(stdout, string(data))
-		if receipt.Verdict == "PASS" {
+		if receipt.Verdict == "PASS" && receipt.Verified && len(receipt.Failures) == 0 {
 			return 0
 		}
 		return 1
@@ -106,9 +111,16 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stdout, "  * %-28s [%s] speedup: %6.1fx (baseline: %d µs, candidate: %d µs)\n",
 			ab.Feature, ab.Verdict, ab.Speedup, ab.BaselineArm.LatencyUS, ab.CandidateArm.LatencyUS)
 	}
+	if len(receipt.Failures) > 0 {
+		fmt.Fprintf(stdout, "--------------------------------------------------------------------------------\n")
+		fmt.Fprintf(stdout, "Failures (%d):\n", len(receipt.Failures))
+		for _, f := range receipt.Failures {
+			fmt.Fprintf(stdout, "  * %s\n", f)
+		}
+	}
 	fmt.Fprintf(stdout, "================================================================================\n\n")
 
-	if receipt.Verdict == "PASS" {
+	if receipt.Verdict == "PASS" && receipt.Verified && len(receipt.Failures) == 0 {
 		return 0
 	}
 	return 1
