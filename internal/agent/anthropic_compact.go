@@ -252,6 +252,9 @@ type CompactOptions struct {
 	// from a guess: a false cold claim converts a warm cache read into a cold re-write.
 	ColdCache bool
 
+	// RestoreStash optionally receives content-addressed drops for CAS storage.
+	RestoreStash func(id, excerpt string, body []byte)
+
 	// PositiveResidue opts into conservative positive-state extraction. It is off by default.
 	PositiveResidue bool
 	// MinHorizonMargin is the fed-back fire/bail threshold (#2817): the EXTRA predicted headroom,

@@ -515,6 +515,12 @@ type SampleParams struct {
 	// NativeDecodeTokenIDs requests the lightweight token-ID companion to a decode
 	// trace. It is valid only when DecodeTrace is also requested.
 	NativeDecodeTokenIDs bool
+	// CompactHistoryBudget overrides the planner's configured compaction budget for this request.
+	CompactHistoryBudget *int
+	// ElideStaleReads overrides the planner's configured stale-read elision for this request.
+	ElideStaleReads *bool
+	// DeferColdTools overrides the planner's configured cold tool deferral for this request.
+	DeferColdTools *bool
 	// GuidedDecode carries provider-native guided-decode fields that are not part of
 	// the OpenAI core wire but are accepted by OpenAI-compatible ride engines such as
 	// vLLM/SGLang (`guided_json`, `guided_regex`, `guided_grammar`, `guided_choice`,

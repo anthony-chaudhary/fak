@@ -31,6 +31,9 @@ type InKernelPlannerConfig struct {
 	Qwen35MetalGDNSequence    bool
 	Q4KGateUpOutputSlab       bool
 	DenseGPULayers            int
+	CompactHistoryBudget      int
+	ElideStaleReads           bool
+	DeferColdTools            bool
 }
 
 // NewInKernelPlannerWithConfig is the explicit configuration constructor for native planning.
@@ -53,6 +56,9 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		qwenQ4KPrefillChunkConfigErr: prefillChunkErr,
 		qwen35MetalGDNSequence:       cfg.Qwen35MetalGDNSequence,
 		q4kGateUpOutputSlab:          cfg.Q4KGateUpOutputSlab,
+		compactHistoryBudget:         cfg.CompactHistoryBudget,
+		elideStaleReads:              cfg.ElideStaleReads,
+		deferColdTools:               cfg.DeferColdTools,
 	}
 	if backend == nil && metal {
 		m.PrepareMetalResidency(q4k)
@@ -103,6 +109,9 @@ func (p *InKernelPlanner) RuntimeConfig() InKernelPlannerConfig {
 		Qwen35MetalGDNSequence:    p.qwen35MetalGDNSequence,
 		Q4KGateUpOutputSlab:       p.q4kGateUpOutputSlab,
 		DenseGPULayers:            p.denseGPULayers,
+		CompactHistoryBudget:      p.compactHistoryBudget,
+		ElideStaleReads:           p.elideStaleReads,
+		DeferColdTools:            p.deferColdTools,
 	}
 }
 
