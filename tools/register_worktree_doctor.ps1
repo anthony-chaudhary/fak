@@ -63,6 +63,19 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ThisRepo  = (Resolve-Path (Join-Path $ScriptDir '..')).Path
 
+# Auto-detect sibling checkouts under the parent directory if -AlsoRepo is not specified by the caller
+if (-not $PSBoundParameters.ContainsKey('AlsoRepo')) {
+  $parent = Split-Path -Parent $ThisRepo
+  foreach ($siblingName in @('fak', 'fleet')) {
+    $sibling = Join-Path $parent $siblingName
+    if ((Test-Path (Join-Path $sibling '.git')) -and ($Repo -notcontains $sibling) -and ($sibling -ne $ThisRepo)) {
+      if ($AlsoRepo -notcontains $sibling) {
+        $AlsoRepo += $sibling
+      }
+    }
+  }
+}
+
 # Deduplicate target repositories in declaration order.
 $allRepos = @()
 foreach ($r in $Repo)     { if ($r -and $allRepos -notcontains $r) { $allRepos += $r } }
@@ -172,7 +185,7 @@ if ($EveryHours -gt 0) {
 }
 # StartWhenAvailable: a laptop asleep at $At still gets a catch-up run when it wakes.
 $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -MultipleInstances IgnoreNew
-$taskDesc     = "Keep this checkout at one-worktree-on-master, safely (worktree_doctor.py). Retains: $($AllowBranch -join ',')."
+$taskDesc     = "Keep fleet and fak checkouts at one-worktree-on-master, safely (worktree_doctor.py). Retains: $($AllowBranch -join ',')."
 # S4U (non-interactive, session 0), NOT the Register-ScheduledTask default (Interactive):
 # a console powershell.exe launched in the interactive session FLASHES a window on every
 # daily trigger -- one of the "random popup windows". -WindowStyle Hidden does NOT suppress
