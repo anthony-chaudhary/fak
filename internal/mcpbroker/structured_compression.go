@@ -8,9 +8,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
-
-	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 )
 
 const (
@@ -39,7 +38,7 @@ const (
 	// ReasonNoneligible indicates the content or result is not eligible for structured compression
 	// (e.g. content too small, no structured content, error result, multiple blocks, non-text, or mismatch).
 	ReasonNoneligible CompressionReason = "noneligible"
-	// ReasonPoison indicates the content was flagged by security screening (ctxmmu.ScreenBytes).
+	// ReasonPoison indicates the content was flagged by security screening.
 	ReasonPoison CompressionReason = "poison"
 	// ReasonMalformed indicates invalid JSON in result, content, block, or payload string.
 	ReasonMalformed CompressionReason = "malformed"
@@ -281,6 +280,27 @@ func ResolveEffectiveCompression(ctx context.Context, req CallRequest, sessionPo
 	return CompressionAuto
 }
 
+// ContentScreener reports whether body contains poison or prohibited content that must not be compressed.
+type ContentScreener func(body []byte) bool
+
+var (
+	contentScreenerMu sync.RWMutex
+	contentScreener   ContentScreener
+)
+
+// RegisterContentScreener sets the global default security screener for structured compression.
+func RegisterContentScreener(s ContentScreener) {
+	contentScreenerMu.Lock()
+	defer contentScreenerMu.Unlock()
+	contentScreener = s
+}
+
+func defaultContentScreener() ContentScreener {
+	contentScreenerMu.RLock()
+	defer contentScreenerMu.RUnlock()
+	return contentScreener
+}
+
 // CompressionOptions configures the execution of structured compression.
 type CompressionOptions struct {
 	Context       context.Context
@@ -289,6 +309,7 @@ type CompressionOptions struct {
 	ExactOriginal bool
 	SessionID     string
 	Store         *RestoreStore
+	Screener      ContentScreener
 }
 
 // CompressionOption is a functional option for CompactStructuredContentWithReceipt.
@@ -312,6 +333,13 @@ func WithOptOut(optOut bool) CompressionOption {
 func WithCompressionCodec(codec string) CompressionOption {
 	return func(o *CompressionOptions) {
 		o.Codec = codec
+	}
+}
+
+// WithContentScreener sets a custom security screener for structured compression.
+func WithContentScreener(s ContentScreener) CompressionOption {
+	return func(o *CompressionOptions) {
+		o.Screener = s
 	}
 }
 
@@ -453,7 +481,11 @@ func CompactStructuredContentWithReceipt(result, content json.RawMessage, opts .
 	}
 
 	// 11. Security screening: ScreenBytes must not be hidden
-	if _, held := ctxmmu.ScreenBytes([]byte(original)); held {
+	screener := options.Screener
+	if screener == nil {
+		screener = defaultContentScreener()
+	}
+	if screener != nil && screener([]byte(original)) {
 		return content, makeReceipt(ReasonPoison, inputLen, 0, "")
 	}
 

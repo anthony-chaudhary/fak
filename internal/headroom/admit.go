@@ -8,7 +8,15 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
+	"github.com/anthony-chaudhary/fak/internal/mcpbroker"
 )
+
+func init() {
+	mcpbroker.RegisterContentScreener(func(body []byte) bool {
+		_, held := ctxmmu.ScreenBytes(body)
+		return held
+	})
+}
 
 // AdmitRank places the compression gate AFTER the de-obfuscation rescan (normgate,
 // rank 5) and as a peer just ahead of the context-MMU (ctxmmu, rank 10). At rank 8

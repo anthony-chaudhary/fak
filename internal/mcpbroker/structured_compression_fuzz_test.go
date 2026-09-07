@@ -10,6 +10,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 )
 
+func init() {
+	RegisterContentScreener(func(body []byte) bool {
+		_, held := ctxmmu.ScreenBytes(body)
+		return held
+	})
+}
+
 type compressionSeedCase struct {
 	name            string
 	result          []byte
@@ -810,6 +817,34 @@ func TestStructuredCompressionBounds(t *testing.T) {
 			if !bytes.Equal(out, cnt) {
 				t.Fatalf("FAK_COMPRESSOR=%q did not disable compression", envVal)
 			}
+		}
+	})
+
+	t.Run("screener_option_override", func(t *testing.T) {
+		pretty := "{\n" + strings.Repeat(" ", 100) + `"key":"custom_poison_test"` + "\n}"
+		compact := `{"key":"custom_poison_test"}`
+		cnt := []byte(makeFuzzBlock(pretty, ""))
+		res := []byte(makeFuzzResult(string(cnt), compact, ""))
+
+		// By default (with ctxmmu screener), custom_poison_test is not poison and should compress.
+		out, receipt := CompactStructuredContentWithReceipt(res, cnt)
+		if receipt.Reason != ReasonSaved {
+			t.Fatalf("expected ReasonSaved by default, got %v", receipt.Reason)
+		}
+		if bytes.Equal(out, cnt) {
+			t.Fatalf("expected compressed output, got identity")
+		}
+
+		// Per-call screener option overrides and flags as poison:
+		customScreener := func(body []byte) bool {
+			return bytes.Contains(body, []byte("custom_poison_test"))
+		}
+		outOpt, receiptOpt := CompactStructuredContentWithReceipt(res, cnt, WithContentScreener(customScreener))
+		if receiptOpt.Reason != ReasonPoison {
+			t.Fatalf("expected ReasonPoison with WithContentScreener, got %v", receiptOpt.Reason)
+		}
+		if !bytes.Equal(outOpt, cnt) {
+			t.Fatalf("expected identity output on poison")
 		}
 	})
 }
