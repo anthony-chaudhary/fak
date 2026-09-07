@@ -188,6 +188,11 @@ func hasDeletedMinePath(root string, paths []string) bool {
 }
 
 func ownedTestRunExpression(root string, paths []string) (string, error) {
+	for _, rel := range paths {
+		if rel != "" && !strings.HasSuffix(strings.ToLower(rel), "_test.go") {
+			return "", nil
+		}
+	}
 	seen := map[string]bool{}
 	var names []string
 	for _, rel := range paths {
