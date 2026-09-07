@@ -2,13 +2,9 @@ package gateway
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -21,47 +17,12 @@ const defaultStaleProtectTail = 6
 // transcripts. Only a Read result with a later same-path edit is replaced, the newest
 // working set is protected, and fak_context_restore retains the exact original.
 func (s *Server) maybeElideStaleReadMessages(trace string, messages []agent.Message) []agent.Message {
-	if s == nil || !s.elideStaleReads || len(messages) <= defaultStaleProtectTail {
+	if s == nil || !s.elideStaleReads {
 		return messages
 	}
-	out := append([]agent.Message(nil), messages...)
-	readPath := make(map[string]string)
-	lastEdit := make(map[string]int)
-	for i, msg := range messages {
-		for _, call := range msg.ToolCalls {
-			path := decodedToolPath(call.Function.Arguments)
-			if path == "" {
-				continue
-			}
-			switch strings.ToLower(call.Function.Name) {
-			case "read":
-				readPath[call.ID] = path
-			case "edit", "write", "multiedit", "notebookedit":
-				lastEdit[strings.ToLower(filepath.Clean(path))] = i
-			}
-		}
-	}
-	limit := len(messages) - defaultStaleProtectTail
-	for i := 0; i < limit; i++ {
-		msg := messages[i]
-		if msg.Role != agent.RoleTool || msg.ToolCallID == "" || msg.Content == "" {
-			continue
-		}
-		path := readPath[msg.ToolCallID]
-		if path == "" || lastEdit[strings.ToLower(filepath.Clean(path))] <= i {
-			continue
-		}
-		body := []byte(msg.Content)
-		sum := sha256.Sum256(body)
-		id := hex.EncodeToString(sum[:])
-		excerpt := strings.TrimSpace(msg.Content)
-		if len(excerpt) > 160 {
-			excerpt = excerpt[:160]
-		}
+	return agent.ElideStaleReadMessages(messages, func(id, excerpt string, body []byte) {
 		s.stashRestore(trace, id, excerpt, body)
-		out[i].Content = fmt.Sprintf("...[fak: this Read of %s was superseded by a later in-session edit and its body was elided to stay within the context budget; recover via fak_context_restore restore_id=%s]...", path, id)
-	}
-	return out
+	})
 }
 
 func decodedToolPath(arguments string) string {

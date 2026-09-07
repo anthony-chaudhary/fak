@@ -93,7 +93,7 @@ func serveBindReachesOffHost(addr string) bool {
 // failure. Reading presence here therefore never lets an unauthenticated listener bind
 // and never pre-empts the more precise diagnostic.
 func serveAuthConfigured(sf *serveFlags) bool {
-	return strings.TrimSpace(*sf.requireKeyEnv) != "" || len(sf.keyPrincipal.Values()) > 0
+	return strings.TrimSpace(*sf.requireKeyEnv) != "" || len(sf.keyPrincipal.Values()) > 0 || (sf.allowLAN != nil && *sf.allowLAN)
 }
 
 // serveBindRefusal returns the operator-facing refusal text for a listen address, or ""

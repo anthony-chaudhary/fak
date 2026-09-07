@@ -32,24 +32,40 @@ package gateway
 // lever-off session. The missing fact is not per-turn, it is per-WIRE, and that is what this
 // block carries.
 
-import "github.com/anthony-chaudhary/fak/internal/guardvars"
+import (
+	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/guardvars"
+)
 
 // The wire shape lives in internal/guardvars beside CacheAttributionVars and ManagedCacheVars
 // so the `fak info` pane and any scraper decode one definition rather than a hand-synced copy.
 type debugShrinkLeverVars = guardvars.ShrinkLeverVars
 
+// wireRunsShrinkLevers reports whether this server's wire runs prompt-shrink levers.
+// True for the Anthropic passthrough and for native in-kernel serving (InKernelPlanner).
+func (s *Server) wireRunsShrinkLevers() bool {
+	if s == nil {
+		return false
+	}
+	if s.anthropicPassthrough() {
+		return true
+	}
+	_, inKernel := s.planner.(*agent.InKernelPlanner)
+	return inKernel
+}
+
 // shrinkLeverVars builds the /debug/vars prompt-shrink-lever posture block from the resolved
-// wire (passthrough, the same predicate the three gates read; dualLocal; provider) and the
+// wire (wireRunsLevers, indicating whether the wire runs levers; dualLocal; provider) and the
 // three configured lever values as gateway.Config carries them.
 //
 // It returns nil — omitting the block — when no lever is configured ON at all, so a session
 // that opted out of all three stays quiet instead of rendering an empty object. Every other
-// case renders, including the healthy all-live passthrough: "which levers are live" is only a
-// useful answer if the surface is also present when the answer is a good one, otherwise the
+// case renders, including the healthy all-live passthrough or in-kernel wire: "which levers are live"
+// is only a useful answer if the surface is also present when the answer is a good one, otherwise the
 // block's presence alone becomes the finding and an operator learns to ignore it.
 //
 // Pure: flags in, block out. No planner call, no lock, no I/O.
-func shrinkLeverVars(passthrough, dualLocal bool, provider string, compactHistoryBudget int, elideStaleReads, deferColdTools bool) *debugShrinkLeverVars {
+func shrinkLeverVars(wireRunsLevers, dualLocal bool, provider string, compactHistoryBudget int, elideStaleReads, deferColdTools bool) *debugShrinkLeverVars {
 	// The order is fixed (compaction, stale-read elision, cold-tool defer) to match the
 	// startup admission's table, so the two surfaces name the levers in the same sequence.
 	configured := []struct {
@@ -60,12 +76,12 @@ func shrinkLeverVars(passthrough, dualLocal bool, provider string, compactHistor
 		{guardvars.ShrinkLeverElideStaleReads, elideStaleReads},
 		{guardvars.ShrinkLeverDeferColdTools, deferColdTools},
 	}
-	block := &debugShrinkLeverVars{WireRunsLevers: passthrough, Wire: provider, DualLocalRouting: dualLocal}
+	block := &debugShrinkLeverVars{WireRunsLevers: wireRunsLevers, Wire: provider, DualLocalRouting: dualLocal}
 	for _, l := range configured {
 		if !l.on {
 			continue
 		}
-		if passthrough {
+		if wireRunsLevers {
 			block.LiveOnWire = append(block.LiveOnWire, l.token)
 		} else {
 			block.InertOnWire = append(block.InertOnWire, l.token)

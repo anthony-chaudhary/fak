@@ -54,6 +54,9 @@ func applyServeManifestDefaults(sf *serveFlags, m deploymanifest.Manifest) {
 	if m.Present("auth", "require_key_env") {
 		*sf.requireKeyEnv = m.Auth.RequireKeyEnv
 	}
+	if m.Present("auth", "allow_lan") {
+		*sf.allowLAN = m.Auth.AllowLAN
+	}
 	if m.Present("budgets", "default_tokens") {
 		*sf.contextBudgetTokens = m.Budgets.DefaultTokens
 	}
@@ -108,6 +111,7 @@ func buildServeManifestSpecs() map[string]serveManifestSpec {
 		"agent_templates.dir":    {reason: "agent templates are started by the all-in-one orchestrator", nextAction: "use fak up when agent-template orchestration ships"},
 		"audit.journal":          {reason: "audit journal lifecycle belongs to the all-in-one orchestrator", nextAction: "use the existing serve audit controls until fak up owns this field"},
 		"audit.retention_days":   {reason: "retention requires the audit lifecycle manager", nextAction: "configure retention through the audit subsystem until fak up owns this field"},
+		"auth.allow_lan":         {flagName: "allow-lan", reason: "mapped directly to allow unauthenticated access from local network"},
 		"auth.require_key_env":   {flagName: "require-key-env", reason: "mapped directly to serve authentication"},
 		"budgets.default_tokens": {flagName: "context-budget-tokens", reason: "mapped directly to the default session token budget"},
 		"observability.bind":     {flagName: "addr", reason: "mapped directly to the serve listener"},
@@ -172,6 +176,7 @@ func effectiveServeConfig(sf *serveFlags, m deploymanifest.Manifest, hasManifest
 			"addr":                                 {Value: *sf.addr, Source: source("addr", "observability", "bind")},
 			"policy":                               {Value: *sf.policyPath, Source: source("policy", "policy", "floor")},
 			"require_key_env":                      {Value: *sf.requireKeyEnv, Source: source("require-key-env", "auth", "require_key_env")},
+			"allow_lan":                            {Value: *sf.allowLAN, Source: source("allow-lan", "auth", "allow_lan")},
 			"context_budget_tokens":                {Value: *sf.contextBudgetTokens, Source: source("context-budget-tokens", "budgets", "default_tokens")},
 			"native_qwen_q4k_prefill_chunk_tokens": {Value: *sf.nativeQwenQ4KPrefillChunk, Source: source(nativeQwenQ4KPrefillChunkFlag, "", "")},
 			"native_qwen35_metal_gdn_sequence":     {Value: *sf.nativeQwen35MetalGDNSequence, Source: source("native-qwen35-metal-gdn-sequence", "", "")},

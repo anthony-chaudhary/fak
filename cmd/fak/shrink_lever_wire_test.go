@@ -22,12 +22,12 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
 
-// TestClassifyShrinkWireMatrix pins the flag→wire classification against gateway.New's own
+// TestShrinkLeverWireClassification pins the flag→wire classification against gateway.New's own
 // planner switch: upstream URLs beat loaded weights (that pair is the dual planner, whose
 // proxy side is still the passthrough), 2+ upstreams route through the replica router and
 // so are NOT a passthrough even on the anthropic wire, and an unparseable provider stands
 // down to unknown so this rule never pre-empts gateway.New's precise refusal.
-func TestClassifyShrinkWireMatrix(t *testing.T) {
+func TestShrinkLeverWireClassification(t *testing.T) {
 	cases := []struct {
 		name     string
 		provider string
@@ -58,15 +58,15 @@ func TestClassifyShrinkWireMatrix(t *testing.T) {
 	}
 }
 
-// TestShrinkWireRunsLeversOnlyOnPassthroughOrUnknown pins the two admitting classes. An
+// TestShrinkLeverWireRunsLeversOnlyOnPassthroughOrUnknown pins the two admitting classes. An
 // unknown wire admits on purpose: an unproven classification must never refuse a boot.
-func TestShrinkWireRunsLeversOnlyOnPassthroughOrUnknown(t *testing.T) {
+func TestShrinkLeverWireRunsLeversOnlyOnPassthroughOrUnknown(t *testing.T) {
 	runs := map[string]bool{
 		shrinkWireAnthropicPassthrough: true,
+		shrinkWireInKernel:             true,
 		shrinkWireUnknown:              true,
 		shrinkWireForeignProxy:         false,
 		shrinkWireReplicaFleet:         false,
-		shrinkWireInKernel:             false,
 		shrinkWireMock:                 false,
 	}
 	for wire, want := range runs {
@@ -93,6 +93,9 @@ func TestInertShrinkLeversSelectsOnlyEnabledLeversOffTheWire(t *testing.T) {
 	}
 	if inert := inertShrinkLevers(shrinkWireAnthropicPassthrough, all); len(inert) != 0 {
 		t.Errorf("levers on the passthrough must never be inert, got %d: %v", len(inert), inert)
+	}
+	if inert := inertShrinkLevers(shrinkWireInKernel, all); len(inert) != 0 {
+		t.Errorf("levers on the in-kernel wire must never be inert, got %d: %v", len(inert), inert)
 	}
 	if inert := inertShrinkLevers(shrinkWireUnknown, all); len(inert) != 0 {
 		t.Errorf("an unclassified wire must admit everything, got %d: %v", len(inert), inert)
@@ -145,16 +148,16 @@ func TestShrinkLeverRefusalCarriesTokenLeverWireAndRemedy(t *testing.T) {
 // that prevents the ticket's second-order harm: a ~0-saving A/B on this wire is a verdict
 // on an unwired lever, not on the kernel.
 func TestShrinkLeverNoticeNamesTheFalseNull(t *testing.T) {
-	if got := shrinkLeverNotice(shrinkLeverServeCommand, shrinkWireInKernel, "openai", nil); got != "" {
+	if got := shrinkLeverNotice(shrinkLeverServeCommand, shrinkWireForeignProxy, "openai", nil); got != "" {
 		t.Errorf("no default-on inert lever must render no notice, got %q", got)
 	}
-	got := shrinkLeverNotice(shrinkLeverServeCommand, shrinkWireInKernel, "openai", []shrinkLever{{
+	got := shrinkLeverNotice(shrinkLeverServeCommand, shrinkWireForeignProxy, "openai", []shrinkLever{{
 		Flag: "--compact-history-budget", Token: "compact_history_budget",
 		Gate: "gateway.compactAnthropicRawWithReason", Off: "--compact-history-budget 0", On: true,
 	}})
 	for _, want := range []string{
 		shrinkLeverInertToken, "--compact-history-budget", "compact_history_budget",
-		"in-kernel planner", "A/B", "unwired lever",
+		"non-Anthropic proxy", "A/B", "unwired lever",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("notice must name %q; got:\n%s", want, got)
@@ -215,11 +218,16 @@ func TestAdmitServeShrinkLeversOnRealFlagSurface(t *testing.T) {
 			wantNone:  []string{"refusing to start"},
 		},
 		{
-			name:      "an in-kernel serve is the same self-hosted case and is named too",
+			name:      "an in-kernel serve supports prompt-shrink levers and admits silently on default levers",
 			argv:      []string{"-gguf", "/models/m.gguf"},
 			wantAdmit: true,
-			wantAll:   []string{shrinkLeverInertToken, "in-kernel planner"},
-			wantNone:  []string{"refusing to start"},
+			wantNone:  []string{shrinkLeverInertToken, "refusing to start", "NOTICE"},
+		},
+		{
+			name:      "explicit prompt-shrink levers are active and accepted on in-kernel serve wire",
+			argv:      []string{"-gguf", "/models/m.gguf", "-compact-history-budget", "32000", "-elide-stale-reads", "-defer-cold-tools"},
+			wantAdmit: true,
+			wantNone:  []string{shrinkLeverInertToken, "refusing to start", "NOTICE"},
 		},
 		{
 			name:      "a replica fleet is not a passthrough even on the anthropic wire",
@@ -490,13 +498,22 @@ func TestAdmitGuardShrinkLeversOnResolvedGuardBoot(t *testing.T) {
 			wantAdmit: true,
 		},
 		{
-			name:     "a typed --elide-stale-reads on the in-kernel upstream is refused by name",
-			provider: "anthropic", baseURL: "", gguf: "/models/m.gguf", typed: []string{"elide-stale-reads"},
-			wantAdmit: false,
-			wantAll: []string{
-				shrinkLeverInertToken, "refusing to start",
-				"--elide-stale-reads", "elide_stale_reads", "gateway.maybeElideStaleReads", "--elide-stale-reads=false",
-			},
+			name:      "a typed --elide-stale-reads on the in-kernel upstream is admitted and active",
+			provider:  "anthropic", baseURL: "", gguf: "/models/m.gguf", typed: []string{"elide-stale-reads"},
+			wantAdmit: true,
+			wantNone:  []string{shrinkLeverInertToken, "refusing to start"},
+		},
+		{
+			name:      "a typed --compact-history-budget on the in-kernel upstream is admitted and active",
+			provider:  "anthropic", baseURL: "", gguf: "/models/m.gguf", typed: []string{"compact-history-budget"},
+			wantAdmit: true,
+			wantNone:  []string{shrinkLeverInertToken, "refusing to start"},
+		},
+		{
+			name:      "a typed --defer-cold-tools on the in-kernel upstream is admitted and active",
+			provider:  "anthropic", baseURL: "", gguf: "/models/m.gguf", typed: []string{"defer-cold-tools"},
+			wantAdmit: true,
+			wantNone:  []string{shrinkLeverInertToken, "refusing to start"},
 		},
 		{
 			name:     "--gguf ALONGSIDE an anthropic upstream keeps the passthrough on the proxy side",
@@ -614,5 +631,33 @@ func TestGuardCompactStartupSuppressesDefaultShrinkLeverEssay(t *testing.T) {
 	}
 	if got := stderr.String(); !strings.Contains(got, "SHRINK_LEVER_INERT_ON_WIRE") {
 		t.Fatalf("explicit refusal missing from compact startup: %q", got)
+	}
+}
+
+// TestShrinkLeverWireInKernel verifies that --compact-history-budget,
+// --elide-stale-reads, and --defer-cold-tools are accepted and active on the in-kernel wire.
+func TestShrinkLeverWireInKernel(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"compact history budget", []string{"-gguf", "/models/m.gguf", "-compact-history-budget", "48000"}},
+		{"elide stale reads", []string{"-gguf", "/models/m.gguf", "-elide-stale-reads=true"}},
+		{"defer cold tools", []string{"-gguf", "/models/m.gguf", "-defer-cold-tools=true"}},
+		{"all levers combined", []string{"-gguf", "/models/m.gguf", "-compact-history-budget", "32000", "-elide-stale-reads", "-defer-cold-tools"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs, sf := newServeFlagSet()
+			if err := fs.Parse(tc.args); err != nil {
+				t.Fatalf("parse %v: %v", tc.args, err)
+			}
+			var stderr bytes.Buffer
+			if !admitServeShrinkLevers(fs, sf, &stderr) {
+				t.Fatalf("admitServeShrinkLevers(%v) refused: %s", tc.args, stderr.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("admitServeShrinkLevers(%v) wrote unexpected output: %s", tc.args, stderr.String())
+			}
+		})
 	}
 }

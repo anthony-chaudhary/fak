@@ -83,6 +83,7 @@ The first runtime spine maps these manifest fields directly to serve:
 |---|---|
 | `policy.floor` | `--policy` |
 | `auth.require_key_env` | `--require-key-env` |
+| `auth.allow_lan` | `--allow-lan` |
 | `budgets.default_tokens` | `--context-budget-tokens` |
 | `observability.bind` | `--addr` |
 
@@ -215,6 +216,7 @@ session control-verb writes, and from the live Paused→Running resume the
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--require-key-env` | string | `""` | Environment variable holding a bearer token REQUIRED on every request (except `/healthz`). Empty means no auth. |
+| `--allow-lan` | bool | `false` | When true, exempts callers originating from private/local networks (RFC 1918 IPv4, link-local, loopback) from mandatory bearer authentication. Off-LAN / public callers still require authentication. |
 
 ---
 

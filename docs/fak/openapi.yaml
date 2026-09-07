@@ -2287,11 +2287,20 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
           example: { error: { message: "malformed request body: invalid character 'x' looking for beginning of value", type: "invalid_request_error", code: null, param: null } }
     Unauthorized:
-      description: Missing or invalid credentials (only when `--require-key-env` is set; `/healthz` is exempt).
+      description: Missing or invalid credentials (when `--require-key-env` is set; `/healthz` is exempt, and private/LAN subnets are exempt when `--allow-lan` / `auth.allow_lan` is enabled).
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            example: 'Bearer realm="fak-gateway"'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
-          example: { error: { message: "missing or invalid credentials", type: "authentication_error", code: null, param: null } }
+          example: { error: { message: "missing or invalid credentials: no bearer token provided; send 'Authorization: Bearer <key>', 'X-Api-Key: <key>', or '?key=<key>'", type: "authentication_error", code: "missing_credentials", param: null } }
+        text/html:
+          schema:
+            type: string
+            description: Styled HTML authentication gate with unlock form and appliance setup instructions when requested by browsers.
     MethodNotAllowed:
       description: Wrong HTTP method for this route.
       content:

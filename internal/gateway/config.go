@@ -412,6 +412,11 @@ type Config struct {
 	// RequireKey, if non-empty, is the bearer token the gateway REQUIRES on every
 	// request (except /healthz). Empty => no auth (drop-in compatible, loopback).
 	RequireKey string
+	// AllowLAN, when true, exempts callers originating from private/local network
+	// addresses (RFC 1918 IPv4, link-local IPv4/IPv6, unique-local IPv6, and loopback)
+	// from mandatory bearer token authentication. Off-LAN / public callers still require
+	// authentication.
+	AllowLAN bool
 	// ReadBearer, if non-empty, is an ADDITIONAL bearer accepted ONLY on the read-only
 	// observability endpoints (/healthz, /debug/vars, /metrics) as an alternative to
 	// the loopback exemption / RequireKey (#3461). It never authorizes any other

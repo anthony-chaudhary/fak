@@ -370,6 +370,7 @@ type Server struct {
 	model           string
 	richDashboards  *richDashboardManager
 	requireKey      string
+	allowLAN        bool
 	// readBearer is the read-scoped observability bearer (Config.ReadBearer): accepted
 	// ONLY on the diagnostic reads (/debug/vars, /metrics, /v1/fak/observation),
 	// never on a mutating route.
