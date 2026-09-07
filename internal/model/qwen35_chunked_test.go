@@ -2,8 +2,65 @@ package model
 
 import (
 	"math"
+	"reflect"
 	"testing"
 )
+
+func TestQwen35LinearAttnBatchedResumesState(t *testing.T) {
+	cfg := qwen35HybridTestCfg()
+	m := NewSynthetic(cfg)
+	s := m.NewSession()
+	defer s.Close()
+	layer := 0
+	for !cfg.isLinearAttnLayer(layer) {
+		layer++
+	}
+	panel := make([][]float32, cfg.LinearConvKernelDim+5)
+	for row := range panel {
+		panel[row] = make([]float32, cfg.HiddenSize)
+		for i := range panel[row] {
+			panel[row][i] = float32(math.Sin(float64((row+1)*(i+3)) * 0.017))
+		}
+	}
+	prefix := len(panel) - 3
+	for _, row := range panel[:prefix] {
+		s.linearAttnStep(layer, row, residentKernel{m})
+	}
+	state := s.Cache.linear.layers[layer].clone()
+	want := make([][]float32, 3)
+	for i, row := range panel[prefix:] {
+		want[i] = s.linearAttnStep(layer, row, residentKernel{m})
+	}
+	got, err := m.linearAttnSeqBatchedState(layer, panel[prefix:], &state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range want {
+		assertFloat32BitsEqual(t, "resumed row", want[i], got[i])
+	}
+	if !reflect.DeepEqual(state, s.Cache.linear.layers[layer]) {
+		t.Fatal("resumed convolution or recurrent state differs from native token steps")
+	}
+	cacheless := m.linearAttnSeqBatched(layer, panel)
+	for i, row := range m.linearAttnSeq(layer, panel) {
+		assertFloat32BitsEqual(t, "cacheless row", row, cacheless[i])
+	}
+	before := state.clone()
+	if _, err := m.linearAttnSeqBatchedState(layer, [][]float32{{1}}, &state); err == nil {
+		t.Fatal("malformed input accepted")
+	}
+	if !reflect.DeepEqual(state, before) {
+		t.Fatal("malformed input mutated borrowed state")
+	}
+	state.recurrent[0] = state.recurrent[0][:1]
+	before = state.clone()
+	if _, err := m.linearAttnSeqBatchedState(layer, panel[prefix:], &state); err == nil {
+		t.Fatal("malformed recurrent state accepted")
+	}
+	if !reflect.DeepEqual(state, before) {
+		t.Fatal("malformed geometry mutated borrowed state")
+	}
+}
 
 // TestQwen35LinearAttnBatchedMatchesScalar is the issue #443 box-1 witness: the batched-projection
 // Gated-DeltaNet prefill path (linearAttnSeqBatched) is bit-for-bit identical to the scalar

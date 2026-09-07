@@ -22,6 +22,7 @@ package model
 // batched; the batched-Q8 tile GEMM is the separate box-2 slice the issue scopes out of this pass.
 
 import (
+	"fmt"
 	"math"
 	"os"
 )
@@ -64,16 +65,63 @@ func (m *Model) residentMatMulBatch(name string, X []float32, out, in, P int) []
 // delta-rule recurrence, and the gated RMSNorm are byte-for-byte the scalar math, so the result is
 // bit-identical to linearAttnSeq on the f32 path.
 func (m *Model) linearAttnSeqBatched(l int, xn [][]float32) [][]float32 {
+	out, err := m.linearAttnSeqBatchedState(l, xn, nil)
+	if err != nil {
+		panic(err)
+	}
+	return out
+}
+
+// linearAttnSeqBatchedState borrows a layer's persistent state; nil starts from zero.
+// Geometry errors precede mutation. Callers that need rollback on execution panics
+// retain a session snapshot. Convolution history owns copies of projection rows.
+func (m *Model) linearAttnSeqBatchedState(l int, xn [][]float32, persistent *linearAttnLayerState) ([][]float32, error) {
 	cfg := m.Cfg
 	H := cfg.HiddenSize
+	maxInt := int(^uint(0) >> 1)
+	if l < 0 || l >= cfg.NumLayers || !cfg.isLinearAttnLayer(l) || H <= 0 ||
+		cfg.LinearNumKeyHeads <= 0 || cfg.LinearNumValueHeads <= 0 ||
+		cfg.LinearKeyHeadDim <= 0 || cfg.LinearValueHeadDim <= 0 || cfg.LinearConvKernelDim <= 0 ||
+		cfg.LinearNumValueHeads%cfg.LinearNumKeyHeads != 0 ||
+		cfg.LinearNumKeyHeads > maxInt/cfg.LinearKeyHeadDim ||
+		cfg.LinearNumValueHeads > maxInt/cfg.LinearValueHeadDim ||
+		cfg.LinearKeyHeadDim > maxInt/cfg.LinearValueHeadDim {
+		return nil, fmt.Errorf("model: invalid stateful GDN geometry at layer %d", l)
+	}
 	nK, nV, kHd, vHd, keyDim, valDim, convDim := cfg.linearAttnDims()
 	K := cfg.LinearConvKernelDim
 	seq := len(xn)
+	if keyDim > (maxInt-valDim)/2 || convDim > maxInt/K ||
+		(seq > 0 && (H > maxInt/seq || convDim > maxInt/seq || valDim > maxInt/seq)) {
+		return nil, fmt.Errorf("model: stateful GDN panel dimensions overflow")
+	}
+	for _, row := range xn {
+		if len(row) != H {
+			return nil, fmt.Errorf("model: stateful GDN input width %d != %d", len(row), H)
+		}
+	}
+	if persistent == nil {
+		initial := newLinearAttnLayerState(cfg)
+		persistent = &initial
+	}
+	if len(persistent.recurrent) != nV || len(persistent.conv) > K-1 {
+		return nil, fmt.Errorf("model: invalid stateful GDN state dimensions")
+	}
+	for _, row := range persistent.recurrent {
+		if len(row) != kHd*vHd {
+			return nil, fmt.Errorf("model: invalid stateful GDN recurrent row")
+		}
+	}
+	for _, row := range persistent.conv {
+		if len(row) != convDim {
+			return nil, fmt.Errorf("model: invalid stateful GDN convolution row")
+		}
+	}
 	eps := float32(cfg.RMSNormEps)
 	p := func(s string) string { return layerName(l, s) }
 
 	if seq == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Pack the per-token normalized inputs into one [seq, H] panel, then run each input
@@ -122,8 +170,11 @@ func (m *Model) linearAttnSeqBatched(l int, xn [][]float32) [][]float32 {
 			var acc float32
 			cb := c * K
 			for j := 0; j < K; j++ {
-				if ti := t - (K - 1) + j; ti >= 0 {
+				ti := t - (K - 1) + j
+				if ti >= 0 {
 					acc += conv[cb+j] * mixed[ti][c]
+				} else if hi := len(persistent.conv) + ti; hi >= 0 {
+					acc += conv[cb+j] * persistent.conv[hi][c]
 				}
 			}
 			row[c] = silu(acc)
@@ -134,10 +185,7 @@ func (m *Model) linearAttnSeqBatched(l int, xn [][]float32) [][]float32 {
 	// Recurrent gated delta rule — identical scalar math to linearAttnSeq.
 	scale := float32(1.0 / math.Sqrt(float64(kHd)))
 	repeat := nV / nK
-	state := make([][]float32, nV)
-	for h := range state {
-		state[h] = make([]float32, kHd*vHd)
-	}
+	state := persistent.recurrent
 	core := make([][]float32, seq)
 	qNorm := make([]float32, keyDim)
 	kNorm := make([]float32, keyDim)
@@ -206,5 +254,8 @@ func (m *Model) linearAttnSeqBatched(l int, xn [][]float32) [][]float32 {
 	for t := 0; t < seq; t++ {
 		out[t] = outFlat[t*H : (t+1)*H]
 	}
-	return out
+	for _, row := range mixed {
+		persistent.pushConvRow(row, K-1)
+	}
+	return out, nil
 }
