@@ -813,3 +813,400 @@ func TestSandboxSymlinkConfinement(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPTransform_AdjudicateReadNormalization(t *testing.T) {
+	SetConfiguredPosture(adjudicator.PostureDefaultOpen)
+	Configure()
+
+	_, err := ArmMCPTools()
+	if err != nil {
+		t.Fatalf("ArmMCPTools failed: %v", err)
+	}
+	defer DisarmMCPTools()
+
+	ctx := context.Background()
+	eng := abi.Engine("inprocess_mcp")
+	if eng == nil {
+		t.Fatal("inprocess_mcp engine is nil")
+	}
+
+	argsJSON, _ := json.Marshal(map[string]any{
+		"tool": "Read",
+		"arguments": map[string]any{
+			"filePath": "internal/agent/mcptools.go",
+		},
+	})
+	c := &abi.ToolCall{
+		Tool: "fak_adjudicate",
+		Args: putBytes(ctx, argsJSON),
+	}
+	res, err := eng.Complete(ctx, c)
+	if err != nil {
+		t.Fatalf("Complete error: %v", err)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(refutil.Bytes(ctx, res.Payload), &resp); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	if resp["verdict"] != "transform" {
+		t.Errorf("verdict = %v, want 'transform'", resp["verdict"])
+	}
+	if resp["allowed"] != true {
+		t.Errorf("allowed = %v, want true", resp["allowed"])
+	}
+	if resp["repaired_tool"] != "fak_read" {
+		t.Errorf("repaired_tool = %v, want 'fak_read'", resp["repaired_tool"])
+	}
+	repairedArgs, ok := resp["repaired_arguments"].(map[string]any)
+	if !ok {
+		t.Fatalf("repaired_arguments type = %T, want map[string]any", resp["repaired_arguments"])
+	}
+	if repairedArgs["file_path"] != "internal/agent/mcptools.go" {
+		t.Errorf("file_path in repaired_arguments = %v, want 'internal/agent/mcptools.go'", repairedArgs["file_path"])
+	}
+	if _, hasOld := repairedArgs["filePath"]; hasOld {
+		t.Errorf("legacy filePath was not stripped: %v", repairedArgs)
+	}
+}
+
+func TestMCPTransform_SyscallReadNormalization(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFileName := "test_sample_transform.txt"
+	testContent := "hello from mcp syscall transform"
+	testFilePath := filepath.Join(tmpDir, testFileName)
+	if err := os.WriteFile(testFilePath, []byte(testContent), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	SetConfiguredPosture(adjudicator.PostureDefaultOpen)
+	Configure()
+
+	_, err := ArmMCPTools()
+	if err != nil {
+		t.Fatalf("ArmMCPTools failed: %v", err)
+	}
+	defer DisarmMCPTools()
+
+	RegisterReadEngine(tmpDir)
+	t.Cleanup(func() { RegisterReadEngine("") })
+
+	ctx := context.Background()
+	eng := abi.Engine("inprocess_mcp")
+	if eng == nil {
+		t.Fatal("inprocess_mcp engine is nil")
+	}
+
+	argsJSON, _ := json.Marshal(map[string]any{
+		"tool": "Read",
+		"arguments": map[string]any{
+			"filePath": testFileName,
+		},
+	})
+	c := &abi.ToolCall{
+		Tool: "fak_syscall",
+		Args: putBytes(ctx, argsJSON),
+	}
+	res, err := eng.Complete(ctx, c)
+	if err != nil {
+		t.Fatalf("Complete error: %v", err)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(refutil.Bytes(ctx, res.Payload), &resp); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	if resp["verdict"] != "transform" {
+		t.Errorf("verdict = %v, want 'transform'", resp["verdict"])
+	}
+	if resp["repaired_tool"] != "fak_read" {
+		t.Errorf("repaired_tool = %v, want 'fak_read'", resp["repaired_tool"])
+	}
+
+	resultMap, ok := resp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any; resp = %+v", resp["result"], resp)
+	}
+	if resultMap["content"] != testContent {
+		t.Errorf("result content = %v, want %q", resultMap["content"], testContent)
+	}
+
+	repairedArgs, ok := resp["repaired_arguments"].(map[string]any)
+	if !ok {
+		t.Fatalf("repaired_arguments type = %T, want map[string]any", resp["repaired_arguments"])
+	}
+	if repairedArgs["file_path"] != testFileName {
+		t.Errorf("repaired_arguments file_path = %v, want %q", repairedArgs["file_path"], testFileName)
+	}
+}
+
+type mcpRecordLocalEngine struct {
+	lastArgs map[string]any
+	rawArgs  []byte
+}
+
+func (r *mcpRecordLocalEngine) Caps() []abi.Capability { return nil }
+func (r *mcpRecordLocalEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
+	body, m := decodeCallArgs(ctx, c.Args)
+	r.rawArgs = body
+	r.lastArgs = m
+	out, isErr := execTool(c.Tool, m)
+	return engineResult(ctx, c, body, out, isErr, "localtools"), nil
+}
+
+func TestMCPTransform_SecretRedaction(t *testing.T) {
+	SetConfiguredPosture(adjudicator.PostureDefaultOpen)
+	Configure()
+
+	_, err := ArmMCPTools()
+	if err != nil {
+		t.Fatalf("ArmMCPTools failed: %v", err)
+	}
+	defer DisarmMCPTools()
+
+	snap := adjudicator.Default.PolicySnapshot()
+	defer adjudicator.Default.SetPolicy(snap)
+
+	pol := snap
+	pol.RedactFields = []string{"api_key"}
+	adjudicator.Default.SetPolicy(pol)
+
+	rec := &mcpRecordLocalEngine{}
+	abi.RegisterEngine("localtools", rec)
+	defer abi.RegisterEngine("localtools", localEngine{})
+
+	ctx := context.Background()
+	eng := abi.Engine("inprocess_mcp")
+	if eng == nil {
+		t.Fatal("inprocess_mcp engine is nil")
+	}
+
+	secretVal := "secret-api-key-12345"
+	callArgs := map[string]any{
+		"a":       12,
+		"b":       18,
+		"api_key": secretVal,
+	}
+
+	// 1. fak_adjudicate with secret redaction
+	adjJSON, _ := json.Marshal(map[string]any{
+		"tool":      "calculate",
+		"arguments": callArgs,
+	})
+	cAdj := &abi.ToolCall{
+		Tool: "fak_adjudicate",
+		Args: putBytes(ctx, adjJSON),
+	}
+	resAdj, err := eng.Complete(ctx, cAdj)
+	if err != nil {
+		t.Fatalf("fak_adjudicate Complete error: %v", err)
+	}
+	var respAdj map[string]any
+	if err := json.Unmarshal(refutil.Bytes(ctx, resAdj.Payload), &respAdj); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if respAdj["verdict"] != "transform" {
+		t.Errorf("adjudicate verdict = %v, want 'transform'", respAdj["verdict"])
+	}
+	if respAdj["allowed"] != true {
+		t.Errorf("adjudicate allowed = %v, want true", respAdj["allowed"])
+	}
+	repairedAdjArgs, ok := respAdj["repaired_arguments"].(map[string]any)
+	if !ok {
+		t.Fatalf("repaired_arguments type = %T, want map[string]any", respAdj["repaired_arguments"])
+	}
+	if repairedAdjArgs["api_key"] != "[REDACTED]" {
+		t.Errorf("repaired_arguments api_key = %v, want '[REDACTED]'", repairedAdjArgs["api_key"])
+	}
+	if _, hasTool := respAdj["repaired_tool"]; hasTool {
+		t.Errorf("repaired_tool should not be present on arg-only transform: %v", respAdj["repaired_tool"])
+	}
+
+	// 2. fak_syscall with secret redaction
+	sysJSON, _ := json.Marshal(map[string]any{
+		"tool":      "calculate",
+		"arguments": callArgs,
+	})
+	cSys := &abi.ToolCall{
+		Tool: "fak_syscall",
+		Args: putBytes(ctx, sysJSON),
+	}
+	resSys, err := eng.Complete(ctx, cSys)
+	if err != nil {
+		t.Fatalf("fak_syscall Complete error: %v", err)
+	}
+	var respSys map[string]any
+	if err := json.Unmarshal(refutil.Bytes(ctx, resSys.Payload), &respSys); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if respSys["verdict"] != "transform" {
+		t.Errorf("syscall verdict = %v, want 'transform'", respSys["verdict"])
+	}
+	repairedSysArgs, ok := respSys["repaired_arguments"].(map[string]any)
+	if !ok {
+		t.Fatalf("syscall repaired_arguments type = %T, want map[string]any", respSys["repaired_arguments"])
+	}
+	if repairedSysArgs["api_key"] != "[REDACTED]" {
+		t.Errorf("syscall repaired_arguments api_key = %v, want '[REDACTED]'", repairedSysArgs["api_key"])
+	}
+	resultMap, ok := respSys["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("syscall result type = %T, want map[string]any", respSys["result"])
+	}
+	if sumVal, ok := resultMap["sum"].(float64); !ok || sumVal != 30 {
+		t.Errorf("syscall sum = %v, want 30", resultMap["sum"])
+	}
+
+	// Verify executed arguments on the dispatched engine were redacted
+	if rec.lastArgs == nil {
+		t.Fatal("engine was not dispatched")
+	}
+	if rec.lastArgs["api_key"] != "[REDACTED]" {
+		t.Errorf("engine received unredacted api_key: %v", rec.lastArgs["api_key"])
+	}
+	if strings.Contains(string(rec.rawArgs), secretVal) {
+		t.Errorf("engine rawArgs contains secret value: %s", string(rec.rawArgs))
+	}
+	if !strings.Contains(string(rec.rawArgs), "[REDACTED]") {
+		t.Errorf("engine rawArgs missing [REDACTED]: %s", string(rec.rawArgs))
+	}
+}
+
+type mcpSpyDispatchEngine struct {
+	dispatched bool
+}
+
+func (s *mcpSpyDispatchEngine) Caps() []abi.Capability { return nil }
+func (s *mcpSpyDispatchEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
+	s.dispatched = true
+	return &abi.Result{Status: abi.StatusOK}, nil
+}
+
+func TestMCPTransform_NonExecutableOutcomeRefusal(t *testing.T) {
+	SetConfiguredPosture(adjudicator.PostureDefaultOpen)
+	Configure()
+
+	_, err := ArmMCPTools()
+	if err != nil {
+		t.Fatalf("ArmMCPTools failed: %v", err)
+	}
+	defer DisarmMCPTools()
+
+	spy := &mcpSpyDispatchEngine{}
+	abi.RegisterEngine("localtools", spy)
+	defer abi.RegisterEngine("localtools", localEngine{})
+
+	ctx := context.Background()
+	eng := abi.Engine("inprocess_mcp")
+	if eng == nil {
+		t.Fatal("inprocess_mcp engine is nil")
+	}
+
+	t.Run("VerdictDeny_PolicyBlock", func(t *testing.T) {
+		spy.dispatched = false
+		argsJSON, _ := json.Marshal(map[string]any{
+			"tool": "delete_account",
+			"arguments": map[string]any{
+				"user_id": "target_user",
+			},
+		})
+		c := &abi.ToolCall{
+			Tool: "fak_syscall",
+			Args: putBytes(ctx, argsJSON),
+		}
+		res, err := eng.Complete(ctx, c)
+		if err != nil {
+			t.Fatalf("Complete error: %v", err)
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(refutil.Bytes(ctx, res.Payload), &resp); err != nil {
+			t.Fatalf("Unmarshal error: %v", err)
+		}
+		if resp["verdict"] != "deny" {
+			t.Errorf("verdict = %v, want 'deny'", resp["verdict"])
+		}
+		resultMap, ok := resp["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("result type = %T, want map[string]any", resp["result"])
+		}
+		if resultMap["error"] != "tool call denied by policy" {
+			t.Errorf("error = %v, want 'tool call denied by policy'", resultMap["error"])
+		}
+		if resultMap["reason"] != "POLICY_BLOCK" {
+			t.Errorf("reason = %v, want 'POLICY_BLOCK'", resultMap["reason"])
+		}
+		if spy.dispatched {
+			t.Error("engine was dispatched on VerdictDeny, want no dispatch")
+		}
+	})
+
+	t.Run("VerdictRequireWitness_NonExecutableOutcome", func(t *testing.T) {
+		spy.dispatched = false
+		argsJSON, _ := json.Marshal(map[string]any{
+			"tool": "Bash",
+			"arguments": map[string]any{
+				"command": "rm -f x",
+			},
+		})
+		c := &abi.ToolCall{
+			Tool: "fak_syscall",
+			Args: putBytes(ctx, argsJSON),
+		}
+		res, err := eng.Complete(ctx, c)
+		if err != nil {
+			t.Fatalf("Complete error: %v", err)
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(refutil.Bytes(ctx, res.Payload), &resp); err != nil {
+			t.Fatalf("Unmarshal error: %v", err)
+		}
+		if resp["verdict"] != "deny" {
+			t.Errorf("verdict = %v, want 'deny'", resp["verdict"])
+		}
+		resultMap, ok := resp["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("result type = %T, want map[string]any", resp["result"])
+		}
+		if resultMap["error"] != "tool call not executable" {
+			t.Errorf("error = %v, want 'tool call not executable'", resultMap["error"])
+		}
+		if resultMap["reason"] == "" || resultMap["reason"] == nil {
+			t.Errorf("reason should not be empty: %v", resultMap["reason"])
+		}
+		if spy.dispatched {
+			t.Error("engine was dispatched on VerdictRequireWitness, want no dispatch")
+		}
+	})
+
+	t.Run("Adjudicate_NonExecutableOutcome", func(t *testing.T) {
+		argsJSON, _ := json.Marshal(map[string]any{
+			"tool": "Bash",
+			"arguments": map[string]any{
+				"command": "rm -f x",
+			},
+		})
+		c := &abi.ToolCall{
+			Tool: "fak_adjudicate",
+			Args: putBytes(ctx, argsJSON),
+		}
+		res, err := eng.Complete(ctx, c)
+		if err != nil {
+			t.Fatalf("Complete error: %v", err)
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(refutil.Bytes(ctx, res.Payload), &resp); err != nil {
+			t.Fatalf("Unmarshal error: %v", err)
+		}
+		if resp["verdict"] != "deny" {
+			t.Errorf("verdict = %v, want 'deny'", resp["verdict"])
+		}
+		if resp["allowed"] != false {
+			t.Errorf("allowed = %v, want false", resp["allowed"])
+		}
+		if resp["reason"] == "" || resp["reason"] == nil {
+			t.Errorf("reason should not be empty: %v", resp["reason"])
+		}
+	})
+}
