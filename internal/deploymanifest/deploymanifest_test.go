@@ -72,6 +72,7 @@ func TestFakTomlBadValueRefuses(t *testing.T) {
 		{"gateway-not-bool", "[runtimes]\ngateway = \"yes\"\n"},
 		{"budget-not-int", "[budgets]\ndefault_tokens = \"lots\"\n"},
 		{"retention-negative", "[audit]\nretention_days = -3\n"},
+		{"allow-lan-not-bool", "[auth]\nallow_lan = \"yes\"\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -153,6 +154,9 @@ func TestFakTomlDefaults(t *testing.T) {
 	if d.Auth.RequireKeyEnv != "" {
 		t.Errorf("default auth must be empty (opt-in), got %q", d.Auth.RequireKeyEnv)
 	}
+	if d.Auth.AllowLAN {
+		t.Errorf("default allow_lan must be false, got true")
+	}
 }
 
 func TestPresentDistinguishesDeclaredValuesFromDefaults(t *testing.T) {
@@ -187,5 +191,66 @@ func TestKnownAndDeclaredKeysAreStableAndComplete(t *testing.T) {
 	want := []string{"policy.floor", "tenants.enabled"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("DeclaredKeys = %v, want %v", got, want)
+	}
+}
+
+// TestFakTomlAuthAllowLAN verifies AllowLAN parses correctly from manifest,
+// defaults to false, tracks presence, projects typed value, and obeys overrides.
+func TestFakTomlAuthAllowLAN(t *testing.T) {
+	// 1. Default must be false and not marked present
+	d := Defaults()
+	if d.Auth.AllowLAN {
+		t.Fatalf("default AllowLAN = true, want false")
+	}
+	if d.Present("auth", "allow_lan") {
+		t.Fatalf("default AllowLAN must not be marked present")
+	}
+
+	// 2. Parse manifest with allow_lan = true
+	mTrue, err := Parse([]byte("[auth]\nrequire_key_env = \"FAK_KEY\"\nallow_lan = true\n"))
+	if err != nil {
+		t.Fatalf("Parse(allow_lan = true) failed: %v", err)
+	}
+	if !mTrue.Auth.AllowLAN {
+		t.Errorf("mTrue.Auth.AllowLAN = false, want true")
+	}
+	if mTrue.Auth.RequireKeyEnv != "FAK_KEY" {
+		t.Errorf("mTrue.Auth.RequireKeyEnv = %q, want FAK_KEY", mTrue.Auth.RequireKeyEnv)
+	}
+	if !mTrue.Present("auth", "allow_lan") {
+		t.Errorf("auth.allow_lan not marked present")
+	}
+	if val, ok := mTrue.Value(Key{Section: "auth", Name: "allow_lan"}).(bool); !ok || !val {
+		t.Errorf("Value(auth.allow_lan) = %v, want true", mTrue.Value(Key{Section: "auth", Name: "allow_lan"}))
+	}
+
+	// 3. Parse manifest with allow_lan = false
+	mFalse, err := Parse([]byte("[auth]\nallow_lan = false\n"))
+	if err != nil {
+		t.Fatalf("Parse(allow_lan = false) failed: %v", err)
+	}
+	if mFalse.Auth.AllowLAN {
+		t.Errorf("mFalse.Auth.AllowLAN = true, want false")
+	}
+	if !mFalse.Present("auth", "allow_lan") {
+		t.Errorf("auth.allow_lan not marked present")
+	}
+
+	// 4. Precedence & Overrides
+	trueVal := true
+	mOverriddenTrue := mFalse.WithOverrides(Overrides{AllowLAN: &trueVal})
+	if !mOverriddenTrue.Auth.AllowLAN {
+		t.Errorf("override AllowLAN=true failed to override manifest false")
+	}
+
+	falseVal := false
+	mOverriddenFalse := mTrue.WithOverrides(Overrides{AllowLAN: &falseVal})
+	if mOverriddenFalse.Auth.AllowLAN {
+		t.Errorf("override AllowLAN=false failed to override manifest true")
+	}
+
+	mNil := mTrue.WithOverrides(Overrides{})
+	if !mNil.Auth.AllowLAN {
+		t.Errorf("nil override should preserve manifest AllowLAN=true")
 	}
 }
