@@ -1,0 +1,466 @@
+{
+  "schema": "fak.strix.validation/v1",
+  "timestamp": "2026-09-07T00:24:57Z",
+  "verdict": "PASS",
+  "target": {
+    "mode": "ssh",
+    "host": "strix1",
+    "reachable": true,
+    "cpu_model": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "gpu_name": "AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+    "target_isa": "gfx1151",
+    "compute_units": 40,
+    "total_ram_bytes": 67028504576,
+    "uma_buffer_bytes": 58985084026,
+    "power_dpm_level": "manual",
+    "lockup_timeout": -1,
+    "vulkan_icd": "/usr/share/vulkan/icd.d/radeon_icd.json",
+    "roundtrip_latency_ms": 480.88,
+    "discovered_at": "2026-09-07T00:24:05Z"
+  },
+  "provenance": {
+    "git_ref": "HEAD",
+    "command": "fak-dev amd-strix-validate --subkernels=all --ablate=all --json",
+    "generated_by": "fak/internal/amdgpu",
+    "transport": "ssh"
+  },
+  "subkernels": [
+    {
+      "name": "argmax",
+      "status": "PASS",
+      "duration_us": 423944,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (argmax)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": true,
+        "passed": true
+      },
+      "metrics": {
+        "category": "reduction",
+        "wall_ms": 423
+      }
+    },
+    {
+      "name": "matmul_f32",
+      "status": "PASS",
+      "duration_us": 351775,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (matmul_f32)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "gemv",
+        "wall_ms": 351
+      }
+    },
+    {
+      "name": "matmul2_f32",
+      "status": "PASS",
+      "duration_us": 364714,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (matmul2_f32)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "gemv",
+        "wall_ms": 364
+      }
+    },
+    {
+      "name": "matmul3_f32",
+      "status": "PASS",
+      "duration_us": 352158,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (matmul3_f32)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "gemv",
+        "wall_ms": 352
+      }
+    },
+    {
+      "name": "q8_matmul",
+      "status": "PASS",
+      "duration_us": 409184,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (q8_matmul)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "quant",
+        "wall_ms": 409
+      }
+    },
+    {
+      "name": "q8_matmul_wide",
+      "status": "PASS",
+      "duration_us": 368420,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (q8_matmul_wide)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "quant",
+        "wall_ms": 368
+      }
+    },
+    {
+      "name": "q8_matmul_vocab",
+      "status": "PASS",
+      "duration_us": 704297,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (q8_matmul_vocab)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "quant",
+        "wall_ms": 704
+      }
+    },
+    {
+      "name": "q4k_matmul",
+      "status": "PASS",
+      "duration_us": 360228,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (q4k_matmul)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "quant",
+        "wall_ms": 360
+      }
+    },
+    {
+      "name": "rmsnorm",
+      "status": "PASS",
+      "duration_us": 360961,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (rmsnorm)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "norm",
+        "wall_ms": 360
+      }
+    },
+    {
+      "name": "rmsnorm_matmul",
+      "status": "PASS",
+      "duration_us": 461467,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (rmsnorm_matmul)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "fused",
+        "wall_ms": 461
+      }
+    },
+    {
+      "name": "rmsnorm_matmul2",
+      "status": "PASS",
+      "duration_us": 361660,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (rmsnorm_matmul2)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "fused",
+        "wall_ms": 361
+      }
+    },
+    {
+      "name": "rmsnorm_matmul3",
+      "status": "PASS",
+      "duration_us": 416826,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (rmsnorm_matmul3)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "fused",
+        "wall_ms": 416
+      }
+    },
+    {
+      "name": "swiglu",
+      "status": "PASS",
+      "duration_us": 372935,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (swiglu)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "activation",
+        "wall_ms": 372
+      }
+    },
+    {
+      "name": "swiglu_matmul_add",
+      "status": "PASS",
+      "duration_us": 725982,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (swiglu_matmul_add)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "fused",
+        "wall_ms": 725
+      }
+    },
+    {
+      "name": "rope",
+      "status": "PASS",
+      "duration_us": 390446,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (rope)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "positional",
+        "wall_ms": 390
+      }
+    },
+    {
+      "name": "attention",
+      "status": "PASS",
+      "duration_us": 498784,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (attention)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "attention",
+        "wall_ms": 498
+      }
+    },
+    {
+      "name": "qwen35_gdn_decode",
+      "status": "PASS",
+      "duration_us": 406625,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (qwen35_gdn_decode)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "linear_attention",
+        "wall_ms": 406
+      }
+    },
+    {
+      "name": "qwen35_gdn_preprojected",
+      "status": "PASS",
+      "duration_us": 331013,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (qwen35_gdn_preprojected)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "linear_attention",
+        "wall_ms": 331
+      }
+    },
+    {
+      "name": "f16_kv_contiguize",
+      "status": "PASS",
+      "duration_us": 460949,
+      "iterations": 1,
+      "parity": {
+        "reference_gemv": "CPU reference (f16_kv_contiguize)",
+        "logit_cosine_similarity": 0.999999,
+        "max_absolute_delta": 0,
+        "relative_l2": 0,
+        "argmax_exact": false,
+        "passed": true
+      },
+      "metrics": {
+        "category": "kv_cache",
+        "wall_ms": 460
+      }
+    }
+  ],
+  "ablations": [
+    {
+      "dimension": "target",
+      "feature": "cpu_vs_vulkan_gpu",
+      "baseline_arm": {
+        "name": "cpu_q4_reference",
+        "latency_us": 75561,
+        "allocated_bytes": 50135040
+      },
+      "candidate_arm": {
+        "name": "vulkan_gpu_q4k",
+        "latency_us": 451,
+        "dram_bandwidth_gbps": 117.1,
+        "allocated_bytes": 50135040
+      },
+      "speedup": 167.54,
+      "lift_ratio": 167.54,
+      "cosine_parity": 0.9999999999986565,
+      "verdict": "VERIFIED_LIFT"
+    },
+    {
+      "dimension": "topology",
+      "feature": "fused_vs_discrete_norm_matmul",
+      "baseline_arm": {
+        "name": "discrete_rmsnorm_then_matmul",
+        "latency_us": 28275
+      },
+      "candidate_arm": {
+        "name": "fused_rmsnorm_matmul",
+        "latency_us": 17400
+      },
+      "speedup": 1.625,
+      "lift_ratio": 1.625,
+      "cosine_parity": 0.999999,
+      "verdict": "VERIFIED_LIFT"
+    },
+    {
+      "dimension": "quantization",
+      "feature": "quant_q4k_vs_q8_vs_f32",
+      "baseline_arm": {
+        "name": "f32_dense_weights",
+        "latency_us": 1820,
+        "allocated_bytes": 356515840
+      },
+      "candidate_arm": {
+        "name": "q4k_super_blocks",
+        "latency_us": 428,
+        "allocated_bytes": 50135040
+      },
+      "speedup": 4.25,
+      "lift_ratio": 4.25,
+      "cosine_parity": 0.999998,
+      "verdict": "VERIFIED_LIFT"
+    },
+    {
+      "dimension": "residency",
+      "feature": "device_local_vs_host_visible",
+      "baseline_arm": {
+        "name": "host_visible_streaming",
+        "latency_us": 1420,
+        "allocated_bytes": 50135040
+      },
+      "candidate_arm": {
+        "name": "device_local_pool",
+        "latency_us": 428,
+        "allocated_bytes": 50135040
+      },
+      "speedup": 3.32,
+      "lift_ratio": 3.32,
+      "cosine_parity": 1,
+      "verdict": "VERIFIED_LIFT"
+    },
+    {
+      "dimension": "layout",
+      "feature": "strided_vs_contiguized_f16_kv",
+      "baseline_arm": {
+        "name": "strided_f16_kv_camping",
+        "latency_us": 44869,
+        "dram_bandwidth_gbps": 28.4,
+        "allocated_bytes": 67108864
+      },
+      "candidate_arm": {
+        "name": "contiguized_f16_kv_scratch",
+        "latency_us": 16680,
+        "dram_bandwidth_gbps": 184.2,
+        "allocated_bytes": 134217728
+      },
+      "speedup": 2.69,
+      "lift_ratio": 2.69,
+      "cosine_parity": 1,
+      "verdict": "VERIFIED_LIFT"
+    }
+  ],
+  "digest": "sha256:646f3de0559ec6ec1163a1beb54223fcdc8e02c3ada8509bb4628dcadc319fc4",
+  "verified": true
+}

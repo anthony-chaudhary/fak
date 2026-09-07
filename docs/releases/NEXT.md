@@ -30,6 +30,7 @@ It is updated as commits land so that release notes are maintained proactively r
 
 ### Developer Platform, Tooling & Evidence
 - Add sandbox tiering and gym spec (#11534).
+- Accelerated performance RSI loop and deterministic scorecard (`fak performance-rsi-scorecard`, #9752, #9779).
 
 ## Upgrade and breaking changes
 

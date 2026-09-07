@@ -69,16 +69,27 @@ func runOpsStatus(stdout, stderr io.Writer, root string, cfg ops.Config, args []
 		lastTime = events[len(events)-1].Timestamp.Format(time.RFC3339)
 	}
 
+	freeBytes, warning, refuse, _ := engine.CheckDiskSpace()
+	status := "healthy"
+	if refuse {
+		status = "refuse"
+	} else if warning {
+		status = "warning"
+	}
+
 	rep := opsStatusReport{
+		FreeDiskBytes: freeBytes,
+		WarningFree:   warning,
+		RefuseFree:    refuse,
 		RecentEvents:  len(events),
 		LastEventTime: lastTime,
-		Status:        "healthy",
+		Status:        status,
 	}
 
 	if *asJSON {
 		_ = json.NewEncoder(stdout).Encode(rep)
 	} else {
-		fmt.Fprintf(stdout, "fak ops: status=%s recent_events_24h=%d last_event=%s\n", rep.Status, rep.RecentEvents, rep.LastEventTime)
+		fmt.Fprintf(stdout, "fak ops: status=%s recent_events_24h=%d last_event=%s free_disk=%d\n", rep.Status, rep.RecentEvents, rep.LastEventTime, rep.FreeDiskBytes)
 	}
 	return 0
 }

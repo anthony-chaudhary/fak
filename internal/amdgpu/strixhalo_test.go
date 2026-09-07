@@ -258,6 +258,54 @@ func TestInspectHostStrixHaloUppercaseLinuxCPU(t *testing.T) {
 	}
 }
 
+// TestInspectHostStrixHaloDedicatedGPUReservation verifies issue #11916:
+// on a 128 GiB physical machine where a 64 GiB dedicated GPU reservation reduces
+// OS-visible MemTotal to ~56-64 GiB, the platform tier must still be classified
+// as StrixHalo128GB, but UMA allocation is capped to the dedicated VRAM (64 GiB)
+// so that the reserved bytes are never budgeted twice.
+func TestInspectHostStrixHaloDedicatedGPUReservation(t *testing.T) {
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "/proc/cpuinfo":
+			return []byte("model name\t: AMD Ryzen AI MAX+ 395 16-Core Processor\n"), nil
+		case "/proc/meminfo":
+			// 64 GiB OS-visible MemTotal
+			return []byte("MemTotal:       67108864 kB\nMemFree:        50000000 kB\n"), nil
+		case "/sys/class/drm/card0/device/mem_info_vram_total":
+			// 64 GiB dedicated GPU reservation
+			return []byte("68719476736\n"), nil
+		default:
+			return nil, errors.New("file not found: " + path)
+		}
+	}
+
+	cfg, err := inspectHostStrixHaloInternal("linux", nil, nil, readFile)
+	if err != nil {
+		t.Fatalf("failed to inspect host with dedicated GPU reservation: %v", err)
+	}
+
+	// 1. Hardware platform tier must be preserved as 128GB
+	if cfg.Platform != StrixHalo128GB {
+		t.Errorf("Platform = %q, want %q (physical tier must be preserved)", cfg.Platform, StrixHalo128GB)
+	}
+
+	// 2. Independently witnessed installed capacity and reservation reported separately
+	if cfg.InstalledRAMGiB != 128.0 {
+		t.Errorf("InstalledRAMGiB = %.1f, want 128.0", cfg.InstalledRAMGiB)
+	}
+	if cfg.ReservedGPURAMGiB != 64.0 {
+		t.Errorf("ReservedGPURAMGiB = %.1f, want 64.0", cfg.ReservedGPURAMGiB)
+	}
+	if cfg.AllocatableHostRAMGiB != 64.0 {
+		t.Errorf("AllocatableHostRAMGiB = %.1f, want 64.0", cfg.AllocatableHostRAMGiB)
+	}
+
+	// 3. UMAAllocatedGiB must reflect the dedicated GPU VRAM (64 GiB), NOT 120 GiB (which would double-budget host memory)
+	if cfg.UMAAllocatedGiB != 64.0 {
+		t.Errorf("UMAAllocatedGiB = %.1f, want 64.0 (must not budget reserved bytes twice)", cfg.UMAAllocatedGiB)
+	}
+}
+
 // TestInspectHostStrixHaloInternal verifies host detection logic for Strix Halo / gfx1151.
 func TestInspectHostStrixHaloInternal(t *testing.T) {
 	fakeWindowsRunner128GB := func(script string, timeout time.Duration) (bool, string, string) {

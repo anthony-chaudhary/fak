@@ -102,6 +102,7 @@ type Policy struct {
 // env var (not the secret) keeps the manifest reviewable and secret-free.
 type Auth struct {
 	RequireKeyEnv string // e.g. "FAK_GATEWAY_KEY"; empty = auth not required
+	AllowLAN      bool   // when true, allow unauthenticated access from local/private network (RFC 1918, link-local, loopback)
 }
 
 // Budgets declares the per-scope token-cap SHAPE. Deep budget semantics → #3273.
@@ -215,6 +216,7 @@ var keyDescriptions = map[string]string{
 	"agent_templates.dir":    "directory containing agent templates for the all-in-one runtime",
 	"audit.journal":          "path of the deployment audit journal",
 	"audit.retention_days":   "days to retain audit records; zero keeps them indefinitely",
+	"auth.allow_lan":         "when true, allow unauthenticated requests from private/local networks (RFC 1918 IPv4, link-local, loopback)",
 	"auth.require_key_env":   "name of the environment variable containing the gateway token; never the token itself",
 	"budgets.default_tokens": "default per-session context token ceiling; zero leaves it unset",
 	"observability.bind":     "gateway listener address",
@@ -273,6 +275,8 @@ func (m Manifest) Value(key Key) any {
 		return m.Policy.Inline
 	case "auth.require_key_env":
 		return m.Auth.RequireKeyEnv
+	case "auth.allow_lan":
+		return m.Auth.AllowLAN
 	case "budgets.default_tokens":
 		return m.Budgets.DefaultTokens
 	case "audit.journal":
@@ -356,7 +360,7 @@ func (m Manifest) DeclaredKeys() []Key {
 var knownSections = map[string]map[string]bool{
 	"runtimes":                  {"gateway": true, "agent_runtime": true, "model": true},
 	"policy":                    {"floor": true, "inline": true},
-	"auth":                      {"require_key_env": true},
+	"auth":                      {"require_key_env": true, "allow_lan": true},
 	"budgets":                   {"default_tokens": true},
 	"audit":                     {"journal": true, "retention_days": true},
 	"tenants":                   {"enabled": true},
@@ -511,11 +515,19 @@ func assign(m *Manifest, section, key, rawVal string, lineNo int) error {
 			m.Policy.Inline = v
 		}
 	case "auth":
-		v, err := stringVal("require_key_env")
-		if err != nil {
-			return err
+		if key == "require_key_env" {
+			v, err := stringVal("require_key_env")
+			if err != nil {
+				return err
+			}
+			m.Auth.RequireKeyEnv = v
+		} else if key == "allow_lan" {
+			v, err := boolVal()
+			if err != nil {
+				return err
+			}
+			m.Auth.AllowLAN = v
 		}
-		m.Auth.RequireKeyEnv = v
 	case "budgets":
 		v, err := countVal("default_tokens")
 		if err != nil {
@@ -595,6 +607,7 @@ type Overrides struct {
 	Model         *string
 	PolicyFloor   *string
 	RequireKeyEnv *string
+	AllowLAN      *bool
 	DefaultTokens *int
 	AuditJournal  *string
 	RetentionDays *int
@@ -621,6 +634,9 @@ func (m Manifest) WithOverrides(o Overrides) Manifest {
 	}
 	if o.RequireKeyEnv != nil {
 		m.Auth.RequireKeyEnv = *o.RequireKeyEnv
+	}
+	if o.AllowLAN != nil {
+		m.Auth.AllowLAN = *o.AllowLAN
 	}
 	if o.DefaultTokens != nil {
 		m.Budgets.DefaultTokens = *o.DefaultTokens

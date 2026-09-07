@@ -27,3 +27,23 @@ func TestInKernelPlannerConfigReachesProductionPlanner(t *testing.T) {
 		t.Fatalf("production planner config = %+v, want %+v", got, want)
 	}
 }
+
+func TestInKernelPromptShrinkLeversConfigReachability(t *testing.T) {
+	cfg := Config{
+		InKernelModel:        model.NewSynthetic(model.Config{}),
+		CompactHistoryBudget: 32000,
+		ElideStaleReads:      true,
+		DeferColdTools:       true,
+	}
+	planner := newInKernelChatPlanner(cfg, "native-shrink-reachability", t.Logf)
+	rc := planner.(*agent.InKernelPlanner).RuntimeConfig()
+	if rc.CompactHistoryBudget != 32000 {
+		t.Fatalf("CompactHistoryBudget = %d, want 32000", rc.CompactHistoryBudget)
+	}
+	if !rc.ElideStaleReads {
+		t.Fatal("ElideStaleReads = false, want true")
+	}
+	if !rc.DeferColdTools {
+		t.Fatal("DeferColdTools = false, want true")
+	}
+}

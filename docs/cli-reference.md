@@ -769,3 +769,33 @@ All destructive or administrative operations fail open and default to dry-run or
   - `--allow-peer`: Permit cleaning a peer's remote recovery ref.
   - `--worktree-name <name>`: Local worktree name for ownership verification.
   - `--root <dir>`: Repository root.
+
+## `fak performance-rsi-scorecard`
+
+Scores and composes versioned empirical evidence for the Performance Recursive Self-Improvement (RSI) loop toward the unsaturated 100x target multiplier.
+
+### Usage
+
+```text
+fak performance-rsi-scorecard -input <file.json> [-json] [-markdown] [-prior <prior.json>]
+fak performance-rsi-scorecard compose -snapshot <name> [receipts...]
+```
+
+### Flags
+
+Matching the live CLI output:
+
+- `-input string`: versioned performance RSI evidence JSON (schema `fak-performance-rsi-evidence/1`).
+- `-json`: render JSON report (schema `fak-performance-rsi-scorecard/1`).
+- `-markdown`: render Markdown report table.
+- `-prior string`: prior scorecard JSON to compare and emit delta trends.
+
+Subcommand `compose`:
+
+```text
+fak performance-rsi-scorecard compose -snapshot <name> [receipts...]
+```
+
+- `compose -snapshot string`: snapshot name for the composed evidence. Assembles multiple independent, single-owner section receipts (`cycle`, `improvement`, `provenance`, `learning`, `hardware`) into a consolidated `fak-performance-rsi-evidence/1` payload.
+
+Evaluates evidence across the 16 canonical performance-RSI dimensions, derives the dominant bottleneck via normalized ratio minimization, and reports loop-health grade and performance-RSI debt. For complete architectural specifications and evidence rules, see [Performance-RSI loop doctrine](notes/PERFORMANCE-RSI-LOOP-DOCTRINE.md) and [internal/perfrsiscore](../internal/perfrsiscore/README.md).

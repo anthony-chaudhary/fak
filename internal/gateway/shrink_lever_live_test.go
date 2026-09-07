@@ -179,3 +179,34 @@ func TestDebugVarsCarriesShrinkLeverFindingOnSelfHostedWire(t *testing.T) {
 		t.Errorf("shrink_levers leaked the upstream base URL: %s", b)
 	}
 }
+
+// In-kernel serving wire supports typed prompt-shrink levers; /debug/vars must report
+// WireRunsLevers = true, LiveOnWire populated, and Finding empty.
+func TestDebugVarsReportsLiveLeversOnInKernelWire(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = agent.NewInKernelPlanner(nil, nil, "synthetic-local", false, nil, false)
+	srv.provider = "in-kernel"
+	srv.compactHistoryBudget = 48000
+	srv.elideStaleReads = true
+	srv.deferColdTools = true
+
+	if !srv.wireRunsShrinkLevers() {
+		t.Fatal("in-kernel planner must report wireRunsShrinkLevers = true")
+	}
+	vars := srv.debugVars(time.Now())
+	if vars.ShrinkLevers == nil {
+		t.Fatal("/debug/vars omitted shrink_levers for in-kernel wire")
+	}
+	if !vars.ShrinkLevers.WireRunsLevers {
+		t.Error("WireRunsLevers = false on in-kernel wire, want true")
+	}
+	if vars.ShrinkLevers.Finding != "" {
+		t.Errorf("Finding = %q, want empty", vars.ShrinkLevers.Finding)
+	}
+	if len(vars.ShrinkLevers.LiveOnWire) != 3 {
+		t.Errorf("LiveOnWire = %v, want 3 active levers", vars.ShrinkLevers.LiveOnWire)
+	}
+	if len(vars.ShrinkLevers.InertOnWire) != 0 {
+		t.Errorf("InertOnWire = %v, want empty", vars.ShrinkLevers.InertOnWire)
+	}
+}

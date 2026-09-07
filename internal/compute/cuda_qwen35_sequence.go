@@ -117,6 +117,11 @@ func qwen35SequenceMatrixBytes(t Tensor) (int, bool) {
 			return 0, false
 		}
 		return n / 256 * 210, true
+	case Q2_K:
+		if n%256 != 0 {
+			return 0, false
+		}
+		return n / 256 * 84, true
 	case Q2_0:
 		if n%4 != 0 {
 			return 0, false

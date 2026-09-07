@@ -29,7 +29,9 @@ func TestDarwinPureGoListener(t *testing.T) {
 	}
 
 	// Wait a moment for listener to run normally without jumps
-	time.Sleep(30 * time.Millisecond)
+	select {
+	case <-time.After(30 * time.Millisecond):
+	}
 
 	if obs.SuspendCount() != 0 || obs.ResumeCount() != 0 {
 		t.Fatalf("expected 0 events during normal ticks, got suspend=%d resume=%d",
@@ -79,7 +81,9 @@ func TestDarwinSleepListenerCreation(t *testing.T) {
 		t.Fatalf("defaultL.Start: %v", err)
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-time.After(50 * time.Millisecond):
+	}
 	if err := defaultL.Stop(); err != nil {
 		t.Fatalf("defaultL.Stop: %v", err)
 	}

@@ -579,3 +579,91 @@ func TestClassify_CPUSaturation_isNormalizedAcrossHostSize(t *testing.T) {
 		}
 	}
 }
+
+func TestClassify_GPUMemPressure_Stall(t *testing.T) {
+	// Committed VRAM at or above 95% capacity signals an immediate GPU memory pressure stall
+	// due to WDDM page thrashing between local VRAM and system memory.
+	s := Sample{
+		AvailableMB:        32000,
+		VRAMTotalBytes:     8 * 1024 * 1024 * 1024,
+		VRAMCommittedBytes: 7800 * 1024 * 1024, // ~95.2% committed
+		VRAMSharedBytes:    512 * 1024 * 1024,
+	}
+	v := Classify(s, DefaultThresholds())
+	if v.Level != LevelStall {
+		t.Fatalf("got level=%q, want stall", v.Level)
+	}
+	if v.Cause != CauseGPUMemPressure {
+		t.Fatalf("got cause=%q, want %q", v.Cause, CauseGPUMemPressure)
+	}
+	joined := strings.Join(v.Reasons, "; ")
+	if !strings.Contains(joined, "VRAM committed") || !strings.Contains(joined, "shared aperture") {
+		t.Fatalf("reasons missing VRAM / aperture details: %v", v.Reasons)
+	}
+}
+
+func TestClassify_GPUMemPressure_Elevated(t *testing.T) {
+	// Committed VRAM at 91% capacity (>= 90% elevated threshold, < 95% stall threshold)
+	// raises calm box to elevated with cause gpu_memory_pressure.
+	s := Sample{
+		AvailableMB:        32000,
+		VRAMTotalBytes:     8 * 1024 * 1024 * 1024,
+		VRAMCommittedBytes: 7500 * 1024 * 1024, // ~91.5% committed
+	}
+	v := Classify(s, DefaultThresholds())
+	if v.Level != LevelElevated {
+		t.Fatalf("got level=%q, want elevated", v.Level)
+	}
+	if v.Cause != CauseGPUMemPressure {
+		t.Fatalf("got cause=%q, want %q", v.Cause, CauseGPUMemPressure)
+	}
+	joined := strings.Join(v.Reasons, "; ")
+	if !strings.Contains(joined, "VRAM committed") {
+		t.Fatalf("reasons missing VRAM details: %v", v.Reasons)
+	}
+}
+
+func TestClassify_GPUMemPressure_AttributedUnderChurnStall(t *testing.T) {
+	// Under a soft-fault churn stall, elevated VRAM pressure is still recorded in reasons.
+	s := Sample{
+		TotalFaultsPerSec:  450000,
+		HardFaultsPerSec:   100,
+		AvailableMB:        32000,
+		VRAMTotalBytes:     8 * 1024 * 1024 * 1024,
+		VRAMCommittedBytes: 7500 * 1024 * 1024, // ~91.5% committed
+	}
+	v := Classify(s, DefaultThresholds())
+	if v.Level != LevelStall || v.Cause != CauseSoftFault {
+		t.Fatalf("got level=%q cause=%q, want stall/soft_fault_churn", v.Level, v.Cause)
+	}
+	joined := strings.Join(v.Reasons, "; ")
+	if !strings.Contains(joined, "VRAM committed") {
+		t.Fatalf("reasons missing VRAM warning under churn stall: %v", v.Reasons)
+	}
+}
+
+func TestClassify_GPUMemPressure_Calm(t *testing.T) {
+	// Normal VRAM usage (~50%) stays calm.
+	s := Sample{
+		AvailableMB:        32000,
+		VRAMTotalBytes:     8 * 1024 * 1024 * 1024,
+		VRAMCommittedBytes: 4000 * 1024 * 1024,
+	}
+	v := Classify(s, DefaultThresholds())
+	if v.Level != LevelCalm || v.Cause != CauseNone {
+		t.Fatalf("got level=%q cause=%q, want calm/none", v.Level, v.Cause)
+	}
+}
+
+func TestClassify_GPUMemPressure_ZeroTotalDoesNotTrip(t *testing.T) {
+	// When VRAM total is 0 (unobserved/no GPU), no warning is triggered.
+	s := Sample{
+		AvailableMB:        32000,
+		VRAMTotalBytes:     0,
+		VRAMCommittedBytes: 4000 * 1024 * 1024,
+	}
+	v := Classify(s, DefaultThresholds())
+	if v.Level != LevelCalm || v.Cause != CauseNone {
+		t.Fatalf("got level=%q cause=%q, want calm/none", v.Level, v.Cause)
+	}
+}

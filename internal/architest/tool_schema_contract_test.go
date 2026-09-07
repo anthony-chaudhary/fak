@@ -253,20 +253,18 @@ func extractMCPSchemas(t *testing.T, mcpGoPath string) map[string]map[string]any
 			if !ok {
 				continue
 			}
-			keyLit, ok := kv.Key.(*ast.BasicLit)
-			if !ok || keyLit.Kind != token.STRING {
-				continue
+			var key string
+			if keyLit, ok := kv.Key.(*ast.BasicLit); ok && keyLit.Kind == token.STRING {
+				key, _ = unquoteStringLit(keyLit)
+			} else if ident, ok := kv.Key.(*ast.Ident); ok {
+				key = ident.Name
 			}
-			key, err := unquoteStringLit(keyLit)
-			if err != nil {
-				continue
-			}
-			switch key {
+			switch strings.ToLower(key) {
 			case "name":
 				if valLit, ok := kv.Value.(*ast.BasicLit); ok && valLit.Kind == token.STRING {
 					name, _ = unquoteStringLit(valLit)
 				}
-			case "inputSchema":
+			case "inputschema":
 				if raw, ok := extractRawMessageString(kv.Value); ok {
 					rawSchema = raw
 				} else if ident, ok := kv.Value.(*ast.Ident); ok {

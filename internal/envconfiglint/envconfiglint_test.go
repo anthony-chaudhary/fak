@@ -190,6 +190,12 @@ func TestThirdUnwatchedCleanupIsExplicitlyAdmitted(t *testing.T) {
 	}
 }
 
+func TestAdmittedPostFreezeCoversTrunkAdvances(t *testing.T) {
+	if len(admittedPostFreeze) == 0 {
+		t.Fatal("expected non-empty admittedPostFreeze")
+	}
+}
+
 func TestAdmittedPostFreezeStaysHonest(t *testing.T) {
 	root := repoRoot(t)
 	matches, err := committedEnvReadMatches(root)

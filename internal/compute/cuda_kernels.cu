@@ -1479,6 +1479,179 @@ extern "C" void fcuda_q6k_matmul_f32(const uint8_t *w, const float *x, float *y,
   k_q6k_gemm<<<dim3((o + 7) / 8, p), 256, 0, g_stream>>>(w, x, y, o, i, p);
 }
 
+// =================================================================================
+// Q2_K Resident Dequant-Fused GEMV & Panel GEMM (sm_80/sm_89/sm_90, issue #11945)
+// Super-block: 256 weights, 84 bytes (16 scales, 64 quants, 2 d, 2 dmin)
+// =================================================================================
+
+// k_q2k_dequant_transient: unpacks resident Q2_K weights to transient FP32 for Tensor Core GEMM (P >= 128).
+__global__ void k_q2k_dequant_transient(const unsigned char *Q2K, float *W, int out, int in) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int total = out * in;
+  if (i >= total) return;
+
+  int o = i / in;
+  int k = i % in;
+  int sb = k / 256;
+  int elem = k % 256;
+
+  const unsigned char *blk = Q2K + ((size_t)o * (in / 256) + sb) * 84;
+  float d = __half2float(*(const __half *)(blk + 80));
+  float min = __half2float(*(const __half *)(blk + 82));
+
+  int h = elem / 128;
+  int rem = elem % 128;
+  int j = rem / 32;
+  int lane = rem % 32;
+  int lane_half = lane >> 4;
+  int is = h * 8 + 2 * j + lane_half;
+  unsigned char sc = blk[is];
+  float dl = d * (float)(sc & 0x0f);
+  float ml = min * (float)(sc >> 4);
+
+  unsigned char qb = blk[16 + h * 32 + lane];
+  int code = (qb >> (2 * j)) & 3;
+
+  W[i] = dl * (float)code - ml;
+}
+
+// k_q2k_gemv: 1 warp (32 threads) per output row.
+// 256 threads per block = 8 rows per block. Zero shared memory, warp shuffle reduction.
+// sm_80/sm_89/sm_90 native execution eliminating CPU decode offload.
+__global__ void k_q2k_gemv(const unsigned char *W, const float *X, float *Y,
+                           int out, int in, int P) {
+  int lane = threadIdx.x & 31;
+  int o = blockIdx.x * 8 + (threadIdx.x >> 5);
+  int t = blockIdx.y;
+  if (o >= out || t >= P) return;
+
+  int nsb = in / 256;
+  float sum = 0.f;
+  const unsigned char *wrow = W + (size_t)o * nsb * 84;
+  const float *xrow = X + (size_t)t * in;
+  int lane_half = lane >> 4; // 0 for lane 0..15, 1 for lane 16..31
+
+  for (int sb = 0; sb < nsb; ++sb) {
+    const unsigned char *blk = wrow + (size_t)sb * 84;
+    const unsigned char *scales = blk;
+    const unsigned char *q = blk + 16;
+    float d = __half2float(*(const __half *)(blk + 80));
+    float min = __half2float(*(const __half *)(blk + 82));
+    const float *xb = xrow + (size_t)sb * 256;
+
+#pragma unroll
+    for (int h = 0; h < 2; ++h) {
+      unsigned char qb = q[h * 32 + lane];
+      int so = h * 8;
+      int base = h * 128;
+#pragma unroll
+      for (int j = 0; j < 4; ++j) {
+        unsigned char sc = scales[so + 2 * j + lane_half];
+        float dl = d * (float)(sc & 0x0f);
+        float ml = min * (float)(sc >> 4);
+        int code = (qb >> (2 * j)) & 3;
+        float w = dl * (float)code - ml;
+        sum = fmaf(w, xb[base + j * 32 + lane], sum);
+      }
+    }
+  }
+
+#pragma unroll
+  for (int delta = 16; delta > 0; delta >>= 1) {
+    sum += __shfl_down_sync(0xffffffff, sum, delta);
+  }
+  if (lane == 0) {
+    Y[(size_t)t * out + o] = sum;
+  }
+}
+
+// k_q2k_gemm_panel: reuses resident Q2_K weights across token_tile tokens to amortize DRAM traffic.
+template <int token_tile>
+__global__ void k_q2k_gemm_panel(const unsigned char *W, const float *X, float *Y,
+                                 int out, int in, int P) {
+  int lane = threadIdx.x;
+  int o = blockIdx.x;
+  int token0 = blockIdx.y * token_tile;
+  if (o >= out) return;
+
+  int nsb = in / 256;
+  const unsigned char *wrow = W + (size_t)o * nsb * 84;
+  float sums[token_tile] = {0.f};
+  int lane_half = lane >> 4;
+
+  for (int sb = 0; sb < nsb; ++sb) {
+    const unsigned char *blk = wrow + (size_t)sb * 84;
+    const unsigned char *scales = blk;
+    const unsigned char *q = blk + 16;
+    float d = __half2float(*(const __half *)(blk + 80));
+    float min = __half2float(*(const __half *)(blk + 82));
+
+#pragma unroll
+    for (int h = 0; h < 2; ++h) {
+      unsigned char qb = q[h * 32 + lane];
+      int so = h * 8;
+      int base = sb * 256 + h * 128;
+#pragma unroll
+      for (int j = 0; j < 4; ++j) {
+        unsigned char sc = scales[so + 2 * j + lane_half];
+        float dl = d * (float)(sc & 0x0f);
+        float ml = min * (float)(sc >> 4);
+        int code = (qb >> (2 * j)) & 3;
+        float w = dl * (float)code - ml;
+        int k = base + j * 32 + lane;
+#pragma unroll
+        for (int m = 0; m < token_tile; ++m) {
+          int token = token0 + m;
+          if (token < P) {
+            sums[m] = fmaf(w, X[(size_t)token * in + k], sums[m]);
+          }
+        }
+      }
+    }
+  }
+
+#pragma unroll
+  for (int m = 0; m < token_tile; ++m) {
+#pragma unroll
+    for (int delta = 16; delta > 0; delta >>= 1) {
+      sums[m] += __shfl_down_sync(0xffffffff, sums[m], delta);
+    }
+    if (lane == 0 && token0 + m < P) {
+      Y[(size_t)(token0 + m) * out + o] = sums[m];
+    }
+  }
+}
+
+extern "C" void fcuda_q2k_gemv(const uint8_t *dQ2K, const float *dX, float *dY,
+                               int out, int in, int P) {
+  k_q2k_gemv<<<dim3((out + 7) / 8, P), 256, 0, g_stream>>>(
+      (const unsigned char *)dQ2K, dX, dY, out, in, P);
+}
+
+extern "C" void fcuda_q2k_gemm_panel(const uint8_t *dQ2K, const float *dX, float *dY,
+                                     int out, int in, int P) {
+  constexpr int token_tile = 4;
+  k_q2k_gemm_panel<token_tile><<<dim3(out, (P + token_tile - 1) / token_tile), 32, 0, g_stream>>>(
+      (const unsigned char *)dQ2K, dX, dY, out, in, P);
+}
+
+extern "C" void fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float *dY,
+                                     int out, int in, int P) {
+  if (P >= 128) {
+    float *wide = (float *)fcuda_malloc((size_t)out * in * sizeof(float));
+    k_q2k_dequant_transient<<<((size_t)out * in + 255) / 256, 256, 0, g_stream>>>(
+        (const unsigned char *)dQ2K, wide, out, in);
+    fp16_compensated_matmul(wide, dX, dY, out, in, P);
+    fcuda_free(wide);
+    return;
+  }
+  if (P < 4) {
+    fcuda_q2k_gemv(dQ2K, dX, dY, out, in, P);
+    return;
+  }
+  fcuda_q2k_gemm_panel(dQ2K, dX, dY, out, in, P);
+}
+
 // ---- RMSNorm: one block per row -------------------------------------------------
 __global__ void k_rmsnorm(const float *X, const float *W, float *Y, int rows, int n, float eps) {
   int r = blockIdx.x;

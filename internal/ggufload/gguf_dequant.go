@@ -804,15 +804,27 @@ func dequantQ2KScalar(out []float32, raw []byte) {
 				sc := scales[is]
 				is++
 				dl, ml := d*float32(sc&0x0f), min*float32(sc>>4)
+				table := [4]float32{
+					0 - ml,
+					dl - ml,
+					dl*2 - ml,
+					dl*3 - ml,
+				}
 				for l := 0; l < 16; l++ {
-					out[n+j*32+l] = dl*float32((q[qi+l]>>shift)&3) - ml
+					out[n+j*32+l] = table[(q[qi+l]>>shift)&3]
 				}
 
 				sc = scales[is]
 				is++
 				dl, ml = d*float32(sc&0x0f), min*float32(sc>>4)
+				table = [4]float32{
+					0 - ml,
+					dl - ml,
+					dl*2 - ml,
+					dl*3 - ml,
+				}
 				for l := 0; l < 16; l++ {
-					out[n+j*32+16+l] = dl*float32((q[qi+16+l]>>shift)&3) - ml
+					out[n+j*32+16+l] = table[(q[qi+16+l]>>shift)&3]
 				}
 				shift += 2
 			}

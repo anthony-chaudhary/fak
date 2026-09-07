@@ -377,6 +377,12 @@ func TestBuildOpencodeChatAndFormatPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "Do not touch root files") {
 		t.Fatalf("prompt missing instructions: %s", prompt)
 	}
+	if !strings.Contains(prompt, "parallel subagents") {
+		t.Fatalf("prompt missing subagents instruction: %s", prompt)
+	}
+	if !strings.Contains(prompt, "gh issue comment") {
+		t.Fatalf("prompt missing gh issue comment instruction: %s", prompt)
+	}
 	if !strings.Contains(prompt, "3-line receipt") {
 		t.Fatalf("prompt missing receipt instruction: %s", prompt)
 	}
@@ -386,6 +392,7 @@ func TestBuildOpencodeChatAndFormatPrompt(t *testing.T) {
 		Interactive: true,
 		Model:       "glm-5.2",
 		Agent:       "general",
+		Variant:     "high",
 		WorktreeDir: "C:/tmp/worktree-42",
 		ExtraArgs:   []string{"--verbose"},
 	})
@@ -400,6 +407,7 @@ func TestBuildOpencodeChatAndFormatPrompt(t *testing.T) {
 		"opencode", "run", "-i", "--title", "Issue #42: Fix memory leak in kvcache",
 		"-m", "glm-5.2",
 		"--agent", "general",
+		"--variant", "high",
 		"--dir", "C:/tmp/worktree-42",
 		"--verbose",
 		prompt,
@@ -419,6 +427,7 @@ func TestBuildOpencodeChatAndFormatPrompt(t *testing.T) {
 		PrintLogs:   true,
 		AutoApprove: true,
 		Model:       "claude-sonnet-4-6",
+		Variant:     "high",
 	})
 	expectedNonInteractiveCmd := []string{
 		"opencode", "run",
@@ -426,6 +435,7 @@ func TestBuildOpencodeChatAndFormatPrompt(t *testing.T) {
 		"--dangerously-skip-permissions",
 		"--title", "Issue #42: Fix memory leak in kvcache",
 		"-m", "claude-sonnet-4-6",
+		"--variant", "high",
 		prompt,
 	}
 	if len(nonInteractiveChat.Command) != len(expectedNonInteractiveCmd) {

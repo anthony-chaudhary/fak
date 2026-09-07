@@ -1255,6 +1255,24 @@ func (s *Session) Generate(prompt []int, n int) []int {
 	return out
 }
 
+// RollbackSpeculative rolls back the session's KV cache by nTokens.
+// It commits accepted positions 0..R-1 and rolls back speculative branches R..K-1
+// via O(1) pointer adjustments without memory copying.
+func (s *Session) RollbackSpeculative(nTokens int) {
+	if s == nil || s.Cache == nil || nTokens <= 0 {
+		return
+	}
+	currLen := s.Cache.Len()
+	if currLen == 0 {
+		return
+	}
+	targetLen := currLen - nTokens
+	if targetLen < 0 {
+		targetLen = 0
+	}
+	s.Cache.Truncate(targetLen)
+}
+
 func argmaxF32(v []float32) int {
 	bi, bv := 0, v[0]
 	for i, x := range v {

@@ -231,6 +231,7 @@ func New(cfg Config) (*Server, error) {
 		servedSide:                   servedSide,
 		upstream:                     upstreamSide,
 		requireKey:                   cfg.RequireKey,
+		allowLAN:                     cfg.AllowLAN,
 		readBearer:                   cfg.ReadBearer,
 		policyRuntime:                cfg.PolicyRuntime,
 		keyset:                       newKeyset(cfg.KeyPrincipals),
@@ -403,6 +404,15 @@ func New(cfg Config) (*Server, error) {
 		}
 	}
 	s.kvStore = kvs
+
+	if ikp, ok := s.planner.(*agent.InKernelPlanner); ok {
+		ikp.SetRestoreStash(s.stashRestore)
+	}
+	if dp, ok := s.planner.(*DualPlanner); ok {
+		if ikp, ok := dp.local.(*agent.InKernelPlanner); ok {
+			ikp.SetRestoreStash(s.stashRestore)
+		}
+	}
 
 	return s, nil
 }
@@ -777,6 +787,15 @@ func newInKernelChatPlanner(cfg Config, modelID string, logf func(string, ...any
 	}
 	plannerCfg := cfg.InKernelPlanner
 	plannerCfg.CPUOffloadExperts = cfg.CPUOffloadExperts
+	if plannerCfg.CompactHistoryBudget == 0 && cfg.CompactHistoryBudget > 0 {
+		plannerCfg.CompactHistoryBudget = cfg.CompactHistoryBudget
+	}
+	if !plannerCfg.ElideStaleReads && cfg.ElideStaleReads {
+		plannerCfg.ElideStaleReads = cfg.ElideStaleReads
+	}
+	if !plannerCfg.DeferColdTools && cfg.DeferColdTools {
+		plannerCfg.DeferColdTools = cfg.DeferColdTools
+	}
 	return agent.NewInKernelPlannerWithConfig(cfg.InKernelModel, cfg.Tokenizer, modelID, cfg.InKernelQ4K, cfg.Backend, cfg.Metal, plannerCfg)
 }
 

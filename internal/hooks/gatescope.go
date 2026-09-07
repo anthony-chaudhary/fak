@@ -79,6 +79,7 @@ func gateScopes() []gateScopeRow {
 		{"MICROHARNESS_WITNESS", "gate_microharnesswitness.go", SeamPreCommit, ClassLandsTree, ""},
 		{"BARE_COMMIT_SWEEP", "gate_barecommitsweep.go", SeamPreCommit, ClassLandsTree, ""},
 		{"PARALLEL_FABRIC_NUDGE", "gate_microcontext_nudge.go", SeamPreCommit, ClassLandsTree, ""},
+		{"PERFORMANCE_RSI_NUDGE", "gate_perfrsi.go", SeamPreCommit, ClassLandsTree, ""},
 		// GIT_HYGIENE_BYPASS judges ADDED LINES only — it makes no fileProbe read at all — so the
 		// wrapper is a no-op for it in the same way it is for CONCEPT_FRESHNESS. It is listed
 		// LANDS_TREE because that is the change set its verdict is about: the view shares the very
@@ -91,6 +92,7 @@ func gateScopes() []gateScopeRow {
 		// a no-op for it (it takes no reads through fileProbe), and that is the point — one gate
 		// solved this for itself, and #5931 is the same answer applied to the shared seam.
 		{"CONCEPT_FRESHNESS", "gate_conceptfreshness.go", SeamPreCommit, ClassLandsTree, ""},
+		{"IMPORT_WITNESS", "gate_importwitness.go", SeamPreCommit, ClassLandsTree, ""},
 
 		// ---- pre-commit, deliberately NOT moved ----------------------------------------------
 		{"PUBLIC_LEAK", "gate_publicleak.go", SeamPreCommit, ClassWorktree,

@@ -391,7 +391,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 	want := sha256.Sum256([]byte(s.requireKey))
 	wantRead := sha256.Sum256([]byte(s.readBearer))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if (s.requireKey != "" || s.keyset != nil) && !authExempt(r) {
+		if (s.requireKey != "" || s.keyset != nil) && !s.authExempt(r) {
 			tok, ok := gatewayCredential(r)
 			got := sha256.Sum256([]byte(tok))
 			// The single RequireKey bearer authenticates the anonymous single-tenant
@@ -422,11 +422,17 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 				authed = subtle.ConstantTimeCompare(got[:], wantRead[:]) == 1
 			}
 			if !authed {
-				writeErr(w, http.StatusUnauthorized, "missing or invalid credentials")
+				writeAuthError(w, r, ok)
 				return
 			}
 			if principal != "" {
 				r = r.WithContext(WithPrincipal(r.Context(), principal))
+			}
+		} else if s.keyset != nil {
+			if tok, ok := gatewayCredential(r); ok {
+				if p, matched := s.keyset.lookup(tok); matched {
+					r = r.WithContext(WithPrincipal(r.Context(), p))
+				}
 			}
 		}
 		if s.startup.childStartupPending() && strings.HasPrefix(r.URL.Path, "/v1/") && !strings.HasPrefix(r.URL.Path, "/v1/fak/") {
@@ -437,20 +443,12 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 }
 
 // authExempt reports whether a request may skip the bearer check on an
-// authenticated gateway. Two cases:
-//
-//   - /healthz is ALWAYS exempt — it is the unauthenticated liveness probe a
-//     load balancer or a `fak claude-mac-fak --debug` preflight hits before it
-//     holds a token, and it carries only the planner/engine words (no counts).
-//   - /metrics, /debug/vars, and /v1/fak/observation are exempt ONLY for a
-//     loopback caller. They are read-only observability surfaces (Prometheus,
-//     legacy diagnostics, and the typed snapshot) that an operator clicks
-//     straight from the host or an SSH tunnel; gating them behind the bearer is
-//     what makes those panel links 401. A REMOTE caller still needs the token,
-//     so request counts, token volumes, the model id, and uptime are never
-//     exposed to the open internet.
-func authExempt(r *http.Request) bool {
+// authenticated gateway.
+func (s *Server) authExempt(r *http.Request) bool {
 	if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+		return true
+	}
+	if s.allowLAN && requestFromLAN(r) {
 		return true
 	}
 	// Human/agent discovery is directly clickable from the loopback URL shown
@@ -462,6 +460,21 @@ func authExempt(r *http.Request) bool {
 		return requestFromLoopback(r)
 	}
 	return false
+}
+
+// requestFromLAN reports whether the request's peer is on a private/local network
+// interface (RFC 1918 IPv4, link-local IPv4/IPv6, unique-local IPv6, or loopback).
+func requestFromLAN(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	host = strings.Trim(host, "[]")
+	if zone := strings.IndexByte(host, '%'); zone >= 0 {
+		host = host[:zone]
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast())
 }
 
 // readScopedPath reports whether the path is one of the read-only observability

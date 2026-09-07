@@ -2,14 +2,18 @@ package ops
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/flock"
 	"github.com/anthony-chaudhary/fak/internal/treedoctor"
 )
 
@@ -26,15 +30,19 @@ type StorageReclaimResult struct {
 
 // StorageManager orchestrates watermarks and the 4-tier reclamation cascade.
 type StorageManager struct {
-	RepoRoot string
-	Config   Config
+	RepoRoot     string
+	Config       Config
+	ProcessAlive func(int) bool
+	DiskFree     func(string) (int64, error)
 }
 
 // NewStorageManager creates a StorageManager.
 func NewStorageManager(repoRoot string, cfg Config) *StorageManager {
 	return &StorageManager{
-		RepoRoot: repoRoot,
-		Config:   cfg,
+		RepoRoot:     repoRoot,
+		Config:       cfg,
+		ProcessAlive: defaultProcessAlive,
+		DiskFree:     treedoctor.GoCacheFreeBytes,
 	}
 }
 
@@ -47,6 +55,36 @@ func (sm *StorageManager) EvaluateWatermark(freeBytes uint64) (warning bool, ref
 		return true, false
 	}
 	return false, false
+}
+
+// CheckDiskSpace evaluates free disk space on the filesystem containing RepoRoot,
+// and evaluates the Warning and Refuse watermarks against Config.
+func (sm *StorageManager) CheckDiskSpace() (freeBytes uint64, warning bool, refuse bool, err error) {
+	if sm.RepoRoot == "" {
+		return 0, false, false, nil
+	}
+	df := sm.DiskFree
+	if df == nil {
+		df = treedoctor.GoCacheFreeBytes
+	}
+	free, err := df(sm.RepoRoot)
+	if err != nil {
+		return 0, false, false, err
+	}
+	if free < 0 {
+		free = 0
+	}
+	freeBytes = uint64(free)
+	warning, refuse = sm.EvaluateWatermark(freeBytes)
+	return freeBytes, warning, refuse, nil
+}
+
+// CheckDiskSpace evaluates free disk space and watermark status via the storage manager.
+func (e *Engine) CheckDiskSpace() (freeBytes uint64, warning bool, refuse bool, err error) {
+	if e == nil || e.Storage == nil {
+		return 0, false, false, nil
+	}
+	return e.Storage.CheckDiskSpace()
 }
 
 // ReclaimCascade runs Tier 0 through Tier 3 reclamation.
@@ -186,6 +224,120 @@ func (sm *StorageManager) reclaimTier0(ctx context.Context, dryRun bool) (int64,
 	return bytesReclaimed, count, actions, nil
 }
 
+// isScratchDirActive checks whether a scratch directory is actively locked or in use
+// by inspecting lock files, PID files, lease files, and owner stamps.
+func (sm *StorageManager) isScratchDirActive(dirPath string, now time.Time) bool {
+	processAlive := sm.ProcessAlive
+	if processAlive == nil {
+		processAlive = defaultProcessAlive
+	}
+
+	active := false
+	maxEntries := 2000
+	seen := 0
+
+	_ = filepath.WalkDir(dirPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			active = true
+			return filepath.SkipAll
+		}
+		if path == dirPath {
+			return nil
+		}
+		seen++
+		if seen > maxEntries {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		name := strings.ToLower(d.Name())
+		info, err := d.Info()
+		if err != nil {
+			active = true
+			return filepath.SkipAll
+		}
+
+		// 1. Check for PID files (*.pid or pid)
+		if strings.HasSuffix(name, ".pid") || name == "pid" {
+			data, readErr := os.ReadFile(path)
+			if readErr == nil {
+				pidStr := strings.TrimSpace(string(data))
+				if pid, convErr := strconv.Atoi(pidStr); convErr == nil && pid > 0 {
+					if processAlive(pid) {
+						active = true
+						return filepath.SkipAll
+					}
+				}
+			}
+		}
+
+		// 2. Check for lock files (*.lock or lock)
+		if strings.HasSuffix(name, ".lock") || name == "lock" {
+			// Try non-blocking advisory flock to detect active holders
+			if f, openErr := os.OpenFile(path, os.O_RDWR, 0); openErr == nil {
+				lockErr := flock.TryLock(f)
+				if errors.Is(lockErr, flock.ErrLockBusy) {
+					_ = f.Close()
+					active = true
+					return filepath.SkipAll
+				}
+				if lockErr == nil {
+					_ = flock.Unlock(f)
+				}
+				_ = f.Close()
+			} else if os.IsPermission(openErr) {
+				active = true
+				return filepath.SkipAll
+			}
+
+			// Check if the lock file records a live PID
+			data, readErr := os.ReadFile(path)
+			if readErr == nil {
+				pidStr := strings.TrimSpace(string(data))
+				if pid, convErr := strconv.Atoi(pidStr); convErr == nil && pid > 0 {
+					if processAlive(pid) {
+						active = true
+						return filepath.SkipAll
+					}
+				}
+			}
+
+			// If lock file has no PID or unparseable, check if modified recently (within 15 minutes)
+			if now.Sub(info.ModTime()) < 15*time.Minute {
+				active = true
+				return filepath.SkipAll
+			}
+		}
+
+		// 3. Check for lease.json or owner.json / *.stamp
+		if name == "lease.json" || name == "owner.json" || strings.HasSuffix(name, ".stamp") {
+			data, readErr := os.ReadFile(path)
+			if readErr == nil {
+				var record struct {
+					PID         int       `json:"pid"`
+					HeartbeatTS time.Time `json:"heartbeat_ts"`
+				}
+				if json.Unmarshal(data, &record) == nil {
+					if record.PID > 0 && processAlive(record.PID) {
+						active = true
+						return filepath.SkipAll
+					}
+					if !record.HeartbeatTS.IsZero() && now.Sub(record.HeartbeatTS) < 15*time.Minute {
+						active = true
+						return filepath.SkipAll
+					}
+				}
+			}
+		}
+
+		return nil
+	})
+
+	return active
+}
+
 // reclaimTier1 sweeps expired producer scratch directories in _scratch/*
 func (sm *StorageManager) reclaimTier1(ctx context.Context, dryRun bool) (int64, int, []string, error) {
 	var bytesReclaimed int64
@@ -209,7 +361,7 @@ func (sm *StorageManager) reclaimTier1(ctx context.Context, dryRun bool) (int64,
 	now := time.Now()
 
 	for _, e := range entries {
-		if !e.IsDir() || e.Name() == "go-tmp" {
+		if !e.IsDir() || e.Name() == "go-tmp" || e.Name() == "gotmp" || strings.HasPrefix(e.Name(), "fak-worker-wt") {
 			continue
 		}
 		info, err := e.Info()
@@ -217,9 +369,12 @@ func (sm *StorageManager) reclaimTier1(ctx context.Context, dryRun bool) (int64,
 			continue
 		}
 
-		// Reclaim if older than TTL
+		// Reclaim if older than TTL and not actively locked or in use
 		if now.Sub(info.ModTime()) > ttl {
 			p := filepath.Join(scratchDir, e.Name())
+			if sm.isScratchDirActive(p, now) {
+				continue
+			}
 			sz := dirSize(p)
 			if !dryRun {
 				if err := os.RemoveAll(p); err == nil {

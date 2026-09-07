@@ -669,7 +669,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		CacheAttribution: observation.CacheAttribution,
 		ManagedCache:     observation.ManagedCache,
 		TokenSavings:     s.tokenSavingsVars(adjudication),
-		ShrinkLevers: shrinkLeverVars(s.anthropicPassthrough(), s.dualRoutesLocalModels(), s.provider,
+		ShrinkLevers: shrinkLeverVars(s.wireRunsShrinkLevers(), s.dualRoutesLocalModels(), s.provider,
 			s.compactHistoryBudget, s.elideStaleReads, s.deferColdTools),
 		VCacheFamilies:   vcacheFamiliesVars(vcacheTurns, vcacheCapped),
 		VCacheGovernor:   m.vcacheGovernorDecisionRecords(),

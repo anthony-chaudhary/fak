@@ -69,6 +69,11 @@ type InKernelPlanner struct {
 	denseGPULayers               int
 	qwen35MetalGDNExecuted       atomic.Bool
 
+	compactHistoryBudget int
+	elideStaleReads      bool
+	deferColdTools       bool
+	restoreStash         func(trace, id, excerpt string, body []byte)
+
 	// tree is the process-scoped RadixAttention prefix cache (internal/radixkv): the
 	// multi-thousand-token static system+tool-schema prefix is prefilled once and the
 	// next turn REUSES its KV, prefilling only the divergent suffix — the candidate-#13
@@ -217,6 +222,66 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 		}
 	}
 	return completion, nil
+}
+
+// SetPromptShrinkLevers configures the prompt-shrink levers for this planner.
+func (p *InKernelPlanner) SetPromptShrinkLevers(compactBudget int, elideStaleReads, deferColdTools bool) {
+	if p == nil {
+		return
+	}
+	p.compactHistoryBudget = compactBudget
+	p.elideStaleReads = elideStaleReads
+	p.deferColdTools = deferColdTools
+}
+
+// SetRestoreStash attaches a content-addressed storage callback for elided / compacted turns.
+func (p *InKernelPlanner) SetRestoreStash(stash func(trace, id, excerpt string, body []byte)) {
+	if p == nil {
+		return
+	}
+	p.restoreStash = stash
+}
+
+// ApplyPromptShrink evaluates the configured or request-level prompt-shrink levers
+// over typed messages and tools before tokenization.
+func (p *InKernelPlanner) ApplyPromptShrink(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) ([]Message, []ToolDef, TypedPromptShrinkOutcome) {
+	sp := applySampleOpts(opts...)
+	compactBudget := p.compactHistoryBudget
+	if sp.CompactHistoryBudget != nil {
+		compactBudget = *sp.CompactHistoryBudget
+	}
+	elideStale := p.elideStaleReads
+	if sp.ElideStaleReads != nil {
+		elideStale = *sp.ElideStaleReads
+	}
+	deferTools := p.deferColdTools
+	if sp.DeferColdTools != nil {
+		deferTools = *sp.DeferColdTools
+	}
+
+	if compactBudget <= 0 && !elideStale && !deferTools {
+		return messages, tools, TypedPromptShrinkOutcome{}
+	}
+
+	var stash func(id, excerpt string, body []byte)
+	if p.restoreStash != nil {
+		traceID := ""
+		if traceVal := ctx.Value("trace_id"); traceVal != nil {
+			if s, ok := traceVal.(string); ok {
+				traceID = s
+			}
+		}
+		stash = func(id, excerpt string, body []byte) {
+			p.restoreStash(traceID, id, excerpt, body)
+		}
+	}
+
+	return ApplyTypedPromptShrinkLevers(messages, tools, TypedPromptShrinkConfig{
+		CompactHistoryBudget: compactBudget,
+		ElideStaleReads:      elideStale,
+		DeferColdTools:       deferTools,
+		RestoreStash:         stash,
+	})
 }
 
 // KVMemoryStats reports the in-process KV prefix cache's physical resident shape.
@@ -729,6 +794,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		return nil, &model.NativeInferenceReceiptUnsupportedError{Reason: "requires greedy sampling over unmodified logits"}
 	}
 
+	messages, tools, _ = p.ApplyPromptShrink(ctx, messages, tools, opts...)
 	chat := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice, sp)
 	ids, err := p.tok.Encode(chat)
 	if err != nil {

@@ -291,6 +291,8 @@ type Runtime struct {
 	PolicyContext    abi.PolicyContext
 	StrictGatedSinks bool
 	GatedSinks       map[string]bool
+	ContentDigest    string
+	Generation       uint64
 }
 
 // Load reads, parses, validates, and resolves a manifest file into a Policy.
@@ -367,7 +369,13 @@ func ParseRuntime(b []byte) (Runtime, error) {
 	if err != nil {
 		return Runtime{}, err
 	}
-	return m.ToRuntime()
+	rt, err := m.ToRuntime()
+	if err != nil {
+		return Runtime{}, err
+	}
+	rt.ContentDigest = ComputeContentDigest(b)
+	rt.Generation = 1
+	return rt, nil
 }
 
 // ParseManifest decodes manifest bytes WITHOUT resolving to a Policy, rejecting
@@ -808,6 +816,12 @@ func postureName(p adjudicator.Posture) string {
 func SummaryRuntime(rt Runtime) string {
 	var b strings.Builder
 	b.WriteString(Summary(rt.Adjudicator))
+	if rt.ContentDigest != "" {
+		fmt.Fprintf(&b, "content digest     : %s\n", rt.ContentDigest)
+	}
+	if rt.Generation > 0 {
+		fmt.Fprintf(&b, "generation         : %d\n", rt.Generation)
+	}
 	fmt.Fprintf(&b, "ifc safe sinks     : %s\n", joinOrNone(rt.SafeSinks))
 	fmt.Fprintf(&b, "ifc authorize      : %d rule(s)\n", len(rt.AuthorizeRules))
 	for _, r := range rt.AuthorizeRules {

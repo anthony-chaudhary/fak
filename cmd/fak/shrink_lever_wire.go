@@ -1,14 +1,15 @@
 // shrink_lever_wire.go — the prompt-shrink-lever WIRE admission rule for the two commands
 // that bind a gateway: `fak serve` (#5493) and `fak guard` (#5538).
 //
-// The three largest prompt-shrink levers this gateway ships are all gated, inside the
-// gateway, on the Anthropic passthrough decision (Server.anthropicPassthroughFor):
+// The three largest prompt-shrink levers this gateway ships are supported on the
+// Anthropic passthrough wire (Server.anthropicPassthroughFor) and the native in-kernel
+// wire (agent.InKernelPlanner via ApplyTypedPromptShrinkLevers):
 //
-//   - --compact-history-budget → gateway.compactAnthropicRawWithReason
-//   - --elide-stale-reads      → gateway.maybeElideStaleReads
-//   - --defer-cold-tools       → gateway.maybeDeferColdTools
+//   - --compact-history-budget → gateway.compactAnthropicRawWithReason / agent.CompactMessagesWithOptions
+//   - --elide-stale-reads      → gateway.maybeElideStaleReads / agent.ElideStaleReadMessages
+//   - --defer-cold-tools       → gateway.maybeDeferColdTools / agent.DeferColdToolDefs
 //
-// Each of those three returns identity the moment the request is not on that wire, so an
+// Each of those three returns identity the moment the request is not on a supported wire, so an
 // operator whose upstream is a self-hosted OpenAI-wire model gets NONE of them — and, until
 // this rule, got no signal at all that the levers they configured were inert. That silence
 // is the expensive half of the defect: an A/B run on such a wire measures ~0 saving and the
@@ -84,7 +85,7 @@ var (
 	// that selects it.
 	shrinkLeverServeCommand = shrinkLeverCommand{
 		Name:   "fak serve",
-		ToWire: "serve the Anthropic Messages wire (--provider anthropic with a single --base-url)",
+		ToWire: "serve the Anthropic Messages wire (--provider anthropic with a single --base-url) or the in-kernel engine (--gguf)",
 	}
 	// shrinkLeverGuardCommand — `fak guard` reaches the passthrough by DEFAULT when it wraps
 	// an Anthropic-wire agent, so its remedy names the default launch and the three flags
@@ -92,7 +93,7 @@ var (
 	// OpenAI-compatible wire, and a bare --gguf makes the in-kernel planner the upstream).
 	shrinkLeverGuardCommand = shrinkLeverCommand{
 		Name:   "fak guard",
-		ToWire: "wrap an Anthropic-wire agent (the default `fak guard -- claude`, or --provider anthropic) with no --local, no --remote-serve and no upstream-replacing --gguf",
+		ToWire: "wrap an Anthropic-wire agent (the default `fak guard -- claude`, or --provider anthropic) or the in-kernel engine (--gguf) with no --local and no --remote-serve",
 	}
 )
 
@@ -115,7 +116,7 @@ const (
 	// configure by accident and impossible to notice without being told.
 	shrinkWireReplicaFleet = "replica-fleet"
 	// shrinkWireInKernel — no upstream, weights loaded (--gguf): every turn decodes on this
-	// box through the in-kernel planner.
+	// box through the in-kernel planner with typed prompt-shrink levers.
 	shrinkWireInKernel = "in-kernel"
 	// shrinkWireMock — no upstream and no weights: the deterministic offline mock planner.
 	shrinkWireMock = "mock"
@@ -163,7 +164,7 @@ func classifyShrinkWire(provider, baseURL string, replicaBaseURLs []string, gguf
 // actually run on. An unknown wire counts as running them: an unproven classification must
 // never be the thing that refuses a boot.
 func shrinkWireRunsLevers(wire string) bool {
-	return wire == shrinkWireAnthropicPassthrough || wire == shrinkWireUnknown
+	return wire == shrinkWireAnthropicPassthrough || wire == shrinkWireInKernel || wire == shrinkWireUnknown
 }
 
 // shrinkWireNoticeWarranted reports whether a wire deserves the default-on ADVISORY. The
@@ -325,7 +326,7 @@ func shrinkLeverRefusal(cmd shrinkLeverCommand, wire, provider string, explicit 
 	}
 	return fmt.Sprintf(
 		"%s: %s — refusing to start: %d prompt-shrink lever(s) were explicitly enabled but cannot run on this wire, which is %s.%s\n"+
-			"Every one of them is gated on the Anthropic passthrough inside the gateway, so on this wire the prompt is forwarded UNSHRUNK and the lever is a no-op. "+
+			"Every one of them is gated on the Anthropic passthrough or in-kernel planner inside the gateway, so on this wire the prompt is forwarded UNSHRUNK and the lever is a no-op. "+
 			"Either %s, or state the lever is off (%s) so this run cannot be quoted as a lever result it never produced.",
 		cmd.Name, shrinkLeverInertToken, len(explicit), shrinkWireDescription(wire, provider),
 		shrinkLeverLines(explicit), cmd.ToWire, shrinkLeverOffForms(explicit))

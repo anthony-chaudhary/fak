@@ -92,6 +92,7 @@ func TestEveryShippedStructuralRuleIsRecognised(t *testing.T) {
 		{"out_of_tree_write", isOutOfTreeWriteArgRule, []string{ootDashORegex, ootOutputRegex, ootRedirectRegex, ootCopyVerbRegex}},
 		{"device_op", isDeviceOpArgRule, []string{defaultDeviceOpDenyRegex, defaultPSDiskOpDenyRegex}},
 		{"build_cache_clean", isBuildCacheCleanArgRule, []string{defaultBuildCacheCleanDenyRegex}},
+		{"git_push", isGitPushArgRule, []string{defaultGitPushDenyRegex, defaultPSGitPushDenyRegex}},
 	}
 
 	undecided := shippedUndecidedRules
@@ -208,7 +209,8 @@ func TestEveryShippedDenyRuleNamesARemedy(t *testing.T) {
 		decided := isRmRfArgRule(pr) || isRCEPipeArgRule(pr) || isSudoArgRule(pr) ||
 			isRunAsArgRule(pr) || isTerraformDestroyArgRule(pr) ||
 			isShellDialectArgRule(pr) || isOutOfTreeWriteArgRule(pr) ||
-			isDeviceOpArgRule(pr)
+			isDeviceOpArgRule(pr) || isBuildCacheCleanArgRule(pr) ||
+			isGitPushArgRule(pr)
 		if !decided {
 			t.Errorf("tool %q arg %q: the fix text for %q MATCHES its own deny_regex, and this rule has NO structural decider — the match IS the verdict, so quoting this refusal re-trips the rule that produced it:\n  fix: %s",
 				r.Tool, r.Arg, r.DenyRegex, r.Fix)

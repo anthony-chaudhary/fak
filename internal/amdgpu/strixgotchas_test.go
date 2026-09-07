@@ -526,6 +526,15 @@ func TestAuditHostGotchas_LiveGotchasEvaluations(t *testing.T) {
 				}
 			}
 		}
+
+		// Issue #11911: Verify env var KV_CACHE_DIRTY_RING_BUFFER_GIB=4 sets DirtyRingBufferActive
+		mockFS := NewMockFS()
+		_ = mockFS.WriteFile("/proc/cpuinfo", []byte("model name: AMD Ryzen AI MAX+ 395\n"), 0644)
+		t.Setenv("KV_CACHE_DIRTY_RING_BUFFER_GIB", "4")
+		envFromEnv := BuildHostProbeEnvironmentWithFS(mockFS)
+		if !envFromEnv.DirtyRingBufferActive {
+			t.Errorf("expected DirtyRingBufferActive=true when KV_CACHE_DIRTY_RING_BUFFER_GIB=4, got false")
+		}
 	})
 
 	t.Run("GOTCHA_THERMAL_CLOCK_HUNTING", func(t *testing.T) {

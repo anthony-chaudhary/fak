@@ -170,8 +170,8 @@ func TestPresentDistinguishesDeclaredValuesFromDefaults(t *testing.T) {
 
 func TestKnownAndDeclaredKeysAreStableAndComplete(t *testing.T) {
 	keys := KnownKeys()
-	if len(keys) != 32 {
-		t.Fatalf("KnownKeys count = %d, want 32", len(keys))
+	if len(keys) != 33 {
+		t.Fatalf("KnownKeys count = %d, want 33", len(keys))
 	}
 	for i := 1; i < len(keys); i++ {
 		if keys[i-1].Dotted() >= keys[i].Dotted() {

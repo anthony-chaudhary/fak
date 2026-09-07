@@ -489,3 +489,162 @@ func TestConcurrentApplyRunsOnce(t *testing.T) {
 		t.Errorf("got %d applied / %d replayed, want exactly 1 each", applied, replayed)
 	}
 }
+
+func TestBoundIdentityRestart(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "idem.jsonl")
+	store, err := Open(ledger, DefaultWindow)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	token := "token-abc"
+	ident := RequestIdentity{
+		Operation:     "issue-create",
+		Resource:      "issues/repo-1",
+		Principal:     "agent-worker-1",
+		PayloadDigest: "sha256:fedcba9876543210",
+	}
+	key := Key(ident.Operation, token)
+
+	calls := 0
+	apply := func() (string, error) {
+		calls++
+		return fmt.Sprintf("created issue #%d", calls), nil
+	}
+
+	// 1. Apply one bound identity via DoBound. Verify applied (not replayed).
+	res1, replayed1, err := store.DoBound(key, ident, apply)
+	if err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+	if replayed1 {
+		t.Fatal("first apply must not be replayed")
+	}
+	if res1 != "created issue #1" {
+		t.Fatalf("first apply result = %q, want %q", res1, "created issue #1")
+	}
+	if calls != 1 {
+		t.Fatalf("calls = %d, want 1", calls)
+	}
+
+	// 2. Close and reopen store in a new Store instance.
+	store2, err := Open(ledger, DefaultWindow)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+
+	// 3. Retry with the exact same identity and token: verify replayed (replayed=true), result matches, apply() was NOT called.
+	res2, replayed2, err := store2.DoBound(key, ident, apply)
+	if err != nil {
+		t.Fatalf("replayed retry: %v", err)
+	}
+	if !replayed2 {
+		t.Fatal("retry with exact same identity must be replayed")
+	}
+	if res2 != res1 {
+		t.Fatalf("retry result = %q, want %q", res2, res1)
+	}
+	if calls != 1 {
+		t.Fatalf("apply() called during replay: calls = %d, want 1", calls)
+	}
+
+	// 4. Retry with changed payload digest (or changed resource/principal): verify returns ErrIdentityConflict, apply() was NOT called.
+	for _, tc := range []struct {
+		name  string
+		ident RequestIdentity
+	}{
+		{
+			name: "changed payload digest",
+			ident: RequestIdentity{
+				Operation:     ident.Operation,
+				Resource:      ident.Resource,
+				Principal:     ident.Principal,
+				PayloadDigest: "sha256:0123456789abcdef",
+			},
+		},
+		{
+			name: "changed resource",
+			ident: RequestIdentity{
+				Operation:     ident.Operation,
+				Resource:      "issues/repo-2",
+				Principal:     ident.Principal,
+				PayloadDigest: ident.PayloadDigest,
+			},
+		},
+		{
+			name: "changed principal",
+			ident: RequestIdentity{
+				Operation:     ident.Operation,
+				Resource:      ident.Resource,
+				Principal:     "agent-worker-2",
+				PayloadDigest: ident.PayloadDigest,
+			},
+		},
+		{
+			name: "changed operation",
+			ident: RequestIdentity{
+				Operation:     "issue-update",
+				Resource:      ident.Resource,
+				Principal:     ident.Principal,
+				PayloadDigest: ident.PayloadDigest,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := store2.DoBound(key, tc.ident, apply)
+			if !errors.Is(err, ErrIdentityConflict) {
+				t.Fatalf("expected ErrIdentityConflict, got %v", err)
+			}
+			if calls != 1 {
+				t.Fatalf("apply() was called during conflict: calls = %d, want 1", calls)
+			}
+		})
+	}
+
+	// 5. In an existing store with an unbound legacy record (written with regular Do): calling DoBound on that key returns ErrLegacyBindingRequired.
+	legacyToken := "legacy-token-xyz"
+	legacyKey := Key("issue-create", legacyToken)
+	legacyRes, legacyReplayed, err := store2.Do(legacyKey, "issue-create", func() (string, error) {
+		return "legacy-created", nil
+	})
+	if err != nil || legacyReplayed || legacyRes != "legacy-created" {
+		t.Fatalf("legacy Do failed: res=%q replayed=%v err=%v", legacyRes, legacyReplayed, err)
+	}
+
+	_, _, err = store2.DoBound(legacyKey, ident, apply)
+	if !errors.Is(err, ErrLegacyBindingRequired) {
+		t.Fatalf("DoBound on legacy unbound record: got %v, want ErrLegacyBindingRequired", err)
+	}
+	if calls != 1 {
+		t.Fatalf("apply() was called during legacy binding check: calls = %d, want 1", calls)
+	}
+}
+
+func TestRequestIdentity(t *testing.T) {
+	var zero RequestIdentity
+	if !zero.IsZero() {
+		t.Error("expected zero RequestIdentity to report IsZero == true")
+	}
+
+	ident := RequestIdentity{
+		Operation:     "deploy",
+		Resource:      "service/auth",
+		Principal:     "agent-1",
+		PayloadDigest: "hash123",
+	}
+	if ident.IsZero() {
+		t.Error("expected non-zero RequestIdentity to report IsZero == false")
+	}
+
+	d1 := ident.Digest()
+	d2 := ident.Digest()
+	if d1 == "" || d1 != d2 {
+		t.Fatalf("Digest not deterministic: %q vs %q", d1, d2)
+	}
+
+	identDiff := ident
+	identDiff.PayloadDigest = "hash456"
+	if identDiff.Digest() == d1 {
+		t.Error("different identity must produce different digest")
+	}
+}

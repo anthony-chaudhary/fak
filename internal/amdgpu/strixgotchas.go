@@ -665,6 +665,11 @@ func BuildHostProbeEnvironmentWithFS(fs FileSystem) GotchaProbeEnvironment {
 	if env.EnvVars["FAK_F16_KV_CONTIGUIZE"] == "1" {
 		env.F16KVContiguizationEnabled = true
 	}
+	if val := env.EnvVars["KV_CACHE_DIRTY_RING_BUFFER_GIB"]; val != "" {
+		if gib, err := strconv.ParseUint(val, 10, 64); err == nil && gib >= 2 {
+			env.DirtyRingBufferActive = true
+		}
+	}
 
 	hasLinuxFiles := false
 	if _, err := fs.Stat("/proc/version"); err == nil {

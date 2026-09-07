@@ -306,3 +306,24 @@ func WithThinkingBudget(budget int) SampleOpt {
 		sp.ThinkingBudget = &v
 	}
 }
+
+// WithCompactHistoryBudget sets the per-request history compaction budget for native/in-kernel planning.
+func WithCompactHistoryBudget(budget int) SampleOpt {
+	return func(sp *SampleParams) {
+		sp.CompactHistoryBudget = &budget
+	}
+}
+
+// WithElideStaleReads toggles per-request stale-read elision.
+func WithElideStaleReads(enabled bool) SampleOpt {
+	return func(sp *SampleParams) {
+		sp.ElideStaleReads = &enabled
+	}
+}
+
+// WithDeferColdTools toggles per-request cold tool deferral.
+func WithDeferColdTools(enabled bool) SampleOpt {
+	return func(sp *SampleParams) {
+		sp.DeferColdTools = &enabled
+	}
+}

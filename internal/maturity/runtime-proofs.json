@@ -1588,6 +1588,11 @@
         },
         {
             "command": "fak version modules",
+            "output_contains": "internal/gym",
+            "lane": "gym"
+        },
+        {
+            "command": "fak version modules",
             "output_contains": "internal/harnessartifact",
             "lane": "harnessartifact"
         },

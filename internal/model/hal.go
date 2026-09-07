@@ -274,25 +274,20 @@ func (s *Session) weightHALQ4K(name string, qt *q4kTensor) compute.Tensor {
 	}, compute.Q4_K, q4kResidentBytes(qt))
 }
 
-// weightHALKQuant stages verbatim Q5_K/Q6_K GGUF bytes. CUDA dequantizes in the
-// GEMV tile, so residency remains at checkpoint size and warm calls reuse the same allocation.
+// weightHALKQuant stages verbatim k-quant GGUF bytes dispatched through the quant registry.
+// CUDA dequantizes in the GEMV tile, so residency remains at checkpoint size and warm calls reuse the same allocation.
 func (s *Session) weightHALKQuant(name string, qt *kQuantTensor) compute.Tensor {
 	if s.Backend == nil || qt == nil {
 		panic("model: weightHALKQuant requires backend and tensor: " + name)
 	}
-	var dt compute.Dtype
-	var host func() compute.Tensor
-	switch qt.kind {
-	case kindQ5K:
-		dt = compute.Q5_K
-		host = func() compute.Tensor { return compute.NewQ5K(compute.Default(), []int{qt.out, qt.in}, qt.raw) }
-	case kindQ6K:
-		dt = compute.Q6_K
-		host = func() compute.Tensor { return compute.NewQ6K(compute.Default(), []int{qt.out, qt.in}, qt.raw) }
-	default:
+	desc, ok := LookupQuantDescriptor(qt.kind)
+	if !ok || !desc.SupportsHAL() {
 		panic("model: unsupported resident expert k-quant: " + qt.kind.String())
 	}
-	return s.weightHALStagedBounded("kquant-raw:"+name, name, host, dt, kQuantResidentBytes(qt))
+	host := func() compute.Tensor {
+		return desc.NewHostTensor(qt.out, qt.in, qt.raw)
+	}
+	return s.weightHALStagedBounded(desc.KeyPrefix()+name, name, host, desc.Dtype(), kQuantResidentBytes(qt))
 }
 
 // supportsRoutedExpertKQuant is the explicit optional capability used both by
@@ -332,6 +327,11 @@ func (w expertWeight) halKey() string {
 	}
 	if w.q4 != nil {
 		return "q4k:" + w.name
+	}
+	if w.kq != nil {
+		if desc, ok := LookupQuantDescriptor(w.kq.kind); ok && desc.KeyPrefix() != "" {
+			return desc.KeyPrefix() + w.name
+		}
 	}
 	return "kquant-raw:" + w.name
 }
@@ -465,7 +465,7 @@ func (s *Session) matWeightHAL(name string) compute.Tensor {
 		}
 	}
 	if s.useHALKQuantWeights() {
-		if qt, ok := s.M.kqw[name]; ok && qt != nil && (qt.kind == kindQ5K || qt.kind == kindQ6K) {
+		if qt, ok := s.M.kqw[name]; ok && qt != nil && SupportsHALKQuant(qt.kind) {
 			return s.weightHALKQuant(name, qt)
 		}
 	}
@@ -501,7 +501,7 @@ func (s *Session) lmHeadMatHAL() compute.Tensor {
 		if _, ok := s.M.kqw[name]; !ok {
 			name = "model.embed_tokens.weight"
 		}
-		if qt, ok := s.M.kqw[name]; ok && qt != nil && (qt.kind == kindQ5K || qt.kind == kindQ6K) {
+		if qt, ok := s.M.kqw[name]; ok && qt != nil && SupportsHALKQuant(qt.kind) {
 			return s.weightHALKQuant(name, qt)
 		}
 	}

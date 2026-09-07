@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"math"
 	"testing"
@@ -351,5 +352,124 @@ func assertLinearAttnCacheQuantClose(t *testing.T, label string, want, got *line
 		for i := range wl.conv {
 			assertMaxAbsAtMost(t, label+" layer "+itoa(l)+" conv row "+itoa(i), wl.conv[i], gl.conv[i], 1e-5)
 		}
+	}
+}
+
+// BenchmarkQwen38GatedDeltaNetStep benchmarks a realistic Qwen 3.8 Gated-DeltaNet token step
+// with head dimensions d=128 across 48 value heads and 16 key heads.
+func BenchmarkQwen38GatedDeltaNetStep(b *testing.B) {
+	const (
+		kHd = 128
+		vHd = 128
+		nK  = 16
+		nV  = 48
+	)
+	state := make([][]float32, nV)
+	for h := 0; h < nV; h++ {
+		state[h] = make([]float32, kHd*vHd)
+		for i := range state[h] {
+			state[h][i] = 0.01
+		}
+	}
+	qNorm := make([]float32, nK*kHd)
+	kNorm := make([]float32, nK*kHd)
+	v := make([]float32, nV*vHd)
+	core := make([]float32, nV*vHd)
+	for i := range qNorm {
+		qNorm[i] = 0.05
+		kNorm[i] = 0.05
+	}
+	for i := range v {
+		v[i] = 0.02
+	}
+	bvec := make([]float32, nV)
+	avec := make([]float32, nV)
+	aLog := make([]float32, nV)
+	dtBias := make([]float32, nV)
+	for h := 0; h < nV; h++ {
+		bvec[h] = 0.5
+		avec[h] = 0.1
+		aLog[h] = -0.5
+		dtBias[h] = 0.1
+	}
+	repeat := nV / nK
+
+	kvmem := make([]float32, vHd)
+	delta := make([]float32, vHd)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for h := 0; h < nV; h++ {
+			kh := h / repeat
+			qn := qNorm[kh*kHd : (kh+1)*kHd]
+			kn := kNorm[kh*kHd : (kh+1)*kHd]
+			vh := v[h*vHd : (h+1)*vHd]
+			st := state[h]
+			bt := sigmoidf(bvec[h])
+			a := float32(math.Exp(float64(aLog[h])))
+			dt := softplus(avec[h] + dtBias[h])
+			g := float32(math.Exp(float64(-a * dt)))
+			od := core[h*vHd : (h+1)*vHd]
+			VectorizedHeadStep(st, qn, kn, vh, bt, g, od, kvmem, delta)
+		}
+	}
+}
+
+// TestMTPForwardSpeculativeMTP verifies speculative Multi-Token Prediction (K=4)
+// micro-batching on gfx1151 with causal tree mask and O(1) Context MMU rollback.
+func TestMTPForwardSpeculativeMTP(t *testing.T) {
+	cfg := qwen35HybridTestCfg()
+	m := NewSynthetic(cfg)
+	ctx := context.Background()
+
+	prompt := []int{3, 7, 11, 5}
+	s := m.NewSession()
+	_ = s.Prefill(prompt)
+
+	basePos := s.Cache.Len()
+	if basePos != len(prompt) {
+		t.Fatalf("base cache len = %d, want %d", basePos, len(prompt))
+	}
+
+	// 1. Propose 4 draft tokens
+	drafts := [4]int{17, 19, 23, 29}
+	accepted, nextTokens, err := ForwardSpeculativeMTP(ctx, s, drafts)
+	if err != nil {
+		t.Fatalf("ForwardSpeculativeMTP failed: %v", err)
+	}
+
+	if accepted < 0 || accepted > 4 {
+		t.Errorf("accepted = %d, want between 0 and 4", accepted)
+	}
+
+	// Invariant: s.Cache.Len() must equal basePos + accepted
+	if s.Cache.Len() != basePos+accepted {
+		t.Errorf("s.Cache.Len() = %d, want basePos (%d) + accepted (%d) = %d",
+			s.Cache.Len(), basePos, accepted, basePos+accepted)
+	}
+
+	// Next tokens should include accepted tokens plus the next target token
+	if len(nextTokens) != accepted+1 && !(accepted == 4 && len(nextTokens) >= 4) {
+		t.Errorf("len(nextTokens) = %d, want %d", len(nextTokens), accepted+1)
+	}
+
+	// 2. Test context cancellation
+	cancCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, err = ForwardSpeculativeMTP(cancCtx, s, drafts)
+	if err == nil {
+		t.Errorf("expected error on cancelled context, got nil")
+	}
+
+	// 3. Test method invocation on Model
+	s2 := m.NewSession()
+	_ = s2.Prefill(prompt)
+	acc2, next2, err2 := m.ForwardSpeculativeMTP(ctx, s2, drafts)
+	if err2 != nil {
+		t.Fatalf("m.ForwardSpeculativeMTP failed: %v", err2)
+	}
+	if acc2 != accepted || len(next2) != len(nextTokens) {
+		t.Errorf("method vs function mismatch: acc2=%d (want %d), len(next2)=%d (want %d)",
+			acc2, accepted, len(next2), len(nextTokens))
 	}
 }

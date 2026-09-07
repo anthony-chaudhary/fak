@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestPrePushKnownRedBlocksByDefaultUnknownFailsOpen(t *testing.T) {
+func TestPrePushKnownRedAndUnknownBlockByDefault(t *testing.T) {
 	path := filepath.Join("..", "..", "tools", "githooks", "pre-push")
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -19,7 +19,7 @@ func TestPrePushKnownRedBlocksByDefaultUnknownFailsOpen(t *testing.T) {
 		`if [ "$build_status" -eq 1 ]`,
 		`if [ "$build_mode" = "block" ]`,
 		`elif [ "$build_status" -ne 0 ]`,
-		`build gate could not run; push allowed`,
+		`build gate could not run; push refused (fail closed)`,
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("pre-push policy missing %q", want)
@@ -35,7 +35,7 @@ func TestPrePushKnownRedBlocksByDefaultUnknownFailsOpen(t *testing.T) {
 		t.Fatalf("known-red default branch does not refuse the push")
 	}
 	unknownBranch := s[unknown:]
-	if strings.Contains(strings.SplitN(unknownBranch, "fi", 2)[0], "exit 1") {
-		t.Fatalf("unknown infrastructure branch must remain fail-open")
+	if !strings.Contains(strings.SplitN(unknownBranch, "else", 2)[0], "exit 1") {
+		t.Fatalf("unknown infrastructure branch must block (fail closed) under block mode")
 	}
 }

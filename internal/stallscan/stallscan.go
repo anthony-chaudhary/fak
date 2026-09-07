@@ -100,6 +100,12 @@ type Sample struct {
 
 	// Top offenders by I/O operations/sec at this instant (already sorted or not).
 	TopIO []ProcIO `json:"top_io,omitempty"`
+
+	// VRAM subsystem (WDDM counters on Windows). Zero means unobserved.
+	VRAMCommittedBytes  uint64  `json:"vram_committed_bytes,omitempty"`
+	VRAMTotalBytes      uint64  `json:"vram_total_bytes,omitempty"`
+	VRAMSharedBytes     uint64  `json:"vram_shared_bytes,omitempty"`
+	ThermalHeadroomDegC float64 `json:"thermal_headroom_degc,omitempty"`
 }
 
 // ProcCPU is one process's average CPU use during the sample window. Percent is
@@ -144,15 +150,16 @@ const (
 type Cause string
 
 const (
-	CauseNone          Cause = "none"
-	CauseSoftFault     Cause = "soft_fault_churn" // demand-zero/transition storm at low hard-fault, RAM free
-	CauseSpawnStorm    Cause = "spawn_storm"      // process-creation burst driving ctx-switch/syscall spike
-	CauseSchedThrash   Cause = "scheduler_thrash" // context-switch/syscall storm without a clear spawn burst
-	CauseDiskIO        Cause = "disk_io"
-	CauseCPUSaturation Cause = "cpu_saturation"  // cores full with runnable work queued behind them
-	CauseMemPressure   Cause = "memory_pressure" // low available RAM (the classic case, here to distinguish it)
-	CauseHandleLeak    Cause = "handle_leak"     // a process's open-handle count climbing unbounded (slow-burn)
-	CauseThreadLeak    Cause = "thread_leak"     // a process's thread count climbing into the hundreds/thousands (terminal thread lag)
+	CauseNone           Cause = "none"
+	CauseSoftFault      Cause = "soft_fault_churn" // demand-zero/transition storm at low hard-fault, RAM free
+	CauseSpawnStorm     Cause = "spawn_storm"      // process-creation burst driving ctx-switch/syscall spike
+	CauseSchedThrash    Cause = "scheduler_thrash" // context-switch/syscall storm without a clear spawn burst
+	CauseDiskIO         Cause = "disk_io"
+	CauseCPUSaturation  Cause = "cpu_saturation"      // cores full with runnable work queued behind them
+	CauseMemPressure    Cause = "memory_pressure"     // low available RAM (the classic case, here to distinguish it)
+	CauseGPUMemPressure Cause = "gpu_memory_pressure" // committed VRAM approaching/exceeding device-local capacity (WDDM paging)
+	CauseHandleLeak     Cause = "handle_leak"         // a process's open-handle count climbing unbounded (slow-burn)
+	CauseThreadLeak     Cause = "thread_leak"         // a process's thread count climbing into the hundreds/thousands (terminal thread lag)
 )
 
 // Deliberately NOT an axis: desktop-heap free%. Issue #3403 scoped two new axes —
@@ -275,6 +282,10 @@ type Thresholds struct {
 	HandleGrowthFloor int // only consider processes whose current handle count is at/above this (default 3000)
 	ThreadGrowthDelta int // per-process thread CLIMB that flags a growth suspect (default 100)
 	ThreadGrowthFloor int // only consider processes whose current thread count is at/above this (default 200)
+
+	// GPU memory pressure detection (WDDM VRAM committed vs device-local capacity).
+	VRAMStallPercent    float64 // VRAM committed % of device-local capacity needed for a stall (default 95)
+	VRAMElevatedPercent float64 // VRAM committed % of device-local capacity that raises calm to elevated (default 90)
 }
 
 // DefaultThresholds returns the calibrated defaults.
@@ -299,6 +310,8 @@ func DefaultThresholds() Thresholds {
 		HandleGrowthFloor:   3000,
 		ThreadGrowthDelta:   100,
 		ThreadGrowthFloor:   200,
+		VRAMStallPercent:    95,
+		VRAMElevatedPercent: 90,
 	}
 }
 
@@ -428,6 +441,21 @@ func Classify(s Sample, t Thresholds) Verdict {
 		return v
 	}
 
+	// GPU memory pressure: committed VRAM approaching or exceeding device-local capacity.
+	if s.VRAMTotalBytes > 0 && t.VRAMStallPercent > 0 {
+		pct := float64(s.VRAMCommittedBytes) / float64(s.VRAMTotalBytes) * 100
+		if pct >= t.VRAMStallPercent {
+			v.Level = LevelStall
+			v.Cause = CauseGPUMemPressure
+			reason := fmt.Sprintf("VRAM committed %.1f%% of capacity (%d / %d bytes)", pct, s.VRAMCommittedBytes, s.VRAMTotalBytes)
+			if s.VRAMSharedBytes > 0 {
+				reason += fmt.Sprintf(", shared aperture %d bytes", s.VRAMSharedBytes)
+			}
+			v.Reasons = append(v.Reasons, reason)
+			return v
+		}
+	}
+
 	// CPU saturation is distinct from scheduler churn: it catches the direct
 	// "too many runnable things / spinners consumed every core" busy-box shape.
 	// Require both near-full CPU and a normalized run queue, so a useful parallel
@@ -516,6 +544,21 @@ func Classify(s Sample, t Thresholds) Verdict {
 		v.Reasons = append(v.Reasons, fmt.Sprintf("%d handles system-wide (>= %d)", s.SystemHandleTotal, t.SystemHandleHigh))
 	}
 
+	// WDDM VRAM pressure warning: append to Reasons before checking churn stall,
+	// so the operator sees the memory pressure even under a churn freeze.
+	hasVRAMPressure := false
+	if s.VRAMTotalBytes > 0 && t.VRAMElevatedPercent > 0 {
+		pct := float64(s.VRAMCommittedBytes) / float64(s.VRAMTotalBytes) * 100
+		if pct >= t.VRAMElevatedPercent {
+			hasVRAMPressure = true
+			reason := fmt.Sprintf("VRAM committed %.1f%% of capacity (elevated >= %.0f%%)", pct, t.VRAMElevatedPercent)
+			if s.VRAMSharedBytes > 0 {
+				reason += fmt.Sprintf(", shared aperture %d bytes", s.VRAMSharedBytes)
+			}
+			v.Reasons = append(v.Reasons, reason)
+		}
+	}
+
 	if stall {
 		v.Level = LevelStall
 		return v
@@ -534,14 +577,15 @@ func Classify(s Sample, t Thresholds) Verdict {
 		}
 		v.Reasons = append(v.Reasons, fmt.Sprintf("%0.f faults/sec (elevated >= %0.f)", s.TotalFaultsPerSec, t.SoftFaultElevated))
 	}
-	// A handle-leak or thread-leak suspect (or a system-wide handle ceiling)
+	// A handle-leak, thread-leak, or VRAM pressure suspect (or a system-wide handle ceiling)
 	// raises a calm box to elevated and owns the cause if nothing else claimed it.
-	// Handle pressure wins the cause label when both a handle and a thread leak
-	// are present (it is the closer-to-exhaustion resource on the reference box).
-	if v.Level == LevelCalm && (hasLeak || systemHandleHigh || hasThreadLeak) {
+	// VRAM memory pressure takes precedence over slow-burn handle/thread leaks.
+	if v.Level == LevelCalm && (hasLeak || systemHandleHigh || hasThreadLeak || hasVRAMPressure) {
 		v.Level = LevelElevated
 		if v.Cause == CauseNone {
-			if hasLeak || systemHandleHigh {
+			if hasVRAMPressure {
+				v.Cause = CauseGPUMemPressure
+			} else if hasLeak || systemHandleHigh {
 				v.Cause = CauseHandleLeak
 			} else {
 				v.Cause = CauseThreadLeak

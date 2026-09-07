@@ -45,7 +45,7 @@ func runStallTool(timeout time.Duration, name string, args ...string) (string, s
 // cold fast.
 const stallPS = `
 $ErrorActionPreference='SilentlyContinue'
-# One counter batch — fault split, scheduler, memory, disk queue.
+# One counter batch — fault split, scheduler, memory, disk queue, WDDM VRAM.
 $paths = @(
  '\Memory\Page Faults/sec','\Memory\Page Reads/sec',
  '\Memory\Demand Zero Faults/sec','\Memory\Transition Faults/sec',
@@ -53,12 +53,30 @@ $paths = @(
  '\Processor(_Total)\% Processor Time','\System\Processor Queue Length',
  '\Memory\Committed Bytes','\Memory\Commit Limit',
  '\System\Processes','\System\Threads',
- '\Memory\Available MBytes','\PhysicalDisk(_Total)\Current Disk Queue Length'
+ '\Memory\Available MBytes','\PhysicalDisk(_Total)\Current Disk Queue Length',
+ '\GPU Adapter Memory(*)\Dedicated Usage',
+ '\GPU Adapter Memory(*)\Shared Usage',
+ '\GPU Adapter Memory(*)\Total Committed'
 )
 $os = Get-CimInstance Win32_OperatingSystem
+$vcs = Get-CimInstance Win32_VideoController
 $c = Get-Counter -Counter $paths
 $h = @{}
-foreach ($s in $c.CounterSamples) { $h[$s.Path.Split([char]92)[-1]] = [math]::Round($s.CookedValue,2) }
+$vramDedicated = 0; $vramShared = 0; $vramCommitted = 0
+foreach ($s in $c.CounterSamples) {
+  $leaf = $s.Path.Split([char]92)[-1]
+  $h[$leaf] = [math]::Round($s.CookedValue,2)
+  if ($leaf -match '(?i)dedicated usage') { $vramDedicated += [uint64]$s.CookedValue }
+  elseif ($leaf -match '(?i)shared usage') { $vramShared += [uint64]$s.CookedValue }
+  elseif ($leaf -match '(?i)total committed') { $vramCommitted += [uint64]$s.CookedValue }
+}
+if ($vramCommitted -eq 0 -and ($vramDedicated -gt 0 -or $vramShared -gt 0)) {
+  $vramCommitted = $vramDedicated + $vramShared
+}
+$vramTotal = 0
+foreach ($vc in $vcs) {
+  if ($vc.AdapterRAM -and $vc.AdapterRAM -gt 0) { $vramTotal += [uint64]$vc.AdapterRAM }
+}
 # Two process-IO snapshots 1s apart -> ops/sec per process. The second pass also
 # carries HandleCount, so the handle census (total + top holders) is computed
 # from the SAME enumeration — no extra Get-Process/Get-CimInstance walk.
@@ -119,6 +137,9 @@ $topT  = $hlist | Sort-Object threads -Descending | Select-Object -First 12
   commit_bytes = [uint64]$h['Committed Bytes']
   commit_limit = [uint64]$h['Commit Limit']
   available_bytes = [uint64]($h['Available MBytes'] * 1MB)
+  vram_committed_bytes = [uint64]$vramCommitted
+  vram_total_bytes     = [uint64]$vramTotal
+  vram_shared_bytes    = [uint64]$vramShared
   faults      = $h['Page Faults/sec']
   hard        = $h['Page Reads/sec']
   demandZero  = $h['Demand Zero Faults/sec']
@@ -168,25 +189,28 @@ type stallTopThread struct {
 }
 
 type stallRaw struct {
-	Timestamp      string  `json:"timestamp"`
-	BootTime       string  `json:"boot_time"`
-	CommitBytes    uint64  `json:"commit_bytes"`
-	CommitLimit    uint64  `json:"commit_limit"`
-	AvailableBytes uint64  `json:"available_bytes"`
-	Faults         float64 `json:"faults"`
-	Hard           float64 `json:"hard"`
-	DemandZero     float64 `json:"demandZero"`
-	Transition     float64 `json:"transition"`
-	Ctxsw          float64 `json:"ctxsw"`
-	Syscalls       float64 `json:"syscalls"`
-	CPUPct         float64 `json:"cpuPct"`
-	CPUQueue       float64 `json:"cpuQueue"`
-	LogicalCPU     int     `json:"logicalCPU"`
-	Procs          int     `json:"procs"`
-	Threads        int     `json:"threads"`
-	AvailMB        int     `json:"availMB"`
-	DiskQ          float64 `json:"diskQ"`
-	HandleTotal    int64   `json:"handleTotal"`
+	Timestamp          string  `json:"timestamp"`
+	BootTime           string  `json:"boot_time"`
+	CommitBytes        uint64  `json:"commit_bytes"`
+	CommitLimit        uint64  `json:"commit_limit"`
+	AvailableBytes     uint64  `json:"available_bytes"`
+	VRAMCommittedBytes uint64  `json:"vram_committed_bytes"`
+	VRAMTotalBytes     uint64  `json:"vram_total_bytes"`
+	VRAMSharedBytes    uint64  `json:"vram_shared_bytes"`
+	Faults             float64 `json:"faults"`
+	Hard               float64 `json:"hard"`
+	DemandZero         float64 `json:"demandZero"`
+	Transition         float64 `json:"transition"`
+	Ctxsw              float64 `json:"ctxsw"`
+	Syscalls           float64 `json:"syscalls"`
+	CPUPct             float64 `json:"cpuPct"`
+	CPUQueue           float64 `json:"cpuQueue"`
+	LogicalCPU         int     `json:"logicalCPU"`
+	Procs              int     `json:"procs"`
+	Threads            int     `json:"threads"`
+	AvailMB            int     `json:"availMB"`
+	DiskQ              float64 `json:"diskQ"`
+	HandleTotal        int64   `json:"handleTotal"`
 	// Spawned is the GROSS count of processes born inside the probe's own
 	// snapshot window (PIDs present in the second enumeration and absent from
 	// the first). SpawnKnown is false when the first enumeration came back
@@ -246,6 +270,9 @@ func gatherStallSample(topN int) (stallscan.Sample, string) {
 		CommitBytes:            raw.CommitBytes,
 		CommitLimit:            raw.CommitLimit,
 		AvailableBytes:         raw.AvailableBytes,
+		VRAMCommittedBytes:     raw.VRAMCommittedBytes,
+		VRAMTotalBytes:         raw.VRAMTotalBytes,
+		VRAMSharedBytes:        raw.VRAMSharedBytes,
 		TotalFaultsPerSec:      raw.Faults,
 		HardFaultsPerSec:       raw.Hard,
 		DemandZeroFaultsPerSec: raw.DemandZero,

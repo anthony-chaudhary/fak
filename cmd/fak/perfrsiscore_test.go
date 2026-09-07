@@ -697,3 +697,80 @@ func TestPerformanceRSIHardwareRefusals(t *testing.T) {
 		})
 	}
 }
+
+func TestPerformanceRSIScorecard(t *testing.T) {
+	// Missing -input flag returns error code 2 and usage message
+	code, _, errText := runPerfRSI(t)
+	if code != 2 || !strings.Contains(errText, "--input is required") {
+		t.Fatalf("expected code=2 with input required, got code=%d err=%s", code, errText)
+	}
+
+	// Conflict between -json and -markdown returns error code 2
+	code, _, errText = runPerfRSI(t, "-input", fixturePath(), "-json", "-markdown")
+	if code != 2 || !strings.Contains(errText, "choose only one of --json or --markdown") {
+		t.Fatalf("expected code=2 with json/markdown conflict, got code=%d err=%s", code, errText)
+	}
+
+	// Human table output by default
+	code, out, errText := runPerfRSI(t, "-input", fixturePath())
+	if code != 0 {
+		t.Fatalf("expected code=0, got code=%d err=%s", code, errText)
+	}
+	if !strings.Contains(out, "performance RSI:") || !strings.Contains(out, "dominant bottleneck:") {
+		t.Fatalf("expected human scorecard output, got %q", out)
+	}
+
+	// JSON output with -json
+	code, jsonOut, errText := runPerfRSI(t, "-input", fixturePath(), "-json")
+	if code != 0 {
+		t.Fatalf("expected code=0, got code=%d err=%s", code, errText)
+	}
+	if !strings.Contains(jsonOut, `"schema": "fak-performance-rsi-scorecard/1"`) {
+		t.Fatalf("expected scorecard JSON schema, got %q", jsonOut)
+	}
+
+	// Markdown output with -markdown
+	code, mdOut, errText := runPerfRSI(t, "-input", fixturePath(), "-markdown")
+	if code != 0 {
+		t.Fatalf("expected code=0, got code=%d err=%s", code, errText)
+	}
+	if !strings.Contains(mdOut, "# Performance RSI") || !strings.Contains(mdOut, "| Dimension | Status |") {
+		t.Fatalf("expected markdown scorecard table, got %q", mdOut)
+	}
+
+	// Comparison with -prior
+	priorPath := filepath.Join(t.TempDir(), "prior.json")
+	if err := os.WriteFile(priorPath, []byte(jsonOut), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, cmpOut, errText := runPerfRSI(t, "-input", fixturePath(), "-prior", priorPath)
+	if code != 0 {
+		t.Fatalf("expected code=0 with prior comparison, got code=%d err=%s", code, errText)
+	}
+	if !strings.Contains(cmpOut, "compared with:") {
+		t.Fatalf("expected comparison in output, got %q", cmpOut)
+	}
+
+	// Compose subcommand requires -snapshot
+	code, _, errText = runPerfRSI(t, "compose")
+	if code != 2 || !strings.Contains(errText, "--snapshot is required") {
+		t.Fatalf("expected compose to require snapshot, got code=%d err=%s", code, errText)
+	}
+
+	// Compose subcommand requires receipts
+	code, _, errText = runPerfRSI(t, "compose", "-snapshot", "test-snapshot")
+	if code != 2 || !strings.Contains(errText, "provide one or more receipt paths") {
+		t.Fatalf("expected compose to require receipts, got code=%d err=%s", code, errText)
+	}
+
+	// Compose subcommand valid execution
+	composeArgs := append([]string{"compose", "-snapshot", "test-snapshot"}, performanceRSICommittedReceiptPaths()...)
+	code, composedOut, errText := runPerfRSI(t, composeArgs...)
+	if code != 0 {
+		t.Fatalf("expected compose success, got code=%d err=%s", code, errText)
+	}
+	if !strings.Contains(composedOut, `"schema": "fak-performance-rsi-evidence/1"`) ||
+		!strings.Contains(composedOut, `"snapshot": "test-snapshot"`) {
+		t.Fatalf("expected composed evidence JSON, got %q", composedOut)
+	}
+}

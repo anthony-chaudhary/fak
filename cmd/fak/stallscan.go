@@ -369,6 +369,18 @@ func renderStallFingerprint(w io.Writer, s stallscan.Sample, v stallscan.Verdict
 		s.DemandZeroFaultsPerSec, s.TransitionFaultsPerSec)
 	fmt.Fprintf(w, "scheduler   : %0.f ctx-switch/sec, %0.f syscall/sec\n", s.ContextSwitchesPerSec, s.SystemCallsPerSec)
 	fmt.Fprintf(w, "census      : %d procs, %d threads (delta %+d)\n", s.ProcessCount, s.ThreadCount, s.ProcessDelta)
+	if s.VRAMTotalBytes > 0 {
+		vramPct := float64(s.VRAMCommittedBytes) / float64(s.VRAMTotalBytes) * 100
+		fmt.Fprintf(w, "vram        : %d / %d MB committed (%.1f%%)",
+			s.VRAMCommittedBytes/(1024*1024), s.VRAMTotalBytes/(1024*1024), vramPct)
+		if s.VRAMSharedBytes > 0 {
+			fmt.Fprintf(w, ", %d MB shared aperture", s.VRAMSharedBytes/(1024*1024))
+		}
+		if vramPct >= 90.0 {
+			fmt.Fprintf(w, " — WARNING: VRAM committed approaches capacity (paging risk)")
+		}
+		fmt.Fprintf(w, "\n")
+	}
 	if s.SystemHandleTotal > 0 {
 		fmt.Fprintf(w, "handles     : %d system-wide", s.SystemHandleTotal)
 		if v.HandleLeakProcess != "" {

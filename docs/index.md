@@ -183,6 +183,7 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 | **Org-policy precedence lattice: compiled-in FROZEN floor > central > operator > agent-self (R3 / #5318)** | [Research note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-org-policy-precedence-2026-07-20.md) |
 | **Keeping a stable core as models × backends × features multiply** | [Combinatorial-growth epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/COMBINATORIAL-GROWTH-EPIC-2026-06-27.md) |
 | **Current performance borrow map for agentic and model-runtime sources** | [Research note](notes/CONCEPT-PERFORMANCE-BORROW-MAP-2026-08-25.md) |
+| **Performance-RSI loop doctrine: accelerating toward the 100x target** | [Operational doctrine](notes/PERFORMANCE-RSI-LOOP-DOCTRINE.md) — 16 canonical dimensions, dominant bottleneck derivation, empirical evidence rules, scorecard CLI, and loop turn telemetry |
 | **Related-system inventory contract for deep `study-repo` passes** | [Research note](notes/CONCEPT-RELATED-SYSTEM-INVENTORY-2026-08-25.md) |
 | **Qwen4 experimental support rollback watch and cutover evidence** | [Operational note](notes/QWEN4EXP-SUPPORT-ROLLBACK-WATCH-2026-08-26.md) |
 | **Choosing repository indexes for exhaustive study inventories** | [Decision matrix](notes/REPO-INDEX-BACKEND-DECISION-2026-08-25.md) |

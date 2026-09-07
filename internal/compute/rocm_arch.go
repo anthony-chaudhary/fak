@@ -39,6 +39,8 @@ const (
 	// ROCmRDNA3 is gfx110x (Radeon RX 7000) — includes gfx1102, the RX 7600 the Vulkan
 	// backend already runs on with numerical parity (docs/benchmarks/VULKAN-AMD-RESULTS.md).
 	ROCmRDNA3
+	// ROCmRDNA3_5 is gfx1151 (AMD Strix Halo / Ryzen AI Max+ 395, 40 CUs RDNA 3.5 APU).
+	ROCmRDNA3_5
 )
 
 // String returns the short generation label.
@@ -58,6 +60,8 @@ func (f ROCmFamily) String() string {
 		return "RDNA2"
 	case ROCmRDNA3:
 		return "RDNA3"
+	case ROCmRDNA3_5:
+		return "RDNA3.5"
 	default:
 		return "unknown"
 	}
@@ -69,7 +73,9 @@ func (f ROCmFamily) String() string {
 func (f ROCmFamily) IsCDNA() bool { return f == ROCmCDNA1 || f == ROCmCDNA2 || f == ROCmCDNA3 }
 
 // IsRDNA reports whether the family is one of the RDNA consumer generations.
-func (f ROCmFamily) IsRDNA() bool { return f == ROCmRDNA1 || f == ROCmRDNA2 || f == ROCmRDNA3 }
+func (f ROCmFamily) IsRDNA() bool {
+	return f == ROCmRDNA1 || f == ROCmRDNA2 || f == ROCmRDNA3 || f == ROCmRDNA3_5
+}
 
 // Datacenter reports whether the part is a server/Instinct GPU (GCN5 + every CDNA), as
 // opposed to an RDNA consumer Radeon. The multi-GPU acceptance bullet (#266) is a
@@ -97,6 +103,7 @@ var rocmArches = []ROCmArch{
 	{GFX: "gfx1032", Family: ROCmRDNA2, Wavefront: 32, Examples: "Radeon RX 6600 (XT)"},
 	{GFX: "gfx1100", Family: ROCmRDNA3, Wavefront: 32, Examples: "Radeon RX 7900 XTX/XT"},
 	{GFX: "gfx1102", Family: ROCmRDNA3, Wavefront: 32, Examples: "Radeon RX 7600 (Vulkan-witnessed)"},
+	{GFX: "gfx1151", Family: ROCmRDNA3_5, Wavefront: 32, Examples: "Ryzen AI Max+ 395 (Strix Halo APU, 40 CUs)"},
 }
 
 // rocmByGFX indexes the table by canonical gfx id for O(1) lookup.
@@ -158,4 +165,56 @@ func KnownROCmArches() []ROCmArch {
 	out := make([]ROCmArch, len(rocmArches))
 	copy(out, rocmArches)
 	return out
+}
+
+// CompilerFlags returns the canonical compiler flags for hipcc/clang on this architecture.
+// For RDNA architectures (such as gfx1151 RDNA 3.5), it mandates Wave32 execution (-mwavefrontsize32).
+func (a ROCmArch) CompilerFlags() []string {
+	flags := []string{"--offload-arch=" + a.GFX}
+	if a.Wavefront == 32 {
+		flags = append(flags, "-mwavefrontsize32")
+	} else if a.Wavefront == 64 {
+		flags = append(flags, "-mwavefrontsize64")
+	}
+	return flags
+}
+
+// MTPTreeMaskLDSConfig specifies LDS allocation tuning for MTP speculative verification tree masks on RDNA 3.5.
+type MTPTreeMaskLDSConfig struct {
+	DraftDepth      int `json:"draft_depth"`
+	MaskBytes       int `json:"mask_bytes"`
+	SharedTileBytes int `json:"shared_tile_bytes"`
+	TotalLDSBytes   int `json:"total_lds_bytes"`
+	MaxWavesPerCU   int `json:"max_waves_per_cu"`
+}
+
+// TuneMTPTreeMaskLDS computes the tuned LDS allocation for K-token speculative tree masks on this architecture.
+// For gfx1151 (RDNA 3.5 with 64KB LDS per CU and Wave32), K=4 requires a packed causal verification tree mask
+// and shared candidate projection tiles, fitting well within the 64KB CU LDS budget for 100% occupancy.
+func (a ROCmArch) TuneMTPTreeMaskLDS(draftDepth int, headDim int) MTPTreeMaskLDSConfig {
+	if draftDepth <= 0 {
+		draftDepth = 4
+	}
+	if headDim <= 0 {
+		headDim = 128
+	}
+	maskBytes := draftDepth * draftDepth * 4 // float32 elements for attention bias/mask
+	tileBytes := draftDepth * headDim * 4   // K * headDim * sizeof(float32)
+	total := (maskBytes + tileBytes + 255) &^ 255
+	if total < 1024 {
+		total = 1024
+	}
+	maxWaves := 32
+	if a.Wavefront == 32 {
+		maxWaves = 32
+	} else {
+		maxWaves = 16
+	}
+	return MTPTreeMaskLDSConfig{
+		DraftDepth:      draftDepth,
+		MaskBytes:       maskBytes,
+		SharedTileBytes: tileBytes,
+		TotalLDSBytes:   total,
+		MaxWavesPerCU:   maxWaves,
+	}
 }
