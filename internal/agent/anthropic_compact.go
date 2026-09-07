@@ -200,6 +200,14 @@ type CompactOutcome struct {
 	// its window — so an operator (and the cache-value ledger) must not read it as a profitable
 	// fire. False on every economics-approved fire and on every bail.
 	SolvencyForced bool
+
+	// Responses wire compaction outcome fields (/v1/responses):
+	OriginalTokens        int
+	CompactedTokens       int
+	ShedTurns             int
+	PrefixAnchorPreserved bool
+	GoalsPreserved        int
+	RestoreStubsCreated   int
 }
 
 // CompactAnchor selects where the protected (verbatim-copied) prefix ends.

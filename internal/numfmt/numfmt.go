@@ -77,6 +77,18 @@ func EnvPositiveInt(key string, def int) int {
 	return def
 }
 
+// EnvPositiveInt64 reads key from the environment and parses it as a base-10
+// int64, returning def unless the value parses cleanly AND is strictly
+// positive.
+func EnvPositiveInt64(key string, def int64) int64 {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
+}
+
 // PluralSuffix returns "s" for every count except exactly one.
 func PluralSuffix(n int) string {
 	if n == 1 {

@@ -17,6 +17,7 @@ const (
 	ScopeAgent ShareScope = iota
 	ScopeTenant
 	ScopeFleet
+	ScopePrivate = ScopeTenant
 )
 
 var (
