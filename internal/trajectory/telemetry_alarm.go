@@ -1,12 +1,18 @@
 package trajectory
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"sort"
+	"strings"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // TelemetryAlarmType identifies the telemetry alarm category.
@@ -37,22 +43,33 @@ type TelemetryAlarm struct {
 
 // TelemetryHealthReport folds prompt, latency, and database telemetry checks.
 type TelemetryHealthReport struct {
-	OK             bool             `json:"ok"`
-	PromptAlarm    TelemetryAlarm   `json:"prompt_alarm"`
-	LatencyAlarm   TelemetryAlarm   `json:"latency_alarm"`
-	DatabaseAlarm  TelemetryAlarm   `json:"database_alarm"`
-	Alarms         []TelemetryAlarm `json:"alarms"`
-	PromptTokens   int              `json:"prompt_tokens"`
-	BaselinePrompt int              `json:"baseline_prompt"`
-	CurrentLatency float64          `json:"current_latency_sec"`
-	MedianLatency  float64          `json:"median_latency_sec"`
-	DBPath         string           `json:"db_path,omitempty"`
-	DBBytes        int64            `json:"db_bytes,omitempty"`
-	FreelistPages  int64            `json:"freelist_pages,omitempty"`
-	PageCount      int64            `json:"page_count,omitempty"`
-	PageSize       int64            `json:"page_size,omitempty"`
-	DBError        string           `json:"db_error,omitempty"`
-	Findings       int              `json:"findings"`
+	OK                bool                   `json:"ok"`
+	PromptAlarm       TelemetryAlarm         `json:"prompt_alarm"`
+	LatencyAlarm      TelemetryAlarm         `json:"latency_alarm"`
+	DatabaseAlarm     TelemetryAlarm         `json:"database_alarm"`
+	Alarms            []TelemetryAlarm       `json:"alarms"`
+	PromptTokens      int                    `json:"prompt_tokens"`
+	BaselinePrompt    int                    `json:"baseline_prompt"`
+	CurrentLatency    float64                `json:"current_latency_sec"`
+	MedianLatency     float64                `json:"median_latency_sec"`
+	DBPath            string                 `json:"db_path,omitempty"`
+	DBBytes           int64                  `json:"db_bytes,omitempty"`
+	FreelistPages     int64                  `json:"freelist_pages,omitempty"`
+	PageCount         int64                  `json:"page_count,omitempty"`
+	PageSize          int64                  `json:"page_size,omitempty"`
+	DBError           string                 `json:"db_error,omitempty"`
+	Findings          int                    `json:"findings"`
+	ReclaimedFreelist string                 `json:"reclaimed_freelist,omitempty"`
+	Reclaim           *DatabaseReclaimResult `json:"reclaim,omitempty"`
+}
+
+// DatabaseReclaimResult stores the metrics before and after an autonomic SQLite freelist reclamation.
+type DatabaseReclaimResult struct {
+	BeforeBytes    int64 `json:"before_bytes"`
+	AfterBytes     int64 `json:"after_bytes"`
+	BeforeFreelist int64 `json:"before_freelist_pages"`
+	AfterFreelist  int64 `json:"after_freelist_pages"`
+	FreedBytes     int64 `json:"freed_bytes"`
 }
 
 // CheckPromptTokenAlarm checks for prompt doubling or hard cap token breaches.
@@ -281,4 +298,68 @@ func EvaluateTelemetryHealth(promptTokens, baselinePrompt int, latencies []float
 		DBError:        dbErrStr,
 		Findings:       findings,
 	}
+}
+
+// ReclaimDatabaseFreelist inspects dbPath, verifies bloat/freelist presence, executes
+// SQLite VACUUM via python or sqlite3 CLI with a timeout, and re-inspects to return
+// before/after byte and freelist page counts.
+func ReclaimDatabaseFreelist(dbPath string) (beforeBytes, afterBytes, beforeFreelist, afterFreelist int64, err error) {
+	beforeBytes, beforeFreelist, _, _, err = InspectSQLiteFileHeader(dbPath)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+
+	if beforeFreelist == 0 && beforeBytes <= maxDBBytes {
+		return beforeBytes, beforeBytes, beforeFreelist, beforeFreelist, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	runners := []struct {
+		bin  string
+		args func(p string) []string
+	}{
+		{"python3", func(p string) []string {
+			return []string{"-c", "import sqlite3, sys; con = sqlite3.connect(sys.argv[1]); con.execute('VACUUM'); con.close()", p}
+		}},
+		{"python", func(p string) []string {
+			return []string{"-c", "import sqlite3, sys; con = sqlite3.connect(sys.argv[1]); con.execute('VACUUM'); con.close()", p}
+		}},
+		{"sqlite3", func(p string) []string {
+			return []string{p, "VACUUM;"}
+		}},
+	}
+
+	var lastErr error
+	executed := false
+	for _, r := range runners {
+		binPath, err := exec.LookPath(r.bin)
+		if err != nil {
+			continue
+		}
+		executed = true
+		cmd := exec.CommandContext(ctx, binPath, r.args(dbPath)...)
+		windowgate.ConfigureBackgroundCommand(cmd)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			lastErr = nil
+			break
+		}
+		lastErr = fmt.Errorf("%s vacuum execution failed: %w (output: %s)", r.bin, err, strings.TrimSpace(string(out)))
+	}
+
+	if !executed {
+		return beforeBytes, 0, beforeFreelist, 0, errors.New("neither python nor sqlite3 CLI found for SQLite vacuum execution")
+	}
+	if lastErr != nil {
+		return beforeBytes, 0, beforeFreelist, 0, lastErr
+	}
+
+	afterBytes, afterFreelist, _, _, err = InspectSQLiteFileHeader(dbPath)
+	if err != nil {
+		return beforeBytes, 0, beforeFreelist, 0, fmt.Errorf("inspect sqlite header after vacuum: %w", err)
+	}
+
+	return beforeBytes, afterBytes, beforeFreelist, afterFreelist, nil
 }
