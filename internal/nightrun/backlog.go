@@ -283,6 +283,18 @@ func witnessTasks() []Task {
 			RecheckDays: 7,
 			Doc:         "docs/research/micro-context-fabrics.md",
 		},
+		{
+			ID:          "witness-strix-halo-subkernels-ablations",
+			Title:       "physical validation and differential ablation of Vulkan compute sub-kernels (argmax, matmul_f32, q8_matmul, q4k_matmul, rmsnorm, swiglu) on AMD Strix Halo APU (gfx1151, 40 CUs, 64GB UMA)",
+			Source:      SourceWitness,
+			Value:       ValueFrontier,
+			Requires:    nil,
+			Run:         "go run ./cmd/fak-dev amd-strix-validate --subkernels=all --ablate=all --json",
+			Acceptance:  "a fak.strix.validation/v1 artifact with verdict PASS across all subkernels and ablations, logit cosine >= 0.999900, and verified digest",
+			RecheckDays: 7,
+			TimeoutSec:  120,
+			Doc:         "docs/fleet-compute-nodes.md",
+		},
 	}
 }
 
