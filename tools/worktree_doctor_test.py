@@ -8,9 +8,11 @@ yet on master — is proven without touching a real repo."""
 import datetime
 import json
 import os
+import sys
 import tempfile
 import unittest
 
+sys.path.insert(0, os.path.dirname(__file__))
 import worktree_doctor as wd
 
 
@@ -616,6 +618,116 @@ class MainEnumeratesRepos(unittest.TestCase):
                                    "--coverage-scan", base, "--json"], fake)
             self.assertEqual(code, 0, "covering both checkouts clears the gap")
             self.assertEqual(out["reason"], wd.REASON_OK)
+
+
+class ManagedWorkerWorktreePreservation(unittest.TestCase):
+    """Managed worker worktrees (fak-worker-wt-* checkouts and checkouts carrying
+    lease.json or .owner.json) must be preserved and omitted from candidate cleanup
+    nomination by generic legacy cleanup planners (make_plan and sweep_candidates),
+    leaving them to the ownership-aware managed lifecycle (internal/workerworktree)."""
+
+    def test_managed_worker_prefix_omitted_from_make_plan_and_sweep(self):
+        primary = sig("/repo/main", "master", primary=True)
+        worker_clean = sig("/repo/fak-worker-wt-tools-abc", "master", unmerged=0)
+        worker_dirty = sig("/repo/fak-worker-wt-gateway-def", "feature", dirty=True, untracked=3)
+        ordinary_clean = sig("/repo/ordinary-clean", "feature-merged", unmerged=0)
+        ordinary_dirty = sig("/repo/ordinary-dirty", "feature-wip", dirty=True)
+
+        # In make_plan: managed workers must NOT be nominated for prune or placed in blocked
+        plan = wd.make_plan([primary, worker_clean, worker_dirty, ordinary_clean, ordinary_dirty])
+        prune_paths = {p["path"] for p in plan["prune"]}
+        blocked_paths = {b["path"] for b in plan["blocked"]}
+
+        self.assertIn("/repo/ordinary-clean", prune_paths)
+        self.assertNotIn("/repo/fak-worker-wt-tools-abc", prune_paths)
+        self.assertNotIn("/repo/fak-worker-wt-gateway-def", prune_paths)
+
+        self.assertIn("/repo/ordinary-dirty", blocked_paths)
+        self.assertNotIn("/repo/fak-worker-wt-tools-abc", blocked_paths)
+        self.assertNotIn("/repo/fak-worker-wt-gateway-def", blocked_paths)
+
+        # In sweep_candidates: managed workers must be omitted from reap candidates
+        swp_worker = _swp("/tmp/scratchpad/fak-worker-wt-worker-1", age_seconds=10_000)
+        swp_ordinary = _swp("/tmp/scratchpad/ordinary-pr", age_seconds=10_000)
+        cands = wd.sweep_candidates([swp_worker, swp_ordinary], fresh_seconds=0)
+        cand_paths = {c["path"] for c in cands}
+
+        self.assertIn("/tmp/scratchpad/ordinary-pr", cand_paths)
+        self.assertNotIn("/tmp/scratchpad/fak-worker-wt-worker-1", cand_paths)
+
+    def test_ownership_markers_omitted_from_make_plan_and_sweep(self):
+        with tempfile.TemporaryDirectory() as base:
+            # wt_lease carries lease.json
+            wt_lease = os.path.join(base, "worker-with-lease")
+            os.makedirs(wt_lease, exist_ok=True)
+            with open(os.path.join(wt_lease, "lease.json"), "w", encoding="utf-8") as f:
+                f.write('{"owner": "agent-1"}')
+
+            # wt_owner carries .owner.json
+            wt_owner = os.path.join(base, "worker-with-owner")
+            os.makedirs(wt_owner, exist_ok=True)
+            with open(os.path.join(wt_owner, ".owner.json"), "w", encoding="utf-8") as f:
+                f.write('{"owner": "agent-2"}')
+
+            # wt_ordinary has no ownership marker
+            wt_ordinary = os.path.join(base, "ordinary-checkout")
+            os.makedirs(wt_ordinary, exist_ok=True)
+
+            primary = sig("/repo/main", "master", primary=True)
+            s_lease = sig(wt_lease, "feature-done", unmerged=0)
+            s_owner = sig(wt_owner, "feature-done", unmerged=0)
+            s_ordinary = sig(wt_ordinary, "feature-done", unmerged=0)
+
+            # In make_plan: lease and .owner markers are preserved, ordinary clean is pruned
+            plan = wd.make_plan([primary, s_lease, s_owner, s_ordinary])
+            prune_paths = {p["path"] for p in plan["prune"]}
+            self.assertIn(wt_ordinary, prune_paths)
+            self.assertNotIn(wt_lease, prune_paths)
+            self.assertNotIn(wt_owner, prune_paths)
+
+            # In sweep_candidates: lease and .owner markers are omitted from candidate cleanup
+            swp_lease = _swp(wt_lease, age_seconds=10_000)
+            swp_owner = _swp(wt_owner, age_seconds=10_000)
+            swp_ordinary = _swp(wt_ordinary, age_seconds=10_000)
+            cands = wd.sweep_candidates([swp_lease, swp_owner, swp_ordinary],
+                                        roots=[base], fresh_seconds=0)
+            cand_paths = {c["path"] for c in cands}
+            self.assertIn(wt_ordinary, cand_paths)
+            self.assertNotIn(wt_lease, cand_paths)
+            self.assertNotIn(wt_owner, cand_paths)
+
+    def test_safe_to_remove_and_is_disposable_path_honor_managed_workers(self):
+        s_worker = sig("/wt/fak-worker-wt-clean", "master", unmerged=0)
+        self.assertFalse(wd.safe_to_remove(s_worker))
+        self.assertFalse(wd.is_disposable_path("/tmp/scratchpad/fak-worker-wt-test"))
+
+        with tempfile.TemporaryDirectory() as base:
+            wt_lease = os.path.join(base, "scratchpad", "leased-wt")
+            os.makedirs(wt_lease, exist_ok=True)
+            with open(os.path.join(wt_lease, "lease.json"), "w", encoding="utf-8") as f:
+                f.write('{"owner": "test"}')
+
+            s_lease = sig(wt_lease, "master", unmerged=0)
+            self.assertFalse(wd.safe_to_remove(s_lease))
+            self.assertFalse(wd.is_disposable_path(wt_lease))
+
+            wt_owner = os.path.join(base, "scratchpad", "owned-wt")
+            os.makedirs(wt_owner, exist_ok=True)
+            with open(os.path.join(wt_owner, ".owner.json"), "w", encoding="utf-8") as f:
+                f.write('{"owner": "test"}')
+
+            s_owner = sig(wt_owner, "master", unmerged=0)
+            self.assertFalse(wd.safe_to_remove(s_owner))
+            self.assertFalse(wd.is_disposable_path(wt_owner))
+
+    def test_dirty_managed_worker_does_not_trip_needs_human(self):
+        primary = sig("/repo/main", "master", primary=True)
+        worker_dirty = sig("/repo/fak-worker-wt-active", "feat", dirty=True, untracked=5)
+        plan = wd.make_plan([primary, worker_dirty])
+        self.assertTrue(plan["converged"])
+        self.assertFalse(plan["needs_human"])
+        self.assertEqual(plan["blocked"], [])
+        self.assertEqual(plan["prune"], [])
 
 
 if __name__ == "__main__":

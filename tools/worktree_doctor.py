@@ -110,6 +110,51 @@ DEFAULT_MASTER_REF = "origin/master"  # last-resort fallback; main() AUTO-DETECT
 # both .../<uuid>/scratchpad/<name> and C:/work/pr-work/<name> qualify regardless of root.
 DISPOSABLE_MARKERS = ("scratchpad", "pr-work")
 
+MANAGED_WORKER_PREFIX = "fak-worker-wt-"
+MANAGED_OWNERSHIP_MARKERS = ("lease.json", ".owner.json")
+
+
+def is_managed_worker_worktree(sig_or_path) -> bool:
+    """True if `sig_or_path` represents a managed worker worktree.
+
+    Managed worker worktrees are left to the ownership-aware managed lifecycle
+    (internal/workerworktree) rather than generic legacy cleanup planners.
+    Matches directories whose name starts with 'fak-worker-wt-' or that contain
+    managed ownership markers ('lease.json' or '.owner.json').
+    """
+    if isinstance(sig_or_path, dict):
+        if sig_or_path.get("is_primary"):
+            return False
+        if sig_or_path.get("managed_worker"):
+            return True
+        markers = sig_or_path.get("markers") or sig_or_path.get("ownership_markers")
+        if markers and any(m in MANAGED_OWNERSHIP_MARKERS for m in markers):
+            return True
+        path = sig_or_path.get("path")
+    else:
+        path = sig_or_path
+
+    if not path:
+        return False
+    path_str = str(path)
+
+    clean = path_str.replace("\\", "/").rstrip("/")
+    parts = [p for p in clean.split("/") if p]
+    if any(p.startswith(MANAGED_WORKER_PREFIX) for p in parts):
+        return True
+
+    for marker in MANAGED_OWNERSHIP_MARKERS:
+        try:
+            if os.path.exists(os.path.join(path_str, marker)):
+                return True
+        except OSError:
+            pass
+
+    return False
+
+
+is_managed_worker = is_managed_worker_worktree
+
 # How many days of sweep-archive <date> day-directories to KEEP before reaping. The sweep
 # writes a full post-mortem copy of every dirty swept worktree under
 # worktree-archive/<date>/ — a recovery convenience, not live state — and nothing used to
@@ -225,6 +270,7 @@ def gather_signals(wt, master_ref=DEFAULT_MASTER_REF):
     sig["unpushed"] = _count(["rev-list", "--count", "@{u}..HEAD"], path, default=None)
     # crude "last activity" proxy for the disposable sweep's freshness guard.
     sig["age_seconds"] = worktree_age_seconds(path)
+    sig["managed_worker"] = is_managed_worker_worktree(path)
     return sig
 
 
@@ -297,7 +343,7 @@ def is_clean_master(sig, trunk="master"):
 
 def safe_to_remove(sig):
     """A non-primary worktree whose removal can lose nothing."""
-    return (not sig.get("is_primary")) and not issues_of(sig)
+    return (not sig.get("is_primary")) and (not is_managed_worker_worktree(sig)) and not issues_of(sig)
 
 
 def make_plan(sigs, master_ref=DEFAULT_MASTER_REF, allow_branches=(), trunk="master"):
@@ -325,6 +371,7 @@ def make_plan(sigs, master_ref=DEFAULT_MASTER_REF, allow_branches=(), trunk="mas
     converged         True iff the only NON-retained worktree is a clean master primary.
     """
     allow = set(allow_branches or ())
+    sigs = [s for s in sigs if not is_managed_worker_worktree(s)]
     primary = next((s for s in sigs if s.get("is_primary")), None)
     clean_masters = [s for s in sigs if is_clean_master(s, trunk)]
 
@@ -465,7 +512,9 @@ def render_text(sigs, plan, trunk="master"):
     for s in sigs:
         tag = "primary" if s.get("is_primary") else "       "
         iss = issues_of(s)
-        if s["path"] in retained_paths:
+        if is_managed_worker_worktree(s):
+            state = "MANAGED WORKER (skipped)"
+        elif s["path"] in retained_paths:
             state = "RETAINED (allow-listed): " + (", ".join(iss) if iss else "clean")
         elif not iss:
             state = "CLEAN"
@@ -538,7 +587,7 @@ def _has_disposable_segment(path, markers):
 def is_disposable_path(path, roots=(), markers=DISPOSABLE_MARKERS):
     """PURE: True if `path` is a harness/agent scratch worktree — under a disposable root,
     or containing a disposable path segment (scratchpad / pr-work)."""
-    if not path:
+    if not path or is_managed_worker_worktree(path):
         return False
     np = os.path.normcase(os.path.normpath(path))
     for r in roots:
@@ -561,6 +610,8 @@ def sweep_candidates(sigs, roots=(), markers=DISPOSABLE_MARKERS, fresh_seconds=0
     out = []
     for s in sigs:
         if s.get("is_primary"):
+            continue
+        if is_managed_worker_worktree(s):
             continue
         path = s.get("path")
         if not path or not is_disposable_path(path, roots, markers):
