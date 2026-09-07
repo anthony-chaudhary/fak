@@ -43,9 +43,10 @@ func FormatOpencodePrompt(issue Issue) string {
 		b.WriteString("- go vet ./...\n")
 	}
 
+	b.WriteString(hardwareValidationGuidance(issue))
 	b.WriteString("\nInstructions:\n")
 	b.WriteString("- Strictly adhere to the assigned lane and boundary paths. Do not touch root files (e.g. go.mod, go.sum, dos.toml) or files in other packages.\n")
-	b.WriteString("- Execute your deliverable directly as a leaf worker. Prohibit calling the 'task' tool or attempting nested subagent delegation (prevents subagent depth limit recursion failure).\n")
+	b.WriteString("- Execute your deliverable directly within assigned package boundaries as a leaf worker. Prohibit calling the 'task' tool or attempting nested subagent delegation (prevents subagent depth limit recursion failure, #12028).\n")
 	b.WriteString("- Deliverable: Deliver a clean defect fix or feature implementation along with a deterministic reproduction/regression unit test.\n")
 	b.WriteString("- Autonomous Safe Git Landing Protocol: Execute safe git landing directly within the worker process by default upon test verification:\n")
 	b.WriteString("  1. Pre-flight safe sync: fak sync reconcile --apply (or fak sync check)\n")

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestFormatOpencodePrompt_LeafWorkerDirectExecution(t *testing.T) {
+func TestOpencode_PromptLeafWorkerDirectExecution(t *testing.T) {
 	iss := Issue{
 		Number: 12028,
 		Key:    "issue-12028",
@@ -31,6 +31,9 @@ func TestFormatOpencodePrompt_LeafWorkerDirectExecution(t *testing.T) {
 	if !strings.Contains(prompt, "directly") {
 		t.Fatalf("FormatOpencodePrompt missing instruction to execute work directly:\n%s", prompt)
 	}
+	if !strings.Contains(prompt, "package boundaries") {
+		t.Fatalf("FormatOpencodePrompt missing package boundaries instruction:\n%s", prompt)
+	}
 
 	// 3. Must prohibit nested task tool delegation (preventing subagent depth limit recursion).
 	if !strings.Contains(prompt, "prohibit") && !strings.Contains(prompt, "Prohibit") && !strings.Contains(prompt, "Do not call") {
@@ -44,7 +47,11 @@ func TestFormatOpencodePrompt_LeafWorkerDirectExecution(t *testing.T) {
 	}
 }
 
-func TestFormatOpencodePrompt_WorkerGitSyncLanding(t *testing.T) {
+func TestFormatOpencodePrompt_LeafWorkerDirectExecution(t *testing.T) {
+	TestOpencode_PromptLeafWorkerDirectExecution(t)
+}
+
+func TestOpencode_WorkerGitSyncLanding(t *testing.T) {
 	iss := Issue{
 		Number: 12032,
 		Key:    "issue-12032",
@@ -75,3 +82,6 @@ func TestFormatOpencodePrompt_WorkerGitSyncLanding(t *testing.T) {
 	}
 }
 
+func TestFormatOpencodePrompt_WorkerGitSyncLanding(t *testing.T) {
+	TestOpencode_WorkerGitSyncLanding(t)
+}
