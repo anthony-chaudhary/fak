@@ -356,6 +356,11 @@ func (s *Session) resolveExpertWeight(name string) (expertWeight, bool) {
 		return expertWeight{name: name, q4: qt}, true
 	}
 	if qt := s.M.kqw[name]; qt != nil {
+		// Demand and prefetch may stage only the formats weightHALKQuant supports.
+		// Other packed residents execute through the native host path.
+		if !SupportsHALKQuant(qt.kind) {
+			return expertWeight{}, false
+		}
 		return expertWeight{name: name, kq: qt}, true
 	}
 	ck, ok := s.M.expertCheckpoint.staging(name)
@@ -940,6 +945,22 @@ func (s *Session) prefillHAL(ids []int, wantLogits bool) []float32 {
 	s.ensureOpenBackendSession()
 	if len(ids) == 0 {
 		return nil
+	}
+	if result, used, err := s.tryQwen35SequencePrefill(ids, wantLogits); used {
+		if err != nil {
+			s.failBackendForward(-1, "sequence prefill", err)
+		}
+		var logits []float32
+		if wantLogits {
+			logits = s.Backend.Read(result.Logits)
+			s.halLogitsWarm = true
+		}
+		s.halStep += len(ids)
+		if s.captureTargetHidden && result.LastHidden.Ready() {
+			s.rememberTargetHidden(s.halKV.Len()-1, ids[len(ids)-1], s.Backend.Read(result.LastHidden))
+		}
+		s.retireRequestResources()
+		return logits
 	}
 	last := len(ids) - 1
 	for i, id := range ids {

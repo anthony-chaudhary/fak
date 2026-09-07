@@ -528,7 +528,7 @@ func (s *Session) hostMatKernel() matKernel {
 	if s.Q4 && m.q4w != nil {
 		return sessionQ4Kernel{s: s}
 	}
-	if s.Q4K && m.q4kw != nil {
+	if s.Q4K && (m.q4kw != nil || len(m.kqw) > 0) {
 		return sessionQ4KKernel{s: s}
 	}
 	if s.Quant {
@@ -701,7 +701,21 @@ func (s *Session) rememberTargetHidden(pos, token int, hidden []float32) {
 // vector captured when committed position pos was evaluated. A stale entry past
 // the current cache boundary is never exposed after speculative rollback.
 func (s *Session) TargetHiddenAt(pos int) ([]float32, error) {
-	if s == nil || !s.captureTargetHidden || s.Cache == nil || pos < 0 || pos >= s.Cache.Len() {
+	if s == nil || !s.captureTargetHidden {
+		return nil, fmt.Errorf("model: target hidden position %d is unavailable", pos)
+	}
+	if s.Backend != nil && s.halKV != nil {
+		if pos < 0 || pos >= s.halKV.Len() {
+			return nil, fmt.Errorf("target hidden pos %d out of bounds (len=%d)", pos, s.halKV.Len())
+		}
+		s.targetHiddenMu.RLock()
+		defer s.targetHiddenMu.RUnlock()
+		if pos >= len(s.targetHidden) || len(s.targetHidden[pos]) == 0 {
+			return nil, fmt.Errorf("model: target hidden position %d is unavailable", pos)
+		}
+		return append([]float32(nil), s.targetHidden[pos]...), nil
+	}
+	if s.Cache == nil || pos < 0 || pos >= s.Cache.Len() {
 		return nil, fmt.Errorf("model: target hidden position %d is unavailable", pos)
 	}
 	s.targetHiddenMu.RLock()

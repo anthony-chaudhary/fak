@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -18,6 +19,13 @@ type sequencePrefillBackend struct {
 	badKV    bool
 	badCount bool
 	badState bool
+
+	orderClock        int
+	readOrder         int
+	retireOrder       int
+	retired           bool
+	failReadIfRetired bool
+	lastHiddenData    []float32
 }
 
 func newSequencePrefillBackend(m *Model) *sequencePrefillBackend {
@@ -26,7 +34,21 @@ func newSequencePrefillBackend(m *Model) *sequencePrefillBackend {
 
 func (b *sequencePrefillBackend) Qwen35SequencePrefillPath() string { return b.path }
 
-func (b *sequencePrefillBackend) RetireRequestResources() { b.retires++ }
+func (b *sequencePrefillBackend) RetireRequestResources() {
+	b.retires++
+	b.retired = true
+	b.orderClock++
+	b.retireOrder = b.orderClock
+}
+
+func (b *sequencePrefillBackend) Read(t compute.Tensor) []float32 {
+	b.orderClock++
+	b.readOrder = b.orderClock
+	if b.failReadIfRetired && b.retired {
+		panic("read attempted after request resources retired")
+	}
+	return b.recordingQwen35Backend.Read(t)
+}
 
 func (b *sequencePrefillBackend) Qwen35SequencePrefill(req compute.Qwen35SequencePrefillRequest) (compute.Qwen35SequencePrefillResult, error) {
 	b.calls++
@@ -47,7 +69,11 @@ func (b *sequencePrefillBackend) Qwen35SequencePrefill(req compute.Qwen35Sequenc
 			}
 		}
 	}
-	hidden := compute.NewF32(b.Backend, []int{req.Hidden}, make([]float32, req.Hidden))
+	hiddenData := make([]float32, req.Hidden)
+	if len(b.lastHiddenData) == req.Hidden {
+		copy(hiddenData, b.lastHiddenData)
+	}
+	hidden := compute.NewF32(b.Backend, []int{req.Hidden}, hiddenData)
 	var logits compute.Tensor
 	if req.NeedLogits {
 		logits = compute.NewF32(b.Backend, []int{b.model.Cfg.VocabSize}, make([]float32, b.model.Cfg.VocabSize))
@@ -58,6 +84,13 @@ func (b *sequencePrefillBackend) Qwen35SequencePrefill(req compute.Qwen35Sequenc
 	}
 	return compute.Qwen35SequencePrefillResult{LastHidden: hidden, Logits: logits, Tokens: tokens}, nil
 }
+
+type vulkanPrefillBackend struct {
+	*sequencePrefillBackend
+}
+
+func (b *vulkanPrefillBackend) Name() string          { return "vulkan" }
+func (b *vulkanPrefillBackend) Qwen35GDNPath() string { return Qwen35GDNVulkanPath }
 
 type sequenceMarkerOnlyBackend struct{ *recordingQwen35Backend }
 
@@ -166,4 +199,182 @@ func TestQwen35SequencePrefillNoLogitsUsesSameContract(t *testing.T) {
 	if be.retires != 1 {
 		t.Fatalf("request retirement calls=%d, want 1 after successful no-logits sequence prefill", be.retires)
 	}
+}
+
+func TestPrefillHAL_ReadbackBeforeRetirement(t *testing.T) {
+	m := NewSynthetic(qwen35HybridTestCfg())
+	be := newSequencePrefillBackend(m)
+	be.failReadIfRetired = true
+	s, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Calling prefillHAL directly with wantLogits=true
+	got := s.prefillHAL([]int{3, 7, 11}, true)
+	if len(got) != m.Cfg.VocabSize {
+		t.Fatalf("got logits len=%d, want %d", len(got), m.Cfg.VocabSize)
+	}
+	if be.calls != 1 {
+		t.Fatalf("expected 1 sequence prefill call, got %d", be.calls)
+	}
+	if be.retires != 1 {
+		t.Fatalf("expected 1 retirement, got %d", be.retires)
+	}
+	if be.readOrder == 0 || be.retireOrder == 0 {
+		t.Fatalf("expected both read and retire to occur, readOrder=%d retireOrder=%d", be.readOrder, be.retireOrder)
+	}
+	if be.readOrder >= be.retireOrder {
+		t.Fatalf("readback must occur before retirement: readOrder=%d, retireOrder=%d", be.readOrder, be.retireOrder)
+	}
+}
+
+func TestPrefillHAL_NoLogitsRetiresWithoutRead(t *testing.T) {
+	m := NewSynthetic(qwen35HybridTestCfg())
+	be := newSequencePrefillBackend(m)
+	s, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Calling prefillHAL directly with wantLogits=false
+	got := s.prefillHAL([]int{3, 7, 11}, false)
+	if got != nil {
+		t.Fatalf("expected nil logits when wantLogits=false, got len=%d", len(got))
+	}
+	if be.calls != 1 {
+		t.Fatalf("expected 1 sequence prefill call, got %d", be.calls)
+	}
+	if be.readOrder != 0 {
+		t.Fatalf("expected 0 reads when wantLogits=false, got readOrder=%d", be.readOrder)
+	}
+	if be.retires != 1 {
+		t.Fatalf("expected 1 retirement, got %d", be.retires)
+	}
+}
+
+func TestQwen35SequencePrefill_PathAttributionAndStepSync(t *testing.T) {
+	t.Run("vulkan-path-attribution-on-failure", func(t *testing.T) {
+		m := NewSynthetic(qwen35HybridTestCfg())
+		inner := newSequencePrefillBackend(m)
+		inner.err = errors.New("injected vulkan sequence failure")
+		vulkanBE := &vulkanPrefillBackend{sequencePrefillBackend: inner}
+
+		s, err := m.NewBackendSessionChecked(vulkanBE)
+		if err != nil {
+			t.Fatalf("NewBackendSessionChecked: %v", err)
+		}
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("expected panic from failBackendForward, got nil")
+			}
+			var berr *BackendForwardOperationError
+			if !errors.As(r.(error), &berr) {
+				t.Fatalf("expected *BackendForwardOperationError, got %T (%v)", r, r)
+			}
+			if berr.Backend != "vulkan" {
+				t.Errorf("Backend = %q, want %q", berr.Backend, "vulkan")
+			}
+			if berr.Path != Qwen35GDNVulkanPath {
+				t.Errorf("Path = %q, want %q", berr.Path, Qwen35GDNVulkanPath)
+			}
+			if berr.Stage != "sequence prefill" {
+				t.Errorf("Stage = %q, want %q", berr.Stage, "sequence prefill")
+			}
+			if berr.Layer != -1 {
+				t.Errorf("Layer = %d, want -1", berr.Layer)
+			}
+			if !s.halClosed {
+				t.Error("expected session halClosed=true")
+			}
+			if s.halFailure == nil {
+				t.Error("expected session halFailure != nil")
+			}
+		}()
+		s.prefillHAL([]int{3, 7, 11}, true)
+	})
+
+	t.Run("step-sync-and-target-hidden-capture", func(t *testing.T) {
+		m := NewSynthetic(qwen35HybridTestCfg())
+		be := newSequencePrefillBackend(m)
+		testHidden := make([]float32, m.Cfg.HiddenSize)
+		for i := range testHidden {
+			testHidden[i] = float32(i + 1)
+		}
+		be.lastHiddenData = testHidden
+
+		s, err := m.NewBackendSessionChecked(be)
+		if err != nil {
+			t.Fatalf("NewBackendSessionChecked: %v", err)
+		}
+		defer s.Close()
+
+		s.captureTargetHidden = true
+
+		if s.halStep != 0 {
+			t.Fatalf("initial halStep = %d, want 0", s.halStep)
+		}
+		if s.halLogitsWarm {
+			t.Fatalf("initial halLogitsWarm = true, want false")
+		}
+
+		ids := []int{3, 7, 11}
+		logits := s.prefillHAL(ids, true)
+		if len(logits) != m.Cfg.VocabSize {
+			t.Fatalf("logits len = %d, want %d", len(logits), m.Cfg.VocabSize)
+		}
+		if s.halStep != len(ids) {
+			t.Fatalf("halStep = %d, want %d", s.halStep, len(ids))
+		}
+		if !s.halLogitsWarm {
+			t.Fatal("halLogitsWarm = false, want true after prefillHAL with wantLogits=true")
+		}
+
+		// Verify TargetHiddenAt captures result.LastHidden at pos = halKV.Len() - 1
+		lastPos := s.halKV.Len() - 1
+		gotHidden, err := s.TargetHiddenAt(lastPos)
+		if err != nil {
+			t.Fatalf("TargetHiddenAt(%d): %v", lastPos, err)
+		}
+		if len(gotHidden) != len(testHidden) {
+			t.Fatalf("TargetHiddenAt len = %d, want %d", len(gotHidden), len(testHidden))
+		}
+		for i := range testHidden {
+			if gotHidden[i] != testHidden[i] {
+				t.Fatalf("TargetHiddenAt[%d] = %g, want %g", i, gotHidden[i], testHidden[i])
+			}
+		}
+
+		// Verify defensive copy: modifying returned slice does not mutate session cache
+		gotHidden[0] = 9999.0
+		againHidden, err := s.TargetHiddenAt(lastPos)
+		if err != nil {
+			t.Fatalf("TargetHiddenAt(%d) again: %v", lastPos, err)
+		}
+		if againHidden[0] != testHidden[0] {
+			t.Fatalf("TargetHiddenAt returned mutable reference, again[0]=%g want %g", againHidden[0], testHidden[0])
+		}
+
+		// Verify bounds checks on TargetHiddenAt
+		wantNegErr := fmt.Sprintf("target hidden pos -1 out of bounds (len=%d)", s.halKV.Len())
+		if _, err := s.TargetHiddenAt(-1); err == nil || err.Error() != wantNegErr {
+			t.Fatalf("TargetHiddenAt(-1) err = %v, want %q", err, wantNegErr)
+		}
+		wantOobErr := fmt.Sprintf("target hidden pos %d out of bounds (len=%d)", s.halKV.Len(), s.halKV.Len())
+		if _, err := s.TargetHiddenAt(s.halKV.Len()); err == nil || err.Error() != wantOobErr {
+			t.Fatalf("TargetHiddenAt(%d) err = %v, want %q", s.halKV.Len(), err, wantOobErr)
+		}
+
+		// Test second prefill with wantLogits=false
+		moreIDs := []int{13, 17}
+		noLogits := s.prefillHAL(moreIDs, false)
+		if noLogits != nil {
+			t.Fatalf("expected nil logits with wantLogits=false, got len=%d", len(noLogits))
+		}
+		if s.halStep != len(ids)+len(moreIDs) {
+			t.Fatalf("halStep = %d, want %d", s.halStep, len(ids)+len(moreIDs))
+		}
+		if !s.halLogitsWarm {
+			t.Fatal("halLogitsWarm should remain true")
+		}
+	})
 }

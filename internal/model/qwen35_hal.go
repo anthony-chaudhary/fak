@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -311,8 +312,18 @@ func (s *Session) failBackendForward(layer int, stage string, cause error) {
 	if cause == nil {
 		cause = fmt.Errorf("unknown backend operation failure")
 	}
+	path := Qwen35GDNCUDAPath
+	backendName := ""
+	if s != nil && s.Backend != nil {
+		backendName = s.Backend.Name()
+		if marker, ok := s.Backend.(qwen35GDNPathMarker); ok && marker.Qwen35GDNPath() != "" {
+			path = marker.Qwen35GDNPath()
+		} else if strings.EqualFold(backendName, "vulkan") {
+			path = Qwen35GDNVulkanPath
+		}
+	}
 	err := &BackendForwardOperationError{
-		Backend: s.Backend.Name(), Forward: ForwardQwen35GDN, Path: Qwen35GDNCUDAPath,
+		Backend: backendName, Forward: ForwardQwen35GDN, Path: path,
 		Layer: layer, Stage: stage, Cause: cause,
 	}
 	s.halFailure = err
@@ -520,6 +531,14 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 	if cfg.AttentionBias {
 		be.AddBias(kRaw, s.weightHAL(p("self_attn.k_proj.bias")))
 		be.AddBias(v, s.weightHAL(p("self_attn.v_proj.bias")))
+	}
+
+	qkEps := cfg.qkNormEps()
+	if s.M.hasWeight(p("self_attn.q_norm.weight")) {
+		q = be.RMSNorm(q, s.normWeightHAL(p("self_attn.q_norm.weight")), qkEps)
+	}
+	if s.M.hasWeight(p("self_attn.k_norm.weight")) {
+		kRaw = be.RMSNorm(kRaw, s.normWeightHAL(p("self_attn.k_norm.weight")), qkEps)
 	}
 
 	kvLayer := qwen35HALKVLayer(cfg, layer)
