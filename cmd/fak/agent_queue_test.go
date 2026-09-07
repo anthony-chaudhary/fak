@@ -465,3 +465,116 @@ func TestAgentQueueRunReconcileRestartFlag(t *testing.T) {
 		t.Fatalf("launches = %+v, want only intent-dead", receipt.Launches)
 	}
 }
+
+func TestAgentQueueEmitReconciler(t *testing.T) {
+	statePath := "/tmp/queue.json"
+
+	t.Run("launchd", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runAgentQueueContext(context.Background(), &stdout, &stderr, []string{
+			"emit-reconciler",
+			"--target", "launchd",
+			"--state", statePath,
+			"--interval", "2m",
+			"--timeout", "45s",
+			"--fak", "fak",
+		})
+		if code != 0 {
+			t.Fatalf("code=%d, stderr: %s", code, stderr.String())
+		}
+		out := stdout.String()
+		for _, want := range []string{
+			"<string>fak</string>",
+			"<string>cron</string>",
+			"<string>run</string>",
+			"<string>--job</string>",
+			"<string>agentqueue-reconcile</string>",
+			"<string>agent-queue</string>",
+			"<string>run</string>",
+			"<string>--state</string>",
+			"<string>/tmp/queue.json</string>",
+			"<string>--once</string>",
+			"<key>StartInterval</key>",
+			"<integer>120</integer>",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("launchd output missing %q:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("systemd", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runAgentQueueContext(context.Background(), &stdout, &stderr, []string{
+			"emit-reconciler",
+			"--target", "systemd",
+			"--state", statePath,
+			"--interval", "1m",
+			"--timeout", "30s",
+			"--fak", "fak",
+		})
+		if code != 0 {
+			t.Fatalf("code=%d, stderr: %s", code, stderr.String())
+		}
+		out := stdout.String()
+		for _, want := range []string{
+			"# === fak-cron-agentqueue-reconcile.service ===",
+			"# === fak-cron-agentqueue-reconcile.timer ===",
+			"Type=oneshot",
+			"ExecStart=fak cron run --job agentqueue-reconcile",
+			"agent-queue run --state /tmp/queue.json --once",
+			"OnUnitActiveSec=60s",
+			"OnBootSec=60s",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("systemd output missing %q:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("taskscheduler", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runAgentQueueContext(context.Background(), &stdout, &stderr, []string{
+			"emit-reconciler",
+			"--target", "taskscheduler",
+			"--state", statePath,
+			"--interval", "5m",
+			"--fak", "fak",
+		})
+		if code != 0 {
+			t.Fatalf("code=%d, stderr: %s", code, stderr.String())
+		}
+		out := stdout.String()
+		for _, want := range []string{
+			"Register-ScheduledTask",
+			"fak-cron-agentqueue-reconcile",
+			"cron run --job agentqueue-reconcile",
+			"agent-queue run --state /tmp/queue.json --once",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("taskscheduler output missing %q:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("missing target or state fails with exit 2", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runAgentQueueContext(context.Background(), &stdout, &stderr, []string{
+			"emit-reconciler",
+			"--state", statePath,
+		})
+		if code != 2 {
+			t.Errorf("missing target code = %d, want 2", code)
+		}
+
+		stdout.Reset()
+		stderr.Reset()
+		code = runAgentQueueContext(context.Background(), &stdout, &stderr, []string{
+			"emit-reconciler",
+			"--target", "systemd",
+		})
+		if code != 2 {
+			t.Errorf("missing state code = %d, want 2", code)
+		}
+	})
+}
