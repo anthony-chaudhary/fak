@@ -14,9 +14,10 @@ layout(set=0,binding=7) buffer State { float state[]; };
 layout(set=0,binding=8) writeonly buffer Core { float core[]; };
 layout(push_constant) uniform PC { int tokens; int convDim; int nK; int nV; int kHd; int vHd; float eps; } pc;
 
-shared float gated[1024];
+shared float readout[1024];
 shared float rmsInv;
 
+float silu(float x) { return x / (1.0 + exp(-x)); }
 float softplus(float x) { return x > 20.0 ? x : log(1.0 + exp(x)); }
 
 void main() {
@@ -34,35 +35,48 @@ void main() {
             float kv = convOut[base + keyDim + kh * pc.kHd + i];
             q2 += qv*qv; k2 += kv*kv;
         }
-        float qInv = inversesqrt(q2 + pc.eps);
-        float kInv = inversesqrt(k2 + pc.eps);
+        // Q/K L2 normalization has its own fixed epsilon; pc.eps belongs to
+        // the output RMS norm and may differ (model.l2normInto uses 1e-6).
+        float qInv = inversesqrt(q2 + 1e-6);
+        float kInv = inversesqrt(k2 + 1e-6);
+        float qScale = inversesqrt(float(pc.kHd));
+        qInv *= qScale;
         float bv = 1.0 / (1.0 + exp(-beta[t * pc.nV + h]));
         float av = exp(-exp(aLog[h]) * softplus(alpha[t * pc.nV + h] + dtBias[h]));
 
         for (int d = lane; d < pc.vHd; d += 64) {
             float vv = convOut[base + 2 * keyDim + h * pc.vHd + d];
+            float kvmem = 0.0;
+            for (int i = 0; i < pc.kHd; ++i) {
+                float kv = convOut[base + keyDim + kh * pc.kHd + i] * kInv;
+                int si = (h * pc.kHd + i) * pc.vHd + d;
+                state[si] *= av;
+                kvmem += state[si] * kv;
+            }
+            float delta = (vv - kvmem) * bv;
             float acc = 0.0;
             for (int i = 0; i < pc.kHd; ++i) {
                 float qv = convOut[base + kh * pc.kHd + i] * qInv;
                 float kv = convOut[base + keyDim + kh * pc.kHd + i] * kInv;
                 int si = (h * pc.kHd + i) * pc.vHd + d;
-                float sv = av * state[si] + bv * kv * vv;
-                state[si] = sv;
-                acc += qv * sv;
+                state[si] += kv * delta;
+                acc += qv * state[si];
             }
-            gated[d] = acc * (1.0 / (1.0 + exp(-z[t * pc.nV * pc.vHd + h * pc.vHd + d])));
+            readout[d] = acc;
         }
         barrier();
 
         if (lane == 0) {
             float sum = 0.0;
-            for (int d = 0; d < pc.vHd; ++d) sum += gated[d] * gated[d];
+            for (int d = 0; d < pc.vHd; ++d) sum += readout[d] * readout[d];
             rmsInv = inversesqrt(sum / float(pc.vHd) + pc.eps);
         }
         barrier();
 
-        for (int d = lane; d < pc.vHd; d += 64)
-            core[t * pc.nV * pc.vHd + h * pc.vHd + d] = gated[d] * rmsInv * norm[d];
+        for (int d = lane; d < pc.vHd; d += 64) {
+            float zv = z[t * pc.nV * pc.vHd + h * pc.vHd + d];
+            core[t * pc.nV * pc.vHd + h * pc.vHd + d] = norm[d] * (readout[d] * rmsInv) * silu(zv);
+        }
         barrier();
     }
 }
