@@ -618,3 +618,119 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 	// path again the way the hard-coded nil bias here did.
 	return m.finalNorm(last)
 }
+
+const (
+	// DefaultMALLCapacityBlocks is the exact number of 256 KiB sequence blocks that fit in 32MB MALL cache:
+	// 32MB / 256 KiB = 128 blocks = 8,192 tokens.
+	DefaultMALLCapacityBlocks = 128
+
+	// DefaultBlockTokens is the standard sequence block token count (64 tokens).
+	DefaultBlockTokens = 64
+)
+
+// CachePolicyHint specifies the RDNA 3.5 cache allocation directive for a token span, tree mask, or weight tensor.
+type CachePolicyHint struct {
+	SLC          int    `json:"slc"`           // System Level Cache: 0 = allocate/cached in MALL, 1 = bypass MALL
+	GLC          int    `json:"glc"`           // Globally Coherent / L1 cache: 0 = normal cacheable, 1 = bypass
+	NT           int    `json:"nt"`            // Non-Temporal flag: 0 = temporal reuse, 1 = non-temporal streaming bypass
+	Temporal     bool   `json:"temporal"`      // True if cached/pinned in MALL
+	Bypass       bool   `json:"bypass"`        // True if bypassing MALL to prevent cache thrashing
+	Prefetch     bool   `json:"prefetch"`      // True if asynchronous prefetch (s_prefetch_data) should be emitted
+	PolicyName   string `json:"policy_name"`   // "TEMPORAL_PINNED", "STREAMING_BYPASS", or "PARTITIONED"
+	PinnedTokens int    `json:"pinned_tokens"` // Number of tokens in span qualifying for MALL pinning (0..8191)
+	BypassTokens int    `json:"bypass_tokens"` // Number of tokens in span bypassing MALL (>8191)
+}
+
+var (
+	// CacheHintTemporal directs CUs to fetch tokens with temporal caching (SLC=0, GLC=0, NT=0),
+	// pinning hot KV blocks and tree masks in the 32MB MALL cache.
+	CacheHintTemporal = CachePolicyHint{
+		SLC:        0,
+		GLC:        0,
+		NT:         0,
+		Temporal:   true,
+		Bypass:     false,
+		Prefetch:   true,
+		PolicyName: "TEMPORAL_PINNED",
+	}
+
+	// CacheHintStreamingBypass directs CUs to use non-temporal streaming bypass (NT=1, SLC=1),
+	// bypassing MALL to prevent cache pollution from divergent tokens or model weight streaming.
+	CacheHintStreamingBypass = CachePolicyHint{
+		SLC:        1,
+		GLC:        0,
+		NT:         1,
+		Temporal:   false,
+		Bypass:     true,
+		Prefetch:   false,
+		PolicyName: "STREAMING_BYPASS",
+	}
+)
+
+// ClassifyKVBlockCacheHint assigns the RDNA 3.5 cache allocation directive for a KV cache block:
+//   - Blocks 0..127 (< DefaultMALLCapacityBlocks): CacheHintTemporal (MALL-pinned).
+//   - Blocks >= 128: CacheHintStreamingBypass (streamed from DRAM).
+func ClassifyKVBlockCacheHint(blockID ...int) CachePolicyHint {
+	bID := 0
+	tokens := DefaultBlockTokens
+	if len(blockID) > 0 {
+		bID = blockID[0]
+	}
+	if len(blockID) > 1 && blockID[1] > 0 {
+		tokens = blockID[1]
+	}
+	if bID < 0 {
+		bID = 0
+	}
+	if bID < DefaultMALLCapacityBlocks {
+		hint := CacheHintTemporal
+		hint.PinnedTokens = tokens
+		hint.BypassTokens = 0
+		return hint
+	}
+	hint := CacheHintStreamingBypass
+	hint.PinnedTokens = 0
+	hint.BypassTokens = tokens
+	return hint
+}
+
+// ClassifyTreeMaskCacheHint returns the RDNA 3.5 cache allocation directive for candidate tree
+// attention masks, tagging them for temporal pinning in MALL (SLC=0, GLC=0, NT=0).
+func ClassifyTreeMaskCacheHint(numNodes ...int) CachePolicyHint {
+	n := 0
+	if len(numNodes) > 0 {
+		n = numNodes[0]
+		if n < 0 {
+			n = 0
+		}
+	}
+	hint := CacheHintTemporal
+	hint.PinnedTokens = n
+	hint.BypassTokens = 0
+	return hint
+}
+
+// ClassifyWeightTensorCacheHint returns the non-temporal streaming bypass policy (NT=1, SLC=1)
+// for streaming model weights to avoid polluting the pinned KV cache in MALL.
+func ClassifyWeightTensorCacheHint(tensorName ...string) CachePolicyHint {
+	return CacheHintStreamingBypass
+}
+
+// AttachWeightCacheHint returns the streaming weight bypass policy hint (NT=1, SLC=1)
+// to attach to weight tensor memory loads during speculative verification.
+func (s *Session) AttachWeightCacheHint(tensorName ...string) CachePolicyHint {
+	return ClassifyWeightTensorCacheHint(tensorName...)
+}
+
+// AttachTreeMaskCacheHint returns the temporal pinned cache policy hint (SLC=0, GLC=0, NT=0)
+// to attach to candidate tree attention mask memory loads.
+func (s *Session) AttachTreeMaskCacheHint(numNodes ...int) CachePolicyHint {
+	return ClassifyTreeMaskCacheHint(numNodes...)
+}
+
+// AttachKVCacheHint returns the cache policy hint (temporal pinned for root context blocks < 128,
+// streaming bypass beyond) to attach to KV cache block loads.
+func (s *Session) AttachKVCacheHint(blockID ...int) CachePolicyHint {
+	return ClassifyKVBlockCacheHint(blockID...)
+}
+
