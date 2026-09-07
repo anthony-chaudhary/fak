@@ -86,6 +86,9 @@ func (v *VDSO) Revoke(witness string) (evicted int) {
 	if witness == "" {
 		return 0
 	}
+	if v.searchCache != nil {
+		evicted += v.searchCache.Revoke(witness)
+	}
 	v.mu.Lock()
 	v.ensureRevokedStateLocked()
 	epoch := atomic.AddUint64(&v.trustEpoch, 1)
