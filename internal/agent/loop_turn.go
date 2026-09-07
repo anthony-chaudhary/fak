@@ -541,7 +541,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			}
 		default:
 			var naiveM ArmMetrics
-			content, ev = execNaive(tool, rawArgs, &naiveM, ev)
+			content, ev = execNaiveContext(ctx, tool, rawArgs, &naiveM, ev)
 			if naiveM.ToolErrors > 0 {
 				isErr = true
 			}
