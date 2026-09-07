@@ -3,12 +3,16 @@
 package compute
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"unsafe"
 )
 
 // vulkan_test.go — op-level witness that the AMD/Vulkan backend's kernels reproduce the
@@ -1428,4 +1432,584 @@ func TestVulkanQ4KTensorHomeReusesCopyAndResets(t *testing.T) {
 	if entries != 0 || resident != 0 {
 		t.Fatalf("reset entries=%d resident=%d", entries, resident)
 	}
+}
+
+func makeSyntheticQ2K(rng *rand.Rand, out, in int) ([]byte, Tensor) {
+	raw := make([]byte, out*(in/q2kSuper)*q2kSuperBlock)
+	for b := 0; b < out*(in/q2kSuper); b++ {
+		blk := raw[b*q2kSuperBlock : (b+1)*q2kSuperBlock]
+		for i := 0; i < 16; i++ {
+			blk[i] = byte(rng.Intn(256))
+		}
+		for i := 16; i < 80; i++ {
+			blk[i] = byte(rng.Intn(256))
+		}
+		binaryPutFloat16(blk[80:82], float32(rng.Float64()*1.0+0.5))
+		binaryPutFloat16(blk[82:84], float32(rng.Float64()*0.5+0.1))
+	}
+	hw := NewQ2K(Default(), []int{out, in}, raw)
+	return raw, hw
+}
+
+func TestVulkanQ2KMatMul(t *testing.T) {
+	v := vk(t)
+	if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") != "1" {
+		t.Skip("set FAK_VULKAN_DISPATCH_PROFILE=1 to witness exact native Q2 dispatch attribution")
+	}
+	v.VulkanDebugResetDispatchProfile()
+
+	rng := rand.New(rand.NewSource(20260907))
+	var maxErr float32
+
+	// Conformance suite: 4 distinct Q2_K dispatches exercising:
+	// - packed Q2 upload
+	// - multi-superblock weights (in=512, 2 superblocks per row)
+	// - row tails (out=67 not divisible by 64 workgroup size)
+	// - serial (MatMul, P=1) and batched (BatchedMatMul, P>1) dispatch
+	// - finite readback parity
+	// - exact native Q2 dispatch attribution (exactly 4 Q2 dispatches)
+	type testCase struct {
+		name    string
+		out, in int
+		p       int
+	}
+	cases := []testCase{
+		{name: "serial_aligned_multi_superblock", out: 64, in: 512, p: 1},
+		{name: "serial_row_tail_multi_superblock", out: 67, in: 512, p: 1},
+		{name: "batched_aligned_multi_superblock", out: 64, in: 512, p: 4},
+		{name: "batched_row_tail_multi_superblock", out: 67, in: 512, p: 3},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, hw := makeSyntheticQ2K(rng, tc.out, tc.in)
+			dw := v.Upload(hw, Q2_K)
+			defer v.Free(dw)
+
+			var got, want []float32
+			if tc.p == 1 {
+				x := make([]float32, tc.in)
+				for i := range x {
+					x[i] = rng.Float32()*2 - 1
+				}
+				dx := v.Upload(NewF32(Default(), []int{tc.in}, x), F32)
+				defer v.Free(dx)
+
+				dy := v.MatMul(dw, dx)
+				defer v.Free(dy)
+
+				got = v.Read(dy)
+				want = Default().Read(Default().MatMul(hw, NewF32(Default(), []int{tc.in}, x)))
+			} else {
+				X := make([]float32, tc.p*tc.in)
+				for i := range X {
+					X[i] = rng.Float32()*2 - 1
+				}
+				dX := v.Upload(NewF32(Default(), []int{tc.p, tc.in}, X), F32)
+				defer v.Free(dX)
+
+				dY := v.BatchedMatMul(dw, dX, tc.p)
+				defer v.Free(dY)
+
+				got = v.Read(dY)
+				want = Default().Read(Default().BatchedMatMul(hw, NewF32(Default(), []int{tc.p, tc.in}, X), tc.p))
+			}
+
+			if len(got) != len(want) {
+				t.Fatalf("length mismatch: got %d want %d", len(got), len(want))
+			}
+
+			for i, g := range got {
+				if math.IsNaN(float64(g)) || math.IsInf(float64(g), 0) {
+					t.Fatalf("non-finite readback at index %d: %v", i, g)
+				}
+				diff := float32(math.Abs(float64(g - want[i])))
+				if diff > maxErr {
+					maxErr = diff
+				}
+				if diff >= 1e-3 {
+					t.Fatalf("index %d: got %g, want %g, delta %g >= 1e-3", i, g, want[i], diff)
+				}
+			}
+		})
+	}
+
+	snapshot := v.VulkanDebugDispatchProfileSnapshot()
+	if snapshot.Q2KMatmulDispatches != 4 {
+		t.Fatalf("Q2_K dispatches = %d, want exactly 4 (snapshot: %+v)", snapshot.Q2KMatmulDispatches, snapshot)
+	}
+	if maxErr >= 1e-3 {
+		t.Fatalf("max absolute error %g >= 1e-3", maxErr)
+	}
+	t.Logf("TestVulkanQ2KMatMul verified on physical device: max absolute error = %e (< 1e-3), Q2 dispatches = %d", maxErr, snapshot.Q2KMatmulDispatches)
+}
+
+func TestVulkanMissingQ2ShaderPreventsRegistration(t *testing.T) {
+	if os.Getenv("FAK_TEST_VULKAN_MISSING_Q2_SUBPROCESS") == "1" {
+		_, ok := Lookup("vulkan")
+		if ok {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	spirvDir := os.Getenv("FAK_VULKAN_SPIRV")
+	if spirvDir == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("os.Getwd: %v", err)
+		}
+		repoRoot := findRepoRootForTest(t, wd)
+		spirvDir = filepath.Join(repoRoot, "internal", "compute", "spirv")
+	}
+	if _, err := os.Stat(filepath.Join(spirvDir, "q2k_matmul.spv")); err != nil {
+		t.Skip("spirv directory does not contain q2k_matmul.spv")
+	}
+
+	tempDir := t.TempDir()
+	entries, err := os.ReadDir(spirvDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", spirvDir, err)
+	}
+	copied := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".spv") {
+			continue
+		}
+		if entry.Name() == "q2k_matmul.spv" {
+			continue
+		}
+		srcPath := filepath.Join(spirvDir, entry.Name())
+		dstPath := filepath.Join(tempDir, entry.Name())
+		data, err := os.ReadFile(srcPath)
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", srcPath, err)
+		}
+		if err := os.WriteFile(dstPath, data, 0o644); err != nil {
+			t.Fatalf("WriteFile(%s): %v", dstPath, err)
+		}
+		copied++
+	}
+	if copied == 0 {
+		t.Fatal("no SPIR-V files copied")
+	}
+
+	// Direct shim initialization witness: missing q2k_matmul.spv must fail (return non-zero, code 8).
+	ret := VulkanDebugInitShim(tempDir)
+	if ret == 0 {
+		t.Fatalf("VulkanDebugInitShim(%s) returned 0 with missing q2k_matmul.spv; want non-zero failure", tempDir)
+	}
+
+	// Subprocess witness: backend registration must fail closed on missing Q2 shader
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	cmd := exec.Command(exe, "-test.run=^TestVulkanMissingQ2ShaderPreventsRegistration$")
+	cmd.Env = append(os.Environ(),
+		"FAK_TEST_VULKAN_MISSING_Q2_SUBPROCESS=1",
+		"FAK_VULKAN_SPIRV="+tempDir,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("subprocess failed: %v, output: %s", err, string(out))
+	}
+}
+
+func TestVulkanQwen35_ResidencyAndErrorRecovery(t *testing.T) {
+	v := &vulkanBackend{}
+
+	host := NewF32(Default(), []int{4}, []float32{1, 2, 3, 4})
+	nilTensor := Tensor{}
+	dummyByte := byte(0)
+	dummyResident := Tensor{buf: &vulkanBuf{ptr: unsafe.Pointer(&dummyByte)}}
+
+	assertPanic := func(opName, want string, fn func()) {
+		t.Helper()
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatalf("%s did not panic; want %q", opName, want)
+			}
+			msg := fmt.Sprint(r)
+			if !strings.Contains(msg, want) {
+				t.Fatalf("%s panicked with %q; want %q", opName, msg, want)
+			}
+		}()
+		fn()
+	}
+
+	// 1. SplitQwen35QueryGate
+	assertPanic("SplitQwen35QueryGate(nil)", "compute: vulkan SplitQwen35QueryGate input tensor buffer is nil", func() {
+		v.SplitQwen35QueryGate(nilTensor, 1, 2)
+	})
+	assertPanic("SplitQwen35QueryGate(host)", "compute: vulkan SplitQwen35QueryGate input tensor is not Vulkan-resident", func() {
+		v.SplitQwen35QueryGate(host, 1, 2)
+	})
+
+	// 2. PartialRoPEQK
+	assertPanic("PartialRoPEQK(nil, nil)", "compute: vulkan PartialRoPEQK Q tensor buffer is nil", func() {
+		v.PartialRoPEQK(nilTensor, nilTensor, 0, 1, 1, 2, 2, 10000.0)
+	})
+	assertPanic("PartialRoPEQK(host, host)", "compute: vulkan PartialRoPEQK Q tensor is not Vulkan-resident", func() {
+		v.PartialRoPEQK(host, host, 0, 1, 1, 2, 2, 10000.0)
+	})
+	assertPanic("PartialRoPEQK(resident, nil)", "compute: vulkan PartialRoPEQK K tensor buffer is nil", func() {
+		v.PartialRoPEQK(dummyResident, nilTensor, 0, 1, 1, 2, 2, 10000.0)
+	})
+	assertPanic("PartialRoPEQK(resident, host)", "compute: vulkan PartialRoPEQK K tensor is not Vulkan-resident", func() {
+		v.PartialRoPEQK(dummyResident, host, 0, 1, 1, 2, 2, 10000.0)
+	})
+
+	// 3. SigmoidMulInPlace
+	assertPanic("SigmoidMulInPlace(nil, nil)", "compute: vulkan SigmoidMulInPlace X tensor buffer is nil", func() {
+		v.SigmoidMulInPlace(nilTensor, nilTensor)
+	})
+	assertPanic("SigmoidMulInPlace(host, host)", "compute: vulkan SigmoidMulInPlace X tensor is not Vulkan-resident", func() {
+		v.SigmoidMulInPlace(host, host)
+	})
+	assertPanic("SigmoidMulInPlace(resident, nil)", "compute: vulkan SigmoidMulInPlace Gate tensor buffer is nil", func() {
+		v.SigmoidMulInPlace(dummyResident, nilTensor)
+	})
+	assertPanic("SigmoidMulInPlace(resident, host)", "compute: vulkan SigmoidMulInPlace Gate tensor is not Vulkan-resident", func() {
+		v.SigmoidMulInPlace(dummyResident, host)
+	})
+
+	if len(v.transient) != 0 {
+		t.Fatalf("expected len(v.transient) == 0, got %d", len(v.transient))
+	}
+}
+
+func TestVulkanVectorGDNDisableSetting(t *testing.T) {
+	// Subtest 1: Verify configuration API and environment variable precedence without requiring a GPU
+	t.Run("SettingFlags", func(t *testing.T) {
+		v := &vulkanBackend{}
+		if v.IsVectorGDNDisabled() {
+			t.Fatal("expected vector GDN to be enabled by default")
+		}
+
+		// 1. Direct setter
+		v.SetDisableVectorGDN(true)
+		if !v.IsVectorGDNDisabled() {
+			t.Fatal("expected vector GDN to be disabled after SetDisableVectorGDN(true)")
+		}
+		v.SetDisableVectorGDN(false)
+		if v.IsVectorGDNDisabled() {
+			t.Fatal("expected vector GDN to be enabled after SetDisableVectorGDN(false)")
+		}
+
+		// 2. ConfigureVulkanGDN interface helper
+		if !ConfigureVulkanGDN(v, true) {
+			t.Fatal("ConfigureVulkanGDN failed to configure backend")
+		}
+		if !v.IsVectorGDNDisabled() {
+			t.Fatal("expected vector GDN to be disabled after ConfigureVulkanGDN(true)")
+		}
+		ConfigureVulkanGDN(v, false)
+		if v.IsVectorGDNDisabled() {
+			t.Fatal("expected vector GDN to be enabled after ConfigureVulkanGDN(false)")
+		}
+
+		// 3. FAK_DISABLE_VECTOR_GDN environment variable
+		t.Setenv("FAK_DISABLE_VECTOR_GDN", "1")
+		if !v.IsVectorGDNDisabled() {
+			t.Fatal("expected vector GDN to be disabled with FAK_DISABLE_VECTOR_GDN=1")
+		}
+		t.Setenv("FAK_DISABLE_VECTOR_GDN", "true")
+		if !v.IsVectorGDNDisabled() {
+			t.Fatal("expected vector GDN to be disabled with FAK_DISABLE_VECTOR_GDN=true")
+		}
+		t.Setenv("FAK_DISABLE_VECTOR_GDN", "0")
+		if v.IsVectorGDNDisabled() {
+			t.Fatal("expected vector GDN to be enabled with FAK_DISABLE_VECTOR_GDN=0")
+		}
+
+		// 4. FAK_VECTORIZED_DELTANET=0 environment variable
+		t.Setenv("FAK_DISABLE_VECTOR_GDN", "")
+		t.Setenv("FAK_VECTORIZED_DELTANET", "0")
+		if !v.IsVectorGDNDisabled() {
+			t.Fatal("expected vector GDN to be disabled with FAK_VECTORIZED_DELTANET=0")
+		}
+		t.Setenv("FAK_VECTORIZED_DELTANET", "false")
+		if !v.IsVectorGDNDisabled() {
+			t.Fatal("expected vector GDN to be disabled with FAK_VECTORIZED_DELTANET=false")
+		}
+		t.Setenv("FAK_VECTORIZED_DELTANET", "1")
+		if v.IsVectorGDNDisabled() {
+			t.Fatal("expected vector GDN to be enabled with FAK_VECTORIZED_DELTANET=1")
+		}
+
+		// 5. FAK_VECTOR_GDN=0 environment variable
+		t.Setenv("FAK_VECTORIZED_DELTANET", "")
+		t.Setenv("FAK_VECTOR_GDN", "0")
+		if !v.IsVectorGDNDisabled() {
+			t.Fatal("expected vector GDN to be disabled with FAK_VECTOR_GDN=0")
+		}
+		t.Setenv("FAK_VECTOR_GDN", "1")
+		if v.IsVectorGDNDisabled() {
+			t.Fatal("expected vector GDN to be enabled with FAK_VECTOR_GDN=1")
+		}
+	})
+
+	// Subtest 2: Scalar recurrence mathematical parity test
+	t.Run("ScalarRecurrenceParity", func(t *testing.T) {
+		tokens, nK, nV, kHd, vHd, kernel := 2, 1, 1, 2, 65, 3
+		convDim := 2*nK*kHd + nV*vHd
+		valueDim := nV * vHd
+		mixed := make([]float32, tokens*convDim)
+		z := make([]float32, tokens*valueDim)
+		for i := range mixed {
+			mixed[i] = float32((i%17)-8) * 0.025
+		}
+		for i := range z {
+			z[i] = float32((i%23)-11) * 0.15
+		}
+		beta := make([]float32, tokens*nV)
+		alpha := make([]float32, tokens*nV)
+		for i := range beta {
+			beta[i] = float32((i%13)-6) * 0.2
+			alpha[i] = float32((i%11)-5) * 0.15
+		}
+		convW := make([]float32, convDim*kernel)
+		for c := 0; c < convDim; c++ {
+			convW[c*kernel] = 0.1
+			convW[c*kernel+1] = -0.2
+			convW[c*kernel+2] = 0.7
+		}
+		aLog := make([]float32, nV)
+		dtBias := make([]float32, nV)
+		for h := 0; h < nV; h++ {
+			aLog[h] = -1.0 + float32(h)*0.1
+			dtBias[h] = 0.1 - float32(h)*0.05
+		}
+		norm := make([]float32, vHd)
+		for i := range norm {
+			norm[i] = 0.9 + float32(i%5)*0.05
+		}
+		convState := make([]float32, (kernel-1)*convDim)
+		for i := range convState {
+			convState[i] = float32((i%7)-3) * 0.02
+		}
+		recState := make([]float32, nV*kHd*vHd)
+		for i := range recState {
+			recState[i] = float32((i%19)-9) * 0.03
+		}
+
+		gotOut, gotCS, gotRS := qwen35GDNScalarRecurrence(
+			mixed, z, beta, alpha, convW, aLog, dtBias, norm, convState, recState,
+			tokens, nK, nV, kHd, vHd, kernel, 1e-5,
+		)
+		wantOut, wantCS, wantRS := qwen35GDNPreprojectedOracle(
+			mixed, z, beta, alpha, convW, aLog, dtBias, norm, convState, recState,
+			tokens, nK, nV, kHd, vHd, kernel, 1e-5,
+		)
+
+		if !slices.Equal(gotOut, wantOut) {
+			t.Fatal("scalar recurrence output does not match oracle exactly")
+		}
+		if !slices.Equal(gotCS, wantCS) {
+			t.Fatal("scalar recurrence conv state does not match oracle exactly")
+		}
+		if !slices.Equal(gotRS, wantRS) {
+			t.Fatal("scalar recurrence recurrent state does not match oracle exactly")
+		}
+	})
+
+	// Subtest 3: Device dispatch witness: when disabled, avoid vectorized dispatch and route to scalar fallback
+	t.Run("DispatchAvoidsVectorizedWhenDisabled", func(t *testing.T) {
+		b, ok := Lookup("vulkan")
+		if !ok {
+			t.Skip("vulkan backend not registered (no reachable Vulkan device)")
+		}
+		v := b.(*vulkanBackend)
+
+		tokens, nK, nV, kHd, vHd, kernel := 2, 1, 1, 2, 65, 3
+		convDim := 2*nK*kHd + nV*vHd
+		valueDim := nV * vHd
+		mixed := make([]float32, tokens*convDim)
+		z := make([]float32, tokens*valueDim)
+		for i := range mixed {
+			mixed[i] = float32((i%17)-8) * 0.025
+		}
+		for i := range z {
+			z[i] = float32((i%23)-11) * 0.15
+		}
+		beta := make([]float32, tokens*nV)
+		alpha := make([]float32, tokens*nV)
+		for i := range beta {
+			beta[i] = float32((i%13)-6) * 0.2
+			alpha[i] = float32((i%11)-5) * 0.15
+		}
+		convW := make([]float32, convDim*kernel)
+		for c := 0; c < convDim; c++ {
+			convW[c*kernel] = 0.1
+			convW[c*kernel+1] = -0.2
+			convW[c*kernel+2] = 0.7
+		}
+		aLog := make([]float32, nV)
+		dtBias := make([]float32, nV)
+		for h := 0; h < nV; h++ {
+			aLog[h] = -1.0 + float32(h)*0.1
+			dtBias[h] = 0.1 - float32(h)*0.05
+		}
+		norm := make([]float32, vHd)
+		for i := range norm {
+			norm[i] = 0.9 + float32(i%5)*0.05
+		}
+		convState := make([]float32, (kernel-1)*convDim)
+		for i := range convState {
+			convState[i] = float32((i%7)-3) * 0.02
+		}
+		recState := make([]float32, nV*kHd*vHd)
+		for i := range recState {
+			recState[i] = float32((i%19)-9) * 0.03
+		}
+
+		upload := func(shape []int, data []float32, class MemoryClass, name string) Tensor {
+			tensor := v.UploadClass(NewF32(Default(), shape, data), F32, class, name)
+			t.Cleanup(func() { v.Free(tensor) })
+			return tensor
+		}
+
+		m := upload([]int{tokens, convDim}, mixed, MemoryActivation, "gdn mixed")
+		zt := upload([]int{tokens, valueDim}, z, MemoryActivation, "gdn z")
+		bt := upload([]int{tokens, nV}, beta, MemoryActivation, "gdn beta")
+		at := upload([]int{tokens, nV}, alpha, MemoryActivation, "gdn alpha")
+		cw := upload([]int{convDim, kernel}, convW, MemoryWeights, "gdn conv")
+		al := upload([]int{nV}, aLog, MemoryWeights, "gdn alog")
+		dt := upload([]int{nV}, dtBias, MemoryWeights, "gdn dt")
+		nw := upload([]int{vHd}, norm, MemoryWeights, "gdn norm")
+		cs := upload([]int{kernel - 1, convDim}, convState, MemoryKVCache, "gdn conv state")
+		rs := upload([]int{nV, kHd, vHd}, recState, MemoryKVCache, "gdn recurrent state")
+
+		// 1. Explicitly disable vectorized GDN
+		v.SetDisableVectorGDN(true)
+		v.VulkanDebugResetGDNProfile()
+		v.VulkanDebugResetDispatchProfile()
+
+		out, err := v.Qwen35GDNPreprojected(m, zt, bt, at, cw, al, dt, nw, cs, rs, tokens, nK, nV, kHd, vHd, kernel, 1e-5)
+		if err != nil {
+			t.Fatalf("Qwen35GDNPreprojected with disabled vectorized GDN failed: %v", err)
+		}
+		t.Cleanup(func() { v.Free(out) })
+
+		vecCalls, scaCalls := v.VulkanDebugGDNProfileSnapshot()
+		if vecCalls != 0 || scaCalls != 1 {
+			t.Fatalf("expected 0 vectorized calls and 1 scalar call, got vec=%d sca=%d", vecCalls, scaCalls)
+		}
+
+		snap := v.VulkanDebugDispatchProfileSnapshot()
+		if snap.OtherGDNDispatches != 0 {
+			t.Fatalf("expected 0 Vulkan shader GDN dispatches when vectorized GDN disabled, got %d", snap.OtherGDNDispatches)
+		}
+
+		gotOut := v.Read(out)
+		wantOut, _, _ := qwen35GDNPreprojectedOracle(mixed, z, beta, alpha, convW, aLog, dtBias, norm, convState, recState, tokens, nK, nV, kHd, vHd, kernel, 1e-5)
+		for i := range gotOut {
+			if math.Abs(float64(gotOut[i]-wantOut[i])) > 1e-4 {
+				t.Fatalf("output mismatch at %d: got %g, want %g", i, gotOut[i], wantOut[i])
+			}
+		}
+
+		// 2. Re-enable vectorized GDN and confirm vectorized dispatch occurs
+		v.SetDisableVectorGDN(false)
+		v.VulkanDebugResetGDNProfile()
+		v.VulkanDebugResetDispatchProfile()
+
+		out2, err := v.Qwen35GDNPreprojected(m, zt, bt, at, cw, al, dt, nw, cs, rs, tokens, nK, nV, kHd, vHd, kernel, 1e-5)
+		if err != nil {
+			t.Fatalf("Qwen35GDNPreprojected with enabled vectorized GDN failed: %v", err)
+		}
+		v.Free(out2)
+
+		vecCalls2, scaCalls2 := v.VulkanDebugGDNProfileSnapshot()
+		if vecCalls2 != 1 || scaCalls2 != 0 {
+			t.Fatalf("expected 1 vectorized call and 0 scalar calls, got vec=%d sca=%d", vecCalls2, scaCalls2)
+		}
+		if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") == "1" {
+			snap2 := v.VulkanDebugDispatchProfileSnapshot()
+			if snap2.OtherGDNDispatches == 0 {
+				t.Fatalf("expected Vulkan shader GDN dispatches > 0 when vectorized GDN enabled, got %d", snap2.OtherGDNDispatches)
+			}
+		}
+	})
+}
+
+func TestVulkanQwen35_ResidencyAndErrorRecovery(t *testing.T) {
+	v := vk(t)
+	c := cpu()
+	hostTensor := NewF32(c, []int{128}, make([]float32, 128))
+	nilTensor := Tensor{}
+
+	t.Run("SplitQwen35QueryGate_NilResidency", func(t *testing.T) {
+		startTr := len(v.transient)
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("expected panic on nil tensor, got nil")
+			}
+			msg := fmt.Sprint(r)
+			if !strings.Contains(msg, "tensor buffer is nil") {
+				t.Fatalf("unexpected panic message: %s", msg)
+			}
+			if len(v.transient) != startTr {
+				t.Fatalf("transient buffer leak: before=%d after=%d", startTr, len(v.transient))
+			}
+		}()
+		v.SplitQwen35QueryGate(nilTensor, 2, 32)
+	})
+
+	t.Run("SplitQwen35QueryGate_HostResidency", func(t *testing.T) {
+		startTr := len(v.transient)
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("expected panic on host tensor, got nil")
+			}
+			msg := fmt.Sprint(r)
+			if !strings.Contains(msg, "not Vulkan-resident") {
+				t.Fatalf("unexpected panic message: %s", msg)
+			}
+			if len(v.transient) != startTr {
+				t.Fatalf("transient buffer leak: before=%d after=%d", startTr, len(v.transient))
+			}
+		}()
+		v.SplitQwen35QueryGate(hostTensor, 2, 32)
+	})
+
+	t.Run("PartialRoPEQK_HostResidency", func(t *testing.T) {
+		startTr := len(v.transient)
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("expected panic on host tensor, got nil")
+			}
+			msg := fmt.Sprint(r)
+			if !strings.Contains(msg, "not Vulkan-resident") {
+				t.Fatalf("unexpected panic message: %s", msg)
+			}
+			if len(v.transient) != startTr {
+				t.Fatalf("transient buffer leak: before=%d after=%d", startTr, len(v.transient))
+			}
+		}()
+		v.PartialRoPEQK(hostTensor, hostTensor, 0, 2, 2, 32, 16, 10000.0)
+	})
+
+	t.Run("SigmoidMulInPlace_HostResidency", func(t *testing.T) {
+		startTr := len(v.transient)
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("expected panic on host tensor, got nil")
+			}
+			msg := fmt.Sprint(r)
+			if !strings.Contains(msg, "not Vulkan-resident") {
+				t.Fatalf("unexpected panic message: %s", msg)
+			}
+			if len(v.transient) != startTr {
+				t.Fatalf("transient buffer leak: before=%d after=%d", startTr, len(v.transient))
+			}
+		}()
+		v.SigmoidMulInPlace(hostTensor, hostTensor)
+	})
 }
