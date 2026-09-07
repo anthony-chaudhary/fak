@@ -3,11 +3,14 @@ package gateway
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -314,5 +317,92 @@ func TestAnthropicMessagesPassthroughStreamAllDeniedEndsTurn(t *testing.T) {
 	}
 	if !strings.Contains(delta, `"end_turn"`) || strings.Contains(delta, `"tool_use"`) {
 		t.Errorf("all-denied turn must rewrite stop_reason to end_turn, got: %s", delta)
+	}
+}
+
+// TestAnthropicMessagesPassthroughStreamHeartbeatsRace proves that streaming Anthropic
+// passthrough with heartbeats enabled runs race-free and well-framed under the race detector (#10830).
+func TestAnthropicMessagesPassthroughStreamHeartbeatsRace(t *testing.T) {
+	t.Setenv("FAK_STREAM_HEARTBEAT_S", "1")
+
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+
+	inbound := []byte(`{"model":"claude-test","max_tokens":1024,"stream":true,` +
+		`"messages":[{"role":"user","content":"stream with heartbeats"}]}`)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if ok {
+			flusher.Flush()
+		}
+
+		send := func(ev, data string) {
+			_, _ = io.WriteString(w, "event: "+ev+"\ndata: "+data+"\n\n")
+			if ok {
+				flusher.Flush()
+			}
+		}
+
+		send("message_start", `{"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","model":"claude-test","content":[],"stop_reason":null,"usage":{"input_tokens":5,"output_tokens":0}}}`)
+		send("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)
+
+		for i := 0; i < 15; i++ {
+			time.Sleep(100 * time.Millisecond)
+			send("content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"chunk%d "}}`, i))
+		}
+
+		send("content_block_stop", `{"type":"content_block_stop","index":0}`)
+		send("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":15}}`)
+		send("message_stop", `{"type":"message_stop"}`)
+	}))
+	defer upstream.Close()
+
+	srv, err := New(Config{EngineID: "test", Model: "claude-test", BaseURL: upstream.URL, Provider: "anthropic", APIKey: "k", VDSO: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/messages", bytes.NewReader(inbound))
+	req.Header.Set("Content-Type", "application/json")
+	httpResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer httpResp.Body.Close()
+	if httpResp.StatusCode != 200 {
+		t.Fatalf("status = %d", httpResp.StatusCode)
+	}
+	if ct := httpResp.Header.Get("Content-Type"); !strings.Contains(ct, "event-stream") {
+		t.Fatalf("downstream is not an SSE stream: Content-Type=%q", ct)
+	}
+	frames := readAnthropicSSE(t, httpResp.Body)
+
+	var text strings.Builder
+	for _, f := range frames {
+		if f.event == "content_block_delta" {
+			var d struct {
+				Delta struct {
+					Text string `json:"text"`
+				} `json:"delta"`
+			}
+			if err := json.Unmarshal([]byte(f.data), &d); err == nil {
+				text.WriteString(d.Delta.Text)
+			}
+		}
+	}
+
+	var wantText strings.Builder
+	for i := 0; i < 15; i++ {
+		wantText.WriteString(fmt.Sprintf("chunk%d ", i))
+	}
+	if got := text.String(); got != wantText.String() {
+		t.Fatalf("reassembled text = %q, want %q", got, wantText.String())
 	}
 }

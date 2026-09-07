@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -327,5 +328,101 @@ func TestStreamChatLiveHeartbeatSilentBeforeFirstToken(t *testing.T) {
 	}
 	if !sawDone {
 		t.Fatal("stream never terminated with [DONE]")
+	}
+}
+
+type hbMultiChunkPlanner struct {
+	model  string
+	chunks []string
+	delay  time.Duration
+}
+
+func (p *hbMultiChunkPlanner) Model() string { return p.model }
+
+func (p *hbMultiChunkPlanner) Complete(context.Context, []agent.Message, []agent.ToolDef, ...agent.SampleOpt) (*agent.Completion, error) {
+	return nil, errors.New("stream only")
+}
+
+func (p *hbMultiChunkPlanner) StreamingSupported() bool { return true }
+
+func (p *hbMultiChunkPlanner) CompleteStream(ctx context.Context, sink agent.StreamSink, _ []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	var full strings.Builder
+	for _, c := range p.chunks {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		if err := sink(c); err != nil {
+			return nil, err
+		}
+		full.WriteString(c)
+		if p.delay > 0 {
+			time.Sleep(p.delay)
+		}
+	}
+	return &agent.Completion{
+		Message:      agent.Message{Role: agent.RoleAssistant, Content: full.String()},
+		FinishReason: "stop",
+		Model:        p.model,
+	}, nil
+}
+
+var _ agent.StreamingPlanner = (*hbMultiChunkPlanner)(nil)
+
+// TestStreamChatLiveHeartbeatConcurrentStreamEmissionRace proves concurrent stream emission
+// and heartbeat emission do not race or corrupt framing (#10830). Multiple chunks are
+// streamed while heartbeats fire in the background; framing must remain intact and race detector clean.
+func TestStreamChatLiveHeartbeatConcurrentStreamEmissionRace(t *testing.T) {
+	t.Setenv("FAK_STREAM_HEARTBEAT_S", "1")
+	var chunks []string
+	for i := 0; i < 16; i++ {
+		chunks = append(chunks, fmt.Sprintf("chunk-%02d ", i))
+	}
+	planner := &hbMultiChunkPlanner{
+		model:  "test-model",
+		chunks: chunks,
+		delay:  100 * time.Millisecond,
+	}
+
+	srv := newTestServer(t)
+	srv.planner = planner
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	body := []byte(`{"model":"test-model","messages":[{"role":"user","content":"probe"}],"stream":true}`)
+	tap := tapChatStream(ts.URL+"/v1/chat/completions", body)
+
+	resp := tap.waitHead(t, hbBudget, "no HTTP head")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	rest := tap.drain(t, 15*time.Second)
+	var content strings.Builder
+	sawDone := false
+	hbCount := 0
+	for _, line := range rest {
+		if line == "data: [DONE]" {
+			sawDone = true
+			continue
+		}
+		if strings.HasPrefix(line, ": fak-heartbeat") {
+			hbCount++
+			continue
+		}
+		chunk := decodeSSEChunk(t, line)
+		content.WriteString(chunk.Choices[0].Delta.Content)
+	}
+
+	expected := strings.Join(chunks, "")
+	if got := content.String(); got != expected {
+		t.Fatalf("reassembled content = %q, want %q", got, expected)
+	}
+	if !sawDone {
+		t.Fatal("stream never terminated with [DONE]")
+	}
+	if hbCount < 1 {
+		t.Fatalf("expected at least 1 heartbeat during 1.6s stream, got %d", hbCount)
 	}
 }
