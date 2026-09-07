@@ -205,7 +205,7 @@ func TestSpecDecodeGreedyQwen35MTPBlockAcceptance(t *testing.T) {
 				t.Fatal(err)
 			}
 			verifyReceipt := tx.VerificationReceipt()
-			if verifyReceipt.Engine != targetVerificationEngine || verifyReceipt.Path != targetVerificationQwen38Path ||
+			if verifyReceipt.Engine != targetVerificationEngine || verifyReceipt.Path != targetVerificationQwen38PanelPath ||
 				verifyReceipt.TargetVerificationOperations != 1 || verifyReceipt.TargetDecodeSteps != 0 ||
 				!verifyReceipt.OneOperation {
 				t.Fatalf("verification receipt = %+v, want one fak-native Qwen3.8 target operation", verifyReceipt)
@@ -340,6 +340,100 @@ func assertQwen35MTPTargetStateEqual(t *testing.T, got, want *Session) {
 	}
 }
 
+func TestQwen35MTPIncrementalTransactionAdoptsAndRollsBack(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	target, serial := m.NewSession(), m.NewSession()
+	defer target.Close()
+	defer serial.Close()
+	target.captureTargetHidden, serial.captureTargetHidden = true, true
+	prefix, draft := []int{0, 1, 2, 3, 4, 5}, []int{2, 3, 4}
+	before := target.Prefill(prefix)
+	serial.Prefill(prefix)
+	normalizeSnapshotForTest(t, target)
+	normalizeSnapshotForTest(t, serial)
+	tx, err := beginQwen35MTPTargetTransaction(target, before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := tx.Verify(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tx.verifiedLive || tx.receipt.Path != targetVerificationQwen38PanelPath || tx.receipt.TargetVerificationOperations != 1 || tx.receipt.TargetDecodeSteps != 0 {
+		t.Fatal("incremental verification identity missing")
+	}
+	for i, token := range draft {
+		assertFloat32BitsEqual(t, "verified row", serial.Step(token), rows[i])
+	}
+	last := append([]float32(nil), rows[len(rows)-1]...)
+	rows[len(rows)-1][0]++ // caller-owned result must not corrupt the committed boundary
+	steps := 0
+	tx.step = func(token int) []float32 { steps++; return target.Step(token) }
+	boundary, err := tx.Commit(len(draft))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if steps != 0 || !tx.closed || tx.closeCount != 1 || tx.snapshot != nil {
+		t.Fatal("full acceptance replayed or retained ownership")
+	}
+	assertFloat32BitsEqual(t, "adopted boundary", last, boundary)
+	assertQwen35MTPTargetStateEqual(t, target, serial)
+
+	tx, err = beginQwen35MTPTargetTransaction(target, boundary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Verify(draft); err != nil {
+		t.Fatal(err)
+	}
+	steps = 0
+	tx.step = func(token int) []float32 { steps++; return target.Step(token) }
+	boundary, err = tx.Commit(2)
+	if err != nil || steps != 2 {
+		t.Fatalf("partial commit replay steps=%d err=%v", steps, err)
+	}
+	serial.Step(draft[0])
+	assertFloat32BitsEqual(t, "partial boundary", serial.Step(draft[1]), boundary)
+	assertQwen35MTPTargetStateEqual(t, target, serial)
+
+	tx, err = beginQwen35MTPTargetTransaction(target, boundary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Verify(draft); err != nil {
+		t.Fatal(err)
+	}
+	verified := target.Cache.Clone()
+	if _, err = tx.Verify(draft); err == nil {
+		t.Fatal("repeat verification accepted")
+	}
+	if !reflect.DeepEqual(verified, target.Cache.Clone()) {
+		t.Fatal("repeat verification changed live state")
+	}
+	if err = tx.Abort(); err != nil {
+		t.Fatal(err)
+	}
+	assertQwen35MTPTargetStateEqual(t, target, serial)
+
+	tx, err = beginQwen35MTPTargetTransaction(target, boundary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verify := tx.verify
+	tx.verify = func(ids []int) ([][]float32, TargetVerificationReceipt, error) {
+		verify(ids)
+		panic("after live panel mutation")
+	}
+	if _, err = tx.Verify(draft); err == nil {
+		t.Fatal("verification panic not surfaced")
+	}
+	if !tx.closed || tx.closeCount != 1 {
+		t.Fatal("failed verifier retained snapshot")
+	}
+	assertQwen35MTPTargetStateEqual(t, target, serial)
+	assertFloat32BitsEqual(t, "continued decode", serial.Step(1), target.Step(1))
+}
+
 func TestQwen35MTPSpeculativeTargetTransactionFailureAtomicity(t *testing.T) {
 	m := qwen38HybridMTPEnabledSyntheticModel(t)
 	prompt := []int{0, 1}
@@ -412,7 +506,7 @@ func TestQwen35MTPSpeculativeTargetTransactionFailureAtomicity(t *testing.T) {
 			}
 			return target.Step(token)
 		}
-		got, err := tx.Commit(len(draft))
+		got, err := tx.Commit(len(draft) - 1)
 		if err == nil {
 			t.Fatal("commit replay panic was not surfaced")
 		}
