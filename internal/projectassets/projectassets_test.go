@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -640,7 +641,10 @@ func TestOpenCodePluginAssetByteParity(t *testing.T) {
 	canonicalPath := filepath.Join(repoRoot, filepath.FromSlash(OpenCodePluginPath))
 	b, err := os.ReadFile(canonicalPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) ||
+			strings.Contains(err.Error(), "no such file or directory") ||
+			strings.Contains(err.Error(), "The system cannot find the path specified") ||
+			strings.Contains(err.Error(), "The system cannot find the file specified") {
 			t.Skipf("skipping: %s does not exist in worktree", canonicalPath)
 		}
 		t.Fatalf("failed to read canonical plugin at %s: %v", canonicalPath, err)
@@ -655,7 +659,10 @@ func TestOpenCodePluginAssetByteParity(t *testing.T) {
 func TestVerifyOpenCodePlugin(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	if err := VerifyOpenCodePlugin(repoRoot); err != nil {
-		if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file or directory") {
+		if errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) ||
+			strings.Contains(err.Error(), "no such file or directory") ||
+			strings.Contains(err.Error(), "The system cannot find the path specified") ||
+			strings.Contains(err.Error(), "The system cannot find the file specified") {
 			t.Skipf("skipping: plugin does not exist in repoRoot in isolated worktree: %v", err)
 		} else {
 			t.Fatalf("VerifyOpenCodePlugin failed on repo root: %v", err)
