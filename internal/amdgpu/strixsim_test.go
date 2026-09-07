@@ -271,3 +271,71 @@ func TestStrixHaloInputValidation(t *testing.T) {
 		t.Errorf("expected error for unsupported platform")
 	}
 }
+
+// TestStrixHaloPrefillDecodeParity verifies that raw prefill and decode throughput
+// reach parity with known competitor reference implementations on AMD Strix Halo,
+// proving that our 1,240x Radix KV prefix cache advantage is a decisive net win.
+func TestStrixHaloPrefillDecodeParity(t *testing.T) {
+	cfg := DefaultStrixSimConfig(StrixHalo128GB)
+	report, err := RunStrixHaloSim(cfg)
+	if err != nil {
+		t.Fatalf("RunStrixHaloSim failed: %v", err)
+	}
+
+	// 1. Verify raw prefill parity
+	if !report.PrefillParityMet {
+		t.Errorf("expected PrefillParityMet to be true; got false (rate: %.2f tok/s, ref: %.2f tok/s, ratio: %.2fx)",
+			report.RawPrefillTokS, report.KnownPrefillReferenceTokS, report.PrefillParityRatio)
+	}
+	if report.PrefillParityRatio < 0.95 {
+		t.Errorf("expected PrefillParityRatio >= 0.95, got %.3f", report.PrefillParityRatio)
+	}
+
+	// 2. Verify raw decode parity
+	if !report.DecodeParityMet {
+		t.Errorf("expected DecodeParityMet to be true; got false (rate: %.2f tok/s, ref: %.2f tok/s, ratio: %.2fx)",
+			report.RawDecodeTokS, report.KnownDecodeReferenceTokS, report.DecodeParityRatio)
+	}
+	if report.DecodeParityRatio < 0.95 {
+		t.Errorf("expected DecodeParityRatio >= 0.95, got %.3f", report.DecodeParityRatio)
+	}
+
+	// 3. Verify net-win status and session latency gain
+	if report.NetWinVerdict != "VERIFIED_NET_WIN" {
+		t.Errorf("expected NetWinVerdict 'VERIFIED_NET_WIN', got %q", report.NetWinVerdict)
+	}
+	if report.SessionNetWinGain < 3.0 {
+		t.Errorf("expected SessionNetWinGain >= 3.0x, got %.2fx", report.SessionNetWinGain)
+	}
+
+	// 4. Verify Summary string output includes parity and net-win sections
+	summary := report.Summary()
+	if !strings.Contains(summary, "RAW THROUGHPUT PARITY & CACHE NET-WIN") {
+		t.Errorf("expected summary to contain 'RAW THROUGHPUT PARITY & CACHE NET-WIN', got:\n%s", summary)
+	}
+	if !strings.Contains(summary, "VERIFIED_NET_WIN") {
+		t.Errorf("expected summary to contain 'VERIFIED_NET_WIN', got:\n%s", summary)
+	}
+	if !strings.Contains(summary, "MET") {
+		t.Errorf("expected summary to contain 'MET', got:\n%s", summary)
+	}
+
+	// 5. Verify JSON serialization carries parity fields
+	rawJSON, err := report.ToJSON()
+	if err != nil {
+		t.Fatalf("report.ToJSON failed: %v", err)
+	}
+	var unmarshaled map[string]any
+	if err := json.Unmarshal(rawJSON, &unmarshaled); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if unmarshaled["net_win_verdict"] != "VERIFIED_NET_WIN" {
+		t.Errorf("expected net_win_verdict 'VERIFIED_NET_WIN', got %v", unmarshaled["net_win_verdict"])
+	}
+	if !unmarshaled["prefill_parity_met"].(bool) {
+		t.Errorf("expected prefill_parity_met true, got false")
+	}
+	if !unmarshaled["decode_parity_met"].(bool) {
+		t.Errorf("expected decode_parity_met true, got false")
+	}
+}

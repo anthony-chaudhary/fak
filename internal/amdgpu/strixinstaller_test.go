@@ -139,6 +139,7 @@ func TestGenerateStrixInstallerPackage_DualTP2(t *testing.T) {
 		"169.254.1.1",
 		"roce_",
 		"thunderbolt0",
+		"peer daemon discovery",
 	} {
 		if !strings.Contains(rdmaStr, token) {
 			t.Errorf("scripts/setup-usb4-rdma.sh missing required token %q:\n%s", token, rdmaStr)
@@ -149,6 +150,12 @@ func TestGenerateStrixInstallerPackage_DualTP2(t *testing.T) {
 	serveService := string(pkg.Files["conf/fak-serve.service"])
 	if !strings.Contains(serveService, "--tp 2 --cluster-peer 169.254.1.2") {
 		t.Errorf("conf/fak-serve.service missing dual_tp2 flags:\n%s", serveService)
+	}
+
+	// Verify verify.sh contains USB4 RoCEv2 and peer checks in dual_tp2 mode
+	verifySh := string(pkg.Files["verify.sh"])
+	if !strings.Contains(verifySh, "USB4 RoCEv2") || !strings.Contains(verifySh, "169.254.1.2") {
+		t.Errorf("verify.sh missing dual_tp2 USB4 RoCEv2 peer checks:\n%s", verifySh)
 	}
 
 	// Test peer IP toggle: when peer is 169.254.1.1, local is 169.254.1.2
@@ -425,8 +432,8 @@ func TestGenerateStrixInstallerPackage_GotchaSettings(t *testing.T) {
 	if !strings.Contains(installSh, "glslc -O --target-env=vulkan1.2 -fshader-stage=comp") {
 		t.Errorf("install.sh missing glslc SPIR-V shader compilation step:\n%s", installSh)
 	}
-	if !strings.Contains(installSh, "1002:1586") || !strings.Contains(installSh, "gfx1151") {
-		t.Errorf("install.sh missing AMD Strix Halo GPU (1002:1586 / gfx1151) auto-detection:\n%s", installSh)
+	if !strings.Contains(installSh, "1002:1586") || !strings.Contains(installSh, "gfx1151") || !strings.Contains(installSh, "Radeon 8060S") {
+		t.Errorf("install.sh missing AMD Strix Halo GPU (Radeon 8060S / 1002:1586 / gfx1151) auto-detection:\n%s", installSh)
 	}
 	if !strings.Contains(installSh, "--engine inkernel --backend vulkan") {
 		t.Errorf("install.sh missing --engine inkernel --backend vulkan injection:\n%s", installSh)
@@ -691,4 +698,109 @@ func TestRunStrixInstallerCLI(t *testing.T) {
 			t.Errorf("expected non-zero exit code for invalid cluster mode, got 0")
 		}
 	})
+}
+
+func TestStrixInstaller_Issue12003_SPIRVAndVulkanDiscovery(t *testing.T) {
+	cfg := DefaultStrixInstallerConfig()
+	pkg, err := GenerateStrixInstallerPackage(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error generating package: %v", err)
+	}
+
+	// 1. SPIR-V compilation step with glslc and bundled SPIR-V fallback in install.sh
+	installSh := string(pkg.Files["install.sh"])
+	if !strings.Contains(installSh, "glslc -O --target-env=vulkan1.2 -fshader-stage=comp") {
+		t.Errorf("install.sh missing glslc SPIR-V compilation step:\n%s", installSh)
+	}
+	if !strings.Contains(installSh, `cp "${SCRIPT_DIR}/spirv"/*.spv /var/lib/fak/spirv/`) {
+		t.Errorf("install.sh missing bundled SPIR-V copy fallback:\n%s", installSh)
+	}
+
+	// 2. Auto-detection of Radeon 8060S / gfx1151 / 1002:1586 setting --engine inkernel --backend vulkan
+	for _, expectedToken := range []string{"1002:1586", "gfx1151", "Radeon 8060S", "--engine inkernel --backend vulkan"} {
+		if !strings.Contains(installSh, expectedToken) {
+			t.Errorf("install.sh missing expected token %q for Strix Halo GPU auto-detection:\n%s", expectedToken, installSh)
+		}
+	}
+
+	// 3. Vulkan SPIR-V directory and runtime-capabilities checks in verify.sh
+	verifySh := string(pkg.Files["verify.sh"])
+	if !strings.Contains(verifySh, "/var/lib/fak/spirv") {
+		t.Errorf("verify.sh missing /var/lib/fak/spirv check:\n%s", verifySh)
+	}
+	if !strings.Contains(verifySh, "runtime-capabilities --backend vulkan") || !strings.Contains(verifySh, "status: available") {
+		t.Errorf("verify.sh missing fak runtime-capabilities --backend vulkan check:\n%s", verifySh)
+	}
+}
+
+func TestStrixInstaller_Issue12004_DualNodeTP2(t *testing.T) {
+	// 1. ClusterMode standalone default: 14 files, no scripts/setup-usb4-rdma.sh
+	defaultCfg := DefaultStrixInstallerConfig()
+	if defaultCfg.ClusterMode != ClusterModeStandalone {
+		t.Errorf("default ClusterMode = %q, want %q", defaultCfg.ClusterMode, ClusterModeStandalone)
+	}
+	standalonePkg, err := GenerateStrixInstallerPackage(defaultCfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := standalonePkg.Files["scripts/setup-usb4-rdma.sh"]; ok {
+		t.Errorf("standalone package should not generate scripts/setup-usb4-rdma.sh")
+	}
+
+	// 2. ClusterMode dual_tp2: 15 files, generates scripts/setup-usb4-rdma.sh
+	tp2Cfg := DefaultStrixInstallerConfig()
+	tp2Cfg.ClusterMode = ClusterModeDualTP2
+	tp2Cfg.ClusterPeerIP = "169.254.1.2"
+	tp2Pkg, err := GenerateStrixInstallerPackage(tp2Cfg)
+	if err != nil {
+		t.Fatalf("unexpected error generating dual_tp2 package: %v", err)
+	}
+
+	rdmaScript, ok := tp2Pkg.Files["scripts/setup-usb4-rdma.sh"]
+	if !ok {
+		t.Fatalf("scripts/setup-usb4-rdma.sh missing from dual_tp2 package")
+	}
+	rdmaStr := string(rdmaScript)
+
+	// Check 8 us interrupt moderation (0x38c00, value 32)
+	for _, token := range []string{"0x38c00", "8 us", "value 32", "nhi_interrupt_moderation"} {
+		if !strings.Contains(rdmaStr, token) {
+			t.Errorf("scripts/setup-usb4-rdma.sh missing interrupt moderation token %q:\n%s", token, rdmaStr)
+		}
+	}
+
+	// Check static link-local IPv4 routing
+	for _, token := range []string{`LOCAL_IP="169.254.1.1"`, `PEER_IP="169.254.1.2"`, `"${LOCAL_IP}/30"`, `"${PEER_IP}/32"`} {
+		if !strings.Contains(rdmaStr, token) {
+			t.Errorf("scripts/setup-usb4-rdma.sh missing link-local routing token %q:\n%s", token, rdmaStr)
+		}
+	}
+
+	// Check peer daemon discovery
+	for _, token := range []string{"peer daemon discovery", "169.254.1.2", "/healthz"} {
+		if !strings.Contains(strings.ToLower(rdmaStr), token) {
+			t.Errorf("scripts/setup-usb4-rdma.sh missing peer discovery token %q:\n%s", token, rdmaStr)
+		}
+	}
+
+	// 3. conf/fak-serve.service --tp 2 and --cluster-peer flags
+	serveService := string(tp2Pkg.Files["conf/fak-serve.service"])
+	if !strings.Contains(serveService, "--tp 2 --cluster-peer 169.254.1.2") {
+		t.Errorf("conf/fak-serve.service missing dual_tp2 flags:\n%s", serveService)
+	}
+
+	// 4. verify.sh checks for USB4 RoCEv2 and peer daemon in dual_tp2 mode
+	verifySh := string(tp2Pkg.Files["verify.sh"])
+	for _, token := range []string{"usb4 rocev2", "169.254.1.2", "peer daemon discovery"} {
+		if !strings.Contains(strings.ToLower(verifySh), token) {
+			t.Errorf("verify.sh missing dual_tp2 verification token %q:\n%s", token, verifySh)
+		}
+	}
+
+	// 5. Unsupported cluster mode returns error
+	invalidCfg := DefaultStrixInstallerConfig()
+	invalidCfg.ClusterMode = "quad_tp4"
+	if _, err := GenerateStrixInstallerPackage(invalidCfg); err == nil {
+		t.Errorf("expected error for unsupported cluster mode, got nil")
+	}
 }

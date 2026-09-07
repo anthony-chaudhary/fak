@@ -495,10 +495,29 @@ if command -v rdma >/dev/null 2>&1; then
   fi
 fi
 
+# 4. Peer daemon discovery
+echo "--> Probing peer daemon discovery at ${PEER_IP}:%d..."
+if ping -c 1 -W 2 "${PEER_IP}" >/dev/null 2>&1; then
+  echo "    Peer node at ${PEER_IP} reachable via ICMP"
+  if command -v curl >/dev/null 2>&1; then
+    if curl -s -f -m 2 "http://${PEER_IP}:%d/healthz" >/dev/null 2>&1; then
+      echo "    Peer daemon discovered at http://${PEER_IP}:%d/healthz [READY]"
+    else
+      echo "    Peer node online; peer daemon at http://${PEER_IP}:%d not yet listening"
+    fi
+  fi
+else
+  echo "    Peer node at ${PEER_IP} not yet reachable (standby until peer cable connected)"
+fi
+
 echo "--> USB4 RoCEv2 dual-node network configuration applied."
 `,
 			cfg.ClusterPeerIP,
 			localIP,
+			cfg.Port,
+			cfg.Port,
+			cfg.Port,
+			cfg.Port,
 		)
 		files["scripts/setup-usb4-rdma.sh"] = []byte(setupUsb4Rdma)
 	}
@@ -557,7 +576,7 @@ else
   echo "    Note: glslc not found or shader sources absent; shaders can be placed in /var/lib/fak/spirv later"
 fi
 
-# 2.6 Auto-detect AMD Strix Halo GPU (1002:1586 / gfx1151)
+# 2.6 Auto-detect AMD Strix Halo GPU (Radeon 8060S / 1002:1586 / gfx1151)
 HAS_STRIX=0
 if [[ -d /sys/bus/pci/devices ]]; then
   for dev in /sys/bus/pci/devices/*; do
@@ -572,7 +591,9 @@ if [[ -d /sys/bus/pci/devices ]]; then
   done
 fi
 if [[ $HAS_STRIX -eq 0 ]] && command -v lspci >/dev/null 2>&1; then
-  if lspci -nn | grep -Ei "1002:1586|gfx1151" >/dev/null 2>&1; then
+  if lspci -nn 2>/dev/null | grep -Ei "1002:1586|gfx1151|8060s|Radeon 8060S" >/dev/null 2>&1; then
+    HAS_STRIX=1
+  elif lspci 2>/dev/null | grep -Ei "Radeon 8060S|8060s|gfx1151" >/dev/null 2>&1; then
     HAS_STRIX=1
   fi
 fi
@@ -592,7 +613,7 @@ echo "--> Installing systemd services..."
 cp "${SCRIPT_DIR}/conf/fak-strix-governor.service" /etc/systemd/system/fak-strix-governor.service
 cp "${SCRIPT_DIR}/conf/fak-serve.service" /etc/systemd/system/fak-serve.service
 if [[ $HAS_STRIX -eq 1 ]]; then
-  echo "--> Detected AMD Strix Halo GPU (1002:1586 / gfx1151); configuring --engine inkernel --backend vulkan"
+  echo "--> Detected AMD Strix Halo GPU (Radeon 8060S / 1002:1586 / gfx1151); configuring --engine inkernel --backend vulkan"
   sed -i 's/serve /serve --engine inkernel --backend vulkan /' /etc/systemd/system/fak-serve.service
 fi
 chmod 0644 /etc/systemd/system/fak-strix-governor.service
@@ -704,6 +725,49 @@ echo "=== Uninstallation complete ==="
 	files["uninstall.sh"] = []byte(uninstallSh)
 
 	// 9. verify.sh
+	dualTP2Verify := ""
+	if cfg.ClusterMode == ClusterModeDualTP2 {
+		dualTP2Verify = fmt.Sprintf(`
+# 4. Check Dual-Node USB4 RoCEv2 & Peer Daemon (ClusterMode: dual_tp2)
+echo "Checking Dual-Node USB4 RoCEv2 & Peer Daemon..."
+USB4_DEV="${USB4_IFACE:-thunderbolt0}"
+echo -n "  - USB4 point-to-point interface (${USB4_DEV}): "
+if ip link show "$USB4_DEV" >/dev/null 2>&1; then
+  echo "[PASS]"
+else
+  echo "[WARN] (interface ${USB4_DEV} not detected)"
+fi
+
+echo -n "  - Peer node reachability (%s): "
+if ping -c 1 -W 2 "%s" >/dev/null 2>&1; then
+  echo "[PASS]"
+else
+  echo "[WARN] (peer node %s not reachable over USB4 link)"
+fi
+
+echo -n "  - Peer daemon discovery (http://%s:%d/healthz): "
+if command -v curl >/dev/null 2>&1; then
+  if curl -s -f -m 2 "http://%s:%d/healthz" >/dev/null 2>&1; then
+    echo "[PASS]"
+  else
+    echo "[WARN] (peer daemon at http://%s:%d/healthz not reachable)"
+  fi
+else
+  echo "[SKIP] (curl not installed)"
+fi
+`,
+			cfg.ClusterPeerIP,
+			cfg.ClusterPeerIP,
+			cfg.ClusterPeerIP,
+			cfg.ClusterPeerIP,
+			cfg.Port,
+			cfg.ClusterPeerIP,
+			cfg.Port,
+			cfg.ClusterPeerIP,
+			cfg.Port,
+		)
+	}
+
 	verifySh := fmt.Sprintf(`#!/usr/bin/env bash
 # Verification and health-check script for fak AMD Strix Halo APU node
 set -euo pipefail
@@ -810,7 +874,7 @@ if command -v systemctl >/dev/null 2>&1; then
     echo "[WARN] (service is $(systemctl is-active fak-serve.service 2>/dev/null || echo 'inactive'))"
   fi
 fi
-
+%s
 if [[ $failures -eq 0 ]]; then
   echo "=== All primary checks completed successfully! ==="
   exit 0
@@ -821,6 +885,7 @@ fi
 `,
 		cfg.Port,
 		cfg.FakBinaryPath,
+		dualTP2Verify,
 	)
 	files["verify.sh"] = []byte(verifySh)
 
