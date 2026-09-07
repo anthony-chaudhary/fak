@@ -158,7 +158,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		// capturing and admitting that same state again only performs a second clone.
 		// Scoped hits from tenant or private scope similarly skip re-admission because
 		// the tenant materialization already exists.
-		skipExactDeviceL1Readmission = ((!scopedLookup) || (scopedLookup && (sourceScope == radixkv.ScopeTenant || sourceScope == radixkv.ScopePrivate))) &&
+		skipExactDeviceL1Readmission = ((!scopedLookup) || (scopedLookup && (sourceScope == radixkv.ScopeTenant || sourceScope == radixkv.ScopeAgent))) &&
 			matchedSnapshot != nil &&
 			matched == len(ids) && cachedLogits != nil && sourceTier == radixkv.SnapshotTierDeviceL1
 	}
