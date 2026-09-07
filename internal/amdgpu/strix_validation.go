@@ -60,8 +60,14 @@ func RunStrixValidation(ctx context.Context, opts StrixValidationOpts) (*StrixVa
 	if opts.RunSubkernels {
 		skResults, skErr := RunSubkernelTests(ctx, target, opts.Subkernels)
 		if skErr != nil {
-			receipt.Failures = append(receipt.Failures, fmt.Sprintf("subkernels error: %v", skErr))
 			receipt.Verdict = "FAIL"
+			receipt.Failures = append(receipt.Failures, fmt.Sprintf("subkernels error: %v", skErr))
+		}
+		if len(opts.Subkernels) > 0 && len(skResults) == 0 {
+			receipt.Verdict = "FAIL"
+			if skErr == nil {
+				receipt.Failures = append(receipt.Failures, "subkernels requested but none were executed")
+			}
 		}
 		receipt.Subkernels = skResults
 		for _, sk := range skResults {
