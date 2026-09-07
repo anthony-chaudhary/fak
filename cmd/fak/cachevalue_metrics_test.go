@@ -144,9 +144,18 @@ func TestRenderCachevalueExposition_Families(t *testing.T) {
 	}
 	// GeneratedAt (2026-07-04T00:00:00Z) drives the timestamp, not `now` (12:00Z).
 	genAt, _ := time.Parse(time.RFC3339, "2026-07-04T00:00:00Z")
-	wantTS := strconv.FormatFloat(float64(genAt.Unix()), 'g', -1, 64)
-	if got := sampleLine(t, out, "fak_cachevalue_generated_timestamp_seconds", ""); !strings.HasSuffix(got, " "+wantTS) {
-		t.Errorf("generated_timestamp = %q, want suffix %q (from GeneratedAt, not now)", got, wantTS)
+	got := sampleLine(t, out, "fak_cachevalue_generated_timestamp_seconds", "")
+	fields := strings.Fields(got)
+	if len(fields) < 2 {
+		t.Fatalf("fak_cachevalue_generated_timestamp_seconds sample line malformed: %q", got)
+	}
+	valStr := fields[1]
+	val, err := strconv.ParseFloat(valStr, 64)
+	if err != nil || math.IsNaN(val) || math.IsInf(val, 0) {
+		t.Fatalf("failed to parse generated_timestamp value %q: %v", valStr, err)
+	}
+	if int64(val) != genAt.Unix() {
+		t.Errorf("generated_timestamp = %v, want %d (from GeneratedAt, not now)", val, genAt.Unix())
 	}
 
 	// Track 1 WITNESSED
@@ -196,6 +205,32 @@ func TestRenderCachevalueExposition_Families(t *testing.T) {
 	// workload label must be the short (<=12 char) hash
 	if got := sampleLine(t, out, "fak_ablation_arm_mean_nanoseconds", `arm="vdso"`); !strings.Contains(got, `workload="9f1701415fb4"`) {
 		t.Errorf("workload label not shortened: %q", got)
+	}
+}
+
+func TestRenderCachevalueExposition_GeneratedAtFallback(t *testing.T) {
+	now := fixedNow(t)
+	wantUnix := now.Unix()
+
+	for _, invalidAt := range []string{"", "invalid-timestamp"} {
+		t.Run("GeneratedAt="+invalidAt, func(t *testing.T) {
+			rep := richReport()
+			rep.GeneratedAt = invalidAt
+			out := renderCachevalueExposition(rep, nil, gatewayusageledger.CompactionReport{}, now)
+
+			got := sampleLine(t, out, "fak_cachevalue_generated_timestamp_seconds", "")
+			fields := strings.Fields(got)
+			if len(fields) < 2 {
+				t.Fatalf("fak_cachevalue_generated_timestamp_seconds sample line malformed: %q", got)
+			}
+			val, err := strconv.ParseInt(fields[1], 10, 64)
+			if err != nil {
+				t.Fatalf("failed to parse generated_timestamp value as integer %q: %v", fields[1], err)
+			}
+			if val != wantUnix {
+				t.Errorf("generated_timestamp = %d, want %d (fallback to now.Unix())", val, wantUnix)
+			}
+		})
 	}
 }
 

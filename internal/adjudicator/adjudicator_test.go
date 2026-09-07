@@ -235,6 +235,133 @@ func TestArgPredicatesAreRestrictOnly(t *testing.T) {
 	}
 }
 
+func TestArgAllowExactAdjudicationEnforcement(t *testing.T) {
+	ctx := context.Background()
+	a := New(Policy{
+		Allow: map[string]bool{"run_shell": true},
+		ArgPredicates: []ArgPredicate{{
+			Tool:   "run_shell",
+			Arg:    "command",
+			Kind:   ArgAllowExact,
+			Glob:   "ls -la",
+			Reason: abi.ReasonPolicyBlock,
+		}},
+	})
+
+	t.Run("exact match", func(t *testing.T) {
+		v := a.Adjudicate(ctx, inlineCall("run_shell", `{"command":"ls -la"}`))
+		if v.Kind != abi.VerdictAllow {
+			t.Fatalf("exact match: got %v/%s, want Allow", v.Kind, abi.ReasonName(v.Reason))
+		}
+	})
+
+	t.Run("near-match prefix", func(t *testing.T) {
+		v := a.Adjudicate(ctx, inlineCall("run_shell", `{"command":"ls -la /tmp"}`))
+		if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonPolicyBlock {
+			t.Fatalf("near-match prefix: got %v/%s, want Deny/POLICY_BLOCK", v.Kind, abi.ReasonName(v.Reason))
+		}
+		wp, ok := v.Payload.(abi.WitnessPayload)
+		if !ok || !strings.Contains(wp.Claim, "run_shell.command allow_exact") {
+			t.Fatalf("bounded witness = %+v, want predicate identity", v.Payload)
+		}
+		if strings.Contains(wp.Claim, "/tmp") {
+			t.Fatalf("bounded witness leaked arg value: %q", wp.Claim)
+		}
+	})
+
+	t.Run("near-match suffix or case", func(t *testing.T) {
+		for _, mismatched := range []string{"LS -LA", "ls -l"} {
+			v := a.Adjudicate(ctx, inlineCall("run_shell", `{"command":"`+mismatched+`"}`))
+			if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonPolicyBlock {
+				t.Fatalf("near-match %q: got %v/%s, want Deny/POLICY_BLOCK", mismatched, v.Kind, abi.ReasonName(v.Reason))
+			}
+		}
+	})
+
+	t.Run("missing argument", func(t *testing.T) {
+		v := a.Adjudicate(ctx, inlineCall("run_shell", `{}`))
+		if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonPolicyBlock {
+			t.Fatalf("missing arg: got %v/%s, want Deny/POLICY_BLOCK", v.Kind, abi.ReasonName(v.Reason))
+		}
+	})
+
+	t.Run("non-string argument", func(t *testing.T) {
+		v := a.Adjudicate(ctx, inlineCall("run_shell", `{"command":123}`))
+		if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonPolicyBlock {
+			t.Fatalf("non-string arg: got %v/%s, want Deny/POLICY_BLOCK", v.Kind, abi.ReasonName(v.Reason))
+		}
+	})
+
+	t.Run("advisory mode", func(t *testing.T) {
+		aAdv := New(Policy{
+			Allow: map[string]bool{"run_shell": true},
+			ArgPredicates: []ArgPredicate{{
+				Tool:     "run_shell",
+				Arg:      "command",
+				Kind:     ArgAllowExact,
+				Glob:     "ls -la",
+				Advisory: true,
+			}},
+		})
+		v := aAdv.Adjudicate(ctx, inlineCall("run_shell", `{"command":"ls -la /tmp"}`))
+		if v.Kind != abi.VerdictAllow {
+			t.Fatalf("advisory mode: got %v/%s, want Allow", v.Kind, abi.ReasonName(v.Reason))
+		}
+		if notes := v.Meta["advisory_violations"]; !strings.Contains(notes, "run_shell.command allow_exact") {
+			t.Fatalf("advisory mode: want advisory note containing %q, got %q", "run_shell.command allow_exact", notes)
+		}
+	})
+
+	t.Run("evalArgPredicates direct", func(t *testing.T) {
+		preds := []ArgPredicate{{
+			Tool:   "run_shell",
+			Arg:    "command",
+			Kind:   ArgAllowExact,
+			Glob:   "ls -la",
+			Reason: abi.ReasonPolicyBlock,
+		}}
+
+		// Exact match
+		if _, denied, _ := evalArgPredicates(preds, "run_shell", map[string]any{"command": "ls -la"}); denied {
+			t.Fatal("expected exact match not to be denied")
+		}
+
+		// Near-match prefix
+		if v, denied, _ := evalArgPredicates(preds, "run_shell", map[string]any{"command": "ls -la /tmp"}); !denied || v.Reason != abi.ReasonPolicyBlock {
+			t.Fatalf("near-match prefix: got denied=%v, reason=%v, want denied=true, reason=POLICY_BLOCK", denied, v.Reason)
+		}
+
+		// Near-match suffix / case
+		for _, mismatched := range []string{"LS -LA", "ls -l"} {
+			if v, denied, _ := evalArgPredicates(preds, "run_shell", map[string]any{"command": mismatched}); !denied || v.Reason != abi.ReasonPolicyBlock {
+				t.Fatalf("near-match %q: got denied=%v, reason=%v, want denied=true, reason=POLICY_BLOCK", mismatched, denied, v.Reason)
+			}
+		}
+
+		// Missing argument
+		if v, denied, _ := evalArgPredicates(preds, "run_shell", map[string]any{}); !denied || v.Reason != abi.ReasonPolicyBlock {
+			t.Fatalf("missing arg: got denied=%v, reason=%v, want denied=true, reason=POLICY_BLOCK", denied, v.Reason)
+		}
+
+		// Non-string argument
+		if v, denied, _ := evalArgPredicates(preds, "run_shell", map[string]any{"command": 123}); !denied || v.Reason != abi.ReasonPolicyBlock {
+			t.Fatalf("non-string arg: got denied=%v, reason=%v, want denied=true, reason=POLICY_BLOCK", denied, v.Reason)
+		}
+
+		// Advisory mode
+		advPreds := []ArgPredicate{{
+			Tool:     "run_shell",
+			Arg:      "command",
+			Kind:     ArgAllowExact,
+			Glob:     "ls -la",
+			Advisory: true,
+		}}
+		if _, denied, notes := evalArgPredicates(advPreds, "run_shell", map[string]any{"command": "ls -la /tmp"}); denied || len(notes) == 0 || !strings.Contains(notes[0], "run_shell.command allow_exact") {
+			t.Fatalf("advisory mode: got denied=%v, notes=%v", denied, notes)
+		}
+	})
+}
+
 // Unit 19: every reason this package emits is in the CLOSED core vocabulary —
 // ReasonName never falls through to the REASON_<n> forward-compat rendering.
 func TestReasonsAreInClosedVocab(t *testing.T) {
