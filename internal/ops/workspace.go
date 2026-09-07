@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/processalive"
 	"github.com/anthony-chaudhary/fak/internal/treedoctor"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
@@ -28,8 +28,9 @@ type WorkspaceHealingResult struct {
 
 // WorkspaceManager oversees dead-PID lock clearance, cold worktree pruning, and repo maintenance.
 type WorkspaceManager struct {
-	RepoRoot     string
-	ProcessAlive func(int) bool
+	RepoRoot             string
+	ProcessAlive         func(int) bool
+	WorkerWorktreeRunner func(string, []string) (int, string)
 }
 
 // NewWorkspaceManager creates a WorkspaceManager.
@@ -41,14 +42,7 @@ func NewWorkspaceManager(repoRoot string) *WorkspaceManager {
 }
 
 func defaultProcessAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
+	return processalive.Check(pid)
 }
 
 func defaultTreeDoctorRunner(ctx context.Context, dir string, args ...string) (string, int, error) {
@@ -243,7 +237,11 @@ func (wm *WorkspaceManager) SweepLocksAndWorktrees(ctx context.Context, dryRun b
 		return false
 	}
 
-	cwList := workerworktree.ColdReapList(wm.RepoRoot, defaultWorkerWorktreeRunner, now, 30*time.Minute, oracle)
+	gitRunner := wm.WorkerWorktreeRunner
+	if gitRunner == nil {
+		gitRunner = defaultWorkerWorktreeRunner
+	}
+	cwList := workerworktree.ColdReapList(wm.RepoRoot, gitRunner, now, 30*time.Minute, oracle)
 	for _, cw := range cwList {
 		if cw.Eligible && !cw.HeldByWork {
 			if !dryRun {

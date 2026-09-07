@@ -190,3 +190,135 @@ func TestSweepPreservesActiveWorkerWorktrees(t *testing.T) {
 		t.Errorf("expected %s in res.WorktreesPruned: %v", deadBase, res.WorktreesPruned)
 	}
 }
+
+func TestSweepPreservesWorktreeHoldingUnlandedWork(t *testing.T) {
+	repo := t.TempDir()
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmdArgs := append([]string{"-c", "user.name=Test", "-c", "user.email=test@example.com"}, args...)
+		cmd := exec.Command("git", cmdArgs...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed in %s: %v\n%s", args, dir, err, out)
+		}
+	}
+
+	runGit(repo, "init", "-q")
+	runGit(repo, "commit", "-q", "--allow-empty", "-m", "initial commit")
+
+	scratchDir := filepath.Join(repo, "_scratch")
+	if err := os.MkdirAll(scratchDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	wtDeadClean := filepath.Join(scratchDir, workerworktree.DirName("bench", "deadclean01"))
+	wtDeadUnlanded := filepath.Join(scratchDir, workerworktree.DirName("agent", "deadunlanded01"))
+	wtLiveLease := filepath.Join(scratchDir, workerworktree.DirName("gateway", "livelease01"))
+
+	runGit(repo, "worktree", "add", "--detach", wtDeadClean)
+	runGit(repo, "worktree", "add", "--detach", wtDeadUnlanded)
+	runGit(repo, "worktree", "add", "--detach", wtLiveLease)
+
+	oldTime := time.Now().Add(-2 * time.Hour)
+
+	// 1. wtDeadClean: dead PID, stale heartbeat, no active lease, clean working tree -> should be pruned
+	if err := workerworktree.WriteWorkerLease(wtDeadClean, workerworktree.WorkerLease{
+		PID:         99999999,
+		CreatedAt:   oldTime,
+		HeartbeatTS: oldTime,
+	}); err != nil {
+		t.Fatalf("WriteWorkerLease wtDeadClean: %v", err)
+	}
+
+	// 2. wtDeadUnlanded: dead PID, stale heartbeat, but carries uncommitted/unlanded file -> must be preserved
+	if err := workerworktree.WriteWorkerLease(wtDeadUnlanded, workerworktree.WorkerLease{
+		PID:         99999999,
+		CreatedAt:   oldTime,
+		HeartbeatTS: oldTime,
+	}); err != nil {
+		t.Fatalf("WriteWorkerLease wtDeadUnlanded: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wtDeadUnlanded, "unlanded_feature.go"), []byte("package unlanded\n"), 0o644); err != nil {
+		t.Fatalf("write unlanded file: %v", err)
+	}
+
+	// 3. wtLiveLease: dead PID in lease.json, but active lease on lane "gateway" in leaseref -> must be preserved
+	if err := workerworktree.WriteWorkerLease(wtLiveLease, workerworktree.WorkerLease{
+		PID:         99999999,
+		CreatedAt:   oldTime,
+		HeartbeatTS: oldTime,
+	}); err != nil {
+		t.Fatalf("WriteWorkerLease wtLiveLease: %v", err)
+	}
+	if _, err := leaseref.NewInDir(repo).Acquire(context.Background(), leaseref.Record{
+		ID:         "resolve-gateway",
+		TTLSeconds: 3600,
+		AcquiredAt: time.Now().Unix(),
+	}); err != nil {
+		t.Fatalf("leaseref Acquire: %v", err)
+	}
+
+	// Age all worktrees past the 30-minute floor
+	for _, p := range []string{wtDeadClean, wtDeadUnlanded, wtLiveLease} {
+		if err := os.Chtimes(p, oldTime, oldTime); err != nil {
+			t.Fatalf("chtimes %s: %v", p, err)
+		}
+	}
+
+	wm := NewWorkspaceManager(repo)
+	wm.ProcessAlive = func(pid int) bool {
+		return false
+	}
+
+	res, err := wm.SweepLocksAndWorktrees(context.Background(), false)
+	if err != nil {
+		t.Fatalf("SweepLocksAndWorktrees: %v", err)
+	}
+
+	// wtDeadUnlanded MUST be preserved because it holds unlanded work
+	if _, err := os.Stat(wtDeadUnlanded); err != nil {
+		t.Errorf("expected worktree holding unlanded work (%s) to be preserved, stat err: %v", wtDeadUnlanded, err)
+	}
+
+	// wtLiveLease MUST be preserved because it has an active lease
+	if _, err := os.Stat(wtLiveLease); err != nil {
+		t.Errorf("expected worktree with active lease (%s) to be preserved, stat err: %v", wtLiveLease, err)
+	}
+
+	// wtDeadClean MUST be reaped
+	if _, err := os.Stat(wtDeadClean); !os.IsNotExist(err) {
+		t.Errorf("expected clean dead worktree (%s) to be reaped, stat err: %v", wtDeadClean, err)
+	}
+
+	cleanBase := filepath.Base(wtDeadClean)
+	unlandedBase := filepath.Base(wtDeadUnlanded)
+	liveBase := filepath.Base(wtLiveLease)
+
+	foundClean := false
+	for _, p := range res.WorktreesPruned {
+		if p == cleanBase {
+			foundClean = true
+		}
+		if p == unlandedBase {
+			t.Errorf("unlanded worktree %s was unexpectedly pruned: %v", unlandedBase, res.WorktreesPruned)
+		}
+		if p == liveBase {
+			t.Errorf("live lease worktree %s was unexpectedly pruned: %v", liveBase, res.WorktreesPruned)
+		}
+	}
+	if !foundClean {
+		t.Errorf("expected %s in res.WorktreesPruned: %v", cleanBase, res.WorktreesPruned)
+	}
+}
+
+func TestDefaultProcessAlive(t *testing.T) {
+	if !defaultProcessAlive(os.Getpid()) {
+		t.Errorf("expected current process PID %d to be alive", os.Getpid())
+	}
+	if defaultProcessAlive(0) || defaultProcessAlive(-1) {
+		t.Errorf("expected non-positive PID to be dead")
+	}
+	if defaultProcessAlive(99999999) {
+		t.Errorf("expected non-existent PID 99999999 to be dead")
+	}
+}
