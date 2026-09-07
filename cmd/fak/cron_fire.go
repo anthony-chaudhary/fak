@@ -19,6 +19,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -52,14 +54,19 @@ const (
 
 // cronFireRecord is one witnessed cron fire in the append-only ledger. Slot is the
 // tick quantized to its schedule boundary (the CAS dedup key with Job); Outcome
-// partitions every recorded tick into exactly one queryable class.
+// partitions every recorded tick into exactly one queryable class. Rows carry
+// a monotonic Seq, PrevHash, and SHA-256 Hash forming an unbroken, tamper-evident
+// hash chain (#2927).
 type cronFireRecord struct {
 	Schema   string `json:"schema"`
+	Seq      uint64 `json:"seq,omitempty"`
 	Job      string `json:"job"`
 	Slot     string `json:"slot"`       // RFC3339 UTC, tick truncated to the interval
 	Interval int64  `json:"interval_s"` // cadence in seconds (0 = one-shot)
-	Outcome  string `json:"outcome"`    // cronOutcomeFired | cronOutcomeDeduped
+	Outcome  string `json:"outcome"`    // cronOutcomeFired | cronOutcomeDeduped | ...
 	FiredAt  string `json:"fired_at"`   // RFC3339 UTC witnessed wall-clock of the tick
+	PrevHash string `json:"prev_hash,omitempty"`
+	Hash     string `json:"hash,omitempty"`
 }
 
 // cronJobAudit is the per-job rollup `fak cron audit` reports: distinct slots that
@@ -254,9 +261,66 @@ func cronReadFires(path string) ([]cronFireRecord, error) {
 	}), nil
 }
 
+// cronHashFireRecord computes the SHA-256 hash over the canonical JSON encoding of r
+// with Hash zeroed, ensuring deterministic, tamper-evident hash chaining (#2927).
+func cronHashFireRecord(r cronFireRecord) string {
+	r.Hash = ""
+	b, err := json.Marshal(r)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// cronVerifyFireChain validates that all records in path form an unbroken,
+// tamper-evident SHA-256 hash chain from genesis to tail (#2927).
+func cronVerifyFireChain(path string) (int, bool, error) {
+	fires, err := cronReadFires(path)
+	if err != nil {
+		return 0, false, err
+	}
+	if len(fires) == 0 {
+		return 0, true, nil
+	}
+	for i, r := range fires {
+		expectedHash := cronHashFireRecord(r)
+		if r.Hash != expectedHash {
+			return i, false, fmt.Errorf("record %d: hash mismatch: got %s, want %s", i, r.Hash, expectedHash)
+		}
+		if i == 0 {
+			if r.PrevHash != "" {
+				return i, false, fmt.Errorf("record 0 (genesis): prev_hash must be empty, got %s", r.PrevHash)
+			}
+			if r.Seq != 1 {
+				return i, false, fmt.Errorf("record 0: seq must be 1, got %d", r.Seq)
+			}
+		} else {
+			if r.PrevHash != fires[i-1].Hash {
+				return i, false, fmt.Errorf("record %d: prev_hash %s does not match previous hash %s", i, r.PrevHash, fires[i-1].Hash)
+			}
+			if r.Seq != fires[i-1].Seq+1 {
+				return i, false, fmt.Errorf("record %d: seq %d does not follow %d", i, r.Seq, fires[i-1].Seq)
+			}
+		}
+	}
+	return len(fires), true, nil
+}
+
 // cronAppendFire appends one fire row as a JSONL line, creating the ledger (and its
-// dir) on first write.
+// dir) on first write. It automatically stamps Seq, PrevHash, and Hash if Hash is empty,
+// ensuring the ledger forms an unbroken hash chain (#2927).
 func cronAppendFire(path string, rec cronFireRecord) error {
+	if rec.Hash == "" {
+		fires, _ := cronReadFires(path)
+		rec.Seq = uint64(len(fires) + 1)
+		if len(fires) > 0 {
+			rec.PrevHash = fires[len(fires)-1].Hash
+		} else {
+			rec.PrevHash = ""
+		}
+		rec.Hash = cronHashFireRecord(rec)
+	}
 	line, err := json.Marshal(rec)
 	if err != nil {
 		return err

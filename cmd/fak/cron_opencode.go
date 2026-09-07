@@ -187,14 +187,12 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		}
 	}
 
-	// Child process execution with timeout context
-	var ctx context.Context
-	var cancel context.CancelFunc
-	if opts.Timeout > 0 {
-		ctx, cancel = context.WithTimeout(context.Background(), opts.Timeout)
-	} else {
-		ctx, cancel = context.WithCancel(context.Background())
+	// Child process execution with timeout context bounded by hard-interrupt ceiling (#2927)
+	effectiveTimeout := opts.Timeout
+	if effectiveTimeout <= 0 || effectiveTimeout > CronHardInterruptCeiling {
+		effectiveTimeout = CronHardInterruptCeiling
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), effectiveTimeout)
 	defer cancel()
 
 	cmdName := opts.Command[0]
