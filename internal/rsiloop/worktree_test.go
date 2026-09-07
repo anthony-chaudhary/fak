@@ -194,13 +194,22 @@ func TestGitLockContention_IsTransient(t *testing.T) {
 		if !IsTransient(err) {
 			t.Errorf("IsTransient(errors.New(%q)) = false, want true", msg)
 		}
+		if !IsTransientMeasureError(err) {
+			t.Errorf("IsTransientMeasureError(errors.New(%q)) = false, want true", msg)
+		}
 		gle := &GitLockError{Err: err, Msg: msg}
 		if !IsTransient(gle) {
 			t.Errorf("IsTransient(&GitLockError{%q}) = false, want true", msg)
 		}
+		if !IsTransientMeasureError(gle) {
+			t.Errorf("IsTransientMeasureError(&GitLockError{%q}) = false, want true", msg)
+		}
 		wrapped := NewTransientMeasureError(gle)
 		if !IsTransient(wrapped) {
 			t.Errorf("IsTransient(NewTransientMeasureError(&GitLockError{%q})) = false, want true", msg)
+		}
+		if !IsTransientMeasureError(wrapped) {
+			t.Errorf("IsTransientMeasureError(NewTransientMeasureError(&GitLockError{%q})) = false, want true", msg)
 		}
 	}
 
@@ -208,7 +217,13 @@ func TestGitLockContention_IsTransient(t *testing.T) {
 	if IsTransient(nonLock) {
 		t.Errorf("IsTransient(nonLock) = true, want false")
 	}
+	if IsTransientMeasureError(nonLock) {
+		t.Errorf("IsTransientMeasureError(nonLock) = true, want false")
+	}
 	if IsTransient(nil) {
 		t.Errorf("IsTransient(nil) = true, want false")
+	}
+	if IsTransientMeasureError(nil) {
+		t.Errorf("IsTransientMeasureError(nil) = true, want false")
 	}
 }

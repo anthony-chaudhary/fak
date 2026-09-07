@@ -98,6 +98,7 @@ func NewWorktreeHarness(cfg WorktreeConfig) Harness {
 		MaxTransientRetries:               cfg.MaxTransientRetries,
 		TransientMeasurementRecoveryLimit: cfg.MaxTransientRetries,
 		TransientBudget:                   cfg.TransientBudget,
+		IsTransientMeasureError:           IsTransient,
 		BaselineMetric: func() (float64, string, error) {
 			sha, err := resolvePinned()
 			if err != nil {

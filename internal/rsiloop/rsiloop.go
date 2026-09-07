@@ -109,6 +109,7 @@ func NewTransientMeasureError(err error) error {
 // IsTransientMeasureError reports whether err represents a transient measurement
 // error. It unwraps err and recognizes:
 //   - *TransientMeasureError
+//   - git lock contention (IsGitLockError)
 //   - any error implementing TransientMeasure() bool that returns true
 //   - any error implementing IsTransient() bool that returns true
 //   - any error implementing Transient() bool that returns true
@@ -118,6 +119,9 @@ func IsTransientMeasureError(err error) bool {
 	}
 	var tme *TransientMeasureError
 	if errors.As(err, &tme) {
+		return true
+	}
+	if IsGitLockError(err) {
 		return true
 	}
 	type transientMeasurer interface {
