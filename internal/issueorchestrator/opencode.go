@@ -45,8 +45,9 @@ func FormatOpencodePrompt(issue Issue) string {
 
 	b.WriteString("\nInstructions:\n")
 	b.WriteString("- Strictly adhere to the assigned lane and boundary paths. Do not touch root files (e.g. go.mod, go.sum, dos.toml) or files in other packages.\n")
+	b.WriteString("- Coordinate substantive work through parallel subagents by default via the 'task' tool (worker, researcher, deep-reason, cross-validator).\n")
 	b.WriteString("- Deliverable: Deliver a clean defect fix or feature implementation along with a deterministic reproduction/regression unit test.\n")
-	b.WriteString("- Provide a 3-line receipt upon completion: status/verdict, changed files, and test output summary.\n")
+	b.WriteString("- Provide a 3-line receipt upon completion: status/verdict, changed files, and test output summary, and post directly to the GitHub issue with gh issue comment.\n")
 
 	return b.String()
 }
@@ -83,6 +84,9 @@ func BuildOpencodeChat(issue Issue, opts OpencodeChatOptions) OpencodeChat {
 	}
 	if opts.Agent != "" {
 		cmd = append(cmd, "--agent", opts.Agent)
+	}
+	if opts.Variant != "" {
+		cmd = append(cmd, "--variant", opts.Variant)
 	}
 	if opts.WorktreeDir != "" {
 		cmd = append(cmd, "--dir", opts.WorktreeDir)

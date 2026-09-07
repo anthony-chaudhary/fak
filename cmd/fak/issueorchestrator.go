@@ -78,6 +78,7 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 	opencodeCommands := fs.Bool("opencode-commands", false, "include ready-to-run opencode commands in JSON/Markdown plan")
 	model := fs.String("model", "", "model for OpenCode chats (-m)")
 	agent := fs.String("agent", "", "agent profile for OpenCode chats (--agent)")
+	variant := fs.String("variant", "high", "reasoning effort variant for OpenCode chats (--variant, default: high)")
 	interactive := fs.Bool("interactive", false, "spawn interactive chat mode (-i) instead of headless run")
 	worktree := fs.Bool("worktree", false, "prepare detached worker worktrees for each spawned chat")
 	dryRun := fs.Bool("dry-run", false, "preview OpenCode chat spawn commands without executing")
@@ -153,6 +154,7 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 		waveOpts.OpencodeOptions = issueorchestrator.OpencodeChatOptions{
 			Model:       *model,
 			Agent:       *agent,
+			Variant:     *variant,
 			Interactive: *interactive,
 			AutoApprove: true,
 			PrintLogs:   true,
@@ -279,6 +281,7 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 			chatOpts := issueorchestrator.OpencodeChatOptions{
 				Model:       *model,
 				Agent:       *agent,
+				Variant:     *variant,
 				Interactive: *interactive,
 				WorktreeDir: wtDir,
 				AutoApprove: true,

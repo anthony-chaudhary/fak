@@ -131,6 +131,7 @@ type WavePlanOptions struct {
 type OpencodeChatOptions struct {
 	Model       string   `json:"model,omitempty"`
 	Agent       string   `json:"agent,omitempty"`
+	Variant     string   `json:"variant,omitempty"`
 	Interactive bool     `json:"interactive,omitempty"`
 	WorktreeDir string   `json:"worktree_dir,omitempty"`
 	AutoApprove bool     `json:"auto_approve,omitempty"`
