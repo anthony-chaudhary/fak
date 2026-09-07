@@ -323,6 +323,5 @@ fak manage --compact-history-budget 48000 -- claude
 > frozen `fak cachevalue report` snapshot and its arithmetic invariants by
 > `tools/docnumbers/fable5-more-usage-for-free.json`, checked hermetically in
 > `make cachedoc-numbers-lint`. When the window has moved on, refresh them with
-> the `/refresh-cachedoc-numbers` skill (or `python3
-> tools/cachedoc_numbers_audit.py --refresh`) rather than editing the numbers by
+> the `/refresh-cachedoc-numbers` skill (or `fak cachedoc-numbers-audit --refresh`) rather than editing the numbers by
 > hand — see `tools/docnumbers/README.md`.

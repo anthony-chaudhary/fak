@@ -1,6 +1,6 @@
 ---
 name: refresh-cachedoc-numbers
-description: Refresh the recent-operational cachevalue numbers in a guarded doc (e.g. docs/integrations/fable5-more-usage-for-free.md) when this-week's telemetry has moved on. Re-derives the frozen snapshots from live `fak cachevalue report`, reconciles the doc's rendered numbers + snapshot_date to the fresh capture, and re-runs the hermetic audit until it is clean. The audit (tools/cachedoc_numbers_audit.py, gated in `make cachedoc-numbers-lint`) binds every rendered number to a committed snapshot field and checks the arithmetic invariants the doc asserts — this skill is the maintenance loop that keeps that. Use when this named workflow matches the task.
+description: Refresh the recent-operational cachevalue numbers in a guarded doc (e.g. docs/integrations/fable5-more-usage-for-free.md) when this-week's telemetry has moved on. Re-derives the frozen snapshots from live `fak cachevalue report`, reconciles the doc's rendered numbers + snapshot_date to the fresh capture, and re-runs the hermetic audit until it is clean. The audit (fak cachedoc-numbers-audit / internal/cachedocaudit, gated in `make cachedoc-numbers-lint`) binds every rendered number to a committed snapshot field and checks the arithmetic invariants the doc asserts — this skill is the maintenance loop that keeps that. Use when this named workflow matches the task.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Edit, Grep, Glob
@@ -25,14 +25,14 @@ making the text match it.
 
 1. **See what's guarded and whether it's stale.**
    ```
-   python3 tools/cachedoc_numbers_audit.py
+   fak cachedoc-numbers-audit
    ```
    A `WARN [staleness]` line, or a `FAIL`, tells you which manifest needs a
    refresh. `Read` that manifest (`tools/docnumbers/<stem>.json`) and its doc.
 
 2. **Re-derive the frozen snapshots from live `fak`.**
    ```
-   python3 tools/cachedoc_numbers_audit.py --refresh   # add --manifest <stem>.json to scope it
+   fak cachedoc-numbers-audit --refresh   # add --manifest <stem>.json to scope it
    ```
    Run this **from the repo root**, where `fak` has its data context. It rewrites
    the snapshots under `snapshot_dir` for every source that has a `cmd`, and
@@ -54,8 +54,8 @@ making the text match it.
 
 4. **Prove it.**
    ```
-   python3 tools/cachedoc_numbers_audit_test.py    # contract still holds
-   python3 tools/cachedoc_numbers_audit.py         # the corpus is clean
+   go test -v ./internal/cachedocaudit/...    # contract still holds
+   fak cachedoc-numbers-audit                 # the corpus is clean
    ```
    Optionally `--live` to confirm the cited fields still exist in fresh output.
    Both must exit 0 with no FAIL before you commit.

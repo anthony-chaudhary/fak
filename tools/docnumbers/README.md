@@ -3,7 +3,7 @@
 The checking layer for **recent-operational cachevalue docs** — pages that quote
 this-week's `fak cachevalue report` fleet/dev telemetry (e.g.
 `docs/integrations/fable5-more-usage-for-free.md`). Audited by
-`tools/cachedoc_numbers_audit.py`, gated in `make cachedoc-numbers-lint`.
+`fak cachedoc-numbers-audit` (or `internal/cachedocaudit`), gated in `make cachedoc-numbers-lint`.
 
 ## Why this exists (and where the line is)
 
@@ -111,7 +111,7 @@ authority for values. `--live` SKIPs cleanly (exit 0) when `fak` is absent.
    existing ones). `--refresh` (below) automates this for cmd-bearing sources.
 2. Write `<stem>.json` binding each rendered number to its snapshot field, and
    add the sums/formulas the doc asserts as invariants.
-3. `python3 tools/cachedoc_numbers_audit.py` until clean. Add the manifest,
+3. `fak cachedoc-numbers-audit` until clean. Add the manifest,
    snapshots, and doc in the same commit.
 
 ## Refreshing the numbers
@@ -119,9 +119,9 @@ authority for values. `--live` SKIPs cleanly (exit 0) when `fak` is absent.
 When the doc's window has moved on and the numbers should be updated:
 
 ```
-python3 tools/cachedoc_numbers_audit.py --refresh   # regenerate snapshots from live fak
+fak cachedoc-numbers-audit --refresh   # regenerate snapshots from live fak
 # → edit the doc to match, bump snapshot_date, then:
-python3 tools/cachedoc_numbers_audit.py             # audit until clean
+fak cachedoc-numbers-audit             # audit until clean
 ```
 
 `--refresh` must run from the repo root where `fak` has its data context; it
