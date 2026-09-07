@@ -692,7 +692,7 @@ func VerifyOpenCodePlugin(root string) error {
 			return fmt.Errorf("opencode plugin %s missing %s (%q)", path, req.desc, req.pattern)
 		}
 	}
-	return nil
+	return verifyOpenCodeGrep(root)
 }
 
 // SyncOpenCodePlugin writes the canonical dos-proof-guard.js plugin into .opencode/plugins/
@@ -701,6 +701,9 @@ func SyncOpenCodePlugin(root string) error {
 	path := filepath.Join(root, filepath.FromSlash(OpenCodePluginPath))
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("create opencode plugin dir: %w", err)
+	}
+	if err := syncOpenCodeGrep(root); err != nil {
+		return err
 	}
 	if err := os.WriteFile(path, []byte(DefaultOpenCodePlugin), 0644); err != nil {
 		return fmt.Errorf("write opencode plugin: %w", err)
@@ -844,22 +847,33 @@ export default async function dosProofGuardPlugin({ client, directory }) {
     },
     "tool.execute.after": async (input, output) => {
       const tool = input?.tool || "";
-      if (mutations.has(tool)) {
+      if (tool === "edit" || tool === "write" || tool === "apply_patch" || mutations.has(tool)) {
         fileModifiedCount++;
-        const reminder = "\n\n[dos-proof-guard] Code modified. On-device proof required before completion:\n" +
+        let reminder = "\n\n[dos-proof-guard] Code modified. On-device proof required before completion:\n" +
           "1. Run tests: .\\test.ps1 ./internal/<pkg>/... -> CLAIM_TEST_GREEN\n" +
           "2. DOS commit audit: dos commit-audit HEAD -> diff-witnessed\n" +
           "3. Spawn cross-validator subagent to adversarial-audit the diff\n" +
           "4. Auto-ticket follow-ons/edge-cases by default (gh issue create / fak issue fanout)\n";
 
+        const files = mutationPaths(tool, input?.args || output?.args);
+        const hasHardware = files.some((f) => typeof f === "string" && (f.includes("internal/compute") || f.includes("internal/amdgpu") || f.includes("vulkan") || f.includes("strix")));
+        if (hasHardware) {
+          reminder += "\n[dos-proof-guard] Halo-related compute/hardware code modified. Physical hardware validation required:\n" +
+            "- Run ` + "`" + `fak-dev amd-strix-probe` + "`" + ` early to discover the LAN AMD Strix Halo and choose a bounded device correctness witness.\n" +
+            "- Hold an exclusive lease across the entire baseline/candidate performance comparison.\n" +
+            "- Validate on device: fak validate --strix --ablate=none\n";
+        }
+
         if (output && typeof output === "object") {
-          if (typeof output.content === "string") {
+          if (typeof output.output === "string") {
+            output.output += reminder;
+          } else if (typeof output.content === "string") {
             output.content += reminder;
           } else if (Array.isArray(output.content)) {
             output.content.push({ type: "text", text: reminder });
           }
         }
-        // Direct console.log(reminder) omitted: keep unencoded notices out of stdout
+        // Direct console logging of reminder omitted: keep unencoded notices out of stdout
         // during --format json runs while preserving structured tool-output delivery above.
       }
     },

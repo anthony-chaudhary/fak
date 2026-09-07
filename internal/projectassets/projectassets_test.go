@@ -1034,12 +1034,16 @@ func TestOpenCodePluginWindowsExtensionAndTimeout(t *testing.T) {
 		strings.Contains(DefaultOpenCodePlugin, `if (tool === 'edit' || tool === 'write')`) {
 		t.Fatal("DefaultOpenCodePlugin tool.execute.after omits apply_patch")
 	}
-	if !strings.Contains(DefaultOpenCodePlugin, "mutations.has(tool)") &&
-		!strings.Contains(DefaultOpenCodePlugin, "apply_patch") {
+	if !strings.Contains(DefaultOpenCodePlugin, "apply_patch") {
 		t.Fatal("DefaultOpenCodePlugin tool.execute.after missing apply_patch handling")
 	}
-	if strings.Contains(DefaultOpenCodePlugin, "console.log(reminder);") {
-		t.Fatal("DefaultOpenCodePlugin must not execute console.log(reminder)")
+	if !strings.Contains(DefaultOpenCodePlugin, `tool === "apply_patch"`) &&
+		!strings.Contains(DefaultOpenCodePlugin, `tool === 'apply_patch'`) &&
+		!strings.Contains(DefaultOpenCodePlugin, "mutations.has(tool)") {
+		t.Fatal("DefaultOpenCodePlugin tool.execute.after missing apply_patch interceptor")
+	}
+	if strings.Contains(DefaultOpenCodePlugin, "console.log") {
+		t.Fatal("DefaultOpenCodePlugin must contain zero console.log statements")
 	}
 
 	// Also verify the disk asset .opencode/plugins/dos-proof-guard.js
@@ -1071,11 +1075,15 @@ func TestOpenCodePluginWindowsExtensionAndTimeout(t *testing.T) {
 		strings.Contains(content, `if (tool === 'edit' || tool === 'write')`) {
 		t.Fatal("disk plugin tool.execute.after omits apply_patch")
 	}
-	if !strings.Contains(content, "mutations.has(tool)") &&
-		!strings.Contains(content, "apply_patch") {
+	if !strings.Contains(content, "apply_patch") {
 		t.Fatal("disk plugin tool.execute.after missing apply_patch handling")
 	}
-	if strings.Contains(content, "console.log(reminder);") {
-		t.Fatal("disk plugin must not execute console.log(reminder)")
+	if !strings.Contains(content, `tool === "apply_patch"`) &&
+		!strings.Contains(content, `tool === 'apply_patch'`) &&
+		!strings.Contains(content, "mutations.has(tool)") {
+		t.Fatal("disk plugin tool.execute.after missing apply_patch interceptor")
+	}
+	if strings.Contains(content, "console.log") {
+		t.Fatal("disk plugin must contain zero console.log statements")
 	}
 }
