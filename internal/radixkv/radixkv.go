@@ -150,7 +150,10 @@ func (p EvictionPolicy) String() string {
 // Tree is a RadixAttention prefix cache: a radix tree of token sequences with
 // longest-prefix matching, an LRU token budget, and reference counting.
 type Tree struct {
-	root *node
+	maxCPUCacheBytes   int64
+	cpuCacheBypasses   int64
+	cpuCacheLastBypass string
+	root               *node
 	// nsRoots holds the VIRTUAL PER-NAMESPACE ROOTS that give node identity the
 	// (tokens, nsKey) shape SGLang's RadixKey does (#3889): a Lookup/Insert under
 	// namespace ns walks from nsRoots[ns] (root itself for the default "" namespace),
@@ -486,7 +489,8 @@ func (t *Tree) split(parent, child *node, oi int) *node {
 		hits:     child.hits,
 		chunkID:  child.chunkID,
 	}
-	if child.kv != nil {
+	if child.kv != nil && child.kv.CanEvict() == nil &&
+		t.cpuCacheCanClone(child.kv) {
 		mid.kv = truncatePrefix(child.kv, mid.plen)
 	}
 	child.key = append([]int(nil), child.key[oi:]...)
@@ -750,14 +754,20 @@ func (t *Tree) insertWithLogitsAndChunk(boundary *node, suffix []int, kv *model.
 		return boundary, false
 	}
 	if len(suffix) == 0 {
-		if logits != nil {
-			boundary.logits = append([]float32(nil), logits...)
+		if logits != nil && boundary.kv != nil {
+			if !t.makeCPUCacheRoom(cpuLogitsBytes(len(logits)), cpuLogitsBytes(cap(boundary.logits)), boundary) {
+				return boundary, false
+			}
+			boundary.logits = copyCPULogits(logits)
 		}
 		if chunkID != 0 {
 			boundary.chunkID = chunkID
 		}
 		t.noteAdmissionRecovery(keyHash)
 		return boundary, true // already fully cached; keep the boundary lease for the caller to Done
+	}
+	if t.maxCPUCacheBytes > 0 && !t.makeCPUCacheRoom(cacheByteSum(kv.OwnedPayloadBytes(), cpuLogitsBytes(len(logits))), 0, boundary) {
+		return boundary, false
 	}
 	leaf := t.attachLeafWithChunk(boundary, suffix, kv, logits, stamp, chunkID)
 	leaf.refs++ // lease the in-flight request's own leaf...
@@ -779,6 +789,18 @@ func (t *Tree) attachLeaf(boundary *node, suffix []int, kv *model.KVCache, logit
 }
 
 func (t *Tree) attachLeafWithChunk(boundary *node, suffix []int, kv *model.KVCache, logits []float32, lastUsed uint64, chunkID int) *node {
+	room := true
+	if t.maxCPUCacheBytes > 0 {
+		incoming := cacheByteSum(kv.OwnedPayloadBytes(), cpuLogitsBytes(len(logits)))
+		if lastUsed == warmRecency {
+			room = t.cpuCacheRoomWithoutEviction(incoming)
+		} else {
+			room = t.makeCPUCacheRoom(incoming, 0, boundary)
+		}
+	}
+	if !room {
+		kv, logits = nil, nil
+	}
 	// Thrash probe (#3393): the new leaf's full path is (root→boundary)+suffix — if that
 	// exact key was just evicted, this attach is the re-insert that proves the eviction
 	// premature. Covers both demand Insert and WarmInsert; a Lookup-consumed entry is
@@ -791,7 +813,7 @@ func (t *Tree) attachLeafWithChunk(boundary *node, suffix []int, kv *model.KVCac
 		parent:   boundary,
 		children: map[int]*node{},
 		kv:       kv,
-		logits:   append([]float32(nil), logits...),
+		logits:   copyCPULogits(logits),
 		plen:     boundary.plen + len(s),
 		lastUsed: lastUsed,
 		chunkID:  chunkID,
@@ -1100,6 +1122,10 @@ func truncatePrefix(c *model.KVCache, L int) *model.KVCache {
 
 // Stats is a snapshot of the cache's structural state for reporting.
 type Stats struct {
+	CPUCacheBytes              int64        `json:"cpu_cache_bytes"`
+	MaxCPUCacheBytes           int64        `json:"max_cpu_cache_bytes"`
+	CPUCacheBypasses           int64        `json:"cpu_cache_bypasses"`
+	CPUCacheLastBypass         string       `json:"cpu_cache_last_bypass,omitempty"`
 	Tokens                     int          // total cached tokens (Σ edge lengths) — the LRU-budget metric
 	PrefixTokens               int          // Σ node.plen over nodes holding a kv — TRUE resident KV positions
 	Nodes                      int          // non-root nodes
@@ -1238,6 +1264,10 @@ func (t *Tree) Stats() Stats {
 		}
 	}
 	s := Stats{
+		CPUCacheBytes:              t.cpuCacheBytes(),
+		MaxCPUCacheBytes:           t.maxCPUCacheBytes,
+		CPUCacheBypasses:           t.cpuCacheBypasses,
+		CPUCacheLastBypass:         t.cpuCacheLastBypass,
 		Evictions:                  t.evictions,
 		CostEvictions:              t.costEvictions,
 		PageEvictions:              t.pageEvictions,

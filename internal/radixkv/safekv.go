@@ -101,7 +101,7 @@ func (s *ScopedTree) Admit(scope ShareScope, owner CacheIdentity, tokens []int, 
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	boundary, matched := s.tree.LookupNS(ns, tokens)
-	leaf := s.tree.InsertWithLogits(boundary, tokens[matched:], cloneKV(kv), logits)
+	leaf := s.tree.InsertCloneWithLogits(boundary, tokens[matched:], kv, logits)
 	s.tree.Done(leaf)
 	return nil
 }
@@ -236,7 +236,7 @@ func (s *ScopedTree) Lookup(owner CacheIdentity, tokens []int) (*model.KVCache, 
 		}
 		node, matched := s.tree.LookupNS(ns, tokens)
 		if node != nil {
-			if matched > bestMatched {
+			if matched > bestMatched && node.KV() != nil {
 				bestMatched, bestScope = matched, scope
 				bestKV, bestLogits = cloneKV(node.KV()), node.Logits()
 			}
@@ -267,10 +267,10 @@ func (s *ScopedTree) Promote(from ShareScope, owner CacheIdentity, tokens []int)
 		}
 		return ErrPrefixAbsent
 	}
-	kv, logits := cloneKV(source.KV()), source.Logits()
+	kv, logits := source.KV(), source.Logits()
 	s.tree.Done(source)
 	boundary, fleetMatched := s.tree.LookupNS(fleetNS, tokens)
-	leaf := s.tree.InsertWithLogits(boundary, tokens[fleetMatched:], kv, logits)
+	leaf := s.tree.InsertCloneWithLogits(boundary, tokens[fleetMatched:], kv, logits)
 	s.tree.Done(leaf)
 	return nil
 }

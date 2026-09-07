@@ -238,10 +238,10 @@ func (s linearAttnLayerState) clone() linearAttnLayerState {
 		conv:      make([][]float32, len(s.conv)),
 	}
 	for h := range s.recurrent {
-		out.recurrent[h] = append([]float32(nil), s.recurrent[h]...)
+		out.recurrent[h] = cloneFloat32WithReserve(s.recurrent[h], 0)
 	}
 	for i := range s.conv {
-		out.conv[i] = append([]float32(nil), s.conv[i]...)
+		out.conv[i] = cloneFloat32WithReserve(s.conv[i], 0)
 	}
 	return out
 }

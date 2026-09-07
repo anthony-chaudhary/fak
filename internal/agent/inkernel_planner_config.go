@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -26,6 +27,8 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 // InKernelPlannerConfig carries settings that must be fixed at planner construction.
 // Empty/zero fields preserve NewInKernelPlanner's historical defaults.
 type InKernelPlannerConfig struct {
+	// CPUCacheBytes caps retained native CPU KV payload; zero uses the environment.
+	CPUCacheBytes             int64
 	CPUOffloadExperts         bool
 	QwenQ4KPrefillChunkTokens int
 	Qwen35MetalGDNSequence    bool
@@ -80,6 +83,17 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 			envInt64("FAK_INKERNEL_RADIX_HOST_L2_BYTES", 0),
 			inKernelRadixEvictionPolicyFromEnv(),
 		)
+		cpuBytes := cfg.CPUCacheBytes
+		if cpuBytes == 0 {
+			if value := os.Getenv("FAK_INKERNEL_RADIX_CPU_BYTES"); value != "" {
+				var err error
+				cpuBytes, err = strconv.ParseInt(value, 10, 64)
+				if err != nil {
+					panic("FAK_INKERNEL_RADIX_CPU_BYTES must be a non-negative byte count")
+				}
+			}
+		}
+		p.tree.SetCPUCacheByteBudget(cpuBytes)
 		p.scopedTree = radixkv.WrapScopedWithLocker(p.tree, &p.mu)
 	}
 	// The model-side KV-quarantine eviction bridge (#579) is OFF unless opted in, the same
@@ -103,7 +117,12 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 // It is a readback seam for gateway/operator reachability receipts; changing the returned
 // value cannot mutate a running planner.
 func (p *InKernelPlanner) RuntimeConfig() InKernelPlannerConfig {
+	var cpuBytes int64
+	if p.tree != nil {
+		cpuBytes = p.tree.CPUCacheByteBudget()
+	}
 	return InKernelPlannerConfig{
+		CPUCacheBytes:             cpuBytes,
 		CPUOffloadExperts:         p.cpuOffloadExperts,
 		QwenQ4KPrefillChunkTokens: p.qwenQ4KPrefillChunkTokens,
 		Qwen35MetalGDNSequence:    p.qwen35MetalGDNSequence,
