@@ -227,3 +227,23 @@ func TestRunStrixValidation_UnknownSubkernel(t *testing.T) {
 		t.Errorf("receipt.Validate() failed: %v", err)
 	}
 }
+
+func TestSubkernelExecution_SourceBindingMismatchFailsRemoteCommand(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithSourceBinding(ctx, "0000000000000000000000000000000000000000", "")
+
+	t.Setenv("FAK_STRIX_DIR", ".")
+	target := &StrixTarget{
+		Host:      "localhost",
+		Mode:      "local",
+		Reachable: true,
+	}
+
+	res := executeOneSubkernel(ctx, target, DefaultSubkernelSpecs[0])
+	if res.Status != "FAIL" {
+		t.Errorf("res.Status = %q, want FAIL on source binding mismatch", res.Status)
+	}
+	if !strings.Contains(res.Error, "source binding mismatch") {
+		t.Errorf("res.Error %q should mention 'source binding mismatch'", res.Error)
+	}
+}

@@ -3,20 +3,94 @@ package amdgpu
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
+
+type sourceBindingKey struct{}
+
+// SourceBinding contains committed source provenance tokens bound to validation.
+type SourceBinding struct {
+	GitTip string
+	GitRef string
+}
+
+// WithSourceBinding returns a new context carrying source binding tokens.
+func WithSourceBinding(ctx context.Context, gitTip, gitRef string) context.Context {
+	return context.WithValue(ctx, sourceBindingKey{}, SourceBinding{
+		GitTip: strings.TrimSpace(gitTip),
+		GitRef: strings.TrimSpace(gitRef),
+	})
+}
+
+// SourceBindingFromContext retrieves source binding tokens from the context if present.
+func SourceBindingFromContext(ctx context.Context) (SourceBinding, bool) {
+	sb, ok := ctx.Value(sourceBindingKey{}).(SourceBinding)
+	return sb, ok
+}
 
 // StrixValidationOpts configures an execution of the Strix Halo validation suite.
 type StrixValidationOpts struct {
-	Host          string        `json:"host,omitempty"`
-	Subkernels    []string      `json:"subkernels,omitempty"`
-	Ablations     []string      `json:"ablations,omitempty"`
-	RunSubkernels bool          `json:"run_subkernels"`
-	RunAblations  bool          `json:"run_ablations"`
-	GitRef        string        `json:"git_ref,omitempty"`
-	GitTip        string        `json:"git_tip,omitempty"`
-	Command       string        `json:"command,omitempty"`
-	Timeout       time.Duration `json:"timeout,omitempty"`
+	Host                 string        `json:"host,omitempty"`
+	Subkernels           []string      `json:"subkernels,omitempty"`
+	Ablations            []string      `json:"ablations,omitempty"`
+	RunSubkernels        bool          `json:"run_subkernels"`
+	RunAblations         bool          `json:"run_ablations"`
+	GitRef               string        `json:"git_ref,omitempty"`
+	GitTip               string        `json:"git_tip,omitempty"`
+	Command              string        `json:"command,omitempty"`
+	Timeout              time.Duration `json:"timeout,omitempty"`
+	RequireSourceBinding bool          `json:"require_source_binding,omitempty"`
+}
+
+var verifySourceBindingFn = VerifySourceBinding
+
+// VerifySourceBinding verifies that the target appliance's source tree matches GitTip/GitRef.
+func VerifySourceBinding(ctx context.Context, target *StrixTarget, gitTip, gitRef string) error {
+	if target == nil || !target.Reachable {
+		return fmt.Errorf("target is nil or unreachable")
+	}
+	cleanTip := strings.TrimSpace(gitTip)
+	cleanRef := strings.TrimSpace(gitRef)
+	if cleanTip == "" && cleanRef == "" {
+		return nil
+	}
+
+	remoteDir := os.Getenv("FAK_STRIX_DIR")
+	if remoteDir == "" {
+		remoteDir = "/var/lib/fak/repo"
+	}
+
+	checkCmd := fmt.Sprintf("cd %s && git rev-parse HEAD", remoteDir)
+	var cmd *exec.Cmd
+	if target.Mode == "local" {
+		cmd = exec.CommandContext(ctx, "bash", "-c", checkCmd)
+	} else {
+		cmd = exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", target.Host, checkCmd)
+	}
+	windowgate.ConfigureBackgroundCommand(cmd)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to resolve git commit on target: %v (output: %s)", err, truncateOutput(string(out), 150))
+	}
+
+	actualHead := strings.TrimSpace(string(out))
+	if actualHead == "" {
+		return fmt.Errorf("target returned empty git commit")
+	}
+
+	if cleanTip != "" {
+		if !strings.HasPrefix(actualHead, cleanTip) && !strings.HasPrefix(cleanTip, actualHead) {
+			return fmt.Errorf("source binding mismatch: target HEAD %s does not match GitTip %s", actualHead, cleanTip)
+		}
+	}
+
+	return nil
 }
 
 // RunStrixValidation orchestrates sub-kernel tests and ablation arms on the Strix Halo machine.
@@ -25,6 +99,11 @@ func RunStrixValidation(ctx context.Context, opts StrixValidationOpts) (*StrixVa
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
+	}
+
+	// Propagate source binding to context for downstream commands
+	if opts.GitTip != "" || opts.GitRef != "" {
+		ctx = WithSourceBinding(ctx, opts.GitTip, opts.GitRef)
 	}
 
 	target, err := DiscoverStrixTarget(ctx, opts.Host)
@@ -55,6 +134,32 @@ func RunStrixValidation(ctx context.Context, opts StrixValidationOpts) (*StrixVa
 	}
 
 	receipt := NewStrixValidationReceipt(*target, opts.GitRef, opts.GitTip, opts.Command)
+
+	// Machine admission: verify source binding against GitTip / GitRef
+	if opts.RequireSourceBinding && strings.TrimSpace(opts.GitTip) == "" {
+		receipt.Verdict = "FAIL"
+		receipt.Verified = false
+		receipt.Failures = append(receipt.Failures, "source binding required but GitTip is missing")
+		digest, _ := receipt.ComputeDigest()
+		receipt.Digest = digest
+		return receipt, fmt.Errorf("amdgpu: source binding required but GitTip is missing")
+	}
+
+	if opts.GitTip != "" || opts.RequireSourceBinding {
+		if bindErr := verifySourceBindingFn(ctx, target, opts.GitTip, opts.GitRef); bindErr != nil {
+			receipt.Verdict = "FAIL"
+			receipt.Verified = false
+			receipt.Failures = append(receipt.Failures, fmt.Sprintf("source binding verification failed: %v", bindErr))
+			digest, _ := receipt.ComputeDigest()
+			receipt.Digest = digest
+			return receipt, fmt.Errorf("amdgpu: source binding verification failed: %w", bindErr)
+		}
+	}
+
+	if !opts.RunSubkernels && !opts.RunAblations {
+		receipt.Verdict = "FAIL"
+		receipt.Failures = append(receipt.Failures, "missing validation evidence: neither subkernels nor ablations requested")
+	}
 
 	// 1. Run Subkernels if enabled
 	if opts.RunSubkernels {

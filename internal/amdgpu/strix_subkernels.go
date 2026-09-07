@@ -152,9 +152,11 @@ var DefaultSubkernelSpecs = []SubkernelSpec{
 	},
 }
 
+var executeOneSubkernelFn = executeOneSubkernel
+
 // RunSubkernelTests executes a set of sub-kernel test specs on the target Strix Halo machine.
 // It validates sub-kernel selectors and fails fast before attempting network or dispatch.
-func RunSubkernelTests(ctx context.Context, target *StrixTarget, selected []string) ([]StrixSubkernelResult, error) {
+func RunSubkernelTests(ctx context.Context, target *StrixTarget, selected []string, gitTip ...string) ([]StrixSubkernelResult, error) {
 	specs, err := FilterSubkernelSpecs(selected)
 	if err != nil {
 		return nil, err
@@ -171,10 +173,14 @@ func RunSubkernelTests(ctx context.Context, target *StrixTarget, selected []stri
 		return nil, fmt.Errorf("amdgpu: target %s is not reachable", host)
 	}
 
+	if len(gitTip) > 0 && gitTip[0] != "" {
+		ctx = WithSourceBinding(ctx, gitTip[0], "")
+	}
+
 	results := make([]StrixSubkernelResult, 0, len(specs))
 
 	for _, spec := range specs {
-		res := executeOneSubkernel(ctx, target, spec)
+		res := executeOneSubkernelFn(ctx, target, spec)
 		results = append(results, res)
 	}
 
@@ -266,9 +272,15 @@ func executeOneSubkernel(ctx context.Context, target *StrixTarget, spec Subkerne
 	if remoteDir == "" {
 		remoteDir = "/var/lib/fak/repo"
 	}
+	sb, _ := SourceBindingFromContext(ctx)
+	var gitCheck string
+	if sb.GitTip != "" {
+		gitCheck = fmt.Sprintf(`ACTUAL_HEAD=$(git rev-parse HEAD 2>/dev/null) && case "$ACTUAL_HEAD" in %s*) ;; *) echo "source binding mismatch: HEAD $ACTUAL_HEAD != GitTip %s" >&2; exit 1;; esac && `, sb.GitTip, sb.GitTip)
+	}
 	testCmd := fmt.Sprintf(
-		`cd %s && FAK_VULKAN_SPIRV="$(pwd)/_scratch/vulkan-linux/spirv" FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_EXPECT_DEVICE=8060S ./_scratch/vulkan-linux/compute.test -test.run "%s" -test.v`,
+		`cd %s && %sFAK_VULKAN_SPIRV="$(pwd)/_scratch/vulkan-linux/spirv" FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_EXPECT_DEVICE=8060S ./_scratch/vulkan-linux/compute.test -test.run "%s" -test.v`,
 		remoteDir,
+		gitCheck,
 		spec.TestPattern,
 	)
 
@@ -322,7 +334,7 @@ func extractCosine(out string) float64 {
 			return c
 		}
 	}
-	return 0.999999
+	return 0.0
 }
 
 func truncateOutput(s string, maxLen int) string {
