@@ -236,15 +236,70 @@ func (t *StdioTransport) pumpReader() {
 
 // dispatchMessage parses an incoming JSON-RPC message and routes responses to waiting callers.
 func (t *StdioTransport) dispatchMessage(data []byte) {
-	var resp rpcResponse
-	if err := json.Unmarshal(data, &resp); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return
 	}
 
-	id, ok := parseID(resp.ID)
-	if !ok {
-		// Server notification or malformed ID
+	// Must specify JSON-RPC 2.0.
+	rawJSONRPC, hasJSONRPC := raw["jsonrpc"]
+	if !hasJSONRPC {
 		return
+	}
+	var jsonrpc string
+	if err := json.Unmarshal(rawJSONRPC, &jsonrpc); err != nil || jsonrpc != "2.0" {
+		return
+	}
+
+	// Must not have a request method (server requests / notifications are kept separate).
+	if _, hasMethod := raw["method"]; hasMethod {
+		return
+	}
+
+	// Must have an exact numeric ID matching the client request sequence.
+	rawID, hasID := raw["id"]
+	if !hasID {
+		return
+	}
+	id, ok := parseNumericID(rawID)
+	if !ok {
+		return
+	}
+
+	// Validate response shape: must have result or error, but not both.
+	rawResult, hasResult := raw["result"]
+	rawErr, hasError := raw["error"]
+
+	hasValidResult := hasResult
+	hasValidError := hasError && !bytes.Equal(bytes.TrimSpace(rawErr), []byte("null"))
+
+	if !hasValidResult && !hasValidError {
+		return
+	}
+	if hasValidResult && hasValidError {
+		return
+	}
+
+	var resp rpcResponse
+	resp.JSONRPC = jsonrpc
+	resp.ID = rawID
+
+	if hasValidResult {
+		resp.Result = rawResult
+	}
+	if hasValidError {
+		var rpcErr rpcError
+		if err := json.Unmarshal(rawErr, &rpcErr); err != nil {
+			return
+		}
+		var errCheck struct {
+			Code    *int    `json:"code"`
+			Message *string `json:"message"`
+		}
+		if err := json.Unmarshal(rawErr, &errCheck); err != nil || errCheck.Code == nil || errCheck.Message == nil {
+			return
+		}
+		resp.Error = &rpcErr
 	}
 
 	t.pendingMu.Lock()
@@ -262,20 +317,19 @@ func (t *StdioTransport) dispatchMessage(data []byte) {
 	}
 }
 
-// parseID parses an ID from a raw JSON payload, handling numeric and string representations.
-func parseID(raw json.RawMessage) (int64, bool) {
-	if len(raw) == 0 {
+// parseNumericID parses an exact numeric int64 ID from a raw JSON payload.
+// Strings and non-numeric types are rejected so that JSON-RPC identifier types are preserved.
+func parseNumericID(raw json.RawMessage) (int64, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return 0, false
+	}
+	if trimmed[0] == '"' || trimmed[0] == '{' || trimmed[0] == '[' || trimmed[0] == 't' || trimmed[0] == 'f' {
 		return 0, false
 	}
 	var num int64
-	if err := json.Unmarshal(raw, &num); err == nil {
+	if err := json.Unmarshal(trimmed, &num); err == nil {
 		return num, true
-	}
-	var str string
-	if err := json.Unmarshal(raw, &str); err == nil {
-		if n, err := strconv.ParseInt(str, 10, 64); err == nil {
-			return n, true
-		}
 	}
 	return 0, false
 }
