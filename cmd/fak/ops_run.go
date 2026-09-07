@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,22 +16,106 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/childprocess"
+	"github.com/anthony-chaudhary/fak/internal/processalive"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // Receipts deliberately omit prompts, provider responses and credentials.
 type opsRunReceipt struct {
-	Schema   string    `json:"schema"`
-	Harness  string    `json:"harness"`
-	Status   string    `json:"status"`
-	ExitCode int       `json:"exit_code"`
-	Started  time.Time `json:"started_at"`
-	Finished time.Time `json:"finished_at"`
+	Schema    string                  `json:"schema"`
+	Harness   string                  `json:"harness"`
+	Status    string                  `json:"status"`
+	ExitCode  int                     `json:"exit_code"`
+	Started   time.Time               `json:"started_at"`
+	Finished  time.Time               `json:"finished_at"`
+	Lifecycle []opsRunLifecycleRecord `json:"lifecycle,omitempty"`
 }
+
+const maxOpsRunLifecycleRecords = 16
+
+type opsRunLifecycleRecord struct {
+	Reason            string `json:"reason"`
+	TerminationReason string `json:"termination_reason,omitempty"`
+	ChildState        string `json:"child_state"`
+	State             string `json:"state,omitempty"`
+	Error             string `json:"error,omitempty"`
+	OSError           string `json:"os_error,omitempty"`
+	Signal            string `json:"signal,omitempty"`
+	ExitCode          *int   `json:"exit_code,omitempty"`
+	ElapsedMS         int64  `json:"elapsed_ms"`
+	DurationMS        int64  `json:"duration_ms,omitempty"`
+	Duration          string `json:"duration,omitempty"`
+}
+
+type opsRunReasonKey struct{}
+type opsRunSignalCheckerKey struct{}
+
+func withOpsRunTerminationReason(ctx context.Context, reason string) context.Context {
+	return context.WithValue(ctx, opsRunReasonKey{}, reason)
+}
+
+func withSignalChecker(ctx context.Context, isSignal func() bool) context.Context {
+	return context.WithValue(ctx, opsRunSignalCheckerKey{}, isSignal)
+}
+
+func opsRunDetermineTerminationReason(ctx context.Context) string {
+	if checker, ok := ctx.Value(opsRunSignalCheckerKey{}).(func() bool); ok && checker() {
+		return "shutdown"
+	}
+	if custom, ok := ctx.Value(opsRunReasonKey{}).(string); ok && custom != "" {
+		return custom
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		return "timeout"
+	}
+	if ctx.Err() == context.Canceled {
+		return "cancelled"
+	}
+	return "cancelled"
+}
+
+func probeChildProcessState(cmd *exec.Cmd) string {
+	if cmd == nil || cmd.Process == nil {
+		return "unknown"
+	}
+	if cmd.ProcessState != nil {
+		return "exited"
+	}
+	pid := cmd.Process.Pid
+	if pid <= 0 {
+		return "unknown"
+	}
+	if processalive.Check(pid) {
+		return "alive"
+	}
+	return "exited"
+}
+
+var (
+	opsRunProbeChildState = probeChildProcessState
+	opsRunCancelProcess   = func(cmd *exec.Cmd, origCancel func() error) error {
+		if origCancel != nil {
+			return origCancel()
+		}
+		if cmd == nil || cmd.Process == nil {
+			return nil
+		}
+		if ok, detail := procguard.KillPID(cmd.Process.Pid); !ok {
+			if err := cmd.Process.Kill(); err != nil {
+				return err
+			}
+			if detail != "" {
+				return errors.New(detail)
+			}
+		}
+		return nil
+	}
+)
 
 var opsRunExecute = executeOpsRun
 
@@ -141,16 +226,22 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		_ = json.NewEncoder(stdout).Encode(map[string]any{"schema": "fak-ops-run-plan/1", "harness": *harness, "provider": *provider, "guarded": true, "prompt_delivery": "stdin", "timeout": timeout.String(), "auto": *auto, "pure": *pure})
 		return 0
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), terminatingSignals()...)
+	sigCtx, stop := signal.NotifyContext(context.Background(), terminatingSignals()...)
 	defer stop()
-	ctx, cancel := context.WithTimeout(ctx, *timeout)
+	ctx, cancel := context.WithTimeout(sigCtx, *timeout)
 	defer cancel()
+	ctx = withSignalChecker(ctx, func() bool {
+		return sigCtx.Err() != nil
+	})
 	receipt := opsRunReceipt{Schema: "fak-ops-run/1", Harness: *harness, Status: "running", Started: time.Now().UTC()}
 	if err := writeOpsRunReceipt(*receiptPath, receipt); err != nil {
 		fmt.Fprintf(stderr, "ops run: write receipt: %v\n", err)
 		return 1
 	}
-	code, complete, eventError := opsRunExecute(ctx, stdout, stderr, argv, env, prompt)
+	code, complete, eventError, lifecycle := opsRunExecute(ctx, stdout, stderr, argv, env, prompt)
+	if len(lifecycle) > 0 {
+		receipt.Lifecycle = append(receipt.Lifecycle, lifecycle...)
+	}
 	receipt.Status = "failed"
 	if ctx.Err() != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -159,6 +250,19 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 		} else {
 			code = 130
 			receipt.Status = "cancelled"
+		}
+		if len(receipt.Lifecycle) == 0 {
+			reason := opsRunDetermineTerminationReason(ctx)
+			receipt.Lifecycle = append(receipt.Lifecycle, opsRunLifecycleRecord{
+				Reason:            reason,
+				TerminationReason: reason,
+				ChildState:        "unknown",
+				State:             "unknown",
+				Signal:            "SIGKILL",
+				ElapsedMS:         0,
+				DurationMS:        0,
+				Duration:          "0s",
+			})
 		}
 	} else if code == 0 {
 		if eventError || !complete {
@@ -255,7 +359,7 @@ func (w *opsRunEvents) finishLine() {
 	w.overflow = false
 }
 
-func executeOpsRun(ctx context.Context, stdout, stderr io.Writer, argv, env []string, prompt []byte) (int, bool, bool) {
+func executeOpsRun(ctx context.Context, stdout, stderr io.Writer, argv, env []string, prompt []byte) (int, bool, bool, []opsRunLifecycleRecord) {
 	events := &opsRunEvents{output: stdout}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Env = env
@@ -264,13 +368,78 @@ func executeOpsRun(ctx context.Context, stdout, stderr io.Writer, argv, env []st
 	cmd.WaitDelay = 5 * time.Second
 	procguard.ConfigureProcessTreeCancel(cmd)
 	windowgate.ConfigureBackgroundCommand(cmd)
+
+	var (
+		mu         sync.Mutex
+		lifecycle  []opsRunLifecycleRecord
+		termStart  time.Time
+		origCancel = cmd.Cancel
+	)
+
+	cmd.Cancel = func() error {
+		now := time.Now()
+		mu.Lock()
+		termStart = now
+		mu.Unlock()
+
+		reason := opsRunDetermineTerminationReason(ctx)
+		childState := opsRunProbeChildState(cmd)
+
+		cancelErr := opsRunCancelProcess(cmd, origCancel)
+
+		elapsed := time.Since(now)
+		rec := opsRunLifecycleRecord{
+			Reason:            reason,
+			TerminationReason: reason,
+			ChildState:        childState,
+			State:             childState,
+			Signal:            "SIGKILL",
+			ElapsedMS:         elapsed.Milliseconds(),
+			DurationMS:        elapsed.Milliseconds(),
+			Duration:          elapsed.String(),
+		}
+		if cancelErr != nil {
+			rec.Error = cancelErr.Error()
+			rec.OSError = cancelErr.Error()
+		}
+		if cmd.ProcessState != nil {
+			exitCode := cmd.ProcessState.ExitCode()
+			rec.ExitCode = &exitCode
+		}
+
+		mu.Lock()
+		if len(lifecycle) < maxOpsRunLifecycleRecords {
+			lifecycle = append(lifecycle, rec)
+		}
+		mu.Unlock()
+
+		return cancelErr
+	}
+
 	err := cmd.Run()
 	events.finishLine()
+
+	mu.Lock()
+	if len(lifecycle) > 0 && !termStart.IsZero() {
+		totalElapsed := time.Since(termStart)
+		last := len(lifecycle) - 1
+		lifecycle[last].ElapsedMS = totalElapsed.Milliseconds()
+		lifecycle[last].DurationMS = totalElapsed.Milliseconds()
+		lifecycle[last].Duration = totalElapsed.String()
+		if cmd.ProcessState != nil && lifecycle[last].ExitCode == nil {
+			exitCode := cmd.ProcessState.ExitCode()
+			lifecycle[last].ExitCode = &exitCode
+		}
+	}
+	resLifecycle := make([]opsRunLifecycleRecord, len(lifecycle))
+	copy(resLifecycle, lifecycle)
+	mu.Unlock()
+
 	if err != nil {
 		fmt.Fprintf(stderr, "ops run: child: %v\n", err)
-		return childprocess.ExitCode(err, 1), events.complete, events.failed
+		return childprocess.ExitCode(err, 1), events.complete, events.failed, resLifecycle
 	}
-	return 0, events.complete, events.failed
+	return 0, events.complete, events.failed, resLifecycle
 }
 
 func writeOpsRunReceipt(path string, receipt opsRunReceipt) error {
