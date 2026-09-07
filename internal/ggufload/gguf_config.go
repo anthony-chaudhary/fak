@@ -285,6 +285,13 @@ func (f *File) Config() (model.Config, error) {
 // so the hybrid config block (LayerTypes/ssm axes) and the recognized-hybrid forward path
 // fire instead of the #934 empty-layer_types refusal. The metadata-key PREFIX stays the file's
 // own spelling (only ModelType and the hybrid gate normalize), exactly as for glm-dsa above.
+//
+// Qwen3.8 checkpoints can declare general.architecture = "qwen3.8", "qwen38", "qwen-3.8",
+// or "qwen-38". Qwen3.8 shares the hybrid Gated-DeltaNet / SSM architecture family ("qwen35")
+// just like Qwen3.5 and Qwen3.6; normalize these spellings onto "qwen35" so (*File).Config()
+// sets ModelType = "qwen35", invokes the hybrid GDN configuration block (LayerTypes and ssm.*
+// axes), and downstream model.ClassifyForwardPath reaches ForwardQwen35GDN instead of throwing
+// UnsupportedArchError (#934).
 func canonicalGGUFArch(arch string) string {
 	switch arch {
 	case "glm-dsa":
@@ -296,7 +303,7 @@ func canonicalGGUFArch(arch string) string {
 		// backbone, no DSA indexer, so the Moonshot-branded spellings collapse onto
 		// "deepseek2" and ride the MLA+MoE forward instead of the #934 refusal.
 		return "deepseek2"
-	case "bonsai", "ternary-bonsai", "qwen3.6", "qwen36":
+	case "bonsai", "ternary-bonsai", "qwen3.6", "qwen36", "qwen3.8", "qwen38", "qwen-3.8", "qwen-38":
 		return "qwen35"
 	}
 	return arch
