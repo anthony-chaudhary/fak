@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"regexp"
@@ -402,8 +401,6 @@ func RunPowerShell(ctx context.Context, script string, opts ...PowerShellOption)
 		advMu.Unlock()
 		if cfg.Logger != nil {
 			cfg.Logger("%s", msg)
-		} else {
-			log.Printf("%s", msg)
 		}
 	}
 

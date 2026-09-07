@@ -3,8 +3,11 @@
 package windowgate
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log"
 	"os/exec"
 	"strings"
 	"testing"
@@ -391,5 +394,48 @@ func TestPowerShellExecution(t *testing.T) {
 	}
 	if res.Engine == "" {
 		t.Errorf("expected non-empty Engine")
+	}
+}
+
+func TestPowerShellSuppressesAdvisoryLogSpam(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Without WithLogger, advisories must be recorded in res.Advisories but NOT spam standard log output
+	var logBuf bytes.Buffer
+	origLogWriter := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(origLogWriter)
+
+	res, err := RunPowerShell(ctx, "Write-Output 'SilentAdvisory'",
+		WithPreferredEngine("powershell.exe"),
+		WithDetectHighLoad(func() bool { return true }),
+	)
+	if err != nil {
+		t.Fatalf("RunPowerShell failed: %v", err)
+	}
+	if len(res.Advisories) == 0 {
+		t.Fatalf("expected high load advisory in res.Advisories, got none")
+	}
+	if logBuf.Len() > 0 {
+		t.Fatalf("expected zero log output when Logger is nil, got: %q", logBuf.String())
+	}
+
+	// 2. When WithLogger is explicitly configured, it should receive the advisory
+	var customLogged []string
+	resLogged, err := RunPowerShell(ctx, "Write-Output 'LoggedAdvisory'",
+		WithPreferredEngine("powershell.exe"),
+		WithDetectHighLoad(func() bool { return true }),
+		WithLogger(func(format string, args ...any) {
+			customLogged = append(customLogged, fmt.Sprintf(format, args...))
+		}),
+	)
+	if err != nil {
+		t.Fatalf("RunPowerShell with custom logger failed: %v", err)
+	}
+	if len(resLogged.Advisories) == 0 {
+		t.Fatalf("expected high load advisory in resLogged.Advisories, got none")
+	}
+	if len(customLogged) == 0 {
+		t.Fatalf("expected custom logger to receive advisory, got none")
 	}
 }
