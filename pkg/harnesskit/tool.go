@@ -71,6 +71,11 @@ type ToolScope struct {
 	NetworkScopes        []string     `json:"network_scopes,omitempty"`
 	RateLimit            RateLimit    `json:"rate_limit,omitempty"`
 	RequiredCapabilities []Capability `json:"required_capabilities,omitempty"`
+	AllowedTools         []string     `json:"allowed_tools,omitempty"`
+	DeniedTools          []string     `json:"denied_tools,omitempty"`
+	MaxMutations         int          `json:"max_mutations,omitempty"`
+	AllowNetwork         bool         `json:"allow_network,omitempty"`
+	AllowWorktree        bool         `json:"allow_worktree,omitempty"`
 }
 
 // ToolCondition specifies conditional scoping, session allow/block list constraints, and dynamic preconditions.

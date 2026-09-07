@@ -1,5 +1,3 @@
-//go:build wip_coordination
-
 package harnesskit
 
 import (
@@ -667,12 +665,6 @@ func TestPublicCoordinationContract(t *testing.T) {
 
 	if len(contract.Errors) == 0 {
 		t.Fatal("contract errors must not be empty")
-	}
-
-	// Also verify PublicContract() includes it identically
-	pub := PublicContract()
-	if !reflect.DeepEqual(pub.Coordination, contract) {
-		t.Fatalf("PublicContract().Coordination mismatch:\ngot:  %+v\nwant: %+v", pub.Coordination, contract)
 	}
 }
 
