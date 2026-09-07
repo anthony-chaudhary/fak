@@ -194,6 +194,14 @@ void fcuda_q2_0_matmul_f32(const uint8_t *dCodes, const float *dScales, const fl
 void fcuda_q5k_matmul_f32(const uint8_t *dQ5K, const float *dX, float *dY, int out, int in, int P);
 void fcuda_q6k_matmul_f32(const uint8_t *dQ6K, const float *dX, float *dY, int out, int in, int P);
 
+/* fcuda_q2k_matmul_f32: Y[P,out] = X[P,in] @ W[out,in]^T where W is resident Q2_K — the raw
+ * llama.cpp k-quant super-block bytes dQ2K, 256 elements per 84-byte super-block (16 scale bytes,
+ * 64 quant bytes, f16 d, f16 dmin). Fused dequantization on device, F32 accumulate.
+ * Eliminates A100 CPU decode offload on sm_80/sm_89/sm_90 (#11945). */
+void fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
+void fcuda_q2k_gemv(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
+void fcuda_q2k_gemm_panel(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
+
 /* per-row RMSNorm: y[r,:] = x[r,:] * rsqrt(mean(x[r,:]^2) + eps) * w[:]  (rows x n). */
 void fcuda_rmsnorm_f32(const float *dX, const float *dW, float *dY, int rows, int n, float eps);
 /* shape-aware dispatched RMSNorm: selects warp-per-row for fitting widths or block-per-row for wide rows */

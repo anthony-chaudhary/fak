@@ -1,0 +1,97 @@
+#version 450
+
+// q2k_matmul.comp — GGML Q2_K 2-bit quantized matrix multiplication for Vulkan 1.2 / RADV.
+//
+// Y[P, outDim] = X[P, inDim] @ W[outDim, inDim]^T
+//
+// Q2_K superblock layout (256 weights, 84 bytes):
+//   - scales: 16 bytes (offset 0..15; low 4 bits = scale mult, high 4 bits = min mult)
+//   - qs:     64 bytes (offset 16..79; 256 2-bit codes, packed 4 per byte)
+//   - d:      half (f16, offset 80..81)
+//   - dmin:   half (f16, offset 82..83)
+
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer Q2K { uint raw[]; };
+layout(std430, set = 0, binding = 1) readonly buffer X   { float x[]; };
+layout(std430, set = 0, binding = 2) writeonly buffer Y  { float y[]; };
+
+layout(push_constant) uniform PC {
+    int outDim;
+    int inDim;
+    int tokens;
+} pc;
+
+uint byteAt(uint off) {
+    uint w = raw[off >> 2];
+    return (w >> ((off & 3u) * 8u)) & 255u;
+}
+
+float halfAt(uint off) {
+    uint bits = byteAt(off) | (byteAt(off + 1u) << 8u);
+    return unpackHalf2x16(bits).x;
+}
+
+void main() {
+    int globalIdx = int(gl_GlobalInvocationID.x);
+    int row;
+    int token;
+
+    // Handles both 1D dispatch ((outDim * tokens + 63) / 64) and 2D dispatch
+    if (pc.tokens > 1 && gl_NumWorkGroups.y == 1u) {
+        row = globalIdx % pc.outDim;
+        token = globalIdx / pc.outDim;
+    } else {
+        row = int(gl_GlobalInvocationID.x);
+        token = int(gl_GlobalInvocationID.y);
+    }
+    if (row >= pc.outDim || token >= pc.tokens) return;
+
+    int blocks = pc.inDim / 256;
+    float sum = 0.0;
+
+    for (int sb = 0; sb < blocks; ++sb) {
+        uint base = uint((row * blocks + sb) * 84);
+        float d = halfAt(base + 80u);
+        float min_val = halfAt(base + 82u);
+
+        uint xBase = uint(token * pc.inDim + sb * 256);
+        uint is_idx = 0u;
+        uint qi_offset = 0u;
+
+        for (int n = 0; n < 256; n += 128) {
+            uint shift = 0u;
+            for (int j = 0; j < 4; ++j) {
+                uint sc0 = byteAt(base + is_idx);
+                is_idx++;
+                float dl0 = d * float(sc0 & 15u);
+                float ml0 = min_val * float(sc0 >> 4u);
+
+                uint sc1 = byteAt(base + is_idx);
+                is_idx++;
+                float dl1 = d * float(sc1 & 15u);
+                float ml1 = min_val * float(sc1 >> 4u);
+
+                uint qBase0 = base + 16u + qi_offset;
+                uint qBase1 = qBase0 + 16u;
+                uint xGroupBase = xBase + uint(n + j * 32);
+
+                for (int l = 0; l < 16; ++l) {
+                    uint q0 = byteAt(qBase0 + uint(l));
+                    uint code0 = (q0 >> shift) & 3u;
+                    float w0 = dl0 * float(code0) - ml0;
+                    sum += w0 * x[xGroupBase + uint(l)];
+
+                    uint q1 = byteAt(qBase1 + uint(l));
+                    uint code1 = (q1 >> shift) & 3u;
+                    float w1 = dl1 * float(code1) - ml1;
+                    sum += w1 * x[xGroupBase + 16u + uint(l)];
+                }
+                shift += 2u;
+            }
+            qi_offset += 32u;
+        }
+    }
+
+    y[token * pc.outDim + row] = sum;
+}

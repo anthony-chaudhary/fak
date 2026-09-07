@@ -470,7 +470,7 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 			Class: class,
 		})
 	}
-	if t.Dtype == Q4_K || t.Dtype == Q5_K || t.Dtype == Q6_K {
+	if t.Dtype == Q4_K || t.Dtype == Q5_K || t.Dtype == Q6_K || t.Dtype == Q2_K {
 		if as != t.Dtype {
 			panic(&CUDAOpError{
 				Op:    "Upload",
@@ -498,7 +498,7 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 		panic(&CUDAOpError{
 			Op:    "Upload",
 			Site:  site,
-			Msg:   "cuda Upload supports F32 host data (optionally narrowing to F16/Q8_0), prequantized Q8_0 codes, or raw Q4_K/Q5_K/Q6_K bytes today (got " + t.Dtype.String() + ")",
+			Msg:   "cuda Upload supports F32 host data (optionally narrowing to F16/Q8_0), prequantized Q8_0 codes, or raw Q4_K/Q5_K/Q6_K/Q2_K bytes today (got " + t.Dtype.String() + ")",
 			Class: class,
 		})
 	}
@@ -817,7 +817,16 @@ func (c *cudaBackend) devQ8(shape []int, block, nScales int) (Tensor, *cudaBuf) 
 // the host byte slice (= (out*in/256)*144). The QuantSpec records the 256-elem super-block.
 func (c *cudaBackend) devRawKQuant(dt Dtype, shape []int, nbytes int) (Tensor, *cudaBuf) {
 	buf := c.dallocWeight(nbytes)
-	q := &QuantSpec{Block: 256, Axis: 2, Bits: 4, Symmetric: false}
+	bits := 4
+	switch dt {
+	case Q2_K:
+		bits = 2
+	case Q5_K:
+		bits = 5
+	case Q6_K:
+		bits = 6
+	}
+	q := &QuantSpec{Block: 256, Axis: 2, Bits: bits, Symmetric: false}
 	return makeTensor(c, dt, RowMajor, append([]int(nil), shape...), q, buf), buf
 }
 
@@ -1005,6 +1014,12 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
 		C.fcuda_q6k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
+	case Q2_K:
+		// native Q2_K GEMV (#11945): dequant fused into the GEMV tile straight off the
+		// resident super-block bytes; the weight stays 2-bit (84 bytes / 256 elements) in VRAM.
+		wb := c.cudaBufForSubmit(w)
+		y, _ = c.devTr([]int{out}, F32)
+		C.fcuda_q2k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
 	case Q2_0:
 		// native packed-ternary Q2_0 GEMV (#4872): 2-bit codes + per-block f32 scales resident, the
 		// signed indicator unpacked and multiply-accumulated against the f32 activation on device
@@ -1017,7 +1032,7 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		panic(&CUDAOpError{
 			Op:    "MatMul",
 			Site:  "matmul-weight-dtype",
-			Msg:   "cuda MatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0 weights today (got " + w.Dtype.String() + "); other quantized device GEMM is a tracked follow-up",
+			Msg:   "cuda MatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0/Q2_K weights today (got " + w.Dtype.String() + "); other quantized device GEMM is a tracked follow-up",
 			Class: MemoryActivation,
 		})
 	}
@@ -1071,6 +1086,12 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
 		C.fcuda_q6k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
+	case Q2_K:
+		// native Q2_K prefill GEMM (#11945): dequant fused into the tile off the resident super-block
+		// bytes, dotted with each of the P f32 activation rows, F32 accumulate.
+		wb := c.cudaBufForSubmit(w)
+		y, _ = c.devTr([]int{P, out}, F32)
+		C.fcuda_q2k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
 	case Q2_0:
 		// native packed-ternary Q2_0 prefill GEMM (#4872): each of the P f32 activation rows dotted
 		// against the resident 2-bit ternary weight (unpacked signed indicator, one block scale folded
@@ -1083,7 +1104,7 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		panic(&CUDAOpError{
 			Op:    "BatchedMatMul",
 			Site:  "batched-matmul-weight-dtype",
-			Msg:   "cuda BatchedMatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0 weights today (got " + w.Dtype.String() + ")",
+			Msg:   "cuda BatchedMatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0/Q2_K weights today (got " + w.Dtype.String() + ")",
 			Class: MemoryActivation,
 		})
 	}

@@ -35,7 +35,7 @@
 #include <atomic>
 
 struct DispatchProfileCounters {
-    std::atomic<uint64_t> compute{0}, q4k{0}, other{0};
+    std::atomic<uint64_t> compute{0}, q4k{0}, q2k{0}, other{0};
     std::atomic<uint64_t> otherMatmul{0}, otherNorm{0}, otherRope{0}, otherSwiGLU{0};
     std::atomic<uint64_t> otherAdd{0}, otherAttention{0}, otherArgmax{0}, otherGDN{0}, otherUnclassified{0};
     std::atomic<uint64_t> barriers{0}, d2d{0}, batchSubmits{0}, batchFlushes{0}, oneShotSubmits{0};
@@ -104,10 +104,10 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_Q4K_MATMUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_Q4K_MATMUL, K_Q2K_MATMUL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
-// Every non-Q4_K kernel belongs to exactly one primary operation family. Fused
+// Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
 // kernels follow their public operation prefix so these fields sum to `other`.
 std::atomic<uint64_t>& dpOtherFamily(KId id) {
     switch (id) {
@@ -129,7 +129,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
         return g_dp.otherArgmax;
     case K_QWEN35_GDN_CONV: case K_QWEN35_GDN_RECURRENT:
         return g_dp.otherGDN;
-    case K_Q4K_MATMUL: case K_COUNT:
+    case K_Q4K_MATMUL: case K_Q2K_MATMUL: case K_COUNT:
         return g_dp.otherUnclassified;
     }
     return g_dp.otherUnclassified;
@@ -140,6 +140,8 @@ static inline void dpDispatch(const Kernel& k) {
     const KId id = static_cast<KId>(&k - g_kern);
     if (id == K_Q4K_MATMUL) {
         g_dp.q4k.fetch_add(1, std::memory_order_relaxed);
+    } else if (id == K_Q2K_MATMUL) {
+        g_dp.q2k.fetch_add(1, std::memory_order_relaxed);
     } else {
         g_dp.other.fetch_add(1, std::memory_order_relaxed);
         dpOtherFamily(id).fetch_add(1, std::memory_order_relaxed);
@@ -877,6 +879,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_QWEN35_GDN_CONV], P("qwen35_gdn_conv.spv"), 4, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_QWEN35_GDN_RECURRENT], P("qwen35_gdn_recurrent.spv"), 9, 6 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_Q4K_MATMUL], P("q4k_matmul.spv"), 3, 3 * sizeof(int));
+    buildKernel(g_kern[K_Q2K_MATMUL], P("q2k_matmul.spv"), 3, 3 * sizeof(int));
     if (!ok) return 8;
     // Q8 kernel is built only when the device advertised the int8/8-bit-storage features; its
     // SPIR-V uses them, so loading it without the enabled device feature would be invalid. If
@@ -1363,10 +1366,17 @@ extern "C" void fvk_q4k_matmul_f32(const void* dQ4K, const void* dX, void* dY,
     Buffer* bufs[3] = {B((void*)dQ4K), B((void*)dX), B(dY)};
     dispatch(g_kern[K_Q4K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)(((size_t)out * P + 63) / 64));
 }
+extern "C" void fvk_q2k_matmul_f32(const void* dQ2K, const void* dX, void* dY,
+                         int out, int in, int P) {
+    struct PC { int out, in, p; } pc{out, in, P};
+    Buffer* bufs[3] = {B((void*)dQ2K), B((void*)dX), B(dY)};
+    dispatch(g_kern[K_Q2K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)(((size_t)out * P + 63) / 64));
+}
 extern "C" void fvk_dispatch_profile_snapshot(fvk_dispatch_profile* out) {
     if (!out) return;
     out->compute_dispatches = g_dp.compute.load();
     out->q4k_matmul_dispatches = g_dp.q4k.load();
+    out->q2k_matmul_dispatches = g_dp.q2k.load();
     out->other_compute_dispatches = g_dp.other.load();
     out->compute_barriers = g_dp.barriers.load();
     out->d2d_copies = g_dp.d2d.load();
@@ -1388,7 +1398,7 @@ extern "C" void fvk_dispatch_profile_snapshot(fvk_dispatch_profile* out) {
     out->one_shot_d2d_submits = g_dp.oneShotD2D.load();
 }
 extern "C" void fvk_dispatch_profile_reset(void) {
-    g_dp.compute.store(0); g_dp.q4k.store(0); g_dp.other.store(0);
+    g_dp.compute.store(0); g_dp.q4k.store(0); g_dp.q2k.store(0); g_dp.other.store(0);
     g_dp.barriers.store(0); g_dp.d2d.store(0); g_dp.batchSubmits.store(0);
     g_dp.batchFlushes.store(0); g_dp.oneShotSubmits.store(0);
     g_dp.otherMatmul.store(0); g_dp.otherNorm.store(0); g_dp.otherRope.store(0);

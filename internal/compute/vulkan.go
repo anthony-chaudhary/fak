@@ -252,7 +252,7 @@ func (v *vulkanBackend) VulkanDebugQ4KProfileSnapshot() (enabled bool, deviceCal
 }
 
 type VulkanDispatchProfile struct {
-	ComputeDispatches, Q4KMatmulDispatches, OtherComputeDispatches         uint64
+	ComputeDispatches, Q4KMatmulDispatches, Q2KMatmulDispatches, OtherComputeDispatches uint64
 	ComputeBarriers, D2DCopies, BatchSubmits, BatchFlushes, OneShotSubmits uint64
 	OtherMatmulDispatches, OtherNormDispatches, OtherRoPEDispatches        uint64
 	OtherSwiGLUDispatches, OtherAddDispatches, OtherAttentionDispatches    uint64
@@ -269,6 +269,7 @@ func (v *vulkanBackend) VulkanDebugDispatchProfileSnapshot() VulkanDispatchProfi
 	return VulkanDispatchProfile{
 		ComputeDispatches:           uint64(p.compute_dispatches),
 		Q4KMatmulDispatches:         uint64(p.q4k_matmul_dispatches),
+		Q2KMatmulDispatches:         uint64(p.q2k_matmul_dispatches),
 		OtherComputeDispatches:      uint64(p.other_compute_dispatches),
 		ComputeBarriers:             uint64(p.compute_barriers),
 		D2DCopies:                   uint64(p.d2d_copies),
@@ -669,6 +670,9 @@ func (v *vulkanBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, what 
 	if t.Dtype == Q4_K {
 		return v.uploadQ4KLocked(t)
 	}
+	if t.Dtype == Q2_K {
+		return v.uploadQ2KLocked(t)
+	}
 	if t.Dtype == Q8_0 {
 		if t.Quant == nil {
 			panic("compute: vulkan Upload Q8 tensor missing QuantSpec")
@@ -717,6 +721,24 @@ func (v *vulkanBackend) uploadQ4KLocked(t Tensor) Tensor {
 		C.fvk_h2d(buf.ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
 	}
 	return makeTensor(v, Q4_K, RowMajor, append([]int(nil), t.Shape...), nil, buf)
+}
+
+func (v *vulkanBackend) uploadQ2KLocked(t Tensor) Tensor {
+	hb, ok := t.buf.(HostBuffer)
+	if !ok || len(t.Shape) != 2 || t.Shape[1]%q2kSuper != 0 {
+		panic("compute: vulkan Q2_K upload requires host raw bytes and [out,in] with in divisible by 256")
+	}
+	codes := hb.I8()
+	raw := i8AsBytes(codes)
+	want := t.Shape[0] * (t.Shape[1] / q2kSuper) * q2kSuperBlock
+	if len(raw) != want {
+		panic("compute: vulkan Q2_K raw byte length does not match shape")
+	}
+	buf := v.dallocWeightFor(len(raw), "Q2_K weight buffer "+shapeText(t.Shape))
+	if len(raw) > 0 {
+		C.fvk_h2d(buf.ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	}
+	return makeTensor(v, Q2_K, RowMajor, append([]int(nil), t.Shape...), t.Quant, buf)
 }
 func (v *vulkanBackend) uploadQ8Locked(shape []int, codes []int8, scales []float32, block int) Tensor {
 	if !v.haveQ8 {
@@ -1049,6 +1071,11 @@ func (v *vulkanBackend) q4kMatMulLocked(w, x, y Tensor, out, in, P int) {
 	C.fvk_q4k_matmul_f32(weight, v.vp(x), v.vp(y), C.int(out), C.int(in), C.int(P))
 }
 
+func (v *vulkanBackend) q2kMatMulLocked(w, x, y Tensor, out, in, P int) {
+	wb := w.buf.(*vulkanBuf)
+	C.fvk_q2k_matmul_f32(wb.ptr, v.vp(x), v.vp(y), C.int(out), C.int(in), C.int(P))
+}
+
 func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -1061,6 +1088,8 @@ func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
 		v.q8MatMulLocked(w, x, y, out, in, 1)
 	case Q4_K:
 		v.q4kMatMulLocked(w, x, y, out, in, 1)
+	case Q2_K:
+		v.q2kMatMulLocked(w, x, y, out, in, 1)
 	default:
 		panic("compute: vulkan MatMul unsupported weight dtype " + w.Dtype.String())
 	}
@@ -1169,6 +1198,10 @@ func (v *vulkanBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		C.fvk_matmul_f32(v.vp(w), v.vp(X), v.vp(y), C.int(out), C.int(in), C.int(P))
 	case Q8_0:
 		v.q8MatMulLocked(w, X, y, out, in, P)
+	case Q4_K:
+		v.q4kMatMulLocked(w, X, y, out, in, P)
+	case Q2_K:
+		v.q2kMatMulLocked(w, X, y, out, in, P)
 	default:
 		panic("compute: vulkan BatchedMatMul unsupported weight dtype " + w.Dtype.String())
 	}

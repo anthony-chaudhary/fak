@@ -24,6 +24,7 @@ func TestROCmArchLookupKnown(t *testing.T) {
 		{"gfx1032", ROCmRDNA2, 32, false},
 		{"gfx1100", ROCmRDNA3, 32, false},
 		{"gfx1102", ROCmRDNA3, 32, false},
+		{"gfx1151", ROCmRDNA3_5, 32, false},
 	}
 	for _, c := range cases {
 		a, ok := LookupROCmArch(c.gfx)
@@ -103,5 +104,71 @@ func TestROCmRX7600IsRDNA3(t *testing.T) {
 	}
 	if off, ok := ROCmOffloadArch("gfx1102"); !ok || off != "gfx1102" {
 		t.Errorf("ROCmOffloadArch(gfx1102) = (%q,%v), want (gfx1102,true)", off, ok)
+	}
+}
+
+// TestROCmGfx1151IsRDNA3_5 witnesses AMD Strix Halo (Ryzen AI Max+ 395, 40 CUs RDNA 3.5)
+// recognition in the ROCm architecture taxonomy.
+func TestROCmGfx1151IsRDNA3_5(t *testing.T) {
+	a, ok := LookupROCmArch("gfx1151")
+	if !ok {
+		t.Fatal("gfx1151 (Strix Halo APU) must be a supported target")
+	}
+	if a.Family != ROCmRDNA3_5 {
+		t.Errorf("gfx1151 family = %v, want ROCmRDNA3_5", a.Family)
+	}
+	if a.Family.String() != "RDNA3.5" {
+		t.Errorf("gfx1151 family string = %q, want RDNA3.5", a.Family.String())
+	}
+	if a.Wavefront != 32 {
+		t.Errorf("gfx1151 wavefront = %d, want 32", a.Wavefront)
+	}
+	if a.Family.Datacenter() {
+		t.Errorf("gfx1151 classified as datacenter, want false")
+	}
+	if !a.Family.IsRDNA() {
+		t.Errorf("gfx1151 IsRDNA() = false, want true")
+	}
+	if a.Family.IsCDNA() {
+		t.Errorf("gfx1151 IsCDNA() = true, want false")
+	}
+	if off, ok := ROCmOffloadArch("gfx1151"); !ok || off != "gfx1151" {
+		t.Errorf("ROCmOffloadArch(gfx1151) = (%q,%v), want (gfx1151,true)", off, ok)
+	}
+}
+
+// TestROCmGfx1151CompilerFlagsAndLDS verifies compiler flags and LDS tuning for 4-token speculative tree masks.
+func TestROCmGfx1151CompilerFlagsAndLDS(t *testing.T) {
+	a, ok := LookupROCmArch("gfx1151")
+	if !ok {
+		t.Fatal("gfx1151 not found")
+	}
+	flags := a.CompilerFlags()
+	hasWave32 := false
+	hasOffload := false
+	for _, f := range flags {
+		if f == "-mwavefrontsize32" {
+			hasWave32 = true
+		}
+		if f == "--offload-arch=gfx1151" {
+			hasOffload = true
+		}
+	}
+	if !hasWave32 {
+		t.Errorf("flags %+v missing -mwavefrontsize32", flags)
+	}
+	if !hasOffload {
+		t.Errorf("flags %+v missing --offload-arch=gfx1151", flags)
+	}
+
+	lds := a.TuneMTPTreeMaskLDS(4, 128)
+	if lds.DraftDepth != 4 {
+		t.Errorf("lds.DraftDepth = %d, want 4", lds.DraftDepth)
+	}
+	if lds.TotalLDSBytes <= 0 || lds.TotalLDSBytes > 65536 {
+		t.Errorf("lds.TotalLDSBytes = %d, must fit in 64KB CU LDS", lds.TotalLDSBytes)
+	}
+	if lds.MaxWavesPerCU != 32 {
+		t.Errorf("lds.MaxWavesPerCU = %d, want 32", lds.MaxWavesPerCU)
 	}
 }

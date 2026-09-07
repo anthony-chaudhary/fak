@@ -52,6 +52,10 @@ const cudaFP16CosineMin = 0.997
 const (
 	cudaQ8CosineMin  = 0.999
 	cudaQ4KCosineMin = 0.995
+	// cudaQ2KCosineMin is the cuda backend's RECORDED Approx cosine floor for the Q2_K
+	// dequant-fused device GEMV / panel GEMM (#11945). The reference is the CPU dequant
+	// of the exact same super-block bytes.
+	cudaQ2KCosineMin = 0.995
 	// cudaQ2CosineMin is the cuda backend's RECORDED Approx cosine floor for the packed-ternary
 	// Q2_0 device GEMV (#4872). UNLIKE the Q8/Q4_K floors, the Q2_0 witness compares the device
 	// GEMM against a cpuref f32 GEMV over an f32 dequant of the SAME packed ternary codes+scales

@@ -122,6 +122,8 @@ func (c *cudaBackend) qwen35SequenceMatMulLocked(w, x Tensor, tokens int, site s
 		C.fcuda_q5k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))
 	case Q6_K:
 		C.fcuda_q6k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))
+	case Q2_K:
+		C.fcuda_q2k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))
 	case Q2_0:
 		C.fcuda_q2_0_matmul_f32((*C.uint8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens), C.int(w.Quant.Block))
 	default:
