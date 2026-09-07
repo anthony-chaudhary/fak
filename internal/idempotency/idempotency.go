@@ -73,6 +73,12 @@ var ErrUnknownApplied = errors.New("idempotency: outcome UNKNOWN_APPLIED; resolu
 // ErrNotFound means no durable intent or outcome exists for a key.
 var ErrNotFound = errors.New("idempotency: key not found")
 
+// ErrIdentityConflict is returned when a retry token is reused with a different request identity.
+var ErrIdentityConflict = errors.New("idempotency: retry token bound to different request identity")
+
+// ErrLegacyBindingRequired is returned when an unbound legacy record exists and cannot be reused in bound mode.
+var ErrLegacyBindingRequired = errors.New("idempotency: legacy unbound record cannot be reused in bound mode")
+
 // lockPoll is the gap between flock.TryLock attempts while waiting for the ledger
 // lock. flock is non-blocking by design (see internal/flock), so a blocking
 // acquire IS this poll — the same idiom loopmgr.withLedgerLock uses.
@@ -102,16 +108,36 @@ const (
 // keeps the key blocked.
 type Readback func(Record) (Resolution, string, error)
 
+// RequestIdentity binds an idempotency key to immutable semantic request properties.
+type RequestIdentity struct {
+	Operation     string `json:"operation,omitempty"`
+	Resource      string `json:"resource,omitempty"`
+	Principal     string `json:"principal,omitempty"`
+	PayloadDigest string `json:"payload_digest,omitempty"`
+}
+
+// IsZero reports whether all request identity fields are empty.
+func (r RequestIdentity) IsZero() bool {
+	return r.Operation == "" && r.Resource == "" && r.Principal == "" && r.PayloadDigest == ""
+}
+
+// Digest returns a deterministic SHA-256 hex digest of the request identity fields.
+func (r RequestIdentity) Digest() string {
+	sum := sha256.Sum256([]byte(r.Operation + "\x00" + r.Resource + "\x00" + r.Principal + "\x00" + r.PayloadDigest))
+	return hex.EncodeToString(sum[:])
+}
+
 // Record is one state transition. AppliedAt is retained for compatibility with
 // success-only ledgers written before states existed; a missing State on read is
 // interpreted as APPLIED.
 type Record struct {
-	Key       string `json:"key"`
-	Op        string `json:"op"`
-	State     State  `json:"state,omitempty"`
-	Result    string `json:"result,omitempty"`
-	AppliedAt int64  `json:"applied_at,omitempty"`
-	UpdatedAt int64  `json:"updated_at,omitempty"`
+	Key       string           `json:"key"`
+	Op        string           `json:"op"`
+	State     State            `json:"state,omitempty"`
+	Result    string           `json:"result,omitempty"`
+	Identity  *RequestIdentity `json:"identity,omitempty"`
+	AppliedAt int64            `json:"applied_at,omitempty"`
+	UpdatedAt int64            `json:"updated_at,omitempty"`
 }
 
 // Key derives a stable idempotency key from an op label and a caller-supplied
@@ -291,6 +317,23 @@ func (s *Store) Status(key string) (Record, bool, error) {
 	return rec, ok, err
 }
 
+// DoBound executes apply under the cross-process lock, binding key to ident.
+// If an existing record exists for key:
+//   - if it lacks an identity (or has a zero identity), it returns ErrLegacyBindingRequired;
+//   - if its identity does not match ident, it returns ErrIdentityConflict without calling apply();
+//   - if its identity matches, it replays a fresh APPLIED result, blocks on ambiguous states, or allows PROVEN_ABSENT.
+func (s *Store) DoBound(key string, ident RequestIdentity, apply func() (string, error)) (result string, replayed bool, err error) {
+	return s.do(key, ident.Operation, ident, apply)
+}
+
+// DoWithIdentity executes apply with an explicit op label and request identity.
+func (s *Store) DoWithIdentity(key, op string, ident RequestIdentity, apply func() (string, error)) (result string, replayed bool, err error) {
+	if op == "" {
+		op = ident.Operation
+	}
+	return s.do(key, op, ident, apply)
+}
+
 // Do fsyncs PENDING before apply. A proven APPLIED result within the window is
 // replayed; PROVEN_ABSENT permits one new apply; PENDING or UNKNOWN_APPLIED fails
 // closed with ErrUnknownApplied. Any apply error, or a failure to record a
@@ -303,6 +346,10 @@ func (s *Store) Status(key string) (Record, bool, error) {
 // would consult its Open-time snapshot, miss, and double-apply. If the lock cannot
 // be taken within LockWait, Do returns ErrBusy having applied nothing.
 func (s *Store) Do(key, op string, apply func() (string, error)) (result string, replayed bool, err error) {
+	return s.do(key, op, RequestIdentity{}, apply)
+}
+
+func (s *Store) do(key, op string, ident RequestIdentity, apply func() (string, error)) (result string, replayed bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -314,7 +361,16 @@ func (s *Store) Do(key, op string, apply func() (string, error)) (result string,
 		if err := s.loadLocked(); err != nil {
 			return err
 		}
+		bound := !ident.IsZero()
 		if r, ok := s.recs[key]; ok {
+			if bound {
+				if r.Identity == nil || r.Identity.IsZero() {
+					return ErrLegacyBindingRequired
+				}
+				if *r.Identity != ident {
+					return ErrIdentityConflict
+				}
+			}
 			switch r.State {
 			case StateApplied:
 				if applied, fresh := s.lookupLocked(key); fresh {
@@ -330,24 +386,31 @@ func (s *Store) Do(key, op string, apply func() (string, error)) (result string,
 			}
 		}
 
+		var identPtr *RequestIdentity
+		if bound {
+			identCopy := ident
+			identPtr = &identCopy
+		}
+
 		now := s.now().UnixNano()
-		intent := Record{Key: key, Op: op, State: StatePending, UpdatedAt: now}
+		intent := Record{Key: key, Op: op, State: StatePending, Identity: identPtr, UpdatedAt: now}
 		if err := s.appendAndRememberLocked(intent); err != nil {
 			return err
 		}
 		out, err := apply()
 		if err != nil {
-			unknown := Record{Key: key, Op: op, State: StateUnknownApplied, UpdatedAt: s.now().UnixNano()}
+			unknown := Record{Key: key, Op: op, State: StateUnknownApplied, Identity: identPtr, UpdatedAt: s.now().UnixNano()}
 			persistErr := s.appendAndRememberLocked(unknown)
 			return unknownAppliedError(key, errors.Join(err, persistErr))
 		}
 		appliedAt := s.now().UnixNano()
 		rec := Record{
 			Key: key, Op: op, State: StateApplied, Result: out,
+			Identity:  identPtr,
 			AppliedAt: appliedAt, UpdatedAt: appliedAt,
 		}
 		if err := s.appendAndRememberLocked(rec); err != nil {
-			unknown := Record{Key: key, Op: op, State: StateUnknownApplied, UpdatedAt: s.now().UnixNano()}
+			unknown := Record{Key: key, Op: op, State: StateUnknownApplied, Identity: identPtr, UpdatedAt: s.now().UnixNano()}
 			persistErr := s.appendAndRememberLocked(unknown)
 			return unknownAppliedError(key, errors.Join(err, persistErr))
 		}
@@ -395,10 +458,11 @@ func (s *Store) Resolve(key string, readback Readback) (Record, error) {
 		case ResolutionApplied:
 			resolved = Record{
 				Key: key, Op: current.Op, State: StateApplied, Result: result,
+				Identity:  current.Identity,
 				AppliedAt: now, UpdatedAt: now,
 			}
 		case ResolutionAbsent:
-			resolved = Record{Key: key, Op: current.Op, State: StateProvenAbsent, UpdatedAt: now}
+			resolved = Record{Key: key, Op: current.Op, State: StateProvenAbsent, Identity: current.Identity, UpdatedAt: now}
 		case ResolutionUnknown:
 			return s.retainUnknownLocked(current, nil)
 		default:
@@ -415,6 +479,7 @@ func (s *Store) Resolve(key string, readback Readback) (Record, error) {
 func (s *Store) retainUnknownLocked(current Record, cause error) error {
 	unknown := Record{
 		Key: current.Key, Op: current.Op, State: StateUnknownApplied,
+		Identity:  current.Identity,
 		UpdatedAt: s.now().UnixNano(),
 	}
 	persistErr := s.appendAndRememberLocked(unknown)
