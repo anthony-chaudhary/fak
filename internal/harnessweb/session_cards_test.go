@@ -684,6 +684,20 @@ func TestSessionCardsSSEInitialConnectionEmitsSessionUpdate(t *testing.T) {
 	}
 }
 
+func TestSessionCardsSSEFrontendRegistrationAndEventAlignment(t *testing.T) {
+	// Verify frontend script in page registers listeners for both session_update and session_cards
+	for _, want := range []string{
+		`addEventListener("session_update"`,
+		`addEventListener("session_cards"`,
+		`addEventListener("approval_requested"`,
+		`addEventListener("approval_resolved"`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("frontend script in page missing listener registration %q", want)
+		}
+	}
+}
+
 func TestSessionSSE_ScopedReplayFiltering(t *testing.T) {
 	resetSessionHubForTest()
 	defer resetSessionHubForTest()
