@@ -1898,7 +1898,7 @@ func TestIsWindowsAbsolutePath(t *testing.T) {
 		{`D:/work/fak/_scratch/fak-worker-wt-test/gitdir`, true},
 		{`\\server\share\worktree`, true},
 		{`/mnt/c/work/fak/_scratch/fak-worker-wt-test/gitdir`, false},
-		{`/home/user/repo`, false},
+		{`/home/USER/repo`, false},
 		{`relative/path`, false},
 		{``, false},
 	}
