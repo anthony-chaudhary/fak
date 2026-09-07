@@ -92,6 +92,10 @@ type pendingTensor struct {
 // ok=false keeps that expert blob on the f32 dequant→Q8 fallback.
 func residentExpertBlockGeometry(t TensorType) (blockWeights, blockBytes int, ok bool) {
 	switch t {
+	case TensorQ3_K:
+		return qkK, blockQ3KBytes, true
+	case TensorIQ3_S:
+		return qkIQ3S, blockIQ3SBytes, true
 	case TensorQ8_0:
 		return qk8_0, blockQ8_0Bytes, true
 	case TensorQ4_0:

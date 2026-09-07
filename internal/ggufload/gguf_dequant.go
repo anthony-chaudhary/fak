@@ -837,68 +837,7 @@ func dequantQ3K(out []float32, raw []byte) {
 	dequantBlocks(out, raw, qkK, blockQ3KBytes, dequantQ3KScalar)
 }
 
-func dequantQ3KScalar(out []float32, raw []byte) {
-	dequantScalarBlocks(out, raw, qkK, blockQ3KBytes, func(out []float32, raw []byte) {
-		hmask := raw[:qkK/8]
-		q := raw[qkK/8 : qkK/8+qkK/4]
-		scales := unpackQ3KScales(raw[qkK/8+qkK/4 : qkK/8+qkK/4+kScaleSize])
-		d := f16At(raw, blockQ3KBytes-2)
-		qi := 0
-		is := 0
-		mask := byte(1)
-		for n := 0; n < qkK; n += 128 {
-			shift := uint(0)
-			for j := 0; j < 4; j++ {
-				dl := d * float32(scales[is]-32)
-				is++
-				for l := 0; l < 16; l++ {
-					code := int8((q[qi+l] >> shift) & 3)
-					if hmask[l]&mask == 0 {
-						code -= 4
-					}
-					out[n+j*32+l] = dl * float32(code)
-				}
-
-				dl = d * float32(scales[is]-32)
-				is++
-				for l := 0; l < 16; l++ {
-					code := int8((q[qi+16+l] >> shift) & 3)
-					if hmask[16+l]&mask == 0 {
-						code -= 4
-					}
-					out[n+j*32+16+l] = dl * float32(code)
-				}
-				shift += 2
-				mask <<= 1
-			}
-			qi += 32
-		}
-	})
-}
-
-func unpackQ3KScales(raw []byte) [16]int8 {
-	const (
-		kmask1 = uint32(0x03030303)
-		kmask2 = uint32(0x0f0f0f0f)
-	)
-	aux0 := binary.LittleEndian.Uint32(raw[0:4])
-	aux1 := binary.LittleEndian.Uint32(raw[4:8])
-	aux2 := binary.LittleEndian.Uint32(raw[8:12])
-	tmp := aux2
-	words := [4]uint32{
-		(aux0 & kmask2) | (((tmp >> 0) & kmask1) << 4),
-		(aux1 & kmask2) | (((tmp >> 2) & kmask1) << 4),
-		((aux0 >> 4) & kmask2) | (((tmp >> 4) & kmask1) << 4),
-		((aux1 >> 4) & kmask2) | (((tmp >> 6) & kmask1) << 4),
-	}
-	var scales [16]int8
-	for i, word := range words {
-		for j := 0; j < 4; j++ {
-			scales[i*4+j] = int8(byte(word >> (8 * j)))
-		}
-	}
-	return scales
-}
+func dequantQ3KScalar(out []float32, raw []byte) { model.DequantQ3K(out, raw) }
 
 func dequantQ4K(out []float32, raw []byte) {
 	dequantBlocks(out, raw, qkK, blockQ4KBytes, dequantKQuantBody(dequantQ4KArch, dequantQ4KScalar))
@@ -1166,51 +1105,4 @@ func (r *countingReader) value(typ ValueType) (Value, error) {
 // f16 scale, 64 low grid-index bytes, 8 high-bit bytes, 32 sign masks, and four
 // packed 4-bit subscales. The indexing and sign order intentionally mirror
 // llama.cpp dequantize_row_iq3_s so that file-format parity has one oracle.
-func dequantIQ3S(out []float32, raw []byte) {
-	const (
-		qsOffset     = 2
-		qhOffset     = qsOffset + 64
-		signsOffset  = qhOffset + 8
-		scalesOffset = signsOffset + 32
-	)
-	dequantScalarBlocks(out, raw, qkIQ3S, blockIQ3SBytes, func(out []float32, raw []byte) {
-		d := f16At(raw, 0)
-		qs := raw[qsOffset:qhOffset]
-		qh := raw[qhOffset:signsOffset]
-		signs := raw[signsOffset:scalesOffset]
-		scales := raw[scalesOffset:blockIQ3SBytes]
-		for pair := 0; pair < 4; pair++ {
-			scaleByte := scales[pair]
-			for half := 0; half < 2; half++ {
-				ib32 := pair*2 + half
-				nibble := scaleByte & 0x0f
-				if half != 0 {
-					nibble = scaleByte >> 4
-				}
-				db := d * float32(1+2*int(nibble))
-				qBase := ib32 * 8
-				high := qh[ib32]
-				signBase := ib32 * 4
-				outBase := ib32 * 32
-				for group := 0; group < 4; group++ {
-					idx1 := uint16(qs[qBase+2*group]) | (uint16(high)<<uint(8-2*group))&0x100
-					idx2 := uint16(qs[qBase+2*group+1]) | (uint16(high)<<uint(7-2*group))&0x100
-					grid1, grid2 := iq3SGrid[idx1], iq3SGrid[idx2]
-					sign := signs[signBase+group]
-					for j := 0; j < 4; j++ {
-						v1 := float32(byte(grid1 >> uint(8*j)))
-						v2 := float32(byte(grid2 >> uint(8*j)))
-						if sign&(1<<uint(j)) != 0 {
-							v1 = -v1
-						}
-						if sign&(1<<uint(j+4)) != 0 {
-							v2 = -v2
-						}
-						out[outBase+group*8+j] = db * v1
-						out[outBase+group*8+j+4] = db * v2
-					}
-				}
-			}
-		}
-	})
-}
+func dequantIQ3S(out []float32, raw []byte) { model.DequantIQ3S(out, raw) }
