@@ -199,7 +199,7 @@ func TestAssignToNewJobObjectKillsProcessTree(t *testing.T) {
 	// spawned by a job member without breakaway, inherits the job.
 	const script = `$c = Start-Process -FilePath powershell.exe ` +
 		`-ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 120' ` +
-		`-PassThru; Write-Output $c.Id; Start-Sleep -Seconds 120`
+		`-PassThru -NoNewWindow; Write-Output $c.Id; Start-Sleep -Seconds 120`
 	cmd := exec.Command(ps, "-NoProfile", "-NonInteractive", "-Command", script)
 	ConfigureWorkerCommand(cmd)
 
@@ -407,7 +407,7 @@ func runTabCloseHelper(t *testing.T) {
 	}
 	const script = `$PID; $c = Start-Process -FilePath powershell.exe ` +
 		`-ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 120' ` +
-		`-PassThru; Write-Output $c.Id; Start-Sleep -Seconds 120`
+		`-PassThru -NoNewWindow; Write-Output $c.Id; Start-Sleep -Seconds 120`
 	cmd := exec.Command(ps, "-NoProfile", "-NonInteractive", "-Command", script)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
