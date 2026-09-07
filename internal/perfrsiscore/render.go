@@ -66,7 +66,7 @@ func reportHealth(r Report) (HealthSummary, DebtSummary) {
 
 func Compare(current *Report, prior Report) error {
 	if prior.Schema != ReportSchema {
-		return fmt.Errorf("prior schema %q, want %q", prior.Schema, ReportSchema)
+		return fmt.Errorf("prior schema %q, want %q; fix: supply a prior scorecard report conforming to %s", prior.Schema, ReportSchema, ReportSchema)
 	}
 	pm := map[string]Result{}
 	for _, d := range prior.Dimensions {
@@ -76,7 +76,7 @@ func Compare(current *Report, prior Report) error {
 	for _, d := range current.Dimensions {
 		p, ok := pm[d.ID]
 		if !ok {
-			return fmt.Errorf("prior snapshot missing dimension %q", d.ID)
+			return fmt.Errorf("prior snapshot missing dimension %q; fix: ensure the prior scorecard contains all canonical dimensions", d.ID)
 		}
 		c.Deltas = append(c.Deltas, Delta{ID: d.ID, PriorStatus: p.Status, CurrentStatus: d.Status, PriorRatio: p.NormalizedRatio, CurrentRatio: d.NormalizedRatio})
 	}
@@ -89,7 +89,7 @@ func DecodeReport(r io.Reader) (Report, error) {
 	dec := json.NewDecoder(r)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&p); err != nil {
-		return p, err
+		return p, fmt.Errorf("decode report: %w; fix: provide valid JSON conforming to %s", err, ReportSchema)
 	}
 	return p, nil
 }
