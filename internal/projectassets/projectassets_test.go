@@ -1030,6 +1030,17 @@ func TestOpenCodePluginWindowsExtensionAndTimeout(t *testing.T) {
 	if strings.Contains(DefaultOpenCodePlugin, "timeout: 30000") {
 		t.Fatal("DefaultOpenCodePlugin must not contain obsolete 30000ms timeout")
 	}
+	if strings.Contains(DefaultOpenCodePlugin, `if (tool === "edit" || tool === "write")`) ||
+		strings.Contains(DefaultOpenCodePlugin, `if (tool === 'edit' || tool === 'write')`) {
+		t.Fatal("DefaultOpenCodePlugin tool.execute.after omits apply_patch")
+	}
+	if !strings.Contains(DefaultOpenCodePlugin, "mutations.has(tool)") &&
+		!strings.Contains(DefaultOpenCodePlugin, "apply_patch") {
+		t.Fatal("DefaultOpenCodePlugin tool.execute.after missing apply_patch handling")
+	}
+	if strings.Contains(DefaultOpenCodePlugin, "console.log(reminder);") {
+		t.Fatal("DefaultOpenCodePlugin must not execute console.log(reminder)")
+	}
 
 	// Also verify the disk asset .opencode/plugins/dos-proof-guard.js
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
@@ -1055,5 +1066,16 @@ func TestOpenCodePluginWindowsExtensionAndTimeout(t *testing.T) {
 	}
 	if strings.Contains(content, "timeout: 30000") {
 		t.Fatal("disk plugin must not contain obsolete 30000ms timeout")
+	}
+	if strings.Contains(content, `if (tool === "edit" || tool === "write")`) ||
+		strings.Contains(content, `if (tool === 'edit' || tool === 'write')`) {
+		t.Fatal("disk plugin tool.execute.after omits apply_patch")
+	}
+	if !strings.Contains(content, "mutations.has(tool)") &&
+		!strings.Contains(content, "apply_patch") {
+		t.Fatal("disk plugin tool.execute.after missing apply_patch handling")
+	}
+	if strings.Contains(content, "console.log(reminder);") {
+		t.Fatal("disk plugin must not execute console.log(reminder)")
 	}
 }
