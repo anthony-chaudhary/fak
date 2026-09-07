@@ -48,6 +48,10 @@ func FormatOpencodePrompt(issue Issue) string {
 	b.WriteString("- Coordinate substantive work through parallel subagents by default via the 'task' tool (worker, researcher, deep-reason, cross-validator).\n")
 	b.WriteString("- Deliverable: Deliver a clean defect fix or feature implementation along with a deterministic reproduction/regression unit test.\n")
 	b.WriteString("- Provide a 3-line receipt upon completion: status/verdict, changed files, and test output summary, and post directly to the GitHub issue with gh issue comment.\n")
+	b.WriteString("- Milestone Progress Protocol: Report milestone progress using structured comment tags in your commentary:\n")
+	b.WriteString("  <!-- fak:progress milestone=\"<name>\" delta=\"+N files\" tests=\"<pass|fail>\" -->\n")
+	b.WriteString("- Turn Extensions: Request budget extensions when substantive progress is ongoing:\n")
+	b.WriteString("  <!-- fak:extend-turns count=\"N\" reason=\"<reason>\" -->\n")
 
 	return b.String()
 }
