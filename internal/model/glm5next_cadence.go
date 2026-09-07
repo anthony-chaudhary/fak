@@ -1,6 +1,12 @@
 package model
 
 // Adapted from HuggingFace Transformers (transformers/models/glm5_next) under Apache-2.0 license.
+// GLM5Next architecture defines a 4-layer repeating cadence (3:1 KDA-to-DSA ratio):
+// - Layers where layer%4 != 3: KDA linear attention recurrent mixer
+// - Layers where layer%4 == 3 (e.g. layer 3, 7, ...): Decoupled Sparse Attention (DSA)
+//   with KPool 1D key downsampling (stride 4), top-K indexer scoring, and sparse multi-head attention.
+// - MLP sublayers: layers 0..2 use dense SwiGLU; layers 3+ use routed MoE (top-8 of 288 experts + shared expert).
+// - Residual sublayer: Manifold-constrained Hidden Channel (mHC) sphere projection across all layers.
 
 import (
 	"math"

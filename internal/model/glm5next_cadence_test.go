@@ -1,5 +1,12 @@
 package model
 
+// Verification tests for GLM5Next KPool DSA, MoE router, and multi-cycle cadence (#9441):
+// - TestRunGLM5Next4LayerCadenceBlock: 4-layer decode steps, prefill vs decode equivalence, reset and restore
+// - TestRunGLM5Next4LayerCadenceBlock_MultiTokenHistory: KPool key buffer growth and block pooling across sequential tokens
+// - TestGLM5NextLayer3_DSACausalityAndLocalRetention: causal block masking and unconditional local window retention
+// - TestGLM5NextLayer3_MoERoutingWitness: 288-expert router, sigmoid gating, top-8 selection, descending L1-normalized weights
+// - TestGLM5NextMultiCycleCadence_8Layers: multi-cycle cadence across 8 layers (layers 0..2 dense, layers 3..7 MoE, layers 3 and 7 DSA)
+
 import (
 	"math"
 	"math/rand"
