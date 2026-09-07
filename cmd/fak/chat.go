@@ -160,9 +160,16 @@ func cmdChat(argv []string) {
 		rawMode = "fail_closed"
 	}
 
+	var runOpts []agent.RunOption
 	if *cf.policyPath != "" {
 		applyPolicy(*cf.policyPath)
-		agent.SetConfiguredPosture(parseChatMode(rawMode))
+		effMode := parseChatMode(rawMode)
+		agent.SetConfiguredPosture(effMode)
+		snap := adjudicator.Default.PolicySnapshot()
+		if postureExplicit {
+			snap.Posture = effMode
+		}
+		runOpts = append(runOpts, agent.WithPolicySnapshot(snap))
 	} else {
 		initDevRules(rawMode)
 	}
@@ -178,7 +185,6 @@ func cmdChat(argv []string) {
 		effectiveBaseURL = dropin.DefaultBaseURL(*cf.provider)
 	}
 
-	var runOpts []agent.RunOption
 	if *cf.effort != "" {
 		runOpts = append(runOpts, agent.WithRunReasoningEffort(*cf.effort))
 	}

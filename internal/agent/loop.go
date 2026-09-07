@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/session"
@@ -504,6 +505,9 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 	var k *kernel.Kernel
 	if fak {
 		Configure()
+		if cfg.policySnapshot != nil {
+			adjudicator.Default.SetPolicy(*cfg.policySnapshot)
+		}
 		k = kernel.New("localtools")
 		k.SetVDSO(true)
 	}
