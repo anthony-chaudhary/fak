@@ -1,0 +1,28 @@
+#version 450
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly  buffer QGbuf { float QG[]; };
+layout(std430, binding = 1) writeonly buffer Qbuf  { float Q[]; };
+layout(std430, binding = 2) writeonly buffer Gbuf  { float Gate[]; };
+
+layout(push_constant) uniform Push {
+    int tokens;
+    int nHeads;
+    int headDim;
+} pc;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    uint width = uint(pc.nHeads) * uint(pc.headDim);
+    uint total = uint(pc.tokens) * width;
+    if (i >= total) return;
+
+    uint token = i / width;
+    uint within = i % width;
+    uint head = within / uint(pc.headDim);
+    uint dim = within % uint(pc.headDim);
+
+    uint src = token * 2u * width + head * 2u * uint(pc.headDim) + dim;
+    Q[i] = QG[src];
+    Gate[i] = QG[src + uint(pc.headDim)];
+}

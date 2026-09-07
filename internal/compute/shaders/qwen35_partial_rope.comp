@@ -1,0 +1,44 @@
+#version 450
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly  buffer InBuf  { float In[]; };
+layout(std430, binding = 1) writeonly buffer OutBuf { float Out[]; };
+
+layout(push_constant) uniform Push {
+    int tokens;
+    int startPos;
+    int nHeads;
+    int headDim;
+    int rotaryDim;
+    float theta;
+} pc;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    uint width = uint(pc.nHeads) * uint(pc.headDim);
+    uint total = uint(pc.tokens) * width;
+    if (i >= total) return;
+
+    uint token = i / width;
+    uint within = i % width;
+    uint head = within / uint(pc.headDim);
+    uint dim = within % uint(pc.headDim);
+
+    if (dim >= uint(pc.rotaryDim)) {
+        Out[i] = In[i];
+        return;
+    }
+
+    uint halfRotary = uint(pc.rotaryDim) / 2u;
+    uint j = dim < halfRotary ? dim : dim - halfRotary;
+    float freq = pow(pc.theta, -2.0 * float(j) / float(pc.rotaryDim));
+    float angle = float(pc.startPos + int(token)) * freq;
+    float cs = cos(angle);
+    float sn = sin(angle);
+
+    uint base = token * width + head * uint(pc.headDim);
+    float a = In[base + j];
+    float b = In[base + j + halfRotary];
+
+    Out[i] = (dim < halfRotary) ? (a * cs - b * sn) : (b * cs + a * sn);
+}

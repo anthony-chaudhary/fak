@@ -1,0 +1,29 @@
+#version 450
+layout(local_size_x = 256) in;
+layout(std430,binding=0) readonly buffer Q { float q[]; };
+layout(std430,binding=1) readonly buffer K { float k[]; };
+layout(std430,binding=2) writeonly buffer QO { float qo[]; };
+layout(std430,binding=3) writeonly buffer KO { float ko[]; };
+layout(push_constant) uniform PC {
+    int tokens; int startPos; int qHeads; int kHeads; int hd; int rotary; float theta;
+} pc;
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    uint qn = uint(pc.tokens * pc.qHeads * pc.hd);
+    uint kn = uint(pc.tokens * pc.kHeads * pc.hd);
+    if (i >= qn + kn) return;
+    bool isQ = i < qn;
+    uint j = isQ ? i : i - qn;
+    uint d = j % uint(pc.hd);
+    uint token = j / uint((isQ ? pc.qHeads : pc.kHeads) * pc.hd);
+    float a = isQ ? q[j] : k[j];
+    if (d < uint(pc.rotary)) {
+        uint halfDim = uint(pc.rotary / 2);
+        uint pairDim = d % halfDim;
+        uint other = j - d + pairDim + (d < halfDim ? halfDim : 0u);
+        float b = isQ ? q[other] : k[other];
+        float angle = float(pc.startPos + int(token)) * pow(pc.theta, -2.0 * float(pairDim) / float(pc.rotary));
+        a = a * cos(angle) + (d < halfDim ? -b : b) * sin(angle);
+    }
+    if (isQ) qo[j] = a; else ko[j] = a;
+}
