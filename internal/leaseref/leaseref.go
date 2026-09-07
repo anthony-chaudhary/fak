@@ -43,6 +43,7 @@
 package leaseref
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -334,16 +335,116 @@ func isLeaseRef(ref string) bool {
 
 // List reads every lease record under refs/fak/locks/*, sorted by id for a stable view.
 // This is the source a cross-machine arbiter folds into its live_leases: after an
-// ordinary fetch, a peer's pushed lease appears here. A record whose blob does not parse
-// is SKIPPED (a forward-compatible or corrupt entry must not blind the whole view), not
-// surfaced as an error.
+// ordinary fetch, a peer's pushed lease appears here. It prefers ONE batched
+// `git cat-file --batch` process (batchReadRecords) over the serial per-ref reader (#9674).
+// A record whose blob does not parse is SKIPPED (a forward-compatible or corrupt entry
+// must not blind the whole view), not surfaced as an error.
 func (s *Store) List(ctx context.Context) ([]Record, error) {
+	if s.runStdin != nil {
+		if recs, ok := s.batchReadRecords(ctx); ok {
+			sort.Slice(recs, func(i, j int) bool { return recs[i].ID < recs[j].ID })
+			return recs, nil
+		}
+	}
 	recs, err := listRefs(ctx, s, isLeaseRef, s.readRef)
 	if err != nil {
 		return nil, err
 	}
 	sort.Slice(recs, func(i, j int) bool { return recs[i].ID < recs[j].ID })
 	return recs, nil
+}
+
+// batchReadRecords reads EVERY lock lease record through a SINGLE `git cat-file --batch`
+// process instead of one `cat-file blob` spawn per ref — mirroring batchReadSessions (#9674).
+// It lists the shared namespace once with for-each-ref, keeps only the lock lease refs
+// (the namespace split — session descriptors, intent leases, and contract records are EXCLUDED),
+// feeds those ref names on stdin to one cat-file --batch, and unmarshals each streamed blob.
+// It preserves readRef's semantics EXACTLY: a blob that does not JSON-parse (forward-incompatible / corrupt),
+// and a missing/absent object in the stream, are both SKIPPED — one bad or absent entry must never blind
+// the whole view — and an id-less blob has its ID filled from the ref name. The bool result is the
+// reap.go idiom: ok == true means the batch produced the authoritative view (an empty namespace is a
+// valid empty view); ok == false signals the batch was unavailable/refused so List must degrade to the
+// per-ref reader instead of dropping refs.
+func (s *Store) batchReadRecords(ctx context.Context) ([]Record, bool) {
+	out, code, err := s.run(ctx, s.dir, "for-each-ref", "--format=%(refname)", refPrefix)
+	if err != nil {
+		return nil, false // git not executable -> let the per-ref path surface the clean error
+	}
+	if code != 0 {
+		return nil, true // absent/empty namespace is a valid empty view, not an error (matches listRefs)
+	}
+	var refs []string
+	for _, line := range strings.Split(out, "\n") {
+		if ref := strings.TrimSpace(line); isLeaseRef(ref) {
+			refs = append(refs, ref)
+		}
+	}
+	if len(refs) == 0 {
+		return nil, true // no lease refs -> empty view, and no need to spawn cat-file at all
+	}
+	var stdin strings.Builder
+	for _, ref := range refs {
+		stdin.WriteString(ref)
+		stdin.WriteByte('\n')
+	}
+	stream, code, err := s.runStdin(ctx, s.dir, stdin.String(), "cat-file", "--batch")
+	if err != nil || code != 0 {
+		return nil, false // git not executable or a refused/broken batch -> degrade to per-ref
+	}
+	return parseRecordBatch(stream, refs), true
+}
+
+// parseRecordBatch parses a `git cat-file --batch` stream into lease Records, zipping each
+// record to the ref that produced it by POSITION — cat-file --batch emits exactly one record
+// per input line, in the order fed. Each record is either a content header
+// `<oid> <type> <size>\n` followed by <size> payload bytes and a trailing \n, or a
+// `<object> missing\n` status line with no payload. The payload is read by its declared byte
+// COUNT (not line-splitting) so a blob is decoded whole regardless of embedded newlines. A
+// missing object, and a blob whose payload does not JSON-parse, are both SKIPPED — the same
+// "absence and corruption never blind the whole view" rule the per-ref path applies.
+// An id-less blob has its ID filled from the ref name (leaseIDFromRef).
+func parseRecordBatch(stream string, refs []string) []Record {
+	data := []byte(stream)
+	var recs []Record
+	pos := 0
+	for _, ref := range refs {
+		nl := bytes.IndexByte(data[pos:], '\n')
+		if nl < 0 {
+			break // truncated stream: no header line left to read
+		}
+		header := string(data[pos : pos+nl])
+		pos += nl + 1
+		fields := strings.Fields(header)
+		// A `<object> missing` (or `<object> ambiguous`) status line carries NO payload: it has
+		// fewer than three fields (no <type> <size>), so skip it and advance to the next ref's
+		// record. Only a three-field `<oid> <type> <size>` header is followed by payload bytes.
+		size, ok := blobSize(fields)
+		if !ok {
+			continue
+		}
+		if pos+size > len(data) {
+			break // header claims more bytes than the stream holds: truncated, stop safely
+		}
+		payload := data[pos : pos+size]
+		pos += size
+		if pos < len(data) && data[pos] == '\n' {
+			pos++ // consume the trailing newline cat-file emits after each object's payload
+		}
+		var r Record
+		if json.Unmarshal(payload, &r) != nil {
+			continue // skip a forward-incompatible / corrupt blob, don't fail the whole view
+		}
+		if r.ID == "" {
+			r.ID = leaseIDFromRef(ref)
+		}
+		recs = append(recs, r)
+	}
+	return recs
+}
+
+// leaseIDFromRef extracts the lease ID from its ref name by stripping the refPrefix.
+func leaseIDFromRef(ref string) string {
+	return strings.TrimPrefix(ref, refPrefix)
 }
 
 // Live reads List and returns only the records that are NOT expired at time now. This is
@@ -442,7 +543,7 @@ func (s *Store) readRef(ctx context.Context, ref string) (Record, error) {
 		return Record{}, fmt.Errorf("leaseref: unmarshal record at %s: %w", ref, err)
 	}
 	if rec.ID == "" {
-		rec.ID = strings.TrimPrefix(ref, refPrefix)
+		rec.ID = leaseIDFromRef(ref)
 	}
 	return rec, nil
 }

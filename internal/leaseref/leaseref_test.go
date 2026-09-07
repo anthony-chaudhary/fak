@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -92,7 +93,11 @@ func (f *fakeGit) run(ctx context.Context, dir string, args ...string) (string, 
 		if !ok {
 			return "", 1, nil
 		}
-		return string(f.blobs[id]), 0, nil
+		blob, ok := f.blobs[id]
+		if !ok {
+			return "", 1, nil
+		}
+		return string(blob), 0, nil
 	case "for-each-ref":
 		// for-each-ref --format=%(refname) <prefix>
 		prefix := args[len(args)-1]
@@ -141,7 +146,11 @@ func (f *fakeGit) runStdin(ctx context.Context, dir, stdin string, args ...strin
 				b.WriteString(ref + " missing\n")
 				continue
 			}
-			blob := f.blobs[id]
+			blob, ok := f.blobs[id]
+			if !ok {
+				b.WriteString(ref + " missing\n")
+				continue
+			}
 			fmt.Fprintf(&b, "%s blob %d\n", id, len(blob))
 			b.Write(blob)
 			b.WriteByte('\n')
@@ -512,5 +521,294 @@ func TestAcquireRejectsInvalidHashObjectIDBeforeUpdateRef(t *testing.T) {
 		if call[0] == "update-ref" {
 			t.Fatalf("invalid oid reached update-ref: %v", call)
 		}
+	}
+}
+
+// TestStoreLiveBatchedCatFile witnesses that Store.Live (and Store.List) reads a backlog
+// of 100+ synthetic lease refs in O(1) git processes: exactly one for-each-ref and one
+// cat-file --batch (zero per-ref cat-file blob spawns). It verifies identical record values,
+// expiration checks, malformed ref skipping, and namespace partitioning against the reference
+// fallback per-ref reader.
+func TestStoreLiveBatchedCatFile(t *testing.T) {
+	g := newFakeGit()
+	now := time.Unix(2000000000, 0)
+
+	// Populate 100+ synthetic lease refs:
+	// - 70 active lease records (future TTL)
+	// - 35 expired lease records (past AcquiredAt + short TTL)
+	// - 10 active records with no ID in stored JSON (proves ID is populated from ref name)
+	// - 5 malformed / non-JSON blobs (proves corrupt refs are skipped cleanly)
+	// - 5 missing refs (refs pointing to non-existent blob OIDs, proves missing is skipped)
+	// - 15 non-lease refs under the same refs/fak/locks/ prefix (session-, intent-, contract-)
+	// Total lock lease refs = 125.
+	for i := 0; i < 70; i++ {
+		id := fmt.Sprintf("lease-active-%03d", i)
+		rec := Record{
+			ID:         id,
+			TreeGlobs:  []string{fmt.Sprintf("internal/pkg%d/**", i)},
+			Holder:     fmt.Sprintf("node-a:worker-%d", i),
+			AcquiredAt: now.Unix(),
+			TTLSeconds: 3600,
+		}
+		b, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatalf("marshal active record: %v", err)
+		}
+		oid := fmt.Sprintf("oid-active-%03d", i)
+		g.blobs[oid] = b
+		g.refs[refPrefix+id] = oid
+	}
+
+	for i := 0; i < 35; i++ {
+		id := fmt.Sprintf("lease-expired-%03d", i)
+		rec := Record{
+			ID:         id,
+			TreeGlobs:  []string{fmt.Sprintf("internal/old%d/**", i)},
+			Holder:     fmt.Sprintf("node-b:worker-%d", i),
+			AcquiredAt: now.Unix() - 500,
+			TTLSeconds: 60,
+		}
+		b, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatalf("marshal expired record: %v", err)
+		}
+		oid := fmt.Sprintf("oid-expired-%03d", i)
+		g.blobs[oid] = b
+		g.refs[refPrefix+id] = oid
+	}
+
+	for i := 0; i < 10; i++ {
+		id := fmt.Sprintf("lease-noid-%03d", i)
+		b := []byte(fmt.Sprintf(`{"tree_globs":["internal/noid%d/**"],"holder":"node-c:worker-%d","acquired_unix":%d,"ttl_seconds":3600}`, i, i, now.Unix()))
+		oid := fmt.Sprintf("oid-noid-%03d", i)
+		g.blobs[oid] = b
+		g.refs[refPrefix+id] = oid
+	}
+
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("lease-corrupt-%03d", i)
+		oid := fmt.Sprintf("oid-corrupt-%03d", i)
+		g.blobs[oid] = []byte("not valid json {{{")
+		g.refs[refPrefix+id] = oid
+	}
+
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("lease-missing-%03d", i)
+		g.refs[refPrefix+id] = fmt.Sprintf("oid-missing-%03d", i) // not in g.blobs
+	}
+
+	// Non-lease refs in the same namespace partition
+	for i := 0; i < 5; i++ {
+		g.blobs[fmt.Sprintf("oid-session-%d", i)] = []byte(`{"id":"s"}`)
+		g.refs[fmt.Sprintf("refs/fak/locks/session-s%d", i)] = fmt.Sprintf("oid-session-%d", i)
+		g.blobs[fmt.Sprintf("oid-intent-%d", i)] = []byte(`{"target_key":"k"}`)
+		g.refs[fmt.Sprintf("refs/fak/locks/intent-i%d", i)] = fmt.Sprintf("oid-intent-%d", i)
+		g.blobs[fmt.Sprintf("oid-contract-%d", i)] = []byte(`{"ticket_id":"t"}`)
+		g.refs[fmt.Sprintf("refs/fak/locks/contract-c%d", i)] = fmt.Sprintf("oid-contract-%d", i)
+	}
+
+	// Counting runner wrapping fakeGit
+	var procCount, forEachCalls, batchCalls, perRefBlobCalls int
+	countingRun := func(ctx context.Context, dir string, args ...string) (string, int, error) {
+		procCount++
+		if len(args) >= 1 && args[0] == "for-each-ref" {
+			forEachCalls++
+		}
+		if len(args) >= 2 && args[0] == "cat-file" && args[1] == "blob" {
+			perRefBlobCalls++
+		}
+		return g.run(ctx, dir, args...)
+	}
+	countingStdin := func(ctx context.Context, dir, stdin string, args ...string) (string, int, error) {
+		procCount++
+		if len(args) >= 2 && args[0] == "cat-file" && args[1] == "--batch" {
+			batchCalls++
+		}
+		return g.runStdin(ctx, dir, stdin, args...)
+	}
+
+	store := NewWithStdinRunner(countingRun, countingStdin, "")
+
+	live, expired, err := store.Live(ctx(), now)
+	if err != nil {
+		t.Fatalf("Live failed: %v", err)
+	}
+
+	// O(1) process witness: exactly 1 for-each-ref + 1 cat-file --batch, 0 per-ref cat-file blob
+	if forEachCalls != 1 {
+		t.Fatalf("for-each-ref calls = %d, want exactly 1", forEachCalls)
+	}
+	if batchCalls != 1 {
+		t.Fatalf("cat-file --batch calls = %d, want exactly 1 (batched pipeline)", batchCalls)
+	}
+	if perRefBlobCalls != 0 {
+		t.Fatalf("per-ref cat-file blob calls = %d, want 0 (eliminated per-ref spawns)", perRefBlobCalls)
+	}
+	if procCount != 2 {
+		t.Fatalf("total git processes spawned = %d, want exactly 2", procCount)
+	}
+
+	// Verify counts:
+	// 70 active + 10 noid (which are active and had ID populated) = 80 live
+	// 35 expired
+	// 5 corrupt skipped, 5 missing skipped, 15 non-lease refs excluded
+	if len(live) != 80 {
+		t.Fatalf("live count = %d, want 80", len(live))
+	}
+	if len(expired) != 35 {
+		t.Fatalf("expired count = %d, want 35", len(expired))
+	}
+
+	// Verify that live records are sorted by ID
+	for i := 1; i < len(live); i++ {
+		if live[i-1].ID >= live[i].ID {
+			t.Fatalf("live records not sorted: live[%d]=%s >= live[%d]=%s", i-1, live[i-1].ID, i, live[i].ID)
+		}
+	}
+
+	// Verify that noid records had ID properly filled from the ref name
+	var noidCount int
+	for _, r := range live {
+		if strings.HasPrefix(r.ID, "lease-noid-") {
+			noidCount++
+			if r.Holder == "" || len(r.TreeGlobs) == 0 {
+				t.Fatalf("noid record lost fields: %+v", r)
+			}
+		}
+	}
+	if noidCount != 10 {
+		t.Fatalf("noid records found = %d, want 10", noidCount)
+	}
+
+	// Verify parity with the per-ref fallback path
+	fallbackStore := NewWithRunner(g.run, "")
+	wantLive, wantExpired, err := fallbackStore.Live(ctx(), now)
+	if err != nil {
+		t.Fatalf("fallback Live failed: %v", err)
+	}
+	if !reflect.DeepEqual(live, wantLive) {
+		t.Fatalf("batched live records mismatch fallback path:\ngot  %+v\nwant %+v", live, wantLive)
+	}
+	if !reflect.DeepEqual(expired, wantExpired) {
+		t.Fatalf("batched expired records mismatch fallback path:\ngot  %+v\nwant %+v", expired, wantExpired)
+	}
+
+	// Integration subtest against real git
+	t.Run("RealGit", func(t *testing.T) {
+		if _, err := exec.LookPath("git"); err != nil {
+			t.Skip("git not on PATH")
+		}
+		dir := t.TempDir()
+		for _, args := range [][]string{
+			{"init", "-q"},
+			{"config", "user.email", "t@example.com"},
+			{"config", "user.name", "t"},
+		} {
+			c := exec.Command("git", args...)
+			c.Dir = dir
+			if out, err := c.CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
+		}
+
+		// Write blobs and create 100+ refs using update-ref --stdin
+		sBlob, err := (&Store{run: gitRunner, dir: dir}).writeBlob(ctx(), []byte(`{"tree_globs":["a/**"],"holder":"h","acquired_unix":2000000000,"ttl_seconds":3600}`))
+		if err != nil {
+			t.Fatalf("writeBlob active: %v", err)
+		}
+		sExpBlob, err := (&Store{run: gitRunner, dir: dir}).writeBlob(ctx(), []byte(`{"tree_globs":["b/**"],"holder":"h","acquired_unix":100,"ttl_seconds":10}`))
+		if err != nil {
+			t.Fatalf("writeBlob expired: %v", err)
+		}
+		sCorruptBlob, err := (&Store{run: gitRunner, dir: dir}).writeBlob(ctx(), []byte("not json {{{"))
+		if err != nil {
+			t.Fatalf("writeBlob corrupt: %v", err)
+		}
+
+		var updateStdin strings.Builder
+		for i := 0; i < 70; i++ {
+			fmt.Fprintf(&updateStdin, "create refs/fak/locks/lease-rg-active-%03d %s\n", i, sBlob)
+		}
+		for i := 0; i < 35; i++ {
+			fmt.Fprintf(&updateStdin, "create refs/fak/locks/lease-rg-expired-%03d %s\n", i, sExpBlob)
+		}
+		for i := 0; i < 5; i++ {
+			fmt.Fprintf(&updateStdin, "create refs/fak/locks/lease-rg-corrupt-%03d %s\n", i, sCorruptBlob)
+		}
+		// Also non-lease session refs
+		for i := 0; i < 5; i++ {
+			fmt.Fprintf(&updateStdin, "create refs/fak/locks/session-rg-%03d %s\n", i, sBlob)
+		}
+
+		c := exec.Command("git", "update-ref", "--stdin")
+		c.Dir = dir
+		c.Stdin = strings.NewReader(updateStdin.String())
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("update-ref --stdin: %v\n%s", err, out)
+		}
+
+		var realProcCount, realForEach, realBatch, realPerRef int
+		rgRun := func(ctx context.Context, d string, args ...string) (string, int, error) {
+			realProcCount++
+			if len(args) >= 1 && args[0] == "for-each-ref" {
+				realForEach++
+			}
+			if len(args) >= 2 && args[0] == "cat-file" && args[1] == "blob" {
+				realPerRef++
+			}
+			return gitRunner(ctx, d, args...)
+		}
+		rgStdin := func(ctx context.Context, d, stdin string, args ...string) (string, int, error) {
+			realProcCount++
+			if len(args) >= 2 && args[0] == "cat-file" && args[1] == "--batch" {
+				realBatch++
+			}
+			return gitStdinRunner(ctx, d, stdin, args...)
+		}
+
+		rgStore := NewWithStdinRunner(rgRun, rgStdin, dir)
+		rgLive, rgExpired, err := rgStore.Live(ctx(), now)
+		if err != nil {
+			t.Fatalf("real git Live: %v", err)
+		}
+		if realForEach != 1 || realBatch != 1 || realPerRef != 0 || realProcCount != 2 {
+			t.Fatalf("real git process counts: for-each=%d, batch=%d, per-ref=%d, total=%d; want 1, 1, 0, 2", realForEach, realBatch, realPerRef, realProcCount)
+		}
+		if len(rgLive) != 70 {
+			t.Fatalf("real git live count = %d, want 70", len(rgLive))
+		}
+		if len(rgExpired) != 35 {
+			t.Fatalf("real git expired count = %d, want 35", len(rgExpired))
+		}
+	})
+}
+
+// TestParseRecordBatchSemantics pins the record-stream parser directly: a `missing` status
+// line and a non-JSON blob are both SKIPPED, an id-less blob has its ID filled from the ref
+// name, and a payload containing a literal newline is read WHOLE by its declared byte count
+// (a line-splitting parser would corrupt it).
+func TestParseRecordBatchSemantics(t *testing.T) {
+	refs := []string{
+		"refs/fak/locks/lease-a",
+		"refs/fak/locks/lease-gone",
+		"refs/fak/locks/lease-corrupt",
+		"refs/fak/locks/lease-noid",
+	}
+	var b strings.Builder
+	rec := func(oid, payload string) { fmt.Fprintf(&b, "%s blob %d\n%s\n", oid, len(payload), payload) }
+	rec(strings.Repeat("a", 40), `{"id":"lease-a","holder":"h1","tree_globs":["pkg/a/**"],"acquired_unix":1,"ttl_seconds":0}`)
+	b.WriteString("refs/fak/locks/lease-gone missing\n")
+	rec(strings.Repeat("b", 40), "not valid json {{{")
+	rec(strings.Repeat("c", 40), "{\n  \"holder\": \"h2\",\n  \"tree_globs\": [\"pkg/b/**\"],\n  \"acquired_unix\": 2\n}")
+
+	got := parseRecordBatch(b.String(), refs)
+	if len(got) != 2 {
+		t.Fatalf("parseRecordBatch returned %d records, want 2 (missing + corrupt skipped)", len(got))
+	}
+	if got[0].ID != "lease-a" || got[0].Holder != "h1" || len(got[0].TreeGlobs) != 1 || got[0].TreeGlobs[0] != "pkg/a/**" {
+		t.Fatalf("first record = %+v, want lease-a with tree_globs", got[0])
+	}
+	if got[1].ID != "lease-noid" || got[1].Holder != "h2" || len(got[1].TreeGlobs) != 1 || got[1].TreeGlobs[0] != "pkg/b/**" {
+		t.Fatalf("id-less record = %+v, want ID filled to lease-noid", got[1])
 	}
 }
