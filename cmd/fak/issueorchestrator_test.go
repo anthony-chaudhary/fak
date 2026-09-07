@@ -436,3 +436,399 @@ func TestIssueOrchestratorCLILiveViewValidation(t *testing.T) {
 		t.Errorf("expected view error in stderr: %s", stderr.String())
 	}
 }
+
+func TestIssueOrchestratorAdjustStepsSubcommandWithPlan(t *testing.T) {
+	plan := issueorchestrator.Plan{
+		Schema:        issueorchestrator.WavePlanSchema,
+		TotalIssues:   2,
+		PlannedIssues: 2,
+		PlannedSteps:  7,
+		TotalWaves:    1,
+		Waves: []issueorchestrator.Wave{
+			{
+				ID:         "wave-1",
+				WaveSize:   2,
+				StepBudget: 7,
+				Issues: []issueorchestrator.Issue{
+					{Number: 101, Title: "Issue 101", ExpectedSteps: 3, Dispatchability: "dispatchable"},
+					{Number: 102, Title: "Issue 102", ExpectedSteps: 4, Dispatchability: "dispatchable"},
+				},
+			},
+		},
+	}
+	b, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	planPath := filepath.Join(t.TempDir(), "plan.json")
+	if err := os.WriteFile(planPath, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"adjust-steps",
+		"--issue", "101",
+		"--steps", "9",
+		"--reason", "AST expansion",
+		"--plan", planPath,
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("adjust-steps failed: code=%d, stderr=%s", code, stderr.String())
+	}
+
+	// 1. Verify stdout JSON matches updated plan
+	var updatedStdoutPlan issueorchestrator.Plan
+	if err := json.Unmarshal(stdout.Bytes(), &updatedStdoutPlan); err != nil {
+		t.Fatalf("failed to decode stdout plan JSON: %v; raw: %s", err, stdout.String())
+	}
+	if updatedStdoutPlan.PlannedSteps != 13 {
+		t.Errorf("expected PlannedSteps 13, got %d", updatedStdoutPlan.PlannedSteps)
+	}
+	if updatedStdoutPlan.Waves[0].Issues[0].ExpectedSteps != 9 {
+		t.Errorf("expected issue 101 steps 9, got %d", updatedStdoutPlan.Waves[0].Issues[0].ExpectedSteps)
+	}
+	if updatedStdoutPlan.Waves[0].StepBudget != 13 {
+		t.Errorf("expected wave 1 StepBudget 13, got %d", updatedStdoutPlan.Waves[0].StepBudget)
+	}
+
+	// 2. Verify file was modified in-place on disk
+	fileBytes, err := os.ReadFile(planPath)
+	if err != nil {
+		t.Fatalf("failed to read plan file: %v", err)
+	}
+	var filePlan issueorchestrator.Plan
+	if err := json.Unmarshal(fileBytes, &filePlan); err != nil {
+		t.Fatalf("failed to decode disk plan JSON: %v", err)
+	}
+	if filePlan.PlannedSteps != 13 {
+		t.Errorf("expected disk PlannedSteps 13, got %d", filePlan.PlannedSteps)
+	}
+	if filePlan.Waves[0].Issues[0].ExpectedSteps != 9 {
+		t.Errorf("expected disk issue 101 steps 9, got %d", filePlan.Waves[0].Issues[0].ExpectedSteps)
+	}
+	if filePlan.Diagnostics == nil || len(filePlan.Diagnostics.AdvisoryWarnings) == 0 {
+		t.Fatalf("expected diagnostics advisory warnings on disk plan")
+	}
+	if !strings.Contains(filePlan.Diagnostics.AdvisoryWarnings[0], "AST expansion") {
+		t.Errorf("expected advisory warning to contain AST expansion: %v", filePlan.Diagnostics.AdvisoryWarnings)
+	}
+}
+
+func TestIssueOrchestratorAdjustStepsSubcommandWithoutPlan(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"adjust-steps",
+		"--issue", "205",
+		"--steps", "5",
+		"--reason", "minimal plan test",
+	})
+	if code != 0 {
+		t.Fatalf("adjust-steps failed: code=%d, stderr=%s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "Adjusted issue #205 steps to 5") {
+		t.Errorf("stdout missing adjustment summary: %s", out)
+	}
+	if !strings.Contains(out, "Reason: minimal plan test") {
+		t.Errorf("stdout missing reason: %s", out)
+	}
+}
+
+func TestIssueOrchestratorAdjustStepsSubcommandErrors(t *testing.T) {
+	// Missing --issue
+	var out1, err1 bytes.Buffer
+	code1 := runIssueOrchestrator(&out1, &err1, []string{
+		"adjust-steps",
+		"--steps", "5",
+	})
+	if code1 != 2 {
+		t.Errorf("expected exit code 2 for missing --issue, got %d", code1)
+	}
+
+	// Missing --steps
+	var out2, err2 bytes.Buffer
+	code2 := runIssueOrchestrator(&out2, &err2, []string{
+		"adjust-steps",
+		"--issue", "101",
+	})
+	if code2 != 2 {
+		t.Errorf("expected exit code 2 for missing --steps, got %d", code2)
+	}
+
+	// Issue not found in plan
+	plan := issueorchestrator.Plan{
+		Schema:      issueorchestrator.WavePlanSchema,
+		TotalIssues: 1,
+		TotalWaves:  1,
+		Waves: []issueorchestrator.Wave{
+			{
+				ID: "wave-1",
+				Issues: []issueorchestrator.Issue{
+					{Number: 101, ExpectedSteps: 3},
+				},
+			},
+		},
+	}
+	b, _ := json.Marshal(plan)
+	planPath := filepath.Join(t.TempDir(), "plan.json")
+	_ = os.WriteFile(planPath, b, 0o644)
+
+	var out3, err3 bytes.Buffer
+	code3 := runIssueOrchestrator(&out3, &err3, []string{
+		"adjust-steps",
+		"--issue", "999",
+		"--steps", "5",
+		"--plan", planPath,
+	})
+	if code3 != 1 {
+		t.Errorf("expected exit code 1 for issue not found, got %d", code3)
+	}
+}
+
+func TestIssueOrchestratorHarvestFlagExplicitReceipt(t *testing.T) {
+	receipt := issueorchestrator.HarvestReceipt{
+		Schema: issueorchestrator.HarvestReceiptSchema,
+		WaveID: "wave-test-harvest-explicit",
+		Leaves: []issueorchestrator.LeafReceipt{
+			{IssueNumber: 301, Title: "Leaf 301", Lane: "gateway", State: issueorchestrator.StateVerifiedCleared, CommitSHA: "sha301"},
+			{IssueNumber: 302, Title: "Leaf 302", Lane: "model", State: issueorchestrator.StateResidualReview, CommitSHA: "sha302"},
+			{IssueNumber: 303, Title: "Leaf 303", Lane: "compute", State: issueorchestrator.StateQuietIncomplete},
+			{IssueNumber: 304, Title: "Leaf 304", Lane: "token", State: issueorchestrator.StateSpinningStalled},
+		},
+	}
+	b, err := json.MarshalIndent(receipt, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptPath := filepath.Join(t.TempDir(), "wave_receipt.json")
+	if err := os.WriteFile(receiptPath, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--harvest",
+		"--receipt", receiptPath,
+		"--auto-land",
+		"--min-clear-rate", "0.20",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("--harvest failed: code=%d, stderr=%s", code, stderr.String())
+	}
+
+	var res issueorchestrator.HarvestReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatalf("failed to decode harvest receipt JSON: %v; raw: %s", err, stdout.String())
+	}
+
+	if res.WaveID != "wave-test-harvest-explicit" {
+		t.Errorf("expected wave_id %q, got %q", "wave-test-harvest-explicit", res.WaveID)
+	}
+	if res.TotalLeaves != 4 {
+		t.Errorf("expected 4 total leaves, got %d", res.TotalLeaves)
+	}
+	if res.ClearedCount != 1 {
+		t.Errorf("expected 1 cleared, got %d", res.ClearedCount)
+	}
+	if res.ResidualCount != 1 {
+		t.Errorf("expected 1 residual, got %d", res.ResidualCount)
+	}
+	if res.QuietCount != 1 {
+		t.Errorf("expected 1 quiet, got %d", res.QuietCount)
+	}
+	if res.StalledCount != 1 {
+		t.Errorf("expected 1 stalled, got %d", res.StalledCount)
+	}
+	if res.ClearRate != 0.25 {
+		t.Errorf("expected clear rate 0.25, got %f", res.ClearRate)
+	}
+	if len(res.LandedSHAs) != 1 || res.LandedSHAs[0] != "sha301" {
+		t.Errorf("expected LandedSHAs [sha301], got %v", res.LandedSHAs)
+	}
+	if len(res.ReviewQueue) != 1 || res.ReviewQueue[0].IssueNumber != 302 {
+		t.Errorf("expected ReviewQueue with issue #302, got %v", res.ReviewQueue)
+	}
+}
+
+func TestIssueOrchestratorHarvestFlagTextOutput(t *testing.T) {
+	receipt := issueorchestrator.HarvestReceipt{
+		Schema: issueorchestrator.HarvestReceiptSchema,
+		WaveID: "wave-test-text",
+		Leaves: []issueorchestrator.LeafReceipt{
+			{IssueNumber: 401, Title: "Leaf 401", Lane: "gateway", State: issueorchestrator.StateVerifiedCleared, CommitSHA: "sha401"},
+		},
+	}
+	b, err := json.MarshalIndent(receipt, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptPath := filepath.Join(t.TempDir(), "wave_receipt.json")
+	if err := os.WriteFile(receiptPath, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--harvest",
+		"--receipt", receiptPath,
+	})
+	if code != 0 {
+		t.Fatalf("--harvest text failed: code=%d, stderr=%s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "Wave Harvest Reconciliation: wave-test-text") {
+		t.Errorf("stdout missing header: %s", out)
+	}
+	if !strings.Contains(out, "Cleared:        1 (100.0%)") {
+		t.Errorf("stdout missing cleared count: %s", out)
+	}
+}
+
+func TestIssueOrchestratorHarvestFlagDefaultReceiptDiscovery(t *testing.T) {
+	wsDir := t.TempDir()
+	dispatchRunsDir := filepath.Join(wsDir, ".dispatch-runs")
+	if err := os.MkdirAll(dispatchRunsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	receipt := issueorchestrator.HarvestReceipt{
+		Schema: issueorchestrator.HarvestReceiptSchema,
+		WaveID: "wave-auto-discovered",
+		Leaves: []issueorchestrator.LeafReceipt{
+			{IssueNumber: 501, Title: "Leaf 501", Lane: "gateway", State: issueorchestrator.StateVerifiedCleared},
+		},
+	}
+	b, _ := json.Marshal(receipt)
+	receiptPath := filepath.Join(dispatchRunsDir, "wave_receipt_auto.json")
+	if err := os.WriteFile(receiptPath, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--workspace", wsDir,
+		"--harvest",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("harvest auto-discovery failed: code=%d, stderr=%s", code, stderr.String())
+	}
+
+	var res issueorchestrator.HarvestReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatalf("failed to decode json: %v", err)
+	}
+	if res.WaveID != "wave-auto-discovered" {
+		t.Errorf("expected discovered wave_id %q, got %q", "wave-auto-discovered", res.WaveID)
+	}
+}
+
+func TestIssueOrchestratorHarvestFlagMissingReceiptError(t *testing.T) {
+	emptyWs := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--workspace", emptyWs,
+		"--harvest",
+	})
+	if code != 2 {
+		t.Errorf("expected exit code 2 when no receipt found, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "no wave receipt found") {
+		t.Errorf("expected error message in stderr: %s", stderr.String())
+	}
+}
+
+func TestIssueOrchestratorCLIAutoExpandDisabled(t *testing.T) {
+	var issues []issueorchestrator.Issue
+	for i := 1; i <= 25; i++ {
+		if i == 1 || i == 5 || i == 9 || i == 13 || i == 17 || i == 21 || i == 23 || i == 25 {
+			issues = append(issues, issueorchestrator.Issue{
+				Number:          i,
+				Key:             fmt.Sprintf("leaf-%d", i),
+				Title:           fmt.Sprintf("Leaf %d", i),
+				Lane:            fmt.Sprintf("lane%d", i),
+				Paths:           []string{fmt.Sprintf("internal/pkg%d/file.go", i)},
+				ExpectedSteps:   2,
+				Dispatchability: "dispatchable",
+			})
+		} else {
+			issues = append(issues, issueorchestrator.Issue{
+				Number:          i,
+				Key:             fmt.Sprintf("epic-%d", i),
+				Title:           fmt.Sprintf("Epic %d", i),
+				Lane:            "epiclane",
+				Paths:           []string{"internal/a/a.go", "internal/b/b.go", "internal/c/c.go"},
+				ExpectedSteps:   25,
+				Dispatchability: "needs_scope",
+			})
+		}
+	}
+	issuesPath := writeTestIssuesFile(t, issues)
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath,
+		"--target-issues", "6",
+		"--top", "10",
+		"--auto-expand=false",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runIssueOrchestrator failed with exit code %d; stderr: %s", code, stderr.String())
+	}
+
+	var plan issueorchestrator.Plan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("failed to decode JSON plan: %v; raw: %s", err, stdout.String())
+	}
+
+	// Without auto-expand, only issues 1..10 were evaluated (issues 1, 5, 9 are the only leaves in 1..10)
+	if plan.PlannedIssues > 3 {
+		t.Errorf("expected at most 3 planned issues without auto-expand in top 10, got %d", plan.PlannedIssues)
+	}
+}
+
+func TestIssueOrchestratorSuperviseFlagCLI(t *testing.T) {
+	issues := []issueorchestrator.Issue{
+		{
+			Number:          901,
+			Key:             "issue-901",
+			Title:           "Test supervise flag",
+			Lane:            "cli",
+			Paths:           []string{"cmd/fak/main.go"},
+			ExpectedSteps:   1,
+			Dispatchability: "dispatchable",
+		},
+	}
+	issuesPath := writeTestIssuesFile(t, issues)
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath,
+		"--spawn-opencode",
+		"--dry-run",
+		"--supervise=true",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runIssueOrchestrator with --supervise failed: code=%d, stderr=%s", code, stderr.String())
+	}
+
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "worker.log")
+	_ = os.WriteFile(logFile, []byte("init log"), 0o644)
+	cfg := issueorchestrator.WorkerSupervisorConfig{
+		PID:         os.Getpid(),
+		WorktreeDir: tmpDir,
+		LogFile:     logFile,
+	}
+	sup := newWorkerSupervisorFunc(cfg)
+	if sup == nil {
+		t.Fatalf("expected initialized supervisor, got nil")
+	}
+}
