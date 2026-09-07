@@ -1,6 +1,7 @@
 package projectassets
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -65,6 +66,136 @@ func TestOpenCodeLeaseAdmissionIntegration(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenCodeProofPlugin_StdoutJSONPurity(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not found in PATH")
+	}
+
+	tmpDir := t.TempDir()
+	pluginPath := filepath.Join(tmpDir, "dos-proof-guard.js")
+	diskPlugin, err := filepath.Abs(filepath.Join("..", "..", filepath.FromSlash(OpenCodePluginPath)))
+	if err == nil {
+		if _, statErr := os.Stat(diskPlugin); statErr == nil {
+			pluginPath = diskPlugin
+		}
+	}
+	if pluginPath != diskPlugin {
+		if err := os.WriteFile(pluginPath, []byte(DefaultOpenCodePlugin), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "node", "--no-warnings", "--input-type=module", "-", pluginPath, tmpDir)
+	cmd.Stdin = strings.NewReader(openCodePurityWitness)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("node process execution failed: %v\nstdout:\n%s\nstderr:\n%s", err, out, stderr.String())
+	}
+
+	stdout := string(out)
+	lines := strings.Split(stdout, "\n")
+	var witnessFound bool
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+			if strings.Contains(trimmed, "[dos-proof-guard]") {
+				t.Fatalf("unencoded [dos-proof-guard] notice leaked to stdout (not valid JSON): %q", trimmed)
+			}
+			t.Fatalf("stdout line is not valid JSON (%v): %q", err, trimmed)
+		}
+
+		if schema, ok := parsed["schema"].(string); ok && schema == "fak.opencode-purity-witness.v1" {
+			var witness struct {
+				Schema        string `json:"schema"`
+				Status        string `json:"status"`
+				EditInjected  bool   `json:"edit_injected"`
+				WriteInjected bool   `json:"write_injected"`
+				PatchInjected bool   `json:"patch_injected"`
+				ReadUnchanged bool   `json:"read_unchanged"`
+			}
+			if err := json.Unmarshal([]byte(trimmed), &witness); err != nil {
+				t.Fatalf("failed to parse witness JSON: %v\n%s", err, trimmed)
+			}
+			if witness.Status != "ok" || !witness.EditInjected || !witness.WriteInjected || !witness.PatchInjected || !witness.ReadUnchanged {
+				t.Fatalf("witness assertion failure: %+v", witness)
+			}
+			witnessFound = true
+		}
+	}
+
+	if !witnessFound {
+		t.Fatalf("purity witness JSON object not found in stdout:\n%s", stdout)
+	}
+}
+
+const openCodePurityWitness = `
+import assert from 'node:assert/strict';
+import { pathToFileURL } from 'node:url';
+
+const pluginPath = process.argv[2], root = process.argv[3];
+const plugin = (await import(pathToFileURL(pluginPath).href)).default;
+const hooks = await plugin({ directory: root });
+
+assert.equal(typeof hooks['tool.execute.after'], 'function', 'tool.execute.after hook must be defined');
+
+const reminderSignature = '[dos-proof-guard] Code modified. On-device proof required before completion:';
+
+// 1. tool = "edit" with output = { content: "prior text" }
+const editOutput = { content: 'prior text' };
+await hooks['tool.execute.after']({ tool: 'edit' }, editOutput);
+const editInjected = typeof editOutput.content === 'string' &&
+  editOutput.content.startsWith('prior text') &&
+  editOutput.content.includes(reminderSignature);
+
+// 2. tool = "write" with output = { content: [{ type: "text", text: "prior" }] }
+const writeOutput = { content: [{ type: 'text', text: 'prior' }] };
+await hooks['tool.execute.after']({ tool: 'write' }, writeOutput);
+const writeInjected = Array.isArray(writeOutput.content) &&
+  writeOutput.content.length === 2 &&
+  writeOutput.content[0]?.text === 'prior' &&
+  typeof writeOutput.content[1]?.text === 'string' &&
+  writeOutput.content[1].text.includes(reminderSignature);
+
+// 3. tool = "apply_patch" with output = { content: "prior patch" }
+const patchOutput = { content: 'prior patch' };
+await hooks['tool.execute.after']({ tool: 'apply_patch' }, patchOutput);
+const patchInjected = typeof patchOutput.content === 'string' &&
+  patchOutput.content.startsWith('prior patch') &&
+  patchOutput.content.includes(reminderSignature);
+
+// 4. tool = "read" (non-mutating) with output = { content: "prior read" }
+const readOutput = { content: 'prior read' };
+await hooks['tool.execute.after']({ tool: 'read' }, readOutput);
+const readUnchanged = readOutput.content === 'prior read';
+
+assert.ok(editInjected, 'edit reminder must be injected into output.content string');
+assert.ok(writeInjected, 'write reminder must be injected into output.content array');
+assert.ok(patchInjected, 'apply_patch reminder must be injected into output.content string');
+assert.ok(readUnchanged, 'read tool output must remain unchanged');
+
+const witness = {
+  schema: 'fak.opencode-purity-witness.v1',
+  status: 'ok',
+  edit_injected: editInjected,
+  write_injected: writeInjected,
+  patch_injected: patchInjected,
+  read_unchanged: readUnchanged,
+};
+console.log(JSON.stringify(witness));
+`
 
 const openCodeLeaseWitness = `
 import assert from 'node:assert/strict';

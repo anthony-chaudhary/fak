@@ -826,7 +826,7 @@ export default async function dosProofGuardPlugin({ client, directory }) {
     },
     "tool.execute.after": async (input, output) => {
       const tool = input?.tool || "";
-      if (tool === "edit" || tool === "write") {
+      if (tool === "edit" || tool === "write" || tool === "apply_patch") {
         fileModifiedCount++;
         const reminder = "\n\n[dos-proof-guard] Code modified. On-device proof required before completion:\n" +
           "1. Run tests: .\\test.ps1 ./internal/<pkg>/... -> CLAIM_TEST_GREEN\n" +
