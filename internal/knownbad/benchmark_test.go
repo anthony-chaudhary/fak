@@ -1,3 +1,10 @@
+// Package knownbad benchmarks measure failure signature hashing, tree path
+// normalization, intersection queries, ledger compaction, and crash storm
+// coalescing for persistent failure tracking.
+//
+// Query matching executes during lane arbitration and worker preflight,
+// requiring bounded allocation overhead and sub-millisecond query evaluation
+// across hundreds of active failure records.
 package knownbad
 
 import (
@@ -16,6 +23,9 @@ var (
 	benchStateSink    string
 )
 
+// makeBenchRecords synthesizes count failure records across mixed causes, file trees,
+// and lifecycle states (open, claimed, resolved, revoked).
+// Operating envelope: count synthetic failure records across 1 to count/3 distinct failure signatures.
 func makeBenchRecords(count int, nowUnix int64) []Record {
 	recs := make([]Record, 0, count)
 	sigCount := count / 3
@@ -66,6 +76,8 @@ func makeBenchRecords(count int, nowUnix int64) []Record {
 	return recs
 }
 
+// makeBenchJSONL serializes a slice of records into line-delimited JSON bytes for parser benchmarking.
+// Operating envelope: slice of structured Record objects.
 func makeBenchJSONL(records []Record) []byte {
 	var sb strings.Builder
 	for _, r := range records {
@@ -76,6 +88,10 @@ func makeBenchJSONL(records []Record) []byte {
 	return []byte(sb.String())
 }
 
+// BenchmarkSignature measures signature calculation for failure classification and dedup.
+// Operating envelope: single tree glob and multi-glob lists with optional SHA-256 commit hash.
+// Allocation budget: <= 1 alloc/op and <= 64 B/op for single glob; <= 4 allocs/op and <= 256 B/op for multi-glob.
+// Latency ceiling: P50 < 200ns, P99 < 1µs.
 func BenchmarkSignature(b *testing.B) {
 	globs := []string{"internal/gateway/**", "internal/engine/*", "internal/adjudicator/policy.go"}
 	reason := "LIVELOCK_DETECTED"
@@ -99,6 +115,10 @@ func BenchmarkSignature(b *testing.B) {
 	})
 }
 
+// BenchmarkNormalizeTree measures tree path sanitization and wildcard normalization.
+// Operating envelope: cyclic evaluation over 4 varied path patterns (slashes, backslashes, relative dots).
+// Allocation budget: <= 2 allocs/op and <= 64 B/op.
+// Latency ceiling: P50 < 100ns, P99 < 500ns.
 func BenchmarkNormalizeTree(b *testing.B) {
 	paths := []string{
 		"internal/gateway/**",
@@ -114,6 +134,10 @@ func BenchmarkNormalizeTree(b *testing.B) {
 	}
 }
 
+// BenchmarkTreesIntersect measures disjointness checking between two tree glob sets.
+// Operating envelope: 2-pattern candidate tree evaluated against matching and disjoint target sets.
+// Allocation budget: 0 allocs/op on the intersection check.
+// Latency ceiling: P50 < 50ns, P99 < 250ns.
 func BenchmarkTreesIntersect(b *testing.B) {
 	a := []string{"internal/gateway/**", "internal/adjudicator/**"}
 	bMatch := []string{"internal/gateway/server.go"}
@@ -136,6 +160,10 @@ func BenchmarkTreesIntersect(b *testing.B) {
 	})
 }
 
+// BenchmarkMatch evaluates query matching across 10, 100, and 500 historical failure records.
+// Operating envelope: 10 to 500 records evaluated against a specific file path query.
+// Allocation budget: <= 10 allocs/op and <= 2 KB/op at 100 records.
+// Latency ceiling: P50 < 5µs, P99 < 25µs at 100 records with O(N) scaling.
 func BenchmarkMatch(b *testing.B) {
 	const now = 1_700_000_000
 	query := Query{TreeGlobs: []string{"internal/pkg5/sub/file.go"}}
@@ -152,6 +180,10 @@ func BenchmarkMatch(b *testing.B) {
 	}
 }
 
+// BenchmarkLiveRecords measures filtering of active, unexpired, and unresolved records.
+// Operating envelope: 50 to 500 records evaluated against current wall-clock timestamp.
+// Allocation budget: <= 5 allocs/op and <= 4 KB/op at 200 records.
+// Latency ceiling: P50 < 8µs, P99 < 40µs at 200 records.
 func BenchmarkLiveRecords(b *testing.B) {
 	const now = 1_700_000_000
 	for _, size := range []int{50, 200, 500} {
@@ -166,6 +198,10 @@ func BenchmarkLiveRecords(b *testing.B) {
 	}
 }
 
+// BenchmarkFindLatestLive measures reverse chronological search for the newest live record of a signature.
+// Operating envelope: 100-record ledger searching for target signature.
+// Allocation budget: 0 allocs/op.
+// Latency ceiling: P50 < 1µs, P99 < 5µs.
 func BenchmarkFindLatestLive(b *testing.B) {
 	const now = 1_700_000_000
 	records := makeBenchRecords(100, now)
@@ -180,6 +216,10 @@ func BenchmarkFindLatestLive(b *testing.B) {
 	}
 }
 
+// BenchmarkLatestState measures signature state resolution (open, claimed, resolved, revoked).
+// Operating envelope: 100-record ledger resolving state for target signature.
+// Allocation budget: 0 allocs/op.
+// Latency ceiling: P50 < 1µs, P99 < 5µs.
 func BenchmarkLatestState(b *testing.B) {
 	const now = 1_700_000_000
 	records := makeBenchRecords(100, now)
@@ -195,6 +235,10 @@ func BenchmarkLatestState(b *testing.B) {
 	}
 }
 
+// BenchmarkCompact measures ledger pruning retaining active records and terminal tail history.
+// Operating envelope: 250-record ledger evaluated with tail caps of 50 and 0 (live-only).
+// Allocation budget: <= 10 allocs/op and <= 8 KB/op.
+// Latency ceiling: P50 < 15µs, P99 < 75µs.
 func BenchmarkCompact(b *testing.B) {
 	const now = 1_700_000_000
 	records := makeBenchRecords(250, now)
@@ -220,6 +264,10 @@ func BenchmarkCompact(b *testing.B) {
 	})
 }
 
+// BenchmarkParseLedger evaluates JSONL parsing of serialized failure records.
+// Operating envelope: 100 JSONL records (~15 KB payload).
+// Allocation budget: linear with record count (~6 allocs/row).
+// Latency ceiling: P50 < 50µs, P99 < 250µs for 100 records.
 func BenchmarkParseLedger(b *testing.B) {
 	const now = 1_700_000_000
 	records := makeBenchRecords(100, now)
@@ -232,6 +280,10 @@ func BenchmarkParseLedger(b *testing.B) {
 	}
 }
 
+// BenchmarkMarshalLine measures JSON serialization of a single failure record.
+// Operating envelope: fully-populated Record with claim and occurrence history.
+// Allocation budget: <= 5 allocs/op and <= 512 B/op.
+// Latency ceiling: P50 < 500ns, P99 < 2.5µs.
 func BenchmarkMarshalLine(b *testing.B) {
 	rec := NewRecord("SIGNAL_CRASH", []string{"internal/gateway/**", "internal/engine/**"}, "critical failure", "agent-1", "sha256:abcdef", 1_700_000_000, 3600)
 	rec = rec.WithClaim("fixer-42", 1_700_000_100).WithOccurrences(15, 1_700_000_200)
@@ -247,6 +299,10 @@ func BenchmarkMarshalLine(b *testing.B) {
 	}
 }
 
+// BenchmarkCoalesceCrashes measures crash event coalescing across single-window and multi-cause storm topologies.
+// Operating envelope: 100 to 500 crash events evaluated against empty and existing live ledgers.
+// Allocation budget: <= 20 allocs/op and <= 8 KB/op at 100 events.
+// Latency ceiling: P50 < 30µs, P99 < 150µs at 100 events.
 func BenchmarkCoalesceCrashes(b *testing.B) {
 	const now = 1_700_000_000
 	const ttl = 900
@@ -295,6 +351,10 @@ func BenchmarkCoalesceCrashes(b *testing.B) {
 	})
 }
 
+// BenchmarkLeaseID measures deterministic lease identifier generation from a failure signature.
+// Operating envelope: SHA-256 signature string formatted into an authoritative lease ID.
+// Allocation budget: <= 2 allocs/op and <= 64 B/op.
+// Latency ceiling: P50 < 80ns, P99 < 400ns.
 func BenchmarkLeaseID(b *testing.B) {
 	sig := "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
 

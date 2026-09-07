@@ -108,6 +108,7 @@ func makeBenchCalibrationData(n int) ([]TierDecision, []WitnessedOutcome) {
 // across 10, 100, and 1,000 issue rows. Operating envelope: 10-1,000 ledger rows.
 // Allocation target: <= 17 KB/op and <= 6 allocs/op at 1,000 rows. Scaling
 // ceiling: O(N log N) bounded by internal nearest-rank percentile sort passes.
+// Latency ceiling: P50 < 50µs, P99 < 250µs at 1,000 rows.
 func BenchmarkSummary(b *testing.B) {
 	for _, count := range []int{10, 100, 1000} {
 		b.Run(fmt.Sprintf("%d_rows", count), func(b *testing.B) {
@@ -124,7 +125,7 @@ func BenchmarkSummary(b *testing.B) {
 // BenchmarkMedian measures nearest-rank median extraction over a 100-row
 // ledger. Operating envelope: 100 rows. Allocation target: <= 2 KB/op and
 // <= 4 allocs/op. Scaling ceiling: O(N log N) dominated by elapsed time sorting.
-// Latency budget: sub-2 microsecond resolution under standard CPU execution.
+// Latency ceiling: P50 < 1µs, P99 < 5µs with sub-2 microsecond resolution under standard CPU execution.
 func BenchmarkMedian(b *testing.B) {
 	rows := makeBenchLedger(100)
 	b.ReportAllocs()
@@ -137,7 +138,7 @@ func BenchmarkMedian(b *testing.B) {
 // BenchmarkP95 measures nearest-rank 95th percentile latency calculation.
 // Operating envelope: 100 rows. Allocation target: <= 2 KB/op and
 // <= 4 allocs/op. Scaling ceiling: O(N log N) dominated by rank selection.
-// Latency budget: sub-2 microsecond resolution matching fleetmetrics nearest-rank.
+// Latency ceiling: P50 < 1µs, P99 < 5µs matching fleetmetrics nearest-rank expectations.
 func BenchmarkP95(b *testing.B) {
 	rows := makeBenchLedger(100)
 	b.ReportAllocs()
@@ -150,7 +151,7 @@ func BenchmarkP95(b *testing.B) {
 // BenchmarkReportRender measures string rendering of a computed cost Report.
 // Operating envelope: 100-row summary report. Allocation target: <= 128 B/op and
 // <= 3 allocs/op. Scaling ceiling: O(1) constant-format buffer construction.
-// Latency budget: sub-microsecond formatting throughput.
+// Latency ceiling: P50 < 200ns, P99 < 1µs formatting throughput.
 func BenchmarkReportRender(b *testing.B) {
 	rep := Summary(makeBenchLedger(100))
 	b.ReportAllocs()
@@ -164,6 +165,7 @@ func BenchmarkReportRender(b *testing.B) {
 // Operating envelope: 100 rows. Allocation target: <= 5 KB/op and <= 4 allocs/op
 // for slice duplication. Scaling ceiling: O(N log N) via sort.SliceStable.
 // Memory topology: preserves input slice immutability via defensive copy.
+// Latency ceiling: P50 < 2µs, P99 < 10µs via sort.SliceStable.
 func BenchmarkSortedByIssue(b *testing.B) {
 	rows := makeBenchLedger(100)
 	b.ReportAllocs()
@@ -176,7 +178,7 @@ func BenchmarkSortedByIssue(b *testing.B) {
 // BenchmarkAppendRow measures single-row JSONL byte buffer serialization.
 // Operating envelope: 1 record. Allocation target: <= 208 B/op and
 // <= 3 allocs/op. Scaling ceiling: O(1) per row without persistent allocations.
-// Throughput target: zero allocations when appending into an adequately sized preallocated buffer.
+// Latency ceiling: P50 < 150ns, P99 < 800ns with O(1) scaling.
 func BenchmarkAppendRow(b *testing.B) {
 	row := IssueCost{
 		Issue:      42,
@@ -199,6 +201,7 @@ func BenchmarkAppendRow(b *testing.B) {
 // Operating envelope: 10-1,000 rows (up to ~430 KB). Allocation target: linear
 // with row count (~6 allocs/row). Scaling ceiling: O(N) throughput >= 20 MB/s.
 // Error behavior: validates syntax and outcome enum validation on each line.
+// Latency ceiling: P50 < 100µs, P99 < 500µs at 1,000 rows with O(N) throughput >= 20 MB/s.
 func BenchmarkParseLedger(b *testing.B) {
 	for _, count := range []int{10, 100, 1000} {
 		b.Run(fmt.Sprintf("%d_rows", count), func(b *testing.B) {
@@ -230,6 +233,7 @@ func BenchmarkParseLedger(b *testing.B) {
 // <= 85 KB/op and <= 26 allocs/op at 1,000 pairs. Scaling ceiling: O(N) linear
 // hash join and single-pass bucket aggregation.
 // Data topology: joins disparate decision and outcome streams by issue ID.
+// Latency ceiling: P50 < 200µs, P99 < 1ms at 1,000 pairs.
 func BenchmarkCalibrate(b *testing.B) {
 	for _, count := range []int{10, 100, 1000} {
 		b.Run(fmt.Sprintf("%d_pairs", count), func(b *testing.B) {
@@ -247,6 +251,7 @@ func BenchmarkCalibrate(b *testing.B) {
 // Operating envelope: 100 joined pairs. Allocation target: <= 5 KB/op and
 // <= 42 allocs/op. Scaling ceiling: O(T + B) for T tiers and B outcome buckets.
 // Formatting profile: builds multi-section diagnostic text with zero reflection.
+// Latency ceiling: P50 < 10µs, P99 < 50µs.
 func BenchmarkCalibrationRender(b *testing.B) {
 	decisions, outcomes := makeBenchCalibrationData(100)
 	rep := Calibrate(decisions, outcomes)
@@ -261,6 +266,7 @@ func BenchmarkCalibrationRender(b *testing.B) {
 // by tier precedence. Operating envelope: 3-tier advisory slice. Allocation target:
 // <= 376 B/op and <= 4 allocs/op. Scaling ceiling: O(K log K) for K <= 5 tiers.
 // Stability: deterministic tie-breaking by action ordinal.
+// Latency ceiling: P50 < 150ns, P99 < 800ns.
 func BenchmarkSortedRecommendations(b *testing.B) {
 	recs := []Recommendation{
 		{Tier: TierT2, Action: ActionHold},
