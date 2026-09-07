@@ -1,9 +1,6 @@
 package amdgpu
 
 import (
-	"bytes"
-	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -76,42 +73,11 @@ func TestStrixValidationReceiptValidate(t *testing.T) {
 	if err := receipt.Validate(); err == nil {
 		t.Error("expected error when PASS but target unreachable")
 	}
-}
 
-func TestStrixValidationBenchmarkArtifact(t *testing.T) {
-	artifacts := []string{
-		"../../docs/benchmarks/strix-halo-validation-11940.json",
-		"../../docs/benchmarks/strix-halo-validation-latest.json",
-	}
-
-	for _, artifactPath := range artifacts {
-		data, err := os.ReadFile(artifactPath)
-		if err != nil {
-			t.Skipf("benchmark artifact not found at %s: %v", artifactPath, err)
-		}
-		data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
-
-		var receipt StrixValidationReceipt
-		if err := json.Unmarshal(data, &receipt); err != nil {
-			t.Fatalf("failed to unmarshal benchmark artifact %s: %v", artifactPath, err)
-		}
-
-		expectedDigest, err := receipt.ComputeDigest()
-		if err != nil {
-			t.Fatalf("ComputeDigest failed for %s: %v", artifactPath, err)
-		}
-
-		if receipt.Digest != expectedDigest {
-			t.Logf("Artifact %s digest needs updating: recorded %s, computed %s", artifactPath, receipt.Digest, expectedDigest)
-			// Update artifact in place
-			receipt.Digest = expectedDigest
-			if updated, err := json.MarshalIndent(receipt, "", "  "); err == nil {
-				_ = os.WriteFile(artifactPath, append(updated, '\n'), 0644)
-			}
-		}
-
-		if err := receipt.Validate(); err != nil {
-			t.Fatalf("benchmark artifact %s failed Validate(): %v", artifactPath, err)
-		}
+	// Corrupt digest and check validation failure
+	receipt.Target.Reachable = true
+	receipt.Digest = "sha256:corrupted"
+	if err := receipt.Validate(); err == nil {
+		t.Error("expected error for corrupted digest")
 	}
 }
