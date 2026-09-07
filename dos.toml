@@ -2013,6 +2013,20 @@ summary  = "A required witness resolver actively refuted the claimed effect or p
 fix      = "Ensure agent claims match actual repository artifacts and external world state corroborated by git or witness resolvers. Floor: internal/kernel/kernel.go"
 see_also = ["internal/kernel/kernel.go", "internal/abi/types.go"]
 
+[reasons.SPECULATION_MISPREDICT]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A speculative tool call assumption was mispredicted and squashed, incurring wasted computation tokens or latency. Floor: internal/assumecheck/speculation_ledger.go"
+fix      = "Review speculative branch predictor heuristics and pattern success probabilities to improve speculative prediction accuracy. Floor: internal/assumecheck/speculation_ledger.go"
+see_also = ["internal/assumecheck/speculation_ledger.go", "internal/abi/reasons.go", "internal/abi/speculate.go"]
+
+[reasons.SPECULATIVE_EFFECT_LEAK]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A speculative tool call execution attempted or produced an unauthorized side-effect leak, violating the default-deny effect isolation gate. Floor: internal/assumecheck/speculation_ledger.go"
+fix      = "Ensure only provably effect-free (read-only and idempotent) tools are admitted for speculation; audit effect sinks and rollback handlers. Floor: internal/assumecheck/speculation_ledger.go"
+see_also = ["internal/assumecheck/speculation_ledger.go", "internal/abi/reasons.go", "internal/abi/speculate.go"]
+
 [reasons.MALFORMED]
 category = "MISROUTE"
 refusal  = true
