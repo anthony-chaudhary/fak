@@ -33,6 +33,9 @@ var (
 	// metalQ6KW caches one GPU Q6_K weight handle per (model, weight-name) for the fused MLP's
 	// Q6_K down_proj. Same nil-caching policy as metalQ4KW. Guarded by metalQ4KMu.
 	metalQ6KW = map[*Model]map[string]*metalgemm.Q6KWeight{}
+	// metalQ2KW caches one GPU Q2_K weight handle per (model, weight-name). Same nil-caching
+	// policy as metalQ4KW. Guarded by metalQ4KMu.
+	metalQ2KW = map[*Model]map[string]*metalgemm.Q2KWeight{}
 	// metalQ8KW caches one GPU Q8_0 weight handle per (model, weight-name) for Q8-minority
 	// prefill projections in the resident-Q4_K lane (full-attn q/k and Qwen3.6 linear_attn.*).
 	// Same nil-caching policy as metalQ4KW. Guarded by metalQ4KMu.
@@ -287,43 +290,70 @@ func (s *Session) q8GemmGroupDispatch(names []string, Xq *q8Panel, P int) [][]fl
 
 // kQuantGemmDispatch is the prefill-GEMM twin for resident K-quant tensors in the q4_k_m mix. The
 // dense down_proj tensors load as Q6_K in kqw; under MetalQ4K they can use the resident Q6_K GEMM
-// instead of the CPU kQuantMatRowsIntoBatch loop. Other K-quant kinds stay on the proven CPU path.
+// instead of the CPU kQuantMatRowsIntoBatch loop. Resident Q2_K matrices route through the Metal
+// Q2_K GEMM kernel. Other K-quant kinds stay on the proven CPU path.
 func (s *Session) kQuantGemmDispatch(name string, qt *kQuantTensor, Xf []float32, P int) []float32 {
 	Y := make([]float32, P*qt.out)
-	if !s.MetalQ4K || !metalgemm.Available() || qt.kind != kindQ6K {
+	if !s.MetalQ4K || !metalgemm.Available() {
 		kQuantMatRowsIntoBatch(qt, Xf, P, Y)
 		return Y
 	}
-	w := s.M.metalQ6KWeight(name, qt)
-	if w == nil {
-		s.recordMetalFallback(MetalFallbackQ6KGEMMCPU)
-		kQuantMatRowsIntoBatch(qt, Xf, P, Y)
+	if qt.kind == kindQ6K {
+		w := s.M.metalQ6KWeight(name, qt)
+		if w == nil {
+			s.recordMetalFallback(MetalFallbackQ6KGEMMCPU)
+			kQuantMatRowsIntoBatch(qt, Xf, P, Y)
+			return Y
+		}
+		s.metalExecution(metalgemm.ExecutionQ6KGEMM, func(observation *metalgemm.ExecutionObservation) {
+			w.GEMMWithEvents(Xf, P, Y, observation)
+		})
 		return Y
 	}
-	s.metalExecution(metalgemm.ExecutionQ6KGEMM, func(observation *metalgemm.ExecutionObservation) {
-		w.GEMMWithEvents(Xf, P, Y, observation)
-	})
+	if qt.kind == kindQ2K {
+		w := s.M.metalQ2KWeight(name, qt)
+		if w == nil {
+			kQuantMatRowsIntoBatch(qt, Xf, P, Y)
+			return Y
+		}
+		w.GEMM(Xf, P, Y)
+		return Y
+	}
+	kQuantMatRowsIntoBatch(qt, Xf, P, Y)
 	return Y
 }
 
 // kQuantMatRowsIntoDispatch is the decode/head GEMV twin for resident K-quant tensors. Qwen3.6
 // q4_k_m commonly stores the LM head as Q6_K in kqw; under MetalQ4K this keeps that head projection
 // on the same resident Metal path as Q6_K MLP down_proj instead of paying the CPU kQuantMatRows
-// escape every generated token.
+// escape every generated token. Resident Q2_K matrices route through the Metal Q2_K GEMV kernel.
 func (s *Session) kQuantMatRowsIntoDispatch(name string, qt *kQuantTensor, xf, y []float32) {
-	if !s.MetalQ4K || !metalgemm.Available() || qt.kind != kindQ6K {
+	if !s.MetalQ4K || !metalgemm.Available() {
 		kQuantMatRowsInto(qt, xf, y)
 		return
 	}
-	w := s.M.metalQ6KWeight(name, qt)
-	if w == nil {
-		s.recordMetalFallback(MetalFallbackQ6KGEMVCPU)
-		kQuantMatRowsInto(qt, xf, y)
+	if qt.kind == kindQ6K {
+		w := s.M.metalQ6KWeight(name, qt)
+		if w == nil {
+			s.recordMetalFallback(MetalFallbackQ6KGEMVCPU)
+			kQuantMatRowsInto(qt, xf, y)
+			return
+		}
+		s.metalExecution(metalgemm.ExecutionQ6KGEMV, func(observation *metalgemm.ExecutionObservation) {
+			w.GEMVWithEvents(xf, y, observation)
+		})
 		return
 	}
-	s.metalExecution(metalgemm.ExecutionQ6KGEMV, func(observation *metalgemm.ExecutionObservation) {
-		w.GEMVWithEvents(xf, y, observation)
-	})
+	if qt.kind == kindQ2K {
+		w := s.M.metalQ2KWeight(name, qt)
+		if w == nil {
+			kQuantMatRowsInto(qt, xf, y)
+			return
+		}
+		w.GEMV(xf, y)
+		return
+	}
+	kQuantMatRowsInto(qt, xf, y)
 }
 
 // q4kMatRowsDispatch is the decode-GEMV twin of q4kGemmDispatch: under MetalQ4K it runs the q4_k
@@ -605,6 +635,24 @@ func (m *Model) metalQ6KWeight(name string, qt *kQuantTensor) *metalgemm.Q6KWeig
 		return w
 	}
 	w := metalgemm.UploadQ6K(qt.raw, qt.out, qt.in)
+	tbl[name] = w
+	return w
+}
+
+// metalQ2KWeight returns this model's GPU Q2_K handle for `name`, uploading the raw 84-B
+// super-blocks once (cached per *Model, nil cached too).
+func (m *Model) metalQ2KWeight(name string, qt *kQuantTensor) *metalgemm.Q2KWeight {
+	metalQ4KMu.Lock()
+	defer metalQ4KMu.Unlock()
+	tbl := metalQ2KW[m]
+	if tbl == nil {
+		tbl = map[string]*metalgemm.Q2KWeight{}
+		metalQ2KW[m] = tbl
+	}
+	if w, ok := tbl[name]; ok {
+		return w
+	}
+	w := metalgemm.UploadQ2K(qt.raw, qt.out, qt.in)
 	tbl[name] = w
 	return w
 }
@@ -919,8 +967,15 @@ func releaseMetalQ4KResidency(m *Model) {
 	metalQ4KMu.Lock()
 	tbl := metalQ4KW[m]
 	delete(metalQ4KW, m)
+	tblQ2K := metalQ2KW[m]
+	delete(metalQ2KW, m)
 	metalQ4KMu.Unlock()
 	for _, w := range tbl {
+		if w != nil {
+			w.Release()
+		}
+	}
+	for _, w := range tblQ2K {
 		if w != nil {
 			w.Release()
 		}

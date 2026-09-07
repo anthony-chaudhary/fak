@@ -50,6 +50,43 @@ func TestQ8FastDecodeSessionRejectsResidentQ4(t *testing.T) {
 	}
 }
 
+func TestQ8FastDecodeSessionAllowsHybridWhenVectorizedGDNAvailable(t *testing.T) {
+	cfg := Config{
+		HiddenSize:       256,
+		NumLayers:        2,
+		NumHeads:         4,
+		NumKVHeads:       2,
+		HeadDim:          64,
+		IntermediateSize: 256,
+		LayerTypes:       []string{"linear_attention", "full_attention"},
+	}
+	if !cfg.IsHybrid() {
+		t.Fatal("fixture must be recognized as hybrid")
+	}
+
+	// 1. With vectorized GDN available (default)
+	t.Setenv("FAK_VECTORIZED_DELTANET", "1")
+	if !HasVectorizedDeltaNet() {
+		t.Fatal("HasVectorizedDeltaNet must be true when FAK_VECTORIZED_DELTANET=1")
+	}
+	if !q8FastDecodeSessionOK(&Session{}, cfg) {
+		t.Fatal("hybrid model should be accepted by q8FastDecodeSessionOK when vectorized GDN is available")
+	}
+	// Mixed-quantization: base projection weights Q4_K with FP32 recurrent state
+	if !q8FastDecodeSessionOK(&Session{Q4K: true}, cfg) {
+		t.Fatal("hybrid mixed-quantization session (Q4_K) should be accepted when vectorized GDN is available")
+	}
+
+	// 2. When vectorized GDN is disabled
+	t.Setenv("FAK_VECTORIZED_DELTANET", "0")
+	if HasVectorizedDeltaNet() {
+		t.Fatal("HasVectorizedDeltaNet must be false when FAK_VECTORIZED_DELTANET=0")
+	}
+	if q8FastDecodeSessionOK(&Session{}, cfg) {
+		t.Fatal("hybrid model must be refused by q8FastDecodeSessionOK when vectorized GDN is unavailable")
+	}
+}
+
 // TestQ8RoundMatchesMathRound pins the fast float32 q8round to math.Round (ties away from
 // zero) over the full code range, including the near-half values where the naive
 // int8(int32(x+0.5)) trick diverges (the +0.5 addition rounds up). Quantization codes must

@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // qprofOn enables coarse phase timing in prefillBatchedQ (FAK_QPROFILE=1), printed to
@@ -160,7 +162,20 @@ func q8FastDecodeOK(cfg Config) bool {
 	return q8FastPreNormOK(cfg)
 }
 
+// HasVectorizedDeltaNet reports whether the vectorized Gated-DeltaNet operator kernel
+// is registered and available for accelerated decode execution.
+func HasVectorizedDeltaNet() bool {
+	return compute.HasVectorizedDeltaNet()
+}
+
 func q8FastDecodeSessionOK(s *Session, cfg Config) bool {
+	if cfg.IsHybrid() || cfg.IsQwen35Hybrid() {
+		if !HasVectorizedDeltaNet() {
+			return false
+		}
+		// Permit mixed-quantization sessions where base projection weights are Q4_K / Q8 while recurrent state remains FP32.
+		return true
+	}
 	if s != nil && (s.Q4 || s.Q4K) {
 		return false
 	}
@@ -203,7 +218,7 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 	prevTap := s.tapActive
 	s.tapActive = tap
 	defer func() { s.tapActive = prevTap }()
-	if !q8FastDecodeSessionOK(s, cfg) {
+	if !q8FastDecodeSessionOK(s, cfg) || ((cfg.IsHybrid() || cfg.IsQwen35Hybrid()) && HasVectorizedDeltaNet()) {
 		mat := matKernel(sessionQ8Kernel{s})
 		if s.Q4 && m.q4w != nil {
 			// Resident int4 decode: the Qwen3.6 hybrid (and every non-fast-PreNorm arch)
