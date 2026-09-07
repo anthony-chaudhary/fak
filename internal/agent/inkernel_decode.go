@@ -83,9 +83,10 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		var matchedSnapshot *model.PrefixSnapshot
 		var m int
 		var tier radixkv.SnapshotTier
+		var sourceScope radixkv.ShareScope
 		if scopedLookup {
 			if p.backend != nil {
-				matchedSnapshot, cachedLogits, m, _, tier, err = p.scopedTree.LookupSnapshotTieredContext(ctx, owner, ids)
+				matchedSnapshot, cachedLogits, m, sourceScope, tier, err = p.scopedTree.LookupSnapshotTieredContext(ctx, owner, ids)
 			} else {
 				matchedKV, cachedLogits, m, _, err = p.scopedTree.Lookup(owner, ids)
 			}
@@ -155,9 +156,10 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		// The unscoped hot tree already owns the full snapshot and lookup restored a
 		// deep clone into this session. Cached logits mean no prompt state changed, so
 		// capturing and admitting that same state again only performs a second clone.
-		// Scoped hits retain re-admission because lookup does not yet expose the source
-		// scope needed to prove that tenant materialization is redundant.
-		skipExactDeviceL1Readmission = !scopedLookup && matchedSnapshot != nil &&
+		// Scoped hits from tenant or private scope similarly skip re-admission because
+		// the tenant materialization already exists.
+		skipExactDeviceL1Readmission = ((!scopedLookup) || (scopedLookup && (sourceScope == radixkv.ScopeTenant || sourceScope == radixkv.ScopePrivate))) &&
+			matchedSnapshot != nil &&
 			matched == len(ids) && cachedLogits != nil && sourceTier == radixkv.SnapshotTierDeviceL1
 	}
 	if s == nil {
@@ -265,15 +267,17 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// fresh Lookup→Insert→Done. The snapshot covers the FULL ids prefix, so it is a valid
 	// leaf kv no matter how much a concurrent turn may have inserted since step 1.
 	if reuse {
-		if p.backend != nil && !skipExactDeviceL1Readmission {
-			var snap *model.PrefixSnapshot
-			snap, err = s.PrefixSnapshot()
-			if err != nil {
-				return
-			}
-			if err = p.admitPrefixSnapshot(ctx, ids, snap, logits); err != nil {
-				snap.Close()
-				return
+		if p.backend != nil {
+			if !skipExactDeviceL1Readmission {
+				var snap *model.PrefixSnapshot
+				snap, err = s.PrefixSnapshot()
+				if err != nil {
+					return
+				}
+				if err = p.admitPrefixSnapshot(ctx, ids, snap, logits); err != nil {
+					snap.Close()
+					return
+				}
 			}
 		} else {
 			if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil {

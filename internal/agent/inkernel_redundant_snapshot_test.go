@@ -73,3 +73,79 @@ func TestInKernelExactDeviceL1CachedLogitsSkipsRedundantSnapshotClone(t *testing
 		t.Fatalf("exact Device-L1 cached-logits hit cloned %d backend tensors, want lookup-side clone only (%d); redundant post-restore snapshot admission ran", got, oneSnapshotClone)
 	}
 }
+
+func TestInKernelSameTenantExactDeviceL1CachedLogitsSkipsRedundantSnapshotClone(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_RADIX", "on")
+
+	cfg := tinyHybridCfg()
+	backend := &snapshotCloneCountingBackend{countingBackend: &countingBackend{
+		Backend:      compute.Default(),
+		deviceMemory: true,
+	}}
+	planner := NewInKernelPlanner(model.NewSynthetic(cfg), nil, "same-tenant-exact-device-l1-clone-count", false, backend, false)
+	planner.quant = false
+	ids := synthIDs(cfg.VocabSize, 9, 9527)
+
+	prefixCacheIdentityContext := func(ctx context.Context, tenant, agent string) context.Context {
+		return WithPrefixCacheIdentity(ctx, tenant, agent)
+	}
+
+	run := func(ctx context.Context) (gen []int, cacheable, matched int, tier radixkv.SnapshotTier) {
+		_, _, cacheable, matched, tier, _, _, _, err := planner.generateReusedContextWithBias(
+			ctx, ids, 1, 0, 0, 0, nil, 0, 0, map[int]bool{}, func(id int) bool {
+				gen = append(gen, id)
+				return false
+			},
+		)
+		if err != nil {
+			t.Fatalf("generateReusedContextWithBias: %v", err)
+		}
+		return gen, cacheable, matched, tier
+	}
+
+	ctx1 := prefixCacheIdentityContext(context.Background(), "tenant-alpha", "agent-1")
+	primeTokens, primeCacheable, primeMatched, primeTier := run(ctx1)
+	if primeCacheable != 0 || primeMatched != 0 || primeTier != radixkv.SnapshotTierMiss {
+		t.Fatalf("cold request cacheable=%d matched=%d tier=%s, want 0/0/miss", primeCacheable, primeMatched, primeTier)
+	}
+	oneSnapshotClone := backend.snapshotCloneCalls()
+	if oneSnapshotClone == 0 {
+		t.Fatal("cold admission performed no backend tensor clones; test cannot observe snapshot depth")
+	}
+
+	backend.resetSnapshotCloneCalls()
+	ctx2 := prefixCacheIdentityContext(context.Background(), "tenant-alpha", "agent-2")
+	replayTokens, cacheable, matched, tier := run(ctx2)
+	if tier != radixkv.SnapshotTierDeviceL1 || cacheable != len(ids) || matched != len(ids) {
+		t.Fatalf("exact replay cacheable=%d matched=%d tier=%s, want %d/%d/device-l1", cacheable, matched, tier, len(ids), len(ids))
+	}
+	if !eqInts(replayTokens, primeTokens) {
+		t.Fatalf("exact replay changed generated token: prime=%v replay=%v", primeTokens, replayTokens)
+	}
+	if got := backend.snapshotCloneCalls(); got != oneSnapshotClone {
+		t.Fatalf("same-tenant exact Device-L1 cached-logits hit cloned %d backend tensors, want lookup-side clone only (%d); redundant post-restore snapshot admission ran", got, oneSnapshotClone)
+	}
+
+	// Verify the snapshot remains resident in the scoped tree at ScopeTenant.
+	snap, _, matchedTokens, scope, lookupTier, err := planner.scopedTree.LookupSnapshotTieredContext(
+		context.Background(),
+		radixkv.CacheIdentity{Tenant: "tenant-alpha", Agent: "agent-2"},
+		ids,
+	)
+	if err != nil {
+		t.Fatalf("LookupSnapshotTieredContext: %v", err)
+	}
+	if snap == nil {
+		t.Fatal("expected resident snapshot in scopedTree, got nil")
+	}
+	snap.Close()
+	if matchedTokens != len(ids) {
+		t.Fatalf("resident snapshot matched=%d, want %d", matchedTokens, len(ids))
+	}
+	if scope != radixkv.ScopeTenant {
+		t.Fatalf("resident snapshot scope=%v, want %v", scope, radixkv.ScopeTenant)
+	}
+	if lookupTier != radixkv.SnapshotTierDeviceL1 {
+		t.Fatalf("resident snapshot tier=%s, want %s", lookupTier, radixkv.SnapshotTierDeviceL1)
+	}
+}
