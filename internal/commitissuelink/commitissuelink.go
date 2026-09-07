@@ -29,8 +29,13 @@ import (
 	"strings"
 )
 
-// subjectIssueRE matches a #N issue reference occurring in the subject line.
-var subjectIssueRE = regexp.MustCompile(`#(\d+)`)
+// subjectIssueRE matches a bare #N issue reference occurring in the subject line,
+// excluding cross-repo references like fak-private#N where '#' is preceded by a word char or hyphen.
+var subjectIssueRE = regexp.MustCompile(`(?:^|[^\w-])#(\d+)\b`)
+
+// privateIssueRE matches an explicitly qualified reference to a companion
+// fak-private issue, e.g. "fak-private#21" or "anthony-chaudhary/fak-private#21".
+var privateIssueRE = regexp.MustCompile(`(?i)\b(?:anthony-chaudhary/)?fak-private#(\d+)\b`)
 
 // bodyTrailerRE matches a GitHub auto-close trailer (Fixes/Closes/Resolves
 // #N) anywhere in the commit body, case-insensitive.
@@ -54,9 +59,10 @@ type Commit struct {
 // Finding is a commit that carries the ship-stamp trailer -- so it reads as
 // real, tracked work -- but whose subject line has no scannable #N.
 type Finding struct {
-	SHA          string `json:"sha"`
-	Subject      string `json:"subject"`
-	GuessedIssue string `json:"guessed_issue,omitempty"` // from a body "Fixes/Closes/Resolves #N" trailer; "" if none
+	SHA           string `json:"sha"`
+	Subject       string `json:"subject"`
+	GuessedIssue  string `json:"guessed_issue,omitempty"`  // from a body "Fixes/Closes/Resolves #N" trailer; "" if none
+	PrivateIssues []int  `json:"private_issues,omitempty"` // explicitly qualified fak-private#N references found
 }
 
 // Report is the closed result of scanning a commit range for subjects
@@ -123,6 +129,7 @@ func Fold(commits []Commit) Report {
 		if m := bodyTrailerRE.FindStringSubmatch(c.Body); m != nil {
 			f.GuessedIssue = m[1]
 		}
+		f.PrivateIssues = ExtractPrivateIssues(c.Subject + " " + c.Body)
 		rep.Findings = append(rep.Findings, f)
 	}
 	return rep
@@ -168,7 +175,7 @@ func unresolvedReason(row CommitLinkedIssue) (reason, detail string, ok bool) {
 }
 
 func commitTextNamesIssue(row CommitLinkedIssue, number int) bool {
-	re := regexp.MustCompile(fmt.Sprintf(`#%d\b`, number))
+	re := regexp.MustCompile(fmt.Sprintf(`(?:^|[^\w-])#%d\b`, number))
 	return re.MatchString(row.Subject) || re.MatchString(row.Body)
 }
 
@@ -177,4 +184,43 @@ func shortSHA(sha string) string {
 		return sha[:12]
 	}
 	return sha
+}
+
+// ExtractPrivateIssues returns all distinct fak-private issue numbers referenced
+// in s, in first-seen order.
+func ExtractPrivateIssues(s string) []int {
+	var out []int
+	seen := map[int]bool{}
+	for _, m := range privateIssueRE.FindAllStringSubmatch(s, -1) {
+		if len(m) < 2 {
+			continue
+		}
+		var n int
+		for _, b := range m[1] {
+			n = n*10 + int(b-'0')
+		}
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// FormatPrivateIssue returns the canonical cross-repo reference string for a
+// private issue number (e.g. 456 -> "fak-private#456").
+func FormatPrivateIssue(number int) string {
+	return fmt.Sprintf("fak-private#%d", number)
+}
+
+// FormatPublicIssue returns the canonical reference string for a public issue
+// number (e.g. 123 -> "#123").
+func FormatPublicIssue(number int) string {
+	return fmt.Sprintf("#%d", number)
+}
+
+// IsPrivateIssueRef reports whether s contains or is an explicitly qualified
+// fak-private issue reference.
+func IsPrivateIssueRef(s string) bool {
+	return privateIssueRE.MatchString(s)
 }
