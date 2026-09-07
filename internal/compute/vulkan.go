@@ -253,12 +253,12 @@ func (v *vulkanBackend) VulkanDebugQ4KProfileSnapshot() (enabled bool, deviceCal
 
 type VulkanDispatchProfile struct {
 	ComputeDispatches, Q4KMatmulDispatches, Q2KMatmulDispatches, OtherComputeDispatches uint64
-	ComputeBarriers, D2DCopies, BatchSubmits, BatchFlushes, OneShotSubmits uint64
-	OtherMatmulDispatches, OtherNormDispatches, OtherRoPEDispatches        uint64
-	OtherSwiGLUDispatches, OtherAddDispatches, OtherAttentionDispatches    uint64
-	OtherArgmaxDispatches, OtherGDNDispatches, OtherUnclassifiedDispatches uint64
-	OneShotComputeSubmits, OneShotH2DSubmits                               uint64
-	OneShotD2HSubmits, OneShotD2DSubmits                                   uint64
+	ComputeBarriers, D2DCopies, BatchSubmits, BatchFlushes, OneShotSubmits              uint64
+	OtherMatmulDispatches, OtherNormDispatches, OtherRoPEDispatches                     uint64
+	OtherSwiGLUDispatches, OtherAddDispatches, OtherAttentionDispatches                 uint64
+	OtherArgmaxDispatches, OtherGDNDispatches, OtherUnclassifiedDispatches              uint64
+	OneShotComputeSubmits, OneShotH2DSubmits                                            uint64
+	OneShotD2HSubmits, OneShotD2DSubmits                                                uint64
 }
 
 func (v *vulkanBackend) VulkanDebugDispatchProfileSnapshot() VulkanDispatchProfile {

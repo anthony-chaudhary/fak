@@ -62,30 +62,69 @@ void main() {
         for (int n = 0; n < 256; n += 128) {
             uint shift = 0u;
             for (int j = 0; j < 4; ++j) {
-                uint sc0 = byteAt(base + is_idx);
+                uint scWord = raw[(base >> 2u) + (is_idx >> 2u)];
+                uint sc0 = (scWord >> ((is_idx & 3u) * 8u)) & 0xFFu;
                 is_idx++;
                 float dl0 = d * float(sc0 & 15u);
                 float ml0 = min_val * float(sc0 >> 4u);
 
-                uint sc1 = byteAt(base + is_idx);
+                uint sc1 = (scWord >> ((is_idx & 3u) * 8u)) & 0xFFu;
                 is_idx++;
                 float dl1 = d * float(sc1 & 15u);
                 float ml1 = min_val * float(sc1 >> 4u);
 
                 uint qBase0 = base + 16u + qi_offset;
                 uint qBase1 = qBase0 + 16u;
+                uint qWordBase0 = qBase0 >> 2u;
+                uint qWordBase1 = qBase1 >> 2u;
                 uint xGroupBase = xBase + uint(n + j * 32);
 
-                for (int l = 0; l < 16; ++l) {
-                    uint q0 = byteAt(qBase0 + uint(l));
-                    uint code0 = (q0 >> shift) & 3u;
-                    float w0 = dl0 * float(code0) - ml0;
-                    sum += w0 * x[xGroupBase + uint(l)];
+                for (int w = 0; w < 4; ++w) {
+                    uint qw0 = raw[qWordBase0 + uint(w)];
+                    uint qw1 = raw[qWordBase1 + uint(w)];
+                    uint x0 = xGroupBase + uint(w * 4);
+                    uint x1 = xGroupBase + 16u + uint(w * 4);
 
-                    uint q1 = byteAt(qBase1 + uint(l));
-                    uint code1 = (q1 >> shift) & 3u;
-                    float w1 = dl1 * float(code1) - ml1;
-                    sum += w1 * x[xGroupBase + 16u + uint(l)];
+                    // Unpack 4 bytes from 32-bit dwords via bit shifts (& 0xFFu, >> 8, >> 16, >> 24)
+                    uint q0_0 = qw0 & 0xFFu;
+                    uint code0_0 = (q0_0 >> shift) & 3u;
+                    float w0_0 = dl0 * float(code0_0) - ml0;
+                    sum += w0_0 * x[x0];
+
+                    uint q1_0 = qw1 & 0xFFu;
+                    uint code1_0 = (q1_0 >> shift) & 3u;
+                    float w1_0 = dl1 * float(code1_0) - ml1;
+                    sum += w1_0 * x[x1];
+
+                    uint q0_1 = (qw0 >> 8u) & 0xFFu;
+                    uint code0_1 = (q0_1 >> shift) & 3u;
+                    float w0_1 = dl0 * float(code0_1) - ml0;
+                    sum += w0_1 * x[x0 + 1u];
+
+                    uint q1_1 = (qw1 >> 8u) & 0xFFu;
+                    uint code1_1 = (q1_1 >> shift) & 3u;
+                    float w1_1 = dl1 * float(code1_1) - ml1;
+                    sum += w1_1 * x[x1 + 1u];
+
+                    uint q0_2 = (qw0 >> 16u) & 0xFFu;
+                    uint code0_2 = (q0_2 >> shift) & 3u;
+                    float w0_2 = dl0 * float(code0_2) - ml0;
+                    sum += w0_2 * x[x0 + 2u];
+
+                    uint q1_2 = (qw1 >> 16u) & 0xFFu;
+                    uint code1_2 = (q1_2 >> shift) & 3u;
+                    float w1_2 = dl1 * float(code1_2) - ml1;
+                    sum += w1_2 * x[x1 + 2u];
+
+                    uint q0_3 = (qw0 >> 24u) & 0xFFu;
+                    uint code0_3 = (q0_3 >> shift) & 3u;
+                    float w0_3 = dl0 * float(code0_3) - ml0;
+                    sum += w0_3 * x[x0 + 3u];
+
+                    uint q1_3 = (qw1 >> 24u) & 0xFFu;
+                    uint code1_3 = (q1_3 >> shift) & 3u;
+                    float w1_3 = dl1 * float(code1_3) - ml1;
+                    sum += w1_3 * x[x1 + 3u];
                 }
                 shift += 2u;
             }
