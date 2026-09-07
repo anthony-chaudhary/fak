@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -362,5 +363,76 @@ func TestIssueOrchestratorSpawnOpencodeTextRender(t *testing.T) {
 	}
 	if !strings.Contains(out, "DRY RUN") {
 		t.Errorf("expected DRY RUN indicator in output: %s", out)
+	}
+}
+
+func TestIssueOrchestratorCLIDynamicSlidingWindow(t *testing.T) {
+	var issues []issueorchestrator.Issue
+	for i := 1; i <= 25; i++ {
+		if i == 1 || i == 5 || i == 9 || i == 13 || i == 17 || i == 21 || i == 23 || i == 25 {
+			issues = append(issues, issueorchestrator.Issue{
+				Number:          i,
+				Key:             fmt.Sprintf("leaf-%d", i),
+				Title:           fmt.Sprintf("Leaf %d", i),
+				Lane:            fmt.Sprintf("lane%d", i),
+				Paths:           []string{fmt.Sprintf("internal/pkg%d/file.go", i)},
+				ExpectedSteps:   2,
+				Dispatchability: "dispatchable",
+			})
+		} else {
+			issues = append(issues, issueorchestrator.Issue{
+				Number:          i,
+				Key:             fmt.Sprintf("epic-%d", i),
+				Title:           fmt.Sprintf("Epic %d", i),
+				Lane:            "epiclane",
+				Paths:           []string{"internal/a/a.go", "internal/b/b.go", "internal/c/c.go"},
+				ExpectedSteps:   25,
+				Dispatchability: "needs_scope",
+			})
+		}
+	}
+	issuesPath := writeTestIssuesFile(t, issues)
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath,
+		"--target-issues", "6",
+		"--min-window", "10",
+		"--max-window", "30",
+		"--auto-expand",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runIssueOrchestrator failed with exit code %d; stderr: %s", code, stderr.String())
+	}
+
+	var plan issueorchestrator.Plan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("failed to decode JSON plan: %v; raw: %s", err, stdout.String())
+	}
+
+	if plan.Diagnostics == nil {
+		t.Fatalf("expected plan.Diagnostics to be populated")
+	}
+	if plan.Diagnostics.DiscoveryWindowSize <= 10 {
+		t.Errorf("expected DiscoveryWindowSize > 10, got %d", plan.Diagnostics.DiscoveryWindowSize)
+	}
+	if plan.PlannedIssues < 6 {
+		t.Errorf("expected at least 6 planned issues, got %d", plan.PlannedIssues)
+	}
+}
+
+func TestIssueOrchestratorCLILiveViewValidation(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--live",
+		"--view", "nonexistent-test-view-slug",
+		"--json",
+	})
+	if code != 2 {
+		t.Fatalf("expected exit code 2 on invalid view slug, got %d; stdout: %s; stderr: %s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "view slug \"nonexistent-test-view-slug\" not found") {
+		t.Errorf("expected view error in stderr: %s", stderr.String())
 	}
 }

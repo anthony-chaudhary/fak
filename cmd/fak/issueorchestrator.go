@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -64,6 +65,15 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 	var topLimit int
 	fs.IntVar(&topLimit, "top", 0, "limit evaluation to the top N candidate issues")
 	fs.IntVar(&topLimit, "limit", 0, "alias for --top")
+	autoExpand := fs.Bool("auto-expand", true, "dynamically expand discovery window when candidates are unplannable")
+	minWindow := fs.Int("min-window", 20, "minimum candidate discovery window")
+	maxWindow := fs.Int("max-window", 500, "maximum candidate discovery window")
+	unplannableWarnRatio := fs.Float64("unplannable-warn-ratio", 0.65, "threshold ratio of non-dispatchable issues to trigger advisory warning")
+	adaptiveConcurrency := fs.Bool("adaptive-concurrency", true, "derive wave size dynamically from host resources and SQLite contention")
+	live := fs.Bool("live", false, "fetch issues directly from GitHub via live ingestion")
+	view := fs.String("view", "", "view slug from .github/issue-views.json (default: ready-leaves)")
+	pageSize := fs.Int("page-size", 50, "page size for dynamic live ingestion")
+	rateLimitTimeout := fs.Duration("rate-limit-timeout", 30*time.Second, "timeout for rate-limit backoff before soft degradation")
 	_ = fs.Bool("plan-waves", false, "plan concurrent-safe waves (default behavior; accepted for CLI compatibility)")
 	excludeIssuesStr := fs.String("exclude-issues", "", "comma-separated list of issue numbers to exclude")
 	excludeLanes := fs.String("exclude-lanes", "", "comma-separated list of lanes to exclude")
@@ -101,17 +111,35 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 	var issues []issueorchestrator.Issue
 	var err error
 
-	inputPath := *fromIssues
-	if inputPath == "" {
-		inputPath = *fromPlan
-	}
+	if *live {
+		liveOpts := issueorchestrator.LiveIngestOptions{
+			Workspace:        root,
+			View:             *view,
+			PageSize:         *pageSize,
+			RateLimitTimeout: *rateLimitTimeout,
+			TargetIssues:     *targetIssues,
+			LogWarning: func(w string) {
+				fmt.Fprintln(stderr, w)
+			},
+		}
+		issues, err = issueorchestrator.FetchLiveIssues(context.Background(), liveOpts)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak issue-orchestrator: live ingest: %v\n", err)
+			return 2
+		}
+	} else {
+		inputPath := *fromIssues
+		if inputPath == "" {
+			inputPath = *fromPlan
+		}
 
-	issues, err = issueorchestrator.LoadIssues(inputPath, root)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak issue-orchestrator: %v\n", err)
-		return 2
+		issues, err = issueorchestrator.LoadIssues(inputPath, root)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak issue-orchestrator: %v\n", err)
+			return 2
+		}
 	}
-	if topLimit > 0 && len(issues) > topLimit {
+	if !*autoExpand && topLimit > 0 && len(issues) > topLimit {
 		issues = issues[:topLimit]
 	}
 
@@ -138,16 +166,25 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	// 3. Generate wave plan
+	effectiveWaveSize := *waveSize
+	if *adaptiveConcurrency {
+		effectiveWaveSize = issueorchestrator.AdaptiveWaveSize(issueorchestrator.WavePlanOptions{WaveSize: *waveSize})
+	}
+
 	waveOpts := issueorchestrator.WavePlanOptions{
-		WaveSize:       *waveSize,
-		MaxWaves:       *maxWaves,
-		TargetIssues:   *targetIssues,
-		TargetPoints:   targetPoints,
-		Limit:          topLimit,
-		ExcludedIssues: excludedIssues,
-		ExcludedLanes:  excludedLanesList,
-		AutoDetectHeld: !*noDetectHeld,
-		WorkspaceRoot:  root,
+		WaveSize:             effectiveWaveSize,
+		MaxWaves:             *maxWaves,
+		TargetIssues:         *targetIssues,
+		TargetPoints:         targetPoints,
+		Limit:                topLimit,
+		ExcludedIssues:       excludedIssues,
+		ExcludedLanes:        excludedLanesList,
+		AutoDetectHeld:       !*noDetectHeld,
+		WorkspaceRoot:        root,
+		AutoExpand:           *autoExpand,
+		MinWindow:            *minWindow,
+		MaxWindow:            *maxWindow,
+		UnplannableWarnRatio: *unplannableWarnRatio,
 	}
 	if *spawnOpencode || *opencodeCommands {
 		waveOpts.IncludeOpencodeCommands = true
@@ -161,6 +198,11 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	plan := issueorchestrator.PlanWaves(issues, waveOpts)
+	if plan.Diagnostics != nil && len(plan.Diagnostics.AdvisoryWarnings) > 0 {
+		for _, warn := range plan.Diagnostics.AdvisoryWarnings {
+			fmt.Fprintln(stderr, warn)
+		}
+	}
 
 	// 4. Handle baseline comparison if requested
 	if *comparePath != "" {
@@ -269,7 +311,14 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 		}
 
 		hasError := false
-		for _, issue := range selectedWave.Issues {
+		for issueIdx, issue := range selectedWave.Issues {
+			if issueIdx > 0 && !*dryRun {
+				res := issueorchestrator.CurrentSystemResources("")
+				delay := issueorchestrator.CalculateSpawnDelay(res, func(w string) {
+					fmt.Fprintln(stderr, w)
+				})
+				time.Sleep(delay)
+			}
 			var wtDir string
 			if *worktree {
 				res := workerworktree.Prepare(root, issue.Lane, strconv.Itoa(issue.Number), "", "", nil)
@@ -339,7 +388,7 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 			cmd := exec.Command(exe, cmdArgs...)
 			if chat.Worktree != "" {
 				cmd.Dir = chat.Worktree
-				cmd.Env = envSliceFromMap(workerworktree.WorktreeEnv(nil, chat.Worktree))
+				cmd.Env = envSliceFromMap(workerworktree.WorktreeEnv(envMap(os.Environ()), chat.Worktree))
 			} else {
 				cmd.Dir = root
 			}

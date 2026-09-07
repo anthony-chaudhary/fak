@@ -107,6 +107,16 @@ type Plan struct {
 	Subdivide      []SubdivideRow   `json:"subdivide,omitempty"`
 	Triage         []TriageRow      `json:"triage,omitempty"`
 	Duplicates     []DuplicateGroup `json:"duplicates,omitempty"`
+	Diagnostics    *PlanDiagnostics `json:"diagnostics,omitempty"`
+}
+
+// PlanDiagnostics captures metrics on adaptive discovery and horizon expansion.
+type PlanDiagnostics struct {
+	ScannedCandidates   int      `json:"scanned_candidates"`
+	DiscoveryWindowSize int      `json:"discovery_window_size"`
+	WindowExpansions    int      `json:"window_expansions"`
+	UnplannableRatio    float64  `json:"unplannable_ratio"`
+	AdvisoryWarnings    []string `json:"advisory_warnings,omitempty"`
 }
 
 // WavePlanOptions configures campaign wave generation.
@@ -124,6 +134,10 @@ type WavePlanOptions struct {
 	WorkspaceRoot           string
 	Graph                   map[string]map[string]struct{}
 	IncludeOpencodeCommands bool
+	AutoExpand              bool
+	MinWindow               int
+	MaxWindow               int
+	UnplannableWarnRatio    float64
 	OpencodeOptions         OpencodeChatOptions
 }
 
