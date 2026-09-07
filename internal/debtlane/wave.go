@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -12,6 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/processalive"
 )
 
 // WavePlanSchema is the canonical schema identifier for concurrent safe wave plans.
@@ -435,6 +439,76 @@ func hasDep(deps map[string]struct{}, lane string) bool {
 	return false
 }
 
+// pidLivenessCheck is the process liveness probe hook, defaulting to processalive.Check.
+// It is exposed as a package-level variable to allow unit tests to mock process liveness.
+var pidLivenessCheck = processalive.Check
+
+// LaneJournalEntry represents a record in .dos/lane-journal.jsonl tracking lane lease lifecycle.
+type LaneJournalEntry struct {
+	Op          string    `json:"op"`
+	Lane        string    `json:"lane"`
+	PID         int       `json:"pid,omitempty"`
+	Mode        string    `json:"mode,omitempty"` // "exclusive", "advisory", "shared", "readonly"
+	AcquiredAt  time.Time `json:"acquired_at,omitempty"`
+	HeartbeatAt time.Time `json:"heartbeat_at,omitempty"`
+	TTLSeconds  int       `json:"ttl_seconds,omitempty"`
+	Worker      string    `json:"worker,omitempty"`
+}
+
+func parseFlexibleTime(raw []byte) time.Time {
+	if len(raw) == 0 {
+		return time.Time{}
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return time.Time{}
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}
+	}
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04:05Z",
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04",
+		"2006-01-02T15:04Z",
+	} {
+		if t, err := time.ParseInLocation(layout, s, time.UTC); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
+func (e *LaneJournalEntry) UnmarshalJSON(data []byte) error {
+	type rawEntry struct {
+		Op          string          `json:"op"`
+		Lane        string          `json:"lane"`
+		PID         int             `json:"pid,omitempty"`
+		Mode        string          `json:"mode,omitempty"`
+		AcquiredAt  json.RawMessage `json:"acquired_at,omitempty"`
+		HeartbeatAt json.RawMessage `json:"heartbeat_at,omitempty"`
+		TTLSeconds  int             `json:"ttl_seconds,omitempty"`
+		Worker      string          `json:"worker,omitempty"`
+	}
+	var raw rawEntry
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	e.Op = raw.Op
+	e.Lane = raw.Lane
+	e.PID = raw.PID
+	e.Mode = raw.Mode
+	e.TTLSeconds = raw.TTLSeconds
+	e.Worker = raw.Worker
+	e.AcquiredAt = parseFlexibleTime(raw.AcquiredAt)
+	e.HeartbeatAt = parseFlexibleTime(raw.HeartbeatAt)
+	return nil
+}
+
 // DiscoverHeldLanes inspects the workspace lane journal (.dos/lane-journal.jsonl)
 // and returns all currently held lane leases.
 func DiscoverHeldLanes(workspace string) ([]string, error) {
@@ -445,7 +519,7 @@ func DiscoverHeldLanes(workspace string) ([]string, error) {
 	}
 	defer f.Close()
 
-	held := make(map[string]bool)
+	active := make(map[string]LaneJournalEntry)
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
 
@@ -454,31 +528,148 @@ func DiscoverHeldLanes(workspace string) ([]string, error) {
 		if line == "" || !strings.HasPrefix(line, "{") {
 			continue
 		}
-		var row struct {
-			Op   string `json:"op"`
-			Lane string `json:"lane"`
-		}
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
+		var entry LaneJournalEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
 			continue
 		}
-		lane := strings.TrimSpace(row.Lane)
+		lane := strings.TrimSpace(entry.Lane)
 		if lane == "" {
 			continue
 		}
-		switch row.Op {
+		op := strings.ToUpper(strings.TrimSpace(entry.Op))
+		switch op {
 		case "ACQUIRE":
-			held[lane] = true
+			active[lane] = entry
 		case "RELEASE":
-			delete(held, lane)
+			delete(active, lane)
+			for k := range active {
+				if strings.EqualFold(k, lane) {
+					delete(active, k)
+				}
+			}
+		case "HEARTBEAT", "TOUCH":
+			targetKey := lane
+			for k := range active {
+				if strings.EqualFold(k, lane) {
+					targetKey = k
+					break
+				}
+			}
+			if cur, ok := active[targetKey]; ok {
+				if !entry.HeartbeatAt.IsZero() {
+					cur.HeartbeatAt = entry.HeartbeatAt
+				} else if !entry.AcquiredAt.IsZero() {
+					cur.HeartbeatAt = entry.AcquiredAt
+				} else {
+					cur.HeartbeatAt = time.Now()
+				}
+				if entry.PID > 0 {
+					cur.PID = entry.PID
+				}
+				if entry.Mode != "" {
+					cur.Mode = entry.Mode
+				}
+				if entry.Worker != "" {
+					cur.Worker = entry.Worker
+				}
+				if entry.TTLSeconds > 0 {
+					cur.TTLSeconds = entry.TTLSeconds
+				}
+				active[targetKey] = cur
+			} else {
+				if entry.HeartbeatAt.IsZero() {
+					if !entry.AcquiredAt.IsZero() {
+						entry.HeartbeatAt = entry.AcquiredAt
+					} else {
+						entry.HeartbeatAt = time.Now()
+					}
+				}
+				active[lane] = entry
+			}
 		}
 	}
 
-	result := make([]string, 0, len(held))
-	for lane := range held {
-		result = append(result, lane)
+	var held []string
+	for lane, entry := range active {
+		mode := strings.ToLower(strings.TrimSpace(entry.Mode))
+		if mode == "advisory" || mode == "readonly" || mode == "shared" {
+			log.Printf("[debtlane:lease] INFO: lane %s held under advisory lease by PID %d; permitting exclusive acquisition", lane, entry.PID)
+			continue
+		}
+
+		if entry.PID > 0 {
+			if !pidLivenessCheck(entry.PID) {
+				log.Printf("[debtlane:lease] NOTICE: auto-reclaimed orphaned lease on lane %s (PID %d dead)", lane, entry.PID)
+				continue
+			}
+
+			lastSeen := entry.HeartbeatAt
+			if lastSeen.IsZero() {
+				lastSeen = entry.AcquiredAt
+			}
+			if lastSeen.IsZero() {
+				lastSeen = time.Now()
+			}
+
+			baseTTL := 15 * time.Minute
+			if entry.TTLSeconds > 0 {
+				baseTTL = time.Duration(entry.TTLSeconds) * time.Second
+			}
+
+			effectiveTTL := baseTTL
+			if time.Since(lastSeen) < 10*time.Minute {
+				if effectiveTTL < 60*time.Minute {
+					effectiveTTL = 60 * time.Minute
+				}
+			}
+
+			gracePeriod := 5 * time.Minute
+			if time.Since(lastSeen) <= effectiveTTL+gracePeriod {
+				held = append(held, lane)
+			}
+			continue
+		}
+
+		// If PID == 0:
+		held = append(held, lane)
 	}
-	sort.Strings(result)
-	return result, nil
+
+	sort.Strings(held)
+	return held, nil
+}
+
+// TouchLaneLease appends a HEARTBEAT entry for the given lane and PID to .dos/lane-journal.jsonl.
+func TouchLaneLease(workspace, lane string, pid int) error {
+	dosDir := filepath.Join(workspace, ".dos")
+	if err := os.MkdirAll(dosDir, 0o755); err != nil {
+		return err
+	}
+	journalPath := filepath.Join(dosDir, "lane-journal.jsonl")
+	f, err := os.OpenFile(journalPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	payload := struct {
+		Op          string `json:"op"`
+		Lane        string `json:"lane"`
+		PID         int    `json:"pid"`
+		HeartbeatAt string `json:"heartbeat_at"`
+	}{
+		Op:          "HEARTBEAT",
+		Lane:        lane,
+		PID:         pid,
+		HeartbeatAt: time.Now().Format(time.RFC3339),
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	_, err = f.Write(data)
+	return err
 }
 
 // RenderWaves formats a WavePlan as human-readable terminal text.
