@@ -207,6 +207,9 @@ const (
 	ArgMaxBytes
 	// ArgCLIReadOnly validates one gh/git invocation against a positive grammar and may attenuate gh search scope qualifiers.
 	ArgCLIReadOnly
+	// ArgAllowExact requires the original string to equal Glob byte-for-byte.
+	// It performs no path, quoting, whitespace, or environment normalization.
+	ArgAllowExact
 )
 
 // ArgPredicate is the compiled, hot-path form of a policy arg rule (issue #9) —
@@ -217,7 +220,7 @@ type ArgPredicate struct {
 	Tool   string         // the tool name this constrains (exact match)
 	Arg    string         // the argument key whose value is inspected
 	Kind   ArgKind        // which matcher below is active
-	Glob   string         // ArgAllowGlob: containment glob, e.g. "./out/**"
+	Glob   string         // ArgAllowGlob: containment glob; ArgAllowExact: literal string
 	Re     *regexp.Regexp // ArgDenyRegex: precompiled RE2 (nil for other kinds)
 	N      int            // ArgMaxBytes: byte cap
 	Reason abi.ReasonCode // refusal code cited on violation (manifest default: POLICY_BLOCK)

@@ -204,6 +204,8 @@ type AuthorizeRule struct {
 // constrained argument fails its predicate. A rule can only RESTRICT, never widen.
 //
 // Exactly ONE matcher must be set (fail-loud otherwise):
+//   - allow_exact: the original string MUST equal this value byte-for-byte;
+//     missing or non-string args fail closed, including for an empty literal.
 //   - allow_glob: the arg value MUST be a path under this glob ("./out/**"),
 //     else DENY. A "../" escape fails; a MISSING required arg fails closed.
 //   - deny_regex: the arg value matching this RE2 pattern is DENIED. A missing
@@ -220,13 +222,14 @@ type InlineEvalSpec struct {
 }
 
 type ArgRule struct {
-	Tool        string `json:"tool"`
-	Arg         string `json:"arg"`
-	AllowGlob   string `json:"allow_glob,omitempty"`
-	DenyRegex   string `json:"deny_regex,omitempty"`
-	MaxBytes    int    `json:"max_bytes,omitempty"`
-	CLIReadOnly bool   `json:"cli_read_only,omitempty"`
-	Reason      string `json:"reason,omitempty"`
+	Tool        string  `json:"tool"`
+	Arg         string  `json:"arg"`
+	AllowGlob   string  `json:"allow_glob,omitempty"`
+	AllowExact  *string `json:"allow_exact,omitempty"`
+	DenyRegex   string  `json:"deny_regex,omitempty"`
+	MaxBytes    int     `json:"max_bytes,omitempty"`
+	CLIReadOnly bool    `json:"cli_read_only,omitempty"`
+	Reason      string  `json:"reason,omitempty"`
 	// Fix (optional) is the operator-authored SANCTIONED ALTERNATIVE recommended
 	// in the same breath as the refusal: one imperative line naming what the
 	// caller should do instead (e.g. "hand the exact elevated command to the
@@ -687,6 +690,9 @@ func FromPolicy(p adjudicator.Policy) Manifest {
 			r := ArgRule{Tool: pred.Tool, Arg: pred.Arg, Reason: abi.ReasonName(pred.Reason), Advisory: pred.Advisory,
 				Fix: pred.Fix}
 			switch pred.Kind {
+			case adjudicator.ArgAllowExact:
+				literal := pred.Glob
+				r.AllowExact = &literal
 			case adjudicator.ArgAllowGlob:
 				r.AllowGlob = pred.Glob
 			case adjudicator.ArgDenyRegex:
@@ -1085,6 +1091,9 @@ func compileArgRules(rules []ArgRule) ([]adjudicator.ArgPredicate, error) {
 			return nil, fmt.Errorf("arg_rules[%d]: arg is required", i)
 		}
 		matchers := 0
+		if r.AllowExact != nil {
+			matchers++
+		}
 		if r.AllowGlob != "" {
 			matchers++
 		}
@@ -1098,7 +1107,7 @@ func compileArgRules(rules []ArgRule) ([]adjudicator.ArgPredicate, error) {
 			matchers++
 		}
 		if matchers != 1 {
-			return nil, fmt.Errorf("arg_rules[%d]: set exactly one of allow_glob, deny_regex, max_bytes, cli_read_only", i)
+			return nil, fmt.Errorf("arg_rules[%d]: set exactly one of allow_exact, allow_glob, deny_regex, max_bytes, cli_read_only", i)
 		}
 		reason := abi.ReasonPolicyBlock
 		if r.Reason != "" {
@@ -1112,6 +1121,9 @@ func compileArgRules(rules []ArgRule) ([]adjudicator.ArgPredicate, error) {
 		pred := adjudicator.ArgPredicate{Tool: r.Tool, Arg: r.Arg, Reason: reason, Advisory: r.Advisory,
 			Fix: strings.TrimSpace(r.Fix)}
 		switch {
+		case r.AllowExact != nil:
+			pred.Kind = adjudicator.ArgAllowExact
+			pred.Glob = *r.AllowExact
 		case r.AllowGlob != "":
 			pred.Kind = adjudicator.ArgAllowGlob
 			pred.Glob = r.AllowGlob
@@ -1142,6 +1154,8 @@ func describeArgPredicate(p adjudicator.ArgPredicate) string {
 		reason += " (advisory)"
 	}
 	switch p.Kind {
+	case adjudicator.ArgAllowExact:
+		return fmt.Sprintf("%s.%s allow_exact %q -> %s", p.Tool, p.Arg, p.Glob, reason)
 	case adjudicator.ArgAllowGlob:
 		return fmt.Sprintf("%s.%s allow_glob %s -> %s", p.Tool, p.Arg, p.Glob, reason)
 	case adjudicator.ArgDenyRegex:

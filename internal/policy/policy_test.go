@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,6 +12,75 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ifc"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 )
+
+func TestAllowExactPreservesCommandBytes(t *testing.T) {
+	const command = `powershell.exe -NoProfile -Command "Get-Process"`
+	literal := command
+	p, err := (Manifest{Allow: []string{"Bash"}, ArgRules: []ArgRule{{Tool: "Bash", Arg: "command", AllowExact: &literal}}}).ToPolicy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundTrip, err := Parse(FromPolicy(p).JSON())
+	if err != nil || !reflect.DeepEqual(p, roundTrip) {
+		t.Fatalf("round trip dropped exact predicate: %v", err)
+	}
+	if !strings.Contains(Summary(p), "allow_exact") {
+		t.Fatal("summary omitted exact predicate")
+	}
+	k := kernel.New("", kernel.WithAdjudicators([]abi.Adjudicator{adjudicator.New(roundTrip)}))
+	k.SetVDSO(false)
+	for _, raw := range []string{
+		`{"command":` + string(mustExactJSON(t, command)) + `}`,
+		`{"command":` + string(mustExactJSON(t, command+" & echo changed")) + `}`,
+		`{"command":` + string(mustExactJSON(t, "ignored/../"+command)) + `}`,
+		`{"command":` + string(mustExactJSON(t, " "+command)) + `}`,
+		`{"command":` + string(mustExactJSON(t, strings.ToUpper(command))) + `}`,
+		`{"command":null}`, `{"command":123}`, `{}`,
+	} {
+		_, v := k.Syscall(context.Background(), &abi.ToolCall{
+			Tool: "Bash", Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(raw)},
+		})
+		want := abi.VerdictDeny
+		if raw == `{"command":`+string(mustExactJSON(t, command))+`}` {
+			want = abi.VerdictAllow
+		}
+		if v.Kind != want {
+			t.Fatalf("args %s: verdict=%v want=%v", raw, v.Kind, want)
+		}
+	}
+	changed := literal + " changed"
+	next, err := (Manifest{Allow: []string{"Bash"}, ArgRules: []ArgRule{{Tool: "Bash", Arg: "command", AllowExact: &changed}}}).ToPolicy()
+	if err != nil || DiffAmendment(p, next).Empty() {
+		t.Fatalf("exact-value amendment was lost: %v", err)
+	}
+	for _, raw := range []string{
+		`{"arg_rules":[{"tool":"Bash","arg":"command","allow_exact":"","allow_glob":"**"}]}`,
+		`{"arg_rules":[{"tool":"Bash","arg":"command","allow_exact":null}]}`,
+	} {
+		if _, err := Parse([]byte(raw)); err == nil {
+			t.Fatalf("invalid matcher accepted: %s", raw)
+		}
+	}
+	empty, err := Parse([]byte(`{"allow":["Bash"],"arg_rules":[{"tool":"Bash","arg":"command","allow_exact":""}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{`{"command":""}`, `{}`, `{"command":null}`} {
+		v := adjudicator.New(empty).Adjudicate(context.Background(), &abi.ToolCall{Tool: "Bash", Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(raw)}})
+		if (v.Kind == abi.VerdictAllow) != (raw == `{"command":""}`) {
+			t.Fatalf("empty literal presence not enforced: %s => %v", raw, v.Kind)
+		}
+	}
+}
+
+func mustExactJSON(t *testing.T, value string) []byte {
+	t.Helper()
+	b, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
 
 // TestRoundTrip is the load-bearing invariant for --dump: the built-in
 // DefaultPolicy, rendered to a manifest and parsed back, must reconstruct the
