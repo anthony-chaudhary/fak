@@ -1,7 +1,4 @@
 #version 450
-#extension GL_KHR_shader_subgroup_basic : require
-#extension GL_KHR_shader_subgroup_arithmetic : require
-#extension GL_KHR_shader_subgroup_shuffle : require
 
 // q2k_matmul.comp — GGML Q2_K 2-bit quantized matrix multiplication for Vulkan 1.2 / RADV.
 //
@@ -12,14 +9,8 @@
 //   - qs:     64 bytes (offset 16..79; 256 2-bit codes, packed 4 per byte)
 //   - d:      half (f16, offset 80..81)
 //   - dmin:   half (f16, offset 82..83)
-//
-// One 32-lane workgroup owns one output row and a panel of up to four input tokens.
-// Each lane evaluates eight weights per superblock (two 128-weight halves times four
-// 32-weight groups), then subgroupAdd combines the partials. The panel keeps each
-// dequantized weight resident while it is applied to four tokens, amortizing the Q2_K
-// unpack and weight traffic during prefill without changing the P=1 decode path.
 
-layout(local_size_x = 32) in;
+layout(local_size_x = 64) in;
 
 layout(std430, set = 0, binding = 0) readonly buffer Q2K { uint raw[]; };
 layout(std430, set = 0, binding = 1) readonly buffer X   { float x[]; };
@@ -31,66 +22,115 @@ layout(push_constant) uniform PC {
     int tokens;
 } pc;
 
-const uint TOKEN_TILE = 4u;
+uint byteAt(uint off) {
+    uint w = raw[off >> 2];
+    return (w >> ((off & 3u) * 8u)) & 255u;
+}
+
+float halfAt(uint off) {
+    uint bits = byteAt(off) | (byteAt(off + 1u) << 8u);
+    return unpackHalf2x16(bits).x;
+}
 
 void main() {
-    uint lane = gl_LocalInvocationID.x;
-    uint panel = gl_WorkGroupID.x / uint(pc.outDim);
-    uint row = gl_WorkGroupID.x - panel * uint(pc.outDim);
-    uint token0 = panel * TOKEN_TILE;
-    if (row >= uint(pc.outDim) || token0 >= uint(pc.tokens)) return;
+    int globalIdx = int(gl_GlobalInvocationID.x);
+    int row;
+    int token;
 
-    uint blocks = uint(pc.inDim) / 256u;
-    float sums[4] = float[4](0.0, 0.0, 0.0, 0.0);
-    uint laneHalf = lane >> 4u;
+    // Handles both 1D dispatch ((outDim * tokens + 63) / 64) and 2D dispatch
+    if (pc.tokens > 1 && gl_NumWorkGroups.y == 1u) {
+        row = globalIdx % pc.outDim;
+        token = globalIdx / pc.outDim;
+    } else {
+        row = int(gl_GlobalInvocationID.x);
+        token = int(gl_GlobalInvocationID.y);
+    }
+    if (row >= pc.outDim || token >= pc.tokens) return;
 
-    for (uint sb = 0u; sb < blocks; ++sb) {
-        uint baseWord = (row * blocks + sb) * 21u; // 84-byte blocks are dword aligned.
+    int blocks = pc.inDim / 256;
+    float sum = 0.0;
 
-        // Four lanes coalesce the 16-byte scale table. Each consumer shuffles the
-        // required dword from its owning lane instead of issuing a divergent row load.
-        uint scaleWord = lane < 4u ? raw[baseWord + lane] : 0u;
+    for (int sb = 0; sb < blocks; ++sb) {
+        uint base = uint((row * blocks + sb) * 84);
+        float d = halfAt(base + 80u);
+        float min_val = halfAt(base + 82u);
 
-        // d and dmin occupy the final dword of the block. Load it once for the wave.
-        uint dmWord = lane == 0u ? raw[baseWord + 20u] : 0u;
-        dmWord = subgroupShuffle(dmWord, 0u);
-        vec2 dm = unpackHalf2x16(dmWord);
-        float d = dm.x;
-        float minValue = dm.y;
+        uint xBase = uint(token * pc.inDim + sb * 256);
+        uint is_idx = 0u;
+        uint qi_offset = 0u;
 
-        for (uint h = 0u; h < 2u; ++h) {
-            // The 32 quant bytes for this half are eight consecutive dwords. Lanes
-            // 0..7 issue the coalesced loads; subgroupShuffle distributes one byte
-            // to each of the 32 arithmetic lanes.
-            uint qWord = lane < 8u ? raw[baseWord + 4u + h * 8u + lane] : 0u;
-            qWord = subgroupShuffle(qWord, lane >> 2u);
-            uint qb = (qWord >> ((lane & 3u) * 8u)) & 0xffu;
+        for (int n = 0; n < 256; n += 128) {
+            uint shift = 0u;
+            for (int j = 0; j < 4; ++j) {
+                uint scWord = raw[(base >> 2u) + (is_idx >> 2u)];
+                uint sc0 = (scWord >> ((is_idx & 3u) * 8u)) & 0xFFu;
+                is_idx++;
+                float dl0 = d * float(sc0 & 15u);
+                float ml0 = min_val * float(sc0 >> 4u);
 
-            for (uint j = 0u; j < 4u; ++j) {
-                uint scaleIndex = h * 8u + 2u * j + laneHalf;
-                uint selectedScaleWord = subgroupShuffle(scaleWord, scaleIndex >> 2u);
-                uint sc = (selectedScaleWord >> ((scaleIndex & 3u) * 8u)) & 0xffu;
-                float dl = d * float(sc & 15u);
-                float ml = minValue * float(sc >> 4u);
-                uint code = (qb >> (2u * j)) & 3u;
-                float weight = dl * float(code) - ml;
-                uint k = sb * 256u + h * 128u + j * 32u + lane;
+                uint sc1 = (scWord >> ((is_idx & 3u) * 8u)) & 0xFFu;
+                is_idx++;
+                float dl1 = d * float(sc1 & 15u);
+                float ml1 = min_val * float(sc1 >> 4u);
 
-                for (uint m = 0u; m < TOKEN_TILE; ++m) {
-                    uint token = token0 + m;
-                    if (token < uint(pc.tokens)) {
-                        sums[m] += weight * x[token * uint(pc.inDim) + k];
-                    }
+                uint qBase0 = base + 16u + qi_offset;
+                uint qBase1 = qBase0 + 16u;
+                uint qWordBase0 = qBase0 >> 2u;
+                uint qWordBase1 = qBase1 >> 2u;
+                uint xGroupBase = xBase + uint(n + j * 32);
+
+                for (int w = 0; w < 4; ++w) {
+                    uint qw0 = raw[qWordBase0 + uint(w)];
+                    uint qw1 = raw[qWordBase1 + uint(w)];
+                    uint x0 = xGroupBase + uint(w * 4);
+                    uint x1 = xGroupBase + 16u + uint(w * 4);
+
+                    // Unpack 4 bytes from 32-bit dwords via bit shifts (& 0xFFu, >> 8, >> 16, >> 24)
+                    uint q0_0 = qw0 & 0xFFu;
+                    uint code0_0 = (q0_0 >> shift) & 3u;
+                    float w0_0 = dl0 * float(code0_0) - ml0;
+                    sum += w0_0 * x[x0];
+
+                    uint q1_0 = qw1 & 0xFFu;
+                    uint code1_0 = (q1_0 >> shift) & 3u;
+                    float w1_0 = dl1 * float(code1_0) - ml1;
+                    sum += w1_0 * x[x1];
+
+                    uint q0_1 = (qw0 >> 8u) & 0xFFu;
+                    uint code0_1 = (q0_1 >> shift) & 3u;
+                    float w0_1 = dl0 * float(code0_1) - ml0;
+                    sum += w0_1 * x[x0 + 1u];
+
+                    uint q1_1 = (qw1 >> 8u) & 0xFFu;
+                    uint code1_1 = (q1_1 >> shift) & 3u;
+                    float w1_1 = dl1 * float(code1_1) - ml1;
+                    sum += w1_1 * x[x1 + 1u];
+
+                    uint q0_2 = (qw0 >> 16u) & 0xFFu;
+                    uint code0_2 = (q0_2 >> shift) & 3u;
+                    float w0_2 = dl0 * float(code0_2) - ml0;
+                    sum += w0_2 * x[x0 + 2u];
+
+                    uint q1_2 = (qw1 >> 16u) & 0xFFu;
+                    uint code1_2 = (q1_2 >> shift) & 3u;
+                    float w1_2 = dl1 * float(code1_2) - ml1;
+                    sum += w1_2 * x[x1 + 2u];
+
+                    uint q0_3 = (qw0 >> 24u) & 0xFFu;
+                    uint code0_3 = (q0_3 >> shift) & 3u;
+                    float w0_3 = dl0 * float(code0_3) - ml0;
+                    sum += w0_3 * x[x0 + 3u];
+
+                    uint q1_3 = (qw1 >> 24u) & 0xFFu;
+                    uint code1_3 = (q1_3 >> shift) & 3u;
+                    float w1_3 = dl1 * float(code1_3) - ml1;
+                    sum += w1_3 * x[x1 + 3u];
                 }
+                shift += 2u;
             }
+            qi_offset += 32u;
         }
     }
 
-    for (uint m = 0u; m < TOKEN_TILE; ++m) {
-        float total = subgroupAdd(sums[m]);
-        uint token = token0 + m;
-        if (lane == 0u && token < uint(pc.tokens)) {
-            y[token * uint(pc.outDim) + row] = total;
-        }
-    }
+    y[token * pc.outDim + row] = sum;
 }
