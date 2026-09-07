@@ -1682,6 +1682,11 @@
             "lane": "harnessinstructions"
         },
         {
+            "command": "fak dev devindex leaf harnesskit",
+            "output_contains": "harnesskit",
+            "lane": "harnesskit"
+        },
+        {
             "command": "fak version modules",
             "output_contains": "internal/harnessmix",
             "lane": "harnessmix"

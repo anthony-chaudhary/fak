@@ -2,7 +2,7 @@ package harnesskit
 
 import "encoding/json"
 
-// Contract describes the machine-readable public compatibility surface.
+// Specification of the machine-readable public compatibility surface.
 type Contract struct {
 	SchemaVersion string                         `json:"schema_version"`
 	GoImport      string                         `json:"go_import"`
@@ -76,5 +76,5 @@ func PublicContract() Contract {
 	}
 }
 
-// ContractJSON serializes the normative contract for tooling and fixtures.
+// Serializes the normative public compatibility specification for tooling and fixtures.
 func ContractJSON() ([]byte, error) { return json.MarshalIndent(PublicContract(), "", "  ") }

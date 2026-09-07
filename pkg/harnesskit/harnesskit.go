@@ -14,7 +14,7 @@ import (
 	"slices"
 )
 
-// ContractVersion is the compatibility line implemented by this package.
+// Public compatibility line implemented by this package.
 const ContractVersion = "v1alpha1"
 
 // Capability names authority that a product may request. A declaration is not

@@ -293,7 +293,7 @@ const (
 	ChangeBreaking   ChangeClass = "breaking"
 )
 
-// ContractChange is one explicit, non-reflection-derived semantic delta.
+// Semantic delta representing one explicit, non-reflection-derived change.
 type ContractChange struct {
 	Class      ChangeClass `json:"class"`
 	Capability Capability  `json:"capability,omitempty"`
@@ -303,7 +303,7 @@ type ContractChange struct {
 	Detail     string      `json:"detail"`
 }
 
-// ContractDiff classifies every semantic transition in deterministic order.
+// Classified semantic transitions ordered deterministically across versions.
 type ContractDiff struct {
 	SchemaVersion string           `json:"schema_version"`
 	Changes       []ContractChange `json:"changes"`
