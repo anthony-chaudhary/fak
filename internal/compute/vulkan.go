@@ -157,6 +157,26 @@ func (v *vulkanBackend) configureVulkanQ4K(profile, stage bool) {
 	v.q4kStage = stage
 }
 
+type vulkanGDNConfigurer interface {
+	configureVulkanGDN(disableVector bool)
+}
+
+// ConfigureVulkanGDN applies explicit vectorized GDN disable settings to a selected Vulkan backend.
+func ConfigureVulkanGDN(backend Backend, disableVector bool) bool {
+	cfg, ok := backend.(vulkanGDNConfigurer)
+	if !ok {
+		return false
+	}
+	cfg.configureVulkanGDN(disableVector)
+	return true
+}
+
+func (v *vulkanBackend) configureVulkanGDN(disableVector bool) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	v.disableVectorGDN = disableVector
+}
+
 // vulkanBudgetBytes resolves FAK_GPU_BUDGET_MB — the device-local weight budget in MiB — against
 // this device's total device-local memory. 0 / unset / invalid = unbounded (place every weight
 // device-local, the prior behavior); a positive value caps device-local weight residency; "auto"
@@ -306,6 +326,59 @@ func (v *vulkanBackend) VulkanDebugResetQ4KProfile() {
 	v.q4kHostVisiblePackedBytes = 0
 }
 
+func (v *vulkanBackend) SetDisableVectorGDN(disable bool) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	v.disableVectorGDN = disable
+}
+
+func (v *vulkanBackend) IsVectorGDNDisabled() bool {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return v.isVectorGDNDisabledLocked()
+}
+
+func (v *vulkanBackend) isVectorGDNDisabledLocked() bool {
+	if v != nil && v.disableVectorGDN {
+		return true
+	}
+	if env := os.Getenv("FAK_DISABLE_VECTOR_GDN"); env == "1" || strings.EqualFold(env, "true") || strings.EqualFold(env, "yes") || strings.EqualFold(env, "on") {
+		return true
+	}
+	if env := os.Getenv("FAK_VECTORIZED_DELTANET"); env == "0" || strings.EqualFold(env, "false") || strings.EqualFold(env, "no") || strings.EqualFold(env, "off") {
+		return true
+	}
+	if env := os.Getenv("FAK_VECTOR_GDN"); env == "0" || strings.EqualFold(env, "false") || strings.EqualFold(env, "no") || strings.EqualFold(env, "off") {
+		return true
+	}
+	return false
+}
+
+func (v *vulkanBackend) VulkanDebugGDNProfileSnapshot() (vectorCalls, scalarCalls int64) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return v.vectorGDNCalls, v.scalarGDNCalls
+}
+
+func (v *vulkanBackend) VulkanDebugResetGDNProfile() {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	v.vectorGDNCalls = 0
+	v.scalarGDNCalls = 0
+}
+
+// VulkanDebugInitShim attempts initialization against an explicit SPIR-V directory
+// and returns the raw exit code from the underlying shim (0 = success, non-zero = failure).
+func VulkanDebugInitShim(spirvDir string) int {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	cdir := C.CString(spirvDir)
+	defer C.free(unsafe.Pointer(cdir))
+	var name [256]C.char
+	var discrete C.int
+	return int(C.fvk_init(&name[0], 256, &discrete, cdir))
+}
+
 type vulkanBackend struct {
 	name          string
 	tier          string
@@ -347,6 +420,9 @@ type vulkanBackend struct {
 	homeBypasses              int64
 	homeBytes                 int64
 	homeCopied                int64
+	disableVectorGDN          bool
+	vectorGDNCalls            int64
+	scalarGDNCalls            int64
 }
 
 var _ TensorCloner = (*vulkanBackend)(nil)
@@ -1341,7 +1417,8 @@ func (v *vulkanBackend) MatMul3(wq, wk, wv, x Tensor) (Tensor, Tensor, Tensor) {
 }
 
 // RMSNormMatMul2 fuses RMSNorm of x with two projections sharing that normalized input
-// in one decode-only dispatch (all-F32 or all-Q8_0), returning both outputs.
+// in one decode-only operation, returning both outputs. Pairs containing Q2_K
+// compose normalization and the existing projection kernels without expanding weights.
 func (v *vulkanBackend) RMSNormMatMul2(w0, w1, x, normWeight Tensor, eps float32) (Tensor, Tensor) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -1362,6 +1439,36 @@ func (v *vulkanBackend) RMSNormMatMul2(w0, w1, x, normWeight Tensor, eps float32
 	P := x.Numel() / in
 	if P != 1 {
 		panic("compute: vulkan RMSNormMatMul2 is decode-only today")
+	}
+	if w0.Dtype == Q2_K || w1.Dtype == Q2_K {
+		// Refuse both operands before allocating or recording normalization. The
+		// presence of a Q2 kernel does not admit Q5/Q6 or other unsupported formats.
+		for _, w := range []Tensor{w0, w1} {
+			switch w.Dtype {
+			case F32, Q8_0, Q4_K, Q2_K:
+			default:
+				panic("compute: vulkan RMSNormMatMul2 unsupported companion weight dtype " + w.Dtype.String())
+			}
+		}
+		y0, _ := v.devTr([]int{out0}, F32)
+		y1, _ := v.devTr([]int{out1}, F32)
+		xn, _ := v.devTr([]int{in}, F32)
+		C.fvk_rmsnorm_f32(v.vp(x), v.vp(normWeight), v.vp(xn), C.int(P), C.int(in), C.float(eps))
+		project := func(w, y Tensor, out int) {
+			switch w.Dtype {
+			case Q2_K:
+				v.q2kMatMulLocked(w, xn, y, out, in, P)
+			case Q4_K:
+				v.q4kMatMulLocked(w, xn, y, out, in, P)
+			case Q8_0:
+				v.q8MatMulLocked(w, xn, y, out, in, P)
+			case F32:
+				C.fvk_matmul_f32(v.vp(w), v.vp(xn), v.vp(y), C.int(out), C.int(in), C.int(P))
+			}
+		}
+		project(w0, y0, out0)
+		project(w1, y1, out1)
+		return y0, y1
 	}
 	y0, _ := v.devTr([]int{out0}, F32)
 	y1, _ := v.devTr([]int{out1}, F32)
@@ -1501,7 +1608,7 @@ func (v *vulkanBackend) SwiGLUMatMulAddInPlace(dst, w, gate, up Tensor) {
 	switch w.Dtype {
 	case F32:
 		C.fvk_swiglu_matmul_add_f32(v.vp(w), v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))
-	case Q4_K:
+	case Q4_K, Q2_K:
 		sw, _ := v.devTr(append([]int(nil), gate.Shape...), F32)
 		C.fvk_swiglu_f32(v.vp(gate), v.vp(up), v.vp(sw), C.int(gate.Numel()))
 		projShape := []int{P, out}
@@ -1509,7 +1616,11 @@ func (v *vulkanBackend) SwiGLUMatMulAddInPlace(dst, w, gate, up Tensor) {
 			projShape = []int{out}
 		}
 		proj, _ := v.devTr(projShape, F32)
-		v.q4kMatMulLocked(w, sw, proj, out, in, P)
+		if w.Dtype == Q2_K {
+			v.q2kMatMulLocked(w, sw, proj, out, in, P)
+		} else {
+			v.q4kMatMulLocked(w, sw, proj, out, in, P)
+		}
 		C.fvk_add_f32(v.vp(dst), v.vp(proj), C.int(dst.Numel()))
 	case Q8_0:
 		wb := v.q8WeightBufLocked(w, in, "Q8 SwiGLUMatMulAddInPlace")

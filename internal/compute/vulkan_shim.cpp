@@ -109,7 +109,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_Q4K_MATMUL, K_Q2K_MATMUL, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_Q4K_MATMUL, K_Q2K_MATMUL, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -117,7 +117,7 @@ Kernel g_kern[K_COUNT];
 std::atomic<uint64_t>& dpOtherFamily(KId id) {
     switch (id) {
     case K_MATMUL: case K_MATMUL_ADD: case K_MATMUL_ARGMAX: case K_MATMUL_ARGMAX_BLOCKS:
-    case K_MATMUL2: case K_MATMUL3: case K_Q8_MATMUL: case K_Q8_MATMUL2: case K_Q8_MATMUL3:
+    case K_MATMUL2: case K_MATMUL3: case K_Q8_MATMUL: case K_Q8_MATMUL_DECODE: case K_Q8_MATMUL2: case K_Q8_MATMUL3:
         return g_dp.otherMatmul;
     case K_RMSNORM: case K_RMSNORM_MATMUL: case K_RMSNORM_MATMUL2: case K_RMSNORM_MATMUL3:
     case K_RMSNORM_MATMUL_ARGMAX_BLOCKS: case K_RMSNORM_Q8_MATMUL2: case K_RMSNORM_Q8_MATMUL3:
@@ -684,8 +684,8 @@ void recycleDescriptorSet(DescriptorSetRecord rec) {
     if (rec.set) g_descSetPool[rec.layout].push_back(rec);
 }
 
-// dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX workgroups.
-void dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX) {
+// dispatch: bind `bufs` (nbuf of them) + push constants, run groupsX*groupsY workgroups.
+void dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_t groupsX, uint32_t groupsY = 1) {
     if (k.nbuf > MAX_DISPATCH_BUFS) {
         fprintf(stderr, "fak-vulkan: dispatch skipped; kernel has %d buffers, max %d\n",
                 k.nbuf, MAX_DISPATCH_BUFS);
@@ -736,7 +736,7 @@ void dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
         vkCmdBindDescriptorSets(g_batchCmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.layout, 0, 1, &rec.set, 0, nullptr);
         if (pcsize > 0) vkCmdPushConstants(g_batchCmd, k.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pcsize, pc);
         dpDispatch(k);
-        vkCmdDispatch(g_batchCmd, groupsX, 1, 1);
+        vkCmdDispatch(g_batchCmd, groupsX, groupsY, 1);
         g_batchSets.push_back(rec);
         ++g_batchOps;
         return;
@@ -748,7 +748,7 @@ void dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.layout, 0, 1, &rec.set, 0, nullptr);
     if (pcsize > 0) vkCmdPushConstants(cmd, k.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pcsize, pc);
     dpDispatch(k);
-    vkCmdDispatch(cmd, groupsX, 1, 1);
+    vkCmdDispatch(cmd, groupsX, groupsY, 1);
     dpOneShot(g_dp.oneShotCompute);
     endSubmitWait(cmd);
     recycleDescriptorSet(rec);
@@ -922,13 +922,14 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_QWEN35_CAUSAL_ATTENTION_PANEL], P("qwen35_causal_attention_panel.spv"), 4, 5 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_SIGMOID_MUL], P("sigmoid_mul.spv"), 2, sizeof(int));
     ok &= buildKernel(g_kern[K_Q4K_MATMUL], P("q4k_matmul.spv"), 3, 3 * sizeof(int));
-    buildKernel(g_kern[K_Q2K_MATMUL], P("q2k_matmul.spv"), 3, 3 * sizeof(int));
+    ok &= buildKernel(g_kern[K_Q2K_MATMUL], P("q2k_matmul.spv"), 3, 3 * sizeof(int));
     if (!ok) return 8;
     // Q8 kernel is built only when the device advertised the int8/8-bit-storage features; its
     // SPIR-V uses them, so loading it without the enabled device feature would be invalid. If
     // it fails to build, disable the Q8 path rather than failing init (f32 stays available).
     if (g_have_q8) {
         if (!buildKernel(g_kern[K_Q8_MATMUL], P("q8_matmul.spv"), 4, 3 * sizeof(int)) ||
+            !buildKernel(g_kern[K_Q8_MATMUL_DECODE], P("q8_matmul_decode.spv"), 4, 3 * sizeof(int)) ||
             !buildKernel(g_kern[K_Q8_MATMUL2], P("q8_matmul2.spv"), 7, 4 * sizeof(int)) ||
             !buildKernel(g_kern[K_Q8_MATMUL3], P("q8_matmul3.spv"), 10, 5 * sizeof(int)) ||
             !buildKernel(g_kern[K_RMSNORM_Q8_MATMUL2], P("rmsnorm_q8_matmul2.spv"), 8, 4 * sizeof(int) + sizeof(float)) ||
@@ -1117,8 +1118,10 @@ void fvk_q8_matmul_f32(const void* dWcodes, const void* dWscale, const void* dX,
     }
     struct { int outDim, inDim, P; } pc{out, in, P};
     Buffer* bufs[4] = {B((void*)dWcodes), B((void*)dWscale), B((void*)dX), B(dY)};
-    uint32_t outGroups = ((uint32_t)out + 255u) / 256u;
-    dispatch(g_kern[K_Q8_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)P * outGroups);
+    uint32_t outputsPerGroup = P == 1 ? 8u : 256u;
+    uint32_t outGroups = ((uint32_t)out + outputsPerGroup - 1u) / outputsPerGroup;
+    Kernel& kernel = g_kern[P == 1 ? K_Q8_MATMUL_DECODE : K_Q8_MATMUL];
+    dispatch(kernel, bufs, &pc, sizeof(pc), outGroups, (uint32_t)P);
 }
 
 void fvk_q8_matmul2_f32(const void* dW0codes, const void* dW0scale,

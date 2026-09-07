@@ -90,14 +90,14 @@ var (
 
 // WatchdogSafetyViolationError provides detailed context when a chunk exceeds the safety ceiling.
 type WatchdogSafetyViolationError struct {
-	ChunkIndex       int
-	StartToken       int
-	TokenCount       int
-	EstimatedTimeMs  float64
-	CeilingTimeMs    float64
-	WatchdogLimitMs  float64
-	IsMemoryBound    bool
-	DetailMessage    string
+	ChunkIndex      int
+	StartToken      int
+	TokenCount      int
+	EstimatedTimeMs float64
+	CeilingTimeMs   float64
+	WatchdogLimitMs float64
+	IsMemoryBound   bool
+	DetailMessage   string
 }
 
 func (e *WatchdogSafetyViolationError) Error() string {
@@ -880,7 +880,7 @@ func (s *WatchdogPrefillScheduler) PlanSchedule(promptTokens int) (*PrefillSched
 		// Calculate exact pacing metrics for the selected chunk size
 		flops, bRead, bWrite, durMs, compMs, memMs, isMemBound := s.EstimateChunkPacing(start, candidateTokens, batchSize)
 
-		isLast := (start + candidateTokens >= promptTokens)
+		isLast := (start+candidateTokens >= promptTokens)
 
 		// Determine synchronization yield point:
 		// Regular chunks get a signal fence to reset the hardware watchdog.

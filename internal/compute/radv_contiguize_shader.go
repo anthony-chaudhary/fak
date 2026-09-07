@@ -192,17 +192,17 @@ func (pc RADVContiguizePushConstants) Validate() error {
 // RADVScratchAllocation details in-VRAM scratch memory allocation for K and V buffers
 // aligned to 256-byte cache line multiples.
 type RADVScratchAllocation struct {
-	NPos                 int   `json:"n_pos"`
-	NKV                  int   `json:"n_kv"`
-	HeadDim              int   `json:"head_dim"`
-	ElementSizeBytes     int   `json:"element_size_bytes"`      // 2 bytes for f16
-	PerBufferRawBytes    int64 `json:"per_buffer_raw_bytes"`    // nKV * nPos * headDim * 2
+	NPos                  int   `json:"n_pos"`
+	NKV                   int   `json:"n_kv"`
+	HeadDim               int   `json:"head_dim"`
+	ElementSizeBytes      int   `json:"element_size_bytes"`       // 2 bytes for f16
+	PerBufferRawBytes     int64 `json:"per_buffer_raw_bytes"`     // nKV * nPos * headDim * 2
 	PerBufferAlignedBytes int64 `json:"per_buffer_aligned_bytes"` // aligned to 256 bytes
-	TotalRawBytes        int64 `json:"total_raw_bytes"`         // 2 * nKV * nPos * headDim * 2
-	TotalAlignedBytes    int64 `json:"total_aligned_bytes"`     // 2 * PerBufferAlignedBytes
-	AlignmentBytes       int64 `json:"alignment_bytes"`          // 256 bytes
-	KOffset              int64 `json:"k_offset"`                 // 0
-	VOffset              int64 `json:"v_offset"`                 // PerBufferAlignedBytes
+	TotalRawBytes         int64 `json:"total_raw_bytes"`          // 2 * nKV * nPos * headDim * 2
+	TotalAlignedBytes     int64 `json:"total_aligned_bytes"`      // 2 * PerBufferAlignedBytes
+	AlignmentBytes        int64 `json:"alignment_bytes"`          // 256 bytes
+	KOffset               int64 `json:"k_offset"`                 // 0
+	VOffset               int64 `json:"v_offset"`                 // PerBufferAlignedBytes
 }
 
 // radvAlignUp rounds v up to the nearest multiple of align.
@@ -232,17 +232,17 @@ func ComputeRADVScratchAllocation(nPos, nKV, headDim int) (RADVScratchAllocation
 	totalAligned := 2 * perBufferAligned
 
 	return RADVScratchAllocation{
-		NPos:                 nPos,
-		NKV:                  nKV,
-		HeadDim:              headDim,
-		ElementSizeBytes:     elemBytes,
-		PerBufferRawBytes:    perBufferRaw,
+		NPos:                  nPos,
+		NKV:                   nKV,
+		HeadDim:               headDim,
+		ElementSizeBytes:      elemBytes,
+		PerBufferRawBytes:     perBufferRaw,
 		PerBufferAlignedBytes: perBufferAligned,
-		TotalRawBytes:        totalRaw,
-		TotalAlignedBytes:    totalAligned,
-		AlignmentBytes:       RADVScratchAlignmentBytes,
-		KOffset:              0,
-		VOffset:              perBufferAligned,
+		TotalRawBytes:         totalRaw,
+		TotalAlignedBytes:     totalAligned,
+		AlignmentBytes:        RADVScratchAlignmentBytes,
+		KOffset:               0,
+		VOffset:               perBufferAligned,
 	}, nil
 }
 
@@ -330,7 +330,7 @@ type RADVBindingDescriptor struct {
 	DescriptorType string `json:"descriptor_type"` // "storage_buffer"
 	Access         string `json:"access"`          // "readonly" or "writeonly"
 	Name           string `json:"name"`
-	StageFlags     string `json:"stage_flags"`     // "compute"
+	StageFlags     string `json:"stage_flags"` // "compute"
 }
 
 // RADVMemoryInterleaveConfig specifies Strix Halo memory channel interleaving parameters.

@@ -1274,13 +1274,13 @@ const (
 
 // UMADRAMRingConfig specifies parameters for the UMA DRAM write-back dirty ring buffer.
 type UMADRAMRingConfig struct {
-	CapacityBytes       uint64                                              `json:"capacity_bytes"`
-	FlushThresholdBytes uint64                                              `json:"flush_threshold_bytes"`
-	ExtentCoalesceBytes uint64                                              `json:"extent_coalesce_bytes"`
-	SectorSizeBytes     uint32                                              `json:"sector_size_bytes"`
-	BaselineWAF         float64                                             `json:"baseline_waf"`
-	SequentialWAF       float64                                             `json:"sequential_waf"`
-	FileDescriptor      uintptr                                             `json:"file_descriptor,omitempty"`
+	CapacityBytes       uint64                                             `json:"capacity_bytes"`
+	FlushThresholdBytes uint64                                             `json:"flush_threshold_bytes"`
+	ExtentCoalesceBytes uint64                                             `json:"extent_coalesce_bytes"`
+	SectorSizeBytes     uint32                                             `json:"sector_size_bytes"`
+	BaselineWAF         float64                                            `json:"baseline_waf"`
+	SequentialWAF       float64                                            `json:"sequential_waf"`
+	FileDescriptor      uintptr                                            `json:"file_descriptor,omitempty"`
 	DiskWriter          func(offset uint64, data []byte, fd uintptr) error `json:"-"`
 }
 
