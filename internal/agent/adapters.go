@@ -369,13 +369,16 @@ func marshalWithExtraBody(base any, extra json.RawMessage) ([]byte, error) {
 	if len(extra) == 0 {
 		return raw, nil
 	}
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, err
-	}
 	var add map[string]json.RawMessage
 	if err := json.Unmarshal(extra, &add); err != nil {
 		return nil, fmt.Errorf("provider extra body: %w", err)
+	}
+	if len(add) == 0 {
+		return raw, nil
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, err
 	}
 	for k, v := range add {
 		if _, exists := doc[k]; exists {
