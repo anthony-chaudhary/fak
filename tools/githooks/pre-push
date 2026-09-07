@@ -41,22 +41,35 @@
 
 mode="${FLEET_REVIEW_GUARD:-block}"
 
-# Only gate pushes of the trunk itself; a topic branch / tag push is not the shared
-# floor this guard protects.
-branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || exit 0
-# Trunk is `main`; `master` stays allowlisted as the legacy alias (the private
-# repo still trunks on master, and these hooks are shared across both copies).
-case "$branch" in
-	main|master) : ;;
-	*) exit 0 ;;
-esac
-
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 
 # Capture Git's standard update rows before any child can consume stdin. Build
 # evidence below is bound to each immutable local SHA actually being pushed.
 push_updates="$(cat)"
 pushed_tips="$(printf '%s\n' "$push_updates" | awk 'NF >= 4 && $2 !~ /^0+$/ { print $2 }' | sort -u)"
+
+# Only gate pushes of the trunk itself; a topic branch / tag push is not the shared
+# floor this guard protects. Detached HEAD worktrees (where branch is HEAD or empty)
+# or topic branches pushing to main/master are checked against pushed refs from stdin ($push_updates).
+branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || branch=""
+
+# Trunk is `main`; `master` stays allowlisted as the legacy alias (the private
+# repo still trunks on master, and these hooks are shared across both copies).
+trunk_push=0
+if [ -n "$push_updates" ]; then
+	trunk_targets="$(printf '%s\n' "$push_updates" | awk 'NF >= 4 && ($3 ~ /^refs\/heads\/(main|master)$/ || $3 ~ /^(main|master)$/) { print $3 }')"
+	if [ -n "$trunk_targets" ]; then
+		trunk_push=1
+	fi
+else
+	case "$branch" in
+		main|master) trunk_push=1 ;;
+	esac
+fi
+
+if [ "$trunk_push" -ne 1 ]; then
+	exit 0
+fi
 
 # GitHub Actions structural gate (#5986). This rung is intentionally independent of
 # FLEET_BUILD_GUARD: workflow syntax still gates a workflow-only push when compilation is off.
@@ -208,30 +221,34 @@ build_mode="${FLEET_BUILD_GUARD:-block}"
 # build gate's FLEET_BUILD_GUARD mode + FLEET_ALLOW_BUILD_BREAK escape. Fail-open: an older `fak`
 # without the subcommand (exit 2) or a clean tip (exit 0) just falls through to the full build.
 if [ "$build_mode" != "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ]; then
-	iw_status=0
-	if command -v fak >/dev/null 2>&1; then
-		iw_out="$(fak hooks import-witness --root "$root" 2>&1)"
-		iw_status=$?
-	elif command -v go >/dev/null 2>&1; then
-		iw_out="$(cd "$root" && go run ./cmd/fak hooks import-witness --root "$root" 2>&1)"
-		iw_status=$?
-	else
-		iw_status=2
-	fi
-	if [ "$iw_status" -eq 1 ]; then
-		if [ "$build_mode" = "block" ]; then
-			echo "IMPORT_OF_UNCOMMITTED_PACKAGE (blocked): a committed file imports a package with no tracked source." >&2
-			echo "$iw_out" >&2
-			echo "  fix: git add the missing package dir (named above), or revert the importer; then re-push." >&2
-			echo "  override once: FLEET_ALLOW_BUILD_BREAK=1 git push   (intentional only)" >&2
-			exit 1
+	tips="$pushed_tips"
+	[ -z "$tips" ] && tips="HEAD" # manual invocation compatibility
+	for pushed_tip in $tips; do
+		iw_status=0
+		if command -v fak >/dev/null 2>&1; then
+			iw_out="$(fak hooks import-witness --root "$root" --rev "$pushed_tip" 2>&1)"
+			iw_status=$?
+		elif command -v go >/dev/null 2>&1; then
+			iw_out="$(cd "$root" && go run ./cmd/fak hooks import-witness --root "$root" --rev "$pushed_tip" 2>&1)"
+			iw_status=$?
 		else
-			echo "IMPORT_OF_UNCOMMITTED_PACKAGE (advisory): a committed file imports a package with no tracked source." >&2
-			echo "$iw_out" >&2
-			echo "  fix before others fetch, or hard-enforce with FLEET_BUILD_GUARD=block." >&2
+			iw_status=2
 		fi
-	fi
-	# iw_status 0 (clean) or 2 (could-not-run) => fall through to the full compile gate below.
+		if [ "$iw_status" -eq 1 ]; then
+			if [ "$build_mode" = "block" ]; then
+				echo "IMPORT_OF_UNCOMMITTED_PACKAGE (blocked): a committed file imports a package with no tracked source." >&2
+				echo "$iw_out" >&2
+				echo "  fix: git add the missing package dir (named above), or revert the importer; then re-push." >&2
+				echo "  override once: FLEET_ALLOW_BUILD_BREAK=1 git push   (intentional only)" >&2
+				exit 1
+			else
+				echo "IMPORT_OF_UNCOMMITTED_PACKAGE (advisory): a committed file imports a package with no tracked source." >&2
+				echo "$iw_out" >&2
+				echo "  fix before others fetch, or hard-enforce with FLEET_BUILD_GUARD=block." >&2
+			fi
+		fi
+		# iw_status 0 (clean) or 2 (could-not-run) => fall through to the full compile gate below.
+	done
 fi
 
 if [ "$build_mode" != "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ]; then
@@ -273,8 +290,15 @@ if [ "$build_mode" != "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ]; the
 			echo "  fix before others fetch, or hard-enforce with FLEET_BUILD_GUARD=block." >&2
 		fi
 	elif [ "$build_status" -ne 0 ]; then
-		echo "TRUNK_WOULD_NOT_COMPILE (warn): build gate could not run; push allowed." >&2
-		echo "$build_out" >&2
+		if [ "$build_mode" = "block" ]; then
+			echo "TRUNK_WOULD_NOT_COMPILE (blocked): build gate could not run; push refused (fail closed)." >&2
+			echo "$build_out" >&2
+			echo "  fix: verify Go toolchain and build dependencies, or override once with FLEET_ALLOW_BUILD_BREAK=1 git push." >&2
+			exit 1
+		else
+			echo "TRUNK_WOULD_NOT_COMPILE (warn): build gate could not run; push allowed." >&2
+			echo "$build_out" >&2
+		fi
 	fi
 fi
 
@@ -349,11 +373,19 @@ if [ -z "$dos_bin" ]; then
 	exit 0
 fi
 
-# The range this push would ADD to the trunk: prefer this branch's own upstream,
+# The range this push would ADD to the trunk: prefer this branch's own upstream if on main/master,
 # then origin/main, then the legacy origin/master. If none is known (fresh clone,
 # detached remote), fall back to the last 20 commits rather than failing.
-if git rev-parse --verify --quiet "origin/$branch" >/dev/null 2>&1; then
-	range="origin/$branch..HEAD"
+if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
+	if git rev-parse --verify --quiet "origin/$branch" >/dev/null 2>&1; then
+		range="origin/$branch..HEAD"
+	elif git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
+		range="origin/main..HEAD"
+	elif git rev-parse --verify --quiet origin/master >/dev/null 2>&1; then
+		range="origin/master..HEAD"
+	else
+		range="HEAD~20..HEAD"
+	fi
 elif git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
 	range="origin/main..HEAD"
 elif git rev-parse --verify --quiet origin/master >/dev/null 2>&1; then
