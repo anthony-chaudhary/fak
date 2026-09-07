@@ -22,8 +22,11 @@ package model
 // batched; the batched-Q8 tile GEMM is the separate box-2 slice the issue scopes out of this pass.
 
 import (
+	"fmt"
 	"math"
 	"os"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // gdnBatchedPrefill is the opt-in gate (issue #443, box 3: a hybrid model opts into the accelerated
@@ -59,11 +62,18 @@ func (m *Model) residentMatMulBatch(name string, X []float32, out, in, P int) []
 	return Y
 }
 
-// linearAttnSeqBatched mirrors linearAttnSeq exactly, save that the five projection GEMVs are
-// hoisted into full-sequence matMulBatch GEMMs (via residentMatMulBatch). The conv1d, the gated
-// delta-rule recurrence, and the gated RMSNorm are byte-for-byte the scalar math, so the result is
-// bit-identical to linearAttnSeq on the f32 path.
+// linearAttnSeqBatched is the cacheless wrapper over linearAttnSeqBatchedStateful,
+// preserving the zero-state prefill contract for whole sequences.
 func (m *Model) linearAttnSeqBatched(l int, xn [][]float32) [][]float32 {
+	out, _ := m.linearAttnSeqBatchedStateful(l, xn, nil)
+	return out
+}
+
+// linearAttnSeqBatchedStateful runs batched-projection Gated-DeltaNet token mixing for a sequence
+// of new rows, resuming from and updating the caller-owned persistent linearAttnLayerState when non-nil.
+// When st is nil, state is initialized from zero (pure cacheless prefill).
+// Before mutation, it validates geometry against model configuration and refuses malformed states.
+func (m *Model) linearAttnSeqBatchedStateful(l int, xn [][]float32, st *linearAttnLayerState) ([][]float32, error) {
 	cfg := m.Cfg
 	H := cfg.HiddenSize
 	nK, nV, kHd, vHd, keyDim, valDim, convDim := cfg.linearAttnDims()
@@ -73,7 +83,26 @@ func (m *Model) linearAttnSeqBatched(l int, xn [][]float32) [][]float32 {
 	p := func(s string) string { return layerName(l, s) }
 
 	if seq == 0 {
-		return nil
+		return nil, nil
+	}
+
+	// Validate caller-owned state geometry before mutation.
+	if st != nil {
+		if len(st.recurrent) != 0 {
+			if len(st.recurrent) != nV {
+				return nil, fmt.Errorf("model: linearAttnSeqBatchedStateful invalid recurrent head count %d, want %d", len(st.recurrent), nV)
+			}
+			for h := 0; h < nV; h++ {
+				if len(st.recurrent[h]) != kHd*vHd {
+					return nil, fmt.Errorf("model: linearAttnSeqBatchedStateful invalid recurrent state size %d at head %d, want %d", len(st.recurrent[h]), h, kHd*vHd)
+				}
+			}
+		}
+		for i, r := range st.conv {
+			if len(r) != convDim {
+				return nil, fmt.Errorf("model: linearAttnSeqBatchedStateful invalid conv row size %d at index %d, want %d", len(r), i, convDim)
+			}
+		}
 	}
 
 	// Pack the per-token normalized inputs into one [seq, H] panel, then run each input
@@ -114,30 +143,62 @@ func (m *Model) linearAttnSeqBatched(l int, xn [][]float32) [][]float32 {
 		beta[t] = bt
 	}
 
-	// Causal depthwise conv1d (kernel K, no bias, left-padded) + SiLU over each channel.
-	convOut := make([][]float32, seq)
-	for t := 0; t < seq; t++ {
-		row := make([]float32, convDim)
-		for c := 0; c < convDim; c++ {
-			var acc float32
-			cb := c * K
-			for j := 0; j < K; j++ {
-				if ti := t - (K - 1) + j; ti >= 0 {
-					acc += conv[cb+j] * mixed[ti][c]
-				}
-			}
-			row[c] = silu(acc)
+	// Causal depthwise conv1d (kernel K, no bias) + SiLU over each channel.
+	// When st is present and holds prior conv rows, history is read from st.conv.
+	var convOut [][]float32
+	if st == nil {
+		if tiledOut, _, _, err := compute.TiledConvConcatForwardSlices(mixed, conv, convDim, K, nil); err == nil {
+			convOut = tiledOut
 		}
-		convOut[t] = row
+	}
+	if convOut == nil {
+		convOut = make([][]float32, seq)
+		for t := 0; t < seq; t++ {
+			row := make([]float32, convDim)
+			for c := 0; c < convDim; c++ {
+				var acc float32
+				cb := c * K
+				for j := 0; j < K; j++ {
+					ti := t - (K - 1) + j
+					if ti >= 0 {
+						acc += conv[cb+j] * mixed[ti][c]
+					} else if st != nil {
+						idx := len(st.conv) + ti
+						if idx >= 0 && idx < len(st.conv) {
+							acc += conv[cb+j] * st.conv[idx][c]
+						}
+					}
+				}
+				row[c] = silu(acc)
+			}
+			convOut[t] = row
+		}
+	}
+
+	// If st is provided, advance st.conv with the new mixed rows (copying to prevent aliasing).
+	if st != nil {
+		for t := 0; t < seq; t++ {
+			st.pushConvRow(mixed[t], K-1)
+		}
 	}
 
 	// Recurrent gated delta rule — identical scalar math to linearAttnSeq.
 	scale := float32(1.0 / math.Sqrt(float64(kHd)))
 	repeat := nV / nK
-	state := make([][]float32, nV)
-	for h := range state {
-		state[h] = make([]float32, kHd*vHd)
+
+	var state [][]float32
+	if st != nil {
+		if len(st.recurrent) == 0 {
+			*st = newLinearAttnLayerState(cfg)
+		}
+		state = st.recurrent
+	} else {
+		state = make([][]float32, nV)
+		for h := range state {
+			state[h] = make([]float32, kHd*vHd)
+		}
 	}
+
 	core := make([][]float32, seq)
 	qNorm := make([]float32, keyDim)
 	kNorm := make([]float32, keyDim)
@@ -162,33 +223,9 @@ func (m *Model) linearAttnSeqBatched(l int, xn [][]float32) [][]float32 {
 			vh := v[h*vHd : (h+1)*vHd]
 			g := gDecay[t][h]
 			bt := beta[t][h]
-			st := state[h]
-			for i := range st {
-				st[i] *= g
-			}
-			for d := range kvmem {
-				kvmem[d] = 0
-			}
-			for i := 0; i < kHd; i++ {
-				ki := kn[i]
-				base := i * vHd
-				for d := 0; d < vHd; d++ {
-					kvmem[d] += st[base+d] * ki
-				}
-			}
-			for d := 0; d < vHd; d++ {
-				delta[d] = (vh[d] - kvmem[d]) * bt
-			}
+			stHead := state[h]
 			od := out[h*vHd : (h+1)*vHd]
-			for i := 0; i < kHd; i++ {
-				ki := kn[i]
-				qi := qn[i]
-				base := i * vHd
-				for d := 0; d < vHd; d++ {
-					st[base+d] += ki * delta[d]
-					od[d] += st[base+d] * qi
-				}
-			}
+			VectorizedHeadStep(stHead, qn, kn, vh, bt, g, od, kvmem, delta)
 		}
 		core[t] = out
 	}
@@ -206,5 +243,5 @@ func (m *Model) linearAttnSeqBatched(l int, xn [][]float32) [][]float32 {
 	for t := 0; t < seq; t++ {
 		out[t] = outFlat[t*H : (t+1)*H]
 	}
-	return out
+	return out, nil
 }

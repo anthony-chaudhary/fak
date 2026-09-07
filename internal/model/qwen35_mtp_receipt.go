@@ -27,7 +27,11 @@ func (m *qwen35MTPRunMeter) enter(stage string) {
 		return
 	}
 	now := time.Now()
-	m.receipt.Stages[m.stage] += now.Sub(m.last).Nanoseconds()
+	elapsed := now.Sub(m.last).Nanoseconds()
+	if elapsed <= 0 {
+		elapsed = 1
+	}
+	m.receipt.Stages[m.stage] += elapsed
 	m.last, m.stage = now, stage
 }
 

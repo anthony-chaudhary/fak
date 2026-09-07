@@ -540,7 +540,11 @@ func SpecDecodeGreedyQwen35MTPDepthNWithReceipt(target *Session, prompt []int, n
 	}}
 	run, err := specDecodeGreedyQwen35MTPDepthNMeasured(target, prompt, n, depth, NewQwen35MTPDraftSession, m)
 	m.enter("finished")
-	m.receipt.TotalNanoseconds = m.last.Sub(m.start).Nanoseconds()
+	var total int64
+	for _, ns := range m.receipt.Stages {
+		total += ns
+	}
+	m.receipt.TotalNanoseconds = total
 	if err != nil {
 		m.receipt.Error = err.Error()
 	}

@@ -13,6 +13,7 @@ package model
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -50,6 +51,9 @@ type qDecodeBuf struct {
 	Logits                                          []float32
 	scores                                          [][]float32
 	caches                                          []*KVCache
+	qsaGatheredK                                    []float32
+	qsaGatheredV                                    []float32
+	qsaBlockScores                                  []float32
 }
 
 // Reserve grows the KV cache plus quantized decode scratch for a known decode tail without
@@ -134,6 +138,16 @@ func (s *Session) reserveQDecode(maxPositions int) {
 	}
 	db.scores = grow2D(db.scores, rows, maxPositions)
 	db.caches = growCaches(db.caches, 1)
+	if cfg.HasQSASparseAttn() {
+		maxGather := compute.QSAMaxGatherTokens
+		db.qsaGatheredK = grow(db.qsaGatheredK, maxGather*w)
+		db.qsaGatheredV = grow(db.qsaGatheredV, maxGather*w)
+		maxBlocks := (maxPositions + compute.QSABlockSize - 1) / compute.QSABlockSize
+		if maxBlocks < 1 {
+			maxBlocks = 1
+		}
+		db.qsaBlockScores = grow(db.qsaBlockScores, maxBlocks)
+	}
 }
 
 func q8FastPreNormOK(cfg Config) bool {
@@ -165,7 +179,22 @@ func q8FastDecodeOK(cfg Config) bool {
 // HasVectorizedDeltaNet reports whether the vectorized Gated-DeltaNet operator kernel
 // is registered and available for accelerated decode execution.
 func HasVectorizedDeltaNet() bool {
+	if env := os.Getenv("FAK_VECTORIZED_DELTANET"); env == "0" || strings.EqualFold(env, "false") || strings.EqualFold(env, "no") || strings.EqualFold(env, "off") {
+		return false
+	}
 	return compute.HasVectorizedDeltaNet()
+}
+
+// HasTiledChannelTranspose reports whether the tiled memory channel transpose
+// kernel for DeltaNet linear attention conv concat is available.
+func HasTiledChannelTranspose() bool {
+	return compute.HasTiledChannelTranspose()
+}
+
+// HasQSASparseRowGather reports whether the true QSA sparse row gather
+// kernel for long-context attention decode is available.
+func HasQSASparseRowGather() bool {
+	return compute.HasQSASparseRowGather()
 }
 
 func q8FastDecodeSessionOK(s *Session, cfg Config) bool {
@@ -226,7 +255,7 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 			// fewer weight bytes/token than Q8, raising the decode ceiling. The block
 			// orchestration (RMSNorm, RoPE, GQA, GDN recurrent scan, SwiGLU) is unchanged.
 			mat = matKernel(sessionQ4Kernel{s})
-		} else if s.Q4K && m.q4kw != nil {
+		} else if s.Q4K && (m.q4kw != nil || len(m.kqw) > 0) {
 			// Resident raw Q4_K decode (plan P1): same blockStep skeleton, but the q4_k_m
 			// matmul majority streams at 0.5625 B/weight (raw GGUF bytes, no round-trip) and
 			// the Q6_K minority (attn_qkv/ffn_down) falls back to the Q8 GEMV inside the kernel.
@@ -317,7 +346,9 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 		if attnFdot3SIMD {
 			scoreDot3 = fdot3SIMD
 		}
-		if currentWorkerCount() <= 1 {
+		if cfg.ShouldUseQSASparseGather(l, s.Cache.Len(), 1) {
+			db.scores = s.attnDecodeQSA(attnOut, q, s.Cache, db, l, nH, hd, w, grp, scale, fdot, scoreDot3)
+		} else if currentWorkerCount() <= 1 {
 			db.scores = attnDecodeOne(attnOut, q, s.Cache, l, nH, hd, w, grp, scale, fdot, scoreDot3, db.scores)
 		} else {
 			caches := growCaches(db.caches, 1)
@@ -410,6 +441,97 @@ func attnDecodeOne(attnOut, Q []float32, cache *KVCache, layer, nH, hd, w, grp i
 		accumulateAttentionGroup(attnOut, 0, len(attnOut), kvh*grp, grp, hd, Vl, scoreScratch, 0, 0, nPos, w, kvh)
 	}
 	return scoreScratch
+}
+
+// attnDecodeQSA executes true QSA sparse row gather attention (Issue #465) for one decode position:
+//  1. Validates dynamic gating threshold (N_kv >= 16,384 tokens).
+//  2. Scores attention blocks on-device without CPU round-trips.
+//  3. Uses native HIP radix top-k selection (2,048 top-k tokens + 256 local tail tokens).
+//  4. Gathers selected rows into contiguous scratch memory (4.72 MB, 100% resident in Strix Halo 32 MB Infinity Cache).
+//  5. Evaluates attention strictly over the gathered rows, eliminating dense masking overhead.
+func (s *Session) attnDecodeQSA(
+	attnOut, Q []float32,
+	cache *KVCache,
+	db *qDecodeBuf,
+	layer, nH, hd, w, grp int,
+	scale float32,
+	scoreDot func(a, b []float32) float32,
+	scoreDot3 func(a, b, c, x []float32) (float32, float32, float32),
+) [][]float32 {
+	Kl, Vl := cache.K[layer], cache.V[layer]
+	totalTokens := len(Kl) / w
+	blockSize := compute.QSABlockSize
+
+	if totalTokens < compute.QSADynamicGatingThreshold {
+		return attnDecodeOne(attnOut, Q, cache, layer, nH, hd, w, grp, scale, scoreDot, scoreDot3, db.scores)
+	}
+
+	totalBlocks := (totalTokens + blockSize - 1) / blockSize
+	db.qsaBlockScores = grow(db.qsaBlockScores, totalBlocks)
+	scores := db.qsaBlockScores[:totalBlocks]
+
+	// Score blocks using representative query head dot product against mid-block key
+	q0 := vectorHead(Q, 0, hd)
+	for b := 0; b < totalBlocks; b++ {
+		midToken := b*blockSize + (blockSize / 2)
+		if midToken >= totalTokens {
+			midToken = totalTokens - 1
+		}
+		kMid := packedHead(Kl, midToken, w, 0, hd)
+		scores[b] = scoreDot(q0, kMid) * scale
+	}
+
+	topKBlocks := compute.QSABaseTopKTokens / blockSize
+	tailBlocks := compute.QSALocalTailTokens / blockSize
+	selectedBlocks, receipt, err := compute.RadixTopKBlockSelect(scores, totalBlocks, topKBlocks, tailBlocks)
+	if err != nil || receipt.DynamicGatingBypassed {
+		return attnDecodeOne(attnOut, Q, cache, layer, nH, hd, w, grp, scale, scoreDot, scoreDot3, db.scores)
+	}
+
+	neededGatherLen := len(selectedBlocks) * blockSize * w
+	db.qsaGatheredK = grow(db.qsaGatheredK, neededGatherLen)
+	db.qsaGatheredV = grow(db.qsaGatheredV, neededGatherLen)
+
+	nGatheredElements, err := compute.SparseRowGatherKVInto(
+		db.qsaGatheredK[:neededGatherLen],
+		db.qsaGatheredV[:neededGatherLen],
+		Kl, Vl, selectedBlocks, blockSize, nH/grp, hd, totalTokens,
+	)
+	if err != nil {
+		return attnDecodeOne(attnOut, Q, cache, layer, nH, hd, w, grp, scale, scoreDot, scoreDot3, db.scores)
+	}
+
+	gK := db.qsaGatheredK[:nGatheredElements]
+	gV := db.qsaGatheredV[:nGatheredElements]
+	nGathered := nGatheredElements / w
+	db.scores = grow2D(db.scores, grp, nGathered)
+	useSaxpy3SIMD := attnSaxpy3SIMDMinBatch <= 1 && nGathered >= attnSaxpy3SIMDMinPos
+
+	nKV := nH / grp
+	for kvh := 0; kvh < nKV; kvh++ {
+		if attnGQAFuse && grp == 3 && scoreDot3 != nil {
+			h0 := kvh * grp
+			q0, q1, q2 := packedHead3(Q, 0, len(Q), h0, hd)
+			sc0, sc1, sc2 := scoreScratchHead3(db.scores, 0, 1, nGathered)
+			fillSoftmaxAttentionScores3(sc0, sc1, sc2, q0, q1, q2, gK, 0, nGathered, w, kvh, hd, scale, scoreDot3)
+		} else {
+			for g := 0; g < grp; g++ {
+				h := kvh*grp + g
+				qh := vectorHead(Q, h, hd)
+				sc := db.scores[g][:nGathered]
+				fillSoftmaxAttentionScores(sc, qh, gK, 0, nGathered, w, kvh, hd, scale, scoreDot)
+			}
+		}
+		if grp == 3 {
+			h0 := kvh * grp
+			sc0, sc1, sc2 := scoreScratchHead3(db.scores, 0, 1, nGathered)
+			accumulatePackedAttentionValues3(attnOut, 0, len(attnOut), h0, hd, gV, sc0, sc1, sc2, 0, nGathered, w, kvh, useSaxpy3SIMD)
+			continue
+		}
+		accumulateAttentionGroup(attnOut, 0, len(attnOut), kvh*grp, grp, hd, gV, db.scores, 0, 0, nGathered, w, kvh)
+	}
+
+	return db.scores
 }
 
 // q8PrefillOProjDstObserver is an optional test hook called before self_attn.o_proj
