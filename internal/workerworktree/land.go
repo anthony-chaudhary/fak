@@ -727,12 +727,26 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 
 		if verify != nil {
 			finishVerify := beginLandPhase(tracker, "post-merge-validation", attempt)
-			rc, out := run(git, wtPath, []string{"checkout", "--detach", newCommit})
-			if rc != 0 {
+			candDir, err := os.MkdirTemp("", "fak-cand-validate-*")
+			if err != nil {
 				finishVerify()
-				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: git checkout failed: " + tail(out, 200)}, true
+				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: failed to create candidate temp dir: " + err.Error()}, true
 			}
-			ok, detail := verify(wtPath)
+			_ = os.Remove(candDir)
+			cleanupCand := func() {
+				run(git, root, []string{"worktree", "remove", "--force", candDir})
+				run(git, root, []string{"worktree", "prune"})
+				_ = os.RemoveAll(candDir)
+			}
+
+			rc, out := run(git, root, []string{"-c", "core.longpaths=true", "worktree", "add", "--detach", candDir, newCommit})
+			if rc != 0 {
+				cleanupCand()
+				finishVerify()
+				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: git candidate checkout failed: " + tail(out, 200)}, true
+			}
+			ok, detail := verify(candDir)
+			cleanupCand()
 			finishVerify()
 			if !ok {
 				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: " + detail}, true

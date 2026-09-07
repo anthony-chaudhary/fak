@@ -816,14 +816,14 @@ func TestLandIsolatedPostMergeVerificationFailureRefusesCAS(t *testing.T) {
 		reply("apply", 0, "").
 		reply("write-tree", 0, "treeSHA111\n").
 		reply("commit-tree", 0, "newc2223334445556667778889990001112223334\n").
-		reply("checkout", 0, "") // checkout --detach <newCommit>
+		reply("worktree", 0, "")
 	msg := writeMsg(t, "feat(x): do the thing (fak x)")
 
 	verifyCalled := false
 	var verifiedPath string
-	failingVerify := func(wtPath string) (bool, string) {
+	failingVerify := func(candPath string) (bool, string) {
 		verifyCalled = true
-		verifiedPath = wtPath
+		verifiedPath = candPath
 		return false, "syntax error in merged code"
 	}
 
@@ -834,8 +834,8 @@ func TestLandIsolatedPostMergeVerificationFailureRefusesCAS(t *testing.T) {
 	if res.OK {
 		t.Fatalf("expected res.OK=false, got %+v", res)
 	}
-	if !verifyCalled || verifiedPath != "/wt" {
-		t.Fatalf("expected verify to be called on /wt, called=%v path=%q", verifyCalled, verifiedPath)
+	if !verifyCalled || verifiedPath == "/wt" || !strings.Contains(verifiedPath, "fak-cand-validate-") {
+		t.Fatalf("expected verify to be called on isolated candidate dir, called=%v path=%q", verifyCalled, verifiedPath)
 	}
 	expectedReason := "post-merge compilation verification failed, refusing CAS update: syntax error in merged code"
 	if res.Reason != expectedReason {
@@ -848,10 +848,10 @@ func TestLandIsolatedPostMergeVerificationFailureRefusesCAS(t *testing.T) {
 		t.Fatalf("expected update-ref never to be called, got: %v", ur)
 	}
 
-	// Confirm checkout --detach was called on wtPath with newCommit.
-	co := g.callsWithPrefix("checkout", "--detach")
-	if len(co) != 1 || len(co[0]) < 3 || !strings.HasPrefix(co[0][2], "newc222") {
-		t.Fatalf("expected checkout --detach <newCommit>, got %v", co)
+	// Confirm worktree add --detach was called with newCommit (#11978).
+	wtAdd := g.callsWithPrefix("worktree", "add", "--detach")
+	if len(wtAdd) != 1 || len(stripGlobalFlags(wtAdd[0])) < 5 || !strings.HasPrefix(stripGlobalFlags(wtAdd[0])[4], "newc222") {
+		t.Fatalf("expected worktree add --detach <candDir> <newCommit>, got %v", wtAdd)
 	}
 }
 
@@ -864,14 +864,16 @@ func TestLandIsolatedPostMergeVerificationSuccessProceedsWithCAS(t *testing.T) {
 		reply("apply", 0, "").
 		reply("write-tree", 0, "treeSHA111\n").
 		reply("commit-tree", 0, "newc2223334445556667778889990001112223334\n").
-		reply("checkout", 0, ""). // checkout --detach <newCommit>
+		reply("worktree", 0, "").
 		reply("update-ref", 0, "").
 		reply("checkout", 0, "") // checkout <newCommit> -- paths
 	msg := writeMsg(t, "feat(x): do the thing (fak x)")
 
 	verifyCalled := false
-	passingVerify := func(wtPath string) (bool, string) {
+	var verifiedPath string
+	passingVerify := func(candPath string) (bool, string) {
 		verifyCalled = true
+		verifiedPath = candPath
 		return true, ""
 	}
 
@@ -879,8 +881,8 @@ func TestLandIsolatedPostMergeVerificationSuccessProceedsWithCAS(t *testing.T) {
 	if !handled || !res.OK {
 		t.Fatalf("expected handled=true res.OK=true, got handled=%v res=%+v", handled, res)
 	}
-	if !verifyCalled {
-		t.Fatalf("expected verify to be called")
+	if !verifyCalled || verifiedPath == "/wt" || !strings.Contains(verifiedPath, "fak-cand-validate-") {
+		t.Fatalf("expected verify to be called on isolated candidate dir, called=%v path=%q", verifyCalled, verifiedPath)
 	}
 	ur := g.callsWithPrefix("update-ref", "refs/heads/main")
 	if len(ur) != 1 {

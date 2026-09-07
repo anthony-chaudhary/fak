@@ -1,6 +1,7 @@
 package workerworktree
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -208,5 +209,111 @@ func TestLiveLandCommittedBinaryAddition(t *testing.T) {
 	}
 	if string(gotBytes) != string(wantBytes) {
 		t.Fatalf("landed bytes = %x, want %x", gotBytes, wantBytes)
+	}
+}
+
+// TestLiveLandWithDirtyWorkerEditsVerified proves #11978:
+// managed worktree land with compilation verification completes successfully when
+// the worker has uncommitted dirty edits.
+// Post-merge validation runs against an isolated candidate checkout without
+// attempting to checkout over the worker's dirty files, preserving the worker's
+// uncommitted WIP while ensuring failed validation still refuses CAS.
+func TestLiveLandWithDirtyWorkerEditsVerified(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	repo := t.TempDir()
+	run := func(dir string, args ...string) string {
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return string(out)
+	}
+	run(repo, "init", "-q", "-b", "main")
+	run(repo, "config", "user.email", "e2e@test")
+	run(repo, "config", "user.name", "e2e")
+	run(repo, "config", "commit.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(repo, "app.go"), []byte("package app\n\nfunc Version() int { return 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(repo, "add", "app.go")
+	run(repo, "commit", "-q", "-m", "base")
+	base := TrunkHeadSHA(repo, nil)
+
+	res := Prepare(repo, "app", "11978", base, t.TempDir(), nil)
+	if !res.OK {
+		t.Fatalf("prepare: %+v", res)
+	}
+
+	// Worker makes uncommitted edits in its worktree (dirty worker edits, NOT committed)
+	dirtyContent := "package app\n\nfunc Version() int { return 2 }\n"
+	if err := os.WriteFile(filepath.Join(res.Path, "app.go"), []byte(dirtyContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Part 1: Validation failure refuses CAS and preserves dirty edits in worker worktree
+	failingVerify := func(candDir string) (bool, string) {
+		if candDir == res.Path {
+			// Prospective validation on the worker worktree passes
+			return true, ""
+		}
+		return false, "simulated compile error in candidate"
+	}
+	landFail := Land(repo, res.Path, base, "", []string{"app.go"}, failingVerify, nil)
+	if landFail.OK || landFail.Committed {
+		t.Fatalf("expected land to fail on verify error, got %+v", landFail)
+	}
+	if !strings.Contains(landFail.Reason, "simulated compile error in candidate") {
+		t.Fatalf("expected compilation error reason, got %q", landFail.Reason)
+	}
+	// Verify dirty edits in worker worktree were preserved
+	workerGot, err := os.ReadFile(filepath.Join(res.Path, "app.go"))
+	if err != nil || string(workerGot) != dirtyContent {
+		t.Fatalf("worker dirty edits lost on failed verify: %v, content=%q", err, string(workerGot))
+	}
+	// Trunk HEAD must still be base
+	if TrunkHeadSHA(repo, nil) != base {
+		t.Fatalf("trunk HEAD moved despite failed verify")
+	}
+
+	// Part 2: Successful validation passes and preserves dirty edits in worker worktree
+	validatorObservedCandidate := false
+	passingVerify := func(candDir string) (bool, string) {
+		if candDir == res.Path {
+			// Prospective validation on the worker worktree passes
+			return true, ""
+		}
+		candBytes, err := os.ReadFile(filepath.Join(candDir, "app.go"))
+		if err != nil {
+			return false, "read candidate app.go: " + err.Error()
+		}
+		if string(candBytes) != dirtyContent {
+			return false, fmt.Sprintf("candidate app.go mismatch: got %q, want %q", string(candBytes), dirtyContent)
+		}
+		validatorObservedCandidate = true
+		return true, ""
+	}
+
+	landPass := Land(repo, res.Path, base, "", []string{"app.go"}, passingVerify, nil)
+	if !landPass.OK || !landPass.Committed {
+		t.Fatalf("land failed with dirty worker edits: %+v", landPass)
+	}
+	if !validatorObservedCandidate {
+		t.Fatalf("validator did not observe isolated candidate checkout")
+	}
+
+	// Verify worker worktree still has its uncommitted edits intact
+	workerGotAfter, err := os.ReadFile(filepath.Join(res.Path, "app.go"))
+	if err != nil || string(workerGotAfter) != dirtyContent {
+		t.Fatalf("worker dirty edits overwritten during successful land: %v, content=%q", err, string(workerGotAfter))
+	}
+
+	// Verify trunk now has the landed change
+	trunkGot, err := os.ReadFile(filepath.Join(repo, "app.go"))
+	if err != nil || string(trunkGot) != dirtyContent {
+		t.Fatalf("trunk did not receive candidate edits: %v, content=%q", err, string(trunkGot))
 	}
 }
