@@ -486,4 +486,47 @@ func TestTightenedReScreenCatchesObfuscatedPoisonOnReload(t *testing.T) {
 	}
 }
 
+// TestRecallSubphraseQueryMatchingCJK witnesses that a query for a CJK subphrase (e.g. "录入")
+// matches a memory containing mixed Latin/CJK identifiers like "L0录入" via bigram and script-boundary
+// tokenization, ranking it above distractors.
+func TestRecallSubphraseQueryMatchingCJK(t *testing.T) {
+	ctx := context.Background()
+	r := NewRecorder("cjk-subphrase")
+
+	// Target memory containing "L0录入"
+	r.Record(ctx, "data_entry", []byte("L0录入: system batch execution successful for user 1024"))
+	// Distractor 1: English flight refund
+	r.Record(ctx, "airline", []byte("Direct SFO to JFK refund fee is 25 EUR for reservation"))
+	// Distractor 2: Distributed cache
+	r.Record(ctx, "cache", []byte("redis cluster cache policy heartbeat active"))
+
+	s := persistAndReload(t, r)
+
+	// Query for subphrase "录入"
+	set := s.Recall(ctx, "录入", 3)
+	if len(set) == 0 {
+		t.Fatal("expected non-empty working set for CJK query '录入'")
+	}
+	if set[0].Step != 0 {
+		t.Fatalf("expected target page (step 0) containing 'L0录入' to rank first, got step %d (%q)",
+			set[0].Step, set[0].Descriptor)
+	}
+	if !strings.Contains(set[0].Descriptor, "L0录入") {
+		t.Fatalf("expected descriptor to contain 'L0录入', got %q", set[0].Descriptor)
+	}
+
+	// Verify that JournalIndex also matches subphrase query
+	idx := NewJournalIndex()
+	idx.Add(JournalRow{Seq: 0, Text: "gateway transaction L0录入 completed", Provenance: ProvWitnessed})
+	idx.Add(JournalRow{Seq: 1, Text: "deploy rollout cache service", Provenance: ProvWitnessed})
+
+	hits := idx.Recall("录入", 5)
+	if len(hits) == 0 {
+		t.Fatal("expected journal hits for query '录入'")
+	}
+	if hits[0].Seq != 0 {
+		t.Fatalf("expected journal row 0 to rank first, got seq %d", hits[0].Seq)
+	}
+}
+
 func isSealed(err error) bool { return errors.Is(err, ErrSealed) }
