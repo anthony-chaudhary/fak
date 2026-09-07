@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/hooks"
@@ -41,14 +43,56 @@ type syncPublicLeakPreflight struct {
 }
 
 type syncPublicLeakFinding struct {
-	ID          string `json:"id"`
-	Path        string `json:"path"`
-	Gate        string `json:"gate"`
-	Line        int    `json:"line,omitempty"`
-	Detail      string `json:"detail"`
-	Provenance  string `json:"provenance"`
-	Blocking    bool   `json:"blocking"`
-	Attributive bool   `json:"attributive"`
+	ID          string                            `json:"id"`
+	Path        string                            `json:"path"`
+	Gate        string                            `json:"gate"`
+	Line        int                               `json:"line,omitempty"`
+	Detail      string                            `json:"detail"`
+	Provenance  string                            `json:"provenance"`
+	Blocking    bool                              `json:"blocking"`
+	Attributive bool                              `json:"attributive"`
+	Evidence    *syncPublicLeakOccurrenceEvidence `json:"evidence,omitempty"`
+}
+
+type syncPublicLeakOccurrenceEvidence struct {
+	TargetCommit string `json:"target_commit,omitempty"`
+	HeadCommit   string `json:"head_commit,omitempty"`
+	Path         string `json:"path,omitempty"`
+	ContentSHA   string `json:"content_sha,omitempty"`
+	BaselineLine int    `json:"baseline_line,omitempty"`
+	CurrentLine  int    `json:"current_line,omitempty"`
+	Witness      string `json:"witness,omitempty"`
+}
+
+func (e *syncPublicLeakOccurrenceEvidence) Valid(repo string, finding syncPublicLeakFinding, target, head string) bool {
+	if e == nil {
+		return false
+	}
+	normPath := filepath.ToSlash(filepath.Clean(finding.Path))
+	if normPath != e.Path || finding.Line != e.CurrentLine {
+		return false
+	}
+	if target != "" {
+		targetSHA := resolveGitCommitSHA(repo, target)
+		if targetSHA != "" && targetSHA != e.TargetCommit {
+			return false
+		}
+	}
+	if head != "" {
+		headSHA := resolveGitCommitSHA(repo, head)
+		if headSHA != "" && headSHA != e.HeadCommit {
+			return false
+		}
+	}
+	currentContent, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(finding.Path)))
+	if err != nil {
+		return false
+	}
+	sum := sha256.Sum256(currentContent)
+	if hex.EncodeToString(sum[:]) != e.ContentSHA {
+		return false
+	}
+	return true
 }
 
 type syncPublicLeakRepair struct {
@@ -107,12 +151,18 @@ func assessSyncPublicLeak(repo, remote string, info safesync.Assessment, only []
 		}
 		return current[i].Detail < current[j].Detail
 	})
+	classifier := newSyncPublicLeakClassifier(repo, info.Target, info.Head)
 	for _, finding := range current {
 		provenance := "unknown"
+		var evidence *syncPublicLeakOccurrenceEvidence
 		if introduced[syncPublicLeakFindingKey(finding)] {
 			provenance = "introduced"
-		} else if syncPublicLeakExistsAtBaseline(repo, info.Target, finding) {
-			provenance = "inherited"
+		} else {
+			var ok bool
+			ok, evidence = classifier.Adjudicate(finding)
+			if ok {
+				provenance = "inherited"
+			}
 		}
 		blocking := provenance != "inherited"
 		item := syncPublicLeakFinding{
@@ -124,6 +174,7 @@ func assessSyncPublicLeak(repo, remote string, info safesync.Assessment, only []
 			Provenance:  provenance,
 			Blocking:    blocking,
 			Attributive: provenance == "introduced",
+			Evidence:    evidence,
 		}
 		report.Findings = append(report.Findings, item)
 		switch provenance {
@@ -179,31 +230,230 @@ func syncPublicLeakFindingID(finding hooks.Finding) string {
 	return "public-leak:" + hex.EncodeToString(sum[:12])
 }
 
-// syncPublicLeakExistsAtBaseline proves inheritance only when the exact current path or line
-// exists at the assessed remote target. Line shifts, missing refs, and unreadable blobs remain
-// unknown; this intentionally prefers a blocking unknown over guessed attribution.
+// syncPublicLeakExistsAtBaseline proves inheritance when the finding exists at the assessed
+// remote target, either at the exact line or witnessed at a relocated line via unambiguous
+// Git diff occurrence mapping. Changed content, changed path, ambiguous duplicate mapping,
+// unreadable baseline, or missing refs remain false (unknown/blocking).
 func syncPublicLeakExistsAtBaseline(repo, target string, finding hooks.Finding) bool {
 	if target == "" || finding.File == "" {
 		return false
 	}
-	cmd := exec.Command("git", "show", target+":"+filepath.ToSlash(finding.File))
+	classifier := newSyncPublicLeakClassifier(repo, target, "")
+	ok, _ := classifier.Adjudicate(finding)
+	return ok
+}
+
+var syncPublicLeakHunkRE = regexp.MustCompile(`(?m)^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
+
+type syncPublicLeakDiffHunk struct {
+	oldStart int
+	oldCount int
+	newStart int
+	newCount int
+}
+
+func parseSyncPublicLeakDiffHunks(diff string) []syncPublicLeakDiffHunk {
+	matches := syncPublicLeakHunkRE.FindAllStringSubmatch(diff, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	hunks := make([]syncPublicLeakDiffHunk, 0, len(matches))
+	for _, m := range matches {
+		oldStart, _ := strconv.Atoi(m[1])
+		oldCount := 1
+		if m[2] != "" {
+			oldCount, _ = strconv.Atoi(m[2])
+		}
+		newStart, _ := strconv.Atoi(m[3])
+		newCount := 1
+		if m[4] != "" {
+			newCount, _ = strconv.Atoi(m[4])
+		}
+		hunks = append(hunks, syncPublicLeakDiffHunk{
+			oldStart: oldStart,
+			oldCount: oldCount,
+			newStart: newStart,
+			newCount: newCount,
+		})
+	}
+	return hunks
+}
+
+func mapSyncPublicLeakLine(hunks []syncPublicLeakDiffHunk, currentLine int) (int, bool) {
+	if currentLine <= 0 {
+		return 0, false
+	}
+	for _, h := range hunks {
+		if h.newCount > 0 && currentLine >= h.newStart && currentLine < h.newStart+h.newCount {
+			return 0, false
+		}
+	}
+	cumulativeShift := 0
+	for _, h := range hunks {
+		if (h.newCount > 0 && h.newStart+h.newCount <= currentLine) || (h.newCount == 0 && h.newStart < currentLine) {
+			cumulativeShift += (h.newCount - h.oldCount)
+		}
+	}
+	oldLine := currentLine - cumulativeShift
+	if oldLine <= 0 {
+		return 0, false
+	}
+	return oldLine, true
+}
+
+func resolveGitCommitSHA(repo, rev string) string {
+	if rev == "" {
+		return ""
+	}
+	cmd := exec.Command("git", "rev-parse", "--verify", rev+"^{commit}")
 	cmd.Dir = repo
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+type syncPublicLeakFileContext struct {
+	targetCommit string
+	headCommit   string
+	baseLines    []string
+	currentLines []string
+	contentSHA   string
+	hunks        []syncPublicLeakDiffHunk
+	claimedLines map[int]bool
+	valid        bool
+}
+
+type syncPublicLeakClassifier struct {
+	repo         string
+	target       string
+	head         string
+	targetCommit string
+	headCommit   string
+	files        map[string]*syncPublicLeakFileContext
+}
+
+func newSyncPublicLeakClassifier(repo, target, head string) *syncPublicLeakClassifier {
+	c := &syncPublicLeakClassifier{
+		repo:   repo,
+		target: target,
+		head:   head,
+		files:  make(map[string]*syncPublicLeakFileContext),
+	}
+	if target != "" {
+		c.targetCommit = resolveGitCommitSHA(repo, target)
+	}
+	if head != "" {
+		c.headCommit = resolveGitCommitSHA(repo, head)
+	}
+	if c.headCommit == "" {
+		c.headCommit = resolveGitCommitSHA(repo, "HEAD")
+	}
+	return c
+}
+
+func (c *syncPublicLeakClassifier) getFileContext(relPath string) *syncPublicLeakFileContext {
+	cleanPath := filepath.ToSlash(filepath.Clean(relPath))
+	if ctx, exists := c.files[cleanPath]; exists {
+		return ctx
+	}
+	ctx := &syncPublicLeakFileContext{
+		targetCommit: c.targetCommit,
+		headCommit:   c.headCommit,
+		claimedLines: make(map[int]bool),
+	}
+	c.files[cleanPath] = ctx
+
+	if c.targetCommit == "" || cleanPath == "" {
+		return ctx
+	}
+
+	cmd := exec.Command("git", "show", c.targetCommit+":"+cleanPath)
+	cmd.Dir = c.repo
 	configureDispatchHelperCommand(cmd)
 	baseline, err := cmd.Output()
 	if err != nil {
-		return false
+		return ctx
 	}
-	if finding.Line == 0 {
-		return true
-	}
-	current, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(finding.File)))
+
+	current, err := os.ReadFile(filepath.Join(c.repo, filepath.FromSlash(cleanPath)))
 	if err != nil {
-		return false
+		return ctx
 	}
-	baseLines := strings.Split(string(baseline), "\n")
-	currentLines := strings.Split(string(current), "\n")
-	line := finding.Line - 1
-	return line >= 0 && line < len(baseLines) && line < len(currentLines) && strings.TrimRight(baseLines[line], "\r") == strings.TrimRight(currentLines[line], "\r")
+
+	sum := sha256.Sum256(current)
+	ctx.contentSHA = hex.EncodeToString(sum[:])
+	ctx.baseLines = strings.Split(string(baseline), "\n")
+	ctx.currentLines = strings.Split(string(current), "\n")
+
+	diffCmd := exec.Command("git", "diff", "--no-color", "--ignore-space-at-eol", "-U0", c.targetCommit, "--", cleanPath)
+	diffCmd.Dir = c.repo
+	configureDispatchHelperCommand(diffCmd)
+	diffOut, err := diffCmd.Output()
+	if err != nil {
+		return ctx
+	}
+
+	ctx.hunks = parseSyncPublicLeakDiffHunks(string(diffOut))
+	ctx.valid = true
+	return ctx
+}
+
+func (c *syncPublicLeakClassifier) Adjudicate(finding hooks.Finding) (bool, *syncPublicLeakOccurrenceEvidence) {
+	cleanPath := filepath.ToSlash(filepath.Clean(finding.File))
+	ctx := c.getFileContext(cleanPath)
+	if !ctx.valid {
+		return false, nil
+	}
+
+	if finding.Line == 0 {
+		return true, &syncPublicLeakOccurrenceEvidence{
+			TargetCommit: ctx.targetCommit,
+			HeadCommit:   ctx.headCommit,
+			Path:         cleanPath,
+			ContentSHA:   ctx.contentSHA,
+			BaselineLine: 0,
+			CurrentLine:  0,
+			Witness:      "file-exists",
+		}
+	}
+
+	oldLine, ok := mapSyncPublicLeakLine(ctx.hunks, finding.Line)
+	if !ok {
+		return false, nil
+	}
+
+	lineIdx := finding.Line - 1
+	oldIdx := oldLine - 1
+	if lineIdx < 0 || lineIdx >= len(ctx.currentLines) || oldIdx < 0 || oldIdx >= len(ctx.baseLines) {
+		return false, nil
+	}
+
+	if strings.TrimRight(ctx.baseLines[oldIdx], "\r") != strings.TrimRight(ctx.currentLines[lineIdx], "\r") {
+		return false, nil
+	}
+
+	if ctx.claimedLines[oldLine] {
+		return false, nil
+	}
+	ctx.claimedLines[oldLine] = true
+
+	witness := "exact"
+	if oldLine != finding.Line {
+		witness = "relocated"
+	}
+
+	return true, &syncPublicLeakOccurrenceEvidence{
+		TargetCommit: ctx.targetCommit,
+		HeadCommit:   ctx.headCommit,
+		Path:         cleanPath,
+		ContentSHA:   ctx.contentSHA,
+		BaselineLine: oldLine,
+		CurrentLine:  finding.Line,
+		Witness:      witness,
+	}
 }
 
 func syncPublicLeakActionablePaths(findings []syncPublicLeakFinding) []string {
