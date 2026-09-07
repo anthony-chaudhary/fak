@@ -316,3 +316,158 @@ func TestQwen35GDNPreprojectedSequenceLeavesDefaultAndCUDALifecyclesUnchanged(t 
 		}
 	}
 }
+
+type qkNormRecordingBackend struct {
+	*recordingQwen35Backend
+	uploadedBySite map[string][]float32
+}
+
+func newQKNormRecordingBackend(m *Model) *qkNormRecordingBackend {
+	return &qkNormRecordingBackend{
+		recordingQwen35Backend: newRecordingQwen35Backend(m),
+		uploadedBySite:         make(map[string][]float32),
+	}
+}
+
+func (b *qkNormRecordingBackend) UploadClass(t compute.Tensor, as compute.Dtype, class compute.MemoryClass, site string) compute.Tensor {
+	data := b.Backend.Read(t)
+	b.uploadedBySite[site] = append([]float32(nil), data...)
+	return b.recordingQwen35Backend.UploadClass(t, as, class, site)
+}
+
+func TestQwen35FullAttentionHAL_QKNorm(t *testing.T) {
+	cfg := qwen35HybridTestCfg()
+	cfg.PartialRotaryFactor = 0.25
+	cfg.RopeTheta = 10_000_000
+	cfg.RMSNormEps = 1e-5
+	cfg.QKNorm = false
+
+	m := NewSynthetic(cfg)
+	fullLayer := 3
+	qVals := make([]float32, cfg.HeadDim)
+	kVals := make([]float32, cfg.HeadDim)
+	for i := 0; i < cfg.HeadDim; i++ {
+		qVals[i] = 0.85 + 0.3*float32(i+1)/float32(cfg.HeadDim)
+		kVals[i] = 0.90 + 0.2*float32(i+1)/float32(cfg.HeadDim)
+	}
+	tpInjectTensors(m, map[string]tpTensor{
+		layerName(fullLayer, "self_attn.q_norm.weight"): {shape: []int{cfg.HeadDim}, vals: qVals},
+		layerName(fullLayer, "self_attn.k_norm.weight"): {shape: []int{cfg.HeadDim}, vals: kVals},
+	})
+
+	pos := 0
+	eps := float32(cfg.RMSNormEps)
+	scale := cfg.attnScale()
+	grp := cfg.GroupSize()
+	residualHost := make([]float32, cfg.HiddenSize)
+	for i := range residualHost {
+		residualHost[i] = float32(i+1) * 0.1
+	}
+
+	// 1. Prove that when QKNorm: false, no QK normalization is applied.
+	m.Cfg.QKNorm = false
+	beFalse := newQKNormRecordingBackend(m)
+	sFalse, err := m.NewBackendSessionChecked(beFalse)
+	if err != nil {
+		t.Fatalf("NewBackendSessionChecked(false): %v", err)
+	}
+	defer sFalse.Close()
+
+	resFalse := beFalse.Upload(compute.NewF32(beFalse, []int{cfg.HiddenSize}, append([]float32(nil), residualHost...)), compute.F32)
+	sFalse.qwen35FullAttentionHAL(fullLayer, pos, resFalse, eps, scale, grp)
+
+	if recordedClassSite(beFalse.recordingQwen35Backend, compute.MemoryActivation, "qwen35-full-attn-norm-q") {
+		t.Fatal("QKNorm=false uploaded qwen35-full-attn-norm-q")
+	}
+	if recordedClassSite(beFalse.recordingQwen35Backend, compute.MemoryActivation, "qwen35-full-attn-norm-k") {
+		t.Fatal("QKNorm=false uploaded qwen35-full-attn-norm-k")
+	}
+	keysFalse := beFalse.Read(sFalse.halKV.KeysView(0))
+
+	// 2. Prove that when QKNorm: true with explicit QKNormEps, normalization is applied before RoPE and matches CPU reference.
+	m.Cfg.QKNorm = true
+	m.Cfg.QKNormEps = 2e-4 // explicitly distinct from RMSNormEps (1e-5)
+	beTrue := newQKNormRecordingBackend(m)
+	sTrue, err := m.NewBackendSessionChecked(beTrue)
+	if err != nil {
+		t.Fatalf("NewBackendSessionChecked(true): %v", err)
+	}
+	defer sTrue.Close()
+
+	resTrue := beTrue.Upload(compute.NewF32(beTrue, []int{cfg.HiddenSize}, append([]float32(nil), residualHost...)), compute.F32)
+	sTrue.qwen35FullAttentionHAL(fullLayer, pos, resTrue, eps, scale, grp)
+
+	if !recordedClassSite(beTrue.recordingQwen35Backend, compute.MemoryActivation, "qwen35-full-attn-norm-q") {
+		t.Fatal("QKNorm=true missing qwen35-full-attn-norm-q upload")
+	}
+	if !recordedClassSite(beTrue.recordingQwen35Backend, compute.MemoryActivation, "qwen35-full-attn-norm-k") {
+		t.Fatal("QKNorm=true missing qwen35-full-attn-norm-k upload")
+	}
+
+	normQ := beTrue.uploadedBySite["qwen35-full-attn-norm-q"]
+	normK := beTrue.uploadedBySite["qwen35-full-attn-norm-k"]
+	if len(normQ) != cfg.NumHeads*cfg.HeadDim {
+		t.Fatalf("normQ length=%d, want %d", len(normQ), cfg.NumHeads*cfg.HeadDim)
+	}
+	if len(normK) != cfg.NumKVHeads*cfg.HeadDim {
+		t.Fatalf("normK length=%d, want %d", len(normK), cfg.NumKVHeads*cfg.HeadDim)
+	}
+
+	// Compute unnormalized Q and K directly from the original residual via the layer's projection to prove CPU reference match
+	p := func(suffix string) string { return layerName(fullLayer, suffix) }
+	resOrig := beTrue.Upload(compute.NewF32(beTrue, []int{cfg.HiddenSize}, append([]float32(nil), residualHost...)), compute.F32)
+	xn := beTrue.Read(beTrue.RMSNorm(resOrig, sTrue.normWeightHAL(p("input_layernorm.weight")), eps))
+	qWeight, _ := sTrue.qwen35QueryWeightsHAL(fullLayer)
+	xnTensor := compute.NewF32(beTrue, []int{cfg.HiddenSize}, xn)
+	qRaw := beTrue.Read(beTrue.MatMul(qWeight, xnTensor))
+	kRaw := beTrue.Read(beTrue.MatMul(sTrue.matWeightHAL(p("self_attn.k_proj.weight")), xnTensor))
+
+	qExpected := append([]float32(nil), qRaw...)
+	kExpected := append([]float32(nil), kRaw...)
+	m.applyLayerQKNorm(fullLayer, qExpected, kExpected)
+
+	if d := maxAbsDelta(normQ, qExpected); d > 1e-6 {
+		t.Fatalf("normalized Q differs from reference CPU applyLayerQKNorm, max|delta|=%g", d)
+	}
+	if d := maxAbsDelta(normK, kExpected); d > 1e-6 {
+		t.Fatalf("normalized K differs from reference CPU applyLayerQKNorm, max|delta|=%g", d)
+	}
+	if d := maxAbsDelta(normQ, qRaw); d < 1e-3 {
+		t.Fatalf("normalized Q did not change from raw Q, max|delta|=%g", d)
+	}
+	if d := maxAbsDelta(normK, kRaw); d < 1e-3 {
+		t.Fatalf("normalized K did not change from raw K, max|delta|=%g", d)
+	}
+
+	// Verify that normalized K is passed to RoPE and stored in KV cache:
+	// Apply RoPE on kExpected and verify it matches the keys in the HAL KV store.
+	keysTrue := beTrue.Read(sTrue.halKV.KeysView(0))
+	cos, sin := ropeRowForLayer(cfg, fullLayer, pos)
+	qDummy := make([]float32, len(qExpected))
+	kRopeExpected := append([]float32(nil), kExpected...)
+	ropeRowQKInto(qDummy, kRopeExpected, cos, sin, cfg.HeadDim, cfg.NumHeads, cfg.NumKVHeads)
+
+	if d := maxAbsDelta(keysTrue, kRopeExpected); d > 1e-6 {
+		t.Fatalf("HAL KV keys differ from post-norm RoPE keys, max|delta|=%g", d)
+	}
+	if d := maxAbsDelta(keysTrue, keysFalse); d < 1e-3 {
+		t.Fatalf("HAL KV keys with QKNorm do not differ from QKNorm=false keys, max|delta|=%g", d)
+	}
+
+	// 3. Prove full session parity between HAL session and CPU reference session with QKNorm: true
+	prompt := []int{3, 7, 11, 5}
+	cpuRef := m.NewSession()
+	defer cpuRef.Close()
+	wantPrefill := cpuRef.Prefill(prompt)
+
+	halSession, err := m.NewBackendSessionChecked(newRecordingQwen35Backend(m))
+	if err != nil {
+		t.Fatalf("NewBackendSessionChecked(halSession): %v", err)
+	}
+	defer halSession.Close()
+	gotPrefill := halSession.Prefill(prompt)
+
+	if d := maxAbsDelta(wantPrefill, gotPrefill); d > 2e-5 {
+		t.Fatalf("full-session Prefill differs between HAL and CPU reference under QKNorm, max|delta|=%g", d)
+	}
+}
