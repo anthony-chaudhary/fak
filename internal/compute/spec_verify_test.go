@@ -65,10 +65,10 @@ func groundTruthCausalAttention(q, k, v []float32, qLen, kvLen, nH, nHkv, d int)
 	return out
 }
 
-func maxAbsDelta(a, b []float32) float32 {
-	var maxD float32
+func maxAbsDelta(a, b []float32) float64 {
+	var maxD float64
 	for i := range a {
-		d := float32(math.Abs(float64(a[i] - b[i])))
+		d := math.Abs(float64(a[i] - b[i]))
 		if d > maxD {
 			maxD = d
 		}

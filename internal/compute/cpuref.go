@@ -273,24 +273,26 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 }
 
 // RMSNorm reproduces the model's serial in-order sum-of-squares (the one marked
-// load-bearing for R2/R14 — NOT the fdot twin), then x·inv·weight, independently
-// for each weight-width row, matching the device backends' shared norm weights.
+// load-bearing for R2/R14 — NOT the fdot twin), then x·inv·weight across each
+// weight-width row of x.
 func (c *cpuBackend) RMSNorm(x, weight Tensor, eps float32) Tensor {
 	xf, wf := c.f32(x), c.f32(weight)
-	n := len(wf)
-	if n == 0 || len(xf)%n != 0 {
-		panic("compute: RMSNorm requires nonempty weights and whole weight-width input rows")
+	wLen := len(wf)
+	if wLen == 0 || len(xf) == 0 || len(xf)%wLen != 0 {
+		panic(fmt.Sprintf("compute: RMSNorm invalid geometry: input len %d not divisible by weight len %d", len(xf), wLen))
 	}
 	out := make([]float32, len(xf))
-	for start := 0; start < len(xf); start += n {
-		row := xf[start : start+n]
+	nRows := len(xf) / wLen
+	for r := 0; r < nRows; r++ {
+		rowOffset := r * wLen
 		var ss float32
-		for _, v := range row {
+		for i := 0; i < wLen; i++ {
+			v := xf[rowOffset+i]
 			ss += v * v
 		}
-		inv := float32(1.0 / math.Sqrt(float64(ss/float32(n)+eps)))
-		for i, v := range row {
-			out[start+i] = v * inv * wf[i]
+		inv := float32(1.0 / math.Sqrt(float64(ss/float32(wLen)+eps)))
+		for i := 0; i < wLen; i++ {
+			out[rowOffset+i] = xf[rowOffset+i] * inv * wf[i]
 		}
 	}
 	return c.result(append([]int(nil), x.Shape...), out)
