@@ -75,3 +75,43 @@ func TestFormatOpencodePrompt_WorkerGitSyncLanding(t *testing.T) {
 	}
 }
 
+func TestBuildOpencodeChat_SubagentDepth(t *testing.T) {
+	iss := Issue{
+		Number: 12030,
+		Key:    "issue-12030",
+		Title:  "feat(issueorchestrator): add subagent depth configuration to OpencodeChatOptions for multi-tier sessions",
+		Lane:   "issueorchestrator",
+	}
+
+	// Case 1: SubagentDepth > 0 (e.g. 2)
+	opts := OpencodeChatOptions{
+		SubagentDepth: 2,
+	}
+	chat := BuildOpencodeChat(iss, opts)
+	foundFlag := false
+	for i, arg := range chat.Command {
+		if arg == "--subagent-depth" {
+			foundFlag = true
+			if i+1 >= len(chat.Command) || chat.Command[i+1] != "2" {
+				t.Fatalf("expected '--subagent-depth' followed by '2', got command: %v", chat.Command)
+			}
+			break
+		}
+	}
+	if !foundFlag {
+		t.Fatalf("expected command to contain '--subagent-depth', got: %v", chat.Command)
+	}
+
+	// Case 2: SubagentDepth == 0
+	optsZero := OpencodeChatOptions{
+		SubagentDepth: 0,
+	}
+	chatZero := BuildOpencodeChat(iss, optsZero)
+	for _, arg := range chatZero.Command {
+		if arg == "--subagent-depth" {
+			t.Fatalf("expected command to omit '--subagent-depth' when SubagentDepth is 0, got: %v", chatZero.Command)
+		}
+	}
+}
+
+

@@ -2,6 +2,7 @@ package issueorchestrator
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -99,6 +100,9 @@ func BuildOpencodeChat(issue Issue, opts OpencodeChatOptions) OpencodeChat {
 	}
 	if opts.WorktreeDir != "" {
 		cmd = append(cmd, "--dir", opts.WorktreeDir)
+	}
+	if opts.SubagentDepth > 0 {
+		cmd = append(cmd, "--subagent-depth", strconv.Itoa(opts.SubagentDepth))
 	}
 	if len(opts.ExtraArgs) > 0 {
 		cmd = append(cmd, opts.ExtraArgs...)
