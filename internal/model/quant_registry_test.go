@@ -11,11 +11,11 @@ func TestQuantRegistryBuiltinRegistration(t *testing.T) {
 	ResetDefaultQuantDescriptors()
 
 	tests := []struct {
-		kind        kQuantKind
-		name        string
-		dtype       compute.Dtype
-		supportsHAL bool
-		blockBytes  int
+		kind         kQuantKind
+		name         string
+		dtype        compute.Dtype
+		supportsHAL  bool
+		blockBytes   int
 		blockWeights int
 	}{
 		{kindQ5K, "Q5_K", compute.Q5_K, true, q5kBlockBytes, qkK},
@@ -30,6 +30,8 @@ func TestQuantRegistryBuiltinRegistration(t *testing.T) {
 		{kindIQ1S, "IQ1_S", 0, false, iq1sBlockBytes, qkK},
 		{kindIQ2S, "IQ2_S", 0, false, iq2sBlockBytes, qkK},
 		{kindIQ1M, "IQ1_M", 0, false, iq1mBlockBytes, qkK},
+		{kindQ3K, "Q3_K", 0, false, q3kBlockBytes, qkK},
+		{kindIQ3S, "IQ3_S", 0, false, iq3sBlockBytes, qkK},
 	}
 
 	for _, tc := range tests {

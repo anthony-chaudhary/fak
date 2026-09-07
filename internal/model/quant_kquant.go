@@ -39,6 +39,8 @@ const (
 	kindQ8_0
 	kindQ4_0
 	kindQ2K
+	kindQ3K
+	kindIQ3S
 )
 
 // Resident k-quant super-block byte sizes per 256 weights (== ggufload.blockQ{5,6}KBytes),
@@ -76,11 +78,17 @@ const (
 	q8_0BlockBytes   = 2 + q8_0BlockWeights
 	q4_0BlockWeights = 32
 	q4_0BlockBytes   = 2 + q4_0BlockWeights/2
+	q3kBlockBytes    = 110
+	iq3sBlockBytes   = 110
 	q2kBlockBytes    = qkK/16 + qkK/4 + 2 + 2
 )
 
 func (k kQuantKind) blockBytes() int {
 	switch k {
+	case kindQ3K:
+		return q3kBlockBytes
+	case kindIQ3S:
+		return iq3sBlockBytes
 	case kindQ6K:
 		return q6kBlockBytes
 	case kindIQ3XXS:
@@ -120,6 +128,10 @@ func (k kQuantKind) blockWeights() int {
 
 func (k kQuantKind) String() string {
 	switch k {
+	case kindQ3K:
+		return "Q3_K"
+	case kindIQ3S:
+		return "IQ3_S"
 	case kindQ6K:
 		return "Q6_K"
 	case kindIQ3XXS:
@@ -145,6 +157,12 @@ func (k kQuantKind) String() string {
 	default:
 		return "Q5_K"
 	}
+}
+
+// supportsHALStaging matches the packed formats accepted by weightHALKQuant.
+// Both demand and prefetch must keep other resident types on the native host.
+func (k kQuantKind) supportsHALStaging() bool {
+	return SupportsHALKQuant(k)
 }
 
 // kQuantTensor is a resident raw expert-quant weight matrix [out, in]. raw holds the GGUF
@@ -283,6 +301,10 @@ func q2kDequantSuperBlock(dst []float32, blk []byte) {
 
 func kQuantDequantSuperBlock(dst []float32, blk []byte, kind kQuantKind) {
 	switch kind {
+	case kindQ3K:
+		q3kDequantSuperBlock(dst, blk)
+	case kindIQ3S:
+		iq3sDequantSuperBlock(dst, blk)
 	case kindQ6K:
 		q6kDequantSuperBlock(dst, blk)
 	case kindIQ3XXS:
@@ -623,4 +645,14 @@ func (b *QuantBuilder) addResidentKQuantTagged(canon string, shape []int, raw []
 	qt.w3MLP = w3MLP
 	b.m.kqw[name] = qt
 	return nil
+}
+
+// AddResidentQ3K retains eligible Q3_K matrix bytes without requantization.
+func (b *QuantBuilder) AddResidentQ3K(canon string, shape []int, raw []byte) error {
+	return b.addResidentKQuant(canon, shape, raw, kindQ3K)
+}
+
+// AddResidentIQ3S retains eligible IQ3_S matrix bytes without requantization.
+func (b *QuantBuilder) AddResidentIQ3S(canon string, shape []int, raw []byte) error {
+	return b.addResidentKQuant(canon, shape, raw, kindIQ3S)
 }
