@@ -35,14 +35,16 @@ func TestModuleOf(t *testing.T) {
 		{"docs/architecture.md", "docs/architecture.md", "docs", true}, // top-level page: file-keyed
 		{"docs/fak/edge-quickstart.md", "docs/fak", "docs", true},      // section page: keys the section
 		{"docs/adoption/deep/nested/x.md", "docs/adoption", "docs", true},
-		{"docs\\fak\\concept-glossary.md", "docs/fak", "docs", true}, // backslash-normalized
-		{"docs/nightrun/module-versions.jsonl", "", "", false},       // generated ledger: data, not prose
-		{"docs/nightrun/README.md", "docs/nightrun", "docs", true},   // but prose beside it still counts
-		{"docs/_config.yml", "", "", false},                          // site config: not prose
-		{"docs/benchmark-methodology.witness.txt", "", "", false},    // witness artifact: not prose
-		{"docs/adoption-visuals/chart.svg", "", "", false},           // image: not prose
-		{"docs/README.md", "docs/README.md", "docs", true},           // top-level page
-		{"docs", "", "", false},                                      // the root itself is no module
+		{"docs\\fak\\concept-glossary.md", "docs/fak", "docs", true},   // backslash-normalized
+		{"docs/nightrun/module-versions.jsonl", "", "", false},         // generated ledger: data, not prose
+		{"docs/nightrun/README.md", "docs/nightrun", "docs", true},     // but prose beside it still counts
+		{"docs/_config.yml", "", "", false},                            // site config: not prose
+		{"docs/benchmark-methodology.witness.txt", "", "", false},      // witness artifact: not prose
+		{"docs/adoption-visuals/chart.svg", "", "", false},             // image: not prose
+		{"docs/README.md", "docs/README.md", "docs", true},             // top-level page
+		{"docs:architecture.md", "docs/architecture.md", "docs", true}, // docs: prefix supported
+		{"docs:fak/edge-quickstart.md", "docs/fak", "docs", true},      // docs: prefix section page
+		{"docs", "", "", false},                                        // the root itself is no module
 		// tools/ is a flat, family-keyed script keyspace.
 		{"tools/account_probe.py", "tools/account_probe", "tools", true},
 		{"tools/account_probe_test.py", "tools/account_probe", "tools", true}, // _test folds into the family
