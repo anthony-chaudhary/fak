@@ -87,7 +87,7 @@ func TestSyncPushThenFetchExactArgv(t *testing.T) {
 	assertArgv(t, rec.calls, [][]string{
 		wantProbe,
 		{"push", "origin", wantRefspec},
-		{"fetch", "origin", wantRefspec},
+		{"fetch", "--no-prune", "origin", wantRefspec},
 	}, "the emptiness probe precedes the push, and the push precedes the fetch")
 }
 
@@ -100,7 +100,7 @@ func TestSyncSingleDirection(t *testing.T) {
 		wantFetched bool
 	}{
 		{"push-only", true, false, [][]string{wantProbe, {"push", "origin", wantRefspec}}, true, false},
-		{"fetch-only", false, true, [][]string{{"fetch", "origin", wantRefspec}}, false, true},
+		{"fetch-only", false, true, [][]string{{"fetch", "--no-prune", "origin", wantRefspec}}, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := &syncRec{refs: oneLease()}
@@ -178,7 +178,7 @@ func TestSyncEmptyNamespaceSkipsPushAndStillFetches(t *testing.T) {
 	if !res.Fetched {
 		t.Fatalf("Fetched=false: the fetch is the whole point — a zero-lease clone must still learn its peers': %+v", res)
 	}
-	assertArgv(t, rec.calls, [][]string{wantProbe, {"fetch", "origin", wantRefspec}},
+	assertArgv(t, rec.calls, [][]string{wantProbe, {"fetch", "--no-prune", "origin", wantRefspec}},
 		"no push subprocess may run, and the fetch must still happen")
 }
 
@@ -299,6 +299,51 @@ func TestSyncQuarantinesMalformedLooseRefAndFetches(t *testing.T) {
 	matches, err := filepath.Glob(filepath.Join(common, "fak", "quarantine", "malformed-lock-refs", "*", "session-bad"))
 	if err != nil || len(matches) != 1 {
 		t.Fatalf("quarantine matches=%v err=%v", matches, err)
+	}
+}
+
+func TestSyncFetchDoesNotPruneWithFetchPruneConfig(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	local := filepath.Join(root, "local")
+	runGit := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit(root, "init", "--bare", remote)
+	runGit(root, "clone", remote, local)
+	runGit(local, "-c", "user.name=fak-test", "-c", "user.email=fak-test@example.invalid", "commit", "--allow-empty", "-m", "seed")
+	runGit(local, "push", "origin", "HEAD:main")
+
+	// Set fetch.prune = true in local git config to ensure --no-prune overrides it (#12023).
+	runGit(local, "config", "fetch.prune", "true")
+
+	validBlob := filepath.Join(root, "valid.json")
+	if err := os.WriteFile(validBlob, []byte(`{"ok":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	validOID := runGit(local, "hash-object", "-w", validBlob)
+	runGit(local, "update-ref", refPrefix+"local-only", validOID)
+
+	got, err := NewInDir(local).Sync(ctx, "origin", false, true)
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if !got.Fetched {
+		t.Fatalf("Fetched=false: %+v", got)
+	}
+	if gotOID := runGit(local, "rev-parse", refPrefix+"local-only"); gotOID != validOID {
+		t.Fatalf("local lease ref was pruned: got %s want %s", gotOID, validOID)
 	}
 }
 
