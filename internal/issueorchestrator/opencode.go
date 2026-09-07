@@ -85,7 +85,7 @@ func FormatOpencodePrompt(issue Issue) string {
 	if isHaloHardwareRelevant(issue) {
 		b.WriteString("- Leased Halo Hardware Validation Protocol:\n")
 		b.WriteString("  - Mandate executing an early low-cost probe (e.g. `fak-dev amd-strix-probe` or `fak validate --strix`).\n")
-		b.WriteString("  - Mandate coordinated resource access against leased LAN Halo hardware (`strix1`).\n")
+		b.WriteString("  - Mandate coordinated resource access against the sanctioned Halo target discovered by `fak-dev amd-strix-probe`; use the target identifier emitted by the probe or configured route, and never embed a concrete operator hostname.\n")
 		b.WriteString("  - Mandate actual source-bound physical execution evidence, or emit a structured pending hardware status when hardware is busy or unavailable.\n")
 	}
 	b.WriteString("- Provide a 3-line receipt upon completion: status/verdict, changed files & commit SHA, and test output summary, and post directly to the GitHub issue with gh issue comment.\n")

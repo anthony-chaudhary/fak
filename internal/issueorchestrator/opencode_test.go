@@ -124,8 +124,11 @@ func TestFormatOpencodePrompt_HaloHardwareValidation(t *testing.T) {
 		Paths:  []string{"internal/amdgpu/dispatch.go"},
 	}
 	promptLane := FormatOpencodePrompt(relevantLaneIssue)
-	if !strings.Contains(promptLane, "strix1") {
-		t.Fatalf("relevant lane issue prompt missing leased Halo hardware guidance ('strix1'):\n%s", promptLane)
+	if !strings.Contains(promptLane, "sanctioned Halo target") || !strings.Contains(promptLane, "target identifier emitted by the probe") {
+		t.Fatalf("relevant lane issue prompt missing configured-target discovery guidance:\n%s", promptLane)
+	}
+	if strings.Contains(promptLane, "hardware (`") {
+		t.Fatalf("relevant lane issue prompt must not embed a concrete operator hostname:\n%s", promptLane)
 	}
 	if !strings.Contains(promptLane, "early low-cost probe") {
 		t.Fatalf("relevant lane issue prompt missing early low-cost probe requirement:\n%s", promptLane)
@@ -149,8 +152,11 @@ func TestFormatOpencodePrompt_HaloHardwareValidation(t *testing.T) {
 		Paths:  []string{"internal/engine/gemm.go"},
 	}
 	promptTitle := FormatOpencodePrompt(relevantTitleIssue)
-	if !strings.Contains(promptTitle, "strix1") {
-		t.Fatalf("relevant title issue prompt missing leased Halo hardware guidance ('strix1'):\n%s", promptTitle)
+	if !strings.Contains(promptTitle, "sanctioned Halo target") || !strings.Contains(promptTitle, "configured route") {
+		t.Fatalf("relevant title issue prompt missing configured-target discovery guidance:\n%s", promptTitle)
+	}
+	if strings.Contains(promptTitle, "hardware (`") {
+		t.Fatalf("relevant title issue prompt must not embed a concrete operator hostname:\n%s", promptTitle)
 	}
 	if !strings.Contains(promptTitle, "early low-cost probe") {
 		t.Fatalf("relevant title issue prompt missing early low-cost probe requirement:\n%s", promptTitle)
@@ -173,9 +179,6 @@ func TestFormatOpencodePrompt_HaloHardwareValidation(t *testing.T) {
 	promptUnrelated := FormatOpencodePrompt(unrelatedIssue)
 	if strings.Contains(promptUnrelated, "Leased Halo Hardware Validation") {
 		t.Fatalf("unrelated issue prompt must NOT contain Halo Hardware Validation:\n%s", promptUnrelated)
-	}
-	if strings.Contains(promptUnrelated, "strix1") {
-		t.Fatalf("unrelated issue prompt must NOT contain 'strix1':\n%s", promptUnrelated)
 	}
 	if strings.Contains(promptUnrelated, "amd-strix-probe") {
 		t.Fatalf("unrelated issue prompt must NOT contain 'amd-strix-probe':\n%s", promptUnrelated)
@@ -225,6 +228,3 @@ func TestIsHaloHardwareRelevant(t *testing.T) {
 		}
 	}
 }
-
-
-
