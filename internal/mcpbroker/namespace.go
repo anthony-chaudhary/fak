@@ -44,6 +44,10 @@ func RegisterServerTools(b *Broker, serverID string, tools []MCPTool, handler To
 
 // RegisterServerTools registers discovered MCP tools into the broker with namespacing on the broker.
 func (b *Broker) RegisterServerTools(serverID string, tools []MCPTool, handler ToolHandler) ([]string, error) {
+	if serverID == "" || strings.Contains(serverID, "__") {
+		return nil, ErrInvalidServerID
+	}
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -52,7 +56,12 @@ func (b *Broker) RegisterServerTools(serverID string, tools []MCPTool, handler T
 	}
 
 	srv, hasSrv := b.servers[serverID]
-	var registered []string
+
+	type pendingReg struct {
+		name string
+		reg  ToolRegistration
+	}
+	var toRegister []pendingReg
 
 	for _, tool := range tools {
 		if tool.Name == "" {
@@ -90,6 +99,11 @@ func (b *Broker) RegisterServerTools(serverID string, tools []MCPTool, handler T
 			}
 		}
 
+		// Validate before mutating map: refuse cross-owner replacement
+		if existing, exists := b.tools[namespacedName]; exists && existing.ServerID != serverID {
+			return nil, ErrToolAlreadyRegistered
+		}
+
 		reg := ToolRegistration{
 			Name:        namespacedName,
 			ServerID:    serverID,
@@ -99,9 +113,13 @@ func (b *Broker) RegisterServerTools(serverID string, tools []MCPTool, handler T
 			Handler:     handler,
 		}
 
-		// Save or update registration
-		b.tools[namespacedName] = reg
-		registered = append(registered, namespacedName)
+		toRegister = append(toRegister, pendingReg{name: namespacedName, reg: reg})
+	}
+
+	registered := make([]string, 0, len(toRegister))
+	for _, item := range toRegister {
+		b.tools[item.name] = item.reg
+		registered = append(registered, item.name)
 	}
 
 	return registered, nil

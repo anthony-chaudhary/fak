@@ -496,3 +496,204 @@ func BenchmarkRouteCallParallel(b *testing.B) {
 		}
 	})
 }
+
+func TestMCPNamespaceIdentityCollision(t *testing.T) {
+	b := NewBroker()
+
+	// 1. Register server "a" and its tool "b__c"
+	cfgA := ServerConfig{
+		ID:   "a",
+		Name: "Server A",
+	}
+	if err := b.RegisterServer(cfgA); err != nil {
+		t.Fatalf("unexpected error registering server 'a': %v", err)
+	}
+
+	regToolsA, err := b.RegisterServerTools("a", []MCPTool{
+		{Name: "b__c", Description: "Original tool from server a"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error registering tool 'b__c' for server 'a': %v", err)
+	}
+	if len(regToolsA) != 1 || regToolsA[0] != "mcp__a__b__c" {
+		t.Fatalf("unexpected registered tool name: %v", regToolsA)
+	}
+
+	// 2. Reject server "a__b" registration (contains reserved delimiter "__")
+	cfgAB := ServerConfig{
+		ID:   "a__b",
+		Name: "Server A__B",
+	}
+	if err := b.RegisterServer(cfgAB); !errors.Is(err, ErrInvalidServerID) {
+		t.Fatalf("expected ErrInvalidServerID for server ID with '__', got: %v", err)
+	}
+
+	// 3. Reject RegisterServerTools with server "a__b"
+	_, err = b.RegisterServerTools("a__b", []MCPTool{
+		{Name: "c", Description: "Colliding tool from server a__b"},
+	}, nil)
+	if !errors.Is(err, ErrInvalidServerID) {
+		t.Fatalf("expected ErrInvalidServerID for RegisterServerTools with '__', got: %v", err)
+	}
+
+	// 4. Verify that cross-owner replacement is refused when another valid server
+	// attempts to register a tool that is already registered by a different server.
+	cfgOther := ServerConfig{
+		ID:   "other",
+		Name: "Server Other",
+	}
+	if err := b.RegisterServer(cfgOther); err != nil {
+		t.Fatalf("unexpected error registering server 'other': %v", err)
+	}
+	collisionTool := ToolRegistration{
+		Name:     "mcp__a__b__c",
+		ServerID: "other",
+	}
+	if err := b.RegisterTool(collisionTool); !errors.Is(err, ErrToolAlreadyRegistered) {
+		t.Fatalf("expected ErrToolAlreadyRegistered, got: %v", err)
+	}
+
+	// 5. Verify original registration survives
+	tools := b.ListTools()
+	var foundOriginal bool
+	for _, tool := range tools {
+		if tool.Name == "mcp__a__b__c" {
+			foundOriginal = true
+			if tool.ServerID != "a" {
+				t.Fatalf("expected tool server ID 'a', got: %s", tool.ServerID)
+			}
+			if tool.Description != "Original tool from server a" {
+				t.Fatalf("expected original description, got: %s", tool.Description)
+			}
+		}
+	}
+	if !foundOriginal {
+		t.Fatalf("original tool 'mcp__a__b__c' did not survive collision rejection")
+	}
+
+	// Verify calling original tool works
+	resp, err := b.RouteCall(context.Background(), CallRequest{Tool: "mcp__a__b__c"})
+	if err != nil {
+		t.Fatalf("failed to route call to surviving tool: %v", err)
+	}
+	if resp.ServerID != "a" || resp.Tool != "mcp__a__b__c" {
+		t.Fatalf("unexpected route response: tool=%s, server=%s", resp.Tool, resp.ServerID)
+	}
+
+	// 6. Ordinary names work
+	cfgNormal := ServerConfig{
+		ID:   "srv1",
+		Name: "Normal Server",
+	}
+	if err := b.RegisterServer(cfgNormal); err != nil {
+		t.Fatalf("unexpected error registering normal server: %v", err)
+	}
+	regNormal, err := b.RegisterServerTools("srv1", []MCPTool{
+		{Name: "read_file", Description: "Reads a file"},
+		{Name: "list_dir", Description: "Lists directory"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error registering normal tools: %v", err)
+	}
+	if len(regNormal) != 2 || regNormal[0] != "mcp__srv1__read_file" || regNormal[1] != "mcp__srv1__list_dir" {
+		t.Fatalf("unexpected registered normal tools: %v", regNormal)
+	}
+}
+
+func TestBrokerAuthoritativeCallIdentity(t *testing.T) {
+	b := NewBroker()
+
+	var passedReq CallRequest
+	mockHandler := func(ctx context.Context, req CallRequest) (*CallResponse, error) {
+		passedReq = req
+		return &CallResponse{
+			Tool:     "spoofed_tool",
+			ServerID: "spoofed_server",
+			Content:  json.RawMessage(`{"result":"ok"}`),
+		}, nil
+	}
+
+	mockErrHandler := func(ctx context.Context, req CallRequest) (*CallResponse, error) {
+		passedReq = req
+		return &CallResponse{
+			Tool:     "spoofed_err_tool",
+			ServerID: "spoofed_err_server",
+		}, errors.New("handler failure")
+	}
+
+	if err := b.RegisterServer(ServerConfig{ID: "srv_auth", Name: "Auth Server"}); err != nil {
+		t.Fatalf("failed to register server: %v", err)
+	}
+
+	if err := b.RegisterTool(ToolRegistration{
+		Name:     "tool_success",
+		ServerID: "srv_auth",
+		Handler:  mockHandler,
+	}); err != nil {
+		t.Fatalf("failed to register tool_success: %v", err)
+	}
+
+	if err := b.RegisterTool(ToolRegistration{
+		Name:     "tool_error",
+		ServerID: "srv_auth",
+		Handler:  mockErrHandler,
+	}); err != nil {
+		t.Fatalf("failed to register tool_error: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// 1. Server mismatch refusal: req.ServerID conflicts with tool.ServerID
+	mismatchReq := CallRequest{
+		Tool:     "tool_success",
+		ServerID: "srv_wrong",
+	}
+	respMismatch, err := b.RouteCall(ctx, mismatchReq)
+	if !errors.Is(err, ErrServerMismatch) {
+		t.Fatalf("expected ErrServerMismatch, got: %v", err)
+	}
+	if respMismatch == nil || !respMismatch.IsError {
+		t.Fatalf("expected error response on server mismatch")
+	}
+
+	// 2. Auto-population of omitted server in CallRequest
+	omittedReq := CallRequest{
+		Tool: "tool_success",
+	}
+	respSuccess, err := b.RouteCall(ctx, omittedReq)
+	if err != nil {
+		t.Fatalf("unexpected route error: %v", err)
+	}
+	if passedReq.ServerID != "srv_auth" {
+		t.Fatalf("expected handler to receive auto-populated ServerID 'srv_auth', got: %q", passedReq.ServerID)
+	}
+
+	// 3. Authoritative identity on response (overwriting handler spoofing)
+	if respSuccess.Tool != "tool_success" {
+		t.Fatalf("expected authoritative response Tool 'tool_success', got: %q", respSuccess.Tool)
+	}
+	if respSuccess.ServerID != "srv_auth" {
+		t.Fatalf("expected authoritative response ServerID 'srv_auth', got: %q", respSuccess.ServerID)
+	}
+
+	// 4. Authoritative identity on error (overwriting handler spoofing on error return)
+	errReq := CallRequest{
+		Tool: "tool_error",
+	}
+	respErr, err := b.RouteCall(ctx, errReq)
+	if err == nil {
+		t.Fatalf("expected error from handler, got nil")
+	}
+	if respErr == nil {
+		t.Fatalf("expected non-nil error response")
+	}
+	if !respErr.IsError {
+		t.Fatalf("expected IsError=true on error response")
+	}
+	if respErr.Tool != "tool_error" {
+		t.Fatalf("expected authoritative error response Tool 'tool_error', got: %q", respErr.Tool)
+	}
+	if respErr.ServerID != "srv_auth" {
+		t.Fatalf("expected authoritative error response ServerID 'srv_auth', got: %q", respErr.ServerID)
+	}
+}

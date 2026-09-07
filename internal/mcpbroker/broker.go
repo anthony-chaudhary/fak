@@ -36,6 +36,12 @@ var (
 
 	// ErrServerNotFound is returned when referencing a server ID that does not exist.
 	ErrServerNotFound = errors.New("mcpbroker: server not found")
+
+	// ErrInvalidServerID is returned when a server ID is empty or contains reserved delimiters.
+	ErrInvalidServerID = errors.New("mcpbroker: invalid server ID")
+
+	// ErrServerMismatch is returned when a call request specifies a server ID that conflicts with the tool's registered server.
+	ErrServerMismatch = errors.New("mcpbroker: server mismatch")
 )
 
 // ServerConfig configures an upstream MCP server and defines policy boundaries
@@ -243,8 +249,8 @@ func NewBroker(opts ...BrokerOption) *Broker {
 // RegisterServer configures an upstream MCP server in the broker, establishing its
 // policy constraints (allowlist, denylist, read-only status, and execution timeout).
 func (b *Broker) RegisterServer(cfg ServerConfig) error {
-	if cfg.ID == "" {
-		return errors.New("mcpbroker: server ID cannot be empty")
+	if cfg.ID == "" || strings.Contains(cfg.ID, "__") {
+		return ErrInvalidServerID
 	}
 
 	b.mu.Lock()
@@ -414,6 +420,24 @@ func (b *Broker) RouteCall(ctx context.Context, req CallRequest) (*CallResponse,
 		return resp, ErrToolNotFound
 	}
 
+	// Validate explicit ServerID against registered tool.ServerID
+	if req.ServerID != "" && req.ServerID != tool.ServerID {
+		atomic.AddInt64(&b.errorCalls, 1)
+		resp := &CallResponse{
+			Tool:         tool.Name,
+			ServerID:     tool.ServerID,
+			IsError:      true,
+			ErrorMessage: "server mismatch: " + req.ServerID + " != " + tool.ServerID,
+			Latency:      time.Since(start),
+		}
+		return resp, ErrServerMismatch
+	}
+
+	// Populate omitted ServerID from tool.ServerID
+	if req.ServerID == "" {
+		req.ServerID = tool.ServerID
+	}
+
 	// Determine timeout deadline
 	timeout := b.defaultTimeout
 	if hasSrv && srv.Timeout > 0 {
@@ -474,19 +498,18 @@ func (b *Broker) RouteCall(ctx context.Context, req CallRequest) (*CallResponse,
 			atomic.AddInt64(&b.errorCalls, 1)
 			if resp == nil {
 				resp = &CallResponse{
-					Tool:         tool.Name,
-					ServerID:     tool.ServerID,
 					IsError:      true,
 					ErrorMessage: err.Error(),
-					Latency:      latency,
 				}
 			} else {
 				resp.IsError = true
 				if resp.ErrorMessage == "" {
 					resp.ErrorMessage = err.Error()
 				}
-				resp.Latency = latency
 			}
+			resp.Tool = tool.Name
+			resp.ServerID = tool.ServerID
+			resp.Latency = latency
 			return resp, err
 		}
 
@@ -494,12 +517,8 @@ func (b *Broker) RouteCall(ctx context.Context, req CallRequest) (*CallResponse,
 		if resp == nil {
 			resp = &CallResponse{}
 		}
-		if resp.Tool == "" {
-			resp.Tool = tool.Name
-		}
-		if resp.ServerID == "" {
-			resp.ServerID = tool.ServerID
-		}
+		resp.Tool = tool.Name
+		resp.ServerID = tool.ServerID
 		resp.Latency = latency
 		return resp, nil
 	}
@@ -613,8 +632,8 @@ func (b *Broker) RegisterSupervisor(sup *ProcessSupervisor) error {
 // LaunchSupervisor creates, starts, and supervises an MCP server using ServerConfig,
 // automatically discovering and registering its tools into the broker with namespacing.
 func (b *Broker) LaunchSupervisor(ctx context.Context, cfg ServerConfig) (*ProcessSupervisor, error) {
-	if cfg.ID == "" {
-		return nil, errors.New("mcpbroker: server ID cannot be empty")
+	if cfg.ID == "" || strings.Contains(cfg.ID, "__") {
+		return nil, ErrInvalidServerID
 	}
 
 	b.mu.Lock()
