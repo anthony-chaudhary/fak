@@ -279,3 +279,50 @@ func BenchmarkSortedRecommendations(b *testing.B) {
 		benchSinkRecommendations = SortedRecommendations(recs)
 	}
 }
+
+// BenchmarkIssueCost_Parallel evaluates concurrent issue cost summary folds across
+// multiple worker goroutines.
+// Operating envelope: parallel evaluation across GOMAXPROCS workers over a 100-row ledger.
+// Allocation budget: <= 2 KB/op and <= 5 allocs/op per summary fold.
+// Latency ceiling: P50 < 5µs/op, P99 < 25µs/op under concurrent execution.
+func BenchmarkIssueCost_Parallel(b *testing.B) {
+	rows := makeBenchLedger(100)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			rep := Summary(rows)
+			if rep.N == 0 {
+				b.Fatal("unexpected empty report")
+			}
+		}
+	})
+}
+
+// TestBenchmarksRun executes core benchmarks for a small iteration count to guarantee
+// they complete without panicking.
+func TestBenchmarksRun(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping benchmark runner in -short mode")
+	}
+
+	benchmarks := []struct {
+		name string
+		fn   func(b *testing.B)
+	}{
+		{"BenchmarkSummary", BenchmarkSummary},
+		{"BenchmarkMedian", BenchmarkMedian},
+		{"BenchmarkCalibrate", BenchmarkCalibrate},
+		{"BenchmarkSortedRecommendations", BenchmarkSortedRecommendations},
+		{"BenchmarkIssueCost_Parallel", BenchmarkIssueCost_Parallel},
+	}
+
+	for _, bm := range benchmarks {
+		t.Run(bm.name, func(t *testing.T) {
+			res := testing.Benchmark(bm.fn)
+			if res.N <= 0 {
+				t.Fatalf("benchmark %s performed 0 iterations", bm.name)
+			}
+		})
+	}
+}

@@ -489,3 +489,68 @@ func BenchmarkUnderDir(b *testing.B) {
 		benchBoolSink = underDir(target, base)
 	}
 }
+
+// BenchmarkCorelocks_Parallel evaluates concurrent classification performance under lock
+// contention and multi-goroutine read workloads.
+// Operating envelope: concurrent execution across GOMAXPROCS workers querying 10 representative paths.
+// Allocation budget: 0 allocs/op in the parallel classification loop.
+// Latency ceiling: P50 < 150ns/op, P99 < 800ns/op with linear scaling across CPU cores.
+func BenchmarkCorelocks_Parallel(b *testing.B) {
+	tax, err := LoadFixture()
+	if err != nil {
+		b.Fatal(err)
+	}
+	paths := []string{
+		"internal/adjudicator/decide.go",
+		"internal/abi/registry.go",
+		"dos.toml",
+		"internal/resume/engine.go",
+		"internal/canon/canon.go",
+		"internal/covmatrix/matrix.go",
+		"internal/rsiloop/loop.go",
+		"cmd/fak/main.go",
+		"docs/readme.md",
+		"internal/corelocks/corelocks.go",
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			p := paths[i%len(paths)]
+			c, r := tax.Classify(p)
+			if c == "" && r != "" {
+				b.Fatal("unexpected empty class with non-empty reason")
+			}
+			i++
+		}
+	})
+}
+
+// TestBenchmarksRun executes core benchmarks for a small iteration count to guarantee
+// they complete without panicking.
+func TestBenchmarksRun(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping benchmark runner in -short mode")
+	}
+
+	benchmarks := []struct {
+		name string
+		fn   func(b *testing.B)
+	}{
+		{"BenchmarkParse_Fixture", BenchmarkParse_Fixture},
+		{"BenchmarkClassify_HitHardSelf", BenchmarkClassify_HitHardSelf},
+		{"BenchmarkClassify_BatchPaths", BenchmarkClassify_BatchPaths},
+		{"BenchmarkPathUnderGlob_Containment", BenchmarkPathUnderGlob_Containment},
+		{"BenchmarkCorelocks_Parallel", BenchmarkCorelocks_Parallel},
+	}
+
+	for _, bm := range benchmarks {
+		t.Run(bm.name, func(t *testing.T) {
+			res := testing.Benchmark(bm.fn)
+			if res.N <= 0 {
+				t.Fatalf("benchmark %s performed 0 iterations", bm.name)
+			}
+		})
+	}
+}

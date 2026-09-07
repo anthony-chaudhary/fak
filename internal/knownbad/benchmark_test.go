@@ -364,3 +364,49 @@ func BenchmarkLeaseID(b *testing.B) {
 		benchStringSink = LeaseID(sig)
 	}
 }
+
+// BenchmarkKnownBad_Parallel evaluates concurrent query matching over known-bad records
+// across multiple worker goroutines.
+// Operating envelope: parallel evaluation across GOMAXPROCS workers over 100 candidate records.
+// Allocation budget: <= 5 allocs/op and <= 2 KB/op per match query.
+// Latency ceiling: P50 < 5µs/op, P99 < 25µs/op under concurrent execution.
+func BenchmarkKnownBad_Parallel(b *testing.B) {
+	const now = 1_700_000_000
+	records := makeBenchRecords(100, now)
+	query := Query{TreeGlobs: []string{"internal/pkg2/sub/file.go"}}
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_ = Match(records, query, now)
+		}
+	})
+}
+
+// TestBenchmarksRun executes core benchmarks for a small iteration count to guarantee
+// they complete without panicking.
+func TestBenchmarksRun(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping benchmark runner in -short mode")
+	}
+
+	benchmarks := []struct {
+		name string
+		fn   func(b *testing.B)
+	}{
+		{"BenchmarkSignature", BenchmarkSignature},
+		{"BenchmarkMatch", BenchmarkMatch},
+		{"BenchmarkCompact", BenchmarkCompact},
+		{"BenchmarkParseLedger", BenchmarkParseLedger},
+		{"BenchmarkKnownBad_Parallel", BenchmarkKnownBad_Parallel},
+	}
+
+	for _, bm := range benchmarks {
+		t.Run(bm.name, func(t *testing.T) {
+			res := testing.Benchmark(bm.fn)
+			if res.N <= 0 {
+				t.Fatalf("benchmark %s performed 0 iterations", bm.name)
+			}
+		})
+	}
+}

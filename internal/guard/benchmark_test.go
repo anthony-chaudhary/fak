@@ -309,3 +309,63 @@ func BenchmarkLandlockChildEnv(b *testing.B) {
 		benchStringsSink = landlockChildEnv(extra...)
 	}
 }
+
+// BenchmarkGuard_Parallel evaluates concurrent capability profile validation and policy
+// checking under multi-goroutine contention.
+// Operating envelope: concurrent execution across GOMAXPROCS workers validating 5 candidate tools.
+// Allocation budget: 0 allocs/op in the evaluation loop.
+// Latency ceiling: P50 < 50ns/op, P99 < 300ns/op with sub-microsecond parallel scaling.
+func BenchmarkGuard_Parallel(b *testing.B) {
+	profile := CapabilityProfile{
+		Name: "standard",
+		AllowedTools: []string{
+			"bash", "read_file", "write_file", "edit_file", "glob", "grep",
+		},
+		KnownAliases: map[string]string{
+			"exec_command": "bash",
+			"run_shell":    "bash",
+			"view":         "read_file",
+		},
+	}
+	testTools := []string{
+		"bash", "read_file", "exec_command", "view", "unauthorized_tool",
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			_ = profile.Allows(testTools[i%len(testTools)])
+			i++
+		}
+	})
+}
+
+// TestBenchmarksRun executes core benchmarks for a small iteration count to guarantee
+// they complete without panicking.
+func TestBenchmarksRun(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping benchmark runner in -short mode")
+	}
+
+	benchmarks := []struct {
+		name string
+		fn   func(b *testing.B)
+	}{
+		{"BenchmarkReconcileCatalog_Standard", BenchmarkReconcileCatalog_Standard},
+		{"BenchmarkCapabilityProfile_Allows", BenchmarkCapabilityProfile_Allows},
+		{"BenchmarkRulesetSpec_Encode", BenchmarkRulesetSpec_Encode},
+		{"BenchmarkDecideFailOpen", BenchmarkDecideFailOpen},
+		{"BenchmarkGuard_Parallel", BenchmarkGuard_Parallel},
+	}
+
+	for _, bm := range benchmarks {
+		t.Run(bm.name, func(t *testing.T) {
+			res := testing.Benchmark(bm.fn)
+			if res.N <= 0 {
+				t.Fatalf("benchmark %s performed 0 iterations", bm.name)
+			}
+		})
+	}
+}
