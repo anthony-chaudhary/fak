@@ -507,6 +507,28 @@ available; do not use `git add -A`. Work directly on `main`; the trunk guard ref
 an off-trunk commit (`OFF_TRUNK`). Default is to ship: once `make ci` is green,
 commit and push through `fak sync push`.
 
+### Safe merge and trunk convergence
+
+Safe trunk synchronization avoids destructive clobbering and uncoordinated merges:
+- **Active `MERGE_HEAD` detection:** Always check `.git/MERGE_HEAD` before staging or landing changes. If an in-flight merge is active (`MERGE_IN_PROGRESS`), unstage your local paths (`git restore --staged`) and wait for the in-flight merge to finish. Never abort, reset, or finish a peer's merge.
+- **Fast-forward-only convergence (`fak sync apply`):** Routine trunk synchronization runs `fak sync apply` (`git merge --ff-only --no-autostash --no-overwrite-ignore`). This guarantees that local branches converge strictly via fast-forward without creating accidental merge commits or interleaving conflict markers on the shared trunk.
+- **Structured divergence routing (`fak sync reconcile`):** When local and remote branches diverge, do not force-push, use `--autostash`, or perform raw 3-way merges. Instead, run `fak sync reconcile` to evaluate safe, structured divergence routes:
+  - `ROUTE_APPLY`: clean fast-forward when trunk is ahead.
+  - `ROUTE_DISJOINT_INTEGRATE`: automated clean integration when local and upstream commits touch mutually disjoint file trees.
+  - `ROUTE_SUPERSET_MERGE`: textless `-s ours` verified merge when local history is a proven superset.
+  - `ROUTE_HOLD_DIRTY_COLLISION`: suspends colliding local dirty paths via `fak wip park` or `--suspend-paths` to permit convergence.
+  - `ROUTE_RECONCILE_PACKET`: generates an auditable, isolated packet for overlapping manual conflict resolution.
+- **Push retry:** On `PUSH_REJECTED` (non-fast-forward push race), reconcile and safely retry publishing with `fak sync push`.
+
+### Dual-repo synchronization (`fak` and `fak-private`)
+
+When working in an environment with the companion private repository (`fak-private`) or touching shared exported interfaces (`pkg/*`), synchronization must encompass both repositories to prevent interface skew (`go.work`) and lease/queue stalls (`refs/fak/locks/*`):
+1. **Pre-check dirty state:** Inspect `git status --porcelain` across both `fak` and `fak-private` to ensure uncommitted work is accounted for or parked.
+2. **Fetch remotes and lock refs:** Fetch all remotes and tags across both trees, including runtime coordination lock references (`refs/fak/locks/*`).
+3. **Synchronize both trees:** Run `fak sync check` / `fak sync apply` in `fak` alongside fast-forward synchronization in `fak-private` (or via `fak-sync repo`).
+4. **Reconcile Go workspace:** Run `go work sync` to align Go module graphs across both repositories and ensure interface consistency across public packages (`pkg/*`) and private consumers.
+5. **Zero-leak verification:** Run boundary scrub audits (`tools/scrub_public_copy.py --audit-staged`) before publishing to ensure private tokens, internal hostnames, or proprietary code never leak into the public `fak` repository.
+
 Full contributor contract: [`CONTRIBUTING.md`](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md). How a *feature*
 attaches as a leaf behind a `Register*` seam: [`EXTENDING.md`](https://github.com/anthony-chaudhary/fak/blob/main/EXTENDING.md). A
 broader catalog of verbs, runners, and demo scripts:
