@@ -2693,6 +2693,21 @@ summary  = "Benchmark evaluation report or census failed complete denominator ac
 fix      = "Ensure all tasks in the frozen manifest domain are accounted for: N_total = N_pass + N_fail + N_timeout + N_crash + N_refused, with no dropped instances. Producer: bench.VerifyCensusDomain."
 see_also = ["internal/bench/denominator_census.go", "dos_refuse_reasons", "dos_check_reason"]
 
+# #9776: Performance-RSI scorecard refusal tokens for the performance improvement loop
+[reasons.SCORE_INPUT_UNAVAILABLE]
+category = "MISROUTE"
+refusal  = false
+summary  = "Performance-RSI scorecard input is unavailable or missing required snapshot/metrics data during loop execution."
+fix      = "Provide a valid performance-RSI snapshot JSON file via --input or FAK_PERFORMANCE_RSI_INPUT before running the performance loop turn. Producer: internal/perfrsiscore."
+see_also = ["internal/perfrsiscore", "fak performance-rsi-scorecard"]
+
+[reasons.PERFORMANCE_RSI_DEBT]
+category = "MISROUTE"
+refusal  = false
+summary  = "Performance-RSI scorecard detected unresolved canonical performance dimensions (Behind or Unknown status)."
+fix      = "Review the performance-RSI scorecard dominant bottleneck and supply missing benchmark receipts or resolve lagging dimensions. Producer: internal/perfrsiscore."
+see_also = ["internal/perfrsiscore", "fak performance-rsi-scorecard"]
+
 # #2522 (integration follow-on of the spine-first + fan-out epic #2510): the
 # issue fanout planner's own contract rejections (internal/issuefanout.Refusal,
 # e.g. a missing spine_ref, a cap below MinFanout, an unknown area filter, or --
