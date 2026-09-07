@@ -717,8 +717,8 @@ const mutations = new Set(["write", "edit", "apply_patch"]);
 async function jsonCommand(command, args, cwd) {
   let stdout;
   try {
-    ({ stdout } = await execute(command, args, {
-      cwd, timeout: 30000, maxBuffer: 4 * 1024 * 1024, windowsHide: true,
+    ({ stdout } = await execute(process.platform === 'win32' && !command.endsWith('.exe') ? command + '.exe' : command, args, {
+      cwd, timeout: 120000, maxBuffer: 4 * 1024 * 1024, windowsHide: true,
     }));
   } catch (error) {
     throw new Error(` + "`" + `[dos-proof-guard] Lease admission unavailable or refused: ${command}: ${error.stdout || error.stderr || error.message}` + "`" + `);
@@ -841,7 +841,8 @@ export default async function dosProofGuardPlugin({ client, directory }) {
             output.content.push({ type: "text", text: reminder });
           }
         }
-        console.log(reminder);
+        // Direct console.log(reminder) omitted: keep unencoded notices out of stdout
+        // during --format json runs while preserving structured tool-output delivery above.
       }
     },
     "chat.message": async (input, output) => {

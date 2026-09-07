@@ -30,7 +30,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"unicode"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/canon"
@@ -610,9 +609,7 @@ func firstLine(b []byte, max int) string {
 }
 
 func tokenize(s string) []string {
-	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	})
+	return Tokenize(s)
 }
 
 func overlap(query, doc []string) int {

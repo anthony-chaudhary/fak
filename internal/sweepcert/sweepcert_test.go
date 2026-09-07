@@ -351,3 +351,68 @@ func qwen38FixtureEvidence(t *testing.T, closure RangeClosure, values []float64)
 	}
 	return e
 }
+
+// BenchmarkCanonicalEnvelopeDigest benchmarks canonical digest computation for native envelopes.
+func BenchmarkCanonicalEnvelopeDigest(b *testing.B) {
+	coordinates := []float64{128, 256, 512, 1024, 2048, 4096}
+	envelope, err := NewQwen38NativeEnvelope(coordinates, qwen38FixtureProvenance(), RangeClosure{Proven: true, Evidence: "benchmark witness"})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		digest, err := CanonicalEnvelopeDigest(envelope)
+		if err != nil || digest == "" {
+			b.Fatalf("CanonicalEnvelopeDigest failed: %v", err)
+		}
+	}
+}
+
+// BenchmarkObservedExtremum benchmarks extremum extraction over sweep evidence points.
+func BenchmarkObservedExtremum(b *testing.B) {
+	evidence := qwen38FixtureEvidenceHelper(RangeClosure{Proven: true, Evidence: "benchmark witness"}, []float64{100, 250, 400})
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		finding := ObservedExtremum(evidence, "prefill_throughput", Maximum)
+		if finding.Status != FindingMeasured {
+			b.Fatalf("ObservedExtremum failed: status=%s", finding.Status)
+		}
+	}
+}
+
+// BenchmarkValidateQwen38NativeEvidence benchmarks verification and invariant validation of evidence records.
+func BenchmarkValidateQwen38NativeEvidence(b *testing.B) {
+	evidence := qwen38FixtureEvidenceHelper(RangeClosure{Proven: true, Evidence: "benchmark witness"}, []float64{100, 250, 400})
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if err := ValidateQwen38NativeEvidence(evidence); err != nil {
+			b.Fatalf("ValidateQwen38NativeEvidence failed: %v", err)
+		}
+	}
+}
+
+func qwen38FixtureEvidenceHelper(closure RangeClosure, values []float64) Evidence {
+	coordinates := []float64{128, 512, 2048}
+	envelope, err := NewQwen38NativeEnvelope(coordinates, qwen38FixtureProvenance(), closure)
+	if err != nil {
+		panic(err)
+	}
+	digest, err := CanonicalEnvelopeDigest(envelope)
+	if err != nil {
+		panic(err)
+	}
+	e := Evidence{Envelope: envelope, EnvelopeDigest: digest}
+	for i, coordinate := range coordinates {
+		e.Points = append(e.Points, Point{
+			ID: fmt.Sprintf("prompt-%d", int(coordinate)), Coordinate: coordinate, Status: PointMeasured, EnvelopeDigest: digest,
+			Observations: map[string]Observation{"prefill_throughput": measured(values[i], digest, "tok/s")},
+		})
+	}
+	if err := ValidateQwen38NativeEvidence(e); err != nil {
+		panic(err)
+	}
+	return e
+}

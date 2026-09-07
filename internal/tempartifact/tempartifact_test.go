@@ -3,6 +3,7 @@ package tempartifact
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -470,4 +471,60 @@ func assertItemReason(t *testing.T, report Report, path, reason string) *Item {
 		t.Fatalf("reason for %q = %q, want %q", path, item.Reason, reason)
 	}
 	return item
+}
+
+// BenchmarkRunPreview benchmarks temporary artifact scanning and candidate evaluation in preview mode.
+func BenchmarkRunPreview(b *testing.B) {
+	root := b.TempDir()
+	now := time.Now()
+	for i := 0; i < 20; i++ {
+		name := fmt.Sprintf("fak-bench-%02d.zip", i)
+		makeArtifactBench(root, name, "content", now.Add(-10*time.Hour))
+	}
+	cfg := Config{
+		Root:   root,
+		MinAge: 6 * time.Hour,
+		Now:    func() time.Time { return now },
+		Inspect: func(_ context.Context, _ []string) Inspection {
+			return Inspection{Complete: true, References: make(map[string]bool)}
+		},
+	}
+	ctx := context.Background()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		report, err := Run(ctx, cfg)
+		if err != nil || report.Summary.EligibleCount == 0 {
+			b.Fatalf("Run failed: %v", err)
+		}
+	}
+}
+
+// BenchmarkAllowedName benchmarks allowed artifact file name verification.
+func BenchmarkAllowedName(b *testing.B) {
+	names := []string{
+		"fak-candidate-123.zip",
+		"fak-worker-456.tar",
+		"fak-build-789.exe",
+		"other-ignored-file.txt",
+		"fak-directory.zip",
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		for _, name := range names {
+			_ = allowedName(name)
+		}
+	}
+}
+
+func makeArtifactBench(root, name, contents string, modTime time.Time) string {
+	path := filepath.Join(root, name)
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		panic(err)
+	}
+	if err := os.Chtimes(path, modTime, modTime); err != nil {
+		panic(err)
+	}
+	return path
 }
