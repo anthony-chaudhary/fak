@@ -302,6 +302,14 @@ func TestIssuesSubjectBindingOutranksBodyMention(t *testing.T) {
 	}
 }
 
+func TestIssues_IgnoresPrivateIssue(t *testing.T) {
+	// A commit quoting fak-private#21 must NOT be extracted as public PR issue #21.
+	refs := Issues("fix(adjudicator): handle supervision knobs (fak-private#21) and #42", nil)
+	if len(refs) != 1 || refs[0] != "#42" {
+		t.Fatalf("refs = %v, want [#42] (fak-private#21 must not be parsed as public issue)", refs)
+	}
+}
+
 func TestParseLogSkipsMalformedRecords(t *testing.T) {
 	// Empty input, a record with too few fields, and an empty-subject record
 	// must all be skipped without panicking.

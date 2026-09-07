@@ -36,7 +36,7 @@ const Schema = "fak.steerpr.v1"
 var (
 	leafRE  = regexp.MustCompile(`\(fak ([a-z0-9][a-z0-9-]*)\)\s*$`)
 	typeRE  = regexp.MustCompile(`^([a-z]+)[(!:]`)
-	issueRE = regexp.MustCompile(`#(\d+)\b`)
+	issueRE = regexp.MustCompile(`(?:^|[^\w-])#(\d+)\b`)
 )
 
 // Verdict is a per-commit witness verdict, supplied by the caller from the
