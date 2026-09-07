@@ -102,8 +102,11 @@ func TestHibernation100AgentsMultiplexWithinSlotLimits(t *testing.T) {
 	if stats.Resident != 0 {
 		t.Fatalf("expected 0 resident agents after enrollment, got %d", stats.Resident)
 	}
-	if stats.Parked+stats.Warm != totalAgents {
-		t.Fatalf("expected %d total enrolled (parked=%d + warm=%d), got %d", totalAgents, stats.Parked, stats.Warm, stats.Parked+stats.Warm)
+	if totalEnrolled := stats.Parked + stats.Warm + stats.Warming; totalEnrolled != totalAgents {
+		t.Fatalf("expected %d total enrolled (parked=%d + warm=%d + warming=%d), got %d", totalAgents, stats.Parked, stats.Warm, stats.Warming, totalEnrolled)
+	}
+	if enrolled := band.Enrolled(); enrolled != totalAgents {
+		t.Fatalf("expected %d total enrolled in registry, got %d", totalAgents, enrolled)
 	}
 
 	workCh := make(chan string, totalAgents*numTurns*2)
@@ -554,5 +557,99 @@ func TestHibernationConcurrencyHighChurn(t *testing.T) {
 
 	if stats.Peak > residentCap {
 		t.Fatalf("resident limit exceeded during churn: Peak %d > Limit %d", stats.Peak, residentCap)
+	}
+}
+
+// inFlightWakeAgent pauses Blank() until released, pinning a wake transition in flight (#12025).
+type inFlightWakeAgent struct {
+	id          string
+	wakeStarted chan struct{}
+	releaseWake chan struct{}
+	wakeOnce    *sync.Once
+}
+
+func (a *inFlightWakeAgent) Step(context.Context, microagent.Gateway) (bool, error) { return true, nil }
+func (a *inFlightWakeAgent) Freeze() ([]byte, error) {
+	return json.Marshal(map[string]any{"id": a.id})
+}
+func (a *inFlightWakeAgent) Thaw([]byte) error { return nil }
+func (a *inFlightWakeAgent) Blank() microagent.Hibernable {
+	if a.wakeStarted != nil {
+		a.wakeOnce.Do(func() { close(a.wakeStarted) })
+		<-a.releaseWake
+	}
+	return &inFlightWakeAgent{id: a.id}
+}
+
+// TestWarmBandStatsAccountsForInFlightWakeTransition verifies that WarmBandStats
+// accounts for every enrolled agent even when background wake transitions are in flight (#12025).
+func TestWarmBandStatsAccountsForInFlightWakeTransition(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+
+	band, err := microagent.NewWarmBand(microagent.WarmBandConfig{
+		Dir:     t.TempDir(),
+		High:    4,
+		Low:     2,
+		MaxWarm: 2,
+	})
+	if err != nil {
+		t.Fatalf("NewWarmBand: %v", err)
+	}
+	defer band.Close()
+
+	agent := &inFlightWakeAgent{
+		id:          "wake-agent-0",
+		wakeStarted: started,
+		releaseWake: release,
+		wakeOnce:    &sync.Once{},
+	}
+	if err := band.Enroll("wake-agent-0", agent); err != nil {
+		t.Fatalf("Enroll: %v", err)
+	}
+
+	// Wait until background producer starts warming wake-agent-0 and is mid-wake.
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("background producer never initiated wake")
+	}
+
+	// Mid-wake check: wake-agent-0 was dequeued from parked, is not yet in warm reserve,
+	// and must be reported under Warming so the partition remains complete.
+	stats := band.Stats()
+	if stats.Parked != 0 {
+		t.Errorf("stats.Parked = %d, want 0 (dequeued for wake)", stats.Parked)
+	}
+	if stats.Warm != 0 {
+		t.Errorf("stats.Warm = %d, want 0 (not yet published)", stats.Warm)
+	}
+	if stats.Warming != 1 {
+		t.Errorf("stats.Warming = %d, want 1 (in-flight wake transition)", stats.Warming)
+	}
+	if total := stats.Parked + stats.Warm + stats.Warming; total != 1 {
+		t.Errorf("total accounted = %d, want 1", total)
+	}
+	if enrolled := band.Enrolled(); enrolled != 1 {
+		t.Errorf("band.Enrolled = %d, want 1", enrolled)
+	}
+
+	// Release the in-flight wake and verify SyncWarming quiesces cleanly.
+	close(release)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := band.SyncWarming(ctx); err != nil {
+		t.Fatalf("SyncWarming: %v", err)
+	}
+
+	afterStats := band.Stats()
+	if afterStats.Warming != 0 {
+		t.Errorf("stats.Warming after sync = %d, want 0", afterStats.Warming)
+	}
+	if afterStats.Warm != 1 {
+		t.Errorf("stats.Warm after sync = %d, want 1", afterStats.Warm)
+	}
+	if total := afterStats.Parked + afterStats.Warm + afterStats.Warming; total != 1 {
+		t.Errorf("total accounted after sync = %d, want 1", total)
 	}
 }

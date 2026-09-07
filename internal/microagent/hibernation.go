@@ -195,8 +195,8 @@ func (b *WarmBand) PreThaw(id string) error {
 
 	err := b.store.Wake(id, h)
 	b.mu.Lock()
-	delete(b.warming, id)
 	if err != nil {
+		delete(b.warming, id)
 		b.addParkedLocked(id)
 		b.broadcastLocked()
 		b.mu.Unlock()
@@ -204,6 +204,7 @@ func (b *WarmBand) PreThaw(id string) error {
 	}
 
 	if b.reserve.Reserve(id, h) {
+		delete(b.warming, id)
 		b.warmAt[id] = b.now()
 		b.refills++
 		b.broadcastLocked()
@@ -213,13 +214,15 @@ func (b *WarmBand) PreThaw(id string) error {
 
 	// Reserve full; park back to store
 	b.mu.Unlock()
-	if _, parkErr := b.store.Park(id, h); parkErr != nil {
-		return parkErr
-	}
+	_, parkErr := b.store.Park(id, h)
 	b.mu.Lock()
-	b.addParkedLocked(id)
+	delete(b.warming, id)
+	if parkErr == nil {
+		b.addParkedLocked(id)
+	}
+	b.broadcastLocked()
 	b.mu.Unlock()
-	return nil
+	return parkErr
 }
 
 // HibernatedState returns the cold storage state for agent id.

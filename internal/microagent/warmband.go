@@ -143,6 +143,7 @@ type WarmBandStats struct {
 	Warm     int // agents held warm right now (never exceeds the reserve cap)
 	WarmCap  int // the reserve's cap; 0 means the reserve is off
 	Parked   int // agents frozen on disk right now
+	Warming  int // agents mid-transition (warming/waking from disk)
 	Resident int // resident slots held right now
 	Peak     int // high-water residency ever reached (never exceeds High)
 }
@@ -487,6 +488,12 @@ func (b *WarmBand) Retire(id string) {
 func (b *WarmBand) Stats() WarmBandStats {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	warming := 0
+	for id := range b.warming {
+		if !b.onDisk[id] && !b.reserve.Warm(id) {
+			warming++
+		}
+	}
 	return WarmBandStats{
 		Hits:     b.hits,
 		Thaws:    b.thaws,
@@ -495,8 +502,38 @@ func (b *WarmBand) Stats() WarmBandStats {
 		Warm:     b.reserve.Len(),
 		WarmCap:  b.reserve.Cap(),
 		Parked:   len(b.parked),
+		Warming:  warming,
 		Resident: b.rc.Resident(),
 		Peak:     b.rc.Peak(),
+	}
+}
+
+// Enrolled reports the number of agents currently enrolled with the band.
+func (b *WarmBand) Enrolled() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.blanks)
+}
+
+// SyncWarming blocks until all currently in-flight wake transitions have completed.
+func (b *WarmBand) SyncWarming(ctx context.Context) error {
+	for {
+		b.mu.Lock()
+		inFlight := 0
+		for id := range b.warming {
+			if !b.onDisk[id] && !b.reserve.Warm(id) {
+				inFlight++
+			}
+		}
+		if inFlight == 0 {
+			b.mu.Unlock()
+			return nil
+		}
+		wait := b.freed
+		b.mu.Unlock()
+		if err := b.await(ctx, wait); err != nil {
+			return err
+		}
 	}
 }
 
