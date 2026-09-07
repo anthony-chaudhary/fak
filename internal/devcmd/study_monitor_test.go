@@ -277,4 +277,3 @@ func TestStudyMonitorResolvesFromModuleRootSubdir(t *testing.T) {
 		t.Fatalf("expected modroot/repo in stdout, got:\n%s", stdout.String())
 	}
 }
-

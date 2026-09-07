@@ -386,3 +386,97 @@ func TestIssueCreateShiftLeftDefaultLabels(t *testing.T) {
 		}
 	}
 }
+
+func TestIssueCreateAuditDiscoverabilityBlocksNonDispatchable(t *testing.T) {
+	// A body that satisfies scope/problem frame but lacks Lane and Done condition
+	body := "## Parent context\n#1\n\n## Core through-line\nChange -> seam -> outcome -> witness.\n\n## Gold-plating boundary\nNo extras." + validIssueCreateProblemFrame("Core")
+	called := false
+	runner := func(args []string) (string, string, bool) {
+		called = true
+		return "https://example.test/issues/10", "", true
+	}
+
+	var out, errb bytes.Buffer
+	code := runIssueCreateWith(&out, &errb, []string{
+		"--title", "feat: incomplete issue",
+		"--body", body,
+		"--estimate-points", "1",
+		"--parent-baseline-points", "1",
+		"--target-envelope", "- paths: >= 1 command",
+		"--witnessed-envelope", "- paths: 1 command",
+	}, runner)
+
+	if code != 3 {
+		t.Fatalf("code = %d, want 3; stderr:\n%s", code, errb.String())
+	}
+	if called {
+		t.Fatalf("runner was called, but should have been blocked by discoverability audit")
+	}
+	for _, want := range []string{"not dispatchable for wave orchestrator", "missing sections", "repair actions", "--no-audit-discoverability"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Errorf("stderr missing %q:\n%s", want, errb.String())
+		}
+	}
+}
+
+func TestIssueCreateAuditDiscoverabilityBypassFlags(t *testing.T) {
+	body := "## Parent context\n#1\n\n## Core through-line\nChange -> seam -> outcome -> witness.\n\n## Gold-plating boundary\nNo extras." + validIssueCreateProblemFrame("Core")
+
+	// 1. Bypass via --no-audit-discoverability
+	called := false
+	runner := func(args []string) (string, string, bool) {
+		called = true
+		return "https://example.test/issues/11", "", true
+	}
+	var out, errb bytes.Buffer
+	code := runIssueCreateWith(&out, &errb, []string{
+		"--title", "feat: bypass test",
+		"--body", body,
+		"--estimate-points", "1",
+		"--parent-baseline-points", "1",
+		"--target-envelope", "- paths: >= 1 command",
+		"--witnessed-envelope", "- paths: 1 command",
+		"--no-audit-discoverability",
+	}, runner)
+	if code != 0 || !called {
+		t.Fatalf("--no-audit-discoverability failed: code=%d called=%v stderr=%s", code, called, errb.String())
+	}
+
+	// 2. Bypass via --allow-non-dispatchable
+	called = false
+	out.Reset()
+	errb.Reset()
+	code = runIssueCreateWith(&out, &errb, []string{
+		"--title", "feat: allow non dispatchable",
+		"--body", body,
+		"--estimate-points", "1",
+		"--parent-baseline-points", "1",
+		"--target-envelope", "- paths: >= 1 command",
+		"--witnessed-envelope", "- paths: 1 command",
+		"--allow-non-dispatchable",
+	}, runner)
+	if code != 0 || !called {
+		t.Fatalf("--allow-non-dispatchable failed: code=%d called=%v stderr=%s", code, called, errb.String())
+	}
+}
+
+func TestIssueCreateAuditDiscoverabilityAllowsDispatchable(t *testing.T) {
+	body := validDispatchableIssueBody("compute", []string{"internal/compute/kernel.go"}, 4)
+	called := false
+	runner := func(args []string) (string, string, bool) {
+		called = true
+		return "https://example.test/issues/12", "", true
+	}
+	var out, errb bytes.Buffer
+	code := runIssueCreateWith(&out, &errb, []string{
+		"--title", "feat(compute): dispatchable issue",
+		"--body", body,
+		"--estimate-points", "1",
+		"--parent-baseline-points", "1",
+		"--target-envelope", "- paths: >= 1 command",
+		"--witnessed-envelope", "- paths: 1 command",
+	}, runner)
+	if code != 0 || !called {
+		t.Fatalf("code=%d called=%v stderr=%s", code, called, errb.String())
+	}
+}
