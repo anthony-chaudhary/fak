@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
@@ -20,20 +21,29 @@ type qwen35MTPDraftCheckpoint struct {
 	lastPos  int
 }
 
+// Qwen35MTPDraftConfig configures speculative drafting parameters for Qwen3.8 MTP heads.
+type Qwen35MTPDraftConfig struct {
+	Depth             int
+	DraftVocabFilter  *DraftVocabFilter
+	CoverageThreshold float32
+}
+
 // Qwen35MTPDraftSession owns one native MTP forward/cache and generates an
 // ordered greedy draft block. Committed positions are always caught up from
 // target hidden history. Only the unevaluated suffix feeds each MTP output
 // hidden into the next MTP step.
 type Qwen35MTPDraftSession struct {
-	target     *Session
-	depth      int
-	forward    *Qwen35MTPForward
-	step       qwen35MTPDraftStep
-	processed  []int
-	lastLogits []float32
-	pending    *qwen35MTPDraftCheckpoint
-	runtimeErr error
-	closed     bool
+	target            *Session
+	depth             int
+	forward           *Qwen35MTPForward
+	step              qwen35MTPDraftStep
+	processed         []int
+	lastLogits        []float32
+	pending           *qwen35MTPDraftCheckpoint
+	runtimeErr        error
+	closed            bool
+	vocabFilter       *DraftVocabFilter
+	coverageThreshold float32
 }
 
 // NewQwen35MTPDraftSession binds a fresh native Qwen3.8 MTP cache to an already
@@ -53,6 +63,129 @@ func NewQwen35MTPDraftSession(target *Session, depth int) (*Qwen35MTPDraftSessio
 		forward: forward,
 		step:    qwen35MTPForwardFeedback,
 	}, nil
+}
+
+// NewQwen35MTPDraftSessionWithConfig binds a fresh native Qwen3.8 MTP draft session with
+// explicit configuration.
+func NewQwen35MTPDraftSessionWithConfig(target *Session, cfg Qwen35MTPDraftConfig) (*Qwen35MTPDraftSession, error) {
+	d, err := NewQwen35MTPDraftSession(target, cfg.Depth)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.DraftVocabFilter != nil {
+		d.SetDraftVocabFilter(cfg.DraftVocabFilter)
+	}
+	if cfg.CoverageThreshold > 0 {
+		if d.vocabFilter != nil {
+			d.vocabFilter.CoverageThreshold = cfg.CoverageThreshold
+		} else {
+			d.coverageThreshold = cfg.CoverageThreshold
+		}
+	}
+	return d, nil
+}
+
+// WithDraftVocabFilter configures an empirical high-frequency token subset on the draft session.
+func (d *Qwen35MTPDraftSession) WithDraftVocabFilter(subset []int) *Qwen35MTPDraftSession {
+	if d != nil {
+		d.SetDraftVocabFilter(NewDraftVocabFilter(subset))
+	}
+	return d
+}
+
+// WithDraftVocabFilterThreshold configures an empirical token subset and coverage probability threshold.
+func (d *Qwen35MTPDraftSession) WithDraftVocabFilterThreshold(subset []int, threshold float32) *Qwen35MTPDraftSession {
+	if d != nil {
+		d.SetDraftVocabFilter(NewDraftVocabFilterWithThreshold(subset, threshold))
+	}
+	return d
+}
+
+// SetDraftVocabFilter sets the draft vocabulary filter on the session and its underlying forward head.
+func (d *Qwen35MTPDraftSession) SetDraftVocabFilter(filter *DraftVocabFilter) {
+	if d == nil {
+		return
+	}
+	d.vocabFilter = filter
+	if d.forward != nil {
+		d.forward.SetDraftVocabFilter(filter)
+	}
+}
+
+// DraftVocabFilter returns the draft vocabulary filter currently configured on the session.
+func (d *Qwen35MTPDraftSession) DraftVocabFilter() *DraftVocabFilter {
+	if d == nil {
+		return nil
+	}
+	return d.vocabFilter
+}
+
+// SetCoverageThreshold sets an optional probability threshold for draft token acceptance.
+func (d *Qwen35MTPDraftSession) SetCoverageThreshold(threshold float32) {
+	if d == nil {
+		return
+	}
+	d.coverageThreshold = threshold
+	if d.vocabFilter != nil {
+		d.vocabFilter.CoverageThreshold = threshold
+	}
+}
+
+// CoverageThreshold returns the effective coverage threshold.
+func (d *Qwen35MTPDraftSession) CoverageThreshold() float32 {
+	if d == nil {
+		return 0
+	}
+	return d.effectiveThreshold()
+}
+
+func (d *Qwen35MTPDraftSession) effectiveThreshold() float32 {
+	if d.vocabFilter != nil && d.vocabFilter.CoverageThreshold > 0 {
+		return d.vocabFilter.CoverageThreshold
+	}
+	return d.coverageThreshold
+}
+
+func (d *Qwen35MTPDraftSession) selectCandidate(logits []float32) (int, bool) {
+	if len(logits) == 0 {
+		return -1, false
+	}
+	threshold := d.effectiveThreshold()
+
+	// Truncated vocabulary projection: len(logits) matches filter subset length.
+	if d.vocabFilter != nil && len(d.vocabFilter.Subset) > 0 && len(logits) == len(d.vocabFilter.Subset) {
+		tokenID, prob, ok := d.vocabFilter.ArgmaxWithProb(logits)
+		if !ok {
+			return tokenID, false
+		}
+		if threshold > 0 && prob < threshold {
+			return tokenID, false
+		}
+		return tokenID, true
+	}
+
+	// Full logits (unfiltered or filter bypassed)
+	cand := argmaxF32(logits)
+	if d.vocabFilter != nil && len(d.vocabFilter.Subset) > 0 {
+		if !d.vocabFilter.Contains(cand) {
+			return cand, false
+		}
+	}
+	if threshold > 0 {
+		maxVal := logits[cand]
+		var sumExp float64
+		for _, l := range logits {
+			sumExp += math.Exp(float64(l - maxVal))
+		}
+		prob := float32(0)
+		if sumExp > 0 {
+			prob = float32(1.0 / sumExp)
+		}
+		if prob < threshold {
+			return cand, false
+		}
+	}
+	return cand, true
 }
 
 // Propose returns exactly the admitted depth unless a runtime failure is
@@ -86,8 +219,12 @@ func (d *Qwen35MTPDraftSession) Propose(committed []int) (draft []int) {
 		return nil
 	}
 
+	firstToken, ok := d.selectCandidate(d.lastLogits)
+	if !ok {
+		return nil
+	}
 	draft = make([]int, 0, d.depth)
-	draft = append(draft, argmaxF32(d.lastLogits))
+	draft = append(draft, firstToken)
 	if d.depth == 1 {
 		return draft
 	}
@@ -126,7 +263,11 @@ func (d *Qwen35MTPDraftSession) Propose(committed []int) (draft []int) {
 			d.failProposal("forward", pos, ErrQwen35MTPEmptyLogits)
 			return nil
 		}
-		current = argmaxF32(logits)
+		cand, ok := d.selectCandidate(logits)
+		if !ok {
+			break
+		}
+		current = cand
 		draft = append(draft, current)
 		priorHidden = feedback
 	}
@@ -281,6 +422,9 @@ func (d *Qwen35MTPDraftSession) recreateForward() error {
 		d.forward = nil
 		return err
 	}
+	if d.vocabFilter != nil {
+		forward.SetDraftVocabFilter(d.vocabFilter)
+	}
 	d.forward = forward
 	d.processed = nil
 	d.lastLogits = nil
@@ -333,7 +477,7 @@ func qwen35MTPForwardFeedback(f *Qwen35MTPForward, pos int, priorHidden, current
 	f.draft.Cache.appendPosition(pos, -1)
 	f.lastPos = pos
 	feedback := f.draft.M.finalNorm(x)
-	return append([]float32(nil), feedback...), f.draft.head(feedback), nil
+	return append([]float32(nil), feedback...), f.ProjectHead(feedback), nil
 }
 
 // SpecDecodeGreedyQwen35MTPDepthN is the bounded fak-native Qwen3.8 depth-N
@@ -341,6 +485,14 @@ func qwen35MTPForwardFeedback(f *Qwen35MTPForward, pos int, priorHidden, current
 // inference runtime.
 func SpecDecodeGreedyQwen35MTPDepthN(target *Session, prompt []int, n, depth int) (polymodel.SpecDecodeRun, error) {
 	return specDecodeGreedyQwen35MTPDepthN(target, prompt, n, depth, NewQwen35MTPDraftSession)
+}
+
+// SpecDecodeGreedyQwen35MTPConfig executes speculative decoding with custom MTP draft configuration.
+func SpecDecodeGreedyQwen35MTPConfig(target *Session, prompt []int, n int, cfg Qwen35MTPDraftConfig) (polymodel.SpecDecodeRun, error) {
+	builder := func(t *Session, depth int) (*Qwen35MTPDraftSession, error) {
+		return NewQwen35MTPDraftSessionWithConfig(t, cfg)
+	}
+	return specDecodeGreedyQwen35MTPDepthN(target, prompt, n, cfg.Depth, builder)
 }
 
 type qwen35MTPDepthNDraftBuilder func(*Session, int) (*Qwen35MTPDraftSession, error)
