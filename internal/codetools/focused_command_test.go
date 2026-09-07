@@ -72,3 +72,53 @@ func TestFocusedCodingSecurityEnvelope(t *testing.T) {
 		}
 	}
 }
+
+func TestFocusedToolsetExactAllowedCommands(t *testing.T) {
+	cmdAllowed := "powershell -NoProfile -Command Get-Date"
+	exactList := []string{cmdAllowed}
+	ts, err := New(Config{
+		Root:                 t.TempDir(),
+		FocusedCommands:      true,
+		ExactAllowedCommands: exactList,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify immutable copy: mutation of exactList should not affect ts.
+	exactList[0] = "mutated"
+	if got := ts.ExactAllowedCommands(); len(got) != 1 || got[0] != cmdAllowed {
+		t.Fatalf("expected ExactAllowedCommands() to return [%q], got %v", cmdAllowed, got)
+	}
+	ts.ExactAllowedCommands()[0] = "mutated2"
+	if got := ts.ExactAllowedCommands(); len(got) != 1 || got[0] != cmdAllowed {
+		t.Fatalf("expected ExactAllowedCommands() to remain immutable, got %v", got)
+	}
+
+	// 1. Permitted exact command does not return CodeCommandDeny.
+	out, bad := ts.bash(context.Background(), argsOf(t, BashArgs{Command: cmdAllowed}))
+	if bad && errCode(t, out) == CodeCommandDeny {
+		t.Fatalf("expected exact allowed command %q not to return CodeCommandDeny, got: %s", cmdAllowed, out)
+	}
+
+	// 2. Unlisted commands and near-match variants are denied with CodeCommandDeny.
+	for _, unlisted := range []string{
+		"powershell -NoProfile -Command Get-Process",
+		"powershell -NoProfile -Command Get-Date ",
+		" powershell -NoProfile -Command Get-Date",
+		"powershell -NoProfile -Command Get-Date\n",
+		"powershell -noprofile -command get-date",
+		"mutated",
+	} {
+		out, bad := ts.bash(context.Background(), argsOf(t, BashArgs{Command: unlisted}))
+		if !bad || errCode(t, out) != CodeCommandDeny {
+			t.Errorf("command %q: expected denial with CodeCommandDeny, got bad=%v out=%s", unlisted, bad, out)
+		}
+	}
+
+	// 3. Default focused commands (e.g. git status --short) still work.
+	out, bad = ts.bash(context.Background(), argsOf(t, BashArgs{Command: "git status --short"}))
+	if bad && errCode(t, out) == CodeCommandDeny {
+		t.Fatalf("expected default focused command git status --short not to return CodeCommandDeny, got: %s", out)
+	}
+}
