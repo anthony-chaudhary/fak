@@ -5,14 +5,13 @@ package codetools
 import (
 	"fmt"
 	"os/exec"
-	"syscall"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func configureProcessTree(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP}
+	windowgate.ConfigureWorkerCommand(cmd)
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return nil
