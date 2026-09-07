@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
@@ -106,8 +108,74 @@ func TestResponsesRestoreToolAutoAdvertise(t *testing.T) {
 	})
 }
 
+type inBandRestoreContinuationPlanner struct {
+	t             *testing.T
+	restoreCallID string
+	restoreArgs   string
+	expectedBytes string
+	callCount     int
+	observedID    bool
+	observedBytes bool
+}
+
+func (p *inBandRestoreContinuationPlanner) Complete(ctx context.Context, msgs []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	p.callCount++
+	if p.callCount == 1 {
+		return &agent.Completion{
+			FinishReason: "tool_calls",
+			Message: agent.Message{
+				Role: agent.RoleAssistant,
+				ToolCalls: []agent.ToolCall{
+					{
+						ID:   p.restoreCallID,
+						Type: "function",
+						Function: agent.Func{
+							Name:      "mcp__fak__fak_context_restore",
+							Arguments: p.restoreArgs,
+						},
+					},
+				},
+			},
+		}, nil
+	}
+
+	for _, m := range msgs {
+		if m.Role == agent.RoleTool && m.ToolCallID == p.restoreCallID {
+			p.observedID = true
+			var res CtxRestoreResult
+			if err := json.Unmarshal([]byte(m.Content), &res); err != nil {
+				p.t.Errorf("unmarshal restore tool result: %v", err)
+			} else if res.Bytes == p.expectedBytes {
+				p.observedBytes = true
+			}
+			if strings.Contains(m.Content, p.expectedBytes) {
+				p.observedBytes = true
+			}
+		}
+	}
+	if !p.observedID {
+		p.t.Errorf("restore call ID %q was not delivered to planner in continuation", p.restoreCallID)
+	}
+	if !p.observedBytes {
+		p.t.Errorf("restored content %q was not delivered to planner in continuation", p.expectedBytes)
+	}
+
+	return &agent.Completion{
+		FinishReason: "stop",
+		Message: agent.Message{
+			Role:    agent.RoleAssistant,
+			Content: "completed task with restored context: " + p.expectedBytes,
+		},
+	}, nil
+}
+
+func (p *inBandRestoreContinuationPlanner) Model() string {
+	return "in-band-restore-continuation"
+}
+
 func TestResponsesRestoreToolInBandInterception(t *testing.T) {
 	srv := newTestServer(t)
+	abi.RegisterAdjudicator(1, readAdj{})
 	const trace = "t-restore-in-band"
 
 	// Stash a known context payload
@@ -117,23 +185,13 @@ func TestResponsesRestoreToolInBandInterception(t *testing.T) {
 	srv.stashRestore(trace, digest, "recovery test", originalBytes)
 	srv.stashRestore(trace, "sha256:"+digest, "recovery test", originalBytes)
 
-	// Planner returns a tool call to mcp__fak__fak_context_restore
-	planner := &capturingResponsesPlanner{
-		comp: &agent.Completion{
-			Message: agent.Message{
-				Role: agent.RoleAssistant,
-				ToolCalls: []agent.ToolCall{
-					{
-						ID:   "call_restore_1",
-						Type: "function",
-						Function: agent.Func{
-							Name:      "mcp__fak__fak_context_restore",
-							Arguments: `{"id":"sha256:` + digest + `"}`,
-						},
-					},
-				},
-			},
-		},
+	// Planner returns a tool call to mcp__fak__fak_context_restore on turn 1,
+	// observes the structured restore result on turn 2 (continuation), and finishes.
+	planner := &inBandRestoreContinuationPlanner{
+		t:             t,
+		restoreCallID: "call_restore_1",
+		restoreArgs:   `{"id":"sha256:` + digest + `"}`,
+		expectedBytes: string(originalBytes),
 	}
 	srv.planner = planner
 
@@ -172,11 +230,25 @@ func TestResponsesRestoreToolInBandInterception(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if planner.callCount != 2 {
+		t.Fatalf("expected planner to be called twice (initial + continuation), got %d", planner.callCount)
+	}
+	if !planner.observedID {
+		t.Fatalf("planner did not observe restore call identity %q in continuation", planner.restoreCallID)
+	}
+	if !planner.observedBytes {
+		t.Fatalf("planner did not observe restored content %q in continuation", planner.expectedBytes)
+	}
+
 	// Verify the tool call was intercepted in-band and served inline
 	for _, item := range resp.Output {
 		if item.Type == "function_call" && item.Name == "mcp__fak__fak_context_restore" {
 			t.Fatalf("tool call was leaked to client instead of intercepted in-band: %+v", item)
 		}
+	}
+
+	if resp.Status != "completed" {
+		t.Fatalf("expected status completed, got %q", resp.Status)
 	}
 
 	if !strings.Contains(resp.OutputText, string(originalBytes)) {
