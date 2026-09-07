@@ -47,22 +47,24 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 )
 
-// newGGUFLoadProfiler builds the lean-Q8 or streamed-Q4_K GGUF load profiler. It is created when either a
-// -load-profile* flag is set (which attaches the machine-readable load_profile to the report) OR
-// -load-progress is on for one of those profiled paths (the default) — so a multi-minute load streams a
-// throttled percent/GB/elapsed/GB-per-s status to stderr instead of being a silent black box.
-// Returns nil when neither applies (e.g. the f32 path, which does not Tick) so the loader keeps
-// its existing no-bookkeeping behavior.
+// newGGUFLoadProfiler enables default progress for lean and resident/streamed Q4_K
+// GGUF loads. Only lean and streamed paths support detailed phase profiles.
+// Resident Q4_K progress counts collected tensors, before packing and finalization.
+// Returns nil when neither progress nor a supported detailed profile is requested.
 func newGGUFLoadProfiler(f *benchFlags) *ggufload.LoadProfiler {
 	profiledGGUF := *f.gguf != "" && (*f.lean || streamQ4KEnabled(f))
 	wantLoadProfile := (*f.loadProfile || *f.loadProfileTrace || *f.phaseProfile) && profiledGGUF
-	wantProgress := *f.loadProgress && profiledGGUF
+	progressGGUF := *f.gguf != "" && (*f.lean || *f.q4k)
+	wantProgress := *f.loadProgress && progressGGUF
 	if !wantLoadProfile && !wantProgress {
 		return nil
 	}
 	lp := ggufload.NewLoadProfiler()
 	if wantProgress {
 		lp.Progress = os.Stderr // stream load % to stderr so a large multi-minute load is not silent
+		if *f.q4k && !streamQ4KEnabled(f) {
+			fmt.Fprintln(lp.Progress, "fak: resident Q4_K progress counts collected GGUF tensors; Q8 packing and model finalization may continue after 100%")
+		}
 	}
 	if *f.loadProfileTrace {
 		lp.Trace = os.Stderr
@@ -1088,7 +1090,9 @@ func loadBenchModel(f *benchFlags, lp *ggufload.LoadProfiler) (*model.Model, str
 // flag asked for it — a profiler created for default-on -load-progress streams to stderr
 // but must not bloat every report's JSON.
 func snapshotGGUFLoadProfile(f *benchFlags, ggufLoadProfiler *ggufload.LoadProfiler, loadNanos int64) *ggufload.LoadProfile {
-	if ggufLoadProfiler != nil && (*f.loadProfile || *f.loadProfileTrace || *f.phaseProfile) {
+	// Resident Q4_K progress does not provide a detailed conversion-phase profile.
+	profiledGGUF := *f.gguf != "" && (*f.lean || streamQ4KEnabled(f))
+	if profiledGGUF && ggufLoadProfiler != nil && (*f.loadProfile || *f.loadProfileTrace || *f.phaseProfile) {
 		mode, source := ggufLoadProfileIdentity(f)
 		return ggufLoadProfiler.Snapshot(mode, source, loadNanos)
 	}
