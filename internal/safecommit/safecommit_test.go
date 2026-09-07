@@ -1478,6 +1478,104 @@ func TestCommitRefusesDirectorySweepOfPeerWIP(t *testing.T) {
 	})
 }
 
+func TestCommitReconcilesHistoricalCheckpointForExactAuthoredPaths(t *testing.T) {
+	oid, root := strings.Repeat("1", 40), strings.Repeat("2", 40)
+	peerSetup := func(exactPath string) (map[string]reply, Options) {
+		g := onTrunkBase()
+		g["status"] = reply{out: " M " + exactPath + "\n", code: 0}
+		g["diff-tree"] = reply{out: exactPath + "\n", code: 0}
+		g["for-each-ref --sort=refname --format=%(refname) %(objectname) refs/fak/wip"] = reply{out: "refs/fak/wip/peer-agent " + oid + "\n", code: 0}
+		g["for-each-ref --sort=refname --format=%(refname)%00%(objectname)%00%(objecttype)%00%(contents:size)%00%(contents)%00 refs/fak/wip"] = reply{out: "refs/fak/wip/peer-agent\x00" + oid + "\x00commit\x000\x00\x00\n", code: 0}
+		g["rev-list --max-parents=0 --max-count=1 "+oid+" --"] = reply{out: root + "\n", code: 0}
+		g["-c log.showRoot=false log --no-walk=unsorted --format=%H --raw -z --no-abbrev --no-renames --no-ext-diff --no-textconv --diff-merges=off -r "+oid+" "+root+" --always --sparse -- :(top,literal)"+exactPath] = reply{out: oid + "\x00\n:100644 100644 " + oid + " " + root + " M\x00" + exactPath + "\x00" + root + "\x00", code: 0}
+		opts := baseOpts()
+		opts.Paths = []string{exactPath}
+		opts.SessionID = "self-worker"
+		opts.ManagedWorker = true
+		return g, opts
+	}
+
+	t.Run("HistoricalCheckpointReconcilesCleanlyOnManagedWorker", func(t *testing.T) {
+		rep, opts := peerSetup("corpus/doc.txt")
+		rep["merge-base HEAD "+oid] = reply{out: oid + "\n", code: 0}
+		g := &fakeGit{reply: rep}
+
+		res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+		if err != nil {
+			t.Fatalf("unexpected infra error: %v", err)
+		}
+		if !res.Committed || !res.Verified {
+			t.Fatalf("expected commit to succeed for reconciled historical checkpoint, got Committed=%v Verified=%v reason=%q detail=%q", res.Committed, res.Verified, res.Reason, res.Detail)
+		}
+		if len(res.ReconciledOwnership) != 1 || res.ReconciledOwnership[0].Classification != OwnershipHistoricalPresence {
+			t.Fatalf("expected 1 ReconciledOwnership with OwnershipHistoricalPresence, got %+v", res.ReconciledOwnership)
+		}
+	})
+
+	t.Run("DisjointHunksReconcileCleanlyOnManagedWorker", func(t *testing.T) {
+		rep, opts := peerSetup("corpus/doc.txt")
+		workerDiff := "diff --git a/corpus/doc.txt b/corpus/doc.txt\n@@ -10,5 +10,6 @@\n context\n+worker edit\n"
+		peerDiff := "diff --git a/corpus/doc.txt b/corpus/doc.txt\n@@ -100,5 +100,6 @@\n context\n+peer edit\n"
+		rep["diff --no-ext-diff HEAD -- corpus/doc.txt"] = reply{out: workerDiff, code: 0}
+		rep["diff --no-ext-diff HEAD "+oid+" -- corpus/doc.txt"] = reply{out: peerDiff, code: 0}
+		g := &fakeGit{reply: rep}
+
+		res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+		if err != nil {
+			t.Fatalf("unexpected infra error: %v", err)
+		}
+		if !res.Committed || !res.Verified {
+			t.Fatalf("expected disjoint hunks commit to succeed, got Committed=%v Verified=%v reason=%q detail=%q", res.Committed, res.Verified, res.Reason, res.Detail)
+		}
+		if len(res.ReconciledOwnership) != 1 || res.ReconciledOwnership[0].Classification != OwnershipAuthoredHunk {
+			t.Fatalf("expected 1 ReconciledOwnership with OwnershipAuthoredHunk, got %+v", res.ReconciledOwnership)
+		}
+	})
+
+	t.Run("ConflictingHunksRejectOnManagedWorker", func(t *testing.T) {
+		rep, opts := peerSetup("corpus/doc.txt")
+		workerDiff := "diff --git a/corpus/doc.txt b/corpus/doc.txt\n@@ -10,5 +10,6 @@\n context\n+worker edit\n"
+		peerDiff := "diff --git a/corpus/doc.txt b/corpus/doc.txt\n@@ -10,5 +10,6 @@\n context\n+peer edit\n"
+		rep["diff --no-ext-diff HEAD -- corpus/doc.txt"] = reply{out: workerDiff, code: 0}
+		rep["diff --no-ext-diff HEAD "+oid+" -- corpus/doc.txt"] = reply{out: peerDiff, code: 0}
+		g := &fakeGit{reply: rep}
+
+		res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+		if err != nil {
+			t.Fatalf("unexpected infra error: %v", err)
+		}
+		if res.Committed {
+			t.Fatalf("conflicting peer hunks must be rejected")
+		}
+		if res.Reason != ReasonPeerWIPCollision {
+			t.Fatalf("expected reason %q, got %q", ReasonPeerWIPCollision, res.Reason)
+		}
+		if !strings.Contains(res.Detail, "conflicting peer hunk") {
+			t.Fatalf("expected detail to mention conflicting peer hunk, got %q", res.Detail)
+		}
+	})
+
+	t.Run("ManagedWorkerWorktreeDirAutoDetected", func(t *testing.T) {
+		wtDir := filepath.Join(t.TempDir(), "fak-worker-wt-lane-safecommit")
+		rep, opts := peerSetup("corpus/doc.txt")
+		rep["merge-base HEAD "+oid] = reply{out: oid + "\n", code: 0}
+		opts.Dir = wtDir
+		opts.ManagedWorker = false // auto-detect from dir!
+		g := &fakeGit{reply: rep}
+
+		res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+		if err != nil {
+			t.Fatalf("unexpected infra error: %v", err)
+		}
+		if !res.Committed || !res.Verified {
+			t.Fatalf("expected auto-detected managed worker commit to succeed, got Committed=%v Verified=%v reason=%q detail=%q", res.Committed, res.Verified, res.Reason, res.Detail)
+		}
+		if len(res.ReconciledOwnership) != 1 {
+			t.Fatalf("expected 1 ReconciledOwnership, got %v", res.ReconciledOwnership)
+		}
+	})
+}
+
 func TestPostValidationLockWaitStallBoundedWithPhaseEvidence(t *testing.T) {
 	g := &fakeGit{reply: onTrunkBase()}
 	opts := baseOpts()

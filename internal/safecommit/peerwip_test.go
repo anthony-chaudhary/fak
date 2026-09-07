@@ -509,3 +509,184 @@ func TestPeerWIPContextTimeout(t *testing.T) {
 		}
 	})
 }
+
+func TestNarrowOwnershipReconciliation(t *testing.T) {
+	oid, root := strings.Repeat("1", 40), strings.Repeat("2", 40)
+	peerSetup := func(status string) (map[string]reply, Options) {
+		g := onTrunkBase()
+		g["status"] = reply{out: status, code: 0}
+		g["for-each-ref --sort=refname --format=%(refname) %(objectname) refs/fak/wip"] = reply{out: "refs/fak/wip/peer-agent " + oid + "\n", code: 0}
+		g["for-each-ref --sort=refname --format=%(refname)%00%(objectname)%00%(objecttype)%00%(contents:size)%00%(contents)%00 refs/fak/wip"] = reply{out: "refs/fak/wip/peer-agent\x00" + oid + "\x00commit\x000\x00\x00\n", code: 0}
+		g["rev-list --max-parents=0 --max-count=1 "+oid+" --"] = reply{out: root + "\n", code: 0}
+		g["-c log.showRoot=false log --no-walk=unsorted --format=%H --raw -z --no-abbrev --no-renames --no-ext-diff --no-textconv --diff-merges=off -r "+oid+" "+root+" --always --sparse -- :(top,literal)corpus/file.txt"] = reply{out: oid + "\x00\n:100644 100644 " + oid + " " + root + " M\x00corpus/file.txt\x00" + root + "\x00", code: 0}
+		opts := baseOpts()
+		opts.Paths = []string{"corpus/file.txt"}
+		opts.SessionID = "self-worker"
+		opts.ManagedWorker = true
+		return g, opts
+	}
+
+	t.Run("WitnessedDeltaAuthoredHunkReconciles", func(t *testing.T) {
+		rep, opts := peerSetup(" M corpus/file.txt\n")
+		opts.WitnessedDeltas = []WitnessedPathDelta{
+			{Path: "corpus/file.txt", Status: OwnershipAuthoredHunk},
+		}
+		g := &fakeGit{reply: rep}
+		attrOpts := PathAttributionOptions{
+			SessionID:                opts.SessionID,
+			ManagedWorker:            opts.ManagedWorker,
+			WitnessedDeltas:          opts.WitnessedDeltas,
+			ReconcileNarrowOwnership: true,
+		}
+		res, err := ValidatePathAttribution(context.Background(), g.run, "/repo", opts.Paths, attrOpts)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !res.OK {
+			t.Fatalf("expected OK, got reason=%q detail=%q", res.Reason, res.Detail)
+		}
+		if len(res.ReconciledPaths) != 1 || res.ReconciledPaths[0].Classification != OwnershipAuthoredHunk {
+			t.Fatalf("expected 1 reconciled path with OwnershipAuthoredHunk, got %+v", res.ReconciledPaths)
+		}
+	})
+
+	t.Run("WitnessedDeltaConflictingHunkRefuses", func(t *testing.T) {
+		rep, opts := peerSetup(" M corpus/file.txt\n")
+		opts.WitnessedDeltas = []WitnessedPathDelta{
+			{Path: "corpus/file.txt", Status: OwnershipConflictingHunk},
+		}
+		g := &fakeGit{reply: rep}
+		attrOpts := PathAttributionOptions{
+			SessionID:                opts.SessionID,
+			ManagedWorker:            opts.ManagedWorker,
+			WitnessedDeltas:          opts.WitnessedDeltas,
+			ReconcileNarrowOwnership: true,
+		}
+		res, err := ValidatePathAttribution(context.Background(), g.run, "/repo", opts.Paths, attrOpts)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.OK {
+			t.Fatalf("expected refusal on conflicting hunk")
+		}
+		if res.Reason != ReasonPeerWIPCollision {
+			t.Fatalf("expected reason %q, got %q", ReasonPeerWIPCollision, res.Reason)
+		}
+	})
+
+	t.Run("HistoricalCheckpointAncestorReconciles", func(t *testing.T) {
+		rep, opts := peerSetup(" M corpus/file.txt\n")
+		rep["merge-base HEAD "+oid] = reply{out: oid + "\n", code: 0}
+		g := &fakeGit{reply: rep}
+		attrOpts := PathAttributionOptions{
+			SessionID:                opts.SessionID,
+			ManagedWorker:            opts.ManagedWorker,
+			ReconcileNarrowOwnership: true,
+		}
+		res, err := ValidatePathAttribution(context.Background(), g.run, "/repo", opts.Paths, attrOpts)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !res.OK {
+			t.Fatalf("expected OK for ancestor checkpoint, got reason=%q detail=%q", res.Reason, res.Detail)
+		}
+		if len(res.ReconciledPaths) != 1 || res.ReconciledPaths[0].Classification != OwnershipHistoricalPresence {
+			t.Fatalf("expected 1 reconciled path with OwnershipHistoricalPresence, got %+v", res.ReconciledPaths)
+		}
+	})
+
+	t.Run("HistoricalCheckpointBlobMatchReconciles", func(t *testing.T) {
+		rep, opts := peerSetup(" M corpus/file.txt\n")
+		blobSHA := strings.Repeat("3", 40)
+		rep["rev-parse -q --verify "+oid+":corpus/file.txt"] = reply{out: blobSHA + "\n", code: 0}
+		rep["rev-parse -q --verify HEAD:corpus/file.txt"] = reply{out: blobSHA + "\n", code: 0}
+		g := &fakeGit{reply: rep}
+		attrOpts := PathAttributionOptions{
+			SessionID:                opts.SessionID,
+			ManagedWorker:            opts.ManagedWorker,
+			ReconcileNarrowOwnership: true,
+		}
+		res, err := ValidatePathAttribution(context.Background(), g.run, "/repo", opts.Paths, attrOpts)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !res.OK {
+			t.Fatalf("expected OK for blob-matching checkpoint, got reason=%q detail=%q", res.Reason, res.Detail)
+		}
+		if len(res.ReconciledPaths) != 1 || res.ReconciledPaths[0].Classification != OwnershipHistoricalPresence {
+			t.Fatalf("expected 1 reconciled path with OwnershipHistoricalPresence, got %+v", res.ReconciledPaths)
+		}
+	})
+
+	t.Run("DisjointHunkDeltasReconcile", func(t *testing.T) {
+		rep, opts := peerSetup(" M corpus/file.txt\n")
+		workerDiff := "diff --git a/corpus/file.txt b/corpus/file.txt\n@@ -10,5 +10,6 @@\n context\n+worker edit\n"
+		peerDiff := "diff --git a/corpus/file.txt b/corpus/file.txt\n@@ -100,5 +100,6 @@\n context\n+peer edit\n"
+		rep["diff --no-ext-diff HEAD -- corpus/file.txt"] = reply{out: workerDiff, code: 0}
+		rep["diff --no-ext-diff HEAD "+oid+" -- corpus/file.txt"] = reply{out: peerDiff, code: 0}
+		g := &fakeGit{reply: rep}
+		attrOpts := PathAttributionOptions{
+			SessionID:                opts.SessionID,
+			ManagedWorker:            opts.ManagedWorker,
+			ReconcileNarrowOwnership: true,
+		}
+		res, err := ValidatePathAttribution(context.Background(), g.run, "/repo", opts.Paths, attrOpts)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !res.OK {
+			t.Fatalf("expected OK for disjoint hunks, got reason=%q detail=%q", res.Reason, res.Detail)
+		}
+		if len(res.ReconciledPaths) != 1 || res.ReconciledPaths[0].Classification != OwnershipAuthoredHunk {
+			t.Fatalf("expected 1 reconciled path with OwnershipAuthoredHunk, got %+v", res.ReconciledPaths)
+		}
+	})
+
+	t.Run("ConflictingHunkDeltasReject", func(t *testing.T) {
+		rep, opts := peerSetup(" M corpus/file.txt\n")
+		workerDiff := "diff --git a/corpus/file.txt b/corpus/file.txt\n@@ -10,5 +10,6 @@\n context\n+worker edit\n"
+		peerDiff := "diff --git a/corpus/file.txt b/corpus/file.txt\n@@ -10,5 +10,6 @@\n context\n+peer edit\n"
+		rep["diff --no-ext-diff HEAD -- corpus/file.txt"] = reply{out: workerDiff, code: 0}
+		rep["diff --no-ext-diff HEAD "+oid+" -- corpus/file.txt"] = reply{out: peerDiff, code: 0}
+		g := &fakeGit{reply: rep}
+		attrOpts := PathAttributionOptions{
+			SessionID:                opts.SessionID,
+			ManagedWorker:            opts.ManagedWorker,
+			ReconcileNarrowOwnership: true,
+		}
+		res, err := ValidatePathAttribution(context.Background(), g.run, "/repo", opts.Paths, attrOpts)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.OK {
+			t.Fatalf("expected refusal on conflicting hunks")
+		}
+		if res.Reason != ReasonPeerWIPCollision {
+			t.Fatalf("expected reason %q, got %q", ReasonPeerWIPCollision, res.Reason)
+		}
+		if !strings.Contains(res.Detail, "conflicting peer hunk") {
+			t.Fatalf("expected detail to mention conflicting peer hunk, got %q", res.Detail)
+		}
+	})
+
+	t.Run("DirectorySweepDoesNotReconcile", func(t *testing.T) {
+		rep, opts := peerSetup(" M corpus/file.txt\n")
+		opts.Paths = []string{"corpus"}
+		g := &fakeGit{reply: rep}
+		attrOpts := PathAttributionOptions{
+			SessionID:                opts.SessionID,
+			ManagedWorker:            opts.ManagedWorker,
+			ReconcileNarrowOwnership: true,
+		}
+		res, err := ValidatePathAttribution(context.Background(), g.run, "/repo", opts.Paths, attrOpts)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.OK {
+			t.Fatalf("directory sweep must still refuse peer WIP")
+		}
+		if res.Reason != ReasonPeerWIPCollision {
+			t.Fatalf("expected reason %q, got %q", ReasonPeerWIPCollision, res.Reason)
+		}
+	})
+}

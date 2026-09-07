@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/gitgate"
 	"github.com/anthony-chaudhary/fak/internal/wipref"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 // ReasonPeerWIPCollision reports that a path-scoped git op (especially a directory pathspec)
@@ -22,6 +24,50 @@ const peerWIPGuardEnvVar = "FAK_PEER_WIP_GUARD"
 
 // One budget covers the entire attribution scan, not each path or subprocess.
 const peerWIPAttributionTimeout = 30 * time.Second
+
+// HunkOwnershipClassification classifies the relationship between an exact authored path/hunk
+// and a historical checkpoint delta.
+type HunkOwnershipClassification string
+
+const (
+	// OwnershipAuthoredHunk indicates the current path/hunk delta is authored by the managed worker
+	// on a clean base, distinguished from historical checkpoint presence.
+	OwnershipAuthoredHunk HunkOwnershipClassification = "AUTHORED_HUNK"
+	// OwnershipHistoricalPresence indicates the path merely appears in a historical checkpoint delta
+	// without active conflicting hunks against the clean base.
+	OwnershipHistoricalPresence HunkOwnershipClassification = "HISTORICAL_PRESENCE"
+	// OwnershipConflictingHunk indicates a genuine overlapping or conflicting peer hunk exists
+	// that must be rejected.
+	OwnershipConflictingHunk HunkOwnershipClassification = "CONFLICTING_HUNK"
+)
+
+// WitnessedPathDelta carries exact independently witnessed path and hunk delta evidence
+// for an authored file on a managed worker.
+type WitnessedPathDelta struct {
+	Path        string                      `json:"path"`
+	HunkHeaders []string                    `json:"hunk_headers,omitempty"`
+	EditLines   []string                    `json:"edit_lines,omitempty"`
+	Digest      string                      `json:"digest,omitempty"`
+	CleanBase   bool                        `json:"clean_base,omitempty"`
+	Status      HunkOwnershipClassification `json:"status,omitempty"`
+}
+
+// ReconciledPathOwnership records the typed narrow ownership reconciliation verdict
+// for an exact authored path.
+type ReconciledPathOwnership struct {
+	Path           string                      `json:"path"`
+	Classification HunkOwnershipClassification `json:"classification"`
+	PeerSession    string                      `json:"peer_session,omitempty"`
+	CheckpointOID  string                      `json:"checkpoint_oid,omitempty"`
+	Detail         string                      `json:"detail,omitempty"`
+}
+
+// NarrowOwnershipReconciliation configures narrow ownership reconciliation for
+// exact independently witnessed path/hunk deltas on a managed worker.
+type NarrowOwnershipReconciliation struct {
+	ManagedWorker   bool                 `json:"managed_worker"`
+	WitnessedDeltas []WitnessedPathDelta `json:"witnessed_deltas,omitempty"`
+}
 
 // peerWIPGuardMode reads FAK_PEER_WIP_GUARD (block|warn|off, default block).
 func peerWIPGuardMode() staleBaseMode {
@@ -42,17 +88,25 @@ type PathAttributionOptions struct {
 	PeerWIP                map[string]string // path -> peer session id
 	PeerWIPChecker         func(path string) (peerSession string, isPeer bool)
 	RestrictToSessionScope bool
+
+	// ManagedWorker flags that the commit is running on a managed worker worktree.
+	ManagedWorker bool
+	// WitnessedDeltas optionally supplies independently witnessed path/hunk deltas.
+	WitnessedDeltas []WitnessedPathDelta
+	// ReconcileNarrowOwnership explicitly enables or overrides narrow ownership reconciliation.
+	ReconcileNarrowOwnership bool
 }
 
 // PathAttributionResult is the outcome of validating paths against peer WIP and session scope.
 type PathAttributionResult struct {
-	OK             bool     `json:"ok"`
-	Reason         string   `json:"reason,omitempty"`
-	Detail         string   `json:"detail,omitempty"`
-	CollidingPaths []string `json:"colliding_paths,omitempty"`
-	PeerSessions   []string `json:"peer_sessions,omitempty"`
-	ExpandedPaths  []string `json:"expanded_paths,omitempty"`
-	EffectivePaths []string `json:"effective_paths,omitempty"`
+	OK              bool                      `json:"ok"`
+	Reason          string                    `json:"reason,omitempty"`
+	Detail          string                    `json:"detail,omitempty"`
+	CollidingPaths  []string                  `json:"colliding_paths,omitempty"`
+	PeerSessions    []string                  `json:"peer_sessions,omitempty"`
+	ExpandedPaths   []string                  `json:"expanded_paths,omitempty"`
+	EffectivePaths  []string                  `json:"effective_paths,omitempty"`
+	ReconciledPaths []ReconciledPathOwnership `json:"reconciled_paths,omitempty"`
 }
 
 // ValidatePathAttribution validates that requested paths (including directory pathspecs)
@@ -126,17 +180,23 @@ func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string,
 		}
 	}
 
+	var gitOwnerDetails map[string]gitPeerOwnerInfo
 	var gitOwners map[string]string
 	if len(opts.PeerWIP) == 0 && opts.PeerWIPChecker == nil && run != nil {
 		var err error
-		gitOwners, err = resolveGitPeerOwners(ctx, run, dir, changedPaths, sessionID)
+		gitOwnerDetails, err = resolveGitPeerOwnerDetails(ctx, run, dir, changedPaths, sessionID)
 		if err != nil {
 			return PathAttributionResult{}, err
+		}
+		gitOwners = make(map[string]string, len(gitOwnerDetails))
+		for p, info := range gitOwnerDetails {
+			gitOwners[p] = info.Peer
 		}
 	}
 
 	var collidingPaths []string
 	var peerSessions []string
+	var reconciledPaths []ReconciledPathOwnership
 	seenPeers := make(map[string]bool)
 	var descriptions []string
 
@@ -153,6 +213,7 @@ func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string,
 		}
 
 		var peerOwner string
+		var peerOID string
 		var isPeer bool
 
 		// 1. Explicit checker
@@ -179,8 +240,9 @@ func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string,
 
 		// 3. Git peer checkpoints
 		if !isPeer && len(opts.PeerWIP) == 0 && opts.PeerWIPChecker == nil && run != nil {
-			peerOwner = gitOwners[cp]
-			if peerOwner != "" {
+			if info, ok := gitOwnerDetails[cp]; ok && info.Peer != "" {
+				peerOwner = info.Peer
+				peerOID = info.OID
 				isPeer = true
 			}
 		}
@@ -197,6 +259,29 @@ func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string,
 					peerOwner = "peer"
 				}
 				isPeer = true
+			}
+		}
+
+		if isPeer {
+			isExactAuthoredPath := !isDirSweep
+			isManaged := opts.ManagedWorker || opts.ReconcileNarrowOwnership || len(opts.WitnessedDeltas) > 0 || isSanctionedWorkerWorktreeDir(dir) || workerworktree.IsWorkerWorktree(dir) || (os.Getenv(workerworktree.WorktreeDirEnv) != "")
+			if isExactAuthoredPath && isManaged {
+				rec, reconciled := reconcileNarrowOwnership(ctx, run, dir, cp, peerOwner, peerOID, opts)
+				if reconciled {
+					isPeer = false
+					peerOwner = ""
+					peerOID = ""
+					reconciledPaths = append(reconciledPaths, rec)
+				} else if rec.Classification == OwnershipConflictingHunk {
+					collidingPaths = append(collidingPaths, cp)
+					if peerOwner != "" && !seenPeers[peerOwner] {
+						seenPeers[peerOwner] = true
+						peerSessions = append(peerSessions, peerOwner)
+					}
+					desc := fmt.Sprintf("%s has conflicting peer hunk owned by %s (%s)", cp, peerOwner, rec.Detail)
+					descriptions = append(descriptions, desc)
+					continue
+				}
 			}
 		}
 
@@ -219,9 +304,10 @@ func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string,
 	}
 	if len(collidingPaths) == 0 {
 		return PathAttributionResult{
-			OK:             true,
-			ExpandedPaths:  changedPaths,
-			EffectivePaths: requestedPaths,
+			OK:              true,
+			ExpandedPaths:   changedPaths,
+			EffectivePaths:  requestedPaths,
+			ReconciledPaths: reconciledPaths,
 		}, nil
 	}
 
@@ -250,25 +336,48 @@ func checkPathAttributionFromStatus(ctx context.Context, run Runner, dir string,
 				return PathAttributionResult{}, err
 			}
 			return PathAttributionResult{
-				OK:             true,
-				CollidingPaths: collidingPaths,
-				PeerSessions:   peerSessions,
-				ExpandedPaths:  changedPaths,
-				EffectivePaths: kept,
+				OK:              true,
+				CollidingPaths:  collidingPaths,
+				PeerSessions:    peerSessions,
+				ExpandedPaths:   changedPaths,
+				EffectivePaths:  kept,
+				ReconciledPaths: reconciledPaths,
 				Detail: fmt.Sprintf("restricted directory pathspec to %d session-scoped file(s); excluded %d peer path(s) (%s)",
 					len(kept), len(collidingPaths), strings.Join(collidingPaths, ", ")),
 			}, nil
 		}
 	}
 
+	msgPrefix := "directory pathspec would sweep peer WIP"
+	if len(requestedPaths) > 0 {
+		allExact := true
+		for _, cp := range collidingPaths {
+			isDir := false
+			for _, req := range requestedPaths {
+				if gitgate.TreeContains(req, cp) && req != cp {
+					isDir = true
+					break
+				}
+			}
+			if isDir {
+				allExact = false
+				break
+			}
+		}
+		if allExact {
+			msgPrefix = "conflicting peer WIP detected on exact paths"
+		}
+	}
+
 	return PathAttributionResult{
-		OK:             false,
-		Reason:         ReasonPeerWIPCollision,
-		CollidingPaths: collidingPaths,
-		PeerSessions:   peerSessions,
-		ExpandedPaths:  changedPaths,
-		Detail: fmt.Sprintf("directory pathspec would sweep peer WIP: %s — reconcile rather than sweep, or narrow pathspec to explicit files",
-			strings.Join(descriptions, "; ")),
+		OK:              false,
+		Reason:          ReasonPeerWIPCollision,
+		CollidingPaths:  collidingPaths,
+		PeerSessions:    peerSessions,
+		ExpandedPaths:   changedPaths,
+		ReconciledPaths: reconciledPaths,
+		Detail: fmt.Sprintf("%s: %s — reconcile rather than sweep, or narrow pathspec to explicit files",
+			msgPrefix, strings.Join(descriptions, "; ")),
 	}, nil
 }
 
@@ -299,7 +408,13 @@ const peerWIPRefFormat = "--format=%(refname)%00%(objectname)%00%(objecttype)%00
 // Messages are byte-length framed; embedded newlines/NULs cannot forge records.
 // Deltas are fetched by immutable object ID in bounded, deduplicated chunks.
 // Evaluate refs in snapshot order, so an earlier delta still beats a later scope.
-func resolveGitPeerOwners(ctx context.Context, run Runner, dir string, targetPaths []string, selfSession string) (map[string]string, error) {
+type gitPeerOwnerInfo struct {
+	Peer  string
+	OID   string
+	Scope []string
+}
+
+func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, targetPaths []string, selfSession string) (map[string]gitPeerOwnerInfo, error) {
 	// Cross-check the length-framed metadata against a compact ordered manifest.
 	// This also detects successful output truncated at a whole-record boundary;
 	// concurrent ref updates refuse rather than combining different snapshots.
@@ -374,7 +489,7 @@ func resolveGitPeerOwners(ctx context.Context, run Runner, dir string, targetPat
 	}
 	deltas := make(map[string]map[string]bool)
 	if len(objects) == 0 {
-		return make(map[string]string), ctx.Err()
+		return make(map[string]gitPeerOwnerInfo), ctx.Err()
 	}
 	// A root commit is a no-delta terminator under log.showRoot=false. Appending
 	// it to every batch proves that even the final delta was received in full.
@@ -463,21 +578,269 @@ func resolveGitPeerOwners(ctx context.Context, run Runner, dir string, targetPat
 			}
 		}
 	}
-	owners := make(map[string]string)
+	ownerDetails := make(map[string]gitPeerOwnerInfo)
 	for _, checkpoint := range checkpoints {
 		for _, path := range targetPaths {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			if owners[path] == "" && (gitgate.CoveredByAnyTree(path, checkpoint.scope) || deltas[checkpoint.oid][path]) {
-				owners[path] = checkpoint.peer
+			if _, exists := ownerDetails[path]; !exists && (gitgate.CoveredByAnyTree(path, checkpoint.scope) || deltas[checkpoint.oid][path]) {
+				ownerDetails[path] = gitPeerOwnerInfo{
+					Peer:  checkpoint.peer,
+					OID:   checkpoint.oid,
+					Scope: checkpoint.scope,
+				}
 			}
 		}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	return ownerDetails, nil
+}
+
+func resolveGitPeerOwners(ctx context.Context, run Runner, dir string, targetPaths []string, selfSession string) (map[string]string, error) {
+	details, err := resolveGitPeerOwnerDetails(ctx, run, dir, targetPaths, selfSession)
+	if err != nil {
+		return nil, err
+	}
+	owners := make(map[string]string, len(details))
+	for p, info := range details {
+		owners[p] = info.Peer
+	}
 	return owners, nil
+}
+
+func reconcileNarrowOwnership(ctx context.Context, run Runner, dir, path, peerOwner, peerOID string, opts PathAttributionOptions) (ReconciledPathOwnership, bool) {
+	// 1. Explicit independently witnessed delta takes precedence.
+	for _, wd := range opts.WitnessedDeltas {
+		if wd.Path == path {
+			switch wd.Status {
+			case OwnershipConflictingHunk:
+				return ReconciledPathOwnership{
+					Path:           path,
+					Classification: OwnershipConflictingHunk,
+					PeerSession:    peerOwner,
+					CheckpointOID:  peerOID,
+					Detail:         "conflicting peer hunk detected in independently witnessed delta",
+				}, false
+			case OwnershipHistoricalPresence:
+				return ReconciledPathOwnership{
+					Path:           path,
+					Classification: OwnershipHistoricalPresence,
+					PeerSession:    peerOwner,
+					CheckpointOID:  peerOID,
+					Detail:         "historical checkpoint presence cleared by independently witnessed delta",
+				}, true
+			case OwnershipAuthoredHunk:
+				return ReconciledPathOwnership{
+					Path:           path,
+					Classification: OwnershipAuthoredHunk,
+					PeerSession:    peerOwner,
+					CheckpointOID:  peerOID,
+					Detail:         "authored hunk ownership confirmed by independently witnessed delta",
+				}, true
+			default:
+				if wd.CleanBase {
+					return ReconciledPathOwnership{
+						Path:           path,
+						Classification: OwnershipAuthoredHunk,
+						PeerSession:    peerOwner,
+						CheckpointOID:  peerOID,
+						Detail:         "authored hunk ownership on clean base reconciled",
+					}, true
+				}
+			}
+		}
+	}
+
+	if run == nil || peerOID == "" {
+		return ReconciledPathOwnership{}, false
+	}
+
+	// 2. Check if checkpoint commit is an ancestor of HEAD (already incorporated on clean main).
+	if mb, code, err := run(ctx, dir, "merge-base", "HEAD", peerOID); err == nil && code == 0 {
+		mbSHA := strings.TrimSpace(mb)
+		if mbSHA != "" && mbSHA == peerOID {
+			return ReconciledPathOwnership{
+				Path:           path,
+				Classification: OwnershipHistoricalPresence,
+				PeerSession:    peerOwner,
+				CheckpointOID:  peerOID,
+				Detail:         fmt.Sprintf("checkpoint %s is an ancestor of HEAD; historical presence on clean main", peerOID),
+			}, true
+		}
+	} else if _, code, err := run(ctx, dir, "merge-base", "--is-ancestor", peerOID, "HEAD"); err == nil && code == 0 {
+		return ReconciledPathOwnership{
+			Path:           path,
+			Classification: OwnershipHistoricalPresence,
+			PeerSession:    peerOwner,
+			CheckpointOID:  peerOID,
+			Detail:         fmt.Sprintf("checkpoint %s is an ancestor of HEAD; historical presence on clean main", peerOID),
+		}, true
+	}
+
+	// 3. Check if blob of path in checkpoint matches HEAD exactly.
+	outPeer, codePeer, errPeer := run(ctx, dir, "rev-parse", "-q", "--verify", peerOID+":"+path)
+	outHead, codeHead, errHead := run(ctx, dir, "rev-parse", "-q", "--verify", "HEAD:"+path)
+	if errPeer == nil && errHead == nil && codePeer == 0 && codeHead == 0 {
+		peerBlob := strings.TrimSpace(outPeer)
+		headBlob := strings.TrimSpace(outHead)
+		if peerBlob != "" && headBlob != "" && peerBlob == headBlob {
+			return ReconciledPathOwnership{
+				Path:           path,
+				Classification: OwnershipHistoricalPresence,
+				PeerSession:    peerOwner,
+				CheckpointOID:  peerOID,
+				Detail:         fmt.Sprintf("checkpoint %s blob matches HEAD blob %s; historical presence on clean main", peerOID, headBlob),
+			}, true
+		}
+	}
+
+	// 4. Compare hunk deltas between HEAD, checkpoint, and working tree.
+	workerDiff, codeW, errW := run(ctx, dir, "diff", "--no-ext-diff", "HEAD", "--", path)
+	peerDiff, codeP, errP := run(ctx, dir, "diff", "--no-ext-diff", "HEAD", peerOID, "--", path)
+	if errW == nil && errP == nil && codeW == 0 && codeP == 0 {
+		peerDiffTrimmed := strings.TrimSpace(peerDiff)
+		if peerDiffTrimmed == "" {
+			return ReconciledPathOwnership{
+				Path:           path,
+				Classification: OwnershipHistoricalPresence,
+				PeerSession:    peerOwner,
+				CheckpointOID:  peerOID,
+				Detail:         fmt.Sprintf("checkpoint %s introduces zero diff against HEAD for %s", peerOID, path),
+			}, true
+		}
+
+		workerHunks := parseDiffHunks(workerDiff)
+		peerHunks := parseDiffHunks(peerDiff)
+
+		if len(peerHunks) > 0 && len(workerHunks) > 0 && hunksOverlap(workerHunks, peerHunks) {
+			return ReconciledPathOwnership{
+				Path:           path,
+				Classification: OwnershipConflictingHunk,
+				PeerSession:    peerOwner,
+				CheckpointOID:  peerOID,
+				Detail:         fmt.Sprintf("authored hunks overlap with peer hunks in checkpoint %s", peerOID),
+			}, false
+		}
+
+		if len(workerHunks) > 0 {
+			return ReconciledPathOwnership{
+				Path:           path,
+				Classification: OwnershipAuthoredHunk,
+				PeerSession:    peerOwner,
+				CheckpointOID:  peerOID,
+				Detail:         fmt.Sprintf("authored hunks are disjoint from peer hunks in checkpoint %s", peerOID),
+			}, true
+		}
+	}
+
+	return ReconciledPathOwnership{}, false
+}
+
+type diffHunk struct {
+	oldStart  int
+	oldCount  int
+	newStart  int
+	newCount  int
+	editLines []string
+}
+
+func parseDiffHunks(diff string) []diffHunk {
+	var hunks []diffHunk
+	var cur *diffHunk
+	flush := func() {
+		if cur != nil {
+			hunks = append(hunks, *cur)
+			cur = nil
+		}
+	}
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "@@") {
+			flush()
+			oldStart, oldCount, newStart, newCount, ok := parseHunkHeader(line)
+			if ok {
+				cur = &diffHunk{
+					oldStart: oldStart,
+					oldCount: oldCount,
+					newStart: newStart,
+					newCount: newCount,
+				}
+			}
+			continue
+		}
+		if cur != nil {
+			if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+				cur.editLines = append(cur.editLines, line)
+			} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+				cur.editLines = append(cur.editLines, line)
+			}
+		}
+	}
+	flush()
+	return hunks
+}
+
+func parseHunkHeader(line string) (oldStart, oldCount, newStart, newCount int, ok bool) {
+	if !strings.HasPrefix(line, "@@") {
+		return 0, 0, 0, 0, false
+	}
+	rest := strings.TrimPrefix(line, "@@")
+	end := strings.Index(rest, "@@")
+	if end < 0 {
+		return 0, 0, 0, 0, false
+	}
+	header := strings.TrimSpace(rest[:end])
+	fields := strings.Fields(header)
+	if len(fields) < 2 {
+		return 0, 0, 0, 0, false
+	}
+	oldPart := fields[0]
+	newPart := fields[1]
+	if !strings.HasPrefix(oldPart, "-") || !strings.HasPrefix(newPart, "+") {
+		return 0, 0, 0, 0, false
+	}
+	oldStart, oldCount = parseHunkRange(strings.TrimPrefix(oldPart, "-"))
+	newStart, newCount = parseHunkRange(strings.TrimPrefix(newPart, "+"))
+	return oldStart, oldCount, newStart, newCount, true
+}
+
+func parseHunkRange(s string) (start, count int) {
+	parts := strings.Split(s, ",")
+	start, _ = strconv.Atoi(parts[0])
+	if len(parts) > 1 {
+		count, _ = strconv.Atoi(parts[1])
+	} else {
+		count = 1
+	}
+	return start, count
+}
+
+func hunksOverlap(hunks1, hunks2 []diffHunk) bool {
+	for _, h1 := range hunks1 {
+		for _, h2 := range hunks2 {
+			end1 := h1.oldStart + h1.oldCount
+			if h1.oldCount == 0 {
+				end1 = h1.oldStart + 1
+			}
+			end2 := h2.oldStart + h2.oldCount
+			if h2.oldCount == 0 {
+				end2 = h2.oldStart + 1
+			}
+
+			start1 := h1.oldStart
+			start2 := h2.oldStart
+
+			if start1 < end2 && start2 < end1 {
+				if len(h1.editLines) > 0 && len(h2.editLines) > 0 && reflect.DeepEqual(h1.editLines, h2.editLines) {
+					continue
+				}
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func peerWIPObjectID(s string) bool {

@@ -155,6 +155,15 @@ type Options struct {
 	// sweeps of peer/unscoped paths under a directory pathspec are refused.
 	RestrictToSessionScope bool
 
+	// ManagedWorker flags that the commit is running on a managed worker worktree.
+	// When true (or auto-detected from Dir), narrow ownership reconciliation is
+	// enabled for exact authored paths.
+	ManagedWorker bool
+	// WitnessedDeltas optionally supplies independently witnessed path/hunk deltas.
+	WitnessedDeltas []WitnessedPathDelta
+	// ReconcileNarrowOwnership explicitly enables or overrides narrow ownership reconciliation.
+	ReconcileNarrowOwnership bool
+
 	// AuthorityFence is the opt-in authority lease/token fence (#11849) that must be valid
 	// immediately before staging paths. When nil or empty, unconfigured commits proceed
 	// as normal.
@@ -273,9 +282,10 @@ type Result struct {
 	// this commit changed ("correlated" / "uncorrelated" / "indeterminate", plus
 	// why). A CONFIRMED witness is not automatically a RELEVANT one; this is the
 	// reading that says which, and it is recorded on the maintenance decision note.
-	CoreLockWitnessCorrelation string                   `json:"core_lock_witness_correlation,omitempty"`
-	Review                     *modelroute.ReviewResult `json:"review,omitempty"`
-	PeerCollisions             []string                 `json:"peer_collisions,omitempty"`
+	CoreLockWitnessCorrelation string                    `json:"core_lock_witness_correlation,omitempty"`
+	Review                     *modelroute.ReviewResult  `json:"review,omitempty"`
+	PeerCollisions             []string                  `json:"peer_collisions,omitempty"`
+	ReconciledOwnership        []ReconciledPathOwnership `json:"reconciled_ownership,omitempty"`
 	// BuildCheck is what the COMMITTED_RED prospective-tree compile gate DID (#6006): passed,
 	// failed, or skipped — and, when skipped, whether the commit was admitted anyway. The gate
 	// runs in cmd/fak before the executor, so CommitWith never sets this; the caller attaches
@@ -1112,16 +1122,23 @@ func precommitGates(ctx context.Context, run Runner, opts Options, trunk string,
 	// Cross-reference changed paths with session scope / peer WIP: refuse if a peer's modified
 	// or untracked file sits under the directory pathspec, or restrict to session's explicit files.
 	if mode := peerWIPGuardMode(); mode != staleBaseOff {
+		isManaged := opts.ManagedWorker || isSanctionedWorkerWorktreeDir(opts.Dir) || workerworktree.IsWorkerWorktree(opts.Dir) || (os.Getenv(workerworktree.WorktreeDirEnv) != "")
 		attrOpts := PathAttributionOptions{
-			SessionID:              opts.SessionID,
-			SessionScope:           opts.SessionScope,
-			PeerWIP:                opts.PeerWIP,
-			PeerWIPChecker:         opts.PeerWIPChecker,
-			RestrictToSessionScope: opts.RestrictToSessionScope,
+			SessionID:                opts.SessionID,
+			SessionScope:             opts.SessionScope,
+			PeerWIP:                  opts.PeerWIP,
+			PeerWIPChecker:           opts.PeerWIPChecker,
+			RestrictToSessionScope:   opts.RestrictToSessionScope,
+			ManagedWorker:            isManaged,
+			WitnessedDeltas:          opts.WitnessedDeltas,
+			ReconcileNarrowOwnership: opts.ReconcileNarrowOwnership || isManaged,
 		}
 		attrRes, aerr := checkPathAttributionFromStatus(ctx, run, opts.Dir, paths, statusOut, attrOpts)
 		if aerr != nil {
 			return res, false, aerr
+		}
+		if len(attrRes.ReconciledPaths) > 0 {
+			res.ReconciledOwnership = attrRes.ReconciledPaths
 		}
 		if !attrRes.OK {
 			if mode == staleBaseWarn {
