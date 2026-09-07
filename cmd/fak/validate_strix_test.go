@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/amdgpu"
 )
 
 func TestIsGPURelatedValidation(t *testing.T) {
@@ -41,6 +45,36 @@ func TestIsGPURelatedValidation(t *testing.T) {
 		{
 			name:     "strix named file changes",
 			mine:     []string{"internal/devcmd/amd_strix_validate.go"},
+			expected: true,
+		},
+		{
+			name:     "directory boundary internal/model_foo must not match internal/model",
+			mine:     []string{"internal/model_foo"},
+			expected: false,
+		},
+		{
+			name:     "directory boundary internal/model_foo/file.go must not match internal/model",
+			mine:     []string{"internal/model_foo/file.go"},
+			expected: false,
+		},
+		{
+			name:     "model package change matches whole directory",
+			mine:     []string{"internal/model/llm.go"},
+			expected: true,
+		},
+		{
+			name:     "halo keyword in path",
+			mine:     []string{"configs/halo_apu.json"},
+			expected: true,
+		},
+		{
+			name:     "vulkan keyword in path",
+			mine:     []string{"shaders/vulkan_kernel.spv"},
+			expected: true,
+		},
+		{
+			name:     "gfx115 keyword in path",
+			mine:     []string{"firmware/gfx1151.bin"},
 			expected: true,
 		},
 	}
@@ -88,5 +122,404 @@ func TestValidateStrix(t *testing.T) {
 	}
 	if !foundSkipped {
 		t.Errorf("expected strix_validation in skipped phases, got %v", res.SkippedPhases)
+	}
+}
+
+func TestValidateStrixNonGPUChangesSkipCleanly(t *testing.T) {
+	var res validateResult
+	res.OK = true
+	recorder := &validateRecorder{
+		ctx:     context.Background(),
+		stderr:  io.Discard,
+		started: time.Now(),
+		res:     &res,
+	}
+	err := executeStrixValidationPhase(context.Background(), io.Discard, io.Discard, &res, recorder, false, "", "", "", []string{"docs/README.md", "cmd/fak/new_verb.go"})
+	if err != nil {
+		t.Fatalf("unexpected error on non-gpu skip: %v", err)
+	}
+	if !res.OK {
+		t.Errorf("expected res.OK to remain true on skip, got false")
+	}
+	if len(res.Failures) != 0 {
+		t.Errorf("expected 0 failures on skip, got %d", len(res.Failures))
+	}
+	foundSkipped := false
+	for _, p := range res.SkippedPhases {
+		if p == "strix_validation" {
+			foundSkipped = true
+			break
+		}
+	}
+	if !foundSkipped {
+		t.Errorf("expected strix_validation in skipped phases, got %v", res.SkippedPhases)
+	}
+}
+
+func TestValidateStrixUnavailableHardwareFailsClosed(t *testing.T) {
+	origDiscover := discoverStrixTargetFn
+	defer func() { discoverStrixTargetFn = origDiscover }()
+
+	discoverStrixTargetFn = func(ctx context.Context, hostOverride string) (*amdgpu.StrixTarget, error) {
+		return nil, errors.New("appliance unreachable in test")
+	}
+
+	var res validateResult
+	res.OK = true
+	recorder := &validateRecorder{
+		ctx:     context.Background(),
+		stderr:  io.Discard,
+		started: time.Now(),
+		res:     &res,
+	}
+
+	err := executeStrixValidationPhase(
+		context.Background(),
+		io.Discard,
+		io.Discard,
+		&res,
+		recorder,
+		false,
+		"strix-host-test",
+		"",
+		"",
+		[]string{"internal/amdgpu/strixhalo.go"},
+	)
+
+	if err == nil {
+		t.Fatalf("expected non-nil error when hardware is unreachable, got nil")
+	}
+	if res.OK {
+		t.Fatalf("expected res.OK == false when hardware is unreachable, got true")
+	}
+
+	foundFailure := false
+	const expectedSubstr = "strix hardware validation required for relevant changes but appliance is unreachable (pending hardware evidence)"
+	for _, f := range res.Failures {
+		if f.Step == "strix-validation" && strings.Contains(f.Detail, expectedSubstr) {
+			foundFailure = true
+			break
+		}
+	}
+	if !foundFailure {
+		t.Errorf("expected failure step 'strix-validation' mentioning %q, got: %+v", expectedSubstr, res.Failures)
+	}
+
+	for _, p := range res.SkippedPhases {
+		if p == "strix_validation" {
+			t.Errorf("relevant GPU change must NOT fail open into skipped phases")
+		}
+	}
+}
+
+func TestValidateStrixNilReceiptPropagatesFailure(t *testing.T) {
+	origDiscover := discoverStrixTargetFn
+	origRun := runStrixValidationFn
+	defer func() {
+		discoverStrixTargetFn = origDiscover
+		runStrixValidationFn = origRun
+	}()
+
+	discoverStrixTargetFn = func(ctx context.Context, hostOverride string) (*amdgpu.StrixTarget, error) {
+		return &amdgpu.StrixTarget{
+			Host:      "strix-target-ok",
+			Reachable: true,
+			TargetISA: "gfx1151",
+		}, nil
+	}
+
+	// 1. Nil receipt with error
+	runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+		return nil, errors.New("ssh connection dropped during validation")
+	}
+
+	var res validateResult
+	res.OK = true
+	recorder := &validateRecorder{
+		ctx:     context.Background(),
+		stderr:  io.Discard,
+		started: time.Now(),
+		res:     &res,
+	}
+
+	err := executeStrixValidationPhase(
+		context.Background(),
+		io.Discard,
+		io.Discard,
+		&res,
+		recorder,
+		false,
+		"",
+		"",
+		"",
+		[]string{"internal/compute/vulkan.go"},
+	)
+
+	if err == nil {
+		t.Fatalf("expected error on nil receipt, got nil")
+	}
+	if res.OK {
+		t.Fatalf("expected res.OK == false on nil receipt, got true")
+	}
+	if len(res.Failures) == 0 || res.Failures[0].Step != "strix-validation" {
+		t.Errorf("expected strix-validation failure recorded, got %+v", res.Failures)
+	}
+
+	// 2. Nil receipt with nil error
+	runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+		return nil, nil
+	}
+	res = validateResult{OK: true}
+	recorder = &validateRecorder{
+		ctx:     context.Background(),
+		stderr:  io.Discard,
+		started: time.Now(),
+		res:     &res,
+	}
+
+	err = executeStrixValidationPhase(
+		context.Background(),
+		io.Discard,
+		io.Discard,
+		&res,
+		recorder,
+		false,
+		"",
+		"",
+		"",
+		[]string{"internal/compute/vulkan.go"},
+	)
+
+	if err == nil {
+		t.Fatalf("expected error on nil receipt with nil valErr, got nil")
+	}
+	if res.OK {
+		t.Fatalf("expected res.OK == false on nil receipt, got true")
+	}
+}
+
+func TestValidateStrixReceiptValidationFails(t *testing.T) {
+	origDiscover := discoverStrixTargetFn
+	origRun := runStrixValidationFn
+	defer func() {
+		discoverStrixTargetFn = origDiscover
+		runStrixValidationFn = origRun
+	}()
+
+	discoverStrixTargetFn = func(ctx context.Context, hostOverride string) (*amdgpu.StrixTarget, error) {
+		return &amdgpu.StrixTarget{
+			Host:      "strix-target-ok",
+			Reachable: true,
+			TargetISA: "gfx1151",
+		}, nil
+	}
+
+	// Receipt fails invariant validation (invalid schema)
+	runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+		r := amdgpu.NewStrixValidationReceipt(
+			amdgpu.StrixTarget{Host: "strix-target-ok", TargetISA: "gfx1151", Reachable: true, ComputeUnits: 40, DiscoveredAt: time.Now().UTC().Format(time.RFC3339)},
+			"ref",
+			"tip",
+			"fak validate --strix",
+		)
+		r.Schema = "invalid-schema" // forces receipt.Validate() error
+		return r, nil
+	}
+
+	var res validateResult
+	res.OK = true
+	recorder := &validateRecorder{
+		ctx:     context.Background(),
+		stderr:  io.Discard,
+		started: time.Now(),
+		res:     &res,
+	}
+
+	err := executeStrixValidationPhase(
+		context.Background(),
+		io.Discard,
+		io.Discard,
+		&res,
+		recorder,
+		false,
+		"",
+		"",
+		"",
+		[]string{"internal/amdgpu/strixhalo.go"},
+	)
+
+	if err == nil {
+		t.Fatalf("expected error on invalid receipt invariants, got nil")
+	}
+	if res.OK {
+		t.Fatalf("expected res.OK == false when receipt validation fails, got true")
+	}
+	if res.StrixValidation == nil || res.StrixValidation.Verdict != "FAIL" {
+		t.Errorf("expected StrixValidation verdict FAIL, got %+v", res.StrixValidation)
+	}
+}
+
+func TestValidateStrixReceiptNonPassVerdict(t *testing.T) {
+	origDiscover := discoverStrixTargetFn
+	origRun := runStrixValidationFn
+	defer func() {
+		discoverStrixTargetFn = origDiscover
+		runStrixValidationFn = origRun
+	}()
+
+	discoverStrixTargetFn = func(ctx context.Context, hostOverride string) (*amdgpu.StrixTarget, error) {
+		return &amdgpu.StrixTarget{
+			Host:         "strix-target-ok",
+			Reachable:    true,
+			TargetISA:    "gfx1151",
+			ComputeUnits: 40,
+		}, nil
+	}
+
+	runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+		r := amdgpu.NewStrixValidationReceipt(
+			amdgpu.StrixTarget{Host: "strix-target-ok", TargetISA: "gfx1151", Reachable: true, ComputeUnits: 40, DiscoveredAt: time.Now().UTC().Format(time.RFC3339)},
+			"ref",
+			"tip",
+			"fak validate --strix",
+		)
+		r.Verdict = "FAIL"
+		r.Failures = []string{"subkernel q4k_matmul failed"}
+		digest, _ := r.ComputeDigest()
+		r.Digest = digest
+		return r, nil
+	}
+
+	var res validateResult
+	res.OK = true
+	recorder := &validateRecorder{
+		ctx:     context.Background(),
+		stderr:  io.Discard,
+		started: time.Now(),
+		res:     &res,
+	}
+
+	err := executeStrixValidationPhase(
+		context.Background(),
+		io.Discard,
+		io.Discard,
+		&res,
+		recorder,
+		false,
+		"",
+		"",
+		"",
+		[]string{"internal/amdgpu/strixhalo.go"},
+	)
+
+	if err == nil {
+		t.Fatalf("expected error on non-PASS verdict, got nil")
+	}
+	if res.OK {
+		t.Fatalf("expected res.OK == false on non-PASS verdict, got true")
+	}
+	found := false
+	for _, f := range res.Failures {
+		if f.Step == "strix-validation" && strings.Contains(f.Detail, "subkernel q4k_matmul failed") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected failure detail mentioning 'subkernel q4k_matmul failed', got %+v", res.Failures)
+	}
+}
+
+func TestValidateStrixAblationsDefault(t *testing.T) {
+	origDiscover := discoverStrixTargetFn
+	origRun := runStrixValidationFn
+	defer func() {
+		discoverStrixTargetFn = origDiscover
+		runStrixValidationFn = origRun
+	}()
+
+	discoverStrixTargetFn = func(ctx context.Context, hostOverride string) (*amdgpu.StrixTarget, error) {
+		return &amdgpu.StrixTarget{
+			Host:         "strix-target-ok",
+			Reachable:    true,
+			TargetISA:    "gfx1151",
+			ComputeUnits: 40,
+			DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
+		}, nil
+	}
+
+	var capturedOpts amdgpu.StrixValidationOpts
+	runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+		capturedOpts = opts
+		r := amdgpu.NewStrixValidationReceipt(
+			amdgpu.StrixTarget{Host: "strix-target-ok", TargetISA: "gfx1151", Reachable: true, ComputeUnits: 40, DiscoveredAt: time.Now().UTC().Format(time.RFC3339)},
+			"ref",
+			"tip",
+			opts.Command,
+		)
+		r.Verdict = "PASS"
+		r.Verified = true
+		digest, _ := r.ComputeDigest()
+		r.Digest = digest
+		return r, nil
+	}
+
+	// 1. Default ablateArg == "" -> RunAblations must be false
+	var res validateResult
+	res.OK = true
+	recorder := &validateRecorder{
+		ctx:     context.Background(),
+		stderr:  io.Discard,
+		started: time.Now(),
+		res:     &res,
+	}
+
+	err := executeStrixValidationPhase(
+		context.Background(),
+		io.Discard,
+		io.Discard,
+		&res,
+		recorder,
+		false,
+		"",
+		"",
+		"", // ablateArg empty
+		[]string{"internal/amdgpu/strixhalo.go"},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error on passing validation: %v", err)
+	}
+	if capturedOpts.RunAblations {
+		t.Errorf("expected RunAblations == false when ablateArg == '', got true")
+	}
+
+	// 2. Explicit ablateArg != "" -> RunAblations must be true
+	res = validateResult{OK: true}
+	recorder = &validateRecorder{
+		ctx:     context.Background(),
+		stderr:  io.Discard,
+		started: time.Now(),
+		res:     &res,
+	}
+	err = executeStrixValidationPhase(
+		context.Background(),
+		io.Discard,
+		io.Discard,
+		&res,
+		recorder,
+		false,
+		"",
+		"",
+		"all", // ablateArg requested
+		[]string{"internal/amdgpu/strixhalo.go"},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error on passing validation with ablations: %v", err)
+	}
+	if !capturedOpts.RunAblations {
+		t.Errorf("expected RunAblations == true when ablateArg == 'all', got false")
+	}
+	if len(capturedOpts.Ablations) == 0 {
+		t.Errorf("expected Ablations list populated when ablateArg == 'all', got empty")
 	}
 }

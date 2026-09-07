@@ -18,17 +18,36 @@ func isGPURelatedValidation(mine []string) bool {
 		"internal/roofline",
 		"internal/model",
 		"cmd/fak/validate_acceptance",
+		"cmd/fak/validate_acceptance.go",
+		"cmd/fak/validate_acceptance_test.go",
+	}
+	gpuKeywords := []string{
+		"strix",
+		"halo",
+		"vulkan",
+		"gfx115",
 	}
 	for _, p := range mine {
 		norm := strings.ReplaceAll(p, "\\", "/")
+		lower := strings.ToLower(norm)
+		for _, kw := range gpuKeywords {
+			if strings.Contains(lower, kw) {
+				return true
+			}
+		}
 		for _, root := range gpuRoots {
-			if strings.HasPrefix(norm, root) || strings.Contains(norm, "strix") || strings.Contains(norm, "vulkan") {
+			if norm == root || strings.HasPrefix(norm, root+"/") {
 				return true
 			}
 		}
 	}
 	return false
 }
+
+var (
+	discoverStrixTargetFn = amdgpu.DiscoverStrixTarget
+	runStrixValidationFn  = amdgpu.RunStrixValidation
+)
 
 // shouldRunStrixValidation determines whether Strix Halo validation should run.
 func shouldRunStrixValidation(explicitStrix bool, mine []string) bool {
@@ -62,24 +81,36 @@ func executeStrixValidationPhase(
 	}
 
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
-	target, err := amdgpu.DiscoverStrixTarget(probeCtx, hostOverride)
+	target, err := discoverStrixTargetFn(probeCtx, hostOverride)
 	cancel()
 
 	if err != nil || target == nil || !target.Reachable {
-		if explicitStrix {
-			phase.finish(fmt.Errorf("strix validation required but appliance unreachable: %v", err))
-			res.Failures = append(res.Failures, ciPreflightFailure{
-				Step:   "strix-validation",
-				Detail: fmt.Sprintf("explicit --strix demanded but appliance unreachable: %v", err),
-				Files:  []string{hostOverride},
-			})
-			res.OK = false
-			return fmt.Errorf("strix unreachable: %w", err)
+		unreachErr := err
+		if unreachErr == nil {
+			if target != nil && target.Error != "" {
+				unreachErr = fmt.Errorf("%s", target.Error)
+			} else {
+				unreachErr = fmt.Errorf("appliance unreachable or target not discovered")
+			}
 		}
-		// In auto mode, unreachable Strix Halo fails open as advisory skip
-		phase.finish(nil)
-		res.SkippedPhases = append(res.SkippedPhases, "strix_validation")
-		return nil
+		detail := fmt.Sprintf("strix hardware validation required for relevant changes but appliance is unreachable (pending hardware evidence): %v", unreachErr)
+		if explicitStrix {
+			detail = fmt.Sprintf("strix hardware validation required for relevant changes but appliance is unreachable (pending hardware evidence): explicit --strix demanded: %v", unreachErr)
+		}
+		phase.finish(fmt.Errorf("strix validation required but appliance unreachable: %w", unreachErr))
+		var failFiles []string
+		if hostOverride != "" {
+			failFiles = []string{hostOverride}
+		} else if target != nil && target.Host != "" {
+			failFiles = []string{target.Host}
+		}
+		res.Failures = append(res.Failures, ciPreflightFailure{
+			Step:   "strix-validation",
+			Detail: detail,
+			Files:  failFiles,
+		})
+		res.OK = false
+		return fmt.Errorf("strix unreachable: %w", unreachErr)
 	}
 
 	// Prepare validation options
@@ -88,16 +119,22 @@ func executeStrixValidationPhase(
 		skList = strings.Split(subkernelsArg, ",")
 	}
 
-	abList := []string{"cpu_vs_vulkan_gpu", "fused_vs_discrete_norm_matmul"}
-	if ablateArg != "" && ablateArg != "all" {
-		abList = strings.Split(ablateArg, ",")
+	runAblations := false
+	var abList []string
+	if ablateArg != "" {
+		runAblations = true
+		if ablateArg == "all" {
+			abList = []string{"cpu_vs_vulkan_gpu", "fused_vs_discrete_norm_matmul"}
+		} else {
+			abList = strings.Split(ablateArg, ",")
+		}
 	}
 
 	opts := amdgpu.StrixValidationOpts{
 		Host:          target.Host,
 		RunSubkernels: true,
 		Subkernels:    skList,
-		RunAblations:  true,
+		RunAblations:  runAblations,
 		Ablations:     abList,
 		GitRef:        res.Ref,
 		GitTip:        res.Tip,
@@ -105,22 +142,52 @@ func executeStrixValidationPhase(
 		Timeout:       25 * time.Second,
 	}
 
-	receipt, valErr := amdgpu.RunStrixValidation(ctx, opts)
+	receipt, valErr := runStrixValidationFn(ctx, opts)
 	phase.finish(valErr)
 
-	if receipt != nil {
-		res.StrixValidation = receipt
-		if err := receipt.Validate(); err != nil {
-			receipt.Verdict = "FAIL"
-			receipt.Verified = false
-			res.OK = false
+	if receipt == nil {
+		res.OK = false
+		detail := "strix validation returned nil receipt"
+		if valErr != nil {
+			detail = fmt.Sprintf("strix validation failed: %v", valErr)
+		}
+		var files []string
+		if target != nil && target.Host != "" {
+			files = []string{target.Host}
+		}
+		res.Failures = append(res.Failures, ciPreflightFailure{
+			Step:   "strix-validation",
+			Detail: detail,
+			Files:  files,
+		})
+		if valErr == nil {
+			valErr = fmt.Errorf("strix validation returned nil receipt")
+		}
+		return valErr
+	}
+
+	res.StrixValidation = receipt
+	if err := receipt.Validate(); err != nil {
+		receipt.Verdict = "FAIL"
+		receipt.Verified = false
+		res.OK = false
+		res.Failures = append(res.Failures, ciPreflightFailure{
+			Step:   "strix-validation",
+			Detail: fmt.Sprintf("receipt invariant validation failed: %v", err),
+			Files:  []string{target.Host},
+		})
+		return fmt.Errorf("receipt invariant validation failed: %w", err)
+	}
+
+	if receipt.Verdict != "PASS" {
+		res.OK = false
+		if len(receipt.Failures) == 0 {
 			res.Failures = append(res.Failures, ciPreflightFailure{
 				Step:   "strix-validation",
-				Detail: fmt.Sprintf("receipt invariant validation failed: %v", err),
+				Detail: fmt.Sprintf("strix validation verdict: %s", receipt.Verdict),
 				Files:  []string{target.Host},
 			})
-		} else if receipt.Verdict != "PASS" {
-			res.OK = false
+		} else {
 			for _, f := range receipt.Failures {
 				res.Failures = append(res.Failures, ciPreflightFailure{
 					Step:   "strix-validation",
@@ -129,7 +196,18 @@ func executeStrixValidationPhase(
 				})
 			}
 		}
+		return fmt.Errorf("strix validation failed with verdict: %s", receipt.Verdict)
 	}
 
-	return valErr
+	if valErr != nil {
+		res.OK = false
+		res.Failures = append(res.Failures, ciPreflightFailure{
+			Step:   "strix-validation",
+			Detail: fmt.Sprintf("strix validation execution error: %v", valErr),
+			Files:  []string{target.Host},
+		})
+		return valErr
+	}
+
+	return nil
 }

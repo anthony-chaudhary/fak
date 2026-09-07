@@ -75,28 +75,28 @@ type validateWSLCapabilityVerdict struct {
 }
 
 type validateResult struct {
-	Schema         string                        `json:"schema"`
-	Mode           string                        `json:"mode"`
-	Ref            string                        `json:"ref"`
-	Tip            string                        `json:"tip"`
-	Mine           []string                      `json:"mine"`
-	Tested         []string                      `json:"tested,omitempty"`
-	Runner         string                        `json:"runner,omitempty"`
-	TestRun        string                        `json:"test_run,omitempty"`
-	TestScope      string                        `json:"test_scope,omitempty"`
-	OK             bool                          `json:"ok"`
-	Partial        bool                          `json:"partial"`
-	TimedOut       bool                          `json:"timed_out"`
-	Reason         string                        `json:"reason,omitempty"`
-	TimeoutMS      int64                         `json:"timeout_ms"`
-	ElapsedMS      int64                         `json:"elapsed_ms"`
-	Phases         []validatePhase               `json:"phases"`
-	SkippedPhases  []string                      `json:"skipped_phases"`
-	Overlays       validateOverlayProgress       `json:"overlays"`
-	WSLPreflight    *validateWSLCapabilityVerdict `json:"wsl_preflight,omitempty"`
+	Schema          string                         `json:"schema"`
+	Mode            string                         `json:"mode"`
+	Ref             string                         `json:"ref"`
+	Tip             string                         `json:"tip"`
+	Mine            []string                       `json:"mine"`
+	Tested          []string                       `json:"tested,omitempty"`
+	Runner          string                         `json:"runner,omitempty"`
+	TestRun         string                         `json:"test_run,omitempty"`
+	TestScope       string                         `json:"test_scope,omitempty"`
+	OK              bool                           `json:"ok"`
+	Partial         bool                           `json:"partial"`
+	TimedOut        bool                           `json:"timed_out"`
+	Reason          string                         `json:"reason,omitempty"`
+	TimeoutMS       int64                          `json:"timeout_ms"`
+	ElapsedMS       int64                          `json:"elapsed_ms"`
+	Phases          []validatePhase                `json:"phases"`
+	SkippedPhases   []string                       `json:"skipped_phases"`
+	Overlays        validateOverlayProgress        `json:"overlays"`
+	WSLPreflight    *validateWSLCapabilityVerdict  `json:"wsl_preflight,omitempty"`
 	StrixValidation *amdgpu.StrixValidationReceipt `json:"strix_validation,omitempty"`
-	Failures        []ciPreflightFailure          `json:"failures"`
-	SelectionAudit *validateSelectionAudit       `json:"selection_audit,omitempty"`
+	Failures        []ciPreflightFailure           `json:"failures"`
+	SelectionAudit  *validateSelectionAudit        `json:"selection_audit,omitempty"`
 }
 
 type validateSelectionAudit struct {
@@ -347,7 +347,9 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 			}
 		}
 		if shouldRunStrixValidation(*strix, paths) {
-			_ = executeStrixValidationPhase(ctx, stdout, stderr, &res, &recorder, *strix, *strixHost, *subkernels, *ablate, paths)
+			if err := executeStrixValidationPhase(ctx, stdout, stderr, &res, &recorder, *strix, *strixHost, *subkernels, *ablate, paths); err != nil {
+				res.OK = false
+			}
 		}
 	}
 	recorder.finish()
