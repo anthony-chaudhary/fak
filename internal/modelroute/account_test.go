@@ -575,3 +575,65 @@ func TestDefaultRosterAstraBindings(t *testing.T) {
 		}
 	}
 }
+
+func TestTargetCheckPayloadResidencyComposition(t *testing.T) {
+	r := rosterFixture()
+	localTg, err := r.Resolve("small")
+	if err != nil {
+		t.Fatalf("resolve small: %v", err)
+	}
+	remoteTg, err := r.Resolve("large")
+	if err != nil {
+		t.Fatalf("resolve large: %v", err)
+	}
+
+	cfg := PayloadClassificationConfig{
+		Rules: []ClassificationRule{
+			{Pattern: "secret/**", Class: ClassLocal},
+		},
+	}
+
+	classifiedPayload := NewPayload("secret/creds.env")
+	unclassifiedPayload := NewPayload("public/readme.md")
+
+	// 1. Remote target + classified payload -> denied when no local target configured.
+	witness := NewEgressWitness("run-composition-1")
+	dec, err := remoteTg.CheckPayloadResidency(cfg, classifiedPayload, witness)
+	if err == nil || dec.Action != ActionDeny {
+		t.Fatalf("remote target with classified payload must be denied: dec=%+v err=%v", dec, err)
+	}
+	if dec.Reason != ReasonPayloadClassifiedRemoteDenied {
+		t.Fatalf("denial reason = %q, want %q", dec.Reason, ReasonPayloadClassifiedRemoteDenied)
+	}
+
+	// 2. Remote target + unclassified payload -> allowed pass-through.
+	dec, err = remoteTg.CheckPayloadResidency(cfg, unclassifiedPayload, witness)
+	if err != nil || dec.Action != ActionAllow {
+		t.Fatalf("remote target with unclassified payload must be allowed: dec=%+v err=%v", dec, err)
+	}
+
+	// 3. Local target + classified payload -> allowed on-box.
+	dec, err = localTg.CheckPayloadResidency(cfg, classifiedPayload, witness)
+	if err != nil || dec.Action != ActionAllow {
+		t.Fatalf("local target with classified payload must be allowed: dec=%+v err=%v", dec, err)
+	}
+
+	// 4. Remote target + classified payload + local target configured -> rerouted.
+	cfgWithLocal := cfg
+	cfgWithLocal.LocalTarget = &localTg
+	dec, err = remoteTg.CheckPayloadResidency(cfgWithLocal, classifiedPayload, witness)
+	if err != nil || dec.Action != ActionReroute {
+		t.Fatalf("remote target with local fallback configured must be rerouted: dec=%+v err=%v", dec, err)
+	}
+	if !dec.Target.Local() {
+		t.Fatalf("rerouted target must be local, got %+v", dec.Target)
+	}
+
+	// Core invariant: classified remote bytes sent must be 0.
+	if err := witness.Validate(); err != nil {
+		t.Fatalf("witness invariant broken: %v", err)
+	}
+	if witness.ClassifiedBytesRemote != 0 {
+		t.Fatalf("classified bytes remote = %d, want 0", witness.ClassifiedBytesRemote)
+	}
+}
