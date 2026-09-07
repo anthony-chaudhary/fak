@@ -1,10 +1,11 @@
 ---
 name: ci-repair
-description: Diagnose, isolate, and repair broken CI/CD workflows and red trunk gates across GitHub Actions, spine-invariance, ci-fast, architest DAG rules, structural policies, and scorecard freshness. Uses parallel subagents for failure triage, isolated leaf implementation, on-device witness verification, and atomic commit landing.
+description: Diagnose, isolate, and repair broken CI/CD workflows and red trunk gates across GitHub Actions, spine-invariance, ci-fast, architest DAG rules, structural policies, scorecard freshness, and build breakages. Uses...
 metadata:
   opencode: agent-permission
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/ci-repair/SKILL.md
+  canonical-description-hash: dbd159c86039b3bdf4dbe1c684cad532c6badce9aad29b6f2a4bf7d6bec32a9c
 ---
 
 # Canonical project skill adapter
