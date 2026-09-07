@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -313,5 +314,349 @@ func TestSpeculativeBatchGraphCaptureKeyStability(t *testing.T) {
 	}
 	if finalStats.SpeculativeMisses != 1 {
 		t.Errorf("final SpeculativeMisses = %d, want 1", finalStats.SpeculativeMisses)
+	}
+}
+
+func TestSpeculativeBatchShapeValidation(t *testing.T) {
+	limits := SchedulerLimits{
+		MaxActiveSeqs:       64,
+		SpecDraftUBatchSize: 512,
+		MaxTokensPerReq:     16,
+		UBatchSize:          1024,
+		MaxContextLength:    262144,
+	}
+
+	if err := limits.Validate(); err != nil {
+		t.Fatalf("limits.Validate() failed: %v", err)
+	}
+
+	// 1. Valid runtime shapes pass reachability validation
+	validShapes := []struct {
+		name  string
+		shape SpeculativeShape
+	}{
+		{
+			name: "single sequence pure decode",
+			shape: SpeculativeShape{
+				NumSequences:    1,
+				TokensPerSeq:    []int{8},
+				MaxTokensPerSeq: 8,
+				TotalTokens:     8,
+				PrefillTokens:   0,
+				ContextPosition: 100,
+			},
+		},
+		{
+			name: "multi-sequence uniform decode",
+			shape: SpeculativeShape{
+				NumSequences:    16,
+				TokensPerSeq:    []int{8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8},
+				MaxTokensPerSeq: 8,
+				TotalTokens:     128,
+				PrefillTokens:   0,
+				ContextPosition: 500,
+			},
+		},
+		{
+			name: "multi-sequence ragged decode",
+			shape: SpeculativeShape{
+				NumSequences:    4,
+				TokensPerSeq:    []int{3, 5, 2, 7},
+				MaxTokensPerSeq: 7,
+				TotalTokens:     17,
+				PrefillTokens:   0,
+				ContextPosition: 2000,
+			},
+		},
+		{
+			name: "mixed prefill and decode",
+			shape: SpeculativeShape{
+				NumSequences:    2,
+				TokensPerSeq:    []int{4, 4},
+				MaxTokensPerSeq: 4,
+				TotalTokens:     520, // 8 decode + 512 prefill
+				PrefillTokens:   512,
+				ContextPosition: 4096,
+			},
+		},
+		{
+			name: "maximum allowable micro-batch boundary",
+			shape: SpeculativeShape{
+				NumSequences:    32,
+				TokensPerSeq:    make([]int, 32),
+				MaxTokensPerSeq: 16,
+				TotalTokens:     512,
+				PrefillTokens:   0,
+				ContextPosition: 0,
+			},
+		},
+		{
+			name: "pure prefill step without decode",
+			shape: SpeculativeShape{
+				NumSequences:    0,
+				TotalTokens:     1024,
+				PrefillTokens:   1024,
+				ContextPosition: 0,
+			},
+		},
+	}
+
+	for i := range validShapes {
+		if validShapes[i].name == "maximum allowable micro-batch boundary" {
+			for j := range validShapes[i].shape.TokensPerSeq {
+				validShapes[i].shape.TokensPerSeq[j] = 16
+			}
+		}
+	}
+
+	for _, tc := range validShapes {
+		t.Run("valid_"+tc.name, func(t *testing.T) {
+			if err := ValidateSchedulerReachable(tc.shape, limits); err != nil {
+				t.Errorf("expected shape to be reachable, got error: %v", err)
+			}
+		})
+	}
+
+	// 2. Synthetic impossible shapes rejected with clear errors
+	invalidCases := []struct {
+		name    string
+		shape   SpeculativeShape
+		wantErr string
+	}{
+		{
+			name: "zero sequences and zero prefill",
+			shape: SpeculativeShape{
+				NumSequences:  0,
+				PrefillTokens: 0,
+			},
+			wantErr: "no active sequences and no prefill tokens",
+		},
+		{
+			name: "negative sequences",
+			shape: SpeculativeShape{
+				NumSequences: -1,
+			},
+			wantErr: "NumSequences cannot be negative",
+		},
+		{
+			name: "sequence count exceeds MaxActiveSeqs",
+			shape: SpeculativeShape{
+				NumSequences:    128, // > 64
+				MaxTokensPerSeq: 4,
+				TotalTokens:     512,
+			},
+			wantErr: "exceeds scheduler MaxActiveSeqs",
+		},
+		{
+			name: "sequence tokens exceeds MaxTokensPerReq",
+			shape: SpeculativeShape{
+				NumSequences:    2,
+				TokensPerSeq:    []int{8, 20}, // 20 > 16
+				MaxTokensPerSeq: 20,
+				TotalTokens:     28,
+			},
+			wantErr: "exceeds scheduler MaxTokensPerReq",
+		},
+		{
+			name: "non-positive token count in sequence",
+			shape: SpeculativeShape{
+				NumSequences:    2,
+				TokensPerSeq:    []int{4, 0}, // must be >= 1 for K+1
+				MaxTokensPerSeq: 4,
+				TotalTokens:     4,
+			},
+			wantErr: "must be >= 1 for K+1",
+		},
+		{
+			name: "total decode tokens exceeds SpecDraftUBatchSize",
+			shape: SpeculativeShape{
+				NumSequences:    40,
+				TokensPerSeq:    nil,
+				MaxTokensPerSeq: 15, // 40 * 15 = 600 > 512
+				TotalTokens:     600,
+			},
+			wantErr: "exceeds scheduler SpecDraftUBatchSize",
+		},
+		{
+			name: "decode tokens fewer than sequence count",
+			shape: SpeculativeShape{
+				NumSequences:    5,
+				TokensPerSeq:    nil,
+				MaxTokensPerSeq: 0,
+				TotalTokens:     3, // 3 tokens for 5 sequences is physically impossible
+			},
+			wantErr: "cannot be less than NumSequences",
+		},
+		{
+			name: "TokensPerSeq slice length mismatch",
+			shape: SpeculativeShape{
+				NumSequences:    4,
+				TokensPerSeq:    []int{4, 4, 4}, // 3 elements != 4
+				MaxTokensPerSeq: 4,
+				TotalTokens:     12,
+			},
+			wantErr: "does not match NumSequences",
+		},
+		{
+			name: "prefill tokens exceed UBatchSize",
+			shape: SpeculativeShape{
+				NumSequences:    1,
+				TokensPerSeq:    []int{4},
+				MaxTokensPerSeq: 4,
+				PrefillTokens:   2048, // > 1024
+				TotalTokens:     2052,
+			},
+			wantErr: "exceeds scheduler UBatchSize",
+		},
+		{
+			name: "negative prefill tokens",
+			shape: SpeculativeShape{
+				NumSequences:  1,
+				PrefillTokens: -5,
+			},
+			wantErr: "PrefillTokens cannot be negative",
+		},
+		{
+			name: "negative context position",
+			shape: SpeculativeShape{
+				NumSequences:    1,
+				TokensPerSeq:    []int{4},
+				MaxTokensPerSeq: 4,
+				TotalTokens:     4,
+				ContextPosition: -10,
+			},
+			wantErr: "ContextPosition cannot be negative",
+		},
+		{
+			name: "context window overflow",
+			shape: SpeculativeShape{
+				NumSequences:    1,
+				TokensPerSeq:    []int{16},
+				MaxTokensPerSeq: 16,
+				TotalTokens:     16,
+				ContextPosition: 262140, // 262140 + 16 = 262156 > 262144
+			},
+			wantErr: "exceeds scheduler MaxContextLength",
+		},
+		{
+			name: "inconsistent TotalTokens count",
+			shape: SpeculativeShape{
+				NumSequences:    2,
+				TokensPerSeq:    []int{4, 4},
+				MaxTokensPerSeq: 4,
+				PrefillTokens:   100,
+				TotalTokens:     200, // 8 decode + 100 prefill != 200
+			},
+			wantErr: "inconsistent with decode tokens",
+		},
+	}
+
+	for _, tc := range invalidCases {
+		t.Run("invalid_"+tc.name, func(t *testing.T) {
+			err := ValidateSchedulerReachable(tc.shape, limits)
+			if err == nil {
+				t.Fatalf("expected error for case %s, got nil", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error %q does not contain expected substring %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestSpeculativeProfileShapeDerivation(t *testing.T) {
+	cfg := DefaultSpeculativeBatchConfig()
+	limits := cfg.SchedulerLimits()
+
+	shapes := cfg.GenerateProfileShapes()
+	if len(shapes) == 0 {
+		t.Fatalf("GenerateProfileShapes() returned empty slice")
+	}
+
+	// Verify that every derived shape passes reachability validation
+	for i, s := range shapes {
+		if err := ValidateSchedulerReachable(s, limits); err != nil {
+			t.Errorf("derived profile shape %d (%+v) failed reachability: %v", i, s, err)
+		}
+		if s.NumSequences > limits.MaxActiveSeqs {
+			t.Errorf("shape %d NumSequences %d > MaxActiveSeqs %d", i, s.NumSequences, limits.MaxActiveSeqs)
+		}
+		if s.DecodeTokens() > limits.SpecDraftUBatchSize {
+			t.Errorf("shape %d DecodeTokens %d > SpecDraftUBatchSize %d", i, s.DecodeTokens(), limits.SpecDraftUBatchSize)
+		}
+	}
+}
+
+func TestSpeculativeBatchPlanReachabilityAndReceipts(t *testing.T) {
+	cfg := DefaultSpeculativeBatchConfig()
+
+	// 1. Planning with a valid reachable shape
+	validShape := SpeculativeShape{
+		NumSequences:    4,
+		TokensPerSeq:    []int{8, 8, 8, 8},
+		MaxTokensPerSeq: 8,
+		TotalTokens:     288, // 32 decode + 256 prefill
+		PrefillTokens:   256,
+		ContextPosition: 1024,
+	}
+
+	plan, err := cfg.PlanSpeculativeBatch(validShape)
+	if err != nil {
+		t.Fatalf("PlanSpeculativeBatch failed for valid shape: %v", err)
+	}
+	if !plan.SchedulerReachable {
+		t.Errorf("plan.SchedulerReachable = false, want true")
+	}
+	if plan.TotalPromptTokens != 256 {
+		t.Errorf("plan.TotalPromptTokens = %d, want 256", plan.TotalPromptTokens)
+	}
+	if plan.TotalDraftTokens != 32 {
+		t.Errorf("plan.TotalDraftTokens = %d, want 32", plan.TotalDraftTokens)
+	}
+
+	// 2. Planning with an unreachable shape must fail
+	unreachableShape := SpeculativeShape{
+		NumSequences:    128, // > MaxActiveSeqs (64)
+		MaxTokensPerSeq: 8,
+		TotalTokens:     1024,
+	}
+	_, err = cfg.PlanSpeculativeBatch(unreachableShape)
+	if err == nil {
+		t.Fatalf("expected PlanSpeculativeBatch to reject unreachable shape, got nil")
+	}
+
+	// 3. Receipts properly record SchedulerReachable: true
+	var targetReceipt TargetVerificationReceipt
+	targetReceipt.StampSchedulerReachable(validShape)
+
+	if !targetReceipt.SchedulerReachable {
+		t.Errorf("targetReceipt.SchedulerReachable = false, want true")
+	}
+	if targetReceipt.Shape == nil || targetReceipt.Shape.NumSequences != 4 {
+		t.Errorf("targetReceipt.Shape not stamped properly: %+v", targetReceipt.Shape)
+	}
+
+	batchReceipt := SpeculativeBatchReceipt{
+		Shape:              validShape,
+		SchedulerReachable: true,
+		DraftTokens:        32,
+		PaddedTokens:       cfg.SpecDraftUBatchSize - 32,
+		CaptureKey: compute.GraphCaptureKey{
+			Kind:               compute.GraphCaptureSpeculative,
+			BatchSize:          cfg.SpecDraftUBatchSize,
+			SchedulerReachable: true,
+		},
+	}
+	if !batchReceipt.SchedulerReachable {
+		t.Errorf("batchReceipt.SchedulerReachable = false, want true")
+	}
+
+	// 4. PlanDeepContextExecution stamps SchedulerReachable: true
+	deepPlan, err := cfg.PlanDeepContextExecution(2048, 128, 0)
+	if err != nil {
+		t.Fatalf("PlanDeepContextExecution failed: %v", err)
+	}
+	if !deepPlan.SchedulerReachable {
+		t.Errorf("deepPlan.SchedulerReachable = false, want true")
 	}
 }

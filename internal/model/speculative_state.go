@@ -41,6 +41,14 @@ type TargetVerificationReceipt struct {
 	TargetDecodeSteps            int                       `json:"target_decode_steps"`
 	OneOperation                 bool                      `json:"one_operation"`
 	Accounting                   SpeculativeCostAccounting `json:"accounting"`
+	Shape                        *SpeculativeShape         `json:"shape,omitempty"`
+	SchedulerReachable           bool                      `json:"scheduler_reachable"`
+}
+
+// StampSchedulerReachable stamps the receipt with the verified profile shape and marks SchedulerReachable: true.
+func (r *TargetVerificationReceipt) StampSchedulerReachable(shape SpeculativeShape) {
+	r.Shape = &shape
+	r.SchedulerReachable = true
 }
 
 // MissingCostCategories returns every category that prevents this receipt from

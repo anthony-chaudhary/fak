@@ -22,17 +22,24 @@ const (
 // It decouples the fixed micro-batch capture dimension for speculative draft verification
 // from dynamic prompt chunk sizes.
 type GraphCaptureKey struct {
-	Kind      GraphCaptureKind `json:"kind"`
-	BatchSize int              `json:"batch_size"` // fixed capture dimension
-	Tag       string           `json:"tag,omitempty"`
+	Kind               GraphCaptureKind `json:"kind"`
+	BatchSize          int              `json:"batch_size"` // fixed capture dimension
+	Tag                string           `json:"tag,omitempty"`
+	NumSequences       int              `json:"num_sequences,omitempty"`
+	TokensPerReq       int              `json:"tokens_per_req,omitempty"`
+	SchedulerReachable bool             `json:"scheduler_reachable"`
 }
 
 // String returns a human-readable, deterministic identifier for the capture key.
 func (k GraphCaptureKey) String() string {
-	if k.Tag != "" {
-		return fmt.Sprintf("%s:b%d:%s", k.Kind, k.BatchSize, k.Tag)
+	var suffix string
+	if k.NumSequences > 0 && k.TokensPerReq > 0 {
+		suffix = fmt.Sprintf(":s%d:k%d", k.NumSequences, k.TokensPerReq)
 	}
-	return fmt.Sprintf("%s:b%d", k.Kind, k.BatchSize)
+	if k.Tag != "" {
+		return fmt.Sprintf("%s:b%d%s:%s", k.Kind, k.BatchSize, suffix, k.Tag)
+	}
+	return fmt.Sprintf("%s:b%d%s", k.Kind, k.BatchSize, suffix)
 }
 
 // IsSpeculative reports whether the capture key is for speculative draft verification.
@@ -56,6 +63,12 @@ type SpeculativeGraphConfig struct {
 
 	// DeviceTag optionally tags the device architecture or stream for graph differentiation.
 	DeviceTag string `json:"device_tag,omitempty"`
+
+	// MaxActiveSeqs optionally limits the active sequence capacity for reachability validation.
+	MaxActiveSeqs int `json:"max_active_seqs,omitempty"`
+
+	// MaxTokensPerReq optionally limits the decode tokens (K+1) per sequence for reachability validation.
+	MaxTokensPerReq int `json:"max_tokens_per_req,omitempty"`
 }
 
 // Validate checks the configuration parameters.
@@ -65,6 +78,12 @@ func (c SpeculativeGraphConfig) Validate() error {
 	}
 	if c.SpecDraftUBatchSize <= 0 {
 		return fmt.Errorf("speculative graph: SpecDraftUBatchSize must be positive, got %d", c.SpecDraftUBatchSize)
+	}
+	if c.MaxActiveSeqs < 0 {
+		return fmt.Errorf("speculative graph: MaxActiveSeqs must be non-negative, got %d", c.MaxActiveSeqs)
+	}
+	if c.MaxTokensPerReq < 0 {
+		return fmt.Errorf("speculative graph: MaxTokensPerReq must be non-negative, got %d", c.MaxTokensPerReq)
 	}
 	return nil
 }
@@ -98,23 +117,92 @@ func (p *SpeculativeGraphPlanner) SpecDraftUBatchSize() int {
 	return p.cfg.SpecDraftUBatchSize
 }
 
+// ValidateKey validates whether a capture key is scheduler-reachable under the planner configuration.
+func (p *SpeculativeGraphPlanner) ValidateKey(key GraphCaptureKey) error {
+	if key.Kind != GraphCapturePrimary && key.Kind != GraphCaptureSpeculative {
+		return fmt.Errorf("speculative graph: unknown capture key kind %q", key.Kind)
+	}
+	if key.BatchSize <= 0 {
+		return fmt.Errorf("speculative graph: capture key batch size must be positive, got %d", key.BatchSize)
+	}
+
+	maxSeqs := p.cfg.MaxActiveSeqs
+	if maxSeqs <= 0 {
+		maxSeqs = 64
+	}
+	maxTokensReq := p.cfg.MaxTokensPerReq
+	if maxTokensReq <= 0 {
+		maxTokensReq = 16
+	}
+
+	if key.IsSpeculative() {
+		if key.BatchSize > p.cfg.SpecDraftUBatchSize {
+			return fmt.Errorf("speculative graph: batch size %d exceeds SpecDraftUBatchSize %d",
+				key.BatchSize, p.cfg.SpecDraftUBatchSize)
+		}
+		if key.NumSequences > maxSeqs {
+			return fmt.Errorf("speculative graph: sequence count %d exceeds MaxActiveSeqs %d",
+				key.NumSequences, maxSeqs)
+		}
+		if key.TokensPerReq > maxTokensReq {
+			return fmt.Errorf("speculative graph: tokens per request %d exceeds MaxTokensPerReq %d",
+				key.TokensPerReq, maxTokensReq)
+		}
+		if key.NumSequences > 0 && key.TokensPerReq > 0 {
+			total := key.NumSequences * key.TokensPerReq
+			if total > p.cfg.SpecDraftUBatchSize {
+				return fmt.Errorf("speculative graph: required tokens (%d * %d = %d) exceeds SpecDraftUBatchSize %d",
+					key.NumSequences, key.TokensPerReq, total, p.cfg.SpecDraftUBatchSize)
+			}
+		}
+	} else if key.IsPrimary() {
+		if key.BatchSize > p.cfg.PrimaryUBatchSize {
+			return fmt.Errorf("speculative graph: primary chunk size %d exceeds PrimaryUBatchSize %d",
+				key.BatchSize, p.cfg.PrimaryUBatchSize)
+		}
+	}
+
+	return nil
+}
+
 // SpeculativeCaptureKey returns the dedicated, fixed capture key for speculative draft verification.
 // It is guaranteed to remain invariant under varying prompt chunk sizes and dynamic draft token counts.
 func (p *SpeculativeGraphPlanner) SpeculativeCaptureKey() GraphCaptureKey {
 	return GraphCaptureKey{
-		Kind:      GraphCaptureSpeculative,
-		BatchSize: p.cfg.SpecDraftUBatchSize,
-		Tag:       p.cfg.DeviceTag,
+		Kind:               GraphCaptureSpeculative,
+		BatchSize:          p.cfg.SpecDraftUBatchSize,
+		Tag:                p.cfg.DeviceTag,
+		SchedulerReachable: true,
 	}
 }
 
 // PrimaryCaptureKey returns the capture key for a given primary prompt chunk size.
 func (p *SpeculativeGraphPlanner) PrimaryCaptureKey(chunkSize int) GraphCaptureKey {
+	reachable := chunkSize > 0 && chunkSize <= p.cfg.PrimaryUBatchSize
 	return GraphCaptureKey{
-		Kind:      GraphCapturePrimary,
-		BatchSize: chunkSize,
-		Tag:       p.cfg.DeviceTag,
+		Kind:               GraphCapturePrimary,
+		BatchSize:          chunkSize,
+		Tag:                p.cfg.DeviceTag,
+		SchedulerReachable: reachable,
 	}
+}
+
+// ShapeCaptureKey produces a graph capture key for a specific sequence count and tokens per request,
+// verifying reachability before returning the key.
+func (p *SpeculativeGraphPlanner) ShapeCaptureKey(numSeqs, tokensPerReq int) (GraphCaptureKey, error) {
+	key := GraphCaptureKey{
+		Kind:               GraphCaptureSpeculative,
+		BatchSize:          p.cfg.SpecDraftUBatchSize,
+		Tag:                p.cfg.DeviceTag,
+		NumSequences:       numSeqs,
+		TokensPerReq:       tokensPerReq,
+		SchedulerReachable: true,
+	}
+	if err := p.ValidateKey(key); err != nil {
+		key.SchedulerReachable = false
+		return key, err
+	}
+	return key, nil
 }
 
 // CapturedGraph represents an instantiated device execution graph ready for replay.
@@ -173,6 +261,30 @@ func (r *SpeculativeGraphRunner) LookupGraph(key GraphCaptureKey) (*CapturedGrap
 	return g, ok
 }
 
+// AllocateGraph validates reachability and allocates/caches a device graph for the given key.
+// Unreachable shapes fail validation before graph allocation occurs.
+func (r *SpeculativeGraphRunner) AllocateGraph(key GraphCaptureKey) (*CapturedGraph, error) {
+	if err := r.planner.ValidateKey(key); err != nil {
+		return nil, fmt.Errorf("speculative graph: cannot allocate graph for unreachable shape %s: %w", key, err)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	keyStr := key.String()
+	if g, exists := r.graphs[keyStr]; exists {
+		return g, nil
+	}
+
+	g := &CapturedGraph{
+		Key:       key,
+		CreatedAt: time.Now(),
+	}
+	r.graphs[keyStr] = g
+	r.stats.CapturesTotal++
+	return g, nil
+}
+
 // ExecuteSpeculativeDraft executes speculative verification using the fixed micro-batch dimension.
 // If numTokens < SpecDraftUBatchSize, the dispatch is mapped to the fixed capture dimension,
 // preserving graph hits across dynamic draft lengths and preventing driver timeouts.
@@ -186,6 +298,9 @@ func (r *SpeculativeGraphRunner) ExecuteSpeculativeDraft(numTokens int, body fun
 	}
 
 	key := r.planner.SpeculativeCaptureKey()
+	if err := r.planner.ValidateKey(key); err != nil {
+		return fmt.Errorf("speculative graph: unreachable capture key: %w", err)
+	}
 	keyStr := key.String()
 
 	r.mu.Lock()
@@ -227,6 +342,9 @@ func (r *SpeculativeGraphRunner) ExecutePrimaryChunk(chunkSize int, body func(ch
 	}
 
 	key := r.planner.PrimaryCaptureKey(chunkSize)
+	if err := r.planner.ValidateKey(key); err != nil {
+		return fmt.Errorf("speculative graph: unreachable capture key: %w", err)
+	}
 	keyStr := key.String()
 
 	r.mu.Lock()
@@ -257,6 +375,52 @@ func (r *SpeculativeGraphRunner) ExecutePrimaryChunk(chunkSize int, body func(ch
 	r.mu.Unlock()
 
 	return body(chunkSize)
+}
+
+// ExecuteCaptureKey executes a graph dispatch for an arbitrary capture key, validating reachability
+// before allocating or executing the graph.
+func (r *SpeculativeGraphRunner) ExecuteCaptureKey(key GraphCaptureKey, body func(batchSize int) error) error {
+	if err := r.planner.ValidateKey(key); err != nil {
+		return fmt.Errorf("speculative graph: cannot execute unreachable graph key %s: %w", key, err)
+	}
+	keyStr := key.String()
+
+	r.mu.Lock()
+	g, exists := r.graphs[keyStr]
+	if !exists {
+		r.stats.CapturesTotal++
+		if key.IsSpeculative() {
+			r.stats.SpeculativeMisses++
+		} else {
+			r.stats.PrimaryMisses++
+		}
+		g = &CapturedGraph{
+			Key:       key,
+			CreatedAt: time.Now(),
+		}
+		r.graphs[keyStr] = g
+
+		capturer := r.capturer
+		if capturer != nil && capturer.GraphBegin() {
+			r.mu.Unlock()
+			err := body(key.BatchSize)
+			capturer.GraphEndLaunch()
+			return err
+		}
+		r.mu.Unlock()
+		return body(key.BatchSize)
+	}
+
+	if key.IsSpeculative() {
+		r.stats.SpeculativeHits++
+	} else {
+		r.stats.PrimaryHits++
+	}
+	r.stats.ReplaysTotal++
+	g.ReplayCount++
+	r.mu.Unlock()
+
+	return body(key.BatchSize)
 }
 
 // Stats returns a copy of current execution statistics.
