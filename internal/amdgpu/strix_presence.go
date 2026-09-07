@@ -312,3 +312,13 @@ func savePresenceCache(target *StrixTarget) {
 		_ = os.WriteFile(filePath, data, 0644)
 	}
 }
+
+// SavePresenceCache stores a target in the local presence cache.
+func SavePresenceCache(target *StrixTarget) {
+	savePresenceCache(target)
+}
+
+// ClearPresenceCache removes the cached presence file if it exists.
+func ClearPresenceCache() {
+	_ = os.Remove(getPresenceFilePath())
+}

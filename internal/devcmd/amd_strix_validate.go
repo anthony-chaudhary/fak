@@ -59,11 +59,7 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	receipt, err := amdgpu.RunStrixValidation(ctx, opts)
-	if err != nil && (receipt == nil || receipt.Verdict == "FAIL") {
-		if receipt != nil && *asJSON {
-			data, _ := json.MarshalIndent(receipt, "", "  ")
-			fmt.Fprintln(stdout, string(data))
-		}
+	if receipt == nil {
 		fmt.Fprintf(stderr, "amd-strix-validate: validation failed: %v\n", err)
 		return 1
 	}
@@ -71,6 +67,10 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 	if *asJSON {
 		data, _ := json.MarshalIndent(receipt, "", "  ")
 		fmt.Fprintln(stdout, string(data))
+		if err != nil {
+			fmt.Fprintf(stderr, "amd-strix-validate: validation failed: %v\n", err)
+			return 1
+		}
 		if receipt.Verdict == "PASS" {
 			return 0
 		}
@@ -90,6 +90,13 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 		float64(receipt.Target.TotalRAMBytes)/(1024*1024*1024))
 	fmt.Fprintf(stdout, "DPM Level:   %s (Watchdog: %d)\n", receipt.Target.DPMLevel, receipt.Target.LockupTimeout)
 	fmt.Fprintf(stdout, "Digest:      %s\n", receipt.Digest)
+	if len(receipt.Failures) > 0 {
+		fmt.Fprintf(stdout, "--------------------------------------------------------------------------------\n")
+		fmt.Fprintf(stdout, "Failures (%d):\n", len(receipt.Failures))
+		for _, f := range receipt.Failures {
+			fmt.Fprintf(stdout, "  * %s\n", f)
+		}
+	}
 	fmt.Fprintf(stdout, "--------------------------------------------------------------------------------\n")
 	fmt.Fprintf(stdout, "Sub-Kernels Tested (%d):\n", len(receipt.Subkernels))
 	for _, sk := range receipt.Subkernels {
@@ -107,6 +114,11 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 			ab.Feature, ab.Verdict, ab.Speedup, ab.BaselineArm.LatencyUS, ab.CandidateArm.LatencyUS)
 	}
 	fmt.Fprintf(stdout, "================================================================================\n\n")
+
+	if err != nil {
+		fmt.Fprintf(stderr, "amd-strix-validate: validation failed: %v\n", err)
+		return 1
+	}
 
 	if receipt.Verdict == "PASS" {
 		return 0

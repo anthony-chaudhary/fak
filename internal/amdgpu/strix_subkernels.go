@@ -148,11 +148,21 @@ var DefaultSubkernelSpecs = []SubkernelSpec{
 
 // RunSubkernelTests executes a set of sub-kernel test specs on the target Strix Halo machine.
 func RunSubkernelTests(ctx context.Context, target *StrixTarget, selected []string) ([]StrixSubkernelResult, error) {
+	specs, err := filterSubkernelSpecs(selected)
+	if err != nil {
+		return nil, err
+	}
+	if len(selected) > 0 && len(specs) == 0 {
+		return nil, fmt.Errorf("amdgpu: no subkernel specs matched selection")
+	}
+
+	if target == nil {
+		return nil, fmt.Errorf("amdgpu: target is nil")
+	}
 	if !target.Reachable {
 		return nil, fmt.Errorf("amdgpu: target %s is not reachable", target.Host)
 	}
 
-	specs := filterSubkernelSpecs(selected)
 	results := make([]StrixSubkernelResult, 0, len(specs))
 
 	for _, spec := range specs {
@@ -163,21 +173,82 @@ func RunSubkernelTests(ctx context.Context, target *StrixTarget, selected []stri
 	return results, nil
 }
 
-func filterSubkernelSpecs(selected []string) []SubkernelSpec {
-	if len(selected) == 0 {
-		return DefaultSubkernelSpecs
+func availableSubkernelNames() string {
+	names := make([]string, len(DefaultSubkernelSpecs))
+	for i, spec := range DefaultSubkernelSpecs {
+		names[i] = spec.Name
 	}
-	selMap := make(map[string]bool)
-	for _, s := range selected {
-		selMap[strings.ToLower(strings.TrimSpace(s))] = true
+	return strings.Join(names, ", ")
+}
+
+func matchSubkernelSelector(spec SubkernelSpec, s string) bool {
+	specNameLower := strings.ToLower(spec.Name)
+	specCatLower := strings.ToLower(spec.Category)
+	if s == "all" || specNameLower == s || specCatLower == s {
+		return true
 	}
+	if s == "gemm" && specCatLower == "gemv" {
+		return true
+	}
+	return false
+}
+
+func filterSubkernelSpecs(selected []string) ([]SubkernelSpec, error) {
+	if len(selected) == 0 || (len(selected) == 1 && strings.TrimSpace(strings.ToLower(selected[0])) == "all") {
+		return DefaultSubkernelSpecs, nil
+	}
+
+	availableList := availableSubkernelNames()
+
+	hasNonEmpty := false
+	for _, item := range selected {
+		s := strings.TrimSpace(strings.ToLower(item))
+		if s == "" {
+			continue
+		}
+		hasNonEmpty = true
+		if s == "all" {
+			continue
+		}
+		matched := false
+		for _, spec := range DefaultSubkernelSpecs {
+			if matchSubkernelSelector(spec, s) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return nil, fmt.Errorf("amdgpu: unknown subkernel selector %q (available: %s)", s, availableList)
+		}
+	}
+
+	if !hasNonEmpty {
+		return nil, fmt.Errorf("amdgpu: no subkernel specs matched selection (available: %s)", availableList)
+	}
+
 	var out []SubkernelSpec
 	for _, spec := range DefaultSubkernelSpecs {
-		if selMap[spec.Name] || selMap[strings.ToLower(spec.Category)] {
+		matched := false
+		for _, item := range selected {
+			s := strings.TrimSpace(strings.ToLower(item))
+			if s == "" {
+				continue
+			}
+			if matchSubkernelSelector(spec, s) {
+				matched = true
+				break
+			}
+		}
+		if matched {
 			out = append(out, spec)
 		}
 	}
-	return out
+
+	if len(out) == 0 {
+		return nil, fmt.Errorf("amdgpu: no subkernel specs matched selection (available: %s)", availableList)
+	}
+
+	return out, nil
 }
 
 func executeOneSubkernel(ctx context.Context, target *StrixTarget, spec SubkernelSpec) StrixSubkernelResult {
