@@ -213,6 +213,9 @@ func applyBudget(budget float64) {
 
 // validateFlags enforces the flag combinations that must hold before any load.
 func validateFlagCombinations(f *benchFlags) error {
+	if *f.backendName != "legacy" && *f.metal {
+		return fmt.Errorf("-metal selects the legacy Metal path; omit it when naming -backend")
+	}
 	if streamQ4KEnabled(f) && (*f.gguf == "" || !*f.q4k) {
 		return fmt.Errorf("-stream-q4k requires exact -gguf and -q4k")
 	}
@@ -244,8 +247,8 @@ func validateFlagCombinations(f *benchFlags) error {
 			return fmt.Errorf("-q4k cannot be combined with -hf")
 		case *f.lean:
 			return fmt.Errorf("-q4k is its own GGUF resident-quant load path; omit -lean")
-		case *f.backendName != "legacy":
-			return fmt.Errorf("-q4k currently runs through the legacy resident-Q4_K session path; omit -backend")
+		case *f.backendName != "legacy" && *f.backendName != "vulkan":
+			return fmt.Errorf("-q4k supports the legacy resident-quant path or -backend=vulkan")
 		case *f.verify:
 			return fmt.Errorf("-q4k -verify is not wired; use go test ./internal/model -run MetalQ4K for the parity gate (darwin/arm64+cgo auto-compiles Metal, no build tag needed)")
 		}
