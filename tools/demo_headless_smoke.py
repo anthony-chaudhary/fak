@@ -161,6 +161,7 @@ WITNESSES: tuple[Witness, ...] = (
     Witness("agentbenchdemo", ("go", "run", "./cmd/agentbenchdemo"), ("the self-tax", "adjudicated tool calls")),
     Witness("agentbenchdemo-selfcheck", ("go", "run", "./cmd/agentbenchdemo", "-selfcheck"), ("the self-tax invariants hold",)),
     Witness("agentbenchdemo-json", ("go", "run", "./cmd/agentbenchdemo", "-json"), ('"iterations"', '"calls"')),
+    Witness("perfrsidemo-selfcheck", ("go", "run", "./cmd/perfrsidemo", "-selfcheck"), ("selfcheck: PASS (deterministic performance-rsi scorecard)",)),
     Witness(
         "marketdemo-selfcheck",
         ("go", "run", "./cmd/marketdemo", "-selfcheck"),
