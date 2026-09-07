@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
+	"github.com/anthony-chaudhary/fak/internal/amdgpu"
 	"github.com/anthony-chaudhary/fak/internal/interspersedflags"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -92,8 +93,9 @@ type validateResult struct {
 	Phases         []validatePhase               `json:"phases"`
 	SkippedPhases  []string                      `json:"skipped_phases"`
 	Overlays       validateOverlayProgress       `json:"overlays"`
-	WSLPreflight   *validateWSLCapabilityVerdict `json:"wsl_preflight,omitempty"`
-	Failures       []ciPreflightFailure          `json:"failures"`
+	WSLPreflight    *validateWSLCapabilityVerdict `json:"wsl_preflight,omitempty"`
+	StrixValidation *amdgpu.StrixValidationReceipt `json:"strix_validation,omitempty"`
+	Failures        []ciPreflightFailure          `json:"failures"`
 	SelectionAudit *validateSelectionAudit       `json:"selection_audit,omitempty"`
 }
 
@@ -194,6 +196,10 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 	testRun := fs.String("test-run", "", "go test -run expression for isolated affected tests")
 	auditSelection := fs.Bool("audit-selection", false, "compare affected tests with a full-suite truth run")
 	smoke := fs.Bool("smoke", false, "run real-world binary smoke tests against the freshly compiled fak binary in the isolated checkout")
+	strix := fs.Bool("strix", false, "execute physical device validation on AMD Strix Halo appliance")
+	strixHost := fs.String("strix-host", "", "target hostname for AMD Strix Halo validation (default: strix1)")
+	subkernels := fs.String("subkernels", "", "sub-kernel functions to validate on Strix Halo (comma-separated, or 'all')")
+	ablate := fs.String("ablate", "", "ablation arms to evaluate on Strix Halo (comma-separated, or 'all')")
 	var mine pathList
 	fs.Var(&mine, "mine", "owned changed path to overlay (repeatable; files and directories accepted)")
 	positional, parseErr := interspersedflags.Parse(fs, argv)
@@ -339,6 +345,9 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 			if code, timedOut := runValidateSmokePhase(ctx, stdout, &res, &recorder, dir, wslWorkspace, *asJSON); timedOut {
 				return code
 			}
+		}
+		if shouldRunStrixValidation(*strix, paths) {
+			_ = executeStrixValidationPhase(ctx, stdout, stderr, &res, &recorder, *strix, *strixHost, *subkernels, *ablate, paths)
 		}
 	}
 	recorder.finish()
