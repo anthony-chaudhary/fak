@@ -35,9 +35,9 @@ The five that will bite you if you skip them:
   verify on-device (`fak validate --mine <paths>`, `go test ./internal/<pkg>/...`), commit by explicit path
   (`fak commit --path <p> -m "<subject> (fak <leaf>)"` or `fak sweep --apply --lane <lane> -m "<subject>"`), and push unprompted via `fak sync push` or `fak commit --push`.
   "Green" requires shift-left proof: for changes touching executable CLI verbs, gateway adapters, or runtime logic,
-  execute real paths in dogfood or integration tests rather than relying on mock-only or shallow tests. Stay on the trunk,
-  never force-push, defer to the guard (`OFF_TRUNK` / a peer merge in flight), and reconcile trunk divergence in place with `fak sync apply`. Full default + verify command
-  in [`AGENTS.md`](AGENTS.md).
+  execute real paths in dogfood or integration tests rather than relying on mock-only or shallow tests.
+  Safe merge discipline: verify no in-flight `MERGE_HEAD` exists before staging (if active, unstage and wait; never clobber, abort, or finish a peer's merge); use `fak sync apply` (`--ff-only`) for clean trunk convergence; route divergence via `fak sync reconcile` (disjoint integration, superset merge, or dirty parking via `fak wip park`); never force-push, use `--autostash`, or perform raw 3-way merges.
+  Dual-repo synchronization invariant: when working across both repos or touching shared interfaces (`pkg/*`), keep both `fak` and `fak-private` synchronized (fetch both remotes and `refs/fak/locks/*`, fast-forward both, sync `go.work` to prevent module skew, and audit with public leak scrub `tools/scrub_public_copy.py --audit-staged`). Full default + verify command in [`AGENTS.md`](AGENTS.md).
 - **Divide and conquer: delegate substantive work and keep this coordinator context clean; enforce capability-aware scoping and persistence** —
   decompose substantive or multi-part requests into atomic single-concern units and launch specialized subagents
   concurrently for independent components. Use guarded headless agents or equivalent isolated workers for investigation,

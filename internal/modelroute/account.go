@@ -415,6 +415,25 @@ func (t Target) Local() bool { return t.Kind == KindLocal }
 // Local). The residency floor denies a sensitive payload only on a Remote target.
 func (t Target) Remote() bool { return !t.Local() }
 
+// CheckPayloadResidency evaluates whether a payload may be dispatched to this
+// target under the provided payload residency policy. It composes the account's
+// declared locality (Local() / Remote()) with payload classification:
+//
+//   - If the payload is unclassified, it passes through to this target.
+//   - If the target is Local(), classified payloads are permitted (bytes stay on-box).
+//   - If the target is Remote() and the payload is classified, it either deterministically
+//     reroutes to a declared local target or explicitly refuses with a named reason.
+//
+// The account-level residency invariant is left unchanged; this check composes
+// on top of it.
+func (t Target) CheckPayloadResidency(policy PayloadClassificationConfig, payload Payload, witness *EgressWitness) (DispatchDecision, error) {
+	enforcer := NewPayloadResidencyEnforcer(policy)
+	if witness != nil {
+		enforcer.Witness = witness
+	}
+	return enforcer.Check(t, payload)
+}
+
 // EngineRoute returns the value the host writes to abi.ToolCall.Engine for this
 // target. It is STRUCTURALLY honest about locality: a local target is prefixed
 // "local:" (which internal/engine's residency PDP reads as on-box, residency-exempt,

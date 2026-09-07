@@ -87,6 +87,12 @@ type DescriptorAgent struct {
 	History    []agent.Message
 }
 
+// Blank shares the immutable task and prefix, while leaving mutable continuation
+// state empty for HibernationStore's verified Thaw.
+func (a *DescriptorAgent) Blank() Hibernable {
+	return &DescriptorAgent{Descriptor: a.Descriptor, Base: a.Base}
+}
+
 func (a *DescriptorAgent) Step(ctx context.Context, gw Gateway) (bool, error) {
 	if err := a.Descriptor.Validate(); err != nil {
 		return false, err
@@ -141,6 +147,9 @@ func (c OutputContract) Match(got string) bool {
 
 // SpawnDescriptor wires the descriptor's budget into the Host's existing
 // session table before spawning; it does not create a second scheduler.
+// With Config.Warm the returned value is an enrollment template: restored
+// instances execute the task, so callers observe terminal status through Reap
+// rather than reading mutable fields on this template.
 func SpawnDescriptor(h *Host, d Descriptor, base []agent.Message) (*DescriptorAgent, error) {
 	if h == nil {
 		return nil, errors.New("microagent: nil host")

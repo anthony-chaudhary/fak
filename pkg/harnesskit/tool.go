@@ -99,7 +99,7 @@ type Condition struct {
 }
 
 // AuthRequirement declares credential dependencies resolved just-in-time at the execution boundary.
-// Invariant: The model context and serialized tool parameters NEVER contain these secrets.
+// Secrets are injected at runtime so model contexts and serialized tool parameters never include them.
 type AuthRequirement struct {
 	Type          AuthType `json:"type"`
 	SecretKey     string   `json:"secret_key,omitempty"`

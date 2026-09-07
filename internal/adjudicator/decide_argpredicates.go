@@ -28,6 +28,15 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 		}
 		val, present := argString(args, pr.Arg)
 		switch pr.Kind {
+		case ArgAllowExact:
+			literal, isString := args[pr.Arg].(string)
+			if !isString || literal != pr.Glob {
+				if pr.Advisory {
+					note(pr, "allow_exact")
+					continue
+				}
+				return argDeny(pr, "allow_exact"), true, notes
+			}
 		case ArgAllowGlob:
 			// Canonicalize before the containment check (#2407): a backslash,
 			// redundant dot-segment, env alias, or quote-wrapped spelling of an

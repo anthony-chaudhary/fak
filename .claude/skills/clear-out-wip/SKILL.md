@@ -25,7 +25,12 @@ collision-priced follow-on units. Do not recreate those workflows here.
   yours. Mutate or commit only paths whose ownership is evidenced by the operator, current task,
   a lane/lease record, or a coherent diff you can attribute independently.
 - If `MERGE_HEAD` exists and the merge is not yours, do not finish or abort it. Leave your edits
-  unstaged and wait.
+  unstaged and wait. Strictly avoid raw unverified git merges, `--autostash`, or force-pushes.
+  Integrate upstream advances only through structured convergence (`fak sync apply` or `fak sync reconcile`).
+- Dual-repo boundary awareness: when clearing WIP spanning shared interfaces (`pkg/*`), platform modules,
+  or cross-repo dependencies with `fak-private`, inventory and coordinate both checkouts. Verify multi-module
+  alignment (`go work sync`) and ensure zero private leak needles (`python tools/scrub_public_copy.py --audit-staged`)
+  before declaring enabling or ship-now slices ready to land.
 - Never add a `.gitignore` rule merely to make an unknown path disappear. Ignore only a
   reproducible generated class with a named producer; verify no tracked or durable source path
   matches. Prefer allocating output through `fak tree-doctor --scratch-dir/--scratch-path`.
@@ -57,6 +62,17 @@ git rev-parse -q --verify MERGE_HEAD
 fak sweep --json
 fak tree-doctor --json
 ```
+
+If clearing WIP that crosses shared boundaries into companion repository `fak-private`, run the dual-repo census:
+```bash
+# In fak-private checkout:
+git status --short --branch
+git rev-parse -q --verify MERGE_HEAD
+git fetch origin
+# Multi-module workspace graph verification:
+go work sync
+```
+If either checkout has an active `MERGE_HEAD`, halt and wait for merge quiescence before proceeding. Never abort or finish a peer's merge.
 
 Also inspect lane/lease and WIP records when available:
 
@@ -155,8 +171,9 @@ For each `SHIP_NOW` or `SHIP_ENABLER` unit:
 1. Confirm ownership and inspect the complete diff for the explicit paths.
 2. Run the narrow witness, then `fak validate --mine <path> ...` for the committed tip plus only
    that unit. On this Windows host, use the repository's WSL test path where tests are required.
-3. Follow `/commit-clean`: preview the subject, commit exactly the paths under the lock, verify the
-   committed path set, and push through the safe sync path. One coherent unit, one commit, one leaf.
+3. Follow `/commit-clean`: preview the subject, ensure local HEAD is converged with upstream without raw merges or `--autostash` (`fak sync apply` or `fak sync reconcile` supporting `ROUTE_DISJOINT_INTEGRATE`, `ROUTE_SUPERSET_MERGE`, or `ROUTE_HOLD_DIRTY_COLLISION` with `fak wip park`). Commit exactly the paths under the lock, verify the committed path set, and push through the safe sync path (`fak sync push`).
+   - When clearing WIP spanning shared boundaries (`pkg/*`) with `fak-private`, verify boundary leak hygiene (`python tools/scrub_public_copy.py --audit-staged`), run `go work sync`, and coordinate safe pushes across both repositories (`fak sync push` in `fak`, `fak-sync push` in `fak-private`).
+   One coherent unit, one commit, one leaf.
 4. Cite the changed `module@rev` and witness. State `parent remains open` for an enabling slice.
 5. Rerun `fak sweep --json`; peers may have changed the tree while the unit landed. Never apply a
    stale census to the next commit.

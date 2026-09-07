@@ -110,3 +110,75 @@ func TestStreamContractMakesBackpressureCancelable(t *testing.T) {
 		t.Fatalf("unexpected cancellation: %v", err)
 	}
 }
+
+func BenchmarkResolveInstructions(b *testing.B) {
+	ctx := context.Background()
+	provider := InstructionProviderFunc(func(_ context.Context, req InstructionRequest) (InstructionSnapshot, error) {
+		return InstructionSnapshot{
+			Fragments: []InstructionFragment{
+				{
+					ID:         "app/core",
+					Source:     "application",
+					Trust:      TrustApplication,
+					Precedence: 10,
+					Lifetime:   LifetimeRun,
+					Residency:  ResidencyOverlay,
+					Content:    "You are an AI assistant helping with coding tasks.",
+				},
+				{
+					ID:         "dynamic/policy",
+					Source:     "operator",
+					Trust:      TrustApplication,
+					Precedence: 20,
+					Lifetime:   LifetimeTurn,
+					Residency:  ResidencyEphemeralTail,
+					Content:    "Operate within approved workspace boundaries.",
+				},
+			},
+		}, nil
+	})
+	req := InstructionRequest{
+		RunID:     "run-bench",
+		ThreadID:  "thread-bench",
+		TurnID:    "turn-1",
+		AgentRole: "coder",
+		Facts:     map[string]string{"task": "benchmark"},
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		snapshot, err := ResolveInstructions(ctx, provider, req)
+		if err != nil || len(snapshot.Fragments) == 0 {
+			b.Fatalf("unexpected failure: %v", err)
+		}
+	}
+}
+
+func BenchmarkNegotiateCompatibility(b *testing.B) {
+	builder := BuilderContract{
+		ContractVersion: ContractVersion,
+		Requirements: []CapabilityRequirement{
+			{Name: "tools.invoke", MinRevision: 1, MaxRevision: 2, Status: StatusStable},
+			{Name: "events.trace", MinRevision: 1, MaxRevision: 1, Optional: true},
+			{Name: "context.inject", MinRevision: 1, MaxRevision: 3, Status: StatusStable},
+		},
+	}
+	host := RuntimeContract{
+		ContractVersion: ContractVersion,
+		Capabilities: []CapabilityOffer{
+			{Name: "unrelated", Revision: 9, Status: StatusExperimental},
+			{Name: "tools.invoke", Revision: 2, Status: StatusStable},
+			{Name: "context.inject", Revision: 2, Status: StatusStable},
+		},
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		report := NegotiateCompatibility(builder, host)
+		if !report.Compatible {
+			b.Fatalf("expected compatible negotiation: %s", report.Error())
+		}
+	}
+}

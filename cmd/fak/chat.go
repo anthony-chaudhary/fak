@@ -22,12 +22,16 @@ type chatFlags struct {
 	baseURL               *string
 	model                 *string
 	apiKeyEnv             *string
+	codexAuth             *bool
+	codexHome             *string
 	anthropicAuth         *string
 	offline               *bool
 	maxTurns              *int
 	policyPath            *string
 	posture               *string
 	task                  *string
+	taskFile              *string
+	effort                *string
 	tools                 *string
 	codeTools             *bool
 	codeWorkspace         *string
@@ -52,12 +56,16 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 	cf.baseURL = fs.String("base-url", "", "provider base URL (empty => offline mock planner; no upstream)")
 	cf.model = fs.String("model", "gemini-2.5-flash", "model id")
 	cf.apiKeyEnv = fs.String("api-key-env", "GEMINI_API_KEY", "env var holding the API key")
+	cf.codexAuth = fs.Bool("codex-auth", false, "explicitly reuse a Codex-managed ChatGPT login read-only; Codex owns renewal")
+	cf.codexHome = fs.String("codex-home", "", "Codex credential home for --codex-auth (default: existing discovery)")
 	cf.anthropicAuth = fs.String("anthropic-auth", "auto", "(--provider anthropic) how to present the credential: auto (sniff the token shape), bearer, or x-api-key. Pass bearer for a THIRD-PARTY Anthropic-compatible endpoint whose tenant token is not an sk-ant-* key")
 	cf.offline = fs.Bool("offline", false, "force the deterministic mock planner (no network)")
 	cf.maxTurns = fs.Int("max-turns", 10, "max model turns the loop may take to resolve ONE human turn")
 	cf.policyPath = fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor)")
 	cf.posture = fs.String("posture", "fail_closed", "adjudication posture: fail_closed|default_open|admit_and_log (default: fail_closed developer floor; env: FAK_AGENT_POSTURE or FAK_GUARD_POSTURE)")
 	cf.task = fs.String("task", "", "run a single non-interactive task turn (headless mode) and exit")
+	cf.taskFile = fs.String("task-file", "", "read a non-interactive UTF-8 task from a file (mutually exclusive with --task)")
+	cf.effort = fs.String("effort", "", "reasoning effort for the native task")
 	cf.tools = fs.String("tools", "code", "toolset to arm: code (Read/Write/Edit/Bash/Grep/Glob), demo (airline fixture), or none")
 	cf.codeTools = fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the workspace (alias for --tools=code)")
 	cf.codeWorkspace = fs.String("code-workspace", "", "override workspace root for code tools (default: current directory)")
@@ -90,6 +98,35 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 func cmdChat(argv []string) {
 	fs, cf := newChatFlagSet()
 	_ = fs.Parse(argv)
+	apiKeyExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "api-key-env" {
+			apiKeyExplicit = true
+		}
+	})
+	if *cf.codexHome != "" && !*cf.codexAuth {
+		must(fmt.Errorf("fak chat: --codex-home requires --codex-auth"))
+	}
+	if *cf.codexAuth {
+		if *cf.offline || (apiKeyExplicit && *cf.apiKeyEnv != "") {
+			must(fmt.Errorf("fak chat: --codex-auth cannot be combined with --offline or an explicit API key environment"))
+		}
+		if *cf.provider != "openai-responses" || strings.TrimRight(*cf.baseURL, "/") != guardCodexChatGPTBackendBaseURL {
+			must(fmt.Errorf("fak chat: --codex-auth requires --provider openai-responses and --base-url %s", guardCodexChatGPTBackendBaseURL))
+		}
+		*cf.apiKeyEnv = ""
+	}
+	if *cf.taskFile != "" {
+		if *cf.task != "" {
+			must(fmt.Errorf("fak chat: --task and --task-file are mutually exclusive"))
+		}
+		data, err := os.ReadFile(*cf.taskFile)
+		must(err)
+		if len(strings.TrimSpace(string(data))) == 0 {
+			must(fmt.Errorf("fak chat: task file must be nonempty"))
+		}
+		*cf.task = string(data)
+	}
 
 	if *cf.workflow != "" {
 		if err := runWorkflowCLI(*cf.workflow, *cf.workflowStep, *cf.workflowCheckpointDir); err != nil {
@@ -142,6 +179,9 @@ func cmdChat(argv []string) {
 	}
 
 	var runOpts []agent.RunOption
+	if *cf.effort != "" {
+		runOpts = append(runOpts, agent.WithRunReasoningEffort(*cf.effort))
+	}
 	var catalog []agent.ToolDef
 	hasCustomCatalog := false
 	root := strings.TrimSpace(*cf.codeWorkspace)
@@ -194,6 +234,13 @@ func cmdChat(argv []string) {
 	}
 
 	planner := chatPlanner(*cf.offline, effectiveBaseURL, *cf.provider, *cf.model, *cf.apiKeyEnv, *cf.anthropicAuth)
+	if *cf.codexAuth {
+		httpPlanner, ok := planner.(*agent.HTTPPlanner)
+		if !ok {
+			must(fmt.Errorf("fak chat: --codex-auth requires the native HTTP planner"))
+		}
+		must(configureChatCodexSubscription(httpPlanner, *cf.codexHome))
+	}
 	if *cf.task != "" {
 		if err := runChatHeadless(os.Stdout, planner, *cf.task, *cf.maxTurns, *cf.asJSON, *cf.receiptOut, root, runOpts...); err != nil {
 			os.Exit(1)

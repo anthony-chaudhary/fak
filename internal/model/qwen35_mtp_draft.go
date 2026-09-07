@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
 )
@@ -345,6 +346,10 @@ func SpecDecodeGreedyQwen35MTPDepthN(target *Session, prompt []int, n, depth int
 type qwen35MTPDepthNDraftBuilder func(*Session, int) (*Qwen35MTPDraftSession, error)
 
 func specDecodeGreedyQwen35MTPDepthN(target *Session, prompt []int, n, depth int, build qwen35MTPDepthNDraftBuilder) (polymodel.SpecDecodeRun, error) {
+	return specDecodeGreedyQwen35MTPDepthNMeasured(target, prompt, n, depth, build, nil)
+}
+
+func specDecodeGreedyQwen35MTPDepthNMeasured(target *Session, prompt []int, n, depth int, build qwen35MTPDepthNDraftBuilder, meter *qwen35MTPRunMeter) (polymodel.SpecDecodeRun, error) {
 	if len(prompt) == 0 {
 		return polymodel.SpecDecodeRun{}, ErrQwen35MTPEmptyPrefix
 	}
@@ -388,11 +393,14 @@ func specDecodeGreedyQwen35MTPDepthN(target *Session, prompt []int, n, depth int
 	var pending *qwen35MTPTargetTransaction
 	var pendingCommitted int
 	propose := func(committed []int) []int {
+		meter.enter("synchronization")
+		defer meter.enter("acceptance_control")
 		if runtimeErr != nil || draftSession.Err() != nil {
 			return nil
 		}
 		if pending != nil {
 			targetLogits, runtimeErr = pending.Commit(len(pending.draft))
+			meter.record(pending)
 			pending = nil
 			pendingCommitted = 0
 		}
@@ -402,6 +410,7 @@ func specDecodeGreedyQwen35MTPDepthN(target *Session, prompt []int, n, depth int
 		if runtimeErr != nil {
 			return nil
 		}
+		meter.enter("drafting")
 		draft := draftSession.Propose(committed)
 		if err := draftSession.Err(); err != nil {
 			runtimeErr = err
@@ -409,6 +418,8 @@ func specDecodeGreedyQwen35MTPDepthN(target *Session, prompt []int, n, depth int
 		return draft
 	}
 	verify := func(committed, draft []int) []int {
+		meter.enter("verification_setup")
+		defer meter.enter("acceptance_control")
 		if runtimeErr != nil || draftSession.Err() != nil {
 			return nil
 		}
@@ -422,10 +433,12 @@ func specDecodeGreedyQwen35MTPDepthN(target *Session, prompt []int, n, depth int
 			return nil
 		}
 		pendingCommitted = len(committed)
+		meter.enter("target_verification")
 		rows, err := pending.Verify(draft)
 		if err != nil {
 			runtimeErr = err
 			_ = pending.Abort()
+			meter.record(pending)
 			pending = nil
 			pendingCommitted = 0
 			return nil
@@ -442,15 +455,20 @@ func specDecodeGreedyQwen35MTPDepthN(target *Session, prompt []int, n, depth int
 		MaxNewTokens: n,
 		MaxDraft:     depth,
 		Rollback: func(evictKV int) {
+			meter.enter("rejection_rollback_replay")
+			defer meter.enter("acceptance_control")
 			if pending == nil || runtimeErr != nil {
 				return
 			}
 			accepted := len(pending.draft) - evictKV
 			targetLogits, runtimeErr = pending.Commit(accepted)
+			meter.record(pending)
 			pending = nil
 			pendingCommitted = 0
 		},
 	})
+	// Final commit, cleanup and any recovery remain inside the inclusive timer.
+	meter.enter("finalization_recovery")
 	if pending != nil {
 		if decodeErr == nil && runtimeErr == nil {
 			emitted := len(prompt) + len(run.Output) - pendingCommitted
@@ -459,6 +477,7 @@ func specDecodeGreedyQwen35MTPDepthN(target *Session, prompt []int, n, depth int
 		} else {
 			_ = pending.Abort()
 		}
+		meter.record(pending)
 		pending = nil
 		pendingCommitted = 0
 	}
@@ -509,4 +528,21 @@ func validateQwen35MTPDepthNTarget(target *Session, depth int, requireFresh bool
 		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: err.Error()}
 	}
 	return nil
+}
+
+// SpecDecodeGreedyQwen35MTPDepthNWithReceipt executes the same production loop
+// as SpecDecodeGreedyQwen35MTPDepthN, retaining failed as well as successful
+// attempts. It makes no artifact, memory-headroom, or speedup claim.
+func SpecDecodeGreedyQwen35MTPDepthNWithReceipt(target *Session, prompt []int, n, depth int) (polymodel.SpecDecodeRun, Qwen35MTPRunReceipt, error) {
+	started := time.Now()
+	m := &qwen35MTPRunMeter{start: started, last: started, stage: "setup", receipt: Qwen35MTPRunReceipt{
+		Engine: "fak-native", Depth: depth, Stages: map[string]int64{},
+	}}
+	run, err := specDecodeGreedyQwen35MTPDepthNMeasured(target, prompt, n, depth, NewQwen35MTPDraftSession, m)
+	m.enter("finished")
+	m.receipt.TotalNanoseconds = m.last.Sub(m.start).Nanoseconds()
+	if err != nil {
+		m.receipt.Error = err.Error()
+	}
+	return run, m.receipt, err
 }

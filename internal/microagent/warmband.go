@@ -461,6 +461,9 @@ func (b *WarmBand) Yield(id string) error {
 // A frozen file for a cancelled id is deliberately LEFT on disk: it is that agent's last
 // witnessed context, and deleting it here would discard state the band never owned.
 func (b *WarmBand) Retire(id string) {
+	b.coldMu.Lock()
+	delete(b.coldStates, id)
+	b.coldMu.Unlock()
 	b.mu.Lock()
 	_, wasHeld := b.held[id]
 	delete(b.held, id)
