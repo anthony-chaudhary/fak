@@ -45,7 +45,7 @@ func FormatOpencodePrompt(issue Issue) string {
 
 	b.WriteString("\nInstructions:\n")
 	b.WriteString("- Strictly adhere to the assigned lane and boundary paths. Do not touch root files (e.g. go.mod, go.sum, dos.toml) or files in other packages.\n")
-	b.WriteString("- Coordinate substantive work through parallel subagents by default via the 'task' tool (worker, researcher, deep-reason, cross-validator).\n")
+	b.WriteString("- Execute your deliverable directly as a leaf worker. Prohibit calling the 'task' tool or attempting nested subagent delegation (prevents subagent depth limit recursion failure).\n")
 	b.WriteString("- Deliverable: Deliver a clean defect fix or feature implementation along with a deterministic reproduction/regression unit test.\n")
 	b.WriteString("- Provide a 3-line receipt upon completion: status/verdict, changed files, and test output summary, and post directly to the GitHub issue with gh issue comment.\n")
 	b.WriteString("- Milestone Progress Protocol: Report milestone progress using structured comment tags in your commentary:\n")
