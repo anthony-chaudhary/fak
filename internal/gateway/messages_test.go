@@ -188,6 +188,8 @@ func TestAnthropicMessagesParrotLoopSteers(t *testing.T) {
 
 	body := json.RawMessage(`{"messages":[{"role":"user","content":"go"},` +
 		parrotNote() + `,{"role":"user","content":"again"},` +
+		parrotNote() + `,{"role":"user","content":"again"},` +
+		parrotNote() + `,{"role":"user","content":"again"},` +
 		parrotNote() + `,{"role":"user","content":"again"}]}`)
 	var resp anthropicMessageResponse
 	postJSON(t, ts.URL+"/v1/messages", body, &resp)
@@ -207,7 +209,7 @@ func TestAnthropicMessagesParrotLoopSteers(t *testing.T) {
 }
 
 // The SECOND loop class: the model repeating its OWN identical prose (not a [fak] echo)
-// verbatim each turn. Two identical trailing refusals → at threshold → steer.
+// verbatim each turn. Four identical trailing refusals → at threshold → steer.
 func TestAnthropicMessagesVerbatimRepeatSteers(t *testing.T) {
 	srv := newTestServer(t)
 	srv.planner = stubPlanner{comp: &agent.Completion{
@@ -218,6 +220,8 @@ func TestAnthropicMessagesVerbatimRepeatSteers(t *testing.T) {
 	defer ts.Close()
 
 	body := json.RawMessage(`{"messages":[{"role":"user","content":"go"},` +
+		verbatimRefusal() + `,{"role":"user","content":"again"},` +
+		verbatimRefusal() + `,{"role":"user","content":"again"},` +
 		verbatimRefusal() + `,{"role":"user","content":"again"},` +
 		verbatimRefusal() + `,{"role":"user","content":"again"}]}`)
 	var resp anthropicMessageResponse
@@ -245,6 +249,8 @@ func TestAnthropicMessagesFreshUserInputVetoesSteer(t *testing.T) {
 	defer ts.Close()
 
 	body := json.RawMessage(`{"messages":[{"role":"user","content":"go"},` +
+		parrotNote() + `,{"role":"user","content":"again"},` +
+		parrotNote() + `,{"role":"user","content":"again"},` +
 		parrotNote() + `,{"role":"user","content":"again"},` +
 		parrotNote() + `,{"role":"user","content":"Judge whether the stop condition is satisfied and answer with JSON. Condition: work on top next issues"}]}`)
 	var resp anthropicMessageResponse
@@ -276,6 +282,8 @@ func TestAnthropicMessagesKernelNoteTailStillSteers(t *testing.T) {
 	defer ts.Close()
 
 	body := json.RawMessage(`{"messages":[{"role":"user","content":"go"},` +
+		parrotNote() + `,{"role":"user","content":"again"},` +
+		parrotNote() + `,{"role":"user","content":"again"},` +
 		parrotNote() + `,{"role":"user","content":"again"},` +
 		parrotNote() + `,{"role":"user","content":"[fak] refused 1 tool call(s): Write (DEFAULT_DENY/TERMINAL). Do not re-propose a refused call unchanged; choose an allowed alternative."}]}`)
 	var resp anthropicMessageResponse

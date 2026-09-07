@@ -192,9 +192,45 @@ func anyLivelock(adjs []ToolAdjudication) bool {
 // the gateway short-circuits the loop. A capable model never repeats itself verbatim or
 // echoes a kernel notice; a small local model fronted by the kernel often does exactly
 // that — turn after turn, with no new tool call and no progress — until the harness
-// turn-cap ends the session with an empty result. At threshold=2 the third such
-// degenerate turn trips the break, reclaiming the rest of the turn budget.
-const loopBreakThreshold = 2
+// turn-cap ends the session with an empty result. Four trailing degenerate turns
+// trip the break, reclaiming the rest of the turn budget.
+const loopBreakThreshold = 4
+
+// isKernelBannerEcho recognizes emitted notices at the beginning of a line,
+// excluding quoted and fenced examples in ordinary discussion.
+func isKernelBannerEcho(content string) bool {
+	var fence byte
+	var fenceWidth int
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			marker := trimmed[0]
+			width := len(trimmed) - len(strings.TrimLeft(trimmed, string(marker)))
+			if fence == 0 {
+				fence, fenceWidth = marker, width
+			} else if marker == fence && width >= fenceWidth && strings.TrimSpace(trimmed[width:]) == "" {
+				fence = 0
+			}
+			continue
+		}
+		if fence != 0 || !strings.HasPrefix(line, "[fak] ") {
+			continue
+		}
+		body := strings.TrimPrefix(line, "[fak] ")
+		for _, prefix := range []string{"refused ", "refused:", "held:", "quarantined:", "adjudicated:", "Allowed next step for ", "repaired arguments for:", "observed repeated admitted tool call(s):"} {
+			if strings.HasPrefix(body, prefix) {
+				return true
+			}
+		}
+		// resultAdmissionNote begins with a count rather than a verb.
+		count, rest, ok := strings.Cut(body, " ")
+		if n, err := strconv.Atoi(count); ok && err == nil && n > 0 &&
+			(strings.HasPrefix(rest, "tool result was held out of context (") || strings.HasPrefix(rest, "tool results were held out of context (")) {
+			return true
+		}
+	}
+	return false
+}
 
 // degenerateStreak counts the trailing run of NON-PROGRESSING assistant turns in the
 // replayed history. A turn is degenerate when it is text-only (no tool call survived to
@@ -228,7 +264,7 @@ func degenerateStreak(messages []agent.Message) int {
 	// of the adjacent more-recent assistant turn (the model emitting the same prose).
 	n := 0
 	for i, c := range tail {
-		isEcho := strings.Contains(c, "[fak]")
+		isEcho := isKernelBannerEcho(c)
 		isRepeat := c != "" && ((i > 0 && c == tail[i-1]) || (i+1 < len(tail) && c == tail[i+1]))
 		if isEcho || isRepeat {
 			n++
@@ -268,7 +304,7 @@ func pendingFreshUserInput(messages []agent.Message) bool {
 		}
 	}
 	for _, m := range messages[last+1:] {
-		if m.Role != agent.RoleUser || m.Content == "" || strings.Contains(m.Content, "[fak]") {
+		if m.Role != agent.RoleUser || m.Content == "" || isKernelBannerEcho(m.Content) {
 			continue
 		}
 		if _, ok := answered[m.Content]; !ok {

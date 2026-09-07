@@ -455,21 +455,21 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 	}
 
 	p := &anthropicPassthrough{
-		s:              s,
-		w:              w,
-		r:              r,
-		req:            req,
-		reqTrace:       reqTrace,
-		turn:           sessionTurn,
-		flusher:        flusher,
-		passIdx:        map[int]int{},
-		toolBuf:        map[int]*sseToolAccum{},
+		s:               s,
+		w:               w,
+		r:               r,
+		req:             req,
+		reqTrace:        reqTrace,
+		turn:            sessionTurn,
+		flusher:         flusher,
+		passIdx:         map[int]int{},
+		toolBuf:         map[int]*sseToolAccum{},
 		openClientBlock: -1,
-		checkpointDir:  "",
-		incidentDir:    "",
-		traceID:        reqTrace,
-		model:          req.Model,
-		began:          time.Now(),
+		checkpointDir:   "",
+		incidentDir:     "",
+		traceID:         reqTrace,
+		model:           req.Model,
+		began:           time.Now(),
 	}
 	began := time.Now()
 

@@ -25,12 +25,12 @@ import (
 // Disposition is the actionable deny-loopback class — it is what lets a refusal
 // cost a non-Go agent zero extra model turns.
 type WireVerdict struct {
-	Kind           string            `json:"kind"`                       // ALLOW|DENY|TRANSFORM|QUARANTINE|REQUIRE_WITNESS|DEFER|RESIDUAL|KIND_<n>
-	Reason         string            `json:"reason,omitempty"`           // closed refusal vocabulary, e.g. POLICY_BLOCK
-	RefusalSubtype string            `json:"refusal_subtype,omitempty"`  // granular subtype for TRUST_VIOLATION, e.g. injection_quarantine
-	By             string            `json:"by,omitempty"`               // which adjudicator decided (forensics)
-	Disposition    string            `json:"disposition,omitempty"`      // RETRYABLE|WAIT|ESCALATE|TERMINAL
-	Detail         map[string]string `json:"detail,omitempty"`           // bounded disclosure (e.g. the offending self-modify glob)
+	Kind           string            `json:"kind"`                      // ALLOW|DENY|TRANSFORM|QUARANTINE|REQUIRE_WITNESS|DEFER|RESIDUAL|KIND_<n>
+	Reason         string            `json:"reason,omitempty"`          // closed refusal vocabulary, e.g. POLICY_BLOCK
+	RefusalSubtype string            `json:"refusal_subtype,omitempty"` // granular subtype for TRUST_VIOLATION, e.g. injection_quarantine
+	By             string            `json:"by,omitempty"`              // which adjudicator decided (forensics)
+	Disposition    string            `json:"disposition,omitempty"`     // RETRYABLE|WAIT|ESCALATE|TERMINAL
+	Detail         map[string]string `json:"detail,omitempty"`          // bounded disclosure (e.g. the offending self-modify glob)
 }
 
 // renderVerdict projects a folded abi.Verdict (and the optional result Meta) onto
