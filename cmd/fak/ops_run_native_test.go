@@ -246,3 +246,196 @@ func TestOpsNativeRetainsExplicitPolicy(t *testing.T) {
 		t.Fatalf("code=%d, status=%q, stderr=%s", code, got.Status, &stderr)
 	}
 }
+
+func TestOpsNativePolicyExactCommand(t *testing.T) {
+	t.Setenv("FAK_OPS_NATIVE_TEST_CHILD", "1")
+	root := t.TempDir()
+	prompt := filepath.Join(root, "prompt.txt")
+	receipt := filepath.Join(root, "run.json")
+	policyFile := filepath.Join(root, "policy.json")
+	permittedFile := filepath.Join(root, "report", "inventory.txt")
+	if err := os.MkdirAll(filepath.Join(root, "report"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(prompt, []byte("native exact command inventory task"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	exactCmd := "echo exact-authorized-marker"
+	policyJSON := `{
+		"posture": "fail_closed",
+		"allow": ["Write", "Bash"],
+		"arg_rules": [
+			{
+				"tool": "Write",
+				"arg": "file_path",
+				"allow_glob": "report/**",
+				"reason": "POLICY_BLOCK"
+			},
+			{
+				"tool": "Bash",
+				"arg": "command",
+				"allow_exact": "echo exact-authorized-marker",
+				"reason": "POLICY_BLOCK"
+			}
+		]
+	}`
+	if err := os.WriteFile(policyFile, []byte(policyJSON), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		w.Header().Set("Content-Type", "application/json")
+		n := requests.Add(1)
+		switch n {
+		case 1:
+			// Attempt 1: Near-match Bash command (denied by policy).
+			args, _ := json.Marshal(map[string]string{"command": "echo near-match-marker"})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []any{
+					map[string]any{
+						"message": map[string]any{
+							"role": "assistant",
+							"tool_calls": []any{
+								map[string]any{
+									"id":   "bash-near-match",
+									"type": "function",
+									"function": map[string]any{
+										"name":      "Bash",
+										"arguments": string(args),
+									},
+								},
+							},
+						},
+						"finish_reason": "tool_calls",
+					},
+				},
+			})
+		case 2:
+			// Attempt 2: Exact authorized command but with wrong/escaping cwd (denied).
+			args, _ := json.Marshal(map[string]string{"command": exactCmd, "cwd": "../escape"})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []any{
+					map[string]any{
+						"message": map[string]any{
+							"role": "assistant",
+							"tool_calls": []any{
+								map[string]any{
+									"id":   "bash-wrong-cwd",
+									"type": "function",
+									"function": map[string]any{
+										"name":      "Bash",
+										"arguments": string(args),
+									},
+								},
+							},
+						},
+						"finish_reason": "tool_calls",
+					},
+				},
+			})
+		case 3:
+			// Attempt 3: Exact authorized command in workspace cwd (should succeed).
+			args, _ := json.Marshal(map[string]string{"command": exactCmd})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []any{
+					map[string]any{
+						"message": map[string]any{
+							"role": "assistant",
+							"tool_calls": []any{
+								map[string]any{
+									"id":   "bash-exact-authorized",
+									"type": "function",
+									"function": map[string]any{
+										"name":      "Bash",
+										"arguments": string(args),
+									},
+								},
+							},
+						},
+						"finish_reason": "tool_calls",
+					},
+				},
+			})
+		case 4:
+			// Verify that the previous tool execution for bash-exact-authorized returned the exact marker.
+			msgs, _ := request["messages"].([]any)
+			var markerWitnessed bool
+			for _, m := range msgs {
+				msgMap, _ := m.(map[string]any)
+				if msgMap["role"] == "tool" && msgMap["tool_call_id"] == "bash-exact-authorized" {
+					content, _ := msgMap["content"].(string)
+					if strings.Contains(content, "exact-authorized-marker") {
+						markerWitnessed = true
+					}
+				}
+			}
+			content := "failed: command denied"
+			if markerWitnessed {
+				content = "witness: exact-authorized-marker"
+			}
+			// Attempt 4: Confined Write with the witnessed marker (should succeed).
+			args, _ := json.Marshal(map[string]string{"file_path": "report/inventory.txt", "content": content, "mode": "create"})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []any{
+					map[string]any{
+						"message": map[string]any{
+							"role": "assistant",
+							"tool_calls": []any{
+								map[string]any{
+									"id":   "write-inventory",
+									"type": "function",
+									"function": map[string]any{
+										"name":      "Write",
+										"arguments": string(args),
+									},
+								},
+							},
+						},
+						"finish_reason": "tool_calls",
+					},
+				},
+			})
+		default:
+			// Final completion.
+			fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"Operational inventory complete."},"finish_reason":"stop"}]}`)
+		}
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := runOpsRun(&stdout, &stderr, []string{
+		"--harness", "native",
+		"--prompt-file", prompt,
+		"--receipt", receipt,
+		"--provider", "openai",
+		"--model", "fixture",
+		"--base-url", server.URL + "/v1",
+		"--workspace", root,
+		"--policy", policyFile,
+		"--max-turns", "6",
+		"--timeout", "10s",
+		"--effort", "low",
+	})
+
+	written, err := os.ReadFile(permittedFile)
+	if err != nil || string(written) != "witness: exact-authorized-marker" {
+		t.Fatalf("permitted report file %s not written: err=%v, content=%q\nstdout: %s\nstderr: %s", permittedFile, err, written, &stdout, &stderr)
+	}
+
+	data, err := os.ReadFile(receipt)
+	if err != nil {
+		t.Fatalf("receipt: %v; child stderr: %s", err, &stderr)
+	}
+	var got opsRunReceipt
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 || got.Status != "succeeded" {
+		t.Fatalf("code=%d, status=%q, stderr=%s", code, got.Status, &stderr)
+	}
+}

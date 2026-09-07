@@ -202,11 +202,16 @@ func cmdChat(argv []string) {
 		if *cf.skillsDir != "" {
 			extraDirs = append(extraDirs, *cf.skillsDir)
 		}
+		var exactCommands []string
+		if *cf.policyPath != "" {
+			exactCommands = extractPolicyExactCommands(adjudicator.Default.PolicySnapshot())
+		}
 		codeCat, armErr := agent.ArmCodeToolsWithOptions(agent.CodeToolsOptions{
-			Root:         root,
-			Focused:      true,
-			EnableSkills: *cf.skills,
-			ExtraDirs:    extraDirs,
+			Root:                 root,
+			Focused:              true,
+			EnableSkills:         *cf.skills,
+			ExtraDirs:            extraDirs,
+			ExactAllowedCommands: exactCommands,
 		})
 		must(armErr)
 		defer agent.DisarmCodeTools()
@@ -418,4 +423,26 @@ func initDevRules(mode string) {
 	defer policyReloadMu.Unlock()
 	_, err = applyPolicyRuntimeLocked(rt, "embedded:developer", digest, "", false)
 	must(err)
+}
+
+func extractPolicyExactCommands(p adjudicator.Policy) []string {
+	if p.Posture != adjudicator.PostureFailClosed {
+		return nil
+	}
+	if len(p.Complain) > 0 {
+		return nil
+	}
+	var exacts []string
+	for _, pred := range p.ArgPredicates {
+		if pred.Advisory {
+			continue
+		}
+		if p.AdvisoryReasons != nil && p.AdvisoryReasons[pred.Reason] {
+			continue
+		}
+		if strings.EqualFold(pred.Tool, "bash") && pred.Arg == "command" && pred.Kind == adjudicator.ArgAllowExact && pred.Glob != "" {
+			exacts = append(exacts, pred.Glob)
+		}
+	}
+	return exacts
 }
