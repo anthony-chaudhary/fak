@@ -29,10 +29,19 @@ var (
 // TryLock takes a non-blocking exclusive advisory lock on f. It returns
 // ErrLockBusy when another holder owns the lock, nil on success.
 func TryLock(f *os.File) error {
+	return tryLock(f, lockfileExclusiveLock)
+}
+
+// TryLockShared allows concurrent readers while excluding TryLock holders.
+func TryLockShared(f *os.File) error {
+	return tryLock(f, 0)
+}
+
+func tryLock(f *os.File, mode uintptr) error {
 	ol := syscall.Overlapped{Offset: lockOffsetLow}
 	r, _, err := procLockFileEx.Call(
 		f.Fd(),
-		lockfileExclusiveLock|lockfileFailImmediately,
+		mode|lockfileFailImmediately,
 		0,
 		1,
 		0,

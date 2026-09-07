@@ -13,9 +13,27 @@
 // next acquire. flock stays a pure primitive.
 package flock
 
-import "errors"
+import (
+	"errors"
+	"os"
+)
 
 // ErrLockBusy is the sentinel TryLock returns when the file is already locked by
 // another holder. Callers test for it with errors.Is to distinguish a contended
 // lock (retry/poll) from a real I/O failure.
 var ErrLockBusy = errors.New("flock: lock busy")
+
+// Lock is an alias for TryLock, providing exclusive write-locking semantics.
+func Lock(f *os.File) error {
+	return TryLock(f)
+}
+
+// LockShared is an alias for TryLockShared, acquiring a non-blocking shared read lock.
+func LockShared(f *os.File) error {
+	return TryLockShared(f)
+}
+
+// RLock is an alias for TryLockShared for callers preferring read-lock terminology.
+func RLock(f *os.File) error {
+	return TryLockShared(f)
+}

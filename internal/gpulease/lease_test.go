@@ -1,15 +1,96 @@
 package gpulease
 
 import (
+	"bufio"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+const crossProcessLeaseModeEnv = "GPULEASE_CROSS_PROCESS_MODE"
+
+type leaseProcess struct {
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stderr *strings.Builder
+}
+
+func startLeaseProcess(t *testing.T, path string, mode Mode) *leaseProcess {
+	t.Helper()
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestCrossProcessSharedExclusiveAdmission$")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("helper stdin: %v", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("helper stdout: %v", err)
+	}
+	stderr := new(strings.Builder)
+	cmd.Stderr = stderr
+	cmd.Env = append(os.Environ(),
+		crossProcessLeaseModeEnv+"="+mode.String(),
+		"GPULEASE_CROSS_PROCESS_PATH="+path,
+	)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start %s helper: %v", mode, err)
+	}
+
+	p := &leaseProcess{cmd: cmd, stdin: stdin, stderr: stderr}
+	t.Cleanup(func() {
+		if p.cmd != nil {
+			_ = p.cmd.Process.Kill()
+			_ = p.cmd.Wait()
+			p.cmd = nil
+		}
+	})
+	ready, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil || strings.TrimSpace(ready) != "READY" {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		p.cmd = nil
+		t.Fatalf("%s helper readiness: line=%q err=%v stderr=%q", mode, ready, err, stderr.String())
+	}
+	return p
+}
+
+func (p *leaseProcess) stop(t *testing.T) {
+	t.Helper()
+	if p == nil || p.cmd == nil {
+		return
+	}
+	if err := p.stdin.Close(); err != nil {
+		t.Fatalf("close helper stdin: %v", err)
+	}
+	if err := p.cmd.Wait(); err != nil {
+		t.Fatalf("helper exit: %v stderr=%q", err, p.stderr.String())
+	}
+	p.cmd = nil
+}
+
+func (p *leaseProcess) kill(t *testing.T) {
+	t.Helper()
+	if p == nil || p.cmd == nil {
+		return
+	}
+	if _, err := p.stdin.Write([]byte{'K'}); err != nil {
+		t.Fatalf("request abrupt helper exit: %v", err)
+	}
+	_ = p.stdin.Close()
+	if err := p.cmd.Wait(); err == nil {
+		t.Fatal("abrupt helper exit reported success")
+	}
+	p.cmd = nil
+}
 
 // TestNoWaitBusyThenFree proves the core invariant the panic fix relies on: while
 // one lease is held, a second NoWait Acquire is refused (ErrBusy), and once the
@@ -211,4 +292,324 @@ func TestReleaseIdempotent(t *testing.T) {
 	l.Release() // no-op, must not panic
 	var nilLease *Lease
 	nilLease.Release() // no-op, must not panic
+}
+
+// TestSharedReadersConcurrent proves invariant (a): concurrent shared readers
+// share the machine lock simultaneously while excluding exclusive writers.
+func TestSharedReadersConcurrent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gpu.lease")
+
+	// Acquire first shared reader via AcquireShared
+	r1, err := AcquireShared(Options{Path: path, NoWait: true})
+	if err != nil {
+		t.Fatalf("r1 AcquireShared: %v", err)
+	}
+	defer r1.Release()
+
+	if !r1.Shared() || r1.Mode() != ModeShared {
+		t.Fatalf("r1: Shared()=%v Mode()=%v, want true/ModeShared", r1.Shared(), r1.Mode())
+	}
+
+	// Acquire second shared reader via Mode: ModeShared
+	r2, err := Acquire(Options{Path: path, Mode: ModeShared, NoWait: true})
+	if err != nil {
+		t.Fatalf("r2 Acquire(ModeShared): %v", err)
+	}
+	defer r2.Release()
+
+	if !r2.Shared() || r2.Mode() != ModeShared {
+		t.Fatalf("r2: Shared()=%v Mode()=%v, want true/ModeShared", r2.Shared(), r2.Mode())
+	}
+
+	// Acquire third shared reader via Shared: true
+	r3, err := Acquire(Options{Path: path, Shared: true, NoWait: true})
+	if err != nil {
+		t.Fatalf("r3 Acquire(Shared:true): %v", err)
+	}
+	defer r3.Release()
+
+	// While readers are holding the lease simultaneously, exclusive Acquire must be refused.
+	if _, err := Acquire(Options{Path: path, NoWait: true}); !errors.Is(err, ErrBusy) {
+		t.Fatalf("exclusive acquire while shared readers hold lease: want ErrBusy, got %v", err)
+	}
+
+	// Release all readers
+	r1.Release()
+	r2.Release()
+	r3.Release()
+
+	// Exclusive writer can now succeed immediately.
+	w, err := Acquire(Options{Path: path, NoWait: true})
+	if err != nil {
+		t.Fatalf("exclusive acquire after all readers release: %v", err)
+	}
+	if w.Shared() || w.Mode() != ModeExclusive {
+		t.Fatalf("exclusive lease: Shared()=%v Mode()=%v, want false/ModeExclusive", w.Shared(), w.Mode())
+	}
+	w.Release()
+}
+
+// TestExclusiveWriterBlocksUntilAllReadersRelease proves invariant (b): an exclusive
+// writer blocks until ALL concurrent shared readers release the lock.
+func TestExclusiveWriterBlocksUntilAllReadersRelease(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gpu.lease")
+
+	r1, err := AcquireShared(Options{Path: path, NoWait: true})
+	if err != nil {
+		t.Fatalf("r1 acquire: %v", err)
+	}
+	defer r1.Release()
+
+	r2, err := AcquireShared(Options{Path: path, NoWait: true})
+	if err != nil {
+		t.Fatalf("r2 acquire: %v", err)
+	}
+	defer r2.Release()
+
+	type result struct {
+		lease *Lease
+		err   error
+	}
+	writerCh := make(chan result, 1)
+	waitingCh := make(chan struct{})
+	var waitOnce sync.Once
+
+	go func() {
+		w, err := Acquire(Options{
+			Path:      path,
+			pollEvery: 2 * time.Millisecond,
+			Timeout:   5 * time.Second,
+			Logf: func(format string, args ...any) {
+				waitOnce.Do(func() { close(waitingCh) })
+			},
+		})
+		writerCh <- result{lease: w, err: err}
+	}()
+
+	// Wait until writer enters the waiting state.
+	select {
+	case <-waitingCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("writer never logged waiting notice")
+	}
+
+	// Verify writer has not acquired while both readers hold lease.
+	select {
+	case res := <-writerCh:
+		t.Fatalf("writer acquired prematurely while readers active: %v", res.err)
+	default:
+	}
+
+	// Release only the first reader; r2 still holds.
+	r1.Release()
+
+	// Verify writer still has not acquired because r2 is still held.
+	time.Sleep(20 * time.Millisecond)
+	select {
+	case res := <-writerCh:
+		t.Fatalf("writer acquired while r2 still held lease: %v", res.err)
+	default:
+	}
+
+	// Release the second reader; now writer must acquire.
+	r2.Release()
+
+	select {
+	case res := <-writerCh:
+		if res.err != nil {
+			t.Fatalf("writer acquire failed: %v", res.err)
+		}
+		defer res.lease.Release()
+		if res.lease.Shared() || res.lease.Mode() != ModeExclusive {
+			t.Fatal("writer lease is not exclusive")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("writer timed out after all readers released")
+	}
+}
+
+// TestSharedReaderBlocksBehindExclusiveWriter proves invariant (c): a shared reader
+// blocks behind an active exclusive writer and proceeds only when the writer releases.
+func TestSharedReaderBlocksBehindExclusiveWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gpu.lease")
+
+	w, err := Acquire(Options{Path: path, NoWait: true})
+	if err != nil {
+		t.Fatalf("exclusive acquire: %v", err)
+	}
+	defer w.Release()
+
+	// Immediate NoWait shared acquire must fail with ErrBusy.
+	if _, err := AcquireShared(Options{Path: path, NoWait: true}); !errors.Is(err, ErrBusy) {
+		t.Fatalf("shared acquire while writer active: want ErrBusy, got %v", err)
+	} else {
+		var busy *BusyError
+		if !errors.As(err, &busy) {
+			t.Fatalf("expected *BusyError, got %T", err)
+		}
+		if busy.PID != os.Getpid() {
+			t.Fatalf("busy PID = %d, want %d", busy.PID, os.Getpid())
+		}
+	}
+
+	type result struct {
+		lease *Lease
+		err   error
+	}
+	readerCh := make(chan result, 1)
+	waitingCh := make(chan struct{})
+	var waitOnce sync.Once
+
+	go func() {
+		r, err := AcquireShared(Options{
+			Path:      path,
+			pollEvery: 2 * time.Millisecond,
+			Timeout:   5 * time.Second,
+			Logf: func(format string, args ...any) {
+				waitOnce.Do(func() { close(waitingCh) })
+			},
+		})
+		readerCh <- result{lease: r, err: err}
+	}()
+
+	// Wait until reader enters waiting state.
+	select {
+	case <-waitingCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reader never logged waiting notice")
+	}
+
+	// Verify reader has not acquired while writer holds lease.
+	select {
+	case res := <-readerCh:
+		t.Fatalf("reader acquired prematurely while writer active: %v", res.err)
+	default:
+	}
+
+	// Release writer. Reader should now succeed.
+	w.Release()
+
+	select {
+	case res := <-readerCh:
+		if res.err != nil {
+			t.Fatalf("reader acquire failed: %v", res.err)
+		}
+		defer res.lease.Release()
+		if !res.lease.Shared() || res.lease.Mode() != ModeShared {
+			t.Fatal("reader lease is not shared")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("reader timed out after writer released")
+	}
+}
+
+// TestReleaseSharedOnProcessExit proves that the OS releases a shared lease
+// when the holding process exits without calling Release().
+func TestReleaseSharedOnProcessExit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gpu.lease")
+
+	if p := os.Getenv("GPULEASE_HELPER_SHARED_PATH"); p != "" {
+		if _, err := AcquireShared(Options{Path: p, NoWait: true}); err != nil {
+			os.Stderr.WriteString("child acquire shared failed: " + err.Error() + "\n")
+			os.Exit(3)
+		}
+		os.Stdout.WriteString("ACQUIRED_SHARED\n")
+		os.Exit(0)
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestReleaseSharedOnProcessExit")
+	cmd.Env = append(os.Environ(), "GPULEASE_HELPER_SHARED_PATH="+path)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("child process: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "ACQUIRED_SHARED") {
+		t.Fatalf("child did not acquire shared lease; output:\n%s", out)
+	}
+
+	// Child has exited; exclusive writer must now be able to acquire.
+	l, err := Acquire(Options{Path: path, NoWait: true})
+	if err != nil {
+		t.Fatalf("exclusive lease not acquired after child process exit: %v", err)
+	}
+	l.Release()
+}
+
+// TestCrossProcessSharedExclusiveAdmission exercises the OS lock across
+// independent processes. Shared inspection is intentionally host-local: every
+// participant must execute on the hardware host and name the same lockfile.
+func TestCrossProcessSharedExclusiveAdmission(t *testing.T) {
+	if mode := os.Getenv(crossProcessLeaseModeEnv); mode != "" {
+		path := os.Getenv("GPULEASE_CROSS_PROCESS_PATH")
+		var (
+			lease *Lease
+			err   error
+		)
+		switch mode {
+		case ModeShared.String():
+			lease, err = AcquireShared(Options{Path: path, NoWait: true})
+		case ModeExclusive.String():
+			lease, err = Acquire(Options{Path: path, NoWait: true})
+		default:
+			err = fmt.Errorf("unknown helper mode %q", mode)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "helper acquire: %v\n", err)
+			os.Exit(3)
+		}
+		fmt.Fprintln(os.Stdout, "READY")
+		var control [1]byte
+		n, _ := os.Stdin.Read(control[:])
+		if n == 1 && control[0] == 'K' {
+			os.Exit(9) // leave the lease to process teardown, without Release
+		}
+		lease.Release()
+		os.Exit(0)
+	}
+
+	path := filepath.Join(t.TempDir(), "cross-process-gpu.lease")
+	r1 := startLeaseProcess(t, path, ModeShared)
+	r2 := startLeaseProcess(t, path, ModeShared)
+
+	_, err := Acquire(Options{Path: path, NoWait: true})
+	var busy *BusyError
+	if !errors.As(err, &busy) || busy.PID != 0 {
+		t.Fatalf("exclusive behind shared children: got %v, want BusyError with PID 0", err)
+	}
+
+	r1.stop(t)
+	_, err = Acquire(Options{Path: path, NoWait: true})
+	busy = nil
+	if !errors.As(err, &busy) || busy.PID != 0 {
+		t.Fatalf("exclusive behind final shared child: got %v, want BusyError with PID 0", err)
+	}
+
+	r2.stop(t)
+	w, err := Acquire(Options{Path: path, NoWait: true})
+	if err != nil {
+		t.Fatalf("exclusive after final reader release: %v", err)
+	}
+	w.Release()
+
+	writer := startLeaseProcess(t, path, ModeExclusive)
+	_, err = AcquireShared(Options{Path: path, NoWait: true})
+	busy = nil
+	if !errors.As(err, &busy) || busy.PID != writer.cmd.Process.Pid {
+		t.Fatalf("shared behind exclusive child: got %v, want BusyError with PID %d", err, writer.cmd.Process.Pid)
+	}
+	writer.stop(t)
+
+	r, err := AcquireShared(Options{Path: path, NoWait: true})
+	if err != nil {
+		t.Fatalf("shared after writer release: %v", err)
+	}
+	r.Release()
+
+	doomed := startLeaseProcess(t, path, ModeShared)
+	doomed.kill(t)
+	w, err = Acquire(Options{Path: path, NoWait: true})
+	if err != nil {
+		t.Fatalf("exclusive after shared holder process death: %v", err)
+	}
+	w.Release()
 }

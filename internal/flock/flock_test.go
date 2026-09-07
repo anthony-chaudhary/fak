@@ -68,3 +68,78 @@ func TestErrLockBusySentinel(t *testing.T) {
 		t.Fatal("a distinct error value with the same text must not match ErrLockBusy")
 	}
 }
+
+// TestSharedLockConcurrencyAndExclusion verifies that:
+// (a) multiple shared readers can acquire the lock simultaneously,
+// (b) exclusive acquisition is refused while shared readers hold the lock,
+// (c) exclusive acquisition succeeds once all readers have released, and
+// (d) shared acquisition is refused while an exclusive writer holds the lock.
+func TestSharedLockConcurrencyAndExclusion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shared.lock")
+
+	r1, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("open r1: %v", err)
+	}
+	defer r1.Close()
+
+	r2, err := os.OpenFile(path, os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("open r2: %v", err)
+	}
+	defer r2.Close()
+
+	w1, err := os.OpenFile(path, os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("open w1: %v", err)
+	}
+	defer w1.Close()
+
+	// (a) First shared reader succeeds.
+	if err := TryLockShared(r1); err != nil {
+		t.Fatalf("r1 TryLockShared: %v", err)
+	}
+
+	// Second shared reader also succeeds concurrently (using LockShared alias).
+	if err := LockShared(r2); err != nil {
+		t.Fatalf("r2 LockShared concurrent with r1: %v", err)
+	}
+
+	// (b) Exclusive writer must be refused while shared locks are held.
+	if err := TryLock(w1); !errors.Is(err, ErrLockBusy) {
+		t.Fatalf("w1 TryLock while readers active: want ErrLockBusy, got %v", err)
+	}
+
+	// Releasing one reader still leaves r2 holding shared lock.
+	if err := Unlock(r1); err != nil {
+		t.Fatalf("r1 Unlock: %v", err)
+	}
+	if err := TryLock(w1); !errors.Is(err, ErrLockBusy) {
+		t.Fatalf("w1 TryLock while r2 still active: want ErrLockBusy, got %v", err)
+	}
+
+	// (c) Releasing the final reader permits the exclusive writer.
+	if err := Unlock(r2); err != nil {
+		t.Fatalf("r2 Unlock: %v", err)
+	}
+	if err := Lock(w1); err != nil {
+		t.Fatalf("w1 Lock after all readers unlocked: %v", err)
+	}
+
+	// (d) Shared reader must be refused while exclusive writer holds the lock.
+	if err := RLock(r1); !errors.Is(err, ErrLockBusy) {
+		t.Fatalf("r1 RLock while writer active: want ErrLockBusy, got %v", err)
+	}
+
+	if err := Unlock(w1); err != nil {
+		t.Fatalf("w1 Unlock: %v", err)
+	}
+
+	// Shared reader succeeds once writer releases.
+	if err := RLock(r1); err != nil {
+		t.Fatalf("r1 RLock after writer unlocked: %v", err)
+	}
+	if err := Unlock(r1); err != nil {
+		t.Fatalf("r1 Unlock final: %v", err)
+	}
+}
