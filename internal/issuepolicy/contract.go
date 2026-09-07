@@ -122,6 +122,7 @@ type Candidate struct {
 	IssueNumber     int    `json:"issue_number,omitempty"`
 	Key             string `json:"key"`
 	Title           string `json:"title"`
+	Body            string `json:"body,omitempty"`
 	Generation      string `json:"generation,omitempty"`
 	ParentRef       string `json:"parent_ref,omitempty"`
 	CurrentState    string `json:"current_state,omitempty"`
@@ -268,6 +269,9 @@ type Review struct {
 	IssueNumber       int                      `json:"issue_number,omitempty"`
 	Key               string                   `json:"key,omitempty"`
 	Lane              string                   `json:"lane,omitempty"`
+	ProvisionalLane   bool                     `json:"provisional_lane,omitempty"`
+	LaneConfidence    float64                  `json:"lane_confidence,omitempty"`
+	SuggestedLanes    []string                 `json:"suggested_lanes,omitempty"`
 	Paths             []string                 `json:"paths,omitempty"`
 	Dependencies      []DependencyRef          `json:"dependencies,omitempty"`
 	WorkUnit          string                   `json:"work_unit,omitempty"`
@@ -300,6 +304,20 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 
 func reviewCandidate(c Candidate, opt Options, allowLegacyProblemFrame bool) Review {
 	c = normalize(c)
+
+	var progRes ProgressiveLaneResult
+	inferredProg := false
+	if c.Lane == "" {
+		body := c.Body
+		if body == "" {
+			body = strings.Join([]string{c.CurrentState, c.WhyNow, c.InScope, c.DoneCondition, c.Witness, c.BetterBecause}, " ")
+		}
+		progRes = InferLaneProgressive(c.Title, body, c.Paths)
+		inferredProg = true
+		if progRes.Confidence >= 0.40 {
+			c.Lane = progRes.Lane
+		}
+	}
 
 	scopeMissing := missingScopeFields(c)
 	missing := append([]string(nil), scopeMissing...)
@@ -472,6 +490,27 @@ func reviewCandidate(c Candidate, opt Options, allowLegacyProblemFrame bool) Rev
 		out.Verdict = "needs_scope"
 		out.Dispatchability = TriageOnly
 	}
+
+	if inferredProg {
+		out.LaneConfidence = progRes.Confidence
+		if progRes.Confidence >= 0.40 {
+			out.Lane = progRes.Lane
+			out.ProvisionalLane = progRes.Provisional
+			if progRes.Provisional {
+				if out.Verdict == "needs_scope" && hasProblemFrameAndDescriptions(c, reasons) {
+					out.Verdict = "ready"
+					out.Dispatchability = Dispatchable
+					out.Reasons = removeReasons(out.Reasons, ReasonUnrouted, ReasonScopeIncomplete)
+					out.MissingFields = removeStrings(out.MissingFields, "likely_files", "lane", "paths")
+					out.OK = len(out.Reasons) == 0
+				}
+				note := fmt.Sprintf("[advisory] issue #%d assigned provisional lane '%s' (confidence %.2f)", out.IssueNumber, out.Lane, out.LaneConfidence)
+				out.Coordination = append(out.Coordination, note)
+			}
+		} else {
+			out.SuggestedLanes = progRes.SuggestedLanes
+		}
+	}
 	return out
 }
 
@@ -491,6 +530,9 @@ func ReviewIssueDraft(d IssueDraft, opt Options) Review {
 		}
 	}
 	missingSections := missingRequiredIssueSections(d.Body, candidate)
+	if review.ProvisionalLane || (review.Lane != "" && review.LaneConfidence >= 0.40) {
+		missingSections = removeStrings(missingSections, "likely_files")
+	}
 	// A draft without an issue number has not been filed yet. Require its body
 	// to declare both a done-condition list and the heading that makes
 	// that list authoritative. Historical issue audits remain descriptive so
@@ -511,6 +553,14 @@ func ReviewIssueDraft(d IssueDraft, opt Options) Review {
 		if review.Dispatchability == Dispatchable {
 			review.Verdict = "needs_scope"
 			review.Dispatchability = TriageOnly
+		}
+	}
+	if review.ProvisionalLane && review.Verdict == "needs_scope" {
+		if hasProblemFrameAndDescriptions(candidate, reasonSet(map[string]bool{})) {
+			review.Verdict = "ready"
+			review.Dispatchability = Dispatchable
+			review.Reasons = removeReasons(review.Reasons, ReasonUnrouted, ReasonScopeIncomplete)
+			review.OK = len(review.Reasons) == 0
 		}
 	}
 	if HasUnexpandedTemplate(d.Body) {
@@ -891,6 +941,7 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		IssueNumber:            d.Number,
 		Key:                    issueDraftKey(d),
 		Title:                  d.Title,
+		Body:                   d.Body,
 		Generation:             issueDraftGeneration(d, section("Generation stream", "Generation")),
 		ParentRef:              parentRef,
 		CurrentState:           currentState,
@@ -933,8 +984,8 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		ProblemFrame:           AssessProblemFrame(d),
 		// Body fallback for the tier tags — used only when the namespaced
 		// tier/T?-required|optimal GitHub labels are absent (see modelTier).
-		RequiredModelTier:      issueHeaderField(d.Body, "Required model tier"),
-		OptimalModelTier:       issueHeaderField(d.Body, "Optimal model tier"),
+		RequiredModelTier: issueHeaderField(d.Body, "Required model tier"),
+		OptimalModelTier:  issueHeaderField(d.Body, "Optimal model tier"),
 	}
 
 	if c.CurrentState == "" {
@@ -1500,4 +1551,54 @@ func (s reasonSet) list() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func removeReasons(list []string, toRemove ...string) []string {
+	removeSet := make(map[string]bool, len(toRemove))
+	for _, r := range toRemove {
+		removeSet[r] = true
+	}
+	out := make([]string, 0, len(list))
+	for _, r := range list {
+		if !removeSet[r] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func removeStrings(list []string, toRemove ...string) []string {
+	removeSet := make(map[string]bool, len(toRemove))
+	for _, s := range toRemove {
+		removeSet[s] = true
+	}
+	out := make([]string, 0, len(list))
+	for _, s := range list {
+		if !removeSet[s] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func hasProblemFrameAndDescriptions(c Candidate, reasons reasonSet) bool {
+	if reasons.has(ReasonProblemFrameIncomplete) {
+		return false
+	}
+	if reasons.has(ReasonPrivateBoundary) ||
+		reasons.has(ReasonLiveUnarmored) ||
+		reasons.has(ReasonNoiseIncomplete) ||
+		reasons.has(ReasonAgentIncomplete) ||
+		reasons.has(ReasonNotDispatchLeaf) ||
+		reasons.has(ReasonOversizedSteps) ||
+		reasons.has(ReasonUnexpandedTemplate) {
+		return false
+	}
+	hasDesc := strings.TrimSpace(c.Title) != "" && (strings.TrimSpace(c.CurrentState) != "" ||
+		strings.TrimSpace(c.InScope) != "" ||
+		strings.TrimSpace(c.DoneCondition) != "" ||
+		strings.TrimSpace(c.WhyNow) != "" ||
+		strings.TrimSpace(c.BetterBecause) != "" ||
+		strings.TrimSpace(c.Body) != "")
+	return hasDesc
 }
