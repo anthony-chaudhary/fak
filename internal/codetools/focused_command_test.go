@@ -217,6 +217,16 @@ func TestFocusedToolsetExactAllowedCommandsMatrix(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		// Verify ExactAllowedCommands returns an independent copy in unfocused mode.
+		unfocusedGot := ts.ExactAllowedCommands()
+		if len(unfocusedGot) != len(exactList) {
+			t.Fatalf("expected %d commands in unfocused ExactAllowedCommands(), got %d", len(exactList), len(unfocusedGot))
+		}
+		unfocusedGot[0] = "mutated_unfocused"
+		if ts.ExactAllowedCommands()[0] == "mutated_unfocused" {
+			t.Fatal("expected unfocused ExactAllowedCommands to return a copy that cannot mutate internal state")
+		}
+
 		// Unlisted commands that would be denied under FocusedCommands must NOT return CodeCommandDeny.
 		for _, cmd := range []string{
 			"env",
@@ -240,6 +250,15 @@ func TestFocusedToolsetExactAllowedCommandsMatrix(t *testing.T) {
 		res := decodeResult(t, out)
 		if stdout, ok := res["stdout"].(string); !ok || !strings.Contains(stdout, "passthrough-verified") {
 			t.Fatalf("expected stdout to contain 'passthrough-verified', got: %v", res)
+		}
+
+		// Verify unconfigured toolset returns nil for ExactAllowedCommands.
+		tsUnconfigured, err := New(Config{Root: t.TempDir()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := tsUnconfigured.ExactAllowedCommands(); got != nil {
+			t.Fatalf("expected nil from ExactAllowedCommands() when unconfigured, got %v", got)
 		}
 	})
 
