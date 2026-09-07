@@ -53,7 +53,10 @@ func (t *Tree) rootFor(ns string) *node {
 	}
 	r := t.nsRoots[ns]
 	if r == nil {
-		r = &node{children: map[int]*node{}}
+		r = &node{
+			children:  map[int]*node{},
+			regimeKey: extractRegimeKey(ns),
+		}
 		t.nsRoots[ns] = r
 	}
 	return r

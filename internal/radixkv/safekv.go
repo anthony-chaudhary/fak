@@ -290,6 +290,226 @@ func (s *ScopedTree) RevokeFleet(tokens []int) int {
 	return s.tree.EvictPrefixNS("shared/fleet", tokens)
 }
 
+// AdmitRegime stores a prefix at an explicit scope fenced by decode regime.
+func (s *ScopedTree) AdmitRegime(regime Regime, scope ShareScope, owner CacheIdentity, tokens []int, kv *model.KVCache, logits []float32) error {
+	if !regime.Complete() {
+		return ErrRegimeIncomplete
+	}
+	if scope == ScopeFleet {
+		return ErrCacheScope
+	}
+	baseNS, err := scopeNamespace(scope, owner)
+	if err != nil {
+		return err
+	}
+	ns := regimeNamespace(baseNS, regime)
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	boundary, matched := s.tree.LookupNS(ns, tokens)
+	leaf := s.tree.InsertCloneWithLogits(boundary, tokens[matched:], kv, logits)
+	s.tree.Done(leaf)
+	return nil
+}
+
+// AdmitPrivateRegime stores a prefix at tenant scope fenced by decode regime.
+func (s *ScopedTree) AdmitPrivateRegime(regime Regime, owner CacheIdentity, tokens []int, kv *model.KVCache, logits []float32) error {
+	return s.AdmitRegime(regime, ScopeTenant, owner, tokens, kv, logits)
+}
+
+// LookupRegime returns the longest reusable prefix visible to owner matching the specified decode regime.
+func (s *ScopedTree) LookupRegime(regime Regime, owner CacheIdentity, tokens []int) (*model.KVCache, []float32, int, ShareScope, error) {
+	if !regime.Complete() {
+		return nil, nil, 0, ScopeTenant, ErrRegimeIncomplete
+	}
+	if strings.TrimSpace(owner.Tenant) == "" {
+		return nil, nil, 0, ScopeTenant, ErrCacheIdentity
+	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	checks := []ShareScope{ScopeAgent, ScopeTenant, ScopeFleet}
+	bestScope, bestMatched := ScopeTenant, 0
+	var bestKV *model.KVCache
+	var bestLogits []float32
+	for _, scope := range checks {
+		if scope == ScopeAgent && strings.TrimSpace(owner.Agent) == "" {
+			continue
+		}
+		baseNS, err := scopeNamespace(scope, owner)
+		if err != nil {
+			continue
+		}
+		ns := regimeNamespace(baseNS, regime)
+		node, matched := s.tree.LookupNS(ns, tokens)
+		if node != nil {
+			if matched > bestMatched && node.KV() != nil {
+				bestMatched, bestScope = matched, scope
+				bestKV, bestLogits = cloneKV(node.KV()), node.Logits()
+			}
+			s.tree.Done(node)
+		}
+	}
+	return bestKV, bestLogits, bestMatched, bestScope, nil
+}
+
+// PromoteRegime copies an exact private prefix matching regime into fleet visibility.
+func (s *ScopedTree) PromoteRegime(regime Regime, from ShareScope, owner CacheIdentity, tokens []int) error {
+	if !regime.Complete() {
+		return ErrRegimeIncomplete
+	}
+	if from == ScopeFleet {
+		return ErrCacheScope
+	}
+	baseSrcNS, err := scopeNamespace(from, owner)
+	if err != nil {
+		return err
+	}
+	sourceNS := regimeNamespace(baseSrcNS, regime)
+	baseFleetNS, _ := scopeNamespace(ScopeFleet, owner)
+	fleetNS := regimeNamespace(baseFleetNS, regime)
+
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	source, matched := s.tree.LookupNS(sourceNS, tokens)
+	if source == nil || matched != len(tokens) {
+		if source != nil {
+			s.tree.Done(source)
+		}
+		return ErrPrefixAbsent
+	}
+	kv, logits := source.KV(), source.Logits()
+	s.tree.Done(source)
+	boundary, fleetMatched := s.tree.LookupNS(fleetNS, tokens)
+	leaf := s.tree.InsertCloneWithLogits(boundary, tokens[fleetMatched:], kv, logits)
+	s.tree.Done(leaf)
+	return nil
+}
+
+// RevokeFleetRegime removes a promoted prefix under regime without touching any private copy.
+func (s *ScopedTree) RevokeFleetRegime(regime Regime, tokens []int) int {
+	if !regime.Complete() {
+		return 0
+	}
+	fleetNS := regimeNamespace("shared/fleet", regime)
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	return s.tree.EvictPrefixNS(fleetNS, tokens)
+}
+
+// AdmitPrivateSnapshotRegime stores a complete backend prefix snapshot at tenant scope fenced by regime.
+func (s *ScopedTree) AdmitPrivateSnapshotRegime(regime Regime, owner CacheIdentity, tokens []int, snap *model.PrefixSnapshot, logits []float32) error {
+	if !regime.Complete() {
+		return ErrRegimeIncomplete
+	}
+	baseNS, err := scopeNamespace(ScopeTenant, owner)
+	if err != nil {
+		return err
+	}
+	ns := regimeNamespace(baseNS, regime)
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	boundary, matched := s.tree.LookupNS(ns, tokens)
+	leaf, err := s.tree.InsertSnapshot(boundary, tokens[matched:], snap, logits)
+	if leaf != nil {
+		s.tree.Done(leaf)
+	}
+	return err
+}
+
+// LookupSnapshotRegime returns the longest visible independently owned backend prefix under regime.
+func (s *ScopedTree) LookupSnapshotRegime(regime Regime, owner CacheIdentity, tokens []int) (*model.PrefixSnapshot, []float32, int, ShareScope, error) {
+	snap, logits, matched, scope, _, err := s.LookupSnapshotTieredRegime(regime, owner, tokens)
+	return snap, logits, matched, scope, err
+}
+
+// LookupSnapshotTieredRegime is LookupSnapshotRegime with truthful physical source-tier attribution.
+func (s *ScopedTree) LookupSnapshotTieredRegime(regime Regime, owner CacheIdentity, tokens []int) (*model.PrefixSnapshot, []float32, int, ShareScope, SnapshotTier, error) {
+	return s.LookupSnapshotTieredContextRegime(context.Background(), regime, owner, tokens)
+}
+
+// LookupSnapshotTieredContextRegime is the cancellable scoped L1->L2->L3 lookup under regime.
+func (s *ScopedTree) LookupSnapshotTieredContextRegime(ctx context.Context, regime Regime, owner CacheIdentity, tokens []int) (*model.PrefixSnapshot, []float32, int, ShareScope, SnapshotTier, error) {
+	if !regime.Complete() {
+		return nil, nil, 0, ScopeTenant, SnapshotTierMiss, ErrRegimeIncomplete
+	}
+	if strings.TrimSpace(owner.Tenant) == "" {
+		return nil, nil, 0, ScopeTenant, SnapshotTierMiss, ErrCacheIdentity
+	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	checks := []ShareScope{ScopeAgent, ScopeTenant, ScopeFleet}
+	bestHotScope, bestHotMatched := ScopeTenant, 0
+	bestHostScope, bestHostMatched := ScopeTenant, 0
+	bestRemoteScope, bestRemoteMatched := ScopeTenant, 0
+	bestRemoteNS := ""
+	var bestHot, bestHost, bestRemote *node
+	for _, scope := range checks {
+		if scope == ScopeAgent && strings.TrimSpace(owner.Agent) == "" {
+			continue
+		}
+		baseNS, err := scopeNamespace(scope, owner)
+		if err != nil {
+			continue
+		}
+		ns := regimeNamespace(baseNS, regime)
+		n, _ := s.tree.LookupNS(ns, tokens)
+		for candidate := n; candidate != nil; candidate = candidate.parent {
+			if candidate.snapshot != nil && candidate.plen > bestHotMatched {
+				bestHot, bestHotMatched, bestHotScope = candidate, candidate.plen, scope
+			}
+			if candidate.hostSnapshot != nil && candidate.plen > bestHostMatched {
+				bestHost, bestHostMatched, bestHostScope = candidate, candidate.plen, scope
+			}
+			if candidate.remoteSnapshot != nil && candidate.plen > bestRemoteMatched {
+				bestRemote, bestRemoteMatched, bestRemoteScope, bestRemoteNS = candidate, candidate.plen, scope, ns
+			}
+		}
+		if n != nil {
+			s.tree.Done(n)
+		}
+	}
+	if bestHot != nil {
+		snap, err := bestHot.snapshot.Clone()
+		if err != nil {
+			s.tree.l1Faults++
+			return nil, nil, bestHotMatched, bestHotScope, SnapshotTierDeviceL1, err
+		}
+		s.tree.l1Hits++
+		s.tree.l1HitTokens += bestHotMatched
+		return snap, bestHot.Logits(), bestHotMatched, bestHotScope, SnapshotTierDeviceL1, nil
+	}
+	s.tree.l1Misses++
+	if !s.tree.HostL2Enabled() && !s.tree.RemoteSnapshotEnabled() {
+		return nil, nil, 0, ScopeTenant, SnapshotTierMiss, nil
+	}
+	if bestHost != nil {
+		snap, err := bestHost.hostSnapshot.Restore()
+		if err != nil {
+			s.tree.l2Faults++
+			return nil, nil, bestHostMatched, bestHostScope, SnapshotTierHostL2, err
+		}
+		s.tree.l2Hits++
+		s.tree.l2HitTokens += bestHostMatched
+		s.tree.l2RestoreBytes += bestHost.hostSnapshot.TransferBytes()
+		return snap, bestHost.Logits(), bestHostMatched, bestHostScope, SnapshotTierHostL2, nil
+	}
+	if s.tree.HostL2Enabled() {
+		s.tree.l2Misses++
+	}
+	if bestRemote != nil && s.tree.RemoteSnapshotEnabled() {
+		snap, found, err := s.tree.restoreSnapshotFromRemote(ctx, bestRemoteNS, bestRemote)
+		if err != nil {
+			return nil, nil, bestRemoteMatched, bestRemoteScope, SnapshotTierRemoteL3, err
+		}
+		if found {
+			return snap, bestRemote.Logits(), bestRemoteMatched, bestRemoteScope, SnapshotTierRemoteL3, nil
+		}
+	}
+	if s.tree.RemoteSnapshotEnabled() {
+		s.tree.l3Misses++
+	}
+	return nil, nil, 0, ScopeTenant, SnapshotTierMiss, nil
+}
+
 func cloneKV(kv *model.KVCache) *model.KVCache {
 	if kv == nil {
 		return nil

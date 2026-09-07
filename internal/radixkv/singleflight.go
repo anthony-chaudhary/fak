@@ -455,14 +455,15 @@ func (t *Tree) attachComputingLeaf(boundary *node, suffix []int, ready chan stru
 	}
 	s := append([]int(nil), suffix...)
 	leaf := &node{
-		key:      s,
-		parent:   boundary,
-		children: map[int]*node{},
-		plen:     boundary.plen + len(s),
-		state:    uint32(NodeComputingPrefill),
-		ready:    ready,
-		lastUsed: t.clock,
-		refs:     1, // leased while computing
+		key:       s,
+		parent:    boundary,
+		children:  map[int]*node{},
+		plen:      boundary.plen + len(s),
+		state:     uint32(NodeComputingPrefill),
+		ready:     ready,
+		lastUsed:  t.clock,
+		refs:      1, // leased while computing
+		regimeKey: boundary.regimeKey,
 	}
 	boundary.children[s[0]] = leaf
 	t.tokens += len(s)

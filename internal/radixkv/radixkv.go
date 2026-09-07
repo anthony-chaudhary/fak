@@ -137,10 +137,11 @@ type node struct {
 	cachedLogits []float32 // logits owned by a complete device snapshot
 
 	plen     int    // path length in tokens (parent.plen + len(key)); == len(kv) when kv!=nil
-	refs     int    // active leases; a leaf with refs>0 is never LRU-evicted
-	lastUsed uint64 // logical clock of the most recent match/insert touching this node — LRU key
-	hits     int    // subsequent demand lookups that found this node resident
-	chunkID  int    // physical backing page / allocation chunk identifier (0 = unassigned)
+	refs      int    // active leases; a leaf with refs>0 is never LRU-evicted
+	lastUsed  uint64 // logical clock of the most recent match/insert touching this node — LRU key
+	hits      int    // subsequent demand lookups that found this node resident
+	chunkID   int    // physical backing page / allocation chunk identifier (0 = unassigned)
+	regimeKey string // decode regime identifier under which this node's KV was produced
 
 	state     uint32        // lifecycle state (warm, computing prefill, failed, evicted); accessed atomically
 	ready     chan struct{} // completion broadcast for in-flight prefill promises
@@ -592,13 +593,14 @@ func (t *Tree) MatchLenNS(ns string, tokens []int) int {
 func (t *Tree) split(parent, child *node, oi int) *node {
 	first := child.key[0]
 	mid := &node{
-		key:      append([]int(nil), child.key[:oi]...),
-		parent:   parent,
-		children: map[int]*node{},
-		plen:     parent.plen + oi,
-		lastUsed: child.lastUsed,
-		hits:     child.hits,
-		chunkID:  child.chunkID,
+		key:       append([]int(nil), child.key[:oi]...),
+		parent:    parent,
+		children:  map[int]*node{},
+		plen:      parent.plen + oi,
+		lastUsed:  child.lastUsed,
+		hits:      child.hits,
+		chunkID:   child.chunkID,
+		regimeKey: child.regimeKey,
 	}
 	if child.kv != nil && child.kv.CanEvict() == nil &&
 		t.cpuCacheCanClone(child.kv) {
@@ -925,14 +927,15 @@ func (t *Tree) attachLeafWithChunk(boundary *node, suffix []int, kv *model.KVCac
 	t.fills++ // one prefix-cache FILL event (#5804): demand Insert or prewarm WarmInsert
 	s := append([]int(nil), suffix...)
 	leaf := &node{
-		key:      s,
-		parent:   boundary,
-		children: map[int]*node{},
-		kv:       kv,
-		logits:   copyCPULogits(logits),
-		plen:     boundary.plen + len(s),
-		lastUsed: lastUsed,
-		chunkID:  chunkID,
+		key:       s,
+		parent:    boundary,
+		children:  map[int]*node{},
+		kv:        kv,
+		logits:    copyCPULogits(logits),
+		plen:      boundary.plen + len(s),
+		lastUsed:  lastUsed,
+		chunkID:   chunkID,
+		regimeKey: boundary.regimeKey,
 	}
 	if chunkID == 0 && t.pageTracker != nil {
 		if id := t.pageTracker.ChunkID(leaf); id != 0 {
@@ -971,6 +974,14 @@ func (n *node) Logits() []float32 {
 
 // Plen is the node's cached prefix length in tokens.
 func (n *node) Plen() int { return n.plen }
+
+// RegimeKey returns the decode regime under which this node was cached, or "" if unassigned.
+func (n *node) RegimeKey() string {
+	if n == nil {
+		return ""
+	}
+	return n.regimeKey
+}
 
 // DemotionDecision indicates the chosen demotion action.
 type DemotionDecision struct {
