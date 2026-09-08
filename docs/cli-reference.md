@@ -543,7 +543,7 @@ The command surface has two executable boundaries. The shipped **`fak` runtime**
 the product — what an adopter or operator touches (`guard`, `manage`, `serve`, `agent`,
 `run`, `preflight`, `policy`, `attest`, `audit`, `egress`, `info`, `session`,
 `ps`/`top`, `signal`, `resume`, `doctor`, `recover`, `model`, `codex`, `ablate`,
-`vcache`, `answer-shape`, `codelint`, `self-update`, `version`, `help`). `fak help` and `fak help --all` describe that
+`vcache`, `answer-shape`, `codelint`, `issues-solved`, `self-update`, `version`, `help`). `fak help` and `fak help --all` describe that
 runtime. Repository workflows, scorecards, benches, and issue/docs tooling live
 in the separate **`fak-dev`** executable; `fak-dev help` lists them. The legacy
 `fak dev <verb>` spelling is a compatibility handoff to a sibling or

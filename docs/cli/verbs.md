@@ -764,6 +764,31 @@ context/query value with `--context-shed-tokens` and
 `--context-resident-tokens`; pass SGLang/vLLM/llama prefix-cache evidence with
 `--external-engine-hit-rate`.
 
+### `fak issues-solved`
+
+`fak issues-solved` (aliases: `fak issues-recent`, `fak issue-stats`) queries and reports issue resolution counts and commit velocity across both the public `fak` repository and the companion `fak-private` repository over a specified time window.
+
+```bash
+# Query the last 9 hours across both checkouts (default 4-line concise summary)
+fak issues-solved --hours 9
+
+# Query since a specific duration or RFC3339 timestamp
+fak issues-solved --since 24h
+fak issues-solved --since 2026-09-08T00:00:00Z
+
+# Include detailed issue listings with titles and timestamps
+fak issues-solved --hours 9 --detailed
+
+# Output structured JSON for automation (schema: fak-issues-solved/1)
+fak issues-solved --hours 9 --json
+
+# Restrict to public repository only
+fak issues-solved --hours 9 --no-private
+
+# Explicitly select data source (auto, github, or git)
+fak issues-solved --hours 9 --source git
+```
+
 `scripts/ci.ps1` (or `make ci`) runs build + vet + test + the CLAIMS lint as one gate.
 
 > It is *designed for extension*: other ideas bake in as a new package + one

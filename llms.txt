@@ -83,6 +83,7 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - Operator-heaviness pressure, budgets, and reduction standard: [docs/OPERATOR-HEAVINESS.md](docs/OPERATOR-HEAVINESS.md)
 - Operator-steerability PRs (`fak steer prs`) — the gate/observability separation, the OSP unit, and why the overlay must never become a merge gate: [docs/operator-steerability-prs.md](docs/operator-steerability-prs.md)
 - Version-everything (`fak version modules`) — per-module rev+date over the module tree, git-witnessed via the `fak-module-versions/1` ledger rather than asserted: [docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md](docs/notes/VERSION-EVERYTHING-SPINE-2026-07-03.md)
+- Cross-repo issue velocity (`fak issues-solved`): query issues solved across public and companion checkouts over arbitrary time windows in 1 turn: [docs/cli/verbs.md#fak-issues-solved](docs/cli/verbs.md#fak-issues-solved)
 
 ## Source authorities
 

@@ -82,6 +82,8 @@ def green_ancestor_status(recent: object, *, max_commits: int,
     for entry in recent:
         if not isinstance(entry, dict) or not entry.get("ancestor_of_head"):
             continue
+        if entry.get("stale"):
+            continue
         result = str(entry.get("result") or "").strip().lower()
         if result not in ("green", "red"):
             continue
@@ -114,8 +116,9 @@ def green_ancestor_status(recent: object, *, max_commits: int,
     # Safety: any red decisive run STRICTLY closer to HEAD than the chosen green
     # (i.e. on a commit between the green ancestor and HEAD, exclusive) means
     # something broke after the last green — do not treat CI as green.
+    # Stale failures past the commit window do not hold the cut (#12169).
     for behind, result, _ in anc:
-        if result == "red" and behind < green_behind:
+        if result == "red" and behind < green_behind and behind <= max_commits:
             return ""
     return "green"
 
