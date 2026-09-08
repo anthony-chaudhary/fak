@@ -63,6 +63,60 @@ func TestPlanGraphTransientsReusesDisjointLifetimesWithParity(t *testing.T) {
 	}
 }
 
+func TestVulkanTransientPlanBindsSuballocatedViews(t *testing.T) {
+	graph := transientReuseGraphFixture()
+	values := []TransientValue{
+		{Node: "v0", Bytes: 64, LifetimeEnd: "v1"},
+		{Node: "v1", Bytes: 64},
+		{Node: "v2", Bytes: 64},
+		{Node: "v3", Bytes: 64},
+		{Node: "v4", Bytes: 64, Escapes: true},
+	}
+
+	plan, _, err := PlanGraphTransients(graph, values, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := BindVulkanTransientViews(plan, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding.ArenaBytes != plan.Reserved {
+		t.Fatalf("bound arena = %d, want planned %d", binding.ArenaBytes, plan.Reserved)
+	}
+	if binding.MemoryAllocations != 1 {
+		t.Fatalf("native memory allocations = %d, want one shared arena", binding.MemoryAllocations)
+	}
+
+	views := make(map[NodeID]VulkanTransientView, len(binding.Views))
+	for _, view := range binding.Views {
+		views[view.Node] = view
+		if view.Offset%binding.Alignment != 0 {
+			t.Fatalf("view %q offset %d is not aligned to %d", view.Node, view.Offset, binding.Alignment)
+		}
+		if view.Offset < 0 || view.Bytes <= 0 || view.Offset+view.Bytes > binding.ArenaBytes {
+			t.Fatalf("view %q is outside arena: %+v", view.Node, view)
+		}
+	}
+	if views["v0"].Offset != views["v2"].Offset {
+		t.Fatalf("disjoint views did not bind the same suballocation: v0=%+v v2=%+v", views["v0"], views["v2"])
+	}
+	if views["v0"].Offset == views["v1"].Offset {
+		t.Fatalf("simultaneously live views share an offset: v0=%+v v1=%+v", views["v0"], views["v1"])
+	}
+
+	bad := plan
+	bad.Allocations = append([]TransientAllocation(nil), plan.Allocations...)
+	for i := range bad.Allocations {
+		if bad.Allocations[i].Node == "v1" {
+			bad.Allocations[i].Offset = views["v0"].Offset
+		}
+	}
+	if _, err := BindVulkanTransientViews(bad, 64); err == nil || !strings.Contains(err.Error(), "simultaneously live") {
+		t.Fatalf("overlapping live views error = %v, want simultaneous-lifetime refusal", err)
+	}
+}
+
 func TestTransientPlanReceiptUsesAllocationDigestName(t *testing.T) {
 	payload, err := json.Marshal(TransientPlanReceipt{AllocationDigest: "abc"})
 	if err != nil {

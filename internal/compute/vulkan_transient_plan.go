@@ -38,6 +38,28 @@ type TransientAllocationPlan struct {
 	Reserved    int64                 `json:"reserved_bytes"`
 }
 
+// VulkanTransientView is the native binding contract for one VkBuffer view into a
+// shared device-memory arena. Offset is the VkDeviceMemory bind offset; descriptor
+// offsets remain zero because every logical tensor receives its own VkBuffer.
+type VulkanTransientView struct {
+	Node    NodeID `json:"node"`
+	Offset  int64  `json:"offset"`
+	Bytes   int64  `json:"bytes"`
+	Start   int    `json:"start"`
+	End     int    `json:"end"`
+	Escapes bool   `json:"escapes,omitempty"`
+}
+
+// VulkanTransientBinding is the validated adapter between the backend-neutral
+// lifetime plan and Vulkan's one-allocation, many-buffer binding model.
+type VulkanTransientBinding struct {
+	Mode              string                `json:"mode"`
+	ArenaBytes        int64                 `json:"arena_bytes"`
+	Alignment         int64                 `json:"alignment"`
+	MemoryAllocations int                   `json:"memory_allocations"`
+	Views             []VulkanTransientView `json:"views"`
+}
+
 // TransientPlanReceipt records the eligibility decision and exact deterministic memory delta.
 type TransientPlanReceipt struct {
 	Eligible         bool   `json:"eligible"`
@@ -99,6 +121,88 @@ func PlanGraphTransients(graph Graph, values []TransientValue, align int64) (Tra
 	plan := reuseTransientPlan(intervals, align)
 	receipt, err := transientPlanReceipt(plan, graphDigest, true, "")
 	return plan, receipt, err
+}
+
+// BindVulkanTransientViews validates a transient plan at the Vulkan binding
+// boundary. A non-empty plan maps to exactly one device-memory allocation and one
+// buffer view per logical value. Byte ranges may alias only when the planner proved
+// their lifetimes disjoint; escaping values never alias.
+func BindVulkanTransientViews(plan TransientAllocationPlan, alignment int64) (VulkanTransientBinding, error) {
+	if alignment < 1 || alignment&(alignment-1) != 0 {
+		return VulkanTransientBinding{}, fmt.Errorf("compute Vulkan transient binding: alignment must be a positive power of two")
+	}
+	if plan.Mode != transientPlanLifetimeReuse && plan.Mode != transientPlanForwardBump {
+		return VulkanTransientBinding{}, fmt.Errorf("compute Vulkan transient binding: unknown plan mode %q", plan.Mode)
+	}
+
+	binding := VulkanTransientBinding{
+		Mode:       plan.Mode,
+		ArenaBytes: plan.Reserved,
+		Alignment:  alignment,
+		Views:      make([]VulkanTransientView, 0, len(plan.Allocations)),
+	}
+	if len(plan.Allocations) == 0 {
+		if plan.Reserved != 0 {
+			return VulkanTransientBinding{}, fmt.Errorf("compute Vulkan transient binding: empty plan reserves %d bytes", plan.Reserved)
+		}
+		return binding, nil
+	}
+	if plan.Reserved <= 0 {
+		return VulkanTransientBinding{}, fmt.Errorf("compute Vulkan transient binding: non-empty plan has non-positive arena size %d", plan.Reserved)
+	}
+
+	seen := make(map[NodeID]struct{}, len(plan.Allocations))
+	for _, allocation := range plan.Allocations {
+		if allocation.Node == "" {
+			return VulkanTransientBinding{}, fmt.Errorf("compute Vulkan transient binding: allocation has empty node")
+		}
+		if _, exists := seen[allocation.Node]; exists {
+			return VulkanTransientBinding{}, fmt.Errorf("compute Vulkan transient binding: node %q is allocated more than once", allocation.Node)
+		}
+		seen[allocation.Node] = struct{}{}
+		if allocation.Bytes <= 0 {
+			return VulkanTransientBinding{}, fmt.Errorf("compute Vulkan transient binding: node %q has non-positive size %d", allocation.Node, allocation.Bytes)
+		}
+		if allocation.Offset < 0 || allocation.Offset&(alignment-1) != 0 {
+			return VulkanTransientBinding{}, fmt.Errorf("compute Vulkan transient binding: node %q offset %d is not aligned to %d", allocation.Node, allocation.Offset, alignment)
+		}
+		if allocation.Offset > plan.Reserved || allocation.Bytes > plan.Reserved-allocation.Offset {
+			return VulkanTransientBinding{}, fmt.Errorf("compute Vulkan transient binding: node %q range [%d,%d) exceeds arena size %d", allocation.Node, allocation.Offset, allocation.Offset+allocation.Bytes, plan.Reserved)
+		}
+		if allocation.Start < 0 || allocation.End < allocation.Start {
+			return VulkanTransientBinding{}, fmt.Errorf("compute Vulkan transient binding: node %q has invalid lifetime [%d,%d]", allocation.Node, allocation.Start, allocation.End)
+		}
+		binding.Views = append(binding.Views, VulkanTransientView{
+			Node: allocation.Node, Offset: allocation.Offset, Bytes: allocation.Bytes,
+			Start: allocation.Start, End: allocation.End, Escapes: allocation.Escapes,
+		})
+	}
+
+	for i := range binding.Views {
+		for j := i + 1; j < len(binding.Views); j++ {
+			left, right := binding.Views[i], binding.Views[j]
+			if !vulkanTransientByteRangesOverlap(left, right) {
+				continue
+			}
+			if plan.Mode == transientPlanForwardBump {
+				return VulkanTransientBinding{}, fmt.Errorf("compute Vulkan transient binding: forward-bump views %q and %q overlap", left.Node, right.Node)
+			}
+			if left.Escapes || right.Escapes || vulkanTransientLifetimesOverlap(left, right) {
+				return VulkanTransientBinding{}, fmt.Errorf("compute Vulkan transient binding: views %q and %q overlap while simultaneously live", left.Node, right.Node)
+			}
+		}
+	}
+
+	binding.MemoryAllocations = 1
+	return binding, nil
+}
+
+func vulkanTransientByteRangesOverlap(left, right VulkanTransientView) bool {
+	return left.Offset < right.Offset+right.Bytes && right.Offset < left.Offset+left.Bytes
+}
+
+func vulkanTransientLifetimesOverlap(left, right VulkanTransientView) bool {
+	return left.Start <= right.End && right.Start <= left.End
 }
 
 func transientIntervals(graph Graph, values []TransientValue, align int64) ([]transientInterval, string) {
