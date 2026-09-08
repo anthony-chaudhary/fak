@@ -1,212 +1,53 @@
 #version 450
 
-// q4k_matmul.comp — Wave32/Wave64 2D block-tiled cooperative matrix GEMM for Q4_K on gfx1151 (RDNA 3.5).
-//
-// Key Optimizations:
-// 1. Dual-Path Dispatch Specialization:
-//    - Decode Mode (tokens == 1): High-precision scalar GEMV streaming with bit-exact FP32 accumulation
-//      (relative L2 <= 1e-4, exact argmax).
-//    - Prefill Mode (tokens > 1): 2D block-tiled cooperative matrix GEMM utilizing RDNA 3.5 Wave32 WMMA
-//      hardware primitives, staging Q4_K weights and activations in LDS to eliminate redundant VRAM fetches.
-// 2. 2D Block Tiling & Cooperative Matrix (WMMA):
-//    Organizes workgroups into cooperative subgroups accumulating a 16x32 spatial tile
-//    (TILE_M=16 tokens, TILE_N=32 output rows) per tile step.
-//    Uses 16x16x16 FP16 WMMA hardware cooperative matrix primitives over K-dimension blocks (TILE_K=16).
-// 3. LDS Pad-2 Stride Bank Conflict Elimination:
-//    Applies Pad-2 row strides (STRIDE_K = 16 + 2 = 18, STRIDE_N = 32 + 2 = 34) in shared memory,
-//    eliminating LDS bank serialization stalls across threads.
-// 4. Flexible Dispatch Geometry:
-//    Supports 2D workgroup grids (gl_NumWorkGroups.y > 1) and 1D flattened grids with grid-stride tile coverage.
-
-#extension GL_KHR_cooperative_matrix : enable
-#extension GL_KHR_memory_scope_semantics : enable
-#extension GL_KHR_shader_subgroup_basic : enable
-#extension GL_EXT_shader_explicit_arithmetic_types_float16 : enable
-#extension GL_EXT_shader_16bit_storage : enable
-
-// Workgroup configuration: 128 threads (2 Wave64 waves or 4 Wave32 waves)
-layout(local_size_x = 64, local_size_y = 2, local_size_z = 1) in;
-
-layout(set=0, binding=0) readonly buffer Q4K { uint raw[]; };
-layout(set=0, binding=1) readonly buffer X { float x[]; };
-layout(set=0, binding=2) writeonly buffer Y { float y[]; };
-
-layout(push_constant) uniform PC {
-    int outDim;
-    int inDim;
-    int tokens;
-} pc;
+layout(local_size_x = 64) in;
+layout(set=0,binding=0) readonly buffer Q4K { uint raw[]; };
+layout(set=0,binding=1) readonly buffer X { float x[]; };
+layout(set=0,binding=2) writeonly buffer Y { float y[]; };
+layout(push_constant) uniform PC { int outDim; int inDim; int tokens; } pc;
 
 uint byteAt(uint off) {
     uint w = raw[off >> 2];
     return (w >> ((off & 3u) * 8u)) & 255u;
 }
-
 float halfAt(uint off) {
     uint bits = byteAt(off) | (byteAt(off + 1u) << 8u);
     return unpackHalf2x16(bits).x;
 }
-
 void scaleMin(uint base, int group, out uint sc, out uint mn) {
     int j = group;
     if (j < 4) {
         sc = byteAt(base + uint(j)) & 63u;
         mn = byteAt(base + uint(j + 4)) & 63u;
     } else {
-        sc = (byteAt(base + uint(j + 4)) & 15u) | ((byteAt(base + uint(j - 4)) >> 6u) << 4u);
+        j -= 4;
+        sc = (byteAt(base + uint(j + 4)) & 15u) | ((byteAt(base + uint(j)) >> 6u) << 4u);
         mn = (byteAt(base + uint(j + 4)) >> 4u) | ((byteAt(base + uint(j)) >> 6u) << 4u);
     }
 }
-
-// Tile dimensions: 16 tokens x 32 output channels (composed of two 16x16 sub-tiles)
-const uint TILE_M = 16u;
-const uint TILE_N = 32u;
-const uint TILE_K = 16u;
-const uint LDS_PAD_2 = 2u;
-const uint STRIDE_N = TILE_N + LDS_PAD_2; // 34 elements (Pad-2 LDS stride)
-const uint STRIDE_K = TILE_K + LDS_PAD_2; // 18 elements (Pad-2 LDS stride)
-
-shared float16_t ldsTileA[TILE_M * STRIDE_K]; // [16, 18]
-shared float16_t ldsTileB[TILE_K * STRIDE_N]; // [16, 34]
-shared float     ldsTileC[TILE_M * STRIDE_N]; // [16, 34]
-
 void main() {
-    // Path 1: Decode mode (tokens == 1) single-token scalar GEMV
-    if (pc.tokens == 1) {
-        if (gl_LocalInvocationID.y != 0) return;
-        int row = int(gl_GlobalInvocationID.x);
-        if (row >= pc.outDim) return;
-        int blocks = pc.inDim / 256;
-        float sum = 0.0;
-        for (int sb = 0; sb < blocks; ++sb) {
-            uint base = uint((row * blocks + sb) * 144);
-            float d = halfAt(base);
-            float dm = halfAt(base + 2u);
-            for (int group = 0; group < 8; ++group) {
-                uint sc, mn; scaleMin(base + 4u, group, sc, mn);
-                for (int lane = 0; lane < 32; ++lane) {
-                    uint packed = byteAt(base + 16u + uint((group >> 1) * 32 + lane));
-                    uint code = ((group & 1) != 0) ? packed >> 4u : packed & 15u;
-                    float w = d * float(sc) * float(code) - dm * float(mn);
-                    sum += w * x[sb * 256 + group * 32 + lane];
-                }
+    int globalIdx = int(gl_GlobalInvocationID.x);
+    // The host dispatch is deliberately one-dimensional: ceil(outDim*tokens/64)
+    // workgroups in X and exactly one workgroup in Y. Decode and prefill therefore
+    // share one unambiguous flattening for every token count, including tokens==1.
+    int row = globalIdx % pc.outDim;
+    int token = globalIdx / pc.outDim;
+    if (row >= pc.outDim || token >= pc.tokens) return;
+    int blocks = pc.inDim / 256;
+    float sum = 0.0;
+    for (int sb = 0; sb < blocks; ++sb) {
+        uint base = uint((row * blocks + sb) * 144);
+        float d = halfAt(base);
+        float dm = halfAt(base + 2u);
+        for (int group = 0; group < 8; ++group) {
+            uint sc, mn; scaleMin(base + 4u, group, sc, mn);
+            for (int lane = 0; lane < 32; ++lane) {
+                uint packed = byteAt(base + 16u + uint((group >> 1) * 32 + lane));
+                uint code = ((group & 1) != 0) ? packed >> 4u : packed & 15u;
+                float w = d * float(sc) * float(code) - dm * float(mn);
+                sum += w * x[token * pc.inDim + sb * 256 + group * 32 + lane];
             }
         }
-        y[row] = sum;
-        return;
     }
-
-    // Path 2: Prefill mode (tokens > 1) 2D block-tiled cooperative matrix GEMM
-    uint waveID = gl_SubgroupID;           // Hardware subgroup ID (constant across wave)
-    uint threadID = gl_LocalInvocationIndex; // 0..127
-    uint waveCol = (waveID % 2u) * 16u;
-
-    uint numTileCols = (uint(pc.outDim) + TILE_N - 1u) / TILE_N;
-    if (numTileCols < 1u) numTileCols = 1u;
-    uint numTileRows = (uint(pc.tokens) + TILE_M - 1u) / TILE_M;
-    if (numTileRows < 1u) numTileRows = 1u;
-    uint totalTiles = numTileCols * numTileRows;
-
-    uint startTile;
-    uint tileStep;
-    uint endTile;
-
-    if (gl_NumWorkGroups.y > 1u) {
-        startTile = gl_WorkGroupID.y * numTileCols + gl_WorkGroupID.x;
-        tileStep = totalTiles + 1u; // run exactly once
-        endTile = startTile + 1u;
-    } else {
-        startTile = gl_WorkGroupID.x;
-        tileStep = gl_NumWorkGroups.x;
-        endTile = totalTiles;
-    }
-
-    uint blocks = uint(pc.inDim) / 256u;
-
-    for (uint tileIdx = startTile; tileIdx < endTile; tileIdx += tileStep) {
-        uint wgCol = tileIdx % numTileCols;
-        uint wgRow = tileIdx / numTileCols;
-
-        uint tileRow = wgRow * TILE_M;
-        uint tileCol = wgCol * TILE_N;
-
-        if (tileRow >= uint(pc.tokens) || tileCol >= uint(pc.outDim)) {
-            continue;
-        }
-
-        coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC;
-        matC = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
-
-        for (uint kBlock = 0u; kBlock < uint(pc.inDim); kBlock += TILE_K) {
-            // 1. Stage Tile A [16 x 16] into LDS (256 elements, 128 threads -> 2 elements per thread)
-            for (uint i = threadID; i < 256u; i += 128u) {
-                uint r = i / TILE_K;
-                uint c = i % TILE_K;
-                uint gToken = tileRow + r;
-                uint gK = kBlock + c;
-                float16_t val = float16_t(0.0);
-                if (gToken < uint(pc.tokens) && gK < uint(pc.inDim)) {
-                    val = float16_t(x[gToken * uint(pc.inDim) + gK]);
-                }
-                ldsTileA[r * STRIDE_K + c] = val;
-            }
-
-            // 2. Stage Tile B [16 x 32] into LDS (512 elements, 128 threads -> 4 elements per thread)
-            for (uint i = threadID; i < 512u; i += 128u) {
-                uint c = i / TILE_N;
-                uint r = i % TILE_N;
-                uint gRow = tileCol + r;
-                uint gK = kBlock + c;
-                float16_t val = float16_t(0.0);
-                if (gRow < uint(pc.outDim) && gK < uint(pc.inDim)) {
-                    uint sb = gK / 256u;
-                    uint kInSb = gK % 256u;
-                    uint base = (gRow * blocks + sb) * 144u;
-                    float d = halfAt(base);
-                    float dm = halfAt(base + 2u);
-                    uint group = kInSb / 32u;
-                    uint lane = kInSb % 32u;
-                    uint sc, mn;
-                    scaleMin(base + 4u, int(group), sc, mn);
-                    uint packed = byteAt(base + 16u + (group >> 1u) * 32u + lane);
-                    uint code = ((group & 1u) != 0u) ? (packed >> 4u) : (packed & 15u);
-                    float w = d * float(sc) * float(code) - dm * float(mn);
-                    val = float16_t(w);
-                }
-                ldsTileB[c * STRIDE_N + r] = val;
-            }
-
-            barrier();
-
-            // 3. Load cooperative matrix fragments
-            coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> matA;
-            coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> matB;
-
-            coopMatLoad(matA, ldsTileA, 0u, STRIDE_K, gl_CooperativeMatrixLayoutRowMajor);
-            coopMatLoad(matB, ldsTileB, waveCol, STRIDE_N, gl_CooperativeMatrixLayoutRowMajor);
-
-            // 4. WMMA accumulation
-            matC = coopMatMulAdd(matA, matB, matC);
-
-            barrier();
-        }
-
-        // 5. Store to LDS
-        coopMatStore(matC, ldsTileC, waveCol, STRIDE_N, gl_CooperativeMatrixLayoutRowMajor);
-
-        barrier();
-
-        // 6. Write out to Y (512 elements, 128 threads -> 4 elements per thread)
-        for (uint i = threadID; i < 512u; i += 128u) {
-            uint r = i / TILE_N;
-            uint c = i % TILE_N;
-            uint outToken = tileRow + r;
-            uint outRow = tileCol + c;
-            if (outToken < uint(pc.tokens) && outRow < uint(pc.outDim)) {
-                y[outToken * uint(pc.outDim) + outRow] = ldsTileC[r * STRIDE_N + c];
-            }
-        }
-
-        barrier();
-    }
+    y[token * pc.outDim + row] = sum;
 }

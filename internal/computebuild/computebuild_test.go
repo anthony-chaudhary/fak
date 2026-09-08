@@ -62,6 +62,22 @@ func TestVulkanShadersCompleteness(t *testing.T) {
 	}
 }
 
+func TestVulkanQ4KScalarShaderStaysPortable(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join("..", "compute", "shaders", "q4k_matmul.comp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	for _, forbidden := range []string{"GL_KHR_cooperative_matrix", "coopMatMulAdd", "float16_t"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("always-loaded scalar Q4_K shader requires optional capability %q", forbidden)
+		}
+	}
+	if !strings.Contains(text, "layout(local_size_x = 64) in;") {
+		t.Fatal("scalar Q4_K shader no longer matches its one-dimensional host dispatch")
+	}
+}
+
 func TestCUDAArchParsingAndGencode(t *testing.T) {
 	sampleArchTxt := "sm_80\r\nsm_89\nsm_90\nsm_100\nsm_120\n"
 
