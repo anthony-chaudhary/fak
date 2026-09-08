@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
@@ -64,7 +65,7 @@ func TestRawDecodeSynthetic(t *testing.T) {
 	defer setRawDecodeTestFlags(true, "1,2,3", 256, false, false)()
 
 	m := model.NewSynthetic(syntheticTestConfig())
-	f := testRawDecodeFlags(5, 1)
+	f := testRawDecodeFlags(5, 2)
 
 	report, err := executeRawDecode(f, m, "synthetic-test", 12.5, 0, nil, nil)
 	if err != nil {
@@ -132,6 +133,56 @@ func TestRawDecodeSynthetic(t *testing.T) {
 	}
 	if _, ok := report["margin_summary"].(map[string]any); !ok {
 		t.Errorf("missing margin_summary")
+	}
+
+	attempt, ok := report["canonical_physical_receipt"].(rawDecodePhysicalReceiptAttempt)
+	if !ok {
+		t.Fatalf("missing canonical physical receipt attempt: %T", report["canonical_physical_receipt"])
+	}
+	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
+		t.Fatalf("synthetic raw decode became creditable: %+v", attempt)
+	}
+	if attempt.Observed.Model.Name != "synthetic-test" || attempt.Observed.Model.Quantization == "" {
+		t.Fatalf("observed model fields were not preserved: %+v", attempt.Observed.Model)
+	}
+	if !reflect.DeepEqual(attempt.Observed.PromptTokenIDs, []int32{1, 2, 3}) || len(attempt.Observed.OutputTokenIDs) != 5 {
+		t.Fatalf("observed token identity was not preserved: prompt=%v output=%v", attempt.Observed.PromptTokenIDs, attempt.Observed.OutputTokenIDs)
+	}
+	if attempt.Observed.Engine.Name != "" || attempt.Observed.Engine.Backend != "" || attempt.Observed.Engine.FallbackCount != nil {
+		t.Fatalf("synthetic execution was relabeled as a physical engine: %+v", attempt.Observed.Engine)
+	}
+	if attempt.Observed.Source.GitCommit != "" || attempt.Observed.Model.ArtifactSHA256 != "" || attempt.Observed.Device.Name != "" || attempt.Observed.OutputText != "" || attempt.Observed.PeakProcessMemoryBytes != nil || attempt.Observed.PeakDeviceMemoryBytes != nil || attempt.Observed.Counters != nil {
+		t.Fatalf("unobserved physical identity or telemetry was invented: %+v", attempt.Observed)
+	}
+	if attempt.Observed.FiniteLogits == nil || !*attempt.Observed.FiniteLogits || attempt.Observed.CPUModelParity != nil {
+		t.Fatalf("quality evidence presence mismatch: finite=%v parity=%v", attempt.Observed.FiniteLogits, attempt.Observed.CPUModelParity)
+	}
+	runs, ok := report["runs"].([]map[string]any)
+	if !ok || len(runs) != 2 {
+		t.Fatalf("expected two raw runs, got %T %v", report["runs"], report["runs"])
+	}
+	rep0Timing := runs[0]["timings"].(map[string]any)
+	wantElapsedNS := uint64(math.Round(rep0Timing["total_ms"].(float64) * 1e6))
+	if attempt.Observed.CandidateElapsedNanoseconds != wantElapsedNS || attempt.Observed.Runs[0].CandidateElapsedNanoseconds != wantElapsedNS {
+		t.Fatalf("physical attempt candidate_elapsed_ns=%d run0=%d, want repetition-zero elapsed_ns=%d", attempt.Observed.CandidateElapsedNanoseconds, attempt.Observed.Runs[0].CandidateElapsedNanoseconds, wantElapsedNS)
+	}
+}
+
+type vulkanNamedRawDecodeTestBackend struct{ compute.Backend }
+
+func (vulkanNamedRawDecodeTestBackend) Name() string { return compute.Qwen38VulkanDecodeBackend }
+
+func TestRawDecodeVulkanNameDoesNotClaimPhysicalEngineIdentity(t *testing.T) {
+	be := vulkanNamedRawDecodeTestBackend{Backend: compute.Default()}
+	attempt := rawDecodePhysicalReceipt(testRawDecodeFlags(1, 1), "synthetic", "observed test path", "f32", be, []int{1}, 8, 1, false, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
+		t.Fatalf("named test backend became creditable: %+v", attempt)
+	}
+	if attempt.Observed.Engine.Backend != compute.Qwen38VulkanDecodeBackend || attempt.Observed.Engine.ExecutedPath != "observed test path" {
+		t.Fatalf("observed backend fields missing: %+v", attempt.Observed.Engine)
+	}
+	if attempt.Observed.Engine.Name != "" || attempt.Observed.Engine.Runtime != "" || attempt.Observed.Engine.FallbackCount != nil {
+		t.Fatalf("backend registry name was relabeled as physical execution identity: %+v", attempt.Observed.Engine)
 	}
 }
 
@@ -393,6 +444,18 @@ func TestRawDecodeVerifyCPUAgreement(t *testing.T) {
 		if !step.Agree {
 			t.Errorf("step %d did not agree", i+1)
 		}
+	}
+	attempt := report["canonical_physical_receipt"].(rawDecodePhysicalReceiptAttempt)
+	if attempt.Observed.CPUModelParity == nil || !*attempt.Observed.CPUModelParity {
+		t.Fatalf("passing CPU replay was not preserved as observed parity: %+v", attempt.Observed)
+	}
+	run := attempt.Observed.Runs[0]
+	wantCandidate := run.SessionSetupNanoseconds + run.PrefillNanoseconds + run.FirstSampleNanoseconds + run.DecodeNanoseconds + run.TeardownNanoseconds
+	if run.CandidateElapsedNanoseconds != wantCandidate || attempt.Observed.CandidateElapsedNanoseconds != wantCandidate {
+		t.Fatalf("candidate timing includes non-candidate work: run=%+v top_level=%d", run, attempt.Observed.CandidateElapsedNanoseconds)
+	}
+	if attempt.Observed.CPUVerificationNanoseconds != run.CPUVerificationNanoseconds {
+		t.Fatalf("CPU verification timing was not preserved separately: run=%+v top_level=%d", run, attempt.Observed.CPUVerificationNanoseconds)
 	}
 }
 
@@ -765,6 +828,10 @@ func TestRawDecodeCPUDivergencePreservesReceipt(t *testing.T) {
 	}
 	if v.AllArgmaxAgree {
 		t.Errorf("expected verify_cpu.AllArgmaxAgree: false on divergence")
+	}
+	attempt := report["canonical_physical_receipt"].(rawDecodePhysicalReceiptAttempt)
+	if attempt.Status != "UNAVAILABLE" || attempt.Observed.CPUModelParity == nil || *attempt.Observed.CPUModelParity {
+		t.Fatalf("divergent CPU replay was not preserved as non-creditable parity=false: %+v", attempt)
 	}
 
 	// 2. runRawDecode with output file must write the report JSON despite error.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -202,6 +203,104 @@ type rawRepOutput struct {
 	stepsInfo       []rawStepInfo
 	hostStages      []map[string]any
 	cpuVerify       *cpuVerifyResult
+}
+
+type rawDecodePhysicalReceiptAttempt struct {
+	Status         string                              `json:"status"`
+	CreditEligible bool                                `json:"credit_eligible"`
+	Reason         string                              `json:"reason,omitempty"`
+	Observed       compute.Qwen38VulkanRawDecodeResult `json:"observed"`
+	Receipt        *compute.Qwen38VulkanDecodeReceipt  `json:"receipt,omitempty"`
+}
+
+func rawDecodeInt32IDs(ids []int) ([]int32, error) {
+	out := make([]int32, len(ids))
+	for i, id := range ids {
+		if id < 0 || int64(id) > math.MaxInt32 {
+			return nil, fmt.Errorf("token ID %d cannot be represented by canonical int32 token identity", id)
+		}
+		out[i] = int32(id)
+	}
+	return out, nil
+}
+
+// rawDecodePhysicalReceipt observes only values the current runner owns. In
+// particular, it does not infer source hashes, artifact hashes, device/driver
+// identity, fallback counters, memory, dispatch counters, or decoded text.
+func rawDecodePhysicalReceipt(f *benchFlags, modelName, engine, precision string, be compute.Backend, promptIDs []int, contextLimit, generatedTokenLimit int, ignoreEOS bool, repOutputs []rawRepOutput) rawDecodePhysicalReceiptAttempt {
+	finiteLogits := true
+	observed := compute.Qwen38VulkanRawDecodeResult{
+		Model: compute.Qwen38VulkanModelIdentity{
+			Name:         modelName,
+			Quantization: precision,
+		},
+		Device: compute.Qwen38VulkanDeviceIdentity{
+			OS:   runtime.GOOS,
+			Arch: runtime.GOARCH,
+		},
+		GeneratedTokenLimit: generatedTokenLimit,
+		FiniteLogits:        &finiteLogits,
+	}
+	if f != nil && f.gguf != nil {
+		observed.Model.ArtifactPath = strings.TrimSpace(*f.gguf)
+	}
+	if be != nil {
+		observed.Engine.Backend = be.Name()
+		observed.Engine.ExecutedPath = engine
+	}
+
+	if len(repOutputs) == 0 {
+		return rawDecodePhysicalReceiptAttempt{Status: "UNAVAILABLE", Reason: "raw decode produced no repetitions", Observed: observed}
+	}
+	var err error
+	if observed.PromptTokenIDs, err = rawDecodeInt32IDs(promptIDs); err != nil {
+		return rawDecodePhysicalReceiptAttempt{Status: "UNAVAILABLE", Reason: err.Error(), Observed: observed}
+	}
+	allParityObserved, allParityPassed := true, true
+	observed.Runs = make([]compute.Qwen38VulkanDecodeRun, len(repOutputs))
+	for i, rep := range repOutputs {
+		outputTokenIDs, convertErr := rawDecodeInt32IDs(rep.generatedTokens)
+		if convertErr != nil {
+			return rawDecodePhysicalReceiptAttempt{Status: "UNAVAILABLE", Reason: convertErr.Error(), Observed: observed}
+		}
+		ignoreEOSObserved, eosStoppedObserved := ignoreEOS, rep.eosStopped
+		candidateElapsed := rep.sessionSetupDur + rep.prefillDur + rep.firstSampleDur + rep.decodeDur + rep.teardownDur
+		observed.Runs[i] = compute.Qwen38VulkanDecodeRun{
+			Repetition:                  i + 1,
+			ContextLimit:                contextLimit,
+			ContextTokens:               len(promptIDs) + len(rep.generatedTokens),
+			GeneratedTokenLimit:         generatedTokenLimit,
+			ActualGeneratedTokens:       len(rep.generatedTokens),
+			Sampler:                     "greedy",
+			SeedPolicy:                  "not_applicable_greedy",
+			IgnoreEOS:                   &ignoreEOSObserved,
+			EOSStopped:                  &eosStoppedObserved,
+			OutputTokenIDs:              outputTokenIDs,
+			SessionSetupNanoseconds:     uint64(max(rep.sessionSetupDur.Nanoseconds(), 0)),
+			PrefillNanoseconds:          uint64(max(rep.prefillDur.Nanoseconds(), 0)),
+			FirstSampleNanoseconds:      uint64(max(rep.firstSampleDur.Nanoseconds(), 0)),
+			DecodeNanoseconds:           uint64(max(rep.decodeDur.Nanoseconds(), 0)),
+			TeardownNanoseconds:         uint64(max(rep.teardownDur.Nanoseconds(), 0)),
+			CandidateElapsedNanoseconds: uint64(max(candidateElapsed.Nanoseconds(), 0)),
+			CPUVerificationNanoseconds:  uint64(max(rep.cpuVerifyDur.Nanoseconds(), 0)),
+		}
+		if rep.cpuVerify == nil {
+			allParityObserved = false
+		} else if !rep.cpuVerify.Passed {
+			allParityPassed = false
+		}
+	}
+	observed.OutputTokenIDs = slices.Clone(observed.Runs[0].OutputTokenIDs)
+	observed.CandidateElapsedNanoseconds = observed.Runs[0].CandidateElapsedNanoseconds
+	observed.CPUVerificationNanoseconds = observed.Runs[0].CPUVerificationNanoseconds
+	if allParityObserved {
+		observed.CPUModelParity = &allParityPassed
+	}
+	receipt, err := compute.BuildQwen38VulkanDecodeReceipt(observed)
+	if err != nil {
+		return rawDecodePhysicalReceiptAttempt{Status: "UNAVAILABLE", Reason: err.Error(), Observed: observed}
+	}
+	return rawDecodePhysicalReceiptAttempt{Status: "AVAILABLE", CreditEligible: true, Observed: observed, Receipt: &receipt}
 }
 
 // executeRawDecode runs raw greedy decode across reps, returning the structured report map.
@@ -539,30 +638,32 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, q
 	}
 
 	engine, precision, backendReport := describeEngine(f, be, registeredBackends)
+	physicalReceipt := rawDecodePhysicalReceipt(f, modelName, engine, precision, be, promptIDs, rawContext, requestedSteps, ignoreEOS, repOutputs)
 
 	report := map[string]any{
-		"app_version":             appversion.Current(),
-		"engine":                  engine,
-		"model":                   modelName,
-		"precision":               precision,
-		"backend":                 backendReport,
-		"raw_decode":              true,
-		"raw_ignore_eos":          ignoreEOS,
-		"raw_context":             rawContext,
-		"prompt_ids":              promptIDs,
-		"effective_ids":           effectiveIDs,
-		"prefill_output_id":       rep0.prefillOutputID,
-		"step_tokens":             rep0.stepTokens,
-		"actual_tokens_generated": len(rep0.generatedTokens),
-		"actual_step_calls":       len(rep0.stepTokens),
-		"eos_stopped":             rep0.eosStopped,
-		"finite_logits":           true,
-		"timings":                 timings,
-		"timing_scope":            "load_ms and quant_ms occur once; per-repetition total_ms covers candidate setup through teardown plus optional CPU verification, excluding report assembly",
-		"steps":                   rep0.stepsInfo,
-		"margin_summary":          marginSummary,
-		"host_stages":             rep0.hostStages,
-		"reps":                    reps,
+		"app_version":                appversion.Current(),
+		"engine":                     engine,
+		"model":                      modelName,
+		"precision":                  precision,
+		"backend":                    backendReport,
+		"raw_decode":                 true,
+		"raw_ignore_eos":             ignoreEOS,
+		"raw_context":                rawContext,
+		"prompt_ids":                 promptIDs,
+		"effective_ids":              effectiveIDs,
+		"prefill_output_id":          rep0.prefillOutputID,
+		"step_tokens":                rep0.stepTokens,
+		"actual_tokens_generated":    len(rep0.generatedTokens),
+		"actual_step_calls":          len(rep0.stepTokens),
+		"eos_stopped":                rep0.eosStopped,
+		"finite_logits":              true,
+		"timings":                    timings,
+		"timing_scope":               "load_ms and quant_ms occur once; per-repetition total_ms covers candidate setup through teardown plus optional CPU verification, excluding report assembly",
+		"steps":                      rep0.stepsInfo,
+		"margin_summary":             marginSummary,
+		"host_stages":                rep0.hostStages,
+		"canonical_physical_receipt": physicalReceipt,
+		"reps":                       reps,
 		"host": map[string]any{
 			"os":         runtime.GOOS,
 			"arch":       runtime.GOARCH,
