@@ -33,6 +33,7 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - FAK vs DOS boundary — FAK owns agent execution; DOS owns work admission, leases, truth, liveness, and decisions; FAK workflows compose DOS: [`docs/fak-vs-dos.md`](docs/fak-vs-dos.md)
 ## Current authorities
 
+- Astra formal-subagent admission, closed formal kinds, fail-closed packet schema, pin precedence, assignment digest, and ranked correctness deployment map: [`docs/astra-formal-subagents.md`](docs/astra-formal-subagents.md)
 - Micro-context fabric contract and bounded 100/1k/10k floor (`microcontextdemo`): [`docs/research/micro-context-fabrics.md`](docs/research/micro-context-fabrics.md); captured stage witnesses: [`docs/research/README.md`](docs/research/README.md)
 - Product scope and mode choice: [`README.md`](README.md)
 - Human role map: [`START-HERE.md`](START-HERE.md)

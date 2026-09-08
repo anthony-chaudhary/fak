@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -14,6 +16,185 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/orchestration"
 	"github.com/anthony-chaudhary/fak/internal/trajectory"
 )
+
+func TestOrchestrationLaunchLowersFormalPacketAndBindsAssignmentDigest(t *testing.T) {
+	home := externalOrchestrationTestHome(t)
+	t.Setenv("CODEX_THREAD_ID", "session-formal-packet")
+	fixture := filepath.Join(t.TempDir(), "formal-task.json")
+	body := `{
+		"schema":"fak-orchestration-task/1",
+		"id":"formal-launch",
+		"work_class":"rigor",
+		"formal_packet":{
+			"schema":"fak-formal-packet/1",
+			"task_kinds":["state_machine_audit"],
+			"definitions_and_assumptions":"For finite states S, transition relation R is total.",
+			"exact_proposition":"Prove every reachable state has exactly one canonical successor.",
+			"required_output_form":"DEFINITIONS, PROPOSITION, PROOF, COUNTEREXAMPLES, WITNESS",
+			"deterministic_witness":"go test ./internal/orchestration -run TestFormalPacket",
+			"surfaces":["internal/orchestration/**"]
+		}
+	}`
+	if err := os.WriteFile(fixture, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	old := orchestrationWorkerLauncher
+	var requests []orchestrationWorkerLaunchRequest
+	orchestrationWorkerLauncher = func(req orchestrationWorkerLaunchRequest) (codexOrchestrationWorkerLaunch, error) {
+		requests = append(requests, req)
+		return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: 700 + len(requests), Status: "started", LogPath: filepath.Join(req.RunDir, req.Role.ID+".jsonl")}, nil
+	}
+	t.Cleanup(func() { orchestrationWorkerLauncher = old })
+
+	var stdout, stderr bytes.Buffer
+	code := runOrchestration(&stdout, &stderr, []string{"plan", "--profile", "auto", "--task", fixture, "--codex-home", home, "--launch", "--json"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var result struct {
+		Plan   orchestration.Resolution        `json:"plan"`
+		Launch codexOrchestrationLaunchReceipt `json:"launch"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("decode launch result: %v\n%s", err, stdout.String())
+	}
+	if result.Plan.Resolved.SOLRoute.WorkerModel != orchestration.AstraWorkerModel || result.Plan.Resolved.SOLRoute.WorkerReasoningEffort != orchestration.AstraWorkerEffort {
+		t.Fatalf("formal worker route = %+v", result.Plan.Resolved.SOLRoute)
+	}
+	if len(requests) == 0 || len(result.Launch.Workers) != len(requests) {
+		t.Fatalf("requests=%d workers=%d", len(requests), len(result.Launch.Workers))
+	}
+
+	wantFragments := []string{
+		"schema: fak-formal-packet/1",
+		"task_kinds:\n- state_machine_audit",
+		"definitions_and_assumptions:\nFor finite states S, transition relation R is total.",
+		"exact_proposition:\nProve every reachable state has exactly one canonical successor.",
+		"required_output_form:\nDEFINITIONS, PROPOSITION, PROOF, COUNTEREXAMPLES, WITNESS",
+		"deterministic_witness:\ngo test ./internal/orchestration -run TestFormalPacket",
+		"surfaces:\n- internal/orchestration/**",
+	}
+	assignment := requests[0].TaskText
+	digest := sha256.Sum256([]byte(assignment))
+	wantDigest := "sha256:" + hex.EncodeToString(digest[:])
+	if wantDigest == "sha256:" || result.Launch.AssignmentDigest != wantDigest {
+		t.Fatalf("launch assignment digest = %q, want %q", result.Launch.AssignmentDigest, wantDigest)
+	}
+	for _, req := range requests {
+		if req.TaskText != assignment || req.AssignmentDigest != wantDigest || req.Model != orchestration.AstraWorkerModel || req.Effort != orchestration.AstraWorkerEffort {
+			t.Fatalf("formal request mismatch: %+v", req)
+		}
+		if req.Access.Mode != orchestration.ChildAccessObserve || !req.Access.Admission.ReadOnly {
+			t.Fatalf("formal request gained write access: %+v", req.Access)
+		}
+		prompt := orchestrationWorkerPrompt(req)
+		if !strings.Contains(prompt, "Work read-only") || !strings.Contains(prompt, assignment) {
+			t.Fatalf("formal prompt lost read-only assignment: %q", prompt)
+		}
+		for _, fragment := range wantFragments {
+			if !strings.Contains(prompt, fragment) {
+				t.Errorf("formal prompt missing %q: %q", fragment, prompt)
+			}
+		}
+	}
+	for _, worker := range result.Launch.Workers {
+		if worker.AssignmentDigest != wantDigest || worker.Model != orchestration.AstraWorkerModel || worker.Effort != orchestration.AstraWorkerEffort || !worker.ReadOnly {
+			t.Fatalf("formal worker receipt mismatch: %+v", worker)
+		}
+	}
+	persisted, ok := readCodexOrchestrationLaunchReceipt(home, "session-formal-packet")
+	if !ok || persisted.AssignmentDigest != wantDigest || !reflect.DeepEqual(persisted.Workers, result.Launch.Workers) {
+		t.Fatalf("persisted launch receipt mismatch: ok=%v receipt=%+v", ok, persisted)
+	}
+}
+
+func TestOrchestrationCLIWorkerOverridesReplaceRouteProvenance(t *testing.T) {
+	fixture := filepath.Join(t.TempDir(), "formal-task.json")
+	body := `{
+		"schema":"fak-orchestration-task/1",
+		"id":"formal-overrides",
+		"work_class":"rigor",
+		"formal_packet":{
+			"schema":"fak-formal-packet/1",
+			"task_kinds":["formal_proof"],
+			"definitions_and_assumptions":"Natural numbers use ordinary addition.",
+			"exact_proposition":"Prove zero is the additive identity.",
+			"required_output_form":"Definitions, proposition, proof, witness.",
+			"deterministic_witness":"go test ./internal/orchestration -run TestFormalPacket",
+			"surfaces":["internal/orchestration/**"]
+		}
+	}`
+	if err := os.WriteFile(fixture, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runOrchestration(&stdout, &stderr, []string{
+		"plan", "--profile", "auto", "--task", fixture, "--json", "--selfcheck",
+		"--worker-model", "gpt-5.6-sol", "--worker-effort", "high",
+	})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var got orchestration.Resolution
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"sol_route.worker_model":            "gpt-5.6-sol",
+		"sol_route.worker_reasoning_effort": "high",
+	}
+	counts := map[string]int{}
+	for _, override := range got.Overrides {
+		value, tracked := want[override.Field]
+		if !tracked {
+			continue
+		}
+		counts[override.Field]++
+		if override.Source != orchestration.AstraRouteSourceOperatorPin || override.Value != value {
+			t.Fatalf("override = %+v, want source operator-pin value %q", override, value)
+		}
+	}
+	for field := range want {
+		if counts[field] != 1 {
+			t.Fatalf("override field %q count=%d, want exactly one; overrides=%+v", field, counts[field], got.Overrides)
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runOrchestration(&stdout, &stderr, []string{
+		"plan", "--profile", "off", "--task", fixture, "--json", "--selfcheck",
+		"--worker-model", "astra",
+	})
+	if code != 0 {
+		t.Fatalf("profile-off code=%d stderr=%s", code, stderr.String())
+	}
+	got = orchestration.Resolution{}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	route := got.Resolved.AstraRoute
+	if route == nil || !route.Eligible || route.Selected || route.Model != "astra" || route.Source != orchestration.AstraRouteSourceOperatorPin {
+		t.Fatalf("profile-off Astra receipt = %+v", route)
+	}
+	if got.Resolved.Profile != orchestration.ProfileOff || got.Resolved.Budget.MaxWorkers > 1 || got.Resolved.SOLRoute.WorkerModel != "astra" {
+		t.Fatalf("profile-off effective route = %+v", got.Resolved)
+	}
+	modelOverrides := 0
+	for _, override := range got.Overrides {
+		if override.Field != "sol_route.worker_model" {
+			continue
+		}
+		modelOverrides++
+		if override.Source != orchestration.AstraRouteSourceOperatorPin || override.Value != "astra" {
+			t.Fatalf("profile-off override = %+v", override)
+		}
+	}
+	if modelOverrides != 1 {
+		t.Fatalf("profile-off model override count=%d, want one; overrides=%+v", modelOverrides, got.Overrides)
+	}
+}
 
 func externalOrchestrationTestHome(t *testing.T) string {
 	t.Helper()

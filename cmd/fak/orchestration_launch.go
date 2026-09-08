@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -93,6 +94,7 @@ type codexOrchestrationWorkerLaunch struct {
 	Model            string                               `json:"model"`
 	Mode             string                               `json:"mode"`
 	Effort           string                               `json:"reasoning_effort"`
+	AssignmentDigest string                               `json:"assignment_digest"`
 	AccessMode       string                               `json:"access_mode,omitempty"`
 	ReadOnly         bool                                 `json:"read_only"`
 	WriteTree        string                               `json:"write_tree,omitempty"`
@@ -137,6 +139,7 @@ type codexOrchestrationLaunchReceipt struct {
 	RunID             string                                 `json:"run_id"`
 	LaunchedAt        time.Time                              `json:"launched_at"`
 	TaskID            string                                 `json:"task_id"`
+	AssignmentDigest  string                                 `json:"assignment_digest"`
 	RequestedProfile  string                                 `json:"requested_profile"`
 	ResolvedProfile   string                                 `json:"resolved_profile"`
 	WorkClass         string                                 `json:"work_class"`
@@ -213,23 +216,24 @@ func qwenEmptyUsageGuardFromEnv() (qwenEmptyUsagePolicyReceipt, time.Duration, e
 }
 
 type orchestrationWorkerLaunchRequest struct {
-	Role          orchestration.Role
-	Access        orchestrationCompiledChildAccess
-	WorkClass     orchestration.WorkClass
-	TaskText      string
-	Root          string
-	RunDir        string
-	Model         string
-	Mode          orchestration.SOLMode
-	Effort        string
-	TokenBudget   int64
-	DeadlineAt    time.Time
-	RemainingWall time.Duration
-	RunID         string
-	OutputProfile string
-	WorkProfile   string
-	Attempt       int
-	RecordStarted func(codexOrchestrationWorkerLaunch) error
+	Role             orchestration.Role
+	Access           orchestrationCompiledChildAccess
+	WorkClass        orchestration.WorkClass
+	TaskText         string
+	AssignmentDigest string
+	Root             string
+	RunDir           string
+	Model            string
+	Mode             orchestration.SOLMode
+	Effort           string
+	TokenBudget      int64
+	DeadlineAt       time.Time
+	RemainingWall    time.Duration
+	RunID            string
+	OutputProfile    string
+	WorkProfile      string
+	Attempt          int
+	RecordStarted    func(codexOrchestrationWorkerLaunch) error
 }
 
 var orchestrationWorkerLauncher = launchGuardedCodexOrchestrationWorker
@@ -246,9 +250,11 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 		return codexOrchestrationLaunchReceipt{}, err
 	}
 	launchedAt := orchestrationLaunchNow().UTC()
+	taskText = strings.TrimSpace(taskText)
+	assignmentDigest := orchestrationAssignmentDigest(taskText)
 	receipt := codexOrchestrationLaunchReceipt{
 		Schema: codexOrchestrationLaunchSchema, SessionID: sessionID, RunID: runID,
-		LaunchedAt: launchedAt, TaskID: resolution.Resolved.TaskID,
+		LaunchedAt: launchedAt, TaskID: resolution.Resolved.TaskID, AssignmentDigest: assignmentDigest,
 		RequestedProfile: requestedProfile, ResolvedProfile: string(resolution.Resolved.Profile),
 		WorkClass: string(resolution.Resolved.WorkClass), CapabilityProfile: capabilityProfile,
 		Degradations: orchestrationDegradationNames(resolution.Degradations), Workers: []codexOrchestrationWorkerLaunch{},
@@ -339,7 +345,7 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 		}
 		access, compileErr := compileOrchestrationChildAccess(role, snapshot.Parent, laneadmit.Request{})
 		if compileErr != nil {
-			receipt.Workers = append(receipt.Workers, refusedOrchestrationWorker(role, access, compileErr))
+			receipt.Workers = append(receipt.Workers, refusedOrchestrationWorker(role, access, assignmentDigest, compileErr))
 			receipt.Status = "partial"
 			_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
 			return receipt, compileErr
@@ -347,7 +353,7 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 		admission := laneadmit.Decide(access.Admission, live, snapshot.Taxonomy)
 		if !admission.Admit {
 			admitErr := fmt.Errorf("%s: child %q: %s", admission.Reason, role.ID, admission.Detail)
-			receipt.Workers = append(receipt.Workers, refusedOrchestrationWorker(role, access, admitErr))
+			receipt.Workers = append(receipt.Workers, refusedOrchestrationWorker(role, access, assignmentDigest, admitErr))
 			receipt.Status = "partial"
 			_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
 			return receipt, admitErr
@@ -364,14 +370,14 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 		remainingWall := receipt.Budget.DeadlineAt.Sub(orchestrationLaunchNow())
 		if remainingWall <= 0 {
 			deadlineErr := fmt.Errorf("%s: parent wall deadline elapsed before child %q launch", orchestration.UltracodeBudgetReasonWallOverrun, role.ID)
-			receipt.Workers = append(receipt.Workers, refusedOrchestrationWorker(role, access, deadlineErr))
+			receipt.Workers = append(receipt.Workers, refusedOrchestrationWorker(role, access, assignmentDigest, deadlineErr))
 			receipt.Status = "invalid"
 			receipt.DeclineReason = orchestration.UltracodeBudgetReasonWallOverrun
 			_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
 			return receipt, deadlineErr
 		}
 		request := orchestrationWorkerLaunchRequest{
-			Role: role, Access: access, WorkClass: resolution.Resolved.WorkClass, TaskText: taskText,
+			Role: role, Access: access, WorkClass: resolution.Resolved.WorkClass, TaskText: taskText, AssignmentDigest: assignmentDigest,
 			Root: root, RunDir: runDir, Model: workerModel, Mode: route.Mode, Effort: workerEffort,
 			TokenBudget: childBudgets[role.ID].ReservedTokens, DeadlineAt: receipt.Budget.DeadlineAt,
 			RemainingWall: remainingWall, RunID: receipt.RunID, OutputProfile: outputProfile, WorkProfile: workProfile,
@@ -382,6 +388,7 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 			launched.Model = workerModel
 			launched.Mode = string(route.Mode)
 			launched.Effort = workerEffort
+			launched.AssignmentDigest = request.AssignmentDigest
 			launched.AccessMode = string(access.Mode)
 			launched.ReadOnly = access.Admission.ReadOnly
 			launched.PolicyPath = access.PolicyPath
@@ -745,8 +752,8 @@ func persistOrchestrationChildEnvelope(runDir, roleID string, raw []byte) (strin
 	return path, nil
 }
 
-func refusedOrchestrationWorker(role orchestration.Role, access orchestrationCompiledChildAccess, err error) codexOrchestrationWorkerLaunch {
-	row := codexOrchestrationWorkerLaunch{RoleID: role.ID, Status: "refused", AccessMode: string(access.Mode), ReadOnly: access.Admission.ReadOnly}
+func refusedOrchestrationWorker(role orchestration.Role, access orchestrationCompiledChildAccess, assignmentDigest string, err error) codexOrchestrationWorkerLaunch {
+	row := codexOrchestrationWorkerLaunch{RoleID: role.ID, Status: "refused", AccessMode: string(access.Mode), ReadOnly: access.Admission.ReadOnly, AssignmentDigest: assignmentDigest}
 	if len(access.Admission.Tree) > 0 {
 		row.WriteTree = access.Admission.Tree[0]
 	}
@@ -754,6 +761,11 @@ func refusedOrchestrationWorker(role orchestration.Role, access orchestrationCom
 		row.Refusal = err.Error()
 	}
 	return row
+}
+
+func orchestrationAssignmentDigest(taskText string) string {
+	digest := sha256.Sum256([]byte(taskText))
+	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
 func orchestrationWorkerEnv(env []string) []string {
