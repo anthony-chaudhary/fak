@@ -130,6 +130,7 @@ function Build-Shaders {
     $shaders += "glm_kda_recurrent_wave32"
     $shaders += "flash_attn_dequant"
     $shaders += "qwen35_gdn_tiled_transpose"
+    $shaders += "qwen35_gdn_q8_in_proj"
     $shaders += "coopmat_wave32_wmma"
     $shaders += "q4k_matmul_wave32"
     $shaders += "rmsnorm_q4k_matmul2"

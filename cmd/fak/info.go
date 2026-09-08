@@ -22,6 +22,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/negframe"
 	"github.com/anthony-chaudhary/fak/internal/resumemetrics"
 	"github.com/anthony-chaudhary/fak/internal/scorecardpane"
+	"github.com/anthony-chaudhary/fak/internal/telemetry"
 	"golang.org/x/term"
 )
 
@@ -175,6 +176,12 @@ type guardInfoVars struct {
 	// gateway OMITS the block on a cold process that never ran a watchdog (resumemetrics.Active()
 	// is false), so nil means "no watchdog signal here" — distinct from a present all-zero snapshot.
 	Watchdog *guardInfoWatchdog `json:"watchdog"`
+	// MTP holds live Multi-Token Prediction speculative decoding telemetry (#12333).
+	// mtp_acceptance_rate, mtp_decode_speedup, and mtp_rollback_count are exposed at root for witness contract.
+	MTPAcceptanceRate float64               `json:"mtp_acceptance_rate"`
+	MTPDecodeSpeedup  float64               `json:"mtp_decode_speedup"`
+	MTPRollbackCount  int64                 `json:"mtp_rollback_count"`
+	MTP               *telemetry.MTPMetrics `json:"mtp,omitempty"`
 }
 
 type startupViewSnapshot struct {
@@ -353,7 +360,50 @@ func fetchGuardInfoVars(c *claudeMacDebugClient, stderr io.Writer) (guardInfoVar
 	v.FleetWorkspace = collectInfoFleetWorkspace("", fleetPaneRunner, time.Now().UTC())
 	v.WorkDone = ptrGuardInfoWorkDone(guardInfoWorkDoneFromVars(v))
 	c.decorateWorkHistory(&v)
+	syncMTPFields(&v)
 	return v, true
+}
+
+// syncMTPFields synchronizes root MTP metrics fields and structured telemetry across
+// decoded vars, struct initializers, and in-process collectors (#12333).
+func syncMTPFields(v *guardInfoVars) {
+	if v == nil {
+		return
+	}
+	if v.MTP != nil {
+		if v.MTPAcceptanceRate == 0 && v.MTP.AcceptanceRate > 0 {
+			v.MTPAcceptanceRate = v.MTP.AcceptanceRate
+		}
+		if v.MTPDecodeSpeedup == 0 && v.MTP.DecodeSpeedup > 0 {
+			v.MTPDecodeSpeedup = v.MTP.DecodeSpeedup
+		}
+		if v.MTPRollbackCount == 0 && v.MTP.RollbackCount > 0 {
+			v.MTPRollbackCount = v.MTP.RollbackCount
+		}
+	} else if v.MTPAcceptanceRate > 0 || v.MTPDecodeSpeedup > 0 || v.MTPRollbackCount > 0 {
+		speedup := v.MTPDecodeSpeedup
+		if speedup <= 0 {
+			speedup = 1.0
+		}
+		v.MTP = &telemetry.MTPMetrics{
+			RollingRate:    v.MTPAcceptanceRate,
+			LifetimeRate:   v.MTPAcceptanceRate,
+			AcceptanceRate: v.MTPAcceptanceRate,
+			DecodeSpeedup:  speedup,
+			RollbackCount:  v.MTPRollbackCount,
+			TotalRollbacks: v.MTPRollbackCount,
+		}
+	} else {
+		snap := telemetry.DefaultCollector().Snapshot()
+		if snap.TotalProposed > 0 || snap.TotalAccepted > 0 || snap.RollbackCount > 0 || snap.InFallback {
+			v.MTP = &snap
+			v.MTPAcceptanceRate = snap.AcceptanceRate
+			v.MTPDecodeSpeedup = snap.DecodeSpeedup
+			v.MTPRollbackCount = snap.RollbackCount
+		} else if v.MTPDecodeSpeedup == 0 {
+			v.MTPDecodeSpeedup = 1.0
+		}
+	}
 }
 
 // guardInfoUnreachable reports whether err is the "nothing is listening" class — a refused
@@ -440,6 +490,7 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	negationTax := fs.Bool("negation-tax", false, "render the negation-tax debt + top offending steer strings from the source corpus and exit (offline; no gateway needed)")
 	negationTaxTop := fs.Int("negation-tax-top", 5, "with --negation-tax: maximum offenders to render")
 	startup := fs.Bool("startup", false, "print the guarded session's FULL startup report (the banner + hook/MCP/auth notes) and exit. This is the on-demand door to the detail an attended `fak guard -- claude` launch keeps compact: the guard records the full text on its gateway at boot, and this reads it back any time during the session (startup_report on /debug/vars). Relaunching with `fak guard --banner=full` streams it at boot instead.")
+	promFlag := fs.Bool("prometheus", false, "emit live MTP speculative decoding metrics as Prometheus exposition text and exit")
 	color := fs.String("color", "auto", "colorize the info overlay on a TTY: auto (TTY && NO_COLOR unset), always (force on unless NO_COLOR), or never")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -562,6 +613,20 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 
 	if *workDoneJSON {
 		return runInfoWorkDoneHistoryQuery(stdout, stderr, c, *workDoneWindow, *workDoneHistory, *workloadKey, *runKey)
+	}
+	if *promFlag {
+		v, ok := fetchGuardInfoVars(c, stderr)
+		if !ok {
+			fmt.Fprint(stdout, telemetry.DefaultCollector().Prometheus())
+			return 0
+		}
+		syncMTPFields(&v)
+		if v.MTP != nil {
+			fmt.Fprint(stdout, v.MTP.Prometheus())
+		} else {
+			fmt.Fprint(stdout, telemetry.DefaultCollector().Prometheus())
+		}
+		return 0
 	}
 	if *asJSON {
 		v, ok := fetchGuardInfoVars(c, stderr)
@@ -1220,7 +1285,33 @@ func renderGuardInfoLine(v guardInfoVars) string {
 	if assumptions := guardInfoAssumptionsText(v.Assumptions); assumptions != "" {
 		line += " · " + assumptions
 	}
+	if mtp := mtpInfoLineSummary(v); mtp != "" {
+		line += " · " + mtp
+	}
 	return line
+}
+
+// mtpInfoLineSummary summarizes live MTP speculative decoding metrics for the status line (#12333).
+func mtpInfoLineSummary(v guardInfoVars) string {
+	if v.MTP == nil && v.MTPAcceptanceRate == 0 && v.MTPDecodeSpeedup <= 1.0 && v.MTPRollbackCount == 0 {
+		return ""
+	}
+	m := v.MTP
+	if m == nil {
+		speedup := v.MTPDecodeSpeedup
+		if speedup <= 0 {
+			speedup = 1.0
+		}
+		m = &telemetry.MTPMetrics{
+			RollingRate:    v.MTPAcceptanceRate,
+			LifetimeRate:   v.MTPAcceptanceRate,
+			AcceptanceRate: v.MTPAcceptanceRate,
+			DecodeSpeedup:  speedup,
+			RollbackCount:  v.MTPRollbackCount,
+			TotalRollbacks: v.MTPRollbackCount,
+		}
+	}
+	return m.TUISummary()
 }
 
 // guardInfoLegend explains each part of the live line above in plain words, printed once at the

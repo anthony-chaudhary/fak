@@ -76,6 +76,9 @@ int fvk_matmul_argmax_f32(const void *dW, const void *dX, int out, int in);
  * features the Q8 GEMM shader needs (queried at init); 0 otherwise. The Go side falls back to
  * f32 weights when this is 0, so Q8 is an optional fast path, never a correctness dependency. */
 int fvk_have_q8(void);
+/* Optional decode-only Q8 Gated-DeltaNet input-projection specialization. Its
+ * pipeline may be absent while the generic Q8 kernels remain fully available. */
+int fvk_have_qwen35_gdn_q8_in_proj(void);
 int fvk_have_glm_kda_wave32(void);
 int fvk_have_cooperative_matrix(void);
 /* Per-resource storage-buffer cap discovered at init. fvk_max_buffer_bytes is the effective
@@ -110,6 +113,15 @@ void fvk_q8_matmul3_f32(const void *dW0codes, const void *dW0scale,
                         const void *dW2codes, const void *dW2scale,
                         const void *dX, void *dY0, void *dY1, void *dY2,
                         int out0, int out1, int out2, int in, int P);
+/* Four Q8_0 projections over one decode activation. Returns zero when the
+ * optional pipeline records successfully and a non-zero fail-closed status otherwise. */
+int fvk_qwen35_gdn_q8_in_proj_f32(
+    const void *dW0codes, const void *dW0scale,
+    const void *dW1codes, const void *dW1scale,
+    const void *dW2codes, const void *dW2scale,
+    const void *dW3codes, const void *dW3scale,
+    const void *dX, void *dY0, void *dY1, void *dY2, void *dY3,
+    int out0, int out1, int out2, int out3, int in);
 /* RMSNorm(X) followed by two Q8_0 projections over the normalized row (FFN gate/up, Q8). */
 void fvk_rmsnorm_q8_matmul2_f32(const void *dW0codes, const void *dW0scale,
                                 const void *dW1codes, const void *dW1scale,

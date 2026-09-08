@@ -23,7 +23,9 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
 )
@@ -342,19 +344,30 @@ func guardInfoAgentsPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) 
 	return rows
 }
 
-// guardInfoAgentText renders one session row: short trace id, continuation lineage, run
-// state, live wall-clock, and whatever budget axes are actually seeded (a 0 axis is
-// "never seeded" and is omitted, never fabricated as exhausted).
-//
-// The lineage clause reads CONTINUATION, not spawn. ParentTrace is written by exactly
-// one verb — session.Table.Recontinue — and internal/session defines it as "the trace
-// this session was re-continued FROM", with Generation counting budget-reset
-// re-continuations. That is the SAME agent after a hidden context reset (or a relay leg
-// handoff), not a child anyone spawned. Rendering it as "sub g3" told an operator
-// watching one long-running agent that they were watching a three-deep sub-agent, which
-// is both the wrong entity and a wrong depth. The row's real sub-agent axis is
-// SpawnCount, rendered below, and it is a PARENT-side count: nothing in this row can
-// say "I am someone's child", so nothing here claims it.
+// humanAgentUptime renders agent uptime seconds compactly (e.g. "12m", "1m1s", "30s").
+func humanAgentUptime(sec float64) string {
+	if sec <= 0 {
+		return "0s"
+	}
+	d := time.Duration(sec * float64(time.Second)).Round(time.Second)
+	switch {
+	case d >= time.Hour:
+		if int(d.Minutes())%60 == 0 {
+			return fmt.Sprintf("%dh", int(d.Hours()))
+		}
+		return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+	case d >= time.Minute:
+		if int(d.Seconds())%60 == 0 {
+			return fmt.Sprintf("%dm", int(d.Minutes()))
+		}
+		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
+	default:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+}
+
+// guardInfoAgentText renders one session row: short trace id, continuation lineage or role
+// badge, run state, live wall-clock, and whatever budget/reuse axes are actually seeded.
 func guardInfoAgentText(s guardInfoSession) string {
 	id := strings.TrimSpace(s.TraceID)
 	if len(id) > 10 {
@@ -364,61 +377,108 @@ func guardInfoAgentText(s guardInfoSession) string {
 		id = "?"
 	}
 	role := "root"
-	if strings.TrimSpace(s.ParentTrace) != "" {
+	switch {
+	case strings.TrimSpace(s.Role) != "":
+		r := strings.TrimSpace(s.Role)
+		if strings.HasPrefix(r, "[") && strings.HasSuffix(r, "]") {
+			role = r
+		} else {
+			role = fmt.Sprintf("[%s]", r)
+		}
+	case strings.TrimSpace(s.SubagentType) != "":
+		role = fmt.Sprintf("[sub:%s]", strings.TrimSpace(s.SubagentType))
+	case strings.TrimSpace(s.ParentSessionID) != "":
+		role = "[sub]"
+	case strings.TrimSpace(s.ParentTrace) != "":
 		gen := s.Generation
 		if gen < 1 {
 			gen = 1
 		}
 		role = fmt.Sprintf("cont g%d", gen)
 	}
-	parts := []string{id, role}
+
+	var metricParts []string
 	if run := strings.TrimSpace(s.Run); run != "" {
-		parts = append(parts, run)
+		metricParts = append(metricParts, run)
 	}
 	if s.ElapsedSeconds > 0 {
-		parts = append(parts, humanUptime(float64(s.ElapsedSeconds)))
+		uptime := humanAgentUptime(float64(s.ElapsedSeconds))
+		if strings.HasPrefix(role, "[") {
+			metricParts = append(metricParts, "up "+uptime)
+		} else {
+			metricParts = append(metricParts, uptime)
+		}
+	}
+	if s.PromptTokens > 0 {
+		metricParts = append(metricParts, guardInfoShortCount(s.PromptTokens)+" tok")
+	}
+	if s.ReuseRate > 0 {
+		pct := int(math.Round(s.ReuseRate * 100))
+		if s.ReuseRate > 1.0 && s.ReuseRate <= 100 {
+			pct = int(math.Round(s.ReuseRate))
+		}
+		clause := fmt.Sprintf("%d%% reuse", pct)
+		if s.SharedTokens > 0 {
+			clause += fmt.Sprintf(" (%s shared)", guardInfoShortCount(s.SharedTokens))
+		}
+		metricParts = append(metricParts, clause)
+	} else if s.SharedTokens > 0 {
+		if s.PromptTokens > 0 {
+			pct := int(math.Round(float64(s.SharedTokens) / float64(s.PromptTokens) * 100))
+			metricParts = append(metricParts, fmt.Sprintf("%d%% reuse (%s shared)", pct, guardInfoShortCount(s.SharedTokens)))
+		} else {
+			metricParts = append(metricParts, fmt.Sprintf("%s shared", guardInfoShortCount(s.SharedTokens)))
+		}
 	}
 	if s.TokensLeft > 0 {
-		parts = append(parts, guardInfoShortCount(s.TokensLeft)+" tok left")
+		metricParts = append(metricParts, guardInfoShortCount(s.TokensLeft)+" tok left")
 	}
 	if s.TurnsLeft > 0 {
-		parts = append(parts, fmt.Sprintf("%d turns left", s.TurnsLeft))
+		metricParts = append(metricParts, fmt.Sprintf("%d turns left", s.TurnsLeft))
 	}
 	// Live-status activity cell (#2627): what the agent is doing right now. Each clause is
 	// omitted when its axis is unset, so a pre-activity row renders exactly as before.
 	if tool := strings.TrimSpace(s.LastTool); tool != "" {
-		parts = append(parts, "tool "+tool)
+		metricParts = append(metricParts, "tool "+tool)
 	}
 	if s.SpawnCount > 0 {
 		noun := "spawns"
 		if s.SpawnCount == 1 {
 			noun = "spawn"
 		}
-		parts = append(parts, fmt.Sprintf("%d %s", s.SpawnCount, noun))
+		metricParts = append(metricParts, fmt.Sprintf("%d %s", s.SpawnCount, noun))
 	}
 	// In-flight and idle are mutually exclusive by construction (the gateway sets one or
 	// the other); prefer in-flight so an open request always reads as "hot", not "idle".
 	if s.InflightSeconds > 0 {
-		parts = append(parts, "in-flight "+humanUptime(float64(s.InflightSeconds)))
+		metricParts = append(metricParts, "in-flight "+humanAgentUptime(float64(s.InflightSeconds)))
 	} else if s.IdleSeconds > 0 {
-		parts = append(parts, "idle "+humanUptime(float64(s.IdleSeconds)))
+		metricParts = append(metricParts, "idle "+humanAgentUptime(float64(s.IdleSeconds)))
 	}
+
+	if strings.HasPrefix(role, "[") {
+		if len(metricParts) == 0 {
+			return fmt.Sprintf("%s  %s", id, role)
+		}
+		return fmt.Sprintf("%s  %s  %s", id, role, strings.Join(metricParts, " · "))
+	}
+
+	parts := append([]string{id, role}, metricParts...)
 	return strings.Join(parts, " · ")
 }
 
 // guardInfoAgentsSummary is the agents panel's one-row mini form (also reused by the
 // compact status line): active count, how many sessions are continuations and the
-// deepest continuation depth, how many sub-agents were spawned, and how many sessions
-// hold an in-flight request right now (#2627 — the compact "who is hot").
-//
-// The two lineage axes are kept apart for the reason guardInfoAgentText spells out: a
-// ParentTrace is a re-continuation of the same agent, so counting those as sub-agents
-// reported a fleet that did not exist ("1 active (1 sub, deepest g3)" for a single agent
-// that had merely been context-reset three times). Spawns are counted from SpawnCount,
-// the admitted subagent-spawn count the gateway actually observed — the one number here
-// that a sub-agent ever moved.
+// deepest continuation depth, how many sub-agents were spawned, how many sessions
+// hold an in-flight request right now, and cross-agent token reuse rate.
 func guardInfoAgentsSummary(ss []guardInfoSession) string {
 	continued, deepest, spawned, inflight := 0, 0, 0, 0
+	subagents := 0
+	totalSubPromptTokens := 0
+	totalSubSharedTokens := 0
+	sumReuseRate := 0.0
+	reuseCount := 0
+
 	for _, s := range ss {
 		if s.InflightSeconds > 0 {
 			inflight++
@@ -436,7 +496,54 @@ func guardInfoAgentsSummary(ss []guardInfoSession) string {
 				deepest = gen
 			}
 		}
+
+		isSub := strings.TrimSpace(s.ParentSessionID) != "" ||
+			strings.TrimSpace(s.SubagentType) != "" ||
+			strings.HasPrefix(strings.TrimSpace(s.Role), "sub") ||
+			strings.HasPrefix(strings.TrimSpace(s.Role), "[sub")
+		if isSub {
+			subagents++
+			if s.PromptTokens > 0 {
+				totalSubPromptTokens += s.PromptTokens
+			}
+			if s.SharedTokens > 0 {
+				totalSubSharedTokens += s.SharedTokens
+			}
+			if s.ReuseRate > 0 {
+				rate := s.ReuseRate
+				if rate > 1.0 {
+					rate = rate / 100.0
+				}
+				sumReuseRate += rate
+				reuseCount++
+			}
+		}
 	}
+
+	if subagents > 0 {
+		parts := []string{fmt.Sprintf("%d active", len(ss))}
+		if continued > 0 && subagents == 0 {
+			parts[0] += fmt.Sprintf(" (%d continued, deepest g%d)", continued, deepest)
+		}
+		subNoun := "subagents"
+		if subagents == 1 {
+			subNoun = "subagent"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", subagents, subNoun))
+		if inflight > 0 {
+			parts = append(parts, fmt.Sprintf("%d in-flight", inflight))
+		}
+		if totalSubPromptTokens > 0 && totalSubSharedTokens > 0 {
+			reusePct := int(math.Round(float64(totalSubSharedTokens) / float64(totalSubPromptTokens) * 100))
+			parts = append(parts, fmt.Sprintf("%d%% x-agent reuse", reusePct))
+		} else if reuseCount > 0 {
+			avgReuse := sumReuseRate / float64(reuseCount)
+			reusePct := int(math.Round(avgReuse * 100))
+			parts = append(parts, fmt.Sprintf("%d%% x-agent reuse", reusePct))
+		}
+		return strings.Join(parts, " · ")
+	}
+
 	out := fmt.Sprintf("%d active", len(ss))
 	if continued > 0 {
 		out += fmt.Sprintf(" (%d continued, deepest g%d)", continued, deepest)
