@@ -115,11 +115,13 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchReap(stdout, stderr, argv[1:])
 	case "reflex":
 		return runDispatchReflex(stdout, stderr, argv[1:])
+	case "epilogue":
+		return runDispatchEpilogue(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, route-health, graph, canary, tier-status, rollout-status, tick, wave, sweep, progress, status, sessions, evidence, audit, closure-audit, acceptance-resolve, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, timeout-ledger, rung-ledger, or reap)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, route-health, graph, canary, tier-status, rollout-status, tick, wave, sweep, progress, status, sessions, evidence, audit, closure-audit, acceptance-resolve, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, timeout-ledger, rung-ledger, reap, reflex, or epilogue)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}

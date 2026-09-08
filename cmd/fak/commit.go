@@ -7,11 +7,15 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/commitintent"
 	"github.com/anthony-chaudhary/fak/internal/commitrollup"
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
@@ -128,6 +132,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	reclaimLock := fs.Bool("reclaim-stale-index-lock", false, "RECOVERY (no commit): reclaim a stale index lock and next-index residue. Dry-run unless --apply; same path as `fak commit status --reclaim-stale-index-lock`")
 	reclaimCommitLock := fs.Bool("reclaim-stale-commit-lock", false, "RECOVERY (no commit): reclaim only <git-dir>/fak-commit.lock when its recorded owner is proven stale or foreign. Dry-run unless --apply")
 	reclaimApply := fs.Bool("apply", false, "with a --reclaim-stale-*-lock recovery, actually remove the proven-stale lock file(s) (default: dry-run)")
+	queueOnBusy := fs.Bool("queue-on-busy", os.Getenv("FAK_COMMIT_QUEUE") == "1", "submit to epilogue landing queue if commit lock is busy instead of polling and failing with LOCK_BUSY")
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -217,6 +222,52 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if ready, receipt := commitLaneWaitFn(root, *lockTimeout); !ready {
+		if *queueOnBusy || os.Getenv("FAK_COMMIT_QUEUE") == "1" {
+			var patch string
+			cmdDiff := exec.Command("git", append([]string{"-C", root, "diff", "HEAD", "--"}, paths...)...)
+			if out, err := cmdDiff.CombinedOutput(); err == nil && len(out) > 0 {
+				patch = string(out)
+			} else {
+				cmdCached := exec.Command("git", append([]string{"-C", root, "diff", "--cached", "--"}, paths...)...)
+				if out, err := cmdCached.CombinedOutput(); err == nil && len(out) > 0 {
+					patch = string(out)
+				}
+			}
+			issue := 0
+			if m := regexp.MustCompile(`#(\d+)`).FindStringSubmatch(message); len(m) > 1 {
+				issue, _ = strconv.Atoi(m[1])
+			}
+			lane := ""
+			if m := regexp.MustCompile(`\(fak\s+([a-zA-Z0-9_-]+)\)`).FindStringSubmatch(message); len(m) > 1 {
+				lane = m[1]
+			}
+			rec, err := dispatchtick.SubmitEpilogue(filepath.Join(root, ".dispatch-runs"), dispatchtick.EpilogueRecord{
+				Issue:       issue,
+				Lane:        lane,
+				WorkerPID:   os.Getpid(),
+				Paths:       append([]string(nil), paths...),
+				Message:     message,
+				WorktreeDir: root,
+				Patch:       patch,
+			})
+			if err != nil {
+				fmt.Fprintf(stderr, "fak commit: queue epilogue: %v\n", err)
+				return 1
+			}
+			if *asJSON {
+				if err := writeIndentedJSON(stdout, map[string]interface{}{
+					"status":   "queued",
+					"epilogue": rec,
+				}); err != nil {
+					fmt.Fprintf(stderr, "fak commit: %v\n", err)
+					return 1
+				}
+				return 0
+			}
+			fmt.Fprintf(stdout, "QUEUED: commit lane busy; submitted epilogue %s to landing queue (skipping idle wait loop)\n", rec.ID)
+			return 0
+		}
+
 		res := safecommit.ScoreResult(safecommit.Result{
 			Paths:    append([]string(nil), paths...),
 			Reason:   safecommit.ReasonLockBusy,
