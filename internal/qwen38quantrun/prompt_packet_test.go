@@ -194,7 +194,7 @@ func TestDerivePromptPacketGGUFIdentityPinnedQwen38Header(t *testing.T) {
 	mergeItems[0].Value = mergeItems[0].Value.(string) + "x"
 	merges.Value = mergeItems
 	mutatedTokenizer.Metadata["tokenizer.ggml.merges"] = merges
-	mutated, err := derivePromptPacketGGUFIdentity(mutatedTokenizer)
+	mutated, err := DerivePromptPacketGGUFIdentityFromFile(mutatedTokenizer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestDerivePromptPacketGGUFIdentityPinnedQwen38Header(t *testing.T) {
 	chatTemplate := mutatedTemplate.Metadata["tokenizer.chat_template"]
 	chatTemplate.Value = chatTemplate.Value.(string) + "\n"
 	mutatedTemplate.Metadata["tokenizer.chat_template"] = chatTemplate
-	mutated, err = derivePromptPacketGGUFIdentity(mutatedTemplate)
+	mutated, err = DerivePromptPacketGGUFIdentityFromFile(mutatedTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestDerivePromptPacketGGUFIdentityPinnedQwen38Header(t *testing.T) {
 	for _, missing := range []string{"tokenizer.chat_template", "tokenizer.ggml.pre"} {
 		incomplete := cloneGGUFHeader(gg)
 		delete(incomplete.Metadata, missing)
-		if _, err := derivePromptPacketGGUFIdentity(incomplete); err == nil {
+		if _, err := DerivePromptPacketGGUFIdentityFromFile(incomplete); err == nil {
 			t.Fatalf("missing %s was accepted", missing)
 		}
 	}
