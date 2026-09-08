@@ -32,7 +32,7 @@ func attachFixture(t testing.TB) *cdb.Image {
 func TestQueryMaterializesTypedWorkingSet(t *testing.T) {
 	im := attachFixture(t)
 	res := Query(context.Background(), im, Request{
-		Query:         "refund fee trust violation",
+		Query:         "refund fee prompt injection",
 		PolicyVersion: "policy-test",
 	})
 
@@ -133,7 +133,7 @@ func TestAllFiveMaterializationVerdictsReachable(t *testing.T) {
 	// Pass 1 — cold, policy "p1", no budget: build summaries (FAULT) and refuse
 	// the sealed page the query touches (REFUSE).
 	cold := Query(context.Background(), im, Request{
-		Query:         "refund fee trust violation",
+		Query:         "refund fee prompt injection",
 		PreferView:    ViewSummary,
 		ViewCache:     cache,
 		PolicyVersion: "p1",
@@ -155,7 +155,7 @@ func TestAllFiveMaterializationVerdictsReachable(t *testing.T) {
 	// Pass 2 — warm cache, policy changed to "p2": every cached summary is stale,
 	// so the resolver RECOMPUTES (re-faults the source, rebuilds under p2).
 	stale := Query(context.Background(), im, Request{
-		Query:         "refund fee trust violation",
+		Query:         "refund fee prompt injection",
 		PreferView:    ViewSummary,
 		ViewCache:     cache,
 		PolicyVersion: "p2",
@@ -170,7 +170,7 @@ func TestAllFiveMaterializationVerdictsReachable(t *testing.T) {
 	// Pass 3 — warm cache, same policy "p2": every view is fresh -> HIT, and the
 	// raw page device is untouched. This is the economic proof.
 	warm := Query(context.Background(), im, Request{
-		Query:         "refund fee trust violation",
+		Query:         "refund fee prompt injection",
 		PreferView:    ViewSummary,
 		ViewCache:     cache,
 		PolicyVersion: "p2",
@@ -192,7 +192,7 @@ func TestAllFiveMaterializationVerdictsReachable(t *testing.T) {
 	// Pass 4 — fresh cache, tiny budget: the first item exceeds budget before
 	// resolution -> ABSTAIN without paying a fault.
 	budget := Query(context.Background(), im, Request{
-		Query:         "refund fee trust violation",
+		Query:         "refund fee prompt injection",
 		PreferView:    ViewSummary,
 		ViewCache:     cache,
 		PolicyVersion: "p2",
