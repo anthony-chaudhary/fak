@@ -8,6 +8,8 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -229,17 +231,8 @@ func inspectGoASTDetectors(lane *DebtLane, unitDir string, surface SurfaceClass)
 		}
 
 		// 10. Stub debt detection: TODO/FIXME/unimplemented panics
-		stubCount := countStubMarkers(path)
-		if stubCount > 0 {
-			findings = append(findings, FindingProvenance{
-				Dimension: string(DimStubDebt),
-				Surface:   string(surface),
-				Lane:      lane.Lane,
-				Path:      relPath,
-				Severity:  "warning",
-				Message:   fmt.Sprintf("stub debt: %d unimplemented/TODO marker(s) found", stubCount),
-			})
-		}
+		stubFindings := inspectStubDebt(fset, fileNode, relPath, lane, surface)
+		findings = append(findings, stubFindings...)
 
 		// 12. Unsafe usage in non-core
 		if lane.Criticality != CriticalityCore && lane.Criticality != CriticalityEnabling {
@@ -350,6 +343,281 @@ func hasTestAssertions(body *ast.BlockStmt) bool {
 	return hasAssert
 }
 
+var stubCommentRegex = regexp.MustCompile(`\b(TODO|FIXME|XXX)\b`)
+
+func isGeneratedASTFile(fileNode *ast.File) bool {
+	if fileNode == nil {
+		return false
+	}
+	var b strings.Builder
+	for _, cg := range fileNode.Comments {
+		b.WriteString(cg.Text())
+		b.WriteByte('\n')
+		for _, c := range cg.List {
+			b.WriteString(c.Text)
+			b.WriteByte('\n')
+		}
+	}
+	all := b.String()
+	return strings.Contains(all, "DO NOT EDIT") && (strings.Contains(all, "Code generated") || strings.Contains(all, "GENERATED"))
+}
+
+type scopeInfo struct {
+	symbol    string
+	startLine int
+	endLine   int
+}
+
+func formatReceiver(recv *ast.FieldList) string {
+	if recv == nil || len(recv.List) == 0 {
+		return ""
+	}
+	switch t := recv.List[0].Type.(type) {
+	case *ast.StarExpr:
+		if id, ok := t.X.(*ast.Ident); ok {
+			return "(*" + id.Name + ")"
+		}
+	case *ast.Ident:
+		return t.Name
+	case *ast.IndexExpr: // generic receiver T[P]
+		if id, ok := t.X.(*ast.Ident); ok {
+			return id.Name
+		}
+	case *ast.IndexListExpr: // generic receiver T[P, Q]
+		if id, ok := t.X.(*ast.Ident); ok {
+			return id.Name
+		}
+	}
+	return ""
+}
+
+func typeDeclSymbol(decl *ast.GenDecl) string {
+	if decl == nil || decl.Tok != token.TYPE {
+		return ""
+	}
+	for _, spec := range decl.Specs {
+		if ts, ok := spec.(*ast.TypeSpec); ok && ts.Name != nil {
+			return ts.Name.Name
+		}
+	}
+	return ""
+}
+
+func declRange(fset *token.FileSet, decl ast.Decl) (token.Pos, token.Pos, int, int) {
+	startPos := decl.Pos()
+	endPos := decl.End()
+	switch d := decl.(type) {
+	case *ast.GenDecl:
+		if d.Doc != nil && d.Doc.Pos() < startPos {
+			startPos = d.Doc.Pos()
+		}
+	case *ast.FuncDecl:
+		if d.Doc != nil && d.Doc.Pos() < startPos {
+			startPos = d.Doc.Pos()
+		}
+	}
+	startLine := fset.Position(startPos).Line
+	endLine := fset.Position(endPos).Line
+	return startPos, endPos, startLine, endLine
+}
+
+func findEnclosingScope(fset *token.FileSet, fileNode *ast.File, pos token.Pos) scopeInfo {
+	p := fset.Position(pos)
+	line := p.Line
+
+	for _, decl := range fileNode.Decls {
+		startPos, endPos, dStart, dEnd := declRange(fset, decl)
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			if (pos >= startPos && pos <= endPos) || (line >= dStart && line <= dEnd) {
+				symbol := d.Name.Name
+				if d.Recv != nil {
+					if r := formatReceiver(d.Recv); r != "" {
+						symbol = r + "." + d.Name.Name
+					}
+				}
+				return scopeInfo{
+					symbol:    symbol,
+					startLine: dStart,
+					endLine:   dEnd,
+				}
+			}
+		case *ast.GenDecl:
+			if (pos >= startPos && pos <= endPos) || (line >= dStart && line <= dEnd) {
+				symbol := ""
+				if d.Tok == token.TYPE {
+					symbol = typeDeclSymbol(d)
+				}
+				if symbol == "" && fileNode.Name != nil {
+					symbol = fileNode.Name.Name
+				}
+				return scopeInfo{
+					symbol:    symbol,
+					startLine: dStart,
+					endLine:   dEnd,
+				}
+			}
+		}
+	}
+
+	pkgName := "package"
+	if fileNode.Name != nil && fileNode.Name.Name != "" {
+		pkgName = fileNode.Name.Name
+	}
+	return scopeInfo{
+		symbol:    pkgName,
+		startLine: line,
+		endLine:   line,
+	}
+}
+
+func cleanComment(text string) string {
+	s := strings.TrimSpace(text)
+	if strings.HasPrefix(s, "//") {
+		s = strings.TrimPrefix(s, "//")
+		return strings.TrimSpace(s)
+	}
+	if strings.HasPrefix(s, "/*") {
+		s = strings.TrimPrefix(s, "/*")
+		s = strings.TrimSuffix(s, "*/")
+		lines := strings.Split(s, "\n")
+		for _, l := range lines {
+			l = strings.TrimSpace(l)
+			l = strings.TrimPrefix(l, "*")
+			l = strings.TrimSpace(l)
+			if stubCommentRegex.MatchString(l) {
+				return l
+			}
+		}
+		return strings.TrimSpace(lines[0])
+	}
+	return strings.TrimSpace(s)
+}
+
+func isStubPanic(call *ast.CallExpr) (bool, string) {
+	ident, ok := call.Fun.(*ast.Ident)
+	if !ok || ident.Name != "panic" || len(call.Args) == 0 {
+		return false, ""
+	}
+	found := false
+	detail := ""
+	for _, arg := range call.Args {
+		ast.Inspect(arg, func(n ast.Node) bool {
+			if found {
+				return false
+			}
+			lit, ok := n.(*ast.BasicLit)
+			if ok && lit.Kind == token.STRING {
+				val := strings.Trim(lit.Value, "`\"")
+				lower := strings.ToLower(val)
+				if strings.Contains(lower, "not implemented") ||
+					strings.Contains(lower, "unimplemented") ||
+					strings.Contains(lower, "todo") {
+					found = true
+					detail = val
+					return false
+				}
+			}
+			return true
+		})
+		if found {
+			break
+		}
+	}
+	return found, detail
+}
+
+type stubCandidate struct {
+	pos    token.Pos
+	line   int
+	symbol string
+	span   string
+	detail string
+}
+
+func inspectStubDebt(fset *token.FileSet, fileNode *ast.File, relPath string, lane *DebtLane, surface SurfaceClass) []FindingProvenance {
+	if isGeneratedASTFile(fileNode) {
+		return nil
+	}
+
+	var candidates []stubCandidate
+
+	// 1. AST comments
+	for _, cg := range fileNode.Comments {
+		for _, c := range cg.List {
+			if stubCommentRegex.MatchString(c.Text) {
+				scope := findEnclosingScope(fset, fileNode, c.Pos())
+				line := fset.Position(c.Pos()).Line
+				detail := cleanComment(c.Text)
+				candidates = append(candidates, stubCandidate{
+					pos:    c.Pos(),
+					line:   line,
+					symbol: scope.symbol,
+					span:   fmt.Sprintf("%d-%d", scope.startLine, scope.endLine),
+					detail: detail,
+				})
+			}
+		}
+	}
+
+	// 2. AST panic calls
+	ast.Inspect(fileNode, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if isPanic, msg := isStubPanic(call); isPanic {
+			scope := findEnclosingScope(fset, fileNode, call.Pos())
+			line := fset.Position(call.Pos()).Line
+			detail := fmt.Sprintf("panic(%q)", msg)
+			candidates = append(candidates, stubCandidate{
+				pos:    call.Pos(),
+				line:   line,
+				symbol: scope.symbol,
+				span:   fmt.Sprintf("%d-%d", scope.startLine, scope.endLine),
+				detail: detail,
+			})
+		}
+		return true
+	})
+
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	// Sort deterministically in source order
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return candidates[i].pos < candidates[j].pos
+	})
+
+	// Deduplicate by detector (stub_debt), symbol, and source span
+	laneName := ""
+	if lane != nil {
+		laneName = lane.Lane
+	}
+
+	var findings []FindingProvenance
+	seen := make(map[string]bool)
+
+	for _, c := range candidates {
+		key := fmt.Sprintf("stub_debt:%s:%s", c.symbol, c.span)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		findings = append(findings, FindingProvenance{
+			Dimension: string(DimStubDebt),
+			Surface:   string(surface),
+			Lane:      laneName,
+			Path:      relPath,
+			Severity:  "warning",
+			Message:   fmt.Sprintf("stub debt in %s (%s:%d): %s", c.symbol, relPath, c.line, c.detail),
+		})
+	}
+
+	return findings
+}
+
 func countStubMarkers(filePath string) int {
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -359,6 +627,7 @@ func countStubMarkers(filePath string) int {
 
 	count := 0
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		lower := strings.ToLower(line)
