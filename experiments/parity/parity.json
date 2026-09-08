@@ -5,7 +5,7 @@
     "utc": "2026-08-17T04:18:38Z",
     "git_commit": "aa3f90004ee7d915d0475adc6a62edabecd75369",
     "go_version": "go1.26.6",
-    "node": "DESKTOP-BB3FMHP"
+    "node": "[redacted-host]"
   },
   "benchmark_artifact": {
     "schema": "fak-benchmark-artifact/1",
@@ -20,7 +20,7 @@
       "build_flags": null
     },
     "machine": {
-      "hostname": "DESKTOP-BB3FMHP",
+      "hostname": "[redacted-host]",
       "cpu": "AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD",
       "gpu": "unknown",
       "ram_gb": 0,
