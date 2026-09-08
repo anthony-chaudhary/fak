@@ -3,10 +3,57 @@
 package compute
 
 import (
+	"encoding/json"
 	"math"
 	"math/rand"
 	"testing"
 )
+
+type q4kParityOracleEvent struct {
+	Schema         string                  `json:"schema"`
+	Selector       string                  `json:"selector"`
+	TestName       string                  `json:"test_name"`
+	OracleKind     string                  `json:"oracle_kind"`
+	Engine         string                  `json:"engine"`
+	DeviceObserved bool                    `json:"device_observed"`
+	CaseCount      int                     `json:"case_count"`
+	Passed         bool                    `json:"passed"`
+	Observed       q4kParityOracleObserved `json:"observed"`
+	Bounds         q4kParityOracleBounds   `json:"bounds"`
+}
+
+type q4kParityOracleObserved struct {
+	Cosine      float64 `json:"cosine"`
+	ArgmaxExact bool    `json:"argmax_exact"`
+}
+
+type q4kParityOracleBounds struct {
+	MinCosine          float64 `json:"min_cosine"`
+	RequireArgmaxExact bool    `json:"require_argmax_exact"`
+}
+
+func formatQ4KMatMulParityOracle(cosine float64, argmaxExact bool) ([]byte, error) {
+	passed := argmaxExact && cosine >= 0.995
+	event := q4kParityOracleEvent{
+		Schema:         "fak.strix.subkernel-parity/v1",
+		Selector:       "q4k_matmul",
+		TestName:       "TestVulkanQ4KMatMulMatchesCPUReference",
+		OracleKind:     "cosine_argmax",
+		Engine:         "fak-native/vulkan",
+		DeviceObserved: true,
+		CaseCount:      1,
+		Passed:         passed,
+		Observed: q4kParityOracleObserved{
+			Cosine:      cosine,
+			ArgmaxExact: argmaxExact,
+		},
+		Bounds: q4kParityOracleBounds{
+			MinCosine:          0.995,
+			RequireArgmaxExact: true,
+		},
+	}
+	return json.Marshal(event)
+}
 
 func TestVulkanQ4KMatMulMatchesCPUReference(t *testing.T) {
 	v, ok := Pick("vulkan").(*vulkanBackend)
@@ -32,11 +79,105 @@ func TestVulkanQ4KMatMulMatchesCPUReference(t *testing.T) {
 	defer v.Free(dy)
 	got := v.Read(dy)
 	want := Default().Read(Default().MatMul(hw, NewF32(Default(), []int{in}, x)))
-	if a, b := argmaxF32(got), argmaxF32(want); a != b {
-		t.Fatalf("argmax=%d want %d", a, b)
+	gotArgmax, wantArgmax := argmaxF32(got), argmaxF32(want)
+	argmaxExact := gotArgmax == wantArgmax
+	if !argmaxExact {
+		t.Fatalf("argmax=%d want %d", gotArgmax, wantArgmax)
 	}
-	if c := cosineC(got, want); c < 0.995 {
+	c := cosineC(got, want)
+	if c < 0.995 {
 		t.Fatalf("cosine %.8f < 0.995", c)
+	}
+	oracleJSON, err := formatQ4KMatMulParityOracle(float64(c), argmaxExact)
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
+}
+
+func TestVulkanQ4KMatMulParityOracleFormat(t *testing.T) {
+	raw, err := formatQ4KMatMulParityOracle(0.998, true)
+	if err != nil {
+		t.Fatalf("formatQ4KMatMulParityOracle failed: %v", err)
+	}
+	var parsed struct {
+		Schema         string `json:"schema"`
+		Selector       string `json:"selector"`
+		TestName       string `json:"test_name"`
+		OracleKind     string `json:"oracle_kind"`
+		Engine         string `json:"engine"`
+		DeviceObserved bool   `json:"device_observed"`
+		CaseCount      int    `json:"case_count"`
+		Passed         bool   `json:"passed"`
+		Observed       struct {
+			Cosine      float64 `json:"cosine"`
+			ArgmaxExact bool    `json:"argmax_exact"`
+		} `json:"observed"`
+		Bounds struct {
+			MinCosine          float64 `json:"min_cosine"`
+			RequireArgmaxExact bool    `json:"require_argmax_exact"`
+		} `json:"bounds"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("unmarshal formatted oracle failed: %v", err)
+	}
+	if parsed.Schema != "fak.strix.subkernel-parity/v1" {
+		t.Errorf("schema = %q, want fak.strix.subkernel-parity/v1", parsed.Schema)
+	}
+	if parsed.Selector != "q4k_matmul" {
+		t.Errorf("selector = %q, want q4k_matmul", parsed.Selector)
+	}
+	if parsed.TestName != "TestVulkanQ4KMatMulMatchesCPUReference" {
+		t.Errorf("test_name = %q, want TestVulkanQ4KMatMulMatchesCPUReference", parsed.TestName)
+	}
+	if parsed.OracleKind != "cosine_argmax" {
+		t.Errorf("oracle_kind = %q, want cosine_argmax", parsed.OracleKind)
+	}
+	if parsed.Engine != "fak-native/vulkan" {
+		t.Errorf("engine = %q, want fak-native/vulkan", parsed.Engine)
+	}
+	if !parsed.DeviceObserved {
+		t.Errorf("device_observed must be true")
+	}
+	if parsed.CaseCount != 1 {
+		t.Errorf("case_count = %d, want 1", parsed.CaseCount)
+	}
+	if !parsed.Passed {
+		t.Errorf("passed must be true")
+	}
+	if parsed.Observed.Cosine != 0.998 {
+		t.Errorf("observed cosine = %f, want 0.998", parsed.Observed.Cosine)
+	}
+	if !parsed.Observed.ArgmaxExact {
+		t.Errorf("observed argmax_exact must be true")
+	}
+	if parsed.Bounds.MinCosine != 0.995 {
+		t.Errorf("bounds min_cosine = %f, want 0.995", parsed.Bounds.MinCosine)
+	}
+	if !parsed.Bounds.RequireArgmaxExact {
+		t.Errorf("bounds require_argmax_exact must be true")
+	}
+
+	failRaw, err := formatQ4KMatMulParityOracle(0.990, true)
+	if err != nil {
+		t.Fatalf("format failed oracle failed: %v", err)
+	}
+	if err := json.Unmarshal(failRaw, &parsed); err != nil {
+		t.Fatalf("unmarshal fail oracle failed: %v", err)
+	}
+	if parsed.Passed {
+		t.Errorf("expected passed=false when cosine < 0.995")
+	}
+
+	failRaw2, err := formatQ4KMatMulParityOracle(0.998, false)
+	if err != nil {
+		t.Fatalf("format failed oracle 2 failed: %v", err)
+	}
+	if err := json.Unmarshal(failRaw2, &parsed); err != nil {
+		t.Fatalf("unmarshal fail oracle 2 failed: %v", err)
+	}
+	if parsed.Passed {
+		t.Errorf("expected passed=false when argmax_exact=false")
 	}
 }
 

@@ -2,6 +2,7 @@ package compute
 
 import (
 	"bytes"
+	"encoding/json"
 	"math/rand"
 	"strings"
 	"testing"
@@ -9,16 +10,38 @@ import (
 
 // TestRADVContiguizeShader is the main test suite covering the RADV compute shader abstraction
 // for pre-attention f16 KV contiguization on AMD Strix Halo (#11903).
+//
+// In accordance with #12120 and #12124, this selector represents a truthful host-side
+// contract verification (CPU reference emulation, geometry, GLSL source, and entropy restoration)
+// rather than a Vulkan physical device dispatch. It emits exactly one typed
+// fak.strix.subkernel-parity/v1 event with device_observed=false and oracle_kind=host_contract,
+// which is strictly barred from physical-device parity credit.
 func TestRADVContiguizeShader(t *testing.T) {
-	t.Run("PushConstantsEncoding", testRADVPushConstantsEncoding)
-	t.Run("WorkgroupGeometryAndDispatch", testRADVWorkgroupGeometryAndDispatch)
-	t.Run("InVRAMScratchAllocation", testRADVScratchAllocation)
-	t.Run("MathematicalParityWithCPURef", testRADVMathematicalParity)
-	t.Run("ChannelEntropyRestoration", testRADVChannelEntropyRestoration)
-	t.Run("PipelineDescriptorAndGLSL", testRADVPipelineDescriptorAndGLSL)
+	var totalCases int
+
+	t.Run("PushConstantsEncoding", func(t *testing.T) {
+		totalCases += testRADVPushConstantsEncoding(t)
+	})
+	t.Run("WorkgroupGeometryAndDispatch", func(t *testing.T) {
+		totalCases += testRADVWorkgroupGeometryAndDispatch(t)
+	})
+	t.Run("InVRAMScratchAllocation", func(t *testing.T) {
+		totalCases += testRADVScratchAllocation(t)
+	})
+	t.Run("MathematicalParityWithCPURef", func(t *testing.T) {
+		totalCases += testRADVMathematicalParity(t)
+	})
+	t.Run("ChannelEntropyRestoration", func(t *testing.T) {
+		totalCases += testRADVChannelEntropyRestoration(t)
+	})
+	t.Run("PipelineDescriptorAndGLSL", func(t *testing.T) {
+		totalCases += testRADVPipelineDescriptorAndGLSL(t)
+	})
+
+	emitRADVContiguizeHostContractEvent(t, totalCases, !t.Failed())
 }
 
-func testRADVPushConstantsEncoding(t *testing.T) {
+func testRADVPushConstantsEncoding(t *testing.T) int {
 	testCases := []struct {
 		nPos    int
 		nKV     int
@@ -95,9 +118,10 @@ func testRADVPushConstantsEncoding(t *testing.T) {
 	if err := inconsistentPC.Validate(); err == nil {
 		t.Errorf("expected validation error for inconsistent strideToken, got nil")
 	}
+	return len(testCases)
 }
 
-func testRADVWorkgroupGeometryAndDispatch(t *testing.T) {
+func testRADVWorkgroupGeometryAndDispatch(t *testing.T) int {
 	geom64 := NewWorkgroupGeometryWave64()
 	if geom64.TotalThreads() != 64 {
 		t.Errorf("Wave64 total threads = %d, want 64", geom64.TotalThreads())
@@ -182,9 +206,10 @@ func testRADVWorkgroupGeometryAndDispatch(t *testing.T) {
 	if planArbitrary.Dimensions.GridZ != 3 {
 		t.Errorf("planArbitrary.Dimensions.GridZ = %d, want 3", planArbitrary.Dimensions.GridZ)
 	}
+	return 4
 }
 
-func testRADVScratchAllocation(t *testing.T) {
+func testRADVScratchAllocation(t *testing.T) int {
 	// 1. Standard large APU case: nPos=32768, nKV=8, headDim=128
 	// Raw per buffer: 8 * 32768 * 128 * 2 = 67,108,864 bytes (64 MB).
 	// Total raw bytes: 2 * 67,108,864 = 134,217,728 bytes (128 MB).
@@ -257,9 +282,10 @@ func testRADVScratchAllocation(t *testing.T) {
 	if _, err := ComputeRADVScratchAllocation(32768, 8, 0); err == nil {
 		t.Errorf("expected error for headDim=0, got nil")
 	}
+	return 2
 }
 
-func testRADVMathematicalParity(t *testing.T) {
+func testRADVMathematicalParity(t *testing.T) int {
 	pipeline64, err := NewRADVContiguizePipelineDescriptor(RADVTargetArchGfx1151, RADVWave64, RADVDefaultInterleaveBytes)
 	if err != nil {
 		t.Fatalf("NewRADVContiguizePipelineDescriptor(Wave64) failed: %v", err)
@@ -351,9 +377,10 @@ func testRADVMathematicalParity(t *testing.T) {
 			}
 		})
 	}
+	return len(testCases)
 }
 
-func testRADVChannelEntropyRestoration(t *testing.T) {
+func testRADVChannelEntropyRestoration(t *testing.T) int {
 	testContexts := []int{32768, 65536, 131072}
 	interleaveOptions := []int{RADVInterleaveBytes128, RADVInterleaveBytes64}
 
@@ -406,9 +433,10 @@ func testRADVChannelEntropyRestoration(t *testing.T) {
 			}
 		}
 	}
+	return len(interleaveOptions) * len(testContexts)
 }
 
-func testRADVPipelineDescriptorAndGLSL(t *testing.T) {
+func testRADVPipelineDescriptorAndGLSL(t *testing.T) int {
 	// Valid descriptor for gfx1151
 	pipe, err := NewRADVContiguizePipelineDescriptor(RADVTargetArchGfx1151, RADVWave64, RADVDefaultInterleaveBytes)
 	if err != nil {
@@ -461,31 +489,192 @@ func testRADVPipelineDescriptorAndGLSL(t *testing.T) {
 			t.Errorf("expected error for non-APU arch %q, got nil", arch)
 		}
 	}
+	return 1
 }
 
 // Standalone tests for specific -run matching
 func TestRADVContiguizeShader_PushConstants(t *testing.T) {
-	testRADVPushConstantsEncoding(t)
+	_ = testRADVPushConstantsEncoding(t)
 }
 
 func TestRADVContiguizeShader_DispatchDimensions(t *testing.T) {
-	testRADVWorkgroupGeometryAndDispatch(t)
+	_ = testRADVWorkgroupGeometryAndDispatch(t)
 }
 
 func TestRADVContiguizeShader_ScratchAllocation(t *testing.T) {
-	testRADVScratchAllocation(t)
+	_ = testRADVScratchAllocation(t)
 }
 
 func TestRADVContiguizeShader_Parity(t *testing.T) {
-	testRADVMathematicalParity(t)
+	_ = testRADVMathematicalParity(t)
 }
 
 func TestRADVContiguizeShader_ChannelEntropy(t *testing.T) {
-	testRADVChannelEntropyRestoration(t)
+	_ = testRADVChannelEntropyRestoration(t)
 }
 
 func TestRADVContiguizeShader_PipelineDescriptor(t *testing.T) {
-	testRADVPipelineDescriptorAndGLSL(t)
+	_ = testRADVPipelineDescriptorAndGLSL(t)
+}
+
+// RADVContiguizeParityEvent defines the truthful host-contract event schema
+// emitted by TestRADVContiguizeShader for the f16_kv_contiguize subkernel selector (#12120, #12124).
+// Because host emulation is non-device, device_observed is explicitly false
+// and cannot be promoted to physical-device parity credit.
+type RADVContiguizeParityEvent struct {
+	Schema         string                       `json:"schema"`
+	Selector       string                       `json:"selector"`
+	TestName       string                       `json:"test_name"`
+	Test           string                       `json:"test,omitempty"`
+	OracleKind     string                       `json:"oracle_kind"`
+	CaseCount      int                          `json:"case_count"`
+	DeviceObserved bool                         `json:"device_observed"`
+	Engine         string                       `json:"engine"`
+	Passed         bool                         `json:"passed"`
+	Observed       RADVContiguizeParityObserved `json:"observed"`
+	Bounds         RADVContiguizeParityBounds   `json:"bounds"`
+	Detail         string                       `json:"detail,omitempty"`
+}
+
+// PhysicalParityCredit reports whether this event earns physical-device parity credit.
+// Host contracts and unobserved events never earn physical-device parity credit.
+func (e RADVContiguizeParityEvent) PhysicalParityCredit() bool {
+	if e.OracleKind == "host_contract" {
+		return false
+	}
+	if !e.DeviceObserved {
+		return false
+	}
+	return e.Passed
+}
+
+type RADVContiguizeParityObserved struct {
+	ContractHolds *bool  `json:"contract_holds,omitempty"`
+	ContractName  string `json:"contract_name,omitempty"`
+}
+
+type RADVContiguizeParityBounds struct {
+	Comparison       string `json:"comparison,omitempty"`
+	ContractExpected *bool  `json:"contract_expected,omitempty"`
+}
+
+func emitRADVContiguizeHostContractEvent(t *testing.T, casesEvaluated int, passed bool) RADVContiguizeParityEvent {
+	t.Helper()
+	holds := passed
+	expected := true
+	detail := "host-side bit-exact emulation, geometry, GLSL source, and entropy restoration verified; non-device host contract"
+	if !passed {
+		detail = "host contract verification failed; non-device host contract"
+	}
+	ev := RADVContiguizeParityEvent{
+		Schema:         "fak.strix.subkernel-parity/v1",
+		Selector:       "f16_kv_contiguize",
+		TestName:       "TestRADVContiguizeShader",
+		Test:           "TestRADVContiguizeShader",
+		OracleKind:     "host_contract",
+		CaseCount:      casesEvaluated,
+		DeviceObserved: false,
+		Engine:         "fak-native/host",
+		Passed:         passed,
+		Observed: RADVContiguizeParityObserved{
+			ContractHolds: &holds,
+			ContractName:  "radv_contiguize_host_contract",
+		},
+		Bounds: RADVContiguizeParityBounds{
+			Comparison:       "==",
+			ContractExpected: &expected,
+		},
+		Detail: detail,
+	}
+
+	raw, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatalf("failed to marshal contiguize host contract event: %v", err)
+	}
+	t.Log(string(raw))
+	return ev
+}
+
+func TestRADVContiguizeHostContractEvent(t *testing.T) {
+	// 1. Verify successful host contract event emission
+	ev := emitRADVContiguizeHostContractEvent(t, 24, true)
+	if ev.Schema != "fak.strix.subkernel-parity/v1" {
+		t.Errorf("expected schema 'fak.strix.subkernel-parity/v1', got %q", ev.Schema)
+	}
+	if ev.Selector != "f16_kv_contiguize" {
+		t.Errorf("expected selector 'f16_kv_contiguize', got %q", ev.Selector)
+	}
+	if ev.TestName != "TestRADVContiguizeShader" {
+		t.Errorf("expected test_name 'TestRADVContiguizeShader', got %q", ev.TestName)
+	}
+	if ev.Test != "TestRADVContiguizeShader" {
+		t.Errorf("expected test 'TestRADVContiguizeShader', got %q", ev.Test)
+	}
+	if ev.OracleKind != "host_contract" {
+		t.Errorf("expected oracle_kind 'host_contract', got %q", ev.OracleKind)
+	}
+	if ev.DeviceObserved {
+		t.Errorf("host contract MUST have device_observed=false, got true")
+	}
+	if ev.PhysicalParityCredit() {
+		t.Errorf("host contract MUST NOT earn physical parity credit")
+	}
+	if ev.Engine != "fak-native/host" {
+		t.Errorf("expected engine 'fak-native/host', got %q", ev.Engine)
+	}
+	if !ev.Passed {
+		t.Errorf("expected passed=true")
+	}
+	if ev.CaseCount != 24 {
+		t.Errorf("expected case_count=24, got %d", ev.CaseCount)
+	}
+	if ev.Observed.ContractHolds == nil || !*ev.Observed.ContractHolds {
+		t.Errorf("expected observed.contract_holds=true")
+	}
+	if ev.Observed.ContractName != "radv_contiguize_host_contract" {
+		t.Errorf("expected observed.contract_name 'radv_contiguize_host_contract', got %q", ev.Observed.ContractName)
+	}
+	if ev.Bounds.Comparison != "==" {
+		t.Errorf("expected bounds.comparison '==', got %q", ev.Bounds.Comparison)
+	}
+	if ev.Bounds.ContractExpected == nil || !*ev.Bounds.ContractExpected {
+		t.Errorf("expected bounds.contract_expected=true")
+	}
+
+	// 2. JSON serialization contract checks (no cosine conflation, explicit device_observed=false)
+	raw, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	rawStr := string(raw)
+
+	if strings.Contains(rawStr, "cosine_similarity") || strings.Contains(rawStr, `"cosine"`) {
+		t.Errorf("host contract must not contain cosine (conflation risk): %s", rawStr)
+	}
+	if !strings.Contains(rawStr, `"device_observed":false`) {
+		t.Errorf("host contract json missing explicit '\"device_observed\":false': %s", rawStr)
+	}
+	if !strings.Contains(rawStr, `"oracle_kind":"host_contract"`) {
+		t.Errorf("host contract json missing '\"oracle_kind\":\"host_contract\"': %s", rawStr)
+	}
+	if !strings.Contains(rawStr, `"test_name":"TestRADVContiguizeShader"`) {
+		t.Errorf("host contract json missing '\"test_name\":\"TestRADVContiguizeShader\"': %s", rawStr)
+	}
+	if !strings.Contains(rawStr, `"schema":"fak.strix.subkernel-parity/v1"`) {
+		t.Errorf("host contract json missing '\"schema\":\"fak.strix.subkernel-parity/v1\"': %s", rawStr)
+	}
+
+	// 3. Negative failure mode: when passed=false, contract_holds is false and PhysicalParityCredit is false
+	evFail := emitRADVContiguizeHostContractEvent(t, 24, false)
+	if evFail.Passed {
+		t.Errorf("expected passed=false for failing contract")
+	}
+	if evFail.Observed.ContractHolds == nil || *evFail.Observed.ContractHolds {
+		t.Errorf("expected contract_holds=false for failing contract")
+	}
+	if evFail.PhysicalParityCredit() {
+		t.Errorf("failing host contract must not earn physical parity credit")
+	}
 }
 
 // Suppress unused import warnings if any
