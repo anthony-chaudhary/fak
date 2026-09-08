@@ -260,7 +260,9 @@ func UploadQ4K(raw []byte, out, in int) *Q4KWeight {
 }
 
 // AllocateMetalMTPSharedBuffer allocates page-aligned unified memory using anonymous mmap
-// suitable for zero-copy Metal MTLResourceStorageModeShared buffer creation on Apple Silicon.
+// suitable for zero-copy Metal MTLResourceStorageModeShared buffer creation on Apple Silicon (#12236).
+// This enables resident Qwen 3.8 / 3.6 MTP draft projection weights to be shared directly between
+// host Go slices and GPU command encoders with zero host-to-device memcpy overhead.
 // The allocated memory is rounded up to os.Getpagesize() and returns a slice of length bytes.
 func AllocateMetalMTPSharedBuffer(bytes int) ([]byte, error) {
 	if bytes <= 0 {

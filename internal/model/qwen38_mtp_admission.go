@@ -3,7 +3,29 @@ package model
 import (
 	"fmt"
 	"math/bits"
+	"os/exec"
+	"runtime"
+	"strconv"
+	"strings"
 )
+
+// Apple Silicon unified memory capacity thresholds for MTP speculative decoding.
+const (
+	AppleSiliconUnifiedMemoryFloorBytes uint64 = 16 * 1024 * 1024 * 1024 // 16 GiB
+	AppleSilicon36GBUnifiedMemoryBytes  uint64 = 36 * 1024 * 1024 * 1024 // 36 GiB
+)
+
+// qwen38MTPCapacityResult reports the outcome of capacity admission on Apple Silicon
+// unified memory before loading or allocating MTP draft weights.
+type qwen38MTPCapacityResult struct {
+	Approved    bool                      `json:"approved"`
+	Outcome     Qwen38MTPAdmissionOutcome `json:"outcome"`
+	TotalBytes  uint64                    `json:"total_bytes"`
+	UsableBytes uint64                    `json:"usable_bytes"`
+	FloorBytes  uint64                    `json:"floor_bytes"`
+	Reason      string                    `json:"reason"`
+	Admission   Qwen38MTPAdmission        `json:"admission"`
+}
 
 // Qwen38MTPMemoryPressure is the bounded pressure signal used before any MTP
 // allocation. Unknown and critical pressure fail closed to target-only decode.
@@ -163,4 +185,128 @@ func (a Qwen38MTPAdmission) validate() error {
 		}
 	}
 	return nil
+}
+
+// admitQwen38MTPAppleSilicon evaluates capacity admission for Apple Silicon unified memory.
+// It refuses cleanly when available unified memory is at or below the 16 GiB floor to prevent
+// swap thrashing, or when memory pressure is critical.
+func admitQwen38MTPAppleSilicon(in Qwen38MTPAdmissionInput) qwen38MTPCapacityResult {
+	if in.AvailableBytes <= AppleSiliconUnifiedMemoryFloorBytes {
+		admiss := AdmitQwen38MTP(in)
+		admiss.Outcome = Qwen38MTPAdmissionTargetOnly
+		admiss.DeviceBytes = 0
+		return qwen38MTPCapacityResult{
+			Approved:    false,
+			Outcome:     Qwen38MTPAdmissionTargetOnly,
+			TotalBytes:  in.AvailableBytes,
+			UsableBytes: admiss.UsableBytes,
+			FloorBytes:  AppleSiliconUnifiedMemoryFloorBytes,
+			Reason:      "insufficient unified memory: Apple Silicon <=16GB configuration refuses MTP draft residency to prevent swap thrashing",
+			Admission:   admiss,
+		}
+	}
+
+	if in.Pressure == Qwen38MTPPressureCritical {
+		admiss := AdmitQwen38MTP(in)
+		return qwen38MTPCapacityResult{
+			Approved:    false,
+			Outcome:     Qwen38MTPAdmissionTargetOnly,
+			TotalBytes:  in.AvailableBytes,
+			UsableBytes: admiss.UsableBytes,
+			FloorBytes:  AppleSiliconUnifiedMemoryFloorBytes,
+			Reason:      "memory pressure critical: saturated configuration refuses MTP draft residency",
+			Admission:   admiss,
+		}
+	}
+
+	admiss := AdmitQwen38MTP(in)
+	switch admiss.Outcome {
+	case Qwen38MTPAdmissionResident:
+		return qwen38MTPCapacityResult{
+			Approved:    true,
+			Outcome:     Qwen38MTPAdmissionResident,
+			TotalBytes:  in.AvailableBytes,
+			UsableBytes: admiss.UsableBytes,
+			FloorBytes:  AppleSiliconUnifiedMemoryFloorBytes,
+			Reason:      "approved: resident MTP draft weights fit within Apple Silicon unified memory headroom",
+			Admission:   admiss,
+		}
+	case Qwen38MTPAdmissionHostAssisted:
+		return qwen38MTPCapacityResult{
+			Approved:    false,
+			Outcome:     admiss.Outcome,
+			TotalBytes:  in.AvailableBytes,
+			UsableBytes: admiss.UsableBytes,
+			FloorBytes:  AppleSiliconUnifiedMemoryFloorBytes,
+			Reason:      "headroom constrained: host-assisted fallback selected",
+			Admission:   admiss,
+		}
+	case Qwen38MTPAdmissionTargetOnly:
+		return qwen38MTPCapacityResult{
+			Approved:    false,
+			Outcome:     Qwen38MTPAdmissionTargetOnly,
+			TotalBytes:  in.AvailableBytes,
+			UsableBytes: admiss.UsableBytes,
+			FloorBytes:  AppleSiliconUnifiedMemoryFloorBytes,
+			Reason:      "memory headroom exceeded: target-only decode fallback",
+			Admission:   admiss,
+		}
+	default:
+		return qwen38MTPCapacityResult{
+			Approved:    false,
+			Outcome:     admiss.Outcome,
+			TotalBytes:  in.AvailableBytes,
+			UsableBytes: admiss.UsableBytes,
+			FloorBytes:  AppleSiliconUnifiedMemoryFloorBytes,
+			Reason:      "memory headroom exceeded: target-only decode fallback",
+			Admission:   admiss,
+		}
+	}
+}
+
+// admitQwen38MTPDevice evaluates MTP admission on an Apple Silicon device.
+// Takes optional physicalMemoryBytes (defaulting to 36GB if not on Darwin or Darwin query).
+// Slices headroom (e.g. 4GB) and reservations (e.g. 2GB) and checks admission.
+func admitQwen38MTPDevice(targetTensorBytes, mtpTensorBytes uint64, physicalMemoryBytes ...uint64) qwen38MTPCapacityResult {
+	var totalMem uint64
+	if len(physicalMemoryBytes) > 0 && physicalMemoryBytes[0] > 0 {
+		totalMem = physicalMemoryBytes[0]
+	} else if runtime.GOOS == "darwin" {
+		if mem, err := queryDarwinPhysicalMemory(); err == nil && mem > 0 {
+			totalMem = mem
+		} else {
+			totalMem = AppleSilicon36GBUnifiedMemoryBytes
+		}
+	} else {
+		totalMem = AppleSilicon36GBUnifiedMemoryBytes
+	}
+
+	headroom := uint64(4 * 1024 * 1024 * 1024) // 4 GiB
+	reserved := uint64(2 * 1024 * 1024 * 1024) // 2 GiB
+
+	in := Qwen38MTPAdmissionInput{
+		TargetTensorBytes:      targetTensorBytes,
+		RetainedMTPTensorBytes: mtpTensorBytes,
+		AvailableBytes:         totalMem,
+		HeadroomBytes:          headroom,
+		ReservedBytes:          reserved,
+		Pressure:               Qwen38MTPPressureNominal,
+		HostAssistedSupported:  false,
+	}
+	return admitQwen38MTPAppleSilicon(in)
+}
+
+func queryDarwinPhysicalMemory() (uint64, error) {
+	out, err := exec.Command("sysctl", "-n", "hw.memsize").Output()
+	if err != nil {
+		out, err = exec.Command("/usr/sbin/sysctl", "-n", "hw.memsize").Output()
+		if err != nil {
+			return 0, err
+		}
+	}
+	val, err := strconv.ParseUint(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return val, nil
 }
