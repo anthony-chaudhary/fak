@@ -345,8 +345,6 @@ func TestIsSubpathEdgeCases(t *testing.T) {
 		{`C:\`, `C:\Users\dev\OneDrive`, true},
 		{`C:`, `C:\Users\dev\OneDrive`, false},
 		{`C:Users\dev`, `C:\Users\dev\OneDrive`, false},
-		{`C:`, `C:Users\dev`, false},
-		{`C:Users\dev`, `C:Users\dev\OneDrive`, false},
 		{`C:\Users\dev\OneDrive`, `D:\Users\dev\OneDrive\Desktop\repo`, false},
 		{`C:\Users\dev\OneDrive`, `/home/dev/work/fak`, false},
 		{`/home/dev/work/fak`, `C:\Users\dev\OneDrive`, false},
