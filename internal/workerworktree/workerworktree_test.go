@@ -587,6 +587,7 @@ func TestLandEmptyDiffIsOKButNotCommitted(t *testing.T) {
 }
 
 func TestLandApplyFailureDoesNotCommit(t *testing.T) {
+	t.Setenv(IsolatedLandEnv, "0")
 	g := newFakeGit().
 		reply("diff", 0, "diff --git a/x b/x\n@@\n-o\n+n\n").
 		reply("apply", 1, "error: patch does not apply")
@@ -600,6 +601,7 @@ func TestLandApplyFailureDoesNotCommit(t *testing.T) {
 }
 
 func TestLandBaseSHAIsTheDiffRefNotHead(t *testing.T) {
+	t.Setenv(IsolatedLandEnv, "0")
 	g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-old\n+new\n", "x\n").
 		reply("apply", 0, "").
 		reply("commit", 0, "[main abc] msg")
@@ -658,6 +660,7 @@ func TestLandDiffErrorFailsOpen(t *testing.T) {
 // TestLandDerivesMsgFromWorktreeTipWhenNoFile proves the witness-sweep call site
 // (which has no pre-written message file) borrows the worker's own commit subject.
 func TestLandDerivesMsgFromWorktreeTipWhenNoFile(t *testing.T) {
+	t.Setenv(IsolatedLandEnv, "0")
 	g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-o\n+n\n", "x\n").
 		reply("log", 0, "fix(x): resolve thing (#3168) (fak x)\n").
 		reply("apply", 0, "").
@@ -678,6 +681,7 @@ func TestLandDerivesMsgFromWorktreeTipWhenNoFile(t *testing.T) {
 // ---- Land: opt-in post-commit readback (#3547 shared-index race) ---------- //
 
 func TestLandReadbackVerifyPassesWhenTrunkCarriesPaths(t *testing.T) {
+	t.Setenv(IsolatedLandEnv, "0")
 	t.Setenv(LandReadbackEnv, "1")
 	g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-old\n+new\n", "x\n").
 		reply("apply", 0, "").
@@ -691,6 +695,7 @@ func TestLandReadbackVerifyPassesWhenTrunkCarriesPaths(t *testing.T) {
 }
 
 func TestLandReadbackVerifyRefusesWhenPathSweptByRace(t *testing.T) {
+	t.Setenv(IsolatedLandEnv, "0")
 	t.Setenv(LandReadbackEnv, "1")
 	// commit succeeded, but trunk HEAD carries a DIFFERENT file — our `x` was swept
 	// into a concurrent commit on the shared index (the #3547 failure).
@@ -709,6 +714,7 @@ func TestLandReadbackVerifyRefusesWhenPathSweptByRace(t *testing.T) {
 }
 
 func TestLandReadbackForcedOffLeavesBaselineUnchanged(t *testing.T) {
+	t.Setenv(IsolatedLandEnv, "0")
 	t.Setenv(LandReadbackEnv, "0") // explicit off — baseline path
 	// A diff-tree that WOULD fail the check must never be consulted when off.
 	g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-old\n+new\n", "x\n").
@@ -725,6 +731,7 @@ func TestLandReadbackForcedOffLeavesBaselineUnchanged(t *testing.T) {
 }
 
 func TestLandReadbackFailsOpenOnGitError(t *testing.T) {
+	t.Setenv(IsolatedLandEnv, "0")
 	t.Setenv(LandReadbackEnv, "1")
 	// HEAD unreadable — the readback cannot run, so it must NOT manufacture a
 	// refusal; the commit's own verdict stands (fail-open, the module invariant).
@@ -929,11 +936,11 @@ func TestLandIsolatedDisambiguationRefusalPreservesStateAndWorkerDiff(t *testing
 	}
 }
 
-func TestLandIsolatedApplyConflictFallsBackNotCommits(t *testing.T) {
+func TestLandIsolatedApplyConflictRequiresReconciliation(t *testing.T) {
 	g := isolatedHappyFake().reply("apply", 1, "error: patch does not apply")
 	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
-	if handled {
-		t.Fatalf("an apply conflict must fall back (handled=false), got %+v", res)
+	if handled || res.OK || res.Code != "reconciliation-required" || !res.Preserved {
+		t.Fatalf("an apply conflict must be a terminal preserved reconciliation result, handled=%v result=%+v", handled, res)
 	}
 	if len(g.envCallsWithPrefix("commit-tree")) != 0 || len(g.callsWithPrefix("update-ref")) != 0 {
 		t.Fatalf("conflict must not build/move a commit: env=%v calls=%v", g.envCalls, g.calls)
@@ -991,18 +998,18 @@ func TestLandIsolatedLostCASRetriesReseedFromNewHEADAndLands(t *testing.T) {
 	}
 }
 
-func TestLandIsolatedRetryReapplyConflictFallsBack(t *testing.T) {
+func TestLandIsolatedRetryReapplyConflictRequiresReconciliation(t *testing.T) {
 	stubCASSleep(t)
 	// Attempt 1 stages clean but loses the CAS; the re-apply onto the peer's new
-	// HEAD conflicts on the same hunk — a genuine overlap, so the baseline path
-	// must adjudicate it (handled=false), exactly as a first-try conflict does.
+	// HEAD conflicts on the same hunk — a genuine overlap preserved for explicit
+	// reconciliation, exactly as a first-try conflict is.
 	g := isolatedHappyFake().
 		replyOnce("apply", 0, "").
 		replyOnce("apply", 1, "error: patch does not apply").
 		replyOnce("update-ref", 1, "fatal: update_ref failed: ref moved")
 	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
-	if handled {
-		t.Fatalf("a conflicting re-apply must fall back to the baseline, got %+v", res)
+	if handled || res.OK || res.Code != "reconciliation-required" || !res.Preserved {
+		t.Fatalf("a conflicting re-apply must be a terminal preserved reconciliation result, handled=%v result=%+v", handled, res)
 	}
 	if len(g.envCallsWithPrefix("commit-tree")) != 1 || len(g.callsWithPrefix("update-ref", "refs/heads/main")) != 1 {
 		t.Fatalf("the conflicted retry must not build/CAS a second commit: env=%v calls=%v", g.envCalls, g.calls)
@@ -1012,15 +1019,15 @@ func TestLandIsolatedRetryReapplyConflictFallsBack(t *testing.T) {
 	}
 }
 
-func TestLandIsolatedLostCASRetryCapHonoredThenFallsBack(t *testing.T) {
+func TestLandIsolatedLostCASRetryCapHonoredThenRequiresReconciliation(t *testing.T) {
 	stubCASSleep(t)
 	t.Setenv(IsolatedLandRetryEnv, "3")
 	// A CAS that NEVER wins (HEAD keeps moving under us): the loop must be bounded
-	// by the cap, then fall back — and never sync the shared working tree.
+	// by the cap, then refuse — and never sync the shared working tree.
 	g := isolatedHappyFake().reply("update-ref", 1, "fatal: update_ref failed: ref moved")
 	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
-	if handled {
-		t.Fatalf("exhausted CAS attempts must fall back to baseline, got %+v", res)
+	if handled || res.OK || res.Code != "reconciliation-required" || !res.Preserved {
+		t.Fatalf("exhausted CAS attempts must be a terminal preserved reconciliation result, handled=%v result=%+v", handled, res)
 	}
 	if n := len(g.callsWithPrefix("update-ref")); n != 3 {
 		t.Fatalf("retry cap of 3 must yield exactly 3 CAS attempts, got %d: %v", n, g.calls)
@@ -1053,25 +1060,65 @@ func TestIsolatedLandRetryCapDefaultsAndParses(t *testing.T) {
 	}
 }
 
-func TestLandIsolatedDetachedHeadFallsBackImmediately(t *testing.T) {
+func TestLandIsolatedDetachedHeadRefusesImmediately(t *testing.T) {
 	g := isolatedHappyFake().reply("symbolic-ref", 1, "") // detached HEAD
-	_, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
-	if handled {
-		t.Fatalf("detached HEAD has no branch ref to CAS — must fall back")
+	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
+	if handled || res.OK || res.Code != "reconciliation-required" || !res.Preserved {
+		t.Fatalf("detached HEAD must be a terminal preserved reconciliation result, handled=%v result=%+v", handled, res)
 	}
 	if len(g.envCalls) != 0 {
 		t.Fatalf("must bail before any throwaway-index work: env=%v", g.envCalls)
 	}
 }
 
-func TestLandIsolatedMissingIdentityFallsBack(t *testing.T) {
+func TestLandIsolatedMissingIdentityRefuses(t *testing.T) {
 	g := isolatedHappyFake().reply("config", 0, "") // no user.name/email → can't honor -s
-	_, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
-	if handled {
-		t.Fatalf("unresolved signoff identity must fall back to baseline")
+	res, handled := landIsolated("/trunk", "/wt", "diff --git a/x b/x\n@@\n-o\n+n\n", writeMsg(t, "s"), []string{"x"}, g.run, g.runEnv)
+	if handled || res.OK || res.Code != "reconciliation-required" || !res.Preserved {
+		t.Fatalf("unresolved signoff identity must be a terminal preserved reconciliation result, handled=%v result=%+v", handled, res)
 	}
 	if len(g.envCalls) != 0 {
 		t.Fatalf("must bail before touching the throwaway index: env=%v", g.envCalls)
+	}
+}
+
+func TestLandDefaultIsolatedConflictPreservesSecondRootState(t *testing.T) {
+	t.Setenv(IsolatedLandEnv, "")
+	os.Unsetenv(IsolatedLandEnv)
+	f := newReapProofFixture(t)
+
+	writeReapProofFile(t, f.wt, "target.txt", "worker\n")
+	writeReapProofFile(t, f.repo, "target.txt", "peer\n")
+	commitReapProofTrunk(t, f)
+
+	trunkHead := strings.TrimSpace(reapProofGit(t, f.repo, "rev-parse", "HEAD"))
+	trunkIndex := reapProofGit(t, f.repo, "diff", "--cached", "--binary")
+	trunkWorktree := reapProofGit(t, f.repo, "diff", "--binary")
+	workerHead := strings.TrimSpace(reapProofGit(t, f.wt, "rev-parse", "HEAD"))
+	workerIndex := reapProofGit(t, f.wt, "diff", "--cached", "--binary")
+	workerWorktree := reapProofGit(t, f.wt, "diff", "--binary")
+
+	res := Land(f.repo, f.wt, f.base, writeMsg(t, "fix(workerworktree): preserve conflict (fak workerworktree)"), []string{"target.txt"}, nil, nil)
+	if res.OK || res.Code != "reconciliation-required" || !res.Preserved || res.Applied || res.Committed {
+		t.Fatalf("conflict must be a terminal preserved reconciliation result: %+v", res)
+	}
+	if got := strings.TrimSpace(reapProofGit(t, f.repo, "rev-parse", "HEAD")); got != trunkHead {
+		t.Fatalf("trunk HEAD changed: got %s want %s", got, trunkHead)
+	}
+	if got := reapProofGit(t, f.repo, "diff", "--cached", "--binary"); got != trunkIndex {
+		t.Fatalf("trunk index changed:\n%s", got)
+	}
+	if got := reapProofGit(t, f.repo, "diff", "--binary"); got != trunkWorktree {
+		t.Fatalf("trunk worktree changed:\n%s", got)
+	}
+	if got := strings.TrimSpace(reapProofGit(t, f.wt, "rev-parse", "HEAD")); got != workerHead {
+		t.Fatalf("worker HEAD changed: got %s want %s", got, workerHead)
+	}
+	if got := reapProofGit(t, f.wt, "diff", "--cached", "--binary"); got != workerIndex {
+		t.Fatalf("worker index changed:\n%s", got)
+	}
+	if got := reapProofGit(t, f.wt, "diff", "--binary"); got != workerWorktree {
+		t.Fatalf("worker worktree changed:\n%s", got)
 	}
 }
 
@@ -1110,6 +1157,24 @@ func TestLandIsolatedGateOnRoutesLandThroughIsolatedPath(t *testing.T) {
 	// The baseline shared-index commit must NOT have run.
 	if len(g.callsWithPrefix("commit")) != 0 || len(g.callsWithPrefix("apply")) != 0 {
 		t.Fatalf("isolated success must skip the baseline apply+commit: %v", g.calls)
+	}
+}
+
+func TestLandDefaultIsolatedWholeTreeRefusesSharedIndex(t *testing.T) {
+	t.Setenv(IsolatedLandEnv, "")
+	os.Unsetenv(IsolatedLandEnv)
+	g := newFakeGit().
+		replyOnce("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
+		replyOnce("diff", 0, "x\n").
+		reply("merge-base", 0, "").
+		reply("apply", 0, "").
+		reply("commit", 0, "committed")
+	res := Land("/trunk", "/wt/fak-worker-wt-tools-abc", "base", writeMsg(t, "feat(x): thing (fak x)"), nil, nil, g.run)
+	if res.OK || res.Code != "reconciliation-required" || !res.Preserved {
+		t.Fatalf("default isolated whole-tree land must refuse without shared-index fallback: %+v", res)
+	}
+	if len(g.callsWithPrefix("apply")) != 0 || len(g.callsWithPrefix("commit")) != 0 {
+		t.Fatalf("default isolated land must not enter the shared-index path: %v", g.calls)
 	}
 }
 
