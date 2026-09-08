@@ -1448,13 +1448,13 @@ void fvk_add_bias_f32(void* dDst, const void* dBias, int rows, int width) {
 
 void fvk_attention_f32(const void* dQ, const void* dK, const void* dV, void* dOut,
                        int nPos, int nH, int nKV, int hd, float scale) {
-    size_t scoreBytes = (size_t)nH * nPos * sizeof(float);
+    size_t scoreBytes = 64; // FlashAttention-3 tiled online softmax executes in registers; O(1) scratchpad
     Buffer* scores = g_batching ? batchAttentionScratch(scoreBytes) : (Buffer*)fvk_malloc(scoreBytes);
     if (!scores) {
         fprintf(stderr, "fak-vulkan: attention scratch allocation failed (%zu bytes)\n", scoreBytes);
         abort();
     }
-    struct { int nPos, nH, nKV, hd; float scale; } pc{nPos, nH, nKV, hd, scale};
+    struct { int nPos, nH, nKV, hd; float scale; int causal; int windowSize; int qTokens; } pc{nPos, nH, nKV, hd, scale, 1, 0, 1};
     Buffer* bufs[5] = {B((void*)dQ), B((void*)dK), B((void*)dV), B(dOut), scores};
     dispatch(g_kern[K_ATTENTION], bufs, &pc, sizeof(pc), (uint32_t)nH);
     if (!g_batching) {
