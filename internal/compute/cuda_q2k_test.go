@@ -330,7 +330,7 @@ func simulateKQ2KGEMMPanel(w []byte, X []float32, out, in, P int) []float32 {
 }
 
 func TestQ2KCUDAGEMMPanelSimulatedReduction(t *testing.T) {
-	out, in, P := 64, 512, 8
+	const out, in = 64, 512
 	nblk := in / q2kSuper
 	raw := make([]byte, out*nblk*q2kSuperBlock)
 
@@ -346,33 +346,44 @@ func TestQ2KCUDAGEMMPanelSimulatedReduction(t *testing.T) {
 		binary.LittleEndian.PutUint16(raw[base+82:base+84], 0x3400) // dmin = 0.25
 	}
 
-	X := make([]float32, P*in)
-	for i := range X {
-		X[i] = float32((i%23)-11) * 0.05
-	}
+	for _, tc := range []struct {
+		name string
+		P    int
+	}{
+		{name: "one-panel", P: 4},
+		{name: "tail-panel", P: 7},
+		{name: "two-panels", P: 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			X := make([]float32, tc.P*in)
+			for i := range X {
+				X[i] = float32((i%23)-11) * 0.05
+			}
 
-	// Reference batched dot
-	refY := make([]float32, P*out)
-	scratch := make([]float32, q2kSuper)
-	rowBytes := nblk * q2kSuperBlock
-	for o := 0; o < out; o++ {
-		row := raw[o*rowBytes : (o+1)*rowBytes]
-		for tRow := 0; tRow < P; tRow++ {
-			refY[tRow*out+o] = q2kRowDot(row, X[tRow*in:(tRow+1)*in], scratch)
-		}
-	}
+			// Reference batched dot.
+			refY := make([]float32, tc.P*out)
+			scratch := make([]float32, q2kSuper)
+			rowBytes := nblk * q2kSuperBlock
+			for o := 0; o < out; o++ {
+				row := raw[o*rowBytes : (o+1)*rowBytes]
+				for tRow := 0; tRow < tc.P; tRow++ {
+					refY[tRow*out+o] = q2kRowDot(row, X[tRow*in:(tRow+1)*in], scratch)
+				}
+			}
 
-	panelY := simulateKQ2KGEMMPanel(raw, X, out, in, P)
+			panelY := simulateKQ2KGEMMPanel(raw, X, out, in, tc.P)
 
-	var maxDelta float32
-	for i := range refY {
-		delta := float32(math.Abs(float64(refY[i] - panelY[i])))
-		if delta > maxDelta {
-			maxDelta = delta
-		}
-	}
-	if maxDelta > 1e-4 {
-		t.Errorf("panel GEMM max delta %g > 1e-4", maxDelta)
+			var maxDelta float32
+			for i := range refY {
+				delta := float32(math.Abs(float64(refY[i] - panelY[i])))
+				if delta > maxDelta {
+					maxDelta = delta
+				}
+			}
+			if maxDelta > 1e-4 {
+				t.Errorf("panel GEMM max delta %g > 1e-4", maxDelta)
+			}
+		})
 	}
 }
 
@@ -383,15 +394,24 @@ func TestQ2KCUDADeviceExecutionIfAvailable(t *testing.T) {
 		return
 	}
 
-	const out, in = 320, 256
+	// Exercise more than one Q2_K super-block and a non-block-aligned output row
+	// count. P=1/3 use the GEMV launcher; P=4/7 use the panel launcher, with
+	// P=7 covering an incomplete four-token panel.
+	const out, in = 321, 512
 	nblk := in / q2kSuper
 	raw := make([]byte, out*nblk*q2kSuperBlock)
+	state := uint64(0x11945_c0de)
 	for i := range raw {
-		raw[i] = byte(i * 37)
+		state ^= state << 13
+		state ^= state >> 7
+		state ^= state << 17
+		raw[i] = byte(state)
 	}
-	for base := 0; base < len(raw); base += q2kSuperBlock {
-		binary.LittleEndian.PutUint16(raw[base+80:base+82], 0x3800)
-		binary.LittleEndian.PutUint16(raw[base+82:base+84], 0x3400)
+	dBits := [...]uint16{0x3000, 0x3400, 0x3800, 0x3a00}    // 0.125, 0.25, 0.5, 0.75
+	dminBits := [...]uint16{0x2c00, 0x3000, 0x3400, 0x3600} // 0.0625, 0.125, 0.25, 0.375
+	for block, base := 0, 0; base < len(raw); block, base = block+1, base+q2kSuperBlock {
+		binary.LittleEndian.PutUint16(raw[base+80:base+82], dBits[block%len(dBits)])
+		binary.LittleEndian.PutUint16(raw[base+82:base+84], dminBits[(block*3)%len(dminBits)])
 	}
 
 	hostT := NewQ2K(be, []int{out, in}, raw)
@@ -403,29 +423,75 @@ func TestQ2KCUDADeviceExecutionIfAvailable(t *testing.T) {
 	if devW.Dtype != Q2_K {
 		t.Fatalf("Upload Q2_K dtype = %s, want Q2_K", devW.Dtype)
 	}
+	t.Cleanup(func() { be.Free(devW) })
 
-	x := make([]float32, in)
-	for i := range x {
-		x[i] = 1.0
-	}
-	devX := be.Upload(NewF32(be, []int{in}, x), F32)
-
-	// GEMV (decode)
-	devY := be.MatMul(devW, devX)
-	got := be.Read(devY)
-	if len(got) != out {
-		t.Fatalf("MatMul output size %d != %d", len(got), out)
-	}
-
-	// Parity against CPU reference
 	ref := Default()
 	refW := NewQ2K(ref, []int{out, in}, raw)
-	refX := NewF32(ref, []int{in}, x)
-	refY := ref.Read(ref.MatMul(refW, refX))
-
-	cos := cosine(refY, got)
-	if cos < 0.995 {
-		t.Errorf("CUDA Q2_K GEMV cosine %g < 0.995", cos)
+	testCases := []struct {
+		name string
+		P    int
+	}{
+		{name: "gemv-p1", P: 1},
+		{name: "gemv-p3", P: 3},
+		{name: "panel-p4", P: 4},
+		{name: "panel-tail-p7", P: 7},
 	}
-	t.Logf("CUDA Q2_K GEMV on-device execution verified: cosine=%g", cos)
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			x := make([]float32, tc.P*in)
+			for token := 0; token < tc.P; token++ {
+				for i := 0; i < in; i++ {
+					phase := float64((token + 1) * (i + 3))
+					x[token*in+i] = float32(math.Sin(phase*0.017) + 0.25*math.Cos(phase*0.031))
+				}
+			}
+
+			xShape := []int{tc.P, in}
+			if tc.P == 1 {
+				xShape = []int{in}
+			}
+			devX := be.Upload(NewF32(be, xShape, x), F32)
+			t.Cleanup(func() { be.Free(devX) })
+
+			var devY Tensor
+			if tc.P == 1 {
+				devY = be.MatMul(devW, devX)
+			} else {
+				devY = be.BatchedMatMul(devW, devX, tc.P)
+			}
+			t.Cleanup(func() { be.Free(devY) })
+			if devY.Dtype != F32 {
+				t.Fatalf("output dtype = %s, want F32", devY.Dtype)
+			}
+			got := be.Read(devY)
+			if len(got) != tc.P*out {
+				t.Fatalf("output size %d != %d", len(got), tc.P*out)
+			}
+
+			refX := NewF32(ref, xShape, x)
+			var refY []float32
+			if tc.P == 1 {
+				refY = ref.Read(ref.MatMul(refW, refX))
+			} else {
+				refY = ref.Read(ref.BatchedMatMul(refW, refX, tc.P))
+			}
+
+			var maxDelta float32
+			for i := range refY {
+				delta := float32(math.Abs(float64(refY[i] - got[i])))
+				if delta > maxDelta {
+					maxDelta = delta
+				}
+			}
+			cos := cosine(refY, got)
+			if cos < 0.99999 {
+				t.Errorf("cosine %g < 0.99999", cos)
+			}
+			if maxDelta > 2e-3 {
+				t.Errorf("max delta %g > 2e-3", maxDelta)
+			}
+			t.Logf("CUDA Q2_K %s verified on-device: cosine=%g max_delta=%g", tc.name, cos, maxDelta)
+		})
+	}
 }
