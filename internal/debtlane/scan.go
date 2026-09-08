@@ -176,8 +176,10 @@ func Scan(opts Options) (Report, error) {
 		}
 	}
 
+	var expandedFindings []FindingProvenance
 	if opts.ExpandedBreadth && len(opts.Facts) == 0 {
-		extra := discoverExpandedSurfaces(absRoot)
+		var extra []DebtLane
+		extra, expandedFindings = discoverExpandedSurfaces(absRoot)
 		for i := range extra {
 			extra[i].Repo = targetRepo
 			allLanes = append(allLanes, extra[i])
@@ -344,16 +346,61 @@ func Scan(opts Options) (Report, error) {
 	}
 
 	var allFindings []FindingProvenance
+	allFindings = append(allFindings, expandedFindings...)
 	scannedFiles := 0
 	for i := range allLanes {
 		unitDir := ""
 		if len(opts.Facts) == 0 {
 			unitDir = filepath.Join(absRoot, allLanes[i].UnitOfWork)
 		}
+		if unitDir != "" {
+			_ = filepath.WalkDir(unitDir, func(p string, d fs.DirEntry, err error) error {
+				if err != nil {
+					rel, _ := filepath.Rel(absRoot, p)
+					allFindings = append(allFindings, FindingProvenance{
+						Dimension: string(DimCoverageDebt),
+						Surface:   string(classifySurface(allLanes[i].UnitOfWork)),
+						Lane:      allLanes[i].Lane,
+						Path:      rel,
+						Severity:  "warning",
+						Message:   fmt.Sprintf("unreadable file: %v", err),
+					})
+					return nil
+				}
+				if !d.IsDir() {
+					if _, readErr := os.ReadFile(p); readErr != nil {
+						rel, _ := filepath.Rel(absRoot, p)
+						allFindings = append(allFindings, FindingProvenance{
+							Dimension: string(DimCoverageDebt),
+							Surface:   string(classifySurface(allLanes[i].UnitOfWork)),
+							Lane:      allLanes[i].Lane,
+							Path:      rel,
+							Severity:  "warning",
+							Message:   fmt.Sprintf("unreadable file: %v", readErr),
+						})
+					}
+				}
+				return nil
+			})
+		}
 		findings := InspectUnitDetectors(&allLanes[i], unitDir)
-		allFindings = append(allFindings, findings...)
+
+		// Filter out raw generic DimStalePerfProof from InspectUnitDetectors
+		// so AuditPerformanceProof has authoritative evaluation.
+		filteredFindings := make([]FindingProvenance, 0, len(findings))
+		for _, f := range findings {
+			if f.Dimension != string(DimStalePerfProof) {
+				filteredFindings = append(filteredFindings, f)
+			}
+		}
+
+		perfFindings := AuditPerformanceProof(&allLanes[i])
+		filteredFindings = append(filteredFindings, perfFindings...)
+
+		allFindings = append(allFindings, filteredFindings...)
 		scannedFiles += allLanes[i].Evidence.FilesCount
 	}
+	allFindings = dedupeFindings(allFindings)
 
 	coverage := BuildCoverageReceipt(absRoot, targetRepo, allLanes, allFindings, scannedFiles)
 
@@ -431,6 +478,9 @@ func EvaluateLaneHealth(l DebtLane) LaneHealth {
 		if l.Evidence.HasModelHardcoding {
 			issues = append(issues, "model_hardcoding")
 		}
+	}
+	if l.PerfProofReason != "" {
+		issues = append(issues, "stale_perf_proof:"+l.PerfProofReason)
 	}
 
 	score := 1.0
@@ -538,6 +588,9 @@ func matchesQuery(l DebtLane, q string) bool {
 	if strings.Contains(strings.ToLower(l.Related.CompanionLane), q) || strings.Contains(strings.ToLower(l.Related.CompanionUnitOfWork), q) {
 		return true
 	}
+	if l.PerfProofReason != "" && strings.Contains(strings.ToLower(l.PerfProofReason), q) {
+		return true
+	}
 	return false
 }
 
@@ -557,6 +610,39 @@ func matchesHealth(l DebtLane, h string) bool {
 }
 
 func recomputeLane(l *DebtLane) {
+	if l.PerformanceProof == nil && l.Evidence.PerformanceProof != nil {
+		l.PerformanceProof = l.Evidence.PerformanceProof
+	} else if l.Evidence.PerformanceProof == nil && l.PerformanceProof != nil {
+		l.Evidence.PerformanceProof = l.PerformanceProof
+	}
+	if len(l.HistoricalProofs) == 0 && len(l.Evidence.HistoricalProofs) > 0 {
+		l.HistoricalProofs = l.Evidence.HistoricalProofs
+	} else if len(l.Evidence.HistoricalProofs) == 0 && len(l.HistoricalProofs) > 0 {
+		l.Evidence.HistoricalProofs = l.HistoricalProofs
+	}
+	if l.CurrentRevision == "" && l.Evidence.CurrentRevision != "" {
+		l.CurrentRevision = l.Evidence.CurrentRevision
+	} else if l.Evidence.CurrentRevision == "" && l.CurrentRevision != "" {
+		l.Evidence.CurrentRevision = l.CurrentRevision
+	}
+	if l.RequiredWorkload == "" && l.Evidence.RequiredWorkload != "" {
+		l.RequiredWorkload = l.Evidence.RequiredWorkload
+	} else if l.Evidence.RequiredWorkload == "" && l.RequiredWorkload != "" {
+		l.Evidence.RequiredWorkload = l.RequiredWorkload
+	}
+	if l.RequiredQuality == "" && l.Evidence.RequiredQuality != "" {
+		l.RequiredQuality = l.Evidence.RequiredQuality
+	} else if l.Evidence.RequiredQuality == "" && l.RequiredQuality != "" {
+		l.Evidence.RequiredQuality = l.RequiredQuality
+	}
+	if l.PerfProofReason == "" && l.Evidence.PerfProofReason != "" {
+		l.PerfProofReason = l.Evidence.PerfProofReason
+	} else if l.Evidence.PerfProofReason == "" && l.PerfProofReason != "" {
+		l.Evidence.PerfProofReason = l.PerfProofReason
+	}
+
+	_ = AuditPerformanceProof(l)
+
 	if l.Weight == 0 {
 		l.Weight = CriticalityWeight(l.Criticality)
 	}
@@ -926,7 +1012,7 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 		if d.IsDir() {
 			if path != dir {
 				name := d.Name()
-				if name == "testdata" || name == "vendor" || name == ".git" || name == "_scratch" {
+				if shouldSkipDir(name) {
 					return filepath.SkipDir
 				}
 			}
@@ -936,13 +1022,16 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 			return nil
 		}
 		fullPath := path
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			return nil
+		}
+		if isGeneratedArtifact(fullPath, content) {
+			return nil
+		}
 		isTest := strings.HasSuffix(d.Name(), "_test.go")
 
 		if isTest {
-			content, err := os.ReadFile(fullPath)
-			if err != nil {
-				return nil
-			}
 			testNode, err := parser.ParseFile(fset, fullPath, content, 0)
 			if err != nil {
 				return nil
@@ -975,10 +1064,6 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 		ev.HasCode = true
 
 		// Parse non-test files for exported symbols and comment metrics.
-		content, err := os.ReadFile(fullPath)
-		if err != nil {
-			return nil
-		}
 		ev.CodeLines += countNonEmptyLines(content)
 
 		node, err := parser.ParseFile(fset, fullPath, content, parser.ParseComments)
@@ -1500,20 +1585,695 @@ func readRuntimeProofs(root string) map[string]bool {
 	return set
 }
 
-func discoverExpandedSurfaces(root string) []DebtLane {
+func shouldSkipDir(name string) bool {
+	return name == "testdata" || name == "vendor" || name == ".git" || name == "_scratch" ||
+		name == "generated" || name == "node_modules" || name == ".cache"
+}
+
+func isGeneratedArtifact(path string, content []byte) bool {
+	clean := filepath.ToSlash(path)
+	base := filepath.Base(clean)
+	if strings.Contains(clean, "/generated/") || strings.HasPrefix(clean, "generated/") {
+		return true
+	}
+	if strings.HasSuffix(base, "_generated.go") || strings.HasSuffix(base, ".generated.go") || strings.HasSuffix(base, ".gen.go") {
+		return true
+	}
+	if strings.Contains(base, ".generated.") || strings.HasPrefix(base, "generated_") {
+		return true
+	}
+	sample := content
+	if len(sample) > 1024 {
+		sample = sample[:1024]
+	}
+	sampleStr := string(sample)
+	if strings.Contains(sampleStr, "Code generated by") && strings.Contains(sampleStr, "DO NOT EDIT") {
+		return true
+	}
+	if strings.Contains(sampleStr, "Auto-generated by") || strings.Contains(sampleStr, "auto-generated by") {
+		return true
+	}
+	if strings.Contains(sampleStr, "GENERATED") && strings.Contains(sampleStr, "do not hand-edit") {
+		return true
+	}
+	if strings.Contains(sampleStr, "@generated") {
+		return true
+	}
+	return false
+}
+
+func dedupeFindings(findings []FindingProvenance) []FindingProvenance {
+	seen := make(map[string]bool)
+	var out []FindingProvenance
+	for _, f := range findings {
+		key := f.Dimension + "|" + f.Surface + "|" + f.Path + "|" + f.Message
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func inspectCmdEvidence(cmdDir, unitOfWork, laneName string) (Evidence, []FindingProvenance) {
+	var ev Evidence
+	var findings []FindingProvenance
+	fset := token.NewFileSet()
+
+	_ = filepath.WalkDir(cmdDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			rel, _ := filepath.Rel(cmdDir, path)
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimCoverageDebt),
+				Surface:   string(SurfaceCmd),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   fmt.Sprintf("unreadable file: %v", walkErr),
+			})
+			return nil
+		}
+		if d.IsDir() {
+			if path != cmdDir && shouldSkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		rel, _ := filepath.Rel(cmdDir, path)
+		if err != nil {
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimCoverageDebt),
+				Surface:   string(SurfaceCmd),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   fmt.Sprintf("unreadable file: %v", err),
+			})
+			return nil
+		}
+		if isGeneratedArtifact(path, data) {
+			return nil
+		}
+		name := d.Name()
+		if !strings.HasSuffix(name, ".go") {
+			return nil
+		}
+
+		if strings.HasSuffix(name, "_test.go") {
+			testNode, err := parser.ParseFile(fset, path, data, 0)
+			if err == nil {
+				hasRealTests := false
+				for _, decl := range testNode.Decls {
+					fn, ok := decl.(*ast.FuncDecl)
+					if !ok {
+						continue
+					}
+					if strings.HasPrefix(fn.Name.Name, "Test") && fn.Body != nil && len(fn.Body.List) > 0 {
+						hasRealTests = true
+					}
+					if strings.HasPrefix(fn.Name.Name, "Benchmark") {
+						if isSubstantiveBenchmark(fn) {
+							ev.Benchmarked = true
+						}
+					}
+				}
+				if hasRealTests {
+					ev.HasTests = true
+					ev.TestFilesCount++
+				}
+			}
+			return nil
+		}
+
+		ev.FilesCount++
+		ev.CodeLines += countNonEmptyLines(data)
+		ev.HasCode = true
+		stubs := countStubMarkers(path)
+		if stubs > 0 {
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimStubDebt),
+				Surface:   string(SurfaceCmd),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   fmt.Sprintf("stub debt: %d unimplemented/TODO marker(s) found", stubs),
+			})
+			ev.ModularityDeficit = true
+		}
+		return nil
+	})
+
+	if ev.HasCode {
+		ev.Integrated = true
+		if ev.HasTests {
+			ev.Dogfooded = true
+		}
+	}
+
+	return ev, findings
+}
+
+func inspectToolEvidence(toolsDir, unitOfWork, laneName string) (Evidence, []FindingProvenance) {
+	var ev Evidence
+	var findings []FindingProvenance
+	hasStubs := false
+	fset := token.NewFileSet()
+
+	_ = filepath.WalkDir(toolsDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			rel, _ := filepath.Rel(toolsDir, path)
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimCoverageDebt),
+				Surface:   string(SurfaceTools),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   fmt.Sprintf("unreadable file: %v", walkErr),
+			})
+			return nil
+		}
+		if d.IsDir() {
+			if path != toolsDir && shouldSkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		rel, _ := filepath.Rel(toolsDir, path)
+		if err != nil {
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimCoverageDebt),
+				Surface:   string(SurfaceTools),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   fmt.Sprintf("unreadable file: %v", err),
+			})
+			return nil
+		}
+		if isGeneratedArtifact(path, data) {
+			return nil
+		}
+
+		name := d.Name()
+		if strings.HasSuffix(name, ".go") {
+			isTest := strings.HasSuffix(name, "_test.go")
+			if isTest {
+				testNode, err := parser.ParseFile(fset, path, data, 0)
+				if err == nil {
+					thinCount := 0
+					testCount := 0
+					for _, decl := range testNode.Decls {
+						fn, ok := decl.(*ast.FuncDecl)
+						if !ok || fn.Body == nil {
+							continue
+						}
+						if strings.HasPrefix(fn.Name.Name, "Test") {
+							testCount++
+							if !hasTestAssertions(fn.Body) {
+								thinCount++
+							}
+						}
+					}
+					if testCount > 0 && thinCount == testCount {
+						findings = append(findings, FindingProvenance{
+							Dimension: string(DimThinTests),
+							Surface:   string(SurfaceTools),
+							Lane:      laneName,
+							Path:      filepath.Join(unitOfWork, rel),
+							Severity:  "warning",
+							Message:   fmt.Sprintf("thin test hazard: %d test function(s) contain zero assertions", thinCount),
+						})
+					} else if testCount > 0 {
+						ev.HasTests = true
+						ev.TestFilesCount++
+					}
+				}
+				return nil
+			}
+			ev.FilesCount++
+			ev.CodeLines += countNonEmptyLines(data)
+			ev.HasCode = true
+			stubs := countStubMarkers(path)
+			if stubs > 0 {
+				hasStubs = true
+				findings = append(findings, FindingProvenance{
+					Dimension: string(DimStubDebt),
+					Surface:   string(SurfaceTools),
+					Lane:      laneName,
+					Path:      filepath.Join(unitOfWork, rel),
+					Severity:  "warning",
+					Message:   fmt.Sprintf("stub debt: %d unimplemented/TODO marker(s) found", stubs),
+				})
+			}
+		} else if strings.HasSuffix(name, ".py") {
+			isTest := strings.HasSuffix(name, "_test.py") || strings.HasPrefix(name, "test_")
+			if isTest {
+				ev.HasTests = true
+				ev.TestFilesCount++
+				return nil
+			}
+			ev.FilesCount++
+			ev.CodeLines += countNonEmptyLines(data)
+			ev.HasCode = true
+			content := string(data)
+			if strings.Contains(content, "TODO") || strings.Contains(content, "FIXME") || strings.Contains(content, "panic(") {
+				hasStubs = true
+				findings = append(findings, FindingProvenance{
+					Dimension: string(DimStubDebt),
+					Surface:   string(SurfaceTools),
+					Lane:      laneName,
+					Path:      filepath.Join(unitOfWork, rel),
+					Severity:  "warning",
+					Message:   "stub debt: TODO or placeholder found in tool script",
+				})
+			}
+		} else if strings.HasSuffix(name, ".sh") || strings.HasSuffix(name, ".ps1") {
+			ev.FilesCount++
+			ev.CodeLines += countNonEmptyLines(data)
+			ev.HasCode = true
+		}
+		return nil
+	})
+
+	if ev.HasCode {
+		if ev.HasTests && !hasStubs {
+			ev.Integrated = true
+			ev.Dogfooded = true
+		} else if hasStubs {
+			ev.ModularityDeficit = true
+		}
+	}
+
+	return ev, findings
+}
+
+func inspectSkillEvidence(skillDir, unitOfWork, laneName string) (Evidence, []FindingProvenance) {
+	var ev Evidence
+	var findings []FindingProvenance
+
+	var skillMdData []byte
+	var skillMdFound bool
+
+	_ = filepath.WalkDir(skillDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			rel, _ := filepath.Rel(skillDir, path)
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimCoverageDebt),
+				Surface:   string(SurfaceSkills),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   fmt.Sprintf("unreadable file: %v", walkErr),
+			})
+			return nil
+		}
+		if d.IsDir() {
+			if path != skillDir && shouldSkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		rel, _ := filepath.Rel(skillDir, path)
+		if err != nil {
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimCoverageDebt),
+				Surface:   string(SurfaceSkills),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   fmt.Sprintf("unreadable file: %v", err),
+			})
+			return nil
+		}
+		if isGeneratedArtifact(path, data) {
+			return nil
+		}
+		ev.FilesCount++
+		ev.CodeLines += countNonEmptyLines(data)
+		if strings.EqualFold(d.Name(), "SKILL.md") {
+			skillMdData = data
+			skillMdFound = true
+		}
+		return nil
+	})
+
+	if skillMdFound {
+		ev.HasCode = true
+		content := string(skillMdData)
+		if strings.HasPrefix(content, "---\n") {
+			ev.Integrated = true
+		} else {
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimWiringStatus),
+				Surface:   string(SurfaceSkills),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, "SKILL.md"),
+				Severity:  "critical",
+				Message:   "missing YAML frontmatter in SKILL.md",
+			})
+		}
+
+		if strings.Contains(content, "## Verification") || strings.Contains(content, "## Witness") ||
+			strings.Contains(content, "go test") || strings.Contains(content, "python tools/") {
+			ev.HasTests = true
+			ev.TestFilesCount = 1
+			ev.Dogfooded = true
+		} else {
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimProofStatus),
+				Surface:   string(SurfaceSkills),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, "SKILL.md"),
+				Severity:  "warning",
+				Message:   "missing verification or witness commands in SKILL.md",
+			})
+		}
+
+		if strings.Contains(content, "TODO") || strings.Contains(content, "FIXME") {
+			ev.ModularityDeficit = true
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimStubDebt),
+				Surface:   string(SurfaceSkills),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, "SKILL.md"),
+				Severity:  "warning",
+				Message:   "stub debt: TODO or placeholder found in SKILL.md",
+			})
+		}
+	}
+
+	return ev, findings
+}
+
+func inspectWorkflowEvidence(wfDir, unitOfWork, laneName string) (Evidence, []FindingProvenance) {
+	var ev Evidence
+	var findings []FindingProvenance
+	hasUnboundedTimeout := false
+
+	_ = filepath.WalkDir(wfDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			rel, _ := filepath.Rel(wfDir, path)
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimCoverageDebt),
+				Surface:   string(SurfaceWorkflows),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   fmt.Sprintf("unreadable file: %v", walkErr),
+			})
+			return nil
+		}
+		if d.IsDir() {
+			if path != wfDir && shouldSkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".yml") && !strings.HasSuffix(d.Name(), ".yaml") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		rel, _ := filepath.Rel(wfDir, path)
+		if err != nil {
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimCoverageDebt),
+				Surface:   string(SurfaceWorkflows),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   fmt.Sprintf("unreadable file: %v", err),
+			})
+			return nil
+		}
+		if isGeneratedArtifact(path, data) {
+			return nil
+		}
+		ev.FilesCount++
+		ev.CodeLines += countNonEmptyLines(data)
+		ev.HasCode = true
+
+		content := string(data)
+		if !strings.Contains(content, "timeout-minutes:") {
+			hasUnboundedTimeout = true
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimBlastRadius),
+				Surface:   string(SurfaceWorkflows),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   "unbounded CI job timeout: workflow job missing timeout-minutes",
+			})
+		}
+		return nil
+	})
+
+	if ev.HasCode {
+		if !hasUnboundedTimeout {
+			ev.Integrated = true
+			ev.HasTests = true
+			ev.Dogfooded = true
+			ev.TestFilesCount = ev.FilesCount
+		} else {
+			ev.ModularityDeficit = true
+		}
+	}
+
+	return ev, findings
+}
+
+func inspectExampleEvidence(exDir, unitOfWork, laneName string) (Evidence, []FindingProvenance) {
+	var ev Evidence
+	var findings []FindingProvenance
+	hasStubs := false
+
+	_ = filepath.WalkDir(exDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			rel, _ := filepath.Rel(exDir, path)
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimCoverageDebt),
+				Surface:   string(SurfaceExamples),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   fmt.Sprintf("unreadable file: %v", walkErr),
+			})
+			return nil
+		}
+		if d.IsDir() {
+			if path != exDir && shouldSkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		rel, _ := filepath.Rel(exDir, path)
+		if err != nil {
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimCoverageDebt),
+				Surface:   string(SurfaceExamples),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   fmt.Sprintf("unreadable file: %v", err),
+			})
+			return nil
+		}
+		if isGeneratedArtifact(path, data) {
+			return nil
+		}
+		ev.FilesCount++
+		ev.CodeLines += countNonEmptyLines(data)
+		ev.HasCode = true
+
+		content := string(data)
+		if strings.Contains(content, "TODO") || strings.Contains(content, "panic(\"not implemented\")") {
+			hasStubs = true
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimStubDebt),
+				Surface:   string(SurfaceExamples),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   "stub debt: unimplemented/TODO marker found in example",
+			})
+		}
+		return nil
+	})
+
+	if ev.HasCode {
+		if !hasStubs && ev.CodeLines >= 20 {
+			ev.Integrated = true
+			ev.HasTests = true
+			ev.Dogfooded = true
+		} else if hasStubs {
+			ev.ModularityDeficit = true
+		}
+	}
+
+	return ev, findings
+}
+
+func inspectDocEvidence(docsDir, unitOfWork, laneName string) (Evidence, []FindingProvenance) {
+	var ev Evidence
+	var findings []FindingProvenance
+	hasStubs := false
+
+	_ = filepath.WalkDir(docsDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			rel, _ := filepath.Rel(docsDir, path)
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimCoverageDebt),
+				Surface:   string(SurfaceDocs),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   fmt.Sprintf("unreadable file: %v", walkErr),
+			})
+			return nil
+		}
+		if d.IsDir() {
+			if path != docsDir && shouldSkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		rel, _ := filepath.Rel(docsDir, path)
+		if err != nil {
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimCoverageDebt),
+				Surface:   string(SurfaceDocs),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   fmt.Sprintf("unreadable file: %v", err),
+			})
+			return nil
+		}
+		if isGeneratedArtifact(path, data) {
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".md") && !strings.HasSuffix(d.Name(), ".rst") && !strings.HasSuffix(d.Name(), ".txt") {
+			return nil
+		}
+		ev.FilesCount++
+		ev.CodeLines += countNonEmptyLines(data)
+		ev.HasCode = true
+
+		content := strings.TrimSpace(string(data))
+		lines := strings.Split(content, "\n")
+		if len(lines) < 10 && (strings.Contains(content, "TODO") || strings.Contains(content, "stub")) {
+			hasStubs = true
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimStubDebt),
+				Surface:   string(SurfaceDocs),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   "stub doc: documentation file is an unfinished placeholder stub",
+			})
+		}
+		return nil
+	})
+
+	if ev.HasCode {
+		ev.Documented = true
+		if !hasStubs {
+			ev.Integrated = true
+			ev.HasTests = true
+			ev.Dogfooded = true
+		} else {
+			ev.ModularityDeficit = true
+		}
+	}
+
+	return ev, findings
+}
+
+func inspectUnsupportedRootEvidence(dir, unitOfWork, laneName string) (Evidence, []FindingProvenance) {
+	var ev Evidence
+	var findings []FindingProvenance
+
+	surface := classifySurface(unitOfWork)
+
+	findings = append(findings, FindingProvenance{
+		Dimension: string(DimCoverageDebt),
+		Surface:   string(surface),
+		Lane:      laneName,
+		Path:      unitOfWork,
+		Severity:  "warning",
+		Message:   fmt.Sprintf("unsupported surface root: directory %s is not a recognized repository surface", unitOfWork),
+	})
+
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			rel, _ := filepath.Rel(dir, path)
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimCoverageDebt),
+				Surface:   string(surface),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   fmt.Sprintf("unreadable file: %v", walkErr),
+			})
+			return nil
+		}
+		if d.IsDir() {
+			if path != dir && shouldSkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		rel, _ := filepath.Rel(dir, path)
+		if err != nil {
+			findings = append(findings, FindingProvenance{
+				Dimension: string(DimCoverageDebt),
+				Surface:   string(surface),
+				Lane:      laneName,
+				Path:      filepath.Join(unitOfWork, rel),
+				Severity:  "warning",
+				Message:   fmt.Sprintf("unreadable file: %v", err),
+			})
+			return nil
+		}
+		if isGeneratedArtifact(path, data) {
+			return nil
+		}
+		ev.FilesCount++
+		ev.CodeLines += countNonEmptyLines(data)
+		ev.HasCode = true
+		return nil
+	})
+
+	return ev, findings
+}
+
+func isStandardSurfaceRoot(name string) bool {
+	return name == "internal" || name == "pkg" || name == "platform" || name == "cmd" ||
+		name == "tools" || name == ".claude" || name == ".agents" || name == ".github" ||
+		name == "examples" || name == "docs"
+}
+
+func discoverExpandedSurfaces(root string) ([]DebtLane, []FindingProvenance) {
 	var extra []DebtLane
+	var allFindings []FindingProvenance
 
 	// 1. cmd/
 	cmdDir := filepath.Join(root, "cmd")
 	if entries, err := os.ReadDir(cmdDir); err == nil {
 		for _, e := range entries {
-			if !e.IsDir() {
+			if !e.IsDir() || shouldSkipDir(e.Name()) {
 				continue
 			}
 			unitPath := filepath.Join("cmd", e.Name())
 			absDir := filepath.Join(cmdDir, e.Name())
 			if dirContainsGoFiles(absDir) {
-				ev := inspectUnitEvidence(absDir, e.Name(), nil, nil, nil, nil)
+				ev, findings := inspectCmdEvidence(absDir, unitPath, "cmd_"+e.Name())
+				allFindings = append(allFindings, findings...)
 				score, rung := EvaluateMaturityCurve(ev)
 				bounds := DefaultBoundsAndLimits(CriticalityEnabling)
 				lane := DebtLane{
@@ -1537,16 +2297,10 @@ func discoverExpandedSurfaces(root string) []DebtLane {
 
 	// 2. tools/
 	toolsDir := filepath.Join(root, "tools")
-	if entries, err := os.ReadDir(toolsDir); err == nil {
-		hasTools := false
-		for _, e := range entries {
-			if strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), ".py") {
-				hasTools = true
-				break
-			}
-		}
-		if hasTools {
-			ev := inspectUnitEvidence(toolsDir, "tools", nil, nil, nil, nil)
+	if info, err := os.Stat(toolsDir); err == nil && info.IsDir() {
+		ev, findings := inspectToolEvidence(toolsDir, "tools", "tools")
+		if ev.HasCode || len(findings) > 0 {
+			allFindings = append(allFindings, findings...)
 			score, rung := EvaluateMaturityCurve(ev)
 			bounds := DefaultBoundsAndLimits(CriticalityStewardship)
 			lane := DebtLane{
@@ -1568,92 +2322,348 @@ func discoverExpandedSurfaces(root string) []DebtLane {
 	}
 
 	// 3. skills/ (.claude/skills and .agents/skills)
-	skillsDir := filepath.Join(root, ".claude", "skills")
-	if entries, err := os.ReadDir(skillsDir); err == nil {
+	seenSkills := make(map[string]bool)
+	for _, skillsRel := range []string{filepath.Join(".claude", "skills"), filepath.Join(".agents", "skills")} {
+		skillsDir := filepath.Join(root, skillsRel)
+		entries, err := os.ReadDir(skillsDir)
+		if err != nil {
+			continue
+		}
 		for _, e := range entries {
-			if !e.IsDir() {
+			if !e.IsDir() || shouldSkipDir(e.Name()) {
 				continue
 			}
-			skillMd := filepath.Join(skillsDir, e.Name(), "SKILL.md")
-			if info, err := os.Stat(skillMd); err == nil && !info.IsDir() {
-				bounds := DefaultBoundsAndLimits(CriticalityStewardship)
-				lane := DebtLane{
-					Lane:           "skill_" + e.Name(),
-					UnitOfWork:     filepath.Join(".claude", "skills", e.Name()),
-					Criticality:    CriticalityStewardship,
-					Weight:         1.0,
-					Maturity:       8.0,
-					MaturityRung:   "hardened",
-					TargetMaturity: bounds.TargetCeiling,
-					Bounds:         bounds,
-				}
-				lane.MaturityGap = math.Max(0, lane.TargetMaturity-lane.Maturity)
-				lane.DebtPrincipal, lane.CarryingCost, lane.TotalDebt = CalculateDebt(lane.Maturity, lane.TargetMaturity, lane.Weight, lane.Interest, lane.Bounds)
-				lane.Health = EvaluateLaneHealth(lane)
-				extra = append(extra, lane)
+			skillDir := filepath.Join(skillsDir, e.Name())
+			unitPath := filepath.Join(skillsRel, e.Name())
+			laneName := "skill_" + e.Name()
+			if seenSkills[laneName] {
+				laneName = "skill_" + strings.ReplaceAll(skillsRel, string(filepath.Separator), "_") + "_" + e.Name()
 			}
+			seenSkills[laneName] = true
+
+			ev, findings := inspectSkillEvidence(skillDir, unitPath, laneName)
+			allFindings = append(allFindings, findings...)
+			score, rung := EvaluateMaturityCurve(ev)
+			bounds := DefaultBoundsAndLimits(CriticalityStewardship)
+			lane := DebtLane{
+				Lane:           laneName,
+				UnitOfWork:     unitPath,
+				Criticality:    CriticalityStewardship,
+				Weight:         1.5,
+				Maturity:       score,
+				MaturityRung:   rung,
+				TargetMaturity: bounds.TargetCeiling,
+				Evidence:       ev,
+				Bounds:         bounds,
+			}
+			lane.MaturityGap = math.Max(0, lane.TargetMaturity-lane.Maturity)
+			lane.DebtPrincipal, lane.CarryingCost, lane.TotalDebt = CalculateDebt(lane.Maturity, lane.TargetMaturity, lane.Weight, lane.Interest, lane.Bounds)
+			lane.Health = EvaluateLaneHealth(lane)
+			extra = append(extra, lane)
 		}
 	}
 
 	// 4. workflows/ (.github/workflows)
 	wfDir := filepath.Join(root, ".github", "workflows")
-	if entries, err := os.ReadDir(wfDir); err == nil && len(entries) > 0 {
-		bounds := DefaultBoundsAndLimits(CriticalityStewardship)
-		lane := DebtLane{
-			Lane:           "workflows",
-			UnitOfWork:     filepath.Join(".github", "workflows"),
-			Criticality:    CriticalityStewardship,
-			Weight:         1.5,
-			Maturity:       8.0,
-			MaturityRung:   "hardened",
-			TargetMaturity: bounds.TargetCeiling,
-			Bounds:         bounds,
+	if info, err := os.Stat(wfDir); err == nil && info.IsDir() {
+		ev, findings := inspectWorkflowEvidence(wfDir, filepath.Join(".github", "workflows"), "workflows")
+		if ev.HasCode || len(findings) > 0 {
+			allFindings = append(allFindings, findings...)
+			score, rung := EvaluateMaturityCurve(ev)
+			bounds := DefaultBoundsAndLimits(CriticalityStewardship)
+			lane := DebtLane{
+				Lane:           "workflows",
+				UnitOfWork:     filepath.Join(".github", "workflows"),
+				Criticality:    CriticalityStewardship,
+				Weight:         1.5,
+				Maturity:       score,
+				MaturityRung:   rung,
+				TargetMaturity: bounds.TargetCeiling,
+				Evidence:       ev,
+				Bounds:         bounds,
+			}
+			lane.MaturityGap = math.Max(0, lane.TargetMaturity-lane.Maturity)
+			lane.DebtPrincipal, lane.CarryingCost, lane.TotalDebt = CalculateDebt(lane.Maturity, lane.TargetMaturity, lane.Weight, lane.Interest, lane.Bounds)
+			lane.Health = EvaluateLaneHealth(lane)
+			extra = append(extra, lane)
 		}
-		lane.MaturityGap = math.Max(0, lane.TargetMaturity-lane.Maturity)
-		lane.DebtPrincipal, lane.CarryingCost, lane.TotalDebt = CalculateDebt(lane.Maturity, lane.TargetMaturity, lane.Weight, lane.Interest, lane.Bounds)
-		lane.Health = EvaluateLaneHealth(lane)
-		extra = append(extra, lane)
 	}
 
 	// 5. examples/
 	exDir := filepath.Join(root, "examples")
-	if entries, err := os.ReadDir(exDir); err == nil && len(entries) > 0 {
-		bounds := DefaultBoundsAndLimits(CriticalityPeripheral)
-		lane := DebtLane{
-			Lane:           "examples",
-			UnitOfWork:     "examples",
-			Criticality:    CriticalityPeripheral,
-			Weight:         1.0,
-			Maturity:       4.0,
-			MaturityRung:   "prototyped",
-			TargetMaturity: bounds.TargetCeiling,
-			Bounds:         bounds,
+	if info, err := os.Stat(exDir); err == nil && info.IsDir() {
+		ev, findings := inspectExampleEvidence(exDir, "examples", "examples")
+		if ev.HasCode || len(findings) > 0 {
+			allFindings = append(allFindings, findings...)
+			score, rung := EvaluateMaturityCurve(ev)
+			bounds := DefaultBoundsAndLimits(CriticalityPeripheral)
+			lane := DebtLane{
+				Lane:           "examples",
+				UnitOfWork:     "examples",
+				Criticality:    CriticalityPeripheral,
+				Weight:         1.0,
+				Maturity:       score,
+				MaturityRung:   rung,
+				TargetMaturity: bounds.TargetCeiling,
+				Evidence:       ev,
+				Bounds:         bounds,
+			}
+			lane.MaturityGap = math.Max(0, lane.TargetMaturity-lane.Maturity)
+			lane.DebtPrincipal, lane.CarryingCost, lane.TotalDebt = CalculateDebt(lane.Maturity, lane.TargetMaturity, lane.Weight, lane.Interest, lane.Bounds)
+			lane.Health = EvaluateLaneHealth(lane)
+			extra = append(extra, lane)
 		}
-		lane.MaturityGap = math.Max(0, lane.TargetMaturity-lane.Maturity)
-		lane.DebtPrincipal, lane.CarryingCost, lane.TotalDebt = CalculateDebt(lane.Maturity, lane.TargetMaturity, lane.Weight, lane.Interest, lane.Bounds)
-		lane.Health = EvaluateLaneHealth(lane)
-		extra = append(extra, lane)
 	}
 
 	// 6. docs/
 	docsDir := filepath.Join(root, "docs")
-	if entries, err := os.ReadDir(docsDir); err == nil && len(entries) > 0 {
-		bounds := DefaultBoundsAndLimits(CriticalityStewardship)
-		lane := DebtLane{
-			Lane:           "docs",
-			UnitOfWork:     "docs",
-			Criticality:    CriticalityStewardship,
-			Weight:         1.0,
-			Maturity:       7.0,
-			MaturityRung:   "documented",
-			TargetMaturity: bounds.TargetCeiling,
-			Bounds:         bounds,
+	if info, err := os.Stat(docsDir); err == nil && info.IsDir() {
+		ev, findings := inspectDocEvidence(docsDir, "docs", "docs")
+		if ev.HasCode || len(findings) > 0 {
+			allFindings = append(allFindings, findings...)
+			score, rung := EvaluateMaturityCurve(ev)
+			bounds := DefaultBoundsAndLimits(CriticalityStewardship)
+			lane := DebtLane{
+				Lane:           "docs",
+				UnitOfWork:     "docs",
+				Criticality:    CriticalityStewardship,
+				Weight:         1.5,
+				Maturity:       score,
+				MaturityRung:   rung,
+				TargetMaturity: bounds.TargetCeiling,
+				Evidence:       ev,
+				Bounds:         bounds,
+			}
+			lane.MaturityGap = math.Max(0, lane.TargetMaturity-lane.Maturity)
+			lane.DebtPrincipal, lane.CarryingCost, lane.TotalDebt = CalculateDebt(lane.Maturity, lane.TargetMaturity, lane.Weight, lane.Interest, lane.Bounds)
+			lane.Health = EvaluateLaneHealth(lane)
+			extra = append(extra, lane)
 		}
-		lane.MaturityGap = math.Max(0, lane.TargetMaturity-lane.Maturity)
-		lane.DebtPrincipal, lane.CarryingCost, lane.TotalDebt = CalculateDebt(lane.Maturity, lane.TargetMaturity, lane.Weight, lane.Interest, lane.Bounds)
-		lane.Health = EvaluateLaneHealth(lane)
-		extra = append(extra, lane)
 	}
 
-	return extra
+	// 7. Unsupported roots
+	if entries, err := os.ReadDir(root); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() || shouldSkipDir(e.Name()) {
+				continue
+			}
+			name := e.Name()
+			if isStandardSurfaceRoot(name) {
+				continue
+			}
+			// Unsupported root found
+			unitPath := name
+			absDir := filepath.Join(root, name)
+			ev, findings := inspectUnsupportedRootEvidence(absDir, unitPath, name)
+			allFindings = append(allFindings, findings...)
+			bounds := DefaultBoundsAndLimits(CriticalityStewardship)
+			lane := DebtLane{
+				Lane:           name,
+				UnitOfWork:     unitPath,
+				Criticality:    CriticalityStewardship,
+				Weight:         1.5,
+				Maturity:       0.0,
+				MaturityRung:   "stub",
+				TargetMaturity: bounds.TargetCeiling,
+				Evidence:       ev,
+				Bounds:         bounds,
+			}
+			lane.MaturityGap = math.Max(0, lane.TargetMaturity-lane.Maturity)
+			lane.DebtPrincipal, lane.CarryingCost, lane.TotalDebt = CalculateDebt(lane.Maturity, lane.TargetMaturity, lane.Weight, lane.Interest, lane.Bounds)
+			lane.Health = EvaluateLaneHealth(lane)
+			extra = append(extra, lane)
+		}
+	}
+
+	return extra, allFindings
+}
+
+// AuditPerformanceProof evaluates whether a performance lane has fresh, fak-native, workload-bound,
+// and quality-constrained performance proof evidence. Returns typed findings.
+func AuditPerformanceProof(lane *DebtLane) []FindingProvenance {
+	if lane == nil {
+		return nil
+	}
+	// Non-performance lanes stay clean regardless of proof presence.
+	if !lane.IsPerformanceLane() {
+		return nil
+	}
+
+	surface := string(classifySurface(lane.UnitOfWork))
+	proof := lane.PerformanceProof
+	if proof == nil && lane.Evidence.PerformanceProof != nil {
+		proof = lane.Evidence.PerformanceProof
+	}
+
+	makeFinding := func(reason, msg string) FindingProvenance {
+		lane.PerfProofReason = reason
+		lane.Evidence.PerfProofReason = reason
+		return FindingProvenance{
+			Dimension: string(DimStalePerfProof),
+			Surface:   surface,
+			Lane:      lane.Lane,
+			Path:      lane.UnitOfWork,
+			Severity:  "critical",
+			Message:   fmt.Sprintf("stale performance proof [%s]: %s", reason, msg),
+		}
+	}
+
+	// 1. Missing performance proof
+	if proof == nil {
+		hist := lane.HistoricalProofs
+		if len(hist) == 0 && len(lane.Evidence.HistoricalProofs) > 0 {
+			hist = lane.Evidence.HistoricalProofs
+		}
+		if len(hist) > 0 {
+			for _, h := range hist {
+				scopeDesc := h.IncompatibleScope
+				if scopeDesc == "" {
+					scopeDesc = "historical"
+				}
+				return []FindingProvenance{makeFinding(ReasonIncompatibleScope,
+					fmt.Sprintf("historical evidence preserved under explicit incompatible scope %q; current native performance proof required", scopeDesc))}
+			}
+		}
+
+		if lane.CurrentRevision != "" || lane.RequiredWorkload != "" || lane.RequiredQuality != "" ||
+			(lane.Evidence.Integrated && !lane.Evidence.Benchmarked && !lane.Evidence.Dogfooded) {
+			return []FindingProvenance{makeFinding(ReasonMissingPerfProof,
+				"performance-critical unit lacks a workload- and quality-bound performance authority record")}
+		}
+		return nil
+	}
+
+	// 2. Historical evidence with explicit incompatible scope: preserve, but flag as incompatible
+	if proof.IncompatibleScope != "" || proof.IsHistorical {
+		alreadyPreserved := false
+		for _, h := range lane.HistoricalProofs {
+			if h.Revision == proof.Revision && h.Artifact == proof.Artifact {
+				alreadyPreserved = true
+				break
+			}
+		}
+		if !alreadyPreserved {
+			lane.HistoricalProofs = append(lane.HistoricalProofs, *proof)
+			lane.Evidence.HistoricalProofs = append(lane.Evidence.HistoricalProofs, *proof)
+		}
+		scopeDesc := proof.IncompatibleScope
+		if scopeDesc == "" {
+			scopeDesc = "historical"
+		}
+		return []FindingProvenance{makeFinding(ReasonIncompatibleScope,
+			fmt.Sprintf("historical evidence preserved under explicit incompatible scope %q; current native performance proof required", scopeDesc))}
+	}
+
+	// 3. Engine check: must be fak-native, NOT reference engine (e.g. llama.cpp)
+	eng := strings.ToLower(strings.TrimSpace(proof.Engine))
+	if eng == "" || isReferenceEngine(eng) {
+		engName := proof.Engine
+		if engName == "" {
+			engName = "unspecified"
+		}
+		return []FindingProvenance{makeFinding(ReasonReferenceEngine,
+			fmt.Sprintf("reference engine %q cannot satisfy native performance proof; fak-native execution required", engName))}
+	}
+
+	// 4. Revision check: must match current revision
+	currentRev := strings.TrimSpace(lane.CurrentRevision)
+	proofRev := strings.TrimSpace(proof.Revision)
+	if currentRev != "" {
+		if proofRev == "" {
+			return []FindingProvenance{makeFinding(ReasonMismatchedRevision,
+				fmt.Sprintf("authority record missing revision; current code revision is %s", currentRev))}
+		}
+		if !revisionsMatch(proofRev, currentRev) {
+			return []FindingProvenance{makeFinding(ReasonMismatchedRevision,
+				fmt.Sprintf("authority revision %s does not match current code revision %s", proofRev, currentRev))}
+		}
+	} else if proofRev == "" {
+		return []FindingProvenance{makeFinding(ReasonMismatchedRevision,
+			"authority record missing source revision binding")}
+	}
+
+	// 5. Workload check: must be bound and non-empty
+	workload := strings.TrimSpace(proof.Workload)
+	if workload == "" {
+		return []FindingProvenance{makeFinding(ReasonMismatchedWorkload,
+			"authority record lacks bound workload specification")}
+	}
+	reqWorkload := strings.TrimSpace(lane.RequiredWorkload)
+	if reqWorkload != "" && !workloadsMatch(workload, reqWorkload) {
+		return []FindingProvenance{makeFinding(ReasonMismatchedWorkload,
+			fmt.Sprintf("measured workload %q does not match required workload %q", workload, reqWorkload))}
+	}
+
+	// 6. Quality envelope check: must be bound and non-empty
+	quality := strings.TrimSpace(proof.QualityEnvelope)
+	if quality == "" {
+		return []FindingProvenance{makeFinding(ReasonMismatchedQualityEnvelope,
+			"authority record lacks bound quality envelope specification")}
+	}
+	reqQuality := strings.TrimSpace(lane.RequiredQuality)
+	if reqQuality != "" && !qualitiesMatch(quality, reqQuality) {
+		return []FindingProvenance{makeFinding(ReasonMismatchedQualityEnvelope,
+			fmt.Sprintf("measured quality envelope %q does not match required quality %q", quality, reqQuality))}
+	}
+
+	// Clean!
+	lane.PerfProofReason = ""
+	lane.Evidence.PerfProofReason = ""
+	return nil
+}
+
+func isReferenceEngine(eng string) bool {
+	lower := strings.ToLower(strings.TrimSpace(eng))
+	if lower == "llama.cpp" || lower == "llamacpp" || lower == "reference" ||
+		lower == "vllm" || lower == "mlx" || lower == "external" || lower == "ollama" {
+		return true
+	}
+	if strings.Contains(lower, "fak") || lower == "native" || lower == "in-kernel" || lower == "inkernel" {
+		return false
+	}
+	return true
+}
+
+func revisionsMatch(proofRev, currentRev string) bool {
+	p := strings.ToLower(strings.TrimSpace(proofRev))
+	c := strings.ToLower(strings.TrimSpace(currentRev))
+	if p == c {
+		return true
+	}
+	if len(p) >= 7 && strings.HasPrefix(c, p) {
+		return true
+	}
+	if len(c) >= 7 && strings.HasPrefix(p, c) {
+		return true
+	}
+	if strings.Contains(p, "+g") && strings.Contains(c, "+g") {
+		pParts := strings.Split(p, "+g")
+		cParts := strings.Split(c, "+g")
+		if len(pParts) == 2 && len(cParts) == 2 {
+			pSha := pParts[1]
+			cSha := cParts[1]
+			if (len(pSha) >= 7 && strings.HasPrefix(cSha, pSha)) || (len(cSha) >= 7 && strings.HasPrefix(pSha, cSha)) {
+				return pParts[0] == cParts[0]
+			}
+		}
+	}
+	return false
+}
+
+func workloadsMatch(measured, required string) bool {
+	m := strings.ToLower(strings.TrimSpace(measured))
+	r := strings.ToLower(strings.TrimSpace(required))
+	if m == r {
+		return true
+	}
+	return strings.Contains(m, r) || strings.Contains(r, m)
+}
+
+func qualitiesMatch(measured, required string) bool {
+	m := strings.ToLower(strings.TrimSpace(measured))
+	r := strings.ToLower(strings.TrimSpace(required))
+	if m == r {
+		return true
+	}
+	return strings.Contains(m, r) || strings.Contains(r, m)
 }

@@ -1903,3 +1903,380 @@ func TestHighCouplingAndQueryMatch(t *testing.T) {
 	}
 }
 
+func TestPerformanceProofFreshness_CleanFixture(t *testing.T) {
+	// A clean fixture with a current-revision, fak-native, workload- and quality-bound authority record emits no finding.
+	currentRev := "internal/modelengine@r10+g33144e097"
+	lane := DebtLane{
+		Lane:             "modelengine",
+		UnitOfWork:       "internal/modelengine",
+		Criticality:      CriticalityCore,
+		CurrentRevision:  currentRev,
+		RequiredWorkload: "T=50 A=5 P=2048",
+		RequiredQuality:  "Q8_0,lossless",
+		Evidence: Evidence{
+			HasCode:         true,
+			HasTests:        true,
+			Integrated:      true,
+			Dogfooded:       true,
+			Benchmarked:     true,
+			CurrentRevision: currentRev,
+		},
+		PerformanceProof: &PerformanceProof{
+			Lane:            "modelengine",
+			Revision:        currentRev,
+			Engine:          "fak-native",
+			Workload:        "T=50 A=5 P=2048",
+			QualityEnvelope: "Q8_0,lossless",
+			Artifact:        "experiments/modelengine/native-continuous-batching-20260629.json",
+		},
+	}
+
+	report, err := Scan(Options{
+		Facts:         []DebtLane{lane},
+		DeepDetectors: true,
+	})
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+
+	// Verify no stale_perf_proof finding emitted
+	if report.Coverage != nil {
+		for _, f := range report.Coverage.Findings {
+			if f.Dimension == string(DimStalePerfProof) {
+				t.Fatalf("clean fixture must emit no stale_perf_proof finding, got: %+v", f)
+			}
+		}
+	}
+}
+
+func TestPerformanceProofFreshness_SeededMismatchedRevision(t *testing.T) {
+	// Seeded fixture with mismatched revision emits typed stale_perf_proof reason
+	currentRev := "internal/modelengine@r10+g33144e097"
+	staleRev := "internal/modelengine@r5+g1111111"
+	lane := DebtLane{
+		Lane:             "modelengine",
+		UnitOfWork:       "internal/modelengine",
+		Criticality:      CriticalityCore,
+		CurrentRevision:  currentRev,
+		RequiredWorkload: "T=50 A=5 P=2048",
+		RequiredQuality:  "Q8_0,lossless",
+		Evidence: Evidence{
+			HasCode:         true,
+			HasTests:        true,
+			Integrated:      true,
+			Dogfooded:       true,
+			Benchmarked:     true,
+			CurrentRevision: currentRev,
+		},
+		PerformanceProof: &PerformanceProof{
+			Lane:            "modelengine",
+			Revision:        staleRev,
+			Engine:          "fak-native",
+			Workload:        "T=50 A=5 P=2048",
+			QualityEnvelope: "Q8_0,lossless",
+		},
+	}
+
+	report, err := Scan(Options{
+		Facts:         []DebtLane{lane},
+		DeepDetectors: true,
+	})
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+
+	found := false
+	if report.Coverage != nil {
+		for _, f := range report.Coverage.Findings {
+			if f.Dimension == string(DimStalePerfProof) {
+				found = true
+				if !strings.Contains(f.Message, ReasonMismatchedRevision) {
+					t.Errorf("expected finding message to contain %q, got: %s", ReasonMismatchedRevision, f.Message)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected typed stale_perf_proof finding for mismatched revision")
+	}
+}
+
+func TestPerformanceProofFreshness_SeededMismatchedWorkload(t *testing.T) {
+	// Seeded fixture with mismatched workload emits typed stale_perf_proof reason
+	currentRev := "internal/modelengine@r10+g33144e097"
+	lane := DebtLane{
+		Lane:             "modelengine",
+		UnitOfWork:       "internal/modelengine",
+		Criticality:      CriticalityCore,
+		CurrentRevision:  currentRev,
+		RequiredWorkload: "T=50 A=5 P=2048",
+		RequiredQuality:  "Q8_0,lossless",
+		Evidence: Evidence{
+			HasCode:         true,
+			HasTests:        true,
+			Integrated:      true,
+			Dogfooded:       true,
+			Benchmarked:     true,
+			CurrentRevision: currentRev,
+		},
+		PerformanceProof: &PerformanceProof{
+			Lane:            "modelengine",
+			Revision:        currentRev,
+			Engine:          "fak-native",
+			Workload:        "synthetic-micro-batch1", // mismatched workload!
+			QualityEnvelope: "Q8_0,lossless",
+		},
+	}
+
+	report, err := Scan(Options{
+		Facts:         []DebtLane{lane},
+		DeepDetectors: true,
+	})
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+
+	found := false
+	if report.Coverage != nil {
+		for _, f := range report.Coverage.Findings {
+			if f.Dimension == string(DimStalePerfProof) {
+				found = true
+				if !strings.Contains(f.Message, ReasonMismatchedWorkload) {
+					t.Errorf("expected finding message to contain %q, got: %s", ReasonMismatchedWorkload, f.Message)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected typed stale_perf_proof finding for mismatched workload")
+	}
+}
+
+func TestPerformanceProofFreshness_SeededMismatchedQualityEnvelope(t *testing.T) {
+	// Seeded fixture with mismatched quality envelope emits typed stale_perf_proof reason
+	currentRev := "internal/modelengine@r10+g33144e097"
+	lane := DebtLane{
+		Lane:             "modelengine",
+		UnitOfWork:       "internal/modelengine",
+		Criticality:      CriticalityCore,
+		CurrentRevision:  currentRev,
+		RequiredWorkload: "T=50 A=5 P=2048",
+		RequiredQuality:  "Q8_0,lossless",
+		Evidence: Evidence{
+			HasCode:         true,
+			HasTests:        true,
+			Integrated:      true,
+			Dogfooded:       true,
+			Benchmarked:     true,
+			CurrentRevision: currentRev,
+		},
+		PerformanceProof: &PerformanceProof{
+			Lane:            "modelengine",
+			Revision:        currentRev,
+			Engine:          "fak-native",
+			Workload:        "T=50 A=5 P=2048",
+			QualityEnvelope: "lossy-unconstrained", // mismatched quality envelope!
+		},
+	}
+
+	report, err := Scan(Options{
+		Facts:         []DebtLane{lane},
+		DeepDetectors: true,
+	})
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+
+	found := false
+	if report.Coverage != nil {
+		for _, f := range report.Coverage.Findings {
+			if f.Dimension == string(DimStalePerfProof) {
+				found = true
+				if !strings.Contains(f.Message, ReasonMismatchedQualityEnvelope) {
+					t.Errorf("expected finding message to contain %q, got: %s", ReasonMismatchedQualityEnvelope, f.Message)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected typed stale_perf_proof finding for mismatched quality envelope")
+	}
+}
+
+func TestPerformanceProofFreshness_SeededReferenceEngine(t *testing.T) {
+	// Seeded fixture with reference engine emits typed stale_perf_proof reason
+	currentRev := "internal/modelengine@r10+g33144e097"
+	lane := DebtLane{
+		Lane:             "modelengine",
+		UnitOfWork:       "internal/modelengine",
+		Criticality:      CriticalityCore,
+		CurrentRevision:  currentRev,
+		RequiredWorkload: "T=50 A=5 P=2048",
+		RequiredQuality:  "Q8_0,lossless",
+		Evidence: Evidence{
+			HasCode:         true,
+			HasTests:        true,
+			Integrated:      true,
+			Dogfooded:       true,
+			Benchmarked:     true,
+			CurrentRevision: currentRev,
+		},
+		PerformanceProof: &PerformanceProof{
+			Lane:            "modelengine",
+			Revision:        currentRev,
+			Engine:          "llama.cpp", // reference engine!
+			Workload:        "T=50 A=5 P=2048",
+			QualityEnvelope: "Q8_0,lossless",
+		},
+	}
+
+	report, err := Scan(Options{
+		Facts:         []DebtLane{lane},
+		DeepDetectors: true,
+	})
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+
+	found := false
+	if report.Coverage != nil {
+		for _, f := range report.Coverage.Findings {
+			if f.Dimension == string(DimStalePerfProof) {
+				found = true
+				if !strings.Contains(f.Message, ReasonReferenceEngine) {
+					t.Errorf("expected finding message to contain %q, got: %s", ReasonReferenceEngine, f.Message)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected typed stale_perf_proof finding for reference engine")
+	}
+}
+
+func TestPerformanceProofFreshness_NonPerformanceLaneStaysClean(t *testing.T) {
+	// Non-performance lanes stay clean even without authority records or with mismatched data
+	lanes := []DebtLane{
+		{
+			Lane:        "tools_steward",
+			UnitOfWork:  "tools/steward",
+			Criticality: CriticalityStewardship,
+			Evidence: Evidence{
+				HasCode:     true,
+				HasTests:    true,
+				Integrated:  true,
+				Benchmarked: false,
+				Dogfooded:   false,
+			},
+		},
+		{
+			Lane:        "visual_demo",
+			UnitOfWork:  "visuals/demo",
+			Criticality: CriticalityPeripheral,
+			Evidence: Evidence{
+				HasCode:     true,
+				HasTests:    true,
+				Integrated:  true,
+				Benchmarked: false,
+				Dogfooded:   false,
+			},
+		},
+		{
+			Lane:           "explicit_nonperf",
+			UnitOfWork:     "internal/nonperf",
+			Criticality:    CriticalityCore,
+			NonPerformance: true,
+			Evidence: Evidence{
+				HasCode:     true,
+				HasTests:    true,
+				Integrated:  true,
+				Benchmarked: false,
+				Dogfooded:   false,
+			},
+		},
+	}
+
+	report, err := Scan(Options{
+		Facts:         lanes,
+		DeepDetectors: true,
+	})
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+
+	if report.Coverage != nil {
+		for _, f := range report.Coverage.Findings {
+			if f.Dimension == string(DimStalePerfProof) {
+				t.Fatalf("non-performance lanes must emit no stale_perf_proof finding, got: %+v", f)
+			}
+		}
+	}
+}
+
+func TestPerformanceProofFreshness_HistoricalEvidencePreserved(t *testing.T) {
+	// Preserve historical evidence with explicit incompatible scope rather than deleting it
+	currentRev := "internal/modelengine@r10+g33144e097"
+	historicalProof := PerformanceProof{
+		Lane:              "modelengine",
+		Revision:          "internal/modelengine@r1+g0000000",
+		Engine:            "fak-native",
+		Workload:          "Qwen3.6-27B",
+		QualityEnvelope:   "q4_k_m",
+		IncompatibleScope: "qwen3.6-historical",
+	}
+
+	lane := DebtLane{
+		Lane:             "modelengine",
+		UnitOfWork:       "internal/modelengine",
+		Criticality:      CriticalityCore,
+		CurrentRevision:  currentRev,
+		RequiredWorkload: "T=50 A=5 P=2048",
+		RequiredQuality:  "Q8_0,lossless",
+		HistoricalProofs: []PerformanceProof{historicalProof},
+		Evidence: Evidence{
+			HasCode:          true,
+			HasTests:         true,
+			Integrated:       true,
+			Dogfooded:        true,
+			Benchmarked:      true,
+			CurrentRevision:  currentRev,
+			HistoricalProofs: []PerformanceProof{historicalProof},
+		},
+	}
+
+	report, err := Scan(Options{
+		Facts:         []DebtLane{lane},
+		DeepDetectors: true,
+	})
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+
+	// 1. Verify historical evidence is preserved in report lanes
+	if len(report.Lanes) != 1 {
+		t.Fatalf("expected 1 lane in report, got %d", len(report.Lanes))
+	}
+	if len(report.Lanes[0].HistoricalProofs) != 1 {
+		t.Fatalf("expected 1 preserved historical proof, got %d", len(report.Lanes[0].HistoricalProofs))
+	}
+	if report.Lanes[0].HistoricalProofs[0].IncompatibleScope != "qwen3.6-historical" {
+		t.Errorf("historical proof incompatible scope not preserved: %+v", report.Lanes[0].HistoricalProofs[0])
+	}
+
+	// 2. Verify typed stale_perf_proof finding is emitted for current scope
+	found := false
+	if report.Coverage != nil {
+		for _, f := range report.Coverage.Findings {
+			if f.Dimension == string(DimStalePerfProof) {
+				found = true
+				if !strings.Contains(f.Message, ReasonIncompatibleScope) {
+					t.Errorf("expected finding message to contain %q, got: %s", ReasonIncompatibleScope, f.Message)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected typed stale_perf_proof finding for historical incompatible scope")
+	}
+}
+
