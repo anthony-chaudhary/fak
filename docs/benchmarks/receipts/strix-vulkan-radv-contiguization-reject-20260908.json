@@ -1,0 +1,72 @@
+{
+  "schema": "fak.strix.vulkan-radv-contiguization-rejection/v1",
+  "observed_at": "2026-09-08",
+  "issue": "https://github.com/anthony-chaudhary/fak/issues/12053",
+  "decision": "REJECT",
+  "reason": "The in-device FP32 KV transpose preserved output bits but increased complete attention latency at every measured context depth.",
+  "source": {
+    "repository": "https://github.com/anthony-chaudhary/fak",
+    "candidate_commit": "a79492f763cc324d62e464d29b9d0b771c1bfca5",
+    "vectorized_kernel_commit": "348517e9f77ba5b9340ffae8b4a0f3e53b611d97",
+    "test": "TestVulkanAttention_RADVContiguization"
+  },
+  "hardware": {
+    "device": "integrated:AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+    "engine": "fak-native/vulkan",
+    "device_observed": true,
+    "lease": "/tmp/fak-gpu.lease acquired read-only with flock",
+    "icd": "/usr/share/vulkan/icd.d/radeon_icd.x86_64.json"
+  },
+  "geometry": {
+    "model_proxy": "Qwen3.8/Qwen3.5-27B full-attention geometry",
+    "n_query_heads": 24,
+    "n_kv_heads": 4,
+    "head_dim": 256,
+    "source_layout": "f32[position,kv_head,head_dim]",
+    "candidate_layout": "f32[kv_head,position,head_dim]"
+  },
+  "controls": {
+    "samples_per_arm": 11,
+    "arm_order": "interleaved",
+    "candidate_warmup": true,
+    "transpose": "vec4 bit-preserving in-device compute dispatch",
+    "host_round_trips": 0,
+    "model_loaded_by_witness": false,
+    "production_service_restarted": false
+  },
+  "measurements": [
+    {
+      "n_pos": 32768,
+      "source_commit": "38727b5193737e3ff2309e1031773a16dd01d2c7",
+      "baseline_median_ns": 37432666,
+      "candidate_median_ns": 39110829,
+      "candidate_over_baseline": 1.0448315116000555,
+      "latency_delta_percent": 4.48315116000555,
+      "bit_exact": true,
+      "dispatch_calls": 11
+    },
+    {
+      "n_pos": 65536,
+      "source_commit": "a79492f763cc324d62e464d29b9d0b771c1bfca5",
+      "baseline_median_ns": 81723167,
+      "candidate_median_ns": 83367960,
+      "candidate_over_baseline": 1.0201263981852293,
+      "latency_delta_percent": 2.01263981852293,
+      "bit_exact": true,
+      "dispatch_calls": 11
+    },
+    {
+      "n_pos": 131072,
+      "source_commit": "a79492f763cc324d62e464d29b9d0b771c1bfca5",
+      "baseline_median_ns": 168212024,
+      "candidate_median_ns": 176756915,
+      "candidate_over_baseline": 1.0507983365089288,
+      "latency_delta_percent": 5.07983365089288,
+      "bit_exact": true,
+      "dispatch_calls": 11
+    }
+  ],
+  "service_before": "MODEL: Qwen3.8-27B-Q4_K_M | STAT: ONLINE | OUT: 0.59 t/s",
+  "service_after": "MODEL: Qwen3.8-27B-Q4_K_M | STAT: ONLINE | OUT: 0.59 t/s",
+  "conclusion": "Do not merge or default-enable pre-attention whole-cache contiguization. A future candidate must avoid the full-cache copy, for example by changing the native KV layout or fusing access reordering into attention, and must beat this same-device control."
+}
