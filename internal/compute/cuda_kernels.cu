@@ -2385,7 +2385,9 @@ __global__ void k_spec_verify_attention(
     }
     __syncthreads();
 
-    float m_stat = -1e30f;
+    // A finite sentinel is incorrect for valid scores below that sentinel: the
+    // first online-softmax update would retain an empty normalization state.
+    float m_stat = -INFINITY;
     float l_stat = 0.f;
     float acc[FLASH_ACC_MAX];
 #pragma unroll
@@ -2465,7 +2467,7 @@ __global__ void k_spec_verify_combine(
     __syncthreads();
 
     if (tid == 0) {
-      float g_max = -1e30f;
+      float g_max = -INFINITY;
       for (int s = 0; s < NUM_SEGMENTS; s++) {
         if (s_sum[s] > 0.f && s_max[s] > g_max) {
           g_max = s_max[s];

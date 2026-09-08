@@ -282,6 +282,8 @@ func TestSpecVerifyAttentionCUDASourceContract(t *testing.T) {
 		"#define BLOCK_M SPEC_VERIFY_BLOCK_M",
 		"#define NUM_SEGMENTS SPEC_VERIFY_NUM_SEGMENTS",
 		"fcuda_spec_verify_attention_f32",
+		"float m_stat = -INFINITY;",
+		"float g_max = -INFINITY;",
 	} {
 		if !strings.Contains(cuSrc, symbol) {
 			t.Errorf("cuda_kernels.cu missing required symbol %q", symbol)

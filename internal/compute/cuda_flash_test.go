@@ -183,6 +183,10 @@ func TestCUDASpecVerifyAttentionMatchesRef(t *testing.T) {
 				t.Fatalf("cb.SpecVerifyAttention failed: %v", err)
 			}
 			oCu := cb.Read(outCu)
+			cb.Free(outCu)
+			cb.Free(vCu)
+			cb.Free(kCu)
+			cb.Free(qCu)
 
 			cos := cosine(oRef, oCu)
 			if cos < 0.999 {
@@ -191,5 +195,57 @@ func TestCUDASpecVerifyAttentionMatchesRef(t *testing.T) {
 			t.Logf("#11100 spec verify parity [qLen=%d %s nH=%d nHkv=%d d=%d kvLen=%d]: cosine=%.8f maxDelta=%.2e",
 				qLen, c.name, c.nH, c.nHkv, c.d, c.kvLen, cos, maxAbsDelta(oRef, oCu))
 		}
+	}
+}
+
+// TestCUDASpecVerifyAttentionExtremeNegativeScores guards the online-softmax
+// empty-state sentinel. Finite scores below -1e30 must still admit the first
+// key; a finite sentinel makes every segment look empty and returns all zeros.
+func TestCUDASpecVerifyAttentionExtremeNegativeScores(t *testing.T) {
+	cb := cudaOrSkip(t)
+	ref := Default()
+	const qLen, kvLen, nH, nHkv, d = 4, 8, 4, 1, 64
+
+	qData := make([]float32, qLen*nH*d)
+	kData := make([]float32, kvLen*nHkv*d)
+	vData := make([]float32, kvLen*nHkv*d)
+	for i := range qData {
+		qData[i] = -1e15
+	}
+	for i := range kData {
+		kData[i] = 1e15
+	}
+	for i := range vData {
+		vData[i] = float32(i%13-6) * 0.03125
+	}
+
+	qRef := NewF32(ref, []int{qLen, nH, d}, qData)
+	kRef := NewF32(ref, []int{kvLen, nHkv, d}, kData)
+	vRef := NewF32(ref, []int{kvLen, nHkv, d}, vData)
+	var outRef Tensor
+	if err := ref.(SpecVerifyAttentionBackend).SpecVerifyAttention(
+		&qRef, &kRef, &vRef, &outRef, qLen, kvLen, nH, nHkv, d); err != nil {
+		t.Fatalf("ref.SpecVerifyAttention failed: %v", err)
+	}
+
+	qCu := cb.Upload(qRef, F32)
+	kCu := cb.Upload(kRef, F32)
+	vCu := cb.Upload(vRef, F32)
+	var outCu Tensor
+	if err := cb.SpecVerifyAttention(&qCu, &kCu, &vCu, &outCu, qLen, kvLen, nH, nHkv, d); err != nil {
+		t.Fatalf("cb.SpecVerifyAttention failed: %v", err)
+	}
+	got := cb.Read(outCu)
+	cb.Free(outCu)
+	cb.Free(vCu)
+	cb.Free(kCu)
+	cb.Free(qCu)
+	want := ref.Read(outRef)
+
+	if cos := cosine(want, got); cos < 0.99999 {
+		t.Fatalf("extreme-negative cosine %.8f < 0.99999 (max delta %.3g)", cos, maxAbsDelta(want, got))
+	}
+	if delta := maxAbsDelta(want, got); delta > 1e-5 {
+		t.Fatalf("extreme-negative max delta %.3g > 1e-5", delta)
 	}
 }
