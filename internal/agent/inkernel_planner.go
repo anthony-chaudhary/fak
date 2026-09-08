@@ -172,6 +172,42 @@ type InKernelPlanner struct {
 	// — both over-count the denominator, which can only UNDER-state the filtered ratio,
 	// never inflate it (the same honest-conservative direction as cacheobs's clamps).
 	kvPrefixEverAdmitted atomic.Bool
+
+	// mtpSpeculative gates native MTP depth K=4 speculative verification loop.
+	mtpSpeculative        bool
+	mtpDraftFunc          func(prefix []int) []int
+	mtpFallbackTriggered  atomic.Bool
+	mtpProposedTokens     atomic.Int64
+	mtpAcceptedTokens     atomic.Int64
+	mtpFallbackWindowSize int
+}
+
+// EnableMTPSpeculative configures speculative decoding with MTP depth K=4.
+func (p *InKernelPlanner) EnableMTPSpeculative(enable bool) {
+	p.mtpSpeculative = enable
+}
+
+// MTPSpeculativeEnabled reports whether MTP speculative decoding is active.
+func (p *InKernelPlanner) MTPSpeculativeEnabled() bool {
+	return p != nil && p.mtpSpeculative
+}
+
+// SetMTPDrafter installs an optional candidate proposal function for speculative drafting.
+func (p *InKernelPlanner) SetMTPDrafter(drafter func(prefix []int) []int) {
+	p.mtpDraftFunc = drafter
+}
+
+// MTPFallbackTriggered reports whether the <50% acceptance fallback tripwire has fired.
+func (p *InKernelPlanner) MTPFallbackTriggered() bool {
+	return p != nil && p.mtpFallbackTriggered.Load()
+}
+
+// MTPStats returns total proposed and accepted draft tokens during speculative decode.
+func (p *InKernelPlanner) MTPStats() (proposed, accepted int64) {
+	if p == nil {
+		return 0, 0
+	}
+	return p.mtpProposedTokens.Load(), p.mtpAcceptedTokens.Load()
 }
 
 type inKernelOOMRetryClassStats struct {

@@ -37,6 +37,7 @@ type InKernelPlannerConfig struct {
 	CompactHistoryBudget      int
 	ElideStaleReads           bool
 	DeferColdTools            bool
+	MTPSpeculative            bool
 }
 
 // NewInKernelPlannerWithConfig is the explicit configuration constructor for native planning.
@@ -62,6 +63,13 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		compactHistoryBudget:         cfg.CompactHistoryBudget,
 		elideStaleReads:              cfg.ElideStaleReads,
 		deferColdTools:               cfg.DeferColdTools,
+		mtpSpeculative:               cfg.MTPSpeculative,
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_INKERNEL_MTP"))) {
+	case "on", "1", "true", "yes":
+		p.mtpSpeculative = true
+	case "off", "0", "false", "no":
+		p.mtpSpeculative = false
 	}
 	if backend == nil && metal {
 		m.PrepareMetalResidency(q4k)
@@ -131,6 +139,7 @@ func (p *InKernelPlanner) RuntimeConfig() InKernelPlannerConfig {
 		CompactHistoryBudget:      p.compactHistoryBudget,
 		ElideStaleReads:           p.elideStaleReads,
 		DeferColdTools:            p.deferColdTools,
+		MTPSpeculative:            p.mtpSpeculative,
 	}
 }
 

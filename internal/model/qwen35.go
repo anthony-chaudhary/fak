@@ -672,46 +672,7 @@ func ForwardSpeculativeMTP(ctx context.Context, s *Session, drafts [4]int) (acce
 	if s == nil || s.M == nil {
 		return 0, nil, errors.New("model: nil session or model in ForwardSpeculativeMTP")
 	}
-
-	// 1. Generate 2D causal verification tree mask for K=4 draft proposals
-	treeMask := compute.MTPK4CausalVerificationTreeMask()
-
-	if s.Cache == nil {
-		s.Cache = NewKVCache(s.M.Cfg)
-	}
-	basePos := s.Cache.Len()
-
-	// 2. Perform verification steps for the draft tokens
-	var targetTokens []int
-	for i := 0; i < 4; i++ {
-		if !compute.IsCausalVerificationMaskAllowed(i, i) {
-			return 0, nil, errors.New("model: causal tree mask violation")
-		}
-		logits := s.Step(drafts[i])
-		predToken := argmaxF32(logits)
-		targetTokens = append(targetTokens, predToken)
-	}
-
-	// 3. Evaluate sequential draft acceptance and determine rollback
-	evalRes := compute.EvaluateDraftAcceptance(drafts[:], targetTokens)
-	accepted = evalRes.AcceptedCount
-	nextTokens = evalRes.NextTokens
-
-	// 4. Update KV cache pointer tables via Context MMU:
-	// If R < 4 tokens were accepted, roll back the (4 - R) unaccepted speculative branches
-	// via O(1) pointer adjustment without memory copying.
-	if accepted < 4 {
-		rollbackCount := 4 - accepted
-		s.RollbackSpeculative(rollbackCount)
-	}
-
-	// Invariant: s.Cache.Len() must equal basePos + accepted
-	if s.Cache.Len() != basePos+accepted {
-		s.Cache.Truncate(basePos + accepted)
-	}
-
-	_ = treeMask
-	return accepted, nextTokens, nil
+	return s.Qwen35MTPDepth4CausalTreeVerify(ctx, drafts)
 }
 
 // ForwardSpeculativeMTP is also exposed as a method on Model.
@@ -904,4 +865,3 @@ func ValidatePLEPrefillThroughput(tokPerSec float64) error {
 	}
 	return nil
 }
-

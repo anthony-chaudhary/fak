@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"math/rand"
 	"os"
@@ -336,6 +337,8 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		// Opt-in: drive this one request through the shared continuous-batch step. For B==1
 		// StepBatchActive is exactly Seqs[0].Step, so the served tokens are unchanged.
 		inKernelDecodeLanesBatched(ctx, []*decodeLane{ln}, p.m, p.quant)
+	} else if p.mtpSpeculative {
+		inKernelDecodeSpeculativeMTP(ctx, ln, p)
 	} else {
 		inKernelDecodeSerial(ctx, ln)
 	}
@@ -816,4 +819,238 @@ func envFloat(key string, def float64) float64 {
 		}
 	}
 	return def
+}
+
+type mtpRollingWindow struct {
+	history []bool
+	size    int
+}
+
+func newMTPRollingWindow(size int) *mtpRollingWindow {
+	if size <= 0 {
+		size = 32
+	}
+	return &mtpRollingWindow{
+		history: make([]bool, 0, size),
+		size:    size,
+	}
+}
+
+func (w *mtpRollingWindow) record(accepted, proposed int) {
+	for i := 0; i < proposed; i++ {
+		isAcc := i < accepted
+		if len(w.history) >= w.size {
+			w.history = w.history[1:]
+		}
+		w.history = append(w.history, isAcc)
+	}
+}
+
+func (w *mtpRollingWindow) acceptanceRate() (rate float64, full bool) {
+	if len(w.history) < w.size {
+		return 1.0, false
+	}
+	acc := 0
+	for _, b := range w.history {
+		if b {
+			acc++
+		}
+	}
+	return float64(acc) / float64(w.size), true
+}
+
+// inKernelDecodeSpeculativeMTP executes native MTP depth K=4 speculative verification decode.
+// It manages candidate drafting, parallel causal tree forward verification, greedy temperature-zero
+// tripwires, and rolling 32-token window fallback.
+func inKernelDecodeSpeculativeMTP(ctx context.Context, ln *decodeLane, p *InKernelPlanner) {
+	if ln == nil || ln.s == nil || ln.s.M == nil {
+		inKernelDecodeSerial(ctx, ln)
+		return
+	}
+
+	// Tripwire 1 (Requirement 3): enforce greedy temperature-zero tripwires during speculative
+	// verification passes: temperature=0.0, repeat_penalty=1.0 (zero frequency and presence penalty).
+	savedTemp := ln.temp
+	savedTopP := ln.topP
+	savedTopK := ln.topK
+	savedFreqPenalty := ln.freqPenalty
+	savedPresPenalty := ln.presPenalty
+
+	ln.temp = 0.0
+	ln.topP = 0.0
+	ln.topK = 0
+	ln.freqPenalty = 0.0
+	ln.presPenalty = 0.0
+	defer func() {
+		ln.temp = savedTemp
+		ln.topP = savedTopP
+		ln.topK = savedTopK
+		ln.freqPenalty = savedFreqPenalty
+		ln.presPenalty = savedPresPenalty
+	}()
+
+	windowSize := 32
+	if p != nil && p.mtpFallbackWindowSize > 0 {
+		windowSize = p.mtpFallbackWindowSize
+	}
+	window := newMTPRollingWindow(windowSize)
+
+	var draftSession *model.Qwen35MTPDraftSession
+	if p != nil && p.mtpDraftFunc == nil && ln.s.M.Cfg.HasMTPHead() {
+		ds, err := model.NewQwen35MTPDraftSession(ln.s, 4)
+		if err == nil {
+			draftSession = ds
+			defer draftSession.Close()
+		}
+	}
+
+	for ln.gen < ln.maxNew {
+		laneCtx := ctx
+		if ln.ctx != nil {
+			laneCtx = ln.ctx
+		}
+		if err := laneCtx.Err(); err != nil {
+			ln.err, ln.done = err, true
+			return
+		}
+
+		// Propose K=4 draft candidate tokens
+		var drafts [4]int
+		if p != nil && p.mtpDraftFunc != nil {
+			cands := p.mtpDraftFunc(nil)
+			for i := 0; i < 4; i++ {
+				if i < len(cands) {
+					drafts[i] = cands[i]
+				} else if i > 0 {
+					drafts[i] = (drafts[i-1] + 1) % len(ln.logits)
+				} else {
+					drafts[i] = sampleLogitsWithPenalty(ln.logits, 0.0, 0.0, 0, nil, 0.0, 0.0, nil, ln.rng)
+				}
+			}
+		} else if draftSession != nil {
+			baseToken := sampleLogitsWithPenalty(ln.logits, 0.0, 0.0, 0, nil, 0.0, 0.0, nil, ln.rng)
+			cands := draftSession.Propose([]int{baseToken})
+			for i := 0; i < 4; i++ {
+				if i < len(cands) {
+					drafts[i] = cands[i]
+				} else if i > 0 {
+					drafts[i] = (drafts[i-1] + 1) % len(ln.logits)
+				} else {
+					drafts[i] = baseToken
+				}
+			}
+		} else {
+			first := sampleLogitsWithPenalty(ln.logits, 0.0, 0.0, 0, nil, 0.0, 0.0, nil, ln.rng)
+			drafts[0] = first
+			for i := 1; i < 4; i++ {
+				drafts[i] = (drafts[i-1] + 1) % len(ln.logits)
+			}
+		}
+
+		// Set current step logits on session for target verification
+		ln.s.SetLastLogits(ln.logits)
+
+		// Parallel causal tree verification in single pass via qwen35_hal.go
+		res, err := ln.s.Qwen35MTPDepth4CausalTreeVerifyResult(laneCtx, drafts)
+		if err != nil {
+			if laneCtx.Err() != nil {
+				ln.err, ln.done = laneCtx.Err(), true
+				return
+			}
+			// Fall back to serial decode for remaining generation
+			ln.temp = savedTemp
+			ln.topP = savedTopP
+			ln.topK = savedTopK
+			ln.freqPenalty = savedFreqPenalty
+			ln.presPenalty = savedPresPenalty
+			inKernelDecodeSerial(ctx, ln)
+			return
+		}
+		accepted := res.AcceptedCount
+		nextTokens := res.NextTokens
+
+		// Update rolling acceptance stats
+		window.record(accepted, 4)
+		if p != nil {
+			p.mtpProposedTokens.Add(4)
+			p.mtpAcceptedTokens.Add(int64(accepted))
+		}
+
+		// Assemble verified tokens
+		var toEmit []int
+		for i := 0; i < accepted; i++ {
+			toEmit = append(toEmit, drafts[i])
+		}
+		var finalCorrectionToken int = -1
+		if accepted < 4 && len(nextTokens) > accepted {
+			finalCorrectionToken = nextTokens[accepted]
+			toEmit = append(toEmit, finalCorrectionToken)
+		} else if accepted == 4 && len(nextTokens) > 4 {
+			finalCorrectionToken = nextTokens[4]
+			toEmit = append(toEmit, finalCorrectionToken)
+		}
+
+		// Emit verified tokens
+		for _, tok := range toEmit {
+			if tok < 0 || ln.stops[tok] {
+				ln.stopped, ln.done = true, true
+				return
+			}
+			if err := ln.measurement.record(ln.logits, tok); err != nil {
+				ln.err, ln.done = err, true
+				return
+			}
+			if ln.counts != nil && tok < len(ln.counts) {
+				ln.counts[tok]++
+			}
+			emitStopped := ln.emit != nil && ln.emit(tok)
+			ln.gen++
+			if err := ln.measurement.recordDecodeTrace(ln.gen, tok); err != nil {
+				ln.err, ln.done = err, true
+				return
+			}
+			if emitStopped {
+				ln.stopped, ln.done = true, true
+				return
+			}
+			if ln.emit != nil {
+				if err := laneCtx.Err(); err != nil {
+					ln.err, ln.done = err, true
+					return
+				}
+			}
+			if ln.gen >= ln.maxNew {
+				ln.done = true
+				return
+			}
+		}
+
+		// Advance state/logits for next round:
+		// If finalCorrectionToken >= 0 was emitted, step it into cache to produce updated logits.
+		// If all 4 were accepted, use res.Logits if non-empty.
+		if finalCorrectionToken >= 0 {
+			ln.logits = ln.s.Step(finalCorrectionToken)
+			ln.s.SetLastLogits(ln.logits)
+		} else if accepted == 4 && len(res.Logits) > 0 {
+			ln.logits = res.Logits
+			ln.s.SetLastLogits(ln.logits)
+		}
+
+		// Tripwire 2 (Requirement 4): if draft acceptance drops below 50% over rolling 32-token window,
+		// immediately fall back to unassisted serial decode without stalling the session.
+		if rate, full := window.acceptanceRate(); full && rate < 0.50 {
+			if p != nil {
+				p.mtpFallbackTriggered.Store(true)
+			}
+			log.Printf("inkernel_planner: mtp draft acceptance %.1f%% below 50%% tripwire over 32 tokens; falling back to unassisted serial decode", rate*100)
+			// Restore sampling parameters before fallback
+			ln.temp = savedTemp
+			ln.topP = savedTopP
+			ln.topK = savedTopK
+			ln.freqPenalty = savedFreqPenalty
+			ln.presPenalty = savedPresPenalty
+			inKernelDecodeSerial(ctx, ln)
+			return
+		}
+	}
 }

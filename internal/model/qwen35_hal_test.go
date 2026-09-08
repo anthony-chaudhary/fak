@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"math"
 	"testing"
@@ -487,5 +488,106 @@ func TestQwen35HALQKNormMissingResidentPathFailsClosed(t *testing.T) {
 	if recordedClassSite(be.recordingQwen35Backend, compute.MemoryActivation, "qwen35-full-attn-norm-q") ||
 		recordedClassSite(be.recordingQwen35Backend, compute.MemoryActivation, "qwen35-full-attn-norm-k") {
 		t.Fatal("typed resident refusal must not re-upload Q/K activations")
+	}
+}
+
+// TestQwen35MTPDepth4SpeculativeLoop witnesses native MTP depth K=4 causal tree verification
+// evaluating 4 candidate tokens in parallel during a single base-model weight read pass.
+func TestQwen35MTPDepth4SpeculativeLoop(t *testing.T) {
+	cfg := qwen35HybridTestCfg()
+	m := NewSynthetic(cfg)
+	ctx := context.Background()
+
+	prompt := []int{5, 12, 19, 26}
+	s := m.NewSession()
+	_ = s.Prefill(prompt)
+	basePos := s.Cache.Len()
+
+	// 1. Execute speculative verification pass with K=4 draft proposals
+	drafts := [4]int{31, 37, 41, 43}
+	res, err := s.Qwen35MTPDepth4CausalTreeVerifyResult(ctx, drafts)
+	if err != nil {
+		t.Fatalf("Qwen35MTPDepth4CausalTreeVerifyResult failed: %v", err)
+	}
+
+	// 2. Validate K=4 and single-pass execution contract
+	if res.DraftDepthK != 4 {
+		t.Errorf("DraftDepthK = %d, want 4", res.DraftDepthK)
+	}
+	if !res.SinglePass {
+		t.Errorf("SinglePass = false, want true (single weight read pass)")
+	}
+
+	// 3. Validate packed 4x4 causal verification tree mask in LDS
+	canonicalMask := compute.MTPK4CausalVerificationTreeMask()
+	for i := 0; i < 4; i++ {
+		for j := 0; j < 4; j++ {
+			if res.TreeMask[i][j] != canonicalMask[i][j] {
+				t.Fatalf("TreeMask[%d][%d] = %f, want %f", i, j, res.TreeMask[i][j], canonicalMask[i][j])
+			}
+			if j <= i && res.TreeMask[i][j] != 1.0 {
+				t.Errorf("causal connection masked at (%d, %d)", i, j)
+			}
+			if j > i && res.TreeMask[i][j] != 0.0 {
+				t.Errorf("non-causal connection unmasked at (%d, %d)", i, j)
+			}
+		}
+	}
+
+	// 4. Validate Strix Halo single-pass weight reuse and 40 CU occupancy
+	if !res.Audit.CausalTreeMaskApplied {
+		t.Errorf("Audit.CausalTreeMaskApplied = false, want true")
+	}
+	if res.Audit.ComputeUnitsEngaged != compute.StrixHaloComputeUnits {
+		t.Errorf("Audit.ComputeUnitsEngaged = %d, want %d", res.Audit.ComputeUnitsEngaged, compute.StrixHaloComputeUnits)
+	}
+	if res.Audit.WeightReuseRatio < 1.0 {
+		t.Errorf("Audit.WeightReuseRatio = %f, want >= 1.0", res.Audit.WeightReuseRatio)
+	}
+
+	// 5. Validate atomic rollback and KV cache invariant: Len == basePos + accepted
+	if s.Cache.Len() != basePos+res.AcceptedCount {
+		t.Errorf("s.Cache.Len() = %d, want basePos (%d) + accepted (%d) = %d",
+			s.Cache.Len(), basePos, res.AcceptedCount, basePos+res.AcceptedCount)
+	}
+	if res.RollbackCount != 4-res.AcceptedCount {
+		t.Errorf("RollbackCount = %d, want %d", res.RollbackCount, 4-res.AcceptedCount)
+	}
+
+	// 6. Validate sustained throughput scaling on >= 80% draft acceptance
+	if res.AcceptanceRate >= 0.80 && res.ThroughputTokS < 34.8 {
+		t.Errorf("throughput = %f tok/s, want >= 34.8 tok/s at >= 80%% acceptance", res.ThroughputTokS)
+	}
+
+	// 7. Verify helper Qwen35MTPDepth4CausalTreeVerify returns matched counts
+	s2 := m.NewSession()
+	_ = s2.Prefill(prompt)
+	acc2, next2, err2 := s2.Qwen35MTPDepth4CausalTreeVerify(ctx, drafts)
+	if err2 != nil {
+		t.Fatalf("s2.Qwen35MTPDepth4CausalTreeVerify failed: %v", err2)
+	}
+	if acc2 != res.AcceptedCount || len(next2) != len(res.NextTokens) {
+		t.Errorf("helper mismatch: acc2=%d want %d, len(next2)=%d want %d",
+			acc2, res.AcceptedCount, len(next2), len(res.NextTokens))
+	}
+
+	// 8. Verify Model method wrapper
+	s3 := m.NewSession()
+	_ = s3.Prefill(prompt)
+	acc3, next3, err3 := m.Qwen35MTPDepth4CausalTreeVerify(ctx, s3, drafts)
+	if err3 != nil {
+		t.Fatalf("m.Qwen35MTPDepth4CausalTreeVerify failed: %v", err3)
+	}
+	if acc3 != res.AcceptedCount || len(next3) != len(res.NextTokens) {
+		t.Errorf("model wrapper mismatch: acc3=%d want %d, len(next3)=%d want %d",
+			acc3, res.AcceptedCount, len(next3), len(res.NextTokens))
+	}
+
+	// 9. Verify context cancellation fail-closed
+	cancCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, errCanc := s.Qwen35MTPDepth4CausalTreeVerifyResult(cancCtx, drafts)
+	if errCanc == nil {
+		t.Errorf("expected error on cancelled context, got nil")
 	}
 }
