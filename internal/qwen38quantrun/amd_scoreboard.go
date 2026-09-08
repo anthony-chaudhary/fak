@@ -54,10 +54,12 @@ type AMDArmReceipt struct {
 	DeterministicTokens bool                 `json:"deterministic_tokens,omitempty"`
 	SelectedTokenLogits bool                 `json:"selected_token_logits,omitempty"`
 	TokenizerDigest     string               `json:"tokenizer_digest,omitempty"`
+	TemplateDigest      string               `json:"template_digest,omitempty"`
 	PromptPacketDigest  string               `json:"prompt_packet_digest,omitempty"`
 	StopTokens          []string             `json:"stop_tokens,omitempty"`
 	StopTokenIDs        []int                `json:"stop_token_ids,omitempty"`
 	TopP                float64              `json:"top_p,omitempty"`
+	TopK                int                  `json:"top_k,omitempty"`
 	PromptPacket        *PromptTokenPacket   `json:"prompt_packet,omitempty"`
 	Trials              []AMDScoreboardTrial `json:"trials"`
 }
@@ -185,17 +187,7 @@ func validateAMDScoreboard(in AMDScoreboardInput) []string {
 	if in.Candidate.ArtifactSHA256 != in.Reference.ArtifactSHA256 {
 		add("artifact-mismatch")
 	}
-	if in.Candidate.TokenizerDigest != in.Reference.TokenizerDigest {
-		add("tokenizer-digest-mismatch")
-	}
-	if in.Candidate.PromptPacketDigest != in.Reference.PromptPacketDigest {
-		add("prompt-packet-mismatch")
-	}
-	if in.Candidate.PromptPacket != nil && in.Reference.PromptPacket != nil {
-		if err := ValidatePromptPacketAttestation(*in.Candidate.PromptPacket, *in.Reference.PromptPacket); err != nil {
-			add("prompt-packet-mismatch")
-		}
-	} else if (in.Candidate.PromptPacket != nil) != (in.Reference.PromptPacket != nil) {
+	if err := ValidateArmPromptPacketAttestation(in.Candidate, in.Reference); err != nil {
 		add("prompt-packet-mismatch")
 	}
 	if in.Candidate.PromptSHA256 != in.Reference.PromptSHA256 || !slices.Equal(in.Candidate.PromptTokenIDs, in.Reference.PromptTokenIDs) {
@@ -203,6 +195,9 @@ func validateAMDScoreboard(in AMDScoreboardInput) []string {
 	}
 	if in.Candidate.TokenizerDigest != in.Reference.TokenizerDigest {
 		add("tokenizer-digest-mismatch")
+	}
+	if in.Candidate.TemplateDigest != in.Reference.TemplateDigest {
+		add("template-digest-mismatch")
 	}
 	if in.Candidate.PromptPacketDigest != in.Reference.PromptPacketDigest {
 		add("prompt-packet-digest-mismatch")
@@ -225,18 +220,11 @@ func validateAMDScoreboard(in AMDScoreboardInput) []string {
 	if in.Candidate.GPUMemoryBudget != in.Reference.GPUMemoryBudget || in.Candidate.HostSpillPolicy != in.Reference.HostSpillPolicy {
 		add("memory-placement-envelope-mismatch")
 	}
-	if in.Candidate.Temperature != in.Reference.Temperature || in.Candidate.PrefillTokens != in.Reference.PrefillTokens || in.Candidate.DecodeTokens != in.Reference.DecodeTokens || in.Candidate.TopP != in.Reference.TopP {
+	if in.Candidate.Temperature != in.Reference.Temperature || in.Candidate.PrefillTokens != in.Reference.PrefillTokens || in.Candidate.DecodeTokens != in.Reference.DecodeTokens || in.Candidate.TopP != in.Reference.TopP || in.Candidate.TopK != in.Reference.TopK {
 		add("generation-envelope-mismatch")
 	}
 	if !slices.Equal(in.Candidate.StopTokens, in.Reference.StopTokens) || !slices.Equal(in.Candidate.StopTokenIDs, in.Reference.StopTokenIDs) {
 		add("stop-tokens-mismatch")
-	}
-	if in.Candidate.PromptPacket != nil || in.Reference.PromptPacket != nil {
-		if in.Candidate.PromptPacket == nil || in.Reference.PromptPacket == nil {
-			add("prompt-packet-mismatch")
-		} else if err := ValidatePromptPacketAttestation(*in.Candidate.PromptPacket, *in.Reference.PromptPacket); err != nil {
-			add("prompt-packet-mismatch")
-		}
 	}
 	if in.Candidate.Hardware != in.Reference.Hardware {
 		add("hardware-mismatch")
@@ -279,10 +267,14 @@ func validateAMDArm(arm AMDArmReceipt, role string, add func(string)) {
 	if !validOracleSHA256(arm.ArtifactSHA256) || !validOracleSHA256(arm.PromptSHA256) || len(arm.PromptTokenIDs) == 0 {
 		add(prefix + "artifact-or-prompt-incomplete")
 	}
-	if arm.PromptPacket != nil {
-		if err := VerifyPromptPacket(*arm.PromptPacket); err != nil {
-			add(prefix + "prompt-packet-invalid")
-		}
+	if arm.TokenizerDigest == "" || arm.TemplateDigest == "" || arm.PromptPacketDigest == "" || arm.PromptPacket == nil {
+		add(prefix + "prompt-attestation-incomplete")
+	} else if err := VerifyPromptPacket(*arm.PromptPacket); err != nil {
+		add(prefix + "prompt-packet-invalid")
+	} else if arm.PromptPacket.Schema != PromptTokenPacketSchema {
+		add(prefix + "prompt-packet-historical")
+	} else if err := validateArmPromptPacketBinding(role, arm); err != nil {
+		add(prefix + "prompt-packet-identity-mismatch")
 	}
 	if arm.ContextTokens <= 0 || arm.ContextBudgetBytes == 0 || arm.KVTypeK == "" || arm.KVTypeV == "" || arm.KVOffload == "" || arm.GPUMemoryBudget == 0 || arm.HostSpillPolicy == "" || arm.Temperature != 0 || arm.PrefillTokens <= 0 || arm.DecodeTokens <= 0 {
 		add(prefix + "envelope-incomplete")

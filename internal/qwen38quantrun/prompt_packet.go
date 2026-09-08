@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	PromptTokenPacketSchema = "fak.qwen38.prompt-token-packet.v1"
+	PromptTokenPacketSchema       = "fak.qwen38.prompt-token-packet.v2"
+	promptTokenPacketLegacySchema = "fak.qwen38.prompt-token-packet.v1"
 )
 
 // ContextBudget defines the token and byte capacity constraints for a trial.
@@ -41,6 +42,7 @@ type PromptTokenPacket struct {
 	ArtifactSHA256     string             `json:"artifact_sha256"`
 	TokenizerIdentity  string             `json:"tokenizer_identity,omitempty"`
 	TokenizerDigest    string             `json:"tokenizer_digest"`
+	TemplateDigest     string             `json:"template_digest,omitempty"`
 	PromptTokenIDs     []int              `json:"prompt_token_ids"`
 	StopTokens         []string           `json:"stop_tokens,omitempty"`
 	StopTokenIDs       []int              `json:"stop_token_ids,omitempty"`
@@ -63,14 +65,35 @@ func normalizePacketStopTokens(p *PromptTokenPacket) {
 }
 
 func validatePromptPacketFields(p PromptTokenPacket) error {
-	if p.Schema != PromptTokenPacketSchema {
-		return fmt.Errorf("prompt packet schema %q must be %q", p.Schema, PromptTokenPacketSchema)
+	switch p.Schema {
+	case PromptTokenPacketSchema:
+		if p.PacketID == "" {
+			return errors.New("prompt packet packet_id is required")
+		}
+		if !validOracleSHA256(p.TokenizerDigest) {
+			return fmt.Errorf("prompt packet tokenizer_digest %q is not a valid 64-char hex SHA-256", p.TokenizerDigest)
+		}
+		if !validOracleSHA256(p.TemplateDigest) {
+			return fmt.Errorf("prompt packet template_digest %q is not a valid 64-char hex SHA-256", p.TemplateDigest)
+		}
+	case promptTokenPacketLegacySchema:
+		if p.TemplateDigest != "" {
+			return errors.New("legacy prompt packet must not claim a template_digest")
+		}
+	default:
+		return fmt.Errorf("unsupported prompt packet schema %q", p.Schema)
 	}
 	if !validOracleSHA256(p.ArtifactSHA256) {
 		return fmt.Errorf("prompt packet artifact_sha256 %q is not a valid 64-char hex SHA-256", p.ArtifactSHA256)
 	}
 	if p.TokenizerDigest == "" {
 		return errors.New("prompt packet tokenizer_digest is required")
+	}
+	if len(p.StopTokens) > 0 && len(p.GenerationControls.StopTokens) > 0 && !slices.Equal(p.StopTokens, p.GenerationControls.StopTokens) {
+		return errors.New("prompt packet stop tokens mismatch generation_controls.stop_tokens")
+	}
+	if len(p.StopTokenIDs) > 0 && len(p.GenerationControls.StopTokenIDs) > 0 && !slices.Equal(p.StopTokenIDs, p.GenerationControls.StopTokenIDs) {
+		return errors.New("prompt packet stop token IDs mismatch generation_controls.stop_token_ids")
 	}
 	if len(p.PromptTokenIDs) == 0 {
 		return errors.New("prompt packet prompt_token_ids must not be empty")
@@ -110,6 +133,9 @@ func ComputePromptPacketDigest(p PromptTokenPacket) (string, error) {
 
 // FreezePromptPacket validates packet fields, computes its canonical digest, and returns the sealed packet.
 func FreezePromptPacket(p PromptTokenPacket) (PromptTokenPacket, error) {
+	if p.Schema != PromptTokenPacketSchema {
+		return PromptTokenPacket{}, fmt.Errorf("new prompt packets must use schema %q", PromptTokenPacketSchema)
+	}
 	if err := validatePromptPacketFields(p); err != nil {
 		return PromptTokenPacket{}, err
 	}
@@ -200,11 +226,20 @@ func ValidatePromptPacketAttestation(candidate, reference PromptTokenPacket) err
 	if err := VerifyPromptPacket(reference); err != nil {
 		return fmt.Errorf("reference prompt packet invalid: %w", err)
 	}
+	if candidate.Schema != PromptTokenPacketSchema || reference.Schema != PromptTokenPacketSchema {
+		return fmt.Errorf("historical prompt packet schema is not eligible for comparison credit: candidate=%s reference=%s", candidate.Schema, reference.Schema)
+	}
+	if candidate.PacketID != reference.PacketID {
+		return fmt.Errorf("packet ID mismatch: candidate=%s reference=%s", candidate.PacketID, reference.PacketID)
+	}
 	if candidate.ArtifactSHA256 != reference.ArtifactSHA256 {
 		return fmt.Errorf("artifact SHA-256 mismatch: candidate=%s reference=%s", candidate.ArtifactSHA256, reference.ArtifactSHA256)
 	}
 	if candidate.TokenizerDigest != reference.TokenizerDigest {
 		return fmt.Errorf("tokenizer digest mismatch: candidate=%s reference=%s", candidate.TokenizerDigest, reference.TokenizerDigest)
+	}
+	if candidate.TemplateDigest != reference.TemplateDigest {
+		return fmt.Errorf("template digest mismatch: candidate=%s reference=%s", candidate.TemplateDigest, reference.TemplateDigest)
 	}
 	if !slices.Equal(candidate.PromptTokenIDs, reference.PromptTokenIDs) {
 		return errors.New("prompt token IDs mismatch between candidate and reference")
@@ -233,30 +268,52 @@ func ValidateArmPromptPacketAttestation(candidate, reference AMDArmReceipt) erro
 	if candidate.Engine != "fak-native" || candidate.ComparatorOnly || candidate.FallbackActive {
 		return errors.New("candidate arm must be fak-native with no fallback and not comparator-only")
 	}
-	if candidate.ArtifactSHA256 != reference.ArtifactSHA256 {
-		return fmt.Errorf("artifact SHA-256 mismatch: candidate=%s reference=%s", candidate.ArtifactSHA256, reference.ArtifactSHA256)
+	if candidate.PromptPacket == nil || reference.PromptPacket == nil {
+		return errors.New("both arms must carry a prompt_packet")
 	}
-	if candidate.TokenizerDigest != "" && reference.TokenizerDigest != "" && candidate.TokenizerDigest != reference.TokenizerDigest {
-		return fmt.Errorf("tokenizer digest mismatch: candidate=%s reference=%s", candidate.TokenizerDigest, reference.TokenizerDigest)
+	if err := ValidatePromptPacketAttestation(*candidate.PromptPacket, *reference.PromptPacket); err != nil {
+		return fmt.Errorf("prompt packet attestation failed: %w", err)
 	}
-	if !slices.Equal(candidate.PromptTokenIDs, reference.PromptTokenIDs) {
-		return errors.New("prompt token IDs mismatch between arms")
+	if err := validateArmPromptPacketBinding("candidate", candidate); err != nil {
+		return err
 	}
-	if candidate.PromptPacketDigest != "" && reference.PromptPacketDigest != "" && candidate.PromptPacketDigest != reference.PromptPacketDigest {
-		return fmt.Errorf("prompt packet digest mismatch: candidate=%s reference=%s", candidate.PromptPacketDigest, reference.PromptPacketDigest)
+	if err := validateArmPromptPacketBinding("reference", reference); err != nil {
+		return err
 	}
-	if candidate.ContextTokens != reference.ContextTokens || candidate.ContextBudgetBytes != reference.ContextBudgetBytes {
-		return errors.New("context budget mismatch between arms")
+	return nil
+}
+
+func validateArmPromptPacketBinding(role string, arm AMDArmReceipt) error {
+	if arm.PromptPacket == nil {
+		return fmt.Errorf("%s arm is missing prompt_packet", role)
 	}
-	if candidate.Temperature != reference.Temperature || candidate.TopP != reference.TopP {
-		return errors.New("generation envelope mismatch between arms")
+	p := *arm.PromptPacket
+	if arm.PromptPacketDigest == "" || arm.PromptPacketDigest != p.PacketDigest {
+		return fmt.Errorf("%s arm prompt packet digest does not bind embedded packet: outer=%s embedded=%s", role, arm.PromptPacketDigest, p.PacketDigest)
 	}
-	if candidate.PromptPacket != nil && reference.PromptPacket != nil {
-		if err := ValidatePromptPacketAttestation(*candidate.PromptPacket, *reference.PromptPacket); err != nil {
-			return fmt.Errorf("prompt packet attestation failed: %w", err)
-		}
-	} else if candidate.PromptPacket != nil || reference.PromptPacket != nil {
-		return errors.New("one arm carries prompt_packet but the other does not")
+	if arm.ArtifactSHA256 != p.ArtifactSHA256 {
+		return fmt.Errorf("%s arm artifact SHA-256 does not bind embedded packet", role)
+	}
+	if arm.TokenizerDigest != p.TokenizerDigest {
+		return fmt.Errorf("%s arm tokenizer digest does not bind embedded packet", role)
+	}
+	if arm.TemplateDigest != p.TemplateDigest {
+		return fmt.Errorf("%s arm template digest does not bind embedded packet", role)
+	}
+	if !slices.Equal(arm.PromptTokenIDs, p.PromptTokenIDs) {
+		return fmt.Errorf("%s arm prompt token IDs do not bind embedded packet", role)
+	}
+	if !slices.Equal(arm.StopTokens, p.StopTokens) || !slices.Equal(arm.StopTokenIDs, p.StopTokenIDs) {
+		return fmt.Errorf("%s arm stop tokens do not bind embedded packet", role)
+	}
+	if arm.ContextTokens != p.ContextBudget.ContextTokens || arm.ContextBudgetBytes != p.ContextBudget.ContextBudgetBytes {
+		return fmt.Errorf("%s arm context budget does not bind embedded packet", role)
+	}
+	if arm.Temperature != p.GenerationControls.Temperature || arm.TopP != p.GenerationControls.TopP || arm.TopK != p.GenerationControls.TopK {
+		return fmt.Errorf("%s arm generation controls do not bind embedded packet", role)
+	}
+	if arm.DecodeTokens != p.GenerationControls.MaxOutputTokens {
+		return fmt.Errorf("%s arm decode token limit does not bind embedded packet", role)
 	}
 	return nil
 }
