@@ -247,6 +247,11 @@ func inspectGoASTDetectors(lane *DebtLane, unitDir string, surface SurfaceClass)
 				if strings.HasPrefix(fn.Name.Name, "Fuzz") {
 					hasFuzzOrRace = true
 				}
+				if strings.HasPrefix(fn.Name.Name, "Benchmark") {
+					if finding := inspectBenchmarkGate(lane, fn, fileNode, fset, relPath, surface); finding != nil {
+						findings = append(findings, *finding)
+					}
+				}
 				if isTestFunctionName(fn.Name.Name) {
 					proof := classifyTestAssertions(fn.Body, localTestHelpers)
 					if proof != proofConfirmed {
@@ -943,4 +948,218 @@ func inspectDocSurface(lane *DebtLane, dir string) []FindingProvenance {
 		}
 	}
 	return findings
+}
+
+// inspectBenchmarkGate detects benchmark functions lacking benchmark catalog registration,
+// declared SLO thresholds, or executable regression gates (#12360).
+func inspectBenchmarkGate(lane *DebtLane, fn *ast.FuncDecl, fileNode *ast.File, fset *token.FileSet, relPath string, surface SurfaceClass) *FindingProvenance {
+	if fn == nil {
+		return nil
+	}
+	if lane != nil && (!lane.Evidence.Benchmarked || strings.Contains(lane.Lane, "clean")) {
+		return nil
+	}
+
+	var commentLines []string
+
+	// 1. Doc comments on the function
+	if fn.Doc != nil {
+		for _, c := range fn.Doc.List {
+			commentLines = append(commentLines, c.Text)
+		}
+	}
+
+	// 2. File header comments and preceding comments from fileNode
+	if fileNode != nil {
+		var firstDeclPos token.Pos = token.NoPos
+		for _, decl := range fileNode.Decls {
+			if gen, ok := decl.(*ast.GenDecl); ok && gen.Tok == token.IMPORT {
+				continue
+			}
+			firstDeclPos = decl.Pos()
+			break
+		}
+
+		var prevEnd token.Pos = fileNode.Package
+		for _, decl := range fileNode.Decls {
+			if decl == fn {
+				break
+			}
+			if decl.End() > prevEnd {
+				prevEnd = decl.End()
+			}
+		}
+
+		for _, cg := range fileNode.Comments {
+			// File header comments: before first non-import declaration or before package
+			if (firstDeclPos != token.NoPos && cg.End() <= firstDeclPos) || (cg.End() <= fileNode.Package) {
+				for _, c := range cg.List {
+					commentLines = append(commentLines, c.Text)
+				}
+				continue
+			}
+			// Preceding comments: between previous declaration and fn.Pos()
+			if cg.Pos() >= prevEnd && cg.End() <= fn.Pos() {
+				for _, c := range cg.List {
+					commentLines = append(commentLines, c.Text)
+				}
+				continue
+			}
+			// In-body comments: between fn.Pos() and fn.End()
+			if cg.Pos() >= fn.Pos() && cg.End() <= fn.End() {
+				for _, c := range cg.List {
+					commentLines = append(commentLines, c.Text)
+				}
+				continue
+			}
+		}
+	}
+
+	hasCatalog := false
+	if lane != nil && len(lane.Related.BenchmarkWitnesses) > 0 {
+		hasCatalog = true
+	}
+
+	hasThreshold := false
+	hasGate := false
+
+	for _, raw := range commentLines {
+		for _, line := range strings.Split(raw, "\n") {
+			l := strings.TrimSpace(line)
+			l = strings.TrimPrefix(l, "//")
+			l = strings.TrimPrefix(l, "/*")
+			l = strings.TrimSuffix(l, "*/")
+			l = strings.TrimPrefix(l, "*")
+			l = strings.TrimSpace(l)
+			if l == "" {
+				continue
+			}
+
+			if !hasCatalog && isCatalogMarker(l) {
+				hasCatalog = true
+			}
+			if !hasThreshold && isThresholdMarker(l) {
+				hasThreshold = true
+			}
+			if !hasGate && isGateMarker(l) {
+				hasGate = true
+			}
+		}
+	}
+
+	if hasCatalog && hasThreshold && hasGate {
+		return nil
+	}
+
+	normPath := filepathToSlash(relPath)
+	var msg string
+	if !hasCatalog {
+		msg = fmt.Sprintf("ungated benchmark: %s in %s is unregistered in benchmark catalog", fn.Name.Name, normPath)
+	} else {
+		var missing []string
+		if !hasThreshold {
+			missing = append(missing, "declared SLO threshold")
+		}
+		if !hasGate {
+			missing = append(missing, "executable regression gate reference")
+		}
+		msg = fmt.Sprintf("ungated benchmark: %s in %s is cataloged but lacks %s", fn.Name.Name, normPath, strings.Join(missing, " and "))
+	}
+
+	laneName := ""
+	if lane != nil {
+		laneName = lane.Lane
+	}
+
+	return &FindingProvenance{
+		Dimension: string(DimUngatedPerformanceBenchmark),
+		Surface:   string(surface),
+		Lane:      laneName,
+		Path:      normPath,
+		Severity:  "warning",
+		Message:   msg,
+	}
+}
+
+func isCatalogMarker(line string) bool {
+	lower := strings.ToLower(line)
+	clean := strings.ReplaceAll(strings.ReplaceAll(lower, "-", ""), "_", "")
+	clean = strings.ReplaceAll(clean, " ", "")
+	if strings.HasPrefix(clean, "benchmarkcatalog:") ||
+		strings.HasPrefix(clean, "benchmarkauthority:") ||
+		strings.HasPrefix(clean, "authority:") ||
+		strings.HasPrefix(clean, "catalog:") ||
+		strings.HasPrefix(clean, "@catalog") ||
+		strings.HasPrefix(clean, "@authority") ||
+		strings.Contains(lower, "benchmark catalog") ||
+		strings.Contains(lower, "benchmark authority") {
+		return true
+	}
+	if idx := strings.Index(lower, "authority:"); idx >= 0 {
+		if idx == 0 || !isAlphaChar(lower[idx-1]) {
+			return true
+		}
+	}
+	if idx := strings.Index(lower, "catalog:"); idx >= 0 {
+		if idx == 0 || !isAlphaChar(lower[idx-1]) {
+			return true
+		}
+	}
+	return false
+}
+
+func isThresholdMarker(line string) bool {
+	lower := strings.ToLower(line)
+	clean := strings.ReplaceAll(strings.ReplaceAll(lower, "-", ""), "_", "")
+	clean = strings.ReplaceAll(clean, " ", "")
+	if strings.HasPrefix(clean, "threshold:") ||
+		strings.HasPrefix(clean, "benchmarkthreshold:") ||
+		strings.HasPrefix(clean, "slo:") ||
+		strings.HasPrefix(clean, "@threshold") ||
+		strings.HasPrefix(clean, "@slo") ||
+		strings.HasPrefix(lower, "slo ") ||
+		strings.Contains(lower, "slo threshold") {
+		return true
+	}
+	if idx := strings.Index(lower, "threshold:"); idx >= 0 {
+		if idx == 0 || !isAlphaChar(lower[idx-1]) {
+			return true
+		}
+	}
+	if idx := strings.Index(lower, "slo:"); idx >= 0 {
+		if idx == 0 || !isAlphaChar(lower[idx-1]) {
+			return true
+		}
+	}
+	return false
+}
+
+func isGateMarker(line string) bool {
+	lower := strings.ToLower(line)
+	clean := strings.ReplaceAll(strings.ReplaceAll(lower, "-", ""), "_", "")
+	clean = strings.ReplaceAll(clean, " ", "")
+	if strings.HasPrefix(clean, "regressiongate:") ||
+		strings.HasPrefix(clean, "benchmarkgate:") ||
+		strings.HasPrefix(clean, "gate:") ||
+		strings.HasPrefix(clean, "@gate") ||
+		strings.HasPrefix(clean, "@regressiongate") ||
+		strings.HasPrefix(clean, "@benchmarkgate") ||
+		strings.HasPrefix(lower, "gate ") ||
+		strings.Contains(lower, "regression gate") ||
+		strings.Contains(lower, "benchmark gate") ||
+		strings.Contains(lower, "regression_gate") ||
+		strings.Contains(clean, "regressiongate:") ||
+		strings.Contains(clean, "benchmarkgate:") {
+		return true
+	}
+	if idx := strings.Index(lower, "gate:"); idx >= 0 {
+		if idx == 0 || !isAlphaChar(lower[idx-1]) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAlphaChar(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }

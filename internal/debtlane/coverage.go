@@ -13,15 +13,15 @@ const CoverageReceiptSchema = "fak.debt-coverage-receipt.v1"
 type SurfaceClass string
 
 const (
-	SurfaceInternal  SurfaceClass = "internal"  // Core Go packages
-	SurfacePkg       SurfaceClass = "pkg"       // Public shared Go packages
-	SurfacePlatform  SurfaceClass = "platform"  // Platform-specific Go packages
-	SurfaceCmd       SurfaceClass = "cmd"       // Go CLI binary commands
-	SurfaceTools     SurfaceClass = "tools"     // Tooling programs and submodules
-	SurfaceSkills    SurfaceClass = "skills"    // Agent skills (.claude/skills, .agents/skills)
-	SurfaceWorkflows SurfaceClass = "workflows" // CI/CD workflows (.github/workflows)
-	SurfaceExamples  SurfaceClass = "examples"  // Examples and runnable demos
-	SurfaceDocs      SurfaceClass = "docs"      // Technical documentation and guides
+	SurfaceInternal    SurfaceClass = "internal"    // Core Go packages
+	SurfacePkg         SurfaceClass = "pkg"         // Public shared Go packages
+	SurfacePlatform    SurfaceClass = "platform"    // Platform-specific Go packages
+	SurfaceCmd         SurfaceClass = "cmd"         // Go CLI binary commands
+	SurfaceTools       SurfaceClass = "tools"       // Tooling programs and submodules
+	SurfaceSkills      SurfaceClass = "skills"      // Agent skills (.claude/skills, .agents/skills)
+	SurfaceWorkflows   SurfaceClass = "workflows"   // CI/CD workflows (.github/workflows)
+	SurfaceExamples    SurfaceClass = "examples"    // Examples and runnable demos
+	SurfaceDocs        SurfaceClass = "docs"        // Technical documentation and guides
 	SurfaceUnknown     SurfaceClass = "unknown"     // Unknown surface class
 	SurfaceUnsupported SurfaceClass = "unsupported" // Unsupported repository surface root
 )
@@ -43,25 +43,31 @@ var StandardSurfaceClasses = []SurfaceClass{
 type DetectorDimension string
 
 const (
-	DimTestStatus          DetectorDimension = "test_status"          // Passing, missing, or failing tests
-	DimCommentHygiene      DetectorDimension = "comment_hygiene"      // Clean comments vs bloat/gaming
-	DimWiringStatus        DetectorDimension = "wiring_status"        // Integrated in production graph vs disconnected
-	DimProofStatus         DetectorDimension = "proof_status"         // Dogfooded runtime proof vs unproven
-	DimBenchmarkStatus     DetectorDimension = "benchmark_status"     // Substantive benchmark vs unmeasured
-	DimModularityDeficit   DetectorDimension = "modularity_deficit"   // God files / god functions
-	DimModelCoupling       DetectorDimension = "model_coupling"       // Model family hardcoding outside model/
-	DimBlastRadius         DetectorDimension = "blast_radius"         // Inbound dependents > 25
-	DimThinTests           DetectorDimension = "thin_tests"           // Vacuous/assertion-free test files
-	DimStubDebt            DetectorDimension = "stub_debt"            // TODO/FIXME/unimplemented panics
-	DimUndocumentedExports DetectorDimension = "undocumented_exports" // Exported symbols without godoc
-	DimUnsafeUsage         DetectorDimension = "unsafe_usage"         // Unsafe pointer usage in non-core
-	DimSubprocessExec      DetectorDimension = "subprocess_exec"      // Subprocess spawning in library packages
-	DimRaceFuzzStatus      DetectorDimension = "race_fuzz_status"      // Concurrency/parser lacking race/fuzz tests
-	DimStalePerfProof      DetectorDimension = "stale_perf_proof"      // Missing from benchmark authority or proof registry
-	DimCoverageDebt        DetectorDimension = "coverage_debt"        // Unknown, unsupported, or unreadable content
+	DimTestStatus                  DetectorDimension = "test_status"                   // Passing, missing, or failing tests
+	DimCommentHygiene              DetectorDimension = "comment_hygiene"               // Clean comments vs bloat/gaming
+	DimWiringStatus                DetectorDimension = "wiring_status"                 // Integrated in production graph vs disconnected
+	DimProofStatus                 DetectorDimension = "proof_status"                  // Dogfooded runtime proof vs unproven
+	DimBenchmarkStatus             DetectorDimension = "benchmark_status"              // Substantive benchmark vs unmeasured
+	DimModularityDeficit           DetectorDimension = "modularity_deficit"            // God files / god functions
+	DimModelCoupling               DetectorDimension = "model_coupling"                // Model family hardcoding outside model/
+	DimBlastRadius                 DetectorDimension = "blast_radius"                  // Inbound dependents > 25
+	DimThinTests                   DetectorDimension = "thin_tests"                    // Vacuous/assertion-free test files
+	DimStubDebt                    DetectorDimension = "stub_debt"                     // TODO/FIXME/unimplemented panics
+	DimUndocumentedExports         DetectorDimension = "undocumented_exports"          // Exported symbols without godoc
+	DimUnsafeUsage                 DetectorDimension = "unsafe_usage"                  // Unsafe pointer usage in non-core
+	DimSubprocessExec              DetectorDimension = "subprocess_exec"               // Subprocess spawning in library packages
+	DimRaceFuzzStatus              DetectorDimension = "race_fuzz_status"              // Concurrency/parser lacking race/fuzz tests
+	DimStalePerfProof              DetectorDimension = "stale_perf_proof"              // Missing from benchmark authority or proof registry
+	DimCoverageDebt                DetectorDimension = "coverage_debt"                 // Unknown, unsupported, or unreadable content
+	DimUngatedPerformanceBenchmark DetectorDimension = "ungated_performance_benchmark" // Benchmarked lanes without executable regression gates
 )
 
-// Standard 15 detector dimensions for full-depth evaluation.
+// Aliases for dimensional lookup compatibility.
+const (
+	DimUngatedBenchmark = DimUngatedPerformanceBenchmark
+)
+
+// Standard 16 detector dimensions for full-depth evaluation.
 var StandardDetectorDimensions = []DetectorDimension{
 	DimTestStatus,
 	DimCommentHygiene,
@@ -78,6 +84,7 @@ var StandardDetectorDimensions = []DetectorDimension{
 	DimSubprocessExec,
 	DimRaceFuzzStatus,
 	DimStalePerfProof,
+	DimUngatedPerformanceBenchmark,
 }
 
 // FindingProvenance records typed provenance for a specific debt finding.
