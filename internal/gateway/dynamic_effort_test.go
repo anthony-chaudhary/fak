@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -699,5 +700,140 @@ func TestDynamicEffort_ServerHookIntegration(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+}
+
+func TestModulateOpenAIJSON_MapsEffortNoneToLow(t *testing.T) {
+	// 1. OpenAI reasoning models: o1, o3-mini, o4 should map EffortNone to "low"
+	reasoningModels := []string{"o1", "o3-mini", "o4", "o1-mini", "o4-mini"}
+	for _, model := range reasoningModels {
+		raw := []byte(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hello"}]}`, model))
+		decision := agentopt.TurnEffortDecision{
+			Effort:          agentopt.EffortNone,
+			AllocatedBudget: 0,
+		}
+		modulated, err := ModulateOpenAIJSON(raw, decision)
+		if err != nil {
+			t.Fatalf("model %s: ModulateOpenAIJSON failed: %v", model, err)
+		}
+
+		var root map[string]json.RawMessage
+		if err := json.Unmarshal(modulated, &root); err != nil {
+			t.Fatalf("model %s: unmarshal modulated json: %v", model, err)
+		}
+
+		rawEffort, ok := root["reasoning_effort"]
+		if !ok {
+			t.Fatalf("model %s: expected reasoning_effort to be injected", model)
+		}
+		var effort string
+		if err := json.Unmarshal(rawEffort, &effort); err != nil {
+			t.Fatalf("model %s: unmarshal reasoning_effort: %v", model, err)
+		}
+		if effort != "low" {
+			t.Errorf("model %s: expected reasoning_effort %q for EffortNone, got %q", model, "low", effort)
+		}
+	}
+
+	// 2. OpenAI reasoning models preserve valid tiers: low, medium, high
+	tiers := []struct {
+		tier agentopt.EffortTier
+		want string
+	}{
+		{agentopt.EffortLow, "low"},
+		{agentopt.EffortMedium, "medium"},
+		{agentopt.EffortHigh, "high"},
+	}
+	for _, tc := range tiers {
+		raw := []byte(`{"model":"o3-mini","messages":[{"role":"user","content":"analyze"}]}`)
+		decision := agentopt.TurnEffortDecision{
+			Effort: tc.tier,
+		}
+		modulated, err := ModulateOpenAIJSON(raw, decision)
+		if err != nil {
+			t.Fatalf("tier %s: ModulateOpenAIJSON failed: %v", tc.tier, err)
+		}
+		var root map[string]json.RawMessage
+		_ = json.Unmarshal(modulated, &root)
+		var effort string
+		_ = json.Unmarshal(root["reasoning_effort"], &effort)
+		if effort != tc.want {
+			t.Errorf("tier %s: expected reasoning_effort %q, got %q", tc.tier, tc.want, effort)
+		}
+	}
+
+	// 3. Non-reasoning models: gpt-4o, gpt-4o-mini should NOT have reasoning_effort injected
+	nonReasoningModels := []string{"gpt-4o", "gpt-4o-mini", "gpt-4", "gpt-3.5-turbo"}
+	for _, model := range nonReasoningModels {
+		for _, tier := range []agentopt.EffortTier{agentopt.EffortNone, agentopt.EffortLow, agentopt.EffortMedium, agentopt.EffortHigh} {
+			raw := []byte(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hello"}]}`, model))
+			decision := agentopt.TurnEffortDecision{
+				Effort: tier,
+			}
+			modulated, err := ModulateOpenAIJSON(raw, decision)
+			if err != nil {
+				t.Fatalf("model %s tier %s: ModulateOpenAIJSON failed: %v", model, tier, err)
+			}
+
+			var root map[string]json.RawMessage
+			if err := json.Unmarshal(modulated, &root); err != nil {
+				t.Fatalf("model %s: unmarshal modulated json: %v", model, err)
+			}
+
+			if _, ok := root["reasoning_effort"]; ok {
+				t.Errorf("model %s tier %s: expected NO reasoning_effort parameter injected, but found %s", model, tier, root["reasoning_effort"])
+			}
+		}
+
+		// Also verify that if reasoning_effort was somehow present in non-reasoning model request, it is stripped
+		rawWithEffort := []byte(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hello"}],"reasoning_effort":"high"}`, model))
+		decision := agentopt.TurnEffortDecision{Effort: agentopt.EffortNone}
+		modulated, err := ModulateOpenAIJSON(rawWithEffort, decision)
+		if err != nil {
+			t.Fatalf("model %s: ModulateOpenAIJSON failed: %v", model, err)
+		}
+		var root map[string]json.RawMessage
+		_ = json.Unmarshal(modulated, &root)
+		if _, ok := root["reasoning_effort"]; ok {
+			t.Errorf("model %s: expected reasoning_effort to be removed from non-reasoning model", model)
+		}
+	}
+
+	// 4. Test via ApplyDynamicEffortToOpenAIJSON
+	rawRoutine := []byte(`{
+		"model": "o1",
+		"messages": [
+			{"role": "user", "content": "read auth.go"},
+			{"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\":\"auth.go\"}"}}]},
+			{"role": "tool", "tool_call_id": "c1", "name": "read_file", "content": "package auth\n"}
+		]
+	}`)
+	modulatedRoutine, decRoutine, err := ApplyDynamicEffortToOpenAIJSON(rawRoutine, "o1")
+	if err != nil {
+		t.Fatalf("ApplyDynamicEffortToOpenAIJSON failed: %v", err)
+	}
+	if decRoutine.Effort != agentopt.EffortNone {
+		t.Errorf("expected classified effort to be EffortNone, got %s", decRoutine.Effort)
+	}
+	var rootRoutine map[string]json.RawMessage
+	_ = json.Unmarshal(modulatedRoutine, &rootRoutine)
+	var effortRoutine string
+	_ = json.Unmarshal(rootRoutine["reasoning_effort"], &effortRoutine)
+	if effortRoutine != "low" {
+		t.Errorf("expected modulated reasoning_effort to be %q, got %q", "low", effortRoutine)
+	}
+
+	rawGpt4o := []byte(`{
+		"model": "gpt-4o",
+		"messages": [{"role": "user", "content": "Plan the architecture"}]
+	}`)
+	modulatedGpt4o, _, err := ApplyDynamicEffortToOpenAIJSON(rawGpt4o, "gpt-4o")
+	if err != nil {
+		t.Fatalf("ApplyDynamicEffortToOpenAIJSON gpt-4o failed: %v", err)
+	}
+	var rootGpt4o map[string]json.RawMessage
+	_ = json.Unmarshal(modulatedGpt4o, &rootGpt4o)
+	if _, ok := rootGpt4o["reasoning_effort"]; ok {
+		t.Errorf("gpt-4o: expected no reasoning_effort parameter in ApplyDynamicEffortToOpenAIJSON output")
 	}
 }

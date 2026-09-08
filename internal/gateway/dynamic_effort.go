@@ -40,6 +40,39 @@ func ModelSupportsThinking(model string) bool {
 	return capmatrix.Lookup(model).Thinking
 }
 
+func isOSeries(base string) bool {
+	if len(base) < 2 || (base[0] != 'o' && base[0] != 'O') {
+		return false
+	}
+	if base[1] < '1' || base[1] > '9' {
+		return false
+	}
+	i := 2
+	for i < len(base) && base[i] >= '0' && base[i] <= '9' {
+		i++
+	}
+	if i == len(base) || base[i] == '-' || base[i] == '.' || base[i] == '_' {
+		return true
+	}
+	return false
+}
+
+// IsOpenAIReasoningModel reports whether model is an OpenAI reasoning model (e.g. o1, o3-mini, o4)
+// that supports the reasoning_effort parameter ("low", "medium", "high").
+func IsOpenAIReasoningModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if idx := strings.LastIndex(m, "/"); idx >= 0 {
+		m = m[idx+1:]
+	}
+	if isOSeries(m) {
+		return true
+	}
+	if ModelSupportsThinking(m) && (strings.HasPrefix(m, "gpt-") || strings.HasPrefix(m, "astra")) {
+		return true
+	}
+	return false
+}
+
 // RequestSupportsThinking reports whether the request should undergo dynamic effort modulation,
 // based on either model capability or explicit thinking configuration present in the request.
 func RequestSupportsThinking(model string, hasExplicitThinking bool) bool {
@@ -225,6 +258,9 @@ func ModulateGeminiRequest(req *agent.GeminiGenerateContentRequest, decision age
 
 // ModulateOpenAIJSON injects or updates reasoning_effort in a raw OpenAI ChatCompletions JSON payload
 // without altering message history or system prompt bytes.
+// For OpenAI reasoning models (e.g. o1, o3-mini, o4), EffortNone maps to "low" to satisfy provider enum
+// constraints ("low", "medium", "high"). For non-reasoning models (e.g. gpt-4o), reasoning_effort
+// parameter is not injected.
 func ModulateOpenAIJSON(raw []byte, decision agentopt.TurnEffortDecision) ([]byte, error) {
 	if len(raw) == 0 {
 		return raw, nil
@@ -234,7 +270,22 @@ func ModulateOpenAIJSON(raw []byte, decision agentopt.TurnEffortDecision) ([]byt
 		return nil, fmt.Errorf("modulate openai json: %w", err)
 	}
 
-	root["reasoning_effort"] = json.RawMessage(fmt.Sprintf("%q", decision.Effort))
+	var model string
+	if rawModel, ok := root["model"]; ok {
+		_ = json.Unmarshal(rawModel, &model)
+	}
+
+	if !IsOpenAIReasoningModel(model) {
+		delete(root, "reasoning_effort")
+		return json.Marshal(root)
+	}
+
+	effort := string(decision.Effort)
+	if decision.Effort == agentopt.EffortNone || effort == "none" || effort == "" {
+		effort = "low"
+	}
+
+	root["reasoning_effort"] = json.RawMessage(fmt.Sprintf("%q", effort))
 	return json.Marshal(root)
 }
 
@@ -262,7 +313,13 @@ func ModulateChatRequest(req *ChatRequest, decision agentopt.TurnEffortDecision)
 	if req == nil {
 		return
 	}
-	req.ReasoningEffort = string(decision.Effort)
+	if req.Model != "" && !IsOpenAIReasoningModel(req.Model) && !ModelSupportsThinking(req.Model) {
+		req.ReasoningEffort = ""
+	} else if IsOpenAIReasoningModel(req.Model) && (decision.Effort == agentopt.EffortNone || decision.Effort == "") {
+		req.ReasoningEffort = "low"
+	} else {
+		req.ReasoningEffort = string(decision.Effort)
+	}
 	req.ThinkingConfig, _ = json.Marshal(map[string]int{
 		"thinkingBudget": decision.AllocatedBudget,
 	})
@@ -451,6 +508,19 @@ func ApplyDynamicEffortToOpenAIJSON(raw []byte, model string) ([]byte, *agentopt
 	}
 	if chatReq.Model == "" {
 		chatReq.Model = model
+	}
+	if chatReq.Model != "" {
+		var root map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &root); err == nil {
+			if _, ok := root["model"]; !ok {
+				if mBytes, err := json.Marshal(chatReq.Model); err == nil {
+					root["model"] = mBytes
+					if newRaw, err := json.Marshal(root); err == nil {
+						raw = newRaw
+					}
+				}
+			}
+		}
 	}
 	turnCtx := BuildTurnContext(chatReq.Messages, "")
 	decision := ClassifyTurnEffort(turnCtx)
