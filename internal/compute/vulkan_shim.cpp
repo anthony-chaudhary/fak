@@ -418,42 +418,10 @@ const VkBufferUsageFlags STORAGE_USAGE =
     VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
     VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
-std::vector<Buffer*>          g_attentionScratch;
-size_t                        g_attentionScratchCursor = 0;
-
 size_t scratchCapacity(size_t bytes) {
     size_t cap = 4 * 1024;
     while (cap < bytes && cap <= (((size_t)-1) / 2)) cap *= 2;
     return cap < bytes ? bytes : cap;
-}
-
-Buffer* batchAttentionScratch(size_t bytes) {
-    if (bytes == 0) bytes = 4;
-    size_t slot = g_attentionScratchCursor++;
-    if (slot >= g_attentionScratch.size()) g_attentionScratch.resize(slot + 1, nullptr);
-
-    Buffer* b = g_attentionScratch[slot];
-    if (b && b->bytes >= bytes) return b;
-
-    if (b) {
-        destroyBuffer(b);
-        g_attentionScratch[slot] = nullptr;
-        clearDescriptorBindingCache();
-    }
-    b = allocBuffer(scratchCapacity(bytes), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
-    if (!b) {
-        fprintf(stderr, "fak-vulkan: attention scratch allocation failed (%zu bytes)\n", bytes);
-        abort();
-    }
-    g_attentionScratch[slot] = b;
-    return b;
-}
-
-void freeAttentionScratch() {
-    for (Buffer* b : g_attentionScratch) destroyBuffer(b);
-    if (!g_attentionScratch.empty()) clearDescriptorBindingCache();
-    g_attentionScratch.clear();
-    g_attentionScratchCursor = 0;
 }
 
 Buffer*                       g_gdn_conv_out = nullptr;
@@ -529,10 +497,6 @@ std::vector<DescriptorSetRecord> g_batchSets;
 std::vector<Buffer*>          g_batchFreed;   // buffers freed mid-batch, recycled after submit
 int                           g_batchOps  = 0;
 
-// Attention scores are scratch, but a token batch records all layers before submit, so each
-// attention call in the batch needs a distinct buffer. Keep a reusable ring by call index and
-// grow each slot geometrically as the sequence length increases instead of allocating/freeing
-// nLayers differently-sized score buffers every token.
 // A full compute->compute barrier: every recorded op may read the previous op's output
 // buffer, so each dispatch is fenced against the prior by a global shader-write->shader-read
 // barrier. Coarse but correct; per-buffer barriers are a later refinement.
@@ -553,7 +517,6 @@ void batchBegin() {
 	g_batching = true;
 	g_batchOps = 0;
 	g_batchSets.clear();
-	g_attentionScratchCursor = 0;
 }
 
 void batchFlush() {
@@ -983,7 +946,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_SWIGLU_MATMUL_ADD], P("swiglu_matmul_add.spv"), 4, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_ADD],       P("add.spv"),       2, sizeof(int));
     ok &= buildKernel(g_kern[K_ADD_BIAS],  P("add_bias.spv"),  2, 2 * sizeof(int));
-    ok &= buildKernel(g_kern[K_ATTENTION], P("attention.spv"), 5, 4 * sizeof(int) + sizeof(float));
+    ok &= buildKernel(g_kern[K_ATTENTION], P("attention.spv"), 4, 4 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_ARGMAX],    P("argmax.spv"),    2, sizeof(int));
     ok &= buildKernel(g_kern[K_ARGMAX_PAIRS], P("argmax_pairs.spv"), 3, sizeof(int));
     ok &= buildKernel(g_kern[K_QWEN35_GDN_CONV], P("qwen35_gdn_conv.spv"), 4, 3 * sizeof(int));
@@ -1174,7 +1137,6 @@ void fvk_trim_pool(void) {
     if (!g_dev) return;
     if (g_batching) batchFlush();
     drainPool();
-    freeAttentionScratch();
     freeGdnScratch();
 }
 
@@ -1448,18 +1410,9 @@ void fvk_add_bias_f32(void* dDst, const void* dBias, int rows, int width) {
 
 void fvk_attention_f32(const void* dQ, const void* dK, const void* dV, void* dOut,
                        int nPos, int nH, int nKV, int hd, float scale) {
-    size_t scoreBytes = 64; // FlashAttention-3 tiled online softmax executes in registers; O(1) scratchpad
-    Buffer* scores = g_batching ? batchAttentionScratch(scoreBytes) : (Buffer*)fvk_malloc(scoreBytes);
-    if (!scores) {
-        fprintf(stderr, "fak-vulkan: attention scratch allocation failed (%zu bytes)\n", scoreBytes);
-        abort();
-    }
-    struct { int nPos, nH, nKV, hd; float scale; int causal; int windowSize; int qTokens; } pc{nPos, nH, nKV, hd, scale, 1, 0, 1};
-    Buffer* bufs[5] = {B((void*)dQ), B((void*)dK), B((void*)dV), B(dOut), scores};
+    struct { int nPos, nH, nKV, hd; float scale; } pc{nPos, nH, nKV, hd, scale};
+    Buffer* bufs[4] = {B((void*)dQ), B((void*)dK), B((void*)dV), B(dOut)};
     dispatch(g_kern[K_ATTENTION], bufs, &pc, sizeof(pc), (uint32_t)nH);
-    if (!g_batching) {
-        fvk_free(scores);
-    }
 }
 
 int fvk_argmax_f32(const void* dLogits, int n) {

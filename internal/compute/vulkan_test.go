@@ -1678,6 +1678,56 @@ func TestVulkanAttentionApprox(t *testing.T) {
 	t.Logf("%s", oracleJSON)
 }
 
+func TestVulkanAttentionFlashShapes(t *testing.T) {
+	cases := []struct {
+		name string
+		grp  int
+		nKV  int
+		hd   int
+		nPos int
+	}{
+		{"MHA_hd64_ctx32", 1, 8, 64, 32},
+		{"GQA_hd128_ctx128", 4, 2, 128, 128},
+		{"MQA_hd256_ctx64", 8, 1, 256, 64},
+		{"Context_512", 2, 2, 64, 512},
+		{"Context_2048", 2, 1, 64, 2048},
+		{"Context_8192", 1, 1, 64, 8192},
+	}
+	v := vk(t)
+	c := cpu()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := KVConfig{NumLayers: 1, NumKVHeads: tc.nKV, HeadDim: tc.hd, RopeTheta: 10000}
+			nH := tc.grp * tc.nKV
+			w := tc.nKV * tc.hd
+			scale := float32(1.0 / math.Sqrt(float64(tc.hd)))
+			var s lcg = 42
+
+			ckv := c.NewKV(cfg)
+			vkv := v.NewKV(cfg)
+			for p := 0; p < tc.nPos; p++ {
+				kRaw := randVec(&s, w)
+				kRoPE := randVec(&s, w)
+				val := randVec(&s, w)
+				ckv.AppendKV(0, NewF32(c, []int{w}, kRaw), NewF32(c, []int{w}, kRoPE), NewF32(c, []int{w}, val), p)
+				vkv.AppendKV(0, v.Upload(NewF32(c, []int{w}, kRaw), F32), v.Upload(NewF32(c, []int{w}, kRoPE), F32), v.Upload(NewF32(c, []int{w}, val), F32), p)
+			}
+			q := randVec(&s, nH*tc.hd)
+			ref := c.Read(c.Attention(NewF32(c, []int{nH * tc.hd}, q), ckv, 0, true, tc.grp, scale))
+			got := v.Read(v.Attention(v.Upload(NewF32(c, []int{nH * tc.hd}, q), F32), vkv, 0, true, tc.grp, scale))
+			cos := cosine(ref, got)
+			if cos < 0.999 {
+				t.Fatalf("attention cosine %.6f < 0.999", cos)
+			}
+			d := maxAbs(ref, got)
+			if d > 1e-2 {
+				t.Fatalf("attention max|Δ| %.4g > 1e-2", d)
+			}
+			t.Logf("[%s] cos=%.8f maxAbs=%.4g", tc.name, cos, d)
+		})
+	}
+}
+
 func TestVulkanTeardownResourcesIsIdempotent(t *testing.T) {
 	v := vk(t)
 	a := v.Upload(NewF32(Default(), []int{4}, []float32{1, 2, 3, 4}), F32)

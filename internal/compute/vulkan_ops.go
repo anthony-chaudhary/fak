@@ -75,8 +75,9 @@ func (v *vulkanBackend) AddBias(dst, bias Tensor) {
 	C.fvk_add_bias_f32(v.vp(dst), v.vp(bias), C.int(rows), C.int(width))
 }
 
-// Attention runs the fused scaled-dot-product attention for one layer over the cached
-// keys/values (grp query heads per KV head, scale applied to the scores), returning the
+// Attention runs the fused scaled-dot-product FlashAttention for one layer over the cached
+// keys/values (grp query heads per KV head, scale applied to the scores) via online softmax,
+// dispatching 4 buffers (Q, K, V, Out) with zero global scratch allocations, and returning the
 // per-head context vectors as one device tensor.
 func (v *vulkanBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, grp int, scale float32) Tensor {
 	vulkanMu.Lock()
