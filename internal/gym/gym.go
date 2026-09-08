@@ -97,7 +97,7 @@ func (a *Arena) Overlay() CoWOverlay {
 
 // ModifiedArtifacts returns a list of files modified, created, or deleted relative to base.
 func (a *Arena) ModifiedArtifacts() []string {
-	if u, ok := a.overlay.(*UserspaceOverlay); ok {
+	if u, ok := a.overlay.(interface{ ModifiedArtifacts() []string }); ok {
 		return u.ModifiedArtifacts()
 	}
 	// Generic fallback by reading upper directory
@@ -143,8 +143,8 @@ func (a *Arena) Execute(ctx context.Context, req sandbox.ExecutionRequest) (sand
 	reg := sandbox.DefaultRegistry()
 	res, err := reg.Execute(ctx, spec, req)
 
-	// 3. Reconcile modifications into UpperDir if userspace overlay
-	if u, ok := a.overlay.(*UserspaceOverlay); ok {
+	// 3. Reconcile modifications into UpperDir if supported
+	if u, ok := a.overlay.(interface{ Reconcile() error }); ok {
 		_ = u.Reconcile()
 	}
 

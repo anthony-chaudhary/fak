@@ -195,12 +195,23 @@ func guardDisabled() bool {
 	return !fleetEnvSwitchOn("FLEET_DOGFOOD_GUARD", true)
 }
 
-// workerWorktreeEnabled reports whether #3168 per-worker git worktree isolation is
-// switched on via FLEET_WORKER_WORKTREE. Default (unset / an off-ish value) is OFF,
-// which restores the shared-trunk spawn behavior byte-for-byte; any other value
-// turns isolation on.
+// workerWorktreeEnabled reports whether portable per-worker isolation is active.
+// Unset is ON; only an explicit off-ish value selects unsafe shared-root
+// compatibility. This keeps repository roots portable while making isolation the
+// ordinary dispatch admission path.
 func workerWorktreeEnabled() bool {
-	return fleetEnvSwitchOn("FLEET_WORKER_WORKTREE", false)
+	enabled, _ := workerWorktreeAdmissionMode()
+	return enabled
+}
+
+func workerWorktreeAdmissionMode() (bool, string) {
+	if _, explicitlySet := os.LookupEnv("FLEET_WORKER_WORKTREE"); !explicitlySet {
+		return true, worktreeModeManagedDefault
+	}
+	if !fleetEnvSwitchOn("FLEET_WORKER_WORKTREE", true) {
+		return false, worktreeModeSharedExplicitOptOut
+	}
+	return true, worktreeModeManagedExplicit
 }
 
 // dispatchTierLaunchEnabled reports whether the opt-in per-issue tier launch profile

@@ -232,6 +232,7 @@ type Session struct {
 	// device residency. It preserves the hot plain-map lookup while making Close's
 	// ownership decision O(1) per entry; unmarked entries remain session-owned.
 	borrowedHALW map[string]struct{}
+	lastLogits   []float32
 	// ExpertRingBytes bounds the DEVICE residency of ROUTED expert weights (`.mlp.experts.N.*`) at
 	// this many bytes, staging them through a pagedRing (expert_ring_hal.go, #5611) instead of the
 	// never-evicting halW memoizer above. It is what makes the ACTIVATED expert set a bounded object:
@@ -1313,6 +1314,21 @@ func (s *Session) RollbackSpeculative(nTokens int) {
 		targetLen = 0
 	}
 	s.Cache.Truncate(targetLen)
+}
+
+// LastLogits returns the most recent forward logits recorded on the session.
+func (s *Session) LastLogits() []float32 {
+	if s == nil {
+		return nil
+	}
+	return s.lastLogits
+}
+
+// SetLastLogits sets the most recent forward logits on the session.
+func (s *Session) SetLastLogits(l []float32) {
+	if s != nil {
+		s.lastLogits = l
+	}
 }
 
 func argmaxF32(v []float32) int {

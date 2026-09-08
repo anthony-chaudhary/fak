@@ -521,13 +521,14 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 	}()
 
 	type toolExecResult struct {
-		tc      ToolCall
-		content string
-		ev      traceEvent
-		isErr   bool
-		abiCall *abi.ToolCall
-		abiRes  *abi.Result
-		verdict *abi.Verdict
+		tc            ToolCall
+		content       string
+		ev            traceEvent
+		isErr         bool
+		abiCall       *abi.ToolCall
+		abiRes        *abi.Result
+		verdict       *abi.Verdict
+		suppressTrace bool
 	}
 
 	execOne := func(tc ToolCall) toolExecResult {
@@ -676,12 +677,11 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 					Call:    call,
 					Payload: resPayload,
 				}
-				if res.isErr {
-					v := &abi.Verdict{
-						Kind:   abi.VerdictDeny,
-						By:     "raw-harness",
-						Reason: abi.ReasonMalformed,
-					}
+				v := res.verdict
+				if v == nil && res.isErr {
+					v = &abi.Verdict{Kind: abi.VerdictDeny, By: "raw-harness", Reason: abi.ReasonMalformed}
+				}
+				if v != nil && v.Kind == abi.VerdictDeny {
 					r.cfg.auditJournal.Emit(abi.Event{
 						Kind:    abi.EvDecide,
 						Call:    call,
@@ -695,10 +695,8 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 						Result:  result,
 					})
 				} else {
-					v := &abi.Verdict{
-						Kind:   abi.VerdictAllow,
-						By:     "raw-harness",
-						Reason: abi.ReasonNone,
+					if v == nil {
+						v = &abi.Verdict{Kind: abi.VerdictAllow, By: "raw-harness", Reason: abi.ReasonNone}
 					}
 					r.cfg.auditJournal.Emit(abi.Event{
 						Kind:    abi.EvDecide,
@@ -794,7 +792,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			Kind: ProgressCallAdjudicated, Turn: turn + 1, CallID: tc.ID, Tool: tool,
 			Verdict: ev.Verdict, Reason: ev.Reason,
 		})
-		if r.log != nil {
+		if r.log != nil && !res.suppressTrace {
 			*r.log = append(*r.log, ev)
 		}
 		if res.isErr {
@@ -853,86 +851,92 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 	}
 
 	var allResults []toolExecResult
-	for idx := 0; idx < len(asst.ToolCalls); {
-		if r.stopTerminated() {
-			return true, nil
-		}
-		// Determine segment boundary.
-		// A contiguous slice of effect-safe calls can execute their bodies concurrently.
-		// An exclusive call forms a barrier (segment of length 1).
-		segEnd := idx + 1
-		isSafe := isEffectSafeTool(asst.ToolCalls[idx].Function.Name)
-		if isSafe {
-			for segEnd < len(asst.ToolCalls) && isEffectSafeTool(asst.ToolCalls[segEnd].Function.Name) {
-				segEnd++
-			}
-		}
-		segCalls := asst.ToolCalls[idx:segEnd]
-
-		var runnable []ToolCall
-		stopped := false
-		for _, tc := range segCalls {
-			if r.stopTerminated() {
-				stopped = true
-				break
-			}
-			if reason := r.cfg.debitToolCall(); reason != "" {
-				r.metrics.StoppedBySession = reason
-				r.finalizeFak()
-				stopped = true
-				break
-			}
-			r.metrics.ToolCalls++
-			if isSafe {
-				r.metrics.ToolCallsSafe++
-			} else {
-				r.metrics.ToolCallsExclusive++
-			}
-			r.cfg.emitProgress(ProgressEvent{Kind: ProgressToolStarted, Turn: turn + 1, CallID: tc.ID, Tool: tc.Function.Name})
-			if r.envelopeSink != nil {
-				callID := tc.ID
-				if callID == "" {
-					callID = fmt.Sprintf("call-%s-%d", tc.Function.Name, turn+1)
+	scheduled := make([]scheduledToolCall, 0, len(asst.ToolCalls))
+	executed := make([]toolExecResult, len(asst.ToolCalls))
+	stopped := false
+	for _, tc := range asst.ToolCalls {
+		effect := toolEffectFor(tc.Function.Name)
+		index := len(scheduled)
+		call := tc
+		scheduled = append(scheduled, scheduledToolCall{
+			call:   call,
+			effect: effect,
+			admit: func() *scheduledToolSkip {
+				if r.stopTerminated() {
+					stopped = true
+					return interruptedToolSkip()
 				}
-				r.emitEnvelope(harnesskit.EventToolStarted, harnesskit.ToolPayload{
-					CallID: callID,
-					Name:   tc.Function.Name,
-					Status: "started",
-				})
-			}
-			runnable = append(runnable, tc)
-		}
-
-		if len(runnable) > 0 {
-			results := make([]toolExecResult, len(runnable))
-			if isSafe && len(runnable) > 1 {
-				var wg sync.WaitGroup
-				wg.Add(len(runnable))
-				for i, tc := range runnable {
-					go func(i int, tc ToolCall) {
-						defer wg.Done()
-						results[i] = execOne(tc)
-					}(i, tc)
+				if reason := r.cfg.debitToolCall(); reason != "" {
+					r.metrics.StoppedBySession = reason
+					stopped = true
+					return &scheduledToolSkip{
+						reason: reason, by: "session-budget/" + reason, disposition: "TERMINAL",
+						detail:        "skipped before dispatch because the session tool-call budget was exhausted; never dispatched",
+						suppressTrace: true,
+					}
 				}
-				wg.Wait()
-			} else {
-				for i, tc := range runnable {
-					results[i] = execOne(tc)
+				r.metrics.ToolCalls++
+				if effect == toolEffectSafe {
+					r.metrics.ToolCallsSafe++
+				} else {
+					r.metrics.ToolCallsExclusive++
 				}
-			}
-
-			for _, res := range results {
+				return nil
+			},
+			start: func() {
+				r.cfg.emitProgress(ProgressEvent{Kind: ProgressToolStarted, Turn: turn + 1, CallID: call.ID, Tool: call.Function.Name})
+				if r.envelopeSink != nil {
+					callID := call.ID
+					if callID == "" {
+						callID = fmt.Sprintf("call-%s-%d", call.Function.Name, turn+1)
+					}
+					r.emitEnvelope(harnesskit.EventToolStarted, harnesskit.ToolPayload{
+						CallID: callID,
+						Name:   call.Function.Name,
+						Status: "started",
+					})
+				}
+			},
+			run: func(context.Context) (string, error) {
+				res := execOne(call)
+				executed[index] = res
+				return res.content, nil
+			},
+			commit: func(outcome scheduledToolResult) error {
+				res := executed[index]
+				if !outcome.started {
+					skip := outcome.skip
+					if skip == nil {
+						skip = interruptedToolSkip()
+					}
+					// An interruption/budget freeze is scheduler control flow, not a
+					// policy denial. Keep the audit decision non-authoritative while
+					// the typed DROPPED trace and receipt carry the terminal reason.
+					v := abi.Verdict{Kind: abi.VerdictDefer, By: skip.by, Reason: abi.ReasonNone}
+					res = toolExecResult{
+						tc: call, content: outcome.content,
+						ev: traceEvent{
+							Turn: turn + 1, Arm: r.metrics.Arm, Tool: call.Function.Name, RawArgs: call.Function.Arguments,
+							Verdict: "DROPPED", Reason: skip.reason, By: skip.by, Disposition: skip.disposition,
+							Note: skip.detail,
+						},
+						verdict:       &v,
+						suppressTrace: skip.suppressTrace,
+					}
+				}
 				allResults = append(allResults, res)
-				if err := commitOne(res); err != nil {
-					return false, err
-				}
-			}
-		}
+				return commitOne(res)
+			},
+		})
+	}
 
-		if stopped {
-			return true, nil
-		}
-		idx = segEnd
+	if _, err := runScheduledToolCalls(ctx, maxParallelToolCalls, scheduled); err != nil {
+		return false, err
+	}
+
+	if stopped {
+		r.finalizeFak()
+		return true, nil
 	}
 
 	if len(allResults) > 0 {

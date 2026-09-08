@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"time"
 )
 
 var (
@@ -21,13 +22,16 @@ var (
 	// ErrMetalMTPClosed is returned when operations are attempted on a closed coordinator.
 	ErrMetalMTPClosed = errors.New("model: MetalMTPCoordinator session is closed")
 
-	// ErrMetalMTPInvalidDraftDepth is returned when draft depth is outside supported bounds [2, 4].
-	ErrMetalMTPInvalidDraftDepth = errors.New("model: Metal MTP draft depth must be between 2 and 4")
+	// ErrMetalMTPInvalidDraftDepth is returned when draft depth is outside supported bounds [1, 4].
+	ErrMetalMTPInvalidDraftDepth = errors.New("model: Metal MTP draft depth must be between 1 and 4")
 )
+
+// StepCostFn calculates or overrides step and target latencies or speedup for an adaptive governor observation.
+type StepCostFn func(proposed, accepted int, base Qwen38AdaptiveStepObservation) Qwen38AdaptiveStepObservation
 
 // MetalMTPConfig configures the in-kernel Metal MTP draft-verify-rollback execution loop.
 type MetalMTPConfig struct {
-	// DraftDepth is the speculative draft depth K (2..4, default 4).
+	// DraftDepth is the speculative draft depth K (1..4, default 4).
 	DraftDepth int `json:"draft_depth"`
 
 	// MinAcceptanceRate is the threshold (default 0.50) below which the coordinator smoothly
@@ -43,6 +47,12 @@ type MetalMTPConfig struct {
 
 	// FallbackToSerial enables fail-closed fallback to unassisted serial decode.
 	FallbackToSerial bool `json:"fallback_to_serial"`
+
+	// Adaptive enables dynamic adaptive draft depth auto-tuning via Qwen38MTPAdaptiveDepthGovernor.
+	Adaptive bool `json:"adaptive"`
+
+	// AdaptiveConfig specifies custom configuration for the adaptive depth governor.
+	AdaptiveConfig *Qwen38AdaptiveConfig `json:"adaptive_config,omitempty"`
 }
 
 // DefaultMetalMTPConfig returns production defaults for the Metal MTP execution loop.
@@ -72,6 +82,11 @@ type MetalMTPAcceptanceStats struct {
 	CommittedPages  int     `json:"committed_pages"`
 	FreedPages      int     `json:"freed_pages"`
 	TotalGenerated  int     `json:"total_generated"`
+
+	// Adaptive depth auto-tuning state
+	ActiveDraftDepth int                         `json:"active_draft_depth,omitempty"`
+	AdaptiveReceipt  *Qwen38AdaptiveDepthReceipt `json:"adaptive_receipt,omitempty"`
+	DowngradeReason  Qwen38MTPDowngradeReason    `json:"downgrade_reason,omitempty"`
 }
 
 // MTPCheckpointRecorder records speculative candidate draft tokens and atomic page commit/rollback.
@@ -131,6 +146,11 @@ type MetalMTPCoordinator struct {
 	drafter  ProposalGenerator
 	draftSes *Qwen35MTPDraftSession
 
+	// Adaptive depth governance
+	governor      *Qwen38MTPAdaptiveDepthGovernor
+	stepCostFn    StepCostFn
+	targetLatency time.Duration
+
 	// Context-MMU state
 	checkpointMgr MTPCheckpointRecorder
 	sessionID     string
@@ -163,8 +183,8 @@ func NewMetalMTPCoordinator(target *Session, cfgs ...MetalMTPConfig) (*MetalMTPC
 	}
 	if cfg.DraftDepth <= 0 {
 		cfg.DraftDepth = 4
-	} else if cfg.DraftDepth < 2 {
-		cfg.DraftDepth = 2
+	} else if cfg.DraftDepth < 1 {
+		cfg.DraftDepth = 1
 	} else if cfg.DraftDepth > 4 {
 		cfg.DraftDepth = 4
 	}
@@ -181,6 +201,21 @@ func NewMetalMTPCoordinator(target *Session, cfgs ...MetalMTPConfig) (*MetalMTPC
 		cfg:            cfg,
 		draftState:     &MTPDraftTracker{DraftDepth: cfg.DraftDepth},
 		windowOutcomes: make([]bool, 0, cfg.WindowSize),
+	}
+
+	if cfg.Adaptive || cfg.AdaptiveConfig != nil {
+		adCfg := DefaultQwen38AdaptiveConfig()
+		if cfg.AdaptiveConfig != nil {
+			adCfg = *cfg.AdaptiveConfig
+		}
+		if cfg.DraftDepth > 0 && cfg.AdaptiveConfig == nil {
+			adCfg.MaxDepth = cfg.DraftDepth
+		}
+		gov, err := NewQwen38MTPAdaptiveDepthGovernor(adCfg)
+		if err == nil {
+			c.governor = gov
+			c.draftState.DraftDepth = gov.CurrentDepth()
+		}
 	}
 
 	if target != nil {
@@ -264,6 +299,9 @@ func (c *MetalMTPCoordinator) Config() MetalMTPConfig {
 func (c *MetalMTPCoordinator) InFallback() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.governor != nil && c.governor.CurrentDepth() == 0 {
+		return true
+	}
 	return c.inFallback
 }
 
@@ -275,6 +313,9 @@ func (c *MetalMTPCoordinator) ResetFallback() {
 	c.fallbackReason = ""
 	c.windowOutcomes = c.windowOutcomes[:0]
 	c.windowHead = 0
+	if c.governor != nil {
+		c.governor.Reset()
+	}
 }
 
 // CheckSamplingTripwire validates sampling parameters against the greedy temperature-zero tripwire.
@@ -312,7 +353,8 @@ func (c *MetalMTPCoordinator) recordAcceptanceLocked(proposed, accepted int) {
 	}
 
 	// Smoothly fall back to serial autoregressive decode if rolling acceptance < 50%
-	if c.cfg.FallbackToSerial && len(c.windowOutcomes) >= 8 {
+	// (only active when adaptive governor is not managing dynamic depth and target-only escape)
+	if c.governor == nil && c.cfg.FallbackToSerial && len(c.windowOutcomes) >= 8 {
 		rate := c.windowRateLocked()
 		if rate < c.cfg.MinAcceptanceRate {
 			c.inFallback = true
@@ -363,7 +405,7 @@ func (c *MetalMTPCoordinator) Stats() MetalMTPAcceptanceStats {
 		freedPages = c.draftState.FreedPages
 	}
 
-	return MetalMTPAcceptanceStats{
+	stats := MetalMTPAcceptanceStats{
 		TotalProposed:   c.totalProposed,
 		TotalAccepted:   c.totalAccepted,
 		TotalRollbacks:  c.totalRollbacks,
@@ -379,6 +421,28 @@ func (c *MetalMTPCoordinator) Stats() MetalMTPAcceptanceStats {
 		FreedPages:      freedPages,
 		TotalGenerated:  c.totalGenerated,
 	}
+
+	if c.governor != nil {
+		stats.ActiveDraftDepth = c.governor.CurrentDepth()
+		stats.DowngradeReason = c.governor.DowngradeReason()
+		receipt := c.governor.Receipt()
+		stats.AdaptiveReceipt = &receipt
+		if c.governor.CurrentDepth() == 0 {
+			stats.InFallback = true
+			if stats.FallbackReason == "" {
+				stats.FallbackReason = string(c.governor.DowngradeReason())
+			}
+		}
+	} else {
+		stats.ActiveDraftDepth = c.cfg.DraftDepth
+		if c.inFallback {
+			stats.DowngradeReason = Qwen38MTPNetLatencyRegressed
+		} else {
+			stats.DowngradeReason = Qwen38MTPEligible
+		}
+	}
+
+	return stats
 }
 
 // StepRound executes one speculative draft-verify-rollback cycle or serial step.
@@ -422,27 +486,60 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 
 	target0 := argmaxF32(boundaryLogits)
 
+	activeDepth := c.cfg.DraftDepth
+	if c.governor != nil {
+		activeDepth = c.governor.CurrentDepth()
+	}
+
 	// Ensure resident drafter is initialized
 	c.ensureDrafterLocked()
 
-	// 2. Fallback mode: smoothly execute single serial step
-	if c.inFallback || c.drafter == nil || c.cfg.DraftDepth < 2 {
+	// 2. Fallback or target-only mode: smoothly execute single serial step
+	if (c.governor != nil && activeDepth == 0) || c.inFallback || c.drafter == nil || activeDepth < 1 {
+		start := time.Now()
 		nextLogits = c.target.Step(target0)
+		elapsed := time.Since(start)
 		c.totalGenerated++
+		if c.governor != nil {
+			obs := Qwen38AdaptiveStepObservation{
+				ProposedTokens: 0,
+				AcceptedTokens: 0,
+				StepLatency:    elapsed,
+				TargetLatency:  c.targetLatency,
+			}
+			if c.stepCostFn != nil {
+				obs = c.stepCostFn(0, 0, obs)
+			}
+			_, _, _ = c.governor.ObserveStep(obs)
+		}
 		return []int{target0}, -1, nextLogits, nil
 	}
 
 	// 3. Propose K draft tokens from resident MTP head (zero host memory copies)
-	prop, pErr := c.drafter.Propose(ctx, committed, c.cfg.DraftDepth)
-	if pErr != nil || len(prop.Tokens) < 2 {
+	start := time.Now()
+	prop, pErr := c.drafter.Propose(ctx, committed, activeDepth)
+	if pErr != nil || len(prop.Tokens) < 1 {
 		nextLogits = c.target.Step(target0)
+		elapsed := time.Since(start)
 		c.totalGenerated++
+		if c.governor != nil {
+			obs := Qwen38AdaptiveStepObservation{
+				ProposedTokens: 0,
+				AcceptedTokens: 0,
+				StepLatency:    elapsed,
+				TargetLatency:  c.targetLatency,
+			}
+			if c.stepCostFn != nil {
+				obs = c.stepCostFn(0, 0, obs)
+			}
+			_, _, _ = c.governor.ObserveStep(obs)
+		}
 		return []int{target0}, -1, nextLogits, nil
 	}
 
 	drafts := prop.Tokens
-	if len(drafts) > c.cfg.DraftDepth {
-		drafts = drafts[:c.cfg.DraftDepth]
+	if len(drafts) > activeDepth {
+		drafts = drafts[:activeDepth]
 	}
 
 	draftTokens32 := make([]int32, len(drafts))
@@ -462,7 +559,20 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 				_, _, _ = c.checkpointMgr.CommitMTPDraft(c.sessionID, 0)
 			}
 			nextLogits = c.target.Step(target0)
+			elapsed := time.Since(start)
 			c.totalGenerated++
+			if c.governor != nil {
+				obs := Qwen38AdaptiveStepObservation{
+					ProposedTokens: len(drafts),
+					AcceptedTokens: 0,
+					StepLatency:    elapsed,
+					TargetLatency:  c.targetLatency,
+				}
+				if c.stepCostFn != nil {
+					obs = c.stepCostFn(len(drafts), 0, obs)
+				}
+				_, _, _ = c.governor.ObserveStep(obs)
+			}
 			return nil, target0, nextLogits, nil
 		}
 	}
@@ -471,7 +581,20 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 	snap, snapErr := c.target.PrefixSnapshot()
 	if snapErr != nil {
 		nextLogits = c.target.Step(target0)
+		elapsed := time.Since(start)
 		c.totalGenerated++
+		if c.governor != nil {
+			obs := Qwen38AdaptiveStepObservation{
+				ProposedTokens: 0,
+				AcceptedTokens: 0,
+				StepLatency:    elapsed,
+				TargetLatency:  c.targetLatency,
+			}
+			if c.stepCostFn != nil {
+				obs = c.stepCostFn(0, 0, obs)
+			}
+			_, _, _ = c.governor.ObserveStep(obs)
+		}
 		return []int{target0}, -1, nextLogits, nil
 	}
 	defer snap.Close()
@@ -508,7 +631,20 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 		}
 		_ = snap.Restore(c.target)
 		nextLogits = c.target.Step(target0)
+		elapsed := time.Since(start)
 		c.totalGenerated++
+		if c.governor != nil {
+			obs := Qwen38AdaptiveStepObservation{
+				ProposedTokens: len(drafts),
+				AcceptedTokens: 0,
+				StepLatency:    elapsed,
+				TargetLatency:  c.targetLatency,
+			}
+			if c.stepCostFn != nil {
+				obs = c.stepCostFn(len(drafts), 0, obs)
+			}
+			_, _, _ = c.governor.ObserveStep(obs)
+		}
 		return []int{target0}, -1, nextLogits, nil
 	}
 
@@ -574,10 +710,25 @@ func (c *MetalMTPCoordinator) StepRound(ctx context.Context, committed []int, bo
 
 	// 9. Advance target session with the bonus token
 	nextLogits = c.target.Step(bonusTok)
+	elapsed := time.Since(start)
 	c.totalGenerated += numAccepted + 1
 
 	// 10. Update rolling acceptance monitoring
 	c.recordAcceptanceLocked(len(drafts), numAccepted)
+
+	// 11. Update adaptive depth governor if connected
+	if c.governor != nil {
+		obs := Qwen38AdaptiveStepObservation{
+			ProposedTokens: len(drafts),
+			AcceptedTokens: numAccepted,
+			StepLatency:    elapsed,
+			TargetLatency:  c.targetLatency,
+		}
+		if c.stepCostFn != nil {
+			obs = c.stepCostFn(len(drafts), numAccepted, obs)
+		}
+		_, _, _ = c.governor.ObserveStep(obs)
+	}
 
 	return accTokens, bonusTok, nextLogits, nil
 }
@@ -669,4 +820,71 @@ func (c *MetalMTPCoordinator) Close() error {
 		c.draftSes = nil
 	}
 	return nil
+}
+
+// CurrentDraftDepth returns the currently adjudicated speculative draft depth K (0..MaxDepth).
+func (c *MetalMTPCoordinator) CurrentDraftDepth() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.governor != nil {
+		return c.governor.CurrentDepth()
+	}
+	if c.inFallback {
+		return 0
+	}
+	return c.cfg.DraftDepth
+}
+
+// AdaptiveGovernor returns the currently configured adaptive depth governor, or nil if none.
+func (c *MetalMTPCoordinator) AdaptiveGovernor() *Qwen38MTPAdaptiveDepthGovernor {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.governor
+}
+
+// SetAdaptiveGovernor binds an adaptive depth governor to dynamically control draft depth K.
+func (c *MetalMTPCoordinator) SetAdaptiveGovernor(gov *Qwen38MTPAdaptiveDepthGovernor) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.governor = gov
+	if gov != nil && c.draftState != nil {
+		c.draftState.DraftDepth = gov.CurrentDepth()
+	}
+}
+
+// SetStepCostFn registers a custom cost function for deterministic testing or profiling.
+func (c *MetalMTPCoordinator) SetStepCostFn(fn StepCostFn) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stepCostFn = fn
+}
+
+// SetTargetLatency sets the baseline serial target decode latency for speedup calculations.
+func (c *MetalMTPCoordinator) SetTargetLatency(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.targetLatency = d
+}
+
+// DowngradeReason reports the typed downgrade reason (e.g. Qwen38MTPNetLatencyRegressed on target-only escape).
+func (c *MetalMTPCoordinator) DowngradeReason() Qwen38MTPDowngradeReason {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.governor != nil {
+		return c.governor.DowngradeReason()
+	}
+	if c.inFallback {
+		return Qwen38MTPNetLatencyRegressed
+	}
+	return Qwen38MTPEligible
+}
+
+// Engine reports the active execution engine (Qwen38EngineMTP or Qwen38EngineTargetDecode).
+func (c *MetalMTPCoordinator) Engine() Qwen38MTPEngine {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if (c.governor != nil && c.governor.CurrentDepth() == 0) || c.inFallback {
+		return Qwen38EngineTargetDecode
+	}
+	return Qwen38EngineMTP
 }
