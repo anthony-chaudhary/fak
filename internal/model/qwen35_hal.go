@@ -418,6 +418,19 @@ func (s *Session) derivedWeightHAL(key string, shape []int, data []float32) comp
 	})
 }
 
+func (s *Session) tokenEmbeddingHAL() compute.Tensor {
+	if s.M != nil && s.M.Q2KEmbedding != nil {
+		return s.cachedImmutableWeight("model.embed_tokens.weight#q2k", "f32:model.embed_tokens.weight#q2k", func() compute.Tensor {
+			data, err := s.M.Q2KEmbedding.DequantizeTable()
+			if err != nil {
+				panic(fmt.Sprintf("model: dequantize Q2_K embedding: %v", err))
+			}
+			return s.uploadHostF32([]int{s.M.Q2KEmbedding.Vocab(), s.M.Q2KEmbedding.Hidden()}, data, compute.MemoryWeights, "hal-weight model.embed_tokens.weight#q2k")
+		})
+	}
+	return s.weightHAL("model.embed_tokens.weight")
+}
+
 func splitQwen35HeadInterleavedRows(src []float32, nHeads, headDim, rowWidth int) (query, gate []float32) {
 	rows := nHeads * headDim
 	query = make([]float32, rows*rowWidth)
@@ -534,11 +547,27 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 	}
 
 	if cfg.QKNorm {
-		qHost := s.readQwen35FullAttention(layer, "full-attention q-norm read", q)
-		kHost := s.readQwen35FullAttention(layer, "full-attention k-norm read", kRaw)
-		s.M.applyLayerQKNorm(layer, qHost, kHost)
-		q = s.uploadHostF32([]int{nH * hd}, qHost, compute.MemoryActivation, "qwen35-full-attn-norm-q")
-		kRaw = s.uploadHostF32([]int{nKV * hd}, kHost, compute.MemoryActivation, "qwen35-full-attn-norm-k")
+		dispatched := false
+		if !cfg.LayerNorm && !cfg.QKNormPerHeadWeight && s.M.hasWeight(p("self_attn.q_norm.weight")) && s.M.hasWeight(p("self_attn.k_norm.weight")) {
+			qkEps := float32(cfg.qkNormEps())
+			qWeight := s.normWeightHAL(p("self_attn.q_norm.weight"))
+			kWeight := s.normWeightHAL(p("self_attn.k_norm.weight"))
+			if qWeight.Buf() != nil && kWeight.Buf() != nil {
+				qNorm := be.RMSNorm(q, qWeight, qkEps)
+				kNorm := be.RMSNorm(kRaw, kWeight, qkEps)
+				if qNorm.Buf() != nil && kNorm.Buf() != nil {
+					q, kRaw = qNorm, kNorm
+					dispatched = true
+				}
+			}
+		}
+		if !dispatched {
+			qHost := s.readQwen35FullAttention(layer, "full-attention q-norm read", q)
+			kHost := s.readQwen35FullAttention(layer, "full-attention k-norm read", kRaw)
+			s.M.applyLayerQKNorm(layer, qHost, kHost)
+			q = s.uploadHostF32([]int{nH * hd}, qHost, compute.MemoryActivation, "qwen35-full-attn-norm-q")
+			kRaw = s.uploadHostF32([]int{nKV * hd}, kHost, compute.MemoryActivation, "qwen35-full-attn-norm-k")
+		}
 	}
 
 	kvLayer := qwen35HALKVLayer(cfg, layer)
@@ -601,7 +630,7 @@ func (s *Session) qwen35SequencePrefillRequest(ids []int, needLogits bool) compu
 	nK, nV, kHd, vHd, _, _, _ := cfg.linearAttnDims()
 	req := compute.Qwen35SequencePrefillRequest{
 		Path: compute.Qwen35SequencePrefillPath, TokenIDs: append([]int(nil), ids...), StartPos: s.halKV.Len(),
-		TokenEmbedding: s.weightHAL("model.embed_tokens.weight"), OutputNorm: s.normWeightHAL("model.norm.weight"), Output: s.lmHeadMatHAL(),
+		TokenEmbedding: s.tokenEmbeddingHAL(), OutputNorm: s.normWeightHAL("model.norm.weight"), Output: s.lmHeadMatHAL(),
 		Layers: make([]compute.Qwen35SequenceLayer, cfg.NumLayers), States: make([]compute.Qwen35SequenceState, cfg.NumLayers), KV: s.halKV,
 		Hidden: cfg.HiddenSize, Intermediate: cfg.IntermediateSize, NumHeads: cfg.NumHeads, NumKVHeads: cfg.NumKVHeads,
 		HeadDim: cfg.HeadDim, RotaryDim: cfg.rotaryDim(), NumKeyHeads: nK, NumValueHeads: nV, KeyHeadDim: kHd, ValueHeadDim: vHd,
@@ -645,7 +674,13 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 	if s == nil || s.M == nil || s.Backend == nil || !s.M.Cfg.IsQwen35Hybrid() || len(ids) < 2 {
 		return compute.Qwen35SequencePrefillResult{}, false, nil
 	}
+	embedShape := []int{s.M.Cfg.VocabSize, s.M.Cfg.HiddenSize}
 	if s.M.Q2KEmbedding != nil {
+		embedShape = []int{s.M.Q2KEmbedding.Vocab(), s.M.Q2KEmbedding.Hidden()}
+	} else if meta, ok := s.M.manifest["model.embed_tokens.weight"]; ok && len(meta.Shape) == 2 {
+		embedShape = meta.Shape
+	}
+	if !deviceEmbeddingTableFits(s.Backend, embedShape) {
 		return compute.Qwen35SequencePrefillResult{}, false, nil
 	}
 	if _, isSplit := s.validateDenseGPULayers(); isSplit {

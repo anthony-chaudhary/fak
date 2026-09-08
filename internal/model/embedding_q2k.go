@@ -89,3 +89,18 @@ func (q *Q2KEmbedding) GatherRow(tokenID int, dst []float32, scale float32) erro
 	}
 	return nil
 }
+
+// DequantizeTable dequantizes all rows into a float32 slice of length vocab * hidden.
+func (q *Q2KEmbedding) DequantizeTable() ([]float32, error) {
+	if q == nil {
+		return nil, fmt.Errorf("model: Q2KEmbedding is nil")
+	}
+	dst := make([]float32, q.vocab*q.hidden)
+	for tokenID := 0; tokenID < q.vocab; tokenID++ {
+		if err := q.GatherRow(tokenID, dst[tokenID*q.hidden:(tokenID+1)*q.hidden], 1.0); err != nil {
+			return nil, err
+		}
+	}
+	return dst, nil
+}
+

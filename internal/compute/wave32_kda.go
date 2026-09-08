@@ -1304,20 +1304,99 @@ func wave32GatedDeltaNetStepGo(
 	}
 }
 
+// Qwen35GDNTiledTransposeShader is the canonical compute shader identifier for
+// DeltaNet Conv-State Transposed Concat (2D tiled transpose) on RDNA 3.5 (gfx1151).
+const Qwen35GDNTiledTransposeShader = "qwen35_gdn_tiled_transpose"
+
+// TiledTransposePushConstants specifies the push constant block passed to the
+// qwen35_gdn_tiled_transpose Vulkan compute shader.
+type TiledTransposePushConstants struct {
+	Width  int32 `json:"width"`
+	Height int32 `json:"height"`
+}
+
+// TiledTransposeShaderDescriptor captures the Vulkan compute pipeline configuration,
+// workgroup layout, LDS shared memory allocation, push constants, and dispatch geometry for
+// 2D tiled channel transpose on AMD Strix Halo (gfx1151).
+type TiledTransposeShaderDescriptor struct {
+	ShaderName       string                      `json:"shader_name"`
+	TargetArch       string                      `json:"target_arch"`
+	TileT            int                         `json:"tile_t"`
+	TileC            int                         `json:"tile_c"`
+	LocalSizeX       int                         `json:"local_size_x"`
+	LocalSizeY       int                         `json:"local_size_y"`
+	LocalSizeZ       int                         `json:"local_size_z"`
+	LDSBankStride    int                         `json:"lds_bank_stride"`    // 33 floats (Pad-1/Pad-2 bank conflict elimination)
+	SharedMemorySize int                         `json:"shared_memory_size"` // in bytes (e.g. 32 * 33 * 4 = 4224 bytes)
+	PushConstants    TiledTransposePushConstants `json:"push_constants"`
+	GridX            int                         `json:"grid_x"`
+	GridY            int                         `json:"grid_y"`
+	GridZ            int                         `json:"grid_z"`
+	Bindings         []string                    `json:"bindings"`
+}
+
+// NewTiledTransposeShaderDescriptor constructs a hardware-aligned shader descriptor for
+// transposing an activation matrix of [height, width] on RDNA 3.5 (gfx1151).
+func NewTiledTransposeShaderDescriptor(width, height int, cfg TiledChannelTransposeConfig) TiledTransposeShaderDescriptor {
+	tileT := cfg.TileT
+	if tileT <= 0 {
+		tileT = Wave32WavefrontSize
+	}
+	tileC := cfg.TileC
+	if tileC <= 0 {
+		tileC = Wave32WavefrontSize
+	}
+	stride := cfg.LDSBankStride
+	if stride <= 0 {
+		stride = tileC + 1
+	}
+	gridX := (width + tileC - 1) / tileC
+	gridY := (height + tileT - 1) / tileT
+	return TiledTransposeShaderDescriptor{
+		ShaderName:       Qwen35GDNTiledTransposeShader,
+		TargetArch:       Wave32TargetArch,
+		TileT:            tileT,
+		TileC:            tileC,
+		LocalSizeX:       32,
+		LocalSizeY:       8,
+		LocalSizeZ:       1,
+		LDSBankStride:    stride,
+		SharedMemorySize: tileT * stride * 4,
+		PushConstants: TiledTransposePushConstants{
+			Width:  int32(width),
+			Height: int32(height),
+		},
+		GridX:    gridX,
+		GridY:    gridY,
+		GridZ:    1,
+		Bindings: []string{
+			"set=0,binding=0:readonly buffer InBuf",
+			"set=0,binding=1:writeonly buffer OutBuf",
+		},
+	}
+}
+
 // TiledChannelTransposeConfig configures 2D tiled memory channel transpose and depthwise convolution
 // for DeltaNet linear attention on AMD Strix Halo (gfx1151 / Wave32) and Zen 5 AVX-512 architectures.
 type TiledChannelTransposeConfig struct {
 	TargetArch    string `json:"target_arch"`     // "gfx1151", "zen5-avx512", or "generic"
+	ShaderName    string `json:"shader_name"`     // Qwen35GDNTiledTransposeShader
 	TileT         int    `json:"tile_t"`          // Sequence/time tile dimension (default 32)
 	TileC         int    `json:"tile_c"`          // Channel tile dimension (default 32)
 	LDSBankStride int    `json:"lds_bank_stride"` // LDS allocated row pitch (33 to eliminate 32-way bank conflicts)
 	LDSBanks      int    `json:"lds_banks"`       // Hardware bank count (32 on RDNA 3.5)
 }
 
+// Descriptor returns the TiledTransposeShaderDescriptor for the given matrix dimensions.
+func (cfg TiledChannelTransposeConfig) Descriptor(width, height int) TiledTransposeShaderDescriptor {
+	return NewTiledTransposeShaderDescriptor(width, height, cfg)
+}
+
 // DefaultTiledChannelTransposeConfig creates the default hardware-aligned config for gfx1151 / Wave32.
 func DefaultTiledChannelTransposeConfig() TiledChannelTransposeConfig {
 	return TiledChannelTransposeConfig{
 		TargetArch:    Wave32TargetArch,
+		ShaderName:    Qwen35GDNTiledTransposeShader,
 		TileT:         Wave32WavefrontSize,     // 32
 		TileC:         Wave32WavefrontSize,     // 32
 		LDSBankStride: Wave32WavefrontSize + 1, // 33 (+1 float padding per row)
@@ -1328,14 +1407,15 @@ func DefaultTiledChannelTransposeConfig() TiledChannelTransposeConfig {
 // TiledChannelTransposeAudit records memory coalescing, bank conflict metrics, and DRAM traffic
 // for the 2D tiled channel transpose and causal depthwise convolution pipeline.
 type TiledChannelTransposeAudit struct {
-	TokensProcessed     int   `json:"tokens_processed"`
-	ChannelsProcessed   int   `json:"channels_processed"`
-	CoalescedReadBytes  int64 `json:"coalesced_read_bytes"`
-	CoalescedWriteBytes int64 `json:"coalesced_write_bytes"`
-	LDSBankConflicts    int64 `json:"lds_bank_conflicts"`
-	DRAMReadsEliminated int64 `json:"dram_reads_eliminated"`
-	DRAMReadBytes       int64 `json:"dram_read_bytes"`
-	DRAMWriteBytes      int64 `json:"dram_write_bytes"`
+	TokensProcessed     int                             `json:"tokens_processed"`
+	ChannelsProcessed   int                             `json:"channels_processed"`
+	CoalescedReadBytes  int64                           `json:"coalesced_read_bytes"`
+	CoalescedWriteBytes int64                           `json:"coalesced_write_bytes"`
+	LDSBankConflicts    int64                           `json:"lds_bank_conflicts"`
+	DRAMReadsEliminated int64                           `json:"dram_reads_eliminated"`
+	DRAMReadBytes       int64                           `json:"dram_read_bytes"`
+	DRAMWriteBytes      int64                           `json:"dram_write_bytes"`
+	ShaderDescriptor    *TiledTransposeShaderDescriptor `json:"shader_descriptor,omitempty"`
 }
 
 // AssertZeroBankConflicts verifies that the LDS tile access pattern incurred zero bank conflicts.
@@ -1344,6 +1424,75 @@ func (a TiledChannelTransposeAudit) AssertZeroBankConflicts() error {
 		return fmt.Errorf("compute: LDS bank conflicts detected: %d (want 0)", a.LDSBankConflicts)
 	}
 	return nil
+}
+
+// ExecuteTiledTransposeShader executes the 2D tiled transpose shader logic modeled on
+// qwen35_gdn_tiled_transpose.comp, performing workgroup dispatch, coalesced global reads,
+// barrier synchronization across shared memory tile[32][33], and coalesced global writes.
+func ExecuteTiledTransposeShader(
+	input []float32,
+	width, height int,
+	desc TiledTransposeShaderDescriptor,
+) ([]float32, error) {
+	if width <= 0 || height <= 0 {
+		return nil, fmt.Errorf("compute: invalid transpose dimensions width=%d, height=%d", width, height)
+	}
+	expectedLen := width * height
+	if len(input) != expectedLen {
+		return nil, fmt.Errorf("compute: input length %d != width*height %d", len(input), expectedLen)
+	}
+
+	stride := desc.LDSBankStride
+	if stride <= 0 {
+		stride = 33
+	}
+
+	output := make([]float32, expectedLen)
+	// Emulate workgroup execution across the 2D dispatch grid
+	for gy := 0; gy < desc.GridY; gy++ {
+		for gx := 0; gx < desc.GridX; gx++ {
+			tileInX := gx * 32
+			tileInY := gy * 32
+
+			// Shared memory tile[32][33] per workgroup (stride 33 floats)
+			tile := make([]float32, 32*stride)
+
+			// Workgroup of 32x8 threads: local_size_x = 32, local_size_y = 8
+			// Coalesced global reads along X into padded shared memory tile
+			for ly := 0; ly < 8; ly++ {
+				for lx := 0; lx < 32; lx++ {
+					for j := 0; j < 32; j += 8 {
+						y := ly + j
+						inX := tileInX + lx
+						inY := tileInY + y
+						if inX < width && inY < height {
+							tile[y*stride+lx] = input[inY*width+inX]
+						} else {
+							tile[y*stride+lx] = 0.0
+						}
+					}
+				}
+			}
+
+			// Barrier: tile is fully populated before any thread reads transposed values
+
+			// Coalesced global writes along X of transposed elements
+			for ly := 0; ly < 8; ly++ {
+				for lx := 0; lx < 32; lx++ {
+					for j := 0; j < 32; j += 8 {
+						y := ly + j
+						outX := tileInY + lx
+						outY := tileInX + y
+						if outX < height && outY < width {
+							output[outY*height+outX] = tile[lx*stride+y]
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return output, nil
 }
 
 // TiledChannelTranspose transposes an activation tensor from token-major [T, convDim]
@@ -1363,6 +1512,11 @@ func TiledChannelTranspose(
 	expectedLen := T * convDim
 	if len(input) != expectedLen {
 		return nil, fmt.Errorf("compute: input length %d != T*convDim %d", len(input), expectedLen)
+	}
+
+	desc := NewTiledTransposeShaderDescriptor(convDim, T, cfg)
+	if audit != nil {
+		audit.ShaderDescriptor = &desc
 	}
 
 	tileT := cfg.TileT
@@ -1474,6 +1628,11 @@ func TiledChannelTransposeInverse(
 	expectedLen := convDim * T
 	if len(input) != expectedLen {
 		return nil, fmt.Errorf("compute: input length %d != convDim*T %d", len(input), expectedLen)
+	}
+
+	desc := NewTiledTransposeShaderDescriptor(T, convDim, cfg)
+	if audit != nil {
+		audit.ShaderDescriptor = &desc
 	}
 
 	tileC := cfg.TileC

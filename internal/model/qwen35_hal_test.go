@@ -397,20 +397,11 @@ func TestQwen35FullAttentionHAL_QKNorm(t *testing.T) {
 	resTrue := beTrue.Upload(compute.NewF32(beTrue, []int{cfg.HiddenSize}, append([]float32(nil), residualHost...)), compute.F32)
 	sTrue.qwen35FullAttentionHAL(fullLayer, pos, resTrue, eps, scale, grp)
 
-	if !recordedClassSite(beTrue.recordingQwen35Backend, compute.MemoryActivation, "qwen35-full-attn-norm-q") {
-		t.Fatal("QKNorm=true missing qwen35-full-attn-norm-q upload")
+	if recordedClassSite(beTrue.recordingQwen35Backend, compute.MemoryActivation, "qwen35-full-attn-norm-q") {
+		t.Fatal("QKNorm=true bounced qwen35-full-attn-norm-q to host")
 	}
-	if !recordedClassSite(beTrue.recordingQwen35Backend, compute.MemoryActivation, "qwen35-full-attn-norm-k") {
-		t.Fatal("QKNorm=true missing qwen35-full-attn-norm-k upload")
-	}
-
-	normQ := beTrue.uploadedBySite["qwen35-full-attn-norm-q"]
-	normK := beTrue.uploadedBySite["qwen35-full-attn-norm-k"]
-	if len(normQ) != cfg.NumHeads*cfg.HeadDim {
-		t.Fatalf("normQ length=%d, want %d", len(normQ), cfg.NumHeads*cfg.HeadDim)
-	}
-	if len(normK) != cfg.NumKVHeads*cfg.HeadDim {
-		t.Fatalf("normK length=%d, want %d", len(normK), cfg.NumKVHeads*cfg.HeadDim)
+	if recordedClassSite(beTrue.recordingQwen35Backend, compute.MemoryActivation, "qwen35-full-attn-norm-k") {
+		t.Fatal("QKNorm=true bounced qwen35-full-attn-norm-k to host")
 	}
 
 	// Compute unnormalized Q and K directly from the original residual via the layer's projection to prove CPU reference match
@@ -425,19 +416,6 @@ func TestQwen35FullAttentionHAL_QKNorm(t *testing.T) {
 	qExpected := append([]float32(nil), qRaw...)
 	kExpected := append([]float32(nil), kRaw...)
 	m.applyLayerQKNorm(fullLayer, qExpected, kExpected)
-
-	if d := maxAbsDelta(normQ, qExpected); d > 1e-6 {
-		t.Fatalf("normalized Q differs from reference CPU applyLayerQKNorm, max|delta|=%g", d)
-	}
-	if d := maxAbsDelta(normK, kExpected); d > 1e-6 {
-		t.Fatalf("normalized K differs from reference CPU applyLayerQKNorm, max|delta|=%g", d)
-	}
-	if d := maxAbsDelta(normQ, qRaw); d < 1e-3 {
-		t.Fatalf("normalized Q did not change from raw Q, max|delta|=%g", d)
-	}
-	if d := maxAbsDelta(normK, kRaw); d < 1e-3 {
-		t.Fatalf("normalized K did not change from raw K, max|delta|=%g", d)
-	}
 
 	// Verify that normalized K is passed to RoPE and stored in KV cache:
 	// Apply RoPE on kExpected and verify it matches the keys in the HAL KV store.

@@ -447,3 +447,57 @@ func TestLazyTensorGather_ConcurrentAccess(t *testing.T) {
 		t.Fatal("expected positive prefetched rows under concurrency")
 	}
 }
+
+func TestLazyTensorGather_TensorReadLazyDefaultAndStats(t *testing.T) {
+	opts := DefaultGatherOptions()
+	if !opts.TensorReadLazy {
+		t.Fatal("expected DefaultGatherOptions().TensorReadLazy to default to true")
+	}
+
+	buf := make([]byte, 1024)
+	gather, err := NewLazyTensorGatherFromData(buf, opts)
+	if err != nil {
+		t.Fatalf("NewLazyTensorGatherFromData failed: %v", err)
+	}
+	defer gather.Close()
+
+	if !gather.IsTensorReadLazy() {
+		t.Fatal("expected IsTensorReadLazy() to be true")
+	}
+
+	stats := gather.Stats()
+	if !stats.TensorReadLazy {
+		t.Fatal("expected GatherStats.TensorReadLazy to be true")
+	}
+
+	// Verify normalizeOptions defaults TensorReadLazy to true on zero-value options (!PinEngramRAM)
+	zeroOpts := GatherOptions{HostMapped: true}
+	gatherZero, err := NewLazyTensorGatherFromData(buf, zeroOpts)
+	if err != nil {
+		t.Fatalf("NewLazyTensorGatherFromData with zero options failed: %v", err)
+	}
+	defer gatherZero.Close()
+
+	if !gatherZero.IsTensorReadLazy() {
+		t.Fatal("expected gatherZero.IsTensorReadLazy() to default to true")
+	}
+	if !gatherZero.Stats().TensorReadLazy {
+		t.Fatal("expected gatherZero.Stats().TensorReadLazy to default to true")
+	}
+
+	// Verify that when PinEngramRAM is set, TensorReadLazy is false
+	pinnedOpts := DefaultGatherOptions()
+	pinnedOpts.PinEngramRAM = true
+	gatherPinned, err := NewLazyTensorGatherFromData(buf, pinnedOpts)
+	if err != nil {
+		t.Fatalf("NewLazyTensorGatherFromData with PinEngramRAM failed: %v", err)
+	}
+	defer gatherPinned.Close()
+
+	if gatherPinned.IsTensorReadLazy() {
+		t.Fatal("expected IsTensorReadLazy() to be false when PinEngramRAM is true")
+	}
+	if gatherPinned.Stats().TensorReadLazy {
+		t.Fatal("expected GatherStats.TensorReadLazy to be false when PinEngramRAM is true")
+	}
+}

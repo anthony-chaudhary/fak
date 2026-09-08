@@ -81,6 +81,9 @@ func TestQ2KEmbeddingBoundsAndErrors(t *testing.T) {
 	if err := nilQ2K.GatherRow(0, buf, 1.0); err == nil {
 		t.Error("GatherRow on nil Q2KEmbedding want error, got nil")
 	}
+	if _, err := nilQ2K.DequantizeTable(); err == nil {
+		t.Error("DequantizeTable on nil Q2KEmbedding want error, got nil")
+	}
 
 	// Invalid dimensions
 	if _, err := NewQ2KEmbedding(raw, 0, hidden); err == nil {
@@ -377,43 +380,44 @@ func TestSessionGuardsQ2KEmbedding(t *testing.T) {
 	sHAL.validateDenseGPULayers()
 }
 
-func TestHALTokenInputUploadsDecodedRowAndDeclinesSequence(t *testing.T) {
+func TestQ2KEmbeddingDequantizeTable(t *testing.T) {
+	var nilQ2K *Q2KEmbedding
+	if _, err := nilQ2K.DequantizeTable(); err == nil {
+		t.Fatal("DequantizeTable on nil Q2KEmbedding want error, got nil")
+	}
+
 	const (
-		vocab  = 4
-		hidden = 256
+		vocab  = 6
+		hidden = 512 // 2 superblocks per row
 	)
 	raw := makeTestQ2KPayload(vocab, hidden)
 	q2k, err := NewQ2KEmbedding(raw, vocab, hidden)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("NewQ2KEmbedding: %v", err)
 	}
 
-	m := &Model{
-		Cfg: Config{
-			ModelType:  "qwen35",
-			VocabSize:  vocab,
-			HiddenSize: hidden,
-			NumLayers:  1,
-		},
-		manifest:     map[string]tensorMeta{},
-		Q2KEmbedding: q2k,
-	}
-
-	s := &Session{
-		M:       m,
-		Backend: compute.Default(),
-	}
-
-	// tryQwen35SequencePrefill must decline
-	res, used, err := s.tryQwen35SequencePrefill([]int{0, 1}, true)
-	if used {
-		t.Error("tryQwen35SequencePrefill must decline (used=false) when Q2KEmbedding is present")
-	}
+	table, err := q2k.DequantizeTable()
 	if err != nil {
-		t.Errorf("tryQwen35SequencePrefill unexpected error: %v", err)
+		t.Fatalf("DequantizeTable: %v", err)
 	}
-	if res.Tokens != 0 {
-		t.Errorf("tryQwen35SequencePrefill returned non-zero tokens: %d", res.Tokens)
+	if len(table) != vocab*hidden {
+		t.Fatalf("table length = %d, want %d", len(table), vocab*hidden)
+	}
+
+	for tokenID := 0; tokenID < vocab; tokenID++ {
+		row := make([]float32, hidden)
+		if err := q2k.GatherRow(tokenID, row, 1.0); err != nil {
+			t.Fatalf("GatherRow(%d): %v", tokenID, err)
+		}
+		tableRow := table[tokenID*hidden : (tokenID+1)*hidden]
+		for i := 0; i < hidden; i++ {
+			if math.IsNaN(float64(tableRow[i])) || math.IsInf(float64(tableRow[i]), 0) {
+				t.Fatalf("token %d elem %d is not finite: %v", tokenID, i, tableRow[i])
+			}
+			if tableRow[i] != row[i] {
+				t.Fatalf("token %d elem %d mismatch: table=%v, GatherRow=%v", tokenID, i, tableRow[i], row[i])
+			}
+		}
 	}
 }
 

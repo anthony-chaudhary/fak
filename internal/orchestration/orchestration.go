@@ -90,6 +90,7 @@ type TaskSpec struct {
 	Schema       string                `json:"schema"`
 	ID           string                `json:"id"`
 	WorkClass    WorkClass             `json:"work_class,omitempty"`
+	FormalPacket *FormalPacket         `json:"formal_packet,omitempty"`
 	Attended     *bool                 `json:"attended,omitempty"`
 	MaxWorkers   *int                  `json:"max_workers,omitempty"`
 	ExactWorkers *int                  `json:"exact_workers,omitempty"`
@@ -297,6 +298,7 @@ type WorkflowPlan struct {
 	Interaction  InteractionPolicy  `json:"interaction"`
 	EngineRef    string             `json:"engine_ref"`
 	SOLRoute     SOLRoute           `json:"sol_route"`
+	AstraRoute   *AstraRoute        `json:"astra_route,omitempty"`
 	Degradations []Degradation      `json:"degradations"`
 	Explanation  []string           `json:"explanation"`
 	Fast         *FastExecutionPlan `json:"fast,omitempty"`
@@ -555,6 +557,15 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 		engine = "executionroute:auto"
 	}
 	solRoute := SelectSOLRoute("", resolvedProfile, task.WorkClass, "gpt-5.6-sol")
+	astraRoute := AssessAstraRoute(task)
+	if astraRoute != nil && astraRoute.Eligible {
+		solRoute.WorkerModel = AstraWorkerModel
+		solRoute.WorkerReasoningEffort = AstraWorkerEffort
+		prov = append(prov,
+			Provenance{"sol_route.worker_model", AstraRouteSourceFormalPacket, AstraWorkerModel},
+			Provenance{"sol_route.worker_reasoning_effort", AstraRouteSourceFormalPacket, AstraWorkerEffort},
+		)
+	}
 	if task.Pins.Effort != "" {
 		effort := strings.ToLower(strings.TrimSpace(task.Pins.Effort))
 		if effort != "low" && effort != "medium" && effort != "high" && effort != "xhigh" {
@@ -564,16 +575,25 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 		solRoute.WorkerReasoningEffort = effort
 		solRoute.Decision += "; effort pinned by operator to " + effort
 		prov = append(prov, Provenance{"fast.effort", "task.pin", effort})
+		if astraRoute != nil {
+			astraRoute.ReasoningEffort = effort
+			astraRoute.ReasoningEffortSource = AstraRouteSourceTaskPin
+		}
 	}
 	if task.Pins.Model != "" {
 		solRoute.WorkerModel = task.Pins.Model
 		prov = append(prov, Provenance{"fast.model", "task.pin", task.Pins.Model})
+		if astraRoute != nil {
+			astraRoute.Model = task.Pins.Model
+			astraRoute.Source = AstraRouteSourceTaskPin
+			astraRoute.Selected = task.Pins.Model == AstraWorkerModel
+		}
 	}
 	explain := []string{fmt.Sprintf("profile %s resolved from %s work", resolvedProfile, task.WorkClass), fmt.Sprintf("budget capped at %d workers and %d tokens", workers, tokens), fmt.Sprintf("task execution remains delegated to taskmgr with engine reference %s", engine)}
 	for _, d := range deg {
 		explain = append(explain, "degraded: "+d.Reason)
 	}
-	plan := WorkflowPlan{Schema: SchemaVersion, Profile: resolvedProfile, TaskID: task.ID, WorkClass: task.WorkClass, Roles: roles, DAG: dag, Budget: Budget{workers, tokens}, Leases: LeasePolicy{"taskmgr", multi}, Witness: WitnessPolicy{witness, witness}, Reconcile: ReconcilePolicy{multi, "effect-readback"}, Interaction: InteractionPolicy{attended, multi, multi}, EngineRef: engine, SOLRoute: solRoute, Degradations: deg, Explanation: explain, Width: width, Warnings: witnessWarnings}
+	plan := WorkflowPlan{Schema: SchemaVersion, Profile: resolvedProfile, TaskID: task.ID, WorkClass: task.WorkClass, Roles: roles, DAG: dag, Budget: Budget{workers, tokens}, Leases: LeasePolicy{"taskmgr", multi}, Witness: WitnessPolicy{witness, witness}, Reconcile: ReconcilePolicy{multi, "effect-readback"}, Interaction: InteractionPolicy{attended, multi, multi}, EngineRef: engine, SOLRoute: solRoute, AstraRoute: astraRoute, Degradations: deg, Explanation: explain, Width: width, Warnings: witnessWarnings}
 	if err := NormalizeWorkflowPlanAccess(&plan); err != nil {
 		return Resolution{}, err
 	}

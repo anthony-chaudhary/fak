@@ -148,6 +148,74 @@ func TestQwen35SequencePrefillNoCapabilityFallsBack(t *testing.T) {
 	}
 }
 
+type cappedSequencePrefillBackend struct {
+	*sequencePrefillBackend
+	maxBufferBytes int64
+}
+
+func (b *cappedSequencePrefillBackend) MaxWeightBufferBytes() int64 {
+	return b.maxBufferBytes
+}
+
+func TestQwen35SequencePrefillDeclinesWhenEmbeddingExceedsDeviceCap(t *testing.T) {
+	t.Run("Standard", func(t *testing.T) {
+		m := NewSynthetic(qwen35HybridTestCfg())
+		base := newSequencePrefillBackend(m)
+		// Set cap smaller than the model's VocabSize * HiddenSize * 4
+		be := &cappedSequencePrefillBackend{
+			sequencePrefillBackend: base,
+			maxBufferBytes:         1024,
+		}
+		s, err := m.NewBackendSessionChecked(be)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// tryQwen35SequencePrefill should decline (advertised=false) and fall back cleanly without calling sequence backend
+		_, advertised, err := s.tryQwen35SequencePrefill([]int{3, 7}, false)
+		if err != nil {
+			t.Fatalf("tryQwen35SequencePrefill: %v", err)
+		}
+		if advertised {
+			t.Fatalf("expected sequence prefill to decline oversized embedding table, but got advertised=true")
+		}
+		if base.calls != 0 {
+			t.Fatalf("expected 0 sequence prefill calls on declined oversized embedding, got %d", base.calls)
+		}
+	})
+
+	t.Run("Q2K", func(t *testing.T) {
+		cfg := qwen35HybridTestCfg()
+		cfg.HiddenSize = 256
+		m := NewSynthetic(cfg)
+		raw := makeTestQ2KPayload(m.Cfg.VocabSize, m.Cfg.HiddenSize)
+		q2k, err := NewQ2KEmbedding(raw, m.Cfg.VocabSize, m.Cfg.HiddenSize)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.Q2KEmbedding = q2k
+		delete(m.manifest, "model.embed_tokens.weight")
+		base := newSequencePrefillBackend(m)
+		be := &cappedSequencePrefillBackend{
+			sequencePrefillBackend: base,
+			maxBufferBytes:         1024,
+		}
+		s, err := m.NewBackendSessionChecked(be)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, advertised, err := s.tryQwen35SequencePrefill([]int{3, 7}, false)
+		if err != nil {
+			t.Fatalf("tryQwen35SequencePrefill: %v", err)
+		}
+		if advertised {
+			t.Fatalf("expected sequence prefill to decline oversized Q2_K embedding table, but got advertised=true")
+		}
+		if base.calls != 0 {
+			t.Fatalf("expected 0 sequence prefill calls on declined oversized Q2_K embedding, got %d", base.calls)
+		}
+	})
+}
+
 func TestQwen35SequencePrefillAdvertisedFailuresCloseWithoutScalarReplay(t *testing.T) {
 	m := NewSynthetic(qwen35HybridTestCfg())
 	injected := errors.New("sequence injected failure")
@@ -378,3 +446,70 @@ func TestQwen35SequencePrefill_PathAttributionAndStepSync(t *testing.T) {
 		}
 	})
 }
+
+func TestQwen35SequencePrefill_Q2KEmbedding(t *testing.T) {
+	cfg := qwen35HybridTestCfg()
+	cfg.HiddenSize = 256
+	cfg.NumHeads = 4
+	cfg.NumKVHeads = 2
+	cfg.HeadDim = 64
+	cfg.IntermediateSize = 512
+	cfg.LinearKeyHeadDim = 64
+	cfg.LinearNumKeyHeads = 2
+	cfg.LinearValueHeadDim = 64
+	cfg.LinearNumValueHeads = 4
+	cfg.VocabSize = 16
+
+	m := NewSynthetic(cfg)
+	raw := makeTestQ2KPayload(cfg.VocabSize, cfg.HiddenSize)
+	q2k, err := NewQ2KEmbedding(raw, cfg.VocabSize, cfg.HiddenSize)
+	if err != nil {
+		t.Fatalf("NewQ2KEmbedding: %v", err)
+	}
+	m.Q2KEmbedding = q2k
+	m.manifest["lm_head.weight"] = m.manifest["model.embed_tokens.weight"]
+	delete(m.manifest, "model.embed_tokens.weight")
+
+	be := newSequencePrefillBackend(m)
+	s, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatalf("NewBackendSessionChecked: %v", err)
+	}
+	defer s.Close()
+
+	ids := []int{1, 5, 9}
+	res, used, err := s.tryQwen35SequencePrefill(ids, true)
+	if err != nil {
+		t.Fatalf("tryQwen35SequencePrefill error: %v", err)
+	}
+	if !used {
+		t.Fatal("tryQwen35SequencePrefill returned used=false with Q2KEmbedding and supported backend")
+	}
+	if res.Tokens != len(ids) {
+		t.Fatalf("res.Tokens = %d, want %d", res.Tokens, len(ids))
+	}
+	if be.calls != 1 {
+		t.Fatalf("backend calls = %d, want 1", be.calls)
+	}
+
+	req := be.requests[0]
+	if req.TokenEmbedding.Buf() == nil {
+		t.Fatal("request TokenEmbedding buffer is nil")
+	}
+	if len(req.TokenEmbedding.Shape) != 2 || req.TokenEmbedding.Shape[0] != cfg.VocabSize || req.TokenEmbedding.Shape[1] != cfg.HiddenSize {
+		t.Fatalf("request TokenEmbedding shape = %v, want [%d, %d]", req.TokenEmbedding.Shape, cfg.VocabSize, cfg.HiddenSize)
+	}
+
+	gotEmbedding := be.Read(req.TokenEmbedding)
+	wantEmbedding, err := q2k.DequantizeTable()
+	if err != nil {
+		t.Fatalf("q2k.DequantizeTable: %v", err)
+	}
+	if len(gotEmbedding) != len(wantEmbedding) {
+		t.Fatalf("TokenEmbedding len = %d, want %d", len(gotEmbedding), len(wantEmbedding))
+	}
+	if d := maxAbsDelta(gotEmbedding, wantEmbedding); d > 1e-6 {
+		t.Fatalf("TokenEmbedding differs from dequantized Q2K table: max|delta|=%g", d)
+	}
+}
+
