@@ -141,8 +141,63 @@ func NewSynthetic(cfg Config) *Model {
 		return synthMatmulFill(name, next)
 	})
 
-	cfg.TieWordEmbeddings = true // synthetic head is tied to the embedding
+	cfg.TieWordEmbeddings = true
 	return &Model{Cfg: cfg, manifest: man, raw: raw}
+}
+
+// NewSyntheticQwen38MTP builds a synthetic Qwen3.8 hybrid model with resident MTP head tensors.
+func NewSyntheticQwen38MTP() *Model {
+	cfg := Config{
+		Name:                  "Qwen3.8 hybrid MTP synthetic",
+		ModelType:             "qwen3_5_text",
+		HiddenSize:            32,
+		NumLayers:             4,
+		NumHeads:              4,
+		NumKVHeads:            2,
+		HeadDim:               8,
+		IntermediateSize:      64,
+		VocabSize:             97,
+		RMSNormEps:            1e-5,
+		RopeTheta:             10000,
+		TieWordEmbeddings:     true,
+		EOSTokenID:            -1,
+		LayerTypes:            []string{"linear_attention", "linear_attention", "linear_attention", "full_attention"},
+		LinearConvKernelDim:   3,
+		LinearKeyHeadDim:      8,
+		LinearNumKeyHeads:     2,
+		LinearValueHeadDim:    8,
+		LinearNumValueHeads:   4,
+		AttnOutputGate:        true,
+		FullAttentionInterval: 4,
+		NormGain1p:            true,
+		MTPNumHiddenLayers:    1,
+	}
+	m := NewSynthetic(cfg)
+	shapes, err := qwen35MTPExpectedShapes(cfg)
+	if err != nil {
+		panic(err)
+	}
+	for tensorIndex, name := range qwen35MTPRequiredTensors {
+		shape := shapes[name]
+		elements := 1
+		for _, dim := range shape {
+			elements *= dim
+		}
+		start := len(m.raw)
+		for i := 0; i < elements; i++ {
+			value := float32(tensorIndex+1)/100 + float32(i)/100000
+			var bits [4]byte
+			binary.LittleEndian.PutUint32(bits[:], math.Float32bits(value))
+			m.raw = append(m.raw, bits[:]...)
+		}
+		m.manifest[name] = tensorMeta{
+			Dtype:  "F32",
+			Shape:  append([]int(nil), shape...),
+			Offset: start,
+			Nbytes: elements * 4,
+		}
+	}
+	return m
 }
 
 // NewSyntheticMoE builds an in-memory MoE Model: the same layout as NewSynthetic

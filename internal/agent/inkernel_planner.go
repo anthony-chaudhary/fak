@@ -176,6 +176,8 @@ type InKernelPlanner struct {
 
 	speculativeEngine *model.SpeculativeEngine
 	specDraftDepth    int
+
+	metalMTPCoordinator *model.MetalMTPCoordinator
 }
 
 type inKernelOOMRetryClassStats struct {
@@ -620,6 +622,9 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 			panic(r)
 		}
 	}()
+	if p.metalMTPCoordinator != nil {
+		return p.generateReusedMetalMTP(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
+	}
 	if p.speculativeEngine != nil {
 		return p.generateReusedSpeculative(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	}
@@ -665,6 +670,34 @@ func (p *InKernelPlanner) EnableSpeculativeDecoding(gen model.ProposalGenerator,
 func (p *InKernelPlanner) DisableSpeculativeDecoding() {
 	p.speculativeEngine = nil
 	p.specDraftDepth = 0
+}
+
+// SetMetalMTPCoordinator configures an explicit MetalMTPCoordinator on this planner.
+func (p *InKernelPlanner) SetMetalMTPCoordinator(c *model.MetalMTPCoordinator) {
+	p.metalMTPCoordinator = c
+}
+
+// MetalMTPCoordinator returns the active MetalMTPCoordinator, if any.
+func (p *InKernelPlanner) MetalMTPCoordinator() *model.MetalMTPCoordinator {
+	return p.metalMTPCoordinator
+}
+
+// EnableMetalMTP enables the in-kernel Metal MTP draft-verify-rollback execution loop.
+func (p *InKernelPlanner) EnableMetalMTP(cfg ...model.MetalMTPConfig) error {
+	c, err := model.NewMetalMTPCoordinator(nil, cfg...)
+	if err != nil {
+		return err
+	}
+	p.metalMTPCoordinator = c
+	return nil
+}
+
+// DisableMetalMTP disables the Metal MTP execution loop on this planner.
+func (p *InKernelPlanner) DisableMetalMTP() {
+	if p.metalMTPCoordinator != nil {
+		_ = p.metalMTPCoordinator.Close()
+		p.metalMTPCoordinator = nil
+	}
 }
 
 func (p *InKernelPlanner) generateReusedSpeculative(
@@ -869,6 +902,180 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		// Advance target session with bonus token
 		curLogits = s.Step(bonus)
 		eng.SetLastLogits(curLogits)
+	}
+
+	decodeS := time.Since(td).Seconds()
+
+	return inKernelGenerateResult{
+		gen:        gen,
+		promptTok:  promptTok,
+		cacheable:  cacheable,
+		matched:    matched,
+		sourceTier: sourceTier,
+		prefillS:   prefillS,
+		decodeS:    decodeS,
+		stopped:    stopped,
+	}, err
+}
+
+func (p *InKernelPlanner) generateReusedMetalMTP(
+	ctx context.Context,
+	ids []int,
+	maxNew int,
+	temp, topP float64,
+	topK int,
+	logitBias model.LogitBias,
+	freqPenalty, presPenalty float64,
+	stops map[int]bool,
+	emit func(int) bool,
+	measurementOpt ...*nativeInferenceMeasurement,
+) (res inKernelGenerateResult, err error) {
+	promptTok := len(ids)
+	if promptTok == 0 {
+		return inKernelGenerateResult{}, nil
+	}
+	if err = ctx.Err(); err != nil {
+		return inKernelGenerateResult{}, err
+	}
+
+	reuse := p.tree != nil && inKernelPlannerPrefixReuseSupported(p.m, p.backend)
+	var s *model.Session
+	var cachedLogits []float32
+	var matched, cacheable int
+	var sourceTier radixkv.SnapshotTier
+
+	if reuse {
+		p.mu.Lock()
+		b, m := p.tree.Lookup(ids)
+		cacheable = m
+		matched = m
+		if k := b.KV(); k != nil {
+			s = p.sessionFromPrefixClone(k)
+			if m >= len(ids) {
+				cachedLogits = b.Logits()
+			}
+			sourceTier = radixkv.SnapshotTierDeviceL1
+		}
+		p.tree.Done(b)
+		p.mu.Unlock()
+
+		if s != nil && matched >= len(ids) && cachedLogits == nil {
+			if inKernelRefeedLastTokenForExactHit(s, len(ids)) {
+				matched = len(ids) - 1
+			} else {
+				s, matched = nil, 0
+				sourceTier = radixkv.SnapshotTierMiss
+			}
+		}
+	}
+
+	if s == nil {
+		matched = 0
+		s = p.m.NewSession()
+	}
+	defer s.Close()
+	p.configureNativeSession(s)
+
+	p.recordTurnTax(promptTok, cacheable, matched)
+
+	// Prefill divergent prompt tokens
+	logits := cachedLogits
+	var prefillS float64
+	if logits == nil {
+		tp := time.Now()
+		prefillAt := matched
+		if prefillAt < len(ids) {
+			rawLogits, err := p.prefillDivergentSuffix(ctx, s, ids[prefillAt:])
+			if err != nil {
+				return inKernelGenerateResult{}, err
+			}
+			logits = append([]float32(nil), rawLogits...)
+		}
+		prefillS = time.Since(tp).Seconds()
+	} else {
+		logits = append([]float32(nil), cachedLogits...)
+	}
+	if err = ctx.Err(); err != nil {
+		return inKernelGenerateResult{}, err
+	}
+
+	// Admit full prompt to prefix cache BEFORE speculative decode mutates cache
+	if reuse {
+		p.mu.Lock()
+		b, m := p.tree.Lookup(ids)
+		leaf := p.tree.InsertCloneWithLogits(b, ids[m:], s.Cache, logits)
+		p.tree.Done(leaf)
+		p.mu.Unlock()
+		p.noteKVPrefixAdmitted()
+	}
+
+	td := time.Now()
+	coord := p.metalMTPCoordinator
+	coord.SetTargetSession(s)
+
+	// Enforce greedy temperature-zero tripwire
+	if tripErr := coord.CheckSamplingTripwire(temp, freqPenalty); tripErr != nil {
+		if coord.Config().EnforceGreedyTripwire {
+			temp = 0.0
+			topP = 1.0
+			topK = 0
+			freqPenalty = 0.0
+			presPenalty = 0.0
+		}
+	}
+
+	committed := append([]int(nil), ids...)
+	gen := 0
+	stopped := false
+	curLogits := logits
+
+	for gen < maxNew {
+		if err = ctx.Err(); err != nil {
+			break
+		}
+
+		accTokens, bonusTok, nextLogits, stepErr := coord.StepRound(ctx, committed, curLogits)
+		if stepErr != nil {
+			err = stepErr
+			break
+		}
+
+		roundStopped := false
+		for _, tok := range accTokens {
+			if tok < 0 || stops[tok] {
+				roundStopped = true
+				stopped = true
+				break
+			}
+			emitStopped := emit != nil && emit(tok)
+			gen++
+			committed = append(committed, tok)
+			if emitStopped || gen == maxNew {
+				roundStopped = true
+				stopped = emitStopped
+				break
+			}
+		}
+
+		if roundStopped || gen == maxNew {
+			break
+		}
+
+		if bonusTok >= 0 {
+			if stops[bonusTok] {
+				stopped = true
+				break
+			}
+			emitStopped := emit != nil && emit(bonusTok)
+			gen++
+			committed = append(committed, bonusTok)
+			if emitStopped || gen == maxNew {
+				stopped = emitStopped
+				break
+			}
+		}
+
+		curLogits = nextLogits
 	}
 
 	decodeS := time.Since(td).Seconds()

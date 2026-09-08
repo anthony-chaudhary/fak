@@ -37,6 +37,10 @@ malformed calls, quarantine poisoned results. Its MCP server is wired in `.mcp.j
   transient locks rather than abandoning the prompt or stopping on recoverable failures.
   Abstain with a structured reason strictly on isolated high-difficulty aspects
   (concurrency, ABI, kernel/memory layout) instead of speculating.
+- Focus on "move forward" over "conclusions" — frame diagnostics, benchmark results, and
+  investigations around forward momentum rather than defeatist conclusions (e.g. rather than
+  *"X didn't work ... therefore we suck..."*, state *"the next step to get better performance is X"*).
+  Treat unmet targets as empirical data that eliminates a variable and always provide the next checkable step.
 - The Go module is the repository root — run `go` commands from the clone root.
 
 To run your harness's own model behind the kernel, pick your recipe under

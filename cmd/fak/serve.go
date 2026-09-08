@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -143,6 +144,9 @@ type serveFlags struct {
 	allowLAN                     *bool
 	keyPrincipal                 repeatedStringFlag
 	unsafeUnauthedBind           *bool
+	opencode                     *bool
+	opencodeConfig               *bool
+	writeOpencodeConfig          *bool
 	routeManifest                *string
 	routeAccounts                *string
 	ggufPath                     *string
@@ -216,6 +220,9 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.baseURL = fs.String("base-url", "", "upstream provider base URL for the /v1/chat/completions proxy (empty = offline mock planner)")
 	fs.Var(&sf.replicaBaseURLs, "replica-base-url", "additional upstream provider base URL for a static round-robin replica fleet; repeat for N replicas. If --base-url is set, it is replica 1. Each replica's identity defaults to a stable endpoint-derived id (replica-<digest>) so the same upstream keeps its metric/residency labels regardless of flag order or a dropped peer; pass name=URL to pin an operator-chosen id.")
 	sf.model = fs.String("model", "mock", "model id (advertised by /v1/models; used for the upstream call)")
+	sf.opencode = fs.Bool("opencode", false, "one-touch OpenCode setup: write or update opencode.json in the current workspace with this server's provider config")
+	sf.opencodeConfig = fs.Bool("opencode-config", false, "print opencode.json provider configuration for this server and exit without binding a listener")
+	sf.writeOpencodeConfig = fs.Bool("write-opencode-config", false, "write or update opencode.json in the current workspace with this server's provider config and exit without binding a listener")
 	sf.apiKeyEnv = fs.String("api-key-env", "", "env var holding the upstream API key (proxy mode)")
 	sf.streamProgressTimeout = fs.Duration("stream-progress-timeout", agent.DefaultStreamProgressTimeout, "proxy mode: end a STREAMING upstream turn that has stayed warm this long without a single frame that advances it (#5486). Keepalive frames (a ping, an SSE comment, an empty-delta chunk) re-arm the inter-byte deadline but are NOT progress, so a generation wedged behind a live socket otherwise rides the 600s whole-request ceiling. DEFAULT-ON at agent.DefaultStreamProgressTimeout (300s), which sits above the worst prefill-to-first-token gap on a large cached prompt and above any extended-thinking pause (thinking streams content deltas, which do count as progress). Pass 0 to DISABLE the deadline — the escape hatch when a provider's prefill legitimately outlasts the window. A positive value outside [5s, 600s] is not honored as a real window: the default is used instead, so a typo never silently becomes a different deadline. Inert on the non-streaming path and on the offline mock planner.")
 	sf.engineCacheEngine = fs.String("engine-cache-engine", "", "self-hosted upstream cache reset engine for quarantined provider-bound tool results: sglang|vllm (empty disables)")
@@ -367,6 +374,17 @@ func cmdServe(argv []string) {
 		fmt.Fprintf(os.Stderr, "fak serve: config %s: %v\n", configPath, err)
 		os.Exit(2)
 	}
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		if *sf.ggufPath == "" && strings.TrimSpace(*sf.baseURL) == "" && len(sf.replicaBaseURLs.Values()) == 0 {
+			if *sf.opencode || *sf.metal {
+				*sf.ggufPath = "default"
+				*sf.metal = true
+				if *sf.model == "mock" || *sf.model == "" {
+					*sf.model = "qwen38:27b"
+				}
+			}
+		}
+	}
 	qwen38Runtime, err := normalizeQwen38Runtime(*sf.qwen38Runtime)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
@@ -424,6 +442,21 @@ func cmdServe(argv []string) {
 	if *sf.sizingJSON {
 		runServeSizingJSON(sf)
 		return
+	}
+
+	// --opencode-config: emit opencode.json provider configuration and exit before load.
+	if *sf.opencodeConfig {
+		runServeOpenCodeConfig(sf, os.Stdout, false)
+		return
+	}
+	// --write-opencode-config: write or update opencode.json in the current workspace and exit before load.
+	if *sf.writeOpencodeConfig {
+		runServeOpenCodeConfig(sf, os.Stderr, true)
+		return
+	}
+	// --opencode: ensure opencode.json is configured before booting listener.
+	if *sf.opencode {
+		runServeOpenCodeConfig(sf, os.Stderr, true)
 	}
 
 	// Advisory (#3094): a serve launched from a non-fak cwd silently indexes whatever

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -753,6 +754,11 @@ func cmdManageCommand(commandName string, argv []string) {
 				os.Exit(1)
 			}
 			*ggufPath = resolved
+		}
+		if strings.TrimSpace(*gpuBackend) == "" && runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+			if _, found := compute.Lookup("metal"); found {
+				*gpuBackend = "metal"
+			}
 		}
 		var berr error
 		chatBackend, berr = resolveServeChatBackend(*gpuBackend)

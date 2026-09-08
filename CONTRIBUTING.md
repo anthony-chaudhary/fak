@@ -94,6 +94,14 @@ while infusing the product values through design, implementation, proof, and rev
 direction is not shipped evidence: use [`CLAIMS.md`](CLAIMS.md) and the relevant captured
 witness for completion claims.
 
+### Move forward over conclusions
+
+When evaluating architectures, diagnosing performance regressions, or documenting experiments,
+focus on **forward momentum rather than terminal conclusions**. Rather than defeatist summaries
+(*"X didn't work ... therefore we suck..."*), always state the concrete forward action
+(*"the next step to get better performance is X"*). Every negative measurement eliminates a variable;
+identify the next checkable step, lever, or hypothesis.
+
 ## Choose the route for your change
 
 | Change | Start here | Proof before landing |

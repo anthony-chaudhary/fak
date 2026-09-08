@@ -64,6 +64,15 @@ The six that will bite you if you skip them:
   and background tooling **MUST be native Go programs** (`cmd/*`, Go leaves registered as `fak` CLI verbs,
   or quarantined sub-modules). Think modular, integrated, long-term value.
 
+## Move forward over conclusions
+
+Frame all diagnostics, benchmark reports, and investigations around **forward momentum rather than
+terminal conclusions**. When an approach underperforms, a benchmark trails baseline, or an experiment
+fails, focus on forward action rather than passive or defeatist editorializing (e.g. rather than
+*"X didn't work ... therefore we suck..."*, state *"the next step to get better performance is X"*).
+Treat unmet targets as empirical data that eliminates a variable and always formulate the concrete
+next checkable step.
+
 ## Doc map
 
 Doc map for humans and agents: [`llms.txt`](llms.txt). Full contributor contract:

@@ -315,6 +315,27 @@ and reap scratch through `fak tree-doctor`; see [`docs/generated-output-defaults
 
 Close operator-facing turns with verdict-first bullets, one claim and inline evidence per line;
 make the final line the next checkable step. A one-line “nothing left; pushed X” is sufficient.
+
+## Focus on "move forward" over "conclusions"
+
+Frame all diagnostics, performance measurements, benchmark reports, and investigation findings
+around **forward momentum rather than terminal conclusions**. When an approach underperforms,
+a benchmark trails baseline, or an experiment yields negative results, focus on forward action
+rather than passive, defeatist, or dead-end editorializing (e.g. rather than *"X didn't work ...
+therefore we suck..."*, state *"the next step to get better performance is X"*).
+
+- **Action over self-judgment**: Treat unmet targets, performance gaps, or failed attempts as
+  empirical data that eliminates a variable and sharpens the search space, not as an editorial
+  verdict on the system. Maintain momentum by identifying the forward path.
+- **Formulate the next checkable lever**: Every diagnostic, bottleneck, or failed attempt must
+  yield a concrete, actionable forward step:
+  - *"Prefill amortized poorly at batch size 1; the next step to improve throughput is activating chunked prefill in `internal/compute`."*
+  - *"Sub-byte quantization introduced drift on layer 14; the next step to recover accuracy is keeping the attention projection in Q8_0."*
+  - *"Host-device transfers dominate turn latency; the next step to get better performance is pinning input buffers via the unified memory allocator."*
+- **Ground turn endings and handoffs in forward movement**: Keep summaries, issue updates, and
+  handoffs oriented toward actionable progress. Always conclude with the concrete next experiment,
+  test, or patch that advances the work.
+
 ## Version everything: cite `module@rev`, not just a bare SHA
 
 Every module carries a **derived** version — there are no hand-maintained per-module version

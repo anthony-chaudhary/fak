@@ -6,7 +6,7 @@
 
 **fak is an agent runtime: one binary puts a fast, cache-accelerated boundary between your coding agent and every tool call.**
 
-> **In short:** run coding agents locally with workflow batching and cache reuse, protected by a default-deny capability floor (blocking unauthorized actions).
+> **In short:** run coding agents locally with zero-cold-start subagent fanout and cache reuse, protected by a default-deny capability floor (blocking unauthorized actions).
 
 ## Try fak
 
@@ -63,7 +63,8 @@ Most LLM serving engines treat memory overflow as a slow host-memory fallback wi
 
 ## Why run coding agents on fak
 
-- **Workflow batching and cache reuse:** Multi-agent coding loops reuse prompt context across turns, achieving **4.1× vs tuned** baselines with 86.7% cache hit rates. In-kernel vDSO tool caching serves idempotent file reads in sub-microsecond time without extra model round trips.
+- **Zero-cold-start subagent fanout:** Standard multi-agent swarms pay a heavy cold-start penalty on every spawned worker, re-ingesting 20k–30k tokens of prompts, tools, and repo context. fak warms this shared prefix once. Subagents inherit resident KV caches in milliseconds ($O(1)$ memory cloning), dropping Time-To-First-Token (TTFT) and achieving **4.1× vs tuned** baselines with 86.7% cache hit rates. In-kernel tool caching (vDSO) serves idempotent reads in sub-microsecond time.
+- **Real-time multi-agent visibility:** Inspect live cross-agent reuse rates, per-subagent token breakdowns, and savings sparklines directly in your terminal overlay (`fak info` / `fak guard`) to see and verify the speedup as subagents execute concurrently.
 - **Zero-copy GPU Direct storage overflow:** Run models far exceeding physical GPU VRAM without host memory thrashing. Built on a BaM accelerator storage architecture, fak maps NVMe queues directly in GPU VRAM. It streams paged KV caches and hybrid linear states over peer-to-peer PCIe DMA without DRAM bounce copies (`StagingCopyCount == 0`). See the [GPU Direct overflow specification](docs/benchmarks/QWEN38-AMD-GPUDIRECT-RESULTS.md).
 - **Local execution on your hardware:** Run models directly with native inference across Apple Silicon, AMD, and NVIDIA. New work prioritizes Qwen3.8 with resident quantization and prefix reuse. Cut token bills and keep your code private on your own machine.
 - **Default-deny capability floor:** Protect your workspace from unintended commands, path escapes, or tool poisoning. Every tool call is verified against a capability floor before execution. Drop-in wrappers protect existing agents like Claude Code, Codex, OpenCode, and Cursor with zero rewrites.
@@ -116,4 +117,4 @@ Balanced defaults are `ponytail:medium` for work discipline and `caveman:medium`
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-09-06 vs VERSION 0.51.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-06 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-09-08 vs VERSION 0.53.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-08 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
