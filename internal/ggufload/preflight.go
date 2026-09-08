@@ -285,6 +285,12 @@ func estimateVulkanMixedQ4K(s *WeightSource, residentQ2KEmbedding bool) (preflig
 	var readBytes, hostPacked, hostQ8, hostF32Logical, deviceBytes int64
 	staging := make([]int64, 0, len(s.File.Tensors))
 	for _, info := range s.File.Tensors {
+		// The resident-Q4K loader drops target-inactive MTP/vision sidecars before
+		// reading their payload. Keep both read volume and residency aligned with that
+		// exact materialization path; these tensors have no native target-model slot.
+		if archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
+			continue
+		}
 		payload, err := tensorPayloadBytes(info)
 		if err != nil {
 			return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate tensor %s: %w", info.Name, err)

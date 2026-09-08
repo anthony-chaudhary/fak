@@ -288,6 +288,17 @@ func TestPreflightVulkanMixedQ4KAccountsResidentQ2KEmbedding(t *testing.T) {
 	if got, want := base.EstLoadStagingBytes-packed.EstLoadStagingBytes, 2*f32Bytes; got != want {
 		t.Fatalf("staging reduction=%d, want removed two F32 work buffers %d", got, want)
 	}
+
+	ws.File.Tensors = append(ws.File.Tensors, TensorInfo{
+		Name: "blk.1.nextn.eh_proj.weight", Dims: []uint64{1 << 30}, Type: TensorF32,
+	})
+	withNextN := BuildModelPreflight(PreflightInput{
+		Source: ws, Backend: backend, VulkanMixedQ4K: true, ResidentQ2KEmbedding: true,
+	})
+	if withNextN.Verdict != PreflightReady || withNextN.EstReadBytes != packed.EstReadBytes ||
+		withNextN.EstLoadBytes != packed.EstLoadBytes {
+		t.Fatalf("target-inactive NextN tensor changed mixed plan: before=%+v after=%+v", packed, withNextN)
+	}
 }
 
 func TestPreflightVulkanMixedQ4KFailsClosedForUnknownAndSplit(t *testing.T) {
