@@ -75,6 +75,22 @@ class PickTargetTest(unittest.TestCase):
         self.assertEqual(mod.pick_target_issue([], set()), None)
 
 
+class CapabilitySkipTest(unittest.TestCase):
+    def test_standard_runner_skips_only_explicit_hardware_requirement(self) -> None:
+        mod = load()
+        skipped, rows = mod.capability_skips(
+            [30, 31], {30: [], 31: ["gpu"]}, frozenset())
+        self.assertEqual(skipped, {31})
+        self.assertEqual(rows, [{"issue": 31, "required_caps": ["gpu"]}])
+
+    def test_capable_runner_admits_explicit_requirement(self) -> None:
+        mod = load()
+        skipped, rows = mod.capability_skips(
+            [31], {31: ["GPU"]}, frozenset({"gpu"}))
+        self.assertEqual(skipped, set())
+        self.assertEqual(rows, [])
+
+
 class ContractOverlayTest(unittest.TestCase):
     def test_record_merges_overlay_into_body(self) -> None:
         mod = load()

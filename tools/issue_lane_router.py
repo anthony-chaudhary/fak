@@ -293,20 +293,9 @@ CONFIDENCE_RANK = {
     "none": 0,
 }
 
-# Hardware-capability signals. An issue carrying one of these needs a host that
-# declares the capability (FLEET_NODE_CAPS) to run; a GPU-less worker skips it and
-# leaves it OPEN + visible for a GPU node (see issue_required_caps + the dispatcher's
-# capability gate). Deliberately keyed on UNAMBIGUOUS accelerator signals only: a bare
-# `moe`/`agentic-serving` label ROUTES to compute/gateway (it's real lane work) but is
-# NOT itself hardware-gated — that code is often unit-testable on a GPU-less host, so
-# gating it would falsely strand legitimate local work. Keyword literals are lowercase
-# so they never trip the uppercase-bounded hardware-name scrubber (scrub_hardware_names).
-GPU_CAP_LABELS = {"cuda", "gpu", "multi-gpu"}
-GPU_CAP_KEYWORDS = ("h100", "a100", "dgx", "nvidia")
-
 # The maintainer-applied "this needs sanctioned physical hardware" label. Unlike the
-# accelerator signals above — which INFER the requirement from prose — this one is a
-# human judgement, so it is precise by construction and needs no regex. It carries its
+# area labels and prose used for discovery, this one is a human judgement, so it is
+# precise by construction and needs no regex. It carries its
 # own `hardware` capability rather than `gpu`, because the work it gates is not always
 # accelerator work: #4750 projects desired state into systemd and #4754 wants a real
 # crash/reboot/partition host, neither of which a lone GPU satisfies. A node that can
@@ -666,22 +655,12 @@ def issue_required_caps(issue: dict[str, Any]) -> list[str]:
     """The hardware capabilities a host must declare (FLEET_NODE_CAPS) to run this
     issue, sorted and deduplicated.
 
-    Contributes "gpu" when the issue carries an unambiguous accelerator signal — a
-    cuda/gpu/multi-gpu label or scope, a named-accelerator keyword (h100/a100/dgx/
-    nvidia) in the title/body, a requires:gpu/* label, or an explicit execution
-    boundary declaring single/multi GPU / CUDA — and "hardware" when it carries
-    HARDWARE_CAP_LABEL or requires:hardware/* or lab hardware / DGX, "metal" for
-    requires:metal, and "quota" for requires:quota.
-
-    Explicit `requires:none` or a "Standard runner" execution target declaration
-    designates unconstrained CPU execution and suppresses inferred accelerator
-    keywords. Pure + deterministic."""
+    Requirements come only from explicit ``requires:*`` labels/fields, an explicit
+    execution-boundary declaration, or the temporary legacy ``gated/hardware`` label.
+    Area labels/scopes and accelerator words elsewhere remain discovery metadata and
+    never gain admission semantics. Pure + deterministic."""
     labels = {ln.lower() for ln in _label_names(issue)}
     caps: set[str] = set()
-    suppress_inference = False
-
-    if REQUIRES_NONE_LABEL in labels:
-        suppress_inference = True
 
     for lab in labels:
         if lab in REQUIRES_GPU_LABELS:
@@ -695,8 +674,6 @@ def issue_required_caps(issue: dict[str, Any]) -> list[str]:
 
     if HARDWARE_CAP_LABEL in labels:
         caps.add(HARDWARE_CAP)
-    if labels & GPU_CAP_LABELS:
-        caps.add("gpu")
 
     body = str(issue.get("body") or "")
     targets: list[str] = []
@@ -713,7 +690,6 @@ def issue_required_caps(issue: dict[str, Any]) -> list[str]:
     for target in targets:
         if (re.search(r"\bstandard\s+runner\b", target, re.IGNORECASE) or
                 re.search(r"\brequires:none\b", target, re.IGNORECASE)):
-            suppress_inference = True
             continue
 
         # Extract explicit requires:* tags in target
@@ -727,8 +703,6 @@ def issue_required_caps(issue: dict[str, Any]) -> list[str]:
                 caps.add("metal")
             elif tr_lower in REQUIRES_QUOTA_LABELS:
                 caps.add("quota")
-            elif tr_lower == REQUIRES_NONE_LABEL:
-                suppress_inference = True
 
         # Check prose mentions
         if re.search(r"\bsingle[- ]gpu\b", target, re.IGNORECASE):
@@ -753,14 +727,6 @@ def issue_required_caps(issue: dict[str, Any]) -> list[str]:
 
         if re.search(r"\bquota\b", target, re.IGNORECASE):
             caps.add("quota")
-
-    if not suppress_inference:
-        scope = _scope_token(str(issue.get("title") or ""))
-        if scope in GPU_CAP_LABELS:
-            caps.add("gpu")
-        text = str(issue.get("title") or "") + "\n" + str(issue.get("body") or "")
-        if any(_has_keyword(text, kw) for kw in GPU_CAP_KEYWORDS):
-            caps.add("gpu")
 
     return sorted(caps)
 
