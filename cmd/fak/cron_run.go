@@ -38,6 +38,10 @@ const (
 	cronRunOutcomeSkippedDuplicate = "skipped_duplicate"
 
 	cronRunExitTimeout = 124
+
+	// cronRunMaxInterruptCeiling bounds the operator override. The default
+	// remains CronHardInterruptCeiling; longer jobs must opt in explicitly.
+	cronRunMaxInterruptCeiling = 30 * time.Minute
 )
 
 // cronRunKillTree is injectable for tests; defaults to procguard.KillPID.
@@ -92,6 +96,22 @@ func emitCronRunReceipt(stdout io.Writer, asJSON bool, r cronRunReceipt) {
 	}
 }
 
+func cronRunEffectiveTimeout(requested, interruptCeiling time.Duration) (time.Duration, error) {
+	if interruptCeiling <= 0 {
+		return 0, errors.New("--interrupt-ceiling must be positive")
+	}
+	if interruptCeiling > cronRunMaxInterruptCeiling {
+		return 0, fmt.Errorf("--interrupt-ceiling must not exceed %s", cronRunMaxInterruptCeiling)
+	}
+	if requested <= 0 {
+		return 0, errors.New("--timeout must be positive")
+	}
+	if requested > interruptCeiling {
+		return interruptCeiling, nil
+	}
+	return requested, nil
+}
+
 // runCronRun implements `fak cron run`.
 func runCronRun(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("cron run", flag.ContinueOnError)
@@ -101,6 +121,7 @@ func runCronRun(stdout, stderr io.Writer, argv []string) int {
 	ledger := fs.String("ledger", "", "witness ledger path, JSONL (required)")
 	interval := fs.Duration("interval", 0, "firing cadence; tick is quantized to this slot")
 	timeout := fs.Duration("timeout", 0, "command execution timeout (required, must be positive)")
+	interruptCeiling := fs.Duration("interrupt-ceiling", CronHardInterruptCeiling, "hard execution ceiling; explicit values may not exceed 30m")
 	at := fs.String("at", "", "wall-clock tick time (RFC3339); default now — injectable for tests")
 	slot := fs.String("slot", "", "override computed slot key directly")
 	asJSON := fs.Bool("json", false, "emit outcome receipt as JSON instead of human key-value")
@@ -144,8 +165,9 @@ func runCronRun(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak cron run: --interval must be positive")
 		return 2
 	}
-	if *timeout <= 0 {
-		fmt.Fprintln(stderr, "fak cron run: --timeout must be positive")
+	effectiveTimeout, err := cronRunEffectiveTimeout(*timeout, *interruptCeiling)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak cron run: %v\n", err)
 		return 2
 	}
 	if len(cmdArgs) == 0 {
@@ -223,12 +245,6 @@ func runCronRun(stdout, stderr io.Writer, argv []string) int {
 		release = nil
 	}
 
-	// Execute command with bounded timeout clamped to hard-interrupt ceiling (#2927)
-	effectiveTimeout := *timeout
-	if effectiveTimeout > CronHardInterruptCeiling {
-		effectiveTimeout = CronHardInterruptCeiling
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), effectiveTimeout)
 	defer cancel()
 
@@ -261,8 +277,8 @@ func runCronRun(stdout, stderr io.Writer, argv []string) int {
 			outcome = cronRunOutcomeTimeout
 			status = cronRunStatusTimeout
 			exitCode = cronRunExitTimeout
-			if *timeout > CronHardInterruptCeiling && effectiveTimeout == CronHardInterruptCeiling {
-				errMsg = fmt.Sprintf("execution stopped: exceeded %s hard interrupt ceiling", CronHardInterruptCeiling)
+			if *timeout > *interruptCeiling && effectiveTimeout == *interruptCeiling {
+				errMsg = fmt.Sprintf("execution stopped: exceeded %s hard interrupt ceiling", *interruptCeiling)
 			} else {
 				errMsg = "execution timed out"
 			}
