@@ -31,6 +31,11 @@ extern "C" {
  * lavapipe — can be told apart from the real GPU). Returns 0 on success, non-zero if no
  * Vulkan compute device is reachable or pipeline creation fails. */
 int fvk_init(char *name, int namelen, int *is_discrete, const char *spirv_dir);
+/* Query identity from the physical device selected by fvk_init. Values come
+ * directly from VkPhysicalDeviceProperties, never process configuration. */
+int fvk_device_identity(char *name, int namelen, uint32_t *vendor_id,
+                        uint32_t *device_id, uint32_t *driver_version,
+                        uint32_t *api_version);
 
 /* device memory + transfers (the residency seam). The returned handle is an opaque
  * VkBuffer wrapper; it is NOT a host pointer. */

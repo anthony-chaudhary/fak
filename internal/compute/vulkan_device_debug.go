@@ -10,10 +10,70 @@ package compute
 */
 import "C"
 import (
+	"fmt"
 	"os"
 	"strings"
 	"unsafe"
 )
+
+// BackendExecutionSnapshot reports identity and cumulative counters from the
+// selected Vulkan backend. Callers must bracket one execution and subtract via
+// BackendExecutionDelta; this process-global snapshot is never a receipt.
+func (v *vulkanBackend) BackendExecutionSnapshot() (BackendExecutionSnapshot, error) {
+	var name [256]C.char
+	var vendorID, deviceID, driverVersion, apiVersion C.uint32_t
+	if C.fvk_device_identity(&name[0], 256, &vendorID, &deviceID, &driverVersion, &apiVersion) == 0 {
+		return BackendExecutionSnapshot{}, fmt.Errorf("compute: Vulkan physical-device identity is unavailable")
+	}
+	device := strings.TrimSpace(C.GoString(&name[0]))
+	if device == "" {
+		return BackendExecutionSnapshot{}, fmt.Errorf("compute: Vulkan physical-device name is unavailable")
+	}
+	api := uint32(apiVersion)
+	runtimeIdentity := fmt.Sprintf("vulkan-%d.%d.%d", api>>22, (api>>12)&0x3ff, api&0xfff)
+	driverIdentity := fmt.Sprintf("vendor=0x%04x device=0x%04x driver=0x%08x", uint32(vendorID), uint32(deviceID), uint32(driverVersion))
+
+	dispatch := v.VulkanDebugDispatchProfileSnapshot()
+	if dispatch.Q4KMatmulDispatches > dispatch.ComputeDispatches {
+		return BackendExecutionSnapshot{}, fmt.Errorf("compute: Vulkan Q4_K dispatch count exceeds compute total")
+	}
+	h2d, d2h := v.VulkanDebugTransferBytes()
+	_, _, stageCalls, stageBytes, fallbacks := v.VulkanDebugQ4KStageSnapshot()
+	hits, admissions, bypasses, entries, residentBytes, copiedBytes := v.VulkanDebugQ4KTensorHomeSnapshot()
+	if entries < 0 {
+		return BackendExecutionSnapshot{}, fmt.Errorf("compute: Vulkan tensor-home entry count is negative")
+	}
+	for name, value := range map[string]int64{
+		"stage calls": stageCalls, "stage bytes": stageBytes, "fallbacks": fallbacks,
+		"tensor-home hits": hits, "tensor-home admissions": admissions, "tensor-home bypasses": bypasses,
+		"tensor-home resident bytes": residentBytes, "tensor-home copied bytes": copiedBytes,
+	} {
+		if value < 0 {
+			return BackendExecutionSnapshot{}, fmt.Errorf("compute: Vulkan %s counter is negative", name)
+		}
+	}
+	total, free, memoryObserved := DeviceMemoryInfo(v)
+	if memoryObserved && (total <= 0 || free < 0 || free > total) {
+		return BackendExecutionSnapshot{}, fmt.Errorf("compute: Vulkan device-memory observation is invalid")
+	}
+
+	return BackendExecutionSnapshot{
+		Identity: BackendRuntimeIdentity{
+			Backend: v.Name(), Device: device, Driver: driverIdentity, Runtime: runtimeIdentity,
+		},
+		Counters: BackendCounterSnapshot{
+			ComputeDispatches: dispatch.ComputeDispatches, Q4KMatmulDispatches: dispatch.Q4KMatmulDispatches,
+			OtherDispatches: dispatch.ComputeDispatches - dispatch.Q4KMatmulDispatches,
+			DispatchSubmits: dispatch.BatchSubmits + dispatch.OneShotSubmits,
+			H2DBytes:        h2d, D2HBytes: d2h, D2DCopies: dispatch.D2DCopies,
+			Q4KStageCalls: uint64(stageCalls), Q4KStageBytes: uint64(stageBytes), Fallbacks: uint64(fallbacks),
+			TensorHomeHits: uint64(hits), TensorHomeAdmissions: uint64(admissions),
+			TensorHomeBypasses: uint64(bypasses), TensorHomeCopiedBytes: uint64(copiedBytes),
+		},
+		TensorHomeEntries: uint64(entries), TensorHomeResidentBytes: uint64(residentBytes),
+		DeviceMemoryTotalBytes: uint64(total), DeviceMemoryFreeBytes: uint64(free), DeviceMemoryObserved: memoryObserved,
+	}, nil
+}
 
 func (v *vulkanBackend) debugBufferHostVisible(b *vulkanBuf) bool {
 	return b != nil && b.ptr != nil && C.fvk_debug_buffer_is_host_visible(b.ptr) != 0

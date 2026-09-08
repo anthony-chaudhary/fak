@@ -741,6 +741,23 @@ inline Buffer* B(void* h)       { return (Buffer*)h; }
 // ---- C ABI ----------------------------------------------------------------------
 extern "C" {
 
+int fvk_device_identity(char* name, int namelen, uint32_t* vendor_id,
+                        uint32_t* device_id, uint32_t* driver_version,
+                        uint32_t* api_version) {
+    if (g_phys == VK_NULL_HANDLE) return 0;
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(g_phys, &props);
+    if (name && namelen > 0) {
+        strncpy(name, props.deviceName, namelen - 1);
+        name[namelen - 1] = 0;
+    }
+    if (vendor_id) *vendor_id = props.vendorID;
+    if (device_id) *device_id = props.deviceID;
+    if (driver_version) *driver_version = props.driverVersion;
+    if (api_version) *api_version = props.apiVersion;
+    return 1;
+}
+
 int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "fak";

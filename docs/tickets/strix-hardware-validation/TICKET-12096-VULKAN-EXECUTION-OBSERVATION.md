@@ -5,7 +5,7 @@ GitHub: #12213. Parent issues: #12096 and #12097. Follows #12211.
 
 ```routing
 lane: qwen38-vulkan-execution-observation
-paths: ["internal/compute/physical_observation.go", "internal/compute/physical_observation_test.go", "internal/compute/vulkan_device_debug.go", "internal/compute/vulkan_backend.c", "internal/compute/vulkan_backend.h", "internal/rawdecode/executor.go", "internal/rawdecode/executor_test.go"]
+paths: ["internal/compute/physical_observation.go", "internal/compute/physical_observation_test.go", "internal/compute/vulkan_device_debug.go", "internal/compute/vulkan_shim.cpp", "internal/compute/vulkan_backend.h", "internal/rawdecode/executor.go", "internal/rawdecode/executor_test.go"]
 expected_steps: 8
 ```
 
@@ -92,7 +92,7 @@ remaining source-archive/model/host identity contract and trusted-host smoke.
 ```text
 go test ./internal/compute ./internal/rawdecode -run 'Test.*(PhysicalObservation|RawDecode.*Observation)' -count=1
 go vet ./internal/compute ./internal/rawdecode
-fak validate --mine internal/compute/physical_observation.go --mine internal/compute/physical_observation_test.go --mine internal/compute/vulkan_device_debug.go --mine internal/compute/vulkan_backend.c --mine internal/compute/vulkan_backend.h --mine internal/rawdecode/executor.go --mine internal/rawdecode/executor_test.go
+fak validate --mine internal/compute/physical_observation.go --mine internal/compute/physical_observation_test.go --mine internal/compute/vulkan_device_debug.go --mine internal/compute/vulkan_shim.cpp --mine internal/compute/vulkan_backend.h --mine internal/rawdecode/executor.go --mine internal/rawdecode/executor_test.go
 ```
 
 The witness is device-free and earns no `[HW-WITNESSED]` status.
@@ -111,7 +111,7 @@ The resolving commit cites this child issue and carries `(fak compute)` or
 
 - `internal/compute/physical_observation.go` and focused test
 - `internal/compute/vulkan_device_debug.go`
-- `internal/compute/vulkan_backend.c` and `.h`
+- `internal/compute/vulkan_shim.cpp` and `vulkan_backend.h`
 - `internal/rawdecode/executor.go` and focused test
 
 ## Lane

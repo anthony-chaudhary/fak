@@ -38,6 +38,32 @@ type fakeLoadedModel struct {
 	cpu            *fakeSession
 }
 
+type rawObservedBackend struct {
+	compute.Backend
+	name      string
+	snapshots []compute.BackendExecutionSnapshot
+	calls     int
+}
+
+func (b *rawObservedBackend) Name() string                    { return b.name }
+func (b *rawObservedBackend) Tier() string                    { return "observed" }
+func (b *rawObservedBackend) Class() compute.CorrectnessClass { return compute.Approx }
+func (b *rawObservedBackend) Caps() compute.Caps              { return compute.Caps{DeviceMemory: true} }
+func (b *rawObservedBackend) BackendExecutionSnapshot() (compute.BackendExecutionSnapshot, error) {
+	b.calls++
+	return b.snapshots[b.calls-1], nil
+}
+
+type rawUnsupportedBackend struct {
+	compute.Backend
+	name string
+}
+
+func (b rawUnsupportedBackend) Name() string                    { return b.name }
+func (b rawUnsupportedBackend) Tier() string                    { return "unsupported" }
+func (b rawUnsupportedBackend) Class() compute.CorrectnessClass { return compute.Approx }
+func (b rawUnsupportedBackend) Caps() compute.Caps              { return compute.Caps{} }
+
 func (m *fakeLoadedModel) Config() model.Config { return model.Config{VocabSize: 3, EOSTokenID: -1} }
 func (m *fakeLoadedModel) IsEOS(int) bool       { return false }
 func (m *fakeLoadedModel) CloseWeights() error  { m.closeCalls++; return nil }
@@ -157,5 +183,107 @@ func TestRawDecodeExecutorRejectsModelSelectorBeforeSession(t *testing.T) {
 	}
 	if m.candidateCalls != 0 {
 		t.Fatalf("model mismatch created %d candidate sessions", m.candidateCalls)
+	}
+}
+
+func TestRawDecodeBackendObservationIsPerRunAndBackendOwned(t *testing.T) {
+	artifact := "observed backend artifact"
+	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(artifact)))
+	identity := compute.BackendRuntimeIdentity{Backend: "vulkan", Device: "device", Driver: "driver", Runtime: "vulkan-1.3.0"}
+	before := compute.BackendExecutionSnapshot{Identity: identity, Counters: compute.BackendCounterSnapshot{ComputeDispatches: 100, H2DBytes: 1000}}
+	after := before
+	after.Counters.ComputeDispatches = 107
+	after.Counters.H2DBytes = 1064
+	backend := &rawObservedBackend{name: "vulkan", snapshots: []compute.BackendExecutionSnapshot{before, after}}
+	m := &fakeLoadedModel{candidate: &fakeSession{outputs: [][]float32{{0, 2, 1}}}}
+	d := dependencies{
+		openArtifact: func(string) (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(artifact)), nil },
+		loadModel:    func(context.Context, Request) (loadedModel, string, error) { return m, "observed-model", nil },
+		resolveBackend: func(Request) (compute.Backend, BackendObservation, error) {
+			return backend, BackendObservation{Selected: backend.Name()}, nil
+		},
+		now: fakeClock(),
+	}
+	req := Request{ArtifactPath: "model.gguf", ExpectedArtifactSHA256: digest, ModelName: "observed-model", BackendName: "caller-selector", PromptTokenIDs: []int{0}, ContextLimit: 2, GeneratedTokenLimit: 1, Repetitions: 1}
+	exec, err := d.execute(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := exec.Runs[0].BackendExecution
+	if observed == nil || observed.Identity != identity || observed.Counters.ComputeDispatches != 7 || observed.Counters.H2DBytes != 64 {
+		t.Fatalf("backend-owned per-run observation = %+v", observed)
+	}
+	if observed.Counters.ComputeDispatches == after.Counters.ComputeDispatches || observed.Identity.Backend == req.BackendName {
+		t.Fatalf("caller label or prior cumulative counters leaked into observation: %+v", observed)
+	}
+}
+
+func TestRawDecodeBackendObservationRefusesForgedLabelMissingIdentityAndReset(t *testing.T) {
+	artifact := "refusal artifact"
+	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(artifact)))
+	request := Request{ArtifactPath: "model.gguf", ExpectedArtifactSHA256: digest, ModelName: "observed-model", BackendName: "forged", PromptTokenIDs: []int{0}, ContextLimit: 2, GeneratedTokenLimit: 1, Repetitions: 1}
+	newModel := func() *fakeLoadedModel {
+		return &fakeLoadedModel{candidate: &fakeSession{outputs: [][]float32{{0, 2, 1}}}}
+	}
+	baseDeps := func(m *fakeLoadedModel, backend compute.Backend, label string) dependencies {
+		return dependencies{
+			openArtifact: func(string) (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(artifact)), nil },
+			loadModel:    func(context.Context, Request) (loadedModel, string, error) { return m, "observed-model", nil },
+			resolveBackend: func(Request) (compute.Backend, BackendObservation, error) {
+				return backend, BackendObservation{Selected: label}, nil
+			},
+			now: fakeClock(),
+		}
+	}
+
+	t.Run("forged resolver label", func(t *testing.T) {
+		m := newModel()
+		backend := rawUnsupportedBackend{name: "vulkan"}
+		if got, err := baseDeps(m, backend, "forged").execute(context.Background(), request); err == nil || len(got.Runs) != 0 || got.ArtifactSHA256 != "" || m.candidateCalls != 0 {
+			t.Fatalf("got=%+v err=%v candidate_calls=%d", got, err, m.candidateCalls)
+		}
+	})
+
+	t.Run("missing backend identity", func(t *testing.T) {
+		m := newModel()
+		backend := &rawObservedBackend{name: "vulkan", snapshots: []compute.BackendExecutionSnapshot{{Identity: compute.BackendRuntimeIdentity{Backend: "vulkan"}}}}
+		if got, err := baseDeps(m, backend, "vulkan").execute(context.Background(), request); err == nil || len(got.Runs) != 0 || got.ArtifactSHA256 != "" || m.candidateCalls != 0 {
+			t.Fatalf("got=%+v err=%v candidate_calls=%d", got, err, m.candidateCalls)
+		}
+	})
+
+	t.Run("counter reset", func(t *testing.T) {
+		m := newModel()
+		identity := compute.BackendRuntimeIdentity{Backend: "vulkan", Device: "device", Driver: "driver", Runtime: "runtime"}
+		backend := &rawObservedBackend{name: "vulkan", snapshots: []compute.BackendExecutionSnapshot{
+			{Identity: identity, Counters: compute.BackendCounterSnapshot{ComputeDispatches: 2}},
+			{Identity: identity, Counters: compute.BackendCounterSnapshot{ComputeDispatches: 1}},
+		}}
+		if got, err := baseDeps(m, backend, "vulkan").execute(context.Background(), request); err == nil || len(got.Runs) != 0 || got.ArtifactSHA256 != "" || !strings.Contains(err.Error(), "reset") {
+			t.Fatalf("got=%+v err=%v", got, err)
+		}
+	})
+}
+
+func TestRawDecodeUnsupportedBackendObservationRemainsUnavailable(t *testing.T) {
+	artifact := "unsupported observation artifact"
+	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(artifact)))
+	m := &fakeLoadedModel{candidate: &fakeSession{outputs: [][]float32{{0, 2, 1}}}}
+	backend := rawUnsupportedBackend{name: "accelerator"}
+	d := dependencies{
+		openArtifact: func(string) (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(artifact)), nil },
+		loadModel:    func(context.Context, Request) (loadedModel, string, error) { return m, "observed-model", nil },
+		resolveBackend: func(Request) (compute.Backend, BackendObservation, error) {
+			return backend, BackendObservation{Selected: backend.Name()}, nil
+		},
+		now: fakeClock(),
+	}
+	req := Request{ArtifactPath: "model.gguf", ExpectedArtifactSHA256: digest, ModelName: "observed-model", BackendName: "accelerator", PromptTokenIDs: []int{0}, ContextLimit: 2, GeneratedTokenLimit: 1, Repetitions: 1}
+	exec, err := d.execute(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exec.Runs[0].BackendExecution != nil {
+		t.Fatalf("unsupported backend was zero-filled as available: %+v", exec.Runs[0].BackendExecution)
 	}
 }
