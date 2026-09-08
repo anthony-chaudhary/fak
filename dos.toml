@@ -3245,12 +3245,5 @@ summary  = "git clean -f refused: untracked files may contain peer work, allocat
 fix      = "Remove specific unwanted files individually or preview with `git clean -n`. Allocate and reap scratch explicitly via `fak tree-doctor`."
 see_also = ["internal/gitgate", "AGENTS.md"]
 
-[reasons.NEVER_AMEND_SHARED]
-category = "OPERATOR_GATE"
-refusal  = true
-summary  = "never amend commits pushed to the shared trunk: rewrites public history and breaks peer convergence."
-fix      = "Create a new forward commit with `fak commit --path` rather than amending. Reconcile divergence safely with `fak sync reconcile --apply`."
-see_also = ["internal/gitgate", "AGENTS.md"]
-
 [retention]
 audits_keep_last = 30
