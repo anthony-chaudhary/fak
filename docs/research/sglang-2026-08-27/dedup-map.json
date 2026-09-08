@@ -2839,7 +2839,7 @@
     {
       "issue": 4781,
       "state": "CLOSED",
-      "title": "bench(deepseek): capture pure-fak V4 Pro witness on DGX3",
+      "title": "bench(deepseek): capture pure-fak V4 Pro witness on GPU-server",
       "url": "https://github.com/anthony-chaudhary/fak/issues/4781",
       "relevance": "mention-reviewed",
       "candidate_ids": [
