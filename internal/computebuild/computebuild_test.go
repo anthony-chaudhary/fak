@@ -1,10 +1,15 @@
 package computebuild
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestVulkanShadersCompleteness(t *testing.T) {
@@ -303,4 +308,358 @@ func TestLiveToolchainDiscovery(t *testing.T) {
 	// Log discovered tools for diagnostic visibility
 	t.Logf("Discovered Toolchain: CC=%q CXX=%q AR=%q NVCC=%q GLSLC=%q VulkanSDK=%q CUDAHome=%q",
 		tc.CC, tc.CXX, tc.AR, tc.NVCC, tc.GLSLC, tc.VulkanSDK, tc.CUDAHome)
+}
+
+func TestReceiptGenerationAndFormatting(t *testing.T) {
+	tmpDir := t.TempDir()
+	receiptPath := filepath.Join(tmpDir, "test-receipt.json")
+
+	zeroCode := 0
+	receipt := &ComputeBuildReceipt{
+		Schema:      ComputeBuildReceiptSchema,
+		Backend:     "vulkan",
+		Command:     "binary",
+		Outcome:     "success",
+		ExitCode:    0,
+		StartedAt:   time.Now().UTC().Format(time.RFC3339Nano),
+		FinishedAt:  time.Now().UTC().Add(time.Second).Format(time.RFC3339Nano),
+		ElapsedMS:   1000,
+		ReceiptPath: receiptPath,
+		Phases: []ComputeBuildPhase{
+			{Name: "toolchain_probe", Outcome: "success", ElapsedMS: 50, ExitCode: &zeroCode},
+			{Name: "shaders", Outcome: "success", ElapsedMS: 300, ExitCode: &zeroCode},
+			{Name: "shim", Outcome: "success", ElapsedMS: 250, ExitCode: &zeroCode},
+			{Name: "build_or_test", Outcome: "success", ElapsedMS: 350, ExitCode: &zeroCode},
+			{Name: "smoke", Outcome: "success", ElapsedMS: 50, ExitCode: &zeroCode},
+		},
+		Artifact: &BuildArtifact{
+			Path:      filepath.Join(tmpDir, "fak.exe"),
+			SizeBytes: 54321,
+			Signed:    true,
+			SHA256:    "abcdef0123456789",
+		},
+		Smoke: &SmokeResult{
+			Command:  []string{filepath.Join(tmpDir, "fak.exe"), "version", "--json"},
+			Outcome:  "success",
+			Output:   `{"version":"dev"}`,
+			ExitCode: 0,
+		},
+	}
+
+	if err := WriteReceiptAtomic(receiptPath, receipt); err != nil {
+		t.Fatalf("WriteReceiptAtomic failed: %v", err)
+	}
+
+	// Verify file exists on disk
+	if !FileExists(receiptPath) {
+		t.Fatalf("receipt file not found on disk at %s", receiptPath)
+	}
+
+	// Read and verify JSON structure
+	data, err := os.ReadFile(receiptPath)
+	if err != nil {
+		t.Fatalf("failed reading receipt file: %v", err)
+	}
+
+	var decoded ComputeBuildReceipt
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("failed unmarshaling receipt: %v", err)
+	}
+
+	if decoded.Schema != ComputeBuildReceiptSchema {
+		t.Errorf("schema mismatch: got %q, want %q", decoded.Schema, ComputeBuildReceiptSchema)
+	}
+	if decoded.Backend != "vulkan" {
+		t.Errorf("backend mismatch: got %q, want vulkan", decoded.Backend)
+	}
+	if decoded.Command != "binary" {
+		t.Errorf("command mismatch: got %q, want binary", decoded.Command)
+	}
+	if decoded.Outcome != "success" || decoded.ExitCode != 0 {
+		t.Errorf("outcome mismatch: outcome=%q, exit_code=%d", decoded.Outcome, decoded.ExitCode)
+	}
+	if len(decoded.Phases) != 5 {
+		t.Fatalf("expected 5 phases, got %d", len(decoded.Phases))
+	}
+	if decoded.Phases[0].Name != "toolchain_probe" || decoded.Phases[4].Name != "smoke" {
+		t.Errorf("unexpected phase names: first=%q last=%q", decoded.Phases[0].Name, decoded.Phases[4].Name)
+	}
+	if decoded.Artifact == nil || decoded.Artifact.SizeBytes != 54321 || !decoded.Artifact.Signed {
+		t.Errorf("artifact mismatch: %+v", decoded.Artifact)
+	}
+	if decoded.Smoke == nil || decoded.Smoke.Outcome != "success" || decoded.Smoke.ExitCode != 0 {
+		t.Errorf("smoke result mismatch: %+v", decoded.Smoke)
+	}
+
+	// Test overwriting existing receipt atomically
+	receipt.Outcome = "failed"
+	receipt.ExitCode = 1
+	receipt.Error = "simulated error"
+	if err := WriteReceiptAtomic(receiptPath, receipt); err != nil {
+		t.Fatalf("WriteReceiptAtomic overwrite failed: %v", err)
+	}
+
+	dataOverwritten, err := os.ReadFile(receiptPath)
+	if err != nil {
+		t.Fatalf("reading overwritten receipt: %v", err)
+	}
+	var decoded2 ComputeBuildReceipt
+	if err := json.Unmarshal(dataOverwritten, &decoded2); err != nil {
+		t.Fatalf("unmarshaling overwritten receipt: %v", err)
+	}
+	if decoded2.Outcome != "failed" || decoded2.ExitCode != 1 || decoded2.Error != "simulated error" {
+		t.Errorf("overwritten receipt mismatch: %+v", decoded2)
+	}
+}
+
+func TestShiftLeftSmokeExecution(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Non-existent file
+	resMissing := SmokeArtifact(ctx, "")
+	if resMissing.Outcome != "failed" || resMissing.ExitCode != 1 {
+		t.Errorf("expected failure on empty path, got: %+v", resMissing)
+	}
+
+	resNotFound := SmokeArtifact(ctx, filepath.Join(t.TempDir(), "nonexistent_bin.exe"))
+	if resNotFound.Outcome != "failed" || resNotFound.ExitCode != 1 || !strings.Contains(resNotFound.Error, "not found") {
+		t.Errorf("expected not found failure, got: %+v", resNotFound)
+	}
+
+	// 2. Build mock binary to test fallback ladder
+	tmpDir := t.TempDir()
+	mockSrc := filepath.Join(tmpDir, "mock_main.go")
+	mockBin := filepath.Join(tmpDir, "mock_tool.exe")
+
+	srcCode := `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	mode := os.Getenv("FAK_SMOKE_MOCK_MODE")
+	args := os.Args[1:]
+	if len(args) == 0 {
+		os.Exit(1)
+	}
+
+	switch mode {
+	case "version":
+		if args[0] == "version" && len(args) > 1 && args[1] == "--json" {
+			fmt.Println("{\"version\":\"1.0.0\"}")
+			os.Exit(0)
+		}
+	case "help":
+		if args[0] == "--help" {
+			fmt.Println("mock tool help text")
+			os.Exit(0)
+		}
+	case "dash_h":
+		if args[0] == "-h" {
+			fmt.Println("mock tool -h usage")
+			os.Exit(0)
+		}
+	case "crash":
+		os.Exit(42)
+	}
+	os.Exit(1)
+}
+`
+	if err := os.WriteFile(mockSrc, []byte(srcCode), 0644); err != nil {
+		t.Fatalf("failed writing mock tool source: %v", err)
+	}
+
+	cmdBuild := exec.Command("go", "build", "-o", mockBin, mockSrc)
+	if out, err := cmdBuild.CombinedOutput(); err != nil {
+		t.Fatalf("building mock binary failed: %v (output: %s)", err, string(out))
+	}
+
+	// Subtest A: version --json succeeds on first try
+	t.Run("VersionJsonSuccess", func(t *testing.T) {
+		t.Setenv("FAK_SMOKE_MOCK_MODE", "version")
+		res := SmokeArtifact(ctx, mockBin)
+		if res.Outcome != "success" {
+			t.Fatalf("expected success, got outcome=%q error=%q", res.Outcome, res.Error)
+		}
+		if res.ExitCode != 0 {
+			t.Errorf("expected exit code 0, got %d", res.ExitCode)
+		}
+		if len(res.Command) < 3 || res.Command[1] != "version" || res.Command[2] != "--json" {
+			t.Errorf("expected version --json command, got %v", res.Command)
+		}
+		if !strings.Contains(res.Output, "1.0.0") {
+			t.Errorf("output missing version string: %q", res.Output)
+		}
+	})
+
+	// Subtest B: version fails, falls back to --help
+	t.Run("FallbackHelpSuccess", func(t *testing.T) {
+		t.Setenv("FAK_SMOKE_MOCK_MODE", "help")
+		res := SmokeArtifact(ctx, mockBin)
+		if res.Outcome != "success" {
+			t.Fatalf("expected success on --help fallback, got outcome=%q error=%q", res.Outcome, res.Error)
+		}
+		if res.ExitCode != 0 {
+			t.Errorf("expected exit code 0, got %d", res.ExitCode)
+		}
+		if len(res.Command) < 2 || res.Command[1] != "--help" {
+			t.Errorf("expected --help command, got %v", res.Command)
+		}
+		if !strings.Contains(res.Output, "help text") {
+			t.Errorf("output missing help text: %q", res.Output)
+		}
+	})
+
+	// Subtest C: version and --help fail, falls back to -h
+	t.Run("FallbackDashHSuccess", func(t *testing.T) {
+		t.Setenv("FAK_SMOKE_MOCK_MODE", "dash_h")
+		res := SmokeArtifact(ctx, mockBin)
+		if res.Outcome != "success" {
+			t.Fatalf("expected success on -h fallback, got outcome=%q error=%q", res.Outcome, res.Error)
+		}
+		if res.ExitCode != 0 {
+			t.Errorf("expected exit code 0, got %d", res.ExitCode)
+		}
+		if len(res.Command) < 2 || res.Command[1] != "-h" {
+			t.Errorf("expected -h command, got %v", res.Command)
+		}
+		if !strings.Contains(res.Output, "-h usage") {
+			t.Errorf("output missing -h usage: %q", res.Output)
+		}
+	})
+
+	// Subtest D: all candidates fail (crash or non-zero exit)
+	t.Run("AllCandidatesFail", func(t *testing.T) {
+		t.Setenv("FAK_SMOKE_MOCK_MODE", "crash")
+		res := SmokeArtifact(ctx, mockBin)
+		if res.Outcome != "failed" {
+			t.Fatalf("expected failure, got outcome=%q", res.Outcome)
+		}
+		if res.ExitCode != 42 {
+			t.Errorf("expected exit code 42, got %d", res.ExitCode)
+		}
+	})
+}
+
+func TestPhaseRecordingAndDurationAccounting(t *testing.T) {
+	tmpDir := t.TempDir()
+	receiptPath := filepath.Join(tmpDir, "phase-receipt.json")
+
+	tracker := newReceiptTracker("vulkan", "build", receiptPath)
+
+	// Phase 1: success with measurable duration
+	err1 := tracker.recordPhase("toolchain_probe", func() error {
+		time.Sleep(15 * time.Millisecond)
+		return nil
+	})
+	if err1 != nil {
+		t.Fatalf("phase 1 unexpected error: %v", err1)
+	}
+
+	// Phase 2: success
+	err2 := tracker.recordPhase("shaders", func() error {
+		time.Sleep(15 * time.Millisecond)
+		return nil
+	})
+	if err2 != nil {
+		t.Fatalf("phase 2 unexpected error: %v", err2)
+	}
+
+	// Phase 3: failure
+	err3 := tracker.recordPhase("shim", func() error {
+		time.Sleep(10 * time.Millisecond)
+		return fmt.Errorf("simulated compiler error")
+	})
+	if err3 == nil {
+		t.Fatalf("expected error from phase 3")
+	}
+
+	// Finish and persist receipt
+	if err := tracker.finish(receiptPath); err != nil {
+		t.Fatalf("tracker.finish failed: %v", err)
+	}
+
+	if !FileExists(receiptPath) {
+		t.Fatalf("receipt not written to disk at %s", receiptPath)
+	}
+
+	data, err := os.ReadFile(receiptPath)
+	if err != nil {
+		t.Fatalf("reading receipt: %v", err)
+	}
+
+	var rec ComputeBuildReceipt
+	if err := json.Unmarshal(data, &rec); err != nil {
+		t.Fatalf("unmarshaling receipt: %v", err)
+	}
+
+	if rec.Outcome != "failed" {
+		t.Errorf("receipt outcome expected failed, got %q", rec.Outcome)
+	}
+	if rec.ExitCode == 0 {
+		t.Errorf("receipt exit code expected non-zero, got %d", rec.ExitCode)
+	}
+	if !strings.Contains(rec.Error, "simulated compiler error") {
+		t.Errorf("receipt error missing simulated error: %q", rec.Error)
+	}
+
+	if len(rec.Phases) != 3 {
+		t.Fatalf("expected 3 phases, got %d", len(rec.Phases))
+	}
+
+	// Check phase 1
+	p1 := rec.Phases[0]
+	if p1.Name != "toolchain_probe" || p1.Outcome != "success" || p1.ElapsedMS < 10 {
+		t.Errorf("phase 1 invalid: %+v", p1)
+	}
+
+	// Check phase 2
+	p2 := rec.Phases[1]
+	if p2.Name != "shaders" || p2.Outcome != "success" || p2.ElapsedMS < 10 {
+		t.Errorf("phase 2 invalid: %+v", p2)
+	}
+
+	// Check phase 3
+	p3 := rec.Phases[2]
+	if p3.Name != "shim" || p3.Outcome != "failed" || !strings.Contains(p3.Error, "simulated compiler error") {
+		t.Errorf("phase 3 invalid: %+v", p3)
+	}
+
+	// Duration accounting: total elapsed should be at least sum of phases
+	phaseSum := p1.ElapsedMS + p2.ElapsedMS + p3.ElapsedMS
+	if rec.ElapsedMS < phaseSum {
+		t.Errorf("total ElapsedMS (%d) less than phase sum (%d)", rec.ElapsedMS, phaseSum)
+	}
+}
+
+func TestCxxToolchainProbe(t *testing.T) {
+	ctx := context.Background()
+
+	// Nil toolchain
+	if err := TestCxxToolchain(ctx, nil); err == nil {
+		t.Errorf("expected error for nil toolchain")
+	}
+
+	// Empty CXX
+	if err := TestCxxToolchain(ctx, &Toolchain{CXX: ""}); err == nil {
+		t.Errorf("expected error for empty CXX toolchain")
+	}
+
+	// Non-existent CXX binary
+	if err := TestCxxToolchain(ctx, &Toolchain{CXX: "nonexistent_compiler_xyz"}); err == nil {
+		t.Errorf("expected error for invalid CXX compiler")
+	}
+
+	// If live toolchain has CXX, test live toolchain
+	tc, err := DiscoverToolchain()
+	if err == nil && tc != nil && tc.CXX != "" && FileExists(tc.CXX) {
+		t.Logf("Testing live C++ toolchain probe with %s ...", tc.CXX)
+		if probeErr := TestCxxToolchain(ctx, tc); probeErr != nil {
+			t.Logf("Live toolchain probe returned error (expected if dev environment headers missing): %v", probeErr)
+		} else {
+			t.Logf("Live toolchain probe succeeded!")
+		}
+	}
 }

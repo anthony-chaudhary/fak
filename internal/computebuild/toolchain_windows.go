@@ -3,14 +3,11 @@
 package computebuild
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -192,25 +189,6 @@ func IngestVsDevEnv(vsDevCmdPath string) (map[string]string, error) {
 	return ParseEnvBlock(out), nil
 }
 
-// ParseEnvBlock parses KEY=VALUE environment blocks from command output.
-func ParseEnvBlock(raw []byte) map[string]string {
-	scanner := bufio.NewScanner(bytes.NewReader(raw))
-	env := make(map[string]string)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		idx := strings.Index(line, "=")
-		if idx > 0 {
-			key := line[:idx]
-			val := line[idx+1:]
-			env[key] = val
-		}
-	}
-	return env
-}
-
 // FindVulkanSDK discovers the Vulkan SDK installation directory.
 func FindVulkanSDK() string {
 	if envSDK := os.Getenv("VULKAN_SDK"); envSDK != "" && DirExists(envSDK) {
@@ -242,33 +220,6 @@ func FindVulkanSDK() string {
 		return fallback
 	}
 	return ""
-}
-
-// compareVersionStrings compares two dotted version strings (e.g. "1.4.350.0" vs "1.3.290.0").
-// Returns 1 if v1 > v2, -1 if v1 < v2, and 0 if equal.
-func compareVersionStrings(v1, v2 string) int {
-	p1 := strings.Split(v1, ".")
-	p2 := strings.Split(v2, ".")
-	maxLen := len(p1)
-	if len(p2) > maxLen {
-		maxLen = len(p2)
-	}
-	for i := 0; i < maxLen; i++ {
-		var n1, n2 int
-		if i < len(p1) {
-			n1, _ = strconv.Atoi(p1[i])
-		}
-		if i < len(p2) {
-			n2, _ = strconv.Atoi(p2[i])
-		}
-		if n1 > n2 {
-			return 1
-		}
-		if n1 < n2 {
-			return -1
-		}
-	}
-	return 0
 }
 
 // FindSignTool searches for signtool.exe on PATH and in Windows Kits.

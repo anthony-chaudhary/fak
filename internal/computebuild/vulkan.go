@@ -67,7 +67,7 @@ func BuildShaders(ctx context.Context, tc *Toolchain, repoRoot string, stdout io
 		dst := filepath.Join(spvOut, s+".spv")
 
 		if !FileExists(src) {
-			continue
+			return fmt.Errorf("required shader source missing: %s", src)
 		}
 
 		if stdout != nil {
@@ -78,6 +78,10 @@ func BuildShaders(ctx context.Context, tc *Toolchain, repoRoot string, stdout io
 			return fmt.Errorf("glslc failed on %s.comp: %w", s, err)
 		}
 		compiledCount++
+	}
+
+	if compiledCount == 0 {
+		return fmt.Errorf("no shaders compiled in %s", shaderSrc)
 	}
 
 	if stdout != nil {
@@ -142,6 +146,46 @@ func BuildVulkanShim(ctx context.Context, tc *Toolchain, repoRoot string, stdout
 	}, nil
 }
 
+// TestCxxToolchain performs a shift-left C++ compilation probe, proving the C++
+// compiler and standard library are functional before running heavy build tasks.
+func TestCxxToolchain(ctx context.Context, tc *Toolchain) error {
+	if tc == nil || tc.CXX == "" {
+		return fmt.Errorf("C++ compiler not found (clang++ or g++)")
+	}
+
+	tmpDir, err := os.MkdirTemp("", "fak-cxx-probe-*")
+	if err != nil {
+		return fmt.Errorf("creating temp probe dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	probeSrc := filepath.Join(tmpDir, "probe.cpp")
+	probeObj := filepath.Join(tmpDir, "probe.o")
+
+	srcContent := []byte("#include <vector>\n#include <string>\nint main() {\n    std::vector<std::string> v;\n    v.push_back(\"fak_probe\");\n    return v.empty() ? 1 : 0;\n}\n")
+	if err := os.WriteFile(probeSrc, srcContent, 0644); err != nil {
+		return fmt.Errorf("writing probe source: %w", err)
+	}
+
+	cxxArgs := []string{"-O3", "-std=c++17"}
+	if tc.IsWindows {
+		cxxArgs = append(cxxArgs, "-D_CRT_SECURE_NO_WARNINGS")
+	} else {
+		cxxArgs = append(cxxArgs, "-fPIC")
+	}
+	cxxArgs = append(cxxArgs, "-c", probeSrc, "-o", probeObj)
+
+	env := os.Environ()
+	if len(tc.VsDevEnv) > 0 {
+		env = MergeEnviron(env, tc.VsDevEnv)
+	}
+
+	if err := RunCmd(ctx, tc.CXX, cxxArgs, tmpDir, env, nil, nil); err != nil {
+		return fmt.Errorf("C++ toolchain probe failed: %w", err)
+	}
+	return nil
+}
+
 // RunVulkan orchestrates Vulkan build tasks according to cfg.Command.
 func RunVulkan(ctx context.Context, cfg *VulkanConfig) error {
 	if cfg == nil {
@@ -164,18 +208,62 @@ func RunVulkan(ctx context.Context, cfg *VulkanConfig) error {
 		}
 		cfg.Toolchain = tc
 	}
+	if cfg.ReceiptPath == "" {
+		cfg.ReceiptPath = filepath.Join(cfg.RepoRoot, DefaultVulkanBuildReceiptPath)
+	} else if !filepath.IsAbs(cfg.ReceiptPath) {
+		cfg.ReceiptPath = filepath.Join(cfg.RepoRoot, cfg.ReceiptPath)
+	}
+	if cfg.Command == "binary" && !cfg.SkipSmoke {
+		cfg.Smoke = true
+	}
+
+	tracker := newReceiptTracker("vulkan", cfg.Command, cfg.ReceiptPath)
+	cfg.Receipt = tracker.receipt
+	defer func() {
+		_ = tracker.finish(cfg.ReceiptPath)
+	}()
 
 	switch cfg.Command {
 	case "shaders":
-		return BuildShaders(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout)
+		return tracker.recordPhase("shaders", func() error {
+			return BuildShaders(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout)
+		})
+
 	case "lib":
-		_, err := BuildVulkanShim(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout)
-		return err
-	case "build":
-		if err := BuildShaders(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout); err != nil {
+		if err := tracker.recordPhase("toolchain_probe", func() error {
+			return TestCxxToolchain(ctx, cfg.Toolchain)
+		}); err != nil {
 			return err
 		}
-		if _, err := BuildVulkanShim(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout); err != nil {
+		var artifact *BuildArtifact
+		if err := tracker.recordPhase("shim", func() error {
+			art, err := BuildVulkanShim(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout)
+			if err != nil {
+				return err
+			}
+			artifact = art
+			return nil
+		}); err != nil {
+			return err
+		}
+		tracker.receipt.Artifact = artifact
+		return nil
+
+	case "build":
+		if err := tracker.recordPhase("toolchain_probe", func() error {
+			return TestCxxToolchain(ctx, cfg.Toolchain)
+		}); err != nil {
+			return err
+		}
+		if err := tracker.recordPhase("shaders", func() error {
+			return BuildShaders(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout)
+		}); err != nil {
+			return err
+		}
+		if err := tracker.recordPhase("shim", func() error {
+			_, err := BuildVulkanShim(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout)
+			return err
+		}); err != nil {
 			return err
 		}
 		cgoEnv := SynthesizeVulkanCgoEnv(cfg.Toolchain, cfg.PkgDir)
@@ -184,15 +272,49 @@ func RunVulkan(ctx context.Context, cfg *VulkanConfig) error {
 			env = MergeEnviron(env, cfg.Toolchain.VsDevEnv)
 		}
 		args := []string{"build", "-tags", "vulkan", "./internal/compute/"}
-		return RunCmd(ctx, "go", args, cfg.RepoRoot, env, cfg.Stdout, cfg.Stderr)
-	case "binary":
-		if cfg.OutPkg == "" || cfg.OutBin == "" {
-			return fmt.Errorf("usage: binary <pkg> <out>")
-		}
-		if err := BuildShaders(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout); err != nil {
+		if err := tracker.recordPhase("build_or_test", func() error {
+			return RunCmd(ctx, "go", args, cfg.RepoRoot, env, cfg.Stdout, cfg.Stderr)
+		}); err != nil {
 			return err
 		}
-		if _, err := BuildVulkanShim(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout); err != nil {
+		outBinPath := cfg.OutBin
+		if outBinPath != "" && !filepath.IsAbs(outBinPath) {
+			outBinPath = filepath.Join(cfg.RepoRoot, outBinPath)
+		}
+		if outBinPath != "" && FileExists(outBinPath) {
+			if art, err := InspectArtifact(outBinPath); err == nil {
+				tracker.receipt.Artifact = art
+			}
+			if cfg.Smoke {
+				if err := tracker.recordSmoke(ctx, outBinPath); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+
+	case "binary":
+		if cfg.OutPkg == "" || cfg.OutBin == "" {
+			err := fmt.Errorf("usage: binary <pkg> <out>")
+			tracker.receipt.Outcome = "failed"
+			tracker.receipt.ExitCode = 1
+			tracker.receipt.Error = err.Error()
+			return err
+		}
+		if err := tracker.recordPhase("toolchain_probe", func() error {
+			return TestCxxToolchain(ctx, cfg.Toolchain)
+		}); err != nil {
+			return err
+		}
+		if err := tracker.recordPhase("shaders", func() error {
+			return BuildShaders(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout)
+		}); err != nil {
+			return err
+		}
+		if err := tracker.recordPhase("shim", func() error {
+			_, err := BuildVulkanShim(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout)
+			return err
+		}); err != nil {
 			return err
 		}
 		cgoEnv := SynthesizeVulkanCgoEnv(cfg.Toolchain, cfg.PkgDir)
@@ -201,12 +323,42 @@ func RunVulkan(ctx context.Context, cfg *VulkanConfig) error {
 			env = MergeEnviron(env, cfg.Toolchain.VsDevEnv)
 		}
 		args := []string{"build", "-tags", "vulkan", "-o", cfg.OutBin, cfg.OutPkg}
-		return RunCmd(ctx, "go", args, cfg.RepoRoot, env, cfg.Stdout, cfg.Stderr)
-	case "test":
-		if err := BuildShaders(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout); err != nil {
+		if err := tracker.recordPhase("build_or_test", func() error {
+			return RunCmd(ctx, "go", args, cfg.RepoRoot, env, cfg.Stdout, cfg.Stderr)
+		}); err != nil {
 			return err
 		}
-		if _, err := BuildVulkanShim(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout); err != nil {
+		outBinPath := cfg.OutBin
+		if !filepath.IsAbs(outBinPath) {
+			outBinPath = filepath.Join(cfg.RepoRoot, outBinPath)
+		}
+		if FileExists(outBinPath) {
+			if art, err := InspectArtifact(outBinPath); err == nil {
+				tracker.receipt.Artifact = art
+			}
+		}
+		if cfg.Smoke && FileExists(outBinPath) {
+			if err := tracker.recordSmoke(ctx, outBinPath); err != nil {
+				return err
+			}
+		}
+		return nil
+
+	case "test":
+		if err := tracker.recordPhase("toolchain_probe", func() error {
+			return TestCxxToolchain(ctx, cfg.Toolchain)
+		}); err != nil {
+			return err
+		}
+		if err := tracker.recordPhase("shaders", func() error {
+			return BuildShaders(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout)
+		}); err != nil {
+			return err
+		}
+		if err := tracker.recordPhase("shim", func() error {
+			_, err := BuildVulkanShim(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout)
+			return err
+		}); err != nil {
 			return err
 		}
 		cgoEnv := SynthesizeVulkanCgoEnv(cfg.Toolchain, cfg.PkgDir)
@@ -215,8 +367,15 @@ func RunVulkan(ctx context.Context, cfg *VulkanConfig) error {
 			env = MergeEnviron(env, cfg.Toolchain.VsDevEnv)
 		}
 		args := []string{"test", "-tags", "vulkan", "-count=1", "-v", "-run", "Vulkan|HALDevice", "./internal/compute/", "./internal/model/"}
-		return RunCmd(ctx, "go", args, cfg.RepoRoot, env, cfg.Stdout, cfg.Stderr)
+		return tracker.recordPhase("build_or_test", func() error {
+			return RunCmd(ctx, "go", args, cfg.RepoRoot, env, cfg.Stdout, cfg.Stderr)
+		})
+
 	default:
-		return fmt.Errorf("unknown subcommand: %s (use shaders|lib|build|binary|test)", cfg.Command)
+		err := fmt.Errorf("unknown subcommand: %s (use shaders|lib|build|binary|test)", cfg.Command)
+		tracker.receipt.Outcome = "failed"
+		tracker.receipt.ExitCode = 1
+		tracker.receipt.Error = err.Error()
+		return err
 	}
 }
