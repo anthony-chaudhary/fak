@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"testing"
@@ -116,9 +115,6 @@ func TestAgentBufferPoolConcurrentContention(t *testing.T) {
 			fmt.Sprintf("package fixture\n\nconst ID = %d\n", i))
 	}
 
-	oldGC := debug.SetGCPercent(500)
-	defer debug.SetGCPercent(oldGC)
-
 	codetools.ResetBufferPoolMetrics()
 	const workers = 20
 	const opsPerWorker = 50
@@ -147,9 +143,12 @@ func TestAgentBufferPoolConcurrentContention(t *testing.T) {
 	wg.Wait()
 
 	m := codetools.GetBufferPoolMetrics()
-	// Read acquires the shared arena; Grep uses a bounded reader without pool acquisition.
-	if m.Acquires < workers*opsPerWorker {
-		t.Fatalf("Acquires = %d, want >= %d", m.Acquires, workers*opsPerWorker)
+	wantAcquires := uint64(workers * opsPerWorker)
+	if m.Acquires != wantAcquires {
+		t.Fatalf("Acquires = %d, want %d pooled Read acquisitions", m.Acquires, wantAcquires)
+	}
+	if m.Releases != m.Acquires {
+		t.Fatalf("Releases = %d, want %d (all acquired buffers returned)", m.Releases, m.Acquires)
 	}
 	// Bounded allocations under concurrent access
 	if m.Allocations > workers*4 {
