@@ -28,6 +28,18 @@ func (e *BackendForwardOperationError) Error() string {
 
 func (e *BackendForwardOperationError) Unwrap() error { return e.Cause }
 
+// Qwen35QKNormResidencyError is a typed refusal to execute Q/K normalization
+// through the model's host fallback. Native-performance callers must not count a
+// run unless the exact Qwen shared-head-weight RMSNorm can remain on the backend.
+type Qwen35QKNormResidencyError struct {
+	Layer  int
+	Reason string
+}
+
+func (e *Qwen35QKNormResidencyError) Error() string {
+	return fmt.Sprintf("model: Qwen QK normalization cannot remain device-resident at layer %d: %s", e.Layer, e.Reason)
+}
+
 type qwen35HALState struct {
 	backend          Qwen35GDNBackend
 	layers           []qwen35HALLayerState
@@ -538,6 +550,48 @@ func (s *Session) readQwen35FullAttention(layer int, label string, tensor comput
 	return append([]float32(nil), data...)
 }
 
+// qwen35ResidentQKNorm applies the Qwen3.5/3.8 per-head Q/K RMSNorm without
+// materializing either projection on the host. The Qwen checkpoint stores one
+// head-dimension gain vector shared by all Q (or K) heads; Backend.RMSNorm
+// therefore sees one row per head. Other layouts need a distinct device kernel
+// and are rejected rather than silently degrading a native-performance run.
+func (s *Session) qwen35ResidentQKNorm(layer int, q, k compute.Tensor) (compute.Tensor, compute.Tensor, error) {
+	if s == nil || s.M == nil || s.Backend == nil {
+		return compute.Tensor{}, compute.Tensor{}, &Qwen35QKNormResidencyError{Layer: layer, Reason: "missing model session or backend"}
+	}
+	cfg := s.M.Cfg
+	p := func(suffix string) string { return layerName(layer, suffix) }
+	if cfg.LayerNorm {
+		return compute.Tensor{}, compute.Tensor{}, &Qwen35QKNormResidencyError{Layer: layer, Reason: "mean-subtracting LayerNorm requires a separate device capability"}
+	}
+	if cfg.QKNormPerHeadWeight {
+		return compute.Tensor{}, compute.Tensor{}, &Qwen35QKNormResidencyError{Layer: layer, Reason: "per-head gain rows require a separate device capability"}
+	}
+	qName, kName := p("self_attn.q_norm.weight"), p("self_attn.k_norm.weight")
+	if !s.M.hasWeight(qName) || !s.M.hasWeight(kName) {
+		return compute.Tensor{}, compute.Tensor{}, &Qwen35QKNormResidencyError{Layer: layer, Reason: "missing q_norm or k_norm weight"}
+	}
+	hd, nH, nKV := cfg.HeadDim, cfg.NumHeads, cfg.NumKVHeads
+	qWeight, kWeight := s.normWeightHAL(qName), s.normWeightHAL(kName)
+	if hd <= 0 || q.Numel() != nH*hd || k.Numel() != nKV*hd || qWeight.Numel() != hd || kWeight.Numel() != hd {
+		return compute.Tensor{}, compute.Tensor{}, &Qwen35QKNormResidencyError{
+			Layer: layer,
+			Reason: fmt.Sprintf("unsupported geometry q=%d k=%d q_weight=%d k_weight=%d; want %d, %d, %d, %d",
+				q.Numel(), k.Numel(), qWeight.Numel(), kWeight.Numel(), nH*hd, nKV*hd, hd, hd),
+		}
+	}
+	qNorm := s.Backend.RMSNorm(q, qWeight, cfg.qkNormEps())
+	if qNorm.Buf() == nil || !qNorm.Ready() {
+		return compute.Tensor{}, compute.Tensor{}, &Qwen35QKNormResidencyError{Layer: layer, Reason: "backend returned no resident query result"}
+	}
+	kNorm := s.Backend.RMSNorm(k, kWeight, cfg.qkNormEps())
+	if kNorm.Buf() == nil || !kNorm.Ready() {
+		s.Backend.Free(qNorm)
+		return compute.Tensor{}, compute.Tensor{}, &Qwen35QKNormResidencyError{Layer: layer, Reason: "backend returned no resident key result"}
+	}
+	return qNorm, kNorm, nil
+}
+
 func qwen35HALKVLayer(cfg Config, layer int) int {
 	if !cfg.IsQwen35Hybrid() {
 		return layer
@@ -592,26 +646,10 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 	}
 
 	if cfg.QKNorm {
-		dispatched := false
-		if !cfg.LayerNorm && !cfg.QKNormPerHeadWeight && s.M.hasWeight(p("self_attn.q_norm.weight")) && s.M.hasWeight(p("self_attn.k_norm.weight")) {
-			qkEps := float32(cfg.qkNormEps())
-			qWeight := s.normWeightHAL(p("self_attn.q_norm.weight"))
-			kWeight := s.normWeightHAL(p("self_attn.k_norm.weight"))
-			if qWeight.Buf() != nil && kWeight.Buf() != nil {
-				qNorm := be.RMSNorm(q, qWeight, qkEps)
-				kNorm := be.RMSNorm(kRaw, kWeight, qkEps)
-				if qNorm.Buf() != nil && kNorm.Buf() != nil {
-					q, kRaw = qNorm, kNorm
-					dispatched = true
-				}
-			}
-		}
-		if !dispatched {
-			qHost := s.readQwen35FullAttention(layer, "full-attention q-norm read", q)
-			kHost := s.readQwen35FullAttention(layer, "full-attention k-norm read", kRaw)
-			s.M.applyLayerQKNorm(layer, qHost, kHost)
-			q = s.uploadHostF32([]int{nH * hd}, qHost, compute.MemoryActivation, "qwen35-full-attn-norm-q")
-			kRaw = s.uploadHostF32([]int{nKV * hd}, kHost, compute.MemoryActivation, "qwen35-full-attn-norm-k")
+		var err error
+		q, kRaw, err = s.qwen35ResidentQKNorm(layer, q, kRaw)
+		if err != nil {
+			s.failBackendForward(layer, "resident QK normalization", err)
 		}
 	}
 
