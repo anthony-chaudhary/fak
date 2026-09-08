@@ -117,7 +117,7 @@ func (be *vulkanBackend) SpecVerifyAttention(q, k, v, out *Tensor, qLen, kvLen, 
 
 var _ BatchedPrefillBackend = (*vulkanBackend)(nil)
 
-// PrefillBatch executes batched prompt prefill across a sequence panel (P x D) in 1 pass on Vulkan GPU (#11036).
+// PrefillBatch executes batched prompt prefill across a sequence panel (P x D) in 1 pass on Vulkan GPU (#11036, #12181).
 func (v *vulkanBackend) PrefillBatch(args PrefillBatchArgs) (PrefillBatchResult, error) {
 	P, D, err := validatePrefillBatchArgs(&args)
 	if err != nil {
