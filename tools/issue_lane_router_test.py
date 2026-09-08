@@ -1248,23 +1248,24 @@ class RequiredCapsTest(unittest.TestCase):
     (FLEET_NODE_CAPS) to run an issue — the signal the dispatcher's Part-B capability
     gate consumes to skip-but-not-stop GPU work on a GPU-less host."""
 
-    def test_gpu_labels_require_gpu(self):
+    def test_gpu_labels_are_area_only(self):
         for lab in ("gpu", "cuda", "multi-gpu"):
             with self.subTest(label=lab):
                 self.assertEqual(
-                    m.issue_required_caps(issue(1, "x", labels=[lab])), ["gpu"])
+                    m.issue_required_caps(issue(1, "x", labels=[lab])), [])
 
-    def test_gpu_scope_requires_gpu(self):
+    def test_gpu_scope_is_routing_only(self):
         self.assertEqual(
-            m.issue_required_caps(issue(1, "feat(multi-gpu): shard experts")), ["gpu"])
+            m.issue_required_caps(issue(1, "feat(multi-gpu): shard experts")), [])
 
-    def test_accelerator_keyword_requires_gpu(self):
-        self.assertEqual(
-            m.issue_required_caps(
-                issue(1, "provision an h100 serving node", body="needs 8x h100")),
-            ["gpu"])
-        self.assertEqual(
-            m.issue_required_caps(issue(1, "stand up an a100 pool")), ["gpu"])
+    def test_incidental_accelerator_words_do_not_require_gpu(self):
+        for word in ("h100", "a100", "dgx", "nvidia"):
+            with self.subTest(word=word):
+                self.assertEqual(
+                    m.issue_required_caps(
+                        issue(1, f"parse {word} telemetry",
+                              body=f"unit-test the {word} fixture on a standard host")),
+                    [])
 
     def test_plain_cpu_work_requires_nothing(self):
         self.assertEqual(
@@ -1282,9 +1283,13 @@ class RequiredCapsTest(unittest.TestCase):
 
     def test_route_record_carries_required_caps(self):
         # The annotation rides every routed record (the flat --json issues list the
-        # dispatcher's capability gate reads), keyed off the same labels routing used.
+        # dispatcher's capability gate reads), but routing metadata alone is not an
+        # execution requirement.
         r = route(issue(1478, "serving regression", labels=["multi-gpu"]))
-        self.assertEqual(r["required_caps"], ["gpu"])
+        self.assertEqual(r["required_caps"], [])
+        required = route(issue(1479, "serving regression",
+                               labels=["multi-gpu", "requires:gpu"]))
+        self.assertEqual(required["required_caps"], ["gpu"])
         r2 = route(issue(1, "fix(gateway): admit", body="see fak/internal/gateway/x.go"))
         self.assertEqual(r2["required_caps"], [])
 
@@ -1304,7 +1309,8 @@ class RequiredCapsTest(unittest.TestCase):
         self.assertEqual(
             m.issue_required_caps(
                 issue(4784, "perf(glm52): execute routed experts across all GPUs",
-                      body="on the lab a100 box", labels=[m.HARDWARE_CAP_LABEL])),
+                      body="on the lab a100 box",
+                      labels=[m.HARDWARE_CAP_LABEL, "requires:gpu"])),
             ["gpu", "hardware"])
 
     def test_hardware_label_absent_leaves_ordinary_work_ungated(self):
@@ -1348,6 +1354,10 @@ class RequiredCapsTest(unittest.TestCase):
     def test_body_execution_boundary_declaration(self):
         self.assertEqual(
             m.issue_required_caps(
+                issue(0, "task", body="Execution boundary: Single GPU (CUDA)")),
+            ["gpu"])
+        self.assertEqual(
+            m.issue_required_caps(
                 issue(1, "task",
                       body="Execution boundary: Single GPU (CUDA / Metal) [requires:gpu]")),
             ["gpu"])
@@ -1361,6 +1371,11 @@ class RequiredCapsTest(unittest.TestCase):
             m.issue_required_caps(
                 issue(3, "task",
                       body="Execution boundary: Sanctioned lab hardware (bare metal / reboot host) [requires:hardware]")),
+            ["hardware"])
+        self.assertEqual(
+            m.issue_required_caps(
+                issue(31, "task",
+                      body="Execution boundary: Sanctioned lab hardware (bare metal / reboot host)")),
             ["hardware"])
         self.assertEqual(
             m.issue_required_caps(

@@ -4945,6 +4945,26 @@ def _candidate_issue_numbers(eligible_lanes: list[Any] | None,
     return out
 
 
+def capability_skips(candidates: Any, caps_by_issue: dict[int, list[str]],
+                     node_caps: Any) -> tuple[set[int], list[dict[str, Any]]]:
+    """Return candidates whose explicit requirements exceed this host's caps.
+
+    The resolver treats the router's empty ``required_caps`` as dispatchable on a
+    standard runner. It does not infer capability from lane or issue text here.
+    """
+    available = {str(cap).lower() for cap in node_caps if cap}
+    required = {
+        int(number): {str(cap).lower() for cap in caps_by_issue.get(int(number), []) if cap}
+        for number in candidates
+    }
+    skipped = {number for number, caps in required.items() if not caps <= available}
+    rows = [
+        {"issue": number, "required_caps": sorted(required[number])}
+        for number in sorted(skipped)
+    ]
+    return skipped, rows
+
+
 def commit_audit_abstain_holds(root: Path, candidates: set[int], *,
                                git: Any | None = None,
                                audit_runner: Any | None = None,
@@ -6582,11 +6602,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # run (the #2062 tools-lane burn), instead of falsely stopping it.
     node_caps_set = dispatch_worker.node_caps()
     caps_by_issue = {int(k): v for k, v in (pick.get("caps_by_issue") or {}).items()}
-    capability_skipped = {n for n in candidates
-                          if not (set(caps_by_issue.get(n, [])) <= node_caps_set)}
-    capability_skipped_issues = [
-        {"issue": n, "required_caps": sorted(caps_by_issue.get(n, []))}
-        for n in sorted(capability_skipped)]
+    capability_skipped, capability_skipped_issues = capability_skips(
+        candidates, caps_by_issue, node_caps_set)
     skip = (live_issues | cooled | held_no_commit | contract_held_prior
             | multi_lane_held_prior | collision_held_prior
             | reblock_streak_held
