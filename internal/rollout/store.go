@@ -100,8 +100,7 @@ func (s *Store) Install(g Generation, artifact []byte) error {
 	return nil
 }
 
-// Load reads a generation manifest and verifies its artifact before returning it.
-func (s *Store) Load(id string) (Generation, error) {
+func (s *Store) loadManifest(id string) (Generation, error) {
 	if s == nil || s.root == "" {
 		return Generation{}, errors.New("generation store requires a root")
 	}
@@ -126,27 +125,46 @@ func (s *Store) Load(id string) (Generation, error) {
 	if manifest.Generation.ID != id {
 		return Generation{}, fmt.Errorf("generation manifest identity mismatch: requested %q, found %q", id, manifest.Generation.ID)
 	}
-	digestHex, err := parseDigest(manifest.Generation.Digest)
-	if err != nil {
+	if _, err := parseDigest(manifest.Generation.Digest); err != nil {
 		return Generation{}, err
-	}
-	if err := verifyFileDigest(s.objectPath(digestHex), digestHex); err != nil {
-		return Generation{}, fmt.Errorf("verify generation %q artifact: %w", id, err)
 	}
 	return manifest.Generation, nil
 }
 
+// Load reads a generation manifest and verifies its artifact before returning it.
+func (s *Store) Load(id string) (Generation, error) {
+	gen, err := s.loadManifest(id)
+	if err != nil {
+		return Generation{}, err
+	}
+	digestHex, _ := parseDigest(gen.Digest)
+	if err := verifyFileDigest(s.objectPath(digestHex), digestHex); err != nil {
+		return Generation{}, fmt.Errorf("verify generation %q artifact: %w", id, err)
+	}
+	return gen, nil
+}
+
 // Artifact returns verified immutable bytes for g.
 func (s *Store) Artifact(g Generation) ([]byte, error) {
-	stored, err := s.Load(g.ID)
+	stored, err := s.loadManifest(g.ID)
 	if err != nil {
 		return nil, err
 	}
 	if stored != g {
 		return nil, fmt.Errorf("generation %q digest mismatch: requested %s, stored %s", g.ID, g.Digest, stored.Digest)
 	}
-	digestHex, _ := parseDigest(g.Digest)
-	return os.ReadFile(s.objectPath(digestHex))
+	digestHex, err := parseDigest(g.Digest)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(s.objectPath(digestHex))
+	if err != nil {
+		return nil, fmt.Errorf("verify generation %q artifact: %w", g.ID, err)
+	}
+	if err := verifyArtifactBytes(data, digestHex); err != nil {
+		return nil, fmt.Errorf("verify generation %q artifact: %w", g.ID, err)
+	}
+	return data, nil
 }
 
 // Activate atomically changes a named pointer after verifying the generation.
@@ -242,6 +260,15 @@ func verifyFileDigest(path, wantHex string) error {
 		return err
 	}
 	got := hex.EncodeToString(h.Sum(nil))
+	if got != wantHex {
+		return fmt.Errorf("artifact corruption: digest is sha256:%s, want sha256:%s", got, wantHex)
+	}
+	return nil
+}
+
+func verifyArtifactBytes(data []byte, wantHex string) error {
+	actual := sha256.Sum256(data)
+	got := hex.EncodeToString(actual[:])
 	if got != wantHex {
 		return fmt.Errorf("artifact corruption: digest is sha256:%s, want sha256:%s", got, wantHex)
 	}

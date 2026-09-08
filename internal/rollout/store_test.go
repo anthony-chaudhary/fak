@@ -240,3 +240,51 @@ func TestStoreManifestPathDoesNotUseGenerationIDAsPath(t *testing.T) {
 		t.Fatalf("load path-like ID: %v", err)
 	}
 }
+
+func TestStoreArtifactVerifiesExactBytesReturned(t *testing.T) {
+	store := NewStore(t.TempDir())
+	artifact := []byte("exact rollout payload verification test bytes")
+	generation := generationForArtifact("gen-exact", artifact)
+	if err := store.Install(generation, artifact); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	got, err := store.Artifact(generation)
+	if err != nil {
+		t.Fatalf("Artifact failed on valid generation: %v", err)
+	}
+	if !bytes.Equal(got, artifact) {
+		t.Fatalf("Artifact returned %q, want %q", got, artifact)
+	}
+
+	// Corrupt object file on disk so the bytes read do not match the expected digest
+	digestHex, err := parseDigest(generation.Digest)
+	if err != nil {
+		t.Fatalf("parse digest: %v", err)
+	}
+	objectPath := store.objectPath(digestHex)
+	if err := os.Chmod(objectPath, 0o644); err != nil {
+		t.Fatalf("chmod artifact: %v", err)
+	}
+	if err := os.WriteFile(objectPath, []byte("tampered artifact bytes"), 0o444); err != nil {
+		t.Fatalf("write tampered artifact: %v", err)
+	}
+
+	corruptBytes, err := store.Artifact(generation)
+	if err == nil {
+		t.Fatalf("Artifact succeeded on corrupted object, returned: %q", corruptBytes)
+	}
+	if !strings.Contains(err.Error(), "artifact corruption") {
+		t.Fatalf("Artifact error = %v, want 'artifact corruption'", err)
+	}
+	if corruptBytes != nil {
+		t.Fatalf("Artifact returned non-nil bytes on verification failure: %q", corruptBytes)
+	}
+
+	// Also verify that digest mismatch between requested generation and stored manifest is rejected
+	mismatchedGen := generation
+	mismatchedGen.Digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	if _, err := store.Artifact(mismatchedGen); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+		t.Fatalf("Artifact error = %v, want digest mismatch", err)
+	}
+}
