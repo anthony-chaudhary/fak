@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"unsafe"
 )
 
@@ -260,6 +261,12 @@ func (v *vulkanBackend) VulkanDebugRestoreActive() bool {
 // selected Vulkan backend. Callers must bracket one execution and subtract via
 // BackendExecutionDelta; this process-global snapshot is never a receipt.
 func (v *vulkanBackend) BackendExecutionSnapshot() (BackendExecutionSnapshot, error) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return v.backendExecutionSnapshotLocked()
+}
+
+func (v *vulkanBackend) backendExecutionSnapshotLocked() (BackendExecutionSnapshot, error) {
 	var name [256]C.char
 	var vendorID, deviceID, driverVersion, apiVersion C.uint32_t
 	if C.fvk_device_identity(&name[0], 256, &vendorID, &deviceID, &driverVersion, &apiVersion) == 0 {
@@ -273,13 +280,21 @@ func (v *vulkanBackend) BackendExecutionSnapshot() (BackendExecutionSnapshot, er
 	runtimeIdentity := fmt.Sprintf("vulkan-%d.%d.%d", api>>22, (api>>12)&0x3ff, api&0xfff)
 	driverIdentity := fmt.Sprintf("vendor=0x%04x device=0x%04x driver=0x%08x", uint32(vendorID), uint32(deviceID), uint32(driverVersion))
 
-	dispatch := v.VulkanDebugDispatchProfileSnapshot()
+	dispatch := vulkanDebugDispatchProfileSnapshotLocked()
 	if dispatch.Q4KMatmulDispatches > dispatch.ComputeDispatches {
 		return BackendExecutionSnapshot{}, fmt.Errorf("compute: Vulkan Q4_K dispatch count exceeds compute total")
 	}
-	h2d, d2h := v.VulkanDebugTransferBytes()
-	_, _, stageCalls, stageBytes, fallbacks := v.VulkanDebugQ4KStageSnapshot()
-	hits, admissions, bypasses, entries, residentBytes, copiedBytes := v.VulkanDebugQ4KTensorHomeSnapshot()
+	var h2dCount, h2dBytes, d2hCount, d2hBytes, d2dCount, d2dBytes C.uint64_t
+	if C.fvk_transfer_counters(&h2dCount, &h2dBytes, &d2hCount, &d2hBytes, &d2dCount, &d2dBytes) == 0 {
+		return BackendExecutionSnapshot{}, fmt.Errorf("compute: Vulkan transfer counters are unavailable")
+	}
+	var allocationLive C.uint64_t
+	if C.fvk_device_allocation_snapshot(&allocationLive) == 0 {
+		return BackendExecutionSnapshot{}, fmt.Errorf("compute: Vulkan device-allocation accounting is unavailable")
+	}
+	stageCalls, stageBytes, fallbacks := v.q4kStagedCalls, v.q4kStagedBytes, v.q4kStageFallbacks
+	hits, admissions, bypasses := v.homeHits, v.homeMisses, v.homeBypasses
+	entries, residentBytes, copiedBytes := len(v.homes), v.homeBytes, v.homeCopied
 	if entries < 0 {
 		return BackendExecutionSnapshot{}, fmt.Errorf("compute: Vulkan tensor-home entry count is negative")
 	}
@@ -292,7 +307,13 @@ func (v *vulkanBackend) BackendExecutionSnapshot() (BackendExecutionSnapshot, er
 			return BackendExecutionSnapshot{}, fmt.Errorf("compute: Vulkan %s counter is negative", name)
 		}
 	}
-	total, free, memoryObserved := DeviceMemoryInfo(v)
+	total, free, memoryObserved := v.totalMem, int64(FreeUnknown), v.totalMem > 0
+	if memoryObserved && v.haveMemoryBudget {
+		var budget, usage, freeBytes C.uint64_t
+		if C.fvk_device_local_memory_budget(&budget, &usage, &freeBytes) != 0 {
+			free = vulkanCapInt64(freeBytes)
+		}
+	}
 	if memoryObserved && (total <= 0 || free < 0 || free > total) {
 		return BackendExecutionSnapshot{}, fmt.Errorf("compute: Vulkan device-memory observation is invalid")
 	}
@@ -305,14 +326,61 @@ func (v *vulkanBackend) BackendExecutionSnapshot() (BackendExecutionSnapshot, er
 			ComputeDispatches: dispatch.ComputeDispatches, Q4KMatmulDispatches: dispatch.Q4KMatmulDispatches,
 			OtherDispatches: dispatch.ComputeDispatches - dispatch.Q4KMatmulDispatches,
 			DispatchSubmits: dispatch.BatchSubmits + dispatch.OneShotSubmits,
-			H2DBytes:        h2d, D2HBytes: d2h, D2DCopies: dispatch.D2DCopies,
+			H2DBytes:        uint64(h2dBytes), H2DCount: uint64(h2dCount),
+			D2HBytes: uint64(d2hBytes), D2HCount: uint64(d2hCount),
+			D2DCopies: uint64(d2dCount), D2DBytes: uint64(d2dBytes),
 			Q4KStageCalls: uint64(stageCalls), Q4KStageBytes: uint64(stageBytes), Fallbacks: uint64(fallbacks),
 			TensorHomeHits: uint64(hits), TensorHomeAdmissions: uint64(admissions),
 			TensorHomeBypasses: uint64(bypasses), TensorHomeCopiedBytes: uint64(copiedBytes),
 		},
 		TensorHomeEntries: uint64(entries), TensorHomeResidentBytes: uint64(residentBytes),
 		DeviceMemoryTotalBytes: uint64(total), DeviceMemoryFreeBytes: uint64(free), DeviceMemoryObserved: memoryObserved,
+		TransferCountersObserved: true, DeviceAllocationLiveBytes: uint64(allocationLive), DeviceAllocationObserved: true,
 	}, nil
+}
+
+type vulkanExecutionWindow struct {
+	backend *vulkanBackend
+	before  BackendExecutionSnapshot
+	token   uint64
+	mu      sync.Mutex
+	ended   bool
+}
+
+func (v *vulkanBackend) BeginBackendExecutionWindow() (BackendExecutionWindow, error) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	before, err := v.backendExecutionSnapshotLocked()
+	if err != nil {
+		return nil, err
+	}
+	var token C.uint64_t
+	if C.fvk_device_allocation_window_begin(&token) == 0 || token == 0 {
+		return nil, fmt.Errorf("compute: Vulkan execution observation window is unavailable or already active")
+	}
+	return &vulkanExecutionWindow{backend: v, before: before, token: uint64(token)}, nil
+}
+
+func (w *vulkanExecutionWindow) End() (BackendExecutionObservation, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.ended {
+		return BackendExecutionObservation{}, fmt.Errorf("compute: Vulkan execution observation window is stale")
+	}
+	w.ended = true
+
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	after, snapshotErr := w.backend.backendExecutionSnapshotLocked()
+	var live, peak C.uint64_t
+	ended := C.fvk_device_allocation_window_end(C.uint64_t(w.token), &live, &peak) != 0
+	if snapshotErr != nil {
+		return BackendExecutionObservation{}, snapshotErr
+	}
+	if !ended {
+		return BackendExecutionObservation{}, fmt.Errorf("compute: Vulkan execution observation window could not be completed")
+	}
+	return BackendExecutionWindowDelta(w.before, after, uint64(live), uint64(peak))
 }
 
 func (v *vulkanBackend) debugBufferHostVisible(b *vulkanBuf) bool {
@@ -383,6 +451,10 @@ type VulkanDispatchProfile struct {
 func (v *vulkanBackend) VulkanDebugDispatchProfileSnapshot() VulkanDispatchProfile {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
+	return vulkanDebugDispatchProfileSnapshotLocked()
+}
+
+func vulkanDebugDispatchProfileSnapshotLocked() VulkanDispatchProfile {
 	var p C.fvk_dispatch_profile
 	C.fvk_dispatch_profile_snapshot(&p)
 	return VulkanDispatchProfile{

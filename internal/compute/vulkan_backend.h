@@ -196,6 +196,19 @@ int fvk_batch_flush_status(void);
 /* Cumulative host transfer bytes, independent of optional profiling. */
 uint64_t fvk_h2d_bytes(void);
 uint64_t fvk_d2h_bytes(void);
+/* Complete backend-owned transfer tuple. Returns 0 after accounting overflow or
+ * before initialization; all six outputs are mandatory. Observed zero directions
+ * are returned as zero values with success=1. */
+int fvk_transfer_counters(uint64_t *h2d_count, uint64_t *h2d_bytes,
+                          uint64_t *d2h_count, uint64_t *d2h_bytes,
+                          uint64_t *d2d_count, uint64_t *d2d_bytes);
+/* Process-owned allocations on device-local Vulkan heaps. The live output is
+ * mandatory. The closing snapshot is a gauge, not a peak. begin/end creates one
+ * non-nestable peak window and requires a healthy, quiescent submit context. */
+int fvk_device_allocation_snapshot(uint64_t *live_bytes);
+int fvk_device_allocation_window_begin(uint64_t *token);
+int fvk_device_allocation_window_end(uint64_t token, uint64_t *live_bytes,
+                                     uint64_t *peak_bytes);
 
 int fvk_qwen35_split_qg_panel_f32(const void* qg, void* q, void* gate,
     int tokens, int nHeads, int headDim);
