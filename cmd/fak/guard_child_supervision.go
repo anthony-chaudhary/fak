@@ -412,7 +412,7 @@ func guardTimeBudgetExhausted(sessions *session.Table, traceID string, now time.
 	return false, ""
 }
 
-func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, codexSessionStatePath string, restarter *guardBudgetRestarter, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool, startupProgress *guardStartupProgress) {
+func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, codexSessionStatePath string, restarter *guardBudgetRestarter, deadlineCfg guardDeadlineConfig, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool, startupProgress *guardStartupProgress) {
 	// Same live card as the unsupervised path; child restarts stay one session and one
 	// Slack thread, so the updater spans the whole supervision loop and finalizes once.
 	guardSessionCardHandle.startUpdater(srv)
@@ -462,6 +462,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 		return
 	}
+	var softDeadlineWarned bool
 	for {
 		if err := relaunchFiles.ensure(); err != nil {
 			startupProgress.Abort()
@@ -517,6 +518,12 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		resourcePolicy.Stop = resourceStop
 		resourceEvents := startGuardChildResourceMonitor(child.Process.Pid, guardTraceID, agentName, resourcePolicy)
 		event := waitGuardChildSupervised(wait, restarter.events, budgetTicker.C, func(now time.Time) (bool, string) {
+			if !softDeadlineWarned && deadlineCfg.SoftDeadlineLead > 0 {
+				if warn, rem := guardCheckSoftDeadline(serveSessions, guardTraceID, deadlineCfg.SoftDeadlineLead, now); warn {
+					softDeadlineWarned = true
+					guardEmitSoftDeadlineWarning(os.Stderr, restarter.stderr, auditJournal, srv, guardTraceID, rem, deadlineCfg.MaxDuration)
+				}
+			}
 			return guardTimeBudgetExhausted(serveSessions, guardTraceID, now)
 		}, resourceEvents, restarter.stderr)
 		close(resourceStop)
@@ -728,14 +735,39 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			markGuardChildTerminalIntent(child, "restart")
 			stopGuardChild(child, wait, 2*time.Second)
 		case guardChildTimeBudget:
-			// The wall-clock envelope elapsed: stop the wrapped agent and report, rather
-			// than let it keep burning tokens past its --max-duration (the #2229 gap).
-			if !quiet {
-				fmt.Fprintf(os.Stderr, "fak guard: %s — wall-clock --max-duration envelope elapsed for %s; stopping the wrapped agent\n", event.Reason, guardTraceID)
+			inFlight, commitDetail := isGuardCommitInFlight(child.Process.Pid, repoRoot())
+			if inFlight && deadlineCfg.CommitGracePeriod > 0 {
+				fmt.Fprintf(os.Stderr, "fak guard: %s — wall-clock deadline reached for %s, but commit in-flight (%s); granting up to %s grace period\n", event.Reason, guardTraceID, commitDetail, deadlineCfg.CommitGracePeriod.Round(time.Second))
+				if auditJournal != nil {
+					auditJournal.AppendAgentEvent("COMMIT_GRACE_ENTERED", guardTraceID, fmt.Sprintf("grace=%s reason=%s details=%s", deadlineCfg.CommitGracePeriod, event.Reason, commitDetail))
+				}
+				outcome, childErr := pollGuardCommitGrace(child.Process.Pid, repoRoot(), deadlineCfg.CommitGracePeriod, 250*time.Millisecond, wait)
+				switch outcome {
+				case guardCommitGraceChildExited:
+					fmt.Fprintf(os.Stderr, "fak guard: wrapped agent exited during commit grace period: %v\n", childErr)
+					appendGuardChildExitWitnessWithReason(auditJournal, agentName, guardTraceID, childErr, child.ProcessState, childStarted, session.ReasonTimeBudgetExhausted, spawnMeta.PromptFuel)
+					finishGuardChildAndReport(childErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+					return
+				case guardCommitGraceCompleted:
+					fmt.Fprintf(os.Stderr, "fak guard: in-flight commit completed within grace period; stopping wrapped agent\n")
+					if auditJournal != nil {
+						auditJournal.AppendAgentEvent("COMMIT_GRACE_COMPLETED", guardTraceID, "")
+					}
+				case guardCommitGraceExpired:
+					fmt.Fprintf(os.Stderr, "fak guard: in-flight commit grace period (%s) expired; stopping wrapped agent\n", deadlineCfg.CommitGracePeriod.Round(time.Second))
+					if auditJournal != nil {
+						auditJournal.AppendAgentEvent("COMMIT_GRACE_EXPIRED", guardTraceID, fmt.Sprintf("grace=%s", deadlineCfg.CommitGracePeriod.Round(time.Second)))
+					}
+				}
+			} else {
+				if !quiet {
+					fmt.Fprintf(os.Stderr, "fak guard: %s — wall-clock --max-duration envelope elapsed for %s; stopping the wrapped agent\n", event.Reason, guardTraceID)
+				}
 			}
 			markGuardChildTerminalIntent(child, "time_budget")
-			stopGuardChild(child, wait, 2*time.Second)
-			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted, spawnMeta.PromptFuel)
+			stopGrace := deadlineCfg.ChildStopGrace
+			stopGuardChild(child, wait, stopGrace)
+			appendGuardChildExitWitnessWithReason(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted, session.ReasonTimeBudgetExhausted, spawnMeta.PromptFuel)
 			finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}

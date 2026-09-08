@@ -136,6 +136,9 @@ func cmdManageCommand(commandName string, argv []string) {
 	sessionPressureGate := fs.String("session-pressure-gate", "", "before launching the wrapped agent, audit recent sessions for Opus-cost / long-context pressure and refuse when actions at or above this severity exist. Spec: THRESHOLD[,days=N][,max=N][,report=PATH][,justify=TEXT] — THRESHOLD is high|medium|none|off (off by default, so a bare `--session-pressure-gate high` is the common form); days (default 7) and max (default 40) size the audit window over this workspace's transcript namespace; report=PATH writes the fak.session_audit.actions.v1 launch-gate report before allowing or refusing; justify=TEXT, with an explicit Opus --model, is the justification that allows the launch while still recording that report. justify= takes the REST of the spec so prose may contain commas — put it last. e.g. --session-pressure-gate high,days=3,report=pressure.json")
 	contextBudgetTokens := fs.Int("context-budget-tokens", 0, "seed the guard session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
 	maxDuration := fs.Duration("max-duration", 0, "govern this guard session to at most this much REAL WALL-CLOCK time (issue #1584), tracked independently of --context-budget-tokens and surviving a --restart-on-budget hidden restart (the elapsed total carries forward, it does not reset to zero). 0 = unbounded (still tracked for `fak session status`, just never stops the run). Query/inspect anytime with `fak session status <id>`; the time budget drains the session to Draining/Stopped with reason TIME_BUDGET_EXHAUSTED exactly like a token-budget exhaustion.")
+	softDeadlineLead := fs.Duration("soft-deadline-lead", 2*time.Minute, "emit a soft deadline warning when this much wall-clock time remains under --max-duration (0 disables; default 2m)")
+	commitGracePeriod := fs.Duration("commit-grace-period", 30*time.Second, "maximum grace period to allow an in-flight commit to conclude cleanly when --max-duration expires (0 disables; default 30s)")
+	childStopGrace := fs.Duration("child-stop-grace", 3*time.Second, "grace window between graceful interrupt (SIGINT) and destructive tree-kill when stopping a child (default 3s)")
 	budgetEnvelopeSpec := fs.String("budget-envelope", "", "managed-context budget envelope (#1573): turns=20,tokens=200000,context=64000,wall=2h,spend=$25,throughput=40/s,max-tokens=1024,gap=250ms. Seeds this guard session's budget/pace/wall axes; explicit --context-budget-tokens and --max-duration override those envelope axes.")
 	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	restartOnBudget := fs.Bool("restart-on-budget", false, "on context-budget exhaustion, stop and relaunch the wrapped child under the continuation trace, writing a carryover seed JSON and exposing it via FAK_RESET_* env vars (requires --context-budget-tokens)")
@@ -254,6 +257,22 @@ func cmdManageCommand(commandName string, argv []string) {
 	if hasGuardBudgetEnvelope && !guardSetFlags["max-duration"] && guardBudgetEnvelope.WallClockLimit() > 0 {
 		maxDurationLimit = guardBudgetEnvelope.WallClockLimit()
 	}
+	if env := strings.TrimSpace(os.Getenv("FAK_GUARD_SOFT_DEADLINE_LEAD")); env != "" {
+		if d, err := time.ParseDuration(env); err == nil {
+			*softDeadlineLead = d
+		}
+	}
+	if env := strings.TrimSpace(os.Getenv("FAK_GUARD_COMMIT_GRACE_PERIOD")); env != "" {
+		if d, err := time.ParseDuration(env); err == nil {
+			*commitGracePeriod = d
+		}
+	}
+	if env := strings.TrimSpace(os.Getenv("FAK_GUARD_CHILD_STOP_GRACE")); env != "" {
+		if d, err := time.ParseDuration(env); err == nil {
+			*childStopGrace = d
+		}
+	}
+	deadlineCfg := normalizeGuardDeadlineSettings(maxDurationLimit, *softDeadlineLead, *commitGracePeriod, *childStopGrace)
 
 	// --split-dry-run is a pure PREVIEW: render the resolved 80/20 split plan and exit BEFORE
 	// any gateway bind, pane spawn, or agent launch. The live gateway URL is not known yet (the
@@ -1504,7 +1523,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// must be ENFORCED (#2229). A --max-duration-only run routes here with a disabled
 	// restarter (its events channel never fires), gaining only the time-budget ticker.
 	if restarter.Enabled() || maxDurationLimit > 0 {
-		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, sessionStartInstall.StatePath, restarter, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, agentName, up, *dojoMode, resSampler, dumpStartupOnLaunchFail, startupProgress)
+		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, sessionStartInstall.StatePath, restarter, deadlineCfg, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, agentName, up, *dojoMode, resSampler, dumpStartupOnLaunchFail, startupProgress)
 		return
 	}
 	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, sessionStartInstall.StatePath, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, agentName, up, *dojoMode, resSampler, dumpStartupOnLaunchFail, startupProgress)
