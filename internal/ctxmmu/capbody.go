@@ -66,6 +66,8 @@ func (m *MMU) PageOutBody(ctx context.Context, body []byte) (id string, ok bool)
 	if !stillHeld {
 		return "", false
 	}
+	m.stagePaged(handle.Digest, body)
+	m.stagePaged(id, body)
 	return id, true
 }
 
