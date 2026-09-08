@@ -109,8 +109,8 @@ func TestNativeInferenceReceiptProductionPath(t *testing.T) {
 	}
 	metrics := srv.renderMetrics()
 	for _, want := range []string{
-		`fak_native_runtime_info{engine="inkernel",backend="other",forward_path="other",model="synthetic",planner="inkernel",owner="fak"} 1`,
-		`fak_native_receipt_requests_total{engine="inkernel",backend="other",forward_path="other"} 1`,
+		`fak_native_runtime_info{engine="inkernel",backend="other",forward_path="other",evidence_class="measured",model="synthetic",planner="inkernel",owner="fak"} 1`,
+		`fak_native_receipt_requests_total{engine="inkernel",backend="other",forward_path="other",evidence_class="measured"} 1`,
 		`fak_native_receipt_signal_supported{signal="prefill"} 1`,
 		`fak_native_receipt_signal_supported{signal="decode"} 1`,
 		`fak_native_receipt_latest_stale 0`,

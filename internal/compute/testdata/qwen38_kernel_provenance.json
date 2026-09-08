@@ -70,6 +70,16 @@
       "copyright_notice": "Retain copyright and attribution headers from each copied or adapted source file.",
       "notice_file": "NOTICE",
       "notice_rule": "Retain LICENSE, NOTICE, source headers, and changed-file notices required by Apache-2.0."
+    },
+    {
+      "id": "freetoken-pr-338",
+      "repository": "https://github.com/FlashML-org/FreeToken",
+      "sha": "de77d16a5ac36494d85964f846b50ad36f7acc21",
+      "license": "Apache-2.0",
+      "license_file": "LICENSE",
+      "copyright_notice": "No repository-specific copyright line is present; retain the SPDX source header and Apache-2.0 attribution.",
+      "notice_file": "NONE",
+      "notice_rule": "No root NOTICE exists at the pinned revision; retain LICENSE, source headers, attribution, and changed-file notices required by Apache-2.0."
     }
   ],
   "kernels": [
@@ -81,6 +91,15 @@
       "decision": "ADAPT",
       "attribution": "Sequence algorithm adapted from llama.cpp gated_delta_net.cu at\n// 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).",
       "parity_witness": "internal/compute/cuda_qwen35_gdn_sequence_test.go"
+    },
+    {
+      "id": "qwen4exp-cuda-ple-hash",
+      "upstream": "freetoken-pr-338",
+      "source_path": "python/freetoken/kernel/triton/ple_hash.py",
+      "destination": "internal/compute/cuda_kernels.cu",
+      "decision": "ADAPT",
+      "attribution": "Algorithm adapted from FlashML-org/FreeToken\n// python/freetoken/kernel/triton/ple_hash.py:31-83 at\n// de77d16a5ac36494d85964f846b50ad36f7acc21 (Apache-2.0).",
+      "parity_witness": "internal/compute/cuda_qwen4exp_ple_hash_cuda_test.go"
     }
   ]
 }
