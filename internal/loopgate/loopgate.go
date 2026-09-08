@@ -141,7 +141,7 @@ func Adjudicate(ctx context.Context, turn Turn, witness WitnessFunc) Decision {
 			Summary: "turn did not claim done; continue",
 		}
 	}
-	if turn.ClaimedDone && IsNarrationTestClaim(turn.Claim) && !HasMatchingExecutionReceipt(turn.Claim, turn.Receipts) {
+	if turn.ClaimedDone && IsNarrationTestClaim(turn.Claim) && (len(turn.Receipts) == 0 || !HasMatchingExecutionReceipt(turn.Claim, turn.Receipts)) {
 		return Decision{
 			Verdict: VerdictRefused,
 			Reason:  ReasonUnwitnessedNarrationClaim,
