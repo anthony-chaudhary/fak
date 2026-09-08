@@ -1,6 +1,12 @@
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _minor(version: str) -> tuple[int, int]:
+    major, minor, *_ = version.split(".")
+    return int(major), int(minor)
 
 
 def test_blackwell_arches_are_first_class_single_arch_targets():
@@ -22,6 +28,26 @@ def test_build_entry_points_validate_the_declared_arch_set():
     assert "unsupported CUDA arch" in build
     assert "internal\\compute\\cuda_arch.txt" in windows
     assert "internal/compute/cuda_arch.txt" in docker
+
+
+def test_declared_arches_use_blackwell_capable_cuda_toolchains():
+    arches = (ROOT / "internal/compute/cuda_arch.txt").read_text().split()
+    docker = (ROOT / "Dockerfile.cuda").read_text(encoding="utf-8")
+    setup = (ROOT / "internal/compute/setup_cuda_wsl.sh").read_text(encoding="utf-8")
+
+    docker_versions = re.findall(r"^FROM nvidia/cuda:([0-9.]+)-(?:devel|runtime)-", docker, re.MULTILINE)
+    setup_versions = re.findall(
+        r"(?:cuda-nvcc|cuda-cudart-dev|cuda-nvrtc-dev|libcublas-dev|cuda-cccl)=([0-9.]+)",
+        setup,
+    )
+    assert docker_versions == ["12.8.1", "12.8.1"]
+    assert setup_versions == ["12.8"] * 5
+
+    minimum_by_arch = {"sm_100": (12, 8), "sm_120": (12, 8)}
+    for arch in arches:
+        minimum = minimum_by_arch.get(arch, (0, 0))
+        assert all(_minor(version) >= minimum for version in docker_versions)
+        assert all(_minor(version) >= minimum for version in setup_versions)
 
 
 def test_default_build_is_fatbin_with_highest_arch_ptx_floor():
