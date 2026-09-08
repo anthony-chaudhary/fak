@@ -13,6 +13,13 @@ package compute
 #cgo LDFLAGS: -L${SRCDIR} -lfakvulkan
 #include <stdlib.h>
 #include "vulkan_backend.h"
+
+// Issue-local #12217 ABI pending the generic #11096 VMM contract. Keeping these declarations
+// beside the only Go consumer avoids widening the public backend header before that contract lands.
+void *fvk_malloc_weight(size_t bytes, uint64_t max_arena_bytes);
+void fvk_weight_arena_stats(uint64_t *memory_allocations, uint64_t *buffer_bindings,
+                            uint64_t *reserved_bytes, uint64_t *live_bytes,
+                            uint64_t *peak_reserved_bytes);
 */
 import "C"
 
@@ -273,6 +280,52 @@ type vulkanBuf struct {
 	q8Chunks            []vulkanQ8Chunk
 	budgetedWeightBytes int64
 	hostVisibleWeight   bool
+}
+
+// VulkanWeightArenaStats separates the expensive VkDeviceMemory allocation count from the
+// descriptor-visible VkBuffer binding count. Physical receipts compare counter deltas around a
+// model load; byte fields expose the arena's current and peak bounded reservation.
+type VulkanWeightArenaStats struct {
+	MemoryAllocations uint64 `json:"memory_allocations"`
+	BufferBindings    uint64 `json:"buffer_bindings"`
+	ReservedBytes     uint64 `json:"reserved_bytes"`
+	LiveBytes         uint64 `json:"live_bytes"`
+	PeakReservedBytes uint64 `json:"peak_reserved_bytes"`
+}
+
+// VulkanWeightArenaStats returns a serialized snapshot suitable for a source-bound hardware
+// receipt. Counters are cumulative so a caller can take before/after load deltas.
+func (v *vulkanBackend) VulkanWeightArenaStats() VulkanWeightArenaStats {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return v.weightArenaStatsLocked()
+}
+
+// VulkanWeightArenaCounters exposes the same snapshot without requiring callers compiled without
+// the vulkan tag to name the build-tagged stats type. Hardware witnesses discover this optional
+// contract through the Backend registry.
+func (v *vulkanBackend) VulkanWeightArenaCounters() (memoryAllocations, bufferBindings, reservedBytes, liveBytes, peakReservedBytes uint64) {
+	stats := v.VulkanWeightArenaStats()
+	return stats.MemoryAllocations, stats.BufferBindings, stats.ReservedBytes, stats.LiveBytes, stats.PeakReservedBytes
+}
+
+func (v *vulkanBackend) weightArenaStatsLocked() VulkanWeightArenaStats {
+	var memoryAllocations, bufferBindings C.uint64_t
+	var reservedBytes, liveBytes, peakReservedBytes C.uint64_t
+	C.fvk_weight_arena_stats(
+		&memoryAllocations,
+		&bufferBindings,
+		&reservedBytes,
+		&liveBytes,
+		&peakReservedBytes,
+	)
+	return VulkanWeightArenaStats{
+		MemoryAllocations: uint64(memoryAllocations),
+		BufferBindings:    uint64(bufferBindings),
+		ReservedBytes:     uint64(reservedBytes),
+		LiveBytes:         uint64(liveBytes),
+		PeakReservedBytes: uint64(peakReservedBytes),
+	}
 }
 
 type vulkanQ8Chunk struct {
@@ -608,7 +661,24 @@ func (v *vulkanBackend) dallocWeightFor(nbytes int, what string) *vulkanBuf {
 		v.accountWeightPlacement(buf, nbytes)
 		return buf
 	}
-	buf := v.dallocForClass(nbytes, MemoryWeights, what)
+	v.checkResourceCap(nbytes, what)
+	arenaLimit := v.totalMem
+	if v.budgetBytes > 0 {
+		arenaLimit = v.budgetBytes
+	}
+	var maxArenaBytes C.uint64_t
+	if arenaLimit > 0 {
+		maxArenaBytes = C.uint64_t(arenaLimit)
+	}
+	p := C.fvk_malloc_weight(C.size_t(nbytes), maxArenaBytes)
+	var buf *vulkanBuf
+	if p == nil {
+		// Arena exhaustion must not escape its declared reservation bound by falling back to an
+		// untracked device allocation. Preserve the existing deliberate host-visible recovery.
+		buf = v.dallocHostVisFor(nbytes, what)
+	} else {
+		buf = &vulkanBuf{ptr: unsafe.Pointer(p), n: nbytes, class: MemoryWeights}
+	}
 	v.accountWeightPlacement(buf, nbytes)
 	return buf
 }
