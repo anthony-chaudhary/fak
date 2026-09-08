@@ -2,12 +2,16 @@ package qwen38campaign
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
+	"github.com/anthony-chaudhary/fak/internal/rawdecode"
 )
 
 func TestSubagentCLIRejectsSyntheticPhysicalMode(t *testing.T) {
@@ -775,59 +779,80 @@ func TestSubagentFanoutPhysicalModeRejectsMissingTelemetry(t *testing.T) {
 	}
 }
 
-// TestSubagentFanoutPhysicalExecutionWithProductRunner verifies bounded B=1 physical execution.
-func TestSubagentFanoutPhysicalExecutionWithProductRunner(t *testing.T) {
-	runner := NewProductPhysicalRunner()
-	cfg := FanoutConfig{
-		Scenario:                   ScenarioSharedPrefixForked,
-		Concurrency:                1,
-		Runs:                       5,
-		PrefixTokens:               1000,
-		GeneratedTokensPerSubagent: 16,
-		Simulated:                  false,
+// TestRawDecodePhysicalRunnerInvokesRealSeamAndLeavesProvenanceUnavailable
+// proves the adapter maps only observed executor output and cannot mint a
+// physical receipt without runner-owned provenance.
+func TestRawDecodePhysicalRunnerInvokesRealSeamAndLeavesProvenanceUnavailable(t *testing.T) {
+	calls := 0
+	var captured rawdecode.Request
+	runner := NewRawDecodePhysicalRunner(rawdecode.Request{
+		ArtifactPath: "selected.gguf", ExpectedArtifactSHA256: strings.Repeat("a", 64),
+		ModelName: "qwen3.8", BackendName: "vulkan", PromptTokenIDs: []int{11, 12},
+		Q4K: true, VerifyCPU: true,
+	})
+	runner.Execute = func(_ context.Context, req rawdecode.Request) (rawdecode.Execution, error) {
+		calls++
+		captured = req
+		return rawdecode.Execution{
+			ArtifactSHA256: strings.Repeat("b", 64),
+			Engine:         "fak-in-kernel via compute HAL backend \"vulkan\"",
+			Backend:        rawdecode.BackendObservation{Selected: "vulkan"},
+			PromptTokenIDs: []int{11, 12}, ContextLimit: 5, GeneratedLimit: 3,
+			FiniteLogits: true, CPUModelParity: boolPtr(true),
+			Runs: []rawdecode.Run{{
+				SessionSetupDuration: time.Millisecond, PrefillDuration: 2 * time.Millisecond,
+				FirstSampleDuration: time.Millisecond, DecodeDuration: 6 * time.Millisecond,
+				TeardownDuration: time.Millisecond, PrefillOutputID: 21,
+				StepTokens: []int{22, 23}, GeneratedTokens: []int{21, 22, 23},
+				CPUVerification: &rawdecode.CPUVerification{Passed: true, MinCosine: 0.99999},
+			}},
+		}, nil
 	}
-	harness, err := NewSubagentFanoutHarness(cfg)
-	if err != nil {
-		t.Fatalf("failed to create harness: %v", err)
-	}
-	harness.PhysicalRunner = runner
 
-	receipt, err := harness.Execute()
+	result, err := runner.ExecuteFanoutTrial(PhysicalTrialRequest{
+		RunIndex: 1, Scenario: ScenarioCold, Concurrency: 1,
+		PrefixTokens: 2, GeneratedTokensPerSubagent: 3,
+		ParityThreshold: DefaultLogitCosineParityThreshold,
+	})
 	if err != nil {
-		t.Fatalf("physical execution with product runner failed: %v", err)
+		t.Fatalf("ExecuteFanoutTrial: %v", err)
 	}
-	if err := receipt.Validate(); err != nil {
-		t.Fatalf("physical receipt failed validation: %v", err)
+	if calls != 1 {
+		t.Fatalf("rawdecode executor calls=%d, want 1", calls)
+	}
+	if captured.ArtifactPath != "selected.gguf" || captured.ExpectedArtifactSHA256 != strings.Repeat("a", 64) || captured.Repetitions != 1 || captured.GeneratedTokenLimit != 3 || captured.ContextLimit != 5 {
+		t.Fatalf("rawdecode request mismatch: %+v", captured)
+	}
+	if result.Backend != "vulkan" || result.ExecutionPath == "" || result.WallDurationMS != 11 || result.UsefulTokens != 3 || result.TokensPerSec <= 0 {
+		t.Fatalf("observed execution mapping mismatch: %+v", result)
+	}
+	if got := fmt.Sprint(result.OutputTokenIDs); got != "[21 22 23]" {
+		t.Fatalf("output tokens=%s", got)
+	}
+	if result.Identity.ModelGGUFSHA256 != strings.Repeat("b", 64) || result.Identity.TokenPacketSHA256 == "" {
+		t.Fatalf("observed packet identity missing: %+v", result.Identity)
+	}
+	if result.Identity.SourceCommit != "" || result.Identity.SourceArchiveSHA256 != "" || result.Identity.BinarySHA256 != "" || result.PeakMemoryBytes != 0 || result.PhysicalDRAMBytes != 0 || result.MALLTotalBytes != 0 {
+		t.Fatalf("unobserved provenance or telemetry was invented: %+v", result)
+	}
+	if err := result.Validate(DefaultLogitCosineParityThreshold); err == nil || !strings.Contains(err.Error(), "source commit") {
+		t.Fatalf("incomplete result promoted: %v", err)
 	}
 
-	if receipt.Provenance != ProvenancePhysical {
-		t.Errorf("provenance = %q, want %q", receipt.Provenance, ProvenancePhysical)
-	}
-	if receipt.Engine != CanonicalEngineName {
-		t.Errorf("engine = %q, want %q", receipt.Engine, CanonicalEngineName)
-	}
-	if receipt.PrimaryEngine != CanonicalEngineName {
-		t.Errorf("primary_engine = %q, want %q", receipt.PrimaryEngine, CanonicalEngineName)
-	}
-	if receipt.FallbackCount != 0 {
-		t.Errorf("fallback_count = %d, want 0", receipt.FallbackCount)
-	}
-	if !receipt.ZeroFallback {
-		t.Errorf("zero_fallback = false, want true")
-	}
-	if receipt.ExecutionIdentity == nil {
-		t.Fatalf("missing execution identity")
-	}
-	if receipt.ExecutionIdentity.SourceCommit == "" {
-		t.Errorf("missing source commit")
-	}
-	if receipt.ExecutionIdentity.BinarySHA256 == "" {
-		t.Errorf("missing binary sha256")
-	}
-	if receipt.ExecutionIdentity.ModelGGUFSHA256 != DefaultModelGGUFSHA256 {
-		t.Errorf("model gguf sha = %q, want %q", receipt.ExecutionIdentity.ModelGGUFSHA256, DefaultModelGGUFSHA256)
-	}
-	if receipt.Summary.CountersStatus != CountersUnavailable {
-		t.Errorf("counters status = %q, want %q", receipt.Summary.CountersStatus, CountersUnavailable)
+	for _, outputArg := range []string{"--json", ""} {
+		var stdout, stderr bytes.Buffer
+		args := []string{"--simulated=false", "--scenario=cold", "--concurrency=1", "--runs=5", "--prefix-tokens=2", "--gen-tokens=3"}
+		if outputArg != "" {
+			args = append(args, outputArg)
+		}
+		code := RunWithRunner(&stdout, &stderr, args, runner)
+		if code == 0 || stdout.Len() != 0 {
+			t.Fatalf("incomplete physical output mode %q returned code=%d receipt=%s", outputArg, code, stdout.String())
+		}
+		if !strings.Contains(stderr.String(), "missing source commit") {
+			t.Fatalf("missing fail-closed provenance diagnostic: %s", stderr.String())
+		}
 	}
 }
+
+func boolPtr(v bool) *bool { return &v }

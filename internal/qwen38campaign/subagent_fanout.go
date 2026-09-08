@@ -3,6 +3,7 @@
 package qwen38campaign
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -12,15 +13,14 @@ import (
 	"math"
 	"math/rand"
 	"os"
-	"os/exec"
-	"runtime"
-	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
+	"github.com/anthony-chaudhary/fak/internal/rawdecode"
 	"github.com/anthony-chaudhary/fak/internal/roofline"
 )
 
@@ -626,265 +626,112 @@ func CalculateStatisticalSummary(runs []RunMetric, threshold float64) (Statistic
 	return summary, phaseSummaryMS
 }
 
-// ProductPhysicalRunner executes subagent fan-out trials against the real product / model path.
-type ProductPhysicalRunner struct {
-	Backend         string
-	ExecutionPath   string
-	ModelGGUFSHA256 string
-	CounterSource   string
-	SourceCommit    string
-	BinarySHA256    string
-	ParityEvaluator func(seed int, concurrency int, size int) float64
-	DRAMBytesReader func() int64
-	DRAMBWReader    func() float64
-	MALLHitReader   func() (hitBytes, totalBytes int64)
+// RawDecodePhysicalRunner adapts one explicit rawdecode request to the physical
+// fanout seam. It does not own source, binary, device, memory, fallback, or
+// hardware-counter observers, so its result intentionally remains incomplete
+// until a runner-owned provenance collector is attached.
+type RawDecodePhysicalRunner struct {
+	Request rawdecode.Request
+	Execute func(context.Context, rawdecode.Request) (rawdecode.Execution, error)
 }
 
-// NewProductPhysicalRunner instantiates the canonical physical product runner bound to source and binary hashes.
-func NewProductPhysicalRunner() *ProductPhysicalRunner {
-	commit := resolveSourceCommit()
-	binSHA := resolveBinarySHA256()
-	return &ProductPhysicalRunner{
-		Backend:         "vulkan",
-		ExecutionPath:   "fak-native-product",
-		ModelGGUFSHA256: DefaultModelGGUFSHA256,
-		CounterSource:   CountersUnavailable,
-		SourceCommit:    commit,
-		BinarySHA256:    binSHA,
-	}
+// NewRawDecodePhysicalRunner constructs the device-free production adapter. The
+// request must carry an explicit artifact path, expected artifact SHA-256,
+// model selector, backend, prompt token IDs, and execution policy.
+func NewRawDecodePhysicalRunner(req rawdecode.Request) *RawDecodePhysicalRunner {
+	return &RawDecodePhysicalRunner{Request: req, Execute: rawdecode.Execute}
 }
 
-func resolveSourceCommit() string {
-	if v := os.Getenv("FAK_SOURCE_COMMIT"); strings.TrimSpace(v) != "" {
-		return strings.TrimSpace(v)
+// ExecuteFanoutTrial invokes the real fak-native rawdecode seam. This first
+// tracer supports only B=1: claiming fanout concurrency from serial calls would
+// manufacture queueing and shared-prefix evidence.
+func (p *RawDecodePhysicalRunner) ExecuteFanoutTrial(req PhysicalTrialRequest) (PhysicalTrialResult, error) {
+	if p == nil || p.Execute == nil {
+		return PhysicalTrialResult{}, errors.New("qwen38campaign: rawdecode physical executor is unavailable")
 	}
-	if info, ok := debug.ReadBuildInfo(); ok {
-		for _, s := range info.Settings {
-			if s.Key == "vcs.revision" && len(s.Value) >= 40 {
-				return s.Value
-			}
-		}
+	if strings.TrimSpace(p.Request.ArtifactPath) == "" || strings.TrimSpace(p.Request.ExpectedArtifactSHA256) == "" ||
+		strings.TrimSpace(p.Request.ModelName) == "" || strings.TrimSpace(p.Request.BackendName) == "" {
+		return PhysicalTrialResult{}, errors.New("qwen38campaign: rawdecode physical runner requires explicit artifact path, expected SHA-256, model selector, and backend")
 	}
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	if out, err := cmd.Output(); err == nil {
-		commit := strings.TrimSpace(string(out))
-		if len(commit) == 40 {
-			return commit
-		}
+	if req.Concurrency != 1 {
+		return PhysicalTrialResult{}, fmt.Errorf("qwen38campaign: rawdecode physical tracer supports concurrency 1, got %d", req.Concurrency)
 	}
-	return "0000000000000000000000000000000000000000"
-}
-
-func resolveBinarySHA256() string {
-	if v := os.Getenv("FAK_BINARY_SHA256"); strings.TrimSpace(v) != "" {
-		return strings.TrimSpace(v)
-	}
-	if exe, err := os.Executable(); err == nil && exe != "" {
-		if data, err := os.ReadFile(exe); err == nil && len(data) > 0 {
-			sum := sha256.Sum256(data)
-			return hex.EncodeToString(sum[:])
-		}
-	}
-	sum := sha256.Sum256([]byte("fak-native-subagent-runner-binary"))
-	return hex.EncodeToString(sum[:])
-}
-
-func computeTokenPacketSHA256(scenario string, concurrency int, prefixTokens int, genTokens int) string {
-	h := sha256.New()
-	fmt.Fprintf(h, "scenario=%s:b=%d:prefix=%d:gen=%d", scenario, concurrency, prefixTokens, genTokens)
-	return hex.EncodeToString(h.Sum(nil))
-}
-
-// ExecuteFanoutTrial executes one physical device fanout trial and captures observed performance.
-func (p *ProductPhysicalRunner) ExecuteFanoutTrial(req PhysicalTrialRequest) (PhysicalTrialResult, error) {
-	b := req.Concurrency
-	genTokens := req.GeneratedTokensPerSubagent
-	totalUsefulTokens := b * genTokens
-
-	// 1. Host Dispatch: time queue admission and session initialization
-	t0 := time.Now()
-	forkMgr := ctxmmu.NewForkManager(ctxmmu.ForkConfig{
-		Granularity:   ctxmmu.BlockGranularity64,
-		BytesPerToken: DefaultBytesPerToken,
-	})
-	tQueue := time.Now()
-	queueLatencyMS := float64(tQueue.Sub(t0).Nanoseconds()) / 1e6
-	if queueLatencyMS <= 0 {
-		queueLatencyMS = 0.001
+	if len(p.Request.PromptTokenIDs) != req.PrefixTokens {
+		return PhysicalTrialResult{}, fmt.Errorf("qwen38campaign: explicit prompt token count %d does not match requested prefix tokens %d", len(p.Request.PromptTokenIDs), req.PrefixTokens)
 	}
 
-	// 2. Prefix Tree Lookup & 3. KV Allocation
-	tPrefixStart := time.Now()
-	parentID := fmt.Sprintf("phys-run-%d-root", req.RunIndex)
-	parentSess, err := forkMgr.RegisterSession(parentID, ctxmmu.BlockGranularity64)
+	rawReq := p.Request
+	rawReq.PromptTokenIDs = slices.Clone(p.Request.PromptTokenIDs)
+	rawReq.ContextLimit = len(rawReq.PromptTokenIDs) + req.GeneratedTokensPerSubagent
+	rawReq.GeneratedTokenLimit = req.GeneratedTokensPerSubagent
+	rawReq.Repetitions = 1
+	execution, err := p.Execute(context.Background(), rawReq)
 	if err != nil {
-		return PhysicalTrialResult{}, fmt.Errorf("physical trial register session: %w", err)
+		return PhysicalTrialResult{}, fmt.Errorf("qwen38campaign: rawdecode physical execution: %w", err)
 	}
-	prefixSlice := make([]int32, req.PrefixTokens)
-	for i := range prefixSlice {
-		prefixSlice[i] = int32((i % 32000) + 1)
-	}
-	if err := parentSess.AppendTokens(prefixSlice...); err != nil {
-		return PhysicalTrialResult{}, fmt.Errorf("physical trial append prefix: %w", err)
-	}
-	tPrefixEnd := time.Now()
-	prefixLookupUS := float64(tPrefixEnd.Sub(tPrefixStart).Nanoseconds()) / 1000.0
-	if prefixLookupUS <= 0 {
-		prefixLookupUS = 1.0
-	}
+	return physicalTrialFromRawDecode(req, execution)
+}
 
-	tKVStart := time.Now()
-	for subIdx := 0; subIdx < b; subIdx++ {
-		childID := fmt.Sprintf("phys-run-%d-sub-%d", req.RunIndex, subIdx)
-		childSess, err := forkMgr.ForkSession(parentID, childID)
-		if err != nil {
-			return PhysicalTrialResult{}, fmt.Errorf("physical trial fork session %s: %w", childID, err)
+func physicalTrialFromRawDecode(req PhysicalTrialRequest, execution rawdecode.Execution) (PhysicalTrialResult, error) {
+	if len(execution.Runs) != 1 {
+		return PhysicalTrialResult{}, fmt.Errorf("qwen38campaign: rawdecode returned %d runs, want exactly 1", len(execution.Runs))
+	}
+	run := execution.Runs[0]
+	wall := run.SessionSetupDuration + run.PrefillDuration + run.FirstSampleDuration + run.DecodeDuration + run.TeardownDuration
+	if wall <= 0 {
+		return PhysicalTrialResult{}, errors.New("qwen38campaign: rawdecode wall duration unavailable")
+	}
+	if len(run.GeneratedTokens) == 0 {
+		return PhysicalTrialResult{}, errors.New("qwen38campaign: rawdecode produced no output tokens")
+	}
+	output := make([]int32, len(run.GeneratedTokens))
+	for i, token := range run.GeneratedTokens {
+		if token < 0 || int64(token) > math.MaxInt32 {
+			return PhysicalTrialResult{}, fmt.Errorf("qwen38campaign: rawdecode output token %d cannot be represented as int32", token)
 		}
-		childTokens := make([]int32, genTokens)
-		for j := range childTokens {
-			childTokens[j] = int32(((subIdx+1)*1000 + j) % 32000)
-		}
-		if err := childSess.AppendTokens(childTokens...); err != nil {
-			return PhysicalTrialResult{}, fmt.Errorf("physical trial append child tokens: %w", err)
-		}
-	}
-	tKVEnd := time.Now()
-	kvAllocUS := float64(tKVEnd.Sub(tKVStart).Nanoseconds()) / 1000.0
-	if kvAllocUS <= 0 {
-		kvAllocUS = 1.0
+		output[i] = int32(token)
 	}
 
-	// 4. GPU Kernel Execution (real timed kernel forward pass boundary)
-	tKernelStart := time.Now()
-	refLogits := generateReferenceLogits(req.RunIndex, b, 256)
-	actualLogits := make([]float64, len(refLogits))
-	copy(actualLogits, refLogits)
-	tKernelEnd := time.Now()
-	kernelUS := float64(tKernelEnd.Sub(tKernelStart).Nanoseconds()) / 1000.0
-	if kernelUS <= 0 {
-		kernelUS = 5.0
+	result := PhysicalTrialResult{
+		RunIndex:       req.RunIndex,
+		Concurrency:    req.Concurrency,
+		Scenario:       req.Scenario,
+		Backend:        execution.Backend.Selected,
+		ExecutionPath:  execution.Engine,
+		WallDurationMS: float64(wall.Nanoseconds()) / 1e6,
+		UsefulTokens:   len(output),
+		TokensPerSec:   float64(len(output)) / wall.Seconds(),
+		TTFTMS:         float64((run.SessionSetupDuration + run.PrefillDuration + run.FirstSampleDuration).Nanoseconds()) / 1e6,
+		CounterSource:  CountersUnavailable,
+		PhasesMS: map[string]float64{
+			"session_setup": float64(run.SessionSetupDuration.Nanoseconds()) / 1e6,
+			"prefill":       float64(run.PrefillDuration.Nanoseconds()) / 1e6,
+			"first_sample":  float64(run.FirstSampleDuration.Nanoseconds()) / 1e6,
+			"decode":        float64(run.DecodeDuration.Nanoseconds()) / 1e6,
+			"teardown":      float64(run.TeardownDuration.Nanoseconds()) / 1e6,
+		},
+		OutputTokenIDs: output,
+		Identity: ExecutionIdentity{
+			ModelGGUFSHA256:   execution.ArtifactSHA256,
+			TokenPacketSHA256: observedTokenPacketSHA256(execution.PromptTokenIDs, output),
+		},
 	}
-
-	// 5. Token Sampling
-	tSampleStart := time.Now()
-	outTokens := make([]int32, totalUsefulTokens)
-	for i := range outTokens {
-		outTokens[i] = int32((i + 1) % 32000)
+	if len(output) > 1 && run.DecodeDuration > 0 {
+		result.TPOTMS = float64(run.DecodeDuration.Nanoseconds()) / 1e6 / float64(len(output)-1)
 	}
-	tSampleEnd := time.Now()
-	samplingUS := float64(tSampleEnd.Sub(tSampleStart).Nanoseconds()) / 1000.0
-	if samplingUS <= 0 {
-		samplingUS = 1.0
+	if run.CPUVerification != nil {
+		result.LogitCosineParity = run.CPUVerification.MinCosine
+		result.ParityPassed = run.CPUVerification.Passed
 	}
+	// Identity.Validate will keep this result non-creditable until source,
+	// archive, and binary observers are supplied by the trusted runner.
+	return result, nil
+}
 
-	hostDispatchUS := queueLatencyMS * 1000.0
-	totalWallUS := hostDispatchUS + prefixLookupUS + kvAllocUS + kernelUS + samplingUS
-	wallDurationMS := totalWallUS / 1000.0
-	if wallDurationMS <= 0 {
-		wallDurationMS = 0.01
-	}
-
-	tokensPerSec := float64(totalUsefulTokens) / (wallDurationMS / 1000.0)
-
-	ttftMS := (hostDispatchUS + prefixLookupUS + kvAllocUS + (kernelUS / float64(genTokens))) / 1000.0
-	tpotMS := 0.0
-	if genTokens > 1 {
-		tpotMS = ((kernelUS * float64(genTokens-1) / float64(genTokens)) + samplingUS) / (1000.0 * float64(genTokens-1))
-	}
-
-	prefixReuseRate := 0.0
-	if req.Scenario != ScenarioCold && req.PrefixTokens > 0 {
-		prefixReuseRate = float64(req.PrefixTokens) / float64(req.PrefixTokens+genTokens)
-	}
-
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
-	peakMem := memStats.Sys
-
-	logitCosine := 0.999995
-	if p.ParityEvaluator != nil {
-		logitCosine = p.ParityEvaluator(req.RunIndex, b, 256)
-	} else {
-		logitCosine = CosineSimilarity(refLogits, actualLogits)
-	}
-
-	threshold := req.ParityThreshold
-	if threshold <= 0 {
-		threshold = DefaultLogitCosineParityThreshold
-	}
-
-	var dramBytes, mallHitBytes, mallTotalBytes int64
-	var dramBW, mallHitRate float64
-	counterSource := p.CounterSource
-	if counterSource != "" && counterSource != CountersUnavailable {
-		if p.DRAMBytesReader != nil {
-			dramBytes = p.DRAMBytesReader()
-		}
-		if p.DRAMBWReader != nil {
-			dramBW = p.DRAMBWReader()
-		}
-		if p.MALLHitReader != nil {
-			mallHitBytes, mallTotalBytes = p.MALLHitReader()
-			if mallTotalBytes > 0 {
-				mallHitRate = float64(mallHitBytes) / float64(mallTotalBytes)
-			}
-		}
-	} else {
-		counterSource = CountersUnavailable
-	}
-
-	phasesUS := map[string]float64{
-		PhaseHostDispatch:     hostDispatchUS,
-		PhasePrefixTreeLookup: prefixLookupUS,
-		PhaseKVAllocation:     kvAllocUS,
-		PhaseGPUKernel:        kernelUS,
-		PhaseTokenSampling:    samplingUS,
-	}
-	phasesMS := map[string]float64{
-		PhaseHostDispatch:     hostDispatchUS / 1000.0,
-		PhasePrefixTreeLookup: prefixLookupUS / 1000.0,
-		PhaseKVAllocation:     kvAllocUS / 1000.0,
-		PhaseGPUKernel:        kernelUS / 1000.0,
-		PhaseTokenSampling:    samplingUS / 1000.0,
-	}
-
-	identity := ExecutionIdentity{
-		SourceCommit:        p.SourceCommit,
-		SourceArchiveSHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-		BinarySHA256:        p.BinarySHA256,
-		ModelGGUFSHA256:     p.ModelGGUFSHA256,
-		TokenPacketSHA256:   computeTokenPacketSHA256(req.Scenario, b, req.PrefixTokens, genTokens),
-	}
-
-	return PhysicalTrialResult{
-		RunIndex:          req.RunIndex,
-		Concurrency:       b,
-		Scenario:          req.Scenario,
-		Backend:           p.Backend,
-		ExecutionPath:     p.ExecutionPath,
-		Identity:          identity,
-		WallDurationMS:    wallDurationMS,
-		UsefulTokens:      totalUsefulTokens,
-		TokensPerSec:      tokensPerSec,
-		QueueLatencyMS:    queueLatencyMS,
-		TTFTMS:            ttftMS,
-		TPOTMS:            tpotMS,
-		PrefixReuseRate:   prefixReuseRate,
-		PeakMemoryBytes:   peakMem,
-		CounterSource:     counterSource,
-		PhysicalDRAMBytes: dramBytes,
-		DRAMBandwidthGBps: dramBW,
-		MALLHitBytes:      mallHitBytes,
-		MALLTotalBytes:    mallTotalBytes,
-		MALLHitRate:       mallHitRate,
-		PhasesMS:          phasesMS,
-		PhasesUS:          phasesUS,
-		LogitCosineParity: logitCosine,
-		ParityPassed:      logitCosine >= threshold,
-		OutputTokenIDs:    outTokens,
-		FallbackCount:     0,
-		FailureCount:      0,
-	}, nil
+func observedTokenPacketSHA256(prompt []int, output []int32) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "prompt=%v;output=%v", prompt, output)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 var defaultPhysicalRunner PhysicalRunner
