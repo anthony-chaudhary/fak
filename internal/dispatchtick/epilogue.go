@@ -78,6 +78,19 @@ func epiloguesDir(runsDir string) string {
 
 // SubmitEpilogue writes an epilogue record atomically to disk under <runsDir>/epilogues/<id>.json.
 func SubmitEpilogue(runsDir string, rec EpilogueRecord) (EpilogueRecord, error) {
+	if len(rec.Paths) == 0 {
+		return rec, fmt.Errorf("epilogue requires at least one path")
+	}
+	cleanPaths := make([]string, 0, len(rec.Paths))
+	for _, p := range rec.Paths {
+		clean := strings.TrimSpace(filepath.ToSlash(filepath.Clean(p)))
+		if clean == "" || clean == "." || strings.HasPrefix(clean, "../") {
+			return rec, fmt.Errorf("invalid epilogue path %q", p)
+		}
+		cleanPaths = append(cleanPaths, clean)
+	}
+	rec.Paths = cleanPaths
+
 	if rec.Schema == "" {
 		rec.Schema = EpilogueSchema
 	}
@@ -249,6 +262,15 @@ func DrainEpilogues(root, runsDir string, opts EpilogueDrainOptions) (EpilogueDr
 	}
 	ctx := context.Background()
 
+	// Recover interrupted/stale landing epilogues
+	if landing, err := ListEpilogues(runsDir, EpilogueStatusLanding); err == nil {
+		for _, rec := range landing {
+			if time.Since(rec.SubmittedAt) > 2*time.Minute {
+				_, _ = UpdateEpilogueStatus(runsDir, rec.ID, EpilogueStatusPending, "", "recovered from interrupted landing")
+			}
+		}
+	}
+
 	var result EpilogueDrainResult
 	pending, err := ListEpilogues(runsDir, EpilogueStatusPending)
 	if err != nil {
@@ -306,22 +328,46 @@ func DrainEpilogues(root, runsDir string, opts EpilogueDrainOptions) (EpilogueDr
 			_, _ = tmpPatch.WriteString(rec.Patch)
 			_ = tmpPatch.Close()
 
-			out, err := git(ctx, root, "apply", "--whitespace=nowarn", patchPath)
-			_ = os.Remove(patchPath)
-			if err != nil {
-				// git apply failed => mark conflict
-				for _, p := range rec.Paths {
-					conflictedPaths[p] = true
+			// Check forward application
+			_, checkErr := git(ctx, root, "apply", "--check", patchPath)
+			if checkErr == nil {
+				out, err := git(ctx, root, "apply", "--whitespace=nowarn", patchPath)
+				_ = os.Remove(patchPath)
+				if err != nil {
+					for _, p := range rec.Paths {
+						conflictedPaths[p] = true
+					}
+					if rec.WorktreeDir != "" && rec.WorktreeDir != root && len(rec.Paths) > 0 {
+						_, _ = git(ctx, root, append([]string{"checkout", "--"}, rec.Paths...)...)
+					}
+					updated, _ := UpdateEpilogueStatus(runsDir, rec.ID, EpilogueStatusConflict, "", fmt.Sprintf("git apply failed: %v: %s", err, strings.TrimSpace(out)))
+					result.Conflicted++
+					result.Records = append(result.Records, updated)
+					continue
 				}
-				if len(rec.Paths) > 0 {
-					_, _ = git(ctx, root, append([]string{"checkout", "--"}, rec.Paths...)...)
+				applied = true
+			} else {
+				// Forward apply check failed. Check if patch is ALREADY applied in working tree (e.g. in-place queued commit)
+				_, reverseCheckErr := git(ctx, root, "apply", "-R", "--check", patchPath)
+				_ = os.Remove(patchPath)
+				if reverseCheckErr == nil {
+					// Patch is already applied in working tree
+					applied = true
+				} else {
+					// Genuine patch conflict
+					for _, p := range rec.Paths {
+						conflictedPaths[p] = true
+					}
+					// Only roll back if from a distinct worktree, never wipe working tree in root
+					if rec.WorktreeDir != "" && rec.WorktreeDir != root && len(rec.Paths) > 0 {
+						_, _ = git(ctx, root, append([]string{"checkout", "--"}, rec.Paths...)...)
+					}
+					updated, _ := UpdateEpilogueStatus(runsDir, rec.ID, EpilogueStatusConflict, "", fmt.Sprintf("patch conflict: %v", checkErr))
+					result.Conflicted++
+					result.Records = append(result.Records, updated)
+					continue
 				}
-				updated, _ := UpdateEpilogueStatus(runsDir, rec.ID, EpilogueStatusConflict, "", fmt.Sprintf("git apply failed: %v: %s", err, strings.TrimSpace(out)))
-				result.Conflicted++
-				result.Records = append(result.Records, updated)
-				continue
 			}
-			applied = true
 		} else if rec.WorktreeDir != "" {
 			copyErr := false
 			for _, p := range rec.Paths {
@@ -377,16 +423,31 @@ func DrainEpilogues(root, runsDir string, opts EpilogueDrainOptions) (EpilogueDr
 			}
 		}
 
-		// Commit with author message and DCO sign-off
+		// Commit with author message, explicit paths, and DCO sign-off
 		commitMsg := strings.TrimSpace(rec.Message)
 		if commitMsg == "" {
-			commitMsg = fmt.Sprintf("resolve(#%d): drain epilogue %s", rec.Issue, rec.ID)
+			lane := rec.Lane
+			if lane == "" {
+				lane = "cmd"
+			}
+			commitMsg = fmt.Sprintf("resolve(#%d): drain epilogue %s (fak %s)", rec.Issue, rec.ID, lane)
+		}
+		if !strings.Contains(commitMsg, "(fak ") {
+			lane := rec.Lane
+			if lane == "" {
+				lane = "cmd"
+			}
+			commitMsg += fmt.Sprintf(" (fak %s)", lane)
 		}
 		if !strings.Contains(commitMsg, "Signed-off-by:") {
 			commitMsg += "\n\nSigned-off-by: fak <fak@localhost>"
 		}
 
 		commitArgs := []string{"commit", "-m", commitMsg}
+		if len(rec.Paths) > 0 {
+			commitArgs = append(commitArgs, "--")
+			commitArgs = append(commitArgs, rec.Paths...)
+		}
 		if out, err := git(ctx, root, commitArgs...); err != nil {
 			for _, p := range rec.Paths {
 				conflictedPaths[p] = true
