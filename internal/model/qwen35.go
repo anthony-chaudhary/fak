@@ -397,7 +397,7 @@ func (m *Model) linearAttnSeq(l int, xn [][]float32) [][]float32 {
 			bt := beta[t][h]
 			st := state[h]
 			od := out[h*vHd : (h+1)*vHd]
-			if HasVectorizedDeltaNet() {
+			if HasVectorizedDeltaNetFor(kHd, vHd) {
 				VectorizedHeadStep(st, qn, kn, vh, bt, g, od, kvmem, delta)
 			} else {
 				ScalarHeadStep(st, qn, kn, vh, bt, g, od, kvmem, delta)
@@ -528,7 +528,7 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 		dt := softplus(avec[h] + dtBias[h])
 		g := float32(math.Exp(float64(-a * dt)))
 		od := core[h*vHd : (h+1)*vHd]
-		if HasVectorizedDeltaNet() {
+		if HasVectorizedDeltaNetFor(kHd, vHd) {
 			VectorizedHeadStep(st, qn, kn, vh, bt, g, od, kvmem, delta)
 		} else {
 			ScalarHeadStep(st, qn, kn, vh, bt, g, od, kvmem, delta)
@@ -646,7 +646,7 @@ func VectorizedHeadStep(
 	bt, g float32,
 	od, kvmem, delta []float32,
 ) {
-	if !HasVectorizedDeltaNet() {
+	if !HasVectorizedDeltaNetFor(len(qn), len(vh)) {
 		ScalarHeadStep(st, qn, kn, vh, bt, g, od, kvmem, delta)
 		return
 	}
@@ -904,4 +904,3 @@ func ValidatePLEPrefillThroughput(tokPerSec float64) error {
 	}
 	return nil
 }
-

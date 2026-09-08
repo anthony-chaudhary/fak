@@ -52,29 +52,31 @@ func TestQ8FastDecodeSessionRejectsResidentQ4(t *testing.T) {
 
 func TestQ8FastDecodeSessionAllowsHybridWhenVectorizedGDNAvailable(t *testing.T) {
 	cfg := Config{
-		HiddenSize:       256,
-		NumLayers:        2,
-		NumHeads:         4,
-		NumKVHeads:       2,
-		HeadDim:          64,
-		IntermediateSize: 256,
-		LayerTypes:       []string{"linear_attention", "full_attention"},
+		HiddenSize:          256,
+		NumLayers:           2,
+		NumHeads:            4,
+		NumKVHeads:          2,
+		HeadDim:             64,
+		IntermediateSize:    256,
+		LayerTypes:          []string{"linear_attention", "full_attention"},
+		LinearKeyHeadDim:    128,
+		LinearValueHeadDim:  128,
+		LinearNumKeyHeads:   1,
+		LinearNumValueHeads: 1,
 	}
 	if !cfg.IsHybrid() {
 		t.Fatal("fixture must be recognized as hybrid")
 	}
 
-	// 1. With vectorized GDN available (default)
+	// 1. Enabling the kernel never overrides actual CPU/OS capability.
 	t.Setenv("FAK_VECTORIZED_DELTANET", "1")
-	if !HasVectorizedDeltaNet() {
-		t.Fatal("HasVectorizedDeltaNet must be true when FAK_VECTORIZED_DELTANET=1")
+	available := HasVectorizedDeltaNetFor(128, 128)
+	if got := q8FastDecodeSessionOK(&Session{}, cfg); got != available {
+		t.Fatalf("hybrid fast-decode eligibility=%v, vectorized kernel availability=%v", got, available)
 	}
-	if !q8FastDecodeSessionOK(&Session{}, cfg) {
-		t.Fatal("hybrid model should be accepted by q8FastDecodeSessionOK when vectorized GDN is available")
-	}
-	// Mixed-quantization: base projection weights Q4_K with FP32 recurrent state
-	if !q8FastDecodeSessionOK(&Session{Q4K: true}, cfg) {
-		t.Fatal("hybrid mixed-quantization session (Q4_K) should be accepted when vectorized GDN is available")
+	// Mixed-quantization eligibility follows the same executable-kernel gate.
+	if got := q8FastDecodeSessionOK(&Session{Q4K: true}, cfg); got != available {
+		t.Fatalf("hybrid Q4_K fast-decode eligibility=%v, vectorized kernel availability=%v", got, available)
 	}
 
 	// 2. When vectorized GDN is disabled
@@ -89,20 +91,22 @@ func TestQ8FastDecodeSessionAllowsHybridWhenVectorizedGDNAvailable(t *testing.T)
 
 func TestQ8FastDecodeSessionOK(t *testing.T) {
 	cfg := qwen35HybridTestCfg()
+	// Exercise the implemented AVX-512 geometry while leaving the full-attention
+	// fixture dimensions small enough for a fast synthetic end-to-end witness.
+	cfg.LinearKeyHeadDim = 128
+	cfg.LinearValueHeadDim = 128
 	if !cfg.IsHybrid() {
 		t.Fatal("fixture must be recognized as hybrid")
 	}
 
 	// 1. Gating condition assertions
 	t.Setenv("FAK_VECTORIZED_DELTANET", "1")
-	if !HasVectorizedDeltaNet() {
-		t.Fatal("HasVectorizedDeltaNet must be true when FAK_VECTORIZED_DELTANET=1")
+	available := HasVectorizedDeltaNetFor(128, 128)
+	if got := q8FastDecodeSessionOK(&Session{}, cfg); got != available {
+		t.Fatalf("hybrid fast-decode eligibility=%v, vectorized kernel availability=%v", got, available)
 	}
-	if !q8FastDecodeSessionOK(&Session{}, cfg) {
-		t.Fatal("hybrid model should be accepted by q8FastDecodeSessionOK when vectorized GDN is available")
-	}
-	if !q8FastDecodeSessionOK(&Session{Q4K: true}, cfg) {
-		t.Fatal("hybrid mixed-quantization session (Q4_K) should be accepted when vectorized GDN is available")
+	if got := q8FastDecodeSessionOK(&Session{Q4K: true}, cfg); got != available {
+		t.Fatalf("hybrid Q4_K fast-decode eligibility=%v, vectorized kernel availability=%v", got, available)
 	}
 
 	t.Setenv("FAK_VECTORIZED_DELTANET", "0")
@@ -114,6 +118,9 @@ func TestQ8FastDecodeSessionOK(t *testing.T) {
 	}
 	if q8FastDecodeSessionOK(&Session{Q4K: true}, cfg) {
 		t.Fatal("hybrid mixed-quantization session must be refused by q8FastDecodeSessionOK when vectorized GDN is unavailable")
+	}
+	if !available {
+		t.Skip("AVX-512 GDN unavailable; capability fail-closed assertions passed")
 	}
 
 	// 2. Decode execution and bypass verification

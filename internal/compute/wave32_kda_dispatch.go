@@ -360,16 +360,24 @@ func (wg *Wave32Workgroup) Wave32GatedDeltaNetStep(
 	return wg.Wave32GDNStep(q, k, v, z, norm, beta, decay, eps)
 }
 
-// HasVectorizedDeltaNet reports whether an optimized vectorized DeltaNet kernel is available.
-// It is available by default and can be explicitly disabled via FAK_VECTORIZED_DELTANET=0 (or false/no/off).
+// HasVectorizedDeltaNet reports whether this process can execute an optimized
+// DeltaNet kernel. The environment can disable a detected kernel, but cannot
+// force one on when the CPU/OS does not support its instruction set.
 func HasVectorizedDeltaNet() bool {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv("FAK_VECTORIZED_DELTANET")))
 	switch v {
 	case "0", "false", "no", "off":
 		return false
 	default:
-		return true
+		return hasDeltaNetSIMD()
 	}
+}
+
+// HasVectorizedDeltaNetFor reports whether the optimized kernel supports the
+// requested key/value head geometry. The AVX-512 implementation is deliberately
+// limited to Qwen's canonical 128x128 recurrence; other shapes use the Go path.
+func HasVectorizedDeltaNetFor(kHd, vHd int) bool {
+	return kHd == 128 && vHd == 128 && HasVectorizedDeltaNet()
 }
 
 // HasTiledChannelTranspose reports whether the tiled memory channel transpose
@@ -402,6 +410,9 @@ func Wave32GatedDeltaNetStep(
 		return
 	}
 
+	if HasVectorizedDeltaNetFor(kHd, vHd) && tryDeltaNetSIMD(st, qn, kn, vh, bt, g, od, kvmem, delta) {
+		return
+	}
 	wave32GatedDeltaNetStepGo(st, qn, kn, vh, bt, g, od, kvmem, delta)
 }
 
