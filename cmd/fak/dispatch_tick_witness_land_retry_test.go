@@ -1,10 +1,9 @@
 package main
 
-// #3613: the dispatch land seam must CONSUME a refused optimistic land instead of
-// discarding it — a LAND_READBACK_MISMATCH race refusal retries the land (bounded)
-// BEFORE the reap destroys the worktree (the only copy of the diff), while a
-// deterministic refusal (red verify) goes straight to the reap, and an exhausted
-// bound still reaps (the pre-#3613 fail-open final resort).
+// #3613/#12449: the dispatch land seam must CONSUME a refused optimistic land
+// instead of discarding it. A LAND_READBACK_MISMATCH race refusal retries the land
+// (bounded), but every terminal refusal retains the worktree (the only copy of the
+// diff). Only a durable successful land may reach reap.
 
 import (
 	"testing"
@@ -42,7 +41,8 @@ func withLandRetrySeams(t *testing.T, results []workerworktree.Result) *[]string
 }
 
 func raceRefusedResult() workerworktree.Result {
-	return workerworktree.Result{OK: false, Applied: true, Committed: true,
+	return workerworktree.Result{OK: false, Code: workerworktree.LandResultReconciliationRequired,
+		Applied: true, Committed: true, Preserved: true,
 		Reason: workerworktree.LandReadbackMismatchToken +
 			": trunk HEAD abcdef123456 does not carry intended path(s) cmd/x.go after commit — shared-index race, land not trusted (#3547)"}
 }
@@ -60,10 +60,11 @@ func TestRefusedLandRetriesThenSucceedsBeforeReap(t *testing.T) {
 	assertLandRetryLog(t, *log, want)
 }
 
-// TestRefusedLandGivesUpAfterBoundThenReaps pins the bound: an always-race-refused
-// land is attempted exactly dispatchLandRefusedAttempts times, then the reap still
-// runs — bounded retry, never an unbounded loop, never a leaked worktree.
-func TestRefusedLandGivesUpAfterBoundThenReaps(t *testing.T) {
+// TestRefusedLandExhaustionRetainsWorker pins the bound: an always-race-refused
+// land is attempted exactly dispatchLandRefusedAttempts times, then the worktree
+// remains available for explicit reconciliation. The retry is bounded without
+// turning budget exhaustion into implicit discard authority.
+func TestRefusedLandExhaustionRetainsWorker(t *testing.T) {
 	if dispatchLandRefusedAttempts < 2 {
 		t.Fatalf("the #3613 bound must allow at least one retry, got %d", dispatchLandRefusedAttempts)
 	}
@@ -73,19 +74,20 @@ func TestRefusedLandGivesUpAfterBoundThenReaps(t *testing.T) {
 	for i := 0; i < dispatchLandRefusedAttempts; i++ {
 		want = append(want, "land")
 	}
-	want = append(want, "reap:/wt/fak-worker-wt-cmd-abc")
 	assertLandRetryLog(t, *log, want)
 }
 
-// TestDeterministicRefusalNeverRetries pins the guard rail: a red-verify refusal
-// is deterministic — replaying it cannot change the verdict — so the seam must
-// land exactly ONCE and reap, never burn retries on it.
-func TestDeterministicRefusalNeverRetries(t *testing.T) {
+// TestDeterministicRefusalRetainsWorker pins the guard rail: a fail-closed
+// reconciliation result is deterministic, so the seam lands exactly once and
+// retains the worker rather than replaying or reaping it.
+func TestDeterministicRefusalRetainsWorker(t *testing.T) {
 	log := withLandRetrySeams(t, []workerworktree.Result{
-		{OK: false, Reason: "worktree verify failed, refusing to land: go build ./... failed: boom"},
+		{OK: false, Code: workerworktree.LandResultReconciliationRequired,
+			Path: "/wt/fak-worker-wt-cmd-abc", Preserved: true,
+			Reason: "isolated land requires reconciliation: worktree verify failed"},
 	})
 	landAndReapWorkerWorktreeDefault("/root", "/wt/fak-worker-wt-cmd-abc", "base", []string{"cmd"})
-	assertLandRetryLog(t, *log, []string{"land", "reap:/wt/fak-worker-wt-cmd-abc"})
+	assertLandRetryLog(t, *log, []string{"land"})
 }
 
 // TestCleanLandSingleAttemptThenReap pins the happy path untouched: a first-try

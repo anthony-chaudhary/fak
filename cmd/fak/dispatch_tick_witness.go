@@ -54,29 +54,34 @@ var dispatchWitnessCommitPaths = dispatchWitnessCommitPathsGit
 const dispatchWitnessTestRunEnv = "FAK_WITNESS_TEST_RUN"
 
 // dispatchWitnessLandReap is the seam the #3168 land+reap fires through, injectable
-// so the sweep test can assert it runs (before the resolving-SHA scan) and that a
-// fault is swallowed. Default lands the worker's worktree diff onto the trunk and
-// reaps the worktree.
+// so the sweep test can assert it runs before the resolving-SHA scan. Its structured
+// result is also the authority for consuming the .worktree sidecar: only an OK
+// land+reap may remove it; every refusal leaves the recovery pointer durable (#12449).
 var dispatchWitnessLandReap = landAndReapWorkerWorktreeDefault
 
 // landAndReapWorkerWorktree lands a dead worker's per-worker worktree (#3168) onto
 // the trunk and reaps it, when a .worktree sidecar records one. A no-op (and no
 // error surfaced) when the sidecar is absent — a worker that ran in the shared
-// trunk. FAIL-OPEN: every step's error is swallowed; the sweep proceeds to audit
-// the resolve log regardless.
-func landAndReapWorkerWorktree(root, stem, base string) {
+// trunk. FAIL-OPEN: the sweep proceeds to audit the resolve log regardless. The
+// returned typed result is retained in the audit receipt and governs whether the
+// durable worktree sidecar may be consumed.
+func landAndReapWorkerWorktree(root, stem, base string) workerworktree.Result {
 	wtPath := ""
 	if b, err := os.ReadFile(stem + dispatchWorktreeSidecarSuffix); err == nil {
 		wtPath = strings.TrimSpace(string(b))
 	}
 	if wtPath == "" {
-		return
+		return workerworktree.Result{OK: true, Code: workerworktree.LandResultNoOp,
+			Reason: "worker worktree sidecar is absent"}
 	}
 	tree := readResolveLeaseTree(stem + dispatchLeaseTreeSidecarSuffix)
-	dispatchWitnessLandReap(root, wtPath, base, tree)
-	// Landed once: drop the sidecar so a later sweep never re-lands (the diff is now
-	// on the trunk and the worktree is gone).
-	_ = os.Remove(stem + dispatchWorktreeSidecarSuffix)
+	res := dispatchWitnessLandReap(root, wtPath, base, tree)
+	if res.OK {
+		// Landed and reaped once: drop the sidecar so a later sweep never re-lands.
+		// A refusal keeps this pointer as the durable next-action input.
+		_ = os.Remove(stem + dispatchWorktreeSidecarSuffix)
+	}
+	return res
 }
 
 // dispatchLandVerify is the #3178 pre-land build witness wired into the live land
@@ -96,8 +101,8 @@ var dispatchLandVerify workerworktree.VerifyHook = worktreeWorkerGoBuildVerify
 const dispatchLandRefusedAttempts = 3
 
 // Seams for the #3613 refused-land retry, injectable so the retry test pins the
-// land/reap sequencing hermetically: the land itself, the reap that destroys the
-// worktree, and the between-attempt backoff.
+// land/reap sequencing hermetically: the land itself, the success-only reap, and
+// the between-attempt backoff.
 var dispatchLandWorktreeOnce = func(root, wtPath, base string, tree []string) workerworktree.Result {
 	return landWorkerWorktreeVerified(root, wtPath, base, tree, nil)
 }
@@ -110,18 +115,18 @@ var dispatchLandRetrySleep = func(attempt int) {
 
 // landAndReapWorkerWorktreeDefault is the production land+reap: apply the worktree's
 // diff-since-base onto the trunk as the worker's own stamped commit (scoped to its
-// declared lease tree), then force-remove the worktree. Both fail-open.
+// declared lease tree), then reap only after durable land success. Both stages
+// return structured evidence; any refusal preserves the worker (#12449).
 //
 // #3613: a refused land is no longer unconditionally forgotten. A refusal carrying
 // the workerworktree.LandReadbackMismatchToken race class is TRANSIENT — a
 // concurrent commit on the shared index swept this worker's paths, and the
 // worktree still holds the ONLY copy of the diff — so the land is re-attempted
-// (bounded, backed off) on the moved HEAD before the reap destroys it.
+// (bounded, backed off) on the moved HEAD before a successful completion reaps it.
 // Deterministic refusals (red verify, apply conflict) never retry: replaying them
-// cannot change the verdict. After the bound is exhausted the reap still runs —
-// the pre-#3613 fail-open final resort, so a pathological race can never leak
-// worktrees without bound — with every attempt surfaced as a countable line.
-func landAndReapWorkerWorktreeDefault(root, wtPath, base string, tree []string) {
+// cannot change the verdict. After the bound is exhausted the worker and sidecar
+// remain explicit reconciliation inputs, with every attempt surfaced as evidence.
+func landAndReapWorkerWorktreeDefault(root, wtPath, base string, tree []string) workerworktree.Result {
 	// No commit-message file: Land derives the subject from the worktree tip so the
 	// landed commit keeps the worker's own #N-citing, (fak <leaf>)-stamped subject.
 	// verify=dispatchLandVerify (#3178): a red `go build ./...` in the worktree refuses
@@ -129,7 +134,7 @@ func landAndReapWorkerWorktreeDefault(root, wtPath, base string, tree []string) 
 	res := dispatchLandWorktreeOnce(root, wtPath, base, tree)
 	attempt := 1
 	for !res.OK && workerworktree.LandRefusalRetryable(res.Reason) && attempt < dispatchLandRefusedAttempts {
-		fmt.Fprintf(os.Stderr, "fak dispatch: worktree land refused for %s (attempt %d/%d): %s — retrying before reap (#3613)\n",
+		fmt.Fprintf(os.Stderr, "fak dispatch: worktree land refused for %s (attempt %d/%d): %s — retrying before completion (#3613)\n",
 			filepath.Base(wtPath), attempt, dispatchLandRefusedAttempts, res.Reason)
 		dispatchLandRetrySleep(attempt)
 		attempt++
@@ -139,10 +144,35 @@ func landAndReapWorkerWorktreeDefault(root, wtPath, base string, tree []string) 
 		// Surface WHY a worker produced no commit — a refused land is silent otherwise,
 		// leaving an operator to guess whether the worker crashed or was refused (#3178).
 		// The attempt count makes each race-refusal a countable witness line (#3613).
-		fmt.Fprintf(os.Stderr, "fak dispatch: worktree land refused for %s (%d/%d attempts): %s\n",
-			filepath.Base(wtPath), attempt, dispatchLandRefusedAttempts, res.Reason)
+		if strings.TrimSpace(res.Path) == "" {
+			res.Path = wtPath
+		}
+		// The dispatch layer did not discard anything, so report that standing
+		// guarantee even for older failure results that predate Preserved.
+		res.Preserved = true
+		fmt.Fprintf(os.Stderr, "fak dispatch: worktree land refused for %s (%d/%d attempts): code=%s preserved=%t path=%s reason=%s; next: reconcile with fak worktree worker land\n",
+			filepath.Base(wtPath), attempt, dispatchLandRefusedAttempts, res.Code,
+			res.Preserved, res.Path, res.Reason)
+		return res
 	}
-	_ = dispatchReapWorktree(root, wtPath)
+	if !res.OK {
+		if strings.TrimSpace(res.Path) == "" {
+			res.Path = wtPath
+		}
+		res.Preserved = true
+		return res
+	}
+	reap := dispatchReapWorktree(root, wtPath)
+	if !reap.OK {
+		if strings.TrimSpace(reap.Path) == "" {
+			reap.Path = wtPath
+		}
+		reap.Preserved = true
+		fmt.Fprintf(os.Stderr, "fak dispatch: worktree reap refused after durable land for %s: code=%s preserved=%t path=%s reason=%s; next: inspect with fak worktree worker list --json\n",
+			filepath.Base(wtPath), reap.Code, reap.Preserved, reap.Path, reap.Reason)
+		return reap
+	}
+	return res
 }
 
 // landWorkerWorktreeVerified lands a worker's worktree diff-since-base onto the trunk
@@ -307,6 +337,7 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		// — the stranded-poison revert rung below must never fire for it.
 		_, wtErr := os.Stat(stem + dispatchWorktreeSidecarSuffix)
 		ranInWorktree := wtErr == nil
+		var worktreeLand *workerworktree.Result
 		// #3168: the pid is provably dead. If this worker ran in a per-worker git
 		// worktree, land its diff onto the trunk and reap the worktree BEFORE the
 		// resolving-SHA scan, so the just-landed commit is what gets witnessed. All
@@ -314,8 +345,9 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		// audit the resolve log exactly as today (a leaked worktree is reaped later
 		// by worktree_doctor.py --sweep-disposable, which knows the marker). Only in a
 		// live sweep — a dry-run must never mutate the trunk.
-		if live && !reconcileLateCommit {
-			landAndReapWorkerWorktree(root, stem, base)
+		if live && !reconcileLateCommit && ranInWorktree {
+			res := landAndReapWorkerWorktree(root, stem, base)
+			worktreeLand = &res
 		}
 		sha := dispatchWitnessResolvingSHA(root, issue, base)
 		if reconcileLateCommit && sha == "" {
@@ -394,6 +426,12 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		}
 		records = append(records, rec)
 		row := rec.Map()
+		if worktreeLand != nil {
+			// Keep the exact typed land/refusal evidence in both the tick JSON and
+			// durable .witness sidecar. Operators can distinguish a durable success
+			// from reconciliation-required without scraping stderr (#12449).
+			row["worktree_land"] = *worktreeLand
+		}
 		if len(reverted) > 0 {
 			// #3515: surface the revert as first-class evidence on the graded row (and
 			// so in the .witness sidecar below) — an operator can see exactly which

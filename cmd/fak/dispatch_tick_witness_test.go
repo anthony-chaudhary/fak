@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 // deadDispatchPID is a pid no live process plausibly holds on either OS, so the
@@ -353,10 +354,14 @@ func withWitnessLandReapStub(t *testing.T, fail bool) *[]string {
 	t.Helper()
 	old := dispatchWitnessLandReap
 	calls := &[]string{}
-	dispatchWitnessLandReap = func(root, wtPath, base string, tree []string) {
+	dispatchWitnessLandReap = func(root, wtPath, base string, tree []string) workerworktree.Result {
 		*calls = append(*calls, wtPath+"|"+base)
-		// fail=true models a land/reap that errored: the seam swallows it (returns
-		// normally), so the sweep must still proceed to audit.
+		if fail {
+			return workerworktree.Result{OK: false, Code: workerworktree.LandResultReconciliationRequired,
+				Path: wtPath, Preserved: true, Reason: "isolated land requires reconciliation: conflict"}
+		}
+		return workerworktree.Result{OK: true, Code: workerworktree.LandResultSuccess,
+			Path: wtPath, Applied: true, Committed: true, Removed: true}
 	}
 	t.Cleanup(func() { dispatchWitnessLandReap = old })
 	return calls
@@ -364,16 +369,16 @@ func withWitnessLandReapStub(t *testing.T, fail bool) *[]string {
 
 // TestWitnessLandsAndReapsWorkerWorktreeBeforeAudit is the #3168 witness: a dead-pid
 // worker WITH a .worktree sidecar has its worktree landed+reaped BEFORE the
-// resolving-SHA scan (so the just-landed commit is what gets witnessed), the sidecar
-// is consumed (a second sweep never re-lands), and a land/reap fault is swallowed —
-// the slot is still graded exactly as today.
+// resolving-SHA scan (so the just-landed commit is what gets witnessed) and the
+// sidecar is consumed (a second sweep never re-lands). The slot is still graded
+// exactly as today.
 func TestWitnessLandsAndReapsWorkerWorktreeBeforeAudit(t *testing.T) {
 	root := t.TempDir()
 	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
 	stem := "resolve-3168-20260708-010101"
 
 	var landRanBeforeScan bool
-	landReap := withWitnessLandReapStub(t, true)
+	landReap := withWitnessLandReapStub(t, false)
 	// The resolving-SHA scan asserts land already fired: on the FIRST worker the
 	// land+reap recorder must already hold an entry when the scan runs.
 	withWitnessStubs(t, func(_ string, _ int, base string) string {
@@ -415,6 +420,57 @@ func TestWitnessLandsAndReapsWorkerWorktreeBeforeAudit(t *testing.T) {
 	// The .worktree sidecar is consumed so a second sweep never re-lands.
 	if _, err := os.Stat(filepath.Join(runsDir, stem+dispatchWorktreeSidecarSuffix)); !os.IsNotExist(err) {
 		t.Fatalf("worktree sidecar should be removed after landing, stat err=%v", err)
+	}
+}
+
+// TestWitnessRetainsSidecarAfterPreservedLandRefusal proves the dispatch sweep
+// keeps the durable pointer to a managed worker whenever structured land says
+// reconciliation is required. Auditing remains fail-open, but recoverable bytes
+// are never silently converted into a reap/discard decision.
+func TestWitnessRetainsSidecarAfterPreservedLandRefusal(t *testing.T) {
+	root := t.TempDir()
+	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	stem := "resolve-12449-20260908-010101"
+	landReap := withWitnessLandReapStub(t, true)
+	withWitnessStubs(t, func(string, int, string) string { return "" }, "", "")
+
+	writeWitnessWorker(t, runsDir, stem, "# fak-spawn\nworked\n", deadDispatchPID)
+	wtPath := filepath.FromSlash("/wt/fak-worker-wt-dispatch-12449")
+	sidecar := filepath.Join(runsDir, stem+dispatchWorktreeSidecarSuffix)
+	if err := os.WriteFile(sidecar, []byte(wtPath), 0o644); err != nil {
+		t.Fatalf("write worktree sidecar: %v", err)
+	}
+
+	payload, _ := witnessExitedWorkers(root, runsDir, true)
+
+	if len(*landReap) != 1 {
+		t.Fatalf("want exactly one land attempt, got %v", *landReap)
+	}
+	if got, err := os.ReadFile(sidecar); err != nil || string(got) != wtPath {
+		t.Fatalf("preserved refusal must retain worktree sidecar: got=%q err=%v", got, err)
+	}
+	audited, _ := payload["audited"].([]any)
+	if len(audited) != 1 {
+		t.Fatalf("want one JSON audit row, got %#v", payload["audited"])
+	}
+	row, _ := audited[0].(map[string]any)
+	land, _ := row["worktree_land"].(workerworktree.Result)
+	if land.Code != workerworktree.LandResultReconciliationRequired || !land.Preserved || land.Path != wtPath {
+		t.Fatalf("JSON audit omitted structured preserved refusal: %#v", row["worktree_land"])
+	}
+	raw, err := os.ReadFile(filepath.Join(runsDir, stem+dispatchtick.WitnessSidecarSuffix))
+	if err != nil {
+		t.Fatalf("read durable witness: %v", err)
+	}
+	var durable struct {
+		WorktreeLand workerworktree.Result `json:"worktree_land"`
+	}
+	if err := json.Unmarshal(raw, &durable); err != nil {
+		t.Fatalf("decode durable witness: %v", err)
+	}
+	if durable.WorktreeLand.Code != workerworktree.LandResultReconciliationRequired ||
+		!durable.WorktreeLand.Preserved || durable.WorktreeLand.Path != wtPath {
+		t.Fatalf("durable witness omitted structured preserved refusal: %+v", durable.WorktreeLand)
 	}
 }
 
