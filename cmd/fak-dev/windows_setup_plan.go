@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -156,7 +157,62 @@ func uniqueClean(in []string) []string {
 	return out
 }
 
+func isWindowsVolumePath(p string) bool {
+	if len(p) >= 2 && ((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z')) && p[1] == ':' {
+		return true
+	}
+	if strings.HasPrefix(p, `\\`) || strings.HasPrefix(p, `//`) {
+		return true
+	}
+	return false
+}
+
+func cleanWindowsPath(p string) string {
+	p = strings.ReplaceAll(p, "\\", "/")
+	vol := ""
+	if len(p) >= 2 && ((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z')) && p[1] == ':' {
+		vol = strings.ToUpper(p[:2])
+		p = p[2:]
+	} else if strings.HasPrefix(p, "//") {
+		trimmed := strings.TrimPrefix(p, "//")
+		parts := strings.SplitN(trimmed, "/", 3)
+		if len(parts) >= 2 {
+			vol = "//" + parts[0] + "/" + parts[1]
+			if len(parts) == 3 {
+				p = "/" + parts[2]
+			} else {
+				p = "/"
+			}
+		}
+	}
+	if p == "" || p == "/" {
+		return vol + "/"
+	}
+	cleaned := path.Clean(p)
+	if !strings.HasPrefix(cleaned, "/") {
+		cleaned = "/" + cleaned
+	}
+	return vol + cleaned
+}
+
 func isSubpath(parent, child string) bool {
+	if isWindowsVolumePath(parent) || isWindowsVolumePath(child) {
+		if !isWindowsVolumePath(parent) || !isWindowsVolumePath(child) {
+			return false
+		}
+		pClean := cleanWindowsPath(parent)
+		cClean := cleanWindowsPath(child)
+		if strings.EqualFold(pClean, cClean) {
+			return true
+		}
+		pLower := strings.ToLower(pClean)
+		cLower := strings.ToLower(cClean)
+		if !strings.HasSuffix(pLower, "/") {
+			pLower += "/"
+		}
+		return strings.HasPrefix(cLower, pLower)
+	}
+
 	p := filepath.Clean(parent)
 	c := filepath.Clean(child)
 	if strings.EqualFold(p, c) {
