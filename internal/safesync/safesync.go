@@ -267,6 +267,18 @@ func Apply(ctx context.Context, opts Options) (info Assessment, err error) {
 	opts = normalizeOptions(opts)
 	run := opts.Runner
 
+	if os.Getenv(EnvSafesyncShadow) == "1" {
+		_, _ = AuditShadowLanding(ctx, opts.Repo, ShadowOptions{
+			Repo:    opts.Repo,
+			Remote:  opts.Remote,
+			Branch:  opts.Branch,
+			Runner:  opts.Runner,
+			Now:     opts.Now,
+			Session: opts.Session,
+			Shadow:  true,
+		})
+	}
+
 	// Phase 1 (Shared Read Lease): Fetch remote refs, inspect git rev-parse, run diff audits concurrently (#11234).
 	readLease, rerr := AcquireQueuedSharedReadLease(ctx, opts.Repo, opts.LeaseOwner, now, opts.WriterLeaseTTL, opts.QueueWait)
 	if rerr != nil {
