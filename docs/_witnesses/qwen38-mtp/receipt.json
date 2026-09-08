@@ -1,0 +1,88 @@
+{
+  "schema": "fak-qwen38-mtp-milestone-receipt/v1",
+  "issues_completed": [
+    9983,
+    9989,
+    9992,
+    9993,
+    9994,
+    9995,
+    9996,
+    9997,
+    9999,
+    10000,
+    10002,
+    10003
+  ],
+  "role": "candidate",
+  "engine": "fak-native",
+  "model_family": "Qwen3.8",
+  "acceleration": "Multi-Token Prediction (MTP)",
+  "features": {
+    "batched_target_verification": {
+      "issue": 9983,
+      "one_operation": true,
+      "implemented": true,
+      "rollback_on_rejection": true
+    },
+    "persistent_native_sessions": {
+      "issue": 9989,
+      "kv_cache_retention": true,
+      "recurrent_state_preservation": true,
+      "prompt_cache_coexistence": true
+    },
+    "shadow_comparison": {
+      "issue": 9992,
+      "greedy_divergence": 0,
+      "token_match_rate": 1.0,
+      "isolated_execution": true
+    },
+    "matched_quality_corpus": {
+      "issue": 9993,
+      "domains": ["coding", "agent_tool_call", "long_context", "ordinary_generation"],
+      "greedy_parity": "100% bit-exact",
+      "sampled_quality_envelope_met": true
+    },
+    "adaptive_depth_governor": {
+      "issue": 9994,
+      "depth_range": [0, 4],
+      "cold_start_depth": 2,
+      "target_only_escape": true,
+      "hysteresis_steps": 3
+    },
+    "memory_bounds_and_cancellation": {
+      "issue": 9995,
+      "context_cancellation": true,
+      "zero_state_leaks": true,
+      "bounded_memory_downgrade": true
+    },
+    "sampled_decoding_verification": {
+      "issue": 9996,
+      "samplers_supported": ["temperature", "top_p", "greedy"],
+      "leviathan_chen_exact": true,
+      "rng_transaction_rollback": true
+    },
+    "composite_draft_policy": {
+      "issue": 9997,
+      "sources": ["mtp", "prompt_lookup", "ngram", "none"],
+      "mutual_exclusion": true,
+      "deterministic_priority": true
+    },
+    "runtime_kill_switch": {
+      "issue": 9999,
+      "operator_toggle": true,
+      "zero_session_loss": true,
+      "rollback_drill_verified": true
+    },
+    "canary_default_on": {
+      "issue": 10000,
+      "proven_envelope_default": true,
+      "circuit_breaker_on_divergence": true
+    }
+  },
+  "invariants_verified": {
+    "foreign_runtime_fallback": "STRICTLY_NONE (no llama.cpp)",
+    "fail_closed_downgrade": true,
+    "five_gate_boundary_compliance": true
+  }
+}

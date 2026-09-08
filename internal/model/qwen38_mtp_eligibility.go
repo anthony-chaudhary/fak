@@ -35,17 +35,19 @@ const (
 // tensor stores rather than trusting an artifact label. F32 remains only for the
 // pre-Q4_K compatibility caller that has no loaded model.
 type Qwen38MTPEligibilityInput struct {
-	Qwen38MTPArtifact bool
-	MTPBackendReady   bool
-	Backend           Qwen38MTPBackend
-	Model             *Model
-	F32               bool
-	Greedy            bool
-	Depth             int
-	FreshSession      bool
-	MemoryHeadroomOK  bool
-	Admission         *Qwen38MTPAdmission
-	OperatorEnabled   bool
+	Qwen38MTPArtifact      bool
+	MTPBackendReady        bool
+	Backend                Qwen38MTPBackend
+	Model                  *Model
+	F32                    bool
+	Greedy                 bool
+	Depth                  int
+	FreshSession           bool
+	PersistentSession      bool
+	AllowPersistentSession bool
+	MemoryHeadroomOK       bool
+	Admission              *Qwen38MTPAdmission
+	OperatorEnabled        bool
 }
 
 // Qwen38MTPEligibility is receipt-ready: Engine always names the fak-native path that
@@ -94,7 +96,7 @@ func EvaluateQwen38MTPEligibility(in Qwen38MTPEligibilityInput) Qwen38MTPEligibi
 		reason = Qwen38MTPSamplingUnsupported
 	case in.Depth <= 0 || in.Depth > Qwen35MTPMaxDraftDepth:
 		reason = Qwen38MTPDepthUnsupported
-	case !in.FreshSession:
+	case !in.FreshSession && !in.AllowPersistentSession && !in.PersistentSession:
 		reason = Qwen38MTPSessionNotFresh
 	case in.Admission != nil && in.Admission.Outcome == Qwen38MTPAdmissionTargetOnly:
 		reason = Qwen38MTPMemoryUnsafe
