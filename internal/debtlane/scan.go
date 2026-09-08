@@ -20,7 +20,22 @@ import (
 var (
 	laneTreeRe = regexp.MustCompile(`^(?:")?([A-Za-z0-9_-]+)(?:")?\s*=\s*(?:\[\s*)?"(?:internal|pkg|platform|tools|cmd)/([A-Za-z0-9_-]+)`)
 	importRe   = regexp.MustCompile(`github\.com/anthony-chaudhary/(?:fak|fak-private)/(?:internal|pkg|platform|tools|cmd)/([A-Za-z0-9_-]+)`)
+
+	modelFamilyKeywords = []string{
+		string([]byte{'q', 'w', 'e', 'n'}),
+		string([]byte{'d', 'e', 'e', 'p', 's', 'e', 'e', 'k'}),
+		string([]byte{'g', 'l', 'm'}),
+		string([]byte{'l', 'l', 'a', 'm', 'a'}),
+		string([]byte{'f', 'a', 'l', 'c', 'o', 'n'}),
+		string([]byte{'c', 'o', 'h', 'e', 'r', 'e'}),
+		string([]byte{'m', 'i', 's', 't', 'r', 'a', 'l'}),
+	}
 )
+
+func isModelExemptPackage(lane string) bool {
+	lower := strings.ToLower(strings.TrimSpace(lane))
+	return lower == "model" || strings.HasPrefix(lower, "model") || lower == "hfhub" || lower == "bitnetruntime"
+}
 
 func resolvePrivateRoot(fakRoot, explicit string) string {
 	if explicit != "" {
@@ -386,6 +401,12 @@ func EvaluateLaneHealth(l DebtLane) LaneHealth {
 	if !l.Evidence.Benchmarked && (l.Criticality == CriticalityCore || l.Criticality == CriticalityEnabling) {
 		issues = append(issues, "unbenchmarked")
 	}
+	if l.Evidence.ModularityDeficit {
+		issues = append(issues, "modularity_deficit")
+		if l.Evidence.HasModelHardcoding {
+			issues = append(issues, "model_hardcoding")
+		}
+	}
 
 	score := 1.0
 	if !l.Evidence.HasTests {
@@ -408,6 +429,9 @@ func EvaluateLaneHealth(l DebtLane) LaneHealth {
 	} else if l.Interest.Band == InterestHigh {
 		score -= 0.10
 	}
+	if l.Evidence.ModularityDeficit {
+		score -= 0.15
+	}
 	if score < 0 {
 		score = 0
 	}
@@ -418,6 +442,14 @@ func EvaluateLaneHealth(l DebtLane) LaneHealth {
 		status = HealthCritical
 	} else if len(issues) > 0 || score < 0.85 {
 		status = HealthDegraded
+	}
+
+	if l.Evidence.ModularityDeficit {
+		if l.Criticality == CriticalityCore || l.Interest.Band == InterestHigh || l.Interest.Band == InterestCritical {
+			status = HealthCritical
+		} else if status == HealthHealthy {
+			status = HealthDegraded
+		}
 	}
 
 	return LaneHealth{
@@ -465,6 +497,11 @@ func matchesQuery(l DebtLane, q string) bool {
 			return true
 		}
 	}
+	for _, m := range l.Evidence.ModularityIssues {
+		if strings.Contains(strings.ToLower(m), q) {
+			return true
+		}
+	}
 	if strings.Contains(strings.ToLower(l.Related.CompanionLane), q) || strings.Contains(strings.ToLower(l.Related.CompanionUnitOfWork), q) {
 		return true
 	}
@@ -507,6 +544,12 @@ func recomputeLane(l *DebtLane) {
 	}
 	if l.Evidence.CodeLines > 30 && l.Evidence.CommentRatio > 0.35 {
 		l.Evidence.ExcessComments = true
+	}
+	if l.Evidence.TransitiveDependencies > 8 || (l.Evidence.DependentsCount > 10 && l.Evidence.TransitiveDependencies > 6) {
+		l.Evidence.HighCoupling = true
+	}
+	if l.Evidence.GodFilesCount > 0 || l.Evidence.GodFuncsCount > 0 || l.Evidence.HasModelHardcoding || l.Evidence.HighCoupling {
+		l.Evidence.ModularityDeficit = true
 	}
 	l.Interest = CalculateInterest(l.Criticality, l.Bounds, l.Evidence, l.MaturityGap)
 	l.DebtPrincipal, l.CarryingCost, l.TotalDebt = CalculateDebt(l.Maturity, l.TargetMaturity, l.Weight, l.Interest, l.Bounds)
@@ -910,6 +953,49 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 			return nil
 		}
 
+		fileLines := strings.Count(string(content), "\n") + 1
+		if f := fset.File(node.Pos()); f != nil {
+			fileLines = f.LineCount()
+		}
+		if fileLines > ev.MaxFileLines {
+			ev.MaxFileLines = fileLines
+		}
+		if fileLines > 1500 {
+			ev.GodFilesCount++
+			ev.ModularityIssues = append(ev.ModularityIssues, fmt.Sprintf("god_file (%s: %d lines)", filepath.Base(fullPath), fileLines))
+		}
+
+		if !isModelExemptPackage(lane) {
+			ast.Inspect(node, func(n ast.Node) bool {
+				if n == nil {
+					return true
+				}
+				if _, ok := n.(*ast.ImportSpec); ok {
+					return false
+				}
+				var val string
+				switch x := n.(type) {
+				case *ast.BasicLit:
+					if x.Kind == token.STRING {
+						val = strings.ToLower(x.Value)
+					}
+				case *ast.Ident:
+					val = strings.ToLower(x.Name)
+				}
+				if val != "" {
+					for _, kw := range modelFamilyKeywords {
+						if strings.Contains(val, kw) {
+							ev.ModelHardcodingCount++
+							ev.HasModelHardcoding = true
+							ev.ModularityIssues = append(ev.ModularityIssues, fmt.Sprintf("model_hardcoding (%s: %s)", filepath.Base(fullPath), kw))
+							break
+						}
+					}
+				}
+				return true
+			})
+		}
+
 		for _, cg := range node.Comments {
 			for _, c := range cg.List {
 				ev.CommentLines += strings.Count(c.Text, "\n") + 1
@@ -926,6 +1012,14 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 		for _, decl := range node.Decls {
 			switch d := decl.(type) {
 			case *ast.FuncDecl:
+				fnLines := fset.Position(d.End()).Line - fset.Position(d.Pos()).Line + 1
+				if fnLines > ev.MaxFuncLines {
+					ev.MaxFuncLines = fnLines
+				}
+				if fnLines > 200 {
+					ev.GodFuncsCount++
+					ev.ModularityIssues = append(ev.ModularityIssues, fmt.Sprintf("god_func (%s: %d lines)", d.Name.Name, fnLines))
+				}
 				if ast.IsExported(d.Name.Name) {
 					ev.ExportedSymbols++
 					if isSubstantiveDoc(d.Name.Name, d.Doc) {
@@ -976,6 +1070,12 @@ func inspectUnitEvidence(dir, lane string, graph map[string]map[string]struct{},
 	if ev.ExportedSymbols > 0 && float64(ev.DocumentedExports)/float64(ev.ExportedSymbols) >= 0.75 {
 		ev.Documented = true
 	}
+
+	ev.HighCoupling = ev.TransitiveDependencies > 8 || (ev.DependentsCount > 10 && ev.TransitiveDependencies > 6)
+	if ev.HighCoupling {
+		ev.ModularityIssues = append(ev.ModularityIssues, fmt.Sprintf("high_coupling (%d deps, %d dependents)", ev.TransitiveDependencies, ev.DependentsCount))
+	}
+	ev.ModularityDeficit = ev.GodFilesCount > 0 || ev.GodFuncsCount > 0 || ev.HasModelHardcoding || ev.HighCoupling
 
 	return ev
 }

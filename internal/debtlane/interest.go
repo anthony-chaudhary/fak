@@ -3,6 +3,7 @@ package debtlane
 import (
 	"fmt"
 	"math"
+	"strings"
 )
 
 // DefaultBoundsAndLimits returns the standard bounds, target ceiling, and pacing for a criticality tier.
@@ -103,6 +104,24 @@ func CalculateInterest(c Criticality, bounds BoundsAndLimits, e Evidence, gap fl
 	if e.ExcessComments {
 		rate += 0.05
 		drivers = append(drivers, fmt.Sprintf("excess_comment_bloat (%.1f%% comments)", e.CommentRatio*100))
+	}
+
+	// Modularity deficit penalty: god-constructs or model coupling carries compounding interest.
+	if e.ModularityDeficit {
+		surcharge := 0.08
+		if (e.GodFilesCount > 0 || e.GodFuncsCount > 0) && e.HasModelHardcoding {
+			surcharge = 0.10
+		}
+		rate += surcharge
+		var summary string
+		if len(e.ModularityIssues) == 0 {
+			summary = "modularity_deficit"
+		} else if len(e.ModularityIssues) <= 5 {
+			summary = strings.Join(e.ModularityIssues, ", ")
+		} else {
+			summary = strings.Join(e.ModularityIssues[:5], ", ") + fmt.Sprintf(" (+%d more)", len(e.ModularityIssues)-5)
+		}
+		drivers = append(drivers, fmt.Sprintf("modularity_surcharge (+%.2f: %s)", surcharge, summary))
 	}
 
 	// Pacing urgency adjustments.

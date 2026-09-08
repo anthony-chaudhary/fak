@@ -102,9 +102,18 @@ type Evidence struct {
 	Documented             bool    `json:"documented"`
 	ExportedSymbols        int     `json:"exported_symbols"`
 	DocumentedExports      int     `json:"documented_exports"`
-	DependentsCount        int     `json:"dependents_count"` // Inbound internal imports (blast radius).
-	TransitiveDependencies int     `json:"transitive_dependencies"`
-	HasContractComments    bool    `json:"has_contract_comments,omitempty"` // Deprecated: formulaic comments do not award maturity points.
+	DependentsCount        int      `json:"dependents_count"` // Inbound internal imports (blast radius).
+	TransitiveDependencies int      `json:"transitive_dependencies"`
+	HasContractComments    bool     `json:"has_contract_comments,omitempty"` // Deprecated: formulaic comments do not award maturity points.
+	GodFilesCount          int      `json:"god_files_count,omitempty"`
+	GodFuncsCount          int      `json:"god_funcs_count,omitempty"`
+	MaxFileLines           int      `json:"max_file_lines,omitempty"`
+	MaxFuncLines           int      `json:"max_func_lines,omitempty"`
+	ModelHardcodingCount   int      `json:"model_hardcoding_count,omitempty"`
+	HasModelHardcoding     bool     `json:"has_model_hardcoding,omitempty"`
+	HighCoupling           bool     `json:"high_coupling,omitempty"`
+	ModularityDeficit      bool     `json:"modularity_deficit,omitempty"`
+	ModularityIssues       []string `json:"modularity_issues,omitempty"`
 }
 
 // DebtLane represents a dedicated maturity debt lane for one single unit of work.

@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1593,3 +1594,312 @@ func TestRenderCrossIndexOutput(t *testing.T) {
 		t.Errorf("expected dos trees in cross-index output: %s", out)
 	}
 }
+
+func TestInspectUnitEvidenceGodFilesAndFuncs(t *testing.T) {
+	tmp := t.TempDir()
+	unitDir := filepath.Join(tmp, "internal", "heavyunit")
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Create a god-file with >1500 lines containing a god-function with >200 lines
+	var b strings.Builder
+	b.WriteString("package heavyunit\n\n")
+	b.WriteString("// HugeFunction is a god-function with >200 lines\n")
+	b.WriteString("func HugeFunction() int {\n")
+	b.WriteString("\tx := 0\n")
+	for i := 0; i < 210; i++ {
+		b.WriteString("\tx++\n")
+	}
+	b.WriteString("\treturn x\n}\n\n")
+	for i := 0; i < 1350; i++ {
+		b.WriteString("var _ = 1\n")
+	}
+
+	filePath := filepath.Join(unitDir, "godfile.go")
+	if err := os.WriteFile(filePath, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ev := inspectUnitEvidence(unitDir, "heavyunit", nil, nil, nil, nil)
+	if ev.GodFilesCount != 1 {
+		t.Errorf("expected GodFilesCount == 1, got %d", ev.GodFilesCount)
+	}
+	if ev.MaxFileLines <= 1500 {
+		t.Errorf("expected MaxFileLines > 1500, got %d", ev.MaxFileLines)
+	}
+	if ev.GodFuncsCount != 1 {
+		t.Errorf("expected GodFuncsCount == 1, got %d", ev.GodFuncsCount)
+	}
+	if ev.MaxFuncLines <= 200 {
+		t.Errorf("expected MaxFuncLines > 200, got %d", ev.MaxFuncLines)
+	}
+	if !ev.ModularityDeficit {
+		t.Errorf("expected ModularityDeficit == true")
+	}
+
+	issues := strings.Join(ev.ModularityIssues, "; ")
+	if !strings.Contains(issues, "god_file") || !strings.Contains(issues, "godfile.go") {
+		t.Errorf("expected ModularityIssues to mention god_file: %s", issues)
+	}
+	if !strings.Contains(issues, "god_func") || !strings.Contains(issues, "HugeFunction") {
+		t.Errorf("expected ModularityIssues to mention god_func: %s", issues)
+	}
+}
+
+func TestModelHardcodingDetection(t *testing.T) {
+	// Verify isModelExemptPackage helper
+	if !isModelExemptPackage("model") || !isModelExemptPackage("modelengine") || !isModelExemptPackage("hfhub") || !isModelExemptPackage("bitnetruntime") {
+		t.Errorf("expected model, modelengine, hfhub, bitnetruntime to be exempt")
+	}
+	if isModelExemptPackage("gateway") || isModelExemptPackage("agent") || isModelExemptPackage("debtlane") {
+		t.Errorf("gateway, agent, debtlane should NOT be model exempt")
+	}
+
+	tmp := t.TempDir()
+
+	// Non-exempt package with model-specific hardcoding
+	nonExemptDir := filepath.Join(tmp, "internal", "customagent")
+	if err := os.MkdirAll(nonExemptDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	codeWithCoupling := `package customagent
+
+const defaultModel = "qwen-2.5-7b"
+var deepseekWeights = 1
+
+type LlamaConfig struct {
+	Model string
+}
+`
+	if err := os.WriteFile(filepath.Join(nonExemptDir, "agent.go"), []byte(codeWithCoupling), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	evNonExempt := inspectUnitEvidence(nonExemptDir, "customagent", nil, nil, nil, nil)
+	if evNonExempt.ModelHardcodingCount < 3 {
+		t.Errorf("expected ModelHardcodingCount >= 3, got %d", evNonExempt.ModelHardcodingCount)
+	}
+	if !evNonExempt.HasModelHardcoding {
+		t.Errorf("expected HasModelHardcoding == true")
+	}
+	if !evNonExempt.ModularityDeficit {
+		t.Errorf("expected ModularityDeficit == true")
+	}
+
+	// Exempt package with same model names must NOT be flagged
+	exemptDir := filepath.Join(tmp, "internal", "modelengine")
+	if err := os.MkdirAll(exemptDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(exemptDir, "engine.go"), []byte(codeWithCoupling), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	evExempt := inspectUnitEvidence(exemptDir, "modelengine", nil, nil, nil, nil)
+	if evExempt.ModelHardcodingCount != 0 {
+		t.Errorf("expected ModelHardcodingCount == 0 for exempt model lane, got %d", evExempt.ModelHardcodingCount)
+	}
+	if evExempt.HasModelHardcoding {
+		t.Errorf("expected HasModelHardcoding == false for exempt model lane")
+	}
+}
+
+func TestModularityInterestSurcharge(t *testing.T) {
+	bounds := DefaultBoundsAndLimits(CriticalityEnabling)
+
+	// Clean baseline: enabling baseRate = 0.08
+	cleanEv := Evidence{HasCode: true, HasTests: true}
+	cleanInt := CalculateInterest(CriticalityEnabling, bounds, cleanEv, 3.0)
+
+	// Base modularity deficit (surcharge = 0.08)
+	baseModEv := cleanEv
+	baseModEv.ModularityDeficit = true
+	baseModEv.GodFilesCount = 1
+	baseModEv.ModularityIssues = []string{"god_file (big.go: 1600 lines)"}
+	baseModInt := CalculateInterest(CriticalityEnabling, bounds, baseModEv, 3.0)
+
+	diffBase := math.Round((baseModInt.Rate-cleanInt.Rate)*100) / 100
+	if diffBase != 0.08 {
+		t.Errorf("expected rate difference of 0.08, got %.2f (clean=%.2f, mod=%.2f)", diffBase, cleanInt.Rate, baseModInt.Rate)
+	}
+	driversBase := strings.Join(baseModInt.Drivers, "; ")
+	if !strings.Contains(driversBase, "modularity_surcharge (+0.08:") {
+		t.Errorf("expected driver to contain modularity_surcharge (+0.08:), got: %s", driversBase)
+	}
+
+	// Compound modularity deficit: god construct AND model hardcoding (surcharge = 0.10)
+	compoundEv := baseModEv
+	compoundEv.HasModelHardcoding = true
+	compoundEv.ModelHardcodingCount = 2
+	compoundEv.ModularityIssues = append(compoundEv.ModularityIssues, "model_hardcoding (big.go: qwen)")
+	compoundInt := CalculateInterest(CriticalityEnabling, bounds, compoundEv, 3.0)
+
+	diffCompound := math.Round((compoundInt.Rate-cleanInt.Rate)*100) / 100
+	if diffCompound != 0.10 {
+		t.Errorf("expected rate difference of 0.10 for compound deficit, got %.2f (clean=%.2f, compound=%.2f)", diffCompound, cleanInt.Rate, compoundInt.Rate)
+	}
+	driversCompound := strings.Join(compoundInt.Drivers, "; ")
+	if !strings.Contains(driversCompound, "modularity_surcharge (+0.10:") {
+		t.Errorf("expected driver to contain modularity_surcharge (+0.10:), got: %s", driversCompound)
+	}
+}
+
+func TestModularityMaturityRungGating(t *testing.T) {
+	// A fully verified, integrated, dogfooded, benchmarked module
+	clean := Evidence{
+		HasCode:         true,
+		CodeLines:       200,
+		HasTests:        true,
+		TestFilesCount:  2,
+		Integrated:      true,
+		Dogfooded:       true,
+		Benchmarked:     true,
+		ExcessComments:  false,
+		DependentsCount: 2,
+	}
+
+	cleanScore, cleanRung := EvaluateMaturityCurve(clean)
+	if cleanRung != "production_grade" {
+		t.Fatalf("expected clean unit to reach production_grade, got %q (score %.1f)", cleanRung, cleanScore)
+	}
+
+	// With modularity deficit: production grade bonus (1.0) denied and 0.5 score deducted
+	deficit := clean
+	deficit.ModularityDeficit = true
+	deficit.GodFilesCount = 1
+	deficit.HasModelHardcoding = true
+	deficit.ModelHardcodingCount = 3
+
+	deficitScore, deficitRung := EvaluateMaturityCurve(deficit)
+	if deficitRung == "production_grade" || deficitRung == "hardened" {
+		t.Errorf("modularity deficit must NOT allow production_grade or hardened rungs, got %q", deficitRung)
+	}
+	if deficitScore >= cleanScore {
+		t.Errorf("deficitScore (%.1f) should be significantly lower than cleanScore (%.1f)", deficitScore, cleanScore)
+	}
+
+	// Verify NextActionForGap
+	actionCompound := NextActionForGap("mycore", "internal/mycore", deficitScore, 10.0, deficit)
+	if !strings.Contains(actionCompound, "modularize mycore: decouple model-specific hardcoding") {
+		t.Errorf("expected actionable compound advice, got: %s", actionCompound)
+	}
+
+	onlyHardcoding := clean
+	onlyHardcoding.ModularityDeficit = true
+	onlyHardcoding.HasModelHardcoding = true
+	onlyHardcoding.ModelHardcodingCount = 2
+	actionHardcoding := NextActionForGap("mycore", "internal/mycore", deficitScore, 10.0, onlyHardcoding)
+	if !strings.Contains(actionHardcoding, "decouple mycore: remove model-specific hardcoding") {
+		t.Errorf("expected model hardcoding decoupling advice, got: %s", actionHardcoding)
+	}
+
+	onlyGodFile := clean
+	onlyGodFile.ModularityDeficit = true
+	onlyGodFile.GodFilesCount = 1
+	actionGodFile := NextActionForGap("mycore", "internal/mycore", deficitScore, 10.0, onlyGodFile)
+	if !strings.Contains(actionGodFile, "modularize mycore: split god-constructs") {
+		t.Errorf("expected god construct split advice, got: %s", actionGodFile)
+	}
+}
+
+func TestHealthEvaluationWithModularityDeficit(t *testing.T) {
+	// Core lane with modularity deficit must be marked HealthCritical
+	coreLane := DebtLane{
+		Lane:        "gateway",
+		Criticality: CriticalityCore,
+		Maturity:    8.0,
+		Evidence: Evidence{
+			HasCode:           true,
+			HasTests:          true,
+			TestFilesCount:    2,
+			Integrated:        true,
+			ModularityDeficit: true,
+			GodFilesCount:     1,
+		},
+		Interest: Interest{Band: InterestLow, Rate: 0.05},
+	}
+	coreHealth := EvaluateLaneHealth(coreLane)
+	if coreHealth.Status != HealthCritical {
+		t.Errorf("expected core lane with modularity deficit to be HealthCritical, got %q", coreHealth.Status)
+	}
+	foundDeficitIssue := false
+	for _, iss := range coreHealth.Issues {
+		if iss == "modularity_deficit" {
+			foundDeficitIssue = true
+			break
+		}
+	}
+	if !foundDeficitIssue {
+		t.Errorf("expected 'modularity_deficit' in health issues, got: %v", coreHealth.Issues)
+	}
+
+	// Enabling lane with low interest and modularity deficit is HealthDegraded
+	enablingLane := DebtLane{
+		Lane:        "worker",
+		Criticality: CriticalityEnabling,
+		Maturity:    6.0,
+		Evidence: Evidence{
+			HasCode:              true,
+			HasTests:             true,
+			TestFilesCount:       1,
+			Integrated:           true,
+			ModularityDeficit:    true,
+			HasModelHardcoding:   true,
+			ModelHardcodingCount: 1,
+		},
+		Interest: Interest{Band: InterestLow, Rate: 0.05},
+	}
+	enablingHealth := EvaluateLaneHealth(enablingLane)
+	if enablingHealth.Status != HealthDegraded {
+		t.Errorf("expected enabling lane with modularity deficit to be HealthDegraded, got %q", enablingHealth.Status)
+	}
+	foundModelIssue := false
+	for _, iss := range enablingHealth.Issues {
+		if iss == "model_hardcoding" {
+			foundModelIssue = true
+			break
+		}
+	}
+	if !foundModelIssue {
+		t.Errorf("expected 'model_hardcoding' in health issues, got: %v", enablingHealth.Issues)
+	}
+
+	// Clean enabling lane counterpart has higher health score
+	cleanEnabling := enablingLane
+	cleanEnabling.Evidence.ModularityDeficit = false
+	cleanEnabling.Evidence.HasModelHardcoding = false
+	cleanHealth := EvaluateLaneHealth(cleanEnabling)
+	if cleanHealth.Score <= enablingHealth.Score {
+		t.Errorf("clean score (%.2f) should be higher than modularity deficit score (%.2f)", cleanHealth.Score, enablingHealth.Score)
+	}
+}
+
+func TestHighCouplingAndQueryMatch(t *testing.T) {
+	ev := Evidence{
+		TransitiveDependencies: 9,
+		DependentsCount:        5,
+	}
+	l := DebtLane{
+		Lane:        "coupled_lane",
+		Criticality: CriticalityEnabling,
+		Evidence:    ev,
+	}
+	recomputeLane(&l)
+	if !l.Evidence.HighCoupling {
+		t.Errorf("expected HighCoupling == true when TransitiveDependencies > 8")
+	}
+	if !l.Evidence.ModularityDeficit {
+		t.Errorf("expected ModularityDeficit == true when HighCoupling")
+	}
+
+	// Test matchesQuery with ModularityIssues
+	l.Evidence.ModularityIssues = []string{"god_file (huge.go: 1800 lines)", "model_hardcoding (custom.go: qwen)"}
+	if !matchesQuery(l, "huge.go") {
+		t.Errorf("matchesQuery should match file in ModularityIssues")
+	}
+	if !matchesQuery(l, "qwen") {
+		t.Errorf("matchesQuery should match keyword in ModularityIssues")
+	}
+}
+

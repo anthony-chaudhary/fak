@@ -62,12 +62,17 @@ func EvaluateMaturityCurve(e Evidence) (score float64, rung string) {
 	}
 
 	// Production grade bonus: clean comprehensive surface.
-	if e.Integrated && e.Dogfooded && e.Benchmarked && e.HasTests && !e.ExcessComments {
+	if e.Integrated && e.Dogfooded && e.Benchmarked && e.HasTests && !e.ExcessComments && !e.ModularityDeficit {
 		score += 1.0
 	}
 
 	// Excess comments penalty: formulaic noise or comment bloat is bad debt.
 	if e.ExcessComments {
+		score -= 0.5
+	}
+
+	// Modularity deficit penalty: god-constructs or model coupling degrades maturity.
+	if e.ModularityDeficit {
 		score -= 0.5
 	}
 
@@ -86,9 +91,9 @@ func EvaluateMaturityCurve(e Evidence) (score float64, rung string) {
 	score = math.Round(score*10) / 10
 
 	switch {
-	case score >= 9.5 && e.Integrated && e.Dogfooded && e.Benchmarked && e.HasTests && !e.ExcessComments:
+	case score >= 9.5 && e.Integrated && e.Dogfooded && e.Benchmarked && e.HasTests && !e.ExcessComments && !e.ModularityDeficit:
 		rung = "production_grade"
-	case score >= 8.5 && e.Integrated && e.Dogfooded && e.Benchmarked && !e.ExcessComments:
+	case score >= 8.5 && e.Integrated && e.Dogfooded && e.Benchmarked && !e.ExcessComments && !e.ModularityDeficit:
 		rung = "hardened"
 	case score >= 7.5 && e.Integrated && e.Dogfooded && e.Benchmarked:
 		rung = "benchmarked"
@@ -125,6 +130,17 @@ func NextActionForGap(lane, unit string, score, target float64, e Evidence) stri
 		return fmt.Sprintf("benchmark %s: add substantive Benchmark* functions measuring production operations with b.N loops, or register authoritative benchmark", lane)
 	case e.ExcessComments:
 		return fmt.Sprintf("clean %s: prune excess comment bloat and formulaic noise (%.1f%% comment ratio); make code self-documenting and verify invariants in tests", lane, e.CommentRatio*100)
+	case e.ModularityDeficit:
+		if e.HasModelHardcoding && (e.GodFilesCount > 0 || e.GodFuncsCount > 0) {
+			return fmt.Sprintf("modularize %s: decouple model-specific hardcoding (%d matches) and split god-constructs (%d god-files >1500 lines, %d god-funcs >200 lines)", lane, e.ModelHardcodingCount, e.GodFilesCount, e.GodFuncsCount)
+		} else if e.HasModelHardcoding {
+			return fmt.Sprintf("decouple %s: remove model-specific hardcoding (%d occurrences); route via model catalog or provider abstraction", lane, e.ModelHardcodingCount)
+		} else if e.GodFilesCount > 0 || e.GodFuncsCount > 0 {
+			return fmt.Sprintf("modularize %s: split god-constructs (%d god-files >1500 lines, %d god-funcs >200 lines) into focused single-responsibility units", lane, e.GodFilesCount, e.GodFuncsCount)
+		} else if e.HighCoupling {
+			return fmt.Sprintf("decouple %s: reduce high dependency coupling (%d transitive dependencies, %d dependents)", lane, e.TransitiveDependencies, e.DependentsCount)
+		}
+		return fmt.Sprintf("modularize %s: resolve modularity deficit, split god-constructs, and decouple model-specific dependencies", lane)
 	default:
 		return fmt.Sprintf("advance %s: complete production contracts and verified defaults to reach %.1f", lane, target)
 	}
