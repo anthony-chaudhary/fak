@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -148,6 +149,12 @@ func init() {
 		maxStorageBufferRange:   vulkanCapInt64(C.fvk_max_storage_buffer_range()),
 		maxMemoryAllocationSize: vulkanCapInt64(C.fvk_max_memory_allocation_size()),
 	}
+	spvRMSNorm := filepath.Join(spirv, "rmsnorm_q4k_matmul2.spv")
+	spvSwiGLU := filepath.Join(spirv, "swiglu_q4k_matmul_add.spv")
+	_, errR := os.Stat(spvRMSNorm)
+	_, errS := os.Stat(spvSwiGLU)
+	vulkanDev.haveQ4KFusedRMSNormMatMul2 = errR == nil
+	vulkanDev.haveQ4KFusedSwiGLUMatMulAdd = errS == nil
 	Register(vulkanDev)
 }
 
@@ -156,6 +163,63 @@ func (v *vulkanBackend) configureVulkanQ4K(profile, stage bool) {
 	defer vulkanMu.Unlock()
 	v.q4kProfile = profile
 	v.q4kStage = stage
+}
+
+// selectQ4KFusionLocked evaluates candidate selection for fused Q4_K dense-MLP dispatches.
+// Candidate selection requires P=1, both optional pipelines, and explicit opt-in;
+// unset/false/unknown/P>1 selects unchanged Q4_K composition, and an explicit scalar override wins.
+func (v *vulkanBackend) selectQ4KFusionLocked(P int) bool {
+	if v.forceScalarQ4K {
+		return false
+	}
+	if P != 1 {
+		return false
+	}
+	if !v.haveQ4KFusedRMSNormMatMul2 || !v.haveQ4KFusedSwiGLUMatMulAdd {
+		return false
+	}
+	optIn := os.Getenv("FAK_VULKAN_Q4K_FUSION")
+	if optIn == "" {
+		optIn = os.Getenv("FAK_VULKAN_Q4K_ARM")
+	}
+	optIn = strings.TrimSpace(strings.ToLower(optIn))
+	if optIn == "scalar" || optIn == "0" || optIn == "false" || optIn == "off" || optIn == "no" || optIn == "" {
+		return false
+	}
+	if optIn == "candidate" || optIn == "fusion" || optIn == "fused" || optIn == "1" || optIn == "true" || optIn == "on" || optIn == "yes" {
+		return true
+	}
+	// Unset/false/unknown selects unchanged Q4_K composition.
+	return false
+}
+
+func (v *vulkanBackend) ConfigureQ4KFusion(rmsnorm2, swigluAdd, forceScalar bool) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	v.haveQ4KFusedRMSNormMatMul2 = rmsnorm2
+	v.haveQ4KFusedSwiGLUMatMulAdd = swigluAdd
+	v.forceScalarQ4K = forceScalar
+}
+
+func (v *vulkanBackend) Q4KFusionStatus() (haveRMSNorm2, haveSwiGLUAdd, enabled bool) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return v.haveQ4KFusedRMSNormMatMul2, v.haveQ4KFusedSwiGLUMatMulAdd, v.selectQ4KFusionLocked(1)
+}
+
+func (v *vulkanBackend) VulkanDebugQ4KFusionCalls() (fusedRMSNorm, composedRMSNorm, fusedSwiGLU, composedSwiGLU int64) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return v.q4kFusionRMSNormCalls, v.q4kComposedRMSNormCalls, v.q4kFusionSwiGLUCalls, v.q4kComposedSwiGLUCalls
+}
+
+func (v *vulkanBackend) VulkanDebugResetQ4KFusionProfile() {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	v.q4kFusionRMSNormCalls = 0
+	v.q4kComposedRMSNormCalls = 0
+	v.q4kFusionSwiGLUCalls = 0
+	v.q4kComposedSwiGLUCalls = 0
 }
 
 type vulkanGDNConfigurer interface {
@@ -246,31 +310,38 @@ type vulkanBackend struct {
 	// effective STORAGE buffer ceiling: min(maxStorageBufferRange, maxMemoryAllocationSize)
 	// when both are known. It does not solve chunking, but it turns a raw driver allocation
 	// failure into a deterministic refusal that names the over-cap buffer (#362).
-	haveMemoryBudget          bool
-	totalMem                  int64
-	maxBufferBytes            int64
-	maxStorageBufferRange     int64
-	maxMemoryAllocationSize   int64
-	q4kProfile                bool
-	q4kDeviceCalls            int64
-	q4kDevicePackedBytes      int64
-	q4kHostVisibleCalls       int64
-	q4kHostVisiblePackedBytes int64
-	q4kStage                  bool
-	q4kStagePtr               unsafe.Pointer
-	q4kStageBytes             int64
-	q4kStagedCalls            int64
-	q4kStagedBytes            int64
-	q4kStageFallbacks         int64
-	homes                     map[vulkanQ4KHomeKey]vulkanQ4KHome
-	homeHits                  int64
-	homeMisses                int64
-	homeBypasses              int64
-	homeBytes                 int64
-	homeCopied                int64
-	disableVectorGDN          bool
-	vectorGDNCalls            int64
-	scalarGDNCalls            int64
+	haveMemoryBudget            bool
+	totalMem                    int64
+	maxBufferBytes              int64
+	maxStorageBufferRange       int64
+	maxMemoryAllocationSize     int64
+	q4kProfile                  bool
+	q4kDeviceCalls              int64
+	q4kDevicePackedBytes        int64
+	q4kHostVisibleCalls         int64
+	q4kHostVisiblePackedBytes   int64
+	q4kStage                    bool
+	q4kStagePtr                 unsafe.Pointer
+	q4kStageBytes               int64
+	q4kStagedCalls              int64
+	q4kStagedBytes              int64
+	q4kStageFallbacks           int64
+	homes                       map[vulkanQ4KHomeKey]vulkanQ4KHome
+	homeHits                    int64
+	homeMisses                  int64
+	homeBypasses                int64
+	homeBytes                   int64
+	homeCopied                  int64
+	disableVectorGDN            bool
+	vectorGDNCalls              int64
+	scalarGDNCalls              int64
+	haveQ4KFusedRMSNormMatMul2  bool
+	haveQ4KFusedSwiGLUMatMulAdd bool
+	forceScalarQ4K              bool
+	q4kFusionRMSNormCalls       int64
+	q4kFusionSwiGLUCalls        int64
+	q4kComposedRMSNormCalls     int64
+	q4kComposedSwiGLUCalls      int64
 }
 
 var _ TensorCloner = (*vulkanBackend)(nil)
@@ -378,44 +449,25 @@ func VulkanQ4KDispatchGrid(outDim, tokens int, coopMatActive bool) (gridX, gridY
 	return gridX, 1, 1
 }
 
-// Q8_0 cooperative matrix 2D tile geometry constants on gfx1151 / RDNA 3.5.
-const (
-	VulkanQ8TileM = 32 // Token tile dimension
-	VulkanQ8TileN = 32 // Output channel / row tile dimension
-	VulkanQ8TileK = 32 // Reduction K dimension (Q8_0 BLOCK=32)
-)
-
 // Q8MatMul2DDispatchGrid computes 2D workgroup dispatch grid dimensions (GridX, GridY, GridZ)
 // for Q8_0 matrix multiplication. When cooperative matrix is active and tokens > 1 (prefill),
 // it returns a 2D block-tiled grid: (ceil(outDim/TileN), ceil(tokens/TileM), 1).
 // When cooperative matrix is unsupported or tokens == 1, it falls back to 1D scalar decode dispatch:
 // (ceil(outDim/8), tokens, 1).
 func (v *vulkanBackend) Q8MatMul2DDispatchGrid(outDim, tokens int) (gridX, gridY, gridZ int) {
-	return VulkanQ8DispatchGrid(outDim, tokens, v.HasCooperativeMatrix() || v.haveCoopmat)
+	return VulkanQ8DispatchGrid(outDim, tokens, v.q8CooperativeMatrixActive(tokens))
+}
+
+// q8CooperativeMatrixActive binds Q8 2D routing to the capability reported by
+// the initialized native backend. Device-name and environment heuristics cannot
+// prove that the native cooperative-matrix pipeline is available.
+func (v *vulkanBackend) q8CooperativeMatrixActive(tokens int) bool {
+	return v != nil && vulkanQ8CooperativeMatrixActive(v.haveCoopmat, tokens)
 }
 
 // VulkanQ8DispatchGrid calculates workgroup grid dimensions for Q8_0 matmul under cooperative matrix or scalar fallback.
 func VulkanQ8DispatchGrid(outDim, tokens int, coopMatActive bool) (gridX, gridY, gridZ int) {
-	if outDim <= 0 || tokens <= 0 {
-		return 1, 1, 1
-	}
-	if coopMatActive && tokens > 1 {
-		gridX = (outDim + VulkanQ8TileN - 1) / VulkanQ8TileN
-		gridY = (tokens + VulkanQ8TileM - 1) / VulkanQ8TileM
-		if gridX < 1 {
-			gridX = 1
-		}
-		if gridY < 1 {
-			gridY = 1
-		}
-		return gridX, gridY, 1
-	}
-	// Fallback scalar decode dispatch grid (8 outputs per group)
-	gridX = (outDim + 7) / 8
-	if gridX < 1 {
-		gridX = 1
-	}
-	return gridX, tokens, 1
+	return vulkanQ8DispatchGrid(outDim, tokens, coopMatActive)
 }
 
 // DeviceMemory reports the Vulkan device-local heap total and, when VK_EXT_memory_budget is
@@ -1124,7 +1176,7 @@ func (v *vulkanBackend) q8MatMulLocked(w, x, y Tensor, out, in, P int) {
 		v.q8MatMulChunksLocked(wb, x, y, out, in, P)
 		return
 	}
-	if (v.haveCoopmat || v.HasCooperativeMatrix()) && P > 1 {
+	if v.q8CooperativeMatrixActive(P) {
 		gridX, gridY, _ := v.Q8MatMul2DDispatchGrid(out, P)
 		C.fvk_q8_matmul_2d_f32(wb.ptr, wb.scalePtr, v.vp(x), v.vp(y),
 			C.int(out), C.int(in), C.int(P), C.uint(gridX), C.uint(gridY))
@@ -1141,7 +1193,7 @@ func (v *vulkanBackend) q8MatMulChunksLocked(wb *vulkanBuf, x, y Tensor, out, in
 			tmpShape = []int{chunk.rows}
 		}
 		_, tmpBuf := v.devTr(tmpShape, F32)
-		if (v.haveCoopmat || v.HasCooperativeMatrix()) && P > 1 {
+		if v.q8CooperativeMatrixActive(P) {
 			gridX, gridY, _ := v.Q8MatMul2DDispatchGrid(chunk.rows, P)
 			C.fvk_q8_matmul_2d_f32(chunk.ptr, chunk.scalePtr, v.vp(x), tmpBuf.ptr,
 				C.int(chunk.rows), C.int(in), C.int(P), C.uint(gridX), C.uint(gridY))
@@ -1437,6 +1489,14 @@ func (v *vulkanBackend) RMSNormMatMul2(w0, w1, x, normWeight Tensor, eps float32
 		if w0.Dtype != Q4_K || w1.Dtype != Q4_K {
 			panic("compute: vulkan RMSNormMatMul2 requires either all F32, all Q8_0, or all Q4_K weights")
 		}
+		if v.selectQ4KFusionLocked(P) {
+			v.q4kFusionRMSNormCalls++
+			C.fvk_rmsnorm_q4k_matmul2_f32(v.vp(w0), v.vp(w1), v.vp(x), v.vp(normWeight), v.vp(y0), v.vp(y1),
+				C.int(out0), C.int(out1), C.int(in), C.int(P), C.float(eps))
+			return y0, y1
+		}
+		// Unchanged Q4_K composition: RMSNorm + 2 Q4_K GEMVs (three dispatches)
+		v.q4kComposedRMSNormCalls++
 		xn, _ := v.devTr([]int{in}, F32)
 		C.fvk_rmsnorm_f32(v.vp(x), v.vp(normWeight), v.vp(xn), C.int(P), C.int(in), C.float(eps))
 		v.q4kMatMulLocked(w0, xn, y0, out0, in, P)
@@ -1570,6 +1630,15 @@ func (v *vulkanBackend) SwiGLUMatMulAddInPlace(dst, w, gate, up Tensor) {
 	case F32:
 		C.fvk_swiglu_matmul_add_f32(v.vp(w), v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))
 	case Q4_K, Q2_K:
+		if w.Dtype == Q4_K && v.selectQ4KFusionLocked(P) {
+			v.q4kFusionSwiGLUCalls++
+			C.fvk_swiglu_q4k_matmul_add_f32(v.vp(w), v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))
+			return
+		}
+		if w.Dtype == Q4_K {
+			// Unchanged Q4_K composition: SwiGLU + Q4_K GEMV + Add (three dispatches)
+			v.q4kComposedSwiGLUCalls++
+		}
 		sw, _ := v.devTr(append([]int(nil), gate.Shape...), F32)
 		C.fvk_swiglu_f32(v.vp(gate), v.vp(up), v.vp(sw), C.int(gate.Numel()))
 		projShape := []int{P, out}

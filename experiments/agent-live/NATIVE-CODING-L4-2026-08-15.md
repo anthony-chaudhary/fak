@@ -6,7 +6,7 @@ Issues: #1380, #6910, runtime repair #6917.
 
 - Committed source: `internal/agent@r298+g111a069af8` (derived by `fak version modules --json`).
 - Commit: `111a069af88e` (`fix(agent): prevent unsupported CUDA prefix admission panic`).
-- CUDA image: `us-central1-docker.pkg.dev/dos-rlvr-admit-20260608/fak/fak-gpu@sha256:8c61355aff8e32b5545d0d5a098aade703369da461aaab6d1792aa099e15260d`.
+- CUDA image: `us-central1-docker.pkg.dev/example-gcp-project/fak/fak-gpu@sha256:8c61355aff8e32b5545d0d5a098aade703369da461aaab6d1792aa099e15260d`.
 - Builder: Cloud Build, `Dockerfile.cuda`, `CUDA_ARCH=sm_89`.
 - Compute: sanctioned GCP `fak-realmodel`, NVIDIA L4, CUDA backend.
 - Serve flags included `--backend cuda --native --native-code-workspace /workspace`; `/workspace/hello.go` was a bounded fixture.
@@ -74,7 +74,7 @@ The final missing #1380 envelope was run from the public `/v1/messages` seam wit
 
 ```text
 Cloud Build: b656afd1-83ec-4846-a475-3f2c792175e5
-Image: us-central1-docker.pkg.dev/dos-rlvr-admit-20260608/fak/fak-gpu@sha256:54203be53b6b3058f996a56611790945b03cf8122b89518d06553af7313c8ff3
+Image: us-central1-docker.pkg.dev/example-gcp-project/fak/fak-gpu@sha256:54203be53b6b3058f996a56611790945b03cf8122b89518d06553af7313c8ff3
 Modules: internal/abi@r33+gaedb79407d; internal/agent@r301+gaedb79407d
 Trace: spec-live-rollback-1
 ```

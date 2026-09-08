@@ -23,6 +23,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"runtime"
 	"runtime/debug"
 	"strings"
 
@@ -57,22 +58,45 @@ func (p ExecutableProvenance) Revision() string { return p.revision }
 // Dirty reports the embedded vcs.modified tree state.
 func (p ExecutableProvenance) Dirty() bool { return p.dirty }
 
+// Modified reports the embedded vcs.modified tree state.
+func (p ExecutableProvenance) Modified() bool { return p.dirty }
+
 // BinarySHA256 returns the lowercase SHA-256 of the opened executable bytes.
 func (p ExecutableProvenance) BinarySHA256() string { return p.binarySHA256 }
 
 // BinaryBytes returns the observed executable byte count.
 func (p ExecutableProvenance) BinaryBytes() int64 { return p.binaryBytes }
 
+// IsZero reports whether p is the zero observation.
+func (p ExecutableProvenance) IsZero() bool {
+	return p.revision == "" && !p.dirty && p.binarySHA256 == "" && p.binaryBytes == 0
+}
+
 // ObserveExecutableProvenance derives strict provenance for the running
 // executable. It accepts no identity arguments, so a benchmark caller cannot
-// relabel the source revision, tree state, or binary digest. Any missing,
-// malformed, ambiguous, or unstable observation returns a zero value.
+// relabel the source revision, tree state, or binary digest. It opens
+// /proc/self/exe directly on Linux to bind the mapped running image even if
+// the launch pathname is replaced concurrently, and fails closed where no
+// equivalent mapped-image primitive is implemented. Any missing, malformed,
+// ambiguous, or unstable observation returns a zero value.
 func ObserveExecutableProvenance() (ExecutableProvenance, error) {
 	return observeExecutableProvenance(
 		debug.ReadBuildInfo,
-		os.Executable,
+		runningExecutablePath,
 		func(path string) (provenanceFile, error) { return os.Open(path) },
 	)
+}
+
+// CurrentExecutableProvenance is an alias for ObserveExecutableProvenance.
+func CurrentExecutableProvenance() (ExecutableProvenance, error) {
+	return ObserveExecutableProvenance()
+}
+
+func runningExecutablePath() (string, error) {
+	if runtime.GOOS == "linux" {
+		return "/proc/self/exe", nil
+	}
+	return "", fmt.Errorf("binstamp: mapped executable image observation unavailable on %s", runtime.GOOS)
 }
 
 type provenanceFile interface {

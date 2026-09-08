@@ -109,7 +109,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q2K_MATMUL, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -121,10 +121,12 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
         return g_dp.otherMatmul;
     case K_RMSNORM: case K_RMSNORM_MATMUL: case K_RMSNORM_MATMUL2: case K_RMSNORM_MATMUL3:
     case K_RMSNORM_MATMUL_ARGMAX_BLOCKS: case K_RMSNORM_Q8_MATMUL2: case K_RMSNORM_Q8_MATMUL3:
+    case K_RMSNORM_Q4K_MATMUL2:
         return g_dp.otherNorm;
     case K_ROPE: case K_QWEN35_PARTIAL_ROPE_PANEL:
         return g_dp.otherRope;
     case K_SWIGLU: case K_SWIGLU_MATMUL_ADD: case K_SWIGLU_Q8_MATMUL_ADD: case K_SIGMOID_MUL:
+    case K_SWIGLU_Q4K_MATMUL_ADD:
         return g_dp.otherSwiGLU;
     case K_ADD: case K_ADD_BIAS:
         return g_dp.otherAdd;
@@ -739,6 +741,23 @@ inline Buffer* B(void* h)       { return (Buffer*)h; }
 // ---- C ABI ----------------------------------------------------------------------
 extern "C" {
 
+int fvk_device_identity(char* name, int namelen, uint32_t* vendor_id,
+                        uint32_t* device_id, uint32_t* driver_version,
+                        uint32_t* api_version) {
+    if (g_phys == VK_NULL_HANDLE) return 0;
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(g_phys, &props);
+    if (name && namelen > 0) {
+        strncpy(name, props.deviceName, namelen - 1);
+        name[namelen - 1] = 0;
+    }
+    if (vendor_id) *vendor_id = props.vendorID;
+    if (device_id) *device_id = props.deviceID;
+    if (driver_version) *driver_version = props.driverVersion;
+    if (api_version) *api_version = props.apiVersion;
+    return 1;
+}
+
 int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "fak";
@@ -1003,6 +1022,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
             g_have_q4k_wave32 = 0;
         }
     }
+    buildKernel(g_kern[K_RMSNORM_Q4K_MATMUL2], P("rmsnorm_q4k_matmul2.spv"), 6, 4 * sizeof(int) + sizeof(float));
+    buildKernel(g_kern[K_SWIGLU_Q4K_MATMUL_ADD], P("swiglu_q4k_matmul_add.spv"), 4, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_Q2K_MATMUL], P("q2k_matmul.spv"), 3, 3 * sizeof(int));
     if (!ok) return 8;
     // Q8 kernel is built only when the device advertised the int8/8-bit-storage features; its
@@ -1325,6 +1346,31 @@ void fvk_swiglu_q8_matmul_add_f32(const void* dWcodes, const void* dWscale,
     };
     uint32_t outGroups = ((uint32_t)out + 255u) / 256u;
     dispatch(g_kern[K_SWIGLU_Q8_MATMUL_ADD], bufs, &pc, sizeof(pc), (uint32_t)P * outGroups);
+}
+
+void fvk_rmsnorm_q4k_matmul2_f32(const void* dW0, const void* dW1,
+                                 const void* dX, const void* dNorm,
+                                 void* dY0, void* dY1,
+                                 int out0, int out1, int in, int P, float eps) {
+    struct { int out0, out1, inDim, P; float eps; } pc{out0, out1, in, P, eps};
+    Buffer* bufs[6] = {
+        B((void*)dW0), B((void*)dW1),
+        B((void*)dX), B((void*)dNorm),
+        B(dY0), B(dY1),
+    };
+    uint32_t totalOut = (uint32_t)(out0 + out1);
+    uint32_t outGroups = (totalOut + 255u) / 256u;
+    dispatch(g_kern[K_RMSNORM_Q4K_MATMUL2], bufs, &pc, sizeof(pc), (uint32_t)P * outGroups);
+}
+
+void fvk_swiglu_q4k_matmul_add_f32(const void* dW, const void* dG, const void* dU,
+                                   void* dD, int out, int in, int P) {
+    struct { int outDim, inDim, P; } pc{out, in, P};
+    Buffer* bufs[4] = {
+        B((void*)dW), B((void*)dG), B((void*)dU), B(dD),
+    };
+    uint32_t outGroups = ((uint32_t)out + 255u) / 256u;
+    dispatch(g_kern[K_SWIGLU_Q4K_MATMUL_ADD], bufs, &pc, sizeof(pc), (uint32_t)P * outGroups);
 }
 
 int fvk_matmul_argmax_f32(const void* dW, const void* dX, int out, int in) {

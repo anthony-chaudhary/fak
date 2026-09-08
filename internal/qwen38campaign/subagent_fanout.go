@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/rawdecode"
@@ -217,6 +218,7 @@ func (h *SubagentFanoutHarness) executePhysical() (SubagentFanoutReceipt, error)
 			ParityPassed:      trialRes.ParityPassed,
 			FallbackCount:     trialRes.FallbackCount,
 			FailureCount:      trialRes.FailureCount,
+			BackendExecution:  cloneBackendExecutionEvidence(trialRes.BackendExecution),
 		}
 	}
 
@@ -627,9 +629,9 @@ func CalculateStatisticalSummary(runs []RunMetric, threshold float64) (Statistic
 }
 
 // RawDecodePhysicalRunner adapts one explicit rawdecode request to the physical
-// fanout seam. It does not own source, binary, device, memory, fallback, or
-// hardware-counter observers, so its result intentionally remains incomplete
-// until a runner-owned provenance collector is attached.
+// fanout seam. Backend identity and counters come only from the backend-owned
+// rawdecode observation; source, binary, model inventory, and peak memory remain
+// unavailable until their independent observers are attached.
 type RawDecodePhysicalRunner struct {
 	Request rawdecode.Request
 	Execute func(context.Context, rawdecode.Request) (rawdecode.Execution, error)
@@ -691,18 +693,27 @@ func physicalTrialFromRawDecode(req PhysicalTrialRequest, execution rawdecode.Ex
 		}
 		output[i] = int32(token)
 	}
+	backendExecution, err := backendExecutionEvidence(run.BackendExecution, execution.Backend.Selected)
+	if err != nil {
+		return PhysicalTrialResult{}, err
+	}
+	if backendExecution.Fallbacks > uint64(math.MaxInt) {
+		return PhysicalTrialResult{}, errors.New("qwen38campaign: observed fallback count overflows int")
+	}
 
 	result := PhysicalTrialResult{
-		RunIndex:       req.RunIndex,
-		Concurrency:    req.Concurrency,
-		Scenario:       req.Scenario,
-		Backend:        execution.Backend.Selected,
-		ExecutionPath:  execution.Engine,
-		WallDurationMS: float64(wall.Nanoseconds()) / 1e6,
-		UsefulTokens:   len(output),
-		TokensPerSec:   float64(len(output)) / wall.Seconds(),
-		TTFTMS:         float64((run.SessionSetupDuration + run.PrefillDuration + run.FirstSampleDuration).Nanoseconds()) / 1e6,
-		CounterSource:  CountersUnavailable,
+		RunIndex:         req.RunIndex,
+		Concurrency:      req.Concurrency,
+		Scenario:         req.Scenario,
+		Backend:          execution.Backend.Selected,
+		ExecutionPath:    execution.Engine,
+		WallDurationMS:   float64(wall.Nanoseconds()) / 1e6,
+		UsefulTokens:     len(output),
+		TokensPerSec:     float64(len(output)) / wall.Seconds(),
+		TTFTMS:           float64((run.SessionSetupDuration + run.PrefillDuration + run.FirstSampleDuration).Nanoseconds()) / 1e6,
+		CounterSource:    CountersUnavailable,
+		FallbackCount:    int(backendExecution.Fallbacks),
+		BackendExecution: backendExecution,
 		PhasesMS: map[string]float64{
 			"session_setup": float64(run.SessionSetupDuration.Nanoseconds()) / 1e6,
 			"prefill":       float64(run.PrefillDuration.Nanoseconds()) / 1e6,
@@ -726,6 +737,59 @@ func physicalTrialFromRawDecode(req PhysicalTrialRequest, execution rawdecode.Ex
 	// Identity.Validate will keep this result non-creditable until source,
 	// archive, and binary observers are supplied by the trusted runner.
 	return result, nil
+}
+
+func backendExecutionEvidence(observed *compute.BackendExecutionObservation, selectedBackend string) (*BackendExecutionEvidence, error) {
+	if observed == nil {
+		return nil, errors.New("qwen38campaign: rawdecode backend execution observation is unavailable")
+	}
+	evidence := &BackendExecutionEvidence{
+		Backend:                 observed.Identity.Backend,
+		Device:                  observed.Identity.Device,
+		Driver:                  observed.Identity.Driver,
+		Runtime:                 observed.Identity.Runtime,
+		ComputeDispatches:       observed.Counters.ComputeDispatches,
+		Q4KMatmulDispatches:     observed.Counters.Q4KMatmulDispatches,
+		OtherDispatches:         observed.Counters.OtherDispatches,
+		DispatchSubmits:         observed.Counters.DispatchSubmits,
+		H2DBytes:                observed.Counters.H2DBytes,
+		D2HBytes:                observed.Counters.D2HBytes,
+		D2DCopies:               observed.Counters.D2DCopies,
+		Q4KStageCalls:           observed.Counters.Q4KStageCalls,
+		Q4KStageBytes:           observed.Counters.Q4KStageBytes,
+		Fallbacks:               observed.Counters.Fallbacks,
+		TensorHomeHits:          observed.Counters.TensorHomeHits,
+		TensorHomeAdmissions:    observed.Counters.TensorHomeAdmissions,
+		TensorHomeBypasses:      observed.Counters.TensorHomeBypasses,
+		TensorHomeCopiedBytes:   observed.Counters.TensorHomeCopiedBytes,
+		TensorHomeEntries:       observed.TensorHomeEntries,
+		TensorHomeResidentBytes: observed.TensorHomeResidentBytes,
+	}
+	if observed.DeviceMemoryObserved {
+		total, free := observed.DeviceMemoryTotalBytes, observed.DeviceMemoryFreeBytes
+		evidence.DeviceMemoryTotalBytes = &total
+		evidence.DeviceMemoryFreeBytes = &free
+	}
+	if err := evidence.Validate(selectedBackend); err != nil {
+		return nil, fmt.Errorf("qwen38campaign: invalid rawdecode backend execution observation: %w", err)
+	}
+	return evidence, nil
+}
+
+func cloneBackendExecutionEvidence(evidence *BackendExecutionEvidence) *BackendExecutionEvidence {
+	if evidence == nil {
+		return nil
+	}
+	clone := *evidence
+	if evidence.DeviceMemoryTotalBytes != nil {
+		total := *evidence.DeviceMemoryTotalBytes
+		clone.DeviceMemoryTotalBytes = &total
+	}
+	if evidence.DeviceMemoryFreeBytes != nil {
+		free := *evidence.DeviceMemoryFreeBytes
+		clone.DeviceMemoryFreeBytes = &free
+	}
+	return &clone
 }
 
 func observedTokenPacketSHA256(prompt []int, output []int32) string {

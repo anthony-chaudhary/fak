@@ -1,0 +1,83 @@
+#version 450
+
+// swiglu_q4k_matmul_add.comp — D[o] += (silu(G) * U) @ W[o]^T in ONE dispatch (P=1 decode).
+//
+// Eliminates intermediate SwiGLU activations and matmul projection tensors in VRAM,
+// evaluating the SwiGLU activation elementwise into workgroup shared memory (256 floats per
+// Q4_K super-block) and accumulating the Q4_K down-projection into D in place.
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer Wbuf { uint raw[]; };
+layout(std430, binding = 1) readonly buffer Gbuf { float G[]; };
+layout(std430, binding = 2) readonly buffer Ubuf { float U[]; };
+layout(std430, binding = 3) buffer Dbuf { float D[]; };
+
+layout(push_constant) uniform Push {
+    int outDim;
+    int inDim;
+    int P;
+} pc;
+
+shared float Xs[256];
+
+uint byteAt(uint off) {
+    uint w = raw[off >> 2];
+    return (w >> ((off & 3u) * 8u)) & 255u;
+}
+
+float halfAt(uint off) {
+    uint bits = byteAt(off) | (byteAt(off + 1u) << 8u);
+    return unpackHalf2x16(bits).x;
+}
+
+void scaleMin(uint base, int group, out uint sc, out uint mn) {
+    int j = group;
+    if (j < 4) {
+        sc = byteAt(base + uint(j)) & 63u;
+        mn = byteAt(base + uint(j + 4)) & 63u;
+    } else {
+        sc = (byteAt(base + uint(j + 4)) & 15u) | ((byteAt(base + uint(j - 4)) >> 6u) << 4u);
+        mn = (byteAt(base + uint(j + 4)) >> 4u) | ((byteAt(base + uint(j)) >> 6u) << 4u);
+    }
+}
+
+void main() {
+    if (pc.P != 1) return;
+    uint tid = gl_LocalInvocationID.x;
+    uint o = gl_GlobalInvocationID.x;
+    uint out_ = uint(pc.outDim);
+    uint in_ = uint(pc.inDim);
+    int blocks = int(in_ / 256u);
+    float sum = 0.0;
+
+    for (int sb = 0; sb < blocks; ++sb) {
+        uint idx = uint(sb * 256) + tid;
+        if (idx < in_) {
+            float g = G[idx];
+            Xs[tid] = (g / (1.0 + exp(-g))) * U[idx];
+        } else {
+            Xs[tid] = 0.0;
+        }
+        barrier();
+
+        if (o < out_) {
+            uint base = uint((o * uint(blocks) + uint(sb)) * 144u);
+            float d = halfAt(base);
+            float dm = halfAt(base + 2u);
+            for (int group = 0; group < 8; ++group) {
+                uint sc, mn; scaleMin(base + 4u, group, sc, mn);
+                for (int lane = 0; lane < 32; ++lane) {
+                    uint packed = byteAt(base + 16u + uint((group >> 1) * 32 + lane));
+                    uint code = ((group & 1) != 0) ? packed >> 4u : packed & 15u;
+                    float w = d * float(sc) * float(code) - dm * float(mn);
+                    sum += w * Xs[group * 32 + lane];
+                }
+            }
+        }
+        barrier();
+    }
+
+    if (o < out_) {
+        D[o] += sum;
+    }
+}
