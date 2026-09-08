@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+	"unsafe"
 )
 
 // refMatMul computes the f32 reference Y[P,out] = X[P,in] · Wᵀ (W row-major [out,in]).
@@ -110,5 +111,54 @@ func TestResetReclaimsTable(t *testing.T) {
 			t.Fatalf("round %d: err/scale %.4f exceeds f16 tolerance after reset", r, maxAbs/maxRef)
 		}
 		Reset() // frees wt's buffer; wt is invalid by contract from here
+	}
+}
+
+// TestSDPANAXConstantsLayout asserts that the memory layout of the SDPANAXConstants struct
+// matches the Metal Shading Language (MSL) constant buffer layout [[buffer(5)]] 1:1 across
+// all 9 fields (8 uint32_t + 1 float) with 4-byte scalar alignment and 36 bytes total size.
+func TestSDPANAXConstantsLayout(t *testing.T) {
+	type sdpaNAXConstantsLayout struct {
+		GQAFactor uint32
+		DraftLen  uint32
+		M         uint32
+		HeadDim   uint32
+		PrefixLen uint32
+		TotalKV   uint32
+		Scale     float32
+		TileN     uint32
+		Order     uint32
+	}
+
+	var s sdpaNAXConstantsLayout
+	const expectedSize = 36
+	if size := unsafe.Sizeof(s); size != expectedSize {
+		t.Fatalf("SDPANAXConstants layout size = %d, want %d bytes", size, expectedSize)
+	}
+
+	expectedOffsets := []struct {
+		name   string
+		offset uintptr
+		size   uintptr
+	}{
+		{"gqa_factor", unsafe.Offsetof(s.GQAFactor), unsafe.Sizeof(s.GQAFactor)},
+		{"draft_len", unsafe.Offsetof(s.DraftLen), unsafe.Sizeof(s.DraftLen)},
+		{"M", unsafe.Offsetof(s.M), unsafe.Sizeof(s.M)},
+		{"head_dim", unsafe.Offsetof(s.HeadDim), unsafe.Sizeof(s.HeadDim)},
+		{"prefix_len", unsafe.Offsetof(s.PrefixLen), unsafe.Sizeof(s.PrefixLen)},
+		{"total_kv", unsafe.Offsetof(s.TotalKV), unsafe.Sizeof(s.TotalKV)},
+		{"scale", unsafe.Offsetof(s.Scale), unsafe.Sizeof(s.Scale)},
+		{"tile_n", unsafe.Offsetof(s.TileN), unsafe.Sizeof(s.TileN)},
+		{"order", unsafe.Offsetof(s.Order), unsafe.Sizeof(s.Order)},
+	}
+
+	for i, field := range expectedOffsets {
+		wantOffset := uintptr(i * 4)
+		if field.offset != wantOffset {
+			t.Errorf("field %s at offset %d, want %d", field.name, field.offset, wantOffset)
+		}
+		if field.size != 4 {
+			t.Errorf("field %s size %d, want 4", field.name, field.size)
+		}
 	}
 }

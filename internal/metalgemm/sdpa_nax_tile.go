@@ -1,9 +1,58 @@
+//go:build darwin && arm64 && cgo
+
 package metalgemm
+
+/*
+#include <stdint.h>
+#include <stdlib.h>
+
+int mg_sdpa_nax_tail_causal_tile_run(
+    const float* Q, const float* K, const float* V,
+    float* Out, float* LSE,
+    int gqaFactor, int draftLen, int M, int headDim,
+    int prefixLen, int totalKV, float scale, int tileN, int order);
+
+int mg_qwen35_decode_create(int nK, int nV, int kHd, int vHd, int convKernel);
+void mg_qwen35_decode_reset(int handle);
+void mg_qwen35_decode_release(int handle);
+int mg_qwen35_decode_get_state(int handle, float* conv_out, float* recurrent_out);
+int mg_qwen35_decode_set_state(int handle, const float* conv_in, const float* recurrent_in);
+
+int mg_qwen35_decode_step(
+    int handle,
+    const float* mixed, const float* z, const float* b, const float* a,
+    const float* convW, const float* aLog, const float* dtBias, const float* norm,
+    float* core_out,
+    int nK, int nV, int kHd, int vHd, int convKernel, float eps);
+
+int mg_qwen35_decode_step_wide_m(
+    int handle,
+    const float* mixed, const float* z, const float* b, const float* a,
+    const float* convW, const float* aLog, const float* dtBias, const float* norm,
+    float* core_out,
+    int tokens, int nK, int nV, int kHd, int vHd, int convKernel, float eps);
+
+int mg_metal_wide_m_verify_step(
+    int q4_wid,
+    const float* draft_input,
+    float* gemm_out,
+    int gdn_handle,
+    const float* z, const float* b, const float* a,
+    const float* convW, const float* aLog, const float* dtBias, const float* norm,
+    float* gdn_core_out,
+    int nK, int nV, int kHd, int vHd, int convKernel, float eps,
+    const float* Q, const float* K, const float* V,
+    float* sdpa_out, float* lse_out,
+    int gqaFactor, int draftLen, int sdpaM, int headDim,
+    int prefixLen, int totalKV, float sdpaScale, int tileN, int order);
+*/
+import "C"
 
 import (
 	"errors"
 	"fmt"
 	"math"
+	"unsafe"
 )
 
 // Default and boundary parameters for wide-M tail-causal SDPA speculative verification tiles.
@@ -577,15 +626,14 @@ kernel void sdpa_nax_tail_causal_tile(
     if (c.M == 0 || c.head_dim == 0 || c.total_kv == 0) return;
 
     // In wide-M speculative verification, M rows (16..24) are handled
-    // cooperatively by simdgroups in the threadgroup.
-    uint m = simd_group_id;
-    if (m >= c.M) return;
+    // cooperatively by simdgroups across threadgroups.
+    uint m = tg_idx * (tg_size / 32) + simd_group_id;
 
     float acc[4] = {0.0f, 0.0f, 0.0f, 0.0f}; // Dimension chunk for this SIMD lane
     float m_prev = -INFINITY;
     float l_prev = 0.0f;
 
-    uint max_k_for_row = nax_max_causal_key(m, c);
+    uint max_k_for_row = (m < c.M) ? nax_max_causal_key(m, c) : 0;
     uint num_tiles = (c.total_kv + c.tile_n - 1) / c.tile_n;
 
     for (uint tile_idx = 0; tile_idx < num_tiles; ++tile_idx) {
@@ -594,7 +642,7 @@ kernel void sdpa_nax_tail_causal_tile(
         uint tile_len = j_end - j_start;
 
         // 1. Cooperative load of K and V tiles from DRAM into threadgroup memory.
-        // Loaded ONCE for all M query rows in the threadgroup (eliminating redundant reads).
+        // Loaded ONCE for all query rows in the threadgroup (eliminating redundant reads).
         threadgroup_barrier(mem_flags::mem_threadgroup);
         uint total_elements = tile_len * c.head_dim;
         for (uint idx = tid; idx < total_elements; idx += tg_size) {
@@ -608,7 +656,7 @@ kernel void sdpa_nax_tail_causal_tile(
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
         // If the entire tile is past the causal horizon for draft token m, skip computation.
-        if (j_start > max_k_for_row) {
+        if (m >= c.M || j_start > max_k_for_row) {
             continue;
         }
 
@@ -643,13 +691,15 @@ kernel void sdpa_nax_tail_causal_tile(
     }
 
     // 4. Output normalization and LSE writeback
-    float inv_l = (l_prev > 0.0f) ? (1.0f / l_prev) : 0.0f;
-    uint d_idx = 0;
-    for (uint d = simd_lane; d < c.head_dim; d += 32) {
-        Out[m * c.head_dim + d] = acc[d_idx++] * inv_l;
-    }
-    if (simd_lane == 0) {
-        LSE[m] = (l_prev > 0.0f) ? (m_prev + log(l_prev)) : -INFINITY;
+    if (m < c.M) {
+        float inv_l = (l_prev > 0.0f) ? (1.0f / l_prev) : 0.0f;
+        uint d_idx = 0;
+        for (uint d = simd_lane; d < c.head_dim; d += 32) {
+            Out[m * c.head_dim + d] = acc[d_idx++] * inv_l;
+        }
+        if (simd_lane == 0) {
+            LSE[m] = (l_prev > 0.0f) ? (m_prev + log(l_prev)) : -INFINITY;
+        }
     }
 }
 `
@@ -690,15 +740,14 @@ func NewSDPANAXMetalPipelineDescriptor(cfg SDPANAXTileConfig) (*MetalPipelineDes
 
 // BuildSDPANAXDispatchGrid computes threadgroup and thread allocations for Apple Silicon Metal.
 func BuildSDPANAXDispatchGrid(cfg SDPANAXTileConfig) MetalDispatchGrid {
-	// One threadgroup handles the M query rows with up to 8 simdgroups (256 threads)
-	threads := 32 * cfg.M
-	if threads > 256 {
-		threads = 256
-	} else if threads < 32 {
-		threads = 32
+	numSimd := cfg.M
+	if numSimd > 8 {
+		numSimd = 8
 	}
+	threads := numSimd * 32
+	numTGs := (cfg.M + numSimd - 1) / numSimd
 	return MetalDispatchGrid{
-		ThreadgroupsPerGrid:   [3]int{1, 1, 1},
+		ThreadgroupsPerGrid:   [3]int{numTGs, 1, 1},
 		ThreadsPerThreadgroup: [3]int{threads, 1, 1},
 	}
 }
@@ -757,4 +806,356 @@ func (h *SDPANAXHarness) ExecuteAndVerify(input SDPANAXTileInput, tolerance floa
 	}
 	report := EvaluateSDPAEquivalence(tiledRes, refOut, refLSE, tolerance)
 	return tiledRes, &report, nil
+}
+
+// ExecuteMetal runs the wide-M tail-causal SDPA tiled computation on Apple Silicon Metal 4.
+func (h *SDPANAXHarness) ExecuteMetal(input SDPANAXTileInput) (*SDPANAXTileResult, error) {
+	input.Config = h.Config
+	return RunSDPANAXMetalComputation(input)
+}
+
+// RunSDPANAXMetalComputation executes the wide-M tail-causal SDPA kernel on Metal 4.
+func RunSDPANAXMetalComputation(input SDPANAXTileInput) (*SDPANAXTileResult, error) {
+	if !Available() {
+		return nil, errors.New("sdpa_nax: Metal unavailable on this host")
+	}
+	cfg := input.Config
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	expectedQ := cfg.M * cfg.HeadDim
+	if len(input.Q) < expectedQ {
+		return nil, fmt.Errorf("sdpa_nax: Q length %d smaller than expected %d", len(input.Q), expectedQ)
+	}
+	expectedKV := cfg.TotalKV * cfg.HeadDim
+	if len(input.K) < expectedKV || len(input.V) < expectedKV {
+		return nil, fmt.Errorf("sdpa_nax: K/V length smaller than expected %d", expectedKV)
+	}
+
+	output := make([]float32, cfg.M*cfg.HeadDim)
+	lse := make([]float32, cfg.M)
+
+	ret := C.mg_sdpa_nax_tail_causal_tile_run(
+		(*C.float)(unsafe.Pointer(&input.Q[0])),
+		(*C.float)(unsafe.Pointer(&input.K[0])),
+		(*C.float)(unsafe.Pointer(&input.V[0])),
+		(*C.float)(unsafe.Pointer(&output[0])),
+		(*C.float)(unsafe.Pointer(&lse[0])),
+		C.int(cfg.GQAFactor),
+		C.int(cfg.DraftLen),
+		C.int(cfg.M),
+		C.int(cfg.HeadDim),
+		C.int(cfg.PrefixLen),
+		C.int(cfg.TotalKV),
+		C.float(cfg.Scale),
+		C.int(cfg.TileN),
+		C.int(cfg.Order),
+	)
+	if ret == 0 {
+		return nil, errors.New("sdpa_nax: Metal 4 SDPA tail-causal tile execution failed")
+	}
+
+	numTiles := (cfg.TotalKV + cfg.TileN - 1) / cfg.TileN
+	stats := SDPANAXMemoryStats{
+		ScalarKVLoads:  cfg.M * numTiles,
+		TiledKVLoads:   numTiles,
+		ReductionRatio: float64(cfg.M),
+		NumTiles:       numTiles,
+		M:              cfg.M,
+		TotalKV:        cfg.TotalKV,
+		TileN:          cfg.TileN,
+	}
+
+	return &SDPANAXTileResult{
+		Output: output,
+		LSE:    lse,
+		Stats:  stats,
+	}, nil
+}
+
+// Qwen35GDNDecodeState manages allocated on-device Metal GDN recurrence buffers.
+type Qwen35GDNDecodeState struct {
+	handle     C.int
+	nK, nV     int
+	kHd, vHd   int
+	convKernel int
+}
+
+// NewQwen35GDNDecodeState initializes persistent on-device GDN recurrence state buffers.
+func NewQwen35GDNDecodeState(nK, nV, kHd, vHd, convKernel int) (*Qwen35GDNDecodeState, error) {
+	if !Available() {
+		return nil, errors.New("qwen35_decode: Metal unavailable on this host")
+	}
+	h := C.mg_qwen35_decode_create(C.int(nK), C.int(nV), C.int(kHd), C.int(vHd), C.int(convKernel))
+	if h < 0 {
+		return nil, errors.New("qwen35_decode: failed to allocate Metal GDN decode state")
+	}
+	return &Qwen35GDNDecodeState{
+		handle:     h,
+		nK:         nK,
+		nV:         nV,
+		kHd:        kHd,
+		vHd:        vHd,
+		convKernel: convKernel,
+	}, nil
+}
+
+// Handle returns the underlying native state handle index.
+func (s *Qwen35GDNDecodeState) Handle() int {
+	return int(s.handle)
+}
+
+// Reset clears the convolution and recurrent buffers to zero.
+func (s *Qwen35GDNDecodeState) Reset() {
+	if s != nil && s.handle >= 0 {
+		C.mg_qwen35_decode_reset(s.handle)
+	}
+}
+
+// Release frees the native Metal state buffers.
+func (s *Qwen35GDNDecodeState) Release() {
+	if s != nil && s.handle >= 0 {
+		C.mg_qwen35_decode_release(s.handle)
+		s.handle = -1
+	}
+}
+
+// Step performs a single-token decode forward step on the GDN state.
+func (s *Qwen35GDNDecodeState) Step(mixed, z, b, a []float32, panel GDNPanel) ([]float32, error) {
+	return s.StepWideM(mixed, z, b, a, panel, 1)
+}
+
+// StepWideMInto performs a multi-token (M=2..4) batched recurrent state update writing into dst.
+// Preallocating dst eliminates allocations on the hot path.
+func (s *Qwen35GDNDecodeState) StepWideMInto(mixed, z, b, a []float32, panel GDNPanel, tokens int, coreOut []float32) error {
+	if s == nil || s.handle < 0 {
+		return errors.New("qwen35_decode: nil or released GDN state")
+	}
+	convDim := 2*(s.nK*s.kHd) + (s.nV * s.vHd)
+	valueDim := s.nV * s.vHd
+	if len(mixed) < tokens*convDim || len(z) < tokens*valueDim || len(b) < tokens*s.nV || len(a) < tokens*s.nV {
+		return errors.New("qwen35_decode: input slice length too short for tokens")
+	}
+	if len(coreOut) < tokens*valueDim {
+		return errors.New("qwen35_decode: destination slice too short")
+	}
+	if len(panel.Conv1D) < convDim*s.convKernel || len(panel.ALog) < s.nV || len(panel.DTBias) < s.nV || len(panel.Norm) < s.vHd {
+		return errors.New("qwen35_decode: invalid GDN panel constant dimensions")
+	}
+
+	ret := C.mg_qwen35_decode_step_wide_m(
+		s.handle,
+		(*C.float)(unsafe.Pointer(&mixed[0])),
+		(*C.float)(unsafe.Pointer(&z[0])),
+		(*C.float)(unsafe.Pointer(&b[0])),
+		(*C.float)(unsafe.Pointer(&a[0])),
+		(*C.float)(unsafe.Pointer(&panel.Conv1D[0])),
+		(*C.float)(unsafe.Pointer(&panel.ALog[0])),
+		(*C.float)(unsafe.Pointer(&panel.DTBias[0])),
+		(*C.float)(unsafe.Pointer(&panel.Norm[0])),
+		(*C.float)(unsafe.Pointer(&coreOut[0])),
+		C.int(tokens),
+		C.int(s.nK), C.int(s.nV), C.int(s.kHd), C.int(s.vHd), C.int(s.convKernel),
+		C.float(panel.RMSNormEpsilon),
+	)
+	if ret == 0 {
+		return errors.New("qwen35_decode: wide-M recurrent GDN step failed")
+	}
+	return nil
+}
+
+// StepWideM performs a multi-token (M=2..4) batched recurrent state update across draft tokens.
+func (s *Qwen35GDNDecodeState) StepWideM(mixed, z, b, a []float32, panel GDNPanel, tokens int) ([]float32, error) {
+	valueDim := s.nV * s.vHd
+	coreOut := make([]float32, tokens*valueDim)
+	if err := s.StepWideMInto(mixed, z, b, a, panel, tokens, coreOut); err != nil {
+		return nil, err
+	}
+	return coreOut, nil
+}
+
+// State reads back the current convolution and recurrent state arrays.
+func (s *Qwen35GDNDecodeState) State() (conv []float32, recurrent []float32, err error) {
+	if s == nil || s.handle < 0 {
+		return nil, nil, errors.New("qwen35_decode: nil or released GDN state")
+	}
+	convDim := 2*(s.nK*s.kHd) + (s.nV * s.vHd)
+	conv = make([]float32, (s.convKernel-1)*convDim)
+	recurrent = make([]float32, s.nV*s.kHd*s.vHd)
+	ret := C.mg_qwen35_decode_get_state(
+		s.handle,
+		(*C.float)(unsafe.Pointer(&conv[0])),
+		(*C.float)(unsafe.Pointer(&recurrent[0])),
+	)
+	if ret == 0 {
+		return nil, nil, errors.New("qwen35_decode: failed to read GDN state")
+	}
+	return conv, recurrent, nil
+}
+
+// SetState initializes or restores the convolution and recurrent state arrays.
+func (s *Qwen35GDNDecodeState) SetState(conv, recurrent []float32) error {
+	if s == nil || s.handle < 0 {
+		return errors.New("qwen35_decode: nil or released GDN state")
+	}
+	convDim := 2*(s.nK*s.kHd) + (s.nV * s.vHd)
+	if len(conv) < (s.convKernel-1)*convDim || len(recurrent) < s.nV*s.kHd*s.vHd {
+		return errors.New("qwen35_decode: state slices shorter than expected buffer sizes")
+	}
+	ret := C.mg_qwen35_decode_set_state(
+		s.handle,
+		(*C.float)(unsafe.Pointer(&conv[0])),
+		(*C.float)(unsafe.Pointer(&recurrent[0])),
+	)
+	if ret == 0 {
+		return errors.New("qwen35_decode: failed to set GDN state")
+	}
+	return nil
+}
+
+// WideMSpeculativeVerificationStep configures a complete speculative candidate verification
+// forward step evaluating M=2..4 draft tokens concurrently.
+type WideMSpeculativeVerificationStep struct {
+	DraftTokens int
+	Q4KWeight   *Q4KWeight
+	Input       []float32
+	GDNState    *Qwen35GDNDecodeState
+	GDNPanel    GDNPanel
+	Z           []float32
+	B           []float32
+	A           []float32
+	SDPAConfig  SDPANAXTileConfig
+	SDPAQ       []float32
+	SDPAK       []float32
+	SDPAV       []float32
+}
+
+// WideMSpeculativeVerificationResult captures outputs and execution topology
+// from the single command buffer dispatch.
+type WideMSpeculativeVerificationResult struct {
+	GEMMOutput   []float32
+	GDNOutput    []float32
+	SDPAOutput   []float32
+	SDPALSE      []float32
+	SingleBuffer bool
+	Committed    bool
+}
+
+// RunMetalWideMSpeculativeVerificationInto executes the complete verification pipeline into
+// caller-provided destination buffers, eliminating heap allocations on the hot path.
+func RunMetalWideMSpeculativeVerificationInto(
+	step WideMSpeculativeVerificationStep,
+	gemmOut, gdnCoreOut, sdpaOut, sdpaLSE []float32,
+) (*WideMSpeculativeVerificationResult, error) {
+	if !Available() {
+		return nil, errors.New("metalgemm: Metal unavailable")
+	}
+	M := step.DraftTokens
+	if M < 2 || M > 8 {
+		return nil, fmt.Errorf("metalgemm: wide-M draft depth %d out of range [2, 8]", M)
+	}
+	if step.GDNState == nil || step.GDNState.handle < 0 {
+		return nil, errors.New("metalgemm: valid GDNState required")
+	}
+	if err := step.SDPAConfig.Validate(); err != nil {
+		return nil, err
+	}
+
+	convDim := 2*(step.GDNState.nK*step.GDNState.kHd) + (step.GDNState.nV * step.GDNState.vHd)
+	valueDim := step.GDNState.nV * step.GDNState.vHd
+
+	var q4Wid C.int = -1
+	var draftInputPtr *C.float = nil
+
+	if step.Q4KWeight != nil && step.Q4KWeight.id >= 0 {
+		q4Wid = step.Q4KWeight.id
+		if len(step.Input) < M*step.Q4KWeight.In {
+			return nil, errors.New("metalgemm: input slice too short for Q4_K weight In width")
+		}
+		if len(gemmOut) < M*step.Q4KWeight.Out {
+			return nil, errors.New("metalgemm: gemmOut destination slice too short")
+		}
+		draftInputPtr = (*C.float)(unsafe.Pointer(&step.Input[0]))
+	} else if len(step.Input) >= M*convDim {
+		draftInputPtr = (*C.float)(unsafe.Pointer(&step.Input[0]))
+	} else {
+		return nil, errors.New("metalgemm: valid input slice required for verification")
+	}
+
+	if len(gdnCoreOut) < M*valueDim {
+		return nil, errors.New("metalgemm: gdnCoreOut destination slice too short")
+	}
+	if len(sdpaOut) < step.SDPAConfig.M*step.SDPAConfig.HeadDim {
+		return nil, errors.New("metalgemm: sdpaOut destination slice too short")
+	}
+	if len(sdpaLSE) < step.SDPAConfig.M {
+		return nil, errors.New("metalgemm: sdpaLSE destination slice too short")
+	}
+
+	var gemmOutPtr *C.float = nil
+	if len(gemmOut) > 0 {
+		gemmOutPtr = (*C.float)(unsafe.Pointer(&gemmOut[0]))
+	}
+
+	ret := C.mg_metal_wide_m_verify_step(
+		q4Wid,
+		draftInputPtr,
+		gemmOutPtr,
+		step.GDNState.handle,
+		(*C.float)(unsafe.Pointer(&step.Z[0])),
+		(*C.float)(unsafe.Pointer(&step.B[0])),
+		(*C.float)(unsafe.Pointer(&step.A[0])),
+		(*C.float)(unsafe.Pointer(&step.GDNPanel.Conv1D[0])),
+		(*C.float)(unsafe.Pointer(&step.GDNPanel.ALog[0])),
+		(*C.float)(unsafe.Pointer(&step.GDNPanel.DTBias[0])),
+		(*C.float)(unsafe.Pointer(&step.GDNPanel.Norm[0])),
+		(*C.float)(unsafe.Pointer(&gdnCoreOut[0])),
+		C.int(step.GDNState.nK), C.int(step.GDNState.nV),
+		C.int(step.GDNState.kHd), C.int(step.GDNState.vHd),
+		C.int(step.GDNState.convKernel),
+		C.float(step.GDNPanel.RMSNormEpsilon),
+		(*C.float)(unsafe.Pointer(&step.SDPAQ[0])),
+		(*C.float)(unsafe.Pointer(&step.SDPAK[0])),
+		(*C.float)(unsafe.Pointer(&step.SDPAV[0])),
+		(*C.float)(unsafe.Pointer(&sdpaOut[0])),
+		(*C.float)(unsafe.Pointer(&sdpaLSE[0])),
+		C.int(step.SDPAConfig.GQAFactor),
+		C.int(step.SDPAConfig.DraftLen),
+		C.int(step.SDPAConfig.M),
+		C.int(step.SDPAConfig.HeadDim),
+		C.int(step.SDPAConfig.PrefixLen),
+		C.int(step.SDPAConfig.TotalKV),
+		C.float(step.SDPAConfig.Scale),
+		C.int(step.SDPAConfig.TileN),
+		C.int(step.SDPAConfig.Order),
+	)
+
+	if ret == 0 {
+		return nil, errors.New("metalgemm: single-command-buffer wide-M verification step failed")
+	}
+
+	return &WideMSpeculativeVerificationResult{
+		GEMMOutput:   gemmOut,
+		GDNOutput:    gdnCoreOut,
+		SDPAOutput:   sdpaOut,
+		SDPALSE:      sdpaLSE,
+		SingleBuffer: true,
+		Committed:    true,
+	}, nil
+}
+
+// RunMetalWideMSpeculativeVerification executes the complete verification pipeline:
+// Wide-M Q4_K GEMM -> Batched Recurrent GDN step -> Tail-Causal SDPA tile
+// inside a single Metal command buffer with zero host-GPU synchronization round-trips.
+func RunMetalWideMSpeculativeVerification(step WideMSpeculativeVerificationStep) (*WideMSpeculativeVerificationResult, error) {
+	M := step.DraftTokens
+	valueDim := step.GDNState.nV * step.GDNState.vHd
+	var gemmOut []float32
+	if step.Q4KWeight != nil && step.Q4KWeight.id >= 0 {
+		gemmOut = make([]float32, M*step.Q4KWeight.Out)
+	}
+	gdnCoreOut := make([]float32, M*valueDim)
+	sdpaOut := make([]float32, step.SDPAConfig.M*step.SDPAConfig.HeadDim)
+	sdpaLSE := make([]float32, step.SDPAConfig.M)
+	return RunMetalWideMSpeculativeVerificationInto(step, gemmOut, gdnCoreOut, sdpaOut, sdpaLSE)
 }
