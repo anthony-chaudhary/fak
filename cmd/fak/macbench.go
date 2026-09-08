@@ -27,6 +27,9 @@ func runMacBench(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) > 0 && argv[0] == "validate-agentic-comparison" {
 		return runMacBenchValidateAgenticComparison(stdout, stderr, argv[1:])
 	}
+	if len(argv) > 0 && (argv[0] == "validate-mtp-comparison" || argv[0] == "validate-mtp") {
+		return runMacBenchValidateMTPComparison(stdout, stderr, argv[1:])
+	}
 	if len(argv) > 0 && argv[0] == "watch-status" {
 		return runMacBenchWatchStatus(stdout, stderr, argv[1:])
 	}
@@ -214,6 +217,76 @@ func runMacBenchValidateAgenticComparison(stdout, stderr io.Writer, argv []strin
 		_ = writeIndentedJSONNoEscape(stdout, result)
 	} else {
 		fmt.Fprintf(stdout, "VALID packet_sha256=%s speedup=%.2fx\n", result.PacketSHA256, result.SpeedupRatio)
+	}
+	return 0
+}
+
+func runMacBenchValidateMTPComparison(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("macbench validate-mtp-comparison", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	input := fs.String("input", "", "4-way MTP comparison packet JSON")
+	asJSON := fs.Bool("json", false, "emit machine-readable validation result")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if strings.TrimSpace(*input) == "" {
+		fmt.Fprintln(stderr, "fak macbench validate-mtp-comparison: --input is required")
+		return 2
+	}
+	raw, err := os.ReadFile(*input)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak macbench validate-mtp-comparison: read --input: %v\n", err)
+		return 1
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var packet macbench.MTPComparisonPacket
+	if err := dec.Decode(&packet); err != nil {
+		fmt.Fprintf(stderr, "fak macbench validate-mtp-comparison: decode packet: %v\n", err)
+		return 1
+	}
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			err = fmt.Errorf("multiple JSON values")
+		}
+		fmt.Fprintf(stderr, "fak macbench validate-mtp-comparison: decode packet: %v\n", err)
+		return 1
+	}
+	if err := macbench.ValidateMTPComparisonPacket(packet); err != nil {
+		fmt.Fprintf(stderr, "fak macbench validate-mtp-comparison: %v\n", err)
+		return 1
+	}
+	if err := macbench.VerifyMTPComparisonEvidenceFiles(packet, *input); err != nil {
+		fmt.Fprintf(stderr, "fak macbench validate-mtp-comparison: %v\n", err)
+		return 1
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
+	result := struct {
+		Schema              string  `json:"schema"`
+		Valid               bool    `json:"valid"`
+		PacketSHA256        string  `json:"packet_sha256"`
+		FakNativeDecodeTokS float64 `json:"fak_native_decode_tok_s"`
+		AcceptanceRate      float64 `json:"acceptance_rate"`
+		VsLlamaSpeedupRatio float64 `json:"vs_llama_speedup_ratio"`
+		VsAxEngineRatio     float64 `json:"vs_ax_engine_ratio"`
+		VsMTPLXRatio        float64 `json:"vs_mtplx_ratio"`
+	}{
+		Schema:              "fak.macbench.mtp-comparison.validation.v1",
+		Valid:               true,
+		PacketSHA256:        digest,
+		FakNativeDecodeTokS: packet.Summary.FakNativeDecodeTokS,
+		AcceptanceRate:      packet.Summary.FakNativeAcceptanceRate,
+		VsLlamaSpeedupRatio: packet.Summary.VsLlamaSpeedupRatio,
+		VsAxEngineRatio:     packet.Summary.VsAxEngineRatio,
+		VsMTPLXRatio:        packet.Summary.VsMTPLXRatio,
+	}
+	if *asJSON {
+		_ = writeIndentedJSONNoEscape(stdout, result)
+	} else {
+		fmt.Fprintf(stdout, "VALID packet_sha256=%s fak_native_decode=%.2f tok/s acceptance=%.3f vs_llama=%.2fx vs_ax=%.2fx vs_mtplx=%.2fx\n",
+			result.PacketSHA256, result.FakNativeDecodeTokS, result.AcceptanceRate,
+			result.VsLlamaSpeedupRatio, result.VsAxEngineRatio, result.VsMTPLXRatio)
 	}
 	return 0
 }
