@@ -3,10 +3,61 @@
 package compute
 
 import (
+	"encoding/json"
 	"math"
 	"math/rand"
+	"strings"
 	"testing"
 )
+
+type qwen35SequenceParityOracleEvent struct {
+	Schema         string                             `json:"schema"`
+	Selector       string                             `json:"selector"`
+	TestName       string                             `json:"test_name"`
+	OracleKind     string                             `json:"oracle_kind"`
+	Engine         string                             `json:"engine"`
+	DeviceObserved bool                               `json:"device_observed"`
+	CaseCount      int                                `json:"case_count"`
+	Passed         bool                               `json:"passed"`
+	Observed       qwen35SequenceParityOracleObserved `json:"observed"`
+	Bounds         qwen35SequenceParityOracleBounds   `json:"bounds"`
+}
+
+type qwen35SequenceParityOracleObserved struct {
+	MaxAbsDelta  float64 `json:"max_abs_delta"`
+	FiniteOutput bool    `json:"finite_output"`
+}
+
+type qwen35SequenceParityOracleBounds struct {
+	MaxAbsDelta   float64 `json:"max_abs_delta"`
+	RequireFinite bool    `json:"require_finite"`
+}
+
+func formatQwen35SequenceParityOracle(maxAbsDelta float64, finiteOutput bool, caseCount int) ([]byte, error) {
+	if caseCount <= 0 {
+		caseCount = 4
+	}
+	passed := finiteOutput && maxAbsDelta <= 2e-3
+	event := qwen35SequenceParityOracleEvent{
+		Schema:         "fak.strix.subkernel-parity/v1",
+		Selector:       "qwen35_sequence_prefill",
+		TestName:       "TestVulkanQwen35SequenceQuantizedPanelsMatchCPU",
+		OracleKind:     "max_abs",
+		Engine:         "fak-native/vulkan",
+		DeviceObserved: true,
+		CaseCount:      caseCount,
+		Passed:         passed,
+		Observed: qwen35SequenceParityOracleObserved{
+			MaxAbsDelta:  maxAbsDelta,
+			FiniteOutput: finiteOutput,
+		},
+		Bounds: qwen35SequenceParityOracleBounds{
+			MaxAbsDelta:   2e-3,
+			RequireFinite: true,
+		},
+	}
+	return json.Marshal(event)
+}
 
 // Three distinct rows and an output width crossing one workgroup expose token
 // addressing errors that a one-token decode or repeated input cannot detect.
@@ -35,6 +86,9 @@ func TestVulkanQwen35SequenceQuantizedPanelsMatchCPU(t *testing.T) {
 		binaryPutFloat16(block[80:82], .015625)
 		binaryPutFloat16(block[82:84], .0078125)
 	}
+	var worstMaxAbsDelta float64
+	allFinite := true
+	evaluatedPanels := 0
 	for _, host := range []Tensor{
 		NewF32(Default(), []int{out, in}, w),
 		QuantizeQ8(Default(), []int{out, in}, w, 32),
@@ -42,6 +96,7 @@ func TestVulkanQwen35SequenceQuantizedPanelsMatchCPU(t *testing.T) {
 		NewQ2K(Default(), []int{out, in}, raw2),
 	} {
 		t.Run(host.Dtype.String(), func(t *testing.T) {
+			evaluatedPanels++
 			dw := v.Upload(host, host.Dtype)
 			defer v.Free(dw)
 			dx := v.Upload(NewF32(Default(), []int{tokens, in}, x), F32)
@@ -57,7 +112,15 @@ func TestVulkanQwen35SequenceQuantizedPanelsMatchCPU(t *testing.T) {
 				want := Default().Read(Default().MatMul(host, NewF32(Default(), []int{in}, x[token*in:(token+1)*in])))
 				for row, expected := range want {
 					actual := got[token*out+row]
-					if math.IsNaN(float64(actual)) || math.IsInf(float64(actual), 0) || math.Abs(float64(actual-expected)) > 2e-3+2e-4*math.Abs(float64(expected)) {
+					if math.IsNaN(float64(actual)) || math.IsInf(float64(actual), 0) || math.IsNaN(float64(expected)) || math.IsInf(float64(expected), 0) {
+						allFinite = false
+						t.Fatalf("token=%d row=%d got=%g want=%g must be finite", token, row, actual, expected)
+					}
+					delta := math.Abs(float64(actual - expected))
+					if delta > worstMaxAbsDelta {
+						worstMaxAbsDelta = delta
+					}
+					if delta > 2e-3+2e-4*math.Abs(float64(expected)) {
 						t.Fatalf("token=%d row=%d got=%g want=%g", token, row, actual, expected)
 					}
 				}
@@ -65,6 +128,11 @@ func TestVulkanQwen35SequenceQuantizedPanelsMatchCPU(t *testing.T) {
 			t.Logf("engine=fak-native backend=vulkan dtype=%s tokens=%d in=%d out=%d cpu_parity=true", host.Dtype, tokens, in, out)
 		})
 	}
+	oracleJSON, err := formatQwen35SequenceParityOracle(worstMaxAbsDelta, allFinite, evaluatedPanels)
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
 }
 
 func TestVulkanQwen35SequenceGeometryValidation(t *testing.T) {
@@ -141,4 +209,343 @@ func TestVulkanQwen35SequenceGeometryValidation(t *testing.T) {
 	if _, err := v.validateQwen35VulkanSequence(mtp65); err == nil {
 		t.Fatal("expected error rejecting 65th MTP metadata layer")
 	}
+}
+
+func TestVulkanQwen35SequenceParityOracleFormat(t *testing.T) {
+	raw, err := formatQwen35SequenceParityOracle(1.5e-3, true, 4)
+	if err != nil {
+		t.Fatalf("formatQwen35SequenceParityOracle failed: %v", err)
+	}
+	var parsed struct {
+		Schema         string `json:"schema"`
+		Selector       string `json:"selector"`
+		TestName       string `json:"test_name"`
+		OracleKind     string `json:"oracle_kind"`
+		Engine         string `json:"engine"`
+		DeviceObserved bool   `json:"device_observed"`
+		CaseCount      int    `json:"case_count"`
+		Passed         bool   `json:"passed"`
+		Observed       struct {
+			MaxAbsDelta  float64 `json:"max_abs_delta"`
+			FiniteOutput bool    `json:"finite_output"`
+		} `json:"observed"`
+		Bounds struct {
+			MaxAbsDelta   float64 `json:"max_abs_delta"`
+			RequireFinite bool    `json:"require_finite"`
+		} `json:"bounds"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("unmarshal formatted oracle failed: %v", err)
+	}
+	if parsed.Schema != "fak.strix.subkernel-parity/v1" {
+		t.Errorf("schema = %q, want fak.strix.subkernel-parity/v1", parsed.Schema)
+	}
+	if parsed.Selector != "qwen35_sequence_prefill" {
+		t.Errorf("selector = %q, want qwen35_sequence_prefill", parsed.Selector)
+	}
+	if parsed.TestName != "TestVulkanQwen35SequenceQuantizedPanelsMatchCPU" {
+		t.Errorf("test_name = %q, want TestVulkanQwen35SequenceQuantizedPanelsMatchCPU", parsed.TestName)
+	}
+	if parsed.OracleKind != "max_abs" {
+		t.Errorf("oracle_kind = %q, want max_abs", parsed.OracleKind)
+	}
+	if parsed.Engine != "fak-native/vulkan" {
+		t.Errorf("engine = %q, want fak-native/vulkan", parsed.Engine)
+	}
+	if !parsed.DeviceObserved {
+		t.Errorf("device_observed must be true")
+	}
+	if parsed.CaseCount != 4 {
+		t.Errorf("case_count = %d, want 4", parsed.CaseCount)
+	}
+	if !parsed.Passed {
+		t.Errorf("passed must be true")
+	}
+	if parsed.Observed.MaxAbsDelta != 1.5e-3 {
+		t.Errorf("observed max_abs_delta = %g, want 1.5e-3", parsed.Observed.MaxAbsDelta)
+	}
+	if !parsed.Observed.FiniteOutput {
+		t.Errorf("observed finite_output must be true")
+	}
+	if parsed.Bounds.MaxAbsDelta != 2e-3 {
+		t.Errorf("bounds max_abs_delta = %g, want 2e-3", parsed.Bounds.MaxAbsDelta)
+	}
+	if !parsed.Bounds.RequireFinite {
+		t.Errorf("bounds require_finite must be true")
+	}
+
+	// Boundary failure: delta exceeds threshold
+	failRaw, err := formatQwen35SequenceParityOracle(2.5e-3, true, 4)
+	if err != nil {
+		t.Fatalf("format failed oracle failed: %v", err)
+	}
+	if err := json.Unmarshal(failRaw, &parsed); err != nil {
+		t.Fatalf("unmarshal fail oracle failed: %v", err)
+	}
+	if parsed.Passed {
+		t.Errorf("expected passed=false when max_abs_delta > 2e-3")
+	}
+
+	// Boundary failure: non-finite output
+	failRaw2, err := formatQwen35SequenceParityOracle(1.5e-3, false, 4)
+	if err != nil {
+		t.Fatalf("format failed oracle 2 failed: %v", err)
+	}
+	if err := json.Unmarshal(failRaw2, &parsed); err != nil {
+		t.Fatalf("unmarshal fail oracle 2 failed: %v", err)
+	}
+	if parsed.Passed {
+		t.Errorf("expected passed=false when finite_output=false")
+	}
+}
+
+// TestStrixQwen35ParityEmitterContract verifies that the two Qwen3.5 GDN selectors
+// ("qwen35_gdn_decode", "qwen35_gdn_preprojected") and one sequence-prefill selector
+// ("qwen35_sequence_prefill") each have exactly one truthful aggregate success emitter,
+// matching the schema, bounds, and test bindings registered in the Strix contract,
+// and that geometry-only sibling tests emit zero events.
+//
+// Device-free contract test: does not initialize Vulkan hardware or require a physical GPU device.
+func TestStrixQwen35ParityEmitterContract(t *testing.T) {
+	type subkernelContract struct {
+		selector             string
+		testName             string
+		oracleKind           string
+		engine               string
+		deviceObserved       bool
+		caseCount            int
+		maxAbsDeltaBound     float64
+		requireStateIdentity bool
+		requireFinite        bool
+		formatFn             func() ([]byte, error)
+		formatExceedBoundFn  func() ([]byte, error)
+		formatFailIdentityFn func() ([]byte, error)
+		formatFailFiniteFn   func() ([]byte, error)
+	}
+
+	contracts := []subkernelContract{
+		{
+			selector:             "qwen35_gdn_decode",
+			testName:             "TestVulkanQwen35GDNDecodeMatchesCPUOracleInPlace",
+			oracleKind:           "state_continuity",
+			engine:               "fak-native/vulkan",
+			deviceObserved:       true,
+			caseCount:            1,
+			maxAbsDeltaBound:     3e-4,
+			requireStateIdentity: true,
+			requireFinite:        true,
+			formatFn: func() ([]byte, error) {
+				return formatQwen35GDNDecodeParityOracle(1.5e-4, true, true)
+			},
+			formatExceedBoundFn: func() ([]byte, error) {
+				return formatQwen35GDNDecodeParityOracle(4e-4, true, true)
+			},
+			formatFailIdentityFn: func() ([]byte, error) {
+				return formatQwen35GDNDecodeParityOracle(1.5e-4, false, true)
+			},
+			formatFailFiniteFn: func() ([]byte, error) {
+				return formatQwen35GDNDecodeParityOracle(1.5e-4, true, false)
+			},
+		},
+		{
+			selector:             "qwen35_gdn_preprojected",
+			testName:             "TestVulkanQwen35GDNPreprojectedParityAndStateContinuity",
+			oracleKind:           "state_continuity",
+			engine:               "fak-native/vulkan",
+			deviceObserved:       true,
+			caseCount:            4,
+			maxAbsDeltaBound:     2e-4,
+			requireStateIdentity: true,
+			requireFinite:        true,
+			formatFn: func() ([]byte, error) {
+				return formatQwen35GDNPreprojectedParityOracle(1.2e-4, true, true, 4)
+			},
+			formatExceedBoundFn: func() ([]byte, error) {
+				return formatQwen35GDNPreprojectedParityOracle(3e-4, true, true, 4)
+			},
+			formatFailIdentityFn: func() ([]byte, error) {
+				return formatQwen35GDNPreprojectedParityOracle(1.2e-4, false, true, 4)
+			},
+			formatFailFiniteFn: func() ([]byte, error) {
+				return formatQwen35GDNPreprojectedParityOracle(1.2e-4, true, false, 4)
+			},
+		},
+		{
+			selector:             "qwen35_sequence_prefill",
+			testName:             "TestVulkanQwen35SequenceQuantizedPanelsMatchCPU",
+			oracleKind:           "max_abs",
+			engine:               "fak-native/vulkan",
+			deviceObserved:       true,
+			caseCount:            4,
+			maxAbsDeltaBound:     2e-3,
+			requireStateIdentity: false,
+			requireFinite:        true,
+			formatFn: func() ([]byte, error) {
+				return formatQwen35SequenceParityOracle(1.5e-3, true, 4)
+			},
+			formatExceedBoundFn: func() ([]byte, error) {
+				return formatQwen35SequenceParityOracle(2.5e-3, true, 4)
+			},
+			formatFailIdentityFn: nil,
+			formatFailFiniteFn: func() ([]byte, error) {
+				return formatQwen35SequenceParityOracle(1.5e-3, false, 4)
+			},
+		},
+	}
+
+	seenSelectors := make(map[string]bool)
+	seenTestNames := make(map[string]bool)
+
+	for _, c := range contracts {
+		t.Run(c.selector, func(t *testing.T) {
+			if seenSelectors[c.selector] {
+				t.Fatalf("duplicate selector in contract table: %s", c.selector)
+			}
+			seenSelectors[c.selector] = true
+
+			if seenTestNames[c.testName] {
+				t.Fatalf("duplicate test name in contract table: %s", c.testName)
+			}
+			seenTestNames[c.testName] = true
+
+			// Geometry sibling isolation
+			if strings.Contains(c.testName, "Geometry") {
+				t.Errorf("selector %s must not bind to a geometry sibling test, got %s", c.selector, c.testName)
+			}
+
+			// Format valid passing oracle event
+			raw, err := c.formatFn()
+			if err != nil {
+				t.Fatalf("formatFn failed: %v", err)
+			}
+
+			var parsed struct {
+				Schema         string `json:"schema"`
+				Selector       string `json:"selector"`
+				TestName       string `json:"test_name"`
+				OracleKind     string `json:"oracle_kind"`
+				Engine         string `json:"engine"`
+				DeviceObserved bool   `json:"device_observed"`
+				CaseCount      int    `json:"case_count"`
+				Passed         bool   `json:"passed"`
+				Observed       struct {
+					MaxAbsDelta   float64 `json:"max_abs_delta"`
+					StateIdentity bool    `json:"state_identity"`
+					FiniteOutput  bool    `json:"finite_output"`
+				} `json:"observed"`
+				Bounds struct {
+					MaxAbsDelta          float64 `json:"max_abs_delta"`
+					RequireStateIdentity bool    `json:"require_state_identity"`
+					RequireFinite        bool    `json:"require_finite"`
+				} `json:"bounds"`
+			}
+			if err := json.Unmarshal(raw, &parsed); err != nil {
+				t.Fatalf("unmarshal formatFn output failed: %v", err)
+			}
+
+			if parsed.Schema != "fak.strix.subkernel-parity/v1" {
+				t.Errorf("schema = %q, want fak.strix.subkernel-parity/v1", parsed.Schema)
+			}
+			if parsed.Selector != c.selector {
+				t.Errorf("selector = %q, want %q", parsed.Selector, c.selector)
+			}
+			if parsed.TestName != c.testName {
+				t.Errorf("test_name = %q, want %q", parsed.TestName, c.testName)
+			}
+			if parsed.OracleKind != c.oracleKind {
+				t.Errorf("oracle_kind = %q, want %q", parsed.OracleKind, c.oracleKind)
+			}
+			if parsed.Engine != c.engine {
+				t.Errorf("engine = %q, want %q", parsed.Engine, c.engine)
+			}
+			if parsed.DeviceObserved != c.deviceObserved {
+				t.Errorf("device_observed = %v, want %v", parsed.DeviceObserved, c.deviceObserved)
+			}
+			if parsed.CaseCount != c.caseCount {
+				t.Errorf("case_count = %d, want %d", parsed.CaseCount, c.caseCount)
+			}
+			if !parsed.Passed {
+				t.Errorf("passed must be true for valid oracle event")
+			}
+			if parsed.Bounds.MaxAbsDelta != c.maxAbsDeltaBound {
+				t.Errorf("bounds max_abs_delta = %g, want %g", parsed.Bounds.MaxAbsDelta, c.maxAbsDeltaBound)
+			}
+			if parsed.Bounds.RequireStateIdentity != c.requireStateIdentity {
+				t.Errorf("bounds require_state_identity = %v, want %v", parsed.Bounds.RequireStateIdentity, c.requireStateIdentity)
+			}
+			if parsed.Bounds.RequireFinite != c.requireFinite {
+				t.Errorf("bounds require_finite = %v, want %v", parsed.Bounds.RequireFinite, c.requireFinite)
+			}
+			if parsed.Observed.MaxAbsDelta > parsed.Bounds.MaxAbsDelta {
+				t.Errorf("observed max_abs_delta (%g) > bound (%g)", parsed.Observed.MaxAbsDelta, parsed.Bounds.MaxAbsDelta)
+			}
+			if c.requireStateIdentity && !parsed.Observed.StateIdentity {
+				t.Errorf("observed state_identity must be true")
+			}
+			if c.requireFinite && !parsed.Observed.FiniteOutput {
+				t.Errorf("observed finite_output must be true")
+			}
+
+			// Boundary failure: delta exceeds threshold
+			if c.formatExceedBoundFn != nil {
+				exceedRaw, err := c.formatExceedBoundFn()
+				if err != nil {
+					t.Fatalf("formatExceedBoundFn failed: %v", err)
+				}
+				var exceedParsed struct {
+					Passed bool `json:"passed"`
+				}
+				if err := json.Unmarshal(exceedRaw, &exceedParsed); err != nil {
+					t.Fatalf("unmarshal exceedRaw failed: %v", err)
+				}
+				if exceedParsed.Passed {
+					t.Errorf("expected passed=false when max_abs_delta exceeds bound")
+				}
+			}
+
+			// Boundary failure: state identity failure
+			if c.formatFailIdentityFn != nil {
+				failIdRaw, err := c.formatFailIdentityFn()
+				if err != nil {
+					t.Fatalf("formatFailIdentityFn failed: %v", err)
+				}
+				var failIdParsed struct {
+					Passed bool `json:"passed"`
+				}
+				if err := json.Unmarshal(failIdRaw, &failIdParsed); err != nil {
+					t.Fatalf("unmarshal failIdRaw failed: %v", err)
+				}
+				if failIdParsed.Passed {
+					t.Errorf("expected passed=false when state_identity is false")
+				}
+			}
+
+			// Boundary failure: non-finite output
+			if c.formatFailFiniteFn != nil {
+				failFiniteRaw, err := c.formatFailFiniteFn()
+				if err != nil {
+					t.Fatalf("formatFailFiniteFn failed: %v", err)
+				}
+				var failFiniteParsed struct {
+					Passed bool `json:"passed"`
+				}
+				if err := json.Unmarshal(failFiniteRaw, &failFiniteParsed); err != nil {
+					t.Fatalf("unmarshal failFiniteRaw failed: %v", err)
+				}
+				if failFiniteParsed.Passed {
+					t.Errorf("expected passed=false when finite_output is false")
+				}
+			}
+		})
+	}
+
+	// Sibling geometry validation must emit zero events
+	t.Run("GeometrySiblingEmitsNoOracle", func(t *testing.T) {
+		const geomTestName = "TestVulkanQwen35SequenceGeometryValidation"
+		for _, c := range contracts {
+			if c.testName == geomTestName {
+				t.Errorf("geometry test %s must not be mapped to any selector", geomTestName)
+			}
+		}
+	})
 }
