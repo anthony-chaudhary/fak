@@ -114,6 +114,7 @@ func HygieneGates() []HygieneGate {
 		{"INDEX_SYNC", gateIndexSyncTree, false, false},
 		{"BRAND_CONSISTENCY", gateBrandConsistencyTree, false, false},
 		{"TIER_DECLARED", gateTierDeclaredTree, false, true},
+		{"VERB_UNTIERED", gateVerbTierTree, false, true},
 		{"NEW_PYTHON_TOOL", gatePythonToolTree, false, true},
 		// GOD_FILE_GROWTH ships default-ON like NEW_PYTHON_TOOL: the grandfathered
 		// baseline (godfile_baseline.go) freezes today's offenders at-size, so the

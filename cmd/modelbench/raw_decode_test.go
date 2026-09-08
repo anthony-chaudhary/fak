@@ -294,6 +294,28 @@ type vulkanNamedRawDecodeTestBackend struct{ compute.Backend }
 
 func (vulkanNamedRawDecodeTestBackend) Name() string { return compute.Qwen38VulkanDecodeBackend }
 
+type observedRawDecodeTestBackend struct {
+	compute.Backend
+	identity      compute.BackendRuntimeIdentity
+	snapshotCalls int
+}
+
+func (b *observedRawDecodeTestBackend) Name() string { return compute.Qwen38VulkanDecodeBackend }
+func (b *observedRawDecodeTestBackend) BackendExecutionSnapshot() (compute.BackendExecutionSnapshot, error) {
+	b.snapshotCalls++
+	return compute.BackendExecutionSnapshot{
+		Identity: b.identity,
+		Counters: compute.BackendCounterSnapshot{
+			ComputeDispatches:   uint64(b.snapshotCalls),
+			Q4KMatmulDispatches: uint64(b.snapshotCalls),
+			DispatchSubmits:     uint64(b.snapshotCalls),
+		},
+		DeviceMemoryObserved:   true,
+		DeviceMemoryTotalBytes: 64 << 30,
+		DeviceMemoryFreeBytes:  48 << 30,
+	}, nil
+}
+
 func TestRawDecodeVulkanNameDoesNotClaimPhysicalEngineIdentity(t *testing.T) {
 	execution := rawdecode.Execution{
 		Backend:        rawdecode.BackendObservation{Selected: compute.Qwen38VulkanDecodeBackend},
@@ -310,7 +332,7 @@ func TestRawDecodeVulkanNameDoesNotClaimPhysicalEngineIdentity(t *testing.T) {
 
 func TestRawDecodePhysicalReceiptCarriesBackendObservationWithoutPromoting(t *testing.T) {
 	backendExecution := compute.BackendExecutionObservation{
-		Identity: compute.BackendRuntimeIdentity{Backend: "vulkan", Device: "fixture-device", Driver: "fixture-driver", Runtime: "Vulkan 1.3"},
+		Identity: compute.BackendRuntimeIdentity{Backend: "vulkan", Device: "fixture-device", Driver: "driver=mesa vendor=0x1002 device=0x1586", Runtime: "Vulkan 1.3"},
 		Counters: compute.BackendCounterSnapshot{
 			ComputeDispatches: 9, Q4KMatmulDispatches: 7, OtherDispatches: 2, DispatchSubmits: 3,
 			H2DBytes: 64, D2HBytes: 32, D2DCopies: 1, Q4KStageCalls: 2, Q4KStageBytes: 128,
@@ -332,7 +354,7 @@ func TestRawDecodePhysicalReceiptCarriesBackendObservationWithoutPromoting(t *te
 	if len(attempt.BackendExecutions) != 1 || attempt.BackendExecutions[0].Counters.ComputeDispatches != 9 || attempt.BackendExecutions[0].Counters.H2DBytes != 64 {
 		t.Fatalf("backend execution delta was not preserved: %+v", attempt.BackendExecutions)
 	}
-	if attempt.Observed.Device.Name != "fixture-device" || attempt.Observed.Device.VulkanVersion != "Vulkan 1.3" || attempt.Observed.Engine.Backend != "vulkan" || attempt.Observed.Engine.Runtime != compute.Qwen38VulkanDecodeRuntime || attempt.Observed.Engine.FallbackCount == nil || *attempt.Observed.Engine.FallbackCount != 0 {
+	if attempt.Observed.Device != (compute.Qwen38VulkanDeviceIdentity{}) || attempt.Observed.Engine.Backend != "vulkan" || attempt.Observed.Engine.Runtime != compute.Qwen38VulkanDecodeRuntime || attempt.Observed.Engine.FallbackCount == nil || *attempt.Observed.Engine.FallbackCount != 0 {
 		t.Fatalf("backend-owned canonical identity mapping mismatch: device=%+v engine=%+v", attempt.Observed.Device, attempt.Observed.Engine)
 	}
 	if attempt.Observed.Device.MesaVersion != "" || attempt.Observed.PeakProcessMemoryBytes != nil || attempt.Observed.PeakDeviceMemoryBytes != nil || attempt.Observed.Counters != nil {
@@ -359,9 +381,13 @@ func TestRawDecodePhysicalReceiptCarriesBackendObservationWithoutPromoting(t *te
 }
 
 func TestRawDecodePhysicalReceiptSeparatesNativeRuntimeFromVulkanAPI(t *testing.T) {
+	host := compute.VulkanHostEnvironment{
+		OS: "linux", Arch: "amd64", Kernel: "6.14.0", Device: "fixture-device",
+		VendorID: "0x1002", DeviceID: "0x1586", MesaDriver: "radv", MesaVersion: "Mesa 26.1", Firmware: "vbios-observed",
+	}
 	backendExecution := compute.BackendExecutionObservation{
 		Identity: compute.BackendRuntimeIdentity{
-			Backend: "vulkan", Device: "fixture-device", Driver: "fixture-driver", Runtime: "vulkan-1.3.0",
+			Backend: "vulkan", Device: "fixture-device", Driver: "driver=mesa vendor=0x1002 device=0x1586", Runtime: "vulkan-1.3.0",
 		},
 		Counters: compute.BackendCounterSnapshot{
 			ComputeDispatches: 1, Q4KMatmulDispatches: 1, DispatchSubmits: 1,
@@ -372,7 +398,7 @@ func TestRawDecodePhysicalReceiptSeparatesNativeRuntimeFromVulkanAPI(t *testing.
 		ArtifactSHA256: strings.Repeat("a", 64), Engine: "fak-in-kernel via compute HAL backend \"vulkan\"",
 		Backend: rawdecode.BackendObservation{Selected: "vulkan"}, PromptTokenIDs: []int{1},
 		ContextLimit: 8, GeneratedLimit: 1, FiniteLogits: true,
-		Runs: []rawdecode.Run{{BackendExecution: &backendExecution}},
+		Runs: []rawdecode.Run{{BackendExecution: &backendExecution, HostEnvironment: &host}},
 	}
 
 	attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
@@ -388,6 +414,130 @@ func TestRawDecodePhysicalReceiptSeparatesNativeRuntimeFromVulkanAPI(t *testing.
 	if attempt.Observed.Engine.Runtime == backendExecution.Identity.Runtime {
 		t.Fatalf("Vulkan API identity escaped into engine runtime: %+v", attempt.Observed.Engine)
 	}
+}
+
+func TestRawDecodePhysicalReceiptMapsOnlyCrossBoundStableHostEnvironment(t *testing.T) {
+	identity := compute.BackendRuntimeIdentity{
+		Backend: "vulkan", Device: "AMD Radeon 8060S Graphics",
+		Driver: "driver=mesa-26.1 vendor=0x1002 device=0x1586", Runtime: "vulkan-1.4.0",
+	}
+	baseHost := compute.VulkanHostEnvironment{
+		OS: "linux", Arch: "amd64", Kernel: "6.14.0", Device: identity.Device,
+		VendorID: "0x1002", DeviceID: "0x1586", MesaDriver: "radv",
+		MesaVersion: "Mesa 26.1.0", Firmware: "vbios-observed",
+	}
+	newExecution := func() rawdecode.Execution {
+		runs := make([]rawdecode.Run, 2)
+		for i := range runs {
+			backend := compute.BackendExecutionObservation{
+				Identity:             identity,
+				Counters:             compute.BackendCounterSnapshot{ComputeDispatches: 1, Q4KMatmulDispatches: 1, DispatchSubmits: 1},
+				DeviceMemoryObserved: true, DeviceMemoryTotalBytes: 64 << 30, DeviceMemoryFreeBytes: 48 << 30,
+			}
+			host := baseHost
+			runs[i] = rawdecode.Run{BackendExecution: &backend, HostEnvironment: &host}
+		}
+		return rawdecode.Execution{
+			Engine: "fak-in-kernel via compute HAL backend \"vulkan\"", Backend: rawdecode.BackendObservation{Selected: "vulkan"},
+			PromptTokenIDs: []int{1}, ContextLimit: 8, GeneratedLimit: 1, FiniteLogits: true, Runs: runs,
+		}
+	}
+	repOutputs := []rawRepOutput{
+		{generatedTokens: []int{2}, prefillDur: time.Nanosecond},
+		{generatedTokens: []int{2}, prefillDur: time.Nanosecond},
+	}
+
+	attempt := rawDecodePhysicalReceipt(newExecution(), repOutputs)
+	want := compute.Qwen38VulkanDeviceIdentity{
+		OS: baseHost.OS, Arch: baseHost.Arch, Kernel: baseHost.Kernel, Name: baseHost.Device,
+		MesaVersion: baseHost.MesaVersion, VulkanVersion: identity.Runtime, Firmware: baseHost.Firmware,
+	}
+	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil || attempt.Observed.Device != want {
+		t.Fatalf("cross-bound host mapping = %+v, want unavailable attempt with device %+v", attempt, want)
+	}
+
+	for name, mutate := range map[string]func(*rawdecode.Execution){
+		"missing":                    func(e *rawdecode.Execution) { e.Runs[0].HostEnvironment = nil },
+		"ambiguous observer refusal": func(e *rawdecode.Execution) { e.Runs[1].HostEnvironment = nil },
+		"wrong device":               func(e *rawdecode.Execution) { e.Runs[0].HostEnvironment.Device = "different" },
+		"wrong PCI":                  func(e *rawdecode.Execution) { e.Runs[0].HostEnvironment.DeviceID = "0x9999" },
+		"opaque backend driver":      func(e *rawdecode.Execution) { e.Runs[0].BackendExecution.Identity.Driver = "Mesa RADV" },
+		"per-run drift":              func(e *rawdecode.Execution) { e.Runs[1].HostEnvironment.Kernel = "6.15.0" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			execution := newExecution()
+			mutate(&execution)
+			got := rawDecodePhysicalReceipt(execution, repOutputs)
+			if got.Status != "UNAVAILABLE" || got.CreditEligible || got.Receipt != nil || got.Observed.Device != (compute.Qwen38VulkanDeviceIdentity{}) {
+				t.Fatalf("invalid host tuple was mapped or promoted: %+v", got)
+			}
+		})
+	}
+}
+
+func TestExecuteRawDecodeObservesHostAfterEveryRealRepetitionAndFailsClosed(t *testing.T) {
+	defer setRawDecodeTestFlags(true, "1", 8, false, false)()
+	identity := compute.BackendRuntimeIdentity{
+		Backend: "vulkan", Device: "AMD Radeon 8060S Graphics",
+		Driver: "driver=mesa-26.1 vendor=0x1002 device=0x1586", Runtime: "vulkan-1.4.0",
+	}
+	host := compute.VulkanHostEnvironment{
+		OS: "linux", Arch: "amd64", Kernel: "6.14.0", Device: identity.Device,
+		VendorID: "0x1002", DeviceID: "0x1586", MesaDriver: "radv",
+		MesaVersion: "Mesa 26.1.0", Firmware: "vbios-observed",
+	}
+
+	run := func(t *testing.T, observerErr error) (rawDecodePhysicalReceiptAttempt, int) {
+		t.Helper()
+		backend := &observedRawDecodeTestBackend{Backend: compute.Default(), identity: identity}
+		calls := 0
+		observe := func(_ context.Context, got compute.Backend) (compute.VulkanHostEnvironment, error) {
+			calls++
+			if got != backend {
+				t.Fatalf("observer backend=%T, want exact executing backend", got)
+			}
+			if backend.snapshotCalls != calls*2 {
+				t.Fatalf("observer call %d preceded %d snapshots, want post-execution call after %d", calls, backend.snapshotCalls, calls*2)
+			}
+			if observerErr != nil {
+				return compute.VulkanHostEnvironment{}, observerErr
+			}
+			return host, nil
+		}
+		f := testRawDecodeFlags(1, 2)
+		report, err := executeRawDecodeWithHostObserver(f, model.NewSynthetic(syntheticTestConfig()), "observed-model", 0, 0, backend, nil, observe)
+		if err != nil {
+			t.Fatalf("executeRawDecodeWithHostObserver: %v", err)
+		}
+		attempt, ok := report["canonical_physical_receipt"].(rawDecodePhysicalReceiptAttempt)
+		if !ok {
+			t.Fatalf("canonical receipt type=%T", report["canonical_physical_receipt"])
+		}
+		return attempt, calls
+	}
+
+	t.Run("maps stable tuple", func(t *testing.T) {
+		attempt, calls := run(t, nil)
+		if calls != 2 {
+			t.Fatalf("observer calls=%d, want one for each of two repetitions", calls)
+		}
+		if attempt.Observed.Device.Name != host.Device || attempt.Observed.Device.MesaVersion != host.MesaVersion {
+			t.Fatalf("stable host tuple was not mapped: %+v", attempt.Observed.Device)
+		}
+		if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
+			t.Fatalf("incomplete receipt became creditable: %+v", attempt)
+		}
+	})
+
+	t.Run("observer error clears tuple", func(t *testing.T) {
+		attempt, calls := run(t, errors.New("observation unavailable"))
+		if calls != 2 {
+			t.Fatalf("observer calls=%d, want one for each of two repetitions", calls)
+		}
+		if attempt.Observed.Device != (compute.Qwen38VulkanDeviceIdentity{}) || attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
+			t.Fatalf("observer error escaped partial canonical evidence: %+v", attempt)
+		}
+	})
 }
 
 func TestRawDecodeExecutorProductionAdapterCallsSeamOnceAndFailsReceiptClosed(t *testing.T) {

@@ -176,3 +176,61 @@ func TestBuildOpencodeChat_SubagentDepth(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildOpencodeChat_DefaultAgentWorker(t *testing.T) {
+	iss := Issue{
+		Number: 12255,
+		Title:  "Test default agent",
+		Lane:   "issueorchestrator",
+	}
+
+	// When opts.Agent is empty, it must default to "worker".
+	chat := BuildOpencodeChat(iss, OpencodeChatOptions{})
+
+	foundAgent := false
+	for i, arg := range chat.Command {
+		if arg == "--agent" {
+			foundAgent = true
+			if i+1 >= len(chat.Command) || chat.Command[i+1] != "worker" {
+				t.Fatalf("expected '--agent' followed by 'worker', got: %v", chat.Command)
+			}
+			break
+		}
+	}
+	if !foundAgent {
+		t.Fatalf("expected command to contain '--agent worker', got: %v", chat.Command)
+	}
+}
+
+func TestBuildOpencodeChat_ExplicitAgentOverride(t *testing.T) {
+	iss := Issue{
+		Number: 12255,
+		Title:  "Test explicit agent override",
+		Lane:   "issueorchestrator",
+	}
+
+	// When opts.Agent is explicitly provided, it must preserve the override.
+	chat := BuildOpencodeChat(iss, OpencodeChatOptions{
+		Agent: "researcher",
+	})
+
+	foundAgent := false
+	for i, arg := range chat.Command {
+		if arg == "--agent" {
+			foundAgent = true
+			if i+1 >= len(chat.Command) || chat.Command[i+1] != "researcher" {
+				t.Fatalf("expected '--agent' followed by 'researcher', got: %v", chat.Command)
+			}
+			break
+		}
+	}
+	if !foundAgent {
+		t.Fatalf("expected command to contain '--agent researcher', got: %v", chat.Command)
+	}
+
+	for _, arg := range chat.Command {
+		if arg == "worker" {
+			t.Fatalf("command should not contain default 'worker' when overridden, got: %v", chat.Command)
+		}
+	}
+}

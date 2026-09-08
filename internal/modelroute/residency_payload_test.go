@@ -583,6 +583,8 @@ func TestGlobMatchingPatterns(t *testing.T) {
 		// Windows backslash normalization
 		{"secret/**", "secret\\nested\\file.txt", true},
 		{"*.pem", "certs\\prod.pem", true},
+		{"secret\\**", "secret\\nested\\file.txt", true},
+		{"secret/**", "other\\secret\\keys.env", false},
 	}
 
 	for _, tc := range tests {

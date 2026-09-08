@@ -417,11 +417,19 @@ func EvaluateLaneHealth(l DebtLane) LaneHealth {
 	if !l.Evidence.Integrated {
 		score -= 0.15
 	}
-	if !l.Evidence.Dogfooded && (l.Criticality == CriticalityCore || l.Criticality == CriticalityEnabling) {
-		score -= 0.05
+	if !l.Evidence.Dogfooded {
+		if l.Criticality == CriticalityCore {
+			score -= 0.15 // 3x harsher penalty on core unproven runtime (was 0.05)
+		} else if l.Criticality == CriticalityEnabling {
+			score -= 0.05
+		}
 	}
-	if !l.Evidence.Benchmarked && (l.Criticality == CriticalityCore || l.Criticality == CriticalityEnabling) {
-		score -= 0.05
+	if !l.Evidence.Benchmarked {
+		if l.Criticality == CriticalityCore {
+			score -= 0.15 // 3x harsher penalty on core unbenchmarked runtime (was 0.05)
+		} else if l.Criticality == CriticalityEnabling {
+			score -= 0.05
+		}
 	}
 	if l.Interest.Band == InterestCritical {
 		score -= 0.20

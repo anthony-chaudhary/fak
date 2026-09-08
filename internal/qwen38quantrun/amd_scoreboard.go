@@ -93,6 +93,11 @@ type AMDScoreboardTrial struct {
 	D2HBytes                  uint64    `json:"d2h_bytes"`
 	D2DBytes                  uint64    `json:"d2d_bytes"`
 	QueueSubmissions          uint64    `json:"queue_submissions"`
+	// ObservedIgnoreEOS and EOSStopped are authoritative physical receipt
+	// observations. A requested generation flag must never populate them.
+	ObservedIgnoreEOS    *bool  `json:"observed_ignore_eos,omitempty"`
+	EOSStopped           *bool  `json:"eos_stopped,omitempty"`
+	AcceptedOutputTokens uint64 `json:"accepted_output_tokens,omitempty"`
 }
 
 func (t AMDScoreboardTrial) EffectiveTokenIDs() []int {
@@ -507,6 +512,24 @@ func validateAMDArm(arm AMDArmReceipt, role string, add func(string)) {
 		}
 		if t.H2DBytes == 0 || t.D2HBytes == 0 || t.QueueSubmissions == 0 {
 			add(prefix + "transfer-or-submission-accounting-missing")
+		}
+		if fixed128 {
+			if t.ObservedIgnoreEOS == nil {
+				add(prefix + "fixed-128-ignore-eos-observation-missing")
+			} else if !*t.ObservedIgnoreEOS {
+				add(prefix + "fixed-128-ignore-eos-not-observed")
+			}
+			if t.EOSStopped == nil {
+				add(prefix + "fixed-128-eos-stopped-observation-missing")
+			} else if *t.EOSStopped {
+				add(prefix + "fixed-128-eos-stopped")
+			}
+			if t.AcceptedOutputTokens != 128 {
+				add(prefix + "fixed-128-accepted-output-token-count-mismatch")
+			}
+			if len(t.OutputTokenIDs) != 128 {
+				add(prefix + "fixed-128-output-token-count-mismatch")
+			}
 		}
 		for _, v := range logits {
 			if math.IsNaN(v) || math.IsInf(v, 0) {

@@ -56,16 +56,19 @@ func IsLocalOnlyClass(class string) bool {
 
 // normalizePath converts path separators to slashes, strips leading prefixes, and cleans the path.
 func normalizePath(p string) string {
-	p = filepath.ToSlash(strings.TrimSpace(p))
+	p = strings.ReplaceAll(filepath.ToSlash(strings.TrimSpace(p)), "\\", "/")
 	p = strings.TrimPrefix(p, "./")
 	p = strings.TrimPrefix(p, "/")
+	if p == "" {
+		return ""
+	}
 	return path.Clean(p)
 }
 
 // matchPattern matches a glob pattern against a target path.
 // Supports exact match, recursive "**", directory prefix, extension match, and path.Match.
 func matchPattern(pattern, targetPath string) bool {
-	normPat := filepath.ToSlash(strings.TrimSpace(pattern))
+	normPat := strings.ReplaceAll(filepath.ToSlash(strings.TrimSpace(pattern)), "\\", "/")
 	normPat = strings.TrimPrefix(normPat, "./")
 	normPat = strings.TrimPrefix(normPat, "/")
 	normTarget := normalizePath(targetPath)

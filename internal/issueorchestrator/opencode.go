@@ -103,6 +103,10 @@ func BuildOpencodeChat(issue Issue, opts OpencodeChatOptions) OpencodeChat {
 		}
 	}
 
+	if opts.Agent == "" {
+		opts.Agent = "worker"
+	}
+
 	prompt := FormatOpencodePrompt(issue)
 
 	var cmd []string
@@ -122,9 +126,7 @@ func BuildOpencodeChat(issue Issue, opts OpencodeChatOptions) OpencodeChat {
 	if opts.Model != "" {
 		cmd = append(cmd, "-m", opts.Model)
 	}
-	if opts.Agent != "" {
-		cmd = append(cmd, "--agent", opts.Agent)
-	}
+	cmd = append(cmd, "--agent", opts.Agent)
 	if opts.Variant != "" {
 		cmd = append(cmd, "--variant", opts.Variant)
 	}

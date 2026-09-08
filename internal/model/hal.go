@@ -887,8 +887,9 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 // capture, returning the same (logits, nextToken) contract as the inline tail it replaces:
 // halNoLogits short-circuits; halArgmax prefers a fused norm+matmul+argmax (then a fused
 // matmul+argmax, then host Argmax); the logits modes prefer a fused norm+matmul. The fused
-// argmax paths stay gated on !capturing and (for the F32 matmul) an F32 head, and every
-// fused-norm path stays gated on !useQ8Weights, exactly as before.
+// argmax paths stay gated on !capturing and an explicitly supported head dtype. Q2_K
+// bypasses the F32-only fused-norm path so its packed resident head reaches MatMulArgmax;
+// every fused-norm path otherwise stays gated on !useQ8Weights, exactly as before.
 func (s *Session) halFinalLogits(x compute.Tensor, mode halOutputMode, capturing, useQ8Weights bool, finishGraph func()) (compute.Tensor, int) {
 	be := s.Backend
 	eps := float32(s.M.Cfg.RMSNormEps)
@@ -898,7 +899,8 @@ func (s *Session) halFinalLogits(x compute.Tensor, mode halOutputMode, capturing
 	}
 	finalNorm := s.normWeightHAL("model.norm.weight")
 	if mode == halArgmax {
-		if fused, ok := be.(rmsNormMatMulArgmaxBackend); ok && !capturing && !useQ8Weights {
+		head := s.lmHeadMatHAL()
+		if fused, ok := be.(rmsNormMatMulArgmaxBackend); ok && !capturing && !useQ8Weights && head.Dtype != compute.Q2_K {
 			next := fused.RMSNormMatMulArgmax(s.lmHeadHAL(), x, finalNorm, eps)
 			finishGraph()
 			return compute.Tensor{}, next
@@ -914,7 +916,7 @@ func (s *Session) halFinalLogits(x compute.Tensor, mode halOutputMode, capturing
 	hidden := be.RMSNorm(x, finalNorm, eps)
 	head := s.lmHeadMatHAL()
 	if mode == halArgmax {
-		if fused, ok := be.(matMulArgmaxBackend); ok && !capturing && head.Dtype == compute.F32 {
+		if fused, ok := be.(matMulArgmaxBackend); ok && !capturing && (head.Dtype == compute.F32 || head.Dtype == compute.Q2_K) {
 			next := fused.MatMulArgmax(head, hidden)
 			finishGraph()
 			return compute.Tensor{}, next

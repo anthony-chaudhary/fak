@@ -116,6 +116,8 @@ func gateScopes() []gateScopeRow {
 			"registered ONLY as a hygiene tree gate (HygieneGates, DefaultOff) — it has no staged twin to scope, and its whole-tree denominator is the audit sweep that proves the retirement; give it a staged twin and that twin lands LANDS_TREE"},
 		{"TIER_DECLARED", "gate_tierdeclared.go", SeamHygiene, ClassTreeTwin,
 			"whole-tree hygiene twin of UNTIERED_LEAF, which IS scoped — the commit-boundary refusal is the staged one"},
+		{"VERB_UNTIERED", "gate_verbtier.go", SeamHygiene, ClassTreeTwin,
+			"whole-tree hygiene gate for CLI verb tier totality, push-scoped to CLI dispatch and tier tables"},
 		{"BRAND_CONSISTENCY", "gate_brandconsistency.go", SeamHygiene, ClassTreeTwin, "whole-tree hygiene sweep"},
 		{"SWALLOWED_ERROR", "gate_swallowederror.go", SeamHygiene, ClassTreeTwin, "whole-tree hygiene sweep (DefaultOff migration ratchet)"},
 		{"GOD_FILE_GROWTH", "gate_godfile.go", SeamHygiene, ClassTreeTwin, "whole-tree hygiene sweep against a frozen baseline"},

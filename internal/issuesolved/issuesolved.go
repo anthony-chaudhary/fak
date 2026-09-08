@@ -71,6 +71,7 @@ type Report struct {
 type RepoReport struct {
 	Repo        string      `json:"repo"`
 	Path        string      `json:"path"`
+	Source      string      `json:"source"`
 	Solved      int         `json:"solved"`
 	Closed      int         `json:"closed"`
 	NotPlanned  int         `json:"not_planned"`
@@ -245,11 +246,13 @@ func collectRepo(ctx context.Context, repo, dir string, opts Options,
 
 	switch source {
 	case "github":
+		rr.Source = "github"
 		issues, issuesErr = collectIssuesFromGh(ctx, repo, opts.Since, opts.Now, ghExec)
 		if issuesErr != nil {
 			return rr, issuesErr
 		}
 	case "git":
+		rr.Source = "git"
 		issues, issuesErr = collectIssuesFromGit(ctx, repo, dir, opts.Since, opts.Now, gitExec)
 		if issuesErr != nil {
 			return rr, issuesErr
@@ -257,12 +260,15 @@ func collectRepo(ctx context.Context, repo, dir string, opts Options,
 	case "auto":
 		issues, issuesErr = collectIssuesFromGh(ctx, repo, opts.Since, opts.Now, ghExec)
 		if issuesErr != nil {
+			rr.Source = "git"
 			gitIssues, gitErr := collectIssuesFromGit(ctx, repo, dir, opts.Since, opts.Now, gitExec)
 			if gitErr == nil {
 				issues = gitIssues
 			} else {
 				issues = []IssueItem{}
 			}
+		} else {
+			rr.Source = "github"
 		}
 	default:
 		return rr, fmt.Errorf("unknown source: %q (supported: auto, github, git)", opts.Source)
@@ -340,6 +346,9 @@ func collectIssuesFromGh(ctx context.Context, repo string, since, until time.Tim
 		"--state", "closed",
 		"--limit", "300",
 		"--json", "number,title,closedAt,stateReason,url",
+	}
+	if !since.IsZero() {
+		args = append(args, "--search", fmt.Sprintf("closed:>=%s", since.UTC().Format(time.RFC3339)))
 	}
 	out, err := execFn(ctx, args...)
 	if err != nil {

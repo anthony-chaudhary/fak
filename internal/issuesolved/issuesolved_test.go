@@ -185,6 +185,9 @@ func TestCollect_GhParsing_TimeFiltering_StateReason(t *testing.T) {
 	if pub.Repo != "anthony-chaudhary/fak" {
 		t.Errorf("expected public repo name 'anthony-chaudhary/fak', got %q", pub.Repo)
 	}
+	if pub.Source != "github" {
+		t.Errorf("expected public Source='github', got %q", pub.Source)
+	}
 	if pub.Solved != 1 {
 		t.Errorf("expected public Solved=1, got %d", pub.Solved)
 	}
@@ -205,6 +208,9 @@ func TestCollect_GhParsing_TimeFiltering_StateReason(t *testing.T) {
 	priv := rep.Repos[1]
 	if priv.Repo != "anthony-chaudhary/fak-private" {
 		t.Errorf("expected private repo name 'anthony-chaudhary/fak-private', got %q", priv.Repo)
+	}
+	if priv.Source != "github" {
+		t.Errorf("expected private Source='github', got %q", priv.Source)
 	}
 	if priv.Solved != 1 {
 		t.Errorf("expected private Solved=1, got %d", priv.Solved)
@@ -278,6 +284,9 @@ func TestCollect_FallbackToGit(t *testing.T) {
 		t.Fatalf("expected 1 repo, got %d", len(rep.Repos))
 	}
 	r := rep.Repos[0]
+	if r.Source != "git" {
+		t.Errorf("expected Source='git', got %q", r.Source)
+	}
 	if r.CommitCount != 42 {
 		t.Errorf("expected CommitCount=42, got %d", r.CommitCount)
 	}
@@ -334,6 +343,9 @@ func TestCollect_SourceExplicitGit(t *testing.T) {
 	}
 	if ghCalled {
 		t.Errorf("GhExecutor was called unexpectedly when Source='git'")
+	}
+	if rep.Repos[0].Source != "git" {
+		t.Errorf("expected Source='git', got %q", rep.Repos[0].Source)
 	}
 	if rep.TotalSolved != 1 {
 		t.Errorf("expected TotalSolved=1, got %d", rep.TotalSolved)
@@ -537,5 +549,146 @@ func TestResolvePrivateDir_Env(t *testing.T) {
 	got := resolvePrivateDir(".", "")
 	if got != tempDir {
 		t.Errorf("expected %q, got %q", tempDir, got)
+	}
+}
+
+func TestReport_ProvenanceAndFilter(t *testing.T) {
+	fixedNow := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	fixedSince := time.Date(2026, 9, 8, 3, 0, 0, 0, time.UTC)
+
+	var capturedGhArgs []string
+	mockGh := func(ctx context.Context, args ...string) ([]byte, error) {
+		capturedGhArgs = args
+		issues := []map[string]any{
+			{
+				"number":      12162,
+				"title":       "feat(issuesolved): record provenance in report schema",
+				"closedAt":    "2026-09-08T05:00:00Z",
+				"stateReason": "COMPLETED",
+				"url":         "https://github.com/anthony-chaudhary/fak/issues/12162",
+			},
+		}
+		return json.Marshal(issues)
+	}
+
+	mockGit := func(ctx context.Context, dir string, args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "rev-list" {
+			return []byte("5\n"), nil
+		}
+		return nil, nil
+	}
+
+	// 1. Verify GitHub source and search filter generation
+	optsGh := Options{
+		Since:          fixedSince,
+		Now:            fixedNow,
+		IncludePrivate: false,
+		Source:         "github",
+		GhExecutor:     mockGh,
+		GitExecutor:    mockGit,
+	}
+
+	repGh, err := Collect(context.Background(), optsGh)
+	if err != nil {
+		t.Fatalf("Collect failed for github source: %v", err)
+	}
+	if len(repGh.Repos) != 1 {
+		t.Fatalf("expected 1 repo, got %d", len(repGh.Repos))
+	}
+	if repGh.Repos[0].Source != "github" {
+		t.Errorf("expected Repos[0].Source='github', got %q", repGh.Repos[0].Source)
+	}
+
+	// Verify gh search args contain --search closed:>=<since>
+	hasSearch := false
+	expectedFilter := fmt.Sprintf("closed:>=%s", fixedSince.UTC().Format(time.RFC3339))
+	for i, arg := range capturedGhArgs {
+		if arg == "--search" && i+1 < len(capturedGhArgs) && capturedGhArgs[i+1] == expectedFilter {
+			hasSearch = true
+			break
+		}
+	}
+	if !hasSearch {
+		t.Errorf("expected captured gh args to contain '--search %s', got: %v", expectedFilter, capturedGhArgs)
+	}
+
+	// Verify JSON serialization includes "source": "github"
+	var bufGh bytes.Buffer
+	if err := RenderJSON(&bufGh, repGh); err != nil {
+		t.Fatalf("RenderJSON failed: %v", err)
+	}
+	if !strings.Contains(bufGh.String(), `"source": "github"`) {
+		t.Errorf("expected JSON to contain '\"source\": \"github\"', got: %s", bufGh.String())
+	}
+
+	// 2. Verify Git source provenance
+	optsGit := Options{
+		Since:          fixedSince,
+		Now:            fixedNow,
+		IncludePrivate: false,
+		Source:         "git",
+		GitExecutor: func(ctx context.Context, dir string, args ...string) ([]byte, error) {
+			if len(args) > 0 && args[0] == "rev-list" {
+				return []byte("2\n"), nil
+			}
+			if len(args) > 0 && args[0] == "log" {
+				rec := "sha1\x1f2026-09-08T04:00:00Z\x1ffix: git issue (#12162)\x1f"
+				return []byte(rec + "\x1e"), nil
+			}
+			return nil, nil
+		},
+	}
+
+	repGit, err := Collect(context.Background(), optsGit)
+	if err != nil {
+		t.Fatalf("Collect failed for git source: %v", err)
+	}
+	if repGit.Repos[0].Source != "git" {
+		t.Errorf("expected Repos[0].Source='git', got %q", repGit.Repos[0].Source)
+	}
+
+	var bufGit bytes.Buffer
+	if err := RenderJSON(&bufGit, repGit); err != nil {
+		t.Fatalf("RenderJSON failed: %v", err)
+	}
+	if !strings.Contains(bufGit.String(), `"source": "git"`) {
+		t.Errorf("expected JSON to contain '\"source\": \"git\"', got: %s", bufGit.String())
+	}
+
+	// 3. Verify Auto fallback to Git provenance
+	optsAutoFallback := Options{
+		Since:          fixedSince,
+		Now:            fixedNow,
+		IncludePrivate: false,
+		Source:         "auto",
+		GhExecutor: func(ctx context.Context, args ...string) ([]byte, error) {
+			return nil, errors.New("gh offline")
+		},
+		GitExecutor: func(ctx context.Context, dir string, args ...string) ([]byte, error) {
+			if len(args) > 0 && args[0] == "rev-list" {
+				return []byte("1\n"), nil
+			}
+			return nil, nil
+		},
+	}
+
+	repAuto, err := Collect(context.Background(), optsAutoFallback)
+	if err != nil {
+		t.Fatalf("Collect failed for auto fallback: %v", err)
+	}
+	if repAuto.Repos[0].Source != "git" {
+		t.Errorf("expected Repos[0].Source='git' on gh failure, got %q", repAuto.Repos[0].Source)
+	}
+
+	// 4. Verify that zero Since does not generate --search flag in collectIssuesFromGh
+	var capturedZeroArgs []string
+	_, _ = collectIssuesFromGh(context.Background(), "anthony-chaudhary/fak", time.Time{}, fixedNow, func(ctx context.Context, args ...string) ([]byte, error) {
+		capturedZeroArgs = args
+		return []byte("[]"), nil
+	})
+	for _, arg := range capturedZeroArgs {
+		if arg == "--search" {
+			t.Errorf("expected no '--search' arg when since is zero, got: %v", capturedZeroArgs)
+		}
 	}
 }

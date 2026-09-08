@@ -2,6 +2,7 @@ package safesync
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -392,6 +393,22 @@ func TestParseGoal(t *testing.T) {
 			wantTarget:    "origin/main",
 		},
 		{
+			raw:           "",
+			defaultRemote: "origin",
+			defaultBranch: "",
+			wantKind:      "publish",
+			wantSource:    "HEAD",
+			wantTarget:    "origin/main",
+		},
+		{
+			raw:           "integrate",
+			defaultRemote: "origin",
+			defaultBranch: "",
+			wantKind:      "integrate",
+			wantSource:    "HEAD",
+			wantTarget:    "origin/main",
+		},
+		{
 			raw:           "publish",
 			defaultRemote: "origin",
 			defaultBranch: "work",
@@ -452,6 +469,134 @@ func TestParseGoal(t *testing.T) {
 				t.Errorf("Target = %q, want %q", got.Target, tc.wantTarget)
 			}
 		})
+	}
+}
+
+func TestParseGoal_BranchRole(t *testing.T) {
+	tmp := t.TempDir()
+	dosFile := filepath.Join(tmp, "dos.toml")
+	if err := os.WriteFile(dosFile, []byte("[branch_roles]\ndevelopment_branch = \"dev\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(tmp)
+
+	cases := []struct {
+		name          string
+		raw           string
+		defaultRemote string
+		defaultBranch string
+		wantKind      string
+		wantSource    string
+		wantTarget    string
+	}{
+		{
+			name:          "empty goal derives dev",
+			raw:           "",
+			defaultRemote: "origin",
+			defaultBranch: "",
+			wantKind:      "publish",
+			wantSource:    "HEAD",
+			wantTarget:    "origin/dev",
+		},
+		{
+			name:          "publish goal derives dev",
+			raw:           "publish",
+			defaultRemote: "origin",
+			defaultBranch: "",
+			wantKind:      "publish",
+			wantSource:    "HEAD",
+			wantTarget:    "origin/dev",
+		},
+		{
+			name:          "integrate goal derives dev",
+			raw:           "integrate",
+			defaultRemote: "origin",
+			defaultBranch: "",
+			wantKind:      "integrate",
+			wantSource:    "HEAD",
+			wantTarget:    "origin/dev",
+		},
+		{
+			name:          "explicit branch takes precedence",
+			raw:           "",
+			defaultRemote: "origin",
+			defaultBranch: "feature",
+			wantKind:      "publish",
+			wantSource:    "HEAD",
+			wantTarget:    "origin/feature",
+		},
+		{
+			name:          "explicit integrate ref takes precedence",
+			raw:           "integrate upstream/custom",
+			defaultRemote: "origin",
+			defaultBranch: "",
+			wantKind:      "integrate",
+			wantSource:    "HEAD",
+			wantTarget:    "upstream/custom",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseGoal(tc.raw, tc.defaultRemote, tc.defaultBranch)
+			if err != nil {
+				t.Fatalf("ParseGoal(%q) error = %v", tc.raw, err)
+			}
+			if got.Kind != tc.wantKind {
+				t.Errorf("Kind = %q, want %q", got.Kind, tc.wantKind)
+			}
+			if got.Source != tc.wantSource {
+				t.Errorf("Source = %q, want %q", got.Source, tc.wantSource)
+			}
+			if got.Target != tc.wantTarget {
+				t.Errorf("Target = %q, want %q", got.Target, tc.wantTarget)
+			}
+		})
+	}
+}
+
+func TestRouteReconciliationDetached_BranchRole(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+
+	origin := filepath.Join(tmp, "origin")
+	mkdir(t, origin)
+	git(t, origin, "init", "-b", "dev")
+	git(t, origin, "config", "user.name", "test")
+	git(t, origin, "config", "user.email", "test@example.com")
+	writeFile(t, filepath.Join(origin, "init.txt"), "init\n")
+	git(t, origin, "add", ".")
+	git(t, origin, "commit", "-m", "init")
+
+	clone := filepath.Join(tmp, "clone")
+	git(t, tmp, "-c", "core.autocrlf=false", "clone", "-b", "dev", origin, clone)
+	git(t, clone, "config", "core.autocrlf", "false")
+	git(t, clone, "config", "user.name", "test")
+	git(t, clone, "config", "user.email", "test@example.com")
+
+	writeFile(t, filepath.Join(clone, "dos.toml"), "[branch_roles]\ndevelopment_branch = \"dev\"\n")
+	git(t, clone, "checkout", "--detach", "HEAD")
+
+	opts := ReconcileOptions{
+		Repo:   clone,
+		Remote: "origin",
+		Branch: "",
+		Goal:   "publish",
+	}
+
+	assessment, err := RouteReconciliation(ctx, opts)
+	if err != nil {
+		t.Fatalf("RouteReconciliation error: %v", err)
+	}
+	if assessment.Branch != "dev" {
+		t.Fatalf("assessment.Branch = %q, want dev", assessment.Branch)
+	}
+	if assessment.TargetRef != "origin/dev" {
+		t.Fatalf("assessment.TargetRef = %q, want origin/dev", assessment.TargetRef)
+	}
+	if assessment.Route != RouteNoop {
+		t.Fatalf("assessment.Route = %q, want %s", assessment.Route, RouteNoop)
 	}
 }
 

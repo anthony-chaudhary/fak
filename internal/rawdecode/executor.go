@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -96,6 +97,7 @@ type Run struct {
 	Steps                []Step
 	CPUVerification      *CPUVerification
 	BackendExecution     *compute.BackendExecutionObservation
+	HostEnvironment      *compute.VulkanHostEnvironment
 }
 
 // BackendObservation describes the backend that was actually resolved. It is
@@ -152,6 +154,7 @@ type dependencies struct {
 	inspectArtifact func(string, func(string) (io.ReadCloser, error)) (artifactObservation, error)
 	loadModel       func(context.Context, Request) (loadedModel, string, error)
 	resolveBackend  func(Request) (compute.Backend, BackendObservation, error)
+	observeHost     func(context.Context, compute.Backend) (compute.VulkanHostEnvironment, error)
 	now             func() time.Time
 	since           func(time.Time) time.Duration
 }
@@ -198,8 +201,9 @@ func defaultDependencies() dependencies {
 			observed.Caps = be.Caps()
 			return be, observed, nil
 		},
-		now:   time.Now,
-		since: time.Since,
+		observeHost: compute.ObserveVulkanHostEnvironment,
+		now:         time.Now,
+		since:       time.Since,
 	}
 }
 
@@ -257,7 +261,7 @@ func (d dependencies) execute(ctx context.Context, req Request) (Execution, erro
 	if since == nil {
 		since = func(start time.Time) time.Duration { return d.now().Sub(start) }
 	}
-	exec, runErr := executeLoaded(req, lm, be, d.now, since)
+	exec, runErr := executeLoaded(ctx, req, lm, be, d.observeHost, d.now, since)
 	if runErr != nil && len(exec.Runs) == 0 {
 		return Execution{}, runErr
 	}
@@ -492,11 +496,19 @@ func describeEngine(req Request, be compute.Backend) (string, string) {
 // non-GGUF command inputs. It executes the same orchestration loop but cannot
 // produce artifact identity because it did not open the artifact.
 func ExecuteModel(req Request, m *model.Model, be compute.Backend) (Execution, error) {
+	return ExecuteModelWithHostObserver(context.Background(), req, m, be, compute.ObserveVulkanHostEnvironment)
+}
+
+// ExecuteModelWithHostObserver executes an already-loaded model while allowing
+// callers to inject the host observer for deterministic device-free tests.
+// Production callers should use ExecuteModel, which installs the strict
+// backend-bound Linux/RADV observer.
+func ExecuteModelWithHostObserver(ctx context.Context, req Request, m *model.Model, be compute.Backend, observeHost func(context.Context, compute.Backend) (compute.VulkanHostEnvironment, error)) (Execution, error) {
 	if m == nil {
 		return Execution{}, errors.New("raw decode: nil model")
 	}
 	pm := &productionModel{model: m}
-	exec, err := executeLoaded(req, pm, be, time.Now, time.Since)
+	exec, err := executeLoaded(ctx, req, pm, be, observeHost, time.Now, time.Since)
 	exec.ModelName = m.Cfg.ModelType
 	exec.ModelConfig = m.Cfg
 	exec.Engine, exec.Precision = describeEngine(req, be)
@@ -507,7 +519,7 @@ func ExecuteModel(req Request, m *model.Model, be compute.Backend) (Execution, e
 	return exec, err
 }
 
-func executeLoaded(req Request, m loadedModel, be compute.Backend, now func() time.Time, since func(time.Time) time.Duration) (Execution, error) {
+func executeLoaded(ctx context.Context, req Request, m loadedModel, be compute.Backend, observeHost func(context.Context, compute.Backend) (compute.VulkanHostEnvironment, error), now func() time.Time, since func(time.Time) time.Duration) (Execution, error) {
 	if len(req.PromptTokenIDs) == 0 || req.GeneratedTokenLimit < 1 || req.Repetitions < 1 || req.ContextLimit < len(req.PromptTokenIDs)+req.GeneratedTokenLimit {
 		return Execution{}, errors.New("raw decode: invalid execution request")
 	}
@@ -543,6 +555,12 @@ func executeLoaded(req Request, m loadedModel, be compute.Backend, now func() ti
 				return Execution{}, fmt.Errorf("raw decode: backend observation for run %d: %w", rep+1, err)
 			}
 			run.BackendExecution = &delta
+			if observeHost != nil && delta.Identity.Backend == "vulkan" {
+				host, hostErr := observeHost(ctx, be)
+				if hostErr == nil && rawDecodeHostMatchesBackend(host, delta.Identity) {
+					run.HostEnvironment = &host
+				}
+			}
 		}
 		exec.Runs = append(exec.Runs, run)
 		if run.CPUVerification != nil && !run.CPUVerification.Passed {
@@ -558,6 +576,68 @@ func executeLoaded(req Request, m loadedModel, be compute.Backend, now func() ti
 		exec.CPUModelParity = &parity
 	}
 	return exec, verifyErr
+}
+
+// rawDecodeHostMatchesBackend accepts only the strict #12281 tuple bound to
+// the exact backend-owned identity for this repetition. The driver field is
+// parsed only for its sealed PCI keys; Mesa identity comes from the observer.
+func rawDecodeHostMatchesBackend(host compute.VulkanHostEnvironment, identity compute.BackendRuntimeIdentity) bool {
+	if host.OS != "linux" || strings.TrimSpace(host.Arch) == "" || strings.TrimSpace(host.Kernel) == "" ||
+		strings.TrimSpace(host.Device) == "" || strings.TrimSpace(host.MesaVersion) == "" ||
+		strings.TrimSpace(host.Firmware) == "" || !strings.EqualFold(host.MesaDriver, "radv") ||
+		identity.Backend != "vulkan" || host.Device != identity.Device {
+		return false
+	}
+	vendor, device, ok := rawDecodeBackendPCIIdentity(identity.Driver)
+	return ok && host.VendorID == vendor && host.DeviceID == device
+}
+
+// BoundVulkanHostEnvironment returns the host tuple only when it remains
+// exactly bound to the backend-owned identity retained for the same run.
+func BoundVulkanHostEnvironment(run Run) (compute.VulkanHostEnvironment, bool) {
+	if run.HostEnvironment == nil || run.BackendExecution == nil {
+		return compute.VulkanHostEnvironment{}, false
+	}
+	host := *run.HostEnvironment
+	if !rawDecodeHostMatchesBackend(host, run.BackendExecution.Identity) {
+		return compute.VulkanHostEnvironment{}, false
+	}
+	return host, true
+}
+
+func rawDecodeBackendPCIIdentity(driver string) (string, string, bool) {
+	fields := strings.Fields(driver)
+	if len(fields) != 3 {
+		return "", "", false
+	}
+	values := make(map[string]string, len(fields))
+	for _, field := range fields {
+		key, value, ok := strings.Cut(field, "=")
+		if !ok || values[key] != "" || (key != "driver" && key != "vendor" && key != "device") {
+			return "", "", false
+		}
+		values[key] = value
+	}
+	canonical := func(value string) (string, bool) {
+		value = strings.TrimSpace(strings.ToLower(value))
+		if !strings.HasPrefix(value, "0x") {
+			return "", false
+		}
+		parsed, err := strconv.ParseUint(strings.TrimPrefix(value, "0x"), 16, 16)
+		if err != nil {
+			return "", false
+		}
+		return fmt.Sprintf("0x%04x", parsed), true
+	}
+	if strings.TrimSpace(values["driver"]) == "" {
+		return "", "", false
+	}
+	vendor, ok := canonical(values["vendor"])
+	if !ok {
+		return "", "", false
+	}
+	device, ok := canonical(values["device"])
+	return vendor, device, ok
 }
 
 func executeRun(req Request, m loadedModel, be compute.Backend, now func() time.Time, since func(time.Time) time.Duration) (Run, error) {

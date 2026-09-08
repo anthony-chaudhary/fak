@@ -66,6 +66,187 @@ func TestOpenCodeLeaseAdmissionIntegration(t *testing.T) {
 	}
 }
 
+func TestOpenCodeLeaseFastFailAndCircuitBreaker(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required for OpenCode lease fast-fail and circuit breaker test")
+	}
+	root := t.TempDir()
+	pluginPath := filepath.Join(root, "dos-proof-guard.js")
+	if err := os.WriteFile(pluginPath, []byte(DefaultOpenCodePlugin), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, node, "--no-warnings", "--input-type=module", "-", pluginPath, root)
+	cmd.Stdin = strings.NewReader(`
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const [pluginFile, root] = process.argv.slice(2);
+const plugin = (await import(pathToFileURL(pluginFile).href)).default;
+const hooks = await plugin({ directory: root });
+
+// 1. Out-of-workspace scratch writes emit explicit steerage directing to shell commands
+{
+  const scratchTarget = path.join(root, '..', 'AppData', 'Local', 'Temp', 'opencode', 'scratch.txt');
+  await assert.rejects(
+    hooks['tool.execute.before']({ tool: 'write', sessionID: 'sess-scratch' }, { args: { filePath: scratchTarget } }),
+    (err) => {
+      assert.ok(err.message.includes('[dos-proof-guard] Mutation path is outside this lease workspace'));
+      assert.ok(err.message.includes('Temporary scratch files under temp/scratch directories'));
+      assert.ok(err.message.includes('use shell commands (e.g. bash or PowerShell)'));
+      return true;
+    }
+  );
+
+  const normalOut = path.join(root, '..', 'sibling', 'file.txt');
+  await assert.rejects(
+    hooks['tool.execute.before']({ tool: 'write', sessionID: 'sess-scratch' }, { args: { filePath: normalOut } }),
+    (err) => {
+      assert.ok(err.message.includes('[dos-proof-guard] Mutation path is outside this lease workspace'));
+      assert.ok(!err.message.includes('Temporary scratch files'));
+      return true;
+    }
+  );
+}
+
+// 2. Fast-fail rejects malformed path containing null byte without subprocess execution
+{
+  await assert.rejects(
+    hooks['tool.execute.before']({ tool: 'write', sessionID: 'sess-malformed' }, { args: { filePath: 'bad\0path.txt' } }),
+    /Malformed mutation path: contains null byte/
+  );
+}
+
+// 3. Structured refusal steerage on COLLISION_RISK containing [RECOVERY] advice
+{
+  const code = await readFile(pluginFile, 'utf8');
+  let execCallCount = 0;
+  const mockExec = 'let execCallCount = 0;\n' +
+    'const execute = async () => { ' +
+    'execCallCount++; ' +
+    'const err = new Error("Command failed"); ' +
+    'err.stdout = JSON.stringify({schema:"fak.loop-region.v1",admit:false,reason:"COLLISION_RISK",conflict:{holder:"worker-theta"}}); ' +
+    'throw err; ' +
+    '};';
+  const patched = code.replace('const execute = promisify(execFile);', mockExec) +
+    '\nexport { execCallCount };';
+  const mod = await import('data:text/javascript;base64,' + Buffer.from(patched).toString('base64'));
+  const collisionPlugin = await mod.default({ directory: root });
+
+  const collisionSession = 'sess-collision';
+  const collisionPath = 'collision-target.go';
+
+  // Failure 1: encounters COLLISION_RISK and receives [RECOVERY] steerage
+  await assert.rejects(
+    collisionPlugin['tool.execute.before']({ tool: 'edit', sessionID: collisionSession }, { args: { filePath: collisionPath } }),
+    (err) => {
+      assert.ok(err.message.includes('COLLISION_RISK'));
+      assert.ok(err.message.includes('[RECOVERY]'));
+      assert.ok(err.message.includes("Lane conflict detected with holder 'worker-theta'"));
+      assert.ok(err.message.includes("Run 'fak recover COLLISION_RISK' or select a tree-disjoint task."));
+      return true;
+    }
+  );
+
+  // Failure 2: encounters COLLISION_RISK again
+  await assert.rejects(
+    collisionPlugin['tool.execute.before']({ tool: 'edit', sessionID: collisionSession }, { args: { filePath: collisionPath } }),
+    (err) => {
+      assert.ok(err.message.includes('COLLISION_RISK'));
+      assert.ok(err.message.includes('[RECOVERY]'));
+      return true;
+    }
+  );
+
+  // Snapshot execution count before 3rd attempt
+  const countBefore3rd = mod.execCallCount;
+
+  // Attempt 3: 3rd consecutive failing edit triggers circuit breaker refusal without dispatching subprocess commands
+  await assert.rejects(
+    collisionPlugin['tool.execute.before']({ tool: 'edit', sessionID: collisionSession }, { args: { filePath: collisionPath } }),
+    (err) => {
+      assert.ok(err.message.includes('[dos-proof-guard-circuit-breaker]'));
+      assert.ok(err.message.includes('Refusing 3rd consecutive failing edit on ' + collisionPath));
+      assert.ok(err.message.includes("Stop retrying. Inspect the file with 'read' or pivot to an alternate lane."));
+      return true;
+    }
+  );
+
+  // Verify no subprocess commands were dispatched on 3rd attempt
+  assert.equal(mod.execCallCount, countBefore3rd, 'Circuit breaker must refuse without dispatching child CLI commands');
+}
+
+// 4. Circuit breaker on string-matching failure and reset on success
+{
+  const session = 'sess-cb-reset';
+  const targetFile = 'cb-reset-test.go';
+
+  // Failure 1 in tool.execute.after
+  await hooks['tool.execute.after'](
+    { tool: 'edit', sessionID: session, args: { filePath: targetFile } },
+    { output: 'Error: Could not find oldString in file' }
+  );
+
+  // Failure 2 in tool.execute.after
+  await hooks['tool.execute.after'](
+    { tool: 'edit', sessionID: session, args: { filePath: targetFile } },
+    { output: 'Error: Found multiple matches for oldString' }
+  );
+
+  // Attempt 3: trips circuit breaker in tool.execute.before
+  await assert.rejects(
+    hooks['tool.execute.before']({ tool: 'edit', sessionID: session }, { args: { filePath: targetFile } }),
+    (err) => {
+      assert.ok(err.message.includes('[dos-proof-guard-circuit-breaker]'));
+      assert.ok(err.message.includes('Refusing 3rd consecutive failing edit on ' + targetFile));
+      return true;
+    }
+  );
+
+  // Successful edit resets the failure counter for that path
+  await hooks['tool.execute.after'](
+    { tool: 'edit', sessionID: session, args: { filePath: targetFile } },
+    { output: 'Successfully replaced 1 instance' }
+  );
+
+  // Failure 1 after reset
+  await hooks['tool.execute.after'](
+    { tool: 'edit', sessionID: session, args: { filePath: targetFile } },
+    { output: 'Error: Could not find oldString in file' }
+  );
+
+  // Next attempt: failure count is 1, so breaker MUST NOT trip
+  let tripped = false;
+  try {
+    await hooks['tool.execute.before']({ tool: 'edit', sessionID: session }, { args: { filePath: targetFile } });
+  } catch (err) {
+    if (err.message.includes('[dos-proof-guard-circuit-breaker]')) {
+      tripped = true;
+    }
+  }
+  assert.equal(tripped, false, 'Circuit breaker must not trip after failure counter reset');
+}
+
+console.log(JSON.stringify({ ok: true }));
+`)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("OpenCode lease fast-fail & circuit breaker test failed: %v\n%s", err, out)
+	}
+	var receipt struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(out, &receipt); err != nil || !receipt.OK {
+		t.Fatalf("unexpected witness output: %s", out)
+	}
+}
+
 const openCodeLeaseWitness = `
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
@@ -96,7 +277,12 @@ async function mutate(sessionID, filename, content, tool='write', extra={}) {
 }
 const fak = (args) => JSON.parse(invoke('fak', ['leaseref', ...args, '--dir', root]));
 fak(['acquire', '--id', 'codex-witness', '--holder', 'codex:witness', '--session', 'codex-witness', '--tree', 'owned/**', '--ttl', '300', '--announce', 'offline']);
-await assert.rejects(mutate('foreign', target, 'clobber', 'write', {owner:'codex:witness', session:'codex-witness', self:'codex-witness'}), /dos-proof-guard/);
+await assert.rejects(mutate('foreign', target, 'clobber', 'write', {owner:'codex:witness', session:'codex-witness', self:'codex-witness'}), (err) => {
+  return /dos-proof-guard/.test(err.message) &&
+         err.message.includes('[RECOVERY]') &&
+         err.message.includes("Lane conflict detected with holder 'codex:witness'") &&
+         err.message.includes("Run 'fak recover COLLISION_RISK'");
+});
 assert.equal(await readFile(target, 'utf8'), 'before');
 await mutate('foreign', path.join(root, 'free', 'file.txt'), 'disjoint');
 assert.equal(await readFile(path.join(root, 'free', 'file.txt'), 'utf8'), 'disjoint');
