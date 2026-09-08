@@ -35,14 +35,22 @@ No Metal kernel, GGUF loader, Q4_K math, Darwin implementation, rawdecode, model
 
 ## Done condition
 
-- [ ] Non-Darwin compilation succeeds.
-- [ ] Stub zero-copy construction remains unavailable.
-- [ ] The stub never claims a shared Metal buffer.
-- [ ] Darwin behavior and build constraints remain unchanged unless compilation proves a narrow adjustment necessary.
+- [x] Non-Darwin compilation succeeds.
+- [x] Stub zero-copy construction remains unavailable.
+- [x] The stub never claims a shared Metal buffer.
+- [x] Darwin behavior and build constraints remain unchanged.
 
 ## Verifiable Witness
 
-Current `main` fails device-free with `undefined: Q4KWeight` at `zerocopy_stub.go:57` and `:62`. Darwin and physical Metal checks remain unrun.
+The Windows/amd64 device-free witness passes:
+
+```text
+go test ./internal/metalgemm -count=1
+go test ./internal/rawdecode ./cmd/modelbench -count=1
+go vet ./internal/metalgemm ./internal/rawdecode ./cmd/modelbench
+```
+
+Darwin and physical Metal checks remain unrun.
 
 ## Likely files
 
