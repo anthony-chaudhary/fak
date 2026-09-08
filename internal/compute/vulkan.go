@@ -1238,19 +1238,26 @@ func (v *vulkanBackend) q8WeightBufLocked(w Tensor, in int, op string) *vulkanBu
 	return wb
 }
 
-// MatMulArgmax fuses the final F32 projection and the argmax reduction in one shader,
-// returning the index of the largest logit without copying the logits host-ward.
+// MatMulArgmax returns the final projection's largest-logit index without copying
+// logits host-ward. F32 uses the fused shader; Q2_K stays packed for its device
+// projection and composes the existing device argmax until the packed fused shader lands.
 func (v *vulkanBackend) MatMulArgmax(w, x Tensor) int {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	out, in := w.Shape[0], w.Shape[1]
-	if w.Dtype != F32 {
-		panic("compute: vulkan MatMulArgmax supports only F32 weights today (got " + w.Dtype.String() + ")")
-	}
 	if in == 0 || x.Numel() != in {
 		panic("compute: vulkan MatMulArgmax expects one input row matching the weight input dim")
 	}
-	return int(C.fvk_matmul_argmax_f32(v.vp(w), v.vp(x), C.int(out), C.int(in)))
+	switch w.Dtype {
+	case F32:
+		return int(C.fvk_matmul_argmax_f32(v.vp(w), v.vp(x), C.int(out), C.int(in)))
+	case Q2_K:
+		logits, _ := v.devTr([]int{out}, F32)
+		v.q2kMatMulLocked(w, x, logits, out, in, 1)
+		return int(C.fvk_argmax_f32(v.vp(logits), C.int(out)))
+	default:
+		panic("compute: vulkan MatMulArgmax supports only F32 or Q2_K weights (got " + w.Dtype.String() + ")")
+	}
 }
 
 // RMSNormMatMulArgmax fuses RMSNorm of x, the final F32 projection, and the argmax into
