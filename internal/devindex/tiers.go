@@ -221,6 +221,7 @@ var verbTiers = map[string]VerbTier{
 	"commit":                        TierDev,
 	"commit-subject-coverage":       TierDev,
 	"complain":                      TierDev,
+	"completion":                    TierDev,
 	"compute":                       TierDev,
 	"concept":                       TierDev,
 	"concept-usage-score":           TierDev,

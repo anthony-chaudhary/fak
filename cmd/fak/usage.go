@@ -870,6 +870,7 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  'fak score conflation --json' == the old 'fak conflation-scorecard --json';
                  the legacy verbs stay as thin aliases)
   fak version   [modules [--json] [--stamp] [--scores F.json]]  (binary version; per-module version report)
+  fak completion [bash|zsh|fish]  (generate shell completion scripts for bash, zsh, or fish)
 
 every tool call crosses one in-process syscall boundary: vDSO -> adjudicate ->
 pre-flight/grammar -> dispatch -> context-MMU admit.

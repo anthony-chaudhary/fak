@@ -12,6 +12,7 @@
 # Knobs (environment):
 #   FAK_VERSION       pin a version, e.g. 0.24.0 (default: latest release)
 #   FAK_INSTALL_DIR   install target (default: /usr/local/bin, else ~/.local/bin)
+#   FAK_PREFER_DIRECT bypass Homebrew on macOS and force direct binary download (default: 0)
 #   PUBLISH_REPO      owner/repo every published URL derives from — clone,
 #                     install, and releases (default: anthony-chaudhary/fak;
 #                     FAK_REPO is a back-compat alias)
@@ -53,6 +54,17 @@ esac
 # Every combination the OS/arch cases above can produce — {linux,darwin}/{amd64,arm64} —
 # is now a published .tar.gz target, including linux/arm64 (Raspberry Pi / Jetson / arm64
 # gateway). Windows already errored in the OS case above (it ships a .zip, not this tarball).
+
+# On macOS, prefer Homebrew when available unless an explicit install dir, version pin,
+# or direct binary download is requested.
+if [ "$GOOS" = "darwin" ] && have brew && [ -z "${FAK_INSTALL_DIR:-}" ] && [ -z "${FAK_VERSION:-}" ] && [ "${FAK_PREFER_DIRECT:-0}" != "1" ]; then
+  printf 'install.sh: macOS detected with Homebrew available — attempting install via Homebrew\n' >&2
+  if brew install anthony-chaudhary/tap/fak 2>/dev/null || brew install fak 2>/dev/null; then
+    printf 'install.sh: Homebrew install OK\n' >&2
+    exit 0
+  fi
+  printf 'install.sh: Homebrew tap not reachable; proceeding with direct binary download\n' >&2
+fi
 
 # --- resolve version -----------------------------------------------------------
 VERSION="${FAK_VERSION:-}"
@@ -101,11 +113,17 @@ chmod +x "${tmp}/fak"
 DEST="${FAK_INSTALL_DIR:-}"
 if [ -z "$DEST" ]; then
   if [ -w /usr/local/bin ] 2>/dev/null; then DEST=/usr/local/bin
+  elif [ "$GOOS" = "darwin" ] && [ -w /opt/homebrew/bin ] 2>/dev/null; then DEST=/opt/homebrew/bin
   else DEST="${HOME}/.local/bin"; fi
 fi
 mkdir -p "$DEST" || err "cannot create install dir ${DEST}"
 [ -w "$DEST" ] || err "no write permission to ${DEST} — re-run with FAK_INSTALL_DIR=~/.local/bin, or sudo"
 mv "${tmp}/fak" "${DEST}/fak"
+
+# On macOS, clear quarantine attribute so Gatekeeper allows immediate one-touch execution.
+if [ "$GOOS" = "darwin" ] && have xattr; then
+  xattr -d com.apple.quarantine "${DEST}/fak" 2>/dev/null || true
+fi
 
 printf 'install.sh: installed fak %s to %s/fak\n' "$VERSION" "$DEST" >&2
 case ":${PATH}:" in

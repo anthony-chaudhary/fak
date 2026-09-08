@@ -1,0 +1,136 @@
+name: release-macos
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing vX.Y.Z tag to (re)build, notarize, and package macOS assets for"
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-macos-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-macos:
+    name: build-universal-and-notarize
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      GOTOOLCHAIN: auto
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build darwin/arm64 and darwin/amd64 binaries
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          mkdir -p dist/arm64 dist/amd64 dist/universal
+
+          # Build arm64
+          GOOS=darwin GOARCH=arm64 OUT="dist/arm64/fak" VERSION="${VERSION}" sh scripts/build.sh
+
+          # Build amd64
+          GOOS=darwin GOARCH=amd64 OUT="dist/amd64/fak" VERSION="${VERSION}" sh scripts/build.sh
+
+          # Create Universal macOS binary combining arm64 and amd64 using lipo
+          lipo -create -output dist/universal/fak dist/arm64/fak dist/amd64/fak
+          file dist/universal/fak
+
+      - name: Sign macOS Universal Binary
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASS: ${{ secrets.APPLE_CERTIFICATE_PASS }}
+          APPLE_KEYCHAIN_PASS: ${{ secrets.APPLE_KEYCHAIN_PASS }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APPLE_CERTIFICATE:-}" ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            echo "Importing Developer ID Certificate..."
+            KEYCHAIN="build.keychain"
+            security create-keychain -p "${APPLE_KEYCHAIN_PASS:-build}" "$KEYCHAIN"
+            security default-keychain -s "$KEYCHAIN"
+            security unlock-keychain -p "${APPLE_KEYCHAIN_PASS:-build}" "$KEYCHAIN"
+            echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+            security import certificate.p12 -k "$KEYCHAIN" -P "${APPLE_CERTIFICATE_PASS:-}" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple: -s -k "${APPLE_KEYCHAIN_PASS:-build}" "$KEYCHAIN"
+            codesign --force --options runtime --sign "$APPLE_SIGNING_IDENTITY" --timestamp dist/universal/fak
+            codesign --verify --verbose dist/universal/fak
+          else
+            echo "Apple signing identity not configured; signing ad-hoc for local/CI validation"
+            codesign --force --options runtime --sign - dist/universal/fak || true
+          fi
+
+      - name: Notarize macOS Binary with Apple
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+            echo "Submitting binary to Apple Notary Service..."
+            ditto -c -k --keepParent dist/universal/fak dist/fak.zip
+            xcrun notarytool submit dist/fak.zip \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait
+            xcrun stapler staple dist/universal/fak || true
+          else
+            echo "Apple notarization credentials not configured; skipping notarytool submission in unprovisioned environment"
+          fi
+
+      - name: Package Universal and per-arch Archives
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+
+          # Package universal binary
+          cp LICENSE GETTING-STARTED.md dist/universal/
+          ( cd dist/universal && tar -czf "../fak_${VERSION}_darwin_universal.tar.gz" . )
+          shasum -a 256 "dist/fak_${VERSION}_darwin_universal.tar.gz" > "dist/fak_${VERSION}_darwin_universal.tar.gz.sha256"
+
+          echo "UNIVERSAL_ARCHIVE=dist/fak_${VERSION}_darwin_universal.tar.gz" >> "$GITHUB_ENV"
+          echo "UNIVERSAL_SUM=dist/fak_${VERSION}_darwin_universal.tar.gz.sha256" >> "$GITHUB_ENV"
+
+      - name: Upload Universal Binary to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          # Wait up to 2 min for release page if running concurrently
+          for i in $(seq 1 24); do
+            gh release view "$TAG" >/dev/null 2>&1 && break
+            echo "release $TAG not visible yet (attempt $i/24); waiting 5s..."
+            sleep 5
+          done
+          gh release upload "$TAG" "$UNIVERSAL_ARCHIVE" "$UNIVERSAL_SUM" --clobber
+
+      - name: Validate Homebrew Formula and Executable Functionality
+        run: |
+          set -euo pipefail
+          ruby -c Formula/fak.rb
+          # Test local execution and completions of built universal binary
+          ./dist/universal/fak version
+          ./dist/universal/fak completion bash >/dev/null
+          ./dist/universal/fak completion zsh >/dev/null
+          ./dist/universal/fak completion fish >/dev/null
