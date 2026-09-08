@@ -39,3 +39,7 @@ internal/agentsindex/testdata/effective/** text eol=lf
 # The red-team floor report is generated and compared byte-for-byte; keep its
 # markdown line endings stable under core.autocrlf=true (#11345).
 internal/policy/testdata/redteam_floor_report.md text eol=lf
+
+# Armbench caveman inputs are SHA-256 addressed; keep LF line endings across all OS checkouts (#12010).
+docs/_witnesses/armbench-caveman-native/inputs/** text eol=lf
+

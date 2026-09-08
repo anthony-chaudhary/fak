@@ -211,6 +211,10 @@ type VDSO struct {
 	// Used for causal revocation when an external write (Write, Edit) touches that path.
 	fileWitnesses map[string]map[string]struct{}
 
+	// searchCache is the tier-2 search result memoization cache with hierarchical
+	// path-scope invalidation (#11492).
+	searchCache *SearchCache
+
 	// cachemeta emission (§2.5). cacheSink observes tier-2 lifecycle events as
 	// cachemeta entries; witnessAdapters are per-tool external-witness extractors.
 	// resultStore is the opt-in durable write-through delegate. All are opt-in
@@ -364,7 +368,13 @@ func New(capacity int) *VDSO {
 		revokedLRU:    list.New(),
 		revokedIndex:  map[string]*list.Element{},
 		fileWitnesses: map[string]map[string]struct{}{},
+		searchCache:   NewSearchCache(capacity),
 	}
+}
+
+// SearchCache returns the tier-2 search result memoization cache.
+func (v *VDSO) SearchCache() *SearchCache {
+	return v.searchCache
 }
 
 // Tier2State returns one mutex-coherent snapshot of the live tier-2 budget and
@@ -412,6 +422,9 @@ func (v *VDSO) ResizeTier2(req Tier2ResizeRequest) (Tier2ResizeReceipt, error) {
 	}
 
 	v.cap = req.Capacity
+	if v.searchCache != nil {
+		v.searchCache.Resize(req.Capacity)
+	}
 	v.cacheGen++
 	receipt.Changed = true
 	receipt.NewCapacity = v.cap
@@ -627,6 +640,14 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 		if v.resourceMisnamed(c, args) {
 			return v.missed(c, MissResourceMisnamed)
 		}
+		// Tier-2 search cache memoization (#11492)
+		if v.searchCache != nil && (IsSearchTool(c.Tool) || ExtractToolPattern(args) != "") {
+			if res, ok := v.searchCache.Get(c, args); ok {
+				atomic.AddInt64(&v.hits, 1)
+				return res, true
+			}
+			return v.missed(c, MissNotCached)
+		}
 		v.mu.Lock()
 		key := v.keyLocked(c, args)
 		if el, ok := v.cache[key]; ok {
@@ -796,6 +817,21 @@ func (v *VDSO) Emit(ev abi.Event) {
 		tags := v.writeTags(c, wargs)
 		v.bumpAndPublish(c, tags)
 		v.revokeOnWrite(c, wargs)
+		if v.searchCache != nil {
+			if v.GranularityOf() == Global {
+				v.searchCache.Clear()
+			} else {
+				wpath := ExtractToolPath(wargs)
+				if wpath == "" {
+					wpath = ExtractToolDirectory(wargs)
+				}
+				if wpath != "" && wpath != "." {
+					v.searchCache.InvalidatePath(wpath)
+				} else {
+					v.searchCache.Clear()
+				}
+			}
+		}
 		return
 	}
 	_, _ = v.StoreResult(context.Background(), c, r)
@@ -832,6 +868,32 @@ func (v *VDSO) StoreResult(ctx context.Context, c *abi.ToolCall, r *abi.Result) 
 		return ResultStoreReceipt{}, nil
 	}
 	wit := v.resolveWitness(c, r)
+	if v.searchCache != nil && (IsSearchTool(c.Tool) || ExtractToolPattern(args) != "") {
+		if v.searchCache.Put(c, args, r, wit) {
+			atomic.AddInt64(&v.fills, 1)
+		}
+		producerDiagnostics, err := canonicalProducerDiagnostics(metaValue(r.Meta, MetaProducerDiagnostics))
+		if err != nil {
+			return ResultStoreReceipt{}, err
+		}
+		v.regMu.RLock()
+		durable := v.resultStore
+		v.regMu.RUnlock()
+		if durable != nil {
+			receipt, err := writeThroughResult(ctx, r.Payload, func(_ context.Context, ref abi.Ref) (bool, error) {
+				return true, nil
+			}, durable)
+			receipt.Resident = true
+			receipt.ProducerDiagnostics = producerDiagnostics
+			return receipt, err
+		}
+		return ResultStoreReceipt{
+			Ref:                 r.Payload,
+			Resident:            true,
+			Replication:         ResultResidentOnly,
+			ProducerDiagnostics: producerDiagnostics,
+		}, nil
+	}
 	producerDiagnostics, err := canonicalProducerDiagnostics(metaValue(r.Meta, MetaProducerDiagnostics))
 	if err != nil {
 		return ResultStoreReceipt{}, err
@@ -1234,6 +1296,9 @@ func (v *VDSO) revokeOnWrite(c *abi.ToolCall, wargs []byte) int {
 
 // RevokePath causally revokes all cached entries associated with the given file path or directory.
 func (v *VDSO) RevokePath(path string) (evicted int) {
+	if v.searchCache != nil {
+		evicted += v.searchCache.InvalidatePath(path)
+	}
 	canon := fileCanonPath(path)
 	if canon == "" {
 		canon = path
@@ -1260,6 +1325,21 @@ func (v *VDSO) RevokePath(path string) (evicted int) {
 	v.mu.Unlock()
 	for _, w := range witnesses {
 		evicted += v.Revoke(w)
+	}
+	return evicted
+}
+
+// InvalidatePath hierarchically invalidates all search cache entries and per-path cache
+// entries overlapping with the given file path or directory.
+func (v *VDSO) InvalidatePath(path string) int {
+	evicted := v.RevokePath(path)
+
+	v.mu.Lock()
+	args := []byte(`{"path":"` + path + `"}`)
+	tags := v.fileWriteTags(args)
+	v.mu.Unlock()
+	if len(tags) > 0 {
+		v.bumpAndPublish(&abi.ToolCall{Tool: "InvalidatePath"}, tags)
 	}
 	return evicted
 }

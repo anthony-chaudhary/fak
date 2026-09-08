@@ -533,12 +533,12 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 		be.AddBias(v, s.weightHAL(p("self_attn.v_proj.bias")))
 	}
 
-	qkEps := cfg.qkNormEps()
-	if s.M.hasWeight(p("self_attn.q_norm.weight")) {
-		q = be.RMSNorm(q, s.normWeightHAL(p("self_attn.q_norm.weight")), qkEps)
-	}
-	if s.M.hasWeight(p("self_attn.k_norm.weight")) {
-		kRaw = be.RMSNorm(kRaw, s.normWeightHAL(p("self_attn.k_norm.weight")), qkEps)
+	if cfg.QKNorm {
+		qHost := s.readQwen35FullAttention(layer, "full-attention q-norm read", q)
+		kHost := s.readQwen35FullAttention(layer, "full-attention k-norm read", kRaw)
+		s.M.applyLayerQKNorm(layer, qHost, kHost)
+		q = s.uploadHostF32([]int{nH * hd}, qHost, compute.MemoryActivation, "qwen35-full-attn-norm-q")
+		kRaw = s.uploadHostF32([]int{nKV * hd}, kHost, compute.MemoryActivation, "qwen35-full-attn-norm-k")
 	}
 
 	kvLayer := qwen35HALKVLayer(cfg, layer)

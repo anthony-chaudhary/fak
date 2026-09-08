@@ -25,11 +25,31 @@ const (
 
 // IsClaudeNativeReadTool reports whether tool is a Claude/Cursor/OpenCode read-only tool.
 func IsClaudeNativeReadTool(tool string) bool {
-	switch tool {
-	case "Read", "Grep", "Glob", "ReadFile", "read", "grep", "glob":
+	switch strings.ToLower(tool) {
+	case "read", "grep", "glob", "readfile",
+		"fak_read", "fak_grep", "fak_glob",
+		"mcp__fak__fak_read", "mcp__fak__fak_grep", "mcp__fak__fak_glob",
+		"fak_fak_read", "fak_fak_grep", "fak_fak_glob":
 		return true
 	default:
-		return false
+		return IsSearchTool(tool)
+	}
+}
+
+// IsSearchTool reports whether tool is a search/grep/glob tool.
+func IsSearchTool(tool string) bool {
+	t := strings.ToLower(strings.TrimSpace(tool))
+	switch t {
+	case "grep", "glob", "fak_grep", "fak_glob",
+		"mcp__fak__fak_grep", "mcp__fak__fak_glob",
+		"fak_fak_grep", "fak_fak_glob", "codesearch", "search":
+		return true
+	default:
+		if IsWriteShaped(t) {
+			return false
+		}
+		return strings.HasSuffix(t, "_grep") || strings.HasSuffix(t, "_glob") ||
+			strings.HasSuffix(t, ":grep") || strings.HasSuffix(t, ":glob")
 	}
 }
 
@@ -155,6 +175,32 @@ func ExtractToolPattern(args []byte) string {
 			}
 		}
 	}
+	if raw, ok := m["patterns"]; ok {
+		var arr []string
+		if json.Unmarshal(raw, &arr) == nil && len(arr) > 0 {
+			return strings.Join(arr, ",")
+		}
+	}
+	if raw, ok := m["queries"]; ok {
+		var qArr []map[string]json.RawMessage
+		if json.Unmarshal(raw, &qArr) == nil && len(qArr) > 0 {
+			var patterns []string
+			for _, item := range qArr {
+				for _, pk := range []string{"pattern", "query", "regex"} {
+					if pRaw, ok := item[pk]; ok {
+						var ps string
+						if json.Unmarshal(pRaw, &ps) == nil && strings.TrimSpace(ps) != "" {
+							patterns = append(patterns, strings.TrimSpace(ps))
+							break
+						}
+					}
+				}
+			}
+			if len(patterns) > 0 {
+				return strings.Join(patterns, ",")
+			}
+		}
+	}
 	return ""
 }
 
@@ -188,7 +234,7 @@ func ExtractToolDirectory(args []byte) string {
 	if json.Unmarshal(args, &m) != nil {
 		return "."
 	}
-	for _, k := range []string{"path", "dir", "directory", "filePath", "file_path"} {
+	for _, k := range []string{"path", "dir", "directory", "filePath", "file_path", "root", "workspace"} {
 		if raw, ok := m[k]; ok {
 			var s string
 			if json.Unmarshal(raw, &s) == nil && strings.TrimSpace(s) != "" {

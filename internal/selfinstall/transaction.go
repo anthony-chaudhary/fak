@@ -44,6 +44,7 @@ type RollbackFailed struct {
 	Changed        int
 	Err            error
 	RollbackErrors []error
+	Snapshots      []string
 }
 
 func (Updated) transactionResult()        {}
@@ -70,7 +71,7 @@ func RunLaunchTransaction(copies []Copy, launchTarget string, swap Swapper) Tran
 	return runTransaction(copies, launchTarget, swap)
 }
 
-func runTransaction(copies []Copy, launchTarget string, swap Swapper) TransactionResult {
+func runTransaction(copies []Copy, launchTarget string, swap Swapper) (result TransactionResult) {
 	ordered, err := validateCopies(copies)
 	if err != nil {
 		return RolledBack{Err: err}
@@ -94,9 +95,23 @@ func runTransaction(copies []Copy, launchTarget string, swap Swapper) Transactio
 
 	prepared := make([]preparedCopy, 0, len(ordered))
 	defer func() {
+		preserved := make(map[string]bool)
+		if rf, ok := result.(RollbackFailed); ok {
+			if len(rf.Snapshots) > 0 {
+				for _, s := range rf.Snapshots {
+					preserved[s] = true
+				}
+			} else {
+				for _, item := range prepared {
+					preserved[item.snapshot] = true
+				}
+			}
+		}
 		for _, item := range prepared {
 			_ = os.Remove(item.candidate)
-			_ = os.Remove(item.snapshot)
+			if !preserved[item.snapshot] {
+				_ = os.Remove(item.snapshot)
+			}
 		}
 	}()
 
@@ -140,13 +155,14 @@ func runTransaction(copies []Copy, launchTarget string, swap Swapper) Transactio
 		attempted := i + 1
 		if err := swap(prepared[i].candidate, prepared[i].copy.Target); err != nil {
 			activationErr := fmt.Errorf("activate %q: %w", prepared[i].copy.Target, err)
-			rollbackErrors := rollback(prepared[:changed], swap)
+			rollbackErrors, failedSnapshots := rollback(prepared[:changed], swap)
 			if len(rollbackErrors) != 0 {
 				return RollbackFailed{
 					Attempted:      attempted,
 					Changed:        changed,
 					Err:            activationErr,
 					RollbackErrors: rollbackErrors,
+					Snapshots:      failedSnapshots,
 				}
 			}
 			return RolledBack{Attempted: attempted, Changed: changed, Err: activationErr}
@@ -249,21 +265,24 @@ func stageCopy(source, target, kind string) (path string, err error) {
 	return path, nil
 }
 
-func rollback(changed []preparedCopy, swap Swapper) []error {
+func rollback(changed []preparedCopy, swap Swapper) ([]error, []string) {
 	var rollbackErrors []error
+	var failedSnapshots []string
 	for i := len(changed) - 1; i >= 0; i-- {
 		item := changed[i]
 		candidate, err := stageCopy(item.snapshot, item.copy.Target, "rollback")
 		if err != nil {
 			rollbackErrors = append(rollbackErrors, fmt.Errorf("stage rollback %q: %w", item.copy.Target, err))
+			failedSnapshots = append(failedSnapshots, item.snapshot)
 			continue
 		}
 		if err := swap(candidate, item.copy.Target); err != nil {
 			rollbackErrors = append(rollbackErrors, fmt.Errorf("rollback %q: %w", item.copy.Target, err))
+			failedSnapshots = append(failedSnapshots, item.snapshot)
 		}
 		_ = os.Remove(candidate)
 	}
-	return rollbackErrors
+	return rollbackErrors, failedSnapshots
 }
 
 func supportsPOSIXPermissions() bool {

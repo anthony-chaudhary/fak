@@ -115,6 +115,15 @@ type Message struct {
 	// reasoning text is not treated as final answer text, while still round-tripping when
 	// a provider requires it on a later tool-result turn.
 	ReasoningContent string `json:"reasoning_content,omitempty"`
+
+	// CacheControl carries explicit provider prompt cache breakpoint metadata (e.g. Anthropic cache_control).
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+// CacheControl specifies prompt cache breakpoint behavior for provider prefix caching.
+type CacheControl struct {
+	Type string `json:"type"`          // e.g. "ephemeral"
+	TTL  string `json:"ttl,omitempty"` // e.g. "1h"
 }
 
 // UnmarshalJSON decodes a chat message, flattening a `content` field that may be a
@@ -132,6 +141,7 @@ func (m *Message) UnmarshalJSON(raw []byte) error {
 		ThinkingSignature string          `json:"thinking_signature,omitempty"`
 		RedactedThinking  []string        `json:"redacted_thinking,omitempty"`
 		ReasoningContent  string          `json:"reasoning_content,omitempty"`
+		CacheControl      *CacheControl   `json:"cache_control,omitempty"`
 	}
 	if err := json.Unmarshal(raw, &aux); err != nil {
 		return err
@@ -150,6 +160,7 @@ func (m *Message) UnmarshalJSON(raw []byte) error {
 	m.ThinkingSignature = aux.ThinkingSignature
 	m.RedactedThinking = aux.RedactedThinking
 	m.ReasoningContent = aux.ReasoningContent
+	m.CacheControl = aux.CacheControl
 	return nil
 }
 

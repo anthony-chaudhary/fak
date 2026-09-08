@@ -18,6 +18,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/archcheck"
+	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
+	"github.com/anthony-chaudhary/fak/internal/numfmt"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 )
 
@@ -413,6 +415,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		if err != nil {
 			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
 		}
+		env = s.enrichPagedResultEnvelope(env, s.traceFor(rr.TraceID))
 		return mcpToolResult(SyscallResponse{Verdict: wv, Result: env, TraceID: s.traceFor(rr.TraceID)}), nil
 	case "fak_adjudicate":
 		req := decodeSyscallArgs(p.Arguments)
@@ -683,6 +686,13 @@ func unpageFakReadPayload(ctx context.Context, payload []byte) []byte {
 		return payload
 	}
 	if paged, _ := m["_paged"].(bool); !paged {
+		return payload
+	}
+	maxRead := numfmt.EnvPositiveInt("FAK_READ_OVERSIZE_BYTES", ctxmmu.ReadOversizeBytes)
+	if size, ok := m["size"].(float64); ok && int(size) > maxRead {
+		return payload
+	}
+	if l, ok := m["len"].(float64); ok && int(l) > maxRead {
 		return payload
 	}
 	ref, _ := m["ref"].(string)

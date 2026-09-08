@@ -570,6 +570,117 @@ def test_main_metrics_mode_reads_only() -> None:
         assert apl.main(["--workspace", str(root), "--metrics", "--json"]) == 0
 
 
+# --- #6512: push lock, repo attribution, and actionable remediation ---------
+
+def test_admit_refuses_when_push_lock_held_by_live_pid() -> None:
+    adm = apl.admit(_pane(), {}, NOW_TS, lock={"pid": 12345, "acquired_at": NOW_TS},
+                    is_alive=lambda pid: True)
+    assert adm.should is False
+    assert adm.verdict == "LOCKED"
+    assert adm.reason == "push-lock-held-by-pid-12345"
+    assert apl.health_of(adm.verdict) == apl.HEALTH_DEGRADED
+    assert apl.exit_code(apl.health_of(adm.verdict)) == 2
+
+
+def test_admit_ignores_stale_or_dead_push_lock() -> None:
+    # Stale lock past 600s: ignored
+    stale_lock = {"pid": 12345, "acquired_at": NOW_TS - (apl.LOCK_TIMEOUT_SECONDS + 1)}
+    adm_stale = apl.admit(_pane(), {}, NOW_TS, lock=stale_lock, is_alive=lambda pid: True)
+    assert adm_stale.should is True and adm_stale.verdict == "WOULD_PUSH"
+
+    # Lock held by dead PID: ignored
+    dead_lock = {"pid": 12345, "acquired_at": NOW_TS}
+    adm_dead = apl.admit(_pane(), {}, NOW_TS, lock=dead_lock, is_alive=lambda pid: False)
+    assert adm_dead.should is True and adm_dead.verdict == "WOULD_PUSH"
+
+
+def test_run_mutual_exclusion_when_lock_held_on_disk() -> None:
+    import json
+    root = Path(tempfile.mkdtemp())
+    lock_file = root / apl.LOCK_REL
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    lock_file.write_text(json.dumps({"pid": 9876, "acquired_at": NOW_TS}), encoding="utf-8")
+
+    with _Patch(git_pane=lambda r, **k: _pane(), push_main=_boom):
+        res = apl.run(root, live=True, push_lag_mins=45, now=NOW, is_alive=lambda pid: True)
+    assert res["verdict"] == "LOCKED"
+    assert res["health"] == apl.HEALTH_DEGRADED
+    assert res["ok"] is False
+    assert res["reason"] == "push-lock-held-by-pid-9876"
+    assert apl.exit_code(res["health"]) == 2
+
+
+def test_run_acquires_and_releases_lock_during_push() -> None:
+    import json
+    import os
+    root = Path(tempfile.mkdtemp())
+    lock_seen_during_push = {}
+
+    def fake_push(r, fak):
+        p = root / apl.LOCK_REL
+        lock_seen_during_push["exists"] = p.exists()
+        if p.exists():
+            lock_seen_during_push["data"] = json.loads(p.read_text(encoding="utf-8"))
+        return {"ok": True, "pushed": True, "returncode": 0, "reason": "pushed"}
+
+    with _Patch(git_pane=lambda r, **k: _pane(), push_main=fake_push,
+                resolve_fak=lambda r: ["fak"]):
+        res = apl.run(root, live=True, push_lag_mins=45, now=NOW)
+
+    assert res["verdict"] == "PUSHED"
+    assert lock_seen_during_push.get("exists") is True
+    assert lock_seen_during_push.get("data", {}).get("pid") == os.getpid()
+    # After run completes, lock must be released
+    assert not (root / apl.LOCK_REL).exists()
+
+
+def test_run_records_repo_attribution_in_result_and_jsonl() -> None:
+    import json
+    root = Path(tempfile.mkdtemp())
+    with _Patch(git_pane=lambda r, **k: _pane(push_lag_stale=False), push_main=_boom):
+        res = apl.run(root, live=False, push_lag_mins=45, now=NOW)
+    expected_repo = str(root.resolve())
+    assert res["repo"] == expected_repo
+
+    log = root / apl.LOG_REL
+    assert log.exists()
+    rec = json.loads(log.read_text(encoding="utf-8").splitlines()[-1])
+    assert rec["repo"] == expected_repo
+
+
+def test_remediation_on_behind_push_failure() -> None:
+    import json
+    root = Path(tempfile.mkdtemp())
+    behind_push = _fail_push(reason="push-rejected",
+                             parsed={"reason": "BEHIND", "divergence": "diverged"})
+    with _Patch(git_pane=lambda r, **k: _pane(), push_main=behind_push,
+                resolve_fak=lambda r: ["fak"]):
+        res = apl.run(root, live=True, push_lag_mins=45, now=NOW)
+
+    expected_remediation = "Trunk is behind origin/main. Run 'fak sync pull' or 'git pull --ff-only'"
+    assert res["remediation"] == expected_remediation
+    rec = json.loads((root / apl.LOG_REL).read_text(encoding="utf-8").splitlines()[-1])
+    assert rec["remediation"] == expected_remediation
+
+
+def test_remediation_on_behind_pane_and_in_backoff() -> None:
+    root = Path(tempfile.mkdtemp())
+    # 1. Pane with behind > 0
+    with _Patch(git_pane=lambda r, **k: _pane(behind=2, push_lag_stale=False), push_main=_boom):
+        res = apl.run(root, live=False, push_lag_mins=45, now=NOW)
+    assert res["remediation"] == "Trunk is behind origin/main. Run 'fak sync pull' or 'git pull --ff-only'"
+
+    # 2. In backoff after BEHIND failure
+    behind_push = _fail_push(reason="push-rejected", parsed={"reason": "BEHIND"})
+    with _Patch(git_pane=lambda r, **k: _pane(), push_main=behind_push,
+                resolve_fak=lambda r: ["fak"]):
+        apl.run(root, live=True, push_lag_mins=45, now=NOW)
+        res_backoff = apl.run(root, live=True, push_lag_mins=45,
+                              now=NOW + timedelta(minutes=10))
+    assert res_backoff["verdict"] == "BACKOFF"
+    assert res_backoff["remediation"] == "Trunk is behind origin/main. Run 'fak sync pull' or 'git pull --ff-only'"
+
+
 def _run_all() -> int:
     fns = [v for k, v in sorted(globals().items())
            if k.startswith("test_") and callable(v)]

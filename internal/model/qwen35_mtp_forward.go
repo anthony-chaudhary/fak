@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // Qwen35MTPForwardError reports a typed contract failure in the retained
@@ -36,6 +38,7 @@ type Qwen35MTPForward struct {
 	tensorFormat Qwen38MTPTensorFormat
 	lastPos      int
 	closed       bool
+	vocabFilter  *DraftVocabFilter
 }
 
 // NewQwen35MTPForward binds the exact mtp.layers.0 namespace to the shared Qwen
@@ -158,7 +161,59 @@ func (f *Qwen35MTPForward) Forward(pos int, priorHidden, currentEmbedding []floa
 	x = f.draft.blockStep(0, pos, x, cos, sin, f.mat)
 	f.draft.Cache.appendPosition(pos, -1)
 	f.lastPos = pos
-	return f.draft.head(f.draft.M.finalNorm(x)), nil
+	return f.ProjectHead(f.draft.M.finalNorm(x)), nil
+}
+
+// SetDraftVocabFilter configures the empirical draft vocabulary filter on the forward head.
+func (f *Qwen35MTPForward) SetDraftVocabFilter(filter *DraftVocabFilter) {
+	if f != nil {
+		f.vocabFilter = filter
+	}
+}
+
+// DraftVocabFilter returns the configured draft vocabulary filter, if any.
+func (f *Qwen35MTPForward) DraftVocabFilter() *DraftVocabFilter {
+	if f == nil {
+		return nil
+	}
+	return f.vocabFilter
+}
+
+// ProjectHead projects the normalized hidden vector to logits. If a DraftVocabFilter
+// is configured on the forward head, it projects only across the truncated vocabulary
+// subset. Otherwise, it projects across the full model vocabulary.
+func (f *Qwen35MTPForward) ProjectHead(xf []float32) []float32 {
+	if f == nil || f.draft == nil || f.draft.M == nil {
+		return nil
+	}
+	if f.vocabFilter != nil && len(f.vocabFilter.Subset) > 0 {
+		return f.ProjectFiltered(xf, f.vocabFilter.Subset)
+	}
+	return f.draft.head(xf)
+}
+
+// ProjectFiltered computes logits for an explicit subset of token IDs.
+func (f *Qwen35MTPForward) ProjectFiltered(xf []float32, subset []int) []float32 {
+	if f == nil || f.draft == nil || f.draft.M == nil || len(subset) == 0 {
+		return nil
+	}
+	w := f.draft.M.lmHead()
+	in := f.draft.M.Cfg.HiddenSize
+	logits := parMatRowsSubset(w, xf, subset, in)
+	scaleSubsetLogitsInPlace(logits, subset, f.draft.M.Cfg)
+	return logits
+}
+
+// Argmax resolves logits returned by Forward or ProjectHead to a full vocabulary token ID,
+// respecting any configured DraftVocabFilter.
+func (f *Qwen35MTPForward) Argmax(logits []float32) int {
+	if f != nil && f.vocabFilter != nil && len(logits) == len(f.vocabFilter.Subset) {
+		return f.vocabFilter.Argmax(logits)
+	}
+	if len(logits) == 0 {
+		return -1
+	}
+	return argmaxF32(logits)
 }
 
 // Qwen35MTPFuse implements the checkpoint-defined pre-layer path exactly:
@@ -320,4 +375,178 @@ func sameIntShape(a, b []int) bool {
 		}
 	}
 	return true
+}
+
+// DraftVocabFilter defines an empirical high-frequency token subset for truncated
+// vocabulary projection in MTP speculative draft heads.
+type DraftVocabFilter struct {
+	// Subset holds the empirical high-frequency token IDs (e.g., top 40k of 248k).
+	Subset []int
+
+	// CoverageThreshold is an optional minimum softmax probability threshold in [0, 1].
+	// When positive, if the probability of the argmax token in the subset falls below
+	// this threshold, candidate generation can fall back to standard decode or cleanly reject.
+	CoverageThreshold float32
+
+	subsetMap map[int]int
+}
+
+// NewDraftVocabFilter constructs a DraftVocabFilter for the given token subset.
+func NewDraftVocabFilter(subset []int) *DraftVocabFilter {
+	return NewDraftVocabFilterWithThreshold(subset, 0)
+}
+
+// NewDraftVocabFilterWithThreshold constructs a DraftVocabFilter with an optional coverage probability threshold.
+func NewDraftVocabFilterWithThreshold(subset []int, threshold float32) *DraftVocabFilter {
+	if len(subset) == 0 {
+		return nil
+	}
+	s := append([]int(nil), subset...)
+	m := make(map[int]int, len(s))
+	for i, tok := range s {
+		m[tok] = i
+	}
+	return &DraftVocabFilter{
+		Subset:            s,
+		CoverageThreshold: threshold,
+		subsetMap:         m,
+	}
+}
+
+// Len returns the count of token IDs in the truncated subset.
+func (f *DraftVocabFilter) Len() int {
+	if f == nil {
+		return 0
+	}
+	return len(f.Subset)
+}
+
+// RemapIndex maps an index in the truncated subset back to the full vocabulary token ID.
+// Returns -1 if subsetIdx is out of bounds.
+func (f *DraftVocabFilter) RemapIndex(subsetIdx int) int {
+	if f == nil || subsetIdx < 0 || subsetIdx >= len(f.Subset) {
+		return -1
+	}
+	return f.Subset[subsetIdx]
+}
+
+// Contains reports whether tokenID is present in the truncated subset.
+func (f *DraftVocabFilter) Contains(tokenID int) bool {
+	if f == nil || f.subsetMap == nil {
+		return false
+	}
+	_, ok := f.subsetMap[tokenID]
+	return ok
+}
+
+// Index returns the subset index for tokenID, or (-1, false) if absent.
+func (f *DraftVocabFilter) Index(tokenID int) (int, bool) {
+	if f == nil || f.subsetMap == nil {
+		return -1, false
+	}
+	idx, ok := f.subsetMap[tokenID]
+	return idx, ok
+}
+
+// Argmax finds the index of the maximum logit in subsetLogits and remaps it to
+// the corresponding full vocabulary token ID.
+func (f *DraftVocabFilter) Argmax(subsetLogits []float32) int {
+	tokID, _, _ := f.ArgmaxWithProb(subsetLogits)
+	return tokID
+}
+
+// ArgmaxWithProb finds the argmax within subsetLogits, maps the subset index
+// back to the full vocabulary token ID, and computes its softmax probability
+// across the subset. It returns (tokenID, prob, ok). ok is false if subsetLogits
+// is empty or if CoverageThreshold > 0 and prob < CoverageThreshold.
+func (f *DraftVocabFilter) ArgmaxWithProb(subsetLogits []float32) (int, float32, bool) {
+	if f == nil || len(subsetLogits) == 0 || len(f.Subset) == 0 {
+		return -1, 0, false
+	}
+	n := len(subsetLogits)
+	if n > len(f.Subset) {
+		n = len(f.Subset)
+	}
+	maxIdx := 0
+	maxVal := subsetLogits[0]
+	for i := 1; i < n; i++ {
+		if subsetLogits[i] > maxVal {
+			maxVal = subsetLogits[i]
+			maxIdx = i
+		}
+	}
+	tokenID := f.Subset[maxIdx]
+	var sumExp float64
+	for i := 0; i < n; i++ {
+		sumExp += math.Exp(float64(subsetLogits[i] - maxVal))
+	}
+	prob := float32(0)
+	if sumExp > 0 {
+		prob = float32(1.0 / sumExp)
+	}
+	if f.CoverageThreshold > 0 && prob < f.CoverageThreshold {
+		return tokenID, prob, false
+	}
+	return tokenID, prob, true
+}
+
+// parMatRowsSubset parallelizes output row projections for an explicit subset
+// of vocabulary token IDs. Output row y[i] is computed for token subset[i].
+func parMatRowsSubset(w, x []float32, subset []int, in int) []float32 {
+	if len(subset) == 0 || in <= 0 {
+		return nil
+	}
+	y := make([]float32, len(subset))
+	vocabSize := 0
+	if in > 0 {
+		vocabSize = len(w) / in
+	}
+	row := func(lo, hi int) {
+		for i := lo; i < hi; i++ {
+			tok := subset[i]
+			if tok >= 0 && tok < vocabSize {
+				y[i] = mathx.FDot(w[tok*in:tok*in+in], x)
+			} else {
+				y[i] = float32(math.Inf(-1))
+			}
+		}
+	}
+	if len(subset)*in < parThreshold {
+		row(0, len(subset))
+		return y
+	}
+	workers := currentWorkerCount()
+	if maxW := len(subset) / 8192; maxW < workers {
+		if maxW < 1 {
+			maxW = 1
+		}
+		workers = maxW
+	}
+	parFor(len(subset), workers, row)
+	return y
+}
+
+func scaleSubsetLogitsInPlace(logits []float32, subset []int, cfg Config) {
+	s := float32(1)
+	if cfg.LogitScale != 0 && cfg.LogitScale != 1 {
+		s = float32(cfg.LogitScale)
+	}
+	if s != 1 {
+		for i := range logits {
+			logits[i] *= s
+		}
+	}
+	softcapInPlace(logits, float32(cfg.LogitSoftcap))
+	if len(cfg.SuppressTokens) > 0 {
+		negInf := float32(math.Inf(-1))
+		suppressed := make(map[int]bool, len(cfg.SuppressTokens))
+		for _, id := range cfg.SuppressTokens {
+			suppressed[id] = true
+		}
+		for i, id := range subset {
+			if suppressed[id] {
+				logits[i] = negInf
+			}
+		}
+	}
 }

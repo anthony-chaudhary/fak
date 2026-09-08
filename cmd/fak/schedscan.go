@@ -81,7 +81,7 @@ var schedResultTable = map[uint32]schedResultEntry{
 	0x41301: {"The task is currently running.", "running", ""},
 	0x41302: {"The task is disabled.", "warn", "re-enable with Enable-ScheduledTask"},
 	0x41303: {"The task has not yet run.", "info", ""},
-	0x41304: {"There are no more runs scheduled for this task.", "warn", "the trigger has expired; re-arm the schedule"},
+	0x41304: {"There are no more runs scheduled for this task (for one-shot tasks, indicates completion without further runs).", "warn", "the trigger has expired or one-shot task completed; re-arm the schedule if recurring runs are needed"},
 	0x41305: {"One or more of the properties needed to run this task on a schedule have not been set.", "warn", "the task has no active schedule; re-arm its trigger"},
 	0x41306: {"The last run of the task was terminated by the user.", "warn", ""},
 	0x41307: {"Either the task has no triggers or the existing triggers are disabled or not set.", "warn", "add or enable a trigger; the task will not fire on its own"},
@@ -217,10 +217,13 @@ func applySchedExitMask(status string, r schedResultMeaning, masked bool) (strin
 // that a failure result dominates the live State (that is the whole point — a task
 // can report State=Ready while its last run was refused with 0x800710E0), then the
 // explicit running state, then idle/healthy.
-func classifySchedTask(state string, r schedResultMeaning) (status string, failing bool) {
+func classifySchedTask(state string, r schedResultMeaning, lastRun, nextRun string) (status string, failing bool) {
 	st := strings.ToLower(strings.TrimSpace(state))
 	if st == "disabled" || (r.Severity == "warn" && r.Code == 0x41302) {
 		return "disabled", false
+	}
+	if lastRun != "" && strings.TrimSpace(nextRun) == "" && (r.Code == 0x41304 || r.Code == 0) {
+		return "completed", false
 	}
 	switch r.Severity {
 	case "fail":
@@ -297,7 +300,7 @@ func buildSchedScanDoc(rows []schedScanTaskInfo, filter *regexp.Regexp, source, 
 			continue
 		}
 		res := decodeSchedTaskResult(row.LastTaskResult)
-		status, failing := classifySchedTask(row.State, res)
+		status, failing := classifySchedTask(row.State, res, row.LastRunTime, row.NextRunTime)
 		masked := schedActionMasksExit(row.ActionExecute)
 		status, res = applySchedExitMask(status, res, masked)
 		doc.Tasks = append(doc.Tasks, schedScanTaskReport{

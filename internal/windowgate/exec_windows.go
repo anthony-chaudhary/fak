@@ -9,16 +9,18 @@ import (
 	"os/exec"
 	"syscall"
 	"unsafe"
+
+	"github.com/anthony-chaudhary/fak/pkg/sysproc"
 )
 
 // CreateNoWindow is the Windows process creation flag that prevents a console
 // child spawned by a windowless parent from allocating a visible conhost window.
-const CreateNoWindow = 0x08000000
+const CreateNoWindow = sysproc.CreateNoWindow
 
 // CreateNewProcessGroup is CREATE_NEW_PROCESS_GROUP: the spawned worker becomes
 // the root of a fresh process group so a group-directed console signal
 // (CTRL_BREAK_EVENT) reaches the whole tree instead of only the top process.
-const CreateNewProcessGroup = 0x00000200
+const CreateNewProcessGroup = sysproc.CreateNewProcessGroup
 
 // DetachedProcess is DETACHED_PROCESS: the child neither inherits the parent's
 // console nor gets one of its own.
@@ -33,7 +35,7 @@ const CreateNewProcessGroup = 0x00000200
 // 2 GB, and #3405 confirmed that price scales linearly with fleet size
 // (microsoft/terminal#15976). DETACHED_PROCESS allocates no console at all, so
 // there is no host process to pay for.
-const DetachedProcess = 0x00000008
+const DetachedProcess = sysproc.DetachedProcess
 
 // createSuspended is CREATE_SUSPENDED. StartInNewJob uses it so no child code
 // can run (or fork an escaping descendant) between CreateProcess and assignment
@@ -161,27 +163,16 @@ func (j *JobObject) Close() error {
 // allocating a user-visible console window. Use it for short-lived helper tools
 // (including the Go toolchain) launched by fak control-plane code.
 func Command(name string, args ...string) *exec.Cmd {
-	cmd := exec.Command(name, args...)
-	ConfigureBackgroundCommand(cmd)
-	return cmd
+	return sysproc.Command(name, args...)
 }
 
 // CommandContext is Command with cancellation.
 func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, name, args...)
-	ConfigureBackgroundCommand(cmd)
-	return cmd
+	return sysproc.CommandContext(ctx, name, args...)
 }
 
 func ConfigureBackgroundCommand(cmd *exec.Cmd) {
-	if cmd == nil {
-		return
-	}
-	if cmd.SysProcAttr == nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{}
-	}
-	cmd.SysProcAttr.HideWindow = true
-	cmd.SysProcAttr.CreationFlags |= CreateNoWindow
+	sysproc.ConfigureBackground(cmd)
 }
 
 // ConfigureDetachedCommand prepares a spawn that must not own a console AT ALL:
@@ -196,15 +187,7 @@ func ConfigureBackgroundCommand(cmd *exec.Cmd) {
 // is present, so leaving both set would encode a contradiction that reads as though
 // the window flag still did something.
 func ConfigureDetachedCommand(cmd *exec.Cmd) {
-	if cmd == nil {
-		return
-	}
-	if cmd.SysProcAttr == nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{}
-	}
-	cmd.SysProcAttr.HideWindow = true
-	cmd.SysProcAttr.CreationFlags &^= CreateNoWindow
-	cmd.SysProcAttr.CreationFlags |= DetachedProcess
+	sysproc.ConfigureDetached(cmd)
 }
 
 // ConfigureWorkerCommand prepares a long-lived dispatched-worker / loop-child
@@ -212,11 +195,7 @@ func ConfigureDetachedCommand(cmd *exec.Cmd) {
 // group-directed signal reaches the worker's whole tree. Pair it with
 // AssignToNewJobObject after Start for reliable KILL_ON_JOB_CLOSE teardown.
 func ConfigureWorkerCommand(cmd *exec.Cmd) {
-	if cmd == nil {
-		return
-	}
-	ConfigureBackgroundCommand(cmd)
-	cmd.SysProcAttr.CreationFlags |= CreateNewProcessGroup
+	sysproc.ConfigureProcessGroup(cmd)
 }
 
 // StartInNewJob starts cmd as the root of a KILL_ON_JOB_CLOSE job. The caller

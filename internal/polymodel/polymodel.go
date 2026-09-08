@@ -82,10 +82,12 @@ type entry struct {
 // does); it is the bookkeeping that lets a kernel keep 10s of models warm and
 // reason about which to drop.
 type Pool struct {
-	budget int64
-	used   int64
-	clock  uint64
-	models map[ModelID]*entry
+	budget    int64
+	used      int64
+	clock     uint64
+	models    map[ModelID]*entry
+	bridge    VocabBridge
+	vocabMaps map[string]*VocabMap
 }
 
 // NewPool returns an empty pool with the given weight-byte budget.

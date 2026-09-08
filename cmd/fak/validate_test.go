@@ -115,13 +115,21 @@ func TestAlpha(t *testing.T) {}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := ownedTestRunExpression(root, []string{"p/owned_test.go", "p/production.go"})
+	got, err := ownedTestRunExpression(root, []string{"p/owned_test.go"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := "^(FuzzOwned|TestAlpha|TestZulu)$"
 	if got != want {
 		t.Fatalf("test run expression=%q, want %q", got, want)
+	}
+
+	gotMixed, err := ownedTestRunExpression(root, []string{"p/owned_test.go", "p/production.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotMixed != "" {
+		t.Fatalf("test run expression with mixed paths=%q, want %q", gotMixed, "")
 	}
 }
 

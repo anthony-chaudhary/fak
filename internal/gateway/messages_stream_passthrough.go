@@ -22,6 +22,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -118,8 +119,10 @@ type anthropicPassthrough struct {
 	// hb holds the heartbeat config for typed progress heartbeats.
 	hb *heartbeatConfig
 	// hbTicker and hbDone manage the heartbeat goroutine lifecycle.
-	hbTicker *time.Ticker
-	hbDone   chan struct{}
+	hbTicker   *time.Ticker
+	hbDone     chan struct{}
+	hbStopped  chan struct{}
+	hbStopOnce sync.Once
 	// checkpointDir is the directory for durable partial-output checkpoints.
 	checkpointDir string
 	// incidentDir is the directory for incident packets.
@@ -149,6 +152,18 @@ func (p *anthropicPassthrough) markFirstToken(now time.Time) {
 	}
 }
 
+func (p *anthropicPassthrough) stopHeartbeat() {
+	p.hbStopOnce.Do(func() {
+		if p.hbDone != nil {
+			close(p.hbDone)
+			if p.hbTicker != nil {
+				p.hbTicker.Stop()
+			}
+			<-p.hbStopped
+		}
+	})
+}
+
 // start opens the client SSE stream exactly once: it writes the event-stream headers and
 // the 200 status, then installs the SSE sender. Idempotent so onEvent can call it freely.
 func (p *anthropicPassthrough) start() {
@@ -160,7 +175,9 @@ func (p *anthropicPassthrough) start() {
 	if p.hb.enabled {
 		p.hbTicker = time.NewTicker(p.hb.interval)
 		p.hbDone = make(chan struct{})
+		p.hbStopped = make(chan struct{})
 		go func() {
+			defer close(p.hbStopped)
 			for {
 				select {
 				case <-p.hbTicker.C:
@@ -453,6 +470,9 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 	if !ok {
 		return false // this writer cannot stream; let the caller use the buffered path
 	}
+	sw := newSyncResponseWriter(w)
+	w = sw
+	flusher = sw
 
 	p := &anthropicPassthrough{
 		s:               s,
@@ -471,18 +491,11 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 		model:           req.Model,
 		began:           time.Now(),
 	}
+	defer p.stopHeartbeat()
 	began := time.Now()
 
 	err := hp.StreamAnthropicRaw(r.Context(), req.Raw, upstreamKey, upstreamBeta, p.onEvent)
-	// Ensure heartbeat ticker is cleaned up on all exit paths.
-	defer func() {
-		if p.hbTicker != nil {
-			p.hbTicker.Stop()
-		}
-		if p.hbDone != nil {
-			close(p.hbDone)
-		}
-	}()
+	p.stopHeartbeat()
 	// #3353 warm-continue: a worker that dies mid-turn (client bytes already flowing) is
 	// recovered by replaying the already-delivered assistant text as a prefill turn on a
 	// fresh worker with the token budget decremented, so the caller sees ONE unbroken turn

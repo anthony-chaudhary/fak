@@ -1,18 +1,21 @@
 <#
 register_worktree_doctor.ps1 - install/remove/status the Scheduled Task that runs
 tools/worktree_doctor.py on a cadence, so this box stays at "one worktree on the trunk"
-(auto-detected, e.g. main) without anyone babysitting it. Two safety stances run together:
-the converge step only ever removes the provably loss-free (non-primary, clean, no
-untracked, no mid-op, fully merged); the disposable SWEEP (--sweep-disposable) reaps dead
-scratch worktrees under temp/scratchpad/pr-work but ARCHIVES each dirty one's diff +
-untracked files first and spares any worktree touched recently (a live session). So
-unattended is safe by construction - nothing is ever lost.
+(auto-detected, e.g. main) without anyone babysitting it. Dual-repo coverage maintains both
+primary checkouts (C:\work\fleet and C:\work\fak) in a single scheduled run. Two safety
+stances run together: the converge step only ever removes the provably loss-free (non-primary,
+clean, no untracked, no mid-op, fully merged); the disposable SWEEP (--sweep-disposable) reaps
+dead scratch worktrees under temp/scratchpad/pr-work and %LOCALAPPDATA%\Fleet\worker-worktrees
+but ARCHIVES each dirty one's diff + untracked files first and spares any worktree touched
+recently (a live session, bounded by --fresh-minutes). Active-process guards and age floors
+protect in-flight workers from premature cleanup. So unattended is safe by construction -
+nothing is ever lost.
 
-  .\register_worktree_doctor.ps1                  # install: prune safe worktrees + sweep dead scratch
+  .\register_worktree_doctor.ps1                  # install: prune safe worktrees + sweep dead scratch (fleet + fak)
   .\register_worktree_doctor.ps1 -PruneBranches   # ALSO delete merged local branches (git branch -d)
   .\register_worktree_doctor.ps1 -ReportOnly      # install: report only, never remove anything
-  .\register_worktree_doctor.ps1 -EveryHours 4    # repeat every N hours (0 = once daily at -At)
-  .\register_worktree_doctor.ps1 -AlsoRepo C:\work\fak  # ALSO maintain another checkout on this box
+  .\register_worktree_doctor.ps1 -EveryHours 4    # repeat every N hours (0 = daily only)
+  .\register_worktree_doctor.ps1 -AlsoRepo C:\work\job  # ALSO maintain an additional checkout beyond fleet + fak
   .\register_worktree_doctor.ps1 -Action status
   .\register_worktree_doctor.ps1 -Action remove
   .\register_worktree_doctor.ps1 -At 02:00 -AllowBranch fak-v0.1,my-release
@@ -28,9 +31,12 @@ param(
   [string]$At = '03:30',                     # daily run time (HH:mm, 24h)
   [int]$EveryHours = 4,                      # also repeat every N hours within the day (0 = daily only)
   # The live task name is machine-global (see -TaskName below), so ONE task has to
-  # maintain EVERY checkout on this box. -AlsoRepo names the others; the doctor reports
-  # each repository separately and its exit NAMES the one that failed, so a clean sweep
-  # of this clone can never stand in for an unswept peer (#6498).
+  # maintain EVERY checkout on this box. Dual-repo coverage includes both primary
+  # targets (C:\work\fleet and C:\work\fak) by default. -AlsoRepo names any additional
+  # checkouts this one task also maintains; the doctor reports each repository
+  # separately and its exit NAMES the one that failed, so a clean sweep of one clone
+  # can never stand in for an unswept peer (#6498, #7205).
+  [string[]]$Repo = @('C:\work\fleet', 'C:\work\fak'), # repositories maintained by default (dual-repo)
   [string[]]$AlsoRepo = @(),                 # additional checkouts this one task also maintains
   # Directories whose immediate subdirectories are audited for checkouts whose AGENTS.md
   # promises a scheduled worktree doctor. Any such checkout missing from the --repo set
@@ -55,10 +61,33 @@ $ErrorActionPreference = 'Stop'
 
 # Resolve the repo from THIS script's location (tools/ -> repo root). No hardcoded path.
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Repo      = (Resolve-Path (Join-Path $ScriptDir '..')).Path
-# Default coverage audit: this clone's parent, so a sibling checkout that advertises a
-# scheduled doctor but is not in the --repo set is reported instead of silently unswept.
-if (-not $PSBoundParameters.ContainsKey('CoverageScan')) { $CoverageScan = @((Split-Path -Parent $Repo)) }
+$ThisRepo  = (Resolve-Path (Join-Path $ScriptDir '..')).Path
+
+# Auto-detect sibling checkouts under the parent directory if -AlsoRepo is not specified by the caller
+if (-not $PSBoundParameters.ContainsKey('AlsoRepo')) {
+  $parent = Split-Path -Parent $ThisRepo
+  foreach ($siblingName in @('fak', 'fleet')) {
+    $sibling = Join-Path $parent $siblingName
+    if ((Test-Path (Join-Path $sibling '.git')) -and ($Repo -notcontains $sibling) -and ($sibling -ne $ThisRepo)) {
+      if ($AlsoRepo -notcontains $sibling) {
+        $AlsoRepo += $sibling
+      }
+    }
+  }
+}
+
+# Deduplicate target repositories in declaration order.
+$allRepos = @()
+foreach ($r in $Repo)     { if ($r -and $allRepos -notcontains $r) { $allRepos += $r } }
+foreach ($r in $AlsoRepo) { if ($r -and $allRepos -notcontains $r) { $allRepos += $r } }
+
+# Default coverage audit: parent of target repositories (e.g. C:\work), so any sibling
+# checkout that advertises a scheduled doctor but is not in the --repo set is reported
+# instead of silently unswept.
+if (-not $PSBoundParameters.ContainsKey('CoverageScan')) {
+  $CoverageScan = @($allRepos | ForEach-Object { Split-Path -Parent $_ } | Select-Object -Unique)
+  if (-not $CoverageScan) { $CoverageScan = @((Split-Path -Parent $ThisRepo)) }
+}
 $Doctor    = Join-Path $ScriptDir 'worktree_doctor.py'
 $LogDir    = Join-Path $env:LOCALAPPDATA 'Fleet\watchdog'
 $Log       = Join-Path $LogDir 'worktree_doctor.log'
@@ -105,10 +134,11 @@ New-Item -ItemType Directory -Force $LogDir | Out-Null
 # trunk ref. Default removals: safe worktree prune + the archived disposable-scratch sweep.
 # Branch deletion (git branch -d) is opt-in via -PruneBranches so a fresh install never
 # purges merged local branches by surprise.
-$dargs = @("`"$Doctor`"", '--repo', "`"$Repo`"", '--fetch')
+$dargs = @("`"$Doctor`"")
+foreach ($r in $allRepos)     { $dargs += @('--repo', "`"$r`"") }
+$dargs += '--fetch'
 # Every checkout this one machine-global task is responsible for, plus the coverage audit
 # that fails the run when a checkout claims a scheduled doctor nobody actually scheduled.
-foreach ($r in $AlsoRepo)     { if ($r) { $dargs += @('--repo', "`"$r`"") } }
 foreach ($c in $CoverageScan) { if ($c) { $dargs += @('--coverage-scan', "`"$c`"") } }
 if (-not $ReportOnly) {
   $dargs += @('--prune', '--sweep-disposable')
@@ -131,9 +161,18 @@ $dargStr = $dargs -join ' '
 $inner = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; `"===== `$((Get-Date -Format o)) =====`" | Out-File -FilePath '$Log' -Append -Encoding UTF8; & '$Python' -X utf8 $dargStr 2>&1 | Out-File -FilePath '$Log' -Append -Encoding UTF8"
 $psArg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$inner`""
 
+# Prefer canonical fleet root or first declared repo as working directory, falling back to script repo.
+$workDir = if (Test-Path 'C:\work\fleet') {
+  'C:\work\fleet'
+} elseif ($allRepos.Count -gt 0 -and (Test-Path $allRepos[0])) {
+  $allRepos[0]
+} else {
+  $ThisRepo
+}
+
 # NB: $action would alias the $Action PARAM (PowerShell vars are case-insensitive),
 # so these are deliberately named $task*.
-$taskAction   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $psArg -WorkingDirectory $Repo
+$taskAction   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $psArg -WorkingDirectory $workDir
 $taskTrigger  = New-ScheduledTaskTrigger -Daily -At $At
 # Scratch worktrees accrue across a busy multi-session day, not just overnight. Repeating
 # every N hours keeps the checkout swept through the day; the doctor's freshness guard
@@ -146,7 +185,7 @@ if ($EveryHours -gt 0) {
 }
 # StartWhenAvailable: a laptop asleep at $At still gets a catch-up run when it wakes.
 $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -MultipleInstances IgnoreNew
-$taskDesc     = "Keep this checkout at one-worktree-on-master, safely (worktree_doctor.py). Retains: $($AllowBranch -join ',')."
+$taskDesc     = "Keep fleet and fak checkouts at one-worktree-on-master, safely (worktree_doctor.py). Retains: $($AllowBranch -join ',')."
 # S4U (non-interactive, session 0), NOT the Register-ScheduledTask default (Interactive):
 # a console powershell.exe launched in the interactive session FLASHES a window on every
 # daily trigger -- one of the "random popup windows". -WindowStyle Hidden does NOT suppress
@@ -173,7 +212,7 @@ $mode = if ($ReportOnly) {
 }
 $cadence = if ($EveryHours -gt 0) { "daily at $At, repeating every $EveryHours h" } else { "daily at $At" }
 Write-Output "installed $TaskName - $cadence, $mode"
-Write-Output "repo:    $Repo"
+Write-Output "repos:   $($allRepos -join ', ')"
 Write-Output "retains: $($AllowBranch -join ', ')  (never pruned / no false alarm)"
 Write-Output "log:     $Log"
 Write-Output "run now: Start-ScheduledTask -TaskName $TaskName    |    status: .\tools\register_worktree_doctor.ps1 -Action status"

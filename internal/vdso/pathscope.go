@@ -2,6 +2,7 @@ package vdso
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -111,6 +112,8 @@ func fileCanonPath(s string) string {
 	if isWindowsDrivePath(s) {
 		s = strings.ReplaceAll(s, "\\", "/")
 		s = filepath.ToSlash(filepath.Clean(s))
+	} else if strings.HasPrefix(s, "/") || strings.HasPrefix(s, "\\") {
+		s = filepath.ToSlash(filepath.Clean(s))
 	} else {
 		if !filepath.IsAbs(s) {
 			if abs, err := filepath.Abs(s); err == nil {
@@ -139,8 +142,8 @@ func fileShapedButUnnamed(args []byte) bool {
 	if len(args) == 0 {
 		return false
 	}
-	// Pattern-based search tools (Glob, Grep) specify a pattern, not a single file_path.
-	if ExtractToolPattern(args) != "" {
+	// Pattern-based search tools (Glob, Grep) specify a pattern or include, not a single file_path.
+	if ExtractToolPattern(args) != "" || ExtractToolInclude(args) != "" {
 		return false
 	}
 	var m map[string]json.RawMessage
@@ -171,8 +174,8 @@ func (v *VDSO) fileReadChain(args []byte) []string {
 		return nil
 	}
 	// If this call carries a pattern (Glob / Grep), bind the directory tag.
-	if ExtractToolPattern(args) != "" {
-		dir := ExtractToolDirectory(args)
+	if ExtractToolPattern(args) != "" || ExtractToolInclude(args) != "" {
+		dir := filepath.ToSlash(filepath.Clean(ExtractToolDirectory(args)))
 		return []string{rootTag, filesNamespace, "files:dir:" + dir}
 	}
 	ent := v.fileLeafEntity(args)
@@ -198,20 +201,64 @@ func (v *VDSO) fileLeafEntity(args []byte) string {
 // own leaf — or nil when the write names no single path (so the caller falls back to the
 // namespace/root flush, which over-invalidates soundly). A write to path P bumps
 // "files:P", which strands exactly the reads whose chain contains "files:P" (that file's
-// reads) and leaves every other file's cached reads warm. In addition, it bumps the
-// directory tag so any directory search (Glob/Grep) covering this path is invalidated.
+// reads) and leaves every other file's cached reads warm. In addition, it bumps all
+// ancestor directory tags hierarchically so any directory search (Glob/Grep) covering
+// this path is properly invalidated.
 func (v *VDSO) fileWriteTags(args []byte) []string {
 	ent := v.fileLeafEntity(args)
 	if ent == "" {
-		return nil
+		p := ExtractToolPath(args)
+		if p != "" {
+			ent = fileCanonPath(p)
+		}
+		if ent == "" {
+			return nil
+		}
 	}
 	tags := []string{filePathTag(ent)}
-	dir := filepath.ToSlash(filepath.Dir(ent))
-	if dir != "" {
-		tags = append(tags, "files:dir:"+dir)
+	seen := make(map[string]bool)
+	seen[filePathTag(ent)] = true
+
+	cur := filepath.ToSlash(filepath.Dir(ent))
+	for cur != "" && cur != "." && cur != "/" {
+		tag := "files:dir:" + cur
+		if !seen[tag] {
+			seen[tag] = true
+			tags = append(tags, tag)
+		}
+		parent := filepath.ToSlash(filepath.Dir(cur))
+		if parent == cur {
+			break
+		}
+		cur = parent
 	}
-	if dir != "." && !filepath.IsAbs(ent) {
+	if !seen["files:dir:."] {
+		seen["files:dir:."] = true
 		tags = append(tags, "files:dir:.")
+	}
+
+	// Also if ent is inside cwd, add relative directory tags
+	if cwd, err := os.Getwd(); err == nil {
+		canonCwd := filepath.ToSlash(cwd)
+		if isCaseInsensitiveOS {
+			canonCwd = strings.ToLower(canonCwd)
+		}
+		if strings.HasPrefix(ent, canonCwd+"/") {
+			rel := strings.TrimPrefix(ent, canonCwd+"/")
+			rcur := filepath.ToSlash(filepath.Dir(rel))
+			for rcur != "" && rcur != "." && rcur != "/" {
+				tag := "files:dir:" + rcur
+				if !seen[tag] {
+					seen[tag] = true
+					tags = append(tags, tag)
+				}
+				rparent := filepath.ToSlash(filepath.Dir(rcur))
+				if rparent == rcur {
+					break
+				}
+				rcur = rparent
+			}
+		}
 	}
 	return tags
 }

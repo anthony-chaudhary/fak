@@ -55,7 +55,7 @@ func TestOwnedProcessReapsHousekeepingDescendants(t *testing.T) {
 			childScript := fmt.Sprintf("Start-Sleep -Seconds 120 # %s", token)
 			script := `$c = Start-Process -FilePath powershell.exe ` +
 				fmt.Sprintf(`-ArgumentList '-NoProfile','-NonInteractive','-Command',%q `, childScript) +
-				`-NoNewWindow -PassThru; Write-Output $c.Id; [Console]::Out.Flush(); ` + tc.rootTail
+				`-PassThru -NoNewWindow; Write-Output $c.Id; [Console]::Out.Flush(); ` + tc.rootTail
 			cmd := exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-Command", script)
 			stdout, err := cmd.StdoutPipe()
 			if err != nil {

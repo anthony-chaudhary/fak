@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/ifc"
 )
@@ -787,6 +788,139 @@ func TestServedBenignResultAdmitted(t *testing.T) {
 	}
 	if env == nil || !strings.Contains(env.Content, "hello world") {
 		t.Fatalf("benign result content must pass through, got %v", envMeta(env))
+	}
+}
+
+func TestChatProxyNoToolResultSnapshotFastPath(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterResultAdmitter(10, ctxmmu.New())
+	abi.RegisterResultAdmitter(20, ifc.NewStampGate(ifc.NewLedger(), ifc.Policy{}))
+
+	var mu sync.Mutex
+	upstreamHits := 0
+	var upstreamMessages []agent.Message
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		upstreamHits++
+		var req struct {
+			Messages []agent.Message `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		upstreamMessages = req.Messages
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"tool-free response"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`))
+	}))
+	defer upstream.Close()
+
+	srv, err := New(Config{
+		EngineID: "test",
+		Model:    "test-model",
+		BaseURL:  upstream.URL,
+		Provider: "openai-compatible",
+		VDSO:     true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	inputMessages := []agent.Message{
+		{Role: agent.RoleSystem, Content: "You are a helpful assistant."},
+		{Role: agent.RoleUser, Content: "Hello!"},
+		{Role: agent.RoleAssistant, Content: "How can I help you today?"},
+	}
+	body := map[string]any{
+		"model":    "client-model",
+		"messages": inputMessages,
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	httpResp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer httpResp.Body.Close()
+	respRaw, _ := io.ReadAll(httpResp.Body)
+	if httpResp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", httpResp.StatusCode, respRaw)
+	}
+	if !strings.Contains(string(respRaw), "tool-free response") {
+		t.Fatalf("response missing 'tool-free response': %s", respRaw)
+	}
+
+	mu.Lock()
+	hits := upstreamHits
+	gotMsgs := upstreamMessages
+	mu.Unlock()
+	if hits != 1 {
+		t.Fatalf("upstream hits = %d, want 1", hits)
+	}
+	if len(gotMsgs) != len(inputMessages) {
+		t.Fatalf("upstream messages count = %d, want %d", len(gotMsgs), len(inputMessages))
+	}
+	for i := range inputMessages {
+		if gotMsgs[i].Role != inputMessages[i].Role || gotMsgs[i].Content != inputMessages[i].Content {
+			t.Fatalf("upstream message[%d] mismatch: got %+v, want %+v", i, gotMsgs[i], inputMessages[i])
+		}
+	}
+
+	toolFreeMsgs := []agent.Message{
+		{Role: agent.RoleSystem, Content: "You are a helpful assistant."},
+		{Role: agent.RoleUser, Content: "Hello!"},
+		{Role: agent.RoleAssistant, Content: "How can I help you today?"},
+	}
+	adms, err := srv.admitInboundResults(context.Background(), toolFreeMsgs, nil, "trace-tool-free")
+	if err != nil {
+		t.Fatalf("admitInboundResults tool-free error: %v", err)
+	}
+	if adms != nil {
+		t.Fatalf("tool-free admissions = %v, want nil", adms)
+	}
+
+	toolResultMsgs := []agent.Message{
+		{Role: agent.RoleUser, Content: "run tool"},
+		{
+			Role:    agent.RoleAssistant,
+			Content: "calling tool",
+			ToolCalls: []agent.ToolCall{
+				{
+					ID:       "call_1",
+					Function: agent.Func{Name: "read_file", Arguments: `{"path":"foo.txt"}`},
+				},
+			},
+		},
+		{
+			Role:       agent.RoleTool,
+			ToolCallID: "call_1",
+			Name:       "read_file",
+			Content:    `{"result":"ok"}`,
+		},
+	}
+
+	// Warm up srv.admitInboundResults so s.resultLivelock is initialized.
+	_, _ = srv.admitInboundResults(context.Background(), toolFreeMsgs, nil, "trace-warmup")
+	_, _ = srv.admitInboundResults(context.Background(), toolResultMsgs, nil, "trace-warmup-tool")
+
+	toolFreeAllocs := testing.AllocsPerRun(100, func() {
+		_, _ = srv.admitInboundResults(context.Background(), toolFreeMsgs, nil, "trace-tool-free-alloc")
+	})
+	if toolFreeAllocs > 1 {
+		t.Fatalf("tool-free admitInboundResults allocated %v objects, want <= 1", toolFreeAllocs)
+	}
+
+	toolResultAllocs := testing.AllocsPerRun(100, func() {
+		_, _ = srv.admitInboundResults(context.Background(), toolResultMsgs, nil, "trace-tool-result-alloc")
+	})
+	if toolResultAllocs <= toolFreeAllocs {
+		t.Fatalf("tool result allocs (%v) must be greater than tool-free allocs (%v)", toolResultAllocs, toolFreeAllocs)
 	}
 }
 

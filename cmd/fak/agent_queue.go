@@ -32,7 +32,7 @@ func runAgentQueueContext(ctx context.Context, stdout, stderr io.Writer, args []
 		if len(args) == 0 {
 			out = stderr
 		}
-		fmt.Fprintln(out, "usage: fak agent-queue reconcile --state SNAPSHOT.json [--json]\n       fak agent-queue reconcile-restart --state SNAPSHOT.json [--json] [--apply]\n       fak agent-queue run --state queue.json [--interval 5s] [--fak <path>] [--json] [--once] [--reconcile-restart]")
+		fmt.Fprintln(out, "usage: fak agent-queue reconcile --state SNAPSHOT.json [--json]\n       fak agent-queue reconcile-restart --state SNAPSHOT.json [--json] [--apply]\n       fak agent-queue run --state queue.json [--interval 5s] [--fak <path>] [--json] [--once] [--reconcile-restart]\n       fak agent-queue emit-reconciler --target launchd|systemd|taskscheduler --state queue.json [--interval 1m] [--timeout 30s] [--ledger cron.jsonl] [--fak <path>]")
 		if len(args) == 0 {
 			return 2
 		}
@@ -45,6 +45,8 @@ func runAgentQueueContext(ctx context.Context, stdout, stderr io.Writer, args []
 		return runAgentQueueReconcileRestart(stdout, stderr, args[1:])
 	case "run":
 		return runAgentQueueRun(ctx, stdout, stderr, args[1:])
+	case "emit-reconciler":
+		return runAgentQueueEmitReconciler(stdout, stderr, args[1:])
 	default:
 		fmt.Fprintf(stderr, "agent-queue: unknown subcommand %q\n", args[0])
 		return 2
@@ -214,4 +216,54 @@ func runAgentQueueRun(ctx context.Context, stdout, stderr io.Writer, args []stri
 		return 1
 	}
 	return 0
+}
+
+func runAgentQueueEmitReconciler(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("agent-queue emit-reconciler", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	target := fs.String("target", "", "target scheduler format (launchd, systemd, taskscheduler)")
+	state := fs.String("state", "", "path to the JSON queue state file")
+	interval := fs.Duration("interval", 1*time.Minute, "reconciliation interval (e.g. 1m)")
+	timeout := fs.Duration("timeout", 30*time.Second, "reconciliation timeout (e.g. 30s)")
+	ledger := fs.String("ledger", ".fak/cron.jsonl", "append-only CAS cron delivery ledger")
+	job := fs.String("job", "agentqueue-reconcile", "cron job identifier")
+	defaultFak := os.Args[0]
+	if defaultFak == "" {
+		defaultFak = "fak"
+	}
+	fakPath := fs.String("fak", defaultFak, "executable path to fak")
+	reconcileRestart := fs.Bool("reconcile-restart", true, "enable restart reconciliation on start")
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if *target == "" {
+		fmt.Fprintln(stderr, "agent-queue emit-reconciler: --target is required (launchd|systemd|taskscheduler)")
+		return 2
+	}
+	if *state == "" {
+		fmt.Fprintln(stderr, "agent-queue emit-reconciler: --state is required")
+		return 2
+	}
+
+	cmdArgs := []string{*fakPath, "agent-queue", "run", "--state", *state, "--once"}
+	if *reconcileRestart {
+		cmdArgs = append(cmdArgs, "--reconcile-restart")
+	}
+
+	cronArgs := []string{
+		"--runner",
+		"--target", *target,
+		"--job", *job,
+		"--ledger", *ledger,
+		"--interval", interval.String(),
+		"--timeout", timeout.String(),
+		"--",
+	}
+	cronArgs = append(cronArgs, cmdArgs...)
+
+	return runCronEmit(stdout, stderr, cronArgs)
 }

@@ -1,6 +1,9 @@
 package radixkv
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // regimefence.go fences prefix reuse by the DECODE REGIME the KV bytes were
 // produced under (issue #5273). The bare radix Tree matches a prefix on token
@@ -117,4 +120,92 @@ func (r DecodeRegime) Match(want DecodeRegime) (bool, MismatchAxis) {
 func (r DecodeRegime) Reusable(want DecodeRegime) bool {
 	ok, _ := r.Match(want)
 	return ok
+}
+
+// RACCompatibilityFence defines the multi-axis compatibility contract that a
+// cached KV span must satisfy against the target decode context before reuse (issue #8463).
+type RACCompatibilityFence struct {
+	// ModelID identifies the model architecture and weights.
+	ModelID string `json:"model_id"`
+	// TokenizerID identifies the tokenizer vocabulary and encoding scheme.
+	TokenizerID string `json:"tokenizer_id"`
+	// AttentionRegime specifies the attention mechanism (e.g. "causal", "swa_window_4096", "softcap_50").
+	AttentionRegime string `json:"attention_regime"`
+	// Dtype is the KV element numerical data type (e.g. "f32", "f16", "bf16", "fp8", "fp8_e4m3", "int4").
+	Dtype string `json:"dtype"`
+	// QuantMode specifies the KV quantization scheme (e.g. "none", "int8", "int4", "fp8").
+	QuantMode string `json:"quant_mode"`
+	// RoPEScheme specifies rotary position embedding configuration and scaling (e.g. "default", "yarn_32k", "linear_8k").
+	RoPEScheme string `json:"rope_scheme"`
+	// MaxContextLen specifies the maximum supported context window length.
+	MaxContextLen int `json:"max_context_len,omitempty"`
+}
+
+// IsSupported reports whether the fence specifies a supported decode regime.
+func (f RACCompatibilityFence) IsSupported() bool {
+	if f.AttentionRegime == "unsupported" || f.RoPEScheme == "unsupported" || f.QuantMode == "unsupported" || f.Dtype == "unsupported" {
+		return false
+	}
+	return true
+}
+
+// Match verifies exact regime match against want, returning false and a mismatch reason on any divergence.
+func (f RACCompatibilityFence) Match(want RACCompatibilityFence) (bool, string) {
+	if !f.IsSupported() {
+		return false, fmt.Sprintf("unsupported candidate regime: %s", f.AttentionRegime)
+	}
+	if !want.IsSupported() {
+		return false, fmt.Sprintf("unsupported target regime: %s", want.AttentionRegime)
+	}
+	if f.ModelID != want.ModelID {
+		return false, fmt.Sprintf("model mismatch: %q != %q", f.ModelID, want.ModelID)
+	}
+	if f.TokenizerID != want.TokenizerID {
+		return false, fmt.Sprintf("tokenizer mismatch: %q != %q", f.TokenizerID, want.TokenizerID)
+	}
+	if f.AttentionRegime != want.AttentionRegime {
+		return false, fmt.Sprintf("attention regime mismatch: %q != %q", f.AttentionRegime, want.AttentionRegime)
+	}
+	if f.Dtype != want.Dtype {
+		return false, fmt.Sprintf("dtype mismatch: %q != %q", f.Dtype, want.Dtype)
+	}
+	if f.QuantMode != want.QuantMode {
+		return false, fmt.Sprintf("quant mode mismatch: %q != %q", f.QuantMode, want.QuantMode)
+	}
+	if f.RoPEScheme != want.RoPEScheme {
+		return false, fmt.Sprintf("rope scheme mismatch: %q != %q", f.RoPEScheme, want.RoPEScheme)
+	}
+	if f.MaxContextLen != 0 && want.MaxContextLen != 0 && f.MaxContextLen != want.MaxContextLen {
+		return false, fmt.Sprintf("max context len mismatch: %d != %d", f.MaxContextLen, want.MaxContextLen)
+	}
+	return true, ""
+}
+
+// CompatibleWith is an alias for Match for backward compatibility.
+func (f RACCompatibilityFence) CompatibleWith(want RACCompatibilityFence) (bool, string) {
+	return f.Match(want)
+}
+
+// CompatibleWithShift reports whether rotary embeddings can be shifted/re-rotated across positional offsets.
+func (f RACCompatibilityFence) CompatibleWithShift(want RACCompatibilityFence) bool {
+	matched, _ := f.Match(want)
+	if !matched {
+		return false
+	}
+	// Sliding Window Attention (SWA) or local window attention regimes break receptive fields
+	// when shifted across window boundaries.
+	attn := strings.ToLower(f.AttentionRegime)
+	if strings.Contains(attn, "swa") || strings.Contains(attn, "sliding_window") || strings.Contains(attn, "window") {
+		return false
+	}
+	if strings.Contains(attn, "prefix_lm") || strings.Contains(attn, "bidirectional") {
+		return false
+	}
+
+	// RoPE schemes must support relative rotation.
+	rope := strings.ToLower(f.RoPEScheme)
+	if rope == "none" || rope == "absolute" || rope == "alibi" || rope == "unsupported" {
+		return false
+	}
+	return true
 }

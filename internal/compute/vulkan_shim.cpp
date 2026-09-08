@@ -1118,9 +1118,9 @@ void fvk_q8_matmul_f32(const void* dWcodes, const void* dWscale, const void* dX,
     }
     struct { int outDim, inDim, P; } pc{out, in, P};
     Buffer* bufs[4] = {B((void*)dWcodes), B((void*)dWscale), B((void*)dX), B(dY)};
-    uint32_t outputsPerGroup = P == 1 ? 8u : 256u;
+    uint32_t outputsPerGroup = 8u;
     uint32_t outGroups = ((uint32_t)out + outputsPerGroup - 1u) / outputsPerGroup;
-    Kernel& kernel = g_kern[P == 1 ? K_Q8_MATMUL_DECODE : K_Q8_MATMUL];
+    Kernel& kernel = g_kern[K_Q8_MATMUL_DECODE];
     dispatch(kernel, bufs, &pc, sizeof(pc), outGroups, (uint32_t)P);
 }
 

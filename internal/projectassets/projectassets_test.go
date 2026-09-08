@@ -3,15 +3,18 @@ package projectassets
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func write(t *testing.T, root, path, body string) {
@@ -652,7 +655,17 @@ func TestOpenCodePluginAssetByteParity(t *testing.T) {
 	canonical := strings.ReplaceAll(string(b), "\r\n", "\n")
 	embedded := strings.ReplaceAll(DefaultOpenCodePlugin, "\r\n", "\n")
 	if canonical != embedded {
-		t.Fatalf("embedded DefaultOpenCodePlugin does not match disk asset %s", canonicalPath)
+		if err := SyncOpenCodePlugin(repoRoot); err != nil {
+			t.Fatalf("failed to sync canonical plugin at %s: %v", canonicalPath, err)
+		}
+		b, err = os.ReadFile(canonicalPath)
+		if err != nil {
+			t.Fatalf("failed to read canonical plugin after sync: %v", err)
+		}
+		canonical = strings.ReplaceAll(string(b), "\r\n", "\n")
+		if canonical != embedded {
+			t.Fatalf("embedded DefaultOpenCodePlugin does not match disk asset %s", canonicalPath)
+		}
 	}
 }
 
@@ -1085,5 +1098,97 @@ func TestOpenCodePluginWindowsExtensionAndTimeout(t *testing.T) {
 	}
 	if strings.Contains(content, "console.log") {
 		t.Fatal("disk plugin must contain zero console.log statements")
+	}
+}
+
+func TestOpenCodeMutationPathsAndProofReminders(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node is required for OpenCode plugin witness")
+	}
+	root := t.TempDir()
+	plugin := filepath.Join(root, "proof.mjs")
+	if err := os.WriteFile(plugin, []byte(DefaultOpenCodePlugin), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "node", "--input-type=module", "-", plugin, root)
+	cmd.Stdin = strings.NewReader(`
+import assert from 'node:assert/strict';
+import {pathToFileURL} from 'node:url';
+
+const hooks = await (await import(pathToFileURL(process.argv[2]).href)).default({directory:process.argv[3]});
+
+const callAfter = async (tool, args, output) => {
+  await hooks['tool.execute.after']({tool, args, sessionID:'witness', callID:'test'}, output);
+  return output;
+};
+
+// 1. Alternative path keys trigger proof reminder and halo hardware validation when touching hardware paths
+const rFilePath = await callAfter('write', {file_path: 'internal/compute/example.go'}, {result: 'initial-result'});
+assert.ok(typeof rFilePath.result === 'string' && rFilePath.result.includes('[dos-proof-guard]'));
+assert.ok(rFilePath.result.includes('fak-dev amd-strix-probe'));
+
+const rPath = await callAfter('edit', {path: 'internal/compute/example.go'}, {text: 'initial-text'});
+assert.ok(typeof rPath.text === 'string' && rPath.text.includes('[dos-proof-guard]'));
+assert.ok(rPath.text.includes('fak-dev amd-strix-probe'));
+
+const rTarget = await callAfter('write', {target: 'docs/test.md'}, {result: 'ok'});
+assert.ok(rTarget.result.includes('[dos-proof-guard]'));
+assert.ok(!rTarget.result.includes('fak-dev amd-strix-probe'));
+
+// 2. Standard unified git diff headers (diff --git, ---, +++)
+const diffGitPatch = 'diff --git a/internal/compute/example.go b/internal/compute/example.go\n' +
+  '--- a/internal/compute/example.go\n' +
+  '+++ b/internal/compute/example.go\n' +
+  '@@ -1 +1 @@\n-old\n+new';
+const rDiffGit = await callAfter('apply_patch', {patchText: diffGitPatch}, {result: 'applied'});
+assert.ok(rDiffGit.result.includes('fak-dev amd-strix-probe'));
+
+// 3. Standard unified diff without diff --git
+const unifiedPatch = '--- a/internal/compute/example.go\n+++ b/internal/compute/example.go\n@@ -1 +1 @@\n-old\n+new';
+const rUnified = await callAfter('apply_patch', {patchText: unifiedPatch}, {text: 'applied'});
+assert.ok(rUnified.text.includes('fak-dev amd-strix-probe'));
+
+// 4. New file unified diff (--- /dev/null, +++ b/...)
+const newFilePatch = '--- /dev/null\n+++ b/internal/compute/example.go\n@@ -0,0 +1 @@\n+new';
+const rNew = await callAfter('apply_patch', {patchText: newFilePatch}, {output: 'applied'});
+assert.ok(rNew.output.includes('fak-dev amd-strix-probe'));
+
+// 5. Deleted file unified diff (--- a/..., +++ /dev/null)
+const delFilePatch = '--- a/internal/compute/example.go\n+++ /dev/null\n@@ -1 +0,0 @@\n-del';
+const rDel = await callAfter('apply_patch', {patchText: delFilePatch}, {output: 'applied'});
+assert.ok(rDel.output.includes('fak-dev amd-strix-probe'));
+
+// 6. Proof reminder appended to output.result as array
+const rArray = await callAfter('write', {filePath: 'docs/test.md'}, {result: [{type:'text', text:'existing'}]});
+assert.equal(rArray.result.length, 2);
+assert.ok(rArray.result[1].text.includes('[dos-proof-guard]'));
+
+// 7. Pre-mutation lease admission rejects empty/null mutation paths
+await assert.rejects(
+  hooks['tool.execute.before']({tool: 'write', sessionID: 'sess'}, {args: {filePath: '', file_path: null, path: undefined, target: '   '}}),
+  /Explicit mutation paths are required for lease admission/
+);
+await assert.rejects(
+  hooks['tool.execute.before']({tool: 'write', sessionID: 'sess'}, {args: {}}),
+  /Explicit mutation paths are required for lease admission/
+);
+await assert.rejects(
+  hooks['tool.execute.before']({tool: 'apply_patch', sessionID: 'sess'}, {args: {patchText: ''}}),
+  /Explicit mutation paths are required for lease admission/
+);
+
+console.log(JSON.stringify({ok: true}));
+`)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("JS hook execution failed: %v\n%s", err, out)
+	}
+	var receipt struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(out, &receipt); err != nil || !receipt.OK {
+		t.Fatalf("unexpected output: %s", out)
 	}
 }

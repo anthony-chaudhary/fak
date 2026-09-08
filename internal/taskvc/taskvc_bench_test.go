@@ -162,18 +162,15 @@ func productionDeclared() map[string][]string {
 
 func productionCaptured() map[string]bool {
 	return map[string]bool{
-		"tools/scheduled-tasks/ClaudeAccountBackup.xml":          true,
-		"tools/scheduled-tasks/July4CacheValueAutospawn.xml":     true,
-		"tools/scheduled-tasks/FakFleetJanitorHeadless.xml":      true,
-		"tools/scheduled-tasks/FakBenchmarkFleetLoop.xml":        true,
-		"tools/scheduled-tasks/FakMetaSuperloopNight100.xml":     true,
-		"tools/scheduled-tasks/FakOvernightMixedProfiles100.xml": true,
-		"tools/scheduled-tasks/FleetGLM52CampaignStop.xml":       true,
-		"tools/scheduled-tasks/FakReapOrphanTails.xml":           true,
-		"tools/scheduled-tasks/FleetOwnerSeatResume.xml":         true,
-		"tools/scheduled-tasks/FleetStrandedRecovery.xml":        true,
-		"tools/scheduled-tasks/FleetWatchdogWatchdogAudit.xml":   true,
-		"tools/scheduled-tasks/UserSeatDrain-1010.xml":           true,
+		"tools/scheduled-tasks/ClaudeAccountBackup.xml":        true,
+		"tools/scheduled-tasks/July4CacheValueAutospawn.xml":   true,
+		"tools/scheduled-tasks/FakFleetJanitorHeadless.xml":    true,
+		"tools/scheduled-tasks/FakBenchmarkFleetLoop.xml":      true,
+		"tools/scheduled-tasks/FakReapOrphanTails.xml":         true,
+		"tools/scheduled-tasks/FleetOwnerSeatResume.xml":       true,
+		"tools/scheduled-tasks/FleetStrandedRecovery.xml":      true,
+		"tools/scheduled-tasks/FleetWatchdogWatchdogAudit.xml": true,
+		"tools/scheduled-tasks/UserSeatDrain-1010.xml":         true,
 	}
 }
 

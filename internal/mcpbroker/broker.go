@@ -266,11 +266,14 @@ func (b *Broker) RegisterServer(cfg ServerConfig) error {
 
 // RegisterTool adds a tool registration to the broker. If the tool specifies a ServerID,
 // it is validated against the server's policy constraints (denylist, allowlist, and read-only).
-// Returns an error if the tool name is empty, if the broker is closed, or if registration
-// violates server policy.
+// Returns an error if the tool name is empty, if the ServerID contains reserved delimiters ("__"),
+// if the broker is closed, or if registration violates server policy.
 func (b *Broker) RegisterTool(reg ToolRegistration) error {
 	if reg.Name == "" {
 		return ErrInvalidToolName
+	}
+	if strings.Contains(reg.ServerID, "__") {
+		return ErrInvalidServerID
 	}
 
 	b.mu.Lock()

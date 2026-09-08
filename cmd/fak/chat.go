@@ -160,9 +160,16 @@ func cmdChat(argv []string) {
 		rawMode = "fail_closed"
 	}
 
+	var runOpts []agent.RunOption
 	if *cf.policyPath != "" {
 		applyPolicy(*cf.policyPath)
-		agent.SetConfiguredPosture(parseChatMode(rawMode))
+		effMode := parseChatMode(rawMode)
+		agent.SetConfiguredPosture(effMode)
+		snap := adjudicator.Default.PolicySnapshot()
+		if postureExplicit {
+			snap.Posture = effMode
+		}
+		runOpts = append(runOpts, agent.WithPolicySnapshot(snap))
 	} else {
 		initDevRules(rawMode)
 	}
@@ -178,7 +185,6 @@ func cmdChat(argv []string) {
 		effectiveBaseURL = dropin.DefaultBaseURL(*cf.provider)
 	}
 
-	var runOpts []agent.RunOption
 	if *cf.effort != "" {
 		runOpts = append(runOpts, agent.WithRunReasoningEffort(*cf.effort))
 	}
@@ -196,11 +202,16 @@ func cmdChat(argv []string) {
 		if *cf.skillsDir != "" {
 			extraDirs = append(extraDirs, *cf.skillsDir)
 		}
+		var exactCommands []string
+		if *cf.policyPath != "" {
+			exactCommands = extractPolicyExactCommands(adjudicator.Default.PolicySnapshot())
+		}
 		codeCat, armErr := agent.ArmCodeToolsWithOptions(agent.CodeToolsOptions{
-			Root:         root,
-			Focused:      true,
-			EnableSkills: *cf.skills,
-			ExtraDirs:    extraDirs,
+			Root:                 root,
+			Focused:              true,
+			EnableSkills:         *cf.skills,
+			ExtraDirs:            extraDirs,
+			ExactAllowedCommands: exactCommands,
 		})
 		must(armErr)
 		defer agent.DisarmCodeTools()
@@ -412,4 +423,26 @@ func initDevRules(mode string) {
 	defer policyReloadMu.Unlock()
 	_, err = applyPolicyRuntimeLocked(rt, "embedded:developer", digest, "", false)
 	must(err)
+}
+
+func extractPolicyExactCommands(p adjudicator.Policy) []string {
+	if p.Posture != adjudicator.PostureFailClosed {
+		return nil
+	}
+	if len(p.Complain) > 0 {
+		return nil
+	}
+	var exacts []string
+	for _, pred := range p.ArgPredicates {
+		if pred.Advisory {
+			continue
+		}
+		if p.AdvisoryReasons != nil && p.AdvisoryReasons[pred.Reason] {
+			continue
+		}
+		if strings.EqualFold(pred.Tool, "bash") && pred.Arg == "command" && pred.Kind == adjudicator.ArgAllowExact && pred.Glob != "" {
+			exacts = append(exacts, pred.Glob)
+		}
+	}
+	return exacts
 }

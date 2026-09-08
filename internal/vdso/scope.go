@@ -57,6 +57,7 @@ package vdso
 import (
 	"container/list"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 
@@ -151,6 +152,10 @@ func (v *VDSO) NodeEpochs() int {
 // a bump of any of them strands the entry. Global => ["*"]; Namespace => ["*","ns"];
 // Resource => ["*","ns","ns:entity"] (or ["*","ns"] when the entity is not nameable).
 func (v *VDSO) readChain(c *abi.ToolCall, args []byte) []string {
+	if v.GranularityOf() == Resource && c != nil && IsSearchTool(c.Tool) {
+		dir := filepath.ToSlash(filepath.Clean(ExtractToolDirectory(args)))
+		return []string{rootTag, filesNamespace, "files:dir:" + dir}
+	}
 	ns, ent, direct, done := v.scopeNodes(c, args, v.fileReadChain)
 	if done {
 		return direct
@@ -340,6 +345,9 @@ func (v *VDSO) resourceMisnamed(c *abi.ToolCall, args []byte) bool {
 	if v.GranularityOf() != Resource {
 		return false
 	}
+	if c != nil && IsSearchTool(c.Tool) {
+		return false
+	}
 	// File analog of the namespace check (#795): a read that CARRIES a file-path arg but
 	// whose path won't canonicalize would bind only the root, yet a path-fine write bumps
 	// "files:<path>" WITHOUT bumping the root — so the root-bound read would never be
@@ -379,8 +387,12 @@ func (v *VDSO) bumpAndPublish(c *abi.ToolCall, tags []string) {
 		tags = append(append([]string(nil), tags...), rootTag)
 	}
 	v.mutSeq++
+	toolName := ""
+	if c != nil {
+		toolName = c.Tool
+	}
 	m := Mutation{
-		Tool:      c.Tool,
+		Tool:      toolName,
 		Tags:      append([]string(nil), tags...),
 		WorldVer:  atomic.LoadUint64(&v.worldVer),
 		Seq:       v.mutSeq,

@@ -5,11 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/pkg/sysproc"
 )
 
 var (
@@ -21,9 +22,9 @@ var (
 // Runner executes a git command in dir with optional extra env and returns stdout, stderr, err.
 type Runner func(ctx context.Context, dir string, env []string, args ...string) (string, string, error)
 
-// DefaultRunner executes git using os/exec.
+// DefaultRunner executes git using sysproc.
 func DefaultRunner(ctx context.Context, dir string, env []string, args ...string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := sysproc.CommandContext(ctx, "git", args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}

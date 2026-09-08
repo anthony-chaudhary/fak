@@ -96,31 +96,93 @@ func TestDecodeSchedTaskResult(t *testing.T) {
 func TestClassifySchedTask(t *testing.T) {
 	// A refused task reports State=Ready but must classify as failing anyway — the
 	// whole reason schedscan exists.
-	if status, failing := classifySchedTask("Ready", decodeSchedTaskResult(0x800710E0)); status != "failing" || !failing {
+	if status, failing := classifySchedTask("Ready", decodeSchedTaskResult(0x800710E0), "", ""); status != "failing" || !failing {
 		t.Errorf("refused-but-Ready => (%q,%v), want (failing,true)", status, failing)
 	}
-	if status, failing := classifySchedTask("Ready", decodeSchedTaskResult(0)); status != "idle" || failing {
+	if status, failing := classifySchedTask("Ready", decodeSchedTaskResult(0), "", ""); status != "idle" || failing {
 		t.Errorf("clean Ready => (%q,%v), want (idle,false)", status, failing)
 	}
-	if status, _ := classifySchedTask("Running", decodeSchedTaskResult(0x41301)); status != "running" {
+	if status, _ := classifySchedTask("Running", decodeSchedTaskResult(0x41301), "", ""); status != "running" {
 		t.Errorf("running => %q, want running", status)
 	}
-	if status, _ := classifySchedTask("Disabled", decodeSchedTaskResult(0x41302)); status != "disabled" {
+	if status, _ := classifySchedTask("Disabled", decodeSchedTaskResult(0x41302), "", ""); status != "disabled" {
 		t.Errorf("disabled => %q, want disabled", status)
 	}
 	// A task action that exited non-zero (here 3) while State=Ready must roll up as
 	// failing so --strict catches it — not "idle".
-	if status, failing := classifySchedTask("Ready", decodeSchedTaskResult(3)); status != "failing" || !failing {
+	if status, failing := classifySchedTask("Ready", decodeSchedTaskResult(3), "", ""); status != "failing" || !failing {
 		t.Errorf("Ready+exit-3 => (%q,%v), want (failing,true)", status, failing)
 	}
 	// A warn-severity status (batch-logon) surfaces as degraded, not idle.
-	if status, failing := classifySchedTask("Ready", decodeSchedTaskResult(0x4131C)); status != "degraded" || failing {
+	if status, failing := classifySchedTask("Ready", decodeSchedTaskResult(0x4131C), "", ""); status != "degraded" || failing {
 		t.Errorf("Ready+0x4131C => (%q,%v), want (degraded,false)", status, failing)
 	}
 	// An operator-disabled task with a STALE hard-failure last result must not latch
 	// --strict: intentional-off dominates stale history.
-	if status, failing := classifySchedTask("Disabled", decodeSchedTaskResult(0x800710E0)); status != "disabled" || failing {
+	if status, failing := classifySchedTask("Disabled", decodeSchedTaskResult(0x800710E0), "", ""); status != "disabled" || failing {
 		t.Errorf("Disabled+stale-fail => (%q,%v), want (disabled,false)", status, failing)
+	}
+
+	// Completed one-shot task: lastRun is set, nextRun is empty, and result is 0x41304 (no more runs) or 0 (success).
+	if status, failing := classifySchedTask("Ready", decodeSchedTaskResult(0x41304), "2026-08-12T10:00:00Z", ""); status != "completed" || failing {
+		t.Errorf("one-shot 0x41304 => (%q,%v), want (completed,false)", status, failing)
+	}
+	if status, failing := classifySchedTask("Ready", decodeSchedTaskResult(0), "2026-08-12T10:00:00Z", ""); status != "completed" || failing {
+		t.Errorf("one-shot 0x0 => (%q,%v), want (completed,false)", status, failing)
+	}
+	if status, failing := classifySchedTask("Ready", decodeSchedTaskResult(0), "2026-08-12T10:00:00Z", "   "); status != "completed" || failing {
+		t.Errorf("one-shot with whitespace nextRun => (%q,%v), want (completed,false)", status, failing)
+	}
+	// If nextRun is set, upcoming runs exist so it is recurring, not completed.
+	if status, failing := classifySchedTask("Ready", decodeSchedTaskResult(0), "2026-08-12T10:00:00Z", "2026-08-12T11:00:00Z"); status != "idle" || failing {
+		t.Errorf("recurring 0x0 => (%q,%v), want (idle,false)", status, failing)
+	}
+	// If lastRun is empty, the task has not yet run.
+	if status, failing := classifySchedTask("Ready", decodeSchedTaskResult(0), "", ""); status != "idle" || failing {
+		t.Errorf("never-run 0x0 => (%q,%v), want (idle,false)", status, failing)
+	}
+}
+
+// TestSchedScan_CompletedOneShot tests that a completed one-shot task is classified
+// as completed with failing == false.
+func TestSchedScan_CompletedOneShot(t *testing.T) {
+	// One-shot completed with 0x41304 (no more runs scheduled).
+	status, failing := classifySchedTask("Ready", decodeSchedTaskResult(0x41304), "2026-08-12T10:00:00Z", "")
+	if status != "completed" || failing {
+		t.Errorf("one-shot 0x41304 => (%q, %v), want (completed, false)", status, failing)
+	}
+
+	// One-shot completed with 0x0 (success).
+	status, failing = classifySchedTask("Ready", decodeSchedTaskResult(0), "2026-08-12T10:00:00Z", "")
+	if status != "completed" || failing {
+		t.Errorf("one-shot 0x0 => (%q, %v), want (completed, false)", status, failing)
+	}
+
+	// With whitespace next_run.
+	status, failing = classifySchedTask("Ready", decodeSchedTaskResult(0), "2026-08-12T10:00:00Z", "   ")
+	if status != "completed" || failing {
+		t.Errorf("one-shot with whitespace nextRun => (%q, %v), want (completed, false)", status, failing)
+	}
+
+	// End-to-end doc rollup test.
+	rows := []schedScanTaskInfo{
+		{
+			TaskName:       "FakOneShotCampaign",
+			State:          "Ready",
+			LastRunTime:    "2026-08-12T10:00:00Z",
+			NextRunTime:    "",
+			LastTaskResult: 0x41304,
+		},
+	}
+	doc := buildSchedScanDoc(rows, nil, "test", "2026-08-12T12:00:00Z")
+	if doc.Count != 1 {
+		t.Fatalf("doc.Count = %d, want 1", doc.Count)
+	}
+	if doc.Tasks[0].Status != "completed" || doc.Tasks[0].Failing {
+		t.Errorf("task status = %q, failing = %v, want (completed, false)", doc.Tasks[0].Status, doc.Tasks[0].Failing)
+	}
+	if doc.FailingCount != 0 {
+		t.Errorf("doc.FailingCount = %d, want 0", doc.FailingCount)
 	}
 }
 

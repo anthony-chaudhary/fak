@@ -50,6 +50,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cacheprice"
@@ -71,6 +72,38 @@ const (
 	SnapshotTierHostL2   SnapshotTier = "host_dram_l2"
 	SnapshotTierRemoteL3 SnapshotTier = "remote_http_l3"
 )
+
+// NodeState models the lifecycle and computation states of a radix tree node.
+type NodeState uint32
+
+const (
+	// NodeWarm indicates the node has completed prefill and holds a valid KV cache.
+	NodeWarm NodeState = iota
+	// NodeComputingPrefill indicates the node is actively undergoing prefill by a leader subagent.
+	NodeComputingPrefill
+	// NodeFailed indicates prefill computation failed or was abandoned.
+	NodeFailed
+	// NodeEvicted indicates the node has been evicted from the tree.
+	NodeEvicted
+)
+
+func (s NodeState) String() string {
+	switch s {
+	case NodeWarm:
+		return "warm"
+	case NodeComputingPrefill:
+		return "computing_prefill"
+	case NodeFailed:
+		return "failed"
+	case NodeEvicted:
+		return "evicted"
+	default:
+		return "unknown"
+	}
+}
+
+// Node is an alias for node to make the tree node handle accessible to external callers.
+type Node = node
 
 // node is one vertex of the compressed radix tree. The edge parent→node carries `key`
 // (a run of token ids); the path root→node spells the token prefix this node caches.
@@ -104,10 +137,89 @@ type node struct {
 	cachedLogits []float32 // logits owned by a complete device snapshot
 
 	plen     int    // path length in tokens (parent.plen + len(key)); == len(kv) when kv!=nil
-	refs     int    // active leases; a leaf with refs>0 is never LRU-evicted
-	lastUsed uint64 // logical clock of the most recent match/insert touching this node — LRU key
-	hits     int    // subsequent demand lookups that found this node resident
-	chunkID  int    // physical backing page / allocation chunk identifier (0 = unassigned)
+	refs      int    // active leases; a leaf with refs>0 is never LRU-evicted
+	lastUsed  uint64 // logical clock of the most recent match/insert touching this node — LRU key
+	hits      int    // subsequent demand lookups that found this node resident
+	chunkID   int    // physical backing page / allocation chunk identifier (0 = unassigned)
+	regimeKey string // decode regime identifier under which this node's KV was produced
+
+	state     uint32        // lifecycle state (warm, computing prefill, failed, evicted); accessed atomically
+	ready     chan struct{} // completion broadcast for in-flight prefill promises
+	flightErr error         // terminal error if in-flight prefill failed or was abandoned
+}
+
+var closedReadyChan = func() <-chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}()
+
+// State returns the current lifecycle state of this node.
+func (n *node) State() NodeState {
+	if n == nil {
+		return NodeWarm
+	}
+	return NodeState(atomic.LoadUint32(&n.state))
+}
+
+// SetState updates the lifecycle state of this node atomically.
+func (n *node) SetState(s NodeState) {
+	if n != nil {
+		atomic.StoreUint32(&n.state, uint32(s))
+	}
+}
+
+// Ready returns a channel that is closed when prefill computation finishes (or immediately if already warm).
+func (n *node) Ready() <-chan struct{} {
+	if n == nil || n.ready == nil {
+		return closedReadyChan
+	}
+	return n.ready
+}
+
+// WaitReady blocks until prefill computation for this node completes or ctx is cancelled.
+func (n *node) WaitReady(ctx context.Context) error {
+	if n == nil {
+		return nil
+	}
+	select {
+	case <-n.Ready():
+		if n.flightErr != nil {
+			return n.flightErr
+		}
+		if n.State() == NodeFailed {
+			return ErrFlightAbandoned
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// FlightErr returns the error recorded if prefill failed during in-flight computation.
+func (n *node) FlightErr() error {
+	if n == nil {
+		return nil
+	}
+	return n.flightErr
+}
+
+// IsComputing reports whether this node is currently undergoing prefill computation.
+func (n *node) IsComputing() bool {
+	return n != nil && n.State() == NodeComputingPrefill
+}
+
+// IsWarm reports whether this node is resident and has completed prefill.
+func (n *node) IsWarm() bool {
+	return n != nil && n.State() == NodeWarm
+}
+
+// CloneKV returns an independently cloneable handle to the node's full-prefix KV cache.
+func (n *node) CloneKV() *model.KVCache {
+	if n == nil || n.kv == nil {
+		return nil
+	}
+	return n.kv.Clone()
 }
 
 // ChunkID returns the physical backing page or allocation chunk identifier for this node.
@@ -150,7 +262,10 @@ func (p EvictionPolicy) String() string {
 // Tree is a RadixAttention prefix cache: a radix tree of token sequences with
 // longest-prefix matching, an LRU token budget, and reference counting.
 type Tree struct {
-	root *node
+	maxCPUCacheBytes   int64
+	cpuCacheBypasses   int64
+	cpuCacheLastBypass string
+	root               *node
 	// nsRoots holds the VIRTUAL PER-NAMESPACE ROOTS that give node identity the
 	// (tokens, nsKey) shape SGLang's RadixKey does (#3889): a Lookup/Insert under
 	// namespace ns walks from nsRoots[ns] (root itself for the default "" namespace),
@@ -478,16 +593,23 @@ func (t *Tree) MatchLenNS(ns string, tokens []int) int {
 func (t *Tree) split(parent, child *node, oi int) *node {
 	first := child.key[0]
 	mid := &node{
-		key:      append([]int(nil), child.key[:oi]...),
-		parent:   parent,
-		children: map[int]*node{},
-		plen:     parent.plen + oi,
-		lastUsed: child.lastUsed,
-		hits:     child.hits,
-		chunkID:  child.chunkID,
+		key:       append([]int(nil), child.key[:oi]...),
+		parent:    parent,
+		children:  map[int]*node{},
+		plen:      parent.plen + oi,
+		lastUsed:  child.lastUsed,
+		hits:      child.hits,
+		chunkID:   child.chunkID,
+		regimeKey: child.regimeKey,
 	}
-	if child.kv != nil {
+	if child.kv != nil && child.kv.CanEvict() == nil &&
+		t.cpuCacheCanClone(child.kv) {
 		mid.kv = truncatePrefix(child.kv, mid.plen)
+	}
+	if child.IsComputing() {
+		mid.SetState(NodeComputingPrefill)
+		mid.ready = child.ready
+		mid.flightErr = child.flightErr
 	}
 	child.key = append([]int(nil), child.key[oi:]...)
 	child.parent = mid
@@ -695,7 +817,7 @@ func (t *Tree) snapshotVictim(exclude *node) *node {
 	var victim *node
 	var walk func(*node)
 	walk = func(n *node) {
-		if n != exclude && n.refs == 0 && n.snapshot != nil {
+		if n != exclude && n.refs == 0 && !n.IsComputing() && n.snapshot != nil {
 			if victim == nil || strat.Priority(n).less(strat.Priority(victim)) {
 				victim = n
 			}
@@ -750,14 +872,20 @@ func (t *Tree) insertWithLogitsAndChunk(boundary *node, suffix []int, kv *model.
 		return boundary, false
 	}
 	if len(suffix) == 0 {
-		if logits != nil {
-			boundary.logits = append([]float32(nil), logits...)
+		if logits != nil && boundary.kv != nil {
+			if !t.makeCPUCacheRoom(cpuLogitsBytes(len(logits)), cpuLogitsBytes(cap(boundary.logits)), boundary) {
+				return boundary, false
+			}
+			boundary.logits = copyCPULogits(logits)
 		}
 		if chunkID != 0 {
 			boundary.chunkID = chunkID
 		}
 		t.noteAdmissionRecovery(keyHash)
 		return boundary, true // already fully cached; keep the boundary lease for the caller to Done
+	}
+	if t.maxCPUCacheBytes > 0 && !t.makeCPUCacheRoom(cacheByteSum(kv.OwnedPayloadBytes(), cpuLogitsBytes(len(logits))), 0, boundary) {
+		return boundary, false
 	}
 	leaf := t.attachLeafWithChunk(boundary, suffix, kv, logits, stamp, chunkID)
 	leaf.refs++ // lease the in-flight request's own leaf...
@@ -779,6 +907,18 @@ func (t *Tree) attachLeaf(boundary *node, suffix []int, kv *model.KVCache, logit
 }
 
 func (t *Tree) attachLeafWithChunk(boundary *node, suffix []int, kv *model.KVCache, logits []float32, lastUsed uint64, chunkID int) *node {
+	room := true
+	if t.maxCPUCacheBytes > 0 {
+		incoming := cacheByteSum(kv.OwnedPayloadBytes(), cpuLogitsBytes(len(logits)))
+		if lastUsed == warmRecency {
+			room = t.cpuCacheRoomWithoutEviction(incoming)
+		} else {
+			room = t.makeCPUCacheRoom(incoming, 0, boundary)
+		}
+	}
+	if !room {
+		kv, logits = nil, nil
+	}
 	// Thrash probe (#3393): the new leaf's full path is (root→boundary)+suffix — if that
 	// exact key was just evicted, this attach is the re-insert that proves the eviction
 	// premature. Covers both demand Insert and WarmInsert; a Lookup-consumed entry is
@@ -787,14 +927,15 @@ func (t *Tree) attachLeafWithChunk(boundary *node, suffix []int, kv *model.KVCac
 	t.fills++ // one prefix-cache FILL event (#5804): demand Insert or prewarm WarmInsert
 	s := append([]int(nil), suffix...)
 	leaf := &node{
-		key:      s,
-		parent:   boundary,
-		children: map[int]*node{},
-		kv:       kv,
-		logits:   append([]float32(nil), logits...),
-		plen:     boundary.plen + len(s),
-		lastUsed: lastUsed,
-		chunkID:  chunkID,
+		key:       s,
+		parent:    boundary,
+		children:  map[int]*node{},
+		kv:        kv,
+		logits:    copyCPULogits(logits),
+		plen:      boundary.plen + len(s),
+		lastUsed:  lastUsed,
+		chunkID:   chunkID,
+		regimeKey: boundary.regimeKey,
 	}
 	if chunkID == 0 && t.pageTracker != nil {
 		if id := t.pageTracker.ChunkID(leaf); id != 0 {
@@ -833,6 +974,14 @@ func (n *node) Logits() []float32 {
 
 // Plen is the node's cached prefix length in tokens.
 func (n *node) Plen() int { return n.plen }
+
+// RegimeKey returns the decode regime under which this node was cached, or "" if unassigned.
+func (n *node) RegimeKey() string {
+	if n == nil {
+		return ""
+	}
+	return n.regimeKey
+}
 
 // DemotionDecision indicates the chosen demotion action.
 type DemotionDecision struct {
@@ -923,7 +1072,7 @@ func (t *Tree) selectVictimLeaf(record bool) *node {
 		stack = stack[:len(stack)-1]
 		if len(n.children) == 0 {
 			candidates++
-			if n.refs > 0 {
+			if n.refs > 0 || n.IsComputing() {
 				locked++
 				continue
 			}
@@ -1100,6 +1249,10 @@ func truncatePrefix(c *model.KVCache, L int) *model.KVCache {
 
 // Stats is a snapshot of the cache's structural state for reporting.
 type Stats struct {
+	CPUCacheBytes              int64        `json:"cpu_cache_bytes"`
+	MaxCPUCacheBytes           int64        `json:"max_cpu_cache_bytes"`
+	CPUCacheBypasses           int64        `json:"cpu_cache_bypasses"`
+	CPUCacheLastBypass         string       `json:"cpu_cache_last_bypass,omitempty"`
 	Tokens                     int          // total cached tokens (Σ edge lengths) — the LRU-budget metric
 	PrefixTokens               int          // Σ node.plen over nodes holding a kv — TRUE resident KV positions
 	Nodes                      int          // non-root nodes
@@ -1238,6 +1391,10 @@ func (t *Tree) Stats() Stats {
 		}
 	}
 	s := Stats{
+		CPUCacheBytes:              t.cpuCacheBytes(),
+		MaxCPUCacheBytes:           t.maxCPUCacheBytes,
+		CPUCacheBypasses:           t.cpuCacheBypasses,
+		CPUCacheLastBypass:         t.cpuCacheLastBypass,
 		Evictions:                  t.evictions,
 		CostEvictions:              t.costEvictions,
 		PageEvictions:              t.pageEvictions,

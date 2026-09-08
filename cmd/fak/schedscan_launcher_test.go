@@ -139,6 +139,12 @@ func TestSchedScriptProvenance(t *testing.T) {
 //     one (it only inspects INTERACTIVE tasks, and it counts `-WindowStyle Hidden`
 //     as windowless), which is exactly why the launcher axis is scored separately.
 func TestSchedLauncherAuditCatchesTheAuditedRegressions(t *testing.T) {
+	origStat := schedStatFn
+	defer func() { schedStatFn = origStat }()
+	schedStatFn = func(path string) (os.FileInfo, error) {
+		return nil, nil
+	}
+
 	t.Run("desktop-attached task fails even behind a headless shim", func(t *testing.T) {
 		p := schedLauncherAudit(schedScanTaskInfo{
 			TaskName:        "FakMetaSuperloopNight100",
@@ -265,6 +271,12 @@ func TestParseSchedTaskXML(t *testing.T) {
 // exit 3 while any of them still violates the contract, and carry the #2170
 // invariant the posture is defended for.
 func TestSchedLauncherReportOverVersionedTaskDefinitions(t *testing.T) {
+	origStat := schedStatFn
+	defer func() { schedStatFn = origStat }()
+	schedStatFn = func(path string) (os.FileInfo, error) {
+		return nil, nil
+	}
+
 	dir := capturedTaskDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -394,5 +406,52 @@ func TestSchedLauncherTableCarriesTheContractFields(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("launcher table missing %q\n---\n%s", want, got)
 		}
+	}
+}
+
+// TestSchedLauncherAudit_MissingScriptBroken tests that a task pointing to a missing script
+// file is classified as broken with allowed=false, and carries the diagnostic reason and remediation.
+func TestSchedLauncherAudit_MissingScriptBroken(t *testing.T) {
+	origStat := schedStatFn
+	defer func() { schedStatFn = origStat }()
+	schedStatFn = func(path string) (os.FileInfo, error) {
+		return nil, os.ErrNotExist
+	}
+
+	p := schedLauncherAudit(schedScanTaskInfo{
+		TaskName:        "FleetMissingScriptTask",
+		LogonType:       "S4U",
+		ActionExecute:   `C:\WINDOWS\System32\conhost.exe`,
+		ActionArguments: `--headless powershell.exe -NoProfile -File "C:\work\fak\tools\missing_tool.ps1"`,
+	}, capturedTaskRepoRoot)
+
+	if p.Verdict != schedVerdictBroken {
+		t.Fatalf("verdict = %q, want %q", p.Verdict, schedVerdictBroken)
+	}
+	if p.Allowed {
+		t.Fatalf("allowed = %v, want false", p.Allowed)
+	}
+	joinedReasons := strings.Join(p.Reasons, " | ")
+	if !strings.Contains(joinedReasons, "script file missing on disk") {
+		t.Errorf("reasons missing expected prefix: %s", joinedReasons)
+	}
+	if !strings.Contains(joinedReasons, "missing_tool.ps1") {
+		t.Errorf("reasons missing script name: %s", joinedReasons)
+	}
+	joinedRemediations := strings.Join(p.Remediations, " | ")
+	if !strings.Contains(joinedRemediations, "restore the deleted script or unregister the orphaned scheduled task") {
+		t.Errorf("remediations missing expected text: %s", joinedRemediations)
+	}
+}
+
+func TestSchedLauncherPostureWorst(t *testing.T) {
+	if got := schedLauncherPostureWorst(schedVerdictPass, schedVerdictBroken); got != schedVerdictBroken {
+		t.Errorf("worst(pass, broken) = %q, want %q", got, schedVerdictBroken)
+	}
+	if got := schedLauncherPostureWorst(schedVerdictWarn, schedVerdictBroken); got != schedVerdictBroken {
+		t.Errorf("worst(warn, broken) = %q, want %q", got, schedVerdictBroken)
+	}
+	if got := schedLauncherPostureWorst(schedVerdictExempt, schedVerdictBroken); got != schedVerdictBroken {
+		t.Errorf("worst(exempt, broken) = %q, want %q", got, schedVerdictBroken)
 	}
 }

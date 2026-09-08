@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/codetools"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
@@ -278,10 +280,69 @@ func execViaKernelFull(ctx context.Context, k *kernel.Kernel, tool, rawArgs, eng
 	return string(body), ev, tc, r, v
 }
 
+func normalizeArmedToolName(tool string) string {
+	switch strings.ToLower(strings.TrimSpace(tool)) {
+	case "read":
+		return codetools.ToolRead
+	case "grep":
+		return codetools.ToolGrep
+	case "glob":
+		return codetools.ToolGlob
+	case "write":
+		return codetools.ToolWrite
+	case "edit":
+		return codetools.ToolEdit
+	case "bash":
+		return codetools.ToolBash
+	case "apply_patch", "applypatch":
+		return codetools.ToolApplyPatch
+	default:
+		return tool
+	}
+}
+
+func execArmedTool(ctx context.Context, tool, rawArgs string) ([]byte, bool, bool) {
+	normTool := normalizeArmedToolName(tool)
+	c := &abi.ToolCall{
+		Tool: normTool,
+		Args: abi.Ref{
+			Kind:   abi.RefInline,
+			Inline: []byte(rawArgs),
+			Len:    int64(len(rawArgs)),
+		},
+	}
+	if armedCodeTools.Load() != nil {
+		codeToolGate{}.Adjudicate(ctx, c)
+	}
+	if c.Engine == "" && armedSysTools.Load() != nil {
+		sysToolGate{}.Adjudicate(ctx, c)
+	}
+	if c.Engine != "" {
+		eng := abi.Engine(c.Engine)
+		if eng != nil {
+			res, err := eng.Complete(ctx, c)
+			if err != nil {
+				b, _ := json.Marshal(map[string]any{"error": err.Error()})
+				return b, true, true
+			}
+			if res != nil {
+				b := refutil.Bytes(ctx, res.Payload)
+				isErr := (res.Status == abi.StatusError)
+				return b, true, isErr
+			}
+		}
+	}
+	return nil, false, false
+}
+
 // execNaive is the "now" baseline: execute the tool directly, no kernel. A
 // malformed call lands as a tool error the model must spend a turn to fix; a
 // poisoned result enters context verbatim; a destructive tool just runs.
 func execNaive(tool, rawArgs string, m *ArmMetrics, ev traceEvent) (string, traceEvent) {
+	return execNaiveContext(context.Background(), tool, rawArgs, m, ev)
+}
+
+func execNaiveContext(ctx context.Context, tool, rawArgs string, m *ArmMetrics, ev traceEvent) (string, traceEvent) {
 	var args map[string]any
 	if rawArgs != "" {
 		_ = json.Unmarshal([]byte(rawArgs), &args)
@@ -290,6 +351,12 @@ func execNaive(tool, rawArgs string, m *ArmMetrics, ev traceEvent) (string, trac
 		args = map[string]any{}
 	}
 	out, isErr := execTool(tool, args)
+	if isErr && strings.Contains(string(out), "unknown tool:") {
+		if armedOut, ok, armedErr := execArmedTool(ctx, tool, rawArgs); ok {
+			out = armedOut
+			isErr = armedErr
+		}
+	}
 	ev.Verdict = "naive-exec"
 	if isErr {
 		m.ToolErrors++
@@ -320,10 +387,7 @@ func Run(ctx context.Context, p Planner, task string, maxTurns int, opts ...RunO
 		return nil, nil, err
 	}
 	var baseOpts []RunOption
-	cfg := resolveRunConfig(opts)
-	if cfg.auditJournal != nil {
-		baseOpts = append(baseOpts, WithAuditJournal(cfg.auditJournal))
-	}
+	baseOpts = append(baseOpts, opts...)
 	baseStart := time.Now()
 	baseM, err := RunArm(ctx, p, task, false, maxTurns, &baseLog, baseOpts...)
 	baseElapsed := time.Since(baseStart)
@@ -504,6 +568,9 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 	var k *kernel.Kernel
 	if fak {
 		Configure()
+		if cfg.policySnapshot != nil {
+			adjudicator.Default.SetPolicy(*cfg.policySnapshot)
+		}
 		k = kernel.New("localtools")
 		k.SetVDSO(true)
 	}

@@ -47,22 +47,24 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 )
 
-// newGGUFLoadProfiler builds the lean-Q8 or streamed-Q4_K GGUF load profiler. It is created when either a
-// -load-profile* flag is set (which attaches the machine-readable load_profile to the report) OR
-// -load-progress is on for one of those profiled paths (the default) — so a multi-minute load streams a
-// throttled percent/GB/elapsed/GB-per-s status to stderr instead of being a silent black box.
-// Returns nil when neither applies (e.g. the f32 path, which does not Tick) so the loader keeps
-// its existing no-bookkeeping behavior.
+// newGGUFLoadProfiler enables default progress for lean and resident/streamed Q4_K
+// GGUF loads. Only lean and streamed paths support detailed phase profiles.
+// Resident Q4_K progress counts collected tensors, before packing and finalization.
+// Returns nil when neither progress nor a supported detailed profile is requested.
 func newGGUFLoadProfiler(f *benchFlags) *ggufload.LoadProfiler {
 	profiledGGUF := *f.gguf != "" && (*f.lean || streamQ4KEnabled(f))
 	wantLoadProfile := (*f.loadProfile || *f.loadProfileTrace || *f.phaseProfile) && profiledGGUF
-	wantProgress := *f.loadProgress && profiledGGUF
+	progressGGUF := *f.gguf != "" && (*f.lean || *f.q4k)
+	wantProgress := *f.loadProgress && progressGGUF
 	if !wantLoadProfile && !wantProgress {
 		return nil
 	}
 	lp := ggufload.NewLoadProfiler()
 	if wantProgress {
 		lp.Progress = os.Stderr // stream load % to stderr so a large multi-minute load is not silent
+		if *f.q4k && !streamQ4KEnabled(f) {
+			fmt.Fprintln(lp.Progress, "fak: resident Q4_K progress counts collected GGUF tensors; Q8 packing and model finalization may continue after 100%")
+		}
 	}
 	if *f.loadProfileTrace {
 		lp.Trace = os.Stderr
@@ -79,6 +81,22 @@ func loadModel(f *benchFlags, lp *ggufload.LoadProfiler) (*model.Model, string, 
 
 func loadModelContext(ctx context.Context, f *benchFlags, lp *ggufload.LoadProfiler) (*model.Model, string, error) {
 	if *f.q4k {
+		if *f.backendName != "legacy" {
+			// Dense formats without a HAL path must remain reachable through Q8.
+			// Vulkan also retains eligible Q2_K payloads for its native kernel.
+			opts := []ggufload.Q4KLoadOption{ggufload.WithDenseKQuantResident(false)}
+			if *f.backendName == "vulkan" {
+				opts = append(opts, ggufload.WithDenseQ2KResident(true))
+			}
+			loader := ggufload.LoadModelQ4KProfileOptionsContext
+			label := " [gguf-q4k]"
+			if streamQ4KEnabled(f) {
+				loader = ggufload.LoadModelQ4KStreamedDenseContext
+				label = " [gguf-q4k-streamed-dense]"
+			}
+			m, err := loader(ctx, *f.gguf, lp, opts...)
+			return m, filepath.Base(*f.gguf) + label, err
+		}
 		return loadGGUFQ4KContext(ctx, *f.gguf, lp, streamQ4KEnabled(f))
 	}
 	if *f.lean {
@@ -200,8 +218,8 @@ func resolveBackend(f *benchFlags) (compute.Backend, []string) {
 		// (the wired Q8 HAL path keys off Caps().UploadDtype). A backend that can't —
 		// e.g. cpu-ref or an f32-only device — still refuses -quant rather than silently
 		// running the f32 path under a Q8 flag.
-		if q8UploadUnsupported(*f.quant, be.Caps()) {
-			fmt.Fprintf(os.Stderr, "backend: %q is f32-only (no Q8 upload support); omit -quant\n", be.Name())
+		if q8UploadUnsupported(*f.quant || *f.q4k, be.Caps()) {
+			fmt.Fprintf(os.Stderr, "backend: %q is f32-only (no quantized upload support); omit -quant/-q4k\n", be.Name())
 			f.exit(2)
 		}
 		if *f.requireNonReference && be.Class() == compute.Reference {
@@ -332,8 +350,8 @@ func describeEngine(f *benchFlags, be compute.Backend, registeredBackends []stri
 		precision = "Q8_0"
 	}
 	if *f.q4k {
-		engine = "fak-in-kernel resident Q4_K/Q8 hybrid (raw GGUF Q4_K majority + Q8 minority)"
-		precision = "Q4_K/Q8 resident hybrid"
+		engine = "fak-in-kernel GGUF resident mixed quantization"
+		precision = "GGUF resident mixed quantization"
 		if *f.metal {
 			engine = "fak-in-kernel Metal Q4_K/Q8 hybrid (raw GGUF Q4_K majority through MetalQ4K; Q8 minority on CPU)"
 			precision = "Q4_K/Q8 resident hybrid + MetalQ4K"
@@ -350,24 +368,72 @@ func describeEngine(f *benchFlags, be compute.Backend, registeredBackends []stri
 		engine = fmt.Sprintf("fak-in-kernel via compute HAL backend %q", be.Name())
 		backendReport = map[string]any{
 			"selected":            be.Name(),
+			"native_host_stages":  "permitted",
+			"device_coverage":     "unmeasured",
 			"tier":                be.Tier(),
 			"class":               be.Class().String(),
 			"caps":                be.Caps(),
 			"registered_backends": registeredBackends,
+		}
+		if *f.q4k {
+			if *f.backendName == "vulkan" {
+				precision = "resident Q4_K/Q2_K + unsupported dense formats converted to Q8"
+				backendReport["dense_non_q4k_load"] = "retain eligible Q2_K; dequantize other dense formats then quantize to Q8"
+			} else {
+				precision = "resident Q4_K + dense non-Q4_K converted to Q8"
+				backendReport["dense_non_q4k_load"] = "dequantize then quantize to Q8; source encoding not retained"
+			}
+			backendReport["fit_estimate"] = "conservative full-F32 upper bound; not actual resident bytes"
 		}
 	}
 	return engine, precision, backendReport
 }
 
 func applyLegacySessionFlags(s *model.Session, f *benchFlags) {
-	s.Quant = *f.quant
-	s.Q4K = *f.q4k
-	s.Q4KGateUpOutputSlab = *f.q4kGateUpSlab
-	if *f.q4k {
-		s.MetalQ4K = *f.metal
+	if f == nil {
 		return
 	}
-	s.Metal = *f.metal
+	if f.quant != nil {
+		s.Quant = *f.quant
+	}
+	if f.q4k != nil {
+		s.Q4K = *f.q4k
+	}
+	if f.q4kGateUpSlab != nil {
+		s.Q4KGateUpOutputSlab = *f.q4kGateUpSlab
+	}
+	if f.q4k != nil && *f.q4k {
+		if f.metal != nil {
+			s.MetalQ4K = *f.metal
+		}
+		return
+	}
+	if f.metal != nil {
+		s.Metal = *f.metal
+	}
+}
+
+// Smoke and timed execution must use the same backend and resident-weight flags.
+// A HAL session may intentionally execute unsupported quant formats on native CPU.
+func newBenchSession(m *model.Model, f *benchFlags, be compute.Backend) *model.Session {
+	if be == nil {
+		s := m.NewSession()
+		applyLegacySessionFlags(s, f)
+		return s
+	}
+	s := m.NewBackendSession(be)
+	if f != nil {
+		quant := f.quant != nil && *f.quant
+		q4k := f.q4k != nil && *f.q4k
+		s.Quant = quant || q4k
+		if f.q4k != nil {
+			s.Q4K = *f.q4k
+		}
+		if f.q4kGateUpSlab != nil {
+			s.Q4KGateUpOutputSlab = *f.q4kGateUpSlab
+		}
+	}
+	return s
 }
 
 func modelConfigReport(cfg model.Config) map[string]any {
@@ -1024,7 +1090,9 @@ func loadBenchModel(f *benchFlags, lp *ggufload.LoadProfiler) (*model.Model, str
 // flag asked for it — a profiler created for default-on -load-progress streams to stderr
 // but must not bloat every report's JSON.
 func snapshotGGUFLoadProfile(f *benchFlags, ggufLoadProfiler *ggufload.LoadProfiler, loadNanos int64) *ggufload.LoadProfile {
-	if ggufLoadProfiler != nil && (*f.loadProfile || *f.loadProfileTrace || *f.phaseProfile) {
+	// Resident Q4_K progress does not provide a detailed conversion-phase profile.
+	profiledGGUF := *f.gguf != "" && (*f.lean || streamQ4KEnabled(f))
+	if profiledGGUF && ggufLoadProfiler != nil && (*f.loadProfile || *f.loadProfileTrace || *f.phaseProfile) {
 		mode, source := ggufLoadProfileIdentity(f)
 		return ggufLoadProfiler.Snapshot(mode, source, loadNanos)
 	}
@@ -1105,6 +1173,12 @@ func assembleBenchReport(f *benchFlags, be compute.Backend, registeredBackends [
 func main() {
 	f := parseFlags()
 	validateFlags(f)
+	if rawDecodeEnabled() {
+		if err := validateRawDecodeFlags(f); err != nil {
+			fmt.Fprintln(os.Stderr, "flags:", err)
+			f.exit(2)
+		}
+	}
 	if maybeCompareNativeProfiles(f) {
 		return
 	}
@@ -1186,15 +1260,15 @@ func main() {
 		runSmoke(f, m, modelName, loadMS, vocab)
 		return
 	}
-	newSession := func() *model.Session {
-		if be != nil {
-			s := m.NewBackendSession(be)
-			s.Quant = *f.quant // routes the HAL through the Q8 weight path when the backend advertises UploadDtype
-			return s
+	if rawDecodeEnabled() {
+		if err := runRawDecode(f, m, modelName, loadMS, quantMS, be, registeredBackends); err != nil {
+			fmt.Fprintln(os.Stderr, "raw decode:", err)
+			f.exit(1)
 		}
-		s := m.NewSession()
-		applyLegacySessionFlags(s, f)
-		return s
+		return
+	}
+	newSession := func() *model.Session {
+		return newBenchSession(m, f, be)
 	}
 	if *f.nativeProfileOut != "" {
 		if err := runWithTransferredWeightLifetime(f, func() error {
@@ -1246,14 +1320,20 @@ const modelbenchDeviceHeadroom = 0.15
 // OpenErr field carries any header-open failure so the classifier reports REFUSE_BAD_HEADER.
 func preflightInputFor(f *benchFlags, be compute.Backend) ggufload.PreflightInput {
 	ws, err := ggufload.OpenWeights(*f.gguf)
+	// Backed, non-streaming Vulkan Q4_K uses mixed packed/Q8/F32 storage. Other
+	// backed Q4_K paths keep the historical F32 upper bound; streaming owns a
+	// different lifecycle and remains on that conservative path too.
+	convertedDense := *f.q4k && be != nil
+	vulkanMixed := convertedDense && *f.backendName == "vulkan" && !streamQ4KEnabled(f)
 	return ggufload.PreflightInput{
-		Path:     *f.gguf,
-		OpenErr:  err,
-		Source:   ws,
-		Backend:  be,
-		Headroom: modelbenchDeviceHeadroom,
-		Lean:     *f.lean,
-		Q4K:      *f.q4k,
+		Path:           *f.gguf,
+		OpenErr:        err,
+		Source:         ws,
+		Backend:        be,
+		Headroom:       modelbenchDeviceHeadroom,
+		Lean:           *f.lean && !convertedDense,
+		Q4K:            *f.q4k && !convertedDense,
+		VulkanMixedQ4K: vulkanMixed,
 	}
 }
 
@@ -1404,6 +1484,8 @@ func allFinite(logits []float32) bool {
 func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, vocab int) {
 	status := smokeStatusOK
 	var detail string
+	be, registeredBackends := resolveBackend(f)
+	engine, precision, backendReport := describeEngine(f, be, registeredBackends)
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -1411,13 +1493,18 @@ func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, v
 				detail = fmt.Sprintf("forward panicked: %v", r)
 			}
 		}()
-		s := m.NewSession()
-		applyLegacySessionFlags(s, f)
+		s := newBenchSession(m, f, be)
 		defer s.Close()
 		logits := s.Prefill(lcgIDs(*f.decodePrompt, vocab))
 		if !allFinite(logits) {
 			status = smokeStatusForwardFailed
 			detail = "prefill produced non-finite logits (NaN/Inf)"
+			return
+		}
+		logits = s.Step(mathx.ArgmaxF32(logits))
+		if !allFinite(logits) {
+			status = smokeStatusForwardFailed
+			detail = "decode produced non-finite logits (NaN/Inf)"
 		}
 	}()
 	fmt.Fprintf(os.Stderr, "fak modelbench smoke: %s (%s, loaded in %.1fs)\n", status, modelName, loadMS/1000)
@@ -1426,7 +1513,9 @@ func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, v
 	}
 	writeReport(f, map[string]any{
 		"app_version":         appversion.Current(),
-		"engine":              "fak modelbench smoke",
+		"engine":              engine,
+		"precision":           precision,
+		"backend":             backendReport,
 		"model":               modelName,
 		"source":              loadSource(*f.hf, *f.gguf, *f.dir, *f.lean, *f.q4k, streamQ4KEnabled(f)),
 		"stream_q4k":          streamQ4KEnabled(f),

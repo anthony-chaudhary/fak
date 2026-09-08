@@ -36,7 +36,9 @@ Set-StrictMode -Off
 # they are still Interactive, even if Task Scheduler has not retained 0x800710E0.
 $RequiredS4UTasks = @(
   'FleetScoutLoop',
-  'FleetStaleWorkGarden'
+  'FleetStaleWorkGarden',
+  'FleetRebootAdvisor',
+  'FakStallMonitor'
 )
 function Test-Admin {
   $id = [Security.Principal.WindowsIdentity]::GetCurrent()

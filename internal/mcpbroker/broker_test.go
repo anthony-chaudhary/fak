@@ -46,6 +46,15 @@ func TestRegisterTool(t *testing.T) {
 		t.Fatalf("expected ErrInvalidToolName, got %v", err)
 	}
 
+	// 1b. Reject tool with ServerID containing "__"
+	badServerTool := ToolRegistration{
+		Name:     "tool_with_bad_server",
+		ServerID: "srv__bad",
+	}
+	if err := b.RegisterTool(badServerTool); !errors.Is(err, ErrInvalidServerID) {
+		t.Fatalf("expected ErrInvalidServerID for tool with ServerID containing '__', got %v", err)
+	}
+
 	// 2. Register valid standalone tool
 	validTool := ToolRegistration{
 		Name:        "get_weather",
@@ -534,6 +543,15 @@ func TestMCPNamespaceIdentityCollision(t *testing.T) {
 	}, nil)
 	if !errors.Is(err, ErrInvalidServerID) {
 		t.Fatalf("expected ErrInvalidServerID for RegisterServerTools with '__', got: %v", err)
+	}
+
+	// 3b. Reject RegisterTool with server "a__b"
+	toolAB := ToolRegistration{
+		Name:     "c",
+		ServerID: "a__b",
+	}
+	if err := b.RegisterTool(toolAB); !errors.Is(err, ErrInvalidServerID) {
+		t.Fatalf("expected ErrInvalidServerID for RegisterTool with '__', got: %v", err)
 	}
 
 	// 4. Verify that cross-owner replacement is refused when another valid server

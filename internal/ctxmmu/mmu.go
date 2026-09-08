@@ -78,6 +78,7 @@ type MMU struct {
 	orderHead int                // consumed-prefix index into order (compacted in place)
 	maxHeld   int                // cap on len(held); 0 in zero-value, set by constructors
 	pageOutID string             // keyed page-out codec id (default "blob"; FAK_PAGEOUT_BACKEND)
+	staging   *PagedStore        // in-memory staging and read-through cache for paged refs (#10018)
 }
 
 // New builds the registered-default-shaped gate with the standard quarantine-ledger
@@ -89,6 +90,23 @@ func New() *MMU {
 	return NewWithLimit(numfmt.EnvPositiveInt("FAK_CTXMMU_MAX_HELD", DefaultMaxHeld))
 }
 
+var (
+	activeMMUsMu sync.RWMutex
+	activeMMUs   []*MMU
+)
+
+func registerActiveMMU(m *MMU) {
+	activeMMUsMu.Lock()
+	defer activeMMUsMu.Unlock()
+	activeMMUs = append(activeMMUs, m)
+}
+
+func ResetActiveMMUsForTest() {
+	activeMMUsMu.Lock()
+	defer activeMMUsMu.Unlock()
+	activeMMUs = nil
+}
+
 // NewWithLimit builds a gate whose quarantine ledger holds at most maxHeld entries
 // (oldest dropped first). A non-positive maxHeld falls back to DefaultMaxHeld. This
 // is the seam the leak-regression test uses to exercise eviction with a small bound.
@@ -96,7 +114,50 @@ func NewWithLimit(maxHeld int) *MMU {
 	if maxHeld < 1 {
 		maxHeld = DefaultMaxHeld
 	}
-	return &MMU{held: map[string]abi.Ref{}, cleared: map[string]bool{}, lastTouch: map[string]int64{}, maxHeld: maxHeld, pageOutID: pageOutBackendID()}
+	m := &MMU{
+		held:       map[string]abi.Ref{},
+		cleared:    map[string]bool{},
+		lastTouch:  map[string]int64{},
+		maxHeld:    maxHeld,
+		pageOutID:  pageOutBackendID(),
+		staging:    NewPagedStore(DefaultPagedStoreMaxBytes, maxHeld*2),
+	}
+	registerActiveMMU(m)
+	return m
+}
+
+func (m *MMU) stagingStore() *PagedStore {
+	if m != nil && m.staging != nil {
+		return m.staging
+	}
+	return DefaultPagedStore()
+}
+
+func (m *MMU) stagePaged(digest string, body []byte) {
+	if digest == "" || len(body) == 0 {
+		return
+	}
+	m.stagingStore().Stage(digest, body)
+	StagePagedRef(digest, body)
+}
+
+func (m *MMU) unstagePaged(digest string) {
+	if digest == "" {
+		return
+	}
+	if m != nil && m.staging != nil {
+		m.staging.Remove(digest)
+	}
+	DefaultPagedStore().Remove(digest)
+}
+
+func (m *MMU) getStaged(digest string) ([]byte, bool) {
+	if m != nil && m.staging != nil {
+		if b, ok := m.staging.Get(digest); ok {
+			return b, true
+		}
+	}
+	return DefaultPagedStore().Get(digest)
 }
 
 // pageOutBackendID is the keyed page-out codec id the MMU pages cold/quarantined
@@ -366,6 +427,8 @@ func (m *MMU) quarantineResult(ctx context.Context, r *abi.Result, reason abi.Re
 	m.touchLocked(id, holdNowMillis()) // start the TTL keepalive countdown (pinreaper.go)
 	m.evictExcessLocked()
 	m.mu.Unlock()
+	m.stagePaged(handle.Digest, body)
+	m.stagePaged(id, body)
 	stub := map[string]any{
 		"_quarantined":       true,
 		"status":             "quarantined_for_safety",
@@ -423,12 +486,107 @@ func quarantineMeta(by string, reason abi.ReasonCode, detector, id string) map[s
 
 func (m *MMU) pageToPointer(ctx context.Context, orig abi.Ref, body []byte, hint string) (abi.Ref, bool) {
 	handle := m.pageOut(ctx, body)
-	stub := map[string]any{"_paged": true, "ref": handle.Digest, "len": len(body), "hint": hint}
+	if handle.Digest == "" {
+		return abi.Ref{}, false
+	}
+	stub := map[string]any{
+		"_paged":         true,
+		"ref":            handle.Digest,
+		"retrieval_tool": "fak_context_restore",
+		"size":           len(body),
+		"len":            len(body),
+		"retrieval_call": map[string]any{"id": handle.Digest},
+		"hint":           hint,
+	}
 	ref, ok := putJSON(ctx, stub)
 	if !ok || ref.Len >= PointerMax {
 		return abi.Ref{}, false
 	}
+	digest := handle.Digest
+	m.mu.Lock()
+	if m.held != nil {
+		if _, exists := m.held[digest]; !exists {
+			m.held[digest] = handle
+			m.order = append(m.order, digest)
+		}
+		if m.cleared != nil {
+			m.cleared[digest] = true
+		}
+		abi.PinResolved(handle)
+		m.touchLocked(digest, holdNowMillis())
+		m.evictExcessLocked()
+	}
+	m.mu.Unlock()
+
+	// Stage in-memory for immediate read-through restore before background CAS flush completes (#10018)
+	m.stagePaged(digest, body)
+
 	return ref, true
+}
+
+func (m *MMU) ResolvePagedRef(ctx context.Context, digest string) ([]byte, bool) {
+	if m == nil {
+		return nil, false
+	}
+	clean := strings.TrimPrefix(digest, "sha256:")
+	m.mu.Lock()
+	key := clean
+	handle, ok := m.held[clean]
+	if !ok {
+		key = digest
+		handle, ok = m.held[digest]
+	}
+	if ok {
+		m.touchLocked(key, holdNowMillis())
+	}
+	m.mu.Unlock()
+	if !ok {
+		// Read-through fallback: check in-memory staging store
+		if staged, ok := m.getStaged(clean); ok && len(staged) > 0 {
+			return staged, true
+		}
+		return nil, false
+	}
+	if b, has := abi.PageOut(m.codecID()); has {
+		if ref, err := b.PageIn(ctx, handle); err == nil && len(ref.Inline) > 0 {
+			return ref.Inline, true
+		}
+	}
+	if res := abi.ActiveResolver(); res != nil {
+		if raw, err := res.Resolve(ctx, handle); err == nil && len(raw) > 0 {
+			return raw, true
+		}
+	}
+	// In-memory read-through fallback: check pending writeback buffers / staging store (#10018)
+	if staged, ok := m.getStaged(clean); ok && len(staged) > 0 {
+		return staged, true
+	}
+	return nil, false
+}
+
+func ResolvePaged(ctx context.Context, digest string) ([]byte, bool) {
+	clean := strings.TrimPrefix(digest, "sha256:")
+	activeMMUsMu.RLock()
+	mmus := make([]*MMU, len(activeMMUs))
+	copy(mmus, activeMMUs)
+	activeMMUsMu.RUnlock()
+
+	for _, m := range mmus {
+		if body, ok := m.ResolvePagedRef(ctx, digest); ok {
+			return body, true
+		}
+	}
+	for _, ra := range abi.ResultAdmitters() {
+		if m, ok := ra.(*MMU); ok {
+			if body, ok := m.ResolvePagedRef(ctx, digest); ok {
+				return body, true
+			}
+		}
+	}
+	if staged, ok := GetStagedPagedRef(clean); ok && len(staged) > 0 {
+		return staged, true
+	}
+	return nil, false
 }
 
 // digestToPointer is the rung-3 useful-page-out peer of pageToPointer (issue #570):
@@ -468,6 +626,11 @@ func (m *MMU) digestToPointer(ctx context.Context, body []byte, digest, by strin
 	m.touchLocked(id, holdNowMillis()) // start the TTL keepalive countdown (pinreaper.go)
 	m.evictExcessLocked()
 	m.mu.Unlock()
+
+	// Stage in-memory for immediate read-through restore before background CAS flush completes (#10018)
+	m.stagePaged(handle.Digest, body)
+	m.stagePaged(id, body)
+
 	return ref, id, true
 }
 
@@ -514,6 +677,10 @@ func (m *MMU) evictExcessLocked() {
 			delete(m.held, old)
 			delete(m.cleared, old)
 			delete(m.lastTouch, old)
+			m.unstagePaged(old)
+			if h.Digest != "" {
+				m.unstagePaged(h.Digest)
+			}
 			atomic.AddInt64(&m.evicted, 1)
 		}
 	}
@@ -542,10 +709,22 @@ func (m *MMU) PageIn(ctx context.Context, id string) ([]byte, error) {
 	}
 	if b, has := abi.PageOut(m.codecID()); has {
 		ref, err := b.PageIn(ctx, handle)
-		if err != nil {
-			return nil, err
+		if err == nil && len(ref.Inline) > 0 {
+			return ref.Inline, nil
 		}
-		return ref.Inline, nil
+	}
+	if res := abi.ActiveResolver(); res != nil {
+		raw, err := res.Resolve(ctx, handle)
+		if err == nil && len(raw) > 0 {
+			return raw, nil
+		}
+	}
+	// In-memory read-through fallback: check pending writeback buffers / staging store (#10018)
+	if staged, ok := m.getStaged(handle.Digest); ok && len(staged) > 0 {
+		return staged, nil
+	}
+	if staged, ok := m.getStaged(id); ok && len(staged) > 0 {
+		return staged, nil
 	}
 	return nil, fmt.Errorf("ctxmmu: no page-out backend")
 }
@@ -572,10 +751,21 @@ func (m *MMU) Override(ctx context.Context, id, justification string) ([]byte, e
 
 	if b, has := abi.PageOut(m.codecID()); has {
 		ref, err := b.PageIn(ctx, handle)
-		if err != nil {
-			return nil, err
+		if err == nil && len(ref.Inline) > 0 {
+			return ref.Inline, nil
 		}
-		return ref.Inline, nil
+	}
+	if res := abi.ActiveResolver(); res != nil {
+		raw, err := res.Resolve(ctx, handle)
+		if err == nil && len(raw) > 0 {
+			return raw, nil
+		}
+	}
+	if staged, ok := m.getStaged(handle.Digest); ok && len(staged) > 0 {
+		return staged, nil
+	}
+	if staged, ok := m.getStaged(id); ok && len(staged) > 0 {
+		return staged, nil
 	}
 	return nil, fmt.Errorf("ctxmmu: no page-out backend")
 }

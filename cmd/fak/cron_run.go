@@ -223,8 +223,13 @@ func runCronRun(stdout, stderr io.Writer, argv []string) int {
 		release = nil
 	}
 
-	// Execute command with bounded timeout
-	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	// Execute command with bounded timeout clamped to hard-interrupt ceiling (#2927)
+	effectiveTimeout := *timeout
+	if effectiveTimeout > CronHardInterruptCeiling {
+		effectiveTimeout = CronHardInterruptCeiling
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), effectiveTimeout)
 	defer cancel()
 
 	cmdName := cmdArgs[0]
@@ -256,7 +261,11 @@ func runCronRun(stdout, stderr io.Writer, argv []string) int {
 			outcome = cronRunOutcomeTimeout
 			status = cronRunStatusTimeout
 			exitCode = cronRunExitTimeout
-			errMsg = "execution timed out"
+			if *timeout > CronHardInterruptCeiling && effectiveTimeout == CronHardInterruptCeiling {
+				errMsg = fmt.Sprintf("execution stopped: exceeded %s hard interrupt ceiling", CronHardInterruptCeiling)
+			} else {
+				errMsg = "execution timed out"
+			}
 		} else {
 			outcome = cronRunOutcomeFailed
 			status = cronRunStatusFailed

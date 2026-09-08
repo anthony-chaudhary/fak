@@ -32,34 +32,38 @@ const (
 	ReasonScopeCrossing                      // payload routed or shared wider than its declared isolation scope
 	ReasonPromptInjection                    // tool result or payload contains prompt injection markers
 	ReasonIntegrityRefuted                   // witness resolver actively refuted the claimed effect
-	// 22.. reserved for additive core reasons; register out-of-tree names via
+	ReasonSpeculationMispredict              // speculative tool call was mispredicted or squashed
+	ReasonSpeculativeEffectLeak              // speculative execution attempted or caused an unauthorized side-effect leak
+	// 24.. reserved for additive core reasons; register out-of-tree names via
 	// RegisterReason.
 	ReasonCoreMax ReasonCode = 1023
 )
 
 var coreReasonNames = map[ReasonCode]string{
-	ReasonNone:             "NONE",
-	ReasonDefaultDeny:      "DEFAULT_DENY",
-	ReasonPolicyBlock:      "POLICY_BLOCK",
-	ReasonSelfModify:       "SELF_MODIFY",
-	ReasonLeaseHeld:        "LEASE_HELD",
-	ReasonTrustViolation:   "TRUST_VIOLATION",
-	ReasonMalformed:        "MALFORMED",
-	ReasonMisroute:         "MISROUTE",
-	ReasonRateLimited:      "RATE_LIMITED",
-	ReasonSecretExfil:      "SECRET_EXFIL",
-	ReasonUnwitnessed:      "UNWITNESSED",
-	ReasonOversize:         "OVERSIZE",
-	ReasonUnknownTool:      "UNKNOWN_TOOL",
-	ReasonSecretDiscovered: "RESULT_SECRET_DISCOVERED",
-	ReasonSecretRedacted:   "SECRET_REDACTED",
-	ReasonShellDialect:     "SHELL_DIALECT",
-	ReasonPIIRedacted:      "PII_REDACTED",
-	ReasonPIIExfil:         "PII_EXFIL",
-	ReasonTaintEgress:      "TAINT_EGRESS",
-	ReasonScopeCrossing:    "SCOPE_CROSSING",
-	ReasonPromptInjection:  "PROMPT_INJECTION",
-	ReasonIntegrityRefuted: "INTEGRITY_REFUTED",
+	ReasonNone:                  "NONE",
+	ReasonDefaultDeny:           "DEFAULT_DENY",
+	ReasonPolicyBlock:           "POLICY_BLOCK",
+	ReasonSelfModify:            "SELF_MODIFY",
+	ReasonLeaseHeld:             "LEASE_HELD",
+	ReasonTrustViolation:        "TRUST_VIOLATION",
+	ReasonMalformed:             "MALFORMED",
+	ReasonMisroute:              "MISROUTE",
+	ReasonRateLimited:           "RATE_LIMITED",
+	ReasonSecretExfil:           "SECRET_EXFIL",
+	ReasonUnwitnessed:           "UNWITNESSED",
+	ReasonOversize:              "OVERSIZE",
+	ReasonUnknownTool:           "UNKNOWN_TOOL",
+	ReasonSecretDiscovered:      "RESULT_SECRET_DISCOVERED",
+	ReasonSecretRedacted:        "SECRET_REDACTED",
+	ReasonShellDialect:          "SHELL_DIALECT",
+	ReasonPIIRedacted:           "PII_REDACTED",
+	ReasonPIIExfil:              "PII_EXFIL",
+	ReasonTaintEgress:           "TAINT_EGRESS",
+	ReasonScopeCrossing:         "SCOPE_CROSSING",
+	ReasonPromptInjection:       "PROMPT_INJECTION",
+	ReasonIntegrityRefuted:      "INTEGRITY_REFUTED",
+	ReasonSpeculationMispredict: "SPECULATION_MISPREDICT",
+	ReasonSpeculativeEffectLeak: "SPECULATIVE_EFFECT_LEAK",
 }
 
 // ReasonName resolves a reason code to its stable name, consulting the closed
@@ -136,4 +140,4 @@ func sortStrings(s []string) {
 
 // CoreReasonCount is the size of the closed core vocabulary (excludes NONE) —
 // referenced by tests asserting the closed reason set.
-const CoreReasonCount = 21
+const CoreReasonCount = 23

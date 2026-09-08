@@ -55,13 +55,55 @@ func (s *Session) VerifyForward(ids []int, pos []int, allow func(q, k int) bool)
 }
 
 const (
-	targetVerificationReceiptSchema = "fak-target-verification/1"
-	targetVerificationEngine        = "fak-native"
-	targetVerificationBatchedPath   = "fak-native/batched-target-verify-v1"
-	targetVerificationQwen38Path    = "fak-native/f32/qwen3.8-whole-sequence-target-verify-v1"
-	targetVerificationDecodePath    = "fak-native/ordinary-target-decode-v1"
-	qwen38VerifyBoundaryTolerance   = float32(2e-5)
+	targetVerificationReceiptSchema   = "fak-target-verification/1"
+	targetVerificationEngine          = "fak-native"
+	targetVerificationBatchedPath     = "fak-native/batched-target-verify-v1"
+	targetVerificationQwen38Path      = "fak-native/f32/qwen3.8-whole-sequence-target-verify-v1"
+	targetVerificationQwen38PanelPath = "fak-native/f32/qwen3.8-incremental-target-verify-v1"
+	targetVerificationDecodePath      = "fak-native/ordinary-target-decode-v1"
+	qwen38VerifyBoundaryTolerance     = float32(2e-5)
 )
+
+// verifyQwen35MTPPanel owns timing for the incremental production verifier.
+// The panel's 256 MiB admission estimate is a scratch/cache-growth bound, not
+// resident memory. Only actually retained transaction state enters KnownMemoryBytes;
+// process peak memory and the inclusive acceptance run remain separately measured.
+func (s *Session) verifyQwen35MTPPanel(ids []int, boundaryLogits []float32) (rows [][]float32, receipt TargetVerificationReceipt, err error) {
+	receipt = TargetVerificationReceipt{Schema: targetVerificationReceiptSchema, Engine: targetVerificationEngine, Path: targetVerificationDecodePath, DraftTokens: len(ids)}
+	setup := time.Now()
+	err = s.admitQwen35VerifyPanel(ids)
+	if err == nil && len(boundaryLogits) != s.M.Cfg.VocabSize {
+		err = targetVerificationDowngrade("incremental target boundary logits width differs from vocabulary")
+	}
+	receipt.Accounting.Setup = measuredSpeculativeCost(setup)
+	if err != nil {
+		return nil, receipt, err
+	}
+	receipt.Path = targetVerificationQwen38PanelPath
+	receipt.TargetVerificationOperations = 1
+	started := time.Now()
+	defer func() {
+		receipt.Accounting.TargetVerification = measuredSpeculativeCost(started)
+		if recovered := recover(); recovered != nil {
+			rows = nil
+			err = fmt.Errorf("model: incremental Qwen3.8 target verification: %v", recovered)
+		}
+	}()
+	rows, err = s.qwen35VerifyPanel(ids, nil)
+	if err != nil {
+		return nil, receipt, err
+	}
+	if len(rows) != len(ids) {
+		return nil, receipt, fmt.Errorf("model: incremental target returned %d rows for %d drafts", len(rows), len(ids))
+	}
+	for _, row := range rows {
+		if len(row) != s.M.Cfg.VocabSize {
+			return nil, receipt, fmt.Errorf("model: incremental target returned malformed logits")
+		}
+	}
+	receipt.OneOperation = true
+	return rows, receipt, nil
+}
 
 // ErrTargetVerificationDowngrade marks a request that cannot be represented by
 // one proven target operation. The caller may explicitly retain ordinary

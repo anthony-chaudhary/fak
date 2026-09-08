@@ -1,6 +1,6 @@
 <#
 register_bench_plan_doc.ps1 -- install/remove the OS Scheduled Task that keeps the
-committed hardware bench-plan doc fresh (docs/bench-plan.md).
+hardware bench-plan doc fresh (.fak\bench-plan.md).
 
 The benchmark catalog (experiments/benchmark/catalog.json) is a passive registry of what
 each bench-node (macbook / datacenter-A100 / cloud-L4 / RTX-laptop) HAS run. This task renders the
@@ -13,7 +13,7 @@ cadence is slow; minute-scale would only churn the doc).
 PURE READ-ONLY FOLD: the tick WRITES only the working-tree doc and git-commits NOTHING.
 The repo is a shared multi-session tree where commits are by explicit path only --
 automating git here would steal a sibling session's in-flight files. An operator commits
-docs/bench-plan.md by path when ready; the task just keeps the working copy current.
+the doc by path when ready; the task just keeps the working copy current.
 
 NO LIVE ARM: the planner has no execute mode and never runs a benchmark, and this box is
 the agent-host -- "live" execution is a human/remote action on the bench-node later.
@@ -29,7 +29,7 @@ param(
   [ValidateSet('install','remove','status')] [string]$Action = 'install',
   [string]$TaskName    = 'FleetBenchPlanDoc',
   [string]$Workspace   = $(Split-Path -Parent $PSScriptRoot),
-  [string]$DocPath     = 'docs\bench-plan.md',
+  [string]$DocPath     = '.fak\bench-plan.md',
   [int]$EveryMinutes   = 720
 )
 $ErrorActionPreference = 'Stop'

@@ -228,14 +228,14 @@ func TestPowerShellStreamingExtension(t *testing.T) {
 func TestPowerShellSoftProgressiveWarning(t *testing.T) {
 	ctx := context.Background()
 
-	// Base timeout: 2000ms. 70% threshold is 1400ms.
-	// Command sleeps 1500ms, guaranteeing crossing the 1400ms warning threshold
-	// while finishing well before the 2000ms deadline.
-	script := `Start-Sleep -Milliseconds 1500; Write-Output 'progressive complete'`
+	// Base timeout: 3500ms. 70% threshold is 2450ms.
+	// Command sleeps 2500ms, guaranteeing crossing the 2450ms warning threshold
+	// while finishing well before the 3500ms deadline.
+	script := `Start-Sleep -Milliseconds 2500; Write-Output 'progressive complete'`
 
 	res, err := RunPowerShell(ctx, script,
 		WithPreferredEngine("powershell.exe"),
-		WithTimeout(2000*time.Millisecond),
+		WithTimeout(3500*time.Millisecond),
 		WithWarningThreshold(0.70),
 		WithExtensionSlice(5*time.Second),
 	)
@@ -300,8 +300,11 @@ func TestPowerShellDualEngineStartFallback(t *testing.T) {
 	ctx := context.Background()
 	script := "Write-Output 'StartFallbackSuccess'"
 
-	// Mock CommandContext such that when pwsh is attempted, it points to a non-existent binary that fails Start
+	// Mock LookPath and CommandContext such that when pwsh is attempted, it points to a non-existent binary that fails Start
 	res, err := RunPowerShell(ctx, script,
+		WithLookPath(func(name string) (string, error) {
+			return name, nil
+		}),
 		WithCommandContext(func(cmdCtx context.Context, name string, args ...string) *exec.Cmd {
 			if strings.HasPrefix(name, "pwsh") {
 				return exec.CommandContext(cmdCtx, "C:\\nonexistent_pwsh_binary_for_test.exe", args...)

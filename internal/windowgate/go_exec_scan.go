@@ -10,8 +10,8 @@ import (
 // ---- Go background helper window-suppression rules ---------------------- //
 
 var (
-	reGoExecAssign = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*exec\.Command(?:Context)?\s*\(`)
-	reGoCommandLit = regexp.MustCompile(`exec\.Command\s*\(\s*"([^"]+)"|exec\.CommandContext\s*\([^,]+,\s*"([^"]+)"`)
+	reGoExecAssign = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*(?:exec|sysproc)\.Command(?:Context)?\s*\(`)
+	reGoCommandLit = regexp.MustCompile(`(?:exec|sysproc)\.Command\s*\(\s*"([^"]+)"|(?:exec|sysproc)\.CommandContext\s*\([^,]+,\s*"([^"]+)"`)
 	reGoInlineTerm = regexp.MustCompile(`exec\.Command(?:Context)?\s*\([^)]*\)\.(Run|Output|CombinedOutput|Start)\s*\(`)
 )
 
@@ -62,6 +62,18 @@ var candidateConsoleTools = map[string]bool{
 	"schtasks": true, "schtasks.exe": true,
 	"taskkill": true, "taskkill.exe": true, "tasklist": true, "tasklist.exe": true,
 	"wsl": true, "wsl.exe": true,
+}
+
+var candidateSuppressors = []string{
+	"configureDispatchHelperCommand",
+	"configureDispatchSpawn",
+	"windowgate.ConfigureBackgroundCommand",
+	"ConfigureBackgroundCommand",
+	"windowgate.ConfigureWorkerCommand",
+	"ConfigureWorkerCommand",
+	"sysproc.ConfigureBackground",
+	"sysproc.ConfigureDetached",
+	"sysproc.ConfigureProcessGroup",
 }
 
 // GoExecViolations returns one message per known background Go helper command
@@ -125,15 +137,21 @@ func goExecFindings(rel, src string, hard, onlyGo bool) []string {
 		}
 		name := m[1]
 		configured := false
+		if strings.Contains(line, "sysproc.Command(") || strings.Contains(line, "sysproc.CommandContext(") {
+			configured = true
+		}
 		for j := i + 1; j < len(lines) && j <= i+36; j++ {
 			text := stripGoLineComment(lines[j])
-			if strings.Contains(text, "configureDispatchHelperCommand("+name+")") ||
-				strings.Contains(text, "configureDispatchSpawn("+name+")") ||
-				strings.Contains(text, "windowgate.ConfigureBackgroundCommand("+name+")") ||
-				strings.Contains(text, "windowgate.ConfigureWorkerCommand("+name+")") ||
-				strings.Contains(text, "ConfigureWorkerCommand("+name+")") ||
-				strings.Contains(text, "ConfigureBackgroundCommand("+name+")") {
+			for _, sup := range candidateSuppressors {
+				if strings.Contains(text, sup+"("+name+")") {
+					configured = true
+					break
+				}
+			}
+			if strings.Contains(text, "sysproc.Command(") || strings.Contains(text, "sysproc.CommandContext(") {
 				configured = true
+			}
+			if configured {
 				continue
 			}
 			if reGoExecAssign.MatchString(text) {

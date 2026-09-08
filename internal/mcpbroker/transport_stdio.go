@@ -263,6 +263,49 @@ func (t *StdioTransport) dispatchMessage(data []byte) {
 	}
 	id, ok := parseNumericID(rawID)
 	if !ok {
+		// Response has a non-int64 ID (e.g. string "1", float 1.0, or unparseable).
+		// Fail fast with a protocol error instead of silently dropping and hanging callers.
+		errResp := &rpcResponse{
+			JSONRPC: jsonrpc,
+			ID:      rawID,
+			Error: &rpcError{
+				Code:    -32600,
+				Message: "unsupported non-int64 response id format",
+			},
+		}
+
+		candidateID, hasCandidate := parseAnyNumericID(rawID)
+
+		var targets []chan *rpcResponse
+		t.pendingMu.Lock()
+		if hasCandidate {
+			if ch, found := t.pending[candidateID]; found {
+				delete(t.pending, candidateID)
+				targets = append(targets, ch)
+			}
+		} else {
+			if len(t.pending) == 1 {
+				for pid, ch := range t.pending {
+					delete(t.pending, pid)
+					targets = append(targets, ch)
+				}
+			} else if len(t.pending) > 1 {
+				for pid, ch := range t.pending {
+					delete(t.pending, pid)
+					targets = append(targets, ch)
+				}
+			}
+		}
+		t.pendingMu.Unlock()
+
+		for _, ch := range targets {
+			if ch != nil {
+				select {
+				case ch <- errResp:
+				default:
+				}
+			}
+		}
 		return
 	}
 
@@ -330,6 +373,35 @@ func parseNumericID(raw json.RawMessage) (int64, bool) {
 	var num int64
 	if err := json.Unmarshal(trimmed, &num); err == nil {
 		return num, true
+	}
+	return 0, false
+}
+
+// parseAnyNumericID attempts to parse an integer ID from raw JSON, converting
+// string (e.g. "1", "1.0") or float (e.g. 1.0) representations.
+func parseAnyNumericID(raw json.RawMessage) (int64, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return 0, false
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err == nil {
+			s = strings.TrimSpace(s)
+			if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+				return n, true
+			}
+			if f, err := strconv.ParseFloat(s, 64); err == nil && float64(int64(f)) == f {
+				return int64(f), true
+			}
+		}
+		return 0, false
+	}
+	var f float64
+	if err := json.Unmarshal(trimmed, &f); err == nil {
+		if float64(int64(f)) == f {
+			return int64(f), true
+		}
 	}
 	return 0, false
 }

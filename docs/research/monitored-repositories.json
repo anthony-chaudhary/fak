@@ -4,6 +4,63 @@
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
 {
+    "repository": "MindLab-Research/ferrite",
+    "url": "https://github.com/MindLab-Research/ferrite",
+    "status": "studied",
+    "priority": 1,
+    "why": "Monomorphic Rust engine, PDAF, MHC with Sinkhorn, WYF chunking for native GLM-5.3-Flash inference.",
+    "last_checked": "2026-09-03",
+    "checked_revision": "d771576a7a462866ba707af16100a106c52c7fd2",
+    "study_note": "docs/notes/CONCEPT-STUDY-FERRITE-GLM53-2026-09-03.md",
+    "receipt_id": "study_c821e957a046f539ebbf2876517477318651faf282329ee891aebe1b06f4acff",
+    "inventory": {
+      "filed_issue_count": 1,
+      "issue_refs": [
+        "#10950"
+      ],
+      "mode": "deep",
+      "candidate_count": 5
+    }
+},
+{
+    "repository": "vcruz305/GLM-5.3-Flash-EXL3-K2-DGX-Spark-recipe",
+    "url": "https://github.com/vcruz305/GLM-5.3-Flash-EXL3-K2-DGX-Spark-recipe",
+    "status": "studied",
+    "priority": 1,
+    "why": "Native EXL3 CUDA kernels, native MTP k=2, and circular K-pool tail slot mapping integrity for GLM-5.3 on DGX Spark.",
+    "last_checked": "2026-09-03",
+    "checked_revision": "9ced8ba911ea6a0720384c4de1875d64d5470ef1",
+    "study_note": "docs/notes/CONCEPT-STUDY-VCRUZ305-GLM53-EXL3-2026-09-03.md",
+    "receipt_id": "study_c821e957a046f539ebbf2876517477318651faf282329ee891aebe1b06f4acff",
+    "inventory": {
+      "filed_issue_count": 1,
+      "issue_refs": [
+        "#10953"
+      ],
+      "mode": "deep",
+      "candidate_count": 5
+    }
+},
+{
+    "repository": "pctablet505/glm53-flash-single-gpu",
+    "url": "https://github.com/pctablet505/glm53-flash-single-gpu",
+    "status": "studied",
+    "priority": 1,
+    "why": "Extreme memory-ratio offloading, 52 GB/s Triton gather, and grouped DMA staging for 181GB GLM-5.3 on single 96GB GPU.",
+    "last_checked": "2026-09-03",
+    "checked_revision": "3f8a419be20d8591e1c7f0b8c4d299442a8b3017",
+    "study_note": "docs/notes/CONCEPT-STUDY-PCTABLET505-GLM53-UVA-2026-09-03.md",
+    "receipt_id": "study_c821e957a046f539ebbf2876517477318651faf282329ee891aebe1b06f4acff",
+    "inventory": {
+      "filed_issue_count": 1,
+      "issue_refs": [
+        "#10957"
+      ],
+      "mode": "deep",
+      "candidate_count": 3
+    }
+},
+{
     "repository":  "seal-rg/recurrent-pretraining",
     "url":  "https://github.com/seal-rg/recurrent-pretraining",
     "status":  "studied",

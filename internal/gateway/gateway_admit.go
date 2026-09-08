@@ -185,9 +185,17 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 	// Snapshot each message's ORIGINAL content before admission rewrites any quarantined
 	// payload in place. The in-kernel poison-eviction hook needs the original (poisoned)
 	// bytes to render the token path that was actually cached, not the paged-out form.
-	origContent := make([]string, len(messages))
-	for i := range messages {
-		origContent[i] = messages[i].Content
+	// The origContent snapshot is only allocated when there is at least one tool result
+	// that could be quarantined, skipping allocation on tool-free requests.
+	var origContent []string
+	for _, m := range messages {
+		if m.Role == agent.RoleTool {
+			origContent = make([]string, len(messages))
+			for i := range messages {
+				origContent[i] = messages[i].Content
+			}
+			break
+		}
 	}
 	// Pair each inbound tool_result to its originating call's (tool, args): the result
 	// block carries only ToolCallID + Content, but the args live on the prior assistant

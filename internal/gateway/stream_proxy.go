@@ -217,7 +217,9 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	if !ok || !sp.StreamingSupported() {
 		return false
 	}
-	flusher, _ := w.(http.Flusher)
+	sw := newSyncResponseWriter(w)
+	w = sw
+	flusher := sw
 	id := "chatcmpl-fak-" + itoa(uint64(time.Now().UnixNano()))
 	created := time.Now().Unix()
 
@@ -232,20 +234,30 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	// Heartbeat config for typed progress heartbeats (#10672).
 	hb := newHeartbeatConfig()
 	var hbTicker *time.Ticker
-	var hbDone chan struct{}
+	var hbStop chan struct{}
+	var hbStopped chan struct{}
+	var stopOnce sync.Once
+	stopHB := func() {
+		stopOnce.Do(func() {
+			if hbStop != nil {
+				close(hbStop)
+				<-hbStopped
+			}
+		})
+	}
+	defer stopHB()
 	if hb.enabled {
 		hbTicker = time.NewTicker(hb.interval)
-		hbDone = make(chan struct{})
-		defer func() {
-			close(hbDone)
-			hbTicker.Stop()
-		}()
+		hbStop = make(chan struct{})
+		hbStopped = make(chan struct{})
 		go func() {
+			defer close(hbStopped)
+			defer hbTicker.Stop()
 			for {
 				select {
 				case <-hbTicker.C:
 					hb.emitHeartbeat(w)
-				case <-hbDone:
+				case <-hbStop:
 					return
 				case <-ctx.Done():
 					return
@@ -309,6 +321,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 
 	began := time.Now()
 	comp, err := sp.CompleteStream(ctx, utf8Fragments.write, req.Messages, req.Tools, opts...)
+	stopHB()
 	if err != nil {
 		if _, _, _, ok := inKernelOOMObservation(err); ok {
 			s.observePlannerRequestMemory()

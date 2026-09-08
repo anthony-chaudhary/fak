@@ -20,6 +20,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/a2achan"
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/session"
@@ -247,6 +248,25 @@ type runConfig struct {
 	baseURL                      string
 	circuitBreakerThreshold      int
 	envelopeSink                 func(harnesskit.Envelope)
+	policySnapshot               *adjudicator.Policy
+	streamingSpeculation         bool
+	streamingFSMHook             func(*StreamingToolFSM)
+}
+
+// WithStreamingSpeculation enables speculative tool execution driven by StreamingToolFSM
+// as token chunks arrive from the streaming planner.
+func WithStreamingSpeculation(enabled bool) RunOption {
+	return func(c *runConfig) {
+		c.streamingSpeculation = enabled
+	}
+}
+
+// WithStreamingFSMHook registers an observer or configuration hook called whenever
+// a StreamingToolFSM is instantiated for a turn.
+func WithStreamingFSMHook(hook func(*StreamingToolFSM)) RunOption {
+	return func(c *runConfig) {
+		c.streamingFSMHook = hook
+	}
 }
 
 // WithCircuitBreakerThreshold configures the threshold of consecutive identical
@@ -254,6 +274,20 @@ type runConfig struct {
 func WithCircuitBreakerThreshold(threshold int) RunOption {
 	return func(c *runConfig) {
 		c.circuitBreakerThreshold = threshold
+	}
+}
+
+// WithPolicySnapshot installs an explicit caller policy snapshot to restore post-Configure.
+// This preserves explicitly supplied capability floors (such as from a chat --policy
+// manifest) through native arm configuration while leaving runs without an explicit
+// snapshot on default Configure behavior.
+//
+// Process-global policy is not concurrent per-session isolation: this option documents
+// single-process immutable policy use and restores the caller floor in the existing runtime setup.
+func WithPolicySnapshot(p adjudicator.Policy) RunOption {
+	return func(c *runConfig) {
+		snap := p
+		c.policySnapshot = &snap
 	}
 }
 

@@ -19,7 +19,7 @@ const (
 
 	// DefaultHeartbeatStaleThreshold is the cutoff after which a worktree with an un-updated
 	// heartbeat is considered stale and eligible for reaping (#11239, #11508).
-	DefaultHeartbeatStaleThreshold = 60 * time.Minute
+	DefaultHeartbeatStaleThreshold = 15 * time.Minute
 )
 
 // WorkerLease represents the durable heartbeat lease stored inside each worker worktree (#11239).
@@ -74,6 +74,9 @@ func WriteWorkerLease(wtPath string, lease WorkerLease) error {
 // ReadWorkerLease reads and parses lease.json from wtPath.
 func ReadWorkerLease(wtPath string) (WorkerLease, error) {
 	var lease WorkerLease
+	if wtPath == "" {
+		return lease, fmt.Errorf("worker worktree path cannot be empty")
+	}
 	data, err := os.ReadFile(filepath.Join(wtPath, WorkerLeaseFileName))
 	if err != nil {
 		return lease, err
@@ -137,6 +140,9 @@ type DeadWorktreeSweepReport struct {
 // isWorktreeDirty reports whether wtPath has uncommitted git changes.
 // Metadata files like lease.json are ignored.
 func isWorktreeDirty(wtPath string, git GitRunner) bool {
+	if wtPath == "" {
+		return false
+	}
 	rc, out := run(git, wtPath, []string{"status", "--porcelain"})
 	if rc != 0 {
 		return false
@@ -223,7 +229,9 @@ func SweepDeadWorktrees(root, wtRoot string, git GitRunner) DeadWorktreeSweepRep
 						dead = true
 					}
 					if !lease.HeartbeatTS.IsZero() && time.Since(lease.HeartbeatTS) > DefaultHeartbeatStaleThreshold {
-						stale = true
+						if lease.PID <= 0 || !processalive.Check(lease.PID) {
+							stale = true
+						}
 					}
 				}
 				if stamp, serr := readOwnerStamp(wtPath); serr == nil {
@@ -234,18 +242,25 @@ func SweepDeadWorktrees(root, wtRoot string, git GitRunner) DeadWorktreeSweepRep
 						dead = true
 					}
 					if !stamp.CreatedAt.IsZero() && time.Since(stamp.CreatedAt) > DefaultHeartbeatStaleThreshold {
-						stale = true
+						if stamp.PID <= 0 || !processalive.Check(stamp.PID) {
+							stale = true
+						}
 					}
 				}
 			}
 
 			if dead || stale {
-				if wtPath != "" {
-					if _, err := os.Stat(wtPath); err == nil {
-						if isWorktreeDirty(wtPath, cleanupGit) {
-							continue
-						}
-					}
+				if alive, ok := OwnerProcessLive(wtPath, processalive.Check); ok && alive {
+					continue
+				}
+				if lease, lerr := ReadWorkerLease(wtPath); lerr == nil && lease.PID > 0 && processalive.Check(lease.PID) {
+					continue
+				}
+				if stamp, serr := readOwnerStamp(wtPath); serr == nil && stamp.PID > 0 && processalive.Check(stamp.PID) {
+					continue
+				}
+				if isWorktreeDirty(wtPath, cleanupGit) {
+					continue
 				}
 				_ = os.Remove(lockedFile)
 				run(cleanupGit, root, []string{"worktree", "unlock", entry.Name()})
@@ -296,7 +311,9 @@ func SweepDeadWorktrees(root, wtRoot string, git GitRunner) DeadWorktreeSweepRep
 					dead = true
 				}
 				if !lease.HeartbeatTS.IsZero() && time.Since(lease.HeartbeatTS) > DefaultHeartbeatStaleThreshold {
-					stale = true
+					if lease.PID <= 0 || !processalive.Check(lease.PID) {
+						stale = true
+					}
 				}
 			}
 			if stamp, serr := readOwnerStamp(wtPath); serr == nil {
@@ -307,14 +324,23 @@ func SweepDeadWorktrees(root, wtRoot string, git GitRunner) DeadWorktreeSweepRep
 					dead = true
 				}
 				if !stamp.CreatedAt.IsZero() && time.Since(stamp.CreatedAt) > DefaultHeartbeatStaleThreshold {
-					stale = true
+					if stamp.PID <= 0 || !processalive.Check(stamp.PID) {
+						stale = true
+					}
 				}
 			}
 			if dead || stale {
-				if _, err := os.Stat(wtPath); err == nil {
-					if isWorktreeDirty(wtPath, cleanupGit) {
-						continue
-					}
+				if alive, ok := OwnerProcessLive(wtPath, processalive.Check); ok && alive {
+					continue
+				}
+				if lease, lerr := ReadWorkerLease(wtPath); lerr == nil && lease.PID > 0 && processalive.Check(lease.PID) {
+					continue
+				}
+				if stamp, serr := readOwnerStamp(wtPath); serr == nil && stamp.PID > 0 && processalive.Check(stamp.PID) {
+					continue
+				}
+				if isWorktreeDirty(wtPath, cleanupGit) {
+					continue
 				}
 				run(cleanupGit, root, []string{"worktree", "unlock", wtPath})
 				run(cleanupGit, root, []string{"worktree", "unlock", entry.Name()})

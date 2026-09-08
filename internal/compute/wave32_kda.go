@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
+	"strings"
 )
 
 // Architecture constants for AMD RDNA 3.5 APUs (gfx1151 / AMD Strix Halo)
@@ -1071,8 +1073,15 @@ func (wg *Wave32Workgroup) Wave32GatedDeltaNetStep(
 }
 
 // HasVectorizedDeltaNet reports whether an optimized vectorized DeltaNet kernel is available.
+// It is available by default and can be explicitly disabled via FAK_VECTORIZED_DELTANET=0 (or false/no/off).
 func HasVectorizedDeltaNet() bool {
-	return true
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("FAK_VECTORIZED_DELTANET")))
+	switch v {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 // HasTiledChannelTranspose reports whether the tiled memory channel transpose

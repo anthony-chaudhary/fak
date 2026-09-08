@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -302,6 +304,12 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if !admitted {
 		return
 	}
+	if len(messages) > 0 {
+		messages = CanonicalizePromptOrder(messages)
+	}
+	if len(tools) > 1 {
+		tools = CanonicalizeToolDefs(tools)
+	}
 	ctx = context.WithValue(ctx, responsesRestoreContextKey{}, restoreContinuation)
 	resultAdmissions, err := s.admitInboundResults(ctx, messages, tools, reqTrace)
 	if err != nil {
@@ -341,6 +349,27 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	if elisionsCount > 0 {
 		w.Header().Set(ResponsesElisionsHeader, strconv.Itoa(elisionsCount))
+	}
+
+	// Lossless cache-prefix-preserving compaction for Responses wire (/v1/responses)
+	if s.compactHistoryBudget > 0 {
+		casPut := func(body []byte) string {
+			sum := sha256.Sum256(body)
+			digest := hex.EncodeToString(sum[:])
+			excerpt := strings.TrimSpace(string(body))
+			if len(excerpt) > 160 {
+				excerpt = excerpt[:160]
+			}
+			s.stashRestore(reqTrace, digest, excerpt, body)
+			s.stashRestore(reqTrace, "sha256:"+digest, excerpt, body)
+			if len(body) >= responsesCASThreshold {
+				s.persistRestoreCAS(digest, body)
+			}
+			return digest
+		}
+		if compacted, outcome, err := agent.CompactResponsesMessages(messages, s.compactHistoryBudget, casPut); err == nil && outcome.ShedTurns > 0 {
+			messages = compacted
+		}
 	}
 
 	var subturnRawInput json.RawMessage

@@ -521,6 +521,26 @@ func TestGoDispatchExecRules(t *testing.T) {
 			"internal/gardenbundle/gardenbundle.go",
 			"package gardenbundle\nimport (\n \"os/exec\"\n \"github.com/anthony-chaudhary/fak/internal/windowgate\"\n)\nfunc f(){\n cmd := exec.Command(\"git\", \"rev-parse\", \"HEAD\")\n windowgate.ConfigureBackgroundCommand(cmd)\n _, _ = cmd.Output()\n}\n",
 			0},
+		{"sysproc-background-hook-clean",
+			"internal/gardenbundle/gardenbundle.go",
+			"package gardenbundle\nimport (\n \"os/exec\"\n \"github.com/anthony-chaudhary/fak/pkg/sysproc\"\n)\nfunc f(){\n cmd := exec.Command(\"git\", \"rev-parse\", \"HEAD\")\n sysproc.ConfigureBackground(cmd)\n _, _ = cmd.Output()\n}\n",
+			0},
+		{"sysproc-detached-hook-clean",
+			"internal/gardenbundle/gardenbundle.go",
+			"package gardenbundle\nimport (\n \"os/exec\"\n \"github.com/anthony-chaudhary/fak/pkg/sysproc\"\n)\nfunc f(){\n cmd := exec.Command(\"git\", \"rev-parse\", \"HEAD\")\n sysproc.ConfigureDetached(cmd)\n _, _ = cmd.Output()\n}\n",
+			0},
+		{"sysproc-processgroup-hook-clean",
+			"internal/gardenbundle/gardenbundle.go",
+			"package gardenbundle\nimport (\n \"os/exec\"\n \"github.com/anthony-chaudhary/fak/pkg/sysproc\"\n)\nfunc f(){\n cmd := exec.Command(\"git\", \"rev-parse\", \"HEAD\")\n sysproc.ConfigureProcessGroup(cmd)\n _, _ = cmd.Output()\n}\n",
+			0},
+		{"sysproc-command-constructor-clean",
+			"internal/example/build.go",
+			"package example\nimport \"github.com/anthony-chaudhary/fak/pkg/sysproc\"\nfunc f(){\n cmd := sysproc.Command(\"go\", \"tool\", \"compile\")\n _, _ = cmd.Output()\n}\n",
+			0},
+		{"sysproc-commandcontext-constructor-clean",
+			"internal/example/build.go",
+			"package example\nimport (\n \"context\"\n \"github.com/anthony-chaudhary/fak/pkg/sysproc\"\n)\nfunc f(){\n cmd := sysproc.CommandContext(context.Background(), \"go\", \"tool\", \"compile\")\n _, _ = cmd.Output()\n}\n",
+			0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -553,6 +573,23 @@ func f() {
 }`
 	if got := GoExecViolations("internal/devcmd/index_graph.go", src); len(got) != 0 {
 		t.Fatalf("windowgate.Command must satisfy the no-window launch contract, got %v", got)
+	}
+}
+
+func TestGoExecViolationsAcceptSysprocCommandConstructor(t *testing.T) {
+	src := `package main
+import (
+	"context"
+	"github.com/anthony-chaudhary/fak/pkg/sysproc"
+)
+func f() {
+	cmd := sysproc.Command("go", "list", "./...")
+	_, _ = cmd.Output()
+	cmd2 := sysproc.CommandContext(context.Background(), "go", "list", "./...")
+	_, _ = cmd2.Output()
+}`
+	if got := GoExecViolations("internal/devcmd/index_graph.go", src); len(got) != 0 {
+		t.Fatalf("sysproc.Command must satisfy the no-window launch contract, got %v", got)
 	}
 }
 

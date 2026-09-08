@@ -69,6 +69,7 @@ SCHEMA = "fak-auto-push-on-lag/1"
 STATE_SCHEMA = "fak-auto-push-on-lag-state/1"
 METRICS_SCHEMA = "fak-auto-push-on-lag-metrics/1"
 LOG_REL = ".dispatch-runs/auto-push.jsonl"
+LOCK_REL = ".dispatch-runs/auto-push.lock"
 # The tick-to-tick memory that turns a level-triggered poll into an EDGE-triggered
 # backstop: the unpushed tip we last actually attempted, the consecutive-rejection
 # streak with its parking deadline, and the cumulative yield/cost counters. It lives
@@ -82,6 +83,7 @@ STATE_REL = ".dispatch-runs/auto-push-state.json"
 # rc124). 600s clears the contended-materialize window while staying well under the
 # 15-min cron period, so a slow tick still never overlaps the next.
 PUSH_TIMEOUT_SECONDS = 600
+LOCK_TIMEOUT_SECONDS = 600
 
 # Backoff after a REJECTED push. The observed pathology was a rejection re-fired
 # every 15 minutes for ~5.5 hours (22 identical failures): the trunk was genuinely
@@ -111,6 +113,7 @@ _HEALTH_BY_VERDICT = {
     "PUSHED": HEALTH_OK,        # the lag was drained
     "BACKOFF": HEALTH_DEGRADED,  # lag persists and we are parked after a rejection
     "SKIPPED": HEALTH_DEGRADED,  # lag persists and we could not even try safely
+    "LOCKED": HEALTH_DEGRADED,   # push lock held by concurrent pusher
     "PUSH_FAILED": HEALTH_FAILED,
 }
 
@@ -122,7 +125,7 @@ _EXIT_BY_HEALTH = {
 
 # Verdicts the event/backoff gate suppressed. Counted separately from the plain
 # NO_LAG steady state so `--metrics` can show what edge-triggering actually saved.
-_SUPPRESSED_VERDICTS = {"BACKOFF", "NO_EVENT"}
+_SUPPRESSED_VERDICTS = {"BACKOFF", "NO_EVENT", "LOCKED"}
 
 
 def health_of(verdict: str) -> str:
@@ -195,6 +198,98 @@ def resolve_fak(root: Path) -> list[str] | None:
     return None
 
 
+def _pid_is_alive(pid: int) -> bool:
+    """Cross-platform live-PID check. On Windows os.kill terminates rather than probes."""
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+            if handle:
+                ctypes.windll.kernel32.CloseHandle(handle)
+                return True
+            return False
+        except Exception:
+            pass
+        try:
+            proc = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 f"Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Id"],
+                capture_output=True, text=True, timeout=5)
+            return proc.returncode == 0 and bool((proc.stdout or "").strip())
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def lock_path(root: Path) -> Path:
+    return root / LOCK_REL
+
+
+def read_lock(root: Path) -> dict[str, Any] | None:
+    try:
+        raw = lock_path(root).read_text(encoding="utf-8")
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def is_lock_live(lock: dict[str, Any] | None, now_ts: int,
+                 is_alive: Any | None = None) -> tuple[bool, int]:
+    """Check if lock is held by a live process within timeout. Returns (is_live, pid)."""
+    if not lock or not isinstance(lock, dict):
+        return False, 0
+    pid = _as_int(lock.get("pid"))
+    acquired_at = _as_int(lock.get("acquired_at"))
+    if pid <= 0:
+        return False, 0
+    if abs(now_ts - acquired_at) >= LOCK_TIMEOUT_SECONDS:
+        return False, pid
+    alive_fn = is_alive or _pid_is_alive
+    if not alive_fn(pid):
+        return False, pid
+    return True, pid
+
+
+def acquire_lock(root: Path, now_ts: int,
+                 is_alive: Any | None = None) -> bool:
+    p = lock_path(root)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    existing = read_lock(root)
+    live, _ = is_lock_live(existing, now_ts, is_alive)
+    if live:
+        return False
+    try:
+        p.unlink()
+    except (FileNotFoundError, OSError):
+        pass
+    payload = json.dumps({"pid": os.getpid(), "acquired_at": now_ts})
+    try:
+        fd = os.open(str(p), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(payload)
+        return True
+    except OSError:
+        return False
+
+
+def release_lock(root: Path) -> None:
+    p = lock_path(root)
+    try:
+        lock = read_lock(root)
+        if lock and lock.get("pid") == os.getpid():
+            p.unlink()
+    except (FileNotFoundError, OSError):
+        pass
+
+
 def decide(pane: dict[str, Any]) -> tuple[bool, str]:
     """Pure admission: should we push, and why/why-not. The unit-test seam.
 
@@ -219,13 +314,16 @@ class Admission(NamedTuple):
     reason: str
 
 
-def admit(pane: dict[str, Any], state: dict[str, Any], now_ts: int) -> Admission:
-    """Event-driven admission: decide() plus the backoff and edge gates.
+def admit(pane: dict[str, Any], state: dict[str, Any], now_ts: int,
+          lock: dict[str, Any] | None = None, *,
+          is_alive: Any | None = None) -> Admission:
+    """Event-driven admission: decide() plus the lock, backoff, and edge gates.
 
     decide() answers the level question ("is there stale unpushed work?"). That
     alone is what made the cadence blind: the same stale tip re-admitted every 15
-    minutes forever. admit() adds the two memory-dependent gates, in order:
+    minutes forever. admit() adds the lock and memory-dependent gates, in order:
 
+      - LOCKED: a push lock is held by a live process within timeout (600s).
       - BACKOFF: a previous push was REJECTED and its parking window has not
         elapsed. Carries the streak and the typed guard reason so the operator sees
         WHAT is blocking delivery, not just that it is blocked.
@@ -237,6 +335,10 @@ def admit(pane: dict[str, Any], state: dict[str, Any], now_ts: int) -> Admission
     permanent park: once the window elapses the same tip is admitted again, so a
     stall that clears on its own still drains without a new commit to trigger it.
     """
+    if lock:
+        live, pid = is_lock_live(lock, now_ts, is_alive)
+        if live:
+            return Admission(False, "LOCKED", f"push-lock-held-by-pid-{pid}")
     should, reason = decide(pane)
     if not should:
         return Admission(False, "NOT_ON_MAIN" if reason == "not-on-main" else "NO_LAG", reason)
@@ -368,7 +470,8 @@ def _append_log(root: Path, record: dict[str, Any]) -> None:
 
 
 def run(root: Path, *, live: bool, push_lag_mins: int,
-        now: datetime | None = None) -> dict[str, Any]:
+        now: datetime | None = None,
+        is_alive: Any | None = None) -> dict[str, Any]:
     """Read the git pane, admit, and (only in --live) push. Returns the report.
 
     Also folds this tick into the persisted memory: the tip that was attempted, the
@@ -381,9 +484,11 @@ def run(root: Path, *, live: bool, push_lag_mins: int,
     now_ts = int(moment.timestamp())
     generated_at = moment.strftime("%Y-%m-%dT%H:%M:%SZ")
     state = load_state(root)
-    adm = admit(pane, state, now_ts)
+    lock = read_lock(root)
+    adm = admit(pane, state, now_ts, lock=lock, is_alive=is_alive)
     result: dict[str, Any] = {
         "schema": SCHEMA,
+        "repo": str(root.resolve()),
         "ok": True,
         "verdict": adm.verdict,
         "health": HEALTH_OK,
@@ -400,48 +505,60 @@ def run(root: Path, *, live: bool, push_lag_mins: int,
         "backoff_seconds": 0,
         "lag_reduced_seconds": 0,
         "reason": adm.reason,
+        "remediation": "",
         "generated_at": generated_at,
     }
 
-    if adm.should and not live:
+    if adm.verdict == "LOCKED":
+        result["verdict"] = "LOCKED"
+    elif adm.should and not live:
         # Dry run: report, and deliberately DON'T record the tip. A dry tick that
         # claimed the event would suppress the next live one and hide a real stall.
         result["verdict"] = "WOULD_PUSH"
     elif adm.should:
-        fak = resolve_fak(root)
-        if fak is None:
-            result["verdict"] = "SKIPPED"
-            result["reason"] = "fak-unavailable"
+        if not acquire_lock(root, now_ts, is_alive=is_alive):
+            existing = read_lock(root)
+            held_pid = existing.get("pid") if existing else "unknown"
+            result["verdict"] = "LOCKED"
+            result["reason"] = f"push-lock-held-by-pid-{held_pid}"
         else:
-            pr = push_main(root, fak)
-            result["push_result"] = pr
-            pushed = bool(pr.get("pushed"))
-            result["verdict"] = "PUSHED" if pushed else "PUSH_FAILED"
-            if pushed:
-                # The lag this push actually drained — the loop's only real yield.
-                result["lag_reduced_seconds"] = _as_int(pane.get("push_lag_seconds"))
-                result["fail_streak"] = 0
-                state.update(fail_streak=0, backoff_until=0, guard_reason="")
-            else:
-                if pr.get("reason"):
-                    # Surface the REAL push-failure cause (push-rejected / push-timeout /
-                    # push-oserror) as the reason, NOT the stale decide reason ("push-lag-NNm"):
-                    # the JSONL breadcrumb below logs result["reason"], so without this a
-                    # multi-hour stall reads as a generic lag and hides WHICH step died — a
-                    # rejected pre-push gate vs a timed-out tip-materialize vs a credential hang.
-                    result["reason"] = pr["reason"]
-                guard = push_guard_reason(pr)
-                streak = _as_int(state.get("fail_streak")) + 1
-                parked = backoff_seconds(streak)
-                state.update(fail_streak=streak, backoff_until=now_ts + parked,
-                             guard_reason=guard)
-                result["guard_reason"] = guard
-                result["fail_streak"] = streak
-                result["backoff_seconds"] = parked
-            # Only a LIVE attempt records the tip, so the next identical tip is a
-            # genuine no-event rather than an untried one.
-            state["tip"] = str(pane.get("sha") or "")
-            state["attempted_at"] = now_ts
+            try:
+                fak = resolve_fak(root)
+                if fak is None:
+                    result["verdict"] = "SKIPPED"
+                    result["reason"] = "fak-unavailable"
+                else:
+                    pr = push_main(root, fak)
+                    result["push_result"] = pr
+                    pushed = bool(pr.get("pushed"))
+                    result["verdict"] = "PUSHED" if pushed else "PUSH_FAILED"
+                    if pushed:
+                        # The lag this push actually drained — the loop's only real yield.
+                        result["lag_reduced_seconds"] = _as_int(pane.get("push_lag_seconds"))
+                        result["fail_streak"] = 0
+                        state.update(fail_streak=0, backoff_until=0, guard_reason="")
+                    else:
+                        if pr.get("reason"):
+                            # Surface the REAL push-failure cause (push-rejected / push-timeout /
+                            # push-oserror) as the reason, NOT the stale decide reason ("push-lag-NNm"):
+                            # the JSONL breadcrumb below logs result["reason"], so without this a
+                            # multi-hour stall reads as a generic lag and hides WHICH step died — a
+                            # rejected pre-push gate vs a timed-out tip-materialize vs a credential hang.
+                            result["reason"] = pr["reason"]
+                        guard = push_guard_reason(pr)
+                        streak = _as_int(state.get("fail_streak")) + 1
+                        parked = backoff_seconds(streak)
+                        state.update(fail_streak=streak, backoff_until=now_ts + parked,
+                                     guard_reason=guard)
+                        result["guard_reason"] = guard
+                        result["fail_streak"] = streak
+                        result["backoff_seconds"] = parked
+                    # Only a LIVE attempt records the tip, so the next identical tip is a
+                    # genuine no-event rather than an untried one.
+                    state["tip"] = str(pane.get("sha") or "")
+                    state["attempted_at"] = now_ts
+            finally:
+                release_lock(root)
     elif adm.verdict == "BACKOFF":
         result["guard_reason"] = str(state.get("guard_reason") or "")
         result["backoff_seconds"] = max(0, _as_int(state.get("backoff_until")) - now_ts)
@@ -452,6 +569,15 @@ def run(root: Path, *, live: bool, push_lag_mins: int,
         state.update(fail_streak=0, backoff_until=0, guard_reason="")
         result["fail_streak"] = 0
 
+    # Remediation for rejected/behind pushes
+    behind_val = _as_int(pane.get("behind"))
+    guard = result["guard_reason"] or str(state.get("guard_reason") or "")
+    combined_reason = f"{guard}:{result['reason']}".upper()
+    if "BEHIND" in combined_reason or behind_val > 0:
+        result["remediation"] = "Trunk is behind origin/main. Run 'fak sync pull' or 'git pull --ff-only'"
+    elif result["verdict"] == "PUSH_FAILED":
+        result["remediation"] = f"Push failed ({result['reason']}). Check trunk status or run 'fak sync push' manually."
+
     health = health_of(result["verdict"])
     result["health"] = health
     result["ok"] = health == HEALTH_OK
@@ -460,7 +586,7 @@ def run(root: Path, *, live: bool, push_lag_mins: int,
     save_state(root, state)
 
     _append_log(root, {
-        "ts": generated_at, "verdict": result["verdict"], "live": live,
+        "ts": generated_at, "repo": result["repo"], "verdict": result["verdict"], "live": live,
         "health": health, "branch": result["branch"], "sha": result["sha"],
         "ahead": result["ahead"],
         "push_lag_seconds": result["push_lag_seconds"], "reason": result["reason"],
@@ -469,6 +595,7 @@ def run(root: Path, *, live: bool, push_lag_mins: int,
         "lag_reduced_seconds": result["lag_reduced_seconds"],
         "duration_ms": result["duration_ms"],
         "pushed": bool(result["push_result"] and result["push_result"].get("pushed")),
+        "remediation": result["remediation"],
     })
     return result
 

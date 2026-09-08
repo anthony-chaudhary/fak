@@ -1,0 +1,85 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_8bit_storage : require
+
+// Multi-token Q8_0 matmul. Eight outputs share a workgroup, with 32 lanes
+// computing whole integer blocks per output. The output owner accumulates
+// scaled blocks in the scalar kernel's original block/window order.
+// Dispatch is two-dimensional: output groups on x, token rows on y.
+layout(local_size_x = 256) in;
+const uint BLOCK = 32u;
+const uint SHARED_CAP = 2048u;
+const uint WIN_BLOCKS = SHARED_CAP / BLOCK;
+
+layout(std430, binding = 0) readonly buffer Wq { int8_t Wcodes[]; };
+layout(std430, binding = 1) readonly buffer Ws { float Wscale[]; };
+layout(std430, binding = 2) readonly buffer Xb { float X[]; };
+layout(std430, binding = 3) writeonly buffer Yb { float Y[]; };
+layout(push_constant) uniform Push { int outDim; int inDim; int P; } pc;
+
+shared int8_t Xq[SHARED_CAP];
+shared float Xs[WIN_BLOCKS];
+shared float partial[8u * WIN_BLOCKS];
+
+int8_t q8round(float x) {
+    int t = int(x);
+    float f = x - float(t);
+    if (f >= 0.5) t += 1; else if (f <= -0.5) t -= 1;
+    return int8_t(clamp(t, -127, 127));
+}
+
+void main() {
+    uint tokenRow = gl_WorkGroupID.y;
+    if (tokenRow >= uint(pc.P)) return;
+    uint inputBase = tokenRow * uint(pc.inDim);
+    uint outputBase = tokenRow * uint(pc.outDim);
+    uint tid = gl_LocalInvocationID.x;
+    uint lane = tid % BLOCK;
+    uint row = tid / BLOCK;
+    uint outputRow = gl_WorkGroupID.x * 8u + row;
+    uint in_ = uint(pc.inDim);
+    uint nblk = in_ / BLOCK;
+    float acc = 0.0;
+
+    for (uint wb = 0u; wb < nblk; wb += WIN_BLOCKS) {
+        uint winBlocks = min(WIN_BLOCKS, nblk - wb);
+        for (uint b = tid; b < winBlocks; b += 256u) {
+            uint base = b * BLOCK;
+            uint gbase = (wb + b) * BLOCK;
+            float amax = 0.0;
+            for (uint i = 0u; i < BLOCK; ++i)
+                amax = max(amax, abs(X[inputBase + gbase + i]));
+            float d = amax / 127.0;
+            Xs[b] = d;
+            float inv = d > 0.0 ? 1.0 / d : 0.0;
+            for (uint i = 0u; i < BLOCK; ++i)
+                Xq[base + i] = d > 0.0 ? q8round(X[inputBase + gbase + i] * inv) : int8_t(0);
+        }
+        barrier();
+
+        if (outputRow < uint(pc.outDim)) {
+            for (uint lb = lane; lb < winBlocks; lb += BLOCK) {
+                uint block = wb + lb;
+                uint cb = outputRow * in_ + block * BLOCK;
+                uint xb = lb * BLOCK;
+                int s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+                for (uint i = 0u; i < BLOCK; i += 4u) {
+                    s0 += int(Wcodes[cb + i]) * int(Xq[xb + i]);
+                    s1 += int(Wcodes[cb + i + 1u]) * int(Xq[xb + i + 1u]);
+                    s2 += int(Wcodes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
+                    s3 += int(Wcodes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
+                }
+                partial[row * WIN_BLOCKS + lb] = float((s0 + s1) + (s2 + s3))
+                    * Wscale[outputRow * nblk + block];
+            }
+        }
+        barrier();
+        if (lane == 0u && outputRow < uint(pc.outDim)) {
+            for (uint lb = 0u; lb < winBlocks; ++lb)
+                acc += partial[row * WIN_BLOCKS + lb] * Xs[lb];
+        }
+        barrier();
+    }
+    if (lane == 0u && outputRow < uint(pc.outDim))
+        Y[outputBase + outputRow] = acc;
+}

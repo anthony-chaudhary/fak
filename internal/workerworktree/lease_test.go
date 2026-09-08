@@ -258,3 +258,84 @@ func TestReapDeadWorktreeCleansStaleLocks(t *testing.T) {
 		t.Fatalf("new lease PID = %d, want > 0", newLease.PID)
 	}
 }
+
+func TestSweepPreservesLiveOwnerWithOldHeartbeat(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := t.TempDir()
+	rawGit(t, root, "init", "-q", "-b", "main")
+	rawGit(t, root, "config", "user.email", "preservetest@example.com")
+	rawGit(t, root, "config", "user.name", "preservetest")
+	rawGit(t, root, "config", "commit.gpgsign", "false")
+
+	initFile := filepath.Join(root, "init.txt")
+	if err := os.WriteFile(initFile, []byte("init\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rawGit(t, root, "add", "init.txt")
+	rawGit(t, root, "commit", "-q", "-m", "init")
+
+	wtRoot := t.TempDir()
+	prep := Prepare(root, "livelane", "livekey", "", wtRoot, nil)
+	if !prep.OK {
+		t.Fatalf("Prepare failed: %+v", prep)
+	}
+	wtPath := prep.Path
+
+	agedTime := time.Now().Add(-20 * time.Minute)
+	livePID := os.Getpid()
+
+	lease := WorkerLease{
+		PID:         livePID,
+		SessionID:   "live-session",
+		CreatedAt:   agedTime,
+		HeartbeatTS: agedTime,
+	}
+	if err := WriteWorkerLease(wtPath, lease); err != nil {
+		t.Fatalf("WriteWorkerLease failed: %v", err)
+	}
+	if err := writeOwnerStamp(wtPath, OwnerStamp{
+		Schema:    ownerStampSchema,
+		PID:       livePID,
+		LeaseID:   "live-session",
+		CreatedAt: agedTime,
+	}); err != nil {
+		t.Fatalf("writeOwnerStamp failed: %v", err)
+	}
+
+	// Verify that even while clean, the aged heartbeat does not cause reaping
+	// because the owning process is positively alive.
+	cleanReport := SweepDeadWorktrees(root, wtRoot, nil)
+	if cleanReport.Pruned != 0 {
+		t.Fatalf("expected cleanReport.Pruned == 0 for live owner, got %d", cleanReport.Pruned)
+	}
+
+	sentinelContent := "dirty sentinel content to preserve\n"
+	sentinelPath := filepath.Join(wtPath, "sentinel.txt")
+	if err := os.WriteFile(sentinelPath, []byte(sentinelContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report := SweepDeadWorktrees(root, wtRoot, nil)
+	if report.Pruned != 0 {
+		t.Fatalf("expected report.Pruned == 0, got %d (report: %+v)", report.Pruned, report)
+	}
+
+	if fi, err := os.Stat(wtPath); err != nil || !fi.IsDir() {
+		t.Fatalf("expected wtPath %q to exist as directory, err: %v", wtPath, err)
+	}
+
+	_, wtList := rawGit(t, root, "worktree", "list")
+	if !strings.Contains(wtList, wtPath) && !strings.Contains(filepath.ToSlash(wtList), filepath.ToSlash(wtPath)) {
+		t.Fatalf("expected git worktree list to contain wtPath %q, got:\n%s", wtPath, wtList)
+	}
+
+	content, err := os.ReadFile(sentinelPath)
+	if err != nil {
+		t.Fatalf("failed to read sentinel file: %v", err)
+	}
+	if string(content) != sentinelContent {
+		t.Fatalf("sentinel content mismatch: got %q, want %q", string(content), sentinelContent)
+	}
+}

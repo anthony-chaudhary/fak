@@ -41,6 +41,8 @@ func runCron(stdout, stderr io.Writer, argv []string) int {
 		return runCronPrompt(stdout, stderr, argv[1:])
 	case "chain":
 		return runCronChain(stdout, stderr, argv[1:])
+	case "opencode":
+		return runCronOpenCode(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		cronUsage(stdout)
 		return 0
@@ -434,6 +436,8 @@ func cronUsage(w io.Writer) {
 
   fak cron run    --job ID --ledger FILE --interval DUR --timeout DUR [--json]
                   [--at RFC3339] [--slot KEY] -- CMD ARG...
+  fak cron opencode [--job ID] [--ledger FILE] [--interval DUR] [--timeout DUR]
+                  [--at RFC3339] [--slot KEY] [--run-id ID] [--passthrough] -- CMD ARG...
   fak cron fire   --job ID --ledger FILE [--interval DUR] [--at RFC3339] [--slot KEY]
   fak cron audit  --ledger FILE [--job ID] [--json]
   fak cron prompt --job ID --ledger FILE [--script 'CMD'] [--context-from A,B]
@@ -444,6 +448,11 @@ Run is the BOUNDED TASK RUNNER (#11829): it executes an admitted scheduled task
 under a timeout with deduplication and process-tree termination. Exit 0 on success,
 exit 3 on dedup, child exit code on failure, and 124 on timeout. Terminal outcomes
 (succeeded, failed, timeout) are witnessed in the ledger.
+
+Opencode runs an OpenCode scheduled session with bounded execution (#11953),
+retaining terminal outcomes (succeeded, failed, timeout), session ID joins, and
+witnessed run receipts in the ledger. Exit 0 on success, exit 3 on dedup, child
+exit code on failure, and 124 on timeout.
 
 Fire is the FIRE WITNESS (#2886): it records each fire in the ledger under a
 (job, slot) compare-and-set guarded by a dup-tick lock, so a duplicate or

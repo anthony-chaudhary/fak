@@ -148,9 +148,10 @@ type OpencodeChatOptions struct {
 	Variant     string   `json:"variant,omitempty"`
 	Interactive bool     `json:"interactive,omitempty"`
 	WorktreeDir string   `json:"worktree_dir,omitempty"`
-	AutoApprove bool     `json:"auto_approve,omitempty"`
-	PrintLogs   bool     `json:"print_logs,omitempty"`
-	ExtraArgs   []string `json:"extra_args,omitempty"`
+	AutoApprove   bool     `json:"auto_approve,omitempty"`
+	PrintLogs     bool     `json:"print_logs,omitempty"`
+	SubagentDepth int      `json:"subagent_depth,omitempty"`
+	ExtraArgs     []string `json:"extra_args,omitempty"`
 }
 
 // OpencodeChat describes a fresh OpenCode chat session for an issue.

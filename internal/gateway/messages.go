@@ -1437,11 +1437,16 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 func anthropicSSESender(w http.ResponseWriter, flusher http.Flusher) func(event string, data any) {
 	return func(event string, data any) {
 		b, _ := json.Marshal(data)
-		_, _ = w.Write([]byte("event: " + event + "\n"))
-		_, _ = w.Write([]byte("data: "))
-		_, _ = w.Write(b)
-		_, _ = w.Write([]byte("\n\n"))
-		flusher.Flush()
+		var buf bytes.Buffer
+		buf.WriteString("event: ")
+		buf.WriteString(event)
+		buf.WriteString("\ndata: ")
+		buf.Write(b)
+		buf.WriteString("\n\n")
+		_, _ = w.Write(buf.Bytes())
+		if flusher != nil {
+			flusher.Flush()
+		}
 	}
 }
 

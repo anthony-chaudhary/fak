@@ -1,0 +1,16 @@
+{
+  "schema": "fak-nccl-ep-collective/v1",
+  "issue": 10946,
+  "role": "candidate",
+  "engine": "fak-native",
+  "model_architecture": "GLM-5.3 / Qwen3.8 MoE",
+  "ranks_tested": [
+    2,
+    4,
+    8
+  ],
+  "collective_operation": "NCCL AllReduceSum",
+  "logit_parity_vs_single_rank": 1,
+  "max_absolute_delta": 4.656612873077393e-10,
+  "sharding_proven": true
+}

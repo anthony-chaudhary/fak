@@ -59,20 +59,22 @@ func (e *Qwen35MTPSpecDecodeUnsupportedError) Unwrap() error {
 type qwen35MTPDrafterBuilder func(*Model, int, Qwen35MTPTargetHidden, Qwen35MTPTokenEmbedding) (*Qwen35MTPDrafter, error)
 
 // qwen35MTPTargetTransaction owns one speculative mutation of the live target.
-// Verification may evaluate every draft token, but Commit always restores the
-// pre-round snapshot and replays only the accepted prefix. Abort restores none.
-// That deliberately prices recovery work in the native path instead of relying
-// on cache-only suffix eviction, which cannot restore hidden or recurrent state.
+// A successful incremental panel may be adopted on full acceptance. Partial
+// acceptance restores the pre-round snapshot and replays only accepted tokens;
+// Abort restores the exact pre-round state, including hidden and recurrent state.
 type qwen35MTPTargetTransaction struct {
-	target       *Session
-	snapshot     *PrefixSnapshot
-	beforeLogits []float32
-	draft        []int
-	verify       func([]int) ([][]float32, TargetVerificationReceipt, error)
-	step         func(int) []float32
-	receipt      TargetVerificationReceipt
-	closed       bool
-	closeCount   int
+	target        *Session
+	snapshot      *PrefixSnapshot
+	beforeLogits  []float32
+	draft         []int
+	verify        func([]int) ([][]float32, TargetVerificationReceipt, error)
+	step          func(int) []float32
+	receipt       TargetVerificationReceipt
+	closed        bool
+	closeCount    int
+	verifyStarted bool
+	verifiedLive  bool
+	lastLogits    []float32
 }
 
 func beginQwen35MTPTargetTransaction(target *Session, beforeLogits []float32) (*qwen35MTPTargetTransaction, error) {
@@ -86,10 +88,12 @@ func beginQwen35MTPTargetTransaction(target *Session, beforeLogits []float32) (*
 	}
 	tx := &qwen35MTPTargetTransaction{
 		target: target, snapshot: snapshot, beforeLogits: append([]float32(nil), beforeLogits...),
-		verify: func(draft []int) ([][]float32, TargetVerificationReceipt, error) {
-			return target.VerifyForwardOneOperation(draft, beforeLogits)
-		},
 		step: target.Step,
+	}
+	tx.verify = func(draft []int) ([][]float32, TargetVerificationReceipt, error) {
+		rows, receipt, err := target.verifyQwen35MTPPanel(draft, tx.beforeLogits)
+		tx.verifiedLive = err == nil
+		return rows, receipt, err
 	}
 	tx.receipt = TargetVerificationReceipt{
 		Schema: targetVerificationReceiptSchema,
@@ -105,6 +109,10 @@ func (tx *qwen35MTPTargetTransaction) Verify(draft []int) (rows [][]float32, err
 	if tx == nil || tx.closed || tx.snapshot == nil {
 		return nil, errors.New("model: Qwen3.8 MTP target transaction is closed")
 	}
+	if tx.verifyStarted {
+		return nil, errors.New("model: Qwen3.8 MTP target transaction already verified")
+	}
+	tx.verifyStarted = true
 	tx.draft = append(tx.draft[:0], draft...)
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -133,6 +141,10 @@ func (tx *qwen35MTPTargetTransaction) Verify(draft []int) (rows [][]float32, err
 	if verifyErr != nil {
 		return nil, tx.rollbackFailure("verify", verifyErr)
 	}
+	if tx.verifiedLive {
+		tx.lastLogits = append([]float32(nil), rows[len(rows)-1]...)
+		tx.receipt.Accounting.KnownMemoryBytes += int64(len(tx.lastLogits)) * 4
+	}
 	return rows, nil
 }
 
@@ -145,6 +157,15 @@ func (tx *qwen35MTPTargetTransaction) Commit(accepted int) (logits []float32, er
 	}
 	tx.receipt.AcceptedTokens = accepted
 	tx.receipt.RejectedTokens = len(tx.draft) - accepted
+	if tx.verifiedLive && accepted == len(tx.draft) {
+		started := time.Now()
+		logits = tx.lastLogits
+		tx.lastLogits = nil // transfer the independent logits row to the caller
+		tx.finish()
+		tx.receipt.Accounting.Synchronization = measuredSpeculativeCost(started)
+		tx.receipt.Accounting.Rollback.Measured = true // no rollback required
+		return logits, nil
+	}
 	rollback, err := tx.snapshot.Clone()
 	if err != nil {
 		tx.finish()
@@ -174,6 +195,8 @@ func (tx *qwen35MTPTargetTransaction) Commit(accepted int) (logits []float32, er
 		}
 	}()
 	started := time.Now()
+	// Synchronization includes accepted-prefix Step replay; TargetDecodeSteps
+	// describes verification execution, not these separately timed commit steps.
 	for _, token := range tx.draft[:accepted] {
 		logits = tx.step(token)
 	}
@@ -229,6 +252,7 @@ func (tx *qwen35MTPTargetTransaction) finish() {
 	}
 	tx.snapshot.Close()
 	tx.snapshot = nil
+	tx.lastLogits = nil
 	tx.closed = true
 	tx.closeCount++
 }

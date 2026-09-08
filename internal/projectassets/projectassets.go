@@ -765,10 +765,46 @@ async function canonicalPath(filename) {
 }
 
 function mutationPaths(tool, args) {
-  if (tool !== "apply_patch") return [args?.filePath];
-  if (typeof args?.patchText !== "string") return [];
-  return [...args.patchText.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)\r?$/gm)]
-    .map((match) => match[1].trim());
+  if (tool !== "apply_patch") {
+    const candidates = [args?.filePath, args?.file_path, args?.path, args?.target];
+    return [...new Set(candidates
+      .filter((p) => typeof p === "string" && p.trim() !== "")
+      .map((p) => p.trim()))];
+  }
+  const patch = typeof args?.patchText === "string" ? args.patchText : (typeof args?.patch === "string" ? args.patch : "");
+  if (!patch) return [];
+
+  const paths = new Set();
+  const addPath = (raw) => {
+    if (!raw || typeof raw !== "string") return;
+    let s = raw.trim();
+    const tabIdx = s.indexOf("\t");
+    if (tabIdx !== -1) s = s.slice(0, tabIdx).trim();
+    if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+      s = s.slice(1, -1).trim();
+    }
+    if (s.startsWith("a/") || s.startsWith("b/")) {
+      s = s.slice(2).trim();
+    }
+    if (s && s !== "/dev/null" && s !== "dev/null") {
+      paths.add(s);
+    }
+  };
+
+  for (const m of patch.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)\r?$/gm)) {
+    addPath(m[1]);
+  }
+  for (const m of patch.matchAll(/^diff --git\s+(?:"([^"]+)"|'([^']+)'|(\S+))\s+(?:"([^"]+)"|'([^']+)'|(\S+))\r?$/gm)) {
+    addPath(m[1] || m[2] || m[3]);
+    addPath(m[4] || m[5] || m[6]);
+  }
+  for (const m of patch.matchAll(/^---\s+(?:"([^"]+)"|'([^']+)'|([^\t\r\n]+?))(?:\t.*)?\r?$/gm)) {
+    addPath(m[1] || m[2] || m[3]);
+  }
+  for (const m of patch.matchAll(/^\+\+\+\s+(?:"([^"]+)"|'([^']+)'|([^\t\r\n]+?))(?:\t.*)?\r?$/gm)) {
+    addPath(m[1] || m[2] || m[3]);
+  }
+  return [...paths];
 }
 
 /**
@@ -871,6 +907,12 @@ export default async function dosProofGuardPlugin({ client, directory }) {
             output.content += reminder;
           } else if (Array.isArray(output.content)) {
             output.content.push({ type: "text", text: reminder });
+          } else if (typeof output.result === "string") {
+            output.result += reminder;
+          } else if (Array.isArray(output.result)) {
+            output.result.push({ type: "text", text: reminder });
+          } else if (typeof output.text === "string") {
+            output.text += reminder;
           }
         }
         // Direct console logging of reminder omitted: keep unencoded notices out of stdout

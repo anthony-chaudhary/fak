@@ -410,26 +410,70 @@ func handleAdjudicate(ctx context.Context, m map[string]any) map[string]any {
 	verdictStr := "deny"
 	allowed := false
 	reason := ""
-	if v.Kind == abi.VerdictAllow {
+	var (
+		repairedTool    string
+		hasRepairedTool bool
+		repairedArgs    any
+		hasRepairedArgs bool
+	)
+
+	switch v.Kind {
+	case abi.VerdictAllow:
 		verdictStr = "allow"
 		allowed = true
+		if v.Reason != 0 {
+			reason = abi.ReasonName(v.Reason)
+		}
+	case abi.VerdictTransform:
+		verdictStr = "transform"
+		allowed = true
+		if v.Reason != 0 {
+			reason = abi.ReasonName(v.Reason)
+		}
+		if tp, ok := v.Payload.(abi.TransformPayload); ok {
+			if tp.NewTool != "" {
+				repairedTool = tp.NewTool
+				hasRepairedTool = true
+			}
+			if b := refutil.Bytes(ctx, tp.NewArgs); len(b) > 0 {
+				var parsed any
+				if err := json.Unmarshal(b, &parsed); err == nil {
+					repairedArgs = parsed
+				} else {
+					repairedArgs = string(b)
+				}
+				hasRepairedArgs = true
+			}
+		}
+	default:
+		verdictStr = "deny"
+		allowed = false
+		if v.Reason != 0 {
+			reason = abi.ReasonName(v.Reason)
+		} else {
+			reason = "POLICY_BLOCK"
+		}
 	}
-	if v.Reason != 0 {
-		reason = abi.ReasonName(v.Reason)
-	} else if v.Kind == abi.VerdictDeny {
-		reason = "POLICY_BLOCK"
-	}
+
 	by := v.By
 	if by == "" {
 		by = "adjudicator"
 	}
 
-	return map[string]any{
+	res := map[string]any{
 		"verdict": verdictStr,
 		"allowed": allowed,
 		"reason":  reason,
 		"by":      by,
 	}
+	if hasRepairedTool {
+		res["repaired_tool"] = repairedTool
+	}
+	if hasRepairedArgs {
+		res["repaired_arguments"] = repairedArgs
+	}
+
+	return res
 }
 
 func handleSyscall(ctx context.Context, m map[string]any) map[string]any {
@@ -479,7 +523,61 @@ func handleSyscall(ctx context.Context, m map[string]any) map[string]any {
 		}
 	}
 
-	// Allowed — determine engine
+	if v.Kind != abi.VerdictAllow && v.Kind != abi.VerdictTransform {
+		reason := abi.ReasonName(v.Reason)
+		if v.Reason == 0 {
+			reason = "POLICY_BLOCK"
+		}
+		by := v.By
+		if by == "" {
+			by = "adjudicator"
+		}
+		return map[string]any{
+			"verdict": "deny",
+			"result": map[string]any{
+				"error":  "tool call not executable",
+				"reason": reason,
+				"by":     by,
+			},
+		}
+	}
+
+	verdictStr := "allow"
+	var (
+		repairedTool    string
+		hasRepairedTool bool
+		repairedArgs    any
+		hasRepairedArgs bool
+	)
+
+	if v.Kind == abi.VerdictTransform {
+		verdictStr = "transform"
+		if tp, ok := v.Payload.(abi.TransformPayload); ok {
+			if tp.NewTool != "" {
+				call.Tool = tp.NewTool
+				toolName = tp.NewTool
+				repairedTool = tp.NewTool
+				hasRepairedTool = true
+			}
+			if b := refutil.Bytes(ctx, tp.NewArgs); len(b) > 0 {
+				call.Args = abi.Ref{
+					Kind:   abi.RefInline,
+					Inline: b,
+					Len:    int64(len(b)),
+				}
+				argBytes = b
+				var parsed any
+				if err := json.Unmarshal(b, &parsed); err == nil {
+					repairedArgs = parsed
+				} else {
+					repairedArgs = string(b)
+				}
+				hasRepairedArgs = true
+			}
+		}
+	}
+
+	// Allowed or Transformed — determine engine
 	norm := normalizeMCPTool(toolName)
 	if norm == "fak_read" {
 		call.Engine = FakReadEngineID
@@ -524,10 +622,17 @@ func handleSyscall(ctx context.Context, m map[string]any) map[string]any {
 		}
 	}
 
-	return map[string]any{
-		"verdict": "allow",
+	out := map[string]any{
+		"verdict": verdictStr,
 		"result":  execResult,
 	}
+	if hasRepairedTool {
+		out["repaired_tool"] = repairedTool
+	}
+	if hasRepairedArgs {
+		out["repaired_arguments"] = repairedArgs
+	}
+	return out
 }
 
 func handleCapabilities(_ map[string]any) map[string]any {

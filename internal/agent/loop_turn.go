@@ -62,6 +62,7 @@ type armRunner struct {
 	envelopeSink            func(harnesskit.Envelope)
 	envelopeSeq             uint64
 	envelopeMu              sync.Mutex
+	streamingFSM            *StreamingToolFSM
 }
 
 func (r *armRunner) emitEnvelope(eventType harnesskit.EventType, payload any) {
@@ -91,6 +92,10 @@ func (r *armRunner) emitEnvelope(eventType harnesskit.EventType, payload any) {
 		Payload:     raw,
 	}
 	r.envelopeSink(env)
+}
+
+func (r *armRunner) StreamingFSM() *StreamingToolFSM {
+	return r.streamingFSM
 }
 
 type armTurnAction uint8
@@ -181,6 +186,12 @@ func (r *armRunner) runTurn(ctx context.Context, turn int) (bool, error) {
 	case armTurnContinue:
 		turnStop = false
 	case armTurnStop:
+		if r.streamingFSM != nil && r.streamingFSM.IsDispatched() {
+			r.streamingFSM.Squash("turn stopped with final answer")
+			if r.metrics != nil {
+				r.metrics.SpecSquashed++
+			}
+		}
 		turnStop = true
 	default:
 		turnStop, err = r.dispatchToolCalls(ctx, turn, asst)
@@ -288,7 +299,11 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 
 	var streamedChunks []string
 	turnSink := r.sink
-	if r.stream {
+	if r.stream || (r.cfg != nil && r.cfg.streamingSpeculation) {
+		r.streamingFSM = NewStreamingToolFSM()
+		if r.cfg != nil && r.cfg.streamingFSMHook != nil {
+			r.cfg.streamingFSMHook(r.streamingFSM)
+		}
 		turnSink = func(chunk string) error {
 			if r.sink != nil {
 				if err := r.sink(chunk); err != nil {
@@ -302,6 +317,35 @@ func (r *armRunner) requestModel(ctx context.Context, turn, perTurnCap int) (Mes
 					Role:      RoleAssistant,
 					Text:      chunk,
 				})
+			}
+			if r.streamingFSM != nil {
+				_ = r.streamingFSM.Feed(chunk)
+				if r.cfg != nil && r.cfg.streamingSpeculation && r.streamingFSM.IsSpeculatable() && !r.streamingFSM.IsDispatched() {
+					args := r.streamingFSM.RawArgs()
+					if args == "" {
+						args = r.streamingFSM.EarlyArgs()
+					}
+					if args != "" {
+						_ = r.streamingFSM.SpeculativeDispatch(ctx, func(ctx context.Context, tool, args string) (string, error) {
+							if r.fak {
+								engine, routeErr := r.cfg.resolveCallEngine(tool, args, metaFor(tool))
+								if routeErr != nil {
+									return "", routeErr
+								}
+								ev := traceEvent{Turn: turn + 1, Arm: r.metrics.Arm, Tool: tool, RawArgs: args}
+								content, _, _, _, _ := execViaKernelFull(ctx, r.kernel, tool, args, engine, r.cfg.trace, ev, r.cfg.principal)
+								return content, nil
+							}
+							var naiveM ArmMetrics
+							ev := traceEvent{Turn: turn + 1, Arm: r.metrics.Arm, Tool: tool, RawArgs: args}
+							content, _ := execNaiveContext(ctx, tool, args, &naiveM, ev)
+							return content, nil
+						})
+						if r.metrics != nil {
+							r.metrics.SpecIssued++
+						}
+					}
+				}
 			}
 			return nil
 		}
@@ -459,6 +503,12 @@ func isToolResultFailure(isErr bool, verdict string, content string) bool {
 // dispatchToolCalls adjudicates and admits every tool call from one assistant turn.
 func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Message) (bool, error) {
 	if len(asst.ToolCalls) == 0 {
+		if r.streamingFSM != nil && r.streamingFSM.IsDispatched() {
+			r.streamingFSM.Squash("no tool calls emitted")
+			if r.metrics != nil {
+				r.metrics.SpecSquashed++
+			}
+		}
 		return false, nil
 	}
 	// Resolve a suspended speculation against the first authoritative call in this turn.
@@ -522,6 +572,50 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			abiCall = &abi.ToolCall{Tool: tool, TraceID: r.cfg.trace, Args: putBytes(ctx, []byte(rawArgs))}
 			v := abi.Verdict{Kind: abi.VerdictDeny, By: "write-barrier", Reason: abi.ReasonPolicyBlock}
 			verdict = &v
+		case r.streamingFSM != nil && r.streamingFSM.IsDispatched() && r.streamingFSM.ToolName() == tool:
+			specRes, err := r.streamingFSM.Commit(tool, rawArgs)
+			if err == nil {
+				content = specRes
+				ev.Verdict = "ALLOW"
+				ev.By = "streaming-fsm-speculative"
+				ev.Note = "COMMITTED from StreamingToolFSM pre-computed speculative execution"
+				if r.metrics != nil {
+					r.metrics.SpecCommitted++
+					r.metrics.SpecServed++
+				}
+				abiCall = &abi.ToolCall{Tool: tool, TraceID: r.cfg.trace, Args: putBytes(ctx, []byte(rawArgs))}
+				abiRes = &abi.Result{Call: abiCall, Payload: putBytes(ctx, []byte(content))}
+				v := abi.Verdict{Kind: abi.VerdictAllow, By: "streaming-fsm-speculative"}
+				verdict = &v
+			} else {
+				if r.metrics != nil {
+					r.metrics.SpecSquashed++
+				}
+				if r.fak {
+					engine, routeErr := r.cfg.resolveCallEngine(tool, rawArgs, metaFor(tool))
+					if routeErr != nil {
+						detail, _ := json.Marshal(map[string]string{"error": routeErr.Error()})
+						content = string(detail)
+						ev.Verdict = "route-error"
+						ev.By = "route-accounts"
+						ev.Note = "ROUTE REFUSED (fail-loud): " + routeErr.Error()
+						abiCall = &abi.ToolCall{Tool: tool, TraceID: r.cfg.trace, Args: putBytes(ctx, []byte(rawArgs))}
+						v := abi.Verdict{Kind: abi.VerdictDeny, By: "route-accounts", Reason: abi.ReasonMisroute}
+						verdict = &v
+					} else {
+						var verdictVal abi.Verdict
+						content, ev, abiCall, abiRes, verdictVal = execViaKernelFull(ctx, r.kernel, tool, rawArgs, engine, r.cfg.trace, ev, r.cfg.principal)
+						verdict = &verdictVal
+						content, ev = r.cfg.parkEscalatedDeny(ctx, r.kernel, tool, rawArgs, engine, content, ev)
+					}
+				} else {
+					var naiveM ArmMetrics
+					content, ev = execNaiveContext(ctx, tool, rawArgs, &naiveM, ev)
+					if naiveM.ToolErrors > 0 {
+						isErr = true
+					}
+				}
+			}
 		case r.fak:
 			engine, routeErr := r.cfg.resolveCallEngine(tool, rawArgs, metaFor(tool))
 			if routeErr != nil {
@@ -541,7 +635,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			}
 		default:
 			var naiveM ArmMetrics
-			content, ev = execNaive(tool, rawArgs, &naiveM, ev)
+			content, ev = execNaiveContext(ctx, tool, rawArgs, &naiveM, ev)
 			if naiveM.ToolErrors > 0 {
 				isErr = true
 			}

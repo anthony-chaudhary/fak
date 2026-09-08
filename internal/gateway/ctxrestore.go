@@ -7,11 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/blob"
+	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/sessionread"
 	"github.com/anthony-chaudhary/fak/internal/sessionread/screen"
@@ -333,14 +336,15 @@ func (s *Server) scopeReadSelf(caller string, op sessionread.ReadOp, trace strin
 // RestoreContinuation is the exact next retrieval call returned when bounded
 // retrieval produces a partial slice (#11551).
 type RestoreContinuation struct {
-	Tool      string                `json:"tool,omitempty"`
-	Name      string                `json:"name,omitempty"`
-	Arguments ContextRestoreRequest `json:"arguments"`
-	ID        string                `json:"id,omitempty"`
-	TraceID   string                `json:"trace_id,omitempty"`
-	Offset    int                   `json:"offset"`
-	Limit     int                   `json:"limit"`
-	Range     string                `json:"range,omitempty"`
+	Tool              string                `json:"tool,omitempty"`
+	Name              string                `json:"name,omitempty"`
+	Arguments         ContextRestoreRequest `json:"arguments"`
+	ID                string                `json:"id,omitempty"`
+	TraceID           string                `json:"trace_id,omitempty"`
+	Offset            int                   `json:"offset"`
+	Limit             int                   `json:"limit"`
+	Range             string                `json:"range,omitempty"`
+	ContinuationToken string                `json:"continuation_token,omitempty"`
 }
 
 // CtxRestoreResult is the fak_context_restore reply. Bytes is the verbatim dropped turn (the full
@@ -348,18 +352,19 @@ type RestoreContinuation struct {
 // "what it is" and "all of it" in one answer. Provenance is WITNESSED — fak is returning bytes it
 // authored the drop of, never a guess or a fabrication.
 type CtxRestoreResult struct {
-	Schema       string               `json:"schema"`
-	TraceID      string               `json:"trace_id"`
-	ID           string               `json:"id"`
-	Excerpt      string               `json:"excerpt,omitempty"`
-	Bytes        string               `json:"bytes"` // the verbatim JSON of the dropped originating-task turn
-	Provenance   string               `json:"provenance"`
-	Offset       int                  `json:"offset"`
-	Limit        int                  `json:"limit"`
-	TotalBytes   int                  `json:"total_bytes"`
-	HasMore      bool                 `json:"has_more"`
-	NextOffset   int                  `json:"next_offset"`
-	Continuation *RestoreContinuation `json:"continuation,omitempty"`
+	Schema            string               `json:"schema"`
+	TraceID           string               `json:"trace_id"`
+	ID                string               `json:"id"`
+	Excerpt           string               `json:"excerpt,omitempty"`
+	Bytes             string               `json:"bytes"` // the verbatim JSON of the dropped originating-task turn
+	Provenance        string               `json:"provenance"`
+	Offset            int                  `json:"offset"`
+	Limit             int                  `json:"limit"`
+	TotalBytes        int                  `json:"total_bytes"`
+	HasMore           bool                 `json:"has_more"`
+	NextOffset        int                  `json:"next_offset"`
+	ContinuationToken string               `json:"continuation_token,omitempty"`
+	Continuation      *RestoreContinuation `json:"continuation,omitempty"`
 }
 
 const ctxRestoreSchema = "fak-ctxrestore-result/1"
@@ -373,12 +378,19 @@ const ctxRestoreSchema = "fak-ctxrestore-result/1"
 // digest pages back in under the image's own trust gate — the SAME content-address, one restore call.
 // Omitted, restore is stash-only, exactly as Slice 1 behaved (backward-compatible).
 type ContextRestoreRequest struct {
-	ID       string `json:"id"`
-	TraceID  string `json:"trace_id"`
-	ImageDir string `json:"image_dir,omitempty"`
-	Offset   int    `json:"offset,omitempty"`
-	Limit    int    `json:"limit,omitempty"`
-	Range    string `json:"range,omitempty"`
+	ID                string `json:"id"`
+	TraceID           string `json:"trace_id"`
+	ImageDir          string `json:"image_dir,omitempty"`
+	Offset            int    `json:"offset,omitempty"`
+	Limit             int    `json:"limit,omitempty"`
+	Range             string `json:"range,omitempty"`
+	MaxBytes          int    `json:"max_bytes,omitempty"`
+	ContinuationToken string `json:"continuation_token,omitempty"`
+}
+
+// ResolveRestorableContext resolves a fak_context_restore call for caller and req.
+func (s *Server) ResolveRestorableContext(caller string, req ContextRestoreRequest) (CtxRestoreResult, error) {
+	return s.restoreContext(caller, req)
 }
 
 // restoreContext resolves a fak_context_restore call: page dropped-span bytes back in by their
@@ -467,31 +479,15 @@ func (s *Server) resolveRestoreRaw(caller, trace, id string, req ContextRestoreR
 			TargetOwner: refOwner,
 		})
 	}
-	if b, ok := abi.PageOut("blob"); ok {
-		handle := abi.Ref{Kind: abi.RefBlob, Digest: cleanID}
-		if ref, perr := b.PageIn(context.Background(), handle); perr == nil && len(ref.Inline) > 0 {
-			if body, serr := screen.ScreenOutbound(screen.Span{Bytes: ref.Inline}); serr == nil {
-				return CtxRestoreResult{
-					Schema:     ctxRestoreSchema,
-					TraceID:    trace,
-					ID:         id,
-					Bytes:      string(body),
-					Provenance: "WITNESSED",
-				}, nil
-			}
-		}
-	} else if res := abi.ActiveResolver(); res != nil {
-		handle := abi.Ref{Kind: abi.RefBlob, Digest: cleanID}
-		if raw, rerr := res.Resolve(context.Background(), handle); rerr == nil && len(raw) > 0 {
-			if body, serr := screen.ScreenOutbound(screen.Span{Bytes: raw}); serr == nil {
-				return CtxRestoreResult{
-					Schema:     ctxRestoreSchema,
-					TraceID:    trace,
-					ID:         id,
-					Bytes:      string(body),
-					Provenance: "WITNESSED",
-				}, nil
-			}
+	if raw, ok := s.resolvePagedContext(context.Background(), cleanID); ok && len(raw) > 0 {
+		if body, serr := screen.ScreenOutbound(screen.Span{Bytes: raw}); serr == nil {
+			return CtxRestoreResult{
+				Schema:     ctxRestoreSchema,
+				TraceID:    trace,
+				ID:         id,
+				Bytes:      string(body),
+				Provenance: "WITNESSED",
+			}, nil
 		}
 	}
 
@@ -541,6 +537,49 @@ func (s *Server) resolveRestoreRaw(caller, trace, id string, req ContextRestoreR
 	return CtxRestoreResult{}, ErrRestoreMiss
 }
 
+func (s *Server) resolvePagedContext(ctx context.Context, cleanID string) ([]byte, bool) {
+	handle := abi.Ref{Kind: abi.RefBlob, Digest: cleanID}
+	// 1) abi.PageOut("blob")
+	if b, ok := abi.PageOut("blob"); ok {
+		if ref, perr := b.PageIn(ctx, handle); perr == nil && len(ref.Inline) > 0 {
+			return ref.Inline, true
+		}
+	}
+	// 2) abi.PageOut(customCodec) if os.Getenv("FAK_PAGEOUT_BACKEND") is set and != "blob"
+	if custom := os.Getenv("FAK_PAGEOUT_BACKEND"); custom != "" && custom != "blob" {
+		if b, ok := abi.PageOut(custom); ok {
+			if ref, perr := b.PageIn(ctx, handle); perr == nil && len(ref.Inline) > 0 {
+				return ref.Inline, true
+			}
+		}
+	}
+	// 3) abi.ActiveResolver()
+	if res := abi.ActiveResolver(); res != nil {
+		if raw, rerr := res.Resolve(ctx, handle); rerr == nil && len(raw) > 0 {
+			return raw, true
+		}
+	}
+	// 4) blob.Default if not nil
+	if blob.Default != nil {
+		if raw, rerr := blob.Default.Resolve(ctx, handle); rerr == nil && len(raw) > 0 {
+			return raw, true
+		}
+	}
+	// 5) ctxmmu.ResolvePaged(ctx, cleanID)
+	if body, ok := ctxmmu.ResolvePaged(ctx, cleanID); ok && len(body) > 0 {
+		return body, true
+	}
+	// 6) abi.ResultAdmitters() for any *ctxmmu.MMU
+	for _, ra := range abi.ResultAdmitters() {
+		if m, ok := ra.(*ctxmmu.MMU); ok {
+			if body, ok := m.ResolvePagedRef(ctx, cleanID); ok && len(body) > 0 {
+				return body, true
+			}
+		}
+	}
+	return nil, false
+}
+
 func parseRange(r string) (offset int, limit int, ok bool) {
 	r = strings.TrimSpace(r)
 	if r == "" {
@@ -574,23 +613,34 @@ func applyRestoreBounds(res CtxRestoreResult, req ContextRestoreRequest) CtxRest
 
 	offset := req.Offset
 	limit := req.Limit
+	if req.ContinuationToken != "" && offset == 0 {
+		tok := strings.TrimSpace(req.ContinuationToken)
+		tok = strings.TrimPrefix(tok, "offset:")
+		if n, err := strconv.Atoi(tok); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	if req.MaxBytes > 0 && (limit <= 0 || req.MaxBytes < limit) {
+		limit = req.MaxBytes
+	}
 	if req.Range != "" {
 		if rOffset, rLimit, ok := parseRange(req.Range); ok {
-			if req.Offset == 0 {
+			if req.Offset == 0 && req.ContinuationToken == "" {
 				offset = rOffset
 			}
-			if req.Limit == 0 {
+			if req.Limit == 0 && req.MaxBytes <= 0 {
 				limit = rLimit
 			}
 		}
 	}
 
-	if offset == 0 && limit <= 0 && req.Range == "" {
+	if offset == 0 && limit <= 0 && req.Range == "" && req.ContinuationToken == "" && req.MaxBytes <= 0 {
 		res.Offset = 0
 		res.Limit = fullLen
 		res.HasMore = false
 		res.NextOffset = fullLen
 		res.Continuation = nil
+		res.ContinuationToken = ""
 		return res
 	}
 
@@ -618,26 +668,32 @@ func applyRestoreBounds(res CtxRestoreResult, req ContextRestoreRequest) CtxRest
 	if hasMore {
 		nextOffset := end
 		res.NextOffset = nextOffset
+		tok := strconv.Itoa(nextOffset)
+		res.ContinuationToken = tok
 		nextArgs := ContextRestoreRequest{
-			ID:       res.ID,
-			TraceID:  res.TraceID,
-			ImageDir: req.ImageDir,
-			Offset:   nextOffset,
-			Limit:    limit,
+			ID:                res.ID,
+			TraceID:           res.TraceID,
+			ImageDir:          req.ImageDir,
+			Offset:            nextOffset,
+			Limit:             limit,
+			MaxBytes:          req.MaxBytes,
+			ContinuationToken: tok,
 		}
 		res.Continuation = &RestoreContinuation{
-			Tool:      "fak_context_restore",
-			Name:      "fak_context_restore",
-			Arguments: nextArgs,
-			ID:        res.ID,
-			TraceID:   res.TraceID,
-			Offset:    nextOffset,
-			Limit:     limit,
-			Range:     fmt.Sprintf("%d-%d", nextOffset, nextOffset+limit),
+			Tool:              "fak_context_restore",
+			Name:              "fak_context_restore",
+			Arguments:         nextArgs,
+			ID:                res.ID,
+			TraceID:           res.TraceID,
+			Offset:            nextOffset,
+			Limit:             limit,
+			Range:             fmt.Sprintf("%d-%d", nextOffset, nextOffset+limit),
+			ContinuationToken: tok,
 		}
 	} else {
 		res.NextOffset = fullLen
 		res.Continuation = nil
+		res.ContinuationToken = ""
 	}
 	return res
 }

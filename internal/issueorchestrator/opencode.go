@@ -2,8 +2,35 @@ package issueorchestrator
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
+
+// isHaloHardwareRelevant checks if the issue is relevant to AMD GPU or Strix Halo hardware validation.
+func isHaloHardwareRelevant(issue Issue) bool {
+	switch strings.ToLower(strings.TrimSpace(issue.Lane)) {
+	case "amdgpu", "compute", "modelperfobs", "nativeperf":
+		return true
+	}
+
+	for _, p := range issue.Paths {
+		pLower := strings.ToLower(p)
+		for _, kw := range []string{"amdgpu", "compute", "strix", "halo", "gfx115", "vulkan"} {
+			if strings.Contains(pLower, kw) {
+				return true
+			}
+		}
+	}
+
+	titleLower := strings.ToLower(issue.Title)
+	for _, kw := range []string{"strix", "halo", "gfx115", "amdgpu", "rocm", "vulkan", "rdna"} {
+		if strings.Contains(titleLower, kw) {
+			return true
+		}
+	}
+
+	return false
+}
 
 // FormatOpencodePrompt formats a standard task prompt for an OpenCode worker.
 func FormatOpencodePrompt(issue Issue) string {
@@ -42,18 +69,21 @@ func FormatOpencodePrompt(issue Issue) string {
 		b.WriteString("- go test -v ./...\n")
 		b.WriteString("- go vet ./...\n")
 	}
-
 	b.WriteString(hardwareValidationGuidance(issue))
 	b.WriteString("\nInstructions:\n")
 	b.WriteString("- Strictly adhere to the assigned lane and boundary paths. Do not touch root files (e.g. go.mod, go.sum, dos.toml) or files in other packages.\n")
 	b.WriteString("- Execute your deliverable directly within assigned package boundaries as a leaf worker. Prohibit calling the 'task' tool or attempting nested subagent delegation (prevents subagent depth limit recursion failure, #12028).\n")
-	b.WriteString("- Deliverable: Deliver a clean defect fix or feature implementation along with a deterministic reproduction/regression unit test.\n")
-	b.WriteString("- Autonomous Safe Git Landing Protocol: Execute safe git landing directly within the worker process by default upon test verification:\n")
-	b.WriteString("  1. Pre-flight safe sync: fak sync reconcile --apply (or fak sync check)\n")
-	b.WriteString(fmt.Sprintf("  2. Stage-and-commit by explicit path: fak commit --path <changed-paths> -m \"<type>(%s): <description> (fak %s)\"\n", lane, lane))
-	b.WriteString("  3. Safe unprompted push: fak sync push\n")
-	b.WriteString("  Never leave finished work uncommitted or rely on external manual landing.\n")
-	b.WriteString("- Provide a 3-line receipt upon completion: status/verdict, changed files & commit SHA, and test output summary, and post directly to the GitHub issue with gh issue comment.\n")
+	b.WriteString("- Mandatory 4-Phase Delivery and Landing Pipeline (landing by default is required within this worker process; do NOT stop after tests):\n")
+	b.WriteString("  Phase 1 [Implement]: Author reproduction test and atomic fix strictly within assigned boundary paths.\n")
+	b.WriteString("  Phase 2 [Verify]: Run package verification commands and confirm all tests pass cleanly.\n")
+	b.WriteString("  Phase 3 [Autonomous Safe Git Landing - MANDATORY EXIT GATE]:\n")
+	b.WriteString("    You are explicitly authorized and required to commit and push right now. Leaving modified files uncommitted or unstaged is a task failure.\n")
+	b.WriteString("    1. Pre-flight safe sync: fak sync check (or fak sync reconcile --apply)\n")
+	b.WriteString(fmt.Sprintf("    2. Stage-and-commit by explicit path: fak commit --path <changed-paths> -m \"<type>(%s): <description> (fak %s)\"\n", lane, lane))
+	b.WriteString("    3. Safe unprompted push: fak sync push\n")
+	b.WriteString("    4. If push reports diverged trunk: run 'fak sync reconcile --apply' and retry 'fak sync push'.\n")
+	b.WriteString("    Never leave finished work uncommitted or rely on external manual landing.\n")
+	b.WriteString("- Phase 4 [Receipt]: Provide a 3-line receipt upon completion: status/verdict, changed files & LANDED COMMIT SHA on origin, and test output summary, and post directly to the GitHub issue with gh issue comment.\n")
 	b.WriteString("- Milestone Progress Protocol: Report milestone progress using structured comment tags in your commentary:\n")
 	b.WriteString("  <!-- fak:progress milestone=\"<name>\" delta=\"+N files\" tests=\"<pass|fail>\" -->\n")
 	b.WriteString("- Turn Extensions: Request budget extensions when substantive progress is ongoing:\n")
@@ -100,6 +130,9 @@ func BuildOpencodeChat(issue Issue, opts OpencodeChatOptions) OpencodeChat {
 	}
 	if opts.WorktreeDir != "" {
 		cmd = append(cmd, "--dir", opts.WorktreeDir)
+	}
+	if opts.SubagentDepth > 0 {
+		cmd = append(cmd, "--subagent-depth", strconv.Itoa(opts.SubagentDepth))
 	}
 	if len(opts.ExtraArgs) > 0 {
 		cmd = append(cmd, opts.ExtraArgs...)

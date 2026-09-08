@@ -89,6 +89,10 @@ type SpecDecodeConfig struct {
 	// Rollback, if non-nil, is called with EvictKV after each round that rejected drafts,
 	// so the engine can roll back the rejected suffix's KV. nil for a KV-less pure loop.
 	Rollback Rollback
+	// VocabMap, when non-nil, bridges a cross-vocabulary drafter into the target's
+	// id space. When set, SpecDecode automatically wraps draft via VocabMap.BridgeDrafter
+	// so heterogeneous-vocabulary drafting runs seamlessly without manual wrapping (#4208).
+	VocabMap *VocabMap
 }
 
 // SpecDecodeRun is the outcome of a SpecDecode run: the emitted tokens plus the accounting
@@ -161,6 +165,9 @@ func SpecDecode(prompt []int, draft Drafter, verify Verifier, cfg SpecDecodeConf
 	max := cfg.MaxNewTokens
 	if max <= 0 {
 		return run, nil // empty budget: nothing to decode
+	}
+	if cfg.VocabMap != nil && draft != nil {
+		draft = cfg.VocabMap.BridgeDrafter(draft)
 	}
 	committed := append([]int(nil), prompt...)
 	out := make([]int, 0, max)

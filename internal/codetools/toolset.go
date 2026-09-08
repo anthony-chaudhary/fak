@@ -258,6 +258,11 @@ func (t *Toolset) Edit(ctx context.Context, body []byte) ([]byte, bool) {
 	return t.edit(ctx, body)
 }
 
+// Bash executes a Bash operation with JSON body arguments.
+func (t *Toolset) Bash(ctx context.Context, body []byte) ([]byte, bool) {
+	return t.bash(ctx, body)
+}
+
 // ApplyPatch executes an ApplyPatch operation with JSON body arguments.
 func (t *Toolset) ApplyPatch(ctx context.Context, body []byte) ([]byte, bool) {
 	return t.applyPatch(ctx, body)

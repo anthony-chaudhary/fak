@@ -177,19 +177,26 @@ func (s *Store) localNamespaceEmpty(ctx context.Context) (bool, error) {
 	return strings.TrimSpace(out) == "", nil
 }
 
-// runSyncDirection runs one sync direction (git verb remote syncRefspec) and
-// translates its outcome into the error shape both Sync directions use: a
-// non-executable git is an infrastructure error, and a non-zero exit is a
-// verb-tagged message with an optional direction-specific extra suffix (push
-// carries the stop-before-fetch rationale; fetch carries none). Returns nil
-// once the direction completed (exit 0).
+// runSyncDirection runs one sync direction and translates its outcome into the
+// error shape both Sync directions use: a non-executable git is an
+// infrastructure error, and a non-zero exit is a verb-tagged message with an
+// optional direction-specific extra suffix (push carries the stop-before-fetch
+// rationale; fetch carries none). Returns nil once the direction completed (exit 0).
+//
+// Fetch explicitly passes --no-prune so inherited Git configuration (e.g.
+// fetch.prune=true) cannot delete newly acquired or local-only lease refs.
 func (s *Store) runSyncDirection(ctx context.Context, verb, remote, extra string) error {
-	_, code, err := s.run(ctx, s.dir, verb, remote, syncRefspec)
+	args := []string{verb}
+	if verb == "fetch" {
+		args = append(args, "--no-prune")
+	}
+	args = append(args, remote, syncRefspec)
+	_, code, err := s.run(ctx, s.dir, args...)
 	if err != nil {
 		return fmt.Errorf("leaseref: git not executable: %w", err)
 	}
 	if code != 0 {
-		return fmt.Errorf("leaseref: %s %s %s exited %d%s", verb, remote, syncRefspec, code, extra)
+		return fmt.Errorf("leaseref: %s exited %d%s", strings.Join(args, " "), code, extra)
 	}
 	return nil
 }

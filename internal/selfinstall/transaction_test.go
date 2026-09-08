@@ -317,6 +317,127 @@ func TestRunTransactionReportsRollbackFailure(t *testing.T) {
 	assertTransactionContents(t, source, "new")
 	assertTransactionContents(t, a, "new")
 	assertTransactionContents(t, b, "old-b")
+
+	if len(failed.Snapshots) != 1 {
+		t.Fatalf("failed.Snapshots = %v, want 1 snapshot", failed.Snapshots)
+	}
+	snapshotA := failed.Snapshots[0]
+	if !strings.Contains(filepath.Base(snapshotA), "a-target") {
+		t.Fatalf("snapshot path = %q, want target a snapshot", snapshotA)
+	}
+	assertTransactionContents(t, snapshotA, "old-a")
+
+	matches, err := filepath.Glob(filepath.Join(dir, ".a-target.selfinstall-snapshot-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0] != snapshotA {
+		t.Fatalf("target a snapshot matches = %v, want [%s]", matches, snapshotA)
+	}
+
+	bMatches, err := filepath.Glob(filepath.Join(dir, ".b-target.selfinstall-snapshot-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bMatches) != 0 {
+		t.Fatalf("target b snapshot matches = %v, want none", bMatches)
+	}
+
+	candidateMatches, err := filepath.Glob(filepath.Join(dir, ".*.selfinstall-stage-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidateMatches) != 0 {
+		t.Fatalf("candidate debris remained: %v", candidateMatches)
+	}
+
+	if err := os.Remove(snapshotA); err != nil {
+		t.Fatalf("failed to clean up snapshot %q: %v", snapshotA, err)
+	}
+	assertNoTransactionDebris(t, dir)
+}
+
+func TestRunTransactionPartialRollbackFailurePreservesFailedSnapshotOnly(t *testing.T) {
+	dir := t.TempDir()
+	source := writeTransactionFile(t, dir, "source", "new")
+	a := writeTransactionFile(t, dir, "a-target", "old-a")
+	b := writeTransactionFile(t, dir, "b-target", "old-b")
+	c := writeTransactionFile(t, dir, "c-target", "old-c")
+	calls := 0
+	swap := func(source, target string) error {
+		calls++
+		switch calls {
+		case 3:
+			return errors.New("injected activation failure on c")
+		case 5:
+			return errors.New("injected rollback failure on a")
+		default:
+			return OSSwap(source, target)
+		}
+	}
+
+	// Lexical order: a, b, c.
+	// Call 1: activate a (succeeds)
+	// Call 2: activate b (succeeds)
+	// Call 3: activate c (fails)
+	// Rollback in reverse:
+	// Call 4: rollback b (succeeds)
+	// Call 5: rollback a (fails)
+	result := RunTransaction([]Copy{
+		{Source: source, Target: c},
+		{Source: source, Target: b},
+		{Source: source, Target: a},
+	}, swap)
+
+	failed, ok := result.(RollbackFailed)
+	if !ok {
+		t.Fatalf("result = %#v, want RollbackFailed", result)
+	}
+	if failed.Attempted != 3 || failed.Changed != 2 || len(failed.RollbackErrors) != 1 {
+		t.Fatalf("result = %#v", failed)
+	}
+	assertTransactionContents(t, source, "new")
+	assertTransactionContents(t, a, "new")   // rollback failed
+	assertTransactionContents(t, b, "old-b") // rollback succeeded
+	assertTransactionContents(t, c, "old-c") // never activated
+
+	// Only target a's snapshot should remain.
+	if len(failed.Snapshots) != 1 {
+		t.Fatalf("failed.Snapshots = %v, want 1 snapshot", failed.Snapshots)
+	}
+	snapshotA := failed.Snapshots[0]
+	if !strings.Contains(filepath.Base(snapshotA), "a-target") {
+		t.Fatalf("snapshot path = %q, want target a snapshot", snapshotA)
+	}
+	assertTransactionContents(t, snapshotA, "old-a")
+
+	matchesA, err := filepath.Glob(filepath.Join(dir, ".a-target.selfinstall-snapshot-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matchesA) != 1 || matchesA[0] != snapshotA {
+		t.Fatalf("matchesA = %v, want [%s]", matchesA, snapshotA)
+	}
+
+	matchesB, err := filepath.Glob(filepath.Join(dir, ".b-target.selfinstall-snapshot-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matchesB) != 0 {
+		t.Fatalf("matchesB = %v, want none", matchesB)
+	}
+
+	matchesC, err := filepath.Glob(filepath.Join(dir, ".c-target.selfinstall-snapshot-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matchesC) != 0 {
+		t.Fatalf("matchesC = %v, want none", matchesC)
+	}
+
+	if err := os.Remove(snapshotA); err != nil {
+		t.Fatalf("failed to clean up snapshot %q: %v", snapshotA, err)
+	}
 	assertNoTransactionDebris(t, dir)
 }
 

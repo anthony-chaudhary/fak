@@ -163,6 +163,13 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if len(req.Messages) > 0 {
+		req.Messages = CanonicalizePromptOrder(req.Messages)
+	}
+	if len(req.Tools) > 1 {
+		req.Tools = CanonicalizeToolDefs(req.Tools)
+	}
+
 	// Arm the result-side floor BEFORE the planner runs — exact parity with the
 	// OpenAI and Anthropic proxy paths. decodeGeminiContent already turned each
 	// inbound functionResponse into a canonical RoleTool message, so
