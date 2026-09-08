@@ -2,6 +2,8 @@ package issueorchestrator
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -112,5 +114,117 @@ func TestPlanWaves_AutoExpandDisabled(t *testing.T) {
 	}
 	if plan.Diagnostics != nil {
 		t.Errorf("expected Diagnostics to be nil when AutoExpand=false, got %+v", plan.Diagnostics)
+	}
+}
+
+func TestPlanWaves_SameLaneDisjointPathsAdmittedInSameWave(t *testing.T) {
+	issues := []Issue{
+		testIssue(1, "issue-1", "Compute task A", "compute", []string{"internal/compute/a.go"}, 3),
+		testIssue(2, "issue-2", "Compute task B", "compute", []string{"internal/compute/b.go"}, 3),
+	}
+
+	plan := PlanWaves(issues, WavePlanOptions{
+		WaveSize: 4,
+	})
+
+	if plan.TotalWaves != 1 {
+		t.Fatalf("expected 1 wave for same-lane disjoint issues, got %d waves", plan.TotalWaves)
+	}
+	if len(plan.Waves[0].Issues) != 2 {
+		t.Fatalf("expected 2 issues in wave 1, got %d", len(plan.Waves[0].Issues))
+	}
+	if plan.Waves[0].Issues[0].Number != 1 || plan.Waves[0].Issues[1].Number != 2 {
+		t.Errorf("expected issues 1 and 2 in wave 1, got numbers: %v", plan.Waves[0].IssueNumbers)
+	}
+}
+
+func TestPlanWaves_OverlappingPathsSeparatedIntoDifferentWaves(t *testing.T) {
+	// Same lane with overlapping paths
+	issuesSameLane := []Issue{
+		testIssue(1, "issue-1", "Compute task A", "compute", []string{"internal/compute/a.go"}, 3),
+		testIssue(2, "issue-2", "Compute task A prime", "compute", []string{"internal/compute/a.go"}, 3),
+	}
+	planSameLane := PlanWaves(issuesSameLane, WavePlanOptions{
+		WaveSize: 4,
+	})
+	if planSameLane.TotalWaves != 2 {
+		t.Fatalf("expected 2 waves for same-lane overlapping issues, got %d", planSameLane.TotalWaves)
+	}
+	if len(planSameLane.Waves) != 2 || len(planSameLane.Waves[0].Issues) != 1 || len(planSameLane.Waves[1].Issues) != 1 {
+		t.Fatalf("expected 1 issue per wave, got waves: %v", planSameLane.Waves)
+	}
+
+	// Cross lane with overlapping paths
+	issuesCrossLane := []Issue{
+		testIssue(3, "issue-3", "Cross lane 1", "compute", []string{"internal/shared/common.go"}, 3),
+		testIssue(4, "issue-4", "Cross lane 2", "gateway", []string{"internal/shared/common.go"}, 3),
+	}
+	planCrossLane := PlanWaves(issuesCrossLane, WavePlanOptions{
+		WaveSize: 4,
+	})
+	if planCrossLane.TotalWaves != 2 {
+		t.Fatalf("expected 2 waves for cross-lane overlapping issues, got %d", planCrossLane.TotalWaves)
+	}
+}
+
+func TestPlanWaves_HeldLeaseExactTreeSpecificity(t *testing.T) {
+	tempDir := t.TempDir()
+	dosDir := filepath.Join(tempDir, ".dos")
+	if err := os.MkdirAll(dosDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	journal := filepath.Join(dosDir, "lane-journal.jsonl")
+	// Lease held specifically on internal/compute/a.go
+	record := `{"op":"ACQUIRE","lane":"compute","tree":["internal/compute/a.go"]}` + "\n"
+	if err := os.WriteFile(journal, []byte(record), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	issues := []Issue{
+		// Issue 1: disjoint path on b.go -> MUST be permitted (NOT held)
+		testIssue(1, "issue-1", "Compute task B", "compute", []string{"internal/compute/b.go"}, 3),
+		// Issue 2: exact overlapping path on a.go -> MUST be held
+		testIssue(2, "issue-2", "Compute task A", "compute", []string{"internal/compute/a.go"}, 3),
+		// Issue 3: ancestor wildcard overlapping path on internal/compute/** -> MUST be held
+		testIssue(3, "issue-3", "Compute task wildcard", "compute", []string{"internal/compute/**"}, 3),
+	}
+
+	plan := PlanWaves(issues, WavePlanOptions{
+		WaveSize:       4,
+		WorkspaceRoot:  tempDir,
+		AutoDetectHeld: true,
+	})
+
+	// Issue 1 should NOT be in HeldIssues
+	for _, num := range plan.HeldIssues {
+		if num == 1 {
+			t.Errorf("issue 1 on disjoint path 'internal/compute/b.go' must NOT be held!")
+		}
+	}
+
+	// Issue 2 and Issue 3 MUST be in HeldIssues
+	hasIssue2 := false
+	hasIssue3 := false
+	for _, num := range plan.HeldIssues {
+		if num == 2 {
+			hasIssue2 = true
+		}
+		if num == 3 {
+			hasIssue3 = true
+		}
+	}
+	if !hasIssue2 {
+		t.Errorf("issue 2 on exact overlapping path 'internal/compute/a.go' MUST be held!")
+	}
+	if !hasIssue3 {
+		t.Errorf("issue 3 on wildcard path 'internal/compute/**' MUST be held!")
+	}
+
+	// Issue 1 should be scheduled in Wave 1
+	if plan.PlannedIssues != 1 {
+		t.Fatalf("expected exactly 1 planned issue (issue 1), got %d", plan.PlannedIssues)
+	}
+	if len(plan.Waves) == 0 || len(plan.Waves[0].Issues) != 1 || plan.Waves[0].Issues[0].Number != 1 {
+		t.Fatalf("expected issue 1 to be planned in wave 1, got %v", plan.Waves)
 	}
 }
