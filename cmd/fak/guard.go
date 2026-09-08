@@ -349,86 +349,28 @@ func cmdManageCommand(commandName string, argv []string) {
 		return
 	}
 
-	command := launchPlan.executableCommand() // everything after the flags (and after `--`) is the wrapped agent.
-	profilesExplicit := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "output-profile" || f.Name == "work-profile" {
-			profilesExplicit = true
-		}
+	preparedCommand := prepareGuardManagedCommand(fs, launchPlan, guardManagedCommandInputs{
+		OutputProfile:           outputProfile,
+		WorkProfile:             workProfile,
+		CodexLoopGate:           codexLoopGate,
+		CodexHome:               codexHome,
+		CodexLoopGateSinceHours: codexLoopGateSinceHours,
+		CodexLoopGateLimit:      codexLoopGateLimit,
+		SessionPressureGate:     sessionPressureGate,
+		Provider:                provider,
+		APIKeyEnv:               apiKeyEnv,
+		Model:                   model,
+		Banner:                  bannerFlag,
+		DebugStats:              debugStats,
+		Quiet:                   quiet,
+		SetFlags:                guardSetFlags,
 	})
-	command, responseProfileCapture, profileErr := injectGuardProfiles(command, *outputProfile, *workProfile, profilesExplicit)
-	if profileErr != nil {
-		fmt.Fprintf(os.Stderr, "fak guard: %v\n", profileErr)
-		os.Exit(2)
-	}
-	if len(command) == 0 {
-		fs.Usage()
-		os.Exit(2)
-	}
-	launchPlan = launchPlan.withExecutableCommand(command)
-	if code := runGuardStoragePressureGate(os.Stderr, defaultGuardStoragePressureDeps()); code != 0 {
-		os.Exit(code)
-	}
-	agentName := launchPlan.agentName()
-	if cfg, ok := guardCodexLoopGateConfigForProfile(launchPlan.harnessProfile(), launchPlan.executableCommand(), *codexLoopGate, *codexHome, *codexLoopGateSinceHours, *codexLoopGateLimit, *quiet); ok {
-		if code := runCodexLoopGate(os.Stderr, cfg); code != 0 {
-			os.Exit(code)
-		}
-	}
-	sessionPressure, specErr := parseGuardSessionPressureSpec(*sessionPressureGate)
-	if specErr != nil {
-		fmt.Fprintf(os.Stderr, "fak guard: --session-pressure-gate %q: %v\n", *sessionPressureGate, specErr)
-		os.Exit(2)
-	}
-	if code := runGuardSessionPressureGate(os.Stderr, guardSessionPressureGateConfig{
-		Threshold:     sessionPressure.Threshold,
-		SinceDays:     sessionPressure.SinceDays,
-		Max:           sessionPressure.Max,
-		Quiet:         *quiet,
-		ReportPath:    sessionPressure.ReportPath,
-		LaunchModel:   *model,
-		Justification: sessionPressure.Justification,
-	}); code != 0 {
-		os.Exit(code)
-	}
-
-	// Cooldown-aware seat selection: a bare `fak guard -- claude` (no --rotate) resolves its
-	// account purely from the environment and, unlike `fak accounts launch --rotate`, never
-	// consults the fleet-shared cooldown store — so it would launch against an account the
-	// launcher just watched bounce off its own weekly/usage cap, burning a turn on a walled
-	// seat. Only meaningful on the subscription-OAuth Anthropic path: an explicit --api-key-env
-	// is API billing (one key, no rotation) and a non-Claude child has no Claude seat to rotate.
-	// When the currently-resolved seat is actively cooled and a live alternate exists, redirect
-	// $CLAUDE_CONFIG_DIR to it BEFORE resolveGuardUpstream and the child spawn, so every
-	// downstream consumer (fak's own OAuth read, the failover seed, the cap-recovery transcript
-	// path, and the child's inherited env — all of which re-read the env var) follows to the live
-	// seat. Fail-open: any doubt leaves the resolved dir untouched (see guardRotateOffCooldown).
-	if provResolved, _ := launchPlan.resolveProvider(*provider); provResolved == "anthropic" && strings.TrimSpace(*apiKeyEnv) == "" {
-		guardHomeDir, _ := os.UserHomeDir()
-		if newDir, rotated := guardRotateOffCooldown(guardHomeDir, guardDefaultAccountsRegistryPath(guardHomeDir), time.Now(), guardRotateWarnWriter(os.Stderr, *quiet)); rotated {
-			_ = os.Setenv("CLAUDE_CONFIG_DIR", newDir)
-		}
-	}
-
-	// Decide whether the per-turn `fak-turn …` economy line streams to the SHARED terminal
-	// stderr. On an attended interactive launch the wrapped agent (Claude Code) paints a
-	// full-screen alternate-screen TUI over THIS terminal, so a per-turn stderr write lands
-	// on top of it and corrupts the session view; there the economy belongs in the `fak info`
-	// split pane (the dedicated fak section) + the exit summary, not the agent pane. An
-	// explicit --debug-stats still streams here; headless/piped runs keep it (no TUI to
-	// corrupt). See guardDebugStatsToSharedStderr.
-	debugStatsStderr := guardDebugStatsToSharedStderr(
-		*debugStats, *quiet, guardSetFlags["debug-stats"],
-		cmdGuardStdinInteractive(), launchPlan.interactive())
-
-	// Startup-banner verbosity: resolve --banner now, fail-loud on a bad value before
-	// any gateway binds. AUTO/empty selects the private delayed-progress-only mode for
-	// both interactive and noninteractive launches. See guard_banner.go.
-	bannerMode, bannerErr := guardBannerModeDecision(*bannerFlag, *quiet, cmdGuardStdinInteractive(), launchPlan.interactive())
-	if bannerErr != nil {
-		fmt.Fprintf(os.Stderr, "fak guard: %v\n", bannerErr)
-		os.Exit(2)
-	}
+	command := preparedCommand.Command
+	responseProfileCapture := preparedCommand.ResponseProfileCapture
+	launchPlan = preparedCommand.LaunchPlan
+	agentName := preparedCommand.AgentName
+	debugStatsStderr := preparedCommand.DebugStatsStderr
+	bannerMode := preparedCommand.BannerMode
 
 	// Observability sink for the gateway's structured per-request + per-verdict logs
 	// (event=gateway_http_request / event=gateway_operation, each carrying the trace_id).
