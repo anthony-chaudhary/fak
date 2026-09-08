@@ -33,6 +33,28 @@ func TestClassifyHardcodedRef(t *testing.T) {
 	}
 }
 
+func TestCurrentBranchRefClassifications(t *testing.T) {
+	cases := []struct {
+		path string
+		line string
+		want string
+	}{
+		{"cmd/fak/sync.go", "integrate origin/main", RefClassDevelopmentSource},
+		{"cmd/fak/wip_park.go", "default: origin/main", RefClassDevelopmentSource},
+		{"internal/safesync/executor.go", "verify each local commit in origin/main", RefClassDevelopmentSource},
+		{"internal/safesync/park.go", `targetRef = "origin/main"`, RefClassDevelopmentSource},
+		{"internal/safesync/reconcile.go", "default integrate origin/main", RefClassDevelopmentSource},
+		{"goals/GOAL-inference-defaults-11580.md", "incoming origin/main overlaps", RefClassHistorical},
+		{"tools/release_cut.py", "merge remote-tracking origin/main", RefClassHistorical},
+		{"tools/release_next.py", "sync trunk with origin/main", RefClassHistorical},
+	}
+	for _, tc := range cases {
+		if got := ClassifyHardcodedRef(tc.path, tc.line); got != tc.want {
+			t.Errorf("ClassifyHardcodedRef(%q) = %q, want %q", tc.path, got, tc.want)
+		}
+	}
+}
+
 func TestScanHardcodedRefFileHandlesLongLines(t *testing.T) {
 	dir := t.TempDir()
 	// A single data line far larger than bufio.Scanner's 64 KiB token cap, with a
