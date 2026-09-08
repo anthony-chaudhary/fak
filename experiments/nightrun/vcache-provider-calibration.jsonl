@@ -1,0 +1,1 @@
+{"schema":"fak.vcache.provider-calibration.v1","ts":"2026-09-05T19:42:35.677171Z","provider":"openai","source":"serve:http","turns":15,"predictions":15,"true_warm":6,"false_warm":1,"true_cold":6,"false_cold":2,"false_warm_rate":0.14285714285714285,"false_cold_rate":0.25,"stale_after_days":7}
