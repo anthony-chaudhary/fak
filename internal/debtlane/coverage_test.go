@@ -785,3 +785,276 @@ func TestAmbiguousExternal(t *testing.T) {
 		t.Errorf("expected message to report ambiguous proof as unknown, got %q", ambThin[0].Message)
 	}
 }
+
+func TestHotPathPerformanceDebt(t *testing.T) {
+	tmp := t.TempDir()
+
+	// 1. Critical-path unit containing all 5 debt patterns:
+	// - loop-local make/append growth
+	// - []byte to string conversion
+	// - filesystem or subprocess I/O
+	// - time.Sleep
+	// - mutex acquisition
+	critDir := filepath.Join(tmp, "internal", "hotcrit")
+	if err := os.MkdirAll(critDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	critCode := `package hotcrit
+
+import (
+	"os"
+	"os/exec"
+	"sync"
+	"time"
+)
+
+func CriticalPipeline(input []byte) {
+	// Mutex acquisition on critical path
+	var mu sync.Mutex
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Loop-local make & append growth
+	var items []int
+	for i := 0; i < 10; i++ {
+		tempBuf := make([]byte, 128)
+		_ = tempBuf
+		items = append(items, i)
+	}
+
+	// []byte to string conversion
+	str := string(input)
+	_ = str
+
+	// Filesystem I/O on critical path
+	_, _ = os.ReadFile("config.json")
+
+	// Subprocess execution on critical path
+	cmd := exec.Command("uptime")
+	_ = cmd
+
+	// Blocking sleep on critical path
+	time.Sleep(10 * time.Millisecond)
+}
+`
+	if err := os.WriteFile(filepath.Join(critDir, "pipeline.go"), []byte(critCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	laneCrit := DebtLane{
+		Lane:        "hotcrit",
+		UnitOfWork:  "internal/hotcrit",
+		Criticality: CriticalityCore,
+		Evidence: Evidence{
+			HasCode:    true,
+			Integrated: true,
+		},
+	}
+
+	critFindings := InspectUnitDetectors(&laneCrit, critDir)
+
+	// Verify all 5 patterns are detected with exact source spans and correct dimensions
+	foundMake := false
+	foundAppend := false
+	foundByteString := false
+	foundFileIO := false
+	foundSubprocess := false
+	foundSleep := false
+	foundMutex := false
+
+	for _, f := range critFindings {
+		if f.Dimension != string(DimAllocationCopyDebt) && f.Dimension != string(DimBlockingCallDebt) {
+			continue
+		}
+
+		// Verify exact source span in Path: format is <path>:<line>:<col>
+		parts := strings.Split(f.Path, ":")
+		if len(parts) < 3 {
+			t.Errorf("expected exact source span (path:line:col), got %q", f.Path)
+		}
+		if f.Severity != "warning" {
+			t.Errorf("expected warning severity for static suspicion, got %q", f.Severity)
+		}
+		if !strings.Contains(f.Message, "static suspicion") {
+			t.Errorf("expected static suspicion notice in message: %s", f.Message)
+		}
+
+		switch f.Dimension {
+		case string(DimAllocationCopyDebt):
+			if strings.Contains(f.Message, "make") {
+				foundMake = true
+			}
+			if strings.Contains(f.Message, "append") {
+				foundAppend = true
+			}
+			if strings.Contains(f.Message, "byte/string") {
+				foundByteString = true
+			}
+		case string(DimBlockingCallDebt):
+			if strings.Contains(f.Message, "os.ReadFile") {
+				foundFileIO = true
+			}
+			if strings.Contains(f.Message, "exec.Command") {
+				foundSubprocess = true
+			}
+			if strings.Contains(f.Message, "time.Sleep") {
+				foundSleep = true
+			}
+			if strings.Contains(f.Message, "mutex acquisition") {
+				foundMutex = true
+			}
+		}
+	}
+
+	if !foundMake {
+		t.Errorf("missing loop-local make finding in: %+v", critFindings)
+	}
+	if !foundAppend {
+		t.Errorf("missing loop-local append finding in: %+v", critFindings)
+	}
+	if !foundByteString {
+		t.Errorf("missing byte/string copy finding in: %+v", critFindings)
+	}
+	if !foundFileIO {
+		t.Errorf("missing file I/O finding in: %+v", critFindings)
+	}
+	if !foundSubprocess {
+		t.Errorf("missing subprocess I/O finding in: %+v", critFindings)
+	}
+	if !foundSleep {
+		t.Errorf("missing time.Sleep finding in: %+v", critFindings)
+	}
+	if !foundMutex {
+		t.Errorf("missing mutex acquisition finding in: %+v", critFindings)
+	}
+
+	// Verify coverage receipt incorporates hot-path detector dimensions
+	receipt := BuildCoverageReceipt(tmp, "fak", []DebtLane{laneCrit}, critFindings, 1)
+	foundAllocDim := false
+	foundBlockDim := false
+	for _, d := range receipt.Dimensions {
+		if d == string(DimAllocationCopyDebt) {
+			foundAllocDim = true
+		}
+		if d == string(DimBlockingCallDebt) {
+			foundBlockDim = true
+		}
+	}
+	if !foundAllocDim {
+		t.Errorf("expected %s in coverage receipt dimensions: %v", DimAllocationCopyDebt, receipt.Dimensions)
+	}
+	if !foundBlockDim {
+		t.Errorf("expected %s in coverage receipt dimensions: %v", DimBlockingCallDebt, receipt.Dimensions)
+	}
+
+	// 2. Preallocated control fixture on critical path (remains clean)
+	preallocDir := filepath.Join(tmp, "internal", "prealloc")
+	if err := os.MkdirAll(preallocDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	preallocCode := `package prealloc
+
+// Clean pipeline: preallocated buffer, indexed loops, no conversions, no blocking calls.
+func PreallocatedPipeline(input []byte, n int) int {
+	buf := make([]int, n)
+	sum := 0
+	for i := 0; i < n; i++ {
+		buf[i] = i * 2
+		sum += buf[i]
+	}
+	if len(input) > 0 {
+		sum += int(input[0])
+	}
+	return sum
+}
+`
+	if err := os.WriteFile(filepath.Join(preallocDir, "pipeline.go"), []byte(preallocCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lanePrealloc := DebtLane{
+		Lane:        "prealloc",
+		UnitOfWork:  "internal/prealloc",
+		Criticality: CriticalityCore,
+		Evidence: Evidence{
+			HasCode:    true,
+			Integrated: true,
+		},
+	}
+
+	preallocFindings := InspectUnitDetectors(&lanePrealloc, preallocDir)
+	var preallocHotFindings []FindingProvenance
+	for _, f := range preallocFindings {
+		if f.Dimension == string(DimAllocationCopyDebt) || f.Dimension == string(DimBlockingCallDebt) {
+			preallocHotFindings = append(preallocHotFindings, f)
+		}
+	}
+	if len(preallocHotFindings) != 0 {
+		t.Fatalf("preallocated critical path fixture must have 0 hot-path findings, got %d: %+v",
+			len(preallocHotFindings), preallocHotFindings)
+	}
+
+	// 3. Off-spine control with the EXACT same debt patterns as critCode
+	offSpineDir := filepath.Join(tmp, "tools", "offspine")
+	if err := os.MkdirAll(offSpineDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(offSpineDir, "tool.go"), []byte(critCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	laneOffSpine := DebtLane{
+		Lane:        "offspine",
+		UnitOfWork:  "tools/offspine",
+		Criticality: CriticalityPeripheral,
+		Evidence: Evidence{
+			HasCode:    true,
+			Integrated: true,
+		},
+	}
+
+	offSpineFindings := InspectUnitDetectors(&laneOffSpine, offSpineDir)
+	var offSpineHotFindings []FindingProvenance
+	for _, f := range offSpineFindings {
+		if f.Dimension == string(DimAllocationCopyDebt) || f.Dimension == string(DimBlockingCallDebt) {
+			offSpineHotFindings = append(offSpineHotFindings, f)
+		}
+	}
+	if len(offSpineHotFindings) != 0 {
+		t.Fatalf("off-spine fixture must have 0 hot-path findings, got %d: %+v",
+			len(offSpineHotFindings), offSpineHotFindings)
+	}
+
+	// 4. Disconnected control with the EXACT same debt patterns
+	disconnDir := filepath.Join(tmp, "internal", "disconnected")
+	if err := os.MkdirAll(disconnDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(disconnDir, "disconn.go"), []byte(critCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	laneDisconn := DebtLane{
+		Lane:        "disconnected",
+		UnitOfWork:  "internal/disconnected",
+		Criticality: CriticalityCore,
+		Evidence: Evidence{
+			HasCode:    true,
+			Integrated: false, // unreachable from root!
+		},
+	}
+
+	disconnFindings := InspectUnitDetectors(&laneDisconn, disconnDir)
+	var disconnHotFindings []FindingProvenance
+	for _, f := range disconnFindings {
+		if f.Dimension == string(DimAllocationCopyDebt) || f.Dimension == string(DimBlockingCallDebt) {
+			disconnHotFindings = append(disconnHotFindings, f)
+		}
+	}
+	if len(disconnHotFindings) != 0 {
+		t.Fatalf("disconnected fixture must have 0 hot-path findings, got %d: %+v",
+			len(disconnHotFindings), disconnHotFindings)
+	}
+}
