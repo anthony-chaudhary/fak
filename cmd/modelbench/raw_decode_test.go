@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
 	"os"
@@ -18,6 +19,15 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/rawdecode"
 )
+
+func setRawDecodeExecutableProvenanceForTest(t *testing.T, observed rawDecodeExecutableProvenance, err error) {
+	t.Helper()
+	previous := observeRawDecodeExecutableProvenance
+	observeRawDecodeExecutableProvenance = func() (rawDecodeExecutableProvenance, error) {
+		return observed, err
+	}
+	t.Cleanup(func() { observeRawDecodeExecutableProvenance = previous })
+}
 
 func syntheticTestConfig() model.Config {
 	return model.Config{
@@ -64,6 +74,7 @@ func setRawDecodeTestFlags(rawDecode bool, promptIDs string, contextLimit int, i
 }
 
 func TestRawDecodeSynthetic(t *testing.T) {
+	setRawDecodeExecutableProvenanceForTest(t, rawDecodeExecutableProvenance{}, errors.New("unavailable"))
 	defer setRawDecodeTestFlags(true, "1,2,3", 256, false, false)()
 
 	m := model.NewSynthetic(syntheticTestConfig())
@@ -174,6 +185,7 @@ func TestRawDecodeSynthetic(t *testing.T) {
 }
 
 func TestRawDecodePhysicalReceiptLeavesIncompleteExecutableTupleUnavailable(t *testing.T) {
+	setRawDecodeExecutableProvenanceForTest(t, rawDecodeExecutableProvenance{}, errors.New("unavailable"))
 	execution := rawdecode.Execution{
 		PromptTokenIDs: []int{1}, ContextLimit: 8, GeneratedLimit: 1, FiniteLogits: true,
 	}
@@ -186,7 +198,51 @@ func TestRawDecodePhysicalReceiptLeavesIncompleteExecutableTupleUnavailable(t *t
 	}
 }
 
+func TestRawDecodePhysicalReceiptMapsExecutableProvenance(t *testing.T) {
+	execution := rawdecode.Execution{
+		PromptTokenIDs: []int{1}, ContextLimit: 8, GeneratedLimit: 1, FiniteLogits: true,
+	}
+	const revision = "0123456789abcdef0123456789abcdef01234567"
+	const binarySHA256 = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+
+	t.Run("complete", func(t *testing.T) {
+		setRawDecodeExecutableProvenanceForTest(t, rawDecodeExecutableProvenance{
+			revision: revision, modified: true, binarySHA256: binarySHA256,
+		}, nil)
+		attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+		if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
+			t.Fatalf("partial source tuple became creditable: %+v", attempt)
+		}
+		source := attempt.Observed.Source
+		if source.GitCommit != revision || source.BinarySHA256 != binarySHA256 || source.Dirty == nil || !*source.Dirty {
+			t.Fatalf("executable provenance mapping mismatch: %+v", source)
+		}
+		if source.SourceArchiveSHA256 != "" || source.DiffSHA256 != "" {
+			t.Fatalf("unobserved source archive or diff was invented: %+v", source)
+		}
+	})
+
+	t.Run("observer error", func(t *testing.T) {
+		setRawDecodeExecutableProvenanceForTest(t, rawDecodeExecutableProvenance{
+			revision: revision, modified: true, binarySHA256: binarySHA256,
+		}, errors.New("observation failed"))
+		attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+		if attempt.Observed.Source != (compute.Qwen38VulkanSourceIdentity{}) || attempt.CreditEligible || attempt.Receipt != nil {
+			t.Fatalf("failed executable observation escaped atomically: %+v", attempt)
+		}
+	})
+
+	t.Run("incomplete success", func(t *testing.T) {
+		setRawDecodeExecutableProvenanceForTest(t, rawDecodeExecutableProvenance{revision: revision}, nil)
+		attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+		if attempt.Observed.Source != (compute.Qwen38VulkanSourceIdentity{}) || attempt.CreditEligible || attempt.Receipt != nil {
+			t.Fatalf("incomplete executable observation escaped atomically: %+v", attempt)
+		}
+	})
+}
+
 func TestRawDecodePhysicalReceiptCarriesOnlyCompleteGGUFObservation(t *testing.T) {
+	setRawDecodeExecutableProvenanceForTest(t, rawDecodeExecutableProvenance{}, errors.New("unavailable"))
 	execution := rawdecode.Execution{
 		ArtifactPath:          "fixtures/qwen3.8-q4_k_m.gguf",
 		ArtifactSHA256:        strings.Repeat("a", 64),
