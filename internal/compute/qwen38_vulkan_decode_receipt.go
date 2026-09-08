@@ -17,6 +17,7 @@ const (
 	Qwen38VulkanDecodeReceiptSchema       = "fak/qwen38-vulkan-decode-receipt/v2"
 	Qwen38VulkanDecodeReceiptV3Schema     = "fak/qwen38-vulkan-decode-receipt/v3"
 	Qwen38VulkanResourceScopeReportedRuns = "reported_runs"
+	Qwen38VulkanRunKindMeasured           = "measured"
 
 	Qwen38VulkanDecodeGGUFSHA256 = "7E78DA5D7E3AE28D178121F58646953305F3E5BD3CB46F4A75584E8B6C6FE169"
 	Qwen38VulkanDecodeBackend    = "vulkan"
@@ -164,6 +165,7 @@ type Qwen38VulkanEngineIdentity struct {
 
 type Qwen38VulkanDecodeRun struct {
 	Repetition                  int                       `json:"repetition"`
+	Kind                        string                    `json:"kind,omitempty"`
 	ContextLimit                int                       `json:"context_limit"`
 	ContextTokens               int                       `json:"context_tokens"`
 	GeneratedTokenLimit         int                       `json:"generated_token_limit"`
@@ -307,6 +309,7 @@ func buildQwen38VulkanDecodeReceipt(raw Qwen38VulkanRawDecodeResult, schema stri
 		if schema == Qwen38VulkanDecodeReceiptV3Schema {
 			runs[i].Resources = qwen38VulkanRunResourcesCopy(run.Resources)
 		} else {
+			runs[i].Kind = ""
 			runs[i].Resources = nil
 		}
 	}
@@ -564,6 +567,9 @@ func aggregateQwen38VulkanRunResources(runs []Qwen38VulkanDecodeRun) (uint64, ui
 	var processPeak, devicePeak uint64
 	var total Qwen38VulkanDecodeCounters
 	for i, run := range runs {
+		if run.Kind != Qwen38VulkanRunKindMeasured {
+			return 0, 0, Qwen38VulkanDecodeCounters{}, fmt.Errorf("qwen3.8 Vulkan repetition %d kind %q, want %q", i+1, run.Kind, Qwen38VulkanRunKindMeasured)
+		}
 		resources := run.Resources
 		if resources == nil {
 			return 0, 0, Qwen38VulkanDecodeCounters{}, fmt.Errorf("qwen3.8 Vulkan repetition %d requires resource observations", i+1)

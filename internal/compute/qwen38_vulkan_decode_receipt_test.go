@@ -158,6 +158,8 @@ func TestQwen38VulkanDecodeReceiptV3FailsClosedOnIncompleteResources(t *testing.
 		{"scope absent", func(r *Qwen38VulkanRawDecodeResult) { r.ResourceScope = "" }, "resource scope"},
 		{"reported runs zero", func(r *Qwen38VulkanRawDecodeResult) { r.ReportedRuns = 0 }, "reported runs"},
 		{"reported runs mismatch", func(r *Qwen38VulkanRawDecodeResult) { r.ReportedRuns-- }, "reported runs"},
+		{"run kind absent", func(r *Qwen38VulkanRawDecodeResult) { r.Runs[2].Kind = "" }, "kind"},
+		{"warmup mixed in", func(r *Qwen38VulkanRawDecodeResult) { r.Runs[2].Kind = "warmup" }, "want \"measured\""},
 		{"run resources absent", func(r *Qwen38VulkanRawDecodeResult) { r.Runs[2].Resources = nil }, "requires resource observations"},
 		{"transfer completeness absent", func(r *Qwen38VulkanRawDecodeResult) { r.Runs[2].Resources.TransfersComplete = nil }, "complete transfer"},
 		{"transfer completeness false", func(r *Qwen38VulkanRawDecodeResult) {
@@ -212,6 +214,7 @@ func TestQwen38VulkanDecodeReceiptV3RejectsMutatedAggregation(t *testing.T) {
 		{"device maximum", func(r *Qwen38VulkanDecodeReceipt) { r.PeakDeviceMemoryBytes++ }, "peak memory"},
 		{"counter sum", func(r *Qwen38VulkanDecodeReceipt) { r.Counters.H2D.Bytes++ }, "counters do not match"},
 		{"partial run", func(r *Qwen38VulkanDecodeReceipt) { r.Runs[3].Resources = nil }, "requires resource observations"},
+		{"warmup mixed in", func(r *Qwen38VulkanDecodeReceipt) { r.Runs[3].Kind = "warmup" }, "want \"measured\""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -242,13 +245,14 @@ func TestQwen38VulkanDecodeReceiptV2RemainsCompatible(t *testing.T) {
 	raw := validQwen38VulkanRawDecodeResult()
 	raw.ResourceScope = Qwen38VulkanResourceScopeReportedRuns
 	raw.ReportedRuns = len(raw.Runs)
+	raw.Runs[0].Kind = "warmup"
 	complete := true
 	raw.Runs[0].Resources = &Qwen38VulkanRunResources{TransfersComplete: &complete}
 	receipt, err := BuildQwen38VulkanDecodeReceipt(raw)
 	if err != nil {
 		t.Fatalf("legacy BuildQwen38VulkanDecodeReceipt() error = %v", err)
 	}
-	if receipt.Schema != Qwen38VulkanDecodeReceiptSchema || receipt.ResourceScope != "" || receipt.ReportedRuns != 0 || receipt.TransfersComplete != nil || receipt.Runs[0].Resources != nil {
+	if receipt.Schema != Qwen38VulkanDecodeReceiptSchema || receipt.ResourceScope != "" || receipt.ReportedRuns != 0 || receipt.TransfersComplete != nil || receipt.Runs[0].Kind != "" || receipt.Runs[0].Resources != nil {
 		t.Fatalf("v2 receipt acquired v3 fields: %+v", receipt)
 	}
 }
@@ -480,6 +484,7 @@ func validQwen38VulkanV3RawDecodeResult(reportedRuns int) Qwen38VulkanRawDecodeR
 		complete := true
 		run := baseRun
 		run.Repetition = i + 1
+		run.Kind = Qwen38VulkanRunKindMeasured
 		run.OutputTokenIDs = slices.Clone(baseRun.OutputTokenIDs)
 		run.Resources = &Qwen38VulkanRunResources{
 			PeakProcessMemoryBytes: uint64(100 + i),
