@@ -21,9 +21,11 @@ import (
 const (
 	MTPComparisonSchema           = "fak.macbench.mtp-comparison.v1"
 	MTPComparisonRawSamplesSchema = "fak.macbench.mtp-comparison.raw-samples.v1"
+	MTPComparisonSpecType         = "mtp-sidecar"
 	MinimumMTPComparisonSamples   = 20
 	MinMTPSustainedDecodeTokS     = 14.5
 	MinMTPAcceptanceRate          = 0.75
+	MinMTPBaselineSpeedup         = 2.0
 )
 
 // MTPComparisonPacket records a 4-way comparative speculative decode benchmark packet.
@@ -39,9 +41,17 @@ type MTPComparisonPacket struct {
 	ContextTokens     int                     `json:"context_tokens"`
 	OutputTokens      int                     `json:"output_tokens"`
 	SpeculativeConfig MTPSpeculativeConfig    `json:"speculative_config"`
+	Baseline          MTPComparisonBaseline   `json:"baseline"`
 	QualityPolicy     ComparisonQualityPolicy `json:"quality_policy"`
 	Arms              []MTPComparisonArm      `json:"arms"`
 	Summary           MTPSummary              `json:"summary"`
+}
+
+// MTPComparisonBaseline binds the speedup claim to a measured control arm.
+type MTPComparisonBaseline struct {
+	ArmName             string  `json:"arm_name"`
+	RunID               string  `json:"run_id"`
+	EffectiveDecodeTokS float64 `json:"effective_decode_tok_s"`
 }
 
 // MTPComparisonRawSamplesFile represents the standalone raw telemetry artifact for an MTP comparison arm.
@@ -148,8 +158,24 @@ type MTPSummary struct {
 	Verified                bool    `json:"verified"`
 }
 
-// MTPRunnerOptions specifies parameters for driving an MTP comparison run.
-type MTPRunnerOptions struct {
+// DefaultMTPArmTimeout is the safe default execution deadline for each comparator arm.
+const DefaultMTPArmTimeout = 2 * time.Minute
+
+var canonicalMTPArms = []string{
+	"fak-native",
+	"ax-engine",
+	"mtplx",
+	"llama.cpp",
+}
+
+const (
+	mtpEvidenceObserved = "observed"
+	mtpEvidenceTest     = "test"
+)
+
+// MTPArmRequest defines the immutable execution request passed to an adapter.
+type MTPArmRequest struct {
+	ArmName           string                  `json:"arm_name"`
 	CampaignID        string                  `json:"campaign_id"`
 	HostID            string                  `json:"host_id"`
 	Model             ComparisonModel         `json:"model"`
@@ -160,8 +186,32 @@ type MTPRunnerOptions struct {
 	OutputTokens      int                     `json:"output_tokens"`
 	SpeculativeConfig MTPSpeculativeConfig    `json:"speculative_config"`
 	QualityPolicy     ComparisonQualityPolicy `json:"quality_policy"`
+	ArmTimeout        time.Duration           `json:"arm_timeout"`
 	HTTPClient        *http.Client            `json:"-"`
-	Now               func() time.Time        `json:"-"`
+}
+
+// MTPComparisonAdapter executes empirical measurement for one comparator arm.
+// Adapters must return promptly when ctx is done. Run bounds its wait, but Go
+// cannot forcibly terminate an adapter that ignores cancellation.
+type MTPComparisonAdapter func(ctx context.Context, req MTPArmRequest) (MTPComparisonArm, error)
+
+// MTPRunnerOptions specifies parameters for driving an MTP comparison run.
+type MTPRunnerOptions struct {
+	CampaignID        string                          `json:"campaign_id"`
+	HostID            string                          `json:"host_id"`
+	Model             ComparisonModel                 `json:"model"`
+	Hardware          ComparisonHardware              `json:"hardware"`
+	OS                ComparisonOS                    `json:"os"`
+	PromptSet         ComparisonPromptSet             `json:"prompt_set"`
+	ContextTokens     int                             `json:"context_tokens"`
+	OutputTokens      int                             `json:"output_tokens"`
+	SpeculativeConfig MTPSpeculativeConfig            `json:"speculative_config"`
+	QualityPolicy     ComparisonQualityPolicy         `json:"quality_policy"`
+	ArmTimeout        time.Duration                   `json:"arm_timeout,omitempty"`
+	HTTPClient        *http.Client                    `json:"-"`
+	Now               func() time.Time                `json:"-"`
+	Adapters          map[string]MTPComparisonAdapter `json:"-"`
+	evidenceKind      string
 }
 
 // MTPRunner coordinates execution and reporting of 4-way MTP benchmarks.
@@ -169,21 +219,384 @@ type MTPRunner struct {
 	opts MTPRunnerOptions
 }
 
-// NewMTPRunner constructs a benchmark runner harness bound to the given options.
+// NewMTPRunner constructs a benchmark runner harness bound to a snapshot of the given options.
 func NewMTPRunner(opts MTPRunnerOptions) *MTPRunner {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &MTPRunner{opts: opts}
+	if opts.ArmTimeout <= 0 {
+		opts.ArmTimeout = DefaultMTPArmTimeout
+	}
+	if opts.evidenceKind == "" {
+		opts.evidenceKind = mtpEvidenceObserved
+	}
+	opts.PromptSet = cloneMTPPromptSet(opts.PromptSet)
+	runner := &MTPRunner{opts: opts}
+	if opts.Adapters != nil {
+		runner.opts.Adapters = make(map[string]MTPComparisonAdapter, len(opts.Adapters))
+		for k, v := range opts.Adapters {
+			runner.opts.Adapters[k] = v
+		}
+	}
+	return runner
 }
 
-// Run executes the comparison evaluation and returns the validated packet.
+func cloneMTPPromptSet(promptSet ComparisonPromptSet) ComparisonPromptSet {
+	promptSet.Prompts = append([]ComparisonPrompt(nil), promptSet.Prompts...)
+	return promptSet
+}
+
+func validateMTPRunnerEnvelope(opts MTPRunnerOptions) error {
+	chk := func(cond bool, msg string) error {
+		if !cond {
+			return fmt.Errorf("mtp runner envelope invalid: %s", msg)
+		}
+		return nil
+	}
+	for _, check := range []struct {
+		cond bool
+		msg  string
+	}{
+		{strings.TrimSpace(opts.CampaignID) != "", "campaign_id is required"},
+		{validSHA256(opts.HostID), "host_id must be a SHA-256 host identity"},
+		{strings.TrimSpace(opts.Model.Family) != "", "model.family is required"},
+		{strings.TrimSpace(opts.Model.ID) != "", "model.id is required"},
+		{validSHA256(opts.Model.CanonicalWeightsSHA256), "model.canonical_weights_sha256 must be SHA-256"},
+		{strings.TrimSpace(opts.Model.Quant) != "", "model.quant is required"},
+		{strings.TrimSpace(opts.Hardware.Model) != "", "hardware.model is required"},
+		{strings.TrimSpace(opts.Hardware.Chip) != "", "hardware.chip is required"},
+		{opts.Hardware.MemoryBytes > 0, "hardware.memory_bytes must be positive"},
+		{strings.TrimSpace(opts.OS.Name) != "", "os.name is required"},
+		{opts.OS.Version != "" && opts.OS.Build != "", "os.version and build are required"},
+		{opts.ContextTokens == 128 && opts.OutputTokens == 64, "context_tokens must be 128 and output_tokens 64"},
+		{opts.PromptSet.ID != "" && validSHA256(opts.PromptSet.SHA256) && len(opts.PromptSet.Prompts) > 0, "prompt_set invalid"},
+		{opts.SpeculativeConfig.Temperature == 0.0 && opts.SpeculativeConfig.MinAcceptanceRate >= 0.70 && opts.SpeculativeConfig.MinEffectiveDecodeTokS >= 14.0 && validMTPDraftDepth(opts.SpeculativeConfig.DraftDepth), "speculative_config invalid"},
+		{opts.QualityPolicy.ID != "" && opts.QualityPolicy.Version != "" && validSHA256(opts.QualityPolicy.SHA256) && finitePositive(opts.QualityPolicy.MinimumScore), "quality_policy invalid"},
+	} {
+		if err := chk(check.cond, check.msg); err != nil {
+			return err
+		}
+	}
+	for _, prompt := range opts.PromptSet.Prompts {
+		if strings.TrimSpace(prompt.ID) == "" || !validSHA256(prompt.SHA256) {
+			return fmt.Errorf("mtp runner envelope invalid: prompt_set prompt is invalid")
+		}
+		if opts.evidenceKind == mtpEvidenceObserved && !nonPlaceholderSHA256(prompt.SHA256) {
+			return fmt.Errorf("mtp runner envelope invalid: prompt digest must be non-placeholder")
+		}
+	}
+	if opts.evidenceKind != mtpEvidenceObserved && opts.evidenceKind != mtpEvidenceTest {
+		return fmt.Errorf("mtp runner envelope invalid: unsupported evidence kind %q", opts.evidenceKind)
+	}
+	if opts.evidenceKind == mtpEvidenceObserved {
+		for _, check := range []struct {
+			cond bool
+			msg  string
+		}{
+			{strings.EqualFold(strings.TrimSpace(opts.Model.Family), "Qwen3.8"), "model.family must be Qwen3.8"},
+			{strings.EqualFold(strings.TrimSpace(opts.Model.ID), "Qwen3.8-27B") || strings.HasPrefix(strings.ToLower(strings.TrimSpace(opts.Model.ID)), "qwen3.8-27b"), "model.id must identify Qwen3.8-27B"},
+			{strings.EqualFold(strings.TrimSpace(opts.Model.Quant), "Q4_K_M"), "model.quant must be Q4_K_M"},
+			{strings.Contains(opts.Hardware.Model, "Mac"), "hardware.model must identify Mac"},
+			{strings.Contains(opts.Hardware.Chip, "M3 Pro"), "hardware.chip must identify M3 Pro"},
+			{strings.EqualFold(strings.TrimSpace(opts.OS.Name), "macOS"), "os.name must be macOS"},
+			{nonPlaceholderSHA256(opts.HostID), "host_id must be non-placeholder"},
+			{nonPlaceholderSHA256(opts.Model.CanonicalWeightsSHA256), "model canonical weights must be non-placeholder"},
+			{nonPlaceholderSHA256(opts.PromptSet.SHA256), "prompt_set digest must be non-placeholder"},
+			{nonPlaceholderSHA256(opts.QualityPolicy.SHA256), "quality policy digest must be non-placeholder"},
+		} {
+			if err := chk(check.cond, check.msg); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// Run executes the comparison evaluation across all canonical arms through injected adapters.
 func (r *MTPRunner) Run(ctx context.Context) (MTPComparisonPacket, error) {
-	packet := NodeMacOSAMTPComparisonPacket()
-	if err := ValidateMTPComparisonPacket(packet); err != nil {
-		return MTPComparisonPacket{}, fmt.Errorf("mtp runner: invalid comparison packet: %w", err)
+	if ctx == nil {
+		return MTPComparisonPacket{}, fmt.Errorf("mtp runner: context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return MTPComparisonPacket{}, fmt.Errorf("mtp runner: context cancelled: %w", err)
+	}
+
+	// Validate envelope first so invalid configs cannot launch expensive adapter work.
+	if err := validateMTPRunnerEnvelope(r.opts); err != nil {
+		return MTPComparisonPacket{}, err
+	}
+
+	if len(r.opts.Adapters) == 0 {
+		return MTPComparisonPacket{}, fmt.Errorf("mtp runner: no adapters configured (missing canonical arms: %s)", strings.Join(canonicalMTPArms, ", "))
+	}
+
+	// Snapshot adapters map and verify all canonical arms are present and non-nil.
+	adapters := make(map[string]MTPComparisonAdapter, len(r.opts.Adapters))
+	for k, v := range r.opts.Adapters {
+		if v == nil {
+			return MTPComparisonPacket{}, fmt.Errorf("mtp runner: adapter for arm %q is nil", k)
+		}
+		adapters[k] = v
+	}
+
+	for _, armName := range canonicalMTPArms {
+		if adapters[armName] == nil {
+			return MTPComparisonPacket{}, fmt.Errorf("mtp runner: missing adapter for canonical arm %q", armName)
+		}
+	}
+	for armName := range adapters {
+		found := false
+		for _, canon := range canonicalMTPArms {
+			if armName == canon {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return MTPComparisonPacket{}, fmt.Errorf("mtp runner: unexpected non-canonical arm %q", armName)
+		}
+	}
+
+	armTimeout := r.opts.ArmTimeout
+	if armTimeout <= 0 {
+		armTimeout = DefaultMTPArmTimeout
+	}
+
+	reqTemplate := MTPArmRequest{
+		CampaignID:        r.opts.CampaignID,
+		HostID:            r.opts.HostID,
+		Model:             r.opts.Model,
+		Hardware:          r.opts.Hardware,
+		OS:                r.opts.OS,
+		PromptSet:         r.opts.PromptSet,
+		ContextTokens:     r.opts.ContextTokens,
+		OutputTokens:      r.opts.OutputTokens,
+		SpeculativeConfig: r.opts.SpeculativeConfig,
+		QualityPolicy:     r.opts.QualityPolicy,
+		ArmTimeout:        armTimeout,
+		HTTPClient:        r.opts.HTTPClient,
+	}
+
+	arms := make([]MTPComparisonArm, 0, len(canonicalMTPArms))
+	for _, armName := range canonicalMTPArms {
+		if err := ctx.Err(); err != nil {
+			return MTPComparisonPacket{}, fmt.Errorf("mtp runner: context cancelled before executing arm %q: %w", armName, err)
+		}
+
+		adapter := adapters[armName]
+		req := reqTemplate
+		req.ArmName = armName
+		req.PromptSet = cloneMTPPromptSet(reqTemplate.PromptSet)
+
+		armCtx, armCancel := context.WithTimeout(ctx, armTimeout)
+
+		type armResult struct {
+			arm MTPComparisonArm
+			err error
+		}
+		resCh := make(chan armResult, 1)
+		go func() {
+			arm, err := adapter(armCtx, req)
+			resCh <- armResult{arm: arm, err: err}
+		}()
+
+		var res armResult
+		select {
+		case <-armCtx.Done():
+			armCancel()
+			if err := ctx.Err(); err != nil {
+				return MTPComparisonPacket{}, fmt.Errorf("mtp runner: parent context ended while executing arm %q: %w", armName, err)
+			}
+			return MTPComparisonPacket{}, fmt.Errorf("mtp runner: arm %q execution timed out: %w", armName, armCtx.Err())
+		case res = <-resCh:
+			armCancel()
+		}
+
+		if res.err != nil {
+			return MTPComparisonPacket{}, fmt.Errorf("mtp runner: adapter for arm %q failed: %w", armName, res.err)
+		}
+
+		arm := res.arm
+		if arm.Name == "" {
+			arm.Name = armName
+		} else if arm.Name != armName {
+			return MTPComparisonPacket{}, fmt.Errorf("mtp runner: adapter for arm %q returned arm with name %q", armName, arm.Name)
+		}
+
+		evidenceKind := strings.ToLower(strings.TrimSpace(arm.EvidenceKind))
+		if evidenceKind != r.opts.evidenceKind {
+			return MTPComparisonPacket{}, fmt.Errorf("mtp runner: arm %q returned provenance %q, want %q", armName, arm.EvidenceKind, r.opts.evidenceKind)
+		}
+		arm.EvidenceKind = evidenceKind
+		if err := validateMTPArmRequestBinding(arm, req); err != nil {
+			return MTPComparisonPacket{}, fmt.Errorf("mtp runner: arm %q does not match request envelope: %w", armName, err)
+		}
+
+		// Reconcile top-level arm EffectiveDecodeTokS and AcceptanceRate to raw-sample metrics.
+		if len(arm.Samples) >= MinimumMTPComparisonSamples {
+			metrics := SummarizeMTPSamples(arm.Samples)
+			arm.Metrics = metrics
+			arm.EffectiveDecodeTokS = metrics.Decode.ThroughputTokS.P50
+			arm.AcceptanceRate = metrics.Decode.AcceptanceRate.P50
+			arm.RollbackCount = int(metrics.Decode.RollbackCount.P50)
+		}
+
+		arms = append(arms, arm)
+	}
+
+	nowFunc := r.opts.Now
+	if nowFunc == nil {
+		nowFunc = time.Now
+	}
+	genTime := nowFunc().UTC()
+	for _, arm := range arms {
+		if tFin, err := time.Parse(time.RFC3339, arm.FinishedAt); err == nil {
+			if genTime.Before(tFin) {
+				genTime = tFin
+			}
+		}
+	}
+	generatedAt := genTime.Format(time.RFC3339)
+
+	summary, err := DeriveMTPSummary(arms)
+	if err != nil {
+		return MTPComparisonPacket{}, fmt.Errorf("mtp runner: derive summary: %w", err)
+	}
+	if r.opts.evidenceKind != mtpEvidenceObserved {
+		summary.Verified = false
+	}
+	var baseline MTPComparisonBaseline
+	for _, arm := range arms {
+		if arm.Name == "llama.cpp" {
+			baseline = MTPComparisonBaseline{
+				ArmName:             arm.Name,
+				RunID:               arm.RunID,
+				EffectiveDecodeTokS: arm.EffectiveDecodeTokS,
+			}
+			break
+		}
+	}
+
+	packet := MTPComparisonPacket{
+		Schema:            MTPComparisonSchema,
+		GeneratedAt:       generatedAt,
+		CampaignID:        r.opts.CampaignID,
+		HostID:            r.opts.HostID,
+		Model:             r.opts.Model,
+		Hardware:          r.opts.Hardware,
+		OS:                r.opts.OS,
+		PromptSet:         r.opts.PromptSet,
+		ContextTokens:     r.opts.ContextTokens,
+		OutputTokens:      r.opts.OutputTokens,
+		SpeculativeConfig: r.opts.SpeculativeConfig,
+		Baseline:          baseline,
+		QualityPolicy:     r.opts.QualityPolicy,
+		Arms:              arms,
+		Summary:           summary,
+	}
+
+	var validateErr error
+	if r.opts.evidenceKind == mtpEvidenceObserved {
+		validateErr = ValidateMTPComparisonPacket(packet)
+	} else {
+		validateErr = validateMTPComparisonPacket(packet, mtpValidationMode{
+			expectedEvidenceKind: r.opts.evidenceKind,
+			requirePhysical:      false,
+			requireVerified:      false,
+		})
+	}
+	if validateErr != nil {
+		return MTPComparisonPacket{}, fmt.Errorf("mtp runner: invalid comparison packet: %w", validateErr)
 	}
 	return packet, nil
+}
+
+func validateMTPArmRequestBinding(arm MTPComparisonArm, req MTPArmRequest) error {
+	checks := []struct {
+		ok    bool
+		field string
+	}{
+		{arm.HostID == req.HostID, "host_id"},
+		{arm.ModelID == req.Model.ID, "model_id"},
+		{arm.Artifact.CanonicalWeightsSHA256 == req.Model.CanonicalWeightsSHA256, "artifact.canonical_weights_sha256"},
+		{arm.Artifact.Quant == req.Model.Quant, "artifact.quant"},
+		{arm.Artifact.SourceRevision == req.Model.SourceRevision, "artifact.source_revision"},
+		{reflect.DeepEqual(arm.Hardware, req.Hardware), "hardware"},
+		{reflect.DeepEqual(arm.OS, req.OS), "os"},
+		{arm.PromptSetSHA256 == req.PromptSet.SHA256, "prompt_set_sha256"},
+		{arm.ContextTokens == req.ContextTokens, "context_tokens"},
+		{arm.OutputTokens == req.OutputTokens, "output_tokens"},
+		{arm.DraftDepth == req.SpeculativeConfig.DraftDepth, "draft_depth"},
+	}
+	for _, check := range checks {
+		if !check.ok {
+			return fmt.Errorf("%s mismatch", check.field)
+		}
+	}
+	return nil
+}
+
+// DeriveMTPSummary calculates comparative speedup ratios and verification status from distinct canonical arms.
+func DeriveMTPSummary(arms []MTPComparisonArm) (MTPSummary, error) {
+	armMap := make(map[string]*MTPComparisonArm, len(arms))
+	for i := range arms {
+		arm := &arms[i]
+		if armMap[arm.Name] != nil {
+			return MTPSummary{}, fmt.Errorf("derive mtp summary: duplicate arm %q", arm.Name)
+		}
+		armMap[arm.Name] = arm
+	}
+
+	fakArm := armMap["fak-native"]
+	llamaArm := armMap["llama.cpp"]
+	axArm := armMap["ax-engine"]
+	mtplxArm := armMap["mtplx"]
+
+	if fakArm == nil {
+		return MTPSummary{}, fmt.Errorf("derive mtp summary: missing canonical arm %q", "fak-native")
+	}
+	if llamaArm == nil {
+		return MTPSummary{}, fmt.Errorf("derive mtp summary: missing canonical arm %q", "llama.cpp")
+	}
+	if axArm == nil {
+		return MTPSummary{}, fmt.Errorf("derive mtp summary: missing canonical arm %q", "ax-engine")
+	}
+	if mtplxArm == nil {
+		return MTPSummary{}, fmt.Errorf("derive mtp summary: missing canonical arm %q", "mtplx")
+	}
+
+	if fakArm.EffectiveDecodeTokS <= 0 {
+		return MTPSummary{}, fmt.Errorf("derive mtp summary: fak-native effective decode tok/s must be positive, got %.2f", fakArm.EffectiveDecodeTokS)
+	}
+	if llamaArm.EffectiveDecodeTokS <= 0 {
+		return MTPSummary{}, fmt.Errorf("derive mtp summary: llama.cpp effective decode tok/s must be positive, got %.2f", llamaArm.EffectiveDecodeTokS)
+	}
+	if axArm.EffectiveDecodeTokS <= 0 {
+		return MTPSummary{}, fmt.Errorf("derive mtp summary: ax-engine effective decode tok/s must be positive, got %.2f", axArm.EffectiveDecodeTokS)
+	}
+	if mtplxArm.EffectiveDecodeTokS <= 0 {
+		return MTPSummary{}, fmt.Errorf("derive mtp summary: mtplx effective decode tok/s must be positive, got %.2f", mtplxArm.EffectiveDecodeTokS)
+	}
+
+	vsLlama := math.Round((fakArm.EffectiveDecodeTokS/llamaArm.EffectiveDecodeTokS)*100) / 100
+	vsAx := math.Round((fakArm.EffectiveDecodeTokS/axArm.EffectiveDecodeTokS)*100) / 100
+	vsMtplx := math.Round((fakArm.EffectiveDecodeTokS/mtplxArm.EffectiveDecodeTokS)*100) / 100
+
+	verified := fakArm.Engine == "fak-native" &&
+		fakArm.Runtime == "inkernel" &&
+		fakArm.EffectiveDecodeTokS >= MinMTPSustainedDecodeTokS &&
+		fakArm.AcceptanceRate >= MinMTPAcceptanceRate &&
+		fakArm.FallbackCount == 0 &&
+		fakArm.Fallback == "none"
+
+	return MTPSummary{
+		FakNativeDecodeTokS:     fakArm.EffectiveDecodeTokS,
+		FakNativeAcceptanceRate: fakArm.AcceptanceRate,
+		VsLlamaSpeedupRatio:     vsLlama,
+		VsAxEngineRatio:         vsAx,
+		VsMTPLXRatio:            vsMtplx,
+		Verified:                verified,
+	}, nil
 }
 
 // SummarizeMTPSamples calculates deterministic nearest-rank p50/p95 values for all MTP distributions.
@@ -213,8 +626,22 @@ func SummarizeMTPSamples(samples []MTPComparisonSample) MTPComparisonMetrics {
 	}
 }
 
-// ValidateMTPComparisonPacket validates a 4-way comparative speculative decode packet against fail-closed criteria.
+type mtpValidationMode struct {
+	expectedEvidenceKind string
+	requirePhysical      bool
+	requireVerified      bool
+}
+
+// ValidateMTPComparisonPacket validates observed physical M3 Pro evidence against fail-closed criteria.
 func ValidateMTPComparisonPacket(p MTPComparisonPacket) error {
+	return validateMTPComparisonPacket(p, mtpValidationMode{
+		expectedEvidenceKind: mtpEvidenceObserved,
+		requirePhysical:      true,
+		requireVerified:      true,
+	})
+}
+
+func validateMTPComparisonPacket(p MTPComparisonPacket, mode mtpValidationMode) error {
 	var problems []string
 	require := func(ok bool, field, detail string) {
 		if !ok {
@@ -228,20 +655,28 @@ func ValidateMTPComparisonPacket(p MTPComparisonPacket) error {
 	require(strings.TrimSpace(p.CampaignID) != "", "campaign_id", "is required")
 	require(validSHA256(p.HostID), "host_id", "must be a SHA-256 host identity")
 
-	// Model validation: family Qwen3.8, id Qwen3.8-27B, canonical weights SHA256, quant Q4_K_M
-	require(strings.EqualFold(strings.TrimSpace(p.Model.Family), "Qwen3.8"), "model.family", "must be exactly Qwen3.8")
-	modelID := strings.ToLower(strings.TrimSpace(p.Model.ID))
-	require(modelID == "qwen3.8-27b" || strings.HasPrefix(modelID, "qwen3.8-27b"), "model.id", "must identify Qwen3.8-27B")
+	require(strings.TrimSpace(p.Model.Family) != "", "model.family", "is required")
+	require(strings.TrimSpace(p.Model.ID) != "", "model.id", "is required")
 	require(validSHA256(p.Model.CanonicalWeightsSHA256), "model.canonical_weights_sha256", "must be a valid SHA-256")
-	require(strings.EqualFold(strings.TrimSpace(p.Model.Quant), "Q4_K_M"), "model.quant", "must be Q4_K_M")
+	require(strings.TrimSpace(p.Model.Quant) != "", "model.quant", "is required")
 
-	// Hardware & OS validation: Apple M3 Pro / Mac15,7, macOS
-	require(strings.TrimSpace(p.Hardware.Model) == "Mac15,7" || strings.Contains(p.Hardware.Model, "Mac"), "hardware.model", "must identify Mac15,7")
-	require(strings.Contains(p.Hardware.Chip, "Apple M3 Pro") || strings.Contains(p.Hardware.Chip, "M3 Pro"), "hardware.chip", "must identify Apple M3 Pro")
+	require(strings.TrimSpace(p.Hardware.Model) != "", "hardware.model", "is required")
+	require(strings.TrimSpace(p.Hardware.Chip) != "", "hardware.chip", "is required")
 	require(p.Hardware.MemoryBytes > 0, "hardware.memory_bytes", "must be positive")
-	require(strings.EqualFold(strings.TrimSpace(p.OS.Name), "macOS"), "os.name", "must be macOS")
+	require(strings.TrimSpace(p.OS.Name) != "", "os.name", "is required")
 	require(strings.TrimSpace(p.OS.Version) != "", "os.version", "is required")
 	require(strings.TrimSpace(p.OS.Build) != "", "os.build", "is required")
+	if mode.requirePhysical {
+		modelID := strings.ToLower(strings.TrimSpace(p.Model.ID))
+		require(strings.EqualFold(strings.TrimSpace(p.Model.Family), "Qwen3.8"), "model.family", "must be exactly Qwen3.8")
+		require(modelID == "qwen3.8-27b" || strings.HasPrefix(modelID, "qwen3.8-27b"), "model.id", "must identify Qwen3.8-27B")
+		require(strings.EqualFold(strings.TrimSpace(p.Model.Quant), "Q4_K_M"), "model.quant", "must be Q4_K_M")
+		require(strings.TrimSpace(p.Hardware.Model) == "Mac15,7" || strings.Contains(p.Hardware.Model, "Mac"), "hardware.model", "must identify Mac15,7")
+		require(strings.Contains(p.Hardware.Chip, "Apple M3 Pro") || strings.Contains(p.Hardware.Chip, "M3 Pro"), "hardware.chip", "must identify Apple M3 Pro")
+		require(strings.EqualFold(strings.TrimSpace(p.OS.Name), "macOS"), "os.name", "must be macOS")
+		require(nonPlaceholderSHA256(p.HostID), "host_id", "must be a non-placeholder SHA-256 host identity")
+		require(nonPlaceholderSHA256(p.Model.CanonicalWeightsSHA256), "model.canonical_weights_sha256", "must be a non-placeholder SHA-256")
+	}
 
 	// Prompt set validation: context 128, output 64
 	require(p.ContextTokens == 128, "context_tokens", "must be 128")
@@ -251,21 +686,32 @@ func ValidateMTPComparisonPacket(p MTPComparisonPacket) error {
 	require(len(p.PromptSet.Prompts) > 0, "prompt_set.prompts", "must bind at least one prompt")
 
 	promptIDs := make(map[string]struct{}, len(p.PromptSet.Prompts))
-	for _, pr := range p.PromptSet.Prompts {
+	for i, pr := range p.PromptSet.Prompts {
+		require(strings.TrimSpace(pr.ID) != "", fmt.Sprintf("prompt_set.prompts[%d].id", i), "is required")
+		require(validSHA256(pr.SHA256), fmt.Sprintf("prompt_set.prompts[%d].sha256", i), "must be a SHA-256 digest")
+		if mode.requirePhysical {
+			require(nonPlaceholderSHA256(pr.SHA256), fmt.Sprintf("prompt_set.prompts[%d].sha256", i), "must be a non-placeholder SHA-256 digest")
+		}
 		promptIDs[pr.ID] = struct{}{}
+	}
+	if mode.requirePhysical {
+		require(nonPlaceholderSHA256(p.PromptSet.SHA256), "prompt_set.sha256", "must be a non-placeholder SHA-256 digest")
 	}
 
 	// Speculative config validation: temperature == 0, min_acceptance_rate >= 0.70, min_effective_decode_tok_s >= 14.0
 	require(p.SpeculativeConfig.Temperature == 0.0, "speculative_config.temperature", "must be 0 (deterministic)")
 	require(p.SpeculativeConfig.MinAcceptanceRate >= 0.70, "speculative_config.min_acceptance_rate", "must be >= 0.70")
 	require(p.SpeculativeConfig.MinEffectiveDecodeTokS >= 14.0, "speculative_config.min_effective_decode_tok_s", "must be >= 14.0")
-	require(p.SpeculativeConfig.DraftDepth >= 1, "speculative_config.draft_depth", "must be >= 1")
+	require(validMTPDraftDepth(p.SpeculativeConfig.DraftDepth), "speculative_config.draft_depth", "must be between 2 and 4")
 
 	// Quality policy validation
 	require(strings.TrimSpace(p.QualityPolicy.ID) != "", "quality_policy.id", "is required")
 	require(strings.TrimSpace(p.QualityPolicy.Version) != "", "quality_policy.version", "is required")
 	require(validSHA256(p.QualityPolicy.SHA256), "quality_policy.sha256", "must be a SHA-256 digest")
 	require(finitePositive(p.QualityPolicy.MinimumScore), "quality_policy.minimum_score", "must be finite and positive")
+	if mode.requirePhysical {
+		require(nonPlaceholderSHA256(p.QualityPolicy.SHA256), "quality_policy.sha256", "must be a non-placeholder SHA-256 digest")
+	}
 
 	// Arms validation: exactly 4 arms: "fak-native", "ax-engine", "mtplx", "llama.cpp"
 	require(len(p.Arms) == 4, "arms", "must contain exactly four arms: fak-native, ax-engine, mtplx, llama.cpp")
@@ -286,9 +732,25 @@ func ValidateMTPComparisonPacket(p MTPComparisonPacket) error {
 		armMap[arm.Name] = arm
 
 		require(wantArms[arm.Name], prefix+".name", "must be one of: fak-native, ax-engine, mtplx, llama.cpp")
-		require(strings.TrimSpace(arm.EvidenceKind) != "", prefix+".evidence_kind", "is required")
+		require(strings.EqualFold(strings.TrimSpace(arm.EvidenceKind), mode.expectedEvidenceKind), prefix+".evidence_kind", "must be "+mode.expectedEvidenceKind)
 		require(strings.TrimSpace(arm.RuntimeRevision) != "", prefix+".runtime_revision", "is required")
-		require(strings.TrimSpace(arm.SpecType) != "", prefix+".spec_type", "is required")
+		require(arm.SpecType == MTPComparisonSpecType, prefix+".spec_type", "must be "+MTPComparisonSpecType)
+		require(arm.HostID == p.HostID, prefix+".host_id", "must match packet host_id")
+		require(arm.ModelID == p.Model.ID, prefix+".model_id", "must match packet model.id")
+		require(reflect.DeepEqual(arm.Hardware, p.Hardware), prefix+".hardware", "must match packet hardware")
+		require(reflect.DeepEqual(arm.OS, p.OS), prefix+".os", "must match packet os")
+		require(arm.PromptSetSHA256 == p.PromptSet.SHA256, prefix+".prompt_set_sha256", "must match packet prompt_set.sha256")
+		require(arm.ContextTokens == p.ContextTokens, prefix+".context_tokens", "must match packet context_tokens")
+		require(arm.OutputTokens == p.OutputTokens, prefix+".output_tokens", "must match packet output_tokens")
+		require(validSHA256(arm.Artifact.SHA256), prefix+".artifact.sha256", "must be a SHA-256 digest")
+		require(arm.Artifact.CanonicalWeightsSHA256 == p.Model.CanonicalWeightsSHA256, prefix+".artifact.canonical_weights_sha256", "must match packet model canonical weights")
+		require(arm.Artifact.Quant == p.Model.Quant, prefix+".artifact.quant", "must match packet model quant")
+		require(arm.Artifact.SourceRevision == p.Model.SourceRevision, prefix+".artifact.source_revision", "must match packet model source revision")
+		require(validSHA256(arm.RawResult.SHA256), prefix+".raw_result.sha256", "must be a SHA-256 digest")
+		if mode.requirePhysical {
+			require(nonPlaceholderSHA256(arm.Artifact.SHA256), prefix+".artifact.sha256", "must be a non-placeholder SHA-256 digest")
+			require(nonPlaceholderSHA256(arm.RawResult.SHA256), prefix+".raw_result.sha256", "must be a non-placeholder SHA-256 digest")
+		}
 
 		startedAt, startedErr := time.Parse(time.RFC3339, arm.StartedAt)
 		finishedAt, finishedErr := time.Parse(time.RFC3339, arm.FinishedAt)
@@ -312,10 +774,13 @@ func ValidateMTPComparisonPacket(p MTPComparisonPacket) error {
 		require(arm.Quality.PolicyVersion == p.QualityPolicy.Version, prefix+".quality.policy_version", "must match quality_policy.version")
 		require(arm.Quality.PolicySHA256 == p.QualityPolicy.SHA256, prefix+".quality.policy_sha256", "must match quality_policy.sha256")
 		require(validSHA256(arm.Quality.ResultSHA256), prefix+".quality.result_sha256", "must be a SHA-256 digest")
+		if mode.requirePhysical {
+			require(nonPlaceholderSHA256(arm.Quality.ResultSHA256), prefix+".quality.result_sha256", "must be a non-placeholder SHA-256 digest")
+		}
 		require(finite(arm.Quality.Score) && arm.Quality.Score >= p.QualityPolicy.MinimumScore, prefix+".quality.score", "must meet quality_policy.minimum_score")
 
-		// Draft depth >= 1, acceptance rate in [0, 1]
-		require(arm.DraftDepth >= 1, prefix+".draft_depth", "must be >= 1")
+		require(validMTPDraftDepth(arm.DraftDepth), prefix+".draft_depth", "must be between 2 and 4")
+		require(arm.DraftDepth == p.SpeculativeConfig.DraftDepth, prefix+".draft_depth", "must match speculative_config.draft_depth")
 		require(finite(arm.AcceptanceRate) && arm.AcceptanceRate >= 0.0 && arm.AcceptanceRate <= 1.0, prefix+".acceptance_rate", "must be in [0, 1]")
 
 		// Effective decode tok/s > 0
@@ -327,6 +792,10 @@ func ValidateMTPComparisonPacket(p MTPComparisonPacket) error {
 
 		validateMTPSamples(prefix, arm, p, promptIDs, require)
 		validateMTPMetrics(prefix, arm.Metrics, arm.Samples, require)
+		derived := SummarizeMTPSamples(arm.Samples)
+		require(nearlyEqual(arm.EffectiveDecodeTokS, derived.Decode.ThroughputTokS.P50), prefix+".effective_decode_tok_s", "must equal the p50 derived from raw samples")
+		require(nearlyEqual(arm.AcceptanceRate, derived.Decode.AcceptanceRate.P50), prefix+".acceptance_rate", "must equal the p50 derived from raw samples")
+		require(nearlyEqual(float64(arm.RollbackCount), derived.Decode.RollbackCount.P50), prefix+".rollback_count", "must equal the p50 derived from raw samples")
 	}
 
 	for name := range wantArms {
@@ -348,6 +817,29 @@ func ValidateMTPComparisonPacket(p MTPComparisonPacket) error {
 			fmt.Sprintf("must achieve acceptance rate >= %.2f (got %.3f)", MinMTPAcceptanceRate, fakArm.AcceptanceRate))
 		require(fakArm.FallbackCount == 0, "fak-native.fallback_count", "must be 0")
 		require(fakArm.Fallback == "none", "fak-native.fallback", "must be 'none'")
+	}
+
+	baselineArm := armMap[p.Baseline.ArmName]
+	require(strings.TrimSpace(p.Baseline.ArmName) != "", "baseline.arm_name", "is required")
+	require(baselineArm != nil, "baseline.arm_name", "must name an arm in the packet")
+	require(p.Baseline.ArmName != "fak-native", "baseline.arm_name", "must name a non-candidate control arm")
+	require(strings.TrimSpace(p.Baseline.RunID) != "", "baseline.run_id", "is required")
+	require(finitePositive(p.Baseline.EffectiveDecodeTokS), "baseline.effective_decode_tok_s", "must be positive")
+	if baselineArm != nil {
+		require(p.Baseline.RunID == baselineArm.RunID, "baseline.run_id", "must match the bound arm run_id")
+		require(nearlyEqual(p.Baseline.EffectiveDecodeTokS, baselineArm.EffectiveDecodeTokS), "baseline.effective_decode_tok_s", "must match the bound arm measurement")
+	}
+	if mode.requirePhysical && fakArm != nil && finitePositive(p.Baseline.EffectiveDecodeTokS) {
+		require(fakArm.EffectiveDecodeTokS >= MinMTPBaselineSpeedup*p.Baseline.EffectiveDecodeTokS,
+			"fak-native.effective_decode_tok_s",
+			fmt.Sprintf("must be >= %.3fx compatible baseline (got %.3fx)", MinMTPBaselineSpeedup, fakArm.EffectiveDecodeTokS/p.Baseline.EffectiveDecodeTokS))
+	}
+	if mode.requirePhysical && fakArm != nil {
+		for name, arm := range armMap {
+			if name != "fak-native" {
+				require(fakArm.EffectiveDecodeTokS > arm.EffectiveDecodeTokS, "fak-native.rank", "must rank first by effective decode tok/s")
+			}
+		}
 	}
 
 	// Validates summary ratios:
@@ -374,7 +866,15 @@ func ValidateMTPComparisonPacket(p MTPComparisonPacket) error {
 			fmt.Sprintf("ratio %.2f does not match expected %.2f (fak %.2f / mtplx %.2f)",
 				p.Summary.VsMTPLXRatio, expVsMtplx, fakArm.EffectiveDecodeTokS, mtplxArm.EffectiveDecodeTokS))
 
-		require(p.Summary.Verified, "summary.verified", "must be true")
+		if mode.requireVerified {
+			require(p.Summary.Verified, "summary.verified", "must be true")
+		} else {
+			require(!p.Summary.Verified, "summary.verified", "must be false outside observed physical evidence")
+		}
+	}
+	if fakArm != nil {
+		require(nearlyEqual(p.Summary.FakNativeDecodeTokS, fakArm.EffectiveDecodeTokS), "summary.fak_native_decode_tok_s", "must match the fak-native arm measurement")
+		require(nearlyEqual(p.Summary.FakNativeAcceptanceRate, fakArm.AcceptanceRate), "summary.fak_native_acceptance_rate", "must match the fak-native arm measurement")
 	}
 
 	if len(problems) > 0 {
@@ -408,12 +908,21 @@ func validateMTPSamples(prefix string, arm *MTPComparisonArm, packet MTPComparis
 		require(sample.Engine == arm.Engine, field+".engine", "must match arm engine")
 		require(sample.Runtime == arm.Runtime, field+".runtime", "must match arm runtime")
 		require(sample.RuntimeRevision == arm.RuntimeRevision, field+".runtime_revision", "must match arm runtime_revision")
-		require(sample.DraftDepth >= 1, field+".draft_depth", "must be >= 1")
-		require(sample.DraftProposed >= 0, field+".draft_proposed", "must be non-negative")
+		require(sample.ArtifactSHA256 == arm.Artifact.SHA256, field+".artifact_sha256", "must match arm artifact sha256")
+		require(validMTPDraftDepth(sample.DraftDepth), field+".draft_depth", "must be between 2 and 4")
+		require(sample.DraftDepth == arm.DraftDepth && sample.DraftDepth == packet.SpeculativeConfig.DraftDepth, field+".draft_depth", "must match arm and speculative_config draft_depth")
+		require(sample.DraftProposed > 0, field+".draft_proposed", "must be positive")
 		require(sample.DraftAccepted >= 0, field+".draft_accepted", "must be non-negative")
 		require(sample.DraftAccepted <= sample.DraftProposed, field+".draft_accepted", "cannot exceed draft_proposed")
+		require(sample.DraftAccepted <= sample.OutputTokens, field+".draft_accepted", "cannot exceed generated output tokens")
+		require(sample.DraftProposed <= sample.DraftDepth*sample.OutputTokens, field+".draft_proposed", "cannot exceed draft_depth * generated output tokens")
 		require(finite(sample.AcceptanceRate) && sample.AcceptanceRate >= 0 && sample.AcceptanceRate <= 1.0, field+".acceptance_rate", "must be in [0, 1]")
+		if sample.DraftProposed > 0 {
+			derivedAcceptance := float64(sample.DraftAccepted) / float64(sample.DraftProposed)
+			require(nearlyEqual(sample.AcceptanceRate, derivedAcceptance), field+".acceptance_rate", "must equal draft_accepted / draft_proposed")
+		}
 		require(sample.RollbackCount >= 0, field+".rollback_count", "must be non-negative")
+		require(sample.RollbackCount <= sample.DraftProposed-sample.DraftAccepted, field+".rollback_count", "cannot exceed rejected draft proposals")
 		require(sample.Fallback == arm.Fallback, field+".fallback", "must match arm fallback")
 		require(sample.FallbackCount == arm.FallbackCount, field+".fallback_count", "must match arm fallback_count")
 		require(finitePositive(sample.TTFTMS), field+".ttft_ms", "must be positive")
@@ -454,6 +963,23 @@ func validateMTPSamples(prefix string, arm *MTPComparisonArm, packet MTPComparis
 	}
 }
 
+func validMTPDraftDepth(depth int) bool {
+	return depth >= 2 && depth <= 4
+}
+
+func nonPlaceholderSHA256(digest string) bool {
+	digest = strings.ToLower(strings.TrimSpace(digest))
+	if !validSHA256(digest) {
+		return false
+	}
+	for _, period := range []int{1, 2, 4, 8, 16, 32} {
+		if strings.Repeat(digest[:period], len(digest)/period) == digest {
+			return false
+		}
+	}
+	return true
+}
+
 func validateMTPMetrics(prefix string, got MTPComparisonMetrics, samples []MTPComparisonSample, require func(bool, string, string)) {
 	want := SummarizeMTPSamples(samples)
 	checks := []struct {
@@ -471,7 +997,7 @@ func validateMTPMetrics(prefix string, got MTPComparisonMetrics, samples []MTPCo
 
 	for _, check := range checks {
 		var valid bool
-		if check.field == "decode.rollback_count" {
+		if check.field == "decode.rollback_count" || check.field == "decode.acceptance_rate" {
 			valid = finite(check.got.P50) && check.got.P50 >= 0 && finite(check.got.P95) && check.got.P95 >= check.got.P50
 		} else {
 			valid = finitePositive(check.got.P50) && finitePositive(check.got.P95) && check.got.P95 >= check.got.P50
@@ -481,8 +1007,9 @@ func validateMTPMetrics(prefix string, got MTPComparisonMetrics, samples []MTPCo
 	}
 }
 
-// NodeMacOSAMTPComparisonPacket produces the on-device empirical measurement packet
+// NodeMacOSAMTPComparisonPacket produces the fixture comparison benchmark packet
 // for Apple M3 Pro (node-macos-a) benchmarking Qwen3.8-27B with MTP speculative draft sidecar.
+// It is quarantined to fixture provenance so synthesized samples cannot be published as observed.
 func NodeMacOSAMTPComparisonPacket() MTPComparisonPacket {
 	hardware := ComparisonHardware{
 		Model:       "Mac15,7",
@@ -627,7 +1154,7 @@ func NodeMacOSAMTPComparisonPacket() MTPComparisonPacket {
 	for _, d := range defs {
 		arm := MTPComparisonArm{
 			Name:            d.name,
-			EvidenceKind:    "observed",
+			EvidenceKind:    "fixture",
 			RunID:           fmt.Sprintf("node-macos-a-qwen38-%s-mtp-20260908", d.name),
 			StartedAt:       "2026-09-08T15:00:00Z",
 			FinishedAt:      "2026-09-08T16:00:00Z",
@@ -742,7 +1269,7 @@ func NodeMacOSAMTPComparisonPacket() MTPComparisonPacket {
 		VsLlamaSpeedupRatio:     1.25, // 15.22 / 12.14 = 1.2537...
 		VsAxEngineRatio:         1.02, // 15.22 / 14.85 = 1.0249...
 		VsMTPLXRatio:            1.02, // 15.22 / 14.98 = 1.0160...
-		Verified:                true,
+		Verified:                false,
 	}
 
 	return MTPComparisonPacket{
@@ -757,9 +1284,14 @@ func NodeMacOSAMTPComparisonPacket() MTPComparisonPacket {
 		ContextTokens:     contextTokens,
 		OutputTokens:      outputTokens,
 		SpeculativeConfig: speculativeConfig,
-		QualityPolicy:     qualityPolicy,
-		Arms:              arms,
-		Summary:           summary,
+		Baseline: MTPComparisonBaseline{
+			ArmName:             "llama.cpp",
+			RunID:               "node-macos-a-qwen38-llama.cpp-mtp-20260908",
+			EffectiveDecodeTokS: 12.14,
+		},
+		QualityPolicy: qualityPolicy,
+		Arms:          arms,
+		Summary:       summary,
 	}
 }
 
@@ -819,6 +1351,18 @@ func VerifyMTPComparisonEvidenceFiles(packet MTPComparisonPacket, packetPath str
 		if qualityFile != wantQuality {
 			return fmt.Errorf("arm %s quality: content does not match packet quality result", arm.Name)
 		}
+	}
+	return nil
+}
+
+// ValidateMTPComparisonEvidence composes strict packet validation with all
+// digest-bound raw and quality evidence-file checks.
+func ValidateMTPComparisonEvidence(packet MTPComparisonPacket, packetPath string) error {
+	if err := ValidateMTPComparisonPacket(packet); err != nil {
+		return err
+	}
+	if err := VerifyMTPComparisonEvidenceFiles(packet, packetPath); err != nil {
+		return fmt.Errorf("mtp comparison evidence invalid: %w", err)
 	}
 	return nil
 }
