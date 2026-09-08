@@ -100,6 +100,19 @@ type Run struct {
 	HostEnvironment      *compute.VulkanHostEnvironment
 }
 
+type selectedTokenLogprobRunEvidence struct {
+	generatedTokenIDs []int
+	steps             []Step
+	logprobs          []float64
+}
+
+type selectedTokenLogprobEvidence struct {
+	promptTokenIDs []int
+	generatedLimit int
+	repetitions    int
+	runs           []selectedTokenLogprobRunEvidence
+}
+
 // BackendObservation describes the backend that was actually resolved. It is
 // execution metadata, not device provenance.
 type BackendObservation struct {
@@ -133,6 +146,91 @@ type Execution struct {
 	FiniteLogits          bool
 	CPUModelParity        *bool
 	Runs                  []Run
+
+	selectedTokenLogprobs *selectedTokenLogprobEvidence
+}
+
+// BindQwen38VulkanSelectedTokenLogprobsV3 binds runner-owned selected-token
+// logprobs to an otherwise caller-populated raw Vulkan result. The binding is
+// only an integrity-preserving data transfer: it grants no physical,
+// comparator, candidate/reference-pair, or performance authority.
+//
+// Every error returns a zero raw result. The compute receipt builder owns the
+// serialized digest and must derive it from the bound observations.
+func BindQwen38VulkanSelectedTokenLogprobsV3(execution Execution, raw compute.Qwen38VulkanRawDecodeResult) (compute.Qwen38VulkanRawDecodeResult, error) {
+	fail := func(format string, args ...any) (compute.Qwen38VulkanRawDecodeResult, error) {
+		return compute.Qwen38VulkanRawDecodeResult{}, fmt.Errorf("raw decode selected-token logprobs: "+format, args...)
+	}
+	evidence := execution.selectedTokenLogprobs
+	if evidence == nil {
+		return fail("runner evidence is unavailable")
+	}
+	if !slices.Equal(execution.PromptTokenIDs, evidence.promptTokenIDs) ||
+		execution.GeneratedLimit != evidence.generatedLimit {
+		return fail("execution request fields do not match runner evidence")
+	}
+	if !equalInt32TokenIDs(raw.PromptTokenIDs, evidence.promptTokenIDs) ||
+		raw.GeneratedTokenLimit != evidence.generatedLimit {
+		return fail("raw request fields do not match runner evidence")
+	}
+	if evidence.repetitions < 1 || len(evidence.runs) != evidence.repetitions ||
+		len(execution.Runs) != evidence.repetitions || len(raw.Runs) != evidence.repetitions {
+		return fail("repetition count does not match runner evidence")
+	}
+	if raw.ReportedRuns != 0 && raw.ReportedRuns != evidence.repetitions {
+		return fail("reported repetition count does not match runner evidence")
+	}
+
+	boundRuns := slices.Clone(raw.Runs)
+	for i, sealedRun := range evidence.runs {
+		publicRun := execution.Runs[i]
+		rawRun := raw.Runs[i]
+		if len(sealedRun.generatedTokenIDs) == 0 || len(sealedRun.logprobs) != len(sealedRun.generatedTokenIDs) {
+			return fail("sealed repetition %d is incomplete", i+1)
+		}
+		if !slices.Equal(publicRun.GeneratedTokens, sealedRun.generatedTokenIDs) ||
+			!slices.Equal(publicRun.Steps, sealedRun.steps) ||
+			len(publicRun.Steps) != len(sealedRun.generatedTokenIDs) ||
+			publicRun.PrefillOutputID != sealedRun.generatedTokenIDs[0] ||
+			!slices.Equal(publicRun.StepTokens, sealedRun.generatedTokenIDs[1:]) {
+			return fail("public repetition %d does not match runner evidence", i+1)
+		}
+		for stepIndex, step := range publicRun.Steps {
+			if step.Step != stepIndex || step.TokenID != sealedRun.generatedTokenIDs[stepIndex] {
+				return fail("public repetition %d step %d does not match runner evidence", i+1, stepIndex)
+			}
+		}
+		if rawRun.Repetition != i+1 || rawRun.GeneratedTokenLimit != evidence.generatedLimit ||
+			rawRun.ActualGeneratedTokens != len(sealedRun.generatedTokenIDs) ||
+			!equalInt32TokenIDs(rawRun.OutputTokenIDs, sealedRun.generatedTokenIDs) ||
+			!equalInt32TokenIDs(raw.OutputTokenIDs, sealedRun.generatedTokenIDs) {
+			return fail("raw repetition %d does not match runner evidence", i+1)
+		}
+		if len(rawRun.SelectedTokenLogprobs) != 0 || rawRun.SelectedTokenLogprobsSHA256 != "" {
+			return fail("raw repetition %d already contains selected-token evidence", i+1)
+		}
+		for stepIndex, logprob := range sealedRun.logprobs {
+			if math.IsNaN(logprob) || math.IsInf(logprob, 0) || logprob > 0 {
+				return fail("sealed repetition %d logprob %d is invalid", i+1, stepIndex)
+			}
+		}
+		boundRuns[i].SelectedTokenLogprobs = slices.Clone(sealedRun.logprobs)
+		boundRuns[i].SelectedTokenLogprobsSHA256 = ""
+	}
+	raw.Runs = boundRuns
+	return raw, nil
+}
+
+func equalInt32TokenIDs(got []int32, want []int) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if int(got[i]) != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 type session interface {
@@ -532,13 +630,18 @@ func executeLoaded(ctx context.Context, req Request, m loadedModel, be compute.B
 		PromptTokenIDs: slices.Clone(req.PromptTokenIDs), ContextLimit: req.ContextLimit,
 		GeneratedLimit: req.GeneratedTokenLimit, IgnoreEOS: req.IgnoreEOS, FiniteLogits: true,
 	}
+	evidence := &selectedTokenLogprobEvidence{
+		promptTokenIDs: slices.Clone(req.PromptTokenIDs),
+		generatedLimit: req.GeneratedTokenLimit,
+		repetitions:    req.Repetitions,
+	}
 	var verifyErr error
 	for rep := 0; rep < req.Repetitions; rep++ {
 		before, observed, err := compute.CaptureBackendExecutionSnapshot(be)
 		if err != nil {
 			return Execution{}, fmt.Errorf("raw decode: capture backend observation before run %d: %w", rep+1, err)
 		}
-		run, err := executeRun(req, m, be, now, since)
+		run, selectedTokenLogprobs, err := executeRun(req, m, be, now, since)
 		if err != nil {
 			return Execution{}, err
 		}
@@ -563,11 +666,17 @@ func executeLoaded(ctx context.Context, req Request, m loadedModel, be compute.B
 			}
 		}
 		exec.Runs = append(exec.Runs, run)
+		evidence.runs = append(evidence.runs, selectedTokenLogprobRunEvidence{
+			generatedTokenIDs: slices.Clone(run.GeneratedTokens),
+			steps:             slices.Clone(run.Steps),
+			logprobs:          slices.Clone(selectedTokenLogprobs),
+		})
 		if run.CPUVerification != nil && !run.CPUVerification.Passed {
 			verifyErr = errors.New("raw decode CPU verification divergence: argmax divergence between device and CPU reference")
 			break
 		}
 	}
+	exec.selectedTokenLogprobs = evidence
 	if req.VerifyCPU {
 		parity := true
 		for _, run := range exec.Runs {
@@ -640,21 +749,22 @@ func rawDecodeBackendPCIIdentity(driver string) (string, string, bool) {
 	return vendor, device, ok
 }
 
-func executeRun(req Request, m loadedModel, be compute.Backend, now func() time.Time, since func(time.Time) time.Duration) (Run, error) {
+func executeRun(req Request, m loadedModel, be compute.Backend, now func() time.Time, since func(time.Time) time.Duration) (Run, []float64, error) {
 	start := now()
 	s, err := m.NewCandidateSession(be, req)
 	if err != nil {
-		return Run{}, fmt.Errorf("raw decode: create candidate session: %w", err)
+		return Run{}, nil, fmt.Errorf("raw decode: create candidate session: %w", err)
 	}
 	setupDone := now()
 	logits := s.Prefill(req.PromptTokenIDs)
 	prefillDone := now()
-	if !allFinite(logits) {
+	token, top1, top2, selectedTokenLogprob, err := greedySelection(logits)
+	if err != nil {
 		s.Close()
-		return Run{}, errors.New("raw decode: prefill produced non-finite logits")
+		return Run{}, nil, errors.New("raw decode: prefill produced non-finite logits")
 	}
-	token, top1, top2 := logitTop2(logits)
 	run := Run{PrefillOutputID: token, GeneratedTokens: []int{token}, Steps: []Step{{Step: 0, TokenID: token, Top1: top1, Top2: top2, Margin: top1 - top2}}}
+	selectedTokenLogprobs := []float64{selectedTokenLogprob}
 	var candidateLogits [][]float32
 	if req.VerifyCPU {
 		candidateLogits = append(candidateLogits, slices.Clone(logits))
@@ -664,14 +774,15 @@ func executeRun(req Request, m loadedModel, be compute.Backend, now func() time.
 	previous := token
 	for step := 1; !run.EOSStopped && step < req.GeneratedTokenLimit && len(req.PromptTokenIDs)+len(run.GeneratedTokens) < req.ContextLimit; step++ {
 		logits = s.Step(previous)
-		if !allFinite(logits) {
+		token, top1, top2, selectedTokenLogprob, err = greedySelection(logits)
+		if err != nil {
 			s.Close()
-			return Run{}, fmt.Errorf("raw decode: step %d produced non-finite logits", step)
+			return Run{}, nil, fmt.Errorf("raw decode: step %d produced non-finite logits", step)
 		}
-		token, top1, top2 = logitTop2(logits)
 		run.StepTokens = append(run.StepTokens, token)
 		run.GeneratedTokens = append(run.GeneratedTokens, token)
 		run.Steps = append(run.Steps, Step{Step: step, TokenID: token, Top1: top1, Top2: top2, Margin: top1 - top2})
+		selectedTokenLogprobs = append(selectedTokenLogprobs, selectedTokenLogprob)
 		if req.VerifyCPU {
 			candidateLogits = append(candidateLogits, slices.Clone(logits))
 		}
@@ -691,11 +802,11 @@ func executeRun(req Request, m loadedModel, be compute.Backend, now func() time.
 		verification, err := verifyCPU(req, m.NewCPUSession(req), run, candidateLogits)
 		run.CPUVerifyDuration = since(verifyStart)
 		if err != nil {
-			return Run{}, err
+			return Run{}, nil, err
 		}
 		run.CPUVerification = &verification
 	}
-	return run, nil
+	return run, selectedTokenLogprobs, nil
 }
 
 func verifyCPU(req Request, s session, run Run, candidate [][]float32) (CPUVerification, error) {
@@ -747,6 +858,33 @@ func logitTop2(values []float32) (int, float32, float32) {
 		}
 	}
 	return index, top1, top2
+}
+
+func greedySelection(values []float32) (int, float32, float32, float64, error) {
+	if len(values) == 0 {
+		return 0, 0, 0, 0, errors.New("empty logits")
+	}
+	top1, top2, index := -float32(math.MaxFloat32), -float32(math.MaxFloat32), 0
+	for i, value := range values {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			return 0, 0, 0, 0, errors.New("non-finite logits")
+		}
+		if value > top1 {
+			top2, top1, index = top1, value, i
+		} else if value > top2 {
+			top2 = value
+		}
+	}
+	maximum := float64(top1)
+	var shiftedExpSum float64
+	for _, value := range values {
+		shiftedExpSum += math.Exp(float64(value) - maximum)
+	}
+	selectedTokenLogprob := -math.Log(shiftedExpSum)
+	if selectedTokenLogprob == 0 {
+		selectedTokenLogprob = 0
+	}
+	return index, top1, top2, selectedTokenLogprob, nil
 }
 
 func cosine(a, b []float32) float64 {

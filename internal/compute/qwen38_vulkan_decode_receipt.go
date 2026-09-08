@@ -7,17 +7,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
 )
 
 const (
-	Qwen38VulkanDecodePacketSchema        = "fak/qwen38-vulkan-decode-packet/v1"
-	Qwen38VulkanDecodeReceiptSchema       = "fak/qwen38-vulkan-decode-receipt/v2"
-	Qwen38VulkanDecodeReceiptV3Schema     = "fak/qwen38-vulkan-decode-receipt/v3"
-	Qwen38VulkanResourceScopeReportedRuns = "reported_runs"
-	Qwen38VulkanRunKindMeasured           = "measured"
+	Qwen38VulkanDecodePacketSchema          = "fak/qwen38-vulkan-decode-packet/v1"
+	Qwen38VulkanDecodeReceiptSchema         = "fak/qwen38-vulkan-decode-receipt/v2"
+	Qwen38VulkanDecodeReceiptV3Schema       = "fak/qwen38-vulkan-decode-receipt/v3"
+	Qwen38VulkanResourceScopeReportedRuns   = "reported_runs"
+	Qwen38VulkanRunKindMeasured             = "measured"
+	qwen38VulkanSelectedTokenLogprobsDomain = "fak/qwen38-vulkan-selected-token-logprobs/v1\x00"
 
 	Qwen38VulkanDecodeGGUFSHA256 = "7E78DA5D7E3AE28D178121F58646953305F3E5BD3CB46F4A75584E8B6C6FE169"
 	Qwen38VulkanDecodeBackend    = "vulkan"
@@ -175,6 +177,8 @@ type Qwen38VulkanDecodeRun struct {
 	IgnoreEOS                   *bool                     `json:"ignore_eos"`
 	EOSStopped                  *bool                     `json:"eos_stopped"`
 	OutputTokenIDs              []int32                   `json:"output_token_ids"`
+	SelectedTokenLogprobs       []float64                 `json:"selected_token_logprobs,omitempty"`
+	SelectedTokenLogprobsSHA256 string                    `json:"selected_token_logprobs_sha256,omitempty"`
 	SessionSetupNanoseconds     uint64                    `json:"session_setup_nanoseconds"`
 	PrefillNanoseconds          uint64                    `json:"prefill_nanoseconds"`
 	FirstSampleNanoseconds      uint64                    `json:"first_sample_nanoseconds"`
@@ -263,6 +267,24 @@ func BuildQwen38VulkanDecodeReceiptV3(raw Qwen38VulkanRawDecodeResult) (Qwen38Vu
 	if raw.PeakProcessMemoryBytes != nil || raw.PeakDeviceMemoryBytes != nil || raw.Counters != nil {
 		return Qwen38VulkanDecodeReceipt{}, errors.New("raw decode result is not a canonical v3 physical receipt: resource aggregates must be derived from reported runs")
 	}
+	raw.Runs = slices.Clone(raw.Runs)
+	for i := range raw.Runs {
+		if raw.Runs[i].SelectedTokenLogprobsSHA256 != "" {
+			return Qwen38VulkanDecodeReceipt{}, fmt.Errorf("raw decode result is not a canonical v3 physical receipt: repetition %d selected-token logprob digest must be derived", i+1)
+		}
+		logprobs := slices.Clone(raw.Runs[i].SelectedTokenLogprobs)
+		for j := range logprobs {
+			if logprobs[j] == 0 {
+				logprobs[j] = 0
+			}
+		}
+		digest, err := Qwen38VulkanSelectedTokenLogprobsSHA256(raw.Runs[i].OutputTokenIDs, logprobs)
+		if err != nil {
+			return Qwen38VulkanDecodeReceipt{}, fmt.Errorf("raw decode result is not a canonical v3 physical receipt: repetition %d selected-token logprobs: %w", i+1, err)
+		}
+		raw.Runs[i].SelectedTokenLogprobs = logprobs
+		raw.Runs[i].SelectedTokenLogprobsSHA256 = digest
+	}
 	processPeak, devicePeak, counters, err := aggregateQwen38VulkanRunResources(raw.Runs)
 	if err != nil {
 		return Qwen38VulkanDecodeReceipt{}, fmt.Errorf("raw decode result is not a canonical v3 physical receipt: %w", err)
@@ -304,6 +326,7 @@ func buildQwen38VulkanDecodeReceipt(raw Qwen38VulkanRawDecodeResult, schema stri
 	for i, run := range raw.Runs {
 		runs[i] = run
 		runs[i].OutputTokenIDs = slices.Clone(run.OutputTokenIDs)
+		runs[i].SelectedTokenLogprobs = slices.Clone(run.SelectedTokenLogprobs)
 		runs[i].IgnoreEOS = qwen38VulkanBoolCopy(run.IgnoreEOS)
 		runs[i].EOSStopped = qwen38VulkanBoolCopy(run.EOSStopped)
 		if schema == Qwen38VulkanDecodeReceiptV3Schema {
@@ -311,6 +334,8 @@ func buildQwen38VulkanDecodeReceipt(raw Qwen38VulkanRawDecodeResult, schema stri
 		} else {
 			runs[i].Kind = ""
 			runs[i].Resources = nil
+			runs[i].SelectedTokenLogprobs = nil
+			runs[i].SelectedTokenLogprobsSHA256 = ""
 		}
 	}
 	receipt := Qwen38VulkanDecodeReceipt{
@@ -368,6 +393,36 @@ func Qwen38VulkanTokenIDsSHA256(tokenIDs []int32) string {
 	}
 	sum := sha256.Sum256(buf)
 	return strings.ToUpper(hex.EncodeToString(sum[:]))
+}
+
+// Qwen38VulkanSelectedTokenLogprobsSHA256 binds each selected-token logprob to
+// its output token ID and position. Signed zero is canonicalized to positive
+// zero so one observation has exactly one digest representation.
+func Qwen38VulkanSelectedTokenLogprobsSHA256(outputTokenIDs []int32, logprobs []float64) (string, error) {
+	if len(outputTokenIDs) == 0 || len(logprobs) == 0 {
+		return "", errors.New("selected-token logprobs require nonempty token IDs and observations")
+	}
+	if len(outputTokenIDs) != len(logprobs) {
+		return "", fmt.Errorf("selected-token logprob count %d does not match output token count %d", len(logprobs), len(outputTokenIDs))
+	}
+	h := sha256.New()
+	_, _ = h.Write([]byte(qwen38VulkanSelectedTokenLogprobsDomain))
+	var encoded [8]byte
+	binary.BigEndian.PutUint64(encoded[:], uint64(len(outputTokenIDs)))
+	_, _ = h.Write(encoded[:])
+	for i, logprob := range logprobs {
+		if math.IsNaN(logprob) || math.IsInf(logprob, 0) || logprob > 0 {
+			return "", fmt.Errorf("selected-token logprob %d must be finite and non-positive", i)
+		}
+		if logprob == 0 {
+			logprob = 0
+		}
+		binary.BigEndian.PutUint32(encoded[:4], uint32(outputTokenIDs[i]))
+		_, _ = h.Write(encoded[:4])
+		binary.BigEndian.PutUint64(encoded[:], math.Float64bits(logprob))
+		_, _ = h.Write(encoded[:])
+	}
+	return strings.ToUpper(hex.EncodeToString(h.Sum(nil))), nil
 }
 
 func (r Qwen38VulkanDecodeReceipt) Validate() error {
@@ -519,6 +574,26 @@ func (r Qwen38VulkanDecodeReceipt) validateRuns() error {
 		}
 		if !slices.Equal(run.OutputTokenIDs, r.OutputTokenIDs) {
 			return fmt.Errorf("qwen3.8 Vulkan repetition %d output token identity mismatch", run.Repetition)
+		}
+		if r.Schema == Qwen38VulkanDecodeReceiptV3Schema {
+			if len(run.SelectedTokenLogprobs) != run.ActualGeneratedTokens || len(run.SelectedTokenLogprobs) != len(run.OutputTokenIDs) {
+				return fmt.Errorf("qwen3.8 Vulkan repetition %d selected-token logprob count does not match generated tokens", run.Repetition)
+			}
+			for j, logprob := range run.SelectedTokenLogprobs {
+				if math.IsNaN(logprob) || math.IsInf(logprob, 0) || logprob > 0 {
+					return fmt.Errorf("qwen3.8 Vulkan repetition %d selected-token logprob %d must be finite and non-positive", run.Repetition, j)
+				}
+				if logprob == 0 && math.Signbit(logprob) {
+					return fmt.Errorf("qwen3.8 Vulkan repetition %d selected-token logprob %d has non-canonical signed zero", run.Repetition, j)
+				}
+			}
+			digest, err := Qwen38VulkanSelectedTokenLogprobsSHA256(run.OutputTokenIDs, run.SelectedTokenLogprobs)
+			if err != nil {
+				return fmt.Errorf("qwen3.8 Vulkan repetition %d selected-token logprobs: %w", run.Repetition, err)
+			}
+			if run.SelectedTokenLogprobsSHA256 != digest {
+				return fmt.Errorf("qwen3.8 Vulkan repetition %d selected-token logprob digest %q does not match observations", run.Repetition, run.SelectedTokenLogprobsSHA256)
+			}
 		}
 		if run.Sampler != "greedy" || run.SeedPolicy != "not_applicable_greedy" {
 			return fmt.Errorf("qwen3.8 Vulkan repetition %d requires sampler=greedy seed_policy=not_applicable_greedy", run.Repetition)

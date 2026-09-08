@@ -2,6 +2,8 @@ package computebuild
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -1000,5 +1002,411 @@ func TestVulkanBinaryReceiptBindsReproducibleSourceToolsShadersAndBinary(t *test
 	}
 	if _, _, err := hashSPIRVBundle(repo); err == nil || !strings.Contains(err.Error(), "incomplete") {
 		t.Fatalf("missing SPIR-V module error = %v", err)
+	}
+}
+
+type vulkanVerifierFixture struct {
+	evidence VulkanBinaryReceiptEvidence
+	receipt  ComputeBuildReceipt
+	root     string
+	gitRun   vulkanGitRunner
+}
+
+func pathVulkanGitRunner(gitPath string) vulkanGitRunner {
+	return func(ctx context.Context, root string, args ...string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, gitPath, controlledVulkanGitArgs(root, args...)...)
+		cmd.Env = controlledVulkanGitEnv()
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("fixture Git failed: %w: %s", err, out)
+		}
+		return out, nil
+	}
+}
+
+func verifyVulkanFixture(ctx context.Context, fixture vulkanVerifierFixture, evidence VulkanBinaryReceiptEvidence) (*VulkanBinaryReceiptIdentityVerification, error) {
+	if runtime.GOOS == "linux" {
+		return VerifyVulkanBinaryReceiptIdentity(ctx, evidence)
+	}
+	return verifyVulkanBinaryReceiptIdentityWithRunners(ctx, evidence, fixture.gitRun, fixture.gitRun)
+}
+
+func newVulkanVerifierFixture(t *testing.T) vulkanVerifierFixture {
+	t.Helper()
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	writeFixtureFile(t, filepath.Join(repo, "go.mod"), "module example.test/verifier\n\ngo 1.26\n")
+	writeFixtureFile(t, filepath.Join(repo, "cmd", "fak", "main.go"), "package main\nfunc main() {}\n")
+	spirvRoot := filepath.Join(repo, "internal", "compute", "spirv")
+	for _, shader := range VulkanShaders {
+		writeFixtureFile(t, filepath.Join(spirvRoot, shader+".spv"), "spirv:"+shader+"\n")
+	}
+	toolPath := filepath.Join(repo, "tooling", "inert-tool")
+	writeFixtureFile(t, toolPath, "not an executable; verifier must only hash these bytes\n")
+	if err := os.Chmod(toolPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	binaryPath := filepath.Join(repo, "out", "fak")
+	writeFixtureFile(t, binaryPath, "sealed mapped executable bytes\n")
+	if err := os.Chmod(binaryPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	runFixtureGit(t, root, "init", "-q", repo)
+	runFixtureGit(t, repo, "config", "user.email", "fixture@example.invalid")
+	runFixtureGit(t, repo, "config", "user.name", "Fixture")
+	runFixtureGit(t, repo, "add", "-f", ".")
+	runFixtureGit(t, repo, "commit", "-q", "-m", "fixture")
+	commit := strings.TrimSpace(runFixtureGit(t, repo, "rev-parse", "HEAD"))
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitPath, err = filepath.Abs(gitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitPath, err = filepath.EvalSymlinks(gitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitSHA, _, err := strictFileSHA256(gitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitRun := pathVulkanGitRunner(gitPath)
+	binarySHA, binarySize, err := strictFileSHA256(binaryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptPath := filepath.Join(root, "receipt.json")
+	evidence := VulkanBinaryReceiptEvidence{
+		ReceiptPath: receiptPath, SourceRoot: repo, GitExecutable: gitPath, ExpectedGitSHA256: gitSHA, ExpectedCommit: commit,
+		BinaryPath: binaryPath, ExpectedBinarySHA256: binarySHA, ExpectedBinarySize: binarySize,
+		SPIRVRoot: spirvRoot, ExpectedSPIRVModules: append([]string(nil), VulkanShaders...),
+		Tools:     VulkanReceiptToolInputs{Go: toolPath, CC: toolPath, CXX: toolPath, AR: toolPath, GLSLC: toolPath, CxxRuntime: "-lstdc++", IsWindows: runtime.GOOS == "windows"},
+		BuildPlan: VulkanReceiptBuildPlan{PackageDir: filepath.Join(repo, "internal", "compute"), OutPackage: "./cmd/fak", Smoke: false},
+	}
+	observed, err := observeVulkanReceiptEvidence(context.Background(), evidence, gitRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := ComputeBuildReceipt{
+		Schema: VulkanBuildReceiptSchema, Backend: "vulkan", Command: "binary", Outcome: "success", ExitCode: 0,
+		ReceiptPath: receiptPath, Phases: []ComputeBuildPhase{}, Artifact: &observed.Artifact,
+		Vulkan: &VulkanBuildProvenance{
+			Source: observed.Source, SPIRVBundleSHA256: observed.SPIRVBundleSHA256, SPIRVModuleCount: observed.SPIRVModuleCount,
+			Toolchain: append([]BuildToolIdentity(nil), observed.Toolchain...), ToolchainSHA256: observed.ToolchainSHA256,
+			NormalizedBuildCommand: append([]string(nil), observed.NormalizedBuildCommand...), BuildCommandSHA256: observed.BuildCommandSHA256,
+			StableIdentitySHA256: observed.StableIdentitySHA256,
+		},
+		Reproducibility: &BuildReproducibility{Status: "baseline"},
+	}
+	writeVerifierReceipt(t, receiptPath, receipt)
+	return vulkanVerifierFixture{evidence: evidence, receipt: receipt, root: root, gitRun: gitRun}
+}
+
+func writeVerifierReceipt(t *testing.T, path string, receipt ComputeBuildReceipt) []byte {
+	t.Helper()
+	b, err := json.MarshalIndent(receipt, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = append(b, '\n')
+	if err := os.WriteFile(path, b, 0644); err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func cloneVerifierReceipt(t *testing.T, receipt ComputeBuildReceipt) ComputeBuildReceipt {
+	t.Helper()
+	b, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var clone ComputeBuildReceipt
+	if err := json.Unmarshal(b, &clone); err != nil {
+		t.Fatal(err)
+	}
+	return clone
+}
+
+func forgeVerifierReceiptDownstream(t *testing.T, receipt *ComputeBuildReceipt, evidence VulkanBinaryReceiptEvidence) {
+	t.Helper()
+	if receipt.Vulkan == nil || receipt.Artifact == nil {
+		return
+	}
+	toolchainSHA, err := hashJSON(struct {
+		Tools      []BuildToolIdentity `json:"tools"`
+		CXXRuntime string              `json:"cxx_runtime"`
+		IsWindows  bool                `json:"is_windows"`
+	}{receipt.Vulkan.Toolchain, evidence.Tools.CxxRuntime, evidence.Tools.IsWindows})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt.Vulkan.ToolchainSHA256 = toolchainSHA
+	commandSHA, err := hashJSON(receipt.Vulkan.NormalizedBuildCommand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt.Vulkan.BuildCommandSHA256 = commandSHA
+	stableSHA, err := vulkanStableIdentitySHA(receipt.Vulkan.Source, receipt.Vulkan.SPIRVBundleSHA256, receipt.Vulkan.SPIRVModuleCount, toolchainSHA, commandSHA, receipt.Artifact.SHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt.Vulkan.StableIdentitySHA256 = stableSHA
+}
+
+func TestVerifyVulkanBinaryReceiptIdentityAcceptsIndependentFixture(t *testing.T) {
+	fixture := newVulkanVerifierFixture(t)
+	verified, err := verifyVulkanFixture(context.Background(), fixture, fixture.evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validLowerSHA256(verified.ReceiptSHA256) || verified.HistoricalBuildCausality != "unavailable" || len(verified.UnavailableClaims) != len(unavailableVulkanV2Causality) {
+		t.Fatalf("verification availability = %+v", verified)
+	}
+	if verified.Receipt.Vulkan == nil || verified.Receipt.Vulkan.StableIdentitySHA256 != fixture.receipt.Vulkan.StableIdentitySHA256 {
+		t.Fatalf("verified receipt = %+v", verified.Receipt)
+	}
+}
+
+func TestVerifyVulkanBinaryReceiptIdentityFailsClosedWithoutLinuxFDBinding(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		t.Skip("Linux exercises the fd-bound production runner")
+	}
+	_, err := VerifyVulkanBinaryReceiptIdentity(context.Background(), VulkanBinaryReceiptEvidence{})
+	if err == nil || !strings.Contains(err.Error(), "fd-bound Git execution is unsupported") {
+		t.Fatalf("unsupported-platform error = %v", err)
+	}
+}
+
+func TestPinnedLinuxGitRunnerExecutesVerifiedDescriptorAfterPathSwap(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux /proc/self/fd contract")
+	}
+	fixture := newVulkanVerifierFixture(t)
+	pinnedPath := filepath.Join(fixture.root, "policy-git")
+	gitBytes, err := os.ReadFile(fixture.evidence.GitExecutable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pinnedPath, gitBytes, 0755); err != nil {
+		t.Fatal(err)
+	}
+	pinnedSHA, _, err := strictFileSHA256(pinnedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, closeGit, err := pinnedLinuxGitRunner(pinnedPath, pinnedSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeGit()
+	parked := pinnedPath + ".verified"
+	if err := os.Rename(pinnedPath, parked); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Rename(parked, pinnedPath)
+	if err := os.WriteFile(pinnedPath, []byte("forged pathname bytes\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(pinnedPath)
+	out, err := run(context.Background(), fixture.evidence.SourceRoot, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		t.Fatalf("fd-bound Git did not survive pathname swap: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != fixture.evidence.ExpectedCommit {
+		t.Fatalf("fd-bound Git commit = %q, want %q", got, fixture.evidence.ExpectedCommit)
+	}
+}
+
+func TestVerifyVulkanBinaryReceiptIdentityNeutralizesHostileRepoConfigBeforeObservation(t *testing.T) {
+	fixture := newVulkanVerifierFixture(t)
+	marker := filepath.Join(fixture.root, "fsmonitor-was-executed")
+	command := fmt.Sprintf("echo invoked > %q", filepath.ToSlash(marker))
+	runFixtureGit(t, fixture.evidence.SourceRoot, "config", "core.fsmonitor", command)
+	if _, err := verifyVulkanFixture(context.Background(), fixture, fixture.evidence); err != nil {
+		t.Fatalf("normalized fsmonitor configuration rejected valid evidence: %v", err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("hostile fsmonitor executed before verification: %v", err)
+	}
+
+	runFixtureGit(t, fixture.evidence.SourceRoot, "config", "extensions.partialClone", "origin")
+	runFixtureGit(t, fixture.evidence.SourceRoot, "config", "remote.origin.promisor", "true")
+	if _, err := verifyVulkanFixture(context.Background(), fixture, fixture.evidence); err == nil || !strings.Contains(err.Error(), "unsupported repo-admin configuration") {
+		t.Fatalf("promisor configuration error = %v", err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("hostile configuration caused side effects: %v", err)
+	}
+}
+
+func TestVerifyVulkanBinaryReceiptIdentityRejectsSelfConsistentForgeries(t *testing.T) {
+	fixture := newVulkanVerifierFixture(t)
+	observed, err := observeVulkanReceiptEvidence(context.Background(), fixture.evidence, fixture.gitRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutations := []struct {
+		name       string
+		mutate     func(*ComputeBuildReceipt)
+		afterForge func(*ComputeBuildReceipt)
+	}{
+		{"schema", func(r *ComputeBuildReceipt) { r.Schema = ComputeBuildReceiptSchema }, nil},
+		{"outcome", func(r *ComputeBuildReceipt) { r.Outcome = "failed" }, nil},
+		{"receipt path", func(r *ComputeBuildReceipt) { r.ReceiptPath += ".forged" }, nil},
+		{"source commit", func(r *ComputeBuildReceipt) { r.Vulkan.Source.GitCommit = strings.Repeat("0", 40) }, nil},
+		{"source tree", func(r *ComputeBuildReceipt) { r.Vulkan.Source.GitTree = strings.Repeat("0", 40) }, nil},
+		{"source clean", func(r *ComputeBuildReceipt) { r.Vulkan.Source.Clean = false }, nil},
+		{"source archive", func(r *ComputeBuildReceipt) { r.Vulkan.Source.SourceArchiveSHA256 = strings.Repeat("0", 64) }, nil},
+		{"spirv bundle", func(r *ComputeBuildReceipt) { r.Vulkan.SPIRVBundleSHA256 = strings.Repeat("0", 64) }, nil},
+		{"spirv count", func(r *ComputeBuildReceipt) { r.Vulkan.SPIRVModuleCount-- }, nil},
+		{"tool role", func(r *ComputeBuildReceipt) { r.Vulkan.Toolchain[0].Role = "forged" }, nil},
+		{"tool executable", func(r *ComputeBuildReceipt) { r.Vulkan.Toolchain[0].Executable = "forged" }, nil},
+		{"tool digest", func(r *ComputeBuildReceipt) { r.Vulkan.Toolchain[0].SHA256 = strings.Repeat("0", 64) }, nil},
+		{"toolchain digest", func(*ComputeBuildReceipt) {}, func(r *ComputeBuildReceipt) { r.Vulkan.ToolchainSHA256 = strings.Repeat("0", 64) }},
+		{"normalized command", func(r *ComputeBuildReceipt) { r.Vulkan.NormalizedBuildCommand[0] += "|forged" }, nil},
+		{"command digest", func(*ComputeBuildReceipt) {}, func(r *ComputeBuildReceipt) { r.Vulkan.BuildCommandSHA256 = strings.Repeat("0", 64) }},
+		{"binary path", func(r *ComputeBuildReceipt) { r.Artifact.Path += ".forged" }, nil},
+		{"binary size", func(r *ComputeBuildReceipt) { r.Artifact.SizeBytes++ }, nil},
+		{"binary digest", func(r *ComputeBuildReceipt) { r.Artifact.SHA256 = strings.Repeat("0", 64) }, nil},
+		{"binary signed", func(r *ComputeBuildReceipt) { r.Artifact.Signed = true }, nil},
+		{"stable digest", func(*ComputeBuildReceipt) {}, func(r *ComputeBuildReceipt) { r.Vulkan.StableIdentitySHA256 = strings.Repeat("0", 64) }},
+		{"reproducibility status", func(r *ComputeBuildReceipt) { r.Reproducibility.Status = "match" }, nil},
+		{"reproducibility digest", func(r *ComputeBuildReceipt) { r.Reproducibility.ComparedReceiptSHA256 = strings.Repeat("0", 64) }, nil},
+		{"reproducibility mismatches", func(r *ComputeBuildReceipt) { r.Reproducibility.MismatchedFields = []string{"binary"} }, nil},
+		{"legacy provenance", func(r *ComputeBuildReceipt) { r.GitCommit = fixture.evidence.ExpectedCommit }, nil},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			receipt := cloneVerifierReceipt(t, fixture.receipt)
+			mutation.mutate(&receipt)
+			forgeVerifierReceiptDownstream(t, &receipt, fixture.evidence)
+			if mutation.afterForge != nil {
+				mutation.afterForge(&receipt)
+			}
+			err := compareReceiptToObservation(receipt, observed)
+			if err == nil {
+				err = verifyBaselineReproducibility(receipt)
+			}
+			if err == nil {
+				t.Fatal("self-consistent forged receipt unexpectedly accepted")
+			}
+		})
+	}
+}
+
+func TestVerifyVulkanBinaryReceiptIdentityRejectsUnknownTrailingAndIndependentDrift(t *testing.T) {
+	fixture := newVulkanVerifierFixture(t)
+	raw := writeVerifierReceipt(t, fixture.evidence.ReceiptPath, fixture.receipt)
+	unknown := append([]byte(nil), raw[:len(raw)-2]...)
+	unknown = append(unknown, []byte(",\n  \"forged\": true\n}\n")...)
+	if err := os.WriteFile(fixture.evidence.ReceiptPath, unknown, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verifyVulkanFixture(context.Background(), fixture, fixture.evidence); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("unknown-field error = %v", err)
+	}
+	if err := os.WriteFile(fixture.evidence.ReceiptPath, append(raw, []byte("{}\n")...), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verifyVulkanFixture(context.Background(), fixture, fixture.evidence); err == nil || !strings.Contains(err.Error(), "trailing") {
+		t.Fatalf("trailing-data error = %v", err)
+	}
+	writeVerifierReceipt(t, fixture.evidence.ReceiptPath, fixture.receipt)
+	evidence := fixture.evidence
+	evidence.ExpectedBinarySHA256 = strings.Repeat("0", 64)
+	if _, err := verifyVulkanFixture(context.Background(), fixture, evidence); err == nil || !strings.Contains(err.Error(), "sealed mapped executable") {
+		t.Fatalf("sealed-binary error = %v", err)
+	}
+	evidence = fixture.evidence
+	evidence.ExpectedGitSHA256 = strings.Repeat("0", 64)
+	if _, err := verifyVulkanFixture(context.Background(), fixture, evidence); err == nil || !strings.Contains(err.Error(), "policy-pinned Git") {
+		t.Fatalf("pinned-Git error = %v", err)
+	}
+	writeFixtureFile(t, filepath.Join(fixture.evidence.SourceRoot, "untracked"), "dirty\n")
+	if _, err := verifyVulkanFixture(context.Background(), fixture, fixture.evidence); err == nil || !strings.Contains(err.Error(), "not clean") {
+		t.Fatalf("dirty-source error = %v", err)
+	}
+}
+
+func TestVerifyVulkanBinaryReceiptIdentityRejectsInvalidSPIRVCensus(t *testing.T) {
+	fixture := newVulkanVerifierFixture(t)
+	t.Run("duplicate registry", func(t *testing.T) {
+		registry := append([]string(nil), fixture.evidence.ExpectedSPIRVModules...)
+		registry[len(registry)-1] = registry[0]
+		if _, _, err := hashObservedSPIRVBundle(fixture.evidence.SPIRVRoot, registry); err == nil || !strings.Contains(err.Error(), "duplicate") {
+			t.Fatalf("duplicate registry error = %v", err)
+		}
+	})
+	t.Run("missing module", func(t *testing.T) {
+		missing := filepath.Join(fixture.evidence.SPIRVRoot, fixture.evidence.ExpectedSPIRVModules[0]+".spv")
+		parked := missing + ".missing"
+		if err := os.Rename(missing, parked); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Rename(parked, missing)
+		if _, _, err := hashObservedSPIRVBundle(fixture.evidence.SPIRVRoot, fixture.evidence.ExpectedSPIRVModules); err == nil || !strings.Contains(err.Error(), "incomplete") {
+			t.Fatalf("missing module error = %v", err)
+		}
+	})
+	t.Run("extra module", func(t *testing.T) {
+		extra := filepath.Join(fixture.evidence.SPIRVRoot, "forged-extra.spv")
+		writeFixtureFile(t, extra, "extra\n")
+		defer os.Remove(extra)
+		if _, _, err := hashObservedSPIRVBundle(fixture.evidence.SPIRVRoot, fixture.evidence.ExpectedSPIRVModules); err == nil || !strings.Contains(err.Error(), "unexpected") {
+			t.Fatalf("extra module error = %v", err)
+		}
+	})
+	t.Run("symlink module", func(t *testing.T) {
+		target := filepath.Join(fixture.evidence.SPIRVRoot, fixture.evidence.ExpectedSPIRVModules[1]+".spv")
+		link := filepath.Join(fixture.evidence.SPIRVRoot, fixture.evidence.ExpectedSPIRVModules[0]+".spv")
+		parked := link + ".regular"
+		if err := os.Rename(link, parked); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Rename(parked, link)
+		if err := os.Symlink(target, link); err != nil {
+			t.Skipf("symlink creation unavailable: %v", err)
+		}
+		defer os.Remove(link)
+		if _, _, err := hashObservedSPIRVBundle(fixture.evidence.SPIRVRoot, fixture.evidence.ExpectedSPIRVModules); err == nil || !strings.Contains(err.Error(), "non-symlink") {
+			t.Fatalf("symlink module error = %v", err)
+		}
+	})
+}
+
+func TestVerifyVulkanBinaryReceiptIdentityRequiresAuthenticatedComparison(t *testing.T) {
+	fixture := newVulkanVerifierFixture(t)
+	priorPath := filepath.Join(fixture.root, "prior.json")
+	prior := cloneVerifierReceipt(t, fixture.receipt)
+	prior.ReceiptPath = priorPath
+	priorRaw := writeVerifierReceipt(t, priorPath, prior)
+	currentPath := filepath.Join(fixture.root, "current.json")
+	current := cloneVerifierReceipt(t, fixture.receipt)
+	current.ReceiptPath = currentPath
+	priorDigest := sha256.Sum256(priorRaw)
+	current.Reproducibility = &BuildReproducibility{Status: "match", ComparedReceiptSHA256: hex.EncodeToString(priorDigest[:])}
+	writeVerifierReceipt(t, currentPath, current)
+	priorEvidence := fixture.evidence
+	priorEvidence.ReceiptPath = priorPath
+	evidence := fixture.evidence
+	evidence.ReceiptPath = currentPath
+	evidence.Comparison = &priorEvidence
+	if _, err := verifyVulkanFixture(context.Background(), fixture, evidence); err != nil {
+		t.Fatal(err)
+	}
+
+	forgedPrior := cloneVerifierReceipt(t, prior)
+	forgedPrior.Vulkan.SPIRVBundleSHA256 = strings.Repeat("0", 64)
+	forgeVerifierReceiptDownstream(t, &forgedPrior, priorEvidence)
+	forgedPriorRaw := writeVerifierReceipt(t, priorPath, forgedPrior)
+	forgedDigest := sha256.Sum256(forgedPriorRaw)
+	current.Reproducibility.ComparedReceiptSHA256 = hex.EncodeToString(forgedDigest[:])
+	writeVerifierReceipt(t, currentPath, current)
+	if _, err := verifyVulkanFixture(context.Background(), fixture, evidence); err == nil {
+		t.Fatal("independently invalid comparison receipt unexpectedly accepted")
 	}
 }
