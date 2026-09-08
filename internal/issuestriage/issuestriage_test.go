@@ -19,7 +19,8 @@ func TestTriageDispositions(t *testing.T) {
 	}{
 		{"close-dormant", Action{Number: 1, Kind: "close-dormant-question", Reason: "question idle 60d", Command: "gh issue close 1 --reason \"not planned\""}, choicetriage.TakeObvious, false},
 		{"mark-stale", Action{Number: 2, Kind: "mark-stale", Reason: "idle 90d", Command: "gh issue edit 2 --add-label stale"}, choicetriage.TakeObvious, false},
-		{"review-priority", Action{Number: 3, Kind: "review", Reason: "needs-priority, needs-area"}, choicetriage.HumanResidual, true},
+		{"review-priority-default", Action{Number: 3, Kind: "review", Reason: "needs-priority, needs-area"}, choicetriage.FreshContext, false},
+		{"review-priority-escalated", Action{Number: 8, Kind: "review", Reason: "needs-priority, needs-area", Escalation: "POLICY_AUTHORITY_ESCALATION"}, choicetriage.HumanResidual, true},
 		{"review-area", Action{Number: 4, Kind: "review", Reason: "needs-area"}, choicetriage.FreshContext, false},
 		{"review-kind", Action{Number: 5, Kind: "review", Reason: "needs-kind"}, choicetriage.FreshContext, false},
 		{"review-dup", Action{Number: 6, Kind: "review", Reason: "likely-dup"}, choicetriage.FreshContext, false},
@@ -49,5 +50,18 @@ func TestReviewResolveIsActionable(t *testing.T) {
 	v := Triage(Action{Number: 8, Kind: "review", Reason: "needs-area"})
 	if v.Resolve == "" {
 		t.Error("a FRESH_CONTEXT review should carry a resolve hint")
+	}
+}
+
+// TestReviewOnlyWordingAndOperatingPosture verifies the wording of the review-only notice
+// and the default agent-progress operating posture.
+func TestReviewOnlyWordingAndOperatingPosture(t *testing.T) {
+	const wantNotice = "review-only: no precomputed mechanical command, not human-required (agent-operated by default; human escalation requires an explicit typed reason)"
+	if ReviewOnlyNotice != wantNotice {
+		t.Fatalf("ReviewOnlyNotice = %q, want %q", ReviewOnlyNotice, wantNotice)
+	}
+	const wantPosture = ">=99% agent-progress posture (operating target/default, not observed snapshot percentage)"
+	if DefaultAgentProgressPosture != wantPosture {
+		t.Fatalf("DefaultAgentProgressPosture = %q, want %q", DefaultAgentProgressPosture, wantPosture)
 	}
 }
