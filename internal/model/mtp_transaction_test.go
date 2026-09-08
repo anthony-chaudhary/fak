@@ -576,6 +576,63 @@ func TestMTPTransaction_SessionPrefixSnapshotRollback(t *testing.T) {
 	}
 }
 
+func TestMTPTransactionPartialCommitRestoresLiveTargetPrefix(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	target := m.NewSession()
+	want := m.NewSession()
+	t.Cleanup(target.Close)
+	t.Cleanup(want.Close)
+	target.captureTargetHidden = true
+	want.captureTargetHidden = true
+
+	prompt := []int{0, 1}
+	draft := []int{2, 3, 4}
+	target.Prefill(prompt)
+	want.Prefill(prompt)
+	normalizeSnapshotForTest(t, target)
+	normalizeSnapshotForTest(t, want)
+
+	tx, err := NewMTPTransactionWithTarget(target, MTPTransactionConfig{
+		HiddenSize:    m.Cfg.HiddenSize,
+		VocabSize:     m.Cfg.VocabSize,
+		MaxDraftDepth: len(draft),
+		Backend:       Qwen38MTPBackendMetal,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tx.Close() })
+
+	cp, err := tx.BeginRound()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Propose(draft, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range draft {
+		target.Step(token)
+	}
+
+	if err := tx.Commit(1); err != nil {
+		t.Fatal(err)
+	}
+	want.Step(draft[0])
+	assertQwen35MTPTargetStateEqual(t, target, want)
+
+	const continuation = 5
+	assertFloat32BitsEqual(t, "partial commit continuation", target.Step(continuation), want.Step(continuation))
+	assertQwen35MTPTargetStateEqual(t, target, want)
+
+	accounting := tx.Accounting()
+	if accounting.AcceptedCount != 1 || accounting.RejectedCount != 2 {
+		t.Fatalf("partial commit accounting accepted/rejected = %d/%d, want 1/2", accounting.AcceptedCount, accounting.RejectedCount)
+	}
+	if tx.checkpoint != nil || tx.roundActive || !cp.closed || cp.targetSnap != nil {
+		t.Fatalf("partial commit retained checkpoint ownership: checkpoint=%p active=%v closed=%v target_snapshot=%p", tx.checkpoint, tx.roundActive, cp.closed, cp.targetSnap)
+	}
+}
+
 func assertNoForeignFallback(t *testing.T, tx *MTPTransaction) {
 	t.Helper()
 	eng := string(tx.Engine())

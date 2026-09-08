@@ -15,29 +15,33 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/debtlane"
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/issueorchestrator"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 type SpawnedChatRecord struct {
-	IssueNumber         int      `json:"issue_number"`
-	Key                 string   `json:"key"`
-	Title               string   `json:"title"`
-	Lane                string   `json:"lane"`
-	SessionTitle        string   `json:"session_title"`
-	PID                 int      `json:"pid"`
-	Status              string   `json:"status"` // "dry_run", "spawned", "error"
-	Worktree            string   `json:"worktree,omitempty"`
-	LogFile             string   `json:"log_file,omitempty"`
-	Command             []string `json:"command"`
-	Error               string   `json:"error,omitempty"`
-	ControllerRevision  string   `json:"controller_revision,omitempty"`
-	ControllerBinarySHA string   `json:"controller_binary_sha,omitempty"`
-	ControllerFreshness string   `json:"controller_freshness,omitempty"`
-	AgentProfile        string   `json:"agent_profile,omitempty"`
-	ExactPaths          []string `json:"exact_paths,omitempty"`
-	NarrowedPaths       []string `json:"narrowed_paths,omitempty"`
-	TreeLeaseAcquired   bool     `json:"tree_lease_acquired,omitempty"`
+	IssueNumber           int      `json:"issue_number"`
+	Key                   string   `json:"key"`
+	Title                 string   `json:"title"`
+	Lane                  string   `json:"lane"`
+	SessionTitle          string   `json:"session_title"`
+	PID                   int      `json:"pid"`
+	Status                string   `json:"status"` // "dry_run", "spawned", "error"
+	Worktree              string   `json:"worktree,omitempty"`
+	LogFile               string   `json:"log_file,omitempty"`
+	Command               []string `json:"command"`
+	Error                 string   `json:"error,omitempty"`
+	ControllerRevision    string   `json:"controller_revision,omitempty"`
+	ControllerBinarySHA   string   `json:"controller_binary_sha,omitempty"`
+	ControllerFreshness   string   `json:"controller_freshness,omitempty"`
+	AgentProfile          string   `json:"agent_profile,omitempty"`
+	ExactPaths            []string `json:"exact_paths,omitempty"`
+	NarrowedPaths         []string `json:"narrowed_paths,omitempty"`
+	TreeLeaseAcquired     bool     `json:"tree_lease_acquired,omitempty"`
+	WorktreeMode          string   `json:"worktree_mode"`
+	AutoLand              bool     `json:"auto_land"`
+	UnsafeSharedWorkspace bool     `json:"unsafe_shared_workspace,omitempty"`
 }
 
 type OpencodeSpawnReceipt struct {
@@ -54,10 +58,19 @@ type OpencodeSpawnReceipt struct {
 	ExactPaths          []string            `json:"exact_paths,omitempty"`
 	NarrowedPaths       []string            `json:"narrowed_paths,omitempty"`
 	TreeLeaseAcquired   bool                `json:"tree_lease_acquired,omitempty"`
+	WorktreeMode        string              `json:"worktree_mode"`
+	AutoLand            bool                `json:"auto_land"`
 	Chats               []SpawnedChatRecord `json:"chats"`
 }
 
 const opencodeSpawnReceiptSchema = "fak.issue-orchestrator-opencode-spawn.v1"
+
+const (
+	worktreeModeManagedDefault       = "managed_default"
+	worktreeModeManagedExplicit      = "managed_explicit"
+	worktreeModeManagedManualLand    = "managed_manual_land"
+	worktreeModeSharedExplicitOptOut = "shared_explicit_opt_out"
+)
 
 var (
 	newWorkerSupervisorFunc = issueorchestrator.NewWorkerSupervisor
@@ -78,6 +91,7 @@ var (
 	startDispatchWorkerFunc = func(cmd *exec.Cmd) error {
 		return cmd.Start()
 	}
+	prepareManagedWorkerWorktreeFunc = workerworktree.Prepare
 )
 
 func revisionsMatch(a, b string) bool {
@@ -162,13 +176,13 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 	agent := fs.String("agent", "", "agent profile for OpenCode chats (--agent)")
 	variant := fs.String("variant", "", "explicit reasoning effort override for OpenCode chats (--variant); omitted by default so the agent profile controls effort")
 	interactive := fs.Bool("interactive", false, "spawn interactive chat mode (-i) instead of headless run")
-	worktree := fs.Bool("worktree", false, "prepare detached worker worktrees for each spawned chat")
+	worktree := fs.Bool("worktree", true, "prepare detached worker worktrees for each spawned chat (default: true; set --worktree=false for unsafe shared-root compatibility)")
 	dryRun := fs.Bool("dry-run", false, "preview OpenCode chat spawn commands without executing")
 	logDir := fs.String("log-dir", "", "directory for OpenCode session logs (default: .dispatch-runs)")
 	supervise := fs.Bool("supervise", true, "enables adaptive process supervision for spawned OpenCode chats")
 
 	harvest := fs.Bool("harvest", false, "trigger harvest and progressive reconciliation of wave runs")
-	autoLand := fs.Bool("auto-land", false, "automatically land verified cleared leaves")
+	autoLand := fs.Bool("auto-land", true, "automatically land verified cleared leaves (default: true; set --auto-land=false to preserve the managed worktree for manual landing)")
 	minClearRate := fs.Float64("min-clear-rate", 0.0, "minimum clear rate threshold")
 	receipt := fs.String("receipt", "", "path to wave receipt JSON (defaults to latest in .dispatch-runs or workspace)")
 
@@ -183,6 +197,15 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 	root := *workspace
 	if root == "" {
 		root = repoRoot()
+	}
+	worktreeMode := worktreeModeManagedDefault
+	if !*worktree {
+		worktreeMode = worktreeModeSharedExplicitOptOut
+	} else if flagWasExplicitlySet(fs, "worktree") {
+		worktreeMode = worktreeModeManagedExplicit
+	}
+	if *worktree && !*autoLand {
+		worktreeMode = worktreeModeManagedManualLand
 	}
 
 	if *harvest {
@@ -449,6 +472,8 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 				ControllerBinarySHA: binSHA,
 				ControllerFreshness: freshness,
 				AgentProfile:        effectiveAgent,
+				WorktreeMode:        worktreeMode,
+				AutoLand:            *autoLand,
 				Chats:               []SpawnedChatRecord{},
 			}
 			if *asJSON {
@@ -479,6 +504,8 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 			ControllerBinarySHA: binSHA,
 			ControllerFreshness: freshness,
 			AgentProfile:        effectiveAgent,
+			WorktreeMode:        worktreeMode,
+			AutoLand:            *autoLand,
 			Chats:               make([]SpawnedChatRecord, 0, len(selectedWave.Issues)),
 		}
 
@@ -578,12 +605,30 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 				effectivePaths = disjointPaths
 			}
 
-			var wtDir string
-			if *worktree {
-				res := workerworktree.Prepare(root, issue.Lane, strconv.Itoa(issue.Number), "", "", nil)
-				if res.OK {
-					wtDir = res.Path
+			var wtDir, workerBaseSHA string
+			if *worktree && !*dryRun {
+				res := prepareManagedWorkerWorktreeFunc(root, issue.Lane, strconv.Itoa(issue.Number), "", "", nil)
+				if !res.OK {
+					reason := strings.TrimSpace(res.Reason)
+					if reason == "" {
+						reason = strings.TrimSpace(res.Detail)
+					}
+					if reason == "" {
+						reason = "managed worktree preparation returned no reason"
+					}
+					record := SpawnedChatRecord{
+						IssueNumber: issue.Number, Key: issue.Key, Title: issue.Title, Lane: issue.Lane,
+						ControllerRevision: stamp.Revision, ControllerBinarySHA: binSHA, ControllerFreshness: freshness,
+						AgentProfile: effectiveAgent, ExactPaths: exactPaths, NarrowedPaths: narrowedPaths,
+						Status: "error", Error: "WORKTREE_PREPARE_FAILED: " + reason,
+						Worktree: res.Path, WorktreeMode: worktreeMode, AutoLand: *autoLand,
+					}
+					receipt.Chats = append(receipt.Chats, record)
+					hasError = true
+					continue
 				}
+				wtDir = res.Path
+				workerBaseSHA = res.BaseSHA
 			}
 
 			chatOpts := issueorchestrator.OpencodeChatOptions{
@@ -603,19 +648,22 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 			chat := issueorchestrator.BuildOpencodeChat(issueForChat, chatOpts)
 
 			record := SpawnedChatRecord{
-				IssueNumber:         issue.Number,
-				Key:                 issue.Key,
-				Title:               issue.Title,
-				Lane:                issue.Lane,
-				SessionTitle:        chat.SessionTitle,
-				Worktree:            chat.Worktree,
-				Command:             chat.Command,
-				ControllerRevision:  stamp.Revision,
-				ControllerBinarySHA: binSHA,
-				ControllerFreshness: freshness,
-				AgentProfile:        effectiveAgent,
-				ExactPaths:          exactPaths,
-				NarrowedPaths:       narrowedPaths,
+				IssueNumber:           issue.Number,
+				Key:                   issue.Key,
+				Title:                 issue.Title,
+				Lane:                  issue.Lane,
+				SessionTitle:          chat.SessionTitle,
+				Worktree:              chat.Worktree,
+				Command:               chat.Command,
+				ControllerRevision:    stamp.Revision,
+				ControllerBinarySHA:   binSHA,
+				ControllerFreshness:   freshness,
+				AgentProfile:          effectiveAgent,
+				ExactPaths:            exactPaths,
+				NarrowedPaths:         narrowedPaths,
+				WorktreeMode:          worktreeMode,
+				AutoLand:              *autoLand,
+				UnsafeSharedWorkspace: !*worktree,
 			}
 
 			if *dryRun {
@@ -712,6 +760,15 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 				_ = os.WriteFile(pidStem+".pid", []byte(strconv.Itoa(pid)), 0o644)
 				if chat.Worktree != "" {
 					_ = workerworktree.HandoffOwner(chat.Worktree, pid)
+					if *autoLand {
+						_ = os.WriteFile(pidStem+dispatchWorktreeSidecarSuffix, []byte(chat.Worktree), 0o644)
+						if workerBaseSHA != "" {
+							_ = os.WriteFile(pidStem+dispatchtick.BaseSHASidecarSuffix, []byte(workerBaseSHA), 0o644)
+						}
+						if b, err := json.Marshal(effectivePaths); err == nil {
+							_ = os.WriteFile(pidStem+dispatchLeaseTreeSidecarSuffix, b, 0o644)
+						}
+					}
 				}
 				_ = cmd.Process.Release()
 			}
@@ -766,6 +823,7 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 				statusStr = "DRY RUN"
 			}
 			fmt.Fprintf(stdout, "=== OpenCode Chat Spawner: %s (%s) ===\n", receipt.WaveID, statusStr)
+			fmt.Fprintf(stdout, "Worktrees:  %s (auto-land: %t)\n", receipt.WorktreeMode, receipt.AutoLand)
 			if receipt.ControllerRevision != "" {
 				fmt.Fprintf(stdout, "Controller:  %s (freshness: %s)\n", receipt.ControllerRevision, receipt.ControllerFreshness)
 			}
@@ -991,4 +1049,14 @@ func issueOrchestratorContainsStr(slice []string, val string) bool {
 		}
 	}
 	return false
+}
+
+func flagWasExplicitlySet(fs *flag.FlagSet, name string) bool {
+	found := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
 }
