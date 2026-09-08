@@ -51,6 +51,26 @@ type Objective struct {
 	MinMeanQuality float64       `json:"min_mean_quality,omitempty"`
 }
 
+// IsFinite reports whether the objective's weights and constraints are finite and domain-valid (#12112).
+func (o Objective) IsFinite() bool {
+	if math.IsNaN(o.QualityWeight) || math.IsInf(o.QualityWeight, 0) || o.QualityWeight < 0 {
+		return false
+	}
+	if math.IsNaN(o.CostWeight) || math.IsInf(o.CostWeight, 0) || o.CostWeight < 0 {
+		return false
+	}
+	if math.IsNaN(o.LatencyWeight) || math.IsInf(o.LatencyWeight, 0) || o.LatencyWeight < 0 {
+		return false
+	}
+	if math.IsNaN(o.MaxMeanCost) || math.IsInf(o.MaxMeanCost, 0) || o.MaxMeanCost < 0 {
+		return false
+	}
+	if math.IsNaN(o.MinMeanQuality) || math.IsInf(o.MinMeanQuality, 0) || o.MinMeanQuality < 0 || o.MinMeanQuality > 1.0 {
+		return false
+	}
+	return true
+}
+
 func (o Objective) effectiveQualityWeight() float64 {
 	if o.QualityWeight == 0 && o.CostWeight == 0 && o.LatencyWeight == 0 {
 		return 1.0
@@ -60,13 +80,24 @@ func (o Objective) effectiveQualityWeight() float64 {
 
 // Score computes the scalar objective score for an evaluation.
 func (o Objective) Score(eval EvaluationScore) float64 {
+	if !o.IsFinite() || math.IsNaN(eval.MeanCost) || math.IsInf(eval.MeanCost, 0) || math.IsNaN(eval.MeanQuality) || math.IsInf(eval.MeanQuality, 0) {
+		return 0
+	}
 	qw := o.effectiveQualityWeight()
 	latencySec := eval.MeanLatency.Seconds()
-	return qw*eval.MeanQuality - o.CostWeight*eval.MeanCost - o.LatencyWeight*latencySec
+	score := qw*eval.MeanQuality - o.CostWeight*eval.MeanCost - o.LatencyWeight*latencySec
+	if math.IsNaN(score) || math.IsInf(score, 0) {
+		return 0
+	}
+	return score
 }
 
 // Feasible reports whether the evaluation satisfies all declared constraints.
+// Fails closed on any non-finite metric, score, or constraint parameter (#12112).
 func (o Objective) Feasible(eval EvaluationScore) bool {
+	if !o.IsFinite() || !eval.IsFinite() {
+		return false
+	}
 	if eval.Count == 0 {
 		return false
 	}
@@ -93,6 +124,20 @@ type EvaluationScore struct {
 	Feasible    bool          `json:"feasible"`
 }
 
+// IsFinite reports whether all metrics and the score are finite and domain-valid (#12112).
+func (e EvaluationScore) IsFinite() bool {
+	if math.IsNaN(e.MeanCost) || math.IsInf(e.MeanCost, 0) || e.MeanCost < 0 {
+		return false
+	}
+	if math.IsNaN(e.MeanQuality) || math.IsInf(e.MeanQuality, 0) || e.MeanQuality < 0 || e.MeanQuality > 1.0 {
+		return false
+	}
+	if math.IsNaN(e.Score) || math.IsInf(e.Score, 0) {
+		return false
+	}
+	return true
+}
+
 // ScoreDelta records the objective score before and after a change.
 type ScoreDelta struct {
 	Before   EvaluationScore `json:"before"`
@@ -101,8 +146,28 @@ type ScoreDelta struct {
 	Improved bool            `json:"improved"` // Delta > 0 and After is feasible
 }
 
+func sanitizeScore(eval *EvaluationScore) {
+	if math.IsNaN(eval.Score) || math.IsInf(eval.Score, 0) {
+		eval.Score = 0
+		eval.Feasible = false
+	}
+	if math.IsNaN(eval.MeanCost) || math.IsInf(eval.MeanCost, 0) {
+		eval.MeanCost = 0
+		eval.Feasible = false
+	}
+	if math.IsNaN(eval.MeanQuality) || math.IsInf(eval.MeanQuality, 0) {
+		eval.MeanQuality = 0
+		eval.Feasible = false
+	}
+}
+
 func computeScoreDelta(before, after EvaluationScore) ScoreDelta {
+	sanitizeScore(&before)
+	sanitizeScore(&after)
 	delta := after.Score - before.Score
+	if math.IsNaN(delta) || math.IsInf(delta, 0) {
+		delta = 0
+	}
 	improved := after.Feasible && (delta > 1e-9 || (!before.Feasible && after.Feasible))
 	return ScoreDelta{
 		Before:   before,
@@ -319,9 +384,13 @@ func recordTarget(m Manifest, rec OutcomeRecord) (matchedRule string, chosenMode
 
 // EvaluateManifest measures the performance of manifest m against a slice of OutcomeRecords.
 // A record contributes only if it was served by the model that manifest m selects for that route.
+// Telemetry records with non-finite or domain-invalid outcomes are rejected from reductions (#12112).
 func EvaluateManifest(m Manifest, records []OutcomeRecord, obj Objective) (EvaluationScore, error) {
+	if !obj.IsFinite() {
+		return EvaluationScore{Count: 0, Feasible: false}, errors.New("modelroute: objective contains non-finite or invalid parameters")
+	}
 	if len(records) == 0 {
-		return EvaluationScore{}, nil
+		return EvaluationScore{Count: 0, Feasible: false}, nil
 	}
 
 	totalCount := 0
@@ -330,6 +399,9 @@ func EvaluateManifest(m Manifest, records []OutcomeRecord, obj Objective) (Evalu
 	var totalQuality float64
 
 	for _, rec := range records {
+		if !rec.Outcome.IsFinite() {
+			continue
+		}
 		_, chosenModel := recordTarget(m, rec)
 		recModel := rec.Model
 		if recModel == "" || recModel != chosenModel {
@@ -363,6 +435,7 @@ func EvaluateManifest(m Manifest, records []OutcomeRecord, obj Objective) (Evalu
 }
 
 // evaluateRuleRecords evaluates a specific rule's performance with a chosen model on a slice of records.
+// Telemetry records with non-finite or domain-invalid outcomes are rejected from reductions (#12112).
 func evaluateRuleRecords(ruleName string, aspect Aspect, model string, records []OutcomeRecord, obj Objective) EvaluationScore {
 	totalCount := 0
 	var totalCost float64
@@ -370,6 +443,9 @@ func evaluateRuleRecords(ruleName string, aspect Aspect, model string, records [
 	var totalQuality float64
 
 	for _, rec := range records {
+		if !rec.Outcome.IsFinite() {
+			continue
+		}
 		if rec.Key.Rule != ruleName {
 			continue
 		}
@@ -409,6 +485,9 @@ func evaluateRuleRecords(ruleName string, aspect Aspect, model string, records [
 // If any rule change strictly improves the objective on the held-out split (and
 // satisfies all declared constraints), it returns a ManifestProposal.
 func Propose(opts ProposeOptions) (*ManifestProposal, error) {
+	if !opts.Objective.IsFinite() {
+		return nil, errors.New("modelroute: objective contains non-finite or invalid parameters")
+	}
 	if err := opts.BaseManifest.Validate(); err != nil {
 		return nil, fmt.Errorf("modelroute: base manifest invalid: %w", err)
 	}
@@ -418,10 +497,29 @@ func Propose(opts ProposeOptions) (*ManifestProposal, error) {
 		records = opts.Journal.Records()
 	}
 
+	// Filter non-finite telemetry before splitting and reductions (#12112).
+	if len(records) > 0 {
+		var valid []OutcomeRecord
+		for _, r := range records {
+			if r.Outcome.IsFinite() {
+				valid = append(valid, r)
+			}
+		}
+		records = valid
+	}
+
 	var train, heldOut []OutcomeRecord
 	if len(opts.TrainRecords) > 0 && len(opts.HeldOutRecords) > 0 {
-		train = opts.TrainRecords
-		heldOut = opts.HeldOutRecords
+		for _, r := range opts.TrainRecords {
+			if r.Outcome.IsFinite() {
+				train = append(train, r)
+			}
+		}
+		for _, r := range opts.HeldOutRecords {
+			if r.Outcome.IsFinite() {
+				heldOut = append(heldOut, r)
+			}
+		}
 	} else {
 		if len(records) == 0 {
 			return nil, errors.New("modelroute: no outcome records provided for proposal")

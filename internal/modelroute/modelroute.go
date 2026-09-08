@@ -78,6 +78,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -628,12 +629,18 @@ func Combine(reduce Reduction, votes []Vote) (Result, error) {
 		return Result{Reduce: ReduceVote, Output: best, Winner: winnerForOutput(votes, best), Tally: tally, Members: len(votes)}, nil
 
 	case ReduceBestOf:
-		bi := 0
+		bi := -1
 		for i := range votes {
-			if votes[i].Score > votes[bi].Score ||
+			if math.IsNaN(votes[i].Score) || math.IsInf(votes[i].Score, 0) {
+				continue
+			}
+			if bi == -1 || votes[i].Score > votes[bi].Score ||
 				(votes[i].Score == votes[bi].Score && votes[i].Member.Model < votes[bi].Member.Model) {
 				bi = i
 			}
+		}
+		if bi == -1 {
+			bi = 0
 		}
 		return Result{Reduce: ReduceBestOf, Output: votes[bi].Output, Winner: votes[bi].Member.Model, Members: len(votes)}, nil
 
@@ -644,11 +651,20 @@ func Combine(reduce Reduction, votes []Vote) (Result, error) {
 			if err != nil {
 				return Result{}, fmt.Errorf("modelroute: all_reduce needs numeric member outputs, got %q: %w", v.Output, err)
 			}
+			if math.IsNaN(f) || math.IsInf(f, 0) {
+				return Result{}, fmt.Errorf("modelroute: all_reduce requires finite numeric member outputs, got %q", v.Output)
+			}
 			w := weightOf(v.Member)
 			sum += f * w
 			wsum += w
 		}
+		if wsum <= 0 || math.IsNaN(wsum) || math.IsInf(wsum, 0) {
+			return Result{}, fmt.Errorf("modelroute: all_reduce total weight must be positive and finite")
+		}
 		mean := sum / wsum
+		if math.IsNaN(mean) || math.IsInf(mean, 0) {
+			return Result{}, fmt.Errorf("modelroute: all_reduce produced non-finite mean")
+		}
 		return Result{Reduce: ReduceAllReduce, Output: strconv.FormatFloat(mean, 'g', -1, 64), Members: len(votes)}, nil
 
 	default:
@@ -656,9 +672,9 @@ func Combine(reduce Reduction, votes []Vote) (Result, error) {
 	}
 }
 
-// weightOf returns a member's effective weight (<= 0 means the default weight 1).
+// weightOf returns a member's effective weight (<= 0 or non-finite means the default weight 1).
 func weightOf(m Member) float64 {
-	if m.Weight <= 0 {
+	if math.IsNaN(m.Weight) || math.IsInf(m.Weight, 0) || m.Weight <= 0 {
 		return 1
 	}
 	return m.Weight

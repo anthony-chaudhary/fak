@@ -39,6 +39,7 @@ package modelroute
 // zero), so an unserved or unmeasured route never silently drags a mean down.
 
 import (
+	"math"
 	"sort"
 	"time"
 )
@@ -66,6 +67,18 @@ type Outcome struct {
 	Latency time.Duration `json:"latency_ns"`       // wall-clock the served call took
 	Quality float64       `json:"quality"`          // 0..1 quality score for the answer
 	Verify  Verification  `json:"verify,omitempty"` // provenance of Quality (verify.go); "" == self-reported
+}
+
+// IsFinite reports whether the outcome's numerical fields are finite and domain-valid (#12112).
+// A valid outcome must have non-negative finite cost and quality within [0.0, 1.0].
+func (o Outcome) IsFinite() bool {
+	if math.IsNaN(o.Cost) || math.IsInf(o.Cost, 0) || o.Cost < 0 {
+		return false
+	}
+	if math.IsNaN(o.Quality) || math.IsInf(o.Quality, 0) || o.Quality < 0 || o.Quality > 1.0 {
+		return false
+	}
+	return true
 }
 
 // AspectRuleKey is the per-(aspect,rule) key the feedback corpus aggregates on —
@@ -188,7 +201,12 @@ func (j *OutcomeJournal) Aggregate() Aggregate {
 		sumQuality float64
 	}
 	by := make(map[AspectRuleKey]*acc, len(j.records))
+	totalValid := 0
 	for _, r := range j.records {
+		if !r.Outcome.IsFinite() {
+			continue
+		}
+		totalValid++
 		a := by[r.Key]
 		if a == nil {
 			a = &acc{}
@@ -199,7 +217,7 @@ func (j *OutcomeJournal) Aggregate() Aggregate {
 		a.sumLatency += r.Outcome.Latency
 		a.sumQuality += r.Outcome.Quality
 	}
-	out := Aggregate{ByKey: make(map[AspectRuleKey]AspectRuleStats, len(by)), Total: len(j.records)}
+	out := Aggregate{ByKey: make(map[AspectRuleKey]AspectRuleStats, len(by)), Total: totalValid}
 	for k, a := range by {
 		n := float64(a.count)
 		out.ByKey[k] = AspectRuleStats{
