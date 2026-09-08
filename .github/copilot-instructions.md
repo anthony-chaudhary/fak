@@ -22,6 +22,10 @@ Must-know rules (enforced below the agent layer):
   branch and never trips `OFF_TRUNK`. Feature branches and off-trunk commits stay forbidden.
 - Commit by explicit path (`git commit -- <paths>`, never `git add -A`); sign off with
   `git commit -s` (DCO).
+- **Focus on "move forward" over "conclusions"** — frame diagnostics, benchmarks, and failed
+  attempts around actionable forward momentum. Rather than defeatist conclusions (*"X didn't work ...
+  therefore we suck..."*), always identify the concrete next action (*"the next step to get better
+  performance is X"*) and state the next checkable step.
 - Keep code comments succinct: omit comments that restate syntax or narrate each step. Preserve
   comments that explain non-obvious rationale, invariants, safety, concurrency, compatibility, or
   exported APIs; prefer clearer code and put durable tutorials in docs.
