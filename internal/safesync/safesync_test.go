@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 func TestParseNameStatusZ(t *testing.T) {
@@ -621,4 +623,117 @@ func readFile(t testing.TB, path string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func TestCurrentBranch_SanctionedWorkerWorktreeFallback(t *testing.T) {
+	t.Run("standard repo with detached HEAD returns error", func(t *testing.T) {
+		repo := t.TempDir()
+		git(t, repo, "init")
+		git(t, repo, "config", "user.name", "test")
+		git(t, repo, "config", "user.email", "test@example.com")
+		writeFile(t, filepath.Join(repo, "a.txt"), "hello\n")
+		git(t, repo, "add", ".")
+		git(t, repo, "commit", "-m", "init")
+		git(t, repo, "checkout", "--detach", "HEAD")
+
+		branch, err := currentBranch(context.Background(), RealRunner, repo)
+		if err == nil {
+			t.Fatalf("expected error, got branch %q", branch)
+		}
+		if !strings.Contains(err.Error(), "detached HEAD; no branch to sync") {
+			t.Fatalf("got error %v, want substring %q", err, "detached HEAD; no branch to sync")
+		}
+	})
+
+	t.Run("worker worktree with lease.json returns main", func(t *testing.T) {
+		repo := t.TempDir()
+		git(t, repo, "init")
+		git(t, repo, "config", "user.name", "test")
+		git(t, repo, "config", "user.email", "test@example.com")
+		writeFile(t, filepath.Join(repo, "a.txt"), "hello\n")
+		git(t, repo, "add", ".")
+		git(t, repo, "commit", "-m", "init")
+		git(t, repo, "checkout", "--detach", "HEAD")
+
+		writeFile(t, filepath.Join(repo, "lease.json"), `{"pid": 12345, "session_id": "sess-1"}`)
+
+		branch, err := currentBranch(context.Background(), RealRunner, repo)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if branch != "main" {
+			t.Fatalf("got branch %q, want %q", branch, "main")
+		}
+	})
+
+	t.Run("worker worktree with dos.toml returns dev", func(t *testing.T) {
+		repo := t.TempDir()
+		git(t, repo, "init")
+		git(t, repo, "config", "user.name", "test")
+		git(t, repo, "config", "user.email", "test@example.com")
+		writeFile(t, filepath.Join(repo, "a.txt"), "hello\n")
+		git(t, repo, "add", ".")
+		git(t, repo, "commit", "-m", "init")
+		git(t, repo, "checkout", "--detach", "HEAD")
+
+		writeFile(t, filepath.Join(repo, "lease.json"), `{"pid": 12345}`)
+		writeFile(t, filepath.Join(repo, "dos.toml"), "[branch_roles]\ndevelopment_branch = \"dev\"\n")
+
+		branch, err := currentBranch(context.Background(), RealRunner, repo)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if branch != "dev" {
+			t.Fatalf("got branch %q, want %q", branch, "dev")
+		}
+	})
+
+	t.Run("worker worktree with owner stamp returns dev", func(t *testing.T) {
+		parent := t.TempDir()
+		repo := filepath.Join(parent, "wt")
+		mkdir(t, repo)
+		git(t, repo, "init")
+		git(t, repo, "config", "user.name", "test")
+		git(t, repo, "config", "user.email", "test@example.com")
+		writeFile(t, filepath.Join(repo, "a.txt"), "hello\n")
+		git(t, repo, "add", ".")
+		git(t, repo, "commit", "-m", "init")
+		git(t, repo, "checkout", "--detach", "HEAD")
+
+		stampPath := workerworktree.OwnerStampPath(repo)
+		mkdir(t, filepath.Dir(stampPath))
+		writeFile(t, stampPath, `{"schema":"fak-worker-worktree-owner/1","pid":12345}`)
+		writeFile(t, filepath.Join(repo, "dos.toml"), "[branch_roles]\ndevelopment_branch = \"dev\"\n")
+
+		branch, err := currentBranch(context.Background(), RealRunner, repo)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if branch != "dev" {
+			t.Fatalf("got branch %q, want %q", branch, "dev")
+		}
+	})
+
+	t.Run("worker worktree with marker dir name returns dev", func(t *testing.T) {
+		parent := t.TempDir()
+		repo := filepath.Join(parent, "fak-worker-wt-testlane-42")
+		mkdir(t, repo)
+		git(t, repo, "init")
+		git(t, repo, "config", "user.name", "test")
+		git(t, repo, "config", "user.email", "test@example.com")
+		writeFile(t, filepath.Join(repo, "a.txt"), "hello\n")
+		git(t, repo, "add", ".")
+		git(t, repo, "commit", "-m", "init")
+		git(t, repo, "checkout", "--detach", "HEAD")
+
+		writeFile(t, filepath.Join(repo, "dos.toml"), "[branch_roles]\ndevelopment_branch = \"dev\"\n")
+
+		branch, err := currentBranch(context.Background(), RealRunner, repo)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if branch != "dev" {
+			t.Fatalf("got branch %q, want %q", branch, "dev")
+		}
+	})
 }

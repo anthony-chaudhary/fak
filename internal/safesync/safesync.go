@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 const (
@@ -489,9 +491,60 @@ func currentBranch(ctx context.Context, run Runner, repo string) (string, error)
 	}
 	branch := strings.TrimSpace(string(out))
 	if branch == "" || branch == "HEAD" {
+		if isSanctionedWorkerWorktree(repo) {
+			roles, _ := branchrole.Load(repo)
+			devBranch := strings.TrimSpace(roles.DevelopmentBranch)
+			if devBranch == "" {
+				devBranch = "main"
+			}
+			return devBranch, nil
+		}
 		return "", fmt.Errorf("detached HEAD; no branch to sync")
 	}
 	return branch, nil
+}
+
+func isSanctionedWorkerWorktree(repo string) bool {
+	if strings.TrimSpace(repo) == "" {
+		repo = "."
+	}
+	abs, err := filepath.Abs(repo)
+	if err != nil {
+		abs = filepath.Clean(repo)
+	}
+	if fi, err := os.Stat(abs); err == nil && !fi.IsDir() {
+		abs = filepath.Dir(abs)
+	}
+
+	for curr := abs; ; {
+		if workerworktree.IsWorkerWorktree(curr) {
+			return true
+		}
+		if lease, err := workerworktree.ReadWorkerLease(curr); err == nil {
+			if lease.PID > 0 || strings.TrimSpace(lease.SessionID) != "" {
+				return true
+			}
+		}
+		if fi, err := os.Stat(filepath.Join(curr, "lease.json")); err == nil && !fi.IsDir() {
+			return true
+		}
+		if fi, err := os.Stat(workerworktree.OwnerStampPath(curr)); err == nil && !fi.IsDir() {
+			return true
+		}
+		if fi, err := os.Stat(filepath.Join(curr, ".owner.json")); err == nil && !fi.IsDir() {
+			return true
+		}
+		if fi, err := os.Stat(filepath.Join(curr, "owner.json")); err == nil && !fi.IsDir() {
+			return true
+		}
+
+		parent := filepath.Dir(curr)
+		if parent == curr {
+			break
+		}
+		curr = parent
+	}
+	return false
 }
 
 func rev(ctx context.Context, run Runner, repo, ref string) (string, error) {
