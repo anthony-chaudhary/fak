@@ -361,6 +361,12 @@ func (s Store) Reopen(goalID, author, reference string) (Goal, error) {
 		}
 		for i := range r.Goals {
 			if r.Goals[i].GoalID == goalID {
+				if !isTerminal(r.Goals[i].Lifecycle) {
+					if r.Goals[i].Lifecycle == Paused {
+						return fmt.Errorf("goal %q is paused; use Update to resume non-terminal goal", goalID)
+					}
+					return fmt.Errorf("cannot reopen non-terminal goal %q with lifecycle %s", goalID, r.Goals[i].Lifecycle)
+				}
 				r.OutcomeEvidence = append(r.OutcomeEvidence, OutcomeEvidence{GoalID: goalID, Lifecycle: Active, Class: OperatorDeclaration, Author: strings.TrimSpace(author), Reference: strings.TrimSpace(reference), RecordedAt: s.now()})
 				r.Goals[i].Lifecycle, r.Goals[i].UpdatedAt = Active, s.now()
 				out = r.Goals[i]
@@ -532,6 +538,9 @@ func validateProvenance(p Provenance) error {
 }
 func validLifecycle(v Lifecycle) bool {
 	return v == Active || v == Achieved || v == Abandoned || v == Superseded || v == Blocked || v == Paused
+}
+func isTerminal(v Lifecycle) bool {
+	return v == Achieved || v == Abandoned || v == Superseded || v == Blocked
 }
 func validRelation(r Relation) bool {
 	return (r.Kind == "parent_goal" || r.Kind == "derived_from" || r.Kind == "supersedes") && strings.TrimSpace(r.GoalID) != ""

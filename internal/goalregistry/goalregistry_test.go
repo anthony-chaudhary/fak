@@ -171,3 +171,146 @@ func TestGenericUpdateCannotTerminalizeGoal(t *testing.T) {
 		t.Fatal("generic update terminalized goal")
 	}
 }
+
+func TestReopenLifecycleTransitionTable(t *testing.T) {
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	p := Provenance{Actor: "operator", Authority: "operator-declared"}
+
+	cases := []struct {
+		state       Lifecycle
+		terminal    bool
+		setup       func(s Store, g Goal) (Goal, error)
+		allowReopen bool
+	}{
+		{
+			state:       Active,
+			terminal:    false,
+			allowReopen: false,
+			setup: func(s Store, g Goal) (Goal, error) {
+				return g, nil
+			},
+		},
+		{
+			state:       Paused,
+			terminal:    false,
+			allowReopen: false,
+			setup: func(s Store, g Goal) (Goal, error) {
+				return s.Update(g.GoalID, g.Title, g.Summary, Paused)
+			},
+		},
+		{
+			state:       Achieved,
+			terminal:    true,
+			allowReopen: true,
+			setup: func(s Store, g Goal) (Goal, error) {
+				return s.Transition(g.GoalID, Achieved, OutcomeEvidence{
+					Class:     IndependentWitness,
+					Author:    "judge",
+					Reference: "test:achieved",
+				})
+			},
+		},
+		{
+			state:       Abandoned,
+			terminal:    true,
+			allowReopen: true,
+			setup: func(s Store, g Goal) (Goal, error) {
+				return s.Transition(g.GoalID, Abandoned, OutcomeEvidence{
+					Class:     IndependentWitness,
+					Author:    "judge",
+					Reference: "test:abandoned",
+				})
+			},
+		},
+		{
+			state:       Superseded,
+			terminal:    true,
+			allowReopen: true,
+			setup: func(s Store, g Goal) (Goal, error) {
+				return s.Transition(g.GoalID, Superseded, OutcomeEvidence{
+					Class:     IndependentWitness,
+					Author:    "judge",
+					Reference: "test:superseded",
+				})
+			},
+		},
+		{
+			state:       Blocked,
+			terminal:    true,
+			allowReopen: true,
+			setup: func(s Store, g Goal) (Goal, error) {
+				return s.Transition(g.GoalID, Blocked, OutcomeEvidence{
+					Class:     IndependentWitness,
+					Author:    "judge",
+					Reference: "test:blocked",
+				})
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(string(tc.state), func(t *testing.T) {
+			s := Store{
+				Path: filepath.Join(t.TempDir(), "goals.json"),
+				Now:  func() time.Time { return now },
+			}
+			g, err := s.Create("Test goal", "summary", p, nil)
+			if err != nil {
+				t.Fatalf("create failed: %v", err)
+			}
+			g, err = tc.setup(s, g)
+			if err != nil {
+				t.Fatalf("setup %s failed: %v", tc.state, err)
+			}
+			if g.Lifecycle != tc.state {
+				t.Fatalf("setup produced lifecycle %s; want %s", g.Lifecycle, tc.state)
+			}
+
+			initialEvidence, err := s.OutcomeEvidence(g.GoalID)
+			if err != nil {
+				t.Fatalf("get initial evidence: %v", err)
+			}
+
+			reopened, err := s.Reopen(g.GoalID, "operator", "reopen-ref")
+			if tc.allowReopen {
+				if err != nil {
+					t.Fatalf("reopen from terminal state %s failed: %v", tc.state, err)
+				}
+				if reopened.Lifecycle != Active {
+					t.Fatalf("reopened lifecycle = %s; want %s", reopened.Lifecycle, Active)
+				}
+				evidence, err := s.OutcomeEvidence(g.GoalID)
+				if err != nil {
+					t.Fatalf("get outcome evidence: %v", err)
+				}
+				if len(evidence) != len(initialEvidence)+1 {
+					t.Fatalf("evidence count = %d; want %d", len(evidence), len(initialEvidence)+1)
+				}
+				last := evidence[len(evidence)-1]
+				if last.Lifecycle != Active || last.Class != OperatorDeclaration || last.Author != "operator" || last.Reference != "reopen-ref" {
+					t.Fatalf("reopen evidence = %+v", last)
+				}
+			} else {
+				if err == nil {
+					t.Fatalf("reopen from non-terminal state %s succeeded unexpectedly", tc.state)
+				}
+				// Verify refusals leave state and evidence unchanged
+				evidence, err := s.OutcomeEvidence(g.GoalID)
+				if err != nil {
+					t.Fatalf("get outcome evidence after refusal: %v", err)
+				}
+				if len(evidence) != len(initialEvidence) {
+					t.Fatalf("refused reopen mutated evidence: before=%d after=%d", len(initialEvidence), len(evidence))
+				}
+				cur, _, err := s.Show(g.GoalID)
+				if err != nil {
+					t.Fatalf("show goal: %v", err)
+				}
+				if cur.Lifecycle != tc.state {
+					t.Fatalf("refused reopen mutated lifecycle: got %s; want %s", cur.Lifecycle, tc.state)
+				}
+			}
+		})
+	}
+}
