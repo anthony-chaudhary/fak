@@ -198,3 +198,17 @@ func TestCensusIdleAndMultiSession(t *testing.T) {
 		t.Errorf("recency split = %v, want one LIVE + one IDLE", byLive)
 	}
 }
+
+// TestCensusDeduplicatesUnnamespacedFakRows verifies that unnamespaced host fak observations
+// are omitted from the cross-agent census and never duplicate rows (#12131).
+func TestCensusDeduplicatesUnnamespacedFakRows(t *testing.T) {
+	home := t.TempDir()
+
+	rows := Census(home, censusFixtureNow)
+
+	for _, r := range rows {
+		if r.Agent == "fak" && r.Kind == KindNoNamespace {
+			t.Errorf("unexpected unnamespaced fak row in census: %+v", r)
+		}
+	}
+}

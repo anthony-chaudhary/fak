@@ -136,8 +136,17 @@ var uuidRE = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0
 // The result is stably sorted by (agent, namespace, session).
 func Census(home string, now time.Time) []CensusRow {
 	var rows []CensusRow
+	seenNoNamespace := make(map[string]bool)
 	for _, p := range harnessprofile.Profiles() {
-		rows = append(rows, censusForProfile(home, now, p)...)
+		for _, r := range censusForProfile(home, now, p) {
+			if r.Kind == KindNoNamespace {
+				if seenNoNamespace[r.Agent] {
+					continue
+				}
+				seenNoNamespace[r.Agent] = true
+			}
+			rows = append(rows, r)
+		}
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].Agent != rows[j].Agent {
@@ -156,6 +165,9 @@ func Census(home string, now time.Time) []CensusRow {
 func censusForProfile(home string, now time.Time, p harnessprofile.HarnessProfile) []CensusRow {
 	layout, known := nsLayouts[p.Name]
 	if home == "" || p.ConfigHomeGlob == "" || !known {
+		if p.Name == "fak" {
+			return nil
+		}
 		return []CensusRow{noNamespaceRow(p, known)}
 	}
 	homes, _ := filepath.Glob(filepath.Join(home, p.ConfigHomeGlob))
@@ -173,6 +185,9 @@ func censusForProfile(home string, now time.Time, p harnessprofile.HarnessProfil
 		}
 	}
 	if len(roots) == 0 {
+		if p.Name == "fak" {
+			return nil
+		}
 		return []CensusRow{{
 			Agent:    p.Name,
 			Kind:     KindNoNamespace,
