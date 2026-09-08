@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -157,6 +158,14 @@ func uniqueClean(in []string) []string {
 }
 
 func isSubpath(parent, child string) bool {
+	if isWindowsVolumePath(parent) || isWindowsVolumePath(child) {
+		if !isWindowsVolumePath(parent) || !isWindowsVolumePath(child) {
+			return false
+		}
+		p := strings.ToLower(path.Clean(strings.ReplaceAll(parent, `\`, "/")))
+		c := strings.ToLower(path.Clean(strings.ReplaceAll(child, `\`, "/")))
+		return p == c || strings.HasPrefix(c, strings.TrimSuffix(p, "/")+"/")
+	}
 	p := filepath.Clean(parent)
 	c := filepath.Clean(child)
 	if strings.EqualFold(p, c) {
@@ -168,6 +177,14 @@ func isSubpath(parent, child string) bool {
 		pLower += string(filepath.Separator)
 	}
 	return strings.HasPrefix(cLower, pLower)
+}
+
+func isWindowsVolumePath(p string) bool {
+	if strings.HasPrefix(p, `\\`) {
+		return true
+	}
+	return len(p) >= 3 && p[1] == ':' && (p[2] == '\\' || p[2] == '/') &&
+		((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z'))
 }
 
 func checkOneDriveSync(path string) (bool, string) {
