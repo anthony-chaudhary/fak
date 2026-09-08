@@ -9,8 +9,8 @@
   "slots_per_layer": 16,
   "num_layers": 40,
   "expert_chunk_size_bytes": 2894064,
-  "sustained_streaming_gb_s": 593.697818144351,
-  "achieved_decode_tok_s": 715.1653676879705,
+  "sustained_streaming_gb_s": 590.1747784656513,
+  "achieved_decode_tok_s": 710.9215320359016,
   "min_bandwidth_threshold_gb_s": 12,
   "min_decode_rate_threshold_tok_s": 15,
   "vram_enclosed_proven": true
