@@ -29,11 +29,45 @@ func TestFormatOpencodePromptHardwareValidation(t *testing.T) {
 			if !tc.want {
 				return
 			}
-			for _, required := range []string{"During investigation", "fak-dev amd-strix-probe", "shared lease", "exclusive lease", "flock -w 30 -x", "do not nest locks", "source-bound receipt", "dirty patch digest", "built executable digest", "fak-native", "matched baseline/candidate", "hardware validation PENDING"} {
+			for _, required := range []string{
+				"During investigation",
+				"fak-dev amd-strix-probe",
+				"shared lease",
+				"exclusive lease",
+				"flock -w 30 -x",
+				"do not nest locks",
+				"source-bound receipt",
+				"dirty patch digest",
+				"built executable digest",
+				"fak-native",
+				"matched baseline/candidate",
+				"hardware validation PENDING",
+				"PENDING_HARDWARE",
+				"green software increment",
+			} {
 				if !strings.Contains(prompt, required) {
 					t.Errorf("missing %q", required)
 				}
 			}
 		})
+	}
+}
+
+func TestHardwareValidation_ShiftLeftSoftwareLandingPrecedesPhysicalGates(t *testing.T) {
+	iss := Issue{
+		Title: "perf: accelerate Strix Halo decode",
+		Lane:  "compute",
+	}
+	prompt := FormatOpencodePrompt(iss)
+	for _, required := range []string{
+		"Software validation and landing precede physical qualification gates",
+		"author deterministic test witness, implement atomic fix, pass package tests, and land green software increment before physical device qualification",
+		"hardware validation PENDING",
+		"PENDING_HARDWARE",
+		"green software increment must still land while physical qualification is pending",
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Errorf("missing %q in hardware guidance prompt", required)
+		}
 	}
 }

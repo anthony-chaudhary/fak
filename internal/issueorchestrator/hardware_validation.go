@@ -9,10 +9,11 @@ func hardwareValidationGuidance(issue Issue) string {
 		return ""
 	}
 	return "\nPhysical hardware validation:\n" +
+		"- Software validation and landing precede physical qualification gates (author deterministic test witness, implement atomic fix, pass package tests, and land green software increment before physical device qualification).\n" +
 		"- During investigation, run `fak-dev amd-strix-probe` early to discover the LAN AMD Strix Halo and choose a bounded device correctness witness. Read docs/fleet-compute-nodes.md for the sanctioned route.\n" +
 		"- Coordinate access on the appliance using its canonical GPU lock (`FAK_GPU_LEASE`, default /tmp/fak-gpu.lease). Use a shared lease for low-impact inspection or explicitly compatible bounded correctness checks; hold an exclusive lease across the entire baseline/candidate performance comparison. External test executables can use `flock -w 30 -x /tmp/fak-gpu.lease <command>` remotely; use the configured lock path when overridden. Commands that already lease internally, such as modelbench, do not nest locks. Busy hardware means bounded waiting or independent local work, never bypassing the lease.\n" +
 		"- Before done, execute the changed code on the physical device and capture a source-bound receipt: exact source revision plus dirty patch digest when applicable, built executable digest, actual engine/device identity, command, lease mode, exit status, and observed output. Keep native execution fak-native. `fak validate --strix` alone does not establish that a pre-existing remote executable contains your change.\n" +
-		"- Performance claims additionally require matched baseline/candidate workload and configuration with measured timings under exclusive access. A correctness PASS is not a speedup measurement. If hardware is unavailable/busy or source binding is missing, report hardware validation PENDING with the exact next command; unit tests or historical receipts cannot satisfy the physical witness.\n"
+		"- Performance claims additionally require matched baseline/candidate workload and configuration with measured timings under exclusive access. A correctness PASS is not a speedup measurement. If hardware is unavailable/busy or source binding is missing, report hardware validation PENDING (PENDING_HARDWARE) with the exact next command; unit tests or historical receipts cannot satisfy the physical witness. The green software increment must still land while physical qualification is pending.\n"
 }
 
 func needsHaloValidation(issue Issue) bool {

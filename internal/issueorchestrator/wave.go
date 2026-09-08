@@ -47,14 +47,31 @@ func PlanWaves(issues []Issue, opts WavePlanOptions) Plan {
 		}
 	}
 
+	var heldLeases []debtlane.HeldLease
 	heldLanesMap := make(map[string]bool)
 	if opts.AutoDetectHeld && workspace != "" {
-		discovered, _ := debtlane.DiscoverHeldLanes(workspace)
-		for _, l := range discovered {
-			lower := strings.ToLower(strings.TrimSpace(l))
+		discovered, _ := debtlane.DiscoverHeldLeases(workspace)
+		heldLeases = append(heldLeases, discovered...)
+		for _, hl := range discovered {
+			lower := strings.ToLower(strings.TrimSpace(hl.Lane))
 			if lower != "" {
 				heldLanesMap[lower] = true
-				plan.HeldLanes = append(plan.HeldLanes, l)
+				if !containsStr(plan.HeldLanes, hl.Lane) {
+					plan.HeldLanes = append(plan.HeldLanes, hl.Lane)
+				}
+			}
+		}
+		sort.Strings(plan.HeldLanes)
+	}
+	if len(opts.HeldLeases) > 0 {
+		heldLeases = append(heldLeases, opts.HeldLeases...)
+		for _, hl := range opts.HeldLeases {
+			lower := strings.ToLower(strings.TrimSpace(hl.Lane))
+			if lower != "" {
+				heldLanesMap[lower] = true
+				if !containsStr(plan.HeldLanes, hl.Lane) {
+					plan.HeldLanes = append(plan.HeldLanes, hl.Lane)
+				}
 			}
 		}
 		sort.Strings(plan.HeldLanes)
@@ -62,7 +79,7 @@ func PlanWaves(issues []Issue, opts WavePlanOptions) Plan {
 
 	if opts.AutoExpand {
 		var diag PlanDiagnostics
-		issues, diag = DynamicSlidingWindow(issues, opts, heldLanesMap, excludedIssuesMap, excludedLanesMap)
+		issues, diag = DynamicSlidingWindow(issues, opts, heldLanesMap, heldLeases, excludedIssuesMap, excludedLanesMap)
 		plan.Diagnostics = &diag
 	} else if opts.Limit > 0 && len(issues) > opts.Limit {
 		issues = issues[:opts.Limit]
@@ -120,7 +137,7 @@ func PlanWaves(issues []Issue, opts WavePlanOptions) Plan {
 		}
 
 		// Check if held by an active lease
-		if isHeld(iss, heldLanesMap) {
+		if isHeld(iss, heldLanesMap, heldLeases) {
 			plan.HeldIssues = append(plan.HeldIssues, iss.Number)
 			continue
 		}
@@ -370,18 +387,46 @@ func (o WavePlanOptions) toPolicyOptions() issuepolicy.Options {
 	}
 }
 
-func isHeld(iss Issue, heldLanes map[string]bool) bool {
-	if len(heldLanes) == 0 {
+func isHeld(iss Issue, heldLanes map[string]bool, heldLeases []debtlane.HeldLease) bool {
+	if len(heldLanes) == 0 && len(heldLeases) == 0 {
 		return false
 	}
-	if iss.Lane != "" && heldLanes[strings.ToLower(iss.Lane)] {
-		return true
+
+	if len(iss.Paths) > 0 {
+		for _, p := range iss.Paths {
+			for _, hl := range heldLeases {
+				if len(hl.Tree) > 0 {
+					for _, ht := range hl.Tree {
+						if debtlane.TreesOverlap(p, ht) {
+							return true
+						}
+					}
+				} else if hl.Lane != "" {
+					target := "internal/" + strings.ToLower(hl.Lane)
+					if debtlane.TreesOverlap(p, target) || debtlane.TreesOverlap(p, hl.Lane) {
+						return true
+					}
+				}
+			}
+			if len(heldLeases) == 0 {
+				clean := filepath.ToSlash(filepath.Clean(p))
+				for held := range heldLanes {
+					target := "internal/" + held
+					if clean == target || strings.HasPrefix(clean, target+"/") || debtlane.TreesOverlap(clean, target) || debtlane.TreesOverlap(clean, held) {
+						return true
+					}
+				}
+			}
+		}
+		return false
 	}
-	for _, p := range iss.Paths {
-		clean := filepath.ToSlash(filepath.Clean(p))
-		for held := range heldLanes {
-			target := "internal/" + held
-			if clean == target || strings.HasPrefix(clean, target+"/") {
+
+	if iss.Lane != "" {
+		if heldLanes != nil && heldLanes[strings.ToLower(iss.Lane)] {
+			return true
+		}
+		for _, hl := range heldLeases {
+			if strings.EqualFold(hl.Lane, iss.Lane) {
 				return true
 			}
 		}
@@ -448,12 +493,9 @@ func isUrgent(iss Issue) bool {
 }
 
 func issuesCollide(a, b Issue, graph map[string]map[string]struct{}) bool {
-	// 1. Same lane always collides (two workers cannot hold the same lane lease simultaneously)
-	if a.Lane != "" && b.Lane != "" && strings.EqualFold(a.Lane, b.Lane) {
-		return true
-	}
-
-	// 2. Path tree overlap
+	// If both issues declare concrete Paths:
+	// same-lane issues with disjoint paths do NOT collide! They collide only if their
+	// paths overlap (debtlane.TreesOverlap) or if an import graph contention exists across different lanes.
 	if len(a.Paths) > 0 && len(b.Paths) > 0 {
 		for _, pa := range a.Paths {
 			for _, pb := range b.Paths {
@@ -462,9 +504,20 @@ func issuesCollide(a, b Issue, graph map[string]map[string]struct{}) bool {
 				}
 			}
 		}
+		if a.Lane != "" && b.Lane != "" && !strings.EqualFold(a.Lane, b.Lane) && graph != nil {
+			if debtlane.ImportsContend(a.Lane, b.Lane, graph) {
+				return true
+			}
+		}
+		return false
 	}
 
-	// 2. Package import graph contention
+	// If either issue has no paths declared, same-lane defaults to colliding.
+	if a.Lane != "" && b.Lane != "" && strings.EqualFold(a.Lane, b.Lane) {
+		return true
+	}
+
+	// Cross-lane package import graph contention
 	if a.Lane != "" && b.Lane != "" && graph != nil {
 		if debtlane.ImportsContend(a.Lane, b.Lane, graph) {
 			return true
@@ -532,6 +585,7 @@ func DynamicSlidingWindow(
 	issues []Issue,
 	opts WavePlanOptions,
 	heldLanesMap map[string]bool,
+	heldLeases []debtlane.HeldLease,
 	excludedIssuesMap map[int]bool,
 	excludedLanesMap map[string]bool,
 ) ([]Issue, PlanDiagnostics) {
@@ -587,7 +641,7 @@ func DynamicSlidingWindow(
 		if opts.LaneFilter != "" && !strings.EqualFold(iss.Lane, opts.LaneFilter) {
 			return false
 		}
-		if isHeld(iss, heldLanesMap) {
+		if isHeld(iss, heldLanesMap, heldLeases) {
 			return false
 		}
 		if isSubdivideTarget(iss) {
