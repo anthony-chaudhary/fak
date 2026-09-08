@@ -814,7 +814,7 @@ func TestLandIsolatedHappyPathUsesTempIndexAndCASRefUpdate(t *testing.T) {
 	}
 }
 
-func TestLandIsolatedPostMergeVerificationFailureRefusesCAS(t *testing.T) {
+func TestLandIsolatedCandidateVerificationRefusalRequiresReconciliation(t *testing.T) {
 	g := newFakeGit().
 		reply("symbolic-ref", 0, "refs/heads/main\n").
 		reply("rev-parse", 0, "oldhead000\n").
@@ -841,12 +841,18 @@ func TestLandIsolatedPostMergeVerificationFailureRefusesCAS(t *testing.T) {
 	if res.OK {
 		t.Fatalf("expected res.OK=false, got %+v", res)
 	}
+	if res.Code != LandResultReconciliationRequired || !res.Preserved {
+		t.Fatalf("verification refusal must require reconciliation and preserve the worker: %+v", res)
+	}
 	if !verifyCalled || verifiedPath == "/wt" || !strings.Contains(verifiedPath, "fak-cand-validate-") {
 		t.Fatalf("expected verify to be called on isolated candidate dir, called=%v path=%q", verifyCalled, verifiedPath)
 	}
 	expectedReason := "post-merge compilation verification failed, refusing CAS update: syntax error in merged code"
 	if res.Reason != expectedReason {
 		t.Fatalf("expected reason %q, got %q", expectedReason, res.Reason)
+	}
+	if res.RecoveryRef == "" {
+		t.Fatalf("verification refusal must retain the anchored recovery ref: %+v", res)
 	}
 
 	// CAS update must be refused and update-ref must never be called.
@@ -897,7 +903,7 @@ func TestLandIsolatedPostMergeVerificationSuccessProceedsWithCAS(t *testing.T) {
 	}
 }
 
-func TestLandIsolatedDisambiguationRefusalPreservesStateAndWorkerDiff(t *testing.T) {
+func TestLandIsolatedDisambiguationRefusalRequiresReconciliation(t *testing.T) {
 	g := isolatedHappyFake()
 	oldRead := readDisambiguation
 	defer func() { readDisambiguation = oldRead }()
@@ -916,6 +922,9 @@ func TestLandIsolatedDisambiguationRefusalPreservesStateAndWorkerDiff(t *testing
 	if !handled || res.OK || res.Committed {
 		t.Fatalf("post-apply rejection must be handled before a durable commit: handled=%v result=%+v", handled, res)
 	}
+	if res.Code != LandResultReconciliationRequired || !res.Preserved {
+		t.Fatalf("disambiguation refusal must require reconciliation and preserve the worker: %+v", res)
+	}
 	if res.Disambiguation.PostApply.Detail == "" || res.Disambiguation.PostApply.SemanticValid {
 		t.Fatalf("machine-readable refusal witness missing: %+v", res.Disambiguation)
 	}
@@ -933,6 +942,120 @@ func TestLandIsolatedDisambiguationRefusalPreservesStateAndWorkerDiff(t *testing
 	}
 	if countVerb("commit-tree") != 0 || countVerb("update-ref") != 0 || countVerb("reset") != 0 || countVerb("checkout") != 0 {
 		t.Fatalf("refusal changed trunk/index/worker state: calls=%v", g.calls)
+	}
+}
+
+func TestLandIsolatedRecoveryRemoteCandidateRefusalRequiresReconciliation(t *testing.T) {
+	const (
+		root   = "/trunk"
+		worker = "/wt"
+		diff   = "diff --git a/x b/x\n@@\n-o\n+n\n"
+	)
+	type outcome struct {
+		res     Result
+		handled bool
+		git     *fakeGit
+	}
+	tests := []struct {
+		name       string
+		run        func(*testing.T) outcome
+		wantReason string
+		wantDetail string
+		check      func(*testing.T, Result)
+	}{
+		{
+			name: "recovery anchor publication",
+			run: func(t *testing.T) outcome {
+				g := isolatedHappyFake()
+				anchorFail := func(repo string, env map[string]string, args []string) (int, string) {
+					if len(args) > 1 && gitVerb(args) == "update-ref" && args[1] == "--create-reflog" {
+						g.envCalls = append(g.envCalls, append([]string{}, args...))
+						return 1, "anchor denied"
+					}
+					return g.runEnv(repo, env, args)
+				}
+				res, handled := landIsolated(root, worker, diff, writeMsg(t, "fix: anchor"), []string{"x"}, nil, g.run, GitEnvRunner(anchorFail))
+				return outcome{res: res, handled: handled, git: g}
+			},
+			wantReason: "isolated land recovery anchor failed — trunk unchanged",
+			wantDetail: "anchor denied",
+			check: func(t *testing.T, res Result) {
+				if res.RecoveryRef == "" {
+					t.Fatalf("anchor refusal must retain the attempted recovery ref: %+v", res)
+				}
+			},
+		},
+		{
+			name: "required remote recovery witness",
+			run: func(t *testing.T) outcome {
+				g := isolatedHappyFake().reply("push", 1, "remote offline")
+				cfg := newLandConfig([]LandOption{WithRecoveryRemote("origin", true)})
+				res, handled := landIsolated(root, worker, diff, writeMsg(t, "fix: remote"), []string{"x"}, nil, g.run, g.runEnv, cfg)
+				return outcome{res: res, handled: handled, git: g}
+			},
+			wantReason: "required remote recovery witness failed — trunk unchanged",
+			wantDetail: "remote push failed",
+			check: func(t *testing.T, res Result) {
+				if res.RecoveryRef == "" || res.RemoteRecovery == nil || res.RemoteRecovery.Witnessed {
+					t.Fatalf("remote refusal must retain local and remote recovery evidence: %+v", res)
+				}
+			},
+		},
+		{
+			name: "candidate checkout",
+			run: func(t *testing.T) outcome {
+				g := isolatedHappyFake().reply("worktree", 1, "checkout denied")
+				res, handled := landIsolated(root, worker, diff, writeMsg(t, "fix: checkout"), []string{"x"}, VerifyHook(func(string) (bool, string) {
+					return true, ""
+				}), g.run, g.runEnv)
+				return outcome{res: res, handled: handled, git: g}
+			},
+			wantReason: "post-merge compilation verification failed, refusing CAS update: git candidate checkout failed: checkout denied",
+			wantDetail: "git candidate checkout failed",
+			check: func(t *testing.T, res Result) {
+				if res.RecoveryRef == "" {
+					t.Fatalf("candidate checkout refusal must retain the recovery ref: %+v", res)
+				}
+			},
+		},
+		{
+			name: "candidate verification",
+			run: func(t *testing.T) outcome {
+				g := isolatedHappyFake().reply("worktree", 0, "")
+				res, handled := landIsolated(root, worker, diff, writeMsg(t, "fix: verify"), []string{"x"}, VerifyHook(func(string) (bool, string) {
+					return false, "candidate build failed"
+				}), g.run, g.runEnv)
+				return outcome{res: res, handled: handled, git: g}
+			},
+			wantReason: "post-merge compilation verification failed, refusing CAS update: candidate build failed",
+			wantDetail: "candidate build failed",
+			check: func(t *testing.T, res Result) {
+				if res.RecoveryRef == "" {
+					t.Fatalf("candidate verification refusal must retain the recovery ref: %+v", res)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.run(t)
+			if !got.handled || got.res.OK || got.res.Applied || got.res.Committed {
+				t.Fatalf("pre-CAS refusal must be terminal without a land: handled=%v result=%+v", got.handled, got.res)
+			}
+			if got.res.Code != LandResultReconciliationRequired || !got.res.Preserved {
+				t.Fatalf("pre-CAS refusal must require reconciliation and preserve the worker: %+v", got.res)
+			}
+			if got.res.Reason != tt.wantReason || !strings.Contains(got.res.Detail, tt.wantDetail) {
+				t.Fatalf("branch evidence changed: reason=%q detail=%q", got.res.Reason, got.res.Detail)
+			}
+			if got.res.Path != worker {
+				t.Fatalf("refusal path = %q, want preserved worker %q", got.res.Path, worker)
+			}
+			if calls := got.git.callsWithPrefix("update-ref", "refs/heads/main"); len(calls) != 0 {
+				t.Fatalf("pre-CAS refusal moved trunk: %v", calls)
+			}
+			tt.check(t, got.res)
+		})
 	}
 }
 

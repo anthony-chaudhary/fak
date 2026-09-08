@@ -26,14 +26,26 @@ const (
 )
 
 func isolatedLandReconciliation(wtPath, reason, detail string) (Result, bool) {
-	return Result{
-		OK:        false,
-		Code:      LandResultReconciliationRequired,
-		Path:      wtPath,
-		Preserved: true,
-		Reason:    "isolated land requires reconciliation: " + reason,
-		Detail:    tail(detail, 300),
-	}, false
+	return isolatedLandReconciliationResult(wtPath, Result{
+		OK:     false,
+		Path:   wtPath,
+		Reason: "isolated land requires reconciliation: " + reason,
+		Detail: tail(detail, 300),
+	}), false
+}
+
+// isolatedLandReconciliationResult applies the portable fail-closed receipt
+// contract to a branch-specific refusal without rewriting its evidence. Direct
+// pre-CAS gates use this form because their stable Reason strings and structured
+// disambiguation/recovery fields are consumed by existing operators.
+func isolatedLandReconciliationResult(wtPath string, result Result) Result {
+	result.OK = false
+	result.Code = LandResultReconciliationRequired
+	result.Preserved = true
+	if result.Path == "" {
+		result.Path = wtPath
+	}
+	return result
 }
 
 // LandRefusalRetryable reports whether a refused Land is worth re-attempting on
@@ -720,7 +732,7 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 			disambiguation, valid = verifyAppliedDisambiguation(root, wtPath, treeSHA)
 			finishAnalysis()
 			if !valid {
-				return Result{OK: false, Path: root, Reason: "post-apply disambiguation invariant failed", Detail: disambiguation.compactDetail(), Disambiguation: disambiguation}, true
+				return isolatedLandReconciliationResult(wtPath, Result{Path: root, Reason: "post-apply disambiguation invariant failed", Detail: disambiguation.compactDetail(), Disambiguation: disambiguation}), true
 			}
 		}
 		finishCommit := beginLandPhase(tracker, "commit-construction", attempt)
@@ -738,7 +750,7 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 		recoveryRef, anchorErr := AnchorRecoveryEntry(root, wtPath, newCommit, func(r string, a []string) (int, string) { return runEnv(genv, r, env, a) })
 		if anchorErr != nil {
 			finishRecovery()
-			return Result{OK: false, Reason: "isolated land recovery anchor failed — trunk unchanged", Detail: anchorErr.Error()}, true
+			return isolatedLandReconciliationResult(wtPath, Result{Reason: "isolated land recovery anchor failed — trunk unchanged", Detail: anchorErr.Error(), RecoveryRef: recoveryRef}), true
 		}
 		var remoteReceipt *RemoteReadback
 		if cfg.recoveryRemote != "" {
@@ -746,7 +758,7 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 			remoteReceipt = &receipt
 			if cfg.requireRemote && !receipt.Witnessed {
 				finishRecovery()
-				return Result{OK: false, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt, Reason: "required remote recovery witness failed — trunk unchanged", Detail: receipt.Reason}, true
+				return isolatedLandReconciliationResult(wtPath, Result{RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt, Reason: "required remote recovery witness failed — trunk unchanged", Detail: receipt.Reason}), true
 			}
 		}
 		finishRecovery()
@@ -756,7 +768,12 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 			ok, detail := verifyTopologyCandidate(root, newCommit, "", verify, git)
 			finishVerify()
 			if !ok {
-				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: " + detail}, true
+				return isolatedLandReconciliationResult(wtPath, Result{
+					Reason:         "post-merge compilation verification failed, refusing CAS update: " + detail,
+					Detail:         detail,
+					RecoveryRef:    recoveryRef,
+					RemoteRecovery: remoteReceipt,
+				}), true
 			}
 		}
 
