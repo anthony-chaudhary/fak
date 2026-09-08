@@ -13,6 +13,8 @@ package ctxmmu
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -79,6 +81,7 @@ type MMU struct {
 	maxHeld   int                // cap on len(held); 0 in zero-value, set by constructors
 	pageOutID string             // keyed page-out codec id (default "blob"; FAK_PAGEOUT_BACKEND)
 	staging   *PagedStore        // in-memory staging and read-through cache for paged refs (#10018)
+	ledger    *QuarantineLedger  // quarantine ledger tracking quarantined digests across operations (#12055, #12057)
 }
 
 // New builds the registered-default-shaped gate with the standard quarantine-ledger
@@ -115,15 +118,38 @@ func NewWithLimit(maxHeld int) *MMU {
 		maxHeld = DefaultMaxHeld
 	}
 	m := &MMU{
-		held:       map[string]abi.Ref{},
-		cleared:    map[string]bool{},
-		lastTouch:  map[string]int64{},
-		maxHeld:    maxHeld,
-		pageOutID:  pageOutBackendID(),
-		staging:    NewPagedStore(DefaultPagedStoreMaxBytes, maxHeld*2),
+		held:      map[string]abi.Ref{},
+		cleared:   map[string]bool{},
+		lastTouch: map[string]int64{},
+		maxHeld:   maxHeld,
+		pageOutID: pageOutBackendID(),
+		staging:   NewPagedStore(DefaultPagedStoreMaxBytes, maxHeld*2),
+		ledger:    DefaultQuarantineLedger(),
 	}
 	registerActiveMMU(m)
 	return m
+}
+
+func (m *MMU) quarantineLedger() *QuarantineLedger {
+	if m != nil && m.ledger != nil {
+		return m.ledger
+	}
+	return DefaultQuarantineLedger()
+}
+
+func (m *MMU) SetQuarantineLedger(l *QuarantineLedger) {
+	if m != nil {
+		m.ledger = l
+	}
+}
+
+func (m *MMU) isQuarantined(digest string) bool {
+	if m != nil && m.ledger != nil {
+		if m.ledger.IsQuarantined(digest) {
+			return true
+		}
+	}
+	return IsQuarantined(digest)
 }
 
 func (m *MMU) stagingStore() *PagedStore {
@@ -152,12 +178,75 @@ func (m *MMU) unstagePaged(digest string) {
 }
 
 func (m *MMU) getStaged(digest string) ([]byte, bool) {
-	if m != nil && m.staging != nil {
+	if m == nil {
+		return DefaultPagedStore().Get(digest)
+	}
+	clean := strings.TrimPrefix(digest, "sha256:")
+	m.mu.Lock()
+	if m.isHeldUnclearedLocked(clean, digest) {
+		m.mu.Unlock()
+		return nil, false
+	}
+	m.mu.Unlock()
+
+	if m.isQuarantined(clean) || m.isQuarantined(digest) {
+		return nil, false
+	}
+
+	if m.staging != nil {
 		if b, ok := m.staging.Get(digest); ok {
 			return b, true
 		}
+		if b, ok := m.staging.Get(clean); ok {
+			return b, true
+		}
 	}
-	return DefaultPagedStore().Get(digest)
+	if b, ok := DefaultPagedStore().Get(digest); ok {
+		return b, true
+	}
+	return DefaultPagedStore().Get(clean)
+}
+
+func (m *MMU) isHeldUnclearedLocked(clean, digest string) bool {
+	if m == nil || m.held == nil {
+		return false
+	}
+	key := clean
+	handle, ok := m.held[clean]
+	if !ok {
+		key = digest
+		handle, ok = m.held[digest]
+	}
+	if !ok {
+		for k, h := range m.held {
+			hClean := strings.TrimPrefix(h.Digest, "sha256:")
+			if hClean == clean || h.Digest == digest || h.Digest == clean {
+				key = k
+				handle = h
+				ok = true
+				break
+			}
+		}
+	}
+	if ok {
+		_ = handle
+		if !m.cleared[key] {
+			return true
+		}
+		if _, inHeld := m.held[clean]; inHeld && !m.cleared[clean] {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *MMU) isHeldUncleared(clean, digest string) bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.isHeldUnclearedLocked(clean, digest)
 }
 
 // pageOutBackendID is the keyed page-out codec id the MMU pages cold/quarantined
@@ -429,6 +518,24 @@ func (m *MMU) quarantineResult(ctx context.Context, r *abi.Result, reason abi.Re
 	m.mu.Unlock()
 	m.stagePaged(handle.Digest, body)
 	m.stagePaged(id, body)
+
+	// Record in quarantine ledger (#12055, #12057)
+	m.quarantineLedger().RecordQuarantine(id)
+	RecordQuarantine(id)
+	if handle.Digest != "" {
+		cleanDigest := strings.TrimPrefix(handle.Digest, "sha256:")
+		m.quarantineLedger().RecordQuarantine(handle.Digest)
+		m.quarantineLedger().RecordQuarantine(cleanDigest)
+		RecordQuarantine(handle.Digest)
+		RecordQuarantine(cleanDigest)
+	} else if len(body) > 0 {
+		sum := sha256.Sum256(body)
+		hexSum := hex.EncodeToString(sum[:])
+		m.quarantineLedger().RecordQuarantine(hexSum)
+		m.quarantineLedger().RecordQuarantine("sha256:" + hexSum)
+		RecordQuarantine(hexSum)
+		RecordQuarantine("sha256:" + hexSum)
+	}
 	stub := map[string]any{
 		"_quarantined":       true,
 		"status":             "quarantined_for_safety",
@@ -529,6 +636,10 @@ func (m *MMU) ResolvePagedRef(ctx context.Context, digest string) ([]byte, bool)
 		return nil, false
 	}
 	clean := strings.TrimPrefix(digest, "sha256:")
+	if m.isQuarantined(digest) || m.isQuarantined(clean) {
+		return nil, false
+	}
+
 	m.mu.Lock()
 	key := clean
 	handle, ok := m.held[clean]
@@ -536,7 +647,26 @@ func (m *MMU) ResolvePagedRef(ctx context.Context, digest string) ([]byte, bool)
 		key = digest
 		handle, ok = m.held[digest]
 	}
+	if !ok {
+		for k, h := range m.held {
+			hClean := strings.TrimPrefix(h.Digest, "sha256:")
+			if hClean == clean || h.Digest == digest || h.Digest == clean {
+				key = k
+				handle = h
+				ok = true
+				break
+			}
+		}
+	}
 	if ok {
+		if !m.cleared[key] {
+			m.mu.Unlock()
+			return nil, false
+		}
+		if _, inHeld := m.held[clean]; inHeld && !m.cleared[clean] {
+			m.mu.Unlock()
+			return nil, false
+		}
 		m.touchLocked(key, holdNowMillis())
 	}
 	m.mu.Unlock()
@@ -561,23 +691,37 @@ func (m *MMU) ResolvePagedRef(ctx context.Context, digest string) ([]byte, bool)
 	if staged, ok := m.getStaged(clean); ok && len(staged) > 0 {
 		return staged, true
 	}
+	if handle.Digest != "" {
+		if staged, ok := m.getStaged(handle.Digest); ok && len(staged) > 0 {
+			return staged, true
+		}
+	}
 	return nil, false
 }
 
 func ResolvePaged(ctx context.Context, digest string) ([]byte, bool) {
 	clean := strings.TrimPrefix(digest, "sha256:")
+	if IsQuarantined(clean) || IsQuarantined(digest) {
+		return nil, false
+	}
 	activeMMUsMu.RLock()
 	mmus := make([]*MMU, len(activeMMUs))
 	copy(mmus, activeMMUs)
 	activeMMUsMu.RUnlock()
 
 	for _, m := range mmus {
+		if m.isHeldUncleared(clean, digest) || m.isQuarantined(clean) || m.isQuarantined(digest) {
+			return nil, false
+		}
 		if body, ok := m.ResolvePagedRef(ctx, digest); ok {
 			return body, true
 		}
 	}
 	for _, ra := range abi.ResultAdmitters() {
 		if m, ok := ra.(*MMU); ok {
+			if m.isHeldUncleared(clean, digest) || m.isQuarantined(clean) || m.isQuarantined(digest) {
+				return nil, false
+			}
 			if body, ok := m.ResolvePagedRef(ctx, digest); ok {
 				return body, true
 			}
@@ -651,11 +795,48 @@ func (m *MMU) pageOut(ctx context.Context, body []byte) abi.Ref {
 // bounded by maxHeld (it cannot grow independently of the held ledger).
 func (m *MMU) Clear(id string) {
 	m.mu.Lock()
-	if _, ok := m.held[id]; ok {
+	clean := strings.TrimPrefix(id, "sha256:")
+	var clearedHandle abi.Ref
+	var clearedKey string
+	if h, ok := m.held[id]; ok {
+		clearedKey = id
+		clearedHandle = h
 		m.cleared[id] = true
 		m.touchLocked(id, holdNowMillis()) // a witness clear is a liveness signal (keepalive)
+	} else if h, ok := m.held[clean]; ok {
+		clearedKey = clean
+		clearedHandle = h
+		m.cleared[clean] = true
+		m.touchLocked(clean, holdNowMillis())
+	} else {
+		for k, h := range m.held {
+			hClean := strings.TrimPrefix(h.Digest, "sha256:")
+			if k == clean || hClean == clean || h.Digest == id || h.Digest == clean {
+				clearedKey = k
+				clearedHandle = h
+				m.cleared[k] = true
+				m.touchLocked(k, holdNowMillis())
+				break
+			}
+		}
 	}
 	m.mu.Unlock()
+
+	if clearedKey != "" {
+		m.quarantineLedger().ClearQuarantine(clearedKey)
+		ClearQuarantine(clearedKey)
+		m.quarantineLedger().ClearQuarantine(id)
+		ClearQuarantine(id)
+		m.quarantineLedger().ClearQuarantine(clean)
+		ClearQuarantine(clean)
+		if clearedHandle.Digest != "" {
+			hClean := strings.TrimPrefix(clearedHandle.Digest, "sha256:")
+			m.quarantineLedger().ClearQuarantine(clearedHandle.Digest)
+			m.quarantineLedger().ClearQuarantine(hClean)
+			ClearQuarantine(clearedHandle.Digest)
+			ClearQuarantine(hClean)
+		}
+	}
 }
 
 // evictExcessLocked drops the oldest held quarantines (FIFO) until len(held) is
@@ -740,11 +921,28 @@ func (m *MMU) Override(ctx context.Context, id, justification string) ([]byte, e
 	handle, ok := m.held[id]
 	if ok {
 		m.cleared[id] = true
+		clean := strings.TrimPrefix(id, "sha256:")
+		if _, inHeld := m.held[clean]; inHeld {
+			m.cleared[clean] = true
+		}
 		m.touchLocked(id, holdNowMillis())
 	}
 	m.mu.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("ctxmmu: no quarantined result %s", id)
+	}
+
+	clean := strings.TrimPrefix(id, "sha256:")
+	m.quarantineLedger().ClearQuarantine(id)
+	ClearQuarantine(id)
+	m.quarantineLedger().ClearQuarantine(clean)
+	ClearQuarantine(clean)
+	if handle.Digest != "" {
+		hClean := strings.TrimPrefix(handle.Digest, "sha256:")
+		m.quarantineLedger().ClearQuarantine(handle.Digest)
+		m.quarantineLedger().ClearQuarantine(hClean)
+		ClearQuarantine(handle.Digest)
+		ClearQuarantine(hClean)
 	}
 
 	m.logSecurityOverride(nil, abi.ReasonNone, justification, "quarantine_override:"+id)
