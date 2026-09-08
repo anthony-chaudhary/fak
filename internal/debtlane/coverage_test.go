@@ -1,6 +1,8 @@
 package debtlane
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,7 +27,8 @@ func TestCoverageReceiptBreadthAndDepth(t *testing.T) {
 	}
 
 	var findings []FindingProvenance
-	receipt := BuildCoverageReceipt("/test/workspace", "fak", lanes, findings, 50)
+	receipt := BuildCoverageReceipt("/test/workspace", "fak", lanes, findings, 50,
+		WithExecutedDimensions(StandardDetectorDimensions...))
 
 	if receipt.Schema != CoverageReceiptSchema {
 		t.Errorf("expected schema %q, got %q", CoverageReceiptSchema, receipt.Schema)
@@ -75,6 +78,10 @@ func TestCoverageReceiptBreadthAndDepth(t *testing.T) {
 		if !found {
 			t.Errorf("expected detector dimension %q in receipt", expected)
 		}
+	}
+
+	if len(receipt.Gaps) != 0 {
+		t.Errorf("expected 0 gaps when all 15 executed, got %d: %v", len(receipt.Gaps), receipt.Gaps)
 	}
 }
 
@@ -1580,5 +1587,156 @@ func PreallocatedPipeline(input []byte, n int) int {
 	if len(disconnHotFindings) != 0 {
 		t.Fatalf("disconnected fixture must have 0 hot-path findings, got %d: %+v",
 			len(disconnHotFindings), disconnHotFindings)
+	}
+}
+
+func TestCoverageZeroInvokedDetectors(t *testing.T) {
+	// A clean fixture with zero invoked detectors reports observed depth 0 plus explicit gaps.
+	lanes := []DebtLane{
+		{Lane: "cleanpkg", UnitOfWork: "internal/cleanpkg", Criticality: CriticalityCore},
+	}
+	receipt := BuildCoverageReceipt("/test/workspace", "fak", lanes, nil, 10)
+
+	if receipt.ObservedDepth != 0 {
+		t.Fatalf("expected observed depth 0 for zero invoked detectors, got %d", receipt.ObservedDepth)
+	}
+	if receipt.DepthRatio != 0.0 {
+		t.Fatalf("expected depth ratio 0.0, got %.2f", receipt.DepthRatio)
+	}
+	if len(receipt.Dimensions) != 0 {
+		t.Fatalf("expected 0 evaluated dimensions, got %d: %v", len(receipt.Dimensions), receipt.Dimensions)
+	}
+	if len(receipt.Gaps) != len(StandardDetectorDimensions) {
+		t.Fatalf("expected explicit gaps for all %d declared dimensions, got %d: %v",
+			len(StandardDetectorDimensions), len(receipt.Gaps), receipt.Gaps)
+	}
+	if receipt.CoverageDebt != 0 {
+		t.Fatalf("expected 0 coverage debt, got %d", receipt.CoverageDebt)
+	}
+}
+
+func TestCoverageSeededTwoDetectors(t *testing.T) {
+	// A seeded fixture invoking two named detectors reports exactly 2.
+	lanes := []DebtLane{
+		{Lane: "seeded", UnitOfWork: "internal/seeded", Criticality: CriticalityCore},
+	}
+	findings := []FindingProvenance{
+		{
+			Dimension: string(DimThinTests),
+			Surface:   string(SurfaceInternal),
+			Lane:      "seeded",
+			Path:      "internal/seeded/seeded_test.go",
+			Severity:  "warning",
+			Message:   "thin test hazard",
+		},
+	}
+
+	receipt := BuildCoverageReceipt("/test/workspace", "fak", lanes, findings, 20,
+		WithExecutedDimensions(DimThinTests, DimStubDebt))
+
+	if receipt.ObservedDepth != 2 {
+		t.Fatalf("expected observed depth 2 for two invoked detectors, got %d", receipt.ObservedDepth)
+	}
+	if len(receipt.Dimensions) != 2 {
+		t.Fatalf("expected 2 evaluated dimensions, got %d: %v", len(receipt.Dimensions), receipt.Dimensions)
+	}
+	if receipt.Dimensions[0] != string(DimStubDebt) || receipt.Dimensions[1] != string(DimThinTests) {
+		t.Fatalf("expected [stub_debt, thin_tests], got %v", receipt.Dimensions)
+	}
+	expectedGaps := len(StandardDetectorDimensions) - 2
+	if len(receipt.Gaps) != expectedGaps {
+		t.Fatalf("expected %d gaps, got %d: %v", expectedGaps, len(receipt.Gaps), receipt.Gaps)
+	}
+	expectedRatio := float64(int((2.0/5.0)*100)) / 100.0
+	if receipt.DepthRatio != expectedRatio {
+		t.Fatalf("expected depth ratio %.2f, got %.2f", expectedRatio, receipt.DepthRatio)
+	}
+	if receipt.CoverageDebt != 0 {
+		t.Fatalf("expected 0 coverage debt, got %d", receipt.CoverageDebt)
+	}
+}
+
+func TestCoverageErroredDetectorRecordedAsCoverageDebt(t *testing.T) {
+	// An errored detector is recorded as coverage debt and not counted in observed depth.
+	lanes := []DebtLane{
+		{Lane: "seeded", UnitOfWork: "internal/seeded", Criticality: CriticalityCore},
+	}
+
+	receipt := BuildCoverageReceipt("/test/workspace", "fak", lanes, nil, 20,
+		WithExecutedDimensions(DimTestStatus),
+		WithErroredDimension(DimRaceFuzzStatus, fmt.Errorf("fuzz harness parse timeout")),
+	)
+
+	if receipt.ObservedDepth != 1 {
+		t.Fatalf("expected observed depth 1 (errored detector excluded from depth), got %d", receipt.ObservedDepth)
+	}
+	if receipt.CoverageDebt != 1 {
+		t.Fatalf("expected coverage debt 1, got %d", receipt.CoverageDebt)
+	}
+	if len(receipt.ErroredDimensions) != 1 || receipt.ErroredDimensions[0] != string(DimRaceFuzzStatus) {
+		t.Fatalf("expected errored dimension %q, got %v", DimRaceFuzzStatus, receipt.ErroredDimensions)
+	}
+	// Verify errored detector is in gaps
+	foundInGaps := false
+	for _, g := range receipt.Gaps {
+		if g == string(DimRaceFuzzStatus) {
+			foundInGaps = true
+			break
+		}
+	}
+	if !foundInGaps {
+		t.Fatalf("expected errored detector %q in gaps, got %v", DimRaceFuzzStatus, receipt.Gaps)
+	}
+	// Verify errored detector is recorded as coverage debt in findings
+	foundFinding := false
+	for _, f := range receipt.Findings {
+		if f.Dimension == string(DimRaceFuzzStatus) && f.Severity == "critical" && strings.Contains(f.Message, "coverage debt") {
+			foundFinding = true
+			break
+		}
+	}
+	if !foundFinding {
+		t.Fatalf("expected coverage debt finding for errored detector in %+v", receipt.Findings)
+	}
+}
+
+func TestCoverageReceiptByteStable(t *testing.T) {
+	// Repeated receipts are byte-stable.
+	lanes := []DebtLane{
+		{Lane: "core_gate", UnitOfWork: "internal/gate", Criticality: CriticalityCore},
+		{Lane: "pub_sdk", UnitOfWork: "pkg/sdk", Criticality: CriticalityEnabling},
+		{Lane: "plat_disp", UnitOfWork: "platform/disp", Criticality: CriticalityEnabling},
+	}
+	findings := []FindingProvenance{
+		{
+			Dimension: string(DimTestStatus),
+			Surface:   string(SurfaceInternal),
+			Lane:      "core_gate",
+			Path:      "internal/gate/gate_test.go",
+			Severity:  "warning",
+			Message:   "missing unit tests",
+		},
+	}
+
+	opts := []CoverageOption{
+		WithExecutedDimensions(DimTestStatus, DimCommentHygiene, DimWiringStatus),
+		WithErroredDimension(DimRaceFuzzStatus, fmt.Errorf("timeout")),
+		WithSkippedDimensions(DimBlastRadius),
+	}
+
+	receipt1 := BuildCoverageReceipt("/test/workspace", "fak", lanes, findings, 50, opts...)
+	receipt2 := BuildCoverageReceipt("/test/workspace", "fak", lanes, findings, 50, opts...)
+
+	raw1, err1 := json.Marshal(receipt1)
+	if err1 != nil {
+		t.Fatalf("marshal receipt1: %v", err1)
+	}
+	raw2, err2 := json.Marshal(receipt2)
+	if err2 != nil {
+		t.Fatalf("marshal receipt2: %v", err2)
+	}
+
+	if !bytes.Equal(raw1, raw2) {
+		t.Fatalf("coverage receipts are not byte-stable:\nraw1: %s\nraw2: %s", string(raw1), string(raw2))
 	}
 }
