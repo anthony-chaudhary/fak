@@ -133,9 +133,17 @@ func (c *Collector) writeAggregateOps(b *strings.Builder, totals *shardTotals) {
 	b.WriteString("# TYPE l3_ops_gets_total counter\n")
 	fmt.Fprintf(b, "l3_ops_gets_total %d\n", totals.gets)
 
+	b.WriteString("\n# HELP l3_server_gets_total Total GET operations across all shards.\n")
+	b.WriteString("# TYPE l3_server_gets_total counter\n")
+	fmt.Fprintf(b, "l3_server_gets_total %d\n", totals.gets)
+
 	b.WriteString("\n# HELP l3_ops_sets_total Total SET operations across all shards.\n")
 	b.WriteString("# TYPE l3_ops_sets_total counter\n")
 	fmt.Fprintf(b, "l3_ops_sets_total %d\n", totals.sets)
+
+	b.WriteString("\n# HELP l3_server_sets_total Total SET operations across all shards.\n")
+	b.WriteString("# TYPE l3_server_sets_total counter\n")
+	fmt.Fprintf(b, "l3_server_sets_total %d\n", totals.sets)
 
 	b.WriteString("\n# HELP l3_ops_deletes_total Total DELETE operations across all shards.\n")
 	b.WriteString("# TYPE l3_ops_deletes_total counter\n")
@@ -145,13 +153,25 @@ func (c *Collector) writeAggregateOps(b *strings.Builder, totals *shardTotals) {
 	b.WriteString("# TYPE l3_ops_exists_total counter\n")
 	fmt.Fprintf(b, "l3_ops_exists_total %d\n", totals.exists)
 
+	b.WriteString("\n# HELP l3_server_exists_total Total EXISTS operations across all shards.\n")
+	b.WriteString("# TYPE l3_server_exists_total counter\n")
+	fmt.Fprintf(b, "l3_server_exists_total %d\n", totals.exists)
+
 	b.WriteString("\n# HELP l3_ops_hits_total Total cache hits on GET.\n")
 	b.WriteString("# TYPE l3_ops_hits_total counter\n")
 	fmt.Fprintf(b, "l3_ops_hits_total %d\n", totals.hits)
 
+	b.WriteString("\n# HELP l3_server_hits_total Total cache hits on GET.\n")
+	b.WriteString("# TYPE l3_server_hits_total counter\n")
+	fmt.Fprintf(b, "l3_server_hits_total %d\n", totals.hits)
+
 	b.WriteString("\n# HELP l3_ops_misses_total Total cache misses on GET.\n")
 	b.WriteString("# TYPE l3_ops_misses_total counter\n")
 	fmt.Fprintf(b, "l3_ops_misses_total %d\n", totals.misses)
+
+	b.WriteString("\n# HELP l3_server_misses_total Total cache misses on GET.\n")
+	b.WriteString("# TYPE l3_server_misses_total counter\n")
+	fmt.Fprintf(b, "l3_server_misses_total %d\n", totals.misses)
 
 	b.WriteString("\n# HELP l3_ops_ttl_expirations_total Total entries removed due to TTL expiry.\n")
 	b.WriteString("# TYPE l3_ops_ttl_expirations_total counter\n")
@@ -164,6 +184,10 @@ func (c *Collector) writeAggregateOps(b *strings.Builder, totals *shardTotals) {
 	b.WriteString("\n# HELP l3_ops_hit_rate_percent GET hit rate (0-100).\n")
 	b.WriteString("# TYPE l3_ops_hit_rate_percent gauge\n")
 	fmt.Fprintf(b, "l3_ops_hit_rate_percent %.2f\n", hitRate)
+
+	b.WriteString("\n# HELP l3_server_hit_rate_percent GET hit rate (0-100).\n")
+	b.WriteString("# TYPE l3_server_hit_rate_percent gauge\n")
+	fmt.Fprintf(b, "l3_server_hit_rate_percent %.2f\n", hitRate)
 
 	existsHitRate := float64(0)
 	if totals.exists > 0 {
@@ -223,6 +247,10 @@ func (c *Collector) writeEviction(b *strings.Builder, totals *shardTotals) {
 	b.WriteString("# TYPE l3_eviction_total counter\n")
 	fmt.Fprintf(b, "l3_eviction_total %d\n", totals.evictions)
 
+	b.WriteString("\n# HELP l3_server_evictions_total Total evictions across all shards.\n")
+	b.WriteString("# TYPE l3_server_evictions_total counter\n")
+	fmt.Fprintf(b, "l3_server_evictions_total %d\n", totals.evictions)
+
 	b.WriteString("\n# HELP l3_eviction_key_pressure_total Evictions triggered during key buffer allocation.\n")
 	b.WriteString("# TYPE l3_eviction_key_pressure_total counter\n")
 	fmt.Fprintf(b, "l3_eviction_key_pressure_total %d\n", totals.evictionsKeyPressure)
@@ -267,6 +295,10 @@ func (c *Collector) writeEviction(b *strings.Builder, totals *shardTotals) {
 	b.WriteString("# TYPE l3_eviction_rate_percent gauge\n")
 	fmt.Fprintf(b, "l3_eviction_rate_percent %.2f\n", evictionRate)
 
+	b.WriteString("\n# HELP l3_server_eviction_rate_percent Evictions as percentage of SETs.\n")
+	b.WriteString("# TYPE l3_server_eviction_rate_percent gauge\n")
+	fmt.Fprintf(b, "l3_server_eviction_rate_percent %.2f\n", evictionRate)
+
 	evictionFailRate := float64(0)
 	if totals.evictionsKeyPressure+totals.evictionsValuePressure+totals.evictionsFailed > 0 {
 		evictionFailRate = float64(totals.evictionsFailed) / float64(totals.evictionsKeyPressure+totals.evictionsValuePressure+totals.evictionsFailed) * 100
@@ -274,6 +306,10 @@ func (c *Collector) writeEviction(b *strings.Builder, totals *shardTotals) {
 	b.WriteString("\n# HELP l3_eviction_fail_rate_percent Failed evictions as percentage of all pressure evictions.\n")
 	b.WriteString("# TYPE l3_eviction_fail_rate_percent gauge\n")
 	fmt.Fprintf(b, "l3_eviction_fail_rate_percent %.2f\n", evictionFailRate)
+
+	b.WriteString("\n# HELP l3_server_eviction_fail_rate_percent Failed evictions as percentage of all pressure evictions.\n")
+	b.WriteString("# TYPE l3_server_eviction_fail_rate_percent gauge\n")
+	fmt.Fprintf(b, "l3_server_eviction_fail_rate_percent %.2f\n", evictionFailRate)
 }
 
 func (c *Collector) writeWireProtocol(b *strings.Builder, totals *shardTotals) {
@@ -328,13 +364,25 @@ func (c *Collector) writeWireProtocol(b *strings.Builder, totals *shardTotals) {
 			b.WriteString("# TYPE l3_wire_throughput_gbps_in gauge\n")
 			fmt.Fprintf(b, "l3_wire_throughput_gbps_in %.6f\n", gbIn/epochSec)
 
+			b.WriteString("\n# HELP l3_server_wire_throughput_gbps_in Payload ingest throughput in GiB/s.\n")
+			b.WriteString("# TYPE l3_server_wire_throughput_gbps_in gauge\n")
+			fmt.Fprintf(b, "l3_server_wire_throughput_gbps_in %.6f\n", gbIn/epochSec)
+
 			b.WriteString("\n# HELP l3_wire_throughput_gbps_out Payload serve throughput in GiB/s.\n")
 			b.WriteString("# TYPE l3_wire_throughput_gbps_out gauge\n")
 			fmt.Fprintf(b, "l3_wire_throughput_gbps_out %.6f\n", gbOut/epochSec)
 
+			b.WriteString("\n# HELP l3_server_wire_throughput_gbps_out Payload serve throughput in GiB/s.\n")
+			b.WriteString("# TYPE l3_server_wire_throughput_gbps_out gauge\n")
+			fmt.Fprintf(b, "l3_server_wire_throughput_gbps_out %.6f\n", gbOut/epochSec)
+
 			b.WriteString("\n# HELP l3_wire_throughput_gbps_total Combined payload throughput in GiB/s.\n")
 			b.WriteString("# TYPE l3_wire_throughput_gbps_total gauge\n")
 			fmt.Fprintf(b, "l3_wire_throughput_gbps_total %.6f\n", (gbIn+gbOut)/epochSec)
+
+			b.WriteString("\n# HELP l3_server_wire_throughput_gbps_total Combined payload throughput in GiB/s.\n")
+			b.WriteString("# TYPE l3_server_wire_throughput_gbps_total gauge\n")
+			fmt.Fprintf(b, "l3_server_wire_throughput_gbps_total %.6f\n", (gbIn+gbOut)/epochSec)
 		}
 	}
 }
@@ -480,6 +528,25 @@ func (c *Collector) writeSlabAllocator(b *strings.Builder) {
 	b.WriteString("\n# HELP l3_slab_model_effective_gb Effective memory for the model page class in GiB.\n")
 	b.WriteString("# TYPE l3_slab_model_effective_gb gauge\n")
 	fmt.Fprintf(b, "l3_slab_model_effective_gb %.6f\n", effectiveGB)
+
+	b.WriteString("\n# HELP l3_server_slab_effective_gb Effective memory for the model page class in GiB.\n")
+	b.WriteString("# TYPE l3_server_slab_effective_gb gauge\n")
+	fmt.Fprintf(b, "l3_server_slab_effective_gb %.6f\n", effectiveGB)
+
+	var totalUsedSlots, totalSlots uint64
+	for _, cls := range classes {
+		totalUsedSlots += cls.UsedSlots
+		totalSlots += cls.TotalSlots
+	}
+	slotUtil := float64(0)
+	if totalSlots > 0 {
+		slotUtil = float64(totalUsedSlots) / float64(totalSlots)
+	} else if detection.SlotUtilization > 0 {
+		slotUtil = detection.SlotUtilization
+	}
+	b.WriteString("\n# HELP l3_server_slab_slot_utilization Overall slab slot utilization (0-1).\n")
+	b.WriteString("# TYPE l3_server_slab_slot_utilization gauge\n")
+	fmt.Fprintf(b, "l3_server_slab_slot_utilization %.4f\n", slotUtil)
 
 	// Per-class pressure metrics (part of slab section)
 	if c.PressureMetrics != nil {
