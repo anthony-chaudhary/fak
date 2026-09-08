@@ -449,3 +449,43 @@ func TestQwen35FullAttentionHAL_QKNorm(t *testing.T) {
 		t.Fatalf("full-session Prefill differs between HAL and CPU reference under QKNorm, max|delta|=%g", d)
 	}
 }
+
+func TestQwen35HALQKNormMissingResidentPathFailsClosed(t *testing.T) {
+	cfg := qwen35HybridTestCfg()
+	cfg.QKNorm = false
+	m := NewSynthetic(cfg)
+	fullLayer := 3
+	qVals := make([]float32, cfg.HeadDim)
+	kVals := make([]float32, cfg.HeadDim)
+	for i := range qVals {
+		qVals[i] = 0.9 + float32(i)/100
+		kVals[i] = 1.1 - float32(i)/100
+	}
+	tpInjectTensors(m, map[string]tpTensor{
+		layerName(fullLayer, "self_attn.q_norm.weight"): {shape: []int{cfg.HeadDim}, vals: qVals},
+		layerName(fullLayer, "self_attn.k_norm.weight"): {shape: []int{cfg.HeadDim}, vals: kVals},
+	})
+	m.Cfg.QKNorm = true
+	m.Cfg.QKNormPerHeadWeight = true
+	be := newQKNormRecordingBackend(m)
+	s, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatalf("NewBackendSessionChecked: %v", err)
+	}
+	defer s.Close()
+	q := be.Upload(compute.NewF32(compute.Default(), []int{cfg.NumHeads * cfg.HeadDim}, make([]float32, cfg.NumHeads*cfg.HeadDim)), compute.F32)
+	k := be.Upload(compute.NewF32(compute.Default(), []int{cfg.NumKVHeads * cfg.HeadDim}, make([]float32, cfg.NumKVHeads*cfg.HeadDim)), compute.F32)
+
+	_, _, err = s.qwen35ResidentQKNorm(fullLayer, q, k)
+	var residentErr *Qwen35QKNormResidencyError
+	if !errors.As(err, &residentErr) {
+		t.Fatalf("error=%T %v, want typed Qwen35QKNormResidencyError", err, err)
+	}
+	if residentErr.Layer != fullLayer || be.readCalls != 0 || be.hostCalls != 0 {
+		t.Fatalf("refusal layer=%d read_calls=%d host_calls=%d, want %d/0/0", residentErr.Layer, be.readCalls, be.hostCalls, fullLayer)
+	}
+	if recordedClassSite(be.recordingQwen35Backend, compute.MemoryActivation, "qwen35-full-attn-norm-q") ||
+		recordedClassSite(be.recordingQwen35Backend, compute.MemoryActivation, "qwen35-full-attn-norm-k") {
+		t.Fatal("typed resident refusal must not re-upload Q/K activations")
+	}
+}

@@ -1,0 +1,95 @@
+{
+  "schema": "fak.strix.vulkan-qwen35-resident-qknorm/v1",
+  "issue": 12082,
+  "status": "PASS_OPERATION_LEVEL",
+  "scope": "Source-bound production qwen35ResidentQKNorm method at Qwen3.8 attention geometry on the physical Vulkan backend. This is not a full-checkpoint generation or throughput qualification.",
+  "observed_utc": "2026-09-08T07:23:48Z",
+  "source": {
+    "repository": "anthony-chaudhary/fak",
+    "commit": "18ccb4a713901eba308226eaeffd05bc1f842ce6",
+    "implementation_commit": "851bc0ccae5a235fd9871ceb1576f9721402d832",
+    "blobs": {
+      "internal/model/qwen35_hal.go": "bfea27f15b6611865e93202eff92dd1b7aad6435",
+      "internal/model/qwen35_hal_test.go": "9279ef42663041e283cf804d52b166ed18b510b8",
+      "internal/model/qwen35_hal_vulkan_test.go": "84cea676f1f3305b64280a71094c196485b5f26c",
+      "internal/compute/vulkan.go": "7dfe8c7fd16a46bd59d6c029b12a98262b56c472"
+    }
+  },
+  "artifacts": {
+    "model_test_sha256": "6471e415b373dc90be9c2f97a893d64387cf1750401769e910e38081715b7f9a"
+  },
+  "hardware": {
+    "backend": "vulkan",
+    "tier": "integrated:AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+    "driver": "radv",
+    "driver_info": "Mesa 26.2.2-arch1.1",
+    "kernel": "7.2.3-arch1-3"
+  },
+  "geometry": {
+    "model_fixture": "Qwen3.5-27B/Qwen3.8 QK-normalization geometry",
+    "n_query_heads": 24,
+    "n_kv_heads": 4,
+    "head_dim": 256,
+    "qk_norm_epsilon": 0.000001,
+    "norm_gain_1p": true,
+    "gain_layout": "one head-dimension vector shared across heads"
+  },
+  "safety": {
+    "lease": "exclusive nonblocking read-only flock on /tmp/fak-gpu.lease",
+    "cooldown_seconds": 4,
+    "admission_limits": {
+      "chat_requests": 0,
+      "gpu_busy_percent_max": 5,
+      "MemAvailable_kib_min": 4194304
+    },
+    "before": {
+      "chat_requests": 0,
+      "gpu_busy_percent": 0,
+      "MemAvailable_kib": 26748396,
+      "service_model": "Qwen3.8-27B-Q4_K_M",
+      "service_status": "ONLINE",
+      "service_output_tokens_per_second": 0.59
+    },
+    "after": {
+      "chat_requests": 0,
+      "gpu_busy_percent": 0,
+      "MemAvailable_kib": 26701508,
+      "service_model": "Qwen3.8-27B-Q4_K_M",
+      "service_status": "ONLINE",
+      "service_output_tokens_per_second": 0.59
+    },
+    "service_restart": false,
+    "model_reload": false
+  },
+  "command": {
+    "environment": {
+      "FAK_VULKAN_REQUIRE_DEVICE": "1",
+      "FAK_VULKAN_EXPECT_DEVICE": "8060S",
+      "FAK_VULKAN_DISPATCH_PROFILE": "1",
+      "FAK_VULKAN_SOURCE_REV": "18ccb4a713901eba308226eaeffd05bc1f842ce6"
+    },
+    "test_regex": "^TestQwen35VulkanResidentQKNormMatchesCPUWithZeroTransfers$",
+    "watchdog": "timeout 45s; Go test timeout 40s"
+  },
+  "result": {
+    "exit_code": 0,
+    "executed_test": "TestQwen35VulkanResidentQKNormMatchesCPUWithZeroTransfers",
+    "skipped": false,
+    "norm_dispatches": 2,
+    "h2d_bytes": 0,
+    "d2h_bytes": 0,
+    "h2d_submits": 0,
+    "d2h_submits": 0,
+    "query_cosine": 1.0,
+    "key_cosine": 1.0,
+    "query_max_abs_error": 0.0000007152557373046875,
+    "key_max_abs_error": 0.000000476837158203125,
+    "implicit_fallback": false
+  },
+  "exact_checkpoint_gate": {
+    "qualified": false,
+    "reason": "A second exact Qwen3.8-27B-Q4_K_M load cannot fit beside the operator-owned active service under the current memory envelope. The service was not stopped or reloaded.",
+    "dependency": "https://github.com/anthony-chaudhary/fak/issues/11959"
+  },
+  "diagnostic_note": "An earlier invocation omitted FAK_VULKAN_DISPATCH_PROFILE and therefore produced no attributable dispatch counts; it was not used as evidence. The recorded run enabled profiling before process start."
+}

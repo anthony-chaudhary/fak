@@ -265,6 +265,15 @@ func (v *vulkanBackend) VulkanDebugMemoryBudgetAvailable() bool {
 	return v.haveMemoryBudget
 }
 
+// VulkanDebugTransferBytes returns the process-global payload bytes copied across
+// the Vulkan host/device boundary. It is a cumulative observability counter: take
+// snapshots around a serialized operation to prove that operation stayed resident.
+func (v *vulkanBackend) VulkanDebugTransferBytes() (h2d, d2h uint64) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return uint64(C.fvk_h2d_bytes()), uint64(C.fvk_d2h_bytes())
+}
+
 func (v *vulkanBackend) VulkanDebugQ4KProfileSnapshot() (enabled bool, deviceCalls, devicePackedBytes, hostVisibleCalls, hostVisiblePackedBytes int64) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
