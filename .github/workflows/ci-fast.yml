@@ -33,14 +33,14 @@ on:
 permissions:
   contents: read
 
-# Queue control (CI/CD run-speed): converge each branch or PR ref on its newest
-# head. Normal pushes coalesce and cancel in-progress runs so obsolete runs don't
-# waste capacity. Declared release intents (workflow_dispatch) pin their run to a
-# distinct concurrency group with cancel-in-progress: false so supersession
-# starvation cannot block releases (#7324).
+# Queue control (CI/CD run-speed): converge each PR ref on its newest head.
+# Normal PRs coalesce and cancel in-progress runs so obsolete runs don't waste
+# capacity. Pushes to main and declared release intents (workflow_dispatch) run
+# uncancelled (cancel-in-progress: false) so push churn cannot cancel in-flight
+# trunk runs or starve release readiness (#12169, #7324).
 concurrency:
   group: ${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' && (inputs.intent == 'release' || inputs.intent == '')) && format('release-{0}', inputs.sha != '' && inputs.sha || github.run_id) || (github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('ref-{0}', github.ref)) }}
-  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.intent == 'release' || inputs.intent == '')) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || !(github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && (inputs.intent == 'release' || inputs.intent == ''))) }}
 
 jobs:
   build-vet-test-fast:

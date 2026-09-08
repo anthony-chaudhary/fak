@@ -210,13 +210,17 @@ const (
 )
 
 func dequantParallelWorkers(blocks int) int {
-	if activeParallelLoads.Load() != 0 {
-		return 1
-	}
+	return dequantParallelWorkersLimited(blocks, 0)
+}
+
+func dequantParallelWorkersLimited(blocks, limit int) int {
 	if blocks < dequantParallelMinBlocks {
 		return 1
 	}
 	workers := dequantWorkers()
+	if limit > 0 && workers > limit {
+		workers = limit
+	}
 	if workers < 2 {
 		return 1
 	}
@@ -242,8 +246,12 @@ func dequantWorkers() int {
 }
 
 func dequantBlocks(out []float32, raw []byte, qk, blockBytes int, body func([]float32, []byte)) {
+	dequantBlocksLimited(out, raw, qk, blockBytes, 0, body)
+}
+
+func dequantBlocksLimited(out []float32, raw []byte, qk, blockBytes, workerLimit int, body func([]float32, []byte)) {
 	blocks := len(out) / qk
-	workers := dequantParallelWorkers(blocks)
+	workers := dequantParallelWorkersLimited(blocks, workerLimit)
 	if workers <= 1 {
 		body(out, raw)
 		return
@@ -295,6 +303,10 @@ func dequantF32(t TensorInfo, raw []byte) ([]float32, error) {
 	return dequantF32Into(nil, t, raw)
 }
 
+func dequantF32Limited(t TensorInfo, raw []byte, workerLimit int) ([]float32, error) {
+	return dequantF32IntoLimited(nil, t, raw, workerLimit)
+}
+
 // dequantF32Into decodes a GGUF tensor's raw payload to f32, writing into scratch when it
 // has the capacity (else allocating). The dequant writes every returned element for every
 // supported type, so the reused buffer's prior contents never leak. The returned slice
@@ -307,6 +319,10 @@ func dequantF32(t TensorInfo, raw []byte) ([]float32, error) {
 // throwaway elems*4 f32 buffers — each faulting in fresh zeroed pages the GC then unmaps —
 // collapse to one reused arena grown to the largest tensor.
 func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, error) {
+	return dequantF32IntoLimited(scratch, t, raw, 0)
+}
+
+func dequantF32IntoLimited(scratch []float32, t TensorInfo, raw []byte, workerLimit int) ([]float32, error) {
 	elems, err := tensorElems(t)
 	if err != nil {
 		return nil, err
@@ -339,7 +355,7 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 		if _, err := checkQuantPayload(t, elems, raw, qk4, blockQ4_0Bytes, "Q4_0"); err != nil {
 			return nil, err
 		}
-		dequantQ4_0(out, raw)
+		dequantQ4_0Limited(out, raw, workerLimit)
 	case TensorQ2_0:
 		if _, err := checkQuantPayload(t, elems, raw, 128, blockQ2_0Bytes, "Q2_0"); err != nil {
 			return nil, err
@@ -359,47 +375,47 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 		if _, err := checkQuantPayload(t, elems, raw, qk4, blockQ4_1Bytes, "Q4_1"); err != nil {
 			return nil, err
 		}
-		dequantQ4_1(out, raw)
+		dequantQ4_1Limited(out, raw, workerLimit)
 	case TensorQ5_0:
 		if _, err := checkQuantPayload(t, elems, raw, qk5, blockQ5_0Bytes, "Q5_0"); err != nil {
 			return nil, err
 		}
-		dequantQ5_0(out, raw)
+		dequantQ5_0Limited(out, raw, workerLimit)
 	case TensorQ5_1:
 		if _, err := checkQuantPayload(t, elems, raw, qk5, blockQ5_1Bytes, "Q5_1"); err != nil {
 			return nil, err
 		}
-		dequantQ5_1(out, raw)
+		dequantQ5_1Limited(out, raw, workerLimit)
 	case TensorQ8_0:
 		if _, err := checkQuantPayload(t, elems, raw, qk8_0, blockQ8_0Bytes, "Q8_0"); err != nil {
 			return nil, err
 		}
-		dequantQ8_0(out, raw)
+		dequantQ8_0Limited(out, raw, workerLimit)
 	case TensorQ2_K:
 		if _, err := checkQuantPayload(t, elems, raw, qkK, blockQ2KBytes, "Q2_K"); err != nil {
 			return nil, err
 		}
-		dequantQ2K(out, raw)
+		dequantQ2KLimited(out, raw, workerLimit)
 	case TensorQ3_K:
 		if _, err := checkQuantPayload(t, elems, raw, qkK, blockQ3KBytes, "Q3_K"); err != nil {
 			return nil, err
 		}
-		dequantQ3K(out, raw)
+		dequantQ3KLimited(out, raw, workerLimit)
 	case TensorQ4_K:
 		if _, err := checkQuantPayload(t, elems, raw, qkK, blockQ4KBytes, "Q4_K"); err != nil {
 			return nil, err
 		}
-		dequantQ4K(out, raw)
+		dequantQ4KLimited(out, raw, workerLimit)
 	case TensorQ5_K:
 		if _, err := checkQuantPayload(t, elems, raw, qkK, blockQ5KBytes, "Q5_K"); err != nil {
 			return nil, err
 		}
-		dequantQ5K(out, raw)
+		dequantQ5KLimited(out, raw, workerLimit)
 	case TensorQ6_K:
 		if _, err := checkQuantPayload(t, elems, raw, qkK, blockQ6KBytes, "Q6_K"); err != nil {
 			return nil, err
 		}
-		dequantQ6K(out, raw)
+		dequantQ6KLimited(out, raw, workerLimit)
 	case TensorIQ2_XXS:
 		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ2XXSBytes, "IQ2_XXS"); err != nil {
 			return nil, err
@@ -429,12 +445,12 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 		if _, err := checkQuantPayload(t, elems, raw, qkMXFP4, blockMXFP4Bytes, "MXFP4"); err != nil {
 			return nil, err
 		}
-		dequantMXFP4(out, raw)
+		dequantMXFP4Limited(out, raw, workerLimit)
 	case TensorIQ4_NL:
 		if _, err := checkQuantPayload(t, elems, raw, qkIQ4NL, blockIQ4NLBytes, "IQ4_NL"); err != nil {
 			return nil, err
 		}
-		dequantIQ4NL(out, raw)
+		dequantIQ4NLLimited(out, raw, workerLimit)
 	case TensorIQ3_S:
 		if _, err := checkQuantPayload(t, elems, raw, qkIQ3S, blockIQ3SBytes, "IQ3_S"); err != nil {
 			return nil, err
@@ -444,12 +460,12 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ4XSBytes, "IQ4_XS"); err != nil {
 			return nil, err
 		}
-		dequantIQ4XS(out, raw)
+		dequantIQ4XSLimited(out, raw, workerLimit)
 	case TensorIQ3_XXS:
 		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ3XXSBytes, "IQ3_XXS"); err != nil {
 			return nil, err
 		}
-		dequantIQ3XXS(out, raw)
+		dequantIQ3XXSLimited(out, raw, workerLimit)
 	default:
 		return nil, fmt.Errorf("gguf: tensor %s type %d cannot dequantize to f32 yet", t.Name, t.Type)
 	}
@@ -563,7 +579,11 @@ func dequantIQ1S(out []float32, raw []byte)   { model.DequantIQ1S(out, raw) }
 func dequantIQ1M(out []float32, raw []byte)   { model.DequantIQ1M(out, raw) }
 
 func dequantQ4_0(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qk4, blockQ4_0Bytes, dequantQ4_0Scalar)
+	dequantQ4_0Limited(out, raw, 0)
+}
+
+func dequantQ4_0Limited(out []float32, raw []byte, workers int) {
+	dequantBlocksLimited(out, raw, qk4, blockQ4_0Bytes, workers, dequantQ4_0Scalar)
 }
 
 func dequantQ4_0Scalar(out []float32, raw []byte) {
@@ -601,7 +621,11 @@ func e8m0ToF32Half(e uint8) float32 {
 // element j, the high nibble is element j+qkMXFP4/2 — and each code indexes the
 // E2M1 value table scaled by the block's half-scaled E8M0 exponent.
 func dequantMXFP4(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qkMXFP4, blockMXFP4Bytes, dequantMXFP4Scalar)
+	dequantMXFP4Limited(out, raw, 0)
+}
+
+func dequantMXFP4Limited(out []float32, raw []byte, workers int) {
+	dequantBlocksLimited(out, raw, qkMXFP4, blockMXFP4Bytes, workers, dequantMXFP4Scalar)
 }
 
 func dequantMXFP4Scalar(out []float32, raw []byte) {
@@ -629,7 +653,11 @@ var kvaluesIQ4NL = [16]float32{-127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 
 // element 2j+1 in its high nibble — and each code indexes kvaluesIQ4NL before the block
 // scale: y = d*kvaluesIQ4NL[code].
 func dequantIQ4NL(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qkIQ4NL, blockIQ4NLBytes, dequantIQ4NLScalar)
+	dequantIQ4NLLimited(out, raw, 0)
+}
+
+func dequantIQ4NLLimited(out []float32, raw []byte, workers int) {
+	dequantBlocksLimited(out, raw, qkIQ4NL, blockIQ4NLBytes, workers, dequantIQ4NLScalar)
 }
 
 func dequantIQ4NLScalar(out []float32, raw []byte) {
@@ -653,7 +681,11 @@ func dequantIQ4NLScalar(out []float32, raw []byte) {
 // 2 bits from a scales_h field — applied as dl = d*(ls-32). Within a sub-block byte j holds
 // element j in its low nibble and element j+16 in its high nibble: y = dl*kvaluesIQ4NL[code].
 func dequantIQ4XS(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qkK, blockIQ4XSBytes, dequantIQ4XSScalar)
+	dequantIQ4XSLimited(out, raw, 0)
+}
+
+func dequantIQ4XSLimited(out []float32, raw []byte, workers int) {
+	dequantBlocksLimited(out, raw, qkK, blockIQ4XSBytes, workers, dequantIQ4XSScalar)
 }
 
 func dequantIQ4XSScalar(out []float32, raw []byte) {
@@ -688,7 +720,11 @@ func dequantIQ4XSScalar(out []float32, raw []byte) {
 // gives an 8-bit sign mask (bit j flips output j). Layout matches ggml exactly so the f32 is
 // bit-faithful to llama.cpp's IQ3_XXS dequant.
 func dequantIQ3XXS(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qkK, blockIQ3XXSBytes, dequantKQuantBody(dequantIQ3XXSArch, dequantIQ3XXSScalar))
+	dequantIQ3XXSLimited(out, raw, 0)
+}
+
+func dequantIQ3XXSLimited(out []float32, raw []byte, workers int) {
+	dequantBlocksLimited(out, raw, qkK, blockIQ3XXSBytes, workers, dequantKQuantBody(dequantIQ3XXSArch, dequantIQ3XXSScalar))
 }
 
 func dequantIQ3XXSScalar(out []float32, raw []byte) {
@@ -727,7 +763,11 @@ func dequantIQ3XXSScalar(out []float32, raw []byte) {
 // The GGML layout (dequantize_row_q4_1) keeps the same low/high-nibble interleave as
 // Q4_0 but the codes are NOT re-centered — they carry an affine min: y = nibble*d + m.
 func dequantQ4_1(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qk4, blockQ4_1Bytes, dequantQ4_1Scalar)
+	dequantQ4_1Limited(out, raw, 0)
+}
+
+func dequantQ4_1Limited(out []float32, raw []byte, workers int) {
+	dequantBlocksLimited(out, raw, qk4, blockQ4_1Bytes, workers, dequantQ4_1Scalar)
 }
 
 func dequantQ4_1Scalar(out []float32, raw []byte) {
@@ -745,7 +785,11 @@ func dequantQ4_1Scalar(out []float32, raw []byte) {
 }
 
 func dequantQ5_0(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qk5, blockQ5_0Bytes, dequantQ5_0Scalar)
+	dequantQ5_0Limited(out, raw, 0)
+}
+
+func dequantQ5_0Limited(out []float32, raw []byte, workers int) {
+	dequantBlocksLimited(out, raw, qk5, blockQ5_0Bytes, workers, dequantQ5_0Scalar)
 }
 
 func dequantQ5_0Scalar(out []float32, raw []byte) {
@@ -765,7 +809,11 @@ func dequantQ5_0Scalar(out []float32, raw []byte) {
 }
 
 func dequantQ5_1(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qk5, blockQ5_1Bytes, dequantQ5_1Scalar)
+	dequantQ5_1Limited(out, raw, 0)
+}
+
+func dequantQ5_1Limited(out []float32, raw []byte, workers int) {
+	dequantBlocksLimited(out, raw, qk5, blockQ5_1Bytes, workers, dequantQ5_1Scalar)
 }
 
 func dequantQ5_1Scalar(out []float32, raw []byte) {
@@ -786,7 +834,11 @@ func dequantQ5_1Scalar(out []float32, raw []byte) {
 }
 
 func dequantQ2K(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qkK, blockQ2KBytes, dequantQ2KScalar)
+	dequantQ2KLimited(out, raw, 0)
+}
+
+func dequantQ2KLimited(out []float32, raw []byte, workers int) {
+	dequantBlocksLimited(out, raw, qkK, blockQ2KBytes, workers, dequantQ2KScalar)
 }
 
 func dequantQ2KScalar(out []float32, raw []byte) {
@@ -834,13 +886,21 @@ func dequantQ2KScalar(out []float32, raw []byte) {
 }
 
 func dequantQ3K(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qkK, blockQ3KBytes, dequantQ3KScalar)
+	dequantQ3KLimited(out, raw, 0)
+}
+
+func dequantQ3KLimited(out []float32, raw []byte, workers int) {
+	dequantBlocksLimited(out, raw, qkK, blockQ3KBytes, workers, dequantQ3KScalar)
 }
 
 func dequantQ3KScalar(out []float32, raw []byte) { model.DequantQ3K(out, raw) }
 
 func dequantQ4K(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qkK, blockQ4KBytes, dequantKQuantBody(dequantQ4KArch, dequantQ4KScalar))
+	dequantQ4KLimited(out, raw, 0)
+}
+
+func dequantQ4KLimited(out []float32, raw []byte, workers int) {
+	dequantBlocksLimited(out, raw, qkK, blockQ4KBytes, workers, dequantKQuantBody(dequantQ4KArch, dequantQ4KScalar))
 }
 
 func dequantQ4KScalar(out []float32, raw []byte) {
@@ -878,7 +938,11 @@ func scaleMinPairK4(d, min float32, is int, scales []byte) (d1, m1, d2, m2 float
 }
 
 func dequantQ5K(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qkK, blockQ5KBytes, dequantKQuantBody(dequantQ5KArch, dequantQ5KScalar))
+	dequantQ5KLimited(out, raw, 0)
+}
+
+func dequantQ5KLimited(out []float32, raw []byte, workers int) {
+	dequantBlocksLimited(out, raw, qkK, blockQ5KBytes, workers, dequantKQuantBody(dequantQ5KArch, dequantQ5KScalar))
 }
 
 func dequantQ5KScalar(out []float32, raw []byte) {
@@ -916,11 +980,19 @@ func dequantQ5KScalar(out []float32, raw []byte) {
 }
 
 func dequantQ6K(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qkK, blockQ6KBytes, dequantKQuantBody(dequantQ6KArch, dequantQ6KScalar))
+	dequantQ6KLimited(out, raw, 0)
+}
+
+func dequantQ6KLimited(out []float32, raw []byte, workers int) {
+	dequantBlocksLimited(out, raw, qkK, blockQ6KBytes, workers, dequantKQuantBody(dequantQ6KArch, dequantQ6KScalar))
 }
 
 func dequantQ8_0(out []float32, raw []byte) {
-	dequantBlocks(out, raw, qk8_0, blockQ8_0Bytes, dequantQ8_0Scalar)
+	dequantQ8_0Limited(out, raw, 0)
+}
+
+func dequantQ8_0Limited(out []float32, raw []byte, workers int) {
+	dequantBlocksLimited(out, raw, qk8_0, blockQ8_0Bytes, workers, dequantQ8_0Scalar)
 }
 
 func dequantQ8_0Scalar(out []float32, raw []byte) {

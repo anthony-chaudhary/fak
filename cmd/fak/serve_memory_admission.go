@@ -207,3 +207,46 @@ func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts g
 		})
 	}, nil
 }
+
+// loadLocalLauncherModelWithVulkanLease coordinates local native Vulkan memory admission,
+// acquiring the canonical GPU lease before model allocation and retaining it across the
+// entire serving lifetime. In-kernel Vulkan serving requires sole ownership of the
+// machine-wide GPU lease so concurrent GPU-heavy workloads queue instead of stacking.
+func loadLocalLauncherModelWithVulkanLease(useVulkan bool, modelPath string, opts gpulease.Options, load func()) (release func(), err error) {
+	if !useVulkan || strings.TrimSpace(modelPath) == "" {
+		load()
+		return func() {}, nil
+	}
+
+	opts.NoWait = true
+	opts.Timeout = 0
+	opts.Mode = gpulease.ModeExclusive
+	opts.Shared = false
+	lease, err := gpulease.Acquire(opts)
+	if err != nil {
+		path := opts.Path
+		if path == "" {
+			path = gpulease.DefaultPath()
+		}
+		if errors.Is(err, gpulease.ErrBusy) {
+			return func() {}, fmt.Errorf("fak local launcher: Vulkan residency admission refused before model load: %w; stop the holder process and retry, or run a CPU/non-Vulkan serve", err)
+		}
+		return func() {}, fmt.Errorf("fak local launcher: acquire Vulkan residency lease %s before model load: %w", path, err)
+	}
+
+	loaded := false
+	defer func() {
+		if !loaded {
+			lease.Release()
+		}
+	}()
+	load()
+	loaded = true
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			lease.Release()
+		})
+	}, nil
+}

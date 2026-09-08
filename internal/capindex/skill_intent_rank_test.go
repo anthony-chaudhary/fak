@@ -391,10 +391,10 @@ func TestFaultStillPagesTheWholeSkillBody(t *testing.T) {
 		if len(body) == 0 {
 			t.Fatalf("%s: faulted body is empty", c.Ref.Name)
 		}
-		// The full description prose is in the faulted body, byte for byte.
-		if !strings.Contains(strings.Join(strings.Fields(string(body)), " "),
-			strings.Join(strings.Fields(c.Trigger), " ")) {
-			t.Errorf("%s: full description is not recoverable from the faulted body", c.Ref.Name)
+		// The decoded description is recoverable from the faulted body. Compare the
+		// semantic scalar rather than its YAML serialization, which may escape quotes.
+		if got := parseFrontmatter(body).description; got != c.Trigger {
+			t.Errorf("%s: faulted description = %q, want %q", c.Ref.Name, got, c.Trigger)
 		}
 	}
 }

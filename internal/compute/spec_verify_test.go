@@ -282,6 +282,8 @@ func TestSpecVerifyAttentionCUDASourceContract(t *testing.T) {
 		"#define BLOCK_M SPEC_VERIFY_BLOCK_M",
 		"#define NUM_SEGMENTS SPEC_VERIFY_NUM_SEGMENTS",
 		"fcuda_spec_verify_attention_f32",
+		"float m_stat = -INFINITY;",
+		"float g_max = -INFINITY;",
 	} {
 		if !strings.Contains(cuSrc, symbol) {
 			t.Errorf("cuda_kernels.cu missing required symbol %q", symbol)
@@ -304,5 +306,90 @@ func TestSpecVerifyAttentionCUDASourceContract(t *testing.T) {
 	goSrc := string(goBytes)
 	if !strings.Contains(goSrc, "func (c *cudaBackend) SpecVerifyAttention") {
 		t.Error("cuda.go missing SpecVerifyAttention method")
+	}
+}
+
+func TestTreeVerifyAttentionCPUReferenceAndPacking(t *testing.T) {
+	mask := [][]bool{
+		{true, false, false, false},
+		{false, true, false, false},
+		{true, false, true, false},
+		{false, true, false, true},
+	}
+	rows, err := PackTreeAttentionMask(mask)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRows := []uint32{0b0001, 0b0010, 0b0101, 0b1010}
+	for i := range rows {
+		if rows[i] != wantRows[i] {
+			t.Fatalf("packed row %d = %04b, want %04b", i, rows[i], wantRows[i])
+		}
+	}
+
+	ref := Default()
+	qLen, kvLen, nH, nKV, d := 4, 5, 1, 1, 2
+	q := NewF32(ref, []int{qLen, nH, d}, make([]float32, qLen*nH*d))
+	k := NewF32(ref, []int{kvLen, nKV, d}, make([]float32, kvLen*nKV*d))
+	v := NewF32(ref, []int{kvLen, nKV, d}, []float32{
+		10, 20, // committed prefix
+		1, 2, // candidate 0
+		3, 4, // candidate 1 (sibling of 0)
+		5, 6, // candidate 2 (child of 0)
+		7, 8, // candidate 3 (child of 1)
+	})
+	var out Tensor
+	if err := TreeVerifyAttention(&q, &k, &v, &out, rows, qLen, kvLen, nH, nKV, d); err != nil {
+		t.Fatal(err)
+	}
+	got := ref.Read(out)
+	want := []float32{5.5, 11, 6.5, 12, 16.0 / 3, 28.0 / 3, 20.0 / 3, 32.0 / 3}
+	if delta := maxAbsDelta(got, want); delta > 1e-6 {
+		t.Fatalf("tree attention max delta %.3g > 1e-6\ngot  %v\nwant %v", delta, got, want)
+	}
+
+	badFuture := [][]bool{{true, true}, {false, true}}
+	if _, err := PackTreeAttentionMask(badFuture); err == nil {
+		t.Fatal("PackTreeAttentionMask accepted a future candidate key")
+	}
+}
+
+func TestTreeVerifyAttentionCUDASourceContract(t *testing.T) {
+	cu, err := os.ReadFile("tree_attention.cu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(cu)
+	for _, symbol := range []string{
+		"k_tree_verify_attention",
+		"fak_tree_mask32 masks",
+		"uint32_t rowMask = masks.rows[qi]",
+		"float m = -INFINITY",
+		"fcuda_tree_verify_attention_f32",
+	} {
+		if !strings.Contains(src, symbol) {
+			t.Errorf("tree_attention.cu missing %q", symbol)
+		}
+	}
+	mainCU, err := os.ReadFile("cuda_kernels.cu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mainCU), `#include "tree_attention.cu"`) {
+		t.Error("cuda_kernels.cu does not compile the focused tree-attention fragment")
+	}
+	header, err := os.ReadFile("cuda_backend.h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(header), "fcuda_tree_verify_attention_f32") {
+		t.Error("cuda_backend.h missing tree-attention ABI")
+	}
+	goCUDA, err := os.ReadFile("cuda.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(goCUDA), "func (c *cudaBackend) TreeVerifyAttention") {
+		t.Error("cuda.go missing tree-attention binding")
 	}
 }

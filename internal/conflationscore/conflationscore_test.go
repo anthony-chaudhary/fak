@@ -134,6 +134,15 @@ func TestCacheHeadlineProvenance_LabeledProviderCacheHitIsClean(t *testing.T) {
 	}
 }
 
+func TestCacheHeadlineProvenance_NamedExternalClaimIsClean(t *testing.T) {
+	surfaces := map[string][]cacheHeadlineLine{"docs/x.md": {
+		{Line: 3, Text: "SGLang claims 75-95% cache hit rates in agentic workflows."},
+	}}
+	if k := kpiCacheHeadlineProvenance(surfaces); len(k.Defects) != 0 {
+		t.Fatalf("named external cache claim should be clean, got %v", k.Defects)
+	}
+}
+
 func TestExtractCacheHeadlineLinesSkipsCodeFence(t *testing.T) {
 	src := "```text\n99% cache-hit\n```\n\n# OBSERVED provider cache-hit 99%\n"
 	lines := extractCacheHeadlineLines(src)

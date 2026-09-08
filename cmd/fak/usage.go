@@ -407,7 +407,13 @@ const usageCoreText = `usage:
                  dependency order, and zero-leftover closure over the selected queue.)
 `
 
-const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--query STR]
+const usageOpsText = `  fak issues-solved [--hours N] [--since D] [--repo R] [--private-repo PR] [--no-private]
+                 [--source auto|github|git] [--detailed|--list] [--json]
+                (cross-repo issue resolution counts and commit velocity across public and
+                 companion checkouts over a time window. Emits a concise token-efficient
+                 summary by default, or detailed issue lists / JSON. Aliases: issues-recent,
+                 issue-stats)
+  fak recall    [--dir DIR] [--out recall-report.json] [--query STR]
                 (persist a finished session as a core dump, reload it in a FRESH
                  store, and demonstrate the quarantine surviving the boundary)
   fak recover   <REASON> [--dry-run|--execute] [--json]

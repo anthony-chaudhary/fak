@@ -177,11 +177,11 @@ func TestKnownVocabulariesAreDiscovered(t *testing.T) {
 // its exemption stays, and whatever lands under that name next is silently
 // unchecked forever. So every key must still name a site the linter WOULD
 // otherwise report, proven by re-scanning with exemptions disabled.
-func TestNativeBenchAlternativesExemptionExplainsPartialVocabulary(t *testing.T) {
-	key := "literal|internal/nativebench|contracts.Alternatives"
+func TestHarnessProfileBuiltinsRepointExemptionExplainsPartialVocabulary(t *testing.T) {
+	key := "literal|internal/harnessprofile|builtins.Repoint"
 	reason := ExemptionReason(key)
-	if !strings.Contains(reason, "applicable comparison classes") {
-		t.Fatalf("exemption %q lacks benchmark-specific reason: %q", key, reason)
+	if !strings.Contains(reason, "supports") {
+		t.Fatalf("exemption %q lacks profile-specific reason: %q", key, reason)
 	}
 }
 

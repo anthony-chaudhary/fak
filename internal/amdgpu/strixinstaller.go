@@ -235,6 +235,7 @@ SPEC_DRAFT_UBATCH_SIZE=%d
 PREFILL_CHUNK_TOKENS=%d
 FAK_PLANNER_TIMEOUT_S=1800
 FAK_HTTP_WRITE_TIMEOUT_S=1800
+FAK_GPU_LEASE=/tmp/fak-gpu.lease
 # Gotchas #9 & #5: ensure toxic overrides remain unset on APU:
 # GGML_CUDA_ENABLE_UNIFIED_MEMORY must NOT be set (corrupts ROCm APU output)
 # HSA_OVERRIDE_GFX_VERSION=11.0.0 must NOT be set (causes SIGSEGV in libamdhip64)
@@ -264,6 +265,7 @@ Wants=fak-strix-governor.service
 [Service]
 Type=simple
 EnvironmentFile=/etc/fak/strix-halo.env
+Environment=FAK_GPU_LEASE=/tmp/fak-gpu.lease
 UnsetEnvironment=GGML_CUDA_ENABLE_UNIFIED_MEMORY HSA_OVERRIDE_GFX_VERSION
 ExecStart=%s serve%s --provider openai --base-url http://127.0.0.1:%d/v1 --model %s --addr 0.0.0.0:%d --policy /etc/fak/policy.json --require-key-env FAK_GATEWAY_KEY
 Restart=always

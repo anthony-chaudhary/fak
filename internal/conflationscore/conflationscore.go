@@ -120,7 +120,7 @@ var cacheHeadlineClaimPhrases = []*regexp.Regexp{
 // also name an owner/plane so "OBSERVED cache win" cannot hide whose cache did the work.
 var cacheHeadlineProvenanceQualifiers = []string{
 	"OBSERVED", "WITNESSED", "SIMULATED", "FORECAST", "modeled", "modelled",
-	"provenance",
+	"provenance", "claims",
 }
 
 // cacheHeadlineOwnerQualifiers name the owner/plane of a terse cache claim. This is the
@@ -128,7 +128,7 @@ var cacheHeadlineProvenanceQualifiers = []string{
 // lets the provider prompt-cache masquerade as fak-authored value.
 var cacheHeadlineOwnerQualifiers = []string{
 	"provider", "provider-cache", "provider cache", "cache_read", "cache_creation",
-	"fak", "kernel", "KV", "context", "ctxplan", "resident", "external-engine",
+	"fak", "kernel", "KV", "context", "ctxplan", "resident", "external-engine", "SGLang",
 	"compaction", "vDSO", "cost/latency", "rebate", "plane",
 }
 

@@ -349,7 +349,7 @@ concurrent = [
   "hostfault", "hostplacement", "hostresurrect", "hwgatelint", "ideascout", "idempotency",
   "incidentrsi",
   "intlist", "issuecatalog", "issuecohort", "issuecontractrepair", "issuecost",
-  "issuededup", "issuehygiene", "issuesmallness", "issuestriage", "jsonlledger", "kimik3page",
+  "issuededup", "issuehygiene", "issuesmallness", "issuesolved", "issuestriage", "jsonlledger", "kimik3page",
   "knobcensus", "knownbad", "knownenv", "kvbudget", "l3region", "launchlatency", "lifebridge",
   "lifecycle", "linkstate", "loaddebounce", "logvault", "lookahead", "loopfleet", "loopmap",
   "localbench", "looptrigger",
@@ -1157,6 +1157,7 @@ issuecost = ["internal/issuecost/**"]
 issuededup = ["internal/issuededup/**"]
 issuehygiene = ["internal/issuehygiene/**"]
 issuesmallness = ["internal/issuesmallness/**"]
+issuesolved = ["internal/issuesolved/**"]
 issuestriage = ["internal/issuestriage/**"]
 issueorchestrator = ["internal/issueorchestrator/**"]
 jsonlledger = ["internal/jsonlledger/**"]

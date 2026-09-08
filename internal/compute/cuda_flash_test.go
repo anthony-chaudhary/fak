@@ -98,6 +98,54 @@ func TestCUDAFlashAttentionMatchesRef(t *testing.T) {
 		"tools/run_486_acceptance_on_gpu.sh. device=%s tier=%s class=%s", cb.Name(), cb.Tier(), cb.Class())
 }
 
+// TestCUDAFlashAttentionExtremeFiniteScores guards the empty-state bound in
+// both decode implementations. Scores below -1e30 are valid float32 values;
+// treating -1e30 as negative infinity leaves the online normalizer empty and
+// makes the retained naive reduction exponentiate around the wrong maximum.
+func TestCUDAFlashAttentionExtremeFiniteScores(t *testing.T) {
+	cb := cudaOrSkip(t)
+	t.Cleanup(cb.Recycle)
+	ref := Default()
+	c := flashHeadCase{"extreme-finite", 4, 1, 64, 8}
+	width := c.nKV * c.hd
+	qData := make([]float32, c.nH*c.hd)
+	for i := range qData {
+		qData[i] = -1e15
+	}
+	kData := make([]float32, c.nP*width)
+	for i := range kData {
+		kData[i] = 1e15
+	}
+	vData := make([]float32, c.nP*width)
+	for i := range vData {
+		vData[i] = float32(i%13-6) * 0.03125
+	}
+	build := func(be Backend) (Tensor, KVStore) {
+		kv := be.NewKV(KVConfig{NumLayers: 1, NumKVHeads: c.nKV, HeadDim: c.hd})
+		for pos := 0; pos < c.nP; pos++ {
+			key := mkResident(be, []int{width}, kData[pos*width:(pos+1)*width])
+			value := mkResident(be, []int{width}, vData[pos*width:(pos+1)*width])
+			kv.AppendKV(0, key, key, value, pos)
+		}
+		return mkResident(be, []int{c.nH * c.hd}, qData), kv
+	}
+	grp := c.nH / c.nKV
+	scale := float32(1 / math.Sqrt(float64(c.hd)))
+	qRef, kvRef := build(ref)
+	want := ref.Read(ref.Attention(qRef, kvRef, 0, true, grp, scale))
+	qCUDA, kvCUDA := build(cb)
+	flash := cb.Read(cb.Attention(qCUDA, kvCUDA, 0, true, grp, scale))
+	naive := cb.Read(cb.attentionNaive(qCUDA, kvCUDA, 0, grp, scale))
+	for name, got := range map[string][]float32{"flash": flash, "naive": naive} {
+		if similarity := cosine(want, got); similarity < 0.99999 {
+			t.Fatalf("%s extreme-finite cosine %.8f < 0.99999 (max delta %.3g)", name, similarity, maxAbsDelta(want, got))
+		}
+		if delta := maxAbsDelta(want, got); delta > 1e-5 {
+			t.Fatalf("%s extreme-finite max delta %.3g > 1e-5", name, delta)
+		}
+	}
+}
+
 // flashBenchCase is the representative decode-attention shape the fused-vs-naive microbench times:
 // a Llama-ish 32 query heads over 8 KV heads (GQA), head dim 128, at a 1024-token KV window — the
 // regime where the naive kernel's full global scores[nH*nPos] row + four passes cost most, and the
@@ -183,6 +231,10 @@ func TestCUDASpecVerifyAttentionMatchesRef(t *testing.T) {
 				t.Fatalf("cb.SpecVerifyAttention failed: %v", err)
 			}
 			oCu := cb.Read(outCu)
+			cb.Free(outCu)
+			cb.Free(vCu)
+			cb.Free(kCu)
+			cb.Free(qCu)
 
 			cos := cosine(oRef, oCu)
 			if cos < 0.999 {
@@ -191,5 +243,108 @@ func TestCUDASpecVerifyAttentionMatchesRef(t *testing.T) {
 			t.Logf("#11100 spec verify parity [qLen=%d %s nH=%d nHkv=%d d=%d kvLen=%d]: cosine=%.8f maxDelta=%.2e",
 				qLen, c.name, c.nH, c.nHkv, c.d, c.kvLen, cos, maxAbsDelta(oRef, oCu))
 		}
+	}
+}
+
+// TestCUDATreeAttentionMatchesReference is the physical device parity gate for
+// arbitrary K<=32 branch masks. The mask is intentionally not lower-triangular
+// dense causality: adjacent candidates are siblings and remain isolated.
+func TestCUDATreeAttentionMatchesReference(t *testing.T) {
+	cb := cudaOrSkip(t)
+	ref := Default()
+	qLen, prefix, nH, nKV, d := 16, 64, 8, 2, 64
+	kvLen := prefix + qLen
+	parents := []int{-1, -1, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6}
+	rows := make([]uint32, qLen)
+	for q := 0; q < qLen; q++ {
+		rows[q] = uint32(1) << uint(q)
+		for p := parents[q]; p >= 0; p = parents[p] {
+			rows[q] |= uint32(1) << uint(p)
+		}
+	}
+	var seed lcg = 10899
+	qData := randVec(&seed, qLen*nH*d)
+	kData := randVec(&seed, kvLen*nKV*d)
+	vData := randVec(&seed, kvLen*nKV*d)
+	qRef := NewF32(ref, []int{qLen, nH, d}, qData)
+	kRef := NewF32(ref, []int{kvLen, nKV, d}, kData)
+	vRef := NewF32(ref, []int{kvLen, nKV, d}, vData)
+	var outRef Tensor
+	if err := ref.(TreeVerifyAttentionBackend).TreeVerifyAttention(&qRef, &kRef, &vRef, &outRef, rows, qLen, kvLen, nH, nKV, d); err != nil {
+		t.Fatal(err)
+	}
+
+	qCUDA := cb.Upload(qRef, F32)
+	kCUDA := cb.Upload(kRef, F32)
+	vCUDA := cb.Upload(vRef, F32)
+	var outCUDA Tensor
+	t.Cleanup(func() {
+		cb.Free(qCUDA)
+		cb.Free(kCUDA)
+		cb.Free(vCUDA)
+		cb.Free(outCUDA)
+	})
+	if err := cb.TreeVerifyAttention(&qCUDA, &kCUDA, &vCUDA, &outCUDA, rows, qLen, kvLen, nH, nKV, d); err != nil {
+		t.Fatal(err)
+	}
+	want := ref.Read(outRef)
+	got := cb.Read(outCUDA)
+	if similarity := cosine(want, got); similarity < 0.99999 {
+		t.Fatalf("tree CUDA/reference cosine %.8f < 0.99999 (max delta %.3g)", similarity, maxAbsDelta(want, got))
+	}
+	if delta := maxAbsDelta(want, got); delta > 2e-5 {
+		t.Fatalf("tree CUDA/reference max delta %.3g > 2e-5", delta)
+	}
+}
+
+// TestCUDASpecVerifyAttentionExtremeNegativeScores guards the online-softmax
+// empty-state sentinel. Finite scores below -1e30 must still admit the first
+// key; a finite sentinel makes every segment look empty and returns all zeros.
+func TestCUDASpecVerifyAttentionExtremeNegativeScores(t *testing.T) {
+	cb := cudaOrSkip(t)
+	ref := Default()
+	const qLen, kvLen, nH, nHkv, d = 4, 8, 4, 1, 64
+
+	qData := make([]float32, qLen*nH*d)
+	kData := make([]float32, kvLen*nHkv*d)
+	vData := make([]float32, kvLen*nHkv*d)
+	for i := range qData {
+		qData[i] = -1e15
+	}
+	for i := range kData {
+		kData[i] = 1e15
+	}
+	for i := range vData {
+		vData[i] = float32(i%13-6) * 0.03125
+	}
+
+	qRef := NewF32(ref, []int{qLen, nH, d}, qData)
+	kRef := NewF32(ref, []int{kvLen, nHkv, d}, kData)
+	vRef := NewF32(ref, []int{kvLen, nHkv, d}, vData)
+	var outRef Tensor
+	if err := ref.(SpecVerifyAttentionBackend).SpecVerifyAttention(
+		&qRef, &kRef, &vRef, &outRef, qLen, kvLen, nH, nHkv, d); err != nil {
+		t.Fatalf("ref.SpecVerifyAttention failed: %v", err)
+	}
+
+	qCu := cb.Upload(qRef, F32)
+	kCu := cb.Upload(kRef, F32)
+	vCu := cb.Upload(vRef, F32)
+	var outCu Tensor
+	if err := cb.SpecVerifyAttention(&qCu, &kCu, &vCu, &outCu, qLen, kvLen, nH, nHkv, d); err != nil {
+		t.Fatalf("cb.SpecVerifyAttention failed: %v", err)
+	}
+	got := cb.Read(outCu)
+	cb.Free(outCu)
+	cb.Free(vCu)
+	cb.Free(kCu)
+	cb.Free(qCu)
+	want := ref.Read(outRef)
+
+	if cos := cosine(want, got); cos < 0.99999 {
+		t.Fatalf("extreme-negative cosine %.8f < 0.99999 (max delta %.3g)", cos, maxAbsDelta(want, got))
+	}
+	if delta := maxAbsDelta(want, got); delta > 1e-5 {
+		t.Fatalf("extreme-negative max delta %.3g > 1e-5", delta)
 	}
 }

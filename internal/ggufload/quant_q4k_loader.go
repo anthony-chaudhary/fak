@@ -61,14 +61,14 @@ func ExpertShardForRank(numExperts, ranks, rank int) (ExpertShard, error) {
 }
 
 type q4kLoadOptions struct {
-	expertShardSet        bool
-	expertShard           ExpertShard
-	residentDenseKQuant   bool
-	residentDenseQ2K      bool
-	residentQ2KEmbedding  bool
-	streamedExperts       bool
-	streamedExpertBytes   int64
-	streamedDenseQ4K      bool
+	expertShardSet       bool
+	expertShard          ExpertShard
+	residentDenseKQuant  bool
+	residentDenseQ2K     bool
+	residentQ2KEmbedding bool
+	streamedExperts      bool
+	streamedExpertBytes  int64
+	streamedDenseQ4K     bool
 }
 
 // Q4KLoadOption configures the direct-resident-Q4_K GGUF load path.
@@ -436,8 +436,8 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	// normalizes + splits, returning the builder mutations to apply. It touches no shared
 	// state (TensorBytes copies; dequantF32 allocates fresh; the helpers are pure over the
 	// read-only Config), so it is safe to run from many workers at once.
-	computeFn := func(info TensorInfo) tensorWork {
-		return s.computeQ4KTensorWork(info, cfg, w3Requested, streamed, loadOpts)
+	computeFn := func(info TensorInfo, innerWorkers int) tensorWork {
+		return s.computeQ4KTensorWork(info, cfg, w3Requested, streamed, loadOpts, innerWorkers)
 	}
 
 	// applyFn owns all shared mutable state (builder, KV-b merge buffer, profiler) and runs
@@ -446,7 +446,7 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 		return applyQ4KTensorWork(tw, p, cfg, builder, kvbHalf, w3Requested)
 	}
 
-	if err := s.parallelQuantLoadContext(ctx, computeFn, applyFn); err != nil {
+	if err := s.parallelQuantLoadContextBudget(ctx, computeFn, applyFn); err != nil {
 		return nil, err
 	}
 	if err := glmKVBUnpaired(kvbHalf); err != nil {
@@ -643,7 +643,7 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 	return nil
 }
 
-func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w3Requested bool, streamed map[string]bool, loadOpts q4kLoadOptions) tensorWork {
+func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w3Requested bool, streamed map[string]bool, loadOpts q4kLoadOptions, innerWorkers int) tensorWork {
 	tw := tensorWork{tickBytes: tensorOnDiskBytes(info)}
 	if w3Requested && info.Type == TensorIQ3_XXS &&
 		archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
@@ -655,7 +655,7 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 	}
 	if archUsesMLAMoELayout(cfg.ModelType) {
 		if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
-			shape, data, err := s.dequantGGUFShapeF32(info)
+			shape, data, err := s.dequantGGUFShapeF32Limited(info, innerWorkers)
 			if err != nil {
 				tw.err = err
 				return tw
@@ -698,7 +698,7 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 					return tw
 				}
 			}
-			data, err := dequantF32(info, raw)
+			data, err := dequantF32Limited(info, raw, innerWorkers)
 			if err != nil {
 				tw.err = err
 				return tw
@@ -770,7 +770,7 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 		tw.acctResident = true
 		return tw
 	}
-	data, err := dequantF32(info, raw)
+	data, err := dequantF32Limited(info, raw, innerWorkers)
 	if err != nil {
 		tw.err = err
 		return tw

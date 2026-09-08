@@ -2,9 +2,12 @@ package ctxmmu
 
 import (
 	"errors"
+	"math/bits"
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // Default constants for GTT attention page allocations on Strix Halo APU architectures.
@@ -348,4 +351,418 @@ func (p *SharedTokenPool) StreamUsage(streamID string) (committed int, reserved 
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.committed[streamID], p.reservations[streamID]
+}
+
+// Standard typed errors for physical block allocator and page table operations.
+var (
+	// ErrPhysicalMemoryExhausted is returned when no free physical pages remain in the block allocator.
+	ErrPhysicalMemoryExhausted = errors.New("ctxmmu: physical page pool exhausted")
+
+	// ErrInvalidPageID is returned when an out-of-bounds or invalid physical page ID is requested.
+	ErrInvalidPageID = errors.New("ctxmmu: invalid physical page ID")
+
+	// ErrPageAlreadyFree is returned if an attempt is made to release a page whose reference count is already 0.
+	ErrPageAlreadyFree = errors.New("ctxmmu: physical page already free")
+
+	// ErrPageInUse is returned when attempting an illegal operation on an active physical page.
+	ErrPageInUse = errors.New("ctxmmu: physical page is in active use")
+)
+
+// PhysicalPageID identifies a distinct physical memory block allocated in unified memory.
+type PhysicalPageID int
+
+// PhysicalPage represents a single physical memory page block of fixed byte size in unified DRAM.
+// Shared pages across Copy-on-Write forks are reference-counted and immutable until unshared.
+type PhysicalPage struct {
+	ID         PhysicalPageID
+	refCount   atomic.Int32
+	lastAccess atomic.Int64 // Unix nanoseconds for LRU tracking
+	data       []byte       // Physical memory slab buffer for KV cache entries
+}
+
+// RefCount returns the current reference count of this physical page.
+func (p *PhysicalPage) RefCount() int32 {
+	return p.refCount.Load()
+}
+
+// Retain atomically increments the reference count of this physical page.
+func (p *PhysicalPage) Retain() int32 {
+	return p.refCount.Add(1)
+}
+
+// Release atomically decrements the reference count of this physical page.
+func (p *PhysicalPage) Release() int32 {
+	return p.refCount.Add(-1)
+}
+
+// IsShared reports whether more than one session holds a reference to this page.
+func (p *PhysicalPage) IsShared() bool {
+	return p.refCount.Load() > 1
+}
+
+// Touch updates the last-access timestamp to current wall-clock time for LRU tracking.
+func (p *PhysicalPage) Touch() {
+	p.lastAccess.Store(time.Now().UnixNano())
+}
+
+// LastAccess returns the last access timestamp in Unix nanoseconds.
+func (p *PhysicalPage) LastAccess() int64 {
+	return p.lastAccess.Load()
+}
+
+// Data returns the underlying byte slice representing the physical memory buffer.
+func (p *PhysicalPage) Data() []byte {
+	return p.data
+}
+
+// BlockAllocator manages a pool of fixed-size physical memory pages in unified memory.
+// It provides lock-free O(1) page allocation and deallocation using a free-list bitmask,
+// atomic reference counting for Copy-on-Write sharing, and LRU page tracking.
+type BlockAllocator struct {
+	numPages       int
+	pageSizeBytes  int64
+	pages          []*PhysicalPage
+	bitmask        []atomic.Uint64 // Bitmask free-list: 0 = free, 1 = allocated
+	searchHint     atomic.Uint64   // Round-robin hint index into bitmask words
+	allocatedCount atomic.Int64
+	cowClones      atomic.Int64
+}
+
+// NewBlockAllocator initializes a BlockAllocator with the specified number of physical pages
+// and page byte size.
+func NewBlockAllocator(numPages int, pageSizeBytes int64) *BlockAllocator {
+	if numPages <= 0 {
+		numPages = 1024
+	}
+	if pageSizeBytes <= 0 {
+		pageSizeBytes = 65536
+	}
+
+	numWords := (numPages + 63) / 64
+	bitmask := make([]atomic.Uint64, numWords)
+
+	// If numPages is not an exact multiple of 64, mask out trailing out-of-bounds bits as 1 (allocated)
+	// so they are never handed out during bitmask scans.
+	rem := numPages % 64
+	if rem != 0 {
+		invalidMask := ^uint64(0) << rem
+		bitmask[numWords-1].Store(invalidMask)
+	}
+
+	pages := make([]*PhysicalPage, numPages)
+	for i := 0; i < numPages; i++ {
+		pages[i] = &PhysicalPage{
+			ID:   PhysicalPageID(i),
+			data: make([]byte, pageSizeBytes),
+		}
+	}
+
+	return &BlockAllocator{
+		numPages:      numPages,
+		pageSizeBytes: pageSizeBytes,
+		pages:         pages,
+		bitmask:       bitmask,
+	}
+}
+
+// Allocate provides lock-free O(1) allocation of a physical page using the free-list bitmask.
+// Returns ErrPhysicalMemoryExhausted when all pages in the pool are allocated.
+func (a *BlockAllocator) Allocate() (PhysicalPageID, error) {
+	numWords := len(a.bitmask)
+	if numWords == 0 {
+		return -1, ErrPhysicalMemoryExhausted
+	}
+
+	start := a.searchHint.Load() % uint64(numWords)
+	for i := 0; i < numWords; i++ {
+		w := int((start + uint64(i)) % uint64(numWords))
+		for {
+			val := a.bitmask[w].Load()
+			if ^val == 0 {
+				// All 64 bits in this word are allocated
+				break
+			}
+
+			bit := bits.TrailingZeros64(^val)
+			pageID := w*64 + bit
+			if pageID >= a.numPages {
+				break
+			}
+
+			newVal := val | (uint64(1) << bit)
+			if a.bitmask[w].CompareAndSwap(val, newVal) {
+				// Successfully claimed the bit
+				a.searchHint.Store(uint64(w))
+				a.allocatedCount.Add(1)
+
+				page := a.pages[pageID]
+				page.refCount.Store(1)
+				page.Touch()
+				return PhysicalPageID(pageID), nil
+			}
+			// CAS contention: retry with fresh val in the same word
+		}
+	}
+
+	return -1, ErrPhysicalMemoryExhausted
+}
+
+// AllocateBatch allocates multiple physical pages in O(count) time.
+// If not enough pages are available, all allocated pages in the batch are freed and an error is returned.
+func (a *BlockAllocator) AllocateBatch(count int) ([]PhysicalPageID, error) {
+	if count <= 0 {
+		return nil, nil
+	}
+	res := make([]PhysicalPageID, 0, count)
+	for i := 0; i < count; i++ {
+		p, err := a.Allocate()
+		if err != nil {
+			// Rollback allocated pages
+			for _, allocated := range res {
+				_, _ = a.Release(allocated)
+			}
+			return nil, err
+		}
+		res = append(res, p)
+	}
+	return res, nil
+}
+
+// Retain increments the reference count for a physical page.
+// Returns ErrInvalidPageID or ErrPageAlreadyFree if the page is invalid or unallocated.
+func (a *BlockAllocator) Retain(pageID PhysicalPageID) (int32, error) {
+	id := int(pageID)
+	if id < 0 || id >= a.numPages {
+		return 0, ErrInvalidPageID
+	}
+	page := a.pages[id]
+	for {
+		cur := page.refCount.Load()
+		if cur <= 0 {
+			return 0, ErrPageAlreadyFree
+		}
+		if page.refCount.CompareAndSwap(cur, cur+1) {
+			page.Touch()
+			return cur + 1, nil
+		}
+	}
+}
+
+// Release decrements the reference count of a physical page.
+// If the reference count drops to 0, the page is recycled back to the free-list bitmask in O(1) time.
+func (a *BlockAllocator) Release(pageID PhysicalPageID) (int32, error) {
+	id := int(pageID)
+	if id < 0 || id >= a.numPages {
+		return 0, ErrInvalidPageID
+	}
+	page := a.pages[id]
+	newRef := page.Release()
+	if newRef > 0 {
+		return newRef, nil
+	}
+	if newRef < 0 {
+		page.refCount.Store(0)
+		return 0, ErrPageAlreadyFree
+	}
+
+	// newRef == 0: Recycle page back to the bitmask free list in O(1)
+	w := id / 64
+	bit := id % 64
+	mask := ^(uint64(1) << bit)
+	for {
+		oldVal := a.bitmask[w].Load()
+		newVal := oldVal & mask
+		if a.bitmask[w].CompareAndSwap(oldVal, newVal) {
+			break
+		}
+	}
+
+	a.allocatedCount.Add(-1)
+	a.searchHint.Store(uint64(w))
+	return 0, nil
+}
+
+// ClonePage performs Copy-on-Write by allocating a new physical page and copying
+// the source page's buffer contents.
+func (a *BlockAllocator) ClonePage(srcID PhysicalPageID) (PhysicalPageID, error) {
+	src, err := a.Page(srcID)
+	if err != nil {
+		return -1, err
+	}
+	dstID, err := a.Allocate()
+	if err != nil {
+		return -1, err
+	}
+	dst := a.pages[dstID]
+	copy(dst.data, src.data)
+	a.cowClones.Add(1)
+	return dstID, nil
+}
+
+// Page returns the PhysicalPage pointer for the given ID.
+func (a *BlockAllocator) Page(pageID PhysicalPageID) (*PhysicalPage, error) {
+	id := int(pageID)
+	if id < 0 || id >= a.numPages {
+		return nil, ErrInvalidPageID
+	}
+	return a.pages[id], nil
+}
+
+// PageData returns the backing byte buffer for the given physical page.
+func (a *BlockAllocator) PageData(pageID PhysicalPageID) ([]byte, error) {
+	p, err := a.Page(pageID)
+	if err != nil {
+		return nil, err
+	}
+	return p.Data(), nil
+}
+
+// IsAllocated checks whether the specified physical page is currently allocated in the bitmask.
+func (a *BlockAllocator) IsAllocated(pageID PhysicalPageID) bool {
+	id := int(pageID)
+	if id < 0 || id >= a.numPages {
+		return false
+	}
+	w := id / 64
+	bit := id % 64
+	return (a.bitmask[w].Load() & (uint64(1) << bit)) != 0
+}
+
+// TotalPages returns the total number of physical pages managed by this allocator.
+func (a *BlockAllocator) TotalPages() int {
+	return a.numPages
+}
+
+// AllocatedPages returns the number of physical pages currently allocated.
+func (a *BlockAllocator) AllocatedPages() int {
+	return int(a.allocatedCount.Load())
+}
+
+// FreePages returns the number of free physical pages available for allocation.
+func (a *BlockAllocator) FreePages() int {
+	free := a.numPages - a.AllocatedPages()
+	if free < 0 {
+		return 0
+	}
+	return free
+}
+
+// PageSizeBytes returns the size of each physical page buffer in bytes.
+func (a *BlockAllocator) PageSizeBytes() int64 {
+	return a.pageSizeBytes
+}
+
+// TotalBytes returns the total unified memory capacity managed by this allocator in bytes.
+func (a *BlockAllocator) TotalBytes() int64 {
+	return int64(a.numPages) * a.pageSizeBytes
+}
+
+// COWClones returns the total number of Copy-on-Write page clones performed.
+func (a *BlockAllocator) COWClones() int64 {
+	return a.cowClones.Load()
+}
+
+// FindLRUEvictable finds the allocated physical page with the oldest access timestamp
+// matching the provided filter function (e.g. refCount == 1).
+func (a *BlockAllocator) FindLRUEvictable(filter func(p *PhysicalPage) bool) (PhysicalPageID, error) {
+	var bestID PhysicalPageID = -1
+	var oldestAccess int64 = -1
+
+	for i, p := range a.pages {
+		if !a.IsAllocated(PhysicalPageID(i)) {
+			continue
+		}
+		if filter != nil && !filter(p) {
+			continue
+		}
+		acc := p.LastAccess()
+		if oldestAccess == -1 || acc < oldestAccess {
+			oldestAccess = acc
+			bestID = PhysicalPageID(i)
+		}
+	}
+
+	if bestID == -1 {
+		return -1, errors.New("ctxmmu: no evictable physical page found")
+	}
+	return bestID, nil
+}
+
+// VirtualPageTable maps logical sequence page indices to physical memory page IDs.
+// It supports zero-copy Copy-on-Write branching via shallow reference duplication.
+type VirtualPageTable struct {
+	mu      sync.RWMutex
+	entries []PhysicalPageID
+}
+
+// NewVirtualPageTable creates an empty virtual page table.
+func NewVirtualPageTable() *VirtualPageTable {
+	return &VirtualPageTable{
+		entries: make([]PhysicalPageID, 0),
+	}
+}
+
+// PageCount returns the number of mapped logical pages in the page table.
+func (t *VirtualPageTable) PageCount() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return len(t.entries)
+}
+
+// GetPhysicalPage returns the physical page ID mapped to the given logical page index.
+func (t *VirtualPageTable) GetPhysicalPage(logicalIdx int) (PhysicalPageID, bool) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if logicalIdx < 0 || logicalIdx >= len(t.entries) {
+		return -1, false
+	}
+	physID := t.entries[logicalIdx]
+	if physID < 0 {
+		return -1, false
+	}
+	return physID, true
+}
+
+// MapPage maps a logical page index to a physical page ID.
+func (t *VirtualPageTable) MapPage(logicalIdx int, physID PhysicalPageID) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if logicalIdx >= len(t.entries) {
+		newEntries := make([]PhysicalPageID, logicalIdx+1)
+		copy(newEntries, t.entries)
+		for i := len(t.entries); i < logicalIdx; i++ {
+			newEntries[i] = -1
+		}
+		t.entries = newEntries
+	}
+	t.entries[logicalIdx] = physID
+}
+
+// AppendPage appends a physical page mapping as the next logical page index.
+func (t *VirtualPageTable) AppendPage(physID PhysicalPageID) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	idx := len(t.entries)
+	t.entries = append(t.entries, physID)
+	return idx
+}
+
+// PhysicalPages returns a snapshot copy of all mapped physical page IDs.
+func (t *VirtualPageTable) PhysicalPages() []PhysicalPageID {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	res := make([]PhysicalPageID, len(t.entries))
+	copy(res, t.entries)
+	return res
+}
+
+// Clone creates a shallow copy of the page table for zero-copy Copy-on-Write branching.
+func (t *VirtualPageTable) Clone() *VirtualPageTable {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	cloned := make([]PhysicalPageID, len(t.entries))
+	copy(cloned, t.entries)
+	return &VirtualPageTable{
+		entries: cloned,
+	}
 }
