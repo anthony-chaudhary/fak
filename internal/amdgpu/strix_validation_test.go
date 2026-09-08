@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -557,6 +559,227 @@ func TestBuildStrixCandidateArchiveRejectsOverlaySymlink(t *testing.T) {
 	_, err := BuildStrixCandidateArchive(context.Background(), root, run("rev-parse", "HEAD"), []string{"overlay-link"})
 	if err == nil || !strings.Contains(err.Error(), "overlay symlink") {
 		t.Fatalf("overlay symlink accepted: %v", err)
+	}
+}
+
+func TestBuildStrixCandidateArchiveRejectsIntermediateSymlink(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("init")
+	run("config", "user.email", "test@example.invalid")
+	run("config", "user.name", "test")
+	if err := os.WriteFile(filepath.Join(root, "marker"), []byte("base"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "marker")
+	run("commit", "-m", "base")
+	tip := run("rev-parse", "HEAD")
+
+	inside := filepath.Join(root, "regular")
+	outside := t.TempDir()
+	for _, dir := range []string{inside, outside} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "secret"), []byte("not archived"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		name   string
+		target string
+		leaf   string
+	}{{"outside", outside, "secret"}, {"outside-missing-leaf", outside, "missing"}, {"inside", inside, "secret"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			link := filepath.Join(root, "alias-"+tc.name)
+			if err := os.Symlink(tc.target, link); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			_, err := BuildStrixCandidateArchive(context.Background(), root, tip, []string{filepath.Join("alias-"+tc.name, tc.leaf)})
+			if err == nil || !strings.Contains(err.Error(), "symlink component") {
+				t.Fatalf("intermediate %s symlink accepted: %v", tc.name, err)
+			}
+		})
+	}
+
+	t.Run("directory symlink child", func(t *testing.T) {
+		dir := filepath.Join(root, "overlay-with-link")
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(dir, "child")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		if _, err := BuildStrixCandidateArchive(context.Background(), root, tip, []string{"overlay-with-link"}); err == nil || !strings.Contains(err.Error(), "symlink") {
+			t.Fatalf("directory symlink child was silently omitted: %v", err)
+		}
+	})
+
+	t.Run("directory special child", func(t *testing.T) {
+		dir := filepath.Join(root, "overlay-with-special")
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		fifo := filepath.Join(dir, "pipe")
+		if out, err := exec.Command("mkfifo", fifo).CombinedOutput(); err != nil {
+			t.Skipf("mkfifo unavailable: %v: %s", err, out)
+		}
+		if _, err := BuildStrixCandidateArchive(context.Background(), root, tip, []string{"overlay-with-special"}); err == nil || !strings.Contains(err.Error(), "unsupported mode") {
+			t.Fatalf("directory special child was silently omitted: %v", err)
+		}
+	})
+}
+
+func TestBuildStrixCandidateArchiveRejectsWindowsJunction(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows junction/reparse regression")
+	}
+	root := t.TempDir()
+	run := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("init")
+	run("config", "user.email", "test@example.invalid")
+	run("config", "user.name", "test")
+	overlay := filepath.Join(root, "overlay")
+	if err := os.MkdirAll(overlay, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(overlay, "keep"), []byte("base"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "overlay/keep")
+	run("commit", "-m", "base")
+
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret"), []byte("not archived"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	junction := filepath.Join(overlay, "junction")
+	if out, err := exec.Command("cmd.exe", "/c", "mklink", "/J", junction, outside).CombinedOutput(); err != nil {
+		t.Skipf("Windows junction unavailable: %v: %s", err, out)
+	}
+	defer func() { _ = exec.Command("cmd.exe", "/c", "rmdir", junction).Run() }()
+	// Owning the parent directory forces the walk callback to validate the
+	// junction itself before it can be treated as a traversable directory.
+	_, err := BuildStrixCandidateArchive(context.Background(), root, run("rev-parse", "HEAD"), []string{"overlay"})
+	if err == nil {
+		t.Fatalf("Windows junction escaped overlay validation: %v", err)
+	}
+}
+
+func TestBuildStrixCandidateArchiveCanceledBeforeTraversal(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	missingRoot := filepath.Join(t.TempDir(), "must-not-be-inspected")
+	archive, err := BuildStrixCandidateArchive(ctx, missingRoot, testTip, []string{"anything"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("already-canceled build returned %v, want context.Canceled", err)
+	}
+	if len(archive.Bytes) != 0 || archive.SourceArchiveSHA256 != "" {
+		t.Fatalf("canceled build emitted archive receipt: %+v", archive)
+	}
+}
+
+func TestBuildStrixCandidateArchiveWrapsGitCancellation(t *testing.T) {
+	original := strixGitArchiveOutput
+	t.Cleanup(func() { strixGitArchiveOutput = original })
+	ctx, cancel := context.WithCancel(context.Background())
+	strixGitArchiveOutput = func(context.Context, string, string) ([]byte, error) {
+		cancel()
+		return nil, context.Canceled
+	}
+
+	archive, err := BuildStrixCandidateArchive(ctx, t.TempDir(), testTip, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("git cancellation returned %v, want context.Canceled", err)
+	}
+	if len(archive.Bytes) != 0 || archive.SourceArchiveSHA256 != "" {
+		t.Fatalf("canceled git archive emitted receipt: %+v", archive)
+	}
+}
+
+func TestBuildStrixCandidateArchiveAllowsRegularAndDeletionOverlays(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("init")
+	run("config", "user.email", "test@example.invalid")
+	run("config", "user.name", "test")
+	if err := os.MkdirAll(filepath.Join(root, "regular"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "deleted"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"single.txt": "base", "regular/nested.txt": "base", "deleted/nested.txt": "remove"} {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("add", ".")
+	run("commit", "-m", "base")
+	tip := run("rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(root, "single.txt"), []byte("single overlay"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "regular", "nested.txt"), []byte("directory overlay"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "deleted")); err != nil {
+		t.Fatal(err)
+	}
+
+	archive, err := BuildStrixCandidateArchive(context.Background(), root, tip, []string{"single.txt", "regular", "deleted", "missing/child"})
+	if err != nil {
+		t.Fatalf("regular/deletion overlays rejected: %v", err)
+	}
+	contents := map[string]string{}
+	tr := tar.NewReader(bytes.NewReader(archive.Bytes))
+	for {
+		h, er := tr.Next()
+		if er == io.EOF {
+			break
+		}
+		if er != nil {
+			t.Fatal(er)
+		}
+		if h.Typeflag == tar.TypeReg || h.Typeflag == tar.TypeRegA {
+			body, er := io.ReadAll(tr)
+			if er != nil {
+				t.Fatal(er)
+			}
+			contents[h.Name] = string(body)
+		}
+	}
+	if contents["single.txt"] != "single overlay" || contents["regular/nested.txt"] != "directory overlay" {
+		t.Fatalf("regular overlays missing from archive: %+v", contents)
+	}
+	for name := range contents {
+		if strings.HasPrefix(name, "deleted/") || strings.HasPrefix(name, "missing/") {
+			t.Fatalf("deletion overlay remained in archive: %q", name)
+		}
 	}
 }
 

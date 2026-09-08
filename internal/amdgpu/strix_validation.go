@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -86,19 +87,131 @@ func validateStrixWorkspace(work string) error {
 
 func digestBytes(b []byte) string { h := sha256.Sum256(b); return "sha256:" + hex.EncodeToString(h[:]) }
 
+type strixOwnedOverlayPath struct {
+	rel    string
+	full   string
+	exists bool
+}
+
+func canonicalStrixOverlayRoot(root string) (string, error) {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("amdgpu: resolve candidate root: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("amdgpu: canonicalize candidate root: %w", err)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("amdgpu: inspect candidate root: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("amdgpu: candidate root %q is not a directory", resolved)
+	}
+	return filepath.Clean(resolved), nil
+}
+
+func strixPathWithinRoot(root, candidate string) bool {
+	rel, err := filepath.Rel(root, candidate)
+	return err == nil && !filepath.IsAbs(rel) && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func sameStrixFilesystemPath(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+func strixArchiveContextErr(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("amdgpu: build candidate archive canceled: %w", err)
+	}
+	return nil
+}
+
+var strixGitArchiveOutput = func(ctx context.Context, root, baseTip string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "archive", "--format=tar", baseTip)
+	return cmd.Output()
+}
+
+// resolveStrixOwnedOverlay rejects links in every existing component. Missing
+// components are safe deletion overlays: there is no filesystem object to read,
+// and the lexical destination has already been proven beneath canonicalRoot.
+func resolveStrixOwnedOverlay(canonicalRoot, raw string) (strixOwnedOverlayPath, error) {
+	relOS := filepath.Clean(filepath.FromSlash(raw))
+	if relOS == "." || !filepath.IsLocal(relOS) {
+		return strixOwnedOverlayPath{}, fmt.Errorf("amdgpu: unsafe candidate overlay path %q", raw)
+	}
+	full := filepath.Join(canonicalRoot, relOS)
+	if !strixPathWithinRoot(canonicalRoot, full) {
+		return strixOwnedOverlayPath{}, fmt.Errorf("amdgpu: candidate overlay path %q resolves outside canonical root %q", raw, canonicalRoot)
+	}
+
+	current := canonicalRoot
+	components := strings.Split(relOS, string(filepath.Separator))
+	for i, component := range components {
+		current = filepath.Join(current, component)
+		info, err := os.Lstat(current)
+		if os.IsNotExist(err) {
+			return strixOwnedOverlayPath{rel: filepath.ToSlash(relOS), full: full, exists: false}, nil
+		}
+		if err != nil {
+			return strixOwnedOverlayPath{}, fmt.Errorf("amdgpu: inspect candidate overlay component %q: %w", current, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return strixOwnedOverlayPath{}, fmt.Errorf("amdgpu: candidate overlay symlink component %q in path %q is not allowed", current, raw)
+		}
+		resolved, err := filepath.EvalSymlinks(current)
+		if err != nil {
+			return strixOwnedOverlayPath{}, fmt.Errorf("amdgpu: resolve candidate overlay component %q: %w", current, err)
+		}
+		if !strixPathWithinRoot(canonicalRoot, resolved) {
+			return strixOwnedOverlayPath{}, fmt.Errorf("amdgpu: candidate overlay path %q resolves outside canonical root %q", raw, canonicalRoot)
+		}
+		// EvalSymlinks also exposes Windows junction/reparse aliases which are not
+		// always reported as ModeSymlink by Lstat. Reject aliases even when their
+		// destination remains inside the repository.
+		if !sameStrixFilesystemPath(current, resolved) {
+			return strixOwnedOverlayPath{}, fmt.Errorf("amdgpu: candidate overlay symlink component %q in path %q is not allowed", current, raw)
+		}
+		if i < len(components)-1 && !info.IsDir() {
+			return strixOwnedOverlayPath{}, fmt.Errorf("amdgpu: candidate overlay component %q is not a directory", current)
+		}
+	}
+	return strixOwnedOverlayPath{rel: filepath.ToSlash(relOS), full: full, exists: true}, nil
+}
+
 // BuildStrixCandidateArchive creates a deterministic archive of baseTip plus exactly ownedPaths from root.
 func BuildStrixCandidateArchive(ctx context.Context, root, baseTip string, ownedPaths []string) (StrixCandidateArchive, error) {
 	if !fullGitTipRE.MatchString(strings.TrimSpace(baseTip)) {
 		return StrixCandidateArchive{}, fmt.Errorf("amdgpu: full 40-hex base GitTip is required")
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", root, "archive", "--format=tar", baseTip)
-	base, err := cmd.Output()
+	if err := strixArchiveContextErr(ctx); err != nil {
+		return StrixCandidateArchive{}, err
+	}
+	canonicalRoot, err := canonicalStrixOverlayRoot(root)
 	if err != nil {
+		return StrixCandidateArchive{}, err
+	}
+	base, err := strixGitArchiveOutput(ctx, canonicalRoot, baseTip)
+	if err != nil {
+		if ctx.Err() != nil {
+			return StrixCandidateArchive{}, strixArchiveContextErr(ctx)
+		}
 		return StrixCandidateArchive{}, fmt.Errorf("amdgpu: archive base candidate: %w", err)
+	}
+	if err := strixArchiveContextErr(ctx); err != nil {
+		return StrixCandidateArchive{}, err
 	}
 	entries := map[string]tarEntry{}
 	tr := tar.NewReader(bytes.NewReader(base))
 	for {
+		if err := strixArchiveContextErr(ctx); err != nil {
+			return StrixCandidateArchive{}, err
+		}
 		h, er := tr.Next()
 		if er == io.EOF {
 			break
@@ -123,20 +236,24 @@ func BuildStrixCandidateArchive(ctx context.Context, root, baseTip string, owned
 		entries[name] = tarEntry{name: name, mode: h.Mode, kind: h.Typeflag, link: h.Linkname, body: body}
 	}
 	for _, raw := range ownedPaths {
-		rel := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(raw)), "./")
-		if rel == "." || rel == "" || strings.HasPrefix(rel, "../") || filepath.IsAbs(raw) {
-			return StrixCandidateArchive{}, fmt.Errorf("amdgpu: unsafe candidate overlay path %q", raw)
+		if err := strixArchiveContextErr(ctx); err != nil {
+			return StrixCandidateArchive{}, err
 		}
+		overlay, er := resolveStrixOwnedOverlay(canonicalRoot, raw)
+		if er != nil {
+			return StrixCandidateArchive{}, er
+		}
+		rel := overlay.rel
 		for name := range entries {
 			if name == rel || strings.HasPrefix(name, rel+"/") {
 				delete(entries, name)
 			}
 		}
-		path := filepath.Join(root, filepath.FromSlash(rel))
-		info, er := os.Lstat(path)
-		if os.IsNotExist(er) {
+		if !overlay.exists {
 			continue
 		}
+		overlayPath := overlay.full
+		info, er := os.Lstat(overlayPath)
 		if er != nil {
 			return StrixCandidateArchive{}, fmt.Errorf("amdgpu: inspect overlay %s: %w", rel, er)
 		}
@@ -146,9 +263,20 @@ func BuildStrixCandidateArchive(ctx context.Context, root, baseTip string, owned
 				return fmt.Errorf("candidate overlay symlink %q is not allowed", name)
 			}
 			if !fi.Mode().IsRegular() {
-				return nil
+				return fmt.Errorf("candidate overlay entry %q has unsupported mode %s", name, fi.Mode())
 			}
-			body, e := os.ReadFile(full)
+			// Re-resolve immediately before reading to fail closed when a link was
+			// present in the observed snapshot. Stdlib path checks cannot make this
+			// race-free against concurrent mutation; handle-relative opens are a
+			// separate hardening boundary.
+			checked, e := resolveStrixOwnedOverlay(canonicalRoot, name)
+			if e != nil {
+				return e
+			}
+			if !checked.exists {
+				return fmt.Errorf("candidate overlay %q disappeared before read", name)
+			}
+			body, e := os.ReadFile(checked.full)
 			if e != nil {
 				return e
 			}
@@ -157,25 +285,38 @@ func BuildStrixCandidateArchive(ctx context.Context, root, baseTip string, owned
 			return nil
 		}
 		if info.IsDir() {
-			er = filepath.Walk(path, func(full string, fi os.FileInfo, walkErr error) error {
+			er = filepath.Walk(overlayPath, func(full string, fi os.FileInfo, walkErr error) error {
+				if err := strixArchiveContextErr(ctx); err != nil {
+					return err
+				}
 				if walkErr != nil {
 					return walkErr
+				}
+				child, e := filepath.Rel(canonicalRoot, full)
+				if e != nil {
+					return e
+				}
+				checked, e := resolveStrixOwnedOverlay(canonicalRoot, child)
+				if e != nil {
+					return e
+				}
+				if !checked.exists {
+					return fmt.Errorf("candidate overlay %q disappeared during walk", filepath.ToSlash(child))
 				}
 				if fi.IsDir() {
 					return nil
 				}
-				child, e := filepath.Rel(root, full)
-				if e != nil {
-					return e
-				}
 				return add(full, child, fi)
 			})
 		} else {
-			er = add(path, rel, info)
+			er = add(overlayPath, rel, info)
 		}
 		if er != nil {
 			return StrixCandidateArchive{}, fmt.Errorf("amdgpu: overlay %s: %w", rel, er)
 		}
+	}
+	if err := strixArchiveContextErr(ctx); err != nil {
+		return StrixCandidateArchive{}, err
 	}
 	names := make([]string, 0, len(entries))
 	for name := range entries {
@@ -185,6 +326,9 @@ func BuildStrixCandidateArchive(ctx context.Context, root, baseTip string, owned
 	var out bytes.Buffer
 	tw := tar.NewWriter(&out)
 	for _, name := range names {
+		if err := strixArchiveContextErr(ctx); err != nil {
+			return StrixCandidateArchive{}, err
+		}
 		e := entries[name]
 		h := &tar.Header{Name: e.name, Mode: e.mode, Size: int64(len(e.body)), Typeflag: e.kind, Linkname: e.link, ModTime: time.Unix(0, 0).UTC(), Uid: 0, Gid: 0}
 		if e.kind == tar.TypeSymlink {
@@ -202,7 +346,15 @@ func BuildStrixCandidateArchive(ctx context.Context, root, baseTip string, owned
 	if err := tw.Close(); err != nil {
 		return StrixCandidateArchive{}, err
 	}
-	return StrixCandidateArchive{Bytes: out.Bytes(), SourceArchiveSHA256: digestBytes(out.Bytes())}, nil
+	if err := strixArchiveContextErr(ctx); err != nil {
+		return StrixCandidateArchive{}, err
+	}
+	archiveBytes := out.Bytes()
+	archiveSHA256 := digestBytes(archiveBytes)
+	if err := strixArchiveContextErr(ctx); err != nil {
+		return StrixCandidateArchive{}, err
+	}
+	return StrixCandidateArchive{Bytes: archiveBytes, SourceArchiveSHA256: archiveSHA256}, nil
 }
 
 func rejectArchiveLinkEntry(h *tar.Header) error {
