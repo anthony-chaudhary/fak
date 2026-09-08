@@ -232,6 +232,32 @@ func TestQuarantineRestoreRefusalSurvivesRestart(t *testing.T) {
 			t.Fatalf("ledger kill-switch bypassed mandatory authority: %v", err)
 		}
 		return
+
+	case "canonical-durable-write":
+		poison := quarantineRestoreCASBlob()
+		call := &abi.ToolCall{Tool: "fetch_remote_payload",
+			Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{}`)},
+			Meta: map[string]string{"readOnlyHint": "true"}}
+		result := &abi.Result{Call: call, Status: abi.StatusOK,
+			Payload: abi.Ref{Kind: abi.RefInline, Inline: poison}}
+		verdict := ctxmmu.New().Admit(context.Background(), call, result)
+		pageOut, ok := verdict.Payload.(abi.QuarantinePayload)
+		if verdict.Kind != abi.VerdictQuarantine || !ok || !pageOut.PageOut {
+			t.Fatalf("canonical durable quarantine = %#v, want page-out", verdict)
+		}
+		return
+
+	case "canonical-durable-read":
+		poison := quarantineRestoreCASBlob()
+		digest := ctxplan.Digest(poison)
+		if err := ctxmmu.ClearQuarantine(digest); err != nil {
+			t.Fatalf("clear canonical durable authority: %v", err)
+		}
+		got, err := newTestServer(t).resolveRestoreRaw("", "default", digest, ContextRestoreRequest{ID: digest})
+		if err != nil || got.Bytes != string(poison) {
+			t.Fatalf("canonical durable restore = (%d bytes, %v), want %d bytes", len(got.Bytes), err, len(poison))
+		}
+		return
 	}
 
 	dir := t.TempDir()
@@ -304,6 +330,11 @@ func TestQuarantineRestoreRefusalSurvivesRestart(t *testing.T) {
 	runPhase(t.TempDir(), "ledger-off-check", "FAK_QUARANTINE_LEDGER_PATH=off", ctxRestoreCASEnvDir+"=off", "FAK_PAGEOUT_BACKEND=opaque-test")
 	runPhase(t.TempDir(), "ledger-off-check", "FAK_QUARANTINE_LEDGER_PATH=off", ctxRestoreCASEnvDir+"=off", "FAK_PAGEOUT_BACKEND=off")
 	runPhase(t.TempDir(), "ledger-off-check", "FAK_QUARANTINE_LEDGER_PATH=off", ctxRestoreCASEnvDir+"=off", "FAK_PAGEOUT_BACKEND=off", "FAK_BLOB_DIR=custom-resolver")
+
+	durableWorkspace := t.TempDir()
+	durableBlobDir := filepath.Join(durableWorkspace, "blobfs")
+	runPhase(durableWorkspace, "canonical-durable-write", "FAK_PAGEOUT_BACKEND=blobfs", "FAK_BLOB_DIR="+durableBlobDir)
+	runPhase(durableWorkspace, "canonical-durable-read", "FAK_PAGEOUT_BACKEND=blobfs", "FAK_BLOB_DIR="+durableBlobDir)
 }
 
 // TestRestoreDurableCASSurvivesEvictionAndRestart (#5163): a media entry evicted from the RAM stash

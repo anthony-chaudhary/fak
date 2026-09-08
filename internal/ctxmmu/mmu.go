@@ -609,11 +609,26 @@ func (m *MMU) quarantineResult(ctx context.Context, r *abi.Result, reason abi.Re
 		Meta:    quarantineMeta("ctxmmu", reason, detector, id)}
 }
 
-// quarantinePageOut uses only the ABI's canonical content-addressed blob codec.
-// A configured codec may publish bytes under an opaque key before returning it,
-// which cannot be made crash-safe by a post-call digest comparison.
+// quarantinePageOut uses only codecs whose in-tree contract is a canonical
+// content address. A configured opaque codec may publish bytes before returning
+// its key, which cannot be made crash-safe by a post-call digest comparison.
 func (m *MMU) quarantinePageOut(ctx context.Context, body []byte) abi.Ref {
-	if b, ok := abi.PageOut("blob"); ok {
+	codec := m.codecID()
+	switch codec {
+	case "blob", "blobfs", "blobhttp", "store":
+		// These registered implementations derive Ref.Digest from the bytes.
+	default:
+		codec = "blob"
+	}
+	codecs := []string{codec}
+	if codec != "blob" {
+		codecs = append(codecs, "blob")
+	}
+	for _, id := range codecs {
+		b, ok := abi.PageOut(id)
+		if !ok {
+			continue
+		}
 		inline := abi.Ref{Kind: abi.RefInline, Inline: body, Len: int64(len(body))}
 		if h, err := b.PageOut(ctx, inline); err == nil {
 			return h
