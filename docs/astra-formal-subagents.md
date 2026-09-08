@@ -61,18 +61,19 @@ The command emits stable plan JSON and `SELFCHECK PASS ... launched=0`. Inspect 
 |---|---:|---:|---|
 | Complete packet, `auto`, no pin | `true` | `true` | Automatic worker route is `gpt-6-astra` at `xhigh`. |
 | Complete packet, `off` or another direct/no-child resolution | `true` | `false` | The packet is valid, but there is no child route to select. |
-| Complete packet, non-Astra task or CLI worker-model pin | `true` | `false` | Explicit model control wins over automatic selection. |
-| Complete packet, Astra task or CLI worker-model pin | `true` | `true` when a child route exists | The effective model is Astra, but the receipt source identifies the pin rather than automatic admission. |
+| Complete packet, non-Astra environment, task, or CLI worker-model control | `true` | `false` | The higher-precedence model control wins over automatic selection. |
+| Complete packet, Astra environment, task, or CLI worker-model control | `true` | `true` when a supported child route exists | The effective model is Astra, but the receipt source identifies the winning control rather than automatic admission. |
 | Incomplete, excluded-kind, unbounded, or effect-mode packet | `false` | `false` unless explicitly pinned | The formal packet cannot automatically spend Astra capacity. A pin is explicit operator control outside the automatic-admission claim. |
 
 Model and effort precedence is:
 
 1. CLI `--worker-model` and `--worker-effort` controls;
 2. task `pins.model` and `pins.effort` controls;
-3. the eligible formal-packet default, `gpt-6-astra` and `xhigh`;
-4. the ordinary orchestration default.
+3. `FAK_ORCHESTRATION_WORKER_MODEL` and `FAK_ORCHESTRATION_WORKER_EFFORT` environment controls;
+4. the eligible formal-packet default, `gpt-6-astra` and `xhigh`;
+5. the ordinary orchestration default.
 
-`astra_route.source` identifies the effective model source (`formal-packet`, `task.pin`, or `operator-pin`). `reasoning_effort_source` tracks effort independently. The matching `overrides` fields are `sol_route.worker_model` and `sol_route.worker_reasoning_effort`; a formal task pin must not masquerade as a `fast.*` decision.
+Environment controls are resolved before the stable plan and launch receipt. They appear with source `environment`, never silently override a task or CLI pin, and an invalid `FAK_ORCHESTRATION_WORKER_EFFORT` value fails before launch. `astra_route.source` identifies the effective model source (`formal-packet`, `environment`, `task.pin`, or `operator-pin`). `reasoning_effort_source` tracks effort independently. The matching `overrides` fields are `sol_route.worker_model` and `sol_route.worker_reasoning_effort`; a formal task pin must not masquerade as a `fast.*` decision.
 
 Formal admission never grants write access. Default and explicitly declared observe workers remain read-only. Declaring any effect-mode `worker_access` adds `ASTRA_FORMAL_PACKET_ANALYSIS_ONLY` and prevents automatic Astra admission. Access compilation and enforcement remain separate controls even when an operator explicitly pins a model.
 
@@ -131,7 +132,7 @@ Do not open a duplicate for the `PublishFenced` check-then-publish takeover race
 | Uncertainty | Repository-specific quality and cost deltas are not yet established by a matched accepted-outcome study. |
 | Contraindications | Exploration, coding, broad review, documentation, issue triage, test execution, effectful access, vague propositions, or unbounded repository scope. |
 | Safeguards/dose | One focused read-only Astra audit at `xhigh`, one to three surfaces, compact required output, deterministic witness, then separate implementation and verification. |
-| Control | `--profile off`, task pins, and CLI worker pins remain explicit operator controls; receipts must preserve their source. |
+| Control | `--profile off`, environment defaults, task pins, and CLI worker pins control routing in the documented precedence; receipts must preserve the winning source. |
 | Surveillance | Inspect eligibility/reasons, selected model/effort, access mode, assignment digest, witness result, token/cost receipt, and follow-on defect rate. Re-rank only from comparable evidence. |
 
 The deterministic package witness for the route contract is:

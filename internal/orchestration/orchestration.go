@@ -258,6 +258,31 @@ type Provenance struct {
 	Value  any    `json:"value"`
 }
 
+// replaceProvenanceField installs the winning value at the position of the
+// first prior entry for its field, removes any other entries for that field,
+// and preserves the relative order of unrelated provenance.
+func replaceProvenanceField(all []Provenance, winner Provenance) []Provenance {
+	write := 0
+	replaced := false
+	for _, entry := range all {
+		if entry.Field == winner.Field {
+			if !replaced {
+				all[write] = winner
+				write++
+				replaced = true
+			}
+			continue
+		}
+		all[write] = entry
+		write++
+	}
+	all = all[:write]
+	if !replaced {
+		all = append(all, winner)
+	}
+	return all
+}
+
 // MechanismOutcome makes every fast-profile choice closed and explainable.
 type MechanismOutcome struct {
 	Mechanism string       `json:"mechanism"`
@@ -574,7 +599,7 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 		solRoute.ReasoningEffort = effort
 		solRoute.WorkerReasoningEffort = effort
 		solRoute.Decision += "; effort pinned by operator to " + effort
-		prov = append(prov, Provenance{"sol_route.worker_reasoning_effort", AstraRouteSourceTaskPin, effort})
+		prov = replaceProvenanceField(prov, Provenance{"sol_route.worker_reasoning_effort", AstraRouteSourceTaskPin, effort})
 		if astraRoute != nil {
 			astraRoute.ReasoningEffort = effort
 			astraRoute.ReasoningEffortSource = AstraRouteSourceTaskPin
@@ -582,7 +607,7 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 	}
 	if task.Pins.Model != "" {
 		solRoute.WorkerModel = task.Pins.Model
-		prov = append(prov, Provenance{"sol_route.worker_model", AstraRouteSourceTaskPin, task.Pins.Model})
+		prov = replaceProvenanceField(prov, Provenance{"sol_route.worker_model", AstraRouteSourceTaskPin, task.Pins.Model})
 		if astraRoute != nil {
 			astraRoute.Model = task.Pins.Model
 			astraRoute.Source = AstraRouteSourceTaskPin
@@ -591,10 +616,9 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 	}
 	if astraRoute != nil {
 		// Selected describes an executable child route, not packet eligibility in
-		// isolation. A direct plan has no child to select even when its packet is
-		// otherwise complete; explicit pins still determine the model whenever a
-		// child route exists.
-		astraRoute.Selected = multi && IsAstraModel(solRoute.WorkerModel)
+		// isolation. Only ultracode is accepted by the launch adapter; direct and
+		// fast plans therefore retain the candidate without selecting it.
+		astraRoute.Selected = resolvedProfile == ProfileUltracode && workers > 1 && IsAstraModel(solRoute.WorkerModel)
 	}
 	explain := []string{fmt.Sprintf("profile %s resolved from %s work", resolvedProfile, task.WorkClass), fmt.Sprintf("budget capped at %d workers and %d tokens", workers, tokens), fmt.Sprintf("task execution remains delegated to taskmgr with engine reference %s", engine)}
 	for _, d := range deg {

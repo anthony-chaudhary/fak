@@ -196,6 +196,139 @@ func TestOrchestrationCLIWorkerOverridesReplaceRouteProvenance(t *testing.T) {
 	}
 }
 
+func TestOrchestrationWorkerControlPrecedenceIsResolvedBeforeLaunch(t *testing.T) {
+	fixture := writeFormalWorkerControlFixture(t, "")
+	pinnedFixture := writeFormalWorkerControlFixture(t, `"pins":{"model":"gpt-5.6-sol","effort":"high"},`)
+	home := externalOrchestrationTestHome(t)
+	t.Setenv("CODEX_THREAD_ID", "session-worker-control-precedence")
+
+	old := orchestrationWorkerLauncher
+	var requests []orchestrationWorkerLaunchRequest
+	orchestrationWorkerLauncher = func(req orchestrationWorkerLaunchRequest) (codexOrchestrationWorkerLaunch, error) {
+		requests = append(requests, req)
+		return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: 900 + len(requests), Status: "started", LogPath: filepath.Join(req.RunDir, req.Role.ID+".jsonl")}, nil
+	}
+	t.Cleanup(func() { orchestrationWorkerLauncher = old })
+
+	t.Setenv("FAK_ORCHESTRATION_WORKER_MODEL", "astra")
+	t.Setenv("FAK_ORCHESTRATION_WORKER_EFFORT", "low")
+	var stdout, stderr bytes.Buffer
+	code := runOrchestration(&stdout, &stderr, []string{"plan", "--profile", "auto", "--task", fixture, "--codex-home", home, "--launch", "--json"})
+	if code != 0 {
+		t.Fatalf("environment launch code=%d stderr=%s", code, stderr.String())
+	}
+	var launched struct {
+		Plan   orchestration.Resolution        `json:"plan"`
+		Launch codexOrchestrationLaunchReceipt `json:"launch"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &launched); err != nil {
+		t.Fatal(err)
+	}
+	assertWorkerControlRoute(t, launched.Plan, "astra", "low", orchestrationRouteSourceEnvironment)
+	if len(requests) == 0 || len(launched.Launch.Workers) != len(requests) {
+		t.Fatalf("environment launch requests=%d workers=%d", len(requests), len(launched.Launch.Workers))
+	}
+	for i, req := range requests {
+		if req.Model != "astra" || req.Effort != "low" || launched.Launch.Workers[i].Model != req.Model || launched.Launch.Workers[i].Effort != req.Effort {
+			t.Fatalf("plan/launch environment route diverged: request=%+v worker=%+v", req, launched.Launch.Workers[i])
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	t.Setenv("FAK_ORCHESTRATION_WORKER_EFFORT", "invalid-task-shadowed")
+	code = runOrchestration(&stdout, &stderr, []string{"plan", "--profile", "auto", "--task", pinnedFixture, "--json", "--selfcheck"})
+	if code != 0 {
+		t.Fatalf("task-pin code=%d stderr=%s", code, stderr.String())
+	}
+	var taskPinned orchestration.Resolution
+	if err := json.Unmarshal(stdout.Bytes(), &taskPinned); err != nil {
+		t.Fatal(err)
+	}
+	assertWorkerControlRoute(t, taskPinned, "gpt-5.6-sol", "high", orchestration.AstraRouteSourceTaskPin)
+
+	t.Setenv("FAK_ORCHESTRATION_WORKER_MODEL", "gpt-5.6-sol")
+	t.Setenv("FAK_ORCHESTRATION_WORKER_EFFORT", "invalid-cli-shadowed")
+	stdout.Reset()
+	stderr.Reset()
+	code = runOrchestration(&stdout, &stderr, []string{
+		"plan", "--profile", "auto", "--task", fixture, "--json", "--selfcheck",
+		"--worker-model", "astra", "--worker-effort", "xhigh",
+	})
+	if code != 0 {
+		t.Fatalf("CLI-pin code=%d stderr=%s", code, stderr.String())
+	}
+	var cliPinned orchestration.Resolution
+	if err := json.Unmarshal(stdout.Bytes(), &cliPinned); err != nil {
+		t.Fatal(err)
+	}
+	assertWorkerControlRoute(t, cliPinned, "astra", "xhigh", orchestration.AstraRouteSourceOperatorPin)
+
+	t.Setenv("FAK_ORCHESTRATION_WORKER_EFFORT", "ultra")
+	beforeInvalid := len(requests)
+	stdout.Reset()
+	stderr.Reset()
+	code = runOrchestration(&stdout, &stderr, []string{"plan", "--profile", "auto", "--task", fixture, "--codex-home", home, "--launch", "--json"})
+	if code != 2 || !strings.Contains(stderr.String(), "invalid FAK_ORCHESTRATION_WORKER_EFFORT") {
+		t.Fatalf("invalid environment effort code=%d stderr=%s", code, stderr.String())
+	}
+	if len(requests) != beforeInvalid {
+		t.Fatalf("invalid environment effort launched %d worker(s)", len(requests)-beforeInvalid)
+	}
+}
+
+func writeFormalWorkerControlFixture(t *testing.T, pins string) string {
+	t.Helper()
+	fixture := filepath.Join(t.TempDir(), "formal-worker-control.json")
+	body := `{
+		"schema":"fak-orchestration-task/1",
+		"id":"formal-worker-control",
+		"work_class":"rigor",
+		` + pins + `
+		"formal_packet":{
+			"schema":"fak-formal-packet/1",
+			"task_kinds":["formal_proof"],
+			"definitions_and_assumptions":"Natural numbers use ordinary addition.",
+			"exact_proposition":"Prove zero is the additive identity.",
+			"required_output_form":"Definitions, proposition, proof, witness.",
+			"deterministic_witness":"go test ./internal/orchestration -run TestFormalPacket",
+			"surfaces":["internal/orchestration/**"]
+		}
+	}`
+	if err := os.WriteFile(fixture, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return fixture
+}
+
+func assertWorkerControlRoute(t *testing.T, resolution orchestration.Resolution, model, effort, source string) {
+	t.Helper()
+	if resolution.Resolved.SOLRoute.WorkerModel != model || resolution.Resolved.SOLRoute.WorkerReasoningEffort != effort {
+		t.Fatalf("effective worker route=%+v, want %s/%s", resolution.Resolved.SOLRoute, model, effort)
+	}
+	route := resolution.Resolved.AstraRoute
+	wantSelected := resolution.Resolved.Profile == orchestration.ProfileUltracode &&
+		resolution.Resolved.Budget.MaxWorkers > 1 && orchestration.IsAstraModel(model)
+	if route == nil || !route.Eligible || route.Model != model || route.ReasoningEffort != effort || route.Source != source || route.ReasoningEffortSource != source || route.Selected != wantSelected {
+		t.Fatalf("Astra route=%+v, want model=%s effort=%s source=%s selected=%v", route, model, effort, source, wantSelected)
+	}
+	counts := map[string]int{}
+	for _, override := range resolution.Overrides {
+		if override.Field != "sol_route.worker_model" && override.Field != "sol_route.worker_reasoning_effort" {
+			continue
+		}
+		counts[override.Field]++
+		if override.Source != source {
+			t.Fatalf("worker override=%+v, want source=%s", override, source)
+		}
+	}
+	for _, field := range []string{"sol_route.worker_model", "sol_route.worker_reasoning_effort"} {
+		if counts[field] != 1 {
+			t.Fatalf("worker override %q count=%d, want one; overrides=%+v", field, counts[field], resolution.Overrides)
+		}
+	}
+}
+
 func externalOrchestrationTestHome(t *testing.T) string {
 	t.Helper()
 	base, err := os.UserCacheDir()
