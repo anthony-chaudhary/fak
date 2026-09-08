@@ -18,9 +18,10 @@ var receiptMetricByteKinds = [...]string{"kv", "transfer"}
 var receiptMetricSignals = [...]string{"queue", "prefill", "decode", "kv", "transfer", "kernel"}
 
 type receiptMetricKey struct {
-	engine      string
-	backend     string
-	forwardPath string
+	engine        string
+	backend       string
+	forwardPath   string
+	evidenceClass string
 }
 
 type receiptMetricTotals struct {
@@ -74,9 +75,10 @@ func (m *ReceiptMetrics) Observe(receipt *model.NativeInferenceReceipt, observed
 	}
 
 	key := receiptMetricKey{
-		engine:      boundedEngine(receipt.Engine),
-		backend:     boundedBackend(receipt.Backend),
-		forwardPath: boundedForwardPath(receipt.ForwardPath),
+		engine:        boundedEngine(receipt.Engine),
+		backend:       boundedBackend(receipt.Backend),
+		forwardPath:   boundedForwardPath(receipt.ForwardPath),
+		evidenceClass: nativeReceiptEvidenceClass(receipt),
 	}
 	var phases [len(receiptMetricPhases)]float64
 	phases[0] = finiteNonnegative(receipt.TTFTSeconds - receipt.PrefillSeconds)
@@ -139,7 +141,12 @@ func (m *ReceiptMetrics) ObservePhases(receipt PhaseReceipt, observedAt time.Tim
 	if observedAt.IsZero() {
 		observedAt = time.Now()
 	}
-	key := receiptMetricKey{engine: boundedEngine(receipt.Engine), backend: boundedBackend(receipt.Backend), forwardPath: boundedForwardPath(receipt.ForwardPath)}
+	key := receiptMetricKey{
+		engine:        boundedEngine(receipt.Engine),
+		backend:       boundedBackend(receipt.Backend),
+		forwardPath:   boundedForwardPath(receipt.ForwardPath),
+		evidenceClass: phaseReceiptEvidenceClass(receipt),
+	}
 	m.mu.Lock()
 	totals := m.totals[key]
 	for _, accounting := range receipt.Phases {
@@ -215,7 +222,10 @@ func (m *ReceiptMetrics) Prometheus(now time.Time) string {
 		if keys[i].backend != keys[j].backend {
 			return keys[i].backend < keys[j].backend
 		}
-		return keys[i].forwardPath < keys[j].forwardPath
+		if keys[i].forwardPath != keys[j].forwardPath {
+			return keys[i].forwardPath < keys[j].forwardPath
+		}
+		return keys[i].evidenceClass < keys[j].evidenceClass
 	})
 
 	var b strings.Builder
@@ -281,7 +291,102 @@ func writeReceiptHelpType(b *strings.Builder, name, help, metricType string) {
 }
 
 func receiptLabels(k receiptMetricKey) string {
-	return fmt.Sprintf("{engine=%q,backend=%q,forward_path=%q}", k.engine, k.backend, k.forwardPath)
+	return fmt.Sprintf("{engine=%q,backend=%q,forward_path=%q,evidence_class=%q}", k.engine, k.backend, k.forwardPath, k.evidenceClass)
+}
+
+func boundedEvidenceClass(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "device":
+		return "device"
+	case "measured", "real":
+		return "measured"
+	case "synthetic", "mock", "simulated":
+		return "synthetic"
+	default:
+		return "other"
+	}
+}
+
+func nativeReceiptEvidenceClass(receipt *model.NativeInferenceReceipt) string {
+	if receipt == nil {
+		return "other"
+	}
+	backend := strings.ToLower(strings.TrimSpace(receipt.Backend))
+	forward := strings.ToLower(strings.TrimSpace(receipt.ForwardPath))
+	selBackend := strings.ToLower(strings.TrimSpace(receipt.NativeSelection.Backend))
+	selForward := strings.ToLower(strings.TrimSpace(receipt.NativeSelection.ForwardPath))
+	planner := strings.ToLower(strings.TrimSpace(receipt.Planner))
+
+	if backend == "synthetic" || backend == "mock" || backend == "simulated" ||
+		forward == "synthetic" || forward == "mock" || forward == "simulated" ||
+		selBackend == "synthetic" || selBackend == "mock" || selBackend == "simulated" ||
+		selForward == "synthetic" || selForward == "mock" || selForward == "simulated" ||
+		planner == "mock" {
+		return "synthetic"
+	}
+
+	if seq := receipt.Qwen35MetalForwardSequence; seq != nil {
+		if strings.EqualFold(string(seq.EvidenceState), "synthetic") || strings.EqualFold(seq.Path, "synthetic") {
+			return "synthetic"
+		}
+	}
+
+	hasDeviceProof := false
+	if forward := receipt.Qwen35MetalForwardSequence; forward != nil && (forward.Available || forward.TimingAvailable || forward.EvidenceState == model.Qwen35MetalSequenceEvidenceExecuted) {
+		hasDeviceProof = true
+	}
+	if state := receipt.Qwen35MetalStateIdentity; state != nil && state.Available {
+		hasDeviceProof = true
+	}
+	if upload := receipt.CUDAImmutableWeightUploads; upload != nil {
+		hasDeviceProof = true
+	}
+
+	b := boundedBackend(receipt.Backend)
+	if (b == "metal" || b == "cuda") && hasDeviceProof {
+		return "device"
+	}
+	if (b == "metal" || b == "cuda") && !hasDeviceProof {
+		return "synthetic"
+	}
+	if b == "cpu" || strings.Contains(backend, "cpu") {
+		return "measured"
+	}
+	if hasDeviceProof {
+		return "device"
+	}
+	return "other"
+}
+
+func phaseReceiptEvidenceClass(receipt PhaseReceipt) string {
+	backend := strings.ToLower(strings.TrimSpace(receipt.Backend))
+	forward := strings.ToLower(strings.TrimSpace(receipt.ForwardPath))
+	if backend == "synthetic" || backend == "mock" || backend == "simulated" ||
+		forward == "synthetic" || forward == "mock" || forward == "simulated" {
+		return "synthetic"
+	}
+	b := boundedBackend(receipt.Backend)
+	hasDevicePhase := false
+	for _, p := range receipt.Phases {
+		if (p.Phase == PhaseKernel || p.Phase == PhaseHostUpload || p.Phase == PhaseHostDownload || p.Phase == PhaseSynchronization) &&
+			(p.Exclusive.Wall > 0 || p.Inclusive.Wall > 0) {
+			hasDevicePhase = true
+			break
+		}
+	}
+	if (b == "metal" || b == "cuda") && hasDevicePhase {
+		return "device"
+	}
+	if (b == "metal" || b == "cuda") && !hasDevicePhase {
+		return "synthetic"
+	}
+	if b == "cpu" || strings.Contains(backend, "cpu") {
+		return "measured"
+	}
+	if hasDevicePhase {
+		return "device"
+	}
+	return "other"
 }
 
 func boundedModel(v string) string {

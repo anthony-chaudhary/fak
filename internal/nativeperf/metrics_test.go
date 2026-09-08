@@ -17,14 +17,14 @@ func TestReceiptMetricsProjectsNativeReceipt(t *testing.T) {
 	}
 	out := m.Prometheus(now.Add(10 * time.Second))
 	for _, want := range []string{
-		`fak_native_runtime_info{engine="inkernel",backend="metal",forward_path="qwen_metal",model="qwen3.8",planner="inkernel",owner="fak"} 1`,
-		`fak_native_receipt_requests_total{engine="inkernel",backend="metal",forward_path="qwen_metal"} 1`,
-		`fak_native_receipt_phase_seconds_total{engine="inkernel",backend="metal",forward_path="qwen_metal",phase="queue"} 0.2`,
-		`fak_native_receipt_phase_seconds_total{engine="inkernel",backend="metal",forward_path="qwen_metal",phase="prefill"} 0.3`,
-		`fak_native_receipt_phase_seconds_total{engine="inkernel",backend="metal",forward_path="qwen_metal",phase="decode"} 0.7`,
-		`fak_native_receipt_phase_seconds_total{engine="inkernel",backend="metal",forward_path="qwen_metal",phase="kernel"} 0.025`,
-		`fak_native_receipt_bytes_total{engine="inkernel",backend="metal",forward_path="qwen_metal",kind="kv"} 300`,
-		`fak_native_receipt_bytes_total{engine="inkernel",backend="metal",forward_path="qwen_metal",kind="transfer"} 1000`,
+		`fak_native_runtime_info{engine="inkernel",backend="metal",forward_path="qwen_metal",evidence_class="device",model="qwen3.8",planner="inkernel",owner="fak"} 1`,
+		`fak_native_receipt_requests_total{engine="inkernel",backend="metal",forward_path="qwen_metal",evidence_class="device"} 1`,
+		`fak_native_receipt_phase_seconds_total{engine="inkernel",backend="metal",forward_path="qwen_metal",evidence_class="device",phase="queue"} 0.2`,
+		`fak_native_receipt_phase_seconds_total{engine="inkernel",backend="metal",forward_path="qwen_metal",evidence_class="device",phase="prefill"} 0.3`,
+		`fak_native_receipt_phase_seconds_total{engine="inkernel",backend="metal",forward_path="qwen_metal",evidence_class="device",phase="decode"} 0.7`,
+		`fak_native_receipt_phase_seconds_total{engine="inkernel",backend="metal",forward_path="qwen_metal",evidence_class="device",phase="kernel"} 0.025`,
+		`fak_native_receipt_bytes_total{engine="inkernel",backend="metal",forward_path="qwen_metal",evidence_class="device",kind="kv"} 300`,
+		`fak_native_receipt_bytes_total{engine="inkernel",backend="metal",forward_path="qwen_metal",evidence_class="device",kind="transfer"} 1000`,
 		`fak_native_receipt_signal_supported{signal="kernel"} 1`,
 		`fak_native_receipt_latest_age_seconds 10`,
 		`fak_native_receipt_latest_stale 0`,
@@ -105,7 +105,7 @@ func TestReceiptMetricsConcurrentObserveAndScrape(t *testing.T) {
 	}
 	wg.Wait()
 	out := m.Prometheus(now)
-	want := `fak_native_receipt_requests_total{engine="inkernel",backend="metal",forward_path="qwen_metal"} 400`
+	want := `fak_native_receipt_requests_total{engine="inkernel",backend="metal",forward_path="qwen_metal",evidence_class="device"} 400`
 	if !strings.Contains(out, want) {
 		t.Fatalf("concurrent total missing %q\n%s", want, out)
 	}
@@ -137,5 +137,101 @@ func fixtureNativeReceipt() *model.NativeInferenceReceipt {
 			GDNStateD2HBytes: 100,
 			GDNStateH2DBytes: 200,
 		},
+	}
+}
+
+func TestReceiptMetricsSeparatesEvidenceHistory(t *testing.T) {
+	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+	m := NewReceiptMetrics(time.Minute)
+
+	// Device evidence receipt: real Metal execution with hardware forward sequence.
+	// Deliberately give it a model name containing "synthetic" to prove provenance is not inferred from model name.
+	rDevice := fixtureNativeReceipt()
+	rDevice.Model = "synthetic-override-ignored"
+	if ok := m.Observe(rDevice, now); !ok {
+		t.Fatal("Observe rejected device receipt")
+	}
+
+	// Synthetic evidence receipt: same engine, backend, and forward path, but lacking device execution evidence.
+	// Model name looks like a real production model, proving provenance is inspected rather than inferring from model name.
+	rSynthetic := fixtureNativeReceipt()
+	rSynthetic.Model = "qwen3.8-production-honest"
+	rSynthetic.Qwen35MetalForwardSequence = nil
+	rSynthetic.Qwen35MetalStateIdentity = nil
+	if ok := m.Observe(rSynthetic, now); !ok {
+		t.Fatal("Observe rejected synthetic receipt")
+	}
+
+	// Measured evidence receipt: CPU execution.
+	rMeasured := fixtureNativeReceipt()
+	rMeasured.Backend = "cpu"
+	rMeasured.ForwardPath = "cpu/reference"
+	rMeasured.Qwen35MetalForwardSequence = nil
+	rMeasured.Qwen35MetalStateIdentity = nil
+	if ok := m.Observe(rMeasured, now); !ok {
+		t.Fatal("Observe rejected measured receipt")
+	}
+
+	out := m.Prometheus(now)
+
+	// Verify that history is partitioned into distinct time series by evidence_class
+	// even when engine, backend, and forward_path are identical.
+	wantDeviceReq := `fak_native_receipt_requests_total{engine="inkernel",backend="metal",forward_path="qwen_metal",evidence_class="device"} 1`
+	wantSyntheticReq := `fak_native_receipt_requests_total{engine="inkernel",backend="metal",forward_path="qwen_metal",evidence_class="synthetic"} 1`
+	wantMeasuredReq := `fak_native_receipt_requests_total{engine="inkernel",backend="cpu",forward_path="other",evidence_class="measured"} 1`
+
+	for _, want := range []string{wantDeviceReq, wantSyntheticReq, wantMeasuredReq} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("metrics missing expected partitioned series %q\n%s", want, out)
+		}
+	}
+
+	// Observe device receipt again and verify counts accumulate independently without pooling into synthetic history.
+	if ok := m.Observe(rDevice, now); !ok {
+		t.Fatal("second Observe rejected device receipt")
+	}
+	out = m.Prometheus(now)
+	wantDeviceAccum := `fak_native_receipt_requests_total{engine="inkernel",backend="metal",forward_path="qwen_metal",evidence_class="device"} 2`
+	if !strings.Contains(out, wantDeviceAccum) {
+		t.Fatalf("device requests did not accumulate to 2: missing %q\n%s", wantDeviceAccum, out)
+	}
+	if !strings.Contains(out, wantSyntheticReq) {
+		t.Fatalf("synthetic requests leaked or pooled with device: missing %q\n%s", wantSyntheticReq, out)
+	}
+
+	// Verify phase durations are also partitioned by evidence_class.
+	wantDevicePrefill := `fak_native_receipt_phase_seconds_total{engine="inkernel",backend="metal",forward_path="qwen_metal",evidence_class="device",phase="prefill"} 0.6`
+	wantSyntheticPrefill := `fak_native_receipt_phase_seconds_total{engine="inkernel",backend="metal",forward_path="qwen_metal",evidence_class="synthetic",phase="prefill"} 0.3`
+	if !strings.Contains(out, wantDevicePrefill) || !strings.Contains(out, wantSyntheticPrefill) {
+		t.Fatalf("phase seconds not partitioned by evidence_class:\nwant device: %s\nwant synthetic: %s\n%s", wantDevicePrefill, wantSyntheticPrefill, out)
+	}
+
+	// Verify phase accounting from ObservePhases also partitions across evidence classes.
+	recorderDev := NewPhaseRecorder("inkernel", "cuda", "qwen_cuda", 10*time.Millisecond)
+	_ = recorderDev.Add(PhaseKernel, "", 0, 5*time.Millisecond, WorkActive)
+	_ = recorderDev.Add(PhaseDecode, "", 5*time.Millisecond, 10*time.Millisecond, WorkActive)
+	pDev, err := recorderDev.Finalize(0)
+	if err != nil {
+		t.Fatalf("finalize dev: %v", err)
+	}
+	if ok := m.ObservePhases(pDev, now); !ok {
+		t.Fatal("ObservePhases rejected device phase receipt")
+	}
+
+	recorderSynth := NewPhaseRecorder("inkernel", "cuda", "synthetic", 10*time.Millisecond)
+	_ = recorderSynth.Add(PhaseDecode, "", 0, 10*time.Millisecond, WorkActive)
+	pSynth, err := recorderSynth.Finalize(0)
+	if err != nil {
+		t.Fatalf("finalize synth: %v", err)
+	}
+	if ok := m.ObservePhases(pSynth, now); !ok {
+		t.Fatal("ObservePhases rejected synthetic phase receipt")
+	}
+
+	out = m.Prometheus(now)
+	wantDevicePhase := `fak_native_phase_seconds_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",evidence_class="device",phase="kernel",kind="active"} 0.005`
+	wantSynthPhase := `fak_native_phase_seconds_total{engine="inkernel",backend="cuda",forward_path="synthetic",evidence_class="synthetic",phase="decode",kind="active"} 0.01`
+	if !strings.Contains(out, wantDevicePhase) || !strings.Contains(out, wantSynthPhase) {
+		t.Fatalf("phase accounting not partitioned by evidence_class:\nwant dev: %s\nwant synth: %s\n%s", wantDevicePhase, wantSynthPhase, out)
 	}
 }
