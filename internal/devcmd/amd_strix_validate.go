@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -88,137 +87,26 @@ func IsValidFullGitTip(s string) bool {
 	return true
 }
 
-// BuildStrixCandidateArchive constructs a deterministic candidate archive from a base commit and in-memory overlay files.
-func BuildStrixCandidateArchive(baseCommit string, overlayFiles map[string][]byte) (*StrixCandidateArchive, error) {
-	cleanBase := strings.TrimSpace(baseCommit)
-	if !IsValidFullGitTip(cleanBase) {
+// BuildStrixCandidateArchiveFromPaths builds a candidate archive reading overlay files from disk under rootDir by delegating to the canonical amdgpu helper.
+func BuildStrixCandidateArchiveFromPaths(baseCommit, rootDir string, overlayPaths []string) (*StrixCandidateArchive, error) {
+	cleanTip := strings.TrimSpace(baseCommit)
+	if !IsValidFullGitTip(cleanTip) {
 		return nil, fmt.Errorf("invalid or abbreviated Git tip %q: must be full 40-hex commit hash", baseCommit)
 	}
-
-	paths := make([]string, 0, len(overlayFiles))
-	for p := range overlayFiles {
-		norm := filepath.ToSlash(filepath.Clean(p))
-		if strings.HasPrefix(norm, "../") || strings.Contains(norm, "/../") || norm == ".." || filepath.IsAbs(norm) {
-			return nil, fmt.Errorf("overlay path traversal rejected: %q escapes root", p)
-		}
-		paths = append(paths, norm)
+	if buildStrixCandidateArchiveFn == nil {
+		return nil, fmt.Errorf("candidate archive builder unavailable")
 	}
-	sort.Strings(paths)
-
-	var manifestBuf bytes.Buffer
-	for _, p := range paths {
-		h := sha256.Sum256(overlayFiles[p])
-		fmt.Fprintf(&manifestBuf, "%s  %s\n", hex.EncodeToString(h[:]), p)
+	built, err := buildStrixCandidateArchiveFn(context.Background(), rootDir, cleanTip, overlayPaths)
+	if err != nil {
+		return nil, err
 	}
-	manifestHash := sha256.Sum256(manifestBuf.Bytes())
-	overlayManifestSHA256 := hex.EncodeToString(manifestHash[:])
-
-	var tarBuf bytes.Buffer
-	tw := tar.NewWriter(&tarBuf)
-
-	// Deterministic base commit entry
-	baseData := []byte(cleanBase + "\n")
-	baseHdr := &tar.Header{
-		Name:     ".strix-base-commit",
-		Mode:     0o644,
-		Size:     int64(len(baseData)),
-		ModTime:  time.Unix(0, 0).UTC(),
-		Typeflag: tar.TypeReg,
-		Format:   tar.FormatPAX,
-	}
-	if err := tw.WriteHeader(baseHdr); err != nil {
-		return nil, fmt.Errorf("failed to write base commit tar header: %w", err)
-	}
-	if _, err := tw.Write(baseData); err != nil {
-		return nil, fmt.Errorf("failed to write base commit tar data: %w", err)
-	}
-
-	for _, p := range paths {
-		data := overlayFiles[p]
-		hdr := &tar.Header{
-			Name:     p,
-			Mode:     0o644,
-			Size:     int64(len(data)),
-			ModTime:  time.Unix(0, 0).UTC(),
-			Typeflag: tar.TypeReg,
-			Format:   tar.FormatPAX,
-		}
-		if err := tw.WriteHeader(hdr); err != nil {
-			return nil, fmt.Errorf("failed to write tar header for %q: %w", p, err)
-		}
-		if _, err := tw.Write(data); err != nil {
-			return nil, fmt.Errorf("failed to write tar data for %q: %w", p, err)
-		}
-	}
-
-	if err := tw.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close tar writer: %w", err)
-	}
-
-	raw := tarBuf.Bytes()
-	archiveHash := sha256.Sum256(raw)
-	archiveSHA256 := hex.EncodeToString(archiveHash[:])
-
+	digest := strings.TrimPrefix(built.SourceArchiveSHA256, "sha256:")
 	return &StrixCandidateArchive{
-		BaseCommit:            cleanBase,
-		ArchiveBytes:          raw,
-		ArchiveSHA256:         archiveSHA256,
-		OverlayManifestSHA256: overlayManifestSHA256,
-		OverlayFiles:          overlayFiles,
+		BaseCommit:            cleanTip,
+		ArchiveBytes:          built.Bytes,
+		ArchiveSHA256:         digest,
+		OverlayManifestSHA256: digest,
 	}, nil
-}
-
-// BuildStrixCandidateArchiveFromPaths builds a candidate archive reading overlay files from disk under rootDir.
-func BuildStrixCandidateArchiveFromPaths(baseCommit, rootDir string, overlayPaths []string) (*StrixCandidateArchive, error) {
-	overlayFiles := make(map[string][]byte, len(overlayPaths))
-	seenPaths := make(map[string]struct{}, len(overlayPaths))
-	for _, rawPath := range overlayPaths {
-		rawPath = strings.TrimSpace(rawPath)
-		if rawPath == "" {
-			return nil, fmt.Errorf("empty --mine overlay path rejected")
-		}
-		if filepath.IsAbs(rawPath) || strings.HasPrefix(rawPath, "/") || strings.HasPrefix(rawPath, "\\") || (len(rawPath) > 1 && rawPath[1] == ':') {
-			return nil, fmt.Errorf("absolute overlay path rejected: %q must be relative to repository root", rawPath)
-		}
-		norm := filepath.ToSlash(filepath.Clean(filepath.FromSlash(rawPath)))
-		if strings.HasPrefix(norm, "../") || strings.Contains(norm, "/../") || norm == ".." || norm == "." {
-			return nil, fmt.Errorf("overlay path traversal rejected: %q escapes root", rawPath)
-		}
-		if _, exists := seenPaths[norm]; exists {
-			return nil, fmt.Errorf("duplicate overlay path rejected: %q specified multiple times", rawPath)
-		}
-		seenPaths[norm] = struct{}{}
-
-		cleanPath := filepath.Clean(filepath.FromSlash(rawPath))
-		fullPath := filepath.Join(rootDir, cleanPath)
-		fi, err := osLstatFn(fullPath)
-		if err != nil {
-			return nil, fmt.Errorf("overlay file unreadable or missing: %w", err)
-		}
-		if fi.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("symlink overlay rejected: %q is a symlink", rawPath)
-		}
-		if fi.IsDir() {
-			return nil, fmt.Errorf("directory overlay rejected: %q is a directory, must be a regular file", rawPath)
-		}
-		if !fi.Mode().IsRegular() {
-			return nil, fmt.Errorf("invalid overlay file mode: %q must be a regular file (mode: %s)", rawPath, fi.Mode())
-		}
-		realPath, err := filepath.EvalSymlinks(fullPath)
-		if err == nil {
-			rel, relErr := filepath.Rel(rootDir, realPath)
-			if relErr != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-				return nil, fmt.Errorf("symlink escape rejected: %q resolves outside root (%s)", rawPath, realPath)
-			}
-		}
-
-		data, err := osReadFileFn(fullPath)
-		if err != nil {
-			return nil, fmt.Errorf("overlay file unreadable: %w", err)
-		}
-		overlayFiles[norm] = data
-	}
-	return BuildStrixCandidateArchive(baseCommit, overlayFiles)
 }
 
 // LoadOrBuildCandidateArchive loads an existing archive or builds one from candidate state.
@@ -240,19 +128,11 @@ func LoadOrBuildCandidateArchive(gitTip, archivePath, archiveDigest string, mine
 		hash := sha256.Sum256(data)
 		calcSHA256 := hex.EncodeToString(hash[:])
 
-		var archive StrixCandidateArchive
-		// 1. Check if it's a tar archive with .strix-base-commit
 		tr := tar.NewReader(bytes.NewReader(data))
 		var tarBaseCommit string
-		overlayFromTar := make(map[string][]byte)
-		isTar := true
 		for {
 			hdr, err := tr.Next()
-			if err == io.EOF {
-				break
-			}
 			if err != nil {
-				isTar = false
 				break
 			}
 			if hdr.Name == ".strix-base-commit" {
@@ -260,62 +140,61 @@ func LoadOrBuildCandidateArchive(gitTip, archivePath, archiveDigest string, mine
 				if err == nil {
 					tarBaseCommit = strings.TrimSpace(string(b))
 				}
-			} else if hdr.Typeflag == tar.TypeReg {
-				content, err := io.ReadAll(tr)
-				if err == nil {
-					overlayFromTar[hdr.Name] = content
-				}
+				break
 			}
 		}
 
-		if isTar && tarBaseCommit != "" {
+		var jsonMeta struct {
+			BaseCommit string `json:"base_commit"`
+		}
+		if tarBaseCommit != "" {
 			if !IsValidFullGitTip(tarBaseCommit) {
 				return nil, fmt.Errorf("invalid or abbreviated Git tip %q in candidate archive: must be full 40-hex commit hash", tarBaseCommit)
 			}
 			if cleanTip != "" && !strings.EqualFold(cleanTip, tarBaseCommit) {
 				return nil, fmt.Errorf("archive base commit %s does not match GitTip %s", tarBaseCommit, cleanTip)
 			}
-			archive = StrixCandidateArchive{
-				BaseCommit:    tarBaseCommit,
-				ArchiveBytes:  data,
-				ArchiveSHA256: calcSHA256,
-				OverlayFiles:  overlayFromTar,
-			}
-		} else if json.Unmarshal(data, &archive) == nil && archive.BaseCommit != "" {
-			if !IsValidFullGitTip(archive.BaseCommit) {
-				return nil, fmt.Errorf("invalid or abbreviated Git tip %q in candidate archive: must be full 40-hex commit hash", archive.BaseCommit)
-			}
-			if cleanTip != "" && !strings.EqualFold(cleanTip, archive.BaseCommit) {
-				return nil, fmt.Errorf("archive base commit %s does not match GitTip %s", archive.BaseCommit, cleanTip)
-			}
-			if archive.ArchiveSHA256 == "" {
-				archive.ArchiveSHA256 = calcSHA256
-			}
-			archive.ArchiveBytes = data
-		} else {
 			if cleanTip == "" {
-				return nil, fmt.Errorf("candidate archive provided without explicit GitTip and archive carries no base_commit metadata")
+				cleanTip = tarBaseCommit
 			}
-			if !IsValidFullGitTip(cleanTip) {
-				return nil, fmt.Errorf("invalid or abbreviated Git tip %q: must be full 40-hex commit hash", cleanTip)
+		} else if json.Unmarshal(data, &jsonMeta) == nil && jsonMeta.BaseCommit != "" {
+			if !IsValidFullGitTip(jsonMeta.BaseCommit) {
+				return nil, fmt.Errorf("invalid or abbreviated Git tip %q in candidate archive: must be full 40-hex commit hash", jsonMeta.BaseCommit)
 			}
-			archive = StrixCandidateArchive{
-				BaseCommit:    cleanTip,
-				ArchiveBytes:  data,
-				ArchiveSHA256: calcSHA256,
+			if cleanTip != "" && !strings.EqualFold(cleanTip, jsonMeta.BaseCommit) {
+				return nil, fmt.Errorf("archive base commit %s does not match GitTip %s", jsonMeta.BaseCommit, cleanTip)
 			}
+			if cleanTip == "" {
+				cleanTip = jsonMeta.BaseCommit
+			}
+		}
+
+		if cleanTip == "" {
+			canonicalRoot, _ := gitRevParseFn(context.Background(), candidateDir, "--show-toplevel")
+			if canonicalRoot != "" {
+				cleanTip, _ = gitRevParseFn(context.Background(), canonicalRoot, "--verify", "HEAD^{commit}")
+			}
+		}
+		if cleanTip == "" {
+			return nil, fmt.Errorf("candidate archive provided without explicit GitTip and archive carries no base_commit metadata")
+		}
+		if !IsValidFullGitTip(cleanTip) {
+			return nil, fmt.Errorf("invalid or abbreviated Git tip %q: must be full 40-hex commit hash", cleanTip)
 		}
 
 		if archiveDigest != "" {
 			expected := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(archiveDigest), "sha256:"))
-			if strings.ToLower(archive.ArchiveSHA256) != expected {
-				return nil, fmt.Errorf("archive/digest disagreement: computed sha256:%s != expected %s", archive.ArchiveSHA256, archiveDigest)
+			if strings.ToLower(calcSHA256) != expected {
+				return nil, fmt.Errorf("archive/digest disagreement: computed sha256:%s != expected %s", calcSHA256, archiveDigest)
 			}
 		}
-		if len(archive.ArchiveBytes) == 0 || strings.TrimSpace(archive.ArchiveSHA256) == "" {
-			return nil, fmt.Errorf("candidate archive invalid: empty archive bytes or digest")
-		}
-		return &archive, nil
+
+		return &StrixCandidateArchive{
+			BaseCommit:            cleanTip,
+			ArchiveBytes:          data,
+			ArchiveSHA256:         calcSHA256,
+			OverlayManifestSHA256: calcSHA256,
+		}, nil
 	}
 
 	// No archivePath specified -> Build from local candidate checkout
@@ -357,30 +236,57 @@ func LoadOrBuildCandidateArchive(gitTip, archivePath, archiveDigest string, mine
 		fileBaseDir = candidateDir
 	}
 
-	var candArchive *StrixCandidateArchive
-	if buildStrixCandidateArchiveFn != nil {
-		built, err := buildStrixCandidateArchiveFn(context.Background(), fileBaseDir, cleanTip, minePaths)
-		if err == nil && len(built.Bytes) > 0 {
-			candArchive = &StrixCandidateArchive{
-				BaseCommit:            cleanTip,
-				ArchiveBytes:          built.Bytes,
-				ArchiveSHA256:         strings.TrimPrefix(built.SourceArchiveSHA256, "sha256:"),
-				OverlayManifestSHA256: strings.TrimPrefix(built.SourceArchiveSHA256, "sha256:"),
+	seenPaths := make(map[string]struct{}, len(minePaths))
+	for _, rawPath := range minePaths {
+		rawPath = strings.TrimSpace(rawPath)
+		if rawPath == "" {
+			return nil, fmt.Errorf("empty --mine overlay path rejected")
+		}
+		if filepath.IsAbs(rawPath) || strings.HasPrefix(rawPath, "/") || strings.HasPrefix(rawPath, "\\") || (len(rawPath) > 1 && rawPath[1] == ':') {
+			return nil, fmt.Errorf("absolute overlay path rejected: %q must be relative to repository root", rawPath)
+		}
+		norm := filepath.ToSlash(filepath.Clean(filepath.FromSlash(rawPath)))
+		if strings.HasPrefix(norm, "../") || strings.Contains(norm, "/../") || norm == ".." || norm == "." {
+			return nil, fmt.Errorf("overlay path traversal rejected: %q escapes root", rawPath)
+		}
+		if _, exists := seenPaths[norm]; exists {
+			return nil, fmt.Errorf("duplicate overlay path rejected: %q specified multiple times", rawPath)
+		}
+		seenPaths[norm] = struct{}{}
+
+		cleanPath := filepath.Clean(filepath.FromSlash(rawPath))
+		fullPath := filepath.Join(fileBaseDir, cleanPath)
+		fi, err := osLstatFn(fullPath)
+		if err != nil {
+			return nil, fmt.Errorf("overlay file unreadable or missing: %w", err)
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("symlink overlay rejected: %q is a symlink", rawPath)
+		}
+		if fi.IsDir() {
+			return nil, fmt.Errorf("directory overlay rejected: %q is a directory, must be a regular file", rawPath)
+		}
+		if !fi.Mode().IsRegular() {
+			return nil, fmt.Errorf("invalid overlay file mode: %q must be a regular file (mode: %s)", rawPath, fi.Mode())
+		}
+		realPath, err := filepath.EvalSymlinks(fullPath)
+		if err == nil {
+			rel, relErr := filepath.Rel(fileBaseDir, realPath)
+			if relErr != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+				return nil, fmt.Errorf("symlink escape rejected: %q resolves outside root (%s)", rawPath, realPath)
 			}
 		}
 	}
-	if candArchive == nil {
-		var err error
-		candArchive, err = BuildStrixCandidateArchiveFromPaths(cleanTip, fileBaseDir, minePaths)
-		if err != nil {
-			return nil, err
-		}
+
+	candArchive, err := BuildStrixCandidateArchiveFromPaths(cleanTip, fileBaseDir, minePaths)
+	if err != nil {
+		return nil, err
 	}
 
 	if overlayDigest != "" {
 		expected := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(overlayDigest), "sha256:"))
-		if strings.ToLower(candArchive.OverlayManifestSHA256) != expected {
-			return nil, fmt.Errorf("overlay manifest digest disagreement: computed sha256:%s != expected %s", candArchive.OverlayManifestSHA256, overlayDigest)
+		if strings.ToLower(candArchive.ArchiveSHA256) != expected {
+			return nil, fmt.Errorf("overlay manifest digest disagreement: computed sha256:%s != expected %s", candArchive.ArchiveSHA256, overlayDigest)
 		}
 	}
 
@@ -469,11 +375,12 @@ func isCurrentValidPass(receipt *amdgpu.StrixValidationReceipt, expectedTip, exp
 	if cleanRefDigest != cleanExpected {
 		return false, fmt.Sprintf("receipt GitRef %s does not match expected archive digest %s", receipt.Provenance.GitRef, expectedRef)
 	}
-	if receipt.Provenance.SourceArchiveSHA256 != "" {
-		cleanSourceArchive := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(receipt.Provenance.SourceArchiveSHA256)), "sha256:")
-		if cleanSourceArchive != cleanExpected {
-			return false, fmt.Sprintf("receipt SourceArchiveSHA256 %s does not match expected archive digest %s", receipt.Provenance.SourceArchiveSHA256, expectedRef)
-		}
+	cleanSourceArchive := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(receipt.Provenance.SourceArchiveSHA256)), "sha256:")
+	if cleanSourceArchive == "" {
+		return false, "historical or unbound receipt: SourceArchiveSHA256 is empty"
+	}
+	if cleanSourceArchive != cleanExpected {
+		return false, fmt.Sprintf("receipt SourceArchiveSHA256 %s does not match expected archive digest %s", receipt.Provenance.SourceArchiveSHA256, expectedRef)
 	}
 	// Execution completeness: if subkernels were selected/executed, none can be SKIPPED or FAIL
 	if len(receipt.Subkernels) == 0 && len(receipt.Ablations) == 0 {

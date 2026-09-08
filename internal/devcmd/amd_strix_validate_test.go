@@ -9,8 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -96,6 +96,58 @@ func createTestValidReceipt(target amdgpu.StrixTarget, gitRef, gitTip, command s
 	return r
 }
 
+func stubTestCandidateArchive(t *testing.T, expectedTip string) (string, []byte) {
+	t.Helper()
+	origBuild := buildStrixCandidateArchiveFn
+	testBytes := []byte("candidate-test-archive-tar-bytes")
+	h := sha256.Sum256(testBytes)
+	testDigest := "sha256:" + hex.EncodeToString(h[:])
+	buildStrixCandidateArchiveFn = func(ctx context.Context, root, tip string, owned []string) (amdgpu.StrixCandidateArchive, error) {
+		if expectedTip != "" && !strings.EqualFold(tip, expectedTip) {
+			return amdgpu.StrixCandidateArchive{}, fmt.Errorf("tip mismatch: got %s, want %s", tip, expectedTip)
+		}
+		return amdgpu.StrixCandidateArchive{
+			Bytes:               testBytes,
+			SourceArchiveSHA256: testDigest,
+		}, nil
+	}
+	t.Cleanup(func() { buildStrixCandidateArchiveFn = origBuild })
+	return testDigest, testBytes
+}
+
+func createTestPrebuiltTar(baseCommit string, files map[string][]byte) ([]byte, string) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if baseCommit != "" {
+		baseData := []byte(baseCommit + "\n")
+		_ = tw.WriteHeader(&tar.Header{
+			Name:     ".strix-base-commit",
+			Mode:     0o644,
+			Size:     int64(len(baseData)),
+			Typeflag: tar.TypeReg,
+		})
+		_, _ = tw.Write(baseData)
+	}
+	names := make([]string, 0, len(files))
+	for n := range files {
+		names = append(names, n)
+	}
+	for _, n := range names {
+		data := files[n]
+		_ = tw.WriteHeader(&tar.Header{
+			Name:     n,
+			Mode:     0o644,
+			Size:     int64(len(data)),
+			Typeflag: tar.TypeReg,
+		})
+		_, _ = tw.Write(data)
+	}
+	_ = tw.Close()
+	raw := buf.Bytes()
+	h := sha256.Sum256(raw)
+	return raw, hex.EncodeToString(h[:])
+}
+
 func TestRunAMDStrixValidate_UnknownSelector(t *testing.T) {
 	defer amdgpu.ClearPresenceCache()
 	origStatus := gitStatusFn
@@ -104,6 +156,7 @@ func TestRunAMDStrixValidate_UnknownSelector(t *testing.T) {
 		gitStatusFn = origStatus
 		gitRevParseFn = origGit
 	}()
+	stubTestCandidateArchive(t, "0123456789abcdef0123456789abcdef01234567")
 	gitStatusFn = func(ctx context.Context, dir string) (string, error) { return "", nil }
 	gitRevParseFn = func(ctx context.Context, dir string, args ...string) (string, error) {
 		if len(args) > 0 && args[0] == "--show-toplevel" {
@@ -492,6 +545,8 @@ func TestRunAMDStrixValidate_BindsCandidateArchiveToRunner(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	stubTestCandidateArchive(t, baseCommit)
+
 	candArchive, err := BuildStrixCandidateArchiveFromPaths(baseCommit, tmpDir, []string{overlayRel})
 	if err != nil {
 		t.Fatalf("failed to build candidate archive: %v", err)
@@ -609,6 +664,7 @@ func TestRunAMDStrixValidate_HistoricalOrPartialReceiptFailsClosed(t *testing.T)
 	}()
 	gitStatusFn = func(ctx context.Context, dir string) (string, error) { return "", nil }
 	baseCommit := "b0123456789abcdef0123456789abcdef0123456"
+	stubTestCandidateArchive(t, baseCommit)
 	gitRevParseFn = func(ctx context.Context, dir string, args ...string) (string, error) {
 		if len(args) > 0 && args[0] == "--show-toplevel" {
 			return "/mock/repo", nil
@@ -1026,6 +1082,7 @@ func TestRunAMDStrixValidate_CommittedOnlyMode(t *testing.T) {
 	})
 
 	t.Run("clean worktree builds empty overlay archive and calls runner", func(t *testing.T) {
+		stubTestCandidateArchive(t, baseCommit)
 		gitStatusFn = func(ctx context.Context, dir string) (string, error) {
 			return "", nil
 		}
@@ -1098,6 +1155,7 @@ func TestRunAMDStrixValidate_HumanOutput_RendersHistoricalNonCredit(t *testing.T
 	}()
 	gitStatusFn = func(ctx context.Context, dir string) (string, error) { return "", nil }
 	baseCommit := "d0123456789abcdef0123456789abcdef0123456"
+	stubTestCandidateArchive(t, baseCommit)
 	gitRevParseFn = func(ctx context.Context, dir string, args ...string) (string, error) {
 		if len(args) > 0 && args[0] == "--show-toplevel" {
 			return "/mock/repo", nil
@@ -1193,6 +1251,7 @@ func TestRunAMDStrixValidate_CanonicalRootAndBaseResolution(t *testing.T) {
 
 	mockRoot := "/mock/repo/root"
 	mockCommit := "e0123456789abcdef0123456789abcdef0123456"
+	stubTestCandidateArchive(t, mockCommit)
 
 	revParseCalls := make([]string, 0)
 	gitRevParseFn = func(ctx context.Context, dir string, args ...string) (string, error) {
@@ -1319,75 +1378,94 @@ func TestRunAMDStrixValidate_RejectsConflictingArchiveAndOverlays(t *testing.T) 
 
 func TestBuildStrixCandidateArchive_DeterministicTarFormat(t *testing.T) {
 	baseCommit := "0123456789abcdef0123456789abcdef01234567"
-	overlayFiles := map[string][]byte{
-		"pkg/foo.go":      []byte("package pkg\nconst Foo = 1\n"),
-		"internal/bar.go": []byte("package internal\nconst Bar = 2\n"),
-	}
 
-	archive, err := BuildStrixCandidateArchive(baseCommit, overlayFiles)
-	if err != nil {
-		t.Fatalf("BuildStrixCandidateArchive failed: %v", err)
-	}
-
-	if archive.BaseCommit != baseCommit {
-		t.Errorf("BaseCommit = %q, want %q", archive.BaseCommit, baseCommit)
-	}
-
-	// Verify tar entries
-	tr := tar.NewReader(bytes.NewReader(archive.ArchiveBytes))
-	entries := make(map[string][]byte)
-	var entryOrder []string
-
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
+	t.Run("rejects invalid or abbreviated base git tip", func(t *testing.T) {
+		_, err := BuildStrixCandidateArchiveFromPaths("short", ".", []string{"foo.go"})
+		if err == nil || !strings.Contains(err.Error(), "40-hex") {
+			t.Fatalf("expected error mentioning 40-hex, got: %v", err)
 		}
+	})
+
+	t.Run("delegates to canonical helper and preserves archive bytes and digest", func(t *testing.T) {
+		origBuild := buildStrixCandidateArchiveFn
+		defer func() { buildStrixCandidateArchiveFn = origBuild }()
+		fakeTar := []byte("tar-bytes-canonical-stream")
+		h := sha256.Sum256(fakeTar)
+		fakeDigest := "sha256:" + hex.EncodeToString(h[:])
+		calledWithRoot, calledWithTip := "", ""
+		var calledWithPaths []string
+		buildStrixCandidateArchiveFn = func(ctx context.Context, root, tip string, paths []string) (amdgpu.StrixCandidateArchive, error) {
+			calledWithRoot = root
+			calledWithTip = tip
+			calledWithPaths = paths
+			return amdgpu.StrixCandidateArchive{
+				Bytes:               fakeTar,
+				SourceArchiveSHA256: fakeDigest,
+			}, nil
+		}
+
+		res, err := BuildStrixCandidateArchiveFromPaths(baseCommit, "/some/root", []string{"pkg/foo.go", "internal/bar.go"})
 		if err != nil {
-			t.Fatalf("failed reading tar entry: %v", err)
+			t.Fatalf("BuildStrixCandidateArchiveFromPaths failed: %v", err)
 		}
-		if hdr.Typeflag != tar.TypeReg {
-			t.Errorf("entry %q has non-regular typeflag %v", hdr.Name, hdr.Typeflag)
+		if calledWithRoot != "/some/root" || calledWithTip != baseCommit || len(calledWithPaths) != 2 {
+			t.Errorf("delegation arguments mismatched: root=%q, tip=%q, paths=%v", calledWithRoot, calledWithTip, calledWithPaths)
 		}
-		if hdr.Mode != 0o644 {
-			t.Errorf("entry %q has mode %o, want 0644", hdr.Name, hdr.Mode)
+		if !bytes.Equal(res.ArchiveBytes, fakeTar) {
+			t.Errorf("archive bytes mismatch")
 		}
-		if !hdr.ModTime.Equal(time.Unix(0, 0).UTC()) {
-			t.Errorf("entry %q has non-zero modtime %v", hdr.Name, hdr.ModTime)
+		if res.ArchiveSHA256 != strings.TrimPrefix(fakeDigest, "sha256:") {
+			t.Errorf("archive sha256 = %q, want %q", res.ArchiveSHA256, strings.TrimPrefix(fakeDigest, "sha256:"))
 		}
-		content, err := io.ReadAll(tr)
+	})
+
+	t.Run("produces deterministic tar archive on real repository", func(t *testing.T) {
+		tempRepo := t.TempDir()
+		runGit := func(args ...string) string {
+			cmd := exec.Command("git", args...)
+			cmd.Dir = tempRepo
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("git %v: %v: %s", args, err, out)
+			}
+			return strings.TrimSpace(string(out))
+		}
+		runGit("init")
+		runGit("config", "user.email", "test@example.invalid")
+		runGit("config", "user.name", "test")
+		if err := os.WriteFile(filepath.Join(tempRepo, "base.txt"), []byte("base-content\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit("add", "base.txt")
+		runGit("commit", "-m", "initial commit")
+		tempTip := runGit("rev-parse", "HEAD")
+
+		if err := os.WriteFile(filepath.Join(tempRepo, "overlay.txt"), []byte("overlay-content\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		origBuild := buildStrixCandidateArchiveFn
+		defer func() { buildStrixCandidateArchiveFn = origBuild }()
+		buildStrixCandidateArchiveFn = amdgpu.BuildStrixCandidateArchive
+
+		a, err := BuildStrixCandidateArchiveFromPaths(tempTip, tempRepo, []string{"overlay.txt"})
 		if err != nil {
-			t.Fatalf("failed reading content for %q: %v", hdr.Name, err)
+			t.Fatalf("first archive build failed: %v", err)
 		}
-		entries[hdr.Name] = content
-		entryOrder = append(entryOrder, hdr.Name)
-	}
-
-	// First entry must be .strix-base-commit
-	if len(entryOrder) == 0 || entryOrder[0] != ".strix-base-commit" {
-		t.Fatalf("first entry = %v, want .strix-base-commit", entryOrder)
-	}
-	if string(entries[".strix-base-commit"]) != baseCommit+"\n" {
-		t.Errorf(".strix-base-commit = %q, want %q", string(entries[".strix-base-commit"]), baseCommit+"\n")
-	}
-
-	// Subsequent entries must be sorted overlay files
-	expectedOrder := []string{".strix-base-commit", "internal/bar.go", "pkg/foo.go"}
-	if len(entryOrder) != len(expectedOrder) {
-		t.Fatalf("entry count = %d, want %d (entries: %v)", len(entryOrder), len(expectedOrder), entryOrder)
-	}
-	for i, name := range expectedOrder {
-		if entryOrder[i] != name {
-			t.Errorf("entry %d = %q, want %q", i, entryOrder[i], name)
+		b, err := BuildStrixCandidateArchiveFromPaths(tempTip, tempRepo, []string{"overlay.txt"})
+		if err != nil {
+			t.Fatalf("second archive build failed: %v", err)
 		}
-	}
-
-	// Verify deterministic SHA-256
-	h := sha256.Sum256(archive.ArchiveBytes)
-	expectedSHA := hex.EncodeToString(h[:])
-	if archive.ArchiveSHA256 != expectedSHA {
-		t.Errorf("ArchiveSHA256 = %q, want %q", archive.ArchiveSHA256, expectedSHA)
-	}
+		if a.ArchiveSHA256 != b.ArchiveSHA256 {
+			t.Fatalf("archive sha256 non-deterministic: %s != %s", a.ArchiveSHA256, b.ArchiveSHA256)
+		}
+		if !bytes.Equal(a.ArchiveBytes, b.ArchiveBytes) {
+			t.Fatalf("archive bytes non-deterministic")
+		}
+		if len(a.ArchiveSHA256) != 64 {
+			t.Errorf("unexpected archive digest length: %d", len(a.ArchiveSHA256))
+		}
+	})
 }
 
 func TestRunAMDStrixValidate_CurrentV2ValidationInvariants(t *testing.T) {
@@ -1402,6 +1480,7 @@ func TestRunAMDStrixValidate_CurrentV2ValidationInvariants(t *testing.T) {
 	gitStatusFn = func(ctx context.Context, dir string) (string, error) { return "", nil }
 
 	baseCommit := "f0123456789abcdef0123456789abcdef0123456"
+	stubTestCandidateArchive(t, baseCommit)
 	gitRevParseFn = func(ctx context.Context, dir string, args ...string) (string, error) {
 		if len(args) > 0 && args[0] == "--show-toplevel" {
 			return "/mock/repo", nil
@@ -1575,6 +1654,7 @@ func TestRunAMDStrixValidate_CurrentV2ValidationInvariants(t *testing.T) {
 	t.Run("zero executed subkernels and zero ablations cannot PASS", func(t *testing.T) {
 		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
 			receipt := amdgpu.NewStrixValidationReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
+			receipt.Provenance.SourceArchiveSHA256 = opts.GitRef
 			receipt.Verdict = "PASS"
 			receipt.Verified = true
 			receipt.ExecutedCount = 0
@@ -1652,6 +1732,7 @@ func TestRunAMDStrixValidate_CurrentV2ValidationInvariants(t *testing.T) {
 	t.Run("invalid or regressing ablation arm fails in JSON and human modes", func(t *testing.T) {
 		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
 			receipt := amdgpu.NewStrixValidationReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
+			receipt.Provenance.SourceArchiveSHA256 = opts.GitRef
 			receipt.Verdict = "PASS"
 			receipt.Verified = true
 			receipt.Ablations = []amdgpu.StrixAblationResult{
@@ -1715,6 +1796,7 @@ func TestRunAMDStrixValidate_CurrentV2ValidationInvariants(t *testing.T) {
 	t.Run("receipt invariant validation failure fails in JSON and human modes", func(t *testing.T) {
 		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
 			receipt := amdgpu.NewStrixValidationReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
+			receipt.Provenance.SourceArchiveSHA256 = opts.GitRef
 			receipt.Verdict = "PASS"
 			receipt.Verified = true
 			receipt.ExecutedCount = 1
@@ -1754,6 +1836,7 @@ func TestRunAMDStrixValidate_CurrentV2ValidationInvariants(t *testing.T) {
 	t.Run("receipt with failing parity event fails invariant validation", func(t *testing.T) {
 		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
 			receipt := amdgpu.NewStrixValidationReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
+			receipt.Provenance.SourceArchiveSHA256 = opts.GitRef
 			receipt.Verdict = "PASS"
 			receipt.Verified = true
 			receipt.ExecutedCount = 1
@@ -1786,6 +1869,7 @@ func TestRunAMDStrixValidate_CurrentV2ValidationInvariants(t *testing.T) {
 			nonStrixTarget.GPUName = "NVIDIA GeForce RTX 4090"
 			nonStrixTarget.TargetISA = "sm_89"
 			receipt := amdgpu.NewStrixValidationReceipt(nonStrixTarget, opts.GitRef, opts.GitTip, opts.Command)
+			receipt.Provenance.SourceArchiveSHA256 = opts.GitRef
 			receipt.Verdict = "PASS"
 			receipt.Verified = true
 			receipt.ExecutedCount = 1
@@ -1811,6 +1895,91 @@ func TestRunAMDStrixValidate_CurrentV2ValidationInvariants(t *testing.T) {
 			t.Errorf("expected stderr to mention invariant validation failure, got: %s", stderrJSON.String())
 		}
 	})
+
+	t.Run("receipt with missing Provenance.SourceArchiveSHA256 fails in JSON and human modes", func(t *testing.T) {
+		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			receipt := createTestValidReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
+			receipt.Provenance.SourceArchiveSHA256 = "" // Missing source archive hash
+			receipt.Digest, _ = receipt.ComputeDigest()
+			return receipt, nil
+		}
+
+		var stdoutJSON, stderrJSON bytes.Buffer
+		codeJSON := RunAMDStrixValidate(&stdoutJSON, &stderrJSON, []string{"-committed-only", "-json", "-subkernels", "argmax", "-ablate", "none"})
+		if codeJSON != 1 {
+			t.Fatalf("expected JSON exit code 1, got %d", codeJSON)
+		}
+		if !strings.Contains(stderrJSON.String(), "SourceArchiveSHA256 is empty") && !strings.Contains(stderrJSON.String(), "receipt invariant validation failed") && !strings.Contains(stderrJSON.String(), "incomplete immutable source") {
+			t.Errorf("expected stderr to mention SourceArchiveSHA256 is empty or invariant validation failed, got: %s", stderrJSON.String())
+		}
+
+		var stdoutHuman, stderrHuman bytes.Buffer
+		codeHuman := RunAMDStrixValidate(&stdoutHuman, &stderrHuman, []string{"-committed-only", "-subkernels", "argmax", "-ablate", "none"})
+		if codeHuman != 1 {
+			t.Fatalf("expected human exit code 1, got %d", codeHuman)
+		}
+		if !strings.Contains(stdoutHuman.String(), "PASS (historical/non-credit)") {
+			t.Errorf("expected human stdout to render PASS (historical/non-credit), got:\n%s", stdoutHuman.String())
+		}
+	})
+
+	t.Run("receipt with mismatched Provenance.SourceArchiveSHA256 fails in JSON and human modes", func(t *testing.T) {
+		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			receipt := createTestValidReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
+			receipt.Provenance.SourceArchiveSHA256 = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+			receipt.Digest, _ = receipt.ComputeDigest()
+			return receipt, nil
+		}
+
+		var stdoutJSON, stderrJSON bytes.Buffer
+		codeJSON := RunAMDStrixValidate(&stdoutJSON, &stderrJSON, []string{"-committed-only", "-json", "-subkernels", "argmax", "-ablate", "none"})
+		if codeJSON != 1 {
+			t.Fatalf("expected JSON exit code 1, got %d", codeJSON)
+		}
+		if !strings.Contains(stderrJSON.String(), "SourceArchiveSHA256") || !strings.Contains(stderrJSON.String(), "does not match") {
+			t.Errorf("expected stderr to mention SourceArchiveSHA256 mismatch, got: %s", stderrJSON.String())
+		}
+
+		var stdoutHuman, stderrHuman bytes.Buffer
+		codeHuman := RunAMDStrixValidate(&stdoutHuman, &stderrHuman, []string{"-committed-only", "-subkernels", "argmax", "-ablate", "none"})
+		if codeHuman != 1 {
+			t.Fatalf("expected human exit code 1, got %d", codeHuman)
+		}
+		if !strings.Contains(stdoutHuman.String(), "PASS (historical/non-credit)") {
+			t.Errorf("expected human stdout to render PASS (historical/non-credit), got:\n%s", stdoutHuman.String())
+		}
+	})
+
+	t.Run("runner receives CandidateArchive bytes and AdmissionTimeout from devcmd", func(t *testing.T) {
+		var capturedOpts amdgpu.StrixValidationOpts
+		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			capturedOpts = opts
+			receipt := createTestValidReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
+			return receipt, nil
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := RunAMDStrixValidate(&stdout, &stderr, []string{
+			"-committed-only",
+			"-subkernels", "argmax",
+			"-ablate", "none",
+			"-admission-timeout", "12",
+			"-timeout", "50",
+			"-json",
+		})
+		if code != 0 {
+			t.Fatalf("expected exit code 0, got %d (stderr: %s)", code, stderr.String())
+		}
+		if len(capturedOpts.CandidateArchive) == 0 {
+			t.Errorf("expected non-empty CandidateArchive in opts")
+		}
+		if capturedOpts.AdmissionTimeout != 12*time.Second {
+			t.Errorf("captured AdmissionTimeout = %v, want 12s", capturedOpts.AdmissionTimeout)
+		}
+		if !strings.HasPrefix(capturedOpts.SourceArchiveSHA256, "sha256:") {
+			t.Errorf("captured SourceArchiveSHA256 = %q, want sha256: prefix", capturedOpts.SourceArchiveSHA256)
+		}
+	})
 }
 
 func TestRunAMDStrixValidate_PrebuiltTarArchiveBinding(t *testing.T) {
@@ -1827,9 +1996,11 @@ func TestRunAMDStrixValidate_PrebuiltTarArchiveBinding(t *testing.T) {
 		"internal/devcmd/test_overlay.go": []byte("package devcmd\n// overlay\n"),
 	}
 
-	candArchive, err := BuildStrixCandidateArchive(baseCommit, overlayFiles)
-	if err != nil {
-		t.Fatalf("BuildStrixCandidateArchive failed: %v", err)
+	tarBytes, tarSHA256 := createTestPrebuiltTar(baseCommit, overlayFiles)
+	candArchive := &StrixCandidateArchive{
+		BaseCommit:    baseCommit,
+		ArchiveBytes:  tarBytes,
+		ArchiveSHA256: tarSHA256,
 	}
 
 	tmpDir := t.TempDir()
@@ -1916,8 +2087,8 @@ func TestRunAMDStrixValidate_PrebuiltTarArchiveBinding(t *testing.T) {
 		if capturedCandArchive.ArchiveSHA256 != candArchive.ArchiveSHA256 {
 			t.Errorf("capturedCandArchive.ArchiveSHA256 = %q, want %q", capturedCandArchive.ArchiveSHA256, candArchive.ArchiveSHA256)
 		}
-		if len(capturedCandArchive.OverlayFiles) != 2 {
-			t.Errorf("captured overlay file count = %d, want 2", len(capturedCandArchive.OverlayFiles))
+		if len(capturedCandArchive.ArchiveBytes) == 0 {
+			t.Errorf("captured candidate archive bytes is empty")
 		}
 	})
 
