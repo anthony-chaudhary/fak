@@ -311,3 +311,53 @@ func TestParkUpstreamIdenticalSuppressed(t *testing.T) {
 		t.Fatalf("a.txt = %q, want 'v2\\n'", got)
 	}
 }
+
+func TestParkDetached_BranchRole(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+
+	origin := filepath.Join(tmp, "origin")
+	mkdir(t, origin)
+	git(t, origin, "init", "-b", "dev")
+	git(t, origin, "config", "user.name", "test")
+	git(t, origin, "config", "user.email", "test@example.com")
+	writeFile(t, filepath.Join(origin, "a.txt"), "top\nmiddle\nbottom\n")
+	git(t, origin, "add", ".")
+	git(t, origin, "commit", "-m", "base")
+
+	clone := filepath.Join(tmp, "clone")
+	git(t, tmp, "-c", "core.autocrlf=false", "clone", "-b", "dev", origin, clone)
+	git(t, clone, "config", "core.autocrlf", "false")
+	git(t, clone, "config", "user.name", "test")
+	git(t, clone, "config", "user.email", "test@example.com")
+
+	writeFile(t, filepath.Join(clone, "dos.toml"), "[branch_roles]\ndevelopment_branch = \"dev\"\n")
+	git(t, clone, "checkout", "--detach", "HEAD")
+
+	writeFile(t, filepath.Join(origin, "a.txt"), "top\nincoming\nmiddle\nbottom\n")
+	git(t, origin, "add", ".")
+	git(t, origin, "commit", "-m", "upstream update")
+	git(t, clone, "fetch", "origin")
+
+	writeFile(t, filepath.Join(clone, "a.txt"), "top\nincoming\nmiddle\nbottom\nunique\n")
+
+	opts := ParkOptions{
+		Repo:      clone,
+		Session:   "sess-detached-dev",
+		Paths:     []string{"a.txt"},
+		TargetRef: "",
+		Apply:     false,
+	}
+
+	rec, err := Park(ctx, opts)
+	if err != nil {
+		t.Fatalf("Park error: %v", err)
+	}
+	if rec.TargetRef != "origin/dev" {
+		t.Fatalf("TargetRef = %q, want origin/dev", rec.TargetRef)
+	}
+	if !rec.OK {
+		t.Fatalf("expected OK=true, got reason: %s", rec.Reason)
+	}
+}
+

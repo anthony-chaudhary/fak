@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/safesync"
 	"github.com/anthony-chaudhary/fak/internal/wipref"
@@ -27,7 +28,11 @@ func runWipPark(stdout, stderr io.Writer, argv []string) int {
 	verbFlagUsage(fs, "wip")
 	repo := fs.String("C", "", "run in this git repo (default: cwd)")
 	sessionFlag := fs.String("session", "", "session id (default: positional arg, else $CLAUDE_CODE_SESSION_ID or $FAK_SESSION_ID)")
-	target := fs.String("target", "", "target ref or commit to integrate (default: origin/main or tracking branch)")
+	defaultDev := "main"
+	if roles, err := branchrole.Load(""); err == nil && roles.DevelopmentBranch != "" {
+		defaultDev = roles.DevelopmentBranch
+	}
+	target := fs.String("target", "", fmt.Sprintf("target ref or commit to integrate (default: origin/%s or tracking branch)", defaultDev))
 	apply := fs.Bool("apply", false, "execute in-place integration and reapply (default: false, dry-run preview)")
 	asJSON := fs.Bool("json", false, "emit park receipt as JSON")
 

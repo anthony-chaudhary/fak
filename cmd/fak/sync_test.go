@@ -517,3 +517,22 @@ func syncReadFile(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+func TestSyncGoalHelpBranchRole(t *testing.T) {
+	tmp := t.TempDir()
+	dosFile := filepath.Join(tmp, "dos.toml")
+	if err := os.WriteFile(dosFile, []byte("[branch_roles]\ndevelopment_branch = \"dev\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(tmp)
+
+	var stdout, stderr bytes.Buffer
+	code := runSync(&stdout, &stderr, []string{"reconcile", "--help"})
+	if code != syncExitUsage {
+		t.Fatalf("exit = %d, want %d", code, syncExitUsage)
+	}
+	want := "integrate (default integrate origin/dev)"
+	if !strings.Contains(stderr.String(), want) {
+		t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+	}
+}

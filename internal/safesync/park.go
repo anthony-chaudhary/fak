@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -191,7 +192,11 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 		if berr == nil && branch != "" {
 			targetRef = "origin/" + branch
 		} else {
-			targetRef = "origin/main"
+			devBranch := "main"
+			if roles, err := branchrole.Load(repo); err == nil && roles.DevelopmentBranch != "" {
+				devBranch = roles.DevelopmentBranch
+			}
+			targetRef = "origin/" + devBranch
 		}
 	}
 	receipt.TargetRef = targetRef

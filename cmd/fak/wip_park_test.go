@@ -127,3 +127,22 @@ func writeFileCLI(t *testing.T, path, text string) {
 		t.Fatal(err)
 	}
 }
+
+func TestWipParkTargetHelpBranchRole(t *testing.T) {
+	tmp := t.TempDir()
+	dosFile := filepath.Join(tmp, "dos.toml")
+	if err := os.WriteFile(dosFile, []byte("[branch_roles]\ndevelopment_branch = \"dev\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(tmp)
+
+	var stdout, stderr bytes.Buffer
+	code := runWipPark(&stdout, &stderr, []string{"--help"})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+	want := "(default: origin/dev or tracking branch)"
+	if !strings.Contains(stderr.String(), want) {
+		t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+	}
+}

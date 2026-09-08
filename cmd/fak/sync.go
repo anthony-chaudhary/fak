@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/safesync"
 )
@@ -77,7 +78,11 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	quarantineScratch := fs.Bool("quarantine-scratch", true, "shift-left untracked artifact isolation: safely isolate and restore untracked files colliding with incoming fast-forward additions (#10913)")
 	asJSON := fs.Bool("json", false, "emit the assessment as JSON")
 	resumeToken := fs.String("resume-token", "", "check: operation-bound token emitted by a blocked PUBLIC_LEAK preflight")
-	goal := fs.String("goal", "publish", "reconcile: target goal: publish (default publish HEAD), publish <sha>, integrate (default integrate origin/main)")
+	defaultDev := "main"
+	if roles, err := branchrole.Load(""); err == nil && roles.DevelopmentBranch != "" {
+		defaultDev = roles.DevelopmentBranch
+	}
+	goal := fs.String("goal", "publish", fmt.Sprintf("reconcile: target goal: publish (default publish HEAD), publish <sha>, integrate (default integrate origin/%s)", defaultDev))
 	applyFlag := fs.Bool("apply", false, "reconcile: execute the selected safe primitive")
 	executeFlag := fs.Bool("execute", false, "reconcile: execute reconciliation packet with independent graph readback")
 	emitPacket := fs.Bool("emit-packet", false, "reconcile: emit owner-aware reconciliation packet")

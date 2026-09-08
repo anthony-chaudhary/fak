@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/mergepreview"
 )
 
@@ -106,6 +107,13 @@ func ParseGoal(raw, defaultRemote, defaultBranch string) (GoalInfo, error) {
 	if raw == "" {
 		raw = "publish"
 	}
+	devBranch := strings.TrimSpace(defaultBranch)
+	if devBranch == "" {
+		devBranch = "main"
+		if roles, err := branchrole.Load(""); err == nil && roles.DevelopmentBranch != "" {
+			devBranch = roles.DevelopmentBranch
+		}
+	}
 	fields := strings.Fields(raw)
 	kind := strings.ToLower(fields[0])
 	switch kind {
@@ -114,10 +122,7 @@ func ParseGoal(raw, defaultRemote, defaultBranch string) (GoalInfo, error) {
 		if len(fields) > 1 {
 			source = fields[1]
 		}
-		target := defaultRemote + "/main"
-		if defaultBranch != "" {
-			target = defaultRemote + "/" + defaultBranch
-		}
+		target := defaultRemote + "/" + devBranch
 		return GoalInfo{
 			Raw:    raw,
 			Kind:   "publish",
@@ -125,10 +130,7 @@ func ParseGoal(raw, defaultRemote, defaultBranch string) (GoalInfo, error) {
 			Target: target,
 		}, nil
 	case "integrate":
-		target := defaultRemote + "/main"
-		if defaultBranch != "" {
-			target = defaultRemote + "/" + defaultBranch
-		}
+		target := defaultRemote + "/" + devBranch
 		if len(fields) > 1 {
 			target = fields[1]
 		}
@@ -251,7 +253,11 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 		}
 	}
 	if branch == "" {
-		branch = "main"
+		devBranch := "main"
+		if roles, err := branchrole.Load(repo); err == nil && roles.DevelopmentBranch != "" {
+			devBranch = roles.DevelopmentBranch
+		}
+		branch = devBranch
 	}
 
 	goalInfo, err := ParseGoal(r.opts.Goal, r.opts.Remote, branch)
