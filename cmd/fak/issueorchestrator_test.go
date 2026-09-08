@@ -346,6 +346,13 @@ func TestIssueOrchestratorOpencodeCommandsFlag(t *testing.T) {
 	if len(wave.Issues) == 0 || len(wave.Issues[0].OpencodeCommand) == 0 {
 		t.Errorf("expected opencode_command to be populated on issue")
 	}
+	command := wave.OpencodeChats[0].Command
+	if got := issueOrchestratorArgCount(command, "--variant"); got != 0 {
+		t.Fatalf("default generated command contains %d --variant overrides, want 0: %v", got, command)
+	}
+	if !issueOrchestratorContainsArgPair(command, "--agent", "worker") {
+		t.Fatalf("default generated command missing --agent worker: %v", command)
+	}
 }
 
 func TestIssueOrchestratorSpawnOpencodeTextRender(t *testing.T) {
@@ -1157,6 +1164,83 @@ func TestIssueOrchestratorDefaultAgent(t *testing.T) {
 	if !foundAgentFlag {
 		t.Fatalf("expected command to contain '--agent worker', got: %v", chat.Command)
 	}
+	if got := issueOrchestratorArgCount(chat.Command, "--variant"); got != 0 {
+		t.Fatalf("default spawn command contains %d --variant overrides, want 0: %v", got, chat.Command)
+	}
+}
+
+func TestIssueOrchestratorExplicitVariantOverride(t *testing.T) {
+	origStamp := controllerStampFunc
+	origHead := controllerHeadRevFunc
+	defer func() {
+		controllerStampFunc = origStamp
+		controllerHeadRevFunc = origHead
+	}()
+
+	const testRev = "532688a0a04ba669a20d2c7f353150d044ae8be8"
+	controllerStampFunc = func() binstamp.Stamp {
+		return binstamp.Stamp{Revision: testRev, HasVCS: true}
+	}
+	controllerHeadRevFunc = func(string) string { return testRev }
+
+	issuesPath := writeTestIssuesFile(t, []issueorchestrator.Issue{{
+		Number:          1005,
+		Key:             "issue-1005",
+		Title:           "Explicit variant override test",
+		Lane:            "issueorchestrator",
+		Paths:           []string{"internal/issueorchestrator/opencode.go"},
+		ExpectedSteps:   1,
+		Dispatchability: "dispatchable",
+	}})
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath,
+		"--spawn-opencode",
+		"--dry-run",
+		"--json",
+		"--variant", "high",
+	})
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
+	}
+
+	var receipt OpencodeSpawnReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
+		t.Fatalf("failed to decode JSON receipt: %v; raw: %s", err, stdout.String())
+	}
+	if len(receipt.Chats) != 1 {
+		t.Fatalf("expected 1 chat, got %d", len(receipt.Chats))
+	}
+	command := receipt.Chats[0].Command
+	if got := issueOrchestratorArgCount(command, "--variant"); got != 1 {
+		t.Fatalf("explicit command contains %d --variant overrides, want 1: %v", got, command)
+	}
+	if !issueOrchestratorContainsArgPair(command, "--variant", "high") {
+		t.Fatalf("explicit command missing --variant high: %v", command)
+	}
+	if !issueOrchestratorContainsArgPair(command, "--agent", "worker") {
+		t.Fatalf("explicit command missing --agent worker: %v", command)
+	}
+}
+
+func issueOrchestratorArgCount(args []string, target string) int {
+	count := 0
+	for _, arg := range args {
+		if arg == target {
+			count++
+		}
+	}
+	return count
+}
+
+func issueOrchestratorContainsArgPair(args []string, key, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == key && args[i+1] == value {
+			return true
+		}
+	}
+	return false
 }
 
 func TestIssueOrchestratorExplicitAgent(t *testing.T) {
