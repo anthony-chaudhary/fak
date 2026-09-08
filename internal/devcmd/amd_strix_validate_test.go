@@ -1803,3 +1803,209 @@ func TestRunAMDStrixValidate_CurrentV2ValidationInvariants(t *testing.T) {
 		}
 	})
 }
+
+func TestRunAMDStrixValidate_PrebuiltTarArchiveBinding(t *testing.T) {
+	origRun := runStrixValidationFn
+	origGit := gitRevParseFn
+	defer func() {
+		runStrixValidationFn = origRun
+		gitRevParseFn = origGit
+	}()
+
+	baseCommit := "c0123456789abcdef0123456789abcdef0123456"
+	overlayFiles := map[string][]byte{
+		"internal/amdgpu/strix_kernel.go": []byte("package amdgpu\n// candidate kernel\n"),
+		"internal/devcmd/test_overlay.go": []byte("package devcmd\n// overlay\n"),
+	}
+
+	candArchive, err := BuildStrixCandidateArchive(baseCommit, overlayFiles)
+	if err != nil {
+		t.Fatalf("BuildStrixCandidateArchive failed: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	archiveTarPath := filepath.Join(tmpDir, "strix_candidate.tar")
+	if err := os.WriteFile(archiveTarPath, candArchive.ArchiveBytes, 0o644); err != nil {
+		t.Fatalf("failed to write candidate tar: %v", err)
+	}
+
+	validTarget := amdgpu.StrixTarget{
+		Mode:         "ssh",
+		Host:         "strix1",
+		Reachable:    true,
+		CPUModel:     "AMD Ryzen AI MAX+ 395",
+		GPUName:      "AMD Radeon 8060S Graphics",
+		TargetISA:    "gfx1151",
+		ComputeUnits: 40,
+		DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	t.Run("prebuilt tar archive binds base commit and archive digest to runner", func(t *testing.T) {
+		var capturedOpts amdgpu.StrixValidationOpts
+		var capturedCandArchive *StrixCandidateArchive
+		var capturedAdmissionTimeout time.Duration
+		runnerCalled := false
+
+		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			runnerCalled = true
+			capturedOpts = opts
+			if cand, ok := CandidateArchiveFromContext(ctx); ok {
+				capturedCandArchive = cand
+			}
+			if adm, ok := AdmissionTimeoutFromContext(ctx); ok {
+				capturedAdmissionTimeout = adm
+			}
+
+			receipt := amdgpu.NewStrixValidationReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
+			receipt.Verdict = "PASS"
+			receipt.Verified = true
+			receipt.ExecutedCount = 1
+			receipt.Subkernels = []amdgpu.StrixSubkernelResult{
+				{
+					Name:       "argmax",
+					Status:     "PASS",
+					DurationUS: 320,
+					Parity:     amdgpu.StrixParityVerdict{Passed: true, ArgmaxExact: true},
+				},
+			}
+			digest, _ := receipt.ComputeDigest()
+			receipt.Digest = digest
+			return receipt, nil
+		}
+
+		var stdout, stderr bytes.Buffer
+		argv := []string{
+			"-archive", archiveTarPath,
+			"-host", "strix1",
+			"-subkernels", "argmax",
+			"-ablate", "none",
+			"-admission-timeout", "8",
+			"-timeout", "30",
+			"-json",
+		}
+
+		code := RunAMDStrixValidate(&stdout, &stderr, argv)
+		if code != 0 {
+			t.Fatalf("expected exit code 0, got %d (stderr: %s)", code, stderr.String())
+		}
+		if !runnerCalled {
+			t.Fatal("expected runner to be called")
+		}
+
+		expectedArchiveDigest := "sha256:" + candArchive.ArchiveSHA256
+		if capturedOpts.GitTip != baseCommit {
+			t.Errorf("capturedOpts.GitTip = %q, want %q", capturedOpts.GitTip, baseCommit)
+		}
+		if capturedOpts.GitRef != expectedArchiveDigest {
+			t.Errorf("capturedOpts.GitRef = %q, want %q", capturedOpts.GitRef, expectedArchiveDigest)
+		}
+		if !capturedOpts.RequireSourceBinding {
+			t.Errorf("capturedOpts.RequireSourceBinding = false, want true")
+		}
+		if capturedAdmissionTimeout != 8*time.Second {
+			t.Errorf("capturedAdmissionTimeout = %v, want 8s", capturedAdmissionTimeout)
+		}
+		if capturedCandArchive == nil {
+			t.Fatal("candidate archive missing from context")
+		}
+		if capturedCandArchive.ArchiveSHA256 != candArchive.ArchiveSHA256 {
+			t.Errorf("capturedCandArchive.ArchiveSHA256 = %q, want %q", capturedCandArchive.ArchiveSHA256, candArchive.ArchiveSHA256)
+		}
+		if len(capturedCandArchive.OverlayFiles) != 2 {
+			t.Errorf("captured overlay file count = %d, want 2", len(capturedCandArchive.OverlayFiles))
+		}
+	})
+
+	t.Run("matching archive-digest flag succeeds", func(t *testing.T) {
+		runnerCalled := false
+		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			runnerCalled = true
+			receipt := amdgpu.NewStrixValidationReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
+			receipt.Verdict = "PASS"
+			receipt.Verified = true
+			receipt.ExecutedCount = 1
+			receipt.Subkernels = []amdgpu.StrixSubkernelResult{
+				{
+					Name:       "argmax",
+					Status:     "PASS",
+					DurationUS: 320,
+					Parity:     amdgpu.StrixParityVerdict{Passed: true, ArgmaxExact: true},
+				},
+			}
+			digest, _ := receipt.ComputeDigest()
+			receipt.Digest = digest
+			return receipt, nil
+		}
+
+		var stdout, stderr bytes.Buffer
+		argv := []string{
+			"-archive", archiveTarPath,
+			"-archive-digest", "sha256:" + candArchive.ArchiveSHA256,
+			"-subkernels", "argmax",
+			"-ablate", "none",
+			"-json",
+		}
+
+		code := RunAMDStrixValidate(&stdout, &stderr, argv)
+		if code != 0 {
+			t.Fatalf("expected exit code 0, got %d (stderr: %s)", code, stderr.String())
+		}
+		if !runnerCalled {
+			t.Fatal("expected runner to be called")
+		}
+	})
+
+	t.Run("mismatched archive-digest flag fails closed", func(t *testing.T) {
+		runnerCalled := false
+		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			runnerCalled = true
+			return nil, nil
+		}
+
+		var stdout, stderr bytes.Buffer
+		argv := []string{
+			"-archive", archiveTarPath,
+			"-archive-digest", "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+			"-subkernels", "argmax",
+			"-ablate", "none",
+		}
+
+		code := RunAMDStrixValidate(&stdout, &stderr, argv)
+		if code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		if runnerCalled {
+			t.Fatal("runner was called despite mismatched archive digest")
+		}
+		if !strings.Contains(stderr.String(), "archive/digest disagreement") {
+			t.Errorf("expected stderr to mention archive/digest disagreement, got: %s", stderr.String())
+		}
+	})
+
+	t.Run("mismatched explicit git-tip flag fails closed", func(t *testing.T) {
+		runnerCalled := false
+		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			runnerCalled = true
+			return nil, nil
+		}
+
+		var stdout, stderr bytes.Buffer
+		argv := []string{
+			"-archive", archiveTarPath,
+			"-git-tip", "d111111111111111111111111111111111111111",
+			"-subkernels", "argmax",
+			"-ablate", "none",
+		}
+
+		code := RunAMDStrixValidate(&stdout, &stderr, argv)
+		if code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		if runnerCalled {
+			t.Fatal("runner was called despite mismatched git-tip")
+		}
+		if !strings.Contains(stderr.String(), "does not match GitTip") {
+			t.Errorf("expected stderr to mention does not match GitTip, got: %s", stderr.String())
+		}
+	})
+}
