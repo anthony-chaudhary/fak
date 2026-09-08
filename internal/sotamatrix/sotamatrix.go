@@ -91,6 +91,57 @@ type Op struct {
 // assumed. Keep it sorted by Slug for stable output and easy diffing.
 var matrix = []Op{
 	{
+		Slug:  "amd-vulkan-quant-gemm",
+		Title: "AMD Vulkan Q2_K / Q4_K / Q8_0 GEMV and GEMM",
+		FileGlobs: []string{
+			"internal/compute/vulkan.go",
+			"internal/compute/shaders/q*k_matmul.comp",
+			"internal/compute/shaders/q8_matmul*.comp",
+		},
+		FakPath:     "internal/compute/vulkan.go; internal/compute/shaders/q2k_matmul.comp, q4k_matmul.comp, q8_matmul*.comp",
+		SOTA:        "Nathanw1014/strix-halo-llamacpp@45bec945dd4c7944fba45ebd02e6b713b342d0ba gfx1151 Vulkan rowtiling, Wave32/cooperative-matrix, and dequant-once mechanisms (MIT)",
+		PrimaryLink: "https://github.com/Nathanw1014/strix-halo-llamacpp/tree/45bec945dd4c7944fba45ebd02e6b713b342d0ba",
+		Route:       RouteBorrow,
+		Oracle:      "independent CPU dequant/GEMM over the same packed bytes: argmax exact and cosine >= 0.995 for Q2_K/Q4_K, with finite outputs, resident packed-byte accounting, and fak-native Vulkan path identity",
+		Papers:      []string{"llama.cpp k-quants design (PR #1684, Kawrakow)"},
+		Note:        "Borrow one measured gfx1151 mechanism at a time after a current-path witness; attribution is required and no runtime or backend fallback may receive performance credit.",
+	},
+	{
+		Slug:  "amd-vulkan-qwen-gdn",
+		Title: "AMD Vulkan Qwen3.8 Gated-DeltaNet recurrence",
+		FileGlobs: []string{
+			"internal/compute/vulkan_qwen35_gdn.go",
+			"internal/compute/shaders/qwen35_gdn_*.comp",
+			"internal/compute/shaders/qwen35_split_qg*.comp",
+			"internal/compute/shaders/qwen35_partial_rope*.comp",
+			"internal/compute/shaders/sigmoid_mul.comp",
+		},
+		FakPath:     "internal/compute/vulkan_qwen35_gdn.go; internal/compute/shaders/qwen35_gdn_*.comp",
+		SOTA:        "julianmb/q38rocm@6c142530031c923ece1adf4d8c9c824b7369fef8 Strix Halo Qwen3.8 execution study (Apache-2.0); FLA@bccaf2d3cf4d9badc8be050a2c71616220b246d7 Gated-DeltaNet recurrence (MIT)",
+		PrimaryLink: "https://github.com/julianmb/q38rocm/tree/6c142530031c923ece1adf4d8c9c824b7369fef8",
+		Route:       RouteStayMinimal,
+		Oracle:      "fak production CPU recurrence: multi-token per-step output and logit equivalence, convolution-state and recurrent-state continuity at predeclared tolerances, exact greedy-token equality, finite outputs, fak-native Vulkan identity, and zero fallback",
+		Papers: []string{
+			"FLA fused recurrent Gated-DeltaNet (bccaf2d3cf4d9badc8be050a2c71616220b246d7): https://github.com/fla-org/flash-linear-attention/blob/bccaf2d3cf4d9badc8be050a2c71616220b246d7/fla/ops/gated_delta_rule/fused_recurrent.py",
+		},
+		Note: "Stay minimal until #12026 proves production CPU parity; only then borrow a measured recurrence mechanism, with no runtime or backend fallback.",
+	},
+	{
+		Slug:  "amd-vulkan-sequence-attention",
+		Title: "AMD Vulkan Qwen3.8 sequence prefill and attention",
+		FileGlobs: []string{
+			"internal/compute/vulkan_qwen35_sequence.go",
+			"internal/compute/shaders/qwen35_causal_attention*.comp",
+		},
+		FakPath:     "internal/compute/vulkan_qwen35_sequence.go; internal/compute/shaders/qwen35_causal_attention*.comp",
+		SOTA:        "Nathanw1014/strix-halo-llamacpp@45bec945dd4c7944fba45ebd02e6b713b342d0ba Strix Halo Vulkan Flash-Attention and dequant-once mechanisms (MIT)",
+		PrimaryLink: "https://github.com/Nathanw1014/strix-halo-llamacpp/tree/45bec945dd4c7944fba45ebd02e6b713b342d0ba",
+		Route:       RouteBorrow,
+		Oracle:      "fak production CPU full sequence path: exact token identity, finite logits, logit cosine >= 0.999, per-token activation parity at the declared floor, persistent-state continuity, fak-native Vulkan identity, and zero fallback",
+		Papers:      []string{"FlashAttention-2 (Dao, 2023) arXiv:2307.08691"},
+		Note:        "Borrow only the mechanism selected by a current full-sequence witness; preserve model semantics and permit no runtime or backend fallback.",
+	},
+	{
 		Slug:        "dense-f32-gemm",
 		Title:       "Dense f32 GEMM",
 		FileGlobs:   []string{"internal/compute/cpuref.go", "internal/model/parallel.go", "internal/model/fdot_amd64.s"},

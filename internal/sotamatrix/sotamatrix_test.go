@@ -126,6 +126,73 @@ func TestMetalQwenGDNPriorArt(t *testing.T) {
 	}
 }
 
+func TestAMDVulkanPriorArtPaths(t *testing.T) {
+	tests := []struct {
+		path, slug, license string
+		route               Route
+		pins, obligations   []string
+	}{
+		{
+			path: "internal/compute/vulkan.go", slug: "amd-vulkan-quant-gemm", route: RouteBorrow, license: "MIT",
+			pins:        []string{"Nathanw1014/strix-halo-llamacpp@45bec945dd4c7944fba45ebd02e6b713b342d0ba"},
+			obligations: []string{"CPU dequant/GEMM", "argmax exact", "cosine"},
+		},
+		{
+			path: "internal/compute/shaders/q2k_matmul.comp", slug: "amd-vulkan-quant-gemm", route: RouteBorrow, license: "MIT",
+			pins:        []string{"Nathanw1014/strix-halo-llamacpp@45bec945dd4c7944fba45ebd02e6b713b342d0ba"},
+			obligations: []string{"CPU dequant/GEMM", "argmax exact", "cosine"},
+		},
+		{
+			path: "internal/compute/vulkan_qwen35_gdn.go", slug: "amd-vulkan-qwen-gdn", route: RouteStayMinimal, license: "Apache-2.0",
+			pins: []string{
+				"julianmb/q38rocm@6c142530031c923ece1adf4d8c9c824b7369fef8",
+				"FLA@bccaf2d3cf4d9badc8be050a2c71616220b246d7",
+			},
+			obligations: []string{"production CPU", "multi-token", "convolution-state", "recurrent-state", "logit", "exact greedy-token"},
+		},
+		{
+			path: "internal/compute/vulkan_qwen35_sequence.go", slug: "amd-vulkan-sequence-attention", route: RouteBorrow, license: "MIT",
+			pins:        []string{"Nathanw1014/strix-halo-llamacpp@45bec945dd4c7944fba45ebd02e6b713b342d0ba"},
+			obligations: []string{"production CPU", "full sequence", "exact token identity", "finite logits", "cosine"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			op, ok := BySlug(tt.slug)
+			if !ok {
+				t.Fatalf("%s row missing from the SOTA matrix", tt.slug)
+			}
+			if !anyGlobMatches(op.FileGlobs, tt.path) {
+				t.Errorf("%s FileGlobs %v do not cover %s", tt.slug, op.FileGlobs, tt.path)
+			}
+			if op.Route != tt.route {
+				t.Errorf("%s route = %q, want %q", tt.slug, op.Route, tt.route)
+			}
+			for _, pin := range tt.pins {
+				if !strings.Contains(op.SOTA, pin) {
+					t.Errorf("%s SOTA %q does not name pinned source %q", tt.slug, op.SOTA, pin)
+				}
+			}
+			if !strings.Contains(op.PrimaryLink, "45bec945dd4c7944fba45ebd02e6b713b342d0ba") &&
+				!strings.Contains(op.PrimaryLink, "6c142530031c923ece1adf4d8c9c824b7369fef8") {
+				t.Errorf("%s PrimaryLink %q is not revision-pinned", tt.slug, op.PrimaryLink)
+			}
+			if !strings.Contains(op.SOTA, tt.license) {
+				t.Errorf("%s SOTA %q does not state license %q", tt.slug, op.SOTA, tt.license)
+			}
+			for _, obligation := range tt.obligations {
+				if !strings.Contains(op.Oracle, obligation) {
+					t.Errorf("%s oracle %q does not name %q", tt.slug, op.Oracle, obligation)
+				}
+			}
+			if !strings.Contains(op.Note, "no runtime or backend fallback") {
+				t.Errorf("%s note %q does not reject runtime/backend fallback", tt.slug, op.Note)
+			}
+		})
+	}
+}
+
 func TestKVCacheTransformCompressionPriorArt(t *testing.T) {
 	op, ok := BySlug("kv-cache-transform-compression")
 	if !ok {
