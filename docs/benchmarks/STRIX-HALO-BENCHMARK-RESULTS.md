@@ -11,6 +11,13 @@ description: "Physical execution baseline on AMD Ryzen AI MAX+ 395 (Radeon 8060S
 > **Receipt Digest:** `sha256:177e29ee25f61d21bd4d8f7fcb7446f4a9ef92220550bd701324cbd5d3ab052d`  
 > **Schema:** `fak.strix.validation/v1` | **Timestamp:** `2026-09-07T05:55:53Z` | **Verdict:** `PASS` (`verified: true`)
 
+> **Audit correction (2026-09-08):** A selector event with `device_observed: false`
+> is a host contract, not a physical kernel timing. In particular, the earlier
+> `f16_kv_contiguize` 2.69x/184.2 GB/s claim was not connected to the Vulkan
+> runtime. A source-bound FP32 implementation was physically slower at 32K, 64K,
+> and 128K and is rejected; see the
+> [physical rejection receipt](receipts/strix-vulkan-radv-contiguization-reject-20260908.json).
+
 ---
 
 ## 1. Hardware Profile & Execution Environment
@@ -43,7 +50,7 @@ The physical validation suite executes six differential ablation experiments acr
 | **Quantization** | `quant_q4k_vs_q8_vs_f32` | `f32_dense_weights`<br/>• 1,820 µs<br/>• 356.52 MB allocated | `q4k_super_blocks`<br/>• **428 µs**<br/>• **50.14 MB allocated** | **4.25× speedup**<br/>**7.11× compression** | `0.999998` | `VERIFIED_LIFT` | 4-bit super-blocks (144 bytes per 256 weights with 6-bit min/scale) reduce memory footprint from 356.5 MB to 50.1 MB, staying strictly memory-bandwidth bound on UMA. |
 | **Quantization** | `quant_q2k_vs_q4k` | `q4k_super_blocks`<br/>• 428 µs<br/>• 50.14 MB allocated | `q2k_super_blocks`<br/>• **265 µs**<br/>• **29.25 MB allocated** | **1.62× speedup**<br/>**1.71× compression** | `0.999996` | `VERIFIED_LIFT` | 2-bit super-blocks (84 bytes per 256 weights with 4-bit min/scale) reduce memory footprint by 41.7% over Q4_K, cutting UMA DRAM read pressure and accelerating GEMV decode latency. |
 | **Residency** | `device_local_vs_host_visible` | `host_visible_streaming`<br/>• 1,420 µs streaming<br/>• 50.14 MB allocated | `device_local_pool`<br/>• **428 µs resident**<br/>• 50.14 MB allocated | **3.32× speedup**<br/>(Zero bus drop) | `1.000000`<br/>(Exact bitwise) | `VERIFIED_LIFT` | Direct device-local allocation (`VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT` mapped into APU GTT) avoids CPU write-combining and bus sync penalties, unlocking full APU memory speeds. |
-| **Layout** | `strided_vs_contiguized_f16_kv` | `strided_f16_kv_camping`<br/>• 44,869 µs<br/>• 28.4 GB/s DRAM<br/>• 67.11 MB allocated | `contiguized_f16_kv_scratch`<br/>• **16,680 µs**<br/>• **184.2 GB/s DRAM**<br/>• 134.22 MB allocated | **2.69× speedup**<br/>(16-ch saturation) | `1.000000`<br/>(Exact bitwise) | `VERIFIED_LIFT` | Strided multi-head KV reads camp on 1–2 LPDDR5X channels (dropping bandwidth to 28.4 GB/s). Contiguizing heads into scratch memory coalesces accesses and saturates all 16 channels at 184.2 GB/s (90.2% of physical ceiling). |
+| **Layout** | `strided_vs_contiguized_f32_kv` | direct Vulkan attention<br/>• 37.43 ms at 32K<br/>• 81.72 ms at 64K<br/>• 168.21 ms at 128K | vectorized in-device transpose + attention<br/>• 39.11 ms at 32K<br/>• 83.37 ms at 64K<br/>• 176.76 ms at 128K | **0.957× / 0.980× / 0.952×**<br/>(4.48% / 2.01% / 5.08% slower) | `1.000000`<br/>(Exact bitwise) | `REJECT` | The live Vulkan ABI is FP32, not the modeled FP16 cache. Eleven interleaved samples per arm on the 8060S show that whole-cache transpose traffic costs more than the contiguized read pattern saves. |
 | **Prefill** | `prefill_sequence_vs_serial` | `baseline_serial_prefill`<br/>• 18,580 ms<br/>• 3.01 tok/s | `vulkan_sequence_prefill`<br/>• **1,140 ms**<br/>• **49.12 tok/s** | **16.32× speedup**<br/>(49.12 tok/s raw) | `0.999999` | `VERIFIED_LIFT` | Whole-sequence Vulkan prefill streams layer weights once per prompt panel, saturating 40 CUs RDNA 3.5 vector matrix cores and eliminating serial decode overhead. |
 | **Decode** | `decode_resident_vs_host_fallback` | `host_fallback_decode`<br/>• 2,695.8 ms / tok<br/>• 0.37 tok/s | `vulkan_resident_decode`<br/>• **59.5 ms / tok**<br/>• **16.80 tok/s** | **45.3× speedup**<br/>(16.80 tok/s raw) | `0.999999` | `VERIFIED_LIFT` | Native on-device SplitQG, PartialRoPE, and SigmoidMul eliminate all host round-trips and CPU bounces, fusing attention and GDN decode into a single batched command submission per token. |
 
@@ -51,9 +58,10 @@ The physical validation suite executes six differential ablation experiments acr
 
 ## 3. 21 Sub-Kernel Function Baseline Table
 
-The 21 canonical compute sub-kernels validated on the AMD Strix Halo appliance cover the entire forward execution path: tensor projections, quantizations, normalizations, activations, positional rotary embeddings, multi-head attention, linear recurrent attention (Gated Delta Net), whole-sequence prefill, and memory contiguization.
-
-All 21 sub-kernels achieved numerical parity against the CPU reference oracle and were executed under physical validation on the AMD Strix Halo appliance.
+The catalog names 21 compute sub-kernels across the forward path. The receipt's
+`device_observed` field is authoritative for physical credit: the contiguization
+row is a host-only contract, while its later live FP32 treatment is a physically
+rejected candidate rather than a shipped sub-kernel.
 
 | # | Sub-Kernel Name | Subsystem Category | Duration (µs) | Wall Time (ms) | Logit Cosine Parity | Argmax Exact | Parity Verdict | Kernel Function & Metric Description |
 |:---:|---|---|---:|---:|:---:|:---:|:---:|---|
@@ -77,7 +85,7 @@ All 21 sub-kernels achieved numerical parity against the CPU reference oracle an
 | 18 | `qwen35_gdn_decode` | `linear_attention` | 417,370 | 417 | 0.999999 | false | `PASS` | Gated Delta Net recurrent decode in-place token oracle |
 | 19 | `qwen35_gdn_preprojected` | `linear_attention` | 574,540 | 575 | 0.999999 | false | `PASS` | Gated Delta Net preprojected 1D convolution and recurrent state update |
 | 20 | `qwen35_sequence_prefill` | `prefill` | 560,959 | 561 | 0.999999 | false | `PASS` | Whole-sequence Qwen3.5 hybrid prefill on Vulkan (streams weights once per layer) |
-| 21 | `f16_kv_contiguize` | `kv_cache` | 602,463 | 602 | 0.999999 | false | `PASS` | Pre-attention f16 KV cache contiguization pass (saturates 16 DRAM channels) |
+| 21 | `f16_kv_contiguize` | `kv_cache` | 602,463 | 602 | 0.999999 | false | `HOST_ONLY` | Host-side modeled contract; not a Vulkan device dispatch and not physical performance evidence. The live FP32 candidate is rejected above. |
 
 ### Subsystem Category Rollup
 
@@ -97,7 +105,7 @@ All 21 sub-kernels achieved numerical parity against the CPU reference oracle an
 │ reduction          │ 1 op      │ 829,863 µs             │ argmax (exact)       │
 │ kv_cache           │ 1 op      │ 602,463 µs             │ f16_kv_contiguize    │
 └────────────────────┴───────────┴────────────────────────┴──────────────────────┘
-Total: 21 sub-kernels | 100% Passed (21/21) | 0 Regressions | 0 Hardware Faults
+Total: 21 catalog entries | f16 contiguization: host-only contract | live FP32 treatment: REJECT
 ```
 
 ---
