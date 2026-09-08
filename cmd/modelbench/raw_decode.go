@@ -271,8 +271,16 @@ func rawDecodePhysicalReceipt(execution rawdecode.Execution, repOutputs []rawRep
 	// Source identity remains all-or-nothing. The executable observer must also
 	// prove vcs=git before its revision can populate GitCommit; until then this
 	// adapter leaves the entire source tuple unavailable.
-	if execution.ArtifactSHA256 != "" {
+	if strings.TrimSpace(execution.ModelName) != "" &&
+		strings.TrimSpace(execution.ArtifactPath) != "" &&
+		strings.TrimSpace(execution.ArtifactSHA256) != "" &&
+		strings.TrimSpace(execution.TensorInventorySHA256) != "" &&
+		strings.TrimSpace(execution.Quantization) != "" {
+		observed.Model.Name = execution.ModelName
+		observed.Model.ArtifactPath = execution.ArtifactPath
 		observed.Model.ArtifactSHA256 = execution.ArtifactSHA256
+		observed.Model.TensorInventorySHA256 = execution.TensorInventorySHA256
+		observed.Model.Quantization = execution.Quantization
 	}
 	backendExecutions, backendObserved := rawDecodeBackendExecutions(execution)
 	if backendObserved && len(backendExecutions) != len(repOutputs) {
@@ -295,7 +303,7 @@ func rawDecodePhysicalReceipt(execution rawdecode.Execution, repOutputs []rawRep
 			observed.Device.VulkanVersion = identity.Runtime
 			observed.Engine.Name = "fak-native"
 			observed.Engine.Backend = identity.Backend
-			observed.Engine.Runtime = identity.Runtime
+			observed.Engine.Runtime = compute.Qwen38VulkanDecodeRuntime
 			observed.Engine.ExecutedPath = execution.Engine
 			observed.Engine.FallbackCount = &fallbacks
 		}

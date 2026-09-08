@@ -185,6 +185,12 @@ func HasVectorizedDeltaNet() bool {
 	return compute.HasVectorizedDeltaNet()
 }
 
+// HasVectorizedDeltaNetFor reports both executable ISA support and kernel
+// coverage for a specific recurrent head geometry.
+func HasVectorizedDeltaNetFor(kHd, vHd int) bool {
+	return compute.HasVectorizedDeltaNetFor(kHd, vHd)
+}
+
 // HasTiledChannelTranspose reports whether the tiled memory channel transpose
 // kernel for DeltaNet linear attention conv concat is available.
 func HasTiledChannelTranspose() bool {
@@ -199,7 +205,8 @@ func HasQSASparseRowGather() bool {
 
 func q8FastDecodeSessionOK(s *Session, cfg Config) bool {
 	if cfg.IsHybrid() || cfg.IsQwen35Hybrid() {
-		if !HasVectorizedDeltaNet() {
+		_, _, kHd, vHd, _, _, _ := cfg.linearAttnDims()
+		if !HasVectorizedDeltaNetFor(kHd, vHd) {
 			return false
 		}
 		// Permit mixed-quantization sessions where base projection weights are Q4_K / Q8 while recurrent state remains FP32.
@@ -881,4 +888,3 @@ func (s *Session) AttachTreeMaskCacheHint(numNodes ...int) CachePolicyHint {
 func (s *Session) AttachKVCacheHint(blockID ...int) CachePolicyHint {
 	return ClassifyKVBlockCacheHint(blockID...)
 }
-

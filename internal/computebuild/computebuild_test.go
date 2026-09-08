@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -688,575 +687,311 @@ func TestCxxToolchainProbe(t *testing.T) {
 	}
 }
 
-func createSyntheticGitRepo(t *testing.T) (string, string) {
+func runFixtureGit(t *testing.T, root string, args ...string) string {
 	t.Helper()
-	dir := t.TempDir()
-
-	run := func(args ...string) string {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v failed: %v\nOutput: %s", args, err, string(out))
-		}
-		return strings.TrimSpace(string(out))
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
-
-	run("init")
-	run("config", "user.name", "fak-test")
-	run("config", "user.email", "fak-test@example.com")
-	run("config", "commit.gpgsign", "false")
-
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module fak-test\n\ngo 1.26\n"), 0644); err != nil {
-		t.Fatalf("write go.mod: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Synthetic Repo\n"), 0644); err != nil {
-		t.Fatalf("write README.md: %v", err)
-	}
-
-	run("add", "go.mod", "README.md")
-	run("commit", "-m", "initial commit")
-
-	head := run("rev-parse", "HEAD")
-	return dir, head
+	return strings.TrimSpace(string(out))
 }
 
-func createSubprocessSpy(t *testing.T, dir, name string) (string, string) {
+func writeFixtureFile(t *testing.T, path, body string) {
 	t.Helper()
-	logPath := filepath.Join(dir, name+".log")
-	srcPath := filepath.Join(dir, name+".go")
-	binName := name
-	if runtime.GOOS == "windows" {
-		binName += ".exe"
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
 	}
-	binPath := filepath.Join(dir, binName)
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
 
-	src := fmt.Sprintf(`package main
+func buildFakeVulkanTool(t *testing.T, root string) string {
+	t.Helper()
+	source := filepath.Join(root, "fake-tool.go")
+	binary := filepath.Join(root, "fake-tool")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
+	writeFixtureFile(t, source, `package main
+
 import (
 	"os"
+	"path/filepath"
 )
+
 func main() {
-	_ = os.WriteFile(%q, []byte("called\n"), 0644)
-	os.Exit(0)
-}
-`, logPath)
-
-	if err := os.WriteFile(srcPath, []byte(src), 0644); err != nil {
-		t.Fatalf("writing spy source: %v", err)
+	if marker := os.Getenv("FAK_VULKAN_TEST_TOOL_MARKER"); marker != "" {
+		_ = os.WriteFile(marker, []byte("invoked"), 0644)
 	}
-
-	cmd := exec.Command("go", "build", "-o", binPath, srcPath)
+	if os.Getenv("FAK_VULKAN_TEST_TOOL_MODE") == "crash" {
+		os.Exit(139)
+	}
+	if target := os.Getenv("FAK_VULKAN_TEST_MUTATE_SOURCE"); target != "" {
+		_ = os.WriteFile(target, []byte("mutated during build\n"), 0644)
+	}
+	args := os.Args[1:]
+	var out string
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-o" {
+			out = args[i+1]
+		}
+	}
+	if len(args) >= 2 && args[0] == "rcs" {
+		out = args[1]
+	}
+	if out == "" {
+		os.Exit(2)
+	}
+	if err := os.MkdirAll(filepath.Dir(out), 0755); err != nil {
+		os.Exit(3)
+	}
+	if err := os.WriteFile(out, []byte("fak-fixture-output\n"), 0644); err != nil {
+		os.Exit(4)
+	}
+}
+`)
+	cmd := exec.Command("go", "build", "-o", binary, source)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("building spy binary %s failed: %v (output: %s)", binPath, err, string(out))
+		t.Fatalf("build fake Vulkan tool: %v\n%s", err, out)
 	}
-	return binPath, logPath
+	return binary
 }
 
-func TestVulkanBinaryDirtyRefusal(t *testing.T) {
-	repoDir, _ := createSyntheticGitRepo(t)
-	spyBin, spyLog := createSubprocessSpy(t, t.TempDir(), "spy_cxx")
-
-	// Modify tracked file without committing => working tree is dirty
-	readmePath := filepath.Join(repoDir, "README.md")
-	if err := os.WriteFile(readmePath, []byte("# Dirty modification\n"), 0644); err != nil {
-		t.Fatalf("modify README.md: %v", err)
+func newVulkanFixture(t *testing.T) (string, string, *Toolchain) {
+	t.Helper()
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	writeFixtureFile(t, filepath.Join(repo, "go.mod"), "module example.test/vulkanfixture\n\ngo 1.26\n")
+	writeFixtureFile(t, filepath.Join(repo, "README.md"), "fixture\n")
+	writeFixtureFile(t, filepath.Join(repo, "cmd", "app", "main.go"), "package main\nfunc main() {}\n")
+	writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "vulkan_shim.cpp"), "int fixture;\n")
+	for _, shader := range VulkanShaders {
+		writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "shaders", shader+".comp"), "#version 450\n")
+		writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "spirv", shader+".spv"), "fak-fixture-output\n")
 	}
+	writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "vulkan_shim.o"), "fak-fixture-output\n")
+	writeFixtureFile(t, filepath.Join(repo, "internal", "compute", "libfakvulkan.a"), "fak-fixture-output\n")
+	runFixtureGit(t, root, "init", "-q", repo)
+	runFixtureGit(t, repo, "config", "user.email", "fixture@example.invalid")
+	runFixtureGit(t, repo, "config", "user.name", "Fixture")
+	runFixtureGit(t, repo, "add", "-f", ".")
+	runFixtureGit(t, repo, "commit", "-q", "-m", "fixture")
+	tool := buildFakeVulkanTool(t, root)
+	tc := &Toolchain{
+		Go:         tool,
+		CC:         tool,
+		CXX:        tool,
+		AR:         tool,
+		GLSLC:      tool,
+		CxxRuntime: "-lstdc++",
+		IsWindows:  runtime.GOOS == "windows",
+	}
+	return root, repo, tc
+}
 
-	receiptPath := filepath.Join(repoDir, "receipt.json")
+func readBuildReceipt(t *testing.T, path string) ComputeBuildReceipt {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt ComputeBuildReceipt
+	if err := json.Unmarshal(b, &receipt); err != nil {
+		t.Fatal(err)
+	}
+	return receipt
+}
+
+func TestVulkanBinaryDirtySourceRefusesBeforeBuildTool(t *testing.T) {
+	root, repo, tc := newVulkanFixture(t)
+	marker := filepath.Join(root, "tool-invoked")
+	t.Setenv("FAK_VULKAN_TEST_TOOL_MARKER", marker)
+	writeFixtureFile(t, filepath.Join(repo, "README.md"), "fixture\ndirty\n")
+	receiptPath := filepath.Join(root, "dirty-receipt.json")
 	cfg := &VulkanConfig{
-		Command:     "binary",
-		RepoRoot:    repoDir,
-		OutPkg:      "./cmd/fake",
-		OutBin:      filepath.Join(repoDir, "fake.exe"),
-		ReceiptPath: receiptPath,
-		SkipSmoke:   true,
-		Toolchain: &Toolchain{
-			CXX:   spyBin,
-			GLSLC: spyBin,
-		},
+		Command: "binary", RepoRoot: repo, OutPkg: "./cmd/app",
+		OutBin: filepath.Join(root, "app"), ReceiptPath: receiptPath,
+		SkipSmoke: true, Toolchain: tc,
 	}
-
 	err := RunVulkan(context.Background(), cfg)
-	if err == nil {
-		t.Fatalf("expected error on dirty repository build, got nil")
+	if err == nil || !strings.Contains(err.Error(), "dirty") {
+		t.Fatalf("RunVulkan error = %v, want dirty-source refusal", err)
 	}
-	if !strings.Contains(err.Error(), "dirty") && !strings.Contains(err.Error(), "uncommitted") {
-		t.Fatalf("expected error mentioning dirty/uncommitted, got: %v", err)
+	if FileExists(marker) {
+		t.Fatal("build tool executed before dirty-source refusal")
 	}
-
-	// Subprocess spy must NOT have been called
-	if FileExists(spyLog) {
-		t.Fatalf("compiler spy was invoked despite dirty repository!")
+	receipt := readBuildReceipt(t, receiptPath)
+	if receipt.Schema != VulkanBuildReceiptSchema || receipt.Outcome != "failed" {
+		t.Fatalf("receipt = %+v", receipt)
 	}
-
-	// Receipt must record failure truthfully and carry no success artifacts
-	if !FileExists(receiptPath) {
-		t.Fatalf("expected receipt file at %s", receiptPath)
+	if len(receipt.Phases) != 1 || receipt.Phases[0].Name != "source_preflight" {
+		t.Fatalf("phases = %+v, want only failed source_preflight", receipt.Phases)
 	}
-	data, err := os.ReadFile(receiptPath)
-	if err != nil {
-		t.Fatalf("reading receipt: %v", err)
-	}
-	var rec ComputeBuildReceipt
-	if err := json.Unmarshal(data, &rec); err != nil {
-		t.Fatalf("unmarshaling receipt: %v", err)
-	}
-
-	if rec.Outcome != "failed" {
-		t.Errorf("expected outcome failed, got %q", rec.Outcome)
-	}
-	if rec.ExitCode == 0 {
-		t.Errorf("expected non-zero exit code, got %d", rec.ExitCode)
-	}
-	if rec.Clean == nil || *rec.Clean != false {
-		t.Errorf("expected clean false, got %v", rec.Clean)
-	}
-	if rec.Artifact != nil {
-		t.Errorf("failure receipt must not carry artifact: %+v", rec.Artifact)
-	}
-	if rec.ShaderBundleSHA256 != "" {
-		t.Errorf("failure receipt must not carry shader bundle sha256: %q", rec.ShaderBundleSHA256)
+	if receipt.Artifact != nil || receipt.Vulkan != nil || receipt.Reproducibility != nil {
+		t.Fatalf("failed dirty receipt retained success evidence: %+v", receipt)
 	}
 }
 
-func TestVulkanBinaryCommitMismatchProvenanceRefusal(t *testing.T) {
-	repoDir, _ := createSyntheticGitRepo(t)
-	spyBin, spyLog := createSubprocessSpy(t, t.TempDir(), "spy_cxx")
+func TestVulkanBinaryToolFailureOmitsSuccessEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mode      string
+		breakTool func(*Toolchain)
+	}{
+		{name: "missing tool", breakTool: func(tc *Toolchain) { tc.CXX = "" }},
+		{name: "crash exit 139", mode: "crash", breakTool: func(*Toolchain) {}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, repo, tools := newVulkanFixture(t)
+			t.Setenv("FAK_VULKAN_TEST_TOOL_MODE", tc.mode)
+			tc.breakTool(tools)
+			receiptPath := filepath.Join(root, "failed-receipt.json")
+			cfg := &VulkanConfig{
+				Command: "binary", RepoRoot: repo, OutPkg: "./cmd/app",
+				OutBin: filepath.Join(root, "app"), ReceiptPath: receiptPath,
+				SkipSmoke: true, Toolchain: tools,
+			}
+			if err := RunVulkan(context.Background(), cfg); err == nil {
+				t.Fatal("RunVulkan unexpectedly succeeded")
+			}
+			receipt := readBuildReceipt(t, receiptPath)
+			if receipt.Outcome != "failed" || receipt.Artifact != nil || receipt.Vulkan != nil || receipt.Reproducibility != nil {
+				t.Fatalf("failed receipt retained success evidence: %+v", receipt)
+			}
+			if len(receipt.Phases) < 2 || receipt.Phases[0].Name != "source_preflight" || receipt.Phases[len(receipt.Phases)-1].Outcome != "failed" {
+				t.Fatalf("unexpected failure phases: %+v", receipt.Phases)
+			}
+		})
+	}
+}
 
-	receiptPath := filepath.Join(repoDir, "receipt.json")
+func TestVulkanBinaryRevalidatesSourceBeforeSuccess(t *testing.T) {
+	root, repo, tc := newVulkanFixture(t)
+	t.Setenv("FAK_VULKAN_TEST_MUTATE_SOURCE", filepath.Join(repo, "README.md"))
+	receiptPath := filepath.Join(root, "mutated-receipt.json")
 	cfg := &VulkanConfig{
-		Command:     "binary",
-		RepoRoot:    repoDir,
-		OutPkg:      "./cmd/fake",
-		OutBin:      filepath.Join(repoDir, "fake.exe"),
-		ReceiptPath: receiptPath,
-		GitCommit:   "1111111111111111111111111111111111111111",
-		SkipSmoke:   true,
-		Toolchain: &Toolchain{
-			CXX:   spyBin,
-			GLSLC: spyBin,
-		},
+		Command: "binary", RepoRoot: repo, OutPkg: "./cmd/app",
+		OutBin: filepath.Join(root, "app"), ReceiptPath: receiptPath,
+		SkipSmoke: true, Toolchain: tc,
 	}
-
-	err := RunVulkan(context.Background(), cfg)
-	if err == nil {
-		t.Fatalf("expected error on commit mismatch, got nil")
+	if err := RunVulkan(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "dirty") {
+		t.Fatalf("source mutation error = %v, want dirty refusal", err)
 	}
-
-	// Subprocess spy must NOT have been called
-	if FileExists(spyLog) {
-		t.Fatalf("compiler spy was invoked despite commit mismatch!")
+	receipt := readBuildReceipt(t, receiptPath)
+	if receipt.Outcome != "failed" || receipt.Artifact != nil || receipt.Vulkan != nil || receipt.Reproducibility != nil {
+		t.Fatalf("source mutation retained success evidence: %+v", receipt)
 	}
-
-	// Receipt must record failure truthfully
-	if !FileExists(receiptPath) {
-		t.Fatalf("expected receipt file at %s", receiptPath)
-	}
-	data, err := os.ReadFile(receiptPath)
-	if err != nil {
-		t.Fatalf("reading receipt: %v", err)
-	}
-	var rec ComputeBuildReceipt
-	if err := json.Unmarshal(data, &rec); err != nil {
-		t.Fatalf("unmarshaling receipt: %v", err)
-	}
-	if rec.Outcome != "failed" {
-		t.Errorf("expected outcome failed, got %q", rec.Outcome)
-	}
-	if rec.Artifact != nil {
-		t.Errorf("failure receipt must not carry artifact")
-	}
-	if rec.ShaderBundleSHA256 != "" {
-		t.Errorf("failure receipt must not carry shader bundle sha256")
+	if got := receipt.Phases[len(receipt.Phases)-1].Name; got != "source_revalidation" {
+		t.Fatalf("last phase = %q, want source_revalidation", got)
 	}
 }
 
-func TestVulkanComputeSPIRVBundleSHA256Provenance(t *testing.T) {
-	tmpDir := t.TempDir()
-	spvDir := filepath.Join(tmpDir, "spirv")
-	if err := os.MkdirAll(spvDir, 0755); err != nil {
-		t.Fatalf("mkdir spirv: %v", err)
-	}
-
-	// 1. Empty directory should fail
-	if _, err := ComputeSPIRVBundleSHA256(spvDir); err == nil {
-		t.Fatalf("expected error on empty spirv directory")
-	}
-
-	// 2. Non-existent directory should fail
-	if _, err := ComputeSPIRVBundleSHA256(filepath.Join(tmpDir, "nonexistent")); err == nil {
-		t.Fatalf("expected error on nonexistent directory")
-	}
-
-	// 3. Write shaders in non-alphabetical order
-	files := map[string][]byte{
-		"swiglu.spv":   []byte("swiglu_shader_binary_v1"),
-		"matmul.spv":   []byte("matmul_shader_binary_v1"),
-		"rmsnorm.spv":  []byte("rmsnorm_shader_binary_v1"),
-		"add.spv":      []byte("add_shader_binary_v1"),
-		"not_a_shader": []byte("ignored non-spv file"),
-	}
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(spvDir, name), content, 0644); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
-	}
-
-	digest1, err := ComputeSPIRVBundleSHA256(spvDir)
-	if err != nil {
-		t.Fatalf("ComputeSPIRVBundleSHA256 failed: %v", err)
-	}
-	if len(digest1) != 64 {
-		t.Fatalf("expected 64-hex digest, got %q", digest1)
-	}
-
-	// 4. In a second directory, write files in reverse order
-	spvDir2 := filepath.Join(tmpDir, "spirv2")
-	if err := os.MkdirAll(spvDir2, 0755); err != nil {
-		t.Fatalf("mkdir spirv2: %v", err)
-	}
-	order2 := []string{"rmsnorm.spv", "swiglu.spv", "add.spv", "matmul.spv"}
-	for _, name := range order2 {
-		if err := os.WriteFile(filepath.Join(spvDir2, name), files[name], 0644); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
-	}
-
-	digest2, err := ComputeSPIRVBundleSHA256(spvDir2)
-	if err != nil {
-		t.Fatalf("ComputeSPIRVBundleSHA256 dir2 failed: %v", err)
-	}
-	if digest1 != digest2 {
-		t.Fatalf("expected deterministic sorted bundle digest: got %s vs %s", digest1, digest2)
-	}
-
-	// 5. Mutating one shader should change the digest
-	if err := os.WriteFile(filepath.Join(spvDir2, "add.spv"), []byte("modified_shader_data"), 0644); err != nil {
-		t.Fatalf("write modified add.spv: %v", err)
-	}
-	digest3, err := ComputeSPIRVBundleSHA256(spvDir2)
-	if err != nil {
-		t.Fatalf("ComputeSPIRVBundleSHA256 modified failed: %v", err)
-	}
-	if digest3 == digest1 {
-		t.Fatalf("expected digest to change when shader content is modified")
-	}
-}
-
-func TestVulkanBinaryReproducibility(t *testing.T) {
-	cleanTrue := true
-	r1 := &ComputeBuildReceipt{
-		Schema:              ComputeBuildReceiptSchema,
-		Backend:             "vulkan",
-		Command:             "binary",
-		Outcome:             "success",
-		ExitCode:            0,
-		StartedAt:           "2026-09-08T08:00:00Z",
-		FinishedAt:          "2026-09-08T08:00:05Z",
-		ElapsedMS:           5000,
-		ReceiptPath:         "/tmp/receipt1.json",
-		GitCommit:           "f1bc315ce6750ca8e5e732e492c0330a3b273d23",
-		GitRef:              "HEAD",
-		Clean:               &cleanTrue,
-		SourceArchiveSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		ShaderBundleSHA256:  "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		BuildArgs:           []string{"go", "build", "-tags", "vulkan", "-o", "bin/fak", "./cmd/fak"},
-		Toolchain: &ToolchainIdentity{
-			CXX:        "clang++",
-			GLSLC:      "glslc",
-			AR:         "llvm-ar",
-			CxxRuntime: "-lstdc++",
-		},
-		Artifact: &BuildArtifact{
-			Path:      "/tmp/bin/fak",
-			SizeBytes: 123456,
-			SHA256:    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-		},
-	}
-
-	// Clone with differing non-reproducible metadata
-	r2 := &ComputeBuildReceipt{
-		Schema:              ComputeBuildReceiptSchema,
-		Backend:             "vulkan",
-		Command:             "binary",
-		Outcome:             "success",
-		ExitCode:            0,
-		StartedAt:           "2026-09-08T09:30:00Z", // different timestamp
-		FinishedAt:          "2026-09-08T09:30:10Z", // different timestamp
-		ElapsedMS:           10000,                  // different duration
-		ReceiptPath:         "/var/receipt2.json",   // different receipt path
-		GitCommit:           "f1bc315ce6750ca8e5e732e492c0330a3b273d23",
-		GitRef:              "HEAD",
-		Clean:               &cleanTrue,
-		SourceArchiveSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		ShaderBundleSHA256:  "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		BuildArgs:           []string{"go", "build", "-tags", "vulkan", "-o", "bin/fak", "./cmd/fak"},
-		Toolchain: &ToolchainIdentity{
-			CXX:        "clang++",
-			GLSLC:      "glslc",
-			AR:         "llvm-ar",
-			CxxRuntime: "-lstdc++",
-		},
-		Artifact: &BuildArtifact{
-			Path:      "/other/path/fak", // different path
-			SizeBytes: 123456,
-			SHA256:    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-		},
-	}
-
-	if err := CompareReceiptProvenance(r1, r2); err != nil {
-		t.Fatalf("expected receipts to match reproducibility comparison, got: %v", err)
-	}
-
-	// Verify mismatches on each stable field
-	t.Run("SourceArchiveMismatch", func(t *testing.T) {
-		rBad := *r2
-		rBad.SourceArchiveSHA256 = "different_source_archive_hash"
-		if err := CompareReceiptProvenance(r1, &rBad); err == nil {
-			t.Fatalf("expected error on source archive mismatch")
-		}
-	})
-
-	t.Run("ShaderBundleMismatch", func(t *testing.T) {
-		rBad := *r2
-		rBad.ShaderBundleSHA256 = "different_shader_bundle_hash"
-		if err := CompareReceiptProvenance(r1, &rBad); err == nil {
-			t.Fatalf("expected error on shader bundle mismatch")
-		}
-	})
-
-	t.Run("BinaryMismatch", func(t *testing.T) {
-		rBad := *r2
-		rBad.Artifact = &BuildArtifact{
-			Path:      r2.Artifact.Path,
-			SizeBytes: r2.Artifact.SizeBytes,
-			SHA256:    "different_binary_hash",
-		}
-		if err := CompareReceiptProvenance(r1, &rBad); err == nil {
-			t.Fatalf("expected error on binary hash mismatch")
-		}
-	})
-
-	t.Run("CommitMismatch", func(t *testing.T) {
-		rBad := *r2
-		rBad.GitCommit = "0000000000000000000000000000000000000000"
-		if err := CompareReceiptProvenance(r1, &rBad); err == nil {
-			t.Fatalf("expected error on git commit mismatch")
-		}
-	})
-}
-
-func TestVulkanBinaryProvenanceReceipt(t *testing.T) {
-	repoDir, head := createSyntheticGitRepo(t)
-	tracker := newReceiptTracker("vulkan", "binary", filepath.Join(repoDir, "receipt.json"))
-
+func TestVulkanBinaryPropagatesReceiptWriteFailure(t *testing.T) {
+	root, repo, tc := newVulkanFixture(t)
+	receiptPath := filepath.Join(root, "receipt-destination")
+	writeFixtureFile(t, filepath.Join(receiptPath, "keep"), "occupied\n")
 	cfg := &VulkanConfig{
-		Command:   "binary",
-		RepoRoot:  repoDir,
-		OutPkg:    "./cmd/modelbench",
-		OutBin:    filepath.Join(repoDir, "bin", "modelbench"),
-		GitRef:    "HEAD",
-		Toolchain: &Toolchain{CC: "clang", CXX: "clang++", GLSLC: "glslc", AR: "llvm-ar"},
+		Command: "binary", RepoRoot: repo, OutPkg: "./cmd/app",
+		OutBin: filepath.Join(root, "app"), ReceiptPath: receiptPath,
+		SkipSmoke: true, Toolchain: tc,
 	}
-
-	err := checkSourceProvenance(context.Background(), cfg, tracker)
-	if err != nil {
-		t.Fatalf("checkSourceProvenance failed: %v", err)
-	}
-
-	rec := tracker.receipt
-	if rec.GitCommit != head {
-		t.Errorf("GitCommit: want %s, got %s", head, rec.GitCommit)
-	}
-	if rec.GitRef != "HEAD" {
-		t.Errorf("GitRef: want HEAD, got %s", rec.GitRef)
-	}
-	if rec.Clean == nil || *rec.Clean != true {
-		t.Errorf("Clean: want true, got %v", rec.Clean)
-	}
-	if len(rec.SourceArchiveSHA256) != 64 {
-		t.Errorf("SourceArchiveSHA256: expected 64 hex characters, got %q", rec.SourceArchiveSHA256)
-	}
-	if rec.Toolchain == nil || rec.Toolchain.CXX != "clang++" {
-		t.Errorf("Toolchain: expected clang++, got %+v", rec.Toolchain)
-	}
-	if len(rec.BuildArgs) == 0 {
-		t.Errorf("expected non-empty BuildArgs")
+	if err := RunVulkan(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "write Vulkan build receipt") {
+		t.Fatalf("receipt write error = %v", err)
 	}
 }
 
-func TestVulkanBinarySourceArchiveFailureRefusalReceipt(t *testing.T) {
-	repoDir, _ := createSyntheticGitRepo(t)
-	spyBin, spyLog := createSubprocessSpy(t, t.TempDir(), "spy_cxx")
-
-	// Mock gitArchiveCmd to fail
-	origArchiveCmd := gitArchiveCmd
-	defer func() { gitArchiveCmd = origArchiveCmd }()
-	gitArchiveCmd = func(ctx context.Context, repoRoot, commit string, w io.Writer) error {
-		return fmt.Errorf("simulated git archive failure")
-	}
-
-	receiptPath := filepath.Join(repoDir, "receipt.json")
-	cfg := &VulkanConfig{
-		Command:     "binary",
-		RepoRoot:    repoDir,
-		OutPkg:      "./cmd/fake",
-		OutBin:      filepath.Join(repoDir, "fake.exe"),
-		ReceiptPath: receiptPath,
-		SkipSmoke:   true,
-		Toolchain: &Toolchain{
-			CXX:   spyBin,
-			GLSLC: spyBin,
-		},
-	}
-
-	err := RunVulkan(context.Background(), cfg)
-	if err == nil {
-		t.Fatalf("expected error on git archive failure, got nil")
-	}
-	if !strings.Contains(err.Error(), "simulated git archive failure") {
-		t.Fatalf("expected error mentioning simulated failure, got: %v", err)
-	}
-
-	// Subprocess spy must NOT have been called
-	if FileExists(spyLog) {
-		t.Fatalf("compiler spy was invoked despite archive construction failure!")
-	}
-
-	// Receipt must be failed and carry no success artifacts
-	data, err := os.ReadFile(receiptPath)
-	if err != nil {
-		t.Fatalf("reading receipt: %v", err)
-	}
-	var rec ComputeBuildReceipt
-	if err := json.Unmarshal(data, &rec); err != nil {
-		t.Fatalf("unmarshaling receipt: %v", err)
-	}
-	if rec.Outcome != "failed" {
-		t.Errorf("expected outcome failed, got %q", rec.Outcome)
-	}
-	if rec.Artifact != nil {
-		t.Errorf("expected nil artifact on archive failure")
-	}
-	if rec.ShaderBundleSHA256 != "" {
-		t.Errorf("expected empty shader bundle sha256")
-	}
-	if rec.SourceArchiveSHA256 != "" {
-		t.Errorf("expected empty source archive sha256 on archive failure")
+func TestMergeToolchainOverridesPreservesDiscoveredDefaults(t *testing.T) {
+	base := &Toolchain{Go: "go-default", CC: "cc-default", CXX: "cxx-default", AR: "ar-default", GLSLC: "glslc-default"}
+	got := mergeToolchainOverrides(base, &Toolchain{CXX: "cxx-explicit"})
+	if got.CXX != "cxx-explicit" || got.Go != base.Go || got.CC != base.CC || got.AR != base.AR || got.GLSLC != base.GLSLC {
+		t.Fatalf("merged toolchain = %+v", got)
 	}
 }
 
-func TestVulkanBinaryShaderCompilationFailureTruthfulReceipt(t *testing.T) {
-	repoDir, head := createSyntheticGitRepo(t)
-	// Shader source missing => BuildShaders fails
-	receiptPath := filepath.Join(repoDir, "receipt.json")
-	cfg := &VulkanConfig{
-		Command:     "binary",
-		RepoRoot:    repoDir,
-		OutPkg:      "./cmd/fake",
-		OutBin:      filepath.Join(repoDir, "fake.exe"),
-		ReceiptPath: receiptPath,
-		SkipSmoke:   true,
-		Toolchain: &Toolchain{
-			CXX:   "clang++",
-			GLSLC: "glslc",
-		},
-	}
-
-	err := RunVulkan(context.Background(), cfg)
-	if err == nil {
-		t.Fatalf("expected error when shader source is missing, got nil")
-	}
-
-	data, err := os.ReadFile(receiptPath)
+func TestVulkanBinaryReceiptBindsReproducibleSourceToolsShadersAndBinary(t *testing.T) {
+	root, repo, tc := newVulkanFixture(t)
+	firstSource, err := prepareVulkanSource(context.Background(), repo, "")
 	if err != nil {
-		t.Fatalf("reading receipt: %v", err)
+		t.Fatal(err)
 	}
-	var rec ComputeBuildReceipt
-	if err := json.Unmarshal(data, &rec); err != nil {
-		t.Fatalf("unmarshaling receipt: %v", err)
+	secondSource, err := prepareVulkanSource(context.Background(), repo, "")
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// It successfully proved source provenance!
-	if rec.Clean == nil || !*rec.Clean {
-		t.Errorf("expected clean true since repo was clean")
+	if firstSource != secondSource || !firstSource.Clean || len(firstSource.GitCommit) != 40 || len(firstSource.GitTree) != 40 || len(firstSource.SourceArchiveSHA256) != 64 {
+		t.Fatalf("source provenance is not deterministic and complete: first=%+v second=%+v", firstSource, secondSource)
 	}
-	if rec.GitCommit != head {
-		t.Errorf("expected git commit %s, got %s", head, rec.GitCommit)
+	if _, err := prepareVulkanSource(context.Background(), repo, strings.Repeat("0", 40)); err == nil {
+		t.Fatal("absent requested commit unexpectedly accepted")
 	}
-	if len(rec.SourceArchiveSHA256) != 64 {
-		t.Errorf("expected 64-hex source archive SHA-256, got %q", rec.SourceArchiveSHA256)
+	firstReceiptPath := filepath.Join(root, "first-receipt.json")
+	first := &VulkanConfig{
+		Command: "binary", RepoRoot: repo, OutPkg: "./cmd/app",
+		OutBin: filepath.Join(root, "app-first"), ReceiptPath: firstReceiptPath,
+		SkipSmoke: true, Toolchain: tc,
 	}
-	// But it failed before producing binary or complete shader bundle
-	if rec.Outcome != "failed" {
-		t.Errorf("expected outcome failed, got %q", rec.Outcome)
+	if err := RunVulkan(context.Background(), first); err != nil {
+		t.Fatal(err)
 	}
-	if rec.Artifact != nil {
-		t.Errorf("failed receipt must not carry artifact: %+v", rec.Artifact)
+	firstReceipt := readBuildReceipt(t, firstReceiptPath)
+	if firstReceipt.Schema != VulkanBuildReceiptSchema || firstReceipt.Artifact == nil || len(firstReceipt.Artifact.SHA256) != 64 || firstReceipt.Vulkan == nil {
+		t.Fatalf("incomplete first receipt: %+v", firstReceipt)
 	}
-	if rec.ShaderBundleSHA256 != "" {
-		t.Errorf("failed receipt must not carry shader bundle SHA: %q", rec.ShaderBundleSHA256)
+	if firstReceipt.Vulkan.Source != firstSource || firstReceipt.Vulkan.SPIRVModuleCount != len(VulkanShaders) || len(firstReceipt.Vulkan.SPIRVBundleSHA256) != 64 || len(firstReceipt.Vulkan.Toolchain) != 5 || len(firstReceipt.Vulkan.ToolchainSHA256) != 64 || len(firstReceipt.Vulkan.BuildCommandSHA256) != 64 || len(firstReceipt.Vulkan.StableIdentitySHA256) != 64 {
+		t.Fatalf("incomplete first provenance: %+v", firstReceipt.Vulkan)
 	}
-}
-
-func TestVulkanBinaryTwoCleanBuildsFixtureReproducibility(t *testing.T) {
-	repoDir, head := createSyntheticGitRepo(t)
-
-	// Build two receipts from the same clean synthetic repository
-	recPath1 := filepath.Join(repoDir, "receipt1.json")
-	recPath2 := filepath.Join(repoDir, "receipt2.json")
-
-	tracker1 := newReceiptTracker("vulkan", "binary", recPath1)
-	cfg1 := &VulkanConfig{
-		Command:   "binary",
-		RepoRoot:  repoDir,
-		OutPkg:    "./cmd/fake",
-		OutBin:    filepath.Join(repoDir, "bin", "fake"),
-		Toolchain: &Toolchain{CC: "clang", CXX: "clang++", GLSLC: "glslc", AR: "llvm-ar"},
-	}
-	if err := checkSourceProvenance(context.Background(), cfg1, tracker1); err != nil {
-		t.Fatalf("first checkSourceProvenance failed: %v", err)
+	if firstReceipt.Reproducibility == nil || firstReceipt.Reproducibility.Status != "baseline" {
+		t.Fatalf("first reproducibility = %+v", firstReceipt.Reproducibility)
 	}
 
-	time.Sleep(10 * time.Millisecond)
-
-	tracker2 := newReceiptTracker("vulkan", "binary", recPath2)
-	cfg2 := &VulkanConfig{
-		Command:   "binary",
-		RepoRoot:  repoDir,
-		OutPkg:    "./cmd/fake",
-		OutBin:    filepath.Join(repoDir, "bin", "fake"),
-		Toolchain: &Toolchain{CC: "clang", CXX: "clang++", GLSLC: "glslc", AR: "llvm-ar"},
+	secondReceiptPath := filepath.Join(root, "second-receipt.json")
+	second := &VulkanConfig{
+		Command: "binary", RepoRoot: repo, OutPkg: "./cmd/app",
+		OutBin: filepath.Join(root, "app-second"), ReceiptPath: secondReceiptPath,
+		CompareReceiptPath: firstReceiptPath, SkipSmoke: true, Toolchain: tc,
 	}
-	if err := checkSourceProvenance(context.Background(), cfg2, tracker2); err != nil {
-		t.Fatalf("second checkSourceProvenance failed: %v", err)
+	if err := RunVulkan(context.Background(), second); err != nil {
+		t.Fatal(err)
 	}
-
-	// Check deterministic archive SHA
-	if tracker1.receipt.SourceArchiveSHA256 != tracker2.receipt.SourceArchiveSHA256 {
-		t.Fatalf("nondeterministic source archive: %s != %s", tracker1.receipt.SourceArchiveSHA256, tracker2.receipt.SourceArchiveSHA256)
+	secondReceipt := readBuildReceipt(t, secondReceiptPath)
+	if secondReceipt.Reproducibility == nil || secondReceipt.Reproducibility.Status != "match" || len(secondReceipt.Reproducibility.ComparedReceiptSHA256) != 64 {
+		t.Fatalf("second reproducibility = %+v", secondReceipt.Reproducibility)
 	}
-	if tracker1.receipt.GitCommit != head || tracker2.receipt.GitCommit != head {
-		t.Fatalf("commit mismatch: got %s, want %s", tracker1.receipt.GitCommit, head)
+	if secondReceipt.Vulkan == nil || secondReceipt.Vulkan.StableIdentitySHA256 != firstReceipt.Vulkan.StableIdentitySHA256 {
+		t.Fatalf("stable identity mismatch: first=%+v second=%+v", firstReceipt.Vulkan, secondReceipt.Vulkan)
+	}
+	if secondReceipt.StartedAt == firstReceipt.StartedAt || secondReceipt.ReceiptPath == firstReceipt.ReceiptPath {
+		t.Fatal("volatile receipt metadata unexpectedly reused")
 	}
 
-	// Fixture same binary and shader bundle
-	art := &BuildArtifact{
-		Path:      filepath.Join(repoDir, "bin", "fake"),
-		SizeBytes: 98765,
-		SHA256:    "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+	mismatchBaseline := firstReceipt
+	mismatchArtifact := *firstReceipt.Artifact
+	mismatchBaseline.Artifact = &mismatchArtifact
+	mismatchBaseline.Artifact.SHA256 = strings.Repeat("0", 64)
+	mismatchPath := filepath.Join(root, "mismatch-baseline.json")
+	if err := WriteReceiptAtomic(mismatchPath, &mismatchBaseline); err != nil {
+		t.Fatal(err)
 	}
-	shaderSHA := "fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321"
+	mismatchReceiptPath := filepath.Join(root, "mismatch-result.json")
+	mismatch := &VulkanConfig{
+		Command: "binary", RepoRoot: repo, OutPkg: "./cmd/app",
+		OutBin: filepath.Join(root, "app-mismatch"), ReceiptPath: mismatchReceiptPath,
+		CompareReceiptPath: mismatchPath, SkipSmoke: true, Toolchain: tc,
+	}
+	if err := RunVulkan(context.Background(), mismatch); err == nil || !strings.Contains(err.Error(), "reproducibility mismatch") {
+		t.Fatalf("mismatch error = %v", err)
+	}
+	mismatchReceipt := readBuildReceipt(t, mismatchReceiptPath)
+	if mismatchReceipt.Artifact != nil || mismatchReceipt.Vulkan != nil || mismatchReceipt.Reproducibility == nil || mismatchReceipt.Reproducibility.Status != "mismatch" {
+		t.Fatalf("mismatch receipt is not fail-closed: %+v", mismatchReceipt)
+	}
 
-	tracker1.receipt.Artifact = art
-	tracker1.receipt.ShaderBundleSHA256 = shaderSHA
-	tracker2.receipt.Artifact = art
-	tracker2.receipt.ShaderBundleSHA256 = shaderSHA
-
-	_ = tracker1.finish(recPath1)
-	_ = tracker2.finish(recPath2)
-
-	if err := CompareReceiptProvenance(tracker1.receipt, tracker2.receipt); err != nil {
-		t.Fatalf("expected CompareReceiptProvenance to succeed on clean builds: %v", err)
+	if err := os.Remove(filepath.Join(repo, "internal", "compute", "spirv", VulkanShaders[0]+".spv")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := hashSPIRVBundle(repo); err == nil || !strings.Contains(err.Error(), "incomplete") {
+		t.Fatalf("missing SPIR-V module error = %v", err)
 	}
 }

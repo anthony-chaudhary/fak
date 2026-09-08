@@ -16,19 +16,22 @@ import (
 
 // VulkanBuildResult represents the structured JSON output for RunBuildVulkan.
 type VulkanBuildResult struct {
-	Schema              string `json:"schema"`
-	Command             string `json:"command"`
-	Success             bool   `json:"success"`
-	OutBin              string `json:"out_bin,omitempty"`
-	Error               string `json:"error,omitempty"`
-	DurationMS          int64  `json:"duration_ms"`
-	GitCommit           string `json:"git_commit,omitempty"`
-	GitRef              string `json:"git_ref,omitempty"`
-	Clean               *bool  `json:"clean,omitempty"`
-	SourceArchiveSHA256 string `json:"source_archive_sha256,omitempty"`
-	BinarySHA256        string `json:"binary_sha256,omitempty"`
-	ShaderBundleSHA256  string `json:"shader_bundle_sha256,omitempty"`
-	ReceiptPath         string `json:"receipt_path,omitempty"`
+	Schema                string `json:"schema"`
+	Command               string `json:"command"`
+	Success               bool   `json:"success"`
+	OutBin                string `json:"out_bin,omitempty"`
+	ReceiptSchema         string `json:"receipt_schema,omitempty"`
+	StableIdentitySHA256  string `json:"stable_identity_sha256,omitempty"`
+	ReproducibilityStatus string `json:"reproducibility_status,omitempty"`
+	GitCommit             string `json:"git_commit,omitempty"`
+	GitRef                string `json:"git_ref,omitempty"`
+	Clean                 *bool  `json:"clean,omitempty"`
+	SourceArchiveSHA256   string `json:"source_archive_sha256,omitempty"`
+	BinarySHA256          string `json:"binary_sha256,omitempty"`
+	ShaderBundleSHA256    string `json:"shader_bundle_sha256,omitempty"`
+	ReceiptPath           string `json:"receipt_path,omitempty"`
+	Error                 string `json:"error,omitempty"`
+	DurationMS            int64  `json:"duration_ms"`
 }
 
 // RunBuildVulkan parses CLI arguments and runs Vulkan build/test tasks via computebuild.RunVulkan.
@@ -56,12 +59,13 @@ func RunBuildVulkan(stdout, stderr io.Writer, argv []string) int {
 	fs.StringVar(outBin, "o", "", "output binary path (shorthand)")
 	fs.StringVar(outBin, "out", "", "output binary path (alias)")
 	receiptFlag := fs.String("receipt", ".fak/vulkan-build-receipt.json", "path to write durable JSON build receipt")
+	compareReceipt := fs.String("compare-receipt", "", "prior successful Vulkan receipt whose stable build identity must match")
+	commitFlag := fs.String("commit", "", "pinned Git commit SHA (must resolve exactly to HEAD)")
+	fs.StringVar(commitFlag, "git-commit", "", "pinned Git commit SHA (must resolve exactly to HEAD)")
+	fs.StringVar(commitFlag, "git-tip", "", "pinned Git commit SHA (must resolve exactly to HEAD)")
+	refFlag := fs.String("ref", "HEAD", "display ref retained for compatibility")
+	fs.StringVar(refFlag, "git-ref", "HEAD", "display ref retained for compatibility")
 	smokeFlag := fs.Bool("smoke", true, "run shift-left smoke verification on compiled binary")
-	commitFlag := fs.String("commit", "", "pinned Git commit SHA (defaults to HEAD if empty)")
-	fs.StringVar(commitFlag, "git-commit", "", "pinned Git commit SHA")
-	fs.StringVar(commitFlag, "git-tip", "", "pinned Git commit SHA")
-	refFlag := fs.String("ref", "HEAD", "pinned Git ref (default: HEAD)")
-	fs.StringVar(refFlag, "git-ref", "HEAD", "pinned Git ref (default: HEAD)")
 	jsonOut := fs.Bool("json", false, "emit machine-readable JSON output")
 	cmdFlag := fs.String("cmd", "", "subcommand mode (shaders, lib, build, binary, test)")
 
@@ -109,18 +113,19 @@ func RunBuildVulkan(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	cfg := &computebuild.VulkanConfig{
-		Command:     sub,
-		RepoRoot:    *repoRoot,
-		PkgDir:      *pkgDir,
-		OutPkg:      *outPkg,
-		OutBin:      *outBin,
-		ReceiptPath: *receiptFlag,
-		Smoke:       *smokeFlag,
-		SkipSmoke:   !*smokeFlag,
-		GitCommit:   *commitFlag,
-		GitRef:      *refFlag,
-		Stdout:      stdout,
-		Stderr:      stderr,
+		Command:            sub,
+		RepoRoot:           *repoRoot,
+		PkgDir:             *pkgDir,
+		OutPkg:             *outPkg,
+		OutBin:             *outBin,
+		ReceiptPath:        *receiptFlag,
+		CompareReceiptPath: *compareReceipt,
+		GitCommit:          *commitFlag,
+		GitRef:             *refFlag,
+		Smoke:              *smokeFlag,
+		SkipSmoke:          !*smokeFlag,
+		Stdout:             stdout,
+		Stderr:             stderr,
 	}
 
 	// For binary subcommand, allow trailing positional args: [pkg] [out]
@@ -139,10 +144,10 @@ func RunBuildVulkan(stdout, stderr io.Writer, argv []string) int {
 
 	// Customize toolchain if explicit overrides were passed
 	if *vulkanSDK != "" || *cxx != "" || *ar != "" || *glslc != "" {
-		tc, _ := computebuild.DiscoverToolchain()
-		if tc == nil {
-			tc = &computebuild.Toolchain{IsWindows: runtime.GOOS == "windows"}
-		}
+		// Do not discover or execute any tool here: RunVulkan must complete its
+		// clean-source preflight before tool access. RunVulkan merges these partial
+		// overrides into discovered defaults only after that preflight succeeds.
+		tc := &computebuild.Toolchain{Go: "go", IsWindows: runtime.GOOS == "windows"}
 		if *vulkanSDK != "" {
 			tc.VulkanSDK = *vulkanSDK
 			tc.VulkanInc = filepath.Join(*vulkanSDK, "Include")
@@ -157,7 +162,7 @@ func RunBuildVulkan(stdout, stderr io.Writer, argv []string) int {
 		if *glslc != "" {
 			tc.GLSLC = *glslc
 		}
-		cfg.Toolchain = tc
+		cfg.ToolchainOverrides = tc
 	}
 
 	if *jsonOut {
@@ -174,21 +179,28 @@ func RunBuildVulkan(stdout, stderr io.Writer, argv []string) int {
 			Command:     sub,
 			Success:     err == nil,
 			OutBin:      cfg.OutBin,
+			GitRef:      cfg.GitRef,
 			ReceiptPath: cfg.ReceiptPath,
 			DurationMS:  dur,
 		}
-		if cfg.Receipt != nil {
-			res.GitCommit = cfg.Receipt.GitCommit
-			res.GitRef = cfg.Receipt.GitRef
-			res.Clean = cfg.Receipt.Clean
-			res.SourceArchiveSHA256 = cfg.Receipt.SourceArchiveSHA256
-			res.ShaderBundleSHA256 = cfg.Receipt.ShaderBundleSHA256
+		if err != nil {
+			res.Error = err.Error()
+		} else if cfg.Receipt != nil {
+			res.ReceiptSchema = cfg.Receipt.Schema
+			if cfg.Receipt.Vulkan != nil {
+				res.StableIdentitySHA256 = cfg.Receipt.Vulkan.StableIdentitySHA256
+				res.GitCommit = cfg.Receipt.Vulkan.Source.GitCommit
+				clean := cfg.Receipt.Vulkan.Source.Clean
+				res.Clean = &clean
+				res.SourceArchiveSHA256 = cfg.Receipt.Vulkan.Source.SourceArchiveSHA256
+				res.ShaderBundleSHA256 = cfg.Receipt.Vulkan.SPIRVBundleSHA256
+			}
 			if cfg.Receipt.Artifact != nil {
 				res.BinarySHA256 = cfg.Receipt.Artifact.SHA256
 			}
-		}
-		if err != nil {
-			res.Error = err.Error()
+			if cfg.Receipt.Reproducibility != nil {
+				res.ReproducibilityStatus = cfg.Receipt.Reproducibility.Status
+			}
 		}
 		_ = json.NewEncoder(stdout).Encode(res)
 		if err != nil {

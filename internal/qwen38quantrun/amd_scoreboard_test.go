@@ -116,7 +116,7 @@ func validAMDScoreboardInput() AMDScoreboardInput {
 	if err != nil {
 		panic(err)
 	}
-	arm := AMDArmReceipt{Name: "fak", Engine: "fak-native", Backend: "vulkan", Runtime: "native", ArtifactSHA256: sha, PromptSHA256: prompt, PromptTokenIDs: []int{1, 2, 3}, ContextTokens: 256, ContextBudgetBytes: 1 << 30, KVTypeK: "f16", KVTypeV: "f16", KVOffload: "gpu", FlashAttention: true, GPUMemoryBudget: 6 << 30, HostSpillPolicy: "bounded", Temperature: 0, PrefillTokens: 17, DecodeTokens: 4, Hardware: "AMD Radeon RX 7600 / driver 26.8.1", SoftwareRevision: "internal/compute@r212+gfc6393fe90", BuildFlags: []string{"vulkan"}, PeakRSSBytes: 20 << 30, PeakVRAMBytes: 6 << 30, ResidentModelBytes: 1 << 30, TokenizerDigest: packet.TokenizerDigest, TemplateDigest: packet.TemplateDigest, PromptPacketDigest: packet.PacketDigest, StopTokens: slices.Clone(packet.StopTokens), StopTokenIDs: slices.Clone(packet.StopTokenIDs), TopP: 1, TopK: packet.GenerationControls.TopK, PromptPacket: &packet}
+	arm := AMDArmReceipt{Name: "fak", Engine: "fak-native", Backend: "vulkan", Runtime: "native", ArtifactSHA256: sha, PromptSHA256: prompt, PromptTokenIDs: []int{1, 2, 3}, ContextTokens: 256, ContextBudgetBytes: 1 << 30, KVTypeK: "f16", KVTypeV: "f16", KVOffload: "gpu", FlashAttention: true, GPUMemoryBudget: 6 << 30, HostSpillPolicy: "bounded", Temperature: 0, PrefillTokens: 17, DecodeTokens: 4, Hardware: "AMD Radeon RX 7600 / driver 26.8.1", SoftwareRevision: "internal/compute@r212+gfc6393fe90", BuildFlags: []string{"vulkan"}, PeakRSSBytes: 20 << 30, PeakVRAMBytes: 6 << 30, ResidentModelBytes: 1 << 30, TokenizerDigest: packet.TokenizerDigest, TemplateDigest: packet.TemplateDigest, PromptPacketDigest: packet.PacketDigest, StopTokens: slices.Clone(packet.StopTokens), StopTokenIDs: slices.Clone(packet.StopTokenIDs), TopP: 1, TopK: packet.GenerationControls.TopK, IgnoreEOS: packet.GenerationControls.IgnoreEOS, PromptPacket: &packet}
 	arm.PrefillTokens = len(arm.PromptTokenIDs)
 	for i := 1; i <= 5; i++ {
 		seq := 2*i - 1
@@ -147,6 +147,71 @@ func validAMDScoreboardInput() AMDScoreboardInput {
 		ref.Trials[i].Logits = slices.Clone(ref.Trials[i].Logits)
 	}
 	return AMDScoreboardInput{Schema: AMDScoreboardInputSchema, Concurrency: 1, LogitTolerance: 1e-3, Candidate: arm, Reference: ref}
+}
+
+func validFixed128AMDScoreboardInput(t *testing.T) AMDScoreboardInput {
+	t.Helper()
+	in := validAMDScoreboardInput()
+	packet := *in.Candidate.PromptPacket
+	packet.PacketDigest = ""
+	packet.StopTokens = nil
+	packet.StopTokenIDs = nil
+	packet.GenerationControls.MaxOutputTokens = 128
+	packet.GenerationControls.IgnoreEOS = true
+	packet.GenerationControls.StopTokens = nil
+	packet.GenerationControls.StopTokenIDs = nil
+	packet, err := FreezePromptPacket(packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tokenIDs := make([]int, 128)
+	logprobs := make([]float64, 128)
+	for i := range tokenIDs {
+		tokenIDs[i] = 1000 + i
+		logprobs[i] = -1
+	}
+	for _, arm := range []*AMDArmReceipt{&in.Candidate, &in.Reference} {
+		bound := packet
+		arm.PromptPacket = &bound
+		arm.PromptPacketDigest = bound.PacketDigest
+		arm.StopTokens = nil
+		arm.StopTokenIDs = nil
+		arm.IgnoreEOS = true
+		arm.DecodeTokens = 128
+		for i := range arm.Trials {
+			trial := &arm.Trials[i]
+			trial.OutputTokenIDs = slices.Clone(tokenIDs)
+			trial.Logits = slices.Clone(logprobs)
+			trial.SelectedTokenIDs = nil
+			trial.SelectedTokenLogits = nil
+			trial.WarmDecodeTokensPerSecond = 128 / trial.WarmDecodeSeconds
+			if trial.NativeInferenceReceipt != nil {
+				trial.NativeInferenceReceipt.TokenIDs = slices.Clone(tokenIDs)
+				trial.NativeInferenceReceipt.TokenLogprobs = slices.Clone(logprobs)
+			}
+		}
+	}
+	return in
+}
+
+func assertNoAMDComparisonCredit(t *testing.T, report AMDScoreboardReport) {
+	t.Helper()
+	if report.Comparable || report.PairedComparable || report.StrixAbsoluteEligible || report.OverallWin || report.Statistics != nil || report.ReferenceOverCandidate != nil {
+		t.Fatalf("comparison credit leaked: %+v", report)
+	}
+	if err := ValidateAMDScoreboardReport(report); err != nil {
+		t.Fatalf("invalid fail-closed report: %v", err)
+	}
+}
+
+func TestAMDFixed128IgnoreEOSContract(t *testing.T) {
+	in := validFixed128AMDScoreboardInput(t)
+	report := BuildAMDScoreboard(in)
+	assertNoAMDComparisonCredit(t, report)
+	if !slices.Contains(report.Reasons, "physical-eos-receipt-required") {
+		t.Fatalf("fixed-128 ordinary evidence lacked physical receipt refusal: %v", report.Reasons)
+	}
 }
 
 func TestAMDStatisticalContract(t *testing.T) {

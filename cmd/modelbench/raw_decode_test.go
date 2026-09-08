@@ -186,6 +186,40 @@ func TestRawDecodePhysicalReceiptLeavesIncompleteExecutableTupleUnavailable(t *t
 	}
 }
 
+func TestRawDecodePhysicalReceiptCarriesOnlyCompleteGGUFObservation(t *testing.T) {
+	execution := rawdecode.Execution{
+		ArtifactPath:          "fixtures/qwen3.8-q4_k_m.gguf",
+		ArtifactSHA256:        strings.Repeat("a", 64),
+		TensorInventorySHA256: "sha256:" + strings.Repeat("b", 64),
+		Quantization:          "Q4_K_M",
+		ModelName:             "qwen3.8-q4_k_m.gguf [gguf-q4k]",
+		PromptTokenIDs:        []int{1},
+		ContextLimit:          8,
+		GeneratedLimit:        1,
+		FiniteLogits:          true,
+	}
+	attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
+		t.Fatalf("software-only model provenance became creditable: %+v", attempt)
+	}
+	modelIdentity := attempt.Observed.Model
+	if modelIdentity.Name != execution.ModelName || modelIdentity.ArtifactPath != execution.ArtifactPath ||
+		modelIdentity.ArtifactSHA256 != execution.ArtifactSHA256 || modelIdentity.TensorInventorySHA256 != execution.TensorInventorySHA256 ||
+		modelIdentity.Quantization != execution.Quantization {
+		t.Fatalf("canonical model identity mismatch: %+v", modelIdentity)
+	}
+	if modelIdentity.TokenizerSHA256 != "" || modelIdentity.TemplateSHA256 != "" || attempt.Observed.Source != (compute.Qwen38VulkanSourceIdentity{}) {
+		t.Fatalf("unobserved tokenizer/template/source identity was invented: model=%+v source=%+v", modelIdentity, attempt.Observed.Source)
+	}
+
+	incomplete := execution
+	incomplete.TensorInventorySHA256 = ""
+	incompleteAttempt := rawDecodePhysicalReceipt(incomplete, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+	if incompleteAttempt.Observed.Model != (compute.Qwen38VulkanModelIdentity{}) || incompleteAttempt.CreditEligible || incompleteAttempt.Receipt != nil {
+		t.Fatalf("partial GGUF provenance escaped as canonical model identity: %+v", incompleteAttempt)
+	}
+}
+
 type vulkanNamedRawDecodeTestBackend struct{ compute.Backend }
 
 func (vulkanNamedRawDecodeTestBackend) Name() string { return compute.Qwen38VulkanDecodeBackend }
@@ -228,7 +262,7 @@ func TestRawDecodePhysicalReceiptCarriesBackendObservationWithoutPromoting(t *te
 	if len(attempt.BackendExecutions) != 1 || attempt.BackendExecutions[0].Counters.ComputeDispatches != 9 || attempt.BackendExecutions[0].Counters.H2DBytes != 64 {
 		t.Fatalf("backend execution delta was not preserved: %+v", attempt.BackendExecutions)
 	}
-	if attempt.Observed.Device.Name != "fixture-device" || attempt.Observed.Device.VulkanVersion != "Vulkan 1.3" || attempt.Observed.Engine.Backend != "vulkan" || attempt.Observed.Engine.Runtime != "Vulkan 1.3" || attempt.Observed.Engine.FallbackCount == nil || *attempt.Observed.Engine.FallbackCount != 0 {
+	if attempt.Observed.Device.Name != "fixture-device" || attempt.Observed.Device.VulkanVersion != "Vulkan 1.3" || attempt.Observed.Engine.Backend != "vulkan" || attempt.Observed.Engine.Runtime != compute.Qwen38VulkanDecodeRuntime || attempt.Observed.Engine.FallbackCount == nil || *attempt.Observed.Engine.FallbackCount != 0 {
 		t.Fatalf("backend-owned canonical identity mapping mismatch: device=%+v engine=%+v", attempt.Observed.Device, attempt.Observed.Engine)
 	}
 	if attempt.Observed.Device.MesaVersion != "" || attempt.Observed.PeakProcessMemoryBytes != nil || attempt.Observed.PeakDeviceMemoryBytes != nil || attempt.Observed.Counters != nil {
@@ -251,6 +285,38 @@ func TestRawDecodePhysicalReceiptCarriesBackendObservationWithoutPromoting(t *te
 				t.Fatalf("invalid backend observation was exposed or promoted: %+v", got)
 			}
 		})
+	}
+}
+
+func TestRawDecodePhysicalReceiptSeparatesNativeRuntimeFromVulkanAPI(t *testing.T) {
+	backendExecution := compute.BackendExecutionObservation{
+		Identity: compute.BackendRuntimeIdentity{
+			Backend: "vulkan", Device: "fixture-device", Driver: "fixture-driver", Runtime: "vulkan-1.3.0",
+		},
+		Counters: compute.BackendCounterSnapshot{
+			ComputeDispatches: 1, Q4KMatmulDispatches: 1, DispatchSubmits: 1,
+		},
+		DeviceMemoryObserved: true, DeviceMemoryTotalBytes: 64 << 30, DeviceMemoryFreeBytes: 48 << 30,
+	}
+	execution := rawdecode.Execution{
+		ArtifactSHA256: strings.Repeat("a", 64), Engine: "fak-in-kernel via compute HAL backend \"vulkan\"",
+		Backend: rawdecode.BackendObservation{Selected: "vulkan"}, PromptTokenIDs: []int{1},
+		ContextLimit: 8, GeneratedLimit: 1, FiniteLogits: true,
+		Runs: []rawdecode.Run{{BackendExecution: &backendExecution}},
+	}
+
+	attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
+		t.Fatalf("incomplete physical identity became creditable: %+v", attempt)
+	}
+	if attempt.Observed.Device.VulkanVersion != backendExecution.Identity.Runtime {
+		t.Fatalf("device Vulkan version=%q, want observed API identity %q", attempt.Observed.Device.VulkanVersion, backendExecution.Identity.Runtime)
+	}
+	if attempt.Observed.Engine.Runtime != compute.Qwen38VulkanDecodeRuntime {
+		t.Fatalf("engine runtime=%q, want canonical %q", attempt.Observed.Engine.Runtime, compute.Qwen38VulkanDecodeRuntime)
+	}
+	if attempt.Observed.Engine.Runtime == backendExecution.Identity.Runtime {
+		t.Fatalf("Vulkan API identity escaped into engine runtime: %+v", attempt.Observed.Engine)
 	}
 }
 

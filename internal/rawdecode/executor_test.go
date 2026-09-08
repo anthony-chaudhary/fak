@@ -1,8 +1,10 @@
 package rawdecode
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -81,6 +84,103 @@ func fakeClock() func() time.Time {
 	return func() time.Time {
 		now = now.Add(time.Millisecond)
 		return now
+	}
+}
+
+type rawDecodeGGUFTensor struct {
+	name string
+	dims []uint64
+	typ  ggufload.TensorType
+}
+
+func rawDecodeGGUFFixture(t *testing.T, tensors []rawDecodeGGUFTensor) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	b.WriteString(ggufload.Magic)
+	write := func(value any) {
+		t.Helper()
+		if err := binary.Write(&b, binary.LittleEndian, value); err != nil {
+			t.Fatalf("write GGUF fixture: %v", err)
+		}
+	}
+	write(uint32(ggufload.Version))
+	write(uint64(len(tensors)))
+	write(uint64(0))
+	for _, tensor := range tensors {
+		write(uint64(len(tensor.name)))
+		b.WriteString(tensor.name)
+		write(uint32(len(tensor.dims)))
+		for _, dim := range tensor.dims {
+			write(dim)
+		}
+		write(uint32(tensor.typ))
+		write(uint64(0))
+	}
+	return b.Bytes()
+}
+
+func TestRawDecodeExecutorCarriesParsedGGUFProvenance(t *testing.T) {
+	tensors := []rawDecodeGGUFTensor{
+		{name: "blk.0.ffn_gate.weight", dims: []uint64{256, 256}, typ: ggufload.TensorQ4_K},
+		{name: "blk.0.ffn_up.weight", dims: []uint64{256, 256}, typ: ggufload.TensorQ6_K},
+		{name: "output.weight", dims: []uint64{32, 32}, typ: ggufload.TensorQ8_0},
+	}
+	original := rawDecodeGGUFFixture(t, tensors)
+	openBytes := func(data []byte) func(string) (io.ReadCloser, error) {
+		return func(string) (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(data)), nil
+		}
+	}
+	observed, err := inspectGGUFArtifact("fixtures/qwen.gguf", openBytes(original))
+	if err != nil {
+		t.Fatalf("inspect GGUF artifact: %v", err)
+	}
+	wantDigest := fmt.Sprintf("%x", sha256.Sum256(original))
+	if observed.SHA256 != wantDigest || observed.Path != "fixtures/qwen.gguf" || observed.Quantization != "Q4_K_M" || !strings.HasPrefix(observed.TensorInventorySHA256, "sha256:") {
+		t.Fatalf("parsed artifact observation mismatch: %+v", observed)
+	}
+
+	reordered := rawDecodeGGUFFixture(t, []rawDecodeGGUFTensor{tensors[2], tensors[0], tensors[1]})
+	reorderedObserved, err := inspectGGUFArtifact("reordered.gguf", openBytes(reordered))
+	if err != nil {
+		t.Fatalf("inspect reordered GGUF artifact: %v", err)
+	}
+	if reorderedObserved.TensorInventorySHA256 != observed.TensorInventorySHA256 {
+		t.Fatalf("tensor directory order changed canonical digest: %q != %q", reorderedObserved.TensorInventorySHA256, observed.TensorInventorySHA256)
+	}
+	mutated := append([]rawDecodeGGUFTensor(nil), tensors...)
+	mutated[0].dims = []uint64{256, 512}
+	mutatedObserved, err := inspectGGUFArtifact("mutated.gguf", openBytes(rawDecodeGGUFFixture(t, mutated)))
+	if err != nil {
+		t.Fatalf("inspect mutated GGUF artifact: %v", err)
+	}
+	if mutatedObserved.TensorInventorySHA256 == observed.TensorInventorySHA256 {
+		t.Fatal("tensor dimension change did not change canonical digest")
+	}
+
+	m := &fakeLoadedModel{candidate: &fakeSession{outputs: [][]float32{{0, 1, 5}}}}
+	d := dependencies{
+		openArtifact:    openBytes(original),
+		inspectArtifact: inspectGGUFArtifact,
+		loadModel: func(context.Context, Request) (loadedModel, string, error) {
+			return m, "qwen.gguf [gguf-q4k]", nil
+		},
+		resolveBackend: func(Request) (compute.Backend, BackendObservation, error) {
+			return nil, BackendObservation{Selected: "legacy"}, nil
+		},
+		now: fakeClock(),
+	}
+	execution, err := d.execute(context.Background(), Request{
+		ArtifactPath: "fixtures/qwen.gguf", ExpectedArtifactSHA256: wantDigest,
+		PromptTokenIDs: []int{0}, ContextLimit: 2, GeneratedTokenLimit: 1, Repetitions: 1,
+	})
+	if err != nil {
+		t.Fatalf("execute parsed GGUF artifact: %v", err)
+	}
+	if execution.ArtifactPath != observed.Path || execution.ArtifactSHA256 != observed.SHA256 ||
+		execution.TensorInventorySHA256 != observed.TensorInventorySHA256 || execution.Quantization != observed.Quantization ||
+		execution.ModelName != "qwen.gguf [gguf-q4k]" {
+		t.Fatalf("execution lost parsed GGUF provenance: %+v", execution)
 	}
 }
 

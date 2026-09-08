@@ -888,6 +888,101 @@ func TestWave32GatedDeltaNetStepVectorizedParity(t *testing.T) {
 	}
 }
 
+func TestDeltaNetAVX512CapabilityAndParity(t *testing.T) {
+	t.Setenv("FAK_VECTORIZED_DELTANET", "1")
+	if got, want := HasVectorizedDeltaNet(), hasDeltaNetSIMD(); got != want {
+		t.Fatalf("capability=%v, hardware/OS support=%v", got, want)
+	}
+	if HasVectorizedDeltaNetFor(64, 64) {
+		t.Fatal("non-canonical 64x64 geometry must not advertise the AVX-512 kernel")
+	}
+	if !hasDeltaNetSIMD() {
+		t.Skip("AVX-512F with OS ZMM state support unavailable")
+	}
+	if !HasVectorizedDeltaNetFor(128, 128) {
+		t.Fatal("canonical 128x128 geometry must advertise the detected AVX-512 kernel")
+	}
+
+	const dim = 128
+	for trial, gates := range []struct{ beta, decay float32 }{
+		{0, 0},
+		{1, 1},
+		{0.6, float32(math.Exp(-0.05))},
+		{0.999, 0.25},
+	} {
+		rng := rand.New(rand.NewSource(int64(8128 + trial)))
+		stRef := make([]float32, dim*dim)
+		qn := make([]float32, dim)
+		kn := make([]float32, dim)
+		vh := make([]float32, dim)
+		odRef := make([]float32, dim)
+		for i := range stRef {
+			stRef[i] = rng.Float32()*0.2 - 0.1
+		}
+		for i := 0; i < dim; i++ {
+			qn[i] = rng.Float32()*0.2 - 0.1
+			kn[i] = rng.Float32()*0.2 - 0.1
+			vh[i] = rng.Float32()*0.2 - 0.1
+			odRef[i] = rng.Float32()*0.02 - 0.01
+		}
+		stOpt := append([]float32(nil), stRef...)
+		odOpt := append([]float32(nil), odRef...)
+		kvRef, kvOpt := make([]float32, dim), make([]float32, dim)
+		deltaRef, deltaOpt := make([]float32, dim), make([]float32, dim)
+
+		wave32GatedDeltaNetStepGo(stRef, qn, kn, vh, gates.beta, gates.decay, odRef, kvRef, deltaRef)
+		if !tryDeltaNetSIMD(stOpt, qn, kn, vh, gates.beta, gates.decay, odOpt, kvOpt, deltaOpt) {
+			t.Fatal("detected AVX-512 kernel declined canonical input")
+		}
+
+		for name, pair := range map[string][2][]float32{
+			"state": {stRef, stOpt}, "output": {odRef, odOpt},
+			"kvmem": {kvRef, kvOpt}, "delta": {deltaRef, deltaOpt},
+		} {
+			if d := MaxAbsDelta(pair[0], pair[1]); d > 1e-5 {
+				t.Errorf("trial=%d %s max|delta|=%g > 1e-5", trial, name, d)
+			}
+		}
+	}
+
+	t.Setenv("FAK_VECTORIZED_DELTANET", "0")
+	if HasVectorizedDeltaNet() || HasVectorizedDeltaNetFor(128, 128) {
+		t.Fatal("explicit disable must suppress detected AVX-512 support")
+	}
+}
+
+func BenchmarkDeltaNetStepKernels(b *testing.B) {
+	const dim = 128
+	st := make([]float32, dim*dim)
+	qn := make([]float32, dim)
+	kn := make([]float32, dim)
+	vh := make([]float32, dim)
+	od := make([]float32, dim)
+	kvmem := make([]float32, dim)
+	delta := make([]float32, dim)
+	for i := range st {
+		st[i] = 0.01
+	}
+	for i := range vh {
+		vh[i] = 0.1
+	}
+	b.Run("Go", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			wave32GatedDeltaNetStepGo(st, qn, kn, vh, 0.5, 1, od, kvmem, delta)
+		}
+	})
+	if !hasDeltaNetSIMD() {
+		return
+	}
+	b.Run("AVX512", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			if !tryDeltaNetSIMD(st, qn, kn, vh, 0.5, 1, od, kvmem, delta) {
+				b.Fatal("AVX-512 kernel declined canonical input")
+			}
+		}
+	})
+}
+
 // BenchmarkWave32GatedDeltaNetStep benchmarks single-head Gated-DeltaNet step latency.
 func BenchmarkWave32GatedDeltaNetStep(b *testing.B) {
 	const d = 128

@@ -6,6 +6,7 @@ import (
 
 // Toolchain contains paths to discovered build tools and compiler flags.
 type Toolchain struct {
+	Go         string            // Go compiler driver (defaults to go on PATH)
 	CC         string            // C compiler (gcc, clang, cl)
 	CXX        string            // C++ compiler (g++, clang++, cl)
 	AR         string            // Archiver (ar, llvm-ar, lib)
@@ -26,20 +27,22 @@ type Toolchain struct {
 
 // VulkanConfig defines parameters for Vulkan build/test operations.
 type VulkanConfig struct {
-	Command     string               // "shaders", "lib", "build", "test", "binary"
-	RepoRoot    string               // Root of repository containing go.mod
-	PkgDir      string               // Directory of compute package (defaults to <RepoRoot>/internal/compute)
-	OutPkg      string               // Target Go package for "binary" command
-	OutBin      string               // Output binary path for "binary" command
-	ReceiptPath string               // Path to write receipt JSON (defaults to .fak/compute-build-receipt.json or .fak/vulkan-build-receipt.json)
-	Smoke       bool                 // Default true for binary builds: shift-left execution of the output binary
-	SkipSmoke   bool                 // Skip shift-left smoke execution even for binary builds
-	GitCommit   string               // Pinned Git commit SHA (defaults to HEAD if empty)
-	GitRef      string               // Pinned Git ref (e.g. "HEAD")
-	Receipt     *ComputeBuildReceipt // Generated receipt populated upon completion
-	Toolchain   *Toolchain           // Pre-discovered or custom toolchain
-	Stdout      io.Writer            // Standard output stream
-	Stderr      io.Writer            // Standard error stream
+	Command            string               // "shaders", "lib", "build", "test", "binary"
+	RepoRoot           string               // Root of repository containing go.mod
+	PkgDir             string               // Directory of compute package (defaults to <RepoRoot>/internal/compute)
+	OutPkg             string               // Target Go package for "binary" command
+	OutBin             string               // Output binary path for "binary" command
+	ReceiptPath        string               // Path to write receipt JSON (defaults to .fak/compute-build-receipt.json or .fak/vulkan-build-receipt.json)
+	CompareReceiptPath string               // Optional prior successful Vulkan receipt to compare reproducible fields against
+	GitCommit          string               // Optional commit that must resolve exactly to HEAD
+	GitRef             string               // Deprecated display ref retained for API compatibility
+	Smoke              bool                 // Default true for binary builds: shift-left execution of the output binary
+	SkipSmoke          bool                 // Skip shift-left smoke execution even for binary builds
+	Receipt            *ComputeBuildReceipt // Generated receipt populated upon completion
+	Toolchain          *Toolchain           // Pre-discovered or custom toolchain
+	ToolchainOverrides *Toolchain           // CLI overrides merged after source preflight into discovered defaults
+	Stdout             io.Writer            // Standard output stream
+	Stderr             io.Writer            // Standard error stream
 }
 
 // CUDAConfig defines parameters for CUDA build/test/bench operations.
@@ -79,6 +82,8 @@ type BuildArtifact struct {
 const (
 	// ComputeBuildReceiptSchema is the stable schema for compute build receipts.
 	ComputeBuildReceiptSchema = "fak.compute-build-receipt.v1"
+	// VulkanBuildReceiptSchema binds successful Vulkan binary receipts to source, tools, shaders, and output.
+	VulkanBuildReceiptSchema = "fak.vulkan-build-receipt.v2"
 
 	// DefaultComputeBuildReceiptPath is the generic fallback receipt path.
 	DefaultComputeBuildReceiptPath = ".fak/compute-build-receipt.json"
@@ -108,7 +113,44 @@ type ComputeBuildPhase struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// ToolchainIdentity records normalized toolchain and compiler identity.
+// BuildSourceProvenance binds a successful build to one clean committed Git tree.
+type BuildSourceProvenance struct {
+	GitCommit           string `json:"git_commit"`
+	GitTree             string `json:"git_tree"`
+	Clean               bool   `json:"clean"`
+	SourceArchiveSHA256 string `json:"source_archive_sha256"`
+}
+
+// BuildToolIdentity records the content identity of one effective build tool without
+// retaining host-specific absolute paths.
+type BuildToolIdentity struct {
+	Role       string `json:"role"`
+	Executable string `json:"executable"`
+	SHA256     string `json:"sha256"`
+}
+
+// VulkanBuildProvenance contains only success evidence. Failed receipts omit it.
+type VulkanBuildProvenance struct {
+	Source                 BuildSourceProvenance `json:"source"`
+	SPIRVBundleSHA256      string                `json:"spirv_bundle_sha256"`
+	SPIRVModuleCount       int                   `json:"spirv_module_count"`
+	Toolchain              []BuildToolIdentity   `json:"toolchain"`
+	ToolchainSHA256        string                `json:"toolchain_sha256"`
+	NormalizedBuildCommand []string              `json:"normalized_build_command"`
+	BuildCommandSHA256     string                `json:"build_command_sha256"`
+	StableIdentitySHA256   string                `json:"stable_identity_sha256"`
+}
+
+// BuildReproducibility records comparison with a prior successful receipt. The
+// baseline status is explicit so it cannot be mistaken for a witnessed match.
+type BuildReproducibility struct {
+	Status                string   `json:"status"`
+	ComparedReceiptSHA256 string   `json:"compared_receipt_sha256,omitempty"`
+	MismatchedFields      []string `json:"mismatched_fields,omitempty"`
+}
+
+// ToolchainIdentity is the legacy v1 toolchain surface retained for source
+// compatibility. Vulkan v2 receipts use content-hashed BuildToolIdentity values.
 type ToolchainIdentity struct {
 	CC         string   `json:"cc,omitempty"`
 	CXX        string   `json:"cxx,omitempty"`
@@ -121,24 +163,28 @@ type ToolchainIdentity struct {
 
 // ComputeBuildReceipt records full provenance, phases, artifact metadata, and smoke test results.
 type ComputeBuildReceipt struct {
-	Schema              string              `json:"schema"`
-	Backend             string              `json:"backend"`
-	Command             string              `json:"command"`
-	Outcome             string              `json:"outcome"`
-	ExitCode            int                 `json:"exit_code"`
-	Error               string              `json:"error,omitempty"`
-	StartedAt           string              `json:"started_at"`
-	FinishedAt          string              `json:"finished_at"`
-	ElapsedMS           int64               `json:"elapsed_ms"`
-	ReceiptPath         string              `json:"receipt_path"`
-	GitCommit           string              `json:"git_commit,omitempty"`
-	GitRef              string              `json:"git_ref,omitempty"`
-	Clean               *bool               `json:"clean,omitempty"`
-	SourceArchiveSHA256 string              `json:"source_archive_sha256,omitempty"`
-	ShaderBundleSHA256  string              `json:"shader_bundle_sha256,omitempty"`
-	BuildArgs           []string            `json:"build_args,omitempty"`
-	Toolchain           *ToolchainIdentity  `json:"toolchain,omitempty"`
-	Phases              []ComputeBuildPhase `json:"phases"`
-	Artifact            *BuildArtifact      `json:"artifact,omitempty"`
-	Smoke               *SmokeResult        `json:"smoke,omitempty"`
+	Schema      string `json:"schema"`
+	Backend     string `json:"backend"`
+	Command     string `json:"command"`
+	Outcome     string `json:"outcome"`
+	ExitCode    int    `json:"exit_code"`
+	Error       string `json:"error,omitempty"`
+	StartedAt   string `json:"started_at"`
+	FinishedAt  string `json:"finished_at"`
+	ElapsedMS   int64  `json:"elapsed_ms"`
+	ReceiptPath string `json:"receipt_path"`
+	// Legacy v1 fields remain empty in v2 receipts; authoritative Vulkan
+	// provenance lives under Vulkan and never records host-specific paths.
+	GitCommit           string                 `json:"git_commit,omitempty"`
+	GitRef              string                 `json:"git_ref,omitempty"`
+	Clean               *bool                  `json:"clean,omitempty"`
+	SourceArchiveSHA256 string                 `json:"source_archive_sha256,omitempty"`
+	ShaderBundleSHA256  string                 `json:"shader_bundle_sha256,omitempty"`
+	BuildArgs           []string               `json:"build_args,omitempty"`
+	Toolchain           *ToolchainIdentity     `json:"toolchain,omitempty"`
+	Phases              []ComputeBuildPhase    `json:"phases"`
+	Artifact            *BuildArtifact         `json:"artifact,omitempty"`
+	Smoke               *SmokeResult           `json:"smoke,omitempty"`
+	Vulkan              *VulkanBuildProvenance `json:"vulkan,omitempty"`
+	Reproducibility     *BuildReproducibility  `json:"reproducibility,omitempty"`
 }
