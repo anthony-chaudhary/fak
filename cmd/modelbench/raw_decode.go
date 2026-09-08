@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"math"
-	"os"
 	"runtime"
 	"slices"
 	"strconv"
@@ -210,11 +209,12 @@ type rawRepOutput struct {
 }
 
 type rawDecodePhysicalReceiptAttempt struct {
-	Status         string                              `json:"status"`
-	CreditEligible bool                                `json:"credit_eligible"`
-	Reason         string                              `json:"reason,omitempty"`
-	Observed       compute.Qwen38VulkanRawDecodeResult `json:"observed"`
-	Receipt        *compute.Qwen38VulkanDecodeReceipt  `json:"receipt,omitempty"`
+	Status            string                                `json:"status"`
+	CreditEligible    bool                                  `json:"credit_eligible"`
+	Reason            string                                `json:"reason,omitempty"`
+	Observed          compute.Qwen38VulkanRawDecodeResult   `json:"observed"`
+	BackendExecutions []compute.BackendExecutionObservation `json:"backend_executions,omitempty"`
+	Receipt           *compute.Qwen38VulkanDecodeReceipt    `json:"receipt,omitempty"`
 }
 
 func rawDecodeInt32IDs(ids []int) ([]int32, error) {
@@ -228,6 +228,38 @@ func rawDecodeInt32IDs(ids []int) ([]int32, error) {
 	return out, nil
 }
 
+func rawDecodeBackendExecutions(execution rawdecode.Execution) ([]compute.BackendExecutionObservation, bool) {
+	if len(execution.Runs) == 0 {
+		return nil, false
+	}
+	observations := make([]compute.BackendExecutionObservation, len(execution.Runs))
+	var identity compute.BackendRuntimeIdentity
+	for i, run := range execution.Runs {
+		if run.BackendExecution == nil {
+			return nil, false
+		}
+		observation := *run.BackendExecution
+		if observation.Identity.Backend != compute.Qwen38VulkanDecodeBackend ||
+			observation.Identity.Backend != execution.Backend.Selected ||
+			strings.TrimSpace(observation.Identity.Device) == "" ||
+			strings.TrimSpace(observation.Identity.Driver) == "" ||
+			strings.TrimSpace(observation.Identity.Runtime) == "" ||
+			observation.Counters.ComputeDispatches == 0 || observation.Counters.DispatchSubmits == 0 ||
+			observation.Counters.ComputeDispatches != observation.Counters.Q4KMatmulDispatches+observation.Counters.OtherDispatches ||
+			!observation.DeviceMemoryObserved || observation.DeviceMemoryTotalBytes == 0 ||
+			observation.DeviceMemoryFreeBytes > observation.DeviceMemoryTotalBytes {
+			return nil, false
+		}
+		if i == 0 {
+			identity = observation.Identity
+		} else if observation.Identity != identity {
+			return nil, false
+		}
+		observations[i] = observation
+	}
+	return observations, true
+}
+
 // rawDecodePhysicalReceipt maps only executor observations. It never accepts
 // caller-supplied source, binary, device, memory, or counter identity.
 func rawDecodePhysicalReceipt(execution rawdecode.Execution, repOutputs []rawRepOutput) rawDecodePhysicalReceiptAttempt {
@@ -236,35 +268,55 @@ func rawDecodePhysicalReceipt(execution rawdecode.Execution, repOutputs []rawRep
 		GeneratedTokenLimit: execution.GeneratedLimit,
 		FiniteLogits:        &finiteLogits,
 	}
-	// The runner owns the executable path and hashes the bytes that are actually
-	// running. Capture failure deliberately leaves the identity empty so the
-	// canonical receipt remains unavailable; argv, flags, and environment values
-	// cannot supply or override this observation.
-	if executable, err := os.Executable(); err == nil {
-		if binary, err := fileIdentity(executable); err == nil {
-			observed.Source.BinarySHA256 = binary.SHA256
-		}
-	}
+	// Source identity remains all-or-nothing. The executable observer must also
+	// prove vcs=git before its revision can populate GitCommit; until then this
+	// adapter leaves the entire source tuple unavailable.
 	if execution.ArtifactSHA256 != "" {
 		observed.Model.ArtifactSHA256 = execution.ArtifactSHA256
 	}
-	if execution.Backend.Selected != "" && execution.Backend.Selected != "legacy" {
-		observed.Engine.Backend = execution.Backend.Selected
+	backendExecutions, backendObserved := rawDecodeBackendExecutions(execution)
+	if backendObserved && len(backendExecutions) != len(repOutputs) {
+		backendObserved = false
+		backendExecutions = nil
+	}
+	if backendObserved {
+		fallbacks := uint64(0)
+		for _, backendExecution := range backendExecutions {
+			if math.MaxUint64-fallbacks < backendExecution.Counters.Fallbacks {
+				backendObserved = false
+				backendExecutions = nil
+				break
+			}
+			fallbacks += backendExecution.Counters.Fallbacks
+		}
+		if backendObserved {
+			identity := backendExecutions[0].Identity
+			observed.Device.Name = identity.Device
+			observed.Device.VulkanVersion = identity.Runtime
+			observed.Engine.Name = "fak-native"
+			observed.Engine.Backend = identity.Backend
+			observed.Engine.Runtime = identity.Runtime
+			observed.Engine.ExecutedPath = execution.Engine
+			observed.Engine.FallbackCount = &fallbacks
+		}
+	}
+	unavailable := func(reason string) rawDecodePhysicalReceiptAttempt {
+		return rawDecodePhysicalReceiptAttempt{Status: "UNAVAILABLE", Reason: reason, Observed: observed, BackendExecutions: backendExecutions}
 	}
 
 	if len(repOutputs) == 0 {
-		return rawDecodePhysicalReceiptAttempt{Status: "UNAVAILABLE", Reason: "raw decode produced no repetitions", Observed: observed}
+		return unavailable("raw decode produced no repetitions")
 	}
 	var err error
 	if observed.PromptTokenIDs, err = rawDecodeInt32IDs(execution.PromptTokenIDs); err != nil {
-		return rawDecodePhysicalReceiptAttempt{Status: "UNAVAILABLE", Reason: err.Error(), Observed: observed}
+		return unavailable(err.Error())
 	}
 	allParityObserved, allParityPassed := true, true
 	observed.Runs = make([]compute.Qwen38VulkanDecodeRun, len(repOutputs))
 	for i, rep := range repOutputs {
 		outputTokenIDs, convertErr := rawDecodeInt32IDs(rep.generatedTokens)
 		if convertErr != nil {
-			return rawDecodePhysicalReceiptAttempt{Status: "UNAVAILABLE", Reason: convertErr.Error(), Observed: observed}
+			return unavailable(convertErr.Error())
 		}
 		ignoreEOSObserved, eosStoppedObserved := execution.IgnoreEOS, rep.eosStopped
 		candidateElapsed := rep.sessionSetupDur + rep.prefillDur + rep.firstSampleDur + rep.decodeDur + rep.teardownDur
@@ -301,9 +353,9 @@ func rawDecodePhysicalReceipt(execution rawdecode.Execution, repOutputs []rawRep
 	}
 	receipt, err := compute.BuildQwen38VulkanDecodeReceipt(observed)
 	if err != nil {
-		return rawDecodePhysicalReceiptAttempt{Status: "UNAVAILABLE", Reason: err.Error(), Observed: observed}
+		return unavailable(err.Error())
 	}
-	return rawDecodePhysicalReceiptAttempt{Status: "AVAILABLE", CreditEligible: true, Observed: observed, Receipt: &receipt}
+	return rawDecodePhysicalReceiptAttempt{Status: "AVAILABLE", CreditEligible: true, Observed: observed, BackendExecutions: backendExecutions, Receipt: &receipt}
 }
 
 // executeRawDecode is the loaded-model adapter retained for existing modelbench

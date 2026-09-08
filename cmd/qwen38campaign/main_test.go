@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/qwen38quantrun"
 )
 
@@ -111,6 +112,24 @@ func TestRunAMDScoreboardWritesComparableReport(t *testing.T) {
 	}
 	if _, err := os.Stat(report); err != nil {
 		t.Fatal(err)
+	}
+	written, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved qwen38quantrun.AMDScoreboardReport
+	if err := json.Unmarshal(written, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if err := qwen38quantrun.ValidateAMDScoreboardReport(saved); err != nil {
+		t.Fatal(err)
+	}
+	if !saved.PairedComparable || saved.StrixAbsoluteEligible || saved.OverallWin || len(saved.RawInput.Candidate.Trials) != 5 {
+		t.Fatalf("report=%+v", saved)
+	}
+	saved.RawInput.Candidate.Trials[0].PrefillSeconds /= 2
+	if qwen38quantrun.ValidateAMDScoreboardReport(saved) == nil {
+		t.Fatal("report timing tamper admitted")
 	}
 }
 
@@ -222,8 +241,12 @@ func qwen38quantrunTestInput(t *testing.T) qwen38quantrun.AMDScoreboardInput {
 		t.Fatal(err)
 	}
 	arm := qwen38quantrun.AMDArmReceipt{Name: "fak", Engine: "fak-native", Backend: "vulkan", Runtime: "native", ArtifactSHA256: sha, PromptSHA256: prompt, PromptTokenIDs: []int{1}, ContextTokens: 256, ContextBudgetBytes: 1 << 30, KVTypeK: "f16", KVTypeV: "f16", KVOffload: "gpu", FlashAttention: true, GPUMemoryBudget: 6 << 30, HostSpillPolicy: "bounded", PrefillTokens: 1, DecodeTokens: 1, Hardware: "RX 7600", SoftwareRevision: "fak@1", BuildFlags: []string{"vulkan"}, PeakRSSBytes: 1, PeakVRAMBytes: 1, ResidentModelBytes: 1, TokenizerDigest: packet.TokenizerDigest, TemplateDigest: packet.TemplateDigest, PromptPacketDigest: packet.PacketDigest, TopP: packet.GenerationControls.TopP, TopK: packet.GenerationControls.TopK, PromptPacket: &packet}
-	for i := 1; i <= 3; i++ {
-		arm.Trials = append(arm.Trials, qwen38quantrun.AMDScoreboardTrial{Repetition: i, ColdSetupSeconds: 1, PrefillSeconds: 1, PrefillTokensPerSecond: 1, WarmDecodeSeconds: 1, WarmDecodeTokensPerSecond: 1, OutputTokenIDs: []int{2}, Logits: []float64{1}, H2DBytes: 1, D2HBytes: 1, QueueSubmissions: 1})
+	for i := 1; i <= 5; i++ {
+		seq := 2*i - 1
+		if i%2 == 0 {
+			seq++
+		}
+		arm.Trials = append(arm.Trials, qwen38quantrun.AMDScoreboardTrial{EvidenceKind: "selected-token-logprobs", Repetition: i, Sequence: seq, ColdSetupSeconds: 1, PrefillSeconds: 1, PrefillTokensPerSecond: 1, WarmDecodeSeconds: 1, WarmDecodeTokensPerSecond: 1, OutputTokenIDs: []int{2}, Logits: []float64{-1}, H2DBytes: 1, D2HBytes: 1, QueueSubmissions: 1, NativeInferenceReceipt: &model.NativeInferenceReceipt{Engine: "inkernel", Planner: "inkernel", Owner: "fak", ForwardPath: "test-vulkan", Backend: "vulkan", PrefillSeconds: 1, DecodeSeconds: 1, TokenIDs: []int{2}, TokenLogprobs: []float64{-1}}})
 	}
 	ref := arm
 	ref.Name = "llama.cpp"
@@ -232,5 +255,9 @@ func qwen38quantrunTestInput(t *testing.T) qwen38quantrun.AMDScoreboardInput {
 	ref.SoftwareRevision = "llama.cpp@1"
 	ref.PromptTokenIDs = []int{1}
 	ref.Trials = append([]qwen38quantrun.AMDScoreboardTrial(nil), arm.Trials...)
-	return qwen38quantrun.AMDScoreboardInput{Schema: qwen38quantrun.AMDScoreboardInputSchema, LogitTolerance: 1e-3, Candidate: arm, Reference: ref}
+	for i := range ref.Trials {
+		ref.Trials[i].NativeInferenceReceipt = nil
+		ref.Trials[i].Sequence = 4*i + 3 - arm.Trials[i].Sequence
+	}
+	return qwen38quantrun.AMDScoreboardInput{Schema: qwen38quantrun.AMDScoreboardInputSchema, Concurrency: 1, LogitTolerance: 1e-3, Candidate: arm, Reference: ref}
 }
