@@ -568,7 +568,7 @@ func (m *MMU) quarantineResult(ctx context.Context, r *abi.Result, reason abi.Re
 	var handle abi.Ref
 	published := false
 	if authorityOK {
-		handle = m.pageOut(ctx, body)
+		handle = m.quarantinePageOut(ctx, body)
 		if cleanDigest(handle.Digest) == contentDigest {
 			m.mu.Lock()
 			m.held[id] = handle
@@ -607,6 +607,19 @@ func (m *MMU) quarantineResult(ctx context.Context, r *abi.Result, reason abi.Re
 	return abi.Verdict{Kind: abi.VerdictQuarantine, Reason: reason, By: "ctxmmu",
 		Payload: abi.QuarantinePayload{PageOut: published},
 		Meta:    quarantineMeta("ctxmmu", reason, detector, id)}
+}
+
+// quarantinePageOut uses only the ABI's canonical content-addressed blob codec.
+// A configured codec may publish bytes under an opaque key before returning it,
+// which cannot be made crash-safe by a post-call digest comparison.
+func (m *MMU) quarantinePageOut(ctx context.Context, body []byte) abi.Ref {
+	if b, ok := abi.PageOut("blob"); ok {
+		inline := abi.Ref{Kind: abi.RefInline, Inline: body, Len: int64(len(body))}
+		if h, err := b.PageOut(ctx, inline); err == nil {
+			return h
+		}
+	}
+	return abi.Ref{}
 }
 
 func detectorFor(reason abi.ReasonCode) string {

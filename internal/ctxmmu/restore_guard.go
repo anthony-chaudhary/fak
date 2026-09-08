@@ -16,7 +16,6 @@ import (
 const (
 	quarantineLedgerEnv          = "FAK_QUARANTINE_LEDGER_PATH"
 	quarantineLedgerDefaultPath  = ".fak/ctxmmu/quarantine.jsonl"
-	durableRestoreCASEnv         = "FAK_CTXRESTORE_CAS_DIR"
 	maxQuarantineLedgerEntries   = 32768
 	maxQuarantineLedgerWALBytes  = 8 << 20
 	maxQuarantineLedgerKeyLength = 128
@@ -49,11 +48,9 @@ func NewQuarantineLedger(path ...string) *QuarantineLedger {
 	} else if envPath, ok := os.LookupEnv(quarantineLedgerEnv); ok {
 		switch strings.ToLower(strings.TrimSpace(envPath)) {
 		case "off", "0", "none":
-			// A durable restore store without a durable refusal authority is unsafe.
-			// Honor the kill-switch only when durable restore is explicitly off too.
-			if durableRestoreExplicitlyOff() {
-				p = ""
-			}
+			// Generic restore has multiple durable sources (gateway CAS, page-out
+			// codecs, active resolvers, and caller-named images). No single process
+			// env switch proves all are absent, so the authority remains mandatory.
 		case "":
 			// Empty is the default, not an accidental disable.
 		default:
@@ -68,15 +65,6 @@ func NewQuarantineLedger(path ...string) *QuarantineLedger {
 		l.loadErr = l.load()
 	}
 	return l
-}
-
-func durableRestoreExplicitlyOff() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(durableRestoreCASEnv))) {
-	case "off", "0", "none":
-		return true
-	default:
-		return false
-	}
 }
 
 func (l *QuarantineLedger) load() error {
@@ -262,9 +250,12 @@ func marshalQuarantineRecord(op, digest string) ([]byte, error) {
 }
 
 func (l *QuarantineLedger) appendBytesLocked(record []byte) error {
-	if err := os.MkdirAll(filepath.Dir(l.path), 0o700); err != nil {
+	dir := filepath.Dir(l.path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	_, statErr := os.Stat(l.path)
+	created := os.IsNotExist(statErr)
 	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
@@ -279,6 +270,11 @@ func (l *QuarantineLedger) appendBytesLocked(record []byte) error {
 	}
 	if err := f.Close(); err != nil {
 		return err
+	}
+	if created {
+		if err := syncQuarantineLedgerCreation(dir); err != nil {
+			return err
+		}
 	}
 	l.walSize += int64(len(record))
 	return nil
@@ -322,7 +318,7 @@ func (l *QuarantineLedger) rewriteSnapshotLocked() error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpName, l.path); err != nil {
+	if err := replaceQuarantineLedgerFile(tmpName, l.path); err != nil {
 		return err
 	}
 	ok = true
