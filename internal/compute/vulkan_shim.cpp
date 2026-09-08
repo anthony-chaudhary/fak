@@ -76,6 +76,58 @@ void              batchFlush();
 VkResult          g_submissionStatus = VK_SUCCESS;
 std::atomic<uint64_t> g_h2dBytes{0};
 std::atomic<uint64_t> g_d2hBytes{0};
+std::atomic<uint64_t> g_h2dCount{0};
+std::atomic<uint64_t> g_d2hCount{0};
+std::atomic<uint64_t> g_d2dCount{0};
+std::atomic<uint64_t> g_d2dBytes{0};
+bool                  g_transferCountersValid = true;
+uint64_t              g_deviceAllocationLiveBytes = 0;
+bool                  g_deviceAllocationAccountingValid = true;
+bool                  g_allocationWindowActive = false;
+uint64_t              g_allocationWindowToken = 0;
+uint64_t              g_nextAllocationWindowToken = 1;
+uint64_t              g_allocationWindowPeakBytes = 0;
+
+bool checkedCounterAdd(std::atomic<uint64_t>& counter, uint64_t value) {
+    uint64_t current = counter.load(std::memory_order_relaxed);
+    if (value > std::numeric_limits<uint64_t>::max() - current) {
+        g_transferCountersValid = false;
+        return false;
+    }
+    counter.store(current + value, std::memory_order_relaxed);
+    return true;
+}
+
+bool memoryTypeUsesDeviceLocalHeap(uint32_t memoryType) {
+    if (memoryType >= g_memprops.memoryTypeCount) return false;
+    uint32_t heap = g_memprops.memoryTypes[memoryType].heapIndex;
+    return heap < g_memprops.memoryHeapCount &&
+        (g_memprops.memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0;
+}
+
+void trackDeviceAllocation(VkDeviceSize bytes, uint32_t memoryType) {
+    if (!memoryTypeUsesDeviceLocalHeap(memoryType)) return;
+    uint64_t allocationBytes = static_cast<uint64_t>(bytes);
+    if (!g_deviceAllocationAccountingValid ||
+        allocationBytes > std::numeric_limits<uint64_t>::max() - g_deviceAllocationLiveBytes) {
+        g_deviceAllocationAccountingValid = false;
+        return;
+    }
+    g_deviceAllocationLiveBytes += allocationBytes;
+    if (g_allocationWindowActive && g_deviceAllocationLiveBytes > g_allocationWindowPeakBytes) {
+        g_allocationWindowPeakBytes = g_deviceAllocationLiveBytes;
+    }
+}
+
+void untrackDeviceAllocation(VkDeviceSize bytes, bool deviceLocalHeap) {
+    if (!deviceLocalHeap || !g_deviceAllocationAccountingValid) return;
+    uint64_t allocationBytes = static_cast<uint64_t>(bytes);
+    if (allocationBytes > g_deviceAllocationLiveBytes) {
+        g_deviceAllocationAccountingValid = false;
+        return;
+    }
+    g_deviceAllocationLiveBytes -= allocationBytes;
+}
 
 // A device buffer: VkBuffer + its memory + byte size. The opaque handle Go holds is a
 // Buffer* — never a host address.
@@ -87,6 +139,8 @@ struct Buffer {
     VkDeviceSize   memoryOffset = 0;
     bool           weightArenaBound = false;
     size_t         weightArenaBlock = std::numeric_limits<size_t>::max();
+    VkDeviceSize   allocationBytes = 0;
+    bool           allocationDeviceLocal = false;
 };
 
 // Immutable model weights keep their descriptor-visible VkBuffer identity while sharing a
@@ -101,6 +155,7 @@ struct WeightArenaBlock {
     VkDeviceSize used = 0;
     uint32_t memoryTypeIndex = UINT32_MAX;
     size_t liveBuffers = 0;
+    bool allocationDeviceLocal = false;
 };
 std::vector<WeightArenaBlock> g_weightArena;
 uint64_t g_weightArenaMemoryAllocations = 0;
@@ -114,7 +169,10 @@ void releaseWeightArena() {
         if (block.liveBuffers != 0) return;
     }
     for (WeightArenaBlock& block : g_weightArena) {
-        if (block.mem) vkFreeMemory(g_dev, block.mem, nullptr);
+        if (block.mem) {
+            untrackDeviceAllocation(block.capacity, block.allocationDeviceLocal);
+            vkFreeMemory(g_dev, block.mem, nullptr);
+        }
     }
     g_weightArena.clear();
     g_weightArenaReservedBytes = 0;
@@ -143,6 +201,7 @@ struct RestoreTransaction {
     size_t         maxEntries = 0;
     size_t         used = 0;
     size_t         entries = 0;
+    size_t         payloadBytes = 0;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     int            successfulSubmits = 0;
 };
@@ -335,6 +394,7 @@ void destroyBuffer(Buffer* b) {
         if (g_weightArenaLiveBytes >= b->bytes) g_weightArenaLiveBytes -= b->bytes;
         else g_weightArenaLiveBytes = 0;
     } else if (b->mem) {
+        untrackDeviceAllocation(b->allocationBytes, b->allocationDeviceLocal);
         vkFreeMemory(g_dev, b->mem, nullptr);
     }
     delete b;
@@ -422,11 +482,12 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
     }
     VkMemoryRequirements req{};
     vkGetBufferMemoryRequirements(g_dev, b->buf, &req);
-    auto tryAlloc = [&](VkMemoryPropertyFlags want, VkDeviceMemory* out) -> VkResult {
+    auto tryAlloc = [&](VkMemoryPropertyFlags want, VkDeviceMemory* out, uint32_t* selectedType) -> VkResult {
         VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
         ai.allocationSize = req.size;
         ai.memoryTypeIndex = findMemType(req.memoryTypeBits, want);
         if (ai.memoryTypeIndex == UINT32_MAX) return VK_ERROR_FEATURE_NOT_PRESENT;
+        if (selectedType) *selectedType = ai.memoryTypeIndex;
         return vkAllocateMemory(g_dev, &ai, nullptr, out);
     };
 
@@ -434,16 +495,17 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
     // holds buffers nothing references right now) and retry before considering a slower
     // host-visible storage fallback for device-local tensors.
     VkMemoryPropertyFlags actualProps = props;
-    VkResult r = tryAlloc(props, &b->mem);
+    uint32_t selectedMemoryType = UINT32_MAX;
+    VkResult r = tryAlloc(props, &b->mem, &selectedMemoryType);
     if (allocPressure(r)) {
         drainPool();
-        r = tryAlloc(props, &b->mem);
+        r = tryAlloc(props, &b->mem, &selectedMemoryType);
     }
     if (r != VK_SUCCESS && (props & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) &&
         (usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)) {
         VkMemoryPropertyFlags fallback =
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-        VkResult fr = tryAlloc(fallback, &b->mem);
+        VkResult fr = tryAlloc(fallback, &b->mem, &selectedMemoryType);
         if (fr == VK_SUCCESS) {
             fprintf(stderr,
                 "fak-vulkan: device-local alloc(%zu bytes) failed VkResult=%d; using host-visible storage\n",
@@ -473,6 +535,9 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
         return nullptr;
     }
     b->props = actualProps;
+    b->allocationBytes = req.size;
+    b->allocationDeviceLocal = memoryTypeUsesDeviceLocalHeap(selectedMemoryType);
+    trackDeviceAllocation(req.size, selectedMemoryType);
     return b;
 }
 
@@ -598,6 +663,8 @@ Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
     block.used = req.size;
     block.memoryTypeIndex = memoryType;
     block.liveBuffers = 1;
+    block.allocationDeviceLocal = memoryTypeUsesDeviceLocalHeap(memoryType);
+    trackDeviceAllocation(blockBytes, memoryType);
     g_weightArena.push_back(block);
     b->mem = memory;
     b->props = g_memprops.memoryTypes[memoryType].propertyFlags;
@@ -711,6 +778,7 @@ void restoreDiscardCommand() {
     }
     g_restore.used = 0;
     g_restore.entries = 0;
+    g_restore.payloadBytes = 0;
 }
 
 void restoreCleanup() {
@@ -732,6 +800,9 @@ VkCommandBuffer               g_batchCmd  = VK_NULL_HANDLE;
 std::vector<DescriptorSetRecord> g_batchSets;
 std::vector<Buffer*>          g_batchFreed;   // buffers freed mid-batch, recycled after submit
 int                           g_batchOps  = 0;
+uint64_t                      g_batchD2DCount = 0;
+uint64_t                      g_batchD2DBytes = 0;
+bool                          g_batchD2DValid = true;
 
 // A full compute->compute barrier: every recorded op may read the previous op's output
 // buffer, so each dispatch is fenced against the prior by a global shader-write->shader-read
@@ -752,6 +823,9 @@ void batchBegin() {
 	g_batchCmd = beginCmd();
 	g_batching = true;
 	g_batchOps = 0;
+	g_batchD2DCount = 0;
+	g_batchD2DBytes = 0;
+	g_batchD2DValid = true;
 	g_batchSets.clear();
 }
 
@@ -761,6 +835,11 @@ void batchFlush() {
     if (hadWork) {
         dp_inc(g_dp.batchSubmits);
         endSubmitWait(g_batchCmd);   // single submit + fence for the whole recorded chain
+        if (!g_batchD2DValid ||
+            !checkedCounterAdd(g_d2dCount, g_batchD2DCount) ||
+            !checkedCounterAdd(g_d2dBytes, g_batchD2DBytes)) {
+            g_transferCountersValid = false;
+        }
     } else {
         VKCHECK(vkEndCommandBuffer(g_batchCmd));
         vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &g_batchCmd);
@@ -778,6 +857,9 @@ void batchFlush() {
     // (endSubmitWait fenced), so every parked buffer is now safe to return to the pool.
 	g_batching = false;
 	g_batchOps = 0;
+	g_batchD2DCount = 0;
+	g_batchD2DBytes = 0;
+	g_batchD2DValid = true;
 	std::vector<Buffer*> freed;   freed.swap(g_batchFreed);
 	for (Buffer* b : freed)   fvk_free(b);
 }
@@ -785,7 +867,6 @@ void batchFlush() {
 // staging copy host<->device through one persistent HOST_VISIBLE scratch buffer.
 void copyHostToDevice(Buffer* dst, const void* host, size_t bytes) {
     if (bytes == 0 || !dst || !host) return;
-    g_h2dBytes.fetch_add(bytes, std::memory_order_relaxed);
     Buffer* stage = stagingBuffer(bytes);
     if (!stage) return;
     memcpy(g_stageMapped, host, bytes);
@@ -794,11 +875,13 @@ void copyHostToDevice(Buffer* dst, const void* host, size_t bytes) {
     vkCmdCopyBuffer(cmd, stage->buf, dst->buf, 1, &region);
     dpOneShot(g_dp.oneShotH2D);
     endSubmitWait(cmd);
+    if (!checkedCounterAdd(g_h2dCount, 1) || !checkedCounterAdd(g_h2dBytes, bytes)) {
+        g_transferCountersValid = false;
+    }
 }
 
 void copyDeviceToHost(void* host, Buffer* src, size_t bytes) {
     if (bytes == 0 || !host || !src) return;
-    g_d2hBytes.fetch_add(bytes, std::memory_order_relaxed);
     Buffer* stage = stagingBuffer(bytes);
     if (!stage) return;
     VkCommandBuffer cmd = beginCmd();
@@ -807,6 +890,9 @@ void copyDeviceToHost(void* host, Buffer* src, size_t bytes) {
     dpOneShot(g_dp.oneShotD2H);
     endSubmitWait(cmd);
     memcpy(host, g_stageMapped, bytes);
+    if (!checkedCounterAdd(g_d2hCount, 1) || !checkedCounterAdd(g_d2hBytes, bytes)) {
+        g_transferCountersValid = false;
+    }
 }
 
 // ---- SPIR-V load + pipeline build ----------------------------------------------
@@ -1408,6 +1494,7 @@ int fvk_restore_add(void* dst_handle, size_t dst_offset, const void* src, size_t
     vkCmdCopyBuffer(g_restore.cmd, g_restore.stage->buf, dst->buf, 1, &region);
     g_restore.used = aligned + bytes;
     ++g_restore.entries;
+    g_restore.payloadBytes += bytes;
     return 0;
 }
 
@@ -1416,6 +1503,7 @@ int fvk_restore_submit(void) {
     if (g_restoreFailAfterSubmits >= 0 &&
         g_restore.successfulSubmits >= g_restoreFailAfterSubmits) {
         restoreDiscardCommand();
+        g_submissionStatus = VK_ERROR_DEVICE_LOST;
         return (int)VK_ERROR_DEVICE_LOST;
     }
     VkCommandBuffer cmd = g_restore.cmd;
@@ -1430,15 +1518,20 @@ int fvk_restore_submit(void) {
     if (r == VK_SUCCESS) r = vkWaitForFences(g_dev, 1, &g_submitFence, VK_TRUE, UINT64_MAX);
     vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
     g_restore.cmd = VK_NULL_HANDLE;
-    size_t submittedBytes = g_restore.used;
+    size_t submittedBytes = g_restore.payloadBytes;
+    size_t submittedEntries = g_restore.entries;
     g_restore.used = 0;
     g_restore.entries = 0;
+    g_restore.payloadBytes = 0;
     if (r != VK_SUCCESS) {
         g_submissionStatus = r;
         return (int)r;
     }
     ++g_restore.successfulSubmits;
-    g_h2dBytes.fetch_add(submittedBytes, std::memory_order_relaxed);
+    if (!checkedCounterAdd(g_h2dCount, submittedEntries) ||
+        !checkedCounterAdd(g_h2dBytes, submittedBytes)) {
+        g_transferCountersValid = false;
+    }
     dpOneShot(g_dp.oneShotH2D);
     return 0;
 }
@@ -1469,6 +1562,13 @@ void fvk_d2d_range(void* dst, size_t dst_off, const void* src, size_t src_off, s
         VkBufferCopy region{src_off, dst_off, bytes};
         dp_inc(g_dp.d2d);
         vkCmdCopyBuffer(g_batchCmd, B((void*)src)->buf, B(dst)->buf, 1, &region);
+        if (g_batchD2DCount == std::numeric_limits<uint64_t>::max() ||
+            bytes > std::numeric_limits<uint64_t>::max() - g_batchD2DBytes) {
+            g_batchD2DValid = false;
+        } else {
+            ++g_batchD2DCount;
+            g_batchD2DBytes += bytes;
+        }
         ++g_batchOps;
         return;
     }
@@ -1478,6 +1578,9 @@ void fvk_d2d_range(void* dst, size_t dst_off, const void* src, size_t src_off, s
     vkCmdCopyBuffer(cmd, B((void*)src)->buf, B(dst)->buf, 1, &region);
     dpOneShot(g_dp.oneShotD2D);
     endSubmitWait(cmd);
+    if (!checkedCounterAdd(g_d2dCount, 1) || !checkedCounterAdd(g_d2dBytes, bytes)) {
+        g_transferCountersValid = false;
+    }
 }
 
 void fvk_d2d(void* dst, const void* src, size_t bytes) {
@@ -1501,6 +1604,72 @@ void fvk_submission_reset(void) {
 int fvk_batch_flush_status(void) { fvk_batch_flush(); return (int)g_submissionStatus; }
 uint64_t fvk_h2d_bytes(void) { return g_h2dBytes.load(std::memory_order_relaxed); }
 uint64_t fvk_d2h_bytes(void) { return g_d2hBytes.load(std::memory_order_relaxed); }
+int fvk_transfer_counters(uint64_t* h2d_count, uint64_t* h2d_bytes,
+                           uint64_t* d2h_count, uint64_t* d2h_bytes,
+                           uint64_t* d2d_count, uint64_t* d2d_bytes) {
+    if (!g_ready || g_submissionStatus != VK_SUCCESS || !g_transferCountersValid ||
+        !h2d_count || !h2d_bytes || !d2h_count || !d2h_bytes ||
+        !d2d_count || !d2d_bytes) {
+        return 0;
+    }
+    *h2d_count = g_h2dCount.load(std::memory_order_relaxed);
+    *h2d_bytes = g_h2dBytes.load(std::memory_order_relaxed);
+    *d2h_count = g_d2hCount.load(std::memory_order_relaxed);
+    *d2h_bytes = g_d2hBytes.load(std::memory_order_relaxed);
+    *d2d_count = g_d2dCount.load(std::memory_order_relaxed);
+    *d2d_bytes = g_d2dBytes.load(std::memory_order_relaxed);
+    return 1;
+}
+
+int fvk_device_allocation_snapshot(uint64_t* live_bytes) {
+    if (!g_ready || g_submissionStatus != VK_SUCCESS ||
+        !g_deviceAllocationAccountingValid || !live_bytes) {
+        return 0;
+    }
+    *live_bytes = g_deviceAllocationLiveBytes;
+    return 1;
+}
+
+static bool backendObservationQuiescent() {
+    return !g_batching && g_batchCmd == VK_NULL_HANDLE && g_batchOps == 0 &&
+        g_batchSets.empty() && g_batchFreed.empty() &&
+        g_batchD2DCount == 0 && g_batchD2DBytes == 0 && g_batchD2DValid &&
+        !g_restore.stage && !g_restore.mapped && g_restore.cmd == VK_NULL_HANDLE &&
+        g_restore.cap == 0 && g_restore.maxEntries == 0 && g_restore.used == 0 &&
+        g_restore.entries == 0 && g_restore.payloadBytes == 0 &&
+        g_restore.successfulSubmits == 0;
+}
+
+int fvk_device_allocation_window_begin(uint64_t* token) {
+    if (!g_ready || g_submissionStatus != VK_SUCCESS ||
+        !backendObservationQuiescent() || !g_deviceAllocationAccountingValid ||
+        !g_transferCountersValid || g_allocationWindowActive || !token ||
+        g_nextAllocationWindowToken == 0) {
+        return 0;
+    }
+    g_allocationWindowActive = true;
+    g_allocationWindowToken = g_nextAllocationWindowToken++;
+    g_allocationWindowPeakBytes = g_deviceAllocationLiveBytes;
+    *token = g_allocationWindowToken;
+    return 1;
+}
+
+int fvk_device_allocation_window_end(uint64_t token, uint64_t* live_bytes,
+                                     uint64_t* peak_bytes) {
+    if (!g_allocationWindowActive || token == 0 || token != g_allocationWindowToken) {
+        return 0;
+    }
+    g_allocationWindowActive = false;
+    g_allocationWindowToken = 0;
+    if (g_submissionStatus != VK_SUCCESS || !backendObservationQuiescent() ||
+        !g_deviceAllocationAccountingValid || !g_transferCountersValid ||
+        !live_bytes || !peak_bytes) {
+        return 0;
+    }
+    *live_bytes = g_deviceAllocationLiveBytes;
+    *peak_bytes = g_allocationWindowPeakBytes;
+    return 1;
+}
 
 void fvk_sync(void) { if (g_dev) vkDeviceWaitIdle(g_dev); }
 
