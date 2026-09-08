@@ -431,9 +431,17 @@ func (s *Server) restoreContext(caller string, req ContextRestoreRequest) (CtxRe
 }
 
 func (s *Server) resolveRestoreRaw(caller, trace, id string, req ContextRestoreRequest) (CtxRestoreResult, error) {
+	// A quarantine decision is authoritative across every generic restore source.
+	// In particular, consult the durable MMU ledger before the restart-surviving
+	// media CAS and pluggable page-out backends below: screening the bytes again is
+	// not clearance, and a process restart must not turn a held digest into an admit.
+	cleanID := strings.TrimPrefix(id, "sha256:")
+	if ctxmmu.IsQuarantined(id) || ctxmmu.IsQuarantined(cleanID) {
+		return CtxRestoreResult{}, ErrRestoreRefused
+	}
+
 	// 1) The per-trace compaction-tombstone stash — the default source. A hit here (bytes or a
 	//    trust-gate refusal) is authoritative; only a genuine miss falls through to a Store.
-	cleanID := strings.TrimPrefix(id, "sha256:")
 	res, err := s.restoreFromStash(trace, id)
 	if (err != nil && errors.Is(err, ErrRestoreMiss)) && cleanID != id {
 		res, err = s.restoreFromStash(trace, cleanID)

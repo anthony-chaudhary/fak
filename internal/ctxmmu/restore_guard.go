@@ -3,6 +3,7 @@ package ctxmmu
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ type QuarantineLedger struct {
 	mu      sync.RWMutex
 	path    string
 	entries map[string]bool
+	loadErr error // an unreadable authority refuses generic restore; it never means "no quarantines"
 }
 
 // NewQuarantineLedger constructs a new QuarantineLedger. If path is provided,
@@ -37,7 +39,7 @@ func NewQuarantineLedger(path ...string) *QuarantineLedger {
 		entries: make(map[string]bool),
 	}
 	if p != "" {
-		_ = l.load()
+		l.loadErr = l.load()
 	}
 	return l
 }
@@ -56,16 +58,21 @@ func (l *QuarantineLedger) load() error {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
+	lineNo := 0
 	for scanner.Scan() {
+		lineNo++
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
 		var rec quarantineRecord
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			continue
+			return fmt.Errorf("quarantine ledger line %d: %w", lineNo, err)
 		}
 		clean := cleanDigest(rec.Digest)
+		if strings.TrimSpace(rec.Digest) == "" || clean == "" {
+			return fmt.Errorf("quarantine ledger line %d: empty digest", lineNo)
+		}
 		switch rec.Op {
 		case "quarantine":
 			l.entries[rec.Digest] = true
@@ -79,6 +86,8 @@ func (l *QuarantineLedger) load() error {
 				delete(l.entries, clean)
 				delete(l.entries, "sha256:"+clean)
 			}
+		default:
+			return fmt.Errorf("quarantine ledger line %d: unknown operation %q", lineNo, rec.Op)
 		}
 	}
 	return scanner.Err()
@@ -103,7 +112,9 @@ func (l *QuarantineLedger) RecordQuarantine(digest string) {
 		l.entries["sha256:"+clean] = true
 	}
 	if l.path != "" {
-		l.appendRecordLocked("quarantine", digest)
+		if err := l.appendRecordLocked("quarantine", digest); err != nil {
+			l.loadErr = err
+		}
 	}
 }
 
@@ -126,7 +137,9 @@ func (l *QuarantineLedger) ClearQuarantine(digest string) {
 		delete(l.entries, "sha256:"+clean)
 	}
 	if l.path != "" {
-		l.appendRecordLocked("clear", digest)
+		if err := l.appendRecordLocked("clear", digest); err != nil {
+			l.loadErr = err
+		}
 	}
 }
 
@@ -143,6 +156,9 @@ func (l *QuarantineLedger) IsQuarantined(digest string) bool {
 
 	l.mu.RLock()
 	defer l.mu.RUnlock()
+	if l.loadErr != nil {
+		return true
+	}
 
 	if l.entries[digest] {
 		return true
@@ -165,7 +181,7 @@ func (l *QuarantineLedger) Len() int {
 	return len(l.entries)
 }
 
-func (l *QuarantineLedger) appendRecordLocked(op, digest string) {
+func (l *QuarantineLedger) appendRecordLocked(op, digest string) error {
 	rec := quarantineRecord{
 		Op:     op,
 		Digest: digest,
@@ -173,14 +189,17 @@ func (l *QuarantineLedger) appendRecordLocked(op, digest string) {
 	}
 	b, err := json.Marshal(rec)
 	if err != nil {
-		return
+		return err
 	}
 	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
-		return
+		return err
 	}
-	defer f.Close()
-	_, _ = f.Write(append(b, '\n'))
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 var (
