@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Pull the PRIVATE scan instructions into this public clone (gitignored sidecar).
 
-    python tools/pull_scan_needles.py                       # auto-find sibling ../fleet
-    python tools/pull_scan_needles.py --from /path/to/fleet # explicit private repo
+    python tools/pull_scan_needles.py                            # auto-find sibling ../fak-private
+    python tools/pull_scan_needles.py --from /path/to/companion  # explicit private repo
     python tools/pull_scan_needles.py --status              # report current sidecar
     python tools/pull_scan_needles.py --check --json        # self-healing loop status
     python tools/pull_scan_needles.py --dump                # emit the canonical needle artifact
@@ -35,6 +35,7 @@ pulled, 2 precondition (no private repo / no needles), 4 internal.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -47,9 +48,29 @@ CANONICAL_REL = "scrub_needles.json"  # at the private repo ROOT: the durable ar
 SCHEMA = "fleet-scrub-needles/1"
 
 
-def _default_private_root() -> str:
-    """Best-effort sibling private repo: ../fleet next to this public clone."""
-    return os.path.join(os.path.dirname(PUBLIC_ROOT), "fleet")
+def _default_private_root(public_root: str) -> str:
+    """Authorized sibling companion: <public-name>-private beside public_root."""
+    public_root = os.path.abspath(public_root)
+    return os.path.join(os.path.dirname(public_root), os.path.basename(public_root) + "-private")
+
+
+def _source_identity(source: str, private_root: str) -> str | None:
+    """Return a portable identity for an authorized source inside private_root."""
+    try:
+        rel = os.path.relpath(os.path.abspath(source), os.path.abspath(private_root))
+    except ValueError:
+        return None
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        return None
+    rel = rel.replace(os.sep, "/")
+    if rel not in {CANONICAL_REL, "tools/scrub_public_copy.py"}:
+        return None
+    return rel
+
+
+def _source_digest(audit: list[str], export: list[str]) -> str:
+    data = json.dumps([audit, export], ensure_ascii=False, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(data.encode("utf-8")).hexdigest()
 
 
 def _load_private_module(private_root: str):
@@ -93,22 +114,42 @@ def read_private_needles(private_root: str):
             os.path.join(private_root, "tools", "scrub_public_copy.py"), None)
 
 
-def status(public_root: str) -> int:
+def _sidecar_current(public_root: str, private_root: str) -> tuple[bool, str]:
+    """Validate that the ignored sidecar is loaded, intact, and from the companion."""
     path = os.path.join(public_root, SIDECAR_REL)
     if not os.path.isfile(path):
-        print(f"scan-needles: NOT PULLED (no {SIDECAR_REL}) -- audit-tree runs shape-only")
-        return 0
+        return False, "missing"
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"scan-needles: present but unreadable: {exc}", file=sys.stderr)
-        return 4
-    print(
-        f"scan-needles: PULLED from {data.get('source')!r} -- "
-        f"{len(data.get('audit_needles') or [])} audit / "
-        f"{len(data.get('export_audit_needles') or [])} export needles"
-    )
+    except (OSError, json.JSONDecodeError):
+        return False, "invalid"
+
+    audit = data.get("audit_needles")
+    export = data.get("export_audit_needles")
+    source_id = data.get("source")
+    digest = data.get("source_digest")
+    if (data.get("schema") != SCHEMA or not isinstance(audit, list) or
+            not isinstance(export, list) or not export or
+            source_id not in {CANONICAL_REL, "tools/scrub_public_copy.py"} or
+            digest != _source_digest(audit, export)):
+        return False, "invalid"
+
+    if os.path.isdir(private_root):
+        current_audit, current_export, current_source, err = read_private_needles(private_root)
+        current_source_id = (None if err else _source_identity(current_source, private_root))
+        if (err or not current_export or source_id != current_source_id or
+                digest != _source_digest(current_audit, current_export)):
+            return False, "stale"
+    return True, "current"
+
+
+def status(public_root: str, private_root: str) -> int:
+    current, state = _sidecar_current(public_root, private_root)
+    if not current:
+        print(f"scan-needles: NOT CURRENT ({state}) -- audit-tree runs shape-only")
+        return 0 if state == "missing" else 4
+    print(f"scan-needles: PULLED ({state}; full mode)")
     return 0
 
 
@@ -122,10 +163,9 @@ def check(public_root: str, private_opt: str | None, as_json: bool) -> int:
     in ``full`` mode automatically on boxes that can, with no noise on boxes that
     can't.
     """
-    sidecar = os.path.join(public_root, SIDECAR_REL)
-    pulled = os.path.isfile(sidecar)
-    private_root = os.path.abspath(private_opt or _default_private_root())
+    private_root = os.path.abspath(private_opt or _default_private_root(public_root))
     private_reachable = os.path.isdir(private_root)
+    pulled, sidecar_state = _sidecar_current(public_root, private_root)
     ok = pulled or not private_reachable
     mode = ("full" if pulled
             else "shape-only-pullable" if private_reachable
@@ -139,7 +179,7 @@ def check(public_root: str, private_opt: str | None, as_json: bool) -> int:
         "ok": ok,
         "pulled": pulled,
         "private_reachable": private_reachable,
-        "private_root": private_root,
+        "sidecar_state": sidecar_state,
         "mode": mode,
         "reason": reason,
     }
@@ -155,10 +195,10 @@ def dump(private_root: str) -> int:
     """Emit the canonical needle artifact (scrub_needles.json) to stdout."""
     audit, export, source, err = read_private_needles(private_root)
     if err:
-        print(f"ERROR: {err}", file=sys.stderr)
+        print("ERROR: unable to load needle source from authorized companion", file=sys.stderr)
         return 2
     if not export:
-        print(f"ERROR: no EXPORT_AUDIT_NEEDLES from {source}", file=sys.stderr)
+        print("ERROR: authorized companion has no export audit needles", file=sys.stderr)
         return 2
     print(json.dumps({
         "schema": SCHEMA,
@@ -177,9 +217,14 @@ def pull(private_root: str, public_root: str) -> int:
         print(f"ERROR: no EXPORT_AUDIT_NEEDLES from {source}", file=sys.stderr)
         return 2
 
+    source_id = _source_identity(source, private_root)
+    if source_id is None:
+        print("ERROR: needle source is outside the authorized companion", file=sys.stderr)
+        return 2
     payload = {
         "schema": SCHEMA,
-        "source": source,
+        "source": source_id,
+        "source_digest": _source_digest(audit, export),
         "note": ("REAL operator needles pulled from the private repo. Gitignored "
                  "(tools/_registry). NEVER commit. Consumed by "
                  "scrub_public_copy.py --audit-tree."),
@@ -192,7 +237,7 @@ def pull(private_root: str, public_root: str) -> int:
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
     os.replace(tmp, out)
-    print(f"pulled {len(audit)} audit / {len(export)} export needles from {source}")
+    print(f"pulled {len(audit)} audit / {len(export)} export needles from authorized companion")
     print(f"  -> {SIDECAR_REL} (gitignored)")
     print("  audit-tree now runs in FULL mode; "
           "verify: python tools/scrub_public_copy.py --audit-tree --root .")
@@ -204,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--from", dest="private", default=None,
-                    help="private canonical repo root (default: sibling ../fleet)")
+                    help="private canonical repo root (default: sibling ../fak-private)")
     ap.add_argument("--public-dir", default=PUBLIC_ROOT,
                     help="public clone root (default: this repo)")
     ap.add_argument("--status", action="store_true",
@@ -217,16 +262,16 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     public_root = os.path.abspath(args.public_dir)
+    private_root = os.path.abspath(args.private or _default_private_root(public_root))
     if args.status:
-        return status(public_root)
+        return status(public_root, private_root)
     if args.check:
         return check(public_root, args.private, args.json)
 
-    private_root = os.path.abspath(args.private or _default_private_root())
     if args.dump:
         return dump(private_root)
     if not os.path.isdir(private_root):
-        print(f"ERROR: private repo not found: {private_root}\n"
+        print("ERROR: authorized private companion not found\n"
               f"  pass --from <private-repo-root>; on a box without the private "
               f"repo, audit-tree stays shape-only (degraded but honest).",
               file=sys.stderr)
