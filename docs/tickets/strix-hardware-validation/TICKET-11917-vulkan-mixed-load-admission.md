@@ -61,4 +61,22 @@ go vet ./internal/ggufload ./cmd/modelbench
 - [x] [SW-VERIFIED] Packed embedding persistent and staging reductions are exact.
 - [x] [SW-VERIFIED] Integrated-only combined-pool refusal and discrete control pass.
 - [x] [SW-VERIFIED] Full focused package tests and vets pass.
-- [ ] [HW-WITNESSED] Installed artifact header emits exact transformed demands on Strix.
+- [x] [HW-WITNESSED] Installed artifact header emits exact transformed demands on Strix.
+
+Physical receipt:
+[`strix-qwen38-vulkan-load-plan-20260908.json`](../../benchmarks/receipts/strix-qwen38-vulkan-load-plan-20260908.json).
+The source-bound preflight reached `REFUSE_TOO_BIG` with 97,151,913,984 bytes
+of simultaneous transformed demand against 23,176,558,592 usable host bytes
+while the incumbent service remained resident. It read the 10,996,640-byte
+header only; no tensor payload, model load, forward, or GPU dispatch occurred.
+
+The first physical attempt exposed one additional loader/estimator mismatch:
+the estimator rejected `blk.64.nextn.eh_proj.weight`, which the resident-Q4K
+loader intentionally drops before payload read. The follow-up source commit
+shares that skip predicate and the repeated preflight reached the intended
+capacity gate.
+
+The complete `cmd/modelbench` package has a pre-existing Windows timing flake in
+`TestRawDecodePhaseTimings`: a duration sampled around an extremely short fixture
+can be zero. It reproduced on untouched `main`; focused modelbench tests and vet
+remain green for this leaf.

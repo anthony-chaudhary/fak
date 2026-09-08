@@ -1,0 +1,77 @@
+{
+  "schema": "fak.strix.qwen38-vulkan-load-plan.v1",
+  "issue": 11917,
+  "status": "PASS_REFUSAL",
+  "scope": "Header-only mixed-quant Vulkan load admission for the installed Qwen3.8 UD-Q2_K_XL artifact; no tensor payload, model load, forward, or GPU dispatch.",
+  "observed_utc": "2026-09-08T06:16:20.1733546Z",
+  "source": {
+    "repository": "anthony-chaudhary/fak",
+    "commit": "cbe3790f75714470ad46acae1abd8a6e3233590d",
+    "blobs": {
+      "internal/ggufload/preflight.go": "f587d5c7c0ce9d1612b459e85dcb39426522f888",
+      "internal/ggufload/preflight_test.go": "09a63eb09e2e1731ebd2019f523296040e8c4ba1",
+      "cmd/modelbench/main.go": "6b1b92b1b9dbcca2a81512a7542c9dc755d07c10",
+      "cmd/modelbench/modelbench_test.go": "4d78fc86dd02be103dc7f43749a4154246b804a4"
+    }
+  },
+  "artifact": {
+    "kind": "Qwen3.8-27B UD-Q2_K_XL GGUF",
+    "file_bytes": 9828981664,
+    "header_bytes": 10996640,
+    "header_sha256": "1fe82fda85430cca654a156e9ec2915baf460752197013563b426db2581dcc0f",
+    "full_file_rehash_performed": false
+  },
+  "runner": {
+    "modelbench_sha256": "b6beb9e87665e7d33b0d25d57d112e843ac98741a9ba649c3e5f48cd06837b9f",
+    "backend": "vulkan",
+    "device": "AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+    "q4k": true,
+    "preflight": true,
+    "gguf_load_workers": 1,
+    "headroom_fraction": 0.15
+  },
+  "admission": {
+    "verdict": "REFUSE_TOO_BIG",
+    "fit_state": "FIT_TOO_BIG",
+    "fit_scope": "host",
+    "exit_code": 1,
+    "arch": "qwen35",
+    "tensor_count": 866,
+    "est_read_bytes": 9774915584,
+    "est_host_resident_bytes": 56451584000,
+    "est_device_resident_bytes": 39914184704,
+    "est_load_staging_bytes": 786145280,
+    "est_load_bytes": 97151913984,
+    "host_usable_bytes_after_headroom": 23176558592,
+    "reason": "The host-resident and staging subtotal alone exceeds the live headroom-adjusted MemAvailable budget; no load was attempted."
+  },
+  "safety": {
+    "lease": "exclusive nonblocking read-only flock on the appliance GPU lease",
+    "before": {
+      "inflight_including_scrape": 1,
+      "chat_requests": 0,
+      "gpu_busy_percent": 0,
+      "MemAvailable_kib": 26682640
+    },
+    "after": {
+      "service_http_health": 200,
+      "service_engine": "inkernel",
+      "inflight_including_scrape": 1,
+      "chat_requests": 0,
+      "gpu_busy_percent": 0
+    },
+    "service_restart": false,
+    "model_reload": false
+  },
+  "prior_negative": {
+    "source_commit": "c842f9907caf7c1786ad82759b0b33c076b49346",
+    "verdict": "REFUSE_BAD_HEADER",
+    "reason": "The estimator attempted to canonicalize target-inactive blk.64.nextn.eh_proj.weight even though the resident-Q4K loader drops that sidecar before payload read.",
+    "corrective_commit": "cbe3790f75714470ad46acae1abd8a6e3233590d"
+  },
+  "limitations": [
+    "Header-derived transformed demand is an admission estimate, not observed process RSS, driver allocation, or allocator-fragmentation evidence.",
+    "The incumbent model intentionally remained resident, so this receipt proves the live refusal rather than an isolated full-model fit.",
+    "No throughput, logits, or inference quality claim is made."
+  ]
+}
