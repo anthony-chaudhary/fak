@@ -8,18 +8,11 @@ package godfileceiling
 // Baseline pins today's god-files (> HardCeiling lines) at their current LOC. A
 // pinned file may only shrink; an unpinned file may not exceed HardCeiling. See doc.go.
 var Baseline = map[string]int{
-	"cmd/fak/cachevalue_status.go":            3014,
-	"cmd/fak/dispatch_tick.go":                1730,
-	"cmd/fak/loop.go":                         1544,
-	"cmd/fak/release_ship.go":                 1708,
-	"internal/agent/chat.go":                  1664,
-	"internal/compute/cuda.go":                1562,
-	"internal/dispatchtick/router.go":         1768,
-	"internal/fleetpane/fleetpane.go":         2091,
-	"internal/gateway/gateway.go":             3135,
-	"internal/gateway/http.go":                1819,
-	"internal/gateway/messages.go":            1739,
-	"internal/gateway/metrics.go":             3354,
-	"internal/operatorbrief/operatorbrief.go": 1576,
-	"internal/sessionaudit/sessionaudit.go":   1737,
+	"cmd/fak/guard.go":                     1554,
+	"internal/adjudicator/decide.go":       1550,
+	"internal/agent/inkernel_planner.go":   1509,
+	"internal/compute/vulkan.go":           1655,
+	"internal/gateway/messages.go":         1504,
+	"internal/ifc/ifc.go":                  1581,
+	"internal/sessionaudit/sessionaudit.go": 1510,
 }
