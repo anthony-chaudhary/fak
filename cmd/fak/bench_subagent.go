@@ -9,5 +9,6 @@ import (
 // runBenchSubagent executes the subagent fan-out multi-agent benchmark harness CLI.
 // Supports: fak bench subagent --scenario=shared_prefix_forked --concurrency=4 --runs=5 --json
 func runBenchSubagent(stdout, stderr io.Writer, args []string) int {
-	return qwen38campaign.RunCLI(stdout, stderr, args)
+	runner := qwen38campaign.NewProductPhysicalRunner()
+	return qwen38campaign.RunWithRunner(stdout, stderr, args, runner)
 }
