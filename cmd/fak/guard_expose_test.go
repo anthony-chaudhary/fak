@@ -18,7 +18,7 @@ func TestResolveGuardExposeTools(t *testing.T) {
 	if !reflect.DeepEqual(got, guardHeadlessExposeTools) {
 		t.Fatalf("headless profile = %v, want %v", got, guardHeadlessExposeTools)
 	}
-	if !containsStr(got, "fak_tools_search") {
+	if !containsGuardExposeStr(got, "fak_tools_search") {
 		t.Fatalf("fak_tools_search must stay exposed so pruned tools page in: %v", got)
 	}
 
@@ -143,7 +143,7 @@ func TestInteractiveGuardBudgetClearsItsOwnFloor(t *testing.T) {
 	}
 }
 
-func containsStr(xs []string, want string) bool {
+func containsGuardExposeStr(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {
 			return true
