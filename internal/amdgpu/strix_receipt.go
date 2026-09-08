@@ -637,7 +637,8 @@ func (r *StrixValidationReceipt) AllParityEvents() []StrixParityEvent {
 }
 
 // CreditEligible reports whether the receipt qualifies for physical Strix Halo parity credit.
-// Historical v1 receipts and host contracts are non-credit.
+// Historical v1 receipts and host contracts are non-credit. Current physical validation credit
+// is deliberately narrower than general v2 validity: exactly one argmax subkernel and no ablations.
 func (r *StrixValidationReceipt) CreditEligible() bool {
 	if err := r.Validate(); err != nil {
 		return false
@@ -649,6 +650,14 @@ func (r *StrixValidationReceipt) CreditEligible() bool {
 		return false
 	}
 	if !r.Target.Reachable {
+		return false
+	}
+	if r.SelectedCount != 1 || r.ExecutedCount != 1 ||
+		r.SelectedSubkernels != 1 || r.ExecutedSubkernels != 1 ||
+		len(r.Subkernels) != 1 || r.Subkernels[0].Name != "argmax" {
+		return false
+	}
+	if r.SelectedAblations != 0 || r.ExecutedAblations != 0 || len(r.Ablations) != 0 {
 		return false
 	}
 	events := r.AllParityEvents()
