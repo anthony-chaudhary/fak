@@ -83,6 +83,37 @@
       "published result without complete artifact, workload, power, and cache identity"
     ]
   },
+  "field_borrow_routes": {
+    "default": {
+      "disposition": "DEFAULT",
+      "route": "exact-artifact plain local paired A/B",
+      "artifact": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf",
+      "artifact_sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+      "speculation": "disabled",
+      "gate": "Only an interleaved same-token fak-native versus pinned local llama.cpp run on this exact artifact can establish engine superiority."
+    },
+    "optional_module": {
+      "disposition": "OPTIONAL-MODULE",
+      "route": "separately pinned MTP-capable artifact",
+      "reason": "The local Unsloth Q4_K_M file is reported without an MTP head; every 26-33 tok/s MTP row below uses different model bytes.",
+      "readmission": "Pin the exact main and draft artifact hashes, prove 64 GiB fit and held-out quality, then repeat the paired local gate as a distinct campaign."
+    },
+    "watch": {
+      "disposition": "WATCH",
+      "routes": [
+        "q38rocm",
+        "DFlash2"
+      ],
+      "refresh_trigger": "Refresh only after an immutable engine build, exact artifact hashes, and a held-out quality replay are available."
+    },
+    "exclude": {
+      "disposition": "EXCLUDE",
+      "routes": [
+        "corrupt HIP concurrency",
+        "repetitive-output throughput"
+      ]
+    }
+  },
   "rows": [
     {
       "id": "nabe-qwen38-27b-vulkan-mtp-c1-c4-c8",
@@ -177,6 +208,462 @@
       },
       "raw_evidence": {
         "url": "https://github.com/nabe2030/qwen38-evo-x2/tree/d2049a8892577a2e8caef51d71b5f74dfbd7abad/results"
+      },
+      "ratio": null
+    },
+    {
+      "id": "yandaq-lmstudio-q4km-mtp-c1",
+      "disposition": "CONTEXT_ONLY",
+      "reason": "The strongest broad single-stream dense-model point uses a 128 GiB appliance, a different lmstudio-community Q4_K_M with a built-in MTP head, warm sampled requests, and no artifact SHA256, measured power, frozen prompt packet, or held-out correctness score. It is a general c1 challenge, not a ratio against the plain local Unsloth artifact.",
+      "index_display": {
+        "frozen_point": "**26.47** mean decode tok/s across prose, code, and JSON",
+        "why_no_ratio": "Different MTP-capable Q4_K_M bytes and 128 GiB warm sampled workload; artifact hash, frozen prompt packet, held-out quality, and measured power are missing."
+      },
+      "source": {
+        "name": "yandaq/qwen3.8-27b-strix-halo",
+        "url": "https://github.com/yandaq/qwen3.8-27b-strix-halo/blob/eb68ceb0268d1c4fb4999e57e6fef0900441552e/benchmark.md",
+        "revision": "eb68ceb0268d1c4fb4999e57e6fef0900441552e",
+        "event_date": "2026-08-15",
+        "observed_date": "2026-09-08",
+        "license": "Apache-2.0"
+      },
+      "hardware": {
+        "identity": "GMKtec EVO-X2 / AMD Ryzen AI Max+ 395 / Radeon 8060S",
+        "gpu_architecture": "gfx1151",
+        "memory_gib": 128,
+        "memory_topology": "unified"
+      },
+      "model": {
+        "identity": "Qwen3.8-27B",
+        "architecture_class": "dense"
+      },
+      "artifact": {
+        "identity": "lmstudio-community/Qwen3.8-27B-GGUF Q4_K_M 16.80 GB with built-in MTP head",
+        "sha256": null,
+        "local_mismatch": "Local gate uses the distinct Unsloth Q4_K_M SHA256 7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169 without an MTP head."
+      },
+      "quantization": {
+        "weights": "Q4_K_M",
+        "draft": "built-in MTP"
+      },
+      "engine": {
+        "identity": "llama.cpp via LM Studio",
+        "backend": "Vulkan RADV",
+        "build": "LM Studio 2.28.2 fingerprint b1-fe2adf0",
+        "runtime": "Ubuntu 26.04 / kernel 7.0.0-29",
+        "jit_warmup": "The first generation was discarded to warm the Vulkan JIT path; this does not establish prompt-cache or prefix-reuse state."
+      },
+      "workload": {
+        "identity": "three prose/code/JSON prompt families, three measured runs each after one discarded Vulkan-JIT warmup, reasoning off, natural stopping",
+        "sha256": null,
+        "metric": "decode tokens per second",
+        "statistic": "mean of the three prompt-family means; temperature 0.7, top_p 0.8, top_k 20, seed 42",
+        "measurements": [
+          {
+            "concurrency": 1,
+            "value": 26.47,
+            "unit": "output_tok_s"
+          }
+        ]
+      },
+      "load": {
+        "concurrency": 1,
+        "slot_policy": "single stream"
+      },
+      "cache": {
+        "state": null,
+        "prefix_reuse": null
+      },
+      "speculation": {
+        "method": "built-in-mtp",
+        "ngram": false
+      },
+      "power": {
+        "configured_limit_w": null,
+        "observed_w": null,
+        "temperature_c": null,
+        "throttle_state": null,
+        "note": "CPU performance profile is named, but watts and energy are not measured."
+      },
+      "quality": {
+        "method": "degeneration guard requiring at least 0.5 distinct 30-character windows",
+        "verdict": "PARTIAL_SOURCE_CHECK_ONLY",
+        "details": "The source rejects degenerate generations but does not bind the local prompt packet or report a held-out correctness/solve-rate comparison."
+      },
+      "raw_evidence": {
+        "url": "https://github.com/yandaq/qwen3.8-27b-strix-halo/blob/eb68ceb0268d1c4fb4999e57e6fef0900441552e/benchmark.md"
+      },
+      "ratio": null
+    },
+    {
+      "id": "mikeveerman-q6-mtp-c1-q8-plain-c4",
+      "disposition": "CONTEXT_ONLY",
+      "reason": "The source maps useful single-stream MTP and four-stream plain crossover behavior, but uses 128 GiB, Unsloth Q6/Q8 artifacts instead of the local Q4_K_M, and supplies no artifact hashes, quality comparison, or power observations.",
+      "index_display": {
+        "frozen_point": "Q6+MTP c1 **18.72** decode tok/s; prefill **246→210** tok/s; Q8 plain c4 **21.75** aggregate tok/s",
+        "why_no_ratio": "Q6/Q8 plus optional MTP are different quant/speculation envelopes; exact hashes, held-out quality, and measured power are missing."
+      },
+      "source": {
+        "name": "MikeVeerman/qwen38-27-Strix-Halo-bench",
+        "url": "https://github.com/MikeVeerman/qwen38-27-Strix-Halo-bench/blob/cc52706409b0c550636ff068b06894d27079d734/README.md",
+        "revision": "cc52706409b0c550636ff068b06894d27079d734",
+        "event_date": "2026-08-16",
+        "observed_date": "2026-09-08",
+        "license": "MIT"
+      },
+      "hardware": {
+        "identity": "AMD Ryzen AI Max+ 395 / Radeon 8060S",
+        "gpu_architecture": "gfx1151",
+        "memory_gib": 128,
+        "memory_topology": "unified"
+      },
+      "model": {
+        "identity": "Qwen3.8-27B",
+        "architecture_class": "dense"
+      },
+      "artifact": {
+        "identity": "Unsloth UD-Q6_K_XL 25.9 GB and UD-Q8_K_XL 31.5 GB, both carrying NextN",
+        "sha256": null,
+        "local_mismatch": "Neither quant matches the local Unsloth Q4_K_M SHA256 7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169."
+      },
+      "quantization": {
+        "weights": "UD-Q6_K_XL and UD-Q8_K_XL",
+        "draft": "built-in NextN MTP when enabled"
+      },
+      "engine": {
+        "identity": "llama.cpp",
+        "backend": "Vulkan RADV",
+        "build": "b9867 (152d337fa)",
+        "runtime": "Mesa 26.0.3 / Ubuntu 26.04"
+      },
+      "workload": {
+        "identity": "greedy 256-token code/reasoning/JSON/prose generations plus a 10863-token prefill and c1-c4 concurrency sweep; prompt cache off",
+        "sha256": null,
+        "metric": "decode and aggregate output tokens per second; prefill tokens per second",
+        "statistic": "reported configuration means; no frozen cross-run variance distribution",
+        "measurements": [
+          {
+            "condition": "Q6+MTP c1 context 16k",
+            "decode_value": 18.72,
+            "prefill_value": 246.0,
+            "unit": "tok_s"
+          },
+          {
+            "condition": "Q6+MTP c1 context 50k",
+            "decode_value": 18.72,
+            "prefill_value": 210.2,
+            "unit": "tok_s"
+          },
+          {
+            "condition": "Q8 plain c4",
+            "value": 21.75,
+            "unit": "aggregate_output_tok_s"
+          }
+        ]
+      },
+      "load": {
+        "concurrency": [
+          1,
+          4
+        ],
+        "slot_policy": "single stream and four parallel requests reported separately"
+      },
+      "cache": {
+        "state": "prompt cache disabled for measured requests",
+        "prefix_reuse": false
+      },
+      "speculation": {
+        "method": "plain and built-in-mtp reported separately",
+        "ngram": false
+      },
+      "power": {
+        "configured_limit_w": null,
+        "observed_w": null,
+        "temperature_c": null,
+        "throttle_state": null
+      },
+      "quality": {
+        "method": "not measured",
+        "verdict": "UNMEASURED",
+        "details": "The source explicitly does not prove Q6 versus Q8 quality or lossless MTP behavior."
+      },
+      "raw_evidence": {
+        "url": "https://github.com/MikeVeerman/qwen38-27-Strix-Halo-bench/tree/cc52706409b0c550636ff068b06894d27079d734/data"
+      },
+      "ratio": null
+    },
+    {
+      "id": "thetom-ggml-q4km-plain-and-mtp-c1",
+      "disposition": "CONTEXT_ONLY",
+      "reason": "The plain 11.26 tok/s baseline and 33.03 tok/s MTP peak use ggml-org Q4_K_M plus a separate MTP GGUF rather than the local Unsloth artifact. The MTP arm is non-deterministic and has 31.11% worst-case spread across five identical samples, so the unstable headline cannot be promoted.",
+      "index_display": {
+        "frozen_point": "ggml Q4_K_M c1 plain **11.26**; MTP **33.03** tok/s with **31.11%** worst-case spread",
+        "why_no_ratio": "Different main/draft GGUF bytes, incomplete power and prompt identity, and unstable non-deterministic MTP output make both points context only."
+      },
+      "source": {
+        "name": "TheTom/offlabel",
+        "url": "https://github.com/TheTom/offlabel/blob/f4377ea3ae05c76fc598dce86c314cfbd7b95e08/models/qwen3.8-27b.md",
+        "revision": "f4377ea3ae05c76fc598dce86c314cfbd7b95e08",
+        "event_date": "2026-08-17",
+        "observed_date": "2026-09-08",
+        "license": "Apache-2.0"
+      },
+      "hardware": {
+        "identity": "AMD Strix Halo / Radeon 8060S",
+        "gpu_architecture": "gfx1151",
+        "memory_gib": null,
+        "memory_topology": "unified"
+      },
+      "model": {
+        "identity": "Qwen3.8-27B",
+        "architecture_class": "dense"
+      },
+      "artifact": {
+        "identity": "ggml-org Qwen3.8-27B Q4_K_M 17.67 GiB plus separate mtp-Qwen3.8-27B-Q4_0.gguf 1.6 GiB",
+        "sha256": null,
+        "local_mismatch": "The local gate is the smaller Unsloth Q4_K_M SHA256 7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169 and has no MTP sidecar."
+      },
+      "quantization": {
+        "weights": "Q4_K_M",
+        "draft": "separate Q4_0 MTP GGUF when enabled"
+      },
+      "engine": {
+        "identity": "llama.cpp",
+        "backend": "Vulkan RADV",
+        "build": null,
+        "runtime": "--no-mmap"
+      },
+      "workload": {
+        "identity": "single-stream decode at temperature 0 with five identical samples for MTP spread",
+        "sha256": null,
+        "metric": "decode tokens per second",
+        "statistic": "reported baseline and best nDraftMax=5 point with worst-case spread",
+        "measurements": [
+          {
+            "condition": "plain",
+            "value": 11.26,
+            "unit": "output_tok_s",
+            "worst_case_spread_percent": 0.14
+          },
+          {
+            "condition": "MTP nDraftMax 5",
+            "value": 33.03,
+            "unit": "output_tok_s",
+            "worst_case_spread_percent": 31.11
+          }
+        ]
+      },
+      "load": {
+        "concurrency": 1,
+        "slot_policy": "single stream"
+      },
+      "cache": {
+        "state": null,
+        "prefix_reuse": null
+      },
+      "speculation": {
+        "method": "plain and separate-draft MTP reported separately",
+        "ngram": false
+      },
+      "power": {
+        "configured_limit_w": null,
+        "observed_w": null,
+        "temperature_c": null,
+        "throttle_state": null
+      },
+      "quality": {
+        "method": "repeated temperature-zero output observation only",
+        "verdict": "MTP_NONDETERMINISTIC",
+        "details": "Identical MTP requests returned different generation lengths; no frozen prompt or task-quality comparison is attached."
+      },
+      "raw_evidence": {
+        "url": "https://github.com/TheTom/offlabel/blob/f4377ea3ae05c76fc598dce86c314cfbd7b95e08/models/qwen3.8-27b.md"
+      },
+      "ratio": null
+    },
+    {
+      "id": "agention-dflash2-rocmfp4-adaptive-c1",
+      "disposition": "CONTEXT_ONLY",
+      "field_borrow_disposition": "WATCH",
+      "reason": "The 65.6 tok/s structured result is a specialized predictable-output ceiling from a ROCmFP4 target plus DFlash2 draft sidecar and a non-upstream runtime. Prose reaches only 26.1 tok/s; exact artifacts, pinned engine build, repeated distribution, held-out quality, and power evidence are incomplete.",
+      "refresh_trigger": "Re-evaluate after the compatible engine has an immutable revision and exact target/draft hashes are replayed on held-out structured and prose prompts with quality and power receipts.",
+      "index_display": {
+        "frozen_point": "bare **14.0**; adaptive DFlash2 **65.6** structured and **26.1** prose tok/s",
+        "why_no_ratio": "WATCH: specialized ROCmFP4+DFlash2 predictable-output ceiling with an unpinned engine and missing exact hashes, repeated quality replay, and power evidence."
+      },
+      "source": {
+        "name": "agentionai/Qwen3.8-27B-DFlash2-ROCmFP4-FAST-GGUF",
+        "url": "https://huggingface.co/agentionai/Qwen3.8-27B-DFlash2-ROCmFP4-FAST-GGUF/blob/97e4e252d2b48899f12905f8aac814ece633af61/README.md",
+        "revision": "97e4e252d2b48899f12905f8aac814ece633af61",
+        "event_date": "2026-08-30",
+        "observed_date": "2026-09-08",
+        "license": "Apache-2.0"
+      },
+      "hardware": {
+        "identity": "AMD Strix Halo / Radeon 8060S",
+        "gpu_architecture": "gfx1151",
+        "memory_gib": null,
+        "memory_topology": "unified"
+      },
+      "model": {
+        "identity": "Qwen3.8-27B target plus Qwen3.8-27B-DFlash2 draft",
+        "architecture_class": "dense target with learned draft sidecar"
+      },
+      "artifact": {
+        "identity": "julianmb Qwen3.8-27B ROCmFP4-FAST target plus Agention Q4_0_ROCmFP4_FAST DFlash2 sidecar",
+        "sha256": null,
+        "local_mismatch": "Both the ROCmFP4 target and DFlash2 sidecar differ from the local Unsloth Q4_K_M SHA256 7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169."
+      },
+      "quantization": {
+        "weights": "ROCmFP4-FAST target",
+        "draft": "Q4_0_ROCmFP4_FAST DFlash2"
+      },
+      "engine": {
+        "identity": "ROCmFPx llama.cpp fork",
+        "backend": "Vulkan 1.3 / Mesa RADV 26.0.8",
+        "build": null,
+        "runtime": "custom file type 103; stock llama.cpp cannot load it"
+      },
+      "workload": {
+        "identity": "greedy 300-token structured-output and prose prompts with adaptive draft n_min=3 n_max=7",
+        "sha256": null,
+        "metric": "decode tokens per second",
+        "statistic": "reported point estimates; no frozen repetition distribution",
+        "measurements": [
+          {
+            "condition": "bare structured",
+            "value": 14.0,
+            "unit": "output_tok_s"
+          },
+          {
+            "condition": "adaptive structured",
+            "value": 65.6,
+            "unit": "output_tok_s"
+          },
+          {
+            "condition": "adaptive prose",
+            "value": 26.1,
+            "unit": "output_tok_s"
+          }
+        ]
+      },
+      "load": {
+        "concurrency": 1,
+        "slot_policy": "single stream"
+      },
+      "cache": {
+        "state": null,
+        "prefix_reuse": null
+      },
+      "speculation": {
+        "method": "adaptive DFlash2 n_min=3 n_max=7",
+        "ngram": false
+      },
+      "power": {
+        "configured_limit_w": null,
+        "observed_w": null,
+        "temperature_c": null,
+        "throttle_state": null
+      },
+      "quality": {
+        "method": "source states target-model token verification",
+        "verdict": "INCOMPLETE_FOR_COMPARISON",
+        "details": "No held-out correctness corpus, target/draft artifact hashes, or repeated prose-versus-structured quality distribution is attached."
+      },
+      "raw_evidence": {
+        "url": "https://huggingface.co/agentionai/Qwen3.8-27B-DFlash2-ROCmFP4-FAST-GGUF/blob/97e4e252d2b48899f12905f8aac814ece633af61/README.md"
+      },
+      "ratio": null
+    },
+    {
+      "id": "halogen-flash-next-http-c1",
+      "disposition": "CONTEXT_ONLY",
+      "reason": "Halogen measures a custom Qwen3.8-Flash-Next sparse-MoE runtime and HGN artifact on 128 GiB, not dense Qwen3.8-27B Q4_K_M. Its HTTP numbers are valuable cross-model context but cannot establish a dense-model or engine win; power and matched-corpus evidence are absent.",
+      "index_display": {
+        "frozen_point": "HTTP mean **43.6**; 32k served MTP mean **41.7** tok/s",
+        "why_no_ratio": "Custom sparse-MoE Flash-Next/HGN runtime on 128 GiB is cross-model context; artifact, corpus, cache, and power envelopes do not match dense local Q4_K_M."
+      },
+      "source": {
+        "name": "peonist-ai/halogen-flash-server",
+        "url": "https://github.com/peonist-ai/halogen-flash-server/blob/0208581a5a0c54c53fc11f2e9e06622f168f5b6f/README.md",
+        "revision": "0208581a5a0c54c53fc11f2e9e06622f168f5b6f",
+        "event_date": "2026-09-04",
+        "observed_date": "2026-09-08",
+        "license": null
+      },
+      "hardware": {
+        "identity": "AMD Ryzen AI Max+ 395 / Radeon 8060S",
+        "gpu_architecture": "gfx1151",
+        "memory_gib": 128,
+        "memory_topology": "unified"
+      },
+      "model": {
+        "identity": "Qwen3.8-Flash-Next",
+        "architecture_class": "sparse MoE custom HGN runtime"
+      },
+      "artifact": {
+        "identity": "halogen qwen38-flash-next-w4b.hgn 115.55 GiB plus 2.31 GiB quality overlay",
+        "sha256": null,
+        "local_mismatch": "Different model architecture, format, and artifact from dense local Unsloth Q4_K_M SHA256 7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169."
+      },
+      "quantization": {
+        "weights": "custom 5.53 bpw HGN W4B plus quality overlay",
+        "draft": "custom speculative drafter"
+      },
+      "engine": {
+        "identity": "halogen-flash-server",
+        "backend": "ROCm gfx1151",
+        "build": "source revision 0208581a5a0c54c53fc11f2e9e06622f168f5b6f; measurement images 0.2.0 and 0.3.0",
+        "measurement_builds": {
+          "http_mean_43_6": "0.3.0",
+          "served_ctx32768_41_7": "0.2.0 measurement, cross-checked within 1 tok/s on 0.3.0",
+          "current_reproduction_image": "0.4.4 (not the measurement identity)"
+        },
+        "runtime": "custom single-model server"
+      },
+      "workload": {
+        "identity": "HTTP/SSE benchmark over ten real prompt shapes plus a 32768-context served sweep, greedy temperature 0",
+        "sha256": null,
+        "metric": "served decode tokens per second",
+        "statistic": "mean over ten prompt shapes; no matched dense-Qwen replay",
+        "measurements": [
+          {
+            "condition": "HTTP mean over ten prompt shapes",
+            "value": 43.6,
+            "unit": "output_tok_s"
+          },
+          {
+            "condition": "served MTP at 32768 context",
+            "value": 41.7,
+            "unit": "output_tok_s"
+          }
+        ]
+      },
+      "load": {
+        "concurrency": 1,
+        "slot_policy": "single served conversation; server supports multiple slots"
+      },
+      "cache": {
+        "state": "prompt cache enabled by default",
+        "prefix_reuse": true
+      },
+      "speculation": {
+        "method": "custom MTP drafter",
+        "ngram": false
+      },
+      "power": {
+        "configured_limit_w": null,
+        "observed_w": null,
+        "temperature_c": null,
+        "throttle_state": null
+      },
+      "quality": {
+        "method": "source reports byte-identical greedy speculation and long-context retrieval 148/150",
+        "verdict": "SOURCE_ONLY_CROSS_MODEL",
+        "details": "Useful model-local checks, but no common dense-Qwen corpus, exact artifact hash, or paired local correctness comparison exists."
+      },
+      "raw_evidence": {
+        "url": "https://github.com/peonist-ai/halogen-flash-server/blob/0208581a5a0c54c53fc11f2e9e06622f168f5b6f/README.md"
       },
       "ratio": null
     },
