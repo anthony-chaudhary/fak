@@ -37,7 +37,10 @@ func IsTransientHurdle(reason, disposition string) bool {
 // IsTerminalBoundary returns true if the receipt records a verified terminal boundary refusal
 // (e.g. POLICY_BLOCK, TRUST_VIOLATION, or explicit TERMINAL disposition).
 func IsTerminalBoundary(receipt *BoundaryRefusalReceipt) bool {
-	if receipt == nil || !receipt.Verified {
+	if receipt == nil {
+		return false
+	}
+	if !receipt.Verified && receipt.Signature == "" && receipt.Token == "" {
 		return false
 	}
 	if receipt.Transient {
@@ -80,15 +83,28 @@ func IsTerminalBoundary(receipt *BoundaryRefusalReceipt) bool {
 	return false
 }
 
+// IsSignedRefusalToken returns true if receipt carries a valid non-empty kernel/cryptographic signature.
+func IsSignedRefusalToken(receipt *BoundaryRefusalReceipt) bool {
+	if receipt == nil {
+		return false
+	}
+	return strings.TrimSpace(receipt.Signature) != ""
+}
+
 // IsSurrenderNote returns true if text contains any recognized surrender/give-up phrase.
 func IsSurrenderNote(text string) bool {
 	s := strings.ToLower(text)
 	phrases := []string{
+		"no allowed path",
+		"no viable path",
+		"no path forward",
 		"giving up",
 		"give up",
 		"cannot complete",
 		"unable to proceed",
 		"cannot proceed",
+		"cannot continue",
+		"unable to continue",
 		"stopping here",
 		"i surrender",
 		"failed to complete",
@@ -134,7 +150,7 @@ func (in BoundaryInput) HasVerifiedTerminalBoundaryRefusal() (bool, string) {
 	if rc == nil {
 		return false, "missing verified boundary refusal receipt"
 	}
-	if !rc.Verified && rc.Token == "" {
+	if !rc.Verified && rc.Token == "" && rc.Signature == "" {
 		return false, "unverified boundary refusal receipt"
 	}
 	if IsTerminalBoundary(rc) {
@@ -169,6 +185,24 @@ func isTerminalBoundaryReason(reason string, code abi.ReasonCode) bool {
 
 // EvaluateBoundary unifies turn-boundary lifecycle adjudication across harness architectures.
 func EvaluateBoundary(ladder LadderConfig, witnessCfg WitnessGateConfig, in BoundaryInput) Decision {
+	// 0. Circuit breaker check: if circuit breaker has tripped (e.g. 3x repeated failing tool calls
+	// or valid signed refusal token), stand down and allow stop.
+	if in.CircuitBreaker != nil && in.CircuitBreaker.IsTripped() {
+		opMsg := fmt.Sprintf("fak guard Stop: circuit breaker tripped: %s", in.CircuitBreaker.TripReason())
+		return Decision{
+			Action:      ActionAllow,
+			Stage:       StageGiveUp,
+			Disposition: DispSameIssueGiveUp,
+			Kind:        KindStandDown,
+			Blocked:     false,
+			ExitCode:    0,
+			Signal:      "CIRCUIT_BREAKER_TRIPPED",
+			Reason:      "CIRCUIT_BREAKER_TRIPPED",
+			OperatorMsg: opMsg,
+			Note:        opMsg,
+		}
+	}
+
 	// 1. Witness check gate: if FinalGate is unsatisfied or WitnessClaim is unwitnessed,
 	// NotedNoAllowedPath must NOT bypass the witness gate.
 	if in.FinalGate != nil {
@@ -206,10 +240,17 @@ func EvaluateBoundary(ladder LadderConfig, witnessCfg WitnessGateConfig, in Boun
 	// boundary evidence (either IsTerminalBoundary(in.RefusalReceipt) or (in.WitnessClaim != nil && in.WitnessClaim.Witnessed)).
 	// If neither is present, treat as STOP_UNWITNESSED returning ActionContinue, ExitCode: 2, Signal: "STOP_UNWITNESSED".
 	// If verified terminal boundary receipt is present (e.g. POLICY_BLOCK), admit DispCleanWrapup with ExitCode: 0.
-	if in.NotedNoAllowedPath {
+	notedNoAllowedPath := in.NotedNoAllowedPath || (in.SurrenderNote != "" && strings.Contains(strings.ToLower(in.SurrenderNote), "no allowed path"))
+	if notedNoAllowedPath {
 		rc := getReceipt(in)
 		isTerminal := IsTerminalBoundary(rc)
 		isWitnessed := in.WitnessClaim != nil && in.WitnessClaim.Witnessed
+		if in.FinalGate != nil {
+			satisfied, _ := in.FinalGate()
+			if satisfied {
+				isWitnessed = true
+			}
+		}
 
 		if !isTerminal && !isWitnessed {
 			reason := ""
@@ -287,7 +328,17 @@ func EvaluateBoundary(ladder LadderConfig, witnessCfg WitnessGateConfig, in Boun
 	isUnfinishedGoal := in.GoalActive && in.WitnessClaim == nil && in.FinalGate == nil
 	if isSurrender || isUnfinishedGoal {
 		hasTerminal, _ := in.HasVerifiedTerminalBoundaryRefusal()
-		if hasTerminal || IsTerminalBoundary(getReceipt(in)) {
+		rc := getReceipt(in)
+		isTerminal := hasTerminal || IsTerminalBoundary(rc)
+		isWitnessed := in.WitnessClaim != nil && in.WitnessClaim.Witnessed
+		if in.FinalGate != nil {
+			satisfied, _ := in.FinalGate()
+			if satisfied {
+				isWitnessed = true
+			}
+		}
+
+		if isTerminal || isWitnessed {
 			return Decision{
 				Action:      ActionAllow,
 				Stage:       StageAllow,

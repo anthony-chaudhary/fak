@@ -196,4 +196,7 @@ type BoundaryInput struct {
 	SurrenderNote  string
 	GoalActive     bool
 	GoalObjective  string
+
+	// CircuitBreaker optionally provides stateful circuit breaker tracking.
+	CircuitBreaker *CircuitBreaker
 }

@@ -616,3 +616,270 @@ func TestHarnessParityTrajectory(t *testing.T) {
 		}
 	})
 }
+
+// TestUnverifiedSurrenderStringsTriggerRefusal verifies that active goals reject unverified
+// textual surrender phrases (such as "no allowed path", "cannot proceed", "giving up", "no allowed path: <reason>"),
+// triggering ActionContinue / refusal unless accompanied by a valid kernel refusal token or witness (#11771).
+func TestUnverifiedSurrenderStringsTriggerRefusal(t *testing.T) {
+	ladder := DefaultLadderConfig()
+	witness := WitnessGateConfig{Mode: ModeEnforce, Max: 3}
+
+	surrenderPhrases := []struct {
+		name   string
+		phrase string
+	}{
+		{"no_allowed_path", "no allowed path"},
+		{"no_allowed_path_with_reason", "no allowed path: permission denied on write target"},
+		{"no_allowed_path_colon", "no allowed path: resource constrained"},
+		{"cannot_proceed", "cannot proceed with this approach"},
+		{"giving_up", "giving up on task due to compilation errors"},
+		{"unable_to_proceed", "unable to proceed without external dependency"},
+		{"cannot_fix", "cannot fix the issue after multiple attempts"},
+	}
+
+	for _, sp := range surrenderPhrases {
+		t.Run("active_goal_unverified_"+sp.name, func(t *testing.T) {
+			in := BoundaryInput{
+				GoalActive:    true,
+				GoalObjective: "adversarial anti-surrender enforcement",
+				SurrenderNote: sp.phrase,
+			}
+			dec := EvaluateBoundary(ladder, witness, in)
+			if dec.Action != ActionContinue {
+				t.Fatalf("phrase %q: want ActionContinue, got %s", sp.phrase, dec.Action)
+			}
+			if dec.ExitCode != 2 {
+				t.Fatalf("phrase %q: want ExitCode 2, got %d", sp.phrase, dec.ExitCode)
+			}
+			if !dec.Blocked {
+				t.Fatalf("phrase %q: want Blocked true, got false", sp.phrase)
+			}
+			if dec.Disposition != DispClaimUnwitnessedContinue {
+				t.Fatalf("phrase %q: want DispClaimUnwitnessedContinue, got %s", sp.phrase, dec.Disposition)
+			}
+			if dec.Kind != KindContinue {
+				t.Fatalf("phrase %q: want KindContinue, got %s", sp.phrase, dec.Kind)
+			}
+		})
+	}
+
+	t.Run("unverified_refusal_receipt_triggers_refusal", func(t *testing.T) {
+		in := BoundaryInput{
+			GoalActive:    true,
+			GoalObjective: "adversarial anti-surrender enforcement",
+			SurrenderNote: "no allowed path: policy restriction",
+			BoundaryRefusalReceipt: &BoundaryRefusalReceipt{
+				Reason:    "POLICY_BLOCK",
+				Verified:  false,
+				Signature: "", // unverified, unsigned
+			},
+		}
+		dec := EvaluateBoundary(ladder, witness, in)
+		if dec.Action != ActionContinue || dec.ExitCode != 2 || !dec.Blocked {
+			t.Fatalf("unverified receipt must trigger ActionContinue/refusal, got: %+v", dec)
+		}
+		if dec.Disposition != DispClaimUnwitnessedContinue {
+			t.Fatalf("want DispClaimUnwitnessedContinue, got %s", dec.Disposition)
+		}
+	})
+
+	t.Run("witness_satisfied_allows_clean_wrapup_even_with_surrender_note", func(t *testing.T) {
+		in := BoundaryInput{
+			GoalActive:    true,
+			GoalObjective: "adversarial anti-surrender enforcement",
+			SurrenderNote: "cannot proceed further, completed all steps",
+			WitnessClaim: &WitnessClaim{
+				Claimed:   true,
+				Witnessed: true,
+				Commit:    "c0ffee1",
+				Detail:    "witnessed proof commit",
+			},
+		}
+		dec := EvaluateBoundary(ladder, witness, in)
+		if dec.Action != ActionAllow || dec.ExitCode != 0 || dec.Disposition != DispCleanWrapup {
+			t.Fatalf("witnessed claim must admit DispCleanWrapup, got: %+v", dec)
+		}
+	})
+}
+
+// TestValidSignedRefusalTokensAllowCleanWrapupAndTripCircuitBreaker verifies that valid signed
+// refusal tokens admit clean wrapup in EvaluateBoundary and trip the circuit breaker (#11771).
+func TestValidSignedRefusalTokensAllowCleanWrapupAndTripCircuitBreaker(t *testing.T) {
+	ladder := DefaultLadderConfig()
+	witness := WitnessGateConfig{Mode: ModeEnforce, Max: 3}
+
+	signedReceipt := &BoundaryRefusalReceipt{
+		Tool:        "bash",
+		Reason:      "POLICY_BLOCK",
+		Disposition: "TERMINAL",
+		Signature:   "ed25519:sig_kernel_verified_7781",
+		Verified:    true,
+	}
+
+	// 1. In EvaluateBoundary: valid signed refusal token admits DispCleanWrapup with ExitCode 0
+	in := BoundaryInput{
+		GoalActive:             true,
+		GoalObjective:          "testing signed refusal tokens",
+		NotedNoAllowedPath:     true,
+		SurrenderNote:          "no allowed path: policy boundary reached",
+		BoundaryRefusalReceipt: signedReceipt,
+	}
+	dec := EvaluateBoundary(ladder, witness, in)
+	if dec.Action != ActionAllow {
+		t.Fatalf("signed refusal token: want ActionAllow, got %s", dec.Action)
+	}
+	if dec.ExitCode != 0 {
+		t.Fatalf("signed refusal token: want ExitCode 0, got %d", dec.ExitCode)
+	}
+	if dec.Disposition != DispCleanWrapup {
+		t.Fatalf("signed refusal token: want DispCleanWrapup, got %s", dec.Disposition)
+	}
+	if dec.Kind != KindClean {
+		t.Fatalf("signed refusal token: want KindClean, got %s", dec.Kind)
+	}
+
+	// 2. In CircuitBreaker: valid signed refusal token trips the circuit breaker
+	cb := NewCircuitBreaker()
+	if cb.IsTripped() {
+		t.Fatal("new circuit breaker must not be tripped")
+	}
+	tripped := cb.RecordSignedRefusal(signedReceipt)
+	if !tripped {
+		t.Fatal("RecordSignedRefusal must return true for valid signed receipt")
+	}
+	if !cb.IsTripped() {
+		t.Fatal("circuit breaker must be tripped after RecordSignedRefusal")
+	}
+	if !strings.Contains(cb.TripReason(), "POLICY_BLOCK") {
+		t.Fatalf("trip reason must mention POLICY_BLOCK, got %q", cb.TripReason())
+	}
+
+	// 3. Tripped circuit breaker in EvaluateBoundary allows session to stand down cleanly
+	inWithCB := BoundaryInput{
+		GoalActive:     true,
+		SurrenderNote:  "cannot proceed",
+		CircuitBreaker: cb,
+	}
+	decCB := EvaluateBoundary(ladder, witness, inWithCB)
+	if decCB.Action != ActionAllow || decCB.ExitCode != 0 || decCB.Kind != KindStandDown {
+		t.Fatalf("tripped circuit breaker must allow stand-down, got: %+v", decCB)
+	}
+}
+
+// TestCircuitBreakerMD5ToolSignatureTracking tests MD5 tool invocation signature tracking
+// MD5(tool_name || canonical_json_args) and circuit breaker tripping invariants (#11771).
+func TestCircuitBreakerMD5ToolSignatureTracking(t *testing.T) {
+	// 1. Signature canonicalization invariance
+	t.Run("md5_signature_canonical_json_invariance", func(t *testing.T) {
+		sig1 := ToolInvocationSignature("bash", `{"command":"git status","timeout":10}`)
+		sig2 := ToolInvocationSignature("bash", `{"timeout":10,"command":"git status"}`)
+		sig3 := ToolInvocationSignature("bash", `{  "command" : "git status" , "timeout" : 10  }`)
+
+		if sig1 != sig2 {
+			t.Fatalf("key reordering produced different signatures: sig1=%s, sig2=%s", sig1, sig2)
+		}
+		if sig1 != sig3 {
+			t.Fatalf("whitespace produced different signatures: sig1=%s, sig3=%s", sig1, sig3)
+		}
+		if len(sig1) != 32 {
+			t.Fatalf("MD5 signature must be 32 hex chars, got len %d (%s)", len(sig1), sig1)
+		}
+
+		// Different tools produce different signatures
+		sigOtherTool := ToolInvocationSignature("sh", `{"command":"git status","timeout":10}`)
+		if sig1 == sigOtherTool {
+			t.Fatalf("different tools must have different signatures: %s == %s", sig1, sigOtherTool)
+		}
+
+		// Different args produce different signatures
+		sigOtherArgs := ToolInvocationSignature("bash", `{"command":"git log","timeout":10}`)
+		if sig1 == sigOtherArgs {
+			t.Fatalf("different args must have different signatures: %s == %s", sig1, sigOtherArgs)
+		}
+	})
+
+	// 2. Trips circuit breaker only when identical failing calls repeat >= 3 consecutive times without progress
+	t.Run("trips_at_three_consecutive_identical_failures", func(t *testing.T) {
+		cb := NewCircuitBreaker()
+		tool := "run_test"
+		args := `{"test":"TestFeature","timeout":30}`
+
+		// Call 1 fails
+		tripped1 := cb.RecordFailure(tool, args)
+		if tripped1 || cb.IsTripped() || cb.ConsecutiveFailures() != 1 {
+			t.Fatalf("turn 1: unexpected trip or count: tripped=%v, count=%d", tripped1, cb.ConsecutiveFailures())
+		}
+
+		// Call 2 fails with identical args (reordered keys)
+		argsReordered := `{"timeout":30,"test":"TestFeature"}`
+		tripped2 := cb.RecordFailure(tool, argsReordered)
+		if tripped2 || cb.IsTripped() || cb.ConsecutiveFailures() != 2 {
+			t.Fatalf("turn 2: unexpected trip or count: tripped=%v, count=%d", tripped2, cb.ConsecutiveFailures())
+		}
+
+		// Call 3 fails with identical args (whitespace variant) -> trips circuit breaker!
+		argsWhitespace := `{  "test" : "TestFeature" , "timeout" : 30  }`
+		tripped3 := cb.RecordFailure(tool, argsWhitespace)
+		if !tripped3 || !cb.IsTripped() || cb.ConsecutiveFailures() != 3 {
+			t.Fatalf("turn 3: expected circuit breaker trip: tripped=%v, isTripped=%v, count=%d", tripped3, cb.IsTripped(), cb.ConsecutiveFailures())
+		}
+		if !strings.Contains(cb.TripReason(), "3 consecutive occurrences without progress") {
+			t.Fatalf("unexpected trip reason: %s", cb.TripReason())
+		}
+	})
+
+	// 3. Exploratory retries (different tools or args) do NOT trip the circuit breaker
+	t.Run("exploratory_retries_do_not_trip_circuit_breaker", func(t *testing.T) {
+		cb := NewCircuitBreaker()
+
+		// Attempt 1: tool A fails
+		cb.RecordFailure("fetch_page", `{"url":"https://example.com/api"}`)
+		if cb.ConsecutiveFailures() != 1 || cb.IsTripped() {
+			t.Fatal("unexpected state after attempt 1")
+		}
+
+		// Attempt 2: tool A with different URL fails (exploratory)
+		cb.RecordFailure("fetch_page", `{"url":"https://example.com/health"}`)
+		if cb.ConsecutiveFailures() != 1 || cb.IsTripped() {
+			t.Fatalf("exploratory retry must reset count to 1, got %d", cb.ConsecutiveFailures())
+		}
+
+		// Attempt 3: tool B fails (exploratory)
+		cb.RecordFailure("curl_cmd", `{"url":"https://example.com/api"}`)
+		if cb.ConsecutiveFailures() != 1 || cb.IsTripped() {
+			t.Fatalf("different tool must reset count to 1, got %d", cb.ConsecutiveFailures())
+		}
+
+		// Attempt 4: tool C fails (exploratory)
+		cb.RecordFailure("ping_host", `{"host":"example.com"}`)
+		if cb.ConsecutiveFailures() != 1 || cb.IsTripped() {
+			t.Fatalf("different tool must reset count to 1, got %d", cb.ConsecutiveFailures())
+		}
+	})
+
+	// 4. Progress or success resets failure tracking
+	t.Run("progress_or_success_resets_circuit_breaker", func(t *testing.T) {
+		cb := NewCircuitBreaker()
+		tool := "build_target"
+		args := `{"target":"//cmd/fak"}`
+
+		// 2 consecutive failures
+		cb.RecordFailure(tool, args)
+		cb.RecordFailure(tool, args)
+		if cb.ConsecutiveFailures() != 2 {
+			t.Fatalf("want 2 failures, got %d", cb.ConsecutiveFailures())
+		}
+
+		// Progress occurs
+		cb.RecordSuccess(tool, args)
+		if cb.ConsecutiveFailures() != 0 || cb.IsTripped() {
+			t.Fatalf("success must reset counter to 0, got %d", cb.ConsecutiveFailures())
+		}
+
+		// Subsequent failure starts from 1
+		cb.RecordFailure(tool, args)
+		if cb.ConsecutiveFailures() != 1 || cb.IsTripped() {
+			t.Fatalf("post-success failure must be at count 1, got %d", cb.ConsecutiveFailures())
+		}
+	})
+}
