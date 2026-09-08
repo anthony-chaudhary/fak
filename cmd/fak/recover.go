@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
+	"github.com/anthony-chaudhary/fak/internal/guardcomplaint"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
@@ -95,6 +96,34 @@ func runRecover(stdout, stderr io.Writer, argv []string) int {
 	if reasonArg == "" {
 		if fs.NArg() == 1 {
 			reasonArg = fs.Arg(0)
+		} else if fs.NArg() == 0 {
+			journals := guardcomplaint.DiscoverJournals(*dir, "")
+			if latest := guardcomplaint.LatestDenial(journals, "", ""); latest != nil {
+				candidate := ""
+				if latest.DenyRule != "" {
+					candidate = normalizeRecoveryReason(latest.DenyRule)
+				}
+				if candidate == "" || plans[candidate].Reason == "" {
+					candidate = normalizeRecoveryReason(latest.Reason)
+				}
+				if _, ok := plans[candidate]; ok {
+					fmt.Fprintf(stderr, "fak recover: auto-detected refusal from audit journal: %s (tool: %s)\n", candidate, latest.Tool)
+					reasonArg = candidate
+				}
+			}
+			if reasonArg == "" {
+				fmt.Fprintln(stderr, "fak recover: no recovery reason specified and no recent refusal found in audit journal.")
+				fmt.Fprintln(stderr, "usage: fak recover <REASON> [--dry-run|--execute] [--json]")
+				fmt.Fprintln(stderr, "")
+				fmt.Fprintln(stderr, "common recovery reasons:")
+				fmt.Fprintln(stderr, "  fak recover RESET_HARD             # git reset --hard was refused")
+				fmt.Fprintln(stderr, "  fak recover SKIP_HOOKS             # commit/push hooks bypass (-n) was refused")
+				fmt.Fprintln(stderr, "  fak recover POLICY_BLOCK           # policy rule or gotcha blocked tool call")
+				fmt.Fprintln(stderr, "  fak recover BEHIND_FASTFORWARDABLE # branch is behind upstream")
+				fmt.Fprintln(stderr, "  fak recover MERGE_IN_PROGRESS      # active merge in progress")
+				fmt.Fprintln(stderr, "  fak recover --list                 # list all known recovery plans")
+				return 2
+			}
 		} else {
 			fmt.Fprintln(stderr, "usage: fak recover <REASON> [--dry-run|--execute] [--json]")
 			return 2
@@ -181,7 +210,9 @@ var emittedRecoveryReasons = []string{
 	"BEHIND_FASTFORWARDABLE",
 	"BUDGET_RECEIPT_INCOMPLETE",
 	"BUILD_CHECK_TIMEOUT",
+	"CLEAN_FORCE",
 	"COMMITTED_RED",
+	"COMMIT_BY_EXPLICIT_PATH",
 	"CONCEPT_ADMISSION",
 	"CONCEPT_FRESHNESS",
 	"DEFAULT_DENY",
@@ -198,6 +229,7 @@ var emittedRecoveryReasons = []string{
 	"MALFORMED",
 	"MERGE_ACTIVE_PEER_OWNED",
 	"MISROUTE",
+	"NEVER_AMEND_SHARED",
 	"NO_LEASE",
 	"OVERSIZE",
 	"PARENT_TOKEN_BUDGET_EXCEEDED",
@@ -210,12 +242,14 @@ var emittedRecoveryReasons = []string{
 	"QUEUED_AWAITING_QUIESCENCE",
 	"RATE_LIMITED",
 	"REQUIRE_WITNESS",
+	"RESET_HARD",
 	"RESULT_SECRET_DISCOVERED",
 	"SCOPE_CROSSING",
 	"SECRET_EXFIL",
 	"SECRET_REDACTED",
 	"SELF_MODIFY",
 	"SHELL_DIALECT",
+	"SKIP_HOOKS",
 	"STALE_LEASE",
 	"SYSTEM_COMMIT_HEADROOM",
 	"TAINT_EGRESS",
@@ -778,6 +812,70 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 			Notes: []string{
 				"verify claims against ground-truth git history, test runs, or external reporters",
 				"never fabricate evidence or self-report completion without verifiable artifacts",
+			},
+		},
+		"RESET_HARD": {
+			Reason:     "RESET_HARD",
+			Summary:    "git reset --hard refused; whole-tree discards sweep peer working-tree changes on the shared trunk",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"git", "status", "--short"}, Summary: "inspect modified working tree files", Safe: true},
+			},
+			Notes: []string{
+				"never run git reset --hard on trunk: it discards all uncommitted edits across the repo, including peers' concurrent work (AGENTS.md)",
+				"scope your undo to specific files: git restore -- <your-paths> or git checkout -- <your-paths>",
+				"checkpoint uncommitted work instead of discarding: fak wip checkpoint or git stash",
+				"reconcile divergence safely: fak sync reconcile --apply or fak sync apply",
+			},
+		},
+		"SKIP_HOOKS": {
+			Reason:     "SKIP_HOOKS",
+			Summary:    "bypassing commit or push verification hooks (-n/--no-verify) is forbidden",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "commit", "--preview"}, Summary: "preview commit readiness and hook checks", Safe: true},
+			},
+			Notes: []string{
+				"never bypass commit or push hooks with --no-verify or -n: hooks enforce trunk invariants and prevent broken commits (AGENTS.md)",
+				"stage and commit by explicit path: fak commit --path <paths> -m \"<subject> (fak <leaf>)\"",
+				"push safely with hooks enabled: fak sync push or fak commit --push",
+				"if hook checks fail, fix the reported error rather than bypassing verification",
+			},
+		},
+		"COMMIT_BY_EXPLICIT_PATH": {
+			Reason:     "COMMIT_BY_EXPLICIT_PATH",
+			Summary:    "commit by explicit path required; blanket git commit -a or broad staging sweeps peer WIP",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "commit", "--preview"}, Summary: "preview staged files and commit readiness", Safe: true},
+			},
+			Notes: []string{
+				"never use git commit -a or git add -A: stage and commit only your owned paths (AGENTS.md)",
+				"commit by explicit path: fak commit --path <paths> -m \"<subject> (fak <leaf>)\"",
+				"sweep and commit your specific lane: fak sweep --apply --lane <lane> -m \"<subject>\"",
+			},
+		},
+		"CLEAN_FORCE": {
+			Reason:     "CLEAN_FORCE",
+			Summary:    "git clean -f refused; untracked files may contain peer work, allocated scratch, or fixtures",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"git", "clean", "-n"}, Summary: "preview untracked files that would be removed", Safe: true},
+			},
+			Notes: []string{
+				"never run git clean -f or git clean -fdx on shared trunk: it deletes peers' uncommitted files (AGENTS.md)",
+				"remove specific unwanted files individually or use git clean -n to preview",
+				"allocate and reap scratch explicitly via fak tree-doctor",
+			},
+		},
+		"NEVER_AMEND_SHARED": {
+			Reason:     "NEVER_AMEND_SHARED",
+			Summary:    "never amend commits pushed to the shared trunk",
+			Executable: false,
+			Notes: []string{
+				"amends on pushed commits break shared trunk history and diverge peers (AGENTS.md)",
+				"create a new commit with fak commit --path rather than amending",
+				"reconcile divergence safely with fak sync reconcile --apply",
 			},
 		},
 	}

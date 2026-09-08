@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -469,5 +471,103 @@ func TestRecoverBuildCheckTimeoutIsFailClosedAndDetailed(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "no safe executable recovery") {
 		t.Fatalf("stderr missing refusal: %s", errb.String())
+	}
+}
+
+func TestRecoverResetHardDryRun(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runRecover(&out, &errb, []string{"RESET_HARD", "--dry-run"}); rc != 0 {
+		t.Fatalf("rc = %d, stderr=%s", rc, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{
+		"recover RESET_HARD (dry-run)",
+		"git reset --hard refused; whole-tree discards sweep peer working-tree changes on the shared trunk",
+		"git status --short",
+		"never run git reset --hard on trunk",
+		"scope your undo to specific files",
+		"checkpoint uncommitted work instead of discarding",
+		"reconcile divergence safely",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("dry-run output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRecoverSkipHooksDryRun(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runRecover(&out, &errb, []string{"SKIP_HOOKS", "--dry-run"}); rc != 0 {
+		t.Fatalf("rc = %d, stderr=%s", rc, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{
+		"recover SKIP_HOOKS (dry-run)",
+		"bypassing commit or push verification hooks (-n/--no-verify) is forbidden",
+		"fak commit --preview",
+		"never bypass commit or push hooks with --no-verify or -n",
+		"stage and commit by explicit path",
+		"push safely with hooks enabled",
+		"if hook checks fail, fix the reported error rather than bypassing verification",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("dry-run output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRecoverBareAutoDetectsJournalDenial(t *testing.T) {
+	t.Setenv("APPDATA", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	auditDir := filepath.Join(dir, ".dispatch-runs", "guard-audit")
+	if err := os.MkdirAll(auditDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	mockRow := `{"seq":1,"ts_unix_nano":1000000000,"kind":"DENY","verdict":"DENY","tool":"bash","deny_rule":"reset_hard","reason":"POLICY_BLOCK"}` + "\n"
+	if err := os.WriteFile(filepath.Join(auditDir, "audit.jsonl"), []byte(mockRow), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	rc := runRecover(&out, &errb, []string{"--dir", dir})
+	if rc != 0 {
+		t.Fatalf("rc = %d, want 0; stdout=%s stderr=%s", rc, out.String(), errb.String())
+	}
+	errStr := errb.String()
+	if !strings.Contains(errStr, "fak recover: auto-detected refusal from audit journal: RESET_HARD (tool: bash)") {
+		t.Fatalf("stderr missing auto-detection message:\n%s", errStr)
+	}
+	outStr := out.String()
+	if !strings.Contains(outStr, "recover RESET_HARD (dry-run)") {
+		t.Fatalf("stdout missing RESET_HARD plan:\n%s", outStr)
+	}
+}
+
+func TestRecoverBareWithoutJournalShowsCommonReasons(t *testing.T) {
+	t.Setenv("APPDATA", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	var out, errb bytes.Buffer
+	rc := runRecover(&out, &errb, []string{"--dir", dir})
+	if rc != 2 {
+		t.Fatalf("rc = %d, want 2; stdout=%s stderr=%s", rc, out.String(), errb.String())
+	}
+	got := errb.String()
+	for _, want := range []string{
+		"fak recover: no recovery reason specified and no recent refusal found in audit journal.",
+		"usage: fak recover <REASON> [--dry-run|--execute] [--json]",
+		"common recovery reasons:",
+		"fak recover RESET_HARD",
+		"fak recover SKIP_HOOKS",
+		"fak recover POLICY_BLOCK",
+		"fak recover BEHIND_FASTFORWARDABLE",
+		"fak recover MERGE_IN_PROGRESS",
+		"fak recover --list",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, got)
+		}
 	}
 }

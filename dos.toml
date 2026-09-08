@@ -321,7 +321,7 @@ concurrent = [
   "cachewitness", "cadencereport", "callavoid", "capindex", "capindexgw", "catchupscore",
   "chatops", "chatrelay", "checkpointscore", "claimcheck", "closebatch", "closureaudit",
   "closurerate", "cmdutil", "codegraph", "codesearch", "codexlifecycle", "codexmemory",
-  "commitissuelink", "commitsubject", "compactcohere", "completiondist", "computeadmit",
+  "commit-audit", "commitissuelink", "commitsubject", "compactcohere", "completiondist", "computeadmit",
   "conceptbench", "conceptcatalog", "conceptusage", "conflationscore", "conformance",
   "corelockaudit", "corelocks", "covmatrix", "ctxknobs", "ctxplans", "dataslot", "deadlineadmit",
   "deepseekbench", "deepseekv4kv", "deepseekv4moe", "defaultvaluescore", "demo", "demoutil",
@@ -1022,6 +1022,7 @@ codegraph = ["internal/codegraph/**"]
 codesearch = ["internal/codesearch/**"]
 codexlifecycle = ["internal/codexlifecycle/**"]
 codexmemory = ["internal/codexmemory/**"]
+commit-audit = ["tools/issue_closure_audit.py", "tools/issue_closure_audit_test.py"]
 commitissuelink = ["internal/commitissuelink/**"]
 commitsubject = ["internal/commitsubject/**"]
 compactcohere = ["internal/compactcohere/**"]
@@ -3215,6 +3216,41 @@ category = "OPERATOR_GATE"
 refusal = true
 summary = "presented lease generation or holder does not match live ref on disk"
 fix = "fetch latest ref or reacquire lease if previous hold was displaced or expired"
+
+[reasons.RESET_HARD]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "git reset --hard refused: discards every working-tree change across tracked files, destroying concurrent uncommitted work on the shared trunk."
+fix      = "Scope your undo to specific files: `git restore -- <paths>`. Checkpoint with `fak wip checkpoint` or reconcile with `fak sync reconcile --apply`."
+see_also = ["internal/gitgate", "AGENTS.md"]
+
+[reasons.SKIP_HOOKS]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "skip-hooks refused: bypassing commit or push hooks (-n/--no-verify) violates trunk invariants and lands broken or unsigned commits."
+fix      = "Commit with hooks enabled using `fak commit --path <paths> -m \"<subject> (fak <leaf>)\"`. Push safely with `fak sync push`."
+see_also = ["internal/gitgate", "tools/githooks", "AGENTS.md"]
+
+[reasons.COMMIT_BY_EXPLICIT_PATH]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "commit by explicit path required: blanket git commit -a or broad staging sweeps unowned peer WIP on the shared trunk."
+fix      = "Commit by explicit path with `fak commit --path <paths> -m \"<subject> (fak <leaf>)\"` or sweep your lane with `fak sweep --apply --lane <lane> -m \"<subject>\"`."
+see_also = ["internal/gitgate", "AGENTS.md"]
+
+[reasons.CLEAN_FORCE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "git clean -f refused: untracked files may contain peer work, allocated scratch, or fixtures."
+fix      = "Remove specific unwanted files individually or preview with `git clean -n`. Allocate and reap scratch explicitly via `fak tree-doctor`."
+see_also = ["internal/gitgate", "AGENTS.md"]
+
+[reasons.NEVER_AMEND_SHARED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "never amend commits pushed to the shared trunk: rewrites public history and breaks peer convergence."
+fix      = "Create a new forward commit with `fak commit --path` rather than amending. Reconcile divergence safely with `fak sync reconcile --apply`."
+see_also = ["internal/gitgate", "AGENTS.md"]
 
 [retention]
 audits_keep_last = 30
