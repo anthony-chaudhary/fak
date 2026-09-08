@@ -290,3 +290,140 @@ func TestNonFiniteTelemetryFailsClosed(t *testing.T) {
 		}
 	})
 }
+
+func TestDerivedArithmeticOverflowFailsClosed(t *testing.T) {
+	m := manifestForOutcomes()
+	tool := m.Route(Subject{Aspect: AspectToolCall, Tool: "write_file"})
+	record := func(cost float64, latency time.Duration) OutcomeRecord {
+		return RecordOutcome(m.Version, tool, Outcome{Cost: cost, Latency: latency, Quality: 1})
+	}
+	assertJSONSafe := func(t *testing.T, value any) {
+		t.Helper()
+		if _, err := json.Marshal(value); err != nil {
+			t.Fatalf("json.Marshal failed after derived arithmetic overflow: %v", err)
+		}
+	}
+
+	t.Run("score multiplication", func(t *testing.T) {
+		obj := Objective{CostWeight: math.MaxFloat64}
+		before, err := EvaluateManifest(m, []OutcomeRecord{record(1, 0)}, obj)
+		if err != nil {
+			t.Fatalf("EvaluateManifest(before): %v", err)
+		}
+		after, err := EvaluateManifest(m, []OutcomeRecord{record(2, 0)}, obj)
+		if err != nil {
+			t.Fatalf("EvaluateManifest(after): %v", err)
+		}
+		delta := computeScoreDelta(before, after)
+		if after.Feasible || !after.Invalid || delta.Improved {
+			t.Fatalf("overflowed score must fail closed: after=%+v delta.Improved=%v", after, delta.Improved)
+		}
+		if math.IsNaN(after.Score) || math.IsInf(after.Score, 0) || math.IsNaN(delta.Delta) || math.IsInf(delta.Delta, 0) {
+			t.Fatalf("overflowed score leaked a non-finite derived value: after=%+v delta=%+v", after, delta)
+		}
+		assertJSONSafe(t, delta)
+	})
+
+	t.Run("cost sum", func(t *testing.T) {
+		records := []OutcomeRecord{record(math.MaxFloat64, 0), record(math.MaxFloat64, 0)}
+		var journal OutcomeJournal
+		for _, rec := range records {
+			journal.Append(rec)
+		}
+		agg := journal.Aggregate()
+		if agg.Total != 2 || len(agg.ByKey) != 1 {
+			t.Fatalf("overflowed aggregate must retain the input count and mark its bucket invalid: %+v", agg)
+		}
+		for key, stats := range agg.ByKey {
+			if stats.Count != 2 || !stats.Invalid {
+				t.Fatalf("aggregate bucket %v must retain Count=2 and fail closed explicitly: %+v", key, stats)
+			}
+			if math.IsNaN(stats.SumCost) || math.IsInf(stats.SumCost, 0) || math.IsNaN(stats.MeanCost) || math.IsInf(stats.MeanCost, 0) {
+				t.Fatalf("aggregate bucket %v leaked non-finite cost: %+v", key, stats)
+			}
+			assertJSONSafe(t, stats)
+		}
+
+		eval, err := EvaluateManifest(m, records, Objective{})
+		if err != nil {
+			t.Fatalf("EvaluateManifest: %v", err)
+		}
+		if eval.Feasible || !eval.Invalid {
+			t.Fatalf("overflowed cost sum must be infeasible: %+v", eval)
+		}
+		if math.IsNaN(eval.MeanCost) || math.IsInf(eval.MeanCost, 0) || math.IsNaN(eval.Score) || math.IsInf(eval.Score, 0) {
+			t.Fatalf("evaluation leaked a non-finite derived value: %+v", eval)
+		}
+		assertJSONSafe(t, eval)
+	})
+
+	t.Run("latency sum", func(t *testing.T) {
+		records := []OutcomeRecord{
+			record(0, time.Duration(math.MaxInt64)),
+			record(0, time.Duration(math.MaxInt64)),
+			record(0, time.Duration(math.MaxInt64)),
+		}
+		var journal OutcomeJournal
+		for _, rec := range records {
+			journal.Append(rec)
+		}
+		agg := journal.Aggregate()
+		if agg.Total != 3 || len(agg.ByKey) != 1 {
+			t.Fatalf("overflowed aggregate must retain the input count and mark its bucket invalid: %+v", agg)
+		}
+		for key, stats := range agg.ByKey {
+			if stats.Count != 3 || !stats.Invalid {
+				t.Fatalf("aggregate bucket %v must retain Count=3 and fail closed explicitly: %+v", key, stats)
+			}
+			if stats.SumLatency < 0 || stats.MeanLatency < 0 {
+				t.Fatalf("aggregate bucket %v exposed wrapped negative latency: %+v", key, stats)
+			}
+			assertJSONSafe(t, stats)
+		}
+
+		eval, err := EvaluateManifest(m, records, Objective{})
+		if err != nil {
+			t.Fatalf("EvaluateManifest: %v", err)
+		}
+		if eval.Feasible || !eval.Invalid || eval.MeanLatency < 0 {
+			t.Fatalf("overflowed latency sum must fail closed without wrapping negative: %+v", eval)
+		}
+		assertJSONSafe(t, eval)
+	})
+
+	t.Run("invalid baseline cannot improve", func(t *testing.T) {
+		invalidBefore, err := EvaluateManifest(m, []OutcomeRecord{
+			record(math.MaxFloat64, 0),
+			record(math.MaxFloat64, 0),
+		}, Objective{})
+		if err != nil {
+			t.Fatalf("EvaluateManifest(invalid before): %v", err)
+		}
+		validAfter, err := EvaluateManifest(m, []OutcomeRecord{record(1, time.Second)}, Objective{})
+		if err != nil {
+			t.Fatalf("EvaluateManifest(valid after): %v", err)
+		}
+		delta := computeScoreDelta(invalidBefore, validAfter)
+		if delta.Improved {
+			t.Fatalf("invalid baseline must not make a valid candidate look improved: %+v", delta)
+		}
+		if !delta.Before.Invalid || computeScoreDelta(delta.Before, validAfter).Improved {
+			t.Fatalf("sanitized invalidity must survive reuse: %+v", delta)
+		}
+		directInvalid := EvaluationScore{Count: 1, MeanCost: -1}
+		directDelta := computeScoreDelta(directInvalid, validAfter)
+		if directDelta.Improved || !directDelta.Before.Invalid || computeScoreDelta(directDelta.Before, validAfter).Improved {
+			t.Fatalf("direct invalid metrics must stay invalid through sanitization and reuse: %+v", directDelta)
+		}
+		for _, count := range []int{0, -1} {
+			baseline := EvaluationScore{Count: count}
+			if computeScoreDelta(baseline, validAfter).Improved {
+				t.Fatalf("count=%d baseline must not be admissible improvement evidence", count)
+			}
+			if (Objective{}).Feasible(baseline) {
+				t.Fatalf("count=%d evaluation must be infeasible", count)
+			}
+		}
+		assertJSONSafe(t, delta)
+	})
+}

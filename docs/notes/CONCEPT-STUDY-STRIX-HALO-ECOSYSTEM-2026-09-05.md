@@ -12,7 +12,7 @@
 
 This study conducts an exhaustive, multi-subagent deep dive into the latest wave of open-source projects built for the AMD Strix Halo APU platform (`gfx1151`), spanning autonomous agent harnesses, high-throughput inference engines, C-native runtimes, container orchestrators, and hardware power governors.
 
-All sources were cloned into clean session scratch (`C:\Users\antho\AppData\Local\Temp\opencode\strix-halo-study\`) and pinned at their exact Git commit revisions:
+All sources were cloned into clean session scratch (`C:\Users\USER\AppData\Local\Temp\opencode\strix-halo-study\`) and pinned at their exact Git commit revisions:
 
 | Repository | Pinned SHA | License | Stars | Subsystem Domain |
 |---|---|---|---|---|

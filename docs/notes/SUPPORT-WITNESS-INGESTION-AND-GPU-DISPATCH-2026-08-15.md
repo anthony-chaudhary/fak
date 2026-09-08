@@ -13,7 +13,7 @@
 The sanctioned GCP probe was run on 2026-08-15:
 
 ```text
-project=dos-rlvr-admit-20260608
+project=<project-id>
 H100 1g/8g: PROVISIONABLE in us-central1
 L4: NO_QUOTA in us-central1
 T4: NO_QUOTA in us-central1

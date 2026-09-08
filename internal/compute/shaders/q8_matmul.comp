@@ -28,6 +28,7 @@ layout(local_size_x = 256) in;
 const uint BLOCK = 32u;
 const uint SHARED_CAP = 2048u;            // staged input floats per window (multiple of BLOCK)
 const uint WIN_BLOCKS = SHARED_CAP / BLOCK; // whole Q8_0 blocks staged per window (=64)
+const uint XQ_STRIDE = 32u + 2u; // Pad-2 stride: 34 bytes per row to skew LDS bank alignment
 const uint XS_STRIDE = 32u + 2u;
 
 layout(std430, binding = 0) readonly buffer Wq   { int8_t  Wcodes[]; };  // [out*in] int8 weight codes
@@ -37,7 +38,7 @@ layout(std430, binding = 3) writeonly buffer Yb  { float   Y[]; };       // [P*o
 
 layout(push_constant) uniform Push { int outDim; int inDim; int P; } pc;
 
-shared int8_t Xq[SHARED_CAP];        // quantized activation codes for row t
+shared int8_t Xq[WIN_BLOCKS * XQ_STRIDE]; // quantized activation codes for row t (Pad-2 stride)
 shared float  Xs[2u * XS_STRIDE];    // per-block activation scale (one per 32)
 
 uint xs_idx(uint b) {
@@ -79,15 +80,15 @@ void main() {
 
         // quantize this window's activations into shared Xq + Xs, one block per (subset of) threads
         for (uint b = tid; b < winBlocks; b += 256u) {
-            uint base = b * BLOCK;            // shared-local block offset
-            uint gbase = winBase + base;      // global input offset
+            uint xq_base = b * XQ_STRIDE; // shared-local activation offset (Pad-2 stride)
+            uint gbase = winBase + b * BLOCK; // global input offset (unpadded block stride)
             float amax = 0.0;
             for (uint i = 0u; i < BLOCK; ++i) amax = max(amax, abs(X[xbase + gbase + i]));
             float d = amax / 127.0;
             Xs[xs_idx(b)] = d;
             float inv = d > 0.0 ? 1.0 / d : 0.0;
             for (uint i = 0u; i < BLOCK; ++i) {
-                Xq[base + i] = (d > 0.0) ? q8round(X[xbase + gbase + i] * inv) : int8_t(0);
+                Xq[xq_base + i] = (d > 0.0) ? q8round(X[xbase + gbase + i] * inv) : int8_t(0);
             }
         }
         barrier();
@@ -96,7 +97,7 @@ void main() {
         if (o < out_) {
             for (uint lb = 0u; lb < winBlocks; ++lb) {
                 uint cb = wbase + (wb + lb) * BLOCK;   // global weight code offset
-                uint xb = lb * BLOCK;                  // shared-local activation offset
+                uint xb = lb * XQ_STRIDE; // shared-local activation offset (Pad-2 stride)
                 // 4 partial int accumulators, matching the cpuref s0..s3 layout
                 int s0 = 0, s1 = 0, s2 = 0, s3 = 0;
                 for (uint i = 0u; i < BLOCK; i += 4u) {

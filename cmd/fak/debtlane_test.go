@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -90,10 +92,44 @@ func TestDebtLanesCLIMarkdown(t *testing.T) {
 	}
 }
 
+func setupDebtLaneWaveWorkspace(t *testing.T) string {
+	t.Helper()
+	tmp := t.TempDir()
+
+	lanes := []string{"mocka", "mockb", "mockc", "mockd", "mocke", "mockf", "mockg", "mockh"}
+	var dosContent strings.Builder
+	dosContent.WriteString("workspace = \".\"\n\n[lanes]\nconcurrent = [\n")
+	for _, l := range lanes {
+		dosContent.WriteString("  \"" + l + "\",\n")
+	}
+	dosContent.WriteString("]\n\n[lanes.trees]\n")
+	for _, l := range lanes {
+		dosContent.WriteString("\"" + l + "\" = [\"internal/" + l + "/**\"]\n")
+	}
+
+	if err := os.WriteFile(filepath.Join(tmp, "dos.toml"), []byte(dosContent.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, l := range lanes {
+		laneDir := filepath.Join(tmp, "internal", l)
+		if err := os.MkdirAll(laneDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		code := "package " + l + "\n\nfunc Work() string {\n\treturn \"wip\"\n}\n"
+		if err := os.WriteFile(filepath.Join(laneDir, l+".go"), []byte(code), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	return tmp
+}
+
 func TestDebtLanesCLIPlanWavesJSON(t *testing.T) {
+	tmp := setupDebtLaneWaveWorkspace(t)
 	var stdout, stderr bytes.Buffer
 	code := runDebtLanes(&stdout, &stderr, []string{
-		"--workspace", repoRoot(),
+		"--workspace", tmp,
 		"--plan-waves",
 		"--wave-size", "3",
 		"--max-waves", "2",
@@ -130,9 +166,10 @@ func TestDebtLanesCLIPlanWavesJSON(t *testing.T) {
 }
 
 func TestDebtLanesCLIPlanWavesText(t *testing.T) {
+	tmp := setupDebtLaneWaveWorkspace(t)
 	var stdout, stderr bytes.Buffer
 	code := runDebtLanes(&stdout, &stderr, []string{
-		"--workspace", repoRoot(),
+		"--workspace", tmp,
 		"--plan-waves",
 		"--wave-size", "4",
 		"--max-waves", "2",
@@ -150,9 +187,10 @@ func TestDebtLanesCLIPlanWavesText(t *testing.T) {
 }
 
 func TestDebtLanesCLIPlanWavesMarkdown(t *testing.T) {
+	tmp := setupDebtLaneWaveWorkspace(t)
 	var stdout, stderr bytes.Buffer
 	code := runDebtLanes(&stdout, &stderr, []string{
-		"--workspace", repoRoot(),
+		"--workspace", tmp,
 		"--plan-waves",
 		"--wave-size", "4",
 		"--max-waves", "2",
@@ -171,9 +209,10 @@ func TestDebtLanesCLIPlanWavesMarkdown(t *testing.T) {
 }
 
 func TestDebtLanesCLIPlanWavesTargetGrade(t *testing.T) {
+	tmp := setupDebtLaneWaveWorkspace(t)
 	var stdout, stderr bytes.Buffer
 	code := runDebtLanes(&stdout, &stderr, []string{
-		"--workspace", repoRoot(),
+		"--workspace", tmp,
 		"--plan-waves",
 		"--target-grade", "80%",
 		"--wave-size", "4",
@@ -214,9 +253,10 @@ func TestDebtLanesCLIPlanWavesTargetGrade(t *testing.T) {
 }
 
 func TestDebtLanesCLIPlanWavesTargetPointsAlias(t *testing.T) {
+	tmp := setupDebtLaneWaveWorkspace(t)
 	var stdout, stderr bytes.Buffer
 	code := runDebtLanes(&stdout, &stderr, []string{
-		"--workspace", repoRoot(),
+		"--workspace", tmp,
 		"--plan-waves",
 		"--points", "50",
 		"--wave-size", "3",
@@ -241,9 +281,10 @@ func TestDebtLanesCLIPlanWavesTargetPointsAlias(t *testing.T) {
 }
 
 func TestDebtOrchestratorCLI(t *testing.T) {
+	tmp := setupDebtLaneWaveWorkspace(t)
 	var stdout, stderr bytes.Buffer
 	code := runDebtOrchestrator(&stdout, &stderr, []string{
-		"--workspace", repoRoot(),
+		"--workspace", tmp,
 		"--wave-size", "5",
 		"--max-waves", "2",
 		"--json",

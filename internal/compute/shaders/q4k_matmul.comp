@@ -20,7 +20,8 @@ void scaleMin(uint base, int group, out uint sc, out uint mn) {
         sc = byteAt(base + uint(j)) & 63u;
         mn = byteAt(base + uint(j + 4)) & 63u;
     } else {
-        sc = (byteAt(base + uint(j + 4)) & 15u) | ((byteAt(base + uint(j - 4)) >> 6u) << 4u);
+        j -= 4;
+        sc = (byteAt(base + uint(j + 4)) & 15u) | ((byteAt(base + uint(j)) >> 6u) << 4u);
         mn = (byteAt(base + uint(j + 4)) >> 4u) | ((byteAt(base + uint(j)) >> 6u) << 4u);
     }
 }

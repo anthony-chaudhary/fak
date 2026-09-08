@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"sort"
 	"strings"
 	"sync"
@@ -172,6 +173,9 @@ type InKernelPlanner struct {
 	// — both over-count the denominator, which can only UNDER-state the filtered ratio,
 	// never inflate it (the same honest-conservative direction as cacheobs's clamps).
 	kvPrefixEverAdmitted atomic.Bool
+
+	speculativeEngine *model.SpeculativeEngine
+	specDraftDepth    int
 }
 
 type inKernelOOMRetryClassStats struct {
@@ -616,6 +620,9 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 			panic(r)
 		}
 	}()
+	if p.speculativeEngine != nil {
+		return p.generateReusedSpeculative(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
+	}
 	gen, promptTok, cacheable, matched, sourceTier, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	if err != nil {
 		return inKernelGenerateResult{}, err
@@ -630,6 +637,252 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 		decodeS:    decodeS,
 		stopped:    stopped,
 	}, nil
+}
+
+// SetSpeculativeEngine configures the speculative decoding engine for this planner.
+func (p *InKernelPlanner) SetSpeculativeEngine(eng *model.SpeculativeEngine) {
+	p.speculativeEngine = eng
+}
+
+// SpeculativeEngine returns the configured speculative decoding engine, if any.
+func (p *InKernelPlanner) SpeculativeEngine() *model.SpeculativeEngine {
+	return p.speculativeEngine
+}
+
+// EnableSpeculativeDecoding enables speculative decoding using the given proposal generator and draft depth K.
+func (p *InKernelPlanner) EnableSpeculativeDecoding(gen model.ProposalGenerator, draftDepth int) {
+	if draftDepth <= 0 {
+		draftDepth = 4
+	}
+	p.specDraftDepth = draftDepth
+	cfg := model.DefaultSpeculativeEngineConfig()
+	cfg.MaxDraft = draftDepth
+	cfg.Temperature = p.temp
+	p.speculativeEngine = model.NewSpeculativeEngine(nil, gen, cfg)
+}
+
+// DisableSpeculativeDecoding disables speculative decoding on this planner.
+func (p *InKernelPlanner) DisableSpeculativeDecoding() {
+	p.speculativeEngine = nil
+	p.specDraftDepth = 0
+}
+
+func (p *InKernelPlanner) generateReusedSpeculative(
+	ctx context.Context,
+	ids []int,
+	maxNew int,
+	temp, topP float64,
+	topK int,
+	logitBias model.LogitBias,
+	freqPenalty, presPenalty float64,
+	stops map[int]bool,
+	emit func(int) bool,
+	measurementOpt ...*nativeInferenceMeasurement,
+) (res inKernelGenerateResult, err error) {
+	promptTok := len(ids)
+	if promptTok == 0 {
+		return inKernelGenerateResult{}, nil
+	}
+	if err = ctx.Err(); err != nil {
+		return inKernelGenerateResult{}, err
+	}
+
+	reuse := p.tree != nil && inKernelPlannerPrefixReuseSupported(p.m, p.backend)
+	var s *model.Session
+	var cachedLogits []float32
+	var matched, cacheable int
+	var sourceTier radixkv.SnapshotTier
+
+	if reuse {
+		p.mu.Lock()
+		b, m := p.tree.Lookup(ids)
+		cacheable = m
+		matched = m
+		if k := b.KV(); k != nil {
+			s = p.sessionFromPrefixClone(k)
+			if m >= len(ids) {
+				cachedLogits = b.Logits()
+			}
+			sourceTier = radixkv.SnapshotTierDeviceL1
+		}
+		p.tree.Done(b)
+		p.mu.Unlock()
+
+		if s != nil && matched >= len(ids) && cachedLogits == nil {
+			if inKernelRefeedLastTokenForExactHit(s, len(ids)) {
+				matched = len(ids) - 1
+			} else {
+				s, matched = nil, 0
+				sourceTier = radixkv.SnapshotTierMiss
+			}
+		}
+	}
+
+	if s == nil {
+		matched = 0
+		s = p.m.NewSession()
+	}
+	defer s.Close()
+	p.configureNativeSession(s)
+
+	p.recordTurnTax(promptTok, cacheable, matched)
+
+	// Prefill divergent prompt tokens
+	logits := cachedLogits
+	var prefillS float64
+	if logits == nil {
+		tp := time.Now()
+		prefillAt := matched
+		if prefillAt < len(ids) {
+			rawLogits, err := p.prefillDivergentSuffix(ctx, s, ids[prefillAt:])
+			if err != nil {
+				return inKernelGenerateResult{}, err
+			}
+			logits = append([]float32(nil), rawLogits...)
+		}
+		prefillS = time.Since(tp).Seconds()
+	} else {
+		logits = append([]float32(nil), cachedLogits...)
+	}
+	if err = ctx.Err(); err != nil {
+		return inKernelGenerateResult{}, err
+	}
+
+	// Admit full prompt to prefix cache BEFORE speculative decode mutates cache
+	if reuse {
+		p.mu.Lock()
+		b, m := p.tree.Lookup(ids)
+		leaf := p.tree.InsertCloneWithLogits(b, ids[m:], s.Cache, logits)
+		p.tree.Done(leaf)
+		p.mu.Unlock()
+		p.noteKVPrefixAdmitted()
+	}
+
+	// Speculative decoding loop
+	td := time.Now()
+	eng := p.speculativeEngine
+	eng.SetTargetSession(s)
+	eng.SetLastLogits(logits)
+
+	committed := append([]int(nil), ids...)
+	var counts []int32
+	if freqPenalty != 0 || presPenalty != 0 {
+		counts = make([]int32, len(logits))
+	}
+	rng := rand.New(rand.NewSource(p.seed))
+
+	gen := 0
+	stopped := false
+	curLogits := logits
+	maxDraft := eng.Config().MaxDraft
+	if maxDraft <= 0 {
+		maxDraft = 4
+	}
+
+	for gen < maxNew {
+		if err = ctx.Err(); err != nil {
+			break
+		}
+
+		// Propose speculative candidate tokens
+		var proposal model.DraftProposal
+		if eng.PrimaryGenerator() != nil {
+			var propErr error
+			proposal, propErr = eng.PrimaryGenerator().Propose(ctx, committed, maxDraft)
+			if propErr != nil {
+				proposal = model.DraftProposal{}
+			}
+		}
+
+		// If proposal has no tokens and no tree, fall back to single-step autoregressive
+		if len(proposal.Tokens) == 0 && proposal.Tree == nil {
+			next := sampleLogitsWithPenalty(curLogits, temp, topP, topK, logitBias, freqPenalty, presPenalty, counts, rng)
+			if next < 0 || stops[next] {
+				stopped = true
+				break
+			}
+			if counts != nil && next < len(counts) {
+				counts[next]++
+			}
+			emitStopped := emit != nil && emit(next)
+			gen++
+			committed = append(committed, next)
+			if emitStopped || gen == maxNew {
+				stopped = emitStopped
+				break
+			}
+			curLogits = s.Step(next)
+			eng.SetLastLogits(curLogits)
+			continue
+		}
+
+		// Evaluate candidate proposal using parallel verification kernel
+		vRes, vErr := model.ParallelVerifyKernel(ctx, s, committed, proposal, curLogits, eng.Sanitizer(), counts)
+		if vErr != nil {
+			err = vErr
+			break
+		}
+		eng.RecordVerification(len(proposal.Tokens), vRes.NumAccepted, vRes.RollbackKVCount)
+
+		// Accept verified tokens
+		roundStopped := false
+		for _, tok := range vRes.AcceptedTokens {
+			if tok < 0 || stops[tok] {
+				roundStopped = true
+				stopped = true
+				break
+			}
+			if counts != nil && tok < len(counts) {
+				counts[tok]++
+			}
+			emitStopped := emit != nil && emit(tok)
+			gen++
+			committed = append(committed, tok)
+			if emitStopped || gen == maxNew {
+				roundStopped = true
+				stopped = emitStopped
+				break
+			}
+		}
+
+		if roundStopped || gen == maxNew {
+			break
+		}
+
+		// Bonus / correction token
+		bonus := vRes.CorrectionToken
+		if bonus < 0 || stops[bonus] {
+			stopped = true
+			break
+		}
+		if counts != nil && bonus < len(counts) {
+			counts[bonus]++
+		}
+		emitStopped := emit != nil && emit(bonus)
+		gen++
+		committed = append(committed, bonus)
+		if emitStopped || gen == maxNew {
+			stopped = emitStopped
+			break
+		}
+
+		// Advance target session with bonus token
+		curLogits = s.Step(bonus)
+		eng.SetLastLogits(curLogits)
+	}
+
+	decodeS := time.Since(td).Seconds()
+
+	return inKernelGenerateResult{
+		gen:        gen,
+		promptTok:  promptTok,
+		cacheable:  cacheable,
+		matched:    matched,
+		sourceTier: sourceTier,
+		prefillS:   prefillS,
+		decodeS:    decodeS,
+		stopped:    stopped,
+	}, err
 }
 
 func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, onRetry func(), measurementOpt ...*nativeInferenceMeasurement) (inKernelGenerateResult, error) {

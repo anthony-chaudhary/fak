@@ -1209,6 +1209,14 @@ func main() {
 	}
 
 	ggufLoadProfiler := newGGUFLoadProfiler(f)
+	if rawDecodeEnabled() {
+		resolveMetal(f)
+		if err := runRawDecodeArtifact(f, ggufLoadProfiler); err != nil {
+			fmt.Fprintln(os.Stderr, "raw decode:", err)
+			f.exit(1)
+		}
+		return
+	}
 	m, modelName, loadStart := loadBenchModel(f, ggufLoadProfiler)
 	if bindLoadedModelWeights(f, m) {
 		defer f.closeTransferredWeights()
@@ -1251,13 +1259,6 @@ func main() {
 	// whole grid is set up. The load already happened under -smoke-deadline above.
 	if *f.smoke {
 		runSmoke(f, m, modelName, loadMS, vocab)
-		return
-	}
-	if rawDecodeEnabled() {
-		if err := runRawDecode(f, m, modelName, loadMS, quantMS, be, registeredBackends); err != nil {
-			fmt.Fprintln(os.Stderr, "raw decode:", err)
-			f.exit(1)
-		}
 		return
 	}
 	newSession := func() *model.Session {

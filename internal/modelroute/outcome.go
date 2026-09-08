@@ -75,10 +75,29 @@ func (o Outcome) IsFinite() bool {
 	if math.IsNaN(o.Cost) || math.IsInf(o.Cost, 0) || o.Cost < 0 {
 		return false
 	}
+	if o.Latency < 0 {
+		return false
+	}
 	if math.IsNaN(o.Quality) || math.IsInf(o.Quality, 0) || o.Quality < 0 || o.Quality > 1.0 {
 		return false
 	}
 	return true
+}
+
+func addFiniteNonnegative(sum, value float64) (float64, bool) {
+	next := sum + value
+	if math.IsNaN(next) || math.IsInf(next, 0) || next < 0 {
+		return 0, false
+	}
+	return next, true
+}
+
+func addNonnegativeDuration(sum, value time.Duration) (time.Duration, bool) {
+	const maxDuration = time.Duration(1<<63 - 1)
+	if sum < 0 || value < 0 || value > maxDuration-sum {
+		return 0, false
+	}
+	return sum + value, true
 }
 
 // AspectRuleKey is the per-(aspect,rule) key the feedback corpus aggregates on —
@@ -164,12 +183,15 @@ func (j *OutcomeJournal) Records() []OutcomeRecord {
 // outcome contributes nothing — so an unserved route never appears as a zero that
 // drags a mean down. The sums are retained so two aggregates can be merged or so a
 // caller can re-derive a mean at a different grouping without re-reading the
-// journal.
+// journal. Invalid is set when individually valid observations cannot be
+// represented by the aggregate arithmetic; their count remains visible while
+// their derived sums and means stay at JSON-safe zero values.
 type AspectRuleStats struct {
 	Count       int           `json:"count"`
 	MeanCost    float64       `json:"mean_cost"`
 	MeanLatency time.Duration `json:"mean_latency_ns"`
 	MeanQuality float64       `json:"mean_quality"`
+	Invalid     bool          `json:"invalid,omitempty"` // a derived reduction was not representable
 
 	// SumCost / SumLatency / SumQuality are the running totals the means divide.
 	SumCost    float64       `json:"sum_cost"`
@@ -191,14 +213,17 @@ type Aggregate struct {
 // means are exact sums divided by an integer count). A key with no recorded
 // outcome never appears; an outcome with a zero value DOES count as a measured
 // zero (it is a recorded measurement), in contrast to an absent outcome which
-// contributes nothing. This is the grounded feedback corpus folded into the
-// signal a learned policy would later fit on — without being that policy.
+// contributes nothing. A bucket whose checked reduction overflows is retained
+// with its observed Count and Invalid=true, never as a valid prefix. This is the
+// grounded feedback corpus folded into the signal a learned policy would later
+// fit on — without being that policy.
 func (j *OutcomeJournal) Aggregate() Aggregate {
 	type acc struct {
 		count      int
 		sumCost    float64
 		sumLatency time.Duration
 		sumQuality float64
+		invalid    bool
 	}
 	by := make(map[AspectRuleKey]*acc, len(j.records))
 	totalValid := 0
@@ -213,12 +238,29 @@ func (j *OutcomeJournal) Aggregate() Aggregate {
 			by[r.Key] = a
 		}
 		a.count++
-		a.sumCost += r.Outcome.Cost
-		a.sumLatency += r.Outcome.Latency
-		a.sumQuality += r.Outcome.Quality
+		if a.invalid {
+			continue
+		}
+		sumCost, costOK := addFiniteNonnegative(a.sumCost, r.Outcome.Cost)
+		sumLatency, latencyOK := addNonnegativeDuration(a.sumLatency, r.Outcome.Latency)
+		sumQuality, qualityOK := addFiniteNonnegative(a.sumQuality, r.Outcome.Quality)
+		if !costOK || !latencyOK || !qualityOK {
+			a.invalid = true
+			continue
+		}
+		a.sumCost = sumCost
+		a.sumLatency = sumLatency
+		a.sumQuality = sumQuality
 	}
 	out := Aggregate{ByKey: make(map[AspectRuleKey]AspectRuleStats, len(by)), Total: totalValid}
 	for k, a := range by {
+		if a.invalid {
+			out.ByKey[k] = AspectRuleStats{Count: a.count, Invalid: true}
+			continue
+		}
+		if a.count == 0 {
+			continue
+		}
 		n := float64(a.count)
 		out.ByKey[k] = AspectRuleStats{
 			Count:       a.count,

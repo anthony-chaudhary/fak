@@ -66,6 +66,23 @@ func TestTreeVerifyBranchingTopologyMasks(t *testing.T) {
 	}
 }
 
+func TestBuildTreeAttentionRowsExcludesCommittedRootAndIsolatesSiblings(t *testing.T) {
+	tree := BuildWideShallowTree(3, 1, nil)
+	rows, err := BuildTreeAttentionRows(tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("candidate rows=%d, want 3 (committed root excluded)", len(rows))
+	}
+	want := []uint32{0b001, 0b010, 0b100}
+	for i := range rows {
+		if rows[i] != want[i] {
+			t.Fatalf("row %d=%03b, want %03b", i, rows[i], want[i])
+		}
+	}
+}
+
 func TestTreeVerifyMicrobenchmarkEnvelope(t *testing.T) {
 	// Requirements from #10842:
 	// - Exercise tree verification across backends (CPU, CUDA, Metal)

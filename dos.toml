@@ -524,6 +524,25 @@ concurrent = [
   "harnessconformance",
   "harnesssidecar",
   "managedharness",
+  "agentxbench",
+  "airgaptest",
+  "armtracking",
+  "codedebt",
+  "computebuild",
+  "ctxplanlint",
+  "director",
+  "effortbench",
+  "goalrunner",
+  "harnesshint",
+  "harnesslint",
+  "harnessversion",
+  "ops",
+  "pacing",
+  "sessionview",
+  "storage",
+  "supervise",
+  "worktree",
+  "sysproc",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -782,7 +801,7 @@ shipgate = ["internal/shipgate/**"]
 steward = ["internal/steward/**"]
 studydrift = ["internal/studydrift/**"]
 studymonitor = ["internal/studymonitor/**"]
-studyreceipt = ["internal/study/**", "cmd/fak/study.go", "cmd/fak/study_test.go", "cmd/fak/main.go", ".claude/skills/study-repo/SKILL.md", ".claude/skills/field-borrow/SKILL.md"]
+studyreceipt = ["internal/studyreceipt/**", "internal/study/**", "cmd/fak/study.go", "cmd/fak/study_test.go", "cmd/fak/main.go", ".claude/skills/study-repo/SKILL.md", ".claude/skills/field-borrow/SKILL.md"]
 turnbench = ["internal/turnbench/**"]
 vdso = ["internal/vdso/**"]
 witness = ["internal/witness/**"]
@@ -1656,6 +1675,30 @@ harnessconformance = ["pkg/harnessconformance/**"]
 harnesssidecar = ["pkg/harnesssidecar/**"]
 managedharness = ["pkg/managedharness/**"]
 readmenext = ["internal/readmenext/**"]
+agentxbench = ["internal/agentxbench/**"]
+airgaptest = ["internal/airgaptest/**"]
+armtracking = ["internal/armtracking/**"]
+cachedocaudit = ["internal/cachedocaudit/**"]
+cacheheadlines = ["internal/cacheheadlines/**"]
+codedebt = ["internal/codedebt/**"]
+computebuild = ["internal/computebuild/**"]
+ctxplanlint = ["internal/ctxplanlint/**"]
+director = ["internal/director/**"]
+dogfoodcoverage = ["internal/dogfoodcoverage/**"]
+doshook = ["internal/doshook/**"]
+effortbench = ["internal/effortbench/**"]
+freshstatus = ["internal/freshstatus/**"]
+goalrunner = ["internal/goalrunner/**"]
+harnesshint = ["internal/harnesshint/**"]
+harnesslint = ["internal/harnesslint/**"]
+harnessversion = ["internal/harnessversion/**"]
+ops = ["internal/ops/**"]
+pacing = ["internal/pacing/**"]
+sessionview = ["internal/sessionview/**"]
+storage = ["internal/storage/**"]
+supervise = ["internal/supervise/**"]
+worktree = ["internal/worktree/**"]
+sysproc = ["pkg/sysproc/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"math"
@@ -15,6 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/rawdecode"
 )
 
 func syntheticTestConfig() model.Config {
@@ -142,8 +144,8 @@ func TestRawDecodeSynthetic(t *testing.T) {
 	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
 		t.Fatalf("synthetic raw decode became creditable: %+v", attempt)
 	}
-	if attempt.Observed.Model.Name != "synthetic-test" || attempt.Observed.Model.Quantization == "" {
-		t.Fatalf("observed model fields were not preserved: %+v", attempt.Observed.Model)
+	if attempt.Observed.Model.Name != "" || attempt.Observed.Model.Quantization != "" {
+		t.Fatalf("caller-supplied model identity escaped into physical evidence: %+v", attempt.Observed.Model)
 	}
 	if !reflect.DeepEqual(attempt.Observed.PromptTokenIDs, []int32{1, 2, 3}) || len(attempt.Observed.OutputTokenIDs) != 5 {
 		t.Fatalf("observed token identity was not preserved: prompt=%v output=%v", attempt.Observed.PromptTokenIDs, attempt.Observed.OutputTokenIDs)
@@ -173,16 +175,63 @@ type vulkanNamedRawDecodeTestBackend struct{ compute.Backend }
 func (vulkanNamedRawDecodeTestBackend) Name() string { return compute.Qwen38VulkanDecodeBackend }
 
 func TestRawDecodeVulkanNameDoesNotClaimPhysicalEngineIdentity(t *testing.T) {
-	be := vulkanNamedRawDecodeTestBackend{Backend: compute.Default()}
-	attempt := rawDecodePhysicalReceipt(testRawDecodeFlags(1, 1), "synthetic", "observed test path", "f32", be, []int{1}, 8, 1, false, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+	execution := rawdecode.Execution{
+		Backend:        rawdecode.BackendObservation{Selected: compute.Qwen38VulkanDecodeBackend},
+		PromptTokenIDs: []int{1}, ContextLimit: 8, GeneratedLimit: 1, FiniteLogits: true,
+	}
+	attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
 	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
 		t.Fatalf("named test backend became creditable: %+v", attempt)
 	}
-	if attempt.Observed.Engine.Backend != compute.Qwen38VulkanDecodeBackend || attempt.Observed.Engine.ExecutedPath != "observed test path" {
+	if attempt.Observed.Engine.Backend != compute.Qwen38VulkanDecodeBackend || attempt.Observed.Engine.ExecutedPath != "" {
 		t.Fatalf("observed backend fields missing: %+v", attempt.Observed.Engine)
 	}
 	if attempt.Observed.Engine.Name != "" || attempt.Observed.Engine.Runtime != "" || attempt.Observed.Engine.FallbackCount != nil {
 		t.Fatalf("backend registry name was relabeled as physical execution identity: %+v", attempt.Observed.Engine)
+	}
+}
+
+func TestRawDecodeExecutorProductionAdapterCallsSeamOnceAndFailsReceiptClosed(t *testing.T) {
+	defer setRawDecodeTestFlags(true, "1", 8, false, false)()
+	previousDigest := *rawArtifactSHA256Flag
+	*rawArtifactSHA256Flag = strings.Repeat("a", 64)
+	defer func() { *rawArtifactSHA256Flag = previousDigest }()
+
+	f := testRawDecodeFlags(1, 1)
+	*f.gguf = "selected.gguf"
+	*f.name = "caller-model-label"
+	*f.out = filepath.Join(t.TempDir(), "raw.json")
+	calls := 0
+	execute := func(_ context.Context, req rawdecode.Request) (rawdecode.Execution, error) {
+		calls++
+		if req.ArtifactPath != "selected.gguf" || req.ExpectedArtifactSHA256 != strings.Repeat("a", 64) {
+			t.Fatalf("adapter request mismatch: %+v", req)
+		}
+		return rawdecode.Execution{
+			ArtifactSHA256: strings.Repeat("a", 64), ModelName: "observed-model",
+			Backend:        rawdecode.BackendObservation{Selected: "legacy"},
+			PromptTokenIDs: []int{1}, ContextLimit: 8, GeneratedLimit: 1,
+			FiniteLogits: true,
+			Runs:         []rawdecode.Run{{GeneratedTokens: []int{2}, PrefillOutputID: 2, PrefillDuration: time.Nanosecond}},
+		}, nil
+	}
+	if err := runRawDecodeArtifactWith(f, nil, execute); err != nil {
+		t.Fatalf("runRawDecodeArtifactWith: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("executor seam calls=%d, want 1", calls)
+	}
+	b, err := os.ReadFile(*f.out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report map[string]any
+	if err := json.Unmarshal(b, &report); err != nil {
+		t.Fatal(err)
+	}
+	attempt := report["canonical_physical_receipt"].(map[string]any)
+	if attempt["status"] != "UNAVAILABLE" || attempt["credit_eligible"] != false {
+		t.Fatalf("incomplete observation became physical receipt: %v", attempt)
 	}
 }
 
@@ -678,7 +727,10 @@ func TestRawDecodePhaseTimings(t *testing.T) {
 				t.Fatalf("quantization time = %v, want actual %v", timings["quant_ms"], quantMS)
 			}
 			verifyMS, ok := timings["verify_cpu_ms"].(float64)
-			if !ok || (tc.verify && verifyMS <= 0) || (!tc.verify && verifyMS != 0) {
+			// Very fast synthetic replay can fall below the host clock's resolution.
+			// Preserve the observed zero rather than manufacturing a timing floor;
+			// the result and host-stage presence below prove that replay ran.
+			if !ok || verifyMS < 0 || (!tc.verify && verifyMS != 0) {
 				t.Fatalf("verification time = %v, enabled=%v", timings["verify_cpu_ms"], tc.verify)
 			}
 			if _, present := report["verify_cpu"]; present != tc.verify {
@@ -687,7 +739,7 @@ func TestRawDecodePhaseTimings(t *testing.T) {
 			for _, run := range report["runs"].([]map[string]any) {
 				timing := run["timings"].(map[string]any)
 				v, ok := timing["verify_cpu_ms"].(float64)
-				if !ok || (tc.verify && v <= 0) || (!tc.verify && v != 0) {
+				if !ok || v < 0 || (!tc.verify && v != 0) {
 					t.Fatalf("per-run verification time = %v, enabled=%v", timing["verify_cpu_ms"], tc.verify)
 				}
 				var sum float64
