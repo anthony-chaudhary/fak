@@ -494,14 +494,9 @@ func cmdServe(argv []string) {
 			rt.addStartupMessage(serveRemoteKVStartupMessage(receipt))
 		}
 	}
-	useVulkan := isServeVulkan(rt, sf)
-	modelPath := *sf.ggufPath
-	if modelPath == "" && sf.model != nil {
-		modelPath = *sf.model
-	}
 	var releaseMetalResidency func()
 	var metalErr error
-	releaseVulkanResidency, err := loadLocalLauncherModelWithVulkanLease(useVulkan, modelPath, gpulease.Options{}, func() {
+	releaseVulkanResidency, err := loadServeModelWithVulkanLease(sf, gpulease.Options{}, func() {
 		releaseMetalResidency, metalErr = loadLocalLauncherModelWithMetalLease(rt.useMetal, *sf.ggufPath, gpulease.Options{}, func() {
 			rt.loadModel(sf)
 		})
@@ -528,20 +523,16 @@ func cmdServe(argv []string) {
 	rt.run(sf)
 }
 
-// isServeVulkan reports whether the serve configuration intends to use the Vulkan
-// compute backend, either via an explicit flag or an initialized chat backend.
-// Proxy modes (--base-url) remain lease-free because they delegate model residency.
-func isServeVulkan(rt *serveRuntime, sf *serveFlags) bool {
-	if sf != nil && sf.baseURL != nil && strings.TrimSpace(*sf.baseURL) != "" {
+// isServeVulkan reports only an exact, explicitly parsed --backend=vulkan.
+// Proxy modes remain lease-free because they delegate model residency.
+func isServeVulkan(sf *serveFlags) bool {
+	if sf == nil || sf.backendName == nil {
 		return false
 	}
-	if rt != nil && rt.chatBackend != nil && strings.EqualFold(rt.chatBackend.Name(), "vulkan") {
-		return true
+	if sf.baseURL != nil && *sf.baseURL != "" {
+		return false
 	}
-	if sf != nil && sf.backendName != nil && strings.EqualFold(strings.TrimSpace(*sf.backendName), "vulkan") {
-		return true
-	}
-	return false
+	return *sf.backendName == "vulkan"
 }
 
 // warnIfNotFakWorkspace emits a loud stderr advisory when the serve cwd is not inside a
