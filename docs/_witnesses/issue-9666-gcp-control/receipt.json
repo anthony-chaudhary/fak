@@ -4,7 +4,7 @@
   "title": "bench(qwen38): capture server AMD accelerator receipt with GCP control",
   "captured_at": "2026-09-03T14:10:00Z",
   "environment": {
-    "project": "dos-rlvr-admit-20260608",
+    "project": "example-gcp-project",
     "region": "us-central1",
     "zone": "us-central1-f",
     "gpu_architecture": "NVIDIA datacenter GPU",
