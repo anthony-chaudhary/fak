@@ -727,12 +727,72 @@ func EnsureOpenCodePlugin(root string, autoSync bool) error {
 // DefaultOpenCodePlugin is the canonical dos-proof-guard.js script enforcing
 // cross-harness FAK reference fences and DOS lane lease admission before OpenCode native mutations.
 const DefaultOpenCodePlugin = `import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
 const execute = promisify(execFile);
 const mutations = new Set(["write", "edit", "apply_patch"]);
+
+function hashString(str) {
+  if (typeof str !== "string" || !str) return "";
+  return createHash("sha256").update(str).digest("hex").slice(0, 16);
+}
+
+function extractHolder(errorOrOutput, peers) {
+  if (!errorOrOutput) return (peers && peers[0]?.holder) || "peer";
+  if (typeof errorOrOutput === "object") {
+    if (errorOrOutput.conflict?.holder) return errorOrOutput.conflict.holder;
+    if (errorOrOutput.holder) return errorOrOutput.holder;
+  }
+  const text = typeof errorOrOutput === "string" ? errorOrOutput : (errorOrOutput.stdout || errorOrOutput.stderr || errorOrOutput.message || "");
+  const match = text.match(/"holder"\s*:\s*"([^"]+)"/);
+  if (match) return match[1];
+  if (peers && peers.length > 0 && peers[0]?.holder) return peers[0].holder;
+  return "peer";
+}
+
+function formatCollisionRecovery(holder) {
+  return "[RECOVERY]: Lane conflict detected with holder '" + (holder || "peer") + "'. DO NOT retry editing this path. Run 'fak recover COLLISION_RISK' or select a tree-disjoint task.";
+}
+
+function isTempOrScratchPath(target, filename) {
+  const normTarget = (target || "").replace(/\\/g, "/");
+  const normName = (filename || "").replace(/\\/g, "/");
+  const scratchPattern = /(?:appdata\/local\/temp|temp|tmp)\/(?:opencode|scratch)(?:\/|$)/i;
+  return scratchPattern.test(normTarget) || scratchPattern.test(normName);
+}
+
+function extractOutputText(output) {
+  if (!output) return "";
+  if (typeof output === "string") return output;
+  if (typeof output.error === "string") return output.error;
+  if (output.error instanceof Error) return output.error.message;
+  if (typeof output.output === "string") return output.output;
+  if (typeof output.result === "string") return output.result;
+  if (typeof output.text === "string") return output.text;
+  if (typeof output.content === "string") return output.content;
+  if (Array.isArray(output.content)) {
+    return output.content.map((c) => (typeof c === "string" ? c : c?.text || "")).join("\n");
+  }
+  if (Array.isArray(output.result)) {
+    return output.result.map((c) => (typeof c === "string" ? c : c?.text || "")).join("\n");
+  }
+  return "";
+}
+
+function isMutationFailure(output) {
+  if (!output) return false;
+  if (output.error || output.isError === true || output.metadata?.error) return true;
+  const text = extractOutputText(output);
+  if (!text) return false;
+  if (/could not find oldstring/i.test(text)) return true;
+  if (/found multiple matches/i.test(text)) return true;
+  if (/oldstring not found/i.test(text)) return true;
+  if (/^error:\s+/im.test(text)) return true;
+  return false;
+}
 
 async function jsonCommand(command, args, cwd) {
   let stdout;
@@ -742,12 +802,18 @@ async function jsonCommand(command, args, cwd) {
       cwd, timeout: 120000, maxBuffer: 4 * 1024 * 1024, windowsHide: true,
     }));
   } catch (error) {
-    throw new Error(` + "`" + `[dos-proof-guard] Lease admission unavailable or refused: ${command}: ${error.stdout || error.stderr || error.message}` + "`" + `);
+    const rawOut = error.stdout || error.stderr || error.message || "";
+    let recovery = "";
+    if (rawOut.includes("COLLISION_RISK")) {
+      const holder = extractHolder(error);
+      recovery = "\n" + formatCollisionRecovery(holder);
+    }
+    throw new Error("[dos-proof-guard] Lease admission unavailable or refused: " + command + ": " + rawOut + recovery);
   }
   try {
     return JSON.parse(stdout);
   } catch {
-    throw new Error(` + "`" + `[dos-proof-guard] Malformed lease admission response from ${command}` + "`" + `);
+    throw new Error("[dos-proof-guard] Malformed lease admission response from " + command);
   }
 }
 
@@ -819,11 +885,47 @@ function mutationPaths(tool, args) {
 
 export default async function dosProofGuardPlugin({ client, directory }) {
   let fileModifiedCount = 0;
+  const failureHistory = new Map();
   // Capture host configuration once; tool arguments never supply ownership.
   const hostOwner = process.env.FAK_LEASE_OWNER;
   const hostSession = process.env.FAK_LEASE_SESSION;
   const hostLease = process.env.FAK_LEASE_ID;
   const root = await realpath(directory);
+
+  function normalizeKey(session, filename) {
+    const full = path.resolve(root, filename);
+    return session + ":" + full.toLowerCase().replace(/\\/g, "/");
+  }
+
+  function checkCircuitBreaker(session, filename) {
+    const key = normalizeKey(session, filename);
+    const entry = failureHistory.get(key);
+    if (entry && entry.count >= 2) {
+      entry.count++;
+      throw new Error("[dos-proof-guard-circuit-breaker] Refusing 3rd consecutive failing edit on " + filename + ". Stop retrying. Inspect the file with 'read' or pivot to an alternate lane.");
+    }
+  }
+
+  function recordFailure(session, filename, tool, args, reason) {
+    const key = normalizeKey(session, filename);
+    const existing = failureHistory.get(key);
+    const count = (existing?.count || 0) + 1;
+    const oldString = args?.oldString || args?.old_string || "";
+    const oldStringHash = oldString ? hashString(oldString) : (existing?.oldStringHash || "");
+    failureHistory.set(key, {
+      tool: tool || existing?.tool || "unknown",
+      filePath: filename,
+      oldStringHash,
+      failureReason: reason || existing?.failureReason || "",
+      count,
+      lastFailedAt: Date.now(),
+    });
+  }
+
+  function resetFailure(session, filename) {
+    const key = normalizeKey(session, filename);
+    failureHistory.delete(key);
+  }
 
   return {
     "tool.execute.before": async (input, output) => {
@@ -833,57 +935,103 @@ export default async function dosProofGuardPlugin({ client, directory }) {
       }
       const session = hostSession || input.sessionID;
       const owner = hostOwner || ` + "`" + `opencode:${session}` + "`" + `;
-      const filenames = mutationPaths(input.tool, output?.args);
+      const args = output?.args;
+      const filenames = mutationPaths(input.tool, args);
       if (!filenames.length || filenames.some((name) => typeof name !== "string" || !name.trim())) {
         throw new Error("[dos-proof-guard] Explicit mutation paths are required for lease admission");
       }
-      const trees = [];
+
       for (const filename of filenames) {
-        const target = await canonicalPath(path.resolve(root, filename));
-        const relative = path.relative(root, target);
-        if (!relative || relative === ".." || relative.startsWith(` + "`" + `..${path.sep}` + "`" + `) || path.isAbsolute(relative)) {
-          throw new Error("[dos-proof-guard] Mutation path is outside this lease workspace");
-        }
-        trees.push(relative.split(path.sep).join("/"));
+        checkCircuitBreaker(session, filename);
       }
 
-      const refs = await jsonCommand("fak", ["leaseref", "liveness", "--dir", root, "--session", session], root);
-      if (!Array.isArray(refs)) throw new Error("[dos-proof-guard] Invalid FAK lease snapshot");
-      const own = refs.filter((row) => row.holder === owner && row.session_id === session && (!hostLease || row.id === hostLease));
-      if (hostLease && own.length !== 1) throw new Error("[dos-proof-guard] Host lease identity is not current");
-      if (own.length > 1) throw new Error("[dos-proof-guard] Set host FAK_LEASE_ID to identify the active lease");
-      const regionArgs = ["loop", "region", "--dir", root, "--actor", owner, "--no-queue", "--json"];
-      for (const tree of trees) regionArgs.push("--tree", tree);
-      if (own.length === 1) {
-        const lease = own[0];
-        if (!lease.id || !Number.isInteger(lease.generation) || lease.generation < 1) {
-          throw new Error("[dos-proof-guard] Own FAK lease lacks a fencing generation");
+      try {
+        const trees = [];
+        for (const filename of filenames) {
+          if (filename.includes("\0")) {
+            throw new Error("[dos-proof-guard] Malformed mutation path: contains null byte");
+          }
+          const target = await canonicalPath(path.resolve(root, filename));
+          const relative = path.relative(root, target);
+          if (!relative || relative === ".." || relative.startsWith(` + "`" + `..${path.sep}` + "`" + `) || path.isAbsolute(relative)) {
+            if (isTempOrScratchPath(target, filename)) {
+              throw new Error("[dos-proof-guard] Mutation path is outside this lease workspace: '" + filename + "'. Temporary scratch files under temp/scratch directories (e.g. AppData/Local/Temp/opencode) must not be created or edited via repo mutation tools (write/edit/apply_patch); use shell commands (e.g. bash or PowerShell) to manage out-of-tree scratch files.");
+            }
+            throw new Error("[dos-proof-guard] Mutation path is outside this lease workspace: '" + filename + "'");
+          }
+          trees.push(relative.split(path.sep).join("/"));
         }
-        const fence = await jsonCommand("fak", ["leaseref", "fence", "--dir", root, "--id", lease.id, "--holder", owner, "--generation", String(lease.generation)], root);
-        if (fence.ok !== true) throw new Error("[dos-proof-guard] Own FAK lease fence refused");
-        regionArgs.push("--self", lease.id);
-      }
-      const region = await jsonCommand("fak", regionArgs, root);
-      if (region.schema !== "fak.loop-region.v1" || region.admit !== true) {
-        throw new Error("[dos-proof-guard] FAK lease admission refused");
-      }
 
-      // DOS owns WAL parsing, corruption handling, expiry and locking. Older DOS
-      // versions reject strict=True, so a missing prerequisite blocks mutations.
-      const snapshot = await jsonCommand("python", ["-c",
-        "import json,sys; from dos import config,lane_lease; cfg=config.load_workspace_config(sys.argv[1],gather_env=False); print(json.dumps(lane_lease.live_leases(cfg, strict=True, expire_dead=True)))", root], root);
-      if (!Array.isArray(snapshot) || snapshot.some((row) => !row || typeof row.lane !== "string" || !Array.isArray(row.tree))) {
-        throw new Error("[dos-proof-guard] Invalid DOS lease snapshot");
+        const refs = await jsonCommand("fak", ["leaseref", "liveness", "--dir", root, "--session", session], root);
+        if (!Array.isArray(refs)) throw new Error("[dos-proof-guard] Invalid FAK lease snapshot");
+        const own = refs.filter((row) => row.holder === owner && row.session_id === session && (!hostLease || row.id === hostLease));
+        if (hostLease && own.length !== 1) throw new Error("[dos-proof-guard] Host lease identity is not current");
+        if (own.length > 1) throw new Error("[dos-proof-guard] Set host FAK_LEASE_ID to identify the active lease");
+        const regionArgs = ["loop", "region", "--dir", root, "--actor", owner, "--no-queue", "--json"];
+        for (const tree of trees) regionArgs.push("--tree", tree);
+        if (own.length === 1) {
+          const lease = own[0];
+          if (!lease.id || !Number.isInteger(lease.generation) || lease.generation < 1) {
+            throw new Error("[dos-proof-guard] Own FAK lease lacks a fencing generation");
+          }
+          const fence = await jsonCommand("fak", ["leaseref", "fence", "--dir", root, "--id", lease.id, "--holder", owner, "--generation", String(lease.generation)], root);
+          if (fence.ok !== true) throw new Error("[dos-proof-guard] Own FAK lease fence refused");
+          regionArgs.push("--self", lease.id);
+        }
+        const region = await jsonCommand("fak", regionArgs, root);
+        if (region.schema !== "fak.loop-region.v1" || region.admit !== true) {
+          let recovery = "";
+          if (region.reason === "COLLISION_RISK" || JSON.stringify(region).includes("COLLISION_RISK")) {
+            const holder = extractHolder(region);
+            recovery = "\n" + formatCollisionRecovery(holder);
+          }
+          throw new Error("[dos-proof-guard] FAK lease admission refused" + recovery);
+        }
+
+        // DOS owns WAL parsing, corruption handling, expiry and locking. Older DOS
+        // versions reject strict=True, so a missing prerequisite blocks mutations.
+        const snapshot = await jsonCommand("python", ["-c",
+          "import json,sys; from dos import config,lane_lease; cfg=config.load_workspace_config(sys.argv[1],gather_env=False); print(json.dumps(lane_lease.live_leases(cfg, strict=True, expire_dead=True)))", root], root);
+        if (!Array.isArray(snapshot) || snapshot.some((row) => !row || typeof row.lane !== "string" || !Array.isArray(row.tree))) {
+          throw new Error("[dos-proof-guard] Invalid DOS lease snapshot");
+        }
+        const peers = snapshot.filter((row) => !(row.holder === owner && row.run_id === session));
+        const decision = await jsonCommand("dos", ["arbitrate", "--workspace", root, "--lane", "opencode-native-write", "--kind", "keyword", "--output", "json", "--leases", JSON.stringify(peers), "--tree", ...trees], root);
+        if (decision.outcome !== "acquire") {
+          let recovery = "";
+          if (decision.reason === "COLLISION_RISK" || JSON.stringify(decision).includes("COLLISION_RISK")) {
+            const holder = extractHolder(decision, peers);
+            recovery = "\n" + formatCollisionRecovery(holder);
+          }
+          throw new Error("[dos-proof-guard] DOS lease admission refused" + recovery);
+        }
+        // These are pre-execution observations, not an atomic filesystem fence.
+        // Shell/MCP mutations and late lease changes need separate mediation.
+      } catch (err) {
+        for (const filename of filenames) {
+          recordFailure(session, filename, input.tool, args, err.message);
+        }
+        throw err;
       }
-      const peers = snapshot.filter((row) => !(row.holder === owner && row.run_id === session));
-      const decision = await jsonCommand("dos", ["arbitrate", "--workspace", root, "--lane", "opencode-native-write", "--kind", "keyword", "--output", "json", "--leases", JSON.stringify(peers), "--tree", ...trees], root);
-      if (decision.outcome !== "acquire") throw new Error("[dos-proof-guard] DOS lease admission refused");
-      // These are pre-execution observations, not an atomic filesystem fence.
-      // Shell/MCP mutations and late lease changes need separate mediation.
     },
     "tool.execute.after": async (input, output) => {
       const tool = input?.tool || "";
       if (tool === "edit" || tool === "write" || tool === "apply_patch" || mutations.has(tool)) {
+        const session = hostSession || input?.sessionID || "default";
+        const args = input?.args || output?.args;
+        const files = mutationPaths(tool, args);
+
+        if (isMutationFailure(output)) {
+          for (const f of files) {
+            recordFailure(session, f, tool, args, extractOutputText(output) || "mutation_failed");
+          }
+          return;
+        }
+
+        for (const f of files) {
+          resetFailure(session, f);
+        }
+
         fileModifiedCount++;
         let reminder = "\n\n[dos-proof-guard] Code modified. On-device proof required before completion:\n" +
           "1. Run tests: .\\test.ps1 ./internal/<pkg>/... -> CLAIM_TEST_GREEN\n" +
@@ -891,7 +1039,6 @@ export default async function dosProofGuardPlugin({ client, directory }) {
           "3. Spawn cross-validator subagent to adversarial-audit the diff\n" +
           "4. Auto-ticket follow-ons/edge-cases by default (gh issue create / fak issue fanout)\n";
 
-        const files = mutationPaths(tool, input?.args || output?.args);
         const hasHardware = files.some((f) => typeof f === "string" && (f.includes("internal/compute") || f.includes("internal/amdgpu") || f.includes("vulkan") || f.includes("strix")));
         if (hasHardware) {
           reminder += "\n[dos-proof-guard] Halo-related compute/hardware code modified. Physical hardware validation required:\n" +
