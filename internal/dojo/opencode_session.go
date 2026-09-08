@@ -44,81 +44,59 @@ type OpencodeSessionLedger struct {
 	CompactionRecorded     bool `json:"compaction_recorded"`
 }
 
-// OpencodeSessionEpisodes folds an opencode session telemetry ledger into three dojo ScoredInputs:
-// cache_read_share, turns_per_task, and compaction_shed_ratio.
-func OpencodeSessionEpisodes(led OpencodeSessionLedger) []ScoredInput {
-	var episodes []ScoredInput
-
-	// 1. cache_read_share
-	cachePred := Registry.MustPredict("opencode-session", "cache_read_share", "fraction")
-	totalInput := led.InputTokens + led.CacheReadTokens + led.CacheCreationTokens
-	if !led.CacheRecorded || totalInput <= 0 {
-		episodes = append(episodes, ScoredInput{
-			Prediction: cachePred,
-			Outcome: Outcome{
+// OpencodeSessionOutcome extracts the measured outcome for a given metric from session telemetry.
+func OpencodeSessionOutcome(led OpencodeSessionLedger, metric string) Outcome {
+	switch metric {
+	case "cache_read_share":
+		totalInput := led.InputTokens + led.CacheReadTokens + led.CacheCreationTokens
+		if !led.CacheRecorded || totalInput <= 0 {
+			return Outcome{
 				Measured: false,
 				Sample:   totalInput,
 				Source:   "no billed input tokens recorded in opencode session telemetry — cache_read_share is UNMEASURED",
-			},
-		})
-	} else {
+			}
+		}
 		share := float64(led.CacheReadTokens) / float64(totalInput)
 		if share < 0.0 {
 			share = 0.0
 		} else if share > 1.0 {
 			share = 1.0
 		}
-		episodes = append(episodes, ScoredInput{
-			Prediction: cachePred,
-			Outcome: Outcome{
-				Realized:   share,
-				Provenance: Witnessed,
-				Measured:   true,
-				Sample:     totalInput,
-				Source: fmt.Sprintf("%d of %d billed input tokens served from prefix cache in opencode session (WITNESSED)",
-					led.CacheReadTokens, totalInput),
-			},
-		})
-	}
+		return Outcome{
+			Realized:   share,
+			Provenance: Witnessed,
+			Measured:   true,
+			Sample:     totalInput,
+			Source: fmt.Sprintf("%d of %d billed input tokens served from prefix cache in opencode session (WITNESSED)",
+				led.CacheReadTokens, totalInput),
+		}
 
-	// 2. turns_per_task
-	turnsPred := Registry.MustPredict("opencode-session", "turns_per_task", "turns")
-	if !led.TurnsRecorded || led.CompletedTasks <= 0 || led.TotalTurns < 0 {
-		episodes = append(episodes, ScoredInput{
-			Prediction: turnsPred,
-			Outcome: Outcome{
+	case "turns_per_task":
+		if !led.TurnsRecorded || led.CompletedTasks <= 0 || led.TotalTurns < 0 {
+			return Outcome{
 				Measured: false,
 				Sample:   led.CompletedTasks,
 				Source:   "no completed tasks recorded in opencode session telemetry — turns_per_task is UNMEASURED",
-			},
-		})
-	} else {
+			}
+		}
 		tpt := float64(led.TotalTurns) / float64(led.CompletedTasks)
-		episodes = append(episodes, ScoredInput{
-			Prediction: turnsPred,
-			Outcome: Outcome{
-				Realized:   tpt,
-				Provenance: Witnessed,
-				Measured:   true,
-				Sample:     led.CompletedTasks,
-				Source: fmt.Sprintf("%d assistant turns across %d completed task(s) in opencode session (WITNESSED)",
-					led.TotalTurns, led.CompletedTasks),
-			},
-		})
-	}
+		return Outcome{
+			Realized:   tpt,
+			Provenance: Witnessed,
+			Measured:   true,
+			Sample:     led.CompletedTasks,
+			Source: fmt.Sprintf("%d assistant turns across %d completed task(s) in opencode session (WITNESSED)",
+				led.TotalTurns, led.CompletedTasks),
+		}
 
-	// 3. compaction_shed_ratio
-	compactionPred := Registry.MustPredict("opencode-session", "compaction_shed_ratio", "fraction")
-	if !led.CompactionRecorded || led.TokensBeforeCompaction <= 0 || led.CompactionEvents <= 0 {
-		episodes = append(episodes, ScoredInput{
-			Prediction: compactionPred,
-			Outcome: Outcome{
+	case "compaction_shed_ratio":
+		if !led.CompactionRecorded || led.TokensBeforeCompaction <= 0 || led.CompactionEvents <= 0 {
+			return Outcome{
 				Measured: false,
 				Sample:   led.TokensBeforeCompaction,
 				Source:   "no compaction events recorded in opencode session telemetry — compaction_shed_ratio is UNMEASURED",
-			},
-		})
-	} else {
+			}
+		}
 		shed := led.TokensBeforeCompaction - led.TokensAfterCompaction
 		ratio := float64(shed) / float64(led.TokensBeforeCompaction)
 		if ratio < -1.0 {
@@ -126,19 +104,64 @@ func OpencodeSessionEpisodes(led OpencodeSessionLedger) []ScoredInput {
 		} else if ratio > 1.0 {
 			ratio = 1.0
 		}
-		episodes = append(episodes, ScoredInput{
-			Prediction: compactionPred,
-			Outcome: Outcome{
-				Realized:   ratio,
-				Provenance: Witnessed,
-				Measured:   true,
-				Sample:     led.TokensBeforeCompaction,
-				Source: fmt.Sprintf("%d tokens shed across %d compaction event(s) (before=%d after=%d) (WITNESSED)",
-					shed, led.CompactionEvents, led.TokensBeforeCompaction, led.TokensAfterCompaction),
-			},
-		})
+		return Outcome{
+			Realized:   ratio,
+			Provenance: Witnessed,
+			Measured:   true,
+			Sample:     led.TokensBeforeCompaction,
+			Source: fmt.Sprintf("%d tokens shed across %d compaction event(s) (before=%d after=%d) (WITNESSED)",
+				shed, led.CompactionEvents, led.TokensBeforeCompaction, led.TokensAfterCompaction),
+		}
+
+	default:
+		return Outcome{
+			Measured: false,
+			Source:   fmt.Sprintf("unknown metric %q for opencode-session", metric),
+		}
+	}
+}
+
+// OpencodeSessionEpisodes folds an opencode session telemetry ledger into three dojo ScoredInputs:
+// cache_read_share, turns_per_task, and compaction_shed_ratio.
+func OpencodeSessionEpisodes(led OpencodeSessionLedger) []ScoredInput {
+	return OpencodeSessionEpisodesWithPredictions(led, nil)
+}
+
+// OpencodeSessionEpisodesWithPredictions folds an opencode session telemetry ledger
+// using candidate predictions for the opencode-session metrics.
+// Any metric omitted from candidatePreds defaults to the registered claim.
+func OpencodeSessionEpisodesWithPredictions(led OpencodeSessionLedger, candidatePreds map[string]Prediction) []ScoredInput {
+	metrics := []struct {
+		name string
+		unit string
+	}{
+		{"cache_read_share", "fraction"},
+		{"turns_per_task", "turns"},
+		{"compaction_shed_ratio", "fraction"},
 	}
 
+	episodes := make([]ScoredInput, 0, len(metrics))
+	for _, m := range metrics {
+		pred, ok := candidatePreds[m.name]
+		if !ok {
+			pred = Registry.MustPredict(OpencodeSessionLeverName, m.name, m.unit)
+		}
+		outcome := OpencodeSessionOutcome(led, m.name)
+		episodes = append(episodes, ScoredInput{
+			Prediction: pred,
+			Outcome:    outcome,
+		})
+	}
+	return episodes
+}
+
+// EvaluateCandidatePredictions scores candidate predictions against an opencode session ledger.
+func EvaluateCandidatePredictions(scenario string, led OpencodeSessionLedger, candidates []Prediction, band CalibBand) []Episode {
+	episodes := make([]Episode, 0, len(candidates))
+	for _, cand := range candidates {
+		outcome := OpencodeSessionOutcome(led, cand.Metric)
+		episodes = append(episodes, Score(scenario, cand, outcome, band))
+	}
 	return episodes
 }
 
@@ -172,12 +195,21 @@ const OpencodeSessionLeverName = "opencode-session"
 
 // OpencodeSessionLever is the official dojo gym lever for evaluating opencode sessions.
 type OpencodeSessionLever struct {
-	Ledger OpencodeSessionLedger
+	Ledger      OpencodeSessionLedger
+	Predictions map[string]Prediction
 }
 
 // NewOpencodeSessionLever creates an OpencodeSessionLever with the provided telemetry ledger.
 func NewOpencodeSessionLever(led OpencodeSessionLedger) *OpencodeSessionLever {
 	return &OpencodeSessionLever{Ledger: led}
+}
+
+// WithPredictions returns a copy of the lever configured with custom candidate predictions.
+func (l *OpencodeSessionLever) WithPredictions(preds map[string]Prediction) *OpencodeSessionLever {
+	return &OpencodeSessionLever{
+		Ledger:      l.Ledger,
+		Predictions: preds,
+	}
 }
 
 // Name returns the lever name "opencode-session".
@@ -187,6 +219,9 @@ func (l *OpencodeSessionLever) Name() string {
 
 // Episodes returns the scored inputs for the lever over a scenario.
 func (l *OpencodeSessionLever) Episodes(s Scenario) ([]ScoredInput, error) {
+	if len(l.Predictions) > 0 {
+		return OpencodeSessionEpisodesWithPredictions(l.Ledger, l.Predictions), nil
+	}
 	return OpencodeSessionEpisodes(l.Ledger), nil
 }
 

@@ -454,3 +454,153 @@ func TestOpencodeSessionNegativeTurnsUnmeasured(t *testing.T) {
 	}
 }
 
+// TestOpencodeSessionOutcome asserts that OpencodeSessionOutcome correctly extracts
+// measured and unmeasured outcomes for each metric from session telemetry.
+func TestOpencodeSessionOutcome(t *testing.T) {
+	// 1. Fully recorded telemetry
+	led := OpencodeSessionLedger{
+		SessionID:              "ses-outcome",
+		InputTokens:            2000,
+		CacheReadTokens:        8000,
+		CacheRecorded:          true,
+		TotalTurns:             16,
+		CompletedTasks:         2,
+		TurnsRecorded:          true,
+		TokensBeforeCompaction: 100000,
+		TokensAfterCompaction:  60000,
+		CompactionEvents:       1,
+		CompactionRecorded:     true,
+	}
+
+	oCache := OpencodeSessionOutcome(led, "cache_read_share")
+	if !oCache.Measured || math.Abs(oCache.Realized-0.80) > 1e-9 {
+		t.Errorf("cache_read_share outcome = %+v, want realized 0.80", oCache)
+	}
+
+	oTurns := OpencodeSessionOutcome(led, "turns_per_task")
+	if !oTurns.Measured || math.Abs(oTurns.Realized-8.0) > 1e-9 {
+		t.Errorf("turns_per_task outcome = %+v, want realized 8.0", oTurns)
+	}
+
+	oShed := OpencodeSessionOutcome(led, "compaction_shed_ratio")
+	if !oShed.Measured || math.Abs(oShed.Realized-0.40) > 1e-9 {
+		t.Errorf("compaction_shed_ratio outcome = %+v, want realized 0.40", oShed)
+	}
+
+	// 2. Unknown metric
+	oUnknown := OpencodeSessionOutcome(led, "nonexistent_metric")
+	if oUnknown.Measured {
+		t.Errorf("unknown metric outcome must be unmeasured: %+v", oUnknown)
+	}
+
+	// 3. Unrecorded telemetry
+	emptyLed := OpencodeSessionLedger{}
+	for _, m := range []string{"cache_read_share", "turns_per_task", "compaction_shed_ratio"} {
+		out := OpencodeSessionOutcome(emptyLed, m)
+		if out.Measured {
+			t.Errorf("empty ledger for %s must be unmeasured: %+v", m, out)
+		}
+	}
+}
+
+// TestOpencodeSessionEvaluateCandidatePredictions verifies evaluating candidate predictions
+// against session telemetry in the gym.
+func TestOpencodeSessionEvaluateCandidatePredictions(t *testing.T) {
+	band := DefaultCalibBand()
+	led := OpencodeSessionLedger{
+		SessionID:              "ses-cand",
+		InputTokens:            1000,
+		CacheReadTokens:        9000, // 9000 / 10000 = 0.90
+		CacheRecorded:          true,
+		TotalTurns:             24,
+		CompletedTasks:         2, // 24 / 2 = 12.0
+		TurnsRecorded:          true,
+		TokensBeforeCompaction: 100000,
+		TokensAfterCompaction:  50000, // (100000 - 50000) / 100000 = 0.50
+		CompactionEvents:       1,
+		CompactionRecorded:     true,
+	}
+
+	// Candidate predictions matching the realized numbers perfectly
+	candidates := []Prediction{
+		{
+			Lever:   OpencodeSessionLeverName,
+			Metric:  "cache_read_share",
+			Claimed: 0.90,
+			Unit:    "fraction",
+			Basis:   "candidate theory: 90% cache read share",
+		},
+		{
+			Lever:         OpencodeSessionLeverName,
+			Metric:        "turns_per_task",
+			Claimed:       12.0,
+			Unit:          "turns",
+			Basis:         "candidate theory: 12 turns per task",
+			LowerIsBetter: true,
+		},
+		{
+			Lever:   OpencodeSessionLeverName,
+			Metric:  "compaction_shed_ratio",
+			Claimed: 0.50,
+			Unit:    "fraction",
+			Basis:   "candidate theory: 50% compaction shed",
+		},
+	}
+
+	episodes := EvaluateCandidatePredictions("opencode-candidate-scenario", led, candidates, band)
+	if len(episodes) != 3 {
+		t.Fatalf("expected 3 episodes, got %d", len(episodes))
+	}
+
+	for _, ep := range episodes {
+		if ep.Verdict != VerdictCalibrated {
+			t.Errorf("candidate %s: verdict = %s, want %s", ep.Metric, ep.Verdict, VerdictCalibrated)
+		}
+		if ep.CalibErr != 0.0 {
+			t.Errorf("candidate %s: calib_err = %f, want 0.0", ep.Metric, ep.CalibErr)
+		}
+		if ep.Grade != "A" {
+			t.Errorf("candidate %s: grade = %s, want A", ep.Metric, ep.Grade)
+		}
+	}
+
+	// Test OpencodeSessionEpisodesWithPredictions partial override
+	overrideMap := map[string]Prediction{
+		"cache_read_share": {
+			Lever:   OpencodeSessionLeverName,
+			Metric:  "cache_read_share",
+			Claimed: 0.90,
+			Unit:    "fraction",
+		},
+	}
+	customInputs := OpencodeSessionEpisodesWithPredictions(led, overrideMap)
+	if len(customInputs) != 3 {
+		t.Fatalf("expected 3 custom inputs, got %d", len(customInputs))
+	}
+	for _, in := range customInputs {
+		if in.Prediction.Metric == "cache_read_share" {
+			if in.Prediction.Claimed != 0.90 {
+				t.Errorf("cache_read_share candidate claimed = %v, want 0.90", in.Prediction.Claimed)
+			}
+		} else if in.Prediction.Metric == "turns_per_task" {
+			// Unspecified candidate should default to registered claim (16.0)
+			if in.Prediction.Claimed != 16.0 {
+				t.Errorf("turns_per_task default claimed = %v, want 16.0", in.Prediction.Claimed)
+			}
+		}
+	}
+
+	// Test OpencodeSessionLever.WithPredictions
+	baseLever := NewOpencodeSessionLever(led)
+	candLever := baseLever.WithPredictions(overrideMap)
+	leverEpisodes, err := candLever.Episodes(Scenario{Name: "candidate-scenario"})
+	if err != nil {
+		t.Fatalf("candLever.Episodes error: %v", err)
+	}
+	if len(leverEpisodes) != 3 {
+		t.Fatalf("expected 3 lever episodes, got %d", len(leverEpisodes))
+	}
+	if leverEpisodes[0].Prediction.Claimed != 0.90 {
+		t.Errorf("lever candidate claim = %v, want 0.90", leverEpisodes[0].Prediction.Claimed)
+	}
+}
