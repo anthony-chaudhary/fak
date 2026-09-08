@@ -250,6 +250,29 @@ func TestSubkernelExecution_SourceBindingMismatchFailsRemoteCommand(t *testing.T
 	}
 }
 
+func TestReceiptParityEventFromSubkernelPreservesRegisteredCosineArgmax(t *testing.T) {
+	contract, ok := LookupSubkernelParityContract("q4k_matmul")
+	if !ok {
+		t.Fatal("q4k_matmul contract missing")
+	}
+	cosine, exact := 0.999, true
+	event := StrixSubkernelParityEvent{
+		Schema: StrixSubkernelParitySchema, Selector: contract.Selector, TestName: contract.TestName,
+		OracleKind: contract.OracleKind, Engine: contract.Engine, DeviceObserved: true, CaseCount: 4, Passed: true,
+		Observed: StrixSubkernelObservedMetrics{Cosine: &cosine, ArgmaxExact: &exact},
+	}
+	got := receiptParityEventFromSubkernel(event, contract)
+	if err := got.Validate(); err != nil {
+		t.Fatalf("converted event invalid: %v", err)
+	}
+	if err := validateReceiptEventContract(contract.Selector, got); err != nil {
+		t.Fatalf("converted event lost registered contract: %v", err)
+	}
+	if got.OracleKind != StrixOracleCosineArgmax || got.Observed.CosineSimilarity == nil || got.Observed.ArgmaxExact == nil {
+		t.Fatalf("converted event lost cosine+argmax evidence: %+v", got)
+	}
+}
+
 func TestDefaultSubkernelParityContractsAreExhaustive(t *testing.T) {
 	if len(DefaultSubkernelParityContracts) != len(DefaultSubkernelSpecs) {
 		t.Fatalf("DefaultSubkernelParityContracts count = %d, want %d", len(DefaultSubkernelParityContracts), len(DefaultSubkernelSpecs))

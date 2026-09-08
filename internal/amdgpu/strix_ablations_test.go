@@ -206,6 +206,37 @@ func TestAblationArms_RejectMissingOrFabricatedEvidence(t *testing.T) {
 	})
 }
 
+func TestExtractAblationMetricsRequiresExplicitArmSamples(t *testing.T) {
+	out := "{\"feature\":\"f\",\"baseline_latency_us\":20,\"candidate_latency_us\":10,\"cosine_parity\":0.9999}\n--- PASS: TestSomething (0.01s)\nPASS\n"
+	if _, err := extractAblationMetrics(out, "f", nil, nil); err == nil {
+		t.Fatal("Go PASS line was incorrectly inferred as benchmark samples")
+	}
+	out = "{\"feature\":\"f\",\"baseline_latency_us\":20,\"candidate_latency_us\":10,\"baseline_samples\":3,\"candidate_samples\":4,\"cosine_parity\":0.9999}\n"
+	m, err := extractAblationMetrics(out, "f", nil, nil)
+	if err != nil {
+		t.Fatalf("explicit samples rejected: %v", err)
+	}
+	if m.BaselineSamples != 3 || m.CandidateSamples != 4 {
+		t.Fatalf("sample counts not preserved: %+v", m)
+	}
+}
+
+func TestAblationSelectorsRejectMixedUnknownAndCountExactSet(t *testing.T) {
+	if _, err := validateAblationSelectors([]string{"target", "made_up"}); err == nil || !strings.Contains(err.Error(), "made_up") {
+		t.Fatalf("mixed unknown selector accepted: %v", err)
+	}
+	count, err := validateAblationSelectors([]string{"quantization"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("quantization selected %d arms, want 2", count)
+	}
+	if _, err := RunStrixAblations(context.Background(), nil, []string{"cpu_vs_vulkan_gpu", "made_up"}); err == nil || !strings.Contains(err.Error(), "made_up") {
+		t.Fatalf("execution did not fail before target on unknown selector: %v", err)
+	}
+}
+
 func TestAblationArms_AcceptRealEvidence(t *testing.T) {
 	origExec := executeStrixAblationCommandFn
 	defer func() {
@@ -221,7 +252,7 @@ func TestAblationArms_AcceptRealEvidence(t *testing.T) {
 
 	t.Run("runTargetAblation parses real evidence and marks VERIFIED_LIFT", func(t *testing.T) {
 		executeStrixAblationCommandFn = func(ctx context.Context, target *StrixTarget, envVars, testPattern string) (string, time.Duration, error) {
-			jsonStr := `{"cpu_q4_reference_ns": 75561000, "samples": [{"warmup": false, "dispatch_and_output_read_ns": 451000, "cosine": 0.9999999}]}`
+			jsonStr := `{"cpu_q4_reference_ns": 75561000, "baseline_samples": 1, "candidate_samples": 1, "samples": [{"warmup": false, "dispatch_and_output_read_ns": 451000, "cosine": 0.9999999}]}`
 			return fmt.Sprintf("=== RUN TestVulkanQ4KRealShapeProfile\n%s\n--- PASS: TestVulkanQ4KRealShapeProfile (0.08s)\nPASS\n", jsonStr), 80 * time.Millisecond, nil
 		}
 
@@ -248,7 +279,7 @@ func TestAblationArms_AcceptRealEvidence(t *testing.T) {
 
 	t.Run("runTopologyAblation parses real evidence and marks VERIFIED_LIFT", func(t *testing.T) {
 		executeStrixAblationCommandFn = func(ctx context.Context, target *StrixTarget, envVars, testPattern string) (string, time.Duration, error) {
-			jsonStr := `{"feature": "fused_vs_discrete_norm_matmul", "baseline_latency_us": 28275, "candidate_latency_us": 17400, "cosine_parity": 0.999999}`
+			jsonStr := `{"feature": "fused_vs_discrete_norm_matmul", "baseline_latency_us": 28275, "candidate_latency_us": 17400, "baseline_samples": 1, "candidate_samples": 1, "cosine_parity": 0.999999}`
 			return fmt.Sprintf("=== RUN TestTopology\n%s\n--- PASS: TestTopology (0.05s)\nPASS\n", jsonStr), 50 * time.Millisecond, nil
 		}
 

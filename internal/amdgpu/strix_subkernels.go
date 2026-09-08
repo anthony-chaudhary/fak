@@ -6,14 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const (
@@ -608,6 +604,10 @@ var DefaultSubkernelSpecs = []SubkernelSpec{
 	},
 }
 
+// DefaultCreditableSubkernelSelectors is intentionally narrower than the
+// selector catalog until each production test emits its registered oracle.
+var DefaultCreditableSubkernelSelectors = []string{"argmax"}
+
 var executeOneSubkernelFn = executeOneSubkernel
 
 // RunSubkernelTests executes a set of sub-kernel test specs on the target Strix Halo machine.
@@ -723,40 +723,19 @@ func executeOneSubkernel(ctx context.Context, target *StrixTarget, spec Subkerne
 		Metrics: make(map[string]any),
 	}
 
-	// Build remote test command
-	remoteDir := os.Getenv("FAK_STRIX_DIR")
-	if remoteDir == "" {
-		remoteDir = "/var/lib/fak/repo"
+	sb, ok := SourceBindingFromContext(ctx)
+	if !ok || sb.WorkDir == "" || !sha256RE.MatchString(sb.BinarySHA256) || !sha256RE.MatchString(sb.ShaderBundleSHA256) {
+		res.Status = "FAIL"
+		res.Error = "source binding mismatch: missing prepared candidate source/build binding"
+		return res
 	}
-	sb, _ := SourceBindingFromContext(ctx)
-	var gitCheck string
-	if sb.GitTip != "" {
-		gitCheck = fmt.Sprintf(`ACTUAL_HEAD=$(git rev-parse HEAD 2>/dev/null) && case "$ACTUAL_HEAD" in %s*) ;; *) echo "source binding mismatch: HEAD $ACTUAL_HEAD != GitTip %s" >&2; exit 1;; esac && `, sb.GitTip, sb.GitTip)
-	}
-	testCmd := fmt.Sprintf(
-		`cd %s && %sFAK_VULKAN_SPIRV="$(pwd)/_scratch/vulkan-linux/spirv" FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_EXPECT_DEVICE=8060S ./_scratch/vulkan-linux/compute.test -test.run "%s" -test.v`,
-		remoteDir,
-		gitCheck,
-		spec.TestPattern,
-	)
-
-	var cmd *exec.Cmd
-	if target.Mode == "local" {
-		cmd = exec.CommandContext(ctx, "bash", "-c", testCmd)
-	} else {
-		cmd = exec.CommandContext(ctx, "ssh",
-			"-o", "BatchMode=yes",
-			"-o", "ConnectTimeout=5",
-			target.Host,
-			testCmd,
-		)
-	}
-	windowgate.ConfigureBackgroundCommand(cmd)
-
-	out, err := cmd.CombinedOutput()
+	testCmd := fmt.Sprintf(`FAK_VULKAN_SPIRV=%s FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_EXPECT_DEVICE=8060S %s -test.run %s -test.v`, shellQuote(sb.WorkDir+"/build/spirv"), shellQuote(sb.WorkDir+"/build/compute.test"), shellQuote(spec.TestPattern))
+	command := buildStrixAdmissionCommand(target, sb, testCmd)
+	out, err := runStrixTargetCommand(ctx, target, command, nil)
 	duration := time.Since(start)
 	res.DurationUS = duration.Microseconds()
 	outputStr := string(out)
+	res.Evidence = executionEvidenceFromOutput(outputStr, sb)
 
 	if err != nil {
 		res.Status = "FAIL"
@@ -789,12 +768,115 @@ func executeOneSubkernel(ctx context.Context, target *StrixTarget, spec Subkerne
 	if event.Observed.MaxAbsDelta != nil {
 		res.Parity.MaxAbsoluteDelta = *event.Observed.MaxAbsDelta
 	}
+	contract, _ := LookupSubkernelParityContract(spec.Name)
+	res.ParityEvents = []StrixParityEvent{receiptParityEventFromSubkernel(*event, contract)}
 	res.Metrics["category"] = spec.Category
 	res.Metrics["wall_ms"] = duration.Milliseconds()
 	res.Metrics["oracle_kind"] = event.OracleKind
 	res.Metrics["case_count"] = event.CaseCount
 	res.Metrics["device_observed"] = event.DeviceObserved
 	return res
+}
+
+func receiptParityEventFromSubkernel(event StrixSubkernelParityEvent, contract SubkernelParityContract) StrixParityEvent {
+	result := StrixParityEvent{
+		OracleKind:     StrixOracleKind(event.OracleKind),
+		CaseCount:      event.CaseCount,
+		DeviceObserved: event.DeviceObserved,
+		Engine:         event.Engine,
+		Passed:         event.Passed,
+		Observed: StrixParityMetrics{
+			ArgmaxExact:      event.Observed.ArgmaxExact,
+			CosineSimilarity: event.Observed.Cosine,
+			MaxAbsoluteDelta: event.Observed.MaxAbsDelta,
+			MaxSourceDelta:   event.Observed.MaxSourceDelta,
+			StateIdentity:    event.Observed.StateIdentity,
+			FiniteOutput:     event.Observed.FiniteOutput,
+		},
+		Bounds: StrixParityBounds{
+			ExactMatch:     boolPtrOrNil(contract.Bounds.RequireArgmaxExact),
+			MinCosine:      contract.Bounds.MinCosine,
+			MaxAbsDelta:    contract.Bounds.MaxAbsDelta,
+			MaxSourceDelta: contract.Bounds.MaxSourceDelta,
+			StateIdentity:  boolPtrOrNil(contract.Bounds.RequireStateIdentity),
+			FiniteOutput:   boolPtrOrNil(contract.Bounds.RequireFinite),
+		},
+		Detail: event.Selector + ":" + event.TestName,
+	}
+	if result.Bounds.MinCosine != nil {
+		result.Bounds.CosineComparison = ">="
+	}
+	if result.Bounds.MaxAbsDelta != nil {
+		result.Bounds.MaxAbsComparison = "<="
+	}
+	if result.Bounds.MaxSourceDelta != nil {
+		result.Bounds.SourceDeltaComparison = "<="
+	}
+	if event.OracleKind == OracleExactArgmax || event.OracleKind == OracleCosineArgmax {
+		result.Bounds.Comparison = "=="
+	}
+	if event.OracleKind == OracleHostContract {
+		result.Observed.ContractHolds = event.Observed.FiniteOutput
+		result.Observed.ContractName = event.Selector
+		result.Bounds.ContractExpected = boolPtr(true)
+	}
+	return result
+}
+
+func boolPtrOrNil(required bool) *bool {
+	if !required {
+		return nil
+	}
+	return boolPtr(true)
+}
+
+func executionEvidenceFromOutput(out string, sb SourceBinding) StrixExecutionEvidence {
+	zero := 0
+	e := StrixExecutionEvidence{
+		SourceArchiveSHA256: sb.SourceArchiveSHA256,
+		BinarySHA256:        sb.BinarySHA256,
+		ShaderBundleSHA256:  sb.ShaderBundleSHA256,
+		CommandSHA256:       markerValue(out, "FAK_STRIX_COMMAND_SHA256="),
+		DeviceIdentity:      markerValue(out, "FAK_STRIX_DEVICE="),
+		EngineIdentity:      markerValue(out, "FAK_STRIX_ENGINE="),
+		ArtifactRehashed:    strings.Count(out, "FAK_STRIX_ARTIFACT_REHASH=1") == 1,
+		LeasePathSHA256:     markerValue(out, "FAK_STRIX_LEASE_SHA256="),
+		AdmissionWaitMS:     sb.AdmissionWait.Milliseconds(),
+		RawOutputSHA256:     digestBytes([]byte(out)),
+		RawOutputBytes:      len(out),
+	}
+	if raw := markerValue(out, "FAK_STRIX_DEVICE_TIMEOUT_MS="); raw != "" {
+		e.DeviceTimeoutMS, _ = strconv.ParseInt(raw, 10, 64)
+	}
+	ordinal := 0
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		ordinal++
+		if strings.Contains(line, "FAK_STRIX_ADMISSION_ACQUIRED=1") {
+			if e.AcquireOrdinal == 0 {
+				e.AcquireOrdinal, e.Acquired = ordinal, true
+			} else {
+				e.Acquired = false
+			}
+		}
+		if strings.Contains(line, "FAK_STRIX_ADMISSION_RELEASED=1") {
+			if e.ReleaseOrdinal == 0 {
+				e.ReleaseOrdinal, e.Released = ordinal, true
+			} else {
+				e.Released = false
+			}
+		}
+	}
+	if raw := markerValue(out, "FAK_STRIX_EXIT="); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			zero = n
+			e.ExitCode = &zero
+		}
+	}
+	return e
 }
 
 // findParityEventCandidates scans output for candidate subkernel parity JSON blocks.
