@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 func TestBuildAMDScoreboardComparableEmitsRatios(t *testing.T) {
@@ -96,6 +98,121 @@ func TestBuildAMDScoreboardRequiresMemoryAndThreeTrials(t *testing.T) {
 	report := BuildAMDScoreboard(in)
 	if report.Comparable || !slices.Contains(report.Reasons, "candidate-memory-evidence-missing") || !slices.Contains(report.Reasons, "candidate-three-trials-required") {
 		t.Fatalf("reasons=%v", report.Reasons)
+	}
+}
+
+func TestBuildAMDScoreboardFixed128BindsIgnoreEOSAndPhysicalObservation(t *testing.T) {
+	in := validAMDScoreboardInput()
+	observedTrue, observedFalse := true, false
+	bindFixed128 := func(arm *AMDArmReceipt) {
+		packet := *arm.PromptPacket
+		packet.StopTokens = nil
+		packet.StopTokenIDs = nil
+		packet.GenerationControls.StopTokens = nil
+		packet.GenerationControls.StopTokenIDs = nil
+		packet.GenerationControls.MaxOutputTokens = 128
+		packet.GenerationControls.IgnoreEOS = true
+		packet.PacketDigest = ""
+		var err error
+		packet, err = FreezePromptPacket(packet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		arm.PromptPacket = &packet
+		arm.PromptPacketDigest = packet.PacketDigest
+		arm.StopTokens = nil
+		arm.StopTokenIDs = nil
+		arm.DecodeTokens = 128
+		arm.IgnoreEOS = true
+		for i := range arm.Trials {
+			arm.Trials[i].OutputTokenIDs = make([]int, 128)
+			arm.Trials[i].ObservedIgnoreEOS = &observedTrue
+			arm.Trials[i].EOSStopped = &observedFalse
+			arm.Trials[i].AcceptedOutputTokens = 128
+		}
+	}
+	bindFixed128(&in.Candidate)
+	bindFixed128(&in.Reference)
+
+	withoutIgnoreEOS := *in.Candidate.PromptPacket
+	withoutIgnoreEOS.GenerationControls.IgnoreEOS = false
+	withoutIgnoreEOS.PacketDigest = ""
+	withoutIgnoreEOS, err := FreezePromptPacket(withoutIgnoreEOS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withoutIgnoreEOS.PacketDigest == in.Candidate.PromptPacketDigest {
+		t.Fatal("ignore_eos toggle did not change the frozen packet digest")
+	}
+
+	if report := BuildAMDScoreboard(in); !report.Comparable {
+		t.Fatalf("fully observed fixed-128 cell rejected: %v", report.Reasons)
+	}
+
+	tests := []struct {
+		name       string
+		wantReason string
+		mutate     func(*AMDScoreboardInput)
+	}{
+		{"requested false", "candidate-fixed-128-ignore-eos-required", func(got *AMDScoreboardInput) {
+			for _, arm := range []*AMDArmReceipt{&got.Candidate, &got.Reference} {
+				packet := *arm.PromptPacket
+				packet.GenerationControls.IgnoreEOS = false
+				packet.PacketDigest = ""
+				packet, err = FreezePromptPacket(packet)
+				if err != nil {
+					t.Fatal(err)
+				}
+				arm.PromptPacket = &packet
+				arm.PromptPacketDigest = packet.PacketDigest
+				arm.IgnoreEOS = false
+			}
+		}},
+		{"unbound arm request", "candidate-prompt-packet-identity-mismatch", func(got *AMDScoreboardInput) { got.Candidate.IgnoreEOS = false }},
+		{"missing ignore-EOS observation", "candidate-fixed-128-ignore-eos-observation-missing", func(got *AMDScoreboardInput) { got.Candidate.Trials[0].ObservedIgnoreEOS = nil }},
+		{"false ignore-EOS observation", "candidate-fixed-128-ignore-eos-not-observed", func(got *AMDScoreboardInput) { got.Candidate.Trials[0].ObservedIgnoreEOS = &observedFalse }},
+		{"missing EOS-stop observation", "candidate-fixed-128-eos-stopped-observation-missing", func(got *AMDScoreboardInput) { got.Candidate.Trials[0].EOSStopped = nil }},
+		{"EOS stopped", "candidate-fixed-128-eos-stopped", func(got *AMDScoreboardInput) { got.Candidate.Trials[0].EOSStopped = &observedTrue }},
+		{"short accepted output", "candidate-fixed-128-accepted-output-token-count-mismatch", func(got *AMDScoreboardInput) { got.Candidate.Trials[0].AcceptedOutputTokens = 127 }},
+		{"short output IDs", "candidate-fixed-128-output-token-count-mismatch", func(got *AMDScoreboardInput) {
+			got.Candidate.Trials[0].OutputTokenIDs = got.Candidate.Trials[0].OutputTokenIDs[:127]
+		}},
+		{"active stops", "candidate-fixed-128-stop-controls-active", func(got *AMDScoreboardInput) {
+			for _, arm := range []*AMDArmReceipt{&got.Candidate, &got.Reference} {
+				packet := *arm.PromptPacket
+				packet.StopTokens = []string{"stop"}
+				packet.GenerationControls.StopTokens = []string{"stop"}
+				packet.PacketDigest = ""
+				packet, err = FreezePromptPacket(packet)
+				if err != nil {
+					t.Fatal(err)
+				}
+				arm.PromptPacket = &packet
+				arm.PromptPacketDigest = packet.PacketDigest
+				arm.StopTokens = []string{"stop"}
+			}
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := in
+			got.Candidate.Trials = slices.Clone(in.Candidate.Trials)
+			got.Reference.Trials = slices.Clone(in.Reference.Trials)
+			tc.mutate(&got)
+			report := BuildAMDScoreboard(got)
+			if report.Comparable || !slices.Contains(report.Reasons, tc.wantReason) {
+				t.Fatalf("fixed-128 refusal = comparable:%t reasons:%v, want %q", report.Comparable, report.Reasons, tc.wantReason)
+			}
+		})
+	}
+
+	receipt := &model.NativeInferenceReceipt{Engine: "fak-native", Backend: "vulkan", TokenIDs: []int{1}, TokenLogprobs: []float64{-1}}
+	captured, err := CaptureAMDScoreboardTrial(1, receipt, 1, 1, 1, 1, 1, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if captured.ObservedIgnoreEOS != nil || captured.EOSStopped != nil || captured.AcceptedOutputTokens != 0 {
+		t.Fatalf("trial capture synthesized physical EOS/output observation: %+v", captured)
 	}
 }
 

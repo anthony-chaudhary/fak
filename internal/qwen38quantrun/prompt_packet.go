@@ -31,6 +31,7 @@ type GenerationControls struct {
 	TopP            float64  `json:"top_p"`
 	TopK            int      `json:"top_k,omitempty"`
 	MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
+	IgnoreEOS       bool     `json:"ignore_eos,omitempty"`
 	StopTokens      []string `json:"stop_tokens,omitempty"`
 	StopTokenIDs    []int    `json:"stop_token_ids,omitempty"`
 }
@@ -83,6 +84,9 @@ func validatePromptPacketFields(p PromptTokenPacket) error {
 	case promptTokenPacketLegacySchema:
 		if p.TemplateDigest != "" {
 			return errors.New("legacy prompt packet must not claim a template_digest")
+		}
+		if p.GenerationControls.IgnoreEOS {
+			return errors.New("legacy prompt packet must not claim ignore_eos")
 		}
 	default:
 		return fmt.Errorf("unsupported prompt packet schema %q", p.Schema)
@@ -265,7 +269,8 @@ func ValidatePromptPacketAttestation(candidate, reference PromptTokenPacket) err
 	if candidate.GenerationControls.Temperature != reference.GenerationControls.Temperature ||
 		candidate.GenerationControls.TopP != reference.GenerationControls.TopP ||
 		candidate.GenerationControls.TopK != reference.GenerationControls.TopK ||
-		candidate.GenerationControls.MaxOutputTokens != reference.GenerationControls.MaxOutputTokens {
+		candidate.GenerationControls.MaxOutputTokens != reference.GenerationControls.MaxOutputTokens ||
+		candidate.GenerationControls.IgnoreEOS != reference.GenerationControls.IgnoreEOS {
 		return errors.New("generation controls mismatch between candidate and reference")
 	}
 	if candidate.PacketDigest != reference.PacketDigest {
@@ -325,6 +330,9 @@ func validateArmPromptPacketBinding(role string, arm AMDArmReceipt) error {
 	}
 	if arm.DecodeTokens != p.GenerationControls.MaxOutputTokens {
 		return fmt.Errorf("%s arm decode token limit does not bind embedded packet", role)
+	}
+	if arm.IgnoreEOS != p.GenerationControls.IgnoreEOS {
+		return fmt.Errorf("%s arm ignore-EOS policy does not bind embedded packet", role)
 	}
 	return nil
 }

@@ -43,6 +43,7 @@ type AMDArmReceipt struct {
 	GPUMemoryBudget     uint64               `json:"gpu_memory_budget_bytes"`
 	HostSpillPolicy     string               `json:"host_spill_policy"`
 	Temperature         float64              `json:"temperature"`
+	IgnoreEOS           bool                 `json:"ignore_eos,omitempty"`
 	PrefillTokens       int                  `json:"prefill_tokens"`
 	DecodeTokens        int                  `json:"decode_tokens"`
 	Hardware            string               `json:"hardware"`
@@ -87,6 +88,11 @@ type AMDScoreboardTrial struct {
 	D2HBytes                  uint64    `json:"d2h_bytes"`
 	D2DBytes                  uint64    `json:"d2d_bytes"`
 	QueueSubmissions          uint64    `json:"queue_submissions"`
+	// ObservedIgnoreEOS and EOSStopped are authoritative physical receipt
+	// observations. A requested generation flag must never populate them.
+	ObservedIgnoreEOS    *bool  `json:"observed_ignore_eos,omitempty"`
+	EOSStopped           *bool  `json:"eos_stopped,omitempty"`
+	AcceptedOutputTokens uint64 `json:"accepted_output_tokens,omitempty"`
 }
 
 func (t AMDScoreboardTrial) EffectiveTokenIDs() []int {
@@ -220,7 +226,7 @@ func validateAMDScoreboard(in AMDScoreboardInput) []string {
 	if in.Candidate.GPUMemoryBudget != in.Reference.GPUMemoryBudget || in.Candidate.HostSpillPolicy != in.Reference.HostSpillPolicy {
 		add("memory-placement-envelope-mismatch")
 	}
-	if in.Candidate.Temperature != in.Reference.Temperature || in.Candidate.PrefillTokens != in.Reference.PrefillTokens || in.Candidate.DecodeTokens != in.Reference.DecodeTokens || in.Candidate.TopP != in.Reference.TopP || in.Candidate.TopK != in.Reference.TopK {
+	if in.Candidate.Temperature != in.Reference.Temperature || in.Candidate.IgnoreEOS != in.Reference.IgnoreEOS || in.Candidate.PrefillTokens != in.Reference.PrefillTokens || in.Candidate.DecodeTokens != in.Reference.DecodeTokens || in.Candidate.TopP != in.Reference.TopP || in.Candidate.TopK != in.Reference.TopK {
 		add("generation-envelope-mismatch")
 	}
 	if !slices.Equal(in.Candidate.StopTokens, in.Reference.StopTokens) || !slices.Equal(in.Candidate.StopTokenIDs, in.Reference.StopTokenIDs) {
@@ -285,6 +291,15 @@ func validateAMDArm(arm AMDArmReceipt, role string, add func(string)) {
 	if len(arm.Trials) < 3 {
 		add(prefix + "three-trials-required")
 	}
+	fixed128 := arm.DecodeTokens == 128 || (arm.PromptPacket != nil && arm.PromptPacket.GenerationControls.MaxOutputTokens == 128)
+	if fixed128 {
+		if !arm.IgnoreEOS {
+			add(prefix + "fixed-128-ignore-eos-required")
+		}
+		if len(arm.StopTokens) != 0 || len(arm.StopTokenIDs) != 0 || (arm.PromptPacket != nil && (len(arm.PromptPacket.StopTokens) != 0 || len(arm.PromptPacket.StopTokenIDs) != 0 || len(arm.PromptPacket.GenerationControls.StopTokens) != 0 || len(arm.PromptPacket.GenerationControls.StopTokenIDs) != 0)) {
+			add(prefix + "fixed-128-stop-controls-active")
+		}
+	}
 	seen := map[int]bool{}
 	for _, t := range arm.Trials {
 		kind := amdEvidenceKind(t)
@@ -332,6 +347,24 @@ func validateAMDArm(arm AMDArmReceipt, role string, add func(string)) {
 		}
 		if t.H2DBytes == 0 || t.D2HBytes == 0 || t.QueueSubmissions == 0 {
 			add(prefix + "transfer-or-submission-accounting-missing")
+		}
+		if fixed128 {
+			if t.ObservedIgnoreEOS == nil {
+				add(prefix + "fixed-128-ignore-eos-observation-missing")
+			} else if !*t.ObservedIgnoreEOS {
+				add(prefix + "fixed-128-ignore-eos-not-observed")
+			}
+			if t.EOSStopped == nil {
+				add(prefix + "fixed-128-eos-stopped-observation-missing")
+			} else if *t.EOSStopped {
+				add(prefix + "fixed-128-eos-stopped")
+			}
+			if t.AcceptedOutputTokens != 128 {
+				add(prefix + "fixed-128-accepted-output-token-count-mismatch")
+			}
+			if len(t.OutputTokenIDs) != 128 {
+				add(prefix + "fixed-128-output-token-count-mismatch")
+			}
 		}
 		for _, v := range logits {
 			if math.IsNaN(v) || math.IsInf(v, 0) {
