@@ -191,6 +191,8 @@ func TestRawDecodePhysicalReceiptCarriesOnlyCompleteGGUFObservation(t *testing.T
 		ArtifactPath:          "fixtures/qwen3.8-q4_k_m.gguf",
 		ArtifactSHA256:        strings.Repeat("a", 64),
 		TensorInventorySHA256: "sha256:" + strings.Repeat("b", 64),
+		TokenizerSHA256:       strings.Repeat("c", 64),
+		TemplateSHA256:        strings.Repeat("d", 64),
 		Quantization:          "Q4_K_M",
 		ModelName:             "qwen3.8-q4_k_m.gguf [gguf-q4k]",
 		PromptTokenIDs:        []int{1},
@@ -205,18 +207,30 @@ func TestRawDecodePhysicalReceiptCarriesOnlyCompleteGGUFObservation(t *testing.T
 	modelIdentity := attempt.Observed.Model
 	if modelIdentity.Name != execution.ModelName || modelIdentity.ArtifactPath != execution.ArtifactPath ||
 		modelIdentity.ArtifactSHA256 != execution.ArtifactSHA256 || modelIdentity.TensorInventorySHA256 != execution.TensorInventorySHA256 ||
+		modelIdentity.TokenizerSHA256 != execution.TokenizerSHA256 || modelIdentity.TemplateSHA256 != execution.TemplateSHA256 ||
 		modelIdentity.Quantization != execution.Quantization {
 		t.Fatalf("canonical model identity mismatch: %+v", modelIdentity)
 	}
-	if modelIdentity.TokenizerSHA256 != "" || modelIdentity.TemplateSHA256 != "" || attempt.Observed.Source != (compute.Qwen38VulkanSourceIdentity{}) {
-		t.Fatalf("unobserved tokenizer/template/source identity was invented: model=%+v source=%+v", modelIdentity, attempt.Observed.Source)
+	if attempt.Observed.Source != (compute.Qwen38VulkanSourceIdentity{}) {
+		t.Fatalf("unobserved source identity was invented: model=%+v source=%+v", modelIdentity, attempt.Observed.Source)
 	}
 
-	incomplete := execution
-	incomplete.TensorInventorySHA256 = ""
-	incompleteAttempt := rawDecodePhysicalReceipt(incomplete, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
-	if incompleteAttempt.Observed.Model != (compute.Qwen38VulkanModelIdentity{}) || incompleteAttempt.CreditEligible || incompleteAttempt.Receipt != nil {
-		t.Fatalf("partial GGUF provenance escaped as canonical model identity: %+v", incompleteAttempt)
+	for _, missing := range []struct {
+		name  string
+		clear func(*rawdecode.Execution)
+	}{
+		{name: "tensor inventory", clear: func(e *rawdecode.Execution) { e.TensorInventorySHA256 = "" }},
+		{name: "tokenizer", clear: func(e *rawdecode.Execution) { e.TokenizerSHA256 = "" }},
+		{name: "template", clear: func(e *rawdecode.Execution) { e.TemplateSHA256 = "" }},
+	} {
+		t.Run("missing "+missing.name, func(t *testing.T) {
+			incomplete := execution
+			missing.clear(&incomplete)
+			incompleteAttempt := rawDecodePhysicalReceipt(incomplete, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+			if incompleteAttempt.Status != "UNAVAILABLE" || incompleteAttempt.Observed.Model != (compute.Qwen38VulkanModelIdentity{}) || incompleteAttempt.CreditEligible || incompleteAttempt.Receipt != nil {
+				t.Fatalf("partial GGUF provenance escaped as canonical model identity: %+v", incompleteAttempt)
+			}
+		})
 	}
 }
 

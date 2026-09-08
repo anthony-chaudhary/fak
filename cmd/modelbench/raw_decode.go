@@ -275,11 +275,15 @@ func rawDecodePhysicalReceipt(execution rawdecode.Execution, repOutputs []rawRep
 		strings.TrimSpace(execution.ArtifactPath) != "" &&
 		strings.TrimSpace(execution.ArtifactSHA256) != "" &&
 		strings.TrimSpace(execution.TensorInventorySHA256) != "" &&
+		strings.TrimSpace(execution.TokenizerSHA256) != "" &&
+		strings.TrimSpace(execution.TemplateSHA256) != "" &&
 		strings.TrimSpace(execution.Quantization) != "" {
 		observed.Model.Name = execution.ModelName
 		observed.Model.ArtifactPath = execution.ArtifactPath
 		observed.Model.ArtifactSHA256 = execution.ArtifactSHA256
 		observed.Model.TensorInventorySHA256 = execution.TensorInventorySHA256
+		observed.Model.TokenizerSHA256 = execution.TokenizerSHA256
+		observed.Model.TemplateSHA256 = execution.TemplateSHA256
 		observed.Model.Quantization = execution.Quantization
 	}
 	backendExecutions, backendObserved := rawDecodeBackendExecutions(execution)
