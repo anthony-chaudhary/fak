@@ -255,6 +255,7 @@ func TestGenerateStrixInstallerPackage_LANCommunications(t *testing.T) {
 		"FLEET_SPINE_ADVERTISE_S=20.0",
 		"FAK_CORS_ALLOWED_ORIGINS=http://localhost:3000,http://192.168.1.*",
 		"PREFILL_CHUNK_TOKENS=1024",
+		"FAK_GPU_LEASE=/tmp/fak-gpu.lease",
 	}
 	for _, item := range wantEnvItems {
 		if !strings.Contains(env, item) {
@@ -270,6 +271,7 @@ func TestGenerateStrixInstallerPackage_LANCommunications(t *testing.T) {
 		"--model qwen3.6-27b",
 		"/opt/fak/bin/fak serve",
 		"--require-key-env FAK_GATEWAY_KEY",
+		"Environment=FAK_GPU_LEASE=/tmp/fak-gpu.lease",
 		"UnsetEnvironment=GGML_CUDA_ENABLE_UNIFIED_MEMORY HSA_OVERRIDE_GFX_VERSION",
 	}
 	for _, item := range wantServe {
