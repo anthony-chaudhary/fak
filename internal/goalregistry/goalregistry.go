@@ -103,6 +103,34 @@ type Binding struct {
 	EvidencePolicy string     `json:"evidence_policy,omitempty"`
 }
 
+// BindingTuple defines the canonical identity tuple for an external binding.
+type BindingTuple struct {
+	GoalID     string `json:"goal_id"`
+	Namespace  string `json:"namespace"`
+	ExternalID string `json:"external_id"`
+	Revision   string `json:"revision,omitempty"`
+}
+
+// CanonicalBindingTuple normalizes all fields of a binding tuple by trimming whitespace.
+func CanonicalBindingTuple(goalID, namespace, externalID, revision string) BindingTuple {
+	return BindingTuple{
+		GoalID:     strings.TrimSpace(goalID),
+		Namespace:  strings.TrimSpace(namespace),
+		ExternalID: strings.TrimSpace(externalID),
+		Revision:   strings.TrimSpace(revision),
+	}
+}
+
+// Tuple returns the canonical identity tuple for the binding.
+func (b Binding) Tuple() BindingTuple {
+	return CanonicalBindingTuple(b.GoalID, b.Namespace, b.ExternalID, b.Revision)
+}
+
+// SameExternal reports whether two tuples reference the same external namespace, ID, and revision.
+func (t BindingTuple) SameExternal(other BindingTuple) bool {
+	return t.Namespace == other.Namespace && t.ExternalID == other.ExternalID && t.Revision == other.Revision
+}
+
 // Registry encapsulates persisted goals, external bindings, and historical outcome evidence.
 type Registry struct {
 	Schema          string            `json:"schema"`
@@ -213,10 +241,8 @@ func (s Store) create(title, summary string, provenance Provenance, relations []
 // revision is a wildcard only when it identifies exactly one binding; callers
 // must name the revision when external history would otherwise be ambiguous.
 func (s Store) Resolve(namespace, externalID, revision string) (Goal, Binding, error) {
-	namespace = strings.TrimSpace(namespace)
-	externalID = strings.TrimSpace(externalID)
-	revision = strings.TrimSpace(revision)
-	if namespace == "" || externalID == "" {
+	target := CanonicalBindingTuple("", namespace, externalID, revision)
+	if target.Namespace == "" || target.ExternalID == "" {
 		return Goal{}, Binding{}, errors.New("namespace and external ID are required")
 	}
 	r, err := s.Load()
@@ -225,18 +251,19 @@ func (s Store) Resolve(namespace, externalID, revision string) (Goal, Binding, e
 	}
 	var matches []Binding
 	for _, b := range r.Bindings {
-		if b.Namespace == namespace && b.ExternalID == externalID && (revision == "" || b.Revision == revision) {
+		bt := b.Tuple()
+		if bt.Namespace == target.Namespace && bt.ExternalID == target.ExternalID && (target.Revision == "" || bt.Revision == target.Revision) {
 			matches = append(matches, b)
 		}
 	}
 	if len(matches) == 0 {
-		return Goal{}, Binding{}, fmt.Errorf("binding not found: %s:%s revision %q", namespace, externalID, revision)
+		return Goal{}, Binding{}, fmt.Errorf("binding not found: %s:%s revision %q", target.Namespace, target.ExternalID, target.Revision)
 	}
 	if len(matches) != 1 {
-		return Goal{}, Binding{}, fmt.Errorf("binding is ambiguous: %s:%s matches %d revisions; specify --revision", namespace, externalID, len(matches))
+		return Goal{}, Binding{}, fmt.Errorf("binding is ambiguous: %s:%s matches %d revisions; specify --revision", target.Namespace, target.ExternalID, len(matches))
 	}
 	for _, g := range r.Goals {
-		if g.GoalID == matches[0].GoalID {
+		if g.GoalID == matches[0].Tuple().GoalID {
 			return g, matches[0], nil
 		}
 	}
@@ -245,6 +272,7 @@ func (s Store) Resolve(namespace, externalID, revision string) (Goal, Binding, e
 
 // Show retrieves a goal along with all registered external bindings linked to its identifier.
 func (s Store) Show(id string) (Goal, []Binding, error) {
+	id = strings.TrimSpace(id)
 	r, err := s.Load()
 	if err != nil {
 		return Goal{}, nil, err
@@ -253,7 +281,7 @@ func (s Store) Show(id string) (Goal, []Binding, error) {
 		if g.GoalID == id {
 			var bindings []Binding
 			for _, b := range r.Bindings {
-				if b.GoalID == id {
+				if b.Tuple().GoalID == id {
 					bindings = append(bindings, b)
 				}
 			}
@@ -423,8 +451,8 @@ func (s Store) Bind(goalID, namespace, externalID, revision string, provenance P
 }
 
 func (s Store) bind(goalID, namespace, externalID, revision string, provenance Provenance) (Binding, error) {
-	namespace, externalID = strings.TrimSpace(namespace), strings.TrimSpace(externalID)
-	if namespace == "" || externalID == "" {
+	tuple := CanonicalBindingTuple(goalID, namespace, externalID, revision)
+	if tuple.Namespace == "" || tuple.ExternalID == "" {
 		return Binding{}, errors.New("namespace and external ID are required")
 	}
 	if err := validateProvenance(provenance); err != nil {
@@ -436,23 +464,31 @@ func (s Store) bind(goalID, namespace, externalID, revision string, provenance P
 	}
 	found := false
 	for _, g := range r.Goals {
-		if g.GoalID == goalID {
+		if g.GoalID == tuple.GoalID {
 			found = true
 			break
 		}
 	}
 	if !found {
-		return Binding{}, fmt.Errorf("goal %q not found", goalID)
+		return Binding{}, fmt.Errorf("goal %q not found", tuple.GoalID)
 	}
 	for _, b := range r.Bindings {
-		if b.Namespace == namespace && b.ExternalID == externalID && b.Revision == revision {
-			if b.GoalID == goalID {
+		bt := b.Tuple()
+		if bt.SameExternal(tuple) {
+			if bt.GoalID == tuple.GoalID {
 				return b, nil
 			}
-			return Binding{}, fmt.Errorf("binding collision: %s:%s revision %q already belongs to %s", namespace, externalID, revision, b.GoalID)
+			return Binding{}, fmt.Errorf("binding collision: %s:%s revision %q already belongs to %s", tuple.Namespace, tuple.ExternalID, tuple.Revision, bt.GoalID)
 		}
 	}
-	b := Binding{GoalID: goalID, Namespace: namespace, ExternalID: externalID, Revision: strings.TrimSpace(revision), BoundAt: s.now(), Provenance: provenance}
+	b := Binding{
+		GoalID:     tuple.GoalID,
+		Namespace:  tuple.Namespace,
+		ExternalID: tuple.ExternalID,
+		Revision:   tuple.Revision,
+		BoundAt:    s.now(),
+		Provenance: provenance,
+	}
 	r.Bindings = append(r.Bindings, b)
 	return b, s.save(r)
 }
@@ -463,6 +499,7 @@ func (s Store) Unbind(goalID, namespace, externalID, revision string) error {
 }
 
 func (s Store) unbind(goalID, namespace, externalID, revision string) error {
+	tuple := CanonicalBindingTuple(goalID, namespace, externalID, revision)
 	r, err := s.Load()
 	if err != nil {
 		return err
@@ -470,7 +507,7 @@ func (s Store) unbind(goalID, namespace, externalID, revision string) error {
 	out := r.Bindings[:0]
 	removed := false
 	for _, b := range r.Bindings {
-		if b.GoalID == goalID && b.Namespace == namespace && b.ExternalID == externalID && b.Revision == revision {
+		if b.Tuple() == tuple {
 			removed = true
 			continue
 		}
