@@ -346,3 +346,179 @@ func TestVulkanQ4KSwiGLUMatMulAddInPlaceMatchesCPUReference(t *testing.T) {
 		t.Fatalf("cosine %.8f < 0.995", c)
 	}
 }
+
+// fillCraftedQ4KBlock fills a 144-byte super-block explicitly exercising all 8 scale/min groups,
+// both nibbles (even/odd groups), and varied lane patterns.
+func fillCraftedQ4KBlock(blk []byte, blockIdx int) {
+	// Bytes 0..1: d (f16) ~ 0.05
+	blk[0] = 0x00
+	blk[1] = 0x31
+	// Bytes 2..3: dm (f16) ~ 0.025
+	blk[2] = 0x00
+	blk[3] = 0x29
+
+	// Bytes 4..15: 12 bytes of packed scales and mins for groups 0..7.
+	for j := 0; j < 4; j++ {
+		scVal := byte((j*7 + 11 + blockIdx) & 0x3F)
+		mnHi := byte(((j + 1) & 0x03) << 6)
+		blk[4+j] = scVal | mnHi
+
+		mnVal := byte((j*5 + 7 + blockIdx) & 0x3F)
+		scHi := byte(((j + 2) & 0x03) << 6)
+		blk[4+j+4] = mnVal | scHi
+
+		scLo := byte((j*3 + 1 + blockIdx) & 0x0F)
+		mnLo := byte(((j*4 + 2 + blockIdx) & 0x0F) << 4)
+		blk[4+j+8] = scLo | mnLo
+	}
+
+	// Bytes 16..143: 128 bytes of quantized nibbles (4 pairs of groups).
+	for p := 0; p < 4; p++ {
+		for lane := 0; lane < 32; lane++ {
+			loNibble := byte((lane*3 + p*5 + blockIdx*7) & 0x0F)
+			hiNibble := byte(((lane*7 + p*11 + blockIdx*3) & 0x0F) << 4)
+			blk[16+p*32+lane] = loNibble | hiNibble
+		}
+	}
+}
+
+func TestVulkanQ4KWave32CraftedFixtures(t *testing.T) {
+	v := q4Device(t)
+	inDims := []int{256, 512, 768}
+	outDims := []int{1, 2, 3, 5, 8, 13}
+
+	for _, in := range inDims {
+		for _, out := range outDims {
+			t.Run(t.Name(), func(t *testing.T) {
+				nblk := in / q4kSuper
+				raw := make([]byte, out*nblk*q4kSuperBlock)
+				for b := 0; b < out*nblk; b++ {
+					fillCraftedQ4KBlock(raw[b*q4kSuperBlock:(b+1)*q4kSuperBlock], b)
+				}
+				x := make([]float32, in)
+				for i := range x {
+					x[i] = float32(math.Sin(float64(i)*0.07+0.3)) * 0.5
+				}
+
+				hw := NewQ4K(Default(), []int{out, in}, raw)
+				hx := NewF32(Default(), []int{in}, x)
+				dw := v.Upload(hw, Q4_K)
+				defer v.Free(dw)
+				dx := v.Upload(hx, F32)
+				defer v.Free(dx)
+
+				// Candidate P=1 execution
+				t.Setenv("FAK_VULKAN_Q4K_ARM", "candidate")
+				dy := v.MatMul(dw, dx)
+				defer v.Free(dy)
+				got := v.Read(dy)
+				want := Default().Read(Default().MatMul(hw, hx))
+
+				if len(got) != out {
+					t.Fatalf("in=%d out=%d len(got)=%d want %d", in, out, len(got), out)
+				}
+				var sqErr, sqRef float64
+				for i := range got {
+					if math.IsNaN(float64(got[i])) || math.IsInf(float64(got[i]), 0) {
+						t.Fatalf("in=%d out=%d index %d non-finite: %v", in, out, i, got[i])
+					}
+					diff := float64(got[i] - want[i])
+					sqErr += diff * diff
+					sqRef += float64(want[i]) * float64(want[i])
+				}
+				if sqRef <= 0 {
+					t.Fatalf("in=%d out=%d reference norm is zero", in, out)
+				}
+				relL2 := math.Sqrt(sqErr / sqRef)
+				cos := cosineC(got, want)
+				gotArgmax, wantArgmax := argmaxF32(got), argmaxF32(want)
+				if gotArgmax != wantArgmax {
+					t.Fatalf("in=%d out=%d argmax mismatch: got %d, want %d", in, out, gotArgmax, wantArgmax)
+				}
+				if relL2 > 1e-4 {
+					t.Fatalf("in=%d out=%d relative L2 %g > 1e-4", in, out, relL2)
+				}
+				if cos < 0.99999 {
+					t.Fatalf("in=%d out=%d cosine %g < 0.99999", in, out, cos)
+				}
+			})
+		}
+	}
+}
+
+func TestVulkanQ4KWave32CapabilityAdmission(t *testing.T) {
+	v := q4Device(t)
+	const out, in = 13, 512
+	nblk := in / q4kSuper
+	raw := make([]byte, out*nblk*q4kSuperBlock)
+	for b := 0; b < out*nblk; b++ {
+		fillCraftedQ4KBlock(raw[b*q4kSuperBlock:(b+1)*q4kSuperBlock], b)
+	}
+	x := make([]float32, in)
+	for i := range x {
+		x[i] = float32(math.Cos(float64(i)*0.05+0.1)) * 0.4
+	}
+
+	hw := NewQ4K(Default(), []int{out, in}, raw)
+	hx := NewF32(Default(), []int{in}, x)
+	dw := v.Upload(hw, Q4_K)
+	defer v.Free(dw)
+	dx := v.Upload(hx, F32)
+	defer v.Free(dx)
+	want := Default().Read(Default().MatMul(hw, hx))
+
+	// Arm 1: Candidate arm explicitly selected
+	t.Run("CandidateArm", func(t *testing.T) {
+		t.Setenv("FAK_VULKAN_Q4K_ARM", "candidate")
+		dy := v.MatMul(dw, dx)
+		defer v.Free(dy)
+		got := v.Read(dy)
+		if argmaxF32(got) != argmaxF32(want) {
+			t.Fatalf("candidate argmax mismatch: got %d want %d", argmaxF32(got), argmaxF32(want))
+		}
+		if cos := cosineC(got, want); cos < 0.99999 {
+			t.Fatalf("candidate cosine %g < 0.99999", cos)
+		}
+	})
+
+	// Arm 2: Scalar arm explicitly selected
+	t.Run("ScalarArm", func(t *testing.T) {
+		t.Setenv("FAK_VULKAN_Q4K_ARM", "scalar")
+		dy := v.MatMul(dw, dx)
+		defer v.Free(dy)
+		got := v.Read(dy)
+		if argmaxF32(got) != argmaxF32(want) {
+			t.Fatalf("scalar argmax mismatch: got %d want %d", argmaxF32(got), argmaxF32(want))
+		}
+		if cos := cosineC(got, want); cos < 0.995 {
+			t.Fatalf("scalar cosine %g < 0.995", cos)
+		}
+	})
+
+	// Multi-token fallback (P=3) selects scalar pipeline
+	t.Run("MultiTokenFallbackP3", func(t *testing.T) {
+		const P = 3
+		xMulti := make([]float32, P*in)
+		for i := range xMulti {
+			xMulti[i] = float32(math.Sin(float64(i)*0.03)) * 0.3
+		}
+		hxMulti := NewF32(Default(), []int{P, in}, xMulti)
+		dxMulti := v.Upload(hxMulti, F32)
+		defer v.Free(dxMulti)
+		wantMulti := Default().Read(Default().BatchedMatMul(hw, hxMulti, P))
+
+		dyMulti := v.BatchedMatMul(dw, dxMulti, P)
+		defer v.Free(dyMulti)
+		gotMulti := v.Read(dyMulti)
+		for tok := 0; tok < P; tok++ {
+			gRow := gotMulti[tok*out : (tok+1)*out]
+			wRow := wantMulti[tok*out : (tok+1)*out]
+			if argmaxF32(gRow) != argmaxF32(wRow) {
+				t.Fatalf("token %d argmax mismatch", tok)
+			}
+			if cos := cosineC(gRow, wRow); cos < 0.995 {
+				t.Fatalf("token %d cosine %g < 0.995", tok, cos)
+			}
+		}
+	})
+}

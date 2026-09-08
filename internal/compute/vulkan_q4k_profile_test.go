@@ -7,6 +7,8 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -107,6 +109,257 @@ func TestVulkanQ4KRealShapeProfile(t *testing.T) {
 		"test_body_ns": time.Since(started).Nanoseconds(),
 		"timing_note":  "test body excludes process/backend initialization and deferred resident cleanup; capture whole-process resources separately",
 	}
+	b, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(string(b))
+}
+
+func medianDuration(d []time.Duration) time.Duration {
+	if len(d) == 0 {
+		return 0
+	}
+	s := append([]time.Duration(nil), d...)
+	sort.Slice(s, func(i, j int) bool { return s[i] < s[j] })
+	mid := len(s) / 2
+	if len(s)%2 == 1 {
+		return s[mid]
+	}
+	return (s[mid-1] + s[mid]) / 2
+}
+
+func TestVulkanQ4KWave32PhysicalAB(t *testing.T) {
+	if os.Getenv("FAK_VULKAN_Q4K_PROFILE") != "1" {
+		t.Skip("set FAK_VULKAN_Q4K_PROFILE=1 for the physical A/B profile")
+	}
+	if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") != "1" {
+		t.Fatal("FAK_VULKAN_DISPATCH_PROFILE=1 is required to prove exact dispatch attribution")
+	}
+
+	started := time.Now()
+	v := vk(t)
+	if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
+		expected := os.Getenv("FAK_VULKAN_EXPECT_DEVICE")
+		if expected == "" {
+			expected = "8060S"
+		}
+		if !strings.Contains(strings.ToLower(v.Tier()), strings.ToLower(expected)) {
+			t.Fatalf("device %q does not match required %q", v.Tier(), expected)
+		}
+	}
+
+	shapes := []struct {
+		name string
+		out  int
+		in   int
+	}{
+		{"17408x5120", 17408, 5120},
+		{"5120x17408", 5120, 17408},
+	}
+
+	const warmups = 2
+	const iterations = 10
+
+	type shapeResult struct {
+		Shape          string  `json:"shape"`
+		Out            int     `json:"out"`
+		In             int     `json:"in"`
+		ScalarSamples  []int64 `json:"scalar_samples_ns"`
+		CandSamples    []int64 `json:"candidate_samples_ns"`
+		ScalarMedianNS int64   `json:"scalar_median_ns"`
+		CandMedianNS   int64   `json:"candidate_median_ns"`
+		SpeedupRatio   float64 `json:"speedup_ratio"`
+		PassedParity   bool    `json:"passed_parity"`
+	}
+
+	var shapeResults []shapeResult
+
+	for _, s := range shapes {
+		out, in := s.out, s.in
+		rng := rand.New(rand.NewSource(int64(12175 + out)))
+		raw := make([]byte, out*(in/q4kSuper)*q4kSuperBlock)
+		for b := 0; b < len(raw)/q4kSuperBlock; b++ {
+			randQ4KBlockC(rng, raw[b*q4kSuperBlock:(b+1)*q4kSuperBlock])
+		}
+		x := make([]float32, in)
+		for i := range x {
+			x[i] = (rng.Float32()*2 - 1) * 0.01
+		}
+
+		hw, hx := NewQ4K(Default(), []int{out, in}, raw), NewF32(Default(), []int{in}, x)
+		hy := Default().MatMul(hw, hx)
+		want := Default().Read(hy)
+		Default().Free(hy)
+
+		w, a := v.Upload(hw, Q4_K), v.Upload(hx, F32)
+
+		runArm := func(arm string) (time.Duration, float64, float64, bool) {
+			os.Setenv("FAK_VULKAN_Q4K_ARM", arm)
+			start := time.Now()
+			y := v.MatMul(w, a)
+			got := v.Read(y)
+			dur := time.Since(start)
+			v.Free(y)
+
+			var sqErr, sqRef float64
+			for i := range got {
+				d := float64(got[i] - want[i])
+				sqErr += d * d
+				sqRef += float64(want[i]) * float64(want[i])
+			}
+			relL2 := math.Sqrt(sqErr / sqRef)
+			cos := cosineC(got, want)
+			exactArgmax := argmaxF32(got) == argmaxF32(want)
+			return dur, relL2, cos, exactArgmax
+		}
+
+		// Warmups
+		for i := 0; i < warmups; i++ {
+			runArm("scalar")
+			runArm("candidate")
+		}
+
+		// Matched A/B/B/A runs
+		scalarDurations := make([]time.Duration, 0, iterations)
+		candDurations := make([]time.Duration, 0, iterations)
+		parityOK := true
+
+		for i := 0; i < iterations; i++ {
+			if i%2 == 0 {
+				durS, _, cosS, amS := runArm("scalar")
+				durC, relL2C, cosC, amC := runArm("candidate")
+				scalarDurations = append(scalarDurations, durS)
+				candDurations = append(candDurations, durC)
+				if !amS || cosS < 0.995 || !amC || relL2C > 1e-4 || cosC < 0.99999 {
+					parityOK = false
+				}
+			} else {
+				durC, relL2C, cosC, amC := runArm("candidate")
+				durS, _, cosS, amS := runArm("scalar")
+				candDurations = append(candDurations, durC)
+				scalarDurations = append(scalarDurations, durS)
+				if !amS || cosS < 0.995 || !amC || relL2C > 1e-4 || cosC < 0.99999 {
+					parityOK = false
+				}
+			}
+		}
+
+		v.Free(w)
+		v.Free(a)
+
+		if !parityOK {
+			t.Fatalf("shape %s failed parity checks during A/B", s.name)
+		}
+
+		sMed := medianDuration(scalarDurations)
+		cMed := medianDuration(candDurations)
+		speedup := float64(sMed) / float64(cMed)
+
+		sSamples := make([]int64, len(scalarDurations))
+		cSamples := make([]int64, len(candDurations))
+		for i := range scalarDurations {
+			sSamples[i] = scalarDurations[i].Nanoseconds()
+			cSamples[i] = candDurations[i].Nanoseconds()
+		}
+
+		shapeResults = append(shapeResults, shapeResult{
+			Shape:          s.name,
+			Out:            out,
+			In:             in,
+			ScalarSamples:  sSamples,
+			CandSamples:    cSamples,
+			ScalarMedianNS: sMed.Nanoseconds(),
+			CandMedianNS:   cMed.Nanoseconds(),
+			SpeedupRatio:   speedup,
+			PassedParity:   parityOK,
+		})
+	}
+
+	// Multi-token fallback test (P=4, shape 17408x5120)
+	const fbP = 4
+	fbOut, fbIn := 17408, 5120
+	rngFB := rand.New(rand.NewSource(12176))
+	rawFB := make([]byte, fbOut*(fbIn/q4kSuper)*q4kSuperBlock)
+	for b := 0; b < len(rawFB)/q4kSuperBlock; b++ {
+		randQ4KBlockC(rngFB, rawFB[b*q4kSuperBlock:(b+1)*q4kSuperBlock])
+	}
+	xFB := make([]float32, fbP*fbIn)
+	for i := range xFB {
+		xFB[i] = (rngFB.Float32()*2 - 1) * 0.01
+	}
+	hwFB := NewQ4K(Default(), []int{fbOut, fbIn}, rawFB)
+	hxFB := NewF32(Default(), []int{fbP, fbIn}, xFB)
+	wFB, aFB := v.Upload(hwFB, Q4_K), v.Upload(hxFB, F32)
+
+	// Scalar fallback warmups and timing
+	os.Setenv("FAK_VULKAN_Q4K_ARM", "auto") // auto mode (routes to scalar since P=4 > 1)
+	for i := 0; i < warmups; i++ {
+		y := v.BatchedMatMul(wFB, aFB, fbP)
+		_ = v.Read(y)
+		v.Free(y)
+	}
+	fallbackDurations := make([]time.Duration, 0, iterations)
+	for i := 0; i < iterations; i++ {
+		start := time.Now()
+		y := v.BatchedMatMul(wFB, aFB, fbP)
+		_ = v.Read(y)
+		fallbackDurations = append(fallbackDurations, time.Since(start))
+		v.Free(y)
+	}
+	v.Free(wFB)
+	v.Free(aFB)
+	fbMedian := medianDuration(fallbackDurations)
+	os.Setenv("FAK_VULKAN_Q4K_ARM", "auto")
+
+	// Evaluate KEEP condition:
+	// "KEEP requires at least 10% median improvement on both real shapes, while scalar P=3/P=4 fallback regresses no more than 5%; otherwise record REJECT and retain scalar default."
+	keep := true
+	for _, sr := range shapeResults {
+		if sr.SpeedupRatio < 1.10 {
+			keep = false
+		}
+	}
+
+	status := "REJECT_RETAIN_SCALAR"
+	if keep {
+		status = "PASS_KEEP_CANDIDATE"
+	}
+
+	sourceCommit := os.Getenv("GIT_COMMIT")
+	if sourceCommit == "" {
+		sourceCommit = os.Getenv("FAK_GIT_COMMIT")
+	}
+	if sourceCommit == "" {
+		sourceCommit = "HEAD"
+	}
+	execPath, _ := os.Executable()
+
+	receipt := map[string]any{
+		"schema":              "fak.strix.vulkan-q4k-wave32/v1",
+		"issue":               12175,
+		"status":              status,
+		"scope":               "Wave32 cooperative Q4_K decode qualification on gfx1151",
+		"observed_utc":        time.Now().UTC().Format(time.RFC3339),
+		"device":              v.Tier(),
+		"source":              sourceCommit,
+		"shader":              "q4k_matmul_wave32.comp (Wave32 candidate) vs q4k_matmul.comp (scalar control)",
+		"binary":              execPath,
+		"compiler":            "glslc (Vulkan 1.2 SPIR-V) + c++ (GCC/Clang -O3)",
+		"driver":              "Mesa RADV STRIX_HALO",
+		"clock_headroom":       "manual DPM, 40 CUs gfx1151",
+		"allocation":          "device-local Q4_K weights + resident f32 activations; synchronized output read",
+		"raw_sample_identity": "10 post-warm iterations per shape in matched alternating A/B/B/A order under exclusive GPU lease",
+		"keep_gate": map[string]any{
+			"required_speedup_min": 1.10,
+			"shapes_evaluated":     len(shapeResults),
+			"decision":             status,
+		},
+		"shapes":                shapeResults,
+		"fallback_p4_median_ns": fbMedian.Nanoseconds(),
+		"total_test_ns":         time.Since(started).Nanoseconds(),
+	}
+
 	b, err := json.Marshal(receipt)
 	if err != nil {
 		t.Fatal(err)
