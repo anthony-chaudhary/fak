@@ -176,6 +176,14 @@ func Scan(opts Options) (Report, error) {
 		}
 	}
 
+	if opts.ExpandedBreadth && len(opts.Facts) == 0 {
+		extra := discoverExpandedSurfaces(absRoot)
+		for i := range extra {
+			extra[i].Repo = targetRepo
+			allLanes = append(allLanes, extra[i])
+		}
+	}
+
 	// Calculate overall production grade over ALL discovered units of work
 	// BEFORE applying optional display filters, so the denominator accurately
 	// reflects the whole system.
@@ -185,6 +193,9 @@ func Scan(opts Options) (Report, error) {
 	filtered := make([]DebtLane, 0, len(allLanes))
 	for _, l := range allLanes {
 		if opts.LaneFilter != "" && !strings.EqualFold(l.Lane, opts.LaneFilter) {
+			continue
+		}
+		if opts.SurfaceFilter != "" && string(classifySurface(l.UnitOfWork)) != strings.ToLower(opts.SurfaceFilter) {
 			continue
 		}
 		if opts.QueryFilter != "" && !matchesQuery(l, opts.QueryFilter) {
@@ -332,6 +343,20 @@ func Scan(opts Options) (Report, error) {
 		"health_average_score":         healthSummary.AverageScore,
 	}
 
+	var allFindings []FindingProvenance
+	scannedFiles := 0
+	for i := range allLanes {
+		unitDir := ""
+		if len(opts.Facts) == 0 {
+			unitDir = filepath.Join(absRoot, allLanes[i].UnitOfWork)
+		}
+		findings := InspectUnitDetectors(&allLanes[i], unitDir)
+		allFindings = append(allFindings, findings...)
+		scannedFiles += allLanes[i].Evidence.FilesCount
+	}
+
+	coverage := BuildCoverageReceipt(absRoot, targetRepo, allLanes, allFindings, scannedFiles)
+
 	return Report{
 		Schema:          Schema,
 		OK:              ok,
@@ -348,6 +373,7 @@ func Scan(opts Options) (Report, error) {
 		HealthSummary:   healthSummary,
 		Lanes:           filtered,
 		Hotspots:        hotspots,
+		Coverage:        &coverage,
 	}, nil
 }
 
@@ -1472,4 +1498,162 @@ func readRuntimeProofs(root string) map[string]bool {
 		}
 	}
 	return set
+}
+
+func discoverExpandedSurfaces(root string) []DebtLane {
+	var extra []DebtLane
+
+	// 1. cmd/
+	cmdDir := filepath.Join(root, "cmd")
+	if entries, err := os.ReadDir(cmdDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			unitPath := filepath.Join("cmd", e.Name())
+			absDir := filepath.Join(cmdDir, e.Name())
+			if dirContainsGoFiles(absDir) {
+				ev := inspectUnitEvidence(absDir, e.Name(), nil, nil, nil, nil)
+				score, rung := EvaluateMaturityCurve(ev)
+				bounds := DefaultBoundsAndLimits(CriticalityEnabling)
+				lane := DebtLane{
+					Lane:           "cmd_" + e.Name(),
+					UnitOfWork:     unitPath,
+					Criticality:    CriticalityEnabling,
+					Weight:         2.0,
+					Maturity:       score,
+					MaturityRung:   rung,
+					TargetMaturity: bounds.TargetCeiling,
+					Evidence:       ev,
+					Bounds:         bounds,
+				}
+				lane.MaturityGap = math.Max(0, lane.TargetMaturity-lane.Maturity)
+				lane.DebtPrincipal, lane.CarryingCost, lane.TotalDebt = CalculateDebt(lane.Maturity, lane.TargetMaturity, lane.Weight, lane.Interest, lane.Bounds)
+				lane.Health = EvaluateLaneHealth(lane)
+				extra = append(extra, lane)
+			}
+		}
+	}
+
+	// 2. tools/
+	toolsDir := filepath.Join(root, "tools")
+	if entries, err := os.ReadDir(toolsDir); err == nil {
+		hasTools := false
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), ".py") {
+				hasTools = true
+				break
+			}
+		}
+		if hasTools {
+			ev := inspectUnitEvidence(toolsDir, "tools", nil, nil, nil, nil)
+			score, rung := EvaluateMaturityCurve(ev)
+			bounds := DefaultBoundsAndLimits(CriticalityStewardship)
+			lane := DebtLane{
+				Lane:           "tools",
+				UnitOfWork:     "tools",
+				Criticality:    CriticalityStewardship,
+				Weight:         1.5,
+				Maturity:       score,
+				MaturityRung:   rung,
+				TargetMaturity: bounds.TargetCeiling,
+				Evidence:       ev,
+				Bounds:         bounds,
+			}
+			lane.MaturityGap = math.Max(0, lane.TargetMaturity-lane.Maturity)
+			lane.DebtPrincipal, lane.CarryingCost, lane.TotalDebt = CalculateDebt(lane.Maturity, lane.TargetMaturity, lane.Weight, lane.Interest, lane.Bounds)
+			lane.Health = EvaluateLaneHealth(lane)
+			extra = append(extra, lane)
+		}
+	}
+
+	// 3. skills/ (.claude/skills and .agents/skills)
+	skillsDir := filepath.Join(root, ".claude", "skills")
+	if entries, err := os.ReadDir(skillsDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			skillMd := filepath.Join(skillsDir, e.Name(), "SKILL.md")
+			if info, err := os.Stat(skillMd); err == nil && !info.IsDir() {
+				bounds := DefaultBoundsAndLimits(CriticalityStewardship)
+				lane := DebtLane{
+					Lane:           "skill_" + e.Name(),
+					UnitOfWork:     filepath.Join(".claude", "skills", e.Name()),
+					Criticality:    CriticalityStewardship,
+					Weight:         1.0,
+					Maturity:       8.0,
+					MaturityRung:   "hardened",
+					TargetMaturity: bounds.TargetCeiling,
+					Bounds:         bounds,
+				}
+				lane.MaturityGap = math.Max(0, lane.TargetMaturity-lane.Maturity)
+				lane.DebtPrincipal, lane.CarryingCost, lane.TotalDebt = CalculateDebt(lane.Maturity, lane.TargetMaturity, lane.Weight, lane.Interest, lane.Bounds)
+				lane.Health = EvaluateLaneHealth(lane)
+				extra = append(extra, lane)
+			}
+		}
+	}
+
+	// 4. workflows/ (.github/workflows)
+	wfDir := filepath.Join(root, ".github", "workflows")
+	if entries, err := os.ReadDir(wfDir); err == nil && len(entries) > 0 {
+		bounds := DefaultBoundsAndLimits(CriticalityStewardship)
+		lane := DebtLane{
+			Lane:           "workflows",
+			UnitOfWork:     filepath.Join(".github", "workflows"),
+			Criticality:    CriticalityStewardship,
+			Weight:         1.5,
+			Maturity:       8.0,
+			MaturityRung:   "hardened",
+			TargetMaturity: bounds.TargetCeiling,
+			Bounds:         bounds,
+		}
+		lane.MaturityGap = math.Max(0, lane.TargetMaturity-lane.Maturity)
+		lane.DebtPrincipal, lane.CarryingCost, lane.TotalDebt = CalculateDebt(lane.Maturity, lane.TargetMaturity, lane.Weight, lane.Interest, lane.Bounds)
+		lane.Health = EvaluateLaneHealth(lane)
+		extra = append(extra, lane)
+	}
+
+	// 5. examples/
+	exDir := filepath.Join(root, "examples")
+	if entries, err := os.ReadDir(exDir); err == nil && len(entries) > 0 {
+		bounds := DefaultBoundsAndLimits(CriticalityPeripheral)
+		lane := DebtLane{
+			Lane:           "examples",
+			UnitOfWork:     "examples",
+			Criticality:    CriticalityPeripheral,
+			Weight:         1.0,
+			Maturity:       4.0,
+			MaturityRung:   "prototyped",
+			TargetMaturity: bounds.TargetCeiling,
+			Bounds:         bounds,
+		}
+		lane.MaturityGap = math.Max(0, lane.TargetMaturity-lane.Maturity)
+		lane.DebtPrincipal, lane.CarryingCost, lane.TotalDebt = CalculateDebt(lane.Maturity, lane.TargetMaturity, lane.Weight, lane.Interest, lane.Bounds)
+		lane.Health = EvaluateLaneHealth(lane)
+		extra = append(extra, lane)
+	}
+
+	// 6. docs/
+	docsDir := filepath.Join(root, "docs")
+	if entries, err := os.ReadDir(docsDir); err == nil && len(entries) > 0 {
+		bounds := DefaultBoundsAndLimits(CriticalityStewardship)
+		lane := DebtLane{
+			Lane:           "docs",
+			UnitOfWork:     "docs",
+			Criticality:    CriticalityStewardship,
+			Weight:         1.0,
+			Maturity:       7.0,
+			MaturityRung:   "documented",
+			TargetMaturity: bounds.TargetCeiling,
+			Bounds:         bounds,
+		}
+		lane.MaturityGap = math.Max(0, lane.TargetMaturity-lane.Maturity)
+		lane.DebtPrincipal, lane.CarryingCost, lane.TotalDebt = CalculateDebt(lane.Maturity, lane.TargetMaturity, lane.Weight, lane.Interest, lane.Bounds)
+		lane.Health = EvaluateLaneHealth(lane)
+		extra = append(extra, lane)
+	}
+
+	return extra
 }

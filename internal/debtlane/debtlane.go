@@ -183,9 +183,10 @@ type Report struct {
 	ProductionGrade ProductionGrade `json:"production_grade"`
 	InterestSummary InterestSummary `json:"interest_summary"`
 	HealthSummary   HealthSummary   `json:"health_summary"`
-	Lanes           []DebtLane      `json:"lanes"`
-	Hotspots        []DebtLane      `json:"hotspots"` // Top debt lanes ranked worst-first.
-	WavePlan        *WavePlan       `json:"wave_plan,omitempty"`
+	Lanes           []DebtLane       `json:"lanes"`
+	Hotspots        []DebtLane       `json:"hotspots"` // Top debt lanes ranked worst-first.
+	WavePlan        *WavePlan        `json:"wave_plan,omitempty"`
+	Coverage        *CoverageReceipt `json:"coverage,omitempty"` // 3x discovery breadth & detector depth receipt (#12318).
 }
 
 // Options parameters for scanning and evaluating debt lanes.
@@ -196,6 +197,9 @@ type Options struct {
 	LaneFilter        string
 	QueryFilter       string // substring/regex query over lane name, unit, drivers, issues, related
 	HealthFilter      string // filter by health status: "healthy", "degraded", "critical"
+	SurfaceFilter     string // filter by surface class: "internal", "pkg", "cmd", "tools", "skills", etc.
+	ExpandedBreadth   bool   // inventory at least 9 surface classes (#12318)
+	DeepDetectors     bool   // evaluate at least 15 typed detector dimensions (#12318)
 	CrossIndex        bool   // output rich cross-indexed related items
 	MinGap            float64
 	CriticalityFilter string

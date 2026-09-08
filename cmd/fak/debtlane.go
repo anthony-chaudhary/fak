@@ -74,6 +74,9 @@ func runDebtLanesInternal(stdout, stderr io.Writer, flagSetName string, defaultP
 	agent := fs.String("agent", "worker", "OpenCode worker agent profile (default: worker)")
 	model := fs.String("model", "", "OpenCode model override")
 	interactive := fs.Bool("interactive", false, "generate interactive OpenCode run (-i) commands")
+	expandedSurfaces := fs.Bool("expanded-surfaces", false, "inventory >=9 surface classes (cmd, tools, skills, workflows, examples, docs) (#12318)")
+	surfaceFilter := fs.String("surface", "", "filter by surface class (internal, pkg, platform, cmd, tools, skills, workflows, examples, docs)")
+	coverageReceipt := fs.Bool("coverage", false, "display machine-readable coverage receipt summary")
 
 	if !parseFlags(fs, argv) {
 		return 2
@@ -102,6 +105,8 @@ func runDebtLanesInternal(stdout, stderr io.Writer, flagSetName string, defaultP
 		LaneFilter:        *laneFilter,
 		QueryFilter:       *query,
 		HealthFilter:      *health,
+		SurfaceFilter:     *surfaceFilter,
+		ExpandedBreadth:   *expandedSurfaces,
 		CrossIndex:        *crossIndex,
 		CriticalityFilter: *criticality,
 		MinGap:            *minGap,
@@ -180,6 +185,11 @@ func runDebtLanesInternal(stdout, stderr io.Writer, flagSetName string, defaultP
 	}
 
 	switch {
+	case *coverageReceipt:
+		if err := writeIndentedJSON(stdout, report.Coverage); err != nil {
+			fmt.Fprintf(stderr, "%s: encode json: %v\n", flagSetName, err)
+			return 1
+		}
 	case *asJSON:
 		if err := writeIndentedJSON(stdout, report); err != nil {
 			fmt.Fprintf(stderr, "%s: encode json: %v\n", flagSetName, err)
