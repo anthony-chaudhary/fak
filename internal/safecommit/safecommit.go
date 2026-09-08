@@ -121,9 +121,10 @@ type Options struct {
 	Paths    []string          // explicit repo-relative pathspec (REQUIRED, >= 1)
 	Message  string            // commit message (already assembled from -m / -F / stdin)
 	Trunk    string            // expected development branch override ("" => branch_roles.development_branch)
-	SignOff  bool              // add the DCO sign-off (-s)
-	Push     bool              // push, but ONLY after a verified commit
-	Lock     LockOptions       // advisory same-host lock
+	SignOff              bool        // add the DCO sign-off (-s)
+	Push                 bool        // push, but ONLY after a verified commit
+	DisableAutoReconcile bool        // disable automatic reconciliation of safe-disjoint divergence on push (#12078)
+	Lock                 LockOptions // advisory same-host lock
 	Recorder *witness.Recorder // optional decisions-note sink for post-commit assertions
 	Window   *Window           // optional adaptive process-local writer window
 	Review   *ReviewOptions    // optional pre-commit cross-model review rung
@@ -698,6 +699,7 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	// pathset was verified. Release before any remote I/O; a slow push must not stall the
 	// shared same-host commit lane.
 	releaseLock()
+	releaseWriterLease()
 
 	// (8) Optional push — only after a verified commit, by exact SHA refspec (never --force).
 	// Pushing the verified SHA, rather than the mutable branch tip after unlock, prevents a
@@ -796,31 +798,6 @@ func verifyCommittedEffect(ctx context.Context, run Runner, opts Options, paths 
 	}
 	res.Verified = true
 	return commitVerification{record: true, verdict: witness.VerdictAssertPass, assertion: "committed-set==requested-set"}, nil
-}
-
-// applyVerifiedPush performs step (8): the optional push of the already-verified commit. It
-// pushes only when opts.Push is set, by exact SHA refspec through pushVerifiedCommit, and maps
-// a rejected push to ReasonPushRejected (a value, never a force-push). Extracted verbatim from
-// CommitWith so the executor core stays under its ceiling; the returned Result/err on every
-// branch are exactly what CommitWith previously returned.
-func applyVerifiedPush(ctx context.Context, run Runner, opts Options, trunk string, res Result) (Result, error) {
-	if opts.Push {
-		pushed, err := pushVerifiedCommit(ctx, run, opts.Dir, trunk, res.SHA)
-		if err != nil {
-			return res, err
-		}
-		if !pushed.Pushed {
-			res.Reason = ReasonPushRejected
-			res.Detail = trimDetail(pushed.Detail)
-			if res.Detail == "" {
-				res.Detail = pushed.Reason
-			}
-			return res, nil
-		}
-		res.Pushed = true
-	}
-
-	return res, nil
 }
 
 // acquireCommitLock performs step (5): acquire the advisory lock (bounded) and build the
