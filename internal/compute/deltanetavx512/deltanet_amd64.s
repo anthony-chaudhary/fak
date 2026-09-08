@@ -2,11 +2,11 @@
 
 #include "textflag.h"
 
-// func deltaNetStepAVX512(st, qn, kn, vh, od, kvmem, delta *float32, bt, gate float32)
+// func deltaNetStep(st, qn, kn, vh, od, kvmem, delta *float32, bt, gate float32)
 //
 // Canonical Qwen GDN geometry is one 128x128 state matrix. Eight ZMM accumulators
 // cover its 128 value columns while rows are streamed exactly once per phase.
-TEXT ·deltaNetStepAVX512(SB), NOSPLIT, $0-64
+TEXT ·deltaNetStep(SB), NOSPLIT, $0-64
 	MOVQ st+0(FP), AX
 	MOVQ qn+8(FP), BX
 	MOVQ kn+16(FP), CX

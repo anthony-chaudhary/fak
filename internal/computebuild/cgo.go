@@ -58,7 +58,11 @@ func SynthesizeVulkanCgoEnv(tc *Toolchain, pkgDir string) map[string]string {
 	ldflags = append(ldflags, "-lfakvulkan")
 	if tc != nil && tc.VulkanLib != "" {
 		ldflags = append(ldflags, QuoteFlag("-L", tc.VulkanLib))
-		ldflags = append(ldflags, "-lvulkan-1")
+		if tc.IsWindows {
+			ldflags = append(ldflags, "-lvulkan-1")
+		} else {
+			ldflags = append(ldflags, "-lvulkan")
+		}
 	}
 	if tc != nil && tc.CxxRuntime != "" {
 		ldflags = append(ldflags, tc.CxxRuntime)
