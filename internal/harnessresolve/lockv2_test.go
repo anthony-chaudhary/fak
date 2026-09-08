@@ -7,8 +7,37 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/harnesscompose"
+	publiclockv2 "github.com/anthony-chaudhary/fak/pkg/harnesskit/lockv2"
 )
+
+func TestProductLockV2_CanonicalIDMatchesHarnessKit(t *testing.T) {
+	publicLock := &publiclockv2.Lock{
+		Schema:    publiclockv2.ProductLockSchemaV2,
+		Platforms: []publiclockv2.PlatformRequirement{{OS: "linux", Arch: "amd64", Contract: "v1"}},
+		Budget:    publiclockv2.LockBudget{ContextTokens: 1024, MemoryMiB: 256, Workers: 1},
+		Components: []publiclockv2.LockedComponent{{
+			ID: "kernel", Version: "1.0.0", Digest: "sha256:kernel", Source: "registry/kernel",
+		}},
+		Assets: []publiclockv2.LockedAsset{{Kind: "instruction", ID: "guide", Value: "line 1\r\nline 2", Source: "fixture"}},
+	}
+	want, err := publiclockv2.CanonicalID(publicLock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicLock.ID = want
+	raw, err := json.Marshal(publicLock)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := CanonicalIDV2(raw)
+	if err != nil {
+		t.Fatalf("internal compatibility wrapper rejected public lock: %v", err)
+	}
+	if got != want {
+		t.Fatalf("canonical ID drift: internal=%s public=%s", got, want)
+	}
+}
 
 func TestProductLockV2_MultiPlatform(t *testing.T) {
 	baseLock := func() ProductLockV2 {
@@ -19,7 +48,7 @@ func TestProductLockV2_MultiPlatform(t *testing.T) {
 				{OS: "darwin", Arch: "arm64", Contract: "v1"},
 				{OS: "windows", Arch: "amd64", Contract: "v1"},
 			},
-			Components: []LockedComponent{
+			Components: []LockedComponentV2{
 				{
 					ID:      "kernel",
 					Version: "1.0.0",
@@ -27,7 +56,7 @@ func TestProductLockV2_MultiPlatform(t *testing.T) {
 					Source:  "registry/kernel",
 				},
 			},
-			Assets: []harnesscompose.EffectiveAsset{
+			Assets: []LockedAssetV2{
 				{
 					Kind:   "secret",
 					ID:     "auth-token",
@@ -51,12 +80,12 @@ func TestProductLockV2_MultiPlatform(t *testing.T) {
 
 	t.Run("component incompatible OS rejected", func(t *testing.T) {
 		lock := baseLock()
-		lock.Components = append(lock.Components, LockedComponent{
+		lock.Components = append(lock.Components, LockedComponentV2{
 			ID:            "linux-only-daemon",
 			Version:       "1.0.0",
 			Digest:        "sha256:daemon",
 			Source:        "registry/daemon",
-			Compatibility: Compatibility{OS: []string{"linux"}},
+			Compatibility: LockCompatibilityV2{OS: []string{"linux"}},
 		})
 		data, err := json.Marshal(lock)
 		if err != nil {
@@ -73,12 +102,12 @@ func TestProductLockV2_MultiPlatform(t *testing.T) {
 
 	t.Run("component incompatible arch rejected", func(t *testing.T) {
 		lock := baseLock()
-		lock.Components = append(lock.Components, LockedComponent{
+		lock.Components = append(lock.Components, LockedComponentV2{
 			ID:            "amd64-simd",
 			Version:       "1.0.0",
 			Digest:        "sha256:simd",
 			Source:        "registry/simd",
-			Compatibility: Compatibility{Arch: []string{"amd64"}},
+			Compatibility: LockCompatibilityV2{Arch: []string{"amd64"}},
 		})
 		data, err := json.Marshal(lock)
 		if err != nil {
@@ -95,12 +124,12 @@ func TestProductLockV2_MultiPlatform(t *testing.T) {
 
 	t.Run("contract mismatch rejected", func(t *testing.T) {
 		lock := baseLock()
-		lock.Components = append(lock.Components, LockedComponent{
+		lock.Components = append(lock.Components, LockedComponentV2{
 			ID:            "contract-v2-adapter",
 			Version:       "2.0.0",
 			Digest:        "sha256:adapter",
 			Source:        "registry/adapter",
-			Compatibility: Compatibility{Contract: "v2"},
+			Compatibility: LockCompatibilityV2{Contract: "v2"},
 		})
 		data, err := json.Marshal(lock)
 		if err != nil {
@@ -147,22 +176,47 @@ func TestProductLockV2_MultiPlatform(t *testing.T) {
 		}
 	})
 
-	t.Run("platform matrix expansion supported", func(t *testing.T) {
-		lock := baseLock()
-		lock.Platforms = nil
-		lock.Matrix = &PlatformMatrix{
-			OS:       []string{"linux", "darwin", "windows"},
-			Arch:     []string{"amd64"},
-			Contract: []string{"v1"},
+	t.Run("serialized platform matrix remains compatible", func(t *testing.T) {
+		wire := struct {
+			Schema     string              `json:"schema"`
+			ID         string              `json:"id,omitempty"`
+			Matrix     *PlatformMatrix     `json:"matrix"`
+			Components []LockedComponentV2 `json:"components"`
+			Assets     []LockedAssetV2     `json:"assets"`
+		}{
+			Schema: LockSchemaV2,
+			Matrix: &PlatformMatrix{
+				OS:       []string{"linux", "darwin", "windows"},
+				Arch:     []string{"amd64"},
+				Contract: []string{"v1"},
+			},
+			Components: baseLock().Components,
+			Assets:     baseLock().Assets,
 		}
-		data, err := json.Marshal(lock)
+		data, err := json.Marshal(wire)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wire.ID, err = CanonicalIDV2(data)
+		if err != nil {
+			t.Fatalf("canonicalize serialized matrix: %v", err)
+		}
+		data, err = json.Marshal(wire)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := ValidateProductLockV2(data); err != nil {
-			t.Fatalf("expected matrix expansion to validate, got: %v", err)
+			t.Fatalf("serialized matrix lock rejected: %v", err)
+		}
+		parsed, err := ParseProductLockV2(data)
+		if err != nil {
+			t.Fatalf("parse serialized matrix: %v", err)
+		}
+		if len(parsed.Platforms) != 3 {
+			t.Fatalf("matrix expanded to %d platforms, want 3", len(parsed.Platforms))
 		}
 	})
+
 }
 
 func TestProductLockV2_SecretPlaintextLeak(t *testing.T) {
@@ -172,7 +226,7 @@ func TestProductLockV2_SecretPlaintextLeak(t *testing.T) {
 			Platforms: []LockEnvironment{
 				{OS: "linux", Arch: "amd64", Contract: "v1"},
 			},
-			Components: []LockedComponent{
+			Components: []LockedComponentV2{
 				{
 					ID:      "kernel",
 					Version: "1.0.0",
@@ -185,7 +239,7 @@ func TestProductLockV2_SecretPlaintextLeak(t *testing.T) {
 
 	t.Run("fails closed on non-empty plaintext value", func(t *testing.T) {
 		lock := validLock()
-		lock.Assets = []harnesscompose.EffectiveAsset{
+		lock.Assets = []LockedAssetV2{
 			{
 				Kind:   "secret",
 				ID:     "prod-db-credentials",
@@ -229,7 +283,7 @@ func TestProductLockV2_SecretPlaintextLeak(t *testing.T) {
 		}
 		for _, ref := range validRefs {
 			lock := validLock()
-			lock.Assets = []harnesscompose.EffectiveAsset{
+			lock.Assets = []LockedAssetV2{
 				{
 					Kind:   "secret",
 					ID:     "api-token",
@@ -262,7 +316,7 @@ func TestProductLockV2_SecretPlaintextLeak(t *testing.T) {
 		}
 		for _, ref := range invalidRefs {
 			lock := validLock()
-			lock.Assets = []harnesscompose.EffectiveAsset{
+			lock.Assets = []LockedAssetV2{
 				{
 					Kind:   "secret",
 					ID:     "api-token",
@@ -284,7 +338,7 @@ func TestProductLockV2_SecretPlaintextLeak(t *testing.T) {
 
 	t.Run("non-secret assets allow plaintext values", func(t *testing.T) {
 		lock := validLock()
-		lock.Assets = []harnesscompose.EffectiveAsset{
+		lock.Assets = []LockedAssetV2{
 			{
 				Kind:   "instruction",
 				ID:     "system-prompt",
@@ -316,7 +370,7 @@ func TestProductLockV2_CanonicalLF(t *testing.T) {
 			{OS: "darwin", Arch: "arm64", Contract: "v1"},
 			{OS: "windows", Arch: "amd64", Contract: "v1"},
 		},
-		Components: []LockedComponent{
+		Components: []LockedComponentV2{
 			{
 				ID:      "kernel",
 				Version: "1.0.0",
@@ -324,7 +378,7 @@ func TestProductLockV2_CanonicalLF(t *testing.T) {
 				Source:  "registry/kernel",
 			},
 		},
-		Assets: []harnesscompose.EffectiveAsset{
+		Assets: []LockedAssetV2{
 			{
 				Kind:   "secret",
 				ID:     "auth-key",
