@@ -174,7 +174,7 @@ func BuildStrixCandidateArchiveFromPaths(baseCommit, rootDir string, overlayPath
 	for _, rawPath := range overlayPaths {
 		rawPath = strings.TrimSpace(rawPath)
 		if rawPath == "" {
-			continue
+			return nil, fmt.Errorf("empty --mine overlay path rejected")
 		}
 		if filepath.IsAbs(rawPath) || strings.HasPrefix(rawPath, "/") || strings.HasPrefix(rawPath, "\\") || (len(rawPath) > 1 && rawPath[1] == ':') {
 			return nil, fmt.Errorf("absolute overlay path rejected: %q must be relative to repository root", rawPath)
@@ -199,6 +199,9 @@ func BuildStrixCandidateArchiveFromPaths(baseCommit, rootDir string, overlayPath
 		}
 		if fi.IsDir() {
 			return nil, fmt.Errorf("directory overlay rejected: %q is a directory, must be a regular file", rawPath)
+		}
+		if !fi.Mode().IsRegular() {
+			return nil, fmt.Errorf("invalid overlay file mode: %q must be a regular file (mode: %s)", rawPath, fi.Mode())
 		}
 		realPath, err := filepath.EvalSymlinks(fullPath)
 		if err == nil {
@@ -468,11 +471,17 @@ func isCurrentValidPass(receipt *amdgpu.StrixValidationReceipt, expectedTip, exp
 		if ab.Verdict == "REGRESSION" {
 			return false, fmt.Sprintf("ablation %q suffered regression (speedup=%.2fx)", ab.Feature, ab.Speedup)
 		}
+		if ab.Verdict != "VERIFIED_LIFT" && ab.Verdict != "PARITY_MATCH" {
+			return false, fmt.Sprintf("ablation %q verdict is %s (want VERIFIED_LIFT or PARITY_MATCH)", ab.Feature, ab.Verdict)
+		}
+		if ab.BaselineArm.LatencyUS <= 0 || ab.CandidateArm.LatencyUS <= 0 {
+			return false, fmt.Sprintf("ablation %q has non-positive latency (baseline: %d µs, candidate: %d µs)", ab.Feature, ab.BaselineArm.LatencyUS, ab.CandidateArm.LatencyUS)
+		}
 	}
 	return true, ""
 }
 
-func emitFailReceipt(w io.Writer, host, gitTip string, argv []string, err error) {
+func emitFailReceipt(w io.Writer, host, gitTip, gitRef string, argv []string, err error) {
 	receipt := amdgpu.NewStrixValidationReceipt(
 		amdgpu.StrixTarget{
 			Mode:         "ssh",
@@ -482,7 +491,7 @@ func emitFailReceipt(w io.Writer, host, gitTip string, argv []string, err error)
 			ComputeUnits: 40,
 			DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
 		},
-		"",
+		gitRef,
 		gitTip,
 		"fak-dev amd-strix-validate "+strings.Join(argv, " "),
 	)
@@ -524,7 +533,7 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 		err := fmt.Errorf("positional overlays or arguments rejected: %v (use repeatable --mine PATH instead)", fs.Args())
 		fmt.Fprintf(stderr, "amd-strix-validate: %v\n", err)
 		if *asJSON {
-			emitFailReceipt(stdout, *host, *gitTip, argv, err)
+			emitFailReceipt(stdout, *host, *gitTip, "", argv, err)
 		}
 		return 1
 	}
@@ -533,7 +542,7 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 		err := fmt.Errorf("invalid admission timeout (%d): must be > 0 and < total command timeout (%d)", *admissionTimeoutSec, *timeoutSec)
 		fmt.Fprintf(stderr, "amd-strix-validate: %v\n", err)
 		if *asJSON {
-			emitFailReceipt(stdout, *host, *gitTip, argv, err)
+			emitFailReceipt(stdout, *host, *gitTip, "", argv, err)
 		}
 		return 1
 	}
@@ -559,7 +568,7 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 	if archiveErr != nil {
 		fmt.Fprintf(stderr, "amd-strix-validate: candidate archive validation failed: %v\n", archiveErr)
 		if *asJSON {
-			emitFailReceipt(stdout, *host, *gitTip, argv, fmt.Errorf("candidate archive error: %w", archiveErr))
+			emitFailReceipt(stdout, *host, *gitTip, "", argv, fmt.Errorf("candidate archive error: %w", archiveErr))
 		}
 		return 1
 	}
@@ -607,7 +616,7 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 	if receipt == nil {
 		fmt.Fprintf(stderr, "amd-strix-validate: validation failed: %v\n", err)
 		if *asJSON {
-			emitFailReceipt(stdout, *host, candArchive.BaseCommit, argv, fmt.Errorf("validation failed: %v", err))
+			emitFailReceipt(stdout, *host, candArchive.BaseCommit, archiveDigestStr, argv, fmt.Errorf("validation failed: %v", err))
 		}
 		return 1
 	}
