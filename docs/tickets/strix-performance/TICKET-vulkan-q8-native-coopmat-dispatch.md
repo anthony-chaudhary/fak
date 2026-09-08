@@ -3,7 +3,7 @@
 
 ```routing
 lane: compute
-paths: ["docs/tickets/strix-performance/TICKET-vulkan-q8-native-coopmat-dispatch.md", "internal/compute/vulkan.go", "internal/compute/vulkan_q8_coopmat_test.go"]
+paths: ["docs/tickets/strix-performance/TICKET-vulkan-q8-native-coopmat-dispatch.md", "internal/compute/vulkan.go", "internal/compute/vulkan_q8_routing.go", "internal/compute/vulkan_q8_coopmat_test.go"]
 expected_steps: 4
 ```
 
@@ -64,9 +64,9 @@ The device-free selector and grid assertions below are the acceptance witness. H
 ## Verifiable Witness
 
 ```powershell
-go test ./internal/compute -run 'TestVulkanQ8(NativeCoopmatAdmission|DispatchGrid)' -count=1
-go test ./internal/compute -count=1
+go test ./internal/compute -run 'TestQ8DispatchIsApproxAndGated|TestVulkanQ8(NativeCoopmatAdmission|DispatchGrid)' -count=1
 go vet ./internal/compute
+go vet -tags vulkan ./internal/compute
 ```
 
 The focused oracle must prove that heuristic=true/native=false/P=33 selects decode and returns `(9,33,1)` for `out=65`, never cooperative `(3,2,1)`.
@@ -82,8 +82,9 @@ The implementation commit uses `Fixes #12215` and `(fak compute)` only after the
 ## File:Line seams
 
 - `internal/compute/vulkan.go:402-418 (HasCooperativeMatrix)` - heuristic device/tier signal.
-- `internal/compute/vulkan.go:459-489 (Q8MatMul2DDispatchGrid, VulkanQ8DispatchGrid)` - geometry decision.
-- `internal/compute/vulkan.go:1192-1219 (q8MatMulLocked, q8MatMulChunksLocked)` - full and chunked route admission.
+- `internal/compute/vulkan.go:452-470 (Q8MatMul2DDispatchGrid, VulkanQ8DispatchGrid)` - native-only integration wrapper.
+- `internal/compute/vulkan.go:1173-1199 (q8MatMulLocked, q8MatMulChunksLocked)` - full and chunked route admission.
+- `internal/compute/vulkan_q8_routing.go:10-35` - device-free selector and matching grid arithmetic.
 - `internal/compute/vulkan_shim.cpp:1220-1231 (fvk_q8_matmul_2d_f32)` - native pipeline check and scalar fallback with caller grid.
 - `internal/compute/shaders/q8_matmul_decode.comp:33-40 (main)` - one token row and eight output rows per workgroup.
 
