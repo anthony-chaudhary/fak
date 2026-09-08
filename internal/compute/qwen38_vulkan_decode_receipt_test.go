@@ -2,6 +2,7 @@ package compute
 
 import (
 	"errors"
+	"math"
 	"reflect"
 	"slices"
 	"strings"
@@ -110,9 +111,164 @@ func TestQwen38VulkanDecodeReceiptRejectsContractInconsistencies(t *testing.T) {
 	}
 }
 
+func TestQwen38VulkanDecodeReceiptV3AggregatesExactlyReportedRuns(t *testing.T) {
+	raw := validQwen38VulkanV3RawDecodeResult(5)
+	receipt, err := BuildQwen38VulkanDecodeReceiptV3(raw)
+	if err != nil {
+		t.Fatalf("BuildQwen38VulkanDecodeReceiptV3() error = %v", err)
+	}
+	if receipt.Schema != Qwen38VulkanDecodeReceiptV3Schema || receipt.ResourceScope != Qwen38VulkanResourceScopeReportedRuns || receipt.ReportedRuns != 5 {
+		t.Fatalf("v3 scope = schema=%q scope=%q runs=%d", receipt.Schema, receipt.ResourceScope, receipt.ReportedRuns)
+	}
+	if receipt.TransfersComplete == nil || !*receipt.TransfersComplete {
+		t.Fatal("v3 aggregate did not preserve complete transfer observation")
+	}
+	if receipt.PeakProcessMemoryBytes != 104 || receipt.PeakDeviceMemoryBytes != 204 {
+		t.Fatalf("v3 peaks = process=%d device=%d, want maxima 104/204", receipt.PeakProcessMemoryBytes, receipt.PeakDeviceMemoryBytes)
+	}
+	if receipt.Counters.H2D.Count != 15 || receipt.Counters.H2D.Bytes != 15_360 || receipt.Counters.D2D.Count != 10 || receipt.Counters.D2D.Bytes != 10_240 {
+		t.Fatalf("v3 transfer aggregate = %+v", receipt.Counters)
+	}
+	if receipt.Counters.TensorHome.ResidentBytes != 2_048 {
+		t.Fatalf("v3 tensor-home resident bytes = %d, want maximum 2048", receipt.Counters.TensorHome.ResidentBytes)
+	}
+	if err := receipt.Validate(); err != nil {
+		t.Fatalf("v3 Validate() error = %v", err)
+	}
+
+	// The two peaks are independent accounting domains. Device allocation may
+	// exceed resident process memory without invalidating an otherwise observed
+	// v3 receipt.
+	if receipt.PeakDeviceMemoryBytes <= receipt.PeakProcessMemoryBytes {
+		t.Fatal("fixture did not exercise independent memory domains")
+	}
+
+	raw.Runs[0].Resources.PeakProcessMemoryBytes = 999
+	if receipt.Runs[0].Resources.PeakProcessMemoryBytes == 999 {
+		t.Fatal("v3 builder retained caller-owned resource pointer")
+	}
+}
+
+func TestQwen38VulkanDecodeReceiptV3FailsClosedOnIncompleteResources(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*Qwen38VulkanRawDecodeResult)
+		want string
+	}{
+		{"scope absent", func(r *Qwen38VulkanRawDecodeResult) { r.ResourceScope = "" }, "resource scope"},
+		{"reported runs zero", func(r *Qwen38VulkanRawDecodeResult) { r.ReportedRuns = 0 }, "reported runs"},
+		{"reported runs mismatch", func(r *Qwen38VulkanRawDecodeResult) { r.ReportedRuns-- }, "reported runs"},
+		{"run resources absent", func(r *Qwen38VulkanRawDecodeResult) { r.Runs[2].Resources = nil }, "requires resource observations"},
+		{"transfer completeness absent", func(r *Qwen38VulkanRawDecodeResult) { r.Runs[2].Resources.TransfersComplete = nil }, "complete transfer"},
+		{"transfer completeness false", func(r *Qwen38VulkanRawDecodeResult) {
+			incomplete := false
+			r.Runs[2].Resources.TransfersComplete = &incomplete
+		}, "complete transfer"},
+		{"process peak absent", func(r *Qwen38VulkanRawDecodeResult) { r.Runs[2].Resources.PeakProcessMemoryBytes = 0 }, "positive process and device"},
+		{"device peak absent", func(r *Qwen38VulkanRawDecodeResult) { r.Runs[2].Resources.PeakDeviceMemoryBytes = 0 }, "positive process and device"},
+		{"legacy aggregate supplied", func(r *Qwen38VulkanRawDecodeResult) {
+			peak := uint64(1)
+			r.PeakProcessMemoryBytes = &peak
+		}, "must be derived"},
+		{"counter overflow", func(r *Qwen38VulkanRawDecodeResult) {
+			r.Runs[0].Resources.Counters.ComputeDispatches = math.MaxUint64
+			r.Runs[0].Resources.Counters.Q4KMatmulDispatches = math.MaxUint64
+			r.Runs[0].Resources.Counters.OtherComputeDispatches = 0
+		}, "overflow across reported runs"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := validQwen38VulkanV3RawDecodeResult(5)
+			tt.edit(&raw)
+			receipt, err := BuildQwen38VulkanDecodeReceiptV3(raw)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("BuildQwen38VulkanDecodeReceiptV3() error = %v, want %q", err, tt.want)
+			}
+			if !reflect.DeepEqual(receipt, Qwen38VulkanDecodeReceipt{}) {
+				t.Fatalf("invalid v3 raw result returned a nonzero receipt: %+v", receipt)
+			}
+		})
+	}
+}
+
+func TestQwen38VulkanDecodeReceiptV3RejectsMutatedAggregation(t *testing.T) {
+	base, err := BuildQwen38VulkanDecodeReceiptV3(validQwen38VulkanV3RawDecodeResult(5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		edit func(*Qwen38VulkanDecodeReceipt)
+		want string
+	}{
+		{"scope", func(r *Qwen38VulkanDecodeReceipt) { r.ResourceScope = "one_run" }, "resource scope"},
+		{"run count", func(r *Qwen38VulkanDecodeReceipt) { r.ReportedRuns = 4 }, "reported runs"},
+		{"aggregate completeness absent", func(r *Qwen38VulkanDecodeReceipt) { r.TransfersComplete = nil }, "complete transfer"},
+		{"aggregate completeness false", func(r *Qwen38VulkanDecodeReceipt) {
+			incomplete := false
+			r.TransfersComplete = &incomplete
+		}, "complete transfer"},
+		{"process maximum", func(r *Qwen38VulkanDecodeReceipt) { r.PeakProcessMemoryBytes++ }, "peak memory"},
+		{"device maximum", func(r *Qwen38VulkanDecodeReceipt) { r.PeakDeviceMemoryBytes++ }, "peak memory"},
+		{"counter sum", func(r *Qwen38VulkanDecodeReceipt) { r.Counters.H2D.Bytes++ }, "counters do not match"},
+		{"partial run", func(r *Qwen38VulkanDecodeReceipt) { r.Runs[3].Resources = nil }, "requires resource observations"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			receipt := base
+			receipt.Runs = slices.Clone(base.Runs)
+			tt.edit(&receipt)
+			if err := receipt.Validate(); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Validate() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestQwen38VulkanDecodeReceiptV3AcceptsObservedZeroTransferDirections(t *testing.T) {
+	raw := validQwen38VulkanV3RawDecodeResult(1)
+	raw.Runs[0].Resources.Counters.H2D = Qwen38VulkanTransferCounters{}
+	raw.Runs[0].Resources.Counters.D2H = Qwen38VulkanTransferCounters{}
+	receipt, err := BuildQwen38VulkanDecodeReceiptV3(raw)
+	if err != nil {
+		t.Fatalf("observed zero transfer direction was unavailable: %v", err)
+	}
+	if receipt.Counters.H2D != (Qwen38VulkanTransferCounters{}) || receipt.Counters.D2H != (Qwen38VulkanTransferCounters{}) {
+		t.Fatalf("observed zero transfer direction changed: %+v", receipt.Counters)
+	}
+}
+
+func TestQwen38VulkanDecodeReceiptV2RemainsCompatible(t *testing.T) {
+	raw := validQwen38VulkanRawDecodeResult()
+	raw.ResourceScope = Qwen38VulkanResourceScopeReportedRuns
+	raw.ReportedRuns = len(raw.Runs)
+	complete := true
+	raw.Runs[0].Resources = &Qwen38VulkanRunResources{TransfersComplete: &complete}
+	receipt, err := BuildQwen38VulkanDecodeReceipt(raw)
+	if err != nil {
+		t.Fatalf("legacy BuildQwen38VulkanDecodeReceipt() error = %v", err)
+	}
+	if receipt.Schema != Qwen38VulkanDecodeReceiptSchema || receipt.ResourceScope != "" || receipt.ReportedRuns != 0 || receipt.TransfersComplete != nil || receipt.Runs[0].Resources != nil {
+		t.Fatalf("v2 receipt acquired v3 fields: %+v", receipt)
+	}
+}
+
 func TestCompareQwen38VulkanDecodeReceiptsRejectsMismatches(t *testing.T) {
 	packet := NewQwen38VulkanDecodePacket([]int32{7, 8}, 4)
 	parent := validQwen38VulkanDecodeReceipt(t, packet)
+
+	t.Run("schema", func(t *testing.T) {
+		candidateRaw := validQwen38VulkanV3RawDecodeResult(1)
+		candidateRaw.PromptTokenIDs = slices.Clone(packet.PromptTokenIDs)
+		candidateRaw.Runs[0].ContextTokens = len(packet.PromptTokenIDs) + len(candidateRaw.OutputTokenIDs)
+		candidate, err := BuildQwen38VulkanDecodeReceiptV3(candidateRaw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := CompareQwen38VulkanDecodeReceipts(parent, candidate); err == nil || !strings.Contains(err.Error(), "schema mismatch") {
+			t.Fatalf("comparison error = %v, want schema mismatch", err)
+		}
+	})
 
 	t.Run("packet", func(t *testing.T) {
 		candidatePacket := NewQwen38VulkanDecodePacket([]int32{7, 9}, 4)
@@ -308,6 +464,32 @@ func validQwen38VulkanRawDecodeResult() Qwen38VulkanRawDecodeResult {
 		PeakDeviceMemoryBytes:       &peakDeviceMemoryBytes,
 		Counters:                    &counters,
 	}
+}
+
+func validQwen38VulkanV3RawDecodeResult(reportedRuns int) Qwen38VulkanRawDecodeResult {
+	raw := validQwen38VulkanRawDecodeResult()
+	raw.PeakProcessMemoryBytes = nil
+	raw.PeakDeviceMemoryBytes = nil
+	raw.Counters = nil
+	raw.ResourceScope = Qwen38VulkanResourceScopeReportedRuns
+	raw.ReportedRuns = reportedRuns
+	baseRun := raw.Runs[0]
+	baseCounters := *validQwen38VulkanRawDecodeResult().Counters
+	raw.Runs = make([]Qwen38VulkanDecodeRun, reportedRuns)
+	for i := range raw.Runs {
+		complete := true
+		run := baseRun
+		run.Repetition = i + 1
+		run.OutputTokenIDs = slices.Clone(baseRun.OutputTokenIDs)
+		run.Resources = &Qwen38VulkanRunResources{
+			PeakProcessMemoryBytes: uint64(100 + i),
+			PeakDeviceMemoryBytes:  uint64(200 + i),
+			TransfersComplete:      &complete,
+			Counters:               baseCounters,
+		}
+		raw.Runs[i] = run
+	}
+	return raw
 }
 
 func mustQwen38VulkanPacketDigest(t *testing.T, packet Qwen38VulkanDecodePacket) string {
