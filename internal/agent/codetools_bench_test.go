@@ -143,8 +143,12 @@ func TestAgentBufferPoolConcurrentContention(t *testing.T) {
 	wg.Wait()
 
 	m := codetools.GetBufferPoolMetrics()
-	if m.Acquires < workers*opsPerWorker*2 {
-		t.Fatalf("Acquires = %d, want >= %d", m.Acquires, workers*opsPerWorker*2)
+	wantAcquires := uint64(workers * opsPerWorker)
+	if m.Acquires != wantAcquires {
+		t.Fatalf("Acquires = %d, want %d pooled Read acquisitions", m.Acquires, wantAcquires)
+	}
+	if m.Releases != m.Acquires {
+		t.Fatalf("Releases = %d, want %d (all acquired buffers returned)", m.Releases, m.Acquires)
 	}
 	// Bounded allocations under concurrent access
 	if m.Allocations > workers*4 {
