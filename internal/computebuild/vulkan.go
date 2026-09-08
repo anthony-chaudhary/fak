@@ -39,6 +39,7 @@ var VulkanShaders = []string{
 	"qwen35_gdn_conv",
 	"qwen35_gdn_recurrent",
 	"q4k_matmul",
+	"q4k_matmul_wave32",
 	"q2k_matmul",
 	"qwen35_split_qg_panel",
 	"qwen35_partial_rope_panel",

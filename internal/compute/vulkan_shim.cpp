@@ -873,13 +873,19 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_glm_kda_wave32 = 0;
 #endif
 
+    bool isGfx1151 = props.vendorID == 0x1002u && props.deviceID == 0x1586u;
+    bool haveSubgroupBasic =
+        (subgroupBasicProps.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0 &&
+        (subgroupBasicProps.supportedOperations & VK_SUBGROUP_FEATURE_BASIC_BIT) != 0;
     bool haveSubgroupArithmetic =
         (subgroupBasicProps.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0 &&
         (subgroupBasicProps.supportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT) != 0;
     bool effectiveSubgroup32 = (subgroupBasicProps.subgroupSize == 32);
     bool requiredSubgroup32 = subgroupSizeControlAllowed;
 
-    g_have_q4k_wave32 = (haveSubgroupArithmetic && (effectiveSubgroup32 || requiredSubgroup32)) ? 1 : 0;
+    g_have_q4k_wave32 =
+        (isGfx1151 && haveSubgroupBasic && haveSubgroupArithmetic &&
+         (effectiveSubgroup32 || requiredSubgroup32)) ? 1 : 0;
     g_q4k_wave32_required_subgroup = (g_have_q4k_wave32 && requiredSubgroup32);
 
     bool needSubgroupControl = (g_have_glm_kda_wave32 != 0) || g_q4k_wave32_required_subgroup;
