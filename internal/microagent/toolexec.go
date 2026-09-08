@@ -11,6 +11,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // ToolExec is the adjudicating tool-action SEAM (#2003 shape, #2018 floor
@@ -256,6 +257,7 @@ func (subprocessBackend) Dispatch(ctx context.Context, act ToolAction) (ToolResu
 	// Windows native tree walk) — wired to the context-cancel hook, so a timeout or
 	// a parent cancel kills the whole tree, grandchildren included.
 	procguard.ConfigureProcessTreeCancel(cmd)
+	windowgate.ConfigureWorkerCommand(cmd)
 	cmd.WaitDelay = waitDelay
 
 	var stdout, stderr bytes.Buffer

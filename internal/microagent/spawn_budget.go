@@ -33,6 +33,15 @@ type SpawnBudget struct {
 	rootGoal     string
 	goals        map[string]goalLineage
 	goalOwners   map[string]string
+	store        SpawnBudgetLogger
+}
+
+// SpawnBudgetLogger defines the persistence seam for child admissions and reconciliations.
+type SpawnBudgetLogger interface {
+	LogRoot(rootID, rootGoal string) error
+	LogAdmit(request SpawnRequest) error
+	LogReconcile(childID string, actual LineageBudget) error
+	LogRelease(request SpawnRequest) error
 }
 
 type goalLineage struct {
@@ -144,6 +153,17 @@ func (b *SpawnBudget) Admit(request SpawnRequest) error {
 		depth:           request.Depth,
 	}
 	b.goalOwners[goalFingerprint] = request.ChildID
+	if b.store != nil {
+		if err := b.store.LogAdmit(request); err != nil {
+			b.children[request.ParentID]--
+			b.descendants--
+			b.reserved = subtractLineageBudget(b.reserved, request.Budget)
+			delete(b.reservations, request.ChildID)
+			delete(b.goals, request.ChildID)
+			delete(b.goalOwners, goalFingerprint)
+			return fmt.Errorf("%w: persist child admission: %w", ErrSpawnBudget, err)
+		}
+	}
 	return nil
 }
 
@@ -169,10 +189,106 @@ func (b *SpawnBudget) reconcile(childID string, actual LineageBudget) error {
 	if actual.Tokens > reservation.Tokens || actual.OutputTokens > reservation.OutputTokens || actual.CostMicrosUSD > reservation.CostMicrosUSD {
 		return fmt.Errorf("%w: child %q usage exceeds its reservation", ErrSpawnBudget, childID)
 	}
+	if b.store != nil {
+		if err := b.store.LogReconcile(childID, actual); err != nil {
+			return fmt.Errorf("%w: persist child reconciliation: %w", ErrSpawnBudget, err)
+		}
+	}
 	b.reserved = subtractLineageBudget(b.reserved, reservation)
 	b.spent = addLineageBudget(b.spent, actual)
 	delete(b.reservations, childID)
 	return nil
+}
+
+// Reconcile replaces one completed child's conservative reservation with
+// host-observed usage.
+func (b *SpawnBudget) Reconcile(childID string, actual LineageBudget) error {
+	return b.reconcile(childID, actual)
+}
+
+// Settle is an alias for Reconcile.
+func (b *SpawnBudget) Settle(childID string, actual LineageBudget) error {
+	return b.reconcile(childID, actual)
+}
+
+// Reserved reports active conservative reservations across all unreconciled children.
+func (b *SpawnBudget) Reserved() LineageBudget {
+	if b == nil {
+		return LineageBudget{}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.reserved
+}
+
+// Spent reports settled consumption across all completed children.
+func (b *SpawnBudget) Spent() LineageBudget {
+	if b == nil {
+		return LineageBudget{}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.spent
+}
+
+// Remaining reports remaining unreserved capacity for the lineage.
+func (b *SpawnBudget) Remaining() LineageBudget {
+	if b == nil {
+		return LineageBudget{}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	used := addLineageBudget(b.spent, b.reserved)
+	rem := LineageBudget{}
+	if b.MaxTokens > 0 {
+		rem.Tokens = b.MaxTokens - used.Tokens
+		if rem.Tokens < 0 {
+			rem.Tokens = 0
+		}
+	}
+	if b.MaxOutputTokens > 0 {
+		rem.OutputTokens = b.MaxOutputTokens - used.OutputTokens
+		if rem.OutputTokens < 0 {
+			rem.OutputTokens = 0
+		}
+	}
+	if b.MaxCostMicrosUSD > 0 {
+		rem.CostMicrosUSD = b.MaxCostMicrosUSD - used.CostMicrosUSD
+		if rem.CostMicrosUSD < 0 {
+			rem.CostMicrosUSD = 0
+		}
+	}
+	return rem
+}
+
+// Allowance is an alias for Remaining.
+func (b *SpawnBudget) Allowance() LineageBudget {
+	return b.Remaining()
+}
+
+// Reservation reports the active reservation for a child, if any.
+func (b *SpawnBudget) Reservation(childID string) (LineageBudget, bool) {
+	if b == nil {
+		return LineageBudget{}, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	res, ok := b.reservations[childID]
+	return res, ok
+}
+
+// Reservations returns a snapshot of active reservations.
+func (b *SpawnBudget) Reservations() map[string]LineageBudget {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	res := make(map[string]LineageBudget, len(b.reservations))
+	for k, v := range b.reservations {
+		res[k] = v
+	}
+	return res
 }
 
 // Descendants reports host-admitted children across the entire lineage.
@@ -200,6 +316,9 @@ func (b *SpawnBudget) release(request SpawnRequest) {
 		delete(b.goals, request.ChildID)
 		delete(b.goalOwners, goal.goalFingerprint)
 	}
+	if b.store != nil {
+		_ = b.store.LogRelease(request)
+	}
 }
 
 func (b *SpawnBudget) ensureGoalRoot() error {
@@ -215,15 +334,24 @@ func (b *SpawnBudget) ensureGoalRoot() error {
 		return nil
 	}
 	b.rootID, b.rootGoal = rootID, rootFingerprint
-	b.goals = map[string]goalLineage{
-		rootID: {
-			goalFingerprint: rootFingerprint,
-			pathFingerprint: rootFingerprint,
-			ancestors:       map[string]struct{}{},
-			depth:           0,
-		},
+	if b.goals == nil {
+		b.goals = make(map[string]goalLineage)
 	}
-	b.goalOwners = map[string]string{rootFingerprint: rootID}
+	if b.goalOwners == nil {
+		b.goalOwners = make(map[string]string)
+	}
+	b.goals[rootID] = goalLineage{
+		goalFingerprint: rootFingerprint,
+		pathFingerprint: rootFingerprint,
+		ancestors:       map[string]struct{}{},
+		depth:           0,
+	}
+	b.goalOwners[rootFingerprint] = rootID
+	if b.store != nil {
+		if err := b.store.LogRoot(rootID, b.RootGoal); err != nil {
+			return fmt.Errorf("%w: persist root identity: %w", ErrSpawnBudget, err)
+		}
+	}
 	return nil
 }
 
