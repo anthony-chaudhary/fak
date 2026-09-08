@@ -73,6 +73,8 @@ var tier = map[string]int{
 	"resulttier":         1, // standard bounded result tiers and cursor pagination; stdlib-only, off the hot path.
 	"resultstier":        1, // role-based artifact storage tiering (claim vs payload) and payload index minting (#11687, #11688).
 	"power":              1, // cross-platform OS power assertion and wake-lock management; stdlib-only, off the hot path.
+	"issuesolved":        3, // issue resolution and proof verification helper.
+	"rawdecode":          3, // standalone raw decode executor for Qwen models.
 
 	"citeverify":      2, // mechanical source-line claim verification; stdlib-only, off the hot path.
 	"genlock":         2, // generated-output input lock verification; stdlib-only, off the hot path.
