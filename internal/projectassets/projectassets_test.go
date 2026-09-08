@@ -1192,3 +1192,123 @@ console.log(JSON.stringify({ok: true}));
 		t.Fatalf("unexpected output: %s", out)
 	}
 }
+
+func TestOpenCodeGrepExecutableResolutionAndFallback(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	if err := syncOpenCodeGrep(root); err != nil {
+		t.Fatalf("syncOpenCodeGrep failed: %v", err)
+	}
+	if err := VerifyOpenCodePlugin(root); err != nil {
+		t.Fatalf("VerifyOpenCodePlugin failed: %v", err)
+	}
+
+	requiredPatterns := []struct {
+		pattern string
+		desc    string
+	}{
+		{"findRipgrep", "executable path resolution for ripgrep"},
+		{"Git", "Git standard directory resolution"},
+		{"usr", "Git usr directory resolution"},
+		{"Microsoft VS Code", "VS Code ripgrep directory resolution"},
+		{"@vscode/ripgrep", "VS Code bundled ripgrep resolution"},
+		{".cargo", "Cargo bin resolution"},
+		{"findGit", "git fallback resolution"},
+		{"git grep", "git grep fallback"},
+		{"--no-index", "git grep --no-index flag"},
+		{"ENOENT", "child ENOENT error handling"},
+		{"rg_not_found", "typed rg_not_found error metadata"},
+		{"No ripgrep binary found; install ripgrep or run git grep", "actionable error output message"},
+	}
+	for _, req := range requiredPatterns {
+		if !strings.Contains(defaultOpenCodeGrep, req.pattern) {
+			t.Errorf("defaultOpenCodeGrep missing %s (%q)", req.desc, req.pattern)
+		}
+	}
+}
+
+func TestOpenCodeGrepExecutionWitness(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required for OpenCode grep witness")
+	}
+
+	root := t.TempDir()
+	testFile := filepath.Join(root, "sample.txt")
+	if err := os.WriteFile(testFile, []byte("alpha target\nbeta line\ngamma target\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	pluginPath := filepath.Join(root, "fak-grep.js")
+	if err := os.WriteFile(pluginPath, []byte(defaultOpenCodeGrep), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, node, "--input-type=module", "-", pluginPath, root)
+	cmd.Stdin = strings.NewReader(`
+import { readFile } from 'node:fs/promises';
+import assert from 'node:assert/strict';
+
+const [pluginFile, root] = process.argv.slice(2);
+const code = await readFile(pluginFile, 'utf8');
+const mockPlugin = 'data:text/javascript;base64,' + Buffer.from('export const tool = Object.assign((s) => s, { schema: { string: () => ({ optional: () => ({}) }) } });').toString('base64');
+const patched = code.replace('@opencode-ai/plugin', mockPlugin);
+
+// 1. Live execution (using whatever binary is resolved or git fallback)
+{
+  const mod = await import('data:text/javascript;base64,' + Buffer.from(patched).toString('base64'));
+  const plugin = await mod.default();
+  const ctx = { directory: root, abort: new AbortController().signal, ask: async () => {} };
+  const res = await plugin.tool.grep.execute({ pattern: 'target', path: 'sample.txt' }, ctx);
+  assert.equal(res.metadata.matches, 2);
+  assert.match(res.output, /sample\.txt:1:alpha target/);
+  assert.match(res.output, /sample\.txt:3:gamma target/);
+
+  const resNotFound = await plugin.tool.grep.execute({ pattern: 'nonexistent-pattern', path: 'sample.txt' }, ctx);
+  assert.equal(resNotFound.metadata.matches, 0);
+  assert.equal(resNotFound.output, 'No matches found');
+}
+
+// 2. When neither rg nor git is available, returns clean typed fallback without throwing ENOENT
+{
+  const noTools = patched
+    .replace('function findRipgrep() {', 'function findRipgrep() { return null;')
+    .replace('function findGit() {', 'function findGit() { return null;');
+  const mod = await import('data:text/javascript;base64,' + Buffer.from(noTools).toString('base64'));
+  const plugin = await mod.default();
+  const ctx = { directory: root, abort: new AbortController().signal, ask: async () => {} };
+  const res = await plugin.tool.grep.execute({ pattern: 'alpha' }, ctx);
+  assert.equal(res.metadata.error, 'rg_not_found');
+  assert.equal(res.output, 'No ripgrep binary found; install ripgrep or run git grep');
+  assert.equal(res.metadata.matches, 0);
+}
+
+// 3. When child spawn fails with ENOENT, resolves gracefully with typed fallback instead of reject
+{
+  const spawnFail = patched
+    .replace('function findRipgrep() {', "function findRipgrep() { return 'nonexistent-rg-bin.exe';")
+    .replace('function findGit() {', 'function findGit() { return null;');
+  const mod = await import('data:text/javascript;base64,' + Buffer.from(spawnFail).toString('base64'));
+  const plugin = await mod.default();
+  const ctx = { directory: root, abort: new AbortController().signal, ask: async () => {} };
+  const res = await plugin.tool.grep.execute({ pattern: 'alpha' }, ctx);
+  assert.equal(res.metadata.error, 'rg_not_found');
+  assert.equal(res.output, 'No ripgrep binary found; install ripgrep or run git grep');
+}
+
+console.log(JSON.stringify({ ok: true }));
+`)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Node grep witness failed: %v\n%s", err, out)
+	}
+	var receipt struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(out, &receipt); err != nil || !receipt.OK {
+		t.Fatalf("unexpected witness output: %s", out)
+	}
+}

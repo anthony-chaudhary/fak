@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -449,5 +450,96 @@ func TestOrnithQwen35TwoEOSStopIDsExact(t *testing.T) {
 	want := map[int]bool{248044: true, 248046: true}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Ornith StopIDs = %v, want exact two-id set %v", got, want)
+	}
+}
+
+// TestInKernelPlannerSpeculativeVerification verifies speculative decoding wired into the
+// in-kernel planner, ensuring zero output divergence and prompt prefix cache coexistence (#12190).
+func TestInKernelPlannerSpeculativeVerification(t *testing.T) {
+	ctx := context.Background()
+	cfg := tinyConcurrencyConfig()
+	m := model.NewSynthetic(cfg)
+	m.Quantize()
+
+	// 1. Establish baseline non-speculative autoregressive decode
+	baselinePlanner := NewInKernelPlanner(m, nil, "baseline", false, nil, false)
+	prompt := []int{10, 20, 30, 40, 10, 20, 30}
+	const maxNew = 8
+
+	var baselineTokens []int
+	resBase, err := baselinePlanner.generateReusedRecovering(ctx, prompt, maxNew, 0, 0, 0, nil, 0, 0, nil, func(tok int) bool {
+		baselineTokens = append(baselineTokens, tok)
+		return false
+	})
+	if err != nil {
+		t.Fatalf("baseline generate: %v", err)
+	}
+	if resBase.gen != maxNew {
+		t.Fatalf("baseline gen = %d, want %d", resBase.gen, maxNew)
+	}
+
+	// 2. Speculative decoding using NGramProposalGenerator on fresh planner
+	specPlanner := NewInKernelPlanner(m, nil, "speculative", false, nil, false)
+	drafter := model.NgramDrafter{Enabled: true, MinMatch: 2, MaxMatch: 4, MaxDraft: 3}
+	ngramGen := model.NewNGramProposalGenerator(drafter)
+	specPlanner.EnableSpeculativeDecoding(ngramGen, 3)
+
+	var specTokens []int
+	resSpec, err := specPlanner.generateReusedRecovering(ctx, prompt, maxNew, 0, 0, 0, nil, 0, 0, nil, func(tok int) bool {
+		specTokens = append(specTokens, tok)
+		return false
+	})
+	if err != nil {
+		t.Fatalf("speculative generate: %v", err)
+	}
+	if resSpec.gen != maxNew {
+		t.Fatalf("speculative gen = %d, want %d", resSpec.gen, maxNew)
+	}
+
+	// Assert exact token sequence identity (zero output divergence)
+	if !reflect.DeepEqual(specTokens, baselineTokens) {
+		t.Fatalf("speculative output diverged from baseline:\n want: %v\n  got: %v", baselineTokens, specTokens)
+	}
+
+	// Assert speculative engine recorded verification rounds
+	eng := specPlanner.SpeculativeEngine()
+	if eng == nil {
+		t.Fatal("expected non-nil speculative engine on planner")
+	}
+	stats := eng.Stats()
+	if stats.VerificationRounds == 0 {
+		t.Fatal("expected at least one verification round executed")
+	}
+
+	// 3. Test prompt prefix cache coexistence:
+	// Run second request with the same prompt; verify prefix cache hits without invalidation
+	var secondTurnTokens []int
+	resTurn2, err := specPlanner.generateReusedRecovering(ctx, prompt, maxNew, 0, 0, 0, nil, 0, 0, nil, func(tok int) bool {
+		secondTurnTokens = append(secondTurnTokens, tok)
+		return false
+	})
+	if err != nil {
+		t.Fatalf("turn 2 generate: %v", err)
+	}
+
+	// On turn 2, prompt prefix cache MUST be hit (matched == len(prompt))
+	if resTurn2.matched != len(prompt) {
+		t.Fatalf("turn 2 prefix cache matched = %d, want full hit %d", resTurn2.matched, len(prompt))
+	}
+	if !reflect.DeepEqual(secondTurnTokens, baselineTokens) {
+		t.Fatalf("turn 2 output diverged after prefix cache restore:\n want: %v\n  got: %v", baselineTokens, secondTurnTokens)
+	}
+
+	// 4. Test repetition penalty sanitization in speculative planner
+	var penaltyTokens []int
+	_, err = specPlanner.generateReusedRecovering(ctx, prompt, 6, 0, 0, 0, nil, 1.0, 0.5, nil, func(tok int) bool {
+		penaltyTokens = append(penaltyTokens, tok)
+		return false
+	})
+	if err != nil {
+		t.Fatalf("speculative generate with penalty: %v", err)
+	}
+	if len(penaltyTokens) != 6 {
+		t.Fatalf("penalty tokens len = %d, want 6", len(penaltyTokens))
 	}
 }

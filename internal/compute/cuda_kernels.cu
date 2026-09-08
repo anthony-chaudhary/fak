@@ -2544,6 +2544,11 @@ extern "C" int fcuda_spec_verify_attention_f32(
   return (err == cudaSuccess) ? 0 : (int)err;
 }
 
+// Dedicated K<=32 branch-speculative attention primitive. Kept as an included
+// translation-unit fragment because libfakcuda is intentionally built from the
+// single cuda_kernels.cu object on every supported host.
+#include "tree_attention.cu"
+
 // ---- GLM-MoE-DSA sparse attention over the host-selected key set ------------------
 // model.glmDsaAttendCached's inner loop on the device. GLM-5.2's attention is SPARSE: a learned
 // indexer picks the top-k keys a query attends, and the softmax(scale·q·k)·ΣwV runs over only

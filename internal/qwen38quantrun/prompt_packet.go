@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"slices"
+	"strings"
 )
 
 const (
@@ -70,11 +71,14 @@ func validatePromptPacketFields(p PromptTokenPacket) error {
 		if p.PacketID == "" {
 			return errors.New("prompt packet packet_id is required")
 		}
-		if !validOracleSHA256(p.TokenizerDigest) {
-			return fmt.Errorf("prompt packet tokenizer_digest %q is not a valid 64-char hex SHA-256", p.TokenizerDigest)
+		if p.TokenizerIdentity == "" {
+			return errors.New("prompt packet tokenizer_identity is required")
 		}
-		if !validOracleSHA256(p.TemplateDigest) {
-			return fmt.Errorf("prompt packet template_digest %q is not a valid 64-char hex SHA-256", p.TemplateDigest)
+		if !validCanonicalSHA256(p.TokenizerDigest) || p.TokenizerDigest == emptySHA256 {
+			return fmt.Errorf("prompt packet tokenizer_digest %q is not a canonical non-empty lowercase SHA-256", p.TokenizerDigest)
+		}
+		if !validCanonicalSHA256(p.TemplateDigest) || p.TemplateDigest == emptySHA256 {
+			return fmt.Errorf("prompt packet template_digest %q is not a canonical non-empty lowercase SHA-256", p.TemplateDigest)
 		}
 	case promptTokenPacketLegacySchema:
 		if p.TemplateDigest != "" {
@@ -83,7 +87,10 @@ func validatePromptPacketFields(p PromptTokenPacket) error {
 	default:
 		return fmt.Errorf("unsupported prompt packet schema %q", p.Schema)
 	}
-	if !validOracleSHA256(p.ArtifactSHA256) {
+	if p.Schema == PromptTokenPacketSchema && (!validCanonicalSHA256(p.ArtifactSHA256) || p.ArtifactSHA256 == emptySHA256) {
+		return fmt.Errorf("prompt packet artifact_sha256 %q is not a canonical non-empty lowercase SHA-256", p.ArtifactSHA256)
+	}
+	if p.Schema == promptTokenPacketLegacySchema && !validOracleSHA256(p.ArtifactSHA256) {
 		return fmt.Errorf("prompt packet artifact_sha256 %q is not a valid 64-char hex SHA-256", p.ArtifactSHA256)
 	}
 	if p.TokenizerDigest == "" {
@@ -116,6 +123,10 @@ func validatePromptPacketFields(p PromptTokenPacket) error {
 		return errors.New("generation_controls.top_p must be between 0.0 and 1.0")
 	}
 	return nil
+}
+
+func validCanonicalSHA256(value string) bool {
+	return validOracleSHA256(value) && value == strings.ToLower(value)
 }
 
 // ComputePromptPacketDigest computes the canonical SHA-256 digest of a prompt packet.

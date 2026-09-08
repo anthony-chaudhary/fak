@@ -1,0 +1,93 @@
+{
+  "schema": "fak-astra-formal-live-receipt/1",
+  "issue": 12116,
+  "observed_at_utc": "2026-09-08T12:44:54Z",
+  "repository_head": "a4badadbe16bad8d9d019468a0f245fb5e6dbd28",
+  "binary_provenance": {
+    "version_output": "dev",
+    "vcs_stamp": "absent",
+    "source_equivalence": "unverified"
+  },
+  "formal_packet": {
+    "schema": "fak-formal-packet/1",
+    "source_issue": 12112,
+    "task_id": "issue-12112-live-astra-audit",
+    "kind": "numerical_correctness_derivation"
+  },
+  "plan": {
+    "requested_profile": "auto",
+    "resolved_profile": "ultracode",
+    "eligible": true,
+    "selected": true,
+    "route_source": "formal-packet",
+    "worker_model": "gpt-6-astra",
+    "reasoning_effort": "xhigh",
+    "worker_count": 2,
+    "access_mode": "observe",
+    "read_only": true,
+    "declared_token_budget": 65536,
+    "wall_budget_ms": 600000
+  },
+  "launch": {
+    "run_id": "orch-3747772ac30c86f0140b9aca",
+    "status": "launched",
+    "assignment_digest": null,
+    "assignment_binding_verdict": "rejected_missing_digest",
+    "worker_rows_with_matching_digest": 0
+  },
+  "workers": [
+    {
+      "role_id": "worker-1",
+      "model": "gpt-6-astra",
+      "reasoning_effort": "xhigh",
+      "read_only": true,
+      "state": "completed",
+      "provider_tokens": 156648,
+      "usage_authority": "provider-reported",
+      "result_verdict": "rejected",
+      "reason": "the delivered assignment ended at Task: and contained no formal packet payload"
+    },
+    {
+      "role_id": "worker-2",
+      "model": "gpt-6-astra",
+      "reasoning_effort": "xhigh",
+      "read_only": true,
+      "state": "stopped",
+      "provider_tokens": null,
+      "usage_authority": "not-covered",
+      "result_verdict": "rejected",
+      "reason": "SYSTEM_COMMIT_HEADROOM",
+      "partial_discovery": "finite-input arithmetic overflow can still create invalid model-routing evidence; tracked as #12158"
+    }
+  ],
+  "independent_acceptance": {
+    "verdict": "rejected",
+    "witness_status": "not-accepted",
+    "reasons": [
+      "assignment digest was absent from the launch and worker rows",
+      "the first child received no task payload",
+      "the second child was stopped by the system commit headroom guard",
+      "the deterministic package witness was not completed by the live run"
+    ]
+  },
+  "matched_comparator": {
+    "status": "not-run",
+    "reason": "the live Astra assignment was not accepted, so a quality comparison would be invalid"
+  },
+  "recovery": {
+    "reason_token": "SYSTEM_COMMIT_HEADROOM",
+    "diagnostic_command": "fak recover SYSTEM_COMMIT_HEADROOM",
+    "required_steps": [
+      "wait for in-flight managed workers to finish and rerun dispatch preflight",
+      "build or select a VCS-stamped fak binary containing the assignment-binding path",
+      "repeat the same packet and require one non-empty identical assignment digest on the launch and every worker row",
+      "accept the result only after the deterministic package witness and independent reconciliation complete"
+    ],
+    "forbidden_workarounds": [
+      "lower FAK_SYSTEM_COMMIT_HEADROOM_MB",
+      "terminate unrelated processes",
+      "retry-loop around the guard"
+    ]
+  },
+  "claim": "This receipt proves a live guarded Astra launch and a fail-closed rejection. It does not prove assignment fidelity, accepted formal correctness, or Astra superiority."
+}

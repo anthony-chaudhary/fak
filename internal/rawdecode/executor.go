@@ -1,0 +1,602 @@
+// Package rawdecode owns the fak-native raw greedy-decode execution path.
+//
+// It deliberately returns observations, not physical provenance. Source,
+// running-binary, device, memory, and dispatch-counter identity belong to the
+// runner that can actually observe them and are not accepted as inputs here.
+package rawdecode
+
+import (
+	"context"
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/model"
+)
+
+// Request is the complete, explicit input to one real raw-decode execution.
+// ExpectedArtifactSHA256 is mandatory and is checked from opened bytes before
+// model loading or backend/session construction.
+type Request struct {
+	ArtifactPath           string
+	ExpectedArtifactSHA256 string
+	ModelName              string
+	BackendName            string
+	PromptTokenIDs         []int
+	ContextLimit           int
+	GeneratedTokenLimit    int
+	Repetitions            int
+	IgnoreEOS              bool
+	VerifyCPU              bool
+	Quant                  bool
+	Lean                   bool
+	Q4K                    bool
+	StreamQ4K              bool
+	Metal                  bool
+	Q4KGateUpOutputSlab    bool
+	VulkanQ4KProfile       bool
+	VulkanStageQ4K         bool
+	RequireNonReference    bool
+	LoadProfiler           *ggufload.LoadProfiler
+}
+
+// Step is one observed greedy-selection result.
+type Step struct {
+	Step    int     `json:"step"`
+	TokenID int     `json:"token_id"`
+	Top1    float32 `json:"top1"`
+	Top2    float32 `json:"top2"`
+	Margin  float32 `json:"margin"`
+}
+
+// VerificationStep compares one actually observed candidate output with a
+// fresh CPU replay of the same token history.
+type VerificationStep struct {
+	Step        int     `json:"step"`
+	DeviceToken int     `json:"device_token"`
+	CPUToken    int     `json:"cpu_token"`
+	Agree       bool    `json:"agree"`
+	Cosine      float64 `json:"cosine"`
+	MaxDelta    float64 `json:"max_delta"`
+}
+
+// CPUVerification contains only values observed from the CPU replay.
+type CPUVerification struct {
+	Passed         bool               `json:"passed"`
+	AllAgree       bool               `json:"all_agree"`
+	AllArgmaxAgree bool               `json:"all_argmax_agree"`
+	MinCosine      float64            `json:"min_cosine"`
+	MaxDelta       float64            `json:"max_delta"`
+	Prefill        VerificationStep   `json:"prefill"`
+	Steps          []VerificationStep `json:"steps,omitempty"`
+}
+
+// Run is one observed candidate repetition.
+type Run struct {
+	SessionSetupDuration time.Duration
+	PrefillDuration      time.Duration
+	FirstSampleDuration  time.Duration
+	DecodeDuration       time.Duration
+	TeardownDuration     time.Duration
+	CPUVerifyDuration    time.Duration
+	PrefillOutputID      int
+	StepTokens           []int
+	GeneratedTokens      []int
+	EOSStopped           bool
+	Steps                []Step
+	CPUVerification      *CPUVerification
+}
+
+// BackendObservation describes the backend that was actually resolved. It is
+// execution metadata, not device provenance.
+type BackendObservation struct {
+	Selected           string
+	RegisteredBackends []string
+	Tier               string
+	Class              string
+	Caps               compute.Caps
+}
+
+// Execution is the device-free observation produced by the real orchestration
+// path. It intentionally has no source, binary, device, memory, or counter fields.
+type Execution struct {
+	ArtifactSHA256 string
+	ModelName      string
+	ModelConfig    model.Config
+	Engine         string
+	Precision      string
+	Backend        BackendObservation
+	LoadDuration   time.Duration
+	QuantDuration  time.Duration
+	PromptTokenIDs []int
+	ContextLimit   int
+	GeneratedLimit int
+	IgnoreEOS      bool
+	FiniteLogits   bool
+	CPUModelParity *bool
+	Runs           []Run
+}
+
+type session interface {
+	Prefill([]int) []float32
+	Step(int) []float32
+	Close()
+}
+
+type loadedModel interface {
+	Config() model.Config
+	IsEOS(int) bool
+	NewCandidateSession(compute.Backend, Request) (session, error)
+	NewCPUSession(Request) session
+	CloseWeights() error
+}
+
+type dependencies struct {
+	openArtifact   func(string) (io.ReadCloser, error)
+	loadModel      func(context.Context, Request) (loadedModel, string, error)
+	resolveBackend func(Request) (compute.Backend, BackendObservation, error)
+	now            func() time.Time
+	since          func(time.Time) time.Duration
+}
+
+// Execute hashes and loads the selected artifact, resolves the registered
+// fak-native backend, and runs the single raw-decode orchestration path.
+func Execute(ctx context.Context, req Request) (Execution, error) {
+	return defaultDependencies().execute(ctx, req)
+}
+
+func defaultDependencies() dependencies {
+	return dependencies{
+		openArtifact: func(path string) (io.ReadCloser, error) { return os.Open(path) },
+		loadModel:    loadProductionModel,
+		resolveBackend: func(req Request) (compute.Backend, BackendObservation, error) {
+			registered := compute.Registered()
+			observed := BackendObservation{Selected: "legacy", RegisteredBackends: slices.Clone(registered)}
+			if req.BackendName == "" || req.BackendName == "legacy" {
+				if req.RequireNonReference {
+					return nil, observed, errors.New("raw decode: require-non-reference needs a named compute backend")
+				}
+				if req.VulkanQ4KProfile || req.VulkanStageQ4K {
+					return nil, observed, errors.New("raw decode: Vulkan Q4_K controls require backend vulkan")
+				}
+				return nil, observed, nil
+			}
+			be, ok := compute.Lookup(req.BackendName)
+			if !ok {
+				return nil, observed, fmt.Errorf("raw decode: unknown backend %q (registered: %v)", req.BackendName, registered)
+			}
+			if (req.Quant || req.Q4K) && !be.Caps().UploadDtype {
+				return nil, observed, fmt.Errorf("raw decode: backend %q is f32-only", be.Name())
+			}
+			if req.RequireNonReference && be.Class() == compute.Reference {
+				return nil, observed, fmt.Errorf("raw decode: backend %q is reference-class", be.Name())
+			}
+			if (req.VulkanQ4KProfile || req.VulkanStageQ4K) && !compute.ConfigureVulkanQ4K(be, req.VulkanQ4KProfile, req.VulkanStageQ4K) {
+				return nil, observed, errors.New("raw decode: Vulkan Q4_K controls require backend vulkan")
+			}
+			observed.Selected = be.Name()
+			observed.Tier = be.Tier()
+			observed.Class = be.Class().String()
+			observed.Caps = be.Caps()
+			return be, observed, nil
+		},
+		now:   time.Now,
+		since: time.Since,
+	}
+}
+
+func (d dependencies) execute(ctx context.Context, req Request) (Execution, error) {
+	if err := validateRequest(req); err != nil {
+		return Execution{}, err
+	}
+	digest, err := hashArtifact(req.ArtifactPath, d.openArtifact)
+	if err != nil {
+		return Execution{}, err
+	}
+	if !strings.EqualFold(digest, req.ExpectedArtifactSHA256) {
+		return Execution{}, fmt.Errorf("raw decode: artifact SHA-256 mismatch: expected %s, observed %s", strings.ToLower(req.ExpectedArtifactSHA256), digest)
+	}
+
+	be, backendObserved, err := d.resolveBackend(req)
+	if err != nil {
+		return Execution{}, err
+	}
+	loadStart := d.now()
+	lm, derivedName, err := d.loadModel(ctx, req)
+	loadDuration := d.now().Sub(loadStart)
+	if err != nil {
+		return Execution{}, fmt.Errorf("raw decode: load artifact: %w", err)
+	}
+	defer lm.CloseWeights() // best-effort process-local resource release after execution
+
+	quantDuration := time.Duration(0)
+	if req.Quant && !req.Lean && !req.Q4K {
+		qm, ok := lm.(*productionModel)
+		if !ok {
+			return Execution{}, errors.New("raw decode: loaded model does not support requested Q8 quantization")
+		}
+		quantStart := d.now()
+		qm.model.Quantize()
+		quantDuration = d.now().Sub(quantStart)
+	}
+	requestedModel := strings.TrimSpace(req.ModelName)
+	if requestedModel != "" && requestedModel != derivedName && requestedModel != lm.Config().ModelType {
+		return Execution{}, fmt.Errorf("raw decode: model selector %q does not match loaded model %q (type %q)", requestedModel, derivedName, lm.Config().ModelType)
+	}
+	since := d.since
+	if since == nil {
+		since = func(start time.Time) time.Duration { return d.now().Sub(start) }
+	}
+	exec, runErr := executeLoaded(req, lm, be, d.now, since)
+	exec.ArtifactSHA256 = digest
+	exec.ModelName = derivedName
+	exec.ModelConfig = lm.Config()
+	exec.Backend = backendObserved
+	exec.LoadDuration = loadDuration
+	exec.QuantDuration = quantDuration
+	exec.Engine, exec.Precision = describeEngine(req, be)
+	return exec, runErr
+}
+
+func validateRequest(req Request) error {
+	if strings.TrimSpace(req.ArtifactPath) == "" {
+		return errors.New("raw decode: artifact path is required")
+	}
+	digest := strings.TrimSpace(req.ExpectedArtifactSHA256)
+	if len(digest) != sha256.Size*2 {
+		return errors.New("raw decode: expected artifact SHA-256 must be 64 hexadecimal characters")
+	}
+	for _, c := range digest {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
+			return errors.New("raw decode: expected artifact SHA-256 must be hexadecimal")
+		}
+	}
+	if len(req.PromptTokenIDs) == 0 {
+		return errors.New("raw decode: prompt token IDs must be non-empty")
+	}
+	for _, id := range req.PromptTokenIDs {
+		if id < 0 {
+			return fmt.Errorf("raw decode: prompt token ID %d must be non-negative", id)
+		}
+	}
+	if req.ContextLimit < len(req.PromptTokenIDs)+req.GeneratedTokenLimit {
+		return fmt.Errorf("raw decode: context limit %d is smaller than prompt plus generated-token limit %d", req.ContextLimit, len(req.PromptTokenIDs)+req.GeneratedTokenLimit)
+	}
+	if req.GeneratedTokenLimit < 1 || req.Repetitions < 1 {
+		return errors.New("raw decode: generated-token limit and repetitions must be positive")
+	}
+	if req.Q4K && req.Lean {
+		return errors.New("raw decode: Q4_K and lean loading are mutually exclusive")
+	}
+	if req.StreamQ4K && !req.Q4K {
+		return errors.New("raw decode: streamed Q4_K requires Q4_K loading")
+	}
+	return nil
+}
+
+func hashArtifact(path string, open func(string) (io.ReadCloser, error)) (string, error) {
+	f, err := open(path)
+	if err != nil {
+		return "", fmt.Errorf("raw decode: open artifact: %w", err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("raw decode: hash artifact: %w", err)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+type productionModel struct{ model *model.Model }
+
+func (m *productionModel) Config() model.Config { return m.model.Cfg }
+func (m *productionModel) IsEOS(id int) bool    { return m.model.Cfg.IsEOS(id) }
+func (m *productionModel) CloseWeights() error  { return m.model.CloseWeights() }
+func (m *productionModel) NewCPUSession(req Request) session {
+	s := m.model.NewSession()
+	applySessionFlags(s, req, false)
+	return s
+}
+func (m *productionModel) NewCandidateSession(be compute.Backend, req Request) (session, error) {
+	if be == nil {
+		s := m.model.NewSession()
+		applySessionFlags(s, req, true)
+		return s, nil
+	}
+	s, err := m.model.NewBackendSessionChecked(be)
+	if err != nil {
+		return nil, err
+	}
+	applySessionFlags(s, req, true)
+	return s, nil
+}
+
+func applySessionFlags(s *model.Session, req Request, candidate bool) {
+	s.Quant = req.Quant || req.Lean || req.Q4K
+	s.Q4K = req.Q4K
+	s.Q4KGateUpOutputSlab = req.Q4KGateUpOutputSlab
+	if candidate {
+		s.Metal = req.Metal && !req.Q4K
+		s.MetalQ4K = req.Metal && req.Q4K
+	}
+}
+
+func loadProductionModel(ctx context.Context, req Request) (loadedModel, string, error) {
+	path := req.ArtifactPath
+	var (
+		m     *model.Model
+		label string
+		err   error
+	)
+	switch {
+	case req.Q4K && req.BackendName != "" && req.BackendName != "legacy":
+		opts := []ggufload.Q4KLoadOption{ggufload.WithDenseKQuantResident(false)}
+		if req.BackendName == "vulkan" {
+			opts = append(opts, ggufload.WithDenseQ2KResident(true))
+			if q2kEmbeddingEligible(path) {
+				opts = append(opts, ggufload.WithQ2KEmbeddingResident(true))
+			}
+		}
+		loader := ggufload.LoadModelQ4KProfileOptionsContext
+		label = " [gguf-q4k]"
+		if req.StreamQ4K {
+			loader = ggufload.LoadModelQ4KStreamedDenseContext
+			label = " [gguf-q4k-streamed-dense]"
+		}
+		m, err = loader(ctx, path, req.LoadProfiler, opts...)
+	case req.Q4K:
+		label = " [gguf-q4k]"
+		if req.StreamQ4K {
+			label = " [gguf-q4k-streamed-dense]"
+			m, err = ggufload.LoadModelQ4KStreamedDenseContext(ctx, path, req.LoadProfiler)
+		} else {
+			m, err = ggufload.LoadModelQ4KContext(ctx, path)
+		}
+	case req.Lean:
+		label = " [gguf-lean]"
+		m, err = ggufload.LoadModelQuantProfile(path, req.LoadProfiler)
+	default:
+		label = " [gguf]"
+		m, err = ggufload.LoadModel(path)
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return &productionModel{model: m}, filepath.Base(path) + label, nil
+}
+
+func q2kEmbeddingEligible(path string) bool {
+	ws, err := ggufload.OpenWeights(path)
+	if err != nil {
+		return false
+	}
+	defer ws.Close()
+	cfg, err := ws.File.Config()
+	if err != nil || !cfg.IsQwen35Hybrid() || cfg.IsMoE() || cfg.TieWordEmbeddings {
+		return false
+	}
+	var embedding, output bool
+	for _, tensor := range ws.File.Tensors {
+		embedding = embedding || tensor.Name == "token_embd.weight" && tensor.Type == ggufload.TensorQ2_K
+		output = output || tensor.Name == "output.weight"
+	}
+	return embedding && output
+}
+
+func describeEngine(req Request, be compute.Backend) (string, string) {
+	engine, precision := "fak-in-kernel (pure-Go, parallel matmul + batched prefill GEMM + fdot ILP)", "f32"
+	if req.Quant || req.Lean {
+		engine, precision = "fak-in-kernel Q8_0 (pure-Go, quantized weights+activations, int8×int8→int32 dot)", "Q8_0"
+	}
+	if req.Q4K {
+		engine, precision = "fak-in-kernel GGUF resident mixed quantization", "GGUF resident mixed quantization"
+		if req.Metal {
+			engine, precision = "fak-in-kernel Metal Q4_K/Q8 hybrid (raw GGUF Q4_K majority through MetalQ4K; Q8 minority on CPU)", "Q4_K/Q8 resident hybrid + MetalQ4K"
+		}
+	}
+	if be != nil {
+		engine = fmt.Sprintf("fak-in-kernel via compute HAL backend %q", be.Name())
+		if req.Q4K && req.BackendName == "vulkan" {
+			precision = "resident Q4_K/Q2_K + unsupported dense formats converted to Q8"
+		}
+	}
+	return engine, precision
+}
+
+// ExecuteModel is the compatibility seam used by modelbench tests and legacy
+// non-GGUF command inputs. It executes the same orchestration loop but cannot
+// produce artifact identity because it did not open the artifact.
+func ExecuteModel(req Request, m *model.Model, be compute.Backend) (Execution, error) {
+	if m == nil {
+		return Execution{}, errors.New("raw decode: nil model")
+	}
+	pm := &productionModel{model: m}
+	exec, err := executeLoaded(req, pm, be, time.Now, time.Since)
+	exec.ModelName = m.Cfg.ModelType
+	exec.ModelConfig = m.Cfg
+	exec.Engine, exec.Precision = describeEngine(req, be)
+	exec.Backend.Selected = "legacy"
+	if be != nil {
+		exec.Backend.Selected = be.Name()
+	}
+	return exec, err
+}
+
+func executeLoaded(req Request, m loadedModel, be compute.Backend, now func() time.Time, since func(time.Time) time.Duration) (Execution, error) {
+	if len(req.PromptTokenIDs) == 0 || req.GeneratedTokenLimit < 1 || req.Repetitions < 1 || req.ContextLimit < len(req.PromptTokenIDs)+req.GeneratedTokenLimit {
+		return Execution{}, errors.New("raw decode: invalid execution request")
+	}
+	for _, id := range req.PromptTokenIDs {
+		if id < 0 || m.Config().VocabSize > 0 && id >= m.Config().VocabSize {
+			return Execution{}, fmt.Errorf("raw decode: prompt token ID %d exceeds model vocabulary size %d", id, m.Config().VocabSize)
+		}
+	}
+	exec := Execution{
+		PromptTokenIDs: slices.Clone(req.PromptTokenIDs), ContextLimit: req.ContextLimit,
+		GeneratedLimit: req.GeneratedTokenLimit, IgnoreEOS: req.IgnoreEOS, FiniteLogits: true,
+	}
+	var verifyErr error
+	for rep := 0; rep < req.Repetitions; rep++ {
+		run, err := executeRun(req, m, be, now, since)
+		if err != nil {
+			return Execution{}, err
+		}
+		exec.Runs = append(exec.Runs, run)
+		if run.CPUVerification != nil && !run.CPUVerification.Passed {
+			verifyErr = errors.New("raw decode CPU verification divergence: argmax divergence between device and CPU reference")
+			break
+		}
+	}
+	if req.VerifyCPU {
+		parity := true
+		for _, run := range exec.Runs {
+			parity = parity && run.CPUVerification != nil && run.CPUVerification.Passed
+		}
+		exec.CPUModelParity = &parity
+	}
+	return exec, verifyErr
+}
+
+func executeRun(req Request, m loadedModel, be compute.Backend, now func() time.Time, since func(time.Time) time.Duration) (Run, error) {
+	start := now()
+	s, err := m.NewCandidateSession(be, req)
+	if err != nil {
+		return Run{}, fmt.Errorf("raw decode: create candidate session: %w", err)
+	}
+	setupDone := now()
+	logits := s.Prefill(req.PromptTokenIDs)
+	prefillDone := now()
+	if !allFinite(logits) {
+		s.Close()
+		return Run{}, errors.New("raw decode: prefill produced non-finite logits")
+	}
+	token, top1, top2 := logitTop2(logits)
+	run := Run{PrefillOutputID: token, GeneratedTokens: []int{token}, Steps: []Step{{Step: 0, TokenID: token, Top1: top1, Top2: top2, Margin: top1 - top2}}}
+	var candidateLogits [][]float32
+	if req.VerifyCPU {
+		candidateLogits = append(candidateLogits, slices.Clone(logits))
+	}
+	sampled := now()
+	run.EOSStopped = m.IsEOS(token) && !req.IgnoreEOS
+	previous := token
+	for step := 1; !run.EOSStopped && step < req.GeneratedTokenLimit && len(req.PromptTokenIDs)+len(run.GeneratedTokens) < req.ContextLimit; step++ {
+		logits = s.Step(previous)
+		if !allFinite(logits) {
+			s.Close()
+			return Run{}, fmt.Errorf("raw decode: step %d produced non-finite logits", step)
+		}
+		token, top1, top2 = logitTop2(logits)
+		run.StepTokens = append(run.StepTokens, token)
+		run.GeneratedTokens = append(run.GeneratedTokens, token)
+		run.Steps = append(run.Steps, Step{Step: step, TokenID: token, Top1: top1, Top2: top2, Margin: top1 - top2})
+		if req.VerifyCPU {
+			candidateLogits = append(candidateLogits, slices.Clone(logits))
+		}
+		previous = token
+		run.EOSStopped = m.IsEOS(token) && !req.IgnoreEOS
+	}
+	decoded := now()
+	s.Close()
+	closed := now()
+	run.SessionSetupDuration = setupDone.Sub(start)
+	run.PrefillDuration = prefillDone.Sub(setupDone)
+	run.FirstSampleDuration = sampled.Sub(prefillDone)
+	run.DecodeDuration = decoded.Sub(sampled)
+	run.TeardownDuration = closed.Sub(decoded)
+	if req.VerifyCPU {
+		verifyStart := now()
+		verification, err := verifyCPU(req, m.NewCPUSession(req), run, candidateLogits)
+		run.CPUVerifyDuration = since(verifyStart)
+		if err != nil {
+			return Run{}, err
+		}
+		run.CPUVerification = &verification
+	}
+	return run, nil
+}
+
+func verifyCPU(req Request, s session, run Run, candidate [][]float32) (CPUVerification, error) {
+	defer s.Close()
+	logits := s.Prefill(req.PromptTokenIDs)
+	if !allFinite(logits) {
+		return CPUVerification{}, errors.New("raw verify cpu: CPU prefill produced non-finite logits")
+	}
+	verification := compareStep(0, run.PrefillOutputID, candidate[0], logits)
+	result := CPUVerification{Passed: verification.Agree, AllAgree: verification.Agree, AllArgmaxAgree: verification.Agree, MinCosine: verification.Cosine, MaxDelta: verification.MaxDelta, Prefill: verification}
+	previous := run.PrefillOutputID
+	for i, token := range run.StepTokens {
+		logits = s.Step(previous)
+		if !allFinite(logits) {
+			return CPUVerification{}, fmt.Errorf("raw verify cpu: CPU step %d produced non-finite logits", i+1)
+		}
+		step := compareStep(i+1, token, candidate[i+1], logits)
+		result.Steps = append(result.Steps, step)
+		result.Passed = result.Passed && step.Agree
+		result.AllAgree, result.AllArgmaxAgree = result.Passed, result.Passed
+		result.MinCosine = math.Min(result.MinCosine, step.Cosine)
+		result.MaxDelta = math.Max(result.MaxDelta, step.MaxDelta)
+		previous = token
+	}
+	return result, nil
+}
+
+func compareStep(step, candidateToken int, candidate, cpu []float32) VerificationStep {
+	cpuToken, _, _ := logitTop2(cpu)
+	return VerificationStep{Step: step, DeviceToken: candidateToken, CPUToken: cpuToken, Agree: candidateToken == cpuToken, Cosine: cosine(candidate, cpu), MaxDelta: maxAbsDelta(candidate, cpu)}
+}
+
+func allFinite(values []float32) bool {
+	for _, value := range values {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			return false
+		}
+	}
+	return len(values) > 0
+}
+
+func logitTop2(values []float32) (int, float32, float32) {
+	top1, top2, index := -float32(math.MaxFloat32), -float32(math.MaxFloat32), 0
+	for i, value := range values {
+		if value > top1 {
+			top2, top1, index = top1, value, i
+		} else if value > top2 {
+			top2 = value
+		}
+	}
+	return index, top1, top2
+}
+
+func cosine(a, b []float32) float64 {
+	if len(a) != len(b) || len(a) == 0 {
+		return 0
+	}
+	var dot, aa, bb float64
+	for i := range a {
+		x, y := float64(a[i]), float64(b[i])
+		dot, aa, bb = dot+x*y, aa+x*x, bb+y*y
+	}
+	if aa == 0 || bb == 0 {
+		return 0
+	}
+	return dot / math.Sqrt(aa*bb)
+}
+
+func maxAbsDelta(a, b []float32) float64 {
+	if len(a) != len(b) {
+		return math.Inf(1)
+	}
+	var maximum float64
+	for i := range a {
+		maximum = math.Max(maximum, math.Abs(float64(a[i]-b[i])))
+	}
+	return maximum
+}

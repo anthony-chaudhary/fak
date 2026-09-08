@@ -1,20 +1,28 @@
 package qwen38quantrun
 
 import (
+	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
 )
 
 func validTestPromptPacket() PromptTokenPacket {
 	return PromptTokenPacket{
 		Schema:            PromptTokenPacketSchema,
 		PacketID:          "amd-rx7600-trial-001",
-		ArtifactSHA256:    "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
-		TokenizerIdentity: "Qwen/Qwen2.5-Coder-7B-Instruct",
-		TokenizerDigest:   "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-		TemplateDigest:    "b3b8f9a81e8bece1d26c289876989764d646230d99a64bd4d1eb46f196e5a950",
+		ArtifactSHA256:    strings.Repeat("ab", 32),
+		TokenizerIdentity: "synthetic-test-tokenizer",
+		TokenizerDigest:   strings.Repeat("cd", 32),
+		TemplateDigest:    strings.Repeat("ef", 32),
 		PromptTokenIDs:    []int{151644, 872, 198, 2610, 525, 264, 10925, 13, 151645, 198},
 		StopTokens:        []string{"<|im_end|>", "<|endoftext|>"},
 		StopTokenIDs:      []int{151645, 151643},
@@ -31,6 +39,132 @@ func validTestPromptPacket() PromptTokenPacket {
 			StopTokenIDs:    []int{151645, 151643},
 		},
 	}
+}
+
+func TestDerivePromptPacketGGUFIdentityPinnedQwen38Header(t *testing.T) {
+	compressed, err := os.ReadFile(filepath.Join("..", "ggufload", "testdata", "qwen38_ud_q2kxl_header.gguf.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(io.LimitReader(zr, 16<<20))
+	closeErr := zr.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	const headerSHA256 = "1fe82fda85430cca654a156e9ec2915baf460752197013563b426db2581dcc0f"
+	if len(raw) != 10996640 || fmt.Sprintf("%x", sha256.Sum256(raw)) != headerSHA256 {
+		t.Fatalf("pinned canonicalizer fixture identity mismatch: bytes=%d sha256=%x", len(raw), sha256.Sum256(raw))
+	}
+	headerPath := filepath.Join(t.TempDir(), "qwen38-canonicalizer-fixture.gguf")
+	if err := os.WriteFile(headerPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := DerivePromptPacketGGUFIdentity(headerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.TokenizerIdentity != GGUFTokenizerIdentity || identity.TokenizerDigest != "839c662c4a47759df9150bd939b382767b1e36bc2372740ad6d02495a63fa5a0" || identity.TemplateDigest != "87049d017c4eee304541572ddfee78756784389fac4808d02039215f062d31d1" || identity.Architecture != "qwen35" || identity.TokenizerPre != "qwen35" || identity.VocabSize != 248320 {
+		t.Fatalf("pinned canonicalizer identity = %+v", identity)
+	}
+
+	synthetic, err := FreezePromptPacket(validTestPromptPacket())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePromptPacketGGUFIdentity(synthetic, identity); err == nil {
+		t.Fatal("synthetic generic packet received exact GGUF comparison eligibility")
+	}
+	eligible := validTestPromptPacket()
+	eligible.TokenizerIdentity = identity.TokenizerIdentity
+	eligible.TokenizerDigest = identity.TokenizerDigest
+	eligible.TemplateDigest = identity.TemplateDigest
+	eligible, err = FreezePromptPacket(eligible)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePromptPacketGGUFIdentity(eligible, identity); err != nil {
+		t.Fatalf("exactly bound packet rejected: %v", err)
+	}
+	outOfVocab := validTestPromptPacket()
+	outOfVocab.TokenizerIdentity = identity.TokenizerIdentity
+	outOfVocab.TokenizerDigest = identity.TokenizerDigest
+	outOfVocab.TemplateDigest = identity.TemplateDigest
+	outOfVocab.PromptTokenIDs = []int{identity.VocabSize}
+	outOfVocab, err = FreezePromptPacket(outOfVocab)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePromptPacketGGUFIdentity(outOfVocab, identity); err == nil || !strings.Contains(err.Error(), "outside vocabulary") {
+		t.Fatalf("out-of-vocabulary prompt token was not refused: %v", err)
+	}
+	outOfVocab = validTestPromptPacket()
+	outOfVocab.TokenizerIdentity = identity.TokenizerIdentity
+	outOfVocab.TokenizerDigest = identity.TokenizerDigest
+	outOfVocab.TemplateDigest = identity.TemplateDigest
+	outOfVocab.StopTokenIDs = []int{identity.VocabSize}
+	outOfVocab.GenerationControls.StopTokenIDs = []int{identity.VocabSize}
+	outOfVocab, err = FreezePromptPacket(outOfVocab)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePromptPacketGGUFIdentity(outOfVocab, identity); err == nil || !strings.Contains(err.Error(), "outside vocabulary") {
+		t.Fatalf("out-of-vocabulary mirrored stop token was not refused: %v", err)
+	}
+
+	gg, err := ggufload.Read(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mutatedTokenizer := cloneGGUFHeader(gg)
+	merges := mutatedTokenizer.Metadata["tokenizer.ggml.merges"]
+	mergeItems := slices.Clone(merges.Value.([]ggufload.Value))
+	mergeItems[0].Value = mergeItems[0].Value.(string) + "x"
+	merges.Value = mergeItems
+	mutatedTokenizer.Metadata["tokenizer.ggml.merges"] = merges
+	mutated, err := derivePromptPacketGGUFIdentity(mutatedTokenizer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mutated.TokenizerDigest == identity.TokenizerDigest || mutated.TemplateDigest != identity.TemplateDigest {
+		t.Fatalf("tokenizer-only mutation was not isolated: original=%+v mutated=%+v", identity, mutated)
+	}
+
+	mutatedTemplate := cloneGGUFHeader(gg)
+	chatTemplate := mutatedTemplate.Metadata["tokenizer.chat_template"]
+	chatTemplate.Value = chatTemplate.Value.(string) + "\n"
+	mutatedTemplate.Metadata["tokenizer.chat_template"] = chatTemplate
+	mutated, err = derivePromptPacketGGUFIdentity(mutatedTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mutated.TemplateDigest == identity.TemplateDigest || mutated.TokenizerDigest != identity.TokenizerDigest {
+		t.Fatalf("template-only mutation was not isolated: original=%+v mutated=%+v", identity, mutated)
+	}
+
+	for _, missing := range []string{"tokenizer.chat_template", "tokenizer.ggml.pre"} {
+		incomplete := cloneGGUFHeader(gg)
+		delete(incomplete.Metadata, missing)
+		if _, err := derivePromptPacketGGUFIdentity(incomplete); err == nil {
+			t.Fatalf("missing %s was accepted", missing)
+		}
+	}
+}
+
+func cloneGGUFHeader(src *ggufload.File) *ggufload.File {
+	clone := *src
+	clone.Metadata = make(map[string]ggufload.Value, len(src.Metadata))
+	for key, value := range src.Metadata {
+		clone.Metadata[key] = value
+	}
+	return &clone
 }
 
 func TestPromptPacketSerializationAndDeserialization(t *testing.T) {
@@ -227,11 +361,51 @@ func TestPromptPacketFieldValidation(t *testing.T) {
 		}
 	})
 
+	t.Run("empty-input artifact sha", func(t *testing.T) {
+		p := valid
+		p.ArtifactSHA256 = emptySHA256
+		if _, err := FreezePromptPacket(p); err == nil {
+			t.Fatal("expected error on SHA-256 of empty artifact input")
+		}
+	})
+
+	t.Run("uppercase artifact sha", func(t *testing.T) {
+		p := valid
+		p.ArtifactSHA256 = strings.ToUpper(p.ArtifactSHA256)
+		if _, err := FreezePromptPacket(p); err == nil {
+			t.Fatal("expected error on non-canonical uppercase artifact SHA-256")
+		}
+	})
+
 	t.Run("empty tokenizer digest", func(t *testing.T) {
 		p := valid
 		p.TokenizerDigest = ""
 		if _, err := FreezePromptPacket(p); err == nil {
 			t.Fatal("expected error on empty tokenizer digest")
+		}
+	})
+
+	t.Run("empty tokenizer identity", func(t *testing.T) {
+		p := valid
+		p.TokenizerIdentity = ""
+		if _, err := FreezePromptPacket(p); err == nil {
+			t.Fatal("expected error on empty tokenizer identity")
+		}
+	})
+
+	t.Run("empty-input tokenizer digest", func(t *testing.T) {
+		p := valid
+		p.TokenizerDigest = emptySHA256
+		if _, err := FreezePromptPacket(p); err == nil {
+			t.Fatal("expected error on SHA-256 of empty tokenizer input")
+		}
+	})
+
+	t.Run("uppercase tokenizer digest", func(t *testing.T) {
+		p := valid
+		p.TokenizerDigest = strings.ToUpper(p.TokenizerDigest)
+		if _, err := FreezePromptPacket(p); err == nil {
+			t.Fatal("expected error on non-canonical uppercase tokenizer digest")
 		}
 	})
 
@@ -248,6 +422,14 @@ func TestPromptPacketFieldValidation(t *testing.T) {
 		p.TemplateDigest = ""
 		if _, err := FreezePromptPacket(p); err == nil {
 			t.Fatal("expected error on empty template digest")
+		}
+	})
+
+	t.Run("empty-input template digest", func(t *testing.T) {
+		p := valid
+		p.TemplateDigest = emptySHA256
+		if _, err := FreezePromptPacket(p); err == nil {
+			t.Fatal("expected error on SHA-256 of empty template input")
 		}
 	})
 

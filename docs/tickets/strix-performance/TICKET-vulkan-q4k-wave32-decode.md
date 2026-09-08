@@ -3,7 +3,7 @@
 
 ```routing
 lane: compute
-paths: ["internal/compute/shaders/q4k_matmul_wave32.comp", "internal/compute/vulkan_shim.cpp", "internal/compute/build_vulkan.ps1", "internal/compute/vulkan_q4k_profile_test.go"]
+paths: ["internal/compute/vulkan_shim.cpp", "internal/compute/vulkan_q4k_wave32.go", "internal/compute/vulkan_q4k_wave32_test.go", "internal/computebuild/vulkan.go", "internal/computebuild/computebuild_test.go"]
 expected_steps: 8
 ```
 
@@ -164,6 +164,10 @@ Primary blast radius is `internal/compute`; `internal/model`, other quant format
 - `internal/compute/build_vulkan.ps1`
 - `internal/compute/vulkan_q4k_test.go`
 - `internal/compute/vulkan_q4k_profile_test.go`
+- `internal/compute/vulkan_q4k_wave32.go`
+- `internal/compute/vulkan_q4k_wave32_test.go`
+- `internal/computebuild/vulkan.go`
+- `internal/computebuild/computebuild_test.go`
 
 ## Lane
 

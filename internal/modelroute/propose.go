@@ -65,6 +65,9 @@ func (o Objective) IsFinite() bool {
 	if math.IsNaN(o.MaxMeanCost) || math.IsInf(o.MaxMeanCost, 0) || o.MaxMeanCost < 0 {
 		return false
 	}
+	if o.MaxMeanLatency < 0 {
+		return false
+	}
 	if math.IsNaN(o.MinMeanQuality) || math.IsInf(o.MinMeanQuality, 0) || o.MinMeanQuality < 0 || o.MinMeanQuality > 1.0 {
 		return false
 	}
@@ -80,16 +83,32 @@ func (o Objective) effectiveQualityWeight() float64 {
 
 // Score computes the scalar objective score for an evaluation.
 func (o Objective) Score(eval EvaluationScore) float64 {
-	if !o.IsFinite() || math.IsNaN(eval.MeanCost) || math.IsInf(eval.MeanCost, 0) || math.IsNaN(eval.MeanQuality) || math.IsInf(eval.MeanQuality, 0) {
-		return 0
-	}
-	qw := o.effectiveQualityWeight()
-	latencySec := eval.MeanLatency.Seconds()
-	score := qw*eval.MeanQuality - o.CostWeight*eval.MeanCost - o.LatencyWeight*latencySec
-	if math.IsNaN(score) || math.IsInf(score, 0) {
-		return 0
-	}
+	score, _ := o.score(eval)
 	return score
+}
+
+func (o Objective) score(eval EvaluationScore) (float64, bool) {
+	if !o.IsFinite() || math.IsNaN(eval.MeanCost) || math.IsInf(eval.MeanCost, 0) || eval.MeanCost < 0 ||
+		math.IsNaN(eval.MeanQuality) || math.IsInf(eval.MeanQuality, 0) || eval.MeanQuality < 0 || eval.MeanQuality > 1 ||
+		eval.MeanLatency < 0 {
+		return 0, false
+	}
+	finite := func(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
+	qualityScore := o.effectiveQualityWeight() * eval.MeanQuality
+	costPenalty := o.CostWeight * eval.MeanCost
+	latencyPenalty := o.LatencyWeight * eval.MeanLatency.Seconds()
+	if !finite(qualityScore) || !finite(costPenalty) || !finite(latencyPenalty) {
+		return 0, false
+	}
+	score := qualityScore - costPenalty
+	if !finite(score) {
+		return 0, false
+	}
+	score -= latencyPenalty
+	if !finite(score) {
+		return 0, false
+	}
+	return score, true
 }
 
 // Feasible reports whether the evaluation satisfies all declared constraints.
@@ -98,7 +117,10 @@ func (o Objective) Feasible(eval EvaluationScore) bool {
 	if !o.IsFinite() || !eval.IsFinite() {
 		return false
 	}
-	if eval.Count == 0 {
+	if _, ok := o.score(eval); !ok {
+		return false
+	}
+	if eval.Count <= 0 {
 		return false
 	}
 	if o.MaxMeanCost > 0 && eval.MeanCost > o.MaxMeanCost {
@@ -122,10 +144,14 @@ type EvaluationScore struct {
 	MeanQuality float64       `json:"mean_quality"`
 	Score       float64       `json:"score"`
 	Feasible    bool          `json:"feasible"`
+	Invalid     bool          `json:"invalid,omitempty"` // derived arithmetic was not representable
 }
 
 // IsFinite reports whether all metrics and the score are finite and domain-valid (#12112).
 func (e EvaluationScore) IsFinite() bool {
+	if e.Invalid {
+		return false
+	}
 	if math.IsNaN(e.MeanCost) || math.IsInf(e.MeanCost, 0) || e.MeanCost < 0 {
 		return false
 	}
@@ -133,6 +159,9 @@ func (e EvaluationScore) IsFinite() bool {
 		return false
 	}
 	if math.IsNaN(e.Score) || math.IsInf(e.Score, 0) {
+		return false
+	}
+	if e.MeanLatency < 0 {
 		return false
 	}
 	return true
@@ -147,28 +176,35 @@ type ScoreDelta struct {
 }
 
 func sanitizeScore(eval *EvaluationScore) {
+	valid := eval.Count > 0 && eval.IsFinite()
 	if math.IsNaN(eval.Score) || math.IsInf(eval.Score, 0) {
 		eval.Score = 0
-		eval.Feasible = false
 	}
-	if math.IsNaN(eval.MeanCost) || math.IsInf(eval.MeanCost, 0) {
+	if math.IsNaN(eval.MeanCost) || math.IsInf(eval.MeanCost, 0) || eval.MeanCost < 0 {
 		eval.MeanCost = 0
-		eval.Feasible = false
 	}
-	if math.IsNaN(eval.MeanQuality) || math.IsInf(eval.MeanQuality, 0) {
+	if math.IsNaN(eval.MeanQuality) || math.IsInf(eval.MeanQuality, 0) || eval.MeanQuality < 0 || eval.MeanQuality > 1 {
 		eval.MeanQuality = 0
+	}
+	if eval.MeanLatency < 0 {
+		eval.MeanLatency = 0
+	}
+	if !valid {
 		eval.Feasible = false
+		eval.Invalid = true
 	}
 }
 
 func computeScoreDelta(before, after EvaluationScore) ScoreDelta {
+	beforeValid := before.Count > 0 && before.IsFinite()
+	afterValid := after.Count > 0 && after.IsFinite()
 	sanitizeScore(&before)
 	sanitizeScore(&after)
 	delta := after.Score - before.Score
 	if math.IsNaN(delta) || math.IsInf(delta, 0) {
 		delta = 0
 	}
-	improved := after.Feasible && (delta > 1e-9 || (!before.Feasible && after.Feasible))
+	improved := beforeValid && afterValid && after.Feasible && (delta > 1e-9 || (!before.Feasible && after.Feasible))
 	return ScoreDelta{
 		Before:   before,
 		After:    after,
@@ -397,6 +433,7 @@ func EvaluateManifest(m Manifest, records []OutcomeRecord, obj Objective) (Evalu
 	var totalCost float64
 	var totalLatency time.Duration
 	var totalQuality float64
+	validReduction := true
 
 	for _, rec := range records {
 		if !rec.Outcome.IsFinite() {
@@ -409,13 +446,26 @@ func EvaluateManifest(m Manifest, records []OutcomeRecord, obj Objective) (Evalu
 		}
 
 		totalCount++
-		totalCost += rec.Outcome.Cost
-		totalLatency += rec.Outcome.Latency
-		totalQuality += rec.Outcome.Quality
+		if !validReduction {
+			continue
+		}
+		sumCost, costOK := addFiniteNonnegative(totalCost, rec.Outcome.Cost)
+		sumLatency, latencyOK := addNonnegativeDuration(totalLatency, rec.Outcome.Latency)
+		sumQuality, qualityOK := addFiniteNonnegative(totalQuality, rec.Outcome.Quality)
+		if !costOK || !latencyOK || !qualityOK {
+			validReduction = false
+			continue
+		}
+		totalCost = sumCost
+		totalLatency = sumLatency
+		totalQuality = sumQuality
 	}
 
 	if totalCount == 0 {
 		return EvaluationScore{Count: 0, Feasible: false}, nil
+	}
+	if !validReduction {
+		return EvaluationScore{Count: totalCount, Feasible: false, Invalid: true}, nil
 	}
 
 	meanCost := totalCost / float64(totalCount)
@@ -428,7 +478,9 @@ func EvaluateManifest(m Manifest, records []OutcomeRecord, obj Objective) (Evalu
 		MeanLatency: meanLatency,
 		MeanQuality: meanQuality,
 	}
-	eval.Score = obj.Score(eval)
+	var scoreOK bool
+	eval.Score, scoreOK = obj.score(eval)
+	eval.Invalid = !scoreOK
 	eval.Feasible = obj.Feasible(eval)
 
 	return eval, nil
@@ -441,6 +493,7 @@ func evaluateRuleRecords(ruleName string, aspect Aspect, model string, records [
 	var totalCost float64
 	var totalLatency time.Duration
 	var totalQuality float64
+	validReduction := true
 
 	for _, rec := range records {
 		if !rec.Outcome.IsFinite() {
@@ -457,13 +510,26 @@ func evaluateRuleRecords(ruleName string, aspect Aspect, model string, records [
 		}
 
 		totalCount++
-		totalCost += rec.Outcome.Cost
-		totalLatency += rec.Outcome.Latency
-		totalQuality += rec.Outcome.Quality
+		if !validReduction {
+			continue
+		}
+		sumCost, costOK := addFiniteNonnegative(totalCost, rec.Outcome.Cost)
+		sumLatency, latencyOK := addNonnegativeDuration(totalLatency, rec.Outcome.Latency)
+		sumQuality, qualityOK := addFiniteNonnegative(totalQuality, rec.Outcome.Quality)
+		if !costOK || !latencyOK || !qualityOK {
+			validReduction = false
+			continue
+		}
+		totalCost = sumCost
+		totalLatency = sumLatency
+		totalQuality = sumQuality
 	}
 
 	if totalCount == 0 {
 		return EvaluationScore{Count: 0, Feasible: false}
+	}
+	if !validReduction {
+		return EvaluationScore{Count: totalCount, Feasible: false, Invalid: true}
 	}
 
 	meanCost := totalCost / float64(totalCount)
@@ -476,7 +542,9 @@ func evaluateRuleRecords(ruleName string, aspect Aspect, model string, records [
 		MeanLatency: meanLatency,
 		MeanQuality: meanQuality,
 	}
-	eval.Score = obj.Score(eval)
+	var scoreOK bool
+	eval.Score, scoreOK = obj.score(eval)
+	eval.Invalid = !scoreOK
 	eval.Feasible = obj.Feasible(eval)
 	return eval
 }
