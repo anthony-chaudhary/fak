@@ -425,3 +425,133 @@ func TestGeminiResultFloorArmsExfilGate(t *testing.T) {
 		t.Fatalf("tainted session: IFC ledger stayed Trusted (result-side stamp did not land on the Gemini wire)")
 	}
 }
+
+// TestGeminiCachedContentTokenCountRelay proves that cachedContentTokenCount reported by
+// upstream Gemini is faithfully relayed on the Gemini wire in usageMetadata across both
+// buffered (:generateContent) and streaming (:streamGenerateContent) responses (#12157).
+// It also proves that when upstream omits cached tokens (or reports 0), the field is
+// omitted via omitempty to preserve backwards compatibility.
+func TestGeminiCachedContentTokenCountRelay(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	inbound := []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`)
+
+	cachedHits := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cachedHits++
+		w.Header().Set("Content-Type", "application/json")
+		if cachedHits%2 == 1 {
+			// Odd requests: cache hit reported
+			_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"text":"cached response"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":25,"totalTokenCount":125,"cachedContentTokenCount":80}}`))
+		} else {
+			// Even requests: zero/uncached response
+			_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"text":"uncached response"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3,"totalTokenCount":10}}`))
+		}
+	}))
+	defer upstream.Close()
+
+	srv, err := New(Config{EngineID: "test", Model: "gemini-test", BaseURL: upstream.URL, Provider: "gemini", VDSO: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// 1. Buffered generateContent with cache hit
+	{
+		req, _ := http.NewRequest("POST", ts.URL+"/v1beta/models/gemini-test:generateContent", bytes.NewReader(inbound))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("buffered post: %v", err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatalf("buffered status = %d: %s", resp.StatusCode, raw)
+		}
+		if !strings.Contains(string(raw), `"cachedContentTokenCount":80`) {
+			t.Errorf("buffered wire JSON missing cachedContentTokenCount: %s", raw)
+		}
+		var body geminiGenerateContentResponse
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatalf("buffered decode: %v", err)
+		}
+		if body.UsageMetadata.CachedContentTokenCount != 80 {
+			t.Errorf("buffered CachedContentTokenCount = %d, want 80", body.UsageMetadata.CachedContentTokenCount)
+		}
+		if body.UsageMetadata.PromptTokenCount != 100 || body.UsageMetadata.CandidatesTokenCount != 25 || body.UsageMetadata.TotalTokenCount != 125 {
+			t.Errorf("buffered usageMetadata counts incorrect: %+v", body.UsageMetadata)
+		}
+	}
+
+	// 2. Buffered generateContent without cache hit (proves omitempty behavior)
+	{
+		req, _ := http.NewRequest("POST", ts.URL+"/v1beta/models/gemini-test:generateContent", bytes.NewReader(inbound))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("uncached post: %v", err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatalf("uncached status = %d: %s", resp.StatusCode, raw)
+		}
+		if strings.Contains(string(raw), "cachedContentTokenCount") {
+			t.Errorf("uncached wire JSON must omit cachedContentTokenCount: %s", raw)
+		}
+		var body geminiGenerateContentResponse
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatalf("uncached decode: %v", err)
+		}
+		if body.UsageMetadata.CachedContentTokenCount != 0 {
+			t.Errorf("uncached CachedContentTokenCount = %d, want 0", body.UsageMetadata.CachedContentTokenCount)
+		}
+	}
+
+	// 3. Streaming streamGenerateContent with cache hit (SSE data frame)
+	{
+		req, _ := http.NewRequest("POST", ts.URL+"/v1beta/models/gemini-test:streamGenerateContent", bytes.NewReader(inbound))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("streaming post: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatalf("streaming status = %d", resp.StatusCode)
+		}
+		if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+			t.Fatalf("content-type = %q, want text/event-stream", ct)
+		}
+		var frame geminiGenerateContentResponse
+		sawData := false
+		sc := bufio.NewScanner(resp.Body)
+		for sc.Scan() {
+			line := sc.Text()
+			if d, ok := strings.CutPrefix(line, "data: "); ok && d != "" {
+				sawData = true
+				if !strings.Contains(d, `"cachedContentTokenCount":80`) {
+					t.Errorf("stream SSE data frame missing cachedContentTokenCount: %s", d)
+				}
+				if err := json.Unmarshal([]byte(d), &frame); err != nil {
+					t.Fatalf("stream decode: %v (%s)", err, d)
+				}
+			}
+		}
+		if !sawData {
+			t.Fatal("no data frame in stream")
+		}
+		if frame.UsageMetadata.CachedContentTokenCount != 80 {
+			t.Errorf("stream CachedContentTokenCount = %d, want 80", frame.UsageMetadata.CachedContentTokenCount)
+		}
+		if frame.UsageMetadata.PromptTokenCount != 100 || frame.UsageMetadata.CandidatesTokenCount != 25 || frame.UsageMetadata.TotalTokenCount != 125 {
+			t.Errorf("stream usageMetadata counts incorrect: %+v", frame.UsageMetadata)
+		}
+	}
+}

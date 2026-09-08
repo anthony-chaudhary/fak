@@ -64,9 +64,10 @@ type geminiContentOut struct {
 
 // geminiUsageOut mirrors the generateContent usageMetadata object.
 type geminiUsageOut struct {
-	PromptTokenCount     int `json:"promptTokenCount"`
-	CandidatesTokenCount int `json:"candidatesTokenCount"`
-	TotalTokenCount      int `json:"totalTokenCount"`
+	PromptTokenCount        int `json:"promptTokenCount"`
+	CandidatesTokenCount    int `json:"candidatesTokenCount"`
+	TotalTokenCount         int `json:"totalTokenCount"`
+	CachedContentTokenCount int `json:"cachedContentTokenCount,omitempty"`
 }
 
 type geminiTurn struct {
@@ -293,9 +294,10 @@ func (s *Server) completeGeminiTurn(ctx context.Context, req *agent.GeminiGenera
 			FinishReason: agent.GeminiFinishReason(comp.FinishReason),
 		}},
 		usage: geminiUsageOut{
-			PromptTokenCount:     comp.Usage.PromptTokens,
-			CandidatesTokenCount: comp.Usage.CompletionTokens,
-			TotalTokenCount:      total,
+			PromptTokenCount:        comp.Usage.PromptTokens,
+			CandidatesTokenCount:    comp.Usage.CompletionTokens,
+			TotalTokenCount:         total,
+			CachedContentTokenCount: comp.Usage.CachedPromptTokens(),
 		},
 		model:            modelVersion,
 		adjs:             adjs,
