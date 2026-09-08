@@ -281,7 +281,7 @@ func rawDecodeBackendExecutions(execution rawdecode.Execution) ([]compute.Backen
 
 // rawDecodePhysicalReceipt maps only executor observations. It never accepts
 // caller-supplied source, binary, device, memory, or counter identity.
-func rawDecodePhysicalReceipt(execution rawdecode.Execution, repOutputs []rawRepOutput) rawDecodePhysicalReceiptAttempt {
+func rawDecodePhysicalReceipt(execution rawdecode.Execution) rawDecodePhysicalReceiptAttempt {
 	finiteLogits := execution.FiniteLogits
 	observed := compute.Qwen38VulkanRawDecodeResult{
 		GeneratedTokenLimit: execution.GeneratedLimit,
@@ -315,10 +315,6 @@ func rawDecodePhysicalReceipt(execution rawdecode.Execution, repOutputs []rawRep
 		observed.Model.Quantization = execution.Quantization
 	}
 	backendExecutions, backendObserved := rawDecodeBackendExecutions(execution)
-	if backendObserved && len(backendExecutions) != len(repOutputs) {
-		backendObserved = false
-		backendExecutions = nil
-	}
 	if backendObserved {
 		fallbacks := uint64(0)
 		for _, backendExecution := range backendExecutions {
@@ -344,44 +340,71 @@ func rawDecodePhysicalReceipt(execution rawdecode.Execution, repOutputs []rawRep
 		return rawDecodePhysicalReceiptAttempt{Status: "UNAVAILABLE", Reason: reason, Observed: observed, BackendExecutions: backendExecutions}
 	}
 
-	if len(repOutputs) == 0 {
+	if len(execution.Runs) == 0 {
 		return unavailable("raw decode produced no repetitions")
 	}
 	var err error
 	if observed.PromptTokenIDs, err = rawDecodeInt32IDs(execution.PromptTokenIDs); err != nil {
 		return unavailable(err.Error())
 	}
-	allParityObserved, allParityPassed := true, true
-	observed.Runs = make([]compute.Qwen38VulkanDecodeRun, len(repOutputs))
-	for i, rep := range repOutputs {
-		outputTokenIDs, convertErr := rawDecodeInt32IDs(rep.generatedTokens)
+	type observedGeneration struct {
+		ignoreEOS      bool
+		eosStopped     bool
+		actualTokens   int
+		outputTokenIDs []int32
+	}
+	generations := make([]observedGeneration, len(execution.Runs))
+	for i, run := range execution.Runs {
+		generation, generationAvailable := execution.GenerationObservation(i)
+		ignoreEOSObserved, ignoreEOSAvailable := generation.IgnoreEOS()
+		eosStoppedObserved, eosStoppedAvailable := generation.EOSStopped()
+		actualGeneratedTokens, countAvailable := generation.ActualGeneratedTokens()
+		generatedTokenIDs, tokensAvailable := generation.OutputTokenIDs()
+		if !generationAvailable || !ignoreEOSAvailable || !eosStoppedAvailable || !countAvailable || !tokensAvailable {
+			return unavailable(fmt.Sprintf("raw decode generation observation unavailable for repetition %d", i+1))
+		}
+		if execution.IgnoreEOS != ignoreEOSObserved || run.EOSStopped != eosStoppedObserved {
+			return unavailable(fmt.Sprintf("raw decode EOS alias mismatch for repetition %d", i+1))
+		}
+		if actualGeneratedTokens != len(generatedTokenIDs) || !slices.Equal(generatedTokenIDs, run.GeneratedTokens) {
+			return unavailable(fmt.Sprintf("raw decode generation token alias mismatch for repetition %d", i+1))
+		}
+		outputTokenIDs, convertErr := rawDecodeInt32IDs(generatedTokenIDs)
 		if convertErr != nil {
 			return unavailable(convertErr.Error())
 		}
-		ignoreEOSObserved, eosStoppedObserved := execution.IgnoreEOS, rep.eosStopped
-		candidateElapsed := rep.sessionSetupDur + rep.prefillDur + rep.firstSampleDur + rep.decodeDur + rep.teardownDur
+		generations[i] = observedGeneration{
+			ignoreEOS: ignoreEOSObserved, eosStopped: eosStoppedObserved,
+			actualTokens: actualGeneratedTokens, outputTokenIDs: outputTokenIDs,
+		}
+	}
+	allParityObserved, allParityPassed := true, true
+	observed.Runs = make([]compute.Qwen38VulkanDecodeRun, len(execution.Runs))
+	for i, run := range execution.Runs {
+		generation := generations[i]
+		candidateElapsed := run.SessionSetupDuration + run.PrefillDuration + run.FirstSampleDuration + run.DecodeDuration + run.TeardownDuration
 		observed.Runs[i] = compute.Qwen38VulkanDecodeRun{
 			Repetition:                  i + 1,
 			ContextLimit:                execution.ContextLimit,
-			ContextTokens:               len(execution.PromptTokenIDs) + len(rep.generatedTokens),
+			ContextTokens:               len(execution.PromptTokenIDs) + generation.actualTokens,
 			GeneratedTokenLimit:         execution.GeneratedLimit,
-			ActualGeneratedTokens:       len(rep.generatedTokens),
+			ActualGeneratedTokens:       generation.actualTokens,
 			Sampler:                     "greedy",
 			SeedPolicy:                  "not_applicable_greedy",
-			IgnoreEOS:                   &ignoreEOSObserved,
-			EOSStopped:                  &eosStoppedObserved,
-			OutputTokenIDs:              outputTokenIDs,
-			SessionSetupNanoseconds:     uint64(max(rep.sessionSetupDur.Nanoseconds(), 0)),
-			PrefillNanoseconds:          uint64(max(rep.prefillDur.Nanoseconds(), 0)),
-			FirstSampleNanoseconds:      uint64(max(rep.firstSampleDur.Nanoseconds(), 0)),
-			DecodeNanoseconds:           uint64(max(rep.decodeDur.Nanoseconds(), 0)),
-			TeardownNanoseconds:         uint64(max(rep.teardownDur.Nanoseconds(), 0)),
+			IgnoreEOS:                   &generation.ignoreEOS,
+			EOSStopped:                  &generation.eosStopped,
+			OutputTokenIDs:              generation.outputTokenIDs,
+			SessionSetupNanoseconds:     uint64(max(run.SessionSetupDuration.Nanoseconds(), 0)),
+			PrefillNanoseconds:          uint64(max(run.PrefillDuration.Nanoseconds(), 0)),
+			FirstSampleNanoseconds:      uint64(max(run.FirstSampleDuration.Nanoseconds(), 0)),
+			DecodeNanoseconds:           uint64(max(run.DecodeDuration.Nanoseconds(), 0)),
+			TeardownNanoseconds:         uint64(max(run.TeardownDuration.Nanoseconds(), 0)),
 			CandidateElapsedNanoseconds: uint64(max(candidateElapsed.Nanoseconds(), 0)),
-			CPUVerificationNanoseconds:  uint64(max(rep.cpuVerifyDur.Nanoseconds(), 0)),
+			CPUVerificationNanoseconds:  uint64(max(run.CPUVerifyDuration.Nanoseconds(), 0)),
 		}
-		if rep.cpuVerify == nil {
+		if run.CPUVerification == nil {
 			allParityObserved = false
-		} else if !rep.cpuVerify.Passed {
+		} else if !run.CPUVerification.Passed {
 			allParityPassed = false
 		}
 	}
@@ -580,7 +603,7 @@ func rawDecodeReport(f *benchFlags, execution rawdecode.Execution, runErr error,
 		backendReport["device_coverage"] = "unmeasured"
 		backendReport["tier"], backendReport["class"], backendReport["caps"] = execution.Backend.Tier, execution.Backend.Class, execution.Backend.Caps
 	}
-	physicalReceipt := rawDecodePhysicalReceipt(execution, repOutputs)
+	physicalReceipt := rawDecodePhysicalReceipt(execution)
 
 	report := map[string]any{
 		"app_version":                appversion.Current(),
