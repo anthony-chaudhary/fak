@@ -10,6 +10,7 @@ paths:
   - cmd/fak/issueorchestrator_test.go
   - cmd/fak/dispatch_tick.go
   - cmd/fak/dispatch_tick_worker.go
+  - cmd/fak/dispatch_worker_worktree_test.go
 expected_steps: 7
 priority: P1
 dependencies:
@@ -63,6 +64,7 @@ Current defaults show worker isolation and automatic landing are opt-in, while f
 - `cmd/fak/issueorchestrator.go:544-590` (OpenCode process launch)
 - `cmd/fak/dispatch_tick_worker.go:198-203` (environment default)
 - `cmd/fak/dispatch_tick.go:863-879` (dispatch preparation and fallback)
+- `cmd/fak/dispatch_worker_worktree_test.go` (`TestWorkerWorktreeEnabledGrammar` default-off assertion)
 
 ## Blast radius and affected lanes
 
@@ -94,6 +96,7 @@ No distributed consensus, new VCS, GUI, background daemon, module changes, or re
 - `cmd/fak/issueorchestrator_test.go`
 - `cmd/fak/dispatch_tick.go`
 - `cmd/fak/dispatch_tick_worker.go`
+- `cmd/fak/dispatch_worker_worktree_test.go`
 
 ## Witness
 
