@@ -576,3 +576,51 @@ func TestRuntimeSourceDoesNotDispatchWiki(t *testing.T) {
 		t.Fatal("runtime fak still dispatches the dev-only wiki command")
 	}
 }
+
+func TestVulkanBuildDispatch(t *testing.T) {
+	for _, verb := range []string{"build-vulkan", "vulkan-build"} {
+		var out, errOut bytes.Buffer
+		code := run(&out, &errOut, []string{verb, "--help"})
+		if code != 0 {
+			t.Fatalf("%s --help exit code = %d; stderr=%s", verb, code, errOut.String())
+		}
+		if !strings.Contains(errOut.String(), "usage: fak-dev build-vulkan") {
+			t.Fatalf("%s help output missing usage string: %s", verb, errOut.String())
+		}
+	}
+}
+
+func TestCUDABuildDispatch(t *testing.T) {
+	for _, verb := range []string{"build-cuda", "cuda-build"} {
+		var out, errOut bytes.Buffer
+		code := run(&out, &errOut, []string{verb, "--help"})
+		if code != 0 {
+			t.Fatalf("%s --help exit code = %d; stderr=%s", verb, code, errOut.String())
+		}
+		if !strings.Contains(errOut.String(), "usage: fak-dev build-cuda") {
+			t.Fatalf("%s help output missing usage string: %s", verb, errOut.String())
+		}
+	}
+}
+
+func TestGoalLaunchDispatch(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run(&out, &errOut, []string{"goal-launch", "--help"})
+	if code != 0 {
+		t.Fatalf("goal-launch --help exit code = %d; stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "usage: fak-dev goal-launch") {
+		t.Fatalf("goal-launch help missing usage string: %s", errOut.String())
+	}
+}
+
+func TestGoalFleetDispatch(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run(&out, &errOut, []string{"goal-fleet", "--help"})
+	if code != 0 {
+		t.Fatalf("goal-fleet --help exit code = %d; stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "usage: fak-dev goal-fleet") {
+		t.Fatalf("goal-fleet help missing usage string: %s", errOut.String())
+	}
+}
