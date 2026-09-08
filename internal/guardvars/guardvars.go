@@ -43,20 +43,26 @@ import (
 // last ADMITTED tool name (payload-free), the admitted subagent-spawn count, and the
 // in-flight-OR-idle age of the trace — a row carries InflightSeconds or IdleSeconds, never both.
 type SessionVars struct {
-	TraceID           string `json:"trace_id"`
-	Run               string `json:"run"`
-	ParentTrace       string `json:"parent_trace,omitempty"`
-	Generation        int    `json:"generation,omitempty"`
-	Priority          int    `json:"priority,omitempty"`
-	TurnsLeft         int    `json:"turns_left"`
-	TokensLeft        int    `json:"tokens_left"`
-	ContextTokensLeft int    `json:"context_tokens_left,omitempty"`
-	ElapsedSeconds    int64  `json:"elapsed_seconds,omitempty"`
-	Assumptions       int    `json:"assumptions,omitempty"`
-	LastTool          string `json:"last_tool,omitempty"`
-	SpawnCount        int    `json:"spawn_count,omitempty"`
-	InflightSeconds   int64  `json:"inflight_seconds,omitempty"`
-	IdleSeconds       int64  `json:"idle_seconds,omitempty"`
+	TraceID           string  `json:"trace_id"`
+	Run               string  `json:"run"`
+	ParentTrace       string  `json:"parent_trace,omitempty"`
+	Generation        int     `json:"generation,omitempty"`
+	Priority          int     `json:"priority,omitempty"`
+	TurnsLeft         int     `json:"turns_left"`
+	TokensLeft        int     `json:"tokens_left"`
+	ContextTokensLeft int     `json:"context_tokens_left,omitempty"`
+	ElapsedSeconds    int64   `json:"elapsed_seconds,omitempty"`
+	Assumptions       int     `json:"assumptions,omitempty"`
+	LastTool          string  `json:"last_tool,omitempty"`
+	SpawnCount        int     `json:"spawn_count,omitempty"`
+	InflightSeconds   int64   `json:"inflight_seconds,omitempty"`
+	IdleSeconds       int64   `json:"idle_seconds,omitempty"`
+	ParentSessionID   string  `json:"parent_session_id,omitempty"`
+	SubagentType      string  `json:"subagent_type,omitempty"`
+	Role              string  `json:"role,omitempty"`
+	PromptTokens      int     `json:"prompt_tokens,omitempty"`
+	SharedTokens      int     `json:"shared_tokens,omitempty"`
+	ReuseRate         float64 `json:"reuse_rate,omitempty"`
 }
 
 // CacheAttributionVars is the /debug/vars owner-split block (#1849): the same provider-vs-fak
