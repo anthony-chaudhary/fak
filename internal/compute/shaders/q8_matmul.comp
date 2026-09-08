@@ -1,35 +1,47 @@
 #version 450
+#extension GL_KHR_cooperative_matrix : enable
+#extension GL_KHR_memory_scope_semantics : enable
+#extension GL_KHR_shader_subgroup_basic : enable
 #extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int32 : require
 #extension GL_EXT_shader_8bit_storage : require
-// q8_matmul.comp — Q8_0 quantized matmul: y[o] = Σ_b (Σ_i Wq[o,b,i]·Xq[b,i]) · dW[o,b]·dX[b].
-//
-// The WEIGHT is pre-quantized Q8_0 (int8 codes [out,in] + per-block f32 scales [out, in/blk]),
-// uploaded ONCE — that is the 4× memory-traffic cut over f32 that makes decode (memory-bound)
-// faster and makes the comparison with llama.cpp's Q8_0 fair. The ACTIVATION is quantized on
-// the fly per block (amax/127 scale, round-half-away-from-zero), reproducing the cpuref path
-// (quantizeVecQ8 + qdot8scalar) so the result is held to the Approx gate (argmax-exact vs the
-// f32 reference, like the CPU Q8 lane).
-//
-// One workgroup processes a 256-output tile for one row t of X: it stages X[t,:] in
-// shared memory, quantizes each block once into shared int8 + per-block scale, then each
-// thread computes one output reading the int8 weight codes. block is fixed at 32 (Q8_0).
-// The output tiling keeps the 49k-vocab LM head spread across CUs instead of making one
-// long-running workgroup walk the whole vocabulary.
-//
-// Input tiling: when inDim exceeds the shared staging cap (SHARED_CAP floats), the input is
-// processed in WINDOWS of whole blocks that fit the cap — each window is staged+quantized
-// into shared memory, then dotted, accumulating into `acc` across windows. Because `acc`
-// already sums per-block contributions in block order, windowing only changes WHICH blocks
-// are resident at once, not the combine order — the result is identical to a single pass and
-// stays bit-for-bit on the Approx gate. This lifts the old inDim<=2048 limit (e.g. a 1.5B
-// FFN down_proj with inDim=8960) without changing the math.
-layout(local_size_x = 256) in;
 
+// q8_matmul.comp — 2D block-tiled cooperative matrix GEMM for Q8_0 quantized matmul on Wave32 (gfx1151 / RDNA 3.5).
+//
+// Workgroups tile over (M=32 tokens, N=32 outputs) matching Wave32 subgroup dimensions on gfx1151.
+// Activations X and weight codes Wcodes are cooperatively staged into LDS once per (M, N) tile
+// over K-dimension windows of Q8_0 blocks (BLOCK=32).
+//
+// Within each workgroup (128 threads = 4 Wave32 wavefronts organized in a 2x2 grid):
+//   - Wave (0,0): tokens [0..15], outputs [0..15]
+//   - Wave (0,1): tokens [0..15], outputs [16..31]
+//   - Wave (1,0): tokens [16..31], outputs [0..15]
+//   - Wave (1,1): tokens [16..31], outputs [16..31]
+//
+// For each K-block of 32 weights:
+//   1. Cooperatively stage 32 token rows of X (1024 floats) into LDS.
+//   2. Cooperatively stage 32 output rows of Wcodes (1024 int8 codes) transposed into LDS [32 x 32].
+//   3. Stage per-block scales Wscale (32 floats) into LDS.
+//   4. Quantize X row-by-row into LDS Xq [32 x 32] int8 codes and per-row scale Xs [32].
+//   5. Execute Wave32 WMMA 16x16x16 INT8 cooperative matrix multiply in two 16-element halves (K=0..15 and K=16..31),
+//      accumulating into int32 registers.
+//   6. Store cooperative matrix tile to LDS and accumulate scaled partial sums:
+//      acc += float(dot) * Wscale * Xs.
+//
+// Finally, write back outputs Y[t * outDim + o] for valid (t < P && o < outDim).
+
+layout(local_size_x = 32, local_size_y = 4, local_size_z = 1) in;
+
+const uint TILE_M = 32u;
+const uint TILE_N = 32u;
 const uint BLOCK = 32u;
-const uint SHARED_CAP = 2048u;            // staged input floats per window (multiple of BLOCK)
-const uint WIN_BLOCKS = SHARED_CAP / BLOCK; // whole Q8_0 blocks staged per window (=64)
-const uint XQ_STRIDE = 32u + 2u; // Pad-2 stride: 34 bytes per row to skew LDS bank alignment
-const uint XS_STRIDE = 32u + 2u;
+
+shared int8_t  ldsXq[TILE_M * BLOCK];
+shared int8_t  ldsTileW[BLOCK * TILE_N];
+shared float   ldsXs[TILE_M];
+shared float   ldsWs[TILE_N];
+shared float   ldsX_f32[TILE_M * BLOCK];
+shared int32_t ldsMatC[TILE_M * TILE_N];
 
 layout(std430, binding = 0) readonly buffer Wq   { int8_t  Wcodes[]; };  // [out*in] int8 weight codes
 layout(std430, binding = 1) readonly buffer Ws   { float   Wscale[]; };  // [out*nblk] per-block weight scales
@@ -38,81 +50,138 @@ layout(std430, binding = 3) writeonly buffer Yb  { float   Y[]; };       // [P*o
 
 layout(push_constant) uniform Push { int outDim; int inDim; int P; } pc;
 
-shared int8_t Xq[WIN_BLOCKS * XQ_STRIDE]; // quantized activation codes for row t (Pad-2 stride)
-shared float  Xs[2u * XS_STRIDE];    // per-block activation scale (one per 32)
-
-uint xs_idx(uint b) {
-    return (b / 32u) * XS_STRIDE + (b % 32u);
-}
-
 int8_t q8round(float x) {
-    // truncate-then-fractional round, half away from zero, clamped to [-127,127] (matches q8round)
     int t = int(x);
     float f = x - float(t);
     if (f >= 0.5) t += 1; else if (f <= -0.5) t -= 1;
-    t = clamp(t, -127, 127);
-    return int8_t(t);
+    return int8_t(clamp(t, -127, 127));
 }
 
 void main() {
-    uint outGroups = (uint(pc.outDim) + 255u) / 256u;
-    uint t = gl_WorkGroupID.x / outGroups;
-    if (t >= uint(pc.P)) return;
-    uint outGroup = gl_WorkGroupID.x - t * outGroups;
-    uint tid = gl_LocalInvocationID.x;
+    uint waveID = gl_LocalInvocationID.y;
+    uint laneID = gl_LocalInvocationID.x;
+    uint threadID = waveID * 32u + laneID;
+
+    uint waveRow = (waveID / 2u) * 16u;
+    uint waveCol = (waveID % 2u) * 16u;
+
+    uint tileRow = gl_WorkGroupID.y * TILE_M;
+    uint tileCol = gl_WorkGroupID.x * TILE_N;
+
     uint in_ = uint(pc.inDim);
     uint out_ = uint(pc.outDim);
+    uint P_ = uint(pc.P);
     uint nblk = in_ / BLOCK;
-    uint xbase = t * in_;
 
-    uint o = outGroup * 256u + tid;
-    uint wbase = o * in_;
-    uint sbase = o * nblk;
-    float acc = 0.0;
-
-    // ---- window over the input in chunks of WIN_BLOCKS whole blocks (<= SHARED_CAP floats) ----
-    // Each window is staged+quantized into shared memory once, then dotted by every output
-    // thread, accumulating into `acc`. Block order across windows is unchanged, so the result
-    // equals a single pass (the old inDim<=2048 case is exactly one window).
-    for (uint wb = 0u; wb < nblk; wb += WIN_BLOCKS) {
-        uint winBlocks = min(WIN_BLOCKS, nblk - wb);  // blocks in this window
-        uint winBase = wb * BLOCK;                     // first input float of this window
-
-        // quantize this window's activations into shared Xq + Xs, one block per (subset of) threads
-        for (uint b = tid; b < winBlocks; b += 256u) {
-            uint xq_base = b * XQ_STRIDE; // shared-local activation offset (Pad-2 stride)
-            uint gbase = winBase + b * BLOCK; // global input offset (unpadded block stride)
-            float amax = 0.0;
-            for (uint i = 0u; i < BLOCK; ++i) amax = max(amax, abs(X[xbase + gbase + i]));
-            float d = amax / 127.0;
-            Xs[xs_idx(b)] = d;
-            float inv = d > 0.0 ? 1.0 / d : 0.0;
-            for (uint i = 0u; i < BLOCK; ++i) {
-                Xq[xq_base + i] = (d > 0.0) ? q8round(X[xbase + gbase + i] * inv) : int8_t(0);
-            }
-        }
-        barrier();
-
-        // per-output int8 dot over this window's blocks (reproduces qdot8scalar combine order)
-        if (o < out_) {
-            for (uint lb = 0u; lb < winBlocks; ++lb) {
-                uint cb = wbase + (wb + lb) * BLOCK;   // global weight code offset
-                uint xb = lb * XQ_STRIDE; // shared-local activation offset (Pad-2 stride)
-                // 4 partial int accumulators, matching the cpuref s0..s3 layout
-                int s0 = 0, s1 = 0, s2 = 0, s3 = 0;
-                for (uint i = 0u; i < BLOCK; i += 4u) {
-                    s0 += int(Wcodes[cb + i])     * int(Xq[xb + i]);
-                    s1 += int(Wcodes[cb + i + 1u]) * int(Xq[xb + i + 1u]);
-                    s2 += int(Wcodes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
-                    s3 += int(Wcodes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
-                }
-                acc += float((s0 + s1) + (s2 + s3)) * Wscale[sbase + wb + lb] * Xs[xs_idx(lb)];
-            }
-        }
-        barrier();  // all threads done reading shared before the next window overwrites it
+    float acc[8];
+    for (uint i = 0u; i < 8u; ++i) {
+        acc[i] = 0.0;
     }
 
-    if (o < out_) {
-        Y[t * out_ + o] = acc;
+    for (uint b = 0u; b < nblk; ++b) {
+        // 1. Cooperatively load 32 rows of X into ldsX_f32
+        for (uint i = threadID; i < 1024u; i += 128u) {
+            uint r = i / 32u;
+            uint c = i % 32u;
+            uint gRow = tileRow + r;
+            uint gCol = b * BLOCK + c;
+            float val = 0.0;
+            if (gRow < P_ && gCol < in_) {
+                val = X[gRow * in_ + gCol];
+            }
+            ldsX_f32[r * BLOCK + c] = val;
+        }
+
+        // 2. Cooperatively stage Wcodes into ldsTileW [32 x 32] transposed: row=k, col=o
+        for (uint i = threadID; i < 1024u; i += 128u) {
+            uint o = i / 32u;
+            uint k = i % 32u;
+            uint gOut = tileCol + o;
+            uint gIn = b * BLOCK + k;
+            int8_t code = int8_t(0);
+            if (gOut < out_ && gIn < in_) {
+                code = Wcodes[gOut * in_ + gIn];
+            }
+            ldsTileW[k * TILE_N + o] = code;
+        }
+
+        // 3. Stage Wscale for the 32 outputs
+        if (threadID < 32u) {
+            uint gOut = tileCol + threadID;
+            float s = 0.0;
+            if (gOut < out_) {
+                s = Wscale[gOut * nblk + b];
+            }
+            ldsWs[threadID] = s;
+        }
+
+        barrier();
+
+        // 4. Quantize X row-by-row into ldsXq and ldsXs
+        if (threadID < 32u) {
+            uint r = threadID;
+            uint gRow = tileRow + r;
+            float amax = 0.0;
+            if (gRow < P_) {
+                for (uint k = 0u; k < 32u; ++k) {
+                    amax = max(amax, abs(ldsX_f32[r * BLOCK + k]));
+                }
+            }
+            float d = amax / 127.0;
+            ldsXs[r] = d;
+            float inv = d > 0.0 ? 1.0 / d : 0.0;
+            for (uint k = 0u; k < 32u; ++k) {
+                int8_t q = int8_t(0);
+                if (d > 0.0) {
+                    q = q8round(ldsX_f32[r * BLOCK + k] * inv);
+                }
+                ldsXq[r * BLOCK + k] = q;
+            }
+        }
+
+        barrier();
+
+        // 5. Cooperative matrix multiplication for this block
+        coopmat<int8_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> matA;
+        coopmat<int8_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> matB;
+        coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC;
+        matC = coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0);
+
+        for (uint kHalf = 0u; kHalf < 32u; kHalf += 16u) {
+            uint offsetA = waveRow * BLOCK + kHalf;
+            uint offsetB = kHalf * TILE_N + waveCol;
+
+            coopMatLoad(matA, ldsXq, offsetA, BLOCK, gl_CooperativeMatrixLayoutRowMajor);
+            coopMatLoad(matB, ldsTileW, offsetB, TILE_N, gl_CooperativeMatrixLayoutRowMajor);
+
+            matC = coopMatMulAdd(matA, matB, matC);
+        }
+
+        uint offsetC = waveRow * TILE_N + waveCol;
+        coopMatStore(matC, ldsMatC, offsetC, TILE_N, gl_CooperativeMatrixLayoutRowMajor);
+
+        barrier();
+
+        // 6. Accumulate scaled results
+        for (uint i = 0u; i < 8u; ++i) {
+            uint item = threadID * 8u + i;
+            uint r = item / 32u;
+            uint c = item % 32u;
+            acc[i] += float(ldsMatC[r * TILE_N + c]) * ldsWs[c] * ldsXs[r];
+        }
+
+        barrier();
+    }
+
+    // 7. Write back outputs
+    for (uint i = 0u; i < 8u; ++i) {
+        uint item = threadID * 8u + i;
+        uint r = item / 32u;
+        uint c = item % 32u;
+        uint gRow = tileRow + r;
+        uint gOut = tileCol + c;
+        if (gRow < P_ && gOut < out_) {
+            Y[gRow * out_ + gOut] = acc[i];
+        }
     }
 }

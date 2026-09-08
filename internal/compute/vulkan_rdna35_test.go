@@ -2,6 +2,7 @@ package compute
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 	"math/rand"
 	"testing"
@@ -256,6 +257,129 @@ func executeWave32WMMAGEMM_INT8(A, B []int8, M, N, K int) []float32 {
 	return outC
 }
 
+// executeWave32BlockTiledQ8GEMM simulates q8_matmul.comp 2D block-tiled Wave32 cooperative matrix GEMM (#12178)
+// with 4 Wave32 waves per workgroup (32x32 tile), LDS staging for weights and activations, and
+// Wave32 WMMA 16x16x16 accumulation scaled by per-block Wscale and Xs.
+func executeWave32BlockTiledQ8GEMM(codes []int8, scales []float32, X []float32, outDim, inDim, P int) []float32 {
+	outY := make([]float32, P*outDim)
+	const (
+		tileM      = 32
+		tileN      = 32
+		block      = 32
+		waveTileM  = 16
+		waveTileN  = 16
+		wavesPerWg = 4
+	)
+	nblk := inDim / block
+
+	for wgRow := 0; wgRow < P; wgRow += tileM {
+		for wgCol := 0; wgCol < outDim; wgCol += tileN {
+			acc := make([][8]float32, 128)
+
+			for b := 0; b < nblk; b++ {
+				ldsX_f32 := make([]float32, tileM*block)
+				for r := 0; r < tileM; r++ {
+					gRow := wgRow + r
+					for c := 0; c < block; c++ {
+						gCol := b*block + c
+						if gRow < P && gCol < inDim {
+							ldsX_f32[r*block+c] = X[gRow*inDim+gCol]
+						}
+					}
+				}
+
+				ldsTileW := make([]int8, block*tileN)
+				for o := 0; o < tileN; o++ {
+					gOut := wgCol + o
+					for k := 0; k < block; k++ {
+						gIn := b*block + k
+						if gOut < outDim && gIn < inDim {
+							ldsTileW[k*tileN+o] = codes[gOut*inDim+gIn]
+						}
+					}
+				}
+
+				ldsWs := make([]float32, tileN)
+				for o := 0; o < tileN; o++ {
+					gOut := wgCol + o
+					if gOut < outDim {
+						ldsWs[o] = scales[gOut*nblk+b]
+					}
+				}
+
+				ldsXq := make([]int8, tileM*block)
+				ldsXs := make([]float32, tileM)
+				for r := 0; r < tileM; r++ {
+					gRow := wgRow + r
+					var amax float32
+					if gRow < P {
+						for k := 0; k < block; k++ {
+							val := float32(math.Abs(float64(ldsX_f32[r*block+k])))
+							if val > amax {
+								amax = val
+							}
+						}
+					}
+					d := amax / 127.0
+					ldsXs[r] = d
+					var inv float32
+					if d > 0 {
+						inv = 1.0 / d
+					}
+					for k := 0; k < block; k++ {
+						if d > 0 {
+							ldsXq[r*block+k] = q8round(ldsX_f32[r*block+k] * inv)
+						}
+					}
+				}
+
+				ldsMatC := make([]int32, tileM*tileN)
+				for waveID := 0; waveID < wavesPerWg; waveID++ {
+					waveRow := (waveID / 2) * waveTileM
+					waveCol := (waveID % 2) * waveTileN
+
+					for wr := 0; wr < waveTileM; wr++ {
+						for wc := 0; wc < waveTileN; wc++ {
+							var dot int32
+							for kHalf := 0; kHalf < block; kHalf += 16 {
+								for k := 0; k < 16; k++ {
+									aElem := int32(ldsXq[(waveRow+wr)*block+kHalf+k])
+									bElem := int32(ldsTileW[(kHalf+k)*tileN+(waveCol+wc)])
+									dot += aElem * bElem
+								}
+							}
+							ldsMatC[(waveRow+wr)*tileN+(waveCol+wc)] = dot
+						}
+					}
+				}
+
+				for tid := 0; tid < 128; tid++ {
+					for i := 0; i < 8; i++ {
+						item := tid*8 + i
+						r := item / 32
+						c := item % 32
+						acc[tid][i] += float32(ldsMatC[r*tileN+c]) * ldsWs[c] * ldsXs[r]
+					}
+				}
+			}
+
+			for tid := 0; tid < 128; tid++ {
+				for i := 0; i < 8; i++ {
+					item := tid*8 + i
+					r := item / 32
+					c := item % 32
+					gRow := wgRow + r
+					gOut := wgCol + c
+					if gRow < P && gOut < outDim {
+						outY[gRow*outDim+gOut] = acc[tid][i]
+					}
+				}
+			}
+		}
+	}
+	return outY
+}
+
 // rdna35TestAdvisor implements ctxmmu.MadviseAdvisor for cross-platform deterministic test execution.
 type rdna35TestAdvisor struct {
 	randomCalled  bool
@@ -377,6 +501,68 @@ func TestVulkanShadersParity(t *testing.T) {
 			if pipeINT8.TileK != 32 {
 				t.Errorf("pipeINT8.TileK = %d, want 32", pipeINT8.TileK)
 			}
+		}
+	})
+
+	// a2) Wave32_2DBlockTiledQ8GEMMParity:
+	// Tests 2D block-tiled Wave32 cooperative matrix Q8_0 GEMM matching q8_matmul.comp (#12178)
+	// against CPU reference across batch sizes 1, 4, 16, 64, and 512.
+	// Asserts cosine similarity >= 0.995 and argmax exact.
+	t.Run("Wave32_2DBlockTiledQ8GEMMParity", func(t *testing.T) {
+		batchSizes := []int{1, 4, 16, 64, 512}
+		outDim := 64
+		inDim := 64
+		rng := rand.New(rand.NewSource(12178))
+
+		nblk := inDim / 32
+		codes := make([]int8, outDim*inDim)
+		scales := make([]float32, outDim*nblk)
+		for i := range codes {
+			codes[i] = int8(rng.Intn(255) - 128)
+		}
+		for i := range scales {
+			scales[i] = (rng.Float32()*0.05 + 0.001)
+		}
+
+		for _, P := range batchSizes {
+			t.Run(fmt.Sprintf("batch_%d", P), func(t *testing.T) {
+				X := make([]float32, P*inDim)
+				for i := range X {
+					X[i] = rng.Float32()*2.0 - 1.0
+				}
+
+				// CPU golden reference: per-block quantizeVecQ8 + integer dot product
+				refY := make([]float32, P*outDim)
+				for tRow := 0; tRow < P; tRow++ {
+					for o := 0; o < outDim; o++ {
+						var sum float32
+						for b := 0; b < nblk; b++ {
+							xBlock := X[tRow*inDim+b*32 : tRow*inDim+(b+1)*32]
+							xq, xs := quantizeVecQ8(xBlock, 32)
+							var dot int32
+							for k := 0; k < 32; k++ {
+								dot += int32(codes[o*inDim+b*32+k]) * int32(xq[k])
+							}
+							sum += float32(dot) * scales[o*nblk+b] * xs[0]
+						}
+						refY[tRow*outDim+o] = sum
+					}
+				}
+
+				// Execute simulated 2D block-tiled Wave32 cooperative matrix GEMM
+				gotY := executeWave32BlockTiledQ8GEMM(codes, scales, X, outDim, inDim, P)
+
+				cosSim := CosineSimilarity(gotY, refY)
+				if cosSim < 0.995 {
+					t.Errorf("P=%d: cosine similarity = %.8f, want >= 0.995", P, cosSim)
+				}
+				for token := 0; token < P; token++ {
+					lo, hi := token*outDim, (token+1)*outDim
+					if argmaxF32(gotY[lo:hi]) != argmaxF32(refY[lo:hi]) {
+						t.Errorf("P=%d token %d: argmax mismatch: got %d, want %d", P, token, argmaxF32(gotY[lo:hi]), argmaxF32(refY[lo:hi]))
+					}
+				}
+			})
 		}
 	})
 
