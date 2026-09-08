@@ -22,6 +22,24 @@ func ParseDefect(kpi, raw string) Defect {
 	}
 
 	switch {
+	case strings.HasPrefix(raw, "one-off model-specific code "):
+		d.Kind = "one-off-model-code"
+		d.Categories = []Category{CategoryModularity}
+		rest := strings.TrimPrefix(raw, "one-off model-specific code ")
+		if idx := strings.Index(rest, ":"); idx != -1 {
+			d.Path = filepath.ToSlash(strings.TrimSpace(rest[:idx]))
+			rem := strings.TrimSpace(rest[idx+1:])
+			if strings.HasPrefix(rem, "line ") {
+				rem = strings.TrimPrefix(rem, "line ")
+				if colon := strings.Index(rem, ":"); colon != -1 {
+					if line, err := strconv.Atoi(rem[:colon]); err == nil {
+						d.Line = line
+					}
+				}
+			}
+		} else {
+			d.Path = filepath.ToSlash(strings.TrimSpace(rest))
+		}
 	case strings.HasPrefix(raw, "god-file "):
 		d.Kind = "god-file"
 		rest := strings.TrimPrefix(raw, "god-file ")
@@ -181,6 +199,34 @@ func (r *Report) Query(opts QueryOptions) QueryResult {
 	}
 
 	res.MatchedDebt = len(res.Defects)
+	res.MatchedWeightedDebt = 0.0
+	for _, d := range res.Defects {
+		w := 1.0
+		if len(d.Categories) > 0 {
+			if weight, ok := DefaultCategoryWeights[d.Categories[0]]; ok {
+				w = weight
+			}
+		}
+		res.MatchedWeightedDebt += w
+	}
+
+	res.TotalWeightedDebt = r.WeightedDebt
+	if res.TotalWeightedDebt == 0 && len(r.Defects) > 0 {
+		for _, d := range r.Defects {
+			w := 1.0
+			if len(d.Categories) > 0 {
+				if weight, ok := DefaultCategoryWeights[d.Categories[0]]; ok {
+					w = weight
+				}
+			}
+			res.TotalWeightedDebt += w
+		}
+	}
+
+	res.CategoryWeights = make(map[Category]float64)
+	for k, v := range DefaultCategoryWeights {
+		res.CategoryWeights[k] = v
+	}
 
 	// Sort defects deterministically: by Package, Path, Line, Kind, Raw
 	sort.Slice(res.Defects, func(i, j int) bool {
@@ -210,7 +256,8 @@ func (r *Report) Query(opts QueryOptions) QueryResult {
 // FormatText formats the query result as human-readable CLI text.
 func (res QueryResult) FormatText() string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("code-debt query: %d matched defect(s) (of %d total code debt)\n", res.MatchedDebt, res.TotalDebt))
+	sb.WriteString(fmt.Sprintf("code-debt query: %d matched defect(s) (weighted: %.1f; of %d total code debt, %.1f weighted)\n",
+		res.MatchedDebt, res.MatchedWeightedDebt, res.TotalDebt, res.TotalWeightedDebt))
 
 	if len(res.DebtByKPI) > 0 {
 		sb.WriteString("\nby KPI:\n")
@@ -257,7 +304,7 @@ func (res QueryResult) FormatText() string {
 // FormatSummary formats an aggregated summary of code debt.
 func (res QueryResult) FormatSummary() string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("code debt summary: %d total debt units\n", res.MatchedDebt))
+	sb.WriteString(fmt.Sprintf("code debt summary: %d total debt units (weighted: %.1f)\n", res.MatchedDebt, res.MatchedWeightedDebt))
 
 	sb.WriteString("\ncategories:\n")
 	var cats []string
@@ -313,11 +360,12 @@ func ParsePayload(data []byte) (*Report, error) {
 	var raw struct {
 		Workspace string `json:"workspace"`
 		Corpus    struct {
-			Score          float64        `json:"score"`
-			Grade          string         `json:"grade"`
-			CodeDebt       int            `json:"code_debt"`
-			DebtByCategory map[string]int `json:"debt_by_category"`
-			Breakdown      []struct {
+			Score            float64        `json:"score"`
+			Grade            string         `json:"grade"`
+			CodeDebt         int            `json:"code_debt"`
+			WeightedCodeDebt float64        `json:"weighted_code_debt"`
+			DebtByCategory   map[string]int `json:"debt_by_category"`
+			Breakdown        []struct {
 				KPI    string `json:"kpi"`
 				Score  int    `json:"score"`
 				Debt   int    `json:"debt"`
@@ -337,15 +385,21 @@ func ParsePayload(data []byte) (*Report, error) {
 	}
 
 	rep := &Report{
-		Workspace:    raw.Workspace,
-		TotalDebt:    raw.Corpus.CodeDebt,
-		Score:        raw.Corpus.Score,
-		Grade:        raw.Corpus.Grade,
-		DebtByKPI:    make(map[string]int),
-		DebtByCat:    make(map[Category]int),
-		DebtByPkg:    make(map[string]int),
-		Defects:      make([]Defect, 0),
-		KPISummaries: make(map[string]KPISummary),
+		Workspace:       raw.Workspace,
+		TotalDebt:       raw.Corpus.CodeDebt,
+		WeightedDebt:    raw.Corpus.WeightedCodeDebt,
+		Score:           raw.Corpus.Score,
+		Grade:           raw.Corpus.Grade,
+		DebtByKPI:       make(map[string]int),
+		DebtByCat:       make(map[Category]int),
+		DebtByPkg:       make(map[string]int),
+		CategoryWeights: make(map[Category]float64),
+		Defects:         make([]Defect, 0),
+		KPISummaries:    make(map[string]KPISummary),
+	}
+
+	for k, v := range DefaultCategoryWeights {
+		rep.CategoryWeights[k] = v
 	}
 
 	for cat, count := range raw.Corpus.DebtByCategory {
@@ -376,6 +430,28 @@ func ParsePayload(data []byte) (*Report, error) {
 
 	if rep.TotalDebt == 0 && len(rep.Defects) > 0 {
 		rep.TotalDebt = len(rep.Defects)
+	}
+
+	if rep.WeightedDebt == 0 && (len(rep.DebtByCat) > 0 || len(rep.Defects) > 0) {
+		if len(rep.DebtByCat) > 0 {
+			for cat, count := range rep.DebtByCat {
+				w := 1.0
+				if weight, ok := DefaultCategoryWeights[cat]; ok {
+					w = weight
+				}
+				rep.WeightedDebt += float64(count) * w
+			}
+		} else {
+			for _, d := range rep.Defects {
+				w := 1.0
+				if len(d.Categories) > 0 {
+					if weight, ok := DefaultCategoryWeights[d.Categories[0]]; ok {
+						w = weight
+					}
+				}
+				rep.WeightedDebt += w
+			}
+		}
 	}
 
 	return rep, nil

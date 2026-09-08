@@ -116,6 +116,20 @@ func ScanTree(opts ScanOptions) (*Report, error) {
 		}
 	}
 
+	report.CategoryWeights = make(map[Category]float64)
+	for k, v := range DefaultCategoryWeights {
+		report.CategoryWeights[k] = v
+	}
+
+	report.WeightedDebt = 0.0
+	for cat, count := range report.DebtByCat {
+		w := 1.0
+		if weight, ok := DefaultCategoryWeights[cat]; ok {
+			w = weight
+		}
+		report.WeightedDebt += float64(count) * w
+	}
+
 	populateKPISummaries(report, archDefects, testDefects, zeroAssertDefects, formatDefects, depDefects, honestyDefects, nonTrivialPkgs)
 	calculateScoreAndGrade(report)
 

@@ -130,6 +130,12 @@ DEBT_CATEGORIES: dict[str, str] = {
     "internal_coherence": "Related implementation pieces do not form a complete, intelligible whole.",
 }
 
+CATEGORY_DEBT_WEIGHTS: dict[str, float] = {
+    "modularity": 3.0,
+    "internal_consistency": 1.0,
+    "internal_coherence": 1.0,
+}
+
 KPI_DEBT_CATEGORIES: dict[str, tuple[str, ...]] = {
     "architecture": ("modularity",),
     "build": ("internal_coherence",),
@@ -438,6 +444,7 @@ def kpi_architecture(files: list[dict[str, Any]]) -> dict[str, Any]:
     soft: list[str] = []
     god_files = 0
     god_funcs = 0
+    model_findings = 0
     for f in files:
         if f["n_lines"] > FILE_HARD_MAX:
             god_files += 1
@@ -450,10 +457,18 @@ def kpi_architecture(files: list[dict[str, Any]]) -> dict[str, Any]:
                 defects.append(f"god-function {f['path']}:{name} ({length} lines > {FUNC_HARD_MAX})")
             elif length > FUNC_SOFT_MAX:
                 soft.append(f"long function {f['path']}:{name} ({length} lines)")
-    n = god_files + god_funcs
+        for item in f.get("model_hardcoding", []):
+            defects.append(f"one-off model-specific code {f['path']}: {item}")
+            model_findings += 1
+    n = god_files + god_funcs + model_findings
+    if n:
+        detail = f"{god_files} god-file(s), {god_funcs} god-function(s)"
+        if model_findings:
+            detail += f", {model_findings} model-specific"
+    else:
+        detail = f"no egregious outliers ({len(soft)} near-threshold)"
     return {"kpi": "architecture", "score": _clamp(100 - 12 * n - min(20, len(soft))),
-            "detail": (f"{god_files} god-file(s), {god_funcs} god-function(s)"
-                       if n else f"no egregious outliers ({len(soft)} near-threshold)"),
+            "detail": detail,
             "defects": defects, "soft": soft}
 
 
@@ -593,14 +608,21 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
         for category in kpi["debt_categories"]:
             debt_by_category[category] += len(kpi["defects"])
 
+    weighted_code_debt = round(
+        sum(debt_by_category[cat] * CATEGORY_DEBT_WEIGHTS.get(cat, 1.0) for cat in debt_by_category),
+        1,
+    )
+
     corpus = {
         "score": score,
         "grade": grade,
         "code_debt": code_debt,
+        "weighted_code_debt": weighted_code_debt,
         "soft_signals": n_soft,
         "kpi_scores": {k["kpi"]: k["score"] for k in kpis},
         "debt_by_kpi": {k["kpi"]: len(k["defects"]) for k in kpis},
         "debt_categories": DEBT_CATEGORIES.copy(),
+        "category_debt_weights": CATEGORY_DEBT_WEIGHTS.copy(),
         "debt_by_category": debt_by_category,
         "breakdown": breakdown,
     }
@@ -613,7 +635,7 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
     else:
         ok, verdict, finding = False, "ACTION", "code_debt"
         worst = breakdown[0]
-        reason = (f"{code_debt} unit(s) of code-debt; score {score}/100 (grade {grade}); "
+        reason = (f"{code_debt} unit(s) of code-debt (weighted: {weighted_code_debt}); score {score}/100 (grade {grade}); "
                   f"heaviest KPI: {worst['kpi']} ({worst['debt']} defect(s))")
         next_action = ("retire code-debt worst-first (see corpus.breakdown + per-KPI defects): "
                        "gofmt -w the unformatted files, fix vet diagnostics, split god-functions, "
@@ -1003,6 +1025,77 @@ def package_of(rel: str) -> str:
     return Path(rel).parent.as_posix()
 
 
+MODEL_HARDCODING_RE = re.compile(
+    r'\b(?:model|model_id|model_name|model_type|model_family|engine)\s*(?:==|!=)\s*"(qwen|glm|deepseek|llama|falcon|mistral|cohere)"|\bcase\s*"(qwen|glm|deepseek|llama|falcon|mistral|cohere)"',
+    re.IGNORECASE,
+)
+
+
+def is_model_exempt_package(pkg: str) -> bool:
+    p = pkg.replace("\\", "/").strip().lstrip("./")
+    exempt_prefixes = (
+        "internal/model",
+        "pkg/model",
+        "platform/model",
+        "cmd/model",
+        "tools",
+        "testdata",
+    )
+    return any(p == prefix or p.startswith(prefix + "/") or p.startswith(prefix) for prefix in exempt_prefixes)
+
+
+def _strip_comments_for_line(line: str, in_block: bool) -> tuple[str, bool]:
+    out: list[str] = []
+    i, n = 0, len(line)
+    while i < n:
+        c = line[i]
+        if in_block:
+            if c == "*" and i + 1 < n and line[i + 1] == "/":
+                in_block = False
+                i += 2
+                continue
+            i += 1
+            continue
+        if c == "/" and i + 1 < n and line[i + 1] == "*":
+            in_block = True
+            i += 2
+            continue
+        if c == "/" and i + 1 < n and line[i + 1] == "/":
+            break
+        if c == '"' or c == "'":
+            quote = c
+            out.append(c)
+            i += 1
+            while i < n:
+                ch = line[i]
+                out.append(ch)
+                if ch == "\\":
+                    if i + 1 < n:
+                        i += 1
+                        out.append(line[i])
+                    i += 1
+                    continue
+                if ch == quote:
+                    i += 1
+                    break
+                i += 1
+            continue
+        if c == "`":
+            out.append(c)
+            i += 1
+            while i < n:
+                ch = line[i]
+                out.append(ch)
+                if ch == "`":
+                    i += 1
+                    break
+                i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out), in_block
+
+
 def gather(root: Path, *, run_toolchain: bool, run_dos: bool,
            dos_range: str, deterministic: bool = False) -> list[dict[str, Any]]:
     """Read disk + (optionally) shell the toolchain, then run every pure KPI."""
@@ -1036,9 +1129,23 @@ def gather(root: Path, *, run_toolchain: bool, run_dos: bool,
     for rel in src_files:
         text = _safe_read(root / rel)
         info = scan_go_file(text)
-        scanned.append({"path": rel, "n_lines": info["n_lines"],
-                        "long_funcs": info["long_funcs"]})
         pkg = package_of(rel)
+        model_hardcoding: list[str] = []
+        if not is_model_exempt_package(pkg):
+            in_block = False
+            for lineno, raw_line in enumerate(text.splitlines(), 1):
+                code_line, in_block = _strip_comments_for_line(raw_line, in_block)
+                m = MODEL_HARDCODING_RE.search(code_line)
+                if m:
+                    model_hardcoding.append(f"line {lineno}: {m.group(0)}")
+        file_entry: dict[str, Any] = {
+            "path": rel,
+            "n_lines": info["n_lines"],
+            "long_funcs": info["long_funcs"],
+        }
+        if model_hardcoding:
+            file_entry["model_hardcoding"] = model_hardcoding
+        scanned.append(file_entry)
         # count FUNCTION declarations once (literal-aware) for the triviality gate.
         # NOT exported-symbol count (which re-counted exported funcs and folded in
         # types/vars, halving the effective TEST_MIN_FUNCS bar).
@@ -1186,12 +1293,15 @@ def collect(workspace: Path, *, run_toolchain: bool = True, run_dos: bool = True
 
 def render(payload: dict[str, Any]) -> str:
     c = payload.get("corpus") or {}
+    code_debt = c.get("code_debt", 0)
+    weighted_code_debt = c.get("weighted_code_debt", code_debt)
     lines = [
         f"code-quality-scorecard: {payload.get('verdict')} ({payload.get('finding')})",
         f"  {payload.get('reason')}",
         "",
         (f"score {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) "
-         f"· CODE-DEBT {c.get('code_debt', 0)} · {c.get('soft_signals', 0)} advisory"),
+         f"· CODE-DEBT {code_debt} (weighted: {weighted_code_debt}; modularity 3x) "
+         f"· {c.get('soft_signals', 0)} advisory"),
         "",
         "per-KPI (worst first):",
         f"  {'score':>5} {'debt':>4}  kpi            detail",
@@ -1257,6 +1367,7 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     out.append("| Metric | Value |")
     out.append("|---|---|")
     out.append(f"| **Code-debt (total HARD defects)** | **{c.get('code_debt', 0)}** |")
+    out.append(f"| **Weighted code-debt (modularity 3x)** | **{c.get('weighted_code_debt', 0)}** |")
     out.append(f"| Composite score | {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) |")
     out.append(f"| Advisory (soft) signals | {c.get('soft_signals', 0)} |")
     out.append("")
@@ -1275,10 +1386,13 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     out.append("")
     out.append("Stable category identifiers group related HARD findings across detector KPIs.")
     out.append("")
-    out.append("| Category | Debt | Meaning |")
-    out.append("|---|---:|---|")
+    out.append("| Category | Debt | Weight | Weighted | Meaning |")
+    out.append("|---|---:|---:|---:|---|")
     for category, meaning in DEBT_CATEGORIES.items():
-        out.append(f"| `{category}` | {c.get('debt_by_category', {}).get(category, 0)} | {meaning} |")
+        debt = c.get("debt_by_category", {}).get(category, 0)
+        weight = CATEGORY_DEBT_WEIGHTS.get(category, 1.0)
+        weighted = round(debt * weight, 1)
+        out.append(f"| `{category}` | {debt} | {weight}x | {weighted} | {meaning} |")
     out.append("")
     out.append("## Code-debt work-list")
     out.append("")
@@ -1352,7 +1466,16 @@ def filter_payload(payload: dict[str, Any], *, kpi: str = "", category: str = ""
     if "corpus" in out:
         out["corpus"]["code_debt"] = total_matched
         out["corpus"]["debt_by_category"] = cat_counts
+        weighted_code_debt = round(
+            sum(cat_counts[cat] * CATEGORY_DEBT_WEIGHTS.get(cat, 1.0) for cat in cat_counts),
+            1,
+        )
+        out["corpus"]["weighted_code_debt"] = weighted_code_debt
     out["matched_debt"] = total_matched
+    out["matched_weighted_debt"] = round(
+        sum(cat_counts[cat] * CATEGORY_DEBT_WEIGHTS.get(cat, 1.0) for cat in cat_counts),
+        1,
+    )
     return out
 
 

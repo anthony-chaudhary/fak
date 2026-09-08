@@ -819,6 +819,73 @@ def test_render_query_and_summary():
     assert "modularity" in summary_txt
 
 
+def test_build_payload_weighted_code_debt_modularity_3x():
+    kpis = [
+        {"kpi": "architecture", "score": 80, "detail": "2 god-function(s)",
+         "defects": ["god-function a.go:F1", "god-function a.go:F2"], "soft": []},
+        {"kpi": "format", "score": 90, "detail": "1 unformatted",
+         "defects": ["unformatted b.go"], "soft": []},
+        {"kpi": "tests", "score": 90, "detail": "1 untested",
+         "defects": ["untested c"], "soft": []},
+    ]
+    p = cq.build_payload(workspace="/x", kpis=kpis)
+    assert p["corpus"]["code_debt"] == 4
+    # modularity (architecture) = 2 defects * 3.0 = 6.0
+    # internal_consistency (format) = 1 defect * 1.0 = 1.0
+    # internal_coherence (tests) = 1 defect * 1.0 = 1.0
+    # total weighted = 8.0
+    assert p["corpus"]["weighted_code_debt"] == 8.0
+    assert p["corpus"]["category_debt_weights"] == {"modularity": 3.0, "internal_consistency": 1.0, "internal_coherence": 1.0}
+    assert "(weighted: 8.0)" in p["reason"]
+
+
+def test_kpi_architecture_model_hardcoding():
+    files = [
+        {
+            "path": "internal/gateway/handler.go",
+            "n_lines": 100,
+            "long_funcs": [],
+            "model_hardcoding": ['line 42: model == "qwen"', 'line 50: case "llama"'],
+        }
+    ]
+    k = cq.kpi_architecture(files)
+    assert len(k["defects"]) == 2
+    assert k["defects"][0] == 'one-off model-specific code internal/gateway/handler.go: line 42: model == "qwen"'
+    assert k["defects"][1] == 'one-off model-specific code internal/gateway/handler.go: line 50: case "llama"'
+    assert "model-specific" in k["detail"]
+
+    # Architecture defects must be categorized under modularity
+    attached = cq._attach_debt_categories(k.copy())
+    assert "modularity" in attached["debt_categories"]
+
+    p = cq.build_payload(workspace="/x", kpis=[k])
+    assert p["corpus"]["debt_by_category"]["modularity"] == 2
+    assert p["corpus"]["weighted_code_debt"] == 6.0  # 2 * 3.0
+
+
+def test_filter_payload_preserves_weighted_code_debt():
+    payload = {
+        "kpis": [
+            {"kpi": "architecture", "debt_categories": ["modularity"], "defects": ["god-file a.go", "god-function b.go:F"]},
+            {"kpi": "format", "debt_categories": ["internal_consistency"], "defects": ["unformatted c.go"]},
+        ],
+        "corpus": {
+            "code_debt": 3,
+            "weighted_code_debt": 7.0,
+            "debt_by_category": {"modularity": 2, "internal_consistency": 1, "internal_coherence": 0},
+        },
+    }
+    # Filter by architecture (modularity: 2 * 3.0 = 6.0)
+    f_arch = cq.filter_payload(payload, kpi="architecture")
+    assert f_arch["matched_debt"] == 2
+    assert f_arch["corpus"]["weighted_code_debt"] == 6.0
+
+    # Filter by format (internal_consistency: 1 * 1.0 = 1.0)
+    f_fmt = cq.filter_payload(payload, kpi="format")
+    assert f_fmt["matched_debt"] == 1
+    assert f_fmt["corpus"]["weighted_code_debt"] == 1.0
+
+
 def main() -> int:
     """Pure-stdlib runner: collects and runs every module-level test_* function so the
     suite runs in the pytest-free CI exactly like its scorecard-family siblings

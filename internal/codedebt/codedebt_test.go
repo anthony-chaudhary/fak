@@ -72,6 +72,22 @@ func TestParseDefectPatterns(t *testing.T) {
 			wantPkg:  ".",
 			wantCat:  CategoryInternalConsistency,
 		},
+		{
+			kpi:      "architecture",
+			raw:      "one-off model-specific code internal/gateway/handler.go: line 42: model == \"qwen\"",
+			wantKind: "one-off-model-code",
+			wantPath: "internal/gateway/handler.go",
+			wantPkg:  "internal/gateway",
+			wantCat:  CategoryModularity,
+		},
+		{
+			kpi:      "architecture",
+			raw:      "one-off model-specific code internal/agent/planner.go: case \"llama\"",
+			wantKind: "one-off-model-code",
+			wantPath: "internal/agent/planner.go",
+			wantPkg:  "internal/agent",
+			wantCat:  CategoryModularity,
+		},
 	}
 
 	for _, tc := range cases {
@@ -107,11 +123,20 @@ func TestQueryFilteringAndSummarization(t *testing.T) {
 	if qKPI.MatchedDebt != 2 {
 		t.Fatalf("Query(KPI: architecture) = %d, want 2", qKPI.MatchedDebt)
 	}
+	if qKPI.MatchedWeightedDebt != 6.0 {
+		t.Fatalf("Query(KPI: architecture) MatchedWeightedDebt = %v, want 6.0", qKPI.MatchedWeightedDebt)
+	}
+	if qKPI.TotalWeightedDebt != 8.0 {
+		t.Fatalf("Query(KPI: architecture) TotalWeightedDebt = %v, want 8.0", qKPI.TotalWeightedDebt)
+	}
 
 	// 2. Filter by Category
 	qCat := rep.Query(QueryOptions{Category: CategoryModularity})
 	if qCat.MatchedDebt != 2 {
 		t.Fatalf("Query(Category: modularity) = %d, want 2", qCat.MatchedDebt)
+	}
+	if qCat.MatchedWeightedDebt != 6.0 {
+		t.Fatalf("Query(Category: modularity) MatchedWeightedDebt = %v, want 6.0", qCat.MatchedWeightedDebt)
 	}
 
 	// 3. Filter by Path / Package
@@ -135,10 +160,16 @@ func TestQueryFilteringAndSummarization(t *testing.T) {
 	if !strings.Contains(summary, "modularity") || !strings.Contains(summary, "architecture") {
 		t.Fatalf("summary missing expected keywords: %s", summary)
 	}
+	if !strings.Contains(summary, "weighted: 8.0") {
+		t.Fatalf("summary missing weighted debt: %s", summary)
+	}
 
 	text := qKPI.FormatText()
 	if !strings.Contains(text, "god-file") || !strings.Contains(text, "god-function") {
 		t.Fatalf("formatted text missing defects: %s", text)
+	}
+	if !strings.Contains(text, "weighted: 6.0") || !strings.Contains(text, "8.0 weighted") {
+		t.Fatalf("formatted text missing weighted debt details: %s", text)
 	}
 }
 
@@ -184,6 +215,9 @@ func TestParsePayloadFromJSON(t *testing.T) {
 	if rep.TotalDebt != 3 {
 		t.Fatalf("TotalDebt = %d, want 3", rep.TotalDebt)
 	}
+	if rep.WeightedDebt != 7.0 {
+		t.Fatalf("WeightedDebt = %v, want 7.0 (derived: 2*3.0 + 1*1.0)", rep.WeightedDebt)
+	}
 	if rep.DebtByCat[CategoryModularity] != 2 {
 		t.Fatalf("modularity debt = %d, want 2", rep.DebtByCat[CategoryModularity])
 	}
@@ -192,6 +226,12 @@ func TestParsePayloadFromJSON(t *testing.T) {
 	res := rep.Query(QueryOptions{Package: "internal/foo"})
 	if res.MatchedDebt != 2 {
 		t.Fatalf("matched internal/foo debt = %d, want 2", res.MatchedDebt)
+	}
+	if res.MatchedWeightedDebt != 6.0 {
+		t.Fatalf("matched internal/foo weighted debt = %v, want 6.0", res.MatchedWeightedDebt)
+	}
+	if res.TotalWeightedDebt != 7.0 {
+		t.Fatalf("matched internal/foo total weighted debt = %v, want 7.0", res.TotalWeightedDebt)
 	}
 }
 
@@ -261,10 +301,21 @@ func TestScanTreeNative(t *testing.T) {
 	if archQuery.MatchedDebt != 2 {
 		t.Errorf("architecture debt = %d, want 2 (1 god-file + 1 god-function)", archQuery.MatchedDebt)
 	}
+	if archQuery.MatchedWeightedDebt != 6.0 {
+		t.Errorf("architecture weighted debt = %v, want 6.0 (2 defects * 3.0)", archQuery.MatchedWeightedDebt)
+	}
 
 	// Verify assertion strength detected
 	assertQuery := rep.Query(QueryOptions{KPI: "assertion_strength"})
 	if assertQuery.MatchedDebt != 1 {
 		t.Errorf("assertion_strength debt = %d, want 1", assertQuery.MatchedDebt)
+	}
+	if assertQuery.MatchedWeightedDebt != 1.0 {
+		t.Errorf("assertion_strength weighted debt = %v, want 1.0", assertQuery.MatchedWeightedDebt)
+	}
+
+	// Verify total weighted debt
+	if rep.WeightedDebt != 8.0 {
+		t.Errorf("total weighted debt = %v, want 8.0", rep.WeightedDebt)
 	}
 }
