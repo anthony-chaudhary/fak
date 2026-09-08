@@ -574,3 +574,539 @@ func TestRunAMDStrixValidate_HistoricalOrPartialReceiptFailsClosed(t *testing.T)
 	})
 }
 
+func TestRunAMDStrixValidate_RejectsPositionalArguments(t *testing.T) {
+	origRun := runStrixValidationFn
+	defer func() { runStrixValidationFn = origRun }()
+
+	runnerCalled := false
+	runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+		runnerCalled = true
+		return nil, errors.New("runner should not have been called")
+	}
+
+	var stdout, stderr bytes.Buffer
+	argv := []string{
+		"-committed-only",
+		"unexpected_positional_overlay.go",
+	}
+
+	code := RunAMDStrixValidate(&stdout, &stderr, argv)
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if runnerCalled {
+		t.Fatal("runner was called despite positional overlay arguments")
+	}
+	if !strings.Contains(stderr.String(), "positional") {
+		t.Errorf("expected stderr to mention positional arguments rejected, got: %s", stderr.String())
+	}
+}
+
+func TestRunAMDStrixValidate_AdmissionTimeoutValidation(t *testing.T) {
+	origRun := runStrixValidationFn
+	defer func() { runStrixValidationFn = origRun }()
+
+	runnerCalled := false
+	runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+		runnerCalled = true
+		return nil, errors.New("runner should not have been called")
+	}
+
+	t.Run("zero admission timeout is rejected", func(t *testing.T) {
+		runnerCalled = false
+		var stdout, stderr bytes.Buffer
+		code := RunAMDStrixValidate(&stdout, &stderr, []string{
+			"-committed-only",
+			"-admission-timeout", "0",
+			"-timeout", "45",
+		})
+		if code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		if runnerCalled {
+			t.Fatal("runner was called despite zero admission timeout")
+		}
+		if !strings.Contains(stderr.String(), "invalid admission timeout") {
+			t.Errorf("expected stderr to mention invalid admission timeout, got: %s", stderr.String())
+		}
+	})
+
+	t.Run("admission timeout exceeding total timeout is rejected", func(t *testing.T) {
+		runnerCalled = false
+		var stdout, stderr bytes.Buffer
+		code := RunAMDStrixValidate(&stdout, &stderr, []string{
+			"-committed-only",
+			"-admission-timeout", "50",
+			"-timeout", "45",
+		})
+		if code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		if runnerCalled {
+			t.Fatal("runner was called despite admission timeout >= total timeout")
+		}
+		if !strings.Contains(stderr.String(), "invalid admission timeout") {
+			t.Errorf("expected stderr to mention invalid admission timeout, got: %s", stderr.String())
+		}
+	})
+}
+
+func TestRunAMDStrixValidate_RejectsDuplicateOverlayPaths(t *testing.T) {
+	origRun := runStrixValidationFn
+	origGit := gitRevParseFn
+	defer func() {
+		runStrixValidationFn = origRun
+		gitRevParseFn = origGit
+	}()
+
+	tmpDir := t.TempDir()
+	overlayFile := filepath.Join(tmpDir, "duplicate_test.go")
+	if err := os.WriteFile(overlayFile, []byte("// duplicate test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	gitRevParseFn = func(ctx context.Context, dir string, args ...string) (string, error) {
+		return tmpDir, nil
+	}
+
+	runnerCalled := false
+	runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+		runnerCalled = true
+		return nil, errors.New("runner should not have been called")
+	}
+
+	var stdout, stderr bytes.Buffer
+	argv := []string{
+		"-git-tip", "a0123456789abcdef0123456789abcdef0123456",
+		"-candidate-dir", tmpDir,
+		"-mine", "duplicate_test.go",
+		"-mine", "./duplicate_test.go",
+	}
+
+	code := RunAMDStrixValidate(&stdout, &stderr, argv)
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if runnerCalled {
+		t.Fatal("runner was called despite duplicate overlay paths")
+	}
+	if !strings.Contains(stderr.String(), "duplicate overlay path") {
+		t.Errorf("expected stderr to mention duplicate overlay path, got: %s", stderr.String())
+	}
+}
+
+func TestRunAMDStrixValidate_RejectsAbsoluteOverlayPaths(t *testing.T) {
+	origRun := runStrixValidationFn
+	defer func() { runStrixValidationFn = origRun }()
+
+	runnerCalled := false
+	runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+		runnerCalled = true
+		return nil, errors.New("runner should not have been called")
+	}
+
+	var stdout, stderr bytes.Buffer
+	argv := []string{
+		"-git-tip", "a0123456789abcdef0123456789abcdef0123456",
+		"-mine", "/etc/passwd",
+	}
+
+	code := RunAMDStrixValidate(&stdout, &stderr, argv)
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if runnerCalled {
+		t.Fatal("runner was called despite absolute overlay path")
+	}
+	if !strings.Contains(stderr.String(), "absolute overlay path") {
+		t.Errorf("expected stderr to mention absolute overlay path, got: %s", stderr.String())
+	}
+}
+
+type mockSymlinkFileInfo struct {
+	os.FileInfo
+}
+
+func (m mockSymlinkFileInfo) Mode() os.FileMode {
+	return os.ModeSymlink
+}
+
+func (m mockSymlinkFileInfo) IsDir() bool {
+	return false
+}
+
+func TestRunAMDStrixValidate_RejectsSymlinkOverlay(t *testing.T) {
+	origRun := runStrixValidationFn
+	origGit := gitRevParseFn
+	origLstat := osLstatFn
+	defer func() {
+		runStrixValidationFn = origRun
+		gitRevParseFn = origGit
+		osLstatFn = origLstat
+	}()
+
+	tmpDir := t.TempDir()
+	targetFile := filepath.Join(tmpDir, "target.go")
+	if err := os.WriteFile(targetFile, []byte("// target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	gitRevParseFn = func(ctx context.Context, dir string, args ...string) (string, error) {
+		return tmpDir, nil
+	}
+	osLstatFn = func(name string) (os.FileInfo, error) {
+		if strings.HasSuffix(filepath.ToSlash(name), "symlink.go") {
+			fi, err := os.Lstat(targetFile)
+			if err != nil {
+				return nil, err
+			}
+			return mockSymlinkFileInfo{fi}, nil
+		}
+		return os.Lstat(name)
+	}
+
+	runnerCalled := false
+	runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+		runnerCalled = true
+		return nil, errors.New("runner should not have been called")
+	}
+
+	var stdout, stderr bytes.Buffer
+	argv := []string{
+		"-git-tip", "a0123456789abcdef0123456789abcdef0123456",
+		"-candidate-dir", tmpDir,
+		"-mine", "symlink.go",
+	}
+
+	code := RunAMDStrixValidate(&stdout, &stderr, argv)
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if runnerCalled {
+		t.Fatal("runner was called despite symlink overlay")
+	}
+	if !strings.Contains(stderr.String(), "symlink overlay rejected") {
+		t.Errorf("expected stderr to mention symlink overlay rejected, got: %s", stderr.String())
+	}
+}
+
+func TestRunAMDStrixValidate_CommittedOnlyMode(t *testing.T) {
+	origRun := runStrixValidationFn
+	origGit := gitRevParseFn
+	origStatus := gitStatusFn
+	defer func() {
+		runStrixValidationFn = origRun
+		gitRevParseFn = origGit
+		gitStatusFn = origStatus
+	}()
+
+	tmpDir := t.TempDir()
+	baseCommit := "c0123456789abcdef0123456789abcdef0123456"
+
+	gitRevParseFn = func(ctx context.Context, dir string, args ...string) (string, error) {
+		return tmpDir, nil
+	}
+
+	t.Run("dirty worktree fails closed in committed-only mode", func(t *testing.T) {
+		gitStatusFn = func(ctx context.Context, dir string) (string, error) {
+			return " M modified_file.go\n?? untracked.go", nil
+		}
+		runnerCalled := false
+		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			runnerCalled = true
+			return nil, errors.New("runner should not have been called")
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := RunAMDStrixValidate(&stdout, &stderr, []string{
+			"-git-tip", baseCommit,
+			"-candidate-dir", tmpDir,
+			"-committed-only",
+		})
+		if code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		if runnerCalled {
+			t.Fatal("runner was called on dirty worktree in committed-only mode")
+		}
+		if !strings.Contains(stderr.String(), "worktree is dirty") {
+			t.Errorf("expected stderr to mention worktree is dirty, got: %s", stderr.String())
+		}
+	})
+
+	t.Run("clean worktree builds empty overlay archive and calls runner", func(t *testing.T) {
+		gitStatusFn = func(ctx context.Context, dir string) (string, error) {
+			return "", nil
+		}
+		runnerCalled := false
+		var capturedOpts amdgpu.StrixValidationOpts
+		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			runnerCalled = true
+			capturedOpts = opts
+			target := amdgpu.StrixTarget{
+				Mode:         "ssh",
+				Host:         opts.Host,
+				Reachable:    true,
+				CPUModel:     "AMD Ryzen AI MAX+ 395",
+				GPUName:      "AMD Radeon 8060S Graphics",
+				TargetISA:    "gfx1151",
+				ComputeUnits: 40,
+				DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
+			}
+			receipt := amdgpu.NewStrixValidationReceipt(target, opts.GitRef, opts.GitTip, opts.Command)
+			receipt.Verdict = "PASS"
+			receipt.Verified = true
+			receipt.ExecutedCount = 1
+			receipt.Subkernels = []amdgpu.StrixSubkernelResult{
+				{
+					Name:       "argmax",
+					Status:     "PASS",
+					DurationUS: 350,
+					Parity: amdgpu.StrixParityVerdict{
+						Passed:                true,
+						LogitCosineSimilarity: 0.999999,
+					},
+				},
+			}
+			digest, _ := receipt.ComputeDigest()
+			receipt.Digest = digest
+			return receipt, nil
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := RunAMDStrixValidate(&stdout, &stderr, []string{
+			"-git-tip", baseCommit,
+			"-candidate-dir", tmpDir,
+			"-committed-only",
+			"-subkernels", "argmax",
+			"-ablate", "none",
+		})
+		if code != 0 {
+			t.Fatalf("expected exit code 0, got %d (stderr: %s)", code, stderr.String())
+		}
+		if !runnerCalled {
+			t.Fatal("expected runner to be called")
+		}
+		if capturedOpts.GitTip != baseCommit {
+			t.Errorf("GitTip = %q, want %q", capturedOpts.GitTip, baseCommit)
+		}
+		if !strings.HasPrefix(capturedOpts.GitRef, "sha256:") {
+			t.Errorf("GitRef = %q, expected sha256: prefix", capturedOpts.GitRef)
+		}
+	})
+
+	t.Run("both --mine and --committed-only is rejected", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := RunAMDStrixValidate(&stdout, &stderr, []string{
+			"-git-tip", baseCommit,
+			"-candidate-dir", tmpDir,
+			"-committed-only",
+			"-mine", "some_path.go",
+		})
+		if code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		if !strings.Contains(stderr.String(), "conflicting options") {
+			t.Errorf("expected stderr to mention conflicting options, got: %s", stderr.String())
+		}
+	})
+}
+
+func TestRunAMDStrixValidate_HumanOutput_RendersHistoricalNonCredit(t *testing.T) {
+	origRun := runStrixValidationFn
+	origStatus := gitStatusFn
+	defer func() {
+		runStrixValidationFn = origRun
+		gitStatusFn = origStatus
+	}()
+	gitStatusFn = func(ctx context.Context, dir string) (string, error) { return "", nil }
+
+	baseCommit := "d0123456789abcdef0123456789abcdef0123456"
+
+	t.Run("unverified PASS receipt renders historical/non-credit in human mode", func(t *testing.T) {
+		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			target := amdgpu.StrixTarget{
+				Mode:         "ssh",
+				Host:         opts.Host,
+				Reachable:    true,
+				CPUModel:     "AMD Ryzen AI MAX+ 395",
+				GPUName:      "AMD Radeon 8060S Graphics",
+				TargetISA:    "gfx1151",
+				ComputeUnits: 40,
+				DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
+			}
+			receipt := amdgpu.NewStrixValidationReceipt(target, opts.GitRef, opts.GitTip, opts.Command)
+			receipt.Verdict = "PASS"
+			receipt.Verified = false // Unverified
+			digest, _ := receipt.ComputeDigest()
+			receipt.Digest = digest
+			return receipt, nil
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := RunAMDStrixValidate(&stdout, &stderr, []string{
+			"-git-tip", baseCommit,
+			"-committed-only",
+			"-subkernels", "none",
+			"-ablate", "none",
+		})
+		if code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		outStr := stdout.String()
+		if strings.Contains(outStr, "Verdict:     PASS\n") {
+			t.Errorf("expected stdout NOT to render current 'Verdict:     PASS', got:\n%s", outStr)
+		}
+		if !strings.Contains(outStr, "PASS (historical/non-credit)") {
+			t.Errorf("expected stdout to render 'PASS (historical/non-credit)', got:\n%s", outStr)
+		}
+	})
+
+	t.Run("valid PASS receipt renders current PASS in human mode", func(t *testing.T) {
+		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			target := amdgpu.StrixTarget{
+				Mode:         "ssh",
+				Host:         opts.Host,
+				Reachable:    true,
+				CPUModel:     "AMD Ryzen AI MAX+ 395",
+				GPUName:      "AMD Radeon 8060S Graphics",
+				TargetISA:    "gfx1151",
+				ComputeUnits: 40,
+				DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
+			}
+			receipt := amdgpu.NewStrixValidationReceipt(target, opts.GitRef, opts.GitTip, opts.Command)
+			receipt.Verdict = "PASS"
+			receipt.Verified = true
+			receipt.ExecutedCount = 1
+			receipt.Subkernels = []amdgpu.StrixSubkernelResult{
+				{
+					Name:       "argmax",
+					Status:     "PASS",
+					DurationUS: 400,
+					Parity: amdgpu.StrixParityVerdict{
+						Passed:                true,
+						LogitCosineSimilarity: 0.999999,
+					},
+				},
+			}
+			digest, _ := receipt.ComputeDigest()
+			receipt.Digest = digest
+			return receipt, nil
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := RunAMDStrixValidate(&stdout, &stderr, []string{
+			"-git-tip", baseCommit,
+			"-committed-only",
+			"-subkernels", "argmax",
+			"-ablate", "none",
+		})
+		if code != 0 {
+			t.Fatalf("expected exit code 0, got %d (stderr: %s)", code, stderr.String())
+		}
+		outStr := stdout.String()
+		if !strings.Contains(outStr, "Verdict:     PASS\n") {
+			t.Errorf("expected stdout to render 'Verdict:     PASS', got:\n%s", outStr)
+		}
+		if strings.Contains(outStr, "historical/non-credit") {
+			t.Errorf("expected stdout not to mention historical/non-credit for valid PASS, got:\n%s", outStr)
+		}
+	})
+}
+
+func TestRunAMDStrixValidate_CanonicalRootAndBaseResolution(t *testing.T) {
+	origRun := runStrixValidationFn
+	origGit := gitRevParseFn
+	origStatus := gitStatusFn
+	defer func() {
+		runStrixValidationFn = origRun
+		gitRevParseFn = origGit
+		gitStatusFn = origStatus
+	}()
+	gitStatusFn = func(ctx context.Context, dir string) (string, error) { return "", nil }
+
+	mockRoot := "/mock/repo/root"
+	mockCommit := "e0123456789abcdef0123456789abcdef0123456"
+
+	revParseCalls := make([]string, 0)
+	gitRevParseFn = func(ctx context.Context, dir string, args ...string) (string, error) {
+		call := strings.Join(append([]string{dir}, args...), " ")
+		revParseCalls = append(revParseCalls, call)
+		if len(args) > 0 && args[0] == "--show-toplevel" {
+			return mockRoot, nil
+		}
+		if len(args) > 1 && args[0] == "--verify" && args[1] == "HEAD^{commit}" {
+			return mockCommit, nil
+		}
+		return "", errors.New("unrecognized rev-parse invocation")
+	}
+
+	var capturedOpts amdgpu.StrixValidationOpts
+	runnerCalled := false
+	runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+		runnerCalled = true
+		capturedOpts = opts
+		target := amdgpu.StrixTarget{
+			Mode:         "ssh",
+			Host:         opts.Host,
+			Reachable:    true,
+			CPUModel:     "AMD Ryzen AI MAX+ 395",
+			GPUName:      "AMD Radeon 8060S Graphics",
+			TargetISA:    "gfx1151",
+			ComputeUnits: 40,
+			DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
+		}
+		receipt := amdgpu.NewStrixValidationReceipt(target, opts.GitRef, opts.GitTip, opts.Command)
+		receipt.Verdict = "PASS"
+		receipt.Verified = true
+		receipt.ExecutedCount = 1
+		receipt.Subkernels = []amdgpu.StrixSubkernelResult{
+			{
+				Name:       "argmax",
+				Status:     "PASS",
+				DurationUS: 400,
+				Parity: amdgpu.StrixParityVerdict{
+					Passed:                true,
+					LogitCosineSimilarity: 0.999999,
+				},
+			},
+		}
+		digest, _ := receipt.ComputeDigest()
+		receipt.Digest = digest
+		return receipt, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := RunAMDStrixValidate(&stdout, &stderr, []string{
+		"-committed-only",
+		"-subkernels", "argmax",
+		"-ablate", "none",
+	})
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d (stderr: %s)", code, stderr.String())
+	}
+	if !runnerCalled {
+		t.Fatal("expected runner to be called")
+	}
+	if capturedOpts.GitTip != mockCommit {
+		t.Errorf("capturedOpts.GitTip = %q, want %q", capturedOpts.GitTip, mockCommit)
+	}
+
+	foundShowToplevel := false
+	foundVerifyCommit := false
+	for _, call := range revParseCalls {
+		if strings.Contains(call, "--show-toplevel") {
+			foundShowToplevel = true
+		}
+		if strings.Contains(call, "--verify") && strings.Contains(call, "HEAD^{commit}") {
+			foundVerifyCommit = true
+		}
+	}
+	if !foundShowToplevel {
+		t.Errorf("expected git rev-parse --show-toplevel to be invoked, calls: %v", revParseCalls)
+	}
+	if !foundVerifyCommit {
+		t.Errorf("expected git rev-parse --verify HEAD^{commit} to be invoked, calls: %v", revParseCalls)
+	}
+}
+
