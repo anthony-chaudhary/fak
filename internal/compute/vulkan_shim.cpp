@@ -219,7 +219,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -244,7 +244,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
         return g_dp.otherAttention;
     case K_ARGMAX: case K_ARGMAX_PAIRS:
         return g_dp.otherArgmax;
-    case K_QWEN35_GDN_CONV: case K_QWEN35_GDN_RECURRENT:
+    case K_QWEN35_GDN_Q8_IN_PROJ: case K_QWEN35_GDN_CONV: case K_QWEN35_GDN_RECURRENT:
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
     case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_COUNT:
@@ -289,6 +289,9 @@ static inline void dpOneShot(std::atomic<uint64_t>& family) {
 
 // Q8 fast-path availability (set in fvk_init from the device's 8-bit-storage + int8 features).
 int g_have_q8 = 0;
+// The four-projection GDN specialization is optional even when generic Q8 is
+// available: an absent or rejected pipeline must preserve the composed path.
+int g_have_qwen35_gdn_q8_in_proj = 0;
 // Fixed-size GLM KDA kernels require an explicitly requested 32-lane subgroup.
 // A local size of 128 alone is not a Wave32 contract: RADV may otherwise choose Wave64.
 int g_have_glm_kda_wave32 = 0;
@@ -299,11 +302,11 @@ int g_have_coopmat = 0;
 
 VkDescriptorPool g_descpool = VK_NULL_HANDLE;
 
-// 12 covers the widest fused kernel: rmsnorm_q8_matmul3 binds 11 (3 Q8 weight code+scale
-// pairs + X + NormW + Q/K/V outputs). At 10 that dispatch was silently skipped, zeroing its
-// output. Sizes the per-dispatch descriptor/buffer stack arrays; well under the device's
-// storage-buffer binding limit and the 32768-descriptor pool's headroom.
-static constexpr int MAX_DISPATCH_BUFS = 12;
+// 13 covers the widest fused kernel: Qwen GDN Q8 input projection binds four
+// code+scale pairs, X, and four outputs. Sizes the per-dispatch descriptor/buffer
+// stack arrays; well under the device's storage-buffer binding limit and the
+// 32768-descriptor pool's headroom.
+static constexpr int MAX_DISPATCH_BUFS = 13;
 
 struct DescriptorSetRecord {
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
@@ -1078,6 +1081,7 @@ int fvk_device_identity(char* name, int namelen, uint32_t* vendor_id,
 }
 
 int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
+    g_have_qwen35_gdn_q8_in_proj = 0;
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "fak";
     app.apiVersion = VK_API_VERSION_1_2;
@@ -1363,6 +1367,11 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
             !buildKernel(g_kern[K_SWIGLU_Q8_MATMUL_ADD], P("swiglu_q8_matmul_add.spv"), 5, 3 * sizeof(int))) {
             g_have_q8 = 0;
         }
+    }
+    if (g_have_q8) {
+        g_have_qwen35_gdn_q8_in_proj = buildKernel(
+            g_kern[K_QWEN35_GDN_Q8_IN_PROJ], P("qwen35_gdn_q8_in_proj.spv"),
+            13, 5 * sizeof(int)) ? 1 : 0;
     }
 
     g_ready = true;
@@ -1674,6 +1683,7 @@ int fvk_device_allocation_window_end(uint64_t token, uint64_t* live_bytes,
 void fvk_sync(void) { if (g_dev) vkDeviceWaitIdle(g_dev); }
 
 int fvk_have_q8(void) { return g_have_q8; }
+int fvk_have_qwen35_gdn_q8_in_proj(void) { return g_have_qwen35_gdn_q8_in_proj; }
 int fvk_have_glm_kda_wave32(void) { return g_have_glm_kda_wave32; }
 int fvk_have_cooperative_matrix(void) { return g_have_coopmat; }
 uint64_t fvk_max_buffer_bytes(void) { return (uint64_t)g_maxBufferBytes; }
@@ -1803,6 +1813,53 @@ void fvk_q8_matmul3_f32(const void* dW0codes, const void* dW0scale,
     uint32_t totalOut = (uint32_t)(out0 + out1 + out2);
     uint32_t outGroups = (totalOut + 255u) / 256u;
     dispatch(g_kern[K_Q8_MATMUL3], bufs, &pc, sizeof(pc), (uint32_t)P * outGroups);
+}
+
+int fvk_qwen35_gdn_q8_in_proj_f32(
+    const void* dW0codes, const void* dW0scale,
+    const void* dW1codes, const void* dW1scale,
+    const void* dW2codes, const void* dW2scale,
+    const void* dW3codes, const void* dW3scale,
+    const void* dX, void* dY0, void* dY1, void* dY2, void* dY3,
+    int out0, int out1, int out2, int out3, int in) {
+    if (!g_ready) return 1;
+    if (!g_have_qwen35_gdn_q8_in_proj ||
+        g_kern[K_QWEN35_GDN_Q8_IN_PROJ].pipe == VK_NULL_HANDLE) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (out0 <= 0 || out1 <= 0 || out2 <= 0 || out3 <= 0 || in <= 0 || (in & 31) != 0)
+        return 2;
+
+    uint64_t in64 = (uint64_t)in;
+    uint64_t blocks = in64 / 32u;
+    uint64_t outs[4] = {(uint64_t)out0, (uint64_t)out1, (uint64_t)out2, (uint64_t)out3};
+    const void* codes[4] = {dW0codes, dW1codes, dW2codes, dW3codes};
+    const void* scales[4] = {dW0scale, dW1scale, dW2scale, dW3scale};
+    void* outputs[4] = {dY0, dY1, dY2, dY3};
+    if (!dX || in64 * sizeof(float) > B((void*)dX)->bytes) return 2;
+    uint64_t totalOut = 0;
+    for (int i = 0; i < 4; ++i) {
+        if (!codes[i] || !scales[i] || !outputs[i]) return 2;
+        uint64_t codeBytes = outs[i] * in64;
+        uint64_t scaleBytes = outs[i] * blocks * sizeof(float);
+        uint64_t outputBytes = outs[i] * sizeof(float);
+        if (codeBytes > B((void*)codes[i])->bytes ||
+            scaleBytes > B((void*)scales[i])->bytes ||
+            outputBytes > B(outputs[i])->bytes) return 2;
+        totalOut += outs[i];
+    }
+    if (totalOut == 0 || totalOut > UINT32_MAX - 7u) return 2;
+
+    struct { int out0, out1, out2, out3, inDim; } pc{out0, out1, out2, out3, in};
+    Buffer* bufs[13] = {
+        B((void*)dW0codes), B((void*)dW0scale),
+        B((void*)dW1codes), B((void*)dW1scale),
+        B((void*)dW2codes), B((void*)dW2scale),
+        B((void*)dW3codes), B((void*)dW3scale),
+        B((void*)dX), B(dY0), B(dY1), B(dY2), B(dY3),
+    };
+    dispatch(g_kern[K_QWEN35_GDN_Q8_IN_PROJ], bufs, &pc, sizeof(pc),
+             (uint32_t)((totalOut + 7u) / 8u));
+    return (int)g_submissionStatus;
 }
 
 void fvk_rmsnorm_q8_matmul2_f32(const void* dW0codes, const void* dW0scale,
