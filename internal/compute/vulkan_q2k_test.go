@@ -333,15 +333,26 @@ func TestVulkanQ2KShaderInvariants(t *testing.T) {
 		"int outDim;",
 		"int inDim;",
 		"int tokens;",
-		"uint base = uint((row * blocks + sb) * 84);",
-		"halfAt(base + 80u)",
-		"halfAt(base + 82u)",
+		"int row = int(gl_GlobalInvocationID.x);",
+		"int token = int(gl_GlobalInvocationID.y);",
+		"uint code0_0 = (q0_0 >> shift) & 3u;",
+		"float w0_0 = dl0 * float(code0_0) - ml0;",
+		"y[token * pc.outDim + row] = sum;",
 	}
 
 	for _, clause := range requiredClauses {
 		if !strings.Contains(src, clause) {
 			t.Errorf("q2k_matmul.comp missing required clause: %q", clause)
 		}
+	}
+
+	shimPath := filepath.Join(repoRoot, "internal", "compute", "vulkan_shim.cpp")
+	shimBytes, err := os.ReadFile(shimPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", shimPath, err)
+	}
+	if clause := "(uint32_t)(((size_t)out + 63u) / 64u), (uint32_t)P"; !strings.Contains(string(shimBytes), clause) {
+		t.Errorf("vulkan_shim.cpp missing Q2_K 2-D dispatch clause: %q", clause)
 	}
 }
 
@@ -444,38 +455,55 @@ func TestVulkanQ2KMatMulMatchesCPUReference(t *testing.T) {
 	if !ok {
 		t.Skip("Vulkan backend unavailable")
 	}
-	const out, in = 8, 512
-	raw := make([]byte, out*(in/q2kSuper)*q2kSuperBlock)
 	rng := rand.New(rand.NewSource(9718))
-	for b := 0; b < out*(in/q2kSuper); b++ {
-		blk := raw[b*q2kSuperBlock : (b+1)*q2kSuperBlock]
-		for i := 0; i < 16; i++ {
-			blk[i] = byte(rng.Intn(256))
-		}
-		for i := 16; i < 80; i++ {
-			blk[i] = byte(rng.Intn(256))
-		}
-		binaryPutFloat16(blk[80:82], float32(rng.Float64()*1.0+0.5))
-		binaryPutFloat16(blk[82:84], float32(rng.Float64()*0.5+0.1))
-	}
-	x := make([]float32, in)
-	for i := range x {
-		x[i] = rng.Float32()*2 - 1
-	}
-	hw := NewQ2K(Default(), []int{out, in}, raw)
-	dw := v.Upload(hw, Q2_K)
-	defer v.Free(dw)
-	dx := v.Upload(NewF32(Default(), []int{in}, x), F32)
-	defer v.Free(dx)
-	dy := v.MatMul(dw, dx)
-	defer v.Free(dy)
-	got := v.Read(dy)
-	want := Default().Read(Default().MatMul(hw, NewF32(Default(), []int{in}, x)))
-	if a, b := argmaxF32(got), argmaxF32(want); a != b {
-		t.Fatalf("argmax=%d want %d", a, b)
-	}
-	if c := cosineC(got, want); c < 0.995 {
-		t.Fatalf("cosine %.8f < 0.995", c)
+	for _, tc := range []struct {
+		name string
+		out  int
+		P    int
+	}{
+		{name: "decode", out: 64, P: 1},
+		{name: "decode_row_tail", out: 67, P: 1},
+		{name: "prefill_panel_tail", out: 67, P: 3},
+		{name: "prefill_full_panel", out: 67, P: 4},
+		{name: "prefill_multi_panel_tail", out: 67, P: 7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const in = 512
+			hw := q2FusedWeight(Q2_K, tc.out, in)
+			dw := v.Upload(hw, Q2_K)
+			defer v.Free(dw)
+			X := make([]float32, tc.P*in)
+			for i := range X {
+				X[i] = rng.Float32()*2 - 1
+			}
+			dx := v.Upload(NewF32(Default(), []int{tc.P, in}, X), F32)
+			defer v.Free(dx)
+			var dy Tensor
+			if tc.P == 1 {
+				dy = v.MatMul(dw, dx)
+			} else {
+				dy = v.BatchedMatMul(dw, dx, tc.P)
+			}
+			defer v.Free(dy)
+			got := v.Read(dy)
+			ref := Default()
+			var want []float32
+			if tc.P == 1 {
+				want = ref.Read(ref.MatMul(hw, NewF32(ref, []int{in}, X)))
+			} else {
+				want = ref.Read(ref.BatchedMatMul(hw, NewF32(ref, []int{tc.P, in}, X), tc.P))
+			}
+			if c := cosineC(got, want); c < 0.999990 {
+				t.Fatalf("cosine %.8f < 0.999990", c)
+			}
+			for token := 0; token < tc.P; token++ {
+				gotRow := got[token*tc.out : (token+1)*tc.out]
+				wantRow := want[token*tc.out : (token+1)*tc.out]
+				if a, b := argmaxF32(gotRow), argmaxF32(wantRow); a != b {
+					t.Fatalf("token %d argmax=%d want %d", token, a, b)
+				}
+			}
+		})
 	}
 }
 
@@ -484,30 +512,36 @@ func BenchmarkVulkanQ2KMatMul(b *testing.B) {
 	if !ok {
 		b.Skip("Vulkan backend unavailable")
 	}
-	const out, in = 8, 512
-	raw := make([]byte, out*(in/q2kSuper)*q2kSuperBlock)
-	rng := rand.New(rand.NewSource(9718))
-	for bIdx := 0; bIdx < out*(in/q2kSuper); bIdx++ {
-		blk := raw[bIdx*q2kSuperBlock : (bIdx+1)*q2kSuperBlock]
-		for i := 0; i < 80; i++ {
-			blk[i] = byte(rng.Intn(256))
-		}
-		binaryPutFloat16(blk[80:82], 1.0)
-		binaryPutFloat16(blk[82:84], 0.2)
-	}
-	x := make([]float32, in)
-	for i := range x {
-		x[i] = rng.Float32()*2 - 1
-	}
-	hw := NewQ2K(Default(), []int{out, in}, raw)
-	dw := v.Upload(hw, Q2_K)
-	defer v.Free(dw)
-	dx := v.Upload(NewF32(Default(), []int{in}, x), F32)
-	defer v.Free(dx)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		dy := v.MatMul(dw, dx)
-		v.Free(dy)
+	for _, tc := range []struct {
+		name string
+		P    int
+	}{
+		{name: "decode_5120x5120_p1", P: 1},
+		{name: "prefill_5120x5120_p4", P: 4},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			const out, in = 5120, 5120
+			hw := q2FusedWeight(Q2_K, out, in)
+			dw := v.Upload(hw, Q2_K)
+			defer v.Free(dw)
+			rng := rand.New(rand.NewSource(9718 + int64(tc.P)))
+			X := make([]float32, tc.P*in)
+			for i := range X {
+				X[i] = rng.Float32()*2 - 1
+			}
+			dx := v.Upload(NewF32(Default(), []int{tc.P, in}, X), F32)
+			defer v.Free(dx)
+			b.ReportMetric(float64(tc.P), "tokens/op")
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var dy Tensor
+				if tc.P == 1 {
+					dy = v.MatMul(dw, dx)
+				} else {
+					dy = v.BatchedMatMul(dw, dx, tc.P)
+				}
+				v.Free(dy)
+			}
+		})
 	}
 }

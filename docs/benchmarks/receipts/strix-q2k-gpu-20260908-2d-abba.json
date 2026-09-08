@@ -1,0 +1,59 @@
+{
+  "schema": "fak.strix.q2k-abba.v1",
+  "scope": "synthetic resident Q2_K primitive; native two-dimensional row/token dispatch candidate",
+  "hardware": {
+    "cpu": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "gpu": "AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+    "required_device_match": "8060S"
+  },
+  "source": {
+    "parent_revision": "e749fa5d969b8f3965aa25054abfea9eb9ba5def",
+    "candidate_revision": "e336cd11429697357bbf851111d9ecf49c88c7ea",
+    "parent_shader_blob": "4490a9a3fb68e08a61f04bfa1a47ccbf29c81434",
+    "candidate_shader_blob": "3443e4268d199e98bc5c0179836f72305df97d1f",
+    "parent_shim_blob": "1925bf01a09dafc0cdf562ed528013299e3e0897",
+    "candidate_shim_blob": "fa4e87912560abd694ed5b3d41a0444e1514cda7",
+    "candidate_test_blob": "b25b8773ddc00d6787ac2cda06e1cff77d1f51dc"
+  },
+  "artifacts": {
+    "parent_spirv_sha256": "bc21cf16289757519f0dedbabb32147148c9c21937027f7f7ff6a934ebabb602",
+    "candidate_spirv_sha256": "0955f58f5512f83c518b327df9e06faa6c85c58a827c9d966370da7ebbff4917",
+    "parent_binary_sha256": "fd5f5d3ce2f3fafdf274adf7762ba26f347ab31cb567c0f5d3f46aeaeef81aad",
+    "candidate_binary_sha256": "711bb9211dd45639130260b298248e421a1b2303c03c80ccd045cf058d305fdb"
+  },
+  "correctness": {
+    "command": "FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_EXPECT_DEVICE=8060S FAK_VULKAN_SPIRV=<candidate-spirv> compute-2d.test -test.run ^TestVulkanQ2KMatMulMatchesCPUReference$ -test.v",
+    "exit": 0,
+    "passed_panels": ["decode_p1", "decode_row_tail_p1", "prefill_panel_tail_p3", "prefill_full_panel_p4", "prefill_multi_panel_tail_p7"]
+  },
+  "protocol": {
+    "order": ["parent", "candidate", "candidate", "parent"],
+    "lease": "exclusive nonblocking flock /tmp/fak-gpu.lease held for the complete run",
+    "admission": "before every arm: no nonzero chat/completions route and gpu_busy_percent <= 5",
+    "benchmark": "BenchmarkVulkanQ2KMatMul, 500ms, count=5, GOMAXPROCS=2",
+    "successful_admission_gpu_busy_percent": [0, 4, 3, 4],
+    "gateway_inflight_requests": [1, 1, 1, 1],
+    "gateway_inflight_max_age_seconds": [0, 0, 0, 0]
+  },
+  "samples_ns_per_op": {
+    "parent_decode_p1": [79196, 78356, 80002, 80660, 80405, 78950, 78846, 80325, 79735, 80430],
+    "candidate_decode_p1": [67489, 66666, 66748, 66704, 66793, 67327, 67866, 69385, 68995, 68488],
+    "parent_prefill_p4": [127936, 127348, 126754, 127184, 127317, 127425, 127108, 127448, 127394, 127650],
+    "candidate_prefill_p4": [113251, 113056, 115645, 115012, 115515, 114478, 115548, 115360, 112839, 112448]
+  },
+  "summary": {
+    "parent_decode_mean_ns": 79690.5,
+    "parent_decode_stddev_ns": 801.8,
+    "candidate_decode_mean_ns": 67646.1,
+    "candidate_decode_stddev_ns": 1006.1,
+    "decode_improvement_percent": 15.114,
+    "parent_prefill_p4_mean_ns": 127356.4,
+    "parent_prefill_p4_stddev_ns": 314.9,
+    "candidate_prefill_p4_mean_ns": 114315.2,
+    "candidate_prefill_p4_stddev_ns": 1278.7,
+    "prefill_p4_improvement_percent": 10.240,
+    "allocs_per_op_parent": 2,
+    "allocs_per_op_candidate": 2
+  },
+  "decision": "PRIMITIVE KEEP GATE PASS: candidate beats the exact parent and historical 223733 ns decode / 299272 ns P4 bars with unchanged allocation count and physical parity. Full-model keep gate remains pending and no source has landed on main."
+}

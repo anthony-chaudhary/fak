@@ -1,0 +1,63 @@
+{
+  "schema": "fak.strix.q2k-abba.v1",
+  "scope": "synthetic resident Q2_K primitive; rejected four-token panel-reuse candidate",
+  "hardware": {
+    "cpu": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "gpu": "AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+    "required_device_match": "8060S"
+  },
+  "source": {
+    "parent_revision": "e749fa5d969b8f3965aa25054abfea9eb9ba5def",
+    "candidate_revision": "c79771f01f97a889f05040fa3860bd2f7b675e95",
+    "parent_shader_blob": "4490a9a3fb68e08a61f04bfa1a47ccbf29c81434",
+    "candidate_shader_blob": "a8fa6e1860227bdb42ea5579ffb3d80127dab5bf",
+    "parent_shim_blob": "1925bf01a09dafc0cdf562ed528013299e3e0897",
+    "candidate_shim_blob": "65b94e329076112a454f18cb49f6b10148ab07c3",
+    "candidate_test_blob": "542535065972264e8961eba954e078139fbec45b"
+  },
+  "artifacts": {
+    "parent_spirv_sha256": "bc21cf16289757519f0dedbabb32147148c9c21937027f7f7ff6a934ebabb602",
+    "candidate_spirv_sha256": "b0d3c84b07a52545ff8c2db0644b954d2ab4530ae05b7ea0fb02ca4255556380",
+    "parent_binary_sha256": "fd5f5d3ce2f3fafdf274adf7762ba26f347ab31cb567c0f5d3f46aeaeef81aad",
+    "candidate_binary_sha256": "d02905bca29bb5e0a687d71619a9a462a8c1138465c71f2ca74453e8334b8b96"
+  },
+  "correctness": {
+    "command": "FAK_VULKAN_REQUIRE_DEVICE=1 FAK_VULKAN_EXPECT_DEVICE=8060S FAK_VULKAN_SPIRV=<candidate-spirv> compute-panel.test -test.run ^TestVulkanQ2KMatMulMatchesCPUReference$ -test.v",
+    "exit": 0,
+    "passed_panels": [
+      "decode_p1",
+      "decode_row_tail_p1",
+      "prefill_panel_tail_p3",
+      "prefill_full_panel_p4",
+      "prefill_multi_panel_tail_p7"
+    ]
+  },
+  "protocol": {
+    "order": ["parent", "candidate", "candidate", "parent"],
+    "lease": "exclusive nonblocking flock /tmp/fak-gpu.lease held for the complete run",
+    "admission": "before every arm: no nonzero chat/completions route and gpu_busy_percent <= 5",
+    "benchmark": "BenchmarkVulkanQ2KMatMul, 500ms, count=5, GOMAXPROCS=2",
+    "successful_admission_gpu_busy_percent": [0, 4, 5, 4],
+    "gateway_inflight_requests": [1, 1, 1, 1],
+    "gateway_inflight_max_age_seconds": [0, 0, 0, 0]
+  },
+  "samples_ns_per_op": {
+    "parent_decode_p1": [78516, 77555, 78360, 77750, 79401, 80231, 80721, 79164, 79283, 81270],
+    "candidate_decode_p1": [65739, 65569, 63963, 64101, 63813, 68294, 68675, 67733, 69080, 69074],
+    "parent_prefill_p4": [126014, 127783, 127278, 126975, 127216, 127340, 127494, 128032, 127717, 128054],
+    "candidate_prefill_p4": [1208741, 1205900, 1206491, 1216068, 1216307, 1536928, 1664507, 1553827, 1478958, 1501764]
+  },
+  "summary": {
+    "parent_decode_mean_ns": 79225.1,
+    "parent_decode_stddev_ns": 1233.1,
+    "candidate_decode_mean_ns": 66604.1,
+    "candidate_decode_stddev_ns": 2198.5,
+    "decode_candidate_over_parent": 0.841,
+    "parent_prefill_p4_mean_ns": 127390.3,
+    "parent_prefill_p4_stddev_ns": 599.6,
+    "candidate_prefill_p4_mean_ns": 1378949.1,
+    "candidate_prefill_p4_stddev_ns": 183729.7,
+    "prefill_candidate_over_parent": 10.824
+  },
+  "decision": "REJECT: parity and decode improved, but four-token panel reuse regressed P4 by 10.824x. No full-model run was admitted because the primitive keep gate failed. The next candidate isolates only the shorter-lived fused arithmetic observed in the decode branch."
+}

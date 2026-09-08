@@ -9,6 +9,10 @@
 //   - qs:     64 bytes (offset 16..79; 256 2-bit codes, packed 4 per byte)
 //   - d:      half (f16, offset 80..81)
 //   - dmin:   half (f16, offset 82..83)
+//
+// The native 2-D dispatch maps rows on X and tokens on Y. This preserves the
+// retained one-invocation-per-token-row arithmetic without integer divide or
+// modulo in every invocation.
 
 layout(local_size_x = 64) in;
 
@@ -33,18 +37,8 @@ float halfAt(uint off) {
 }
 
 void main() {
-    int globalIdx = int(gl_GlobalInvocationID.x);
-    int row;
-    int token;
-
-    // Handles both 1D dispatch ((outDim * tokens + 63) / 64) and 2D dispatch
-    if (pc.tokens > 1 && gl_NumWorkGroups.y == 1u) {
-        row = globalIdx % pc.outDim;
-        token = globalIdx / pc.outDim;
-    } else {
-        row = int(gl_GlobalInvocationID.x);
-        token = int(gl_GlobalInvocationID.y);
-    }
+    int row = int(gl_GlobalInvocationID.x);
+    int token = int(gl_GlobalInvocationID.y);
     if (row >= pc.outDim || token >= pc.tokens) return;
 
     int blocks = pc.inDim / 256;

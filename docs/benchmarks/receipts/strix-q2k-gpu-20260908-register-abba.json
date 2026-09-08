@@ -1,0 +1,54 @@
+{
+  "schema": "fak.strix.q2k-abba.v1",
+  "scope": "synthetic resident Q2_K primitive; rejected fused-expression/register-lifetime candidate",
+  "hardware": {
+    "cpu": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "gpu": "AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+    "required_device_match": "8060S"
+  },
+  "source": {
+    "parent_revision": "e749fa5d969b8f3965aa25054abfea9eb9ba5def",
+    "candidate_revision": "5213474cffdf21183495bb1813934361162dd21b",
+    "parent_shader_blob": "4490a9a3fb68e08a61f04bfa1a47ccbf29c81434",
+    "candidate_shader_blob": "4692c35721815bf3a00b8dbedf91039c3f5305f6",
+    "parent_shim_blob": "1925bf01a09dafc0cdf562ed528013299e3e0897",
+    "candidate_shim_blob": "c423867372abe79478eef44089056521cac0de93",
+    "candidate_test_blob": "c5704c4e9c36c34386aa8aba42b5828e82e46f7b"
+  },
+  "artifacts": {
+    "parent_spirv_sha256": "bc21cf16289757519f0dedbabb32147148c9c21937027f7f7ff6a934ebabb602",
+    "candidate_spirv_sha256": "b5d7fe6767e7931de9e6f16d30f680ac37ecccf5ebeb445af3a7e25d52e0eb59",
+    "parent_binary_sha256": "fd5f5d3ce2f3fafdf274adf7762ba26f347ab31cb567c0f5d3f46aeaeef81aad",
+    "candidate_binary_sha256": "377b88c0bbbf74fb46eb7f8a6df36e010d144a5998b449a0d62c65f4581126a0"
+  },
+  "correctness": {
+    "exit": 0,
+    "passed_panels": ["decode_p1", "decode_row_tail_p1", "prefill_panel_tail_p3", "prefill_full_panel_p4", "prefill_multi_panel_tail_p7"]
+  },
+  "protocol": {
+    "order": ["parent", "candidate", "candidate", "parent"],
+    "lease": "exclusive nonblocking flock /tmp/fak-gpu.lease held for the complete run",
+    "admission": "before every arm: no nonzero chat/completions route and gpu_busy_percent <= 5",
+    "benchmark": "BenchmarkVulkanQ2KMatMul, 500ms, count=5, GOMAXPROCS=2",
+    "successful_admission_gpu_busy_percent": [0, 4, 4, 4]
+  },
+  "samples_ns_per_op": {
+    "parent_decode_p1": [80284, 78861, 79106, 80037, 80828, 79322, 81139, 79481, 81147, 81046],
+    "candidate_decode_p1": [80348, 79934, 80646, 81080, 80756, 79776, 78057, 77865, 77668, 79864],
+    "parent_prefill_p4": [125156, 127902, 126291, 127727, 126975, 127594, 127881, 127672, 123862, 122917],
+    "candidate_prefill_p4": [128095, 126658, 129041, 129169, 128991, 129336, 128347, 129190, 129167, 129005]
+  },
+  "summary": {
+    "parent_decode_mean_ns": 80125.1,
+    "parent_decode_stddev_ns": 890.9,
+    "candidate_decode_mean_ns": 79599.4,
+    "candidate_decode_stddev_ns": 1270.0,
+    "decode_candidate_over_parent": 0.993,
+    "parent_prefill_p4_mean_ns": 126397.7,
+    "parent_prefill_p4_stddev_ns": 1817.1,
+    "candidate_prefill_p4_mean_ns": 128699.9,
+    "candidate_prefill_p4_stddev_ns": 819.0,
+    "prefill_candidate_over_parent": 1.018
+  },
+  "decision": "REJECT: decode was neutral within noise and P4 regressed 1.8%. No full-model run was admitted. Combined with the earlier panel receipt, this points to row/token index division rather than fused arithmetic as the source of the fast decode observation."
+}

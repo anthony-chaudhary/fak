@@ -1483,10 +1483,11 @@ extern "C" void fvk_q4k_matmul_f32(const void* dQ4K, const void* dX, void* dY,
     dispatch(g_kern[K_Q4K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)(((size_t)out * P + 63) / 64));
 }
 extern "C" void fvk_q2k_matmul_f32(const void* dQ2K, const void* dX, void* dY,
-                         int out, int in, int P) {
+                           int out, int in, int P) {
     struct PC { int out, in, p; } pc{out, in, P};
     Buffer* bufs[3] = {B((void*)dQ2K), B((void*)dX), B(dY)};
-    dispatch(g_kern[K_Q2K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)(((size_t)out * P + 63) / 64));
+    dispatch(g_kern[K_Q2K_MATMUL], bufs, &pc, sizeof(pc),
+             (uint32_t)(((size_t)out + 63u) / 64u), (uint32_t)P);
 }
 extern "C" void fvk_dispatch_profile_snapshot(fvk_dispatch_profile* out) {
     if (!out) return;
