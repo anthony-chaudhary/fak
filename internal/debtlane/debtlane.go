@@ -7,6 +7,31 @@ import (
 // Schema is the canonical schema identifier for the maturity debt lane scorecard and ledger.
 const Schema = "fak.maturity-debt-lane.v1"
 
+// Performance proof freshness failure reasons.
+const (
+	ReasonMismatchedRevision        = "mismatched_revision"
+	ReasonMismatchedWorkload        = "mismatched_workload"
+	ReasonMismatchedQualityEnvelope = "mismatched_quality_envelope"
+	ReasonReferenceEngine           = "reference_engine"
+	ReasonMissingPerfProof          = "missing_performance_proof"
+	ReasonStaleMeasurementAge       = "stale_measurement_age"
+	ReasonIncompatibleScope         = "incompatible_scope"
+)
+
+// PerformanceProof captures verified, workload-bound, and quality-constrained performance authority records.
+type PerformanceProof struct {
+	Lane              string `json:"lane,omitempty"`
+	Revision          string `json:"revision,omitempty"`           // Source revision (e.g. module@rev "internal/gateway@r10+g33144e097" or commit SHA)
+	Engine            string `json:"engine,omitempty"`             // Execution engine ("fak-native", "fak", or external reference like "llama.cpp")
+	Workload          string `json:"workload,omitempty"`           // Bound workload description (e.g. "T=50 A=5 P=2048", "batch=1,ctx=2048")
+	QualityEnvelope   string `json:"quality_envelope,omitempty"`   // Bound quality constraints (e.g. "Q8_0,lossless", "matched-weights,cosine=1.0")
+	ObservedAt        string `json:"observed_at,omitempty"`        // RFC3339 timestamp of the measurement
+	Artifact          string `json:"artifact,omitempty"`           // Path to committed benchmark artifact
+	IncompatibleScope string `json:"incompatible_scope,omitempty"` // Explicit incompatible scope for historical preservation (e.g. "qwen3.6-historical")
+	IsHistorical      bool   `json:"is_historical,omitempty"`      // Preserved as historical evidence
+	Reason            string `json:"reason,omitempty"`             // Evaluated freshness verdict or failure reason
+}
+
 // Criticality describes a unit of work's architectural role and blast radius.
 type Criticality string
 
@@ -111,34 +136,62 @@ type Evidence struct {
 	MaxFuncLines           int      `json:"max_func_lines,omitempty"`
 	ModelHardcodingCount   int      `json:"model_hardcoding_count,omitempty"`
 	HasModelHardcoding     bool     `json:"has_model_hardcoding,omitempty"`
-	HighCoupling           bool     `json:"high_coupling,omitempty"`
-	ModularityDeficit      bool     `json:"modularity_deficit,omitempty"`
-	ModularityIssues       []string `json:"modularity_issues,omitempty"`
+	HighCoupling           bool               `json:"high_coupling,omitempty"`
+	ModularityDeficit      bool               `json:"modularity_deficit,omitempty"`
+	ModularityIssues       []string           `json:"modularity_issues,omitempty"`
+	PerformanceProof       *PerformanceProof  `json:"performance_proof,omitempty"`
+	HistoricalProofs       []PerformanceProof `json:"historical_proofs,omitempty"`
+	CurrentRevision        string             `json:"current_revision,omitempty"`
+	RequiredWorkload       string             `json:"required_workload,omitempty"`
+	RequiredQuality        string             `json:"required_quality,omitempty"`
+	PerfProofReason        string             `json:"perf_proof_reason,omitempty"`
 }
 
 // DebtLane represents a dedicated maturity debt lane for one single unit of work.
 type DebtLane struct {
-	Lane                    string          `json:"lane"`                       // Unique lane identifier (leaf package or subsystem name).
-	Repo                    string          `json:"repo,omitempty"`             // Repository name (e.g. "fak", "fak-private").
-	UnitOfWork              string          `json:"unit_of_work"`               // Primary directory path (e.g. "internal/gateway" or "platform/dispatch").
-	Criticality             Criticality     `json:"criticality"`                // core, enabling, stewardship, peripheral.
-	Weight                  float64         `json:"weight"`                     // Relative weight in production denominator (e.g. 3.0 for core).
-	Maturity                float64         `json:"maturity"`                   // Current maturity on 0.0 - 10.0 curve.
-	MaturityRung            string          `json:"maturity_rung"`              // Name of closest lifecycle rung.
-	TargetMaturity          float64         `json:"target_maturity"`            // Target maturity ceiling under declared bounds.
-	MaturityGap             float64         `json:"maturity_gap"`               // max(0, TargetMaturity - Maturity).
-	DebtPrincipal           float64         `json:"debt_principal"`             // MaturityGap * Weight.
-	Interest                Interest        `json:"interest"`                   // Relative carrying cost rate & drivers.
-	CarryingCost            float64         `json:"carrying_cost"`              // DebtPrincipal * Interest.Rate (capped).
-	TotalDebt               float64         `json:"total_debt"`                 // DebtPrincipal + CarryingCost.
-	DenominatorContribution float64         `json:"denominator_contribution"`   // TargetMaturity * Weight (adds to production denominator).
-	RealizedContribution    float64         `json:"realized_contribution"`      // Maturity * Weight.
-	Bounds                  BoundsAndLimits `json:"bounds"`                     // Declared or derived constraints.
-	Evidence                Evidence        `json:"evidence"`                   // Ground-truth facts.
-	Related                 RelatedThings   `json:"related"`                    // Cross-indexed related items and companions.
-	Health                  LaneHealth      `json:"health"`                     // Multi-dimensional health verdict and score.
-	NextAction              string          `json:"next_action"`                // Concrete action to retire debt.
-	OpencodeCommand         []string        `json:"opencode_command,omitempty"` // Ready-to-run OpenCode worker command.
+	Lane                    string             `json:"lane"`                       // Unique lane identifier (leaf package or subsystem name).
+	Repo                    string             `json:"repo,omitempty"`             // Repository name (e.g. "fak", "fak-private").
+	UnitOfWork              string             `json:"unit_of_work"`               // Primary directory path (e.g. "internal/gateway" or "platform/dispatch").
+	Criticality             Criticality        `json:"criticality"`                // core, enabling, stewardship, peripheral.
+	Weight                  float64            `json:"weight"`                     // Relative weight in production denominator (e.g. 3.0 for core).
+	Maturity                float64            `json:"maturity"`                   // Current maturity on 0.0 - 10.0 curve.
+	MaturityRung            string             `json:"maturity_rung"`              // Name of closest lifecycle rung.
+	TargetMaturity          float64            `json:"target_maturity"`            // Target maturity ceiling under declared bounds.
+	MaturityGap             float64            `json:"maturity_gap"`               // max(0, TargetMaturity - Maturity).
+	DebtPrincipal           float64            `json:"debt_principal"`             // MaturityGap * Weight.
+	Interest                Interest           `json:"interest"`                   // Relative carrying cost rate & drivers.
+	CarryingCost            float64            `json:"carrying_cost"`              // DebtPrincipal * Interest.Rate (capped).
+	TotalDebt               float64            `json:"total_debt"`                 // DebtPrincipal + CarryingCost.
+	DenominatorContribution float64            `json:"denominator_contribution"`   // TargetMaturity * Weight (adds to production denominator).
+	RealizedContribution    float64            `json:"realized_contribution"`      // Maturity * Weight.
+	Bounds                  BoundsAndLimits    `json:"bounds"`                     // Declared or derived constraints.
+	Evidence                Evidence           `json:"evidence"`                   // Ground-truth facts.
+	Related                 RelatedThings      `json:"related"`                    // Cross-indexed related items and companions.
+	Health                  LaneHealth         `json:"health"`                     // Multi-dimensional health verdict and score.
+	NextAction              string             `json:"next_action"`                // Concrete action to retire debt.
+	OpencodeCommand         []string           `json:"opencode_command,omitempty"` // Ready-to-run OpenCode worker command.
+	PerformanceProof        *PerformanceProof  `json:"performance_proof,omitempty"`
+	HistoricalProofs        []PerformanceProof `json:"historical_proofs,omitempty"`
+	CurrentRevision         string             `json:"current_revision,omitempty"`
+	RequiredWorkload        string             `json:"required_workload,omitempty"`
+	RequiredQuality         string             `json:"required_quality,omitempty"`
+	PerfProofReason         string             `json:"perf_proof_reason,omitempty"`
+	IsPerformance           bool               `json:"is_performance,omitempty"`  // Explicit performance lane override
+	NonPerformance          bool               `json:"non_performance,omitempty"` // Explicit non-performance lane override
+}
+
+// IsPerformanceLane returns true if the lane represents a performance-critical path that requires proof freshness.
+func (l DebtLane) IsPerformanceLane() bool {
+	if l.NonPerformance {
+		return false
+	}
+	if l.IsPerformance {
+		return true
+	}
+	if l.Criticality == CriticalityStewardship || l.Criticality == CriticalityPeripheral {
+		return false
+	}
+	return l.Criticality == CriticalityCore || l.Criticality == CriticalityEnabling
 }
 
 // ProductionGrade holds the system-wide denominator and realized production-readiness metrics.
