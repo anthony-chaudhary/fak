@@ -3,12 +3,71 @@
 package compute
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 )
 
+type qwen35GDNPreprojectedParityOracleEvent struct {
+	Schema         string                                    `json:"schema"`
+	Selector       string                                    `json:"selector"`
+	TestName       string                                    `json:"test_name"`
+	OracleKind     string                                    `json:"oracle_kind"`
+	Engine         string                                    `json:"engine"`
+	DeviceObserved bool                                      `json:"device_observed"`
+	CaseCount      int                                       `json:"case_count"`
+	Passed         bool                                      `json:"passed"`
+	Observed       qwen35GDNPreprojectedParityOracleObserved `json:"observed"`
+	Bounds         qwen35GDNPreprojectedParityOracleBounds   `json:"bounds"`
+}
+
+type qwen35GDNPreprojectedParityOracleObserved struct {
+	MaxAbsDelta   float64 `json:"max_abs_delta"`
+	StateIdentity bool    `json:"state_identity"`
+	FiniteOutput  bool    `json:"finite_output"`
+}
+
+type qwen35GDNPreprojectedParityOracleBounds struct {
+	MaxAbsDelta          float64 `json:"max_abs_delta"`
+	RequireStateIdentity bool    `json:"require_state_identity"`
+	RequireFinite        bool    `json:"require_finite"`
+}
+
+func formatQwen35GDNPreprojectedParityOracle(maxAbsDelta float64, stateIdentity, finiteOutput bool, caseCount int) ([]byte, error) {
+	if caseCount <= 0 {
+		caseCount = 4
+	}
+	passed := stateIdentity && finiteOutput && maxAbsDelta <= 2e-4
+	event := qwen35GDNPreprojectedParityOracleEvent{
+		Schema:         "fak.strix.subkernel-parity/v1",
+		Selector:       "qwen35_gdn_preprojected",
+		TestName:       "TestVulkanQwen35GDNPreprojectedParityAndStateContinuity",
+		OracleKind:     "state_continuity",
+		Engine:         "fak-native/vulkan",
+		DeviceObserved: true,
+		CaseCount:      caseCount,
+		Passed:         passed,
+		Observed: qwen35GDNPreprojectedParityOracleObserved{
+			MaxAbsDelta:   maxAbsDelta,
+			StateIdentity: stateIdentity,
+			FiniteOutput:  finiteOutput,
+		},
+		Bounds: qwen35GDNPreprojectedParityOracleBounds{
+			MaxAbsDelta:          2e-4,
+			RequireStateIdentity: true,
+			RequireFinite:        true,
+		},
+	}
+	return json.Marshal(event)
+}
+
 func TestVulkanQwen35GDNPreprojectedParityAndStateContinuity(t *testing.T) {
 	be := vk(t)
+
+	var worstMaxAbsDelta float64
+	allStateIdentity := true
+	allFinite := true
+	caseCount := 0
 
 	testGDN := func(t *testing.T, tokens, nK, nV, kHd, vHd, kernel int, nonzeroRecState bool, inputScale float32) {
 		t.Helper()
@@ -77,6 +136,7 @@ func TestVulkanQwen35GDNPreprojectedParityAndStateContinuity(t *testing.T) {
 		}
 		t.Cleanup(func() { be.Free(out) })
 		if cs.Buf() != oldC || rs.Buf() != oldR {
+			allStateIdentity = false
 			t.Fatal("persistent state identity changed")
 		}
 		got := be.Read(out)
@@ -89,9 +149,14 @@ func TestVulkanQwen35GDNPreprojectedParityAndStateContinuity(t *testing.T) {
 			}
 			for i := range a {
 				if math.IsNaN(float64(a[i])) || math.IsInf(float64(a[i]), 0) || math.IsNaN(float64(b[i])) || math.IsInf(float64(b[i]), 0) {
+					allFinite = false
 					t.Fatalf("%s[%d] must be finite: got=%g want=%g", name, i, a[i], b[i])
 				}
-				if math.Abs(float64(a[i]-b[i])) > 2e-4 {
+				delta := math.Abs(float64(a[i] - b[i]))
+				if delta > worstMaxAbsDelta {
+					worstMaxAbsDelta = delta
+				}
+				if delta > 2e-4 {
 					t.Fatalf("%s[%d]=%g want %g", name, i, a[i], b[i])
 				}
 			}
@@ -99,6 +164,7 @@ func TestVulkanQwen35GDNPreprojectedParityAndStateContinuity(t *testing.T) {
 		closeVec("output", got, want)
 		closeVec("conv state", gotC, wantC)
 		closeVec("recurrent state", gotR, wantR)
+		caseCount++
 	}
 
 	t.Run("ZeroStateTwoTokens", func(t *testing.T) {
@@ -122,6 +188,120 @@ func TestVulkanQwen35GDNPreprojectedParityAndStateContinuity(t *testing.T) {
 	t.Run("SmallNormKeepsL2EpsilonSeparateFromRMS", func(t *testing.T) {
 		testGDN(t, 3, 1, 2, 4, 65, 3, true, .00025)
 	})
+
+	oracleJSON, err := formatQwen35GDNPreprojectedParityOracle(worstMaxAbsDelta, allStateIdentity, allFinite, caseCount)
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
+}
+
+func TestVulkanQwen35GDNPreprojectedParityOracleFormat(t *testing.T) {
+	raw, err := formatQwen35GDNPreprojectedParityOracle(1.2e-4, true, true, 4)
+	if err != nil {
+		t.Fatalf("formatQwen35GDNPreprojectedParityOracle failed: %v", err)
+	}
+	var parsed struct {
+		Schema         string `json:"schema"`
+		Selector       string `json:"selector"`
+		TestName       string `json:"test_name"`
+		OracleKind     string `json:"oracle_kind"`
+		Engine         string `json:"engine"`
+		DeviceObserved bool   `json:"device_observed"`
+		CaseCount      int    `json:"case_count"`
+		Passed         bool   `json:"passed"`
+		Observed       struct {
+			MaxAbsDelta   float64 `json:"max_abs_delta"`
+			StateIdentity bool    `json:"state_identity"`
+			FiniteOutput  bool    `json:"finite_output"`
+		} `json:"observed"`
+		Bounds struct {
+			MaxAbsDelta          float64 `json:"max_abs_delta"`
+			RequireStateIdentity bool    `json:"require_state_identity"`
+			RequireFinite        bool    `json:"require_finite"`
+		} `json:"bounds"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("unmarshal formatted oracle failed: %v", err)
+	}
+	if parsed.Schema != "fak.strix.subkernel-parity/v1" {
+		t.Errorf("schema = %q, want fak.strix.subkernel-parity/v1", parsed.Schema)
+	}
+	if parsed.Selector != "qwen35_gdn_preprojected" {
+		t.Errorf("selector = %q, want qwen35_gdn_preprojected", parsed.Selector)
+	}
+	if parsed.TestName != "TestVulkanQwen35GDNPreprojectedParityAndStateContinuity" {
+		t.Errorf("test_name = %q, want TestVulkanQwen35GDNPreprojectedParityAndStateContinuity", parsed.TestName)
+	}
+	if parsed.OracleKind != "state_continuity" {
+		t.Errorf("oracle_kind = %q, want state_continuity", parsed.OracleKind)
+	}
+	if parsed.Engine != "fak-native/vulkan" {
+		t.Errorf("engine = %q, want fak-native/vulkan", parsed.Engine)
+	}
+	if !parsed.DeviceObserved {
+		t.Errorf("device_observed must be true")
+	}
+	if parsed.CaseCount != 4 {
+		t.Errorf("case_count = %d, want 4", parsed.CaseCount)
+	}
+	if !parsed.Passed {
+		t.Errorf("passed must be true")
+	}
+	if parsed.Observed.MaxAbsDelta != 1.2e-4 {
+		t.Errorf("observed max_abs_delta = %g, want 1.2e-4", parsed.Observed.MaxAbsDelta)
+	}
+	if !parsed.Observed.StateIdentity {
+		t.Errorf("observed state_identity must be true")
+	}
+	if !parsed.Observed.FiniteOutput {
+		t.Errorf("observed finite_output must be true")
+	}
+	if parsed.Bounds.MaxAbsDelta != 2e-4 {
+		t.Errorf("bounds max_abs_delta = %g, want 2e-4", parsed.Bounds.MaxAbsDelta)
+	}
+	if !parsed.Bounds.RequireStateIdentity {
+		t.Errorf("bounds require_state_identity must be true")
+	}
+	if !parsed.Bounds.RequireFinite {
+		t.Errorf("bounds require_finite must be true")
+	}
+
+	// Boundary failure: delta exceeds threshold
+	failRaw, err := formatQwen35GDNPreprojectedParityOracle(3e-4, true, true, 4)
+	if err != nil {
+		t.Fatalf("format failed oracle failed: %v", err)
+	}
+	if err := json.Unmarshal(failRaw, &parsed); err != nil {
+		t.Fatalf("unmarshal fail oracle failed: %v", err)
+	}
+	if parsed.Passed {
+		t.Errorf("expected passed=false when max_abs_delta > 2e-4")
+	}
+
+	// Boundary failure: state identity broken
+	failRaw2, err := formatQwen35GDNPreprojectedParityOracle(1.2e-4, false, true, 4)
+	if err != nil {
+		t.Fatalf("format failed oracle 2 failed: %v", err)
+	}
+	if err := json.Unmarshal(failRaw2, &parsed); err != nil {
+		t.Fatalf("unmarshal fail oracle 2 failed: %v", err)
+	}
+	if parsed.Passed {
+		t.Errorf("expected passed=false when state_identity=false")
+	}
+
+	// Boundary failure: non-finite output
+	failRaw3, err := formatQwen35GDNPreprojectedParityOracle(1.2e-4, true, false, 4)
+	if err != nil {
+		t.Fatalf("format failed oracle 3 failed: %v", err)
+	}
+	if err := json.Unmarshal(failRaw3, &parsed); err != nil {
+		t.Fatalf("unmarshal fail oracle 3 failed: %v", err)
+	}
+	if parsed.Passed {
+		t.Errorf("expected passed=false when finite_output=false")
+	}
 }
 
 func qwen35GDNPreprojectedOracle(mixed, z, beta, alpha, convW, aLog, dtBias, norm, convState, recurrent []float32, tokens, nK, nV, kHd, vHd, kernel int, eps float32) ([]float32, []float32, []float32) {
