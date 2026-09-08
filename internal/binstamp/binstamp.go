@@ -16,6 +16,13 @@
 package binstamp
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
 	"runtime/debug"
 	"strings"
 
@@ -27,6 +34,145 @@ type Stamp struct {
 	Revision string // full VCS revision the binary was built from ("" if unstamped)
 	Dirty    bool   // built from a tree with uncommitted changes
 	HasVCS   bool   // a vcs.revision setting was present at all
+}
+
+// ExecutableProvenance is strict source and binary identity observed from the
+// running process. Unlike Stamp, it never uses a linker-injected fallback:
+// Revision and Dirty are accepted only when both corresponding Go build
+// settings are present and unambiguous. BinarySHA256 covers the bytes opened at
+// the path reported by os.Executable.
+//
+// This is intentionally a partial physical provenance envelope. It does not
+// claim a source archive, device, runtime, model inventory, or counters.
+type ExecutableProvenance struct {
+	revision     string
+	dirty        bool
+	binarySHA256 string
+	binaryBytes  int64
+}
+
+// Revision returns the full VCS revision embedded by the Go toolchain.
+func (p ExecutableProvenance) Revision() string { return p.revision }
+
+// Dirty reports the embedded vcs.modified tree state.
+func (p ExecutableProvenance) Dirty() bool { return p.dirty }
+
+// BinarySHA256 returns the lowercase SHA-256 of the opened executable bytes.
+func (p ExecutableProvenance) BinarySHA256() string { return p.binarySHA256 }
+
+// BinaryBytes returns the observed executable byte count.
+func (p ExecutableProvenance) BinaryBytes() int64 { return p.binaryBytes }
+
+// ObserveExecutableProvenance derives strict provenance for the running
+// executable. It accepts no identity arguments, so a benchmark caller cannot
+// relabel the source revision, tree state, or binary digest. Any missing,
+// malformed, ambiguous, or unstable observation returns a zero value.
+func ObserveExecutableProvenance() (ExecutableProvenance, error) {
+	return observeExecutableProvenance(
+		debug.ReadBuildInfo,
+		os.Executable,
+		func(path string) (provenanceFile, error) { return os.Open(path) },
+	)
+}
+
+type provenanceFile interface {
+	io.Reader
+	io.Closer
+	Stat() (fs.FileInfo, error)
+}
+
+func observeExecutableProvenance(
+	readBuildInfo func() (*debug.BuildInfo, bool),
+	executable func() (string, error),
+	openFile func(string) (provenanceFile, error),
+) (ExecutableProvenance, error) {
+	if readBuildInfo == nil || executable == nil || openFile == nil {
+		return ExecutableProvenance{}, errors.New("binstamp: executable provenance observer is unavailable")
+	}
+	info, ok := readBuildInfo()
+	if !ok || info == nil {
+		return ExecutableProvenance{}, errors.New("binstamp: Go build identity is unavailable")
+	}
+	revision, dirty, err := strictVCSIdentity(info)
+	if err != nil {
+		return ExecutableProvenance{}, err
+	}
+	path, err := executable()
+	if err != nil {
+		return ExecutableProvenance{}, fmt.Errorf("binstamp: current executable path: %w", err)
+	}
+	if strings.TrimSpace(path) == "" {
+		return ExecutableProvenance{}, errors.New("binstamp: current executable path is empty")
+	}
+	f, err := openFile(path)
+	if err != nil {
+		return ExecutableProvenance{}, fmt.Errorf("binstamp: open current executable: %w", err)
+	}
+	defer f.Close()
+
+	before, err := f.Stat()
+	if err != nil {
+		return ExecutableProvenance{}, fmt.Errorf("binstamp: stat current executable before hashing: %w", err)
+	}
+	if !before.Mode().IsRegular() || before.Size() <= 0 {
+		return ExecutableProvenance{}, fmt.Errorf("binstamp: current executable is not a non-empty regular file")
+	}
+	h := sha256.New()
+	read, err := io.Copy(h, f)
+	if err != nil {
+		return ExecutableProvenance{}, fmt.Errorf("binstamp: hash current executable: %w", err)
+	}
+	after, err := f.Stat()
+	if err != nil {
+		return ExecutableProvenance{}, fmt.Errorf("binstamp: stat current executable after hashing: %w", err)
+	}
+	if read != before.Size() || after.Size() != before.Size() || after.ModTime() != before.ModTime() {
+		return ExecutableProvenance{}, errors.New("binstamp: current executable changed while hashing")
+	}
+
+	return ExecutableProvenance{
+		revision:     revision,
+		dirty:        dirty,
+		binarySHA256: hex.EncodeToString(h.Sum(nil)),
+		binaryBytes:  read,
+	}, nil
+}
+
+func strictVCSIdentity(info *debug.BuildInfo) (string, bool, error) {
+	var revision, modified string
+	revisionCount, modifiedCount := 0, 0
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision, revisionCount = strings.TrimSpace(setting.Value), revisionCount+1
+		case "vcs.modified":
+			modified, modifiedCount = strings.TrimSpace(setting.Value), modifiedCount+1
+		}
+	}
+	if revisionCount != 1 || modifiedCount != 1 {
+		return "", false, errors.New("binstamp: binary requires exactly one vcs.revision and vcs.modified build setting")
+	}
+	if !fullRevision(revision) {
+		return "", false, errors.New("binstamp: binary requires a full 40-hex vcs.revision")
+	}
+	var dirty bool
+	switch modified {
+	case "true":
+		dirty = true
+	case "false":
+		dirty = false
+	default:
+		return "", false, fmt.Errorf("binstamp: vcs.modified has invalid value %q", modified)
+	}
+	return strings.ToLower(revision), dirty, nil
+}
+
+func fullRevision(revision string) bool {
+	if len(revision) != 40 {
+		return false
+	}
+	_, err := hex.DecodeString(revision)
+	return err == nil
 }
 
 // Freshness is the verdict of comparing a running stamp to a repo HEAD.
