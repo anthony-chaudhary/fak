@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -782,6 +783,18 @@ func HeadCommit(root string) string {
 func defaultPython() string {
 	if p := os.Getenv("FAK_PYTHON"); p != "" {
 		return p
+	}
+	candidates := []string{"python3", "python"}
+	if runtime.GOOS == "windows" {
+		candidates = []string{"python", "python3"}
+	}
+	for _, c := range candidates {
+		if _, err := exec.LookPath(c); err == nil {
+			return c
+		}
+	}
+	if runtime.GOOS == "windows" {
+		return "python"
 	}
 	return "python3"
 }

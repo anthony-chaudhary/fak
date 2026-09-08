@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -155,12 +156,22 @@ func HeadCommitShort(root string) string {
 }
 
 func defaultPython() string {
-	for _, c := range []string{"python3", "python"} {
+	if p := os.Getenv("FAK_PYTHON"); p != "" {
+		return p
+	}
+	candidates := []string{"python3", "python"}
+	if runtime.GOOS == "windows" {
+		candidates = []string{"python", "python3"}
+	}
+	for _, c := range candidates {
 		if _, err := exec.LookPath(c); err == nil {
 			return c
 		}
 	}
-	return "python"
+	if runtime.GOOS == "windows" {
+		return "python"
+	}
+	return "python3"
 }
 
 func rewriteGoRunFak(argv []string, fakBin string) []string {

@@ -160,7 +160,7 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 	opencodeCommands := fs.Bool("opencode-commands", false, "include ready-to-run opencode commands in JSON/Markdown plan")
 	model := fs.String("model", "", "model for OpenCode chats (-m)")
 	agent := fs.String("agent", "", "agent profile for OpenCode chats (--agent)")
-	variant := fs.String("variant", "high", "reasoning effort variant for OpenCode chats (--variant, default: high)")
+	variant := fs.String("variant", "", "explicit reasoning effort override for OpenCode chats (--variant); omitted by default so the agent profile controls effort")
 	interactive := fs.Bool("interactive", false, "spawn interactive chat mode (-i) instead of headless run")
 	worktree := fs.Bool("worktree", false, "prepare detached worker worktrees for each spawned chat")
 	dryRun := fs.Bool("dry-run", false, "preview OpenCode chat spawn commands without executing")
@@ -741,12 +741,12 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 				anyAcquired = true
 			}
 			for _, p := range c.ExactPaths {
-				if !containsStr(allExact, p) {
+				if !issueOrchestratorContainsStr(allExact, p) {
 					allExact = append(allExact, p)
 				}
 			}
 			for _, p := range c.NarrowedPaths {
-				if !containsStr(allNarrowed, p) {
+				if !issueOrchestratorContainsStr(allNarrowed, p) {
 					allNarrowed = append(allNarrowed, p)
 				}
 			}
@@ -984,7 +984,7 @@ func findLatestReceipt(root string) string {
 	return latestPath
 }
 
-func containsStr(slice []string, val string) bool {
+func issueOrchestratorContainsStr(slice []string, val string) bool {
 	for _, s := range slice {
 		if s == val {
 			return true
@@ -992,4 +992,3 @@ func containsStr(slice []string, val string) bool {
 	}
 	return false
 }
-
