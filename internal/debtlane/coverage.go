@@ -22,6 +22,8 @@ const (
 	SurfaceWorkflows SurfaceClass = "workflows" // CI/CD workflows (.github/workflows)
 	SurfaceExamples  SurfaceClass = "examples"  // Examples and runnable demos
 	SurfaceDocs      SurfaceClass = "docs"      // Technical documentation and guides
+	SurfaceUnknown     SurfaceClass = "unknown"     // Unknown surface class
+	SurfaceUnsupported SurfaceClass = "unsupported" // Unsupported repository surface root
 )
 
 // Standard 9 surface classes for full-breadth coverage.
@@ -56,6 +58,7 @@ const (
 	DimSubprocessExec      DetectorDimension = "subprocess_exec"      // Subprocess spawning in library packages
 	DimRaceFuzzStatus      DetectorDimension = "race_fuzz_status"      // Concurrency/parser lacking race/fuzz tests
 	DimStalePerfProof      DetectorDimension = "stale_perf_proof"      // Missing from benchmark authority or proof registry
+	DimCoverageDebt        DetectorDimension = "coverage_debt"        // Unknown, unsupported, or unreadable content
 )
 
 // Standard 15 detector dimensions for full-depth evaluation.
@@ -396,27 +399,31 @@ func BuildCoverageReceipt(workspace, targetRepo string, lanes []DebtLane, findin
 // classifySurface maps a unit of work directory path to its SurfaceClass.
 func classifySurface(path string) SurfaceClass {
 	norm := filepathToSlash(path)
+	norm = strings.TrimPrefix(norm, "./")
+	norm = strings.TrimPrefix(norm, "/")
 	switch {
-	case strings.HasPrefix(norm, "internal/"):
+	case strings.HasPrefix(norm, "internal/") || norm == "internal":
 		return SurfaceInternal
-	case strings.HasPrefix(norm, "pkg/"):
+	case strings.HasPrefix(norm, "pkg/") || norm == "pkg":
 		return SurfacePkg
-	case strings.HasPrefix(norm, "platform/"):
+	case strings.HasPrefix(norm, "platform/") || norm == "platform":
 		return SurfacePlatform
-	case strings.HasPrefix(norm, "cmd/"):
+	case strings.HasPrefix(norm, "cmd/") || norm == "cmd":
 		return SurfaceCmd
-	case strings.HasPrefix(norm, "tools/"):
+	case strings.HasPrefix(norm, "tools/") || norm == "tools":
 		return SurfaceTools
 	case strings.HasPrefix(norm, ".claude/skills/") || strings.HasPrefix(norm, ".agents/skills/") || strings.Contains(norm, "skills/"):
 		return SurfaceSkills
 	case strings.HasPrefix(norm, ".github/workflows") || strings.Contains(norm, "workflows/"):
 		return SurfaceWorkflows
-	case strings.HasPrefix(norm, "examples/"):
+	case strings.HasPrefix(norm, "examples/") || norm == "examples":
 		return SurfaceExamples
-	case strings.HasPrefix(norm, "docs/"):
+	case strings.HasPrefix(norm, "docs/") || norm == "docs":
 		return SurfaceDocs
+	case strings.HasPrefix(norm, "unsupported/") || norm == "unsupported" || strings.Contains(norm, "unsupported"):
+		return SurfaceUnsupported
 	default:
-		return SurfaceInternal
+		return SurfaceUnknown
 	}
 }
 

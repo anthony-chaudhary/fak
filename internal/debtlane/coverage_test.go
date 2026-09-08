@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -341,6 +343,528 @@ jobs:
 	}
 	if !foundTimeout {
 		t.Errorf("missing expected workflow timeout finding: %+v", findingsWf)
+	}
+}
+
+func TestCleanNineSurfaceFixtureScan(t *testing.T) {
+	tmp := t.TempDir()
+
+	// 1. internal/cleancore
+	intDir := filepath.Join(tmp, "internal", "cleancore")
+	if err := os.MkdirAll(intDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	intCode := `// Package cleancore provides clean core runtime functionality.
+package cleancore
+
+// Engine provides core operations.
+type Engine struct{}
+
+// Compute returns calculated result.
+func (e *Engine) Compute(x int) int {
+	return x * 2
+}
+`
+	if err := os.WriteFile(filepath.Join(intDir, "clean.go"), []byte(intCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	intTest := `package cleancore
+
+import "testing"
+
+func TestCompute(t *testing.T) {
+	e := &Engine{}
+	if got := e.Compute(3); got != 6 {
+		t.Fatalf("expected 6, got %d", got)
+	}
+}
+
+func BenchmarkCompute(b *testing.B) {
+	e := &Engine{}
+	for i := 0; i < b.N; i++ {
+		_ = e.Compute(i)
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(intDir, "clean_test.go"), []byte(intTest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. pkg/cleansdk
+	pkgDir := filepath.Join(tmp, "pkg", "cleansdk")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pkgCode := `// Package cleansdk provides clean public SDK methods.
+package cleansdk
+
+// Client provides clean client operations.
+type Client struct{}
+
+// Fetch returns verified data.
+func (c *Client) Fetch() string {
+	return "ok"
+}
+`
+	if err := os.WriteFile(filepath.Join(pkgDir, "sdk.go"), []byte(pkgCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pkgTest := `package cleansdk
+
+import "testing"
+
+func TestFetch(t *testing.T) {
+	c := &Client{}
+	if got := c.Fetch(); got != "ok" {
+		t.Fatalf("expected ok, got %s", got)
+	}
+}
+
+func BenchmarkFetch(b *testing.B) {
+	c := &Client{}
+	for i := 0; i < b.N; i++ {
+		_ = c.Fetch()
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(pkgDir, "sdk_test.go"), []byte(pkgTest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. platform/cleandisp
+	platDir := filepath.Join(tmp, "platform", "cleandisp")
+	if err := os.MkdirAll(platDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	platCode := `// Package cleandisp provides clean dispatch operations.
+package cleandisp
+
+// Dispatcher provides clean dispatch.
+type Dispatcher struct{}
+
+// Run executes a dispatch step.
+func (d *Dispatcher) Run() int {
+	return 1
+}
+`
+	if err := os.WriteFile(filepath.Join(platDir, "disp.go"), []byte(platCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	platTest := `package cleandisp
+
+import "testing"
+
+func TestRun(t *testing.T) {
+	d := &Dispatcher{}
+	if got := d.Run(); got != 1 {
+		t.Fatalf("expected 1, got %d", got)
+	}
+}
+
+func BenchmarkRun(b *testing.B) {
+	d := &Dispatcher{}
+	for i := 0; i < b.N; i++ {
+		_ = d.Run()
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(platDir, "disp_test.go"), []byte(platTest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. cmd/fak-clean
+	cmdDir := filepath.Join(tmp, "cmd", "fak-clean")
+	if err := os.MkdirAll(cmdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmdCode := `package main
+
+import (
+	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/cleancore"
+	"github.com/anthony-chaudhary/fak/pkg/cleansdk"
+	"github.com/anthony-chaudhary/fak/platform/cleandisp"
+)
+
+func main() {
+	e := &cleancore.Engine{}
+	c := &cleansdk.Client{}
+	d := &cleandisp.Dispatcher{}
+	fmt.Println(e.Compute(1), c.Fetch(), d.Run())
+}
+`
+	if err := os.WriteFile(filepath.Join(cmdDir, "main.go"), []byte(cmdCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmdTest := `package main
+
+import "testing"
+
+func TestMainExec(t *testing.T) {
+	x := 42
+	if x != 42 {
+		t.Fatal("unexpected")
+	}
+}
+
+func BenchmarkMainExec(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = i
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(cmdDir, "main_test.go"), []byte(cmdTest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 5. tools/cleantool
+	toolsDir := filepath.Join(tmp, "tools", "cleantool")
+	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toolCode := `package cleantool
+
+// RunTool executes tooling logic.
+func RunTool() string {
+	return "tool_ok"
+}
+`
+	if err := os.WriteFile(filepath.Join(toolsDir, "tool.go"), []byte(toolCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolTest := `package cleantool
+
+import "testing"
+
+func TestRunTool(t *testing.T) {
+	if got := RunTool(); got != "tool_ok" {
+		t.Fatalf("expected tool_ok, got %s", got)
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(toolsDir, "tool_test.go"), []byte(toolTest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 6. .claude/skills/cleanskill
+	skillDir := filepath.Join(tmp, ".claude", "skills", "cleanskill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var skillSb strings.Builder
+	skillSb.WriteString("---\nname: cleanskill\ndescription: A verified clean skill.\n---\n# Clean Skill\n\n")
+	for i := 0; i < 30; i++ {
+		skillSb.WriteString("This line provides detailed instructions for executing the verified clean skill workflow.\n")
+	}
+	skillSb.WriteString("\n## Verification\ngo test -v ./internal/...\n")
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillSb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 7. .github/workflows/ci.yml
+	wfDir := filepath.Join(tmp, ".github", "workflows")
+	if err := os.MkdirAll(wfDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wfCode := `name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - run: go test ./...
+`
+	if err := os.WriteFile(filepath.Join(wfDir, "ci.yml"), []byte(wfCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 8. examples/cleanex
+	exDir := filepath.Join(tmp, "examples", "cleanex")
+	if err := os.MkdirAll(exDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var exSb strings.Builder
+	exSb.WriteString("package cleanex\n\n// Example demonstrates verified usage.\nfunc ExampleUsage() int {\n")
+	for i := 0; i < 30; i++ {
+		exSb.WriteString("\t// Operation step in verified example\n")
+	}
+	exSb.WriteString("\treturn 100\n}\n")
+	if err := os.WriteFile(filepath.Join(exDir, "example.go"), []byte(exSb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 9. docs/guide.md
+	docsDir := filepath.Join(tmp, "docs")
+	if err := os.MkdirAll(docsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var docSb strings.Builder
+	docSb.WriteString("# Architecture Guide\n\nThis guide explains the verified production architecture.\n\n")
+	for i := 0; i < 20; i++ {
+		docSb.WriteString("Section detailing component interactions, safety invariants, and operating parameters.\n")
+	}
+	if err := os.WriteFile(filepath.Join(docsDir, "guide.md"), []byte(docSb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Generated artifact to test exclusion: docs/generated/auto.md
+	genDocsDir := filepath.Join(docsDir, "generated")
+	if err := os.MkdirAll(genDocsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	genContent := "# GENERATED from registry.json by `fak sync` — do not hand-edit.\nAuto-generated content.\n"
+	if err := os.WriteFile(filepath.Join(genDocsDir, "auto.md"), []byte(genContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Runtime proofs and benchmark authority for zero-gap core/enabling proof
+	matDir := filepath.Join(tmp, "internal", "maturity")
+	if err := os.MkdirAll(matDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	proofJSON := `[{"lane":"cleancore"},{"lane":"cleansdk"},{"lane":"cleandisp"}]`
+	if err := os.WriteFile(filepath.Join(matDir, "runtime-proofs.json"), []byte(proofJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	benchAuth := "# Benchmark Authority\n\n| Lane | Status |\n|---|---|\n| `cleancore` | pass |\n| `cleansdk` | pass |\n| `cleandisp` | pass |\n"
+	if err := os.WriteFile(filepath.Join(tmp, "BENCHMARK-AUTHORITY.md"), []byte(benchAuth), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Scan(Options{
+		WorkspaceRoot:   tmp,
+		ExpandedBreadth: true,
+	})
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+
+	if report.Coverage == nil {
+		t.Fatal("expected non-nil Coverage in report")
+	}
+
+	// Witness requirement 1: exact inventory/evidence counts and zero gaps
+	if report.Coverage.ObservedBreadth != 9 {
+		t.Errorf("expected 9 observed surface classes, got %d: %v",
+			report.Coverage.ObservedBreadth, report.Coverage.SurfaceClasses)
+	}
+	if report.Coverage.TargetBreadth != 9 {
+		t.Errorf("expected target breadth 9, got %d", report.Coverage.TargetBreadth)
+	}
+
+	// Exact count of units of work: 9 surfaces
+	if report.Coverage.ScannedUnits != 9 {
+		t.Errorf("expected exactly 9 scanned units, got %d", report.Coverage.ScannedUnits)
+	}
+
+	// Verify generated file docs/generated/auto.md was excluded from scanned files
+	// Non-generated code/content files across scanned units:
+	// internal/cleancore: clean.go (1)
+	// pkg/cleansdk: sdk.go (1)
+	// platform/cleandisp: disp.go (1)
+	// cmd/fak-clean: main.go (1)
+	// tools/cleantool: tool.go (1)
+	// .claude/skills/cleanskill: SKILL.md (1)
+	// .github/workflows: ci.yml (1)
+	// examples/cleanex: example.go (1)
+	// docs: guide.md (1)
+	// Total non-generated files across scanned units = 9
+	if report.Coverage.ScannedFiles != 9 {
+		t.Errorf("expected exactly 9 non-generated scanned files, got %d", report.Coverage.ScannedFiles)
+	}
+
+	// Zero gaps check: every lane must have 0 gap
+	for _, l := range report.Lanes {
+		if l.MaturityGap > 0 {
+			t.Errorf("lane %s (%s) has unexpected maturity gap %.1f (maturity %.1f, target %.1f)",
+				l.Lane, l.UnitOfWork, l.MaturityGap, l.Maturity, l.TargetMaturity)
+		}
+		if l.Evidence.FilesCount == 0 {
+			t.Errorf("lane %s (%s) has 0 evidence files; evidence must be derived from disk",
+				l.Lane, l.UnitOfWork)
+		}
+	}
+
+	if !report.OK {
+		t.Errorf("expected report.OK to be true for clean fixture, got false: %s", report.Reason)
+	}
+	if report.Coverage.FindingsCount != 0 {
+		t.Errorf("expected 0 findings for clean fixture, got %d: %+v",
+			report.Coverage.FindingsCount, report.Coverage.Findings)
+	}
+}
+
+func TestSeededExpandedSurfacesScan(t *testing.T) {
+	tmp := t.TempDir()
+
+	// 1. .agents/skills/seeded_agent
+	agentSkillDir := filepath.Join(tmp, ".agents", "skills", "seeded_agent")
+	if err := os.MkdirAll(agentSkillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentSkillDir, "SKILL.md"), []byte("# Bad Agent Skill\nNo frontmatter or verification\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. nested docs: docs/nested/sub/stub.md
+	nestedDocDir := filepath.Join(tmp, "docs", "nested", "sub")
+	if err := os.MkdirAll(nestedDocDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDocDir, "stub.md"), []byte("# Stub\nTODO: write docs\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. nested tools: tools/nested/tool.go
+	nestedToolDir := filepath.Join(tmp, "tools", "nested")
+	if err := os.MkdirAll(nestedToolDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toolCode := `package nested
+
+// TODO: implement this nested tool
+func Run() {
+	panic("not implemented")
+}
+`
+	if err := os.WriteFile(filepath.Join(nestedToolDir, "tool.go"), []byte(toolCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. unsupported root: unsupported_root/data.txt
+	unsupportedDir := filepath.Join(tmp, "unsupported_root")
+	if err := os.MkdirAll(unsupportedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unsupportedDir, "data.txt"), []byte("random data\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 5. unreadable file: docs/unreadable.txt
+	unreadablePath := filepath.Join(tmp, "docs", "unreadable.txt")
+	cleanupUnreadable := makeUnreadableFile(t, unreadablePath)
+	defer cleanupUnreadable()
+
+	report, err := Scan(Options{
+		WorkspaceRoot:   tmp,
+		ExpandedBreadth: true,
+	})
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+
+	if report.Coverage == nil {
+		t.Fatal("expected non-nil Coverage")
+	}
+
+	// Verify .agents/skills is inventoried
+	foundAgentSkill := false
+	for _, l := range report.Lanes {
+		if strings.Contains(l.Lane, "seeded_agent") || strings.Contains(l.UnitOfWork, ".agents") {
+			foundAgentSkill = true
+			if classifySurface(l.UnitOfWork) != SurfaceSkills {
+				t.Errorf("expected .agents/skills to be classified as skills, got %s", classifySurface(l.UnitOfWork))
+			}
+		}
+	}
+	if !foundAgentSkill {
+		t.Error("expected .agents/skills/seeded_agent to be inventoried in report.Lanes")
+	}
+
+	// Verify typed findings are emitted
+	foundSkillFM := false
+	foundSkillVerify := false
+	foundNestedDocStub := false
+	foundNestedToolStub := false
+	foundUnreadableFile := false
+	foundUnsupportedRoot := false
+
+	for _, f := range report.Coverage.Findings {
+		// Verify no unknown path is classified as internal
+		if strings.Contains(f.Path, "unsupported") && f.Surface == string(SurfaceInternal) {
+			t.Errorf("unsupported path %q was classified as internal!", f.Path)
+		}
+
+		if strings.Contains(f.Message, "missing YAML frontmatter") && strings.Contains(f.Path, "seeded_agent") {
+			foundSkillFM = true
+		}
+		if strings.Contains(f.Message, "missing verification") && strings.Contains(f.Path, "seeded_agent") {
+			foundSkillVerify = true
+		}
+		if strings.Contains(f.Message, "stub doc") && strings.Contains(f.Path, "stub.md") {
+			foundNestedDocStub = true
+		}
+		if (strings.Contains(f.Message, "stub debt") || strings.Contains(f.Message, "TODO")) && strings.Contains(f.Path, "nested") {
+			foundNestedToolStub = true
+		}
+		if f.Dimension == string(DimCoverageDebt) && strings.Contains(f.Message, "unreadable file") {
+			foundUnreadableFile = true
+		}
+		if f.Dimension == string(DimCoverageDebt) && strings.Contains(f.Message, "unsupported surface root") {
+			foundUnsupportedRoot = true
+			if f.Surface == string(SurfaceInternal) {
+				t.Errorf("unsupported root finding had surface internal: %+v", f)
+			}
+		}
+	}
+
+	if !foundSkillFM {
+		t.Errorf("missing expected frontmatter finding for .agents/skills: %+v", report.Coverage.Findings)
+	}
+	if !foundSkillVerify {
+		t.Errorf("missing expected verification finding for .agents/skills: %+v", report.Coverage.Findings)
+	}
+	if !foundNestedDocStub {
+		t.Errorf("missing expected nested doc stub finding: %+v", report.Coverage.Findings)
+	}
+	if !foundNestedToolStub {
+		t.Errorf("missing expected nested tool stub finding: %+v", report.Coverage.Findings)
+	}
+	if !foundUnreadableFile {
+		t.Errorf("missing expected unreadable file finding: %+v", report.Coverage.Findings)
+	}
+	if !foundUnsupportedRoot {
+		t.Errorf("missing expected unsupported root finding: %+v", report.Coverage.Findings)
+	}
+
+	// Verify classifySurface does not classify unsupported root as internal
+	if classifySurface("unsupported_root") == SurfaceInternal {
+		t.Error("classifySurface(\"unsupported_root\") must not return SurfaceInternal")
+	}
+}
+
+func makeUnreadableFile(t *testing.T, path string) func() {
+	t.Helper()
+	// On Windows, opening with 0 share mode prevents any reads
+	// On Unix, chmod 0000 prevents any reads
+	data := []byte("unreadable content\n")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Try creating unreadable file via Windows exclusive lock or chmod
+	closer := lockFileExclusively(path)
+	return func() {
+		closer()
+		_ = os.Remove(path)
+	}
+}
+
+func lockFileExclusively(path string) func() {
+	if runtime.GOOS == "windows" {
+		p, err := syscall.UTF16PtrFromString(path)
+		if err == nil {
+			h, err := syscall.CreateFile(p, syscall.GENERIC_READ|syscall.GENERIC_WRITE, 0, nil, syscall.OPEN_EXISTING, syscall.FILE_ATTRIBUTE_NORMAL, 0)
+			if err == nil {
+				return func() {
+					_ = syscall.CloseHandle(h)
+				}
+			}
+		}
+	}
+	_ = os.Chmod(path, 0000)
+	return func() {
+		_ = os.Chmod(path, 0644)
 	}
 }
 
