@@ -44,8 +44,8 @@ var mistralToolCallsRe = regexp.MustCompile(`(?s)\[TOOL_CALLS\]\s*(\[.*\])`)
 var fencedJSONRe = regexp.MustCompile("(?s)```(json|tool_call)?\\s*(\\{.*?\\}|\\[.*?\\])\\s*```")
 
 // exampleProseRe matches prose phrases that introduce a tool call as an example
-// rather than an executable instruction (#12042).
-var exampleProseRe = regexp.MustCompile(`(?i)(?:here(?:'s|\s+is)\s+an?\s+example|for\s+example|\bexample\s*:|\bsample\b|e\.g\.|eg\s*:)`)
+// rather than an executable instruction (#12042, #12067).
+var exampleProseRe = regexp.MustCompile(`(?i)(?:here(?:'s|\s+is)\s+an?\s+example|for\s+example|\b(?:examples?|for\s+instance|illustrative|mock)\b|\b(?:sample\s+(?:tool\s+call|call|payload|request))\b|e\.g\.|eg\s*:)`)
 
 // hermesToolCallPayload is the inner JSON of a text-embedded tool call. arguments
 // is intentionally a RawMessage: models emit it as either a JSON object (Hermes)
@@ -164,6 +164,9 @@ func extractQwenFunctionBlocks(content string) []liftedBlock {
 	}
 	var blocks []liftedBlock
 	for _, loc := range matches {
+		if isPrecededByExampleProse(content[:loc[0]]) {
+			continue
+		}
 		name, args, ok := parseQwenFunctionToolCall(content[loc[0]:loc[1]])
 		if !ok {
 			continue
@@ -204,6 +207,11 @@ func normalizeQwenFunctionToolCalls(content string) string {
 		}
 		end := start + len(open) + endRel + len(close)
 		block := content[start:end]
+		if isPrecededByExampleProse(content[:start]) {
+			out.WriteString(block)
+			cursor = end
+			continue
+		}
 		if name, args, ok := parseQwenFunctionToolCall(block); ok {
 			encoded, _ := json.Marshal(struct {
 				Name      string         `json:"name"`
@@ -293,6 +301,9 @@ func extractDelimited(re *regexp.Regexp) func(string) []liftedBlock {
 		}
 		var blocks []liftedBlock
 		for _, loc := range matches {
+			if isPrecededByExampleProse(content[:loc[0]]) {
+				continue
+			}
 			blocks = appendLiftedSpan(blocks, content[loc[2]:loc[3]], loc[0], loc[1])
 		}
 		return blocks
@@ -319,6 +330,9 @@ func extractArrayDelimited(re *regexp.Regexp) func(string) []liftedBlock {
 	return func(content string) []liftedBlock {
 		loc := re.FindStringSubmatchIndex(content)
 		if loc == nil {
+			return nil
+		}
+		if isPrecededByExampleProse(content[:loc[0]]) {
 			return nil
 		}
 		var raws []json.RawMessage
@@ -351,11 +365,29 @@ func arrayLiftedBlocks(raws []json.RawMessage, start, end int) []liftedBlock {
 	return blocks
 }
 
+var precedingBlockTerminators = []string{
+	"```",
+	"</tool_call>",
+	"</function_call>",
+	"</function>",
+	"<|eom_id|>",
+	"<|eot_id|>",
+}
+
 // isPrecededByExampleProse reports whether the preceding text indicates the following
-// fenced block is an illustrative example rather than an intended execution (#12042).
+// tool call block is an illustrative example rather than an intended execution (#12042, #12067).
 func isPrecededByExampleProse(preceding string) bool {
-	if idx := strings.LastIndex(preceding, "```"); idx >= 0 {
-		preceding = preceding[idx+3:]
+	lastEnd := -1
+	for _, term := range precedingBlockTerminators {
+		if idx := strings.LastIndex(preceding, term); idx >= 0 {
+			end := idx + len(term)
+			if end > lastEnd {
+				lastEnd = end
+			}
+		}
+	}
+	if lastEnd >= 0 {
+		preceding = preceding[lastEnd:]
 	}
 	return exampleProseRe.MatchString(preceding)
 }

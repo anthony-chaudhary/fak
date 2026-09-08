@@ -492,4 +492,198 @@ func TestFencedToolExampleDoesNotDispatch(t *testing.T) {
 			t.Errorf("content = %q, want %q", got.Message.Content, "Let me run it:")
 		}
 	})
+
+	t.Run("hermes_example_suppressed", func(t *testing.T) {
+		content := "Here is an example:\n<tool_call>{\"name\": \"sentinel\", \"arguments\": {\"target\": \"prod\"}}</tool_call>"
+		comp := &Completion{
+			Message: Message{
+				Role:    RoleAssistant,
+				Content: content,
+			},
+			FinishReason: "stop",
+		}
+		got := normalizeCompletionToolCalls(comp)
+		if len(got.Message.ToolCalls) != 0 {
+			t.Fatalf("expected 0 tool calls (suppressed), got %d: %+v", len(got.Message.ToolCalls), got.Message.ToolCalls)
+		}
+		if got.FinishReason != "stop" {
+			t.Errorf("finish_reason = %q, want stop", got.FinishReason)
+		}
+		if got.Message.Content != content {
+			t.Errorf("content was not preserved as content:\ngot:  %q\nwant: %q", got.Message.Content, content)
+		}
+	})
+
+	t.Run("mistral_example_suppressed", func(t *testing.T) {
+		content := "For example, you could run:\n[TOOL_CALLS][{\"name\": \"sentinel\", \"arguments\": {\"target\": \"prod\"}}]"
+		comp := &Completion{
+			Message: Message{
+				Role:    RoleAssistant,
+				Content: content,
+			},
+			FinishReason: "stop",
+		}
+		got := normalizeCompletionToolCalls(comp)
+		if len(got.Message.ToolCalls) != 0 {
+			t.Fatalf("expected 0 tool calls (suppressed), got %d: %+v", len(got.Message.ToolCalls), got.Message.ToolCalls)
+		}
+		if got.FinishReason != "stop" {
+			t.Errorf("finish_reason = %q, want stop", got.FinishReason)
+		}
+		if got.Message.Content != content {
+			t.Errorf("content was not preserved as content:\ngot:  %q\nwant: %q", got.Message.Content, content)
+		}
+	})
+
+	t.Run("llama_python_example_suppressed", func(t *testing.T) {
+		content := "Here is an example:\n<|python_tag|>{\"name\": \"sentinel\", \"arguments\": {\"target\": \"prod\"}}<|eom_id|>"
+		comp := &Completion{
+			Message: Message{
+				Role:    RoleAssistant,
+				Content: content,
+			},
+			FinishReason: "stop",
+		}
+		got := normalizeCompletionToolCalls(comp)
+		if len(got.Message.ToolCalls) != 0 {
+			t.Fatalf("expected 0 tool calls (suppressed), got %d: %+v", len(got.Message.ToolCalls), got.Message.ToolCalls)
+		}
+		if got.FinishReason != "stop" {
+			t.Errorf("finish_reason = %q, want stop", got.FinishReason)
+		}
+		if got.Message.Content != content {
+			t.Errorf("content was not preserved as content:\ngot:  %q\nwant: %q", got.Message.Content, content)
+		}
+	})
+
+	t.Run("bare_qwen_example_suppressed", func(t *testing.T) {
+		content := "Here is an example:\n<function=sentinel>\n<parameter=target>\nprod\n</parameter>\n</function>"
+		comp := &Completion{
+			Message: Message{
+				Role:    RoleAssistant,
+				Content: content,
+			},
+			FinishReason: "stop",
+		}
+		got := normalizeCompletionToolCalls(comp)
+		if len(got.Message.ToolCalls) != 0 {
+			t.Fatalf("expected 0 tool calls (suppressed), got %d: %+v", len(got.Message.ToolCalls), got.Message.ToolCalls)
+		}
+		if got.FinishReason != "stop" {
+			t.Errorf("finish_reason = %q, want stop", got.FinishReason)
+		}
+		if got.Message.Content != content {
+			t.Errorf("content was not preserved as content:\ngot:  %q\nwant: %q", got.Message.Content, content)
+		}
+	})
+
+	t.Run("query_data_sample_noun_dispatches", func(t *testing.T) {
+		comp := &Completion{
+			Message: Message{
+				Role:    RoleAssistant,
+				Content: "Query data sample:\n```json\n{\"name\": \"sentinel\", \"arguments\": {\"target\": \"prod\"}}\n```",
+			},
+			FinishReason: "stop",
+		}
+		got := normalizeCompletionToolCalls(comp)
+		if len(got.Message.ToolCalls) != 1 {
+			t.Fatalf("expected 1 tool call, got %d", len(got.Message.ToolCalls))
+		}
+		if got.Message.ToolCalls[0].Function.Name != "sentinel" {
+			t.Errorf("tool name = %q, want sentinel", got.Message.ToolCalls[0].Function.Name)
+		}
+		if got.FinishReason != "tool_calls" {
+			t.Errorf("finish_reason = %q, want tool_calls", got.FinishReason)
+		}
+		if got.Message.Content != "Query data sample:" {
+			t.Errorf("content = %q, want %q", got.Message.Content, "Query data sample:")
+		}
+	})
+
+	t.Run("process_audio_sample_noun_dispatches", func(t *testing.T) {
+		comp := &Completion{
+			Message: Message{
+				Role:    RoleAssistant,
+				Content: "Process audio sample:\n```json\n{\"name\": \"sentinel\", \"arguments\": {\"target\": \"prod\"}}\n```",
+			},
+			FinishReason: "stop",
+		}
+		got := normalizeCompletionToolCalls(comp)
+		if len(got.Message.ToolCalls) != 1 {
+			t.Fatalf("expected 1 tool call, got %d", len(got.Message.ToolCalls))
+		}
+		if got.Message.ToolCalls[0].Function.Name != "sentinel" {
+			t.Errorf("tool name = %q, want sentinel", got.Message.ToolCalls[0].Function.Name)
+		}
+		if got.FinishReason != "tool_calls" {
+			t.Errorf("finish_reason = %q, want tool_calls", got.FinishReason)
+		}
+		if got.Message.Content != "Process audio sample:" {
+			t.Errorf("content = %q, want %q", got.Message.Content, "Process audio sample:")
+		}
+	})
+}
+
+func TestLiftTextToolCalls_ExampleSuppression(t *testing.T) {
+	cases := []struct {
+		name        string
+		content     string
+		wantCalls   int
+		wantName    string
+		wantContent string
+	}{
+		{
+			name:        "hermes_example_suppressed",
+			content:     "Here is an example:\n<tool_call>{\"name\": \"Bash\", \"arguments\": {\"command\": \"ls\"}}</tool_call>",
+			wantCalls:   0,
+			wantContent: "Here is an example:\n<tool_call>{\"name\": \"Bash\", \"arguments\": {\"command\": \"ls\"}}</tool_call>",
+		},
+		{
+			name:        "mistral_example_suppressed",
+			content:     "For example:\n[TOOL_CALLS][{\"name\": \"Bash\", \"arguments\": {\"command\": \"ls\"}}]",
+			wantCalls:   0,
+			wantContent: "For example:\n[TOOL_CALLS][{\"name\": \"Bash\", \"arguments\": {\"command\": \"ls\"}}]",
+		},
+		{
+			name:        "llama_python_example_suppressed",
+			content:     "Here is an example:\n<|python_tag|>{\"name\": \"Bash\", \"arguments\": {\"command\": \"ls\"}}<|eom_id|>",
+			wantCalls:   0,
+			wantContent: "Here is an example:\n<|python_tag|>{\"name\": \"Bash\", \"arguments\": {\"command\": \"ls\"}}<|eom_id|>",
+		},
+		{
+			name:        "bare_qwen_example_suppressed",
+			content:     "Here is an example:\n<function=Bash>\n<parameter=command>\nls\n</parameter>\n</function>",
+			wantCalls:   0,
+			wantContent: "Here is an example:\n<function=Bash>\n<parameter=command>\nls\n</parameter>\n</function>",
+		},
+		{
+			name:        "query_data_sample_noun_dispatches",
+			content:     "Query data sample:\n```json\n{\"name\": \"Bash\", \"arguments\": {\"command\": \"ls\"}}\n```",
+			wantCalls:   1,
+			wantName:    "Bash",
+			wantContent: "Query data sample:",
+		},
+		{
+			name:        "process_audio_sample_noun_dispatches",
+			content:     "Process audio sample:\n```json\n{\"name\": \"Bash\", \"arguments\": {\"command\": \"ls\"}}\n```",
+			wantCalls:   1,
+			wantName:    "Bash",
+			wantContent: "Process audio sample:",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := LiftTextToolCalls(Message{Role: RoleAssistant, Content: tc.content})
+			if len(m.ToolCalls) != tc.wantCalls {
+				t.Fatalf("got %d tool calls, want %d", len(m.ToolCalls), tc.wantCalls)
+			}
+			if tc.wantCalls > 0 && m.ToolCalls[0].Function.Name != tc.wantName {
+				t.Errorf("tool name = %q, want %q", m.ToolCalls[0].Function.Name, tc.wantName)
+			}
+			if m.Content != tc.wantContent {
+				t.Errorf("content = %q, want %q", m.Content, tc.wantContent)
+			}
+		})
+	}
 }
