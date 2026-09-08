@@ -1,5 +1,64 @@
 package model
 
+import "fmt"
+
+type lmHeadProjectionMode uint8
+
+const (
+	lmHeadProjectFullSequence lmHeadProjectionMode = iota
+	lmHeadProjectSampledRows
+)
+
+// selectLMHeadProjectionRows makes the vocabulary-projection cardinality explicit.
+// Evaluation callers retain the full hidden panel; autoregressive callers must provide
+// the exact, strictly increasing rows that can be sampled and receive a compact copy.
+// Keeping this decision before lm_head prevents a prompt-sized [tokens,vocab] allocation.
+func selectLMHeadProjectionRows(dst, hidden []float32, hiddenSize int, sampledRows []int, mode lmHeadProjectionMode) ([]float32, error) {
+	if hiddenSize <= 0 {
+		return nil, fmt.Errorf("model: lm_head hidden size must be positive, got %d", hiddenSize)
+	}
+	if len(hidden)%hiddenSize != 0 {
+		return nil, fmt.Errorf("model: lm_head hidden panel length %d is not divisible by hidden size %d", len(hidden), hiddenSize)
+	}
+
+	switch mode {
+	case lmHeadProjectFullSequence:
+		if len(sampledRows) != 0 {
+			return nil, fmt.Errorf("model: full-sequence lm_head projection cannot also specify sampled rows")
+		}
+		return hidden, nil
+	case lmHeadProjectSampledRows:
+		if len(sampledRows) == 0 {
+			return nil, fmt.Errorf("model: sampled lm_head projection requires at least one row")
+		}
+	default:
+		return nil, fmt.Errorf("model: unknown lm_head projection mode %d", mode)
+	}
+
+	panelRows := len(hidden) / hiddenSize
+	previous := -1
+	for i, row := range sampledRows {
+		if row < 0 || row >= panelRows {
+			return nil, fmt.Errorf("model: sampled lm_head row %d at index %d is outside [0,%d)", row, i, panelRows)
+		}
+		if i > 0 && row <= previous {
+			return nil, fmt.Errorf("model: sampled lm_head rows must be strictly increasing: row %d follows %d", row, previous)
+		}
+		previous = row
+	}
+
+	needed := len(sampledRows) * hiddenSize // bounded by the validated distinct panel rows
+	if cap(dst) < needed {
+		dst = make([]float32, needed)
+	} else {
+		dst = dst[:needed]
+	}
+	for outRow, sourceRow := range sampledRows {
+		copy(dst[outRow*hiddenSize:(outRow+1)*hiddenSize], hidden[sourceRow*hiddenSize:(sourceRow+1)*hiddenSize])
+	}
+	return dst, nil
+}
+
 // PrefillEach ingests each user's (possibly distinct) prompt into that user's own cache and
 // returns each user's last-token logits — the distribution over its first generated token.
 // Prefill is per-user (prompts have different lengths); the throughput win this file is about
@@ -163,13 +222,18 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 	if !wantLogits {
 		return nil
 	}
-	Xnorm := make([]float32, B*H)
+	for b := range baseB {
+		baseB[b] = b*P + P - 1
+	}
+	Xnorm, err := selectLMHeadProjectionRows(make([]float32, B*H), X, H, baseB, lmHeadProjectSampledRows)
+	if err != nil {
+		panic(err) // internal rectangular geometry is validated before this point
+	}
 	for b := 0; b < B; b++ {
-		row := b*P + P - 1
 		// finalNorm, not a hand-rolled normCfg: it is the ONE place the final-norm weight, its
 		// optional bias, and eps are bound together, so this lane cannot drift from the per-token
 		// path again the way the hard-coded nil bias here did.
-		copy(Xnorm[b*H:(b+1)*H], m.finalNorm(X[row*H:(row+1)*H]))
+		copy(Xnorm[b*H:(b+1)*H], m.finalNorm(Xnorm[b*H:(b+1)*H]))
 	}
 	Logits := matMulBatch(m.lmHead(), Xnorm, cfg.VocabSize, H, B)
 	return splitScaledLogits(nil, Logits, B, cfg.VocabSize, cfg)
@@ -339,15 +403,20 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 	if !wantLogits {
 		return nil
 	}
-	Xnorm := grow(pb.Xnorm, B*H)
+	for b := range baseB {
+		baseB[b] = b*P + P - 1
+	}
+	Xnorm, err := selectLMHeadProjectionRows(grow(pb.Xnorm, B*H), X, H, baseB, lmHeadProjectSampledRows)
+	if err != nil {
+		panic(err) // internal rectangular geometry is validated before this point
+	}
 	pb.Xnorm = Xnorm
 	normW := m.tensor("model.norm.weight")
 	for b := 0; b < B; b++ {
-		row := b*P + P - 1
 		if cfg.NormGain1p || cfg.LayerNorm {
-			copy(Xnorm[b*H:(b+1)*H], m.finalNorm(X[row*H:(row+1)*H]))
+			copy(Xnorm[b*H:(b+1)*H], m.finalNorm(Xnorm[b*H:(b+1)*H]))
 		} else {
-			rmsnormInto(Xnorm[b*H:(b+1)*H], X[row*H:(row+1)*H], normW, eps)
+			rmsnormInto(Xnorm[b*H:(b+1)*H], Xnorm[b*H:(b+1)*H], normW, eps)
 		}
 	}
 	quantizeBatchPanelInto(bs.scratch, Xnorm, B, H)
