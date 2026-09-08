@@ -233,7 +233,10 @@ func TestAMDCaptureTrialFromNativeInferenceReceipt(t *testing.T) {
 		PrefillSeconds: 0.25,
 		DecodeSeconds:  1.50,
 		Model:          "Qwen3.8-27B",
-		Engine:         "fak-native",
+		Engine:         "inkernel",
+		Planner:        "inkernel",
+		Owner:          "fak",
+		ForwardPath:    "test-vulkan",
 		Backend:        "vulkan",
 	}
 
@@ -424,16 +427,16 @@ func TestAMDNativeEvidenceFileBinding(t *testing.T) {
 		name, engine, backend, kind string
 		fallback, accept            bool
 	}{
-		{"matched", "fak-native", "vulkan", "selected-token-logprobs", false, true},
-		{"missing-receipt", "fak-native", "vulkan", "selected-token-logprobs", false, false},
-		{"altered-tokens", "fak-native", "vulkan", "selected-token-logprobs", false, false},
-		{"altered-logprobs", "fak-native", "vulkan", "selected-token-logprobs", false, false},
-		{"missing-step", "fak-native", "vulkan", "selected-token-logprobs", false, false},
-		{"unknown-semantics", "fak-native", "vulkan", "unknown", false, false},
+		{"matched", "inkernel", "vulkan", "selected-token-logprobs", false, true},
+		{"missing-receipt", "inkernel", "vulkan", "selected-token-logprobs", false, false},
+		{"altered-tokens", "inkernel", "vulkan", "selected-token-logprobs", false, false},
+		{"altered-logprobs", "inkernel", "vulkan", "selected-token-logprobs", false, false},
+		{"missing-step", "inkernel", "vulkan", "selected-token-logprobs", false, false},
+		{"unknown-semantics", "inkernel", "vulkan", "unknown", false, false},
 		{"foreign-engine", "llama.cpp", "vulkan", "selected-token-logprobs", false, false},
-		{"fallback", "fak-native", "vulkan", "selected-token-logprobs", true, false},
-		{"backend-mismatch", "fak-native", "cpu", "selected-token-logprobs", false, false},
-		{"raw-versus-logprob", "fak-native", "vulkan", "raw-logits", false, false},
+		{"fallback", "inkernel", "vulkan", "selected-token-logprobs", true, false},
+		{"backend-mismatch", "inkernel", "cpu", "selected-token-logprobs", false, false},
+		{"raw-versus-logprob", "inkernel", "vulkan", "raw-logits", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in := validAMDScoreboardInput()
@@ -452,7 +455,7 @@ func TestAMDNativeEvidenceFileBinding(t *testing.T) {
 					trial["logits"] = []float64{-1, -2, -3, -4}
 					trial["evidence_kind"] = "selected-token-logprobs"
 					if role == "candidate" {
-						trial["native_inference_receipt"] = model.NativeInferenceReceipt{Engine: tc.engine, Backend: tc.backend, FallbackActive: tc.fallback, TokenIDs: []int{4, 5, 6, 7}, TokenLogprobs: []float64{-1, -2, -3, -4}}
+						trial["native_inference_receipt"] = model.NativeInferenceReceipt{Engine: tc.engine, Planner: "inkernel", Owner: "fak", ForwardPath: "test-vulkan", Backend: tc.backend, FallbackActive: tc.fallback, TokenIDs: []int{4, 5, 6, 7}, TokenLogprobs: []float64{-1, -2, -3, -4}, PrefillSeconds: trial["prefill_seconds"].(float64), DecodeSeconds: trial["warm_decode_seconds"].(float64)}
 						switch tc.name {
 						case "missing-receipt":
 							delete(trial, "native_inference_receipt")
@@ -519,12 +522,14 @@ func TestAMDNativeCaptureCannotCompareRawLogits(t *testing.T) {
 	in := validAMDScoreboardInput()
 	for i := range in.Candidate.Trials {
 		old := in.Candidate.Trials[i]
-		r := &model.NativeInferenceReceipt{Engine: "fak-native", Backend: "vulkan", TokenIDs: []int{4, 5, 6, 7}, TokenLogprobs: []float64{-1, -2, -3, -4}, PrefillSeconds: old.PrefillSeconds, DecodeSeconds: old.WarmDecodeSeconds}
+		r := &model.NativeInferenceReceipt{Engine: "inkernel", Planner: "inkernel", Owner: "fak", ForwardPath: "test-vulkan", Backend: "vulkan", TokenIDs: []int{4, 5, 6, 7}, TokenLogprobs: []float64{-1, -2, -3, -4}, PrefillSeconds: old.PrefillSeconds, DecodeSeconds: old.WarmDecodeSeconds}
 		trial, err := CaptureAMDScoreboardTrial(i+1, r, old.ColdSetupSeconds, old.PrefillTokensPerSecond, old.WarmDecodeTokensPerSecond, old.H2DBytes, old.D2HBytes, old.D2DBytes, old.QueueSubmissions)
 		if err != nil {
 			t.Fatal(err)
 		}
 		in.Candidate.Trials[i] = trial
+		in.Candidate.Trials[i].Sequence = old.Sequence
+		in.Reference.Trials[i].EvidenceKind = "raw-logits"
 		in.Reference.Trials[i].Logits = slices.Clone(r.TokenLogprobs)
 	}
 	report := BuildAMDScoreboard(in)
