@@ -26,16 +26,11 @@ void scaleMin(uint base, int group, out uint sc, out uint mn) {
 }
 void main() {
     int globalIdx = int(gl_GlobalInvocationID.x);
-    int row;
-    int token;
-
-    if (pc.tokens > 1 && gl_NumWorkGroups.y == 1u) {
-        row = globalIdx % pc.outDim;
-        token = globalIdx / pc.outDim;
-    } else {
-        row = int(gl_GlobalInvocationID.x);
-        token = int(gl_GlobalInvocationID.y);
-    }
+    // The host dispatch is deliberately one-dimensional: ceil(outDim*tokens/64)
+    // workgroups in X and exactly one workgroup in Y. Decode and prefill therefore
+    // share one unambiguous flattening for every token count, including tokens==1.
+    int row = globalIdx % pc.outDim;
+    int token = globalIdx / pc.outDim;
     if (row >= pc.outDim || token >= pc.tokens) return;
     int blocks = pc.inDim / 256;
     float sum = 0.0;

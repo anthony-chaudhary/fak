@@ -1263,11 +1263,14 @@ func (v *vulkanBackend) RMSNormMatMulArgmax(w, x, normWeight Tensor, eps float32
 }
 
 // BatchedMatMul computes the prefill GEMM Y = X @ Wᵀ over P input rows, dispatching the
-// F32 or Q8_0 shader by the weight's dtype.
+// F32, Q8_0, Q4_K, or Q2_K shader by the weight's dtype.
 func (v *vulkanBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	out, in := w.Shape[0], w.Shape[1]
+	if P <= 0 || in <= 0 || X.Numel() != P*in {
+		panic(fmt.Sprintf("compute: vulkan BatchedMatMul input numel=%d, want P*in=%d*%d", X.Numel(), P, in))
+	}
 	y, _ := v.devTr([]int{P, out}, F32)
 	switch w.Dtype {
 	case F32:
