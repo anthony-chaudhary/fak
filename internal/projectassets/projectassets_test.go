@@ -1193,6 +1193,26 @@ console.log(JSON.stringify({ok: true}));
 	}
 }
 
+func TestOpenCodePluginAlternativePathKeysAndUnifiedDiffs(t *testing.T) {
+	// Issue #12071: verify DefaultOpenCodePlugin supports alternative path keys (file_path, path, target)
+	// and standard unified diff formats in mutationPaths.
+	for _, key := range []string{"args?.filePath", "args?.file_path", "args?.path", "args?.target"} {
+		if !strings.Contains(DefaultOpenCodePlugin, key) {
+			t.Fatalf("DefaultOpenCodePlugin missing alternative path key %q (#12071)", key)
+		}
+	}
+	for _, pattern := range []string{"diff --git", "^---", "^\\+\\+\\+"} {
+		if !strings.Contains(DefaultOpenCodePlugin, pattern) {
+			t.Fatalf("DefaultOpenCodePlugin missing unified diff header pattern %q (#12071)", pattern)
+		}
+	}
+	for _, prop := range []string{"output.result", "output.text"} {
+		if !strings.Contains(DefaultOpenCodePlugin, prop) {
+			t.Fatalf("DefaultOpenCodePlugin missing proof reminder target property %q (#12071)", prop)
+		}
+	}
+}
+
 func TestOpenCodeGrepExecutableResolutionAndFallback(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
 	if err := syncOpenCodeGrep(root); err != nil {
