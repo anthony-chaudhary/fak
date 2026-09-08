@@ -245,7 +245,7 @@ def render_notes_legacy(version: str, *, date: str, level: str, themes: list[str
 
 def _clean_public_subject(subject: str) -> str:
     text = re.sub(r"^@\s+", "", subject.strip())
-    text = re.sub(r"\s+\(fak [^)]+\)\s*$", "", text)
+    text = re.sub(r"\s*\(fak [^)]+\)", "", text)
     text = re.sub(r"\s+#[0-9]+(?=\s*$)", "", text)
     text = re.sub(r"^[a-z]+(?:\([^)]+\))?!?: *", "", text)
     c_term = "".join(["c", "a", "m", "a"])

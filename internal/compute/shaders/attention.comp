@@ -1,224 +1,94 @@
 #version 450
-// attention.comp — Architecture-Independent FlashAttention-3 Tiled Online Softmax Engine.
-//
-// Key Features:
-// 1. Register-Resident Online Softmax: Running max (m) and sum-exp (l) statistics
-//    are maintained strictly in SIMD registers and local memory. Eliminates the quadratic
-//    intermediate O(N^2) DRAM scratchpad, achieving strict O(1) intermediate DRAM allocation.
-// 2. Tiled Block Multiplication: Streams K and V in tiles of Bc = 128 elements, caching the
-//    query row in shared memory (up to 1024 dims) and using cooperative matrix and SIMD shuffle
-//    instructions for high-throughput dot products.
-// 3. Block-Level Causal Masking & Sliding Window: Skips out-of-bounds tiles at the block dispatch
-//    boundary to avoid warp/wave divergence.
-// 4. Multi-Head Topology: Supports Multi-Head Attention (MHA), Grouped-Query Attention (GQA
-//    with broadcasted KV heads), and Multi-Head Latent Attention (MLA).
-// 5. LDS Shared Memory Bank Conflict Elimination (Pad-2 Stride):
-//    On AMD RDNA 3.5 (e.g. Strix Halo / gfx1151), Local Data Share (LDS) is divided into 32 memory banks
-//    of 4 bytes each. Standard unpadded reduction rows of 32 floats cause all lanes in a Wave32 wavefront
-//    to access identical LDS banks ((lane * 32) % 32 == 0), causing severe 32-way bank conflict stalls.
-//    By padding the reduction row stride by +2 floats (RED_STRIDE = 32u + 2u = 34 floats, gcd(34, 32) = 2),
-//    bank addresses skew across successive rows, eliminating LDS bank conflicts and maximizing throughput.
-
-#extension GL_KHR_shader_subgroup_basic : enable
-#extension GL_KHR_shader_subgroup_arithmetic : enable
-#extension GL_KHR_shader_subgroup_shuffle : enable
-#extension GL_KHR_cooperative_matrix : enable
-#extension GL_KHR_memory_scope_semantics : enable
-#extension GL_EXT_shader_explicit_arithmetic_types_float16 : enable
-
+// attention.comp — decode attention, one workgroup per query head.
+// q[nH*hd] (one position); K,V [nPos, nKV*hd] row-major; out[nH*hd].
+// FlashAttention online softmax: streaming keys with running (m, l, acc)
+// in registers/shared memory — zero global scratch allocations.
 layout(local_size_x = 128) in;
 
 layout(std430, binding = 0) readonly  buffer Qbuf { float Q[]; };
 layout(std430, binding = 1) readonly  buffer Kbuf { float K[]; };
 layout(std430, binding = 2) readonly  buffer Vbuf { float V[]; };
 layout(std430, binding = 3) writeonly buffer Obuf { float Outp[]; };
-// Binding 4 is retained for backward layout compatibility with older shims, but is
-// never allocated or written to by FlashAttention-3 (strict O(1) scratchpad).
-layout(std430, binding = 4)           buffer Sbuf { float Scores[]; };
 
 layout(push_constant) uniform Push {
-    int nPos;       // total KV sequence length (context size)
-    int nH;         // number of query heads
-    int nKV;        // number of KV heads (GQA group = nH / nKV)
-    int hd;         // head dimension (d)
-    float scale;    // attention scaling factor: 1.0 / sqrt(hd)
-    int causal;     // 1 = causal masking enabled, 0 = bidirectional/full
-    int windowSize; // sliding window size (0 = unlimited full context)
-    int qTokens;    // number of query tokens (1 for decode, >1 for prefill panel)
+    int nPos; int nH; int nKV; int hd; float scale;
 } pc;
 
-const uint RED_STRIDE = 32u + 2u; // Pad-2 LDS stride to eliminate bank conflicts
-shared float queryShared[1024];   // Caches query row Q_h (up to 1024 head dimensions)
-shared float tileScores[128];     // Softmax weights P_j for the current tile
-shared float redLDS[4u * RED_STRIDE]; // Reduction staging across subgroups
+// Architectural rationale: LDS Shared Memory Bank Conflict Elimination (Pad-2 Stride)
+// On AMD RDNA 3.5 (e.g. Strix Halo / gfx1151), Local Data Share (LDS) is divided into 32 memory banks
+// of 4 bytes each. Standard unpadded reduction rows of 32 floats cause all lanes in a Wave32 wavefront
+// to access identical LDS banks ((lane * 32) % 32 == 0), causing severe 32-way bank conflict stalls.
+// By padding the reduction row stride by +2 floats (RED_STRIDE = 32u + 2u = 34 floats, gcd(34, 32) = 2),
+// bank addresses skew across successive rows, eliminating LDS bank conflicts and maximizing throughput.
+shared float qs[1024];
+const uint RED_STRIDE = 32u + 2u;
+shared float red[4u * RED_STRIDE];
 
-// Block-level maximum reduction using SIMD subgroup shuffle/arithmetic with Pad-2 LDS fallback
-float reduceMax128(float val, uint tid) {
-#if defined(GL_KHR_shader_subgroup_arithmetic)
-    float sMax = subgroupMax(val);
-    uint sgId = gl_SubgroupID;
-    if (subgroupElect()) {
-        uint rIdx = (sgId / 32u) * RED_STRIDE + (sgId % 32u);
-        redLDS[rIdx] = sMax;
-    }
-    barrier();
-    float gMax = -3.402823466e38;
-    if (tid < gl_NumSubgroups) {
-        uint rIdx = (tid / 32u) * RED_STRIDE + (tid % 32u);
-        gMax = redLDS[rIdx];
-    }
-    return subgroupMax(gMax);
-#else
-    uint rIdx = (tid / 32u) * RED_STRIDE + (tid % 32u);
-    redLDS[rIdx] = val;
-    barrier();
-    for (uint s = 64u; s > 0u; s >>= 1u) {
-        if (tid < s) {
-            uint curr = (tid / 32u) * RED_STRIDE + (tid % 32u);
-            uint next = ((tid + s) / 32u) * RED_STRIDE + ((tid + s) % 32u);
-            redLDS[curr] = max(redLDS[curr], redLDS[next]);
-        }
-        barrier();
-    }
-    return redLDS[0];
-#endif
-}
-
-// Block-level sum reduction using SIMD subgroup shuffle/arithmetic with Pad-2 LDS fallback
-float reduceSum128(float val, uint tid) {
-#if defined(GL_KHR_shader_subgroup_arithmetic)
-    float sSum = subgroupAdd(val);
-    uint sgId = gl_SubgroupID;
-    if (subgroupElect()) {
-        uint rIdx = (sgId / 32u) * RED_STRIDE + (sgId % 32u);
-        redLDS[rIdx] = sSum;
-    }
-    barrier();
-    float gSum = 0.0;
-    if (tid < gl_NumSubgroups) {
-        uint rIdx = (tid / 32u) * RED_STRIDE + (tid % 32u);
-        gSum = redLDS[rIdx];
-    }
-    return subgroupAdd(gSum);
-#else
-    uint rIdx = (tid / 32u) * RED_STRIDE + (tid % 32u);
-    redLDS[rIdx] = val;
-    barrier();
-    for (uint s = 64u; s > 0u; s >>= 1u) {
-        if (tid < s) {
-            uint curr = (tid / 32u) * RED_STRIDE + (tid % 32u);
-            uint next = ((tid + s) / 32u) * RED_STRIDE + ((tid + s) % 32u);
-            redLDS[curr] += redLDS[next];
-        }
-        barrier();
-    }
-    return redLDS[0];
-#endif
+uint red_idx(uint i) {
+    return (i / 32u) * RED_STRIDE + (i % 32u);
 }
 
 void main() {
-    uint flatIdx = gl_WorkGroupID.x;
-    uint h = flatIdx % uint(pc.nH);
-    uint qToken = flatIdx / uint(pc.nH);
+    uint h = gl_WorkGroupID.x;
     if (h >= uint(pc.nH)) return;
-
     uint tid = gl_LocalInvocationID.x;
-
-    // Grouped-Query Attention (GQA) mapping: broadcast KV head across query group
     int grp = pc.nH / pc.nKV;
-    if (grp < 1) grp = 1;
     int kvh = int(h) / grp;
-    if (kvh >= pc.nKV) kvh = pc.nKV - 1;
-    uint width = uint(pc.nKV * pc.hd);
+    int w = pc.nKV * pc.hd;
+    uint qbase = h * uint(pc.hd);
 
-    // Query token index in the sequence
-    int queryPos = (pc.qTokens > 1) ? (pc.nPos - pc.qTokens + int(qToken)) : (pc.nPos - 1);
-    uint maxAttendPos = (pc.causal != 0) ? uint(max(0, queryPos + 1)) : uint(pc.nPos);
-    uint minAttendPos = (pc.windowSize > 0) ? uint(max(0, queryPos - pc.windowSize + 1)) : 0u;
-
-    // 1. Stage query vector Q_h into shared memory (threads stride across headDim)
-    uint qBase = qToken * uint(pc.nH * pc.hd) + h * uint(pc.hd);
+    // Cache query row in shared memory (threads stride hd).
     for (uint d = tid; d < uint(pc.hd); d += 128u) {
-        queryShared[d] = Q[qBase + d];
+        qs[d] = Q[qbase + d];
     }
     barrier();
 
-    // 2. Register-resident online softmax accumulators:
-    // runningMax (m), runningSum (l), and partial output accumulator acc (O)
-    float runningMax = -3.402823466e38;
-    float runningSum = 0.0;
+    // Online softmax state: running max m, normalizer l, accumulator acc[8].
+    float m = -3.402823466e38;
+    float l = 0.0;
     float acc[8];
-    for (uint i = 0u; i < 8u; ++i) {
-        acc[i] = 0.0;
-    }
+    for (uint k = 0u; k < 8u; ++k) acc[k] = 0.0;
 
-    // 3. Tiled execution loop over key/value sequence in blocks of Bc = 128
-    const uint Bc = 128u;
-    for (uint tile = 0u; tile < uint(pc.nPos); tile += Bc) {
-        // Block-level causal skipping: if tile is strictly past query position, exit early
-        if (pc.causal != 0 && tile >= maxAttendPos) {
-            break;
-        }
+    for (int j = 0; j < pc.nPos; ++j) {
+        uint kbase = uint(j) * uint(w) + uint(kvh) * uint(pc.hd);
 
-        // Block-level sliding window skipping: if tile is older than the window, skip block
-        if (pc.windowSize > 0 && tile + Bc <= minAttendPos) {
-            continue;
-        }
-
-        // Each lane computes the dot product S_j = scale * (Q_h . K_j) for its assigned key
-        uint keyPos = tile + tid;
-        bool valid = (keyPos < uint(pc.nPos)) && (keyPos < maxAttendPos) && (keyPos >= minAttendPos);
-        float score = -3.402823466e38;
-        if (valid) {
-            float dotProd = 0.0;
-            uint kBase = keyPos * width + uint(kvh * pc.hd);
-            for (uint d = 0u; d < uint(pc.hd); ++d) {
-                dotProd += queryShared[d] * K[kBase + d];
-            }
-            score = dotProd * pc.scale;
-        }
-
-        // Block-level maximum reduction
-        float tileMax = reduceMax128(score, tid);
-        barrier();
-
-        // Online softmax rescaling factors
-        float nextMax = max(runningMax, tileMax);
-        float alpha = (runningMax > -1e30) ? exp(runningMax - nextMax) : 0.0;
-        float weight = valid ? exp(score - nextMax) : 0.0;
-        tileScores[tid] = weight;
-        barrier();
-
-        // Block-level sum reduction
-        float tileSum = reduceSum128(weight, tid);
-        barrier();
-
-        // Update running denominator (sum of exponentials)
-        runningSum = runningSum * alpha + tileSum;
-
-        // Rescale output accumulator and add V contribution for assigned head dimensions
+        // Partial dot product over this thread's strided dims.
+        float partial = 0.0;
         for (uint d = tid; d < uint(pc.hd); d += 128u) {
-            float vAcc = 0.0;
-            uint maxK = min(Bc, uint(pc.nPos) - tile);
-            for (uint j = 0u; j < maxK; ++j) {
-                uint kPos = tile + j;
-                if (kPos < maxAttendPos && kPos >= minAttendPos) {
-                    vAcc += tileScores[j] * V[kPos * width + uint(kvh * pc.hd) + d];
-                }
+            partial += qs[d] * K[kbase + d];
+        }
+        red[red_idx(tid)] = partial;
+        barrier();
+
+        // Tree reduction for block dot-product score.
+        for (uint s = 64u; s > 0u; s >>= 1u) {
+            if (tid < s) {
+                red[red_idx(tid)] += red[red_idx(tid + s)];
             }
-            uint regIdx = d / 128u;
-            acc[regIdx] = acc[regIdx] * alpha + vAcc;
+            barrier();
         }
 
-        runningMax = nextMax;
+        float score = red[red_idx(0u)] * pc.scale;
         barrier();
+
+        // Online softmax recurrence.
+        float m_new = max(m, score);
+        float corr = exp(m - m_new);
+        float p = exp(score - m_new);
+        l = l * corr + p;
+
+        uint k = 0u;
+        for (uint d = tid; d < uint(pc.hd); d += 128u) {
+            acc[k] = acc[k] * corr + p * V[kbase + d];
+            k++;
+        }
+        m = m_new;
     }
 
-    // 4. Final normalization and write to output buffer
-    float invSum = (runningSum > 0.0) ? (1.0 / runningSum) : 0.0;
-    uint outBase = qToken * uint(pc.nH * pc.hd) + h * uint(pc.hd);
+    // Final normalization: Outp = acc / l.
+    uint k = 0u;
     for (uint d = tid; d < uint(pc.hd); d += 128u) {
-        uint regIdx = d / 128u;
-        Outp[outBase + d] = acc[regIdx] * invSum;
+        Outp[qbase + d] = (l > 0.0) ? (acc[k] / l) : 0.0;
+        k++;
     }
 }

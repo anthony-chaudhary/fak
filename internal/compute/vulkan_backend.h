@@ -154,8 +154,9 @@ void fvk_swiglu_matmul_add_f32(const void *dW, const void *dG, const void *dU,
 void fvk_add_f32(void *dDst, const void *dSrc, int n);
 void fvk_add_bias_f32(void *dDst, const void *dBias, int rows, int width);
 
-/* Decode attention: q[nH*hd] (one position), K/V [nPos, nKV*hd] row-major; causal by
- * construction (the cache holds exactly the attendable keys). grp = nH/nKV. out[nH*hd]. */
+/* Decode FlashAttention: q[nH*hd] (one position), K/V [nPos, nKV*hd] row-major; causal by
+ * construction (the cache holds exactly the attendable keys). grp = nH/nKV. out[nH*hd].
+ * 4 buffers (Q, K, V, Out) with online softmax and zero global scratch allocations. */
 void fvk_attention_f32(const void *dQ, const void *dK, const void *dV, void *dOut,
                        int nPos, int nH, int nKV, int hd, float scale);
 
