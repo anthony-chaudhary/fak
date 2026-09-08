@@ -178,7 +178,29 @@ func expandLandPaths(wtPath, diffRef string, requested []string, git GitRunner) 
 	sort.Strings(expanded)
 	return expanded, nil
 }
-func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, git GitRunner, opts ...LandOption) (res Result) {
+
+// ProspectiveVerifyHook verifies the exact detached prospective commit built for a
+// CAS attempt. A non-nil materializationErr means no safe candidate checkout was
+// available; the hook must return its fail-closed refusal without inspecting dir.
+type ProspectiveVerifyHook func(dir string, materializationErr error) Result
+
+func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, git GitRunner, opts ...LandOption) Result {
+	return land(root, wtPath, baseSHA, commitMsgFile, paths, verify, nil, git, opts...)
+}
+
+// LandProspectiveVerified is Land with an additional fail-closed gate over the
+// exact post-normalization candidate built for every CAS attempt. It always uses
+// isolated candidate construction, regardless of the optional isolated-land
+// setting, requires explicit paths so post-CAS synchronization is exact, and
+// never falls back to the shared-index path.
+func LandProspectiveVerified(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, prospectiveVerify ProspectiveVerifyHook, git GitRunner, opts ...LandOption) Result {
+	if prospectiveVerify == nil {
+		return Result{OK: false, Reason: "candidate verification hook is required"}
+	}
+	return land(root, wtPath, baseSHA, commitMsgFile, paths, verify, prospectiveVerify, git, opts...)
+}
+
+func land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, prospectiveVerify ProspectiveVerifyHook, git GitRunner, opts ...LandOption) (res Result) {
 	cfg := newLandConfig(opts)
 	tracker := newLandProgressTracker(cfg)
 	cfg.tracker = tracker
@@ -242,6 +264,9 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	if namesRC != 0 {
 		names = ""
 	}
+	if prospectiveVerify != nil && len(paths) == 0 {
+		return prospectiveVerify("", fmt.Errorf("explicit land paths are required for an isolated verified candidate"))
+	}
 	tracker.setPatchScope(countPatchScopeFiles(names), int64(len(diff)))
 	droppedOutOfLane := 0
 	if len(paths) > 0 && names != "" {
@@ -295,6 +320,17 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	}
 
 	landingOp := func() Result {
+		if prospectiveVerify != nil {
+			r, handled := landIsolatedProspectiveVerified(root, wtPath, diff, msgFile, paths, prospectiveVerify, verify, git, isolatedGitEnv, cfg)
+			if !handled {
+				return prospectiveVerify("", fmt.Errorf("could not isolate verified land candidate"))
+			}
+			r.DroppedOutOfLane = droppedOutOfLane
+			if r.OK && r.Committed {
+				r.Code = LandResultSuccess
+			}
+			return r
+		}
 		// Opt-in race-free layer-2 land (default OFF): stage+commit through a THROWAWAY
 		// index so the shared index is never a sweep target. handled=false means it could
 		// not isolate safely (detached HEAD, apply conflict, lost CAS, …) and falls through
@@ -547,7 +583,17 @@ func parseIsolatedArgs(args []any) (VerifyHook, GitRunner, GitEnvRunner, landCon
 // see the landed change, matching the baseline post-state; a sync hiccup is reported
 // but does NOT unland.
 func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...any) (Result, bool) {
+	return landIsolatedProspectiveVerified(root, wtPath, diff, msgFile, paths, nil, args...)
+}
+
+func landIsolatedProspectiveVerified(root, wtPath, diff, msgFile string, paths []string, prospectiveVerify ProspectiveVerifyHook, args ...any) (Result, bool) {
 	verify, git, genv, cfg := parseIsolatedArgs(args)
+	isolationFailure := func(reason string) (Result, bool) {
+		if prospectiveVerify != nil {
+			return prospectiveVerify("", fmt.Errorf("%s", reason)), true
+		}
+		return Result{}, false
+	}
 	tracker := cfg.tracker
 	finishIsolationAdmission := beginLandPhase(tracker, "isolated-admission", 0)
 	isolationAdmissionActive := true
@@ -560,13 +606,13 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 	rc, ref := run(git, root, []string{"symbolic-ref", "--quiet", "HEAD"})
 	branch := strings.TrimSpace(ref)
 	if rc != 0 || branch == "" {
-		return Result{}, false
+		return isolationFailure("could not resolve branch for isolated candidate")
 	}
 	// The exact base our commit parents AND the compare-and-swap old-value.
 	rc, head := run(git, root, []string{"rev-parse", "HEAD"})
 	oldHEAD := strings.TrimSpace(head)
 	if rc != 0 || oldHEAD == "" {
-		return Result{}, false
+		return isolationFailure("could not resolve trunk HEAD for isolated candidate")
 	}
 	// commit-tree runs no hook and adds no signoff; compose Signed-off-by ourselves to
 	// preserve the baseline `commit -s`. Unresolved identity → fall back (can't honor -s).
@@ -574,13 +620,13 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 	_, email := run(git, root, []string{"config", "user.email"})
 	nm, em := strings.TrimSpace(name), strings.TrimSpace(email)
 	if nm == "" || em == "" {
-		return Result{}, false
+		return isolationFailure("could not resolve signing identity for isolated candidate")
 	}
 
 	// Throwaway index at a fresh path git creates via read-tree; removed on return.
 	idxF, err := os.CreateTemp("", "fak-land-*.index")
 	if err != nil {
-		return Result{}, false
+		return isolationFailure("could not create isolated candidate index: " + err.Error())
 	}
 	idx := idxF.Name()
 	idxF.Close()
@@ -595,12 +641,12 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 	// so every CAS attempt stages byte-identical content under the same subject.
 	patch, cleanupPatch, err := writePatch(diff)
 	if err != nil {
-		return Result{}, false
+		return isolationFailure("could not materialize isolated candidate patch: " + err.Error())
 	}
 	defer cleanupPatch()
 	ctMsg, cleanupMsg, err := composeSignedMsg(msgFile, nm, em)
 	if err != nil {
-		return Result{}, false
+		return isolationFailure("could not materialize isolated candidate message: " + err.Error())
 	}
 	defer cleanupMsg()
 	finishIsolationAdmission()
@@ -625,7 +671,7 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 			finishRebase()
 			newHEAD := strings.TrimSpace(head)
 			if rc != 0 || newHEAD == "" {
-				return Result{}, false
+				return isolationFailure("could not resolve retry base for isolated candidate")
 			}
 
 			// In-memory 3-way merge tree resolution for CAS landing retry (#11235).
@@ -646,7 +692,7 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 				finishIndex := beginLandPhase(tracker, "index-construction", attempt)
 				if rc, _ := runEnv(genv, root, env, []string{"read-tree", oldHEAD}); rc != 0 {
 					finishIndex()
-					return Result{}, false
+					return isolationFailure("could not seed retry index for isolated candidate")
 				}
 				// Stage the worker diff into the throwaway index ONLY (--cached never touches
 				// the working tree). A conflict here — first try or re-apply after a lost CAS —
@@ -654,13 +700,13 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 				// it exactly as today rather than force it.
 				if rc, _ := runEnv(genv, root, env, []string{"apply", "--cached", "--whitespace=nowarn", patch}); rc != 0 {
 					finishIndex()
-					return Result{}, false
+					return isolationFailure("could not apply diff to retry candidate")
 				}
 				rc, tree := runEnv(genv, root, env, []string{"write-tree"})
 				treeSHA = strings.TrimSpace(tree)
 				if rc != 0 || treeSHA == "" {
 					finishIndex()
-					return Result{}, false
+					return isolationFailure("could not write retry candidate tree")
 				}
 				finishIndex()
 			}
@@ -669,7 +715,7 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 			finishIndex := beginLandPhase(tracker, "index-construction", attempt)
 			if rc, _ := runEnv(genv, root, env, []string{"read-tree", oldHEAD}); rc != 0 {
 				finishIndex()
-				return Result{}, false
+				return isolationFailure("could not seed index for isolated candidate")
 			}
 			// Stage the worker diff into the throwaway index ONLY (--cached never touches
 			// the working tree). A conflict here — first try or re-apply after a lost CAS —
@@ -677,13 +723,13 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 			// it exactly as today rather than force it.
 			if rc, _ := runEnv(genv, root, env, []string{"apply", "--cached", "--whitespace=nowarn", patch}); rc != 0 {
 				finishIndex()
-				return Result{}, false
+				return isolationFailure("could not apply diff to isolated candidate")
 			}
 			rc, tree := runEnv(genv, root, env, []string{"write-tree"})
 			treeSHA = strings.TrimSpace(tree)
 			if rc != 0 || treeSHA == "" {
 				finishIndex()
-				return Result{}, false
+				return isolationFailure("could not write isolated candidate tree")
 			}
 			finishIndex()
 		}
@@ -702,12 +748,67 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 		finishCommit()
 		newCommit := strings.TrimSpace(commit)
 		if rc != 0 || newCommit == "" {
-			return Result{}, false
+			return isolationFailure("could not write isolated candidate commit")
 		}
 		lastCommit = newCommit
 		lastBase = oldHEAD
-		// Name the off-branch commit before trunk CAS. A process crash from here on
-		// leaves an observable, GC-safe recovery candidate instead of a dangling SHA.
+
+		verifyProspective := func() (Result, bool) {
+			candDir, err := os.MkdirTemp("", "fak-cand-validate-*")
+			if err != nil {
+				if prospectiveVerify != nil {
+					return prospectiveVerify("", fmt.Errorf("failed to create isolated candidate checkout: %w", err)), false
+				}
+				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: failed to create candidate temp dir: " + err.Error()}, false
+			}
+			_ = os.Remove(candDir)
+			cleanupCand := func() {
+				run(git, root, []string{"worktree", "remove", "--force", candDir})
+				run(git, root, []string{"worktree", "prune"})
+				_ = os.RemoveAll(candDir)
+			}
+
+			rc, out := run(git, root, []string{"-c", "core.longpaths=true", "worktree", "add", "--detach", candDir, newCommit})
+			if rc != 0 {
+				cleanupCand()
+				if prospectiveVerify != nil {
+					return prospectiveVerify("", fmt.Errorf("git candidate checkout failed: %s", tail(out, 200))), false
+				}
+				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: git candidate checkout failed: " + tail(out, 200)}, false
+			}
+			if prospectiveVerify != nil {
+				prospectiveResult := prospectiveVerify(candDir, nil)
+				if !prospectiveResult.OK {
+					cleanupCand()
+					return prospectiveResult, false
+				}
+			}
+			var ok bool
+			var detail string
+			if verify != nil {
+				ok, detail = verify(candDir)
+			} else {
+				ok = true
+			}
+			cleanupCand()
+			if !ok {
+				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: " + detail}, false
+			}
+			return Result{OK: true}, true
+		}
+
+		if prospectiveVerify != nil {
+			finishVerify := beginLandPhase(tracker, "candidate-verification", attempt)
+			prospectiveResult, ok := verifyProspective()
+			finishVerify()
+			if !ok {
+				return prospectiveResult, true
+			}
+		}
+
+		// Name only a candidate that passed every required gate. Publication remains
+		// before trunk CAS so a crash leaves a GC-safe recovery commit, but symptom
+		// failures create neither a recovery ref nor a remote side effect.
 		finishRecovery := beginLandPhase(tracker, "recovery-ref-publication", attempt)
 		recoveryRef, anchorErr := AnchorRecoveryEntry(root, wtPath, newCommit, func(r string, a []string) (int, string) { return runEnv(genv, r, env, a) })
 		if anchorErr != nil {
@@ -725,31 +826,12 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 		}
 		finishRecovery()
 
-		if verify != nil {
+		if prospectiveVerify == nil && verify != nil {
 			finishVerify := beginLandPhase(tracker, "post-merge-validation", attempt)
-			candDir, err := os.MkdirTemp("", "fak-cand-validate-*")
-			if err != nil {
-				finishVerify()
-				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: failed to create candidate temp dir: " + err.Error()}, true
-			}
-			_ = os.Remove(candDir)
-			cleanupCand := func() {
-				run(git, root, []string{"worktree", "remove", "--force", candDir})
-				run(git, root, []string{"worktree", "prune"})
-				_ = os.RemoveAll(candDir)
-			}
-
-			rc, out := run(git, root, []string{"-c", "core.longpaths=true", "worktree", "add", "--detach", candDir, newCommit})
-			if rc != 0 {
-				cleanupCand()
-				finishVerify()
-				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: git candidate checkout failed: " + tail(out, 200)}, true
-			}
-			ok, detail := verify(candDir)
-			cleanupCand()
+			verifyResult, ok := verifyProspective()
 			finishVerify()
 			if !ok {
-				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: " + detail}, true
+				return verifyResult, true
 			}
 		}
 
@@ -776,9 +858,10 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 			Reason: "isolated-index land " + shortSHA(newCommit) + " (race-free, #3547)",
 			Detail: detail, Disambiguation: disambiguation, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt}, true
 	}
-	// Every bounded attempt lost its CAS — genuine sustained contention. Fall back to
-	// the baseline shared path as the final resort rather than loop unbounded.
-	return Result{}, false
+	// Every bounded attempt lost its CAS — ordinary lands retain their historical
+	// fallback, while candidate-verified lands refuse rather than landing bytes that
+	// were not the candidate most recently verified.
+	return isolationFailure("isolated candidate exhausted CAS attempts")
 }
 
 // composeSignedMsg writes msgFile's content to a new temp file with a Signed-off-by
