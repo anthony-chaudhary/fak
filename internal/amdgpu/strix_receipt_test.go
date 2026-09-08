@@ -23,6 +23,7 @@ func TestStrixValidationReceiptValidate(t *testing.T) {
 	}
 
 	receipt := NewStrixValidationReceipt(target, "HEAD", "abcdef123456", "fak validate --strix")
+	receipt.Schema = StrixValidationSchemaV1
 	receipt.Subkernels = append(receipt.Subkernels, StrixSubkernelResult{
 		Name:       "argmax",
 		Status:     "PASS",
@@ -118,6 +119,47 @@ func testStrixTarget() StrixTarget {
 
 func sealReceipt(t *testing.T, r *StrixValidationReceipt) {
 	t.Helper()
+	if r.Schema == StrixValidationSchemaV2 {
+		r.Provenance.GitTip = testTip
+		r.Provenance.SourceArchiveSHA256 = testHash
+		r.Provenance.BinarySHA256 = testHash
+		r.Provenance.ShaderBundleSHA256 = testHash
+		r.Provenance.BuildCommandSHA256 = testHash
+		r.Provenance.EngineIdentity = "fak-native/vulkan"
+		r.Provenance.CleanupObserved = true
+		r.SelectedCount = len(r.Subkernels)
+		r.ExecutedCount = len(r.Subkernels)
+		r.SelectedSubkernels = len(r.Subkernels)
+		r.ExecutedSubkernels = len(r.Subkernels)
+		r.SelectedAblations = len(r.Ablations)
+		r.ExecutedAblations = len(r.Ablations)
+		for i := range r.Subkernels {
+			r.Subkernels[i].Evidence = validStrixExecutionEvidence()
+			r.Subkernels[i].Evidence.DeviceIdentity = r.Target.GPUName + "|" + r.Target.TargetISA
+		}
+		for i := range r.Ablations {
+			r.Ablations[i].Evidence = validStrixExecutionEvidence()
+			r.Ablations[i].Evidence.DeviceIdentity = r.Target.GPUName + "|" + r.Target.TargetISA
+			if r.Ablations[i].BaselineArm.Samples == 0 {
+				r.Ablations[i].BaselineArm.Samples = 1
+			}
+			if r.Ablations[i].CandidateArm.Samples == 0 {
+				r.Ablations[i].CandidateArm.Samples = 1
+			}
+		}
+		r.Provenance.ExecutionManifestSHA256 = executionManifestDigest(r)
+		r.Verified = true
+		hostOnly := len(r.AllParityEvents()) > 0
+		for _, ev := range r.AllParityEvents() {
+			if ev.OracleKind != StrixOracleHostContract {
+				hostOnly = false
+			}
+		}
+		if hostOnly {
+			r.Verdict = "SKIPPED"
+			r.Verified = false
+		}
+	}
 	digest, err := r.ComputeDigest()
 	if err != nil {
 		t.Fatalf("ComputeDigest failed: %v", err)
@@ -140,7 +182,7 @@ func TestStrixValidationReceipt_TypedParity_AcceptSupportedOracles(t *testing.T)
 		}
 
 		receipt.Subkernels = append(receipt.Subkernels, StrixSubkernelResult{
-			Name:         "argmax_subkernel",
+			Name:         "argmax",
 			Status:       "PASS",
 			DurationUS:   300,
 			Iterations:   1,
@@ -167,7 +209,7 @@ func TestStrixValidationReceipt_TypedParity_AcceptSupportedOracles(t *testing.T)
 		}
 
 		receipt.Subkernels = append(receipt.Subkernels, StrixSubkernelResult{
-			Name:         "gemv_subkernel",
+			Name:         "matmul_f32",
 			Status:       "PASS",
 			DurationUS:   450,
 			Iterations:   1,
@@ -194,7 +236,7 @@ func TestStrixValidationReceipt_TypedParity_AcceptSupportedOracles(t *testing.T)
 		}
 
 		receipt.Subkernels = append(receipt.Subkernels, StrixSubkernelResult{
-			Name:         "norm_subkernel",
+			Name:         "rmsnorm",
 			Status:       "PASS",
 			DurationUS:   120,
 			Iterations:   1,
@@ -212,7 +254,16 @@ func TestStrixValidationReceipt_TypedParity_AcceptSupportedOracles(t *testing.T)
 	// 4. state_continuity
 	t.Run("state_continuity", func(t *testing.T) {
 		receipt := NewStrixValidationReceipt(target, "HEAD", "abcdef123456", "fak validate --strix")
-		ev := NewStateContinuityParityEvent("fak-native/vulkan", 16, true, 0.999998, 0.999900, 0.0001, 0.001)
+		state := true
+		finite := true
+		maxAbs := 0.0001
+		maxAbsBound := 0.0003
+		ev := StrixParityEvent{
+			OracleKind: StrixOracleStateContinuity, CaseCount: 16, DeviceObserved: true,
+			Engine: "fak-native/vulkan", Passed: true,
+			Observed: StrixParityMetrics{MaxAbsoluteDelta: &maxAbs, StateIdentity: &state, FiniteOutput: &finite},
+			Bounds:   StrixParityBounds{MaxAbsDelta: &maxAbsBound, MaxAbsComparison: "<=", StateIdentity: &state, FiniteOutput: &finite},
+		}
 		if err := ev.Validate(); err != nil {
 			t.Fatalf("state_continuity event should validate: %v", err)
 		}
@@ -221,7 +272,7 @@ func TestStrixValidationReceipt_TypedParity_AcceptSupportedOracles(t *testing.T)
 		}
 
 		receipt.Subkernels = append(receipt.Subkernels, StrixSubkernelResult{
-			Name:         "gdn_recurrent_subkernel",
+			Name:         "qwen35_gdn_decode",
 			Status:       "PASS",
 			DurationUS:   800,
 			Iterations:   1,
@@ -643,7 +694,7 @@ func TestStrixValidationReceipt_TypedParity_RejectExactCosineConflation(t *testi
 		t.Errorf("expected exact/cosine conflation error for host_contract, got: %v", err)
 	}
 
-	// Legacy subkernel result with both ArgmaxExact and LogitCosineSimilarity
+	// Legacy fields remain readable but cannot synthesize current typed credit.
 	sk := StrixSubkernelResult{
 		Name:       "conflated_subkernel",
 		Status:     "PASS",
@@ -656,11 +707,8 @@ func TestStrixValidationReceipt_TypedParity_RejectExactCosineConflation(t *testi
 		},
 	}
 	events := sk.AllParityEvents()
-	if len(events) == 0 {
-		t.Fatalf("expected synthesized event from legacy fields")
-	}
-	if err := events[0].Validate(); err == nil || !strings.Contains(err.Error(), "exact/cosine conflation") {
-		t.Errorf("expected exact/cosine conflation error from legacy fields, got: %v", err)
+	if len(events) != 0 {
+		t.Fatalf("legacy fields synthesized %d current typed event(s)", len(events))
 	}
 }
 
@@ -724,6 +772,36 @@ func TestStrixValidationReceipt_TypedParity_V1HistoricalNonCredit(t *testing.T) 
 	}
 	if receipt.PhysicalParityCredit() {
 		t.Errorf("historical v1 receipt must NOT have physical parity credit")
+	}
+}
+
+func TestStrixValidationReceiptRejectsSlowParityMatch(t *testing.T) {
+	receipt := validStrixReceipt(t)
+	receipt.Ablations = []StrixAblationResult{{
+		Dimension: "decode", Feature: "slow_candidate",
+		BaselineArm:  StrixArmResult{Name: "baseline", LatencyUS: 100, Samples: 3},
+		CandidateArm: StrixArmResult{Name: "candidate", LatencyUS: 200, Samples: 3},
+		Speedup:      0.5, LiftRatio: 0.5, CosineParity: 1,
+		Evidence: validStrixExecutionEvidence(), Verdict: "PARITY_MATCH",
+	}}
+	receipt.SelectedAblations, receipt.ExecutedAblations = 1, 1
+	receipt.Provenance.ExecutionManifestSHA256 = executionManifestDigest(receipt)
+	digest, err := receipt.ComputeDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt.Digest = digest
+	if err := receipt.Validate(); err == nil || !strings.Contains(err.Error(), "parity outside") {
+		t.Fatalf("slow PARITY_MATCH earned credit: %v", err)
+	}
+}
+
+func TestCreditEligibleRequiresFullReceiptValidation(t *testing.T) {
+	receipt := NewStrixValidationReceipt(testStrixTarget(), "HEAD", testTip, "fak validate --strix")
+	receipt.Verified = true
+	receipt.ParityEvents = []StrixParityEvent{NewExactArgmaxParityEvent("fak-native/vulkan", 1, true, true)}
+	if receipt.CreditEligible() {
+		t.Fatal("minimal PASS receipt without digest/provenance/execution evidence earned credit")
 	}
 }
 

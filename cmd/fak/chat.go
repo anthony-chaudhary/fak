@@ -244,7 +244,7 @@ func cmdChat(argv []string) {
 		runOpts = append(runOpts, agent.WithReasoningProfile(*cf.reasoningProfile))
 	}
 
-	planner := chatPlanner(*cf.offline, effectiveBaseURL, *cf.provider, *cf.model, *cf.apiKeyEnv, *cf.anthropicAuth)
+	planner := chatPlanner(*cf.offline, effectiveBaseURL, *cf.provider, *cf.model, *cf.apiKeyEnv, *cf.anthropicAuth, *cf.codexAuth)
 	if *cf.codexAuth {
 		httpPlanner, ok := planner.(*agent.HTTPPlanner)
 		if !ok {
@@ -264,7 +264,14 @@ func cmdChat(argv []string) {
 // chatPlanner picks the planner the REPL drives: the offline mock (no upstream)
 // unless a --base-url is given, mirroring `fak agent` exactly so `fak chat`
 // runs with zero network by default.
-func chatPlanner(offline bool, baseURL, provider, model, apiKeyEnv, anthropicAuth string) agent.Planner {
+func chatPlanner(offline bool, baseURL, provider, model, apiKeyEnv, anthropicAuth string, codexAuth bool) agent.Planner {
+	return chatPlannerWithStderr(os.Stderr, offline, baseURL, provider, model, apiKeyEnv, anthropicAuth, codexAuth)
+}
+
+func chatPlannerWithStderr(stderr io.Writer, offline bool, baseURL, provider, model, apiKeyEnv, anthropicAuth string, codexAuth bool) agent.Planner {
+	if stderr == nil {
+		stderr = os.Stderr
+	}
 	effectiveBaseURL := baseURL
 	if effectiveBaseURL == "" && !offline {
 		if u := dropin.DefaultBaseURL(provider); u != "" {
@@ -273,13 +280,20 @@ func chatPlanner(offline bool, baseURL, provider, model, apiKeyEnv, anthropicAut
 	}
 	if offline || effectiveBaseURL == "" {
 		if !offline {
-			fmt.Fprintln(os.Stderr, "fak chat: no --base-url given; using the offline mock planner (pass --base-url for a live run)")
+			fmt.Fprintln(stderr, "fak chat: no --base-url given; using the offline mock planner (pass --base-url for a live run)")
 		}
 		return agent.NewMockPlanner(model)
 	}
-	key := os.Getenv(apiKeyEnv)
-	if key == "" {
-		fmt.Fprintf(os.Stderr, "fak chat: env %s is empty  -  proceeding with no auth header (fine for a local endpoint)\n", apiKeyEnv)
+	var key string
+	if codexAuth {
+		fmt.Fprintln(stderr, "fak chat: auth mode: codex-auth")
+	} else {
+		if apiKeyEnv != "" {
+			key = os.Getenv(apiKeyEnv)
+		}
+		if key == "" {
+			fmt.Fprintf(stderr, "fak chat: env %s is empty  -  proceeding with no auth header (fine for a local endpoint)\n", apiKeyEnv)
+		}
 	}
 	p, err := agent.NewProviderHTTPPlanner(provider, effectiveBaseURL, model, key)
 	must(err)

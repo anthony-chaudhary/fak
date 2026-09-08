@@ -1,14 +1,49 @@
 package amdgpu
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+const testTip = "0123456789abcdef0123456789abcdef01234567"
+const testHash = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+func validStrixExecutionEvidence() StrixExecutionEvidence {
+	exit := 0
+	return StrixExecutionEvidence{SourceArchiveSHA256: testHash, BinarySHA256: testHash, ShaderBundleSHA256: testHash, CommandSHA256: testHash, DeviceIdentity: "AMD Radeon 8060S Graphics|gfx1151", EngineIdentity: "fak-native/vulkan", ArtifactRehashed: true, DeviceTimeoutMS: 60000, LeasePathSHA256: testHash, AdmissionWaitMS: 30000, Acquired: true, Released: true, AcquireOrdinal: 1, ReleaseOrdinal: 2, ExitCode: &exit, RawOutputSHA256: testHash, RawOutputBytes: 1}
+}
+func validStrixReceipt(t *testing.T) *StrixValidationReceipt {
+	t.Helper()
+	r := NewStrixValidationReceipt(StrixTarget{Mode: "ssh", Host: "strix1", Reachable: true, GPUName: "AMD Radeon 8060S Graphics", TargetISA: "gfx1151"}, "HEAD", testTip, "test")
+	r.Provenance.SourceArchiveSHA256 = testHash
+	r.Provenance.BinarySHA256 = testHash
+	r.Provenance.ShaderBundleSHA256 = testHash
+	r.Provenance.BuildCommandSHA256 = testHash
+	r.Provenance.EngineIdentity = "fak-native/vulkan"
+	r.Provenance.CleanupObserved = true
+	r.SelectedCount = 1
+	r.ExecutedCount = 1
+	r.SelectedSubkernels = 1
+	r.ExecutedSubkernels = 1
+	r.SelectedAblations = 1
+	r.ExecutedAblations = 1
+	r.Subkernels = []StrixSubkernelResult{{Name: "argmax", Status: "PASS", DurationUS: 1, Iterations: 1, ParityEvents: []StrixParityEvent{NewExactArgmaxParityEvent("fak-native/vulkan", 1, true, true)}, Evidence: validStrixExecutionEvidence()}}
+	r.Ablations = []StrixAblationResult{{Dimension: "target", Feature: "cpu_vs_vulkan_gpu", BaselineArm: StrixArmResult{Name: "cpu", LatencyUS: 2, Samples: 1}, CandidateArm: StrixArmResult{Name: "gpu", LatencyUS: 1, Samples: 1}, Speedup: 2, LiftRatio: 2, CosineParity: .9999, Verdict: "VERIFIED_LIFT", Evidence: validStrixExecutionEvidence()}}
+	r.Provenance.ExecutionManifestSHA256 = executionManifestDigest(r)
+	r.Verified = true
+	r.Digest, _ = r.ComputeDigest()
+	return r
+}
 
 func TestFilterSubkernelSpecs_RejectsUnknownSelectors(t *testing.T) {
 	// Unknown single selector
@@ -223,6 +258,9 @@ func TestStrixValidationReceipt_SubkernelCountsJSON(t *testing.T) {
 }
 
 func TestStrixValidationOrchestrator(t *testing.T) {
+	if os.Getenv("FAK_STRIX_LIVE_TEST") != "1" {
+		t.Skip("set FAK_STRIX_LIVE_TEST=1 for the explicit physical integration witness")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -332,7 +370,7 @@ func TestRunStrixValidation_SourceBindingMissingWhenRequired(t *testing.T) {
 	}
 }
 
-func TestRunStrixValidation_SourceBindingMismatch(t *testing.T) {
+func TestRunStrixValidation_LegacyCheckoutBindingCannotEarnV2Credit(t *testing.T) {
 	defer ClearPresenceCache()
 
 	origVerify := verifySourceBindingFn
@@ -366,7 +404,7 @@ func TestRunStrixValidation_SourceBindingMismatch(t *testing.T) {
 
 	receipt, err := RunStrixValidation(ctx, opts)
 	if err == nil {
-		t.Fatal("expected error on source binding mismatch, got nil")
+		t.Fatal("expected legacy checkout-only binding to fail, got nil")
 	}
 	if receipt == nil {
 		t.Fatal("expected non-nil receipt on failure")
@@ -380,13 +418,13 @@ func TestRunStrixValidation_SourceBindingMismatch(t *testing.T) {
 
 	foundReason := false
 	for _, f := range receipt.Failures {
-		if strings.Contains(f, "source binding verification failed") {
+		if strings.Contains(f, "v2 validation requires source binding") {
 			foundReason = true
 			break
 		}
 	}
 	if !foundReason {
-		t.Errorf("expected failure mentioning 'source binding verification failed', got: %v", receipt.Failures)
+		t.Errorf("expected failure mentioning v2 source binding requirement, got: %v", receipt.Failures)
 	}
 }
 
@@ -452,4 +490,235 @@ func TestVerifySourceBinding_DirectChecks(t *testing.T) {
 			t.Errorf("error %q should mention 'mismatch'", err.Error())
 		}
 	})
+}
+
+func TestBuildStrixCandidateArchiveDeterministicAndTamperClosed(t *testing.T) {
+	rootBytes, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tipBytes, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, tip := strings.TrimSpace(string(rootBytes)), strings.TrimSpace(string(tipBytes))
+	a, err := BuildStrixCandidateArchive(context.Background(), root, tip, []string{"internal/amdgpu/strix_receipt.go"})
+	if err != nil {
+		t.Fatalf("first archive: %v", err)
+	}
+	b, err := BuildStrixCandidateArchive(context.Background(), root, tip, []string{"internal/amdgpu/strix_receipt.go"})
+	if err != nil {
+		t.Fatalf("second archive: %v", err)
+	}
+	if a.SourceArchiveSHA256 != b.SourceArchiveSHA256 {
+		t.Fatalf("candidate archive is nondeterministic: %+v != %+v", a, b)
+	}
+	tampered := append([]byte(nil), a.Bytes...)
+	tampered[len(tampered)/2] ^= 1
+	_, err = stageStrixCandidate(context.Background(), &StrixTarget{Reachable: true, Mode: "local"}, StrixValidationOpts{GitTip: tip, CandidateArchive: tampered, SourceArchiveSHA256: a.SourceArchiveSHA256})
+	if err == nil || !strings.Contains(err.Error(), "mismatched exact candidate archive") {
+		t.Fatalf("tampered archive did not fail before target access: %v", err)
+	}
+}
+
+func TestValidateStrixWorkspaceRejectsTraversal(t *testing.T) {
+	for _, bad := range []string{"/tmp/fak-strix-validation.ok/../victim", "/tmp/fak-strix-validation.", "/tmp/fak-strix-validation.ok/child", "/var/tmp/fak-strix-validation.ok"} {
+		if err := validateStrixWorkspace(bad); err == nil {
+			t.Errorf("unsafe workspace accepted: %q", bad)
+		}
+	}
+	if err := validateStrixWorkspace("/tmp/fak-strix-validation.AbC_123-x"); err != nil {
+		t.Fatalf("safe workspace rejected: %v", err)
+	}
+}
+
+func TestBuildStrixCandidateArchiveRejectsOverlaySymlink(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("init")
+	run("config", "user.email", "test@example.invalid")
+	run("config", "user.name", "test")
+	if err := os.WriteFile(filepath.Join(root, "base.txt"), []byte("base"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "base.txt")
+	run("commit", "-m", "base")
+	if err := os.Symlink("base.txt", filepath.Join(root, "overlay-link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	_, err := BuildStrixCandidateArchive(context.Background(), root, run("rev-parse", "HEAD"), []string{"overlay-link"})
+	if err == nil || !strings.Contains(err.Error(), "overlay symlink") {
+		t.Fatalf("overlay symlink accepted: %v", err)
+	}
+}
+
+func TestArchiveRejectsCommittedLinksAndBindsOverlayBytes(t *testing.T) {
+	if err := rejectArchiveLinkEntry(&tar.Header{Name: "hard", Linkname: "../escape", Typeflag: tar.TypeLink}); err == nil {
+		t.Fatal("hardlink entry accepted")
+	}
+	root := t.TempDir()
+	run := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("init")
+	run("config", "user.email", "test@example.invalid")
+	run("config", "user.name", "test")
+	if err := os.WriteFile(filepath.Join(root, "base"), []byte("one"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("base", filepath.Join(root, "committed-link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	run("add", "base", "committed-link")
+	run("commit", "-m", "links")
+	tip := run("rev-parse", "HEAD")
+	if _, err := BuildStrixCandidateArchive(context.Background(), root, tip, nil); err == nil || !strings.Contains(err.Error(), "archive link") {
+		t.Fatalf("committed symlink accepted: %v", err)
+	}
+	run("rm", "committed-link")
+	run("commit", "-m", "unlink")
+	tip = run("rev-parse", "HEAD")
+	a, err := BuildStrixCandidateArchive(context.Background(), root, tip, []string{"base"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "base"), []byte("two"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	b, err := BuildStrixCandidateArchive(context.Background(), root, tip, []string{"base"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.SourceArchiveSHA256 == b.SourceArchiveSHA256 {
+		t.Fatal("transported source digest did not bind changed overlay bytes")
+	}
+}
+
+func TestStageRejectsDigestMatchingUnsafeCandidateArchive(t *testing.T) {
+	makeArchive := func(name, link string, kind byte) []byte {
+		var b bytes.Buffer
+		w := tar.NewWriter(&b)
+		h := &tar.Header{Name: name, Linkname: link, Typeflag: kind, Mode: 0600}
+		if kind == tar.TypeReg {
+			h.Size = 1
+		}
+		if err := w.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+		if kind == tar.TypeReg {
+			_, _ = w.Write([]byte("x"))
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return b.Bytes()
+	}
+	for _, tc := range []struct {
+		name, link string
+		kind       byte
+	}{{"../escape", "", tar.TypeReg}, {"/absolute", "", tar.TypeReg}, {"link", "../escape", tar.TypeSymlink}, {"hard", "../escape", tar.TypeLink}} {
+		data := makeArchive(tc.name, tc.link, tc.kind)
+		_, err := stageStrixCandidate(context.Background(), &StrixTarget{Mode: "local", Reachable: true}, StrixValidationOpts{GitTip: testTip, CandidateArchive: data, SourceArchiveSHA256: digestBytes(data), AdmissionTimeout: time.Second})
+		if err == nil {
+			t.Fatalf("unsafe digest-matching archive accepted: %+v", tc)
+		}
+	}
+}
+
+func TestRunStrixValidationCleanupUsesFreshContextExactlyOnce(t *testing.T) {
+	defer ClearPresenceCache()
+	target := &StrixTarget{Mode: "ssh", Host: "cleanup-test", Reachable: true, GPUName: "AMD Radeon 8060S Graphics", TargetISA: "gfx1151"}
+	SavePresenceCache(target)
+	origStage, origCleanup, origExec := stageStrixCandidateFn, cleanupStrixCandidateFn, executeOneSubkernelFn
+	defer func() {
+		stageStrixCandidateFn = origStage
+		cleanupStrixCandidateFn = origCleanup
+		executeOneSubkernelFn = origExec
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	stageStrixCandidateFn = func(context.Context, *StrixTarget, StrixValidationOpts) (stagedStrixCandidate, error) {
+		return stagedStrixCandidate{SourceBinding: SourceBinding{GitTip: testTip, GitRef: "HEAD", SourceArchiveSHA256: testHash, BinarySHA256: testHash, ShaderBundleSHA256: testHash, BuildCommandSHA256: testHash, WorkDir: "/tmp/fak-strix-validation.safe", AdmissionWait: 30 * time.Second}}, nil
+	}
+	cleanupCalls := 0
+	cleanupStrixCandidateFn = func(cleanCtx context.Context, _ *StrixTarget, work string) bool {
+		cleanupCalls++
+		if cleanCtx.Err() != nil {
+			t.Errorf("cleanup inherited canceled execution context: %v", cleanCtx.Err())
+		}
+		return true
+	}
+	executeOneSubkernelFn = func(context.Context, *StrixTarget, SubkernelSpec) StrixSubkernelResult {
+		cancel()
+		return StrixSubkernelResult{Name: "argmax", Status: "PASS", DurationUS: 1, Iterations: 1, ParityEvents: []StrixParityEvent{NewExactArgmaxParityEvent("fak-native/vulkan", 1, true, true)}, Evidence: validStrixExecutionEvidence()}
+	}
+	r, err := RunStrixValidation(ctx, StrixValidationOpts{Host: target.Host, RunSubkernels: true, Subkernels: []string{"argmax"}, GitRef: "HEAD", GitTip: testTip, Command: "test", RequireSourceBinding: true, CandidateArchive: []byte("unused by stub"), SourceArchiveSHA256: testHash, AdmissionTimeout: 30 * time.Second})
+	if err != nil {
+		t.Fatalf("validation failed: %v", err)
+	}
+	if cleanupCalls != 1 {
+		t.Fatalf("cleanup calls=%d want 1", cleanupCalls)
+	}
+	if !r.Provenance.CleanupObserved {
+		t.Fatal("cleanup not recorded")
+	}
+}
+
+func TestBuildStrixAdmissionCommandStopsOnArtifactMismatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the admission shell contract is exercised under WSL/Linux")
+	}
+	work := t.TempDir()
+	sentinel := filepath.Join(work, "device-ran")
+	sb := SourceBinding{
+		WorkDir:            work,
+		BinarySHA256:       testHash,
+		ShaderBundleSHA256: testHash,
+		AdmissionWait:      time.Second,
+	}
+	target := &StrixTarget{Mode: "local", GPUName: "AMD Radeon 8060S Graphics", TargetISA: "gfx1151"}
+	command := buildStrixAdmissionCommand(target, sb, "touch "+shellQuote(sentinel))
+	out, err := runStrixTargetCommand(context.Background(), target, command, nil)
+	if err == nil {
+		t.Fatal("artifact mismatch unexpectedly executed successfully")
+	}
+	if strings.Contains(string(out), "FAK_STRIX_ARTIFACT_REHASH=1") {
+		t.Fatalf("artifact mismatch emitted a successful rehash marker: %s", out)
+	}
+	if _, statErr := os.Stat(sentinel); !os.IsNotExist(statErr) {
+		t.Fatalf("device command ran after artifact mismatch: %v", statErr)
+	}
+}
+
+func TestRunStrixValidationRejectsInvalidAdmissionBeforeStaging(t *testing.T) {
+	defer ClearPresenceCache()
+	target := &StrixTarget{Mode: "ssh", Host: "admission-test", Reachable: true, GPUName: "AMD Radeon 8060S Graphics", TargetISA: "gfx1151"}
+	SavePresenceCache(target)
+	orig := stageStrixCandidateFn
+	defer func() { stageStrixCandidateFn = orig }()
+	called := false
+	stageStrixCandidateFn = func(context.Context, *StrixTarget, StrixValidationOpts) (stagedStrixCandidate, error) {
+		called = true
+		return stagedStrixCandidate{}, nil
+	}
+	_, err := RunStrixValidation(context.Background(), StrixValidationOpts{Host: target.Host, RunSubkernels: true, Subkernels: []string{"argmax"}, GitTip: testTip, RequireSourceBinding: true, AdmissionTimeout: 61 * time.Second})
+	if err == nil || !strings.Contains(err.Error(), "exceeds 60s") {
+		t.Fatalf("invalid admission accepted: %v", err)
+	}
+	if called {
+		t.Fatal("workspace staged before invalid admission timeout was rejected")
+	}
 }

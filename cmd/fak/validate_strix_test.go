@@ -11,6 +11,15 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/amdgpu"
 )
 
+func stubStrixCandidateArchive(t *testing.T) {
+	t.Helper()
+	orig := buildStrixCandidateArchiveFn
+	buildStrixCandidateArchiveFn = func(context.Context, string, string, []string) (amdgpu.StrixCandidateArchive, error) {
+		return amdgpu.StrixCandidateArchive{Bytes: []byte("candidate"), SourceArchiveSHA256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+	}
+	t.Cleanup(func() { buildStrixCandidateArchiveFn = orig })
+}
+
 func TestIsGPURelatedValidation(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -213,6 +222,7 @@ func TestValidateStrixUnavailableHardwareFailsClosed(t *testing.T) {
 }
 
 func TestValidateStrixNilReceiptPropagatesFailure(t *testing.T) {
+	stubStrixCandidateArchive(t)
 	origDiscover := discoverStrixTargetFn
 	origRun := runStrixValidationFn
 	defer func() {
@@ -234,6 +244,7 @@ func TestValidateStrixNilReceiptPropagatesFailure(t *testing.T) {
 	}
 
 	var res validateResult
+	res.Tip = "0123456789abcdef0123456789abcdef01234567"
 	res.OK = true
 	recorder := &validateRecorder{
 		ctx:     context.Background(),
@@ -269,7 +280,7 @@ func TestValidateStrixNilReceiptPropagatesFailure(t *testing.T) {
 	runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
 		return nil, nil
 	}
-	res = validateResult{OK: true}
+	res = validateResult{OK: true, Tip: "0123456789abcdef0123456789abcdef01234567"}
 	recorder = &validateRecorder{
 		ctx:     context.Background(),
 		stderr:  io.Discard,
@@ -299,6 +310,7 @@ func TestValidateStrixNilReceiptPropagatesFailure(t *testing.T) {
 }
 
 func TestValidateStrixReceiptValidationFails(t *testing.T) {
+	stubStrixCandidateArchive(t)
 	origDiscover := discoverStrixTargetFn
 	origRun := runStrixValidationFn
 	defer func() {
@@ -327,6 +339,7 @@ func TestValidateStrixReceiptValidationFails(t *testing.T) {
 	}
 
 	var res validateResult
+	res.Tip = "0123456789abcdef0123456789abcdef01234567"
 	res.OK = true
 	recorder := &validateRecorder{
 		ctx:     context.Background(),
@@ -359,7 +372,34 @@ func TestValidateStrixReceiptValidationFails(t *testing.T) {
 	}
 }
 
+func TestValidateStrixHistoricalV1ReceiptCannotEarnCredit(t *testing.T) {
+	stubStrixCandidateArchive(t)
+	origDiscover, origRun := discoverStrixTargetFn, runStrixValidationFn
+	defer func() { discoverStrixTargetFn, runStrixValidationFn = origDiscover, origRun }()
+	target := amdgpu.StrixTarget{Host: "strix-target-ok", GPUName: "AMD Radeon 8060S Graphics", TargetISA: "gfx1151", Reachable: true, ComputeUnits: 40, DiscoveredAt: time.Now().UTC().Format(time.RFC3339)}
+	discoverStrixTargetFn = func(context.Context, string) (*amdgpu.StrixTarget, error) { return &target, nil }
+	runStrixValidationFn = func(context.Context, amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+		r := amdgpu.NewStrixValidationReceipt(target, "HEAD", "0123456789abcdef0123456789abcdef01234567", "fak validate --strix")
+		r.Schema = amdgpu.StrixValidationSchemaV1
+		r.Verified = true
+		r.Subkernels = []amdgpu.StrixSubkernelResult{{Name: "argmax", Status: "PASS", DurationUS: 1, Iterations: 1, Parity: amdgpu.StrixParityVerdict{Passed: true, ArgmaxExact: true}}}
+		digest, err := r.ComputeDigest()
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Digest = digest
+		return r, nil
+	}
+	res := validateResult{OK: true, Tip: "0123456789abcdef0123456789abcdef01234567"}
+	recorder := &validateRecorder{ctx: context.Background(), stderr: io.Discard, started: time.Now(), res: &res}
+	err := executeStrixValidationPhase(context.Background(), io.Discard, io.Discard, &res, recorder, false, "", "", "", []string{"internal/amdgpu/strix_receipt.go"})
+	if err == nil || res.OK || !strings.Contains(err.Error(), "not credit eligible") {
+		t.Fatalf("historical v1 receipt earned current credit: err=%v ok=%v", err, res.OK)
+	}
+}
+
 func TestValidateStrixReceiptNonPassVerdict(t *testing.T) {
+	stubStrixCandidateArchive(t)
 	origDiscover := discoverStrixTargetFn
 	origRun := runStrixValidationFn
 	defer func() {
@@ -384,6 +424,7 @@ func TestValidateStrixReceiptNonPassVerdict(t *testing.T) {
 			"fak validate --strix",
 		)
 		r.Verdict = "FAIL"
+		r.Verified = false
 		r.Failures = []string{"subkernel q4k_matmul failed"}
 		digest, _ := r.ComputeDigest()
 		r.Digest = digest
@@ -391,6 +432,7 @@ func TestValidateStrixReceiptNonPassVerdict(t *testing.T) {
 	}
 
 	var res validateResult
+	res.Tip = "0123456789abcdef0123456789abcdef01234567"
 	res.OK = true
 	recorder := &validateRecorder{
 		ctx:     context.Background(),
@@ -431,6 +473,7 @@ func TestValidateStrixReceiptNonPassVerdict(t *testing.T) {
 }
 
 func TestValidateStrixAblationsDefault(t *testing.T) {
+	stubStrixCandidateArchive(t)
 	origDiscover := discoverStrixTargetFn
 	origRun := runStrixValidationFn
 	defer func() {
@@ -466,6 +509,7 @@ func TestValidateStrixAblationsDefault(t *testing.T) {
 
 	// 1. Default ablateArg == "" -> RunAblations must be false
 	var res validateResult
+	res.Tip = "0123456789abcdef0123456789abcdef01234567"
 	res.OK = true
 	recorder := &validateRecorder{
 		ctx:     context.Background(),
@@ -486,15 +530,22 @@ func TestValidateStrixAblationsDefault(t *testing.T) {
 		"", // ablateArg empty
 		[]string{"internal/amdgpu/strixhalo.go"},
 	)
-	if err != nil {
-		t.Fatalf("unexpected error on passing validation: %v", err)
+	if err == nil {
+		t.Fatalf("empty PASS receipt must fail v2 validation")
 	}
 	if capturedOpts.RunAblations {
 		t.Errorf("expected RunAblations == false when ablateArg == '', got true")
 	}
+	if !capturedOpts.RequireSourceBinding || capturedOpts.GitTip != "0123456789abcdef0123456789abcdef01234567" || len(capturedOpts.CandidateArchive) == 0 || capturedOpts.SourceArchiveSHA256 == "" {
+		t.Fatalf("CLI did not bind the exact candidate overlay: %+v", capturedOpts)
+	}
+	if capturedOpts.Timeout <= capturedOpts.AdmissionTimeout+time.Minute {
+		t.Fatalf("total timeout %s cannot cover build, %s admission, and bounded execution", capturedOpts.Timeout, capturedOpts.AdmissionTimeout)
+	}
+	defaultTimeout := capturedOpts.Timeout
 
 	// 2. Explicit ablateArg != "" -> RunAblations must be true
-	res = validateResult{OK: true}
+	res = validateResult{OK: true, Tip: "0123456789abcdef0123456789abcdef01234567"}
 	recorder = &validateRecorder{
 		ctx:     context.Background(),
 		stderr:  io.Discard,
@@ -513,13 +564,16 @@ func TestValidateStrixAblationsDefault(t *testing.T) {
 		"all", // ablateArg requested
 		[]string{"internal/amdgpu/strixhalo.go"},
 	)
-	if err != nil {
-		t.Fatalf("unexpected error on passing validation with ablations: %v", err)
+	if err == nil {
+		t.Fatalf("empty PASS receipt must fail v2 validation with ablations")
 	}
 	if !capturedOpts.RunAblations {
 		t.Errorf("expected RunAblations == true when ablateArg == 'all', got false")
 	}
 	if len(capturedOpts.Ablations) == 0 {
 		t.Errorf("expected Ablations list populated when ablateArg == 'all', got empty")
+	}
+	if capturedOpts.Timeout <= defaultTimeout {
+		t.Errorf("multi-run timeout %s did not grow beyond single-run timeout %s", capturedOpts.Timeout, defaultTimeout)
 	}
 }
