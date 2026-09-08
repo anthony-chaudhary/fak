@@ -6,25 +6,6 @@ layout(set=0,binding=1) readonly buffer X { float x[]; };
 layout(set=0,binding=2) writeonly buffer Y { float y[]; };
 layout(push_constant) uniform PC { int outDim; int inDim; int tokens; } pc;
 
-uint byteAt(uint off) {
-    uint w = raw[off >> 2];
-    return (w >> ((off & 3u) * 8u)) & 255u;
-}
-float halfAt(uint off) {
-    uint bits = byteAt(off) | (byteAt(off + 1u) << 8u);
-    return unpackHalf2x16(bits).x;
-}
-void scaleMin(uint base, int group, out uint sc, out uint mn) {
-    int j = group;
-    if (j < 4) {
-        sc = byteAt(base + uint(j)) & 63u;
-        mn = byteAt(base + uint(j + 4)) & 63u;
-    } else {
-        j -= 4;
-        sc = (byteAt(base + uint(j + 4)) & 15u) | ((byteAt(base + uint(j)) >> 6u) << 4u);
-        mn = (byteAt(base + uint(j + 4)) >> 4u) | ((byteAt(base + uint(j)) >> 6u) << 4u);
-    }
-}
 void main() {
     int globalIdx = int(gl_GlobalInvocationID.x);
     // The host dispatch is deliberately one-dimensional: ceil(outDim*tokens/64)
@@ -36,16 +17,59 @@ void main() {
     int blocks = pc.inDim / 256;
     float sum = 0.0;
     for (int sb = 0; sb < blocks; ++sb) {
-        uint base = uint((row * blocks + sb) * 144);
-        float d = halfAt(base);
-        float dm = halfAt(base + 2u);
-        for (int group = 0; group < 8; ++group) {
-            uint sc, mn; scaleMin(base + 4u, group, sc, mn);
-            for (int lane = 0; lane < 32; ++lane) {
-                uint packed = byteAt(base + 16u + uint((group >> 1) * 32 + lane));
-                uint code = ((group & 1) != 0) ? packed >> 4u : packed & 15u;
-                float w = d * float(sc) * float(code) - dm * float(mn);
-                sum += w * x[token * pc.inDim + sb * 256 + group * 32 + lane];
+        uint baseWord = uint((row * blocks + sb) * 36);
+        vec2 d_dm = unpackHalf2x16(raw[baseWord]);
+        float d = d_dm.x;
+        float dm = d_dm.y;
+
+        uint w1 = raw[baseWord + 1u];
+        uint w2 = raw[baseWord + 2u];
+        uint w3 = raw[baseWord + 3u];
+
+        float d_sc[8];
+        float dm_mn[8];
+
+        for (int j = 0; j < 4; ++j) {
+            uint sc = bitfieldExtract(w1, j * 8, 6);
+            uint mn = bitfieldExtract(w2, j * 8, 6);
+            d_sc[j] = d * float(sc);
+            dm_mn[j] = dm * float(mn);
+        }
+        for (int j = 4; j < 8; ++j) {
+            int k = j - 4;
+            uint sc = bitfieldExtract(w3, k * 8, 4) | (bitfieldExtract(w1, k * 8 + 6, 2) << 4u);
+            uint mn = bitfieldExtract(w3, k * 8 + 4, 4) | (bitfieldExtract(w2, k * 8 + 6, 2) << 4u);
+            d_sc[j] = d * float(sc);
+            dm_mn[j] = dm * float(mn);
+        }
+
+        for (int pair = 0; pair < 4; ++pair) {
+            int g_even = pair * 2;
+            int g_odd = pair * 2 + 1;
+            float d_sc_e = d_sc[g_even];
+            float dm_mn_e = dm_mn[g_even];
+            float d_sc_o = d_sc[g_odd];
+            float dm_mn_o = dm_mn[g_odd];
+
+            int xBase_even = token * pc.inDim + sb * 256 + g_even * 32;
+            int xBase_odd = xBase_even + 32;
+            uint weightBase = baseWord + 4u + uint(pair * 8);
+
+            for (int w = 0; w < 8; ++w) {
+                uint qw = raw[weightBase + uint(w)];
+                int lane = w * 4;
+
+                // 4 low nibbles for even group
+                sum += (d_sc_e * float(bitfieldExtract(qw, 0, 4)) - dm_mn_e) * x[xBase_even + lane + 0];
+                sum += (d_sc_e * float(bitfieldExtract(qw, 8, 4)) - dm_mn_e) * x[xBase_even + lane + 1];
+                sum += (d_sc_e * float(bitfieldExtract(qw, 16, 4)) - dm_mn_e) * x[xBase_even + lane + 2];
+                sum += (d_sc_e * float(bitfieldExtract(qw, 24, 4)) - dm_mn_e) * x[xBase_even + lane + 3];
+
+                // 4 high nibbles for odd group
+                sum += (d_sc_o * float(bitfieldExtract(qw, 4, 4)) - dm_mn_o) * x[xBase_odd + lane + 0];
+                sum += (d_sc_o * float(bitfieldExtract(qw, 12, 4)) - dm_mn_o) * x[xBase_odd + lane + 1];
+                sum += (d_sc_o * float(bitfieldExtract(qw, 20, 4)) - dm_mn_o) * x[xBase_odd + lane + 2];
+                sum += (d_sc_o * float(bitfieldExtract(qw, 28, 4)) - dm_mn_o) * x[xBase_odd + lane + 3];
             }
         }
     }
