@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -708,5 +712,134 @@ func TestRawDecodePackedCPUReplaySnapshots(t *testing.T) {
 		if !step.Agree || step.MaxDelta != 0 || step.Cosine < 0.999999 {
 			t.Fatalf("output %d was not compared with its own preserved logits: %+v", step.Step, step)
 		}
+	}
+}
+
+type divergingTestBackend struct {
+	compute.Backend
+}
+
+func (b *divergingTestBackend) Read(t compute.Tensor) []float32 {
+	raw := b.Backend.Read(t)
+	out := append([]float32(nil), raw...)
+	if len(out) > 1 {
+		curArgmax := mathx.ArgmaxF32(out)
+		other := (curArgmax + 1) % len(out)
+		out[other] = out[curArgmax] + 100.0
+	}
+	return out
+}
+
+func TestRawDecodeCPUDivergencePreservesReceipt(t *testing.T) {
+	defer setRawDecodeTestFlags(true, "2,4,6", 256, false, true)()
+
+	m := model.NewSynthetic(syntheticTestConfig())
+	f := testRawDecodeFlags(4, 1)
+
+	be := &divergingTestBackend{Backend: compute.Default()}
+
+	// 1. executeRawDecode must return both report and error describing divergence.
+	report, err := executeRawDecode(f, m, "divergence-test", 1.0, 0, be, nil)
+	if err == nil {
+		t.Fatal("expected executeRawDecode to return error upon divergence, got nil")
+	}
+	if !strings.Contains(err.Error(), "divergence") {
+		t.Fatalf("expected divergence error, got %v", err)
+	}
+	if report == nil {
+		t.Fatal("expected executeRawDecode to preserve report receipt on divergence, got nil")
+	}
+	vRaw, ok := report["verify_cpu"]
+	if !ok || vRaw == nil {
+		t.Fatalf("report missing verify_cpu section on divergence: %v", report)
+	}
+	v, ok := vRaw.(*cpuVerifyResult)
+	if !ok {
+		t.Fatalf("expected *cpuVerifyResult, got %T", vRaw)
+	}
+	if v.Passed {
+		t.Errorf("expected verify_cpu.Passed: false on divergence")
+	}
+	if v.AllAgree {
+		t.Errorf("expected verify_cpu.AllAgree: false on divergence")
+	}
+	if v.AllArgmaxAgree {
+		t.Errorf("expected verify_cpu.AllArgmaxAgree: false on divergence")
+	}
+
+	// 2. runRawDecode with output file must write the report JSON despite error.
+	tmpDir := t.TempDir()
+	outPath := filepath.Join(tmpDir, "divergence_receipt.json")
+	fOut := testRawDecodeFlags(4, 1)
+	*fOut.out = outPath
+
+	errRun := runRawDecode(fOut, m, "divergence-run-test", 1.0, 0, be, nil)
+	if errRun == nil {
+		t.Fatal("expected runRawDecode to return divergence error, got nil")
+	}
+	data, readErr := os.ReadFile(outPath)
+	if readErr != nil {
+		t.Fatalf("runRawDecode must write report file even on verification failure: %v", readErr)
+	}
+	var parsed map[string]any
+	if unmarshalErr := json.Unmarshal(data, &parsed); unmarshalErr != nil {
+		t.Fatalf("failed to unmarshal divergence report JSON: %v", unmarshalErr)
+	}
+	vMap, ok := parsed["verify_cpu"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing verify_cpu in written divergence JSON: %v", parsed)
+	}
+	if vMap["all_argmax_agree"] != false {
+		t.Errorf("expected verify_cpu.all_argmax_agree=false, got %v", vMap["all_argmax_agree"])
+	}
+	if vMap["all_agree"] != false {
+		t.Errorf("expected verify_cpu.all_agree=false, got %v", vMap["all_agree"])
+	}
+	if vMap["passed"] != false {
+		t.Errorf("expected verify_cpu.passed=false, got %v", vMap["passed"])
+	}
+
+	// 3. runRawDecode to stdout must emit the receipt JSON when -out is empty.
+	fStdout := testRawDecodeFlags(4, 1)
+	rPipe, wPipe, pipeErr := os.Pipe()
+	if pipeErr != nil {
+		t.Fatalf("failed to create pipe: %v", pipeErr)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = wPipe
+
+	outCh := make(chan []byte)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, rPipe)
+		_ = rPipe.Close()
+		outCh <- buf.Bytes()
+	}()
+
+	errStdout := runRawDecode(fStdout, m, "divergence-stdout-test", 1.0, 0, be, nil)
+	_ = wPipe.Close()
+	os.Stdout = oldStdout
+
+	if errStdout == nil {
+		t.Fatal("expected runRawDecode to return divergence error for stdout run, got nil")
+	}
+	capturedStdout := <-outCh
+
+	var parsedStdout map[string]any
+	if unmarshalErr := json.Unmarshal(capturedStdout, &parsedStdout); unmarshalErr != nil {
+		t.Fatalf("failed to unmarshal stdout divergence JSON: %v, raw output: %q", unmarshalErr, string(capturedStdout))
+	}
+	stdoutVMap, ok := parsedStdout["verify_cpu"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing verify_cpu in stdout divergence JSON: %v", parsedStdout)
+	}
+	if stdoutVMap["all_argmax_agree"] != false {
+		t.Errorf("stdout expected verify_cpu.all_argmax_agree=false, got %v", stdoutVMap["all_argmax_agree"])
+	}
+	if stdoutVMap["all_agree"] != false {
+		t.Errorf("stdout expected verify_cpu.all_agree=false, got %v", stdoutVMap["all_agree"])
+	}
+	if stdoutVMap["passed"] != false {
+		t.Errorf("stdout expected verify_cpu.passed=false, got %v", stdoutVMap["passed"])
 	}
 }

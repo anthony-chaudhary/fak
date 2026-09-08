@@ -170,12 +170,13 @@ type rawStepInfo struct {
 }
 
 type cpuVerifyResult struct {
-	Passed    bool         `json:"passed"`
-	AllAgree  bool         `json:"all_agree"`
-	MinCosine float64      `json:"min_cosine"`
-	MaxDelta  float64      `json:"max_delta"`
-	Prefill   stepVerify   `json:"prefill"`
-	Steps     []stepVerify `json:"steps,omitempty"`
+	Passed         bool         `json:"passed"`
+	AllAgree       bool         `json:"all_agree"`
+	AllArgmaxAgree bool         `json:"all_argmax_agree"`
+	MinCosine      float64      `json:"min_cosine"`
+	MaxDelta       float64      `json:"max_delta"`
+	Prefill        stepVerify   `json:"prefill"`
+	Steps          []stepVerify `json:"steps,omitempty"`
 }
 
 type stepVerify struct {
@@ -249,6 +250,7 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, q
 	}
 
 	repOutputs := make([]rawRepOutput, 0, reps)
+	var verifyErr error
 
 	for r := 0; r < reps; r++ {
 		t0 := time.Now()
@@ -405,18 +407,19 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, q
 			cpuSession.Close()
 
 			cpuVerify = &cpuVerifyResult{
-				Passed:    allAgree,
-				AllAgree:  allAgree,
-				MinCosine: minCos,
-				MaxDelta:  maxD,
-				Prefill:   pVerify,
-				Steps:     stepVerifies,
-			}
-			if !allAgree {
-				return nil, fmt.Errorf("raw decode CPU verification failed: argmax divergence between device and CPU reference")
+				Passed:         allAgree,
+				AllAgree:       allAgree,
+				AllArgmaxAgree: allAgree,
+				MinCosine:      minCos,
+				MaxDelta:       maxD,
+				Prefill:        pVerify,
+				Steps:          stepVerifies,
 			}
 			// Includes fresh CPU session setup, replay, comparisons and Close.
 			cpuVerifyDur = time.Since(t5)
+			if !allAgree && verifyErr == nil {
+				verifyErr = fmt.Errorf("raw decode CPU verification divergence: argmax divergence between device and CPU reference")
+			}
 		}
 
 		hostStages := []map[string]any{
@@ -445,6 +448,10 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, q
 			hostStages:      hostStages,
 			cpuVerify:       cpuVerify,
 		})
+
+		if verifyErr != nil {
+			break
+		}
 	}
 
 	rep0 := repOutputs[0]
@@ -452,13 +459,14 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, q
 	effectiveIDs = append(effectiveIDs, promptIDs...)
 	effectiveIDs = append(effectiveIDs, rep0.generatedTokens...)
 
-	setupDurs := make([]time.Duration, reps)
-	prefillDurs := make([]time.Duration, reps)
-	firstSampleDurs := make([]time.Duration, reps)
-	decodeDurs := make([]time.Duration, reps)
-	teardownDurs := make([]time.Duration, reps)
-	cpuVerifyDurs := make([]time.Duration, reps)
-	totalDurs := make([]time.Duration, reps)
+	nRuns := len(repOutputs)
+	setupDurs := make([]time.Duration, nRuns)
+	prefillDurs := make([]time.Duration, nRuns)
+	firstSampleDurs := make([]time.Duration, nRuns)
+	decodeDurs := make([]time.Duration, nRuns)
+	teardownDurs := make([]time.Duration, nRuns)
+	cpuVerifyDurs := make([]time.Duration, nRuns)
+	totalDurs := make([]time.Duration, nRuns)
 
 	for i, ro := range repOutputs {
 		setupDurs[i] = ro.sessionSetupDur
@@ -482,7 +490,7 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, q
 		"total_ms":         medianMS(totalDurs),
 	}
 
-	runs := make([]map[string]any, reps)
+	runs := make([]map[string]any, nRuns)
 	for i, ro := range repOutputs {
 		runs[i] = map[string]any{
 			"rep":                     i + 1,
@@ -569,19 +577,26 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, q
 	if reps > 1 {
 		report["runs"] = runs
 	}
-	if rep0.cpuVerify != nil {
-		report["verify_cpu"] = rep0.cpuVerify
+	for _, ro := range repOutputs {
+		if ro.cpuVerify != nil {
+			report["verify_cpu"] = ro.cpuVerify
+			if !ro.cpuVerify.Passed {
+				break
+			}
+		}
 	}
 
-	return report, nil
+	return report, verifyErr
 }
 
 // runRawDecode performs raw greedy decode and writes the resulting JSON report.
 func runRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, quantMS float64, be compute.Backend, registeredBackends []string) error {
 	report, err := executeRawDecode(f, m, modelName, loadMS, quantMS, be, registeredBackends)
+	if report != nil {
+		writeReport(f, report)
+	}
 	if err != nil {
 		return err
 	}
-	writeReport(f, report)
 	return nil
 }
