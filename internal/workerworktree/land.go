@@ -266,7 +266,18 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		finishAdmission()
 		admissionActive = false
 		finishValidation := beginLandPhase(tracker, "prospective-validation", 0)
-		if ok, detail := verify(wtPath); !ok {
+		ok, detail := false, ""
+		if workspaceNeedsSiblingTopology(root) {
+			rc, prospectiveBase := run(git, wtPath, []string{"rev-parse", diffRef})
+			if rc != 0 || strings.TrimSpace(prospectiveBase) == "" {
+				detail = "could not resolve prospective base: " + tail(prospectiveBase, 200)
+			} else {
+				ok, detail = verifyTopologyCandidate(root, strings.TrimSpace(prospectiveBase), diff, verify, git)
+			}
+		} else {
+			ok, detail = verify(wtPath)
+		}
+		if !ok {
 			finishValidation()
 			return Result{OK: false, Applied: false, Committed: false,
 				Reason: "worktree verify failed, refusing to land: " + detail}
@@ -742,37 +753,7 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 
 		if verify != nil {
 			finishVerify := beginLandPhase(tracker, "post-merge-validation", attempt)
-			// Keep the prospective checkout beside the selected repository root.
-			// Checked-in workspace files may name sibling modules with paths such as
-			// ../module; a system-temp checkout changes that parent topology and can
-			// falsely reject an otherwise valid candidate. Failure to preserve the
-			// topology is terminal: verification must never fall back to a different
-			// parent or proceed without the requested witness.
-			rootAbs, err := filepath.Abs(root)
-			if err != nil {
-				finishVerify()
-				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: failed to resolve selected root: " + err.Error()}, true
-			}
-			candDir, err := os.MkdirTemp(filepath.Dir(rootAbs), ".fak-cand-validate-*")
-			if err != nil {
-				finishVerify()
-				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: failed to create topology-preserving candidate temp dir: " + err.Error()}, true
-			}
-			_ = os.Remove(candDir)
-			cleanupCand := func() {
-				run(git, root, []string{"worktree", "remove", "--force", candDir})
-				run(git, root, []string{"worktree", "prune"})
-				_ = os.RemoveAll(candDir)
-			}
-
-			rc, out := run(git, root, []string{"-c", "core.longpaths=true", "worktree", "add", "--detach", candDir, newCommit})
-			if rc != 0 {
-				cleanupCand()
-				finishVerify()
-				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: git candidate checkout failed: " + tail(out, 200)}, true
-			}
-			ok, detail := verify(candDir)
-			cleanupCand()
+			ok, detail := verifyTopologyCandidate(root, newCommit, "", verify, git)
 			finishVerify()
 			if !ok {
 				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: " + detail}, true
@@ -805,6 +786,66 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 	// Every bounded attempt lost its CAS — preserve the candidate for explicit
 	// reconciliation rather than exposing the shared index under contention.
 	return isolatedLandReconciliation(wtPath, "compare-and-swap retry budget exhausted", "cas-attempts="+strconv.Itoa(attempts)+"/"+strconv.Itoa(attempts))
+}
+
+// verifyTopologyCandidate materializes the exact tree being verified beside the
+// selected repository root. Checked-in workspaces may refer to sibling modules
+// via paths such as ../module; fleet worktrees and system temp directories do
+// not preserve that relationship. prospectiveDiff is applied only for the
+// pre-land worker candidate; post-merge commits already contain the full tree.
+func verifyTopologyCandidate(root, ref, prospectiveDiff string, verify VerifyHook, git GitRunner) (bool, string) {
+	parent := ""
+	if workspaceNeedsSiblingTopology(root) {
+		rootAbs, err := filepath.Abs(root)
+		if err != nil {
+			return false, "failed to resolve selected root: " + err.Error()
+		}
+		parent = filepath.Dir(rootAbs)
+	}
+	candDir, err := os.MkdirTemp(parent, ".fak-cand-validate-*")
+	if err != nil {
+		return false, "failed to create topology-preserving candidate temp dir: " + err.Error()
+	}
+	_ = os.Remove(candDir)
+	cleanup := func() {
+		run(git, root, []string{"worktree", "remove", "--force", candDir})
+		run(git, root, []string{"worktree", "prune"})
+		_ = os.RemoveAll(candDir)
+	}
+	defer cleanup()
+
+	if rc, out := run(git, root, []string{"-c", "core.longpaths=true", "worktree", "add", "--detach", candDir, ref}); rc != 0 {
+		return false, "git candidate checkout failed: " + tail(out, 200)
+	}
+	if prospectiveDiff != "" {
+		patch, cleanupPatch, err := writePatch(prospectiveDiff)
+		if err != nil {
+			return false, "failed to materialize prospective patch: " + err.Error()
+		}
+		defer cleanupPatch()
+		if rc, out := run(git, candDir, []string{"apply", "--whitespace=nowarn", patch}); rc != 0 {
+			return false, "failed to apply prospective patch: " + tail(out, 200)
+		}
+	}
+	return verify(candDir)
+}
+
+// workspaceNeedsSiblingTopology identifies checked-in Go workspaces whose module
+// graph escapes the selected repository root. Those candidates must be verified
+// beside root; ordinary repositories retain direct worker verification and the
+// system-temp post-merge checkout used before #12447.
+func workspaceNeedsSiblingTopology(root string) bool {
+	b, err := os.ReadFile(filepath.Join(root, "go.work"))
+	if err != nil {
+		return false
+	}
+	for _, field := range strings.Fields(string(b)) {
+		field = strings.Trim(field, "()\"")
+		if field == ".." || strings.HasPrefix(field, "../") || strings.HasPrefix(field, `..\`) {
+			return true
+		}
+	}
+	return false
 }
 
 // composeSignedMsg writes msgFile's content to a new temp file with a Signed-off-by

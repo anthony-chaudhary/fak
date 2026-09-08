@@ -380,14 +380,9 @@ func TestLiveLandWithSiblingWorkspaceVerified(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	validatedCandidate := ""
+	var validatedCandidates []string
 	verify := func(dir string) (bool, string) {
-		// The worker checkout lives under an arbitrary fleet root; this witness is
-		// specifically for the prospective merge commit's checkout topology.
-		if dir == prepared.Path {
-			return true, ""
-		}
-		validatedCandidate = dir
+		validatedCandidates = append(validatedCandidates, dir)
 		cmd := exec.Command("go", "build", "./...")
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(), "GOWORK=auto")
@@ -402,8 +397,13 @@ func TestLiveLandWithSiblingWorkspaceVerified(t *testing.T) {
 	if !landed.OK || !landed.Committed {
 		t.Fatalf("sibling-workspace land failed: %+v", landed)
 	}
-	if filepath.Clean(filepath.Dir(validatedCandidate)) != filepath.Clean(filepath.Dir(repo)) {
-		t.Fatalf("candidate parent = %q, want selected-root parent %q", filepath.Dir(validatedCandidate), filepath.Dir(repo))
+	if len(validatedCandidates) != 2 {
+		t.Fatalf("verified candidates = %v, want prospective and post-merge candidates", validatedCandidates)
+	}
+	for _, candidate := range validatedCandidates {
+		if filepath.Clean(filepath.Dir(candidate)) != filepath.Clean(filepath.Dir(repo)) {
+			t.Fatalf("candidate parent = %q, want selected-root parent %q", filepath.Dir(candidate), filepath.Dir(repo))
+		}
 	}
 	got, err := os.ReadFile(filepath.Join(repo, "app.go"))
 	if err != nil || string(got) != workerBody {
