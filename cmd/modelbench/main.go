@@ -36,6 +36,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/benchckpt"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
@@ -639,7 +640,7 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	if err := validateNativeProfileReceipt(b, profile, receipt); err != nil {
 		return fmt.Errorf("native performance receipt self-check: %w", err)
 	}
-	receiptBytes, err := json.MarshalIndent(receipt, "", "  ")
+	receiptBytes, err := benchcli.MarshalReport(receipt)
 	if err != nil {
 		return err
 	}
