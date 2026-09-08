@@ -181,6 +181,15 @@ func TestVulkanQ4KMatMulParityOracleFormat(t *testing.T) {
 	}
 }
 
+func TestStrixQuantParityEmitterContract(t *testing.T) {
+	t.Run("q4k_matmul", func(t *testing.T) {
+		TestVulkanQ4KMatMulParityOracleFormat(t)
+	})
+	t.Run("q2k_matmul", func(t *testing.T) {
+		TestVulkanQ2KMatMulParityOracleFormat(t)
+	})
+}
+
 func TestVulkanQ4KBatchedMatMulMultipleTokensMatchesCPUReference(t *testing.T) {
 	v, ok := Pick("vulkan").(*vulkanBackend)
 	if !ok {
