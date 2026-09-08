@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
@@ -301,5 +302,158 @@ func TestResponsesDenialOnlyPredicate(t *testing.T) {
 				t.Fatalf("turnIsDenialOnly = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+type gitgateResetAdj struct{}
+
+func (gitgateResetAdj) Caps() []abi.Capability { return nil }
+func (gitgateResetAdj) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
+	return abi.Verdict{
+		Kind:        abi.VerdictDeny,
+		Reason:      abi.ReasonPolicyBlock,
+		Disposition: "RETRYABLE",
+		By:          "gitgate",
+		Payload:     abi.WitnessPayload{Claim: "reset-hard refused: `git reset --hard` discards every working-tree change"},
+		Meta: map[string]string{
+			"fix": "reset-hard refused: `git reset --hard` discards every working-tree change",
+		},
+	}
+}
+
+func TestResponsesDenialRetryableEmitsNeedsOperatorFalse(t *testing.T) {
+	srv := newTestServer(t)
+	abi.RegisterAdjudicator(0, gitgateResetAdj{})
+	defer abi.RegisterAdjudicator(0, toolAdj{})
+	planner := &sequencePlanner{comps: []*agent.Completion{
+		toolCallTurn("call_reset1", "git_reset", `{"args":"--hard"}`),
+		toolCallTurn("call_reset2", "deny_shell", `{"command":"git reset --hard"}`),
+	}}
+	srv.planner = planner
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	code, resp := postResponses(t, ts.URL, map[string]any{
+		"model": "m",
+		"input": "reset the branch",
+		"tools": []map[string]any{
+			{"type": "function", "name": "git_reset"},
+			{"type": "function", "name": "deny_shell"},
+		},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if got := planner.calls(); got != 2 {
+		t.Fatalf("planner calls = %d, want 2", got)
+	}
+
+	// 1. resp.Status == "incomplete"
+	if resp.Status != "incomplete" {
+		t.Errorf("status = %q, want incomplete", resp.Status)
+	}
+	if resp.IncompleteDetails == nil || resp.IncompleteDetails.Reason != deniedGuardIncompleteReason {
+		t.Errorf("incomplete_details = %+v, want reason %q", resp.IncompleteDetails, deniedGuardIncompleteReason)
+	}
+
+	text := messageText(resp.Output)
+
+	// 2. Output contains BLOCKED_BY_GUARD
+	if !strings.Contains(text, "BLOCKED_BY_GUARD") {
+		t.Errorf("output missing BLOCKED_BY_GUARD:\n%s", text)
+	}
+
+	// 3. Output contains needs_operator=false
+	if !strings.Contains(text, "needs_operator=false") {
+		t.Errorf("output missing needs_operator=false:\n%s", text)
+	}
+
+	// 4. Output contains autonomous_retryable
+	if !strings.Contains(text, "autonomous_retryable") {
+		t.Errorf("output missing autonomous_retryable:\n%s", text)
+	}
+
+	// 5. Output contains suggested_recovery="fak recover RESET_HARD"
+	if !strings.Contains(text, `suggested_recovery="fak recover RESET_HARD"`) {
+		t.Errorf("output missing suggested_recovery=\"fak recover RESET_HARD\":\n%s", text)
+	}
+
+	// 6. Output contains recovery="fak recover RESET_HARD" in the synthetic tool result
+	recovery := planner.request(1)
+	var denialResult *agent.Message
+	for i := range recovery {
+		if recovery[i].Role == agent.RoleTool && recovery[i].ToolCallID == "call_reset1" {
+			denialResult = &recovery[i]
+			break
+		}
+	}
+	if denialResult == nil {
+		t.Fatalf("recovery request carried no tool result for call_reset1: %+v", recovery)
+	}
+	if !strings.Contains(denialResult.Content, `recovery="fak recover RESET_HARD"`) {
+		t.Errorf("denial tool result missing recovery=\"fak recover RESET_HARD\":\n%s", denialResult.Content)
+	}
+
+	// 7. srv.metrics.denyAllSnapshot() has 0 deny-all stops!
+	if stops, _ := srv.metrics.denyAllSnapshot(); stops != 0 {
+		t.Errorf("deny-all stops = %d, want 0 for retryable turn", stops)
+	}
+}
+
+func TestRecoveryHintAndTokenMapping(t *testing.T) {
+	cases := []struct {
+		detail map[string]string
+		reason string
+		kind   string
+		want   string
+	}{
+		{detail: map[string]string{"deny_rule": "reset_hard"}, want: "RESET_HARD"},
+		{detail: map[string]string{"deny_rule": "skip_hooks"}, want: "SKIP_HOOKS"},
+		{detail: map[string]string{"deny_rule": "commit_by_explicit_path"}, want: "COMMIT_BY_EXPLICIT_PATH"},
+		{detail: map[string]string{"deny_rule": "clean_force"}, want: "CLEAN_FORCE"},
+		{detail: map[string]string{"deny_rule": "off_trunk"}, want: "OFF_TRUNK"},
+		{detail: map[string]string{"deny_rule": "never_amend_shared"}, want: "NEVER_AMEND_SHARED"},
+		{detail: map[string]string{"remedy": "reset-hard refused: test"}, want: "RESET_HARD"},
+		{detail: map[string]string{"claim": "skip-hooks refused: test"}, want: "SKIP_HOOKS"},
+		{reason: "POLICY_BLOCK", want: "POLICY_BLOCK"},
+		{reason: "DEFAULT_DENY", want: "DEFAULT_DENY"},
+		{kind: "SELF_MODIFY", want: "SELF_MODIFY"},
+		{want: ""},
+	}
+	for i, tc := range cases {
+		adj := ToolAdjudication{
+			Verdict: WireVerdict{
+				Kind:   tc.kind,
+				Reason: tc.reason,
+				Detail: tc.detail,
+			},
+		}
+		got := recoveryTokenForAdjudication(adj)
+		if got != tc.want {
+			t.Errorf("case %d: got %q, want %q", i, got, tc.want)
+		}
+	}
+
+	// recoveryHint tests
+	if hint := recoveryHint(nil); hint != "" {
+		t.Errorf("recoveryHint(nil) = %q, want empty", hint)
+	}
+	single := []ToolAdjudication{{
+		Verdict: WireVerdict{
+			Detail: map[string]string{"deny_rule": "reset_hard"},
+		},
+	}}
+	wantSingle := " Run `fak recover RESET_HARD` for structured, actionable recovery steps."
+	if got := recoveryHint(single); got != wantSingle {
+		t.Errorf("recoveryHint(single) = %q, want %q", got, wantSingle)
+	}
+
+	multiple := []ToolAdjudication{
+		{Verdict: WireVerdict{Detail: map[string]string{"deny_rule": "reset_hard"}}},
+		{Verdict: WireVerdict{Detail: map[string]string{"deny_rule": "skip_hooks"}}},
+	}
+	wantMultiple := " Run `fak recover <TOKEN>` for structured, actionable recovery steps (applicable tokens: RESET_HARD, SKIP_HOOKS)."
+	if got := recoveryHint(multiple); got != wantMultiple {
+		t.Errorf("recoveryHint(multiple) = %q, want %q", got, wantMultiple)
 	}
 }

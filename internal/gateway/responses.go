@@ -469,14 +469,16 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	// on the turn's FINAL shape, so a recovered turn resets the streak rather than counting
 	// the refusal it successfully routed around.
 	//
-	// A blocked turn is forced to deny-all even when its refusals were individually tagged
-	// RETRYABLE: "retryable" describes a call the model may fix, and by this point the model
-	// has already BEEN handed the refusal and re-sampled without producing an allowed call.
-	// The retry happened and failed, so what remains is a terminal stop, and counting it as
-	// mere feedback would hide precisely the denial→terminal transition this issue is about.
+	// A blocked turn records deny-all if it contains non-retryable refusals; if all refusals
+	// are RETRYABLE (per turnIsRetryable), record tool feedback so retryable refusals (like
+	// gitgate denials) do not advance the terminal deny-all counter.
 	signal := adjudicationOutcomeForTurn(adjs, len(kept), servedHits)
 	if blocked {
-		signal = adjudicationOutcomeDenyAll
+		if turnIsRetryable(turnAdjs) {
+			signal = adjudicationOutcomeToolFeedback
+		} else {
+			signal = adjudicationOutcomeDenyAll
+		}
 	}
 	denyFP := ""
 	if signal == adjudicationOutcomeDenyAll {

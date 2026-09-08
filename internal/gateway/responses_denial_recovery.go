@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
@@ -137,6 +138,59 @@ func refusedByCallID(adjs []ToolAdjudication) map[string]ToolAdjudication {
 	return refused
 }
 
+// recoveryTokenForAdjudication derives the recovery token for an adjudication from its
+// deny rule or reason class.
+func recoveryTokenForAdjudication(a ToolAdjudication) string {
+	if a.Verdict.Detail != nil {
+		rule := a.Verdict.Detail["deny_rule"]
+		if rule == "" {
+			if r, ok := abi.DenyRuleID(a.Verdict.Detail["remedy"]); ok {
+				rule = r
+			} else if c, ok := abi.DenyRuleID(a.Verdict.Detail["claim"]); ok {
+				rule = c
+			}
+		} else {
+			if r, ok := abi.DenyRuleID(rule); ok {
+				rule = r
+			}
+		}
+		switch rule {
+		case "reset_hard":
+			return "RESET_HARD"
+		case "skip_hooks":
+			return "SKIP_HOOKS"
+		case "commit_by_explicit_path":
+			return "COMMIT_BY_EXPLICIT_PATH"
+		case "clean_force":
+			return "CLEAN_FORCE"
+		case "off_trunk":
+			return "OFF_TRUNK"
+		case "never_amend_shared":
+			return "NEVER_AMEND_SHARED"
+		}
+	}
+	if rk := reasonOrKind(a.Verdict); strings.TrimSpace(rk) != "" {
+		return strings.ToUpper(strings.TrimSpace(rk))
+	}
+	return ""
+}
+
+// turnIsRetryable reports whether all unadmitted adjudications in a turn are
+// retryable per-tool feedback rather than terminal refusals.
+func turnIsRetryable(adjs []ToolAdjudication) bool {
+	sawRefusal := false
+	for _, a := range adjs {
+		if a.Admitted {
+			continue
+		}
+		sawRefusal = true
+		if !toolRejectionIsRetryableFeedback(a.Verdict) {
+			return false
+		}
+	}
+	return sawRefusal
+}
+
 // deniedToolResult renders one refusal as the tool result the model reads. It states the
 // three things the model needs and cannot infer: that nothing ran (so it must not narrate
 // the call as done), why (the structured reason/disposition), and that the ORIGINAL task
@@ -157,6 +211,9 @@ func deniedToolResult(a ToolAdjudication) string {
 	b.WriteString(" reason=" + reasonOrKind(a.Verdict))
 	if disp := strings.TrimSpace(a.Verdict.Disposition); disp != "" {
 		b.WriteString(" disposition=" + disp)
+	}
+	if tok := recoveryTokenForAdjudication(a); tok != "" {
+		b.WriteString(" recovery=\"fak recover " + tok + "\"")
 	}
 	notes, _ := renderRefusalNotes(a)
 	if notes == "" {
@@ -239,9 +296,17 @@ func foldRecoveryUsage(first, second agent.Usage) agent.Usage {
 func blockedByGuardNote(adjs []ToolAdjudication) string {
 	unresolved := make([]string, 0, len(adjs))
 	seen := make(map[string]struct{}, len(adjs))
+	var recoveryTokens []string
+	seenTok := make(map[string]struct{}, len(adjs))
 	for _, a := range adjs {
 		if a.Admitted {
 			continue
+		}
+		if tok := recoveryTokenForAdjudication(a); tok != "" {
+			if _, dup := seenTok[tok]; !dup {
+				seenTok[tok] = struct{}{}
+				recoveryTokens = append(recoveryTokens, tok)
+			}
 		}
 		id := strings.TrimSpace(a.ToolCallID)
 		if id == "" {
@@ -258,9 +323,20 @@ func blockedByGuardNote(adjs []ToolAdjudication) string {
 		unresolved = append(unresolved, entry+")")
 	}
 	sort.Strings(unresolved)
-	note := "[fak] BLOCKED_BY_GUARD needs_operator=true — this turn was interrupted by the capability floor," +
-		" not finished. The requested work is still OPEN: every tool call was refused and the recovery" +
-		" attempt produced no allowed alternative. Treat this as a blocked turn, never as a completed task."
+	var note string
+	if turnIsRetryable(adjs) {
+		note = "[fak] BLOCKED_BY_GUARD needs_operator=false (autonomous_retryable) — this turn was interrupted by the capability floor," +
+			" not finished. The requested work is still OPEN: every proposed tool call was refused, but all refusals are RETRYABLE." +
+			" The agent may adapt autonomously: choose an allowed tool, adjust arguments, or run `fak recover <TOKEN>`." +
+			" Do not halt or wait for operator intervention."
+	} else {
+		note = "[fak] BLOCKED_BY_GUARD needs_operator=true — this turn was interrupted by the capability floor," +
+			" not finished. The requested work is still OPEN: every tool call was refused and the recovery" +
+			" attempt produced no allowed alternative. Treat this as a blocked turn, never as a completed task."
+	}
+	if len(recoveryTokens) > 0 {
+		note += " suggested_recovery=\"fak recover " + recoveryTokens[0] + "\""
+	}
 	if len(unresolved) > 0 {
 		note += " unresolved_calls=" + strings.Join(unresolved, ",")
 	}

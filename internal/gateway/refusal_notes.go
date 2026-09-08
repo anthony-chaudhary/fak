@@ -276,6 +276,7 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 		default:
 			writeFak(" This is per-tool feedback, not a session stop. Do not re-propose a refused call unchanged; fix the arguments/tool choice or choose an allowed alternative. A session stop only comes from a declared stop policy.")
 		}
+		writeOpaque(recoveryHint(deniedAdjs))
 		writeOpaque(complaintHint(deniedAdjs))
 	}
 	if len(repaired) > 0 {
@@ -332,6 +333,27 @@ func livelockInBandNote(a ToolAdjudication) string {
 		note += " fuse=armed (this repeated call was refused; changing approach is required, not optional)"
 	}
 	return note
+}
+
+// recoveryHint extracts unique recovery tokens from denied adjudications and formats
+// an actionable `fak recover <TOKEN>` affordance.
+func recoveryHint(denied []ToolAdjudication) string {
+	var tokens []string
+	seen := make(map[string]bool)
+	for _, a := range denied {
+		tok := recoveryTokenForAdjudication(a)
+		if tok != "" && !seen[tok] {
+			seen[tok] = true
+			tokens = append(tokens, tok)
+		}
+	}
+	if len(tokens) == 0 {
+		return ""
+	}
+	if len(tokens) == 1 {
+		return fmt.Sprintf(" Run `fak recover %s` for structured, actionable recovery steps.", tokens[0])
+	}
+	return fmt.Sprintf(" Run `fak recover <TOKEN>` for structured, actionable recovery steps (applicable tokens: %s).", strings.Join(tokens, ", "))
 }
 
 // complaintHint surfaces the agent's APPEAL channel (`fak complain`) on every
