@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/flock"
 )
 
 const crossProcessLeaseModeEnv = "GPULEASE_CROSS_PROCESS_MODE"
@@ -612,4 +614,271 @@ func TestCrossProcessSharedExclusiveAdmission(t *testing.T) {
 		t.Fatalf("exclusive after shared holder process death: %v", err)
 	}
 	w.Release()
+}
+
+// TestFormatHolderPID verifies that formatHolderPID correctly distinguishes
+// shared inspection readers (HolderSharedReaders / 0) from unknown PIDs (-1)
+// and explicit positive process IDs (#12069).
+func TestFormatHolderPID(t *testing.T) {
+	tests := []struct {
+		name string
+		pid  int
+		want string
+	}{
+		{
+			name: "shared inspection readers constant",
+			pid:  HolderSharedReaders,
+			want: "shared inspection holders",
+		},
+		{
+			name: "shared inspection readers zero",
+			pid:  0,
+			want: "shared inspection holders",
+		},
+		{
+			name: "unknown holder PID constant",
+			pid:  HolderUnknownPID,
+			want: "pid ?",
+		},
+		{
+			name: "negative PID",
+			pid:  -5,
+			want: "pid ?",
+		},
+		{
+			name: "not busy sentinel",
+			pid:  HolderNotBusy,
+			want: "pid ?",
+		},
+		{
+			name: "explicit positive PID",
+			pid:  42801,
+			want: "pid 42801",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := formatHolderPID(tc.pid); got != tc.want {
+				t.Fatalf("formatHolderPID(%d) = %q, want %q", tc.pid, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFormatHolderPIDSharedReadersDetected verifies that when readers hold the lease,
+// busyHolderPID detects them and formatHolderPID outputs "shared inspection holders"
+// in BusyError.Error() instead of "held by pid ?" (#12069).
+func TestFormatHolderPIDSharedReadersDetected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shared_readers_detected.lease")
+
+	r, err := AcquireShared(Options{Path: path, NoWait: true})
+	if err != nil {
+		t.Fatalf("AcquireShared: %v", err)
+	}
+	defer r.Release()
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	defer f.Close()
+
+	pid, busy := busyHolderPID(f)
+	if !busy {
+		t.Fatal("busyHolderPID reported not busy while shared reader holds lease")
+	}
+	if pid != HolderSharedReaders {
+		t.Fatalf("busyHolderPID = %d, want HolderSharedReaders (%d)", pid, HolderSharedReaders)
+	}
+
+	formatted := formatHolderPID(pid)
+	if formatted != "shared inspection holders" {
+		t.Fatalf("formatHolderPID(%d) = %q, want %q", pid, formatted, "shared inspection holders")
+	}
+
+	// Exclusive Acquire in NoWait mode must return BusyError containing "shared inspection holders".
+	_, err = Acquire(Options{Path: path, NoWait: true})
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("exclusive acquire while shared reader holds lease: got %v, want ErrBusy", err)
+	}
+	var busyErr *BusyError
+	if !errors.As(err, &busyErr) {
+		t.Fatalf("expected *BusyError, got %T", err)
+	}
+	if busyErr.PID != HolderSharedReaders {
+		t.Fatalf("busyErr.PID = %d, want HolderSharedReaders (%d)", busyErr.PID, HolderSharedReaders)
+	}
+	wantSub := "held by shared inspection holders"
+	if !strings.Contains(busyErr.Error(), wantSub) {
+		t.Fatalf("busyErr.Error() %q does not contain %q", busyErr.Error(), wantSub)
+	}
+}
+
+// TestBusyHolderPIDNotBusyWhenFree verifies that busyHolderPID does not return
+// a false busy condition if the lock is free or became free after release (#12069).
+func TestBusyHolderPIDNotBusyWhenFree(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "probe_free.lease")
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("open probe file: %v", err)
+	}
+	defer f.Close()
+
+	// 1. Unlocked lease file must probe as not busy.
+	pid, busy := busyHolderPID(f)
+	if busy {
+		t.Fatalf("busyHolderPID on free lock returned busy=true (pid=%d)", pid)
+	}
+	if pid != HolderNotBusy {
+		t.Fatalf("busyHolderPID on free lock returned pid=%d, want HolderNotBusy (%d)", pid, HolderNotBusy)
+	}
+
+	// 2. Lock held exclusively, then released before probe.
+	holder, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("open holder: %v", err)
+	}
+	defer holder.Close()
+
+	if err := flock.TryLock(holder); err != nil {
+		t.Fatalf("lock holder: %v", err)
+	}
+
+	// While held, it must report busy.
+	pid, busy = busyHolderPID(f)
+	if !busy {
+		t.Fatal("busyHolderPID reported not busy while lock held")
+	}
+
+	// Release the lock.
+	if err := flock.Unlock(holder); err != nil {
+		t.Fatalf("unlock holder: %v", err)
+	}
+
+	// After release, probing must report NOT busy (eliminating the race where a freed
+	// lease was falsely reported as &BusyError{PID: 0}).
+	pid, busy = busyHolderPID(f)
+	if busy {
+		t.Fatalf("busyHolderPID reported false busy condition after release (pid=%d)", pid)
+	}
+	if pid != HolderNotBusy {
+		t.Fatalf("busyHolderPID reported pid=%d, want HolderNotBusy (%d)", pid, HolderNotBusy)
+	}
+}
+
+// TestAcquireNoWaitSucceedsWhenReleased verifies that when an exclusive holder
+// releases the lease, Acquire with NoWait: true succeeds and does not falsely
+// return BusyError with PID 0 (#12069).
+func TestAcquireNoWaitSucceedsWhenReleased(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "acquire_nowait_release.lease")
+
+	l1, err := Acquire(Options{Path: path, NoWait: true})
+	if err != nil {
+		t.Fatalf("initial acquire: %v", err)
+	}
+	l1.Release()
+
+	// Must succeed immediately without false BusyError.
+	l2, err := Acquire(Options{Path: path, NoWait: true})
+	if err != nil {
+		t.Fatalf("acquire after release: %v", err)
+	}
+	l2.Release()
+}
+
+// TestAcquireNoWaitDirectAcquisitionOnRetry verifies that when an exclusive lock
+// is released during probe, Acquire with NoWait: true does not falsely return
+// BusyError and successfully acquires the lease via direct retry (#12069).
+func TestAcquireNoWaitDirectAcquisitionOnRetry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "acquire_direct_retry.lease")
+
+	holder, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("open holder: %v", err)
+	}
+	defer holder.Close()
+
+	if err := flock.TryLock(holder); err != nil {
+		t.Fatalf("lock holder: %v", err)
+	}
+
+	retried := false
+	l, err := Acquire(Options{
+		Path:   path,
+		NoWait: true,
+		beforeProbe: func() {
+			// Release holder right before probe so busyHolderPID sees !busy
+			_ = flock.Unlock(holder)
+		},
+		onNoWaitRetry: func(r int) {
+			retried = true
+		},
+	})
+	if err != nil {
+		t.Fatalf("acquire on direct retry failed: %v", err)
+	}
+	defer l.Release()
+
+	if !retried {
+		t.Fatal("expected retry on released probe")
+	}
+	if l.Shared() || l.Mode() != ModeExclusive {
+		t.Fatal("expected exclusive lease acquired")
+	}
+}
+
+// TestAcquireNoWaitBoundedRetries verifies that Acquire with NoWait: true
+// does not spin in an unbounded loop when contention causes busyHolderPID to
+// report not-busy repeatedly, and bounds retries to at most maxNoWaitRetries (#12069).
+func TestAcquireNoWaitBoundedRetries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "acquire_bounded_retries.lease")
+
+	holder, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("open holder: %v", err)
+	}
+	defer holder.Close()
+
+	if err := flock.TryLock(holder); err != nil {
+		t.Fatalf("lock holder: %v", err)
+	}
+
+	var retries int
+	done := make(chan error, 1)
+	go func() {
+		l, err := Acquire(Options{
+			Path:   path,
+			NoWait: true,
+			beforeProbe: func() {
+				// Unlock so busyHolderPID sees the lock is free (!busy)
+				_ = flock.Unlock(holder)
+			},
+			onNoWaitRetry: func(r int) {
+				retries++
+				// Re-lock so the subsequent lock(f) attempt fails
+				_ = flock.TryLock(holder)
+			},
+		})
+		if err == nil {
+			l.Release()
+		}
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected BusyError when holder re-locks on each retry")
+		}
+		if !errors.Is(err, ErrBusy) {
+			t.Fatalf("got %v, want ErrBusy", err)
+		}
+		if retries != maxNoWaitRetries {
+			t.Fatalf("retries = %d, want maxNoWaitRetries (%d)", retries, maxNoWaitRetries)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Acquire with NoWait: true spun in unbounded retry loop")
+	}
 }

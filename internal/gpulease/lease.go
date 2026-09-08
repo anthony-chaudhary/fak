@@ -30,10 +30,25 @@ import (
 // ErrBusy is returned by Acquire when NoWait is set and the lease is already held.
 var ErrBusy = errors.New("gpulease: lease is held by another process")
 
+const (
+	// HolderNotBusy indicates the lease is currently free.
+	HolderNotBusy = -2
+	// HolderUnknownPID indicates an exclusive lock is held but the PID could not be determined.
+	HolderUnknownPID = -1
+	// HolderSharedReaders indicates that one or more shared inspection readers hold the lease.
+	HolderSharedReaders = 0
+
+	// maxNoWaitRetries bounds the number of immediate retries in Acquire with NoWait
+	// when a failed lock attempt races with a concurrent release (#12069).
+	maxNoWaitRetries = 3
+)
+
 // BusyError describes the current lease owner when a no-wait acquisition is
-// refused. PID is best-effort metadata read from the lockfile; zero means the
-// holder could not be identified. Unwrap preserves errors.Is(err, ErrBusy) for
-// callers that only need the retryable classification.
+// refused. PID is best-effort metadata read from the lockfile; HolderSharedReaders
+// (zero) means the lease is held by shared inspection readers, HolderUnknownPID
+// (negative) means an exclusive holder could not be identified, and positive
+// values name the exclusive holder process. Unwrap preserves errors.Is(err, ErrBusy)
+// for callers that only need the retryable classification.
 type BusyError struct {
 	Path string
 	PID  int
@@ -116,6 +131,10 @@ type Options struct {
 	Logf func(format string, args ...any)
 	// pollEvery overrides the busy-poll interval (tests only; 0 => 500ms).
 	pollEvery time.Duration
+	// onNoWaitRetry is invoked on each NoWait retry (tests only).
+	onNoWaitRetry func(retry int)
+	// beforeProbe is invoked right before busyHolderPID is called in NoWait mode (tests only).
+	beforeProbe func()
 }
 
 // DefaultPath is the lease lockfile path Acquire uses when Options.Path is empty.
@@ -170,6 +189,7 @@ func Acquire(opts Options) (*Lease, error) {
 	if isShared {
 		lock = flock.TryLockShared
 	}
+	noWaitRetries := 0
 	for {
 		err := lock(f)
 		if err == nil {
@@ -190,13 +210,33 @@ func Acquire(opts Options) (*Lease, error) {
 			return nil, fmt.Errorf("gpulease: lock %s: %w", path, err)
 		}
 		if opts.NoWait {
-			pid := busyHolderPID(f)
+			if opts.beforeProbe != nil {
+				opts.beforeProbe()
+			}
+			pid, busy := busyHolderPID(f)
+			if !busy && noWaitRetries < maxNoWaitRetries {
+				noWaitRetries++
+				if opts.onNoWaitRetry != nil {
+					opts.onNoWaitRetry(noWaitRetries)
+				}
+				if noWaitRetries > 1 {
+					time.Sleep(time.Duration(noWaitRetries-1) * time.Millisecond)
+				}
+				continue
+			}
 			f.Close()
+			if !busy && pid == HolderNotBusy {
+				pid = HolderUnknownPID
+			}
 			return nil, &BusyError{Path: path, PID: pid}
 		}
 		if !waited {
+			pid, busy := busyHolderPID(f)
+			if !busy {
+				continue
+			}
 			waited = true
-			logf("gpulease: GPU busy (held by %s); waiting for %s", formatHolderPID(busyHolderPID(f)), path)
+			logf("gpulease: GPU busy (held by %s); waiting for %s", formatHolderPID(pid), path)
 		}
 		// Sleep until the next poll, but never past the deadline (otherwise a Timeout
 		// shorter than poll would overshoot by most of a poll interval).
@@ -215,16 +255,33 @@ func Acquire(opts Options) (*Lease, error) {
 	}
 }
 
-// busyHolderPID probes shared admission after a failed lock attempt. If readers
-// hold the file, there is no single owner and any exclusive PID is stale. This
-// never breaks a live lock; the transient shared probe uses the same descriptor
-// on which admission failed, and is released immediately.
-func busyHolderPID(f *os.File) int {
+// busyHolderPID probes the lock status after a failed lock attempt. It returns
+// the holder PID (or HolderSharedReaders if shared readers hold the lock) and
+// whether the lock is currently busy. If the lock was released during the
+// probe, busy returns false so callers can retry rather than falsely reporting
+// contention.
+func busyHolderPID(f *os.File) (int, bool) {
+	// 1. Check if the lock is completely free.
+	if err := flock.TryLock(f); err == nil {
+		_ = flock.Unlock(f)
+		return HolderNotBusy, false
+	}
+
+	// 2. The lock is held. Check if it's held by shared readers.
 	if err := flock.TryLockShared(f); err == nil {
 		_ = flock.Unlock(f)
-		return 0
+		// TryLock failed earlier, but TryLockShared succeeded.
+		// Double-check whether an exclusive lock was released right before
+		// TryLockShared ran.
+		if err := flock.TryLock(f); err == nil {
+			_ = flock.Unlock(f)
+			return HolderNotBusy, false
+		}
+		return HolderSharedReaders, true
 	}
-	return readHolderPID(f)
+
+	// 3. Both exclusive and shared locks failed; an exclusive holder owns the lock.
+	return readHolderPID(f), true
 }
 
 // Release frees the lease. Safe to call once; subsequent calls are no-ops.
@@ -256,18 +313,22 @@ func readHolderPID(f *os.File) int {
 		s = s[:i] // first line only — ignore any stale trailing bytes
 	}
 	if s = strings.TrimSpace(s); s == "" {
-		return 0
+		return HolderUnknownPID
 	}
 	pid, err := strconv.Atoi(s)
 	if err != nil || pid <= 0 {
-		return 0
+		return HolderUnknownPID
 	}
 	return pid
 }
 
 func formatHolderPID(pid int) string {
-	if pid <= 0 {
+	switch {
+	case pid == HolderSharedReaders:
+		return "shared inspection holders"
+	case pid < 0:
 		return "pid ?"
+	default:
+		return "pid " + strconv.Itoa(pid)
 	}
-	return "pid " + strconv.Itoa(pid)
 }
