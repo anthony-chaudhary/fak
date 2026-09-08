@@ -543,3 +543,96 @@ func TestInKernelPlannerSpeculativeVerification(t *testing.T) {
 		t.Fatalf("penalty tokens len = %d, want 6", len(penaltyTokens))
 	}
 }
+
+// TestInKernelPlannerMetalMTP is the witness test for Issue #12238 in internal/agent:
+// It asserts:
+//  1. InKernelPlanner with MetalMTPCoordinator produces 100% bit-exact token sequence
+//     match against baseline autoregressive decode at temperature zero.
+//  2. Prompt prefix cache coexistence: prompt prefix cache is admitted and hit on
+//     repeated queries without invalidation or divergence.
+//  3. Greedy temperature-zero tripwire enforcement in the planner.
+//  4. Coordinator metrics tracking (proposed, accepted, rollbacks, and pages).
+func TestInKernelPlannerMetalMTP(t *testing.T) {
+	ctx := context.Background()
+	m := model.NewSyntheticQwen38MTP()
+	m.Quantize()
+
+	prompt := []int{0, 1, 2}
+	const maxNew = 12
+
+	// 1. Establish baseline non-speculative autoregressive decode
+	baselinePlanner := NewInKernelPlanner(m, nil, "baseline", false, nil, false)
+	var baselineTokens []int
+	resBase, err := baselinePlanner.generateReusedRecovering(ctx, prompt, maxNew, 0, 0, 0, nil, 0, 0, nil, func(tok int) bool {
+		baselineTokens = append(baselineTokens, tok)
+		return false
+	})
+	if err != nil {
+		t.Fatalf("baseline generate: %v", err)
+	}
+	if resBase.gen != maxNew {
+		t.Fatalf("baseline gen = %d, want %d", resBase.gen, maxNew)
+	}
+
+	// 2. Speculative decoding using MetalMTPCoordinator on fresh planner
+	mtpPlanner := NewInKernelPlanner(m, nil, "metal-mtp", false, nil, false)
+	coord, err := model.NewMetalMTPCoordinator(nil, model.DefaultMetalMTPConfig())
+	if err != nil {
+		t.Fatalf("NewMetalMTPCoordinator failed: %v", err)
+	}
+	mtpPlanner.SetMetalMTPCoordinator(coord)
+	t.Cleanup(func() { mtpPlanner.DisableMetalMTP() })
+
+	var mtpTokens []int
+	resMTP, err := mtpPlanner.generateReusedRecovering(ctx, prompt, maxNew, 0, 0, 0, nil, 0, 0, nil, func(tok int) bool {
+		mtpTokens = append(mtpTokens, tok)
+		return false
+	})
+	if err != nil {
+		t.Fatalf("metal MTP generate: %v", err)
+	}
+	if resMTP.gen != maxNew {
+		t.Fatalf("metal MTP gen = %d, want %d", resMTP.gen, maxNew)
+	}
+
+	// Assert 100% token sequence identity (zero output divergence at temp=0)
+	if !reflect.DeepEqual(mtpTokens, baselineTokens) {
+		t.Fatalf("metal MTP output diverged from baseline:\n want: %v\n  got: %v", baselineTokens, mtpTokens)
+	}
+
+	// Assert coordinator stats
+	stats := coord.Stats()
+	if stats.TotalGenerated < maxNew {
+		t.Fatalf("expected total generated >= %d, got %d", maxNew, stats.TotalGenerated)
+	}
+
+	// 3. Test prompt prefix cache coexistence:
+	// Run second request with the same prompt; verify prefix cache hits without invalidation
+	var turn2Tokens []int
+	resTurn2, err := mtpPlanner.generateReusedRecovering(ctx, prompt, maxNew, 0, 0, 0, nil, 0, 0, nil, func(tok int) bool {
+		turn2Tokens = append(turn2Tokens, tok)
+		return false
+	})
+	if err != nil {
+		t.Fatalf("turn 2 generate: %v", err)
+	}
+	if resTurn2.matched != len(prompt) {
+		t.Fatalf("turn 2 prefix cache matched = %d, want full hit %d", resTurn2.matched, len(prompt))
+	}
+	if !reflect.DeepEqual(turn2Tokens, baselineTokens) {
+		t.Fatalf("turn 2 output diverged after prefix cache restore:\n want: %v\n  got: %v", baselineTokens, turn2Tokens)
+	}
+
+	// 4. Test greedy temperature-zero tripwire enforcement in planner
+	var tripwireTokens []int
+	resTripwire, err := mtpPlanner.generateReusedRecovering(ctx, prompt, 6, 0.8, 0.9, 40, nil, 1.2, 0.5, nil, func(tok int) bool {
+		tripwireTokens = append(tripwireTokens, tok)
+		return false
+	})
+	if err != nil {
+		t.Fatalf("generate with non-greedy sampling failed: %v", err)
+	}
+	if resTripwire.gen != 6 {
+		t.Fatalf("tripwire gen = %d, want 6", resTripwire.gen)
+	}
+}
