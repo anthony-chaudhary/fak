@@ -17,8 +17,18 @@ import (
 func TestRunAMDStrixValidate_UnknownSelector(t *testing.T) {
 	defer amdgpu.ClearPresenceCache()
 	origStatus := gitStatusFn
-	defer func() { gitStatusFn = origStatus }()
+	origGit := gitRevParseFn
+	defer func() {
+		gitStatusFn = origStatus
+		gitRevParseFn = origGit
+	}()
 	gitStatusFn = func(ctx context.Context, dir string) (string, error) { return "", nil }
+	gitRevParseFn = func(ctx context.Context, dir string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "--show-toplevel" {
+			return "/mock/repo", nil
+		}
+		return "0123456789abcdef0123456789abcdef01234567", nil
+	}
 
 	// Seed presence cache with a reachable target to isolate subkernel selector validation
 	simTarget := &amdgpu.StrixTarget{
@@ -247,7 +257,14 @@ func TestRunAMDStrixValidate_RejectsMissingCandidateArchive(t *testing.T) {
 
 func TestRunAMDStrixValidate_RejectsPathTraversalInOverlay(t *testing.T) {
 	origRun := runStrixValidationFn
-	defer func() { runStrixValidationFn = origRun }()
+	origGit := gitRevParseFn
+	defer func() {
+		runStrixValidationFn = origRun
+		gitRevParseFn = origGit
+	}()
+	gitRevParseFn = func(ctx context.Context, dir string, args ...string) (string, error) {
+		return "/mock/repo", nil
+	}
 
 	runnerCalled := false
 	runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
@@ -275,7 +292,14 @@ func TestRunAMDStrixValidate_RejectsPathTraversalInOverlay(t *testing.T) {
 
 func TestRunAMDStrixValidate_RejectsUnreadableOverlay(t *testing.T) {
 	origRun := runStrixValidationFn
-	defer func() { runStrixValidationFn = origRun }()
+	origGit := gitRevParseFn
+	defer func() {
+		runStrixValidationFn = origRun
+		gitRevParseFn = origGit
+	}()
+	gitRevParseFn = func(ctx context.Context, dir string, args ...string) (string, error) {
+		return "/mock/repo", nil
+	}
 
 	runnerCalled := false
 	runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
@@ -338,16 +362,27 @@ func TestRunAMDStrixValidate_RejectsArchiveDigestMismatch(t *testing.T) {
 
 func TestRunAMDStrixValidate_BindsCandidateArchiveToRunner(t *testing.T) {
 	origRun := runStrixValidationFn
-	defer func() { runStrixValidationFn = origRun }()
+	origGit := gitRevParseFn
+	defer func() {
+		runStrixValidationFn = origRun
+		gitRevParseFn = origGit
+	}()
 
 	tmpDir := t.TempDir()
+	baseCommit := "a0123456789abcdef0123456789abcdef0123456"
+	gitRevParseFn = func(ctx context.Context, dir string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "--show-toplevel" {
+			return tmpDir, nil
+		}
+		return baseCommit, nil
+	}
+
 	overlayRel := "candidate_subkernel.go"
 	overlayAbs := filepath.Join(tmpDir, overlayRel)
 	if err := os.WriteFile(overlayAbs, []byte("// candidate optimization\npackage main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	baseCommit := "a0123456789abcdef0123456789abcdef0123456"
 	candArchive, err := BuildStrixCandidateArchiveFromPaths(baseCommit, tmpDir, []string{overlayRel})
 	if err != nil {
 		t.Fatalf("failed to build candidate archive: %v", err)
@@ -443,13 +478,20 @@ func TestRunAMDStrixValidate_BindsCandidateArchiveToRunner(t *testing.T) {
 func TestRunAMDStrixValidate_HistoricalOrPartialReceiptFailsClosed(t *testing.T) {
 	origRun := runStrixValidationFn
 	origStatus := gitStatusFn
+	origGit := gitRevParseFn
 	defer func() {
 		runStrixValidationFn = origRun
 		gitStatusFn = origStatus
+		gitRevParseFn = origGit
 	}()
 	gitStatusFn = func(ctx context.Context, dir string) (string, error) { return "", nil }
-
 	baseCommit := "b0123456789abcdef0123456789abcdef0123456"
+	gitRevParseFn = func(ctx context.Context, dir string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "--show-toplevel" {
+			return "/mock/repo", nil
+		}
+		return baseCommit, nil
+	}
 
 	t.Run("receipt with verified=false fails closed", func(t *testing.T) {
 		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
@@ -697,7 +739,14 @@ func TestRunAMDStrixValidate_RejectsDuplicateOverlayPaths(t *testing.T) {
 
 func TestRunAMDStrixValidate_RejectsAbsoluteOverlayPaths(t *testing.T) {
 	origRun := runStrixValidationFn
-	defer func() { runStrixValidationFn = origRun }()
+	origGit := gitRevParseFn
+	defer func() {
+		runStrixValidationFn = origRun
+		gitRevParseFn = origGit
+	}()
+	gitRevParseFn = func(ctx context.Context, dir string, args ...string) (string, error) {
+		return "/mock/repo", nil
+	}
 
 	runnerCalled := false
 	runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
@@ -915,13 +964,20 @@ func TestRunAMDStrixValidate_CommittedOnlyMode(t *testing.T) {
 func TestRunAMDStrixValidate_HumanOutput_RendersHistoricalNonCredit(t *testing.T) {
 	origRun := runStrixValidationFn
 	origStatus := gitStatusFn
+	origGit := gitRevParseFn
 	defer func() {
 		runStrixValidationFn = origRun
 		gitStatusFn = origStatus
+		gitRevParseFn = origGit
 	}()
 	gitStatusFn = func(ctx context.Context, dir string) (string, error) { return "", nil }
-
 	baseCommit := "d0123456789abcdef0123456789abcdef0123456"
+	gitRevParseFn = func(ctx context.Context, dir string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "--show-toplevel" {
+			return "/mock/repo", nil
+		}
+		return baseCommit, nil
+	}
 
 	t.Run("unverified PASS receipt renders historical/non-credit in human mode", func(t *testing.T) {
 		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
@@ -1110,3 +1166,59 @@ func TestRunAMDStrixValidate_CanonicalRootAndBaseResolution(t *testing.T) {
 	}
 }
 
+func TestRunAMDStrixValidate_RejectsConflictingArchiveAndOverlays(t *testing.T) {
+	origRun := runStrixValidationFn
+	defer func() { runStrixValidationFn = origRun }()
+
+	runnerCalled := false
+	runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+		runnerCalled = true
+		return nil, errors.New("runner should not have been called")
+	}
+
+	tmpDir := t.TempDir()
+	archiveFile := filepath.Join(tmpDir, "archive.json")
+	if err := os.WriteFile(archiveFile, []byte(`{"schema":"fak.strix.candidate-archive/v1","base_commit":"0123456789abcdef0123456789abcdef01234567"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("archive and mine overlay conflict", func(t *testing.T) {
+		runnerCalled = false
+		var stdout, stderr bytes.Buffer
+		argv := []string{
+			"-git-tip", "0123456789abcdef0123456789abcdef01234567",
+			"-archive", archiveFile,
+			"-mine", "some_file.go",
+		}
+		code := RunAMDStrixValidate(&stdout, &stderr, argv)
+		if code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		if runnerCalled {
+			t.Fatal("runner was called despite conflicting options")
+		}
+		if !strings.Contains(stderr.String(), "conflicting options") {
+			t.Errorf("expected stderr to mention conflicting options, got: %s", stderr.String())
+		}
+	})
+
+	t.Run("archive and committed-only conflict", func(t *testing.T) {
+		runnerCalled = false
+		var stdout, stderr bytes.Buffer
+		argv := []string{
+			"-git-tip", "0123456789abcdef0123456789abcdef01234567",
+			"-archive", archiveFile,
+			"-committed-only",
+		}
+		code := RunAMDStrixValidate(&stdout, &stderr, argv)
+		if code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		if runnerCalled {
+			t.Fatal("runner was called despite conflicting options")
+		}
+		if !strings.Contains(stderr.String(), "conflicting options") {
+			t.Errorf("expected stderr to mention conflicting options, got: %s", stderr.String())
+		}
+	})
+}

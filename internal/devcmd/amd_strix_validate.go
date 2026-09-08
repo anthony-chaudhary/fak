@@ -175,6 +175,9 @@ func LoadOrBuildCandidateArchive(gitTip, archivePath, archiveDigest string, mine
 	cleanTip := strings.TrimSpace(gitTip)
 
 	if archivePath != "" {
+		if len(minePaths) > 0 || committedOnly {
+			return nil, fmt.Errorf("conflicting options: cannot specify both --archive and --mine/--committed-only")
+		}
 		data, err := osReadFileFn(archivePath)
 		if err != nil {
 			return nil, fmt.Errorf("missing candidate archive: cannot read %q: %w", archivePath, err)
