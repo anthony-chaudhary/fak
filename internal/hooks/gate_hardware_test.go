@@ -96,9 +96,10 @@ func TestHardwareTell_GeneratedDocsExcluded(t *testing.T) {
 	}
 }
 
-// TestHardwareTell_LiveTreeClean asserts the real tracked tree carries no prose hardware tell — the
-// Go twin of `make hygiene`'s passing `scrub_hardware_names.py --check`. Skipped outside a checkout.
-func TestHardwareTell_LiveTreeClean(t *testing.T) {
+// TestHardwareTell_LiveTreeAudit is an advisory audit of the tracked tree for prose hardware tells.
+// Intentionally advisory audits are named and documented as advisory, not clean gates.
+// Skipped outside a checkout.
+func TestHardwareTell_LiveTreeAudit(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}

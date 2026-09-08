@@ -230,11 +230,10 @@ func TestGodfileGate_EscapeHatch(t *testing.T) {
 	}
 }
 
-// TestGodfileGate_LiveTreeClean is the live trunk guard: the real tracked tree, judged
-// against the frozen baseline, must yield ZERO findings. The day a god-file grows (or a
-// new one lands), this reds `make ci` naming the offender — the preventive gate #2868
-// asks for, with Hermes' 20K-line gateway/run.py as the counterexample it prevents.
-func TestGodfileGate_LiveTreeClean(t *testing.T) {
+// TestGodfileGate_LiveTreeAudit is an advisory audit of tracked tree debt:
+// it logs god-file/function growth findings against the frozen baseline with t.Logf.
+// Intentionally advisory audits are named and documented as advisory, not clean gates.
+func TestGodfileGate_LiveTreeAudit(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}

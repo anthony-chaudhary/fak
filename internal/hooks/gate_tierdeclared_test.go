@@ -1,6 +1,10 @@
 package hooks
 
 import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,8 +28,17 @@ func TestTierDeclared_LiveTreeClean(t *testing.T) {
 	if gerr != nil {
 		t.Fatalf("gate error: %v", gerr)
 	}
-	if len(findings) != 0 {
-		t.Logf("undeclared internal leaf on the tracked tree: %+v", findings)
+	// Match authoritative hygiene agreement (HygieneGates TIER_DECLARED PushScoped: true):
+	// findings outside the active push delta are demoted to advisory so peer WIP does not wedge.
+	findings = ScopeTierDeclaredFindings(findings, []string{"internal/hooks/"}, true)
+	var blocking []Finding
+	for _, f := range findings {
+		if !f.Advisory {
+			blocking = append(blocking, f)
+		}
+	}
+	if len(blocking) != 0 {
+		t.Fatalf("undeclared internal leaf on the tracked tree: %+v", blocking)
 	}
 }
 
@@ -173,5 +186,102 @@ func TestScopeTierDeclaredFindingsBlocksOnlyPushOwnedLeaf(t *testing.T) {
 	fallback := ScopeTierDeclaredFindings(in[:1], nil, false)
 	if fallback[0].Advisory {
 		t.Fatalf("no-trunk fallback demoted finding: %+v", fallback[0])
+	}
+}
+
+// TestLiveTreeGates_FailOnBlockingFindings is the structural policy test for issue #12378:
+// any test named *LiveTreeClean* must enforce a clean gate by failing (e.g. t.Fatalf/t.Errorf)
+// on blocking findings, and must not silently log. Tests that are intentionally advisory audits
+// must be named *LiveTreeAudit* instead.
+func TestLiveTreeGates_FailOnBlockingFindings(t *testing.T) {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
+		return strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatalf("parser.ParseDir: %v", err)
+	}
+
+	cleanTestsFound := 0
+	for _, pkg := range pkgs {
+		for fileName, file := range pkg.Files {
+			for _, decl := range file.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok {
+					continue
+				}
+				if !strings.HasPrefix(fn.Name.Name, "Test") || !strings.Contains(fn.Name.Name, "LiveTreeClean") {
+					continue
+				}
+				cleanTestsFound++
+
+				hasFailureCall := false
+				hasSilentLogOnlyOnFindings := false
+
+				ast.Inspect(fn.Body, func(n ast.Node) bool {
+					call, ok := n.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					sel, ok := call.Fun.(*ast.SelectorExpr)
+					if !ok {
+						return true
+					}
+					switch sel.Sel.Name {
+					case "Fatalf", "Fatal", "Errorf", "Error", "FailNow", "Fail":
+						hasFailureCall = true
+					}
+					return true
+				})
+
+				ast.Inspect(fn.Body, func(n ast.Node) bool {
+					ifStmt, ok := n.(*ast.IfStmt)
+					if !ok {
+						return true
+					}
+					condStr := fmt.Sprintf("%v", ifStmt.Cond)
+					checksFindings := strings.Contains(condStr, "findings") || strings.Contains(condStr, "blocking")
+					if !checksFindings {
+						return true
+					}
+					bodyCallsLog := false
+					bodyCallsFail := false
+					ast.Inspect(ifStmt.Body, func(inner ast.Node) bool {
+						c, ok := inner.(*ast.CallExpr)
+						if !ok {
+							return true
+						}
+						s, ok := c.Fun.(*ast.SelectorExpr)
+						if !ok {
+							return true
+						}
+						switch s.Sel.Name {
+						case "Log", "Logf":
+							bodyCallsLog = true
+						case "Fatalf", "Fatal", "Errorf", "Error", "FailNow", "Fail":
+							bodyCallsFail = true
+						}
+						return true
+					})
+					if bodyCallsLog && !bodyCallsFail {
+						hasSilentLogOnlyOnFindings = true
+					}
+					return true
+				})
+
+				if !hasFailureCall {
+					t.Errorf("%s in %s is named LiveTreeClean but contains no test failure assertion (t.Fatalf/t.Errorf) — rename to LiveTreeAudit if advisory",
+						fn.Name.Name, filepath.Base(fileName))
+				}
+				if hasSilentLogOnlyOnFindings {
+					t.Errorf("%s in %s checks findings but only logs (t.Logf) without failing — silent logging on nonempty findings is forbidden in clean gates",
+						fn.Name.Name, filepath.Base(fileName))
+				}
+			}
+		}
+	}
+
+	if cleanTestsFound < 2 {
+		t.Fatalf("expected to scan at least 2 LiveTreeClean tests, found %d", cleanTestsFound)
 	}
 }
