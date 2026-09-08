@@ -11,7 +11,7 @@ import (
 
 var claudeCatalog = ToolCatalog{
 	"Read": {}, "Bash": {}, "PowerShell": {}, "Write": {}, "Edit": {},
-	"Grep": {}, "Glob": {}, "WebFetch": {}, "WebSearch": {}, "Agent": {},
+	"Grep": {}, "Glob": {}, "WebFetch": {}, "WebSearch": {}, "Agent": {}, "Task": {},
 	"AskUserQuestion": {}, "mcp__fak__fak_feature_query": {},
 	"mcp__fak__fak_capabilities": {}, "mcp__fak__fak_index_docs": {},
 	"mcp__fak__fak_index_leaves": {}, "mcp__fak__fak_index_verbs": {},
@@ -19,12 +19,12 @@ var claudeCatalog = ToolCatalog{
 }
 
 func TestResolveAllowedToolsExactAndUnknownFails(t *testing.T) {
-	src := []byte("---\nname: x\nallowed-tools: Write, Read, Write\n---\nbody\n")
+	src := []byte("---\nname: x\nallowed-tools: Write, Task, Read, Write\n---\nbody\n")
 	got, err := ResolveAllowedTools(src, claudeCatalog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"Read", "Write"}; !reflect.DeepEqual(got.Tools, want) {
+	if want := []string{"Read", "Task", "Write"}; !reflect.DeepEqual(got.Tools, want) {
 		t.Fatalf("tools=%v want=%v", got.Tools, want)
 	}
 	_, err = ResolveAllowedTools([]byte("---\nallowed-tools: Read, Mystery\n---\n"), claudeCatalog)
