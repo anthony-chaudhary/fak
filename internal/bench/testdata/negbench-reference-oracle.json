@@ -2,7 +2,7 @@
   "schema": "fak.negbench/1",
   "provenance": "OBSERVED",
   "model": "reference-oracle",
-  "host": "DESKTOP-BB3FMHP",
+  "host": "win11-fak-bench",
   "enforced": false,
   "families": [
     {
@@ -169,5 +169,5 @@
       ]
     }
   ],
-  "digest": "b8bab26edce1921b0b33e4722145eb36e0faba812f5187e7efcf44d784cb6786"
+  "digest": "e1478bfd649a057dcfdfb2bc207d3040667e21a172185f126dd2936a8ae668be"
 }
