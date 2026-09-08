@@ -17,6 +17,13 @@ const Qwen35GDNCUDAPath = "cuda/qwen35-gdn-ssm-decode-v1"
 // non-skipped real-device test run witnesses that the implementation clears it.
 const Qwen35GDNParityCosineMin = 0.999
 
+// VulkanQwen35GDNConvTiledChannelTransposer defines the hardware-accelerated 2D block-tiled
+// channel transpose and depthwise convolution capability for DeltaNet linear attention
+// state concatenation on Vulkan / RDNA 3.5 (gfx1151).
+type VulkanQwen35GDNConvTiledChannelTransposer interface {
+	Qwen35GDNConvTiledChannelTranspose(mixed, conv1D, convState Tensor, tokens, convDim, convKernel int) (output, nextConvState Tensor, err error)
+}
+
 // Qwen35GDNGeometryError is a fail-closed refusal raised before any GDN kernel
 // is launched. Operand is either a tensor name or "geometry" for a relation
 // between scalar dimensions; Want describes the accepted shape/relation.
@@ -25,6 +32,7 @@ type Qwen35GDNGeometryError struct {
 	Got     []int
 	Want    string
 	Reason  string
+	Err     error
 }
 
 func (e *Qwen35GDNGeometryError) Error() string {
@@ -32,24 +40,39 @@ func (e *Qwen35GDNGeometryError) Error() string {
 		return "compute: nil Qwen3.5 GDN geometry error"
 	}
 	if e.Reason != "" {
-		return fmt.Sprintf("compute: cuda Qwen3.5 GDN geometry refused for %s: %s", e.Operand, e.Reason)
+		return fmt.Sprintf("compute: Qwen3.5 GDN geometry refused for %s: %s", e.Operand, e.Reason)
 	}
-	return fmt.Sprintf("compute: cuda Qwen3.5 GDN geometry refused for %s: shape %v, want %s", e.Operand, e.Got, e.Want)
+	return fmt.Sprintf("compute: Qwen3.5 GDN geometry refused for %s: shape %v, want %s", e.Operand, e.Got, e.Want)
+}
+
+func (e *Qwen35GDNGeometryError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
 }
 
 // Qwen35GDNResidencyError refuses a tensor that is not an F32 row-major buffer
-// resident on the CUDA backend executing the operation. In particular, the
+// resident on the backend executing the operation. In particular, the
 // implementation never obtains a HostBuffer and never falls back to CPU math.
 type Qwen35GDNResidencyError struct {
 	Operand string
 	Reason  string
+	Err     error
 }
 
 func (e *Qwen35GDNResidencyError) Error() string {
 	if e == nil {
 		return "compute: nil Qwen3.5 GDN residency error"
 	}
-	return fmt.Sprintf("compute: cuda Qwen3.5 GDN residency refused for %s: %s", e.Operand, e.Reason)
+	return fmt.Sprintf("compute: Qwen3.5 GDN residency refused for %s: %s", e.Operand, e.Reason)
+}
+
+func (e *Qwen35GDNResidencyError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
 }
 
 // Qwen35GDNAllocationError is the typed refusal returned when the strict GDN

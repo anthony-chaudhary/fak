@@ -4,6 +4,8 @@ import (
 	"testing"
 )
 
+// TestHasVectorizedDeltaNetEnvironment verifies that FAK_VECTORIZED_DELTANET respects
+// the disable setting (0) and default/enabled settings.
 func TestHasVectorizedDeltaNetEnvironment(t *testing.T) {
 	for _, tc := range []struct {
 		value string

@@ -177,13 +177,17 @@ func KnownROCmArches() []ROCmArch {
 }
 
 // CompilerFlags returns the canonical compiler flags for hipcc/clang on this architecture.
-// For RDNA architectures (such as gfx1151 RDNA 3.5), it mandates Wave32 execution (-mwavefrontsize32).
+// For RDNA architectures (such as gfx1151 RDNA 3.5), it mandates Wave32 execution (-mwavefrontsize32)
+// and target CPU/GPU flags (-mcpu=gfx1151).
 func (a ROCmArch) CompilerFlags() []string {
 	flags := []string{"--offload-arch=" + a.GFX}
 	if a.Wavefront == 32 || a.Family == ROCmRDNA3_5 || a.GFX == "gfx1151" {
 		flags = append(flags, "-mwavefrontsize32")
 	} else if a.Wavefront == 64 {
 		flags = append(flags, "-mwavefrontsize64")
+	}
+	if a.GFX == "gfx1151" || a.Family == ROCmRDNA3_5 {
+		flags = append(flags, "-mcpu=gfx1151")
 	}
 	return flags
 }

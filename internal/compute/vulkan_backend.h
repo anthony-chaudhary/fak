@@ -226,6 +226,9 @@ int fvk_qwen35_gdn_preprojected_f32(
     const void* conv1d, const void* a_log, const void* dt_bias, const void* norm,
     void* conv_state, void* recurrent_state, void* core,
     int tokens, int conv_dim, int n_k, int n_v, int k_hd, int v_hd, int kernel, float eps);
+int fvk_qwen35_gdn_conv_tiled_transpose_f32(
+    const void* mixed, const void* conv1d, void* conv_state, void* conv_out,
+    int tokens, int conv_dim, int kernel);
 int fvk_glm_kda_step_f32(
     void* state, const void* q, const void* k, const void* value,
     const void* alpha, const void* beta, void* output, int heads, int variant);
