@@ -560,6 +560,8 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdFleet(args)
 	case "garden":
 		cmdGarden(args)
+	case "fresh-status":
+		cmdFreshStatus(args)
 	case "stale-work":
 		cmdStaleWork(args)
 	case "cadence":

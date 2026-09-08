@@ -763,6 +763,42 @@ func dispatchStampMs(m map[string]int64, name string, start time.Time) {
 	m[name] = time.Since(start).Milliseconds()
 }
 
+// prepareDispatchWorkerWorktree is the fail-closed portable admission seam used
+// by every dispatch backend. The selected repository root is passed unchanged to
+// workerworktree.Prepare; no caller-specific merge implementation is introduced.
+func prepareDispatchWorkerWorktree(root, spawnCWD, lane, key, baseSHA string, env map[string]string, payload map[string]any) (string, map[string]string, bool) {
+	enabled, mode := workerWorktreeAdmissionMode()
+	payload["worker_worktree_mode"] = mode
+	if !enabled {
+		payload["worker_worktree_unsafe_shared"] = true
+		return spawnCWD, env, true
+	}
+
+	res := prepareManagedWorkerWorktreeFunc(root, lane, key, baseSHA, "", nil)
+	if !res.OK {
+		reason := strings.TrimSpace(res.Reason)
+		if reason == "" {
+			reason = strings.TrimSpace(res.Detail)
+		}
+		if reason == "" {
+			reason = "managed worktree preparation returned no reason"
+		}
+		payload["verdict"] = "WORKTREE_PREPARE_FAILED"
+		payload["reason"] = reason
+		if res.Code != "" {
+			payload["worker_worktree_code"] = res.Code
+		}
+		if res.Path != "" {
+			payload["worker_worktree"] = res.Path
+		}
+		return spawnCWD, env, false
+	}
+
+	payload["worker_worktree"] = res.Path
+	payload["worker_worktree_base_sha"] = res.BaseSHA
+	return res.Path, workerworktree.WorktreeEnv(env, res.Path), true
+}
+
 // dispatchTickLiveSpawn performs the live spawn once every dry-run gate has passed: acquire
 // the lane lease (refused → LANE_LEASE_HELD), build the guarded worker command + env, spawn
 // the issue-resolution worker, and record the SPAWNED / SPAWN_FAILED payload. It mutates and
@@ -860,22 +896,19 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	env = grant.Env
 	spawnCWD := firstString(grant.CWD, root)
 
-	// #3168: opt-in per-worker git worktree isolation. When FLEET_WORKER_WORKTREE
-	// is on, prepare a throwaway detached worktree pinned at baseSHA and run the
-	// worker in it with GOCACHE/GOTMPDIR redirected inside — so a broken build in
-	// one worker can't red another and two commits can't race the shared index.
-	// FAIL-OPEN: any worktree-layer fault leaves spawnCWD/env untouched (the worker
-	// runs in the shared trunk exactly as before). The .worktree sidecar the spawner
-	// writes lets the witness sweep land+reap it on exit. Default-off restores
-	// today's behavior byte-for-byte.
-	if workerWorktreeEnabled() {
-		if res := workerworktree.Prepare(root, pick.Lane, strconv.Itoa(target), baseSHA, "", nil); res.OK {
-			spawnCWD = res.Path
-			env = workerworktree.WorktreeEnv(env, res.Path)
-			payload["worker_worktree"] = res.Path
-		} else {
-			payload["worker_worktree_failopen"] = res.Reason
-		}
+	// Managed worktrees are the portable default. Preparation is an admission
+	// boundary: a failure retains its evidence and releases the lane without ever
+	// starting a worker in the shared checkout. Shared-root execution remains
+	// available only through the explicit FLEET_WORKER_WORKTREE=off compatibility
+	// switch and is named as unsafe in the receipt.
+	var worktreePrepared bool
+	spawnCWD, env, worktreePrepared = prepareDispatchWorkerWorktree(root, spawnCWD, pick.Lane, strconv.Itoa(target), baseSHA, env, payload)
+	if !worktreePrepared {
+		payload["ok"] = false
+		payload["action"] = "worktree_prepare_failed"
+		releaseAbandonedLaneLease(root, lease, payload)
+		recordDispatchPayload(runsDir, opts.Backend, payload)
+		return finish(payload), nil
 	}
 
 	stdinPayload := dispatchtick.WorkerStdinPayload(opts.Backend, prompt)

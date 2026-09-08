@@ -26,11 +26,11 @@
       "description": "High-reasoning subagent for deep architectural analysis, frozen ABI changes, or complex debugging"
     },
     "worker": {
-      "variant": "high",
+      "variant": "medium",
       "description": "Substantive implementation worker for atomic code modifications, reproduction tests, refactoring, package verification, and autonomous safe git landing by default (executes directly; prohibited from calling the 'task' tool)"
     },
     "researcher": {
-      "variant": "high",
+      "variant": "medium",
       "description": "Research and discovery subagent for investigating codebase layout, prior art, doc searches, and structured findings"
     },
     "cross-validator": {
@@ -38,15 +38,15 @@
       "description": "Adversarial cross-validation subagent for verifying code changes, inspecting diffs, executing tests, and producing proof verdicts"
     },
     "lander": {
-      "variant": "high",
+      "variant": "medium",
       "description": "Safe git landing subagent for executing pre-commit package validation, lint checks, explicit-path commits, and unprompted push"
     },
     "issue-auditor": {
-      "variant": "high",
+      "variant": "medium",
       "description": "Issue discovery and auto-ticketing subagent for analyzing code diffs, uncovering edge cases and failure modes, and filing GitHub tickets"
     },
     "tester": {
-      "variant": "high",
+      "variant": "medium",
       "description": "Deterministic test execution subagent for running on-device test suites and generating proof receipts without modifying source code"
     },
     "reviewer": {
@@ -54,7 +54,7 @@
       "description": "Independent code and architectural review subagent for inspecting diffs and checking 5-gate boundary invariants without modifying files"
     },
     "scout": {
-      "variant": "high",
+      "variant": "medium",
       "description": "Read-only research subagent for external docs, dependency inspection, upstream PR reviews, and library source analysis"
     }
   },

@@ -2071,6 +2071,31 @@ extern "C" int fvk_qwen35_gdn_preprojected_f32(
     return 0;
 }
 
+extern "C" int fvk_qwen35_gdn_conv_tiled_transpose_f32(
+    const void* mixed, const void* conv1d, void* conv_state, void* conv_out,
+    int tokens, int conv_dim, int kernel) {
+    if (!g_ready || !mixed || !conv1d || !conv_state || !conv_out)
+        return 1;
+    if (tokens <= 0 || conv_dim <= 0 || kernel <= 0)
+        return 2;
+    if ((conv_dim * (int)sizeof(float)) % 32 != 0)
+        return 2;
+    uint64_t mixedBytes = (uint64_t)tokens * conv_dim * sizeof(float);
+    uint64_t conv1dBytes = (uint64_t)conv_dim * kernel * sizeof(float);
+    uint64_t stateBytes = (uint64_t)(kernel > 1 ? kernel - 1 : 0) * conv_dim * sizeof(float);
+    uint64_t outBytes = (uint64_t)tokens * conv_dim * sizeof(float);
+    if (B((void*)mixed)->bytes < mixedBytes ||
+        B((void*)conv1d)->bytes < conv1dBytes ||
+        (stateBytes > 0 && B(conv_state)->bytes < stateBytes) ||
+        B(conv_out)->bytes < outBytes) {
+        return 2;
+    }
+    struct ConvPC { int tokens, conv_dim, kernel; } cpc{tokens, conv_dim, kernel};
+    Buffer* cbufs[4] = {B((void*)mixed), B((void*)conv1d), B(conv_state), B(conv_out)};
+    dispatch(g_kern[K_QWEN35_GDN_CONV], cbufs, &cpc, sizeof(cpc), (uint32_t)((conv_dim + 63) / 64));
+    return (int)g_submissionStatus;
+}
+
 extern "C" int fvk_glm_kda_step_f32(
     void* state, const void* q, const void* k, const void* value,
     const void* alpha, const void* beta, void* output, int heads, int variant) {
