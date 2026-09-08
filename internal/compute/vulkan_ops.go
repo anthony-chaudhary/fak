@@ -55,6 +55,10 @@ func (v *vulkanBackend) SwiGLU(gate, up Tensor) Tensor {
 	defer vulkanMu.Unlock()
 	n := gate.Numel()
 	y, _ := v.devTr(append([]int(nil), gate.Shape...), F32)
+	dispatch := recurrentSwiGLUVulkanDispatch
+	if dispatch.Kernel != vulkanElementwiseKernelSwiGLU || dispatch.Dispatches != 1 || dispatch.IntermediateBarriers != 0 {
+		panic(fmt.Sprintf("compute: invalid recurrent SwiGLU Vulkan lowering %+v", dispatch))
+	}
 	C.fvk_swiglu_f32(v.vp(gate), v.vp(up), v.vp(y), C.int(n))
 	return y
 }
