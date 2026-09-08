@@ -175,12 +175,29 @@ func TestVulkanQ2KFusedRMSNormMatMul2(t *testing.T) {
 	pairs := [][2]Dtype{{Q2_K, Q2_K}, {Q2_K, F32}, {F32, Q2_K}, {Q2_K, Q8_0}, {Q8_0, Q2_K}, {Q2_K, Q4_K}, {Q4_K, Q2_K}, {F32, F32}, {Q8_0, Q8_0}, {Q4_K, Q4_K}}
 	for _, pair := range pairs {
 		t.Run(fmt.Sprintf("%s_%s", pair[0], pair[1]), func(t *testing.T) {
+			fusedQ2 := pair[0] == Q2_K && pair[1] == Q2_K
+			if fusedQ2 {
+				t.Setenv("FAK_VULKAN_Q2K_FUSION", "candidate")
+			}
 			w0, w1 := q2FusedWeight(pair[0], 8, 256), q2FusedWeight(pair[1], 12, 256)
 			x, norm := q2FusedInput(256, 0), q2FusedInput(256, 1)
 			dw0, dw1 := q2FusedUpload(t, v, w0), q2FusedUpload(t, v, w1)
 			dx, dn := q2FusedUpload(t, v, x), q2FusedUpload(t, v, norm)
 			t.Cleanup(v.Recycle)
+			beforeBuffers, beforeBytes := v.VulkanDebugTransientSnapshot()
+			v.VulkanDebugResetDispatchProfile()
 			y0, y1 := v.RMSNormMatMul2(dw0, dw1, dx, dn, 1e-6)
+			if fusedQ2 {
+				afterBuffers, afterBytes := v.VulkanDebugTransientSnapshot()
+				wantBytes := int64((8 + 12) * F32.Bytes())
+				if gotBuffers, gotBytes := afterBuffers-beforeBuffers, afterBytes-beforeBytes; gotBuffers != 2 || gotBytes != wantBytes {
+					t.Fatalf("fused RMSNormMatMul2 transient delta=(buffers=%d bytes=%d), want outputs only (2 %d)", gotBuffers, gotBytes, wantBytes)
+				}
+				compute, q2k, swiglu, add := v.VulkanDebugQ2KDispatchSnapshot()
+				if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") == "1" && (compute != 1 || q2k != 1 || swiglu != 0 || add != 0) {
+					t.Fatalf("fused RMSNormMatMul2 dispatches=(compute=%d q2=%d swiglu=%d add=%d), want (1 1 0 0)", compute, q2k, swiglu, add)
+				}
+			}
 			xn := v.RMSNorm(dx, dn, 1e-6)
 			cpuX := Default().RMSNorm(x, norm, 1e-6)
 			q2FusedCompare(t, v.Read(y0), Default().Read(Default().MatMul(w0, cpuX)), v.Read(v.MatMul(dw0, xn)))
@@ -370,10 +387,10 @@ func TestVulkanQ2KShaderInvariants(t *testing.T) {
 		"int outDim;",
 		"int inDim;",
 		"int tokens;",
-		"int auxOutDim;",
-		"uint base = uint((row * uint(pc.inDim / 256) + sb) * 84u);",
-		"halfAt(second, base + 80u)",
-		"halfAt(second, base + 82u)",
+		"int fused;",
+		"uint base = uint((row * blocks + sb) * 84);",
+		"halfAt(base + 80u)",
+		"halfAt(base + 82u)",
 	}
 
 	for _, clause := range requiredClauses {
@@ -398,14 +415,14 @@ func TestVulkanQ2KSwiGLUMatMulAddSourceContract(t *testing.T) {
 			clauses: []string{
 				"binding = 2) readonly buffer U",
 				"binding = 3) buffer Y",
-				"int auxOutDim;",
-				"pc.auxOutDim < 0",
+				"int fused;",
+				"pc.fused != 0",
 			},
 		},
 		{
 			path: filepath.Join(repoRoot, "internal", "compute", "vulkan_shim.cpp"),
 			clauses: []string{
-				"buildKernel(g_kern[K_Q2K_MATMUL], P(\"q2k_matmul.spv\"), 7, 4 * sizeof(int) + sizeof(float))",
+				"buildKernel(g_kern[K_Q2K_MATMUL], P(\"q2k_matmul.spv\"), 4, 4 * sizeof(int))",
 				"fvk_swiglu_q2k_matmul_add_f32",
 			},
 		},
