@@ -16,11 +16,17 @@ func cmdGoal(args []string) { os.Exit(runGoal(os.Stdout, os.Stderr, args)) }
 
 func runGoal(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak goal create|show|list|update|transition|reopen|bind|resolve|topology|backfill-root|unbind|sync ...")
+		fmt.Fprintln(stderr, "usage: fak goal create|show|list|update|transition|reopen|bind|resolve|topology|backfill-root|unbind|sync|launch|fleet ...")
 		return 2
 	}
 	if args[0] == "sync" {
 		return runGoalSync(stdout, stderr, args[1:])
+	}
+	if args[0] == "launch" {
+		return runGoalLaunchSubcommand(stdout, stderr, args[1:])
+	}
+	if args[0] == "fleet" {
+		return runGoalFleetSubcommand(stdout, stderr, args[1:])
 	}
 	fs := flag.NewFlagSet("goal "+args[0], flag.ContinueOnError)
 	fs.SetOutput(stderr)
