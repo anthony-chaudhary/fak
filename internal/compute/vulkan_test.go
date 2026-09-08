@@ -3,6 +3,7 @@
 package compute
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -524,6 +525,185 @@ func TestVulkanEmbeddingRowCopiesSourceOffset(t *testing.T) {
 	v.Trim()
 }
 
+type vulkanCoreParityObserved struct {
+	Cosine         *float64 `json:"cosine,omitempty"`
+	MaxAbsDelta    *float64 `json:"max_abs_delta,omitempty"`
+	MaxSourceDelta *float64 `json:"max_source_delta,omitempty"`
+}
+
+type vulkanCoreParityBounds struct {
+	MinCosine                  *float64 `json:"min_cosine,omitempty"`
+	MaxAbsDelta                *float64 `json:"max_abs_delta,omitempty"`
+	RequireSourceMutationCheck *bool    `json:"require_source_mutation_check,omitempty"`
+	MaxSourceDelta             *float64 `json:"max_source_delta,omitempty"`
+}
+
+type vulkanCoreParityOracleEvent struct {
+	Schema         string                   `json:"schema"`
+	Selector       string                   `json:"selector"`
+	TestName       string                   `json:"test_name"`
+	OracleKind     string                   `json:"oracle_kind"`
+	Engine         string                   `json:"engine"`
+	DeviceObserved bool                     `json:"device_observed"`
+	CaseCount      int                      `json:"case_count"`
+	Passed         bool                     `json:"passed"`
+	Observed       vulkanCoreParityObserved `json:"observed"`
+	Bounds         vulkanCoreParityBounds   `json:"bounds"`
+}
+
+func formatVulkanCoreParityOracle(
+	selector string,
+	testName string,
+	oracleKind string,
+	caseCount int,
+	observed vulkanCoreParityObserved,
+	bounds vulkanCoreParityBounds,
+) ([]byte, error) {
+	passed := true
+	if bounds.MinCosine != nil {
+		if observed.Cosine == nil || *observed.Cosine < *bounds.MinCosine {
+			passed = false
+		}
+	}
+	if bounds.MaxAbsDelta != nil {
+		if observed.MaxAbsDelta == nil || *observed.MaxAbsDelta > *bounds.MaxAbsDelta {
+			passed = false
+		}
+	}
+	if bounds.RequireSourceMutationCheck != nil && *bounds.RequireSourceMutationCheck {
+		if observed.MaxSourceDelta == nil {
+			passed = false
+		} else if bounds.MaxSourceDelta != nil && *observed.MaxSourceDelta > *bounds.MaxSourceDelta {
+			passed = false
+		}
+	}
+	event := vulkanCoreParityOracleEvent{
+		Schema:         "fak.strix.subkernel-parity/v1",
+		Selector:       selector,
+		TestName:       testName,
+		OracleKind:     oracleKind,
+		Engine:         "fak-native/vulkan",
+		DeviceObserved: true,
+		CaseCount:      caseCount,
+		Passed:         passed,
+		Observed:       observed,
+		Bounds:         bounds,
+	}
+	return json.Marshal(event)
+}
+
+func formatVulkanMatMulParityOracle(cosine, maxAbsDelta float64) ([]byte, error) {
+	minCos, maxAbs := 0.9999, 1e-2
+	return formatVulkanCoreParityOracle("matmul_f32", "TestVulkanMatMulApprox", "cosine_max_abs", 1,
+		vulkanCoreParityObserved{Cosine: &cosine, MaxAbsDelta: &maxAbsDelta},
+		vulkanCoreParityBounds{MinCosine: &minCos, MaxAbsDelta: &maxAbs},
+	)
+}
+
+func formatVulkanMatMul2ParityOracle(minCosine, maxAbsDelta float64, caseCount int) ([]byte, error) {
+	minCos, maxAbs := 0.9999, 1e-2
+	return formatVulkanCoreParityOracle("matmul2_f32", "TestVulkanMatMul2Approx", "cosine_max_abs", caseCount,
+		vulkanCoreParityObserved{Cosine: &minCosine, MaxAbsDelta: &maxAbsDelta},
+		vulkanCoreParityBounds{MinCosine: &minCos, MaxAbsDelta: &maxAbs},
+	)
+}
+
+func formatVulkanMatMul3ParityOracle(minCosine, maxAbsDelta float64, caseCount int) ([]byte, error) {
+	minCos, maxAbs := 0.9999, 1e-2
+	return formatVulkanCoreParityOracle("matmul3_f32", "TestVulkanMatMul3Approx", "cosine_max_abs", caseCount,
+		vulkanCoreParityObserved{Cosine: &minCosine, MaxAbsDelta: &maxAbsDelta},
+		vulkanCoreParityBounds{MinCosine: &minCos, MaxAbsDelta: &maxAbs},
+	)
+}
+
+func formatVulkanQ8MatMulParityOracle(minCosine, maxAbsDelta float64, caseCount int) ([]byte, error) {
+	minCos, maxAbs := 0.9999, 1e-3
+	return formatVulkanCoreParityOracle("q8_matmul", "TestVulkanQ8MatMulApprox", "cosine_max_abs", caseCount,
+		vulkanCoreParityObserved{Cosine: &minCosine, MaxAbsDelta: &maxAbsDelta},
+		vulkanCoreParityBounds{MinCosine: &minCos, MaxAbsDelta: &maxAbs},
+	)
+}
+
+func formatVulkanQ8MatMulWideParityOracle(minCosine, maxAbsDelta float64, caseCount int) ([]byte, error) {
+	minCos, maxAbs := 0.9999, 1e-3
+	return formatVulkanCoreParityOracle("q8_matmul_wide", "TestVulkanQ8MatMulWideInput", "cosine_max_abs", caseCount,
+		vulkanCoreParityObserved{Cosine: &minCosine, MaxAbsDelta: &maxAbsDelta},
+		vulkanCoreParityBounds{MinCosine: &minCos, MaxAbsDelta: &maxAbs},
+	)
+}
+
+func formatVulkanQ8MatMulVocabParityOracle(cosine, maxAbsDelta float64) ([]byte, error) {
+	minCos, maxAbs := 0.9999, 1e-3
+	return formatVulkanCoreParityOracle("q8_matmul_vocab", "TestVulkanQ8MatMulVocabHead", "cosine_max_abs", 1,
+		vulkanCoreParityObserved{Cosine: &cosine, MaxAbsDelta: &maxAbsDelta},
+		vulkanCoreParityBounds{MinCosine: &minCos, MaxAbsDelta: &maxAbs},
+	)
+}
+
+func formatVulkanRMSNormParityOracle(maxAbsDelta float64) ([]byte, error) {
+	maxAbs := 1e-3
+	return formatVulkanCoreParityOracle("rmsnorm", "TestVulkanRMSNormApprox", "max_abs", 1,
+		vulkanCoreParityObserved{MaxAbsDelta: &maxAbsDelta},
+		vulkanCoreParityBounds{MaxAbsDelta: &maxAbs},
+	)
+}
+
+func formatVulkanRMSNormMatMulParityOracle(cosine, maxAbsDelta, maxSourceDelta float64) ([]byte, error) {
+	minCos, maxAbs, reqSrc, maxSrc := 0.9999, 1e-2, true, 0.0
+	return formatVulkanCoreParityOracle("rmsnorm_matmul", "TestVulkanRMSNormMatMulApprox", "cosine_max_abs", 1,
+		vulkanCoreParityObserved{Cosine: &cosine, MaxAbsDelta: &maxAbsDelta, MaxSourceDelta: &maxSourceDelta},
+		vulkanCoreParityBounds{MinCosine: &minCos, MaxAbsDelta: &maxAbs, RequireSourceMutationCheck: &reqSrc, MaxSourceDelta: &maxSrc},
+	)
+}
+
+func formatVulkanRMSNormMatMul2ParityOracle(minCosine, maxAbsDelta, maxSourceDelta float64, caseCount int) ([]byte, error) {
+	minCos, maxAbs, reqSrc, maxSrc := 0.9999, 1e-2, true, 0.0
+	return formatVulkanCoreParityOracle("rmsnorm_matmul2", "TestVulkanRMSNormMatMul2Approx", "cosine_max_abs", caseCount,
+		vulkanCoreParityObserved{Cosine: &minCosine, MaxAbsDelta: &maxAbsDelta, MaxSourceDelta: &maxSourceDelta},
+		vulkanCoreParityBounds{MinCosine: &minCos, MaxAbsDelta: &maxAbs, RequireSourceMutationCheck: &reqSrc, MaxSourceDelta: &maxSrc},
+	)
+}
+
+func formatVulkanRMSNormMatMul3ParityOracle(minCosine, maxAbsDelta, maxSourceDelta float64, caseCount int) ([]byte, error) {
+	minCos, maxAbs, reqSrc, maxSrc := 0.9999, 1e-2, true, 0.0
+	return formatVulkanCoreParityOracle("rmsnorm_matmul3", "TestVulkanRMSNormMatMul3Approx", "cosine_max_abs", caseCount,
+		vulkanCoreParityObserved{Cosine: &minCosine, MaxAbsDelta: &maxAbsDelta, MaxSourceDelta: &maxSourceDelta},
+		vulkanCoreParityBounds{MinCosine: &minCos, MaxAbsDelta: &maxAbs, RequireSourceMutationCheck: &reqSrc, MaxSourceDelta: &maxSrc},
+	)
+}
+
+func formatVulkanSwiGLUParityOracle(maxAbsDelta float64) ([]byte, error) {
+	maxAbs := 1e-3
+	return formatVulkanCoreParityOracle("swiglu", "TestVulkanSwiGLUApprox", "max_abs", 1,
+		vulkanCoreParityObserved{MaxAbsDelta: &maxAbsDelta},
+		vulkanCoreParityBounds{MaxAbsDelta: &maxAbs},
+	)
+}
+
+func formatVulkanSwiGLUMatMulAddParityOracle(cosine, maxAbsDelta float64) ([]byte, error) {
+	minCos, maxAbs := 0.9999, 1e-2
+	return formatVulkanCoreParityOracle("swiglu_matmul_add", "TestVulkanSwiGLUMatMulAddInPlaceApprox", "cosine_max_abs", 1,
+		vulkanCoreParityObserved{Cosine: &cosine, MaxAbsDelta: &maxAbsDelta},
+		vulkanCoreParityBounds{MinCosine: &minCos, MaxAbsDelta: &maxAbs},
+	)
+}
+
+func formatVulkanRoPEParityOracle(maxAbsDelta, maxSourceDelta float64) ([]byte, error) {
+	maxAbs, reqSrc, maxSrc := 1e-3, true, 0.0
+	return formatVulkanCoreParityOracle("rope", "TestVulkanRoPEApprox", "max_abs", 1,
+		vulkanCoreParityObserved{MaxAbsDelta: &maxAbsDelta, MaxSourceDelta: &maxSourceDelta},
+		vulkanCoreParityBounds{MaxAbsDelta: &maxAbs, RequireSourceMutationCheck: &reqSrc, MaxSourceDelta: &maxSrc},
+	)
+}
+
+func formatVulkanAttentionParityOracle(cosine, maxAbsDelta float64) ([]byte, error) {
+	minCos, maxAbs := 0.999, 1e-2
+	return formatVulkanCoreParityOracle("attention", "TestVulkanAttentionApprox", "cosine_max_abs", 1,
+		vulkanCoreParityObserved{Cosine: &cosine, MaxAbsDelta: &maxAbsDelta},
+		vulkanCoreParityBounds{MinCosine: &minCos, MaxAbsDelta: &maxAbs},
+	)
+}
+
 func TestVulkanMatMulApprox(t *testing.T) {
 	v := vk(t)
 	c := cpu()
@@ -535,12 +715,19 @@ func TestVulkanMatMulApprox(t *testing.T) {
 	dw := v.Upload(NewF32(c, []int{out, in}, w), F32)
 	dx := v.Upload(NewF32(c, []int{in}, x), F32)
 	got := v.Read(v.MatMul(dw, dx))
-	if cos := cosine(c.Read(ref), got); cos < 0.9999 {
+	cos := cosine(c.Read(ref), got)
+	if cos < 0.9999 {
 		t.Fatalf("matmul cosine %.6f < 0.9999", cos)
 	}
-	if d := maxAbs(c.Read(ref), got); d > 1e-2 {
+	d := maxAbs(c.Read(ref), got)
+	if d > 1e-2 {
 		t.Fatalf("matmul max|Δ| %.4g > 1e-2", d)
 	}
+	oracleJSON, err := formatVulkanMatMulParityOracle(float64(cos), float64(d))
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
 }
 
 func TestVulkanQ8MatMulApprox(t *testing.T) {
@@ -561,21 +748,32 @@ func TestVulkanQ8MatMulApprox(t *testing.T) {
 
 	ref := c.Read(c.MatMul(wq, NewF32(c, []int{in}, x)))
 	got := v.Read(v.MatMul(dwq, dx))
-	if cos := cosine(ref, got); cos < 0.9999 {
+	cos := cosine(ref, got)
+	if cos < 0.9999 {
 		t.Fatalf("q8 matmul cosine %.6f < 0.9999", cos)
 	}
-	if d := maxAbs(ref, got); d > 1e-3 {
+	d := maxAbs(ref, got)
+	if d > 1e-3 {
 		t.Fatalf("q8 matmul max|Delta| %.4g > 1e-3", d)
 	}
 
 	refB := c.Read(c.BatchedMatMul(wq, NewF32(c, []int{P, in}, X), P))
 	gotB := v.Read(v.BatchedMatMul(dwq, dX, P))
-	if cos := cosine(refB, gotB); cos < 0.9999 {
-		t.Fatalf("q8 batched matmul cosine %.6f < 0.9999", cos)
+	cosB := cosine(refB, gotB)
+	if cosB < 0.9999 {
+		t.Fatalf("q8 batched matmul cosine %.6f < 0.9999", cosB)
 	}
-	if d := maxAbs(refB, gotB); d > 1e-3 {
-		t.Fatalf("q8 batched matmul max|Delta| %.4g > 1e-3", d)
+	dB := maxAbs(refB, gotB)
+	if dB > 1e-3 {
+		t.Fatalf("q8 batched matmul max|Delta| %.4g > 1e-3", dB)
 	}
+	minCos := math.Min(float64(cos), float64(cosB))
+	maxD := math.Max(float64(d), float64(dB))
+	oracleJSON, err := formatVulkanQ8MatMulParityOracle(minCos, maxD, 2)
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
 }
 
 // TestVulkanQ8MatMulWideInput exercises the q8_matmul input-tiling path: input dims past the
@@ -589,6 +787,9 @@ func TestVulkanQ8MatMulWideInput(t *testing.T) {
 	}
 	c := cpu()
 	var s lcg = 91
+	minCos := math.MaxFloat64
+	maxD := 0.0
+	cases := 0
 	for _, tc := range []struct {
 		out int
 		in  int
@@ -597,6 +798,7 @@ func TestVulkanQ8MatMulWideInput(t *testing.T) {
 		{out: 64, in: 3072}, // two windows (2048 + 1024)
 		{out: 48, in: 8960}, // the 1.5B FFN down_proj dim — five windows
 	} {
+		cases++
 		w := randVec(&s, tc.out*tc.in)
 		x := randVec(&s, tc.in)
 		wq := QuantizeQ8(c, []int{tc.out, tc.in}, w, 32)
@@ -604,13 +806,26 @@ func TestVulkanQ8MatMulWideInput(t *testing.T) {
 		dx := v.Upload(NewF32(c, []int{tc.in}, x), F32)
 		ref := c.Read(c.MatMul(wq, NewF32(c, []int{tc.in}, x)))
 		got := v.Read(v.MatMul(dwq, dx))
-		if cos := cosine(ref, got); cos < 0.9999 {
+		cos := cosine(ref, got)
+		if cos < 0.9999 {
 			t.Fatalf("q8 wide matmul (out=%d,in=%d) cosine %.6f < 0.9999", tc.out, tc.in, cos)
 		}
-		if d := maxAbs(ref, got); d > 1e-3 {
+		if float64(cos) < minCos {
+			minCos = float64(cos)
+		}
+		d := maxAbs(ref, got)
+		if d > 1e-3 {
 			t.Fatalf("q8 wide matmul (out=%d,in=%d) max|Delta| %.4g > 1e-3", tc.out, tc.in, d)
 		}
+		if float64(d) > maxD {
+			maxD = float64(d)
+		}
 	}
+	oracleJSON, err := formatVulkanQ8MatMulWideParityOracle(minCos, maxD, cases)
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
 }
 
 // TestVulkanQ8MatMulVocabHead exercises the q8_matmul OUTPUT-tiling path at LM-head scale —
@@ -637,12 +852,19 @@ func TestVulkanQ8MatMulVocabHead(t *testing.T) {
 
 	ref := c.Read(c.MatMul(wq, NewF32(c, []int{in}, x)))
 	got := v.Read(v.MatMul(dwq, dx))
-	if cos := cosine(ref, got); cos < 0.9999 {
+	cos := cosine(ref, got)
+	if cos < 0.9999 {
 		t.Fatalf("q8 vocab-head matmul (out=%d,in=%d) cosine %.6f < 0.9999", out, in, cos)
 	}
-	if d := maxAbs(ref, got); d > 1e-3 {
+	d := maxAbs(ref, got)
+	if d > 1e-3 {
 		t.Fatalf("q8 vocab-head matmul (out=%d,in=%d) max|Delta| %.4g > 1e-3", out, in, d)
 	}
+	oracleJSON, err := formatVulkanQ8MatMulVocabParityOracle(float64(cos), float64(d))
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
 }
 
 func TestVulkanMatMulArgmaxMatchesVulkanMatMul(t *testing.T) {
@@ -889,17 +1111,32 @@ func TestVulkanMatMul2Approx(t *testing.T) {
 	dw1 := v.Upload(NewF32(c, []int{out1, in}, w1), F32)
 	dx := v.Upload(NewF32(c, []int{in}, x), F32)
 	y0, y1 := v.MatMul2(dw0, dw1, dx)
+	minCos := math.MaxFloat64
+	maxD := 0.0
 	for name, pair := range map[string]struct{ ref, got []float32 }{
 		"y0": {ref0, v.Read(y0)},
 		"y1": {ref1, v.Read(y1)},
 	} {
-		if cos := cosine(pair.ref, pair.got); cos < 0.9999 {
+		cos := cosine(pair.ref, pair.got)
+		if cos < 0.9999 {
 			t.Fatalf("matmul2 %s cosine %.6f < 0.9999", name, cos)
 		}
-		if d := maxAbs(pair.ref, pair.got); d > 1e-2 {
+		if float64(cos) < minCos {
+			minCos = float64(cos)
+		}
+		d := maxAbs(pair.ref, pair.got)
+		if d > 1e-2 {
 			t.Fatalf("matmul2 %s max|Δ| %.4g > 1e-2", name, d)
 		}
+		if float64(d) > maxD {
+			maxD = float64(d)
+		}
 	}
+	oracleJSON, err := formatVulkanMatMul2ParityOracle(minCos, maxD, 2)
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
 }
 
 func TestVulkanQ8MatMul2Approx(t *testing.T) {
@@ -951,18 +1188,33 @@ func TestVulkanMatMul3Approx(t *testing.T) {
 	dwv := v.Upload(NewF32(c, []int{vOut, in}, wv), F32)
 	dx := v.Upload(NewF32(c, []int{in}, x), F32)
 	q, k, val := v.MatMul3(dwq, dwk, dwv, dx)
+	minCos := math.MaxFloat64
+	maxD := 0.0
 	for name, pair := range map[string]struct{ ref, got []float32 }{
 		"q": {refQ, v.Read(q)},
 		"k": {refK, v.Read(k)},
 		"v": {refV, v.Read(val)},
 	} {
-		if cos := cosine(pair.ref, pair.got); cos < 0.9999 {
+		cos := cosine(pair.ref, pair.got)
+		if cos < 0.9999 {
 			t.Fatalf("matmul3 %s cosine %.6f < 0.9999", name, cos)
 		}
-		if d := maxAbs(pair.ref, pair.got); d > 1e-2 {
+		if float64(cos) < minCos {
+			minCos = float64(cos)
+		}
+		d := maxAbs(pair.ref, pair.got)
+		if d > 1e-2 {
 			t.Fatalf("matmul3 %s max|Δ| %.4g > 1e-2", name, d)
 		}
+		if float64(d) > maxD {
+			maxD = float64(d)
+		}
 	}
+	oracleJSON, err := formatVulkanMatMul3ParityOracle(minCos, maxD, 3)
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
 }
 
 func TestVulkanQ8MatMul3Approx(t *testing.T) {
@@ -1019,20 +1271,36 @@ func TestVulkanRMSNormMatMul2Approx(t *testing.T) {
 	dx := v.Upload(NewF32(c, []int{in}, x), F32)
 	dn := v.Upload(NewF32(c, []int{in}, norm), F32)
 	y0, y1 := v.RMSNormMatMul2(dw0, dw1, dx, dn, 1e-5)
+	minCos := math.MaxFloat64
+	maxD := 0.0
 	for name, pair := range map[string]struct{ ref, got []float32 }{
 		"y0": {ref0, v.Read(y0)},
 		"y1": {ref1, v.Read(y1)},
 	} {
-		if cos := cosine(pair.ref, pair.got); cos < 0.9999 {
+		cos := cosine(pair.ref, pair.got)
+		if cos < 0.9999 {
 			t.Fatalf("rmsnorm_matmul2 %s cosine %.6f < 0.9999", name, cos)
 		}
-		if d := maxAbs(pair.ref, pair.got); d > 1e-2 {
+		if float64(cos) < minCos {
+			minCos = float64(cos)
+		}
+		d := maxAbs(pair.ref, pair.got)
+		if d > 1e-2 {
 			t.Fatalf("rmsnorm_matmul2 %s max|Δ| %.4g > 1e-2", name, d)
 		}
+		if float64(d) > maxD {
+			maxD = float64(d)
+		}
 	}
-	if d := maxAbs(x, v.Read(dx)); d > 0 {
-		t.Fatalf("rmsnorm_matmul2 mutated source max|Δ| %.4g", d)
+	srcD := maxAbs(x, v.Read(dx))
+	if srcD > 0 {
+		t.Fatalf("rmsnorm_matmul2 mutated source max|Δ| %.4g", srcD)
 	}
+	oracleJSON, err := formatVulkanRMSNormMatMul2ParityOracle(minCos, maxD, float64(srcD), 2)
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
 }
 
 func TestVulkanRMSNormMatMul3Approx(t *testing.T) {
@@ -1055,21 +1323,37 @@ func TestVulkanRMSNormMatMul3Approx(t *testing.T) {
 	dx := v.Upload(NewF32(c, []int{in}, x), F32)
 	dn := v.Upload(NewF32(c, []int{in}, norm), F32)
 	q, k, val := v.RMSNormMatMul3(dwq, dwk, dwv, dx, dn, 1e-5)
+	minCos := math.MaxFloat64
+	maxD := 0.0
 	for name, pair := range map[string]struct{ ref, got []float32 }{
 		"q": {refQ, v.Read(q)},
 		"k": {refK, v.Read(k)},
 		"v": {refV, v.Read(val)},
 	} {
-		if cos := cosine(pair.ref, pair.got); cos < 0.9999 {
+		cos := cosine(pair.ref, pair.got)
+		if cos < 0.9999 {
 			t.Fatalf("rmsnorm_matmul3 %s cosine %.6f < 0.9999", name, cos)
 		}
-		if d := maxAbs(pair.ref, pair.got); d > 1e-2 {
+		if float64(cos) < minCos {
+			minCos = float64(cos)
+		}
+		d := maxAbs(pair.ref, pair.got)
+		if d > 1e-2 {
 			t.Fatalf("rmsnorm_matmul3 %s max|Δ| %.4g > 1e-2", name, d)
 		}
+		if float64(d) > maxD {
+			maxD = float64(d)
+		}
 	}
-	if d := maxAbs(x, v.Read(dx)); d > 0 {
-		t.Fatalf("rmsnorm_matmul3 mutated source max|Δ| %.4g", d)
+	srcD := maxAbs(x, v.Read(dx))
+	if srcD > 0 {
+		t.Fatalf("rmsnorm_matmul3 mutated source max|Δ| %.4g", srcD)
 	}
+	oracleJSON, err := formatVulkanRMSNormMatMul3ParityOracle(minCos, maxD, float64(srcD), 3)
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
 }
 
 // The three tests below witness the fused Q8 decode kernels — the dispatch-count lever for
@@ -1221,15 +1505,23 @@ func TestVulkanRMSNormMatMulApprox(t *testing.T) {
 	got := v.RMSNormMatMul(dw, dx, dn, 1e-5)
 	wh := v.Read(want)
 	gh := v.Read(got)
-	if cos := cosine(gh, wh); cos < 0.9999 {
+	cos := cosine(gh, wh)
+	if cos < 0.9999 {
 		t.Fatalf("rmsnorm_matmul cosine %.6f < 0.9999", cos)
 	}
-	if d := maxAbs(gh, wh); d > 1e-2 {
+	d := maxAbs(gh, wh)
+	if d > 1e-2 {
 		t.Fatalf("rmsnorm_matmul max|Delta| %.4g > 1e-2", d)
 	}
-	if d := maxAbs(v.Read(dx), x); d != 0 {
-		t.Fatalf("rmsnorm_matmul mutated source max|Delta| %.4g", d)
+	srcD := maxAbs(v.Read(dx), x)
+	if srcD != 0 {
+		t.Fatalf("rmsnorm_matmul mutated source max|Delta| %.4g", srcD)
 	}
+	oracleJSON, err := formatVulkanRMSNormMatMulParityOracle(float64(cos), float64(d), float64(srcD))
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
 }
 
 func TestVulkanRMSNormApprox(t *testing.T) {
@@ -1241,9 +1533,15 @@ func TestVulkanRMSNormApprox(t *testing.T) {
 	w := randVec(&s, n)
 	ref := c.RMSNorm(NewF32(c, []int{n}, x), NewF32(c, []int{n}, w), 1e-5)
 	got := v.Read(v.RMSNorm(v.Upload(NewF32(c, []int{n}, x), F32), v.Upload(NewF32(c, []int{n}, w), F32), 1e-5))
-	if d := maxAbs(c.Read(ref), got); d > 1e-3 {
+	d := maxAbs(c.Read(ref), got)
+	if d > 1e-3 {
 		t.Fatalf("rmsnorm max|Δ| %.4g > 1e-3", d)
 	}
+	oracleJSON, err := formatVulkanRMSNormParityOracle(float64(d))
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
 }
 
 func TestVulkanRoPEApprox(t *testing.T) {
@@ -1255,12 +1553,19 @@ func TestVulkanRoPEApprox(t *testing.T) {
 	ref := c.RoPE(NewF32(c, []int{nHeads * hd}, x), 5, nHeads, hd, 10000)
 	src := v.Upload(NewF32(c, []int{nHeads * hd}, x), F32)
 	got := v.Read(v.RoPE(src, 5, nHeads, hd, 10000))
-	if d := maxAbs(c.Read(ref), got); d > 1e-3 {
+	d := maxAbs(c.Read(ref), got)
+	if d > 1e-3 {
 		t.Fatalf("rope max|Δ| %.4g > 1e-3", d)
 	}
-	if d := maxAbs(x, v.Read(src)); d > 0 {
-		t.Fatalf("rope mutated source max|Δ| %.4g", d)
+	srcD := maxAbs(x, v.Read(src))
+	if srcD > 0 {
+		t.Fatalf("rope mutated source max|Δ| %.4g", srcD)
 	}
+	oracleJSON, err := formatVulkanRoPEParityOracle(float64(d), float64(srcD))
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
 }
 
 func TestVulkanSwiGLUApprox(t *testing.T) {
@@ -1272,9 +1577,15 @@ func TestVulkanSwiGLUApprox(t *testing.T) {
 	u := randVec(&s, n)
 	ref := c.SwiGLU(NewF32(c, []int{n}, g), NewF32(c, []int{n}, u))
 	got := v.Read(v.SwiGLU(v.Upload(NewF32(c, []int{n}, g), F32), v.Upload(NewF32(c, []int{n}, u), F32)))
-	if d := maxAbs(c.Read(ref), got); d > 1e-3 {
+	d := maxAbs(c.Read(ref), got)
+	if d > 1e-3 {
 		t.Fatalf("swiglu max|Δ| %.4g > 1e-3", d)
 	}
+	oracleJSON, err := formatVulkanSwiGLUParityOracle(float64(d))
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
 }
 
 func TestVulkanSwiGLUMatMulAddInPlaceApprox(t *testing.T) {
@@ -1298,12 +1609,19 @@ func TestVulkanSwiGLUMatMulAddInPlaceApprox(t *testing.T) {
 	ddst := v.Upload(NewF32(c, []int{out}, dst), F32)
 	v.SwiGLUMatMulAddInPlace(ddst, dw, dg, du)
 	got := v.Read(ddst)
-	if cos := cosine(ref, got); cos < 0.9999 {
+	cos := cosine(ref, got)
+	if cos < 0.9999 {
 		t.Fatalf("swiglu_matmul_add cosine %.6f < 0.9999", cos)
 	}
-	if d := maxAbs(ref, got); d > 1e-2 {
+	d := maxAbs(ref, got)
+	if d > 1e-2 {
 		t.Fatalf("swiglu_matmul_add max|Δ| %.4g > 1e-2", d)
 	}
+	oracleJSON, err := formatVulkanSwiGLUMatMulAddParityOracle(float64(cos), float64(d))
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
 }
 
 func TestVulkanArgmaxExact(t *testing.T) {
@@ -1345,12 +1663,19 @@ func TestVulkanAttentionApprox(t *testing.T) {
 	q := randVec(&s, nH*hd)
 	ref := c.Read(c.Attention(NewF32(c, []int{nH * hd}, q), ckv, 0, true, grp, scale))
 	got := v.Read(v.Attention(v.Upload(NewF32(c, []int{nH * hd}, q), F32), vkv, 0, true, grp, scale))
-	if cos := cosine(ref, got); cos < 0.999 {
+	cos := cosine(ref, got)
+	if cos < 0.999 {
 		t.Fatalf("attention cosine %.6f < 0.999", cos)
 	}
-	if d := maxAbs(ref, got); d > 1e-2 {
+	d := maxAbs(ref, got)
+	if d > 1e-2 {
 		t.Fatalf("attention max|Δ| %.4g > 1e-2", d)
 	}
+	oracleJSON, err := formatVulkanAttentionParityOracle(float64(cos), float64(d))
+	if err != nil {
+		t.Fatalf("format parity oracle: %v", err)
+	}
+	t.Logf("%s", oracleJSON)
 }
 
 func TestVulkanTeardownResourcesIsIdempotent(t *testing.T) {
@@ -2011,5 +2336,367 @@ func TestVulkanQwen35_ResidencyAndErrorRecovery(t *testing.T) {
 			}
 		}()
 		v.SigmoidMulInPlace(hostTensor, hostTensor)
+	})
+}
+
+func float64Ptr(v float64) *float64 { return &v }
+
+func TestStrixCoreParityEmitterContract(t *testing.T) {
+	cases := []struct {
+		selector                   string
+		testName                   string
+		oracleKind                 string
+		caseCount                  int
+		minCosine                  *float64
+		maxAbsDelta                *float64
+		requireSourceMutationCheck bool
+		maxSourceDelta             *float64
+		emitterName                string
+		boundChecks                []string
+		formatValid                func() ([]byte, error)
+		formatInvalid              func() ([]byte, error)
+	}{
+		{
+			selector:    "matmul_f32",
+			testName:    "TestVulkanMatMulApprox",
+			oracleKind:  "cosine_max_abs",
+			caseCount:   1,
+			minCosine:   float64Ptr(0.9999),
+			maxAbsDelta: float64Ptr(1e-2),
+			emitterName: "formatVulkanMatMulParityOracle",
+			boundChecks: []string{"cos < 0.9999", "d > 1e-2"},
+			formatValid: func() ([]byte, error) {
+				return formatVulkanMatMulParityOracle(0.99995, 0.005)
+			},
+			formatInvalid: func() ([]byte, error) {
+				return formatVulkanMatMulParityOracle(0.9998, 0.005)
+			},
+		},
+		{
+			selector:    "matmul2_f32",
+			testName:    "TestVulkanMatMul2Approx",
+			oracleKind:  "cosine_max_abs",
+			caseCount:   2,
+			minCosine:   float64Ptr(0.9999),
+			maxAbsDelta: float64Ptr(1e-2),
+			emitterName: "formatVulkanMatMul2ParityOracle",
+			boundChecks: []string{"cos < 0.9999", "d > 1e-2"},
+			formatValid: func() ([]byte, error) {
+				return formatVulkanMatMul2ParityOracle(0.99995, 0.005, 2)
+			},
+			formatInvalid: func() ([]byte, error) {
+				return formatVulkanMatMul2ParityOracle(0.99995, 0.02, 2)
+			},
+		},
+		{
+			selector:    "matmul3_f32",
+			testName:    "TestVulkanMatMul3Approx",
+			oracleKind:  "cosine_max_abs",
+			caseCount:   3,
+			minCosine:   float64Ptr(0.9999),
+			maxAbsDelta: float64Ptr(1e-2),
+			emitterName: "formatVulkanMatMul3ParityOracle",
+			boundChecks: []string{"cos < 0.9999", "d > 1e-2"},
+			formatValid: func() ([]byte, error) {
+				return formatVulkanMatMul3ParityOracle(0.99995, 0.005, 3)
+			},
+			formatInvalid: func() ([]byte, error) {
+				return formatVulkanMatMul3ParityOracle(0.9998, 0.005, 3)
+			},
+		},
+		{
+			selector:    "q8_matmul",
+			testName:    "TestVulkanQ8MatMulApprox",
+			oracleKind:  "cosine_max_abs",
+			caseCount:   2,
+			minCosine:   float64Ptr(0.9999),
+			maxAbsDelta: float64Ptr(1e-3),
+			emitterName: "formatVulkanQ8MatMulParityOracle",
+			boundChecks: []string{"cos < 0.9999", "d > 1e-3", "cosB < 0.9999", "dB > 1e-3"},
+			formatValid: func() ([]byte, error) {
+				return formatVulkanQ8MatMulParityOracle(0.99995, 0.0005, 2)
+			},
+			formatInvalid: func() ([]byte, error) {
+				return formatVulkanQ8MatMulParityOracle(0.9998, 0.0005, 2)
+			},
+		},
+		{
+			selector:    "q8_matmul_wide",
+			testName:    "TestVulkanQ8MatMulWideInput",
+			oracleKind:  "cosine_max_abs",
+			caseCount:   3,
+			minCosine:   float64Ptr(0.9999),
+			maxAbsDelta: float64Ptr(1e-3),
+			emitterName: "formatVulkanQ8MatMulWideParityOracle",
+			boundChecks: []string{"cos < 0.9999", "d > 1e-3"},
+			formatValid: func() ([]byte, error) {
+				return formatVulkanQ8MatMulWideParityOracle(0.99995, 0.0005, 3)
+			},
+			formatInvalid: func() ([]byte, error) {
+				return formatVulkanQ8MatMulWideParityOracle(0.99995, 0.002, 3)
+			},
+		},
+		{
+			selector:    "q8_matmul_vocab",
+			testName:    "TestVulkanQ8MatMulVocabHead",
+			oracleKind:  "cosine_max_abs",
+			caseCount:   1,
+			minCosine:   float64Ptr(0.9999),
+			maxAbsDelta: float64Ptr(1e-3),
+			emitterName: "formatVulkanQ8MatMulVocabParityOracle",
+			boundChecks: []string{"cos < 0.9999", "d > 1e-3"},
+			formatValid: func() ([]byte, error) {
+				return formatVulkanQ8MatMulVocabParityOracle(0.99995, 0.0005)
+			},
+			formatInvalid: func() ([]byte, error) {
+				return formatVulkanQ8MatMulVocabParityOracle(0.9998, 0.0005)
+			},
+		},
+		{
+			selector:    "rmsnorm",
+			testName:    "TestVulkanRMSNormApprox",
+			oracleKind:  "max_abs",
+			caseCount:   1,
+			maxAbsDelta: float64Ptr(1e-3),
+			emitterName: "formatVulkanRMSNormParityOracle",
+			boundChecks: []string{"d > 1e-3"},
+			formatValid: func() ([]byte, error) {
+				return formatVulkanRMSNormParityOracle(0.0005)
+			},
+			formatInvalid: func() ([]byte, error) {
+				return formatVulkanRMSNormParityOracle(0.002)
+			},
+		},
+		{
+			selector:                   "rmsnorm_matmul",
+			testName:                   "TestVulkanRMSNormMatMulApprox",
+			oracleKind:                 "cosine_max_abs",
+			caseCount:                  1,
+			minCosine:                  float64Ptr(0.9999),
+			maxAbsDelta:                float64Ptr(1e-2),
+			requireSourceMutationCheck: true,
+			maxSourceDelta:             float64Ptr(0.0),
+			emitterName:                "formatVulkanRMSNormMatMulParityOracle",
+			boundChecks:                []string{"cos < 0.9999", "d > 1e-2", "srcD != 0"},
+			formatValid: func() ([]byte, error) {
+				return formatVulkanRMSNormMatMulParityOracle(0.99995, 0.005, 0.0)
+			},
+			formatInvalid: func() ([]byte, error) {
+				return formatVulkanRMSNormMatMulParityOracle(0.99995, 0.005, 0.001)
+			},
+		},
+		{
+			selector:                   "rmsnorm_matmul2",
+			testName:                   "TestVulkanRMSNormMatMul2Approx",
+			oracleKind:                 "cosine_max_abs",
+			caseCount:                  2,
+			minCosine:                  float64Ptr(0.9999),
+			maxAbsDelta:                float64Ptr(1e-2),
+			requireSourceMutationCheck: true,
+			maxSourceDelta:             float64Ptr(0.0),
+			emitterName:                "formatVulkanRMSNormMatMul2ParityOracle",
+			boundChecks:                []string{"cos < 0.9999", "d > 1e-2", "srcD > 0"},
+			formatValid: func() ([]byte, error) {
+				return formatVulkanRMSNormMatMul2ParityOracle(0.99995, 0.005, 0.0, 2)
+			},
+			formatInvalid: func() ([]byte, error) {
+				return formatVulkanRMSNormMatMul2ParityOracle(0.9998, 0.005, 0.0, 2)
+			},
+		},
+		{
+			selector:                   "rmsnorm_matmul3",
+			testName:                   "TestVulkanRMSNormMatMul3Approx",
+			oracleKind:                 "cosine_max_abs",
+			caseCount:                  3,
+			minCosine:                  float64Ptr(0.9999),
+			maxAbsDelta:                float64Ptr(1e-2),
+			requireSourceMutationCheck: true,
+			maxSourceDelta:             float64Ptr(0.0),
+			emitterName:                "formatVulkanRMSNormMatMul3ParityOracle",
+			boundChecks:                []string{"cos < 0.9999", "d > 1e-2", "srcD > 0"},
+			formatValid: func() ([]byte, error) {
+				return formatVulkanRMSNormMatMul3ParityOracle(0.99995, 0.005, 0.0, 3)
+			},
+			formatInvalid: func() ([]byte, error) {
+				return formatVulkanRMSNormMatMul3ParityOracle(0.99995, 0.005, 0.001, 3)
+			},
+		},
+		{
+			selector:    "swiglu",
+			testName:    "TestVulkanSwiGLUApprox",
+			oracleKind:  "max_abs",
+			caseCount:   1,
+			maxAbsDelta: float64Ptr(1e-3),
+			emitterName: "formatVulkanSwiGLUParityOracle",
+			boundChecks: []string{"d > 1e-3"},
+			formatValid: func() ([]byte, error) {
+				return formatVulkanSwiGLUParityOracle(0.0005)
+			},
+			formatInvalid: func() ([]byte, error) {
+				return formatVulkanSwiGLUParityOracle(0.002)
+			},
+		},
+		{
+			selector:    "swiglu_matmul_add",
+			testName:    "TestVulkanSwiGLUMatMulAddInPlaceApprox",
+			oracleKind:  "cosine_max_abs",
+			caseCount:   1,
+			minCosine:   float64Ptr(0.9999),
+			maxAbsDelta: float64Ptr(1e-2),
+			emitterName: "formatVulkanSwiGLUMatMulAddParityOracle",
+			boundChecks: []string{"cos < 0.9999", "d > 1e-2"},
+			formatValid: func() ([]byte, error) {
+				return formatVulkanSwiGLUMatMulAddParityOracle(0.99995, 0.005)
+			},
+			formatInvalid: func() ([]byte, error) {
+				return formatVulkanSwiGLUMatMulAddParityOracle(0.9998, 0.005)
+			},
+		},
+		{
+			selector:                   "rope",
+			testName:                   "TestVulkanRoPEApprox",
+			oracleKind:                 "max_abs",
+			caseCount:                  1,
+			maxAbsDelta:                float64Ptr(1e-3),
+			requireSourceMutationCheck: true,
+			maxSourceDelta:             float64Ptr(0.0),
+			emitterName:                "formatVulkanRoPEParityOracle",
+			boundChecks:                []string{"d > 1e-3", "srcD > 0"},
+			formatValid: func() ([]byte, error) {
+				return formatVulkanRoPEParityOracle(0.0005, 0.0)
+			},
+			formatInvalid: func() ([]byte, error) {
+				return formatVulkanRoPEParityOracle(0.0005, 0.001)
+			},
+		},
+		{
+			selector:    "attention",
+			testName:    "TestVulkanAttentionApprox",
+			oracleKind:  "cosine_max_abs",
+			caseCount:   1,
+			minCosine:   float64Ptr(0.999),
+			maxAbsDelta: float64Ptr(1e-2),
+			emitterName: "formatVulkanAttentionParityOracle",
+			boundChecks: []string{"cos < 0.999", "d > 1e-2"},
+			formatValid: func() ([]byte, error) {
+				return formatVulkanAttentionParityOracle(0.9995, 0.005)
+			},
+			formatInvalid: func() ([]byte, error) {
+				return formatVulkanAttentionParityOracle(0.998, 0.005)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.selector, func(t *testing.T) {
+			rawValid, err := tc.formatValid()
+			if err != nil {
+				t.Fatalf("formatValid failed: %v", err)
+			}
+			var ev vulkanCoreParityOracleEvent
+			if err := json.Unmarshal(rawValid, &ev); err != nil {
+				t.Fatalf("unmarshal valid event: %v", err)
+			}
+			if ev.Schema != "fak.strix.subkernel-parity/v1" {
+				t.Errorf("schema = %q, want %q", ev.Schema, "fak.strix.subkernel-parity/v1")
+			}
+			if ev.Selector != tc.selector {
+				t.Errorf("selector = %q, want %q", ev.Selector, tc.selector)
+			}
+			if ev.TestName != tc.testName {
+				t.Errorf("test_name = %q, want %q", ev.TestName, tc.testName)
+			}
+			if ev.OracleKind != tc.oracleKind {
+				t.Errorf("oracle_kind = %q, want %q", ev.OracleKind, tc.oracleKind)
+			}
+			if ev.Engine != "fak-native/vulkan" {
+				t.Errorf("engine = %q, want %q", ev.Engine, "fak-native/vulkan")
+			}
+			if !ev.DeviceObserved {
+				t.Errorf("device_observed must be true")
+			}
+			if ev.CaseCount != tc.caseCount {
+				t.Errorf("case_count = %d, want %d", ev.CaseCount, tc.caseCount)
+			}
+			if !ev.Passed {
+				t.Errorf("passed must be true for valid metrics")
+			}
+			if tc.minCosine != nil {
+				if ev.Bounds.MinCosine == nil || *ev.Bounds.MinCosine != *tc.minCosine {
+					t.Errorf("bounds.min_cosine = %v, want %v", ev.Bounds.MinCosine, *tc.minCosine)
+				}
+				if ev.Observed.Cosine == nil || *ev.Observed.Cosine < *tc.minCosine {
+					t.Errorf("observed.cosine = %v, want >= %v", ev.Observed.Cosine, *tc.minCosine)
+				}
+			}
+			if tc.maxAbsDelta != nil {
+				if ev.Bounds.MaxAbsDelta == nil || *ev.Bounds.MaxAbsDelta != *tc.maxAbsDelta {
+					t.Errorf("bounds.max_abs_delta = %v, want %v", ev.Bounds.MaxAbsDelta, *tc.maxAbsDelta)
+				}
+				if ev.Observed.MaxAbsDelta == nil || *ev.Observed.MaxAbsDelta > *tc.maxAbsDelta {
+					t.Errorf("observed.max_abs_delta = %v, want <= %v", ev.Observed.MaxAbsDelta, *tc.maxAbsDelta)
+				}
+			}
+			if tc.requireSourceMutationCheck {
+				if ev.Bounds.RequireSourceMutationCheck == nil || !*ev.Bounds.RequireSourceMutationCheck {
+					t.Errorf("bounds.require_source_mutation_check must be true")
+				}
+				if ev.Bounds.MaxSourceDelta == nil || *ev.Bounds.MaxSourceDelta != *tc.maxSourceDelta {
+					t.Errorf("bounds.max_source_delta = %v, want %v", ev.Bounds.MaxSourceDelta, *tc.maxSourceDelta)
+				}
+				if ev.Observed.MaxSourceDelta == nil || *ev.Observed.MaxSourceDelta > *tc.maxSourceDelta {
+					t.Errorf("observed.max_source_delta = %v, want <= %v", ev.Observed.MaxSourceDelta, *tc.maxSourceDelta)
+				}
+			}
+
+			rawInvalid, err := tc.formatInvalid()
+			if err != nil {
+				t.Fatalf("formatInvalid failed: %v", err)
+			}
+			var evInv vulkanCoreParityOracleEvent
+			if err := json.Unmarshal(rawInvalid, &evInv); err != nil {
+				t.Fatalf("unmarshal invalid event: %v", err)
+			}
+			if evInv.Passed {
+				t.Errorf("passed must be false for out-of-bound metrics")
+			}
+		})
+	}
+
+	t.Run("source_contract", func(t *testing.T) {
+		srcBytes, err := os.ReadFile("vulkan_test.go")
+		if err != nil {
+			srcBytes, err = os.ReadFile(filepath.Join("internal", "compute", "vulkan_test.go"))
+		}
+		if err != nil {
+			t.Fatalf("reading vulkan_test.go: %v", err)
+		}
+		src := string(srcBytes)
+
+		for _, tc := range cases {
+			fnHeader := "func " + tc.testName + "(t *testing.T) {"
+			idx := strings.Index(src, fnHeader)
+			if idx < 0 {
+				t.Errorf("missing function %s in vulkan_test.go", tc.testName)
+				continue
+			}
+			body := src[idx:]
+			if nextFn := strings.Index(body[len(fnHeader):], "\nfunc "); nextFn >= 0 {
+				body = body[:len(fnHeader)+nextFn]
+			}
+
+			if count := strings.Count(body, tc.emitterName); count != 1 {
+				t.Errorf("%s contains %d emitter calls to %s (want 1)", tc.testName, count, tc.emitterName)
+			}
+			if !strings.Contains(body, "t.Logf(\"%s\", oracleJSON)") {
+				t.Errorf("%s missing t.Logf(\"%%s\", oracleJSON)", tc.testName)
+			}
+			for _, bound := range tc.boundChecks {
+				if !strings.Contains(body, bound) {
+					t.Errorf("%s missing assertion bound check %q", tc.testName, bound)
+				}
+			}
+		}
 	})
 }
