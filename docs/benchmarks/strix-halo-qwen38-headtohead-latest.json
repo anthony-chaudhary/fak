@@ -1,0 +1,143 @@
+{
+  "schema": "fak.strix.qwen38_headtohead/v1",
+  "timestamp": "2026-09-08T04:15:00Z",
+  "issue": 12098,
+  "lane": "strix-qwen38-headtohead",
+  "verdict": "NOT_COMPARABLE",
+  "hardware_validation": "PENDING",
+  "classification": {
+    "portfolio_tier": 2,
+    "centrality": "Core",
+    "p1": "advanced - prove or falsify exceeds known comparison points by making fak and a pinned reference execute the same token-level workload on the same device",
+    "p2": "preserved - reject separate HTTP/chat defaults or published best runs that conflate tokenizer, template, cache, speculation, and machine effects",
+    "p3": "preserved - run the shipped AMD scoreboard with the #9883 token packet and #12096 receipt",
+    "p4": "advanced - mismatched or quality-incomplete rows remain NOT_COMPARABLE and emit no ratio"
+  },
+  "target": {
+    "mode": "ssh",
+    "host": "strix1",
+    "reachable": true,
+    "cpu_model": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "gpu_name": "AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+    "target_isa": "gfx1151",
+    "compute_units": 40,
+    "total_ram_bytes": 67028504576,
+    "uma_buffer_bytes": 58985084026,
+    "power_dpm_level": "manual",
+    "lockup_timeout": -1,
+    "vulkan_icd": "/usr/share/vulkan/icd.d/radeon_icd.json",
+    "roundtrip_latency_ms": 431.7988,
+    "discovered_at": "2026-09-08T04:03:22Z"
+  },
+  "physical_witness": {
+    "lease_mode": "shared",
+    "lease_path": "/tmp/fak-gpu.lease",
+    "command": "fak-dev amd-strix-validate --subkernels=all --ablate=all --json",
+    "built_executable": "/usr/local/bin/fak",
+    "built_executable_sha256": "ba4c3455d81da2eefde29f2572baa8ede55e97119d4b43d9a48181a3e0b47773",
+    "built_source_revision": "fdf3597a11ba+uncommitted",
+    "subkernels_total": 21,
+    "subkernels_passed": 21,
+    "status": "PASS",
+    "active_service": {
+      "unit": "fak.service",
+      "pid": 149670,
+      "status": "active (running)",
+      "command": "/usr/local/bin/fak serve --config /etc/fak/config.toml --engine inkernel --backend vulkan --gguf /var/lib/fak/models/Qwen3.8-27B-Q4_K_M.gguf --model Qwen3.8-27B-Q4_K_M",
+      "memory_rss_bytes": 30815160000,
+      "live_inference_witness": {
+        "id": "chatcmpl-fak-1788840337978088257",
+        "model": "Qwen3.8-27B-Q4_K_M",
+        "prompt_tokens": 16,
+        "completion_tokens": 5,
+        "total_tokens": 21
+      }
+    }
+  },
+  "prompt_token_packet": {
+    "schema": "fak.qwen38.prompt-token-packet.v1",
+    "packet_id": "strix-halo-qwen38-27b-q4km-c1",
+    "artifact_sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "tokenizer_identity": "Qwen/Qwen2.5-Coder-7B-Instruct",
+    "tokenizer_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "prompt_token_ids": [151644, 872, 198, 2610, 525, 264, 10925, 13, 151645, 198],
+    "stop_tokens": ["<|im_end|>", "<|endoftext|>"],
+    "stop_token_ids": [151645, 151643],
+    "context_budget": {
+      "context_tokens": 32768,
+      "context_budget_bytes": 34359738368
+    },
+    "generation_controls": {
+      "temperature": 0.0,
+      "top_p": 1.0,
+      "top_k": 1,
+      "max_output_tokens": 128,
+      "stop_tokens": ["<|im_end|>", "<|endoftext|>"],
+      "stop_token_ids": [151645, 151643]
+    },
+    "packet_digest": "f97bd502f5120620f5ec2b82f43921ebbb7d1c2988c5b09dd2ea5f53bf58b6ec"
+  },
+  "amd_scoreboard": {
+    "schema": "fak.qwen38.amd-scoreboard-report.v1",
+    "verdict": "not-comparable",
+    "comparable": false,
+    "reasons": [
+      "candidate-three-trials-required",
+      "reference-identity-incomplete",
+      "reference-memory-evidence-missing",
+      "reference-three-trials-required"
+    ],
+    "candidate": {
+      "name": "fak",
+      "engine": "fak-native",
+      "backend": "vulkan",
+      "median_cold_setup_seconds": 0,
+      "median_prefill_tokens_per_second": 0,
+      "median_warm_decode_tokens_per_second": 0,
+      "peak_rss_bytes": 30815160000,
+      "peak_vram_bytes": 30815160000,
+      "resident_model_bytes": 17179869184
+    },
+    "reference": {
+      "name": "llama.cpp",
+      "engine": "llama.cpp",
+      "backend": "vulkan",
+      "median_cold_setup_seconds": 0,
+      "median_prefill_tokens_per_second": 0,
+      "median_warm_decode_tokens_per_second": 0,
+      "peak_rss_bytes": 0,
+      "peak_vram_bytes": 0,
+      "resident_model_bytes": 0
+    }
+  },
+  "typed_blockers": {
+    "PINNED_COMPARATOR_UNAVAILABLE": "No pinned llama.cpp Vulkan/RADV build is installed on the appliance (which llama-bench returned empty).",
+    "SERVICE_PROTECTION_LOCK": "fak.service (PID 149670) is actively serving Qwen3.8-27B-Q4_K_M.gguf under 28.7GB memory; stopping or restarting without ownership handoff is prohibited.",
+    "DEPENDENCY_OPEN_12096": "Issue #12096 (canonical Qwen3.8 Vulkan decode receipts from raw-decode) is open.",
+    "DEPENDENCY_OPEN_9883": "Issue #9883 (cross-engine prompt-token packet attestation) live appliance execution pending comparator deployment."
+  },
+  "target_concurrency_matrix": {
+    "c1": {
+      "concurrency": 1,
+      "external_challenge_tok_per_sec": 16.65,
+      "notes": "Published dense Qwen3.8-27B Vulkan bar (128GB envelope)"
+    },
+    "c4": {
+      "concurrency": 4,
+      "external_challenge_tok_per_sec": 24.13,
+      "notes": "Published dense Qwen3.8-27B Vulkan bar (128GB envelope)"
+    },
+    "c8": {
+      "concurrency": 8,
+      "external_challenge_tok_per_sec": 29.42,
+      "notes": "Published dense Qwen3.8-27B Vulkan bar (128GB envelope)"
+    }
+  },
+  "remediation_and_runbook": [
+    "1. Pinned reference deployment: Build or install pinned llama.cpp Vulkan binary on strix1 appliance (/usr/local/bin/llama-bench) with exact build flags GGML_VULKAN=ON.",
+    "2. Maintenance window handoff: Schedule graceful quiescence of fak.service (PID 149670) so 64GB UMA memory is uncontended for full-model trials.",
+    "3. Acquire exclusive appliance lease: flock -w 30 -x /tmp/fak-gpu.lease across the entire interleaved A/B benchmark execution.",
+    "4. Interleaved trials: Execute >=5 measured trials per cell across c in {1, 4, 8} alternating fak-native and llama.cpp with identical #9883 prompt packet.",
+    "5. Independent verdict: Run qwen38campaign --amd-scoreboard --config <input> --report docs/benchmarks/strix-halo-qwen38-headtohead-latest.json to evaluate ratio once both arms satisfy statistical CV <= 5% and quality gates."
+  ]
+}
