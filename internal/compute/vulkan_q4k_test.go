@@ -1,13 +1,46 @@
-//go:build vulkan && (windows || linux) && cgo
-
 package compute
 
 import (
 	"encoding/json"
 	"math"
 	"math/rand"
+	"os"
+	"strings"
 	"testing"
 )
+
+type q4FusedBackend interface {
+	Backend
+	RMSNormMatMul2(Tensor, Tensor, Tensor, Tensor, float32) (Tensor, Tensor)
+	SwiGLUMatMulAddInPlace(Tensor, Tensor, Tensor, Tensor)
+}
+
+func q4Device(t *testing.T) Backend {
+	t.Helper()
+	be, ok := Lookup("vulkan")
+	if !ok {
+		if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
+			t.Fatal("required Vulkan device is not registered")
+		}
+		t.Skip("Vulkan backend unavailable")
+	}
+	if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
+		if expected := os.Getenv("FAK_VULKAN_EXPECT_DEVICE"); expected != "" && !strings.Contains(strings.ToLower(be.Tier()), strings.ToLower(expected)) {
+			t.Fatalf("device %q does not match required %q", be.Tier(), expected)
+		}
+	}
+	return be
+}
+
+func q4FusedDevice(t *testing.T) q4FusedBackend {
+	t.Helper()
+	be := q4Device(t)
+	v, ok := be.(q4FusedBackend)
+	if !ok {
+		t.Fatal("Vulkan backend lacks fused operations")
+	}
+	return v
+}
 
 type q4kParityOracleEvent struct {
 	Schema         string                  `json:"schema"`
@@ -56,10 +89,7 @@ func formatQ4KMatMulParityOracle(cosine float64, argmaxExact bool) ([]byte, erro
 }
 
 func TestVulkanQ4KMatMulMatchesCPUReference(t *testing.T) {
-	v, ok := Pick("vulkan").(*vulkanBackend)
-	if !ok {
-		t.Skip("Vulkan backend unavailable")
-	}
+	v := q4Device(t)
 	const out, in = 12, 768
 	raw := make([]byte, out*(in/q4kSuper)*q4kSuperBlock)
 	rng := rand.New(rand.NewSource(9715))
@@ -191,10 +221,7 @@ func TestStrixQuantParityEmitterContract(t *testing.T) {
 }
 
 func TestVulkanQ4KBatchedMatMulMultipleTokensMatchesCPUReference(t *testing.T) {
-	v, ok := Pick("vulkan").(*vulkanBackend)
-	if !ok {
-		t.Skip("Vulkan backend unavailable")
-	}
+	v := q4Device(t)
 	// out deliberately crosses a 64-lane workgroup boundary. With P > 1 the shader
 	// must recover both token and row from the flattened X dispatch index.
 	const out, in, P = 70, 768, 3
@@ -240,10 +267,7 @@ func TestVulkanQ4KBatchedMatMulMultipleTokensMatchesCPUReference(t *testing.T) {
 }
 
 func TestVulkanQ4KRMSNormMatMul2MatchesCPUReference(t *testing.T) {
-	v, ok := Pick("vulkan").(*vulkanBackend)
-	if !ok {
-		t.Skip("Vulkan backend unavailable")
-	}
+	v := q4FusedDevice(t)
 	const out0, out1, in = 12, 16, 768
 	rng := rand.New(rand.NewSource(9716))
 	newWeight := func(out int) Tensor {
@@ -287,10 +311,7 @@ func TestVulkanQ4KRMSNormMatMul2MatchesCPUReference(t *testing.T) {
 	}
 }
 func TestVulkanQ4KSwiGLUMatMulAddInPlaceMatchesCPUReference(t *testing.T) {
-	v, ok := Pick("vulkan").(*vulkanBackend)
-	if !ok {
-		t.Skip("Vulkan backend unavailable")
-	}
+	v := q4FusedDevice(t)
 	const out, in = 16, 768
 	rng := rand.New(rand.NewSource(9717))
 	raw := make([]byte, out*(in/q4kSuper)*q4kSuperBlock)

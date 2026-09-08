@@ -489,7 +489,15 @@ func formatQ2KMatMulParityOracle(cosine float64, argmaxExact bool) ([]byte, erro
 func TestVulkanQ2KMatMulMatchesCPUReference(t *testing.T) {
 	v, ok := Lookup("vulkan")
 	if !ok {
+		if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
+			t.Fatal("required Vulkan device is not registered")
+		}
 		t.Skip("Vulkan backend unavailable")
+	}
+	if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
+		if expected := os.Getenv("FAK_VULKAN_EXPECT_DEVICE"); expected != "" && !strings.Contains(strings.ToLower(v.Tier()), strings.ToLower(expected)) {
+			t.Fatalf("device %q does not match required %q", v.Tier(), expected)
+		}
 	}
 	const out, in = 8, 512
 	raw := make([]byte, out*(in/q2kSuper)*q2kSuperBlock)
