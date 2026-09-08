@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -189,7 +190,7 @@ func TestRawDecodePhysicalReceiptLeavesIncompleteExecutableTupleUnavailable(t *t
 	execution := rawdecode.Execution{
 		PromptTokenIDs: []int{1}, ContextLimit: 8, GeneratedLimit: 1, FiniteLogits: true,
 	}
-	attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+	attempt := rawDecodePhysicalReceipt(execution)
 	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
 		t.Fatalf("binary-only observation became creditable: %+v", attempt)
 	}
@@ -209,7 +210,7 @@ func TestRawDecodePhysicalReceiptMapsExecutableProvenance(t *testing.T) {
 		setRawDecodeExecutableProvenanceForTest(t, rawDecodeExecutableProvenance{
 			revision: revision, modified: true, binarySHA256: binarySHA256,
 		}, nil)
-		attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+		attempt := rawDecodePhysicalReceipt(execution)
 		if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
 			t.Fatalf("partial source tuple became creditable: %+v", attempt)
 		}
@@ -226,7 +227,7 @@ func TestRawDecodePhysicalReceiptMapsExecutableProvenance(t *testing.T) {
 		setRawDecodeExecutableProvenanceForTest(t, rawDecodeExecutableProvenance{
 			revision: revision, modified: true, binarySHA256: binarySHA256,
 		}, errors.New("observation failed"))
-		attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+		attempt := rawDecodePhysicalReceipt(execution)
 		if attempt.Observed.Source != (compute.Qwen38VulkanSourceIdentity{}) || attempt.CreditEligible || attempt.Receipt != nil {
 			t.Fatalf("failed executable observation escaped atomically: %+v", attempt)
 		}
@@ -234,7 +235,7 @@ func TestRawDecodePhysicalReceiptMapsExecutableProvenance(t *testing.T) {
 
 	t.Run("incomplete success", func(t *testing.T) {
 		setRawDecodeExecutableProvenanceForTest(t, rawDecodeExecutableProvenance{revision: revision}, nil)
-		attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+		attempt := rawDecodePhysicalReceipt(execution)
 		if attempt.Observed.Source != (compute.Qwen38VulkanSourceIdentity{}) || attempt.CreditEligible || attempt.Receipt != nil {
 			t.Fatalf("incomplete executable observation escaped atomically: %+v", attempt)
 		}
@@ -256,7 +257,7 @@ func TestRawDecodePhysicalReceiptCarriesOnlyCompleteGGUFObservation(t *testing.T
 		GeneratedLimit:        1,
 		FiniteLogits:          true,
 	}
-	attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+	attempt := rawDecodePhysicalReceipt(execution)
 	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
 		t.Fatalf("software-only model provenance became creditable: %+v", attempt)
 	}
@@ -282,7 +283,7 @@ func TestRawDecodePhysicalReceiptCarriesOnlyCompleteGGUFObservation(t *testing.T
 		t.Run("missing "+missing.name, func(t *testing.T) {
 			incomplete := execution
 			missing.clear(&incomplete)
-			incompleteAttempt := rawDecodePhysicalReceipt(incomplete, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+			incompleteAttempt := rawDecodePhysicalReceipt(incomplete)
 			if incompleteAttempt.Status != "UNAVAILABLE" || incompleteAttempt.Observed.Model != (compute.Qwen38VulkanModelIdentity{}) || incompleteAttempt.CreditEligible || incompleteAttempt.Receipt != nil {
 				t.Fatalf("partial GGUF provenance escaped as canonical model identity: %+v", incompleteAttempt)
 			}
@@ -321,7 +322,7 @@ func TestRawDecodeVulkanNameDoesNotClaimPhysicalEngineIdentity(t *testing.T) {
 		Backend:        rawdecode.BackendObservation{Selected: compute.Qwen38VulkanDecodeBackend},
 		PromptTokenIDs: []int{1}, ContextLimit: 8, GeneratedLimit: 1, FiniteLogits: true,
 	}
-	attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+	attempt := rawDecodePhysicalReceipt(execution)
 	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
 		t.Fatalf("named test backend became creditable: %+v", attempt)
 	}
@@ -347,7 +348,7 @@ func TestRawDecodePhysicalReceiptCarriesBackendObservationWithoutPromoting(t *te
 		ContextLimit: 8, GeneratedLimit: 1, FiniteLogits: true,
 		Runs: []rawdecode.Run{{BackendExecution: &backendExecution}},
 	}
-	attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+	attempt := rawDecodePhysicalReceipt(execution)
 	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
 		t.Fatalf("partial backend observation became creditable: %+v", attempt)
 	}
@@ -372,7 +373,7 @@ func TestRawDecodePhysicalReceiptCarriesBackendObservationWithoutPromoting(t *te
 			observationCopy := backendExecution
 			candidate.Runs[0].BackendExecution = &observationCopy
 			mutate(&candidate)
-			got := rawDecodePhysicalReceipt(candidate, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+			got := rawDecodePhysicalReceipt(candidate)
 			if got.Status != "UNAVAILABLE" || got.CreditEligible || got.Receipt != nil || len(got.BackendExecutions) != 0 || got.Observed.Engine.FallbackCount != nil {
 				t.Fatalf("invalid backend observation was exposed or promoted: %+v", got)
 			}
@@ -401,7 +402,7 @@ func TestRawDecodePhysicalReceiptSeparatesNativeRuntimeFromVulkanAPI(t *testing.
 		Runs: []rawdecode.Run{{BackendExecution: &backendExecution, HostEnvironment: &host}},
 	}
 
-	attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+	attempt := rawDecodePhysicalReceipt(execution)
 	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
 		t.Fatalf("incomplete physical identity became creditable: %+v", attempt)
 	}
@@ -442,12 +443,7 @@ func TestRawDecodePhysicalReceiptMapsOnlyCrossBoundStableHostEnvironment(t *test
 			PromptTokenIDs: []int{1}, ContextLimit: 8, GeneratedLimit: 1, FiniteLogits: true, Runs: runs,
 		}
 	}
-	repOutputs := []rawRepOutput{
-		{generatedTokens: []int{2}, prefillDur: time.Nanosecond},
-		{generatedTokens: []int{2}, prefillDur: time.Nanosecond},
-	}
-
-	attempt := rawDecodePhysicalReceipt(newExecution(), repOutputs)
+	attempt := rawDecodePhysicalReceipt(newExecution())
 	want := compute.Qwen38VulkanDeviceIdentity{
 		OS: baseHost.OS, Arch: baseHost.Arch, Kernel: baseHost.Kernel, Name: baseHost.Device,
 		MesaVersion: baseHost.MesaVersion, VulkanVersion: identity.Runtime, Firmware: baseHost.Firmware,
@@ -467,7 +463,7 @@ func TestRawDecodePhysicalReceiptMapsOnlyCrossBoundStableHostEnvironment(t *test
 		t.Run(name, func(t *testing.T) {
 			execution := newExecution()
 			mutate(&execution)
-			got := rawDecodePhysicalReceipt(execution, repOutputs)
+			got := rawDecodePhysicalReceipt(execution)
 			if got.Status != "UNAVAILABLE" || got.CreditEligible || got.Receipt != nil || got.Observed.Device != (compute.Qwen38VulkanDeviceIdentity{}) {
 				t.Fatalf("invalid host tuple was mapped or promoted: %+v", got)
 			}
@@ -779,6 +775,202 @@ func TestRawDecodeEOSHandlingAndIgnoreEOS(t *testing.T) {
 	}
 	if rep3b["actual_step_calls"] != 4 {
 		t.Errorf("Case 3b: expected 4 actual_step_calls, got %v", rep3b["actual_step_calls"])
+	}
+}
+
+func TestRawDecodePhysicalReceiptRejectsMutatedIgnoreEOSAlias(t *testing.T) {
+	promptIDs := []int{7, 8, 9}
+	m := model.NewSynthetic(syntheticTestConfig())
+	execution, err := rawdecode.ExecuteModel(rawdecode.Request{
+		PromptTokenIDs: promptIDs, ContextLimit: 8, GeneratedTokenLimit: 1, Repetitions: 1, IgnoreEOS: true,
+	}, m, nil)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	execution.IgnoreEOS = false
+	attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{
+		generatedTokens: execution.Runs[0].GeneratedTokens,
+		eosStopped:      execution.Runs[0].EOSStopped,
+	}})
+	if len(attempt.Observed.Runs) != 0 {
+		t.Fatalf("mutated IgnoreEOS alias retained canonical generation evidence: %+v", attempt.Observed.Runs)
+	}
+}
+
+func TestRawDecodeEOSObservationIsRunnerSealedAndExactly128(t *testing.T) {
+	promptIDs := []int{7, 8, 9}
+	cfg := syntheticTestConfig()
+	m := model.NewSynthetic(cfg)
+
+	probe, err := rawdecode.ExecuteModel(rawdecode.Request{
+		PromptTokenIDs: promptIDs, ContextLimit: 132, GeneratedTokenLimit: 1, Repetitions: 1, IgnoreEOS: true,
+	}, m, nil)
+	if err != nil {
+		t.Fatalf("probe execution: %v", err)
+	}
+	firstToken := probe.Runs[0].PrefillOutputID
+	m.Cfg.EOSTokenID = firstToken
+
+	for _, tc := range []struct {
+		name       string
+		ignoreEOS  bool
+		wantTokens int
+		wantStop   bool
+	}{
+		{name: "ignore", ignoreEOS: true, wantTokens: 128, wantStop: false},
+		{name: "stop", ignoreEOS: false, wantTokens: 1, wantStop: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			execution, execErr := rawdecode.ExecuteModel(rawdecode.Request{
+				PromptTokenIDs: promptIDs, ContextLimit: 132, GeneratedTokenLimit: 128, Repetitions: 2, IgnoreEOS: tc.ignoreEOS,
+			}, m, nil)
+			if execErr != nil {
+				t.Fatalf("execute: %v", execErr)
+			}
+			observation, observationAvailable := execution.GenerationObservation(0)
+			if !observationAvailable {
+				t.Fatal("real decode loop did not seal a generation observation")
+			}
+			ignoreEOS, ok := observation.IgnoreEOS()
+			if !ok || ignoreEOS != tc.ignoreEOS {
+				t.Fatalf("ignore-EOS observation=(%v,%v), want (%v,true)", ignoreEOS, ok, tc.ignoreEOS)
+			}
+			eosStopped, ok := observation.EOSStopped()
+			if !ok || eosStopped != tc.wantStop {
+				t.Fatalf("EOS-stopped observation=(%v,%v), want (%v,true)", eosStopped, ok, tc.wantStop)
+			}
+			actual, ok := observation.ActualGeneratedTokens()
+			if !ok || actual != tc.wantTokens {
+				t.Fatalf("actual-generated observation=(%d,%v), want (%d,true)", actual, ok, tc.wantTokens)
+			}
+			ids, ok := observation.OutputTokenIDs()
+			if !ok || len(ids) != tc.wantTokens {
+				t.Fatalf("output-token observation len=%d available=%v, want %d,true", len(ids), ok, tc.wantTokens)
+			}
+			ids[0] = -1
+			freshIDs, _ := observation.OutputTokenIDs()
+			if freshIDs[0] == -1 {
+				t.Fatal("output-token getter exposed mutable observation storage")
+			}
+
+			attempt := rawDecodePhysicalReceipt(execution)
+			if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
+				t.Fatalf("software EOS observation gained physical or timing credit: %+v", attempt)
+			}
+			if len(attempt.Observed.Runs) != 2 {
+				t.Fatalf("canonical diagnostic run count=%d, want 2", len(attempt.Observed.Runs))
+			}
+			run := attempt.Observed.Runs[0]
+			if run.IgnoreEOS == nil || *run.IgnoreEOS != tc.ignoreEOS || run.EOSStopped == nil || *run.EOSStopped != tc.wantStop || run.ActualGeneratedTokens != tc.wantTokens || len(run.OutputTokenIDs) != tc.wantTokens {
+				t.Fatalf("canonical EOS observation mismatch: %+v", run)
+			}
+
+			assertUnavailableWithoutRuns := func(name string, candidate rawdecode.Execution) {
+				t.Helper()
+				candidateAttempt := rawDecodePhysicalReceipt(candidate)
+				if candidateAttempt.Status != "UNAVAILABLE" || candidateAttempt.CreditEligible || candidateAttempt.Receipt != nil || len(candidateAttempt.Observed.Runs) != 0 {
+					t.Fatalf("%s retained canonical generation evidence: %+v", name, candidateAttempt)
+				}
+			}
+
+			ignoreAlias := execution
+			ignoreAlias.IgnoreEOS = !tc.ignoreEOS
+			assertUnavailableWithoutRuns("IgnoreEOS alias mismatch", ignoreAlias)
+
+			stopAlias := execution
+			stopAlias.Runs = slices.Clone(execution.Runs)
+			stopAlias.Runs[0].EOSStopped = !tc.wantStop
+			assertUnavailableWithoutRuns("EOSStopped alias mismatch", stopAlias)
+
+			requestMutated := execution
+			requestMutated.ContextLimit++
+			assertUnavailableWithoutRuns("request binding mutation", requestMutated)
+
+			promptMutated := execution
+			promptMutated.PromptTokenIDs = slices.Clone(execution.PromptTokenIDs)
+			promptMutated.PromptTokenIDs[0]++
+			assertUnavailableWithoutRuns("prompt binding mutation", promptMutated)
+
+			for name, mutate := range map[string]func(*rawdecode.Execution){
+				"model name":       func(e *rawdecode.Execution) { e.ModelName += "-mutated" },
+				"artifact path":    func(e *rawdecode.Execution) { e.ArtifactPath = "mutated.gguf" },
+				"artifact digest":  func(e *rawdecode.Execution) { e.ArtifactSHA256 = strings.Repeat("a", 64) },
+				"tensor inventory": func(e *rawdecode.Execution) { e.TensorInventorySHA256 = strings.Repeat("b", 64) },
+				"tokenizer":        func(e *rawdecode.Execution) { e.TokenizerSHA256 = strings.Repeat("c", 64) },
+				"template":         func(e *rawdecode.Execution) { e.TemplateSHA256 = strings.Repeat("d", 64) },
+				"quantization":     func(e *rawdecode.Execution) { e.Quantization = "mutated" },
+			} {
+				mutated := execution
+				mutate(&mutated)
+				assertUnavailableWithoutRuns("GGUF "+name+" mutation", mutated)
+			}
+
+			generatedAlias := execution
+			generatedAlias.Runs = slices.Clone(execution.Runs)
+			generatedAlias.Runs[0].GeneratedTokens = slices.Clone(execution.Runs[0].GeneratedTokens)
+			generatedAlias.Runs[0].GeneratedTokens[0] = (generatedAlias.Runs[0].GeneratedTokens[0] + 1) % cfg.VocabSize
+			assertUnavailableWithoutRuns("generated-token alias mismatch", generatedAlias)
+
+			prefillAlias := execution
+			prefillAlias.Runs = slices.Clone(execution.Runs)
+			prefillAlias.Runs[0].PrefillOutputID = (prefillAlias.Runs[0].PrefillOutputID + 1) % cfg.VocabSize
+			assertUnavailableWithoutRuns("prefill-token alias mismatch", prefillAlias)
+
+			if len(execution.Runs[0].StepTokens) > 0 {
+				stepTokenAlias := execution
+				stepTokenAlias.Runs = slices.Clone(execution.Runs)
+				stepTokenAlias.Runs[0].StepTokens = slices.Clone(execution.Runs[0].StepTokens)
+				stepTokenAlias.Runs[0].StepTokens[0] = (stepTokenAlias.Runs[0].StepTokens[0] + 1) % cfg.VocabSize
+				assertUnavailableWithoutRuns("step-token alias mismatch", stepTokenAlias)
+			}
+
+			stepAlias := execution
+			stepAlias.Runs = slices.Clone(execution.Runs)
+			stepAlias.Runs[0].Steps = slices.Clone(execution.Runs[0].Steps)
+			stepAlias.Runs[0].Steps[0].TokenID = (stepAlias.Runs[0].Steps[0].TokenID + 1) % cfg.VocabSize
+			assertUnavailableWithoutRuns("step record alias mismatch", stepAlias)
+
+			repetitionMismatch := execution
+			repetitionMismatch.Runs = slices.Clone(execution.Runs[:1])
+			assertUnavailableWithoutRuns("repetition mismatch", repetitionMismatch)
+
+			if !slices.Equal(execution.Runs[0].GeneratedTokens, execution.Runs[1].GeneratedTokens) {
+				t.Fatalf("permutation regression requires identical token aliases: run0=%v run1=%v", execution.Runs[0].GeneratedTokens, execution.Runs[1].GeneratedTokens)
+			}
+			permuted := execution
+			permuted.Runs = slices.Clone(execution.Runs)
+			permuted.Runs[0], permuted.Runs[1] = permuted.Runs[1], permuted.Runs[0]
+			assertUnavailableWithoutRuns("identical-token repetition permutation", permuted)
+
+			otherExecution, otherErr := rawdecode.ExecuteModel(rawdecode.Request{
+				PromptTokenIDs: promptIDs, ContextLimit: 132, GeneratedTokenLimit: 128, Repetitions: 2, IgnoreEOS: tc.ignoreEOS,
+			}, m, nil)
+			if otherErr != nil {
+				t.Fatalf("second execute: %v", otherErr)
+			}
+			transplanted := execution
+			transplanted.Runs = slices.Clone(execution.Runs)
+			transplanted.Runs[0] = otherExecution.Runs[0]
+			assertUnavailableWithoutRuns("cross-execution sealed Run transplant", transplanted)
+
+			forged := execution
+			forged.Runs = slices.Clone(execution.Runs)
+			forged.Runs[0] = rawdecode.Run{
+				PrefillOutputID: generatedAlias.Runs[0].PrefillOutputID,
+				GeneratedTokens: slices.Clone(execution.Runs[0].GeneratedTokens),
+				EOSStopped:      tc.wantStop,
+				Steps:           slices.Clone(execution.Runs[0].Steps),
+			}
+			assertUnavailableWithoutRuns("externally constructed Run", forged)
+
+			timingMutated := execution
+			timingMutated.Runs = slices.Clone(execution.Runs)
+			timingMutated.Runs[0].DecodeDuration += time.Second
+			timingAttempt := rawDecodePhysicalReceipt(timingMutated)
+			if timingAttempt.Status != "UNAVAILABLE" || timingAttempt.CreditEligible || timingAttempt.Receipt != nil {
+				t.Fatalf("mutable diagnostic timing gained physical credit: %+v", timingAttempt)
+			}
+		})
 	}
 }
 
