@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -217,6 +218,24 @@ type rawDecodePhysicalReceiptAttempt struct {
 	Receipt           *compute.Qwen38VulkanDecodeReceipt    `json:"receipt,omitempty"`
 }
 
+type rawDecodeExecutableProvenance struct {
+	revision     string
+	modified     bool
+	binarySHA256 string
+}
+
+var observeRawDecodeExecutableProvenance = func() (rawDecodeExecutableProvenance, error) {
+	observed, err := binstamp.CurrentExecutableProvenance()
+	if err != nil {
+		return rawDecodeExecutableProvenance{}, err
+	}
+	return rawDecodeExecutableProvenance{
+		revision:     observed.Revision(),
+		modified:     observed.Modified(),
+		binarySHA256: observed.BinarySHA256(),
+	}, nil
+}
+
 func rawDecodeInt32IDs(ids []int) ([]int32, error) {
 	out := make([]int32, len(ids))
 	for i, id := range ids {
@@ -268,9 +287,18 @@ func rawDecodePhysicalReceipt(execution rawdecode.Execution, repOutputs []rawRep
 		GeneratedTokenLimit: execution.GeneratedLimit,
 		FiniteLogits:        &finiteLogits,
 	}
+	if executable, err := observeRawDecodeExecutableProvenance(); err == nil &&
+		strings.TrimSpace(executable.revision) != "" && strings.TrimSpace(executable.binarySHA256) != "" {
+		modified := executable.modified
+		observed.Source = compute.Qwen38VulkanSourceIdentity{
+			GitCommit:    executable.revision,
+			BinarySHA256: executable.binarySHA256,
+			Dirty:        &modified,
+		}
+	}
 	// Source identity remains all-or-nothing. The executable observer must also
-	// prove vcs=git before its revision can populate GitCommit; until then this
-	// adapter leaves the entire source tuple unavailable.
+	// prove vcs=git before its revision can populate GitCommit. Source archive
+	// and diff identity remain unavailable until independently observed.
 	if strings.TrimSpace(execution.ModelName) != "" &&
 		strings.TrimSpace(execution.ArtifactPath) != "" &&
 		strings.TrimSpace(execution.ArtifactSHA256) != "" &&
