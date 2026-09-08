@@ -165,6 +165,7 @@ type DeviceFaultLatch struct {
 
 	mu           sync.Mutex
 	health       DeviceHealth
+	faultEpoch   uint64
 	faults       int
 	attempts     int
 	recoveries   int
@@ -174,6 +175,16 @@ type DeviceFaultLatch struct {
 	lastCode     int
 	seq          uint64
 	transitions  []DeviceFaultTransition
+	recovery     *deviceRecoveryAttempt
+}
+
+// deviceRecoveryAttempt is the single in-flight context reconstruction. Callers that arrive
+// while an owner is rebuilding join this attempt instead of tearing the same context down again.
+// Closing done publishes result to every waiter.
+type deviceRecoveryAttempt struct {
+	done    chan struct{}
+	result  error
+	waiters int
 }
 
 // NewDeviceFaultLatch builds a healthy latch for a named backend. maxAttempts bounds how many
@@ -223,6 +234,7 @@ func (l *DeviceFaultLatch) Observe(class DeviceFaultClass, site string, code int
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	from := l.health
+	l.faultEpoch++
 	l.faults++
 	l.lastClass, l.lastSite, l.lastCode = class, site, code
 	if l.health != DeviceUnrecoverable {
@@ -293,13 +305,21 @@ func (l *DeviceFaultLatch) Admit(site string) error {
 // still cannot serve: Admit keeps refusing regardless. Once the attempt budget is spent the
 // session becomes DeviceUnrecoverable and further calls refuse without invoking rebuild at all.
 //
-// Calling Reconstruct on a healthy session is a no-op that returns nil: recovery is idempotent,
-// so a racing second request does not tear down the context the first one just rebuilt.
+// Calling Reconstruct on a healthy session is a no-op that returns nil. Concurrent calls against
+// one poisoned session singleflight through one rebuild/validation attempt. A fault observed while
+// that attempt is in flight invalidates its success: only a recovery that began after the newest
+// fault may reopen serving.
 func (l *DeviceFaultLatch) Reconstruct(rebuild func() error, validate func() error) error {
 	if l == nil {
 		return nil
 	}
 	l.mu.Lock()
+	if active := l.recovery; active != nil {
+		active.waiters++
+		l.mu.Unlock()
+		<-active.done
+		return active.result
+	}
 	if !l.health.Refusing() {
 		l.mu.Unlock()
 		return nil
@@ -315,6 +335,9 @@ func (l *DeviceFaultLatch) Reconstruct(rebuild func() error, validate func() err
 	}
 	l.attempts++
 	attemptSite := l.lastSite
+	attemptEpoch := l.faultEpoch
+	attempt := &deviceRecoveryAttempt{done: make(chan struct{})}
+	l.recovery = attempt
 	l.mu.Unlock()
 
 	// rebuild/validate run OUTSIDE the lock: they tear down and re-create a device context,
@@ -323,12 +346,29 @@ func (l *DeviceFaultLatch) Reconstruct(rebuild func() error, validate func() err
 	// half-rebuilt context.
 	err := runDeviceRecoveryStep(rebuild)
 	if err == nil {
-		err = runDeviceRecoveryStep(validate)
+		l.mu.Lock()
+		stillCurrent := l.faultEpoch == attemptEpoch && l.health != DeviceUnrecoverable
+		l.mu.Unlock()
+		if stillCurrent {
+			err = runDeviceRecoveryStep(validate)
+		}
 	}
 
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	if err != nil {
+	var result error
+	switch {
+	case l.faultEpoch != attemptEpoch:
+		// This reconstruction predates the newest observed fault. Even if rebuild and
+		// validation succeeded, they are not evidence about the context after that fault.
+		if l.health != DeviceUnrecoverable {
+			if l.maxAttempts > 0 && l.attempts >= l.maxAttempts {
+				l.exhaustLocked()
+			} else {
+				l.record(l.health, l.health, l.lastClass, l.lastSite, l.lastCode)
+			}
+		}
+		result = l.faultErrorLocked(l.lastSite)
+	case err != nil:
 		// A failed reconstruction is itself fault evidence, but it must not consume the
 		// budget twice, so it records the edge without going through Observe.
 		l.lastSite = attemptSite
@@ -337,18 +377,25 @@ func (l *DeviceFaultLatch) Reconstruct(rebuild func() error, validate func() err
 		} else {
 			l.record(l.health, l.health, l.lastClass, attemptSite, l.lastCode)
 		}
-		return l.faultErrorLocked(attemptSite)
-	}
-	if l.health == DeviceUnrecoverable {
+		result = l.faultErrorLocked(attemptSite)
+	case l.health == DeviceUnrecoverable:
 		// A fault observed during the rebuild window exhausted the budget; the validated
 		// context cannot un-condemn a session another observation already gave up on.
-		return l.faultErrorLocked(attemptSite)
+		result = l.faultErrorLocked(attemptSite)
+	default:
+		from := l.health
+		l.health = DeviceHealthy
+		l.recoveries++
+		l.record(from, DeviceHealthy, "", attemptSite, 0)
 	}
-	from := l.health
-	l.health = DeviceHealthy
-	l.recoveries++
-	l.record(from, DeviceHealthy, "", attemptSite, 0)
-	return nil
+
+	// Publish before closing: a receive from done observes the immutable result. Clear the
+	// active slot under the same lock so a later call may start a fresh attempt if needed.
+	attempt.result = result
+	l.recovery = nil
+	close(attempt.done)
+	l.mu.Unlock()
+	return result
 }
 
 // runDeviceRecoveryStep runs one recovery closure, converting a panic into an error. The CUDA
