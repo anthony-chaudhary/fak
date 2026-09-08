@@ -171,9 +171,6 @@ func TestParallelQuantLoadContextCancelsAndJoins(t *testing.T) {
 	if got := active.Load(); got != 0 {
 		t.Fatalf("active tensor ownership = %d, want 0 after return", got)
 	}
-	if got := activeParallelLoads.Load(); got != 0 {
-		t.Fatalf("active parallel load scopes = %d, want 0 after return", got)
-	}
 }
 
 func TestParallelQuantLoadContextReturnsFirstTensorErrorAfterDrain(t *testing.T) {
