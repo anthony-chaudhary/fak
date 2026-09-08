@@ -52,7 +52,7 @@ func initRealGitRepo(t *testing.T) string {
 // — never a second OK. The board cannot double-claim a contended lane even with no coordinating
 // dispatcher, because git's update-ref old-value CAS is the arbiter.
 func TestConcurrentClaimNoDoubleClaim(t *testing.T) {
-	s := NewWithRunner(gitRunner, initRealGitRepo(t))
+	s := NewInDir(initRealGitRepo(t))
 	now := time.Unix(1_000_000, 0) // fixed instant: TTL 300s never expires mid-race
 
 	const workers = 12
@@ -126,7 +126,7 @@ func TestConcurrentClaimNoDoubleClaim(t *testing.T) {
 // lacks: fak claims disjoint lanes fully concurrently because each lane is an independent git
 // ref, not a row in one WAL-contended SQLite file.
 func TestConcurrentClaimDisjointLanesNoSingleWriter(t *testing.T) {
-	s := NewWithRunner(gitRunner, initRealGitRepo(t))
+	s := NewInDir(initRealGitRepo(t))
 	now := time.Unix(1_000_000, 0)
 
 	const workers = 12

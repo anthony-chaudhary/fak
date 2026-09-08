@@ -116,19 +116,181 @@ func (f *fakeGit) run(ctx context.Context, dir string, args ...string) (string, 
 }
 
 // runStdin models `git update-ref --stdin`: it records the argv (so a test can prove the
-// BATCHED path issued exactly one process, not one spawn per ref) and applies each
-// `delete <ref>` command from stdin idempotently — a missing ref is a no-op that never
-// aborts the transaction, matching the real-git no-<oldvalue> delete this package relies on.
+// BATCHED path issued exactly one process, not one spawn per ref) and executes atomic
+// multi-command transactions (`verify`, `update`, `create`, `delete`) as well as `cat-file --batch`.
+// A failed verification causes the entire transaction to be aborted (changes neither ref).
+// A missing ref in an unqualified `delete <ref>` is an idempotent no-op that never aborts.
 func (f *fakeGit) runStdin(ctx context.Context, dir, stdin string, args ...string) (string, int, error) {
 	f.calls = append(f.calls, args)
-	if len(args) >= 2 && args[0] == "update-ref" && args[1] == "--stdin" {
-		for _, line := range strings.Split(strings.TrimSpace(stdin), "\n") {
-			fields := strings.Fields(strings.TrimSpace(line))
-			if len(fields) == 2 && fields[0] == "delete" {
-				delete(f.refs, fields[1]) // idempotent: deleting an absent ref is a no-op
+	isUpdateRefStdin := false
+	if len(args) >= 2 && args[0] == "update-ref" {
+		for _, a := range args[1:] {
+			if a == "--stdin" {
+				isUpdateRefStdin = true
+				break
 			}
 		}
-		return "", 0, nil
+	}
+	if isUpdateRefStdin {
+		type txOp struct {
+			cmd    string
+			ref    string
+			newOID string
+			oldOID string
+			hasOld bool
+		}
+
+		applyTx := func(ops []txOp) int {
+			if len(ops) == 0 {
+				return 0
+			}
+			seenRefs := make(map[string]bool, len(ops))
+			for _, op := range ops {
+				if seenRefs[op.ref] {
+					return 128 // Git rejects multiple updates for the same ref in one transaction
+				}
+				seenRefs[op.ref] = true
+			}
+
+			// Pre-condition verification (all-or-nothing check)
+			for _, op := range ops {
+				cur, exists := f.refs[op.ref]
+				switch op.cmd {
+				case "verify":
+					if !op.hasOld || isAllZeros(op.oldOID) {
+						if exists {
+							return 128
+						}
+					} else {
+						if !exists || cur != op.oldOID {
+							return 128
+						}
+					}
+				case "create":
+					if exists {
+						return 128
+					}
+				case "delete":
+					if op.hasOld {
+						if isAllZeros(op.oldOID) {
+							if exists {
+								return 128
+							}
+						} else {
+							if !exists || cur != op.oldOID {
+								return 128
+							}
+						}
+					}
+				case "update":
+					if op.hasOld {
+						if isAllZeros(op.oldOID) {
+							if exists {
+								return 128
+							}
+						} else {
+							if !exists || cur != op.oldOID {
+								return 128
+							}
+						}
+					}
+				default:
+					return 128
+				}
+			}
+
+			// Apply mutations
+			for _, op := range ops {
+				switch op.cmd {
+				case "create", "update":
+					f.refs[op.ref] = op.newOID
+				case "delete":
+					delete(f.refs, op.ref)
+				case "verify":
+					// verify mutates nothing
+				}
+			}
+			return 0
+		}
+
+		var currentTx []txOp
+		inExplicitTx := false
+		var out strings.Builder
+
+		for _, rawLine := range strings.Split(stdin, "\n") {
+			line := strings.TrimSpace(rawLine)
+			if line == "" {
+				continue
+			}
+			fields := strings.Fields(line)
+			switch fields[0] {
+			case "start":
+				inExplicitTx = true
+				currentTx = nil
+				out.WriteString("start: ok\n")
+			case "prepare":
+				out.WriteString("prepare: ok\n")
+			case "commit":
+				code := applyTx(currentTx)
+				currentTx = nil
+				inExplicitTx = false
+				if code != 0 {
+					return out.String(), code, nil
+				}
+				out.WriteString("commit: ok\n")
+			case "abort":
+				currentTx = nil
+				inExplicitTx = false
+				out.WriteString("abort: ok\n")
+			case "option":
+				continue
+			case "update":
+				if len(fields) < 3 || len(fields) > 4 {
+					return "", 128, nil
+				}
+				op := txOp{cmd: "update", ref: fields[1], newOID: fields[2]}
+				if len(fields) == 4 {
+					op.oldOID = fields[3]
+					op.hasOld = true
+				}
+				currentTx = append(currentTx, op)
+			case "create":
+				if len(fields) != 3 {
+					return "", 128, nil
+				}
+				currentTx = append(currentTx, txOp{cmd: "create", ref: fields[1], newOID: fields[2]})
+			case "delete":
+				if len(fields) < 2 || len(fields) > 3 {
+					return "", 128, nil
+				}
+				op := txOp{cmd: "delete", ref: fields[1]}
+				if len(fields) == 3 {
+					op.oldOID = fields[2]
+					op.hasOld = true
+				}
+				currentTx = append(currentTx, op)
+			case "verify":
+				if len(fields) < 2 || len(fields) > 3 {
+					return "", 128, nil
+				}
+				op := txOp{cmd: "verify", ref: fields[1]}
+				if len(fields) == 3 {
+					op.oldOID = fields[2]
+					op.hasOld = true
+				}
+				currentTx = append(currentTx, op)
+			default:
+				return "", 128, nil
+			}
+		}
+
+		if !inExplicitTx && len(currentTx) > 0 {
+			code := applyTx(currentTx)
+			if code != 0 {
+				return "", code, nil
+			}
+		}
+		return out.String(), 0, nil
 	}
 	// cat-file --batch: read one ref/oid per stdin line, emit the real git --batch record
 	// format so the batched session reader is exercised end to end. A resolvable ref yields
@@ -810,5 +972,104 @@ func TestParseRecordBatchSemantics(t *testing.T) {
 	}
 	if got[1].ID != "lease-noid" || got[1].Holder != "h2" || len(got[1].TreeGlobs) != 1 || got[1].TreeGlobs[0] != "pkg/b/**" {
 		t.Fatalf("id-less record = %+v, want ID filled to lease-noid", got[1])
+	}
+}
+
+// TestLeaseRunnerAtomicTransactionParity compares a real Git transaction (git update-ref --stdin)
+// with the fakeGit fixture runner (g.runStdin):
+// - A failed expected-OID check (verify <ref> <wrong-oid>) changes neither ref (atomic rollback / no commit).
+// - A valid transaction (update <ref1> <new1> <old1>, update <ref2> <new2> <old2>) commits both changes atomically.
+func TestLeaseRunnerAtomicTransactionParity(t *testing.T) {
+	t.Run("FakeGit", func(t *testing.T) {
+		g := newFakeGit()
+		s := NewWithStdinRunner(g.run, g.runStdin, "")
+		testAtomicTransactionParity(t, s)
+	})
+	t.Run("RealGit", func(t *testing.T) {
+		dir := initRealGitRepo(t)
+		s := NewInDir(dir)
+		testAtomicTransactionParity(t, s)
+	})
+}
+
+func testAtomicTransactionParity(t *testing.T, s *Store) {
+	t.Helper()
+	c := ctx()
+
+	// Write 4 distinct blobs to point refs to.
+	oid1, err := s.writeBlob(c, []byte("val-1"))
+	if err != nil {
+		t.Fatalf("writeBlob oid1: %v", err)
+	}
+	oid2, err := s.writeBlob(c, []byte("val-2"))
+	if err != nil {
+		t.Fatalf("writeBlob oid2: %v", err)
+	}
+	new1, err := s.writeBlob(c, []byte("val-new-1"))
+	if err != nil {
+		t.Fatalf("writeBlob new1: %v", err)
+	}
+	new2, err := s.writeBlob(c, []byte("val-new-2"))
+	if err != nil {
+		t.Fatalf("writeBlob new2: %v", err)
+	}
+
+	ref1 := "refs/fak/locks/parity-lane-1"
+	ref2 := "refs/fak/locks/parity-lane-2"
+
+	// Initial setup: point ref1 -> oid1 and ref2 -> oid2.
+	initPayload := fmt.Sprintf("update %s %s\nupdate %s %s\n", ref1, oid1, ref2, oid2)
+	out, code, err := s.runStdin(c, s.dir, initPayload, "update-ref", "--stdin")
+	if err != nil || code != 0 {
+		t.Fatalf("initial setup failed: code=%d err=%v out=%s", code, err, out)
+	}
+
+	cur1, ok1, err := s.currentOID(c, ref1)
+	if err != nil || !ok1 || cur1 != oid1 {
+		t.Fatalf("ref1 not initialized: ok=%v cur=%q want=%q err=%v", ok1, cur1, oid1, err)
+	}
+	cur2, ok2, err := s.currentOID(c, ref2)
+	if err != nil || !ok2 || cur2 != oid2 {
+		t.Fatalf("ref2 not initialized: ok=%v cur=%q want=%q err=%v", ok2, cur2, oid2, err)
+	}
+
+	// 1. A failed expected-OID check (verify <ref> <wrong-oid>) changes neither ref (atomic rollback / no commit).
+	wrongOID := strings.Repeat("a", len(oid2))
+	if wrongOID == oid2 {
+		wrongOID = strings.Repeat("b", len(oid2))
+	}
+	failTx := fmt.Sprintf("update %s %s %s\nverify %s %s\n", ref1, new1, oid1, ref2, wrongOID)
+	out, code, err = s.runStdin(c, s.dir, failTx, "update-ref", "--stdin")
+	if err != nil {
+		t.Fatalf("runStdin unexpected execution error: %v", err)
+	}
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code for failed verify in transaction, got 0; out=%s", out)
+	}
+
+	// Neither ref must have changed.
+	cur1, ok1, err = s.currentOID(c, ref1)
+	if err != nil || !ok1 || cur1 != oid1 {
+		t.Fatalf("atomic rollback failed: ref1 changed to %q (want %q), ok=%v err=%v", cur1, oid1, ok1, err)
+	}
+	cur2, ok2, err = s.currentOID(c, ref2)
+	if err != nil || !ok2 || cur2 != oid2 {
+		t.Fatalf("atomic rollback failed: ref2 changed to %q (want %q), ok=%v err=%v", cur2, oid2, ok2, err)
+	}
+
+	// 2. A valid transaction (update <ref1> <new1> <old1>, update <ref2> <new2> <old2>) commits both changes atomically.
+	validTx := fmt.Sprintf("update %s %s %s\nupdate %s %s %s\n", ref1, new1, oid1, ref2, new2, oid2)
+	out, code, err = s.runStdin(c, s.dir, validTx, "update-ref", "--stdin")
+	if err != nil || code != 0 {
+		t.Fatalf("valid transaction failed: code=%d err=%v out=%s", code, err, out)
+	}
+
+	cur1, ok1, err = s.currentOID(c, ref1)
+	if err != nil || !ok1 || cur1 != new1 {
+		t.Fatalf("valid transaction commit failed: ref1 is %q (want %q), ok=%v err=%v", cur1, new1, ok1, err)
+	}
+	cur2, ok2, err = s.currentOID(c, ref2)
+	if err != nil || !ok2 || cur2 != new2 {
+		t.Fatalf("valid transaction commit failed: ref2 is %q (want %q), ok=%v err=%v", cur2, new2, ok2, err)
 	}
 }
