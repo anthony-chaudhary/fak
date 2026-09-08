@@ -823,7 +823,12 @@ func (cm *CheckpointManager) GetCheckpoint(sessionID string) (*SessionDescriptor
 }
 
 // RecordMTPDraft registers candidate draft tokens for a session's checkpoint.
-func (cm *CheckpointManager) RecordMTPDraft(sessionID string, tokens []int32, pages ...*PageBlock) error {
+func (cm *CheckpointManager) RecordMTPDraft(sessionID string, tokens []int32) error {
+	return cm.RecordMTPDraftPages(sessionID, tokens)
+}
+
+// RecordMTPDraftPages registers candidate draft tokens and speculative page blocks for a session's checkpoint.
+func (cm *CheckpointManager) RecordMTPDraftPages(sessionID string, tokens []int32, pages ...*PageBlock) error {
 	cm.mu.RLock()
 	desc, ok := cm.checkpoints[sessionID]
 	cm.mu.RUnlock()
