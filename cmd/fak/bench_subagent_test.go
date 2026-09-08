@@ -228,75 +228,31 @@ func TestRunBenchSubagentMatrix(t *testing.T) {
 	}
 }
 
-func TestRunBenchSubagentPhysicalMode(t *testing.T) {
+func TestRunBenchSubagentPhysicalModeRequiresAttachedRunner(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	args := []string{"--simulated=false", "--concurrency=1", "--runs=5", "--json"}
 
 	code := runBenchSubagent(&stdout, &stderr, args)
-	if code != 0 {
-		t.Fatalf("runBenchSubagent physical mode failed with code %d, stderr: %s", code, stderr.String())
+	if code == 0 {
+		t.Fatalf("unattached physical mode succeeded with output: %s", stdout.String())
 	}
-
-	var receipt qwen38campaign.SubagentFanoutReceipt
-	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
-		t.Fatalf("failed to unmarshal JSON output: %v\nOutput: %s", err, stdout.String())
+	if stdout.Len() != 0 {
+		t.Fatalf("unattached physical mode emitted receipt bytes: %s", stdout.String())
 	}
-
-	if err := receipt.Validate(); err != nil {
-		t.Fatalf("receipt validation failed: %v", err)
-	}
-
-	if receipt.Provenance != qwen38campaign.ProvenancePhysical {
-		t.Errorf("provenance = %q, want %q", receipt.Provenance, qwen38campaign.ProvenancePhysical)
-	}
-	if receipt.Engine != "fak-native" {
-		t.Errorf("engine = %q, want %q", receipt.Engine, "fak-native")
-	}
-	if receipt.PrimaryEngine != "fak-native" {
-		t.Errorf("primary_engine = %q, want %q", receipt.PrimaryEngine, "fak-native")
-	}
-	if receipt.FallbackCount != 0 {
-		t.Errorf("fallback_count = %d, want 0", receipt.FallbackCount)
-	}
-	if !receipt.ZeroFallback {
-		t.Errorf("zero_fallback = false, want true")
-	}
-	if receipt.Config.Simulated {
-		t.Errorf("config.simulated = true, want false")
-	}
-	if receipt.ExecutionIdentity == nil {
-		t.Fatalf("missing execution identity")
-	}
-	if receipt.ExecutionIdentity.ModelGGUFSHA256 != qwen38campaign.DefaultModelGGUFSHA256 {
-		t.Errorf("model sha = %q, want %q", receipt.ExecutionIdentity.ModelGGUFSHA256, qwen38campaign.DefaultModelGGUFSHA256)
-	}
-	if receipt.Summary.CountersStatus != qwen38campaign.CountersUnavailable {
-		t.Errorf("counters status = %q, want %q", receipt.Summary.CountersStatus, qwen38campaign.CountersUnavailable)
+	if !strings.Contains(stderr.String(), "physical execution is unavailable") {
+		t.Fatalf("missing fail-closed diagnostic: %s", stderr.String())
 	}
 }
 
-func TestRunBenchSubagentPhysicalModeHumanOutput(t *testing.T) {
+func TestRunBenchSubagentPhysicalModeHumanOutputFailsClosed(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	args := []string{"--simulated=false", "--concurrency=1", "--runs=5"}
 
 	code := runBenchSubagent(&stdout, &stderr, args)
-	if code != 0 {
-		t.Fatalf("runBenchSubagent human output failed with code %d, stderr: %s", code, stderr.String())
+	if code == 0 || stdout.Len() != 0 {
+		t.Fatalf("unattached physical human mode returned code=%d output=%s", code, stdout.String())
 	}
-
-	out := stdout.String()
-	requiredSnippets := []string{
-		"Strix Halo Subagent Fan-Out Benchmark Receipt",
-		"Execution Mode:    Physical Device Execution",
-		"Provenance:        physical_device_execution",
-		"Mean Throughput:",
-		"Mean DRAM Traffic: UNAVAILABLE",
-		"Mean MALL Hit Rate:UNAVAILABLE",
-		"Verification Digest:",
-	}
-	for _, snippet := range requiredSnippets {
-		if !strings.Contains(out, snippet) {
-			t.Errorf("human output missing snippet %q; output:\n%s", snippet, out)
-		}
+	if !strings.Contains(stderr.String(), "physical execution is unavailable") {
+		t.Fatalf("missing fail-closed diagnostic: %s", stderr.String())
 	}
 }
