@@ -1,16 +1,42 @@
 package model
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"strings"
 	"testing"
+	"time"
 )
+
+func registerQwen38CanaryTestEvidence(t *testing.T, mgr *Qwen38MTPCanaryManager, receiptID string, envelope Qwen38CanaryEnvelope) {
+	t.Helper()
+	now := time.Now().UTC()
+	err := mgr.RegisterCanaryEvidence(Qwen38MTPCanaryEvidence{
+		Receipt: Qwen38MTPCanaryReceipt{
+			SchemaVersion:   Qwen38MTPCanaryReceiptSchema,
+			ReceiptID:       receiptID,
+			DefaultOn:       true,
+			Engine:          Qwen38EngineMTP,
+			Envelope:        envelope,
+			Speedup:         1.1,
+			TokensProduced:  2,
+			TokensProposed:  1,
+			TokensAccepted:  1,
+			DowngradeReason: Qwen38MTPEligible,
+			CircuitStatus:   CanaryCircuitClosed,
+			LatencyNS:       Qwen38MTPLatencyNS{Setup: 1, Draft: 1, Verify: 1, Total: 3},
+			MemoryBytes:     Qwen38MTPMemoryBytes{DraftWorkspace: 1, VerifyWorkspace: 1, Peak: 1},
+		},
+		ObservedAt: now.Add(-time.Hour),
+		ValidUntil: now.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("register canary evidence: %v", err)
+	}
+}
 
 func TestQwen38MTP_Canary_InsideCertifiedEnvelope(t *testing.T) {
 	mgr := NewQwen38MTPCanaryManager()
 
-	h := sha256.Sum256([]byte("qwen3.8-mtp-certified-v1"))
-	hashStr := hex.EncodeToString(h[:])
+	hashStr := strings.Repeat("ab", 32)
 
 	req := Qwen38CanaryRequest{
 		ModelReady:    true,
@@ -24,6 +50,8 @@ func TestQwen38MTP_Canary_InsideCertifiedEnvelope(t *testing.T) {
 			DraftDepth:    3,
 		},
 	}
+	req.EvidenceReceiptID = "q4k-metal-receipt"
+	registerQwen38CanaryTestEvidence(t, mgr, req.EvidenceReceiptID, req.Envelope)
 
 	dec := mgr.EvaluateCanary(req)
 	if !dec.InsideEnvelope {
@@ -43,6 +71,8 @@ func TestQwen38MTP_Canary_InsideCertifiedEnvelope(t *testing.T) {
 	reqF32 := req
 	reqF32.Envelope.Format = Qwen38MTPFormatF32
 	reqF32.Envelope.Backend = Qwen38MTPBackendCPU
+	reqF32.EvidenceReceiptID = "f32-cpu-receipt"
+	registerQwen38CanaryTestEvidence(t, mgr, reqF32.EvidenceReceiptID, reqF32.Envelope)
 	decF32 := mgr.EvaluateCanary(reqF32)
 	if !decF32.CanaryDefaultOn || decF32.Engine != Qwen38EngineMTP {
 		t.Fatalf("F32 cpu-native expected default-on inside envelope, got %v, %s", decF32.CanaryDefaultOn, decF32.RejectionReason)
@@ -52,8 +82,7 @@ func TestQwen38MTP_Canary_InsideCertifiedEnvelope(t *testing.T) {
 func TestQwen38MTP_Canary_OutsideEnvelopeBoundaries(t *testing.T) {
 	mgr := NewQwen38MTPCanaryManager()
 
-	h := sha256.Sum256([]byte("qwen3.8-mtp-certified-v1"))
-	validHash := hex.EncodeToString(h[:])
+	validHash := strings.Repeat("ab", 32)
 
 	baseEnv := Qwen38CanaryEnvelope{
 		ModelFamily:   "Qwen3.8",
@@ -63,6 +92,8 @@ func TestQwen38MTP_Canary_OutsideEnvelopeBoundaries(t *testing.T) {
 		ArtifactHash:  validHash,
 		DraftDepth:    2,
 	}
+	const receiptID = "boundary-receipt"
+	registerQwen38CanaryTestEvidence(t, mgr, receiptID, baseEnv)
 
 	cases := []struct {
 		name       string
@@ -136,9 +167,10 @@ func TestQwen38MTP_Canary_OutsideEnvelopeBoundaries(t *testing.T) {
 			env := baseEnv
 			tc.mutate(&env)
 			req := Qwen38CanaryRequest{
-				Envelope:      env,
-				OperatorOptIn: tc.optIn,
-				ModelReady:    true,
+				Envelope:          env,
+				EvidenceReceiptID: receiptID,
+				OperatorOptIn:     tc.optIn,
+				ModelReady:        true,
 			}
 			dec := mgr.EvaluateCanary(req)
 			if dec.CanaryDefaultOn {
@@ -157,8 +189,7 @@ func TestQwen38MTP_Canary_OutsideEnvelopeBoundaries(t *testing.T) {
 func TestQwen38MTP_Canary_CircuitBreakerTripOnDivergence(t *testing.T) {
 	mgr := NewQwen38MTPCanaryManager()
 
-	h := sha256.Sum256([]byte("qwen3.8-mtp-certified-v1"))
-	validHash := hex.EncodeToString(h[:])
+	validHash := strings.Repeat("ab", 32)
 
 	req := Qwen38CanaryRequest{
 		ModelReady:    true,
@@ -172,6 +203,8 @@ func TestQwen38MTP_Canary_CircuitBreakerTripOnDivergence(t *testing.T) {
 			DraftDepth:    2,
 		},
 	}
+	req.EvidenceReceiptID = "circuit-receipt"
+	registerQwen38CanaryTestEvidence(t, mgr, req.EvidenceReceiptID, req.Envelope)
 
 	// 1. Before divergence: default-on is active
 	dec1 := mgr.EvaluateCanary(req)
@@ -217,8 +250,7 @@ func TestQwen38MTP_Canary_CircuitBreakerTripOnDivergence(t *testing.T) {
 func TestQwen38MTP_Canary_ReceiptValidation(t *testing.T) {
 	mgr := NewQwen38MTPCanaryManager()
 
-	h := sha256.Sum256([]byte("qwen3.8-mtp-certified-v1"))
-	validHash := hex.EncodeToString(h[:])
+	validHash := strings.Repeat("ab", 32)
 
 	req := Qwen38CanaryRequest{
 		ModelReady:    true,
@@ -232,6 +264,8 @@ func TestQwen38MTP_Canary_ReceiptValidation(t *testing.T) {
 			DraftDepth:    2,
 		},
 	}
+	req.EvidenceReceiptID = "receipt-validation-source"
+	registerQwen38CanaryTestEvidence(t, mgr, req.EvidenceReceiptID, req.Envelope)
 
 	dec := mgr.EvaluateCanary(req)
 

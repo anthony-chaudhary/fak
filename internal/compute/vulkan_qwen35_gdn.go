@@ -39,10 +39,18 @@ func (v *vulkanBackend) Qwen35GDNDecode(
 		return Tensor{}, Tensor{}, Tensor{}, err
 	}
 
-	mixed := v.MatMul(inProjQKV, normalizedInput)
-	z := v.MatMul(inProjZ, normalizedInput)
-	beta := v.MatMul(inProjB, normalizedInput)
-	alpha := v.MatMul(inProjA, normalizedInput)
+	mixed, z, beta, alpha, fused, err := v.tryQwen35GDNQ8InputProjections(
+		normalizedInput, inProjQKV, inProjZ, inProjB, inProjA,
+	)
+	if err != nil {
+		return Tensor{}, Tensor{}, Tensor{}, err
+	}
+	if !fused {
+		mixed = v.MatMul(inProjQKV, normalizedInput)
+		z = v.MatMul(inProjZ, normalizedInput)
+		beta = v.MatMul(inProjB, normalizedInput)
+		alpha = v.MatMul(inProjA, normalizedInput)
+	}
 	core, err := v.Qwen35GDNPreprojected(
 		mixed, z, beta, alpha, conv1D, aLog, dtBias, norm, convState, recurrentState,
 		1, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel, rmsNormEpsilon,
@@ -52,6 +60,62 @@ func (v *vulkanBackend) Qwen35GDNDecode(
 	}
 	output = v.MatMul(outProj, core)
 	return output, convState, recurrentState, nil
+}
+
+// tryQwen35GDNQ8InputProjections records the four decode projections as one
+// optional Q8 dispatch. Any unsupported dtype, chunked weight, or absent
+// specialized pipeline selects the unchanged four-MatMul composition. Once
+// selected, a C ABI failure is returned rather than silently replaying work.
+func (v *vulkanBackend) tryQwen35GDNQ8InputProjections(
+	x, w0, w1, w2, w3 Tensor,
+) (y0, y1, y2, y3 Tensor, fused bool, err error) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+
+	weights := [...]Tensor{w0, w1, w2, w3}
+	if !v.haveQ8 || !v.haveQ8GDNInProj || len(x.Shape) != 1 || x.Dtype != F32 {
+		v.q8GDNComposedInProjCalls++
+		return Tensor{}, Tensor{}, Tensor{}, Tensor{}, false, nil
+	}
+	in := x.Numel()
+	var bufs [4]*vulkanBuf
+	for i, weight := range weights {
+		buf, ok := weight.buf.(*vulkanBuf)
+		if !ok || weight.Dtype != Q8_0 || weight.Quant == nil || weight.Quant.Block != 32 ||
+			len(weight.Shape) != 2 || weight.Shape[1] != in || in%32 != 0 ||
+			buf.ptr == nil || buf.scalePtr == nil || len(buf.q8Chunks) != 0 {
+			v.q8GDNComposedInProjCalls++
+			return Tensor{}, Tensor{}, Tensor{}, Tensor{}, false, nil
+		}
+		bufs[i] = buf
+	}
+
+	startTransient := len(v.transient)
+	y0, _ = v.devTr([]int{w0.Shape[0]}, F32)
+	y1, _ = v.devTr([]int{w1.Shape[0]}, F32)
+	y2, _ = v.devTr([]int{w2.Shape[0]}, F32)
+	y3, _ = v.devTr([]int{w3.Shape[0]}, F32)
+	status := int(C.fvk_qwen35_gdn_q8_in_proj_f32(
+		bufs[0].ptr, bufs[0].scalePtr,
+		bufs[1].ptr, bufs[1].scalePtr,
+		bufs[2].ptr, bufs[2].scalePtr,
+		bufs[3].ptr, bufs[3].scalePtr,
+		v.vp(x), v.vp(y0), v.vp(y1), v.vp(y2), v.vp(y3),
+		C.int(w0.Shape[0]), C.int(w1.Shape[0]), C.int(w2.Shape[0]), C.int(w3.Shape[0]), C.int(in),
+	))
+	if status != 0 {
+		for _, transient := range v.transient[startTransient:] {
+			if transient.ptr != nil {
+				C.fvk_free(transient.ptr)
+				transient.ptr = nil
+			}
+		}
+		v.transient = v.transient[:startTransient]
+		return Tensor{}, Tensor{}, Tensor{}, Tensor{}, false,
+			fmt.Errorf("compute: vulkan Qwen GDN fused Q8 input projection failed closed (code %d)", status)
+	}
+	v.q8GDNFusedInProjCalls++
+	return y0, y1, y2, y3, true, nil
 }
 
 // validateVulkanEntry admits a decode-shaped GDN call onto the Vulkan path:

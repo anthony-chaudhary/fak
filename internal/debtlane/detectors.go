@@ -177,6 +177,46 @@ func inspectGoASTDetectors(lane *DebtLane, unitDir string, surface SurfaceClass)
 		strings.Contains(lane.Lane, "protocol") ||
 		strings.Contains(lane.Lane, "ctxmmu")
 
+	// Pre-scan test files in unitDir to discover local test helper functions
+	localTestHelpers := make(map[string]bool)
+	testFiles := make(map[string]*ast.File)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		path := filepath.Join(unitDir, e.Name())
+		fileNode, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+		if err != nil {
+			continue
+		}
+		testFiles[e.Name()] = fileNode
+		for _, decl := range fileNode.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			if !isTestFunctionName(fn.Name.Name) && !strings.HasPrefix(fn.Name.Name, "Benchmark") && !strings.HasPrefix(fn.Name.Name, "Fuzz") {
+				if hasTestingTParam(fn) && classifyTestAssertions(fn.Body, nil) == proofConfirmed {
+					localTestHelpers[fn.Name.Name] = true
+				}
+			}
+		}
+	}
+	// Second pass: resolve helpers that call other helpers
+	for _, fileNode := range testFiles {
+		for _, decl := range fileNode.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			if !isTestFunctionName(fn.Name.Name) && !strings.HasPrefix(fn.Name.Name, "Benchmark") && !strings.HasPrefix(fn.Name.Name, "Fuzz") {
+				if hasTestingTParam(fn) && classifyTestAssertions(fn.Body, localTestHelpers) == proofConfirmed {
+					localTestHelpers[fn.Name.Name] = true
+				}
+			}
+		}
+	}
+
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
 			continue
@@ -191,34 +231,43 @@ func inspectGoASTDetectors(lane *DebtLane, unitDir string, surface SurfaceClass)
 
 		// 9. Thin test detection: inspect test files for real assertions
 		if strings.HasSuffix(e.Name(), "_test.go") {
-			fileNode, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
-			if err == nil {
-				thinCount := 0
-				testCount := 0
-				for _, decl := range fileNode.Decls {
-					fn, ok := decl.(*ast.FuncDecl)
-					if !ok || fn.Body == nil {
-						continue
-					}
-					if strings.HasPrefix(fn.Name.Name, "Test") {
-						testCount++
-						if !hasTestAssertions(fn.Body) {
-							thinCount++
-						}
-					}
-					if strings.HasPrefix(fn.Name.Name, "Fuzz") {
-						hasFuzzOrRace = true
-					}
+			fileNode := testFiles[e.Name()]
+			if fileNode == nil {
+				var err error
+				fileNode, err = parser.ParseFile(fset, path, nil, parser.ParseComments)
+				if err != nil {
+					continue
 				}
-				if testCount > 0 && thinCount == testCount {
-					findings = append(findings, FindingProvenance{
-						Dimension: string(DimThinTests),
-						Surface:   string(surface),
-						Lane:      lane.Lane,
-						Path:      relPath,
-						Severity:  "warning",
-						Message:   fmt.Sprintf("thin test hazard: %d test function(s) contain zero assertions", thinCount),
-					})
+			}
+			for _, decl := range fileNode.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Body == nil {
+					continue
+				}
+				if strings.HasPrefix(fn.Name.Name, "Fuzz") {
+					hasFuzzOrRace = true
+				}
+				if isTestFunctionName(fn.Name.Name) {
+					proof := classifyTestAssertions(fn.Body, localTestHelpers)
+					if proof != proofConfirmed {
+						startPos := fset.Position(fn.Pos())
+						endPos := fset.Position(fn.End())
+						span := fmt.Sprintf("%s:%d:%d-%d:%d", filepath.ToSlash(relPath), startPos.Line, startPos.Column, endPos.Line, endPos.Column)
+						msg := fmt.Sprintf("thin test hazard: function %s (%s) contains zero assertions", fn.Name.Name, span)
+						sev := "warning"
+						if proof == proofUnknown {
+							msg = fmt.Sprintf("thin test hazard: function %s (%s) assertion proof is unknown (ambiguous)", fn.Name.Name, span)
+							sev = "info"
+						}
+						findings = append(findings, FindingProvenance{
+							Dimension: string(DimThinTests),
+							Surface:   string(surface),
+							Lane:      lane.Lane,
+							Path:      filepath.ToSlash(relPath),
+							Severity:  sev,
+							Message:   msg,
+						})
+					}
 				}
 			}
 			continue
@@ -310,37 +359,193 @@ func inspectGoASTDetectors(lane *DebtLane, unitDir string, surface SurfaceClass)
 		})
 	}
 
+	// 16. Hot-path performance debt on critical paths (#12363)
+	hotFindings := InspectHotPathDebt(lane, unitDir, surface)
+	findings = append(findings, hotFindings...)
+
 	return findings
 }
 
-func hasTestAssertions(body *ast.BlockStmt) bool {
-	if body == nil || len(body.List) == 0 {
+type testAssertionProof int
+
+const (
+	proofNone testAssertionProof = iota
+	proofUnknown
+	proofConfirmed
+)
+
+func isTestFunctionName(name string) bool {
+	if !strings.HasPrefix(name, "Test") || name == "TestMain" || name == "TestHelperProcess" {
 		return false
 	}
-	hasAssert := false
+	if len(name) > 4 && name[4] >= 'a' && name[4] <= 'z' {
+		return false
+	}
+	return true
+}
+
+func hasTestingTParam(fn *ast.FuncDecl) bool {
+	if fn == nil || fn.Type == nil || fn.Type.Params == nil {
+		return false
+	}
+	for _, field := range fn.Type.Params.List {
+		if isTestingTExpr(field.Type) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTestingTExpr(expr ast.Expr) bool {
+	if star, ok := expr.(*ast.StarExpr); ok {
+		if sel, ok := star.X.(*ast.SelectorExpr); ok {
+			if id, ok := sel.X.(*ast.Ident); ok {
+				return id.Name == "testing" && (sel.Sel.Name == "T" || sel.Sel.Name == "B" || sel.Sel.Name == "TB")
+			}
+		}
+	}
+	if sel, ok := expr.(*ast.SelectorExpr); ok {
+		if id, ok := sel.X.(*ast.Ident); ok {
+			return id.Name == "testing" && (sel.Sel.Name == "TB" || sel.Sel.Name == "T" || sel.Sel.Name == "B")
+		}
+	}
+	return false
+}
+
+var failureMethods = map[string]bool{
+	"Error":   true,
+	"Errorf":  true,
+	"Fatal":   true,
+	"Fatalf":  true,
+	"Fail":    true,
+	"FailNow": true,
+	"Skip":    true,
+	"Skipf":   true,
+	"SkipNow": true,
+	"Helper":  true,
+}
+
+var assertionMethods = map[string]bool{
+	"Equal":          true,
+	"NotEqual":       true,
+	"True":           true,
+	"False":          true,
+	"Nil":            true,
+	"NotNil":         true,
+	"NoError":        true,
+	"Error":          true,
+	"Contains":       true,
+	"NotContains":    true,
+	"Empty":          true,
+	"NotEmpty":       true,
+	"Len":            true,
+	"Zero":           true,
+	"NotZero":        true,
+	"EqualValues":    true,
+	"Same":           true,
+	"NotSame":        true,
+	"Match":          true,
+	"Panics":         true,
+	"NotPanics":      true,
+	"Regexp":         true,
+	"Subset":         true,
+	"NotSubset":      true,
+	"Greater":        true,
+	"Less":           true,
+	"GreaterOrEqual": true,
+	"LessOrEqual":    true,
+	"ElementsMatch":  true,
+	"Condition":      true,
+	"InDelta":        true,
+	"InEpsilon":      true,
+	"IsType":         true,
+	"JSONEq":         true,
+	"YAMLEq":         true,
+}
+
+func isAssertionFuncName(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasPrefix(lower, "assert") ||
+		strings.HasPrefix(lower, "check") ||
+		strings.HasPrefix(lower, "verify") ||
+		strings.HasPrefix(lower, "require") ||
+		strings.HasPrefix(lower, "expect") ||
+		strings.HasPrefix(lower, "must")
+}
+
+func getCallName(fun ast.Expr) string {
+	switch f := fun.(type) {
+	case *ast.Ident:
+		return f.Name
+	case *ast.SelectorExpr:
+		return f.Sel.Name
+	}
+	return ""
+}
+
+func classifyTestAssertions(body *ast.BlockStmt, localHelpers map[string]bool) testAssertionProof {
+	if body == nil || len(body.List) == 0 {
+		return proofNone
+	}
+	proof := proofNone
 	ast.Inspect(body, func(n ast.Node) bool {
-		if hasAssert {
+		if proof == proofConfirmed {
 			return false
 		}
-		switch call := n.(type) {
-		case *ast.CallExpr:
-			if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
-				name := sel.Sel.Name
-				if name == "Error" || name == "Errorf" || name == "Fatal" || name == "Fatalf" ||
-					name == "Fail" || name == "FailNow" || name == "Equal" || name == "True" ||
-					name == "False" || name == "NoError" {
-					hasAssert = true
-					return false
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		switch fun := call.Fun.(type) {
+		case *ast.SelectorExpr:
+			name := fun.Sel.Name
+			if failureMethods[name] || assertionMethods[name] {
+				proof = proofConfirmed
+				return false
+			}
+			if localHelpers != nil && localHelpers[name] {
+				proof = proofConfirmed
+				return false
+			}
+			if isAssertionFuncName(name) {
+				proof = proofConfirmed
+				return false
+			}
+		case *ast.Ident:
+			if fun.Name == "panic" {
+				proof = proofConfirmed
+				return false
+			}
+			if localHelpers != nil && localHelpers[fun.Name] {
+				proof = proofConfirmed
+				return false
+			}
+			if isAssertionFuncName(fun.Name) {
+				proof = proofConfirmed
+				return false
+			}
+		}
+		for _, arg := range call.Args {
+			if id, ok := arg.(*ast.Ident); ok {
+				if id.Name == "t" || id.Name == "b" || id.Name == "tb" {
+					callName := getCallName(call.Fun)
+					if isAssertionFuncName(callName) || (localHelpers != nil && localHelpers[callName]) {
+						proof = proofConfirmed
+						return false
+					}
+					if proof == proofNone {
+						proof = proofUnknown
+					}
 				}
 			}
-		case *ast.IfStmt:
-			// Often `if err != nil { t.Fatal(err) }` or `if got != want`
-			hasAssert = true
-			return false
 		}
 		return true
 	})
-	return hasAssert
+	return proof
+}
+
+func hasTestAssertions(body *ast.BlockStmt) bool {
+	return classifyTestAssertions(body, nil) == proofConfirmed
 }
 
 var stubCommentRegex = regexp.MustCompile(`\b(TODO|FIXME|XXX)\b`)

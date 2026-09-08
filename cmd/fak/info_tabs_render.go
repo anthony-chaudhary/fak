@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -213,9 +214,100 @@ func clampInfoScrollToSample(s infoViewState, v guardInfoVars, tr *guardInfoTren
 	return s
 }
 
+type agentTreeNode struct {
+	session  guardInfoSession
+	children []*agentTreeNode
+}
+
+func resolveSubagentRole(s guardInfoSession) string {
+	if strings.TrimSpace(s.SubagentType) != "" {
+		return fmt.Sprintf("[sub:%s]", strings.TrimSpace(s.SubagentType))
+	}
+	if strings.TrimSpace(s.Role) != "" {
+		r := strings.TrimSpace(s.Role)
+		if strings.HasPrefix(r, "[") && strings.HasSuffix(r, "]") {
+			return r
+		}
+		return fmt.Sprintf("[%s]", r)
+	}
+	return "[sub]"
+}
+
+func formatAgentTreeRow(s guardInfoSession, role string, roleColWidth int) string {
+	id := strings.TrimSpace(s.TraceID)
+	if len(id) > 10 {
+		id = id[:10]
+	}
+	if id == "" {
+		id = "?"
+	}
+
+	roleStr := role
+	if roleColWidth > 0 && len(role) < roleColWidth {
+		roleStr = fmt.Sprintf("%-*s", roleColWidth, role)
+	}
+
+	var metricParts []string
+	if s.ElapsedSeconds > 0 {
+		uptime := humanAgentUptime(float64(s.ElapsedSeconds))
+		metricParts = append(metricParts, "up "+uptime)
+	} else if run := strings.TrimSpace(s.Run); run != "" {
+		metricParts = append(metricParts, run)
+	}
+
+	if s.PromptTokens > 0 {
+		metricParts = append(metricParts, guardInfoShortCount(s.PromptTokens)+" tok")
+	} else if s.TokensLeft > 0 {
+		metricParts = append(metricParts, guardInfoShortCount(s.TokensLeft)+" tok left")
+	}
+
+	if s.ReuseRate > 0 {
+		pct := int(math.Round(s.ReuseRate * 100))
+		if s.ReuseRate > 1.0 && s.ReuseRate <= 100 {
+			pct = int(math.Round(s.ReuseRate))
+		}
+		clause := fmt.Sprintf("%d%% reuse", pct)
+		if s.SharedTokens > 0 {
+			clause += fmt.Sprintf(" (%s shared)", guardInfoShortCount(s.SharedTokens))
+		}
+		metricParts = append(metricParts, clause)
+	} else if s.SharedTokens > 0 {
+		if s.PromptTokens > 0 {
+			pct := int(math.Round(float64(s.SharedTokens) / float64(s.PromptTokens) * 100))
+			metricParts = append(metricParts, fmt.Sprintf("%d%% reuse (%s shared)", pct, guardInfoShortCount(s.SharedTokens)))
+		} else {
+			metricParts = append(metricParts, fmt.Sprintf("%s shared", guardInfoShortCount(s.SharedTokens)))
+		}
+	}
+
+	if s.TurnsLeft > 0 {
+		metricParts = append(metricParts, fmt.Sprintf("%d turns left", s.TurnsLeft))
+	}
+	if tool := strings.TrimSpace(s.LastTool); tool != "" {
+		metricParts = append(metricParts, "tool "+tool)
+	}
+	if s.SpawnCount > 0 && strings.TrimSpace(s.LastTool) == "" {
+		noun := "spawns"
+		if s.SpawnCount == 1 {
+			noun = "spawn"
+		}
+		metricParts = append(metricParts, fmt.Sprintf("%d %s", s.SpawnCount, noun))
+	}
+	if s.InflightSeconds > 0 {
+		metricParts = append(metricParts, "in-flight "+humanAgentUptime(float64(s.InflightSeconds)))
+	} else if s.IdleSeconds > 0 {
+		metricParts = append(metricParts, "idle "+humanAgentUptime(float64(s.IdleSeconds)))
+	}
+
+	if len(metricParts) == 0 {
+		return fmt.Sprintf("%s  %s", id, roleStr)
+	}
+	return fmt.Sprintf("%s  %s  %s", id, roleStr, strings.Join(metricParts, " · "))
+}
+
 // renderInfoAgentsView is the expanded Agents view: a fleet-summary header, then one full row per
 // live session (main + every sub-agent, with lineage/run-state/wall-clock/budget/activity). It
-// shows EVERY session — the overview's 4-row cap is exactly what this view exists to lift.
+// supports hierarchical tree rendering of coordinator and spawned subagent sessions.
 func renderInfoAgentsView(v guardInfoVars) []string {
 	rows := renderInfoFleetRows(v.Fleet)
 	if len(v.Sessions) == 0 {
@@ -225,9 +317,105 @@ func renderInfoAgentsView(v guardInfoVars) []string {
 		return append(rows, " agents: none running (no session registry wired, or nothing live)")
 	}
 	rows = append(rows, " agents: "+guardInfoAgentsSummary(v.Sessions))
-	for _, s := range v.Sessions {
-		rows = append(rows, "  "+guardInfoAgentText(s))
+
+	nodes := make([]*agentTreeNode, len(v.Sessions))
+	nodeByID := make(map[string]*agentTreeNode)
+	for i, s := range v.Sessions {
+		node := &agentTreeNode{session: s}
+		nodes[i] = node
+		if id := strings.TrimSpace(s.TraceID); id != "" {
+			nodeByID[id] = node
+		}
 	}
+
+	var roots []*agentTreeNode
+	hasTree := false
+
+	for _, node := range nodes {
+		s := node.session
+		parentID := strings.TrimSpace(s.ParentSessionID)
+		if parentID != "" && parentID != strings.TrimSpace(s.TraceID) {
+			var foundParent *agentTreeNode
+			if p, ok := nodeByID[parentID]; ok {
+				foundParent = p
+			} else {
+				for tid, p := range nodeByID {
+					if tid != strings.TrimSpace(s.TraceID) && (strings.HasPrefix(tid, parentID) || strings.HasPrefix(parentID, tid)) {
+						foundParent = p
+						break
+					}
+				}
+			}
+			if foundParent != nil {
+				foundParent.children = append(foundParent.children, node)
+				hasTree = true
+				continue
+			}
+		}
+		roots = append(roots, node)
+	}
+
+	if !hasTree {
+		for _, s := range v.Sessions {
+			rows = append(rows, "  "+guardInfoAgentText(s))
+		}
+		return rows
+	}
+
+	var emitAgentBranch func(node *agentTreeNode, indent string, isLast bool, isRoot bool, maxRoleLen int)
+	emitAgentBranch = func(node *agentTreeNode, indent string, isLast bool, isRoot bool, maxRoleLen int) {
+		if isRoot {
+			role := node.session.Role
+			if role == "" {
+				if len(node.children) > 0 || node.session.SpawnCount > 0 {
+					role = "[coord]"
+				} else {
+					role = "[root]"
+				}
+			} else {
+				r := strings.TrimSpace(role)
+				if !strings.HasPrefix(r, "[") {
+					role = fmt.Sprintf("[%s]", r)
+				}
+			}
+			rows = append(rows, "  "+formatAgentTreeRow(node.session, role, 0))
+		} else {
+			branch := "├─ "
+			if isLast {
+				branch = "└─ "
+			}
+			role := resolveSubagentRole(node.session)
+			rows = append(rows, indent+branch+formatAgentTreeRow(node.session, role, maxRoleLen))
+		}
+
+		childIndent := indent
+		if !isRoot {
+			if isLast {
+				childIndent += "   "
+			} else {
+				childIndent += "│  "
+			}
+		} else {
+			childIndent = "    "
+		}
+
+		maxChildRoleLen := 0
+		for _, c := range node.children {
+			cRole := resolveSubagentRole(c.session)
+			if len(cRole) > maxChildRoleLen {
+				maxChildRoleLen = len(cRole)
+			}
+		}
+
+		for i, c := range node.children {
+			emitAgentBranch(c, childIndent, i == len(node.children)-1, false, maxChildRoleLen)
+		}
+	}
+
+	for _, root := range roots {
+		emitAgentBranch(root, "", true, true, 0)
+	}
+
 	return rows
 }
 

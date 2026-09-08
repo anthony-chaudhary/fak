@@ -47,6 +47,12 @@ func populatedSessionVars() SessionVars {
 		SpawnCount:        23,
 		InflightSeconds:   29,
 		IdleSeconds:       31,
+		ParentSessionID:   "sess-parent",
+		SubagentType:      "worker",
+		Role:              "sub:worker",
+		PromptTokens:      100,
+		SharedTokens:      80,
+		ReuseRate:         0.8,
 	}
 }
 
@@ -69,7 +75,13 @@ const sessionVarsWire = `{
 	"trace_id": "trace-alpha",
 	"inflight_seconds": 29,
 	"assumptions": 19,
-	"elapsed_seconds": 17
+	"elapsed_seconds": 17,
+	"parent_session_id": "sess-parent",
+	"subagent_type": "worker",
+	"role": "sub:worker",
+	"prompt_tokens": 100,
+	"shared_tokens": 80,
+	"reuse_rate": 0.8
 }`
 
 // populatedCacheAttributionVars fills every field with a distinct non-zero value. The write
@@ -227,6 +239,12 @@ func TestSessionVarsWireKeys(t *testing.T) {
 		"spawn_count",
 		"inflight_seconds",
 		"idle_seconds",
+		"parent_session_id",
+		"subagent_type",
+		"role",
+		"prompt_tokens",
+		"shared_tokens",
+		"reuse_rate",
 	})
 }
 
@@ -291,6 +309,12 @@ func TestWireKeysCarryTheRightValues(t *testing.T) {
 				"spawn_count":         float64(23),
 				"inflight_seconds":    float64(29),
 				"idle_seconds":        float64(31),
+				"parent_session_id":   "sess-parent",
+				"subagent_type":       "worker",
+				"role":                "sub:worker",
+				"prompt_tokens":       float64(100),
+				"shared_tokens":       float64(80),
+				"reuse_rate":          0.8,
 			},
 		},
 		{
@@ -368,7 +392,7 @@ func TestFieldCountsMatchThePinnedKeySets(t *testing.T) {
 		typ  reflect.Type
 		want int
 	}{
-		{"SessionVars", reflect.TypeOf(SessionVars{}), 14},
+		{"SessionVars", reflect.TypeOf(SessionVars{}), 20},
 		{"CacheAttributionVars", reflect.TypeOf(CacheAttributionVars{}), 18},
 		{"ManagedCacheVars", reflect.TypeOf(ManagedCacheVars{}), 6},
 	} {
