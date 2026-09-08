@@ -8,6 +8,17 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
+func TestF32TensorBytesRejectsInvalidAndOverflowingShapes(t *testing.T) {
+	if got, ok := f32TensorBytes([]int{3, 8}); !ok || got != 96 {
+		t.Fatalf("bounded shape bytes=%d ok=%t, want 96/true", got, ok)
+	}
+	for _, shape := range [][]int{{0, 8}, {-1, 8}, {int(^uint(0) >> 1), int(^uint(0) >> 1)}} {
+		if got, ok := f32TensorBytes(shape); ok || got != 0 {
+			t.Fatalf("invalid shape %v bytes=%d ok=%t, want 0/false", shape, got, ok)
+		}
+	}
+}
+
 type uploadClassRecordingBackend struct {
 	compute.Backend
 	classes []compute.MemoryClass

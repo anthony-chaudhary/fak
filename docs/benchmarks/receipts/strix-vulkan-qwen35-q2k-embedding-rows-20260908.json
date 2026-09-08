@@ -1,0 +1,102 @@
+{
+  "schema": "fak.strix.vulkan-qwen35-q2k-embedding-rows/v1",
+  "issue": 12105,
+  "status": "PASS_OPERATION_LEVEL",
+  "scope": "Source-bound bounded Q2_K embedding-row admission through the physical Vulkan Qwen3.5/3.8 whole-sequence path. The model fixture is synthetic and this receipt is not a full-checkpoint generation or throughput qualification.",
+  "observed_utc": "2026-09-08T08:04:01Z",
+  "source": {
+    "repository": "anthony-chaudhary/fak",
+    "commit": "65e42a81fc7c80e6f55ffbc4ca258db2fb56dc26",
+    "blobs": {
+      "internal/model/qwen35_hal.go": "700c8155c5a52132ed549eec3365c220d95b6b5a",
+      "internal/model/embedding_q2k.go": "ad251088091a89d12fceaaf5c0ed16bd98577de9",
+      "internal/model/qwen35_sequence_prefill_vulkan_test.go": "5b83f409bce45b7e12d8d66712f9792ee0b67bb0",
+      "internal/compute/qwen35_sequence_contract.go": "34df4db961d0f98cad3a9e677bef3933942a985d",
+      "internal/compute/vulkan_qwen35_sequence.go": "807f4ac27cb483edada9793318ecd589b0cc2ae6",
+      "internal/compute/cuda_qwen35_sequence.go": "efa0afd6557ddf20dc1b36f9ca139d29f014f5fd"
+    }
+  },
+  "artifacts": {
+    "model_test_sha256": "23f50d7dbef71a5c44553e52df5f493e9d0a6c8df9d58c24ca03dcd1d69dcd59"
+  },
+  "hardware": {
+    "backend": "vulkan",
+    "tier": "integrated:AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+    "driver": "radv",
+    "driver_info": "Mesa 26.2.2-arch1.1",
+    "kernel": "7.2.3-arch1-3",
+    "max_single_buffer_bytes": 4294967292
+  },
+  "model_identity": {
+    "test_fixture": "synthetic-qwen35-hybrid-q2k-v1",
+    "test_vocab": 4097,
+    "test_hidden": 256,
+    "active_operator_service_model": "Qwen3.8-27B-Q4_K_M",
+    "production_geometry_reference": {
+      "vocab": 248320,
+      "hidden": 5120
+    }
+  },
+  "memory_envelope": {
+    "prompt_tokens": 4,
+    "embedding_panel_bytes": 4096,
+    "production_full_f32_table_bytes": 5085593600,
+    "full_table_exceeds_device_cap_bytes": 790626308,
+    "panel_reduction_factor_vs_production_full_table": 1241600,
+    "f32_input_embedding_table_present_on_device_route": false
+  },
+  "safety": {
+    "lease": "exclusive nonblocking read-only flock on /tmp/fak-gpu.lease",
+    "cooldown_seconds": 4,
+    "admission_limits": {
+      "gpu_busy_percent_max": 5,
+      "MemAvailable_kib_min": 4194304
+    },
+    "before": {
+      "MemAvailable_kib": 27370760,
+      "service_model": "Qwen3.8-27B-Q4_K_M",
+      "service_status": "ONLINE",
+      "service_output_tokens_per_second": 0.59
+    },
+    "after": {
+      "MemAvailable_kib": 27299424,
+      "service_model": "Qwen3.8-27B-Q4_K_M",
+      "service_status": "ONLINE",
+      "service_output_tokens_per_second": 0.59
+    },
+    "service_restart": false,
+    "model_reload": false
+  },
+  "command": {
+    "environment": {
+      "FAK_VULKAN_REQUIRE_DEVICE": "1",
+      "FAK_VULKAN_EXPECT_DEVICE": "8060S",
+      "FAK_VULKAN_DISPATCH_PROFILE": "1",
+      "FAK_VULKAN_SOURCE_REV": "65e42a81fc7c80e6f55ffbc4ca258db2fb56dc26"
+    },
+    "test_regex": "^TestVulkanQwen35SequencePrefillQ2KEmbeddingRowsMatchCPU$",
+    "watchdog": "timeout 180s; Go test timeout 170s"
+  },
+  "result": {
+    "exit_code": 0,
+    "executed_test": "TestVulkanQwen35SequencePrefillQ2KEmbeddingRowsMatchCPU",
+    "skipped": false,
+    "token_ids": [0, 2048, 4096, 2048],
+    "first_middle_last_repeated_order_preserved": true,
+    "logits_cosine": 1.0,
+    "logits_max_abs_error": 0.00244140625,
+    "argmax_equal": true,
+    "h2d_bytes_after_panel_admission": 0,
+    "d2h_bytes_after_panel_admission": 0,
+    "activation_h2d_bytes": 0,
+    "activation_d2h_bytes": 0,
+    "native_sequence_path": "qwen35-hybrid-sequence-prefill-v1",
+    "implicit_fallback": false
+  },
+  "exact_checkpoint_gate": {
+    "qualified": false,
+    "reason": "The bounded source-bound device witness proves row-panel admission and quality at the operation level. A second exact Qwen3.8-27B-Q4_K_M load cannot fit beside the operator-owned active service, which was not stopped or reloaded.",
+    "dependency": "https://github.com/anthony-chaudhary/fak/issues/11959"
+  },
+  "diagnostic_note": "The first device invocation used the packed model itself as a CPU oracle and was correctly refused by the existing Q2_K session guard before GPU execution. It was not used as evidence. The authoritative run used an independent f32 oracle populated with the exact Q2_K dequantization."
+}

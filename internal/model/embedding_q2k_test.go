@@ -54,6 +54,37 @@ func TestQ2KEmbeddingGatherRowMatchesScalarRef(t *testing.T) {
 	}
 }
 
+func TestQ2KEmbeddingGatherRowsPreservesFirstMiddleLastAndRepeatedOrder(t *testing.T) {
+	const vocab, hidden = 9, 256
+	q2k, err := NewQ2KEmbedding(makeTestQ2KPayload(vocab, hidden), vocab, hidden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := []int{0, vocab / 2, vocab - 1, vocab / 2}
+	got, err := q2k.GatherRows(ids, 1.25)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(ids)*hidden {
+		t.Fatalf("panel elements=%d, want %d", len(got), len(ids)*hidden)
+	}
+	for row, id := range ids {
+		want := make([]float32, hidden)
+		if err := q2k.GatherRow(id, want, 1.25); err != nil {
+			t.Fatal(err)
+		}
+		if d := maxAbsDelta(got[row*hidden:(row+1)*hidden], want); d != 0 {
+			t.Fatalf("row %d token %d max|delta|=%g", row, id, d)
+		}
+	}
+	if d := maxAbsDelta(got[hidden:2*hidden], got[3*hidden:4*hidden]); d != 0 {
+		t.Fatalf("repeated middle row changed, max|delta|=%g", d)
+	}
+	if _, err := q2k.GatherRows([]int{0, vocab}, 1); err == nil {
+		t.Fatal("out-of-range batched gather succeeded")
+	}
+}
+
 func TestQ2KEmbeddingBoundsAndErrors(t *testing.T) {
 	const (
 		vocab  = 4
@@ -471,4 +502,3 @@ func TestQwen35PrefillAndStepCPUContinuation(t *testing.T) {
 		}
 	}
 }
-

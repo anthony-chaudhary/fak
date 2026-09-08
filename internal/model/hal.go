@@ -573,19 +573,31 @@ type weightBufferCapBackend interface {
 	MaxWeightBufferBytes() int64
 }
 
+func f32TensorBytes(shape []int) (int64, bool) {
+	elements := int64(1)
+	for _, dimension := range shape {
+		if dimension <= 0 || elements > (1<<63-1)/int64(dimension) {
+			return 0, false
+		}
+		elements *= int64(dimension)
+	}
+	bytesPerElement := int64(compute.F32.Bytes())
+	if elements > (1<<63-1)/bytesPerElement {
+		return 0, false
+	}
+	return elements * bytesPerElement, true
+}
+
 func deviceEmbeddingTableFits(be compute.Backend, shape []int) bool {
+	bytes, valid := f32TensorBytes(shape)
+	if !valid {
+		return false
+	}
 	capper, ok := be.(weightBufferCapBackend)
 	if !ok || capper.MaxWeightBufferBytes() <= 0 {
 		return true
 	}
-	elements := int64(1)
-	for _, dimension := range shape {
-		if dimension <= 0 || elements > (1<<63-1)/int64(dimension) {
-			return false
-		}
-		elements *= int64(dimension)
-	}
-	return elements <= capper.MaxWeightBufferBytes()/int64(compute.F32.Bytes())
+	return bytes <= capper.MaxWeightBufferBytes()
 }
 
 type embeddingRowBackend interface {

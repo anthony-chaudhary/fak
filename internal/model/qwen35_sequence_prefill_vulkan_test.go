@@ -142,3 +142,82 @@ func TestVulkanQwen35SequencePrefillMatchesCPUAndPersistsDecodeState(t *testing.
 		t.Fatalf("decode continuity failed: kv=%d", device.halKV.Len())
 	}
 }
+
+func TestVulkanQwen35SequencePrefillQ2KEmbeddingRowsMatchCPU(t *testing.T) {
+	be, _ := requiredVulkanSequenceBackend(t)
+	rows, ok := be.(compute.Qwen35SequenceEmbeddingRowsBackend)
+	if !ok || rows.Qwen35SequenceEmbeddingRowsPath() != compute.Qwen35SequenceEmbeddingRowsPath {
+		t.Fatalf("physical Vulkan backend %T lacks exact embedding-row capability", be)
+	}
+
+	cfg := qwen35HybridTestCfg()
+	cfg.HiddenSize = 256
+	cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim = 4, 2, 64
+	cfg.IntermediateSize = 512
+	cfg.LinearKeyHeadDim, cfg.LinearNumKeyHeads = 64, 2
+	cfg.LinearValueHeadDim, cfg.LinearNumValueHeads = 64, 4
+	cfg.VocabSize = 4097
+	m := NewSynthetic(cfg)
+	q2k, err := NewQ2KEmbedding(makeTestQ2KPayload(cfg.VocabSize, cfg.HiddenSize), cfg.VocabSize, cfg.HiddenSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dequantized, err := q2k.DequantizeTable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The independent CPU oracle uses an ordinary f32 embedding containing the
+	// exact Q2_K dequantization. Keep the same values as the device output head,
+	// so the only route difference under test is bounded row-panel admission.
+	oracle := NewSynthetic(cfg)
+	copy(oracle.tensor("model.embed_tokens.weight"), dequantized)
+	copy(m.tensor("model.embed_tokens.weight"), dequantized)
+	m.Q2KEmbedding = q2k
+	// Preserve the synthetic untied output matrix while proving that the input
+	// embedding has no f32 vocabulary table available to the device route.
+	m.manifest["lm_head.weight"] = m.manifest["model.embed_tokens.weight"]
+	delete(m.manifest, "model.embed_tokens.weight")
+
+	ids := []int{0, cfg.VocabSize / 2, cfg.VocabSize - 1, cfg.VocabSize / 2}
+	cpu := oracle.NewSession()
+	var want []float32
+	for _, id := range ids {
+		want = append([]float32(nil), cpu.Step(id)...)
+	}
+	device, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer device.Close()
+	result, used, err := device.tryQwen35SequencePrefill(ids, true)
+	if err != nil || !used {
+		t.Fatalf("Q2_K row-panel sequence used=%t err=%v", used, err)
+	}
+	got := be.Read(result.Logits)
+	compareVulkanSequenceVector(t, "q2k_embedding_rows_logits", got, want)
+	if argmaxF32(got) != argmaxF32(want) {
+		t.Fatal("Q2_K row-panel greedy token mismatch")
+	}
+	status, present := device.Qwen35SequencePrefillRouteStatus()
+	wantBytes := int64(len(ids) * cfg.HiddenSize * compute.F32.Bytes())
+	productionTableBytes, valid := f32TensorBytes([]int{248320, 5120})
+	if !valid || wantBytes >= productionTableBytes {
+		t.Fatalf("invalid bounded memory envelope panel=%d production_table=%d valid=%t", wantBytes, productionTableBytes, valid)
+	}
+	if !present || status.EffectivePath != compute.Qwen35SequencePrefillPath || status.FallbackActive || !status.NativePerformanceQualifying || !status.PackedEmbeddingRows || status.EmbeddingPanelBytes != wantBytes {
+		t.Fatalf("Q2_K Vulkan route status=%+v present=%t, want native %d-byte panel", status, present, wantBytes)
+	}
+	if result.Transfers.H2DBytes != 0 || result.Transfers.D2HBytes != 0 || result.Transfers.ActivationH2DBytes != 0 || result.Transfers.ActivationD2HBytes != 0 {
+		t.Fatalf("sequence transferred host activations after row-panel admission: %+v", result.Transfers)
+	}
+	if _, ok := m.manifest["model.embed_tokens.weight"]; ok {
+		t.Fatal("physical route unexpectedly retained an f32 input embedding table")
+	}
+	maxBufferBytes := int64(0)
+	if caps, ok := be.(interface {
+		VulkanDebugResourceCaps() (int64, int64, int64)
+	}); ok {
+		maxBufferBytes, _, _ = caps.VulkanDebugResourceCaps()
+	}
+	t.Logf("model_fixture=synthetic-qwen35-hybrid-q2k-v1 q2k_rows=%d vocab=%d hidden=%d embedding_panel_bytes=%d production_f32_table_bytes=%d device_max_buffer_bytes=%d transfers=%+v source_rev=%s", len(ids), cfg.VocabSize, cfg.HiddenSize, wantBytes, productionTableBytes, maxBufferBytes, result.Transfers, os.Getenv("FAK_VULKAN_SOURCE_REV"))
+}

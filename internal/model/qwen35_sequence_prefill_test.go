@@ -36,6 +36,10 @@ func newSequencePrefillBackend(m *Model) *sequencePrefillBackend {
 
 func (b *sequencePrefillBackend) Qwen35SequencePrefillPath() string { return b.path }
 
+func (b *sequencePrefillBackend) Qwen35SequenceEmbeddingRowsPath() string {
+	return compute.Qwen35SequenceEmbeddingRowsPath
+}
+
 func (b *sequencePrefillBackend) RetireRequestResources() {
 	b.retires++
 	b.retired = true
@@ -98,6 +102,20 @@ type sequenceMarkerOnlyBackend struct{ *recordingQwen35Backend }
 
 func (*sequenceMarkerOnlyBackend) Qwen35SequencePrefillPath() string {
 	return compute.Qwen35SequencePrefillPath
+}
+
+type sequencePrefillWithoutEmbeddingRows struct {
+	*recordingQwen35Backend
+	calls int
+}
+
+func (b *sequencePrefillWithoutEmbeddingRows) Qwen35SequencePrefillPath() string {
+	return compute.Qwen35SequencePrefillPath
+}
+
+func (b *sequencePrefillWithoutEmbeddingRows) Qwen35SequencePrefill(compute.Qwen35SequencePrefillRequest) (compute.Qwen35SequencePrefillResult, error) {
+	b.calls++
+	return compute.Qwen35SequencePrefillResult{}, errors.New("embedding-row-incapable backend was called")
 }
 
 func TestQwen35SequencePrefillDispatchCarriesResidentStateAndKV(t *testing.T) {
@@ -166,7 +184,7 @@ func (b *cappedSequencePrefillBackend) MaxWeightBufferBytes() int64 {
 	return b.maxBufferBytes
 }
 
-func assertOversizedEmbeddingFallbackStatus(t *testing.T, s *Session, base *sequencePrefillBackend, vocab int) {
+func assertOversizedEmbeddingFallbackStatus(t *testing.T, s *Session, base *sequencePrefillBackend, vocab int, packedRows bool, panelBytes int64) {
 	t.Helper()
 	if got := s.Prefill([]int{3, 7}); len(got) != vocab || base.gdnCalls == 0 {
 		t.Fatalf("ordinary fallback logits=%d scalar_calls=%d", len(got), base.gdnCalls)
@@ -176,10 +194,12 @@ func assertOversizedEmbeddingFallbackStatus(t *testing.T, s *Session, base *sequ
 	}
 	status, ok := s.Qwen35SequencePrefillRouteStatus()
 	want := Qwen35SequencePrefillRouteStatus{
-		RequestedPath:  compute.Qwen35SequencePrefillPath,
-		EffectivePath:  Qwen35SequencePrefillFallbackPath,
-		DeclineReason:  Qwen35SequencePrefillDeclineEmbeddingCap,
-		FallbackActive: true,
+		RequestedPath:       compute.Qwen35SequencePrefillPath,
+		EffectivePath:       Qwen35SequencePrefillFallbackPath,
+		DeclineReason:       Qwen35SequencePrefillDeclineEmbeddingCap,
+		FallbackActive:      true,
+		PackedEmbeddingRows: packedRows,
+		EmbeddingPanelBytes: panelBytes,
 	}
 	if !ok || status != want {
 		t.Fatalf("oversized route status=%+v present=%t, want %+v", status, ok, want)
@@ -213,7 +233,7 @@ func TestQwen35SequencePrefillDeclinesWhenEmbeddingExceedsDeviceCap(t *testing.T
 		if base.calls != 0 {
 			t.Fatalf("expected 0 sequence prefill calls on declined oversized embedding, got %d", base.calls)
 		}
-		assertOversizedEmbeddingFallbackStatus(t, s, base, m.Cfg.VocabSize)
+		assertOversizedEmbeddingFallbackStatus(t, s, base, m.Cfg.VocabSize, false, 0)
 	})
 
 	t.Run("Q2K", func(t *testing.T) {
@@ -249,7 +269,7 @@ func TestQwen35SequencePrefillDeclinesWhenEmbeddingExceedsDeviceCap(t *testing.T
 		if base.calls != 0 {
 			t.Fatalf("expected 0 sequence prefill calls on declined oversized Q2_K embedding, got %d", base.calls)
 		}
-		assertOversizedEmbeddingFallbackStatus(t, s, base, m.Cfg.VocabSize)
+		assertOversizedEmbeddingFallbackStatus(t, s, base, m.Cfg.VocabSize, true, int64(2*cfg.HiddenSize*compute.F32.Bytes()))
 	})
 
 	t.Run("VulkanDeviceCap", func(t *testing.T) {
@@ -553,7 +573,7 @@ func TestQwen35SequencePrefill_Q2KEmbedding(t *testing.T) {
 	}
 	defer s.Close()
 
-	ids := []int{1, 5, 9}
+	ids := []int{0, cfg.VocabSize / 2, cfg.VocabSize - 1, cfg.VocabSize / 2}
 	res, used, err := s.tryQwen35SequencePrefill(ids, true)
 	if err != nil {
 		t.Fatalf("tryQwen35SequencePrefill error: %v", err)
@@ -572,19 +592,92 @@ func TestQwen35SequencePrefill_Q2KEmbedding(t *testing.T) {
 	if req.TokenEmbedding.Buf() == nil {
 		t.Fatal("request TokenEmbedding buffer is nil")
 	}
-	if len(req.TokenEmbedding.Shape) != 2 || req.TokenEmbedding.Shape[0] != cfg.VocabSize || req.TokenEmbedding.Shape[1] != cfg.HiddenSize {
-		t.Fatalf("request TokenEmbedding shape = %v, want [%d, %d]", req.TokenEmbedding.Shape, cfg.VocabSize, cfg.HiddenSize)
+	if !req.TokenEmbeddingRows || req.TokenEmbeddingVocab != cfg.VocabSize {
+		t.Fatalf("request embedding rows=%t vocab=%d, want true/%d", req.TokenEmbeddingRows, req.TokenEmbeddingVocab, cfg.VocabSize)
+	}
+	if len(req.TokenEmbedding.Shape) != 2 || req.TokenEmbedding.Shape[0] != len(ids) || req.TokenEmbedding.Shape[1] != cfg.HiddenSize {
+		t.Fatalf("request TokenEmbedding shape = %v, want [%d, %d]", req.TokenEmbedding.Shape, len(ids), cfg.HiddenSize)
 	}
 
 	gotEmbedding := be.Read(req.TokenEmbedding)
-	wantEmbedding, err := q2k.DequantizeTable()
+	wantEmbedding, err := q2k.GatherRows(ids, cfg.embedScale())
 	if err != nil {
-		t.Fatalf("q2k.DequantizeTable: %v", err)
+		t.Fatalf("q2k.GatherRows: %v", err)
 	}
 	if len(gotEmbedding) != len(wantEmbedding) {
 		t.Fatalf("TokenEmbedding len = %d, want %d", len(gotEmbedding), len(wantEmbedding))
 	}
 	if d := maxAbsDelta(gotEmbedding, wantEmbedding); d > 1e-6 {
-		t.Fatalf("TokenEmbedding differs from dequantized Q2K table: max|delta|=%g", d)
+		t.Fatalf("TokenEmbedding differs from ordered Q2K row panel: max|delta|=%g", d)
+	}
+	if got := be.freeCalls[req.TokenEmbedding.Buf()]; got != 1 {
+		t.Fatalf("request embedding panel free count=%d, want exactly 1 after sequence call", got)
+	}
+	status, present := s.Qwen35SequencePrefillRouteStatus()
+	wantBytes := int64(len(ids) * cfg.HiddenSize * compute.F32.Bytes())
+	if !present || !status.PackedEmbeddingRows || status.EmbeddingPanelBytes != wantBytes || status.FallbackActive || !status.NativePerformanceQualifying {
+		t.Fatalf("Q2K sequence status=%+v present=%t, want native panel bytes=%d", status, present, wantBytes)
+	}
+}
+
+func TestQwen35SequencePrefillQ2KWholeTableRequestIsRefused(t *testing.T) {
+	cfg := qwen35HybridTestCfg()
+	cfg.HiddenSize = 256
+	m := NewSynthetic(cfg)
+	q2k, err := NewQ2KEmbedding(makeTestQ2KPayload(cfg.VocabSize, cfg.HiddenSize), cfg.VocabSize, cfg.HiddenSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Q2KEmbedding = q2k
+	delete(m.manifest, "model.embed_tokens.weight")
+	be := newSequencePrefillBackend(m)
+	s, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	func() {
+		defer func() {
+			if got := recover(); got != ErrPackedEmbeddingWholeTableRefused {
+				t.Fatalf("whole-table request panic=%v, want %v", got, ErrPackedEmbeddingWholeTableRefused)
+			}
+		}()
+		_ = s.qwen35SequencePrefillRequest([]int{0, cfg.VocabSize - 1}, false)
+	}()
+}
+
+func TestQwen35SequencePrefillQ2KMissingRowCapabilityIsExplicitlyNonQualifying(t *testing.T) {
+	cfg := qwen35HybridTestCfg()
+	cfg.HiddenSize = 256
+	cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim = 4, 2, 64
+	cfg.IntermediateSize = 512
+	cfg.LinearKeyHeadDim, cfg.LinearNumKeyHeads = 64, 2
+	cfg.LinearValueHeadDim, cfg.LinearNumValueHeads = 64, 4
+	m := NewSynthetic(cfg)
+	q2k, err := NewQ2KEmbedding(makeTestQ2KPayload(cfg.VocabSize, cfg.HiddenSize), cfg.VocabSize, cfg.HiddenSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Q2KEmbedding = q2k
+	m.manifest["lm_head.weight"] = m.manifest["model.embed_tokens.weight"]
+	delete(m.manifest, "model.embed_tokens.weight")
+	be := &sequencePrefillWithoutEmbeddingRows{recordingQwen35Backend: newRecordingQwen35Backend(m)}
+	s, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ids := []int{0, cfg.VocabSize - 1}
+	if got := s.Prefill(ids); len(got) != cfg.VocabSize || be.gdnCalls == 0 || be.calls != 0 {
+		t.Fatalf("fallback logits=%d scalar_gdn=%d sequence_calls=%d", len(got), be.gdnCalls, be.calls)
+	}
+	status, present := s.Qwen35SequencePrefillRouteStatus()
+	if !present || status.DeclineReason != Qwen35SequencePrefillDeclineEmbeddingRowsUnsupported || !status.FallbackActive || status.NativePerformanceQualifying || !status.PackedEmbeddingRows {
+		t.Fatalf("missing-row-capability status=%+v present=%t", status, present)
+	}
+	if err := s.RequireQwen35SequencePrefillNativePerformance(); err == nil || !strings.Contains(err.Error(), Qwen35SequencePrefillDeclineEmbeddingRowsUnsupported) {
+		t.Fatalf("native qualification error=%v", err)
 	}
 }

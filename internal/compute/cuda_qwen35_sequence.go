@@ -16,6 +16,10 @@ import (
 
 func (*cudaBackend) Qwen35SequencePrefillPath() string { return Qwen35SequencePrefillPath }
 
+func (*cudaBackend) Qwen35SequenceEmbeddingRowsPath() string {
+	return Qwen35SequenceEmbeddingRowsPath
+}
+
 func qwen35SequenceFailure(stage string, layer int, reason string) error {
 	return &Qwen35SequenceError{Stage: stage, Layer: layer, Reason: reason}
 }
@@ -172,13 +176,13 @@ func (c *cudaBackend) validateQwen35SequenceRequestLocked(req Qwen35SequencePref
 	if int64(req.StartPos) > qwen35GDNMaxCInt-int64(len(req.TokenIDs)) {
 		return nil, qwen35SequenceFailure("geometry", -1, "position range overflows the CUDA int ABI")
 	}
-	if err := c.validateQwen35SequenceTensor("token_embedding", req.TokenEmbedding, false, req.TokenEmbedding.Shape...); err != nil {
+	vocab, embeddingShape, err := qwen35SequenceEmbeddingContract(req)
+	if err != nil {
 		return nil, err
 	}
-	if len(req.TokenEmbedding.Shape) != 2 || req.TokenEmbedding.Shape[1] != req.Hidden {
-		return nil, qwen35SequenceFailure("tensor-preflight", -1, fmt.Sprintf("token_embedding shape %v, want [vocab,%d]", req.TokenEmbedding.Shape, req.Hidden))
+	if err := c.validateQwen35SequenceTensor("token_embedding", req.TokenEmbedding, false, embeddingShape...); err != nil {
+		return nil, err
 	}
-	vocab := req.TokenEmbedding.Shape[0]
 	for _, id := range req.TokenIDs {
 		if id < 0 || id >= vocab {
 			return nil, qwen35SequenceFailure("embedding-gather", -1, fmt.Sprintf("token id %d is outside vocabulary [0,%d)", id, vocab))
@@ -393,9 +397,18 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		return result, err
 	}
 	h2dStart, d2hStart := uint64(C.fcuda_h2dxfer_bytes()), uint64(C.fcuda_hostxfer_bytes())
-	x, xBuf, err := c.qwen35SequenceEmbeddingLocked(req.TokenEmbedding, req.TokenIDs, req.Hidden)
+	var x Tensor
+	var xBuf *cudaBuf
+	if req.TokenEmbeddingRows {
+		x, xBuf, err = c.qwen35SequenceAllocLocked([]int{tokens, req.Hidden}, "embedding-row-panel")
+		if err == nil {
+			C.fcuda_d2d(xBuf.ptr, req.TokenEmbedding.buf.(*cudaBuf).ptr, C.size_t(tokens*req.Hidden*F32.Bytes()))
+		}
+	} else {
+		x, xBuf, err = c.qwen35SequenceEmbeddingLocked(req.TokenEmbedding, req.TokenIDs, req.Hidden)
+	}
 	if err != nil {
-		return result, err
+		return result, &Qwen35SequenceError{Stage: "embedding-gather", Layer: -1, Cause: err}
 	}
 	h2dAfterGather, d2hAfterGather := uint64(C.fcuda_h2dxfer_bytes()), uint64(C.fcuda_hostxfer_bytes())
 	compactAttention := 0
