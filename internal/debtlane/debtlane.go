@@ -178,6 +178,7 @@ type DebtLane struct {
 	PerfProofReason         string             `json:"perf_proof_reason,omitempty"`
 	IsPerformance           bool               `json:"is_performance,omitempty"`  // Explicit performance lane override
 	NonPerformance          bool               `json:"non_performance,omitempty"` // Explicit non-performance lane override
+	CriticalPath            *CriticalPathInfo  `json:"critical_path,omitempty"`   // Production critical-path reachability and provenance (#12361).
 }
 
 // IsPerformanceLane returns true if the lane represents a performance-critical path that requires proof freshness.
@@ -223,23 +224,24 @@ type HealthSummary struct {
 
 // Report is the top-level scorecard payload for dedicated maturity debt lanes.
 type Report struct {
-	Schema          string          `json:"schema"`
-	OK              bool            `json:"ok"`
-	Verdict         string          `json:"verdict"` // OK or ACTION.
-	Finding         string          `json:"finding"`
-	Reason          string          `json:"reason"`
-	NextAction      string          `json:"next_action"`
-	Workspace       string          `json:"workspace"`
-	TargetRepo      string          `json:"target_repo,omitempty"` // "fak", "fak-private", "both"
-	EvaluatedAt     string          `json:"evaluated_at"`
-	Corpus          map[string]any  `json:"corpus"`
-	ProductionGrade ProductionGrade `json:"production_grade"`
-	InterestSummary InterestSummary `json:"interest_summary"`
-	HealthSummary   HealthSummary   `json:"health_summary"`
+	Schema          string           `json:"schema"`
+	OK              bool             `json:"ok"`
+	Verdict         string           `json:"verdict"` // OK or ACTION.
+	Finding         string           `json:"finding"`
+	Reason          string           `json:"reason"`
+	NextAction      string           `json:"next_action"`
+	Workspace       string           `json:"workspace"`
+	TargetRepo      string           `json:"target_repo,omitempty"` // "fak", "fak-private", "both"
+	EvaluatedAt     string           `json:"evaluated_at"`
+	Corpus          map[string]any   `json:"corpus"`
+	ProductionGrade ProductionGrade  `json:"production_grade"`
+	InterestSummary InterestSummary  `json:"interest_summary"`
+	HealthSummary   HealthSummary    `json:"health_summary"`
 	Lanes           []DebtLane       `json:"lanes"`
 	Hotspots        []DebtLane       `json:"hotspots"` // Top debt lanes ranked worst-first.
 	WavePlan        *WavePlan        `json:"wave_plan,omitempty"`
-	Coverage        *CoverageReceipt `json:"coverage,omitempty"` // 3x discovery breadth & detector depth receipt (#12318).
+	Coverage        *CoverageReceipt `json:"coverage,omitempty"`       // 3x discovery breadth & detector depth receipt (#12318).
+	CriticalPaths   CriticalPathMap  `json:"critical_paths,omitempty"` // Production critical path map (#12361).
 }
 
 // Options parameters for scanning and evaluating debt lanes.
@@ -259,6 +261,8 @@ type Options struct {
 	TopN              int
 	// Facts override allows tests to inject hermetic unit of work facts without disk I/O.
 	Facts []DebtLane
+	// Graph override allows tests to inject an import dependency graph in tests.
+	Graph map[string]map[string]struct{}
 	// Clock allows deterministic timestamp injection in tests.
 	Clock func() time.Time
 }

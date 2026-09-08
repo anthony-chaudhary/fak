@@ -178,6 +178,11 @@ type InKernelPlanner struct {
 	specDraftDepth    int
 
 	metalMTPCoordinator *model.MetalMTPCoordinator
+	mtpCanaryMu         sync.RWMutex
+	mtpCanaryManager    *model.Qwen38MTPCanaryManager
+	mtpCanaryRequest    model.Qwen38CanaryRequest
+	mtpKillSwitch       *model.Qwen38MTPKillSwitch
+	mtpCanaryResult     model.Qwen38CanaryDecision
 }
 
 type inKernelOOMRetryClassStats struct {
@@ -622,10 +627,13 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 			panic(r)
 		}
 	}()
-	if p.metalMTPCoordinator != nil {
+	targetOnly := false
+	if p.metalMTPCoordinator != nil && p.qwen38MTPCanaryAllowsExecution() {
 		return p.generateReusedMetalMTP(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
+	} else if p.metalMTPCoordinator != nil {
+		targetOnly = true
 	}
-	if p.speculativeEngine != nil {
+	if !targetOnly && p.speculativeEngine != nil {
 		return p.generateReusedSpeculative(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	}
 	gen, promptTok, cacheable, matched, sourceTier, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
@@ -697,6 +705,91 @@ func (p *InKernelPlanner) DisableMetalMTP() {
 	if p.metalMTPCoordinator != nil {
 		_ = p.metalMTPCoordinator.Close()
 		p.metalMTPCoordinator = nil
+	}
+}
+
+// ConfigureQwen38MTPCanary connects witnessed canary admission to the planner's
+// real Metal MTP decode branch. A fresh matching witness or explicit operator
+// opt-in enables the coordinator; every other decision leaves ordinary
+// fak-native target decode selected. The kill switch is retained and rechecked
+// on every generation so an operator can revoke an already-admitted planner.
+func (p *InKernelPlanner) ConfigureQwen38MTPCanary(
+	manager *model.Qwen38MTPCanaryManager,
+	request model.Qwen38CanaryRequest,
+	killSwitch *model.Qwen38MTPKillSwitch,
+	cfg ...model.MetalMTPConfig,
+) (model.Qwen38CanaryDecision, error) {
+	if manager == nil {
+		manager = model.NewQwen38MTPCanaryManager()
+	}
+	decision := manager.EvaluateCanary(request)
+	if killSwitch != nil {
+		if allowed, reason := killSwitch.CheckEligible(); !allowed {
+			decision = qwen38MTPTargetOnlyResult(request.Envelope, reason, "MTP runtime kill switch is engaged")
+		}
+	}
+
+	p.mtpCanaryMu.Lock()
+	p.mtpCanaryManager = manager
+	p.mtpCanaryRequest = request
+	p.mtpKillSwitch = killSwitch
+	p.mtpCanaryResult = decision
+	p.mtpCanaryMu.Unlock()
+
+	if decision.Engine != model.Qwen38EngineMTP {
+		p.DisableMetalMTP()
+		return decision, nil
+	}
+	p.DisableMetalMTP()
+	if err := p.EnableMetalMTP(cfg...); err != nil {
+		decision = qwen38MTPTargetOnlyResult(request.Envelope, model.Qwen38MTPAttemptFailed, err.Error())
+		p.mtpCanaryMu.Lock()
+		p.mtpCanaryResult = decision
+		p.mtpCanaryMu.Unlock()
+		return decision, err
+	}
+	return decision, nil
+}
+
+// Qwen38MTPCanaryResult returns the last production admission result. The
+// returned value is a copy and cannot mutate planner state.
+func (p *InKernelPlanner) Qwen38MTPCanaryResult() model.Qwen38CanaryDecision {
+	p.mtpCanaryMu.RLock()
+	defer p.mtpCanaryMu.RUnlock()
+	return p.mtpCanaryResult
+}
+
+func (p *InKernelPlanner) qwen38MTPCanaryAllowsExecution() bool {
+	p.mtpCanaryMu.RLock()
+	manager := p.mtpCanaryManager
+	request := p.mtpCanaryRequest
+	killSwitch := p.mtpKillSwitch
+	p.mtpCanaryMu.RUnlock()
+
+	// A coordinator installed through the pre-existing explicit API remains an
+	// explicit override. Only planners configured with a canary manager are
+	// subject to this evidence gate.
+	if manager == nil {
+		return true
+	}
+	decision := manager.EvaluateCanary(request)
+	if killSwitch != nil {
+		if allowed, reason := killSwitch.CheckEligible(); !allowed {
+			decision = qwen38MTPTargetOnlyResult(request.Envelope, reason, "MTP runtime kill switch is engaged")
+		}
+	}
+	p.mtpCanaryMu.Lock()
+	p.mtpCanaryResult = decision
+	p.mtpCanaryMu.Unlock()
+	return decision.Engine == model.Qwen38EngineMTP
+}
+
+func qwen38MTPTargetOnlyResult(envelope model.Qwen38CanaryEnvelope, reason model.Qwen38MTPDowngradeReason, detail string) model.Qwen38CanaryDecision {
+	return model.Qwen38CanaryDecision{
+		Engine:          model.Qwen38EngineTargetDecode,
+		DowngradeReason: reason,
+		RejectionReason: detail,
+		Envelope:        envelope,
 	}
 }
 

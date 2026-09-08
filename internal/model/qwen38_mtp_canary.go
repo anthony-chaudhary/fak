@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Qwen38MTPCanaryReceiptSchema is the canonical schema for Qwen3.8 MTP canary receipts.
@@ -38,9 +39,10 @@ type Qwen38CanaryEnvelope struct {
 
 // Qwen38CanaryRequest describes an incoming inference request for canary adjudication.
 type Qwen38CanaryRequest struct {
-	Envelope      Qwen38CanaryEnvelope `json:"envelope"`
-	OperatorOptIn bool                 `json:"operator_opt_in"`
-	ModelReady    bool                 `json:"model_ready"`
+	Envelope          Qwen38CanaryEnvelope `json:"envelope"`
+	EvidenceReceiptID string               `json:"evidence_receipt_id,omitempty"`
+	OperatorOptIn     bool                 `json:"operator_opt_in"`
+	ModelReady        bool                 `json:"model_ready"`
 }
 
 // Qwen38CanaryDecision captures the result of canary envelope evaluation.
@@ -73,6 +75,35 @@ type Qwen38MTPCanaryReceipt struct {
 	CircuitStatus   CanaryCircuitStatus      `json:"circuit_status"`
 	LatencyNS       Qwen38MTPLatencyNS       `json:"latency_ns"`
 	MemoryBytes     Qwen38MTPMemoryBytes     `json:"memory_bytes"`
+}
+
+// Qwen38MTPCanaryEvidence binds a validated performance/correctness receipt to
+// its observation and expiry window. The receipt carries both identities the
+// gate relies on: ReceiptID identifies the witness, while Envelope.ArtifactHash
+// identifies the exact model artifact the witness measured.
+type Qwen38MTPCanaryEvidence struct {
+	Receipt    Qwen38MTPCanaryReceipt `json:"receipt"`
+	ObservedAt time.Time              `json:"observed_at"`
+	ValidUntil time.Time              `json:"valid_until"`
+}
+
+// Validate rejects evidence that is not a successful, time-bounded MTP witness
+// for a content-addressed artifact. Expiry is evaluated at admission time so a
+// once-valid witness cannot silently remain authoritative forever.
+func (e Qwen38MTPCanaryEvidence) Validate() error {
+	if err := e.Receipt.Validate(); err != nil {
+		return fmt.Errorf("model: invalid MTP canary evidence receipt: %w", err)
+	}
+	if !e.Receipt.DefaultOn || e.Receipt.Engine != Qwen38EngineMTP {
+		return errors.New("model: MTP canary evidence must witness successful default-on fak-native MTP")
+	}
+	if _, ok := normalizeCanaryArtifactHash(e.Receipt.Envelope.ArtifactHash); !ok {
+		return fmt.Errorf("model: MTP canary evidence artifact hash %q is not SHA-256", e.Receipt.Envelope.ArtifactHash)
+	}
+	if e.ObservedAt.IsZero() || e.ValidUntil.IsZero() || !e.ValidUntil.After(e.ObservedAt) {
+		return errors.New("model: MTP canary evidence requires a non-empty validity window")
+	}
+	return nil
 }
 
 // Validate verifies that the canary receipt adheres to all schema and safety invariants.
@@ -131,42 +162,56 @@ func (r Qwen38MTPCanaryReceipt) Validate() error {
 // Qwen38MTPCanaryManager enforces certified canary envelopes, automated default-on activation,
 // and safety ratchet circuit breaking.
 type Qwen38MTPCanaryManager struct {
-	mu                   sync.RWMutex
-	provenArtifactHashes map[string]bool
-	circuitStatus        CanaryCircuitStatus
-	circuitTripReason    string
-	totalEvaluations     int64
-	canaryDefaultCount   int64
-	optInCount           int64
-	targetOnlyCount      int64
-	divergenceCount      int64
-	errorCount           int64
+	mu                 sync.RWMutex
+	evidenceByReceipt  map[string]Qwen38MTPCanaryEvidence
+	circuitStatus      CanaryCircuitStatus
+	circuitTripReason  string
+	totalEvaluations   int64
+	canaryDefaultCount int64
+	optInCount         int64
+	targetOnlyCount    int64
+	divergenceCount    int64
+	errorCount         int64
 }
 
-// NewQwen38MTPCanaryManager initializes a canary manager with default proven hashes and closed circuit.
+// NewQwen38MTPCanaryManager initializes an empty, fail-closed evidence registry
+// and a closed circuit. No artifact is trusted until a validated witness is
+// registered; in particular, a literal label can never manufacture admission.
 func NewQwen38MTPCanaryManager() *Qwen38MTPCanaryManager {
-	m := &Qwen38MTPCanaryManager{
-		provenArtifactHashes: make(map[string]bool),
-		circuitStatus:        CanaryCircuitClosed,
+	return &Qwen38MTPCanaryManager{
+		evidenceByReceipt: make(map[string]Qwen38MTPCanaryEvidence),
+		circuitStatus:     CanaryCircuitClosed,
 	}
-	// Seed canonical proven Qwen3.8 artifact baseline hash
-	h := sha256.Sum256([]byte("qwen3.8-mtp-certified-v1"))
-	m.provenArtifactHashes[hex.EncodeToString(h[:])] = true
-	return m
 }
 
-// RegisterProvenArtifact adds a verified artifact SHA256 hash to the certified set.
-func (m *Qwen38MTPCanaryManager) RegisterProvenArtifact(hash string) {
+// RegisterCanaryEvidence adds a validated receipt and its bounded freshness
+// window to the admission registry. Receipt IDs are immutable identities: a
+// second registration may refresh the identical witness, but cannot rebind the
+// ID to another artifact or envelope.
+func (m *Qwen38MTPCanaryManager) RegisterCanaryEvidence(evidence Qwen38MTPCanaryEvidence) error {
+	if err := evidence.Validate(); err != nil {
+		return err
+	}
+	receiptID := strings.TrimSpace(evidence.Receipt.ReceiptID)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.provenArtifactHashes[strings.ToLower(strings.TrimSpace(hash))] = true
+	if previous, ok := m.evidenceByReceipt[receiptID]; ok && !canaryEvidenceIdentityMatches(previous, evidence) {
+		return fmt.Errorf("model: MTP canary receipt identity %q is already bound to another envelope", receiptID)
+	}
+	m.evidenceByReceipt[receiptID] = evidence
+	return nil
 }
 
-// IsArtifactProven checks whether an artifact hash is in the proven set.
-func (m *Qwen38MTPCanaryManager) IsArtifactProven(hash string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.provenArtifactHashes[strings.ToLower(strings.TrimSpace(hash))]
+func canaryEvidenceIdentityMatches(a, b Qwen38MTPCanaryEvidence) bool {
+	aHash, aOK := normalizeCanaryArtifactHash(a.Receipt.Envelope.ArtifactHash)
+	bHash, bOK := normalizeCanaryArtifactHash(b.Receipt.Envelope.ArtifactHash)
+	return aOK && bOK && strings.TrimSpace(a.Receipt.ReceiptID) == strings.TrimSpace(b.Receipt.ReceiptID) &&
+		aHash == bHash &&
+		strings.EqualFold(strings.TrimSpace(a.Receipt.Envelope.ModelFamily), strings.TrimSpace(b.Receipt.Envelope.ModelFamily)) &&
+		a.Receipt.Envelope.Format == b.Receipt.Envelope.Format &&
+		a.Receipt.Envelope.Backend == b.Receipt.Envelope.Backend &&
+		a.Receipt.Envelope.HeadroomBytes == b.Receipt.Envelope.HeadroomBytes &&
+		a.Receipt.Envelope.DraftDepth == b.Receipt.Envelope.DraftDepth
 }
 
 // TripCircuitBreaker immediately trips the safety circuit breaker, revoking canary default status.
@@ -264,10 +309,22 @@ func (m *Qwen38MTPCanaryManager) EvaluateCanary(req Qwen38CanaryRequest) Qwen38C
 		rejectionReasons = append(rejectionReasons, fmt.Sprintf("headroom %d <= 2GB threshold", env.HeadroomBytes))
 	}
 
-	// Artifact hash check
-	cleanHash := strings.ToLower(strings.TrimSpace(env.ArtifactHash))
-	if cleanHash == "" || !m.provenArtifactHashes[cleanHash] {
-		rejectionReasons = append(rejectionReasons, fmt.Sprintf("artifact hash %q is unproven", env.ArtifactHash))
+	// Evidence check: a request names the exact receipt whose validated envelope
+	// authorized this artifact. Unknown IDs are missing evidence; a known receipt
+	// with another artifact/envelope is mismatched; an expired receipt is stale.
+	evidenceReason := Qwen38MTPEligible
+	receiptID := strings.TrimSpace(req.EvidenceReceiptID)
+	evidence, found := m.evidenceByReceipt[receiptID]
+	switch {
+	case receiptID == "" || !found:
+		evidenceReason = Qwen38MTPEvidenceMissing
+		rejectionReasons = append(rejectionReasons, "witnessed canary evidence is missing")
+	case !time.Now().Before(evidence.ValidUntil):
+		evidenceReason = Qwen38MTPEvidenceStale
+		rejectionReasons = append(rejectionReasons, fmt.Sprintf("canary evidence receipt %q is stale", receiptID))
+	case !canaryEnvelopesMatch(evidence.Receipt.Envelope, env):
+		evidenceReason = Qwen38MTPEvidenceMismatch
+		rejectionReasons = append(rejectionReasons, fmt.Sprintf("canary evidence receipt %q does not match the requested envelope", receiptID))
 	}
 
 	// Bounded draft depth (1 <= K <= 4)
@@ -310,15 +367,43 @@ func (m *Qwen38MTPCanaryManager) EvaluateCanary(req Qwen38CanaryRequest) Qwen38C
 	}
 
 	m.targetOnlyCount++
+	downgradeReason := Qwen38MTPQualityOutsideEnvelope
+	if evidenceReason != Qwen38MTPEligible {
+		downgradeReason = evidenceReason
+	}
 	return Qwen38CanaryDecision{
 		CanaryDefaultOn: false,
 		Engine:          Qwen38EngineTargetDecode,
-		DowngradeReason: Qwen38MTPQualityOutsideEnvelope,
+		DowngradeReason: downgradeReason,
 		InsideEnvelope:  false,
 		CircuitTripped:  false,
 		RejectionReason: rejectionText,
 		Envelope:        env,
 	}
+}
+
+// Evidence-specific downgrade reasons preserve the distinction between absent,
+// wrong, and expired authority while keeping every fallback on fak-native target
+// decode. They intentionally do not imply a different execution engine.
+const (
+	Qwen38MTPEvidenceMissing  Qwen38MTPDowngradeReason = "canary_evidence_missing"
+	Qwen38MTPEvidenceMismatch Qwen38MTPDowngradeReason = "canary_evidence_mismatch"
+	Qwen38MTPEvidenceStale    Qwen38MTPDowngradeReason = "canary_evidence_stale"
+)
+
+func normalizeCanaryArtifactHash(hash string) (string, bool) {
+	clean := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(hash)), "sha256:")
+	decoded, err := hex.DecodeString(clean)
+	return clean, err == nil && len(decoded) == sha256.Size
+}
+
+func canaryEnvelopesMatch(witnessed, requested Qwen38CanaryEnvelope) bool {
+	knownHash, hashOK := normalizeCanaryArtifactHash(witnessed.ArtifactHash)
+	requestedHash, requestedOK := normalizeCanaryArtifactHash(requested.ArtifactHash)
+	return hashOK && requestedOK && knownHash == requestedHash &&
+		strings.EqualFold(strings.TrimSpace(witnessed.ModelFamily), strings.TrimSpace(requested.ModelFamily)) &&
+		witnessed.Format == requested.Format && witnessed.Backend == requested.Backend &&
+		witnessed.DraftDepth == requested.DraftDepth && requested.HeadroomBytes >= witnessed.HeadroomBytes
 }
 
 // EmitReceipt constructs and validates a Qwen38MTPCanaryReceipt witnessing the run.
