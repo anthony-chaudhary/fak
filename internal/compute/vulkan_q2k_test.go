@@ -18,6 +18,9 @@ type q2FusedMLPBackend interface {
 	Backend
 	RMSNormMatMul2(Tensor, Tensor, Tensor, Tensor, float32) (Tensor, Tensor)
 	SwiGLUMatMulAddInPlace(Tensor, Tensor, Tensor, Tensor)
+	VulkanDebugResetDispatchProfile()
+	VulkanDebugQ2KDispatchSnapshot() (compute, q2k, swiglu, add uint64)
+	VulkanDebugTransientSnapshot() (buffers int, bytes int64)
 	BeginBatch()
 	FlushBatch()
 	Recycle()
@@ -227,7 +230,7 @@ func TestVulkanQ2KFusedRMSNormMatMul2(t *testing.T) {
 	}
 }
 
-func TestVulkanQ2KFusedSwiGLUMatMulAdd(t *testing.T) {
+func TestVulkanQ2KSwiGLUMatMulAdd(t *testing.T) {
 	v := q2FusedDevice(t)
 	for _, tc := range []struct {
 		dtype Dtype
@@ -240,13 +243,45 @@ func TestVulkanQ2KFusedSwiGLUMatMulAdd(t *testing.T) {
 			dw, dg, du := q2FusedUpload(t, v, w), q2FusedUpload(t, v, gate), q2FusedUpload(t, v, up)
 			dst, baseline := q2FusedUpload(t, v, residual), q2FusedUpload(t, v, residual)
 			t.Cleanup(v.Recycle)
+			beforeBuffers, beforeBytes := v.VulkanDebugTransientSnapshot()
+			v.VulkanDebugResetDispatchProfile()
 			v.SwiGLUMatMulAddInPlace(dst, dw, dg, du)
+			computeDispatches, q2Dispatches, swigluDispatches, addDispatches := v.VulkanDebugQ2KDispatchSnapshot()
+			afterBuffers, afterBytes := v.VulkanDebugTransientSnapshot()
+			if tc.dtype == Q2_K {
+				wantBuffers, wantBytes := 2, int64(p*512*F32.Bytes()+p*8*F32.Bytes())
+				wantCompute, wantQ2, wantSwiGLU, wantAdd := uint64(3), uint64(1), uint64(1), uint64(1)
+				if p == 1 {
+					wantBuffers, wantBytes = 0, 0
+					wantCompute, wantSwiGLU, wantAdd = 1, 0, 0
+				}
+				if gotBuffers, gotBytes := afterBuffers-beforeBuffers, afterBytes-beforeBytes; gotBuffers != wantBuffers || gotBytes != wantBytes {
+					t.Fatalf("Q2_K P=%d transient delta=(buffers=%d bytes=%d), want (%d %d)", p, gotBuffers, gotBytes, wantBuffers, wantBytes)
+				}
+				if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") == "1" &&
+					(computeDispatches != wantCompute || q2Dispatches != wantQ2 || swigluDispatches != wantSwiGLU || addDispatches != wantAdd) {
+					t.Fatalf("Q2_K P=%d dispatch delta=(compute=%d q2=%d swiglu=%d add=%d), want (%d %d %d %d)",
+						p, computeDispatches, q2Dispatches, swigluDispatches, addDispatches,
+						wantCompute, wantQ2, wantSwiGLU, wantAdd)
+				}
+				t.Logf("Q2_K P=%d dispatches=(compute=%d q2=%d swiglu=%d add=%d) transient_delta=(buffers=%d bytes=%d)",
+					p, computeDispatches, q2Dispatches, swigluDispatches, addDispatches,
+					afterBuffers-beforeBuffers, afterBytes-beforeBytes)
+			}
 			v.AddInPlace(baseline, v.BatchedMatMul(dw, v.SwiGLU(dg, du), p))
 			cpu := Default().Read(Default().BatchedMatMul(w, Default().SwiGLU(gate, up), p))
 			for i, x := range Default().Read(residual) {
 				cpu[i] += x
 			}
-			q2FusedCompare(t, v.Read(dst), cpu, v.Read(baseline))
+			got, unfused := v.Read(dst), v.Read(baseline)
+			q2FusedCompare(t, got, cpu, unfused)
+			if tc.dtype == Q2_K && p == 1 {
+				gotArgmax, wantArgmax := argmaxF32(got), argmaxF32(cpu)
+				if gotArgmax != wantArgmax || gotArgmax != argmaxF32(unfused) {
+					t.Fatalf("Q2_K fused greedy argmax=%d, CPU=%d unfused=%d", gotArgmax, wantArgmax, argmaxF32(unfused))
+				}
+				t.Logf("Q2_K fused parity cosine=%.8f greedy_argmax=%d", cosineC(got, cpu), gotArgmax)
+			}
 		})
 	}
 	for _, dtype := range []Dtype{Q5_K, Q6_K} {
@@ -327,13 +362,15 @@ func TestVulkanQ2KShaderInvariants(t *testing.T) {
 
 	requiredClauses := []string{
 		"#version 450",
-		"layout(local_size_x = 64) in;",
+		"layout(local_size_x = 256) in;",
 		"layout(std430, set = 0, binding = 0) readonly buffer Q2K",
 		"layout(std430, set = 0, binding = 1) readonly buffer X",
-		"layout(std430, set = 0, binding = 2) writeonly buffer Y",
+		"layout(std430, set = 0, binding = 2) readonly buffer U",
+		"layout(std430, set = 0, binding = 3) buffer Y",
 		"int outDim;",
 		"int inDim;",
 		"int tokens;",
+		"int fused;",
 		"uint base = uint((row * blocks + sb) * 84);",
 		"halfAt(base + 80u)",
 		"halfAt(base + 82u)",
@@ -342,6 +379,53 @@ func TestVulkanQ2KShaderInvariants(t *testing.T) {
 	for _, clause := range requiredClauses {
 		if !strings.Contains(src, clause) {
 			t.Errorf("q2k_matmul.comp missing required clause: %q", clause)
+		}
+	}
+}
+
+func TestVulkanQ2KSwiGLUMatMulAddSourceContract(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd failed: %v", err)
+	}
+	repoRoot := findRepoRootForTest(t, wd)
+	checks := []struct {
+		path    string
+		clauses []string
+	}{
+		{
+			path: filepath.Join(repoRoot, "internal", "compute", "shaders", "q2k_matmul.comp"),
+			clauses: []string{
+				"binding = 2) readonly buffer U",
+				"binding = 3) buffer Y",
+				"int fused;",
+				"pc.fused != 0",
+			},
+		},
+		{
+			path: filepath.Join(repoRoot, "internal", "compute", "vulkan_shim.cpp"),
+			clauses: []string{
+				"buildKernel(g_kern[K_Q2K_MATMUL], P(\"q2k_matmul.spv\"), 4, 4 * sizeof(int))",
+				"fvk_swiglu_q2k_matmul_add_f32",
+			},
+		},
+		{
+			path: filepath.Join(repoRoot, "internal", "compute", "vulkan.go"),
+			clauses: []string{
+				"C.fvk_swiglu_q2k_matmul_add_f32",
+				"w.Dtype == Q2_K && P == 1",
+			},
+		},
+	}
+	for _, check := range checks {
+		raw, err := os.ReadFile(check.path)
+		if err != nil {
+			t.Fatalf("read %s: %v", check.path, err)
+		}
+		for _, clause := range check.clauses {
+			if !strings.Contains(string(raw), clause) {
+				t.Errorf("%s missing fused Q2_K contract clause %q", filepath.Base(check.path), clause)
+			}
 		}
 	}
 }

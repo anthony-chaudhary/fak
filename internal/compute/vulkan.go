@@ -13,6 +13,10 @@ package compute
 #cgo LDFLAGS: -L${SRCDIR} -lfakvulkan
 #include <stdlib.h>
 #include "vulkan_backend.h"
+// Issue-local adapter while the shared Vulkan C ABI remains stable: the fused Q2_K
+// tail reuses the required q2k_matmul pipeline rather than adding an optional module.
+void fvk_swiglu_q2k_matmul_add_f32(const void *dW, const void *dG, const void *dU,
+                                   void *dD, int out, int in, int P);
 */
 import "C"
 
@@ -220,6 +224,27 @@ func (v *vulkanBackend) VulkanDebugResetQ4KFusionProfile() {
 	v.q4kComposedRMSNormCalls = 0
 	v.q4kFusionSwiGLUCalls = 0
 	v.q4kComposedSwiGLUCalls = 0
+}
+
+func (v *vulkanBackend) VulkanDebugTransientSnapshot() (buffers int, bytes int64) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	for _, b := range v.transient {
+		if b != nil && b.ptr != nil {
+			buffers++
+			bytes += int64(b.n)
+		}
+	}
+	return buffers, bytes
+}
+
+func (v *vulkanBackend) VulkanDebugQ2KDispatchSnapshot() (compute, q2k, swiglu, add uint64) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	var p C.fvk_dispatch_profile
+	C.fvk_dispatch_profile_snapshot(&p)
+	return uint64(p.compute_dispatches), uint64(p.q2k_matmul_dispatches),
+		uint64(p.other_swiglu_dispatches), uint64(p.other_add_dispatches)
 }
 
 type vulkanGDNConfigurer interface {
@@ -1637,6 +1662,11 @@ func (v *vulkanBackend) SwiGLUMatMulAddInPlace(dst, w, gate, up Tensor) {
 	case F32:
 		C.fvk_swiglu_matmul_add_f32(v.vp(w), v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))
 	case Q4_K, Q2_K:
+		if w.Dtype == Q2_K && P == 1 {
+			wb := w.buf.(*vulkanBuf)
+			C.fvk_swiglu_q2k_matmul_add_f32(wb.ptr, v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))
+			return
+		}
 		if w.Dtype == Q4_K && v.selectQ4KFusionLocked(P) {
 			v.q4kFusionSwiGLUCalls++
 			C.fvk_swiglu_q4k_matmul_add_f32(v.vp(w), v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))

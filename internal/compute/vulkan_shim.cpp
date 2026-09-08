@@ -1024,7 +1024,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     }
     buildKernel(g_kern[K_RMSNORM_Q4K_MATMUL2], P("rmsnorm_q4k_matmul2.spv"), 6, 4 * sizeof(int) + sizeof(float));
     buildKernel(g_kern[K_SWIGLU_Q4K_MATMUL_ADD], P("swiglu_q4k_matmul_add.spv"), 4, 3 * sizeof(int));
-    ok &= buildKernel(g_kern[K_Q2K_MATMUL], P("q2k_matmul.spv"), 3, 3 * sizeof(int));
+    ok &= buildKernel(g_kern[K_Q2K_MATMUL], P("q2k_matmul.spv"), 4, 4 * sizeof(int));
     if (!ok) return 8;
     // Q8 kernel is built only when the device advertised the int8/8-bit-storage features; its
     // SPIR-V uses them, so loading it without the enabled device feature would be invalid. If
@@ -1693,10 +1693,23 @@ extern "C" void fvk_q4k_matmul_f32(const void* dQ4K, const void* dX, void* dY,
     dispatch(g_kern[K_Q4K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)(((size_t)out * P + 63) / 64));
 }
 extern "C" void fvk_q2k_matmul_f32(const void* dQ2K, const void* dX, void* dY,
-                         int out, int in, int P) {
-    struct PC { int out, in, p; } pc{out, in, P};
-    Buffer* bufs[3] = {B((void*)dQ2K), B((void*)dX), B(dY)};
-    dispatch(g_kern[K_Q2K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)(((size_t)out * P + 63) / 64));
+                          int out, int in, int P) {
+    struct PC { int out, in, p, fused; } pc{out, in, P, 0};
+    // Mode 0 ignores binding 2. Rebinding X keeps the descriptor valid without
+    // allocating a dummy buffer or changing the ordinary packed-Q2 contract.
+    Buffer* bufs[4] = {B((void*)dQ2K), B((void*)dX), B((void*)dX), B(dY)};
+    dispatch(g_kern[K_Q2K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)(((size_t)out * P + 255) / 256));
+}
+extern "C" void fvk_swiglu_q2k_matmul_add_f32(const void* dQ2K, const void* dG,
+                                                const void* dU, void* dD,
+                                                int out, int in, int P) {
+    if (P != 1) {
+        fprintf(stderr, "fak-vulkan: fused Q2_K SwiGLU down projection is decode-only\n");
+        abort();
+    }
+    struct PC { int out, in, p, fused; } pc{out, in, P, 1};
+    Buffer* bufs[4] = {B((void*)dQ2K), B((void*)dG), B((void*)dU), B(dD)};
+    dispatch(g_kern[K_Q2K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)(((size_t)out * P + 255) / 256));
 }
 extern "C" void fvk_dispatch_profile_snapshot(fvk_dispatch_profile* out) {
     if (!out) return;

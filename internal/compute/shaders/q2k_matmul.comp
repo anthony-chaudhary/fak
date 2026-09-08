@@ -2,7 +2,8 @@
 
 // q2k_matmul.comp — GGML Q2_K 2-bit quantized matrix multiplication for Vulkan 1.2 / RADV.
 //
-// Y[P, outDim] = X[P, inDim] @ W[outDim, inDim]^T
+// Mode 0: Y[P, outDim] = X[P, inDim] @ W[outDim, inDim]^T.
+// Mode 1 (decode only): Y[outDim] += silu(X[inDim]) * U[inDim] @ W^T.
 //
 // Q2_K superblock layout (256 weights, 84 bytes):
 //   - scales: 16 bytes (offset 0..15; low 4 bits = scale mult, high 4 bits = min mult)
@@ -10,17 +11,23 @@
 //   - d:      half (f16, offset 80..81)
 //   - dmin:   half (f16, offset 82..83)
 
-layout(local_size_x = 64) in;
+layout(local_size_x = 256) in;
 
 layout(std430, set = 0, binding = 0) readonly buffer Q2K { uint raw[]; };
 layout(std430, set = 0, binding = 1) readonly buffer X   { float x[]; };
-layout(std430, set = 0, binding = 2) writeonly buffer Y  { float y[]; };
+layout(std430, set = 0, binding = 2) readonly buffer U   { float u[]; };
+layout(std430, set = 0, binding = 3) buffer Y            { float y[]; };
 
 layout(push_constant) uniform PC {
     int outDim;
     int inDim;
     int tokens;
+    int fused;
 } pc;
+
+// The fused arm computes each 256-value activation superblock once per workgroup,
+// instead of repeating sigmoid evaluation for every output row.
+shared float fusedX[256];
 
 uint byteAt(uint off) {
     uint w = raw[off >> 2];
@@ -37,7 +44,7 @@ void main() {
     int row;
     int token;
 
-    // Handles both 1D dispatch ((outDim * tokens + 63) / 64) and 2D dispatch
+    // Handles both 1D dispatch ((outDim * tokens + 255) / 256) and 2D dispatch.
     if (pc.tokens > 1 && gl_NumWorkGroups.y == 1u) {
         row = globalIdx % pc.outDim;
         token = globalIdx / pc.outDim;
@@ -45,17 +52,26 @@ void main() {
         row = int(gl_GlobalInvocationID.x);
         token = int(gl_GlobalInvocationID.y);
     }
-    if (row >= pc.outDim || token >= pc.tokens) return;
+    bool valid = row < pc.outDim && token < pc.tokens;
 
     int blocks = pc.inDim / 256;
     float sum = 0.0;
 
     for (int sb = 0; sb < blocks; ++sb) {
+        uint xBase = uint(token * pc.inDim + sb * 256);
+        if (pc.fused != 0) {
+            for (uint i = gl_LocalInvocationID.x; i < 256u; i += gl_WorkGroupSize.x) {
+                float g = x[xBase + i];
+                fusedX[i] = (g / (1.0 + exp(-g))) * u[xBase + i];
+            }
+            barrier();
+        }
+
+        if (valid) {
         uint base = uint((row * blocks + sb) * 84);
         float d = halfAt(base + 80u);
         float min_val = halfAt(base + 82u);
 
-        uint xBase = uint(token * pc.inDim + sb * 256);
         uint is_idx = 0u;
         uint qi_offset = 0u;
 
@@ -89,48 +105,65 @@ void main() {
                     uint q0_0 = qw0 & 0xFFu;
                     uint code0_0 = (q0_0 >> shift) & 3u;
                     float w0_0 = dl0 * float(code0_0) - ml0;
-                    sum += w0_0 * x[x0];
+                    float x0_0 = pc.fused != 0 ? fusedX[x0 - xBase] : x[x0];
+                    sum += w0_0 * x0_0;
 
                     uint q1_0 = qw1 & 0xFFu;
                     uint code1_0 = (q1_0 >> shift) & 3u;
                     float w1_0 = dl1 * float(code1_0) - ml1;
-                    sum += w1_0 * x[x1];
+                    float x1_0 = pc.fused != 0 ? fusedX[x1 - xBase] : x[x1];
+                    sum += w1_0 * x1_0;
 
                     uint q0_1 = (qw0 >> 8u) & 0xFFu;
                     uint code0_1 = (q0_1 >> shift) & 3u;
                     float w0_1 = dl0 * float(code0_1) - ml0;
-                    sum += w0_1 * x[x0 + 1u];
+                    float x0_1 = pc.fused != 0 ? fusedX[x0 + 1u - xBase] : x[x0 + 1u];
+                    sum += w0_1 * x0_1;
 
                     uint q1_1 = (qw1 >> 8u) & 0xFFu;
                     uint code1_1 = (q1_1 >> shift) & 3u;
                     float w1_1 = dl1 * float(code1_1) - ml1;
-                    sum += w1_1 * x[x1 + 1u];
+                    float x1_1 = pc.fused != 0 ? fusedX[x1 + 1u - xBase] : x[x1 + 1u];
+                    sum += w1_1 * x1_1;
 
                     uint q0_2 = (qw0 >> 16u) & 0xFFu;
                     uint code0_2 = (q0_2 >> shift) & 3u;
                     float w0_2 = dl0 * float(code0_2) - ml0;
-                    sum += w0_2 * x[x0 + 2u];
+                    float x0_2 = pc.fused != 0 ? fusedX[x0 + 2u - xBase] : x[x0 + 2u];
+                    sum += w0_2 * x0_2;
 
                     uint q1_2 = (qw1 >> 16u) & 0xFFu;
                     uint code1_2 = (q1_2 >> shift) & 3u;
                     float w1_2 = dl1 * float(code1_2) - ml1;
-                    sum += w1_2 * x[x1 + 2u];
+                    float x1_2 = pc.fused != 0 ? fusedX[x1 + 2u - xBase] : x[x1 + 2u];
+                    sum += w1_2 * x1_2;
 
                     uint q0_3 = (qw0 >> 24u) & 0xFFu;
                     uint code0_3 = (q0_3 >> shift) & 3u;
                     float w0_3 = dl0 * float(code0_3) - ml0;
-                    sum += w0_3 * x[x0 + 3u];
+                    float x0_3 = pc.fused != 0 ? fusedX[x0 + 3u - xBase] : x[x0 + 3u];
+                    sum += w0_3 * x0_3;
 
                     uint q1_3 = (qw1 >> 24u) & 0xFFu;
                     uint code1_3 = (q1_3 >> shift) & 3u;
                     float w1_3 = dl1 * float(code1_3) - ml1;
-                    sum += w1_3 * x[x1 + 3u];
+                    float x1_3 = pc.fused != 0 ? fusedX[x1 + 3u - xBase] : x[x1 + 3u];
+                    sum += w1_3 * x1_3;
                 }
                 shift += 2u;
             }
             qi_offset += 32u;
         }
+        }
+        if (pc.fused != 0) barrier();
     }
 
-    y[token * pc.outDim + row] = sum;
+    if (valid) {
+        uint dst = uint(token * pc.outDim + row);
+        if (pc.fused != 0) {
+            y[dst] += sum;
+        } else {
+            y[dst] = sum;
+        }
+    }
 }
