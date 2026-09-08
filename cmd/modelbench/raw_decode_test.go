@@ -186,6 +186,40 @@ func TestRawDecodePhysicalReceiptLeavesIncompleteExecutableTupleUnavailable(t *t
 	}
 }
 
+func TestRawDecodePhysicalReceiptCarriesOnlyCompleteGGUFObservation(t *testing.T) {
+	execution := rawdecode.Execution{
+		ArtifactPath:          "fixtures/qwen3.8-q4_k_m.gguf",
+		ArtifactSHA256:        strings.Repeat("a", 64),
+		TensorInventorySHA256: "sha256:" + strings.Repeat("b", 64),
+		Quantization:          "Q4_K_M",
+		ModelName:             "qwen3.8-q4_k_m.gguf [gguf-q4k]",
+		PromptTokenIDs:        []int{1},
+		ContextLimit:          8,
+		GeneratedLimit:        1,
+		FiniteLogits:          true,
+	}
+	attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
+		t.Fatalf("software-only model provenance became creditable: %+v", attempt)
+	}
+	modelIdentity := attempt.Observed.Model
+	if modelIdentity.Name != execution.ModelName || modelIdentity.ArtifactPath != execution.ArtifactPath ||
+		modelIdentity.ArtifactSHA256 != execution.ArtifactSHA256 || modelIdentity.TensorInventorySHA256 != execution.TensorInventorySHA256 ||
+		modelIdentity.Quantization != execution.Quantization {
+		t.Fatalf("canonical model identity mismatch: %+v", modelIdentity)
+	}
+	if modelIdentity.TokenizerSHA256 != "" || modelIdentity.TemplateSHA256 != "" || attempt.Observed.Source != (compute.Qwen38VulkanSourceIdentity{}) {
+		t.Fatalf("unobserved tokenizer/template/source identity was invented: model=%+v source=%+v", modelIdentity, attempt.Observed.Source)
+	}
+
+	incomplete := execution
+	incomplete.TensorInventorySHA256 = ""
+	incompleteAttempt := rawDecodePhysicalReceipt(incomplete, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+	if incompleteAttempt.Observed.Model != (compute.Qwen38VulkanModelIdentity{}) || incompleteAttempt.CreditEligible || incompleteAttempt.Receipt != nil {
+		t.Fatalf("partial GGUF provenance escaped as canonical model identity: %+v", incompleteAttempt)
+	}
+}
+
 type vulkanNamedRawDecodeTestBackend struct{ compute.Backend }
 
 func (vulkanNamedRawDecodeTestBackend) Name() string { return compute.Qwen38VulkanDecodeBackend }
