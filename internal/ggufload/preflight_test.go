@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -146,6 +147,19 @@ func conservativeTestAllocation(n int64) int64 {
 	return ((n + page - 1) / page * page) + page
 }
 
+// enableStreamedDenseQ4K uses reflection so this regression test still compiles
+// against the parent revision. There it fails at runtime because the lifecycle
+// selector is absent, giving the lander a behavioral red witness rather than an
+// inconclusive parent build failure.
+func enableStreamedDenseQ4K(t *testing.T, in *PreflightInput) {
+	t.Helper()
+	v := reflect.ValueOf(in).Elem().FieldByName("StreamedDenseQ4K")
+	if !v.IsValid() {
+		t.Fatal("PreflightInput is missing the streamed dense Q4_K lifecycle selector")
+	}
+	v.SetBool(true)
+}
+
 func TestPreflightVulkanMixedQ4KAccountsPackedQ8F32AndBoundedStaging(t *testing.T) {
 	t.Setenv("FAK_GGUF_LOAD_WORKERS", "2")
 	ws := mixedVulkanWeightSource(t)
@@ -189,6 +203,67 @@ func TestPreflightVulkanMixedQ4KAccountsPackedQ8F32AndBoundedStaging(t *testing.
 	// host F32 reservation and raw+2*f32 staging are both included above.
 	if pf.EstHostResidentBytes <= conservativeTestAllocation(q2Payload)+conservativeTestAllocation(q4Payload) {
 		t.Fatal("Q2_K embedding was incorrectly treated as packed resident")
+	}
+}
+
+func TestPreflightVulkanMixedQ4KModelsStreamedDenseLifecycle(t *testing.T) {
+	t.Setenv("FAK_GGUF_LOAD_WORKERS", "2")
+	ws := mixedVulkanWeightSource(t)
+	backend := dualCapacityBackend{
+		capBackend: capBackend{total: 8 << 20, free: 8 << 20, known: true},
+		hostTotal:  8 << 20, hostFree: 8 << 20, hostKnown: true,
+	}
+	resident := BuildModelPreflight(PreflightInput{
+		Source: ws, Backend: backend, VulkanMixedQ4K: true,
+	})
+	streamIn := PreflightInput{Source: ws, Backend: backend, VulkanMixedQ4K: true}
+	enableStreamedDenseQ4K(t, &streamIn)
+	streamed := BuildModelPreflight(streamIn)
+	if resident.Verdict != PreflightReady || streamed.Verdict != PreflightReady {
+		t.Fatalf("resident=%+v streamed=%+v, want both READY", resident, streamed)
+	}
+
+	const q2Payload = int64(4 * 84)
+	const q4Payload = int64(256 * 144)
+	const q3Payload = int64(256 * 110)
+	const embedF32 = int64(256 * 4 * 4)
+	// Streaming preserves eventual I/O and device residency, but the eligible Q4_K
+	// tensor is no longer retained in host memory.
+	if streamed.EstReadBytes != resident.EstReadBytes || streamed.EstDeviceResidentBytes != resident.EstDeviceResidentBytes {
+		t.Fatalf("streamed read/device = %d/%d, resident = %d/%d",
+			streamed.EstReadBytes, streamed.EstDeviceResidentBytes,
+			resident.EstReadBytes, resident.EstDeviceResidentBytes)
+	}
+	if got, want := resident.EstHostResidentBytes-streamed.EstHostResidentBytes, conservativeTestAllocation(q4Payload); got != want {
+		t.Fatalf("streamed host reduction = %d, want removed Q4_K allocation %d", got, want)
+	}
+
+	// The loader peak is now Q3 conversion plus the next-largest load window (the
+	// unsupported Q2 embedding). It exceeds the separate one-Q4 HAL upload window.
+	wantLoadStage := (q3Payload + 2*256*256*4) + (q2Payload + 2*embedF32)
+	wantSessionStage := conservativeTestAllocation(q4Payload)
+	if wantLoadStage <= wantSessionStage {
+		t.Fatalf("invalid fixture: load stage %d must exceed session stage %d", wantLoadStage, wantSessionStage)
+	}
+	if streamed.EstLoadStagingBytes != wantLoadStage {
+		t.Fatalf("streamed staging = %d, want max(load=%d, session=%d)", streamed.EstLoadStagingBytes, wantLoadStage, wantSessionStage)
+	}
+	if streamed.EstLoadBytes != streamed.EstHostResidentBytes+streamed.EstDeviceResidentBytes+streamed.EstLoadStagingBytes {
+		t.Fatalf("streamed total = %d, want host+device+stage", streamed.EstLoadBytes)
+	}
+
+	// Also witness the opposite branch: with no large conversion window, the
+	// page-aligned lazy-Q4 materialization is the phase peak.
+	sessionPeakSource := mixedVulkanWeightSource(t)
+	sessionPeakSource.File.Tensors = []TensorInfo{
+		sessionPeakSource.File.Tensors[2], // eligible Q4_K
+		sessionPeakSource.File.Tensors[4], // small F32 load window
+	}
+	sessionPeakIn := PreflightInput{Source: sessionPeakSource, Backend: backend, VulkanMixedQ4K: true}
+	enableStreamedDenseQ4K(t, &sessionPeakIn)
+	sessionPeak := BuildModelPreflight(sessionPeakIn)
+	if sessionPeak.Verdict != PreflightReady || sessionPeak.EstLoadStagingBytes != wantSessionStage {
+		t.Fatalf("session-dominated streamed preflight = %+v, want staging %d", sessionPeak, wantSessionStage)
 	}
 }
 

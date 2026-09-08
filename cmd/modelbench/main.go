@@ -1391,11 +1391,11 @@ const modelbenchDeviceHeadroom = 0.15
 // OpenErr field carries any header-open failure so the classifier reports REFUSE_BAD_HEADER.
 func preflightInputFor(f *benchFlags, be compute.Backend) ggufload.PreflightInput {
 	ws, err := ggufload.OpenWeights(*f.gguf)
-	// Backed, non-streaming Vulkan Q4_K uses mixed packed/Q8/F32 storage. Other
-	// backed Q4_K paths keep the historical F32 upper bound; streaming owns a
-	// different lifecycle and remains on that conservative path too.
+	// Backed Vulkan Q4_K uses mixed packed/Q8/F32 storage. Streaming changes the
+	// eligible Q4_K host/staging lifecycle, but not its device representation.
 	convertedDense := *f.q4k && be != nil
-	vulkanMixed := convertedDense && *f.backendName == "vulkan" && !streamQ4KEnabled(f)
+	vulkanMixed := convertedDense && *f.backendName == "vulkan"
+	streamedDenseQ4K := vulkanMixed && streamQ4KEnabled(f)
 	residentQ2KEmbedding := vulkanMixed && q2kEmbeddingSourceEligible(ws)
 	return ggufload.PreflightInput{
 		Path:                 *f.gguf,
@@ -1406,6 +1406,7 @@ func preflightInputFor(f *benchFlags, be compute.Backend) ggufload.PreflightInpu
 		Lean:                 *f.lean && !convertedDense,
 		Q4K:                  *f.q4k && !convertedDense,
 		VulkanMixedQ4K:       vulkanMixed,
+		StreamedDenseQ4K:     streamedDenseQ4K,
 		ResidentQ2KEmbedding: residentQ2KEmbedding,
 	}
 }
