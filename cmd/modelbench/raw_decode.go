@@ -295,7 +295,7 @@ func rawDecodePhysicalReceipt(execution rawdecode.Execution, repOutputs []rawRep
 			observed.Device.VulkanVersion = identity.Runtime
 			observed.Engine.Name = "fak-native"
 			observed.Engine.Backend = identity.Backend
-			observed.Engine.Runtime = identity.Runtime
+			observed.Engine.Runtime = compute.Qwen38VulkanDecodeRuntime
 			observed.Engine.ExecutedPath = execution.Engine
 			observed.Engine.FallbackCount = &fallbacks
 		}
