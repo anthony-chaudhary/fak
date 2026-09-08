@@ -782,6 +782,183 @@ func TestRawDecodeEOSHandlingAndIgnoreEOS(t *testing.T) {
 	}
 }
 
+func TestRawDecodePhysicalReceiptRejectsMutatedIgnoreEOSAlias(t *testing.T) {
+	promptIDs := []int{7, 8, 9}
+	m := model.NewSynthetic(syntheticTestConfig())
+	execution, err := rawdecode.ExecuteModel(rawdecode.Request{
+		PromptTokenIDs: promptIDs, ContextLimit: 8, GeneratedTokenLimit: 1, Repetitions: 1, IgnoreEOS: true,
+	}, m, nil)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	execution.IgnoreEOS = false
+	attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{
+		generatedTokens: execution.Runs[0].GeneratedTokens,
+		eosStopped:      execution.Runs[0].EOSStopped,
+	}})
+	if len(attempt.Observed.Runs) != 0 {
+		t.Fatalf("mutated IgnoreEOS alias retained canonical generation evidence: %+v", attempt.Observed.Runs)
+	}
+}
+
+func TestRawDecodeEOSObservationIsRunnerSealedAndExactly128(t *testing.T) {
+	promptIDs := []int{7, 8, 9}
+	cfg := syntheticTestConfig()
+	m := model.NewSynthetic(cfg)
+
+	probe, err := rawdecode.ExecuteModel(rawdecode.Request{
+		PromptTokenIDs: promptIDs, ContextLimit: 132, GeneratedTokenLimit: 1, Repetitions: 1, IgnoreEOS: true,
+	}, m, nil)
+	if err != nil {
+		t.Fatalf("probe execution: %v", err)
+	}
+	firstToken := probe.Runs[0].PrefillOutputID
+	m.Cfg.EOSTokenID = firstToken
+
+	for _, tc := range []struct {
+		name       string
+		ignoreEOS  bool
+		wantTokens int
+		wantStop   bool
+	}{
+		{name: "ignore", ignoreEOS: true, wantTokens: 128, wantStop: false},
+		{name: "stop", ignoreEOS: false, wantTokens: 1, wantStop: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			execution, execErr := rawdecode.ExecuteModel(rawdecode.Request{
+				PromptTokenIDs: promptIDs, ContextLimit: 132, GeneratedTokenLimit: 128, Repetitions: 2, IgnoreEOS: tc.ignoreEOS,
+			}, m, nil)
+			if execErr != nil {
+				t.Fatalf("execute: %v", execErr)
+			}
+			legacyOutputs := make([]rawRepOutput, len(execution.Runs))
+			for i, run := range execution.Runs {
+				legacyOutputs[i] = rawRepOutput{
+					generatedTokens: run.GeneratedTokens,
+					eosStopped:      run.EOSStopped,
+				}
+			}
+			attempt := rawDecodePhysicalReceipt(execution, legacyOutputs)
+			if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
+				t.Fatalf("software EOS observation gained physical or timing credit: %+v", attempt)
+			}
+			if len(attempt.Observed.Runs) != 2 {
+				t.Fatalf("canonical diagnostic run count=%d, want 2", len(attempt.Observed.Runs))
+			}
+			run := attempt.Observed.Runs[0]
+			if run.IgnoreEOS == nil || *run.IgnoreEOS != tc.ignoreEOS || run.EOSStopped == nil || *run.EOSStopped != tc.wantStop || run.ActualGeneratedTokens != tc.wantTokens || len(run.OutputTokenIDs) != tc.wantTokens {
+				t.Fatalf("canonical EOS observation mismatch: %+v", run)
+			}
+
+			assertUnavailableWithoutRuns := func(name string, candidate rawdecode.Execution) {
+				t.Helper()
+				candidateAttempt := rawDecodePhysicalReceipt(candidate, legacyOutputs)
+				if candidateAttempt.Status != "UNAVAILABLE" || candidateAttempt.CreditEligible || candidateAttempt.Receipt != nil || len(candidateAttempt.Observed.Runs) != 0 {
+					t.Fatalf("%s retained canonical generation evidence: %+v", name, candidateAttempt)
+				}
+			}
+
+			ignoreAlias := execution
+			ignoreAlias.IgnoreEOS = !tc.ignoreEOS
+			assertUnavailableWithoutRuns("IgnoreEOS alias mismatch", ignoreAlias)
+
+			stopAlias := execution
+			stopAlias.Runs = append([]rawdecode.Run(nil), execution.Runs...)
+			stopAlias.Runs[0].EOSStopped = !tc.wantStop
+			assertUnavailableWithoutRuns("EOSStopped alias mismatch", stopAlias)
+
+			requestMutated := execution
+			requestMutated.ContextLimit++
+			assertUnavailableWithoutRuns("request binding mutation", requestMutated)
+
+			promptMutated := execution
+			promptMutated.PromptTokenIDs = append([]int(nil), execution.PromptTokenIDs...)
+			promptMutated.PromptTokenIDs[0]++
+			assertUnavailableWithoutRuns("prompt binding mutation", promptMutated)
+
+			for name, mutate := range map[string]func(*rawdecode.Execution){
+				"model name":       func(e *rawdecode.Execution) { e.ModelName += "-mutated" },
+				"artifact path":    func(e *rawdecode.Execution) { e.ArtifactPath = "mutated.gguf" },
+				"artifact digest":  func(e *rawdecode.Execution) { e.ArtifactSHA256 = strings.Repeat("a", 64) },
+				"tensor inventory": func(e *rawdecode.Execution) { e.TensorInventorySHA256 = strings.Repeat("b", 64) },
+				"tokenizer":        func(e *rawdecode.Execution) { e.TokenizerSHA256 = strings.Repeat("c", 64) },
+				"template":         func(e *rawdecode.Execution) { e.TemplateSHA256 = strings.Repeat("d", 64) },
+				"quantization":     func(e *rawdecode.Execution) { e.Quantization = "mutated" },
+			} {
+				mutated := execution
+				mutate(&mutated)
+				assertUnavailableWithoutRuns("GGUF "+name+" mutation", mutated)
+			}
+
+			generatedAlias := execution
+			generatedAlias.Runs = append([]rawdecode.Run(nil), execution.Runs...)
+			generatedAlias.Runs[0].GeneratedTokens = append([]int(nil), execution.Runs[0].GeneratedTokens...)
+			generatedAlias.Runs[0].GeneratedTokens[0] = (generatedAlias.Runs[0].GeneratedTokens[0] + 1) % cfg.VocabSize
+			assertUnavailableWithoutRuns("generated-token alias mismatch", generatedAlias)
+
+			prefillAlias := execution
+			prefillAlias.Runs = append([]rawdecode.Run(nil), execution.Runs...)
+			prefillAlias.Runs[0].PrefillOutputID = (prefillAlias.Runs[0].PrefillOutputID + 1) % cfg.VocabSize
+			assertUnavailableWithoutRuns("prefill-token alias mismatch", prefillAlias)
+
+			if len(execution.Runs[0].StepTokens) > 0 {
+				stepTokenAlias := execution
+				stepTokenAlias.Runs = append([]rawdecode.Run(nil), execution.Runs...)
+				stepTokenAlias.Runs[0].StepTokens = append([]int(nil), execution.Runs[0].StepTokens...)
+				stepTokenAlias.Runs[0].StepTokens[0] = (stepTokenAlias.Runs[0].StepTokens[0] + 1) % cfg.VocabSize
+				assertUnavailableWithoutRuns("step-token alias mismatch", stepTokenAlias)
+			}
+
+			stepAlias := execution
+			stepAlias.Runs = append([]rawdecode.Run(nil), execution.Runs...)
+			stepAlias.Runs[0].Steps = append([]rawdecode.Step(nil), execution.Runs[0].Steps...)
+			stepAlias.Runs[0].Steps[0].TokenID = (stepAlias.Runs[0].Steps[0].TokenID + 1) % cfg.VocabSize
+			assertUnavailableWithoutRuns("step record alias mismatch", stepAlias)
+
+			repetitionMismatch := execution
+			repetitionMismatch.Runs = append([]rawdecode.Run(nil), execution.Runs[:1]...)
+			assertUnavailableWithoutRuns("repetition mismatch", repetitionMismatch)
+
+			if !reflect.DeepEqual(execution.Runs[0].GeneratedTokens, execution.Runs[1].GeneratedTokens) {
+				t.Fatalf("permutation regression requires identical token aliases: run0=%v run1=%v", execution.Runs[0].GeneratedTokens, execution.Runs[1].GeneratedTokens)
+			}
+			permuted := execution
+			permuted.Runs = append([]rawdecode.Run(nil), execution.Runs...)
+			permuted.Runs[0], permuted.Runs[1] = permuted.Runs[1], permuted.Runs[0]
+			assertUnavailableWithoutRuns("identical-token repetition permutation", permuted)
+
+			otherExecution, otherErr := rawdecode.ExecuteModel(rawdecode.Request{
+				PromptTokenIDs: promptIDs, ContextLimit: 132, GeneratedTokenLimit: 128, Repetitions: 2, IgnoreEOS: tc.ignoreEOS,
+			}, m, nil)
+			if otherErr != nil {
+				t.Fatalf("second execute: %v", otherErr)
+			}
+			transplanted := execution
+			transplanted.Runs = append([]rawdecode.Run(nil), execution.Runs...)
+			transplanted.Runs[0] = otherExecution.Runs[0]
+			assertUnavailableWithoutRuns("cross-execution sealed Run transplant", transplanted)
+
+			forged := execution
+			forged.Runs = append([]rawdecode.Run(nil), execution.Runs...)
+			forged.Runs[0] = rawdecode.Run{
+				PrefillOutputID: generatedAlias.Runs[0].PrefillOutputID,
+				GeneratedTokens: append([]int(nil), execution.Runs[0].GeneratedTokens...),
+				EOSStopped:      tc.wantStop,
+				Steps:           append([]rawdecode.Step(nil), execution.Runs[0].Steps...),
+			}
+			assertUnavailableWithoutRuns("externally constructed Run", forged)
+
+			timingMutated := execution
+			timingMutated.Runs = append([]rawdecode.Run(nil), execution.Runs...)
+			timingMutated.Runs[0].DecodeDuration += time.Second
+			timingAttempt := rawDecodePhysicalReceipt(timingMutated, legacyOutputs)
+			if timingAttempt.Status != "UNAVAILABLE" || timingAttempt.CreditEligible || timingAttempt.Receipt != nil {
+				t.Fatalf("mutable diagnostic timing gained physical credit: %+v", timingAttempt)
+			}
+		})
+	}
+}
+
 func TestRawDecodeContextLimitEnforcement(t *testing.T) {
 	// Prompt length = 3 ("1,2,3"), requested decode steps = 5 -> required = 8
 	f := testRawDecodeFlags(5, 1)

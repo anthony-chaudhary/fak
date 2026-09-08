@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/debtlane"
 	"github.com/anthony-chaudhary/fak/internal/issueorchestrator"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 func writeTestIssuesFile(t *testing.T, issues []issueorchestrator.Issue) string {
@@ -303,6 +304,104 @@ func TestIssueOrchestratorSpawnOpencodeDryRun(t *testing.T) {
 		if len(c.Command) == 0 {
 			t.Errorf("expected non-empty command for chat")
 		}
+	}
+}
+
+func TestIssueOrchestratorDefaultWorktreePrepareFailureIsTerminal(t *testing.T) {
+	origStamp := controllerStampFunc
+	origHead := controllerHeadRevFunc
+	origPrepare := prepareManagedWorkerWorktreeFunc
+	origStart := startDispatchWorkerFunc
+	origAcquire := acquireTreeLeaseFunc
+	t.Cleanup(func() {
+		controllerStampFunc = origStamp
+		controllerHeadRevFunc = origHead
+		prepareManagedWorkerWorktreeFunc = origPrepare
+		startDispatchWorkerFunc = origStart
+		acquireTreeLeaseFunc = origAcquire
+	})
+
+	const testRev = "532688a0a04ba669a20d2c7f353150d044ae8be8"
+	controllerStampFunc = func() binstamp.Stamp { return binstamp.Stamp{Revision: testRev, HasVCS: true} }
+	controllerHeadRevFunc = func(string) string { return testRev }
+	var gotRoot string
+	prepareManagedWorkerWorktreeFunc = func(root, lane, key, baseSHA, wtRoot string, git workerworktree.GitRunner) workerworktree.Result {
+		gotRoot = root
+		return workerworktree.Result{OK: false, Code: "PREPARE_REFUSED", Reason: "synthetic refusal"}
+	}
+	started := false
+	startDispatchWorkerFunc = func(*exec.Cmd) error { started = true; return nil }
+	acquired := false
+	acquireTreeLeaseFunc = func(string, string, []string, int) error { acquired = true; return nil }
+
+	workspace := t.TempDir()
+	issuesPath := writeTestIssuesFile(t, []issueorchestrator.Issue{{
+		Number: 12379, Key: "portable-default", Title: "Portable default", Lane: "issueorchestrator",
+		Paths: []string{"cmd/fak/issueorchestrator.go"}, ExpectedSteps: 1, Dispatchability: "dispatchable",
+	}})
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath, "--spawn-opencode", "--workspace", workspace,
+		"--no-detect-held", "--supervise=false", "--json",
+	})
+	if code == 0 {
+		t.Fatalf("prepare refusal must return non-zero; stdout=%s", stdout.String())
+	}
+	if started || acquired {
+		t.Fatalf("prepare refusal must precede lease and process start: acquired=%v started=%v", acquired, started)
+	}
+	if gotRoot != workspace {
+		t.Fatalf("prepare root = %q, want selected workspace %q", gotRoot, workspace)
+	}
+	var receipt OpencodeSpawnReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
+		t.Fatalf("decode receipt: %v; raw=%s stderr=%s", err, stdout.String(), stderr.String())
+	}
+	if receipt.WorktreeMode != worktreeModeManagedDefault || !receipt.AutoLand {
+		t.Fatalf("default lifecycle receipt = %+v", receipt)
+	}
+	if len(receipt.Chats) != 1 || receipt.Chats[0].Status != "error" || !strings.Contains(receipt.Chats[0].Error, "WORKTREE_PREPARE_FAILED") {
+		t.Fatalf("prepare refusal chat = %+v", receipt.Chats)
+	}
+}
+
+func TestIssueOrchestratorExplicitSharedOptOutIsVisible(t *testing.T) {
+	origStamp := controllerStampFunc
+	origHead := controllerHeadRevFunc
+	origPrepare := prepareManagedWorkerWorktreeFunc
+	t.Cleanup(func() {
+		controllerStampFunc = origStamp
+		controllerHeadRevFunc = origHead
+		prepareManagedWorkerWorktreeFunc = origPrepare
+	})
+	const testRev = "532688a0a04ba669a20d2c7f353150d044ae8be8"
+	controllerStampFunc = func() binstamp.Stamp { return binstamp.Stamp{Revision: testRev, HasVCS: true} }
+	controllerHeadRevFunc = func(string) string { return testRev }
+	prepareManagedWorkerWorktreeFunc = func(string, string, string, string, string, workerworktree.GitRunner) workerworktree.Result {
+		t.Fatal("explicit shared opt-out must not prepare a worktree")
+		return workerworktree.Result{}
+	}
+	issuesPath := writeTestIssuesFile(t, []issueorchestrator.Issue{{
+		Number: 12380, Key: "portable-optout", Title: "Portable opt-out", Lane: "issueorchestrator",
+		Paths: []string{"cmd/fak/issueorchestrator.go"}, ExpectedSteps: 1, Dispatchability: "dispatchable",
+	}})
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath, "--spawn-opencode", "--dry-run", "--worktree=false", "--auto-land=false",
+		"--no-detect-held", "--json",
+	})
+	if code != 0 {
+		t.Fatalf("explicit opt-out failed: code=%d stderr=%s", code, stderr.String())
+	}
+	var receipt OpencodeSpawnReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
+		t.Fatalf("decode receipt: %v", err)
+	}
+	if receipt.WorktreeMode != worktreeModeSharedExplicitOptOut || receipt.AutoLand {
+		t.Fatalf("explicit opt-out receipt = %+v", receipt)
+	}
+	if len(receipt.Chats) != 1 || !receipt.Chats[0].UnsafeSharedWorkspace {
+		t.Fatalf("shared mode must be explicitly marked unsafe: %+v", receipt.Chats)
 	}
 }
 
@@ -1374,6 +1473,7 @@ func TestIssueOrchestrator_ExactTreeLeaseAcquisitionBeforeSpawn(t *testing.T) {
 	code := runIssueOrchestrator(&stdout, &stderr, []string{
 		"--from-issues", issuesPath,
 		"--spawn-opencode",
+		"--worktree=false",
 		"--workspace", tempDir,
 		"--log-dir", logDir,
 		"--supervise=false",
@@ -1455,6 +1555,7 @@ func TestIssueOrchestrator_OverlapRefusal(t *testing.T) {
 	code := runIssueOrchestrator(&stdout, &stderr, []string{
 		"--from-issues", issuesPath,
 		"--spawn-opencode",
+		"--worktree=false",
 		"--workspace", tempDir,
 		"--dry-run",
 		"--json",
@@ -1540,6 +1641,7 @@ func TestIssueOrchestrator_CleanupOnSpawnFailure(t *testing.T) {
 	code := runIssueOrchestrator(&stdout, &stderr, []string{
 		"--from-issues", issuesPath,
 		"--spawn-opencode",
+		"--worktree=false",
 		"--workspace", tempDir,
 		"--log-dir", logDir,
 		"--supervise=false",
@@ -1644,6 +1746,7 @@ func TestIssueOrchestrator_NarrowedPathRecording(t *testing.T) {
 	code := runIssueOrchestrator(&stdout, &stderr, []string{
 		"--from-issues", issuesPath,
 		"--spawn-opencode",
+		"--worktree=false",
 		"--workspace", tempDir,
 		"--log-dir", logDir,
 		"--supervise=false",
