@@ -16,6 +16,9 @@ import (
 
 func TestRunAMDStrixValidate_UnknownSelector(t *testing.T) {
 	defer amdgpu.ClearPresenceCache()
+	origStatus := gitStatusFn
+	defer func() { gitStatusFn = origStatus }()
+	gitStatusFn = func(ctx context.Context, dir string) (string, error) { return "", nil }
 
 	// Seed presence cache with a reachable target to isolate subkernel selector validation
 	simTarget := &amdgpu.StrixTarget{
@@ -41,6 +44,7 @@ func TestRunAMDStrixValidate_UnknownSelector(t *testing.T) {
 			"-host", "test-strix-devcmd",
 			"-subkernels", "invalid_subkernel_selector",
 			"-ablate", "none",
+			"-committed-only",
 			"-json",
 		}
 
@@ -79,6 +83,7 @@ func TestRunAMDStrixValidate_UnknownSelector(t *testing.T) {
 			"-host", "test-strix-devcmd",
 			"-subkernels", "invalid_subkernel_selector",
 			"-ablate", "none",
+			"-committed-only",
 		}
 
 		code := RunAMDStrixValidate(&stdout, &stderr, argv)
@@ -437,7 +442,12 @@ func TestRunAMDStrixValidate_BindsCandidateArchiveToRunner(t *testing.T) {
 
 func TestRunAMDStrixValidate_HistoricalOrPartialReceiptFailsClosed(t *testing.T) {
 	origRun := runStrixValidationFn
-	defer func() { runStrixValidationFn = origRun }()
+	origStatus := gitStatusFn
+	defer func() {
+		runStrixValidationFn = origRun
+		gitStatusFn = origStatus
+	}()
+	gitStatusFn = func(ctx context.Context, dir string) (string, error) { return "", nil }
 
 	baseCommit := "b0123456789abcdef0123456789abcdef0123456"
 
@@ -462,7 +472,7 @@ func TestRunAMDStrixValidate_HistoricalOrPartialReceiptFailsClosed(t *testing.T)
 		}
 
 		var stdout, stderr bytes.Buffer
-		code := RunAMDStrixValidate(&stdout, &stderr, []string{"-git-tip", baseCommit, "-subkernels", "none", "-ablate", "none"})
+		code := RunAMDStrixValidate(&stdout, &stderr, []string{"-git-tip", baseCommit, "-committed-only", "-subkernels", "none", "-ablate", "none"})
 		if code != 1 {
 			t.Fatalf("expected exit code 1, got %d", code)
 		}
@@ -492,7 +502,7 @@ func TestRunAMDStrixValidate_HistoricalOrPartialReceiptFailsClosed(t *testing.T)
 		}
 
 		var stdout, stderr bytes.Buffer
-		code := RunAMDStrixValidate(&stdout, &stderr, []string{"-git-tip", baseCommit, "-subkernels", "none", "-ablate", "none"})
+		code := RunAMDStrixValidate(&stdout, &stderr, []string{"-git-tip", baseCommit, "-committed-only", "-subkernels", "none", "-ablate", "none"})
 		if code != 1 {
 			t.Fatalf("expected exit code 1, got %d", code)
 		}
@@ -519,7 +529,7 @@ func TestRunAMDStrixValidate_HistoricalOrPartialReceiptFailsClosed(t *testing.T)
 		}
 
 		var stdout, stderr bytes.Buffer
-		code := RunAMDStrixValidate(&stdout, &stderr, []string{"-git-tip", baseCommit, "-subkernels", "none", "-ablate", "none"})
+		code := RunAMDStrixValidate(&stdout, &stderr, []string{"-git-tip", baseCommit, "-committed-only", "-subkernels", "none", "-ablate", "none"})
 		if code != 1 {
 			t.Fatalf("expected exit code 1, got %d", code)
 		}
@@ -557,7 +567,7 @@ func TestRunAMDStrixValidate_HistoricalOrPartialReceiptFailsClosed(t *testing.T)
 		}
 
 		var stdout, stderr bytes.Buffer
-		code := RunAMDStrixValidate(&stdout, &stderr, []string{"-git-tip", baseCommit, "-subkernels", "argmax", "-ablate", "none"})
+		code := RunAMDStrixValidate(&stdout, &stderr, []string{"-git-tip", baseCommit, "-committed-only", "-subkernels", "argmax", "-ablate", "none"})
 		if code != 1 {
 			t.Fatalf("expected exit code 1, got %d", code)
 		}

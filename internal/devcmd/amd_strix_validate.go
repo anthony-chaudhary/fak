@@ -224,7 +224,7 @@ func LoadOrBuildCandidateArchive(gitTip, archivePath, archiveDigest string, mine
 	// No archivePath specified -> Build from local candidate checkout
 	canonicalRoot, err := gitRevParseFn(context.Background(), candidateDir, "--show-toplevel")
 	if err != nil || strings.TrimSpace(canonicalRoot) == "" {
-		return nil, fmt.Errorf("missing or unresolvable git root directory for %q: %w", candidateDir, err)
+		return nil, fmt.Errorf("missing or unresolvable Git tip or root directory for %q: %w", candidateDir, err)
 	}
 	canonicalRoot = strings.TrimSpace(canonicalRoot)
 
@@ -257,6 +257,10 @@ func LoadOrBuildCandidateArchive(gitTip, archivePath, archiveDigest string, mine
 
 	seenPaths := make(map[string]struct{}, len(minePaths))
 	overlayFiles := make(map[string][]byte, len(minePaths))
+	fileBaseDir := canonicalRoot
+	if candidateDir != "" && candidateDir != "." {
+		fileBaseDir = candidateDir
+	}
 	for _, rawPath := range minePaths {
 		rawPath = strings.TrimSpace(rawPath)
 		if rawPath == "" {
@@ -274,7 +278,7 @@ func LoadOrBuildCandidateArchive(gitTip, archivePath, archiveDigest string, mine
 		}
 		seenPaths[norm] = struct{}{}
 
-		fullPath := filepath.Join(canonicalRoot, filepath.FromSlash(norm))
+		fullPath := filepath.Join(fileBaseDir, filepath.FromSlash(norm))
 		fi, err := osLstatFn(fullPath)
 		if err != nil {
 			return nil, fmt.Errorf("overlay file unreadable or missing: %w", err)
@@ -287,7 +291,7 @@ func LoadOrBuildCandidateArchive(gitTip, archivePath, archiveDigest string, mine
 		}
 		realPath, err := filepath.EvalSymlinks(fullPath)
 		if err == nil {
-			rel, relErr := filepath.Rel(canonicalRoot, realPath)
+			rel, relErr := filepath.Rel(fileBaseDir, realPath)
 			if relErr != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
 				return nil, fmt.Errorf("symlink escape rejected: %q resolves outside root (%s)", rawPath, realPath)
 			}
