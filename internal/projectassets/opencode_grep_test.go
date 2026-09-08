@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -65,3 +66,26 @@ await writeFile(path.join(root,'many.txt'), 'needle\n'.repeat(102));
 assert.match((await hooks.tool.grep.execute({pattern:'needle',path:'many.txt'},ctx)).output,/at least 101 matching lines observed/);
 console.log('PASS actual SDK same-name grep: 100KB line, ordinary line, bounded preview, no-match, invalid regex, permission denial, abort');
 `
+
+func TestOpenCodeGrepRipgrepResolutionAndFallback(t *testing.T) {
+	requiredSnippets := []struct {
+		pattern string
+		desc    string
+	}{
+		{"findRipgrep", "ripgrep executable path resolution"},
+		{"existsSync", "filesystem probe check"},
+		{"rg.exe", "Windows ripgrep binary name"},
+		{`"C:\\Program Files\\Git\\usr\\bin\\rg.exe"`, "standard Git 64-bit ripgrep location"},
+		{`"C:\\Program Files (x86)\\Git\\usr\\bin\\rg.exe"`, "standard Git 32-bit ripgrep location"},
+		{`path.join(process.env.USERPROFILE || "", ".cargo", "bin", "rg.exe")`, "user cargo ripgrep location"},
+		{`path.join(process.env.LOCALAPPDATA || "", "Programs", "Git", "usr", "bin", "rg.exe")`, "local appdata Git ripgrep location"},
+		{"ENOENT", "spawn ENOENT error handling"},
+		{"fallbackOutput", "graceful fallback output on missing executable"},
+	}
+
+	for _, req := range requiredSnippets {
+		if !strings.Contains(defaultOpenCodeGrep, req.pattern) {
+			t.Errorf("defaultOpenCodeGrep missing %s (%q)", req.desc, req.pattern)
+		}
+	}
+}
