@@ -16,7 +16,8 @@ var hygienePushDelta = committedPushPaths
 // unavailable, findings remain blocking (safe standalone/archive fallback).
 func scopeHygieneFindingsToPush(root string, findings []hooks.Finding) []hooks.Finding {
 	paths, scoped := hygienePushDelta(root)
-	return hooks.ScopeTierDeclaredFindings(findings, paths, scoped)
+	findings = hooks.ScopeTierDeclaredFindings(findings, paths, scoped)
+	return hooks.ScopePythonToolFindings(findings, paths, scoped)
 }
 
 func committedPushPaths(root string) ([]string, bool) {
@@ -27,7 +28,7 @@ func committedPushPaths(root string) ([]string, bool) {
 		return nil, false
 	}
 	base := strings.TrimSpace(string(mergeBase))
-	diffCmd := exec.Command("git", "-C", root, "diff", "--name-only", base+"..HEAD", "--", "internal/")
+	diffCmd := exec.Command("git", "-C", root, "diff", "--name-only", base+"..HEAD", "--", "internal/", "tools/")
 	windowgate.ConfigureBackgroundCommand(diffCmd)
 	out, err := diffCmd.Output()
 	if err != nil {

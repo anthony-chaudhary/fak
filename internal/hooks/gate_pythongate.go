@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -186,4 +187,32 @@ func gatePythonToolTree(t *TrackedTree) ([]Finding, error) {
 	}
 	sort.Slice(findings, func(i, j int) bool { return findings[i].File < findings[j].File })
 	return findings, nil
+}
+
+// ScopePythonToolFindings applies the committed-push ownership boundary to
+// NEW_PYTHON_TOOL findings. When scoped is false (no remote/trunk read-back), it keeps
+// every finding blocking. Non-NEW_PYTHON_TOOL findings are never changed.
+func ScopePythonToolFindings(findings []Finding, changedPaths []string, scoped bool) []Finding {
+	if !scoped {
+		return findings
+	}
+	touched := map[string]bool{}
+	for _, path := range changedPaths {
+		norm := strings.TrimPrefix(filepath.ToSlash(strings.TrimSpace(path)), "./")
+		norm = strings.ReplaceAll(norm, "\\", "/")
+		touched[norm] = true
+	}
+	out := append([]Finding(nil), findings...)
+	for i := range out {
+		if out[i].Gate != reasonNewPythonTool {
+			continue
+		}
+		norm := strings.TrimPrefix(filepath.ToSlash(strings.TrimSpace(out[i].File)), "./")
+		norm = strings.ReplaceAll(norm, "\\", "/")
+		if !touched[norm] {
+			out[i].Advisory = true
+			out[i].Detail += " This push does not touch that tool; its owner must migrate or baseline it."
+		}
+	}
+	return out
 }
