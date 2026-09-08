@@ -39,6 +39,7 @@ from typing import Any, Callable
 from dispatch_worker import no_window_creationflags
 
 SCHEMA = "fleet-issue-closure-audit/1"
+CACHE_SCHEMA = "fleet-commit-audit-cache/2"
 
 # Where the per-SHA audit cache lives, next to the dispatch loop's other run
 # artifacts. A commit's diff is immutable, so its `dos commit-audit` verdict never
@@ -98,6 +99,36 @@ _VERDICT_OK = "OK"
 # TRUE_RESOLVED, inflating closure_rate — the very metric the RSI loop optimizes. The
 # token set mirrors the close arm (dos emits the bare `test`, not `test_cover`).
 _RESOLVING_CLAIM_KINDS = {"code_effect", "test", "test_cover"}
+
+# Issue #12087: recovery of false ABSTAIN on naive noclaim marker collisions
+_NOCLAIM_MARKERS = (
+    "wip", "misc", "cleanup", "chore", "bump", "version", "release", "merge",
+    "revert", "format", "lint", "whitespace", "style", "address review",
+    "review feedback", "nit", "nits", "rename variable",
+)
+_NOCLAIM_PHRASES = (
+    "address review", "review feedback", "rename variable",
+)
+_NOCLAIM_TYPES = {
+    "chore", "wip", "misc", "bump", "revert", "format", "lint", "style", "release",
+}
+_RESOLVING_TYPES = {
+    "fix", "feat", "perf", "refactor", "test",
+}
+_CODE_VERBS = {
+    "fix", "fixes", "fixed", "feat", "add", "adds", "added",
+    "implement", "implements", "implemented", "perf",
+    "optimize", "optimizes", "optimized", "refactor", "refactors", "refactored",
+    "test", "tests", "tested", "repair", "repairs", "repaired",
+    "resolve", "resolves", "resolved", "support", "supports", "supported",
+    "update", "updates", "updated", "handle", "handles", "handled",
+    "prevent", "prevents", "prevented", "guard", "guards", "guarded",
+    "patch", "patches", "patched", "wire", "wires", "wired",
+    "correct", "corrects", "corrected", "restore", "restores", "restored",
+    "port", "migrate", "speed", "harden", "introduce", "create", "build",
+    "eliminate", "eliminates", "eliminated", "retain", "retains", "retained",
+    "quarantine", "quarantines", "quarantined", "scavenge", "scavenges", "scavenged",
+}
 
 
 def _issue_is_docs_rung(title: str) -> bool:
@@ -293,12 +324,69 @@ def _first_audit_record(text: str) -> dict[str, Any]:
     return read_json_from_text(text)
 
 
+def refine_audit_record(
+    payload: dict[str, Any],
+    sha: str,
+    workspace: Path,
+    subject: str = "",
+) -> dict[str, Any]:
+    """Recover false ABSTAIN verdicts caused by naive noclaim marker substring collisions (#12087).
+
+    When dos commit-audit returns ABSTAIN because a domain noun like 'release',
+    'version', 'whitespace', or 'format' collided with _NOCLAIM_MARKERS, but the diff
+    actually modified source/test files and the subject carries a legitimate code/test
+    claim (conventional commit type in _RESOLVING_TYPES or leading with a code verb),
+    the diff presence and resolving claim take precedence over the naive noclaim marker.
+    """
+    if payload.get("verdict") != "ABSTAIN":
+        return payload
+
+    source_files = payload.get("source_files") or []
+    test_files = payload.get("test_files") or []
+    if not (source_files or test_files):
+        return payload
+
+    subj = (subject or payload.get("subject") or "").strip()
+    if not subj and sha:
+        res = run_text(["git", "log", "-1", "--pretty=format:%s", sha], workspace)
+        subj = (res.get("stdout") or "").strip()
+
+    if not subj:
+        return payload
+
+    subj_lower = subj.lower()
+    if any(phrase in subj_lower for phrase in _NOCLAIM_PHRASES):
+        return payload
+
+    cc_match = re.match(r"^([a-zA-Z0-9_-]+)(?:\([^)]*\))?!?\s*:\s*(.*)$", subj)
+    if cc_match:
+        ctype = cc_match.group(1).lower()
+        desc = cc_match.group(2).strip()
+        first_desc_word = re.split(r"[\s(:!]", desc)[0].lower() if desc else ""
+        is_resolving = (ctype in _RESOLVING_TYPES) or (ctype in _CODE_VERBS) or (first_desc_word in _CODE_VERBS)
+        is_noclaim = ctype in _NOCLAIM_TYPES
+    else:
+        lead_match = re.match(r"^([a-zA-Z0-9_-]+)\b", subj)
+        ctype = lead_match.group(1).lower() if lead_match else ""
+        is_resolving = (ctype in _RESOLVING_TYPES) or (ctype in _CODE_VERBS)
+        is_noclaim = ctype in _NOCLAIM_TYPES
+
+    if is_resolving and not is_noclaim:
+        payload["verdict"] = _VERDICT_OK
+        payload["witness"] = _WITNESS_OK
+        payload["claim_kind"] = "test" if (subj.startswith("test") or (test_files and not source_files)) else "code_effect"
+        payload["reason"] = "code-effect claim witnessed by touched source files (recovering false ABSTAIN on noclaim marker collision)"
+
+    return payload
+
+
 def audit_commit(sha: str, workspace: Path) -> dict[str, Any]:
     # The ref is POSITIONAL (`dos commit-audit <ref>`), not `--ref` (that is the
     # MCP parameter name; the CLI rejects it with exit 2 / empty stdout).
     payload = _first_audit_record(
         run_text(["dos", "commit-audit", sha, "--workspace", str(workspace), "--json"], workspace)["stdout"]
     )
+    payload = refine_audit_record(payload, sha, workspace)
     return {
         "sha": sha,
         "verdict": payload.get("verdict"),
@@ -334,6 +422,7 @@ def load_audit_cache(path: Path) -> dict[str, dict[str, Any]]:
         return {}
     if not isinstance(raw, dict):
         return {}
+    is_legacy = raw.get("schema") != CACHE_SCHEMA
     entries = raw.get("audits")
     if not isinstance(entries, dict):
         return {}
@@ -341,6 +430,8 @@ def load_audit_cache(path: Path) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for sha, rec in entries.items():
         if isinstance(sha, str) and isinstance(rec, dict) and rec.get("verdict") is not None:
+            if is_legacy and rec.get("verdict") == "ABSTAIN":
+                continue
             out[sha] = {"sha": sha, "verdict": rec.get("verdict"),
                         "witness": rec.get("witness"), "claim_kind": rec.get("claim_kind")}
     return out
@@ -352,7 +443,7 @@ def save_audit_cache(path: Path, audits: dict[str, dict[str, Any]]) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            json.dumps({"schema": "fleet-commit-audit-cache/1", "audits": audits},
+            json.dumps({"schema": CACHE_SCHEMA, "audits": audits},
                        separators=(",", ":")),
             encoding="utf-8",
         )
@@ -659,7 +750,7 @@ def _issue_sort_key(g: dict[str, Any]) -> tuple[int, int]:
     # Surface the actionable buckets first; then by issue number desc (recent).
     order = {CLAIMED_CLOSED: 0, OPEN_WITNESSED: 1, TRUE_RESOLVED: 2,
              DATA_RESOLVED: 3, OPEN: 4, CLOSED_NOT_PLANNED: 5}
-    return (order.get(g.get("bucket"), 9), -int(g.get("number") or 0))
+    return (order.get(str(g.get("bucket") or ""), 9), -int(g.get("number") or 0))
 
 
 # ---------------------------------------------------------------------------
