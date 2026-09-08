@@ -36,17 +36,18 @@ const (
 
 // Wave represents one execution wave of concurrent-safe debt lanes.
 type Wave struct {
-	Index             int        `json:"index"`              // 1-based wave sequence number
-	ID                string     `json:"id"`                 // e.g. "wave-1"
-	Safety            WaveSafety `json:"safety"`             // pairwise_tree_disjoint or serial_singleton
-	Lanes             []DebtLane `json:"lanes"`              // Debt lanes allocated to this wave
-	LaneNames         []string   `json:"lane_names"`         // Slice of lane identifiers
-	Paths             []string   `json:"paths"`              // Package paths (e.g. "internal/faultlab")
-	WaveSize          int        `json:"wave_size"`          // Number of concurrent workers in this wave
-	TotalDebt         float64    `json:"total_debt"`         // Sum of TotalDebt across lanes in this wave
-	DebtPrincipal     float64    `json:"debt_principal"`     // Sum of DebtPrincipal across lanes
-	CarryingCost      float64    `json:"carrying_cost"`      // Sum of CarryingCost across lanes
-	PotentialRealized float64    `json:"potential_realized"` // Realized points gain if target reached
+	Index             int            `json:"index"`                    // 1-based wave sequence number
+	ID                string         `json:"id"`                       // e.g. "wave-1"
+	Safety            WaveSafety     `json:"safety"`                   // pairwise_tree_disjoint or serial_singleton
+	Lanes             []DebtLane     `json:"lanes"`                    // Debt lanes allocated to this wave
+	LaneNames         []string       `json:"lane_names"`               // Slice of lane identifiers
+	Paths             []string       `json:"paths"`                    // Package paths (e.g. "internal/faultlab")
+	WaveSize          int            `json:"wave_size"`                // Number of concurrent workers in this wave
+	TotalDebt         float64        `json:"total_debt"`               // Sum of TotalDebt across lanes in this wave
+	DebtPrincipal     float64        `json:"debt_principal"`           // Sum of DebtPrincipal across lanes
+	CarryingCost      float64        `json:"carrying_cost"`            // Sum of CarryingCost across lanes
+	PotentialRealized float64        `json:"potential_realized"`       // Realized points gain if target reached
+	OpencodeChats     []OpencodeChat `json:"opencode_chats,omitempty"` // Ready-to-run OpenCode chat sessions
 }
 
 // WavePlan is the full multi-wave campaign dispatch plan.
@@ -68,16 +69,20 @@ type WavePlan struct {
 	StartingPercent  float64  `json:"starting_percent"`
 	ProjectedPercent float64  `json:"projected_percent"`
 	Waves            []Wave   `json:"waves"`
+	OpencodeCommands []string `json:"opencode_commands,omitempty"` // Ready-to-run OpenCode shell commands
 }
 
 // WavePlanOptions configures wave generation.
 type WavePlanOptions struct {
-	WaveSize       int
-	MaxWaves       int
-	TargetGrade    string
-	TargetPoints   float64
-	ExcludedLanes  []string
-	AutoDetectHeld bool
+	WaveSize         int
+	MaxWaves         int
+	TargetGrade      string
+	TargetPoints     float64
+	ExcludedLanes    []string
+	AutoDetectHeld   bool
+	OpencodeCommands bool
+	OpencodeOptions  OpencodeChatOptions
+	PerfFocus        bool
 	// Graph override allows injecting an import dependency graph in tests.
 	Graph map[string]map[string]struct{}
 }
@@ -131,8 +136,23 @@ func PlanWaves(report Report, opts WavePlanOptions) WavePlan {
 		candidates = append(candidates, l)
 	}
 
-	// Sort candidates: worst-first total debt, carrying cost, maturity gap.
+	// Helper to identify performance-critical debt lanes (unbenchmarked, unproven runtime, modularity deficit on core/enabling).
+	isPerfCriticalDebt := func(l DebtLane) bool {
+		if l.Criticality != CriticalityCore && l.Criticality != CriticalityEnabling {
+			return false
+		}
+		return !l.Evidence.Benchmarked || !l.Evidence.Dogfooded || l.Evidence.ModularityDeficit || l.Evidence.HasModelHardcoding
+	}
+
+	// Sort candidates: when PerfFocus is active, prioritize perf-critical debt 3x.
 	sort.SliceStable(candidates, func(i, j int) bool {
+		if opts.PerfFocus {
+			iPerf := isPerfCriticalDebt(candidates[i])
+			jPerf := isPerfCriticalDebt(candidates[j])
+			if iPerf != jPerf {
+				return iPerf
+			}
+		}
 		if candidates[i].TotalDebt != candidates[j].TotalDebt {
 			return candidates[i].TotalDebt > candidates[j].TotalDebt
 		}
@@ -293,7 +313,7 @@ func PlanWaves(report Report, opts WavePlanOptions) WavePlan {
 		projectedGrade = GradeLetter(projectedPct)
 	}
 
-	return WavePlan{
+	plan := WavePlan{
 		Schema:           WavePlanSchema,
 		Workspace:        report.Workspace,
 		TargetRepo:       report.TargetRepo,
@@ -312,6 +332,12 @@ func PlanWaves(report Report, opts WavePlanOptions) WavePlan {
 		ProjectedPercent: projectedPct,
 		Waves:            selectedWaves,
 	}
+
+	if opts.OpencodeCommands {
+		AttachOpencodeChats(&plan, opts.OpencodeOptions)
+	}
+
+	return plan
 }
 
 // ParseTargetGrade parses target grade specifications into a target percentage.
@@ -447,12 +473,54 @@ var pidLivenessCheck = processalive.Check
 type LaneJournalEntry struct {
 	Op          string    `json:"op"`
 	Lane        string    `json:"lane"`
+	Tree        []string  `json:"tree,omitempty"`
 	PID         int       `json:"pid,omitempty"`
 	Mode        string    `json:"mode,omitempty"` // "exclusive", "advisory", "shared", "readonly"
 	AcquiredAt  time.Time `json:"acquired_at,omitempty"`
 	HeartbeatAt time.Time `json:"heartbeat_at,omitempty"`
 	TTLSeconds  int       `json:"ttl_seconds,omitempty"`
 	Worker      string    `json:"worker,omitempty"`
+}
+
+func parseFlexibleTree(raw json.RawMessage) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return nil
+	}
+	var arr []string
+	if err := json.Unmarshal(raw, &arr); err == nil {
+		var res []string
+		for _, s := range arr {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				res = append(res, s)
+			}
+		}
+		return res
+	}
+	var str string
+	if err := json.Unmarshal(raw, &str); err == nil {
+		str = strings.TrimSpace(str)
+		if str == "" {
+			return nil
+		}
+		if strings.Contains(str, ",") {
+			parts := strings.Split(str, ",")
+			var res []string
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					res = append(res, p)
+				}
+			}
+			return res
+		}
+		return []string{str}
+	}
+	return nil
 }
 
 func parseFlexibleTime(raw []byte) time.Time {
@@ -485,8 +553,12 @@ func parseFlexibleTime(raw []byte) time.Time {
 
 func (e *LaneJournalEntry) UnmarshalJSON(data []byte) error {
 	type rawEntry struct {
-		Op          string          `json:"op"`
-		Lane        string          `json:"lane"`
+		Op    string          `json:"op"`
+		Lane  string          `json:"lane"`
+		Tree  json.RawMessage `json:"tree,omitempty"`
+		Lease *struct {
+			Tree json.RawMessage `json:"tree,omitempty"`
+		} `json:"lease,omitempty"`
 		PID         int             `json:"pid,omitempty"`
 		Mode        string          `json:"mode,omitempty"`
 		AcquiredAt  json.RawMessage `json:"acquired_at,omitempty"`
@@ -506,12 +578,59 @@ func (e *LaneJournalEntry) UnmarshalJSON(data []byte) error {
 	e.Worker = raw.Worker
 	e.AcquiredAt = parseFlexibleTime(raw.AcquiredAt)
 	e.HeartbeatAt = parseFlexibleTime(raw.HeartbeatAt)
+
+	if len(raw.Tree) > 0 {
+		e.Tree = parseFlexibleTree(raw.Tree)
+	}
+	if len(e.Tree) == 0 && raw.Lease != nil && len(raw.Lease.Tree) > 0 {
+		e.Tree = parseFlexibleTree(raw.Lease.Tree)
+	}
 	return nil
 }
 
-// DiscoverHeldLanes inspects the workspace lane journal (.dos/lane-journal.jsonl)
-// and returns all currently held lane leases.
-func DiscoverHeldLanes(workspace string) ([]string, error) {
+// HeldLease represents an active lease held in the workspace.
+type HeldLease struct {
+	Lane string   `json:"lane"`
+	Tree []string `json:"tree,omitempty"`
+	PID  int      `json:"pid,omitempty"`
+	Mode string   `json:"mode,omitempty"`
+}
+
+func leaseKey(entry LaneJournalEntry) string {
+	lane := strings.ToLower(strings.TrimSpace(entry.Lane))
+	if len(entry.Tree) > 0 {
+		trees := append([]string(nil), entry.Tree...)
+		sort.Strings(trees)
+		if entry.PID > 0 {
+			return fmt.Sprintf("%s::tree:%s::pid:%d", lane, strings.Join(trees, ","), entry.PID)
+		}
+		return fmt.Sprintf("%s::tree:%s", lane, strings.Join(trees, ","))
+	}
+	if entry.PID > 0 {
+		return fmt.Sprintf("%s::pid:%d", lane, entry.PID)
+	}
+	return lane
+}
+
+func sameTrees(t1, t2 []string) bool {
+	if len(t1) != len(t2) {
+		return false
+	}
+	s1 := append([]string(nil), t1...)
+	s2 := append([]string(nil), t2...)
+	sort.Strings(s1)
+	sort.Strings(s2)
+	for i := range s1 {
+		if !strings.EqualFold(filepath.Clean(s1[i]), filepath.Clean(s2[i])) {
+			return false
+		}
+	}
+	return true
+}
+
+// DiscoverHeldLeases inspects the workspace lane journal (.dos/lane-journal.jsonl)
+// and returns all currently held leases with their lane, tree, and PID.
+func DiscoverHeldLeases(workspace string) ([]HeldLease, error) {
 	journalPath := filepath.Join(workspace, ".dos", "lane-journal.jsonl")
 	f, err := os.Open(journalPath)
 	if err != nil {
@@ -539,23 +658,45 @@ func DiscoverHeldLanes(workspace string) ([]string, error) {
 		op := strings.ToUpper(strings.TrimSpace(entry.Op))
 		switch op {
 		case "ACQUIRE":
-			active[lane] = entry
+			active[leaseKey(entry)] = entry
 		case "RELEASE":
-			delete(active, lane)
-			for k := range active {
-				if strings.EqualFold(k, lane) {
+			relKey := leaseKey(entry)
+			if _, exists := active[relKey]; exists {
+				delete(active, relKey)
+			} else {
+				for k, cur := range active {
+					if !strings.EqualFold(cur.Lane, lane) {
+						continue
+					}
+					if entry.PID > 0 && cur.PID > 0 && entry.PID != cur.PID {
+						continue
+					}
+					if len(entry.Tree) > 0 && !sameTrees(cur.Tree, entry.Tree) {
+						continue
+					}
 					delete(active, k)
 				}
 			}
 		case "HEARTBEAT", "TOUCH":
-			targetKey := lane
-			for k := range active {
-				if strings.EqualFold(k, lane) {
-					targetKey = k
-					break
+			matchKey := ""
+			candKey := leaseKey(entry)
+			if _, ok := active[candKey]; ok {
+				matchKey = candKey
+			} else {
+				for k, cur := range active {
+					if strings.EqualFold(cur.Lane, lane) {
+						if entry.PID > 0 && cur.PID == entry.PID {
+							matchKey = k
+							break
+						}
+						if matchKey == "" {
+							matchKey = k
+						}
+					}
 				}
 			}
-			if cur, ok := active[targetKey]; ok {
+			if matchKey != "" {
+				cur := active[matchKey]
 				if !entry.HeartbeatAt.IsZero() {
 					cur.HeartbeatAt = entry.HeartbeatAt
 				} else if !entry.AcquiredAt.IsZero() {
@@ -566,6 +707,9 @@ func DiscoverHeldLanes(workspace string) ([]string, error) {
 				if entry.PID > 0 {
 					cur.PID = entry.PID
 				}
+				if len(entry.Tree) > 0 {
+					cur.Tree = entry.Tree
+				}
 				if entry.Mode != "" {
 					cur.Mode = entry.Mode
 				}
@@ -575,7 +719,7 @@ func DiscoverHeldLanes(workspace string) ([]string, error) {
 				if entry.TTLSeconds > 0 {
 					cur.TTLSeconds = entry.TTLSeconds
 				}
-				active[targetKey] = cur
+				active[matchKey] = cur
 			} else {
 				if entry.HeartbeatAt.IsZero() {
 					if !entry.AcquiredAt.IsZero() {
@@ -584,22 +728,22 @@ func DiscoverHeldLanes(workspace string) ([]string, error) {
 						entry.HeartbeatAt = time.Now()
 					}
 				}
-				active[lane] = entry
+				active[candKey] = entry
 			}
 		}
 	}
 
-	var held []string
-	for lane, entry := range active {
+	var held []HeldLease
+	for _, entry := range active {
 		mode := strings.ToLower(strings.TrimSpace(entry.Mode))
 		if mode == "advisory" || mode == "readonly" || mode == "shared" {
-			log.Printf("[debtlane:lease] INFO: lane %s held under advisory lease by PID %d; permitting exclusive acquisition", lane, entry.PID)
+			log.Printf("[debtlane:lease] INFO: lane %s held under advisory lease by PID %d; permitting exclusive acquisition", entry.Lane, entry.PID)
 			continue
 		}
 
 		if entry.PID > 0 {
 			if !pidLivenessCheck(entry.PID) {
-				log.Printf("[debtlane:lease] NOTICE: auto-reclaimed orphaned lease on lane %s (PID %d dead)", lane, entry.PID)
+				log.Printf("[debtlane:lease] NOTICE: auto-reclaimed orphaned lease on lane %s (PID %d dead)", entry.Lane, entry.PID)
 				continue
 			}
 
@@ -625,17 +769,145 @@ func DiscoverHeldLanes(workspace string) ([]string, error) {
 
 			gracePeriod := 5 * time.Minute
 			if time.Since(lastSeen) <= effectiveTTL+gracePeriod {
-				held = append(held, lane)
+				held = append(held, HeldLease{
+					Lane: entry.Lane,
+					Tree: entry.Tree,
+					PID:  entry.PID,
+					Mode: entry.Mode,
+				})
 			}
 			continue
 		}
 
 		// If PID == 0:
-		held = append(held, lane)
+		held = append(held, HeldLease{
+			Lane: entry.Lane,
+			Tree: entry.Tree,
+			PID:  entry.PID,
+			Mode: entry.Mode,
+		})
 	}
 
+	sort.Slice(held, func(i, j int) bool {
+		if held[i].Lane != held[j].Lane {
+			return held[i].Lane < held[j].Lane
+		}
+		if held[i].PID != held[j].PID {
+			return held[i].PID < held[j].PID
+		}
+		return strings.Join(held[i].Tree, ",") < strings.Join(held[j].Tree, ",")
+	})
+	return held, nil
+}
+
+// DiscoverHeldLanes inspects the workspace lane journal (.dos/lane-journal.jsonl)
+// and returns all currently held lane leases.
+func DiscoverHeldLanes(workspace string) ([]string, error) {
+	leases, err := DiscoverHeldLeases(workspace)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool)
+	var held []string
+	for _, l := range leases {
+		lane := strings.TrimSpace(l.Lane)
+		lower := strings.ToLower(lane)
+		if lower != "" && !seen[lower] {
+			seen[lower] = true
+			held = append(held, lane)
+		}
+	}
 	sort.Strings(held)
 	return held, nil
+}
+
+// DiscoverHeldTrees inspects the workspace lane journal (.dos/lane-journal.jsonl)
+// and returns a map from lane name to held tree path slices.
+func DiscoverHeldTrees(workspace string) (map[string][]string, error) {
+	leases, err := DiscoverHeldLeases(workspace)
+	if err != nil {
+		return nil, err
+	}
+	trees := make(map[string][]string)
+	for _, l := range leases {
+		lower := strings.ToLower(strings.TrimSpace(l.Lane))
+		if lower != "" && len(l.Tree) > 0 {
+			trees[lower] = append(trees[lower], l.Tree...)
+		}
+	}
+	return trees, nil
+}
+
+// AcquireTreeLease records an ACQUIRE entry with exact tree in .dos/lane-journal.jsonl.
+func AcquireTreeLease(workspace, lane string, paths []string, pid int) error {
+	dosDir := filepath.Join(workspace, ".dos")
+	if err := os.MkdirAll(dosDir, 0o755); err != nil {
+		return err
+	}
+	journalPath := filepath.Join(dosDir, "lane-journal.jsonl")
+	f, err := os.OpenFile(journalPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	payload := struct {
+		Op         string   `json:"op"`
+		Lane       string   `json:"lane"`
+		Tree       []string `json:"tree,omitempty"`
+		PID        int      `json:"pid,omitempty"`
+		Mode       string   `json:"mode"`
+		AcquiredAt string   `json:"acquired_at"`
+	}{
+		Op:         "ACQUIRE",
+		Lane:       lane,
+		Tree:       paths,
+		PID:        pid,
+		Mode:       "exclusive",
+		AcquiredAt: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	_, err = f.Write(data)
+	return err
+}
+
+// ReleaseTreeLease records a RELEASE entry for the lane and tree in .dos/lane-journal.jsonl.
+func ReleaseTreeLease(workspace, lane string, paths []string, pid int) error {
+	dosDir := filepath.Join(workspace, ".dos")
+	if err := os.MkdirAll(dosDir, 0o755); err != nil {
+		return err
+	}
+	journalPath := filepath.Join(dosDir, "lane-journal.jsonl")
+	f, err := os.OpenFile(journalPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	payload := struct {
+		Op   string   `json:"op"`
+		Lane string   `json:"lane"`
+		Tree []string `json:"tree,omitempty"`
+		PID  int      `json:"pid,omitempty"`
+	}{
+		Op:   "RELEASE",
+		Lane: lane,
+		Tree: paths,
+		PID:  pid,
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	_, err = f.Write(data)
+	return err
 }
 
 // TouchLaneLease appends a HEARTBEAT entry for the given lane and PID to .dos/lane-journal.jsonl.
@@ -720,6 +992,14 @@ func RenderWaves(plan WavePlan, pg ProductionGrade) string {
 		}
 		tw.Flush()
 		b.WriteString("\n")
+
+		if len(w.OpencodeChats) > 0 {
+			b.WriteString("  OpenCode Chat Commands:\n")
+			for _, chat := range w.OpencodeChats {
+				b.WriteString(fmt.Sprintf("    %s\n", strings.Join(chat.Command, " ")))
+			}
+			b.WriteString("\n")
+		}
 	}
 
 	b.WriteString("Dispatch Guide: Launch each wave's workers concurrently via `task` tool with strict package boundaries.\n")
@@ -759,6 +1039,14 @@ func MarkdownWaves(plan WavePlan, pg ProductionGrade) string {
 			))
 		}
 		b.WriteString("\n")
+
+		if len(w.OpencodeChats) > 0 {
+			b.WriteString("#### OpenCode Chat Commands\n\n```bash\n")
+			for _, chat := range w.OpencodeChats {
+				b.WriteString(strings.Join(chat.Command, " ") + "\n")
+			}
+			b.WriteString("```\n\n")
+		}
 	}
 
 	return b.String()

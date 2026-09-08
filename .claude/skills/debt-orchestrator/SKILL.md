@@ -4,152 +4,198 @@ description: Coordinate bounded, evidence-backed maturity debt work in the curre
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob, Task
-argument-hint: "[repository or lane] [wave size] [explicit campaign goal and budget] (no args = one bounded pass)"
+argument-hint: "[repository or lane] [--wave-size N] [--perf-focus] [--opencode-commands] [--spawn-opencode] (no args = one bounded pass)"
+metadata:
+  opencode: agent-permission
 ---
 
-# Debt orchestration: select useful work, verify, resume
+# /debt-orchestrator — Multi-Agent Maturity Debt Burndown & Performance Acceleration
 
-Retire concrete maturity gaps using the current repository's instructions, ownership
-mechanisms, and evidence. The CLI plans work; the coordinator executes and witnesses it.
-Use the invoking repository as the default scope. Include a sibling only when the
-operator names it or an evidenced dependency requires it; preserve public/private placement.
+Retire concrete maturity debt gaps across the codebase using verified lane leases, tree-disjoint multi-agent wave dispatch (via in-harness subagents or OpenCode leaf workers), and rigorous 3x harsher standards on factors driving long-term continual performance gains.
 
-## Scope and stop condition
+The shape: **baseline debt lanes (`fak debt-lanes --json`) → plan concurrent-safe waves (`fak debt-orchestrator --plan-waves --perf-focus`) → arbitrate leases (`dos arbitrate`) → parallel wave dispatch (in-harness `task` or OpenCode leaf workers via `--opencode-commands`) → harvest & independently witness → autonomous safe git landing (`fak sync`, `fak commit --path`, `fak sync push`) → compare burndown (`--compare`) → loop.**
 
-Default to one bounded pass with at most one admitted wave. Choose 4–8 small outcomes
-across verified disjoint lanes (`dos.toml` declares 894 concurrent leaves) and scale workers
-to available hardware capacity. A recurring
-schedule (including a 20-minute cadence) neither supplies a runtime deadline nor proves
-that the previous run finished. Inspect active ownership before dispatch; skip held
-work and leave a resumable receipt. Do not launch another wave to fill idle capacity.
+---
 
-For an explicitly sustained goal, continue through verified waves within its stated
-scope, time/spend limits, and completion criterion. Reassess after each wave; stop at
-the achieved goal, exhausted budget, or a checkable blocker. Record the next action
-when the pass ends. Never turn an unspecified invocation into a letter-grade campaign.
+## The 3x Harsher Performance Discipline
 
-Read the current objective, latest compact receipt, and changed evidence once. Reuse
-an existing matching issue/plan rather than creating a fresh campaign every run. Follow
-repository issue-tracking policy within the user's authorization; this skill does not
-authorize sending messages. Keep one bounded current-state summary, with links to
-owned artifacts; do not replay or append entire transcripts into continuation state.
+To ensure that debt retirement translates directly into long-term continual performance gains (rather than synthetic metric-chasing or comment padding), the debt orchestrator enforces five uncompromising performance gates:
 
-## Baseline and selection
+1. **Substantive Benchmarks Mandatory (Core & Enabling)**:
+   - Any Core or Enabling lane lacking substantive benchmarks (`!Benchmarked`) incurs an automatic interest carrying cost surcharge (`unbenchmarked_core_perf_hazard (+0.06)` / `unbenchmarked_enabling_perf_hazard (+0.04)`) and a 3x harsher health deduction (-0.15).
+   - Core runtime paths cannot achieve `healthy` status without passing benchmarks.
+   - Benchmark functions MUST use `b.Run` or loop over `b.N` in `<unit_of_work>/*_test.go`; empty loops or mocked timers are rejected by structure.
+   - Baseline results must be registered in `BENCHMARK-AUTHORITY.md`.
 
-Resolve explicit absolute repository roots and allocate a unique run scratch directory
-through the repository's supported allocator. Check the installed CLI help before using
-source-only capabilities. Current source implements `fak debt-orchestrator` as
-`fak debt-lanes --plan-waves`; it does not dispatch workers, acquire leases, or land work.
+2. **Real Runtime Proofs & Dogfooding (Mocks Prohibited)**:
+   - "Mocks hide integration bugs" (Hermes' rule). Core and Enabling paths without real loopback execution or dogfooding (`!Dogfooded`) incur carrying cost surcharges (`unproven_runtime_core_perf_hazard (+0.05)`) and 3x harsher health deductions (-0.15).
+   - Real runtime proof must be wired into `runtime-proofs.json` or verified through on-device integration tests (`*integration*test.go`).
+   - Purely synthetic mock-only tests do not count toward debt retirement.
 
-Public scan and plan examples (replace placeholders with resolved paths):
+3. **Zero Tolerance for Modularity Deficits & God-Constructs**:
+   - God-files (>1500 lines) and god-functions (>200 lines), model hardcoding, and tight coupling carry severe compounding interest surcharges (+0.08 to +0.10) and block advancing to `hardened` or `production_grade` rungs.
+   - These monolithic blocks prevent compiler vectorization, SIMD/Vulkan/Metal acceleration, and clean parallelization.
+   - Workers must decompose oversized files into single-responsibility units and remove model coupling.
 
-```text
-fak debt-lanes --workspace <public-root> --target-repo fak --json
-fak debt-orchestrator --workspace <public-root> --target-repo fak --wave-size 3 --max-waves 1 --json
+4. **Zero Tolerance for Formulaic Comment Gaming**:
+   - Comments do NOT award maturity points. Adding formulaic "Contract:", "Invariant:", or "Fail-closed:" headers is flagged as comment gaming and penalized with interest rate surcharges.
+   - Comment bloat (>35% comment ratio) is classified as bad debt and prevents promotion to production grade.
 
-# Queryability, health filtering, and cross-indexing:
-fak debt-lanes --workspace <public-root> --target-repo both --query <keyword> --health degraded,critical --json
-fak debt-lanes --workspace <public-root> --target-repo both --cross-index --top 10
-fak debt-orchestrator --workspace <public-root> --target-repo both --health degraded,critical --wave-size 6 --max-waves 3 --json
+5. **Performance-Focused Wave Prioritization (`--perf-focus`)**:
+   - When `--perf-focus` (or `--harsher-perf`) is passed to `fak debt-orchestrator`, wave planning sorts Core and Enabling lanes with performance debt (unbenchmarked, unproven runtime, modularity deficits) ahead of peripheral debt, regardless of raw principal totals.
+
+---
+
+## Scope and Stop Conditions
+
+- **Default pass**: 1 bounded pass with at most 1 admitted wave (4–8 small outcomes across verified disjoint lanes).
+- **Scale to hardware**: Do not exceed physical CPU cores or create thrashing.
+- **Sustained campaigns**: Continue through verified waves until the target grade or target points are achieved, budget is exhausted, or a checkable blocker is encountered.
+- **Inspect active ownership**: Skip held work (`.dos` leases) and leave a resumable receipt. Never launch duplicate workers on held lanes.
+
+---
+
+## Step 1 — Measure Baseline & Plan Safe Waves
+
+Capture baseline state and plan concurrent-safe waves:
+
+```bash
+# Capture full baseline:
+fak debt-lanes --workspace <repo-root> --json > baseline.json
+fak debt-lanes --top 5
+
+# Plan waves with 3x harsher performance focus:
+fak debt-orchestrator --workspace <repo-root> --wave-size 4 --max-waves 2 --perf-focus
+
+# Plan waves with ready-to-run OpenCode leaf worker commands:
+fak debt-orchestrator --workspace <repo-root> --wave-size 4 --max-waves 2 --perf-focus --opencode-commands
+
+# Emit machine-readable wave plan JSON:
+fak debt-orchestrator --workspace <repo-root> --wave-size 4 --max-waves 2 --perf-focus --opencode-commands --json > wave-plan.json
 ```
 
-For private scope, explicitly pass `--target-repo fak-private --private-root <private-root>`
-with the selected workspace. For authorized combined discovery, use the public root as
-`--workspace`, `--target-repo both`, and the explicit private root. Folder-name inference
-is unreliable in renamed worker checkouts; never infer scope from binary location.
+Use filtering flags to target specific debt areas:
+- `--perf-focus` / `--harsher-perf`: prioritize unbenchmarked, unproven, and modularity debt.
+- `--health degraded,critical`: target only unhealthy or compounding lanes.
+- `--criticality core,enabling`: focus on performance-critical infrastructure.
+- `--query <text>`: filter across lane name, unit of work, companion, or health issue tokens (`unbenchmarked`, `unproven_runtime`, `missing_tests`, `modularity_deficit`).
+- `--cross-index`: display dual-repo companions, inbound blast radius, and DOS trees.
 
-Save the first command's **Report** JSON (`fak.maturity-debt-lane.v1`) as the baseline.
-The orchestrator emits **WavePlan** JSON (`fak.debt-orchestrator-wave-plan.v1`), which is
-not a compare baseline. `--compare <baseline>` emits text even with `--json`; confirm
-schema and matching roots, target-repo, and filters before comparing because the parser does not check them.
+---
 
-Use `--lane`, `--query` (`-q`), `--health`, `--criticality`, and `--min-gap` to narrow candidate work:
-- `--query <text>`: filters lanes across lane name, unit of work, companion, drivers, or health issue tokens (e.g. `missing_tests`, `excess_comments`, `gateway`).
-- `--health <status>`: filters lanes by health classification (`healthy`, `degraded`, `critical`).
-- `--cross-index`: displays dual-repo companions, inbound blast radius, and DOS trees.
-`--top` limits hotspot display, not the full set planned. `--max-waves 0` plans all candidate waves;
-it does not authorize an endless execution loop. Validate user targets before passing
-`--target-grade` or `--target-points` (`--points` alias): malformed grades may be ignored,
-and point-based planning can stop on debt in the plan or potential realized points.
-Those projections do not establish achieved gains.
+## Step 2 — Pre-Dispatch Lease Arbitration
 
-### Multi-Dimensional Health Matrix & Cross-Indexing in Wave Burndowns
-1. **Health Prioritization**: Prioritize `critical` lanes (compounding interest > 25% or untested core leaves) and `degraded` lanes with high blast radius (`Related.Dependents > 10`).
-2. **Cross-Indexed Companion Awareness**: When scheduling a wave with dual-repo scope (`--target-repo both`), inspect `Related.CompanionLane` and `Related.CompanionUnitOfWork` to avoid cross-repo interface skew.
-3. **Artifact Cross-Indexing**: Confirm the subagent fulfills missing artifacts recorded on the lane:
-   - Missing tests -> create `<unit>/*_test.go`
-   - Unproven runtime -> add entry to `runtime-proofs.json`
-   - Unbenchmarked -> add benchmark function or record in `BENCHMARK-AUTHORITY.md`
-   - Comment bloat -> prune formulaic headers and noise to clean health status
+Before launching workers, verify tree-disjointness and acquire leases using DOS:
 
-Save one plan per fresh scope. Inspect a small candidate batch until the first useful,
-ready unit is found; advance through saved candidates on holds. Refresh planning only
-when relevant state changes or the candidate set is exhausted. Repeatedly replanning
-the same held prefix is not progress.
+```bash
+# Adjudicate lane admission:
+dos arbitrate --lane <lane> --tree <unit_of_work>/**
 
-Apply current priorities before debt rank: all-in-one serving/harness/memory, serving,
-harness, then other work. Favor a witnessed blocker in a useful workload and the smallest
-end-to-end improvement. Name the outcome, baseline, and independent witness. Debt rank
-and test counts are discovery signals, not proof of deployed quality or useful throughput.
+# Acquire durable lease:
+dos lease-lane acquire --lane <lane> --owner debt-orchestrator --tree <unit_of_work>/**
+```
 
-## Admit and dispatch
+Never dispatch concurrent workers touching overlapping package directories. Shared Go package edits cause immediate compile breakages.
 
-Treat the wave plan as advisory. Its graph scans `internal/`, `pkg/`, and `platform/`
-under one workspace, checks direct imports by bare lane name, and samples one lane
-journal. It does not prove complete cross-repository, transitive, `cmd/`, or `tools/`
-safety. Journal discovery can fail open; lane names can collide across repositories.
+---
 
-Resolve every packet to repository + absolute root + exact write paths. Inspect current
-DOS lane trees, dependency annotations, live leases, and contract locks in each affected
-repository. Check public SDK/private consumer dependencies separately. Re-arbitrate
-immediately before launch. `dos arbitrate` is a decision; acquire a durable lease through
-the managed launcher or `dos lease-lane --workspace <root> acquire --lane <lane>`
-`--owner <owner> --tree <paths...>` and retain the receipt. Never
-substitute an empty lease set or a planner label for ownership. Defer refused scopes.
+## Step 3 — Wave Dispatch (Subagents or OpenCode Leaf Workers)
 
-Use the repository's managed isolated worker flow: public detached
-`fak worktree worker prepare|land|reap`, private `fak-flow start|checkpoint|land`.
-Bind ownership to a persistent worker/supervisor lifetime, not the short-lived preparation
-process. Each packet names one issue/outcome, exact paths, baseline revision, one
-appropriate witness, budget, and stop condition. Delegate independent bounded units;
-serialize shared contracts, core changes, or uncertain dependencies. Follow the actual
-harness's model/worker routing; do not invent worker types or override user model choices.
+Choose between in-harness subagents (Option A) or OpenCode leaf workers (Option B):
 
-## Witness and land
+### Option A: In-Harness Subagents (`task` Tool)
 
-Workers return compact evidence: changed paths and revision, executed witness with result
-and artifact location, remaining gap or refusal. The coordinator independently reads the
-diff and actual result before accepting it. A mock echo, source declaration, successful
-launch, or restored context is not execution evidence. If a peer already landed the work,
-compare exact candidate files with that commit before attempting another land.
+Dispatch concurrent subagents across pairwise tree-disjoint lanes in a single coordinator response:
 
-Choose verification proportional to the changed behavior and repository requirements.
-Use scoped tests in isolation; execute the real CLI/protocol path for runtime changes.
-Expand validation only for a new failure or an unresolved risk. Reuse compatible receipts
-bound to the exact candidate; do not require arbitrary 10/50/100 matrices per lane.
+```text
+task subagent_type="worker" prompt="Maturity Debt Lane: gateway (internal/gateway)..."
+task subagent_type="worker" prompt="Maturity Debt Lane: compute (internal/compute)..."
+task subagent_type="worker" prompt="Maturity Debt Lane: engine (internal/engine)..."
+```
 
-For native inference/performance work, follow the current native-inference contract:
-new work prefers Qwen3.8, runs fak-native end to end, and names the engine, model,
-configuration, workload, and quality constraints in the receipt. Preserve historical
-Qwen3.6 evidence and require an explicit task-specific exception for new use. Obtain the
-required validity/budget review before expensive runs; measure matched end-to-end cost,
-including failed attempts and verification. A correctness fix or maturity lift alone
-cannot establish a performance multiplier.
+Instruct each worker to:
+1. Confine edits strictly to `internal/<lane>/...` (1–3 files).
+2. Fulfill missing performance deliverables (benchmarks, runtime proofs, modularity cleanup).
+3. Verify package tests and benchmarks (`go test -v ./internal/<lane>/...`, `go test -bench=. ./internal/<lane>/...`).
+4. Execute autonomous safe git landing (`fak sync check`, `fak commit --path`, `fak sync push`).
 
-Land only witnessed, owned paths through the repository's sanctioned commit/landing
-flow, following its actual trailers and publication rules. Keep private evidence private
-and use the repository's supported leak check for public material. Read back the resulting
-commit and sync receipt before calling it shipped. Record source delivery, runtime
-evidence, performance evidence, and queue state separately in the existing plan.
+### Option B: OpenCode Leaf Workers (`--opencode-commands`)
 
-## Close the pass
+Use generated OpenCode CLI commands to launch detached, user-visible child workers:
 
-Re-scan the same scope and compare the Report baseline. Explain denominator or scope
-changes separately; never shrink the denominator to claim retirement. Report observed
-outcomes and measured deltas separately from projected points. Keep a compact receipt:
+```bash
+# Inspect generated commands from wave plan:
+fak debt-orchestrator --wave-size 4 --max-waves 1 --perf-focus --opencode-commands
 
-`scope + revisions | accepted outcomes + witnesses | measured delta | held/unfinished | next action`
+# Example generated invocation:
+opencode run --variant high --auto --title "Debt: gateway (internal/gateway)" "Maturity Debt Lane: gateway..."
+```
 
-Release only this run's finished leases and reap only its witnessed landed scratch or
-worktrees. Preserve unfinished owned work for recovery. Bulk worktree sweeps, cache
-reclamation, and peer cleanup are separate maintenance work, not wave-boundary defaults.
+#### Five Invariants of OpenCode Leaf Workers:
+1. **High Reasoning Effort (`--variant high`)**: Child workers run with Gemini 3.8 Flash high reasoning mode for rigorous verification.
+2. **Direct Leaf Execution (No Nested Tasks)**: Leaf workers execute deliverables directly within package boundaries. Calling the `task` tool or attempting nested delegation is strictly prohibited (prevents subagent depth limit recursion failure, #12028).
+3. **Automated Approvals (`--auto`)**: Workers run unattended with permissions granted for local file operations.
+4. **Mandatory 4-Phase Delivery & Landing Pipeline**:
+   - Phase 1 [Implement]: Author tests, benchmarks, runtime wiring, or modularity refactor.
+   - Phase 2 [Verify]: Run package verification commands (`go test`, `go vet`, benchmarks).
+   - Phase 3 [Autonomous Safe Git Landing]: Commit by explicit path and push unprompted (`fak sync check`, `fak commit --path`, `fak sync push`).
+   - Phase 4 [Receipt]: Output compact 3-line receipt upon completion.
+5. **Milestone Progress Reporting**: Report progress via structured comment tags (`<!-- fak:progress milestone="..." delta="..." tests="..." -->`).
+
+---
+
+## Step 4 — Witness and Harvest
+
+Workers return compact receipts. The coordinator independently verifies delivered evidence:
+
+1. **Verify Git Commits**: Confirm commits landed on trunk with valid trailers (`(fak <lane>)`):
+   ```bash
+   git log -n 5 --oneline
+   ```
+2. **Verify Performance Witnesses**: Run benchmarks and tests on the touched packages:
+   ```bash
+   go test -v ./internal/<lane>/...
+   go test -bench=. -benchmem ./internal/<lane>/...
+   go vet ./internal/<lane>/...
+   ```
+3. **Check Denominator Honesty**: Confirm the production grade increased without shrinking the denominator:
+   ```bash
+   fak debt-lanes --workspace <repo-root> --compare baseline.json
+   ```
+
+---
+
+## Step 5 — Close the Pass & Release Leases
+
+1. Release finished leases:
+   ```bash
+   dos lease-lane release --lane <lane> --owner debt-orchestrator
+   ```
+2. Clean up allocated scratch directories:
+   ```bash
+   fak tree-doctor --reap-scratch debt-orchestrator --json
+   ```
+3. Emit compact verdict receipt (<3 lines):
+   - **Line 1**: Summary of retired debt, grade delta, and waves completed.
+   - **Line 2**: List of matured lanes, touched paths, and landed commit SHAs.
+   - **Line 3**: Checkable verification command.
+
+---
+
+## Verification and Witness
+
+Verify this skill definition using the project gates:
+
+```bash
+# 1. Structural admission and anti-slop verification:
+python tools/skill_slop_scorecard.py .claude/skills/debt-orchestrator/SKILL.md --corpus .claude/skills
+
+# 2. Frontmatter portability check:
+python tools/skill_frontmatter_lint.py --check
+
+# 3. Synchronize cross-harness adapter for OpenCode (.agents/skills/debt-orchestrator/SKILL.md):
+go run ./cmd/fak-project-assets sync --json
+
+# 4. Verify zero unexplained parity gaps across harnesses:
+go run ./cmd/fak-project-assets parity --json
+```
