@@ -81,6 +81,58 @@ type CPUVerification struct {
 	Steps          []VerificationStep `json:"steps,omitempty"`
 }
 
+// GenerationObservation is an opaque account of the token-generation boundary
+// observed by the real decode loop. Its state cannot be populated by callers;
+// zero values are unavailable.
+type GenerationObservation struct {
+	observed       bool
+	executionSeal  *generationExecutionSeal
+	repetition     int
+	ignoreEOS      bool
+	eosStopped     bool
+	outputTokenIDs []int
+}
+
+type generationExecutionSeal struct {
+	repetitions int
+	bound       bool
+	binding     generationExecutionBinding
+}
+
+type generationExecutionBinding struct {
+	promptTokenIDs        []int
+	contextLimit          int
+	generatedLimit        int
+	ignoreEOS             bool
+	modelName             string
+	artifactPath          string
+	artifactSHA256        string
+	tensorInventorySHA256 string
+	tokenizerSHA256       string
+	templateSHA256        string
+	quantization          string
+}
+
+// IgnoreEOS reports the EOS policy observed by the real decode loop.
+func (o GenerationObservation) IgnoreEOS() (bool, bool) { return o.ignoreEOS, o.observed }
+
+// EOSStopped reports whether the real decode loop stopped on EOS.
+func (o GenerationObservation) EOSStopped() (bool, bool) { return o.eosStopped, o.observed }
+
+// ActualGeneratedTokens reports the number of token IDs accepted by the real
+// decode loop.
+func (o GenerationObservation) ActualGeneratedTokens() (int, bool) {
+	return len(o.outputTokenIDs), o.observed
+}
+
+// OutputTokenIDs returns a clone of the IDs accepted by the real decode loop.
+func (o GenerationObservation) OutputTokenIDs() ([]int, bool) {
+	if !o.observed {
+		return nil, false
+	}
+	return slices.Clone(o.outputTokenIDs), true
+}
+
 // Run is one observed candidate repetition.
 type Run struct {
 	SessionSetupDuration time.Duration
@@ -93,6 +145,7 @@ type Run struct {
 	StepTokens           []int
 	GeneratedTokens      []int
 	EOSStopped           bool
+	generation           GenerationObservation
 	Steps                []Step
 	CPUVerification      *CPUVerification
 	BackendExecution     *compute.BackendExecutionObservation
@@ -131,6 +184,49 @@ type Execution struct {
 	FiniteLogits          bool
 	CPUModelParity        *bool
 	Runs                  []Run
+	generationSeal        *generationExecutionSeal
+}
+
+func generationBinding(execution Execution) generationExecutionBinding {
+	return generationExecutionBinding{
+		promptTokenIDs: slices.Clone(execution.PromptTokenIDs), contextLimit: execution.ContextLimit,
+		generatedLimit: execution.GeneratedLimit, ignoreEOS: execution.IgnoreEOS,
+		modelName: execution.ModelName, artifactPath: execution.ArtifactPath,
+		artifactSHA256: execution.ArtifactSHA256, tensorInventorySHA256: execution.TensorInventorySHA256,
+		tokenizerSHA256: execution.TokenizerSHA256, templateSHA256: execution.TemplateSHA256,
+		quantization: execution.Quantization,
+	}
+}
+
+func (binding generationExecutionBinding) matches(execution Execution) bool {
+	return slices.Equal(binding.promptTokenIDs, execution.PromptTokenIDs) &&
+		binding.contextLimit == execution.ContextLimit && binding.generatedLimit == execution.GeneratedLimit &&
+		binding.ignoreEOS == execution.IgnoreEOS && binding.modelName == execution.ModelName &&
+		binding.artifactPath == execution.ArtifactPath && binding.artifactSHA256 == execution.ArtifactSHA256 &&
+		binding.tensorInventorySHA256 == execution.TensorInventorySHA256 && binding.tokenizerSHA256 == execution.TokenizerSHA256 &&
+		binding.templateSHA256 == execution.TemplateSHA256 && binding.quantization == execution.Quantization
+}
+
+func (execution *Execution) sealGenerationBinding() {
+	if execution.generationSeal == nil || execution.generationSeal.bound {
+		return
+	}
+	execution.generationSeal.binding = generationBinding(*execution)
+	execution.generationSeal.bound = true
+}
+
+// GenerationObservation returns the runner-owned observation for one exact
+// repetition after validating its private execution seal, ordinal, and binding.
+func (execution Execution) GenerationObservation(repetition int) (GenerationObservation, bool) {
+	seal := execution.generationSeal
+	if seal == nil || !seal.bound || seal.repetitions != len(execution.Runs) || !seal.binding.matches(execution) || repetition < 0 || repetition >= len(execution.Runs) {
+		return GenerationObservation{}, false
+	}
+	observed := execution.Runs[repetition].generation
+	if !observed.observed || observed.executionSeal != seal || observed.repetition != repetition {
+		return GenerationObservation{}, false
+	}
+	return observed, true
 }
 
 type session interface {
@@ -273,6 +369,7 @@ func (d dependencies) execute(ctx context.Context, req Request) (Execution, erro
 	exec.LoadDuration = loadDuration
 	exec.QuantDuration = quantDuration
 	exec.Engine, exec.Precision = describeEngine(req, be)
+	exec.sealGenerationBinding()
 	return exec, runErr
 }
 
@@ -504,6 +601,7 @@ func ExecuteModel(req Request, m *model.Model, be compute.Backend) (Execution, e
 	if be != nil {
 		exec.Backend.Selected = be.Name()
 	}
+	exec.sealGenerationBinding()
 	return exec, err
 }
 
@@ -516,9 +614,11 @@ func executeLoaded(req Request, m loadedModel, be compute.Backend, now func() ti
 			return Execution{}, fmt.Errorf("raw decode: prompt token ID %d exceeds model vocabulary size %d", id, m.Config().VocabSize)
 		}
 	}
+	generationSeal := &generationExecutionSeal{repetitions: req.Repetitions}
 	exec := Execution{
 		PromptTokenIDs: slices.Clone(req.PromptTokenIDs), ContextLimit: req.ContextLimit,
 		GeneratedLimit: req.GeneratedTokenLimit, IgnoreEOS: req.IgnoreEOS, FiniteLogits: true,
+		generationSeal: generationSeal,
 	}
 	var verifyErr error
 	for rep := 0; rep < req.Repetitions; rep++ {
@@ -526,7 +626,7 @@ func executeLoaded(req Request, m loadedModel, be compute.Backend, now func() ti
 		if err != nil {
 			return Execution{}, fmt.Errorf("raw decode: capture backend observation before run %d: %w", rep+1, err)
 		}
-		run, err := executeRun(req, m, be, now, since)
+		run, err := executeRun(req, m, be, generationSeal, rep, now, since)
 		if err != nil {
 			return Execution{}, err
 		}
@@ -560,7 +660,7 @@ func executeLoaded(req Request, m loadedModel, be compute.Backend, now func() ti
 	return exec, verifyErr
 }
 
-func executeRun(req Request, m loadedModel, be compute.Backend, now func() time.Time, since func(time.Time) time.Duration) (Run, error) {
+func executeRun(req Request, m loadedModel, be compute.Backend, executionSeal *generationExecutionSeal, repetition int, now func() time.Time, since func(time.Time) time.Duration) (Run, error) {
 	start := now()
 	s, err := m.NewCandidateSession(be, req)
 	if err != nil {
@@ -580,7 +680,9 @@ func executeRun(req Request, m loadedModel, be compute.Backend, now func() time.
 		candidateLogits = append(candidateLogits, slices.Clone(logits))
 	}
 	sampled := now()
-	run.EOSStopped = m.IsEOS(token) && !req.IgnoreEOS
+	ignoreEOS := req.IgnoreEOS
+	shouldStopOnEOS := func(token int) bool { return m.IsEOS(token) && !ignoreEOS }
+	run.EOSStopped = shouldStopOnEOS(token)
 	previous := token
 	for step := 1; !run.EOSStopped && step < req.GeneratedTokenLimit && len(req.PromptTokenIDs)+len(run.GeneratedTokens) < req.ContextLimit; step++ {
 		logits = s.Step(previous)
@@ -596,7 +698,15 @@ func executeRun(req Request, m loadedModel, be compute.Backend, now func() time.
 			candidateLogits = append(candidateLogits, slices.Clone(logits))
 		}
 		previous = token
-		run.EOSStopped = m.IsEOS(token) && !req.IgnoreEOS
+		run.EOSStopped = shouldStopOnEOS(token)
+	}
+	run.generation = GenerationObservation{
+		observed:       true,
+		executionSeal:  executionSeal,
+		repetition:     repetition,
+		ignoreEOS:      ignoreEOS,
+		eosStopped:     run.EOSStopped,
+		outputTokenIDs: slices.Clone(run.GeneratedTokens),
 	}
 	decoded := now()
 	s.Close()
