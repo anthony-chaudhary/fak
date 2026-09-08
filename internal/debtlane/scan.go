@@ -188,7 +188,8 @@ func Scan(opts Options) (Report, error) {
 	}
 
 	var expandedFindings []FindingProvenance
-	if opts.ExpandedBreadth && len(opts.Facts) == 0 {
+	expandedBreadth := !opts.NoExpandedBreadth
+	if expandedBreadth && len(opts.Facts) == 0 {
 		var extra []DebtLane
 		extra, expandedFindings = discoverExpandedSurfaces(absRoot)
 		for i := range extra {

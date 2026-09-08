@@ -266,3 +266,44 @@ func TestPerformanceInterestSurcharges(t *testing.T) {
 		t.Errorf("expected score to reflect 3x harsher deductions (<= 0.70), got %.2f", health.Score)
 	}
 }
+
+func TestFormatShellCommand(t *testing.T) {
+	if got := FormatShellCommand(nil); got != "" {
+		t.Errorf("expected empty string for nil args, got %q", got)
+	}
+	if got := FormatShellCommand([]string{}); got != "" {
+		t.Errorf("expected empty string for empty args, got %q", got)
+	}
+
+	args := []string{
+		"opencode",
+		"run",
+		"--title",
+		"Debt: gateway (internal/gateway)",
+		"--variant",
+		"high",
+		"-m",
+		"deepseek/deepseek-r1",
+		"Maturity Debt Lane: gateway\n\nExecution Invariants:\n- go test",
+		`commit with "quote" inside`,
+	}
+
+	cmdStr := FormatShellCommand(args)
+
+	// Clean single-word args should not be quoted
+	if !strings.Contains(cmdStr, "opencode run --title ") {
+		t.Errorf("expected unquoted clean flags, got: %s", cmdStr)
+	}
+	// Spaces and parentheses should be wrapped in quotes
+	if !strings.Contains(cmdStr, `"Debt: gateway (internal/gateway)"`) {
+		t.Errorf("expected quoted title with parens, got: %s", cmdStr)
+	}
+	// Newlines should be wrapped in quotes
+	if !strings.Contains(cmdStr, "\"Maturity Debt Lane: gateway\n\nExecution Invariants:\n- go test\"") {
+		t.Errorf("expected quoted multi-line prompt, got: %s", cmdStr)
+	}
+	// Internal double quotes should be escaped
+	if !strings.Contains(cmdStr, `"commit with \"quote\" inside"`) {
+		t.Errorf("expected escaped quotes, got: %s", cmdStr)
+	}
+}

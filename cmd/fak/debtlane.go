@@ -74,7 +74,8 @@ func runDebtLanesInternal(stdout, stderr io.Writer, flagSetName string, defaultP
 	agent := fs.String("agent", "worker", "OpenCode worker agent profile (default: worker)")
 	model := fs.String("model", "", "OpenCode model override")
 	interactive := fs.Bool("interactive", false, "generate interactive OpenCode run (-i) commands")
-	expandedSurfaces := fs.Bool("expanded-surfaces", false, "inventory >=9 surface classes (cmd, tools, skills, workflows, examples, docs) (#12318)")
+	expandedSurfaces := fs.Bool("expanded-surfaces", true, "inventory >=9 surface classes (cmd, tools, skills, workflows, examples, docs) (#12318)")
+	noExpandedSurfaces := fs.Bool("no-expanded-surfaces", false, "disable expanded surfaces; scan package roots only")
 	surfaceFilter := fs.String("surface", "", "filter by surface class (internal, pkg, platform, cmd, tools, skills, workflows, examples, docs)")
 	coverageReceipt := fs.Bool("coverage", false, "display machine-readable coverage receipt summary")
 
@@ -98,6 +99,7 @@ func runDebtLanesInternal(stdout, stderr io.Writer, flagSetName string, defaultP
 		}
 	}
 
+	enabledExpanded := !*noExpandedSurfaces && *expandedSurfaces
 	report, err := debtlane.Scan(debtlane.Options{
 		WorkspaceRoot:     root,
 		TargetRepo:        *targetRepo,
@@ -106,7 +108,8 @@ func runDebtLanesInternal(stdout, stderr io.Writer, flagSetName string, defaultP
 		QueryFilter:       *query,
 		HealthFilter:      *health,
 		SurfaceFilter:     *surfaceFilter,
-		ExpandedBreadth:   *expandedSurfaces,
+		NoExpandedBreadth: !enabledExpanded,
+		ExpandedBreadth:   enabledExpanded,
 		CrossIndex:        *crossIndex,
 		CriticalityFilter: *criticality,
 		MinGap:            *minGap,

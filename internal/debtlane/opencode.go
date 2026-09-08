@@ -146,6 +146,24 @@ func BuildDebtOpencodeChat(lane DebtLane, opts OpencodeChatOptions) OpencodeChat
 	}
 }
 
+// FormatShellCommand formats a command slice into a shell command line string,
+// wrapping arguments that contain spaces, parentheses, or newlines in quotes.
+func FormatShellCommand(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	parts := make([]string, len(args))
+	for i, arg := range args {
+		if strings.ContainsAny(arg, " ()\n\r") || arg == "" {
+			escaped := strings.ReplaceAll(arg, `"`, `\"`)
+			parts[i] = `"` + escaped + `"`
+		} else {
+			parts[i] = arg
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
 // AttachOpencodeChats generates and attaches OpenCode chat sessions and commands to waves in a WavePlan.
 func AttachOpencodeChats(plan *WavePlan, opts OpencodeChatOptions) {
 	if plan == nil {
@@ -159,7 +177,7 @@ func AttachOpencodeChats(plan *WavePlan, opts OpencodeChatOptions) {
 			chat := BuildDebtOpencodeChat(w.Lanes[j], opts)
 			w.Lanes[j].OpencodeCommand = chat.Command
 			w.OpencodeChats = append(w.OpencodeChats, chat)
-			cmdStr := strings.Join(chat.Command, " ")
+			cmdStr := FormatShellCommand(chat.Command)
 			allCmds = append(allCmds, cmdStr)
 		}
 	}

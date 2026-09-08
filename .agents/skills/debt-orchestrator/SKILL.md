@@ -2,6 +2,7 @@
 name: debt-orchestrator
 description: Coordinate bounded, evidence-backed maturity debt work in the current repository, with isolated workers and independent verification. Use for debt burndowns or explicitly requested sustained campaigns.
 metadata:
+  opencode: agent-permission
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/debt-orchestrator/SKILL.md
 ---

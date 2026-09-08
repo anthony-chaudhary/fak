@@ -17,6 +17,51 @@ The shape: **baseline debt lanes (`fak debt-lanes --json`) → plan concurrent-s
 
 ---
 
+## Default 9-Surface Class Discovery
+
+Discovery scans all **9 standard surface classes** by default across the repository, ensuring complete workspace inventory without hiding peripheral, tool, or stewardship debt:
+
+1. **`internal`**: Core runtime, mediation, security, and compute packages.
+2. **`pkg`**: Public shared packages and client SDKs.
+3. **`platform`**: Hardware and OS platform-specific implementations.
+4. **`cmd`**: Command-line interface binaries and verbs.
+5. **`tools`**: Internal developer tooling and submodules.
+6. **`skills`**: Agent skill packs (`.claude/skills`, `.agents/skills`).
+7. **`workflows`**: CI/CD workflows (`.github/workflows`).
+8. **`examples`**: Example code and runnable demos.
+9. **`docs`**: Technical architecture and reference documentation.
+
+To restrict scanning to package roots only (`internal`, `pkg`, `platform`), pass `--no-expanded-surfaces` (or `--expanded-surfaces=false`).
+
+---
+
+## The Debt Generation Lifecycle
+
+Maturity debt is an active, deterministic accounting system driven by three core lifecycle mechanisms:
+
+1. **1/10 Stub Admission**:
+   - Every new package or unit of work added to the codebase is immediately admitted to the production denominator at **1/10th (10%) target maturity** admission.
+   - Stubs cannot hide unmeasured: creating a skeleton directory or placeholder package instantly claims its production ceiling in the denominator while contributing minimal realized points.
+   - This ensures immediate structural visibility for new code and blocks phantom growth.
+
+2. **Dilution from Immature WIP**:
+   - Any incomplete, unhardened, or untested work-in-progress expands the production denominator (`DenominatorPoints`) while contributing fractionally to realized points (`RealizedPoints`).
+   - This creates measurable **dilution from WIP** (`DilutionFromWIP`), mathematically lowering the system-wide production grade (`GradePercent`) and grade letter until the unit reaches target maturity.
+   - Dilution forces teams to finish and harden existing WIP before opening new speculative surfaces.
+
+3. **Dynamic Detector Debt**:
+   - 15 independent, typed detector dimensions continuously inspect all scanned surfaces on disk.
+   - Detectors inspect unit code, test files, benchmarks, and configuration for structural defects:
+     - **Thin tests**: test files with zero assertions or mock-only passes.
+     - **Stub markers**: `TODO`, `FIXME`, `XXX`, or `panic("not implemented")` calls (safely scanned across lines >64KB).
+     - **Modularity deficits**: god-files (>1500 lines) and god-functions (>200 lines).
+     - **Formulaic comment gaming**: "Contract:"/"Invariant:" stuffing or excessive comment bloat (>35%).
+     - **Performance hazards**: unbenchmarked core/enabling paths or missing runtime proofs.
+     - **Hygiene & safety**: unsafe pointer arithmetic, subprocess execution, undocumented exports, race/fuzz gaps.
+   - Findings dynamically attach carrying cost interest surcharges (elevating the rate up to the critical compounding band >25%) and degrade health verdicts (`healthy` → `degraded` → `critical`).
+
+---
+
 ## The 3x Harsher Performance Discipline
 
 To ensure that debt retirement translates directly into long-term continual performance gains (rather than synthetic metric-chasing or comment padding), the debt orchestrator enforces five uncompromising performance gates:
@@ -75,6 +120,8 @@ fak debt-orchestrator --workspace <repo-root> --wave-size 4 --max-waves 2 --perf
 ```
 
 Use filtering flags to target specific debt areas:
+- `--no-expanded-surfaces`: disable expanded surfaces; scan package roots only (`internal`, `pkg`, `platform`).
+- `--surface <class>`: filter by surface class (`internal`, `pkg`, `platform`, `cmd`, `tools`, `skills`, `workflows`, `examples`, `docs`).
 - `--perf-focus` / `--harsher-perf`: prioritize unbenchmarked, unproven, and modularity debt.
 - `--health degraded,critical`: target only unhealthy or compounding lanes.
 - `--criticality core,enabling`: focus on performance-critical infrastructure.
