@@ -155,6 +155,7 @@ func init() {
 		name:                    "vulkan",
 		tier:                    tier + ":" + C.GoString(&name[0]),
 		haveQ8:                  C.fvk_have_q8() != 0,
+		haveAttention:           true,
 		haveCoopmat:             C.fvk_have_cooperative_matrix() != 0,
 		haveMemoryBudget:        C.fvk_have_memory_budget() != 0,
 		totalMem:                totalDeviceLocal,
@@ -393,6 +394,7 @@ type vulkanBackend struct {
 	tier          string
 	haveQ8        bool
 	haveCoopmat   bool
+	haveAttention bool
 	transient     []*vulkanBuf
 	freeTransient map[int][]*vulkanBuf
 	// Device-local residency budget (Stage-1 offload). budgetBytes is the cap on device-local
