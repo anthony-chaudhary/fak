@@ -153,8 +153,11 @@ func TestRawDecodeSynthetic(t *testing.T) {
 	if attempt.Observed.Engine.Name != "" || attempt.Observed.Engine.Backend != "" || attempt.Observed.Engine.FallbackCount != nil {
 		t.Fatalf("synthetic execution was relabeled as a physical engine: %+v", attempt.Observed.Engine)
 	}
-	if attempt.Observed.Source.GitCommit != "" || attempt.Observed.Model.ArtifactSHA256 != "" || attempt.Observed.Device.Name != "" || attempt.Observed.OutputText != "" || attempt.Observed.PeakProcessMemoryBytes != nil || attempt.Observed.PeakDeviceMemoryBytes != nil || attempt.Observed.Counters != nil {
+	if attempt.Observed.Source.GitCommit != "" || attempt.Observed.Source.SourceArchiveSHA256 != "" || attempt.Observed.Source.Dirty != nil || attempt.Observed.Source.DiffSHA256 != "" || attempt.Observed.Model.ArtifactSHA256 != "" || attempt.Observed.Device.Name != "" || attempt.Observed.OutputText != "" || attempt.Observed.PeakProcessMemoryBytes != nil || attempt.Observed.PeakDeviceMemoryBytes != nil || attempt.Observed.Counters != nil {
 		t.Fatalf("unobserved physical identity or telemetry was invented: %+v", attempt.Observed)
+	}
+	if len(attempt.Observed.Source.BinarySHA256) != 64 {
+		t.Fatalf("running binary identity was not observed: %+v", attempt.Observed.Source)
 	}
 	if attempt.Observed.FiniteLogits == nil || !*attempt.Observed.FiniteLogits || attempt.Observed.CPUModelParity != nil {
 		t.Fatalf("quality evidence presence mismatch: finite=%v parity=%v", attempt.Observed.FiniteLogits, attempt.Observed.CPUModelParity)
@@ -167,6 +170,30 @@ func TestRawDecodeSynthetic(t *testing.T) {
 	wantElapsedNS := uint64(math.Round(rep0Timing["total_ms"].(float64) * 1e6))
 	if attempt.Observed.CandidateElapsedNanoseconds != wantElapsedNS || attempt.Observed.Runs[0].CandidateElapsedNanoseconds != wantElapsedNS {
 		t.Fatalf("physical attempt candidate_elapsed_ns=%d run0=%d, want repetition-zero elapsed_ns=%d", attempt.Observed.CandidateElapsedNanoseconds, attempt.Observed.Runs[0].CandidateElapsedNanoseconds, wantElapsedNS)
+	}
+}
+
+func TestRawDecodePhysicalReceiptCapturesRunningBinary(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := fileIdentity(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution := rawdecode.Execution{
+		PromptTokenIDs: []int{1}, ContextLimit: 8, GeneratedLimit: 1, FiniteLogits: true,
+	}
+	attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
+		t.Fatalf("binary-only observation became creditable: %+v", attempt)
+	}
+	if got := attempt.Observed.Source.BinarySHA256; got != want.SHA256 {
+		t.Fatalf("running binary SHA-256 = %q, want %q", got, want.SHA256)
+	}
+	if attempt.Observed.Source.GitCommit != "" || attempt.Observed.Source.SourceArchiveSHA256 != "" || attempt.Observed.Source.Dirty != nil || attempt.Observed.Source.DiffSHA256 != "" {
+		t.Fatalf("binary capture invented source identity: %+v", attempt.Observed.Source)
 	}
 }
 
@@ -232,6 +259,22 @@ func TestRawDecodeExecutorProductionAdapterCallsSeamOnceAndFailsReceiptClosed(t 
 	attempt := report["canonical_physical_receipt"].(map[string]any)
 	if attempt["status"] != "UNAVAILABLE" || attempt["credit_eligible"] != false {
 		t.Fatalf("incomplete observation became physical receipt: %v", attempt)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantBinary, err := fileIdentity(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, ok := attempt["observed"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing observed physical result: %v", attempt)
+	}
+	source, ok := observed["source"].(map[string]any)
+	if !ok || source["binary_sha256"] != wantBinary.SHA256 {
+		t.Fatalf("production report running binary identity = %v, want %q", source, wantBinary.SHA256)
 	}
 }
 

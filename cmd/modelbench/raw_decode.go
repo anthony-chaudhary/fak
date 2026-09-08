@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"math"
+	"os"
 	"runtime"
 	"slices"
 	"strconv"
@@ -234,6 +235,15 @@ func rawDecodePhysicalReceipt(execution rawdecode.Execution, repOutputs []rawRep
 	observed := compute.Qwen38VulkanRawDecodeResult{
 		GeneratedTokenLimit: execution.GeneratedLimit,
 		FiniteLogits:        &finiteLogits,
+	}
+	// The runner owns the executable path and hashes the bytes that are actually
+	// running. Capture failure deliberately leaves the identity empty so the
+	// canonical receipt remains unavailable; argv, flags, and environment values
+	// cannot supply or override this observation.
+	if executable, err := os.Executable(); err == nil {
+		if binary, err := fileIdentity(executable); err == nil {
+			observed.Source.BinarySHA256 = binary.SHA256
+		}
 	}
 	if execution.ArtifactSHA256 != "" {
 		observed.Model.ArtifactSHA256 = execution.ArtifactSHA256
