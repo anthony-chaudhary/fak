@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,16 +14,18 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/compute"
-	"github.com/anthony-chaudhary/fak/internal/mathx"
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/rawdecode"
 )
 
 var (
-	rawDecodeFlag    = flag.Bool("raw-decode", false, "capture raw greedy decode with exact token accounting")
-	rawPromptIDsFlag = flag.String("raw-prompt-ids", "", "comma-separated prompt token IDs for raw decode (e.g. 1,2,3)")
-	rawContextFlag   = flag.Int("raw-context", 256, "positive logical token context limit for raw decode")
-	rawIgnoreEOSFlag = flag.Bool("raw-ignore-eos", false, "ignore EOS during raw decode and continue until decode-steps")
-	rawVerifyCPUFlag = flag.Bool("raw-verify-cpu", false, "replay raw decode against fresh CPU session to verify logits and argmax")
+	rawDecodeFlag         = flag.Bool("raw-decode", false, "capture raw greedy decode with exact token accounting")
+	rawPromptIDsFlag      = flag.String("raw-prompt-ids", "", "comma-separated prompt token IDs for raw decode (e.g. 1,2,3)")
+	rawContextFlag        = flag.Int("raw-context", 256, "positive logical token context limit for raw decode")
+	rawIgnoreEOSFlag      = flag.Bool("raw-ignore-eos", false, "ignore EOS during raw decode and continue until decode-steps")
+	rawVerifyCPUFlag      = flag.Bool("raw-verify-cpu", false, "replay raw decode against fresh CPU session to verify logits and argmax")
+	rawArtifactSHA256Flag = flag.String("raw-artifact-sha256", "", "required expected SHA-256 of the -gguf artifact for production raw decode")
 )
 
 func rawDecodeEnabled() bool {
@@ -224,36 +227,26 @@ func rawDecodeInt32IDs(ids []int) ([]int32, error) {
 	return out, nil
 }
 
-// rawDecodePhysicalReceipt observes only values the current runner owns. In
-// particular, it does not infer source hashes, artifact hashes, device/driver
-// identity, fallback counters, memory, dispatch counters, or decoded text.
-func rawDecodePhysicalReceipt(f *benchFlags, modelName, engine, precision string, be compute.Backend, promptIDs []int, contextLimit, generatedTokenLimit int, ignoreEOS bool, repOutputs []rawRepOutput) rawDecodePhysicalReceiptAttempt {
-	finiteLogits := true
+// rawDecodePhysicalReceipt maps only executor observations. It never accepts
+// caller-supplied source, binary, device, memory, or counter identity.
+func rawDecodePhysicalReceipt(execution rawdecode.Execution, repOutputs []rawRepOutput) rawDecodePhysicalReceiptAttempt {
+	finiteLogits := execution.FiniteLogits
 	observed := compute.Qwen38VulkanRawDecodeResult{
-		Model: compute.Qwen38VulkanModelIdentity{
-			Name:         modelName,
-			Quantization: precision,
-		},
-		Device: compute.Qwen38VulkanDeviceIdentity{
-			OS:   runtime.GOOS,
-			Arch: runtime.GOARCH,
-		},
-		GeneratedTokenLimit: generatedTokenLimit,
+		GeneratedTokenLimit: execution.GeneratedLimit,
 		FiniteLogits:        &finiteLogits,
 	}
-	if f != nil && f.gguf != nil {
-		observed.Model.ArtifactPath = strings.TrimSpace(*f.gguf)
+	if execution.ArtifactSHA256 != "" {
+		observed.Model.ArtifactSHA256 = execution.ArtifactSHA256
 	}
-	if be != nil {
-		observed.Engine.Backend = be.Name()
-		observed.Engine.ExecutedPath = engine
+	if execution.Backend.Selected != "" && execution.Backend.Selected != "legacy" {
+		observed.Engine.Backend = execution.Backend.Selected
 	}
 
 	if len(repOutputs) == 0 {
 		return rawDecodePhysicalReceiptAttempt{Status: "UNAVAILABLE", Reason: "raw decode produced no repetitions", Observed: observed}
 	}
 	var err error
-	if observed.PromptTokenIDs, err = rawDecodeInt32IDs(promptIDs); err != nil {
+	if observed.PromptTokenIDs, err = rawDecodeInt32IDs(execution.PromptTokenIDs); err != nil {
 		return rawDecodePhysicalReceiptAttempt{Status: "UNAVAILABLE", Reason: err.Error(), Observed: observed}
 	}
 	allParityObserved, allParityPassed := true, true
@@ -263,13 +256,13 @@ func rawDecodePhysicalReceipt(f *benchFlags, modelName, engine, precision string
 		if convertErr != nil {
 			return rawDecodePhysicalReceiptAttempt{Status: "UNAVAILABLE", Reason: convertErr.Error(), Observed: observed}
 		}
-		ignoreEOSObserved, eosStoppedObserved := ignoreEOS, rep.eosStopped
+		ignoreEOSObserved, eosStoppedObserved := execution.IgnoreEOS, rep.eosStopped
 		candidateElapsed := rep.sessionSetupDur + rep.prefillDur + rep.firstSampleDur + rep.decodeDur + rep.teardownDur
 		observed.Runs[i] = compute.Qwen38VulkanDecodeRun{
 			Repetition:                  i + 1,
-			ContextLimit:                contextLimit,
-			ContextTokens:               len(promptIDs) + len(rep.generatedTokens),
-			GeneratedTokenLimit:         generatedTokenLimit,
+			ContextLimit:                execution.ContextLimit,
+			ContextTokens:               len(execution.PromptTokenIDs) + len(rep.generatedTokens),
+			GeneratedTokenLimit:         execution.GeneratedLimit,
 			ActualGeneratedTokens:       len(rep.generatedTokens),
 			Sampler:                     "greedy",
 			SeedPolicy:                  "not_applicable_greedy",
@@ -303,7 +296,8 @@ func rawDecodePhysicalReceipt(f *benchFlags, modelName, engine, precision string
 	return rawDecodePhysicalReceiptAttempt{Status: "AVAILABLE", CreditEligible: true, Observed: observed, Receipt: &receipt}
 }
 
-// executeRawDecode runs raw greedy decode across reps, returning the structured report map.
+// executeRawDecode is the loaded-model adapter retained for existing modelbench
+// sources and tests. Token generation lives only in internal/rawdecode.
 func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, quantMS float64, be compute.Backend, registeredBackends []string) (map[string]any, error) {
 	if err := validateRawDecodeFlags(f); err != nil {
 		return nil, err
@@ -312,245 +306,85 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, q
 	if err != nil {
 		return nil, err
 	}
-	if m != nil && m.Cfg.VocabSize > 0 {
-		for _, id := range promptIDs {
-			if id >= m.Cfg.VocabSize {
-				return nil, fmt.Errorf("prompt token ID %d exceeds model vocabulary size %d", id, m.Cfg.VocabSize)
-			}
-		}
+	req := rawDecodeRequest(f, promptIDs)
+	req.ModelName = modelName
+	execution, runErr := rawdecode.ExecuteModel(req, m, be)
+	execution.LoadDuration = time.Duration(math.Round(loadMS * float64(time.Millisecond)))
+	execution.QuantDuration = time.Duration(math.Round(quantMS * float64(time.Millisecond)))
+	execution.Backend.RegisteredBackends = slices.Clone(registeredBackends)
+	return rawDecodeReport(f, execution, runErr, modelName)
+}
+
+func rawDecodeRequest(f *benchFlags, promptIDs []int) rawdecode.Request {
+	return rawdecode.Request{
+		PromptTokenIDs: slices.Clone(promptIDs), ContextLimit: *rawContextFlag,
+		GeneratedTokenLimit: *f.decodeSteps, Repetitions: *f.decodeReps,
+		IgnoreEOS: *rawIgnoreEOSFlag, VerifyCPU: *rawVerifyCPUFlag,
+		BackendName: *f.backendName, Quant: *f.quant, Lean: *f.lean, Q4K: *f.q4k,
+		StreamQ4K: streamQ4KEnabled(f), Metal: *f.metal,
+		Q4KGateUpOutputSlab: *f.q4kGateUpSlab,
+		VulkanQ4KProfile:    *f.vulkanQ4KProfile, VulkanStageQ4K: *f.vulkanStageQ4K,
+		RequireNonReference: *f.requireNonReference,
 	}
+}
 
-	requestedSteps := 32
-	if f != nil && f.decodeSteps != nil {
-		requestedSteps = *f.decodeSteps
-	}
-	reps := 5
-	if f != nil && f.decodeReps != nil {
-		reps = *f.decodeReps
-	}
-	ignoreEOS := false
-	if rawIgnoreEOSFlag != nil {
-		ignoreEOS = *rawIgnoreEOSFlag
-	}
-	rawContext := 256
-	if rawContextFlag != nil {
-		rawContext = *rawContextFlag
-	}
-	verifyCPU := false
-	if rawVerifyCPUFlag != nil {
-		verifyCPU = *rawVerifyCPUFlag
-	}
-
-	isEOS := func(id int) bool {
-		if m == nil {
-			return false
-		}
-		return m.Cfg.IsEOS(id)
-	}
-
-	repOutputs := make([]rawRepOutput, 0, reps)
-	var verifyErr error
-
-	for r := 0; r < reps; r++ {
-		t0 := time.Now()
-		s := newBenchSession(m, f, be)
-		t1 := time.Now()
-		sessionSetupDur := t1.Sub(t0)
-		prefillLogits := s.Prefill(promptIDs)
-		t2 := time.Now()
-		prefillDur := t2.Sub(t1)
-
-		if !allFinite(prefillLogits) {
-			s.Close()
-			return nil, errors.New("raw decode: prefill produced non-finite logits")
-		}
-
-		top1Idx, top1, top2 := logitTop2(prefillLogits)
-
-		prefillOutputID := top1Idx
-		stepsInfo := []rawStepInfo{
-			{
-				Step:    0,
-				TokenID: prefillOutputID,
-				Top1:    top1,
-				Top2:    top2,
-				Margin:  top1 - top2,
-			},
-		}
-		generatedTokens := []int{prefillOutputID}
-		stepTokens := make([]int, 0, requestedSteps-1)
-		// Quantized sessions reuse their output buffers. Keep snapshots only when
-		// CPU replay needs them after later calls and candidate teardown.
-		var verifyPrefillLogits []float32
-		var deviceStepLogits [][]float32
-		if verifyCPU {
-			verifyPrefillLogits = append([]float32(nil), prefillLogits...)
-			deviceStepLogits = make([][]float32, 0, requestedSteps-1)
-		}
-
-		eosStopped := false
-		if isEOS(prefillOutputID) && !ignoreEOS {
-			eosStopped = true
-		}
-
-		t3 := time.Now()
-		// This boundary is shared with prefill and decode: finite checks, first
-		// token evidence, optional snapshot and bookkeeping stay in the interval.
-		firstSampleDur := t3.Sub(t2)
-		if !eosStopped && requestedSteps > 1 {
-			prevTok := prefillOutputID
-			for step := 1; step < requestedSteps; step++ {
-				if len(promptIDs)+len(generatedTokens) >= rawContext {
-					break
-				}
-				stepLogits := s.Step(prevTok)
-				if !allFinite(stepLogits) {
-					s.Close()
-					return nil, fmt.Errorf("raw decode: step %d produced non-finite logits", step)
-				}
-				tokIdx, sTop1, sTop2 := logitTop2(stepLogits)
-				stepTokens = append(stepTokens, tokIdx)
-				generatedTokens = append(generatedTokens, tokIdx)
-				if verifyCPU {
-					deviceStepLogits = append(deviceStepLogits, append([]float32(nil), stepLogits...))
-				}
-				stepsInfo = append(stepsInfo, rawStepInfo{
-					Step:    step,
-					TokenID: tokIdx,
-					Top1:    sTop1,
-					Top2:    sTop2,
-					Margin:  sTop1 - sTop2,
-				})
-				prevTok = tokIdx
-				if isEOS(prevTok) && !ignoreEOS {
-					eosStopped = true
-					break
-				}
+func rawDecodeRepOutputs(execution rawdecode.Execution) []rawRepOutput {
+	outputs := make([]rawRepOutput, len(execution.Runs))
+	for i, run := range execution.Runs {
+		var verify *cpuVerifyResult
+		if run.CPUVerification != nil {
+			converted := cpuVerifyResult{
+				Passed: run.CPUVerification.Passed, AllAgree: run.CPUVerification.AllAgree,
+				AllArgmaxAgree: run.CPUVerification.AllArgmaxAgree, MinCosine: run.CPUVerification.MinCosine,
+				MaxDelta: run.CPUVerification.MaxDelta, Prefill: stepVerify(run.CPUVerification.Prefill),
 			}
+			for _, step := range run.CPUVerification.Steps {
+				converted.Steps = append(converted.Steps, stepVerify(step))
+			}
+			verify = &converted
 		}
-		t4 := time.Now()
-		decodeDur := t4.Sub(t3)
-		s.Close()
-		t5 := time.Now()
-		teardownDur := t5.Sub(t4)
-
-		var cpuVerify *cpuVerifyResult
-		var cpuVerifyDur time.Duration
-		if verifyCPU {
-			cpuSession := m.NewSession()
-			if f != nil {
-				if f.quant != nil {
-					cpuSession.Quant = *f.quant
-				}
-				if f.q4k != nil {
-					cpuSession.Q4K = *f.q4k
-				}
-				if f.q4kGateUpSlab != nil {
-					cpuSession.Q4KGateUpOutputSlab = *f.q4kGateUpSlab
-				}
-			}
-			cpuPrefillLogits := cpuSession.Prefill(promptIDs)
-			if !allFinite(cpuPrefillLogits) {
-				cpuSession.Close()
-				return nil, errors.New("raw verify cpu: CPU prefill produced non-finite logits")
-			}
-			cpuArgmax := mathx.ArgmaxF32(cpuPrefillLogits)
-			cos0 := cosineF32(verifyPrefillLogits, cpuPrefillLogits)
-			maxDelta0 := maxAbsDelta(verifyPrefillLogits, cpuPrefillLogits)
-			agree0 := (prefillOutputID == cpuArgmax)
-
-			minCos := cos0
-			maxD := maxDelta0
-			allAgree := agree0
-
-			pVerify := stepVerify{
-				Step:        0,
-				DeviceToken: prefillOutputID,
-				CPUToken:    cpuArgmax,
-				Agree:       agree0,
-				Cosine:      cos0,
-				MaxDelta:    maxDelta0,
-			}
-
-			var stepVerifies []stepVerify
-			prevReplayTok := prefillOutputID
-			for i, stepTok := range stepTokens {
-				cpuStepLogits := cpuSession.Step(prevReplayTok)
-				if !allFinite(cpuStepLogits) {
-					cpuSession.Close()
-					return nil, fmt.Errorf("raw verify cpu: CPU step %d produced non-finite logits", i+1)
-				}
-				cArgmax := mathx.ArgmaxF32(cpuStepLogits)
-				cCos := cosineF32(deviceStepLogits[i], cpuStepLogits)
-				cDelta := maxAbsDelta(deviceStepLogits[i], cpuStepLogits)
-				cAgree := (stepTok == cArgmax)
-				if cCos < minCos {
-					minCos = cCos
-				}
-				if cDelta > maxD {
-					maxD = cDelta
-				}
-				if !cAgree {
-					allAgree = false
-				}
-				stepVerifies = append(stepVerifies, stepVerify{
-					Step:        i + 1,
-					DeviceToken: stepTok,
-					CPUToken:    cArgmax,
-					Agree:       cAgree,
-					Cosine:      cCos,
-					MaxDelta:    cDelta,
-				})
-				prevReplayTok = stepTok
-			}
-			cpuSession.Close()
-
-			cpuVerify = &cpuVerifyResult{
-				Passed:         allAgree,
-				AllAgree:       allAgree,
-				AllArgmaxAgree: allAgree,
-				MinCosine:      minCos,
-				MaxDelta:       maxD,
-				Prefill:        pVerify,
-				Steps:          stepVerifies,
-			}
-			// Includes fresh CPU session setup, replay, comparisons and Close.
-			cpuVerifyDur = time.Since(t5)
-			if !allAgree && verifyErr == nil {
-				verifyErr = fmt.Errorf("raw decode CPU verification divergence: argmax divergence between device and CPU reference")
-			}
+		steps := make([]rawStepInfo, len(run.Steps))
+		for j, step := range run.Steps {
+			steps[j] = rawStepInfo(step)
 		}
-
 		hostStages := []map[string]any{
-			{"stage": "session_setup", "duration_ms": float64(sessionSetupDur.Nanoseconds()) / 1e6},
-			{"stage": "prefill", "duration_ms": float64(prefillDur.Nanoseconds()) / 1e6},
-			{"stage": "first_sample", "duration_ms": float64(firstSampleDur.Nanoseconds()) / 1e6},
-			{"stage": "decode", "duration_ms": float64(decodeDur.Nanoseconds()) / 1e6},
-			{"stage": "teardown", "duration_ms": float64(teardownDur.Nanoseconds()) / 1e6},
+			{"stage": "session_setup", "duration_ms": float64(run.SessionSetupDuration.Nanoseconds()) / 1e6},
+			{"stage": "prefill", "duration_ms": float64(run.PrefillDuration.Nanoseconds()) / 1e6},
+			{"stage": "first_sample", "duration_ms": float64(run.FirstSampleDuration.Nanoseconds()) / 1e6},
+			{"stage": "decode", "duration_ms": float64(run.DecodeDuration.Nanoseconds()) / 1e6},
+			{"stage": "teardown", "duration_ms": float64(run.TeardownDuration.Nanoseconds()) / 1e6},
 		}
-		if verifyCPU {
-			hostStages = append(hostStages, map[string]any{"stage": "verify_cpu", "duration_ms": float64(cpuVerifyDur.Nanoseconds()) / 1e6})
+		if run.CPUVerification != nil {
+			hostStages = append(hostStages, map[string]any{"stage": "verify_cpu", "duration_ms": float64(run.CPUVerifyDuration.Nanoseconds()) / 1e6})
 		}
+		outputs[i] = rawRepOutput{
+			sessionSetupDur: run.SessionSetupDuration, prefillDur: run.PrefillDuration,
+			firstSampleDur: run.FirstSampleDuration, decodeDur: run.DecodeDuration,
+			teardownDur: run.TeardownDuration, cpuVerifyDur: run.CPUVerifyDuration,
+			prefillOutputID: run.PrefillOutputID, stepTokens: slices.Clone(run.StepTokens),
+			generatedTokens: slices.Clone(run.GeneratedTokens), eosStopped: run.EOSStopped,
+			stepsInfo: steps, hostStages: hostStages, cpuVerify: verify,
+		}
+	}
+	return outputs
+}
 
-		repOutputs = append(repOutputs, rawRepOutput{
-			sessionSetupDur: sessionSetupDur,
-			prefillDur:      prefillDur,
-			firstSampleDur:  firstSampleDur,
-			decodeDur:       decodeDur,
-			teardownDur:     teardownDur,
-			cpuVerifyDur:    cpuVerifyDur,
-			prefillOutputID: prefillOutputID,
-			stepTokens:      stepTokens,
-			generatedTokens: generatedTokens,
-			eosStopped:      eosStopped,
-			stepsInfo:       stepsInfo,
-			hostStages:      hostStages,
-			cpuVerify:       cpuVerify,
-		})
-
-		if verifyErr != nil {
-			break
+func rawDecodeReport(f *benchFlags, execution rawdecode.Execution, runErr error, displayModelName string) (map[string]any, error) {
+	promptIDs := slices.Clone(execution.PromptTokenIDs)
+	rawContext := execution.ContextLimit
+	reps, ignoreEOS := len(execution.Runs), execution.IgnoreEOS
+	modelName := displayModelName
+	if modelName == "" {
+		modelName = execution.ModelName
+	}
+	loadMS := float64(execution.LoadDuration.Nanoseconds()) / 1e6
+	quantMS := float64(execution.QuantDuration.Nanoseconds()) / 1e6
+	repOutputs := rawDecodeRepOutputs(execution)
+	if len(repOutputs) == 0 {
+		if runErr != nil {
+			return nil, runErr
 		}
+		return nil, errors.New("raw decode produced no repetitions")
 	}
 
 	rep0 := repOutputs[0]
@@ -637,8 +471,14 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, q
 		"avg_margin": avgMargin,
 	}
 
-	engine, precision, backendReport := describeEngine(f, be, registeredBackends)
-	physicalReceipt := rawDecodePhysicalReceipt(f, modelName, engine, precision, be, promptIDs, rawContext, requestedSteps, ignoreEOS, repOutputs)
+	engine, precision := execution.Engine, execution.Precision
+	backendReport := map[string]any{"selected": execution.Backend.Selected, "registered_backends": execution.Backend.RegisteredBackends}
+	if execution.Backend.Selected != "" && execution.Backend.Selected != "legacy" {
+		backendReport["native_host_stages"] = "permitted"
+		backendReport["device_coverage"] = "unmeasured"
+		backendReport["tier"], backendReport["class"], backendReport["caps"] = execution.Backend.Tier, execution.Backend.Class, execution.Backend.Caps
+	}
+	physicalReceipt := rawDecodePhysicalReceipt(execution, repOutputs)
 
 	report := map[string]any{
 		"app_version":                appversion.Current(),
@@ -671,10 +511,8 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, q
 			"gomaxprocs": runtime.GOMAXPROCS(0),
 		},
 	}
-	if m != nil {
-		report["model_config"] = modelConfigReport(m.Cfg)
-		report["eos_id"] = m.Cfg.EOSTokenID
-	}
+	report["model_config"] = modelConfigReport(execution.ModelConfig)
+	report["eos_id"] = execution.ModelConfig.EOSTokenID
 	if reps > 1 {
 		report["runs"] = runs
 	}
@@ -687,7 +525,40 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, q
 		}
 	}
 
-	return report, verifyErr
+	return report, runErr
+}
+
+type rawDecodeArtifactExecutor func(context.Context, rawdecode.Request) (rawdecode.Execution, error)
+
+func runRawDecodeArtifactWith(f *benchFlags, profiler *ggufload.LoadProfiler, execute rawDecodeArtifactExecutor) error {
+	if err := validateRawDecodeFlags(f); err != nil {
+		return err
+	}
+	if f.gguf == nil || strings.TrimSpace(*f.gguf) == "" {
+		return errors.New("-raw-decode production execution requires an explicit -gguf artifact")
+	}
+	if rawArtifactSHA256Flag == nil || strings.TrimSpace(*rawArtifactSHA256Flag) == "" {
+		return errors.New("-raw-decode production execution requires -raw-artifact-sha256")
+	}
+	promptIDs, err := parsePromptIDs(*rawPromptIDsFlag)
+	if err != nil {
+		return err
+	}
+	req := rawDecodeRequest(f, promptIDs)
+	req.ArtifactPath = *f.gguf
+	req.ExpectedArtifactSHA256 = strings.TrimSpace(*rawArtifactSHA256Flag)
+	req.ModelName = strings.TrimSpace(*f.name)
+	req.LoadProfiler = profiler
+	execution, runErr := execute(context.Background(), req)
+	report, reportErr := rawDecodeReport(f, execution, runErr, execution.ModelName)
+	if report != nil {
+		writeReport(f, report)
+	}
+	return reportErr
+}
+
+func runRawDecodeArtifact(f *benchFlags, profiler *ggufload.LoadProfiler) error {
+	return runRawDecodeArtifactWith(f, profiler, rawdecode.Execute)
 }
 
 // runRawDecode performs raw greedy decode and writes the resulting JSON report.
