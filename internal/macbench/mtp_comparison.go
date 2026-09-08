@@ -762,3 +762,119 @@ func NodeMacOSAMTPComparisonPacket() MTPComparisonPacket {
 		Summary:           summary,
 	}
 }
+
+// VerifyMTPComparisonEvidenceFiles verifies all raw samples and quality files bound to an MTP comparison packet.
+func VerifyMTPComparisonEvidenceFiles(packet MTPComparisonPacket, packetPath string) error {
+	base, err := filepath.Abs(filepath.Dir(packetPath))
+	if err != nil {
+		return fmt.Errorf("resolve packet directory: %w", err)
+	}
+	base, err = filepath.EvalSymlinks(base)
+	if err != nil {
+		return fmt.Errorf("resolve packet directory symlinks: %w", err)
+	}
+	for _, arm := range packet.Arms {
+		raw, err := verifyMTPEvidenceFile(base, arm.RawResult.Path, arm.RawResult.SHA256)
+		if err != nil {
+			return fmt.Errorf("arm %s raw_result: %w", arm.Name, err)
+		}
+		var rawFile MTPComparisonRawSamplesFile
+		if err := decodeStrictMTPJSON(raw, &rawFile); err != nil {
+			return fmt.Errorf("arm %s raw_result: decode: %w", arm.Name, err)
+		}
+		wantRaw := MTPComparisonRawSamplesFile{
+			Schema:     MTPComparisonRawSamplesSchema,
+			Arm:        arm.Name,
+			CampaignID: packet.CampaignID,
+			RunID:      arm.RunID,
+			HostID:     arm.HostID,
+			StartedAt:  arm.StartedAt,
+			FinishedAt: arm.FinishedAt,
+			Samples:    arm.Samples,
+		}
+		if !reflect.DeepEqual(rawFile, wantRaw) {
+			return fmt.Errorf("arm %s raw_result: content does not match packet samples", arm.Name)
+		}
+
+		quality, err := verifyMTPEvidenceFile(base, arm.Quality.ResultPath, arm.Quality.ResultSHA256)
+		if err != nil {
+			return fmt.Errorf("arm %s quality: %w", arm.Name, err)
+		}
+		var qualityFile ComparisonQualityEvidenceFile
+		if err := decodeStrictMTPJSON(quality, &qualityFile); err != nil {
+			return fmt.Errorf("arm %s quality: decode: %w", arm.Name, err)
+		}
+		wantQuality := ComparisonQualityEvidenceFile{
+			Schema:          ComparisonQualityEvidenceSchema,
+			Arm:             arm.Name,
+			RunID:           arm.RunID,
+			PolicyRef:       arm.Quality.PolicyRef,
+			PolicyVersion:   arm.Quality.PolicyVersion,
+			PolicySHA256:    arm.Quality.PolicySHA256,
+			Passed:          arm.Quality.Passed,
+			Score:           arm.Quality.Score,
+			ArtifactSHA256:  arm.Artifact.SHA256,
+			PromptSetSHA256: arm.PromptSetSHA256,
+		}
+		if qualityFile != wantQuality {
+			return fmt.Errorf("arm %s quality: content does not match packet quality result", arm.Name)
+		}
+	}
+	return nil
+}
+
+func verifyMTPEvidenceFile(base, relative, wantDigest string) ([]byte, error) {
+	relative = strings.TrimSpace(relative)
+	if relative == "" || filepath.IsAbs(relative) {
+		return nil, fmt.Errorf("path must be relative to the packet")
+	}
+	clean := filepath.Clean(relative)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("path escapes the packet directory")
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Join(base, clean))
+	if err != nil {
+		return nil, fmt.Errorf("resolve %q: %w", relative, err)
+	}
+	inside, err := filepath.Rel(base, resolved)
+	if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("path escapes the packet directory")
+	}
+	f, err := os.Open(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("open %q: %w", relative, err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat %q: %w", relative, err)
+	}
+	if info.Size() > 64<<20 {
+		return nil, fmt.Errorf("%q exceeds 64 MiB evidence limit", relative)
+	}
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("read %q: %w", relative, err)
+	}
+	got := fmt.Sprintf("%x", sha256.Sum256(raw))
+	if got != wantDigest {
+		return nil, fmt.Errorf("sha256 mismatch for %q: got %s want %s", relative, got, wantDigest)
+	}
+	return raw, nil
+}
+
+func decodeStrictMTPJSON(raw []byte, out any) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(out); err != nil {
+		return err
+	}
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("multiple JSON values")
+		}
+		return err
+	}
+	return nil
+}

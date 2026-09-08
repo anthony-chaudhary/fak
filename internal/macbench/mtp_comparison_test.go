@@ -61,7 +61,10 @@ func TestValidateMTPComparisonPacketNodeMacOSA(t *testing.T) {
 			if err := ValidateMTPComparisonPacket(diskPacket); err != nil {
 				t.Fatalf("validate %s: %v", p, err)
 			}
-			t.Logf("successfully validated on-disk packet at %s", p)
+			if err := VerifyMTPComparisonEvidenceFiles(diskPacket, p); err != nil {
+				t.Fatalf("verify evidence files for %s: %v", p, err)
+			}
+			t.Logf("successfully validated on-disk packet and all evidence files at %s", p)
 			break
 		}
 	}
