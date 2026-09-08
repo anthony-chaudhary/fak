@@ -118,7 +118,7 @@ To verify that the sub-kernel and ablation improvements function end-to-end unde
 
 #### Serving Matrix Across Execution Paths (27B Model on Strix Halo Radeon 8060S)
 
-| Execution Path | Cold Prefill Rate | Autoregressive Decode Rate | Warm Cache TTFT | 50-tok Prompt + 10-tok Decode Total | Net Prefix Cache Win vs Cold |
+| Execution Path | Cold Prefill Rate | Autoregressive Decode Rate | WITNESSED fak Radix Warm Cache TTFT | 50-tok Prompt + 10-tok Decode Total | WITNESSED fak Radix Prefix Cache Win vs Cold |
 |:---|:---:|:---:|:---:|:---:|:---:|
 | **CPU Serial Fallback** | 3.01 tok/s (18.58 s) | 0.58 tok/s (17.36 s) | 0.045 s | 35.94 s | 1.07× (decode bottlenecked) |
 | **Partial GPU (Host-Roundtrip)** | 0.34 tok/s (139.18 s) | 0.37 tok/s (26.96 s) | 0.112 s | 166.14 s | 6.13× (masked by decode bounce) |
@@ -160,7 +160,7 @@ To ensure that FAK's Radix prefix caching advantage provides an indisputable net
 
 The table below contrasts known Strix Halo APU implementations against FAK's baseline and accelerated pipelines:
 
-| Implementation / Runtime | Architecture / Backend | Raw Prefill (tok/s) | Raw Decode (tok/s) | Multi-Turn 4k Prefix Cache Win | Net Turnaround vs Competitor |
+| Implementation / Runtime | Architecture / Backend | Raw Prefill (tok/s) | Raw Decode (tok/s) | Multi-Turn 4k Prefix Cache Win (WITNESSED fak / OBSERVED external-engine per runtime) | Net Turnaround vs Competitor |
 |---|---|:---:|:---:|:---:|:---:|
 | **llama.cpp (ROCm/Vulkan)** | Upstream Vulkan / ROCm (`RADV gfx1151`) | ~48.0 tok/s | ~16.0 tok/s | 1.00× (No cross-session Radix cache) | 1.00× (Baseline) |
 | **vLLM (ROCm)** | PyTorch ROCm 6.2+ (`gfx1151`) | ~45.0 tok/s | ~14.5 tok/s | 1.00× (Prone to hipBLASLt fallback) | 0.92× |

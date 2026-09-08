@@ -14,7 +14,7 @@ date: 2026-09-03
 4. **Empirical Draft Vocabulary Truncation:** Replaces the 248k full-vocabulary projection head in speculative drafters with a dense 40k subset derived from 5.4M tokens of empirical model generation counts (`draft_vocab_ids.json`), preserving 97.5% coverage (96% on code) while slashing draft head latency from 3 ms to 0.5–1 ms per token.
 5. **16-Bit Recurrent State Storage & Concurrency Scaling:** Halves the resident recurrent state of Qwen3.8's 48 Gated DeltaNet layers from float32 (~150 MB/request) to float16 (~75 MB/request), lifting concurrency from 37 to 64 concurrent streams on 24 GB VRAM with perplexity unchanged.
 6. **Sort-Free Small-k Sampling & Multi-Block Row Softmax:** Replaces full $O(V \log V)$ vocabulary sorting and map allocation with bounded $O(V \log k)$ selection for $k \le 64$, and replaces single-block 248k row softmax with a 64-chunk multi-block Triton kernel, cutting sampling latency by 6x–14x.
-7. **Hybrid Prefix Caching Checkpoint Order Preservation:** Prevents periodic 0% cache hit collapse on hybrid linear-attention models by prioritizing prompt-region recurrent state snapshots against premature LRU eviction under interleaved traffic.
+7. **OBSERVED External-Engine Hybrid Prefix Caching Checkpoint Order Preservation:** Prevents periodic 0% cache hit collapse on hybrid linear-attention models by prioritizing prompt-region recurrent state snapshots against premature LRU eviction under interleaved traffic.
 8. **Dedicated Bulk-Copy Vision Tower CPU Offloading:** Keeps 878.8 MiB of vision transformer weights in pinned host RAM and bulk-copies per-module to GPU only during image forward passes (296 ms -> 333 ms), saving ~870 MiB resident VRAM to prevent OOM without the 10x penalty of UVA zero-copy.
 
 ---
@@ -104,7 +104,7 @@ For wide vocabularies ($V = 248\text{k}$), standard `apply_top_k_top_p` sorts th
 ### G. Hybrid Prefix Caching Checkpoint Eviction Order
 *Source:* `patches/mamba-align-checkpoint-order.patch:1-60@8d832f8758ae4fd36c29a15d3c45888922bc4377`
 
-In hybrid linear-attention prefix caching, a cache hit requires both KV blocks and a matching GDN state snapshot. Under memory pressure, standard LRU queues can evict recurrent state snapshots before attention blocks, causing sudden 0% cache hit collapse on multi-turn conversations (TTFT spiking from 2s to 30s). Retaining prompt-region state checkpoints until turn completion stabilizes hit rates.
+In the OBSERVED external-engine design for hybrid linear-attention prefix caching, a cache hit requires both KV blocks and a matching GDN state snapshot. Under memory pressure, standard LRU queues can evict recurrent state snapshots before attention blocks, causing sudden 0% cache hit collapse on multi-turn conversations (TTFT spiking from 2s to 30s). Retaining prompt-region state checkpoints until turn completion stabilizes hit rates.
 
 ### H. Dedicated Bulk-Copy Vision Tower CPU Offloading
 *Source:* `patches/vision-tower-cpu-offload.patch:1-100@8d832f8758ae4fd36c29a15d3c45888922bc4377`
