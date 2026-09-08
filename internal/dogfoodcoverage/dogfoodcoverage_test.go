@@ -283,13 +283,21 @@ func TestCountAuditRowsWithUserJournal(t *testing.T) {
 
 func TestCheckGateBehavior(t *testing.T) {
 	root := findTestRepoRoot(t)
+	fakBin, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
 	// Guard on => debt 0 => check passes
-	repOn := Evaluate(root, map[string]string{})
+	repOn := Evaluate(root, map[string]string{"FAK_BIN": fakBin, "PATH": ""})
 	if repOn.DogfoodDebt > 0 {
 		t.Fatalf("expected debt 0 when guard is on, got %d", repOn.DogfoodDebt)
 	}
 	// Guard off => debt > 0 => check fails
-	repOff := Evaluate(root, map[string]string{"FLEET_DOGFOOD_GUARD": "0"})
+	repOff := Evaluate(root, map[string]string{
+		"FAK_BIN":             fakBin,
+		"FLEET_DOGFOOD_GUARD": "0",
+		"PATH":                "",
+	})
 	if repOff.DogfoodDebt == 0 {
 		t.Fatalf("expected debt > 0 when FLEET_DOGFOOD_GUARD=0, got 0")
 	}
