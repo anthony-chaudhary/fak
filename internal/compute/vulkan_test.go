@@ -1616,7 +1616,7 @@ func TestVulkanMissingQ2ShaderPreventsRegistration(t *testing.T) {
 	}
 }
 
-func TestVulkanQwen35_ResidencyAndErrorRecovery(t *testing.T) {
+func TestVulkanQwen35ResidencyValidationWithoutDevice(t *testing.T) {
 	v := &vulkanBackend{}
 
 	host := NewF32(Default(), []int{4}, []float32{1, 2, 3, 4})
