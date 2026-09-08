@@ -275,6 +275,15 @@ void fcuda_flash_attention_f32(const float *dQ, const float *dK, const float *dV
 int fcuda_spec_verify_attention_f32(const float *dQ, const float *dK, const float *dV, float *dOut,
                                    int qLen, int kvLen, int nH, int nKV, int hd, float scale);
 
+/* Arbitrary 2D causal tree verification attention for K=qLen<=32. Mask row q
+ * is a host uint32 bitset containing exactly self plus candidate ancestors;
+ * prefix keys [0,kvLen-qLen) are always visible. The rows are passed through
+ * CUDA launch-parameter space, so mask lookup performs no global-memory load. */
+int fcuda_tree_verify_attention_f32(
+    const float *dQ, const float *dK, const float *dV, float *dOut,
+    const uint32_t *hMaskRows,
+    int qLen, int kvLen, int nH, int nKV, int hd, float scale);
+
 /* GLM-MoE-DSA sparse attention (model.glmDsaAttendCached's inner loop) for ONE query position
  * over nSel host-SELECTED, gathered, causal keys: per query head h, scores[i]=scale·dot(q_h,
  * selK_i_h), softmax over i, out_h=Σ softmax_i·selV_i_h. selK is [nSel, nH*kd], selV [nSel, nH*vd]

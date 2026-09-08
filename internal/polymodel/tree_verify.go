@@ -77,6 +77,33 @@ func BuildTreeAttentionMask(t SpecTree) ([][]bool, error) {
 	return mask, nil
 }
 
+// BuildTreeAttentionRows lowers the validated candidate-only TreePanel mask to
+// the K<=32 uint32 row ABI consumed by compute.TreeVerifyAttention. The committed
+// root is excluded: it already belongs to the always-visible KV prefix. Bit key
+// in row query is set exactly for self or a candidate ancestor.
+func BuildTreeAttentionRows(t SpecTree) ([]uint32, error) {
+	panel, err := BuildTreePanel(t)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateTreeMask(panel); err != nil {
+		return nil, err
+	}
+	k := panel.Mask.Size
+	if k > 32 {
+		return nil, fmt.Errorf("polymodel: tree attention candidate count %d exceeds uint32 mask ABI", k)
+	}
+	rows := make([]uint32, k)
+	for query := 0; query < k; query++ {
+		for key := 0; key < k; key++ {
+			if panel.Mask.Allow(query, key) {
+				rows[query] |= uint32(1) << uint(key)
+			}
+		}
+	}
+	return rows, nil
+}
+
 // ValidateTreeAttentionMask verifies that mask conforms strictly to the tree's causal ancestors.
 func ValidateTreeAttentionMask(t SpecTree, mask [][]bool) error {
 	expected, err := BuildTreeAttentionMask(t)
