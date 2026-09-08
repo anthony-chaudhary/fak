@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -103,5 +104,57 @@ func TestChatCodexSubscriptionLoopback(t *testing.T) {
 		if err := configureChatCodexSubscription(p, home); err == nil {
 			t.Error("accepted noncanonical subscription endpoint")
 		}
+	}
+}
+
+func TestChatAuthModeDiagnostics(t *testing.T) {
+	// Case 1: codex-auth selected - reports explicit auth mode and omits no-auth warning.
+	var codexBuf bytes.Buffer
+	p1 := chatPlannerWithStderr(&codexBuf, false, "http://127.0.0.1:8080", "openai-responses", "gpt-5.6-luna", "OPENAI_API_KEY", "auto", true)
+	if p1 == nil {
+		t.Fatal("expected non-nil planner")
+	}
+	codexOut := codexBuf.String()
+	if !strings.Contains(codexOut, "fak chat: auth mode: codex-auth") {
+		t.Errorf("expected explicit codex auth mode diagnostic, got: %q", codexOut)
+	}
+	if strings.Contains(codexOut, "proceeding with no auth header") {
+		t.Errorf("expected no-auth warning to be absent for codex-auth, got: %q", codexOut)
+	}
+
+	// Case 2: unauthenticated local endpoint without codex-auth - preserves truly unauthenticated warning.
+	t.Setenv("TEST_EMPTY_API_KEY_ENV", "")
+	var localBuf bytes.Buffer
+	p2 := chatPlannerWithStderr(&localBuf, false, "http://127.0.0.1:8080", "openai-responses", "gpt-5.6-luna", "TEST_EMPTY_API_KEY_ENV", "auto", false)
+	if p2 == nil {
+		t.Fatal("expected non-nil planner")
+	}
+	localOut := localBuf.String()
+	if !strings.Contains(localOut, "fak chat: env TEST_EMPTY_API_KEY_ENV is empty  -  proceeding with no auth header (fine for a local endpoint)") {
+		t.Errorf("expected unauthenticated local-endpoint warning, got: %q", localOut)
+	}
+	if strings.Contains(localOut, "auth mode: codex-auth") {
+		t.Errorf("unexpected codex-auth mode in local run: %q", localOut)
+	}
+
+	// Case 3: subprocess execution with --codex-auth - verifies CLI output end-to-end.
+	home := t.TempDir()
+	body := `{"auth_mode":"chatgpt","tokens":{"access_token":"fixture-token","account_id":"fixture-account"}}`
+	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := exec.Command(bin, "chat", "--codex-auth", "--codex-home", home, "--provider", "openai-responses", "--base-url", guardCodexChatGPTBackendBaseURL, "--task", "test")
+	child.Env = append(os.Environ(), "FAK_OPS_NATIVE_TEST_CHILD=1", "OPENAI_API_KEY=")
+	output, _ := child.CombinedOutput()
+	outStr := string(output)
+	if strings.Contains(outStr, "proceeding with no auth header") {
+		t.Errorf("child output must not contain no-auth warning with --codex-auth, got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "fak chat: auth mode: codex-auth") {
+		t.Errorf("child output must contain explicit auth mode with --codex-auth, got:\n%s", outStr)
 	}
 }
