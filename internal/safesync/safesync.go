@@ -35,6 +35,8 @@ const (
 	ReasonTargetMoved              = "TARGET_MOVED"
 	ReasonLeaseOwnerUnavailable    = "LEASE_OWNER_UNAVAILABLE"
 	ReasonPathspecRace             = "PATHSPEC_RACE"
+	ReasonBuildCheckFailed         = "BUILD_CHECK_FAILED"
+	ReasonTestCheckFailed          = "TEST_CHECK_FAILED"
 )
 
 // Runner executes a git subcommand in repo. Err is non-nil only when git could

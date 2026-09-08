@@ -220,7 +220,7 @@ func TestGenerationSurvivesMultipleReleases(t *testing.T) {
 
 func TestGenerationHistoryFakeGit(t *testing.T) {
 	g := newFakeGit()
-	s := NewWithRunner(g.run, "")
+	s := NewWithStdinRunner(g.run, g.runStdin, "")
 	now := time.Unix(5000, 0)
 	leaseID := "fakegit-lane"
 
@@ -256,7 +256,7 @@ func TestGenerationHistoryFakeGit(t *testing.T) {
 
 func TestGenerationFloorNeverDecreases(t *testing.T) {
 	g := newFakeGit()
-	s := NewWithRunner(g.run, "")
+	s := NewWithStdinRunner(g.run, g.runStdin, "")
 	now := time.Unix(5000, 0)
 	leaseID := "monotonic-lane"
 

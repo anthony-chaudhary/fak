@@ -361,36 +361,103 @@ func sweepDeadWorktrees(root, wtRoot string, git GitRunner) {
 }
 
 // isForeignPlatformRegistration reports whether rawGitdir or wtPath represents a
-// foreign-platform absolute path that cannot be stat-ed locally (e.g. POSIX /mnt/... or
-// /home/... on Windows, or Windows C:\... or C:/... on Linux/macOS) (#11814).
+// foreign-platform path that cannot be stat-ed locally or is from a foreign OS
+// namespace (e.g. POSIX /mnt/... or paths without a Windows volume on Windows,
+// or Windows drive letter / backslash paths on Linux/macOS) (#11813, #11814).
 func isForeignPlatformRegistration(rawGitdir, wtPath string) bool {
 	if rawGitdir == "" && wtPath == "" {
 		return false
 	}
+	if !isForeignOSPath(rawGitdir) && !isForeignOSPath(wtPath) {
+		return false
+	}
+	// The path belongs to a foreign OS namespace. If it cannot be translated
+	// or is from a foreign OS namespace, preserve it rather than treating it as dead (#11813).
+	if translated, ok := translateForeignPath(rawGitdir); ok {
+		if canStatLocally(translated) || canStatLocally(filepath.Dir(translated)) {
+			// Even if the translated path exists on disk, it belongs to a foreign
+			// OS worker whose PID and git metadata cannot be safely verified locally.
+			return true
+		}
+	}
+	if translated, ok := translateForeignPath(wtPath); ok {
+		if canStatLocally(translated) {
+			return true
+		}
+	}
+	return true
+}
+
+// isForeignOSPath reports whether p looks like a path from a foreign operating system
+// (e.g. on Linux/Unix, starts with a Windows drive letter ^[a-zA-Z]:[/\\] or contains '\\';
+// on Windows, starts with '/' or doesn't have a Windows volume) (#11813).
+func isForeignOSPath(p string) bool {
+	if p == "" {
+		return false
+	}
 	if runtime.GOOS == "windows" {
-		// On Windows, a foreign-platform path (e.g. Linux/WSL/macOS) starts with '/'
-		// and cannot be stat-ed on the local filesystem.
-		if strings.HasPrefix(rawGitdir, "/") || strings.HasPrefix(wtPath, "/") {
-			if !canStatLocally(wtPath) && !canStatLocally(rawGitdir) {
-				return true
-			}
+		// On Windows, a foreign-platform path starts with '/' or doesn't have a Windows volume.
+		if strings.HasPrefix(p, "/") || !hasWindowsVolume(p) {
+			return true
 		}
 		return false
 	}
-	// On non-Windows, a foreign-platform path is a Windows absolute path (e.g. C:\... or C:/... or \\...).
-	if isWindowsAbsolutePath(rawGitdir) || isWindowsAbsolutePath(wtPath) {
-		if !canStatLocally(rawGitdir) && (wtPath == "." || !canStatLocally(wtPath)) {
-			return true
-		}
+	// On Linux/Unix, a foreign path starts with a Windows drive letter, contains '\\', or starts with '\\\\'.
+	if isWindowsDrivePath(p) || strings.Contains(p, `\`) || strings.HasPrefix(p, `\\`) {
+		return true
 	}
 	return false
 }
 
+// translateForeignPath attempts to translate a foreign-platform path to the local platform path.
+// On Windows, it translates /mnt/<drive>/... to <drive>:\...
+// On Linux/macOS, it translates <drive>:\... or <drive>:/... to /mnt/<drive>/...
+// Returns ("", false) if translation is not possible (#11813).
+func translateForeignPath(p string) (string, bool) {
+	if p == "" {
+		return "", false
+	}
+	if runtime.GOOS == "windows" {
+		normalized := filepath.ToSlash(p)
+		if strings.HasPrefix(normalized, "/mnt/") && len(normalized) >= 6 && isDriveLetter(normalized[5]) {
+			if len(normalized) == 6 || normalized[6] == '/' {
+				drive := strings.ToUpper(string(normalized[5])) + ":"
+				rest := ""
+				if len(normalized) > 7 {
+					rest = normalized[7:]
+				}
+				return filepath.Join(drive+`\`, filepath.FromSlash(rest)), true
+			}
+		}
+		return "", false
+	}
+	if isWindowsDrivePath(p) {
+		drive := strings.ToLower(string(p[0]))
+		rest := p[2:]
+		rest = strings.TrimPrefix(rest, `\`)
+		rest = strings.TrimPrefix(rest, `/`)
+		rest = strings.ReplaceAll(rest, `\`, `/`)
+		return "/mnt/" + drive + "/" + rest, true
+	}
+	return "", false
+}
+
 func isWindowsAbsolutePath(p string) bool {
-	if len(p) >= 3 && isDriveLetter(p[0]) && p[1] == ':' && (p[2] == '/' || p[2] == '\\') {
+	return isWindowsDrivePath(p) || strings.HasPrefix(p, `\\`)
+}
+
+func isWindowsDrivePath(p string) bool {
+	return len(p) >= 3 && isDriveLetter(p[0]) && p[1] == ':' && (p[2] == '/' || p[2] == '\\')
+}
+
+func hasWindowsVolume(p string) bool {
+	if len(p) >= 2 && isDriveLetter(p[0]) && p[1] == ':' {
 		return true
 	}
-	return strings.HasPrefix(p, `\\`)
+	if strings.HasPrefix(p, `\\`) || strings.HasPrefix(p, "//") {
+		return true
+	}
+	return false
 }
 
 func isDriveLetter(c byte) bool {
