@@ -1,8 +1,13 @@
 package ultracodebench
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"math"
 	"sort"
 	"strconv"
@@ -80,47 +85,49 @@ type SafeAccelerationPair struct {
 	Candidate SafeAccelerationArm `json:"candidate"`
 }
 
-// SafeAccelerationEvidenceRef is the immutable structural reference a trusted
-// verifier must resolve to the underlying receipt and witness bytes.
-type SafeAccelerationEvidenceRef struct {
+type safeAccelerationEvidenceRef struct {
 	Pair                    int    `json:"pair"`
 	Arm                     string `json:"arm"`
 	ReceiptDigest           string `json:"receipt_digest"`
 	AcceptanceWitnessDigest string `json:"acceptance_witness_digest"`
 }
 
-type SafeAccelerationVerificationRequest struct {
-	Schema            string                        `json:"schema"`
-	PublicRevision    string                        `json:"public_revision"`
-	PrivateRevision   string                        `json:"private_revision"`
-	BaselineIdentity  SafeAccelerationIdentity      `json:"baseline_identity"`
-	CandidateIdentity SafeAccelerationIdentity      `json:"candidate_identity"`
-	Evidence          []SafeAccelerationEvidenceRef `json:"evidence"`
+type safeAccelerationReceipt struct {
+	Schema           string                   `json:"schema"`
+	Pair             int                      `json:"pair"`
+	Arm              string                   `json:"arm"`
+	RunID            string                   `json:"run_id"`
+	Issuer           string                   `json:"issuer"`
+	ProvenanceDigest string                   `json:"provenance_digest"`
+	PublicRevision   string                   `json:"public_revision"`
+	PrivateRevision  string                   `json:"private_revision"`
+	Identity         SafeAccelerationIdentity `json:"identity"`
+	Measurements     SafeAccelerationArm      `json:"measurements"`
 }
 
-type SafeAccelerationArmVerification struct {
-	Pair                  int    `json:"pair"`
-	Arm                   string `json:"arm"`
-	RunID                 string `json:"run_id"`
-	RehashedReceiptDigest string `json:"rehashed_receipt_digest"`
-	RehashedWitnessDigest string `json:"rehashed_witness_digest"`
-	ReceiptIssuer         string `json:"receipt_issuer"`
-	WitnessIssuer         string `json:"witness_issuer"`
-	ProvenanceDigest      string `json:"provenance_digest"`
-	InputBindingDigest    string `json:"input_binding_digest"`
+type safeAccelerationWitness struct {
+	Schema           string                     `json:"schema"`
+	Pair             int                        `json:"pair"`
+	Arm              string                     `json:"arm"`
+	RunID            string                     `json:"run_id"`
+	Issuer           string                     `json:"issuer"`
+	ProvenanceDigest string                     `json:"provenance_digest"`
+	ReceiptDigest    string                     `json:"receipt_digest"`
+	AcceptedTaskIDs  []string                   `json:"accepted_task_ids"`
+	Violations       SafeAccelerationViolations `json:"violations"`
 }
 
-type SafeAccelerationVerification struct {
-	ResolvedPublicRevision  string                            `json:"resolved_public_revision"`
-	ResolvedPrivateRevision string                            `json:"resolved_private_revision"`
-	Arms                    []SafeAccelerationArmVerification `json:"arms"`
+type safeAccelerationResolvedMaterial struct {
+	Receipt []byte
+	Witness []byte
 }
 
-// SafeAccelerationVerifier is the trust boundary. Implementations must resolve
-// revisions and re-hash the underlying receipt and witness artifacts rather
-// than trusting digests supplied by the campaign document.
-type SafeAccelerationVerifier interface {
-	VerifySafeAcceleration(SafeAccelerationVerificationRequest) (SafeAccelerationVerification, error)
+// This capability has no exported construction path. Its sole constructor
+// parses and re-hashes resolved receipt and witness material.
+type safeAccelerationVerificationCapability struct {
+	campaignDigest string
+	bindings       map[string]string
+	seal           string
 }
 
 type SafeAccelerationCampaign struct {
@@ -157,7 +164,7 @@ var safeAccelerationPhases = [...]string{
 // EvaluateSafeAcceleration recomputes every headline metric from the observed
 // paired campaign. Invalid or incomplete evidence always abstains; complete
 // evidence below the ten-times bar is a measured NO_GAIN.
-func EvaluateSafeAcceleration(c SafeAccelerationCampaign, verifier SafeAccelerationVerifier) SafeAccelerationReport {
+func EvaluateSafeAcceleration(c SafeAccelerationCampaign, capability *safeAccelerationVerificationCapability) SafeAccelerationReport {
 	r := SafeAccelerationReport{
 		Schema:           SafeAccelerationSchema,
 		Verdict:          SafeAccelerationAbstain,
@@ -234,17 +241,11 @@ func EvaluateSafeAcceleration(c SafeAccelerationCampaign, verifier SafeAccelerat
 			add("candidate_operator_minutes_regression", pairNumber)
 		}
 	}
-	verificationRequest := safeAccelerationVerificationRequest(c)
-	if !safeAccelerationUniqueEvidence(verificationRequest.Evidence) {
+	evidence := safeAccelerationEvidence(c)
+	if !safeAccelerationUniqueEvidence(evidence) {
 		add("evidence_digest_replay", 0)
 	}
-	if verifier == nil {
-		add("trusted_verifier_missing", 0)
-	} else if verification, err := verifier.VerifySafeAcceleration(verificationRequest); err != nil {
-		add("trusted_verification_failed", 0)
-	} else {
-		safeAccelerationValidateVerification(verificationRequest, verification, add)
-	}
+	safeAccelerationValidateCapability(c, evidence, capability, add)
 	if totalUnits > 0 {
 		baselineAcceptance := float64(baselineAccepted) / float64(totalUnits)
 		candidateAcceptance := float64(candidateAccepted) / float64(totalUnits)
@@ -268,7 +269,7 @@ func EvaluateSafeAcceleration(c SafeAccelerationCampaign, verifier SafeAccelerat
 	}
 	pairedRateRatio, lower95 := safeAccelerationPairedLower95(ratios)
 	r.PairedRateRatio, r.RateRatioLower95 = safeAccelerationRound(pairedRateRatio), safeAccelerationRound(lower95)
-	if lower95 >= 10 {
+	if safeAccelerationVerifiedVerdict(lower95) == SafeAccelerationGain10X {
 		r.Verdict = SafeAccelerationGain10X
 		return r
 	}
@@ -277,39 +278,18 @@ func EvaluateSafeAcceleration(c SafeAccelerationCampaign, verifier SafeAccelerat
 	return r
 }
 
-func safeAccelerationVerificationRequest(c SafeAccelerationCampaign) SafeAccelerationVerificationRequest {
-	request := SafeAccelerationVerificationRequest{
-		Schema: c.Schema, PublicRevision: c.PublicRevision, PrivateRevision: c.PrivateRevision,
-		BaselineIdentity: c.Baseline, CandidateIdentity: c.Candidate,
-		Evidence: make([]SafeAccelerationEvidenceRef, 0, len(c.Pairs)*2),
-	}
+func safeAccelerationEvidence(c SafeAccelerationCampaign) []safeAccelerationEvidenceRef {
+	evidence := make([]safeAccelerationEvidenceRef, 0, len(c.Pairs)*2)
 	for i, pair := range c.Pairs {
-		request.Evidence = append(request.Evidence,
-			SafeAccelerationEvidenceRef{Pair: i + 1, Arm: "baseline", ReceiptDigest: pair.Baseline.ReceiptDigest, AcceptanceWitnessDigest: pair.Baseline.AcceptanceWitnessDigest},
-			SafeAccelerationEvidenceRef{Pair: i + 1, Arm: "candidate", ReceiptDigest: pair.Candidate.ReceiptDigest, AcceptanceWitnessDigest: pair.Candidate.AcceptanceWitnessDigest},
+		evidence = append(evidence,
+			safeAccelerationEvidenceRef{Pair: i + 1, Arm: "baseline", ReceiptDigest: pair.Baseline.ReceiptDigest, AcceptanceWitnessDigest: pair.Baseline.AcceptanceWitnessDigest},
+			safeAccelerationEvidenceRef{Pair: i + 1, Arm: "candidate", ReceiptDigest: pair.Candidate.ReceiptDigest, AcceptanceWitnessDigest: pair.Candidate.AcceptanceWitnessDigest},
 		)
 	}
-	return request
+	return evidence
 }
 
-// SafeAccelerationRunBinding returns the versioned digest that binds a
-// verifier-issued run ID to the exact campaign revisions, identities, pair,
-// arm, receipt, and witness supplied to the evaluator.
-func SafeAccelerationRunBinding(request SafeAccelerationVerificationRequest, evidence SafeAccelerationEvidenceRef, runID string) string {
-	fields := []string{
-		SafeAccelerationSchema, request.Schema, request.PublicRevision, request.PrivateRevision,
-		request.BaselineIdentity.Source, request.BaselineIdentity.ArtifactDigest,
-		request.BaselineIdentity.ConfigurationDigest, request.BaselineIdentity.WorkloadDigest,
-		request.CandidateIdentity.Source, request.CandidateIdentity.ArtifactDigest,
-		request.CandidateIdentity.ConfigurationDigest, request.CandidateIdentity.WorkloadDigest,
-		strconv.Itoa(evidence.Pair), evidence.Arm, evidence.ReceiptDigest,
-		evidence.AcceptanceWitnessDigest, runID,
-	}
-	sum := sha256.Sum256([]byte(strings.Join(fields, "\x00")))
-	return "sha256:" + hex.EncodeToString(sum[:])
-}
-
-func safeAccelerationUniqueEvidence(evidence []SafeAccelerationEvidenceRef) bool {
+func safeAccelerationUniqueEvidence(evidence []safeAccelerationEvidenceRef) bool {
 	seen := make(map[string]struct{}, len(evidence)*2)
 	for _, item := range evidence {
 		for _, digest := range []string{item.ReceiptDigest, item.AcceptanceWitnessDigest} {
@@ -322,54 +302,181 @@ func safeAccelerationUniqueEvidence(evidence []SafeAccelerationEvidenceRef) bool
 	return true
 }
 
-func safeAccelerationValidateVerification(request SafeAccelerationVerificationRequest, verification SafeAccelerationVerification, add func(SafeAccelerationReasonCode, int)) {
-	if verification.ResolvedPublicRevision != request.PublicRevision || verification.ResolvedPrivateRevision != request.PrivateRevision {
-		add("verified_revision_mismatch", 0)
+func safeAccelerationValidateCapability(c SafeAccelerationCampaign, evidence []safeAccelerationEvidenceRef, capability *safeAccelerationVerificationCapability, add func(SafeAccelerationReasonCode, int)) {
+	if capability == nil {
+		add("authoritative_verification_missing", 0)
+		return
 	}
-	expected := make(map[string]SafeAccelerationEvidenceRef, len(request.Evidence))
-	seenIdentity := make(map[string]struct{}, len(request.Evidence)*3)
-	for _, evidence := range request.Evidence {
-		expected[safeAccelerationEvidenceKey(evidence.Pair, evidence.Arm)] = evidence
-		seenIdentity[evidence.ReceiptDigest] = struct{}{}
-		seenIdentity[evidence.AcceptanceWitnessDigest] = struct{}{}
+	digest, err := safeAccelerationCampaignDigest(c)
+	if err != nil || capability.campaignDigest != digest {
+		add("authoritative_campaign_binding_mismatch", 0)
+		return
 	}
-	seenArms := make(map[string]struct{}, len(verification.Arms))
-	if len(verification.Arms) != len(expected) {
-		add("verified_arm_set_mismatch", 0)
+	if len(capability.bindings) != len(evidence) || capability.seal != safeAccelerationCapabilitySeal(capability.campaignDigest, capability.bindings) {
+		add("authoritative_capability_invalid", 0)
+		return
 	}
-	for _, arm := range verification.Arms {
-		key := safeAccelerationEvidenceKey(arm.Pair, arm.Arm)
-		evidence, exists := expected[key]
-		if _, duplicate := seenArms[key]; !exists || duplicate {
-			add("verified_arm_set_mismatch", arm.Pair)
-			continue
+	for _, item := range evidence {
+		if !safeAccelerationDigest(capability.bindings[safeAccelerationEvidenceKey(item.Pair, item.Arm)]) {
+			add("authoritative_capability_invalid", item.Pair)
 		}
-		seenArms[key] = struct{}{}
-		if arm.RehashedReceiptDigest != evidence.ReceiptDigest || arm.RehashedWitnessDigest != evidence.AcceptanceWitnessDigest {
-			add("verified_evidence_hash_mismatch", arm.Pair)
-		}
-		if strings.TrimSpace(arm.ReceiptIssuer) == "" || strings.TrimSpace(arm.WitnessIssuer) == "" || arm.ReceiptIssuer == arm.WitnessIssuer {
-			add("verified_issuer_not_independent", arm.Pair)
-		}
-		if !safeAccelerationDigest(arm.ProvenanceDigest) {
-			add("verified_provenance_missing", arm.Pair)
-		}
-		if strings.TrimSpace(arm.RunID) == "" || arm.InputBindingDigest != SafeAccelerationRunBinding(request, evidence, arm.RunID) {
-			add("verified_run_binding_mismatch", arm.Pair)
-		}
-		if _, collision := seenIdentity[arm.RunID]; collision {
-			add("verified_identity_replay", arm.Pair)
-		} else {
-			seenIdentity[arm.RunID] = struct{}{}
-		}
-	}
-	if len(seenArms) != len(expected) {
-		add("verified_arm_set_mismatch", 0)
 	}
 }
 
 func safeAccelerationEvidenceKey(pair int, arm string) string {
 	return strconv.Itoa(pair) + "/" + arm
+}
+
+func safeAccelerationCampaignDigest(c SafeAccelerationCampaign) (string, error) {
+	canonical, err := json.Marshal(c) // struct order and sorted map keys are deterministic
+	if err != nil {
+		return "", err
+	}
+	return safeAccelerationHash(canonical), nil
+}
+
+func safeAccelerationHash(material []byte) string {
+	sum := sha256.Sum256(material)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func safeAccelerationCapabilitySeal(campaignDigest string, bindings map[string]string) string {
+	keys := make([]string, 0, len(bindings))
+	for key := range bindings {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	fields := []string{"fak-safe-acceleration-capability/1", campaignDigest}
+	for _, key := range keys {
+		fields = append(fields, key, bindings[key])
+	}
+	return safeAccelerationHash([]byte(strings.Join(fields, "\x00")))
+}
+
+func safeAccelerationMaterialBinding(campaignDigest string, evidence safeAccelerationEvidenceRef, runID string) string {
+	return safeAccelerationHash([]byte(strings.Join([]string{
+		"fak-safe-acceleration-run-binding/1", campaignDigest, strconv.Itoa(evidence.Pair), evidence.Arm,
+		evidence.ReceiptDigest, evidence.AcceptanceWitnessDigest, runID,
+	}, "\x00")))
+}
+
+// safeAccelerationAuthorizeResolved is deliberately package-private. It is the
+// sole capability constructor and rederives campaign measurements from parsed,
+// content-addressed receipt and witness material.
+func safeAccelerationAuthorizeResolved(c SafeAccelerationCampaign, materials []safeAccelerationResolvedMaterial) (*safeAccelerationVerificationCapability, error) {
+	campaignDigest, err := safeAccelerationCampaignDigest(c)
+	if err != nil {
+		return nil, fmt.Errorf("canonical campaign: %w", err)
+	}
+	evidence := safeAccelerationEvidence(c)
+	if len(materials) != len(evidence) || !safeAccelerationUniqueEvidence(evidence) {
+		return nil, fmt.Errorf("resolved material set mismatch or replay")
+	}
+	seen := make(map[string]struct{}, len(evidence)*3)
+	bindings := make(map[string]string, len(evidence))
+	for i, item := range evidence {
+		if safeAccelerationHash(materials[i].Receipt) != item.ReceiptDigest || safeAccelerationHash(materials[i].Witness) != item.AcceptanceWitnessDigest {
+			return nil, fmt.Errorf("pair %d %s: resolved evidence hash mismatch", item.Pair, item.Arm)
+		}
+		var receipt safeAccelerationReceipt
+		var witness safeAccelerationWitness
+		if err := safeAccelerationDecode(materials[i].Receipt, &receipt); err != nil {
+			return nil, fmt.Errorf("pair %d %s receipt: %w", item.Pair, item.Arm, err)
+		}
+		if err := safeAccelerationDecode(materials[i].Witness, &witness); err != nil {
+			return nil, fmt.Errorf("pair %d %s witness: %w", item.Pair, item.Arm, err)
+		}
+		arm, identity := safeAccelerationArmAndIdentity(c, item.Pair, item.Arm)
+		if receipt.Schema != "fak-safe-acceleration-receipt/1" || receipt.Pair != item.Pair || receipt.Arm != item.Arm ||
+			receipt.PublicRevision != c.PublicRevision || receipt.PrivateRevision != c.PrivateRevision || receipt.Identity != identity ||
+			!safeAccelerationCanonicalEqual(receipt.Measurements, safeAccelerationMeasurements(arm)) {
+			return nil, fmt.Errorf("pair %d %s: receipt measurements or identity mismatch", item.Pair, item.Arm)
+		}
+		if witness.Schema != "fak-safe-acceleration-witness/1" || witness.Pair != item.Pair || witness.Arm != item.Arm ||
+			witness.RunID != receipt.RunID || witness.ReceiptDigest != item.ReceiptDigest || witness.Violations != arm.Violations ||
+			!safeAccelerationAcceptedTasks(witness.AcceptedTaskIDs, arm.TaskIDs, arm.AcceptedUnits) {
+			return nil, fmt.Errorf("pair %d %s: witness outcome mismatch", item.Pair, item.Arm)
+		}
+		if receipt.RunID == "" || receipt.Issuer == "" || witness.Issuer == "" || receipt.Issuer == witness.Issuer ||
+			!safeAccelerationDigest(receipt.ProvenanceDigest) || !safeAccelerationDigest(witness.ProvenanceDigest) ||
+			receipt.ProvenanceDigest == witness.ProvenanceDigest {
+			return nil, fmt.Errorf("pair %d %s: issuer or provenance is not independent", item.Pair, item.Arm)
+		}
+		for _, identity := range []string{item.ReceiptDigest, item.AcceptanceWitnessDigest, receipt.RunID} {
+			if _, duplicate := seen[identity]; duplicate {
+				return nil, fmt.Errorf("pair %d %s: evidence or run identity replay", item.Pair, item.Arm)
+			}
+			seen[identity] = struct{}{}
+		}
+		bindings[safeAccelerationEvidenceKey(item.Pair, item.Arm)] = safeAccelerationMaterialBinding(campaignDigest, item, receipt.RunID)
+	}
+	capability := &safeAccelerationVerificationCapability{campaignDigest: campaignDigest, bindings: bindings}
+	capability.seal = safeAccelerationCapabilitySeal(campaignDigest, bindings)
+	return capability, nil
+}
+
+func safeAccelerationDecode(material []byte, value any) error {
+	decoder := json.NewDecoder(bytes.NewReader(material))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return fmt.Errorf("multiple JSON values")
+		}
+		return fmt.Errorf("trailing JSON: %w", err)
+	}
+	return nil
+}
+
+func safeAccelerationArmAndIdentity(c SafeAccelerationCampaign, pair int, arm string) (SafeAccelerationArm, SafeAccelerationIdentity) {
+	if arm == "baseline" {
+		return c.Pairs[pair-1].Baseline, c.Baseline
+	}
+	return c.Pairs[pair-1].Candidate, c.Candidate
+}
+
+func safeAccelerationMeasurements(arm SafeAccelerationArm) SafeAccelerationArm {
+	arm.ReceiptDigest = ""
+	arm.AcceptanceWitnessDigest = ""
+	arm.AcceptanceWitnessIndependent = false
+	return arm
+}
+
+func safeAccelerationCanonicalEqual(a, b any) bool {
+	left, leftErr := json.Marshal(a)
+	right, rightErr := json.Marshal(b)
+	return leftErr == nil && rightErr == nil && bytes.Equal(left, right)
+}
+
+func safeAccelerationAcceptedTasks(accepted, all []string, count int) bool {
+	if len(accepted) != count {
+		return false
+	}
+	available := make(map[string]struct{}, len(all))
+	for _, task := range all {
+		available[task] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(accepted))
+	for _, task := range accepted {
+		if _, ok := available[task]; !ok {
+			return false
+		}
+		if _, duplicate := seen[task]; duplicate {
+			return false
+		}
+		seen[task] = struct{}{}
+	}
+	return true
+}
+
+func safeAccelerationVerifiedVerdict(lower95 float64) SafeAccelerationVerdict {
+	if lower95 >= 10 {
+		return SafeAccelerationGain10X
+	}
+	return SafeAccelerationNoGain
 }
 
 func safeAccelerationTaskIDs(tasks []SafeAccelerationTask) ([]string, bool) {
