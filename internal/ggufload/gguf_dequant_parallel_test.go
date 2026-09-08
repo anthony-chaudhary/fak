@@ -233,6 +233,34 @@ func TestDequantParallelWorkersUseGOMAXPROCSBudget(t *testing.T) {
 	}
 }
 
+func TestDequantF32LimitedMatchesScalar(t *testing.T) {
+	oldProcs := runtime.GOMAXPROCS(4)
+	t.Cleanup(func() { runtime.GOMAXPROCS(oldProcs) })
+
+	blocks := dequantParallelMinBlocks + dequantParallelBlocksPerWorker
+	if got := dequantParallelWorkersLimited(blocks, 2); got != 2 {
+		t.Fatalf("limited dequant workers = %d, want 2", got)
+	}
+	raw := randomParallelDequantRaw(blocks, blockQ2KBytes)
+	for b := 0; b < blocks; b++ {
+		base := b * blockQ2KBytes
+		putFiniteF16ParallelTest(raw, base+qkK/16+qkK/4, b)
+		putFiniteF16ParallelTest(raw, base+qkK/16+qkK/4+2, b+1)
+	}
+
+	want := make([]float32, blocks*qkK)
+	dequantQ2KScalar(want, raw)
+	got, err := dequantF32Limited(TensorInfo{
+		Name: "limited.q2_k",
+		Dims: []uint64{uint64(blocks * qkK)},
+		Type: TensorQ2_K,
+	}, raw, 2)
+	if err != nil {
+		t.Fatalf("dequantF32Limited: %v", err)
+	}
+	assertF32BitsEqualParallelTest(t, "Q2_K limited", got, want)
+}
+
 func randomParallelDequantRaw(blocks, blockBytes int) []byte {
 	raw := make([]byte, blocks*blockBytes)
 	rng := rand.New(rand.NewSource(1102))

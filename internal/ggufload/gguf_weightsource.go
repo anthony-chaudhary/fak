@@ -638,11 +638,15 @@ func (s *WeightSource) shapeAndBytes(info TensorInfo) ([]int, []byte, error) {
 // reading the still-quantized bytes via TensorBytes and dequantizing them. It is the shared
 // shape+read+dequant prelude of QuantModelProfile's glm_moe_dsa split paths.
 func (s *WeightSource) dequantGGUFShapeF32(info TensorInfo) ([]int, []float32, error) {
+	return s.dequantGGUFShapeF32Limited(info, 0)
+}
+
+func (s *WeightSource) dequantGGUFShapeF32Limited(info TensorInfo, workers int) ([]int, []float32, error) {
 	shape, raw, err := s.shapeAndBytes(info)
 	if err != nil {
 		return nil, nil, err
 	}
-	data, err := dequantF32(info, raw)
+	data, err := dequantF32Limited(info, raw, workers)
 	if err != nil {
 		return nil, nil, err
 	}

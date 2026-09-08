@@ -44,12 +44,6 @@ import (
 // on the big-model serve box. FAK_GGUF_LOAD_WORKERS overrides this in either direction.
 const loadWorkerCap = 16
 
-// activeParallelLoads marks worker-pool load scopes. Inside one of these scopes the
-// tensor workers already consume the shared CPU budget, so nested block dequant stays
-// serial rather than multiplying runnable work by GOMAXPROCS. Standalone dequant and
-// serial loads retain the existing block-level parallel path.
-var activeParallelLoads atomic.Int32
-
 // loadWorkers returns the per-tensor load concurrency: min(GOMAXPROCS, loadWorkerCap) by
 // default, or the FAK_GGUF_LOAD_WORKERS override (>=1). It never returns < 1.
 func loadWorkers() int {
@@ -66,6 +60,40 @@ func loadWorkers() int {
 		n = 1
 	}
 	return n
+}
+
+// loadConcurrencyPlan partitions one effective CPU budget between tensor-level and
+// block-level work. An explicit outer-worker override remains authoritative; when it
+// exceeds GOMAXPROCS the effective budget expands to that value and inner work stays
+// serial, making the requested oversubscription explicit rather than silently clipping it.
+type loadConcurrencyPlan struct {
+	Budget int
+	Outer  int
+	Inner  int
+}
+
+func planLoadConcurrency(total, outer, tensors int) loadConcurrencyPlan {
+	if total < 1 {
+		total = 1
+	}
+	if outer < 1 {
+		outer = 1
+	}
+	if tensors > 0 && outer > tensors {
+		outer = tensors
+	}
+	if outer > total {
+		total = outer
+	}
+	inner := total / outer
+	if inner < 1 {
+		inner = 1
+	}
+	return loadConcurrencyPlan{Budget: total, Outer: outer, Inner: inner}
+}
+
+func currentLoadConcurrencyPlan(tensors int) loadConcurrencyPlan {
+	return planLoadConcurrency(runtime.GOMAXPROCS(0), loadWorkers(), tensors)
 }
 
 // pendingTensor is one builder mutation a load worker produced from a GGUF tensor. The
@@ -168,21 +196,28 @@ func (s *WeightSource) parallelQuantLoad(computeFn func(TensorInfo) tensorWork, 
 // already admitted is drained in tensor order so the earliest tensor/apply error remains the
 // deterministic cause rather than being replaced by the cancellation used to stop the pool.
 func (s *WeightSource) parallelQuantLoadContext(ctx context.Context, computeFn func(TensorInfo) tensorWork, applyFn func(tensorWork) error) error {
+	return s.parallelQuantLoadContextBudget(ctx, func(info TensorInfo, _ int) tensorWork {
+		return computeFn(info)
+	}, applyFn)
+}
+
+// parallelQuantLoadContextBudget is the production hierarchical path. innerWorkers is
+// the fixed per-tensor block budget; because at most Outer callbacks run concurrently,
+// the number of active dequant bodies cannot exceed Outer*Inner <= Budget.
+func (s *WeightSource) parallelQuantLoadContextBudget(ctx context.Context, computeFn func(TensorInfo, int) tensorWork, applyFn func(tensorWork) error) error {
 	tensors := s.File.Tensors
 	n := len(tensors)
 	if n == 0 {
 		return ctx.Err()
 	}
-	workers := loadWorkers()
-	if workers > n {
-		workers = n
-	}
+	plan := currentLoadConcurrencyPlan(n)
+	workers := plan.Outer
 	if workers <= 1 {
 		for i := range tensors {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			w := computeFn(tensors[i])
+			w := computeFn(tensors[i], plan.Inner)
 			if w.err != nil {
 				return w.err
 			}
@@ -198,8 +233,6 @@ func (s *WeightSource) parallelQuantLoadContext(ctx context.Context, computeFn f
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	activeParallelLoads.Add(1)
-	defer activeParallelLoads.Add(-1)
 
 	results := make([]tensorWork, n)
 	done := make([]chan struct{}, n)
@@ -216,10 +249,15 @@ func (s *WeightSource) parallelQuantLoadContext(ctx context.Context, computeFn f
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				// Jobs accepted by the feeder own a slot and must run to completion. The
-				// cancellation signal stops later admission; computeFn may also observe it
-				// cooperatively, but the pool never replaces an admitted tensor's real error.
-				results[i] = computeFn(tensors[i])
+				// Do not begin a tensor after caller cancellation wins the admission race.
+				// Internal cancellation from an earlier tensor error uses runCtx, not ctx,
+				// so already-admitted work still completes and preserves its real error.
+				if err := ctx.Err(); err != nil {
+					results[i] = tensorWork{err: err}
+					close(done[i])
+					continue
+				}
+				results[i] = computeFn(tensors[i], plan.Inner)
 				if results[i].err != nil {
 					cancel()
 				}
