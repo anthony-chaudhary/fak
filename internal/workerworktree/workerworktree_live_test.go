@@ -317,3 +317,96 @@ func TestLiveLandWithDirtyWorkerEditsVerified(t *testing.T) {
 		t.Fatalf("trunk did not receive candidate edits: %v, content=%q", err, string(trunkGot))
 	}
 }
+
+// TestLiveLandWithSiblingWorkspaceVerified proves #12447: post-merge
+// verification keeps the selected repository's parent-directory topology, so
+// relative sibling modules named by a checked-in go.work remain resolvable.
+func TestLiveLandWithSiblingWorkspaceVerified(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not on PATH")
+	}
+
+	parent := t.TempDir()
+	dependency := filepath.Join(parent, "support")
+	repo := filepath.Join(parent, "selected")
+	for _, dir := range []string{dependency, repo} {
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dependency, "go.mod"), []byte("module example.test/support\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dependency, "support.go"), []byte("package support\n\nconst Value = 40\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit := func(dir string, args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return string(out)
+	}
+	runGit(repo, "init", "-q", "-b", "main")
+	runGit(repo, "config", "user.email", "e2e@test")
+	runGit(repo, "config", "user.name", "e2e")
+	runGit(repo, "config", "commit.gpgsign", "false")
+	files := map[string]string{
+		"go.mod":  "module example.test/selected\n\ngo 1.26\n\nrequire example.test/support v0.0.0\n",
+		"go.work": "go 1.26\n\nuse (\n\t.\n\t../support\n)\n",
+		"app.go":  "package selected\n\nimport \"example.test/support\"\n\nfunc Value() int { return support.Value + 1 }\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit(repo, "add", "app.go", "go.mod", "go.work")
+	runGit(repo, "commit", "-q", "-m", "base")
+	base := TrunkHeadSHA(repo, nil)
+
+	prepared := Prepare(repo, "workerworktree", "12447", base, t.TempDir(), nil)
+	if !prepared.OK {
+		t.Fatalf("prepare: %+v", prepared)
+	}
+	workerBody := "package selected\n\nimport \"example.test/support\"\n\nfunc Value() int { return support.Value + 2 }\n"
+	if err := os.WriteFile(filepath.Join(prepared.Path, "app.go"), []byte(workerBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	validatedCandidate := ""
+	verify := func(dir string) (bool, string) {
+		// The worker checkout lives under an arbitrary fleet root; this witness is
+		// specifically for the prospective merge commit's checkout topology.
+		if dir == prepared.Path {
+			return true, ""
+		}
+		validatedCandidate = dir
+		cmd := exec.Command("go", "build", "./...")
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GOWORK=auto")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return false, strings.TrimSpace(string(out))
+		}
+		return true, ""
+	}
+
+	landed := Land(repo, prepared.Path, base, "", []string{"app.go"}, verify, nil)
+	if !landed.OK || !landed.Committed {
+		t.Fatalf("sibling-workspace land failed: %+v", landed)
+	}
+	if filepath.Clean(filepath.Dir(validatedCandidate)) != filepath.Clean(filepath.Dir(repo)) {
+		t.Fatalf("candidate parent = %q, want selected-root parent %q", filepath.Dir(validatedCandidate), filepath.Dir(repo))
+	}
+	got, err := os.ReadFile(filepath.Join(repo, "app.go"))
+	if err != nil || string(got) != workerBody {
+		t.Fatalf("trunk app.go = %q, %v; want landed worker bytes", got, err)
+	}
+}

@@ -742,10 +742,21 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 
 		if verify != nil {
 			finishVerify := beginLandPhase(tracker, "post-merge-validation", attempt)
-			candDir, err := os.MkdirTemp("", "fak-cand-validate-*")
+			// Keep the prospective checkout beside the selected repository root.
+			// Checked-in workspace files may name sibling modules with paths such as
+			// ../module; a system-temp checkout changes that parent topology and can
+			// falsely reject an otherwise valid candidate. Failure to preserve the
+			// topology is terminal: verification must never fall back to a different
+			// parent or proceed without the requested witness.
+			rootAbs, err := filepath.Abs(root)
 			if err != nil {
 				finishVerify()
-				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: failed to create candidate temp dir: " + err.Error()}, true
+				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: failed to resolve selected root: " + err.Error()}, true
+			}
+			candDir, err := os.MkdirTemp(filepath.Dir(rootAbs), ".fak-cand-validate-*")
+			if err != nil {
+				finishVerify()
+				return Result{OK: false, Reason: "post-merge compilation verification failed, refusing CAS update: failed to create topology-preserving candidate temp dir: " + err.Error()}, true
 			}
 			_ = os.Remove(candDir)
 			cleanupCand := func() {
