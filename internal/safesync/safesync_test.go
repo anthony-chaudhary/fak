@@ -622,3 +622,114 @@ func readFile(t testing.TB, path string) string {
 	}
 	return string(b)
 }
+
+func TestCurrentBranch_SanctionedWorkerWorktreeFallback(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("detached HEAD in ordinary repo fails with detached HEAD error", func(t *testing.T) {
+		tmp := t.TempDir()
+		repo := filepath.Join(tmp, "ordinary-repo")
+		mkdir(t, repo)
+		git(t, repo, "init", "-b", "main")
+		git(t, repo, "config", "user.name", "test")
+		git(t, repo, "config", "user.email", "test@example.com")
+		writeFile(t, filepath.Join(repo, "a.txt"), "hello\n")
+		git(t, repo, "add", ".")
+		git(t, repo, "commit", "-m", "init")
+		git(t, repo, "checkout", "--detach", "HEAD")
+
+		_, err := currentBranch(ctx, RealRunner, repo)
+		if err == nil {
+			t.Fatal("expected error on detached HEAD in ordinary repo, got nil")
+		}
+		if !strings.Contains(err.Error(), "detached HEAD; no branch to sync") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("detached HEAD in worker worktree dir name falls back to branchrole", func(t *testing.T) {
+		tmp := t.TempDir()
+		repo := filepath.Join(tmp, "fak-worker-wt-test")
+		mkdir(t, repo)
+		git(t, repo, "init", "-b", "main")
+		git(t, repo, "config", "user.name", "test")
+		git(t, repo, "config", "user.email", "test@example.com")
+		writeFile(t, filepath.Join(repo, "a.txt"), "hello\n")
+		git(t, repo, "add", ".")
+		git(t, repo, "commit", "-m", "init")
+		git(t, repo, "checkout", "--detach", "HEAD")
+
+		branch, err := currentBranch(ctx, RealRunner, repo)
+		if err != nil {
+			t.Fatalf("expected fallback to succeed, got error: %v", err)
+		}
+		if branch != "main" {
+			t.Fatalf("currentBranch = %q, want %q", branch, "main")
+		}
+	})
+
+	t.Run("detached HEAD with FLEET_WORKER_WORKTREE_DIR env falls back to branchrole", func(t *testing.T) {
+		tmp := t.TempDir()
+		repo := filepath.Join(tmp, "plain-repo")
+		mkdir(t, repo)
+		git(t, repo, "init", "-b", "main")
+		git(t, repo, "config", "user.name", "test")
+		git(t, repo, "config", "user.email", "test@example.com")
+		writeFile(t, filepath.Join(repo, "a.txt"), "hello\n")
+		git(t, repo, "add", ".")
+		git(t, repo, "commit", "-m", "init")
+		git(t, repo, "checkout", "--detach", "HEAD")
+
+		t.Setenv("FLEET_WORKER_WORKTREE_DIR", repo)
+
+		branch, err := currentBranch(ctx, RealRunner, repo)
+		if err != nil {
+			t.Fatalf("expected fallback to succeed with FLEET_WORKER_WORKTREE_DIR, got: %v", err)
+		}
+		if branch != "main" {
+			t.Fatalf("currentBranch = %q, want %q", branch, "main")
+		}
+	})
+
+	t.Run("detached HEAD with git-dir containing worktrees falls back to branchrole", func(t *testing.T) {
+		mockRunner := func(ctx context.Context, repo string, args ...string) RunResult {
+			if len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--abbrev-ref" {
+				return RunResult{Stdout: []byte("HEAD\n"), Code: 0}
+			}
+			if len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--git-dir" {
+				return RunResult{Stdout: []byte("/path/to/repo/.git/worktrees/worker1\n"), Code: 0}
+			}
+			return RunResult{Code: 1}
+		}
+
+		branch, err := currentBranch(ctx, mockRunner, t.TempDir())
+		if err != nil {
+			t.Fatalf("expected fallback on git-dir containing worktrees, got: %v", err)
+		}
+		if branch != "main" {
+			t.Fatalf("currentBranch = %q, want %q", branch, "main")
+		}
+	})
+
+	t.Run("detached HEAD in worker worktree honors dos.toml configured dev branch", func(t *testing.T) {
+		tmp := t.TempDir()
+		repo := filepath.Join(tmp, "fak-worker-wt-configured")
+		mkdir(t, repo)
+		git(t, repo, "init", "-b", "dev")
+		git(t, repo, "config", "user.name", "test")
+		git(t, repo, "config", "user.email", "test@example.com")
+		writeFile(t, filepath.Join(repo, "dos.toml"), "[branch_roles]\ndevelopment_branch = \"dev\"\n")
+		writeFile(t, filepath.Join(repo, "a.txt"), "hello\n")
+		git(t, repo, "add", ".")
+		git(t, repo, "commit", "-m", "init")
+		git(t, repo, "checkout", "--detach", "HEAD")
+
+		branch, err := currentBranch(ctx, RealRunner, repo)
+		if err != nil {
+			t.Fatalf("expected fallback with dos.toml, got: %v", err)
+		}
+		if branch != "dev" {
+			t.Fatalf("currentBranch = %q, want %q", branch, "dev")
+		}
+	})
+}

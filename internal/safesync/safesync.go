@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -33,6 +34,9 @@ const (
 	ReasonTargetMoved              = "TARGET_MOVED"
 	ReasonLeaseOwnerUnavailable    = "LEASE_OWNER_UNAVAILABLE"
 	ReasonPathspecRace             = "PATHSPEC_RACE"
+	ReasonBuildCheckFailed         = "BUILD_CHECK_FAILED"
+	ReasonTestCheckFailed          = "TEST_CHECK_FAILED"
+	ReasonTestsFailed              = ReasonTestCheckFailed
 )
 
 // Runner executes a git subcommand in repo. Err is non-nil only when git could
@@ -489,9 +493,45 @@ func currentBranch(ctx context.Context, run Runner, repo string) (string, error)
 	}
 	branch := strings.TrimSpace(string(out))
 	if branch == "" || branch == "HEAD" {
+		if isSanctionedWorkerWorktree(ctx, run, repo) {
+			roles, _ := branchrole.Load(repo)
+			if roles.DevelopmentBranch != "" {
+				return roles.DevelopmentBranch, nil
+			}
+			return "main", nil
+		}
 		return "", fmt.Errorf("detached HEAD; no branch to sync")
 	}
 	return branch, nil
+}
+
+const workerWorktreeMarker = "fak-worker-wt"
+
+func isWorkerWorktree(path string) bool {
+	name := filepath.Base(filepath.Clean(path))
+	return name == workerWorktreeMarker || strings.HasPrefix(name, workerWorktreeMarker+"-")
+}
+
+func isSanctionedWorkerWorktree(ctx context.Context, run Runner, repo string) bool {
+	if isWorkerWorktree(repo) {
+		return true
+	}
+	if abs, err := filepath.Abs(repo); err == nil && isWorkerWorktree(abs) {
+		return true
+	}
+	if os.Getenv("FLEET_WORKER_WORKTREE_DIR") != "" {
+		return true
+	}
+	if run != nil {
+		res := run(ctx, repo, "rev-parse", "--git-dir")
+		if res.Err == nil && res.Code == 0 {
+			gitDir := strings.ReplaceAll(strings.TrimSpace(string(res.Stdout)), "\\", "/")
+			if strings.Contains(gitDir, "worktrees") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func rev(ctx context.Context, run Runner, repo, ref string) (string, error) {
