@@ -94,6 +94,7 @@ type Run struct {
 	EOSStopped           bool
 	Steps                []Step
 	CPUVerification      *CPUVerification
+	BackendExecution     *compute.BackendExecutionObservation
 }
 
 // BackendObservation describes the backend that was actually resolved. It is
@@ -210,6 +211,9 @@ func (d dependencies) execute(ctx context.Context, req Request) (Execution, erro
 	if err != nil {
 		return Execution{}, err
 	}
+	if be != nil && backendObserved.Selected != be.Name() {
+		return Execution{}, fmt.Errorf("raw decode: resolved backend label %q does not match actual backend %q", backendObserved.Selected, be.Name())
+	}
 	loadStart := d.now()
 	lm, derivedName, err := d.loadModel(ctx, req)
 	loadDuration := d.now().Sub(loadStart)
@@ -237,6 +241,9 @@ func (d dependencies) execute(ctx context.Context, req Request) (Execution, erro
 		since = func(start time.Time) time.Duration { return d.now().Sub(start) }
 	}
 	exec, runErr := executeLoaded(req, lm, be, d.now, since)
+	if runErr != nil && len(exec.Runs) == 0 {
+		return Execution{}, runErr
+	}
 	exec.ArtifactSHA256 = digest
 	exec.ModelName = derivedName
 	exec.ModelConfig = lm.Config()
@@ -446,9 +453,27 @@ func executeLoaded(req Request, m loadedModel, be compute.Backend, now func() ti
 	}
 	var verifyErr error
 	for rep := 0; rep < req.Repetitions; rep++ {
+		before, observed, err := compute.CaptureBackendExecutionSnapshot(be)
+		if err != nil {
+			return Execution{}, fmt.Errorf("raw decode: capture backend observation before run %d: %w", rep+1, err)
+		}
 		run, err := executeRun(req, m, be, now, since)
 		if err != nil {
 			return Execution{}, err
+		}
+		if observed {
+			after, stillObserved, err := compute.CaptureBackendExecutionSnapshot(be)
+			if err != nil {
+				return Execution{}, fmt.Errorf("raw decode: capture backend observation after run %d: %w", rep+1, err)
+			}
+			if !stillObserved {
+				return Execution{}, fmt.Errorf("raw decode: backend observation became unavailable after run %d", rep+1)
+			}
+			delta, err := compute.BackendExecutionDelta(before, after)
+			if err != nil {
+				return Execution{}, fmt.Errorf("raw decode: backend observation for run %d: %w", rep+1, err)
+			}
+			run.BackendExecution = &delta
 		}
 		exec.Runs = append(exec.Runs, run)
 		if run.CPUVerification != nil && !run.CPUVerification.Passed {
