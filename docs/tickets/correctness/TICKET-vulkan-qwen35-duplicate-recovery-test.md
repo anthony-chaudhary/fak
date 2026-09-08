@@ -51,15 +51,15 @@ code, shader code, device selection, or error semantics.
 
 ## Done condition / witness
 
-- [ ] `go test -c -tags vulkan ./internal/compute` compiles on the sanctioned Vulkan build host.
-- [ ] The compiled binary lists both `TestVulkanQwen35ResidencyValidationWithoutDevice` and `TestVulkanQwen35_ResidencyAndErrorRecovery`.
-- [ ] The host-only validation test passes.
+- [x] `go test -c -tags vulkan ./internal/compute` compiles on the sanctioned Vulkan build host.
+- [x] The compiled binary lists both `TestVulkanQwen35ResidencyValidationWithoutDevice` and `TestVulkanQwen35_ResidencyAndErrorRecovery`.
+- [x] The host-only validation test passes.
 
 ## Definition of Done
 
-- [ ] Both distinct recovery contracts have unique Go test identifiers.
-- [ ] The `vulkan`-tagged compute test binary compiles without an overlay.
-- [ ] Test discovery lists both recovery contracts and the host-only contract passes.
+- [x] Both distinct recovery contracts have unique Go test identifiers.
+- [x] The `vulkan`-tagged compute test binary compiles without an overlay.
+- [x] Test discovery lists both recovery contracts and the host-only contract passes.
 
 ## Acceptance gate
 
@@ -80,9 +80,11 @@ go test -c -tags vulkan ./internal/compute
 
 ## Witness
 
-Run the three commands above on the sanctioned Vulkan build host. The compile must
-exit zero without a Go overlay, test discovery must print both identifiers, and the
-host-only validation contract must pass.
+Witnessed on the physical Strix Vulkan build host with `vulkan_test.go` source blob
+`95bc8b8186c180f59a5d5836a9ae541c2994358f`. The tagged test binary compiled without a Go overlay (SHA-256
+`ae515dab7ae0a10538835e4e689b38a528f8307cd58e7fd8a7d5f2c080a3e21b`), test
+discovery printed both identifiers, and
+`TestVulkanQwen35ResidencyValidationWithoutDevice` passed.
 
 ## File:Line seams
 
