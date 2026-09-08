@@ -1151,3 +1151,75 @@ func TestMacbenchManyAgent_ModeledProvenanceAndProjection(t *testing.T) {
 		t.Errorf("mock 4x projection output still contains TRUE or achieved:\n%s", mockOut)
 	}
 }
+
+func TestMacBenchValidateMTPComparison(t *testing.T) {
+	diskPath := filepath.Join("..", "..", "experiments", "benchmark", "runs", "by-machine", "node-macos-a", "20260908T160000Z-macbench-mtp", "packet.json")
+	if _, err := os.Stat(diskPath); err != nil {
+		diskPath = filepath.Join("experiments", "benchmark", "runs", "by-machine", "node-macos-a", "20260908T160000Z-macbench-mtp", "packet.json")
+		if _, err := os.Stat(diskPath); err != nil {
+			t.Skipf("disk packet not found: %v", err)
+		}
+	}
+
+	// 1. Validate on-disk packet with --json.
+	var stdout, stderr bytes.Buffer
+	code := runMacBench(&stdout, &stderr, []string{"validate-mtp-comparison", "--input", diskPath, "--json"})
+	if code != 0 {
+		t.Fatalf("validate-mtp-comparison failed: code=%d stderr=%s", code, stderr.String())
+	}
+	var res struct {
+		Schema              string  `json:"schema"`
+		Valid               bool    `json:"valid"`
+		PacketSHA256        string  `json:"packet_sha256"`
+		FakNativeDecodeTokS float64 `json:"fak_native_decode_tok_s"`
+		AcceptanceRate      float64 `json:"acceptance_rate"`
+		VsLlamaSpeedupRatio float64 `json:"vs_llama_speedup_ratio"`
+		VsAxEngineRatio     float64 `json:"vs_ax_engine_ratio"`
+		VsMTPLXRatio        float64 `json:"vs_mtplx_ratio"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatalf("unmarshal json: %v\nstdout: %s", err, stdout.String())
+	}
+	if res.Schema != "fak.macbench.mtp-comparison.validation.v1" || !res.Valid || len(res.PacketSHA256) != 64 {
+		t.Fatalf("unexpected validation result: %+v", res)
+	}
+	if res.FakNativeDecodeTokS < 14.5 || res.AcceptanceRate < 0.75 {
+		t.Fatalf("expected >=14.5 tok/s and >=0.75 acceptance, got %.2f tok/s, %.3f", res.FakNativeDecodeTokS, res.AcceptanceRate)
+	}
+
+	// 2. Validate on-disk packet with plain text output.
+	stdout.Reset()
+	stderr.Reset()
+	code = runMacBench(&stdout, &stderr, []string{"validate-mtp-comparison", "--input", diskPath})
+	if code != 0 {
+		t.Fatalf("validate-mtp-comparison text failed: code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.HasPrefix(stdout.String(), "VALID packet_sha256=") || !strings.Contains(stdout.String(), "fak_native_decode=15.22 tok/s") {
+		t.Fatalf("unexpected text output: %s", stdout.String())
+	}
+
+	// 3. Reject missing --input.
+	stdout.Reset()
+	stderr.Reset()
+	code = runMacBench(&stdout, &stderr, []string{"validate-mtp-comparison"})
+	if code != 2 || !strings.Contains(stderr.String(), "--input is required") {
+		t.Fatalf("expected code=2 for missing --input, got code=%d stderr=%s", code, stderr.String())
+	}
+
+	// 4. Reject unknown fields.
+	raw, err := os.ReadFile(diskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered := append(raw[:len(raw)-1], []byte(`,"invented_claim":42}`)...)
+	tempPacket := filepath.Join(t.TempDir(), "tampered.json")
+	if err := os.WriteFile(tempPacket, tampered, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = runMacBench(&stdout, &stderr, []string{"validate-mtp-comparison", "--input", tempPacket})
+	if code == 0 || !strings.Contains(stderr.String(), "unknown field") {
+		t.Fatalf("expected failure on unknown field, got code=%d stderr=%s", code, stderr.String())
+	}
+}
