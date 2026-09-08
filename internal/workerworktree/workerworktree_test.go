@@ -925,6 +925,9 @@ func TestLandIsolatedDisambiguationRefusalRequiresReconciliation(t *testing.T) {
 	if res.Code != LandResultReconciliationRequired || !res.Preserved {
 		t.Fatalf("disambiguation refusal must require reconciliation and preserve the worker: %+v", res)
 	}
+	if res.Path != "/worker" {
+		t.Fatalf("disambiguation refusal path = %q, want retained worker path", res.Path)
+	}
 	if res.Disambiguation.PostApply.Detail == "" || res.Disambiguation.PostApply.SemanticValid {
 		t.Fatalf("machine-readable refusal witness missing: %+v", res.Disambiguation)
 	}
