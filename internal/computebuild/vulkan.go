@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -12,28 +13,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-)
-
-var (
-	gitStatusCmd = func(ctx context.Context, repoRoot string) ([]byte, error) {
-		cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "status", "--porcelain")
-		return cmd.Output()
-	}
-	gitRevParseCmd = func(ctx context.Context, repoRoot, arg string) (string, error) {
-		cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "rev-parse", arg)
-		out, err := cmd.Output()
-		return strings.TrimSpace(string(out)), err
-	}
-	gitArchiveCmd = func(ctx context.Context, repoRoot, commit string, w io.Writer) error {
-		cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "archive", "--format=tar", commit)
-		cmd.Stdout = w
-		var errBuf bytes.Buffer
-		cmd.Stderr = &errBuf
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("%w: %s", err, errBuf.String())
-		}
-		return nil
-	}
 )
 
 // VulkanShaders contains the GLSL compute shaders compiled for the Vulkan backend,
@@ -81,6 +60,418 @@ var VulkanShaders = []string{
 	"coopmat_wave32_wmma",
 	"rmsnorm_q4k_matmul2",
 	"swiglu_q4k_matmul_add",
+}
+
+func strictFileSHA256(path string) (string, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", 0, err
+	}
+	if !info.Mode().IsRegular() {
+		return "", 0, fmt.Errorf("not a regular file: %s", path)
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(h.Sum(nil)), info.Size(), nil
+}
+
+func gitOutput(ctx context.Context, root string, args ...string) ([]byte, error) {
+	argv := append([]string{"-C", root}, args...)
+	cmd := exec.CommandContext(ctx, "git", argv...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git %s failed: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return out, nil
+}
+
+func cleanGitState(ctx context.Context, root string) error {
+	status, err := gitOutput(ctx, root, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none")
+	if err != nil {
+		return err
+	}
+	if len(status) != 0 {
+		return fmt.Errorf("vulkan source repository is dirty; refusing before compiler execution")
+	}
+	return nil
+}
+
+func hashGitArchive(ctx context.Context, root, commit string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "archive", "--format=tar", commit)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	h := sha256.New()
+	cmd.Stdout = h
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git archive failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func prepareVulkanSource(ctx context.Context, root, requestedCommit string) (BuildSourceProvenance, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return BuildSourceProvenance{}, fmt.Errorf("resolve repository root: %w", err)
+	}
+	commitRaw, err := gitOutput(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return BuildSourceProvenance{}, err
+	}
+	commit := strings.TrimSpace(string(commitRaw))
+	if requestedCommit != "" {
+		requestedRaw, err := gitOutput(ctx, root, "rev-parse", "--verify", requestedCommit+"^{commit}")
+		if err != nil {
+			return BuildSourceProvenance{}, fmt.Errorf("resolve requested Vulkan source commit: %w", err)
+		}
+		if resolved := strings.TrimSpace(string(requestedRaw)); resolved != commit {
+			return BuildSourceProvenance{}, fmt.Errorf("requested Vulkan source commit %s does not match HEAD %s", resolved, commit)
+		}
+	}
+	treeRaw, err := gitOutput(ctx, root, "rev-parse", "--verify", commit+"^{tree}")
+	if err != nil {
+		return BuildSourceProvenance{}, err
+	}
+	tree := strings.TrimSpace(string(treeRaw))
+	if err := cleanGitState(ctx, root); err != nil {
+		return BuildSourceProvenance{}, err
+	}
+	archiveSHA, err := hashGitArchive(ctx, root, commit)
+	if err != nil {
+		return BuildSourceProvenance{}, err
+	}
+	afterRaw, err := gitOutput(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return BuildSourceProvenance{}, err
+	}
+	if strings.TrimSpace(string(afterRaw)) != commit {
+		return BuildSourceProvenance{}, fmt.Errorf("vulkan source commit changed during archive construction")
+	}
+	if err := cleanGitState(ctx, root); err != nil {
+		return BuildSourceProvenance{}, err
+	}
+	return BuildSourceProvenance{
+		GitCommit:           commit,
+		GitTree:             tree,
+		Clean:               true,
+		SourceArchiveSHA256: archiveSHA,
+	}, nil
+}
+
+func hashSPIRVBundle(repoRoot string) (string, int, error) {
+	dir := filepath.Join(repoRoot, "internal", "compute", "spirv")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", 0, fmt.Errorf("read SPIR-V bundle: %w", err)
+	}
+	expected := make(map[string]struct{}, len(VulkanShaders))
+	for _, name := range VulkanShaders {
+		expected[name+".spv"] = struct{}{}
+	}
+	observed := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".spv" {
+			continue
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return "", 0, fmt.Errorf("SPIR-V module is a symlink: %s", entry.Name())
+		}
+		if _, ok := expected[entry.Name()]; !ok {
+			return "", 0, fmt.Errorf("unexpected SPIR-V module: %s", entry.Name())
+		}
+		observed = append(observed, entry.Name())
+	}
+	if len(observed) != len(expected) {
+		return "", 0, fmt.Errorf("incomplete SPIR-V bundle: got %d modules, want %d", len(observed), len(expected))
+	}
+	sort.Strings(observed)
+	h := sha256.New()
+	for _, name := range observed {
+		path := filepath.Join(dir, name)
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			return "", 0, fmt.Errorf("invalid SPIR-V module %s", name)
+		}
+		fmt.Fprintf(h, "%s\x00%d\x00", filepath.ToSlash(filepath.Join("internal", "compute", "spirv", name)), info.Size())
+		f, err := os.Open(path)
+		if err != nil {
+			return "", 0, err
+		}
+		_, copyErr := io.Copy(h, f)
+		closeErr := f.Close()
+		if copyErr != nil {
+			return "", 0, copyErr
+		}
+		if closeErr != nil {
+			return "", 0, closeErr
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil)), len(observed), nil
+}
+
+// ComputeSPIRVBundleSHA256 retains the v1 exported helper while applying the
+// same deterministic filename/size/content framing and fail-closed file rules.
+func ComputeSPIRVBundleSHA256(spvDir string) (string, error) {
+	entries, err := os.ReadDir(spvDir)
+	if err != nil {
+		return "", fmt.Errorf("read SPIR-V directory: %w", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) == ".spv" {
+			names = append(names, entry.Name())
+		}
+	}
+	if len(names) == 0 {
+		return "", fmt.Errorf("no .spv files found in %s", spvDir)
+	}
+	sort.Strings(names)
+	h := sha256.New()
+	for _, name := range names {
+		path := filepath.Join(spvDir, name)
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			return "", fmt.Errorf("SPIR-V module must be a regular file: %s", name)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("read SPIR-V module %s: %w", name, err)
+		}
+		fmt.Fprintf(h, "%s\x00%d\x00", name, len(data))
+		_, _ = h.Write(data)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// CompareReceiptProvenance retains the v1 API. Vulkan v2 comparisons use the
+// stable identity produced from source, tool, command, shader, and binary hashes.
+func CompareReceiptProvenance(a, b *ComputeBuildReceipt) error {
+	if a == nil || b == nil {
+		return fmt.Errorf("receipt cannot be nil")
+	}
+	if a.Vulkan != nil || b.Vulkan != nil {
+		if a.Vulkan == nil || b.Vulkan == nil || a.Artifact == nil || b.Artifact == nil {
+			return fmt.Errorf("Vulkan provenance presence mismatch")
+		}
+		if a.Vulkan.StableIdentitySHA256 != b.Vulkan.StableIdentitySHA256 || a.Artifact.SHA256 != b.Artifact.SHA256 {
+			return fmt.Errorf("Vulkan stable provenance mismatch")
+		}
+		return nil
+	}
+	left, err := hashJSON([]any{a.Schema, a.Backend, a.Command, a.Outcome, a.ExitCode, a.GitCommit, a.GitRef, a.Clean, a.SourceArchiveSHA256, a.ShaderBundleSHA256, a.BuildArgs, a.Toolchain, a.Artifact})
+	if err != nil {
+		return err
+	}
+	right, err := hashJSON([]any{b.Schema, b.Backend, b.Command, b.Outcome, b.ExitCode, b.GitCommit, b.GitRef, b.Clean, b.SourceArchiveSHA256, b.ShaderBundleSHA256, b.BuildArgs, b.Toolchain, b.Artifact})
+	if err != nil {
+		return err
+	}
+	if left != right {
+		return fmt.Errorf("receipt provenance mismatch")
+	}
+	return nil
+}
+
+func resolveBuildTool(name string) (string, error) {
+	if strings.TrimSpace(name) == "" {
+		return "", fmt.Errorf("required build tool is not configured")
+	}
+	resolved := name
+	if !filepath.IsAbs(resolved) {
+		var err error
+		resolved, err = exec.LookPath(resolved)
+		if err != nil {
+			return "", err
+		}
+	}
+	if real, err := filepath.EvalSymlinks(resolved); err == nil {
+		resolved = real
+	}
+	return resolved, nil
+}
+
+func hashJSON(v any) (string, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func vulkanToolchainIdentity(tc *Toolchain) ([]BuildToolIdentity, string, error) {
+	goTool := tc.Go
+	if goTool == "" {
+		goTool = "go"
+	}
+	tools := []struct {
+		role string
+		path string
+	}{
+		{"go", goTool},
+		{"cc", tc.CC},
+		{"cxx", tc.CXX},
+		{"ar", tc.AR},
+		{"glslc", tc.GLSLC},
+	}
+	identities := make([]BuildToolIdentity, 0, len(tools))
+	for _, tool := range tools {
+		path, err := resolveBuildTool(tool.path)
+		if err != nil {
+			return nil, "", fmt.Errorf("resolve %s tool: %w", tool.role, err)
+		}
+		digest, _, err := strictFileSHA256(path)
+		if err != nil {
+			return nil, "", fmt.Errorf("hash %s tool: %w", tool.role, err)
+		}
+		identities = append(identities, BuildToolIdentity{Role: tool.role, Executable: filepath.Base(path), SHA256: digest})
+	}
+	digest, err := hashJSON(struct {
+		Tools      []BuildToolIdentity `json:"tools"`
+		CXXRuntime string              `json:"cxx_runtime"`
+		IsWindows  bool                `json:"is_windows"`
+	}{identities, tc.CxxRuntime, tc.IsWindows})
+	return identities, digest, err
+}
+
+func normalizedVulkanBuildCommand(cfg *VulkanConfig) ([]string, string, error) {
+	relPkg, err := filepath.Rel(cfg.RepoRoot, cfg.PkgDir)
+	if err != nil || relPkg == ".." || strings.HasPrefix(relPkg, ".."+string(filepath.Separator)) {
+		return nil, "", fmt.Errorf("Vulkan package directory must be inside repository root")
+	}
+	cxxFlags := "-O3,-std=c++17,-fPIC"
+	if cfg.Toolchain.IsWindows {
+		cxxFlags = "-O3,-std=c++17,-D_CRT_SECURE_NO_WARNINGS"
+	}
+	commands := []string{
+		"glslc|-O|--target-env=vulkan1.2|-fshader-stage=comp|$REPO/internal/compute/shaders/{registered}.comp|-o|$REPO/internal/compute/spirv/{registered}.spv",
+		"cxx|" + cxxFlags + "|-c|$REPO/internal/compute/vulkan_shim.cpp|-o|$REPO/internal/compute/vulkan_shim.o",
+		"ar|rcs|$REPO/internal/compute/libfakvulkan.a|$REPO/internal/compute/vulkan_shim.o",
+		"go|build|-tags|vulkan|-o|$OUT|" + filepath.ToSlash(filepath.Clean(cfg.OutPkg)),
+		"pkg_dir=$REPO/" + filepath.ToSlash(relPkg),
+		fmt.Sprintf("smoke=%t", cfg.Smoke),
+	}
+	digest, err := hashJSON(commands)
+	return commands, digest, err
+}
+
+func compareVulkanBuildReceipt(path string, artifact *BuildArtifact, provenance *VulkanBuildProvenance) (*BuildReproducibility, error) {
+	if path == "" {
+		return &BuildReproducibility{Status: "baseline"}, nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return &BuildReproducibility{Status: "invalid"}, fmt.Errorf("read comparison receipt: %w", err)
+	}
+	digest := sha256.Sum256(b)
+	rep := &BuildReproducibility{Status: "mismatch", ComparedReceiptSHA256: hex.EncodeToString(digest[:])}
+	var prior ComputeBuildReceipt
+	if err := json.Unmarshal(b, &prior); err != nil {
+		rep.Status = "invalid"
+		return rep, fmt.Errorf("decode comparison receipt: %w", err)
+	}
+	if prior.Schema != VulkanBuildReceiptSchema || prior.Outcome != "success" || prior.Vulkan == nil || prior.Artifact == nil || prior.Artifact.SHA256 == "" {
+		rep.Status = "invalid"
+		return rep, fmt.Errorf("comparison receipt is not a complete successful %s receipt", VulkanBuildReceiptSchema)
+	}
+	checks := []struct {
+		name string
+		a    string
+		b    string
+	}{
+		{"source.git_commit", provenance.Source.GitCommit, prior.Vulkan.Source.GitCommit},
+		{"source.git_tree", provenance.Source.GitTree, prior.Vulkan.Source.GitTree},
+		{"source.archive", provenance.Source.SourceArchiveSHA256, prior.Vulkan.Source.SourceArchiveSHA256},
+		{"spirv_bundle", provenance.SPIRVBundleSHA256, prior.Vulkan.SPIRVBundleSHA256},
+		{"toolchain", provenance.ToolchainSHA256, prior.Vulkan.ToolchainSHA256},
+		{"build_command", provenance.BuildCommandSHA256, prior.Vulkan.BuildCommandSHA256},
+		{"binary", artifact.SHA256, prior.Artifact.SHA256},
+		{"stable_identity", provenance.StableIdentitySHA256, prior.Vulkan.StableIdentitySHA256},
+	}
+	for _, check := range checks {
+		if check.a != check.b {
+			rep.MismatchedFields = append(rep.MismatchedFields, check.name)
+		}
+	}
+	if len(rep.MismatchedFields) != 0 {
+		return rep, fmt.Errorf("Vulkan build reproducibility mismatch: %s", strings.Join(rep.MismatchedFields, ", "))
+	}
+	rep.Status = "match"
+	return rep, nil
+}
+
+func mergeToolchainOverrides(base, overrides *Toolchain) *Toolchain {
+	if base == nil {
+		base = &Toolchain{}
+	}
+	merged := *base
+	if overrides == nil {
+		return &merged
+	}
+	for dst, src := range map[*string]string{
+		&merged.Go: overrides.Go, &merged.CC: overrides.CC, &merged.CXX: overrides.CXX,
+		&merged.AR: overrides.AR, &merged.GLSLC: overrides.GLSLC,
+		&merged.VulkanSDK: overrides.VulkanSDK, &merged.VulkanInc: overrides.VulkanInc,
+		&merged.VulkanLib: overrides.VulkanLib,
+	} {
+		if src != "" {
+			*dst = src
+		}
+	}
+	return &merged
+}
+
+func finalizeVulkanBinary(cfg *VulkanConfig, source BuildSourceProvenance, outBinPath string, expectedTools []BuildToolIdentity, expectedToolchainSHA string) (*BuildArtifact, *VulkanBuildProvenance, error) {
+	binarySHA, binarySize, err := strictFileSHA256(outBinPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("hash Vulkan output binary: %w", err)
+	}
+	spirvSHA, spirvCount, err := hashSPIRVBundle(cfg.RepoRoot)
+	if err != nil {
+		return nil, nil, err
+	}
+	_, toolchainSHA, err := vulkanToolchainIdentity(cfg.Toolchain)
+	if err != nil {
+		return nil, nil, err
+	}
+	if toolchainSHA != expectedToolchainSHA {
+		return nil, nil, fmt.Errorf("Vulkan toolchain changed during build")
+	}
+	commands, commandSHA, err := normalizedVulkanBuildCommand(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	artifact := &BuildArtifact{Path: outBinPath, SizeBytes: binarySize, SHA256: binarySHA}
+	provenance := &VulkanBuildProvenance{
+		Source:                 source,
+		SPIRVBundleSHA256:      spirvSHA,
+		SPIRVModuleCount:       spirvCount,
+		Toolchain:              expectedTools,
+		ToolchainSHA256:        toolchainSHA,
+		NormalizedBuildCommand: commands,
+		BuildCommandSHA256:     commandSHA,
+	}
+	stableSHA, err := hashJSON(struct {
+		Source             BuildSourceProvenance `json:"source"`
+		SPIRVBundleSHA256  string                `json:"spirv_bundle_sha256"`
+		SPIRVModuleCount   int                   `json:"spirv_module_count"`
+		ToolchainSHA256    string                `json:"toolchain_sha256"`
+		BuildCommandSHA256 string                `json:"build_command_sha256"`
+		BinarySHA256       string                `json:"binary_sha256"`
+	}{source, spirvSHA, spirvCount, toolchainSHA, commandSHA, binarySHA})
+	if err != nil {
+		return nil, nil, err
+	}
+	provenance.StableIdentitySHA256 = stableSHA
+	return artifact, provenance, nil
 }
 
 // BuildShaders compiles all registered GLSL shaders to SPIR-V using glslc.
@@ -222,196 +613,8 @@ func TestCxxToolchain(ctx context.Context, tc *Toolchain) error {
 	return nil
 }
 
-// ComputeSPIRVBundleSHA256 computes a deterministic, canonical SHA-256 digest over
-// all .spv files in spvDir, sorted lexicographically by filename.
-func ComputeSPIRVBundleSHA256(spvDir string) (string, error) {
-	entries, err := os.ReadDir(spvDir)
-	if err != nil {
-		return "", fmt.Errorf("reading spirv directory %s: %w", spvDir, err)
-	}
-	var spvFiles []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".spv") {
-			spvFiles = append(spvFiles, e.Name())
-		}
-	}
-	if len(spvFiles) == 0 {
-		return "", fmt.Errorf("no .spv files found in %s", spvDir)
-	}
-	sort.Strings(spvFiles)
-
-	bundleHasher := sha256.New()
-	for _, name := range spvFiles {
-		filePath := filepath.Join(spvDir, name)
-		data, err := os.ReadFile(filePath)
-		if err != nil {
-			return "", fmt.Errorf("reading spirv file %s: %w", filePath, err)
-		}
-		fileSum := sha256.Sum256(data)
-		fmt.Fprintf(bundleHasher, "%s  %s\n", hex.EncodeToString(fileSum[:]), name)
-	}
-	return hex.EncodeToString(bundleHasher.Sum(nil)), nil
-}
-
-// CompareReceiptProvenance verifies that all stable provenance fields between two receipts match,
-// proving reproducibility. Non-reproducible execution metadata (timestamps, elapsed durations,
-// receipt file paths, smoke timing) are permitted to vary.
-func CompareReceiptProvenance(a, b *ComputeBuildReceipt) error {
-	if a == nil || b == nil {
-		return fmt.Errorf("receipt cannot be nil (a=%v, b=%v)", a != nil, b != nil)
-	}
-	if a.Schema != b.Schema {
-		return fmt.Errorf("schema mismatch: %q vs %q", a.Schema, b.Schema)
-	}
-	if a.Backend != b.Backend {
-		return fmt.Errorf("backend mismatch: %q vs %q", a.Backend, b.Backend)
-	}
-	if a.Command != b.Command {
-		return fmt.Errorf("command mismatch: %q vs %q", a.Command, b.Command)
-	}
-	if a.Outcome != b.Outcome {
-		return fmt.Errorf("outcome mismatch: %q vs %q", a.Outcome, b.Outcome)
-	}
-	if a.ExitCode != b.ExitCode {
-		return fmt.Errorf("exit code mismatch: %d vs %d", a.ExitCode, b.ExitCode)
-	}
-	if a.GitCommit != b.GitCommit {
-		return fmt.Errorf("git commit mismatch: %q vs %q", a.GitCommit, b.GitCommit)
-	}
-	if a.GitRef != b.GitRef {
-		return fmt.Errorf("git ref mismatch: %q vs %q", a.GitRef, b.GitRef)
-	}
-	if (a.Clean == nil) != (b.Clean == nil) {
-		return fmt.Errorf("clean status mismatch: %v vs %v", a.Clean, b.Clean)
-	}
-	if a.Clean != nil && *a.Clean != *b.Clean {
-		return fmt.Errorf("clean status mismatch: %t vs %t", *a.Clean, *b.Clean)
-	}
-	if a.SourceArchiveSHA256 != b.SourceArchiveSHA256 {
-		return fmt.Errorf("source archive SHA-256 mismatch: %q vs %q", a.SourceArchiveSHA256, b.SourceArchiveSHA256)
-	}
-	if a.ShaderBundleSHA256 != b.ShaderBundleSHA256 {
-		return fmt.Errorf("shader bundle SHA-256 mismatch: %q vs %q", a.ShaderBundleSHA256, b.ShaderBundleSHA256)
-	}
-	if (a.Artifact == nil) != (b.Artifact == nil) {
-		return fmt.Errorf("artifact presence mismatch: %v vs %v", a.Artifact != nil, b.Artifact != nil)
-	}
-	if a.Artifact != nil {
-		if a.Artifact.SHA256 != b.Artifact.SHA256 {
-			return fmt.Errorf("binary SHA-256 mismatch: %q vs %q", a.Artifact.SHA256, b.Artifact.SHA256)
-		}
-		if a.Artifact.SizeBytes != b.Artifact.SizeBytes {
-			return fmt.Errorf("binary size mismatch: %d vs %d", a.Artifact.SizeBytes, b.Artifact.SizeBytes)
-		}
-	}
-	if len(a.BuildArgs) != len(b.BuildArgs) {
-		return fmt.Errorf("build args count mismatch: %d vs %d", len(a.BuildArgs), len(b.BuildArgs))
-	}
-	for i := range a.BuildArgs {
-		if a.BuildArgs[i] != b.BuildArgs[i] {
-			return fmt.Errorf("build arg[%d] mismatch: %q vs %q", i, a.BuildArgs[i], b.BuildArgs[i])
-		}
-	}
-	if (a.Toolchain == nil) != (b.Toolchain == nil) {
-		return fmt.Errorf("toolchain identity presence mismatch: %v vs %v", a.Toolchain != nil, b.Toolchain != nil)
-	}
-	if a.Toolchain != nil {
-		if a.Toolchain.GLSLC != b.Toolchain.GLSLC {
-			return fmt.Errorf("toolchain GLSLC mismatch: %q vs %q", a.Toolchain.GLSLC, b.Toolchain.GLSLC)
-		}
-		if a.Toolchain.CXX != b.Toolchain.CXX {
-			return fmt.Errorf("toolchain CXX mismatch: %q vs %q", a.Toolchain.CXX, b.Toolchain.CXX)
-		}
-		if a.Toolchain.AR != b.Toolchain.AR {
-			return fmt.Errorf("toolchain AR mismatch: %q vs %q", a.Toolchain.AR, b.Toolchain.AR)
-		}
-		if a.Toolchain.CC != b.Toolchain.CC {
-			return fmt.Errorf("toolchain CC mismatch: %q vs %q", a.Toolchain.CC, b.Toolchain.CC)
-		}
-		if a.Toolchain.VulkanSDK != b.Toolchain.VulkanSDK {
-			return fmt.Errorf("toolchain VulkanSDK mismatch: %q vs %q", a.Toolchain.VulkanSDK, b.Toolchain.VulkanSDK)
-		}
-		if a.Toolchain.CxxRuntime != b.Toolchain.CxxRuntime {
-			return fmt.Errorf("toolchain CxxRuntime mismatch: %q vs %q", a.Toolchain.CxxRuntime, b.Toolchain.CxxRuntime)
-		}
-	}
-	return nil
-}
-
-func checkSourceProvenance(ctx context.Context, cfg *VulkanConfig, tracker *receiptTracker) error {
-	gitStatusOut, err := gitStatusCmd(ctx, cfg.RepoRoot)
-	if err != nil {
-		cleanFalse := false
-		tracker.receipt.Clean = &cleanFalse
-		return fmt.Errorf("verifying git repository status in %s: %w", cfg.RepoRoot, err)
-	}
-
-	statusStr := strings.TrimSpace(string(gitStatusOut))
-	if statusStr != "" {
-		cleanFalse := false
-		tracker.receipt.Clean = &cleanFalse
-		return fmt.Errorf("repository %s is dirty: uncommitted changes detected:\n%s", cfg.RepoRoot, statusStr)
-	}
-	cleanTrue := true
-	tracker.receipt.Clean = &cleanTrue
-
-	headCommit, err := gitRevParseCmd(ctx, cfg.RepoRoot, "HEAD")
-	if err != nil {
-		return fmt.Errorf("resolving repository HEAD in %s: %w", cfg.RepoRoot, err)
-	}
-	headCommit = strings.ToLower(strings.TrimSpace(headCommit))
-	if len(headCommit) != 40 {
-		return fmt.Errorf("invalid HEAD commit %q in %s (expected 40-hex SHA)", headCommit, cfg.RepoRoot)
-	}
-
-	if cfg.GitCommit != "" {
-		reqCommit := strings.ToLower(strings.TrimSpace(cfg.GitCommit))
-		resolvedReq, err := gitRevParseCmd(ctx, cfg.RepoRoot, reqCommit+"^{commit}")
-		if err != nil {
-			if !strings.HasPrefix(headCommit, reqCommit) {
-				return fmt.Errorf("requested commit %q cannot be resolved: %w", cfg.GitCommit, err)
-			}
-		} else {
-			resolvedReq = strings.ToLower(strings.TrimSpace(resolvedReq))
-			if resolvedReq != headCommit {
-				return fmt.Errorf("requested commit %s does not match repository HEAD %s", resolvedReq, headCommit)
-			}
-		}
-	}
-
-	tracker.receipt.GitCommit = headCommit
-	ref := cfg.GitRef
-	if ref == "" {
-		ref = "HEAD"
-	}
-	tracker.receipt.GitRef = ref
-
-	hasher := sha256.New()
-	if err := gitArchiveCmd(ctx, cfg.RepoRoot, headCommit, hasher); err != nil {
-		return fmt.Errorf("constructing source archive for %s: %w", headCommit, err)
-	}
-	archiveSHA := hex.EncodeToString(hasher.Sum(nil))
-	tracker.receipt.SourceArchiveSHA256 = archiveSHA
-
-	if cfg.Toolchain != nil {
-		normalizedArgs := []string{"go", "build", "-tags", "vulkan", "-o", filepath.ToSlash(cfg.OutBin), cfg.OutPkg}
-		tracker.receipt.BuildArgs = normalizedArgs
-		tracker.receipt.Toolchain = &ToolchainIdentity{
-			CC:         filepath.ToSlash(cfg.Toolchain.CC),
-			CXX:        filepath.ToSlash(cfg.Toolchain.CXX),
-			AR:         filepath.ToSlash(cfg.Toolchain.AR),
-			GLSLC:      filepath.ToSlash(cfg.Toolchain.GLSLC),
-			VulkanSDK:  filepath.ToSlash(cfg.Toolchain.VulkanSDK),
-			CxxRuntime: cfg.Toolchain.CxxRuntime,
-			BuildArgs:  normalizedArgs,
-		}
-	}
-
-	return nil
-}
-
 // RunVulkan orchestrates Vulkan build tasks according to cfg.Command.
-func RunVulkan(ctx context.Context, cfg *VulkanConfig) error {
+func RunVulkan(ctx context.Context, cfg *VulkanConfig) (retErr error) {
 	if cfg == nil {
 		return fmt.Errorf("nil VulkanConfig")
 	}
@@ -425,42 +628,75 @@ func RunVulkan(ctx context.Context, cfg *VulkanConfig) error {
 	if cfg.PkgDir == "" {
 		cfg.PkgDir = filepath.Join(cfg.RepoRoot, "internal", "compute")
 	}
-	if cfg.Toolchain == nil {
-		tc, err := DiscoverToolchain()
-		if err != nil {
-			return fmt.Errorf("discovering toolchain: %w", err)
-		}
-		cfg.Toolchain = tc
-	}
 	if cfg.ReceiptPath == "" {
 		cfg.ReceiptPath = filepath.Join(cfg.RepoRoot, DefaultVulkanBuildReceiptPath)
 	} else if !filepath.IsAbs(cfg.ReceiptPath) {
 		cfg.ReceiptPath = filepath.Join(cfg.RepoRoot, cfg.ReceiptPath)
+	}
+	if cfg.CompareReceiptPath != "" && !filepath.IsAbs(cfg.CompareReceiptPath) {
+		cfg.CompareReceiptPath = filepath.Join(cfg.RepoRoot, cfg.CompareReceiptPath)
 	}
 	if cfg.Command == "binary" && !cfg.SkipSmoke {
 		cfg.Smoke = true
 	}
 
 	tracker := newReceiptTracker("vulkan", cfg.Command, cfg.ReceiptPath)
+	if cfg.Command == "binary" {
+		tracker.receipt.Schema = VulkanBuildReceiptSchema
+	}
 	cfg.Receipt = tracker.receipt
 	defer func() {
-		_ = tracker.finish(cfg.ReceiptPath)
+		if err := tracker.finish(cfg.ReceiptPath); err != nil && retErr == nil {
+			retErr = fmt.Errorf("write Vulkan build receipt: %w", err)
+		}
 	}()
-
-	switch cfg.Command {
-	case "shaders":
-		if err := tracker.recordPhase("shaders", func() error {
-			return BuildShaders(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout)
+	var source BuildSourceProvenance
+	if cfg.Command == "binary" {
+		if cfg.OutPkg == "" || cfg.OutBin == "" {
+			err := fmt.Errorf("usage: binary <pkg> <out>")
+			tracker.fail(err, 1)
+			return err
+		}
+		if err := tracker.recordPhase("source_preflight", func() error {
+			var err error
+			source, err = prepareVulkanSource(ctx, cfg.RepoRoot, cfg.GitCommit)
+			return err
 		}); err != nil {
 			return err
 		}
-		spvDir := filepath.Join(cfg.PkgDir, "spirv")
-		if DirExists(spvDir) {
-			if bundleSHA, err := ComputeSPIRVBundleSHA256(spvDir); err == nil {
-				tracker.receipt.ShaderBundleSHA256 = bundleSHA
+	}
+	if cfg.Toolchain == nil {
+		if err := tracker.recordPhase("toolchain_discovery", func() error {
+			tc, err := DiscoverToolchain()
+			if err != nil {
+				return fmt.Errorf("discovering toolchain: %w", err)
 			}
+			cfg.Toolchain = tc
+			return nil
+		}); err != nil {
+			return err
 		}
-		return nil
+	}
+	if cfg.ToolchainOverrides != nil {
+		cfg.Toolchain = mergeToolchainOverrides(cfg.Toolchain, cfg.ToolchainOverrides)
+	}
+	var toolIdentities []BuildToolIdentity
+	var toolchainSHA string
+	if cfg.Command == "binary" {
+		if err := tracker.recordPhase("toolchain_identity", func() error {
+			var err error
+			toolIdentities, toolchainSHA, err = vulkanToolchainIdentity(cfg.Toolchain)
+			return err
+		}); err != nil {
+			return err
+		}
+	}
+
+	switch cfg.Command {
+	case "shaders":
+		return tracker.recordPhase("shaders", func() error {
+			return BuildShaders(ctx, cfg.Toolchain, cfg.RepoRoot, cfg.Stdout)
+		})
 
 	case "lib":
 		if err := tracker.recordPhase("toolchain_probe", func() error {
@@ -527,18 +763,6 @@ func RunVulkan(ctx context.Context, cfg *VulkanConfig) error {
 		return nil
 
 	case "binary":
-		if cfg.OutPkg == "" || cfg.OutBin == "" {
-			err := fmt.Errorf("usage: binary <pkg> <out>")
-			tracker.receipt.Outcome = "failed"
-			tracker.receipt.ExitCode = 1
-			tracker.receipt.Error = err.Error()
-			return err
-		}
-		if err := tracker.recordPhase("source_provenance", func() error {
-			return checkSourceProvenance(ctx, cfg, tracker)
-		}); err != nil {
-			return err
-		}
 		if err := tracker.recordPhase("toolchain_probe", func() error {
 			return TestCxxToolchain(ctx, cfg.Toolchain)
 		}); err != nil {
@@ -560,9 +784,13 @@ func RunVulkan(ctx context.Context, cfg *VulkanConfig) error {
 		if len(cfg.Toolchain.VsDevEnv) > 0 {
 			env = MergeEnviron(env, cfg.Toolchain.VsDevEnv)
 		}
+		goTool := cfg.Toolchain.Go
+		if goTool == "" {
+			goTool = "go"
+		}
 		args := []string{"build", "-tags", "vulkan", "-o", cfg.OutBin, cfg.OutPkg}
 		if err := tracker.recordPhase("build_or_test", func() error {
-			return RunCmd(ctx, "go", args, cfg.RepoRoot, env, cfg.Stdout, cfg.Stderr)
+			return RunCmd(ctx, goTool, args, cfg.RepoRoot, env, cfg.Stdout, cfg.Stderr)
 		}); err != nil {
 			return err
 		}
@@ -570,32 +798,37 @@ func RunVulkan(ctx context.Context, cfg *VulkanConfig) error {
 		if !filepath.IsAbs(outBinPath) {
 			outBinPath = filepath.Join(cfg.RepoRoot, outBinPath)
 		}
-		if !FileExists(outBinPath) {
-			err := fmt.Errorf("expected binary output %s was not produced", outBinPath)
-			tracker.receipt.Outcome = "failed"
-			tracker.receipt.ExitCode = 1
-			tracker.receipt.Error = err.Error()
+		if err := tracker.recordPhase("source_revalidation", func() error {
+			revalidated, err := prepareVulkanSource(ctx, cfg.RepoRoot, cfg.GitCommit)
+			if err != nil {
+				return err
+			}
+			if revalidated != source {
+				return fmt.Errorf("Vulkan source identity changed during build")
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
-		art, err := InspectArtifact(outBinPath)
-		if err != nil {
-			tracker.receipt.Outcome = "failed"
-			tracker.receipt.ExitCode = 1
-			tracker.receipt.Error = err.Error()
-			return fmt.Errorf("inspecting output binary %s: %w", outBinPath, err)
+		if err := tracker.recordPhase("provenance", func() error {
+			artifact, provenance, err := finalizeVulkanBinary(cfg, source, outBinPath, toolIdentities, toolchainSHA)
+			if err != nil {
+				return err
+			}
+			tracker.receipt.Artifact = artifact
+			tracker.receipt.Vulkan = provenance
+			return nil
+		}); err != nil {
+			return err
 		}
-		spvDir := filepath.Join(cfg.PkgDir, "spirv")
-		bundleSHA, err := ComputeSPIRVBundleSHA256(spvDir)
-		if err != nil {
-			tracker.receipt.Outcome = "failed"
-			tracker.receipt.ExitCode = 1
-			tracker.receipt.Error = err.Error()
-			return fmt.Errorf("binding spirv bundle provenance: %w", err)
+		if err := tracker.recordPhase("reproducibility", func() error {
+			rep, err := compareVulkanBuildReceipt(cfg.CompareReceiptPath, tracker.receipt.Artifact, tracker.receipt.Vulkan)
+			tracker.receipt.Reproducibility = rep
+			return err
+		}); err != nil {
+			return err
 		}
-		tracker.receipt.Artifact = art
-		tracker.receipt.ShaderBundleSHA256 = bundleSHA
-
-		if cfg.Smoke {
+		if cfg.Smoke && FileExists(outBinPath) {
 			if err := tracker.recordSmoke(ctx, outBinPath); err != nil {
 				return err
 			}
@@ -631,9 +864,7 @@ func RunVulkan(ctx context.Context, cfg *VulkanConfig) error {
 
 	default:
 		err := fmt.Errorf("unknown subcommand: %s (use shaders|lib|build|binary|test)", cfg.Command)
-		tracker.receipt.Outcome = "failed"
-		tracker.receipt.ExitCode = 1
-		tracker.receipt.Error = err.Error()
+		tracker.fail(err, 1)
 		return err
 	}
 }

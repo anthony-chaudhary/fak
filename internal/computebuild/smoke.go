@@ -163,6 +163,22 @@ type receiptTracker struct {
 	start   time.Time
 }
 
+func (t *receiptTracker) fail(err error, exitCode int) {
+	if exitCode == 0 {
+		exitCode = 1
+	}
+	t.receipt.Outcome = "failed"
+	t.receipt.ExitCode = exitCode
+	t.receipt.Error = err.Error()
+	// These fields are admissible only after every build and provenance phase
+	// succeeds. A compiler crash must not leave a partially authoritative receipt.
+	t.receipt.Artifact = nil
+	t.receipt.Vulkan = nil
+	if t.receipt.Reproducibility != nil && t.receipt.Reproducibility.Status != "mismatch" && t.receipt.Reproducibility.Status != "invalid" {
+		t.receipt.Reproducibility = nil
+	}
+}
+
 func newReceiptTracker(backend, command, receiptPath string) *receiptTracker {
 	now := time.Now().UTC()
 	return &receiptTracker{
@@ -200,9 +216,7 @@ func (t *receiptTracker) recordPhase(name string, fn func() error) error {
 		phase.Error = err.Error()
 		t.receipt.Phases = append(t.receipt.Phases, phase)
 
-		t.receipt.Outcome = "failed"
-		t.receipt.ExitCode = errorCode
-		t.receipt.Error = err.Error()
+		t.fail(err, errorCode)
 		return err
 	}
 	phase.Outcome = "success"
@@ -227,10 +241,9 @@ func (t *receiptTracker) recordSmoke(ctx context.Context, binaryPath string) err
 	t.receipt.Phases = append(t.receipt.Phases, phase)
 
 	if smokeResult.Outcome != "success" {
-		t.receipt.Outcome = "failed"
-		t.receipt.ExitCode = smokeResult.ExitCode
-		t.receipt.Error = fmt.Sprintf("smoke execution failed: %s", smokeResult.Error)
-		return fmt.Errorf("smoke execution failed: %s", smokeResult.Error)
+		err := fmt.Errorf("smoke execution failed: %s", smokeResult.Error)
+		t.fail(err, smokeResult.ExitCode)
+		return err
 	}
 	return nil
 }
@@ -239,10 +252,6 @@ func (t *receiptTracker) finish(path string) error {
 	finish := time.Now().UTC()
 	t.receipt.FinishedAt = finish.Format(time.RFC3339Nano)
 	t.receipt.ElapsedMS = finish.Sub(t.start).Milliseconds()
-	if t.receipt.Outcome != "success" {
-		t.receipt.Artifact = nil
-		t.receipt.ShaderBundleSHA256 = ""
-	}
 	if path != "" {
 		t.receipt.ReceiptPath = path
 		return WriteReceiptAtomic(path, t.receipt)
