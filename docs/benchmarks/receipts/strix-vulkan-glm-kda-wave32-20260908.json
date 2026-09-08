@@ -1,0 +1,159 @@
+{
+  "schema": "fak.strix.vulkan-glm-kda-wave32/v1",
+  "issue": 12074,
+  "status": "PASS_KEEP_CANDIDATE",
+  "scope": "One fixed-width GLM-5.3/5.4 KDA recurrent step at production head geometry. This is an operation-level physical qualification, not a full-checkpoint GLM generation or end-to-end throughput claim.",
+  "observed_utc": "2026-09-08T08:50:39Z",
+  "source": {
+    "repository": "anthony-chaudhary/fak",
+    "commit": "23a38be9dc2d4eab945c6b1462ad2188e9f3ebe5",
+    "base_commit_used_for_physical_build": "db74f7592",
+    "blobs": {
+      "internal/compute/shaders/glm_kda_recurrent_reread.comp": "94644ae1c1efb59b28d34af95c867b259a605ae6",
+      "internal/compute/shaders/glm_kda_recurrent_wave32.comp": "473cf7994e486878a6bdbb80035eb926192f5ab1",
+      "internal/compute/vulkan_shim.cpp": "d8e401e844721c647dcec26ca6e932c612d5f976",
+      "internal/compute/vulkan_glm_kda.go": "d7edff1d4a1bcff36c32cb6b5dd017f61193b759",
+      "internal/model/vulkan_glm_kda_physical_test.go": "8d356b0dd0925082fa9faf342ef20c1560787cce"
+    },
+    "sha256": {
+      "glm_kda_recurrent_reread.comp": "a4bf111ddc43636e6502b479a4b5876edd23a2971022614d6b03888b14f8b6a4",
+      "glm_kda_recurrent_wave32.comp": "09a07da0d814edb79a14046b12b5fc24741ebf4507139e46b27bf070cf6995e0",
+      "vulkan_shim.cpp": "5b2a854c01f9ac2c8d26720e3ebdf54bfa673073a1a227c690e34b1036ab5816",
+      "vulkan_glm_kda.go": "bb75a4e62ebe1348a55a500573d18b57cbb4ea10e9aeb27e6ab0e162f8e40ecb",
+      "vulkan_glm_kda_physical_test.go": "07f02fc89d0130841f645795b94066419485097a6b287fae9c3202c1ec86af11"
+    }
+  },
+  "artifacts": {
+    "model_test_sha256": "919d35e527b90e9d82460cd9a91c65e3d9a2c8c91b1b803a4b9fea445774fad3",
+    "reread_spirv_sha256": "48a07811c5cf24e47b3c9a98462f1a4aaca29af51747e3c8b0a54809e4bbb961",
+    "wave32_spirv_sha256": "e933fbb8e88e09ba744471386703336ac6b7a3340b7d66037a199c8869fe0b1d"
+  },
+  "hardware": {
+    "backend": "vulkan",
+    "tier": "integrated:AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+    "device_id": "0x1586",
+    "driver": "radv",
+    "driver_info": "Mesa 26.2.2-arch1.1",
+    "kernel": "7.2.3-arch1-3"
+  },
+  "toolchain": {
+    "glslc": "2026.3",
+    "cxx": "g++ (GCC) 16.2.1 20260810",
+    "go": "go1.27.0-X:nodwarf5 linux/amd64",
+    "spirv_target": "vulkan1.2"
+  },
+  "geometry": {
+    "heads": 64,
+    "key_head_dim": 128,
+    "value_head_dim": 128,
+    "state_f32_elements": 1048576,
+    "state_bytes": 4194304,
+    "workgroups": [64, 1, 1],
+    "local_size": [128, 1, 1],
+    "required_subgroup_size": 32,
+    "wavefronts_per_workgroup": 4
+  },
+  "candidate": {
+    "declared_lever": "retain each invocation-owned 128-element decayed state column privately, eliminating the matched parent's intermediate state write and second global state read",
+    "fallback": false,
+    "retained": true,
+    "keep_threshold_speedup": 1.01
+  },
+  "compiler_stats": {
+    "source": "RADV_DEBUG=shaderstats plus RADV_DEBUG=shaders disassembly",
+    "reread_parent": {
+      "driver_pipeline_hash": "3196247185046425872",
+      "api_subgroup_size": 32,
+      "sgprs": 108,
+      "vgprs": 144,
+      "spilled_sgprs": 47,
+      "spilled_vgprs": 0,
+      "code_bytes": 10076,
+      "lds_bytes": 0,
+      "scratch_bytes": 0,
+      "subgroups_per_simd": 10,
+      "instructions": 1648,
+      "vmem_instructions": 514
+    },
+    "wave32_retention_candidate": {
+      "driver_pipeline_hash": "15824075259998786672",
+      "api_subgroup_size": 32,
+      "sgprs": 108,
+      "vgprs": 256,
+      "spilled_sgprs": 47,
+      "spilled_vgprs": 0,
+      "code_bytes": 7732,
+      "lds_bytes": 0,
+      "scratch_bytes": 0,
+      "subgroups_per_simd": 5,
+      "instructions": 1381,
+      "vmem_instructions": 258
+    }
+  },
+  "safety": {
+    "lease": "exclusive nonblocking read-only flock on /tmp/fak-gpu.lease",
+    "cooldown_seconds": 4,
+    "admission": {
+      "available_bytes": 27787395072,
+      "gpu_busy_percent": 0,
+      "minimum_available_bytes": 4294967296,
+      "maximum_gpu_busy_percent": 5
+    },
+    "active_operator_service_model": "Qwen3.8-27B-Q4_K_M",
+    "service_status_before": "ONLINE",
+    "service_status_after": "ONLINE",
+    "service_output_tokens_per_second_before": 0.59,
+    "service_output_tokens_per_second_after": 0.59,
+    "service_restart": false,
+    "model_reload": false
+  },
+  "command": {
+    "environment": {
+      "RADV_DEBUG": "shaders (resource attribution rerun with shaderstats)",
+      "FAK_VULKAN_SPIRV": "$PWD/build/spirv",
+      "FAK_VULKAN_REQUIRE_DEVICE": "1",
+      "FAK_VULKAN_EXPECT_DEVICE": "8060S",
+      "FAK_VULKAN_GLM_KDA_PHYSICAL": "1",
+      "FAK_VULKAN_DISPATCH_PROFILE": "1"
+    },
+    "test_regex": "^TestVulkanGLMKDAWave32PhysicalAB$"
+  },
+  "result": {
+    "exit_code": 0,
+    "executed_test": "TestVulkanGLMKDAWave32PhysicalAB",
+    "skipped": false,
+    "iterations_per_variant": 31,
+    "dispatches": 62,
+    "h2d_bytes_inside_timed_region": 0,
+    "d2h_bytes_inside_timed_region": 0,
+    "runs": [
+      {
+        "diagnostics": "RADV_DEBUG=shaders",
+        "parent_median_ns": 93274,
+        "parent_p95_ns": 94175,
+        "candidate_median_ns": 40512,
+        "candidate_p95_ns": 50432,
+        "speedup": 2.302379541864139
+      },
+      {
+        "diagnostics": "RADV_DEBUG=shaderstats",
+        "parent_median_ns": 90715,
+        "parent_p95_ns": 92315,
+        "candidate_median_ns": 37722,
+        "candidate_p95_ns": 39172,
+        "speedup": 2.4048300726366576
+      }
+    ],
+    "parent_state_max_abs_error": 1.1641532182693481e-9,
+    "parent_state_cosine": 0.9999999999999348,
+    "candidate_state_max_abs_error": 1.1641532182693481e-9,
+    "candidate_state_cosine": 0.9999999999999348,
+    "parent_output_max_abs_error": 6.984919309616089e-10,
+    "parent_output_cosine": 0.9999999999999937,
+    "candidate_output_max_abs_error": 6.984919309616089e-10,
+    "candidate_output_cosine": 0.9999999999999937,
+    "production_math_oracle": "model.StepGLM5NextKDAHead",
+    "implicit_fallback": false
+  },
+  "diagnostic_note": "An initial otherwise-green run used RADV's default Wave64 because local_size_x=128 does not imply Wave32. That run was rejected as non-qualifying. The retained implementation enables VK_EXT_subgroup_size_control and attaches requiredSubgroupSize=32 to both matched pipelines; only the corrected Wave32 runs above count."
+}
