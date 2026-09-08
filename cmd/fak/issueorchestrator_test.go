@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/issueorchestrator"
 )
 
@@ -226,6 +227,19 @@ func TestIssueOrchestratorCLISubdivideAndTriageFilters(t *testing.T) {
 }
 
 func TestIssueOrchestratorSpawnOpencodeDryRun(t *testing.T) {
+	origStamp := controllerStampFunc
+	origHead := controllerHeadRevFunc
+	defer func() {
+		controllerStampFunc = origStamp
+		controllerHeadRevFunc = origHead
+	}()
+	controllerStampFunc = func() binstamp.Stamp {
+		return binstamp.Stamp{Revision: "532688a0a04ba669a20d2c7f353150d044ae8be8", HasVCS: true}
+	}
+	controllerHeadRevFunc = func(string) string {
+		return "532688a0a04ba669a20d2c7f353150d044ae8be8"
+	}
+
 	issues := []issueorchestrator.Issue{
 		{
 			Number:          501,
@@ -331,6 +345,19 @@ func TestIssueOrchestratorOpencodeCommandsFlag(t *testing.T) {
 }
 
 func TestIssueOrchestratorSpawnOpencodeTextRender(t *testing.T) {
+	origStamp := controllerStampFunc
+	origHead := controllerHeadRevFunc
+	defer func() {
+		controllerStampFunc = origStamp
+		controllerHeadRevFunc = origHead
+	}()
+	controllerStampFunc = func() binstamp.Stamp {
+		return binstamp.Stamp{Revision: "532688a0a04ba669a20d2c7f353150d044ae8be8", HasVCS: true}
+	}
+	controllerHeadRevFunc = func(string) string {
+		return "532688a0a04ba669a20d2c7f353150d044ae8be8"
+	}
+
 	issues := []issueorchestrator.Issue{
 		{
 			Number:          701,
@@ -794,6 +821,19 @@ func TestIssueOrchestratorCLIAutoExpandDisabled(t *testing.T) {
 }
 
 func TestIssueOrchestratorSuperviseFlagCLI(t *testing.T) {
+	origStamp := controllerStampFunc
+	origHead := controllerHeadRevFunc
+	defer func() {
+		controllerStampFunc = origStamp
+		controllerHeadRevFunc = origHead
+	}()
+	controllerStampFunc = func() binstamp.Stamp {
+		return binstamp.Stamp{Revision: "532688a0a04ba669a20d2c7f353150d044ae8be8", HasVCS: true}
+	}
+	controllerHeadRevFunc = func(string) string {
+		return "532688a0a04ba669a20d2c7f353150d044ae8be8"
+	}
+
 	issues := []issueorchestrator.Issue{
 		{
 			Number:          901,
@@ -830,5 +870,359 @@ func TestIssueOrchestratorSuperviseFlagCLI(t *testing.T) {
 	sup := newWorkerSupervisorFunc(cfg)
 	if sup == nil {
 		t.Fatalf("expected initialized supervisor, got nil")
+	}
+}
+
+func TestIssueOrchestratorControllerStaleRefusal(t *testing.T) {
+	origStamp := controllerStampFunc
+	origHead := controllerHeadRevFunc
+	defer func() {
+		controllerStampFunc = origStamp
+		controllerHeadRevFunc = origHead
+	}()
+	controllerStampFunc = func() binstamp.Stamp {
+		return binstamp.Stamp{Revision: "stale-revision-1111111", HasVCS: true}
+	}
+	controllerHeadRevFunc = func(string) string {
+		return "head-revision-2222222"
+	}
+
+	issues := []issueorchestrator.Issue{
+		{
+			Number:          1001,
+			Key:             "issue-1001",
+			Title:           "Stale controller test",
+			Lane:            "issueorchestrator",
+			Paths:           []string{"internal/issueorchestrator/opencode.go"},
+			ExpectedSteps:   1,
+			Dispatchability: "dispatchable",
+		},
+	}
+	issuesPath := writeTestIssuesFile(t, issues)
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath,
+		"--spawn-opencode",
+		"--dry-run",
+	})
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code for stale controller, got 0")
+	}
+
+	errStr := stderr.String()
+	if !strings.Contains(errStr, "CONTROLLER_STALE") {
+		t.Errorf("stderr missing 'CONTROLLER_STALE': %s", errStr)
+	}
+	if !strings.Contains(errStr, "go build ./cmd/fak") {
+		t.Errorf("stderr missing rebuild instructions 'go build ./cmd/fak': %s", errStr)
+	}
+	if !strings.Contains(errStr, "stale-revision-1111111") {
+		t.Errorf("stderr missing running revision: %s", errStr)
+	}
+	if !strings.Contains(errStr, "head-revision-2222222") {
+		t.Errorf("stderr missing head revision: %s", errStr)
+	}
+}
+
+func TestIssueOrchestratorControllerAmbiguousRefusal(t *testing.T) {
+	origStamp := controllerStampFunc
+	origHead := controllerHeadRevFunc
+	defer func() {
+		controllerStampFunc = origStamp
+		controllerHeadRevFunc = origHead
+	}()
+
+	issues := []issueorchestrator.Issue{
+		{
+			Number:          1002,
+			Key:             "issue-1002",
+			Title:           "Ambiguous controller test",
+			Lane:            "issueorchestrator",
+			Paths:           []string{"internal/issueorchestrator/opencode.go"},
+			ExpectedSteps:   1,
+			Dispatchability: "dispatchable",
+		},
+	}
+	issuesPath := writeTestIssuesFile(t, issues)
+
+	t.Run("unstamped running binary", func(t *testing.T) {
+		controllerStampFunc = func() binstamp.Stamp {
+			return binstamp.Stamp{Revision: "", HasVCS: false}
+		}
+		controllerHeadRevFunc = func(string) string {
+			return "head-revision-2222222"
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := runIssueOrchestrator(&stdout, &stderr, []string{
+			"--from-issues", issuesPath,
+			"--spawn-opencode",
+			"--dry-run",
+		})
+		if code == 0 {
+			t.Fatalf("expected non-zero exit code for unstamped controller, got 0")
+		}
+
+		errStr := stderr.String()
+		if !strings.Contains(errStr, "CONTROLLER_AMBIGUOUS") {
+			t.Errorf("stderr missing 'CONTROLLER_AMBIGUOUS': %s", errStr)
+		}
+		if !strings.Contains(errStr, "go build ./cmd/fak") {
+			t.Errorf("stderr missing rebuild instructions 'go build ./cmd/fak': %s", errStr)
+		}
+	})
+
+	t.Run("unresolvable checkout HEAD", func(t *testing.T) {
+		controllerStampFunc = func() binstamp.Stamp {
+			return binstamp.Stamp{Revision: "running-rev-3333333", HasVCS: true}
+		}
+		controllerHeadRevFunc = func(string) string {
+			return ""
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := runIssueOrchestrator(&stdout, &stderr, []string{
+			"--from-issues", issuesPath,
+			"--spawn-opencode",
+			"--dry-run",
+		})
+		if code == 0 {
+			t.Fatalf("expected non-zero exit code for unresolvable HEAD, got 0")
+		}
+
+		errStr := stderr.String()
+		if !strings.Contains(errStr, "CONTROLLER_AMBIGUOUS") {
+			t.Errorf("stderr missing 'CONTROLLER_AMBIGUOUS': %s", errStr)
+		}
+		if !strings.Contains(errStr, "go build ./cmd/fak") {
+			t.Errorf("stderr missing rebuild instructions 'go build ./cmd/fak': %s", errStr)
+		}
+	})
+}
+
+func TestIssueOrchestratorSourceMatchedSpawn(t *testing.T) {
+	origStamp := controllerStampFunc
+	origHead := controllerHeadRevFunc
+	origSHA := controllerBinarySHAFunc
+	defer func() {
+		controllerStampFunc = origStamp
+		controllerHeadRevFunc = origHead
+		controllerBinarySHAFunc = origSHA
+	}()
+
+	const testRev = "feedbeef12345678abcdef0123456789abcdef01"
+	const testSHA = "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff"
+
+	controllerStampFunc = func() binstamp.Stamp {
+		return binstamp.Stamp{Revision: testRev, HasVCS: true}
+	}
+	controllerHeadRevFunc = func(string) string {
+		return testRev
+	}
+	controllerBinarySHAFunc = func() (string, error) {
+		return testSHA, nil
+	}
+
+	issues := []issueorchestrator.Issue{
+		{
+			Number:          1003,
+			Key:             "issue-1003",
+			Title:           "Source matched spawn test",
+			Lane:            "issueorchestrator",
+			Paths:           []string{"internal/issueorchestrator/opencode.go"},
+			ExpectedSteps:   1,
+			Dispatchability: "dispatchable",
+		},
+	}
+	issuesPath := writeTestIssuesFile(t, issues)
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath,
+		"--spawn-opencode",
+		"--dry-run",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("expected exit code 0 for matched controller, got %d; stderr: %s", code, stderr.String())
+	}
+
+	var receipt OpencodeSpawnReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
+		t.Fatalf("failed to decode JSON receipt: %v; raw: %s", err, stdout.String())
+	}
+
+	if receipt.ControllerRevision != testRev {
+		t.Errorf("receipt ControllerRevision = %q, want %q", receipt.ControllerRevision, testRev)
+	}
+	if receipt.ControllerBinarySHA != testSHA {
+		t.Errorf("receipt ControllerBinarySHA = %q, want %q", receipt.ControllerBinarySHA, testSHA)
+	}
+	if receipt.ControllerFreshness != "fresh" {
+		t.Errorf("receipt ControllerFreshness = %q, want 'fresh'", receipt.ControllerFreshness)
+	}
+	if receipt.AgentProfile != "worker" {
+		t.Errorf("receipt AgentProfile = %q, want 'worker'", receipt.AgentProfile)
+	}
+
+	if len(receipt.Chats) != 1 {
+		t.Fatalf("expected 1 chat in receipt, got %d", len(receipt.Chats))
+	}
+	chat := receipt.Chats[0]
+	if chat.ControllerRevision != testRev {
+		t.Errorf("chat ControllerRevision = %q, want %q", chat.ControllerRevision, testRev)
+	}
+	if chat.ControllerBinarySHA != testSHA {
+		t.Errorf("chat ControllerBinarySHA = %q, want %q", chat.ControllerBinarySHA, testSHA)
+	}
+	if chat.ControllerFreshness != "fresh" {
+		t.Errorf("chat ControllerFreshness = %q, want 'fresh'", chat.ControllerFreshness)
+	}
+	if chat.AgentProfile != "worker" {
+		t.Errorf("chat AgentProfile = %q, want 'worker'", chat.AgentProfile)
+	}
+}
+
+func TestIssueOrchestratorDefaultAgent(t *testing.T) {
+	origStamp := controllerStampFunc
+	origHead := controllerHeadRevFunc
+	defer func() {
+		controllerStampFunc = origStamp
+		controllerHeadRevFunc = origHead
+	}()
+
+	const testRev = "532688a0a04ba669a20d2c7f353150d044ae8be8"
+	controllerStampFunc = func() binstamp.Stamp {
+		return binstamp.Stamp{Revision: testRev, HasVCS: true}
+	}
+	controllerHeadRevFunc = func(string) string {
+		return testRev
+	}
+
+	issues := []issueorchestrator.Issue{
+		{
+			Number:          1004,
+			Key:             "issue-1004",
+			Title:           "Default agent test",
+			Lane:            "issueorchestrator",
+			Paths:           []string{"internal/issueorchestrator/opencode.go"},
+			ExpectedSteps:   1,
+			Dispatchability: "dispatchable",
+		},
+	}
+	issuesPath := writeTestIssuesFile(t, issues)
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath,
+		"--spawn-opencode",
+		"--dry-run",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
+	}
+
+	var receipt OpencodeSpawnReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
+		t.Fatalf("failed to decode JSON receipt: %v; raw: %s", err, stdout.String())
+	}
+
+	if receipt.AgentProfile != "worker" {
+		t.Errorf("expected default AgentProfile 'worker', got %q", receipt.AgentProfile)
+	}
+	if len(receipt.Chats) != 1 {
+		t.Fatalf("expected 1 chat, got %d", len(receipt.Chats))
+	}
+	chat := receipt.Chats[0]
+	if chat.AgentProfile != "worker" {
+		t.Errorf("expected chat AgentProfile 'worker', got %q", chat.AgentProfile)
+	}
+
+	foundAgentFlag := false
+	for i, arg := range chat.Command {
+		if arg == "--agent" {
+			foundAgentFlag = true
+			if i+1 >= len(chat.Command) || chat.Command[i+1] != "worker" {
+				t.Fatalf("expected '--agent worker', got command: %v", chat.Command)
+			}
+			break
+		}
+	}
+	if !foundAgentFlag {
+		t.Fatalf("expected command to contain '--agent worker', got: %v", chat.Command)
+	}
+}
+
+func TestIssueOrchestratorExplicitAgent(t *testing.T) {
+	origStamp := controllerStampFunc
+	origHead := controllerHeadRevFunc
+	defer func() {
+		controllerStampFunc = origStamp
+		controllerHeadRevFunc = origHead
+	}()
+
+	const testRev = "532688a0a04ba669a20d2c7f353150d044ae8be8"
+	controllerStampFunc = func() binstamp.Stamp {
+		return binstamp.Stamp{Revision: testRev, HasVCS: true}
+	}
+	controllerHeadRevFunc = func(string) string {
+		return testRev
+	}
+
+	issues := []issueorchestrator.Issue{
+		{
+			Number:          1005,
+			Key:             "issue-1005",
+			Title:           "Explicit agent test",
+			Lane:            "issueorchestrator",
+			Paths:           []string{"internal/issueorchestrator/opencode.go"},
+			ExpectedSteps:   1,
+			Dispatchability: "dispatchable",
+		},
+	}
+	issuesPath := writeTestIssuesFile(t, issues)
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath,
+		"--spawn-opencode",
+		"--dry-run",
+		"--json",
+		"--agent", "custom-profile",
+	})
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
+	}
+
+	var receipt OpencodeSpawnReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
+		t.Fatalf("failed to decode JSON receipt: %v; raw: %s", err, stdout.String())
+	}
+
+	if receipt.AgentProfile != "custom-profile" {
+		t.Errorf("expected explicit AgentProfile 'custom-profile', got %q", receipt.AgentProfile)
+	}
+	if len(receipt.Chats) != 1 {
+		t.Fatalf("expected 1 chat, got %d", len(receipt.Chats))
+	}
+	chat := receipt.Chats[0]
+	if chat.AgentProfile != "custom-profile" {
+		t.Errorf("expected chat AgentProfile 'custom-profile', got %q", chat.AgentProfile)
+	}
+
+	foundAgentFlag := false
+	for i, arg := range chat.Command {
+		if arg == "--agent" {
+			foundAgentFlag = true
+			if i+1 >= len(chat.Command) || chat.Command[i+1] != "custom-profile" {
+				t.Fatalf("expected '--agent custom-profile', got command: %v", chat.Command)
+			}
+			break
+		}
+	}
+	if !foundAgentFlag {
+		t.Fatalf("expected command to contain '--agent custom-profile', got: %v", chat.Command)
 	}
 }
