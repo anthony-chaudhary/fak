@@ -1294,6 +1294,36 @@ func (c *cudaBackend) SpecVerifyAttention(q, k, v, out *Tensor, qLen, kvLen, nH,
 	return nil
 }
 
+// TreeVerifyAttention runs one fused K<=32 branch-tree attention pass. The
+// uint32 rows are copied into the CUDA launch parameter block; the device does
+// not allocate or stream a dense KxK mask.
+func (c *cudaBackend) TreeVerifyAttention(q, k, v, out *Tensor, maskRows []uint32, qLen, kvLen, nH, nHkv, d int) error {
+	if err := validateTreeVerifyAttention(q, k, v, out, maskRows, qLen, kvLen, nH, nHkv, d); err != nil {
+		return err
+	}
+	if q.buf == nil || k.buf == nil || v.buf == nil {
+		return fmt.Errorf("compute: TreeVerifyAttention unallocated input tensor")
+	}
+
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+
+	expectedQ := qLen * nH * d
+	if out.buf == nil || out.Numel() != expectedQ {
+		devOut, _ := c.devTr([]int{qLen, nH, d}, F32)
+		*out = devOut
+	}
+	scale := float32(1 / math.Sqrt(float64(d)))
+	rc := int(C.fcuda_tree_verify_attention_f32(
+		c.cf(*q), c.cf(*k), c.cf(*v), c.cf(*out),
+		(*C.uint32_t)(unsafe.Pointer(&maskRows[0])),
+		C.int(qLen), C.int(kvLen), C.int(nH), C.int(nHkv), C.int(d), C.float(scale)))
+	if rc != 0 {
+		return fmt.Errorf("compute: fcuda_tree_verify_attention_f32 failed rc=%d", rc)
+	}
+	return nil
+}
+
 // PrefillBatch executes batched prompt prefill across a sequence panel (P x D) in 1 pass on CUDA GPU (#11036).
 func (c *cudaBackend) PrefillBatch(args PrefillBatchArgs) (PrefillBatchResult, error) {
 	P, _, err := validatePrefillBatchArgs(&args)

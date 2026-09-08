@@ -246,6 +246,57 @@ func TestCUDASpecVerifyAttentionMatchesRef(t *testing.T) {
 	}
 }
 
+// TestCUDATreeAttentionMatchesReference is the physical device parity gate for
+// arbitrary K<=32 branch masks. The mask is intentionally not lower-triangular
+// dense causality: adjacent candidates are siblings and remain isolated.
+func TestCUDATreeAttentionMatchesReference(t *testing.T) {
+	cb := cudaOrSkip(t)
+	ref := Default()
+	qLen, prefix, nH, nKV, d := 16, 64, 8, 2, 64
+	kvLen := prefix + qLen
+	parents := []int{-1, -1, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6}
+	rows := make([]uint32, qLen)
+	for q := 0; q < qLen; q++ {
+		rows[q] = uint32(1) << uint(q)
+		for p := parents[q]; p >= 0; p = parents[p] {
+			rows[q] |= uint32(1) << uint(p)
+		}
+	}
+	var seed lcg = 10899
+	qData := randVec(&seed, qLen*nH*d)
+	kData := randVec(&seed, kvLen*nKV*d)
+	vData := randVec(&seed, kvLen*nKV*d)
+	qRef := NewF32(ref, []int{qLen, nH, d}, qData)
+	kRef := NewF32(ref, []int{kvLen, nKV, d}, kData)
+	vRef := NewF32(ref, []int{kvLen, nKV, d}, vData)
+	var outRef Tensor
+	if err := ref.(TreeVerifyAttentionBackend).TreeVerifyAttention(&qRef, &kRef, &vRef, &outRef, rows, qLen, kvLen, nH, nKV, d); err != nil {
+		t.Fatal(err)
+	}
+
+	qCUDA := cb.Upload(qRef, F32)
+	kCUDA := cb.Upload(kRef, F32)
+	vCUDA := cb.Upload(vRef, F32)
+	var outCUDA Tensor
+	t.Cleanup(func() {
+		cb.Free(qCUDA)
+		cb.Free(kCUDA)
+		cb.Free(vCUDA)
+		cb.Free(outCUDA)
+	})
+	if err := cb.TreeVerifyAttention(&qCUDA, &kCUDA, &vCUDA, &outCUDA, rows, qLen, kvLen, nH, nKV, d); err != nil {
+		t.Fatal(err)
+	}
+	want := ref.Read(outRef)
+	got := cb.Read(outCUDA)
+	if similarity := cosine(want, got); similarity < 0.99999 {
+		t.Fatalf("tree CUDA/reference cosine %.8f < 0.99999 (max delta %.3g)", similarity, maxAbsDelta(want, got))
+	}
+	if delta := maxAbsDelta(want, got); delta > 2e-5 {
+		t.Fatalf("tree CUDA/reference max delta %.3g > 2e-5", delta)
+	}
+}
+
 // TestCUDASpecVerifyAttentionExtremeNegativeScores guards the online-softmax
 // empty-state sentinel. Finite scores below -1e30 must still admit the first
 // key; a finite sentinel makes every segment look empty and returns all zeros.
