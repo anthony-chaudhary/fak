@@ -2,6 +2,7 @@ package qwen38quantrun
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -40,6 +41,45 @@ func TestBuildAMDScoreboardMismatchSuppressesRatios(t *testing.T) {
 	}
 }
 
+func TestBuildAMDScoreboardRequiresBoundPacketAndTemplateIdentity(t *testing.T) {
+	t.Run("missing attestation", func(t *testing.T) {
+		in := validAMDScoreboardInput()
+		in.Candidate.PromptPacket = nil
+		in.Candidate.PromptPacketDigest = ""
+		report := BuildAMDScoreboard(in)
+		if report.Comparable || report.ReferenceOverCandidate != nil || !slices.Contains(report.Reasons, "candidate-prompt-attestation-incomplete") {
+			t.Fatalf("unattested ratio emitted: %+v", report)
+		}
+	})
+
+	t.Run("outer template identity mismatch", func(t *testing.T) {
+		in := validAMDScoreboardInput()
+		in.Reference.TemplateDigest = "7777777777777777777777777777777777777777777777777777777777777777"
+		report := BuildAMDScoreboard(in)
+		if report.Comparable || report.ReferenceOverCandidate != nil || !slices.Contains(report.Reasons, "reference-prompt-packet-identity-mismatch") {
+			t.Fatalf("misbound ratio emitted: %+v", report)
+		}
+	})
+
+	t.Run("independently bound templates differ", func(t *testing.T) {
+		in := validAMDScoreboardInput()
+		mismatched := *in.Reference.PromptPacket
+		mismatched.TemplateDigest = strings.Repeat("d", 64)
+		mismatched.PacketDigest = ""
+		mismatched, err := FreezePromptPacket(mismatched)
+		if err != nil {
+			t.Fatal(err)
+		}
+		in.Reference.TemplateDigest = mismatched.TemplateDigest
+		in.Reference.PromptPacketDigest = mismatched.PacketDigest
+		in.Reference.PromptPacket = &mismatched
+		report := BuildAMDScoreboard(in)
+		if report.Comparable || report.ReferenceOverCandidate != nil || !slices.Contains(report.Reasons, "template-digest-mismatch") {
+			t.Fatalf("mismatched-template ratio emitted: %+v", report)
+		}
+	})
+}
+
 func TestBuildAMDScoreboardRequiresFakNativeCandidate(t *testing.T) {
 	in := validAMDScoreboardInput()
 	in.Candidate.Engine = "llama.cpp"
@@ -62,11 +102,23 @@ func TestBuildAMDScoreboardRequiresMemoryAndThreeTrials(t *testing.T) {
 func validAMDScoreboardInput() AMDScoreboardInput {
 	sha := "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169"
 	prompt := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	arm := AMDArmReceipt{Name: "fak", Engine: "fak-native", Backend: "vulkan", Runtime: "native", ArtifactSHA256: sha, PromptSHA256: prompt, PromptTokenIDs: []int{1, 2, 3}, ContextTokens: 256, ContextBudgetBytes: 1 << 30, KVTypeK: "f16", KVTypeV: "f16", KVOffload: "gpu", FlashAttention: true, GPUMemoryBudget: 6 << 30, HostSpillPolicy: "bounded", Temperature: 0, PrefillTokens: 17, DecodeTokens: 4, Hardware: "AMD Radeon RX 7600 / driver 26.8.1", SoftwareRevision: "internal/compute@r212+gfc6393fe90", BuildFlags: []string{"vulkan"}, PeakRSSBytes: 20 << 30, PeakVRAMBytes: 6 << 30, ResidentModelBytes: 1 << 30}
+	packet, err := FreezePromptPacket(PromptTokenPacket{
+		Schema: PromptTokenPacketSchema, PacketID: "amd-scoreboard-test", ArtifactSHA256: sha,
+		TokenizerIdentity: "test-tokenizer", TokenizerDigest: strings.Repeat("b", 64), TemplateDigest: strings.Repeat("c", 64),
+		PromptTokenIDs: []int{1, 2, 3}, StopTokens: []string{"stop"}, StopTokenIDs: []int{4},
+		ContextBudget:      ContextBudget{ContextTokens: 256, ContextBudgetBytes: 1 << 30},
+		GenerationControls: GenerationControls{Temperature: 0, TopP: 1, MaxOutputTokens: 4, StopTokens: []string{"stop"}, StopTokenIDs: []int{4}},
+	})
+	if err != nil {
+		panic(err)
+	}
+	arm := AMDArmReceipt{Name: "fak", Engine: "fak-native", Backend: "vulkan", Runtime: "native", ArtifactSHA256: sha, PromptSHA256: prompt, PromptTokenIDs: []int{1, 2, 3}, ContextTokens: 256, ContextBudgetBytes: 1 << 30, KVTypeK: "f16", KVTypeV: "f16", KVOffload: "gpu", FlashAttention: true, GPUMemoryBudget: 6 << 30, HostSpillPolicy: "bounded", Temperature: 0, PrefillTokens: 17, DecodeTokens: 4, Hardware: "AMD Radeon RX 7600 / driver 26.8.1", SoftwareRevision: "internal/compute@r212+gfc6393fe90", BuildFlags: []string{"vulkan"}, PeakRSSBytes: 20 << 30, PeakVRAMBytes: 6 << 30, ResidentModelBytes: 1 << 30, TokenizerDigest: packet.TokenizerDigest, TemplateDigest: packet.TemplateDigest, PromptPacketDigest: packet.PacketDigest, StopTokens: slices.Clone(packet.StopTokens), StopTokenIDs: slices.Clone(packet.StopTokenIDs), TopP: 1, TopK: packet.GenerationControls.TopK, PromptPacket: &packet}
 	for i := 1; i <= 3; i++ {
 		arm.Trials = append(arm.Trials, AMDScoreboardTrial{Repetition: i, ColdSetupSeconds: 300, PrefillSeconds: 10, PrefillTokensPerSecond: .5, WarmDecodeSeconds: 60, WarmDecodeTokensPerSecond: .065, OutputTokenIDs: []int{4, 5, 6, 7}, Logits: []float64{1, 2}, H2DBytes: 1, D2HBytes: 1, D2DBytes: 1, QueueSubmissions: 1})
 	}
 	ref := arm
+	refPacket := packet
+	ref.PromptPacket = &refPacket
 	ref.PromptTokenIDs = slices.Clone(arm.PromptTokenIDs)
 	ref.Name = "llama.cpp"
 	ref.Engine = "llama.cpp"

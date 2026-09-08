@@ -14,6 +14,7 @@ func validTestPromptPacket() PromptTokenPacket {
 		ArtifactSHA256:    "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
 		TokenizerIdentity: "Qwen/Qwen2.5-Coder-7B-Instruct",
 		TokenizerDigest:   "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		TemplateDigest:    "b3b8f9a81e8bece1d26c289876989764d646230d99a64bd4d1eb46f196e5a950",
 		PromptTokenIDs:    []int{151644, 872, 198, 2610, 525, 264, 10925, 13, 151645, 198},
 		StopTokens:        []string{"<|im_end|>", "<|endoftext|>"},
 		StopTokenIDs:      []int{151645, 151643},
@@ -60,6 +61,9 @@ func TestPromptPacketSerializationAndDeserialization(t *testing.T) {
 	}
 	if imported.TokenizerDigest != frozen.TokenizerDigest {
 		t.Fatalf("imported tokenizer digest = %q, want %q", imported.TokenizerDigest, frozen.TokenizerDigest)
+	}
+	if imported.TemplateDigest != frozen.TemplateDigest {
+		t.Fatalf("imported template digest = %q, want %q", imported.TemplateDigest, frozen.TemplateDigest)
 	}
 	if !slices.Equal(imported.PromptTokenIDs, frozen.PromptTokenIDs) {
 		t.Fatalf("imported prompt token IDs mismatch: got %v, want %v", imported.PromptTokenIDs, frozen.PromptTokenIDs)
@@ -133,6 +137,12 @@ func TestPromptPacketHashingAndTamperingDetection(t *testing.T) {
 			name: "tamper tokenizer digest",
 			mutate: func(p *PromptTokenPacket) {
 				p.TokenizerDigest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			},
+		},
+		{
+			name: "tamper template digest",
+			mutate: func(p *PromptTokenPacket) {
+				p.TemplateDigest = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 			},
 		},
 		{
@@ -222,6 +232,22 @@ func TestPromptPacketFieldValidation(t *testing.T) {
 		p.TokenizerDigest = ""
 		if _, err := FreezePromptPacket(p); err == nil {
 			t.Fatal("expected error on empty tokenizer digest")
+		}
+	})
+
+	t.Run("malformed tokenizer digest", func(t *testing.T) {
+		p := valid
+		p.TokenizerDigest = "not-a-sha256"
+		if _, err := FreezePromptPacket(p); err == nil {
+			t.Fatal("expected error on malformed tokenizer digest")
+		}
+	})
+
+	t.Run("empty template digest", func(t *testing.T) {
+		p := valid
+		p.TemplateDigest = ""
+		if _, err := FreezePromptPacket(p); err == nil {
+			t.Fatal("expected error on empty template digest")
 		}
 	})
 
@@ -334,6 +360,21 @@ func TestPromptPacketArmAttestationRejection(t *testing.T) {
 		}
 	})
 
+	// A template change must never silently retain comparison eligibility even
+	// when token IDs happen to remain the same.
+	t.Run("template digest differs with identical tokens", func(t *testing.T) {
+		mismatched := orig
+		mismatched.TemplateDigest = "5555555555555555555555555555555555555555555555555555555555555555"
+		frozenMismatched, err := FreezePromptPacket(mismatched)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = ValidatePromptPacketAttestation(frozenCandidate, frozenMismatched)
+		if err == nil || !strings.Contains(err.Error(), "template digest mismatch") {
+			t.Fatalf("expected template digest mismatch, got: %v", err)
+		}
+	})
+
 	// 4. Stop tokens differ between arms
 	t.Run("stop tokens differ", func(t *testing.T) {
 		mismatched := orig
@@ -360,17 +401,33 @@ func TestPromptPacketArmReceiptAttestation(t *testing.T) {
 	input := validAMDScoreboardInput()
 	cand := input.Candidate
 	cand.TokenizerDigest = frozenPacket.TokenizerDigest
+	cand.TemplateDigest = frozenPacket.TemplateDigest
 	cand.PromptPacketDigest = frozenPacket.PacketDigest
 	cand.PromptTokenIDs = slices.Clone(frozenPacket.PromptTokenIDs)
 	cand.ArtifactSHA256 = frozenPacket.ArtifactSHA256
 	cand.PromptPacket = &frozenPacket
+	cand.StopTokens = slices.Clone(frozenPacket.StopTokens)
+	cand.StopTokenIDs = slices.Clone(frozenPacket.StopTokenIDs)
+	cand.ContextTokens = frozenPacket.ContextBudget.ContextTokens
+	cand.ContextBudgetBytes = frozenPacket.ContextBudget.ContextBudgetBytes
+	cand.TopP = frozenPacket.GenerationControls.TopP
+	cand.TopK = frozenPacket.GenerationControls.TopK
+	cand.DecodeTokens = frozenPacket.GenerationControls.MaxOutputTokens
 
 	ref := input.Reference
 	ref.TokenizerDigest = frozenPacket.TokenizerDigest
+	ref.TemplateDigest = frozenPacket.TemplateDigest
 	ref.PromptPacketDigest = frozenPacket.PacketDigest
 	ref.PromptTokenIDs = slices.Clone(frozenPacket.PromptTokenIDs)
 	ref.ArtifactSHA256 = frozenPacket.ArtifactSHA256
 	ref.PromptPacket = &frozenPacket
+	ref.StopTokens = slices.Clone(frozenPacket.StopTokens)
+	ref.StopTokenIDs = slices.Clone(frozenPacket.StopTokenIDs)
+	ref.ContextTokens = frozenPacket.ContextBudget.ContextTokens
+	ref.ContextBudgetBytes = frozenPacket.ContextBudget.ContextBudgetBytes
+	ref.TopP = frozenPacket.GenerationControls.TopP
+	ref.TopK = frozenPacket.GenerationControls.TopK
+	ref.DecodeTokens = frozenPacket.GenerationControls.MaxOutputTokens
 
 	// Matched receipts pass
 	if err := ValidateArmPromptPacketAttestation(cand, ref); err != nil {
@@ -403,4 +460,34 @@ func TestPromptPacketArmReceiptAttestation(t *testing.T) {
 			t.Fatal("expected error on prompt packet digest mismatch")
 		}
 	})
+
+	t.Run("outer receipt identity cannot disagree with embedded packet", func(t *testing.T) {
+		badRef := ref
+		badRef.TemplateDigest = "6666666666666666666666666666666666666666666666666666666666666666"
+		if err := ValidateArmPromptPacketAttestation(cand, badRef); err == nil || !strings.Contains(err.Error(), "does not bind embedded packet") {
+			t.Fatalf("expected outer receipt binding error, got %v", err)
+		}
+	})
+}
+
+func TestLegacyPromptPacketIsReadableButNotComparisonEligible(t *testing.T) {
+	legacy := validTestPromptPacket()
+	legacy.Schema = promptTokenPacketLegacySchema
+	legacy.TemplateDigest = ""
+	digest, err := ComputePromptPacketDigest(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy.PacketDigest = digest
+	raw, err := ExportPromptPacket(legacy)
+	if err != nil {
+		t.Fatalf("historical packet should remain exportable: %v", err)
+	}
+	imported, err := ImportPromptPacket(raw)
+	if err != nil {
+		t.Fatalf("historical packet should remain readable: %v", err)
+	}
+	if err := ValidatePromptPacketAttestation(imported, imported); err == nil || !strings.Contains(err.Error(), "not eligible for comparison credit") {
+		t.Fatalf("historical packet must be non-credit, got %v", err)
+	}
 }
