@@ -156,7 +156,7 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		}
 		if *workerEffort != "" {
 			effort, valid := orchestrationWorkerEffort(*workerEffort)
-			if !valid {
+			if !valid || effort == "" {
 				fmt.Fprintf(stderr, "fak orchestration plan: invalid --worker-effort %q\n", *workerEffort)
 				return 2
 			}

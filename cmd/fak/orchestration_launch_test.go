@@ -275,6 +275,22 @@ func TestOrchestrationWorkerControlPrecedenceIsResolvedBeforeLaunch(t *testing.T
 	if len(requests) != beforeInvalid {
 		t.Fatalf("invalid environment effort launched %d worker(s)", len(requests)-beforeInvalid)
 	}
+
+	t.Setenv("FAK_ORCHESTRATION_WORKER_MODEL", "")
+	t.Setenv("FAK_ORCHESTRATION_WORKER_EFFORT", "   ")
+	beforeBlankCLI := len(requests)
+	stdout.Reset()
+	stderr.Reset()
+	code = runOrchestration(&stdout, &stderr, []string{
+		"plan", "--profile", "auto", "--task", fixture, "--codex-home", home, "--launch", "--json",
+		"--worker-effort", "   ",
+	})
+	if code != 2 || !strings.Contains(stderr.String(), "invalid --worker-effort") {
+		t.Fatalf("blank CLI effort code=%d stderr=%s", code, stderr.String())
+	}
+	if len(requests) != beforeBlankCLI {
+		t.Fatalf("blank CLI effort launched %d worker(s)", len(requests)-beforeBlankCLI)
+	}
 }
 
 func writeFormalWorkerControlFixture(t *testing.T, pins string) string {
