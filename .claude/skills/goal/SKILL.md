@@ -25,7 +25,7 @@ It unifies the best patterns from existing open-source agent systems:
 2. **State on Disk, Not Ephemeral Memory**: Progress, plans, and scratchpad live in `_scratch/goals/GOAL.md` (or `_scratch/goals/GOAL-<slug>.md`) on disk. Goal specs are noisy, disposable scratchpad memory for surviving context compaction; they are not coordination artifacts. First-class coordination occurs via lane leases (`dos arbitrate` / `internal/leaseref`), claims (`CLAIMS.md`), issue comments, and commit trailers.
 3. **External Witness Exit-Gate**: Model proposes, test disposes. The agent never grades its own work. A goal is satisfied only when a deterministic external command (test suite, buildcheck, validator) exits 0.
 4. **Atomic S0/S1 Steps (Divide & Conquer, Subdivide, and Scope Abstention)**: Divide and conquer substantive or multi-concern objectives into atomic leaves (1–3 files touched per step). When tasks have independent components, delegate to isolated subagents or workers (`task`: worker, researcher, explore, cross-validator) to prevent coordinator context pollution. Parallel subagent cohorts (4–8 parallel subagents across independent packages, tests, or diagnostic probes) are authorized while maintaining the single active goal milestone in `todowrite`. Top-level coordinators fan out subagents, while leaf workers execute directly without nested recursion (#12028). Keep exactly one step `in_progress` in `todowrite`. When encountering high-difficulty boundaries (e.g. frozen ABI, kernel SIMD), scope abstention strictly to the bounded aspect: emit a structured `ABSTAIN` record for that boundary while advancing all independent, safe, solvable sub-components (reproduction tests, diagnostics, disjoint packages).
-5. **Failure Memory Scratchpad & Persistence**: Genuine guard refusals carrying a closed reason token or unexpected process crashes are recorded in `# Scratch / last-refusal` in `_scratch/goals/GOAL.md` (or `_scratch/goals/GOAL-<slug>.md`). Routine CLI return codes from read-only commands (such as `grep` returning 1 on no match, or `git diff --quiet` detecting changes) are normal tool execution results and must not be logged as failures in `# Scratch / last-refusal`. A refusal or tool crash is diagnostic feedback, not a session abort. Query `fak recover <TOKEN>` for structured recovery, adapt the execution path or decompose the step, and maintain momentum on the pinned objective without repeating identical failing calls.
+5. **Failure Memory Scratchpad & Persistence (Move Forward Over Conclusions)**: Genuine guard refusals carrying a closed reason token or unexpected process crashes are recorded in `# Scratch / last-refusal` in `_scratch/goals/GOAL.md` (or `_scratch/goals/GOAL-<slug>.md`). Routine CLI return codes from read-only commands (such as `grep` returning 1 on no match, or `git diff --quiet` detecting changes) are normal tool execution results and must not be logged as failures in `# Scratch / last-refusal`. A refusal or tool crash is diagnostic feedback, not a session abort. Query `fak recover <TOKEN>` for structured recovery, adapt the execution path or decompose the step, and maintain momentum on the pinned objective without repeating identical failing calls. Focus on forward momentum over terminal conclusions: rather than defeatist conclusions when a step underperforms (e.g. rather *"the next step to get better performance is X"* than *"X didn't work ... therefore we suck..."*), treat unmet targets as empirical data that eliminates a variable, and formulate the concrete next checkable step.
 
 ---
 
@@ -133,10 +133,10 @@ python tools/<validator>.py --check
    fak sync push
    # (or combine commit and push: `fak commit --path <p1> ... -m "..." --push`)
    ```
-4. Emit a concise, verdict-first completion report (<3 lines):
+4. Emit a concise, verdict-first completion report (<3 lines), oriented toward forward movement:
    - **Line 1**: Goal status and witness confirmation.
    - **Line 2**: Deliverables and touched paths.
-   - **Line 3**: Checkable verification command.
+   - **Line 3**: Checkable verification command or next forward step.
 
 ---
 
