@@ -15,10 +15,47 @@ OpenCode auto-loads the repo's [`AGENTS.md`](https://github.com/anthony-chaudhar
 ## Integration paths
 
 - **Dedicated launcher (`fak opencode`):** one-command launcher wrapping OpenCode with kernel adjudication, prompt-cache preservation, and live split view.
+- **One-touch Mac Quickstart (`fak serve` / `fak opencode`):** Apple Silicon Metal GPU acceleration and default in-kernel Qwen GGUF model active by default.
 - **`fak manage` wrapper:** launch `fak manage opencode` or `fak manage -- opencode`.
 - **Dogfood scripts:** `scripts/dogfood-opencode.ps1` (Windows) and `scripts/dogfood-opencode.sh` (Linux/macOS).
 - **MCP:** add `fak` as a local MCP server in OpenCode's config (`opencode.json`).
 - **OpenAI-compatible gateway:** point an OpenCode provider at `fak serve`.
+
+## Mac First-Time Run: One-Touch Quickstart (Apple Silicon & Metal by Default)
+
+On Apple Silicon Macs (M1/M2/M3/M4), `fak` assumes **Metal GPU acceleration by default** and **`--gguf default` (Qwen3.8 27B/7B)** so the first run is truly one-touch with zero manual configuration:
+
+### 1. The Zero-Config Run (One Command)
+```bash
+fak opencode
+```
+What happens on a Mac:
+1. `fak opencode` checks if `fak serve` (or Ollama / LM Studio) is already running on loopback and connects automatically if present.
+2. If no server is running and no `OPENAI_API_KEY` is exported, it automatically boots the default GGUF model in-kernel using Apple Silicon Metal GPU acceleration, binds the ephemeral gateway, and launches OpenCode in one touch.
+
+### 2. The Two-Terminal Serving Flow
+If you prefer running a dedicated model server in one terminal and OpenCode in another:
+
+* **Terminal 1 — Start the Gateway:**
+  ```bash
+  fak serve --opencode
+  ```
+  *(On Apple Silicon Mac, `--opencode` automatically selects Metal GPU acceleration, sets `--gguf default`, and writes `opencode.json` with the `fak` provider).*
+
+* **Terminal 2 — Run OpenCode:**
+  ```bash
+  fak opencode
+  # or run opencode directly: opencode
+  ```
+
+### 3. OpenCode Config Helper
+```bash
+# Preview the opencode.json snippet:
+fak opencode config
+
+# Write or update opencode.json in the current directory:
+fak opencode config --write
+```
 
 ## Prerequisites
 
