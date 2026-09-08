@@ -239,6 +239,10 @@ func (t *receiptTracker) finish(path string) error {
 	finish := time.Now().UTC()
 	t.receipt.FinishedAt = finish.Format(time.RFC3339Nano)
 	t.receipt.ElapsedMS = finish.Sub(t.start).Milliseconds()
+	if t.receipt.Outcome != "success" {
+		t.receipt.Artifact = nil
+		t.receipt.ShaderBundleSHA256 = ""
+	}
 	if path != "" {
 		t.receipt.ReceiptPath = path
 		return WriteReceiptAtomic(path, t.receipt)

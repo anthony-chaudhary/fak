@@ -3,6 +3,9 @@ package devcmd
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -97,5 +100,149 @@ func TestVulkanBuildBinaryPositionalArgs(t *testing.T) {
 	}
 	if res.Command != "binary" {
 		t.Fatalf("expected command binary, got %s", res.Command)
+	}
+}
+
+func TestVulkanBuildProvenanceFlags(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	// Test passing -commit and -ref with invalid repo root in json mode
+	code := RunBuildVulkan(&stdout, &stderr, []string{
+		"binary",
+		"-json",
+		"-commit", "1234567890abcdef1234567890abcdef12345678",
+		"-ref", "refs/heads/main",
+		"-smoke=false",
+		"-repo-root", "/nonexistent/repo",
+		"-out-pkg", "./cmd/fake",
+		"-out-bin", "bin/fake.exe",
+	})
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+
+	var res VulkanBuildResult
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatalf("failed to decode JSON: %v", err)
+	}
+	if res.Command != "binary" {
+		t.Errorf("expected command binary, got %s", res.Command)
+	}
+	if res.Success {
+		t.Errorf("expected failure on nonexistent repo")
+	}
+}
+
+func TestVulkanBuildBinaryDirtyRefusalCLI(t *testing.T) {
+	// Create synthetic git repo
+	dir := t.TempDir()
+
+	git := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v (%s)", args, err, string(out))
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	git("init")
+	git("config", "user.name", "fak-test")
+	git("config", "user.email", "fak-test@example.com")
+	git("config", "commit.gpgsign", "false")
+
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module fak-cli-test\n\ngo 1.26\n"), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# CLI Test\n"), 0644); err != nil {
+		t.Fatalf("write README.md: %v", err)
+	}
+	git("add", "go.mod", "README.md")
+	git("commit", "-m", "init")
+
+	// Make dirty
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Dirty modification\n"), 0644); err != nil {
+		t.Fatalf("dirty write: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := RunBuildVulkan(&stdout, &stderr, []string{
+		"binary",
+		"-json",
+		"-repo-root", dir,
+		"-out-pkg", "./cmd/fake",
+		"-out-bin", filepath.Join(dir, "bin", "fake.exe"),
+		"-smoke=false",
+	})
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1 for dirty repo, got %d", code)
+	}
+
+	var res VulkanBuildResult
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatalf("failed decoding JSON output: %v\nOutput: %s", err, stdout.String())
+	}
+	if res.Success {
+		t.Errorf("expected res.Success=false, got true")
+	}
+	if !strings.Contains(res.Error, "dirty") && !strings.Contains(res.Error, "uncommitted") {
+		t.Errorf("expected dirty error message, got %q", res.Error)
+	}
+}
+
+func TestVulkanBuildBinaryCommitMismatchProvenanceCLI(t *testing.T) {
+	dir := t.TempDir()
+
+	git := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v (%s)", args, err, string(out))
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	git("init")
+	git("config", "user.name", "fak-test")
+	git("config", "user.email", "fak-test@example.com")
+	git("config", "commit.gpgsign", "false")
+
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module fak-cli-test\n\ngo 1.26\n"), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# CLI Test\n"), 0644); err != nil {
+		t.Fatalf("write README.md: %v", err)
+	}
+	git("add", "go.mod", "README.md")
+	git("commit", "-m", "init")
+
+	var stdout, stderr bytes.Buffer
+	code := RunBuildVulkan(&stdout, &stderr, []string{
+		"binary",
+		"-json",
+		"-repo-root", dir,
+		"-commit", "0000000000000000000000000000000000000000",
+		"-out-pkg", "./cmd/fake",
+		"-out-bin", filepath.Join(dir, "bin", "fake.exe"),
+		"-smoke=false",
+	})
+
+	if code != 1 {
+		t.Fatalf("expected exit code 1 for commit mismatch, got %d", code)
+	}
+
+	var res VulkanBuildResult
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatalf("failed decoding JSON output: %v\nOutput: %s", err, stdout.String())
+	}
+	if res.Success {
+		t.Errorf("expected res.Success=false, got true")
+	}
+	if !strings.Contains(res.Error, "commit") {
+		t.Errorf("expected commit mismatch error message, got %q", res.Error)
 	}
 }
