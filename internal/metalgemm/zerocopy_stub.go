@@ -18,6 +18,13 @@ var (
 // ZeroCopyBuffer represents an inert buffer handle in stub builds.
 type ZeroCopyBuffer struct{}
 
+// Q4KWeight is an inert Q4_K weight handle in stub builds. It preserves the
+// public shape of the Metal-backed handle for portable callers while no Metal
+// resource is present.
+type Q4KWeight struct {
+	Out, In int
+}
+
 // NewZeroCopyBuffer is a stub returning ErrMetalUnavailable.
 func NewZeroCopyBuffer(span []byte) (*ZeroCopyBuffer, error) {
 	return nil, ErrMetalUnavailable
