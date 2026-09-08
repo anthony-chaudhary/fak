@@ -109,7 +109,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_Q4K_MATMUL, K_Q2K_MATMUL, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q2K_MATMUL, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -133,6 +133,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_ARGMAX: case K_ARGMAX_PAIRS:
         return g_dp.otherArgmax;
     case K_QWEN35_GDN_CONV: case K_QWEN35_GDN_RECURRENT:
+    case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
     case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q2K_MATMUL: case K_COUNT:
         return g_dp.otherUnclassified;
@@ -176,6 +177,9 @@ static inline void dpOneShot(std::atomic<uint64_t>& family) {
 
 // Q8 fast-path availability (set in fvk_init from the device's 8-bit-storage + int8 features).
 int g_have_q8 = 0;
+// Fixed-size GLM KDA kernels require an explicitly requested 32-lane subgroup.
+// A local size of 128 alone is not a Wave32 contract: RADV may otherwise choose Wave64.
+int g_have_glm_kda_wave32 = 0;
 
 VkDescriptorPool g_descpool = VK_NULL_HANDLE;
 
@@ -616,7 +620,7 @@ std::vector<char> readFile(const std::string& path) {
     return data;
 }
 
-bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsize) {
+bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsize, uint32_t subgroupSize = 0) {
     std::vector<char> code = readFile(spvPath);
     if (code.empty()) return false;
     VkShaderModuleCreateInfo smi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
@@ -647,6 +651,12 @@ bool buildKernel(Kernel& k, const std::string& spvPath, int nbuf, uint32_t pcsiz
     stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     stage.module = k.shader;
     stage.pName = "main";
+    VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT requiredSubgroup{
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT};
+    if (subgroupSize != 0) {
+        requiredSubgroup.requiredSubgroupSize = subgroupSize;
+        stage.pNext = &requiredSubgroup;
+    }
     VkComputePipelineCreateInfo cpi{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
     cpi.stage = stage;
     cpi.layout = k.layout;
@@ -789,6 +799,9 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     vkGetPhysicalDeviceProperties(g_phys, &props);
     VkPhysicalDeviceMaintenance3Properties maint3{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES};
+    VkPhysicalDeviceSubgroupSizeControlPropertiesEXT subgroupProps{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES_EXT};
+    maint3.pNext = &subgroupProps;
     VkPhysicalDeviceProperties2 props2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
     props2.pNext = &maint3;
     vkGetPhysicalDeviceProperties2(g_phys, &props2);
@@ -832,13 +845,28 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // backend stays f32-only — Q8 is an optional accelerator, never a correctness dependency.
     VkPhysicalDevice8BitStorageFeatures f8{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES};
     VkPhysicalDeviceShaderFloat16Int8Features fi8{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
+    VkPhysicalDeviceSubgroupSizeControlFeaturesEXT subgroupFeatures{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES_EXT};
     f8.pNext = &fi8;
+    fi8.pNext = &subgroupFeatures;
     VkPhysicalDeviceFeatures2 feat2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     feat2.pNext = &f8;
     vkGetPhysicalDeviceFeatures2(g_phys, &feat2);
     g_have_q8 = (f8.storageBuffer8BitAccess && fi8.shaderInt8) ? 1 : 0;
 
     std::vector<const char*> enabledDeviceExts;
+#ifdef VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME
+    bool haveSubgroupSizeControlExt = deviceExtensionSupported(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
+    g_have_glm_kda_wave32 =
+        haveSubgroupSizeControlExt && subgroupFeatures.subgroupSizeControl &&
+        subgroupProps.minSubgroupSize <= 32 && subgroupProps.maxSubgroupSize >= 32 &&
+        (subgroupProps.requiredSubgroupSizeStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0;
+    if (g_have_glm_kda_wave32) {
+        enabledDeviceExts.push_back(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
+    }
+#else
+    g_have_glm_kda_wave32 = 0;
+#endif
 #ifdef VK_EXT_MEMORY_BUDGET_EXTENSION_NAME
     g_haveMemoryBudget = deviceExtensionSupported(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
     if (g_haveMemoryBudget) {
@@ -855,18 +883,32 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     dci.ppEnabledExtensionNames = enabledDeviceExts.empty() ? nullptr : enabledDeviceExts.data();
     VkPhysicalDevice8BitStorageFeatures e8{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES};
     VkPhysicalDeviceShaderFloat16Int8Features ei8{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
+    VkPhysicalDeviceSubgroupSizeControlFeaturesEXT esubgroup{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES_EXT};
     if (g_have_q8) {
         e8.storageBuffer8BitAccess = VK_TRUE;
         ei8.shaderInt8 = VK_TRUE;
         e8.pNext = &ei8;
         dci.pNext = &e8;
     }
+    if (g_have_glm_kda_wave32) {
+        esubgroup.subgroupSizeControl = VK_TRUE;
+        if (g_have_q8) {
+            ei8.pNext = &esubgroup;
+        } else {
+            dci.pNext = &esubgroup;
+        }
+    }
     VkResult dr = vkCreateDevice(g_phys, &dci, nullptr, &g_dev);
     if (dr != VK_SUCCESS && g_haveMemoryBudget) {
         enabledDeviceExts.clear();
         g_haveMemoryBudget = false;
+        if (g_have_glm_kda_wave32) {
+            enabledDeviceExts.push_back(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
+        }
         dci.enabledExtensionCount = 0;
-        dci.ppEnabledExtensionNames = nullptr;
+        dci.enabledExtensionCount = (uint32_t)enabledDeviceExts.size();
+        dci.ppEnabledExtensionNames = enabledDeviceExts.empty() ? nullptr : enabledDeviceExts.data();
         dr = vkCreateDevice(g_phys, &dci, nullptr, &g_dev);
     }
     if (dr != VK_SUCCESS) return 4;
@@ -917,6 +959,10 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_ARGMAX_PAIRS], P("argmax_pairs.spv"), 3, sizeof(int));
     ok &= buildKernel(g_kern[K_QWEN35_GDN_CONV], P("qwen35_gdn_conv.spv"), 4, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_QWEN35_GDN_RECURRENT], P("qwen35_gdn_recurrent.spv"), 9, 6 * sizeof(int) + sizeof(float));
+    if (g_have_glm_kda_wave32) {
+        ok &= buildKernel(g_kern[K_GLM_KDA_REREAD], P("glm_kda_recurrent_reread.spv"), 7, sizeof(int), 32);
+        ok &= buildKernel(g_kern[K_GLM_KDA_WAVE32], P("glm_kda_recurrent_wave32.spv"), 7, sizeof(int), 32);
+    }
     ok &= buildKernel(g_kern[K_QWEN35_SPLIT_QG_PANEL], P("qwen35_split_qg_panel.spv"), 3, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_QWEN35_PARTIAL_ROPE_PANEL], P("qwen35_partial_rope_panel.spv"), 4, 6 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_QWEN35_CAUSAL_ATTENTION_PANEL], P("qwen35_causal_attention_panel.spv"), 4, 5 * sizeof(int) + sizeof(float));
@@ -1057,6 +1103,7 @@ uint64_t fvk_d2h_bytes(void) { return g_d2hBytes.load(std::memory_order_relaxed)
 void fvk_sync(void) { if (g_dev) vkDeviceWaitIdle(g_dev); }
 
 int fvk_have_q8(void) { return g_have_q8; }
+int fvk_have_glm_kda_wave32(void) { return g_have_glm_kda_wave32; }
 uint64_t fvk_max_buffer_bytes(void) { return (uint64_t)g_maxBufferBytes; }
 uint64_t fvk_max_storage_buffer_range(void) { return (uint64_t)g_maxStorageBufferRange; }
 uint64_t fvk_max_memory_allocation_size(void) { return (uint64_t)g_maxMemoryAllocationSize; }
@@ -1412,6 +1459,36 @@ extern "C" int fvk_qwen35_gdn_preprojected_f32(
     Buffer* rbufs[9] = {conv_out, B((void*)z), B((void*)beta), B((void*)alpha), B((void*)a_log), B((void*)dt_bias), B((void*)norm), B(recurrent_state), B(core)};
     dispatch(g_kern[K_QWEN35_GDN_RECURRENT], rbufs, &rpc, sizeof(rpc), (uint32_t)n_v);
     return 0;
+}
+
+extern "C" int fvk_glm_kda_step_f32(
+    void* state, const void* q, const void* k, const void* value,
+    const void* alpha, const void* beta, void* output, int heads, int variant) {
+    static constexpr uint64_t D = 128;
+    if (!g_ready) return 1;
+    if (!g_have_glm_kda_wave32) return 3;
+    if (g_submissionStatus != VK_SUCCESS) return (int)g_submissionStatus;
+    if (heads <= 0 || (variant != 0 && variant != 1)) return 2;
+    const void* ptrs[] = {state, q, k, value, alpha, beta, output};
+    for (const void* ptr : ptrs) if (!ptr) return 2;
+    for (size_t i = 0; i < 7; ++i)
+        for (size_t j = i + 1; j < 7; ++j)
+            if (ptrs[i] == ptrs[j]) return 2;
+    uint64_t h = (uint64_t)heads;
+    if (h > UINT64_MAX / (D * D * sizeof(float))) return 2;
+    uint64_t stateBytes = h * D * D * sizeof(float);
+    uint64_t vectorBytes = h * D * sizeof(float);
+    uint64_t scalarBytes = h * sizeof(float);
+    if (stateBytes > B(state)->bytes || vectorBytes > B((void*)q)->bytes ||
+        vectorBytes > B((void*)k)->bytes || vectorBytes > B((void*)value)->bytes ||
+        scalarBytes > B((void*)alpha)->bytes || scalarBytes > B((void*)beta)->bytes ||
+        vectorBytes > B(output)->bytes) return 2;
+    struct { int heads; } pc{heads};
+    Buffer* bufs[7] = {B(state), B((void*)q), B((void*)k), B((void*)value),
+                       B((void*)alpha), B((void*)beta), B(output)};
+    KId id = variant == 0 ? K_GLM_KDA_REREAD : K_GLM_KDA_WAVE32;
+    dispatch(g_kern[id], bufs, &pc, sizeof(pc), (uint32_t)heads);
+    return (int)g_submissionStatus;
 }
 // Panel ABI uses signed GLSL indices; validate products before narrowing.
 static bool panelFits(const void* ptr, int tokens, int heads, int dim) {

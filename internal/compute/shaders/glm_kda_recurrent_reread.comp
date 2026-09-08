@@ -1,0 +1,43 @@
+#version 450
+
+// Matched parent for the GLM KDA Wave32 retention candidate. One workgroup
+// owns one head and invocation j owns state column j. The first pass writes the
+// decayed column to device memory; the second pass deliberately rereads it.
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set=0, binding=0) buffer State { float state[]; };
+layout(std430, set=0, binding=1) readonly buffer Q { float q[]; };
+layout(std430, set=0, binding=2) readonly buffer K { float k[]; };
+layout(std430, set=0, binding=3) readonly buffer Value { float value[]; };
+layout(std430, set=0, binding=4) readonly buffer Alpha { float alpha[]; };
+layout(std430, set=0, binding=5) readonly buffer Beta { float beta[]; };
+layout(std430, set=0, binding=6) writeonly buffer Output { float outputData[]; };
+
+const int D = 128;
+
+void main() {
+    int h = int(gl_WorkGroupID.x);
+    int j = int(gl_LocalInvocationID.x);
+    int vectorBase = h * D;
+    int stateBase = h * D * D;
+    float a = alpha[h];
+    float vHat = 0.0;
+
+    for (int i = 0; i < D; ++i) {
+        int si = stateBase + i * D + j;
+        float decayed = a * state[si];
+        state[si] = decayed;
+        vHat += decayed * k[vectorBase + i];
+    }
+
+    float delta = value[vectorBase + j] - vHat;
+    float b = beta[h];
+    float acc = 0.0;
+    for (int i = 0; i < D; ++i) {
+        int si = stateBase + i * D + j;
+        float next = state[si] + (b * k[vectorBase + i]) * delta;
+        state[si] = next;
+        acc += next * q[vectorBase + i];
+    }
+    outputData[vectorBase + j] = acc;
+}

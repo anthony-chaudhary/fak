@@ -71,6 +71,7 @@ int fvk_matmul_argmax_f32(const void *dW, const void *dX, int out, int in);
  * features the Q8 GEMM shader needs (queried at init); 0 otherwise. The Go side falls back to
  * f32 weights when this is 0, so Q8 is an optional fast path, never a correctness dependency. */
 int fvk_have_q8(void);
+int fvk_have_glm_kda_wave32(void);
 /* Per-resource storage-buffer cap discovered at init. fvk_max_buffer_bytes is the effective
  * single-buffer ceiling fak must respect: min(maxStorageBufferRange, maxMemoryAllocationSize)
  * when both are known, otherwise the known cap, or 0 when unknown. */
@@ -203,6 +204,9 @@ int fvk_qwen35_gdn_preprojected_f32(
     const void* conv1d, const void* a_log, const void* dt_bias, const void* norm,
     void* conv_state, void* recurrent_state, void* core,
     int tokens, int conv_dim, int n_k, int n_v, int k_hd, int v_hd, int kernel, float eps);
+int fvk_glm_kda_step_f32(
+    void* state, const void* q, const void* k, const void* value,
+    const void* alpha, const void* beta, void* output, int heads, int variant);
 void fvk_q4k_matmul_f32(const void *dQ4K, const void *dX, void *dY, int out, int in, int P);
 void fvk_q2k_matmul_f32(const void *dQ2K, const void *dX, void *dY, int out, int in, int P);
 typedef struct fvk_dispatch_profile {

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 )
 
-// VulkanShaders contains the 34 GLSL compute shaders compiled for the Vulkan backend,
+// VulkanShaders contains the GLSL compute shaders compiled for the Vulkan backend,
 // exactly matching internal/compute/build_vulkan.ps1.
 var VulkanShaders = []string{
 	"matmul",
@@ -45,6 +45,8 @@ var VulkanShaders = []string{
 	"qwen35_causal_attention_panel",
 	"sigmoid_mul",
 	"q8_matmul_decode",
+	"glm_kda_recurrent_reread",
+	"glm_kda_recurrent_wave32",
 	"flash_attn_dequant",
 	"qwen35_gdn_tiled_transpose",
 	"coopmat_wave32_wmma",

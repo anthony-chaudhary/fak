@@ -1,0 +1,43 @@
+#version 450
+
+// GLM-5.3/5.4 fixed-D KDA recurrence for gfx1151's Wave32 execution mode.
+// One 128-invocation workgroup (four Wave32 wavefronts on RADV gfx1151) owns a
+// head. Invocation j owns every state[h,i,j] cell, so no barrier is required.
+// The candidate removes the parent's second global state read and intermediate
+// global write by retaining the decayed column in invocation-private storage.
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set=0, binding=0) buffer State { float state[]; };
+layout(std430, set=0, binding=1) readonly buffer Q { float q[]; };
+layout(std430, set=0, binding=2) readonly buffer K { float k[]; };
+layout(std430, set=0, binding=3) readonly buffer Value { float value[]; };
+layout(std430, set=0, binding=4) readonly buffer Alpha { float alpha[]; };
+layout(std430, set=0, binding=5) readonly buffer Beta { float beta[]; };
+layout(std430, set=0, binding=6) writeonly buffer Output { float outputData[]; };
+
+const int D = 128;
+
+void main() {
+    int h = int(gl_WorkGroupID.x);
+    int j = int(gl_LocalInvocationID.x);
+    int vectorBase = h * D;
+    int stateBase = h * D * D;
+    float a = alpha[h];
+    float decayed[D];
+    float vHat = 0.0;
+
+    for (int i = 0; i < D; ++i) {
+        decayed[i] = a * state[stateBase + i * D + j];
+        vHat += decayed[i] * k[vectorBase + i];
+    }
+
+    float delta = value[vectorBase + j] - vHat;
+    float b = beta[h];
+    float acc = 0.0;
+    for (int i = 0; i < D; ++i) {
+        float next = decayed[i] + (b * k[vectorBase + i]) * delta;
+        state[stateBase + i * D + j] = next;
+        acc += next * q[vectorBase + i];
+    }
+    outputData[vectorBase + j] = acc;
+}
