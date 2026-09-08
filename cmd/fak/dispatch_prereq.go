@@ -2,11 +2,13 @@ package main
 
 // dispatch_prereq.go -- the dependency soft-hold seam. Like the known-bad hold (dispatch_knownbad.go)
 // it is a runtime overlay the dispatch verbs apply to the built RouterPayload, NOT part of the
-// (lease-held) routing fold. It reads the "depends-on:/blocked-by: #N" edges the router already
-// parsed onto each IssueRoute.BlockedBy and, reusing the tested internal/dispatchorder engine, holds
-// back any dispatchable leaf whose prerequisite is still an OPEN candidate this tick. A held leaf is
-// removed from its lane (so PickTargetIssue cannot select it) and surfaced in the skipped set with
-// reason BLOCKED_BY_OPEN_PREREQ -- legible, not silently dropped.
+// (lease-held) routing fold. It reads the prerequisite edges the router already parsed onto each
+// IssueRoute.BlockedBy (where only 'Start blocked by:' and legacy hard holds are evaluated for
+// BLOCKED_BY_OPEN_PREREQ; advisory 'Coordinates with:' and promotion 'Promotion requires:' never
+// gate pickup) and, reusing the tested internal/dispatchorder engine, holds back any dispatchable
+// leaf whose prerequisite is still an OPEN candidate this tick. A held leaf is removed from its
+// lane (so PickTargetIssue cannot select it) and surfaced in the skipped set with reason
+// BLOCKED_BY_OPEN_PREREQ -- legible, not silently dropped.
 //
 // The hold itself is single-tick and self-clearing. A tiny durable snapshot records only which
 // dependency edges were held on the prior pass, allowing prerequisite closure to produce one bounded
@@ -27,9 +29,11 @@ import (
 )
 
 // reasonBlockedByOpenPrereq is the closed-vocabulary skip reason a SkippedIssue carries when it was
-// held back because a prerequisite it named ("depends-on:/blocked-by: #N") is still an open candidate
-// this tick. Registered in dos.toml [reasons.BLOCKED_BY_OPEN_PREREQ] so the skip is a structured,
-// refusal verifiable with `dos man wedge BLOCKED_BY_OPEN_PREREQ --explain`, not free text.
+// held back because a prerequisite it named (only 'Start blocked by:' and legacy hard holds like
+// "depends-on:/blocked-by: #N"; advisory 'Coordinates with:' and promotion 'Promotion requires:' never
+// gate pickup) is still an open candidate this tick. Registered in dos.toml [reasons.BLOCKED_BY_OPEN_PREREQ]
+// so the skip is a structured refusal verifiable with `dos man wedge BLOCKED_BY_OPEN_PREREQ --explain`,
+// not free text.
 const reasonBlockedByOpenPrereq = "BLOCKED_BY_OPEN_PREREQ"
 
 // holdOpenPrereqForRoute is the pure dependency soft-hold fold: given a routed payload, it moves every

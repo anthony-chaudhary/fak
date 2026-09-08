@@ -1,6 +1,7 @@
 package issuepolicy
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -915,6 +916,79 @@ func TestReviewIssueDraftParsesDependencyMarkers(t *testing.T) {
 	}
 	if got := review.Dependencies[2]; got.Relation != "blocks" || got.Issue != 1772 || !got.Blocking {
 		t.Fatalf("third dependency = %+v, want blocking blocks #1772", got)
+	}
+}
+
+func TestContract_Dependencies(t *testing.T) {
+	body := issueProofSectionBody(
+		"Dependency separation distinguishes pickup blockers from coordination and promotion gates.",
+		"go test ./internal/issuepolicy",
+	) + "\n" + strings.Join([]string{
+		"### Dependencies",
+		"- Start blocked by: #1756 must be witnessed before this issue can run.",
+		"- Coordinates with: #1706 is advisory interface alignment.",
+		"- Promotion requires: #1772 gates promotion and closure claims, not pickup.",
+		"- after: #1780 is a legacy hard hold.",
+		"- related-only: #1790 is context only.",
+	}, "\n")
+
+	draft := IssueDraft{
+		Number: 12252,
+		Title:  "issuepolicy: dependency separation",
+		Body:   body,
+	}
+	cand := CandidateFromIssueDraft(draft)
+	cand.ProblemFrame = completeProblemFrame()
+	review := ReviewCandidate(cand, Options{})
+
+	if !review.OK {
+		t.Fatalf("review = %+v, want OK", review)
+	}
+	if review.Dispatchability != Dispatchable {
+		t.Fatalf("dispatchability = %q, want %q", review.Dispatchability, Dispatchable)
+	}
+
+	if len(review.Dependencies) != 5 {
+		t.Fatalf("dependencies count = %d, want 5: %+v", len(review.Dependencies), review.Dependencies)
+	}
+
+	expectedDeps := []struct {
+		rel      string
+		issue    int
+		blocking bool
+	}{
+		{RelStartBlockedBy, 1756, true},
+		{RelCoordinatesWith, 1706, false},
+		{RelPromotionRequires, 1772, false},
+		{"after", 1780, true},
+		{"related", 1790, false},
+	}
+	for i, exp := range expectedDeps {
+		got := review.Dependencies[i]
+		if got.Relation != exp.rel || got.Issue != exp.issue || got.Blocking != exp.blocking {
+			t.Errorf("dep[%d] = %+v, want relation=%s, issue=%d, blocking=%v", i, got, exp.rel, exp.issue, exp.blocking)
+		}
+	}
+
+	wantBlocked := []string{"1756", "1780"}
+	if !reflect.DeepEqual(cand.BlockedBy, wantBlocked) {
+		t.Fatalf("Candidate.BlockedBy = %v, want %v", cand.BlockedBy, wantBlocked)
+	}
+	for _, nonBlocker := range []string{"1706", "1772", "1790"} {
+		for _, b := range cand.BlockedBy {
+			if b == nonBlocker {
+				t.Fatalf("Candidate.BlockedBy contains non-blocker %s", nonBlocker)
+			}
+		}
+	}
+
+	if !reflect.DeepEqual(review.BlockedBy, cand.BlockedBy) {
+		t.Fatalf("Review.BlockedBy = %v, want %v", review.BlockedBy, cand.BlockedBy)
+	}
+
+	wantBlockedIssues := []int{1756, 1780}
+	if !reflect.DeepEqual(cand.BlockedByIssues(), wantBlockedIssues) {
+		t.Fatalf("Candidate.BlockedByIssues() = %v, want %v", cand.BlockedByIssues(), wantBlockedIssues)
 	}
 }
 

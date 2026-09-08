@@ -253,7 +253,8 @@ type Options struct {
 	QueryFilter       string // substring/regex query over lane name, unit, drivers, issues, related
 	HealthFilter      string // filter by health status: "healthy", "degraded", "critical"
 	SurfaceFilter     string // filter by surface class: "internal", "pkg", "cmd", "tools", "skills", etc.
-	ExpandedBreadth   bool   // inventory at least 9 surface classes (#12318)
+	NoExpandedBreadth bool   // opt-out to disable expanded 9-surface discovery
+	ExpandedBreadth   bool   // legacy alias for expanded 9-surface discovery
 	DeepDetectors     bool   // evaluate at least 15 typed detector dimensions (#12318)
 	CrossIndex        bool   // output rich cross-indexed related items
 	MinGap            float64

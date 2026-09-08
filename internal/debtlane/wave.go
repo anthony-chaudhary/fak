@@ -1022,7 +1022,7 @@ func RenderWaves(plan WavePlan, pg ProductionGrade) string {
 		if len(w.OpencodeChats) > 0 {
 			b.WriteString("  OpenCode Chat Commands:\n")
 			for _, chat := range w.OpencodeChats {
-				b.WriteString(fmt.Sprintf("    %s\n", strings.Join(chat.Command, " ")))
+				b.WriteString(fmt.Sprintf("    %s\n", FormatShellCommand(chat.Command)))
 			}
 			b.WriteString("\n")
 		}
@@ -1069,7 +1069,7 @@ func MarkdownWaves(plan WavePlan, pg ProductionGrade) string {
 		if len(w.OpencodeChats) > 0 {
 			b.WriteString("#### OpenCode Chat Commands\n\n```bash\n")
 			for _, chat := range w.OpencodeChats {
-				b.WriteString(strings.Join(chat.Command, " ") + "\n")
+				b.WriteString(FormatShellCommand(chat.Command) + "\n")
 			}
 			b.WriteString("```\n\n")
 		}

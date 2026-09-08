@@ -529,8 +529,11 @@ func TestDebtLanesCLICoverageReceipt(t *testing.T) {
 	if receipt.Schema != debtlane.CoverageReceiptSchema {
 		t.Errorf("expected schema %s, got %s", debtlane.CoverageReceiptSchema, receipt.Schema)
 	}
-	if len(receipt.Dimensions) < 15 {
-		t.Errorf("expected at least 15 evaluated dimensions in receipt, got %d", len(receipt.Dimensions))
+	if receipt.TargetDepth != 15 {
+		t.Errorf("expected target depth 15, got %d", receipt.TargetDepth)
+	}
+	if len(receipt.DeclaredDimensions) != 15 {
+		t.Errorf("expected 15 declared dimensions in receipt, got %d", len(receipt.DeclaredDimensions))
 	}
 }
 
@@ -548,11 +551,10 @@ func TestDebtLanesCLIExpandedSurfaces(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runDebtLanes(&stdout, &stderr, []string{
 		"--workspace", tmp,
-		"--expanded-surfaces",
 		"--json",
 	})
 	if code != 0 {
-		t.Fatalf("runDebtLanes --expanded-surfaces failed: code %d, stderr: %s", code, stderr.String())
+		t.Fatalf("runDebtLanes default failed: code %d, stderr: %s", code, stderr.String())
 	}
 
 	var report debtlane.Report
@@ -567,6 +569,32 @@ func TestDebtLanesCLIExpandedSurfaces(t *testing.T) {
 		}
 	}
 	if !foundCmd {
-		t.Errorf("expected cmd_fakecmd to be discovered under --expanded-surfaces")
+		t.Errorf("expected cmd_fakecmd to be discovered by default under expanded 9-surface scanning")
+	}
+
+	// Test opt-out with --no-expanded-surfaces
+	stdout.Reset()
+	stderr.Reset()
+	codeOptOut := runDebtLanes(&stdout, &stderr, []string{
+		"--workspace", tmp,
+		"--no-expanded-surfaces",
+		"--json",
+	})
+	if codeOptOut != 0 {
+		t.Fatalf("runDebtLanes --no-expanded-surfaces failed: code %d, stderr: %s", codeOptOut, stderr.String())
+	}
+	var reportOptOut debtlane.Report
+	if err := json.Unmarshal(stdout.Bytes(), &reportOptOut); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+	foundCmdOptOut := false
+	for _, l := range reportOptOut.Lanes {
+		if l.Lane == "cmd_fakecmd" {
+			foundCmdOptOut = true
+			break
+		}
+	}
+	if foundCmdOptOut {
+		t.Errorf("expected cmd_fakecmd to be excluded when --no-expanded-surfaces is passed")
 	}
 }
