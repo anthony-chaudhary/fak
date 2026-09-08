@@ -109,7 +109,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q2K_MATMUL, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q2K_MATMUL, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -135,7 +135,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_QWEN35_GDN_CONV: case K_QWEN35_GDN_RECURRENT:
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
-    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q2K_MATMUL: case K_COUNT:
+    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q2K_MATMUL: case K_COUNT:
         return g_dp.otherUnclassified;
     }
     return g_dp.otherUnclassified;
@@ -144,7 +144,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
 static inline void dpDispatch(const Kernel& k) {
     if (!g_dp_on) return;
     const KId id = static_cast<KId>(&k - g_kern);
-    if (id == K_Q4K_MATMUL) {
+    if (id == K_Q4K_MATMUL || id == K_Q4K_MATMUL_WAVE32) {
         g_dp.q4k.fetch_add(1, std::memory_order_relaxed);
     } else if (id == K_Q2K_MATMUL) {
         g_dp.q2k.fetch_add(1, std::memory_order_relaxed);
@@ -180,6 +180,9 @@ int g_have_q8 = 0;
 // Fixed-size GLM KDA kernels require an explicitly requested 32-lane subgroup.
 // A local size of 128 alone is not a Wave32 contract: RADV may otherwise choose Wave64.
 int g_have_glm_kda_wave32 = 0;
+// Wave32 cooperative Q4_K decode kernel (subgroup arithmetic + effective/required subgroup size 32).
+int g_have_q4k_wave32 = 0;
+bool g_q4k_wave32_required_subgroup = false;
 
 VkDescriptorPool g_descpool = VK_NULL_HANDLE;
 
@@ -801,7 +804,10 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES};
     VkPhysicalDeviceSubgroupSizeControlPropertiesEXT subgroupProps{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES_EXT};
+    VkPhysicalDeviceSubgroupProperties subgroupBasicProps{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
     maint3.pNext = &subgroupProps;
+    subgroupProps.pNext = &subgroupBasicProps;
     VkPhysicalDeviceProperties2 props2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
     props2.pNext = &maint3;
     vkGetPhysicalDeviceProperties2(g_phys, &props2);
@@ -857,16 +863,31 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     std::vector<const char*> enabledDeviceExts;
 #ifdef VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME
     bool haveSubgroupSizeControlExt = deviceExtensionSupported(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
-    g_have_glm_kda_wave32 =
+    bool subgroupSizeControlAllowed =
         haveSubgroupSizeControlExt && subgroupFeatures.subgroupSizeControl &&
         subgroupProps.minSubgroupSize <= 32 && subgroupProps.maxSubgroupSize >= 32 &&
         (subgroupProps.requiredSubgroupSizeStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0;
-    if (g_have_glm_kda_wave32) {
-        enabledDeviceExts.push_back(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
-    }
+    g_have_glm_kda_wave32 = subgroupSizeControlAllowed ? 1 : 0;
 #else
+    bool subgroupSizeControlAllowed = false;
     g_have_glm_kda_wave32 = 0;
 #endif
+
+    bool haveSubgroupArithmetic =
+        (subgroupBasicProps.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0 &&
+        (subgroupBasicProps.supportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT) != 0;
+    bool effectiveSubgroup32 = (subgroupBasicProps.subgroupSize == 32);
+    bool requiredSubgroup32 = subgroupSizeControlAllowed;
+
+    g_have_q4k_wave32 = (haveSubgroupArithmetic && (effectiveSubgroup32 || requiredSubgroup32)) ? 1 : 0;
+    g_q4k_wave32_required_subgroup = (g_have_q4k_wave32 && requiredSubgroup32);
+
+    bool needSubgroupControl = (g_have_glm_kda_wave32 != 0) || g_q4k_wave32_required_subgroup;
+    if (needSubgroupControl) {
+#ifdef VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME
+        enabledDeviceExts.push_back(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
+#endif
+    }
 #ifdef VK_EXT_MEMORY_BUDGET_EXTENSION_NAME
     g_haveMemoryBudget = deviceExtensionSupported(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
     if (g_haveMemoryBudget) {
@@ -891,7 +912,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         e8.pNext = &ei8;
         dci.pNext = &e8;
     }
-    if (g_have_glm_kda_wave32) {
+    if (needSubgroupControl) {
         esubgroup.subgroupSizeControl = VK_TRUE;
         if (g_have_q8) {
             ei8.pNext = &esubgroup;
@@ -903,8 +924,10 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     if (dr != VK_SUCCESS && g_haveMemoryBudget) {
         enabledDeviceExts.clear();
         g_haveMemoryBudget = false;
-        if (g_have_glm_kda_wave32) {
+        if (needSubgroupControl) {
+#ifdef VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME
             enabledDeviceExts.push_back(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
+#endif
         }
         dci.enabledExtensionCount = 0;
         dci.enabledExtensionCount = (uint32_t)enabledDeviceExts.size();
@@ -968,6 +991,12 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_QWEN35_CAUSAL_ATTENTION_PANEL], P("qwen35_causal_attention_panel.spv"), 4, 5 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_SIGMOID_MUL], P("sigmoid_mul.spv"), 2, sizeof(int));
     ok &= buildKernel(g_kern[K_Q4K_MATMUL], P("q4k_matmul.spv"), 3, 3 * sizeof(int));
+    if (g_have_q4k_wave32) {
+        uint32_t reqSize = g_q4k_wave32_required_subgroup ? 32 : 0;
+        if (!buildKernel(g_kern[K_Q4K_MATMUL_WAVE32], P("q4k_matmul_wave32.spv"), 3, 3 * sizeof(int), reqSize)) {
+            g_have_q4k_wave32 = 0;
+        }
+    }
     ok &= buildKernel(g_kern[K_Q2K_MATMUL], P("q2k_matmul.spv"), 3, 3 * sizeof(int));
     if (!ok) return 8;
     // Q8 kernel is built only when the device advertised the int8/8-bit-storage features; its
@@ -1553,8 +1582,43 @@ extern "C" int fvk_sigmoid_mul_f32(void* x, const void* gate, int n) {
     dispatch(g_kern[K_SIGMOID_MUL],bufs,&n,sizeof(n),(uint32_t)(((uint64_t)n+255)/256));
     return (int)g_submissionStatus;
 }
+static int g_q4k_arm_mode = 0; // 0 = default, 1 = candidate, 2 = scalar
+
+extern "C" void fvk_set_q4k_arm_mode(int mode) {
+    g_q4k_arm_mode = mode;
+}
+
+static inline bool useQ4KWave32(int P) {
+    if (!g_have_q4k_wave32 || P != 1) return false;
+    if (g_q4k_arm_mode == 1) return true;
+    if (g_q4k_arm_mode == 2) return false;
+    const char* arm = std::getenv("FAK_VULKAN_Q4K_ARM");
+    if (arm) {
+        if (strcmp(arm, "scalar") == 0 || strcmp(arm, "0") == 0) return false;
+        if (strcmp(arm, "candidate") == 0 || strcmp(arm, "wave32") == 0 || strcmp(arm, "1") == 0) return true;
+    }
+    const char* w32 = std::getenv("FAK_VULKAN_Q4K_WAVE32");
+    if (w32) {
+        if (strcmp(w32, "0") == 0 || strcmp(w32, "false") == 0) return false;
+        if (strcmp(w32, "1") == 0 || strcmp(w32, "true") == 0) return true;
+    }
+    // Physical A/B on gfx1151 resulted in REJECT_RETAIN_SCALAR (0.63x and 0.76x); default retains scalar.
+    return false;
+}
+
+extern "C" int fvk_have_q4k_wave32(void) {
+    return g_have_q4k_wave32;
+}
+
 extern "C" void fvk_q4k_matmul_f32(const void* dQ4K, const void* dX, void* dY,
                          int out, int in, int P) {
+    if (useQ4KWave32(P)) {
+        struct PC { int out, in, p; } pc{out, in, P};
+        Buffer* bufs[3] = {B((void*)dQ4K), B((void*)dX), B(dY)};
+        uint32_t groups = (uint32_t)(((size_t)out + 1) / 2);
+        dispatch(g_kern[K_Q4K_MATMUL_WAVE32], bufs, &pc, sizeof(pc), groups);
+        return;
+    }
     struct PC { int out, in, p; } pc{out, in, P};
     Buffer* bufs[3] = {B((void*)dQ4K), B((void*)dX), B(dY)};
     dispatch(g_kern[K_Q4K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)(((size_t)out * P + 63) / 64));
