@@ -425,6 +425,62 @@ func TestHardwareMeasurementMayEmitMeasuredAbsolutePerformance(t *testing.T) {
 	}
 }
 
+func TestHardwareMeasurementRequiresPhysicalExecutionReceipt(t *testing.T) {
+	ev := validSimulationEvidence(EvidenceHardwareMeasurement, ClaimMeasuredAbsolute)
+	if err := ValidateSimulationEvidence(ev); err != nil {
+		t.Fatalf("complete physical execution receipt rejected: %v", err)
+	}
+	raw, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatalf("marshal hardware evidence: %v", err)
+	}
+	var roundTripped SimulationEvidence
+	if err := json.Unmarshal(raw, &roundTripped); err != nil {
+		t.Fatalf("unmarshal hardware evidence: %v", err)
+	}
+	if !reflect.DeepEqual(roundTripped.PhysicalExecution, ev.PhysicalExecution) {
+		t.Fatalf("round trip changed physical execution receipt: got %+v want %+v", roundTripped.PhysicalExecution, ev.PhysicalExecution)
+	}
+
+	missing := ev
+	missing.PhysicalExecution = nil
+	if err := ValidateSimulationEvidence(missing); err == nil || !strings.Contains(err.Error(), "requires a physical execution receipt") {
+		t.Fatalf("hardware evidence without receipt accepted: %v", err)
+	}
+
+	for _, test := range []struct {
+		name   string
+		mutate func(*PhysicalExecutionReceipt)
+		want   string
+	}{
+		{"not physical silicon", func(r *PhysicalExecutionReceipt) { r.PhysicalSilicon = false }, "physical silicon"},
+		{"missing device", func(r *PhysicalExecutionReceipt) { r.Device = "" }, "device"},
+		{"missing runtime", func(r *PhysicalExecutionReceipt) { r.Runtime = "" }, "runtime"},
+		{"missing backend", func(r *PhysicalExecutionReceipt) { r.Backend = "" }, "backend"},
+		{"missing command", func(r *PhysicalExecutionReceipt) { r.CaptureCommand = "" }, "capture command"},
+		{"unknown command", func(r *PhysicalExecutionReceipt) { r.CaptureCommand = " UNKNOWN " }, "capture command"},
+		{"malformed timestamp", func(r *PhysicalExecutionReceipt) { r.ObservedAt = "2026-08-27" }, "RFC3339"},
+		{"missing artifact", func(r *PhysicalExecutionReceipt) { r.RawArtifact = "" }, "raw artifact"},
+		{"unknown artifact", func(r *PhysicalExecutionReceipt) { r.RawArtifact = " UnKnOwN " }, "raw artifact"},
+		{"malformed digest", func(r *PhysicalExecutionReceipt) { r.RawArtifactDigest = "sha256:nope" }, "sha256"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			invalid := validSimulationEvidence(EvidenceHardwareMeasurement, ClaimMeasuredAbsolute)
+			test.mutate(invalid.PhysicalExecution)
+			err := ValidateSimulationEvidence(invalid)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("incomplete receipt accepted: %v, want %q", err, test.want)
+			}
+		})
+	}
+
+	nonHardware := validSimulationEvidence(EvidenceCycleSimulation, ClaimRelativeRank)
+	nonHardware.PhysicalExecution = ev.PhysicalExecution
+	if err := ValidateSimulationEvidence(nonHardware); err == nil || !strings.Contains(err.Error(), "only valid for hardware_measurement") {
+		t.Fatalf("non-hardware physical receipt accepted: %v", err)
+	}
+}
+
 func TestDecodeArtifactMalformedExplicitEnvelopeDoesNotFallBackToLineage(t *testing.T) {
 	lineage := map[string]any{
 		"lineage_schema": LineageSchema,
@@ -545,8 +601,19 @@ func validSimulationEvidence(evidenceType EvidenceType, claim ClaimCeiling) Simu
 		Cost: SimulationCost{HostWallTimeMS: 3.5, HostCPUTimeMS: 2.25, Bytes: 4096},
 	}
 	switch evidenceType {
-	case EvidenceStructuralCount, EvidenceAnalyticalBound, EvidenceCycleSimulation, EvidenceHardwareMeasurement:
+	case EvidenceStructuralCount, EvidenceAnalyticalBound, EvidenceCycleSimulation:
 		// These producers require no type-specific provenance block.
+	case EvidenceHardwareMeasurement:
+		ev.PhysicalExecution = &PhysicalExecutionReceipt{
+			PhysicalSilicon:   true,
+			Device:            "NVIDIA H100 SXM serial 0324018175512",
+			Runtime:           "CUDA 13.0",
+			Backend:           "fak-native qwen3.8 r4",
+			CaptureCommand:    "fak bench native --model qwen3.8 --device cuda:0 --json",
+			ObservedAt:        "2026-08-27T12:34:56Z",
+			RawArtifact:       "lab/runs/qwen38-h100-run-17.json",
+			RawArtifactDigest: SHA256Digest([]byte("raw-hardware-run-17")),
+		}
 	case EvidenceTraceSimulation:
 		ev.Trace = validTrace()
 	case EvidenceLearnedEstimate:

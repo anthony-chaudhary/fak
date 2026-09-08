@@ -254,6 +254,71 @@ func TestValidateArtifacts_SimulationPromotionBoundary(t *testing.T) {
 	}
 }
 
+// TestValidateArtifacts_HardwareAuthorityRequiresPhysicalBinding closes the
+// downstream authority bypass from #12432: the hardware_measurement enum alone
+// is not proof of execution, while a complete physical receipt remains valid
+// even though replay and simulator cost are legitimately zero for hardware.
+func TestValidateArtifacts_HardwareAuthorityRequiresPhysicalBinding(t *testing.T) {
+	root := t.TempDir()
+	ev := benchcli.SimulationEvidence{
+		Schema:       benchcli.SimulationEvidenceSchema,
+		EvidenceType: benchcli.EvidenceHardwareMeasurement,
+		ClaimCeiling: benchcli.ClaimMeasuredAbsolute,
+		Engine: benchcli.SimulationEngine{
+			Name:         "native-cuda",
+			Revision:     "r12432",
+			ConfigDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
+		Workload: benchcli.WorkloadProvenance{
+			Name: "physical-fixture", Source: "internal/benchauthority/validate_test.go",
+			Digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		},
+		ValidityEnvelope: benchcli.ValidityEnvelope{
+			Description: "one bound physical execution",
+			Dimensions:  map[string]string{"device": "fixture-gpu"},
+		},
+		ExcludedEffects: []string{"none"},
+		Replay: benchcli.ReplaySpec{
+			Stream: "enum-only-placeholder", Repetitions: 1, IndependentStreams: 1,
+		},
+		Cost: benchcli.SimulationCost{HostWallTimeMS: 1, HostCPUTimeMS: 1, Bytes: 1},
+	}
+
+	enumOnlyPath := writeBenchmarkArtifactFixture(t, root, "enum-only-hardware.json", benchcli.BenchmarkArtifact{
+		RunID: "enum-only-hardware", SimulationEvidence: &ev,
+	})
+	claim := validMeasured()
+	claim.Artifact = enumOnlyPath
+	claim.Competitive = true
+	t.Run("enum alone is not physical proof", func(t *testing.T) {
+		if errs := ValidateArtifacts(root, []Claim{claim}); !hasProblem(errs, "malformed benchmark_artifact envelope") {
+			t.Fatalf("hardware_measurement enum without a physical receipt populated a MEASURED/competitive row: %v", errs)
+		}
+	})
+
+	ev.Replay = benchcli.ReplaySpec{}
+	ev.Cost = benchcli.SimulationCost{}
+	ev.PhysicalExecution = &benchcli.PhysicalExecutionReceipt{
+		PhysicalSilicon:   true,
+		Device:            "fixture-gpu",
+		Runtime:           "CUDA 13.0",
+		Backend:           "fak-native",
+		CaptureCommand:    "fak bench --hardware-receipt",
+		ObservedAt:        "2026-08-27T00:00:00Z",
+		RawArtifact:       "artifacts/raw-hardware.json",
+		RawArtifactDigest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+	}
+	boundPath := writeBenchmarkArtifactFixture(t, root, "bound-hardware.json", benchcli.BenchmarkArtifact{
+		RunID: "bound-hardware", SimulationEvidence: &ev,
+	})
+	claim.Artifact = boundPath
+	t.Run("complete physical receipt admits zero replay and cost", func(t *testing.T) {
+		if errs := ValidateArtifacts(root, []Claim{claim}); len(errs) != 0 {
+			t.Fatalf("complete physical binding with hardware-legal zero replay/cost was rejected: %v", errs)
+		}
+	})
+}
+
 // TestValidateArtifacts_InvalidSimulationEvidenceFailsClosed proves an invalid
 // claim-ceiling promotion is rejected by the shared benchcli validator before
 // authority classification, and malformed envelopes cannot evade that validator
