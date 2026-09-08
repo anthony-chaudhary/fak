@@ -44,6 +44,10 @@ on multi-core hosts) specialized subagents concurrently across pairwise tree-dis
   on multi-core hosts) specialized subagents (`task`: worker, researcher, explore, deep-reason, cross-validator,
   issue-auditor, tester, reviewer, scout) concurrently across pairwise tree-disjoint lanes to maximize
   throughput and prevent coordinator context saturation.
+- **Astra worker reservation:** Reserve `gpt-6-astra` subagents for highly pre-specified
+  formal-mathematical leaves: the packet states fixed definitions and assumptions, the exact
+  proposition or derivation, the required output form, and a deterministic witness. Send
+  exploration, implementation, testing, review, and general reasoning to another suitable worker model.
 - **3-Tier Parallel Pipeline**: Structure multi-agent work into three decoupled parallel cohorts:
   1. *Parallel scoping and research*: Discovery via `researcher`, `explore`, and `scout` to isolate prior art, contracts, and relevant packages.
   2. *Parallel implementation + reproduction tests*: Implementation via `worker` and `deep-reason` across disjoint lanes, authoring reproduction tests before fixes.
