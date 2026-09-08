@@ -241,22 +241,49 @@ func TestRunAMDStrixValidate_RejectsMissingCandidateArchive(t *testing.T) {
 		return nil, errors.New("runner should not have been called")
 	}
 
-	var stdout, stderr bytes.Buffer
-	argv := []string{
-		"-git-tip", "0123456789abcdef0123456789abcdef01234567",
-		"-archive", filepath.Join(t.TempDir(), "nonexistent_candidate.json"),
-	}
+	t.Run("nonexistent candidate archive file", func(t *testing.T) {
+		runnerCalled = false
+		var stdout, stderr bytes.Buffer
+		argv := []string{
+			"-git-tip", "0123456789abcdef0123456789abcdef01234567",
+			"-archive", filepath.Join(t.TempDir(), "nonexistent_candidate.json"),
+		}
 
-	code := RunAMDStrixValidate(&stdout, &stderr, argv)
-	if code != 1 {
-		t.Fatalf("expected exit code 1, got %d", code)
-	}
-	if runnerCalled {
-		t.Fatal("runner was called despite missing candidate archive")
-	}
-	if !strings.Contains(stderr.String(), "missing candidate archive") {
-		t.Errorf("expected stderr to mention missing candidate archive, got: %s", stderr.String())
-	}
+		code := RunAMDStrixValidate(&stdout, &stderr, argv)
+		if code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		if runnerCalled {
+			t.Fatal("runner was called despite missing candidate archive")
+		}
+		if !strings.Contains(stderr.String(), "missing candidate archive") {
+			t.Errorf("expected stderr to mention missing candidate archive, got: %s", stderr.String())
+		}
+	})
+
+	t.Run("empty candidate archive file", func(t *testing.T) {
+		runnerCalled = false
+		emptyFile := filepath.Join(t.TempDir(), "empty.tar")
+		if err := os.WriteFile(emptyFile, []byte{}, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		argv := []string{
+			"-git-tip", "0123456789abcdef0123456789abcdef01234567",
+			"-archive", emptyFile,
+		}
+
+		code := RunAMDStrixValidate(&stdout, &stderr, argv)
+		if code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		if runnerCalled {
+			t.Fatal("runner was called despite empty candidate archive")
+		}
+		if !strings.Contains(stderr.String(), "is empty") {
+			t.Errorf("expected stderr to mention archive is empty, got: %s", stderr.String())
+		}
+	})
 }
 
 func TestRunAMDStrixValidate_RejectsPathTraversalInOverlay(t *testing.T) {
@@ -679,6 +706,25 @@ func TestRunAMDStrixValidate_AdmissionTimeoutValidation(t *testing.T) {
 		runnerCalled = true
 		return nil, errors.New("runner should not have been called")
 	}
+
+	t.Run("zero or negative command timeout is rejected", func(t *testing.T) {
+		runnerCalled = false
+		var stdout, stderr bytes.Buffer
+		code := RunAMDStrixValidate(&stdout, &stderr, []string{
+			"-committed-only",
+			"-admission-timeout", "5",
+			"-timeout", "0",
+		})
+		if code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		if runnerCalled {
+			t.Fatal("runner was called despite zero command timeout")
+		}
+		if !strings.Contains(stderr.String(), "invalid command timeout") {
+			t.Errorf("expected stderr to mention invalid command timeout, got: %s", stderr.String())
+		}
+	})
 
 	t.Run("zero admission timeout is rejected", func(t *testing.T) {
 		runnerCalled = false
@@ -1654,6 +1700,106 @@ func TestRunAMDStrixValidate_CurrentV2ValidationInvariants(t *testing.T) {
 		}
 		if parsed.Provenance.GitTip != baseCommit {
 			t.Errorf("expected GitTip = %q, got %q", baseCommit, parsed.Provenance.GitTip)
+		}
+	})
+
+	t.Run("receipt invariant validation failure fails in JSON and human modes", func(t *testing.T) {
+		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			receipt := amdgpu.NewStrixValidationReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
+			receipt.Verdict = "PASS"
+			receipt.Verified = true
+			receipt.ExecutedCount = 1
+			receipt.Subkernels = []amdgpu.StrixSubkernelResult{
+				{
+					Name:       "argmax",
+					Status:     "PASS",
+					DurationUS: 350,
+					Parity:     amdgpu.StrixParityVerdict{Passed: true, ArgmaxExact: true},
+				},
+			}
+			receipt.Digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000" // Tampered receipt digest
+			return receipt, nil
+		}
+
+		// JSON mode
+		var stdoutJSON, stderrJSON bytes.Buffer
+		codeJSON := RunAMDStrixValidate(&stdoutJSON, &stderrJSON, []string{"-committed-only", "-json", "-subkernels", "argmax", "-ablate", "none"})
+		if codeJSON != 1 {
+			t.Fatalf("expected JSON exit code 1, got %d", codeJSON)
+		}
+		if !strings.Contains(stderrJSON.String(), "receipt invariant validation failed") {
+			t.Errorf("expected stderr to mention invariant validation failure, got: %s", stderrJSON.String())
+		}
+
+		// Human mode
+		var stdoutHuman, stderrHuman bytes.Buffer
+		codeHuman := RunAMDStrixValidate(&stdoutHuman, &stderrHuman, []string{"-committed-only", "-subkernels", "argmax", "-ablate", "none"})
+		if codeHuman != 1 {
+			t.Fatalf("expected human exit code 1, got %d", codeHuman)
+		}
+		if !strings.Contains(stdoutHuman.String(), "PASS (historical/non-credit)") {
+			t.Errorf("expected human stdout to render PASS (historical/non-credit), got:\n%s", stdoutHuman.String())
+		}
+	})
+
+	t.Run("receipt with failing parity event fails invariant validation", func(t *testing.T) {
+		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			receipt := amdgpu.NewStrixValidationReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
+			receipt.Verdict = "PASS"
+			receipt.Verified = true
+			receipt.ExecutedCount = 1
+			receipt.Subkernels = []amdgpu.StrixSubkernelResult{
+				{
+					Name:       "argmax",
+					Status:     "PASS",
+					DurationUS: 350,
+					Parity:     amdgpu.StrixParityVerdict{Passed: false, ArgmaxExact: false}, // failing parity
+				},
+			}
+			digest, _ := receipt.ComputeDigest()
+			receipt.Digest = digest
+			return receipt, nil
+		}
+
+		var stdoutJSON, stderrJSON bytes.Buffer
+		codeJSON := RunAMDStrixValidate(&stdoutJSON, &stderrJSON, []string{"-committed-only", "-json", "-subkernels", "argmax", "-ablate", "none"})
+		if codeJSON != 1 {
+			t.Fatalf("expected JSON exit code 1, got %d", codeJSON)
+		}
+		if !strings.Contains(stderrJSON.String(), "credit eligible") && !strings.Contains(stderrJSON.String(), "parity") && !strings.Contains(stderrJSON.String(), "receipt invariant validation failed") {
+			t.Errorf("expected stderr to mention credit eligibility or parity failure, got: %s", stderrJSON.String())
+		}
+	})
+
+	t.Run("receipt with non-Strix target fails invariant validation", func(t *testing.T) {
+		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			nonStrixTarget := validTarget
+			nonStrixTarget.GPUName = "NVIDIA GeForce RTX 4090"
+			nonStrixTarget.TargetISA = "sm_89"
+			receipt := amdgpu.NewStrixValidationReceipt(nonStrixTarget, opts.GitRef, opts.GitTip, opts.Command)
+			receipt.Verdict = "PASS"
+			receipt.Verified = true
+			receipt.ExecutedCount = 1
+			receipt.Subkernels = []amdgpu.StrixSubkernelResult{
+				{
+					Name:       "argmax",
+					Status:     "PASS",
+					DurationUS: 350,
+					Parity:     amdgpu.StrixParityVerdict{Passed: true, ArgmaxExact: true},
+				},
+			}
+			digest, _ := receipt.ComputeDigest()
+			receipt.Digest = digest
+			return receipt, nil
+		}
+
+		var stdoutJSON, stderrJSON bytes.Buffer
+		codeJSON := RunAMDStrixValidate(&stdoutJSON, &stderrJSON, []string{"-committed-only", "-json", "-subkernels", "argmax", "-ablate", "none"})
+		if codeJSON != 1 {
+			t.Fatalf("expected JSON exit code 1, got %d", codeJSON)
+		}
+		if !strings.Contains(stderrJSON.String(), "receipt invariant validation failed") {
+			t.Errorf("expected stderr to mention invariant validation failure, got: %s", stderrJSON.String())
 		}
 	})
 }

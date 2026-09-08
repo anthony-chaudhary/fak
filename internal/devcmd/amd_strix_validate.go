@@ -311,6 +311,9 @@ func LoadOrBuildCandidateArchive(gitTip, archivePath, archiveDigest string, mine
 				return nil, fmt.Errorf("archive/digest disagreement: computed sha256:%s != expected %s", archive.ArchiveSHA256, archiveDigest)
 			}
 		}
+		if len(archive.ArchiveBytes) == 0 || strings.TrimSpace(archive.ArchiveSHA256) == "" {
+			return nil, fmt.Errorf("candidate archive invalid: empty archive bytes or digest")
+		}
 		return &archive, nil
 	}
 
@@ -372,6 +375,10 @@ func LoadOrBuildCandidateArchive(gitTip, archivePath, archiveDigest string, mine
 		}
 	}
 
+	if len(candArchive.ArchiveBytes) == 0 || strings.TrimSpace(candArchive.ArchiveSHA256) == "" {
+		return nil, fmt.Errorf("candidate archive invalid: empty archive bytes or digest")
+	}
+
 	return candArchive, nil
 }
 
@@ -404,6 +411,12 @@ func isCurrentValidPass(receipt *amdgpu.StrixValidationReceipt, expectedTip, exp
 	if receipt == nil {
 		return false, "receipt is nil"
 	}
+	if strings.TrimSpace(expectedTip) == "" {
+		return false, "missing required expected GitTip"
+	}
+	if strings.TrimSpace(expectedRef) == "" {
+		return false, "missing required expected archive digest"
+	}
 	if receipt.Verdict != "PASS" {
 		return false, fmt.Sprintf("verdict is %s (want PASS)", receipt.Verdict)
 	}
@@ -421,27 +434,27 @@ func isCurrentValidPass(receipt *amdgpu.StrixValidationReceipt, expectedTip, exp
 		return false, fmt.Sprintf("receipt invariant validation failed: %v", err)
 	}
 	// Historical or unbound receipt rejection: must carry non-empty source binding tokens
-	if strings.TrimSpace(receipt.Provenance.GitTip) == "" {
+	cleanTip := strings.TrimSpace(receipt.Provenance.GitTip)
+	if cleanTip == "" {
 		return false, "historical or unbound receipt: GitTip is empty"
 	}
-	if !IsValidFullGitTip(receipt.Provenance.GitTip) {
+	if !IsValidFullGitTip(cleanTip) {
 		return false, fmt.Sprintf("invalid or abbreviated GitTip in receipt: %q", receipt.Provenance.GitTip)
 	}
-	if strings.TrimSpace(receipt.Provenance.GitRef) == "" {
+	cleanRef := strings.TrimSpace(receipt.Provenance.GitRef)
+	if cleanRef == "" {
 		return false, "historical or unbound receipt: GitRef (archive digest) is empty"
 	}
-	if !strings.HasPrefix(strings.ToLower(receipt.Provenance.GitRef), "sha256:") {
+	if !strings.HasPrefix(strings.ToLower(cleanRef), "sha256:") {
 		return false, fmt.Sprintf("invalid GitRef in receipt (must have sha256: prefix): %q", receipt.Provenance.GitRef)
 	}
-	if expectedTip != "" && !strings.EqualFold(receipt.Provenance.GitTip, expectedTip) {
+	if !strings.EqualFold(cleanTip, strings.TrimSpace(expectedTip)) {
 		return false, fmt.Sprintf("receipt GitTip %s does not match expected %s", receipt.Provenance.GitTip, expectedTip)
 	}
-	if expectedRef != "" {
-		cleanExpected := strings.TrimPrefix(strings.ToLower(expectedRef), "sha256:")
-		cleanRef := strings.TrimPrefix(strings.ToLower(receipt.Provenance.GitRef), "sha256:")
-		if cleanRef != cleanExpected && !strings.EqualFold(receipt.Provenance.GitRef, expectedRef) {
-			return false, fmt.Sprintf("receipt GitRef %s does not match expected archive digest %s", receipt.Provenance.GitRef, expectedRef)
-		}
+	cleanExpected := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(expectedRef)), "sha256:")
+	cleanRefDigest := strings.TrimPrefix(strings.ToLower(cleanRef), "sha256:")
+	if cleanRefDigest != cleanExpected {
+		return false, fmt.Sprintf("receipt GitRef %s does not match expected archive digest %s", receipt.Provenance.GitRef, expectedRef)
 	}
 	// Execution completeness: if subkernels were selected/executed, none can be SKIPPED or FAIL
 	if len(receipt.Subkernels) == 0 && len(receipt.Ablations) == 0 {
@@ -531,6 +544,15 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 
 	if fs.NArg() > 0 {
 		err := fmt.Errorf("positional overlays or arguments rejected: %v (use repeatable --mine PATH instead)", fs.Args())
+		fmt.Fprintf(stderr, "amd-strix-validate: %v\n", err)
+		if *asJSON {
+			emitFailReceipt(stdout, *host, *gitTip, "", argv, err)
+		}
+		return 1
+	}
+
+	if *timeoutSec <= 0 {
+		err := fmt.Errorf("invalid command timeout (%d): must be > 0", *timeoutSec)
 		fmt.Fprintf(stderr, "amd-strix-validate: %v\n", err)
 		if *asJSON {
 			emitFailReceipt(stdout, *host, *gitTip, "", argv, err)
