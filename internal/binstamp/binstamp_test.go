@@ -1,14 +1,21 @@
 package binstamp
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"runtime/debug"
+	"strings"
 	"testing"
 	"time"
 
@@ -296,3 +303,179 @@ func (i provenanceFixtureInfo) Mode() fs.FileMode  { return i.mode }
 func (i provenanceFixtureInfo) ModTime() time.Time { return time.Unix(1, 0) }
 func (i provenanceFixtureInfo) IsDir() bool        { return i.mode.IsDir() }
 func (i provenanceFixtureInfo) Sys() any           { return nil }
+
+func TestObserveExecutableProvenancePlatformBehavior(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		got, err := ObserveExecutableProvenance()
+		if err == nil {
+			t.Fatalf("ObserveExecutableProvenance on %s succeeded: %+v, want fail-closed error", runtime.GOOS, got)
+		}
+		if !got.IsZero() {
+			t.Fatalf("ObserveExecutableProvenance on %s returned non-zero observation: %+v", runtime.GOOS, got)
+		}
+		if got.Modified() != got.Dirty() {
+			t.Fatalf("Modified (%v) != Dirty (%v)", got.Modified(), got.Dirty())
+		}
+	} else {
+		path, err := runningExecutablePath()
+		if err != nil || path != "/proc/self/exe" {
+			t.Fatalf("runningExecutablePath() = (%q, %v), want (/proc/self/exe, nil)", path, err)
+		}
+	}
+}
+
+const helperEnvVar = "GO_WANT_BINSTAMP_HELPER_PROCESS"
+
+func TestHelperProcessPathnameReplacement(t *testing.T) {
+	if os.Getenv(helperEnvVar) != "1" {
+		return
+	}
+	defer os.Exit(0)
+
+	// Step 1: Signal READY to parent on stdout.
+	if _, err := fmt.Println("READY"); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to signal ready: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Step 2: Wait for parent to signal CONTINUE on stdin.
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		fmt.Fprintf(os.Stderr, "failed to read continue signal: %v\n", scanner.Err())
+		os.Exit(1)
+	}
+	if text := strings.TrimSpace(scanner.Text()); text != "CONTINUE" {
+		fmt.Fprintf(os.Stderr, "unexpected continue signal: %q\n", text)
+		os.Exit(1)
+	}
+
+	// Step 3: Observe executable provenance using the production runningExecutablePath.
+	const testRevision = "0123456789abcdef0123456789abcdef01234567"
+	got, err := observeExecutableProvenance(
+		buildInfoReader(testRevision, "false"),
+		runningExecutablePath,
+		func(path string) (provenanceFile, error) { return os.Open(path) },
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "observeExecutableProvenance failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Step 4: Output observed digest, byte count, and what os.Executable() would read.
+	var exeDigest string
+	if exePath, exeErr := os.Executable(); exeErr == nil && exePath != "" {
+		if exeBytes, readErr := os.ReadFile(exePath); readErr == nil {
+			sum := sha256.Sum256(exeBytes)
+			exeDigest = hex.EncodeToString(sum[:])
+		}
+	}
+	fmt.Printf("OBSERVED_DIGEST:%s OBSERVED_BYTES:%d EXE_DIGEST:%s\n",
+		got.BinarySHA256(), got.BinaryBytes(), exeDigest)
+	os.Exit(0)
+}
+
+func TestExecutableProvenanceBindsMappedImageAcrossPathnameReplacement(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("mapped executable image observation requires linux (/proc/self/exe)")
+	}
+
+	testExe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	origBytes, err := os.ReadFile(testExe)
+	if err != nil {
+		t.Fatalf("read test binary %q: %v", testExe, err)
+	}
+	origSum := sha256.Sum256(origBytes)
+	origSHA256 := hex.EncodeToString(origSum[:])
+
+	tempDir := t.TempDir()
+	launchPath := filepath.Join(tempDir, "fak-child-test")
+	if err := os.WriteFile(launchPath, origBytes, 0o755); err != nil {
+		t.Fatalf("write launch binary: %v", err)
+	}
+
+	replacementBytes := []byte("adversarial replacement binary image fixture bytes")
+	repSum := sha256.Sum256(replacementBytes)
+	replacementSHA256 := hex.EncodeToString(repSum[:])
+	replacementPath := filepath.Join(tempDir, "fak-replacement")
+	if err := os.WriteFile(replacementPath, replacementBytes, 0o755); err != nil {
+		t.Fatalf("write replacement binary: %v", err)
+	}
+
+	cmd := exec.Command(launchPath, "-test.run=^TestHelperProcessPathnameReplacement$", "-test.v=false")
+	cmd.Env = append(os.Environ(), helperEnvVar+"=1")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start child process: %v", err)
+	}
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	}()
+
+	scanner := bufio.NewScanner(stdout)
+	if !scanner.Scan() {
+		t.Fatalf("failed to read child ready: scan=%v, stderr=%s", scanner.Err(), stderr.String())
+	}
+	if line := strings.TrimSpace(scanner.Text()); line != "READY" {
+		t.Fatalf("expected child READY, got %q (stderr: %s)", line, stderr.String())
+	}
+
+	// Replace the launch pathname while the child process is running.
+	if err := os.Rename(replacementPath, launchPath); err != nil {
+		t.Fatalf("failed to rename replacement over launch path: %v", err)
+	}
+
+	// Signal the child to observe executable provenance.
+	if _, err := io.WriteString(stdin, "CONTINUE\n"); err != nil {
+		t.Fatalf("failed to write continue to child: %v", err)
+	}
+
+	if !scanner.Scan() {
+		t.Fatalf("failed to read child result: scan=%v, stderr=%s", scanner.Err(), stderr.String())
+	}
+	resultLine := strings.TrimSpace(scanner.Text())
+
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("child process failed: %v (stderr: %s)", err, stderr.String())
+	}
+
+	var observedDigest, exeDigest string
+	var observedBytes int64
+	n, err := fmt.Sscanf(resultLine, "OBSERVED_DIGEST:%s OBSERVED_BYTES:%d EXE_DIGEST:%s",
+		&observedDigest, &observedBytes, &exeDigest)
+	if err != nil || n != 3 {
+		t.Fatalf("failed to parse child output %q: %v", resultLine, err)
+	}
+
+	// Verify that os.Executable() opened the replacement binary after rename.
+	if exeDigest != replacementSHA256 {
+		t.Fatalf("expected os.Executable to see replacement digest %q, got %q", replacementSHA256, exeDigest)
+	}
+
+	// Verify that the observer bound to the mapped image via /proc/self/exe, not the replacement.
+	if observedDigest != origSHA256 {
+		t.Fatalf("observed digest %q does not match original binary %q (replacement was %q)",
+			observedDigest, origSHA256, replacementSHA256)
+	}
+	if observedBytes != int64(len(origBytes)) {
+		t.Fatalf("observed bytes %d != expected %d", observedBytes, len(origBytes))
+	}
+	if observedDigest == replacementSHA256 {
+		t.Fatalf("FATAL: observer accepted replacement binary digest instead of mapped image")
+	}
+}
