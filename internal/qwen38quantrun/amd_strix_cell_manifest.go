@@ -315,8 +315,8 @@ func validateStrixChallenge(c StrixComparisonChallenge) error {
 	if c.ConfidenceRule != "one-sided-95-percent" || c.PairedRatioRule != "paired-ratio-lcb95>1" || c.SamplingAssumption != "iid-approximately-normal-paired-ratios" {
 		return errors.New("strix comparison cell statistical contract is not canonical")
 	}
-	if c.Warmups != StrixComparisonWarmups || c.MeasuredPairs < StrixComparisonMinimumMeasuredPairs {
-		return errors.New("strix comparison cell requires 3 warmups and at least 5 measured pairs")
+	if c.Warmups != StrixComparisonWarmups || c.MeasuredPairs != StrixComparisonMinimumMeasuredPairs {
+		return errors.New("strix comparison cell requires 3 warmups and exactly 5 measured pairs")
 	}
 	if len(c.PairIDs) != c.MeasuredPairs || len(c.AlternatingOrder) != 2*c.MeasuredPairs {
 		return errors.New("strix comparison cell pair/order cardinality mismatch")
@@ -325,11 +325,23 @@ func validateStrixChallenge(c StrixComparisonChallenge) error {
 		return err
 	}
 	for i := range c.MeasuredPairs {
-		if c.AlternatingOrder[2*i] != "candidate:"+c.PairIDs[i] || c.AlternatingOrder[2*i+1] != "reference:"+c.PairIDs[i] {
-			return errors.New("strix comparison cell measured order is not fixed candidate/reference alternation")
+		pairID, first, second, _, _ := strixComparisonPairOrder(i)
+		if c.PairIDs[i] != pairID || c.AlternatingOrder[2*i] != first || c.AlternatingOrder[2*i+1] != second {
+			return errors.New("strix comparison cell measured order is not the canonical candidate/reference pair alternation")
 		}
 	}
 	return nil
+}
+
+func strixComparisonPairOrder(pairIndex int) (pairID, first, second string, candidateSequence, referenceSequence int) {
+	pairID = fmt.Sprintf("pair-%02d", pairIndex+1)
+	candidateSequence, referenceSequence = 2*pairIndex+1, 2*pairIndex+2
+	first, second = "candidate:"+pairID, "reference:"+pairID
+	if pairIndex%2 != 0 {
+		candidateSequence, referenceSequence = referenceSequence, candidateSequence
+		first, second = second, first
+	}
+	return
 }
 
 func validateStrixPlatform(p StrixComparisonPlatform) error {

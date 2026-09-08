@@ -139,6 +139,89 @@ func TestStrixComparisonCellManifestSeal(t *testing.T) {
 	}
 }
 
+func TestStrixComparisonCellManifestAlternatesPairOrder(t *testing.T) {
+	pairIDs := make([]string, 0, StrixComparisonMinimumMeasuredPairs)
+	order := make([]string, 0, 2*StrixComparisonMinimumMeasuredPairs)
+	input := AMDScoreboardInput{}
+	for i := range StrixComparisonMinimumMeasuredPairs {
+		pairID, first, second, candidateSequence, referenceSequence := strixComparisonPairOrder(i)
+		pairIDs = append(pairIDs, pairID)
+		order = append(order, first, second)
+		input.Candidate.Trials = append(input.Candidate.Trials, AMDScoreboardTrial{Repetition: i + 1, Sequence: candidateSequence})
+		input.Reference.Trials = append(input.Reference.Trials, AMDScoreboardTrial{Repetition: i + 1, Sequence: referenceSequence})
+	}
+
+	m := validStrixComparisonCellManifest(t)
+	m.Challenge.PairIDs = slices.Clone(pairIDs)
+	m.Challenge.AlternatingOrder = slices.Clone(order)
+	m.Capture.PairIDs = slices.Clone(pairIDs)
+	m.Capture.AlternatingOrder = slices.Clone(order)
+	if _, err := SealStrixComparisonCellManifest(m); err != nil {
+		t.Fatalf("shared AB/BA schedule rejected by manifest: %v", err)
+	}
+	if reasons := validateAMDScoreboard(input); slices.Contains(reasons, "alternating-paired-trial-order-required") {
+		t.Fatalf("shared AB/BA schedule rejected by scoreboard: %v", reasons)
+	}
+
+	rejectManifest := func(name string, mutate func(*StrixComparisonCellManifest)) {
+		t.Helper()
+		t.Run(name, func(t *testing.T) {
+			changed := cloneStrixComparisonCellManifestForTest(t, m)
+			mutate(&changed)
+			if _, err := SealStrixComparisonCellManifest(changed); err == nil {
+				t.Fatal("non-canonical pair schedule was accepted")
+			}
+		})
+	}
+	rejectManifest("all-ab", func(changed *StrixComparisonCellManifest) {
+		for i, pairID := range changed.Challenge.PairIDs {
+			changed.Challenge.AlternatingOrder[2*i], changed.Challenge.AlternatingOrder[2*i+1] = "candidate:"+pairID, "reference:"+pairID
+		}
+		changed.Capture.AlternatingOrder = slices.Clone(changed.Challenge.AlternatingOrder)
+	})
+	rejectManifest("all-ba", func(changed *StrixComparisonCellManifest) {
+		for i, pairID := range changed.Challenge.PairIDs {
+			changed.Challenge.AlternatingOrder[2*i], changed.Challenge.AlternatingOrder[2*i+1] = "reference:"+pairID, "candidate:"+pairID
+		}
+		changed.Capture.AlternatingOrder = slices.Clone(changed.Challenge.AlternatingOrder)
+	})
+	rejectManifest("swapped-pair-ids", func(changed *StrixComparisonCellManifest) {
+		changed.Challenge.PairIDs[0], changed.Challenge.PairIDs[1] = changed.Challenge.PairIDs[1], changed.Challenge.PairIDs[0]
+		changed.Capture.PairIDs = slices.Clone(changed.Challenge.PairIDs)
+	})
+	rejectManifest("duplicate-pair-id", func(changed *StrixComparisonCellManifest) {
+		changed.Challenge.PairIDs[1] = changed.Challenge.PairIDs[0]
+		changed.Capture.PairIDs = slices.Clone(changed.Challenge.PairIDs)
+	})
+	rejectManifest("missing-pair", func(changed *StrixComparisonCellManifest) {
+		changed.Challenge.MeasuredPairs--
+		changed.Challenge.PairIDs = changed.Challenge.PairIDs[:4]
+		changed.Challenge.AlternatingOrder = changed.Challenge.AlternatingOrder[:8]
+		changed.Capture.PairIDs = slices.Clone(changed.Challenge.PairIDs)
+		changed.Capture.AlternatingOrder = slices.Clone(changed.Challenge.AlternatingOrder)
+		changed.Capture.TrialCount = 8
+	})
+	rejectManifest("appended-pair", func(changed *StrixComparisonCellManifest) {
+		changed.Challenge.MeasuredPairs++
+		changed.Challenge.PairIDs = append(changed.Challenge.PairIDs, "pair-06")
+		changed.Challenge.AlternatingOrder = append(changed.Challenge.AlternatingOrder, "reference:pair-06", "candidate:pair-06")
+		changed.Capture.PairIDs = slices.Clone(changed.Challenge.PairIDs)
+		changed.Capture.AlternatingOrder = slices.Clone(changed.Challenge.AlternatingOrder)
+		changed.Capture.TrialCount = 12
+	})
+
+	parityChanged := cloneStrixComparisonCellManifestForTest(t, m)
+	parityChanged.Challenge.AlternatingOrder[2], parityChanged.Challenge.AlternatingOrder[3] = "candidate:pair-02", "reference:pair-02"
+	parityChanged.Capture.AlternatingOrder = slices.Clone(parityChanged.Challenge.AlternatingOrder)
+	if _, err := SealStrixComparisonCellManifest(parityChanged); err == nil {
+		t.Fatal("manifest accepted an all-AB parity mutation")
+	}
+	input.Candidate.Trials[1].Sequence, input.Reference.Trials[1].Sequence = 3, 4
+	if reasons := validateAMDScoreboard(input); !slices.Contains(reasons, "alternating-paired-trial-order-required") {
+		t.Fatalf("scoreboard accepted the same all-AB parity mutation: %v", reasons)
+	}
+}
+
 func validStrixComparisonCellManifest(t *testing.T) StrixComparisonCellManifest {
 	t.Helper()
 	packet := PromptTokenPacket{
@@ -160,10 +243,12 @@ func validStrixComparisonCellManifest(t *testing.T) StrixComparisonCellManifest 
 	if err != nil {
 		t.Fatal(err)
 	}
-	pairs := []string{"pair-01", "pair-02", "pair-03", "pair-04", "pair-05"}
+	pairs := make([]string, 0, StrixComparisonMinimumMeasuredPairs)
 	order := make([]string, 0, 2*len(pairs))
-	for _, pair := range pairs {
-		order = append(order, "candidate:"+pair, "reference:"+pair)
+	for i := range StrixComparisonMinimumMeasuredPairs {
+		pairID, first, second, _, _ := strixComparisonPairOrder(i)
+		pairs = append(pairs, pairID)
+		order = append(order, first, second)
 	}
 	observations := make([]StrixComparisonObservation, len(strixComparisonPlatformObservationNames))
 	for i, name := range strixComparisonPlatformObservationNames {

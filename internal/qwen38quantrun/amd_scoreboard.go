@@ -374,12 +374,12 @@ func validateAMDScoreboard(in AMDScoreboardInput) []string {
 		add("hardware-mismatch")
 	}
 	if len(in.Candidate.Trials) == len(in.Reference.Trials) {
+		if len(in.Candidate.Trials) != StrixComparisonMinimumMeasuredPairs {
+			add("alternating-paired-trial-order-required")
+		}
 		for i := range in.Candidate.Trials {
 			c, r := in.Candidate.Trials[i], in.Reference.Trials[i]
-			cs, rs := 2*i+1, 2*i+2
-			if i%2 != 0 {
-				cs, rs = rs, cs
-			}
+			_, _, _, cs, rs := strixComparisonPairOrder(i)
 			if c.Repetition != i+1 || r.Repetition != i+1 || c.Sequence != cs || r.Sequence != rs {
 				add("alternating-paired-trial-order-required")
 			}
