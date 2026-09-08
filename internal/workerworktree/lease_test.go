@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -337,5 +338,124 @@ func TestSweepPreservesLiveOwnerWithOldHeartbeat(t *testing.T) {
 	}
 	if string(content) != sentinelContent {
 		t.Fatalf("sentinel content mismatch: got %q, want %q", string(content), sentinelContent)
+	}
+}
+
+func TestSweepPreservesForeignOSRegistrations(t *testing.T) {
+	root := t.TempDir()
+	wtRoot := t.TempDir()
+
+	type foreignSpec struct {
+		name string
+		path string
+	}
+
+	var specs []foreignSpec
+	if runtime.GOOS == "windows" {
+		specs = []foreignSpec{
+			{"fak-worker-wt-foreign-posix", "/mnt/c/work/fak/_scratch/fak-worker-wt-foreign-posix/gitdir"},
+			{"fak-worker-wt-foreign-linux", "/opt/foreign/fak/_scratch/fak-worker-wt-foreign-linux/gitdir"},
+			{"fak-worker-wt-foreign-novol", `\mnt\c\work\fak\_scratch\fak-worker-wt-foreign-novol\gitdir`},
+		}
+	} else {
+		specs = []foreignSpec{
+			{"fak-worker-wt-foreign-win", `C:\work\fak\_scratch\fak-worker-wt-foreign-win\gitdir`},
+			{"fak-worker-wt-foreign-slash", `C:/work/fak/_scratch/fak-worker-wt-foreign-slash/gitdir`},
+			{"fak-worker-wt-foreign-bs", `sub\dir\fak-worker-wt-foreign-bs\gitdir`},
+			{"fak-worker-wt-foreign-unc", `\\server\share\fak-worker-wt-foreign-unc\gitdir`},
+		}
+	}
+
+	for _, spec := range specs {
+		adminDir := filepath.Join(root, ".git", "worktrees", spec.name)
+		if err := os.MkdirAll(adminDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(adminDir, "gitdir"), []byte(spec.path+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(adminDir, "locked"), []byte("simulated live foreign worker lock\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Also add a local dead registration that SHOULD be pruned
+	deadLocalName := "fak-worker-wt-dead-local"
+	deadAdminDir := filepath.Join(root, ".git", "worktrees", deadLocalName)
+	if err := os.MkdirAll(deadAdminDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	deadLocalPath := filepath.Join(root, "_scratch", "nonexistent-dead-local", "gitdir")
+	if err := os.WriteFile(filepath.Join(deadAdminDir, "gitdir"), []byte(deadLocalPath+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report := SweepDeadWorktrees(root, wtRoot, nil)
+	if report.Pruned != 1 {
+		t.Fatalf("expected exactly 1 worktree pruned (the local dead one), got %d (paths: %v)", report.Pruned, report.Paths)
+	}
+
+	// Verify local dead admin dir was removed
+	if _, err := os.Stat(deadAdminDir); !os.IsNotExist(err) {
+		t.Fatalf("expected dead local admin dir %q to be deleted", deadAdminDir)
+	}
+
+	// Verify all foreign admin dirs and their lock markers were preserved
+	for _, spec := range specs {
+		adminDir := filepath.Join(root, ".git", "worktrees", spec.name)
+		if fi, err := os.Stat(adminDir); err != nil || !fi.IsDir() {
+			t.Errorf("foreign worktree admin dir %q was deleted, should be preserved", adminDir)
+		}
+		gitdirBytes, err := os.ReadFile(filepath.Join(adminDir, "gitdir"))
+		if err != nil {
+			t.Errorf("foreign worktree gitdir missing in %q: %v", adminDir, err)
+		} else if strings.TrimSpace(string(gitdirBytes)) != spec.path {
+			t.Errorf("foreign worktree gitdir content mismatch in %q: got %q, want %q", adminDir, string(gitdirBytes), spec.path)
+		}
+		if _, err := os.Stat(filepath.Join(adminDir, "locked")); err != nil {
+			t.Errorf("foreign worktree locked file missing in %q: %v", adminDir, err)
+		}
+	}
+}
+
+func TestIsForeignOSPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		cases := []struct {
+			path string
+			want bool
+		}{
+			{"/mnt/c/work/fak", true},
+			{"/opt/foreign/fak", true},
+			{`\mnt\c\work\fak`, true},
+			{`C:\work\fak`, false},
+			{`c:/work/fak`, false},
+			{`\\server\share\fak`, false},
+			{"", false},
+		}
+		for _, tc := range cases {
+			if got := isForeignOSPath(tc.path); got != tc.want {
+				t.Errorf("isForeignOSPath(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		}
+	} else {
+		cases := []struct {
+			path string
+			want bool
+		}{
+			{`C:\work\fak`, true},
+			{`C:/work/fak`, true},
+			{`d:\work\fak`, true},
+			{`sub\dir`, true},
+			{`\\server\share\fak`, true},
+			{"/mnt/c/work/fak", false},
+			{"/opt/foreign/fak", false},
+			{"/tmp/test", false},
+			{"", false},
+		}
+		for _, tc := range cases {
+			if got := isForeignOSPath(tc.path); got != tc.want {
+				t.Errorf("isForeignOSPath(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		}
 	}
 }
