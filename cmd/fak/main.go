@@ -689,6 +689,8 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdDebtOrchestrator(args)
 	case "issue-orchestrator", "issue-queue", "issue-lanes":
 		cmdIssueOrchestrator(args)
+	case "issues-solved", "issues-recent", "issue-stats":
+		cmdIssuesSolved(args)
 	case "bench-effort":
 		cmdBenchEffort(args)
 	case "maturity":
