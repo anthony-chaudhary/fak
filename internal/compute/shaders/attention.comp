@@ -16,6 +16,12 @@ layout(push_constant) uniform Push {
     int nPos; int nH; int nKV; int hd; float scale;
 } pc;
 
+// Architectural rationale: LDS Shared Memory Bank Conflict Elimination (Pad-2 Stride)
+// On AMD RDNA 3.5 (e.g. Strix Halo / gfx1151), Local Data Share (LDS) is divided into 32 memory banks
+// of 4 bytes each. Standard unpadded reduction rows of 32 floats cause all lanes in a Wave32 wavefront
+// to access identical LDS banks ((lane * 32) % 32 == 0), causing severe 32-way bank conflict stalls.
+// By padding the reduction row stride by +2 floats (RED_STRIDE = 32u + 2u = 34 floats, gcd(34, 32) = 2),
+// bank addresses skew across successive rows, eliminating LDS bank conflicts and maximizing throughput.
 const uint RED_STRIDE = 32u + 2u;
 shared float red[4u * RED_STRIDE];
 
