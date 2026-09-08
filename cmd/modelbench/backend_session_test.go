@@ -311,11 +311,12 @@ func TestModelbenchSelectedBackendExecutesSmoke(t *testing.T) {
 	var report struct {
 		Backend struct{ Selected string } `json:"backend"`
 		Status  string                    `json:"smoke_status"`
+		Steps   int                       `json:"smoke_decode_steps"`
 	}
 	if err := json.Unmarshal(raw, &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Backend.Selected != "cpu-ref" || report.Status != smokeStatusOK {
+	if report.Backend.Selected != "cpu-ref" || report.Status != smokeStatusOK || report.Steps != 16 {
 		t.Fatalf("smoke execution identity: %+v", report)
 	}
 	// An independent prefill through the real HAL proves smoke included a decode

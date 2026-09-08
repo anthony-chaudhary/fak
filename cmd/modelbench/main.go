@@ -1477,15 +1477,21 @@ func allFinite(logits []float32) bool {
 	return true
 }
 
-// runSmoke is the -smoke entry after a successful (deadline-bounded) load: it decodes ONE token
-// and asserts the logits are finite, emitting SMOKE_OK or SMOKE_FORWARD_FAILED and exiting. This
-// proves the forward runs before committing to the full prefill/decode/workload grid. It reuses
-// the recover-guarded prefill pattern so a panicking forward becomes a clean SMOKE_FORWARD_FAILED.
+// runSmoke is the -smoke entry after a successful (deadline-bounded) load: it decodes multiple tokens
+// (controlled by -smoke-decode-steps, defaulting to 16) and asserts the logits are finite, emitting SMOKE_OK
+// or SMOKE_FORWARD_FAILED and exiting. This proves the forward and autoregressive decode loop run before committing
+// to the full prefill/decode/workload grid. It reuses the recover-guarded pattern so a panic becomes SMOKE_FORWARD_FAILED.
 func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, vocab int) {
 	status := smokeStatusOK
 	var detail string
 	be, registeredBackends := resolveBackend(f)
 	engine, precision, backendReport := describeEngine(f, be, registeredBackends)
+	smokeSteps := 16
+	if f.smokeDecodeSteps != nil && *f.smokeDecodeSteps > 0 {
+		smokeSteps = *f.smokeDecodeSteps
+	}
+	var decodeMS float64
+	var decodeTokS float64
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -1501,28 +1507,45 @@ func runSmoke(f *benchFlags, m *model.Model, modelName string, loadMS float64, v
 			detail = "prefill produced non-finite logits (NaN/Inf)"
 			return
 		}
-		logits = s.Step(mathx.ArgmaxF32(logits))
-		if !allFinite(logits) {
-			status = smokeStatusForwardFailed
-			detail = "decode produced non-finite logits (NaN/Inf)"
+		tDecodeStart := time.Now()
+		for step := 0; step < smokeSteps; step++ {
+			logits = s.Step(mathx.ArgmaxF32(logits))
+			if !allFinite(logits) {
+				status = smokeStatusForwardFailed
+				detail = fmt.Sprintf("decode step %d produced non-finite logits (NaN/Inf)", step+1)
+				return
+			}
+		}
+		elapsed := time.Since(tDecodeStart)
+		decodeMS = float64(elapsed.Nanoseconds()) / 1e6
+		if elapsed.Seconds() > 0 {
+			decodeTokS = float64(smokeSteps) / elapsed.Seconds()
 		}
 	}()
-	fmt.Fprintf(os.Stderr, "fak modelbench smoke: %s (%s, loaded in %.1fs)\n", status, modelName, loadMS/1000)
+	if decodeTokS > 0 {
+		fmt.Fprintf(os.Stderr, "fak modelbench smoke: %s (%s, loaded in %.1fs, %d decode steps @ %.2f tok/s)\n",
+			status, modelName, loadMS/1000, smokeSteps, decodeTokS)
+	} else {
+		fmt.Fprintf(os.Stderr, "fak modelbench smoke: %s (%s, loaded in %.1fs)\n", status, modelName, loadMS/1000)
+	}
 	if detail != "" {
 		fmt.Fprintf(os.Stderr, "  detail: %s\n", detail)
 	}
 	writeReport(f, map[string]any{
-		"app_version":         appversion.Current(),
-		"engine":              engine,
-		"precision":           precision,
-		"backend":             backendReport,
-		"model":               modelName,
-		"source":              loadSource(*f.hf, *f.gguf, *f.dir, *f.lean, *f.q4k, streamQ4KEnabled(f)),
-		"stream_q4k":          streamQ4KEnabled(f),
-		"load_worker_control": currentLoadWorkerControl(),
-		"smoke_status":        status,
-		"load_ms":             loadMS,
-		"smoke_detail":        detail,
+		"app_version":              appversion.Current(),
+		"engine":                   engine,
+		"precision":                precision,
+		"backend":                  backendReport,
+		"model":                    modelName,
+		"source":                   loadSource(*f.hf, *f.gguf, *f.dir, *f.lean, *f.q4k, streamQ4KEnabled(f)),
+		"stream_q4k":               streamQ4KEnabled(f),
+		"load_worker_control":      currentLoadWorkerControl(),
+		"smoke_status":             status,
+		"smoke_decode_steps":       smokeSteps,
+		"smoke_decode_ms":          decodeMS,
+		"smoke_decode_tok_per_sec": decodeTokS,
+		"load_ms":                  loadMS,
+		"smoke_detail":             detail,
 	})
 	if status != smokeStatusOK {
 		f.exit(1)
@@ -1548,6 +1571,30 @@ func loadSource(hf, gguf, dir string, lean, q4k, streamQ4K bool) string {
 	return filepath.Join(hf, "model.safetensors")
 }
 
+func parseTokenSize(s string) (int, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("empty token size")
+	}
+	lower := strings.ToLower(s)
+	if strings.HasSuffix(lower, "k") {
+		numStr := strings.TrimSuffix(lower, "k")
+		f, err := strconv.ParseFloat(numStr, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid token size %q: %w", s, err)
+		}
+		if f <= 0 {
+			return 0, fmt.Errorf("token size must be positive")
+		}
+		return int(math.Round(f * 1024)), nil
+	}
+	val, err := strconv.Atoi(s)
+	if err != nil || val <= 0 {
+		return 0, fmt.Errorf("invalid positive integer %q", s)
+	}
+	return val, nil
+}
+
 func parsePositiveInts(csv string) ([]int, error) {
 	var out []int
 	for _, part := range strings.Split(csv, ",") {
@@ -1555,7 +1602,7 @@ func parsePositiveInts(csv string) ([]int, error) {
 		if part == "" {
 			continue
 		}
-		n, err := strconv.Atoi(part)
+		n, err := parseTokenSize(part)
 		if err != nil || n <= 0 {
 			return nil, fmt.Errorf("invalid positive integer %q", part)
 		}

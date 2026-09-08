@@ -52,6 +52,7 @@ func testCompleteBenchFlags() *benchFlags {
 		workloadPath: testString(""), workloadPrefillCap: testInt(0), loadOnly: testBool(false),
 		loadProfile: testBool(false), loadProfileTrace: testBool(false), loadProfileTraceEvery: testInt(25),
 		phaseProfile: testBool(false), budget: testFloat64(0), preflight: testBool(false), smoke: testBool(false),
+		smokeDecodeSteps: testInt(16),
 		smokeDeadline: testDuration(90 * time.Second), fitCheck: testBool(true), loadProgress: testBool(true),
 		checkpoint: testString(""), resume: testString(""), nativeProfileOut: testString(""), nativeProfileReadback: testString(""),
 		nativeProfileCompare: testString(""), nativeDecodeHandoff: testDecodeHandoff(model.Qwen35DecodeHandoffAuto),
@@ -443,6 +444,9 @@ func TestParsePositiveInts(t *testing.T) {
 	}{
 		{name: "default sizes", in: "16,64,256", want: []int{16, 64, 256}},
 		{name: "single", in: "8", want: []int{8}},
+		{name: "k suffix 2.5k", in: "2.5k", want: []int{2560}},
+		{name: "context ladder", in: "2.5k,5k,10k,20k", want: []int{2560, 5120, 10240, 20480}},
+		{name: "mixed numeric and k", in: "16,64,256,2.5k", want: []int{16, 64, 256, 2560}},
 		{name: "trims whitespace", in: " 1 , 2 ", want: []int{1, 2}},
 		{name: "skips empty fields", in: "3,,4", want: []int{3, 4}},
 		{name: "trailing comma", in: "5,", want: []int{5}},

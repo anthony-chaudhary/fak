@@ -48,6 +48,7 @@ type benchFlags struct {
 	budget                *float64
 	preflight             *bool
 	smoke                 *bool
+	smokeDecodeSteps      *int
 	smokeDeadline         *time.Duration
 	fitCheck              *bool
 	loadProgress          *bool
@@ -104,7 +105,8 @@ func parseFlags() *benchFlags {
 		phaseProfile:          flag.Bool("phase-profile", false, "emit one-shot coarse Session phase profiles for prefill/decode without perturbing median timings"),
 		budget:                flag.Float64("budget", 0, "fractional core budget for this run: 0.75 = use up to 75% of the machine's logical cores (portable across box sizes; 75 or 0.75 both accepted). 0 = unset. FAK_WORKERS, if set, still overrides."),
 		preflight:             flag.Bool("preflight", false, "FAIL FAST: read only the GGUF header (no tensor load), report arch/est-size/device-fit/ETA, and exit in seconds. Refuses a bad-arch / too-big / bad-header model before the multi-minute load. Requires -gguf."),
-		smoke:                 flag.Bool("smoke", false, "header preflight, then load (under -smoke-deadline) and decode ONE token to prove the forward runs, then exit — before the full prefill/decode/workload grid. Requires -gguf."),
+		smoke:                 flag.Bool("smoke", false, "header preflight, then load (under -smoke-deadline) and decode tokens to prove the forward runs, then exit — before the full prefill/decode/workload grid. Requires -gguf."),
+		smokeDecodeSteps:      flag.Int("smoke-decode-steps", 16, "number of decode steps to run in -smoke (default 16; proves multi-step decode loop and measures smoke decode tok/s)"),
 		smokeDeadline:         flag.Duration("smoke-deadline", 90*time.Second, "hard wall-clock cap on the -smoke load: if the load exceeds it, abort and report SMOKE_LOAD_TIMEOUT with the last progress line instead of hanging"),
 		fitCheck:              flag.Bool("fit-check", true, "before a normal load, refuse a model that a capacity-reporting -backend KNOWS won't fit (typed refusal instead of a mid-load OOM panic). Fail-open on legacy/cpu-ref. -fit-check=false for deliberate stress runs."),
 		loadProgress:          flag.Bool("load-progress", true, "stream throttled load progress (percent / GB / elapsed / GB-per-s) to stderr on lean/q4k GGUF loads so a multi-minute load is not silent; -load-progress=false silences it"),
