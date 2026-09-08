@@ -1,4 +1,24 @@
-# Qwen 3.8 Native MTP Operating Envelope and Downgrade Semantics
+---
+title: "[SIMULATED PERFORMANCE] Qwen 3.8 native MTP operating envelope and downgrade semantics"
+description: "Shipped MTP safety mechanisms with simulated throughput and tuning fixtures; no physical 15.22 tok/s comparison packet is committed."
+---
+
+# [SIMULATED PERFORMANCE] Qwen 3.8 native MTP operating envelope and downgrade semantics
+
+> **Honesty boundary.** The rollback and cache-coexistence mechanisms described below are
+> shipped software with unit-test witnesses. Every throughput, acceptance-rate, optimal-depth,
+> and hardware-scaling number on this page is a deterministic model or fixture, not a physical
+> result. The advertised Apple Silicon packet at
+> `experiments/benchmark/runs/by-machine/node-macos-a/20260908T160000Z-macbench-mtp/packet.json`
+> and its raw evidence files are not committed. Follow the
+> [simulated-results discipline](../standards/simulated-results-discipline.md); physical
+> comparison work remains open in [#12239](https://github.com/anthony-chaudhary/fak/issues/12239).
+>
+> **Physical promotion gate:** capture the named MTP-capable artifact on the named physical
+> Apple host; commit the packet plus digest-bound raw and quality files for fak-native and all
+> three reference arms; bind exact artifact, prompt, cache, runtime/backend, fallback, rollback,
+> and quality identity with at least 20 observed samples per arm; pass
+> `fak macbench validate-mtp-comparison` and independent read-back proving fak-native executed.
 
 This document defines the operating envelope, memory bus scaling properties, depth sweet spots, and graceful fallback downgrade semantics for native Multi-Token Prediction (MTP) speculative decoding on Qwen 3.8 hybrid architectures.
 
@@ -12,7 +32,8 @@ Qwen 3.8 integrates linear attention (Gated Delta Net / GDN) recurrent layers wi
 
 ## 2. Supported Quantization Formats
 
-Native MTP decode is certified across the following precision tiers:
+The implementation targets the following precision tiers; this is a proposed operating envelope,
+not a physical certification matrix:
 
 | Quantization Format | Weight Footprint (27B) | Memory Bus Pressure | Target Hardware | Operating Role |
 |---|---|---|---|---|
@@ -25,7 +46,9 @@ Native MTP decode is certified across the following precision tiers:
 
 ## 3. The K=4 Depth Sweet Spot
 
-Draft depth $K$ represents the count of speculative tokens proposed per verification cycle. Empirical sweeps conducted via `cmd/tunemtp` (`internal/mtptune`) over Code, Math, and JSON tasks demonstrate that **$K=4$ is the optimal operating sweet spot**:
+Draft depth $K$ represents the count of speculative tokens proposed per verification cycle.
+Deterministic tuning fixtures in `cmd/tunemtp` (`internal/mtptune`) model **$K=4$ as a candidate
+sweet spot**; physical runs have not established it as optimal:
 
 ```
 Draft Depth (K) vs Effective Token Throughput (tok/s):
@@ -47,7 +70,7 @@ K=8: [========================] 30.5 tok/s  (State rollback memory traffic stall
 
 In autoregressive decode, model weights must be streamed from memory for each token step. MTP speculative decoding breaks the 1-token-per-memory-load barrier:
 
-- **Unified Memory (AMD Strix Halo LPDDR5X @ 200–256 GB/s)**: With $K=4$ MTP, effective generation throughput scales from ~18 tok/s to >42 tok/s on Qwen 3.8 27B ROCmFP4, achieving an effective memory bus efficiency multiplier of ~2.3x.
+- **Unified Memory (AMD Strix Halo LPDDR5X @ 200–256 GB/s)**: The model projects scaling from ~18 tok/s to >42 tok/s on Qwen 3.8 27B ROCmFP4 at $K=4$ (~2.3x); this is `[SIMULATED]`, not measured silicon throughput.
 - **Discrete PCIe Envelopes**: On PCIe Gen4/Gen5 discrete GPU topologies, recurrent state rollback must never leave the device. Performing D2H transfers would introduce ~50–150 $\mu$s bus stalls per verify step, completely eroding speculative speedup. The on-device shadow rollback kernel (`internal/compute/recurrent_rollback.go`) guarantees 0 D2H bytes and 0 D2H events.
 
 ## 5. Graceful Fallback Downgrade Semantics
