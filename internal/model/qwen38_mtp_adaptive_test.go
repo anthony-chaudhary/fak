@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -351,5 +352,306 @@ func TestQwen38MTP_Adaptive_TraceLogging(t *testing.T) {
 	}
 	if receipt.TotalSteps != len(steps) {
 		t.Fatalf("receipt.TotalSteps = %d, want %d", receipt.TotalSteps, len(steps))
+	}
+}
+
+// TestMetalMTPAdaptiveDepthChangesWithPressure is the regression witness for Issue #12332:
+// It minimally connects Qwen38MTPAdaptiveDepthGovernor to real Metal coordinator rounds,
+// feeds deterministic acceptance and cost observations through real StepRound executions,
+// proves bounded K changes with hysteresis, proves target-only escape when drafting is net-negative,
+// and confirms typed fak-native downgrade and envelope isolation without external fallback.
+func TestMetalMTPAdaptiveDepthChangesWithPressure(t *testing.T) {
+	ctx := context.Background()
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	prompt := []int{0, 1, 2}
+
+	// Reference autoregressive baseline at temperature zero for bit-exact ground truth
+	refSes := m.NewSession()
+	t.Cleanup(refSes.Close)
+	const maxSeq = 64
+	wantTokens := refSes.Generate(prompt, maxSeq)
+	if len(wantTokens) < 32 {
+		t.Fatalf("expected >= 32 reference tokens, got %d", len(wantTokens))
+	}
+
+	// Configure coordinator with dynamic adaptive governor:
+	// K in [1..4], cold start K=2, hysteresis=3 steps, probe_interval=4 steps
+	adCfg := DefaultQwen38AdaptiveConfig()
+	adCfg.ColdStartDepth = 2
+	adCfg.MaxDepth = 4
+	adCfg.HysteresisSteps = 3
+	adCfg.ProbeInterval = 4
+	adCfg.SpeedupThresholdHigh = 1.20
+	adCfg.SpeedupThresholdLow = 1.05
+	adCfg.TargetOnlyThreshold = 1.00
+
+	specSes := m.NewSession()
+	t.Cleanup(specSes.Close)
+
+	coord, err := specSes.NewMetalMTPCoordinator(MetalMTPConfig{
+		DraftDepth:            4,
+		Adaptive:              true,
+		AdaptiveConfig:        &adCfg,
+		EnforceGreedyTripwire: true,
+	})
+	if err != nil {
+		t.Fatalf("NewMetalMTPCoordinator failed: %v", err)
+	}
+	t.Cleanup(func() { _ = coord.Close() })
+
+	// 1. Verify cold start initialization and typed fak-native envelope
+	if coord.CurrentDraftDepth() != 2 {
+		t.Fatalf("initial draft depth = %d, want cold start depth 2", coord.CurrentDraftDepth())
+	}
+	if coord.DowngradeReason() != Qwen38MTPEligible {
+		t.Fatalf("initial downgrade reason = %q, want eligible", coord.DowngradeReason())
+	}
+	if coord.Engine() != Qwen38EngineMTP {
+		t.Fatalf("initial engine = %q, want fak-native MTP", coord.Engine())
+	}
+
+	// Helper for an agreeing drafter that matches reference autoregressive decode
+	agreeingDrafter := NewMTPProposalGeneratorWithFn(func(ctx context.Context, committed []int, maxDraft int) ([]int, error) {
+		numGen := len(committed) - len(prompt)
+		if numGen < 0 || numGen+maxDraft > len(wantTokens) {
+			return nil, nil
+		}
+		toks := make([]int, maxDraft)
+		copy(toks, wantTokens[numGen:numGen+maxDraft])
+		return toks, nil
+	})
+	coord.SetDrafter(agreeingDrafter)
+
+	boundary := specSes.Prefill(prompt)
+	committed := append([]int(nil), prompt...)
+
+	// 2. High acceptance rounds: prove hysteresis delay before ramp-up (K=2 -> K=3)
+	// Steps 1 & 2: high speedup, but streak < 3 -> draft depth must hold at 2
+	for round := 1; round <= 2; round++ {
+		acc, bonus, nextLogits, rErr := coord.StepRound(ctx, committed, boundary)
+		if rErr != nil {
+			t.Fatalf("round %d failed: %v", round, rErr)
+		}
+		if len(acc) != 2 {
+			t.Fatalf("round %d accepted = %d, want 2", round, len(acc))
+		}
+		committed = append(committed, acc...)
+		committed = append(committed, bonus)
+		boundary = nextLogits
+
+		if coord.CurrentDraftDepth() != 2 {
+			t.Fatalf("round %d depth = %d, want 2 (held by hysteresis streak %d/3)", round, coord.CurrentDraftDepth(), round)
+		}
+	}
+
+	// Step 3: reaches hysteresis streak of 3 -> ramps up to depth 3
+	acc, bonus, nextLogits, rErr := coord.StepRound(ctx, committed, boundary)
+	if rErr != nil {
+		t.Fatalf("round 3 failed: %v", rErr)
+	}
+	if len(acc) != 2 {
+		t.Fatalf("round 3 accepted = %d, want 2", len(acc))
+	}
+	committed = append(committed, acc...)
+	committed = append(committed, bonus)
+	boundary = nextLogits
+
+	if coord.CurrentDraftDepth() != 3 {
+		t.Fatalf("round 3 depth = %d, want 3 (ramped after 3 high streak steps)", coord.CurrentDraftDepth())
+	}
+
+	// 3. High acceptance rounds at depth 3: prove hysteresis to MaxDepth (K=3 -> K=4)
+	for round := 4; round <= 5; round++ {
+		acc, bonus, nextLogits, rErr := coord.StepRound(ctx, committed, boundary)
+		if rErr != nil {
+			t.Fatalf("round %d failed: %v", round, rErr)
+		}
+		if len(acc) != 3 {
+			t.Fatalf("round %d accepted = %d, want 3", round, len(acc))
+		}
+		committed = append(committed, acc...)
+		committed = append(committed, bonus)
+		boundary = nextLogits
+
+		if coord.CurrentDraftDepth() != 3 {
+			t.Fatalf("round %d depth = %d, want 3 (held by hysteresis)", round, coord.CurrentDraftDepth())
+		}
+	}
+
+	// Step 6: reaches hysteresis streak of 3 -> ramps up to MaxDepth 4
+	acc, bonus, nextLogits, rErr = coord.StepRound(ctx, committed, boundary)
+	if rErr != nil {
+		t.Fatalf("round 6 failed: %v", rErr)
+	}
+	if len(acc) != 3 {
+		t.Fatalf("round 6 accepted = %d, want 3", len(acc))
+	}
+	committed = append(committed, acc...)
+	committed = append(committed, bonus)
+	boundary = nextLogits
+
+	if coord.CurrentDraftDepth() != 4 {
+		t.Fatalf("round 6 depth = %d, want 4 (ramped to MaxDepth)", coord.CurrentDraftDepth())
+	}
+
+	// Step 7: prove bounded K (cannot exceed MaxDepth = 4)
+	acc, bonus, nextLogits, rErr = coord.StepRound(ctx, committed, boundary)
+	if rErr != nil {
+		t.Fatalf("round 7 failed: %v", rErr)
+	}
+	if len(acc) != 4 {
+		t.Fatalf("round 7 accepted = %d, want 4", len(acc))
+	}
+	committed = append(committed, acc...)
+	committed = append(committed, bonus)
+	boundary = nextLogits
+
+	if coord.CurrentDraftDepth() != 4 {
+		t.Fatalf("round 7 depth = %d, want 4 (bounded at MaxDepth)", coord.CurrentDraftDepth())
+	}
+
+	// 4. Introduce adversarial pressure / net-negative drafting:
+	// Propose divergent tokens guaranteed to fail verification (0 accepted, all 4 rolled back)
+	adversarialDrafter := NewMTPProposalGeneratorWithFn(func(ctx context.Context, committed []int, maxDraft int) ([]int, error) {
+		toks := make([]int, maxDraft)
+		for i := range toks {
+			toks[i] = 99990 + i
+		}
+		return toks, nil
+	})
+	coord.SetDrafter(adversarialDrafter)
+
+	acc, bonus, nextLogits, rErr = coord.StepRound(ctx, committed, boundary)
+	if rErr != nil {
+		t.Fatalf("pressure round 8 failed: %v", rErr)
+	}
+	if len(acc) != 0 {
+		t.Fatalf("pressure round 8 accepted = %d, want 0 (complete rollback)", len(acc))
+	}
+	committed = append(committed, bonus)
+	boundary = nextLogits
+
+	// Prove immediate target-only escape when drafting is net-negative
+	if coord.CurrentDraftDepth() != 0 {
+		t.Fatalf("after net-negative drafting, depth = %d, want 0 (target-only escape)", coord.CurrentDraftDepth())
+	}
+	if coord.DowngradeReason() != Qwen38MTPNetLatencyRegressed {
+		t.Fatalf("downgrade reason = %q, want %q", coord.DowngradeReason(), Qwen38MTPNetLatencyRegressed)
+	}
+	if coord.Engine() != Qwen38EngineTargetDecode {
+		t.Fatalf("engine = %q, want %q", coord.Engine(), Qwen38EngineTargetDecode)
+	}
+	if !coord.InFallback() {
+		t.Fatalf("InFallback = false, want true in target-only escape")
+	}
+
+	// 5. Target-only execution: verify serial steps and probe interval counting (ProbeInterval = 4)
+	// Steps 1..3 in target-only mode: must hold depth 0
+	for step := 1; step <= 3; step++ {
+		acc, bonus, nextLogits, rErr = coord.StepRound(ctx, committed, boundary)
+		if rErr != nil {
+			t.Fatalf("target-only step %d failed: %v", step, rErr)
+		}
+		if len(acc) != 1 || bonus != -1 {
+			t.Fatalf("target-only step %d produced acc=%v, bonus=%d, want 1 serial token", step, acc, bonus)
+		}
+		committed = append(committed, acc...)
+		boundary = nextLogits
+
+		if coord.CurrentDraftDepth() != 0 {
+			t.Fatalf("target-only step %d depth = %d, want 0", step, coord.CurrentDraftDepth())
+		}
+	}
+
+	// Step 4 in target-only mode: probe interval (4) elapses, triggering depth 1 probe
+	acc, bonus, nextLogits, rErr = coord.StepRound(ctx, committed, boundary)
+	if rErr != nil {
+		t.Fatalf("target-only step 4 failed: %v", rErr)
+	}
+	committed = append(committed, acc...)
+	boundary = nextLogits
+
+	if coord.CurrentDraftDepth() != 1 {
+		t.Fatalf("after probe interval elapsed, depth = %d, want 1 (probing)", coord.CurrentDraftDepth())
+	}
+	if !coord.AdaptiveGovernor().IsProbing() {
+		t.Fatalf("expected governor to be probing")
+	}
+
+	// 6. Execute probe step with agreeing conditions: drafting resumes at depth 1
+	coord.SetDrafter(agreeingDrafter)
+	acc, bonus, nextLogits, rErr = coord.StepRound(ctx, committed, boundary)
+	if rErr != nil {
+		t.Fatalf("probe execution round failed: %v", rErr)
+	}
+	if len(acc) != 1 {
+		t.Fatalf("probe round accepted = %d, want 1", len(acc))
+	}
+	committed = append(committed, acc...)
+	committed = append(committed, bonus)
+	boundary = nextLogits
+
+	if coord.CurrentDraftDepth() != 1 {
+		t.Fatalf("after probe success, depth = %d, want 1 (drafting resumed)", coord.CurrentDraftDepth())
+	}
+	if coord.DowngradeReason() != Qwen38MTPEligible {
+		t.Fatalf("after probe success, downgrade reason = %q, want eligible", coord.DowngradeReason())
+	}
+	if coord.Engine() != Qwen38EngineMTP {
+		t.Fatalf("after probe success, engine = %q, want fak-native MTP", coord.Engine())
+	}
+	if coord.InFallback() {
+		t.Fatalf("after probe success, InFallback = true, want false")
+	}
+
+	// 7. Verify deterministic cost model pressure injection via SetStepCostFn
+	// Even with 100% acceptance, high simulated step latency triggers net-negative speedup escape
+	coord.SetStepCostFn(func(proposed, accepted int, base Qwen38AdaptiveStepObservation) Qwen38AdaptiveStepObservation {
+		// Simulate severe GPU compute contention: 200ms step vs 50ms target
+		base.StepLatency = 200 * time.Millisecond
+		base.TargetLatency = 50 * time.Millisecond
+		return base
+	})
+
+	acc, bonus, nextLogits, rErr = coord.StepRound(ctx, committed, boundary)
+	if rErr != nil {
+		t.Fatalf("latency pressure round failed: %v", rErr)
+	}
+	committed = append(committed, acc...)
+	committed = append(committed, bonus)
+	boundary = nextLogits
+
+	// Net speedup for 1 proposed, 1 accepted at 200ms/50ms = (2 * 50ms) / 200ms = 0.50 < 1.00 -> escape
+	if coord.CurrentDraftDepth() != 0 {
+		t.Fatalf("latency pressure should trigger target-only escape, got depth %d", coord.CurrentDraftDepth())
+	}
+	if coord.DowngradeReason() != Qwen38MTPNetLatencyRegressed {
+		t.Fatalf("latency pressure downgrade reason = %q, want regressed", coord.DowngradeReason())
+	}
+
+	// 8. Receipt validation: verify deterministic audit trail & schema compliance
+	receipt := coord.AdaptiveGovernor().Receipt()
+	if err := receipt.Validate(); err != nil {
+		t.Fatalf("adaptive receipt validation failed: %v", err)
+	}
+	if receipt.Engine != Qwen38EngineMTP {
+		t.Fatalf("receipt engine = %q, want %q", receipt.Engine, Qwen38EngineMTP)
+	}
+	if receipt.TargetOnlyEscapes < 2 {
+		t.Fatalf("receipt target-only escapes = %d, want >= 2", receipt.TargetOnlyEscapes)
+	}
+	if receipt.ProbesExecuted < 1 {
+		t.Fatalf("receipt probes executed = %d, want >= 1", receipt.ProbesExecuted)
+	}
+	if receipt.NetNegativeSteps < 2 {
+		t.Fatalf("receipt net negative steps = %d, want >= 2", receipt.NetNegativeSteps)
+	}
+
+	// 9. Verify generated tokens match ground truth sequence bit-exactly
+	genTokens := committed[len(prompt):]
+	for i, tok := range genTokens {
+		if tok != wantTokens[i] {
+			t.Fatalf("token %d mismatch: got %d, want %d", i, tok, wantTokens[i])
+		}
 	}
 }
