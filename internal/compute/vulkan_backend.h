@@ -79,6 +79,8 @@ int fvk_have_q8(void);
 /* Optional decode-only Q8 Gated-DeltaNet input-projection specialization. Its
  * pipeline may be absent while the generic Q8 kernels remain fully available. */
 int fvk_have_qwen35_gdn_q8_in_proj(void);
+/* Optional decode-only Q4_K Gated-DeltaNet input-projection specialization. */
+int fvk_have_qwen35_gdn_q4k_in_proj(void);
 int fvk_have_glm_kda_wave32(void);
 int fvk_have_cooperative_matrix(void);
 /* Per-resource storage-buffer cap discovered at init. fvk_max_buffer_bytes is the effective
@@ -120,6 +122,12 @@ int fvk_qwen35_gdn_q8_in_proj_f32(
     const void *dW1codes, const void *dW1scale,
     const void *dW2codes, const void *dW2scale,
     const void *dW3codes, const void *dW3scale,
+    const void *dX, void *dY0, void *dY1, void *dY2, void *dY3,
+    int out0, int out1, int out2, int out3, int in);
+/* Four packed Q4_K projections over one decode activation. Returns zero when
+ * the optional pipeline records successfully and a non-zero status otherwise. */
+int fvk_qwen35_gdn_q4k_in_proj_f32(
+    const void *dW0, const void *dW1, const void *dW2, const void *dW3,
     const void *dX, void *dY0, void *dY1, void *dY2, void *dY3,
     int out0, int out1, int out2, int out3, int in);
 /* RMSNorm(X) followed by two Q8_0 projections over the normalized row (FFN gate/up, Q8). */

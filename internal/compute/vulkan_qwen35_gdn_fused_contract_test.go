@@ -75,7 +75,7 @@ func TestQwen35GDNQ8InputProjectionShimContract(t *testing.T) {
 	src := string(shim)
 	for _, token := range []string{
 		"K_QWEN35_GDN_Q8_IN_PROJ",
-		"case K_QWEN35_GDN_Q8_IN_PROJ: case K_QWEN35_GDN_CONV",
+		"case K_QWEN35_GDN_Q8_IN_PROJ: case K_QWEN35_GDN_Q4K_IN_PROJ:",
 		"static constexpr int MAX_DISPATCH_BUFS = 13;",
 		"P(\"qwen35_gdn_q8_in_proj.spv\"),",
 		"13, 5 * sizeof(int)) ? 1 : 0;",
@@ -89,5 +89,72 @@ func TestQwen35GDNQ8InputProjectionShimContract(t *testing.T) {
 	_, build := qwen35GDNComputeFixture(t, "build_vulkan.ps1")
 	if !strings.Contains(string(build), `$shaders += "qwen35_gdn_q8_in_proj"`) {
 		t.Error("Vulkan build does not compile the fused Q8 GDN shader")
+	}
+}
+
+func TestQwen35GDNQ4KInputProjectionShaderContract(t *testing.T) {
+	shaderPath, raw := qwen35GDNComputeFixture(t, filepath.Join("shaders", "qwen35_gdn_q4k_in_proj.comp"))
+	shader := string(raw)
+	for binding := 0; binding < 9; binding++ {
+		token := "binding=" + strconv.Itoa(binding)
+		if !strings.Contains(shader, token) {
+			t.Errorf("fused Q4_K GDN shader missing descriptor %d", binding)
+		}
+	}
+	for _, token := range []string{
+		"layout(local_size_x = 64) in;",
+		"uint packedWord(uint projection, uint index)",
+		"uint baseWord = (row * blocks + sb) * 36u;",
+		"vec2 d_dm = unpackHalf2x16(packedWord(projection, baseWord));",
+		"uint totalOut = out0 + out1 + out2 + uint(pc.out3);",
+		"else Y3[row] = sum;",
+	} {
+		if !strings.Contains(shader, token) {
+			t.Errorf("fused Q4_K GDN shader missing contract token %q", token)
+		}
+	}
+
+	glslc := "glslc"
+	if _, err := exec.LookPath(glslc); err != nil {
+		vulkanSDK := os.Getenv("VULKAN_SDK")
+		if vulkanSDK == "" {
+			vulkanSDK = `C:\VulkanSDK\1.4.350.0`
+		}
+		candidate := filepath.Join(vulkanSDK, "Bin", "glslc.exe")
+		if _, err := os.Stat(candidate); err == nil {
+			glslc = candidate
+		}
+	}
+	if _, err := exec.LookPath(glslc); err == nil || filepath.IsAbs(glslc) {
+		spv := filepath.Join(t.TempDir(), "qwen35_gdn_q4k_in_proj.spv")
+		out, err := exec.Command(glslc, "-O", "--target-env=vulkan1.2", "-fshader-stage=comp", shaderPath, "-o", spv).CombinedOutput()
+		if err != nil {
+			t.Fatalf("glslc failed: %v\n%s", err, out)
+		}
+		if info, err := os.Stat(spv); err != nil || info.Size() == 0 {
+			t.Fatalf("compiled SPIR-V missing or empty: %v", err)
+		}
+	}
+}
+
+func TestQwen35GDNQ4KInputProjectionShimContract(t *testing.T) {
+	_, shim := qwen35GDNComputeFixture(t, "vulkan_shim.cpp")
+	src := string(shim)
+	for _, token := range []string{
+		"K_QWEN35_GDN_Q4K_IN_PROJ",
+		"case K_QWEN35_GDN_Q8_IN_PROJ: case K_QWEN35_GDN_Q4K_IN_PROJ:",
+		"P(\"qwen35_gdn_q4k_in_proj.spv\"),",
+		"9, 5 * sizeof(int)) ? 1 : 0;",
+		"int fvk_qwen35_gdn_q4k_in_proj_f32(",
+		"Buffer* bufs[9]",
+		"uint64_t weightBytes = outs[i] * blocks * 144u;",
+	} {
+		if !strings.Contains(src, token) {
+			t.Errorf("Vulkan shim missing fused Q4_K GDN contract token %q", token)
+		}
+	}
+	_, build := qwen35GDNComputeFixture(t, "build_vulkan.ps1")
+	if !strings.Contains(string(build), `$shaders += "qwen35_gdn_q4k_in_proj"`) {
+		t.Error("Vulkan build does not compile the fused Q4_K GDN shader")
 	}
 }

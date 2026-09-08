@@ -1,0 +1,115 @@
+#version 450
+
+// Decode-only four-way Q4_K projection for Qwen 3.5/3.8 Gated-DeltaNet.
+// Each invocation owns one output row. The arithmetic and packed-word access
+// order intentionally mirror q4k_matmul.comp; only row routing is fused.
+layout(local_size_x = 64) in;
+
+layout(set=0,binding=0) readonly buffer W0b { uint W0[]; };
+layout(set=0,binding=1) readonly buffer W1b { uint W1[]; };
+layout(set=0,binding=2) readonly buffer W2b { uint W2[]; };
+layout(set=0,binding=3) readonly buffer W3b { uint W3[]; };
+layout(set=0,binding=4) readonly buffer Xb { float X[]; };
+layout(set=0,binding=5) writeonly buffer Y0b { float Y0[]; };
+layout(set=0,binding=6) writeonly buffer Y1b { float Y1[]; };
+layout(set=0,binding=7) writeonly buffer Y2b { float Y2[]; };
+layout(set=0,binding=8) writeonly buffer Y3b { float Y3[]; };
+
+layout(push_constant) uniform Push {
+    int out0;
+    int out1;
+    int out2;
+    int out3;
+    int inDim;
+} pc;
+
+uint packedWord(uint projection, uint index) {
+    if (projection == 0u) return W0[index];
+    if (projection == 1u) return W1[index];
+    if (projection == 2u) return W2[index];
+    return W3[index];
+}
+
+void main() {
+    uint outputRow = gl_GlobalInvocationID.x;
+    uint out0 = uint(pc.out0);
+    uint out1 = uint(pc.out1);
+    uint out2 = uint(pc.out2);
+    uint totalOut = out0 + out1 + out2 + uint(pc.out3);
+    if (outputRow >= totalOut) return;
+
+    uint projection;
+    uint row;
+    if (outputRow < out0) {
+        projection = 0u;
+        row = outputRow;
+    } else if (outputRow < out0 + out1) {
+        projection = 1u;
+        row = outputRow - out0;
+    } else if (outputRow < out0 + out1 + out2) {
+        projection = 2u;
+        row = outputRow - out0 - out1;
+    } else {
+        projection = 3u;
+        row = outputRow - out0 - out1 - out2;
+    }
+
+    uint blocks = uint(pc.inDim) / 256u;
+    float sum = 0.0;
+    for (uint sb = 0u; sb < blocks; ++sb) {
+        uint baseWord = (row * blocks + sb) * 36u;
+        vec2 d_dm = unpackHalf2x16(packedWord(projection, baseWord));
+        float d = d_dm.x;
+        float dm = d_dm.y;
+
+        uint w1 = packedWord(projection, baseWord + 1u);
+        uint w2 = packedWord(projection, baseWord + 2u);
+        uint w3 = packedWord(projection, baseWord + 3u);
+
+        float d_sc[8];
+        float dm_mn[8];
+        for (int j = 0; j < 4; ++j) {
+            uint sc = bitfieldExtract(w1, j * 8, 6);
+            uint mn = bitfieldExtract(w2, j * 8, 6);
+            d_sc[j] = d * float(sc);
+            dm_mn[j] = dm * float(mn);
+        }
+        for (int j = 4; j < 8; ++j) {
+            int k = j - 4;
+            uint sc = bitfieldExtract(w3, k * 8, 4) |
+                      (bitfieldExtract(w1, k * 8 + 6, 2) << 4u);
+            uint mn = bitfieldExtract(w3, k * 8 + 4, 4) |
+                      (bitfieldExtract(w2, k * 8 + 6, 2) << 4u);
+            d_sc[j] = d * float(sc);
+            dm_mn[j] = dm * float(mn);
+        }
+
+        for (int pair = 0; pair < 4; ++pair) {
+            int gEven = pair * 2;
+            int gOdd = gEven + 1;
+            int xBaseEven = int(sb) * 256 + gEven * 32;
+            int xBaseOdd = xBaseEven + 32;
+            uint weightBase = baseWord + 4u + uint(pair * 8);
+
+            for (int word = 0; word < 8; ++word) {
+                uint qw = packedWord(projection, weightBase + uint(word));
+                int lane = word * 4;
+
+                sum += (d_sc[gEven] * float(bitfieldExtract(qw, 0, 4)) - dm_mn[gEven]) * X[xBaseEven + lane + 0];
+                sum += (d_sc[gEven] * float(bitfieldExtract(qw, 8, 4)) - dm_mn[gEven]) * X[xBaseEven + lane + 1];
+                sum += (d_sc[gEven] * float(bitfieldExtract(qw, 16, 4)) - dm_mn[gEven]) * X[xBaseEven + lane + 2];
+                sum += (d_sc[gEven] * float(bitfieldExtract(qw, 24, 4)) - dm_mn[gEven]) * X[xBaseEven + lane + 3];
+
+                sum += (d_sc[gOdd] * float(bitfieldExtract(qw, 4, 4)) - dm_mn[gOdd]) * X[xBaseOdd + lane + 0];
+                sum += (d_sc[gOdd] * float(bitfieldExtract(qw, 12, 4)) - dm_mn[gOdd]) * X[xBaseOdd + lane + 1];
+                sum += (d_sc[gOdd] * float(bitfieldExtract(qw, 20, 4)) - dm_mn[gOdd]) * X[xBaseOdd + lane + 2];
+                sum += (d_sc[gOdd] * float(bitfieldExtract(qw, 28, 4)) - dm_mn[gOdd]) * X[xBaseOdd + lane + 3];
+            }
+        }
+    }
+
+    if (projection == 0u) Y0[row] = sum;
+    else if (projection == 1u) Y1[row] = sum;
+    else if (projection == 2u) Y2[row] = sum;
+    else Y3[row] = sum;
+}

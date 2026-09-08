@@ -534,7 +534,7 @@ func (v *vulkanBackend) VulkanDebugGDNProfileSnapshot() (vectorCalls, scalarCall
 func (v *vulkanBackend) VulkanDebugGDNProjectionProfileSnapshot() (fusedCalls, composedCalls int64) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
-	return v.q8GDNFusedInProjCalls, v.q8GDNComposedInProjCalls
+	return v.gdnFusedInProjCalls, v.gdnComposedInProjCalls
 }
 
 func (v *vulkanBackend) VulkanDebugQ8GDNInProjAvailable() bool {
@@ -543,13 +543,19 @@ func (v *vulkanBackend) VulkanDebugQ8GDNInProjAvailable() bool {
 	return v.haveQ8GDNInProj
 }
 
+func (v *vulkanBackend) VulkanDebugQ4KGDNInProjAvailable() bool {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return v.haveQ4KGDNInProj
+}
+
 func (v *vulkanBackend) VulkanDebugResetGDNProfile() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	v.vectorGDNCalls = 0
 	v.scalarGDNCalls = 0
-	v.q8GDNFusedInProjCalls = 0
-	v.q8GDNComposedInProjCalls = 0
+	v.gdnFusedInProjCalls = 0
+	v.gdnComposedInProjCalls = 0
 }
 
 // VulkanDebugInitShim attempts initialization against an explicit SPIR-V directory
