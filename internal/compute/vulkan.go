@@ -155,6 +155,7 @@ func init() {
 		name:                    "vulkan",
 		tier:                    tier + ":" + C.GoString(&name[0]),
 		haveQ8:                  C.fvk_have_q8() != 0,
+		haveQ8GDNInProj:         C.fvk_have_qwen35_gdn_q8_in_proj() != 0,
 		haveAttention:           true,
 		haveCoopmat:             C.fvk_have_cooperative_matrix() != 0,
 		haveMemoryBudget:        C.fvk_have_memory_budget() != 0,
@@ -390,13 +391,14 @@ type vulkanQ8Chunk struct {
 func (b *vulkanBuf) Ready() bool { return true }
 
 type vulkanBackend struct {
-	name          string
-	tier          string
-	haveQ8        bool
-	haveCoopmat   bool
-	haveAttention bool
-	transient     []*vulkanBuf
-	freeTransient map[int][]*vulkanBuf
+	name            string
+	tier            string
+	haveQ8          bool
+	haveQ8GDNInProj bool
+	haveCoopmat     bool
+	haveAttention   bool
+	transient       []*vulkanBuf
+	freeTransient   map[int][]*vulkanBuf
 	// Device-local residency budget (Stage-1 offload). budgetBytes is the cap on device-local
 	// memory fak will request for weights; 0 = unbounded (the prior behavior). dlUsed tracks
 	// bytes placed device-local so far. When the next weight would exceed the budget it is
@@ -435,6 +437,8 @@ type vulkanBackend struct {
 	disableVectorGDN            bool
 	vectorGDNCalls              int64
 	scalarGDNCalls              int64
+	q8GDNFusedInProjCalls       int64
+	q8GDNComposedInProjCalls    int64
 	haveQ4KFusedRMSNormMatMul2  bool
 	haveQ4KFusedSwiGLUMatMulAdd bool
 	forceScalarQ4K              bool
