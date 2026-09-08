@@ -1796,6 +1796,127 @@ func TestVulkanAttentionFlashShapes(t *testing.T) {
 	}
 }
 
+// TestVulkanPrefillBatch tests GPU-native batched prompt prefill without CPU reference fallback (#11036).
+func TestVulkanPrefillBatch(t *testing.T) {
+	v := vk(t)
+	c := cpu()
+
+	if !v.Caps().FusedAttn {
+		t.Fatalf("vulkan backend does not advertise FusedAttn in Caps")
+	}
+	if !v.Caps().BatchedPrefill {
+		t.Fatalf("vulkan backend does not advertise BatchedPrefill in Caps")
+	}
+
+	testCases := []struct {
+		name     string
+		P        int
+		D        int
+		nH, nKV  int
+		hd       int
+		startPos int
+		withWo   bool
+	}{
+		{name: "P=1 single-token", P: 1, D: 32, nH: 4, nKV: 2, hd: 8, startPos: 0, withWo: true},
+		{name: "P=4 MHA with Wo", P: 4, D: 32, nH: 4, nKV: 4, hd: 8, startPos: 0, withWo: true},
+		{name: "P=8 GQA with Wo", P: 8, D: 64, nH: 4, nKV: 2, hd: 16, startPos: 0, withWo: true},
+		{name: "P=8 GQA without Wo", P: 8, D: 64, nH: 4, nKV: 2, hd: 16, startPos: 0, withWo: false},
+		{name: "P=8 with non-zero startPos", P: 8, D: 64, nH: 4, nKV: 2, hd: 16, startPos: 4, withWo: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var rng lcg = lcg(42 + uint64(tc.P)*17)
+			P := tc.P
+			D := tc.D
+			nH := tc.nH
+			nKV := tc.nKV
+			hd := tc.hd
+			qOut := nH * hd
+			kvOut := nKV * hd
+			theta := 10000.0
+			scale := float32(1.0 / math.Sqrt(float64(hd)))
+
+			xData := randVec(&rng, P*D)
+			wqData := randVec(&rng, qOut*D)
+			wkData := randVec(&rng, kvOut*D)
+			wvData := randVec(&rng, kvOut*D)
+			var woData []float32
+			if tc.withWo {
+				woData = randVec(&rng, D*qOut)
+			}
+
+			xHost := NewF32(c, []int{P, D}, xData)
+			wqHost := NewF32(c, []int{qOut, D}, wqData)
+			wkHost := NewF32(c, []int{kvOut, D}, wkData)
+			wvHost := NewF32(c, []int{kvOut, D}, wvData)
+			var woHost Tensor
+			if tc.withWo {
+				woHost = NewF32(c, []int{D, qOut}, woData)
+			}
+
+			cfg := KVConfig{NumLayers: 1, NumKVHeads: nKV, HeadDim: hd, RopeTheta: theta}
+			ckv := c.NewKV(cfg)
+			vkv := v.NewKV(cfg)
+
+			if tc.startPos > 0 {
+				for p := 0; p < tc.startPos; p++ {
+					kRaw := randVec(&rng, kvOut)
+					kRoPE := randVec(&rng, kvOut)
+					val := randVec(&rng, kvOut)
+					ckv.AppendKV(0, NewF32(c, []int{kvOut}, kRaw), NewF32(c, []int{kvOut}, kRoPE), NewF32(c, []int{kvOut}, val), p)
+					vkv.AppendKV(0, v.Upload(NewF32(c, []int{kvOut}, kRaw), F32), v.Upload(NewF32(c, []int{kvOut}, kRoPE), F32), v.Upload(NewF32(c, []int{kvOut}, val), F32), p)
+				}
+			}
+
+			refArgs := PrefillBatchArgs{
+				X: xHost, Wq: wqHost, Wk: wkHost, Wv: wvHost, Wo: woHost,
+				KV: ckv, Layer: 0, StartPos: tc.startPos, NumHeads: nH, NumKVHeads: nKV, HeadDim: hd,
+				RopeTheta: theta, Scale: scale,
+			}
+			refRes, err := c.PrefillBatch(refArgs)
+			if err != nil {
+				t.Fatalf("CPU ref PrefillBatch failed: %v", err)
+			}
+
+			xDev := v.Upload(xHost, F32)
+			wqDev := v.Upload(wqHost, F32)
+			wkDev := v.Upload(wkHost, F32)
+			wvDev := v.Upload(wvHost, F32)
+			var woDev Tensor
+			if tc.withWo {
+				woDev = v.Upload(woHost, F32)
+			}
+
+			vulkanArgs := PrefillBatchArgs{
+				X: xDev, Wq: wqDev, Wk: wkDev, Wv: wvDev, Wo: woDev,
+				KV: vkv, Layer: 0, StartPos: tc.startPos, NumHeads: nH, NumKVHeads: nKV, HeadDim: hd,
+				RopeTheta: theta, Scale: scale,
+			}
+			vulkanRes, err := v.PrefillBatch(vulkanArgs)
+			if err != nil {
+				t.Fatalf("Vulkan PrefillBatch failed: %v", err)
+			}
+
+			refOut := c.Read(refRes.Output)
+			vulkanOut := v.Read(vulkanRes.Output)
+
+			cos := cosine(refOut, vulkanOut)
+			if cos < 0.995 {
+				t.Fatalf("PrefillBatch cosine %.6f < 0.995", cos)
+			}
+
+			refArgmax := c.Argmax(refRes.Output)
+			vulkanArgmax := v.Argmax(vulkanRes.Output)
+			if refArgmax != vulkanArgmax {
+				t.Fatalf("PrefillBatch argmax mismatch: got %d, want %d", vulkanArgmax, refArgmax)
+			}
+
+			t.Logf("PrefillBatch %s: cosine=%.6f, argmax=%d", tc.name, cos, vulkanArgmax)
+		})
+	}
+}
+
 func TestVulkanTeardownResourcesIsIdempotent(t *testing.T) {
 	v := vk(t)
 	a := v.Upload(NewF32(Default(), []int{4}, []float32{1, 2, 3, 4}), F32)

@@ -19,10 +19,10 @@
 //   - Wave (1,1): tokens [16..31], outputs [16..31]
 //
 // For each K-block of 32 weights:
-//   1. Cooperatively stage 32 token rows of X (1024 floats) into LDS.
+//   1. Cooperatively stage 32 token rows of X (1024 floats) into LDS with Pad-2 stride (34 floats/row).
 //   2. Cooperatively stage 32 output rows of Wcodes (1024 int8 codes) transposed into LDS [32 x 32].
 //   3. Stage per-block scales Wscale (32 floats) into LDS.
-//   4. Quantize X row-by-row into LDS Xq [32 x 32] int8 codes and per-row scale Xs [32].
+//   4. Quantize X row-by-row into LDS Xq [32 x 34] int8 codes and per-row scale Xs [32].
 //   5. Execute Wave32 WMMA 16x16x16 INT8 cooperative matrix multiply in two 16-element halves (K=0..15 and K=16..31),
 //      accumulating into int32 registers.
 //   6. Store cooperative matrix tile to LDS and accumulate scaled partial sums:
@@ -35,12 +35,14 @@ layout(local_size_x = 32, local_size_y = 4, local_size_z = 1) in;
 const uint TILE_M = 32u;
 const uint TILE_N = 32u;
 const uint BLOCK = 32u;
+const uint LDS_PAD_2 = 2u;
+const uint STRIDE_K = BLOCK + LDS_PAD_2;
 
-shared int8_t  ldsXq[TILE_M * BLOCK];
+shared int8_t  ldsXq[TILE_M * STRIDE_K];
 shared int8_t  ldsTileW[BLOCK * TILE_N];
 shared float   ldsXs[TILE_M];
 shared float   ldsWs[TILE_N];
-shared float   ldsX_f32[TILE_M * BLOCK];
+shared float   ldsX_f32[TILE_M * STRIDE_K];
 shared int32_t ldsMatC[TILE_M * TILE_N];
 
 layout(std430, binding = 0) readonly buffer Wq   { int8_t  Wcodes[]; };  // [out*in] int8 weight codes
@@ -89,7 +91,7 @@ void main() {
             if (gRow < P_ && gCol < in_) {
                 val = X[gRow * in_ + gCol];
             }
-            ldsX_f32[r * BLOCK + c] = val;
+            ldsX_f32[r * STRIDE_K + c] = val;
         }
 
         // 2. Cooperatively stage Wcodes into ldsTileW [32 x 32] transposed: row=k, col=o
@@ -124,7 +126,7 @@ void main() {
             float amax = 0.0;
             if (gRow < P_) {
                 for (uint k = 0u; k < 32u; ++k) {
-                    amax = max(amax, abs(ldsX_f32[r * BLOCK + k]));
+                    amax = max(amax, abs(ldsX_f32[r * STRIDE_K + k]));
                 }
             }
             float d = amax / 127.0;
@@ -133,9 +135,9 @@ void main() {
             for (uint k = 0u; k < 32u; ++k) {
                 int8_t q = int8_t(0);
                 if (d > 0.0) {
-                    q = q8round(ldsX_f32[r * BLOCK + k] * inv);
+                    q = q8round(ldsX_f32[r * STRIDE_K + k] * inv);
                 }
-                ldsXq[r * BLOCK + k] = q;
+                ldsXq[r * STRIDE_K + k] = q;
             }
         }
 
@@ -148,10 +150,10 @@ void main() {
         matC = coopmat<int32_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0);
 
         for (uint kHalf = 0u; kHalf < 32u; kHalf += 16u) {
-            uint offsetA = waveRow * BLOCK + kHalf;
+            uint offsetA = waveRow * STRIDE_K + kHalf;
             uint offsetB = kHalf * TILE_N + waveCol;
 
-            coopMatLoad(matA, ldsXq, offsetA, BLOCK, gl_CooperativeMatrixLayoutRowMajor);
+            coopMatLoad(matA, ldsXq, offsetA, STRIDE_K, gl_CooperativeMatrixLayoutRowMajor);
             coopMatLoad(matB, ldsTileW, offsetB, TILE_N, gl_CooperativeMatrixLayoutRowMajor);
 
             matC = coopMatMulAdd(matA, matB, matC);

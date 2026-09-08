@@ -442,7 +442,7 @@ func (v *vulkanBackend) Tier() string            { return v.tier }
 func (v *vulkanBackend) Class() CorrectnessClass { return Approx }
 func (v *vulkanBackend) Caps() Caps {
 	_, _, hostKnown := hostSystemMemory()
-	return Caps{DeviceMemory: true, UploadDtype: v.haveQ8, CapacityProbe: v.totalMem > 0, HostCapacityProbe: hostKnown, BatchedPrefill: true}
+	return Caps{DeviceMemory: true, UploadDtype: v.haveQ8, CapacityProbe: v.totalMem > 0, HostCapacityProbe: hostKnown, BatchedPrefill: true, FusedAttn: true}
 }
 
 // Q4_K cooperative matrix 2D tile geometry constants on gfx1151 / RDNA 3.5.
