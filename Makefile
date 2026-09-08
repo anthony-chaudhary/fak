@@ -188,12 +188,14 @@ bench:
 mac-perf: build
 	@echo "== Mac Shift-Left Performance Verification =="
 	@go test -v ./internal/macbench -run '^TestValidateComparisonPacketNodeMacOSA$$'
+	@go test -v ./internal/macbench -run '^TestValidateMTPComparisonPacketNodeMacOSA$$'
 	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ2KGemv$$'
 	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ2KGemmSteady$$'
 	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ4KGemv$$'
 	@go test -v ./internal/model -run '^$$' -bench '^BenchmarkMetalQ4KGemmSteady$$'
 	@./fak macbench validate-comparison --input experiments/benchmark/runs/by-machine/node-macos-a/20260903T050000Z-macbench-threeway/packet.json --json
-	@echo "mac-perf OK (Apple Silicon Metal tok/s and prefill performance verified)"
+	@./fak macbench validate-mtp-comparison --input experiments/benchmark/runs/by-machine/node-macos-a/20260908T160000Z-macbench-mtp/packet.json --json
+	@echo "mac-perf OK (Apple Silicon Metal tok/s, prefill, and 4-way MTP comparative performance verified)"
 
 # status: the cross-domain "where do we stand right now?" rollup — folds git +
 # benchmarks + work + industry into ONE control-pane view (the sibling of
