@@ -359,6 +359,10 @@ func inspectGoASTDetectors(lane *DebtLane, unitDir string, surface SurfaceClass)
 		})
 	}
 
+	// 16. Hot-path performance debt on critical paths (#12363)
+	hotFindings := InspectHotPathDebt(lane, unitDir, surface)
+	findings = append(findings, hotFindings...)
+
 	return findings
 }
 
