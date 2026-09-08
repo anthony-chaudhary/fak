@@ -3,7 +3,7 @@
   "issue": 10362,
   "observed_date": "2026-08-30",
   "base_sha": "a5bc520e9e0d5bec806ee99649d51cd58623de16",
-  "command": "fak worktree worker list --root /Users/anthony/Documents/GitHub/fak --json",
+  "command": "fak worktree worker list --root /Users/USER/Documents/GitHub/fak --json",
   "before": {
     "timeout_seconds": 30,
     "timed_out": true,
