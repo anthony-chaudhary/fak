@@ -53,7 +53,7 @@
       "class": "runtime_source",
       "status": "covered",
       "evidence": [
-        ".cama-complete-install-dgx3.json",
+        ".cama-complete-install-gpu-server.json",
         ".claude/settings.local.json",
         ".claude/skills/actually-test/judge.py",
         ".claude/skills/actually-test/manifests/blktrace-e2e.yaml",
@@ -376,7 +376,7 @@
         }
       ],
       "example_paths": [
-        ".cama-complete-install-dgx3.json",
+        ".cama-complete-install-gpu-server.json",
         "CLAUDE.md",
         "README.md",
         "bench-vs-aiwasp-audit.md",
@@ -444,7 +444,7 @@
       ],
       "example_paths": [
         "qwen36run/_csv_manifest.json",
-        "qwen36run/results_monitor_dgx1-qwen36-27b-dense__combo_02_workers1_20260423_110148.json"
+        "qwen36run/results_monitor_gpu-server-qwen36-27b-dense__combo_02_workers1_20260423_110148.json"
       ],
       "source_classes": [
         "runtime_source"
