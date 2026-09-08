@@ -156,8 +156,8 @@ func TestRawDecodeSynthetic(t *testing.T) {
 	if attempt.Observed.Source.GitCommit != "" || attempt.Observed.Source.SourceArchiveSHA256 != "" || attempt.Observed.Source.Dirty != nil || attempt.Observed.Source.DiffSHA256 != "" || attempt.Observed.Model.ArtifactSHA256 != "" || attempt.Observed.Device.Name != "" || attempt.Observed.OutputText != "" || attempt.Observed.PeakProcessMemoryBytes != nil || attempt.Observed.PeakDeviceMemoryBytes != nil || attempt.Observed.Counters != nil {
 		t.Fatalf("unobserved physical identity or telemetry was invented: %+v", attempt.Observed)
 	}
-	if len(attempt.Observed.Source.BinarySHA256) != 64 {
-		t.Fatalf("running binary identity was not observed: %+v", attempt.Observed.Source)
+	if attempt.Observed.Source.BinarySHA256 != "" {
+		t.Fatalf("incomplete executable tuple leaked binary-only identity: %+v", attempt.Observed.Source)
 	}
 	if attempt.Observed.FiniteLogits == nil || !*attempt.Observed.FiniteLogits || attempt.Observed.CPUModelParity != nil {
 		t.Fatalf("quality evidence presence mismatch: finite=%v parity=%v", attempt.Observed.FiniteLogits, attempt.Observed.CPUModelParity)
@@ -173,15 +173,7 @@ func TestRawDecodeSynthetic(t *testing.T) {
 	}
 }
 
-func TestRawDecodePhysicalReceiptCapturesRunningBinary(t *testing.T) {
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := fileIdentity(executable)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestRawDecodePhysicalReceiptLeavesIncompleteExecutableTupleUnavailable(t *testing.T) {
 	execution := rawdecode.Execution{
 		PromptTokenIDs: []int{1}, ContextLimit: 8, GeneratedLimit: 1, FiniteLogits: true,
 	}
@@ -189,11 +181,8 @@ func TestRawDecodePhysicalReceiptCapturesRunningBinary(t *testing.T) {
 	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
 		t.Fatalf("binary-only observation became creditable: %+v", attempt)
 	}
-	if got := attempt.Observed.Source.BinarySHA256; got != want.SHA256 {
-		t.Fatalf("running binary SHA-256 = %q, want %q", got, want.SHA256)
-	}
-	if attempt.Observed.Source.GitCommit != "" || attempt.Observed.Source.SourceArchiveSHA256 != "" || attempt.Observed.Source.Dirty != nil || attempt.Observed.Source.DiffSHA256 != "" {
-		t.Fatalf("binary capture invented source identity: %+v", attempt.Observed.Source)
+	if attempt.Observed.Source.GitCommit != "" || attempt.Observed.Source.BinarySHA256 != "" || attempt.Observed.Source.Dirty != nil || attempt.Observed.Source.SourceArchiveSHA256 != "" || attempt.Observed.Source.DiffSHA256 != "" {
+		t.Fatalf("incomplete executable tuple escaped into source identity: %+v", attempt.Observed.Source)
 	}
 }
 
@@ -210,11 +199,58 @@ func TestRawDecodeVulkanNameDoesNotClaimPhysicalEngineIdentity(t *testing.T) {
 	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
 		t.Fatalf("named test backend became creditable: %+v", attempt)
 	}
-	if attempt.Observed.Engine.Backend != compute.Qwen38VulkanDecodeBackend || attempt.Observed.Engine.ExecutedPath != "" {
-		t.Fatalf("observed backend fields missing: %+v", attempt.Observed.Engine)
-	}
-	if attempt.Observed.Engine.Name != "" || attempt.Observed.Engine.Runtime != "" || attempt.Observed.Engine.FallbackCount != nil {
+	if attempt.Observed.Engine.Backend != "" || attempt.Observed.Engine.ExecutedPath != "" || attempt.Observed.Engine.Name != "" || attempt.Observed.Engine.Runtime != "" || attempt.Observed.Engine.FallbackCount != nil {
 		t.Fatalf("backend registry name was relabeled as physical execution identity: %+v", attempt.Observed.Engine)
+	}
+}
+
+func TestRawDecodePhysicalReceiptCarriesBackendObservationWithoutPromoting(t *testing.T) {
+	backendExecution := compute.BackendExecutionObservation{
+		Identity: compute.BackendRuntimeIdentity{Backend: "vulkan", Device: "fixture-device", Driver: "fixture-driver", Runtime: "Vulkan 1.3"},
+		Counters: compute.BackendCounterSnapshot{
+			ComputeDispatches: 9, Q4KMatmulDispatches: 7, OtherDispatches: 2, DispatchSubmits: 3,
+			H2DBytes: 64, D2HBytes: 32, D2DCopies: 1, Q4KStageCalls: 2, Q4KStageBytes: 128,
+			TensorHomeHits: 4, TensorHomeAdmissions: 1,
+		},
+		TensorHomeEntries: 2, TensorHomeResidentBytes: 256,
+		DeviceMemoryObserved: true, DeviceMemoryTotalBytes: 64 << 30, DeviceMemoryFreeBytes: 48 << 30,
+	}
+	execution := rawdecode.Execution{
+		ArtifactSHA256: strings.Repeat("a", 64), Engine: "fak-in-kernel via compute HAL backend \"vulkan\"",
+		Backend: rawdecode.BackendObservation{Selected: "vulkan"}, PromptTokenIDs: []int{1},
+		ContextLimit: 8, GeneratedLimit: 1, FiniteLogits: true,
+		Runs: []rawdecode.Run{{BackendExecution: &backendExecution}},
+	}
+	attempt := rawDecodePhysicalReceipt(execution, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+	if attempt.Status != "UNAVAILABLE" || attempt.CreditEligible || attempt.Receipt != nil {
+		t.Fatalf("partial backend observation became creditable: %+v", attempt)
+	}
+	if len(attempt.BackendExecutions) != 1 || attempt.BackendExecutions[0].Counters.ComputeDispatches != 9 || attempt.BackendExecutions[0].Counters.H2DBytes != 64 {
+		t.Fatalf("backend execution delta was not preserved: %+v", attempt.BackendExecutions)
+	}
+	if attempt.Observed.Device.Name != "fixture-device" || attempt.Observed.Device.VulkanVersion != "Vulkan 1.3" || attempt.Observed.Engine.Backend != "vulkan" || attempt.Observed.Engine.Runtime != "Vulkan 1.3" || attempt.Observed.Engine.FallbackCount == nil || *attempt.Observed.Engine.FallbackCount != 0 {
+		t.Fatalf("backend-owned canonical identity mapping mismatch: device=%+v engine=%+v", attempt.Observed.Device, attempt.Observed.Engine)
+	}
+	if attempt.Observed.Device.MesaVersion != "" || attempt.Observed.PeakProcessMemoryBytes != nil || attempt.Observed.PeakDeviceMemoryBytes != nil || attempt.Observed.Counters != nil {
+		t.Fatalf("unavailable driver, peak memory, or incomplete counters were synthesized: %+v", attempt.Observed)
+	}
+
+	for name, mutate := range map[string]func(*rawdecode.Execution){
+		"unsupported":       func(candidate *rawdecode.Execution) { candidate.Runs[0].BackendExecution = nil },
+		"identity mismatch": func(candidate *rawdecode.Execution) { candidate.Runs[0].BackendExecution.Identity.Backend = "cpu" },
+		"incomplete memory": func(candidate *rawdecode.Execution) { candidate.Runs[0].BackendExecution.DeviceMemoryObserved = false },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := execution
+			candidate.Runs = append([]rawdecode.Run(nil), execution.Runs...)
+			observationCopy := backendExecution
+			candidate.Runs[0].BackendExecution = &observationCopy
+			mutate(&candidate)
+			got := rawDecodePhysicalReceipt(candidate, []rawRepOutput{{generatedTokens: []int{2}, prefillDur: time.Nanosecond}})
+			if got.Status != "UNAVAILABLE" || got.CreditEligible || got.Receipt != nil || len(got.BackendExecutions) != 0 || got.Observed.Engine.FallbackCount != nil {
+				t.Fatalf("invalid backend observation was exposed or promoted: %+v", got)
+			}
+		})
 	}
 }
 
@@ -260,21 +296,13 @@ func TestRawDecodeExecutorProductionAdapterCallsSeamOnceAndFailsReceiptClosed(t 
 	if attempt["status"] != "UNAVAILABLE" || attempt["credit_eligible"] != false {
 		t.Fatalf("incomplete observation became physical receipt: %v", attempt)
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantBinary, err := fileIdentity(executable)
-	if err != nil {
-		t.Fatal(err)
-	}
 	observed, ok := attempt["observed"].(map[string]any)
 	if !ok {
 		t.Fatalf("missing observed physical result: %v", attempt)
 	}
 	source, ok := observed["source"].(map[string]any)
-	if !ok || source["binary_sha256"] != wantBinary.SHA256 {
-		t.Fatalf("production report running binary identity = %v, want %q", source, wantBinary.SHA256)
+	if !ok || source["git_commit"] != "" || source["binary_sha256"] != "" || source["dirty"] != nil {
+		t.Fatalf("production report emitted partial executable identity: %v", source)
 	}
 }
 

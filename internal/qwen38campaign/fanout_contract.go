@@ -91,10 +91,71 @@ type ExecutionIdentity struct {
 	TokenPacketSHA256   string `json:"token_packet_sha256"`
 }
 
+// BackendExecutionEvidence is the lossless receipt form of one backend-owned
+// execution observation. It deliberately keeps transfer bytes separate from
+// DRAM traffic and reports closing memory gauges rather than peak memory.
+type BackendExecutionEvidence struct {
+	Backend                 string  `json:"backend"`
+	Device                  string  `json:"device"`
+	Driver                  string  `json:"driver"`
+	Runtime                 string  `json:"runtime"`
+	ComputeDispatches       uint64  `json:"compute_dispatches"`
+	Q4KMatmulDispatches     uint64  `json:"q4_k_matmul_dispatches"`
+	OtherDispatches         uint64  `json:"other_dispatches"`
+	DispatchSubmits         uint64  `json:"dispatch_submits"`
+	H2DBytes                uint64  `json:"h2d_bytes"`
+	D2HBytes                uint64  `json:"d2h_bytes"`
+	D2DCopies               uint64  `json:"d2d_copies"`
+	Q4KStageCalls           uint64  `json:"q4_k_stage_calls"`
+	Q4KStageBytes           uint64  `json:"q4_k_stage_bytes"`
+	Fallbacks               uint64  `json:"fallbacks"`
+	TensorHomeHits          uint64  `json:"tensor_home_hits"`
+	TensorHomeAdmissions    uint64  `json:"tensor_home_admissions"`
+	TensorHomeBypasses      uint64  `json:"tensor_home_bypasses"`
+	TensorHomeCopiedBytes   uint64  `json:"tensor_home_copied_bytes"`
+	TensorHomeEntries       uint64  `json:"tensor_home_entries"`
+	TensorHomeResidentBytes uint64  `json:"tensor_home_resident_bytes"`
+	DeviceMemoryTotalBytes  *uint64 `json:"device_memory_total_bytes,omitempty"`
+	DeviceMemoryFreeBytes   *uint64 `json:"device_memory_free_bytes,omitempty"`
+}
+
+// Validate ensures the evidence is complete, internally consistent, and bound
+// to the backend named by the physical trial.
+func (e BackendExecutionEvidence) Validate(selectedBackend string) error {
+	if strings.TrimSpace(e.Backend) == "" || e.Backend != selectedBackend {
+		return fmt.Errorf("qwen38campaign: observed backend %q does not match selected backend %q", e.Backend, selectedBackend)
+	}
+	if e.Backend != "vulkan" {
+		return fmt.Errorf("qwen38campaign: physical backend observation requires vulkan, got %q", e.Backend)
+	}
+	if strings.TrimSpace(e.Device) == "" || strings.TrimSpace(e.Driver) == "" || strings.TrimSpace(e.Runtime) == "" {
+		return errors.New("qwen38campaign: backend observation requires device, driver, and runtime")
+	}
+	if e.ComputeDispatches == 0 || e.DispatchSubmits == 0 {
+		return errors.New("qwen38campaign: backend observation requires executed dispatches and submits")
+	}
+	if e.ComputeDispatches != e.Q4KMatmulDispatches+e.OtherDispatches {
+		return fmt.Errorf("qwen38campaign: compute dispatch total %d does not match q4_k %d plus other %d", e.ComputeDispatches, e.Q4KMatmulDispatches, e.OtherDispatches)
+	}
+	if (e.DeviceMemoryTotalBytes == nil) != (e.DeviceMemoryFreeBytes == nil) {
+		return errors.New("qwen38campaign: backend device-memory observation is incomplete")
+	}
+	if e.DeviceMemoryTotalBytes == nil {
+		return errors.New("qwen38campaign: backend device-memory observation is unavailable")
+	}
+	if *e.DeviceMemoryTotalBytes == 0 || *e.DeviceMemoryFreeBytes > *e.DeviceMemoryTotalBytes {
+		return errors.New("qwen38campaign: backend device-memory observation is invalid")
+	}
+	return nil
+}
+
 // Validate ensures all required cryptographic identities are non-empty.
 func (id ExecutionIdentity) Validate() error {
 	if strings.TrimSpace(id.SourceCommit) == "" {
 		return errors.New("qwen38campaign: physical execution missing source commit")
+	}
+	if strings.TrimSpace(id.SourceArchiveSHA256) == "" {
+		return errors.New("qwen38campaign: physical execution missing source archive sha256")
 	}
 	if strings.TrimSpace(id.BinarySHA256) == "" {
 		return errors.New("qwen38campaign: physical execution missing binary sha256")
@@ -120,34 +181,35 @@ type PhysicalTrialRequest struct {
 
 // PhysicalTrialResult captures real observed telemetry from a physical device execution trial.
 type PhysicalTrialResult struct {
-	RunIndex          int                `json:"run_index"`
-	Concurrency       int                `json:"concurrency"`
-	Scenario          string             `json:"scenario"`
-	Backend           string             `json:"backend"`
-	ExecutionPath     string             `json:"execution_path"`
-	Identity          ExecutionIdentity  `json:"identity"`
-	WallDurationMS    float64            `json:"wall_duration_ms"`
-	UsefulTokens      int                `json:"useful_tokens"`
-	TokensPerSec      float64            `json:"tokens_per_sec"`
-	QueueLatencyMS    float64            `json:"queue_latency_ms"`
-	TTFTMS            float64            `json:"ttft_ms,omitempty"`
-	TPOTMS            float64            `json:"tpot_ms,omitempty"`
-	PrefixReuseRate   float64            `json:"prefix_reuse_rate,omitempty"`
-	PeakMemoryBytes   uint64             `json:"peak_memory_bytes,omitempty"`
-	CounterSource     string             `json:"counter_source,omitempty"`
-	PhysicalDRAMBytes int64              `json:"physical_dram_bytes,omitempty"`
-	DRAMBandwidthGBps float64            `json:"dram_bandwidth_gbps,omitempty"`
-	MALLHitBytes      int64              `json:"mall_hit_bytes,omitempty"`
-	MALLTotalBytes    int64              `json:"mall_total_bytes,omitempty"`
-	MALLHitRate       float64            `json:"mall_hit_rate,omitempty"`
-	PhasesMS          map[string]float64 `json:"phases_ms"`
-	PhasesUS          map[string]float64 `json:"phases_us,omitempty"`
-	LogitCosineParity float64            `json:"logit_cosine_parity"`
-	ParityPassed      bool               `json:"parity_passed"`
-	OutputTokenIDs    []int32            `json:"output_token_ids,omitempty"`
-	OutputText        string             `json:"output_text,omitempty"`
-	FallbackCount     int                `json:"fallback_count"`
-	FailureCount      int                `json:"failure_count"`
+	RunIndex          int                       `json:"run_index"`
+	Concurrency       int                       `json:"concurrency"`
+	Scenario          string                    `json:"scenario"`
+	Backend           string                    `json:"backend"`
+	ExecutionPath     string                    `json:"execution_path"`
+	Identity          ExecutionIdentity         `json:"identity"`
+	WallDurationMS    float64                   `json:"wall_duration_ms"`
+	UsefulTokens      int                       `json:"useful_tokens"`
+	TokensPerSec      float64                   `json:"tokens_per_sec"`
+	QueueLatencyMS    float64                   `json:"queue_latency_ms"`
+	TTFTMS            float64                   `json:"ttft_ms,omitempty"`
+	TPOTMS            float64                   `json:"tpot_ms,omitempty"`
+	PrefixReuseRate   float64                   `json:"prefix_reuse_rate,omitempty"`
+	PeakMemoryBytes   uint64                    `json:"peak_memory_bytes,omitempty"`
+	CounterSource     string                    `json:"counter_source,omitempty"`
+	PhysicalDRAMBytes int64                     `json:"physical_dram_bytes,omitempty"`
+	DRAMBandwidthGBps float64                   `json:"dram_bandwidth_gbps,omitempty"`
+	MALLHitBytes      int64                     `json:"mall_hit_bytes,omitempty"`
+	MALLTotalBytes    int64                     `json:"mall_total_bytes,omitempty"`
+	MALLHitRate       float64                   `json:"mall_hit_rate,omitempty"`
+	PhasesMS          map[string]float64        `json:"phases_ms"`
+	PhasesUS          map[string]float64        `json:"phases_us,omitempty"`
+	LogitCosineParity float64                   `json:"logit_cosine_parity"`
+	ParityPassed      bool                      `json:"parity_passed"`
+	OutputTokenIDs    []int32                   `json:"output_token_ids,omitempty"`
+	OutputText        string                    `json:"output_text,omitempty"`
+	FallbackCount     int                       `json:"fallback_count"`
+	FailureCount      int                       `json:"failure_count"`
+	BackendExecution  *BackendExecutionEvidence `json:"backend_execution,omitempty"`
 }
 
 // Validate ensures physical trial results satisfy acceptance contracts.
@@ -175,6 +237,15 @@ func (res PhysicalTrialResult) Validate(threshold float64) error {
 	}
 	if res.FailureCount != 0 {
 		return fmt.Errorf("qwen38campaign: physical trial reported %d failures", res.FailureCount)
+	}
+	if res.BackendExecution == nil {
+		return errors.New("qwen38campaign: physical trial missing backend execution observation")
+	}
+	if err := res.BackendExecution.Validate(res.Backend); err != nil {
+		return err
+	}
+	if uint64(res.FallbackCount) != res.BackendExecution.Fallbacks {
+		return fmt.Errorf("qwen38campaign: physical trial fallback count %d does not match observed backend fallback count %d", res.FallbackCount, res.BackendExecution.Fallbacks)
 	}
 	if !res.ParityPassed || res.LogitCosineParity < threshold {
 		return fmt.Errorf("qwen38campaign: physical trial logit cosine parity %.6f below threshold %.6f", res.LogitCosineParity, threshold)
@@ -205,29 +276,30 @@ type ModeledRunner interface {
 
 // RunMetric captures the performance, memory traffic, and parity of one benchmark trial.
 type RunMetric struct {
-	RunIndex          int                `json:"run_index"`
-	Concurrency       int                `json:"concurrency"`
-	Scenario          string             `json:"scenario"`
-	WallDurationMS    float64            `json:"wall_duration_ms"`
-	UsefulTokens      int                `json:"useful_tokens"`
-	TokensPerSec      float64            `json:"tokens_per_sec"`
-	PhysicalDRAMBytes int64              `json:"physical_dram_bytes,omitempty"`
-	DRAMBandwidthGBps float64            `json:"dram_bandwidth_gbps,omitempty"`
-	MALLHitBytes      int64              `json:"mall_hit_bytes,omitempty"`
-	MALLTotalBytes    int64              `json:"mall_total_bytes,omitempty"`
-	MALLHitRate       float64            `json:"mall_hit_rate,omitempty"`
-	QueueLatencyMS    float64            `json:"queue_latency_ms"`
-	TTFTMS            float64            `json:"ttft_ms,omitempty"`
-	TPOTMS            float64            `json:"tpot_ms,omitempty"`
-	PrefixReuseRate   float64            `json:"prefix_reuse_rate,omitempty"`
-	PeakMemoryBytes   uint64             `json:"peak_memory_bytes,omitempty"`
-	CounterSource     string             `json:"counter_source,omitempty"`
-	PhasesMS          map[string]float64 `json:"phases_ms"`
-	PhasesUS          map[string]float64 `json:"phases_us,omitempty"`
-	LogitCosineParity float64            `json:"logit_cosine_parity"`
-	ParityPassed      bool               `json:"parity_passed"`
-	FallbackCount     int                `json:"fallback_count,omitempty"`
-	FailureCount      int                `json:"failure_count,omitempty"`
+	RunIndex          int                       `json:"run_index"`
+	Concurrency       int                       `json:"concurrency"`
+	Scenario          string                    `json:"scenario"`
+	WallDurationMS    float64                   `json:"wall_duration_ms"`
+	UsefulTokens      int                       `json:"useful_tokens"`
+	TokensPerSec      float64                   `json:"tokens_per_sec"`
+	PhysicalDRAMBytes int64                     `json:"physical_dram_bytes,omitempty"`
+	DRAMBandwidthGBps float64                   `json:"dram_bandwidth_gbps,omitempty"`
+	MALLHitBytes      int64                     `json:"mall_hit_bytes,omitempty"`
+	MALLTotalBytes    int64                     `json:"mall_total_bytes,omitempty"`
+	MALLHitRate       float64                   `json:"mall_hit_rate,omitempty"`
+	QueueLatencyMS    float64                   `json:"queue_latency_ms"`
+	TTFTMS            float64                   `json:"ttft_ms,omitempty"`
+	TPOTMS            float64                   `json:"tpot_ms,omitempty"`
+	PrefixReuseRate   float64                   `json:"prefix_reuse_rate,omitempty"`
+	PeakMemoryBytes   uint64                    `json:"peak_memory_bytes,omitempty"`
+	CounterSource     string                    `json:"counter_source,omitempty"`
+	PhasesMS          map[string]float64        `json:"phases_ms"`
+	PhasesUS          map[string]float64        `json:"phases_us,omitempty"`
+	LogitCosineParity float64                   `json:"logit_cosine_parity"`
+	ParityPassed      bool                      `json:"parity_passed"`
+	FallbackCount     int                       `json:"fallback_count,omitempty"`
+	FailureCount      int                       `json:"failure_count,omitempty"`
+	BackendExecution  *BackendExecutionEvidence `json:"backend_execution,omitempty"`
 }
 
 // StatisticalSummary aggregates distribution metrics across all repetitions.
@@ -351,6 +423,12 @@ func (r SubagentFanoutReceipt) Validate() error {
 			}
 		}
 		if !r.Config.Simulated {
+			if run.BackendExecution == nil {
+				return fmt.Errorf("qwen38campaign: run %d missing backend execution observation", i)
+			}
+			if err := run.BackendExecution.Validate(r.Backend); err != nil {
+				return fmt.Errorf("qwen38campaign: run %d invalid backend execution observation: %w", i, err)
+			}
 			if run.FallbackCount != 0 {
 				return fmt.Errorf("qwen38campaign: run %d fallback count %d != 0", i, run.FallbackCount)
 			}
