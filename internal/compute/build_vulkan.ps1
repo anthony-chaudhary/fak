@@ -132,6 +132,8 @@ function Build-Shaders {
     $shaders += "qwen35_gdn_tiled_transpose"
     $shaders += "coopmat_wave32_wmma"
     $shaders += "q4k_matmul_wave32"
+    $shaders += "rmsnorm_q4k_matmul2"
+    $shaders += "swiglu_q4k_matmul_add"
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"
