@@ -28,7 +28,7 @@ integration, or dual-repo goal/lease coordination, synchronization MUST encompas
 both `fak` and `fak-private` companion repositories to prevent interface skew (`go.work`)
 and lease/queue stalls (`refs/fak/locks/*`). If scope is ambiguous, stay in FAK.
 
-## Divide and conquer: delegate real work; keep the coordinator context clean
+## Divide and conquer: Delegate real work; keep the coordinator context clean
 
 Use guarded headless agents or an equivalent isolated worker for every substantive
 unit of work. The primary agent is the coordinator: decompose the request, give each
@@ -36,11 +36,21 @@ worker a bounded goal and distinct file set, preserve only decisions and compact
 evidence in the primary context, and independently witness worker results before
 landing or reporting them. Delegate investigation, implementation, tests, long command
 output, and independent review; do not pull their full transcripts into the coordinator.
+Structurally drive 10x subagent adoption by default: aggressively fan out 4–8 (up to 16
+on multi-core hosts) specialized subagents concurrently across pairwise tree-disjoint lanes.
 
-- **Divide and conquer by default**: When handling substantive, multi-part, or complex tasks,
-  decompose them into atomic, single-concern units or parallel subagent packets. Launch specialized
-  subagents (`task`: worker, researcher, explore, deep-reason, cross-validator) concurrently for
-  independent components to maximize throughput and prevent coordinator context saturation.
+- **Divide and conquer by default (10x subagent adoption)**: When handling substantive, multi-part, or complex tasks,
+  decompose them into atomic, single-concern units or parallel subagent packets. Launch 4–8 (up to 16
+  on multi-core hosts) specialized subagents (`task`: worker, researcher, explore, deep-reason, cross-validator,
+  issue-auditor, tester, reviewer, scout) concurrently across pairwise tree-disjoint lanes to maximize
+  throughput and prevent coordinator context saturation.
+- **3-Tier Parallel Pipeline**: Structure multi-agent work into three decoupled parallel cohorts:
+  1. *Parallel scoping and research*: Discovery via `researcher`, `explore`, and `scout` to isolate prior art, contracts, and relevant packages.
+  2. *Parallel implementation + reproduction tests*: Implementation via `worker` and `deep-reason` across disjoint lanes, authoring reproduction tests before fixes.
+  3. *Parallel adversarial verification and QA ticketing*: Adversarial verification via `cross-validator`, deterministic test execution via `tester`, and edge-case issue auto-ticketing via `issue-auditor`.
+- **Depth-0 Coordinator vs. Depth-1 Leaf Worker**:
+  - *Top-level coordinator (depth 0)*: Aggressively fans out parallel subagents across the 3-tier pipeline, arbitrates lane leases (`dos arbitrate`), and collects compact receipts.
+  - *Leaf worker (depth 1)*: Executes directly within assigned package boundaries (1–3 files, package-scoped tests). Leaf workers must NOT invoke nested `task` calls (preventing recursion depth exhaustion, #12028). Autonomous safe sync landing (`fak sync`, `fak commit --path`, `fak sync push`) is active by default working within each worker process upon test verification.
 - **Tree-disjoint boundaries**: Assign each worker a distinct, non-overlapping file set to avoid
   concurrent collisions on the shared trunk.
 - **Isolate and witness**: Keep heavy command logs and raw transcripts in worker boundaries; pull
@@ -268,6 +278,14 @@ urgent safety or outage response must start immediately, or GitHub is unavailabl
 or offline work, create or reconcile the issue as soon as the constraint clears and record why
 work began first. Do not use plans, TODOs, commit messages, or chat as substitutes when GitHub
 issue tracking is reasonably available.
+
+### Cross-repository issue quoting and qualification
+
+When referencing, quoting, or linking issue numbers across public and companion repositories:
+- **Public `fak` issues:** A bare `#<num>` in this repository strictly denotes a public issue in `anthony-chaudhary/fak` (or canonical `fak#<num>`).
+- **Private `fak-private` issues:** When public `fak` quotes or cites an issue number from the companion private repository (`fak-private`) — such as referencing an internal appeal, reproducer, incident, or boundary contract in commit messages, technical notes, test names, PRs, or code comments — it **MUST be explicitly qualified as `fak-private#<num>`** (or `anthony-chaudhary/fak-private#<num>`) so that its private origin is crystal clear.
+- **Prohibition on bare private numbers:** Never quote a `fak-private` issue with a bare `#<num>` or unqualified `issue #<num>` in public code, commit subjects/bodies, PRs, or documentation. A bare number in public `fak` falsely implies a public issue, triggers erroneous auto-closes on GitHub, and breaks automated issue-closure tracking.
+
 ## New work defaults: spine first, then fan out
 
 For every new unit, align with the default priority hierarchy (1: All-in-one [serving + harness + memory], 2: Serving only, 3: Harness only, 4: Other things), classify centrality (`Core`, `Enabling`, `Stewardship`, `Peripheral`), run
@@ -319,7 +337,7 @@ is a no-op). **When you cite evidence in a claim or a handoff, prefer `module@re
     - **Structured divergence reconciliation**: When local and remote diverge, use `fak sync reconcile` to evaluate safe structured routes (`ROUTE_APPLY` for clean ff, `ROUTE_DISJOINT_INTEGRATE` for disjoint commit file-trees, `ROUTE_SUPERSET_MERGE` for textless `-s ours` verified merge, `ROUTE_HOLD_DIRTY_COLLISION` with path suspension via `fak wip park` / `--suspend-paths`, or `ROUTE_RECONCILE_PACKET` for overlapping conflicts).
     - **No force-push or unverified merges**: Stay on `main`; never force-push, use `--autostash`, create a feature branch, escape a dirty/diverged tree into a worktree, or perform raw unverified 3-way merges on the shared trunk. On `PUSH_REJECTED`, reconcile and retry via `fak sync push`.
 - **Match scope to capability.** Constrain smaller models and workers to atomic S0/S1 leaf units with single-concern boundaries and one witness. When encountering high-difficulty aspects (concurrency, frozen ABI, complex kernel algorithms), practice scoped fail-to-abstain: land partial verified evidence and escalate only the isolated high-difficulty boundary with a structured ABSTAIN record rather than guessing or emitting speculative changes. Persist through recoverable hurdles using alternate sanctioned routes or waiting out transient locks rather than abandoning the task.
-- **Commit exactly one issue through explicit paths via `fak commit` or `fak sweep`.** All commits must be made via `fak commit --path` or `fak sweep --apply`. Lint with `fak commit --preview`, then stage-and-commit via `fak commit --path <p> ... -m "<subject> (fak <leaf>)"` or `fak sweep --apply --lane <lane> -m "<subject>"`. `fak commit` provides automatic DCO sign-off (with `-s` accepted for compatibility) and verifies that no peer files were raced in (`PATHSPEC_RACE`). Never use `git add -A` or uncoordinated raw git commits on the shared trunk; raw git commit (`git commit -s -m "<subject> (fak <leaf>)" -- <paths>`) is restricted to unbuilt-binary emergency fallback. One issue lands in one commit and one leaf; do not split a green issue into patch commits or batch unrelated issues.
+- **Commit exactly one issue through explicit paths via `fak commit --path` or `fak sweep`.** All commits must be made via `fak commit --path` or `fak sweep --apply`. Lint with `fak commit --preview`, then stage-and-commit via `fak commit --path <p> ... -m "<subject> (fak <leaf>)"` or `fak sweep --apply --lane <lane> -m "<subject>"`. `fak commit` provides automatic DCO sign-off (with `-s` accepted for compatibility) and verifies that no peer files were raced in (`PATHSPEC_RACE`). One issue lands in one commit and one leaf; do not split a green issue into patch commits or batch unrelated issues. WARNING: Raw git commits are strictly an emergency-only fallback, permitted ONLY when the `fak` binary is unbuilt (`git commit -s -m "<subject> (fak <leaf>)" -- <paths>`); never use `git add -A` or uncoordinated raw git commits on the shared trunk.
 - **Make the first subject final.** Sign off with DCO, use a Conventional-Commits subject, and include a recognized `(fak <leaf>)` trailer. A peer may push your commit before an amend, so preview the subject and paths first. Demo binaries use their `cmd/<dir>` name as the leaf.
 - **Preserve shared-tree buildability.** A tracked or untracked `.go` sibling enters every package build. Fence incomplete cross-file WIP with `//go:build wip_<feature>` until its symbols exist; validate only your explicit paths with `fak validate --mine`. Build verification never writes an in-tree binary.
 - **Migrate CI/CD contracts atomically.** Before changing workflow inputs, JSON schemas consumed by workflows, check/job names, secrets/env, runner labels, or artifact/cache names, search the whole tree for consumers and update them together. Include changed contract, migrated consumers, impact/cutover, and rollback in the commit body; prove committed tip with `fak-dev ci-preflight`. Checklist: [`docs/ci/ci-spec-change-migration.md`](docs/ci/ci-spec-change-migration.md).
@@ -360,7 +378,7 @@ Recover by the named action; do not route around the guard:
 rather than guessing. The token argument is case- and separator-insensitive.
 
 Keep the common commit-lane rules available before a refusal: stay on `main`,
-commit only explicit paths via `fak commit` or `fak sweep`, never amend or force-push shared history, wait out a
+commit only explicit paths via `fak commit --path` or `fak sweep`, never amend or force-push shared history, wait out a
 peer's `MERGE_HEAD`, and reconcile divergence in place with `fak sync apply`. The hard rules above are
 the preventive contract; the query surfaces are the token-specific recovery path.
 

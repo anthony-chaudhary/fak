@@ -21,15 +21,16 @@ The five that will bite you if you skip them:
   it is detached (never a branch) and commits only through the serialized land under the
   worker's lane lease, it is not off-trunk and never trips `OFF_TRUNK`. Feature branches
   and any other off-trunk commit stay forbidden. (Details in [`AGENTS.md`](AGENTS.md).)
-- **Commit via `fak commit` or `fak sweep` by explicit path** — all commits must be made via
-  `fak commit --path <p> -m "<subject> (fak <leaf>)"` or `fak sweep --apply --lane <lane> -m "<subject>"`,
-  never `git add -A` or uncoordinated raw `git commit` (shared multi-session tree).
+- **Commit via `fak commit --path` or `fak sweep` by explicit path** — all commits must be made via
+  `fak commit --path <p> -m "<subject> (fak <leaf>)"` or `fak sweep --apply --lane <lane> -m "<subject>"`.
   `fak commit` locks the lane, stages exactly your paths, provides automatic DCO sign-off (with `-s` accepted for compatibility),
   and verifies that no peer files were raced in (`PATHSPEC_RACE`). End every ship commit's Conventional-Commits
   subject with a bindable `(fak <leaf>)` trailer so the `dos verify` referee can bind it — e.g.
   `fix(gateway): treat same-tick ready as positive (fak gateway)`. A bare un-stamped subject stays NOT_SHIPPED.
-  Emergency raw git fallback is permitted ONLY when the `fak` binary is unbuilt (`git commit -s -m "<subject> (fak <leaf>)" -- <paths>`).
-  The [`/commit-clean`](.claude/skills/commit-clean/SKILL.md) skill mechanizes this rule end to end. (Full convention in [`AGENTS.md`](AGENTS.md).)
+  The [`/commit-clean`](.claude/skills/commit-clean/SKILL.md) skill mechanizes this rule end to end.
+  WARNING: Raw git commits are strictly an emergency-only fallback, permitted ONLY when the `fak` binary is unbuilt
+  (`git commit -s -m "<subject> (fak <leaf>)" -- <paths>`); never use `git add -A` or uncoordinated raw git commits
+  on the shared multi-session tree. (Full convention in [`AGENTS.md`](AGENTS.md).)
 - **Default is to ship green work and sync safely unprompted** — do more work by default:
   pre-flight sync with trunk (`fak sync check`, `fak sync reconcile --apply`, or `fak sync apply`),
   verify on-device (`fak validate --mine <paths>`, `go test ./internal/<pkg>/...`), commit by explicit path
@@ -37,10 +38,12 @@ The five that will bite you if you skip them:
   "Green" requires shift-left proof: for changes touching executable CLI verbs, gateway adapters, or runtime logic,
   execute real paths in dogfood or integration tests rather than relying on mock-only or shallow tests.
   Safe merge discipline: verify no in-flight `MERGE_HEAD` exists before staging (if active, unstage and wait; never clobber, abort, or finish a peer's merge); use `fak sync apply` (`--ff-only`) for clean trunk convergence; route divergence via `fak sync reconcile` (disjoint integration, superset merge, or dirty parking via `fak wip park`); never force-push, use `--autostash`, or perform raw 3-way merges.
-  Dual-repo synchronization invariant: when working across both repos or touching shared interfaces (`pkg/*`), keep both `fak` and `fak-private` synchronized (fetch both remotes and `refs/fak/locks/*`, fast-forward both, sync `go.work` to prevent module skew, and audit with public leak scrub `tools/scrub_public_copy.py --audit-staged`). Full default + verify command in [`AGENTS.md`](AGENTS.md).
-- **Divide and conquer: delegate substantive work and keep this coordinator context clean; enforce capability-aware scoping and persistence** —
-  decompose substantive or multi-part requests into atomic single-concern units and launch specialized subagents
-  concurrently for independent components. Use guarded headless agents or equivalent isolated workers for investigation,
+  Dual-repo synchronization invariant: when working across both repos or touching shared interfaces (`pkg/*`), keep both `fak` and `fak-private` synchronized (fetch both remotes and `refs/fak/locks/*`, fast-forward both, sync `go.work` to prevent module skew, and audit with public leak scrub `tools/scrub_public_copy.py --audit-staged`). Cross-repo issue quoting rule: bare `#<num>` strictly denotes a public `fak` issue; quoting a `fak-private` issue in public `fak` MUST be explicitly qualified as `fak-private#<num>` (or `anthony-chaudhary/fak-private#<num>`) to ensure provenance is unambiguous. Full default + verify command in [`AGENTS.md`](AGENTS.md).
+- **Divide and conquer: Delegate substantive work and keep this coordinator context clean; enforce capability-aware scoping and persistence** —
+  structurally drive 10x subagent adoption by launching 4–8 (up to 16 on multi-core hosts) specialized subagents concurrently across pairwise tree-disjoint lanes.
+  Decompose substantive or multi-part requests into atomic single-concern units and deploy multi-agent triads per leaf (researcher/explore -> worker -> cross-validator/issue-auditor).
+  Top-level coordinator (depth 0) aggressively fans out parallel subagents; leaf workers (depth 1) execute directly within assigned package boundaries and must NOT invoke nested `task` calls (preventing recursion depth exhaustion, #12028).
+  Use guarded headless agents or equivalent isolated workers for investigation,
   implementation, tests, and review. Constrain smaller models and workers to atomic S0/S1 leaf units (1–3 files,
   single package, exactly one witness). Scope abstention strictly to bounded high-difficulty aspects
   (concurrency, frozen ABI, kernel memory layout, security gates): emit a structured `ABSTAIN`
@@ -48,7 +51,8 @@ The five that will bite you if you skip them:
   reproduction tests or diagnostics). Treat guard refusals as actionable feedback rather than session stops:
   query `fak recover <TOKEN>`, adapt execution or wait out transient locks, and maintain momentum on the
   objective without repeating failing calls. Keep only decisions and compact witnessed
-  evidence here; independently verify worker effects before landing or reporting them. Reserve
+  evidence here; independently verify
+  worker effects before landing or reporting them. Reserve
   direct work for lightweight coordination and truly trivial tasks. Full contract in [`AGENTS.md`](AGENTS.md).
 - **The Go module is the repository root** — run `go` commands from the clone root;
   `go install github.com/anthony-chaudhary/fak/cmd/fak@latest` resolves directly.
