@@ -298,8 +298,16 @@ func TestBuild_LiveTree(t *testing.T) {
 	if prov := p.Corpus["verb_split_provenance"]; prov != "WITNESSED" {
 		t.Errorf("verb split provenance = %v, want WITNESSED", prov)
 	}
-	t.Logf("live-tree operator-heaviness: debt=%d pressure=%d verbs=%v (frontdoor=%v dev=%v) flags=%v reasons=%v",
-		debt, pressure, verbs, fd, dv, p.Corpus["front_door_flags"], p.Corpus["refusal_reasons"])
+	commonFlags, commonOK := p.Corpus["front_door_flags"].(int)
+	registeredFlags, registeredOK := p.Corpus["registered_guard_flags"].(int)
+	if !commonOK || commonFlags > flagSoftLine {
+		t.Errorf("curated guard front door = %v, want an integer at or below soft line %d", p.Corpus["front_door_flags"], flagSoftLine)
+	}
+	if !registeredOK || registeredFlags < commonFlags {
+		t.Errorf("registered guard flags = %v, want an integer preserving the complete surface (>= %d common)", p.Corpus["registered_guard_flags"], commonFlags)
+	}
+	t.Logf("live-tree operator-heaviness: debt=%d pressure=%d verbs=%v (frontdoor=%v dev=%v) flags=%v common/%v registered reasons=%v",
+		debt, pressure, verbs, fd, dv, commonFlags, registeredFlags, p.Corpus["refusal_reasons"])
 }
 
 // repoRoot walks up from the test's working directory to the directory holding go.mod.
