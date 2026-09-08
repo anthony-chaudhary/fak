@@ -1,6 +1,11 @@
 package adjudicator
 
-import "strings"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
 
 // shellWriteVerbs are the shell idioms that WRITE to a path operand (#172 Hole 1).
 // Detection is by substring on the command string and is deliberately conservative:
@@ -12,7 +17,7 @@ import "strings"
 var shellWriteVerbs = []string{
 	"sed -i", "sed --in-place", "tee ", "dd ", "truncate ", "shred ",
 	"git apply", "git checkout", "git restore", "git stash",
-	"cp ", "mv ", "install ", "patch ", "chmod ", "chown ", "ln ", "rm ",
+	"cp ", "mv ", "install ", "patch ", "chmod ", "chown ", "ln ", "rm ", "touch ",
 	// In-place interpreter edits — the sed -i family across other interpreters
 	// (#172 Hole 1, the porous-denylist residual). `perl -i`/`ruby -i` rewrite a
 	// file in place exactly as `sed -i` does, but carry none of the leading tokens
@@ -253,6 +258,23 @@ func fileWriteRedirectTargets(cmd string) []string {
 		for j < len(cmd) && (cmd[j] == ' ' || cmd[j] == '\t') {
 			j++
 		}
+		if j < len(cmd) && (cmd[j] == '"' || cmd[j] == '\'' || cmd[j] == '`') {
+			q := cmd[j]
+			j++
+			k := j
+			for k < len(cmd) && cmd[k] != q {
+				if cmd[k] == '\\' && k+1 < len(cmd) && q != '\'' {
+					k++
+				}
+				k++
+			}
+			target := cmd[j:k]
+			if target != "" && !isNullSink(target) {
+				targets = append(targets, cleanShellOperand(target))
+			}
+			i = k
+			continue
+		}
 		// Read the target token up to the next shell boundary.
 		k := j
 		for k < len(cmd) && !isRedirectTargetBoundary(cmd[k]) {
@@ -338,6 +360,13 @@ func segmentWriteTargetsWithSpecs(segment string, extra []InlineEvalSpec) []stri
 	for _, target := range fileWriteRedirectTargets(segment) {
 		add(target)
 	}
+	trimmedSeg := strings.TrimSpace(segment)
+	if strings.HasPrefix(trimmedSeg, "(") && strings.HasSuffix(trimmedSeg, ")") {
+		inner := strings.TrimSpace(trimmedSeg[1 : len(trimmedSeg)-1])
+		for _, target := range segmentWriteTargetsWithSpecs(inner, extra) {
+			add(target)
+		}
+	}
 	words := shellWords(segment)
 	if len(words) == 0 {
 		return targets
@@ -346,7 +375,7 @@ func segmentWriteTargetsWithSpecs(segment string, extra []InlineEvalSpec) []stri
 	if start >= len(words) {
 		return targets
 	}
-	head := strings.ToLower(words[start].text)
+	head := strings.ToLower(strings.Trim(words[start].text, "()"))
 	args := words[start+1:]
 	lc := strings.ToLower(segment)
 	switch head {
@@ -416,6 +445,18 @@ func segmentWriteTargetsWithSpecs(segment string, extra []InlineEvalSpec) []stri
 		addLastPlainOperand(args, add)
 	case "patch":
 		for _, target := range plainOperands(args) {
+			add(target)
+		}
+	case "touch":
+		for _, target := range plainOperands(args) {
+			add(target)
+		}
+	case "curl":
+		for _, target := range flagValues(args, "-o", "--output") {
+			add(target)
+		}
+	case "wget":
+		for _, target := range flagValues(args, "-O", "--output-document", "-P", "--directory-prefix") {
 			add(target)
 		}
 	}
@@ -833,6 +874,9 @@ func flagValues(args []shellWord, names ...string) []string {
 }
 
 func cleanShellOperand(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.Trim(s, "\"'")
+	s = strings.Trim(s, "()")
 	return strings.Trim(strings.TrimSpace(s), "\"'")
 }
 
@@ -1060,4 +1104,139 @@ func namesFlagToken(lc, flag string) bool {
 		}
 		from = at + 1
 	}
+}
+
+// ExtractCommandWriteTargets extracts all file targets that cmd attempts to write to (#12276).
+func ExtractCommandWriteTargets(cmd string) []string {
+	return commandWriteTargets(cmd)
+}
+
+// CheckMissionWriteTarget checks whether a single write target conforms to mc (#12276).
+// Enforces the asymmetric stat-then-allow rule:
+// 1. Explicit membership in WriteSet is always permitted.
+// 2. Creation of new files under any ExtractInto root is permitted.
+// 3. Modifying pre-existing files under ExtractInto requires explicit WriteSet membership.
+// 4. All other writes outside the WriteSet and ExtractInto are refused.
+func CheckMissionWriteTarget(target string, mc MissionContract) error {
+	target = cleanShellOperand(target)
+	target = strings.Trim(target, `"'`+"`")
+	if target == "" || isNullSink(target) {
+		return nil
+	}
+	if pathMatchesWriteSet(target, mc.WriteSet) {
+		return nil
+	}
+	for _, dir := range mc.ExtractInto {
+		if pathUnderRoot(target, dir) {
+			if filePreExists(target) {
+				return fmt.Errorf("modifying pre-existing file %q under ExtractInto requires explicit WriteSet membership", target)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("target %q is not in mission write-set and not allowed for extraction", target)
+}
+
+// VerifyMissionWriteSet verifies that all provided targets conform to the mission contract (#12276).
+func VerifyMissionWriteSet(targets []string, mc MissionContract) error {
+	for _, target := range targets {
+		if err := CheckMissionWriteTarget(target, mc); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// VerifyCommandMissionWrites verifies that all write targets in cmd conform to the mission contract (#12276).
+func VerifyCommandMissionWrites(cmd string, mc MissionContract) error {
+	targets := ExtractCommandWriteTargets(cmd)
+	return VerifyMissionWriteSet(targets, mc)
+}
+
+func filePreExists(p string) bool {
+	if p == "" {
+		return false
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
+}
+
+func pathUnderRoot(p, root string) bool {
+	if p == "" || root == "" {
+		return false
+	}
+	pClean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(p)))
+	rClean := strings.TrimSuffix(filepath.ToSlash(filepath.Clean(strings.TrimSpace(root))), "/")
+
+	if pClean == rClean || strings.HasPrefix(pClean, rClean+"/") {
+		return true
+	}
+
+	absP, errP := filepath.Abs(p)
+	absR, errR := filepath.Abs(root)
+	if errP == nil && errR == nil {
+		absPClean := filepath.ToSlash(filepath.Clean(absP))
+		absRClean := strings.TrimSuffix(filepath.ToSlash(filepath.Clean(absR)), "/")
+		if absPClean == absRClean || strings.HasPrefix(absPClean, absRClean+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func pathMatchesWriteSet(p string, writeSet []string) bool {
+	if p == "" || len(writeSet) == 0 {
+		return false
+	}
+	pTrimmed := strings.TrimSpace(p)
+	pClean := filepath.ToSlash(filepath.Clean(pTrimmed))
+	pNorm := strings.TrimPrefix(pClean, "./")
+
+	absP, errP := filepath.Abs(pTrimmed)
+	var absPClean string
+	if errP == nil {
+		absPClean = filepath.ToSlash(filepath.Clean(absP))
+	}
+
+	for _, entry := range writeSet {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		entryClean := filepath.ToSlash(filepath.Clean(entry))
+		entryNorm := strings.TrimPrefix(entryClean, "./")
+
+		if pNorm == entryNorm || pClean == entryClean {
+			return true
+		}
+		if strings.HasSuffix(entry, "/**") {
+			base := strings.TrimSuffix(entryNorm, "/**")
+			if pNorm == base || strings.HasPrefix(pNorm, base+"/") {
+				return true
+			}
+		} else if strings.HasSuffix(entry, "/") {
+			base := strings.TrimSuffix(entryNorm, "/")
+			if pNorm == base || strings.HasPrefix(pNorm, base+"/") {
+				return true
+			}
+		}
+		if ok, _ := filepath.Match(entryNorm, pNorm); ok {
+			return true
+		}
+		if absPClean != "" {
+			absE, errE := filepath.Abs(entry)
+			if errE == nil {
+				if absPClean == filepath.ToSlash(filepath.Clean(absE)) {
+					return true
+				}
+			}
+			if strings.HasSuffix(absPClean, "/"+entryNorm) {
+				return true
+			}
+		}
+	}
+	return false
 }
