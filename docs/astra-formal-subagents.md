@@ -112,12 +112,17 @@ The digest is SHA-256 over the exact trimmed assignment text sent to workers. A 
 
 ## Ranked weakest-link deployment map
 
-These are the current highest-value places to spend a bounded Astra read-only audit. Ranking reflects potential correctness impact and fit to formal reasoning, not measured Astra superiority. Each issue assigns implementation and test execution to a separate worker after the formal obligation is settled.
+The first audit cohort is complete: [#12109](https://github.com/anthony-chaudhary/fak/issues/12109), [#12110](https://github.com/anthony-chaudhary/fak/issues/12110), [#12111](https://github.com/anthony-chaudhary/fak/issues/12111), and [#12112](https://github.com/anthony-chaudhary/fak/issues/12112) are closed. Do not keep spending Astra on a settled packet unless a changed assumption invalidates its proof.
 
-1. [#12109 — lease fence holder identity](https://github.com/anthony-chaudhary/fak/issues/12109): prove the positive-generation holder invariant and isolate the empty-identity counterexample. This is the closest boundary to stale-writer exclusion.
-2. [#12112 — non-finite model-routing telemetry](https://github.com/anthony-chaudhary/fak/issues/12112): derive the minimal validation frontier preventing NaN or infinity from becoming feasible, improved, or unserializable routing evidence.
-3. [#12110 — goal reopen state machine](https://github.com/anthony-chaudhary/fak/issues/12110): derive the exhaustive terminal-to-active transition table and the mutation-free refusal cases.
-4. [#12111 — goal binding equivalence](https://github.com/anthony-chaudhary/fak/issues/12111): prove one canonical equivalence relation across bind, resolve, and unbind.
+The 2026-09-08 live #12112 dogfood run was rejected rather than accepted: the route selected `gpt-6-astra` at `xhigh`, but the unversioned installed binary omitted assignment binding and one child received no task payload; another child surfaced a finite-arithmetic overflow gap before the system-commit guard stopped it. The sanitized [#12116 receipt](_witnesses/issue-12116-astra-formal-live/receipt.json) records the refusal and recovery without making a quality-superiority claim. The resulting numerical gap is tracked by [#12158](https://github.com/anthony-chaudhary/fak/issues/12158).
+
+These are the next highest-value places to spend one bounded Astra read-only audit. Ranking reflects correctness impact and formal fit, not measured Astra superiority. Implementation and test execution remain separate.
+
+1. [#11950 — bound idempotency identity](https://github.com/anthony-chaudhary/fak/issues/11950): prove the canonical semantic-request equivalence relation across persistence, replay, and typed conflict, including legacy rows.
+2. [#11951 — durable spawn-budget restart](https://github.com/anthony-chaudhary/fak/issues/11951): derive the reservation/reconciliation state machine and prove that unknown consumption remains reserved while duplicate admission never double-reserves.
+3. [#11954 — EffectCoordinator bound identity](https://github.com/anthony-chaudhary/fak/issues/11954): after #11950, prove that coordinator retries preserve the same resource, principal, payload, and authority-domain binding across attempt changes.
+
+[#12113 — quarantine authority rebinding](https://github.com/anthony-chaudhary/fak/issues/12113) already received a bounded Astra state-machine audit on 2026-09-08. It rejected the exact-byte-crossing invariant with a deterministic rebind schedule; the issue now needs separate implementation and test work, not another identical audit.
 
 Do not open a duplicate for the `PublishFenced` check-then-publish takeover race. [#11835](https://github.com/anthony-chaudhary/fak/issues/11835) already owns authoritative acquisition and fencing at the actual write boundary, including late stale-holder refusal. #12109 is narrower: it covers missing holder identity at equal positive generation.
 
