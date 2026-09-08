@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	_ "github.com/anthony-chaudhary/fak/internal/registrations"
@@ -23,19 +24,22 @@ type EphemeralGatewayOptions struct {
 
 // EphemeralGateway encapsulates an in-process gateway.Server hosted on an ephemeral httptest.Server.
 type EphemeralGateway struct {
-	opts              EphemeralGatewayOptions
-	casDir            string
-	server            *gateway.Server
-	httpServer        *httptest.Server
-	createdTempCASDir string
-	prevCASDir        string
-	prevCASDirSet     bool
-	prevMaxCalls      string
-	prevMaxCallsSet   bool
-	prevMaxTokens     string
-	prevMaxTokensSet  bool
-	closed            bool
-	mu                sync.Mutex
+	opts                EphemeralGatewayOptions
+	casDir              string
+	server              *gateway.Server
+	httpServer          *httptest.Server
+	createdTempCASDir   string
+	prevCASDir          string
+	prevCASDirSet       bool
+	prevMaxCalls        string
+	prevMaxCallsSet     bool
+	prevMaxTokens       string
+	prevMaxTokensSet    bool
+	prevSubturnYield    string
+	prevSubturnYieldSet bool
+	prevPolicy          *adjudicator.Policy
+	closed              bool
+	mu                  sync.Mutex
 }
 
 // NewEphemeralGateway provisions isolated directories and launches an in-process gateway.Server.
@@ -43,6 +47,15 @@ func NewEphemeralGateway(opts EphemeralGatewayOptions) (*EphemeralGateway, error
 	eg := &EphemeralGateway{
 		opts: opts,
 	}
+
+	snap := adjudicator.Default.PolicySnapshot()
+	eg.prevPolicy = &snap
+	pol := snap
+	if pol.Allow == nil {
+		pol.Allow = make(map[string]bool)
+	}
+	pol.Allow["fak_context_restore"] = true
+	adjudicator.Default.SetPolicy(pol)
 
 	// 1. Provision isolated CAS and session scratch directories
 	casDir := opts.CASDir
@@ -81,6 +94,14 @@ func NewEphemeralGateway(opts EphemeralGatewayOptions) (*EphemeralGateway, error
 			eg.prevMaxTokensSet = true
 		}
 		_ = os.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", strconv.Itoa(opts.MaxSubturnTokens))
+	}
+
+	if opts.MaxSubturnToolCalls > 0 || opts.MaxSubturnTokens > 0 {
+		if v, ok := os.LookupEnv("FAK_RESPONSES_SUBTURN_YIELD"); ok {
+			eg.prevSubturnYield = v
+			eg.prevSubturnYieldSet = true
+		}
+		_ = os.Setenv("FAK_RESPONSES_SUBTURN_YIELD", "true")
 	}
 
 	// 3. Build gateway server
@@ -167,6 +188,16 @@ func (g *EphemeralGateway) Close() error {
 		_ = os.Setenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS", g.prevMaxTokens)
 	} else if g.opts.MaxSubturnTokens > 0 {
 		_ = os.Unsetenv("FAK_RESPONSES_MAX_SUBTURN_TOKENS")
+	}
+
+	if g.prevSubturnYieldSet {
+		_ = os.Setenv("FAK_RESPONSES_SUBTURN_YIELD", g.prevSubturnYield)
+	} else if g.opts.MaxSubturnToolCalls > 0 || g.opts.MaxSubturnTokens > 0 {
+		_ = os.Unsetenv("FAK_RESPONSES_SUBTURN_YIELD")
+	}
+
+	if g.prevPolicy != nil {
+		adjudicator.Default.SetPolicy(*g.prevPolicy)
 	}
 
 	if g.createdTempCASDir != "" {
