@@ -71,6 +71,10 @@ type PreflightInput struct {
 	// eligible Q4_K/Q2_K matrices remain packed while unsupported dense formats make
 	// the bounded f32 -> Q8 round trip.
 	VulkanMixedQ4K bool
+	// ResidentQ2KEmbedding mirrors WithQ2KEmbeddingResident on the eligible dense-Qwen
+	// Vulkan arm. The table remains packed in host memory and never becomes a persistent
+	// device weight; requested rows are materialized separately by the model.
+	ResidentQ2KEmbedding bool
 
 	// AssumedGiBPerSec drives the ROUGH ETA; 0 uses defaultAssumedGiBPerSec.
 	AssumedGiBPerSec float64
@@ -157,9 +161,15 @@ func BuildModelPreflight(in PreflightInput) ModelPreflight {
 	}
 	out.ETASecondsEst = etaSeconds(etaGiB, in.AssumedGiBPerSec)
 
-	// Rung 4: the device-fit check (fail-open). REFUSE only when a capacity-reporting backend
-	// KNOWS the model exceeds its ceiling.
-	if fitErr := compute.RefuseMemoryPlanIfTooBig(in.Backend, est.plan, in.Headroom); fitErr != nil {
+	// Rung 4: the capacity checks (fail-open). REFUSE only when a capacity-reporting backend
+	// KNOWS the model exceeds its ceiling. The ordinary check treats host and device as separate
+	// pools. Integrated Vulkan devices need one additional check because both scopes consume the
+	// same physical DRAM: each subtotal can fit while their simultaneous sum cannot.
+	fitErr := compute.RefuseMemoryPlanIfTooBig(in.Backend, est.plan, in.Headroom)
+	if fitErr == nil {
+		fitErr = refuseIntegratedVulkanUnifiedMemory(in, est.plan)
+	}
+	if fitErr != nil {
 		var fe *compute.FitError
 		if errors.As(fitErr, &fe) {
 			out.Verdict = PreflightRefuseTooBig
@@ -170,7 +180,7 @@ func BuildModelPreflight(in PreflightInput) ModelPreflight {
 			} else {
 				out.DeviceAvailBytes = fe.Avail
 			}
-			out.Reason = fe.Error()
+			out.Reason = fitErr.Error()
 			out.NextAction = "this model does not fit the named device; use a bigger device, --cpu-offload-experts, a smaller quant, or omit -backend to run on the portable floor"
 			return out
 		}
@@ -193,6 +203,25 @@ func BuildModelPreflight(in PreflightInput) ModelPreflight {
 	return out
 }
 
+// refuseIntegratedVulkanUnifiedMemory closes the double-counting hole in the generic
+// host/device fit contract for an integrated Vulkan GPU. vulkanBackend's tier prefix comes from
+// the physical-device type returned by fvk_init, so this does not infer UMA from a product name.
+// The full simultaneous plan is compared with the backend's host-memory snapshot because Linux
+// MemAvailable is the allocatable physical pool shared by Vulkan device allocations, retained Go
+// weights, and loader staging on an APU. Discrete Vulkan devices keep independent pool checks.
+func refuseIntegratedVulkanUnifiedMemory(in PreflightInput, plan compute.MemoryPlan) error {
+	if !in.VulkanMixedQ4K || in.Backend == nil || in.Backend.Name() != "vulkan" ||
+		!strings.HasPrefix(in.Backend.Tier(), "integrated:") || plan.DeviceTotal() <= 0 || plan.HostTotal() <= 0 {
+		return nil
+	}
+	total, free, known := compute.HostMemoryInfo(in.Backend)
+	err := compute.RefuseMemoryPlanIfTooBigForReportedHost(plan, total, free, known, in.Headroom)
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("integrated Vulkan unified-memory admission: %w", err)
+}
+
 type preflightEstimate struct {
 	plan                compute.MemoryPlan
 	readBytes           int64
@@ -208,7 +237,7 @@ func estimateLoadFor(in PreflightInput) (preflightEstimate, error) {
 	var err error
 	switch {
 	case in.VulkanMixedQ4K:
-		return estimateVulkanMixedQ4K(in.Source)
+		return estimateVulkanMixedQ4K(in.Source, in.ResidentQ2KEmbedding)
 	case in.OffloadExperts:
 		plan, err = in.Source.EstimateCPUOffloadExpertsMemoryPlan()
 	case in.Lean || in.Q4K:
@@ -233,7 +262,7 @@ func estimateLoadFor(in PreflightInput) (preflightEstimate, error) {
 // backing, the device copy, and the largest W raw+two-f32 worker windows. W is loadWorkers(),
 // the exact runtime concurrency including FAK_GGUF_LOAD_WORKERS. Split/MoE/unknown layouts
 // fail closed until they share their exact transform and sharding contract with this estimator.
-func estimateVulkanMixedQ4K(s *WeightSource) (preflightEstimate, error) {
+func estimateVulkanMixedQ4K(s *WeightSource, residentQ2KEmbedding bool) (preflightEstimate, error) {
 	if s == nil || s.File == nil {
 		return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate has no weight source")
 	}
@@ -246,6 +275,11 @@ func estimateVulkanMixedQ4K(s *WeightSource) (preflightEstimate, error) {
 	}
 	if cfg.IsMoE() {
 		return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate does not yet support MoE tensor splitting")
+	}
+	if residentQ2KEmbedding {
+		if err := s.validateResidentQ2KEmbedding(cfg); err != nil {
+			return preflightEstimate{}, err
+		}
 	}
 
 	var readBytes, hostPacked, hostQ8, hostF32Logical, deviceBytes int64
@@ -278,6 +312,21 @@ func estimateVulkanMixedQ4K(s *WeightSource) (preflightEstimate, error) {
 		f32Bytes, err := checkedEstimateMulUint64(elems, 4, "f32 bytes", info.Name)
 		if err != nil {
 			return preflightEstimate{}, err
+		}
+
+		packedEmbedding := residentQ2KEmbedding && info.Type == TensorQ2_K && info.Name == "token_embd.weight"
+		if packedEmbedding {
+			alloc, err := conservativePageAllocation(payloadBytes)
+			if err != nil {
+				return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate tensor %s: %w", info.Name, err)
+			}
+			if hostPacked, err = checkedEstimateAdd(hostPacked, alloc, "host packed bytes"); err != nil {
+				return preflightEstimate{}, err
+			}
+			// NewQ2KEmbedding creates an owned copy. The read buffer is the one extra
+			// payload-sized worker window; no persistent whole-table device buffer exists.
+			staging = append(staging, payloadBytes)
+			continue
 		}
 
 		retained := (info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon)) ||

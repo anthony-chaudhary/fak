@@ -132,6 +132,13 @@ func q2kEmbeddingEligible(path string) bool {
 		return false
 	}
 	defer ws.Close()
+	return q2kEmbeddingSourceEligible(ws)
+}
+
+func q2kEmbeddingSourceEligible(ws *ggufload.WeightSource) bool {
+	if ws == nil {
+		return false
+	}
 	cfg, err := ws.File.Config()
 	if err != nil || !cfg.IsQwen35Hybrid() || cfg.IsMoE() || cfg.TieWordEmbeddings {
 		return false
@@ -1353,15 +1360,17 @@ func preflightInputFor(f *benchFlags, be compute.Backend) ggufload.PreflightInpu
 	// different lifecycle and remains on that conservative path too.
 	convertedDense := *f.q4k && be != nil
 	vulkanMixed := convertedDense && *f.backendName == "vulkan" && !streamQ4KEnabled(f)
+	residentQ2KEmbedding := vulkanMixed && q2kEmbeddingSourceEligible(ws)
 	return ggufload.PreflightInput{
-		Path:           *f.gguf,
-		OpenErr:        err,
-		Source:         ws,
-		Backend:        be,
-		Headroom:       modelbenchDeviceHeadroom,
-		Lean:           *f.lean && !convertedDense,
-		Q4K:            *f.q4k && !convertedDense,
-		VulkanMixedQ4K: vulkanMixed,
+		Path:                 *f.gguf,
+		OpenErr:              err,
+		Source:               ws,
+		Backend:              be,
+		Headroom:             modelbenchDeviceHeadroom,
+		Lean:                 *f.lean && !convertedDense,
+		Q4K:                  *f.q4k && !convertedDense,
+		VulkanMixedQ4K:       vulkanMixed,
+		ResidentQ2KEmbedding: residentQ2KEmbedding,
 	}
 }
 

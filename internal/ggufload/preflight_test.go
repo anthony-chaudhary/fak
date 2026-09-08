@@ -15,6 +15,22 @@ type dualCapacityBackend struct {
 	hostTotal int64
 	hostFree  int64
 	hostKnown bool
+	name      string
+	tier      string
+}
+
+func (b dualCapacityBackend) Name() string {
+	if b.name != "" {
+		return b.name
+	}
+	return b.capBackend.Name()
+}
+
+func (b dualCapacityBackend) Tier() string {
+	if b.tier != "" {
+		return b.tier
+	}
+	return b.capBackend.Tier()
 }
 
 func (b dualCapacityBackend) Caps() compute.Caps {
@@ -101,6 +117,27 @@ func mixedVulkanWeightSource(t *testing.T) *WeightSource {
 	return ws
 }
 
+func mixedVulkanQwen35WeightSource(t *testing.T) *WeightSource {
+	t.Helper()
+	ws := mixedVulkanWeightSource(t)
+	ws.File.Metadata = map[string]Value{
+		"general.architecture":                    {Type: TypeString, Value: "qwen35"},
+		"qwen35.context_length":                   {Type: TypeUint64, Value: uint64(16)},
+		"qwen35.embedding_length":                 {Type: TypeUint64, Value: uint64(256)},
+		"qwen35.block_count":                      {Type: TypeUint64, Value: uint64(1)},
+		"qwen35.feed_forward_length":              {Type: TypeUint64, Value: uint64(256)},
+		"qwen35.attention.head_count":             {Type: TypeUint64, Value: uint64(1)},
+		"qwen35.attention.head_count_kv":          {Type: TypeUint64, Value: uint64(1)},
+		"qwen35.attention.layer_norm_rms_epsilon": {Type: TypeFloat32, Value: float32(1e-5)},
+		"qwen35.full_attention_interval":          {Type: TypeUint64, Value: uint64(4)},
+	}
+	const vocab = uint64(1024)
+	ws.File.Tensors[0].Dims = []uint64{256, vocab}
+	ws.File.Tensors[1].Dims = []uint64{256, vocab}
+	ws.File.Tensors[1].Offset = 1 << 20 // distinct untied output table
+	return ws
+}
+
 func conservativeTestAllocation(n int64) int64 {
 	if n <= 0 {
 		return 0
@@ -173,6 +210,83 @@ func TestPreflightVulkanMixedQ4KUsesHostCapacityAndHeadroom(t *testing.T) {
 	wantAvail := compute.BudgetAfterHeadroom(512<<10, 0.15)
 	if pf.HostAvailBytes != wantAvail {
 		t.Fatalf("headroom-adjusted host availability = %d, want %d", pf.HostAvailBytes, wantAvail)
+	}
+}
+
+func TestPreflightVulkanMixedQ4KCountsUnifiedAPUMemoryOnce(t *testing.T) {
+	t.Setenv("FAK_GGUF_LOAD_WORKERS", "2")
+	ws := mixedVulkanWeightSource(t)
+	probe := BuildModelPreflight(PreflightInput{
+		Source: ws,
+		Backend: dualCapacityBackend{
+			capBackend: capBackend{total: 8 << 20, free: 8 << 20, known: true},
+			hostTotal:  8 << 20, hostFree: 8 << 20, hostKnown: true,
+		},
+		VulkanMixedQ4K: true,
+	})
+	if probe.Verdict != PreflightReady {
+		t.Fatalf("sizing probe = %+v, want READY", probe)
+	}
+	hostWant := probe.EstHostResidentBytes + probe.EstLoadStagingBytes
+	deviceWant := probe.EstDeviceResidentBytes
+	separateMax := max(hostWant, deviceWant)
+	sharedFree := separateMax + (probe.EstLoadBytes-separateMax)/2
+	if sharedFree <= separateMax || sharedFree >= probe.EstLoadBytes {
+		t.Fatalf("invalid fixture: host=%d device=%d total=%d shared=%d", hostWant, deviceWant, probe.EstLoadBytes, sharedFree)
+	}
+
+	backend := dualCapacityBackend{
+		capBackend: capBackend{total: sharedFree, free: sharedFree, known: true},
+		hostTotal:  sharedFree, hostFree: sharedFree, hostKnown: true,
+		name: "vulkan", tier: "integrated:test-apu",
+	}
+	pf := BuildModelPreflight(PreflightInput{Source: ws, Backend: backend, VulkanMixedQ4K: true})
+	if pf.Verdict != PreflightRefuseTooBig || pf.FitState != FitTooBigState || pf.FitScope != string(compute.MemoryScopeHost) {
+		t.Fatalf("integrated mixed preflight = %+v, want unified host REFUSE_TOO_BIG", pf)
+	}
+	if pf.EstDeviceResidentBytes > pf.HostAvailBytes || hostWant > pf.HostAvailBytes || pf.EstLoadBytes <= pf.HostAvailBytes {
+		t.Fatalf("fixture did not isolate combined-pool refusal: device=%d host=%d total=%d avail=%d",
+			pf.EstDeviceResidentBytes, hostWant, pf.EstLoadBytes, pf.HostAvailBytes)
+	}
+	if !strings.Contains(pf.Reason, "integrated Vulkan unified-memory admission") {
+		t.Fatalf("refusal reason %q does not identify the shared physical pool", pf.Reason)
+	}
+
+	backend.tier = "discrete:test-gpu"
+	pf = BuildModelPreflight(PreflightInput{Source: ws, Backend: backend, VulkanMixedQ4K: true})
+	if pf.Verdict != PreflightReady || pf.FitState != FitOK {
+		t.Fatalf("discrete mixed preflight = %+v, want independent-pool READY/FIT_OK", pf)
+	}
+}
+
+func TestPreflightVulkanMixedQ4KAccountsResidentQ2KEmbedding(t *testing.T) {
+	t.Setenv("FAK_GGUF_LOAD_WORKERS", "2")
+	ws := mixedVulkanQwen35WeightSource(t)
+	backend := dualCapacityBackend{
+		capBackend: capBackend{total: 8 << 30, free: 8 << 30, known: true},
+		hostTotal:  8 << 30, hostFree: 8 << 30, hostKnown: true,
+	}
+	base := BuildModelPreflight(PreflightInput{Source: ws, Backend: backend, VulkanMixedQ4K: true})
+	packed := BuildModelPreflight(PreflightInput{
+		Source: ws, Backend: backend, VulkanMixedQ4K: true, ResidentQ2KEmbedding: true,
+	})
+	if base.Verdict != PreflightReady || packed.Verdict != PreflightReady {
+		t.Fatalf("base=%+v packed=%+v, want READY", base, packed)
+	}
+	const (
+		vocab       = int64(1024)
+		hidden      = int64(256)
+		packedBytes = vocab * (hidden / 256) * 84
+		f32Bytes    = vocab * hidden * 4
+	)
+	if got, want := base.EstDeviceResidentBytes-packed.EstDeviceResidentBytes, f32Bytes; got != want {
+		t.Fatalf("device reduction=%d, want removed whole-table F32 %d", got, want)
+	}
+	if got, want := base.EstHostResidentBytes-packed.EstHostResidentBytes, 2*f32Bytes-conservativeTestAllocation(packedBytes); got != want {
+		t.Fatalf("host reduction=%d, want %d", got, want)
+	}
+	if got, want := base.EstLoadStagingBytes-packed.EstLoadStagingBytes, 2*f32Bytes; got != want {
+		t.Fatalf("staging reduction=%d, want removed two F32 work buffers %d", got, want)
 	}
 }
 

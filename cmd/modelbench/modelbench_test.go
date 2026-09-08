@@ -54,7 +54,7 @@ func testCompleteBenchFlags() *benchFlags {
 		loadProfile: testBool(false), loadProfileTrace: testBool(false), loadProfileTraceEvery: testInt(25),
 		phaseProfile: testBool(false), budget: testFloat64(0), preflight: testBool(false), smoke: testBool(false),
 		smokeDecodeSteps: testInt(16),
-		smokeDeadline: testDuration(90 * time.Second), fitCheck: testBool(true), loadProgress: testBool(true),
+		smokeDeadline:    testDuration(90 * time.Second), fitCheck: testBool(true), loadProgress: testBool(true),
 		checkpoint: testString(""), resume: testString(""), nativeProfileOut: testString(""), nativeProfileReadback: testString(""),
 		nativeProfileCompare: testString(""), nativeDecodeHandoff: testDecodeHandoff(model.Qwen35DecodeHandoffAuto),
 		qwenSwapOut: testString(""), qwenSwapReadback: testString(""),
@@ -1163,6 +1163,13 @@ func TestModelbenchVulkanQ2KEmbeddingResidentWired(t *testing.T) {
 	*f.gguf = path
 	*f.q4k = true
 	*f.backendName = "vulkan"
+	preflight := preflightInputFor(f, &benchQuantBackend{benchObservedBackend: benchObservedBackend{Backend: compute.Default()}})
+	if preflight.Source != nil {
+		defer preflight.Source.Close()
+	}
+	if !preflight.VulkanMixedQ4K || !preflight.ResidentQ2KEmbedding {
+		t.Fatalf("preflight did not mirror Vulkan packed-embedding loader: %+v", preflight)
+	}
 
 	m, _, err := loadModel(f, nil)
 	if err != nil {
