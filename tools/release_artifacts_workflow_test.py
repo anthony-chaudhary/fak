@@ -3,7 +3,7 @@
 
 The release-artifacts workflow attaches cross-compiled `fak` binaries to the GitHub
 release on a `v*` tag push (issue #133). These tests pin the contract the installer
-and adopters rely on WITHOUT cross-compiling: the four targets, the static/no-cgo
+and adopters rely on WITHOUT cross-compiling: the five targets, the static/no-cgo
 build, the version stamp, and idempotent uploads. They also smoke-check that the
 installer and Dockerfile stay consistent with the assets the workflow publishes.
 """
@@ -23,14 +23,64 @@ DOCKERFILE = ROOT / "Dockerfile"
 # carrying the recipe inline, so those assertions follow it here.
 BUILD_SH = ROOT / "scripts" / "build.sh"
 
-# The four targets the issue's "Done when" enumerates.
-TARGETS = [
+# The exact target and asset sets published by the release workflow (#12209).
+TARGETS = (
     ("linux", "amd64"),
+    ("linux", "arm64"),
     ("darwin", "amd64"),
     ("darwin", "arm64"),
     ("windows", "amd64"),
-]
+)
+ARCHIVES = tuple(
+    f"fak_${{VERSION}}_{goos}_{goarch}{'.zip' if goos == 'windows' else '.tar.gz'}"
+    for goos, goarch in TARGETS
+)
+RELEASE_ASSETS = (*ARCHIVES, *(f"{archive}.sha256" for archive in ARCHIVES), "SHA256SUMS")
 LDFLAG = "-X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion="
+
+
+def yaml_matrix_targets(text: str) -> list[tuple[str, str]]:
+    """Read the simple goos/goarch maps beneath the workflow's matrix include."""
+    lines = text.splitlines()
+    matrix_index = next(i for i, line in enumerate(lines) if line.strip() == "matrix:")
+    matrix_indent = len(lines[matrix_index]) - len(lines[matrix_index].lstrip())
+    include_index = next(
+        i
+        for i in range(matrix_index + 1, len(lines))
+        if lines[i].strip() == "include:"
+    )
+    include_indent = len(lines[include_index]) - len(lines[include_index].lstrip())
+
+    targets: list[tuple[str, str]] = []
+    goos: str | None = None
+    for line in lines[include_index + 1 :]:
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        if stripped and indent <= include_indent:
+            break
+        if stripped.startswith("- goos:"):
+            goos = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("goarch:") and goos is not None:
+            targets.append((goos, stripped.split(":", 1)[1].strip()))
+            goos = None
+
+    if matrix_indent >= include_indent:
+        raise AssertionError("matrix include indentation is invalid")
+    return targets
+
+
+def bash_array_values(text: str, name: str) -> list[str]:
+    """Read one shell array whose entries are one quoted value per line."""
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == f"{name}=(")
+    values: list[str] = []
+    for line in lines[start + 1 :]:
+        value = line.strip()
+        if value == ")":
+            return values
+        if value:
+            values.append(value.removeprefix('"').removesuffix('"'))
+    raise AssertionError(f"unterminated {name} array")
 
 
 class ReleaseArtifactsWorkflowTest(unittest.TestCase):
@@ -43,10 +93,18 @@ class ReleaseArtifactsWorkflowTest(unittest.TestCase):
         self.assertIn('tags: ["v*"]', self.text)
         self.assertIn("workflow_dispatch:", self.text)
 
-    def test_builds_all_four_targets(self) -> None:
-        for goos, goarch in TARGETS:
-            self.assertIn(f"goos: {goos}", self.text, f"{goos} target missing")
-            self.assertIn(f"goarch: {goarch}", self.text, f"{goarch} arch missing")
+    def test_builds_exact_five_target_matrix(self) -> None:
+        self.assertCountEqual(yaml_matrix_targets(self.text), TARGETS)
+
+    def test_verifies_exact_release_asset_payload(self) -> None:
+        archives = bash_array_values(self.text, "expected_archives")
+        checked_assets = (*archives, *(f"{archive}.sha256" for archive in archives), "SHA256SUMS")
+
+        self.assertCountEqual(archives, ARCHIVES)
+        self.assertCountEqual(checked_assets, RELEASE_ASSETS)
+        self.assertIn('[ -s "${assets}/${archive}" ]', self.text)
+        self.assertIn('[ -s "${assets}/${archive}.sha256" ]', self.text)
+        self.assertIn('[ -s "${assets}/SHA256SUMS" ]', self.text)
 
     def test_static_no_cgo_build(self) -> None:
         # Static, reproducible, no cgo — the property that lets the binary run
