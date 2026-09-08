@@ -1,6 +1,6 @@
 ---
 name: git-subagent-sync
-description: Synchronize subagent changes to git on shared trunk across all lanes and all untracked WIP by default (or scoped via --lane/--paths). Enforces single-source-of-truth invariants, safe merge convergence, dual-repo synchronization (fak & fak-private), disjoint file-tree fencing via `dos arbitrate`, detached build-isolation worktrees, and atomic coordinator landing via `fak sweep --apply` or `fak commit --path`. Prevents index corruption, off-trunk drift, peer clobbering, and unverified worker self-reports.
+description: Synchronize subagent changes to git on shared trunk across all lanes and all untracked WIP by default (or scoped via --lane/--paths). Enforces single-source invariants, safe merge convergence via `fak sync check`, `fak sync reconcile --apply`, and `fak sync push`, dual-repo synchronization (fak & fak-private), disjoint file-tree fencing via `dos arbitrate`, detached build-isolation worktrees, and atomic coordinator landing via `fak sweep --apply` or `fak commit --path`. Prevents index corruption, off-trunk drift, peer clobbering, and unverified worker self-reports. Use when synchronizing subagent changes across lanes on shared trunk.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob, Task
@@ -20,11 +20,11 @@ Coordinated, conflict-free synchronization protocol for parallel subagents and i
 3. **Untracked WIP preservation**: Untracked source files (`??`) are first-class candidate WIP. They are mapped to their respective lane via `dos.toml` and committed as part of their package; they are never wiped, abandoned, or hidden behind wildcard `.gitignore` rules.
 4. **Explicit paths only (No blanket staging)**: Git staging and landing operations require explicit pathspecs. "All lanes" does NOT mean `git add -A` or a blanket commit; it means iterating over all dirty lanes and landing each lane group with explicit pathspecs and its bindable `(fak <lane>)` stamp.
 5. **Detached worktrees only**: Concurrent filesystem isolation utilizes detached HEAD worktrees pinned at an explicit trunk SHA (`git worktree add --detach <path> <sha>` managed via `fak worktree worker prepare`). Never attach branch worktrees.
-6. **Coordinator owns git**: Workers and subagents never execute mutating git commands (`commit`, `push`, `merge`, `rebase`, `checkout`, `add`, `reset`). The coordinator process exclusively manages index operations, CAS trunk landing, and push interactions.
+6. **Safe Landing within Worker Boundaries**: Autonomous safe git sync landing (`fak sync check`, `fak sync reconcile --apply`, `fak commit --path`, `fak sync push`) is active by default working within each worker process upon test verification. Raw uncoordinated git commands (`git add -A`, raw unverified git commits/merges) remain strictly prohibited.
 7. **Package-scoped verification only**: Verification executes within isolated scopes (`fak validate --mine <p>...` and targeted package tests under WSL/Linux) without running unisolated global sweeps that contaminate clean builds with peer WIP.
-8. **Autonomous landing upon task completion by default**: When an agent, worker, or subagent completes any assigned task, it must follow the safe landing process itself by default rather than leaving uncommitted edits or waiting for interactive prompts. If coordinator context preservation or build isolation is required, the coordinator dispatches a dedicated landing/worker subagent to execute the verification and landing steps autonomously.
-9. **Safe Merge & Structured Convergence**: Strictly forbid unverified raw merges, `--autostash`, or force-pushes. Check for `.git/MERGE_HEAD` (`MERGE_IN_PROGRESS`); if active, halt and wait. Integrate upstream via `fak sync apply` (`--ff-only`) or `fak sync reconcile` (supporting `ROUTE_DISJOINT_INTEGRATE`, `ROUTE_SUPERSET_MERGE`, and `ROUTE_HOLD_DIRTY_COLLISION` with `fak wip park`).
-10. **Dual-Repo Synchronization (`fak` & `fak-private`)**: When cross-repo dependencies, shared interfaces (`pkg/*`), or companion platform modules are touched, synchronize both repositories. Check dirty states, fetch remotes for both, fast-forward both (`fak sync apply` in `fak`, `git pull --ff-only` or `fak-sync repo` in `fak-private`), run `go work sync`, and verify boundary leak safety (`python tools/scrub_public_copy.py --audit-staged`).
+8. **Autonomous landing upon task completion by default**: When an agent, worker, or subagent completes any assigned task, it must follow the safe landing process itself by default working within each worker process rather than leaving uncommitted edits or waiting for interactive prompts. If coordinator context preservation or build isolation is required, the coordinator dispatches a dedicated landing/worker subagent to execute the verification and landing steps autonomously.
+9. **Safe Merge & Structured Convergence**: Strictly forbid unverified raw merges, `--autostash`, or force-pushes. Check for `.git/MERGE_HEAD` (`MERGE_IN_PROGRESS`); if active, halt and wait. Integrate upstream via `fak sync check` and `fak sync reconcile --apply` (supporting `ROUTE_DISJOINT_INTEGRATE`, `ROUTE_SUPERSET_MERGE`, and `ROUTE_HOLD_DIRTY_COLLISION` with `fak wip park`).
+10. **Dual-Repo Synchronization (`fak` & `fak-private`)**: When cross-repo dependencies, shared interfaces (`pkg/*`), or companion platform modules are touched, synchronize both repositories. Check dirty states, fetch remotes for both, fast-forward both (`fak sync reconcile --apply` in `fak`, `git pull --ff-only` or `fak-sync repo` in `fak-private`), run `go work sync`, and verify boundary leak safety (`python tools/scrub_public_copy.py --audit-staged`).
 
 ## Architecture & Roles
 
@@ -51,8 +51,8 @@ Coordinated, conflict-free synchronization protocol for parallel subagents and i
     │  - Bounded implementation in allocated file tree
     │  - Private compilation cache: GOCACHE, GOTMPDIR
     │  - Local package unit tests
-    │  - ZERO git mutations (read-only git inspection only)
-    │  - Emit structured completion receipt to coordinator
+    │  - Autonomous safe git landing: `fak sync check`, `fak sync reconcile --apply`, `fak commit --path`, `fak sync push`
+    │  - Emit structured completion receipt with commit SHA
     └───────────────────┘
 ```
 
@@ -71,8 +71,8 @@ Coordinated, conflict-free synchronization protocol for parallel subagents and i
 - Execute modifications strictly inside the declared file tree or assigned detached worktree directory.
 - Use isolated compiler directories defined in the environment.
 - Run local tests inside the private worktree or target package.
-- Adhere strictly to the git prohibition: NEVER execute `git commit`, `git push`, `git checkout -b`, `git add`, `git reset`, or `git merge`.
-- Return a structured completion receipt specifying modified files, newly created files, test outputs, and execution status.
+- Adhere strictly to safe trunk landing: NEVER execute raw uncoordinated git commands (`git commit`, `git push`, `git checkout -b`, `git add -A`, `git reset`, or `git merge`). Instead, execute landing through the guarded fak verbs: `fak sync check`, `fak sync reconcile --apply`, `fak commit --path`, and `fak sync push` unprompted by default upon test verification.
+- Return a structured completion receipt specifying modified files, newly created files, test outputs, execution status, and the landed origin commit SHA.
 
 ## Step-by-Step Execution Protocol
 
@@ -81,6 +81,7 @@ Coordinated, conflict-free synchronization protocol for parallel subagents and i
 1. **Refresh upstream tracking and verify safe merge state**:
    ```bash
    fak sync check --fetch
+   fak sync reconcile --apply
    ```
    Inspect for mid-flight merges:
    ```bash
@@ -174,12 +175,13 @@ For each verified lane:
 3. **Safe divergence handling and merge routing**:
    Before executing landing, check if upstream advanced during arbitration or verification:
    - Strictly avoid unverified raw git merges, `--autostash`, or force-pushes.
-   - Route divergence through structured reconciliation:
-     ```bash
-     fak sync reconcile
-     ```
-     Execute the evaluated safe route:
-     - `ROUTE_APPLY`: clean fast-forward convergence via `fak sync apply`.
+    - Route divergence through structured reconciliation:
+      ```bash
+      fak sync check
+      fak sync reconcile --apply
+      ```
+      Execute the evaluated safe route:
+      - `ROUTE_APPLY`: clean fast-forward convergence via `fak sync reconcile --apply` (or `fak sync apply`).
      - `ROUTE_DISJOINT_INTEGRATE`: disjoint commit file-trees merged cleanly.
      - `ROUTE_SUPERSET_MERGE`: textless `-s ours` verified convergence.
      - `ROUTE_HOLD_DIRTY_COLLISION`: if uncommitted local paths collide, park them safely via `fak wip park` (or `--suspend-paths`), converge, and reapply.
@@ -283,9 +285,9 @@ For each verified lane:
 |---|---|---|---|
 | `LOCK_BUSY` | 3 | Another process holds `.git/index.lock` or the advisory commit lock. | Wait with backoff (e.g. 500ms, 1s, 2s). In multi-lane mode, proceed to next disjoint lane or wait for lock release; do not remove active locks manually. |
 | `WRITER_LEASE_HELD` | 3 | Worktree writer lease held by an active sync-apply window (#4240). | Transient contention. Back off and poll until writer lease clears, then retry landing. |
-| `MERGE_IN_PROGRESS` | 4 | A git merge is active (`.git/MERGE_HEAD` exists). | Strictly forbid unverified raw merges, `--autostash`, or force-pushes. If the merge is owned by a peer, do not abort or finish it; unstage local paths and wait. If resolving owned convergence, integrate via `fak sync apply` (`--ff-only`) or `fak sync reconcile` (`ROUTE_DISJOINT_INTEGRATE` / `ROUTE_SUPERSET_MERGE` / `ROUTE_HOLD_DIRTY_COLLISION` with `fak wip park`). |
+| `MERGE_IN_PROGRESS` | 4 | A git merge is active (`.git/MERGE_HEAD` exists). | Strictly forbid unverified raw merges, `--autostash`, or force-pushes. If the merge is owned by a peer, do not abort or finish it; unstage local paths and wait. If resolving owned convergence, integrate via `fak sync reconcile --apply` (or `fak sync apply` `--ff-only`) or `fak sync reconcile` (`ROUTE_DISJOINT_INTEGRATE` / `ROUTE_SUPERSET_MERGE` / `ROUTE_HOLD_DIRTY_COLLISION` with `fak wip park`). |
 | `PATHSPEC_RACE` | 1 | Staged commit contained files outside the requested explicit pathspec. | Commit was held locally unpushed. Inspect `git show --stat HEAD`, verify unrequested paths, unstage them, and never force-push. |
-| `PUSH_REJECTED` | 1 | Remote rejected push (non-fast-forward conflict on origin). | Never force-push or rebase with `--autostash`. Run `fak sync reconcile --apply` (or `fak sync apply`), re-verify affected packages, and push with `fak sync push`. If cross-repo work was landed, synchronize and push both `fak` and `fak-private`. |
+| `PUSH_REJECTED` | 1 | Remote rejected push (non-fast-forward conflict on origin). | Never force-push or rebase with `--autostash`. Run `fak sync check`, then `fak sync reconcile --apply` (or `fak sync apply`), re-verify affected packages, and push with `fak sync push`. If cross-repo work was landed, synchronize and push both `fak` and `fak-private`. |
 | `STALE_BASE_DELETION` | 4 | Working copy predates upstream modifications and would silently overwrite peer lines. | Refresh modified paths from `origin/main`, reapply the subagent delta onto the fresh baseline, re-run tests, and re-commit. |
 | `STALE_UNTRACKED` | 4 | Path is untracked locally but already exists on origin/main. | Local HEAD is behind remote. Run `fak sync check --fetch` and compare via `git show origin/main:<path>` before landing. |
 | `COLLISION_RISK` | 4 | Requested write tree overlaps with a concurrent active lease holder. | Run `dos arbitrate --workspace .` to inspect conflicting holders. Wait for lease expiration or select an alternate disjoint lane from `free_clusters`. If dirty paths collide during convergence, park conflicting WIP via `fak wip park` (`ROUTE_HOLD_DIRTY_COLLISION`). |

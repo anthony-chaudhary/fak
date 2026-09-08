@@ -106,7 +106,7 @@ Stage every doc/index/tool path you curated **by explicit path** via `fak commit
 `git add -A`, never an exclude-glob sweep. List exactly the files you touched:
 
 ```bash
-fak sync check
+fak sync reconcile --apply
 # guard: confirm no live code lane or ignored artifact slipped in
 git status --porcelain | grep -iE '\.exe$|\.dos/' && echo VIOLATION || echo OK
 fak commit \

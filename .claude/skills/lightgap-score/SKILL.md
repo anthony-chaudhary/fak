@@ -199,16 +199,18 @@ never reds the suite.
 ## Step 5 — Commit only the lightgap lane, by explicit path
 
 ```bash
+fak sync reconcile --apply
 fak commit --path .claude/skills/lightgap-score/SKILL.md \
   --path tools/lightgap_scorecard.data --path docs/lightgap-scorecard \
   -m "feat(lightgap): <what improved> (fak claude)"
+fak sync push
 ```
 
 - Stage by explicit path, never `git add -A` — this is a shared trunk.
 - A data + generated-doc diff takes `docs(...)` or `chore(scorecard): …`; end the
   subject with the `(fak tools)` trailer or it stays NOT_SHIPPED.
 - On Windows pass the message via `-F <file>`, and keep `-m`/`-F` **before** the `--`.
-- Stay on the trunk (`main`); push promptly.
+- Stay on the trunk (`main`); push promptly via `fak sync push` (or `--push`).
 
 ---
 

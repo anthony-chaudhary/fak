@@ -145,7 +145,7 @@ Commit `tools/scorecard_baseline.json` in the same lane (the control pane reads 
 ## Step 5 — Ground the ship in DOS, then commit ONLY your lane
 
 ```bash
-fak sync check                                    # or fak sync reconcile --apply to integrate trunk safely
+fak sync reconcile --apply
 fak commit --path <your explicit paths> -F <msgfile>
 dos commit-audit HEAD                             # MUST print [diff-witnessed] / verdict OK
 fak sync push

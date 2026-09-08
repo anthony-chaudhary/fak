@@ -161,7 +161,7 @@ If you added or removed a scorecard surface, also re-fold the portfolio:
 This is a shared trunk; commit *your* lane, never a peer's work:
 
 ```bash
-fak sync check                                   # or fak sync reconcile --apply to integrate trunk safely
+fak sync reconcile --apply
 fak commit \
   --path internal/agentreadinessscore/agentreadinessscore.go \
   --path internal/agentreadinessscore/agentreadinessscore_test.go \

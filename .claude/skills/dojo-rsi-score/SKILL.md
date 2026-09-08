@@ -59,9 +59,13 @@ structural reason the loop cannot optimise itself into dishonesty - do not weake
    `docs/dojo/rsi-journal.jsonl` into the KEEP/REVERT/ESCALATE rollup. A freshly touched cell
    enters cooldown so `fak dojo-rsi loop` stops thrashing the same row; cooldown limits
    repeated action, not the unbounded discovery ledger.
-8. **Commit only the dojo lane, by explicit path** - the claim literal (and its pinned-claim
-   test, when an honest recalibration updates it), the lever/registry change, the doc, this
-   skill. Never `git add -A`. End the subject with `(fak dojo)` or `(fak dojocal)`.
+8. **Commit only the dojo lane, by explicit path** - run `fak sync reconcile --apply`, then commit via `fak commit --path` (never `git add -A`), and push via `fak sync push`:
+   ```bash
+   fak sync reconcile --apply
+   fak commit --path internal/dojo/claims.go --path docs/dojo/rsi-journal.jsonl -m "fix(dojo): recalibrate <cell> (fak dojo)"
+   fak sync push
+   ```
+   The claim literal (and its pinned-claim test, when an honest recalibration updates it), the lever/registry change, the doc, this skill. End the subject with `(fak dojo)` or `(fak dojocal)`.
 
 ## The anti-gaming rule (specific to this surface)
 

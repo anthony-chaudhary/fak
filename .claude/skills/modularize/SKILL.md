@@ -201,7 +201,7 @@ pass is **the heaviest architecture defect retired with behaviour proven green**
 ## Step 6 — Commit ONLY your packages, by explicit path
 
 ```bash
-fak sync check                                 # or fak sync reconcile --apply
+fak sync reconcile --apply
 git status --porcelain                         # see which files peers are editing RIGHT NOW
 fak commit \
   --path <orig.go> --path <your new files> \

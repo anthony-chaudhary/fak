@@ -75,7 +75,7 @@ Alternatively, launch detached child sessions using PowerShell with prompt files
 
 ```powershell
 $exe = "C:\Users\USER\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe"
-$argStr = "run --variant high --auto --title `"Issue #$($issue): $($title)`" `"Resolve GitHub issue #$($issue): please read _scratch/prompts/issue-$($issue).txt and execute the required deliverables directly as a leaf worker (do not call the task tool or spawn nested subagents), run tests, land via fak sync and fak commit --path by default, and post receipts with gh issue comment.`""
+$argStr = "run --variant high --auto --title `"Issue #$($issue): $($title)`" `"Resolve GitHub issue #$($issue): please read _scratch/prompts/issue-$($issue).txt and execute the required deliverables directly as a leaf worker (do not call the task tool or spawn nested subagents), run tests, land via fak sync, fak commit --path, and fak sync push by default (reconciling any divergence via fak sync reconcile --apply), and post receipts with gh issue comment.`""
 
 Start-Process -FilePath $exe -ArgumentList $argStr -WorkingDirectory (Get-Location) -RedirectStandardOutput "_scratch\logs\opencode-issue-$issue.out.log" -RedirectStandardError "_scratch\logs\opencode-issue-$issue.err.log" -PassThru
 ```

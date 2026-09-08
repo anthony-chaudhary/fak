@@ -48,9 +48,13 @@ witnessed signal proves the fault is fak's.**
    don't invent signals that don't exist.
 4. **Re-measure + prove** - `--compare` prints the debt delta; the scorecard must read A
    (debt 0) on the disciplined tree.
-5. **Commit only the scorecard lane, by explicit path** - the scorecard source/test
-   (`internal/conflationscore/`), the reporting-surface file(s) whose prose you corrected,
-   the control-pane baseline. Never `git add -A`. End the subject with `(fak <leaf>)`.
+5. **Commit only the scorecard lane, by explicit path** - run `fak sync reconcile --apply`, then commit via `fak commit --path` (never `git add -A`), and push via `fak sync push`:
+   ```bash
+   fak sync reconcile --apply
+   fak commit --path internal/conflationscore/ --path <reporting-surface-files> -m "docs(conflation): label observed values (fak conflation)"
+   fak sync push
+   ```
+   Commit the scorecard source/test (`internal/conflationscore/`), the reporting-surface file(s) whose prose you corrected, and the control-pane baseline. End the subject with `(fak <leaf>)`.
 
 ## The anti-gaming rule (specific to this surface)
 

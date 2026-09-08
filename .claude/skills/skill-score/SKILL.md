@@ -108,7 +108,7 @@ version and re-pin the control pane. Zero is a current observation, not a comple
 ## Step 4 — Commit ONLY the skill lane, by explicit path
 
 ```bash
-fak sync check                                           # or fak sync reconcile --apply to integrate trunk safely
+fak sync reconcile --apply
 fak commit --path <the SKILL.md files you fixed> --path cmd/fak/skill_effectiveness.go --path docs/SKILL-EFFECTIVENESS-SCORECARD.md -m "<subject>" -m "<body: N→M skill-debt, what changed>" -m "(fak <leaf>)"
 dos commit-audit HEAD                                    # MUST print [diff-witnessed] / verdict OK
 fak sync push

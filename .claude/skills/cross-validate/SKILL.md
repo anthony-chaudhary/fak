@@ -77,29 +77,40 @@ Confirm the witness level is `diff-witnessed`. If the audit returns `CLAIM_UNWIT
 
 ---
 
-## Step 3 — Spawn Adversarial Cross-Validation Subagent
+## Step 3 — Spawn Concurrent Verification Triad
 
-Launch an independent subagent (`task` tool with subagent `cross-validator` or `general`) with the following adversarial prompt:
+Spawn a concurrent Verification Triad in a single message turn using multiple `task` tool calls to independently audit the landed work: `cross-validator` (adversarial audit) + `issue-auditor` (edge cases & ticket generation) + `tester` (regression & matrix execution).
 
-```markdown
-You are an adversarial verifier auditing recent code changes in commit HEAD.
-Do NOT trust the author's narrative or claims.
-
-Your task:
-1. Run `git show --stat HEAD` and inspect the raw diff with `git show HEAD`.
-2. Re-run package tests on-device: `.\test.ps1 ./internal/<pkg>/...` and observe actual output.
-3. Check for regressions, concurrency hazards, race conditions, memory leaks, boundary conditions, and nil-pointer risks.
-4. Verify whether the tests actually test the fix/feature or merely pass vacuously.
-5. Identify all unhandled edge cases, missing platform support (Windows/Linux/Darwin), or soak test needs.
-
-Emit a structured verdict:
-- VERDICT: CONFIRMED_VALID | DEFECT_DETECTED
-- EVIDENCE: on-device test command + exact exit code
-- DIFF_AUDIT: analysis of edge cases and invariants
-- DISCOVERED_ISSUES: list of edge cases/follow-ons that warrant GitHub tickets
+```json
+[
+  {
+    "tool": "task",
+    "parameters": {
+      "subagent_type": "cross-validator",
+      "description": "Adversarial cross-validation of HEAD",
+      "prompt": "You are an adversarial verifier auditing recent code changes in commit HEAD.\nDo NOT trust the author's narrative or claims.\n\nYour task:\n1. Run `git show --stat HEAD` and inspect the raw diff with `git show HEAD`.\n2. Verify that edits did not leak outside declared package boundaries.\n3. Check for regressions, concurrency hazards, race conditions, memory leaks, boundary conditions, and nil-pointer risks.\n4. Verify whether the tests actually test the fix/feature or merely pass vacuously.\n\nEmit a structured verdict:\n- VERDICT: CONFIRMED_VALID | DEFECT_DETECTED\n- EVIDENCE: diff inspection + invariant audit\n- DIFF_AUDIT: analysis of edge cases and invariants"
+    }
+  },
+  {
+    "tool": "task",
+    "parameters": {
+      "subagent_type": "issue-auditor",
+      "description": "Audit edge cases & file tickets",
+      "prompt": "You are an issue auditor inspecting the changes in commit HEAD.\nYour task:\n1. Uncover unhandled edge cases, boundary conditions, missing platform support (Windows/Linux/Darwin), or soak test needs in the newly added code.\n2. If real follow-ons or gaps exist, draft structured GitHub issue tickets with clear reproduction steps and acceptance criteria.\n\nEmit a structured report:\n- AUDIT_SUMMARY: unhandled edge cases and risk surfaces\n- TICKETS: list of drafted/filed GitHub issues (#N) with Problem/Today/Better because/Witness"
+    }
+  },
+  {
+    "tool": "task",
+    "parameters": {
+      "subagent_type": "tester",
+      "description": "Regression & matrix test execution",
+      "prompt": "You are a deterministic tester executing tests for commit HEAD on-device.\nYour task:\n1. Execute on-device package tests: `.\\test.ps1 ./internal/<pkg>/...` (or `go test -v ./internal/<pkg>` and `go vet ./internal/<pkg>`).\n2. Execute regression suites and matrix verification across affected packages.\n3. Observe actual test output and confirm deterministic execution without flaky passes.\n\nEmit a structured verdict:\n- VERDICT: CLAIM_TEST_GREEN | CLAIM_TEST_FAILED\n- EVIDENCE: on-device test command + exact exit code\n- TEST_SUMMARY: passed/failed count and execution duration"
+    }
+  }
+]
 ```
 
-Inspect the returned subagent verdict. If `DEFECT_DETECTED`, address the identified defects and re-verify.
+Inspect the returned subagent verdicts. If `DEFECT_DETECTED` or tests fail, address the identified defects and re-verify.
 
 ---
 

@@ -42,7 +42,7 @@ When invoked without explicit arguments or under underspecified requests, apply 
 - **Bounded Evaluation (`--top 10`)**: ALWAYS bound backlog evaluation to the top 10–15 candidate issues (e.g. `fak issue-orchestrator --top 10`). Never run unbounded sweeps across hundreds of backlog tickets, which wastes tokens evaluating irrelevant triage queues.
 - **Action-First Velocity**: Prioritize immediate wave execution over prolonged baseline analysis. Plan Wave 1, arbitrate, dispatch workers, and land code.
 - **Target Issues**: Default to resolving a focused cohort of **3–5 issues** per session.
-- **Wave Concurrency (`--wave-size`)**: Default to **4 concurrent workers** per wave (or 3 on constrained platforms). Never exceed 5 concurrent workers.
+- **Wave Concurrency (`--wave-size`)**: Default to **4–8 concurrent workers** per wave (scaling up to 16 with adaptive concurrency on capable multi-core hosts). Concurrency is safely gated by pairwise tree-disjointness (`dos.toml` declares 894 concurrent leaves).
 - **Max Waves per Run (`--max-waves`)**: Default to **1–2 waves** per run. Avoid unbounded multi-wave loops without checkpoints.
 - **Scratch & State Hygiene**: Baseline snapshots belong in allocated scratch or temporary JSON files (`fak tree-doctor --scratch-path issue-orchestrator/baseline.json`), never untracked root dumps. Clean them up on completion.
 - **Worker Isolation**: Each subagent gets exactly one issue and one package lane (`internal/<lane>`), touches only declared files, runs only package-scoped tests (`go test -v ./internal/<lane>`, `go vet ./internal/<lane>`), and returns a 3-line receipt.
@@ -108,7 +108,7 @@ From the output, determine:
 - **Campaign Target**:
   - *Default Focused Target*: Resolve **2–4 issues** in Wave 1 immediately.
   - *Alternative Point Target*: Retire a fixed step budget (e.g. `--target-points 15`).
-- **Wave Capacity**: Standard reasonable wave size is **2–4 parallel subagents** (`--wave-size 4`, max 5).
+- **Wave Capacity**: Standard reasonable wave size is **4–8 parallel subagents** (`--wave-size 8`, up to 16 on high-capacity hosts).
 - **Campaign Horizon**: Standard execution batch is **1–2 waves** (`--max-waves 1` or `2`).
 
 ---
@@ -255,8 +255,10 @@ go test -v ./internal/<laneA> ./internal/<laneB>
 
 Commit each finished leaf independently on the trunk with the issue citation and ship-stamp trailer:
 ```bash
+fak sync reconcile --apply
 fak commit --path internal/<laneA> -m "fix(<laneA>): resolve gateway streaming timeout (#1024) (fak <laneA>)"
 fak commit --path internal/<laneB> -m "feat(<laneB>): add model KV cache recycling (#1035) (fak <laneB>)"
+fak sync push
 ```
 *(If changes were developed in detached worktrees via `--worktree`, land them with `fak worktree worker land` or merge the verified commits).*
 

@@ -72,9 +72,13 @@ REALIZED - does it run on our own usage?
    loop's hardware-gate disclosure honest. Don't chase soft signals to zero.
 5. **Re-measure + prove** - `--compare` prints the debt delta; the scorecard reads A
    (debt 0) on the disciplined tree once registered + pinned.
-6. **Commit only the guard-RSI lane, by explicit path** - the scorecard tool/test, the
-   verdict loop tool/test, the control-pane row + pinned baseline, the doc + this skill.
-   Never `git add -A`. End the subject with `(fak guard)`.
+6. **Commit only the guard-RSI lane, by explicit path** - run `fak sync reconcile --apply`, then commit via `fak commit --path` (never `git add -A`), and push via `fak sync push`:
+   ```bash
+   fak sync reconcile --apply
+   fak commit --path internal/guardrsi/ --path docs/fak/guard-verdict-rsi-loop.md -m "feat(guard): update verdict rsi (fak guard)"
+   fak sync push
+   ```
+   The scorecard tool/test, the verdict loop tool/test, the control-pane row + pinned baseline, the doc + this skill. End the subject with `(fak guard)`.
 
 ## The anti-gaming rule (specific to this surface)
 

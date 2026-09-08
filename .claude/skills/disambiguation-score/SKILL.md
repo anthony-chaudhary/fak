@@ -72,9 +72,16 @@ data, only by disambiguating the real concept.
 4. **Re-measure + prove** - `--compare` prints the debt delta; the positioned rows must
    stay clean (0 clarity-debt) while coverage rises.
 5. **Commit exactly the files reported by the authoring verb** - verify with `--critical`
-   and regenerate/check the scorecard baseline when the measured metric changes. Use
-   `fak commit --preview` followed by `fak commit --path` for each reported path; never
-   `git add -A`. End the subject with the `(fak <leaf>)` trailer.
+   and regenerate/check the scorecard baseline when the measured metric changes. Run
+   `fak sync reconcile --apply`, use `fak commit --preview` followed by `fak commit --path` for
+   each reported path (never `git add -A`), and push via `fak sync push`:
+   ```bash
+   fak sync reconcile --apply
+   fak commit --preview -m "docs(concept): disambiguate <concept> (fak concept)" --path <paths>...
+   fak commit --path <paths>... -m "docs(concept): disambiguate <concept> (fak concept)"
+   fak sync push
+   ```
+   End the subject with the `(fak <leaf>)` trailer.
 
 ## The anti-gaming rule (specific to this surface)
 

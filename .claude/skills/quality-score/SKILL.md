@@ -146,7 +146,7 @@ commit too, so "I fixed it" is backed by evidence the committing agent can't
 author:
 
 ```bash
-fak sync check                                    # or fak sync reconcile --apply to integrate trunk safely
+fak sync reconcile --apply
 fak commit --path <your explicit paths> -m "<conventional subject>" -m "<body: N→M debt, what changed>" -m "(fak <leaf>)"
 dos commit-audit HEAD                             # MUST print [diff-witnessed] / verdict OK
 fak sync push

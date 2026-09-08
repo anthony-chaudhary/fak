@@ -151,7 +151,7 @@ If you added or removed a scorecard surface, re-fold the portfolio and re-pin:
 This is a shared trunk; commit *your* lane, never a peer's work:
 
 ```bash
-fak sync check                                   # or fak sync reconcile --apply to integrate trunk safely
+fak sync reconcile --apply
 fak commit \
   --path tools/persona_readiness_scorecard.py \
   --path tools/persona_readiness_scorecard_test.py \

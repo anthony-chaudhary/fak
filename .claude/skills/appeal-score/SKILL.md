@@ -118,7 +118,7 @@ trip a freshness FAIL (a dead link, a stale version pin), and re-stamp the
 This is a shared trunk; commit *your* doc, never a peer's work:
 
 ```bash
-fak sync check                                   # or fak sync reconcile --apply to integrate trunk safely
+fak sync reconcile --apply
 fak commit --path README.md -F <msgfile> [--push]
 fak sync push
 ```

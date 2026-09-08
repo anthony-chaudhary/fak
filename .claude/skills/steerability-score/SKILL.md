@@ -148,7 +148,7 @@ and mangles the `·`/`×`/`—` glyphs.)
 ## Step 5 — Commit ONLY your lane, by explicit path
 
 ```bash
-fak sync check                                    # or fak sync reconcile --apply to integrate trunk safely
+fak sync reconcile --apply
 fak commit --path tools/steerability_scorecard.py --path tools/steerability_scorecard_test.py --path docs/STEERABILITY-SCORECARD.md -F msg
 dos commit-audit HEAD                             # MUST print [diff-witnessed] / verdict OK
 fak sync push

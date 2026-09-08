@@ -77,16 +77,19 @@ Every finding lands in exactly one tier - do not conflate them:
 
 5. **Re-measure + prove, then commit only the scorecard lane, by explicit path**:
 
-   ```
+   ```bash
    go run ./cmd/fak score negframe --json > /tmp/after.json
    go run ./cmd/fak score negframe --compare /tmp/before.json     # prints the debt delta
    go run ./cmd/fak score negframe --markdown > docs/NEGFRAME-SCORECARD.md
+   fak sync reconcile --apply
+   fak commit --path <reframe-files> --path docs/NEGFRAME-SCORECARD.md -m "style(negframe): reframe prose (fak negframe)"
+   fak sync push
    ```
 
    State the delta plainly: `negframe_debt N -> N' (-k)`. Commit the prose files you
-   reframed together with the regenerated snapshot (if any); never `git add -A`. End the
-   subject with a `(fak negframe)` (or the touched leaf's) trailer so `dos commit-audit`
-   binds it.
+   reframed together with the regenerated snapshot (if any); never `git add -A`. Push via
+   `fak sync push`. End the subject with a `(fak negframe)` (or the touched leaf's) trailer
+   so `dos commit-audit` binds it.
 
 ## Reading the payload
 

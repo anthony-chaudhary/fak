@@ -207,7 +207,7 @@ work. Include a Conventional-Commits subject, signed-off DCO (`-s`), and the req
 
 - **For public `fak` commits**:
   ```bash
-  fak sync check
+  fak sync reconcile --apply
   python tools/scrub_public_copy.py --audit-staged --root .
   fak commit --path <unit_of_work> -m "fix(<target>): advance maturity curve and retire debt (fak <target>)" [--push]
   fak sync push

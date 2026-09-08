@@ -29,7 +29,7 @@ The shape: **baseline issue queue (`fak issue-queue --json` / `fak dispatch orde
 
 Never attempt a repository-wide sweep in one pass. Enforce strict scoping:
 
-1. **Max 1–3 issues per batch**: Focus on 1–3 closely related leaves or a single critical `P0`/`P1` issue.
+1. **Batch Scaling (4–8 issues)**: Scale the batch to 4–8 issues whenever candidate issues map to pairwise tree-disjoint lanes (`dos.toml`). Focus on atomic leaves with verified independent packages.
 2. **Shift-left proof by default**: Every bug fix must ship with a reproduction unit test that fails before the fix and passes after. Features must ship with concrete unit/contract tests. Never accept mocks or self-report claims.
 3. **Queue taxonomy discipline**:
    - **Ready Leaves**: Atomic S0/S1 tasks with a single witness and bounded package tree (`internal/<lane>/`).
@@ -215,8 +215,10 @@ Confirm:
 Commit each finished leaf independently on the trunk. Include a Conventional-Commits subject, signed-off DCO (`-s`), issue citation `(#N)`, and required `(fak <leaf>)` trailer:
 
 ```bash
+fak sync reconcile --apply
 fak commit --path internal/<laneA> -m "fix(<laneA>): resolve <summary> (#1024) (fak <laneA>)"
 fak commit --path internal/<laneB> -m "feat(<laneB>): add <summary> (#1035) (fak <laneB>)"
+fak sync push
 ```
 *(Fallback: `git commit -s -m "..." -- internal/<lane>` without `git add -A`).*
 

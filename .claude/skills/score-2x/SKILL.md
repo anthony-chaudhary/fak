@@ -188,7 +188,7 @@ Stay on `main` (the `OFF_TRUNK` guard refuses a branch). Commit by explicit path
 never `git add -A` on this shared tree:
 
 ```bash
-fak sync check                                               # or fak sync reconcile --apply to integrate trunk safely
+fak sync reconcile --apply
 fak commit --path <your genuine-fix paths> --path docs/<X>-SCORECARD.md -m "<conventional subject>" -m "<body: N→M debt (or 'harden: bar X→Y'), what changed>" -m "(fak <leaf>)"
 dos commit-audit HEAD                                        # MUST print [diff-witnessed] / verdict OK
 fak sync push

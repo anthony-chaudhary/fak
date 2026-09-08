@@ -167,8 +167,9 @@ commit discipline:
 - **Stage by explicit path, never `git add -A`** — commit *your* README, not a
   peer's half-written code:
   ```bash
-  fak sync check                          # or fak sync reconcile --apply to integrate trunk safely
+  fak sync reconcile --apply
   fak commit --path README.md -F <msgfile> [--push]
+  fak sync push
   ```
 - **Doc-only diff → `docs(readme): …` subject**, NOT `fix(`/`feat(`. A
   code-effect prefix on a docs-only diff overclaims — keep the prefix honest to

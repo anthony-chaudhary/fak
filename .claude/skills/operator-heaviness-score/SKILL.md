@@ -146,7 +146,7 @@ The scorecard reads five files across three lanes (`cmd`, `tools`, `docs`/`claud
 each lane's files in their OWN commit by explicit path via `fak commit --path` — never `git add -A`:
 
 ```bash
-fak sync check                                                   # or fak sync reconcile --apply to integrate trunk safely
+fak sync reconcile --apply
 fak commit --path cmd/fak/<changed>.go -F msg                    # the surface edit (cmd lane)
 fak commit --path docs/OPERATOR-HEAVINESS.md --path llms.txt -F msg     # the snapshot + doc-map (docs lane)
 dos commit-audit HEAD                                            # MUST print [diff-witnessed] / verdict OK

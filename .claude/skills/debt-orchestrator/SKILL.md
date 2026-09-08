@@ -16,8 +16,9 @@ operator names it or an evidenced dependency requires it; preserve public/privat
 
 ## Scope and stop condition
 
-Default to one bounded pass with at most one admitted wave. Choose 1–3 small outcomes
-and cap workers by available slots, verified disjoint scope, and budget. A recurring
+Default to one bounded pass with at most one admitted wave. Choose 4–8 small outcomes
+across verified disjoint lanes (`dos.toml` declares 894 concurrent leaves) and scale workers
+to available hardware capacity. A recurring
 schedule (including a 20-minute cadence) neither supplies a runtime deadline nor proves
 that the previous run finished. Inspect active ownership before dispatch; skip held
 work and leave a resumable receipt. Do not launch another wave to fill idle capacity.

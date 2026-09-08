@@ -58,9 +58,9 @@ rest of the family.
    /tmp/stability-before.json` prints the debt delta and the ≥2× verdict; regenerate the
    committed snapshot: `python tools/stability_scorecard.py --markdown --stamp DATE >
    docs/STABILITY-SCORECARD.md`.
-5. **Commit only the scorecard lane, by explicit path** — run `fak sync check` (or `fak sync reconcile --apply`), then commit via `fak commit --path`:
+5. **Commit only the scorecard lane, by explicit path** — run `fak sync reconcile --apply`, then commit via `fak commit --path`:
    ```bash
-   fak sync check
+   fak sync reconcile --apply
    fak commit --path tools/stability_scorecard.py --path tools/stability_scorecard_test.py --path docs/STABILITY-SCORECARD.md --path <the affordance you added> -m "<subject>" [--push]
    fak sync push
    ```
