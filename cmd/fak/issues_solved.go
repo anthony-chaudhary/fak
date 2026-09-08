@@ -21,6 +21,7 @@ func cmdIssuesSolved(argv []string) {
 func runIssuesSolved(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak issues-solved", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	verbFlagUsage(fs, "issues-solved")
 
 	hours := fs.Float64("hours", 24, "hours to look back (default: 24)")
 	since := fs.String("since", "", "optional duration e.g. 9h, or RFC3339 timestamp")
