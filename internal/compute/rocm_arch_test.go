@@ -627,3 +627,70 @@ func TestROCm_Ticket12081_Wave32WMMA_ShaderAndPipeline(t *testing.T) {
 		t.Errorf("zeroPC.Validate() should have failed for zero dimensions")
 	}
 }
+
+// TestROCmArchCompilerFlagsGfx1151Wave32 witnesses the required Wave32 and target CPU compiler flags
+// for AMD Strix Halo (gfx1151 / RDNA 3.5) (#12187):
+// - `CompilerFlags()` for `gfx1151` must mandate `-mwavefrontsize32` and `-mcpu=gfx1151`.
+// - Targets discrete RDNA 3 (gfx1100) or CDNA (gfx90a/gfx942) remain untouched.
+func TestROCmArchCompilerFlagsGfx1151Wave32(t *testing.T) {
+	a, ok := LookupROCmArch("gfx1151")
+	if !ok {
+		t.Fatal("LookupROCmArch(gfx1151): not found, want supported")
+	}
+	if a.Family != ROCmRDNA3_5 {
+		t.Errorf("gfx1151 family = %v, want ROCmRDNA3_5", a.Family)
+	}
+	if a.Wavefront != 32 {
+		t.Errorf("gfx1151 wavefront = %d, want 32", a.Wavefront)
+	}
+	if !a.HasNativeWave32WMMA() {
+		t.Errorf("gfx1151 HasNativeWave32WMMA() = false, want true")
+	}
+
+	flags := a.CompilerFlags()
+	hasWave32 := false
+	hasMCPU := false
+	hasOffload := false
+	for _, f := range flags {
+		if f == "-mwavefrontsize32" {
+			hasWave32 = true
+		}
+		if f == "-mcpu=gfx1151" {
+			hasMCPU = true
+		}
+		if f == "--offload-arch=gfx1151" {
+			hasOffload = true
+		}
+	}
+	if !hasWave32 {
+		t.Errorf("flags %+v missing -mwavefrontsize32", flags)
+	}
+	if !hasMCPU {
+		t.Errorf("flags %+v missing -mcpu=gfx1151", flags)
+	}
+	if !hasOffload {
+		t.Errorf("flags %+v missing --offload-arch=gfx1151", flags)
+	}
+
+	// Verify discrete desktop RDNA 3 (gfx1100) does not receive -mcpu=gfx1151
+	rdna3, ok := LookupROCmArch("gfx1100")
+	if !ok {
+		t.Fatal("LookupROCmArch(gfx1100) not found")
+	}
+	for _, f := range rdna3.CompilerFlags() {
+		if f == "-mcpu=gfx1151" {
+			t.Errorf("gfx1100 unexpectedly includes -mcpu=gfx1151: %v", rdna3.CompilerFlags())
+		}
+	}
+
+	// Verify CDNA (gfx90a) does not receive -mwavefrontsize32 or -mcpu=gfx1151
+	cdna, ok := LookupROCmArch("gfx90a")
+	if !ok {
+		t.Fatal("LookupROCmArch(gfx90a) not found")
+	}
+	for _, f := range cdna.CompilerFlags() {
+		if f == "-mcpu=gfx1151" || f == "-mwavefrontsize32" {
+			t.Errorf("gfx90a unexpectedly includes RDNA flags: %v", cdna.CompilerFlags())
+		}
+	}
+}
