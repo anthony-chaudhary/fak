@@ -184,6 +184,84 @@ func TestSymptomTautologicalTestRefutes(t *testing.T) {
 	assertRepoClean(t, dir)
 }
 
+// TestSymptomRejectsParentBuildFailure: when the overlaid test on parent fails to compile
+// (e.g. references a new helper/API introduced by the fix), that failure must NOT be
+// counted as red symptom evidence — it must ABSTAIN as unproven, not CONFIRM (#12058).
+func TestSymptomRejectsParentBuildFailure(t *testing.T) {
+	requireGoAndGit(t)
+	dir := newGoModuleRepo(t)
+	ctx := context.Background()
+	t.Setenv(SymptomFlagEnv, "1")
+
+	// Parent: has Sign, but does NOT have NewHelper.
+	writeRepoFile(t, dir, "sign.go", "package m\n\nfunc Sign(n int) int {\n\treturn 0\n}\n")
+	gitIn(t, dir, "add", "sign.go")
+	gitIn(t, dir, "commit", "-q", "-m", "parent: Sign only")
+
+	// Fix: introduces NewHelper AND corrects Sign, and sign_test.go calls NewHelper.
+	writeRepoFile(t, dir, "sign.go", "package m\n\nfunc NewHelper() bool {\n\treturn true\n}\n\nfunc Sign(n int) int {\n\tif n < 0 {\n\t\treturn -1\n\t}\n\treturn 0\n}\n")
+	writeRepoFile(t, dir, "sign_test.go", "package m\n\nimport \"testing\"\n\nfunc TestSignNegative(t *testing.T) {\n\tif !NewHelper() {\n\t\tt.Fatal(\"helper failed\")\n\t}\n\tif Sign(-3) != -1 {\n\t\tt.Fatalf(\"Sign(-3)=%d, want -1\", Sign(-3))\n\t}\n}\n")
+	gitIn(t, dir, "add", "sign.go", "sign_test.go")
+	gitIn(t, dir, "commit", "-q", "-m", "fix(m): introduce NewHelper and fix Sign")
+
+	// On fix commit, tests pass (green).
+	// On parent, sign_test.go fails to compile because NewHelper is undefined.
+	// This compilation failure must be classified as ABSTAIN, never CONFIRMED.
+	if got := NewWithRunner(gitRunner, dir).Resolve(ctx, nil, "symptom:HEAD"); got != abi.WitnessAbstain {
+		t.Fatalf("parent build failure symptom = %v, want abstain", got)
+	}
+	assertRepoClean(t, dir)
+}
+
+func TestIsBuildFailureDetection(t *testing.T) {
+	buildFailures := []string{
+		"# m [m.test]\n./sign_test.go:5:2: undefined: NewAPI\nFAIL\tm [build failed]\nFAIL",
+		"FAIL\tm [setup failed]\nFAIL",
+		"compile error: syntax error",
+		"compiler error: internal failure",
+		"build error: failed to resolve dependencies",
+		"syntax error: unexpected token",
+		"cannot find package \"foo\" in any of:",
+		"no Go files in /some/path",
+		"# m\nsign_test.go:5:2: undefined: SomeFunc\nFAIL",
+	}
+	for _, out := range buildFailures {
+		if !isGoBuildFailure(out) {
+			t.Errorf("isGoBuildFailure(%q) = false, want true", out)
+		}
+	}
+
+	testFailures := []string{
+		"=== RUN   TestSignNegative\n--- FAIL: TestSignNegative (0.00s)\n    sign_test.go:6: Sign(-3)=0, want -1\nFAIL\nFAIL\tm\t0.010s\nFAIL",
+		"=== RUN   TestPanic\n--- FAIL: TestPanic (0.00s)\npanic: boom\nFAIL\tm\t0.010s\nFAIL",
+	}
+	for _, out := range testFailures {
+		if isGoBuildFailure(out) {
+			t.Errorf("isGoBuildFailure(%q) = true, want false", out)
+		}
+	}
+
+	pyBuildFailures := []string{
+		"Traceback (most recent call last):\n  File \"test.py\", line 1\n    def foo(\nSyntaxError: invalid syntax",
+		"Traceback (most recent call last):\n  File \"test.py\", line 2\nImportError: cannot import name 'NewAPI'",
+		"ModuleNotFoundError: No module named 'foo'",
+	}
+	for _, out := range pyBuildFailures {
+		if !isPythonBuildFailure(out) {
+			t.Errorf("isPythonBuildFailure(%q) = false, want true", out)
+		}
+	}
+
+	pyTestFailures := []string{
+		"FAIL: test_negative (__main__.TestCalc)\nAssertionError: 0 != -1\nFAILED (failures=1)",
+	}
+	for _, out := range pyTestFailures {
+		if isPythonBuildFailure(out) {
+			t.Errorf("isPythonBuildFailure(%q) = true, want false", out)
+		}
+	}
+}
+
 func requireGoAndGit(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {

@@ -25,7 +25,9 @@ package witness
 //	EXECUTION (red-then-green, gated behind FAK_WITNESS_SYMPTOM): overlay the ref's version of
 //	  each changed test onto a PARENT scratch worktree and run it — it must FAIL (red: the test
 //	  reproduces the bug against the old source) — then run it at the ref — it must PASS (green).
-//	  Both hold => CONFIRMED. Passes-at-parent => REFUTED (tautological). Default (flag unset) =>
+//	  Both hold => CONFIRMED. Passes-at-parent => REFUTED (tautological). Parent compilation or
+//	  build failure => ABSTAIN (unproven: the overlaid test failed to compile against parent source,
+//	  e.g. referencing an API introduced in the fix — never a false CONFIRM; #12058). Default (flag unset) =>
 //	  ABSTAIN after the structural check: running an arbitrary test against an old tree is heavy,
 //	  so like the RSL rung the cost is opt-in and the kernel's fail-closed default turns abstain
 //	  into a deny rather than a false CONFIRM.
@@ -190,7 +192,13 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 	if !overlayTestsAtRef(ctx, r.run, r.dir, commit, parentDir, tests) {
 		return abi.WitnessAbstain // could not stage the red test — uncertain, never a false CONFIRM
 	}
-	if allTestsPass(ctx, exec, parentDir, pkgs, pyTests) {
+	passed, buildErr := runParentTests(ctx, exec, parentDir, pkgs, pyTests)
+	if buildErr {
+		// Parent failed to compile/build (e.g. test references an API introduced by the fix) —
+		// this is unproven, never a false CONFIRM of behavioral reproduction (#12058).
+		return abi.WitnessAbstain
+	}
+	if passed {
 		// The test passes against the OLD source too: it constrains nothing about the bug.
 		return abi.WitnessRefuted
 	}
@@ -309,4 +317,105 @@ func pythonBin() string {
 		return "python"
 	}
 	return "python3"
+}
+
+func runParentTests(ctx context.Context, exec CommandRunner, dir string, pkgs, pyTests []string) (passed bool, buildErr bool) {
+	goPassed := true
+	if len(pkgs) > 0 {
+		var err bool
+		goPassed, err = runGoTests(ctx, exec, dir, pkgs)
+		if err {
+			return false, true
+		}
+	}
+	pyPassed := true
+	if len(pyTests) > 0 {
+		var err bool
+		pyPassed, err = runPythonTests(ctx, exec, dir, pyTests)
+		if err {
+			return false, true
+		}
+	}
+	if goPassed && pyPassed {
+		return true, false
+	}
+	return false, false
+}
+
+func runGoTests(ctx context.Context, run CommandRunner, dir string, pkgs []string) (passed bool, buildErr bool) {
+	if run == nil {
+		run = commandRunner
+	}
+	argv := append([]string{"go", "test", "-count=1"}, pkgs...)
+	out, code, err := run(ctx, dir, argv...)
+	if err != nil {
+		return false, true
+	}
+	if code == 0 {
+		return true, false
+	}
+	if isGoBuildFailure(out) {
+		return false, true
+	}
+	return false, false
+}
+
+func runPythonTests(ctx context.Context, run CommandRunner, dir string, tests []string) (passed bool, buildErr bool) {
+	if run == nil {
+		run = commandRunner
+	}
+	py := pythonBin()
+	allPassed := true
+	for _, t := range tests {
+		out, code, err := run(ctx, dir, py, t)
+		if err != nil {
+			return false, true
+		}
+		if code == 0 {
+			continue
+		}
+		if isPythonBuildFailure(out) {
+			return false, true
+		}
+		allPassed = false
+	}
+	return allPassed, false
+}
+
+func isGoBuildFailure(out string) bool {
+	if strings.Contains(out, "[build failed]") || strings.Contains(out, "[setup failed]") {
+		return true
+	}
+	lower := strings.ToLower(out)
+	if strings.Contains(lower, "compile error") ||
+		strings.Contains(lower, "compiler error") ||
+		strings.Contains(lower, "build error") ||
+		strings.Contains(lower, "syntax error") ||
+		strings.Contains(lower, "cannot find package") ||
+		strings.Contains(lower, "no go files in") {
+		return true
+	}
+	if !strings.Contains(out, "--- FAIL:") {
+		if strings.Contains(lower, "build failed") ||
+			strings.Contains(lower, "setup failed") ||
+			strings.Contains(lower, "undefined:") {
+			return true
+		}
+	}
+	return false
+}
+
+func isPythonBuildFailure(out string) bool {
+	lower := strings.ToLower(out)
+	if strings.Contains(lower, "syntaxerror:") ||
+		strings.Contains(lower, "importerror:") ||
+		strings.Contains(lower, "modulenotfounderror:") ||
+		strings.Contains(lower, "indentationerror:") ||
+		strings.Contains(lower, "taberror:") ||
+		strings.Contains(lower, "compile error") ||
+		strings.Contains(lower, "compiler error") ||
+		strings.Contains(lower, "build error") {
+		return true
+	}
+	return false
 }
