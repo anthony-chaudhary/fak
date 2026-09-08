@@ -3,6 +3,7 @@
 package compute
 
 import (
+	"math"
 	"math/rand"
 	"testing"
 )
@@ -38,6 +39,56 @@ func TestVulkanQ4KMatMulMatchesCPUReference(t *testing.T) {
 		t.Fatalf("cosine %.8f < 0.995", c)
 	}
 }
+
+func TestVulkanQ4KBatchedMatMulMultipleTokensMatchesCPUReference(t *testing.T) {
+	v, ok := Pick("vulkan").(*vulkanBackend)
+	if !ok {
+		t.Skip("Vulkan backend unavailable")
+	}
+	// out deliberately crosses a 64-lane workgroup boundary. With P > 1 the shader
+	// must recover both token and row from the flattened X dispatch index.
+	const out, in, P = 70, 768, 3
+	raw := make([]byte, out*(in/q4kSuper)*q4kSuperBlock)
+	rng := rand.New(rand.NewSource(11803))
+	for b := 0; b < out*(in/q4kSuper); b++ {
+		randQ4KBlockC(rng, raw[b*q4kSuperBlock:(b+1)*q4kSuperBlock])
+	}
+	x := make([]float32, P*in)
+	for i := range x {
+		x[i] = rng.Float32()*2 - 1
+	}
+
+	hw := NewQ4K(Default(), []int{out, in}, raw)
+	hx := NewF32(Default(), []int{P, in}, x)
+	dw := v.Upload(hw, Q4_K)
+	defer v.Free(dw)
+	dx := v.Upload(hx, F32)
+	defer v.Free(dx)
+	dy := v.BatchedMatMul(dw, dx, P)
+	defer v.Free(dy)
+
+	got := v.Read(dy)
+	want := Default().Read(Default().BatchedMatMul(hw, hx, P))
+	if len(got) != P*out {
+		t.Fatalf("output len=%d, want %d", len(got), P*out)
+	}
+	for token := 0; token < P; token++ {
+		gotRow := got[token*out : (token+1)*out]
+		wantRow := want[token*out : (token+1)*out]
+		for row, value := range gotRow {
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				t.Fatalf("token %d row %d is non-finite: %v", token, row, value)
+			}
+		}
+		if gotArgmax, wantArgmax := argmaxF32(gotRow), argmaxF32(wantRow); gotArgmax != wantArgmax {
+			t.Fatalf("token %d argmax=%d, want %d", token, gotArgmax, wantArgmax)
+		}
+		if cosine := cosineC(gotRow, wantRow); cosine < 0.995 {
+			t.Fatalf("token %d cosine %.8f < 0.995", token, cosine)
+		}
+	}
+}
+
 func TestVulkanQ4KRMSNormMatMul2MatchesCPUReference(t *testing.T) {
 	v, ok := Pick("vulkan").(*vulkanBackend)
 	if !ok {

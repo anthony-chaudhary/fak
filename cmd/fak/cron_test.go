@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -639,6 +640,63 @@ func TestCronHardInterruptCeilingEnforcement(t *testing.T) {
 		}
 		if !strings.Contains(stdout.String(), "status=timeout") {
 			t.Errorf("stdout missing status=timeout: %s", stdout.String())
+		}
+	})
+}
+
+func TestCronRunInterruptCeilingOverride(t *testing.T) {
+	tests := []struct {
+		name      string
+		requested time.Duration
+		ceiling   time.Duration
+		want      time.Duration
+		wantErr   string
+	}{
+		{name: "default clamps long job", requested: 25 * time.Minute, ceiling: CronHardInterruptCeiling, want: CronHardInterruptCeiling},
+		{name: "explicit ceiling admits declared timeout", requested: 25 * time.Minute, ceiling: 25 * time.Minute, want: 25 * time.Minute},
+		{name: "explicit ceiling still clamps", requested: 25 * time.Minute, ceiling: 20 * time.Minute, want: 20 * time.Minute},
+		{name: "zero ceiling refused", requested: time.Minute, ceiling: 0, wantErr: "must be positive"},
+		{name: "excessive ceiling refused", requested: time.Minute, ceiling: 31 * time.Minute, wantErr: "must not exceed 30m0s"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := cronRunEffectiveTimeout(tt.requested, tt.ceiling)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("cronRunEffectiveTimeout() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("effective timeout = %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	t.Run("invalid override fails before admission", func(t *testing.T) {
+		ledger := filepath.Join(t.TempDir(), "cron_run_invalid_ceiling.jsonl")
+		var stdout, stderr bytes.Buffer
+		code := runCron(&stdout, &stderr, []string{
+			"run",
+			"--job", "job-invalid-ceiling",
+			"--ledger", ledger,
+			"--interval", "1h",
+			"--timeout", "25m",
+			"--interrupt-ceiling", "31m",
+			"--", "unused-command",
+		})
+		if code != 2 {
+			t.Fatalf("exit code = %d, want 2 (stderr=%s)", code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "must not exceed 30m0s") {
+			t.Fatalf("stderr = %q, want bounded-ceiling diagnostic", stderr.String())
+		}
+		if _, err := os.Stat(ledger); !os.IsNotExist(err) {
+			t.Fatalf("invalid override admitted a slot: stat error = %v", err)
 		}
 	})
 }
