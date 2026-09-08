@@ -1458,12 +1458,20 @@ func Tiled16ChannelTransposeConcat(
 	convState []float32,
 ) (output []float32, nextState []float32, report DeltaNet16ChannelInterleaveReport, err error) {
 	if T <= 0 || convDim <= 0 || K < 1 {
-		return nil, nil, report, fmt.Errorf("compute: invalid dimensions for 16-channel transpose (T=%d, convDim=%d, K=%d)", T, convDim, K)
+		return nil, nil, report, &Qwen35GDNGeometryError{
+			Operand: "geometry",
+			Reason:  fmt.Sprintf("invalid dimensions for 16-channel transpose (T=%d, convDim=%d, K=%d)", T, convDim, K),
+			Err:     ErrVulkanInvalidGeometry,
+		}
 	}
 
 	strideBytes := convDim * 4
 	if !ValidateDeltaNet256BitBusAlignment(strideBytes) {
-		return nil, nil, report, fmt.Errorf("compute: convDim %d (stride %d bytes) violates 256-bit bus alignment (must be multiple of 32)", convDim, strideBytes)
+		return nil, nil, report, &Qwen35GDNGeometryError{
+			Operand: "convDim",
+			Reason:  fmt.Sprintf("convDim %d (stride %d bytes) violates 256-bit bus alignment (must be multiple of 32)", convDim, strideBytes),
+			Err:     ErrVulkanInvalidGeometry,
+		}
 	}
 
 	cfg := DefaultTiledChannelTransposeConfig()
