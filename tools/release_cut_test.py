@@ -268,6 +268,73 @@ class ReleaseCutTest(unittest.TestCase):
         argv = json.loads((root / "decider-argv.json").read_text(encoding="utf-8"))
         self.assertIn("--require-ci-green", argv)
 
+    def test_date_is_passed_to_release_bump_in_plan_and_execute(self) -> None:
+        rc = load()
+        root = self.tmp / "dateprop"
+        root.mkdir()
+        self._git(root, "init", "-b", "master")
+        self._write(root / "VERSION", "0.1.0\n")
+        tools = root / "tools"
+        tools.mkdir()
+        self._write(tools / "release_context.py", (
+            "import json\n"
+            "print(json.dumps({'last_tag':'v0.1.0','latest_any_tag':'v0.1.0',"
+            "'commits_since_tag':[{'subject':'feat(x): y'}]}))\n"
+        ))
+        self._write(tools / "release_decide.py", (
+            "import json\n"
+            "print(json.dumps({'decision':'release','next_version':'0.2.0','level':'minor','themes':['x']}))\n"
+        ))
+        self._write(tools / "release_bump.py", (
+            "import json, pathlib, sys\n"
+            "log = pathlib.Path('../bump-argv.jsonl')\n"
+            "old = log.read_text(encoding='utf-8') if log.exists() else ''\n"
+            "log.write_text(old + json.dumps(sys.argv[1:]) + '\\n', encoding='utf-8')\n"
+            "if '--dry-run' not in sys.argv:\n"
+            "    pathlib.Path('VERSION').write_text(sys.argv[1] + '\\n', encoding='utf-8')\n"
+            "print(json.dumps({'targets': {'version': {'path': 'VERSION', 'ok': True}}}))\n"
+        ))
+        self._write(tools / "release_lock.py", (
+            "import json\n"
+            "print(json.dumps({'ok': True}))\n"
+        ))
+        self._git(root, "add", "VERSION", "tools")
+        self._git(root, "commit", "-m", "seed release helpers")
+
+        plan = rc.build_plan(
+            root,
+            version=None,
+            level=None,
+            themes=[],
+            headline=None,
+            date="2026-09-08",
+            includes=[],
+            force=False,
+            allow_hold=False,
+            limit_commits=20,
+        )
+        self.assertTrue(plan["ok"], plan)
+
+        result = rc.execute_plan(
+            root,
+            plan,
+            includes=[],
+            overwrite_notes=False,
+            skip_dry_run=True,
+            ttl=1800,
+            allow_stale_upstream=False,
+            lock_already_held=True,
+        )
+        self.assertTrue(result["ok"], result)
+        bump_argv = [
+            json.loads(line)
+            for line in (self.tmp / "bump-argv.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(bump_argv, [
+            ["0.2.0", "--dry-run", "--date", "2026-09-08"],
+            ["0.2.0", "--date", "2026-09-08"],
+        ])
+
 
     def test_from_manifest_adds_structured_include_paths(self) -> None:
         rc = load()
@@ -351,6 +418,7 @@ class ReleaseCutTest(unittest.TestCase):
             "ok": True,
             "version": "0.2.0",
             "tag": "v0.2.0",
+            "date": "2026-09-08",
             "headline": "failed dry run",
             "paths": ["VERSION", "docs/releases/v0.2.0.md"],
             "notes_file": "docs/releases/v0.2.0.md",
@@ -404,6 +472,7 @@ class ReleaseCutTest(unittest.TestCase):
             "ok": True,
             "version": "0.2.0",
             "tag": "v0.2.0",
+            "date": "2026-09-08",
             "headline": "parent lock release",
             "paths": ["VERSION", "docs/releases/v0.2.0.md"],
             "notes_file": "docs/releases/v0.2.0.md",

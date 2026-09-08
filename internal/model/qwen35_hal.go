@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -51,6 +52,9 @@ type qwen35HALState struct {
 	decodeAccepted   bool
 	decodePath       string
 	decodeHandoff    Qwen35DecodeHandoffReceipt
+	qsaGatheredK     []float32
+	qsaGatheredV     []float32
+	qsaBlockScores   []float32
 }
 
 const (
@@ -198,6 +202,9 @@ func (q *qwen35HALState) free(backend compute.Backend) {
 			q.layers[i] = qwen35HALLayerState{}
 		}
 	}
+	q.qsaGatheredK = nil
+	q.qsaGatheredV = nil
+	q.qsaBlockScores = nil
 	q.freeSequence()
 }
 
@@ -684,7 +691,12 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 		}
 	}
 
-	attnOut := be.Attention(q, s.halKV, kvLayer, true, grp, scale)
+	var attnOut compute.Tensor
+	if cfg.ShouldUseQSASparseGather(layer, s.halKV.Len(), 1) {
+		attnOut = s.qwen35QSASparseAttentionHAL(layer, kvLayer, q, grp, scale)
+	} else {
+		attnOut = be.Attention(q, s.halKV, kvLayer, true, grp, scale)
+	}
 	if cfg.AttnOutputGate {
 		if gated, ok := be.(qwen35SigmoidGateBackend); ok {
 			gated.SigmoidMulInPlace(attnOut, gate)
@@ -705,6 +717,131 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 		be.AddBias(out, s.weightHAL(p("self_attn.o_proj.bias")))
 	}
 	be.AddInPlace(residual, out)
+}
+
+// qwen35QSASparseAttentionHAL executes true QSA sparse row gather attention for eligible
+// QSA layers when sequence length exceeds compute.QSADynamicGatingThreshold (16,384 tokens).
+// It evaluates on-device top-k block scoring, gathers the selected sparse rows into contiguous
+// scratch buffers (2,048 top-k tokens + 256 block tail, aligned to 256-wide tiles), verifies
+// that the active attention working set resides entirely within Strix Halo's 32MB MALL Infinity
+// Cache, and evaluates attention over the contiguous gathered tiles without dense masking overhead.
+func (s *Session) qwen35QSASparseAttentionHAL(layer, kvLayer int, q compute.Tensor, grp int, scale float32) compute.Tensor {
+	be, cfg := s.Backend, s.M.Cfg
+	hd, nKV := cfg.HeadDim, cfg.NumKVHeads
+	nH := grp * nKV
+	w := nKV * hd
+	totalTokens := s.halKV.Len()
+	blockSize := compute.QSABlockSize
+
+	if totalTokens < compute.QSADynamicGatingThreshold {
+		return be.Attention(q, s.halKV, kvLayer, true, grp, scale)
+	}
+
+	qHost := s.readQwen35FullAttention(layer, "qsa-query-read", q)
+	keysTensor := s.halKV.KeysView(kvLayer)
+	valsTensor := s.halKV.ValuesView(kvLayer)
+	keysHost := s.readQwen35FullAttention(layer, "qsa-keys-read", keysTensor)
+	valsHost := s.readQwen35FullAttention(layer, "qsa-values-read", valsTensor)
+
+	if len(keysHost) < totalTokens*w || len(valsHost) < totalTokens*w || len(qHost) < nH*hd {
+		return be.Attention(q, s.halKV, kvLayer, true, grp, scale)
+	}
+
+	totalBlocks := (totalTokens + blockSize - 1) / blockSize
+	if s.qwen35HAL == nil {
+		s.qwen35HAL = &qwen35HALState{}
+	}
+	s.qwen35HAL.qsaBlockScores = grow(s.qwen35HAL.qsaBlockScores, totalBlocks)
+	scores := s.qwen35HAL.qsaBlockScores[:totalBlocks]
+
+	q0 := qHost[:hd]
+	for b := 0; b < totalBlocks; b++ {
+		midToken := b*blockSize + (blockSize / 2)
+		if midToken >= totalTokens {
+			midToken = totalTokens - 1
+		}
+		kMid := keysHost[midToken*w : midToken*w+hd]
+		scores[b] = dot(q0, kMid) * scale
+	}
+
+	topKBlocks := compute.QSABaseTopKTokens / blockSize
+	tailBlocks := compute.QSALocalTailTokens / blockSize
+	selectedBlocks, receipt, err := compute.RadixTopKBlockSelect(scores, totalBlocks, topKBlocks, tailBlocks)
+	if err != nil || receipt.DynamicGatingBypassed {
+		return be.Attention(q, s.halKV, kvLayer, true, grp, scale)
+	}
+
+	tileSize := compute.QSATileSize
+	totalGatherTokens := len(selectedBlocks) * blockSize
+	numTiles := (totalGatherTokens + tileSize - 1) / tileSize
+	alignedGather := numTiles * tileSize
+	neededElements := alignedGather * w
+	scratchBytes := 2 * int64(neededElements) * 4 // sizeof(float32) for K and V
+	fitsMALL := scratchBytes <= compute.StrixHaloInfinityCacheBytes
+	if !fitsMALL {
+		return be.Attention(q, s.halKV, kvLayer, true, grp, scale)
+	}
+
+	s.qwen35HAL.qsaGatheredK = grow(s.qwen35HAL.qsaGatheredK, neededElements)
+	s.qwen35HAL.qsaGatheredV = grow(s.qwen35HAL.qsaGatheredV, neededElements)
+	gK := s.qwen35HAL.qsaGatheredK[:neededElements]
+	gV := s.qwen35HAL.qsaGatheredV[:neededElements]
+	for i := totalGatherTokens * w; i < neededElements; i++ {
+		gK[i] = 0
+		gV[i] = 0
+	}
+
+	nGatheredElements, err := compute.SparseRowGatherKVInto(
+		gK[:totalGatherTokens*w],
+		gV[:totalGatherTokens*w],
+		keysHost, valsHost,
+		selectedBlocks, blockSize, nKV, hd, totalTokens,
+	)
+	if err != nil {
+		return be.Attention(q, s.halKV, kvLayer, true, grp, scale)
+	}
+	nGathered := nGatheredElements / w
+
+	out := make([]float32, nH*hd)
+	scoreBuf := make([]float32, nGathered)
+
+	for h := 0; h < nH; h++ {
+		kvh := h / grp
+		qh := qHost[h*hd : (h+1)*hd]
+
+		var maxScore float32 = -1e30
+		for j := 0; j < nGathered; j++ {
+			kh := gK[j*w+kvh*hd : j*w+(kvh+1)*hd]
+			sc := dot(qh, kh) * scale
+			scoreBuf[j] = sc
+			if sc > maxScore {
+				maxScore = sc
+			}
+		}
+
+		var sumExp float32 = 0.0
+		for j := 0; j < nGathered; j++ {
+			e := float32(math.Exp(float64(scoreBuf[j] - maxScore)))
+			scoreBuf[j] = e
+			sumExp += e
+		}
+
+		var invSum float32 = 0.0
+		if sumExp > 0 {
+			invSum = 1.0 / sumExp
+		}
+
+		oh := out[h*hd : (h+1)*hd]
+		for j := 0; j < nGathered; j++ {
+			weight := scoreBuf[j] * invSum
+			vh := gV[j*w+kvh*hd : j*w+(kvh+1)*hd]
+			for d := 0; d < hd; d++ {
+				oh[d] += weight * vh[d]
+			}
+		}
+	}
+
+	return s.uploadHostF32([]int{nH * hd}, out, compute.MemoryActivation, "qwen35-full-attn-qsa-gathered")
 }
 
 func (s *Session) qwen35SequencePrefillRequestWithEmbedding(ids []int, needLogits bool, embedding compute.Tensor, embeddingRows bool, embeddingVocab int) compute.Qwen35SequencePrefillRequest {

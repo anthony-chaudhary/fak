@@ -10,9 +10,9 @@
 The canonical agent instructions for this repo are in **[`AGENTS.md`](AGENTS.md)** —
 read it first for build/test/run, the repo map, and the rules.
 
-## The five hard rules
+## The six hard rules
 
-The five that will bite you if you skip them:
+The six that will bite you if you skip them:
 
 - **Work directly on the trunk (`main`). Never open a feature branch or new worktree** —
   the trunk guard *refuses* off-trunk commits (`OFF_TRUNK`). The *one* sanctioned
@@ -56,6 +56,13 @@ The five that will bite you if you skip them:
   direct work for lightweight coordination and truly trivial tasks. Full contract in [`AGENTS.md`](AGENTS.md).
 - **The Go module is the repository root** — run `go` commands from the clone root;
   `go install github.com/anthony-chaudhary/fak/cmd/fak@latest` resolves directly.
+- **Strict Ban on PowerShell and Loose Scripts — Mandatory Modular Go Programs** —
+  adding new PowerShell scripts (`.ps1`), Bash/POSIX shell scripts (`.sh`), batch files (`.bat`, `.cmd`),
+  or loose scripts is **STRICTLY BANNED** across this repo and `fak-private`. An exception requires an
+  extraordinary, super heavily justified reason (basically ~1 in the whole repo, such as initial host
+  bootstrapping before Go is installed). All new automation, test runners, harnesses, session orchestrators,
+  and background tooling **MUST be native Go programs** (`cmd/*`, Go leaves registered as `fak` CLI verbs,
+  or quarantined sub-modules). Think modular, integrated, long-term value.
 
 ## Doc map
 

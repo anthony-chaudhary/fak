@@ -2,9 +2,12 @@ package compute
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // The #6412 fault-boundary witness.
@@ -431,6 +434,223 @@ func TestDeviceFaultReconstructIsIdempotentOnHealthy(t *testing.T) {
 	}
 	if device.rebuilds != 0 {
 		t.Fatalf("rebuilds = %d, want 0 — a healthy session must not be torn down", device.rebuilds)
+	}
+}
+
+// TestDeviceFaultReconstructSingleflightsConcurrentCallers proves one poisoned context is torn
+// down exactly once even when many serving goroutines request recovery together. Every caller
+// joins the owner's result; waiters neither overlap rebuilds nor spend the attempt budget.
+func TestDeviceFaultReconstructSingleflightsConcurrentCallers(t *testing.T) {
+	const callers = 12
+	latch := NewDeviceFaultLatch("cuda", 3)
+	latch.Observe(DeviceFaultContext, "resume", 31)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	results := make(chan error, callers)
+	var rebuilds, validations atomic.Int32
+	go func() {
+		results <- latch.Reconstruct(func() error {
+			rebuilds.Add(1)
+			close(started)
+			<-release
+			return nil
+		}, func() error {
+			validations.Add(1)
+			return nil
+		})
+	}()
+	<-started
+
+	for i := 1; i < callers; i++ {
+		go func() {
+			results <- latch.Reconstruct(func() error {
+				rebuilds.Add(1)
+				return nil
+			}, func() error {
+				validations.Add(1)
+				return nil
+			})
+		}()
+	}
+	waitForDeviceRecoveryWaiters(t, latch, callers-1)
+	close(release)
+
+	for i := 0; i < callers; i++ {
+		if err := receiveRecoveryResult(t, results); err != nil {
+			t.Fatalf("caller %d recovery failed: %v", i, err)
+		}
+	}
+	if got := rebuilds.Load(); got != 1 {
+		t.Fatalf("rebuilds = %d, want exactly one shared teardown/rebuild", got)
+	}
+	if got := validations.Load(); got != 1 {
+		t.Fatalf("validations = %d, want exactly one validation", got)
+	}
+	snap := latch.Snapshot()
+	if snap.Health != DeviceHealthy || snap.Attempts != 1 || snap.Recoveries != 1 {
+		t.Fatalf("snapshot = health %q attempts %d recoveries %d, want healthy/1/1",
+			snap.Health, snap.Attempts, snap.Recoveries)
+	}
+}
+
+// TestDeviceFaultReconstructDoesNotClearNewerFault is the recovery-epoch witness. A fault observed
+// while teardown is in flight makes that attempt stale: validation is skipped, serving stays
+// closed, and both the owner and its waiter receive the same refusal for the newer fault.
+func TestDeviceFaultReconstructDoesNotClearNewerFault(t *testing.T) {
+	latch := NewDeviceFaultLatch("cuda", 3)
+	latch.Observe(DeviceFaultContext, "pre-resume", 31)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	results := make(chan error, 2)
+	var rebuilds, validations atomic.Int32
+	go func() {
+		results <- latch.Reconstruct(func() error {
+			rebuilds.Add(1)
+			close(started)
+			<-release
+			return nil
+		}, func() error {
+			validations.Add(1)
+			return nil
+		})
+	}()
+	<-started
+	go func() {
+		results <- latch.Reconstruct(func() error {
+			rebuilds.Add(1)
+			return nil
+		}, func() error {
+			validations.Add(1)
+			return nil
+		})
+	}()
+	waitForDeviceRecoveryWaiters(t, latch, 1)
+
+	if err := latch.Observe(DeviceFaultExecution, "wake-probe", 79); err == nil {
+		t.Fatal("new fault observed during recovery did not refuse")
+	}
+	close(release)
+	ownerErr := receiveRecoveryResult(t, results)
+	waiterErr := receiveRecoveryResult(t, results)
+	if ownerErr == nil || waiterErr == nil {
+		t.Fatalf("stale recovery results = owner %v waiter %v, want two refusals", ownerErr, waiterErr)
+	}
+	if ownerErr != waiterErr {
+		t.Fatalf("joined callers received different attempt results: %p and %p", ownerErr, waiterErr)
+	}
+	if got := rebuilds.Load(); got != 1 {
+		t.Fatalf("rebuilds = %d, want 1", got)
+	}
+	if got := validations.Load(); got != 0 {
+		t.Fatalf("validations = %d, want 0 after a newer fault made the attempt stale", got)
+	}
+	snap := latch.Snapshot()
+	if snap.Health != DevicePoisoned || snap.Faults != 2 || snap.Attempts != 1 || snap.Recoveries != 0 {
+		t.Fatalf("stale snapshot = health %q faults %d attempts %d recoveries %d, want poisoned/2/1/0",
+			snap.Health, snap.Faults, snap.Attempts, snap.Recoveries)
+	}
+	if snap.LastSite != "wake-probe" || snap.LastCode != 79 {
+		t.Fatalf("stale recovery erased newer attribution: site/code = %q/%d", snap.LastSite, snap.LastCode)
+	}
+	if err := latch.Admit("decode-after-wake"); err == nil {
+		t.Fatal("serving reopened after a stale recovery")
+	}
+
+	if err := latch.Reconstruct(nil, nil); err != nil {
+		t.Fatalf("fresh recovery after the newer fault failed: %v", err)
+	}
+	snap = latch.Snapshot()
+	if snap.Health != DeviceHealthy || snap.Attempts != 2 || snap.Recoveries != 1 {
+		t.Fatalf("fresh snapshot = health %q attempts %d recoveries %d, want healthy/2/1",
+			snap.Health, snap.Attempts, snap.Recoveries)
+	}
+}
+
+// TestDeviceFaultReconstructSharesFailedAttempt proves waiters also share failure. One failed
+// physical rebuild consumes one budget slot and publishes one immutable typed refusal.
+func TestDeviceFaultReconstructSharesFailedAttempt(t *testing.T) {
+	const callers = 8
+	latch := NewDeviceFaultLatch("cuda", 3)
+	latch.Observe(DeviceFaultContext, "resume", 31)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	results := make(chan error, callers)
+	var rebuilds atomic.Int32
+	go func() {
+		results <- latch.Reconstruct(func() error {
+			rebuilds.Add(1)
+			close(started)
+			<-release
+			return errors.New("device context still unavailable")
+		}, nil)
+	}()
+	<-started
+	for i := 1; i < callers; i++ {
+		go func() {
+			results <- latch.Reconstruct(func() error {
+				rebuilds.Add(1)
+				return nil
+			}, nil)
+		}()
+	}
+	waitForDeviceRecoveryWaiters(t, latch, callers-1)
+	close(release)
+
+	first := receiveRecoveryResult(t, results)
+	if first == nil {
+		t.Fatal("failed owner attempt returned nil")
+	}
+	for i := 1; i < callers; i++ {
+		if got := receiveRecoveryResult(t, results); got != first {
+			t.Fatalf("waiter %d result = %v, want the shared result %v", i, got, first)
+		}
+	}
+	if got := rebuilds.Load(); got != 1 {
+		t.Fatalf("rebuilds = %d, want 1", got)
+	}
+	snap := latch.Snapshot()
+	if snap.Health != DevicePoisoned || snap.Attempts != 1 || snap.Recoveries != 0 {
+		t.Fatalf("failed snapshot = health %q attempts %d recoveries %d, want poisoned/1/0",
+			snap.Health, snap.Attempts, snap.Recoveries)
+	}
+}
+
+func waitForDeviceRecoveryWaiters(t *testing.T, latch *DeviceFaultLatch, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		latch.mu.Lock()
+		got := 0
+		recovery := reflect.ValueOf(latch).Elem().FieldByName("recovery")
+		if !recovery.IsValid() {
+			latch.mu.Unlock()
+			t.Fatal("DeviceFaultLatch has no in-flight recovery state")
+		}
+		if !recovery.IsNil() {
+			got = int(recovery.Elem().FieldByName("waiters").Int())
+		}
+		latch.mu.Unlock()
+		if got >= want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("recovery waiters = %d, want %d", got, want)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func receiveRecoveryResult(t *testing.T, results <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-results:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for recovery result")
+		return nil
 	}
 }
 

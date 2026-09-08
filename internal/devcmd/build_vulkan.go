@@ -16,12 +16,19 @@ import (
 
 // VulkanBuildResult represents the structured JSON output for RunBuildVulkan.
 type VulkanBuildResult struct {
-	Schema     string `json:"schema"`
-	Command    string `json:"command"`
-	Success    bool   `json:"success"`
-	OutBin     string `json:"out_bin,omitempty"`
-	Error      string `json:"error,omitempty"`
-	DurationMS int64  `json:"duration_ms"`
+	Schema              string `json:"schema"`
+	Command             string `json:"command"`
+	Success             bool   `json:"success"`
+	OutBin              string `json:"out_bin,omitempty"`
+	Error               string `json:"error,omitempty"`
+	DurationMS          int64  `json:"duration_ms"`
+	GitCommit           string `json:"git_commit,omitempty"`
+	GitRef              string `json:"git_ref,omitempty"`
+	Clean               *bool  `json:"clean,omitempty"`
+	SourceArchiveSHA256 string `json:"source_archive_sha256,omitempty"`
+	BinarySHA256        string `json:"binary_sha256,omitempty"`
+	ShaderBundleSHA256  string `json:"shader_bundle_sha256,omitempty"`
+	ReceiptPath         string `json:"receipt_path,omitempty"`
 }
 
 // RunBuildVulkan parses CLI arguments and runs Vulkan build/test tasks via computebuild.RunVulkan.
@@ -50,6 +57,11 @@ func RunBuildVulkan(stdout, stderr io.Writer, argv []string) int {
 	fs.StringVar(outBin, "out", "", "output binary path (alias)")
 	receiptFlag := fs.String("receipt", ".fak/vulkan-build-receipt.json", "path to write durable JSON build receipt")
 	smokeFlag := fs.Bool("smoke", true, "run shift-left smoke verification on compiled binary")
+	commitFlag := fs.String("commit", "", "pinned Git commit SHA (defaults to HEAD if empty)")
+	fs.StringVar(commitFlag, "git-commit", "", "pinned Git commit SHA")
+	fs.StringVar(commitFlag, "git-tip", "", "pinned Git commit SHA")
+	refFlag := fs.String("ref", "HEAD", "pinned Git ref (default: HEAD)")
+	fs.StringVar(refFlag, "git-ref", "HEAD", "pinned Git ref (default: HEAD)")
 	jsonOut := fs.Bool("json", false, "emit machine-readable JSON output")
 	cmdFlag := fs.String("cmd", "", "subcommand mode (shaders, lib, build, binary, test)")
 
@@ -104,6 +116,9 @@ func RunBuildVulkan(stdout, stderr io.Writer, argv []string) int {
 		OutBin:      *outBin,
 		ReceiptPath: *receiptFlag,
 		Smoke:       *smokeFlag,
+		SkipSmoke:   !*smokeFlag,
+		GitCommit:   *commitFlag,
+		GitRef:      *refFlag,
 		Stdout:      stdout,
 		Stderr:      stderr,
 	}
@@ -155,11 +170,22 @@ func RunBuildVulkan(stdout, stderr io.Writer, argv []string) int {
 
 	if *jsonOut {
 		res := VulkanBuildResult{
-			Schema:     "fak.vulkan-build.v1",
-			Command:    sub,
-			Success:    err == nil,
-			OutBin:     cfg.OutBin,
-			DurationMS: dur,
+			Schema:      "fak.vulkan-build.v1",
+			Command:     sub,
+			Success:     err == nil,
+			OutBin:      cfg.OutBin,
+			ReceiptPath: cfg.ReceiptPath,
+			DurationMS:  dur,
+		}
+		if cfg.Receipt != nil {
+			res.GitCommit = cfg.Receipt.GitCommit
+			res.GitRef = cfg.Receipt.GitRef
+			res.Clean = cfg.Receipt.Clean
+			res.SourceArchiveSHA256 = cfg.Receipt.SourceArchiveSHA256
+			res.ShaderBundleSHA256 = cfg.Receipt.ShaderBundleSHA256
+			if cfg.Receipt.Artifact != nil {
+				res.BinarySHA256 = cfg.Receipt.Artifact.SHA256
+			}
 		}
 		if err != nil {
 			res.Error = err.Error()

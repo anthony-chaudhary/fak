@@ -1,0 +1,111 @@
+#version 450
+
+// rmsnorm_q4k_matmul2.comp — RMSNorm(X) then two Q4_K projections in ONE dispatch (P=1 decode).
+//
+// Eliminates two dispatch and barrier boundaries by staging normalized activations (f32)
+// in workgroup shared memory (256 floats per Q4_K super-block) and evaluating two Q4_K
+// projections (w0: out0 x inDim, w1: out1 x inDim) directly.
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer W0buf { uint raw0[]; };
+layout(std430, binding = 1) readonly buffer W1buf { uint raw1[]; };
+layout(std430, binding = 2) readonly buffer Xbuf  { float X[]; };
+layout(std430, binding = 3) readonly buffer Nbuf  { float NormW[]; };
+layout(std430, binding = 4) writeonly buffer Y0buf { float Y0[]; };
+layout(std430, binding = 5) writeonly buffer Y1buf { float Y1[]; };
+
+layout(push_constant) uniform Push {
+    int out0;
+    int out1;
+    int inDim;
+    int P;
+    float eps;
+} pc;
+
+shared float red[256];
+shared float Xs[256];
+
+uint byteAt(bool isW0, uint off) {
+    uint w = isW0 ? raw0[off >> 2] : raw1[off >> 2];
+    return (w >> ((off & 3u) * 8u)) & 255u;
+}
+
+float halfAt(bool isW0, uint off) {
+    uint bits = byteAt(isW0, off) | (byteAt(isW0, off + 1u) << 8u);
+    return unpackHalf2x16(bits).x;
+}
+
+void scaleMin(bool isW0, uint base, int group, out uint sc, out uint mn) {
+    int j = group;
+    if (j < 4) {
+        sc = byteAt(isW0, base + uint(j)) & 63u;
+        mn = byteAt(isW0, base + uint(j + 4)) & 63u;
+    } else {
+        sc = (byteAt(isW0, base + uint(j + 4)) & 15u) | ((byteAt(isW0, base + uint(j - 4)) >> 6u) << 4u);
+        mn = (byteAt(isW0, base + uint(j + 4)) >> 4u) | ((byteAt(isW0, base + uint(j)) >> 6u) << 4u);
+    }
+}
+
+void main() {
+    if (pc.P != 1) return;
+    uint tid = gl_LocalInvocationID.x;
+    uint o = gl_GlobalInvocationID.x;
+    uint totalOut = uint(pc.out0 + pc.out1);
+    uint out0 = uint(pc.out0);
+    uint in_ = uint(pc.inDim);
+
+    // Pass 1: RMS reduction over X -> inv scale
+    float local = 0.0;
+    for (uint i = tid; i < in_; i += 256u) {
+        float v = X[i];
+        local += v * v;
+    }
+    red[tid] = local;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1) {
+        if (tid < s) red[tid] += red[tid + s];
+        barrier();
+    }
+    float inv = inversesqrt(red[0] / float(pc.inDim) + pc.eps);
+    barrier();
+
+    // Pass 2: window over 256-element super-blocks, staging normalized activation
+    int blocks = int(in_ / 256u);
+    bool isW0 = (o < out0);
+    uint row = isW0 ? o : (o - out0);
+    float sum = 0.0;
+
+    for (int sb = 0; sb < blocks; ++sb) {
+        uint idx = uint(sb * 256) + tid;
+        if (idx < in_) {
+            Xs[tid] = X[idx] * inv * NormW[idx];
+        } else {
+            Xs[tid] = 0.0;
+        }
+        barrier();
+
+        if (o < totalOut) {
+            uint base = uint((row * uint(blocks) + uint(sb)) * 144u);
+            float d = halfAt(isW0, base);
+            float dm = halfAt(isW0, base + 2u);
+            for (int group = 0; group < 8; ++group) {
+                uint sc, mn; scaleMin(isW0, base + 4u, group, sc, mn);
+                for (int lane = 0; lane < 32; ++lane) {
+                    uint packed = byteAt(isW0, base + 16u + uint((group >> 1) * 32 + lane));
+                    uint code = ((group & 1) != 0) ? packed >> 4u : packed & 15u;
+                    float w = d * float(sc) * float(code) - dm * float(mn);
+                    sum += w * Xs[group * 32 + lane];
+                }
+            }
+        }
+        barrier();
+    }
+
+    if (o < totalOut) {
+        if (isW0) {
+            Y0[row] = sum;
+        } else {
+            Y1[row] = sum;
+        }
+    }
+}

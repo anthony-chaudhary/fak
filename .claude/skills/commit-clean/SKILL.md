@@ -29,6 +29,7 @@ One repeatable pass that lands YOUR finished paths on `main` with a lintable, bi
 - **Conventional-Commits subject ending in a `(fak <leaf>)` stamp** so the `dos verify` referee can bind the commit to its lane — e.g. `fix(gateway): treat same-tick ready as positive (fak gateway)`. A bare un-stamped subject stays NOT_SHIPPED.
 - **Default is to ship.** Once the tree is green (`make ci`), commit AND push unprompted via `fak sync push`.
 - **Autonomous landing upon task completion.** Following the safe commit-and-land process to completion is MANDATORY and active BY DEFAULT when any task finishes (using a new subagent if needed). Never leave touched paths uncommitted or require an operator prompt to trigger landing.
+- **Strict Ban on Staging PowerShell & Loose Scripts.** Never stage or commit new `.ps1` (PowerShell), `.sh`, `.bat`, or loose scripts. All new automation and tooling MUST be native Go programs (`cmd/*`, Go leaves registered as `fak` CLI verbs, or quarantined sub-modules) providing modular, integrated, long-term value. Unless there is an extraordinary, super heavily justified reason (~1 in entire repo), new scripts are rejected.
 
 ## The tools (dogfood these, not raw git)
 

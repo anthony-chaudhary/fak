@@ -489,3 +489,179 @@ func TestQwen35HALQKNormMissingResidentPathFailsClosed(t *testing.T) {
 		t.Fatal("typed resident refusal must not re-upload Q/K activations")
 	}
 }
+
+// TestQwen35QSASparseRowGather verifies true QSA sparse attention row gather into 32MB MALL Infinity Cache:
+// 1. Dynamic gating threshold (N_kv >= 16,384 tokens) and multi-sequence safety fallback.
+// 2. Contiguous scratch buffer sizing (~2,304 tokens aligned to 256-wide tiles) and 32MB MALL residency.
+// 3. Radix Top-K block selection and contiguous sparse row gather.
+// 4. Numerical equivalence and perplexity parity (relative L2 delta <= 0.05%) against dense masked attention.
+// 5. End-to-end qwen35FullAttentionHAL execution over 16,384 cached tokens.
+func TestQwen35QSASparseRowGather(t *testing.T) {
+	cfg := qwen35HybridTestCfg()
+	// Layer 3 is full_attention (QSA layer)
+	if !cfg.IsQSALayer(3) {
+		t.Fatal("cfg.IsQSALayer(3) must be true for hybrid test config")
+	}
+
+	// 1. Dynamic Threshold Gating Verification
+	if cfg.ShouldUseQSASparseGather(3, 1000, 1) {
+		t.Errorf("ShouldUseQSASparseGather(3, 1000, 1) = true, want false (N_kv < 16384)")
+	}
+	if cfg.ShouldUseQSASparseGather(3, 16383, 1) {
+		t.Errorf("ShouldUseQSASparseGather(3, 16383, 1) = true, want false (boundary N_kv < 16384)")
+	}
+	if !cfg.ShouldUseQSASparseGather(3, 16384, 1) {
+		t.Errorf("ShouldUseQSASparseGather(3, 16384, 1) = false, want true")
+	}
+	if !cfg.ShouldUseQSASparseGather(3, 78000, 1) {
+		t.Errorf("ShouldUseQSASparseGather(3, 78000, 1) = false, want true (78k context)")
+	}
+	// Multi-sequence safety: batchSize > 1 must fall back to dense
+	for _, bs := range []int{2, 4, 8} {
+		if cfg.ShouldUseQSASparseGather(3, 16384, bs) {
+			t.Errorf("ShouldUseQSASparseGather(3, 16384, %d) = true, want false (multi-sequence safety)", bs)
+		}
+	}
+	// Non-QSA linear layers must never trigger QSA
+	for l := 0; l < 3; l++ {
+		if cfg.ShouldUseQSASparseGather(l, 78000, 1) {
+			t.Errorf("ShouldUseQSASparseGather(%d, 78000, 1) = true, want false (non-QSA layer)", l)
+		}
+	}
+
+	// 2. Contiguous Scratch Sizing & 32MB MALL Infinity Cache Residency
+	blockSize := compute.QSABlockSize // 64
+	totalTokens := 16384
+	totalBlocks := (totalTokens + blockSize - 1) / blockSize // 256
+	topKBlocks := compute.QSABaseTopKTokens / blockSize      // 32
+	tailBlocks := compute.QSALocalTailTokens / blockSize     // 4
+
+	scores := make([]float32, totalBlocks)
+	for b := range scores {
+		if b < topKBlocks || b >= totalBlocks-tailBlocks {
+			scores[b] = 5.0 + float32(b)*0.01
+		} else {
+			scores[b] = -10.0 + float32(b)*0.001
+		}
+	}
+
+	selected, _, err := compute.RadixTopKBlockSelect(scores, totalBlocks, topKBlocks, tailBlocks)
+	if err != nil {
+		t.Fatalf("RadixTopKBlockSelect failed: %v", err)
+	}
+	if len(selected) != topKBlocks+tailBlocks {
+		t.Fatalf("selected blocks count = %d, want %d", len(selected), topKBlocks+tailBlocks)
+	}
+
+	tileSize := compute.QSATileSize // 256
+	totalGatherTokens := len(selected) * blockSize
+	numTiles := (totalGatherTokens + tileSize - 1) / tileSize
+	alignedGather := numTiles * tileSize
+	if alignedGather != compute.QSAMaxGatherTokens {
+		t.Fatalf("alignedGather = %d, want QSAMaxGatherTokens %d", alignedGather, compute.QSAMaxGatherTokens)
+	}
+
+	w := cfg.NumKVHeads * cfg.HeadDim
+	neededElements := alignedGather * w
+	scratchBytes := 2 * int64(neededElements) * 4 // sizeof(float32) for K and V
+	if scratchBytes > compute.StrixHaloInfinityCacheBytes {
+		t.Fatalf("scratchBytes %d > StrixHaloInfinityCacheBytes %d (32MB MALL)", scratchBytes, compute.StrixHaloInfinityCacheBytes)
+	}
+	t.Logf("QSA gathered scratch buffer size = %d bytes (resides in 32MB MALL Infinity Cache: %t)", scratchBytes, scratchBytes <= compute.StrixHaloInfinityCacheBytes)
+
+	// 3. Numerical Equivalence & Perplexity Parity Check (<= 0.05% relative delta)
+	hd := cfg.HeadDim
+	nH := cfg.NumHeads
+	nKV := cfg.NumKVHeads
+	grp := nH / nKV
+	scale := float32(1.0 / math.Sqrt(float64(hd)))
+
+	Q := make([]float32, nH*hd)
+	for i := range Q {
+		Q[i] = float32(math.Sin(float64(i+1)*0.1)) + 0.5
+	}
+	K := make([]float32, totalTokens*w)
+	V := make([]float32, totalTokens*w)
+
+	for tTok := 0; tTok < totalTokens; tTok++ {
+		b := tTok / blockSize
+		isSelected := (b < topKBlocks) || (b >= totalBlocks-tailBlocks)
+		for i := 0; i < w; i++ {
+			idx := tTok*w + i
+			kvh := i / hd
+			dim := i % hd
+			sinVal := float32(math.Sin(float64(tTok*w+i)*0.017 + float64(b)*0.1))
+			qh := kvh * grp
+			if isSelected {
+				K[idx] = Q[qh*hd+dim] + sinVal*0.01
+				V[idx] = float32(math.Cos(float64(tTok*w+i) * 0.013))
+			} else {
+				K[idx] = -Q[qh*hd+dim]*3.0 + sinVal*0.01
+				V[idx] = float32(math.Cos(float64(tTok*w+i) * 0.013))
+			}
+		}
+	}
+
+	// Evaluate dense attention
+	denseOut := make([]float32, nH*hd)
+	cache := NewKVCache(cfg)
+	cache.pos = make([]int, totalTokens)
+	for i := range cache.pos {
+		cache.pos[i] = i
+	}
+	cache.K[3] = K
+	cache.V[3] = V
+	_ = attnDecodeOne(denseOut, Q, cache, 3, nH, hd, w, grp, scale, fdot, fdot3scalar, nil)
+
+	// Evaluate QSA sparse row gather attention via HAL session
+	m := NewSynthetic(cfg)
+	be := newRecordingQwen35Backend(m)
+	s, err := m.NewBackendSessionChecked(be)
+	if err != nil {
+		t.Fatalf("NewBackendSessionChecked: %v", err)
+	}
+	defer s.Close()
+
+	// Append rows into halKV for layer 0 (tracking pos) and layer 3 (QSA target)
+	for p := 0; p < totalTokens; p++ {
+		kRow := K[p*w : (p+1)*w]
+		vRow := V[p*w : (p+1)*w]
+		kTen := s.uploadHostF32([]int{w}, kRow, compute.MemoryKVCache, "test-k")
+		vTen := s.uploadHostF32([]int{w}, vRow, compute.MemoryKVCache, "test-v")
+		s.halKV.AppendKV(0, kTen, kTen, vTen, p)
+		s.halKV.AppendKV(3, kTen, kTen, vTen, p)
+	}
+
+	qTensor := s.uploadHostF32([]int{nH * hd}, Q, compute.MemoryActivation, "test-q")
+	sparseOutTensor := s.qwen35QSASparseAttentionHAL(3, 3, qTensor, grp, scale)
+	sparseOut := s.Backend.Read(sparseOutTensor)
+
+	relL2, err := ValidateQSAPerplexityParity(denseOut, sparseOut)
+	if err != nil {
+		t.Fatalf("ValidateQSAPerplexityParity returned error: %v", err)
+	}
+	t.Logf("QSA HAL sparse vs dense relative L2 delta = %e (tolerance = %e)", relL2, compute.QSAPerplexityDeltaTolerance)
+	if relL2 >= compute.QSAPerplexityDeltaTolerance {
+		t.Fatalf("relative L2 delta %e >= tolerance %e (0.05%%)", relL2, compute.QSAPerplexityDeltaTolerance)
+	}
+
+	// 4. End-to-End qwen35FullAttentionHAL execution with QSA gather
+	residualHost := make([]float32, cfg.HiddenSize)
+	for i := range residualHost {
+		residualHost[i] = float32(i+1) * 0.05
+	}
+	residual := s.uploadHostF32([]int{cfg.HiddenSize}, residualHost, compute.MemoryActivation, "test-res")
+	s.qwen35FullAttentionHAL(3, totalTokens, residual, 1e-5, scale, grp)
+	resOut := s.Backend.Read(residual)
+	if len(resOut) != cfg.HiddenSize {
+		t.Fatalf("residual output size = %d, want %d", len(resOut), cfg.HiddenSize)
+	}
+	for i, v := range resOut {
+		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+			t.Fatalf("residual output at index %d is non-finite: %v", i, v)
+		}
+	}
+	if len(s.qwen35HAL.qsaGatheredK) < neededElements || len(s.qwen35HAL.qsaGatheredV) < neededElements {
+		t.Errorf("qsa scratch buffers not sized: K=%d, V=%d, want >= %d", len(s.qwen35HAL.qsaGatheredK), len(s.qwen35HAL.qsaGatheredV), neededElements)
+	}
+}

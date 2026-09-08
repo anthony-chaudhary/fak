@@ -749,7 +749,7 @@ def build_plan(root: Path, *, version: str | None, level: str | None,
 
     bump, raw_bump, bump_code = load_json([
         sys.executable, str(root / "tools" / "release_bump.py"),
-        target, "--dry-run",
+        target, "--dry-run", "--date", date,
     ], root=root)
     if bump is None or bump_code != 0:
         return {"ok": False, "aborted": "release_bump dry-run failed", "detail": raw_bump[-500:]}
@@ -869,6 +869,7 @@ def execute_plan(root: Path, plan: dict, *, includes: list[str], overwrite_notes
 
         bump, raw_bump, bump_code = load_json([
             sys.executable, str(root / "tools" / "release_bump.py"), plan["version"],
+            "--date", plan["date"],
         ], root=root)
         if bump is None or bump_code != 0:
             plan.update(ok=False, aborted="release_bump failed", detail=raw_bump[-500:])

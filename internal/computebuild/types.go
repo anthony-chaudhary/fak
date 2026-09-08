@@ -34,6 +34,8 @@ type VulkanConfig struct {
 	ReceiptPath string               // Path to write receipt JSON (defaults to .fak/compute-build-receipt.json or .fak/vulkan-build-receipt.json)
 	Smoke       bool                 // Default true for binary builds: shift-left execution of the output binary
 	SkipSmoke   bool                 // Skip shift-left smoke execution even for binary builds
+	GitCommit   string               // Pinned Git commit SHA (defaults to HEAD if empty)
+	GitRef      string               // Pinned Git ref (e.g. "HEAD")
 	Receipt     *ComputeBuildReceipt // Generated receipt populated upon completion
 	Toolchain   *Toolchain           // Pre-discovered or custom toolchain
 	Stdout      io.Writer            // Standard output stream
@@ -106,19 +108,37 @@ type ComputeBuildPhase struct {
 	Error     string `json:"error,omitempty"`
 }
 
+// ToolchainIdentity records normalized toolchain and compiler identity.
+type ToolchainIdentity struct {
+	CC         string   `json:"cc,omitempty"`
+	CXX        string   `json:"cxx,omitempty"`
+	AR         string   `json:"ar,omitempty"`
+	GLSLC      string   `json:"glslc,omitempty"`
+	VulkanSDK  string   `json:"vulkan_sdk,omitempty"`
+	CxxRuntime string   `json:"cxx_runtime,omitempty"`
+	BuildArgs  []string `json:"build_args,omitempty"`
+}
+
 // ComputeBuildReceipt records full provenance, phases, artifact metadata, and smoke test results.
 type ComputeBuildReceipt struct {
-	Schema      string              `json:"schema"`
-	Backend     string              `json:"backend"`
-	Command     string              `json:"command"`
-	Outcome     string              `json:"outcome"`
-	ExitCode    int                 `json:"exit_code"`
-	Error       string              `json:"error,omitempty"`
-	StartedAt   string              `json:"started_at"`
-	FinishedAt  string              `json:"finished_at"`
-	ElapsedMS   int64               `json:"elapsed_ms"`
-	ReceiptPath string              `json:"receipt_path"`
-	Phases      []ComputeBuildPhase `json:"phases"`
-	Artifact    *BuildArtifact      `json:"artifact,omitempty"`
-	Smoke       *SmokeResult        `json:"smoke,omitempty"`
+	Schema              string              `json:"schema"`
+	Backend             string              `json:"backend"`
+	Command             string              `json:"command"`
+	Outcome             string              `json:"outcome"`
+	ExitCode            int                 `json:"exit_code"`
+	Error               string              `json:"error,omitempty"`
+	StartedAt           string              `json:"started_at"`
+	FinishedAt          string              `json:"finished_at"`
+	ElapsedMS           int64               `json:"elapsed_ms"`
+	ReceiptPath         string              `json:"receipt_path"`
+	GitCommit           string              `json:"git_commit,omitempty"`
+	GitRef              string              `json:"git_ref,omitempty"`
+	Clean               *bool               `json:"clean,omitempty"`
+	SourceArchiveSHA256 string              `json:"source_archive_sha256,omitempty"`
+	ShaderBundleSHA256  string              `json:"shader_bundle_sha256,omitempty"`
+	BuildArgs           []string            `json:"build_args,omitempty"`
+	Toolchain           *ToolchainIdentity  `json:"toolchain,omitempty"`
+	Phases              []ComputeBuildPhase `json:"phases"`
+	Artifact            *BuildArtifact      `json:"artifact,omitempty"`
+	Smoke               *SmokeResult        `json:"smoke,omitempty"`
 }

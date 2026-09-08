@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/rawdecode"
 )
@@ -573,6 +574,7 @@ func TestSubagentFanoutPhysicalModeFailsBefore(t *testing.T) {
 		ParityPassed:      true,
 		FallbackCount:     0,
 		FailureCount:      0,
+		BackendExecution:  validBackendExecutionEvidence(),
 	}
 
 	validModeledMetric := RunMetric{
@@ -675,10 +677,11 @@ func TestSubagentFanoutPhysicalModeFailsBefore(t *testing.T) {
 // TestSubagentFanoutPhysicalModeRejectsMissingTelemetry verifies fail-closed behavior on missing fields.
 func TestSubagentFanoutPhysicalModeRejectsMissingTelemetry(t *testing.T) {
 	validIdentity := ExecutionIdentity{
-		SourceCommit:      "2a4e3e13431ecea885217ed8c5f161542e823039",
-		BinarySHA256:      "a1b2c3d4e5f60123456789abcdef0123456789abcdef0123456789abcdef0123",
-		ModelGGUFSHA256:   DefaultModelGGUFSHA256,
-		TokenPacketSHA256: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+		SourceCommit:        "2a4e3e13431ecea885217ed8c5f161542e823039",
+		SourceArchiveSHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		BinarySHA256:        "a1b2c3d4e5f60123456789abcdef0123456789abcdef0123456789abcdef0123",
+		ModelGGUFSHA256:     DefaultModelGGUFSHA256,
+		TokenPacketSHA256:   "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
 	}
 
 	basePhasesMS := map[string]float64{
@@ -704,6 +707,7 @@ func TestSubagentFanoutPhysicalModeRejectsMissingTelemetry(t *testing.T) {
 			ParityPassed:      true,
 			FallbackCount:     0,
 			FailureCount:      0,
+			BackendExecution:  validBackendExecutionEvidence(),
 		}
 		if mutate != nil {
 			mutate(&validRealResult)
@@ -804,7 +808,8 @@ func TestRawDecodePhysicalRunnerInvokesRealSeamAndLeavesProvenanceUnavailable(t 
 				FirstSampleDuration: time.Millisecond, DecodeDuration: 6 * time.Millisecond,
 				TeardownDuration: time.Millisecond, PrefillOutputID: 21,
 				StepTokens: []int{22, 23}, GeneratedTokens: []int{21, 22, 23},
-				CPUVerification: &rawdecode.CPUVerification{Passed: true, MinCosine: 0.99999},
+				CPUVerification:  &rawdecode.CPUVerification{Passed: true, MinCosine: 0.99999},
+				BackendExecution: validRawBackendExecutionObservation(),
 			}},
 		}, nil
 	}
@@ -835,8 +840,44 @@ func TestRawDecodePhysicalRunnerInvokesRealSeamAndLeavesProvenanceUnavailable(t 
 	if result.Identity.SourceCommit != "" || result.Identity.SourceArchiveSHA256 != "" || result.Identity.BinarySHA256 != "" || result.PeakMemoryBytes != 0 || result.PhysicalDRAMBytes != 0 || result.MALLTotalBytes != 0 {
 		t.Fatalf("unobserved provenance or telemetry was invented: %+v", result)
 	}
+	if result.BackendExecution == nil || result.BackendExecution.Device != "fixture-vulkan-device" || result.BackendExecution.ComputeDispatches != 9 || result.BackendExecution.H2DBytes != 64 || result.BackendExecution.TensorHomeHits != 4 {
+		t.Fatalf("backend execution observation was not preserved: %+v", result.BackendExecution)
+	}
+	if result.CounterSource != CountersUnavailable || result.PhysicalDRAMBytes != 0 || result.MALLHitBytes != 0 || result.PeakMemoryBytes != 0 {
+		t.Fatalf("backend deltas were relabeled as legacy memory counters: %+v", result)
+	}
 	if err := result.Validate(DefaultLogitCosineParityThreshold); err == nil || !strings.Contains(err.Error(), "source commit") {
 		t.Fatalf("incomplete result promoted: %v", err)
+	}
+
+	baseExecution := rawdecode.Execution{
+		ArtifactSHA256: strings.Repeat("b", 64), Engine: "fak-in-kernel via compute HAL backend \"vulkan\"",
+		Backend: rawdecode.BackendObservation{Selected: "vulkan"}, PromptTokenIDs: []int{11, 12},
+		Runs: []rawdecode.Run{{
+			PrefillDuration: time.Millisecond, GeneratedTokens: []int{21},
+			CPUVerification: &rawdecode.CPUVerification{Passed: true, MinCosine: 0.99999},
+		}},
+	}
+	for name, mutate := range map[string]func(*rawdecode.Execution){
+		"unsupported": func(*rawdecode.Execution) {},
+		"identity mismatch": func(execution *rawdecode.Execution) {
+			execution.Runs[0].BackendExecution = validRawBackendExecutionObservation()
+			execution.Runs[0].BackendExecution.Identity.Backend = "cpu"
+		},
+		"missing device memory": func(execution *rawdecode.Execution) {
+			execution.Runs[0].BackendExecution = validRawBackendExecutionObservation()
+			execution.Runs[0].BackendExecution.DeviceMemoryObserved = false
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			execution := baseExecution
+			execution.Runs = append([]rawdecode.Run(nil), baseExecution.Runs...)
+			mutate(&execution)
+			got, err := physicalTrialFromRawDecode(PhysicalTrialRequest{RunIndex: 1, Scenario: ScenarioCold, Concurrency: 1}, execution)
+			if err == nil || got.BackendExecution != nil || got.UsefulTokens != 0 {
+				t.Fatalf("incomplete backend observation returned result=%+v err=%v", got, err)
+			}
+		})
 	}
 
 	for _, outputArg := range []string{"--json", ""} {
@@ -856,3 +897,27 @@ func TestRawDecodePhysicalRunnerInvokesRealSeamAndLeavesProvenanceUnavailable(t 
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+func validBackendExecutionEvidence() *BackendExecutionEvidence {
+	total, free := uint64(64<<30), uint64(48<<30)
+	return &BackendExecutionEvidence{
+		Backend: "vulkan", Device: "fixture-vulkan-device", Driver: "fixture-driver", Runtime: "Vulkan 1.3",
+		ComputeDispatches: 9, Q4KMatmulDispatches: 7, OtherDispatches: 2, DispatchSubmits: 3,
+		H2DBytes: 64, D2HBytes: 32, D2DCopies: 1, Q4KStageCalls: 2, Q4KStageBytes: 128,
+		TensorHomeHits: 4, TensorHomeAdmissions: 1, TensorHomeEntries: 2, TensorHomeResidentBytes: 256,
+		DeviceMemoryTotalBytes: &total, DeviceMemoryFreeBytes: &free,
+	}
+}
+
+func validRawBackendExecutionObservation() *compute.BackendExecutionObservation {
+	return &compute.BackendExecutionObservation{
+		Identity: compute.BackendRuntimeIdentity{Backend: "vulkan", Device: "fixture-vulkan-device", Driver: "fixture-driver", Runtime: "Vulkan 1.3"},
+		Counters: compute.BackendCounterSnapshot{
+			ComputeDispatches: 9, Q4KMatmulDispatches: 7, OtherDispatches: 2, DispatchSubmits: 3,
+			H2DBytes: 64, D2HBytes: 32, D2DCopies: 1, Q4KStageCalls: 2, Q4KStageBytes: 128,
+			TensorHomeHits: 4, TensorHomeAdmissions: 1,
+		},
+		TensorHomeEntries: 2, TensorHomeResidentBytes: 256,
+		DeviceMemoryObserved: true, DeviceMemoryTotalBytes: 64 << 30, DeviceMemoryFreeBytes: 48 << 30,
+	}
+}

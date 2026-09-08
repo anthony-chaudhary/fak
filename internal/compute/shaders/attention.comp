@@ -3,6 +3,8 @@
 // q[nH*hd] (one position); K,V [nPos, nKV*hd] row-major; out[nH*hd].
 // FlashAttention online softmax: streaming keys with running (m, l, acc)
 // in registers/shared memory — zero global scratch allocations.
+// Evaluates over contiguous gathered sparse KV tiles (aligned to 256-wide tiles) sized to
+// reside entirely within Strix Halo's 32MB MALL Infinity Cache without dense masking overhead.
 layout(local_size_x = 128) in;
 
 layout(std430, binding = 0) readonly  buffer Qbuf { float Q[]; };
@@ -28,6 +30,8 @@ uint red_idx(uint i) {
     return (i / 32u) * RED_STRIDE + (i % 32u);
 }
 
+const uint QSA_TILE_SIZE = 256u;
+
 void main() {
     uint h = gl_WorkGroupID.x;
     if (h >= uint(pc.nH)) return;
@@ -49,40 +53,43 @@ void main() {
     float acc[8];
     for (uint k = 0u; k < 8u; ++k) acc[k] = 0.0;
 
-    for (int j = 0; j < pc.nPos; ++j) {
-        uint kbase = uint(j) * uint(w) + uint(kvh) * uint(pc.hd);
+    for (uint tile = 0u; tile < uint(pc.nPos); tile += QSA_TILE_SIZE) {
+        uint tileEnd = min(tile + QSA_TILE_SIZE, uint(pc.nPos));
+        for (uint j = tile; j < tileEnd; ++j) {
+            uint kbase = j * uint(w) + uint(kvh) * uint(pc.hd);
 
-        // Partial dot product over this thread's strided dims.
-        float partial = 0.0;
-        for (uint d = tid; d < uint(pc.hd); d += 128u) {
-            partial += qs[d] * K[kbase + d];
-        }
-        red[red_idx(tid)] = partial;
-        barrier();
-
-        // Tree reduction for block dot-product score.
-        for (uint s = 64u; s > 0u; s >>= 1u) {
-            if (tid < s) {
-                red[red_idx(tid)] += red[red_idx(tid + s)];
+            // Partial dot product over this thread's strided dims.
+            float partial = 0.0;
+            for (uint d = tid; d < uint(pc.hd); d += 128u) {
+                partial += qs[d] * K[kbase + d];
             }
+            red[red_idx(tid)] = partial;
             barrier();
+
+            // Tree reduction for block dot-product score.
+            for (uint s = 64u; s > 0u; s >>= 1u) {
+                if (tid < s) {
+                    red[red_idx(tid)] += red[red_idx(tid + s)];
+                }
+                barrier();
+            }
+
+            float score = red[red_idx(0u)] * pc.scale;
+            barrier();
+
+            // Online softmax recurrence.
+            float m_new = max(m, score);
+            float corr = exp(m - m_new);
+            float p = exp(score - m_new);
+            l = l * corr + p;
+
+            uint k = 0u;
+            for (uint d = tid; d < uint(pc.hd); d += 128u) {
+                acc[k] = acc[k] * corr + p * V[kbase + d];
+                k++;
+            }
+            m = m_new;
         }
-
-        float score = red[red_idx(0u)] * pc.scale;
-        barrier();
-
-        // Online softmax recurrence.
-        float m_new = max(m, score);
-        float corr = exp(m - m_new);
-        float p = exp(score - m_new);
-        l = l * corr + p;
-
-        uint k = 0u;
-        for (uint d = tid; d < uint(pc.hd); d += 128u) {
-            acc[k] = acc[k] * corr + p * V[kbase + d];
-            k++;
-        }
-        m = m_new;
     }
 
     // Final normalization: Outp = acc / l.
