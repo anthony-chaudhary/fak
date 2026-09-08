@@ -1582,4 +1582,78 @@ func TestRunAMDStrixValidate_CurrentV2ValidationInvariants(t *testing.T) {
 			t.Errorf("expected human stdout not to mention historical/non-credit for valid PASS, got:\n%s", stdoutHuman.String())
 		}
 	})
+
+	t.Run("empty --mine overlay path is rejected", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := RunAMDStrixValidate(&stdout, &stderr, []string{"-mine", "", "-subkernels", "argmax", "-ablate", "none"})
+		if code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		if !strings.Contains(stderr.String(), "empty --mine overlay path rejected") {
+			t.Errorf("expected stderr to mention empty --mine overlay path, got: %s", stderr.String())
+		}
+	})
+
+	t.Run("invalid or regressing ablation arm fails in JSON and human modes", func(t *testing.T) {
+		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			receipt := amdgpu.NewStrixValidationReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
+			receipt.Verdict = "PASS"
+			receipt.Verified = true
+			receipt.Ablations = []amdgpu.StrixAblationResult{
+				{
+					Feature:      "test_ablation",
+					Verdict:      "REGRESSION",
+					Speedup:      0.8,
+					BaselineArm:  amdgpu.StrixArmResult{Name: "base", LatencyUS: 100},
+					CandidateArm: amdgpu.StrixArmResult{Name: "cand", LatencyUS: 125},
+				},
+			}
+			digest, _ := receipt.ComputeDigest()
+			receipt.Digest = digest
+			return receipt, nil
+		}
+
+		var stdoutJSON, stderrJSON bytes.Buffer
+		codeJSON := RunAMDStrixValidate(&stdoutJSON, &stderrJSON, []string{"-committed-only", "-json", "-subkernels", "none", "-ablate", "all"})
+		if codeJSON != 1 {
+			t.Fatalf("expected JSON exit code 1, got %d", codeJSON)
+		}
+		if !strings.Contains(stderrJSON.String(), "suffered regression") {
+			t.Errorf("expected stderr to mention regression, got: %s", stderrJSON.String())
+		}
+
+		var stdoutHuman, stderrHuman bytes.Buffer
+		codeHuman := RunAMDStrixValidate(&stdoutHuman, &stderrHuman, []string{"-committed-only", "-subkernels", "none", "-ablate", "all"})
+		if codeHuman != 1 {
+			t.Fatalf("expected human exit code 1, got %d", codeHuman)
+		}
+		if !strings.Contains(stdoutHuman.String(), "PASS (historical/non-credit)") {
+			t.Errorf("expected human stdout to render PASS (historical/non-credit), got:\n%s", stdoutHuman.String())
+		}
+	})
+
+	t.Run("nil receipt in JSON mode carries candidate archive digest", func(t *testing.T) {
+		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+			return nil, errors.New("runner exploded")
+		}
+
+		var stdout, stderr bytes.Buffer
+		code := RunAMDStrixValidate(&stdout, &stderr, []string{"-committed-only", "-json", "-subkernels", "argmax", "-ablate", "none"})
+		if code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		var parsed amdgpu.StrixValidationReceipt
+		if err := json.Unmarshal(stdout.Bytes(), &parsed); err != nil {
+			t.Fatalf("failed to unmarshal JSON output: %v", err)
+		}
+		if parsed.Verdict != "FAIL" {
+			t.Errorf("verdict = %s, want FAIL", parsed.Verdict)
+		}
+		if !strings.HasPrefix(parsed.Provenance.GitRef, "sha256:") {
+			t.Errorf("expected GitRef to carry sha256 archive digest, got %q", parsed.Provenance.GitRef)
+		}
+		if parsed.Provenance.GitTip != baseCommit {
+			t.Errorf("expected GitTip = %q, got %q", baseCommit, parsed.Provenance.GitTip)
+		}
+	})
 }
