@@ -45,10 +45,13 @@ func DerivePromptPacketGGUFIdentity(path string) (PromptPacketGGUFIdentity, erro
 	if err != nil {
 		return PromptPacketGGUFIdentity{}, fmt.Errorf("derive prompt packet GGUF identity: %w", err)
 	}
-	return derivePromptPacketGGUFIdentity(gg)
+	return DerivePromptPacketGGUFIdentityFromFile(gg)
 }
 
-func derivePromptPacketGGUFIdentity(gg *ggufload.File) (PromptPacketGGUFIdentity, error) {
+// DerivePromptPacketGGUFIdentityFromFile derives the same strict identity from
+// a caller-owned parsed header. This lets loaders bind the identity to the
+// exact stream they already opened without reopening the artifact by path.
+func DerivePromptPacketGGUFIdentityFromFile(gg *ggufload.File) (PromptPacketGGUFIdentity, error) {
 	if gg == nil {
 		return PromptPacketGGUFIdentity{}, fmt.Errorf("derive prompt packet GGUF identity: nil GGUF header")
 	}
