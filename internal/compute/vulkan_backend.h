@@ -72,6 +72,7 @@ int fvk_matmul_argmax_f32(const void *dW, const void *dX, int out, int in);
  * f32 weights when this is 0, so Q8 is an optional fast path, never a correctness dependency. */
 int fvk_have_q8(void);
 int fvk_have_glm_kda_wave32(void);
+int fvk_have_cooperative_matrix(void);
 /* Per-resource storage-buffer cap discovered at init. fvk_max_buffer_bytes is the effective
  * single-buffer ceiling fak must respect: min(maxStorageBufferRange, maxMemoryAllocationSize)
  * when both are known, otherwise the known cap, or 0 when unknown. */
@@ -91,6 +92,8 @@ int fvk_have_memory_budget(void);
  * device. This is the 4× weight-memory cut over fvk_matmul_f32 and the Q8-vs-Q8 parity path. */
 void fvk_q8_matmul_f32(const void *dWcodes, const void *dWscale, const void *dX, void *dY,
                        int out, int in, int P);
+void fvk_q8_matmul_2d_f32(const void *dWcodes, const void *dWscale, const void *dX, void *dY,
+                          int out, int in, int P, unsigned int gridX, unsigned int gridY);
 /* Two Q8_0 projections over the same f32 X in one dispatch. */
 void fvk_q8_matmul2_f32(const void *dW0codes, const void *dW0scale,
                         const void *dW1codes, const void *dW1scale,
@@ -154,8 +157,9 @@ void fvk_swiglu_matmul_add_f32(const void *dW, const void *dG, const void *dU,
 void fvk_add_f32(void *dDst, const void *dSrc, int n);
 void fvk_add_bias_f32(void *dDst, const void *dBias, int rows, int width);
 
-/* Decode attention: q[nH*hd] (one position), K/V [nPos, nKV*hd] row-major; causal by
- * construction (the cache holds exactly the attendable keys). grp = nH/nKV. out[nH*hd]. */
+/* Decode FlashAttention: q[nH*hd] (one position), K/V [nPos, nKV*hd] row-major; causal by
+ * construction (the cache holds exactly the attendable keys). grp = nH/nKV. out[nH*hd].
+ * 4 buffers (Q, K, V, Out) with online softmax and zero global scratch allocations. */
 void fvk_attention_f32(const void *dQ, const void *dK, const void *dV, void *dOut,
                        int nPos, int nH, int nKV, int hd, float scale);
 

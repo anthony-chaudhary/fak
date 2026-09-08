@@ -1,7 +1,7 @@
 {
   "schema": "fak-negation-ab/1",
   "provenance": "OBSERVED / DETERMINISTIC CORPUS REPLAY",
-  "host": "DESKTOP-BB3FMHP/windows/amd64",
+  "host": "win11-fak-bench/windows/amd64",
   "affects_acceptance": false,
   "rungs": [
     {

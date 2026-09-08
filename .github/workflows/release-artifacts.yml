@@ -3,7 +3,7 @@
 # The release CADENCE workflow (release-cadence.yml) cuts the version commit, pushes
 # main, tags `vX.Y.Z` after green CI, and creates the GitHub release PAGE from the
 # committed note. It ships no binaries. THIS workflow decorates that release: on the
-# `v*` tag push it cross-compiles the four supported targets and uploads them (plus
+# `v*` tag push it cross-compiles the five supported targets and uploads them (plus
 # checksums) as release assets, so an external adopter can `curl | sh` (install.sh) or
 # download a prebuilt binary WITHOUT cloning the monorepo (issue #133).
 #

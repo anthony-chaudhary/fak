@@ -212,8 +212,8 @@ func loadLocalLauncherModelWithMetalLease(useMetal bool, ggufPath string, opts g
 // acquiring the canonical GPU lease before model allocation and retaining it across the
 // entire serving lifetime. In-kernel Vulkan serving requires sole ownership of the
 // machine-wide GPU lease so concurrent GPU-heavy workloads queue instead of stacking.
-func loadLocalLauncherModelWithVulkanLease(useVulkan bool, modelPath string, opts gpulease.Options, load func()) (release func(), err error) {
-	if !useVulkan || strings.TrimSpace(modelPath) == "" {
+func loadLocalLauncherModelWithVulkanLease(useVulkan bool, ggufPath string, opts gpulease.Options, load func()) (release func(), err error) {
+	if !useVulkan || ggufPath == "" {
 		load()
 		return func() {}, nil
 	}
@@ -249,4 +249,15 @@ func loadLocalLauncherModelWithVulkanLease(useVulkan bool, modelPath string, opt
 			lease.Release()
 		})
 	}, nil
+}
+
+// loadServeModelWithVulkanLease is the cmdServe admission seam. Only an exact
+// --backend=vulkan paired with an exact nonempty --gguf can acquire residency;
+// --model is advertised/delegated identity and never substitutes for local bytes.
+func loadServeModelWithVulkanLease(sf *serveFlags, opts gpulease.Options, load func()) (release func(), err error) {
+	ggufPath := ""
+	if sf != nil && sf.ggufPath != nil {
+		ggufPath = *sf.ggufPath
+	}
+	return loadLocalLauncherModelWithVulkanLease(isServeVulkan(sf), ggufPath, opts, load)
 }

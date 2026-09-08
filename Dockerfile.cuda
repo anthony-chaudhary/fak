@@ -16,7 +16,7 @@
 # is internal/compute/cuda_arch.txt and this image validates the argument against it:
 #   docker build -f Dockerfile.cuda --build-arg CUDA_ARCH=sm_120 -t fak:cuda .
 #
-# CUDA 12.6 is pinned to match the toolchain internal/compute/setup_cuda_wsl.sh
+# CUDA 12.8 is pinned to match the toolchain internal/compute/setup_cuda_wsl.sh
 # and .github/workflows/cuda-build.yml already build and test against, so the
 # runtime this image ships is the SAME toolkit line the CUDA CI already covers,
 # not an untested newer/older one.
@@ -25,7 +25,7 @@
 #   docker build -f Dockerfile.cuda --build-arg APP_VERSION=0.36.0 -t fak:0.36.0-cuda .
 
 # --- builder -------------------------------------------------------------------
-FROM nvidia/cuda:12.6.2-devel-ubuntu22.04 AS build
+FROM nvidia/cuda:12.8.1-devel-ubuntu22.04 AS build
 ARG APP_VERSION=docker
 ARG CUDA_ARCH=
 
@@ -65,7 +65,7 @@ RUN OUT=/out/fak VERSION="${APP_VERSION}" TAGS=cuda GOTOOLCHAIN=auto sh scripts/
 # --- runtime -------------------------------------------------------------------
 # -runtime (not -base): carries cudart/cublas so the binary's dynamic links resolve;
 # the NVIDIA Container Toolkit injects libcuda.so + the driver at `docker run --gpus`.
-FROM nvidia/cuda:12.6.2-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.1-runtime-ubuntu22.04
 LABEL io.modelcontextprotocol.server.name="io.github.anthony-chaudhary/fak"
 RUN groupadd -r fak && useradd -r -g fak -d /nonexistent -s /usr/sbin/nologin fak
 COPY --from=build /out/fak /usr/local/bin/fak

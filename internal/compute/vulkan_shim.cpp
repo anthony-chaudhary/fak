@@ -183,6 +183,7 @@ int g_have_glm_kda_wave32 = 0;
 // Wave32 cooperative Q4_K decode kernel (subgroup arithmetic + effective/required subgroup size 32).
 int g_have_q4k_wave32 = 0;
 bool g_q4k_wave32_required_subgroup = false;
+int g_have_coopmat = 0;
 
 VkDescriptorPool g_descpool = VK_NULL_HANDLE;
 
@@ -418,42 +419,10 @@ const VkBufferUsageFlags STORAGE_USAGE =
     VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
     VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
-std::vector<Buffer*>          g_attentionScratch;
-size_t                        g_attentionScratchCursor = 0;
-
 size_t scratchCapacity(size_t bytes) {
     size_t cap = 4 * 1024;
     while (cap < bytes && cap <= (((size_t)-1) / 2)) cap *= 2;
     return cap < bytes ? bytes : cap;
-}
-
-Buffer* batchAttentionScratch(size_t bytes) {
-    if (bytes == 0) bytes = 4;
-    size_t slot = g_attentionScratchCursor++;
-    if (slot >= g_attentionScratch.size()) g_attentionScratch.resize(slot + 1, nullptr);
-
-    Buffer* b = g_attentionScratch[slot];
-    if (b && b->bytes >= bytes) return b;
-
-    if (b) {
-        destroyBuffer(b);
-        g_attentionScratch[slot] = nullptr;
-        clearDescriptorBindingCache();
-    }
-    b = allocBuffer(scratchCapacity(bytes), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
-    if (!b) {
-        fprintf(stderr, "fak-vulkan: attention scratch allocation failed (%zu bytes)\n", bytes);
-        abort();
-    }
-    g_attentionScratch[slot] = b;
-    return b;
-}
-
-void freeAttentionScratch() {
-    for (Buffer* b : g_attentionScratch) destroyBuffer(b);
-    if (!g_attentionScratch.empty()) clearDescriptorBindingCache();
-    g_attentionScratch.clear();
-    g_attentionScratchCursor = 0;
 }
 
 Buffer*                       g_gdn_conv_out = nullptr;
@@ -529,10 +498,6 @@ std::vector<DescriptorSetRecord> g_batchSets;
 std::vector<Buffer*>          g_batchFreed;   // buffers freed mid-batch, recycled after submit
 int                           g_batchOps  = 0;
 
-// Attention scores are scratch, but a token batch records all layers before submit, so each
-// attention call in the batch needs a distinct buffer. Keep a reusable ring by call index and
-// grow each slot geometrically as the sequence length increases instead of allocating/freeing
-// nLayers differently-sized score buffers every token.
 // A full compute->compute barrier: every recorded op may read the previous op's output
 // buffer, so each dispatch is fenced against the prior by a global shader-write->shader-read
 // barrier. Coarse but correct; per-buffer barriers are a later refinement.
@@ -553,7 +518,6 @@ void batchBegin() {
 	g_batching = true;
 	g_batchOps = 0;
 	g_batchSets.clear();
-	g_attentionScratchCursor = 0;
 }
 
 void batchFlush() {
@@ -853,6 +817,11 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     VkPhysicalDeviceShaderFloat16Int8Features fi8{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
     VkPhysicalDeviceSubgroupSizeControlFeaturesEXT subgroupFeatures{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES_EXT};
+#ifdef VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME
+    VkPhysicalDeviceCooperativeMatrixFeaturesKHR coopFeatures{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR};
+    subgroupFeatures.pNext = &coopFeatures;
+#endif
     f8.pNext = &fi8;
     fi8.pNext = &subgroupFeatures;
     VkPhysicalDeviceFeatures2 feat2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
@@ -861,6 +830,12 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_have_q8 = (f8.storageBuffer8BitAccess && fi8.shaderInt8) ? 1 : 0;
 
     std::vector<const char*> enabledDeviceExts;
+#ifdef VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME
+    bool haveCoopMatExt = deviceExtensionSupported(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
+    g_have_coopmat = (haveCoopMatExt && coopFeatures.cooperativeMatrix && g_have_q8) ? 1 : 0;
+#else
+    g_have_coopmat = 0;
+#endif
 #ifdef VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME
     bool haveSubgroupSizeControlExt = deviceExtensionSupported(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
     bool subgroupSizeControlAllowed =
@@ -868,9 +843,18 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
         subgroupProps.minSubgroupSize <= 32 && subgroupProps.maxSubgroupSize >= 32 &&
         (subgroupProps.requiredSubgroupSizeStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0;
     g_have_glm_kda_wave32 = subgroupSizeControlAllowed ? 1 : 0;
+    if (g_have_coopmat && !subgroupSizeControlAllowed) {
+        g_have_coopmat = 0;
+    }
 #else
     bool subgroupSizeControlAllowed = false;
     g_have_glm_kda_wave32 = 0;
+    g_have_coopmat = 0;
+#endif
+#ifdef VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME
+    if (g_have_coopmat) {
+        enabledDeviceExts.push_back(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
+    }
 #endif
 
     bool isGfx1151 = props.vendorID == 0x1002u && props.deviceID == 0x1586u;
@@ -888,7 +872,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
          (effectiveSubgroup32 || requiredSubgroup32)) ? 1 : 0;
     g_q4k_wave32_required_subgroup = (g_have_q4k_wave32 && requiredSubgroup32);
 
-    bool needSubgroupControl = (g_have_glm_kda_wave32 != 0) || g_q4k_wave32_required_subgroup;
+    bool needSubgroupControl = (g_have_glm_kda_wave32 != 0) || g_q4k_wave32_required_subgroup || (g_have_coopmat != 0);
     if (needSubgroupControl) {
 #ifdef VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME
         enabledDeviceExts.push_back(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
@@ -912,6 +896,10 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     VkPhysicalDeviceShaderFloat16Int8Features ei8{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
     VkPhysicalDeviceSubgroupSizeControlFeaturesEXT esubgroup{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES_EXT};
+#ifdef VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME
+    VkPhysicalDeviceCooperativeMatrixFeaturesKHR ecoop{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR};
+#endif
     if (g_have_q8) {
         e8.storageBuffer8BitAccess = VK_TRUE;
         ei8.shaderInt8 = VK_TRUE;
@@ -926,16 +914,28 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
             dci.pNext = &esubgroup;
         }
     }
+#ifdef VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME
+    if (g_have_coopmat) {
+        ecoop.cooperativeMatrix = VK_TRUE;
+        esubgroup.pNext = &ecoop;
+    }
+#endif
     VkResult dr = vkCreateDevice(g_phys, &dci, nullptr, &g_dev);
-    if (dr != VK_SUCCESS && g_haveMemoryBudget) {
+    if (dr != VK_SUCCESS && (g_haveMemoryBudget || g_have_coopmat)) {
         enabledDeviceExts.clear();
         g_haveMemoryBudget = false;
+        g_have_coopmat = 0;
+        needSubgroupControl = (g_have_glm_kda_wave32 != 0) || g_q4k_wave32_required_subgroup;
         if (needSubgroupControl) {
 #ifdef VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME
             enabledDeviceExts.push_back(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
 #endif
+            esubgroup.pNext = nullptr;
+        } else if (g_have_q8) {
+            ei8.pNext = nullptr;
+        } else {
+            dci.pNext = nullptr;
         }
-        dci.enabledExtensionCount = 0;
         dci.enabledExtensionCount = (uint32_t)enabledDeviceExts.size();
         dci.ppEnabledExtensionNames = enabledDeviceExts.empty() ? nullptr : enabledDeviceExts.data();
         dr = vkCreateDevice(g_phys, &dci, nullptr, &g_dev);
@@ -983,7 +983,7 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_SWIGLU_MATMUL_ADD], P("swiglu_matmul_add.spv"), 4, 3 * sizeof(int));
     ok &= buildKernel(g_kern[K_ADD],       P("add.spv"),       2, sizeof(int));
     ok &= buildKernel(g_kern[K_ADD_BIAS],  P("add_bias.spv"),  2, 2 * sizeof(int));
-    ok &= buildKernel(g_kern[K_ATTENTION], P("attention.spv"), 5, 4 * sizeof(int) + sizeof(float));
+    ok &= buildKernel(g_kern[K_ATTENTION], P("attention.spv"), 4, 4 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_ARGMAX],    P("argmax.spv"),    2, sizeof(int));
     ok &= buildKernel(g_kern[K_ARGMAX_PAIRS], P("argmax_pairs.spv"), 3, sizeof(int));
     ok &= buildKernel(g_kern[K_QWEN35_GDN_CONV], P("qwen35_gdn_conv.spv"), 4, 3 * sizeof(int));
@@ -1009,8 +1009,12 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     // SPIR-V uses them, so loading it without the enabled device feature would be invalid. If
     // it fails to build, disable the Q8 path rather than failing init (f32 stays available).
     if (g_have_q8) {
-        if (!buildKernel(g_kern[K_Q8_MATMUL], P("q8_matmul.spv"), 4, 3 * sizeof(int)) ||
-            !buildKernel(g_kern[K_Q8_MATMUL_DECODE], P("q8_matmul_decode.spv"), 4, 3 * sizeof(int)) ||
+        if (g_have_coopmat) {
+            if (!buildKernel(g_kern[K_Q8_MATMUL], P("q8_matmul.spv"), 4, 3 * sizeof(int), 32)) {
+                g_have_coopmat = 0;
+            }
+        }
+        if (!buildKernel(g_kern[K_Q8_MATMUL_DECODE], P("q8_matmul_decode.spv"), 4, 3 * sizeof(int)) ||
             !buildKernel(g_kern[K_Q8_MATMUL2], P("q8_matmul2.spv"), 7, 4 * sizeof(int)) ||
             !buildKernel(g_kern[K_Q8_MATMUL3], P("q8_matmul3.spv"), 10, 5 * sizeof(int)) ||
             !buildKernel(g_kern[K_RMSNORM_Q8_MATMUL2], P("rmsnorm_q8_matmul2.spv"), 8, 4 * sizeof(int) + sizeof(float)) ||
@@ -1139,6 +1143,7 @@ void fvk_sync(void) { if (g_dev) vkDeviceWaitIdle(g_dev); }
 
 int fvk_have_q8(void) { return g_have_q8; }
 int fvk_have_glm_kda_wave32(void) { return g_have_glm_kda_wave32; }
+int fvk_have_cooperative_matrix(void) { return g_have_coopmat; }
 uint64_t fvk_max_buffer_bytes(void) { return (uint64_t)g_maxBufferBytes; }
 uint64_t fvk_max_storage_buffer_range(void) { return (uint64_t)g_maxStorageBufferRange; }
 uint64_t fvk_max_memory_allocation_size(void) { return (uint64_t)g_maxMemoryAllocationSize; }
@@ -1174,7 +1179,6 @@ void fvk_trim_pool(void) {
     if (!g_dev) return;
     if (g_batching) batchFlush();
     drainPool();
-    freeAttentionScratch();
     freeGdnScratch();
 }
 
@@ -1192,6 +1196,20 @@ void fvk_matmul_f32(const void* dW, const void* dX, void* dY, int out, int in, i
     dispatch(g_kern[K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)P);
 }
 
+void fvk_q8_matmul_2d_f32(const void* dWcodes, const void* dWscale, const void* dX, void* dY,
+                          int out, int in, int P, uint32_t gridX, uint32_t gridY) {
+    if (!g_have_q8) {
+        fprintf(stderr, "fak-vulkan: q8_matmul requested but int8/8-bit-storage features are unavailable\n");
+        abort();
+    }
+    struct { int outDim, inDim, P; } pc{out, in, P};
+    Buffer* bufs[4] = {B((void*)dWcodes), B((void*)dWscale), B((void*)dX), B(dY)};
+    Kernel& kernel = (g_have_coopmat && g_kern[K_Q8_MATMUL].pipe != VK_NULL_HANDLE)
+        ? g_kern[K_Q8_MATMUL]
+        : g_kern[K_Q8_MATMUL_DECODE];
+    dispatch(kernel, bufs, &pc, sizeof(pc), gridX, gridY);
+}
+
 void fvk_q8_matmul_f32(const void* dWcodes, const void* dWscale, const void* dX, void* dY,
                        int out, int in, int P) {
     if (!g_have_q8) {
@@ -1200,10 +1218,18 @@ void fvk_q8_matmul_f32(const void* dWcodes, const void* dWscale, const void* dX,
     }
     struct { int outDim, inDim, P; } pc{out, in, P};
     Buffer* bufs[4] = {B((void*)dWcodes), B((void*)dWscale), B((void*)dX), B(dY)};
-    uint32_t outputsPerGroup = 8u;
-    uint32_t outGroups = ((uint32_t)out + outputsPerGroup - 1u) / outputsPerGroup;
-    Kernel& kernel = g_kern[K_Q8_MATMUL_DECODE];
-    dispatch(kernel, bufs, &pc, sizeof(pc), outGroups, (uint32_t)P);
+    if (g_have_coopmat && g_kern[K_Q8_MATMUL].pipe != VK_NULL_HANDLE && P > 1) {
+        uint32_t tileN = 32u;
+        uint32_t tileM = 32u;
+        uint32_t gridX = ((uint32_t)out + tileN - 1u) / tileN;
+        uint32_t gridY = ((uint32_t)P + tileM - 1u) / tileM;
+        dispatch(g_kern[K_Q8_MATMUL], bufs, &pc, sizeof(pc), gridX, gridY);
+    } else {
+        uint32_t outputsPerGroup = 8u;
+        uint32_t outGroups = ((uint32_t)out + outputsPerGroup - 1u) / outputsPerGroup;
+        Kernel& kernel = g_kern[K_Q8_MATMUL_DECODE];
+        dispatch(kernel, bufs, &pc, sizeof(pc), outGroups, (uint32_t)P);
+    }
 }
 
 void fvk_q8_matmul2_f32(const void* dW0codes, const void* dW0scale,
@@ -1448,18 +1474,9 @@ void fvk_add_bias_f32(void* dDst, const void* dBias, int rows, int width) {
 
 void fvk_attention_f32(const void* dQ, const void* dK, const void* dV, void* dOut,
                        int nPos, int nH, int nKV, int hd, float scale) {
-    size_t scoreBytes = 64; // FlashAttention-3 tiled online softmax executes in registers; O(1) scratchpad
-    Buffer* scores = g_batching ? batchAttentionScratch(scoreBytes) : (Buffer*)fvk_malloc(scoreBytes);
-    if (!scores) {
-        fprintf(stderr, "fak-vulkan: attention scratch allocation failed (%zu bytes)\n", scoreBytes);
-        abort();
-    }
-    struct { int nPos, nH, nKV, hd; float scale; int causal; int windowSize; int qTokens; } pc{nPos, nH, nKV, hd, scale, 1, 0, 1};
-    Buffer* bufs[5] = {B((void*)dQ), B((void*)dK), B((void*)dV), B(dOut), scores};
+    struct { int nPos, nH, nKV, hd; float scale; } pc{nPos, nH, nKV, hd, scale};
+    Buffer* bufs[4] = {B((void*)dQ), B((void*)dK), B((void*)dV), B(dOut)};
     dispatch(g_kern[K_ATTENTION], bufs, &pc, sizeof(pc), (uint32_t)nH);
-    if (!g_batching) {
-        fvk_free(scores);
-    }
 }
 
 int fvk_argmax_f32(const void* dLogits, int n) {

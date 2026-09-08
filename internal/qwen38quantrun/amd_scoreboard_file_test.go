@@ -84,8 +84,8 @@ func TestStrixHaloComparisonLedgerFailsClosedAndRendersIndex(t *testing.T) {
 	if ledger.Schema != "fak.benchmark.strix-halo-comparison-ladder/v1" || ledger.Status != "NO_COMPARABLE_LOCAL_RESULT" {
 		t.Fatalf("ledger identity = %q/%q", ledger.Schema, ledger.Status)
 	}
-	if len(ledger.Rows) != 4 || len(ledger.NegativeFixtures) != 7 {
-		t.Fatalf("ledger rows/negative fixtures = %d/%d, want 4/7", len(ledger.Rows), len(ledger.NegativeFixtures))
+	if len(ledger.Rows) != 9 || len(ledger.NegativeFixtures) != 7 {
+		t.Fatalf("ledger rows/negative fixtures = %d/%d, want 9/7", len(ledger.Rows), len(ledger.NegativeFixtures))
 	}
 
 	required := stringSet(ledger.Contract.RequiredForComparable)

@@ -173,6 +173,8 @@ function Set-CgoEnv {
     $env:FAK_VULKAN_SPIRV = $spvOut
 }
 
+if ($MyInvocation.InvocationName -eq '.') { return }
+
 switch ($cmd) {
     "shaders" { Build-Shaders }
     "lib"     { Build-Lib }
