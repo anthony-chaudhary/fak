@@ -58,7 +58,12 @@ SCHEMA = "fak-cuda-abi-parity/1"
 HEADER = "internal/compute/cuda_backend.h"
 KERNELS = ("internal/compute/cuda_kernels.cu", "internal/compute/cuda_nccl.cu", "internal/compute/cuda_nccl_pg.cu")
 KERNELS_LABEL = ", ".join(KERNELS)
-BINDINGS = ("internal/compute/cuda.go", "internal/compute/cuda_collective.go", "internal/compute/cuda_collective_pg.go")
+BINDINGS = (
+    "internal/compute/cuda.go",
+    "internal/compute/cuda_collective.go",
+    "internal/compute/cuda_collective_pg.go",
+    "internal/compute/cuda_qwen4exp_ple_hash_cuda.go",
+)
 BINDINGS_LABEL = ", ".join(BINDINGS)
 
 # A CUDA-seam symbol: the `fcuda_` prefix plus a tail that MAY carry an uppercase

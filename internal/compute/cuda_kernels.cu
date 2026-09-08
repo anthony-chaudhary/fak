@@ -49,6 +49,9 @@ static std::unordered_map<void *, size_t> g_managed_live;      // live cudaMallo
 // directions after initial upload. Monotonic; tests reset them around each measured step.
 static size_t g_host_bytes = 0;
 static size_t g_h2d_bytes = 0;
+// Qwen3.8 PLE hash dispatch witness. This counts successful kernel enqueues,
+// not preparation copies or result reads; Go samples it around Dispatch.
+static size_t g_qwen4exp_ple_hash_launches = 0;
 
 // Whole-operation Qwen3.5/3.6 GDN witness (#4725/#4738). This counts confirmed
 // completed operations, not enqueues; the Go fixture reads it together with both
@@ -233,6 +236,104 @@ extern "C" void fcuda_d2h(void *h, const void *d, size_t n) {
 // the only host fence we keep is the final logits d2h in Read.
 extern "C" void fcuda_d2d(void *dst, const void *src, size_t n) { CK(cudaMemcpyAsync(dst, src, n, cudaMemcpyDeviceToDevice, g_stream)); }
 extern "C" void fcuda_sync(void) { CK(cudaDeviceSynchronize()); }
+
+// Algorithm adapted from FlashML-org/FreeToken
+// python/freetoken/kernel/triton/ple_hash.py:31-83 at
+// de77d16a5ac36494d85964f846b50ad36f7acc21 (Apache-2.0).
+//
+// One block owns one flattened token and one thread owns one PLE head. The
+// request-local coordinate is recovered from cuSeqLens inside this launch, so
+// neither a packed [B,context+length] window nor a separate token-index kernel
+// is needed. Every potentially invalid address is formed only inside its
+// proven-valid branch; masked invalid pointer formation is deliberately absent.
+__global__ void k_qwen4exp_ple_hash_i64(
+    const int64_t *input_ids, const int64_t *ngram_context,
+    const int32_t *cu_seqlens, const int64_t *multipliers,
+    const int64_t *vocab_sizes, const int64_t *offsets, int64_t *rows,
+    int tokens, int requests, int context_len, int ngram_size,
+    int heads_per_ngram, int num_heads, int64_t boundary_token) {
+  const int token = (int)blockIdx.x;
+  if (token >= tokens) return;
+
+  __shared__ int request_shared;
+  __shared__ int local_shared;
+  if (threadIdx.x == 0) {
+    int lo = 0;
+    int hi = requests;
+    while (lo + 1 < hi) {
+      const int mid = lo + (hi - lo) / 2;
+      if (cu_seqlens[mid] <= token) lo = mid;
+      else hi = mid;
+    }
+    request_shared = lo;
+    local_shared = token - cu_seqlens[lo];
+  }
+  __syncthreads();
+
+  const int head = (int)threadIdx.x;
+  if (head >= num_heads) return;
+  const int order = 2 + head / heads_per_ngram;
+  const int request = request_shared;
+  const int local = local_shared;
+
+  // Unsigned products give the required, defined modulo-2^64 wrap. NVIDIA
+  // CUDA uses two's-complement int64_t, so the final cast interprets the exact
+  // same bits as the signed Torch/Go oracle before remainder.
+  uint64_t mixed = (uint64_t)input_ids[token] * (uint64_t)multipliers[0];
+  bool valid = true;
+  for (int shift = 1; shift < order; ++shift) {
+    const int column = context_len + local - shift;
+    int64_t raw = boundary_token;
+    if (column >= context_len) {
+      // column >= context_len iff local >= shift, hence token-shift is still
+      // inside this request and is a valid input_ids address.
+      raw = input_ids[token - shift];
+    } else if (column >= 0) {
+      raw = ngram_context[(size_t)request * (size_t)context_len + (size_t)column];
+    }
+    valid = valid && column >= 0 && raw != boundary_token;
+    const int64_t selected = valid ? raw : boundary_token;
+    mixed ^= (uint64_t)selected * (uint64_t)multipliers[shift];
+  }
+
+  const int64_t vocab = vocab_sizes[head];
+  int64_t rem = (int64_t)mixed % vocab;
+  if (rem < 0) rem += vocab; // floor remainder for a positive divisor
+  rows[(size_t)token * (size_t)num_heads + (size_t)head] = rem + offsets[head];
+}
+
+extern "C" int fcuda_qwen4exp_ple_hash_i64(
+    const int64_t *input_ids, const int64_t *ngram_context,
+    const int32_t *cu_seqlens, const int64_t *multipliers,
+    const int64_t *vocab_sizes, const int64_t *offsets, int64_t *rows,
+    int tokens, int requests, int context_len, int ngram_size,
+    int heads_per_ngram, int num_heads, int64_t boundary_token) {
+  if (!input_ids || !ngram_context || !cu_seqlens || !multipliers ||
+      !vocab_sizes || !offsets || !rows || tokens <= 0 || requests <= 0 ||
+      context_len != ngram_size - 1 || ngram_size < 2 ||
+      ngram_size - 1 > 1024 || heads_per_ngram <= 0 ||
+      heads_per_ngram > 1024 / (ngram_size - 1) ||
+      num_heads != heads_per_ngram * (ngram_size - 1) ||
+      num_heads > 1024) return -1;
+  int threads = 32;
+  while (threads < num_heads) threads <<= 1;
+  (void)cudaGetLastError(); // discard stale status before attributing this launch
+  k_qwen4exp_ple_hash_i64<<<tokens, threads, 0, g_stream>>>(
+      input_ids, ngram_context, cu_seqlens, multipliers, vocab_sizes, offsets,
+      rows, tokens, requests, context_len, ngram_size, heads_per_ngram,
+      num_heads, boundary_token);
+  const cudaError_t launched = cudaGetLastError();
+  if (launched != cudaSuccess) return (int)launched;
+  ++g_qwen4exp_ple_hash_launches;
+  return 0;
+}
+
+extern "C" int fcuda_qwen4exp_ple_hash_sync(void) {
+  return (int)cudaStreamSynchronize(g_stream);
+}
+extern "C" size_t fcuda_qwen4exp_ple_hash_launches(void) {
+  return g_qwen4exp_ple_hash_launches;
+}
 
 static cudaEvent_t g_trace_start;
 extern "C" double fcuda_event_elapsed_ms_start(void) {

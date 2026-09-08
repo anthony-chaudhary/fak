@@ -43,6 +43,21 @@ void fcuda_sync(void);
 double fcuda_event_elapsed_ms_start(void);
 double fcuda_event_elapsed_ms_end(void);
 
+/* Qwen3.8-Flash-Next PLE row-id hash. All buffers are already device-resident.
+ * One block owns one token; the request/local index, boundary walk, wrapped
+ * multiply/XOR hash, floored modulo, and every head offset execute in this one
+ * launch. The call enqueues onto the backend stream and returns after launch
+ * validation WITHOUT a host fence. Preparation H2D and result D2H are separate
+ * Go plan phases. */
+int fcuda_qwen4exp_ple_hash_i64(
+    const int64_t *input_ids, const int64_t *ngram_context,
+    const int32_t *cu_seqlens, const int64_t *multipliers,
+    const int64_t *vocab_sizes, const int64_t *offsets, int64_t *rows,
+    int tokens, int requests, int context_len, int ngram_size,
+    int heads_per_ngram, int num_heads, int64_t boundary_token);
+int fcuda_qwen4exp_ple_hash_sync(void);
+size_t fcuda_qwen4exp_ple_hash_launches(void);
+
 /* Device-specific allocation/copy helpers for multi-GPU collectives. The ordinary
  * fcuda_malloc/fcuda_h2d/fcuda_d2h path is device-0 + pooled. These helpers deliberately use
  * direct cudaMalloc/cudaFree on the requested device so rank-r collective buffers cannot be
