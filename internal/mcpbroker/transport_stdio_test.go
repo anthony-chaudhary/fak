@@ -288,3 +288,133 @@ func TestParseResponseIDs(t *testing.T) {
 		})
 	}
 }
+
+func TestStdioMalformedFrameDoesNotAbortMultipleCallers(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	stderrReader, stderrWriter := io.Pipe()
+
+	defer func() {
+		_ = stdinWriter.Close()
+		_ = stdinReader.Close()
+		_ = stdoutWriter.Close()
+		_ = stdoutReader.Close()
+		_ = stderrWriter.Close()
+		_ = stderrReader.Close()
+	}()
+
+	go func() {
+		_, _ = io.Copy(io.Discard, stdinReader)
+	}()
+
+	transport := &StdioTransport{
+		stdin:   stdinWriter,
+		stdout:  stdoutReader,
+		stderr:  stderrReader,
+		pending: make(map[int64]chan *rpcResponse),
+		doneCh:  make(chan struct{}),
+	}
+	go transport.pumpReader()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	type callResult struct {
+		resp *rpcResponse
+		err  error
+	}
+
+	waitForPending := func(id int64) {
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			transport.pendingMu.Lock()
+			_, found := transport.pending[id]
+			transport.pendingMu.Unlock()
+			if found {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for pending call %d to register", id)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	resCh1 := make(chan callResult, 1)
+	go func() {
+		resp, err := transport.sendRequest(ctx, "methodA", nil)
+		resCh1 <- callResult{resp: resp, err: err}
+	}()
+	waitForPending(1)
+
+	resCh2 := make(chan callResult, 1)
+	go func() {
+		resp, err := transport.sendRequest(ctx, "methodB", nil)
+		resCh2 <- callResult{resp: resp, err: err}
+	}()
+	waitForPending(2)
+
+	// Emit an unparseable ID response while multiple callers are in-flight.
+	unparseableResp := `{"jsonrpc":"2.0","id":"unparseable_string","result":{"status":"ignored"}}` + "\n"
+	if _, err := stdoutWriter.Write([]byte(unparseableResp)); err != nil {
+		t.Fatalf("failed to write unparseable response: %v", err)
+	}
+
+	// Give pumpReader a moment to process the frame.
+	time.Sleep(50 * time.Millisecond)
+
+	// In-flight callers must NOT be aborted or wiped out.
+	select {
+	case res := <-resCh1:
+		t.Fatalf("caller 1 was prematurely aborted by unparseable frame: resp=%+v err=%v", res.resp, res.err)
+	default:
+	}
+
+	select {
+	case res := <-resCh2:
+		t.Fatalf("caller 2 was prematurely aborted by unparseable frame: resp=%+v err=%v", res.resp, res.err)
+	default:
+	}
+
+	transport.pendingMu.Lock()
+	pendingCount := len(transport.pending)
+	transport.pendingMu.Unlock()
+	if pendingCount != 2 {
+		t.Fatalf("expected 2 pending callers to survive unparseable frame, got %d", pendingCount)
+	}
+
+	// Now deliver valid responses to both callers.
+	resp1 := `{"jsonrpc":"2.0","id":1,"result":{"status":"ok1"}}` + "\n"
+	if _, err := stdoutWriter.Write([]byte(resp1)); err != nil {
+		t.Fatalf("failed to write resp1: %v", err)
+	}
+
+	select {
+	case res := <-resCh1:
+		if res.err != nil || res.resp == nil || res.resp.Error != nil {
+			t.Fatalf("caller 1 failed: resp=%+v err=%v", res.resp, res.err)
+		}
+		if !bytes.Contains(res.resp.Result, []byte("ok1")) {
+			t.Fatalf("caller 1 got unexpected result: %s", string(res.resp.Result))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for caller 1 valid response")
+	}
+
+	resp2 := `{"jsonrpc":"2.0","id":2,"result":{"status":"ok2"}}` + "\n"
+	if _, err := stdoutWriter.Write([]byte(resp2)); err != nil {
+		t.Fatalf("failed to write resp2: %v", err)
+	}
+
+	select {
+	case res := <-resCh2:
+		if res.err != nil || res.resp == nil || res.resp.Error != nil {
+			t.Fatalf("caller 2 failed: resp=%+v err=%v", res.resp, res.err)
+		}
+		if !bytes.Contains(res.resp.Result, []byte("ok2")) {
+			t.Fatalf("caller 2 got unexpected result: %s", string(res.resp.Result))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for caller 2 valid response")
+	}
+}

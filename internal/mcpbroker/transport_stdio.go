@@ -283,17 +283,12 @@ func (t *StdioTransport) dispatchMessage(data []byte) {
 				delete(t.pending, candidateID)
 				targets = append(targets, ch)
 			}
-		} else {
-			if len(t.pending) == 1 {
-				for pid, ch := range t.pending {
-					delete(t.pending, pid)
-					targets = append(targets, ch)
-				}
-			} else if len(t.pending) > 1 {
-				for pid, ch := range t.pending {
-					delete(t.pending, pid)
-					targets = append(targets, ch)
-				}
+		} else if len(t.pending) == 1 {
+			// Fail fast only if there is a single disambiguated caller. When multiple callers
+			// are in-flight, an unparseable or missing ID frame must not abort all other callers.
+			for pid, ch := range t.pending {
+				delete(t.pending, pid)
+				targets = append(targets, ch)
 			}
 		}
 		t.pendingMu.Unlock()
