@@ -163,18 +163,23 @@ func observeExecutableProvenance(
 }
 
 func strictVCSIdentity(info *debug.BuildInfo) (string, bool, error) {
-	var revision, modified string
-	revisionCount, modifiedCount := 0, 0
+	var vcs, revision, modified string
+	vcsCount, revisionCount, modifiedCount := 0, 0, 0
 	for _, setting := range info.Settings {
 		switch setting.Key {
+		case "vcs":
+			vcs, vcsCount = setting.Value, vcsCount+1
 		case "vcs.revision":
-			revision, revisionCount = strings.TrimSpace(setting.Value), revisionCount+1
+			revision, revisionCount = setting.Value, revisionCount+1
 		case "vcs.modified":
-			modified, modifiedCount = strings.TrimSpace(setting.Value), modifiedCount+1
+			modified, modifiedCount = setting.Value, modifiedCount+1
 		}
 	}
-	if revisionCount != 1 || modifiedCount != 1 {
-		return "", false, errors.New("binstamp: binary requires exactly one vcs.revision and vcs.modified build setting")
+	if vcsCount != 1 || revisionCount != 1 || modifiedCount != 1 {
+		return "", false, errors.New("binstamp: binary requires exactly one vcs=git, vcs.revision, and vcs.modified build setting")
+	}
+	if vcs != "git" {
+		return "", false, fmt.Errorf("binstamp: vcs has invalid value %q", vcs)
 	}
 	if !fullRevision(revision) {
 		return "", false, errors.New("binstamp: binary requires a full 40-hex vcs.revision")

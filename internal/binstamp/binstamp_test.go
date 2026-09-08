@@ -186,18 +186,75 @@ func TestExecutableProvenanceRejectsMissingOrMalformedBuildIdentity(t *testing.T
 	}{
 		{"unavailable", func() (*debug.BuildInfo, bool) { return nil, false }},
 		{"nil", func() (*debug.BuildInfo, bool) { return nil, true }},
+		{"missing vcs", func() (*debug.BuildInfo, bool) {
+			return &debug.BuildInfo{Settings: []debug.BuildSetting{
+				{Key: "vcs.revision", Value: revision},
+				{Key: "vcs.modified", Value: "false"},
+			}}, true
+		}},
+		{"non-git vcs hg", buildInfoReaderWithVCS("hg", revision, "false")},
+		{"non-git vcs svn", buildInfoReaderWithVCS("svn", revision, "false")},
+		{"whitespace-padded vcs prefix", buildInfoReaderWithVCS(" git", revision, "false")},
+		{"whitespace-padded vcs suffix", buildInfoReaderWithVCS("git ", revision, "false")},
+		{"whitespace-padded vcs both", buildInfoReaderWithVCS(" git ", revision, "false")},
 		{"missing revision", buildInfoReader("", "false")},
 		{"missing modified", func() (*debug.BuildInfo, bool) {
-			return &debug.BuildInfo{Settings: []debug.BuildSetting{{Key: "vcs.revision", Value: revision}}}, true
+			return &debug.BuildInfo{Settings: []debug.BuildSetting{
+				{Key: "vcs", Value: "git"},
+				{Key: "vcs.revision", Value: revision},
+			}}, true
 		}},
 		{"short revision", buildInfoReader("0123456", "false")},
 		{"non hex revision", buildInfoReader("zz23456789abcdef0123456789abcdef01234567", "false")},
+		{"whitespace revision", buildInfoReader(" "+revision, "false")},
 		{"untyped modified", buildInfoReader(revision, "yes")},
+		{"whitespace modified", buildInfoReader(revision, "false ")},
+		{"duplicate vcs", func() (*debug.BuildInfo, bool) {
+			return &debug.BuildInfo{Settings: []debug.BuildSetting{
+				{Key: "vcs", Value: "git"},
+				{Key: "vcs", Value: "git"},
+				{Key: "vcs.revision", Value: revision},
+				{Key: "vcs.modified", Value: "false"},
+			}}, true
+		}},
+		{"conflicting vcs", func() (*debug.BuildInfo, bool) {
+			return &debug.BuildInfo{Settings: []debug.BuildSetting{
+				{Key: "vcs", Value: "git"},
+				{Key: "vcs", Value: "hg"},
+				{Key: "vcs.revision", Value: revision},
+				{Key: "vcs.modified", Value: "false"},
+			}}, true
+		}},
 		{"duplicate revision", func() (*debug.BuildInfo, bool) {
 			return &debug.BuildInfo{Settings: []debug.BuildSetting{
+				{Key: "vcs", Value: "git"},
+				{Key: "vcs.revision", Value: revision},
+				{Key: "vcs.revision", Value: revision},
+				{Key: "vcs.modified", Value: "false"},
+			}}, true
+		}},
+		{"conflicting revision", func() (*debug.BuildInfo, bool) {
+			return &debug.BuildInfo{Settings: []debug.BuildSetting{
+				{Key: "vcs", Value: "git"},
 				{Key: "vcs.revision", Value: revision},
 				{Key: "vcs.revision", Value: "ffffffffffffffffffffffffffffffffffffffff"},
 				{Key: "vcs.modified", Value: "false"},
+			}}, true
+		}},
+		{"duplicate modified", func() (*debug.BuildInfo, bool) {
+			return &debug.BuildInfo{Settings: []debug.BuildSetting{
+				{Key: "vcs", Value: "git"},
+				{Key: "vcs.revision", Value: revision},
+				{Key: "vcs.modified", Value: "false"},
+				{Key: "vcs.modified", Value: "false"},
+			}}, true
+		}},
+		{"conflicting modified", func() (*debug.BuildInfo, bool) {
+			return &debug.BuildInfo{Settings: []debug.BuildSetting{
+				{Key: "vcs", Value: "git"},
+				{Key: "vcs.revision", Value: revision},
+				{Key: "vcs.modified", Value: "false"},
+				{Key: "vcs.modified", Value: "true"},
 			}}, true
 		}},
 	}
@@ -272,8 +329,15 @@ func TestExecutableProvenanceRejectsMissingOrMismatchedExecutable(t *testing.T) 
 }
 
 func buildInfoReader(revision, modified string) func() (*debug.BuildInfo, bool) {
+	return buildInfoReaderWithVCS("git", revision, modified)
+}
+
+func buildInfoReaderWithVCS(vcs, revision, modified string) func() (*debug.BuildInfo, bool) {
 	return func() (*debug.BuildInfo, bool) {
-		settings := make([]debug.BuildSetting, 0, 2)
+		settings := make([]debug.BuildSetting, 0, 3)
+		if vcs != "" {
+			settings = append(settings, debug.BuildSetting{Key: "vcs", Value: vcs})
+		}
 		if revision != "" {
 			settings = append(settings, debug.BuildSetting{Key: "vcs.revision", Value: revision})
 		}
