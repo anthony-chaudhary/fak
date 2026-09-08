@@ -57,18 +57,33 @@ const (
 // it, but hardware_measurement is intentionally in the same vocabulary so a
 // consumer can make one exhaustive, fail-closed decision.
 type SimulationEvidence struct {
-	Schema           string                 `json:"schema"`
-	EvidenceType     EvidenceType           `json:"evidence_type"`
-	ClaimCeiling     ClaimCeiling           `json:"claim_ceiling"`
-	Engine           SimulationEngine       `json:"engine"`
-	Workload         WorkloadProvenance     `json:"workload_provenance"`
-	Trace            *TraceProvenance       `json:"trace_provenance,omitempty"`
-	ValidityEnvelope ValidityEnvelope       `json:"validity_envelope"`
-	ExcludedEffects  []string               `json:"excluded_effects"`
-	Replay           ReplaySpec             `json:"replay"`
-	LearnedModel     *LearnedModelInfo      `json:"learned_model,omitempty"`
-	Calibration      *SimulationCalibration `json:"calibration,omitempty"`
-	Cost             SimulationCost         `json:"simulator_cost"`
+	Schema            string                    `json:"schema"`
+	EvidenceType      EvidenceType              `json:"evidence_type"`
+	ClaimCeiling      ClaimCeiling              `json:"claim_ceiling"`
+	Engine            SimulationEngine          `json:"engine"`
+	Workload          WorkloadProvenance        `json:"workload_provenance"`
+	Trace             *TraceProvenance          `json:"trace_provenance,omitempty"`
+	ValidityEnvelope  ValidityEnvelope          `json:"validity_envelope"`
+	ExcludedEffects   []string                  `json:"excluded_effects"`
+	Replay            ReplaySpec                `json:"replay"`
+	LearnedModel      *LearnedModelInfo         `json:"learned_model,omitempty"`
+	Calibration       *SimulationCalibration    `json:"calibration,omitempty"`
+	PhysicalExecution *PhysicalExecutionReceipt `json:"physical_execution,omitempty"`
+	Cost              SimulationCost            `json:"simulator_cost"`
+}
+
+// PhysicalExecutionReceipt binds a hardware measurement to the physical run
+// that produced it. Raw output remains external, but its location and digest
+// make the claim independently checkable.
+type PhysicalExecutionReceipt struct {
+	PhysicalSilicon   bool   `json:"physical_silicon"`
+	Device            string `json:"device"`
+	Runtime           string `json:"runtime"`
+	Backend           string `json:"backend"`
+	CaptureCommand    string `json:"capture_command"`
+	ObservedAt        string `json:"observed_at"`
+	RawArtifact       string `json:"raw_artifact"`
+	RawArtifactDigest string `json:"raw_artifact_digest"`
 }
 
 // SimulationEngine identifies the exact producer and configuration. Toolchain
@@ -294,6 +309,15 @@ func ValidateSimulationEvidence(ev SimulationEvidence) error {
 	if ev.Replay.Stochastic {
 		errs = append(errs, validateIndependentReplication(ev.Replay)...)
 	}
+	if ev.EvidenceType == EvidenceHardwareMeasurement {
+		if ev.PhysicalExecution == nil {
+			errs = append(errs, errors.New("hardware_measurement requires a physical execution receipt"))
+		} else {
+			errs = append(errs, validatePhysicalExecution(*ev.PhysicalExecution)...)
+		}
+	} else if ev.PhysicalExecution != nil {
+		errs = append(errs, errors.New("physical execution receipt is only valid for hardware_measurement evidence"))
+	}
 	if !finiteNonnegative(ev.Cost.HostWallTimeMS) || !finiteNonnegative(ev.Cost.HostCPUTimeMS) || ev.Cost.Bytes < 0 {
 		errs = append(errs, errors.New("simulator_cost values must be finite and non-negative"))
 	}
@@ -320,6 +344,35 @@ func ValidateSimulationEvidence(ev SimulationEvidence) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func validatePhysicalExecution(receipt PhysicalExecutionReceipt) []error {
+	var errs []error
+	if !receipt.PhysicalSilicon {
+		errs = append(errs, errors.New("physical execution receipt must explicitly attest physical silicon"))
+	}
+	if unknownIdentity(receipt.Device) {
+		errs = append(errs, errors.New("physical execution receipt requires physical device identity"))
+	}
+	if unknownIdentity(receipt.Runtime) {
+		errs = append(errs, errors.New("physical execution receipt requires runtime identity"))
+	}
+	if unknownIdentity(receipt.Backend) {
+		errs = append(errs, errors.New("physical execution receipt requires backend identity"))
+	}
+	if unknownIdentity(receipt.CaptureCommand) {
+		errs = append(errs, errors.New("physical execution receipt requires the exact capture command"))
+	}
+	if _, err := time.Parse(time.RFC3339, receipt.ObservedAt); err != nil {
+		errs = append(errs, errors.New("physical execution receipt observed_at must be RFC3339"))
+	}
+	if unknownIdentity(receipt.RawArtifact) {
+		errs = append(errs, errors.New("physical execution receipt requires a raw artifact reference"))
+	}
+	if !validSHA256Digest(receipt.RawArtifactDigest) {
+		errs = append(errs, errors.New("physical execution receipt raw artifact digest must be a sha256 digest"))
+	}
+	return errs
 }
 
 // ValidateBenchmarkArtifact validates the optional evidence block and the claim

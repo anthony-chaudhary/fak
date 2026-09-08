@@ -1,21 +1,21 @@
 {
   "schema": "fak-hardware-latest/1",
-  "as_of": "2026-09-06",
+  "as_of": "2026-09-08",
   "platforms": {
     "Mac": {
       "observed": "2026-09-03",
-      "detail": "docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md",
-      "row": "| Mac | Qwen3.8-27B Q4_K_M on an Apple M3 Pro: 7.61 decode tok/s (+3.1% vs llama.cpp 7.38, MLX 8.07) and 12.6 ms prefix TTFT, observed 2026-09-03. | Verified matched-envelope single-stream decode leads llama.cpp Metal; RadixAttention prefix caching eliminates repeat prefill. | [Mac result](docs/notes/MAC-THREEWAY-BENCH-2026-09-03.md) |"
+      "detail": "docs/benchmarks/QWEN-PERFORMANCE-INDEX.md",
+      "row": "| Mac | Qwen3.8-27B Q4_K_M on Apple M3 Pro: forward-owned Metal sequence prefill was 43.8% faster, 10,284.5 vs 18,304.9 ms, and used 1 command buffer instead of 192; observed 2026-09-03. | Accepted component-path result with exact greedy continuation and zero fallbacks; it is not a full-run throughput comparison. [Qwen result index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) |"
     },
     "AMD": {
       "observed": "2026-06-19",
       "detail": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
-      "row": "| AMD | Qwen3.6-27B on an RX 7600: the measured pure-fak microbench reached 1.15–1.24 decode tok/s versus 0.99 for the local llama.cpp Vulkan baseline, observed 2026-06-19. | Witnessed in that narrow microbench; not a broad quality or full-model parity claim. Qwen3.8 awaits a comparable AMD receipt. | [AMD result](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |"
+      "row": "| AMD | Qwen3.6-27B on RX 7600: the pure-fak TG1 microbench measured 1.24 decode tok/s versus 0.99 for the local llama.cpp Vulkan baseline; observed 2026-06-19. | Narrow, older-model microbench. No accepted current Qwen3.8 AMD result exists. [AMD receipt](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |"
     },
     "NVIDIA": {
       "observed": "2026-09-05",
-      "detail": "docs/_witnesses/issue-10944-nvidia-gcp-overnight/README.md",
-      "row": "| NVIDIA | Hopper H100 Q8_0 decode reached 111.9 tok/s (+17.4% vs f32); live A100 Qwen3.8-27B prefix reuse achieved 4.84× TTFT speedup, observed 2026-09-05. | Witnessed on physical GCP H100 (a3-highgpu-1g) & A100; matched Q8 device GEMV and 50-agent concurrency grid (91/91 ok). | [NVIDIA result](docs/_witnesses/issue-10944-nvidia-gcp-overnight/README.md) |"
+      "detail": "docs/benchmarks/GCP-H100-RESULTS.md",
+      "row": "| NVIDIA | Qwen2.5-3B Q8_0 on a physical Hopper H100: fak reached 111.9 decode tok/s, 17.4% above its f32 path; observed 2026-09-05. | Native CUDA result; llama.cpp Q8_0 was 3.24× as fast at 362.7 tok/s in the same run. [H100 receipt](docs/benchmarks/GCP-H100-RESULTS.md) |"
     }
   }
 }

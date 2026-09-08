@@ -889,7 +889,10 @@ def test_live_collect_real_readme() -> None:
     root = rfa.repo_root()
     if not (root / rfa.README_REL).exists():
         return  # tolerant: not in the repo tree
-    p = rfa.collect(root, today=_dt.date(2026, 9, 3))
+    # This smoke follows the live manifest, whose ``as_of`` advances whenever
+    # accepted hardware evidence is refreshed.  A frozen date turns that valid
+    # update into a false ``fresh_date`` failure.
+    p = rfa.collect(root, today=_dt.date.today())
     assert p["schema"] == rfa.SCHEMA
     assert "ok" in p and isinstance(p["checks"], list) and p["checks"]
     assert p["ok"] is True, p

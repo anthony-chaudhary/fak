@@ -128,33 +128,91 @@ When a tool or test prints simulated metrics:
 
 ### Stage 3: Data schemas and receipts
 
-Any JSON or YAML receipt must enforce typed provenance fields:
+Any JSON or YAML receipt must use the `fak-simulation-evidence/1` contract. A modeled record carries no `physical_execution` block:
 
 ```json
 {
-  "$schema": "https://fak.dev/schemas/benchmark-receipt-v1.json",
-  "provenance": "MODELED",
-  "is_physical_silicon": false,
-  "hardware_target": "NVIDIA-L4",
-  "theoretical_ceiling": 185.0,
-  "modeled_estimate": 120.25,
-  "baseline_measured": 65.4,
-  "assumptions": [
-    "batch_size_4",
-    "coalesced_128b_reads",
-    "sustained_boost_clock_2040mhz"
-  ],
-  "unmodeled_effects": [
-    "pcie_dma_handshake_latency",
-    "host_cgo_context_switch",
-    "thermal_clock_scaling",
-    "bank_conflict_penalty"
-  ],
-  "missing_witness": "make bench-l4-native RUN=TestQwenPrefill"
+  "schema": "fak-simulation-evidence/1",
+  "evidence_type": "cycle_sim",
+  "claim_ceiling": "relative_rank",
+  "engine": {
+    "name": "example-cycle-simulator",
+    "revision": "r1",
+    "config_digest": "sha256:54d0685fea4631ac68829b5c20a5542ea55417a20388008efb5b343c1c3cd56f"
+  },
+  "workload_provenance": {
+    "name": "qwen3.8-decode-example",
+    "source": "fixtures/qwen38-decode-workload-v1",
+    "digest": "sha256:19a538789db52dd2e41f08a7ccf7efa3a3d865c49398126f7aaf8f4a64f48bb6"
+  },
+  "validity_envelope": {
+    "description": "illustrative single-batch decode comparison",
+    "dimensions": {"model": "qwen3.8", "batch": "1"}
+  },
+  "excluded_effects": ["host scheduling", "thermal throttling"],
+  "replay": {
+    "seed": 17,
+    "stream": "candidate-order-v1",
+    "repetitions": 1,
+    "independent_streams": 1,
+    "stochastic": false
+  },
+  "simulator_cost": {
+    "host_wall_time_ms": 0,
+    "host_cpu_time_ms": 0,
+    "bytes": 0
+  }
 }
 ```
 
-Receipts with `is_physical_silicon: false` must label provenance as `MODELED` or `SIMULATED`. The `assumptions`, `unmodeled_effects`, and `missing_witness` fields are required.
+A hardware record uses the same outer contract but must carry the nested physical binding (illustrative identities below; they are not a reported measurement):
+
+```json
+{
+  "schema": "fak-simulation-evidence/1",
+  "evidence_type": "hardware_measurement",
+  "claim_ceiling": "measured_absolute",
+  "engine": {
+    "name": "fak-native",
+    "revision": "example-r1",
+    "config_digest": "sha256:19c5c2aebb5a36c93c6ad0406c79b444963c6dc885b01464e31e55f3f303220c"
+  },
+  "workload_provenance": {
+    "name": "qwen3.8-decode-example",
+    "source": "fixtures/qwen38-decode-workload-v1",
+    "digest": "sha256:19a538789db52dd2e41f08a7ccf7efa3a3d865c49398126f7aaf8f4a64f48bb6"
+  },
+  "validity_envelope": {
+    "description": "illustrative single-batch decode capture",
+    "dimensions": {"model": "qwen3.8", "batch": "1"}
+  },
+  "excluded_effects": ["none"],
+  "replay": {
+    "seed": null,
+    "stream": "",
+    "repetitions": 0,
+    "independent_streams": 0,
+    "stochastic": false
+  },
+  "physical_execution": {
+    "physical_silicon": true,
+    "device": "NVIDIA H100 SXM serial 0324018175512",
+    "runtime": "CUDA 13.0",
+    "backend": "fak-native qwen3.8 example-r1",
+    "capture_command": "fak bench native --model qwen3.8 --device cuda:0 --json",
+    "observed_at": "2026-08-27T12:34:56Z",
+    "raw_artifact": "lab/runs/qwen38-h100-run-17.json",
+    "raw_artifact_digest": "sha256:77a03c8c246c4f793d0df1fea5fbd9fec254b369a7daab6eff1589c6d10769ba"
+  },
+  "simulator_cost": {
+    "host_wall_time_ms": 0,
+    "host_cpu_time_ms": 0,
+    "bytes": 0
+  }
+}
+```
+
+Shift left explicitly: local simulation may cheaply prune candidates and prepare the exact fleet command, but it retains only its modeled claim ceiling. Claim authority changes only after validation accepts a `hardware_measurement` bound to a complete physical-execution receipt. Validation checks the binding, RFC3339 timestamp, and SHA-256 digest shape; it does not open or re-hash the external raw artifact, so artifact integrity must be witnessed separately at capture or ingestion.
 
 ### Stage 4: Documentation and benchmark tables
 
@@ -266,7 +324,7 @@ Repository gates enforce each requirement mechanically:
 | No unadorned simulated numbers | `internal/claimcheck` & `fak claims-lint` | Refuses untagged claims in `CLAIMS.md`; requires `[SIMULATED]` or `[STUB]`. |
 | No premature performance closure | DOS verification monitors (`dos verify`) | Refuses issue closure when commit diff lacks a physical test witness. |
 | No fake `perf(...)` commits | Git commit-msg hook (`tools/githooks/commit-msg`) | Blocks `perf(...)` commits if the diff touches only mock or simulated files. |
-| Receipt schema compliance | Struct validator & CI schema checks | Rejects receipts where `is_physical_silicon == false` but provenance is not `MODELED`/`SIMULATED`. |
+| Receipt schema compliance | Struct validator & CI schema checks | Requires a complete `physical_execution` binding for `hardware_measurement` and rejects that binding on every non-hardware evidence type. |
 | Provenance honesty | Conflation scorecard (`tools/conflation_scorecard.py`) | Flags conflation debt if modeled values are presented as witnessed facts. |
 | No self-reported support promotion | Support maturity fence (`internal/shipgate`) | Holds support ladder rung at highest `WITNESSED` level; ignores `MODELED` targets. |
 | No silent fallback to llama.cpp | Native inference gate (`docs/native-inference-goal.md`) | Rejects benchmark runs that quietly switch engine to bypass native hurdles. |

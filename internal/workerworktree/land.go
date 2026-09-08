@@ -19,7 +19,22 @@ const (
 	LandResultNoOp      = "no-op"
 	LandResultConflict  = "conflict"
 	LandResultStaleBase = "stale-base"
+	// LandResultReconciliationRequired is a fail-closed isolated-land refusal.
+	// The worker remains the durable source of the candidate while an operator or
+	// later retry reconciles it; the shared trunk index/worktree were not used.
+	LandResultReconciliationRequired = "reconciliation-required"
 )
+
+func isolatedLandReconciliation(wtPath, reason, detail string) (Result, bool) {
+	return Result{
+		OK:        false,
+		Code:      LandResultReconciliationRequired,
+		Path:      wtPath,
+		Preserved: true,
+		Reason:    "isolated land requires reconciliation: " + reason,
+		Detail:    tail(detail, 300),
+	}, false
+}
 
 // LandRefusalRetryable reports whether a refused Land is worth re-attempting on
 // the same worktree (#3613). True only for the readback-mismatch race class: a
@@ -295,20 +310,21 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	}
 
 	landingOp := func() Result {
-		// Opt-in race-free layer-2 land (default OFF): stage+commit through a THROWAWAY
-		// index so the shared index is never a sweep target. handled=false means it could
-		// not isolate safely (detached HEAD, apply conflict, lost CAS, …) and falls through
-		// to the baseline shared path below — so enabling it only ever reduces the #3547
-		// race window, never regresses it. Path-scoped lands only (a whole-tree land has no
-		// safe isolated form here).
-		if isolatedLandEnabled() && len(paths) > 0 {
-			if r, handled := landIsolated(root, wtPath, diff, msgFile, paths, verify, git, isolatedGitEnv, cfg); handled {
-				r.DroppedOutOfLane = droppedOutOfLane
-				if r.OK && r.Committed {
-					r.Code = LandResultSuccess
-				}
+		// Default-on race-free layer-2 land: stage+commit through a THROWAWAY
+		// index so the shared index is never a sweep target. Any inability to
+		// isolate is a terminal preserved refusal; only an explicit env opt-out
+		// may enter the legacy shared-index path below.
+		if isolatedLandEnabled() {
+			if len(paths) == 0 {
+				r, _ := isolatedLandReconciliation(wtPath, "path-scoped land paths are required", "set explicit paths or explicitly disable isolated landing")
 				return r
 			}
+			r, _ := landIsolated(root, wtPath, diff, msgFile, paths, verify, git, isolatedGitEnv, cfg)
+			r.DroppedOutOfLane = droppedOutOfLane
+			if r.OK && r.Committed {
+				r.Code = LandResultSuccess
+			}
+			return r
 		}
 
 		tracker.setCache("shared-index-fallback", false)
@@ -538,11 +554,10 @@ func parseIsolatedArgs(args []any) (VerifyHook, GitRunner, GitEnvRunner, landCon
 // jittered backoff. Under contention the old behavior collapsed nearly every land
 // into the racy shared-index fallback precisely when isolation mattered most.
 //
-// Returns (result, handled). handled=false means "could not isolate safely — use the
-// baseline shared path": detached HEAD, unresolved identity, apply conflict (a
-// GENUINE same-path overlap, including a conflicting re-apply after a lost CAS),
-// exhausted CAS attempts, or any git error. Thus enabling this can only REDUCE the
-// race window on the happy path, never regress the baseline. On success the shared
+// Returns (result, handled). The compatibility boolean remains false when the
+// isolated attempt did not land, but the accompanying typed reconciliation
+// result is terminal: callers must not interpret false as authority to mutate the
+// shared index. On success the shared
 // working tree is synced for `paths` (git checkout <new> -- paths) so trunk builders
 // see the landed change, matching the baseline post-state; a sync hiccup is reported
 // but does NOT unland.
@@ -556,31 +571,31 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 			finishIsolationAdmission()
 		}
 	}()
-	// The branch to move. Detached HEAD → no branch ref to CAS safely; fall back.
+	// The branch to move. Detached HEAD has no branch ref to CAS safely.
 	rc, ref := run(git, root, []string{"symbolic-ref", "--quiet", "HEAD"})
 	branch := strings.TrimSpace(ref)
 	if rc != 0 || branch == "" {
-		return Result{}, false
+		return isolatedLandReconciliation(wtPath, "trunk HEAD is detached or has no branch ref", ref)
 	}
 	// The exact base our commit parents AND the compare-and-swap old-value.
 	rc, head := run(git, root, []string{"rev-parse", "HEAD"})
 	oldHEAD := strings.TrimSpace(head)
 	if rc != 0 || oldHEAD == "" {
-		return Result{}, false
+		return isolatedLandReconciliation(wtPath, "could not resolve trunk HEAD", head)
 	}
 	// commit-tree runs no hook and adds no signoff; compose Signed-off-by ourselves to
-	// preserve the baseline `commit -s`. Unresolved identity → fall back (can't honor -s).
+	// preserve the baseline `commit -s`. Unresolved identity is a terminal refusal.
 	_, name := run(git, root, []string{"config", "user.name"})
 	_, email := run(git, root, []string{"config", "user.email"})
 	nm, em := strings.TrimSpace(name), strings.TrimSpace(email)
 	if nm == "" || em == "" {
-		return Result{}, false
+		return isolatedLandReconciliation(wtPath, "signoff identity is unavailable", "configure both user.name and user.email")
 	}
 
 	// Throwaway index at a fresh path git creates via read-tree; removed on return.
 	idxF, err := os.CreateTemp("", "fak-land-*.index")
 	if err != nil {
-		return Result{}, false
+		return isolatedLandReconciliation(wtPath, "could not allocate isolated index", err.Error())
 	}
 	idx := idxF.Name()
 	idxF.Close()
@@ -595,12 +610,12 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 	// so every CAS attempt stages byte-identical content under the same subject.
 	patch, cleanupPatch, err := writePatch(diff)
 	if err != nil {
-		return Result{}, false
+		return isolatedLandReconciliation(wtPath, "could not materialize worker patch", err.Error())
 	}
 	defer cleanupPatch()
 	ctMsg, cleanupMsg, err := composeSignedMsg(msgFile, nm, em)
 	if err != nil {
-		return Result{}, false
+		return isolatedLandReconciliation(wtPath, "could not compose signed commit message", err.Error())
 	}
 	defer cleanupMsg()
 	finishIsolationAdmission()
@@ -608,8 +623,8 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 
 	// Bounded optimistic-concurrency loop (#3570): each attempt seeds the throwaway
 	// index from the CURRENT base, builds the commit as a child of that exact base,
-	// and CASes the branch forward. Only a lost CAS loops; every other hiccup still
-	// falls back immediately, exactly as before.
+	// and CASes the branch forward. Only a lost CAS loops; every other hiccup refuses
+	// without exposing the shared index.
 	attempts := isolatedLandRetryCap()
 	var disambiguation *DisambiguationWitnesses
 	var lastCommit string
@@ -625,7 +640,7 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 			finishRebase()
 			newHEAD := strings.TrimSpace(head)
 			if rc != 0 || newHEAD == "" {
-				return Result{}, false
+				return isolatedLandReconciliation(wtPath, "could not refresh trunk HEAD after lost CAS", head)
 			}
 
 			// In-memory 3-way merge tree resolution for CAS landing retry (#11235).
@@ -644,46 +659,46 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 				oldHEAD = newHEAD
 				// Seed the throwaway index with the current trunk HEAD's tree.
 				finishIndex := beginLandPhase(tracker, "index-construction", attempt)
-				if rc, _ := runEnv(genv, root, env, []string{"read-tree", oldHEAD}); rc != 0 {
+				if rc, out := runEnv(genv, root, env, []string{"read-tree", oldHEAD}); rc != 0 {
 					finishIndex()
-					return Result{}, false
+					return isolatedLandReconciliation(wtPath, "could not seed isolated index", out)
 				}
 				// Stage the worker diff into the throwaway index ONLY (--cached never touches
 				// the working tree). A conflict here — first try or re-apply after a lost CAS —
-				// means a concurrent change to the SAME paths; let the baseline path adjudicate
-				// it exactly as today rather than force it.
-				if rc, _ := runEnv(genv, root, env, []string{"apply", "--cached", "--whitespace=nowarn", patch}); rc != 0 {
+				// means a concurrent change to the SAME paths; preserve it for explicit
+				// reconciliation rather than force it or mutate the shared index.
+				if rc, out := runEnv(genv, root, env, []string{"apply", "--cached", "--whitespace=nowarn", patch}); rc != 0 {
 					finishIndex()
-					return Result{}, false
+					return isolatedLandReconciliation(wtPath, "worker patch conflicts with current trunk", out)
 				}
 				rc, tree := runEnv(genv, root, env, []string{"write-tree"})
 				treeSHA = strings.TrimSpace(tree)
 				if rc != 0 || treeSHA == "" {
 					finishIndex()
-					return Result{}, false
+					return isolatedLandReconciliation(wtPath, "could not write isolated candidate tree", tree)
 				}
 				finishIndex()
 			}
 		} else {
 			// Seed the throwaway index with the current trunk HEAD's tree.
 			finishIndex := beginLandPhase(tracker, "index-construction", attempt)
-			if rc, _ := runEnv(genv, root, env, []string{"read-tree", oldHEAD}); rc != 0 {
+			if rc, out := runEnv(genv, root, env, []string{"read-tree", oldHEAD}); rc != 0 {
 				finishIndex()
-				return Result{}, false
+				return isolatedLandReconciliation(wtPath, "could not seed isolated index", out)
 			}
 			// Stage the worker diff into the throwaway index ONLY (--cached never touches
 			// the working tree). A conflict here — first try or re-apply after a lost CAS —
-			// means a concurrent change to the SAME paths; let the baseline path adjudicate
-			// it exactly as today rather than force it.
-			if rc, _ := runEnv(genv, root, env, []string{"apply", "--cached", "--whitespace=nowarn", patch}); rc != 0 {
+			// means a concurrent change to the SAME paths; preserve it for explicit
+			// reconciliation rather than force it or mutate the shared index.
+			if rc, out := runEnv(genv, root, env, []string{"apply", "--cached", "--whitespace=nowarn", patch}); rc != 0 {
 				finishIndex()
-				return Result{}, false
+				return isolatedLandReconciliation(wtPath, "worker patch conflicts with current trunk", out)
 			}
 			rc, tree := runEnv(genv, root, env, []string{"write-tree"})
 			treeSHA = strings.TrimSpace(tree)
 			if rc != 0 || treeSHA == "" {
 				finishIndex()
-				return Result{}, false
+				return isolatedLandReconciliation(wtPath, "could not write isolated candidate tree", tree)
 			}
 			finishIndex()
 		}
@@ -702,7 +717,7 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 		finishCommit()
 		newCommit := strings.TrimSpace(commit)
 		if rc != 0 || newCommit == "" {
-			return Result{}, false
+			return isolatedLandReconciliation(wtPath, "could not construct isolated commit", commit)
 		}
 		lastCommit = newCommit
 		lastBase = oldHEAD
@@ -776,9 +791,9 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, args ...an
 			Reason: "isolated-index land " + shortSHA(newCommit) + " (race-free, #3547)",
 			Detail: detail, Disambiguation: disambiguation, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt}, true
 	}
-	// Every bounded attempt lost its CAS — genuine sustained contention. Fall back to
-	// the baseline shared path as the final resort rather than loop unbounded.
-	return Result{}, false
+	// Every bounded attempt lost its CAS — preserve the candidate for explicit
+	// reconciliation rather than exposing the shared index under contention.
+	return isolatedLandReconciliation(wtPath, "compare-and-swap retry budget exhausted", "cas-attempts="+strconv.Itoa(attempts)+"/"+strconv.Itoa(attempts))
 }
 
 // composeSignedMsg writes msgFile's content to a new temp file with a Signed-off-by

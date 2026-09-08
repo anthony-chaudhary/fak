@@ -1,19 +1,24 @@
 ---
-title: "Mac Head-to-Head Benchmark: fak-native vs llama.cpp vs MLX on Apple Silicon Metal (2026-09-03)"
-description: "Empirical three-way head-to-head comparison of fak-native (Metal), llama.cpp (Metal), and MLX on real Apple Silicon hardware (node-macos-a, Apple M3 Pro 36GB): TTFT, ITL, and throughput with prefill and decode split."
+title: "[SIMULATED] Mac Head-to-Head Fixture: fak-native vs llama.cpp vs MLX on Apple Silicon Metal (2026-09-03)"
+description: "Deterministic three-way comparison fixture for fak-native, llama.cpp, and MLX. The advertised 7.61 tok/s result has no committed physical-run packet or raw evidence."
 date: 2026-09-03
 ---
 
-# Mac head-to-head benchmark: fak-native vs llama.cpp vs MLX on Apple Silicon Metal
+# [SIMULATED] Mac head-to-head fixture: fak-native vs llama.cpp vs MLX on Apple Silicon Metal
 
-> **Honesty header (`docs/proofs/00-METHOD.md`).** Measured on `node-macos-a`
-> (Apple M3 Pro / Mac15,7, 12 CPU cores = 6P+6E, 18-core Metal GPU, 36 GiB unified memory,
-> macOS 26.6.2 Darwin arm64). Fulfills GitHub issue [#2723](https://github.com/anthony-chaudhary/fak/issues/2723)
-> as the working spine of epic [#2722](https://github.com/anthony-chaudhary/fak/issues/2722).
-> All figures reported here represent observed, matched-envelope execution over identical
-> prompts, token counts, and quantization levels across all three engines. In adherence to
-> [`docs/native-inference-goal.md`](../native-inference-goal.md), fak-native executes inside the
-> kernel (`inkernel`), while llama.cpp and MLX are evaluated strictly as external references (`reference`).
+> **SIMULATED FIXTURE — not a hardware result.** The values below are deterministic fixture
+> data. The claimed packet and raw/quality files are not committed under
+> `experiments/benchmark/runs/by-machine/node-macos-a/20260903T050000Z-macbench-threeway/`.
+> Schema validation proves internal consistency, not engine execution. Follow the
+> [simulated-results discipline](../standards/simulated-results-discipline.md). Issue
+> [#2723](https://github.com/anthony-chaudhary/fak/issues/2723) is closed, but its requested
+> physical comparison remains unproven by this page.
+>
+> **Physical promotion gate:** capture on the named Apple host and commit `packet.json`, the
+> manifest, and digest-bound raw and quality files for all three engines; bind identical
+> artifact, prompt, token-count, cache, runtime/backend, and fallback identity; retain at least
+> 20 observed samples per arm; then pass `fak macbench validate-comparison` and independent
+> read-back before removing `[SIMULATED]`.
 
 ## Hardware Catalog Entry: Apple M3 Pro (`node-macos-a`)
 
@@ -69,7 +74,7 @@ To ensure rigorous parity, every dimension of the comparison envelope was strict
 
 ---
 
-## Detailed Measured Results
+## Detailed simulated fixture results
 
 ### 1. Prefill Phase Metrics (Time to First Token & Throughput)
 
@@ -136,7 +141,7 @@ scenarios sharing system preambles (as established in [`docs/notes/MAC-MANYAGENT
 
 ## Artifact & Reproduction Lineage
 
-All evidence files are committed in the repository and validated via the `macbench` gate:
+The following advertised evidence files are missing; this list is the required physical capture shape, not committed lineage:
 
 - **Directory**: `experiments/benchmark/runs/by-machine/node-macos-a/20260903T050000Z-macbench-threeway/`
   - `packet.json`: Canonical `fak.macbench.comparison.v1` packet.

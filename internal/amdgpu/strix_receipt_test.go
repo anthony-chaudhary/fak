@@ -219,8 +219,8 @@ func TestStrixValidationReceipt_TypedParity_AcceptSupportedOracles(t *testing.T)
 		if err := receipt.Validate(); err != nil {
 			t.Fatalf("receipt with cosine_max_abs should validate: %v", err)
 		}
-		if !receipt.CreditEligible() {
-			t.Fatalf("receipt with cosine_max_abs should be credit eligible")
+		if receipt.CreditEligible() {
+			t.Fatalf("valid non-argmax receipt must not earn exact-argmax validation credit")
 		}
 	})
 
@@ -246,8 +246,8 @@ func TestStrixValidationReceipt_TypedParity_AcceptSupportedOracles(t *testing.T)
 		if err := receipt.Validate(); err != nil {
 			t.Fatalf("receipt with max_abs should validate: %v", err)
 		}
-		if !receipt.CreditEligible() {
-			t.Fatalf("receipt with max_abs should be credit eligible")
+		if receipt.CreditEligible() {
+			t.Fatalf("valid non-argmax receipt must not earn exact-argmax validation credit")
 		}
 	})
 
@@ -282,8 +282,8 @@ func TestStrixValidationReceipt_TypedParity_AcceptSupportedOracles(t *testing.T)
 		if err := receipt.Validate(); err != nil {
 			t.Fatalf("receipt with state_continuity should validate: %v", err)
 		}
-		if !receipt.CreditEligible() {
-			t.Fatalf("receipt with state_continuity should be credit eligible")
+		if receipt.CreditEligible() {
+			t.Fatalf("valid non-argmax receipt must not earn exact-argmax validation credit")
 		}
 	})
 
@@ -802,6 +802,62 @@ func TestCreditEligibleRequiresFullReceiptValidation(t *testing.T) {
 	receipt.ParityEvents = []StrixParityEvent{NewExactArgmaxParityEvent("fak-native/vulkan", 1, true, true)}
 	if receipt.CreditEligible() {
 		t.Fatal("minimal PASS receipt without digest/provenance/execution evidence earned credit")
+	}
+}
+
+func TestCreditEligibleRequiresExactArgmaxWithoutAblations(t *testing.T) {
+	newReceipt := func(t *testing.T, subkernels []StrixSubkernelResult, ablations []StrixAblationResult) *StrixValidationReceipt {
+		t.Helper()
+		receipt := NewStrixValidationReceipt(testStrixTarget(), "HEAD", testTip, "fak validate --strix")
+		receipt.Subkernels = subkernels
+		receipt.Ablations = ablations
+		sealReceipt(t, receipt)
+		if err := receipt.Validate(); err != nil {
+			t.Fatalf("test receipt must remain generally valid: %v", err)
+		}
+		return receipt
+	}
+
+	argmax := StrixSubkernelResult{
+		Name:         "argmax",
+		Status:       "PASS",
+		DurationUS:   1,
+		Iterations:   1,
+		ParityEvents: []StrixParityEvent{NewExactArgmaxParityEvent("fak-native/vulkan", 1, true, true)},
+	}
+	matmul := StrixSubkernelResult{
+		Name:         "matmul_f32",
+		Status:       "PASS",
+		DurationUS:   1,
+		Iterations:   1,
+		ParityEvents: []StrixParityEvent{NewCosineMaxAbsParityEvent("fak-native/vulkan", 1, true, 0.999995, 0.999900, 0.0012, 0.01)},
+	}
+	ablation := StrixAblationResult{
+		Dimension:    "target",
+		Feature:      "cpu_vs_vulkan_gpu",
+		BaselineArm:  StrixArmResult{Name: "cpu", LatencyUS: 2, Samples: 1},
+		CandidateArm: StrixArmResult{Name: "gpu", LatencyUS: 1, Samples: 1},
+		Speedup:      2,
+		LiftRatio:    2,
+		CosineParity: 0.9999,
+		Verdict:      "VERIFIED_LIFT",
+	}
+
+	for _, tc := range []struct {
+		name       string
+		subkernels []StrixSubkernelResult
+		ablations  []StrixAblationResult
+		wantCredit bool
+	}{
+		{name: "exact argmax without ablations", subkernels: []StrixSubkernelResult{argmax}, wantCredit: true},
+		{name: "non-argmax", subkernels: []StrixSubkernelResult{matmul}},
+		{name: "all subkernels and ablations", subkernels: []StrixSubkernelResult{argmax, matmul}, ablations: []StrixAblationResult{ablation}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := newReceipt(t, tc.subkernels, tc.ablations).CreditEligible(); got != tc.wantCredit {
+				t.Fatalf("CreditEligible() = %v, want %v", got, tc.wantCredit)
+			}
+		})
 	}
 }
 
