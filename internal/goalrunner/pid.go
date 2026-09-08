@@ -48,14 +48,15 @@ func SweepDeadPidBreadcrumbs(workspace string) ([]int, error) {
 		pidFile := filepath.Join(logDir, entry.Name())
 		data, err := os.ReadFile(pidFile)
 		if err != nil {
-			_ = os.Remove(pidFile)
+			// Transient read error (e.g. file lock or sharing violation).
+			// Do not unlink on transient read failure.
 			continue
 		}
 
 		raw := strings.TrimSpace(string(data))
 		pid, err := strconv.Atoi(raw)
 		if err != nil || pid <= 0 {
-			// Not a valid PID breadcrumb; remove dead/corrupt entry
+			// Corrupt, empty, or non-integer content; clean up dead entry
 			_ = os.Remove(pidFile)
 			continue
 		}

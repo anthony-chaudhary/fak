@@ -17,14 +17,20 @@ func isProcessLive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	h, err := syscall.OpenProcess(syscall.PROCESS_QUERY_INFORMATION, false, uint32(pid))
+	const access = 0x1000 | 0x00100000 // PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE
+	h, err := syscall.OpenProcess(access, false, uint32(pid))
 	if err != nil {
-		h, err = syscall.OpenProcess(0x1000, false, uint32(pid)) // PROCESS_QUERY_LIMITED_INFORMATION
+		h, err = syscall.OpenProcess(syscall.PROCESS_QUERY_INFORMATION, false, uint32(pid))
 		if err != nil {
 			return false
 		}
 	}
 	defer syscall.CloseHandle(h)
+
+	event, err := syscall.WaitForSingleObject(h, 0)
+	if err == nil {
+		return event == syscall.WAIT_TIMEOUT
+	}
 
 	var code uint32
 	if err := syscall.GetExitCodeProcess(h, &code); err != nil {

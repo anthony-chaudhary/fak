@@ -2,6 +2,43 @@ package goalrunner
 
 import "time"
 
+// GoalLaunchReceiptSchema is the canonical schema identifier for goal launch receipts.
+const GoalLaunchReceiptSchema = "fak.goal-launch-receipt.v1"
+
+// ShiftLeftPreflight captures pre-spawn host and input validation facts.
+type ShiftLeftPreflight struct {
+	Verdict   string `json:"verdict"`
+	LiveCount int    `json:"live_count"`
+	HostCap   int    `json:"host_cap"`
+}
+
+// GoalLaunchReceipt captures audit and shift-left execution evidence for goal worker launches.
+type GoalLaunchReceipt struct {
+	Schema             string             `json:"schema"`
+	Outcome            string             `json:"outcome"`
+	RunID              string             `json:"run_id"`
+	Tag                string             `json:"tag"`
+	PID                int                `json:"pid"`
+	Product            string             `json:"product"`
+	WorkKind           string             `json:"work_kind"`
+	Tier               string             `json:"tier"`
+	Account            string             `json:"account"`
+	AccountTag         string             `json:"account_tag"`
+	Guarded            bool               `json:"guarded"`
+	BudgetTokens       int                `json:"budget_tokens"`
+	MaxDuration        string             `json:"max_duration"`
+	PromptChars        int                `json:"prompt_chars"`
+	PromptFile         string             `json:"prompt_file"`
+	OutLog             string             `json:"out_log"`
+	ErrLog             string             `json:"err_log"`
+	PIDFile            string             `json:"pid_file"`
+	ShiftLeftPreflight ShiftLeftPreflight `json:"shift_left_preflight"`
+	RecordedAt         time.Time          `json:"recorded_at"`
+	ElapsedMS          int64              `json:"elapsed_ms"`
+	ReceiptPath        string             `json:"receipt_path"`
+	Error              string             `json:"error,omitempty"`
+}
+
 // LaunchOptions parameterizes LaunchDetachedWorker.
 type LaunchOptions struct {
 	Workspace           string        `json:"workspace"`
@@ -31,22 +68,24 @@ type LaunchOptions struct {
 	PlanOnly            bool          `json:"plan_only"`
 	AllowTierFallback   bool          `json:"allow_tier_fallback"`
 	Timeout             time.Duration `json:"timeout"`
+	ReceiptPath         string        `json:"receipt_path,omitempty"`
 }
 
 // LaunchResult captures the outcome of LaunchDetachedWorker.
 type LaunchResult struct {
-	PID           int      `json:"pid"`
-	Tag           string   `json:"tag"`
-	RunID         string   `json:"run_id"`
-	LaunchWitness string   `json:"launch_witness"`
-	PromptFile    string   `json:"prompt_file"`
-	OutLog        string   `json:"out_log"`
-	ErrLog        string   `json:"err_log"`
-	PIDFile       string   `json:"pid_file"`
-	SeedDir       string   `json:"seed_dir"`
-	Command       string   `json:"command"`
-	Args          []string `json:"args"`
-	PlanOnly      bool     `json:"plan_only"`
+	PID           int                `json:"pid"`
+	Tag           string             `json:"tag"`
+	RunID         string             `json:"run_id"`
+	LaunchWitness string             `json:"launch_witness"`
+	PromptFile    string             `json:"prompt_file"`
+	OutLog        string             `json:"out_log"`
+	ErrLog        string             `json:"err_log"`
+	PIDFile       string             `json:"pid_file"`
+	SeedDir       string             `json:"seed_dir"`
+	Command       string             `json:"command"`
+	Args          []string           `json:"args"`
+	PlanOnly      bool               `json:"plan_only"`
+	Receipt       *GoalLaunchReceipt `json:"receipt,omitempty"`
 }
 
 // GoalContract represents a single goal task in a fleet.

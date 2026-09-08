@@ -337,6 +337,262 @@ func TestLaunchDetachedWorkerPlanOnly(t *testing.T) {
 	if !strings.HasPrefix(string(inData), "/goal Fix the buffer overflow") {
 		t.Fatalf("expected prompt file to start with '/goal ', got %q", string(inData))
 	}
+	if res.Receipt == nil {
+		t.Fatalf("expected non-nil Receipt in LaunchResult")
+	}
+	if res.Receipt.Outcome != "plan_only" {
+		t.Errorf("expected Receipt Outcome 'plan_only', got %q", res.Receipt.Outcome)
+	}
+}
+
+func TestLaunchDetachedWorkerReceipt(t *testing.T) {
+	tempDir := t.TempDir()
+
+	pointerFile := filepath.Join(tempDir, "solve-issue.md")
+	content := "Fix the memory leak in engine"
+	if err := os.WriteFile(pointerFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	opt := LaunchOptions{
+		Workspace:           tempDir,
+		PointerFile:         pointerFile,
+		Product:             "codex",
+		WorkKind:            "gardening",
+		Tier:                "t2",
+		Account:             "acct-qa",
+		AccountTag:          "qa-team",
+		Guarded:             true,
+		ContextBudgetTokens: 1500000,
+		MaxDuration:         "30m",
+		PreflightMaxWorkers: 8,
+		PlanOnly:            true,
+	}
+
+	res, err := LaunchDetachedWorker(opt)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if res.Receipt == nil {
+		t.Fatalf("expected non-nil Receipt in LaunchResult")
+	}
+
+	rec := res.Receipt
+	if rec.Schema != GoalLaunchReceiptSchema {
+		t.Errorf("schema = %q, want %q", rec.Schema, GoalLaunchReceiptSchema)
+	}
+	if rec.Outcome != "plan_only" {
+		t.Errorf("outcome = %q, want plan_only", rec.Outcome)
+	}
+	if rec.Product != "codex" {
+		t.Errorf("product = %q, want codex", rec.Product)
+	}
+	if rec.WorkKind != "gardening" {
+		t.Errorf("work_kind = %q, want gardening", rec.WorkKind)
+	}
+	if rec.Tier != "t2" {
+		t.Errorf("tier = %q, want t2", rec.Tier)
+	}
+	if rec.Account != "acct-qa" {
+		t.Errorf("account = %q, want acct-qa", rec.Account)
+	}
+	if rec.AccountTag != "qa-team" {
+		t.Errorf("account_tag = %q, want qa-team", rec.AccountTag)
+	}
+	if !rec.Guarded {
+		t.Errorf("guarded = false, want true")
+	}
+	if rec.BudgetTokens != 1500000 {
+		t.Errorf("budget_tokens = %d, want 1500000", rec.BudgetTokens)
+	}
+	if rec.MaxDuration != "30m" {
+		t.Errorf("max_duration = %q, want 30m", rec.MaxDuration)
+	}
+	expectedPrompt := "/goal " + content
+	if rec.PromptChars != len(expectedPrompt) {
+		t.Errorf("prompt_chars = %d, want %d", rec.PromptChars, len(expectedPrompt))
+	}
+	if rec.ShiftLeftPreflight.Verdict != "SPAWN_OK" {
+		t.Errorf("shift_left_preflight verdict = %q, want SPAWN_OK", rec.ShiftLeftPreflight.Verdict)
+	}
+	if rec.ShiftLeftPreflight.LiveCount != 0 {
+		t.Errorf("shift_left_preflight live_count = %d, want 0", rec.ShiftLeftPreflight.LiveCount)
+	}
+	if rec.ShiftLeftPreflight.HostCap != 8 {
+		t.Errorf("shift_left_preflight host_cap = %d, want 8", rec.ShiftLeftPreflight.HostCap)
+	}
+	if rec.ReceiptPath == "" {
+		t.Fatalf("receipt_path is empty")
+	}
+
+	// Verify disk receipt at ReceiptPath
+	receiptBytes, err := os.ReadFile(rec.ReceiptPath)
+	if err != nil {
+		t.Fatalf("failed to read receipt file at %s: %v", rec.ReceiptPath, err)
+	}
+	var diskRec GoalLaunchReceipt
+	if err := json.Unmarshal(receiptBytes, &diskRec); err != nil {
+		t.Fatalf("failed to parse disk receipt: %v", err)
+	}
+	if diskRec.Schema != GoalLaunchReceiptSchema || diskRec.Outcome != "plan_only" {
+		t.Errorf("parsed disk receipt mismatch: %+v", diskRec)
+	}
+
+	// Verify .fak/goal-launch-receipt.json update
+	fakReceiptPath := filepath.Join(tempDir, ".fak", "goal-launch-receipt.json")
+	fakBytes, err := os.ReadFile(fakReceiptPath)
+	if err != nil {
+		t.Fatalf("failed to read .fak receipt file: %v", err)
+	}
+	var fakRec GoalLaunchReceipt
+	if err := json.Unmarshal(fakBytes, &fakRec); err != nil {
+		t.Fatalf("failed to parse .fak receipt: %v", err)
+	}
+	if fakRec.RunID != rec.RunID || fakRec.Outcome != "plan_only" {
+		t.Errorf("parsed .fak receipt mismatch: %+v", fakRec)
+	}
+}
+
+func TestLaunchDetachedWorkerCustomReceiptPath(t *testing.T) {
+	tempDir := t.TempDir()
+	customPath := filepath.Join(tempDir, "custom", "receipts", "custom-run.receipt.json")
+
+	opt := LaunchOptions{
+		Workspace:      tempDir,
+		PointerContent: "inline task condition",
+		ReceiptPath:    customPath,
+		PlanOnly:       true,
+	}
+
+	res, err := LaunchDetachedWorker(opt)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Receipt == nil {
+		t.Fatalf("expected non-nil Receipt")
+	}
+	if res.Receipt.ReceiptPath != customPath {
+		t.Errorf("receipt path = %q, want %q", res.Receipt.ReceiptPath, customPath)
+	}
+
+	if _, err := os.Stat(customPath); os.IsNotExist(err) {
+		t.Fatalf("custom receipt file does not exist at %s", customPath)
+	}
+}
+
+func TestLaunchDetachedWorkerShiftLeftPreflightFailures(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// 1. Workspace does not exist
+	t.Run("nonexistent workspace fails preflight", func(t *testing.T) {
+		_, err := LaunchDetachedWorker(LaunchOptions{
+			Workspace:      filepath.Join(tempDir, "nonexistent-dir"),
+			PointerContent: "task",
+			PlanOnly:       true,
+		})
+		if err == nil {
+			t.Fatalf("expected error for nonexistent workspace, got nil")
+		}
+		if !strings.Contains(err.Error(), "workspace") {
+			t.Errorf("expected error to mention workspace, got: %v", err)
+		}
+	})
+
+	// 2. Goal prompt length > 4000 fails preflight
+	t.Run("prompt length exceeding 4000 fails preflight", func(t *testing.T) {
+		_, err := LaunchDetachedWorker(LaunchOptions{
+			Workspace:      tempDir,
+			PointerContent: strings.Repeat("a", 4001),
+			PlanOnly:       true,
+		})
+		if err == nil {
+			t.Fatalf("expected error for oversized prompt, got nil")
+		}
+		if !strings.Contains(err.Error(), ">4000 cap") {
+			t.Errorf("expected error to mention >4000 cap, got: %v", err)
+		}
+	})
+
+	// 3. Preflight cap reached
+	t.Run("preflight cap exceeded refuses spawn and writes failed receipt", func(t *testing.T) {
+		ws := t.TempDir()
+		logDir := filepath.Join(ws, ".goal-runs")
+		if err := os.MkdirAll(logDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		// Write a live PID file using current process ID
+		livePID := os.Getpid()
+		if err := os.WriteFile(filepath.Join(logDir, "live-worker.pid"), []byte(fmt.Sprintf("%d\n", livePID)), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := LaunchDetachedWorker(LaunchOptions{
+			Workspace:           ws,
+			PointerContent:      "work task",
+			PreflightMaxWorkers: 1, // live = 1 >= cap 1 => refusal
+			PlanOnly:            true,
+		})
+		if err == nil {
+			t.Fatalf("expected error when live workers >= cap, got nil")
+		}
+		if !strings.Contains(err.Error(), "REFUSE_AT_CAP") {
+			t.Fatalf("expected error to mention REFUSE_AT_CAP, got: %v", err)
+		}
+
+		// Verify that a failed receipt was written to .fak/goal-launch-receipt.json
+		fakReceipt := filepath.Join(ws, ".fak", "goal-launch-receipt.json")
+		b, err := os.ReadFile(fakReceipt)
+		if err != nil {
+			t.Fatalf("expected .fak receipt to be written on failure: %v", err)
+		}
+		var rec GoalLaunchReceipt
+		if err := json.Unmarshal(b, &rec); err != nil {
+			t.Fatalf("failed to decode receipt: %v", err)
+		}
+		if rec.Outcome != "failed" {
+			t.Errorf("outcome = %q, want failed", rec.Outcome)
+		}
+		if rec.ShiftLeftPreflight.Verdict != "REFUSE_AT_CAP" {
+			t.Errorf("preflight verdict = %q, want REFUSE_AT_CAP", rec.ShiftLeftPreflight.Verdict)
+		}
+		if rec.ShiftLeftPreflight.LiveCount != 1 {
+			t.Errorf("preflight live_count = %d, want 1", rec.ShiftLeftPreflight.LiveCount)
+		}
+		if rec.Error == "" {
+			t.Errorf("expected receipt Error to be populated")
+		}
+	})
+
+	// 4. SkipPreflight bypasses cap refusal
+	t.Run("skip preflight bypasses cap refusal", func(t *testing.T) {
+		ws := t.TempDir()
+		logDir := filepath.Join(ws, ".goal-runs")
+		if err := os.MkdirAll(logDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		livePID := os.Getpid()
+		if err := os.WriteFile(filepath.Join(logDir, "live-worker.pid"), []byte(fmt.Sprintf("%d\n", livePID)), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		res, err := LaunchDetachedWorker(LaunchOptions{
+			Workspace:           ws,
+			PointerContent:      "work task",
+			PreflightMaxWorkers: 1,
+			SkipPreflight:       true,
+			PlanOnly:            true,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error with SkipPreflight: %v", err)
+		}
+		if res.Receipt == nil {
+			t.Fatalf("expected non-nil Receipt")
+		}
+		if res.Receipt.ShiftLeftPreflight.Verdict != "SKIPPED" {
+			t.Errorf("preflight verdict = %q, want SKIPPED", res.Receipt.ShiftLeftPreflight.Verdict)
+		}
+	})
 }
 
 func TestSerializePlanAndRollup(t *testing.T) {
@@ -488,7 +744,7 @@ func TestMonitorProcessTimeout(t *testing.T) {
 	}
 
 	// Verify the child process was killed upon timeout
-	time.Sleep(50 * time.Millisecond)
+	_ = cmd.Wait()
 	if IsProcessLive(childPID) {
 		t.Errorf("expected child process to be terminated after timeout")
 	}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -373,6 +374,128 @@ func RunFleetPlan(ctx context.Context, plan *FleetPlan, launcher Launcher) ([]*W
 
 	rollupContent := RenderRollup(plan, results)
 	_ = os.WriteFile(plan.RollupPath, []byte(rollupContent), 0644)
+	if plan.StatusPath != "" {
+		statusLine := fmt.Sprintf("%s  driver done -- completed %d contracts (dry-run=%v)\n",
+			time.Now().UTC().Format(time.RFC3339), len(results), plan.DryRun)
+		_ = os.WriteFile(plan.StatusPath, []byte(statusLine), 0644)
+	}
 
 	return results, nil
+}
+
+var issueNumberRegex = regexp.MustCompile(`(?:issue-?|#)?(\d+)`)
+
+// LoadFleetContracts loads goal contracts from a directory, JSON file, or individual contract markdown files.
+func LoadFleetContracts(contractsDir, workspace string) ([]GoalContract, error) {
+	if contractsDir == "" {
+		return nil, fmt.Errorf("contracts-dir is required")
+	}
+
+	target := contractsDir
+	if !filepath.IsAbs(target) && workspace != "" {
+		target = filepath.Join(workspace, target)
+	}
+
+	st, err := os.Stat(target)
+	if err != nil {
+		return nil, fmt.Errorf("stat contracts path: %w", err)
+	}
+
+	if !st.IsDir() {
+		// Single JSON file (could be FleetPlan or []GoalContract or GoalContract)
+		data, err := os.ReadFile(target)
+		if err != nil {
+			return nil, fmt.Errorf("read contract file: %w", err)
+		}
+
+		var plan FleetPlan
+		if err := json.Unmarshal(data, &plan); err == nil && len(plan.Contracts) > 0 {
+			return plan.Contracts, nil
+		}
+
+		var slice []GoalContract
+		if err := json.Unmarshal(data, &slice); err == nil && len(slice) > 0 {
+			return slice, nil
+		}
+
+		var single GoalContract
+		if err := json.Unmarshal(data, &single); err == nil && (single.N > 0 || single.Pointer != "") {
+			return []GoalContract{single}, nil
+		}
+
+		return nil, fmt.Errorf("unable to parse contracts from %s", target)
+	}
+
+	// Target is a directory
+	planJSON := filepath.Join(target, "plan.json")
+	if data, err := os.ReadFile(planJSON); err == nil {
+		var plan FleetPlan
+		if err := json.Unmarshal(data, &plan); err == nil && len(plan.Contracts) > 0 {
+			return plan.Contracts, nil
+		}
+	}
+
+	contractsJSON := filepath.Join(target, "contracts.json")
+	if data, err := os.ReadFile(contractsJSON); err == nil {
+		var slice []GoalContract
+		if err := json.Unmarshal(data, &slice); err == nil && len(slice) > 0 {
+			return slice, nil
+		}
+	}
+
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		return nil, fmt.Errorf("read contracts dir: %w", err)
+	}
+
+	var contracts []GoalContract
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		path := filepath.Join(target, e.Name())
+		ext := strings.ToLower(filepath.Ext(e.Name()))
+
+		if ext == ".json" {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			var c GoalContract
+			if err := json.Unmarshal(data, &c); err == nil && (c.N > 0 || c.Pointer != "") {
+				if c.Pointer == "" {
+					c.Pointer = e.Name()
+				}
+				contracts = append(contracts, c)
+				continue
+			}
+			var slice []GoalContract
+			if err := json.Unmarshal(data, &slice); err == nil && len(slice) > 0 {
+				contracts = append(contracts, slice...)
+				continue
+			}
+		}
+
+		if ext == ".md" || ext == ".txt" {
+			n := 0
+			if m := issueNumberRegex.FindStringSubmatch(e.Name()); len(m) > 1 {
+				n, _ = strconv.Atoi(m[1])
+			}
+			contracts = append(contracts, GoalContract{
+				N:       n,
+				Pointer: e.Name(),
+				Host:    "full",
+			})
+		}
+	}
+
+	if len(contracts) == 0 {
+		return nil, fmt.Errorf("no valid goal contracts found in %s", target)
+	}
+
+	sort.SliceStable(contracts, func(i, j int) bool {
+		return contracts[i].N < contracts[j].N
+	})
+
+	return contracts, nil
 }

@@ -1,6 +1,7 @@
 package goalrunner
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -77,14 +78,86 @@ func ResolveFakExe(repoRoot, explicit string) (string, error) {
 	return "", fmt.Errorf("no fak binary found (looked in %s/tools/.bin, repo root, and PATH; pass explicit path)", repoRoot)
 }
 
+// countLiveWorkers counts live PID files in logDir.
+func countLiveWorkers(logDir string) int {
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".pid") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(logDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err != nil || pid <= 0 {
+			continue
+		}
+		if IsProcessLive(pid) {
+			count++
+		}
+	}
+	return count
+}
+
+// writeReceiptAtomic atomically marshals and writes receipt to destPath via a temp file.
+func writeReceiptAtomic(destPath string, receipt *GoalLaunchReceipt) error {
+	data, err := json.MarshalIndent(receipt, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal receipt: %w", err)
+	}
+	dir := filepath.Dir(destPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("mkdir for receipt: %w", err)
+	}
+	tmpFile, err := os.CreateTemp(dir, ".tmp-receipt-*")
+	if err != nil {
+		return fmt.Errorf("create temp receipt: %w", err)
+	}
+	tmpName := tmpFile.Name()
+	defer func() {
+		_ = os.Remove(tmpName)
+	}()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("write temp receipt: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("close temp receipt: %w", err)
+	}
+
+	if err := os.Rename(tmpName, destPath); err != nil {
+		_ = os.Remove(destPath)
+		if err := os.Rename(tmpName, destPath); err != nil {
+			return fmt.Errorf("rename receipt to %s: %w", destPath, err)
+		}
+	}
+	return nil
+}
+
 // LaunchDetachedWorker launches a headless /goal worker fully detached from the current process.
 func LaunchDetachedWorker(opt LaunchOptions) (*LaunchResult, error) {
+	startTime := time.Now()
+
+	// 1. Shift-left preflight: check workspace existence
 	if opt.Workspace == "" {
 		wd, err := os.Getwd()
 		if err != nil {
 			return nil, fmt.Errorf("resolve workspace: %w", err)
 		}
 		opt.Workspace = wd
+	}
+	wsInfo, err := os.Stat(opt.Workspace)
+	if err != nil {
+		return nil, fmt.Errorf("workspace directory does not exist: %w", err)
+	}
+	if !wsInfo.IsDir() {
+		return nil, fmt.Errorf("workspace path is not a directory: %s", opt.Workspace)
 	}
 
 	if opt.LogDir == "" {
@@ -94,10 +167,19 @@ func LaunchDetachedWorker(opt LaunchOptions) (*LaunchResult, error) {
 		return nil, fmt.Errorf("create log dir: %w", err)
 	}
 
-	// 1. Preflight / PID cleanup
+	// 2. Shift-left preflight: run dead PID breadcrumb sweep
 	_, _ = SweepDeadPidBreadcrumbs(opt.Workspace)
 
-	// 2. Resolve pointer content and tag
+	// 3. Shift-left preflight: live worker count and host cap check
+	liveCount := countLiveWorkers(opt.LogDir)
+	preflightVerdict := "SPAWN_OK"
+	if opt.SkipPreflight {
+		preflightVerdict = "SKIPPED"
+	} else if opt.PreflightMaxWorkers > 0 && liveCount >= opt.PreflightMaxWorkers {
+		preflightVerdict = "REFUSE_AT_CAP"
+	}
+
+	// 4. Shift-left preflight: validate pointer file and content
 	tag := opt.Tag
 	content := opt.PointerContent
 	if content == "" {
@@ -122,13 +204,14 @@ func LaunchDetachedWorker(opt LaunchOptions) (*LaunchResult, error) {
 		tag = "goal"
 	}
 
-	// 3. Format goal prompt
+	// 5. Shift-left preflight: format goal prompt & enforce length (<=4000)
 	prompt, err := FormatGoalPrompt(content)
 	if err != nil {
 		return nil, err
 	}
 
-	// 4. File paths
+	// 6. File paths & naming
+	tag = strings.ReplaceAll(tag, " ", "-")
 	stamp := time.Now().UTC().Format("20060102-150405")
 	runID := fmt.Sprintf("%s-%s", tag, stamp)
 	inF := filepath.Join(opt.LogDir, fmt.Sprintf("%s.in.txt", runID))
@@ -137,29 +220,38 @@ func LaunchDetachedWorker(opt LaunchOptions) (*LaunchResult, error) {
 	pidF := filepath.Join(opt.LogDir, fmt.Sprintf("%s.pid", runID))
 	seedDir := filepath.Join(opt.LogDir, fmt.Sprintf("seed-%s", runID))
 
-	// Write prompt file (UTF-8, no BOM)
-	if err := os.WriteFile(inF, []byte(prompt), 0644); err != nil {
-		return nil, fmt.Errorf("write prompt file: %w", err)
+	receiptPath := opt.ReceiptPath
+	if receiptPath == "" {
+		receiptPath = filepath.Join(opt.LogDir, fmt.Sprintf("%s.receipt.json", runID))
+	} else if !filepath.IsAbs(receiptPath) {
+		receiptPath = filepath.Join(opt.Workspace, receiptPath)
 	}
 
-	// PlanOnly mode: format, write input, and return without spawning
-	if opt.PlanOnly {
-		launchWitness := fmt.Sprintf("PLAN_ONLY tag=%s run_id=%s", tag, runID)
-		return &LaunchResult{
-			PID:           0,
-			Tag:           tag,
-			RunID:         runID,
-			LaunchWitness: launchWitness,
-			PromptFile:    inF,
-			OutLog:        outF,
-			ErrLog:        errF,
-			PIDFile:       pidF,
-			SeedDir:       seedDir,
-			PlanOnly:      true,
-		}, nil
+	product := opt.Product
+	if product == "" {
+		product = "claude"
+	}
+	workKind := opt.WorkKind
+	if workKind == "" {
+		workKind = "engineering"
+	}
+	tier := opt.Tier
+	if tier == "" {
+		tier = "auto"
+	}
+	accountTag := opt.AccountTag
+	if accountTag == "" {
+		accountTag = opt.Account
+	}
+	if accountTag == "" {
+		accountTag = tag
 	}
 
-	// Apply defaults
+	guarded := true
+	if opt.RawSpawn {
+		guarded = false
+	}
+
 	contextBudgetTokens := opt.ContextBudgetTokens
 	if contextBudgetTokens <= 0 {
 		contextBudgetTokens = 2016000
@@ -177,6 +269,98 @@ func LaunchDetachedWorker(opt LaunchOptions) (*LaunchResult, error) {
 		exposeProfile = "headless"
 	}
 
+	// If preflight refused at cap: build failed receipt and return error
+	if preflightVerdict == "REFUSE_AT_CAP" {
+		capErr := fmt.Errorf("spawn gate refused: REFUSE_AT_CAP -- %d live workers at or above cap %d", liveCount, opt.PreflightMaxWorkers)
+		receipt := &GoalLaunchReceipt{
+			Schema:       GoalLaunchReceiptSchema,
+			Outcome:      "failed",
+			RunID:        runID,
+			Tag:          tag,
+			PID:          0,
+			Product:      product,
+			WorkKind:     workKind,
+			Tier:         tier,
+			Account:      opt.Account,
+			AccountTag:   accountTag,
+			Guarded:      guarded,
+			BudgetTokens: contextBudgetTokens,
+			MaxDuration:  maxDuration,
+			PromptChars:  len(prompt),
+			PromptFile:   inF,
+			OutLog:       outF,
+			ErrLog:       errF,
+			PIDFile:      pidF,
+			ShiftLeftPreflight: ShiftLeftPreflight{
+				Verdict:   preflightVerdict,
+				LiveCount: liveCount,
+				HostCap:   opt.PreflightMaxWorkers,
+			},
+			RecordedAt:  time.Now().UTC(),
+			ElapsedMS:   time.Since(startTime).Milliseconds(),
+			ReceiptPath: receiptPath,
+			Error:       capErr.Error(),
+		}
+		_ = writeReceiptAtomic(receiptPath, receipt)
+		_ = writeReceiptAtomic(filepath.Join(opt.Workspace, ".fak", "goal-launch-receipt.json"), receipt)
+		return nil, capErr
+	}
+
+	// Write prompt file (UTF-8, no BOM)
+	if err := os.WriteFile(inF, []byte(prompt), 0644); err != nil {
+		return nil, fmt.Errorf("write prompt file: %w", err)
+	}
+
+	// PlanOnly mode: format, write input, build receipt, and return without spawning
+	if opt.PlanOnly {
+		launchWitness := fmt.Sprintf("PLAN_ONLY tag=%s run_id=%s", tag, runID)
+		receipt := &GoalLaunchReceipt{
+			Schema:       GoalLaunchReceiptSchema,
+			Outcome:      "plan_only",
+			RunID:        runID,
+			Tag:          tag,
+			PID:          0,
+			Product:      product,
+			WorkKind:     workKind,
+			Tier:         tier,
+			Account:      opt.Account,
+			AccountTag:   accountTag,
+			Guarded:      guarded,
+			BudgetTokens: contextBudgetTokens,
+			MaxDuration:  maxDuration,
+			PromptChars:  len(prompt),
+			PromptFile:   inF,
+			OutLog:       outF,
+			ErrLog:       errF,
+			PIDFile:      pidF,
+			ShiftLeftPreflight: ShiftLeftPreflight{
+				Verdict:   preflightVerdict,
+				LiveCount: liveCount,
+				HostCap:   opt.PreflightMaxWorkers,
+			},
+			RecordedAt:  time.Now().UTC(),
+			ElapsedMS:   time.Since(startTime).Milliseconds(),
+			ReceiptPath: receiptPath,
+		}
+		if err := writeReceiptAtomic(receiptPath, receipt); err != nil {
+			return nil, fmt.Errorf("write receipt: %w", err)
+		}
+		_ = writeReceiptAtomic(filepath.Join(opt.Workspace, ".fak", "goal-launch-receipt.json"), receipt)
+		return &LaunchResult{
+			PID:           0,
+			Tag:           tag,
+			RunID:         runID,
+			LaunchWitness: launchWitness,
+			PromptFile:    inF,
+			OutLog:        outF,
+			ErrLog:        errF,
+			PIDFile:       pidF,
+			SeedDir:       seedDir,
+			PlanOnly:      true,
+			Receipt:       receipt,
+		}, nil
+	}
+
 	claudeExe := opt.ClaudeExe
 	if claudeExe == "" {
 		claudeExe = "claude"
@@ -187,12 +371,6 @@ func LaunchDetachedWorker(opt LaunchOptions) (*LaunchResult, error) {
 		claudeArgs = append(claudeArgs, "--model", opt.Model)
 	}
 	claudeArgs = append(claudeArgs, "--permission-mode", "bypassPermissions")
-
-	// Determine if guarded (default true unless RawSpawn is set)
-	guarded := true
-	if opt.RawSpawn {
-		guarded = false
-	}
 
 	var spawnCmd string
 	var spawnArgs []string
@@ -264,31 +442,93 @@ func LaunchDetachedWorker(opt LaunchOptions) (*LaunchResult, error) {
 	cmd.SysProcAttr = detachedSysProcAttr()
 
 	if err := cmd.Start(); err != nil {
+		failReceipt := &GoalLaunchReceipt{
+			Schema:       GoalLaunchReceiptSchema,
+			Outcome:      "failed",
+			RunID:        runID,
+			Tag:          tag,
+			PID:          0,
+			Product:      product,
+			WorkKind:     workKind,
+			Tier:         tier,
+			Account:      opt.Account,
+			AccountTag:   accountTag,
+			Guarded:      guarded,
+			BudgetTokens: contextBudgetTokens,
+			MaxDuration:  maxDuration,
+			PromptChars:  len(prompt),
+			PromptFile:   inF,
+			OutLog:       outF,
+			ErrLog:       errF,
+			PIDFile:      pidF,
+			ShiftLeftPreflight: ShiftLeftPreflight{
+				Verdict:   preflightVerdict,
+				LiveCount: liveCount,
+				HostCap:   opt.PreflightMaxWorkers,
+			},
+			RecordedAt:  time.Now().UTC(),
+			ElapsedMS:   time.Since(startTime).Milliseconds(),
+			ReceiptPath: receiptPath,
+			Error:       err.Error(),
+		}
+		_ = writeReceiptAtomic(receiptPath, failReceipt)
+		_ = writeReceiptAtomic(filepath.Join(opt.Workspace, ".fak", "goal-launch-receipt.json"), failReceipt)
 		return nil, fmt.Errorf("start detached worker: %w", err)
 	}
 
 	pid := cmd.Process.Pid
 
-	// Write PID breadcrumb file
+	// Write PID breadcrumb file atomically via rename
 	pidContent := fmt.Sprintf("%d\n", pid)
-	if err := os.WriteFile(pidF, []byte(pidContent), 0644); err != nil {
-		return nil, fmt.Errorf("write pid file: %w", err)
+	tmpPidF := pidF + ".tmp"
+	if err := os.WriteFile(tmpPidF, []byte(pidContent), 0644); err != nil {
+		return nil, fmt.Errorf("write pid tmp file: %w", err)
+	}
+	if err := os.Rename(tmpPidF, pidF); err != nil {
+		_ = os.Remove(tmpPidF)
+		return nil, fmt.Errorf("rename pid file: %w", err)
 	}
 
 	// Release handle to detach process independently
 	_ = cmd.Process.Release()
 
-	accountTag := opt.AccountTag
-	if accountTag == "" {
-		accountTag = opt.Account
-	}
-	if accountTag == "" {
-		accountTag = tag
-	}
-
 	// Emit machine-readable launch witness
 	launchWitness := fmt.Sprintf("LAUNCH_WITNESS pid=%d tag=%s run_id=%s", pid, accountTag, runID)
 	fmt.Println(launchWitness)
+
+	receipt := &GoalLaunchReceipt{
+		Schema:       GoalLaunchReceiptSchema,
+		Outcome:      "launched",
+		RunID:        runID,
+		Tag:          tag,
+		PID:          pid,
+		Product:      product,
+		WorkKind:     workKind,
+		Tier:         tier,
+		Account:      opt.Account,
+		AccountTag:   accountTag,
+		Guarded:      guarded,
+		BudgetTokens: contextBudgetTokens,
+		MaxDuration:  maxDuration,
+		PromptChars:  len(prompt),
+		PromptFile:   inF,
+		OutLog:       outF,
+		ErrLog:       errF,
+		PIDFile:      pidF,
+		ShiftLeftPreflight: ShiftLeftPreflight{
+			Verdict:   preflightVerdict,
+			LiveCount: liveCount,
+			HostCap:   opt.PreflightMaxWorkers,
+		},
+		RecordedAt:  time.Now().UTC(),
+		ElapsedMS:   time.Since(startTime).Milliseconds(),
+		ReceiptPath: receiptPath,
+	}
+
+	if err := writeReceiptAtomic(receiptPath, receipt); err != nil {
+		return nil, fmt.Errorf("write receipt: %w", err)
+	}
+	_ = writeReceiptAtomic(filepath.Join(opt.Workspace, ".fak", "goal-launch-receipt.json"), receipt)
 
 	return &LaunchResult{
 		PID:           pid,
@@ -303,5 +543,6 @@ func LaunchDetachedWorker(opt LaunchOptions) (*LaunchResult, error) {
 		Command:       spawnCmd,
 		Args:          spawnArgs,
 		PlanOnly:      false,
+		Receipt:       receipt,
 	}, nil
 }
