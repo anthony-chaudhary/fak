@@ -1,6 +1,7 @@
 package debtlane
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -306,5 +307,287 @@ jobs:
 	}
 	if !foundTimeout {
 		t.Errorf("missing expected workflow timeout finding: %+v", findingsWf)
+	}
+}
+
+func TestClassifySurfaceEdgeCases(t *testing.T) {
+	cases := []struct {
+		input    string
+		expected SurfaceClass
+	}{
+		{"tools", SurfaceTools},
+		{"examples", SurfaceExamples},
+		{"docs", SurfaceDocs},
+		{"internal", SurfaceInternal},
+		{"pkg", SurfacePkg},
+		{"cmd", SurfaceCmd},
+		{"platform", SurfacePlatform},
+		{"./tools", SurfaceTools},
+		{`.\\tools`, SurfaceTools},
+		{`.\tools`, SurfaceTools},
+		{"./examples", SurfaceExamples},
+		{`.\\examples`, SurfaceExamples},
+		{`.\examples`, SurfaceExamples},
+		{"./docs", SurfaceDocs},
+		{`.\\docs`, SurfaceDocs},
+		{`.\docs`, SurfaceDocs},
+		{"./internal", SurfaceInternal},
+		{`.\\internal`, SurfaceInternal},
+		{`.\internal`, SurfaceInternal},
+		{"./pkg", SurfacePkg},
+		{`.\\pkg`, SurfacePkg},
+		{`.\pkg`, SurfacePkg},
+		{"./cmd", SurfaceCmd},
+		{`.\\cmd`, SurfaceCmd},
+		{`.\cmd`, SurfaceCmd},
+		{"./platform", SurfacePlatform},
+		{`.\\platform`, SurfacePlatform},
+		{`.\platform`, SurfacePlatform},
+		{"./internal/gateway", SurfaceInternal},
+		{`.\pkg\sdk`, SurfacePkg},
+		{`.\\pkg\\sdk`, SurfacePkg},
+		{"./tools/doctor", SurfaceTools},
+		{"./docs/guide.md", SurfaceDocs},
+		{"./examples/demo", SurfaceExamples},
+	}
+
+	for _, tc := range cases {
+		got := classifySurface(tc.input)
+		if got != tc.expected {
+			t.Errorf("classifySurface(%q) = %q; want %q", tc.input, got, tc.expected)
+		}
+	}
+}
+
+func TestStubDebtCleanFixture(t *testing.T) {
+	tmp := t.TempDir()
+	cleanDir := filepath.Join(tmp, "internal", "cleanstub")
+	if err := os.MkdirAll(cleanDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	code := `// Package cleanstub provides clean functions with markers only in strings.
+package cleanstub
+
+// GetMarkers returns strings containing stub marker tokens inside string literals.
+func GetMarkers() []string {
+	return []string{
+		"TODO: handle edge case",
+		"FIXME: review algorithm",
+		"XXX: potential race condition",
+		"panic(\"not implemented\")",
+		"panic(\"unimplemented\")",
+		"panic(\"todo\")",
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(cleanDir, "cleanstub.go"), []byte(code), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	testCode := `package cleanstub
+
+import "testing"
+
+func TestGetMarkers(t *testing.T) {
+	markers := GetMarkers()
+	if len(markers) != 6 {
+		t.Fatalf("expected 6 markers, got %d", len(markers))
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(cleanDir, "cleanstub_test.go"), []byte(testCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lane := DebtLane{
+		Lane:        "cleanstub",
+		UnitOfWork:  "internal/cleanstub",
+		Criticality: CriticalityCore,
+		Evidence: Evidence{
+			HasCode:        true,
+			HasTests:       true,
+			TestFilesCount: 1,
+			Integrated:     true,
+			Dogfooded:      true,
+			Benchmarked:    true,
+		},
+	}
+
+	findings := InspectUnitDetectors(&lane, cleanDir)
+	for _, f := range findings {
+		if f.Dimension == string(DimStubDebt) {
+			t.Fatalf("clean fixture returning marker strings must produce 0 stub debt findings, got: %+v", f)
+		}
+	}
+}
+
+func TestStubDebtSeededFixture(t *testing.T) {
+	tmp := t.TempDir()
+	pkgDir := filepath.Join(tmp, "internal", "seededstub")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	seededCode := `package seededstub
+
+// TODO: implement worker pool concurrency limit
+type WorkerPool struct{}
+
+// Compute executes calculation.
+func Compute() {
+	panic("not implemented")
+}
+`
+	if err := os.WriteFile(filepath.Join(pkgDir, "seeded.go"), []byte(seededCode), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lane := DebtLane{
+		Lane:        "seededstub",
+		UnitOfWork:  "internal/seededstub",
+		Criticality: CriticalityCore,
+		Evidence: Evidence{
+			HasCode:        true,
+			HasTests:       true,
+			TestFilesCount: 1,
+			Integrated:     true,
+			Dogfooded:      true,
+			Benchmarked:    true,
+		},
+	}
+
+	relPath := filepath.Join("internal", "seededstub", "seeded.go")
+	var firstRun []FindingProvenance
+
+	for i := 0; i < 5; i++ {
+		findings := InspectUnitDetectors(&lane, pkgDir)
+		var stubFindings []FindingProvenance
+		for _, f := range findings {
+			if f.Dimension == string(DimStubDebt) {
+				stubFindings = append(stubFindings, f)
+			}
+		}
+
+		if len(stubFindings) != 2 {
+			t.Fatalf("iteration %d: expected exactly 2 stub debt findings, got %d: %+v", i, len(stubFindings), stubFindings)
+		}
+
+		// Finding 1: WorkerPool TODO directive
+		f1 := stubFindings[0]
+		if f1.Dimension != string(DimStubDebt) {
+			t.Errorf("iteration %d: f1 unexpected dimension %s", i, f1.Dimension)
+		}
+		if f1.Surface != string(SurfaceInternal) {
+			t.Errorf("iteration %d: f1 unexpected surface %s", i, f1.Surface)
+		}
+		if f1.Lane != "seededstub" {
+			t.Errorf("iteration %d: f1 unexpected lane %s", i, f1.Lane)
+		}
+		if f1.Path != relPath {
+			t.Errorf("iteration %d: f1 unexpected path %s", i, f1.Path)
+		}
+		if f1.Severity != "warning" {
+			t.Errorf("iteration %d: f1 unexpected severity %s", i, f1.Severity)
+		}
+		expectedF1Prefix := fmt.Sprintf("stub debt in WorkerPool (%s:3):", relPath)
+		if !strings.HasPrefix(f1.Message, expectedF1Prefix) {
+			t.Errorf("iteration %d: f1 message %q does not have prefix %q", i, f1.Message, expectedF1Prefix)
+		}
+
+		// Finding 2: Compute unimplemented function
+		f2 := stubFindings[1]
+		if f2.Dimension != string(DimStubDebt) {
+			t.Errorf("iteration %d: f2 unexpected dimension %s", i, f2.Dimension)
+		}
+		if f2.Surface != string(SurfaceInternal) {
+			t.Errorf("iteration %d: f2 unexpected surface %s", i, f2.Surface)
+		}
+		if f2.Lane != "seededstub" {
+			t.Errorf("iteration %d: f2 unexpected lane %s", i, f2.Lane)
+		}
+		if f2.Path != relPath {
+			t.Errorf("iteration %d: f2 unexpected path %s", i, f2.Path)
+		}
+		if f2.Severity != "warning" {
+			t.Errorf("iteration %d: f2 unexpected severity %s", i, f2.Severity)
+		}
+		expectedF2Prefix := fmt.Sprintf("stub debt in Compute (%s:8):", relPath)
+		if !strings.HasPrefix(f2.Message, expectedF2Prefix) {
+			t.Errorf("iteration %d: f2 message %q does not have prefix %q", i, f2.Message, expectedF2Prefix)
+		}
+
+		if i == 0 {
+			firstRun = stubFindings
+		} else {
+			for idx := range stubFindings {
+				if stubFindings[idx].Message != firstRun[idx].Message {
+					t.Errorf("iteration %d: finding %d unstable: got %q, want %q",
+						i, idx, stubFindings[idx].Message, firstRun[idx].Message)
+				}
+			}
+		}
+	}
+}
+
+func TestStubDebtGeneratedFileExcluded(t *testing.T) {
+	tmp := t.TempDir()
+	genDir := filepath.Join(tmp, "internal", "genpkg")
+	if err := os.MkdirAll(genDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	code := `// Code generated by protoc-gen-go. DO NOT EDIT.
+package genpkg
+
+// TODO: this generated todo must be ignored
+func GeneratedStub() {
+	panic("not implemented")
+}
+`
+	if err := os.WriteFile(filepath.Join(genDir, "gen.go"), []byte(code), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lane := DebtLane{
+		Lane:        "genpkg",
+		UnitOfWork:  "internal/genpkg",
+		Criticality: CriticalityCore,
+		Evidence: Evidence{
+			HasCode:        true,
+			HasTests:       true,
+			TestFilesCount: 1,
+			Integrated:     true,
+			Dogfooded:      true,
+			Benchmarked:    true,
+		},
+	}
+
+	findings := InspectUnitDetectors(&lane, genDir)
+	for _, f := range findings {
+		if f.Dimension == string(DimStubDebt) {
+			t.Fatalf("generated file carrying Code generated DO NOT EDIT must produce 0 stub debt findings, got: %+v", f)
+		}
+	}
+}
+
+func TestCountStubMarkersLargeLines(t *testing.T) {
+	tmp := t.TempDir()
+	largePath := filepath.Join(tmp, "large.go")
+
+	// Create lines > 64KB (e.g. 70KB and 80KB)
+	largePrefix := strings.Repeat("a", 70*1024)
+	content := "// " + largePrefix + " TODO: handle this in large file\n"
+	content += "package main\n"
+	content += "// " + strings.Repeat("b", 80*1024) + "\n"
+	content += `func run() { panic("not implemented") }` + "\n"
+
+	if err := os.WriteFile(largePath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	count := countStubMarkers(largePath)
+	if count != 2 {
+		t.Errorf("expected 2 stub markers in file with >64KB lines, got %d", count)
 	}
 }
