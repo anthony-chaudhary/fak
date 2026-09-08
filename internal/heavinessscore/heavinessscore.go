@@ -67,12 +67,13 @@ const CleanFloor = 0
 
 // The operator-surface source files this card reads. The strings these render ARE the data.
 const (
-	mainGoRel  = "cmd/fak/main.go"       // the top-level dispatch table (appeal/fallback)
-	usageGoRel = "cmd/fak/usage.go"      // the authored public help wall
-	cliDocRel  = "docs/cli-reference.md" // the public CLI catalog
-	guardGoRel = "cmd/fak/guard.go"      // the front-door verb's flag set
-	dosTomlRel = "dos.toml"              // the structured refusal vocabulary
-	docMapRel  = "llms.txt"              // the doc map an operator orients from
+	mainGoRel    = "cmd/fak/main.go"       // the top-level dispatch table (appeal/fallback)
+	usageGoRel   = "cmd/fak/usage.go"      // the authored public help wall
+	cliDocRel    = "docs/cli-reference.md" // the public CLI catalog
+	guardGoRel   = "cmd/fak/guard.go"      // the front-door verb's registered flag set
+	guardHelpRel = "cmd/fak/guard_help.go" // the curated common-flag front door
+	dosTomlRel   = "dos.toml"              // the structured refusal vocabulary
+	docMapRel    = "llms.txt"              // the doc map an operator orients from
 )
 
 // Soft lines + ceilings for the magnitude KPIs. The soft line is the comfortable operator-surface
@@ -117,7 +118,8 @@ type Surface struct {
 	Verbs                     []string // distinct public top-level verbs (sorted)
 	MetaVerbs                 []string // the subset that are meta-scorecards / RSI verbs (sorted)
 	FrontdoorVerbs            int      // runtime product spellings retained in fak
-	FrontDoorFlags            int      // flags defined on the front-door verb (`fak guard`)
+	FrontDoorFlags            int      // flags shown in the curated `fak guard -h` overview
+	RegisteredGuardFlags      int      // every registered flag, available in the grouped `-h -all` reference
 	RefusalReasons            int      // [reasons.*] blocks declared in dos.toml
 	AppealWired               bool     // the dispatch table routes the in-product appeal verb (`complain`)
 	DocMap                    string   // llms.txt, lowercased (the doc-map coverage oracle)
@@ -141,13 +143,41 @@ var (
 	// fs.StringVar/BoolVar/IntVar/... (M1 of the self-audit: the bare-`(` form silently missed
 	// every *Var flag, a latent undercount + a cheap game). It deliberately does NOT match the
 	// FlagSet METHODS that are not flags (Parse/Args/Usage/Visit/PrintDefaults/NArg/...).
-	reGuardFlag    = regexp.MustCompile(`fs\.(?:String|Bool|Int|Int64|Uint|Uint64|Float64|Duration|TextVar|Func|BoolFunc)(?:Var)?\(|fs\.Var\(`)
-	reReasonsBlock = regexp.MustCompile(`(?m)^\[reasons\.[A-Z0-9_]+\]`)
+	reGuardFlag       = regexp.MustCompile(`fs\.(?:String|Bool|Int|Int64|Uint|Uint64|Float64|Duration|TextVar|Func|BoolFunc)(?:Var)?\(|fs\.Var\(`)
+	reGuardCommonFlag = regexp.MustCompile(`(?m)^\s*\{"([a-z][a-z0-9-]*)",\s*"`)
+	reReasonsBlock    = regexp.MustCompile(`(?m)^\[reasons\.[A-Z0-9_]+\]`)
 	// reMarkdownLink matches a markdown link target `](...)` -- the shape of a real doc-map entry.
 	reMarkdownLink = regexp.MustCompile(`\]\([^)]*\)`)
 	// rePublicVerbLine matches the authored public CLI surface in usage.go and docs/cli-reference.md.
 	rePublicVerbLine = regexp.MustCompile(`(?m)^ {0,2}fak\s+([a-z][a-z0-9-]*)\b`)
 )
+
+const guardCommonFlagsHeader = "var guardCommonFlags = []guardCommonFlag{"
+
+// ParseGuardCommonFlags returns the distinct flags shown by the curated default
+// `fak guard -h` overview. The full registered set remains available one explicit
+// `-all` away; that tiering is the profile which keeps advanced compatibility and
+// diagnostic knobs from becoming front-door operator burden.
+func ParseGuardCommonFlags(guardHelp string) []string {
+	i := strings.Index(guardHelp, guardCommonFlagsHeader)
+	if i < 0 {
+		return nil
+	}
+	body := guardHelp[i+len(guardCommonFlagsHeader):]
+	if end := strings.Index(body, "\n}"); end >= 0 {
+		body = body[:end]
+	}
+	seen := map[string]bool{}
+	for _, m := range reGuardCommonFlag.FindAllStringSubmatch(body, -1) {
+		seen[m[1]] = true
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // dispatchSwitchHeader anchors the top-level verb switch in cmd/fak/main.go. Bounding the verb
 // scan to this block is what keeps `case "x":` lines in main.go's ~10 OTHER switches (session-
@@ -264,6 +294,7 @@ func ParseSurface(root string) Surface {
 	usageGo := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(usageGoRel)))
 	cliDoc := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(cliDocRel)))
 	guardGo := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(guardGoRel)))
+	guardHelp := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(guardHelpRel)))
 	dosToml := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(dosTomlRel)))
 	docMap := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(docMapRel)))
 
@@ -278,12 +309,21 @@ func ParseSurface(root string) Surface {
 			meta = append(meta, v)
 		}
 	}
+	registeredGuardFlags := len(reGuardFlag.FindAllString(guardGo, -1))
+	frontDoorFlags := len(ParseGuardCommonFlags(guardHelp))
+	// Tiny fixtures and older trees may not carry the curated help source. Falling
+	// back to the full set is conservative: absent a witnessed profile, every
+	// registered flag remains front-door burden rather than disappearing.
+	if frontDoorFlags == 0 {
+		frontDoorFlags = registeredGuardFlags
+	}
 	return Surface{
-		Verbs:          verbs,
-		MetaVerbs:      meta,
-		FrontdoorVerbs: countFrontdoor(verbs),
-		FrontDoorFlags: len(reGuardFlag.FindAllString(guardGo, -1)),
-		RefusalReasons: len(reReasonsBlock.FindAllString(dosToml, -1)),
+		Verbs:                verbs,
+		MetaVerbs:            meta,
+		FrontdoorVerbs:       countFrontdoor(verbs),
+		FrontDoorFlags:       frontDoorFlags,
+		RegisteredGuardFlags: registeredGuardFlags,
+		RefusalReasons:       len(reReasonsBlock.FindAllString(dosToml, -1)),
 		// scope the appeal check to the same dispatch block as the verbs, so a `case "complain":`
 		// buried in an inner switch can't satisfy the recovery gate (self-audit, M2-adjacent).
 		AppealWired: strings.Contains(dispatchBlock(mainGo), `case "complain":`),
@@ -420,19 +460,22 @@ func kpiMetaVerbShare(s Surface) scorecard.KPI {
 	return k
 }
 
-// kpiFrontDoorFlagBurden (SOFT, config; HARD past the ceiling): the front-door verb (`fak guard`,
-// the one command most operators run) carries the whole config burden. A large flag set is a
-// steerability tax on the command least able to afford one.
+// kpiFrontDoorFlagBurden (SOFT, config; HARD past the ceiling): the default `fak guard -h`
+// overview is the front door an operator must scan. Advanced flags remain measured and
+// discoverable in the grouped `-h -all` reference, but they do not become front-door burden
+// merely because compatibility keeps them registered.
 func kpiFrontDoorFlagBurden(s Surface) scorecard.KPI {
 	n := float64(s.FrontDoorFlags)
 	k := scorecard.KPI{
 		Key: "front_door_flag_burden", Group: "config", Score: magnitudeScore(n, flagSoftLine, flagHardCeiling),
-		Detail: fmt.Sprintf("%d flags on the front-door verb `fak guard` (soft %d, hard ceiling %d)", s.FrontDoorFlags, flagSoftLine, flagHardCeiling),
+		Detail: fmt.Sprintf("%d common flags on the `fak guard -h` front door; %d registered in grouped `-h -all` (soft %d, hard ceiling %d)", s.FrontDoorFlags, s.RegisteredGuardFlags, flagSoftLine, flagHardCeiling),
 	}
 	if s.FrontDoorFlags > flagHardCeiling {
-		k.Defects = []string{fmt.Sprintf("%d flags on `fak guard` exceed the %d hard ceiling -- the front door needs sensible defaults / a profile, not a flag per knob", s.FrontDoorFlags, flagHardCeiling)}
+		k.Defects = []string{fmt.Sprintf("%d common flags on `fak guard -h` exceed the %d hard ceiling -- the front door needs sensible defaults / a profile, not a flag per knob", s.FrontDoorFlags, flagHardCeiling)}
 	} else if s.FrontDoorFlags > flagSoftLine {
-		k.Soft = []string{fmt.Sprintf("%d flags on the one command most operators run -- fold the rarely-touched knobs behind a profile/default", s.FrontDoorFlags)}
+		k.Soft = []string{fmt.Sprintf("%d common flags on the one command most operators run -- fold the rarely-touched knobs behind a profile/default", s.FrontDoorFlags)}
+	} else if s.RegisteredGuardFlags > flagSoftLine {
+		k.Soft = []string{fmt.Sprintf("%d advanced guard flags remain in the grouped `-h -all` reference behind a %d-flag curated front door -- keep the profile complete and the default overview compact", s.RegisteredGuardFlags, s.FrontDoorFlags)}
 	}
 	return k
 }
@@ -541,13 +584,14 @@ func Build(root string) scorecard.Payload {
 			// frontdoor_verbs + dev_verbs == verbs -- so the sum is the old flat count (the
 			// continuity witness). The counts are WITNESSED: the per-verb tier is read from
 			// internal/devindex, coverage-gated against the dispatch switch.
-			"frontdoor_verbs":       s.FrontdoorVerbs,
-			"dev_verbs":             s.DevVerbs(),
-			"verb_split_provenance": "WITNESSED",
-			"meta_verbs":            len(s.MetaVerbs),
-			"front_door_flags":      s.FrontDoorFlags,
-			"refusal_reasons":       s.RefusalReasons,
-			"config_keys":           s.ConfigKeys, "config_postures": s.ConfigPostures,
+			"frontdoor_verbs":        s.FrontdoorVerbs,
+			"dev_verbs":              s.DevVerbs(),
+			"verb_split_provenance":  "WITNESSED",
+			"meta_verbs":             len(s.MetaVerbs),
+			"front_door_flags":       s.FrontDoorFlags,
+			"registered_guard_flags": s.RegisteredGuardFlags,
+			"refusal_reasons":        s.RefusalReasons,
+			"config_keys":            s.ConfigKeys, "config_postures": s.ConfigPostures,
 			"config_max_keys": s.ConfigMaxKeys, "config_max_postures": s.ConfigMaxPostures,
 			"config_default_coverage":     s.ConfigDefaultCoverage,
 			"config_description_coverage": s.ConfigDescriptionCoverage,
