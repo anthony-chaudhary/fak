@@ -52,12 +52,9 @@ jobs:
   add-to-board:
     name: add issue -> fak fleet board
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'issues' ||
       github.event.action != 'labeled' ||
-      github.event.label.name == 'gen/now' ||
-      github.event.label.name == 'gen/next' ||
-      github.event.label.name == 'gen/second-next' ||
-      github.event.label.name == 'gen/future'
+      startsWith(github.event.label.name, 'gen/')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
