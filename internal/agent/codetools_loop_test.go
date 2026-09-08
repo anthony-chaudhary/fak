@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/codetools"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
@@ -33,6 +34,12 @@ import (
 //     a typed deny receipt instead of file bytes.
 
 var lastRecordingMessages []Message
+
+var codeToolTransformRungs = map[string]string{
+	codetools.ToolRead: "monitor/read_to_fak_read",
+	codetools.ToolGrep: "monitor/grep_to_fak_grep",
+	codetools.ToolGlob: "monitor/glob_to_fak_glob",
+}
 
 type recordingCodePlanner struct {
 	turns    []*Completion
@@ -155,13 +162,24 @@ func TestOwnedLoopDispatchesCodeToolsThroughKernelEngines(t *testing.T) {
 		t.Fatalf("loop recorded %d coding-tool rows, want 4: %+v", len(rows), rows)
 	}
 
-	// 1. Every call was decided by the codetools rung — the loop did not execute a single
-	//    one outside the kernel.
+	// 1. The canonical read/search transforms run before the remaining calls reach the
+	//    codetools rung. Both decisions are kernel-owned; no call bypasses mediation.
+	transformed := 0
 	for _, r := range rows {
+		if r.Verdict == "TRANSFORM" {
+			if want := codeToolTransformRungs[r.Tool]; want == "" || r.By != want {
+				t.Fatalf("unexpected transform row: %+v", r)
+			}
+			transformed++
+			continue
+		}
 		if r.By != codetools.RungName {
 			t.Fatalf("%s row decided By=%q, want %q (call did not cross the codetools rung)",
 				r.Tool, r.By, codetools.RungName)
 		}
+	}
+	if transformed != 3 {
+		t.Fatalf("canonical read/search transforms = %d, want 3", transformed)
 	}
 
 	// 2. The three admitted calls dispatched to registered engines, counted by the KERNEL.
@@ -223,24 +241,24 @@ func TestOwnedLoopRefusesOutOfTreeReadWithoutReadingIt(t *testing.T) {
 	}
 }
 
-// TestOwnedLoopDeniesUnarmedCodeTools pins that the surface is OFF by default: with no
-// ArmCodeTools call, a Read proposed by the model is refused by the loop's default-deny
-// floor rather than quietly reaching a filesystem engine.
+// TestOwnedLoopDeniesUnarmedCodeTools pins that the surface stays closed under an explicit
+// fail-closed posture: with no ArmCodeTools call, an untransformed Write is refused by the
+// loop's default-deny floor rather than quietly reaching a filesystem engine.
 func TestOwnedLoopDeniesUnarmedCodeTools(t *testing.T) {
 	DisarmCodeTools()
 	var log []traceEvent
 	m, err := RunArm(context.Background(), &scriptedPlanner{turns: []*Completion{
-		toolCallTurn(codetools.ToolRead, `{"file_path":"main.go"}`),
+		toolCallTurn(codetools.ToolWrite, `{"file_path":"blocked.txt","content":"blocked"}`),
 		{Message: Message{Content: "done"}},
-	}}, "read a file", true, 4, &log)
+	}}, "write a file", true, 4, &log, WithPolicySnapshot(adjudicator.Policy{Posture: adjudicator.PostureFailClosed}))
 	if err != nil {
 		t.Fatalf("RunArm: %v", err)
 	}
 	if m.Denies != 1 {
-		t.Fatalf("unarmed Read denies = %d, want 1", m.Denies)
+		t.Fatalf("unarmed Write denies = %d, want 1: %+v", m.Denies, log)
 	}
 	if m.EngineCalls != 0 {
-		t.Fatalf("unarmed Read reached %d engines, want 0", m.EngineCalls)
+		t.Fatalf("unarmed Write reached %d engines, want 0", m.EngineCalls)
 	}
 }
 
@@ -537,7 +555,11 @@ func TestIntegratedCodeToolWitnessArtifact(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for _, c := range got.Calls {
-		if c.Verdict != "ALLOW" || (c.By != codetools.RungName && c.By != "vdso") {
+		if want := codeToolTransformRungs[c.Tool]; want != "" {
+			if c.Verdict != "TRANSFORM" || c.By != want {
+				t.Fatalf("%s did not use the canonical transform: %+v", c.Tool, c)
+			}
+		} else if c.Verdict != "ALLOW" || (c.By != codetools.RungName && c.By != "vdso") {
 			t.Fatalf("bypass=%+v", c)
 		}
 		seen[c.Tool] = true
