@@ -21,11 +21,12 @@ import (
 )
 
 var (
-	runStrixValidationFn = amdgpu.RunStrixValidation
-	gitRevParseFn        = defaultGitRevParse
-	gitStatusFn          = defaultGitStatus
-	osLstatFn            = os.Lstat
-	osReadFileFn         = os.ReadFile
+	runStrixValidationFn         = amdgpu.RunStrixValidation
+	buildStrixCandidateArchiveFn = amdgpu.BuildStrixCandidateArchive
+	gitRevParseFn                = defaultGitRevParse
+	gitStatusFn                  = defaultGitStatus
+	osLstatFn                    = os.Lstat
+	osReadFileFn                 = os.ReadFile
 )
 
 type stringSliceFlag []string
@@ -356,9 +357,24 @@ func LoadOrBuildCandidateArchive(gitTip, archivePath, archiveDigest string, mine
 		fileBaseDir = candidateDir
 	}
 
-	candArchive, err := BuildStrixCandidateArchiveFromPaths(cleanTip, fileBaseDir, minePaths)
-	if err != nil {
-		return nil, err
+	var candArchive *StrixCandidateArchive
+	if buildStrixCandidateArchiveFn != nil {
+		built, err := buildStrixCandidateArchiveFn(context.Background(), fileBaseDir, cleanTip, minePaths)
+		if err == nil && len(built.Bytes) > 0 {
+			candArchive = &StrixCandidateArchive{
+				BaseCommit:            cleanTip,
+				ArchiveBytes:          built.Bytes,
+				ArchiveSHA256:         strings.TrimPrefix(built.SourceArchiveSHA256, "sha256:"),
+				OverlayManifestSHA256: strings.TrimPrefix(built.SourceArchiveSHA256, "sha256:"),
+			}
+		}
+	}
+	if candArchive == nil {
+		var err error
+		candArchive, err = BuildStrixCandidateArchiveFromPaths(cleanTip, fileBaseDir, minePaths)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if overlayDigest != "" {
@@ -430,9 +446,6 @@ func isCurrentValidPass(receipt *amdgpu.StrixValidationReceipt, expectedTip, exp
 	if receipt.Schema != amdgpu.StrixValidationSchemaV2 {
 		return false, fmt.Sprintf("historical or non-credit schema %q: current PASS requires v2 (%s)", receipt.Schema, amdgpu.StrixValidationSchemaV2)
 	}
-	if err := receipt.Validate(); err != nil {
-		return false, fmt.Sprintf("receipt invariant validation failed: %v", err)
-	}
 	// Historical or unbound receipt rejection: must carry non-empty source binding tokens
 	cleanTip := strings.TrimSpace(receipt.Provenance.GitTip)
 	if cleanTip == "" {
@@ -456,9 +469,18 @@ func isCurrentValidPass(receipt *amdgpu.StrixValidationReceipt, expectedTip, exp
 	if cleanRefDigest != cleanExpected {
 		return false, fmt.Sprintf("receipt GitRef %s does not match expected archive digest %s", receipt.Provenance.GitRef, expectedRef)
 	}
+	if receipt.Provenance.SourceArchiveSHA256 != "" {
+		cleanSourceArchive := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(receipt.Provenance.SourceArchiveSHA256)), "sha256:")
+		if cleanSourceArchive != cleanExpected {
+			return false, fmt.Sprintf("receipt SourceArchiveSHA256 %s does not match expected archive digest %s", receipt.Provenance.SourceArchiveSHA256, expectedRef)
+		}
+	}
 	// Execution completeness: if subkernels were selected/executed, none can be SKIPPED or FAIL
 	if len(receipt.Subkernels) == 0 && len(receipt.Ablations) == 0 {
 		return false, "missing execution evidence: receipt contains zero subkernels and zero ablations"
+	}
+	if err := receipt.Validate(); err != nil {
+		return false, fmt.Sprintf("receipt invariant validation failed: %v", err)
 	}
 	if receipt.SelectedCount > 0 && receipt.ExecutedCount == 0 {
 		return false, "subkernels were selected but zero were executed"
@@ -611,7 +633,7 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*timeoutSec)*time.Second)
 	defer cancel()
 
-	archiveDigestStr := "sha256:" + candArchive.ArchiveSHA256
+	archiveDigestStr := "sha256:" + strings.TrimPrefix(candArchive.ArchiveSHA256, "sha256:")
 
 	opts := amdgpu.StrixValidationOpts{
 		Host:                 *host,
@@ -624,6 +646,9 @@ func RunAMDStrixValidate(stdout, stderr io.Writer, argv []string) int {
 		Command:              "fak-dev amd-strix-validate " + strings.Join(argv, " "),
 		Timeout:              time.Duration(*timeoutSec) * time.Second,
 		RequireSourceBinding: true,
+		CandidateArchive:     candArchive.ArchiveBytes,
+		SourceArchiveSHA256:  archiveDigestStr,
+		AdmissionTimeout:     time.Duration(*admissionTimeoutSec) * time.Second,
 	}
 
 	ctx = amdgpu.WithSourceBinding(ctx, opts.GitTip, opts.GitRef)
