@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,6 +18,83 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/amdgpu"
 )
+
+func createTestValidReceipt(target amdgpu.StrixTarget, gitRef, gitTip, command string) *amdgpu.StrixValidationReceipt {
+	if target.GPUName == "" {
+		target.GPUName = "AMD Radeon 8060S Graphics"
+	}
+	if target.TargetISA == "" {
+		target.TargetISA = "gfx1151"
+	}
+	target.Reachable = true
+	if strings.TrimSpace(gitTip) == "" {
+		gitTip = "0123456789abcdef0123456789abcdef01234567"
+	}
+	testHash := "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	effectiveRef := gitRef
+	if strings.TrimSpace(effectiveRef) == "" || !strings.HasPrefix(effectiveRef, "sha256:") || len(effectiveRef) != 71 {
+		effectiveRef = testHash
+	}
+	if strings.TrimSpace(command) == "" {
+		command = "fak-dev amd-strix-validate"
+	}
+
+	r := amdgpu.NewStrixValidationReceipt(target, gitRef, gitTip, command)
+	r.Verdict = "PASS"
+	r.Verified = true
+	r.Provenance.SourceArchiveSHA256 = effectiveRef
+	r.Provenance.BinarySHA256 = testHash
+	r.Provenance.ShaderBundleSHA256 = testHash
+	r.Provenance.BuildCommandSHA256 = testHash
+	r.Provenance.EngineIdentity = "fak-native/vulkan"
+	r.Provenance.CleanupObserved = true
+	r.SelectedCount = 1
+	r.ExecutedCount = 1
+	r.SelectedSubkernels = 1
+	r.ExecutedSubkernels = 1
+
+	exit := 0
+	deviceIdentity := target.GPUName + "|" + target.TargetISA
+	evidence := amdgpu.StrixExecutionEvidence{
+		SourceArchiveSHA256: effectiveRef,
+		BinarySHA256:        testHash,
+		ShaderBundleSHA256:  testHash,
+		CommandSHA256:       testHash,
+		DeviceIdentity:      deviceIdentity,
+		EngineIdentity:      "fak-native/vulkan",
+		ArtifactRehashed:    true,
+		DeviceTimeoutMS:     60000,
+		LeasePathSHA256:     testHash,
+		AdmissionWaitMS:     30000,
+		Acquired:            true,
+		Released:            true,
+		AcquireOrdinal:      1,
+		ReleaseOrdinal:      2,
+		ExitCode:            &exit,
+		RawOutputSHA256:     testHash,
+		RawOutputBytes:      1,
+	}
+
+	r.Subkernels = []amdgpu.StrixSubkernelResult{
+		{
+			Name:         "argmax",
+			Status:       "PASS",
+			DurationUS:   350,
+			Iterations:   1,
+			Parity:       amdgpu.StrixParityVerdict{Passed: true, ArgmaxExact: true},
+			ParityEvents: []amdgpu.StrixParityEvent{amdgpu.NewExactArgmaxParityEvent("fak-native/vulkan", 1, true, true)},
+			Evidence:     evidence,
+		},
+	}
+	var b strings.Builder
+	for _, s := range r.Subkernels {
+		fmt.Fprintf(&b, "subkernel:%s:%s\n", s.Name, s.Evidence.CommandSHA256)
+	}
+	h := sha256.Sum256([]byte(b.String()))
+	r.Provenance.ExecutionManifestSHA256 = "sha256:" + hex.EncodeToString(h[:])
+	r.Digest, _ = r.ComputeDigest()
+	return r
+}
 
 func TestRunAMDStrixValidate_UnknownSelector(t *testing.T) {
 	defer amdgpu.ClearPresenceCache()
@@ -448,24 +526,7 @@ func TestRunAMDStrixValidate_BindsCandidateArchiveToRunner(t *testing.T) {
 			ComputeUnits: 40,
 			DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
 		}
-		receipt := amdgpu.NewStrixValidationReceipt(target, opts.GitRef, opts.GitTip, opts.Command)
-		receipt.Verdict = "PASS"
-		receipt.Verified = true
-		receipt.ExecutedCount = 1
-		receipt.SelectedCount = 1
-		receipt.Subkernels = []amdgpu.StrixSubkernelResult{
-			{
-				Name:       "argmax",
-				Status:     "PASS",
-				DurationUS: 400,
-				Parity: amdgpu.StrixParityVerdict{
-					Passed:                true,
-					LogitCosineSimilarity: 0.999999,
-				},
-			},
-		}
-		digest, _ := receipt.ComputeDigest()
-		receipt.Digest = digest
+		receipt := createTestValidReceipt(target, opts.GitRef, opts.GitTip, opts.Command)
 		return receipt, nil
 	}
 
@@ -499,6 +560,15 @@ func TestRunAMDStrixValidate_BindsCandidateArchiveToRunner(t *testing.T) {
 	}
 	if !capturedOpts.RequireSourceBinding {
 		t.Errorf("capturedOpts.RequireSourceBinding = false, want true")
+	}
+	if string(capturedOpts.CandidateArchive) != string(candArchive.ArchiveBytes) {
+		t.Errorf("capturedOpts.CandidateArchive does not match archive bytes")
+	}
+	if capturedOpts.SourceArchiveSHA256 != expectedArchiveDigest {
+		t.Errorf("capturedOpts.SourceArchiveSHA256 = %q, want %q", capturedOpts.SourceArchiveSHA256, expectedArchiveDigest)
+	}
+	if capturedOpts.AdmissionTimeout != 15*time.Second {
+		t.Errorf("capturedOpts.AdmissionTimeout = %v, want 15s", capturedOpts.AdmissionTimeout)
 	}
 	if capturedContextTip != baseCommit {
 		t.Errorf("context GitTip = %q, want %q", capturedContextTip, baseCommit)
@@ -974,23 +1044,7 @@ func TestRunAMDStrixValidate_CommittedOnlyMode(t *testing.T) {
 				ComputeUnits: 40,
 				DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
 			}
-			receipt := amdgpu.NewStrixValidationReceipt(target, opts.GitRef, opts.GitTip, opts.Command)
-			receipt.Verdict = "PASS"
-			receipt.Verified = true
-			receipt.ExecutedCount = 1
-			receipt.Subkernels = []amdgpu.StrixSubkernelResult{
-				{
-					Name:       "argmax",
-					Status:     "PASS",
-					DurationUS: 350,
-					Parity: amdgpu.StrixParityVerdict{
-						Passed:                true,
-						LogitCosineSimilarity: 0.999999,
-					},
-				},
-			}
-			digest, _ := receipt.ComputeDigest()
-			receipt.Digest = digest
+			receipt := createTestValidReceipt(target, opts.GitRef, opts.GitTip, opts.Command)
 			return receipt, nil
 		}
 
@@ -1102,23 +1156,7 @@ func TestRunAMDStrixValidate_HumanOutput_RendersHistoricalNonCredit(t *testing.T
 				ComputeUnits: 40,
 				DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
 			}
-			receipt := amdgpu.NewStrixValidationReceipt(target, opts.GitRef, opts.GitTip, opts.Command)
-			receipt.Verdict = "PASS"
-			receipt.Verified = true
-			receipt.ExecutedCount = 1
-			receipt.Subkernels = []amdgpu.StrixSubkernelResult{
-				{
-					Name:       "argmax",
-					Status:     "PASS",
-					DurationUS: 400,
-					Parity: amdgpu.StrixParityVerdict{
-						Passed:                true,
-						LogitCosineSimilarity: 0.999999,
-					},
-				},
-			}
-			digest, _ := receipt.ComputeDigest()
-			receipt.Digest = digest
+			receipt := createTestValidReceipt(target, opts.GitRef, opts.GitTip, opts.Command)
 			return receipt, nil
 		}
 
@@ -1184,23 +1222,7 @@ func TestRunAMDStrixValidate_CanonicalRootAndBaseResolution(t *testing.T) {
 			ComputeUnits: 40,
 			DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
 		}
-		receipt := amdgpu.NewStrixValidationReceipt(target, opts.GitRef, opts.GitTip, opts.Command)
-		receipt.Verdict = "PASS"
-		receipt.Verified = true
-		receipt.ExecutedCount = 1
-		receipt.Subkernels = []amdgpu.StrixSubkernelResult{
-			{
-				Name:       "argmax",
-				Status:     "PASS",
-				DurationUS: 400,
-				Parity: amdgpu.StrixParityVerdict{
-					Passed:                true,
-					LogitCosineSimilarity: 0.999999,
-				},
-			},
-		}
-		digest, _ := receipt.ComputeDigest()
-		receipt.Digest = digest
+		receipt := createTestValidReceipt(target, opts.GitRef, opts.GitTip, opts.Command)
 		return receipt, nil
 	}
 
@@ -1584,20 +1606,7 @@ func TestRunAMDStrixValidate_CurrentV2ValidationInvariants(t *testing.T) {
 
 	t.Run("valid v2 receipt with passing subkernel succeeds in both JSON and human modes", func(t *testing.T) {
 		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
-			receipt := amdgpu.NewStrixValidationReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
-			receipt.Verdict = "PASS"
-			receipt.Verified = true
-			receipt.ExecutedCount = 1
-			receipt.Subkernels = []amdgpu.StrixSubkernelResult{
-				{
-					Name:       "argmax",
-					Status:     "PASS",
-					DurationUS: 350,
-					Parity:     amdgpu.StrixParityVerdict{Passed: true, ArgmaxExact: true},
-				},
-			}
-			digest, _ := receipt.ComputeDigest()
-			receipt.Digest = digest
+			receipt := createTestValidReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
 			return receipt, nil
 		}
 
@@ -1856,20 +1865,7 @@ func TestRunAMDStrixValidate_PrebuiltTarArchiveBinding(t *testing.T) {
 				capturedAdmissionTimeout = adm
 			}
 
-			receipt := amdgpu.NewStrixValidationReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
-			receipt.Verdict = "PASS"
-			receipt.Verified = true
-			receipt.ExecutedCount = 1
-			receipt.Subkernels = []amdgpu.StrixSubkernelResult{
-				{
-					Name:       "argmax",
-					Status:     "PASS",
-					DurationUS: 320,
-					Parity:     amdgpu.StrixParityVerdict{Passed: true, ArgmaxExact: true},
-				},
-			}
-			digest, _ := receipt.ComputeDigest()
-			receipt.Digest = digest
+			receipt := createTestValidReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
 			return receipt, nil
 		}
 
@@ -1902,6 +1898,15 @@ func TestRunAMDStrixValidate_PrebuiltTarArchiveBinding(t *testing.T) {
 		if !capturedOpts.RequireSourceBinding {
 			t.Errorf("capturedOpts.RequireSourceBinding = false, want true")
 		}
+		if string(capturedOpts.CandidateArchive) != string(candArchive.ArchiveBytes) {
+			t.Errorf("capturedOpts.CandidateArchive does not match archive bytes")
+		}
+		if capturedOpts.SourceArchiveSHA256 != expectedArchiveDigest {
+			t.Errorf("capturedOpts.SourceArchiveSHA256 = %q, want %q", capturedOpts.SourceArchiveSHA256, expectedArchiveDigest)
+		}
+		if capturedOpts.AdmissionTimeout != 8*time.Second {
+			t.Errorf("capturedOpts.AdmissionTimeout = %v, want 8s", capturedOpts.AdmissionTimeout)
+		}
 		if capturedAdmissionTimeout != 8*time.Second {
 			t.Errorf("capturedAdmissionTimeout = %v, want 8s", capturedAdmissionTimeout)
 		}
@@ -1920,20 +1925,7 @@ func TestRunAMDStrixValidate_PrebuiltTarArchiveBinding(t *testing.T) {
 		runnerCalled := false
 		runStrixValidationFn = func(ctx context.Context, opts amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
 			runnerCalled = true
-			receipt := amdgpu.NewStrixValidationReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
-			receipt.Verdict = "PASS"
-			receipt.Verified = true
-			receipt.ExecutedCount = 1
-			receipt.Subkernels = []amdgpu.StrixSubkernelResult{
-				{
-					Name:       "argmax",
-					Status:     "PASS",
-					DurationUS: 320,
-					Parity:     amdgpu.StrixParityVerdict{Passed: true, ArgmaxExact: true},
-				},
-			}
-			digest, _ := receipt.ComputeDigest()
-			receipt.Digest = digest
+			receipt := createTestValidReceipt(validTarget, opts.GitRef, opts.GitTip, opts.Command)
 			return receipt, nil
 		}
 
