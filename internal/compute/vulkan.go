@@ -140,6 +140,7 @@ func init() {
 		name:                    "vulkan",
 		tier:                    tier + ":" + C.GoString(&name[0]),
 		haveQ8:                  C.fvk_have_q8() != 0,
+		haveCoopmat:             C.fvk_have_cooperative_matrix() != 0,
 		haveMemoryBudget:        C.fvk_have_memory_budget() != 0,
 		totalMem:                totalDeviceLocal,
 		budgetBytes:             vulkanBudgetBytes(totalDeviceLocal),
@@ -229,6 +230,7 @@ type vulkanBackend struct {
 	name          string
 	tier          string
 	haveQ8        bool
+	haveCoopmat   bool
 	transient     []*vulkanBuf
 	freeTransient map[int][]*vulkanBuf
 	// Device-local residency budget (Stage-1 offload). budgetBytes is the cap on device-local
@@ -374,6 +376,46 @@ func VulkanQ4KDispatchGrid(outDim, tokens int, coopMatActive bool) (gridX, gridY
 		gridX = 1
 	}
 	return gridX, 1, 1
+}
+
+// Q8_0 cooperative matrix 2D tile geometry constants on gfx1151 / RDNA 3.5.
+const (
+	VulkanQ8TileM = 32 // Token tile dimension
+	VulkanQ8TileN = 32 // Output channel / row tile dimension
+	VulkanQ8TileK = 32 // Reduction K dimension (Q8_0 BLOCK=32)
+)
+
+// Q8MatMul2DDispatchGrid computes 2D workgroup dispatch grid dimensions (GridX, GridY, GridZ)
+// for Q8_0 matrix multiplication. When cooperative matrix is active and tokens > 1 (prefill),
+// it returns a 2D block-tiled grid: (ceil(outDim/TileN), ceil(tokens/TileM), 1).
+// When cooperative matrix is unsupported or tokens == 1, it falls back to 1D scalar decode dispatch:
+// (ceil(outDim/8), tokens, 1).
+func (v *vulkanBackend) Q8MatMul2DDispatchGrid(outDim, tokens int) (gridX, gridY, gridZ int) {
+	return VulkanQ8DispatchGrid(outDim, tokens, v.HasCooperativeMatrix() || v.haveCoopmat)
+}
+
+// VulkanQ8DispatchGrid calculates workgroup grid dimensions for Q8_0 matmul under cooperative matrix or scalar fallback.
+func VulkanQ8DispatchGrid(outDim, tokens int, coopMatActive bool) (gridX, gridY, gridZ int) {
+	if outDim <= 0 || tokens <= 0 {
+		return 1, 1, 1
+	}
+	if coopMatActive && tokens > 1 {
+		gridX = (outDim + VulkanQ8TileN - 1) / VulkanQ8TileN
+		gridY = (tokens + VulkanQ8TileM - 1) / VulkanQ8TileM
+		if gridX < 1 {
+			gridX = 1
+		}
+		if gridY < 1 {
+			gridY = 1
+		}
+		return gridX, gridY, 1
+	}
+	// Fallback scalar decode dispatch grid (8 outputs per group)
+	gridX = (outDim + 7) / 8
+	if gridX < 1 {
+		gridX = 1
+	}
+	return gridX, tokens, 1
 }
 
 // DeviceMemory reports the Vulkan device-local heap total and, when VK_EXT_memory_budget is
@@ -1082,6 +1124,12 @@ func (v *vulkanBackend) q8MatMulLocked(w, x, y Tensor, out, in, P int) {
 		v.q8MatMulChunksLocked(wb, x, y, out, in, P)
 		return
 	}
+	if (v.haveCoopmat || v.HasCooperativeMatrix()) && P > 1 {
+		gridX, gridY, _ := v.Q8MatMul2DDispatchGrid(out, P)
+		C.fvk_q8_matmul_2d_f32(wb.ptr, wb.scalePtr, v.vp(x), v.vp(y),
+			C.int(out), C.int(in), C.int(P), C.uint(gridX), C.uint(gridY))
+		return
+	}
 	C.fvk_q8_matmul_f32(wb.ptr, wb.scalePtr, v.vp(x), v.vp(y),
 		C.int(out), C.int(in), C.int(P))
 }
@@ -1093,8 +1141,14 @@ func (v *vulkanBackend) q8MatMulChunksLocked(wb *vulkanBuf, x, y Tensor, out, in
 			tmpShape = []int{chunk.rows}
 		}
 		_, tmpBuf := v.devTr(tmpShape, F32)
-		C.fvk_q8_matmul_f32(chunk.ptr, chunk.scalePtr, v.vp(x), tmpBuf.ptr,
-			C.int(chunk.rows), C.int(in), C.int(P))
+		if (v.haveCoopmat || v.HasCooperativeMatrix()) && P > 1 {
+			gridX, gridY, _ := v.Q8MatMul2DDispatchGrid(chunk.rows, P)
+			C.fvk_q8_matmul_2d_f32(chunk.ptr, chunk.scalePtr, v.vp(x), tmpBuf.ptr,
+				C.int(chunk.rows), C.int(in), C.int(P), C.uint(gridX), C.uint(gridY))
+		} else {
+			C.fvk_q8_matmul_f32(chunk.ptr, chunk.scalePtr, v.vp(x), tmpBuf.ptr,
+				C.int(chunk.rows), C.int(in), C.int(P))
+		}
 		v.copyQ8ChunkOutputLocked(y.buf.(*vulkanBuf), tmpBuf, out, chunk.rowStart, chunk.rows, P)
 	}
 }
