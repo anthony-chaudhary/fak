@@ -133,6 +133,22 @@ Buffer* g_stage = nullptr;
 void*   g_stageMapped = nullptr;
 size_t  g_stageCap = 0;
 
+// Device-loss restore has a separate, strictly bounded staging lifetime. It is
+// never shared with ordinary H2D/D2H, and it is destroyed at the transaction
+// boundary so a recreated device cannot observe an old-context staging handle.
+struct RestoreTransaction {
+    Buffer*        stage = nullptr;
+    void*          mapped = nullptr;
+    size_t         cap = 0;
+    size_t         maxEntries = 0;
+    size_t         used = 0;
+    size_t         entries = 0;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    int            successfulSubmits = 0;
+};
+RestoreTransaction g_restore;
+int g_restoreFailAfterSubmits = -1;
+
 // One compute kernel: pipeline + layout + descriptor set layout + how many storage buffers
 // it binds + push-constant byte size.
 struct Kernel {
@@ -664,6 +680,46 @@ void submitWait(VkCommandBuffer cmd) {
 void endSubmitWait(VkCommandBuffer cmd) {
     submitWait(cmd);
     vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
+}
+
+VkResult restoreBeginCommand() {
+    if (g_restore.cmd != VK_NULL_HANDLE) return VK_SUCCESS;
+    VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    ai.commandPool = g_cmdpool;
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.commandBufferCount = 1;
+    VkResult r = vkAllocateCommandBuffers(g_dev, &ai, &g_restore.cmd);
+    if (r != VK_SUCCESS) {
+        g_restore.cmd = VK_NULL_HANDLE;
+        return r;
+    }
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    r = vkBeginCommandBuffer(g_restore.cmd, &bi);
+    if (r != VK_SUCCESS) {
+        vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &g_restore.cmd);
+        g_restore.cmd = VK_NULL_HANDLE;
+    }
+    return r;
+}
+
+void restoreDiscardCommand() {
+    if (g_restore.cmd != VK_NULL_HANDLE) {
+        (void)vkEndCommandBuffer(g_restore.cmd);
+        vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &g_restore.cmd);
+        g_restore.cmd = VK_NULL_HANDLE;
+    }
+    g_restore.used = 0;
+    g_restore.entries = 0;
+}
+
+void restoreCleanup() {
+    restoreDiscardCommand();
+    if (g_restore.stage) {
+        if (g_restore.mapped) vkUnmapMemory(g_dev, g_restore.stage->mem);
+        destroyBuffer(g_restore.stage);
+    }
+    g_restore = RestoreTransaction{};
 }
 
 // ---- batched submission state ---------------------------------------------------
@@ -1305,6 +1361,94 @@ void fvk_h2d(void* d, const void* h, size_t bytes) {
     if (resumeBatch) batchFlush();
     copyHostToDevice(B(d), h, bytes);
     if (resumeBatch) batchBegin();
+}
+
+// Bounded immutable-residency restore transaction. The Go adapter owns fresh
+// destination buffers and publishes them only after every submit succeeds.
+// Each submit reuses the same staging allocation only after its fence completes.
+int fvk_restore_begin(size_t max_bytes, size_t max_entries) {
+    if (!g_ready || !g_dev || !g_cmdpool || !g_submitFence || g_batching ||
+        max_bytes < 4 || (max_bytes & 3) != 0 || max_entries == 0 ||
+        g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) {
+        return 1;
+    }
+    VkMemoryPropertyFlags hostvis =
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    Buffer* stage = allocBuffer(max_bytes, hostvis,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    if (!stage) return 2;
+    void* mapped = nullptr;
+    VkResult r = vkMapMemory(g_dev, stage->mem, 0, max_bytes, 0, &mapped);
+    if (r != VK_SUCCESS || !mapped) {
+        destroyBuffer(stage);
+        return r == VK_SUCCESS ? 3 : (int)r;
+    }
+    g_restore.stage = stage;
+    g_restore.mapped = mapped;
+    g_restore.cap = max_bytes;
+    g_restore.maxEntries = max_entries;
+    return 0;
+}
+
+int fvk_restore_add(void* dst_handle, size_t dst_offset, const void* src, size_t bytes) {
+    Buffer* dst = B(dst_handle);
+    if (!g_restore.stage || !g_restore.mapped || !dst || !src || bytes == 0 ||
+        (dst_offset & 3) != 0 || (bytes & 3) != 0 ||
+        dst_offset > dst->bytes || bytes > dst->bytes - dst_offset) {
+        return 4;
+    }
+    if (g_restore.entries >= g_restore.maxEntries) return 5;
+    size_t aligned = (g_restore.used + 3) & ~(size_t)3;
+    if (aligned > g_restore.cap || bytes > g_restore.cap - aligned) return 6;
+    VkResult r = restoreBeginCommand();
+    if (r != VK_SUCCESS) return (int)r;
+    memcpy((unsigned char*)g_restore.mapped + aligned, src, bytes);
+    VkBufferCopy region{aligned, dst_offset, bytes};
+    vkCmdCopyBuffer(g_restore.cmd, g_restore.stage->buf, dst->buf, 1, &region);
+    g_restore.used = aligned + bytes;
+    ++g_restore.entries;
+    return 0;
+}
+
+int fvk_restore_submit(void) {
+    if (!g_restore.stage || g_restore.cmd == VK_NULL_HANDLE || g_restore.entries == 0) return 7;
+    if (g_restoreFailAfterSubmits >= 0 &&
+        g_restore.successfulSubmits >= g_restoreFailAfterSubmits) {
+        restoreDiscardCommand();
+        return (int)VK_ERROR_DEVICE_LOST;
+    }
+    VkCommandBuffer cmd = g_restore.cmd;
+    VkResult r = vkEndCommandBuffer(cmd);
+    if (r == VK_SUCCESS) r = vkResetFences(g_dev, 1, &g_submitFence);
+    if (r == VK_SUCCESS) {
+        VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        si.commandBufferCount = 1;
+        si.pCommandBuffers = &cmd;
+        r = vkQueueSubmit(g_queue, 1, &si, g_submitFence);
+    }
+    if (r == VK_SUCCESS) r = vkWaitForFences(g_dev, 1, &g_submitFence, VK_TRUE, UINT64_MAX);
+    vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
+    g_restore.cmd = VK_NULL_HANDLE;
+    size_t submittedBytes = g_restore.used;
+    g_restore.used = 0;
+    g_restore.entries = 0;
+    if (r != VK_SUCCESS) {
+        g_submissionStatus = r;
+        return (int)r;
+    }
+    ++g_restore.successfulSubmits;
+    g_h2dBytes.fetch_add(submittedBytes, std::memory_order_relaxed);
+    dpOneShot(g_dp.oneShotH2D);
+    return 0;
+}
+
+void fvk_restore_finish(void) { restoreCleanup(); }
+void fvk_restore_abort(void) { restoreCleanup(); }
+int fvk_restore_active(void) {
+    return (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) ? 1 : 0;
+}
+void fvk_debug_restore_fail_after_submits(int successful_submits) {
+    g_restoreFailAfterSubmits = successful_submits;
 }
 
 // d2h is a true host fence (the final logits Read): flush the recorded batch so the compute

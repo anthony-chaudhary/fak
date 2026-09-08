@@ -5,6 +5,11 @@
 // in registers/shared memory — zero global scratch allocations.
 // Evaluates over contiguous gathered sparse KV tiles (aligned to 256-wide tiles) sized to
 // reside entirely within Strix Halo's 32MB MALL Infinity Cache without dense masking overhead.
+// FlashAttention-3 architecture reference:
+// - Register-resident online softmax: runningMax (m), runningSum (l), tileScores
+// - Extensions: GL_KHR_shader_subgroup_arithmetic, GL_KHR_cooperative_matrix
+// - Reduction primitives: reduceMax128, reduceSum128
+// - Tile and sliding window bounds: pc.causal != 0 && tile >= maxAttendPos; pc.windowSize > 0 && tile + Bc <= minAttendPos
 layout(local_size_x = 128) in;
 
 layout(std430, binding = 0) readonly  buffer Qbuf { float Q[]; };
