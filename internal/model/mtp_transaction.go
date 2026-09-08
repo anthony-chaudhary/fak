@@ -669,6 +669,17 @@ func (tx *MTPTransaction) Commit(accepted int) error {
 		tx.accounting.RejectedCount += len(tx.draftTokens)
 		return tx.rollbackLocked()
 	}
+	if accepted < len(tx.draftTokens) && tx.session != nil && tx.checkpoint != nil && tx.checkpoint.targetSnap != nil {
+		// Verification may have advanced the live target through the entire draft.
+		// Restore the pre-round boundary, then replay only the accepted prefix so
+		// rejected tokens cannot survive in KV, recurrent, or hidden state.
+		if err := tx.checkpoint.targetSnap.Restore(tx.session); err != nil {
+			return fmt.Errorf("model: partial commit session restore: %w", err)
+		}
+		for _, token := range tx.draftTokens[:accepted] {
+			tx.session.Step(token)
+		}
+	}
 
 	// Full or partial acceptance: commit prefix.
 	if tx.state != nil {
