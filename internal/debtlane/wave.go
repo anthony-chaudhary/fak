@@ -136,6 +136,27 @@ func PlanWaves(report Report, opts WavePlanOptions) WavePlan {
 		candidates = append(candidates, l)
 	}
 
+	// When PerfFocus is active, resolve critical paths to prioritize execution spine reachability (#12361).
+	if opts.PerfFocus {
+		var cpMap CriticalPathMap
+		if graph != nil {
+			cpMap = MapCriticalPaths(nil, graph)
+		} else if report.Workspace != "" {
+			cpMap = MapProductionCriticalPaths(report.Workspace, graph)
+		} else if len(report.CriticalPaths) > 0 {
+			cpMap = report.CriticalPaths
+		}
+		if len(cpMap) > 0 {
+			for i := range candidates {
+				if candidates[i].CriticalPath == nil {
+					if info, ok := LookupCriticalPath(candidates[i], cpMap); ok {
+						candidates[i].CriticalPath = &info
+					}
+				}
+			}
+		}
+	}
+
 	// Helper to identify performance-critical debt lanes (unbenchmarked, unproven runtime, modularity deficit on core/enabling).
 	isPerfCriticalDebt := func(l DebtLane) bool {
 		if l.Criticality != CriticalityCore && l.Criticality != CriticalityEnabling {
@@ -147,6 +168,11 @@ func PlanWaves(report Report, opts WavePlanOptions) WavePlan {
 	// Sort candidates: when PerfFocus is active, prioritize perf-critical debt 3x.
 	sort.SliceStable(candidates, func(i, j int) bool {
 		if opts.PerfFocus {
+			iCrit := candidates[i].CriticalPath != nil && candidates[i].CriticalPath.OnCriticalPath
+			jCrit := candidates[j].CriticalPath != nil && candidates[j].CriticalPath.OnCriticalPath
+			if iCrit != jCrit {
+				return iCrit
+			}
 			iPerf := isPerfCriticalDebt(candidates[i])
 			jPerf := isPerfCriticalDebt(candidates[j])
 			if iPerf != jPerf {
