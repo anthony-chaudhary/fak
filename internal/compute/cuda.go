@@ -1,4 +1,4 @@
-//go:build cuda
+//go:build cuda && cgo
 
 // cuda.go — the cgo wrapper that registers a CUDA device backend into the compute
 // registry. It is compiled ONLY under `-tags cuda`; the default `go build ./cmd/fak`

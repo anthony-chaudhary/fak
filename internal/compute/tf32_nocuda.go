@@ -1,4 +1,4 @@
-//go:build !cuda
+//go:build !cuda || !cgo
 
 // tf32_nocuda.go — the non-cuda twin of EnableCUDATF32 (tf32_cuda.go). The default
 // `go build ./cmd/fak` excludes the CUDA backend entirely, so there is no f32 SGEMM on a device

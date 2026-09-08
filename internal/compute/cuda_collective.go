@@ -1,4 +1,4 @@
-//go:build cuda && nccl
+//go:build cuda && nccl && cgo
 
 // cuda_collective.go — the Go side of the NCCL device collective (#971): it makes the CUDA
 // backend implement compute.CollectiveBackend over the real cross-GPU communicator in

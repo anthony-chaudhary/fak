@@ -1,4 +1,4 @@
-//go:build !cuda
+//go:build !cuda || !cgo
 
 // graph_nocuda.go — the non-cuda twin of EnableCUDAGraph (graph_cuda.go). The default
 // `go build ./cmd/fak` excludes the CUDA backend entirely, so there is no graph path to

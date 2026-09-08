@@ -1,4 +1,4 @@
-//go:build cuda && nccl
+//go:build cuda && nccl && cgo
 
 // cuda_collective_pg.go — the Go side of the multi-PROCESS NCCL process group (cuda_nccl_pg.cu,
 // #971 follow-on). Distinct from cuda_collective.go's CollectiveBackend (single-process,

@@ -1,4 +1,4 @@
-//go:build cuda
+//go:build cuda && cgo
 
 // tf32_cuda.go — the runtime enable seam for the TF32 tensor-core math mode on the f32 SGEMM
 // path (Lever 4 of the H100-KERNEL-5X-ROADMAP). The gate `tf32Enabled` is read once at init()

@@ -1,4 +1,4 @@
-//go:build cuda && windows
+//go:build cuda && windows && cgo
 
 // cuda_windows.go — the native-Windows half of the `-tags cuda` cgo wiring (issue #481).
 // It compiles ONLY under `-tags cuda` on GOOS=windows; the default `go build ./cmd/fak`

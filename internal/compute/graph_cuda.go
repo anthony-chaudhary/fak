@@ -1,4 +1,4 @@
-//go:build cuda
+//go:build cuda && cgo
 
 // graph_cuda.go — the runtime enable seam for the CUDA-graph decode replay path
 // (#483). The graph gate `graphEnabled` is read once at init() from FAK_CUDA_GRAPH,
