@@ -645,6 +645,9 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 	if s == nil || s.M == nil || s.Backend == nil || !s.M.Cfg.IsQwen35Hybrid() || len(ids) < 2 {
 		return compute.Qwen35SequencePrefillResult{}, false, nil
 	}
+	if s.M.Q2KEmbedding != nil {
+		return compute.Qwen35SequencePrefillResult{}, false, nil
+	}
 	if _, isSplit := s.validateDenseGPULayers(); isSplit {
 		return compute.Qwen35SequencePrefillResult{}, false, nil
 	}

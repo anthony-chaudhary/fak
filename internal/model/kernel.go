@@ -101,7 +101,7 @@ func (k backendKernel) mul(name string, x any, out, in int) []float32 {
 		// keep routed experts resident (cuda: fcuda_q5k/q6k_matmul_f32) stages it on the
 		// device via glmDsaWeightHAL below; every other backend keeps the host k-quant GEMV
 		// (its FAK_KQ_INT8 int8 path when enabled) — bit-identical to before this seam (#5111).
-		if !s.supportsRoutedExpertKQuant() {
+		if !s.supportsRoutedExpertKQuant() || !SupportsHALKQuant(qt.kind) {
 			return kQuantMatRows(qt, xf)
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -1053,5 +1054,126 @@ func TestQ4KSmokeDeadlineReportsOnlyAfterLoaderCleanup(t *testing.T) {
 	}
 	if !reported.Load() {
 		t.Fatal("SMOKE_LOAD_TIMEOUT was not reported")
+	}
+}
+
+func TestModelbenchVulkanQ2KEmbeddingResidentWired(t *testing.T) {
+	const (
+		dim   = 256
+		vocab = 4
+	)
+	var b bytes.Buffer
+	write := func(v any) {
+		if err := binary.Write(&b, binary.LittleEndian, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	str := func(s string) { write(uint64(len(s))); b.WriteString(s) }
+	write(uint32(0x46554747)) // "GGUF"
+	write(uint32(3))          // version
+	write(uint64(4))          // 4 tensors
+	write(uint64(10))         // 10 metadata KVs
+	str("general.architecture")
+	write(uint32(8))
+	str("qwen35")
+	for _, kv := range []struct {
+		key string
+		val uint32
+	}{
+		{"general.alignment", 32},
+		{"qwen35.embedding_length", dim},
+		{"qwen35.block_count", 2},
+		{"qwen35.attention.head_count", 1},
+		{"qwen35.attention.head_count_kv", 1},
+		{"qwen35.full_attention_interval", 4},
+		{"qwen35.attention.key_length", dim},
+		{"qwen35.feed_forward_length", dim},
+	} {
+		str(kv.key)
+		write(uint32(4))
+		write(kv.val)
+	}
+	str("qwen35.attention.layer_norm_rms_epsilon")
+	write(uint32(6))
+	write(float32(1e-6))
+
+	embBytes := (vocab * dim / 256) * 84
+	outBytes := (vocab * dim / 256) * 144
+	ffnBytes := (dim * dim / 256) * 144
+
+	align32 := func(n uint64) uint64 {
+		return (n + 31) &^ 31
+	}
+
+	writeTensor := func(name string, shape []uint64, kind ggufload.TensorType, offset uint64) {
+		str(name)
+		write(uint32(len(shape)))
+		for _, d := range shape {
+			write(d)
+		}
+		write(uint32(kind))
+		write(offset)
+	}
+
+	offset := uint64(0)
+	writeTensor("token_embd.weight", []uint64{uint64(dim), uint64(vocab)}, ggufload.TensorQ2_K, offset)
+	offset = align32(offset + uint64(embBytes))
+	outOffset := offset
+	writeTensor("output.weight", []uint64{uint64(dim), uint64(vocab)}, ggufload.TensorQ4_K, outOffset)
+	offset = align32(offset + uint64(outBytes))
+	vOffset := offset
+	writeTensor("blk.0.attn_v.weight", []uint64{uint64(dim), uint64(dim)}, ggufload.TensorQ4_K, vOffset)
+	offset = align32(offset + uint64(ffnBytes))
+	ffnOffset := offset
+	writeTensor("blk.0.ffn_down.weight", []uint64{uint64(dim), uint64(dim)}, ggufload.TensorQ4_K, ffnOffset)
+	offset = align32(offset + uint64(ffnBytes))
+
+	for b.Len()%32 != 0 {
+		b.WriteByte(0)
+	}
+	dataStart := b.Len()
+
+	writePayloadAt := func(off uint64, data []byte) {
+		target := dataStart + int(off)
+		for b.Len() < target {
+			b.WriteByte(0)
+		}
+		b.Write(data)
+	}
+
+	embPayload := make([]byte, embBytes)
+	for i := range embPayload {
+		embPayload[i] = byte((i*17 + 3) % 256)
+	}
+	for i := 0; i < len(embPayload); i += 84 {
+		binary.LittleEndian.PutUint16(embPayload[i+80:], 0x3C00) // d = 1.0
+		binary.LittleEndian.PutUint16(embPayload[i+82:], 0)      // min = 0
+	}
+	writePayloadAt(0, embPayload)
+	writePayloadAt(outOffset, make([]byte, outBytes))
+	writePayloadAt(vOffset, make([]byte, ffnBytes))
+	writePayloadAt(ffnOffset, make([]byte, ffnBytes))
+
+	path := filepath.Join(t.TempDir(), "qwen35-vulkan.gguf")
+	if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f := testCompleteBenchFlags()
+	*f.gguf = path
+	*f.q4k = true
+	*f.backendName = "vulkan"
+
+	m, _, err := loadModel(f, nil)
+	if err != nil {
+		t.Fatalf("loadModel: %v", err)
+	}
+	defer m.CloseWeights()
+
+	if !m.HasQ2KEmbedding() {
+		t.Fatal("expected model loaded with -backend=vulkan on eligible Qwen3.5 to have resident Q2_K embedding")
+	}
+	if m.HasF32("model.embed_tokens.weight") {
+		t.Fatal("model manifest must NOT have F32 model.embed_tokens.weight")
 	}
 }

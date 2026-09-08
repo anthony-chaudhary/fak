@@ -275,6 +275,18 @@ func (b *QuantBuilder) AddF32Tensor(name string, shape []int, data []float32) er
 	return quantizeDecodedFloatTensorInto(name, shape, data, nil, b.m, b.tied, &b.raw, &b.off)
 }
 
+// SetQ2KEmbedding attaches a packed Q2_K embedding table to the model being built.
+func (b *QuantBuilder) SetQ2KEmbedding(embed *Q2KEmbedding) error {
+	if b.built {
+		return fmt.Errorf("model: QuantBuilder already built")
+	}
+	if b.m.Q2KEmbedding != nil {
+		return fmt.Errorf("model: Q2KEmbedding already set")
+	}
+	b.m.Q2KEmbedding = embed
+	return nil
+}
+
 // Build finalizes the Model. The result is quant-only for the big matmul weights; callers
 // should use the Q8/cacheless paths that can read q8w for those tensors.
 func (b *QuantBuilder) Build() (*Model, error) {
@@ -283,7 +295,7 @@ func (b *QuantBuilder) Build() (*Model, error) {
 	}
 	b.built = true
 	b.m.raw = b.raw
-	if len(b.m.q8w) == 0 {
+	if len(b.m.q8w) == 0 && len(b.m.q4kw) == 0 && len(b.m.kqw) == 0 && len(b.m.q2w) == 0 && b.m.Q2KEmbedding == nil {
 		return nil, fmt.Errorf("model: no quantizable weights found")
 	}
 	b.m.initQ8CacheIfComplete()
