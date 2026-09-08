@@ -89,6 +89,8 @@ var tier = map[string]int{
 	"apihostprobe":           1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
 	"accountprobe":           1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.
 	"walkfiles":              1, // shared swallow-and-scan filepath.WalkDir primitive (Files: visit regular files, swallow walk-step errors, propagate visit errors); stdlib-only, imports nothing internal, off the hot path (#10405).
+	"computebuild":           1, // build/compiler compilation helpers; stdlib-only, off the hot path.
+	"goalrunner":             1, // detached goal execution helpers; stdlib-only, off the hot path.
 	"dispatchconservation":   1, // pure worker-unit conservation fold over .dispatch-runs artifacts; stdlib-only, off the hot path.
 	"dispatchdoa":            1, // #5868: pure DOA-spawn detector — grades a worker log into "the dispatcher spawned it, it wrote a stub, it never reached the guard's agent-launch banner" and folds a window into a clear/warn/alarm spawn-health rung; stdlib-only, imports nothing internal, off the hot path.
 	"eveparity":              1, // CI-runnable Eve-eval parity witness (#2605): pure in-repo eval-semantics evaluator (Evaluate/Compare keep the hard/soft gate distinction) proving fak-routed == raw; production code stdlib-only, off the hot path.
@@ -163,6 +165,11 @@ var tier = map[string]int{
 	"quality":               2,                // missing-middle quality-ladder spine (epic #4509): versioned quality-case schema + reference/engine Runner adapters + deterministic differential comparator & rubric oracle + replay-complete result/failure-bundle; off the hot path. NOT pureRoot: the incremental-Unicode oracle's first-divergence offset delegates to strmatch(1) rather than carrying the copy `fak benchmarks`' name matcher already had (bfb2e3fa7), so it imports a sibling leaf.
 	"trunkbuildprobe":       2,                // release-gate diagnosis (Go port of tools/trunk_build_probe.py): parses `go build` errors + hunts forgotten-`git add` definers; imports windowgate(1) for hidden subprocesses, off the hot path.
 	"godsplitplan":          1,                // doc-comment-aware Go split boundary+hazard planner (Go port of tools/godsplit_plan.py): the /modularize skill's planner + the decl-fold refactorverify reuses; stdlib-only, off the hot path.
+	"doshook":               2,                // native-first launcher for Claude Code/DOS hooks (Go port of tools/dos_hook.py); imports windowgate(2), off the hot path.
+	"cacheheadlines":        1,                // cache-win headline plane and provenance linter (Go port of tools/check_cache_headlines.py); stdlib-only, off the hot path.
+	"dogfoodcoverage":       1,                // dogfood-coverage scorecard across fleet and journals (Go port of tools/dogfood_coverage.py); stdlib-only, off the hot path.
+	"cachedocaudit":         1,                // cachevalue doc numbers and arithmetic audit (Go port of tools/cachedoc_numbers_audit.py); stdlib-only, off the hot path.
+	"freshstatus":           1,                // cross-domain status rollup across git, benchmarks, work, and industry (Go port of tools/fresh_status.py); stdlib-only, off the hot path.
 	"refactorverify":        3,                // proves a god-split dropped no top-level decl (Go port of tools/refactor_verify.py): folds each touched package's decl multiset before/after via godsplitplan.Compute; imports godsplitplan, off the hot path.
 	"chatrelay":             2,                // pure Slack chat-relay client (the inbound complement to the scoreboard publishers): posts/reads a channel via the shared slackenv resolver; rides slackwire(1) for transport, off the hot path.
 	"evebridge":             1,                // Eve preflight connection gates (auth/allowlist/approval, #2602): pure request-shape screening for the Eve bridge; stdlib-only, imports nothing internal, off the hot path.
@@ -317,7 +324,7 @@ var tier = map[string]int{
 	"tokenizer":           1,
 	"toolgrammar":         1, // discriminated union EBNF grammar compiler with byte-level space protection and literal parameter escaping (#11747); stdlib-only primitive.
 	"answershape":         1, // pure degeneration/verbosity metric over text; stdlib-only, imports nothing internal.
-	"codelint":            1,
+	"codelint":            2, // code-linter engine; imports windowgate(2), off the hot path.
 	"codexmcpdiag":        2, // pure Codex MCP startup evidence classifier (#5980); stdlib-only, off the hot path.
 	"codexlifecycle":      2, // pure exactly-once Codex task-lifecycle fold keyed by exact turn_id (#4785): events in, typed terminal (complete/aborted/superseded/process_death/live) + provenance out; stdlib-only, imports nothing internal, off the hot path.
 	"polymodel":           1, // multi-model residency + serial-decode-lane + cache-led MTP accept core; stdlib-only, imports nothing internal.
@@ -827,7 +834,12 @@ var tier = map[string]int{
 	"codedebt":                   1, // pure code-debt query, deterministic scanner, and model fold; stdlib-only, no internal imports, off the hot path (#10939).
 	"archcheck":                  2, // shift-left architecture import DAG and tier preflight validator; stdlib-only, off the hot path (#10918).
 	"ctxplanlint":                1,
-	"debtlane":                   1,
+	"debtlane":                   2, // debt-lane lease and status discovery; imports processalive(1), off the hot path.
+	"armtracking":                1, // ARM performance counter and event tracking; stdlib-only, off the hot path.
+	"pacing":                     2, // adaptive token-bucket and inference slot governor (#11168); imports leaseref(2), off the hot path.
+	"sessionview":                1, // session view model, terminal view, and sink primitives; stdlib-only, off the hot path.
+	"supervise":                  3, // contract reaper and stuck-loop detector (#11171); imports leaseref(2)+worktree(2), off the hot path.
+	"worktree":                   2, // ephemeral git worktree manager and janitor (#11169); imports leaseref(2), off the hot path.
 	"marketplace":                1,
 	"mtpeval":                    1,
 	"mtptune":                    1,
@@ -1489,7 +1501,7 @@ func selfRegisters(t *testing.T, internal, pkg string) bool {
 // wired by its constructor at the Submit seam, not as a passive driver.
 // A leaf added here is a conscious "wired elsewhere" decision, the same review
 // chokepoint as the tier table.
-var regOffList = map[string]bool{"agent": true, "gateway": true, "computeadmit": true, "codetools": true, "systools": true, "observer": true, "trajhook": true, "gym": true}
+var regOffList = map[string]bool{"agent": true, "gateway": true, "computeadmit": true, "codetools": true, "systools": true, "observer": true, "trajhook": true, "gym": true, "policy": true}
 
 // TestRequestPathLeavesRegistered closes the registration-completeness hole: a leaf whose
 // production init() calls abi.Register* MUST be either blank-imported by the defconfig
@@ -1694,6 +1706,7 @@ var interpreterExecAllow = map[string]string{
 	"modelroute":  "cross-audit corpus self-check executes a structured, declaration-matched witness argv (normally the compiled crossauditfixture binary); the dynamic path is test/CLI calibration evidence, not a script interpreter dependency of tool-call adjudication",
 	"compute":     "host hardware topology probe queries the Windows display subsystem for AMD GPUs via Win32_VideoController in ProbeWindowsDisplayTopology; host-observation seam, not a tool-call adjudication dependency",
 	"mcpbroker":   "mcpbroker executes client-configured MCP tool servers through stdio; server command is caller-provided and validated at broker initialization",
+	"trajectory":  "telemetry alarm subprocess executes platform-resolved compiled notification binaries or audit tools; not an adjudication dependency of tool-call decide",
 }
 
 // oracleSeamFiles names the off-path Python oracle/baseline seam scripts (DIRECTION.md
@@ -2965,6 +2978,9 @@ func TestShellSelfModifyGuardWiredInDecide(t *testing.T) {
 var engineDriverRole = map[string]map[string]string{
 	"agent.context_control": {
 		"agent": "bounded agent context control engine",
+	},
+	"agent.question": {
+		"agent": "interactive operator question and clarification prompt engine",
 	},
 	"agent.skill": {
 		"agent": "dynamic agent skill loader engine",

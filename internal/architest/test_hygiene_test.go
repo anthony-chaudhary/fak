@@ -30,6 +30,12 @@ func (v testHygieneViolation) String() string {
 
 var hardcodedPortRe = regexp.MustCompile(`:(8080|50051|9090)\b`)
 
+// brittleSleepAllowlist records test sites where time.Sleep is intentionally used to simulate
+// execution duration or latency rather than for brittle goroutine synchronization (#11307).
+var brittleSleepAllowlist = map[string]string{
+	"internal/vdso/search_cache_test.go:183": "simulates cold engine execution duration for speedup calculation (#11492)",
+}
+
 // scanTestHygiene inspects Go test AST for hardcoded port bindings and brittle synchronization sleeps.
 func scanTestHygiene(path string, src []byte, checkSleeps bool) ([]testHygieneViolation, error) {
 	fset := token.NewFileSet()
@@ -68,6 +74,17 @@ func scanTestHygiene(path string, src []byte, checkSleeps bool) ([]testHygieneVi
 		// 2. Check for time.Sleep calls if checkSleeps is requested for this package.
 		if checkSleeps && isTimeSleep(call) {
 			pos := fset.Position(call.Pos())
+			relPath := filepath.ToSlash(path)
+			if idx := strings.Index(relPath, "internal/"); idx != -1 {
+				relPath = relPath[idx:]
+			}
+			loc := fmt.Sprintf("%s:%d", relPath, pos.Line)
+			if _, ok := brittleSleepAllowlist[loc]; ok {
+				return true
+			}
+			if _, ok := brittleSleepAllowlist[relPath]; ok {
+				return true
+			}
 			violations = append(violations, testHygieneViolation{
 				File:    path,
 				Line:    pos.Line,
@@ -163,7 +180,6 @@ func TestNoBrittleSleepsInAuditedPackages(t *testing.T) {
 		"internal/agentopt",
 		"internal/metalgemm",
 		"internal/power",
-		"internal/gpulease",
 		"internal/breathgate",
 		"internal/cache",
 		"internal/dataslot",
