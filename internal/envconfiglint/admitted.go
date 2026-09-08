@@ -394,4 +394,42 @@ var admittedPostFreeze = []string{
 	"PYTHON",
 	"VULKAN_SDK",
 	"XDG_DATA_HOME",
+
+	// internal/qwen38campaign/subagent_fanout.go — immutable SHA-256 identity stamped into
+	// physical-runner evidence when the launcher already knows the exact binary artifact. It
+	// is provenance, not a credential; the fallback hashes os.Executable directly.
+	// Relocates to: an explicit runner-provenance input supplied when ProductPhysicalRunner is built.
+	"FAK_BINARY_SHA256",
+
+	// internal/qwen38campaign/subagent_fanout.go — source revision stamped beside the binary
+	// digest in physical-runner evidence when VCS build info and a Git checkout are unavailable.
+	// It identifies source bytes and grants no access.
+	// Relocates to: the same explicit runner-provenance input as FAK_BINARY_SHA256.
+	"FAK_SOURCE_COMMIT",
+
+	// cmd/fak/commit.go — opts a contending commit into the epilogue landing queue instead of
+	// waiting for or refusing a busy commit lock. It selects contention behavior, not authority.
+	// Relocates to: the existing `fak commit --queue-on-busy` flag; callers should pass it directly.
+	"FAK_COMMIT_QUEUE",
+
+	// cmd/fak/guard.go — duration between the graceful child interrupt and destructive tree-kill.
+	// This is shutdown timing, not a credential or permission boundary.
+	// Relocates to: the existing `fak guard --child-stop-grace` flag.
+	"FAK_GUARD_CHILD_STOP_GRACE",
+
+	// cmd/fak/guard.go — maximum tail allowed for an in-flight commit to finish after the guard's
+	// wall-clock budget expires. It tunes deadline draining and grants no additional capability.
+	// Relocates to: the existing `fak guard --commit-grace-period` flag.
+	"FAK_GUARD_COMMIT_GRACE_PERIOD",
+
+	// cmd/fak/guard.go — lead time for the warning emitted before a guarded session reaches its
+	// hard wall-clock deadline. It changes only deadline timing and carries no secret material.
+	// Relocates to: the existing `fak guard --soft-deadline-lead` flag.
+	"FAK_GUARD_SOFT_DEADLINE_LEAD",
+
+	// cmd/fak/guard_prompt_transport.go — forces durable stdin prompt fuel for launch shapes that
+	// cannot be inferred as Codex exec or Claude print mode, preserving prompt bytes across relaunch.
+	// It is a transport compatibility switch, not authentication data.
+	// Relocates to: an explicit guard launch-plan prompt-fuel setting passed to preparePromptFuel.
+	"FAK_GUARD_PROMPT_FUEL",
 }
