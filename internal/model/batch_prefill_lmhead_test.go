@@ -37,7 +37,35 @@ func TestLMHeadSampledRowFloor(t *testing.T) {
 		if got, want := len(sampledPrefill[row]), cfg.VocabSize; got != want {
 			t.Fatalf("PrefillEach logits row %d width = %d, want vocab %d", row, got, want)
 		}
+		want := m.NewSession().Prefill(prompts[row])
+		for v := range want {
+			if math.Float32bits(sampledPrefill[row][v]) != math.Float32bits(want[v]) {
+				t.Fatalf("PrefillEach row %d vocab %d = %v, independent terminal = %v", row, v, sampledPrefill[row][v], want[v])
+			}
+		}
 	}
+
+	t.Run("quantized production parity", func(t *testing.T) {
+		quantized := NewSynthetic(cfg)
+		quantized.Quantize()
+		want := make([][]float32, batch)
+		for row := range prompts {
+			s := quantized.NewSession()
+			s.Quant = true
+			want[row] = s.Prefill(prompts[row])
+		}
+		bs := quantized.NewBatchSession(batch)
+		bs.SetQuant(true)
+		got := bs.PrefillEach(prompts)
+		for row := range got {
+			if similarity := cosine(got[row], want[row]); similarity < 0.999 {
+				t.Fatalf("quantized PrefillEach row %d cosine = %.6f, want >= 0.999", row, similarity)
+			}
+			if argmax(got[row]) != argmax(want[row]) {
+				t.Fatalf("quantized PrefillEach row %d argmax = %d, independent terminal = %d", row, argmax(got[row]), argmax(want[row]))
+			}
+		}
+	})
 
 	const hiddenSize, vocab = 3, 5
 	hidden := []float32{
@@ -63,7 +91,8 @@ func TestLMHeadSampledRowFloor(t *testing.T) {
 	if &fullRows[0] != &hidden[0] {
 		t.Fatal("full-sequence lm_head projection copied or sliced the input panel")
 	}
-	fullLogits := matMulBatch(head, fullRows, vocab, hiddenSize, len(fullRows)/hiddenSize)
+	fullProjectedRows := lmHeadProjectedRows(fullRows, hiddenSize)
+	fullLogits := matMulBatch(head, fullRows, vocab, hiddenSize, fullProjectedRows)
 	if got, want := len(fullLogits), 4*vocab; got != want {
 		t.Fatalf("full-sequence logits length = %d, want %d", got, want)
 	}
@@ -74,7 +103,11 @@ func TestLMHeadSampledRowFloor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sampledLogits := matMulBatch(head, sampledRows, vocab, hiddenSize, len(sampledRows)/hiddenSize)
+	sampledProjectedRows := lmHeadProjectedRows(sampledRows, hiddenSize)
+	if got, want := sampledProjectedRows, 2; got != want {
+		t.Fatalf("production lm_head M = %d, want selected rows %d", got, want)
+	}
+	sampledLogits := matMulBatch(head, sampledRows, vocab, hiddenSize, sampledProjectedRows)
 	if got, want := len(sampledLogits), 2*vocab; got != want {
 		t.Fatalf("sampled logits length = %d, want %d", got, want)
 	}
@@ -101,7 +134,7 @@ func TestLMHeadSampledRowFloor(t *testing.T) {
 	if got, want := len(oneRow), 1; got != want {
 		t.Fatalf("8K chunk selected hidden rows = %d, want %d", got, want)
 	}
-	if projectedBytes := int64(len(oneRow)) * largeVocab * 2; projectedBytes > 10<<20 {
+	if projectedBytes := int64(lmHeadProjectedRows(oneRow, 1)) * largeVocab * 2; projectedBytes > 10<<20 {
 		t.Fatalf("sampled fp16 logits allocation = %d bytes, want <= 10 MiB", projectedBytes)
 	}
 
@@ -113,6 +146,7 @@ func TestLMHeadSampledRowFloor(t *testing.T) {
 		mode       lmHeadProjectionMode
 		want       string
 	}{
+		{name: "unspecified mode", hidden: hidden, hiddenSize: hiddenSize, mode: lmHeadProjectUnspecified, want: "unknown"},
 		{name: "missing sample plan", hidden: hidden, hiddenSize: hiddenSize, mode: lmHeadProjectSampledRows, want: "at least one row"},
 		{name: "row out of range", hidden: hidden, hiddenSize: hiddenSize, rows: []int{4}, mode: lmHeadProjectSampledRows, want: "outside"},
 		{name: "duplicate row", hidden: hidden, hiddenSize: hiddenSize, rows: []int{1, 1}, mode: lmHeadProjectSampledRows, want: "strictly increasing"},

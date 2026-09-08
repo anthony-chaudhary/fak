@@ -5,7 +5,8 @@ import "fmt"
 type lmHeadProjectionMode uint8
 
 const (
-	lmHeadProjectFullSequence lmHeadProjectionMode = iota
+	lmHeadProjectUnspecified lmHeadProjectionMode = iota
+	lmHeadProjectFullSequence
 	lmHeadProjectSampledRows
 )
 
@@ -57,6 +58,16 @@ func selectLMHeadProjectionRows(dst, hidden []float32, hiddenSize int, sampledRo
 		copy(dst[outRow*hiddenSize:(outRow+1)*hiddenSize], hidden[sourceRow*hiddenSize:(sourceRow+1)*hiddenSize])
 	}
 	return dst, nil
+}
+
+// lmHeadProjectedRows is the single cardinality seam between row selection and every
+// expensive projection operation. Callers derive M from the compact panel itself instead
+// of carrying a parallel batch/token count that could drift back to the full sequence.
+func lmHeadProjectedRows(selected []float32, hiddenSize int) int {
+	if hiddenSize <= 0 || len(selected)%hiddenSize != 0 {
+		panic("model: invalid selected lm_head panel")
+	}
+	return len(selected) / hiddenSize
 }
 
 // PrefillEach ingests each user's (possibly distinct) prompt into that user's own cache and
@@ -229,14 +240,15 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 	if err != nil {
 		panic(err) // internal rectangular geometry is validated before this point
 	}
-	for b := 0; b < B; b++ {
+	projectedRows := lmHeadProjectedRows(Xnorm, H)
+	for b := 0; b < projectedRows; b++ {
 		// finalNorm, not a hand-rolled normCfg: it is the ONE place the final-norm weight, its
 		// optional bias, and eps are bound together, so this lane cannot drift from the per-token
 		// path again the way the hard-coded nil bias here did.
 		copy(Xnorm[b*H:(b+1)*H], m.finalNorm(Xnorm[b*H:(b+1)*H]))
 	}
-	Logits := matMulBatch(m.lmHead(), Xnorm, cfg.VocabSize, H, B)
-	return splitScaledLogits(nil, Logits, B, cfg.VocabSize, cfg)
+	Logits := matMulBatch(m.lmHead(), Xnorm, cfg.VocabSize, H, projectedRows)
+	return splitScaledLogits(nil, Logits, projectedRows, cfg.VocabSize, cfg)
 }
 
 func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool) [][]float32 {
@@ -411,17 +423,18 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 		panic(err) // internal rectangular geometry is validated before this point
 	}
 	pb.Xnorm = Xnorm
+	projectedRows := lmHeadProjectedRows(Xnorm, H)
 	normW := m.tensor("model.norm.weight")
-	for b := 0; b < B; b++ {
+	for b := 0; b < projectedRows; b++ {
 		if cfg.NormGain1p || cfg.LayerNorm {
 			copy(Xnorm[b*H:(b+1)*H], m.finalNorm(Xnorm[b*H:(b+1)*H]))
 		} else {
 			rmsnormInto(Xnorm[b*H:(b+1)*H], Xnorm[b*H:(b+1)*H], normW, eps)
 		}
 	}
-	quantizeBatchPanelInto(bs.scratch, Xnorm, B, H)
+	quantizeBatchPanelInto(bs.scratch, Xnorm, projectedRows, H)
 	Logits := qGemm8(m.q8(m.headName()), bs.scratch)
-	return splitScaledLogits(nil, Logits, B, cfg.VocabSize, cfg)
+	return splitScaledLogits(nil, Logits, projectedRows, cfg.VocabSize, cfg)
 }
 
 func (bs *BatchSession) rectPrefillGeometry(P int) ([]int, []*KVCache, [][]float32, [][]float32) {
