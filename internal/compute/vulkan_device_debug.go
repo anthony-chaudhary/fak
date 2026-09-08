@@ -7,14 +7,254 @@ package compute
 #cgo LDFLAGS: -L${SRCDIR} -lfakvulkan
 #include <stdlib.h>
 #include "vulkan_backend.h"
+
+// Issue-local restore transaction ABI. The stable public header remains owned by
+// the arena/recovery leaves; this adapter is intentionally private to the Go shim.
+void *fvk_malloc_weight(size_t bytes, uint64_t max_arena_bytes);
+int fvk_restore_begin(size_t max_bytes, size_t max_entries);
+int fvk_restore_add(void *dst, size_t dst_offset, const void *src, size_t bytes);
+int fvk_restore_submit(void);
+void fvk_restore_finish(void);
+void fvk_restore_abort(void);
+int fvk_restore_active(void);
+void fvk_debug_restore_fail_after_submits(int successful_submits);
 */
 import "C"
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 	"unsafe"
 )
+
+// VulkanRestoreLimits bounds both axes that can grow a recovery submit. Bytes
+// bound the one reusable host-visible staging allocation; entries bound command
+// recording even when a group contains many tiny immutable objects.
+type VulkanRestoreLimits struct {
+	MaxBatchBytes   int
+	MaxBatchEntries int
+}
+
+// VulkanImmutableResidencySource is one source-bound immutable restore object.
+// Binding is the stable identity supplied by the model/residency owner (for
+// example, a checkpoint tensor path plus source digest); an empty or duplicate
+// binding is rejected before any Vulkan allocation.
+type VulkanImmutableResidencySource struct {
+	Binding string
+	Bytes   []byte
+}
+
+// VulkanRestoreReceipt describes only work observed by this restore call.
+// Published is the ownership boundary: false means the caller received no
+// destination handles, even when earlier bounded submits completed physically.
+type VulkanRestoreReceipt struct {
+	RequestedObjects int
+	RequestedBytes   uint64
+	SubmittedBytes   uint64
+	Submits          uint64
+	PeakStagingBytes uint64
+	Status           int
+	Published        bool
+}
+
+// VulkanRestoreImmutableResidencyGroup recreates one immutable residency group
+// into fresh transaction-owned buffers. Sources are consumed in slice order and
+// must remain immutable for this synchronous call. A source larger than the byte
+// cap is split deterministically; each submit is also capped by entry count.
+//
+// This is the issue-local adapter between #11288 and #12217: #11288 calls it only
+// after creating a fresh Vulkan context, and every destination is allocated from
+// #12217's immutable-weight arena. On any interruption, all destinations are
+// retired and nil is returned, so partially restored bytes can never become
+// visible through this API.
+func (v *vulkanBackend) VulkanRestoreImmutableResidencyGroup(ctx context.Context, sources []VulkanImmutableResidencySource, limits VulkanRestoreLimits) (buffers []*vulkanBuf, receipt VulkanRestoreReceipt, err error) {
+	receipt.RequestedObjects = len(sources)
+	if ctx == nil {
+		return nil, receipt, fmt.Errorf("compute: Vulkan restore requires a context")
+	}
+	if len(sources) == 0 {
+		return nil, receipt, fmt.Errorf("compute: Vulkan restore requires at least one immutable object")
+	}
+	if limits.MaxBatchBytes < 4 || limits.MaxBatchBytes%4 != 0 {
+		return nil, receipt, fmt.Errorf("compute: Vulkan restore byte cap must be a positive multiple of 4")
+	}
+	if limits.MaxBatchEntries <= 0 {
+		return nil, receipt, fmt.Errorf("compute: Vulkan restore entry cap must be positive")
+	}
+	bindings := make(map[string]struct{}, len(sources))
+	for i, source := range sources {
+		if strings.TrimSpace(source.Binding) == "" {
+			return nil, receipt, fmt.Errorf("compute: Vulkan immutable object %d has no source binding", i)
+		}
+		if _, duplicate := bindings[source.Binding]; duplicate {
+			return nil, receipt, fmt.Errorf("compute: Vulkan immutable source binding %q is duplicated", source.Binding)
+		}
+		bindings[source.Binding] = struct{}{}
+		src := source.Bytes
+		if len(src) == 0 || len(src)%4 != 0 {
+			return nil, receipt, fmt.Errorf("compute: Vulkan immutable object %d size must be a positive multiple of 4", i)
+		}
+		if ^uint64(0)-receipt.RequestedBytes < uint64(len(src)) {
+			return nil, receipt, fmt.Errorf("compute: Vulkan restore byte count overflows receipt")
+		}
+		receipt.RequestedBytes += uint64(len(src))
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, receipt, fmt.Errorf("compute: Vulkan restore cancelled before allocation: %w", err)
+	}
+
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+
+	owned := make([]*vulkanBuf, 0, len(sources))
+	cleanup := true
+	defer func() {
+		if cleanup {
+			for _, b := range owned {
+				if b != nil && b.ptr != nil {
+					C.fvk_free(b.ptr)
+					b.ptr = nil
+				}
+			}
+		}
+	}()
+	// Abort/discard any recorded command before retiring its destination
+	// buffers. Defer order is load-bearing here: this runs before cleanup above.
+	defer C.fvk_restore_abort()
+	arenaLimit := v.totalMem
+	if v.budgetBytes > 0 {
+		arenaLimit = v.budgetBytes
+	}
+	var maxArenaBytes C.uint64_t
+	if arenaLimit > 0 {
+		maxArenaBytes = C.uint64_t(arenaLimit)
+	}
+	for i, source := range sources {
+		src := source.Bytes
+		if err := ctx.Err(); err != nil {
+			return nil, receipt, fmt.Errorf("compute: Vulkan restore cancelled allocating object %d: %w", i, err)
+		}
+		p := C.fvk_malloc_weight(C.size_t(len(src)), maxArenaBytes)
+		b := &vulkanBuf{ptr: unsafe.Pointer(p), n: len(src), class: MemoryWeights}
+		if p == nil || !v.debugBufferDeviceLocal(b) {
+			if p != nil {
+				C.fvk_free(p)
+			}
+			return nil, receipt, fmt.Errorf("compute: Vulkan restore could not allocate device-local object %d (%d bytes)", i, len(src))
+		}
+		owned = append(owned, b)
+	}
+	if status := int(C.fvk_restore_begin(C.size_t(limits.MaxBatchBytes), C.size_t(limits.MaxBatchEntries))); status != 0 {
+		receipt.Status = status
+		return nil, receipt, fmt.Errorf("compute: Vulkan restore transaction begin failed with status %d", status)
+	}
+	// The transaction allocates the full declared staging capacity up front, so
+	// report that memory peak rather than only the payload high-water mark.
+	receipt.PeakStagingBytes = uint64(limits.MaxBatchBytes)
+
+	batchUsed, batchPayload, batchEntries := 0, 0, 0
+	submit := func() error {
+		if batchEntries == 0 {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("compute: Vulkan restore cancelled before submit %d: %w", receipt.Submits+1, err)
+		}
+		status := int(C.fvk_restore_submit())
+		if status != 0 {
+			receipt.Status = status
+			return fmt.Errorf("compute: Vulkan restore submit %d failed with status %d", receipt.Submits+1, status)
+		}
+		receipt.Submits++
+		receipt.SubmittedBytes += uint64(batchPayload)
+		batchUsed, batchPayload, batchEntries = 0, 0, 0
+		return nil
+	}
+	for objectIndex, source := range sources {
+		src := source.Bytes
+		for sourceOffset := 0; sourceOffset < len(src); {
+			if err := ctx.Err(); err != nil {
+				return nil, receipt, fmt.Errorf("compute: Vulkan restore cancelled at object %d offset %d: %w", objectIndex, sourceOffset, err)
+			}
+			aligned := (batchUsed + 3) &^ 3
+			if batchEntries == limits.MaxBatchEntries || aligned == limits.MaxBatchBytes {
+				if err := submit(); err != nil {
+					return nil, receipt, err
+				}
+				aligned = 0
+			}
+			room := limits.MaxBatchBytes - aligned
+			chunk := len(src) - sourceOffset
+			if chunk > room {
+				chunk = room
+			}
+			chunk &^= 3
+			if chunk == 0 {
+				if err := submit(); err != nil {
+					return nil, receipt, err
+				}
+				continue
+			}
+			status := int(C.fvk_restore_add(
+				owned[objectIndex].ptr,
+				C.size_t(sourceOffset),
+				unsafe.Pointer(&src[sourceOffset]),
+				C.size_t(chunk),
+			))
+			if status != 0 {
+				receipt.Status = status
+				return nil, receipt, fmt.Errorf("compute: Vulkan restore add object %d offset %d failed with status %d", objectIndex, sourceOffset, status)
+			}
+			batchUsed = aligned + chunk
+			batchPayload += chunk
+			batchEntries++
+			sourceOffset += chunk
+		}
+	}
+	if err := submit(); err != nil {
+		return nil, receipt, err
+	}
+	C.fvk_restore_finish()
+	receipt.Published = true
+	cleanup = false
+	buffers = owned
+	return buffers, receipt, nil
+}
+
+func (v *vulkanBackend) VulkanDebugReadRestoreBuffer(b *vulkanBuf) []byte {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	if b == nil || b.ptr == nil || b.n <= 0 {
+		return nil
+	}
+	out := make([]byte, b.n)
+	C.fvk_d2h(unsafe.Pointer(&out[0]), b.ptr, C.size_t(len(out)))
+	return out
+}
+
+func (v *vulkanBackend) VulkanDebugFreeRestoreBuffers(buffers []*vulkanBuf) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	for _, b := range buffers {
+		if b != nil && b.ptr != nil {
+			C.fvk_free(b.ptr)
+			b.ptr = nil
+		}
+	}
+}
+
+func (v *vulkanBackend) VulkanDebugSetRestoreFailureAfterSubmits(successfulSubmits int) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	C.fvk_debug_restore_fail_after_submits(C.int(successfulSubmits))
+}
+
+func (v *vulkanBackend) VulkanDebugRestoreActive() bool {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return C.fvk_restore_active() != 0
+}
 
 // BackendExecutionSnapshot reports identity and cumulative counters from the
 // selected Vulkan backend. Callers must bracket one execution and subtract via

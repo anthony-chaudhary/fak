@@ -3,6 +3,7 @@
 package compute
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -500,6 +501,73 @@ func TestVulkanResidencyRoundTrip(t *testing.T) {
 		if math.Float32bits(got[i]) != math.Float32bits(x[i]) {
 			t.Fatalf("residency round-trip altered element %d: got %v want %v", i, got[i], x[i])
 		}
+	}
+}
+
+func TestVulkanRestoreBatchesImmutableResidencyGroups(t *testing.T) {
+	v := vk(t)
+	sources := []VulkanImmutableResidencySource{
+		{Binding: "checkpoint:a/tensor:0", Bytes: []byte{0, 0, 0, 7, 0, 0, 0, 11, 0, 0, 0, 13}},
+		{Binding: "checkpoint:a/tensor:1", Bytes: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}},
+		{Binding: "checkpoint:a/tensor:2", Bytes: []byte{21, 22, 23, 24, 25, 26, 27, 28}},
+		{Binding: "checkpoint:a/tensor:3", Bytes: []byte{29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56}},
+		{Binding: "checkpoint:a/tensor:4", Bytes: []byte{57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72}},
+	}
+	limits := VulkanRestoreLimits{MaxBatchBytes: 32, MaxBatchEntries: 2}
+	beforeArena := v.VulkanWeightArenaStats()
+
+	buffers, receipt, err := v.VulkanRestoreImmutableResidencyGroup(context.Background(), sources, limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.VulkanDebugFreeRestoreBuffers(buffers)
+	if !receipt.Published || receipt.RequestedObjects != 5 || receipt.RequestedBytes != 84 ||
+		receipt.SubmittedBytes != 84 || receipt.Submits != 3 || receipt.PeakStagingBytes != 32 {
+		t.Fatalf("restore receipt = %+v", receipt)
+	}
+	afterArena := v.VulkanWeightArenaStats()
+	if got := afterArena.BufferBindings - beforeArena.BufferBindings; got != uint64(len(sources)) {
+		t.Fatalf("restore arena bindings = %d, want %d", got, len(sources))
+	}
+	for i := range sources {
+		if got := v.VulkanDebugReadRestoreBuffer(buffers[i]); !slices.Equal(got, sources[i].Bytes) {
+			t.Fatalf("restored object %d = %v, want %v", i, got, sources[i].Bytes)
+		}
+	}
+	// The first source encodes the deterministic first post-restore token in its
+	// final word. Byte-exact readback proves the uploader did not reorder it.
+	if got := v.VulkanDebugReadRestoreBuffer(buffers[0]); len(got) != 12 || got[11] != 13 {
+		t.Fatalf("first post-restore token bytes = %v, want terminal byte 13", got)
+	}
+	v.VulkanDebugFreeRestoreBuffers(buffers)
+	buffers = nil
+	afterFree := v.VulkanWeightArenaStats()
+	if afterFree.LiveBytes != beforeArena.LiveBytes || afterFree.ReservedBytes != beforeArena.ReservedBytes {
+		t.Fatalf("successful restore retained arena storage: before=%+v after=%+v", beforeArena, afterFree)
+	}
+
+	v.VulkanDebugSetRestoreFailureAfterSubmits(1)
+	failed, interrupted, err := v.VulkanRestoreImmutableResidencyGroup(context.Background(), sources, limits)
+	v.VulkanDebugSetRestoreFailureAfterSubmits(-1)
+	if err == nil {
+		t.Fatal("injected device-loss interruption returned nil error")
+	}
+	if failed != nil || interrupted.Published || interrupted.Submits != 1 || interrupted.SubmittedBytes != 32 {
+		t.Fatalf("interrupted restore buffers=%v receipt=%+v err=%v", failed, interrupted, err)
+	}
+	if v.VulkanDebugRestoreActive() {
+		t.Fatal("interrupted restore leaked the staging/command slot")
+	}
+	afterInterrupted := v.VulkanWeightArenaStats()
+	if afterInterrupted.LiveBytes != afterFree.LiveBytes || afterInterrupted.ReservedBytes != afterFree.ReservedBytes {
+		t.Fatalf("interrupted restore retained arena storage: before=%+v after=%+v", afterFree, afterInterrupted)
+	}
+
+	cancelledContext, cancel := context.WithCancel(context.Background())
+	cancel()
+	cancelled, cancelledReceipt, err := v.VulkanRestoreImmutableResidencyGroup(cancelledContext, sources, limits)
+	if err == nil || cancelled != nil || cancelledReceipt.Submits != 0 || cancelledReceipt.Published || v.VulkanDebugRestoreActive() {
+		t.Fatalf("cancelled restore buffers=%v receipt=%+v active=%v err=%v", cancelled, cancelledReceipt, v.VulkanDebugRestoreActive(), err)
 	}
 }
 
