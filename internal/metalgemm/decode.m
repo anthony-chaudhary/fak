@@ -267,21 +267,33 @@ static void ensureScaleF16(int wid) {
 static id<MTLComputePipelineState> psoDGemv, psoDNorm, psoDBias, psoDRope, psoDAttn, psoDSilu, psoDAdd;
 static int gDecReady;
 
+static id<MTLComputePipelineState> make_dec_pipeline(id<MTLLibrary> lib, NSString *name) {
+    NSError *err = nil;
+    id<MTLFunction> fn = [lib newFunctionWithName:name];
+    if (fn == nil) return nil;
+    MTLComputePipelineDescriptor *desc = [[MTLComputePipelineDescriptor alloc] init];
+    desc.computeFunction = fn;
+    desc.supportIndirectCommandBuffers = YES;
+    id<MTLComputePipelineState> pso = [gDev newComputePipelineStateWithDescriptor:desc options:0 reflection:nil error:&err];
+    if (pso == nil) {
+        pso = [gDev newComputePipelineStateWithFunction:fn error:&err];
+    }
+    return pso;
+}
+
 static int dec_init(void) {
     if (gDecReady) return 1;
     if (gDev == nil) return 0;
     NSError *err = nil;
     id<MTLLibrary> lib = [gDev newLibraryWithSource:kDecSrc options:nil error:&err];
     if (lib == nil) { NSLog(@"decode: library compile failed: %@", err); return 0; }
-    #define DPSO(name) [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:name] error:&err]
-    psoDGemv = DPSO(@"q8dq_gemv");
-    psoDNorm = DPSO(@"d_rmsnorm");
-    psoDBias = DPSO(@"d_addbias");
-    psoDRope = DPSO(@"d_rope");
-    psoDAttn = DPSO(@"attn_decode");
-    psoDSilu = DPSO(@"d_silumul");
-    psoDAdd  = DPSO(@"d_add");
-    #undef DPSO
+    psoDGemv = make_dec_pipeline(lib, @"q8dq_gemv");
+    psoDNorm = make_dec_pipeline(lib, @"d_rmsnorm");
+    psoDBias = make_dec_pipeline(lib, @"d_addbias");
+    psoDRope = make_dec_pipeline(lib, @"d_rope");
+    psoDAttn = make_dec_pipeline(lib, @"attn_decode");
+    psoDSilu = make_dec_pipeline(lib, @"d_silumul");
+    psoDAdd  = make_dec_pipeline(lib, @"d_add");
     if (!psoDGemv || !psoDNorm || !psoDBias || !psoDRope || !psoDAttn || !psoDSilu || !psoDAdd) {
         NSLog(@"decode: pipeline build failed: %@", err); return 0;
     }
@@ -311,6 +323,94 @@ void mg_decode_head(int finalNormID, int headWid, int vocab) {
     ensureScaleF16(headWid);
 }
 
+// ---- ICB & persistent scratch state ----
+#define MG_DECODE_MODE_MULTI_CB      0
+#define MG_DECODE_MODE_DIRECT_ONE_CB  1
+#define MG_DECODE_MODE_ICB           2
+
+static int gDecDispatchMode = MG_DECODE_MODE_ICB;
+
+typedef struct {
+    int command_buffers;
+    int encoders;
+    int icb_dispatches;
+    int contiguous_blocks;
+    double host_encode_ms;
+    double host_wait_ms;
+    double gpu_ms;
+    double total_ms;
+    int icb_used;
+    int mode;
+} mg_decode_receipt;
+
+typedef struct {
+    int nblk;
+    int out_;
+    int hasBias;
+    int _pad;
+} DecGemvConst;
+
+typedef struct {
+    uint32_t H;
+    float eps;
+    uint32_t _pad[2];
+} DecNormConst;
+
+typedef struct {
+    uint32_t nHeads;
+    uint32_t hd;
+    float theta;
+    uint32_t _pad;
+} DecRopeConst;
+
+typedef struct {
+    uint32_t nH;
+    uint32_t hd;
+    uint32_t w;
+    uint32_t grp;
+    float scale;
+    uint32_t _pad[3];
+} DecAttnConst;
+
+typedef struct {
+    int k_slot;
+    int v_slot;
+    int rope_k_slot;
+} DecLayerDynSlots;
+
+static DecLayerDynSlots gDecDynSlots[DEC_MAXL];
+
+static id<MTLIndirectCommandBuffer> gDecICB = nil;
+static int gDecICBCmdCount = 0;
+static int gDecICBBuilt = 0;
+
+static id<MTLBuffer> gDecXb = nil;
+static id<MTLBuffer> gDecXn = nil, gDecXn2 = nil;
+static id<MTLBuffer> gDecQb = nil;
+static id<MTLBuffer> gDecAttn = nil, gDecTmpH = nil, gDecGb = nil, gDecUb = nil;
+static id<MTLBuffer> gDecLogitBuf = nil;
+static int gDecAllocH = 0, gDecAllocQrow = 0, gDecAllocIm = 0, gDecAllocVocab = 0;
+
+static id<MTLBuffer> gDecStepBuf = nil;
+static id<MTLBuffer> gDecConstBuf = nil;
+
+#define DEC_MAX_RES 2048
+static id<MTLResource> gDecResList[DEC_MAX_RES];
+static int gDecResCount = 0;
+
+static id<MTLBuffer> dbuf(long elems) { // f16 device buffer
+    return [gDev newBufferWithLength:(NSUInteger)(elems * 2) options:MTLResourceStorageModeShared];
+}
+static id<MTLBuffer> wbufOfDec(int wid) { return (__bridge id<MTLBuffer>)gW[wid].buf; }
+
+static void add_res(id<MTLResource> res) {
+    if (res == nil || gDecResCount >= DEC_MAX_RES) return;
+    for (int i = 0; i < gDecResCount; i++) {
+        if (gDecResList[i] == res) return;
+    }
+    gDecResList[gDecResCount++] = res;
+}
+
 void mg_decode_reset(void) {
     gDecNL = gDecH = gDecHd = gDecNH = gDecNKV = gDecI = gDecAttnBias = 0;
     gDecEps = gDecTheta = gDecScale = 0.0f;
@@ -318,16 +418,49 @@ void mg_decode_reset(void) {
     gDecFinalNorm = -1; gDecHead = -1; gDecVocab = 0;
     gKVCap = 0; gKVLen = 0;
     for (int i = 0; i < DEC_MAX_W; i++) gDecSF16[i] = nil; // ARC frees the f16-scale buffers
+    gDecICB = nil;
+    gDecICBCmdCount = 0;
+    gDecICBBuilt = 0;
+    gDecXb = nil; gDecXn = nil; gDecXn2 = nil; gDecQb = nil;
+    gDecAttn = nil; gDecTmpH = nil; gDecGb = nil; gDecUb = nil;
+    gDecLogitBuf = nil;
+    gDecAllocH = 0; gDecAllocQrow = 0; gDecAllocIm = 0; gDecAllocVocab = 0;
+    gDecStepBuf = nil;
+    gDecConstBuf = nil;
+    gDecResCount = 0;
+    for (int i = 0; i < DEC_MAX_RES; i++) gDecResList[i] = nil;
+}
+
+static void dec_ensure_scratch(int wantLogits) {
+    int H = gDecH, hd = gDecHd, nH = gDecNH, Im = gDecI;
+    int qrow = nH * hd;
+    int vocab = (wantLogits && gDecVocab > 0) ? gDecVocab : 0;
+    if (gDecXb == nil || gDecAllocH != H || gDecAllocQrow != qrow || gDecAllocIm != Im || gDecAllocVocab != vocab) {
+        gDecXb = dbuf(H);
+        gDecXn = dbuf(H);
+        gDecXn2 = dbuf(H);
+        gDecQb = dbuf(qrow);
+        gDecAttn = dbuf(qrow);
+        gDecTmpH = dbuf(H);
+        gDecGb = dbuf(Im);
+        gDecUb = dbuf(Im);
+        if (vocab > 0) {
+            gDecLogitBuf = dbuf(vocab);
+        } else {
+            gDecLogitBuf = nil;
+        }
+        gDecAllocH = H;
+        gDecAllocQrow = qrow;
+        gDecAllocIm = Im;
+        gDecAllocVocab = vocab;
+        gDecICBBuilt = 0;
+    }
 }
 
 // ---- encode helpers (one command buffer / encoder per decode step) ----
 static id<MTLCommandBuffer> gDCB;
 static id<MTLComputeCommandEncoder> gDEnc;
 
-static id<MTLBuffer> dbuf(long elems) { // f16 device buffer
-    return [gDev newBufferWithLength:(NSUInteger)(elems * 2) options:MTLResourceStorageModeShared];
-}
-static id<MTLBuffer> wbufOfDec(int wid) { return (__bridge id<MTLBuffer>)gW[wid].buf; }
 static id<MTLComputeCommandEncoder> denc(void) {
     if (gDEnc == nil) gDEnc = [gDCB computeCommandEncoder];
     return gDEnc;
@@ -343,46 +476,42 @@ static void d1d(id<MTLComputeCommandEncoder> e, id<MTLComputePipelineState> pso,
     [e dispatchThreads:MTLSizeMake(n,1,1) threadsPerThreadgroup:MTLSizeMake(tg,1,1)];
 }
 
-// q8 dequant-GEMV: Y[yoff..yoff+out](f16) = dequant(W_q8[wid]) . X(f16). One 8-row threadgroup
-// of 256 threads per group. yoff (f16 elems) lets the K/V projection write straight into the
-// resident KV at row L, so no blit/encoder-switch is needed to append it.
-static void d_gemv(int wid, id<MTLBuffer> X, id<MTLBuffer> Y, long yoff, int biasID) {
+static void d_gemv_e(id<MTLComputeCommandEncoder> e, int wid, id<MTLBuffer> X, id<MTLBuffer> Y, long yoff, int biasID) {
     int out, in, nblk; mg_q8_dims(wid, &out, &in, &nblk);
-    id<MTLComputeCommandEncoder> e = denc();
     [e setComputePipelineState:psoDGemv];
     [e setBuffer:mg_q8_codes_buf(wid) offset:0 atIndex:0];
-    [e setBuffer:gDecSF16[wid]        offset:0 atIndex:1]; // f16 block scales (built at registration)
+    [e setBuffer:gDecSF16[wid]        offset:0 atIndex:1];
     [e setBuffer:X offset:0 atIndex:2];
     [e setBuffer:Y offset:(NSUInteger)(yoff*2) atIndex:3];
     [e setBytes:&nblk length:4 atIndex:4];
     [e setBytes:&out  length:4 atIndex:5];
-    // Fused projection bias: bind the bias vector (gW f16) at index 6, or the scales as a harmless
-    // placeholder when there is none (Metal requires the bound buffer to exist; hasBias gates the read).
     int hasBias = (biasID >= 0) ? 1 : 0;
     [e setBuffer:(hasBias ? wbufOfDec(biasID) : mg_q8_scales_buf(wid)) offset:0 atIndex:6];
     [e setBytes:&hasBias length:4 atIndex:7];
     NSUInteger ntg = (NSUInteger)((out + 7) / 8);
     [e dispatchThreadgroups:MTLSizeMake(ntg,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];
 }
+static void d_gemv(int wid, id<MTLBuffer> X, id<MTLBuffer> Y, long yoff, int biasID) {
+    d_gemv_e(denc(), wid, X, Y, yoff, biasID);
+}
 
-static void d_norm(id<MTLBuffer> X, int normID, id<MTLBuffer> Out) {
-    id<MTLComputeCommandEncoder> e = denc();
+static void d_norm_e(id<MTLComputeCommandEncoder> e, id<MTLBuffer> X, int normID, id<MTLBuffer> Out) {
     [e setComputePipelineState:psoDNorm];
     [e setBuffer:X offset:0 atIndex:0];
     [e setBuffer:wbufOfDec(normID) offset:0 atIndex:1];
     [e setBuffer:Out offset:0 atIndex:2];
     uint H = gDecH; [e setBytes:&H length:4 atIndex:3];
     [e setBytes:&gDecEps length:4 atIndex:4];
-    // ONE threadgroup of TG threads (power of two) over the H-vector; threadgroup memory holds the
-    // reduction. TG = min(256, maxThreads), rounded down to a power of two for the tree reduction.
     NSUInteger TG = psoDNorm.maxTotalThreadsPerThreadgroup; if (TG > 256) TG = 256;
     NSUInteger p = 1; while (p*2 <= TG) p *= 2; TG = p;
     [e setThreadgroupMemoryLength:(NSUInteger)(TG*4) atIndex:0];
     [e dispatchThreadgroups:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(TG,1,1)];
 }
+static void d_norm(id<MTLBuffer> X, int normID, id<MTLBuffer> Out) {
+    d_norm_e(denc(), X, normID, Out);
+}
 
-static void d_rope_at(id<MTLBuffer> Buf, int nHeads, int base, long off) {
-    id<MTLComputeCommandEncoder> e = denc();
+static void d_rope_at_e(id<MTLComputeCommandEncoder> e, id<MTLBuffer> Buf, int nHeads, int base, long off) {
     [e setComputePipelineState:psoDRope];
     [e setBuffer:Buf offset:(NSUInteger)(off*2) atIndex:0];
     uint nh = nHeads, hd = gDecHd, b = base; [e setBytes:&nh length:4 atIndex:1];
@@ -391,44 +520,51 @@ static void d_rope_at(id<MTLBuffer> Buf, int nHeads, int base, long off) {
     [e setBytes:&gDecTheta length:4 atIndex:4];
     d1d(e, psoDRope, (NSUInteger)nHeads*(gDecHd/2));
 }
+static void d_rope_at(id<MTLBuffer> Buf, int nHeads, int base, long off) {
+    d_rope_at_e(denc(), Buf, nHeads, base, off);
+}
 
-static void d_attn(id<MTLBuffer> Q, id<MTLBuffer> K, id<MTLBuffer> V, id<MTLBuffer> Out, int ctx) {
-    id<MTLComputeCommandEncoder> e = denc();
+static void d_attn_e(id<MTLComputeCommandEncoder> e, id<MTLBuffer> Q, id<MTLBuffer> K, id<MTLBuffer> V, id<MTLBuffer> Out, int ctx) {
     [e setComputePipelineState:psoDAttn];
     [e setBuffer:Q offset:0 atIndex:0];
     [e setBuffer:K offset:0 atIndex:1];
     [e setBuffer:V offset:0 atIndex:2];
     [e setBuffer:Out offset:0 atIndex:3];
-    uint c = ctx, nH = gDecNH, hd = gDecHd, w = gDecNKV*gDecHd, grp = gDecNH/gDecNKV;
+    uint c = ctx, nH = gDecNH, hd = gDecHd, w = gDecNKV*gDecHd, grp = (gDecNKV > 0) ? (gDecNH/gDecNKV) : 1;
     [e setBytes:&c length:4 atIndex:4];
     [e setBytes:&nH length:4 atIndex:5];
     [e setBytes:&hd length:4 atIndex:6];
     [e setBytes:&w length:4 atIndex:7];
     [e setBytes:&grp length:4 atIndex:8];
     [e setBytes:&gDecScale length:4 atIndex:9];
-    // ONE threadgroup per head; SPLITS=8 simdgroups (256 threads) split the keys, threadgroup memory
-    // holds the per-split partials for the flash-combine. Clamp SPLITS to the pipeline's max.
     NSUInteger SPLITS = 8;
     NSUInteger maxTG = psoDAttn.maxTotalThreadsPerThreadgroup / 32;
     if (SPLITS > maxTG) SPLITS = maxTG; if (SPLITS == 0) SPLITS = 1;
     [e setThreadgroupMemoryLength:(NSUInteger)(SPLITS * (gDecHd + 2) * 4) atIndex:0];
     [e dispatchThreadgroups:MTLSizeMake((NSUInteger)gDecNH,1,1) threadsPerThreadgroup:MTLSizeMake(SPLITS*32,1,1)];
 }
+static void d_attn(id<MTLBuffer> Q, id<MTLBuffer> K, id<MTLBuffer> V, id<MTLBuffer> Out, int ctx) {
+    d_attn_e(denc(), Q, K, V, Out, ctx);
+}
 
-static void d_silu(id<MTLBuffer> G, id<MTLBuffer> U, int n) {
-    id<MTLComputeCommandEncoder> e = denc();
+static void d_silu_e(id<MTLComputeCommandEncoder> e, id<MTLBuffer> G, id<MTLBuffer> U, int n) {
     [e setComputePipelineState:psoDSilu];
     [e setBuffer:G offset:0 atIndex:0];
     [e setBuffer:U offset:0 atIndex:1];
     d1d(e, psoDSilu, (NSUInteger)n);
 }
+static void d_silu(id<MTLBuffer> G, id<MTLBuffer> U, int n) {
+    d_silu_e(denc(), G, U, n);
+}
 
-static void d_add_buf(id<MTLBuffer> X, id<MTLBuffer> Y, int n) {
-    id<MTLComputeCommandEncoder> e = denc();
+static void d_add_buf_e(id<MTLComputeCommandEncoder> e, id<MTLBuffer> X, id<MTLBuffer> Y, int n) {
     [e setComputePipelineState:psoDAdd];
     [e setBuffer:X offset:0 atIndex:0];
     [e setBuffer:Y offset:0 atIndex:1];
     d1d(e, psoDAdd, (NSUInteger)n);
+}
+static void d_add_buf(id<MTLBuffer> X, id<MTLBuffer> Y, int n) {
+    d_add_buf_e(denc(), X, Y, n);
 }
 
 // kv_ensure grows the resident KV to hold at least `rows`, preserving the gKVLen rows already there.
@@ -446,41 +582,498 @@ static void kv_ensure(int rows) {
         gKVk[l] = nk; gKVv[l] = nv; // ARC frees the old buffers
     }
     gKVCap = newCap;
+    gDecICBBuilt = 0; // buffer pointers changed, rebuild ICB
 }
 
-// mg_decode_step runs one decode token through the whole model on the GPU in ONE command buffer.
-// xEmbed: f32[H] (the new token's embedding). Kctx/Vctx: f32[nL*L*w] (the per-layer post-RoPE K and
-// V already in the CPU cache, w = nKV*hd). L: number of cached positions (the new token's absolute
-// position == L). Outputs: lastPre f32[H] (pre-final-norm hidden — caller applies final norm+head);
-// newKraw/newKpost/newV f32[nL*w] (the new token's per-layer pre-RoPE K, post-RoPE K, V — caller
-// appends to its f32 cache). Returns 1 on success, 0 if the backend declined.
-int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, int L,
-                   float *lastPre, float *newKraw, float *newKpost, float *newV, float *logits, int seedFlag) {
+static int dec_build_icb(int wantLogits) {
+    if (gDecICBBuilt && gDecICB != nil) {
+        return 1;
+    }
+    if (gDecNL <= 0 || gDecH <= 0) return 0;
+    
+    dec_ensure_scratch(wantLogits);
+    
+    if (gDecStepBuf == nil) {
+        gDecStepBuf = [gDev newBufferWithLength:64 options:MTLResourceStorageModeShared];
+    }
+    if (gDecConstBuf == nil) {
+        gDecConstBuf = [gDev newBufferWithLength:65536 options:MTLResourceStorageModeShared];
+    }
+    
+    int hasHead = (gDecFinalNorm >= 0 && gDecHead >= 0 && gDecVocab > 0);
+    int totalDispatches = gDecNL * 15 + (hasHead ? 2 : 0);
+    
+    MTLIndirectCommandBufferDescriptor *icbDesc = [[MTLIndirectCommandBufferDescriptor alloc] init];
+    icbDesc.commandTypes = MTLIndirectCommandTypeConcurrentDispatch | MTLIndirectCommandTypeConcurrentDispatchThreads;
+    icbDesc.inheritBuffers = NO;
+    icbDesc.inheritPipelineState = NO;
+    icbDesc.maxKernelBufferBindCount = 16;
+    
+    gDecICB = [gDev newIndirectCommandBufferWithDescriptor:icbDesc
+                                           maxCommandCount:(NSUInteger)totalDispatches
+                                                   options:MTLResourceStorageModeShared];
+    if (gDecICB == nil) {
+        return 0;
+    }
+    
+    gDecResCount = 0;
+    add_res(gDecXb);
+    add_res(gDecXn);
+    add_res(gDecXn2);
+    add_res(gDecQb);
+    add_res(gDecAttn);
+    add_res(gDecTmpH);
+    add_res(gDecGb);
+    add_res(gDecUb);
+    if (gDecLogitBuf != nil) add_res(gDecLogitBuf);
+    add_res(gDecStepBuf);
+    add_res(gDecConstBuf);
+    
+    uint8_t *constPtr = (uint8_t *)gDecConstBuf.contents;
+    __block NSUInteger constOff = 0;
+    
+    #define ALLOC_CONST(type, val) ({ \
+        NSUInteger cur = constOff; \
+        *((type *)(constPtr + cur)) = (val); \
+        constOff += sizeof(type); \
+        if (constOff % 16 != 0) constOff += 16 - (constOff % 16); \
+        cur; \
+    })
+    
+    int H = gDecH, hd = gDecHd, nH = gDecNH, nKV = gDecNKV, Im = gDecI;
+    int w = nKV * hd;
+    int grp = (nKV > 0) ? (nH / nKV) : 1;
+    
+    NSUInteger normTG = psoDNorm.maxTotalThreadsPerThreadgroup;
+    if (normTG > 256) normTG = 256;
+    NSUInteger p = 1; while (p*2 <= normTG) p *= 2; normTG = p;
+    
+    NSUInteger spl = 8;
+    NSUInteger maxAttnTG = psoDAttn.maxTotalThreadsPerThreadgroup / 32;
+    if (spl > maxAttnTG) spl = maxAttnTG; if (spl == 0) spl = 1;
+    
+    int slot = 0;
+    for (int l = 0; l < gDecNL; l++) {
+        DecLayer L_ = gDecL[l];
+        add_res(gKVk[l]);
+        add_res(gKVv[l]);
+        
+        int qb = gDecAttnBias ? L_.qb : -1;
+        int kb = gDecAttnBias ? L_.kb : -1;
+        int vb = gDecAttnBias ? L_.vb : -1;
+        
+        // 0. InNorm
+        {
+            DecNormConst nc = {(uint32_t)H, gDecEps, {0, 0}};
+            NSUInteger off = ALLOC_CONST(DecNormConst, nc);
+            add_res(wbufOfDec(L_.inNorm));
+            
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDNorm];
+            [cmd setKernelBuffer:gDecXb offset:0 atIndex:0];
+            [cmd setKernelBuffer:wbufOfDec(L_.inNorm) offset:0 atIndex:1];
+            [cmd setKernelBuffer:gDecXn offset:0 atIndex:2];
+            [cmd setKernelBuffer:gDecConstBuf offset:off atIndex:3];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 4 atIndex:4];
+            [cmd setThreadgroupMemoryLength:(NSUInteger)(normTG * 4) atIndex:0];
+            [cmd concurrentDispatchThreadgroups:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(normTG,1,1)];
+            slot++;
+        }
+        
+        // 1. Q GEMV
+        {
+            int out, in, nblk; mg_q8_dims(L_.q, &out, &in, &nblk);
+            int hasBias = (qb >= 0) ? 1 : 0;
+            DecGemvConst gc = {nblk, out, hasBias, 0};
+            NSUInteger off = ALLOC_CONST(DecGemvConst, gc);
+            add_res(mg_q8_codes_buf(L_.q));
+            add_res(gDecSF16[L_.q]);
+            id<MTLBuffer> bBuf = hasBias ? wbufOfDec(qb) : mg_q8_scales_buf(L_.q);
+            add_res(bBuf);
+            
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDGemv];
+            [cmd setKernelBuffer:mg_q8_codes_buf(L_.q) offset:0 atIndex:0];
+            [cmd setKernelBuffer:gDecSF16[L_.q] offset:0 atIndex:1];
+            [cmd setKernelBuffer:gDecXn offset:0 atIndex:2];
+            [cmd setKernelBuffer:gDecQb offset:0 atIndex:3];
+            [cmd setKernelBuffer:gDecConstBuf offset:off atIndex:4];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 4 atIndex:5];
+            [cmd setKernelBuffer:bBuf offset:0 atIndex:6];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 8 atIndex:7];
+            NSUInteger ntg = (NSUInteger)((out + 7) / 8);
+            [cmd concurrentDispatchThreadgroups:MTLSizeMake(ntg,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];
+            slot++;
+        }
+        
+        // 2. K GEMV
+        {
+            gDecDynSlots[l].k_slot = slot;
+            int out, in, nblk; mg_q8_dims(L_.k, &out, &in, &nblk);
+            int hasBias = (kb >= 0) ? 1 : 0;
+            DecGemvConst gc = {nblk, out, hasBias, 0};
+            NSUInteger off = ALLOC_CONST(DecGemvConst, gc);
+            add_res(mg_q8_codes_buf(L_.k));
+            add_res(gDecSF16[L_.k]);
+            id<MTLBuffer> bBuf = hasBias ? wbufOfDec(kb) : mg_q8_scales_buf(L_.k);
+            add_res(bBuf);
+            
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDGemv];
+            [cmd setKernelBuffer:mg_q8_codes_buf(L_.k) offset:0 atIndex:0];
+            [cmd setKernelBuffer:gDecSF16[L_.k] offset:0 atIndex:1];
+            [cmd setKernelBuffer:gDecXn offset:0 atIndex:2];
+            [cmd setKernelBuffer:gKVk[l] offset:0 atIndex:3];
+            [cmd setKernelBuffer:gDecConstBuf offset:off atIndex:4];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 4 atIndex:5];
+            [cmd setKernelBuffer:bBuf offset:0 atIndex:6];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 8 atIndex:7];
+            NSUInteger ntg = (NSUInteger)((out + 7) / 8);
+            [cmd concurrentDispatchThreadgroups:MTLSizeMake(ntg,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];
+            slot++;
+        }
+        
+        // 3. V GEMV
+        {
+            gDecDynSlots[l].v_slot = slot;
+            int out, in, nblk; mg_q8_dims(L_.v, &out, &in, &nblk);
+            int hasBias = (vb >= 0) ? 1 : 0;
+            DecGemvConst gc = {nblk, out, hasBias, 0};
+            NSUInteger off = ALLOC_CONST(DecGemvConst, gc);
+            add_res(mg_q8_codes_buf(L_.v));
+            add_res(gDecSF16[L_.v]);
+            id<MTLBuffer> bBuf = hasBias ? wbufOfDec(vb) : mg_q8_scales_buf(L_.v);
+            add_res(bBuf);
+            
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDGemv];
+            [cmd setKernelBuffer:mg_q8_codes_buf(L_.v) offset:0 atIndex:0];
+            [cmd setKernelBuffer:gDecSF16[L_.v] offset:0 atIndex:1];
+            [cmd setKernelBuffer:gDecXn offset:0 atIndex:2];
+            [cmd setKernelBuffer:gKVv[l] offset:0 atIndex:3];
+            [cmd setKernelBuffer:gDecConstBuf offset:off atIndex:4];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 4 atIndex:5];
+            [cmd setKernelBuffer:bBuf offset:0 atIndex:6];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 8 atIndex:7];
+            NSUInteger ntg = (NSUInteger)((out + 7) / 8);
+            [cmd concurrentDispatchThreadgroups:MTLSizeMake(ntg,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];
+            slot++;
+        }
+        
+        // 4. RoPE Q
+        {
+            DecRopeConst rc = {(uint32_t)nH, (uint32_t)hd, gDecTheta, 0};
+            NSUInteger off = ALLOC_CONST(DecRopeConst, rc);
+            
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDRope];
+            [cmd setKernelBuffer:gDecQb offset:0 atIndex:0];
+            [cmd setKernelBuffer:gDecConstBuf offset:off atIndex:1];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 4 atIndex:2];
+            [cmd setKernelBuffer:gDecStepBuf offset:0 atIndex:3];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 8 atIndex:4];
+            NSUInteger n = (NSUInteger)nH * (hd / 2);
+            NSUInteger tg = psoDRope.maxTotalThreadsPerThreadgroup;
+            if (tg > n) tg = n; if (tg == 0) tg = 1;
+            [cmd concurrentDispatchThreads:MTLSizeMake(n,1,1) threadsPerThreadgroup:MTLSizeMake(tg,1,1)];
+            slot++;
+        }
+        
+        // 5. RoPE K
+        {
+            gDecDynSlots[l].rope_k_slot = slot;
+            DecRopeConst rc = {(uint32_t)nKV, (uint32_t)hd, gDecTheta, 0};
+            NSUInteger off = ALLOC_CONST(DecRopeConst, rc);
+            
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDRope];
+            [cmd setKernelBuffer:gKVk[l] offset:0 atIndex:0];
+            [cmd setKernelBuffer:gDecConstBuf offset:off atIndex:1];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 4 atIndex:2];
+            [cmd setKernelBuffer:gDecStepBuf offset:0 atIndex:3];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 8 atIndex:4];
+            NSUInteger n = (NSUInteger)nKV * (hd / 2);
+            NSUInteger tg = psoDRope.maxTotalThreadsPerThreadgroup;
+            if (tg > n) tg = n; if (tg == 0) tg = 1;
+            [cmd concurrentDispatchThreads:MTLSizeMake(n,1,1) threadsPerThreadgroup:MTLSizeMake(tg,1,1)];
+            slot++;
+        }
+        
+        // 6. Attention
+        {
+            DecAttnConst ac = {(uint32_t)nH, (uint32_t)hd, (uint32_t)w, (uint32_t)grp, gDecScale, {0,0,0}};
+            NSUInteger off = ALLOC_CONST(DecAttnConst, ac);
+            
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDAttn];
+            [cmd setKernelBuffer:gDecQb offset:0 atIndex:0];
+            [cmd setKernelBuffer:gKVk[l] offset:0 atIndex:1];
+            [cmd setKernelBuffer:gKVv[l] offset:0 atIndex:2];
+            [cmd setKernelBuffer:gDecAttn offset:0 atIndex:3];
+            [cmd setKernelBuffer:gDecStepBuf offset:4 atIndex:4];
+            [cmd setKernelBuffer:gDecConstBuf offset:off atIndex:5];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 4 atIndex:6];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 8 atIndex:7];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 12 atIndex:8];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 16 atIndex:9];
+            [cmd setThreadgroupMemoryLength:(NSUInteger)(spl * (hd + 2) * 4) atIndex:0];
+            [cmd concurrentDispatchThreadgroups:MTLSizeMake((NSUInteger)nH,1,1) threadsPerThreadgroup:MTLSizeMake(spl*32,1,1)];
+            slot++;
+        }
+        
+        // 7. O GEMV
+        {
+            int out, in, nblk; mg_q8_dims(L_.o, &out, &in, &nblk);
+            DecGemvConst gc = {nblk, out, 0, 0};
+            NSUInteger off = ALLOC_CONST(DecGemvConst, gc);
+            add_res(mg_q8_codes_buf(L_.o));
+            add_res(gDecSF16[L_.o]);
+            
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDGemv];
+            [cmd setKernelBuffer:mg_q8_codes_buf(L_.o) offset:0 atIndex:0];
+            [cmd setKernelBuffer:gDecSF16[L_.o] offset:0 atIndex:1];
+            [cmd setKernelBuffer:gDecAttn offset:0 atIndex:2];
+            [cmd setKernelBuffer:gDecTmpH offset:0 atIndex:3];
+            [cmd setKernelBuffer:gDecConstBuf offset:off atIndex:4];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 4 atIndex:5];
+            [cmd setKernelBuffer:mg_q8_scales_buf(L_.o) offset:0 atIndex:6];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 8 atIndex:7];
+            NSUInteger ntg = (NSUInteger)((out + 7) / 8);
+            [cmd concurrentDispatchThreadgroups:MTLSizeMake(ntg,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];
+            slot++;
+        }
+        
+        // 8. Residual Add 1
+        {
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDAdd];
+            [cmd setKernelBuffer:gDecXb offset:0 atIndex:0];
+            [cmd setKernelBuffer:gDecTmpH offset:0 atIndex:1];
+            NSUInteger n = (NSUInteger)H;
+            NSUInteger tg = psoDAdd.maxTotalThreadsPerThreadgroup;
+            if (tg > n) tg = n; if (tg == 0) tg = 1;
+            [cmd concurrentDispatchThreads:MTLSizeMake(n,1,1) threadsPerThreadgroup:MTLSizeMake(tg,1,1)];
+            slot++;
+        }
+        
+        // 9. Post RMSNorm
+        {
+            DecNormConst nc = {(uint32_t)H, gDecEps, {0, 0}};
+            NSUInteger off = ALLOC_CONST(DecNormConst, nc);
+            add_res(wbufOfDec(L_.postNorm));
+            
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDNorm];
+            [cmd setKernelBuffer:gDecXb offset:0 atIndex:0];
+            [cmd setKernelBuffer:wbufOfDec(L_.postNorm) offset:0 atIndex:1];
+            [cmd setKernelBuffer:gDecXn2 offset:0 atIndex:2];
+            [cmd setKernelBuffer:gDecConstBuf offset:off atIndex:3];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 4 atIndex:4];
+            [cmd setThreadgroupMemoryLength:(NSUInteger)(normTG * 4) atIndex:0];
+            [cmd concurrentDispatchThreadgroups:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(normTG,1,1)];
+            slot++;
+        }
+        
+        // 10. Gate GEMV
+        {
+            int out, in, nblk; mg_q8_dims(L_.gate, &out, &in, &nblk);
+            DecGemvConst gc = {nblk, out, 0, 0};
+            NSUInteger off = ALLOC_CONST(DecGemvConst, gc);
+            add_res(mg_q8_codes_buf(L_.gate));
+            add_res(gDecSF16[L_.gate]);
+            
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDGemv];
+            [cmd setKernelBuffer:mg_q8_codes_buf(L_.gate) offset:0 atIndex:0];
+            [cmd setKernelBuffer:gDecSF16[L_.gate] offset:0 atIndex:1];
+            [cmd setKernelBuffer:gDecXn2 offset:0 atIndex:2];
+            [cmd setKernelBuffer:gDecGb offset:0 atIndex:3];
+            [cmd setKernelBuffer:gDecConstBuf offset:off atIndex:4];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 4 atIndex:5];
+            [cmd setKernelBuffer:mg_q8_scales_buf(L_.gate) offset:0 atIndex:6];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 8 atIndex:7];
+            NSUInteger ntg = (NSUInteger)((out + 7) / 8);
+            [cmd concurrentDispatchThreadgroups:MTLSizeMake(ntg,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];
+            slot++;
+        }
+        
+        // 11. Up GEMV
+        {
+            int out, in, nblk; mg_q8_dims(L_.up, &out, &in, &nblk);
+            DecGemvConst gc = {nblk, out, 0, 0};
+            NSUInteger off = ALLOC_CONST(DecGemvConst, gc);
+            add_res(mg_q8_codes_buf(L_.up));
+            add_res(gDecSF16[L_.up]);
+            
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDGemv];
+            [cmd setKernelBuffer:mg_q8_codes_buf(L_.up) offset:0 atIndex:0];
+            [cmd setKernelBuffer:gDecSF16[L_.up] offset:0 atIndex:1];
+            [cmd setKernelBuffer:gDecXn2 offset:0 atIndex:2];
+            [cmd setKernelBuffer:gDecUb offset:0 atIndex:3];
+            [cmd setKernelBuffer:gDecConstBuf offset:off atIndex:4];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 4 atIndex:5];
+            [cmd setKernelBuffer:mg_q8_scales_buf(L_.up) offset:0 atIndex:6];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 8 atIndex:7];
+            NSUInteger ntg = (NSUInteger)((out + 7) / 8);
+            [cmd concurrentDispatchThreadgroups:MTLSizeMake(ntg,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];
+            slot++;
+        }
+        
+        // 12. SwiGLU
+        {
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDSilu];
+            [cmd setKernelBuffer:gDecGb offset:0 atIndex:0];
+            [cmd setKernelBuffer:gDecUb offset:0 atIndex:1];
+            NSUInteger n = (NSUInteger)Im;
+            NSUInteger tg = psoDSilu.maxTotalThreadsPerThreadgroup;
+            if (tg > n) tg = n; if (tg == 0) tg = 1;
+            [cmd concurrentDispatchThreads:MTLSizeMake(n,1,1) threadsPerThreadgroup:MTLSizeMake(tg,1,1)];
+            slot++;
+        }
+        
+        // 13. Down GEMV
+        {
+            int out, in, nblk; mg_q8_dims(L_.down, &out, &in, &nblk);
+            DecGemvConst gc = {nblk, out, 0, 0};
+            NSUInteger off = ALLOC_CONST(DecGemvConst, gc);
+            add_res(mg_q8_codes_buf(L_.down));
+            add_res(gDecSF16[L_.down]);
+            
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDGemv];
+            [cmd setKernelBuffer:mg_q8_codes_buf(L_.down) offset:0 atIndex:0];
+            [cmd setKernelBuffer:gDecSF16[L_.down] offset:0 atIndex:1];
+            [cmd setKernelBuffer:gDecGb offset:0 atIndex:2];
+            [cmd setKernelBuffer:gDecTmpH offset:0 atIndex:3];
+            [cmd setKernelBuffer:gDecConstBuf offset:off atIndex:4];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 4 atIndex:5];
+            [cmd setKernelBuffer:mg_q8_scales_buf(L_.down) offset:0 atIndex:6];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 8 atIndex:7];
+            NSUInteger ntg = (NSUInteger)((out + 7) / 8);
+            [cmd concurrentDispatchThreadgroups:MTLSizeMake(ntg,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];
+            slot++;
+        }
+        
+        // 14. Residual Add 2
+        {
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDAdd];
+            [cmd setKernelBuffer:gDecXb offset:0 atIndex:0];
+            [cmd setKernelBuffer:gDecTmpH offset:0 atIndex:1];
+            NSUInteger n = (NSUInteger)H;
+            NSUInteger tg = psoDAdd.maxTotalThreadsPerThreadgroup;
+            if (tg > n) tg = n; if (tg == 0) tg = 1;
+            [cmd concurrentDispatchThreads:MTLSizeMake(n,1,1) threadsPerThreadgroup:MTLSizeMake(tg,1,1)];
+            slot++;
+        }
+    }
+    
+    // Head operations
+    if (hasHead) {
+        // Final Norm
+        {
+            DecNormConst nc = {(uint32_t)H, gDecEps, {0, 0}};
+            NSUInteger off = ALLOC_CONST(DecNormConst, nc);
+            add_res(wbufOfDec(gDecFinalNorm));
+            
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDNorm];
+            [cmd setKernelBuffer:gDecXb offset:0 atIndex:0];
+            [cmd setKernelBuffer:wbufOfDec(gDecFinalNorm) offset:0 atIndex:1];
+            [cmd setKernelBuffer:gDecXn offset:0 atIndex:2];
+            [cmd setKernelBuffer:gDecConstBuf offset:off atIndex:3];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 4 atIndex:4];
+            [cmd setThreadgroupMemoryLength:(NSUInteger)(normTG * 4) atIndex:0];
+            [cmd concurrentDispatchThreadgroups:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(normTG,1,1)];
+            slot++;
+        }
+        
+        // Head GEMV
+        {
+            int out, in, nblk; mg_q8_dims(gDecHead, &out, &in, &nblk);
+            DecGemvConst gc = {nblk, out, 0, 0};
+            NSUInteger off = ALLOC_CONST(DecGemvConst, gc);
+            add_res(mg_q8_codes_buf(gDecHead));
+            add_res(gDecSF16[gDecHead]);
+            
+            id<MTLIndirectComputeCommand> cmd = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)slot];
+            [cmd setBarrier];
+            [cmd setComputePipelineState:psoDGemv];
+            [cmd setKernelBuffer:mg_q8_codes_buf(gDecHead) offset:0 atIndex:0];
+            [cmd setKernelBuffer:gDecSF16[gDecHead] offset:0 atIndex:1];
+            [cmd setKernelBuffer:gDecXn offset:0 atIndex:2];
+            [cmd setKernelBuffer:gDecLogitBuf offset:0 atIndex:3];
+            [cmd setKernelBuffer:gDecConstBuf offset:off atIndex:4];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 4 atIndex:5];
+            [cmd setKernelBuffer:mg_q8_scales_buf(gDecHead) offset:0 atIndex:6];
+            [cmd setKernelBuffer:gDecConstBuf offset:off + 8 atIndex:7];
+            NSUInteger ntg = (NSUInteger)((out + 7) / 8);
+            [cmd concurrentDispatchThreadgroups:MTLSizeMake(ntg,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];
+            slot++;
+        }
+    }
+    
+    #undef ALLOC_CONST
+    
+    gDecICBCmdCount = slot;
+    gDecICBBuilt = 1;
+    return 1;
+}
+
+void mg_decode_set_mode(int mode) {
+    gDecDispatchMode = mode;
+}
+
+int mg_decode_get_mode(void) {
+    return gDecDispatchMode;
+}
+
+int mg_decode_icb_supported(void) {
+    if (!dec_init()) return 0;
+    if (gDev == nil) return 0;
+    MTLIndirectCommandBufferDescriptor *desc = [[MTLIndirectCommandBufferDescriptor alloc] init];
+    desc.commandTypes = MTLIndirectCommandTypeConcurrentDispatch | MTLIndirectCommandTypeConcurrentDispatchThreads;
+    desc.inheritBuffers = NO;
+    desc.inheritPipelineState = NO;
+    desc.maxKernelBufferBindCount = 16;
+    id<MTLIndirectCommandBuffer> icb = [gDev newIndirectCommandBufferWithDescriptor:desc maxCommandCount:1 options:MTLResourceStorageModeShared];
+    return (icb != nil) ? 1 : 0;
+}
+
+// mg_decode_step_receipt runs one decode token and returns execution receipts for performance analysis.
+int mg_decode_step_receipt(const float *xEmbed, const float *Kctx, const float *Vctx, int L,
+                           float *lastPre, float *newKraw, float *newKpost, float *newV, float *logits,
+                           int seedFlag, int dispatchMode, mg_decode_receipt *receipt) {
     if (!dec_init()) return 0;
     int prof = getenv("FAK_DECODE_PROF") != NULL;
     CFTimeInterval t0 = prof ? CFAbsoluteTimeGetCurrent() : 0;
     @autoreleasepool {
         int H = gDecH, hd = gDecHd, nH = gDecNH, nKV = gDecNKV, Im = gDecI, w = nKV*hd, qrow = nH*hd;
         int ctx = L + 1;
-
-        id<MTLBuffer> Xb = dbuf(H);
-        mg_f32_to_f16(xEmbed, (__fp16 *)Xb.contents, (long)H);
-        id<MTLBuffer> Xn = dbuf(H), Xn2 = dbuf(H);
-        id<MTLBuffer> Qb = dbuf(qrow);
-        id<MTLBuffer> attn = dbuf(qrow), tmpH = dbuf(H), Gb = dbuf(Im), Ub = dbuf(Im);
-        int wantLogits = (logits != NULL && gDecHead >= 0 && gDecVocab > 0);
-        id<MTLBuffer> logitBuf = wantLogits ? dbuf(gDecVocab) : nil;
-        // per-layer resident KV: the context rows 0..L plus room for the new row at index L. The
-        // K/V projections write straight into row L (no temp, no blit), so the whole token stays in
-        // ONE compute encoder — Metal's default serial dispatch + automatic hazard tracking order
-        // the dependent kernels without an encoder switch.
         long rowOff = (long)L * w;
-        // Persistent KV: seed (upload the L context rows) when the caller passes Kctx, else append
-        // (the resident KV already holds L rows from prior steps). Decline an append whose length
-        // disagrees with the resident state, so the caller falls back to the CPU path for that token.
-        int seed = seedFlag;
+        int wantLogits = (logits != NULL && gDecHead >= 0 && gDecVocab > 0);
+
         kv_ensure(ctx);
-        if (seed) {
+        if (seedFlag) {
             if (L > 0 && Kctx != NULL) {
                 for (int l = 0; l < gDecNL; l++) {
                     mg_f32_to_f16(Kctx + (long)l*L*w, (__fp16 *)gKVk[l].contents, (long)L*w);
@@ -489,64 +1082,237 @@ int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, in
             }
             gKVLen = L;
         } else if (gKVLen != L) {
-            return 0; // append out of sync with the resident KV — let the caller re-seed via CPU
+            return 0;
         }
 
-        CFTimeInterval tHost = prof ? CFAbsoluteTimeGetCurrent() : 0;
+        dec_ensure_scratch(wantLogits);
+        id<MTLBuffer> Xb = gDecXb;
+        id<MTLBuffer> Xn = gDecXn, Xn2 = gDecXn2;
+        id<MTLBuffer> Qb = gDecQb;
+        id<MTLBuffer> attn = gDecAttn, tmpH = gDecTmpH, Gb = gDecGb, Ub = gDecUb;
+        id<MTLBuffer> logitBuf = wantLogits ? gDecLogitBuf : nil;
 
-        gDCB = [gQueue commandBuffer];
-        gDEnc = nil;
-        // Diagnostic: skip the elementwise kernels (norm/bias/RoPE/attn/SwiGLU/add) so only the seven
-        // projection GEMVs run. Output is garbage; this isolates the matmul (weight-stream) GPU time
-        // from the small-kernel overhead, to decide whether the parity lever is the GEMV bandwidth or
-        // fusing the small kernels.
+        mg_f32_to_f16(xEmbed, (__fp16 *)Xb.contents, (long)H);
+
+        int mode = (dispatchMode >= 0) ? dispatchMode : gDecDispatchMode;
         int matOnly = getenv("FAK_DECODE_MATMUL_ONLY") != NULL;
-        int noAttn  = getenv("FAK_DECODE_NO_ATTN") != NULL; // skip ONLY attention (isolate its cost)
+        int noAttn  = getenv("FAK_DECODE_NO_ATTN") != NULL;
 
-        for (int l = 0; l < gDecNL; l++) {
-            DecLayer L_ = gDecL[l];
-            int qb = gDecAttnBias ? L_.qb : -1, kb = gDecAttnBias ? L_.kb : -1, vb = gDecAttnBias ? L_.vb : -1;
-            if (!matOnly) d_norm(Xb, L_.inNorm, Xn);        // Xn = rmsnorm(X)
-            d_gemv(L_.q, Xn, Qb, 0, qb);                   // Q (+bias fused)
-            d_gemv(L_.k, Xn, gKVk[l], rowOff, kb);         // K written straight to resident row L (+bias)
-            d_gemv(L_.v, Xn, gKVv[l], rowOff, vb);         // V written straight to resident row L (+bias)
-            if (!matOnly) {
-                d_rope_at(Qb, nH, L, 0);                    // RoPE Q
-                d_rope_at(gKVk[l], nKV, L, rowOff);        // RoPE the new K row in place
-                if (!noAttn) d_attn(Qb, gKVk[l], gKVv[l], attn, ctx); // single-query attention over ctx keys
+        // Fall back to direct mode if ICB is requested but unsupported or matOnly/noAttn diagnostics active
+        if (mode == MG_DECODE_MODE_ICB && (matOnly || noAttn || !dec_build_icb(wantLogits))) {
+            mode = MG_DECODE_MODE_DIRECT_ONE_CB;
+        }
+
+        CFTimeInterval tEncodeStart = CFAbsoluteTimeGetCurrent();
+
+        if (mode == MG_DECODE_MODE_ICB) {
+            // Update dynamic parameters in gDecStepBuf
+            uint32_t *dyn = (uint32_t *)gDecStepBuf.contents;
+            dyn[0] = (uint32_t)L;
+            dyn[1] = (uint32_t)(L + 1);
+
+            // Update per-layer dynamic offsets in ICB
+            NSUInteger byteOff = (NSUInteger)(rowOff * 2);
+            for (int l = 0; l < gDecNL; l++) {
+                id<MTLIndirectComputeCommand> cmdK = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)gDecDynSlots[l].k_slot];
+                [cmdK setKernelBuffer:gKVk[l] offset:byteOff atIndex:3];
+
+                id<MTLIndirectComputeCommand> cmdV = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)gDecDynSlots[l].v_slot];
+                [cmdV setKernelBuffer:gKVv[l] offset:byteOff atIndex:3];
+
+                id<MTLIndirectComputeCommand> cmdRopeK = [gDecICB indirectComputeCommandAtIndex:(NSUInteger)gDecDynSlots[l].rope_k_slot];
+                [cmdRopeK setKernelBuffer:gKVk[l] offset:byteOff atIndex:0];
             }
-            d_gemv(L_.o, attn, tmpH, 0, -1);               // O
-            if (!matOnly) d_add_buf(Xb, tmpH, H);           // X += O
-            if (!matOnly) d_norm(Xb, L_.postNorm, Xn2);    // Xn2 = rmsnorm(X)
-            d_gemv(L_.gate, Xn2, Gb, 0, -1);               // gate
-            d_gemv(L_.up, Xn2, Ub, 0, -1);                 // up
-            if (!matOnly) d_silu(Gb, Ub, Im);               // G = silu(G)*U
-            d_gemv(L_.down, Gb, tmpH, 0, -1);              // down
-            if (!matOnly) d_add_buf(Xb, tmpH, H);           // X += down
+
+            CFTimeInterval tEncodeEnd = CFAbsoluteTimeGetCurrent();
+
+            id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+            id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
+            [enc useResources:gDecResList count:(NSUInteger)gDecResCount usage:MTLResourceUsageRead | MTLResourceUsageWrite];
+            int activeCmds = gDecNL * 15 + ((wantLogits && gDecHead >= 0 && gDecVocab > 0) ? 2 : 0);
+            [enc executeCommandsInBuffer:gDecICB withRange:NSMakeRange(0, (NSUInteger)activeCmds)];
+            [enc endEncoding];
+
+            CFTimeInterval tWaitStart = CFAbsoluteTimeGetCurrent();
+            [cb commit];
+            [cb waitUntilCompleted];
+            CFTimeInterval tWaitEnd = CFAbsoluteTimeGetCurrent();
+
+            double gpuMs = 0;
+            if (cb.status == MTLCommandBufferStatusCompleted) {
+                gpuMs = (cb.GPUEndTime - cb.GPUStartTime) * 1000.0;
+            }
+
+            if (receipt != NULL) {
+                receipt->command_buffers = 1;
+                receipt->encoders = 1;
+                receipt->icb_dispatches = activeCmds;
+                receipt->contiguous_blocks = 1;
+                receipt->host_encode_ms = (tEncodeEnd - tEncodeStart) * 1000.0;
+                receipt->host_wait_ms = (tWaitEnd - tWaitStart) * 1000.0;
+                receipt->gpu_ms = gpuMs;
+                receipt->total_ms = (tWaitEnd - tEncodeStart) * 1000.0;
+                receipt->icb_used = 1;
+                receipt->mode = MG_DECODE_MODE_ICB;
+            }
+        } else if (mode == MG_DECODE_MODE_MULTI_CB) {
+            double totalWaitMs = 0;
+            double totalGpuMs = 0;
+            int totalCBs = 0;
+
+            for (int l = 0; l < gDecNL; l++) {
+                DecLayer L_ = gDecL[l];
+                int qb = gDecAttnBias ? L_.qb : -1, kb = gDecAttnBias ? L_.kb : -1, vb = gDecAttnBias ? L_.vb : -1;
+
+                // CB 1: Attention block
+                {
+                    id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+                    id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+                    if (!matOnly) d_norm_e(e, Xb, L_.inNorm, Xn);
+                    d_gemv_e(e, L_.q, Xn, Qb, 0, qb);
+                    d_gemv_e(e, L_.k, Xn, gKVk[l], rowOff, kb);
+                    d_gemv_e(e, L_.v, Xn, gKVv[l], rowOff, vb);
+                    if (!matOnly) {
+                        d_rope_at_e(e, Qb, nH, L, 0);
+                        d_rope_at_e(e, gKVk[l], nKV, L, rowOff);
+                        if (!noAttn) d_attn_e(e, Qb, gKVk[l], gKVv[l], attn, ctx);
+                    }
+                    d_gemv_e(e, L_.o, attn, tmpH, 0, -1);
+                    if (!matOnly) d_add_buf_e(e, Xb, tmpH, H);
+                    [e endEncoding];
+                    CFTimeInterval w0 = CFAbsoluteTimeGetCurrent();
+                    [cb commit];
+                    [cb waitUntilCompleted];
+                    CFTimeInterval w1 = CFAbsoluteTimeGetCurrent();
+                    totalWaitMs += (w1 - w0) * 1000.0;
+                    if (cb.status == MTLCommandBufferStatusCompleted) totalGpuMs += (cb.GPUEndTime - cb.GPUStartTime) * 1000.0;
+                    totalCBs++;
+                }
+
+                // CB 2: MLP block
+                {
+                    id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+                    id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+                    if (!matOnly) d_norm_e(e, Xb, L_.postNorm, Xn2);
+                    d_gemv_e(e, L_.gate, Xn2, Gb, 0, -1);
+                    d_gemv_e(e, L_.up, Xn2, Ub, 0, -1);
+                    if (!matOnly) d_silu_e(e, Gb, Ub, Im);
+                    d_gemv_e(e, L_.down, Gb, tmpH, 0, -1);
+                    if (!matOnly) d_add_buf_e(e, Xb, tmpH, H);
+                    [e endEncoding];
+                    CFTimeInterval w0 = CFAbsoluteTimeGetCurrent();
+                    [cb commit];
+                    [cb waitUntilCompleted];
+                    CFTimeInterval w1 = CFAbsoluteTimeGetCurrent();
+                    totalWaitMs += (w1 - w0) * 1000.0;
+                    if (cb.status == MTLCommandBufferStatusCompleted) totalGpuMs += (cb.GPUEndTime - cb.GPUStartTime) * 1000.0;
+                    totalCBs++;
+                }
+            }
+            if (wantLogits) {
+                id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+                id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+                d_norm_e(e, Xb, gDecFinalNorm, Xn);
+                d_gemv_e(e, gDecHead, Xn, logitBuf, 0, -1);
+                [e endEncoding];
+                CFTimeInterval w0 = CFAbsoluteTimeGetCurrent();
+                [cb commit];
+                [cb waitUntilCompleted];
+                CFTimeInterval w1 = CFAbsoluteTimeGetCurrent();
+                totalWaitMs += (w1 - w0) * 1000.0;
+                if (cb.status == MTLCommandBufferStatusCompleted) totalGpuMs += (cb.GPUEndTime - cb.GPUStartTime) * 1000.0;
+                totalCBs++;
+            }
+            CFTimeInterval tEnd = CFAbsoluteTimeGetCurrent();
+
+            if (receipt != NULL) {
+                receipt->command_buffers = totalCBs;
+                receipt->encoders = totalCBs;
+                receipt->icb_dispatches = 0;
+                receipt->contiguous_blocks = 0;
+                receipt->host_encode_ms = (tEnd - tEncodeStart) * 1000.0 - totalWaitMs;
+                receipt->host_wait_ms = totalWaitMs;
+                receipt->gpu_ms = totalGpuMs;
+                receipt->total_ms = (tEnd - tEncodeStart) * 1000.0;
+                receipt->icb_used = 0;
+                receipt->mode = MG_DECODE_MODE_MULTI_CB;
+            }
+        } else {
+            // Direct one command buffer mode
+            gDCB = [gQueue commandBuffer];
+            gDEnc = nil;
+
+            for (int l = 0; l < gDecNL; l++) {
+                DecLayer L_ = gDecL[l];
+                int qb = gDecAttnBias ? L_.qb : -1, kb = gDecAttnBias ? L_.kb : -1, vb = gDecAttnBias ? L_.vb : -1;
+                if (!matOnly) d_norm(Xb, L_.inNorm, Xn);
+                d_gemv(L_.q, Xn, Qb, 0, qb);
+                d_gemv(L_.k, Xn, gKVk[l], rowOff, kb);
+                d_gemv(L_.v, Xn, gKVv[l], rowOff, vb);
+                if (!matOnly) {
+                    d_rope_at(Qb, nH, L, 0);
+                    d_rope_at(gKVk[l], nKV, L, rowOff);
+                    if (!noAttn) d_attn(Qb, gKVk[l], gKVv[l], attn, ctx);
+                }
+                d_gemv(L_.o, attn, tmpH, 0, -1);
+                if (!matOnly) d_add_buf(Xb, tmpH, H);
+                if (!matOnly) d_norm(Xb, L_.postNorm, Xn2);
+                d_gemv(L_.gate, Xn2, Gb, 0, -1);
+                d_gemv(L_.up, Xn2, Ub, 0, -1);
+                if (!matOnly) d_silu(Gb, Ub, Im);
+                d_gemv(L_.down, Gb, tmpH, 0, -1);
+                if (!matOnly) d_add_buf(Xb, tmpH, H);
+            }
+            if (wantLogits) {
+                d_norm(Xb, gDecFinalNorm, Xn);
+                d_gemv(gDecHead, Xn, logitBuf, 0, -1);
+            }
+            dendEnc();
+            CFTimeInterval tEncodeEnd = CFAbsoluteTimeGetCurrent();
+
+            CFTimeInterval tWaitStart = CFAbsoluteTimeGetCurrent();
+            [gDCB commit];
+            [gDCB waitUntilCompleted];
+            CFTimeInterval tWaitEnd = CFAbsoluteTimeGetCurrent();
+
+            double gpuMs = 0;
+            if (gDCB.status == MTLCommandBufferStatusCompleted) {
+                gpuMs = (gDCB.GPUEndTime - gDCB.GPUStartTime) * 1000.0;
+            }
+
+            if (receipt != NULL) {
+                receipt->command_buffers = 1;
+                receipt->encoders = 1;
+                receipt->icb_dispatches = 0;
+                receipt->contiguous_blocks = 0;
+                receipt->host_encode_ms = (tEncodeEnd - tEncodeStart) * 1000.0;
+                receipt->host_wait_ms = (tWaitEnd - tWaitStart) * 1000.0;
+                receipt->gpu_ms = gpuMs;
+                receipt->total_ms = (tWaitEnd - tEncodeStart) * 1000.0;
+                receipt->icb_used = 0;
+                receipt->mode = MG_DECODE_MODE_DIRECT_ONE_CB;
+            }
+            gDCB = nil;
         }
-        if (wantLogits) {
-            d_norm(Xb, gDecFinalNorm, Xn);                  // Xn = final RMSNorm(X)
-            d_gemv(gDecHead, Xn, logitBuf, 0, -1);          // logits = head . Xn (on GPU)
-        }
-        dendEnc();
-        CFTimeInterval tEnc = prof ? CFAbsoluteTimeGetCurrent() : 0;
-        [gDCB commit];
-        [gDCB waitUntilCompleted];
+
         if (prof) {
-            CFTimeInterval tGpu = CFAbsoluteTimeGetCurrent();
-            fprintf(stderr, "[decode-prof L=%d] host(alloc+kvup)=%.2f encode=%.2f gpu=%.2f total=%.2f ms\n",
-                L, (tHost-t0)*1000.0, (tEnc-tHost)*1000.0, (tGpu-tEnc)*1000.0, (tGpu-t0)*1000.0);
+            CFTimeInterval tNow = CFAbsoluteTimeGetCurrent();
+            fprintf(stderr, "[decode-prof L=%d mode=%d] total=%.2f ms\n", L, mode, (tNow - t0) * 1000.0);
         }
 
         mg_f16_to_f32((const __fp16 *)Xb.contents, lastPre, (long)H);
         if (wantLogits) mg_f16_to_f32((const __fp16 *)logitBuf.contents, logits, (long)gDecVocab);
-        (void)newKraw; // the fast Q8 decode path keeps post-RoPE K/V but not pre-RoPE Kraw
+        (void)newKraw;
         for (int l = 0; l < gDecNL; l++) {
             mg_f16_to_f32((const __fp16 *)gKVk[l].contents + (long)L*w, newKpost + (long)l*w, (long)w);
             mg_f16_to_f32((const __fp16 *)gKVv[l].contents + (long)L*w, newV + (long)l*w, (long)w);
         }
-        gKVLen = L + 1; // the new row is now resident; the next step appends at row L+1
-        gDCB = nil;
+        gKVLen = L + 1;
         return 1;
     }
+}
+
+int mg_decode_step(const float *xEmbed, const float *Kctx, const float *Vctx, int L,
+                   float *lastPre, float *newKraw, float *newKpost, float *newV, float *logits, int seedFlag) {
+    return mg_decode_step_receipt(xEmbed, Kctx, Vctx, L, lastPre, newKraw, newKpost, newV, logits, seedFlag, -1, NULL);
 }

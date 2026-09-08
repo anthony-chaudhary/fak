@@ -41,6 +41,71 @@ func validTestPromptPacket() PromptTokenPacket {
 	}
 }
 
+func TestPromptPacketCompatibilityBaselines(t *testing.T) {
+	current, err := FreezePromptPacket(validTestPromptPacket())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := current.PacketDigest, "1e21b686d2db6699aa1f3cfe6678c4e1564f048354f5fc0979a0b8b4fbb4b61c"; got != want {
+		t.Fatalf("false/omitted v2 digest changed: got %s want %s", got, want)
+	}
+	currentJSON, err := ExportPromptPacket(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(currentJSON, []byte("ignore_eos")) {
+		t.Fatalf("false ignore_eos changed historical v2 bytes: %s", currentJSON)
+	}
+
+	legacy := validTestPromptPacket()
+	legacy.Schema = promptTokenPacketLegacySchema
+	legacy.TemplateDigest = ""
+	legacyTokens := slices.Clone(legacy.PromptTokenIDs)
+	digest, err := ComputePromptPacketDigest(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := digest, "a56bce496206b2203e6bbdc201526c675f80cbb06720a1ae78aafe656ec53c20"; got != want {
+		t.Fatalf("historical v1 digest changed: got %s want %s", got, want)
+	}
+	if !slices.Equal(legacy.PromptTokenIDs, legacyTokens) {
+		t.Fatalf("historical v1 token IDs changed: got %v want %v", legacy.PromptTokenIDs, legacyTokens)
+	}
+
+	ignoreEOS := validTestPromptPacket()
+	ignoreEOS.GenerationControls.IgnoreEOS = true
+	ignoreEOS, err = FreezePromptPacket(ignoreEOS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ignoreEOS.PacketDigest == current.PacketDigest {
+		t.Fatal("ignore_eos=true did not change the packet digest")
+	}
+	ignoreJSON, err := ExportPromptPacket(ignoreEOS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(ignoreJSON, []byte(`"ignore_eos": true`)) {
+		t.Fatalf("ignore_eos=true absent from exported packet: %s", ignoreJSON)
+	}
+	imported, err := ImportPromptPacket(ignoreJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !imported.GenerationControls.IgnoreEOS || imported.PacketDigest != ignoreEOS.PacketDigest {
+		t.Fatalf("ignore_eos round trip lost its digest-bound value: %+v", imported.GenerationControls)
+	}
+
+	legacy.GenerationControls.IgnoreEOS = true
+	legacy.PacketDigest, err = ComputePromptPacketDigest(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyPromptPacket(legacy); err == nil || !strings.Contains(err.Error(), "legacy prompt packet") {
+		t.Fatalf("legacy v1 packet claimed ignore_eos: %v", err)
+	}
+}
+
 func TestDerivePromptPacketGGUFIdentityPinnedQwen38Header(t *testing.T) {
 	compressed, err := os.ReadFile(filepath.Join("..", "ggufload", "testdata", "qwen38_ud_q2kxl_header.gguf.gz"))
 	if err != nil {
@@ -129,7 +194,7 @@ func TestDerivePromptPacketGGUFIdentityPinnedQwen38Header(t *testing.T) {
 	mergeItems[0].Value = mergeItems[0].Value.(string) + "x"
 	merges.Value = mergeItems
 	mutatedTokenizer.Metadata["tokenizer.ggml.merges"] = merges
-	mutated, err := derivePromptPacketGGUFIdentity(mutatedTokenizer)
+	mutated, err := DerivePromptPacketGGUFIdentityFromFile(mutatedTokenizer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +206,7 @@ func TestDerivePromptPacketGGUFIdentityPinnedQwen38Header(t *testing.T) {
 	chatTemplate := mutatedTemplate.Metadata["tokenizer.chat_template"]
 	chatTemplate.Value = chatTemplate.Value.(string) + "\n"
 	mutatedTemplate.Metadata["tokenizer.chat_template"] = chatTemplate
-	mutated, err = derivePromptPacketGGUFIdentity(mutatedTemplate)
+	mutated, err = DerivePromptPacketGGUFIdentityFromFile(mutatedTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +217,7 @@ func TestDerivePromptPacketGGUFIdentityPinnedQwen38Header(t *testing.T) {
 	for _, missing := range []string{"tokenizer.chat_template", "tokenizer.ggml.pre"} {
 		incomplete := cloneGGUFHeader(gg)
 		delete(incomplete.Metadata, missing)
-		if _, err := derivePromptPacketGGUFIdentity(incomplete); err == nil {
+		if _, err := DerivePromptPacketGGUFIdentityFromFile(incomplete); err == nil {
 			t.Fatalf("missing %s was accepted", missing)
 		}
 	}
@@ -307,6 +372,12 @@ func TestPromptPacketHashingAndTamperingDetection(t *testing.T) {
 			name: "tamper max output tokens",
 			mutate: func(p *PromptTokenPacket) {
 				p.GenerationControls.MaxOutputTokens = 256
+			},
+		},
+		{
+			name: "tamper ignore EOS",
+			mutate: func(p *PromptTokenPacket) {
+				p.GenerationControls.IgnoreEOS = !p.GenerationControls.IgnoreEOS
 			},
 		},
 		{
@@ -571,6 +642,19 @@ func TestPromptPacketArmAttestationRejection(t *testing.T) {
 			t.Fatalf("expected stop tokens mismatch, got: %v", err)
 		}
 	})
+
+	t.Run("ignore EOS differs", func(t *testing.T) {
+		mismatched := orig
+		mismatched.GenerationControls.IgnoreEOS = true
+		frozenMismatched, err := FreezePromptPacket(mismatched)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = ValidatePromptPacketAttestation(frozenCandidate, frozenMismatched)
+		if err == nil || !strings.Contains(err.Error(), "generation controls mismatch") {
+			t.Fatalf("expected ignore-EOS generation mismatch, got: %v", err)
+		}
+	})
 }
 
 func TestPromptPacketArmReceiptAttestation(t *testing.T) {
@@ -648,6 +732,14 @@ func TestPromptPacketArmReceiptAttestation(t *testing.T) {
 		badRef.TemplateDigest = "6666666666666666666666666666666666666666666666666666666666666666"
 		if err := ValidateArmPromptPacketAttestation(cand, badRef); err == nil || !strings.Contains(err.Error(), "does not bind embedded packet") {
 			t.Fatalf("expected outer receipt binding error, got %v", err)
+		}
+	})
+
+	t.Run("outer receipt ignore EOS cannot disagree with embedded packet", func(t *testing.T) {
+		badRef := ref
+		badRef.IgnoreEOS = !frozenPacket.GenerationControls.IgnoreEOS
+		if err := ValidateArmPromptPacketAttestation(cand, badRef); err == nil || !strings.Contains(err.Error(), "ignore-EOS policy") {
+			t.Fatalf("expected outer receipt ignore-EOS binding error, got %v", err)
 		}
 	})
 }

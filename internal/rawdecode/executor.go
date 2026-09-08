@@ -21,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/qwen38quantrun"
 )
 
 // Request is the complete, explicit input to one real raw-decode execution.
@@ -110,21 +111,26 @@ type BackendObservation struct {
 // Execution is the device-free observation produced by the real orchestration
 // path. It intentionally has no source, binary, device, memory, or counter fields.
 type Execution struct {
-	ArtifactSHA256 string
-	ModelName      string
-	ModelConfig    model.Config
-	Engine         string
-	Precision      string
-	Backend        BackendObservation
-	LoadDuration   time.Duration
-	QuantDuration  time.Duration
-	PromptTokenIDs []int
-	ContextLimit   int
-	GeneratedLimit int
-	IgnoreEOS      bool
-	FiniteLogits   bool
-	CPUModelParity *bool
-	Runs           []Run
+	ArtifactPath          string
+	ArtifactSHA256        string
+	TensorInventorySHA256 string
+	TokenizerSHA256       string
+	TemplateSHA256        string
+	Quantization          string
+	ModelName             string
+	ModelConfig           model.Config
+	Engine                string
+	Precision             string
+	Backend               BackendObservation
+	LoadDuration          time.Duration
+	QuantDuration         time.Duration
+	PromptTokenIDs        []int
+	ContextLimit          int
+	GeneratedLimit        int
+	IgnoreEOS             bool
+	FiniteLogits          bool
+	CPUModelParity        *bool
+	Runs                  []Run
 }
 
 type session interface {
@@ -142,11 +148,12 @@ type loadedModel interface {
 }
 
 type dependencies struct {
-	openArtifact   func(string) (io.ReadCloser, error)
-	loadModel      func(context.Context, Request) (loadedModel, string, error)
-	resolveBackend func(Request) (compute.Backend, BackendObservation, error)
-	now            func() time.Time
-	since          func(time.Time) time.Duration
+	openArtifact    func(string) (io.ReadCloser, error)
+	inspectArtifact func(string, func(string) (io.ReadCloser, error)) (artifactObservation, error)
+	loadModel       func(context.Context, Request) (loadedModel, string, error)
+	resolveBackend  func(Request) (compute.Backend, BackendObservation, error)
+	now             func() time.Time
+	since           func(time.Time) time.Duration
 }
 
 // Execute hashes and loads the selected artifact, resolves the registered
@@ -157,8 +164,9 @@ func Execute(ctx context.Context, req Request) (Execution, error) {
 
 func defaultDependencies() dependencies {
 	return dependencies{
-		openArtifact: func(path string) (io.ReadCloser, error) { return os.Open(path) },
-		loadModel:    loadProductionModel,
+		openArtifact:    func(path string) (io.ReadCloser, error) { return os.Open(path) },
+		inspectArtifact: inspectGGUFArtifact,
+		loadModel:       loadProductionModel,
 		resolveBackend: func(req Request) (compute.Backend, BackendObservation, error) {
 			registered := compute.Registered()
 			observed := BackendObservation{Selected: "legacy", RegisteredBackends: slices.Clone(registered)}
@@ -199,12 +207,21 @@ func (d dependencies) execute(ctx context.Context, req Request) (Execution, erro
 	if err := validateRequest(req); err != nil {
 		return Execution{}, err
 	}
-	digest, err := hashArtifact(req.ArtifactPath, d.openArtifact)
-	if err != nil {
-		return Execution{}, err
+	artifact := artifactObservation{Path: req.ArtifactPath}
+	var inspectErr error
+	if d.inspectArtifact != nil {
+		artifact, inspectErr = d.inspectArtifact(req.ArtifactPath, d.openArtifact)
+	} else {
+		artifact.SHA256, inspectErr = hashArtifact(req.ArtifactPath, d.openArtifact)
 	}
-	if !strings.EqualFold(digest, req.ExpectedArtifactSHA256) {
-		return Execution{}, fmt.Errorf("raw decode: artifact SHA-256 mismatch: expected %s, observed %s", strings.ToLower(req.ExpectedArtifactSHA256), digest)
+	if artifact.SHA256 == "" {
+		return Execution{}, inspectErr
+	}
+	if !strings.EqualFold(artifact.SHA256, req.ExpectedArtifactSHA256) {
+		return Execution{}, fmt.Errorf("raw decode: artifact SHA-256 mismatch: expected %s, observed %s", strings.ToLower(req.ExpectedArtifactSHA256), artifact.SHA256)
+	}
+	if inspectErr != nil {
+		return Execution{}, inspectErr
 	}
 
 	be, backendObserved, err := d.resolveBackend(req)
@@ -244,7 +261,12 @@ func (d dependencies) execute(ctx context.Context, req Request) (Execution, erro
 	if runErr != nil && len(exec.Runs) == 0 {
 		return Execution{}, runErr
 	}
-	exec.ArtifactSHA256 = digest
+	exec.ArtifactPath = artifact.Path
+	exec.ArtifactSHA256 = artifact.SHA256
+	exec.TensorInventorySHA256 = artifact.TensorInventorySHA256
+	exec.TokenizerSHA256 = artifact.TokenizerSHA256
+	exec.TemplateSHA256 = artifact.TemplateSHA256
+	exec.Quantization = artifact.Quantization
 	exec.ModelName = derivedName
 	exec.ModelConfig = lm.Config()
 	exec.Backend = backendObserved
@@ -301,6 +323,53 @@ func hashArtifact(path string, open func(string) (io.ReadCloser, error)) (string
 		return "", fmt.Errorf("raw decode: hash artifact: %w", err)
 	}
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+type artifactObservation struct {
+	Path                  string
+	SHA256                string
+	TensorInventorySHA256 string
+	TokenizerSHA256       string
+	TemplateSHA256        string
+	Quantization          string
+}
+
+// inspectGGUFArtifact derives model identity and hashes the exact byte stream
+// that supplied the parsed header. The tee includes any bytes Read prefetched,
+// then io.Copy hashes the remainder without loading the artifact into memory.
+func inspectGGUFArtifact(path string, open func(string) (io.ReadCloser, error)) (artifactObservation, error) {
+	f, err := open(path)
+	if err != nil {
+		return artifactObservation{}, fmt.Errorf("raw decode: open artifact: %w", err)
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	gg, parseErr := ggufload.Read(io.TeeReader(f, h))
+	if _, err := io.Copy(h, f); err != nil {
+		return artifactObservation{}, fmt.Errorf("raw decode: hash artifact: %w", err)
+	}
+	observed := artifactObservation{
+		Path:   path,
+		SHA256: fmt.Sprintf("%x", h.Sum(nil)),
+	}
+	if parseErr != nil {
+		return observed, fmt.Errorf("raw decode: parse artifact header: %w", parseErr)
+	}
+	quant := ggufload.ClassifyTensorQuant(gg.Tensors)
+	observed.TensorInventorySHA256 = gg.CanonicalManifestDigest()
+	if identity, err := qwen38quantrun.DerivePromptPacketGGUFIdentityFromFile(gg); err == nil {
+		observed.TokenizerSHA256 = identity.TokenizerDigest
+		observed.TemplateSHA256 = identity.TemplateDigest
+	}
+	observed.Quantization = quant.Recipe
+	if observed.Quantization == "" {
+		observed.Quantization = quant.Name
+	}
+	if observed.Quantization == "unknown" {
+		return observed, errors.New("raw decode: parsed artifact has no quantization inventory")
+	}
+	return observed, nil
 }
 
 type productionModel struct{ model *model.Model }

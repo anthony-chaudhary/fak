@@ -3,8 +3,10 @@
 package metalgemm
 
 import (
+	"bytes"
 	"math"
 	"testing"
+	"unsafe"
 )
 
 func TestQ4KGEMMGroupIntoAliasesSuppliedBackingAndMatchesAllocating(t *testing.T) {
@@ -236,4 +238,136 @@ func TestMixedQ4KQ8ObservationInjectedPostSubmitFailure(t *testing.T) {
 		t.Fatalf("injected post-submit lifecycle=%+v, want committed+waited, no readback, two encoders", event)
 	}
 	t.Logf("captured injected native failure: typed=%T committed=%t waited=%t readback=%t encoders=%d", err, event.Committed, event.CompletedWait, event.HostReadback, event.Encoders)
+}
+
+func TestMetalMTPBufferResidency(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+
+	const (
+		out = 64
+		in  = 256
+	)
+	need := out * (in / 256) * 144
+
+	// Allocates unified buffer with AllocateMetalMTPSharedBuffer for out=64, in=256.
+	buf, err := AllocateMetalMTPSharedBuffer(need)
+	if err != nil {
+		t.Fatalf("AllocateMetalMTPSharedBuffer failed: %v", err)
+	}
+
+	// Generates Q4_K test data using q4kTestRaw(out, in, seed).
+	raw := q4kTestRaw(out, in, 0x8392)
+	copy(buf, raw)
+
+	// Uploads with UploadMTPQ4KShared and UploadMTPQ4K.
+	w, err := UploadMTPQ4KShared(buf, out, in)
+	if err != nil {
+		t.Fatalf("UploadMTPQ4KShared failed: %v", err)
+	}
+	// Asserts w != nil and w.NoCopy() == true (zero-copy verified!).
+	if w == nil || !w.NoCopy() {
+		t.Fatalf("UploadMTPQ4KShared = %#v, want non-nil with NoCopy() == true", w)
+	}
+
+	wConvenience := UploadMTPQ4K(buf, out, in)
+	if wConvenience == nil || !wConvenience.NoCopy() {
+		t.Fatalf("UploadMTPQ4K = %#v, want non-nil with NoCopy() == true", wConvenience)
+	}
+	wConvenience.Release()
+
+	// Verifies pointer sharing: Go slice bytes are identical to what Metal reads.
+	if !bytes.Equal(buf[:need], raw) {
+		t.Fatal("unified buffer contents do not match raw")
+	}
+	if unsafe.SliceData(buf) != unsafe.SliceData(raw) && unsafe.SliceData(buf) == nil {
+		t.Fatal("unified buffer pointer is nil")
+	}
+
+	x := q4kTestVector(in, 0x8392)
+	want := q4kVectorizedReference(raw, out, in, x)
+	got := make([]float32, out)
+	w.GEMV(x, got)
+
+	// Verifies cosine similarity >= 0.9999 against q4kVectorizedReference(raw, out, in, x).
+	cosine, maxRel := q4kTestCosineMaxRel(want, got)
+	if cosine < 0.9999 {
+		t.Fatalf("GEMV parity: cosine=%g want >= 0.9999 (maxRel=%g)", cosine, maxRel)
+	}
+
+	// Active pointer sharing: mutate Go slice in-place and verify Metal reads updated bytes directly.
+	origByte := buf[0]
+	buf[0] ^= 0x55
+	gotMutated := make([]float32, out)
+	w.GEMV(x, gotMutated)
+	if gotMutated[0] == got[0] {
+		t.Fatal("expected pointer sharing: mutating Go slice in-place did not affect Metal output")
+	}
+	buf[0] = origByte
+	gotRestored := make([]float32, out)
+	w.GEMV(x, gotRestored)
+	if cosineRestored, _ := q4kTestCosineMaxRel(got, gotRestored); cosineRestored < 0.999999 {
+		t.Fatalf("restoring Go slice byte did not restore output: cosine=%g", cosineRestored)
+	}
+
+	// Tests non-page-aligned input staging into unified memory also produces NoCopy() == true.
+	unalignedRaw := make([]byte, need+1)
+	copy(unalignedRaw[1:], raw)
+	unalignedSlice := unalignedRaw[1:]
+	wUnaligned, err := UploadMTPQ4KShared(unalignedSlice, out, in)
+	if err != nil {
+		t.Fatalf("UploadMTPQ4KShared unaligned failed: %v", err)
+	}
+	if wUnaligned == nil || !wUnaligned.NoCopy() {
+		t.Fatalf("wUnaligned = %#v, want non-nil with NoCopy() == true", wUnaligned)
+	}
+	gotUnaligned := make([]float32, out)
+	wUnaligned.GEMV(x, gotUnaligned)
+	if cosineUnaligned, _ := q4kTestCosineMaxRel(want, gotUnaligned); cosineUnaligned < 0.9999 {
+		t.Fatalf("unaligned staged GEMV parity: cosine=%g want >= 0.9999", cosineUnaligned)
+	}
+	wUnaligned.Release()
+
+	// Tests boundary conditions (invalid in, out, short buffer).
+	boundaryTests := []struct {
+		name string
+		raw  []byte
+		out  int
+		in   int
+	}{
+		{"invalid in not multiple of 256", raw, out, in - 1},
+		{"zero in", raw, out, 0},
+		{"negative in", raw, out, -256},
+		{"zero out", raw, 0, in},
+		{"negative out", raw, -1, in},
+		{"short buffer", raw[:need-1], out, in},
+		{"empty buffer", []byte{}, out, in},
+	}
+	for _, tc := range boundaryTests {
+		t.Run(tc.name, func(t *testing.T) {
+			if badW, err := UploadMTPQ4KShared(tc.raw, tc.out, tc.in); err == nil || badW != nil {
+				t.Fatalf("UploadMTPQ4KShared(%s) returned w=%v, err=%v; want error and nil weight", tc.name, badW, err)
+			}
+			if badW := UploadMTPQ4K(tc.raw, tc.out, tc.in); badW != nil {
+				t.Fatalf("UploadMTPQ4K(%s) returned w=%v; want nil", tc.name, badW)
+			}
+		})
+	}
+
+	if _, err := AllocateMetalMTPSharedBuffer(0); err == nil {
+		t.Fatal("AllocateMetalMTPSharedBuffer(0) expected error, got nil")
+	}
+	if _, err := AllocateMetalMTPSharedBuffer(-1); err == nil {
+		t.Fatal("AllocateMetalMTPSharedBuffer(-1) expected error, got nil")
+	}
+	if err := FreeMetalMTPSharedBuffer(nil); err != nil {
+		t.Fatalf("FreeMetalMTPSharedBuffer(nil) unexpected error: %v", err)
+	}
+
+	// Cleans up with ResetQ4K() and FreeMetalMTPSharedBuffer.
+	ResetQ4K()
+	if err := FreeMetalMTPSharedBuffer(buf); err != nil {
+		t.Fatalf("FreeMetalMTPSharedBuffer failed: %v", err)
+	}
 }

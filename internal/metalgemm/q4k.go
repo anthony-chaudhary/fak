@@ -53,6 +53,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"unsafe"
 )
 
@@ -197,8 +198,9 @@ type q4kPinnedRaw struct {
 }
 
 var (
-	q4kPinMu sync.Mutex
-	q4kPins  = map[int]q4kPinnedRaw{}
+	q4kPinMu  sync.Mutex
+	q4kPins   = map[int]q4kPinnedRaw{}
+	q4kStaged = map[int][]byte{}
 )
 
 // UploadQ4K makes a row-major q4_k payload (the verbatim GGUF super-block bytes, length
@@ -255,6 +257,109 @@ func UploadQ4K(raw []byte, out, in int) *Q4KWeight {
 	}
 	runtime.KeepAlive(raw)
 	return &Q4KWeight{id: id, Out: out, In: in}
+}
+
+// AllocateMetalMTPSharedBuffer allocates page-aligned unified memory using anonymous mmap
+// suitable for zero-copy Metal MTLResourceStorageModeShared buffer creation on Apple Silicon (#12236).
+// This enables resident Qwen 3.8 / 3.6 MTP draft projection weights to be shared directly between
+// host Go slices and GPU command encoders with zero host-to-device memcpy overhead.
+// The allocated memory is rounded up to os.Getpagesize() and returns a slice of length bytes.
+func AllocateMetalMTPSharedBuffer(bytes int) ([]byte, error) {
+	if bytes <= 0 {
+		return nil, errors.New("metalgemm: buffer size must be positive")
+	}
+	pageSize := os.Getpagesize()
+	if bytes > math.MaxInt-pageSize {
+		return nil, errors.New("metalgemm: buffer size overflows")
+	}
+	rounded := ((bytes + pageSize - 1) / pageSize) * pageSize
+	buf, err := syscall.Mmap(-1, 0, rounded, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_ANON|syscall.MAP_PRIVATE)
+	if err != nil {
+		return nil, err
+	}
+	return buf[:bytes], nil
+}
+
+// FreeMetalMTPSharedBuffer releases unified memory allocated by AllocateMetalMTPSharedBuffer.
+func FreeMetalMTPSharedBuffer(buf []byte) error {
+	if cap(buf) == 0 {
+		return nil
+	}
+	base := uintptr(unsafe.Pointer(unsafe.SliceData(buf)))
+	pageSize := os.Getpagesize()
+	if base%uintptr(pageSize) != 0 {
+		return errors.New("metalgemm: buffer is not page-aligned")
+	}
+	rounded := ((cap(buf) + pageSize - 1) / pageSize) * pageSize
+	if rounded == 0 {
+		return nil
+	}
+	if cap(buf) >= rounded {
+		return syscall.Munmap(buf[:rounded])
+	}
+	return syscall.Munmap(buf[:cap(buf)])
+}
+
+// UploadMTPQ4KShared uploads a Q4_K weight matrix using shared unified memory on Apple Silicon.
+// If raw is already page-aligned with capacity >= pageRound(need), it maps directly via UploadQ4KMappedSpan
+// ensuring zero-copy residency (w.NoCopy() == true). Otherwise, it stages raw into unified memory
+// allocated with AllocateMetalMTPSharedBuffer and maps via UploadQ4KMappedSpan with offset=0.
+func UploadMTPQ4KShared(raw []byte, out, in int) (*Q4KWeight, error) {
+	if !Available() {
+		return nil, errors.New("metalgemm: Metal backend unavailable")
+	}
+	if in <= 0 || in%256 != 0 {
+		return nil, errors.New("metalgemm: input width must be a positive multiple of 256")
+	}
+	if out <= 0 {
+		return nil, errors.New("metalgemm: output dimension must be positive")
+	}
+	const maxInt = int(^uint(0) >> 1)
+	blocks := in / 256
+	if out > maxInt/(blocks*144) {
+		return nil, errors.New("metalgemm: dimensions overflow int")
+	}
+	need := out * blocks * 144
+	if len(raw) < need {
+		return nil, errors.New("metalgemm: raw payload shorter than required geometry")
+	}
+	pageSize := os.Getpagesize()
+	rounded := ((need + pageSize - 1) / pageSize) * pageSize
+
+	base := uintptr(unsafe.Pointer(unsafe.SliceData(raw)))
+	isPageAligned := base%uintptr(pageSize) == 0
+
+	if isPageAligned && cap(raw) >= rounded {
+		w := UploadQ4KMappedSpan(raw[:rounded], 0, out, in)
+		if w == nil {
+			return nil, errors.New("metalgemm: failed to map Q4_K span")
+		}
+		return w, nil
+	}
+
+	staged, err := AllocateMetalMTPSharedBuffer(rounded)
+	if err != nil {
+		return nil, err
+	}
+	copy(staged[:need], raw[:need])
+	w := UploadQ4KMappedSpan(staged, 0, out, in)
+	if w == nil {
+		_ = FreeMetalMTPSharedBuffer(staged)
+		return nil, errors.New("metalgemm: failed to map staged Q4_K span")
+	}
+	q4kPinMu.Lock()
+	q4kStaged[int(w.id)] = staged
+	q4kPinMu.Unlock()
+	return w, nil
+}
+
+// UploadMTPQ4K is a convenience wrapper calling UploadMTPQ4KShared and returning nil on error.
+func UploadMTPQ4K(raw []byte, out, in int) *Q4KWeight {
+	w, err := UploadMTPQ4KShared(raw, out, in)
+	if err != nil {
+		return nil
+	}
+	return w
 }
 
 // GEMV computes y[Out] = W · x for one f32 activation row x (length In). y must have length
@@ -761,6 +866,10 @@ func (w *Q4KWeight) Release() {
 		pinned.pin.Unpin()
 		delete(q4kPins, id)
 	}
+	if staged, ok := q4kStaged[id]; ok {
+		_ = FreeMetalMTPSharedBuffer(staged)
+		delete(q4kStaged, id)
+	}
 	w.id = -1
 	q4kPinMu.Unlock()
 }
@@ -785,6 +894,10 @@ func ResetQ4K() {
 	for id, pinned := range q4kPins {
 		pinned.pin.Unpin()
 		delete(q4kPins, id)
+	}
+	for id, staged := range q4kStaged {
+		_ = FreeMetalMTPSharedBuffer(staged)
+		delete(q4kStaged, id)
 	}
 }
 

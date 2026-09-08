@@ -31,6 +31,69 @@ func TestCalculateRejectsImpossibleBudget(t *testing.T) {
 	}
 }
 
+func TestTurnkeyTierSelectionAndHeadroomGuarantee(t *testing.T) {
+	cases := []struct {
+		name      string
+		memoryGiB uint64
+		wantTier  string
+		wantQuant string
+	}{
+		{name: "16GB MacBook Air", memoryGiB: 16, wantTier: "7B", wantQuant: "Q4_K_M"},
+		{name: "24GB MacBook Pro", memoryGiB: 24, wantTier: "7B", wantQuant: "Q4_K_M"},
+		{name: "36GB MacBook Pro", memoryGiB: 36, wantTier: "27B", wantQuant: "Q4_K_M"},
+		{name: "48GB MacBook Pro", memoryGiB: 48, wantTier: "27B", wantQuant: "Q4_K_M"},
+		{name: "64GB Mac Studio", memoryGiB: 64, wantTier: "70B", wantQuant: "Q4_K_M"},
+		{name: "128GB Mac Studio", memoryGiB: 128, wantTier: "70B", wantQuant: "Q4_K_M"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			memBytes := tc.memoryGiB * GiB
+			tier := SelectModelTier(memBytes)
+			if tier.Name != tc.wantTier {
+				t.Fatalf("tier name = %q, want %q", tier.Name, tc.wantTier)
+			}
+			if tier.QuantTier != tc.wantQuant {
+				t.Fatalf("quant tier = %q, want %q", tier.QuantTier, tc.wantQuant)
+			}
+
+			plan, err := ConfigureTurnkey(memBytes)
+			if err != nil {
+				t.Fatalf("ConfigureTurnkey(%d GiB): %v", tc.memoryGiB, err)
+			}
+			if plan.Tier.Name != tc.wantTier {
+				t.Fatalf("plan tier = %q, want %q", plan.Tier.Name, tc.wantTier)
+			}
+			if plan.HeadroomRatio < 0.20 {
+				t.Fatalf("plan headroom ratio = %.3f, want >= 0.20 (20%% guarantee)", plan.HeadroomRatio)
+			}
+			if plan.ContextBudgetTokens == 0 {
+				t.Fatal("plan context budget tokens must be > 0")
+			}
+			allocated := plan.Tier.WeightBytes + (plan.ContextBudgetTokens * plan.KVBytesPerToken)
+			if allocated+plan.HeadroomBytes != memBytes {
+				t.Fatalf("allocated (%d) + headroom (%d) != total memory (%d)", allocated, plan.HeadroomBytes, memBytes)
+			}
+			// Verify allocated memory does not exceed 80% of total memory (guaranteeing >= 20% headroom)
+			maxAllocated := (memBytes * 80) / 100
+			if allocated > maxAllocated {
+				t.Fatalf("allocated %d bytes exceeds 80%% limit %d bytes (headroom violated)", allocated, maxAllocated)
+			}
+		})
+	}
+}
+
+func TestDetectUnifiedMemoryOverride(t *testing.T) {
+	t.Setenv("FAK_UP_MEMORY_BYTES", "38654705664") // 36 GiB
+	got, err := DetectUnifiedMemory()
+	if err != nil {
+		t.Fatalf("DetectUnifiedMemory: %v", err)
+	}
+	if got != 38654705664 {
+		t.Fatalf("DetectUnifiedMemory() = %d, want 38654705664", got)
+	}
+}
+
 func BenchmarkCalculate(b *testing.B) {
 	const gib = uint64(1 << 30)
 	in := Input{

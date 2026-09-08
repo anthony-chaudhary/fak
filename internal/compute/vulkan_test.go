@@ -3,6 +3,7 @@
 package compute
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -500,6 +501,73 @@ func TestVulkanResidencyRoundTrip(t *testing.T) {
 		if math.Float32bits(got[i]) != math.Float32bits(x[i]) {
 			t.Fatalf("residency round-trip altered element %d: got %v want %v", i, got[i], x[i])
 		}
+	}
+}
+
+func TestVulkanRestoreBatchesImmutableResidencyGroups(t *testing.T) {
+	v := vk(t)
+	sources := []VulkanImmutableResidencySource{
+		{Binding: "checkpoint:a/tensor:0", Bytes: []byte{0, 0, 0, 7, 0, 0, 0, 11, 0, 0, 0, 13}},
+		{Binding: "checkpoint:a/tensor:1", Bytes: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}},
+		{Binding: "checkpoint:a/tensor:2", Bytes: []byte{21, 22, 23, 24, 25, 26, 27, 28}},
+		{Binding: "checkpoint:a/tensor:3", Bytes: []byte{29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56}},
+		{Binding: "checkpoint:a/tensor:4", Bytes: []byte{57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72}},
+	}
+	limits := VulkanRestoreLimits{MaxBatchBytes: 32, MaxBatchEntries: 2}
+	beforeArena := v.VulkanWeightArenaStats()
+
+	buffers, receipt, err := v.VulkanRestoreImmutableResidencyGroup(context.Background(), sources, limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.VulkanDebugFreeRestoreBuffers(buffers)
+	if !receipt.Published || receipt.RequestedObjects != 5 || receipt.RequestedBytes != 84 ||
+		receipt.SubmittedBytes != 84 || receipt.Submits != 3 || receipt.PeakStagingBytes != 32 {
+		t.Fatalf("restore receipt = %+v", receipt)
+	}
+	afterArena := v.VulkanWeightArenaStats()
+	if got := afterArena.BufferBindings - beforeArena.BufferBindings; got != uint64(len(sources)) {
+		t.Fatalf("restore arena bindings = %d, want %d", got, len(sources))
+	}
+	for i := range sources {
+		if got := v.VulkanDebugReadRestoreBuffer(buffers[i]); !slices.Equal(got, sources[i].Bytes) {
+			t.Fatalf("restored object %d = %v, want %v", i, got, sources[i].Bytes)
+		}
+	}
+	// The first source encodes the deterministic first post-restore token in its
+	// final word. Byte-exact readback proves the uploader did not reorder it.
+	if got := v.VulkanDebugReadRestoreBuffer(buffers[0]); len(got) != 12 || got[11] != 13 {
+		t.Fatalf("first post-restore token bytes = %v, want terminal byte 13", got)
+	}
+	v.VulkanDebugFreeRestoreBuffers(buffers)
+	buffers = nil
+	afterFree := v.VulkanWeightArenaStats()
+	if afterFree.LiveBytes != beforeArena.LiveBytes || afterFree.ReservedBytes != beforeArena.ReservedBytes {
+		t.Fatalf("successful restore retained arena storage: before=%+v after=%+v", beforeArena, afterFree)
+	}
+
+	v.VulkanDebugSetRestoreFailureAfterSubmits(1)
+	failed, interrupted, err := v.VulkanRestoreImmutableResidencyGroup(context.Background(), sources, limits)
+	v.VulkanDebugSetRestoreFailureAfterSubmits(-1)
+	if err == nil {
+		t.Fatal("injected device-loss interruption returned nil error")
+	}
+	if failed != nil || interrupted.Published || interrupted.Submits != 1 || interrupted.SubmittedBytes != 32 {
+		t.Fatalf("interrupted restore buffers=%v receipt=%+v err=%v", failed, interrupted, err)
+	}
+	if v.VulkanDebugRestoreActive() {
+		t.Fatal("interrupted restore leaked the staging/command slot")
+	}
+	afterInterrupted := v.VulkanWeightArenaStats()
+	if afterInterrupted.LiveBytes != afterFree.LiveBytes || afterInterrupted.ReservedBytes != afterFree.ReservedBytes {
+		t.Fatalf("interrupted restore retained arena storage: before=%+v after=%+v", afterFree, afterInterrupted)
+	}
+
+	cancelledContext, cancel := context.WithCancel(context.Background())
+	cancel()
+	cancelled, cancelledReceipt, err := v.VulkanRestoreImmutableResidencyGroup(cancelledContext, sources, limits)
+	if err == nil || cancelled != nil || cancelledReceipt.Submits != 0 || cancelledReceipt.Published || v.VulkanDebugRestoreActive() {
+		t.Fatalf("cancelled restore buffers=%v receipt=%+v active=%v err=%v", cancelled, cancelledReceipt, v.VulkanDebugRestoreActive(), err)
 	}
 }
 
@@ -1724,6 +1792,127 @@ func TestVulkanAttentionFlashShapes(t *testing.T) {
 				t.Fatalf("attention max|Δ| %.4g > 1e-2", d)
 			}
 			t.Logf("[%s] cos=%.8f maxAbs=%.4g", tc.name, cos, d)
+		})
+	}
+}
+
+// TestVulkanPrefillBatch tests GPU-native batched prompt prefill without CPU reference fallback (#11036).
+func TestVulkanPrefillBatch(t *testing.T) {
+	v := vk(t)
+	c := cpu()
+
+	if !v.Caps().FusedAttn {
+		t.Fatalf("vulkan backend does not advertise FusedAttn in Caps")
+	}
+	if !v.Caps().BatchedPrefill {
+		t.Fatalf("vulkan backend does not advertise BatchedPrefill in Caps")
+	}
+
+	testCases := []struct {
+		name     string
+		P        int
+		D        int
+		nH, nKV  int
+		hd       int
+		startPos int
+		withWo   bool
+	}{
+		{name: "P=1 single-token", P: 1, D: 32, nH: 4, nKV: 2, hd: 8, startPos: 0, withWo: true},
+		{name: "P=4 MHA with Wo", P: 4, D: 32, nH: 4, nKV: 4, hd: 8, startPos: 0, withWo: true},
+		{name: "P=8 GQA with Wo", P: 8, D: 64, nH: 4, nKV: 2, hd: 16, startPos: 0, withWo: true},
+		{name: "P=8 GQA without Wo", P: 8, D: 64, nH: 4, nKV: 2, hd: 16, startPos: 0, withWo: false},
+		{name: "P=8 with non-zero startPos", P: 8, D: 64, nH: 4, nKV: 2, hd: 16, startPos: 4, withWo: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var rng lcg = lcg(42 + uint64(tc.P)*17)
+			P := tc.P
+			D := tc.D
+			nH := tc.nH
+			nKV := tc.nKV
+			hd := tc.hd
+			qOut := nH * hd
+			kvOut := nKV * hd
+			theta := 10000.0
+			scale := float32(1.0 / math.Sqrt(float64(hd)))
+
+			xData := randVec(&rng, P*D)
+			wqData := randVec(&rng, qOut*D)
+			wkData := randVec(&rng, kvOut*D)
+			wvData := randVec(&rng, kvOut*D)
+			var woData []float32
+			if tc.withWo {
+				woData = randVec(&rng, D*qOut)
+			}
+
+			xHost := NewF32(c, []int{P, D}, xData)
+			wqHost := NewF32(c, []int{qOut, D}, wqData)
+			wkHost := NewF32(c, []int{kvOut, D}, wkData)
+			wvHost := NewF32(c, []int{kvOut, D}, wvData)
+			var woHost Tensor
+			if tc.withWo {
+				woHost = NewF32(c, []int{D, qOut}, woData)
+			}
+
+			cfg := KVConfig{NumLayers: 1, NumKVHeads: nKV, HeadDim: hd, RopeTheta: theta}
+			ckv := c.NewKV(cfg)
+			vkv := v.NewKV(cfg)
+
+			if tc.startPos > 0 {
+				for p := 0; p < tc.startPos; p++ {
+					kRaw := randVec(&rng, kvOut)
+					kRoPE := randVec(&rng, kvOut)
+					val := randVec(&rng, kvOut)
+					ckv.AppendKV(0, NewF32(c, []int{kvOut}, kRaw), NewF32(c, []int{kvOut}, kRoPE), NewF32(c, []int{kvOut}, val), p)
+					vkv.AppendKV(0, v.Upload(NewF32(c, []int{kvOut}, kRaw), F32), v.Upload(NewF32(c, []int{kvOut}, kRoPE), F32), v.Upload(NewF32(c, []int{kvOut}, val), F32), p)
+				}
+			}
+
+			refArgs := PrefillBatchArgs{
+				X: xHost, Wq: wqHost, Wk: wkHost, Wv: wvHost, Wo: woHost,
+				KV: ckv, Layer: 0, StartPos: tc.startPos, NumHeads: nH, NumKVHeads: nKV, HeadDim: hd,
+				RopeTheta: theta, Scale: scale,
+			}
+			refRes, err := c.PrefillBatch(refArgs)
+			if err != nil {
+				t.Fatalf("CPU ref PrefillBatch failed: %v", err)
+			}
+
+			xDev := v.Upload(xHost, F32)
+			wqDev := v.Upload(wqHost, F32)
+			wkDev := v.Upload(wkHost, F32)
+			wvDev := v.Upload(wvHost, F32)
+			var woDev Tensor
+			if tc.withWo {
+				woDev = v.Upload(woHost, F32)
+			}
+
+			vulkanArgs := PrefillBatchArgs{
+				X: xDev, Wq: wqDev, Wk: wkDev, Wv: wvDev, Wo: woDev,
+				KV: vkv, Layer: 0, StartPos: tc.startPos, NumHeads: nH, NumKVHeads: nKV, HeadDim: hd,
+				RopeTheta: theta, Scale: scale,
+			}
+			vulkanRes, err := v.PrefillBatch(vulkanArgs)
+			if err != nil {
+				t.Fatalf("Vulkan PrefillBatch failed: %v", err)
+			}
+
+			refOut := c.Read(refRes.Output)
+			vulkanOut := v.Read(vulkanRes.Output)
+
+			cos := cosine(refOut, vulkanOut)
+			if cos < 0.995 {
+				t.Fatalf("PrefillBatch cosine %.6f < 0.995", cos)
+			}
+
+			refArgmax := c.Argmax(refRes.Output)
+			vulkanArgmax := v.Argmax(vulkanRes.Output)
+			if refArgmax != vulkanArgmax {
+				t.Fatalf("PrefillBatch argmax mismatch: got %d, want %d", vulkanArgmax, refArgmax)
+			}
+
+			t.Logf("PrefillBatch %s: cosine=%.6f, argmax=%d", tc.name, cos, vulkanArgmax)
 		})
 	}
 }

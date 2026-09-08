@@ -115,13 +115,191 @@ func (be *vulkanBackend) SpecVerifyAttention(q, k, v, out *Tensor, qLen, kvLen, 
 	return ref.SpecVerifyAttention(q, k, v, out, qLen, kvLen, nH, nHkv, d)
 }
 
-// PrefillBatch on vulkanBackend falls back to the CPU reference (#11036).
-func (be *vulkanBackend) PrefillBatch(args PrefillBatchArgs) (PrefillBatchResult, error) {
-	ref, ok := Default().(BatchedPrefillBackend)
-	if !ok {
-		return PrefillBatchResult{}, fmt.Errorf("compute: Default backend does not implement BatchedPrefillBackend")
+var _ BatchedPrefillBackend = (*vulkanBackend)(nil)
+
+// PrefillBatch executes batched prompt prefill across a sequence panel (P x D) in 1 pass on Vulkan GPU (#11036).
+func (v *vulkanBackend) PrefillBatch(args PrefillBatchArgs) (PrefillBatchResult, error) {
+	P, D, err := validatePrefillBatchArgs(&args)
+	if err != nil {
+		return PrefillBatchResult{}, err
 	}
-	return ref.PrefillBatch(args)
+
+	nH := args.NumHeads
+	nKV := args.NumKVHeads
+	hd := args.HeadDim
+	qOut := nH * hd
+	kvOut := nKV * hd
+	startPos := args.StartPos
+
+	// Ensure inputs are resident device tensors
+	xDev := args.X
+	if _, isHost := v.Host(xDev); isHost {
+		xDev = v.Upload(xDev, F32)
+	}
+	wqDev := args.Wq
+	if _, isHost := v.Host(wqDev); isHost {
+		wqDev = v.Upload(wqDev, wqDev.Dtype)
+	}
+	wkDev := args.Wk
+	if _, isHost := v.Host(wkDev); isHost {
+		wkDev = v.Upload(wkDev, wkDev.Dtype)
+	}
+	wvDev := args.Wv
+	if _, isHost := v.Host(wvDev); isHost {
+		wvDev = v.Upload(wvDev, wvDev.Dtype)
+	}
+
+	// 1. Batched projections on Vulkan GPU
+	qTen := v.BatchedMatMul(wqDev, xDev, P)
+	kTen := v.BatchedMatMul(wkDev, xDev, P)
+	vTen := v.BatchedMatMul(wvDev, xDev, P)
+
+	vk, isVulkanKV := args.KV.(*vulkanKV)
+	canFastPanel := hd%2 == 0 && hd <= 1024 && (args.KV == nil || isVulkanKV)
+
+	if !canFastPanel {
+		return v.prefillBatchSerialGPU(args, xDev, wqDev, wkDev, wvDev, P, D, nH, nKV, hd, qOut, kvOut)
+	}
+
+	// 2. Rotary position embedding (RoPE) for all P tokens on GPU in one panel dispatch
+	vulkanMu.Lock()
+	qr, _ := v.devTr([]int{P, qOut}, F32)
+	kr, _ := v.devTr([]int{P, kvOut}, F32)
+	ropeStatus := int(C.fvk_qwen35_partial_rope_panel_f32(
+		v.vp(qTen), v.vp(kTen), v.vp(qr), v.vp(kr),
+		C.int(P), C.int(startPos), C.int(nH), C.int(nKV),
+		C.int(hd), C.int(hd), C.double(args.RopeTheta),
+	))
+	vulkanMu.Unlock()
+	if ropeStatus != 0 {
+		return v.prefillBatchSerialGPU(args, xDev, wqDev, wkDev, wvDev, P, D, nH, nKV, hd, qOut, kvOut)
+	}
+
+	// 3. Append to KVStore if provided (all D2D, 0 host copies)
+	var kPtr, vPtr unsafe.Pointer
+	prefix := 0
+	if args.KV != nil {
+		for t := 0; t < P; t++ {
+			pos := startPos + t
+			vulkanMu.Lock()
+			kRawRow, _ := v.devTr([]int{kvOut}, F32)
+			kRopeRow, _ := v.devTr([]int{kvOut}, F32)
+			vRow, _ := v.devTr([]int{kvOut}, F32)
+			rowBytes := C.size_t(kvOut * 4)
+			srcOff := C.size_t(t * kvOut * 4)
+			C.fvk_d2d_range(v.vp(kRawRow), 0, v.vp(kTen), srcOff, rowBytes)
+			C.fvk_d2d_range(v.vp(kRopeRow), 0, v.vp(kr), srcOff, rowBytes)
+			C.fvk_d2d_range(v.vp(vRow), 0, v.vp(vTen), srcOff, rowBytes)
+			vulkanMu.Unlock()
+			args.KV.AppendKV(args.Layer, kRawRow, kRopeRow, vRow, pos)
+		}
+		prefix = startPos
+		kPtr = vk.K[args.Layer].ptr
+		vPtr = vk.V[args.Layer].ptr
+	} else {
+		prefix = 0
+		kPtr = v.vp(kr)
+		vPtr = v.vp(vTen)
+	}
+
+	// 4. Causal attention across the prompt panel on GPU (online softmax, zero quadratic scratch)
+	vulkanMu.Lock()
+	context, _ := v.devTr([]int{P, qOut}, F32)
+	causalStatus := int(C.fvk_qwen35_causal_attention_panel_f32(
+		v.vp(qr), kPtr, vPtr, v.vp(context),
+		C.int(P), C.int(prefix), C.int(nH), C.int(nKV),
+		C.int(hd), C.float(args.Scale),
+	))
+	vulkanMu.Unlock()
+	if causalStatus != 0 {
+		return PrefillBatchResult{}, fmt.Errorf("compute: vulkan causal attention panel dispatch failed: %d", causalStatus)
+	}
+
+	// 5. Output projection if Wo is provided
+	var outTen Tensor
+	if args.Wo.buf != nil {
+		woDev := args.Wo
+		if _, isHost := v.Host(woDev); isHost {
+			woDev = v.Upload(woDev, woDev.Dtype)
+		}
+		outTen = v.BatchedMatMul(woDev, context, P)
+	} else {
+		outTen = context
+	}
+
+	return PrefillBatchResult{
+		Output:  outTen,
+		Context: context,
+		Tokens:  P,
+	}, nil
+}
+
+// prefillBatchSerialGPU executes prompt prefill token-by-token on Vulkan GPU as a safe fallback.
+// Activations and KV-cache remain strictly device-resident in VRAM without host transfers.
+func (v *vulkanBackend) prefillBatchSerialGPU(args PrefillBatchArgs, xDev, wqDev, wkDev, wvDev Tensor, P, D, nH, nKV, hd, qOut, kvOut int) (PrefillBatchResult, error) {
+	grp := nH / nKV
+	scale := args.Scale
+
+	vulkanMu.Lock()
+	context, _ := v.devTr([]int{P, qOut}, F32)
+	vulkanMu.Unlock()
+
+	kvStore := args.KV
+	var tempKV KVStore
+	if kvStore == nil {
+		tempKV = v.NewKV(KVConfig{
+			NumLayers:  1,
+			NumKVHeads: nKV,
+			HeadDim:    hd,
+			RopeTheta:  args.RopeTheta,
+		})
+		defer tempKV.Free()
+		kvStore = tempKV
+	}
+
+	for t := 0; t < P; t++ {
+		pos := args.StartPos + t
+		vulkanMu.Lock()
+		xRow, _ := v.devTr([]int{D}, F32)
+		C.fvk_d2d_range(v.vp(xRow), 0, v.vp(xDev), C.size_t(t*D*4), C.size_t(D*4))
+		vulkanMu.Unlock()
+
+		q := v.MatMul(wqDev, xRow)
+		kRaw := v.MatMul(wkDev, xRow)
+		val := v.MatMul(wvDev, xRow)
+
+		qR := v.RoPE(q, pos, nH, hd, args.RopeTheta)
+		kR := v.RoPE(kRaw, pos, nKV, hd, args.RopeTheta)
+
+		layerIdx := args.Layer
+		if args.KV == nil {
+			layerIdx = 0
+		}
+		kvStore.AppendKV(layerIdx, kRaw, kR, val, pos)
+
+		attnOut := v.Attention(qR, kvStore, layerIdx, true, grp, scale)
+
+		vulkanMu.Lock()
+		C.fvk_d2d_range(v.vp(context), C.size_t(t*qOut*4), v.vp(attnOut), 0, C.size_t(qOut*4))
+		vulkanMu.Unlock()
+	}
+
+	var outTen Tensor
+	if args.Wo.buf != nil {
+		woDev := args.Wo
+		if _, isHost := v.Host(woDev); isHost {
+			woDev = v.Upload(woDev, woDev.Dtype)
+		}
+		outTen = v.BatchedMatMul(woDev, context, P)
+	} else {
+		outTen = context
+	}
+
+	return PrefillBatchResult{
+		Output:  outTen,
+		Context: context,
+		Tokens:  P,
+	}, nil
 }
 
 // Argmax returns the index of the largest element of the device logits tensor via the

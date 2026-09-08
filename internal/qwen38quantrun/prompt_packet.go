@@ -328,6 +328,9 @@ func validateArmPromptPacketBinding(role string, arm AMDArmReceipt) error {
 	if arm.Temperature != p.GenerationControls.Temperature || arm.TopP != p.GenerationControls.TopP || arm.TopK != p.GenerationControls.TopK {
 		return fmt.Errorf("%s arm generation controls do not bind embedded packet", role)
 	}
+	if arm.IgnoreEOS != p.GenerationControls.IgnoreEOS {
+		return fmt.Errorf("%s arm ignore-EOS policy does not bind embedded packet", role)
+	}
 	if arm.DecodeTokens != p.GenerationControls.MaxOutputTokens {
 		return fmt.Errorf("%s arm decode token limit does not bind embedded packet", role)
 	}

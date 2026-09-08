@@ -71,6 +71,11 @@ type PreflightInput struct {
 	// eligible Q4_K/Q2_K matrices remain packed while unsupported dense formats make
 	// the bounded f32 -> Q8 round trip.
 	VulkanMixedQ4K bool
+	// StreamedDenseQ4K mirrors WithStreamedDenseQ4K: eligible Q4_K matrices stay as
+	// lazy file ranges until HAL upload, so they have no persistent host packed copy
+	// and contribute one tensor-sized session staging window rather than load-worker
+	// staging. Device residency and bytes eventually read are unchanged.
+	StreamedDenseQ4K bool
 	// ResidentQ2KEmbedding mirrors WithQ2KEmbeddingResident on the eligible dense-Qwen
 	// Vulkan arm. The table remains packed in host memory and never becomes a persistent
 	// device weight; requested rows are materialized separately by the model.
@@ -237,7 +242,7 @@ func estimateLoadFor(in PreflightInput) (preflightEstimate, error) {
 	var err error
 	switch {
 	case in.VulkanMixedQ4K:
-		return estimateVulkanMixedQ4K(in.Source, in.ResidentQ2KEmbedding)
+		return estimateVulkanMixedQ4K(in.Source, in.ResidentQ2KEmbedding, in.StreamedDenseQ4K)
 	case in.OffloadExperts:
 		plan, err = in.Source.EstimateCPUOffloadExpertsMemoryPlan()
 	case in.Lean || in.Q4K:
@@ -259,10 +264,13 @@ func estimateLoadFor(in PreflightInput) (preflightEstimate, error) {
 // estimateVulkanMixedQ4K mirrors modelbench's dense Vulkan loader: eligible Q4_K and Q2_K
 // matmul weights remain packed, while unsupported formats are dequantized, canonicalized,
 // and stored as Q8 or f32. The header-only plan conservatively includes page-aligned host
-// backing, the device copy, and the largest W raw+two-f32 worker windows. W is loadWorkers(),
-// the exact runtime concurrency including FAK_GGUF_LOAD_WORKERS. Split/MoE/unknown layouts
-// fail closed until they share their exact transform and sharding contract with this estimator.
-func estimateVulkanMixedQ4K(s *WeightSource, residentQ2KEmbedding bool) (preflightEstimate, error) {
+// backing, the device copy, and the largest W raw+two-f32 worker windows. With streamed Q4_K,
+// eligible tensors are lazy file ranges: their persistent host copy and load-worker window
+// disappear, while the largest one-tensor HAL materialization window remains. Loader and HAL
+// staging are phase-disjoint, so the peak is their maximum rather than their sum. W is
+// loadWorkers(), the exact runtime concurrency including FAK_GGUF_LOAD_WORKERS. Split/MoE/
+// unknown layouts fail closed until they share their exact transform and sharding contract.
+func estimateVulkanMixedQ4K(s *WeightSource, residentQ2KEmbedding, streamedDenseQ4K bool) (preflightEstimate, error) {
 	if s == nil || s.File == nil {
 		return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate has no weight source")
 	}
@@ -283,7 +291,8 @@ func estimateVulkanMixedQ4K(s *WeightSource, residentQ2KEmbedding bool) (preflig
 	}
 
 	var readBytes, hostPacked, hostQ8, hostF32Logical, deviceBytes int64
-	staging := make([]int64, 0, len(s.File.Tensors))
+	loadStaging := make([]int64, 0, len(s.File.Tensors))
+	var sessionStagingMax int64
 	for _, info := range s.File.Tensors {
 		// The resident-Q4K loader drops target-inactive MTP/vision sidecars before
 		// reading their payload. Keep both read volume and residency aligned with that
@@ -331,24 +340,35 @@ func estimateVulkanMixedQ4K(s *WeightSource, residentQ2KEmbedding bool) (preflig
 			}
 			// NewQ2KEmbedding creates an owned copy. The read buffer is the one extra
 			// payload-sized worker window; no persistent whole-table device buffer exists.
-			staging = append(staging, payloadBytes)
+			loadStaging = append(loadStaging, payloadBytes)
 			continue
 		}
 
-		retained := (info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon)) ||
+		retainedQ4K := info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon)
+		retained := retainedQ4K ||
 			(info.Type == TensorQ2_K && model.ResidentKQuantEligible(cfg, canon))
 		if retained {
-			alloc, err := conservativePageAllocation(payloadBytes)
-			if err != nil {
-				return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate tensor %s: %w", info.Name, err)
-			}
-			if hostPacked, err = checkedEstimateAdd(hostPacked, alloc, "host packed bytes"); err != nil {
-				return preflightEstimate{}, err
+			if streamedDenseQ4K && retainedQ4K {
+				alloc, err := conservativePageAllocation(payloadBytes)
+				if err != nil {
+					return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate tensor %s: %w", info.Name, err)
+				}
+				if alloc > sessionStagingMax {
+					sessionStagingMax = alloc
+				}
+			} else {
+				alloc, err := conservativePageAllocation(payloadBytes)
+				if err != nil {
+					return preflightEstimate{}, fmt.Errorf("gguf: mixed Vulkan estimate tensor %s: %w", info.Name, err)
+				}
+				if hostPacked, err = checkedEstimateAdd(hostPacked, alloc, "host packed bytes"); err != nil {
+					return preflightEstimate{}, err
+				}
+				loadStaging = append(loadStaging, payloadBytes)
 			}
 			if deviceBytes, err = checkedEstimateAdd(deviceBytes, payloadBytes, "device packed bytes"); err != nil {
 				return preflightEstimate{}, err
 			}
-			staging = append(staging, payloadBytes)
 			continue
 		}
 
@@ -359,7 +379,7 @@ func estimateVulkanMixedQ4K(s *WeightSource, residentQ2KEmbedding bool) (preflig
 		if err != nil {
 			return preflightEstimate{}, err
 		}
-		staging = append(staging, stage)
+		loadStaging = append(loadStaging, stage)
 
 		q8Weight := model.IsQuantWeight(canon) && len(shape) == 2
 		tiedEmbedding := cfg.TieWordEmbeddings && canon == "model.embed_tokens.weight" && len(shape) == 2
@@ -399,16 +419,19 @@ func estimateVulkanMixedQ4K(s *WeightSource, residentQ2KEmbedding bool) (preflig
 		return preflightEstimate{}, err
 	}
 
-	sort.Slice(staging, func(i, j int) bool { return staging[i] > staging[j] })
+	sort.Slice(loadStaging, func(i, j int) bool { return loadStaging[i] > loadStaging[j] })
 	workers := loadWorkers()
-	if workers > len(staging) {
-		workers = len(staging)
+	if workers > len(loadStaging) {
+		workers = len(loadStaging)
 	}
 	var stagingBytes int64
-	for _, n := range staging[:workers] {
+	for _, n := range loadStaging[:workers] {
 		if stagingBytes, err = checkedEstimateAdd(stagingBytes, n, "load staging bytes"); err != nil {
 			return preflightEstimate{}, err
 		}
+	}
+	if sessionStagingMax > stagingBytes {
+		stagingBytes = sessionStagingMax
 	}
 
 	plan := make(compute.MemoryPlan, 0, 3)
@@ -419,7 +442,11 @@ func estimateVulkanMixedQ4K(s *WeightSource, residentQ2KEmbedding bool) (preflig
 		plan = append(plan, compute.MemoryDemand{Class: compute.MemoryWeights, Scope: compute.MemoryScopeHost, Bytes: hostResident, Detail: "gguf-vulkan-mixed-host-resident", DType: "mixed"})
 	}
 	if stagingBytes > 0 {
-		plan = append(plan, compute.MemoryDemand{Class: compute.MemoryScratchpad, Scope: compute.MemoryScopeHost, Bytes: stagingBytes, Detail: fmt.Sprintf("gguf-vulkan-mixed-load-staging-w%d", workers), DType: compute.F32.String()})
+		detail := fmt.Sprintf("gguf-vulkan-mixed-load-staging-w%d", workers)
+		if streamedDenseQ4K {
+			detail = fmt.Sprintf("gguf-vulkan-mixed-phase-staging-w%d", workers)
+		}
+		plan = append(plan, compute.MemoryDemand{Class: compute.MemoryScratchpad, Scope: compute.MemoryScopeHost, Bytes: stagingBytes, Detail: detail, DType: compute.F32.String()})
 	}
 	return preflightEstimate{
 		plan:                plan,

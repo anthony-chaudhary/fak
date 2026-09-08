@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <limits>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -83,7 +84,41 @@ struct Buffer {
     VkDeviceMemory mem = VK_NULL_HANDLE;
     size_t         bytes = 0;
     VkMemoryPropertyFlags props = 0;
+    VkDeviceSize   memoryOffset = 0;
+    bool           weightArenaBound = false;
+    size_t         weightArenaBlock = std::numeric_limits<size_t>::max();
 };
+
+// Immutable model weights keep their descriptor-visible VkBuffer identity while sharing a
+// bounded set of VkDeviceMemory blocks. This is the issue-local #12217 adapter pending the
+// generic #11096 VMM contract: bump-only offsets are never individually reused, and the blocks
+// are released only after the last referencing buffer is destroyed. Vulkan calls are externally
+// serialized by vulkanMu, matching VMA virtual-block's externally synchronized contract.
+static constexpr VkDeviceSize WEIGHT_ARENA_BLOCK_BYTES = 256ull * 1024ull * 1024ull;
+struct WeightArenaBlock {
+    VkDeviceMemory mem = VK_NULL_HANDLE;
+    VkDeviceSize capacity = 0;
+    VkDeviceSize used = 0;
+    uint32_t memoryTypeIndex = UINT32_MAX;
+    size_t liveBuffers = 0;
+};
+std::vector<WeightArenaBlock> g_weightArena;
+uint64_t g_weightArenaMemoryAllocations = 0;
+uint64_t g_weightArenaBufferBindings = 0;
+uint64_t g_weightArenaReservedBytes = 0;
+uint64_t g_weightArenaLiveBytes = 0;
+uint64_t g_weightArenaPeakReservedBytes = 0;
+
+void releaseWeightArena() {
+    for (const WeightArenaBlock& block : g_weightArena) {
+        if (block.liveBuffers != 0) return;
+    }
+    for (WeightArenaBlock& block : g_weightArena) {
+        if (block.mem) vkFreeMemory(g_dev, block.mem, nullptr);
+    }
+    g_weightArena.clear();
+    g_weightArenaReservedBytes = 0;
+}
 
 // size-bucketed free list for device-local buffers (mirrors the CUDA g_pool/g_live arena).
 // Host-visible buffers are deliberately not pooled here: the residency-budget path may
@@ -97,6 +132,22 @@ size_t g_poolCount = 0;
 Buffer* g_stage = nullptr;
 void*   g_stageMapped = nullptr;
 size_t  g_stageCap = 0;
+
+// Device-loss restore has a separate, strictly bounded staging lifetime. It is
+// never shared with ordinary H2D/D2H, and it is destroyed at the transaction
+// boundary so a recreated device cannot observe an old-context staging handle.
+struct RestoreTransaction {
+    Buffer*        stage = nullptr;
+    void*          mapped = nullptr;
+    size_t         cap = 0;
+    size_t         maxEntries = 0;
+    size_t         used = 0;
+    size_t         entries = 0;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    int            successfulSubmits = 0;
+};
+RestoreTransaction g_restore;
+int g_restoreFailAfterSubmits = -1;
 
 // One compute kernel: pipeline + layout + descriptor set layout + how many storage buffers
 // it binds + push-constant byte size.
@@ -276,8 +327,18 @@ bool queryDeviceLocalMemoryBudget(VkDeviceSize* budget, VkDeviceSize* usage) {
 void destroyBuffer(Buffer* b) {
     if (!b) return;
     if (b->buf) vkDestroyBuffer(g_dev, b->buf, nullptr);
-    if (b->mem) vkFreeMemory(g_dev, b->mem, nullptr);
+    if (b->weightArenaBound) {
+        if (b->weightArenaBlock < g_weightArena.size()) {
+            WeightArenaBlock& block = g_weightArena[b->weightArenaBlock];
+            if (block.liveBuffers > 0) --block.liveBuffers;
+        }
+        if (g_weightArenaLiveBytes >= b->bytes) g_weightArenaLiveBytes -= b->bytes;
+        else g_weightArenaLiveBytes = 0;
+    } else if (b->mem) {
+        vkFreeMemory(g_dev, b->mem, nullptr);
+    }
     delete b;
+    releaseWeightArena();
 }
 
 Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlags usage);
@@ -421,6 +482,138 @@ const VkBufferUsageFlags STORAGE_USAGE =
     VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
     VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
+VkDeviceSize alignArenaOffset(VkDeviceSize value, VkDeviceSize alignment) {
+    if (alignment <= 1) return value;
+    VkDeviceSize remainder = value % alignment;
+    if (remainder == 0) return value;
+    VkDeviceSize padding = alignment - remainder;
+    if (value > std::numeric_limits<VkDeviceSize>::max() - padding) {
+        return std::numeric_limits<VkDeviceSize>::max();
+    }
+    return value + padding;
+}
+
+Buffer* allocWeightArenaBuffer(size_t bytes, VkDeviceSize maxArenaBytes) {
+    size_t reqBytes = bytes ? bytes : 1;
+    if (g_maxBufferBytes > 0 && (VkDeviceSize)reqBytes > g_maxBufferBytes) return nullptr;
+
+    Buffer* b = new Buffer();
+    b->bytes = bytes;
+    VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bi.size = reqBytes;
+    bi.usage = STORAGE_USAGE;
+    bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkResult cr = vkCreateBuffer(g_dev, &bi, nullptr, &b->buf);
+    if (cr != VK_SUCCESS) {
+        delete b;
+        return nullptr;
+    }
+
+    VkMemoryDedicatedRequirements dedicated{VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS};
+    VkMemoryRequirements2 req2{VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2};
+    req2.pNext = &dedicated;
+    VkBufferMemoryRequirementsInfo2 info{VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2};
+    info.buffer = b->buf;
+    vkGetBufferMemoryRequirements2(g_dev, &info, &req2);
+    const VkMemoryRequirements& req = req2.memoryRequirements;
+    if (dedicated.requiresDedicatedAllocation) {
+        vkDestroyBuffer(g_dev, b->buf, nullptr);
+        delete b;
+        return allocBuffer(bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
+    }
+
+    uint32_t memoryType = findMemType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (memoryType == UINT32_MAX) {
+        vkDestroyBuffer(g_dev, b->buf, nullptr);
+        delete b;
+        return nullptr;
+    }
+    if (maxArenaBytes == 0) maxArenaBytes = g_totalDeviceLocalMemory;
+    if (maxArenaBytes == 0) maxArenaBytes = g_maxMemoryAllocationSize;
+    if (maxArenaBytes == 0) maxArenaBytes = WEIGHT_ARENA_BLOCK_BYTES;
+
+    for (size_t i = 0; i < g_weightArena.size(); ++i) {
+        WeightArenaBlock& block = g_weightArena[i];
+        if (block.memoryTypeIndex != memoryType) continue;
+        VkDeviceSize offset = alignArenaOffset(block.used, req.alignment);
+        if (offset == std::numeric_limits<VkDeviceSize>::max() ||
+            offset > block.capacity || req.size > block.capacity - offset) continue;
+        VkResult br = vkBindBufferMemory(g_dev, b->buf, block.mem, offset);
+        if (br != VK_SUCCESS) continue;
+        block.used = offset + req.size;
+        ++block.liveBuffers;
+        b->mem = block.mem;
+        b->props = g_memprops.memoryTypes[memoryType].propertyFlags;
+        b->memoryOffset = offset;
+        b->weightArenaBound = true;
+        b->weightArenaBlock = i;
+        ++g_weightArenaBufferBindings;
+        g_weightArenaLiveBytes += bytes;
+        return b;
+    }
+
+    if (g_weightArenaReservedBytes >= maxArenaBytes) {
+        vkDestroyBuffer(g_dev, b->buf, nullptr);
+        delete b;
+        return nullptr;
+    }
+    VkDeviceSize remaining = maxArenaBytes - g_weightArenaReservedBytes;
+    VkDeviceSize blockBytes = WEIGHT_ARENA_BLOCK_BYTES;
+    if (g_maxMemoryAllocationSize > 0 && blockBytes > g_maxMemoryAllocationSize) {
+        blockBytes = g_maxMemoryAllocationSize;
+    }
+    if (blockBytes < req.size) blockBytes = req.size;
+    if (blockBytes > remaining) blockBytes = remaining;
+    if (blockBytes < req.size) {
+        vkDestroyBuffer(g_dev, b->buf, nullptr);
+        delete b;
+        return nullptr;
+    }
+
+    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    ai.allocationSize = blockBytes;
+    ai.memoryTypeIndex = memoryType;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkResult ar = vkAllocateMemory(g_dev, &ai, nullptr, &memory);
+    if (allocPressure(ar)) {
+        drainPool();
+        ar = vkAllocateMemory(g_dev, &ai, nullptr, &memory);
+    }
+    if (ar != VK_SUCCESS) {
+        vkDestroyBuffer(g_dev, b->buf, nullptr);
+        delete b;
+        return nullptr;
+    }
+    VkResult br = vkBindBufferMemory(g_dev, b->buf, memory, 0);
+    if (br != VK_SUCCESS) {
+        vkFreeMemory(g_dev, memory, nullptr);
+        vkDestroyBuffer(g_dev, b->buf, nullptr);
+        delete b;
+        return nullptr;
+    }
+
+    WeightArenaBlock block{};
+    block.mem = memory;
+    block.capacity = blockBytes;
+    block.used = req.size;
+    block.memoryTypeIndex = memoryType;
+    block.liveBuffers = 1;
+    g_weightArena.push_back(block);
+    b->mem = memory;
+    b->props = g_memprops.memoryTypes[memoryType].propertyFlags;
+    b->memoryOffset = 0;
+    b->weightArenaBound = true;
+    b->weightArenaBlock = g_weightArena.size() - 1;
+    ++g_weightArenaMemoryAllocations;
+    ++g_weightArenaBufferBindings;
+    g_weightArenaReservedBytes += blockBytes;
+    if (g_weightArenaReservedBytes > g_weightArenaPeakReservedBytes) {
+        g_weightArenaPeakReservedBytes = g_weightArenaReservedBytes;
+    }
+    g_weightArenaLiveBytes += bytes;
+    return b;
+}
+
 size_t scratchCapacity(size_t bytes) {
     size_t cap = 4 * 1024;
     while (cap < bytes && cap <= (((size_t)-1) / 2)) cap *= 2;
@@ -487,6 +680,46 @@ void submitWait(VkCommandBuffer cmd) {
 void endSubmitWait(VkCommandBuffer cmd) {
     submitWait(cmd);
     vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
+}
+
+VkResult restoreBeginCommand() {
+    if (g_restore.cmd != VK_NULL_HANDLE) return VK_SUCCESS;
+    VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    ai.commandPool = g_cmdpool;
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.commandBufferCount = 1;
+    VkResult r = vkAllocateCommandBuffers(g_dev, &ai, &g_restore.cmd);
+    if (r != VK_SUCCESS) {
+        g_restore.cmd = VK_NULL_HANDLE;
+        return r;
+    }
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    r = vkBeginCommandBuffer(g_restore.cmd, &bi);
+    if (r != VK_SUCCESS) {
+        vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &g_restore.cmd);
+        g_restore.cmd = VK_NULL_HANDLE;
+    }
+    return r;
+}
+
+void restoreDiscardCommand() {
+    if (g_restore.cmd != VK_NULL_HANDLE) {
+        (void)vkEndCommandBuffer(g_restore.cmd);
+        vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &g_restore.cmd);
+        g_restore.cmd = VK_NULL_HANDLE;
+    }
+    g_restore.used = 0;
+    g_restore.entries = 0;
+}
+
+void restoreCleanup() {
+    restoreDiscardCommand();
+    if (g_restore.stage) {
+        if (g_restore.mapped) vkUnmapMemory(g_dev, g_restore.stage->mem);
+        destroyBuffer(g_restore.stage);
+    }
+    g_restore = RestoreTransaction{};
 }
 
 // ---- batched submission state ---------------------------------------------------
@@ -1062,6 +1295,21 @@ void* fvk_malloc(size_t bytes) {
     return allocBuffer(bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
 }
 
+void* fvk_malloc_weight(size_t bytes, uint64_t max_arena_bytes) {
+    if (bytes == 0) bytes = 4;
+    return allocWeightArenaBuffer(bytes, (VkDeviceSize)max_arena_bytes);
+}
+
+void fvk_weight_arena_stats(uint64_t* memory_allocations, uint64_t* buffer_bindings,
+                            uint64_t* reserved_bytes, uint64_t* live_bytes,
+                            uint64_t* peak_reserved_bytes) {
+    if (memory_allocations) *memory_allocations = g_weightArenaMemoryAllocations;
+    if (buffer_bindings) *buffer_bindings = g_weightArenaBufferBindings;
+    if (reserved_bytes) *reserved_bytes = g_weightArenaReservedBytes;
+    if (live_bytes) *live_bytes = g_weightArenaLiveBytes;
+    if (peak_reserved_bytes) *peak_reserved_bytes = g_weightArenaPeakReservedBytes;
+}
+
 void* fvk_malloc_hostvis(size_t bytes) {
     if (bytes == 0) bytes = 4;
     // Host-visible directly — the residency-budget path uses this for cold weights so they go
@@ -1086,6 +1334,11 @@ void fvk_free(void* d) {
     // Park it and recycle only after the batch flushes, so it can't be handed back out and
     // rebound mid-batch.
     if (g_batching) { g_batchFreed.push_back(b); return; }
+    if (b->weightArenaBound) {
+        destroyBuffer(b);
+        clearDescriptorBindingCache();
+        return;
+    }
     if (b->props & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
         destroyBuffer(b);
         clearDescriptorBindingCache();
@@ -1109,6 +1362,94 @@ void fvk_h2d(void* d, const void* h, size_t bytes) {
     if (resumeBatch) batchFlush();
     copyHostToDevice(B(d), h, bytes);
     if (resumeBatch) batchBegin();
+}
+
+// Bounded immutable-residency restore transaction. The Go adapter owns fresh
+// destination buffers and publishes them only after every submit succeeds.
+// Each submit reuses the same staging allocation only after its fence completes.
+int fvk_restore_begin(size_t max_bytes, size_t max_entries) {
+    if (!g_ready || !g_dev || !g_cmdpool || !g_submitFence || g_batching ||
+        max_bytes < 4 || (max_bytes & 3) != 0 || max_entries == 0 ||
+        g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) {
+        return 1;
+    }
+    VkMemoryPropertyFlags hostvis =
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    Buffer* stage = allocBuffer(max_bytes, hostvis,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    if (!stage) return 2;
+    void* mapped = nullptr;
+    VkResult r = vkMapMemory(g_dev, stage->mem, 0, max_bytes, 0, &mapped);
+    if (r != VK_SUCCESS || !mapped) {
+        destroyBuffer(stage);
+        return r == VK_SUCCESS ? 3 : (int)r;
+    }
+    g_restore.stage = stage;
+    g_restore.mapped = mapped;
+    g_restore.cap = max_bytes;
+    g_restore.maxEntries = max_entries;
+    return 0;
+}
+
+int fvk_restore_add(void* dst_handle, size_t dst_offset, const void* src, size_t bytes) {
+    Buffer* dst = B(dst_handle);
+    if (!g_restore.stage || !g_restore.mapped || !dst || !src || bytes == 0 ||
+        (dst_offset & 3) != 0 || (bytes & 3) != 0 ||
+        dst_offset > dst->bytes || bytes > dst->bytes - dst_offset) {
+        return 4;
+    }
+    if (g_restore.entries >= g_restore.maxEntries) return 5;
+    size_t aligned = (g_restore.used + 3) & ~(size_t)3;
+    if (aligned > g_restore.cap || bytes > g_restore.cap - aligned) return 6;
+    VkResult r = restoreBeginCommand();
+    if (r != VK_SUCCESS) return (int)r;
+    memcpy((unsigned char*)g_restore.mapped + aligned, src, bytes);
+    VkBufferCopy region{aligned, dst_offset, bytes};
+    vkCmdCopyBuffer(g_restore.cmd, g_restore.stage->buf, dst->buf, 1, &region);
+    g_restore.used = aligned + bytes;
+    ++g_restore.entries;
+    return 0;
+}
+
+int fvk_restore_submit(void) {
+    if (!g_restore.stage || g_restore.cmd == VK_NULL_HANDLE || g_restore.entries == 0) return 7;
+    if (g_restoreFailAfterSubmits >= 0 &&
+        g_restore.successfulSubmits >= g_restoreFailAfterSubmits) {
+        restoreDiscardCommand();
+        return (int)VK_ERROR_DEVICE_LOST;
+    }
+    VkCommandBuffer cmd = g_restore.cmd;
+    VkResult r = vkEndCommandBuffer(cmd);
+    if (r == VK_SUCCESS) r = vkResetFences(g_dev, 1, &g_submitFence);
+    if (r == VK_SUCCESS) {
+        VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        si.commandBufferCount = 1;
+        si.pCommandBuffers = &cmd;
+        r = vkQueueSubmit(g_queue, 1, &si, g_submitFence);
+    }
+    if (r == VK_SUCCESS) r = vkWaitForFences(g_dev, 1, &g_submitFence, VK_TRUE, UINT64_MAX);
+    vkFreeCommandBuffers(g_dev, g_cmdpool, 1, &cmd);
+    g_restore.cmd = VK_NULL_HANDLE;
+    size_t submittedBytes = g_restore.used;
+    g_restore.used = 0;
+    g_restore.entries = 0;
+    if (r != VK_SUCCESS) {
+        g_submissionStatus = r;
+        return (int)r;
+    }
+    ++g_restore.successfulSubmits;
+    g_h2dBytes.fetch_add(submittedBytes, std::memory_order_relaxed);
+    dpOneShot(g_dp.oneShotH2D);
+    return 0;
+}
+
+void fvk_restore_finish(void) { restoreCleanup(); }
+void fvk_restore_abort(void) { restoreCleanup(); }
+int fvk_restore_active(void) {
+    return (g_restore.stage || g_restore.cmd != VK_NULL_HANDLE) ? 1 : 0;
+}
+void fvk_debug_restore_fail_after_submits(int successful_submits) {
+    g_restoreFailAfterSubmits = successful_submits;
 }
 
 // d2h is a true host fence (the final logits Read): flush the recorded batch so the compute
@@ -1202,6 +1543,7 @@ void fvk_trim_pool(void) {
     if (g_batching) batchFlush();
     drainPool();
     freeGdnScratch();
+    releaseWeightArena();
 }
 
 void fvk_trim_pool_if_over(size_t max_buffers) {

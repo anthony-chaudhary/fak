@@ -69,8 +69,16 @@ func TestModelbenchMixedQuantBackendLoadAndForward(t *testing.T) {
 	if streamIn.Source != nil {
 		defer streamIn.Source.Close()
 	}
-	if streamIn.Lean || streamIn.Q4K || streamIn.VulkanMixedQ4K {
-		t.Fatal("streaming Vulkan Q4_K must retain the conservative F32 preflight path")
+	if streamIn.Lean || streamIn.Q4K || !streamIn.VulkanMixedQ4K {
+		t.Fatal("streaming Vulkan Q4_K must select its mixed-quant streamed lifecycle")
+	}
+	streamPF := ggufload.BuildModelPreflight(streamIn)
+	if streamPF.Refused() {
+		t.Fatalf("streamed mixed-quant preflight refused fixture: %s", streamPF.Reason)
+	}
+	if streamPF.EstReadBytes != pf.EstReadBytes || streamPF.EstDeviceResidentBytes != pf.EstDeviceResidentBytes ||
+		streamPF.EstHostResidentBytes >= pf.EstHostResidentBytes {
+		t.Fatalf("streamed preflight = %+v, resident = %+v; want same read/device and lower host residency", streamPF, pf)
 	}
 	*f.streamQ4K = false
 	_, precision, report := describeEngine(f, be, nil)

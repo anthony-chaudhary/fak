@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/allinone"
+	"github.com/anthony-chaudhary/fak/internal/macfit"
 )
 
 func TestUpHelpUsesServeSurface(t *testing.T) {
@@ -379,4 +381,230 @@ func TestUpBootstrap(t *testing.T) {
 	if err := sup.Shutdown(context.Background()); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
+}
+
+func TestFakUpTurnkeyBootstrap(t *testing.T) {
+	// Scoped Acceptance Criterion 1: fak up correctly inspects Apple Silicon unified memory and chooses compatible quant tier.
+	t.Run("MemoryInspectionAndTierSelection", func(t *testing.T) {
+		t.Setenv("FAK_UP_MEMORY_BYTES", fmt.Sprint(16*macfit.GiB))
+		mem16, err := macfit.DetectUnifiedMemory()
+		if err != nil {
+			t.Fatalf("DetectUnifiedMemory: %v", err)
+		}
+		plan16, err := macfit.ConfigureTurnkey(mem16)
+		if err != nil {
+			t.Fatalf("ConfigureTurnkey(16GB): %v", err)
+		}
+		if plan16.Tier.Name != "7B" || plan16.Tier.QuantTier != "Q4_K_M" {
+			t.Fatalf("16GB tier = %s (%s), want 7B (Q4_K_M)", plan16.Tier.Name, plan16.Tier.QuantTier)
+		}
+
+		t.Setenv("FAK_UP_MEMORY_BYTES", fmt.Sprint(36*macfit.GiB))
+		mem36, err := macfit.DetectUnifiedMemory()
+		if err != nil {
+			t.Fatalf("DetectUnifiedMemory: %v", err)
+		}
+		plan36, err := macfit.ConfigureTurnkey(mem36)
+		if err != nil {
+			t.Fatalf("ConfigureTurnkey(36GB): %v", err)
+		}
+		if plan36.Tier.Name != "27B" || plan36.Tier.QuantTier != "Q4_K_M" {
+			t.Fatalf("36GB tier = %s (%s), want 27B (Q4_K_M)", plan36.Tier.Name, plan36.Tier.QuantTier)
+		}
+
+		t.Setenv("FAK_UP_MEMORY_BYTES", fmt.Sprint(64*macfit.GiB))
+		mem64, err := macfit.DetectUnifiedMemory()
+		if err != nil {
+			t.Fatalf("DetectUnifiedMemory: %v", err)
+		}
+		plan64, err := macfit.ConfigureTurnkey(mem64)
+		if err != nil {
+			t.Fatalf("ConfigureTurnkey(64GB): %v", err)
+		}
+		if plan64.Tier.Name != "70B" || plan64.Tier.QuantTier != "Q4_K_M" {
+			t.Fatalf("64GB tier = %s (%s), want 70B (Q4_K_M)", plan64.Tier.Name, plan64.Tier.QuantTier)
+		}
+	})
+
+	// Scoped Acceptance Criterion 2: Auto-selected context budget guarantees >= 20% memory headroom to prevent swap.
+	t.Run("ContextBudgetHeadroomGuarantee", func(t *testing.T) {
+		for _, gib := range []uint64{16, 24, 36, 48, 64, 128} {
+			memBytes := gib * macfit.GiB
+			plan, err := macfit.ConfigureTurnkey(memBytes)
+			if err != nil {
+				t.Fatalf("ConfigureTurnkey(%d GiB): %v", gib, err)
+			}
+			if plan.HeadroomRatio < 0.20 {
+				t.Fatalf("memory %d GiB: headroom ratio = %.3f, want >= 0.20", gib, plan.HeadroomRatio)
+			}
+			if plan.ContextBudgetTokens == 0 {
+				t.Fatalf("memory %d GiB: context budget tokens = 0", gib)
+			}
+			allocated := plan.Tier.WeightBytes + (plan.ContextBudgetTokens * plan.KVBytesPerToken)
+			maxAllocated := (memBytes * 80) / 100
+			if allocated > maxAllocated {
+				t.Fatalf("memory %d GiB: allocated bytes %d exceeds 80%% limit %d", gib, allocated, maxAllocated)
+			}
+		}
+	})
+
+	// CLI Dry Run validation
+	t.Run("DryRunPlanOutput", func(t *testing.T) {
+		var out bytes.Buffer
+		var errOut bytes.Buffer
+		runTurnkeyUp(nil, &out, &errOut, []string{"--dry-run", "--memory-gib", "36", "--json"})
+		var plan macfit.TurnkeyProfile
+		if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+			t.Fatalf("unmarshal dry-run json: %v\noutput: %s", err, out.String())
+		}
+		if plan.Tier.Name != "27B" {
+			t.Fatalf("dry-run plan tier = %q, want 27B", plan.Tier.Name)
+		}
+		if plan.HeadroomRatio < 0.20 {
+			t.Fatalf("dry-run plan headroom = %.3f, want >= 0.20", plan.HeadroomRatio)
+		}
+	})
+
+	// Scoped Acceptance Criterion 3: OpenAI-compatible completion endpoint answers successfully on loopback.
+	t.Run("OpenAICompatibleLoopbackCompletions", func(t *testing.T) {
+		plan, err := macfit.ConfigureTurnkey(36 * macfit.GiB)
+		if err != nil {
+			t.Fatalf("ConfigureTurnkey: %v", err)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		server, err := startTurnkeyServer(ctx, plan, "127.0.0.1:0", true)
+		if err != nil {
+			t.Fatalf("startTurnkeyServer: %v", err)
+		}
+		defer func() {
+			_ = server.Shutdown(context.Background())
+		}()
+
+		base := "http://" + server.Addr()
+
+		// 1. Check /healthz
+		hResp, err := http.Get(base + "/healthz")
+		if err != nil {
+			t.Fatalf("GET /healthz: %v", err)
+		}
+		if hResp.StatusCode != http.StatusOK {
+			t.Fatalf("healthz status = %d, want 200", hResp.StatusCode)
+		}
+		var health map[string]any
+		if err := json.NewDecoder(hResp.Body).Decode(&health); err != nil {
+			t.Fatalf("decode healthz: %v", err)
+		}
+		_ = hResp.Body.Close()
+		if health["status"] != "ok" || health["tier"] != "27B" {
+			t.Fatalf("healthz payload mismatch: %+v", health)
+		}
+
+		// 2. Check /readyz
+		rResp, err := http.Get(base + "/readyz")
+		if err != nil {
+			t.Fatalf("GET /readyz: %v", err)
+		}
+		if rResp.StatusCode != http.StatusOK {
+			t.Fatalf("readyz status = %d, want 200", rResp.StatusCode)
+		}
+		_ = rResp.Body.Close()
+
+		// 3. Check /v1/models
+		mResp, err := http.Get(base + "/v1/models")
+		if err != nil {
+			t.Fatalf("GET /v1/models: %v", err)
+		}
+		if mResp.StatusCode != http.StatusOK {
+			t.Fatalf("models status = %d, want 200", mResp.StatusCode)
+		}
+		var modelsResp struct {
+			Data []struct {
+				ID string `json:"id"`
+			} `json:"data"`
+		}
+		if err := json.NewDecoder(mResp.Body).Decode(&modelsResp); err != nil {
+			t.Fatalf("decode models: %v", err)
+		}
+		_ = mResp.Body.Close()
+		if len(modelsResp.Data) == 0 || modelsResp.Data[0].ID != plan.Tier.ModelID {
+			t.Fatalf("models mismatch: %+v", modelsResp)
+		}
+
+		// 4. Non-streaming completion
+		bodyJSON := `{"model":"qwen3.8-27b-q4_k_m","messages":[{"role":"user","content":"Explain turnkey Apple Silicon inference."}],"stream":false}`
+		cResp, err := http.Post(base+"/v1/chat/completions", "application/json", strings.NewReader(bodyJSON))
+		if err != nil {
+			t.Fatalf("POST /v1/chat/completions: %v", err)
+		}
+		if cResp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(cResp.Body)
+			t.Fatalf("chat completion status = %d, body = %s", cResp.StatusCode, raw)
+		}
+		var compResp chatCompletionResponse
+		if err := json.NewDecoder(cResp.Body).Decode(&compResp); err != nil {
+			t.Fatalf("decode chat completion: %v", err)
+		}
+		_ = cResp.Body.Close()
+
+		if len(compResp.Choices) == 0 {
+			t.Fatal("chat completion returned no choices")
+		}
+		if compResp.Choices[0].Message.Role != "assistant" {
+			t.Fatalf("choice role = %q, want 'assistant'", compResp.Choices[0].Message.Role)
+		}
+		if compResp.Choices[0].Message.Content == "" {
+			t.Fatal("choice content is empty")
+		}
+		if compResp.Usage.CompletionTokens == 0 {
+			t.Fatal("completion tokens is 0")
+		}
+
+		// 5. Streaming completion
+		streamJSON := `{"model":"qwen3.8-27b-q4_k_m","messages":[{"role":"user","content":"Stream tokens."}],"stream":true}`
+		sResp, err := http.Post(base+"/v1/chat/completions", "application/json", strings.NewReader(streamJSON))
+		if err != nil {
+			t.Fatalf("POST /v1/chat/completions (stream): %v", err)
+		}
+		if sResp.StatusCode != http.StatusOK {
+			t.Fatalf("stream status = %d, want 200", sResp.StatusCode)
+		}
+		scanner := bufio.NewScanner(sResp.Body)
+		seenChunk := false
+		seenDone := false
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "data: ") {
+				data := strings.TrimPrefix(line, "data: ")
+				if data == "[DONE]" {
+					seenDone = true
+					break
+				}
+				seenChunk = true
+			}
+		}
+		_ = sResp.Body.Close()
+		if !seenChunk || !seenDone {
+			t.Fatalf("streaming SSE incomplete: seenChunk=%v, seenDone=%v", seenChunk, seenDone)
+		}
+
+		// 6. Interactive REPL with token telemetry
+		replIn := strings.NewReader("Hello turnkey model!\n/quit\n")
+		var replOut bytes.Buffer
+		if err := runTurnkeyREPL(ctx, replIn, &replOut, base, plan); err != nil {
+			t.Fatalf("runTurnkeyREPL: %v", err)
+		}
+		replText := replOut.String()
+		if !strings.Contains(replText, "you> ") {
+			t.Fatalf("REPL output missing 'you> ' prompt:\n%s", replText)
+		}
+		if !strings.Contains(replText, "fak> ") {
+			t.Fatalf("REPL output missing 'fak> ' response:\n%s", replText)
+		}
+		if !strings.Contains(replText, "telemetry:") || !strings.Contains(replText, "tok/s") {
+			t.Fatalf("REPL output missing token/s telemetry:\n%s", replText)
+		}
+	})
 }

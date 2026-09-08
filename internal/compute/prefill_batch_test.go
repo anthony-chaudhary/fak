@@ -402,6 +402,34 @@ func TestCUDAPrefillBatchSourceContract(t *testing.T) {
 	}
 }
 
+// TestVulkanPrefillBatchSourceContract verifies source and symbol alignment for Vulkan
+// batched prompt prefill without requiring an active Vulkan device.
+func TestVulkanPrefillBatchSourceContract(t *testing.T) {
+	vulkanOpsGo, err := os.ReadFile("vulkan_ops.go")
+	if err != nil {
+		t.Fatalf("failed to read vulkan_ops.go: %v", err)
+	}
+	vOpsStr := string(vulkanOpsGo)
+	if !strings.Contains(vOpsStr, "func (v *vulkanBackend) PrefillBatch") {
+		t.Errorf("vulkan_ops.go missing PrefillBatch method implementation")
+	}
+	if strings.Contains(vOpsStr, "ref.PrefillBatch") {
+		t.Errorf("vulkan_ops.go still contains CPU reference fallback")
+	}
+	if !strings.Contains(vOpsStr, "var _ BatchedPrefillBackend = (*vulkanBackend)(nil)") {
+		t.Errorf("vulkan_ops.go missing BatchedPrefillBackend interface assertion")
+	}
+
+	vulkanGo, err := os.ReadFile("vulkan.go")
+	if err != nil {
+		t.Fatalf("failed to read vulkan.go: %v", err)
+	}
+	vStr := string(vulkanGo)
+	if !strings.Contains(vStr, "FusedAttn: true") || !strings.Contains(vStr, "BatchedPrefill: true") {
+		t.Errorf("vulkan.go Caps() missing FusedAttn: true or BatchedPrefill: true")
+	}
+}
+
 // TestPrefillBatchValidation verifies bounds checking, dimension validation, and fail-closed errors.
 func TestPrefillBatchValidation(t *testing.T) {
 	ref := Default()

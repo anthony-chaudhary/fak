@@ -47,7 +47,6 @@ type AMDArmReceipt struct {
 	GPUMemoryBudget     uint64               `json:"gpu_memory_budget_bytes"`
 	HostSpillPolicy     string               `json:"host_spill_policy"`
 	Temperature         float64              `json:"temperature"`
-	IgnoreEOS           bool                 `json:"ignore_eos,omitempty"`
 	PrefillTokens       int                  `json:"prefill_tokens"`
 	DecodeTokens        int                  `json:"decode_tokens"`
 	Hardware            string               `json:"hardware"`
@@ -65,6 +64,7 @@ type AMDArmReceipt struct {
 	StopTokenIDs        []int                `json:"stop_token_ids,omitempty"`
 	TopP                float64              `json:"top_p,omitempty"`
 	TopK                int                  `json:"top_k,omitempty"`
+	IgnoreEOS           bool                 `json:"ignore_eos,omitempty"`
 	PromptPacket        *PromptTokenPacket   `json:"prompt_packet,omitempty"`
 	Trials              []AMDScoreboardTrial `json:"trials"`
 }
@@ -315,6 +315,13 @@ func validateAMDScoreboard(in AMDScoreboardInput) []string {
 	}
 	validateAMDArm(in.Candidate, "candidate", add)
 	validateAMDArm(in.Reference, "reference", add)
+	// The ordinary scoreboard trial schema has no authoritative execution
+	// receipt for EOS policy on both engines. A fixed-length cell therefore
+	// remains ineligible until candidate and comparator receipts bind those
+	// observations independently of caller-authored scoreboard input.
+	if fixed128AMDArm(in.Candidate) || fixed128AMDArm(in.Reference) {
+		add("physical-eos-receipt-required")
+	}
 	if in.Candidate.Engine != "fak-native" || in.Candidate.ComparatorOnly || in.Candidate.FallbackActive {
 		add("candidate-not-fak-native-no-fallback")
 	}
@@ -357,7 +364,7 @@ func validateAMDScoreboard(in AMDScoreboardInput) []string {
 	if in.Candidate.GPUMemoryBudget != in.Reference.GPUMemoryBudget || in.Candidate.HostSpillPolicy != in.Reference.HostSpillPolicy {
 		add("memory-placement-envelope-mismatch")
 	}
-	if in.Candidate.Temperature != in.Reference.Temperature || in.Candidate.IgnoreEOS != in.Reference.IgnoreEOS || in.Candidate.PrefillTokens != in.Reference.PrefillTokens || in.Candidate.DecodeTokens != in.Reference.DecodeTokens || in.Candidate.TopP != in.Reference.TopP || in.Candidate.TopK != in.Reference.TopK {
+	if in.Candidate.Temperature != in.Reference.Temperature || in.Candidate.PrefillTokens != in.Reference.PrefillTokens || in.Candidate.DecodeTokens != in.Reference.DecodeTokens || in.Candidate.TopP != in.Reference.TopP || in.Candidate.TopK != in.Reference.TopK || in.Candidate.IgnoreEOS != in.Reference.IgnoreEOS {
 		add("generation-envelope-mismatch")
 	}
 	if !slices.Equal(in.Candidate.StopTokens, in.Reference.StopTokens) || !slices.Equal(in.Candidate.StopTokenIDs, in.Reference.StopTokenIDs) {
@@ -403,8 +410,13 @@ func validateAMDScoreboard(in AMDScoreboardInput) []string {
 	return reasons
 }
 
+func fixed128AMDArm(arm AMDArmReceipt) bool {
+	return arm.DecodeTokens == 128 || arm.PromptPacket != nil && arm.PromptPacket.GenerationControls.MaxOutputTokens == 128
+}
+
 func validateAMDArm(arm AMDArmReceipt, role string, add func(string)) {
 	prefix := role + "-"
+	fixed128 := fixed128AMDArm(arm)
 	if arm.Name == "" || arm.Engine == "" || arm.Backend == "" || arm.Runtime == "" || arm.Hardware == "" || arm.SoftwareRevision == "" || len(arm.BuildFlags) == 0 {
 		add(prefix + "identity-incomplete")
 	}
@@ -426,6 +438,14 @@ func validateAMDArm(arm AMDArmReceipt, role string, add func(string)) {
 	if arm.PrefillTokens != len(arm.PromptTokenIDs) {
 		add(prefix + "prefill-token-count-mismatch")
 	}
+	if fixed128 {
+		if !arm.IgnoreEOS {
+			add(prefix + "fixed-128-ignore-eos-required")
+		}
+		if len(arm.StopTokens) != 0 || len(arm.StopTokenIDs) != 0 || arm.PromptPacket != nil && (len(arm.PromptPacket.StopTokens) != 0 || len(arm.PromptPacket.StopTokenIDs) != 0 || len(arm.PromptPacket.GenerationControls.StopTokens) != 0 || len(arm.PromptPacket.GenerationControls.StopTokenIDs) != 0) {
+			add(prefix + "fixed-128-stop-controls-forbidden")
+		}
+	}
 	if arm.PeakRSSBytes == 0 || arm.PeakVRAMBytes == 0 || arm.ResidentModelBytes == 0 {
 		add(prefix + "memory-evidence-missing")
 	}
@@ -435,15 +455,6 @@ func validateAMDArm(arm AMDArmReceipt, role string, add func(string)) {
 	}
 	if len(arm.Trials) < 5 {
 		add(prefix + "five-trials-required")
-	}
-	fixed128 := arm.DecodeTokens == 128 || (arm.PromptPacket != nil && arm.PromptPacket.GenerationControls.MaxOutputTokens == 128)
-	if fixed128 {
-		if !arm.IgnoreEOS {
-			add(prefix + "fixed-128-ignore-eos-required")
-		}
-		if len(arm.StopTokens) != 0 || len(arm.StopTokenIDs) != 0 || (arm.PromptPacket != nil && (len(arm.PromptPacket.StopTokens) != 0 || len(arm.PromptPacket.StopTokenIDs) != 0 || len(arm.PromptPacket.GenerationControls.StopTokens) != 0 || len(arm.PromptPacket.GenerationControls.StopTokenIDs) != 0)) {
-			add(prefix + "fixed-128-stop-controls-active")
-		}
 	}
 	seen := map[int]bool{}
 	for _, t := range arm.Trials {

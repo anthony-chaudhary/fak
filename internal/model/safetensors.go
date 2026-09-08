@@ -358,6 +358,31 @@ func loadSafetensorsFile(sf *safetensorsFile, cfg Config) (*Model, error) {
 // per-load model.Config field once the forward wiring lands and config.go is in scope.
 var RetainMTP bool
 
+func init() {
+	if strings.ToLower(strings.TrimSpace(os.Getenv("FAK_SPECULATIVE"))) == "mtp" || strings.ToLower(strings.TrimSpace(os.Getenv("SPECULATIVE"))) == "mtp" {
+		RetainMTP = true
+	}
+}
+
+// SetRetainMTP sets the package-level RetainMTP toggle.
+func SetRetainMTP(retain bool) {
+	RetainMTP = retain
+}
+
+// shouldRetainMTP reports whether MTP head tensors should be retained at load.
+// It returns true if RetainMTP is true, or if strings.ToLower(strings.TrimSpace(os.Getenv("FAK_SPECULATIVE"))) == "mtp"
+// or strings.ToLower(strings.TrimSpace(os.Getenv("SPECULATIVE"))) == "mtp".
+func shouldRetainMTP(cfg Config) bool {
+	if RetainMTP {
+		return true
+	}
+	if strings.ToLower(strings.TrimSpace(os.Getenv("FAK_SPECULATIVE"))) == "mtp" || strings.ToLower(strings.TrimSpace(os.Getenv("SPECULATIVE"))) == "mtp" {
+		RetainMTP = true
+		return true
+	}
+	return false
+}
+
 // skipLoadTensor drops tensors the text forward never reads BEFORE they are decoded into
 // the f32 buffer. For Qwen3.5/Qwen3-Next that is the vision tower ("model.visual.") and the
 // multi-token-prediction head ("mtp."), which together would otherwise expand to several
@@ -365,7 +390,7 @@ var RetainMTP bool
 // GLM-5.2 (glm_moe_dsa): a multimodal vision encoder and an MTP head for speculative
 // decoding, neither read by the text causal-LM forward pass, so the skip is generalized to
 // any model whose config marks it mtp-bearing. No-op for a plain Llama/Qwen dense checkpoint.
-// The vision tower is always dropped; the mtp head is dropped unless RetainMTP retains it.
+// The vision tower is always dropped; the mtp head is dropped unless shouldRetainMTP retains it.
 func skipLoadTensor(cfg Config, name string) bool {
 	if !cfg.dropsMtpAndVisualAtLoad() {
 		return false
@@ -374,7 +399,7 @@ func skipLoadTensor(cfg Config, name string) bool {
 		return true
 	}
 	if strings.HasPrefix(name, "mtp.") {
-		return !RetainMTP
+		return !shouldRetainMTP(cfg)
 	}
 	return false
 }
@@ -386,7 +411,7 @@ func skipLoadTensor(cfg Config, name string) bool {
 // forward never reads. False for every dense Llama/Qwen/Mistral/etc. checkpoint, so the
 // load path there is unchanged.
 func (c Config) dropsMtpAndVisualAtLoad() bool {
-	return c.IsQwen35Hybrid() || c.isGLM() || c.isMiniMax()
+	return c.IsQwen35Hybrid() || c.isQwen35TextFamily() || c.isGLM() || c.isMiniMax() || c.HasMTPHead()
 }
 
 func appendSafetensorsFileInto(sf *safetensorsFile, man map[string]tensorMeta, raw *[]byte, off *int, cfg Config) error {

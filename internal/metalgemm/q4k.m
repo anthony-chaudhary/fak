@@ -258,9 +258,9 @@ inline void q4k_gemv_multi_impl(device const uchar* W,
                     const long xi = xbase + j + l;
                     const float w = d1 * (float)(q[qi + l] & 0x0f) - m1;
                     a0 += w * X[xi];
-                    a1 += w * X[xstride + xi];
-                    a2 += w * X[2 * xstride + xi];
-                    a3 += w * X[3 * xstride + xi];
+                    if (N >= 2) a1 += w * X[xstride + xi];
+                    if (N >= 3) a2 += w * X[2 * xstride + xi];
+                    if (N >= 4) a3 += w * X[3 * xstride + xi];
                     if (N >= 5) a4 += w * X[4 * xstride + xi];
                     if (N >= 6) a5 += w * X[5 * xstride + xi];
                     if (N >= 7) a6 += w * X[6 * xstride + xi];
@@ -270,9 +270,9 @@ inline void q4k_gemv_multi_impl(device const uchar* W,
                     const long xi = xbase + j + 32 + l;
                     const float w = d2 * (float)(q[qi + l] >> 4) - m2;
                     a0 += w * X[xi];
-                    a1 += w * X[xstride + xi];
-                    a2 += w * X[2 * xstride + xi];
-                    a3 += w * X[3 * xstride + xi];
+                    if (N >= 2) a1 += w * X[xstride + xi];
+                    if (N >= 3) a2 += w * X[2 * xstride + xi];
+                    if (N >= 4) a3 += w * X[3 * xstride + xi];
                     if (N >= 5) a4 += w * X[4 * xstride + xi];
                     if (N >= 6) a5 += w * X[5 * xstride + xi];
                     if (N >= 7) a6 += w * X[6 * xstride + xi];
@@ -284,15 +284,19 @@ inline void q4k_gemv_multi_impl(device const uchar* W,
         }
     }
 
-    a0 = q4k_sum8(a0); a1 = q4k_sum8(a1);
-    a2 = q4k_sum8(a2); a3 = q4k_sum8(a3);
+    a0 = q4k_sum8(a0);
+    if (N >= 2) a1 = q4k_sum8(a1);
+    if (N >= 3) a2 = q4k_sum8(a2);
+    if (N >= 4) a3 = q4k_sum8(a3);
     if (N >= 5) a4 = q4k_sum8(a4);
     if (N >= 6) a5 = q4k_sum8(a5);
     if (N >= 7) a6 = q4k_sum8(a6);
     if (N >= 8) a7 = q4k_sum8(a7);
     if (tx == 0 && valid) {
-        Y[o] = a0; Y[(long)out + o] = a1;
-        Y[2 * (long)out + o] = a2; Y[3 * (long)out + o] = a3;
+        Y[o] = a0;
+        if (N >= 2) Y[(long)out + o] = a1;
+        if (N >= 3) Y[2 * (long)out + o] = a2;
+        if (N >= 4) Y[3 * (long)out + o] = a3;
         if (N >= 5) Y[4 * (long)out + o] = a4;
         if (N >= 6) Y[5 * (long)out + o] = a5;
         if (N >= 7) Y[6 * (long)out + o] = a6;
@@ -312,6 +316,8 @@ kernel void q4k_gemv_multi##N(device const uchar* W [[buffer(0)]], \
     q4k_gemv_multi_impl<N>(W, X, Y, nblk, out, tg, lane, sg); \
 }
 
+Q4K_MULTI_KERNEL(2)
+Q4K_MULTI_KERNEL(3)
 Q4K_MULTI_KERNEL(4)
 Q4K_MULTI_KERNEL(5)
 Q4K_MULTI_KERNEL(6)
@@ -724,7 +730,7 @@ kernel void graph_quantize_q8(device const float* X [[buffer(0)]],
 }
 )MSL";
 
-static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvVectorized, psoQ4KGemvMulti[5], psoQ4KGemm, psoQ4KGemmMM32, psoQ4KGemmM5CooperativeSMEM, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm, psoGraphQuantizeQ8;
+static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvVectorized, psoQ4KGemvMulti[7], psoQ4KGemm, psoQ4KGemmMM32, psoQ4KGemmM5CooperativeSMEM, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm, psoGraphQuantizeQ8;
 static int gQ4KReady;
 
 // q4k_gemv_pso binds selection to an executed-kernel status. A vector request never falls back:
@@ -776,9 +782,9 @@ static int q4k_init(void) {
     if (lib == nil) { NSLog(@"q4k: library compile failed: %@", err); return 0; }
     psoQ4KGemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemv"] error:&err];
     psoQ4KGemvVectorized = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemv_vectorized"] error:&err];
-    for (int n = 4; n <= 8; n++) {
+    for (int n = 2; n <= 8; n++) {
         NSString *name = [NSString stringWithFormat:@"q4k_gemv_multi%d", n];
-        psoQ4KGemvMulti[n - 4] = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:name] error:&err];
+        psoQ4KGemvMulti[n - 2] = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:name] error:&err];
     }
     psoQ4KGemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemm"] error:&err];
     // q4k_gemm_mm32 is optional. Explicit P32 requests fail closed if this pipeline is unavailable;
@@ -792,7 +798,7 @@ static int q4k_init(void) {
     psoQ6KGemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_gemm"] error:&err];
     psoGraphQuantizeQ8 = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"graph_quantize_q8"] error:&err];
     if (!psoQ4KGemv || !psoQ4KGemvMulti[0] || !psoQ4KGemvMulti[1] || !psoQ4KGemvMulti[2] ||
-        !psoQ4KGemvMulti[3] || !psoQ4KGemvMulti[4] || !psoQ4KGemm || !psoQ4KSwiGLU ||
+        !psoQ4KGemvMulti[3] || !psoQ4KGemvMulti[4] || !psoQ4KGemvMulti[5] || !psoQ4KGemvMulti[6] || !psoQ4KGemm || !psoQ4KSwiGLU ||
         !psoQ6KGemv || !psoQ6KGemm || !psoGraphQuantizeQ8) { NSLog(@"q4k: pipeline build failed: %@", err); return 0; }
     gQ4KReady = 1;
     return 1;
@@ -1428,11 +1434,11 @@ void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat, mg_execut
     }
 }
 
-// mg_q4k_gemv_batch_multi applies one Q4_K weight to 4-8 activation rows in a single dispatch.
+// mg_q4k_gemv_batch_multi applies one Q4_K weight to 2-8 activation rows in a single dispatch.
 // q4k_gemv_multi owns the tile-reuse contract; the host side only copies the panel and binds it.
 void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat, mg_execution_event* event) {
     mg_execution_event_reset(event);
-    if (wid < 0 || wid >= gNQ4 || n < 4 || n > 8) return;
+    if (wid < 0 || wid >= gNQ4 || n < 2 || n > 8) return;
     @autoreleasepool {
         Q4KW W = gQ4[wid];
         q4k_grow_scratch((long)n * W.in, (long)n * W.out);
@@ -1445,7 +1451,7 @@ void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat, mg_
         mg_execution_event_command_buffer(event, cb);
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
         mg_execution_event_encoder(event, e);
-        [e setComputePipelineState:psoQ4KGemvMulti[n - 4]];
+        [e setComputePipelineState:psoQ4KGemvMulti[n - 2]];
         [e setBuffer:wbuf offset:W.offset atIndex:0];
         [e setBuffer:xb   offset:0 atIndex:1];
         [e setBuffer:yb   offset:0 atIndex:2];
@@ -1463,6 +1469,34 @@ void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat, mg_
         memcpy(Ycat, yb.contents, (size_t)n * W.out * 4);
         mg_execution_event_readback(event);
     }
+}
+
+int mg_q4k_gemv_wide_m(int wid, const float* Xcat, int m, float* Ycat, mg_execution_event* event) {
+    if (wid < 0 || wid >= gNQ4 || m < 2 || m > 8) return 0;
+    mg_q4k_gemv_batch_multi(wid, Xcat, m, Ycat, event);
+    return 1;
+}
+
+int mg_q4k_gemv_wide_m_encode(void* cb_ptr, int wid, void* x_buf_ptr, void* y_buf_ptr, int m) {
+    if (!cb_ptr || wid < 0 || wid >= gNQ4 || m < 2 || m > 8 || !x_buf_ptr || !y_buf_ptr) return 0;
+    if (!q4k_init()) return 0;
+    Q4KW W = gQ4[wid];
+    id<MTLCommandBuffer> cb = (__bridge id<MTLCommandBuffer>)cb_ptr;
+    id<MTLBuffer> wbuf = (__bridge id<MTLBuffer>)W.buf;
+    id<MTLBuffer> xb = (__bridge id<MTLBuffer>)x_buf_ptr;
+    id<MTLBuffer> yb = (__bridge id<MTLBuffer>)y_buf_ptr;
+    id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+    if (!e) return 0;
+    [e setComputePipelineState:psoQ4KGemvMulti[m - 2]];
+    [e setBuffer:wbuf offset:W.offset atIndex:0];
+    [e setBuffer:xb   offset:0 atIndex:1];
+    [e setBuffer:yb   offset:0 atIndex:2];
+    [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
+    [e setBytes:&W.out  length:sizeof(int) atIndex:4];
+    [e dispatchThreadgroups:MTLSizeMake((NSUInteger)(W.out + 7) / 8, 1, 1)
+        threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+    [e endEncoding];
+    return 1;
 }
 
 // mg_q4k_gemv_group runs n decode GEMVs that SHARE one activation x (length in) but apply n

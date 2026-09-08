@@ -191,6 +191,13 @@ func TestCgoEnvFormatting(t *testing.T) {
 	if !strings.Contains(vulkanEnv["FAK_VULKAN_SPIRV"], "spirv") {
 		t.Errorf("FAK_VULKAN_SPIRV missing spirv: %q", vulkanEnv["FAK_VULKAN_SPIRV"])
 	}
+	linuxVulkanEnv := SynthesizeVulkanCgoEnv(&Toolchain{
+		CC: "gcc", CXX: "g++", VulkanInc: "/usr/include", VulkanLib: "/usr/lib",
+		CxxRuntime: "-lstdc++", IsWindows: false,
+	}, "/work/fak/internal/compute")
+	if flags := linuxVulkanEnv["CGO_LDFLAGS"]; !strings.Contains(flags, "-lvulkan") || strings.Contains(flags, "-lvulkan-1") {
+		t.Errorf("Linux Vulkan CGO_LDFLAGS must select libvulkan, got %q", flags)
+	}
 
 	// 4. SynthesizeCUDACgoEnv
 	tcCuda := &Toolchain{

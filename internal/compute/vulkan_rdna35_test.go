@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
@@ -277,13 +280,14 @@ func executeWave32BlockTiledQ8GEMM(codes []int8, scales []float32, X []float32, 
 			acc := make([][8]float32, 128)
 
 			for b := 0; b < nblk; b++ {
-				ldsX_f32 := make([]float32, tileM*block)
+				strideK := block + 2 // Pad-2 stride alignment (34 elements)
+				ldsX_f32 := make([]float32, tileM*strideK)
 				for r := 0; r < tileM; r++ {
 					gRow := wgRow + r
 					for c := 0; c < block; c++ {
 						gCol := b*block + c
 						if gRow < P && gCol < inDim {
-							ldsX_f32[r*block+c] = X[gRow*inDim+gCol]
+							ldsX_f32[r*strideK+c] = X[gRow*inDim+gCol]
 						}
 					}
 				}
@@ -307,14 +311,14 @@ func executeWave32BlockTiledQ8GEMM(codes []int8, scales []float32, X []float32, 
 					}
 				}
 
-				ldsXq := make([]int8, tileM*block)
+				ldsXq := make([]int8, tileM*strideK)
 				ldsXs := make([]float32, tileM)
 				for r := 0; r < tileM; r++ {
 					gRow := wgRow + r
 					var amax float32
 					if gRow < P {
 						for k := 0; k < block; k++ {
-							val := float32(math.Abs(float64(ldsX_f32[r*block+k])))
+							val := float32(math.Abs(float64(ldsX_f32[r*strideK+k])))
 							if val > amax {
 								amax = val
 							}
@@ -328,7 +332,7 @@ func executeWave32BlockTiledQ8GEMM(codes []int8, scales []float32, X []float32, 
 					}
 					for k := 0; k < block; k++ {
 						if d > 0 {
-							ldsXq[r*block+k] = q8round(ldsX_f32[r*block+k] * inv)
+							ldsXq[r*strideK+k] = q8round(ldsX_f32[r*strideK+k] * inv)
 						}
 					}
 				}
@@ -343,7 +347,7 @@ func executeWave32BlockTiledQ8GEMM(codes []int8, scales []float32, X []float32, 
 							var dot int32
 							for kHalf := 0; kHalf < block; kHalf += 16 {
 								for k := 0; k < 16; k++ {
-									aElem := int32(ldsXq[(waveRow+wr)*block+kHalf+k])
+									aElem := int32(ldsXq[(waveRow+wr)*strideK+kHalf+k])
 									bElem := int32(ldsTileW[(kHalf+k)*tileN+(waveCol+wc)])
 									dot += aElem * bElem
 								}
@@ -1062,4 +1066,138 @@ func TestRDNA35_MicroArchitecturalOptimizations(t *testing.T) {
 			t.Fatalf("gather.ValidatePrefillThroughput(%.2f tok/s) failed: %v", modeledPrefillTokS, err)
 		}
 	})
+}
+
+// TestQ8MatMulAndAttentionLDSPad2 verifies Acceptance Criteria 1, 2, and 3 for Issue #611:
+// 1. [SW-VERIFIED] internal/compute/shaders/q8_matmul.comp implements Pad-2 stride alignment (+2 elements per 32-element row) for shared activation buffers.
+// 2. [SW-VERIFIED] internal/compute/shaders/attention.comp implements Pad-2 stride alignment for shared reduction arrays.
+// 3. [SW-VERIFIED] Bank conflict elimination reduces max conflict depth from 32-way to 2-way and preserves cosine >= 0.999 parity.
+func TestQ8MatMulAndAttentionLDSPad2(t *testing.T) {
+	// 1. Verify q8_matmul.comp contains Pad-2 stride alignment tokens
+	q8PathCandidates := []string{
+		filepath.Join("shaders", "q8_matmul.comp"),
+		filepath.Join("internal", "compute", "shaders", "q8_matmul.comp"),
+		filepath.Join("..", "..", "internal", "compute", "shaders", "q8_matmul.comp"),
+	}
+	var q8Content string
+	for _, p := range q8PathCandidates {
+		if raw, err := os.ReadFile(p); err == nil {
+			q8Content = string(raw)
+			break
+		}
+	}
+	if q8Content == "" {
+		t.Fatalf("could not locate q8_matmul.comp at any candidate path: %v", q8PathCandidates)
+	}
+
+	q8RequiredTokens := []string{
+		"const uint LDS_PAD_2 = 2u;",
+		"const uint STRIDE_K = BLOCK + LDS_PAD_2;",
+		"shared int8_t  ldsXq[TILE_M * STRIDE_K];",
+		"shared float   ldsX_f32[TILE_M * STRIDE_K];",
+		"ldsX_f32[r * STRIDE_K + c] = val;",
+		"amax = max(amax, abs(ldsX_f32[r * STRIDE_K + k]));",
+		"ldsXq[r * STRIDE_K + k] = q;",
+		"uint offsetA = waveRow * STRIDE_K + kHalf;",
+		"coopMatLoad(matA, ldsXq, offsetA, STRIDE_K, gl_CooperativeMatrixLayoutRowMajor);",
+	}
+	for _, tok := range q8RequiredTokens {
+		if !strings.Contains(q8Content, tok) {
+			t.Errorf("q8_matmul.comp missing required Pad-2 stride token: %q", tok)
+		}
+	}
+
+	// 2. Verify attention.comp contains Pad-2 stride alignment tokens
+	attnPathCandidates := []string{
+		filepath.Join("shaders", "attention.comp"),
+		filepath.Join("internal", "compute", "shaders", "attention.comp"),
+		filepath.Join("..", "..", "internal", "compute", "shaders", "attention.comp"),
+	}
+	var attnContent string
+	for _, p := range attnPathCandidates {
+		if raw, err := os.ReadFile(p); err == nil {
+			attnContent = string(raw)
+			break
+		}
+	}
+	if attnContent == "" {
+		t.Fatalf("could not locate attention.comp at any candidate path: %v", attnPathCandidates)
+	}
+
+	attnRequiredTokens := []string{
+		"const uint RED_STRIDE = 32u + 2u;",
+		"shared float red[4u * RED_STRIDE];",
+		"uint red_idx(uint i)",
+		"red[red_idx(tid)] = partial;",
+		"red[red_idx(tid)] += red[red_idx(tid + s)];",
+		"float score = red[red_idx(0u)] * pc.scale;",
+	}
+	for _, tok := range attnRequiredTokens {
+		if !strings.Contains(attnContent, tok) {
+			t.Errorf("attention.comp missing required Pad-2 stride token: %q", tok)
+		}
+	}
+
+	// 3. Verify LDS bank conflict elimination:
+	// Unpadded 32-element row stride causes all 32 lanes in Wave32 to collide on a single bank (32-way conflict).
+	// Pad-2 stride (34 elements) spreads lanes across 16 banks with max conflict depth 2 (no 8-way/16-way stalls).
+	unpaddedReport := AnalyzeLDSBankConflicts(32, false)
+	if unpaddedReport.ActiveBanks != 1 {
+		t.Errorf("unpadded ActiveBanks = %d, want 1 (all lanes hit same bank)", unpaddedReport.ActiveBanks)
+	}
+	if unpaddedReport.MaxConflictDepth != 32 {
+		t.Errorf("unpadded MaxConflictDepth = %d, want 32", unpaddedReport.MaxConflictDepth)
+	}
+
+	paddedReport := AnalyzeLDSBankConflicts(32, true)
+	if paddedReport.ActiveBanks != 16 {
+		t.Errorf("padded ActiveBanks = %d, want 16", paddedReport.ActiveBanks)
+	}
+	if paddedReport.MaxConflictDepth != 2 {
+		t.Errorf("padded MaxConflictDepth = %d, want 2", paddedReport.MaxConflictDepth)
+	}
+	if paddedReport.MaxConflictDepth >= 8 {
+		t.Errorf("padded MaxConflictDepth = %d >= 8 (8-bank conflict stalls not eliminated)", paddedReport.MaxConflictDepth)
+	}
+
+	// 4. Parity verification: simulated 2D block-tiled Wave32 cooperative matrix GEMM with Pad-2 stride
+	outDim, inDim, P := 64, 64, 16
+	rng := rand.New(rand.NewSource(611))
+	nblk := inDim / 32
+	codes := make([]int8, outDim*inDim)
+	scales := make([]float32, outDim*nblk)
+	for i := range codes {
+		codes[i] = int8(rng.Intn(255) - 128)
+	}
+	for i := range scales {
+		scales[i] = rng.Float32()*0.05 + 0.001
+	}
+	X := make([]float32, P*inDim)
+	for i := range X {
+		X[i] = rng.Float32()*2.0 - 1.0
+	}
+
+	refY := make([]float32, P*outDim)
+	for tRow := 0; tRow < P; tRow++ {
+		for o := 0; o < outDim; o++ {
+			var sum float32
+			for b := 0; b < nblk; b++ {
+				xBlock := X[tRow*inDim+b*32 : tRow*inDim+(b+1)*32]
+				xq, xs := quantizeVecQ8(xBlock, 32)
+				var dot int32
+				for k := 0; k < 32; k++ {
+					dot += int32(codes[o*inDim+b*32+k]) * int32(xq[k])
+				}
+				sum += float32(dot) * scales[o*nblk+b] * xs[0]
+			}
+			refY[tRow*outDim+o] = sum
+		}
+	}
+
+	gotY := executeWave32BlockTiledQ8GEMM(codes, scales, X, outDim, inDim, P)
+	cosSim := CosineSimilarity(gotY, refY)
+	if cosSim < 0.999 {
+		t.Fatalf("simulated Pad-2 Q8 GEMM cosine = %.8f, want >= 0.999", cosSim)
+	}
+	t.Logf("LDS Pad-2 stride alignment verified: Q8 cosine=%.8f (gate >= 0.999)", cosSim)
 }

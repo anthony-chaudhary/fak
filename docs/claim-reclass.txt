@@ -70,3 +70,9 @@ witness: testdata/tb4bench/golden_compare.json
 witness: testdata/tb4bench/sample_contract.json
 witness: testdata/tb4bench/sample_manifest.json
 reason: The landed subject says test(tb4bench), but the diff adds only the three golden and sample fixture documents under testdata/tb4bench and changes no test source. The evidence supports a fixture/chore claim, not a new test-code claim.
+
+commit: 858cd70c916d369ac3ac0e077edb5242eae6f57d
+type: docs
+witness: goals/GOAL-mac-oss-performance-number-one.md
+reason: The landed subject says feat(goals), but the diff adds only goals/GOAL-mac-oss-performance-number-one.md and changes no program source. The evidence supports a documentation/goal claim and nothing more.
+

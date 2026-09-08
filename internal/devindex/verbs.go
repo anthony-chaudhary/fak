@@ -145,6 +145,7 @@ var verbManifest = []Verb{
 	{Name: "commit", Synopsis: "commit staged paths with the lane ship-stamp trailer enforced (safe shared-trunk commit)", Lane: "cmd"},
 	{Name: "commit-subject-coverage", Synopsis: "commit-subject grammar coverage: scan the last N commits for stamp-conformant subjects, advisory floor", Lane: "cmd"},
 	{Name: "complain", Synopsis: "file a dogfood complaint about an agent-experience friction", Lane: "cmd"},
+	{Name: "completion", Synopsis: "generate shell completion scripts for bash, zsh, and fish", Lane: "cmd"},
 	{Name: "component", Synopsis: "check component contracts and workload coverage from a declared root", Lane: "cmd"},
 	{Name: "compute", Synopsis: "heterogeneous compute orchestration across CUDA, Metal, and ROCm", Lane: "cmd"},
 	{Name: "compute-trace", Synopsis: "capture or summarize bounded compute-event trace artifacts", Lane: "cmd"},

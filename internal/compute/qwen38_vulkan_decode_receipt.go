@@ -13,8 +13,11 @@ import (
 )
 
 const (
-	Qwen38VulkanDecodePacketSchema  = "fak/qwen38-vulkan-decode-packet/v1"
-	Qwen38VulkanDecodeReceiptSchema = "fak/qwen38-vulkan-decode-receipt/v2"
+	Qwen38VulkanDecodePacketSchema        = "fak/qwen38-vulkan-decode-packet/v1"
+	Qwen38VulkanDecodeReceiptSchema       = "fak/qwen38-vulkan-decode-receipt/v2"
+	Qwen38VulkanDecodeReceiptV3Schema     = "fak/qwen38-vulkan-decode-receipt/v3"
+	Qwen38VulkanResourceScopeReportedRuns = "reported_runs"
+	Qwen38VulkanRunKindMeasured           = "measured"
 
 	Qwen38VulkanDecodeGGUFSHA256 = "7E78DA5D7E3AE28D178121F58646953305F3E5BD3CB46F4A75584E8B6C6FE169"
 	Qwen38VulkanDecodeBackend    = "vulkan"
@@ -108,6 +111,17 @@ type Qwen38VulkanDecodeCounters struct {
 	TensorHome             Qwen38VulkanTensorHomeCounters `json:"tensor_home"`
 }
 
+// Qwen38VulkanRunResources contains observations scoped to exactly one measured
+// run. Warmups are not runs and must not be represented here. TransfersComplete
+// is a pointer so an observed complete tuple (including an all-zero direction)
+// is distinguishable from unavailable transfer instrumentation.
+type Qwen38VulkanRunResources struct {
+	PeakProcessMemoryBytes uint64                     `json:"peak_process_memory_bytes"`
+	PeakDeviceMemoryBytes  uint64                     `json:"peak_device_memory_bytes"`
+	TransfersComplete      *bool                      `json:"transfers_complete"`
+	Counters               Qwen38VulkanDecodeCounters `json:"counters"`
+}
+
 // Qwen38VulkanSourceIdentity binds a physical result to the exact source and
 // executable bytes that produced it. Dirty is a pointer so an observed clean
 // tree is distinguishable from an unobserved tree state.
@@ -150,23 +164,25 @@ type Qwen38VulkanEngineIdentity struct {
 }
 
 type Qwen38VulkanDecodeRun struct {
-	Repetition                  int     `json:"repetition"`
-	ContextLimit                int     `json:"context_limit"`
-	ContextTokens               int     `json:"context_tokens"`
-	GeneratedTokenLimit         int     `json:"generated_token_limit"`
-	ActualGeneratedTokens       int     `json:"actual_generated_tokens"`
-	Sampler                     string  `json:"sampler"`
-	SeedPolicy                  string  `json:"seed_policy"`
-	IgnoreEOS                   *bool   `json:"ignore_eos"`
-	EOSStopped                  *bool   `json:"eos_stopped"`
-	OutputTokenIDs              []int32 `json:"output_token_ids"`
-	SessionSetupNanoseconds     uint64  `json:"session_setup_nanoseconds"`
-	PrefillNanoseconds          uint64  `json:"prefill_nanoseconds"`
-	FirstSampleNanoseconds      uint64  `json:"first_sample_nanoseconds"`
-	DecodeNanoseconds           uint64  `json:"decode_nanoseconds"`
-	TeardownNanoseconds         uint64  `json:"teardown_nanoseconds"`
-	CandidateElapsedNanoseconds uint64  `json:"candidate_elapsed_nanoseconds"`
-	CPUVerificationNanoseconds  uint64  `json:"cpu_verification_nanoseconds"`
+	Repetition                  int                       `json:"repetition"`
+	Kind                        string                    `json:"kind,omitempty"`
+	ContextLimit                int                       `json:"context_limit"`
+	ContextTokens               int                       `json:"context_tokens"`
+	GeneratedTokenLimit         int                       `json:"generated_token_limit"`
+	ActualGeneratedTokens       int                       `json:"actual_generated_tokens"`
+	Sampler                     string                    `json:"sampler"`
+	SeedPolicy                  string                    `json:"seed_policy"`
+	IgnoreEOS                   *bool                     `json:"ignore_eos"`
+	EOSStopped                  *bool                     `json:"eos_stopped"`
+	OutputTokenIDs              []int32                   `json:"output_token_ids"`
+	SessionSetupNanoseconds     uint64                    `json:"session_setup_nanoseconds"`
+	PrefillNanoseconds          uint64                    `json:"prefill_nanoseconds"`
+	FirstSampleNanoseconds      uint64                    `json:"first_sample_nanoseconds"`
+	DecodeNanoseconds           uint64                    `json:"decode_nanoseconds"`
+	TeardownNanoseconds         uint64                    `json:"teardown_nanoseconds"`
+	CandidateElapsedNanoseconds uint64                    `json:"candidate_elapsed_nanoseconds"`
+	CPUVerificationNanoseconds  uint64                    `json:"cpu_verification_nanoseconds"`
+	Resources                   *Qwen38VulkanRunResources `json:"resources,omitempty"`
 }
 
 // Qwen38VulkanRawDecodeResult is the promotion boundary between a raw runner
@@ -190,6 +206,8 @@ type Qwen38VulkanRawDecodeResult struct {
 	PeakProcessMemoryBytes      *uint64                     `json:"peak_process_memory_bytes,omitempty"`
 	PeakDeviceMemoryBytes       *uint64                     `json:"peak_device_memory_bytes,omitempty"`
 	Counters                    *Qwen38VulkanDecodeCounters `json:"counters,omitempty"`
+	ResourceScope               string                      `json:"resource_scope,omitempty"`
+	ReportedRuns                int                         `json:"reported_runs,omitempty"`
 }
 
 // Qwen38VulkanDecodeReceipt captures comparable work and cost for one packet.
@@ -217,12 +235,45 @@ type Qwen38VulkanDecodeReceipt struct {
 	PeakProcessMemoryBytes      uint64                     `json:"peak_process_memory_bytes"`
 	PeakDeviceMemoryBytes       uint64                     `json:"peak_device_memory_bytes"`
 	Counters                    Qwen38VulkanDecodeCounters `json:"counters"`
+	ResourceScope               string                     `json:"resource_scope,omitempty"`
+	ReportedRuns                int                        `json:"reported_runs,omitempty"`
+	TransfersComplete           *bool                      `json:"transfers_complete,omitempty"`
 }
 
 // BuildQwen38VulkanDecodeReceipt promotes a raw result only after the complete
 // physical identity and measurement contract validates. On failure it returns
 // a zero receipt so partial raw reports cannot be mistaken for canonical ones.
 func BuildQwen38VulkanDecodeReceipt(raw Qwen38VulkanRawDecodeResult) (Qwen38VulkanDecodeReceipt, error) {
+	return buildQwen38VulkanDecodeReceipt(raw, Qwen38VulkanDecodeReceiptSchema)
+}
+
+// BuildQwen38VulkanDecodeReceiptV3 constructs the strict resource-observation
+// schema. Its receipt-level peaks are maxima, and its additive counters are
+// overflow-checked sums, across exactly ReportedRuns measured runs. The builder
+// derives those aggregates from per-run observations; caller-supplied legacy
+// aggregate fields are rejected. Existing v2 construction remains available
+// through BuildQwen38VulkanDecodeReceipt for stored-receipt compatibility.
+func BuildQwen38VulkanDecodeReceiptV3(raw Qwen38VulkanRawDecodeResult) (Qwen38VulkanDecodeReceipt, error) {
+	if raw.ResourceScope != Qwen38VulkanResourceScopeReportedRuns {
+		return Qwen38VulkanDecodeReceipt{}, fmt.Errorf("raw decode result is not a canonical v3 physical receipt: resource scope %q, want %q", raw.ResourceScope, Qwen38VulkanResourceScopeReportedRuns)
+	}
+	if raw.ReportedRuns <= 0 || raw.ReportedRuns != len(raw.Runs) {
+		return Qwen38VulkanDecodeReceipt{}, fmt.Errorf("raw decode result is not a canonical v3 physical receipt: reported runs %d != measured runs %d", raw.ReportedRuns, len(raw.Runs))
+	}
+	if raw.PeakProcessMemoryBytes != nil || raw.PeakDeviceMemoryBytes != nil || raw.Counters != nil {
+		return Qwen38VulkanDecodeReceipt{}, errors.New("raw decode result is not a canonical v3 physical receipt: resource aggregates must be derived from reported runs")
+	}
+	processPeak, devicePeak, counters, err := aggregateQwen38VulkanRunResources(raw.Runs)
+	if err != nil {
+		return Qwen38VulkanDecodeReceipt{}, fmt.Errorf("raw decode result is not a canonical v3 physical receipt: %w", err)
+	}
+	raw.PeakProcessMemoryBytes = &processPeak
+	raw.PeakDeviceMemoryBytes = &devicePeak
+	raw.Counters = &counters
+	return buildQwen38VulkanDecodeReceipt(raw, Qwen38VulkanDecodeReceiptV3Schema)
+}
+
+func buildQwen38VulkanDecodeReceipt(raw Qwen38VulkanRawDecodeResult, schema string) (Qwen38VulkanDecodeReceipt, error) {
 	packet := NewQwen38VulkanDecodePacket(raw.PromptTokenIDs, raw.GeneratedTokenLimit)
 	packetDigest, err := packet.Digest()
 	if err != nil {
@@ -255,9 +306,15 @@ func BuildQwen38VulkanDecodeReceipt(raw Qwen38VulkanRawDecodeResult) (Qwen38Vulk
 		runs[i].OutputTokenIDs = slices.Clone(run.OutputTokenIDs)
 		runs[i].IgnoreEOS = qwen38VulkanBoolCopy(run.IgnoreEOS)
 		runs[i].EOSStopped = qwen38VulkanBoolCopy(run.EOSStopped)
+		if schema == Qwen38VulkanDecodeReceiptV3Schema {
+			runs[i].Resources = qwen38VulkanRunResourcesCopy(run.Resources)
+		} else {
+			runs[i].Kind = ""
+			runs[i].Resources = nil
+		}
 	}
 	receipt := Qwen38VulkanDecodeReceipt{
-		Schema:                      Qwen38VulkanDecodeReceiptSchema,
+		Schema:                      schema,
 		Source:                      source,
 		Model:                       raw.Model,
 		Device:                      raw.Device,
@@ -280,6 +337,12 @@ func BuildQwen38VulkanDecodeReceipt(raw Qwen38VulkanRawDecodeResult) (Qwen38Vulk
 		PeakProcessMemoryBytes:      peakProcessMemoryBytes,
 		PeakDeviceMemoryBytes:       peakDeviceMemoryBytes,
 		Counters:                    counters,
+	}
+	if schema == Qwen38VulkanDecodeReceiptV3Schema {
+		complete := true
+		receipt.ResourceScope = raw.ResourceScope
+		receipt.ReportedRuns = raw.ReportedRuns
+		receipt.TransfersComplete = &complete
 	}
 	if err := receipt.Validate(); err != nil {
 		return Qwen38VulkanDecodeReceipt{}, fmt.Errorf("raw decode result is not a canonical physical receipt: %w", err)
@@ -308,8 +371,8 @@ func Qwen38VulkanTokenIDsSHA256(tokenIDs []int32) string {
 }
 
 func (r Qwen38VulkanDecodeReceipt) Validate() error {
-	if r.Schema != Qwen38VulkanDecodeReceiptSchema {
-		return fmt.Errorf("qwen3.8 Vulkan receipt schema %q, want %q", r.Schema, Qwen38VulkanDecodeReceiptSchema)
+	if r.Schema != Qwen38VulkanDecodeReceiptSchema && r.Schema != Qwen38VulkanDecodeReceiptV3Schema {
+		return fmt.Errorf("qwen3.8 Vulkan receipt schema %q, want %q or %q", r.Schema, Qwen38VulkanDecodeReceiptSchema, Qwen38VulkanDecodeReceiptV3Schema)
 	}
 	if err := r.Packet.Validate(); err != nil {
 		return fmt.Errorf("qwen3.8 Vulkan receipt packet: %w", err)
@@ -348,10 +411,29 @@ func (r Qwen38VulkanDecodeReceipt) Validate() error {
 	if r.PeakProcessMemoryBytes == 0 || r.PeakDeviceMemoryBytes == 0 {
 		return errors.New("qwen3.8 Vulkan receipt requires positive process and device peak memory")
 	}
-	if r.PeakDeviceMemoryBytes > r.PeakProcessMemoryBytes {
+	if r.Schema == Qwen38VulkanDecodeReceiptSchema && r.PeakDeviceMemoryBytes > r.PeakProcessMemoryBytes {
 		return fmt.Errorf("qwen3.8 Vulkan device peak %d exceeds process peak %d", r.PeakDeviceMemoryBytes, r.PeakProcessMemoryBytes)
 	}
-	return r.Counters.validate()
+	if r.Schema == Qwen38VulkanDecodeReceiptV3Schema {
+		if err := r.Counters.validateV3(); err != nil {
+			return err
+		}
+	} else if err := r.Counters.validate(); err != nil {
+		return err
+	}
+	if r.Schema == Qwen38VulkanDecodeReceiptV3Schema {
+		return r.validateV3Resources()
+	}
+	return nil
+}
+
+func qwen38VulkanRunResourcesCopy(resources *Qwen38VulkanRunResources) *Qwen38VulkanRunResources {
+	if resources == nil {
+		return nil
+	}
+	copy := *resources
+	copy.TransfersComplete = qwen38VulkanBoolCopy(resources.TransfersComplete)
+	return &copy
 }
 
 func (r Qwen38VulkanDecodeReceipt) validatePhysicalIdentity() error {
@@ -458,6 +540,91 @@ func (r Qwen38VulkanDecodeReceipt) validateRuns() error {
 	return nil
 }
 
+func (r Qwen38VulkanDecodeReceipt) validateV3Resources() error {
+	if r.ResourceScope != Qwen38VulkanResourceScopeReportedRuns {
+		return fmt.Errorf("qwen3.8 Vulkan v3 resource scope %q, want %q", r.ResourceScope, Qwen38VulkanResourceScopeReportedRuns)
+	}
+	if r.ReportedRuns <= 0 || r.ReportedRuns != len(r.Runs) {
+		return fmt.Errorf("qwen3.8 Vulkan v3 reported runs %d != measured runs %d", r.ReportedRuns, len(r.Runs))
+	}
+	if r.TransfersComplete == nil || !*r.TransfersComplete {
+		return errors.New("qwen3.8 Vulkan v3 receipt requires complete transfer observations for every reported run")
+	}
+	processPeak, devicePeak, counters, err := aggregateQwen38VulkanRunResources(r.Runs)
+	if err != nil {
+		return err
+	}
+	if r.PeakProcessMemoryBytes != processPeak || r.PeakDeviceMemoryBytes != devicePeak {
+		return errors.New("qwen3.8 Vulkan v3 peak memory does not match reported-run maxima")
+	}
+	if r.Counters != counters {
+		return errors.New("qwen3.8 Vulkan v3 counters do not match reported-run aggregation")
+	}
+	return nil
+}
+
+func aggregateQwen38VulkanRunResources(runs []Qwen38VulkanDecodeRun) (uint64, uint64, Qwen38VulkanDecodeCounters, error) {
+	var processPeak, devicePeak uint64
+	var total Qwen38VulkanDecodeCounters
+	for i, run := range runs {
+		if run.Kind != Qwen38VulkanRunKindMeasured {
+			return 0, 0, Qwen38VulkanDecodeCounters{}, fmt.Errorf("qwen3.8 Vulkan repetition %d kind %q, want %q", i+1, run.Kind, Qwen38VulkanRunKindMeasured)
+		}
+		resources := run.Resources
+		if resources == nil {
+			return 0, 0, Qwen38VulkanDecodeCounters{}, fmt.Errorf("qwen3.8 Vulkan repetition %d requires resource observations", i+1)
+		}
+		if resources.TransfersComplete == nil || !*resources.TransfersComplete {
+			return 0, 0, Qwen38VulkanDecodeCounters{}, fmt.Errorf("qwen3.8 Vulkan repetition %d requires complete transfer observations", i+1)
+		}
+		if resources.PeakProcessMemoryBytes == 0 || resources.PeakDeviceMemoryBytes == 0 {
+			return 0, 0, Qwen38VulkanDecodeCounters{}, fmt.Errorf("qwen3.8 Vulkan repetition %d requires positive process and device peak memory", i+1)
+		}
+		if err := resources.Counters.validateV3(); err != nil {
+			return 0, 0, Qwen38VulkanDecodeCounters{}, fmt.Errorf("qwen3.8 Vulkan repetition %d resources: %w", i+1, err)
+		}
+		processPeak = max(processPeak, resources.PeakProcessMemoryBytes)
+		devicePeak = max(devicePeak, resources.PeakDeviceMemoryBytes)
+		if err := addQwen38VulkanDecodeCounters(&total, resources.Counters); err != nil {
+			return 0, 0, Qwen38VulkanDecodeCounters{}, fmt.Errorf("qwen3.8 Vulkan repetition %d resources: %w", i+1, err)
+		}
+		total.TensorHome.ResidentBytes = max(total.TensorHome.ResidentBytes, resources.Counters.TensorHome.ResidentBytes)
+	}
+	return processPeak, devicePeak, total, nil
+}
+
+func addQwen38VulkanDecodeCounters(total *Qwen38VulkanDecodeCounters, run Qwen38VulkanDecodeCounters) error {
+	additions := []struct {
+		name  string
+		total *uint64
+		value uint64
+	}{
+		{"compute dispatches", &total.ComputeDispatches, run.ComputeDispatches},
+		{"q4_k matmul dispatches", &total.Q4KMatmulDispatches, run.Q4KMatmulDispatches},
+		{"other compute dispatches", &total.OtherComputeDispatches, run.OtherComputeDispatches},
+		{"dispatch submits", &total.DispatchSubmits, run.DispatchSubmits},
+		{"h2d count", &total.H2D.Count, run.H2D.Count},
+		{"h2d bytes", &total.H2D.Bytes, run.H2D.Bytes},
+		{"d2h count", &total.D2H.Count, run.D2H.Count},
+		{"d2h bytes", &total.D2H.Bytes, run.D2H.Bytes},
+		{"d2d count", &total.D2D.Count, run.D2D.Count},
+		{"d2d bytes", &total.D2D.Bytes, run.D2D.Bytes},
+		{"q4_k stage calls", &total.Q4KStageCalls, run.Q4KStageCalls},
+		{"q4_k stage bytes", &total.Q4KStageBytes, run.Q4KStageBytes},
+		{"tensor-home hits", &total.TensorHome.Hits, run.TensorHome.Hits},
+		{"tensor-home admissions", &total.TensorHome.Admissions, run.TensorHome.Admissions},
+		{"tensor-home bypasses", &total.TensorHome.Bypasses, run.TensorHome.Bypasses},
+		{"tensor-home copied bytes", &total.TensorHome.CopiedBytes, run.TensorHome.CopiedBytes},
+	}
+	for _, addition := range additions {
+		if ^uint64(0)-*addition.total < addition.value {
+			return fmt.Errorf("%s overflow across reported runs", addition.name)
+		}
+		*addition.total += addition.value
+	}
+	return nil
+}
+
 func qwen38VulkanDurationSum(values ...uint64) (uint64, bool) {
 	var total uint64
 	for _, value := range values {
@@ -513,6 +680,23 @@ func (c Qwen38VulkanDecodeCounters) validate() error {
 	return nil
 }
 
+func (c Qwen38VulkanDecodeCounters) validateV3() error {
+	if ^uint64(0)-c.Q4KMatmulDispatches < c.OtherComputeDispatches {
+		return errors.New("qwen3.8 Vulkan compute dispatch components overflow")
+	}
+	homeTotal, ok := qwen38VulkanDurationSum(c.TensorHome.Hits, c.TensorHome.Admissions, c.TensorHome.Bypasses)
+	if !ok {
+		return errors.New("qwen3.8 Vulkan tensor-home accounting overflows")
+	}
+	if err := c.validate(); err != nil {
+		return err
+	}
+	if homeTotal == 0 {
+		return errors.New("qwen3.8 Vulkan receipt requires tensor-home accounting")
+	}
+	return nil
+}
+
 // CompareQwen38VulkanDecodeReceipts rejects unequal request, output, or token
 // work boundaries while intentionally allowing performance counters to differ.
 func CompareQwen38VulkanDecodeReceipts(parent, candidate Qwen38VulkanDecodeReceipt) error {
@@ -521,6 +705,9 @@ func CompareQwen38VulkanDecodeReceipts(parent, candidate Qwen38VulkanDecodeRecei
 	}
 	if err := candidate.Validate(); err != nil {
 		return fmt.Errorf("candidate receipt: %w", err)
+	}
+	if parent.Schema != candidate.Schema {
+		return fmt.Errorf("parent/candidate qwen3.8 Vulkan receipt schema mismatch: %q != %q", parent.Schema, candidate.Schema)
 	}
 	if parent.PacketSHA256 != candidate.PacketSHA256 || !equalQwen38VulkanPackets(parent.Packet, candidate.Packet) {
 		return errors.New("parent/candidate qwen3.8 Vulkan packet mismatch")

@@ -17,8 +17,6 @@ int  mg_decode_step(const float* xEmbed, const float* Kctx, const float* Vctx, i
 */
 import "C"
 
-import "unsafe"
-
 // DecodeConfig records the model geometry the resident decode forward needs. scale is the attention
 // score multiplier (cfg.attnScale()); attnBias is whether q/k/v carry a bias. Call once per model
 // before DecodeLayer.
@@ -49,7 +47,9 @@ func DecodeHead(finalNormID, headWid, vocab int) {
 // compiled pipelines are model-independent and kept.
 func DecodeReset() { C.mg_decode_reset() }
 
-// DecodeStep runs one decode token through the whole model on the GPU in ONE command buffer.
+// DecodeStep runs one decode token through the whole model on the GPU.
+// When ICB replay is enabled (the default), commands are dispatched via pre-allocated
+// MTLIndirectCommandBuffer to eliminate host synchronization overhead and CPU encoding wait.
 // xEmbed is the new token's f32 embedding [H]. Kctx/Vctx are the per-layer post-RoPE K and V from
 // the CPU cache, laid out [nLayers*L*w] (w = nKV*hd); pass nil-safe empty slices when L == 0. L is
 // the number of cached positions (== the new token's absolute position). Returns the pre-final-norm
@@ -61,35 +61,6 @@ func DecodeReset() { C.mg_decode_reset() }
 // seed==false appends onto the resident KV with no re-upload (the steady decode path) and ignores
 // Kctx/Vctx — returns ok==false if the resident length disagrees, so the caller re-seeds.
 func DecodeStep(xEmbed, Kctx, Vctx []float32, L, nLayers, w, H, vocab int, seed bool) (lastPre, newKpost, newV, logits []float32, ok bool) {
-	if !Available() || len(xEmbed) < H {
-		return nil, nil, nil, nil, false
-	}
-	lastPre = make([]float32, H)
-	newKraw := make([]float32, nLayers*w) // unused (the fast Q8 decode keeps post-RoPE K/V only)
-	newKpost = make([]float32, nLayers*w)
-	newV = make([]float32, nLayers*w)
-	var lp *C.float
-	if vocab > 0 {
-		logits = make([]float32, vocab)
-		lp = (*C.float)(unsafe.Pointer(&logits[0]))
-	}
-	var kp, vp *C.float
-	if seed && L > 0 {
-		if len(Kctx) < nLayers*L*w || len(Vctx) < nLayers*L*w {
-			return nil, nil, nil, nil, false
-		}
-		kp = (*C.float)(unsafe.Pointer(&Kctx[0]))
-		vp = (*C.float)(unsafe.Pointer(&Vctx[0]))
-	}
-	seedF := C.int(0)
-	if seed {
-		seedF = 1
-	}
-	r := C.mg_decode_step((*C.float)(unsafe.Pointer(&xEmbed[0])), kp, vp, C.int(L),
-		(*C.float)(unsafe.Pointer(&lastPre[0])), (*C.float)(unsafe.Pointer(&newKraw[0])),
-		(*C.float)(unsafe.Pointer(&newKpost[0])), (*C.float)(unsafe.Pointer(&newV[0])), lp, seedF)
-	if r != 1 {
-		return nil, nil, nil, nil, false
-	}
-	return lastPre, newKpost, newV, logits, true
+	lastPre, newKpost, newV, logits, _, ok = DecodeStepWithReceipt(xEmbed, Kctx, Vctx, L, nLayers, w, H, vocab, seed)
+	return lastPre, newKpost, newV, logits, ok
 }

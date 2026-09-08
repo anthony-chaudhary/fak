@@ -128,6 +128,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdRecover(args)
 	case "concept":
 		os.Exit(runConceptCLI(os.Stdout, os.Stderr, args))
+	case "completion":
+		cmdCompletion(args)
 	case "compute":
 		cmdCompute(args)
 	case "config":
