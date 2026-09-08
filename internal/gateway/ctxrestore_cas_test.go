@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -94,29 +96,154 @@ func TestQuarantineRestoreRefusalSurvivesRestart(t *testing.T) {
 			t.Fatalf("ordinary durable page = (%d bytes, %v), want %d-byte restore", len(got.Bytes), err, len(normal))
 		}
 		return
+
+	case "authority-fail":
+		srv := newTestServer(t)
+		_ = srv
+		poison := quarantineRestoreCASBlob()
+		poisonID := ctxplan.Digest(poison)
+		call := &abi.ToolCall{Tool: "fetch_remote_payload",
+			Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{}`)},
+			Meta: map[string]string{"readOnlyHint": "true"}}
+		result := &abi.Result{Call: call, Status: abi.StatusOK,
+			Payload: abi.Ref{Kind: abi.RefInline, Inline: poison}}
+		m := ctxmmu.New()
+		verdict := m.Admit(context.Background(), call, result)
+		if verdict.Kind != abi.VerdictQuarantine {
+			t.Fatalf("authority failure verdict = %v, want quarantine", verdict.Kind)
+		}
+		pageOut, ok := verdict.Payload.(abi.QuarantinePayload)
+		if !ok || pageOut.PageOut {
+			t.Fatalf("authority failure payload = %#v, want PageOut=false", verdict.Payload)
+		}
+		if held := m.Held(); len(held) != 0 {
+			t.Fatalf("authority failure published %d held handles", len(held))
+		}
+		qid := result.Meta["quarantine_id"]
+		for _, id := range []string{qid, poisonID, "sha256:" + poisonID} {
+			if body, ok := m.ResolvePagedRef(context.Background(), id); ok || len(body) != 0 {
+				t.Fatalf("authority failure resolved %q to %d bytes", id, len(body))
+			}
+		}
+		if res := abi.ActiveResolver(); res != nil {
+			if body, err := res.Resolve(context.Background(), abi.Ref{Kind: abi.RefBlob, Digest: poisonID}); len(body) != 0 {
+				t.Fatalf("authority failure page-out backend resolved %d bytes, err=%v", len(body), err)
+			}
+			if safe, err := res.Resolve(context.Background(), result.Payload); err == nil && bytes.Contains(safe, poison) {
+				t.Fatal("authority failure left quarantined bytes in the result payload")
+			}
+		}
+		return
+
+	case "compact-write":
+		ctxmmu.ResetQuarantineLedgerForTest()
+		oldDigest := strings.Repeat("a", 64)
+		newDigest := strings.Repeat("c", 64)
+		if err := ctxmmu.RecordQuarantine(newDigest); err != nil {
+			t.Fatalf("compact oversized authority WAL: %v", err)
+		}
+		if !ctxmmu.IsQuarantined(oldDigest) || !ctxmmu.IsQuarantined(newDigest) {
+			t.Fatal("snapshot compaction forgot a live denial")
+		}
+		return
+
+	case "compact-read":
+		ctxmmu.ResetQuarantineLedgerForTest()
+		oldDigest := strings.Repeat("a", 64)
+		newDigest := strings.Repeat("c", 64)
+		if !ctxmmu.IsQuarantined(oldDigest) || !ctxmmu.IsQuarantined(newDigest) {
+			t.Fatal("compacted live denials did not survive restart")
+		}
+		info, err := os.Stat(filepath.Join(".fak", "ctxmmu", "quarantine.jsonl"))
+		if err != nil {
+			t.Fatalf("stat compact authority ledger: %v", err)
+		}
+		if info.Size() > 1024 {
+			t.Fatalf("bounded authority ledger size = %d, want compact snapshot", info.Size())
+		}
+		return
+
+	case "capacity-read":
+		ctxmmu.ResetQuarantineLedgerForTest()
+		firstDigest := fmt.Sprintf("%064x", 0)
+		newDigest := strings.Repeat("f", 64)
+		if !ctxmmu.IsQuarantined(firstDigest) {
+			t.Fatal("capacity load forgot an existing durable denial")
+		}
+		if err := ctxmmu.RecordQuarantine(newDigest); err == nil {
+			t.Fatal("capacity authority accepted a new denial")
+		}
+		if ctxmmu.IsQuarantined(newDigest) {
+			t.Fatal("capacity refusal published an uncommitted denial")
+		}
+		return
 	}
 
 	dir := t.TempDir()
-	ledger := filepath.Join(dir, "quarantine.jsonl")
-	cas := filepath.Join(dir, "cas")
-	runPhase := func(phase string) {
+	envWithout := func(keys ...string) []string {
+		blocked := make(map[string]bool, len(keys))
+		for _, key := range keys {
+			blocked[strings.ToUpper(key)] = true
+		}
+		out := make([]string, 0, len(os.Environ()))
+		for _, entry := range os.Environ() {
+			key, _, _ := strings.Cut(entry, "=")
+			if !blocked[strings.ToUpper(key)] {
+				out = append(out, entry)
+			}
+		}
+		return out
+	}
+	runPhase := func(workspace, phase string, extraEnv ...string) {
 		t.Helper()
 		cmd := exec.Command(os.Args[0], "-test.run=^TestQuarantineRestoreRefusalSurvivesRestart$", "-test.count=1")
-		cmd.Env = append(os.Environ(),
-			quarantineRestoreRestartPhase+"="+phase,
-			"FAK_QUARANTINE_LEDGER_PATH="+ledger,
-			ctxRestoreCASEnvDir+"="+cas,
-		)
+		cmd.Dir = workspace
+		cmd.Env = append(envWithout("FAK_QUARANTINE_LEDGER_PATH", ctxRestoreCASEnvDir), quarantineRestoreRestartPhase+"="+phase)
+		cmd.Env = append(cmd.Env, extraEnv...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%s subprocess: %v\n%s", phase, err, out)
 		}
 	}
-	runPhase("write")
-	runPhase("read")
+	runPhase(dir, "write")
+	runPhase(dir, "read")
+	ledger := filepath.Join(dir, ".fak", "ctxmmu", "quarantine.jsonl")
 	if err := os.WriteFile(ledger, []byte("{corrupt suppression record\n"), 0o600); err != nil {
 		t.Fatalf("corrupt ledger fixture: %v", err)
 	}
-	runPhase("corrupt-read")
+	runPhase(dir, "corrupt-read")
+
+	faultWorkspace := t.TempDir()
+	invalidLedger := filepath.Join(faultWorkspace, "authority-is-a-directory")
+	if err := os.MkdirAll(invalidLedger, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runPhase(faultWorkspace, "authority-fail", "FAK_QUARANTINE_LEDGER_PATH="+invalidLedger)
+
+	compactWorkspace := t.TempDir()
+	compactLedger := filepath.Join(compactWorkspace, ".fak", "ctxmmu", "quarantine.jsonl")
+	if err := os.MkdirAll(filepath.Dir(compactLedger), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldRecord := []byte(`{"op":"quarantine","digest":"` + strings.Repeat("a", 64) + `","time":1}` + "\n")
+	if err := os.WriteFile(compactLedger, bytes.Repeat(oldRecord, (8<<20)/len(oldRecord)+1), 0o600); err != nil {
+		t.Fatalf("oversized authority WAL fixture: %v", err)
+	}
+	runPhase(compactWorkspace, "compact-write")
+	runPhase(compactWorkspace, "compact-read")
+
+	capacityWorkspace := t.TempDir()
+	capacityLedger := filepath.Join(capacityWorkspace, ".fak", "ctxmmu", "quarantine.jsonl")
+	if err := os.MkdirAll(filepath.Dir(capacityLedger), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var capacityRecords bytes.Buffer
+	for i := 0; i < 32768; i++ {
+		fmt.Fprintf(&capacityRecords, "{\"op\":\"quarantine\",\"digest\":\"%064x\",\"time\":1}\n", i)
+	}
+	if err := os.WriteFile(capacityLedger, capacityRecords.Bytes(), 0o600); err != nil {
+		t.Fatalf("capacity authority fixture: %v", err)
+	}
+	runPhase(capacityWorkspace, "capacity-read")
 }
 
 // TestRestoreDurableCASSurvivesEvictionAndRestart (#5163): a media entry evicted from the RAM stash

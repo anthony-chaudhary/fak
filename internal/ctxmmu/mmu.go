@@ -16,6 +16,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -135,6 +136,58 @@ func (m *MMU) quarantineLedger() *QuarantineLedger {
 		return m.ledger
 	}
 	return DefaultQuarantineLedger()
+}
+
+// quarantineAuthorityLedgers returns each live authority exactly once. A custom
+// MMU ledger is written before the process-default authority; on clearance this
+// keeps the gateway-visible default denial intact until every custom authority
+// has durably accepted the same transition.
+func (m *MMU) quarantineAuthorityLedgers() []*QuarantineLedger {
+	def := DefaultQuarantineLedger()
+	ledgers := make([]*QuarantineLedger, 0, 2)
+	if m != nil && m.ledger != nil && m.ledger != def {
+		ledgers = append(ledgers, m.ledger)
+	}
+	if def != nil {
+		ledgers = append(ledgers, def)
+	}
+	return ledgers
+}
+
+func (m *MMU) recordQuarantineAuthority(aliases ...string) error {
+	ledgers := m.quarantineAuthorityLedgers()
+	if len(ledgers) == 0 {
+		return errors.New("ctxmmu: no quarantine authority")
+	}
+	for _, alias := range aliases {
+		for _, ledger := range ledgers {
+			if err := ledger.RecordQuarantine(alias); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (m *MMU) clearQuarantineAuthority(aliases ...string) error {
+	ledgers := m.quarantineAuthorityLedgers()
+	if len(ledgers) == 0 {
+		return errors.New("ctxmmu: no quarantine authority")
+	}
+	seen := make(map[string]bool, len(aliases))
+	for _, alias := range aliases {
+		key := cleanDigest(alias)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		for _, ledger := range ledgers {
+			if err := ledger.ClearQuarantine(key); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (m *MMU) SetQuarantineLedger(l *QuarantineLedger) {
@@ -504,37 +557,32 @@ func (m *MMU) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ver
 // in-place with a tiny stub so they are absent from context, records the held
 // handle for a gated page-in, and returns the Quarantine verdict.
 func (m *MMU) quarantineResult(ctx context.Context, r *abi.Result, reason abi.ReasonCode, body []byte, detector string) abi.Verdict {
-	atomic.AddInt64(&m.quarantine, 1)
-	id := fmt.Sprintf("q%d", atomic.LoadInt64(&m.quarantine))
-	handle := m.pageOut(ctx, body)
-	m.mu.Lock()
-	m.held[id] = handle
-	m.order = append(m.order, id)
-	// Pin the held bytes UNDER m.mu so the bounded CAS cannot reclaim them before the
-	// gated PageIn resolves them later; the FIFO bound unpins on eviction.
-	abi.PinResolved(handle)
-	m.touchLocked(id, holdNowMillis()) // start the TTL keepalive countdown (pinreaper.go)
-	m.evictExcessLocked()
-	m.mu.Unlock()
-	m.stagePaged(handle.Digest, body)
-	m.stagePaged(id, body)
+	id := fmt.Sprintf("q%d", atomic.AddInt64(&m.quarantine, 1))
+	sum := sha256.Sum256(body)
+	contentDigest := hex.EncodeToString(sum[:])
 
-	// Record in quarantine ledger (#12055, #12057)
-	m.quarantineLedger().RecordQuarantine(id)
-	RecordQuarantine(id)
-	if handle.Digest != "" {
-		cleanDigest := strings.TrimPrefix(handle.Digest, "sha256:")
-		m.quarantineLedger().RecordQuarantine(handle.Digest)
-		m.quarantineLedger().RecordQuarantine(cleanDigest)
-		RecordQuarantine(handle.Digest)
-		RecordQuarantine(cleanDigest)
-	} else if len(body) > 0 {
-		sum := sha256.Sum256(body)
-		hexSum := hex.EncodeToString(sum[:])
-		m.quarantineLedger().RecordQuarantine(hexSum)
-		m.quarantineLedger().RecordQuarantine("sha256:" + hexSum)
-		RecordQuarantine(hexSum)
-		RecordQuarantine("sha256:" + hexSum)
+	// Authority is committed and synced before any backend or staging store sees
+	// the bytes. The content address is the only handle identity we admit: an
+	// opaque or rewritten backend digest would create an unrecordable crash window.
+	authorityOK := m.recordQuarantineAuthority(contentDigest, id) == nil
+	var handle abi.Ref
+	published := false
+	if authorityOK {
+		handle = m.pageOut(ctx, body)
+		if cleanDigest(handle.Digest) == contentDigest {
+			m.mu.Lock()
+			m.held[id] = handle
+			m.order = append(m.order, id)
+			// Pin the held bytes UNDER m.mu so the bounded CAS cannot reclaim them before the
+			// gated PageIn resolves them later; the FIFO bound unpins on eviction.
+			abi.PinResolved(handle)
+			m.touchLocked(id, holdNowMillis()) // start the TTL keepalive countdown (pinreaper.go)
+			m.evictExcessLocked()
+			m.mu.Unlock()
+			m.stagePaged(handle.Digest, body)
+			m.stagePaged(id, body)
+			published = true
+		}
 	}
 	stub := map[string]any{
 		"_quarantined":       true,
@@ -545,7 +593,7 @@ func (m *MMU) quarantineResult(ctx context.Context, r *abi.Result, reason abi.Re
 		"note":               "Routine safety check: this tool result was held out of immediate context (" + abi.ReasonName(reason) + "). This is expected behavior when inspecting security materials or external untrusted data.",
 		"action":             "If your task requires this content, you can retrieve or override it with an override reason / justification. All overrides are logged for security auditing.",
 		"override_guidance":  "If your task requires this content, you can retrieve or override it with an override reason / justification. All overrides are logged for security auditing.",
-		"override_supported": true,
+		"override_supported": published,
 	}
 	if ref, ok := putJSON(ctx, stub); ok {
 		r.Payload = ref // bytes now ABSENT from context
@@ -557,7 +605,7 @@ func (m *MMU) quarantineResult(ctx context.Context, r *abi.Result, reason abi.Re
 	}
 	r.Meta["quarantine_id"] = id
 	return abi.Verdict{Kind: abi.VerdictQuarantine, Reason: reason, By: "ctxmmu",
-		Payload: abi.QuarantinePayload{PageOut: true},
+		Payload: abi.QuarantinePayload{PageOut: published},
 		Meta:    quarantineMeta("ctxmmu", reason, detector, id)}
 }
 
@@ -801,42 +849,33 @@ func (m *MMU) Clear(id string) {
 	if h, ok := m.held[id]; ok {
 		clearedKey = id
 		clearedHandle = h
-		m.cleared[id] = true
-		m.touchLocked(id, holdNowMillis()) // a witness clear is a liveness signal (keepalive)
 	} else if h, ok := m.held[clean]; ok {
 		clearedKey = clean
 		clearedHandle = h
-		m.cleared[clean] = true
-		m.touchLocked(clean, holdNowMillis())
 	} else {
 		for k, h := range m.held {
 			hClean := strings.TrimPrefix(h.Digest, "sha256:")
 			if k == clean || hClean == clean || h.Digest == id || h.Digest == clean {
 				clearedKey = k
 				clearedHandle = h
-				m.cleared[k] = true
-				m.touchLocked(k, holdNowMillis())
 				break
 			}
 		}
 	}
 	m.mu.Unlock()
 
-	if clearedKey != "" {
-		m.quarantineLedger().ClearQuarantine(clearedKey)
-		ClearQuarantine(clearedKey)
-		m.quarantineLedger().ClearQuarantine(id)
-		ClearQuarantine(id)
-		m.quarantineLedger().ClearQuarantine(clean)
-		ClearQuarantine(clean)
-		if clearedHandle.Digest != "" {
-			hClean := strings.TrimPrefix(clearedHandle.Digest, "sha256:")
-			m.quarantineLedger().ClearQuarantine(clearedHandle.Digest)
-			m.quarantineLedger().ClearQuarantine(hClean)
-			ClearQuarantine(clearedHandle.Digest)
-			ClearQuarantine(hClean)
-		}
+	if clearedKey == "" || m.clearQuarantineAuthority(clearedKey, id, clean, clearedHandle.Digest) != nil {
+		return
 	}
+
+	// Publish clearance only after every durable authority accepted it. Recheck the
+	// held generation narrowly; a broader read-lease/generation protocol is follow-on.
+	m.mu.Lock()
+	if current, ok := m.held[clearedKey]; ok && current.Digest == clearedHandle.Digest {
+		m.cleared[clearedKey] = true
+		m.touchLocked(clearedKey, holdNowMillis())
+	}
+	m.mu.Unlock()
 }
 
 // evictExcessLocked drops the oldest held quarantines (FIFO) until len(held) is
@@ -919,30 +958,24 @@ func (m *MMU) Override(ctx context.Context, id, justification string) ([]byte, e
 	}
 	m.mu.Lock()
 	handle, ok := m.held[id]
-	if ok {
-		m.cleared[id] = true
-		clean := strings.TrimPrefix(id, "sha256:")
-		if _, inHeld := m.held[clean]; inHeld {
-			m.cleared[clean] = true
-		}
-		m.touchLocked(id, holdNowMillis())
-	}
 	m.mu.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("ctxmmu: no quarantined result %s", id)
 	}
 
 	clean := strings.TrimPrefix(id, "sha256:")
-	m.quarantineLedger().ClearQuarantine(id)
-	ClearQuarantine(id)
-	m.quarantineLedger().ClearQuarantine(clean)
-	ClearQuarantine(clean)
-	if handle.Digest != "" {
-		hClean := strings.TrimPrefix(handle.Digest, "sha256:")
-		m.quarantineLedger().ClearQuarantine(handle.Digest)
-		m.quarantineLedger().ClearQuarantine(hClean)
-		ClearQuarantine(handle.Digest)
-		ClearQuarantine(hClean)
+	if err := m.clearQuarantineAuthority(id, clean, handle.Digest); err != nil {
+		return nil, fmt.Errorf("ctxmmu: persist quarantine override: %w", err)
+	}
+	m.mu.Lock()
+	current, stillHeld := m.held[id]
+	if stillHeld && current.Digest == handle.Digest {
+		m.cleared[id] = true
+		m.touchLocked(id, holdNowMillis())
+	}
+	m.mu.Unlock()
+	if !stillHeld || current.Digest != handle.Digest {
+		return nil, fmt.Errorf("ctxmmu: quarantined result %s changed during override", id)
 	}
 
 	m.logSecurityOverride(nil, abi.ReasonNone, justification, "quarantine_override:"+id)
@@ -975,13 +1008,25 @@ func (m *MMU) ClearWithOverride(id, justification string) error {
 		return fmt.Errorf("ctxmmu: clearance of %s requires a non-empty justification (>=3 chars)", id)
 	}
 	m.mu.Lock()
-	if _, ok := m.held[id]; !ok {
+	handle, ok := m.held[id]
+	if !ok {
 		m.mu.Unlock()
 		return fmt.Errorf("ctxmmu: no quarantined result %s", id)
 	}
-	m.cleared[id] = true
-	m.touchLocked(id, holdNowMillis())
 	m.mu.Unlock()
+	if err := m.clearQuarantineAuthority(id, handle.Digest); err != nil {
+		return fmt.Errorf("ctxmmu: persist quarantine clearance: %w", err)
+	}
+	m.mu.Lock()
+	current, stillHeld := m.held[id]
+	if stillHeld && current.Digest == handle.Digest {
+		m.cleared[id] = true
+		m.touchLocked(id, holdNowMillis())
+	}
+	m.mu.Unlock()
+	if !stillHeld || current.Digest != handle.Digest {
+		return fmt.Errorf("ctxmmu: quarantined result %s changed during clearance", id)
+	}
 
 	m.logSecurityOverride(nil, abi.ReasonNone, justification, "quarantine_clear:"+id)
 	return nil
