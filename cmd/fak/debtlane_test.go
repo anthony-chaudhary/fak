@@ -510,3 +510,63 @@ func TestDebtOrchestratorCLIPerfFocus(t *testing.T) {
 		t.Errorf("expected schema %s, got %s", debtlane.WavePlanSchema, plan.Schema)
 	}
 }
+
+func TestDebtLanesCLICoverageReceipt(t *testing.T) {
+	tmp := setupDebtLaneWaveWorkspace(t)
+	var stdout, stderr bytes.Buffer
+	code := runDebtLanes(&stdout, &stderr, []string{
+		"--workspace", tmp,
+		"--coverage",
+	})
+	if code != 0 {
+		t.Fatalf("runDebtLanes --coverage failed: code %d, stderr: %s", code, stderr.String())
+	}
+
+	var receipt debtlane.CoverageReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
+		t.Fatalf("failed to parse JSON coverage receipt: %v; raw: %s", err, stdout.String())
+	}
+	if receipt.Schema != debtlane.CoverageReceiptSchema {
+		t.Errorf("expected schema %s, got %s", debtlane.CoverageReceiptSchema, receipt.Schema)
+	}
+	if len(receipt.Dimensions) < 15 {
+		t.Errorf("expected at least 15 evaluated dimensions in receipt, got %d", len(receipt.Dimensions))
+	}
+}
+
+func TestDebtLanesCLIExpandedSurfaces(t *testing.T) {
+	tmp := setupDebtLaneWaveWorkspace(t)
+	// Add a cmd surface
+	cmdDir := filepath.Join(tmp, "cmd", "fakecmd")
+	if err := os.MkdirAll(cmdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cmdDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runDebtLanes(&stdout, &stderr, []string{
+		"--workspace", tmp,
+		"--expanded-surfaces",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runDebtLanes --expanded-surfaces failed: code %d, stderr: %s", code, stderr.String())
+	}
+
+	var report debtlane.Report
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+	foundCmd := false
+	for _, l := range report.Lanes {
+		if l.Lane == "cmd_fakecmd" {
+			foundCmd = true
+			break
+		}
+	}
+	if !foundCmd {
+		t.Errorf("expected cmd_fakecmd to be discovered under --expanded-surfaces")
+	}
+}

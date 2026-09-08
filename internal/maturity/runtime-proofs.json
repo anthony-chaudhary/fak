@@ -178,6 +178,11 @@
         },
         {
             "command": "fak version modules",
+            "output_contains": "internal/armtracking",
+            "lane": "armtracking"
+        },
+        {
+            "command": "fak version modules",
             "output_contains": "internal/assumecheck",
             "lane": "assumecheck"
         },
@@ -385,6 +390,11 @@
             "command": "fak version modules",
             "output_contains": "internal/cache",
             "lane": "cache"
+        },
+        {
+            "command": "fak version modules",
+            "output_contains": "internal/cacheheadlines",
+            "lane": "cacheheadlines"
         },
         {
             "command": "fak version modules",
@@ -2708,6 +2718,11 @@
         },
         {
             "command": "fak version modules",
+            "output_contains": "internal/pacing",
+            "lane": "pacing"
+        },
+        {
+            "command": "fak version modules",
             "output_contains": "internal/pagespublish",
             "lane": "pagespublish"
         },
@@ -3492,6 +3507,11 @@
             "lane": "sessionsteer"
         },
         {
+            "command": "fak version modules",
+            "output_contains": "internal/sessionview",
+            "lane": "sessionview"
+        },
+        {
             "command": "fak dev devindex leaf shadowgit",
             "output_contains": "shadowgit",
             "lane": "shadowgit"
@@ -3663,6 +3683,11 @@
         },
         {
             "command": "fak version modules",
+            "output_contains": "internal/storage",
+            "lane": "storage"
+        },
+        {
+            "command": "fak version modules",
             "output_contains": "internal/storagepressure",
             "lane": "storagepressure"
         },
@@ -3775,6 +3800,11 @@
             "command": "fak version modules",
             "output_contains": "internal/superstream",
             "lane": "superstream"
+        },
+        {
+            "command": "fak version modules",
+            "output_contains": "internal/supervise",
+            "lane": "supervise"
         },
         {
             "command": "fak version modules",
