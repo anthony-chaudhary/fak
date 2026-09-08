@@ -21,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/qwen38quantrun"
 )
 
 // Request is the complete, explicit input to one real raw-decode execution.
@@ -113,6 +114,8 @@ type Execution struct {
 	ArtifactPath          string
 	ArtifactSHA256        string
 	TensorInventorySHA256 string
+	TokenizerSHA256       string
+	TemplateSHA256        string
 	Quantization          string
 	ModelName             string
 	ModelConfig           model.Config
@@ -261,6 +264,8 @@ func (d dependencies) execute(ctx context.Context, req Request) (Execution, erro
 	exec.ArtifactPath = artifact.Path
 	exec.ArtifactSHA256 = artifact.SHA256
 	exec.TensorInventorySHA256 = artifact.TensorInventorySHA256
+	exec.TokenizerSHA256 = artifact.TokenizerSHA256
+	exec.TemplateSHA256 = artifact.TemplateSHA256
 	exec.Quantization = artifact.Quantization
 	exec.ModelName = derivedName
 	exec.ModelConfig = lm.Config()
@@ -324,6 +329,8 @@ type artifactObservation struct {
 	Path                  string
 	SHA256                string
 	TensorInventorySHA256 string
+	TokenizerSHA256       string
+	TemplateSHA256        string
 	Quantization          string
 }
 
@@ -351,6 +358,10 @@ func inspectGGUFArtifact(path string, open func(string) (io.ReadCloser, error)) 
 	}
 	quant := ggufload.ClassifyTensorQuant(gg.Tensors)
 	observed.TensorInventorySHA256 = gg.CanonicalManifestDigest()
+	if identity, err := qwen38quantrun.DerivePromptPacketGGUFIdentityFromFile(gg); err == nil {
+		observed.TokenizerSHA256 = identity.TokenizerDigest
+		observed.TemplateSHA256 = identity.TemplateDigest
+	}
 	observed.Quantization = quant.Recipe
 	if observed.Quantization == "" {
 		observed.Quantization = quant.Name
