@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -396,7 +397,11 @@ func (m *Model) linearAttnSeq(l int, xn [][]float32) [][]float32 {
 			bt := beta[t][h]
 			st := state[h]
 			od := out[h*vHd : (h+1)*vHd]
-			VectorizedHeadStep(st, qn, kn, vh, bt, g, od, kvmem, delta)
+			if HasVectorizedDeltaNet() {
+				VectorizedHeadStep(st, qn, kn, vh, bt, g, od, kvmem, delta)
+			} else {
+				ScalarHeadStep(st, qn, kn, vh, bt, g, od, kvmem, delta)
+			}
 		}
 		core[t] = out
 	}
@@ -523,7 +528,11 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 		dt := softplus(avec[h] + dtBias[h])
 		g := float32(math.Exp(float64(-a * dt)))
 		od := core[h*vHd : (h+1)*vHd]
-		VectorizedHeadStep(st, qn, kn, vh, bt, g, od, kvmem, delta)
+		if HasVectorizedDeltaNet() {
+			VectorizedHeadStep(st, qn, kn, vh, bt, g, od, kvmem, delta)
+		} else {
+			ScalarHeadStep(st, qn, kn, vh, bt, g, od, kvmem, delta)
+		}
 	}
 	if dispatchWorkers <= 1 || nV*kHd*vHd < parThreshold {
 		kvmem := make([]float32, vHd)
@@ -555,14 +564,93 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 	return out
 }
 
+var (
+	scalarGDNStepCalls     uint64
+	vectorizedGDNStepCalls uint64
+)
+
+// ScalarGDNStepCalls returns the number of times ScalarHeadStep was executed.
+func ScalarGDNStepCalls() uint64 {
+	return atomic.LoadUint64(&scalarGDNStepCalls)
+}
+
+// VectorizedGDNStepCalls returns the number of times VectorizedHeadStep was executed
+// (dispatching to compute.Wave32GatedDeltaNetStep).
+func VectorizedGDNStepCalls() uint64 {
+	return atomic.LoadUint64(&vectorizedGDNStepCalls)
+}
+
+// ResetGDNStepCounters resets the scalar and vectorized GDN step counters to zero.
+func ResetGDNStepCounters() {
+	atomic.StoreUint64(&scalarGDNStepCalls, 0)
+	atomic.StoreUint64(&vectorizedGDNStepCalls, 0)
+}
+
+// ScalarHeadStep performs the un-vectorized scalar reference Gated-DeltaNet recurrent step:
+//  1. Decay scaling: st[i, d] *= g
+//  2. Memory retrieval: kvmem[d] = sum_i st[i, d] * kn[i]
+//  3. Delta computation: delta[d] = (vh[d] - kvmem[d]) * bt
+//  4. Recurrent state update: st[i, d] += kn[i] * delta[d]
+//  5. Readout projection: od[d] += st[i, d] * qn[i]
+func ScalarHeadStep(
+	st []float32,
+	qn, kn, vh []float32,
+	bt, g float32,
+	od, kvmem, delta []float32,
+) {
+	atomic.AddUint64(&scalarGDNStepCalls, 1)
+
+	kHd := len(qn)
+	vHd := len(vh)
+	if kHd == 0 || vHd == 0 || len(kn) < kHd || len(st) < kHd*vHd {
+		return
+	}
+	if len(kvmem) < vHd || len(delta) < vHd || len(od) < vHd {
+		return
+	}
+
+	for i := range st {
+		st[i] *= g
+	}
+	for d := range kvmem {
+		kvmem[d] = 0
+	}
+	for i := 0; i < kHd; i++ {
+		ki := kn[i]
+		base := i * vHd
+		for d := 0; d < vHd; d++ {
+			kvmem[d] += st[base+d] * ki
+		}
+	}
+	for d := 0; d < vHd; d++ {
+		delta[d] = (vh[d] - kvmem[d]) * bt
+	}
+	for i := 0; i < kHd; i++ {
+		ki := kn[i]
+		qi := qn[i]
+		base := i * vHd
+		for d := 0; d < vHd; d++ {
+			st[base+d] += ki * delta[d]
+			od[d] += st[base+d] * qi
+		}
+	}
+}
+
 // VectorizedHeadStep dispatches a single linear-attention head's Gated-DeltaNet
 // state update to the optimized vectorized AVX-512 / Wave32 kernel in compute.
+// When FAK_VECTORIZED_DELTANET=0 or vectorized DeltaNet is unavailable, it falls
+// back to the scalar reference DeltaNet recurrence (ScalarHeadStep).
 func VectorizedHeadStep(
 	st []float32,
 	qn, kn, vh []float32,
 	bt, g float32,
 	od, kvmem, delta []float32,
 ) {
+	if !HasVectorizedDeltaNet() {
+		ScalarHeadStep(st, qn, kn, vh, bt, g, od, kvmem, delta)
+		return
+	}
+	atomic.AddUint64(&vectorizedGDNStepCalls, 1)
 	compute.Wave32GatedDeltaNetStep(st, qn, kn, vh, bt, g, od, kvmem, delta)
 }
 

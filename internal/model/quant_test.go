@@ -87,6 +87,76 @@ func TestQ8FastDecodeSessionAllowsHybridWhenVectorizedGDNAvailable(t *testing.T)
 	}
 }
 
+func TestQ8FastDecodeSessionOK(t *testing.T) {
+	cfg := qwen35HybridTestCfg()
+	if !cfg.IsHybrid() {
+		t.Fatal("fixture must be recognized as hybrid")
+	}
+
+	// 1. Gating condition assertions
+	t.Setenv("FAK_VECTORIZED_DELTANET", "1")
+	if !HasVectorizedDeltaNet() {
+		t.Fatal("HasVectorizedDeltaNet must be true when FAK_VECTORIZED_DELTANET=1")
+	}
+	if !q8FastDecodeSessionOK(&Session{}, cfg) {
+		t.Fatal("hybrid model should be accepted by q8FastDecodeSessionOK when vectorized GDN is available")
+	}
+	if !q8FastDecodeSessionOK(&Session{Q4K: true}, cfg) {
+		t.Fatal("hybrid mixed-quantization session (Q4_K) should be accepted when vectorized GDN is available")
+	}
+
+	t.Setenv("FAK_VECTORIZED_DELTANET", "0")
+	if HasVectorizedDeltaNet() {
+		t.Fatal("HasVectorizedDeltaNet must be false when FAK_VECTORIZED_DELTANET=0")
+	}
+	if q8FastDecodeSessionOK(&Session{}, cfg) {
+		t.Fatal("hybrid model must be refused by q8FastDecodeSessionOK when vectorized GDN is unavailable")
+	}
+	if q8FastDecodeSessionOK(&Session{Q4K: true}, cfg) {
+		t.Fatal("hybrid mixed-quantization session must be refused by q8FastDecodeSessionOK when vectorized GDN is unavailable")
+	}
+
+	// 2. Decode execution and bypass verification
+	m := NewSynthetic(cfg)
+	m.Quantize()
+
+	// Execute decode forward with FAK_VECTORIZED_DELTANET=0: scalar reference DeltaNet must be executed.
+	t.Setenv("FAK_VECTORIZED_DELTANET", "0")
+	ResetGDNStepCounters()
+	sScalar := m.NewSession()
+	sScalar.Quant = true
+	scalarHidden := sScalar.tokenHiddenQ(3, 0)
+
+	if calls := ScalarGDNStepCalls(); calls == 0 {
+		t.Fatalf("expected ScalarGDNStepCalls > 0 when FAK_VECTORIZED_DELTANET=0, got %d", calls)
+	}
+	if calls := VectorizedGDNStepCalls(); calls != 0 {
+		t.Fatalf("expected VectorizedGDNStepCalls == 0 when FAK_VECTORIZED_DELTANET=0, got %d (vectorized kernel was not bypassed)", calls)
+	}
+
+	// Execute decode forward with FAK_VECTORIZED_DELTANET=1: vectorized GDN kernel must be executed.
+	t.Setenv("FAK_VECTORIZED_DELTANET", "1")
+	ResetGDNStepCounters()
+	sVec := m.NewSession()
+	sVec.Quant = true
+	vecHidden := sVec.tokenHiddenQ(3, 0)
+
+	if calls := VectorizedGDNStepCalls(); calls == 0 {
+		t.Fatalf("expected VectorizedGDNStepCalls > 0 when FAK_VECTORIZED_DELTANET=1, got %d", calls)
+	}
+	if calls := ScalarGDNStepCalls(); calls != 0 {
+		t.Fatalf("expected ScalarGDNStepCalls == 0 when FAK_VECTORIZED_DELTANET=1, got %d", calls)
+	}
+
+	// Parity check between scalar recurrence and vectorized GDN
+	if d := maxAbsDelta(scalarHidden, vecHidden); d > 1e-5 {
+		t.Fatalf("scalar and vectorized decode hidden states differ: max|delta|=%g > 1e-5", d)
+	}
+	if cos := cosineF32(t, scalarHidden, vecHidden); cos < 0.99999 {
+		t.Fatalf("scalar and vectorized decode hidden states cosine similarity %g < 0.99999", cos)
+	}
+}
+
 // TestQ8RoundMatchesMathRound pins the fast float32 q8round to math.Round (ties away from
 // zero) over the full code range, including the near-half values where the naive
 // int8(int32(x+0.5)) trick diverges (the +0.5 addition rounds up). Quantization codes must

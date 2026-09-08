@@ -247,7 +247,7 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 	prevTap := s.tapActive
 	s.tapActive = tap
 	defer func() { s.tapActive = prevTap }()
-	if !q8FastDecodeSessionOK(s, cfg) || ((cfg.IsHybrid() || cfg.IsQwen35Hybrid()) && HasVectorizedDeltaNet()) {
+	if cfg.IsHybrid() || cfg.IsQwen35Hybrid() || !q8FastDecodeSessionOK(s, cfg) {
 		mat := matKernel(sessionQ8Kernel{s})
 		if s.Q4 && m.q4w != nil {
 			// Resident int4 decode: the Qwen3.6 hybrid (and every non-fast-PreNorm arch)
