@@ -51,6 +51,13 @@ concurrency:
 jobs:
   add-to-board:
     name: add issue -> fak fleet board
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.action != 'labeled' ||
+      github.event.label.name == 'gen/now' ||
+      github.event.label.name == 'gen/next' ||
+      github.event.label.name == 'gen/second-next' ||
+      github.event.label.name == 'gen/future'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
