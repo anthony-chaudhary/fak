@@ -279,6 +279,25 @@ func rawDecodeBackendExecutions(execution rawdecode.Execution) ([]compute.Backen
 	return observations, true
 }
 
+func rawDecodeHostEnvironment(execution rawdecode.Execution, backendExecutions []compute.BackendExecutionObservation) (compute.VulkanHostEnvironment, bool) {
+	if len(execution.Runs) == 0 || len(execution.Runs) != len(backendExecutions) {
+		return compute.VulkanHostEnvironment{}, false
+	}
+	var observed compute.VulkanHostEnvironment
+	for i, run := range execution.Runs {
+		host, ok := rawdecode.BoundVulkanHostEnvironment(run)
+		if !ok || run.BackendExecution == nil || *run.BackendExecution != backendExecutions[i] {
+			return compute.VulkanHostEnvironment{}, false
+		}
+		if i == 0 {
+			observed = host
+		} else if host != observed {
+			return compute.VulkanHostEnvironment{}, false
+		}
+	}
+	return observed, true
+}
+
 // rawDecodePhysicalReceipt maps only executor observations. It never accepts
 // caller-supplied source, binary, device, memory, or counter identity.
 func rawDecodePhysicalReceipt(execution rawdecode.Execution, repOutputs []rawRepOutput) rawDecodePhysicalReceiptAttempt {
@@ -331,13 +350,20 @@ func rawDecodePhysicalReceipt(execution rawdecode.Execution, repOutputs []rawRep
 		}
 		if backendObserved {
 			identity := backendExecutions[0].Identity
-			observed.Device.Name = identity.Device
-			observed.Device.VulkanVersion = identity.Runtime
 			observed.Engine.Name = "fak-native"
 			observed.Engine.Backend = identity.Backend
 			observed.Engine.Runtime = compute.Qwen38VulkanDecodeRuntime
 			observed.Engine.ExecutedPath = execution.Engine
 			observed.Engine.FallbackCount = &fallbacks
+		}
+	}
+	if backendObserved {
+		if host, ok := rawDecodeHostEnvironment(execution, backendExecutions); ok {
+			observed.Device = compute.Qwen38VulkanDeviceIdentity{
+				OS: host.OS, Arch: host.Arch, Kernel: host.Kernel, Name: host.Device,
+				MesaVersion: host.MesaVersion, VulkanVersion: backendExecutions[0].Identity.Runtime,
+				Firmware: host.Firmware,
+			}
 		}
 	}
 	unavailable := func(reason string) rawDecodePhysicalReceiptAttempt {
@@ -401,6 +427,10 @@ func rawDecodePhysicalReceipt(execution rawdecode.Execution, repOutputs []rawRep
 // executeRawDecode is the loaded-model adapter retained for existing modelbench
 // sources and tests. Token generation lives only in internal/rawdecode.
 func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, quantMS float64, be compute.Backend, registeredBackends []string) (map[string]any, error) {
+	return executeRawDecodeWithHostObserver(f, m, modelName, loadMS, quantMS, be, registeredBackends, compute.ObserveVulkanHostEnvironment)
+}
+
+func executeRawDecodeWithHostObserver(f *benchFlags, m *model.Model, modelName string, loadMS, quantMS float64, be compute.Backend, registeredBackends []string, observeHost func(context.Context, compute.Backend) (compute.VulkanHostEnvironment, error)) (map[string]any, error) {
 	if err := validateRawDecodeFlags(f); err != nil {
 		return nil, err
 	}
@@ -410,7 +440,7 @@ func executeRawDecode(f *benchFlags, m *model.Model, modelName string, loadMS, q
 	}
 	req := rawDecodeRequest(f, promptIDs)
 	req.ModelName = modelName
-	execution, runErr := rawdecode.ExecuteModel(req, m, be)
+	execution, runErr := rawdecode.ExecuteModelWithHostObserver(context.Background(), req, m, be, observeHost)
 	execution.LoadDuration = time.Duration(math.Round(loadMS * float64(time.Millisecond)))
 	execution.QuantDuration = time.Duration(math.Round(quantMS * float64(time.Millisecond)))
 	execution.Backend.RegisteredBackends = slices.Clone(registeredBackends)

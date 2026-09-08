@@ -448,3 +448,80 @@ func TestRawDecodeUnsupportedBackendObservationRemainsUnavailable(t *testing.T) 
 		t.Fatalf("unsupported backend was zero-filled as available: %+v", exec.Runs[0].BackendExecution)
 	}
 }
+
+func TestRawDecodeHostEnvironmentIsPerRunInjectedAndCrossBound(t *testing.T) {
+	artifact := "host environment artifact"
+	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(artifact)))
+	identity := compute.BackendRuntimeIdentity{
+		Backend: "vulkan",
+		Device:  "AMD Radeon 8060S Graphics",
+		Driver:  "driver=mesa-26.1 vendor=0x1002 device=0x1586",
+		Runtime: "vulkan-1.4.0",
+	}
+	host := compute.VulkanHostEnvironment{
+		OS: "linux", Arch: "amd64", Kernel: "6.14.0", Device: identity.Device,
+		VendorID: "0x1002", DeviceID: "0x1586", MesaDriver: "radv",
+		MesaVersion: "Mesa 26.1.0", Firmware: "vbios-observed",
+	}
+	newExecution := func(observe func(context.Context, compute.Backend) (compute.VulkanHostEnvironment, error)) (Execution, error) {
+		before := compute.BackendExecutionSnapshot{Identity: identity, Counters: compute.BackendCounterSnapshot{ComputeDispatches: 10}}
+		after := before
+		after.Counters.ComputeDispatches = 11
+		backend := &rawObservedBackend{name: "vulkan", snapshots: []compute.BackendExecutionSnapshot{before, after}}
+		m := &fakeLoadedModel{candidate: &fakeSession{outputs: [][]float32{{0, 2, 1}}}}
+		d := dependencies{
+			openArtifact: func(string) (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(artifact)), nil },
+			loadModel:    func(context.Context, Request) (loadedModel, string, error) { return m, "observed-model", nil },
+			resolveBackend: func(Request) (compute.Backend, BackendObservation, error) {
+				return backend, BackendObservation{Selected: backend.Name()}, nil
+			},
+			observeHost: observe,
+			now:         fakeClock(),
+		}
+		req := Request{ArtifactPath: "model.gguf", ExpectedArtifactSHA256: digest, ModelName: "observed-model", BackendName: "vulkan", PromptTokenIDs: []int{0}, ContextLimit: 2, GeneratedTokenLimit: 1, Repetitions: 1}
+		return d.execute(context.Background(), req)
+	}
+
+	observerCalls := 0
+	exec, err := newExecution(func(context.Context, compute.Backend) (compute.VulkanHostEnvironment, error) {
+		observerCalls++
+		return host, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observerCalls != 1 || len(exec.Runs) != 1 || exec.Runs[0].HostEnvironment == nil || *exec.Runs[0].HostEnvironment != host {
+		t.Fatalf("per-run host observation calls=%d execution=%+v", observerCalls, exec)
+	}
+
+	for name, observe := range map[string]func(context.Context, compute.Backend) (compute.VulkanHostEnvironment, error){
+		"missing": func(context.Context, compute.Backend) (compute.VulkanHostEnvironment, error) {
+			return compute.VulkanHostEnvironment{}, fmt.Errorf("unavailable")
+		},
+		"wrong device": func(context.Context, compute.Backend) (compute.VulkanHostEnvironment, error) {
+			candidate := host
+			candidate.Device = "different"
+			return candidate, nil
+		},
+		"wrong PCI": func(context.Context, compute.Backend) (compute.VulkanHostEnvironment, error) {
+			candidate := host
+			candidate.DeviceID = "0x9999"
+			return candidate, nil
+		},
+		"not RADV": func(context.Context, compute.Backend) (compute.VulkanHostEnvironment, error) {
+			candidate := host
+			candidate.MesaDriver = "opaque-driver"
+			return candidate, nil
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			exec, err := newExecution(observe)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(exec.Runs) != 1 || exec.Runs[0].HostEnvironment != nil {
+				t.Fatalf("invalid host evidence was retained: %+v", exec.Runs)
+			}
+		})
+	}
+}
