@@ -116,6 +116,17 @@ const DefaultLedgerLimit = 8192
 // Ledger records, per trace, the most-restrictive taint that has entered the
 // session's working set. It is the control-flow taint CaMeL/FIDES track: once a
 // session has seen untrusted content, its sinks are gated.
+// TaintRecord records a structured taint event including source tool, timestamp,
+// sequence number, and optional digest and reason.
+type TaintRecord struct {
+	Label         abi.TaintLabel `json:"label"`
+	SourceTool    string         `json:"source_tool"`
+	Timestamp     time.Time      `json:"timestamp"`
+	CallSeq       int64          `json:"call_seq"`
+	PayloadDigest string         `json:"payload_digest,omitempty"`
+	Reason        string         `json:"reason,omitempty"`
+}
+
 // TaintProvenance records the origin and timestamp of a trace's taint.
 type TaintProvenance struct {
 	Level         abi.TaintLabel `json:"level"`
@@ -179,6 +190,7 @@ type Ledger struct {
 	mu              sync.RWMutex
 	mark            map[string]abi.TaintLabel
 	prov            map[string]TaintProvenance
+	records         map[string][]TaintRecord
 	cap             int
 	lru             *list.List
 	index           map[string]*list.Element
@@ -202,6 +214,7 @@ func NewLedgerWithLimit(limit int) *Ledger {
 	return &Ledger{
 		mark:      map[string]abi.TaintLabel{},
 		prov:      map[string]TaintProvenance{},
+		records:   map[string][]TaintRecord{},
 		cap:       limit,
 		lru:       list.New(),
 		index:     map[string]*list.Element{},
@@ -209,80 +222,154 @@ func NewLedgerWithLimit(limit int) *Ledger {
 	}
 }
 
+// DefaultTraceHistoryLimit bounds the retained TaintRecord history per trace.
+const DefaultTraceHistoryLimit = 1024
+
 // Raise lifts trace's high-water mark to at least t (by restrictiveness rank). A
 // missing key is Trusted (NOT the enum zero value, which is Tainted) — so the
 // FIRST tainted result on a fresh trace is correctly recorded.
 func (l *Ledger) Raise(trace string, t abi.TaintLabel) {
-	l.RaiseWithProvenance(trace, t, TaintProvenance{Level: t})
+	if !Dangerous(t) {
+		return
+	}
+	l.RaiseWithRecord(trace, TaintRecord{
+		Label:     t,
+		Timestamp: time.Now(),
+	})
 }
 
-// RaiseWithProvenance lifts trace's high-water mark and records its taint provenance.
-func (l *Ledger) RaiseWithProvenance(trace string, t abi.TaintLabel, p TaintProvenance) {
+// RaiseWithRecord lifts trace's high-water mark and records a structured TaintRecord.
+func (l *Ledger) RaiseWithRecord(trace string, rec TaintRecord) {
+	if !Dangerous(rec.Label) {
+		return
+	}
+	if rec.Timestamp.IsZero() {
+		rec.Timestamp = time.Now()
+	}
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.ensureLocked()
+
 	if base, turn, ok := ParseTurnTrace(trace); ok {
 		if l.turnTaint[base] == nil {
 			l.turnTaint[base] = map[int]abi.TaintLabel{}
 		}
 		curTurn, exists := l.turnTaint[base][turn]
-		if !exists || taintRank(t) > taintRank(curTurn) {
-			l.turnTaint[base][turn] = t
+		if !exists || taintRank(rec.Label) > taintRank(curTurn) {
+			l.turnTaint[base][turn] = rec.Label
 		}
 	}
+
 	cur, ok := l.mark[trace]
 	if !ok {
 		cur = abi.TaintTrusted
 	}
-	if taintRank(t) > taintRank(cur) {
-		l.mark[trace] = t
-		l.prov[trace] = p
-		l.touchLocked(trace)
-		l.trimLocked()
-		return
+	if taintRank(rec.Label) > taintRank(cur) {
+		l.mark[trace] = rec.Label
+		l.prov[trace] = TaintProvenance{
+			Level:         rec.Label,
+			SourceTool:    rec.SourceTool,
+			SourceCallSeq: uint64(rec.CallSeq),
+			SourceDigest:  rec.PayloadDigest,
+			TaintedAt:     rec.Timestamp.UnixNano(),
+		}
 	}
-	if ok {
-		l.touchLocked(trace)
+
+	history := l.records[trace]
+	if len(history) >= DefaultTraceHistoryLimit {
+		history = history[1:]
 	}
+	l.records[trace] = append(history, rec)
+
+	l.touchLocked(trace)
+	l.trimLocked()
 }
 
-// Provenance returns trace's taint provenance (empty with Level=Trusted if unseen).
-func (l *Ledger) Provenance(trace string) TaintProvenance {
+// RaiseWithProvenance lifts trace's high-water mark and records its taint provenance.
+func (l *Ledger) RaiseWithProvenance(trace string, t abi.TaintLabel, p TaintProvenance) {
+	var ts time.Time
+	if p.TaintedAt > 0 {
+		ts = time.Unix(0, p.TaintedAt)
+	} else {
+		ts = time.Now()
+	}
+	l.RaiseWithRecord(trace, TaintRecord{
+		Label:         t,
+		SourceTool:    p.SourceTool,
+		Timestamp:     ts,
+		CallSeq:       int64(p.SourceCallSeq),
+		PayloadDigest: p.SourceDigest,
+	})
+}
+
+// Provenance returns trace's recorded taint provenance history in chronological order.
+func (l *Ledger) Provenance(trace string) []TaintRecord {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	if l.prov == nil {
-		return TaintProvenance{Level: abi.TaintTrusted}
+	return l.provenanceLocked(trace)
+}
+
+func (l *Ledger) provenanceLocked(trace string) []TaintRecord {
+	if l.records == nil {
+		return nil
 	}
-	p, ok := l.prov[trace]
-	if !ok {
-		if base, turn, okTT := ParseTurnTrace(trace); okTT {
-			for k := turn - 1; k >= 1; k-- {
-				if pk, has := l.prov[TurnTrace(base, k)]; has && pk.Level != abi.TaintTrusted {
-					return pk
-				}
+
+	if base, turn, okTT := ParseTurnTrace(trace); okTT {
+		if recs, ok := l.records[trace]; ok && len(recs) > 0 {
+			out := make([]TaintRecord, len(recs))
+			copy(out, recs)
+			return out
+		}
+		for k := turn - 1; k >= 1; k-- {
+			if recsK, has := l.records[TurnTrace(base, k)]; has && len(recsK) > 0 {
+				out := make([]TaintRecord, len(recsK))
+				copy(out, recsK)
+				return out
 			}
-			if pBase, hasBase := l.prov[base]; hasBase && pBase.Level != abi.TaintTrusted {
-				return pBase
+		}
+		if recsBase, hasBase := l.records[base]; hasBase && len(recsBase) > 0 {
+			out := make([]TaintRecord, len(recsBase))
+			copy(out, recsBase)
+			return out
+		}
+	} else {
+		var combined []TaintRecord
+		if recs, ok := l.records[trace]; ok && len(recs) > 0 {
+			combined = append(combined, recs...)
+		}
+		if l.turnTaint != nil && l.turnTaint[trace] != nil {
+			turns := make([]int, 0, len(l.turnTaint[trace]))
+			for k := range l.turnTaint[trace] {
+				turns = append(turns, k)
 			}
-		} else {
-			if l.turnTaint != nil && l.turnTaint[trace] != nil {
-				turns := make([]int, 0, len(l.turnTaint[trace]))
-				for k := range l.turnTaint[trace] {
-					turns = append(turns, k)
-				}
-				sort.Slice(turns, func(i, j int) bool {
-					return turns[i] > turns[j]
-				})
-				for _, k := range turns {
-					if pk, has := l.prov[TurnTrace(trace, k)]; has && pk.Level != abi.TaintTrusted {
-						return pk
-					}
+			sort.Ints(turns)
+			for _, k := range turns {
+				if recsK, has := l.records[TurnTrace(trace, k)]; has && len(recsK) > 0 {
+					combined = append(combined, recsK...)
 				}
 			}
 		}
-		return TaintProvenance{Level: abi.TaintTrusted}
+		if len(combined) > 0 {
+			out := make([]TaintRecord, len(combined))
+			copy(out, combined)
+			return out
+		}
 	}
-	return p
+
+	return nil
+}
+
+// LatestTaint returns the most recent taint record for trace, or nil if none.
+func (l *Ledger) LatestTaint(trace string) *TaintRecord {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	recs := l.provenanceLocked(trace)
+	if len(recs) == 0 {
+		return nil
+	}
+	latest := recs[len(recs)-1]
+	return &latest
 }
 
 // Level returns trace's current high-water mark (Trusted if unseen).
@@ -450,6 +537,7 @@ func (l *Ledger) Reset(trace string) {
 	l.ensureLocked()
 	delete(l.mark, trace)
 	delete(l.prov, trace)
+	delete(l.records, trace)
 	if el := l.index[trace]; el != nil {
 		l.lru.Remove(el)
 		delete(l.index, trace)
@@ -465,10 +553,16 @@ func (l *Ledger) Reset(trace string) {
 			if b, _, ok := ParseTurnTrace(m); ok && b == trace {
 				delete(l.mark, m)
 				delete(l.prov, m)
+				delete(l.records, m)
 				if el := l.index[m]; el != nil {
 					l.lru.Remove(el)
 					delete(l.index, m)
 				}
+			}
+		}
+		for m := range l.records {
+			if b, _, ok := ParseTurnTrace(m); ok && b == trace {
+				delete(l.records, m)
 			}
 		}
 	}
@@ -502,6 +596,9 @@ func (l *Ledger) ensureLocked() {
 	if l.prov == nil {
 		l.prov = map[string]TaintProvenance{}
 	}
+	if l.records == nil {
+		l.records = map[string][]TaintRecord{}
+	}
 	if l.lru == nil {
 		l.lru = list.New()
 	}
@@ -532,6 +629,7 @@ func (l *Ledger) trimLocked() {
 		delete(l.index, trace)
 		delete(l.mark, trace)
 		delete(l.prov, trace)
+		delete(l.records, trace)
 		delete(l.turnTaint, trace)
 		if base, turn, ok := ParseTurnTrace(trace); ok {
 			if l.turnTaint[base] != nil {
@@ -1098,14 +1196,14 @@ func (g *StampGate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) a
 		seq = r.Call.SeqNo
 	}
 	digest := r.Payload.Digest
-	taintedAt := time.Now().UnixNano()
+	taintedAt := time.Now()
 
-	g.ledger.RaiseWithProvenance(trace, t, TaintProvenance{
-		Level:         t,
+	g.ledger.RaiseWithRecord(trace, TaintRecord{
+		Label:         t,
 		SourceTool:    toolName,
-		SourceCallSeq: seq,
-		SourceDigest:  digest,
-		TaintedAt:     taintedAt,
+		Timestamp:     taintedAt,
+		CallSeq:       int64(seq),
+		PayloadDigest: digest,
 	})
 	if r.Meta == nil {
 		r.Meta = map[string]string{}
@@ -1228,9 +1326,9 @@ func (g *SinkGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict 
 		"override_supported": "true",
 		"remedy":             "Routine IFC check: tainted data in flight to " + sink.String() + " sink. This is an expected safety boundary. If this action is intentional and safe for your task, re-issue with 'override_reason' or 'justification' to proceed (all overrides are logged for security auditing).",
 	}
-	prov := g.ledger.Provenance(c.TraceID)
-	if prov.SourceTool != "" {
-		meta["taint_source_tool"] = prov.SourceTool
+	rec := g.ledger.LatestTaint(c.TraceID)
+	if rec != nil && rec.SourceTool != "" {
+		meta["taint_source_tool"] = rec.SourceTool
 	}
 	args := decodeArgs(ctx, c)
 	offendingKey, _, hasExt := findExternalDestination(args)
@@ -1436,7 +1534,19 @@ func (e vdsoTaintEmitter) Emit(ev abi.Event) {
 	if !enabled || ev.Kind != abi.EvVDSOHit || ev.Call == nil {
 		return
 	}
-	e.ledger.Raise(ev.Call.TraceID, provenance.Taint(ev.Call, ev.Result))
+	t := provenance.Taint(ev.Call, ev.Result)
+	var digest string
+	if ev.Result != nil {
+		digest = ev.Result.Payload.Digest
+	}
+	e.ledger.RaiseWithRecord(ev.Call.TraceID, TaintRecord{
+		Label:         t,
+		SourceTool:    ev.Call.Tool,
+		Timestamp:     time.Now(),
+		CallSeq:       int64(ev.Call.SeqNo),
+		PayloadDigest: digest,
+		Reason:        "vdso_hit",
+	})
 }
 
 // DefaultStampGate / DefaultSinkGate are the registered instances sharing Default

@@ -13,58 +13,76 @@ func TestLedgerProvenanceTracking(t *testing.T) {
 
 	// Clean/unseen trace
 	unseenProv := led.Provenance("unseen")
-	if unseenProv.Level != abi.TaintTrusted || unseenProv.SourceTool != "" {
-		t.Fatalf("unseen trace provenance = %+v, want Level=TaintTrusted and empty tool", unseenProv)
+	if len(unseenProv) != 0 {
+		t.Fatalf("unseen trace provenance = %+v, want empty", unseenProv)
+	}
+	if got := led.LatestTaint("unseen"); got != nil {
+		t.Fatalf("unseen trace latest taint = %+v, want nil", got)
 	}
 
 	// Raise with provenance
-	now := time.Now().UnixNano()
-	p1 := TaintProvenance{
-		Level:         abi.TaintTainted,
+	now := time.Now().Truncate(time.Millisecond)
+	p1 := TaintRecord{
+		Label:         abi.TaintTainted,
 		SourceTool:    "read_webpage",
-		SourceCallSeq: 42,
-		SourceDigest:  "sha256:abcd",
-		TaintedAt:     now,
+		CallSeq:       42,
+		PayloadDigest: "sha256:abcd",
+		Timestamp:     now,
 	}
-	led.RaiseWithProvenance("t1", abi.TaintTainted, p1)
+	led.RaiseWithRecord("t1", p1)
 
-	gotP1 := led.Provenance("t1")
-	if gotP1.Level != abi.TaintTainted || gotP1.SourceTool != "read_webpage" ||
-		gotP1.SourceCallSeq != 42 || gotP1.SourceDigest != "sha256:abcd" || gotP1.TaintedAt != now {
+	gotP1 := led.LatestTaint("t1")
+	if gotP1 == nil || gotP1.Label != abi.TaintTainted || gotP1.SourceTool != "read_webpage" ||
+		gotP1.CallSeq != 42 || gotP1.PayloadDigest != "sha256:abcd" || !gotP1.Timestamp.Equal(now) {
 		t.Fatalf("t1 provenance = %+v, want %+v", gotP1, p1)
+	}
+	provList := led.Provenance("t1")
+	if len(provList) != 1 || provList[0].SourceTool != "read_webpage" {
+		t.Fatalf("t1 provenance list = %+v, want 1 record with read_webpage", provList)
 	}
 
 	// Lower or equal rank does not overwrite higher provenance
-	pLower := TaintProvenance{
-		Level:      abi.TaintTrusted,
+	pLower := TaintRecord{
+		Label:      abi.TaintTrusted,
 		SourceTool: "safe_tool",
 	}
-	led.RaiseWithProvenance("t1", abi.TaintTrusted, pLower)
-	if got := led.Provenance("t1"); got.SourceTool != "read_webpage" {
-		t.Fatalf("lower rank should not overwrite provenance: got tool %q", got.SourceTool)
+	led.RaiseWithRecord("t1", pLower)
+	if got := led.LatestTaint("t1"); got == nil || got.SourceTool != "read_webpage" {
+		t.Fatalf("lower rank should not overwrite provenance: got tool %+v", got)
 	}
 
 	// Higher rank (Quarantined) overwrites
-	pQuar := TaintProvenance{
-		Level:      abi.TaintQuarantined,
+	pQuar := TaintRecord{
+		Label:      abi.TaintQuarantined,
 		SourceTool: "poison_probe",
+		CallSeq:    43,
+		Timestamp:  now.Add(time.Second),
 	}
-	led.RaiseWithProvenance("t1", abi.TaintQuarantined, pQuar)
-	if got := led.Provenance("t1"); got.Level != abi.TaintQuarantined || got.SourceTool != "poison_probe" {
+	led.RaiseWithRecord("t1", pQuar)
+	if got := led.LatestTaint("t1"); got == nil || got.Label != abi.TaintQuarantined || got.SourceTool != "poison_probe" {
 		t.Fatalf("higher rank should update provenance: got %+v", got)
+	}
+	if list := led.Provenance("t1"); len(list) != 2 {
+		t.Fatalf("expected 2 records in provenance history, got %d", len(list))
 	}
 
 	// Bounded capacity eviction evicts provenance along with mark
 	led.Raise("t2", abi.TaintTainted)
 	led.Raise("t3", abi.TaintTainted) // evicts t1
-	if got := led.Provenance("t1"); got.Level != abi.TaintTrusted || got.SourceTool != "" {
-		t.Fatalf("evicted trace should return clean provenance, got %+v", got)
+	if got := led.LatestTaint("t1"); got != nil {
+		t.Fatalf("evicted trace should return nil latest taint, got %+v", got)
+	}
+	if got := led.Provenance("t1"); len(got) != 0 {
+		t.Fatalf("evicted trace should return empty provenance, got %+v", got)
 	}
 
 	// Reset clears provenance
 	led.Reset("t2")
-	if got := led.Provenance("t2"); got.Level != abi.TaintTrusted || got.SourceTool != "" {
-		t.Fatalf("reset trace should return clean provenance, got %+v", got)
+	if got := led.LatestTaint("t2"); got != nil {
+		t.Fatalf("reset trace should return nil latest taint, got %+v", got)
+	}
+	if got := led.Provenance("t2"); len(got) != 0 {
+		t.Fatalf("reset trace should return empty provenance, got %+v", got)
 	}
 }
 
@@ -88,21 +106,30 @@ func TestStampGateCapturesProvenance(t *testing.T) {
 
 	stamp.Admit(ctx, call, res)
 
-	prov := led.Provenance("trace-audit-1")
-	if prov.Level != abi.TaintTainted {
-		t.Fatalf("level = %v, want TaintTainted", prov.Level)
+	records := led.Provenance("trace-audit-1")
+	if len(records) != 1 {
+		t.Fatalf("records len = %d, want 1", len(records))
+	}
+	prov := records[0]
+	if prov.Label != abi.TaintTainted {
+		t.Fatalf("level = %v, want TaintTainted", prov.Label)
 	}
 	if prov.SourceTool != "read_webpage" {
 		t.Fatalf("SourceTool = %q, want read_webpage", prov.SourceTool)
 	}
-	if prov.SourceCallSeq != 7 {
-		t.Fatalf("SourceCallSeq = %d, want 7", prov.SourceCallSeq)
+	if prov.CallSeq != 7 {
+		t.Fatalf("SourceCallSeq = %d, want 7", prov.CallSeq)
 	}
-	if prov.SourceDigest != "sha256:webpage_payload" {
-		t.Fatalf("SourceDigest = %q, want sha256:webpage_payload", prov.SourceDigest)
+	if prov.PayloadDigest != "sha256:webpage_payload" {
+		t.Fatalf("SourceDigest = %q, want sha256:webpage_payload", prov.PayloadDigest)
 	}
-	if prov.TaintedAt <= 0 {
-		t.Fatalf("TaintedAt = %d, want > 0", prov.TaintedAt)
+	if prov.Timestamp.IsZero() {
+		t.Fatalf("Timestamp is zero, want > 0")
+	}
+
+	latest := led.LatestTaint("trace-audit-1")
+	if latest == nil || latest.SourceTool != "read_webpage" {
+		t.Fatalf("latest = %+v, want read_webpage", latest)
 	}
 }
 
@@ -195,24 +222,31 @@ func TestLedgerProvenanceBaseTraceDeterministicDescending(t *testing.T) {
 	led := NewLedgerCap(10)
 
 	base := "sess-abc"
-	led.RaiseWithProvenance(TurnTrace(base, 1), abi.TaintTainted, TaintProvenance{
-		Level:      abi.TaintTainted,
+	led.RaiseWithRecord(TurnTrace(base, 1), TaintRecord{
+		Label:      abi.TaintTainted,
 		SourceTool: "tool_turn1",
 	})
-	led.RaiseWithProvenance(TurnTrace(base, 3), abi.TaintTainted, TaintProvenance{
-		Level:      abi.TaintTainted,
+	led.RaiseWithRecord(TurnTrace(base, 3), TaintRecord{
+		Label:      abi.TaintTainted,
 		SourceTool: "tool_turn3",
 	})
-	led.RaiseWithProvenance(TurnTrace(base, 2), abi.TaintTainted, TaintProvenance{
-		Level:      abi.TaintTainted,
+	led.RaiseWithRecord(TurnTrace(base, 2), TaintRecord{
+		Label:      abi.TaintTainted,
 		SourceTool: "tool_turn2",
 	})
 
 	// Provenance for base should deterministically pick the latest turn (turn 3)
 	for i := 0; i < 20; i++ {
-		p := led.Provenance(base)
-		if p.SourceTool != "tool_turn3" {
-			t.Fatalf("iteration %d: expected latest turn tool_turn3, got %q", i, p.SourceTool)
+		p := led.LatestTaint(base)
+		if p == nil || p.SourceTool != "tool_turn3" {
+			t.Fatalf("iteration %d: expected latest turn tool_turn3, got %+v", i, p)
+		}
+		prov := led.Provenance(base)
+		if len(prov) != 3 {
+			t.Fatalf("iteration %d: expected 3 records, got %d", i, len(prov))
+		}
+		if prov[len(prov)-1].SourceTool != "tool_turn3" {
+			t.Fatalf("iteration %d: expected latest record tool_turn3, got %q", i, prov[len(prov)-1].SourceTool)
 		}
 	}
 }

@@ -1360,3 +1360,95 @@ func TestInternalIdentifierIPC(t *testing.T) {
 		})
 	}
 }
+
+func TestStructuredTaintProvenanceTracking(t *testing.T) {
+	ctx := context.Background()
+	led := NewLedger()
+	stamp := NewStampGate(led, Policy{})
+
+	const traceID = "sess-prov-test"
+
+	// 1. Initial clean trace has empty provenance and nil latest taint.
+	if prov := led.Provenance(traceID); len(prov) != 0 {
+		t.Fatalf("clean trace provenance = %+v, want empty", prov)
+	}
+	if latest := led.LatestTaint(traceID); latest != nil {
+		t.Fatalf("clean trace latest taint = %+v, want nil", latest)
+	}
+
+	// 2. Untrusted tool call 1 enters the session.
+	call1 := &abi.ToolCall{
+		Tool:    "read_webpage",
+		TraceID: traceID,
+		SeqNo:   10,
+	}
+	res1 := &abi.Result{
+		Payload: abi.Ref{
+			Kind:   abi.RefInline,
+			Inline: []byte("untrusted external web content"),
+			Digest: "sha256:digest-webpage-1",
+		},
+	}
+	t0 := time.Now()
+	stamp.Admit(ctx, call1, res1)
+
+	recs1 := led.Provenance(traceID)
+	if len(recs1) != 1 {
+		t.Fatalf("expected 1 taint record, got %d", len(recs1))
+	}
+	r1 := recs1[0]
+	if r1.Label != abi.TaintTainted {
+		t.Errorf("r1.Label = %v, want %v", r1.Label, abi.TaintTainted)
+	}
+	if r1.SourceTool != "read_webpage" {
+		t.Errorf("r1.SourceTool = %q, want read_webpage", r1.SourceTool)
+	}
+	if r1.CallSeq != 10 {
+		t.Errorf("r1.CallSeq = %d, want 10", r1.CallSeq)
+	}
+	if r1.PayloadDigest != "sha256:digest-webpage-1" {
+		t.Errorf("r1.PayloadDigest = %q, want sha256:digest-webpage-1", r1.PayloadDigest)
+	}
+	if r1.Timestamp.Before(t0) || r1.Timestamp.After(time.Now().Add(time.Second)) {
+		t.Errorf("r1.Timestamp = %v, out of expected range", r1.Timestamp)
+	}
+
+	latest1 := led.LatestTaint(traceID)
+	if latest1 == nil || latest1.SourceTool != "read_webpage" || latest1.CallSeq != 10 {
+		t.Fatalf("latest1 = %+v, want read_webpage seq 10", latest1)
+	}
+
+	// 3. Second untrusted tool call enters the session (history accumulates).
+	call2 := &abi.ToolCall{
+		Tool:    "search_flights",
+		TraceID: traceID,
+		SeqNo:   15,
+	}
+	res2 := &abi.Result{
+		Payload: abi.Ref{
+			Kind:   abi.RefInline,
+			Inline: []byte("search results carrying injection"),
+			Digest: "sha256:digest-flights-2",
+		},
+	}
+	stamp.Admit(ctx, call2, res2)
+
+	recs2 := led.Provenance(traceID)
+	if len(recs2) != 2 {
+		t.Fatalf("expected 2 taint records in history, got %d", len(recs2))
+	}
+	if recs2[0].SourceTool != "read_webpage" || recs2[0].CallSeq != 10 {
+		t.Errorf("recs2[0] = %+v, want read_webpage seq 10", recs2[0])
+	}
+	if recs2[1].SourceTool != "search_flights" || recs2[1].CallSeq != 15 {
+		t.Errorf("recs2[1] = %+v, want search_flights seq 15", recs2[1])
+	}
+	if recs2[1].PayloadDigest != "sha256:digest-flights-2" {
+		t.Errorf("recs2[1].PayloadDigest = %q, want sha256:digest-flights-2", recs2[1].PayloadDigest)
+	}
+
+	latest2 := led.LatestTaint(traceID)
+	if latest2 == nil || latest2.SourceTool != "search_flights" || latest2.CallSeq != 15 {
+		t.Fatalf("latest2 = %+v, want search_flights seq 15", latest2)
+	}
+}
