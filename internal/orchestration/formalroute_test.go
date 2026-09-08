@@ -288,6 +288,104 @@ func TestFormalPacketSeparateTaskPinsPreserveReceiptProvenance(t *testing.T) {
 	})
 }
 
+func TestFormalPacketTaskPinsReplaceAutomaticProvenance(t *testing.T) {
+	type wantProvenance struct {
+		source string
+		value  string
+	}
+	tests := []struct {
+		name   string
+		model  string
+		effort string
+		want   map[string]wantProvenance
+	}{
+		{
+			name:  "model only",
+			model: AstraWorkerModel,
+			want: map[string]wantProvenance{
+				"sol_route.worker_model":            {AstraRouteSourceTaskPin, AstraWorkerModel},
+				"sol_route.worker_reasoning_effort": {AstraRouteSourceFormalPacket, AstraWorkerEffort},
+			},
+		},
+		{
+			name:   "effort only",
+			effort: "high",
+			want: map[string]wantProvenance{
+				"sol_route.worker_model":            {AstraRouteSourceFormalPacket, AstraWorkerModel},
+				"sol_route.worker_reasoning_effort": {AstraRouteSourceTaskPin, "high"},
+			},
+		},
+		{
+			name:   "both",
+			model:  "gpt-5.6-sol",
+			effort: "medium",
+			want: map[string]wantProvenance{
+				"sol_route.worker_model":            {AstraRouteSourceTaskPin, "gpt-5.6-sol"},
+				"sol_route.worker_reasoning_effort": {AstraRouteSourceTaskPin, "medium"},
+			},
+		},
+		{
+			name:  "Astra alias",
+			model: "openai/astra",
+			want: map[string]wantProvenance{
+				"sol_route.worker_model":            {AstraRouteSourceTaskPin, "openai/astra"},
+				"sol_route.worker_reasoning_effort": {AstraRouteSourceFormalPacket, AstraWorkerEffort},
+			},
+		},
+		{
+			name:  "non-Astra",
+			model: "gpt-5.6-terra",
+			want: map[string]wantProvenance{
+				"sol_route.worker_model":            {AstraRouteSourceTaskPin, "gpt-5.6-terra"},
+				"sol_route.worker_reasoning_effort": {AstraRouteSourceFormalPacket, AstraWorkerEffort},
+			},
+		},
+	}
+
+	baseline, err := Resolve(OrchestrationProfile{Name: ProfileAuto}, completeFormalTask(), nativeCaps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	unrelated := func(all []Provenance) []Provenance {
+		kept := make([]Provenance, 0, len(all))
+		for _, entry := range all {
+			if entry.Field != "sol_route.worker_model" && entry.Field != "sol_route.worker_reasoning_effort" {
+				kept = append(kept, entry)
+			}
+		}
+		return kept
+	}
+	baselineUnrelated := unrelated(baseline.Overrides)
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			task := completeFormalTask()
+			task.Pins.Model = tc.model
+			task.Pins.Effort = tc.effort
+			got, err := Resolve(OrchestrationProfile{Name: ProfileAuto}, task, nativeCaps())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if gotUnrelated := unrelated(got.Overrides); !reflect.DeepEqual(gotUnrelated, baselineUnrelated) {
+				t.Fatalf("unrelated provenance order changed\ngot:  %+v\nwant: %+v", gotUnrelated, baselineUnrelated)
+			}
+			for field, want := range tc.want {
+				count := 0
+				var entry Provenance
+				for _, candidate := range got.Overrides {
+					if candidate.Field == field {
+						count++
+						entry = candidate
+					}
+				}
+				if count != 1 || entry.Source != want.source || entry.Value != want.value {
+					t.Fatalf("provenance %q count=%d entry=%+v, want exactly one source=%q value=%q", field, count, entry, want.source, want.value)
+				}
+			}
+		})
+	}
+}
+
 func TestFormalPacketRouteAuthorityInvariant(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -303,6 +401,9 @@ func TestFormalPacketRouteAuthorityInvariant(t *testing.T) {
 	}{
 		{"auto", ProfileAuto, nil, true, true, AstraWorkerModel, AstraWorkerEffort, AstraRouteSourceFormalPacket, AstraRouteSourceFormalPacket, ""},
 		{"off direct", ProfileOff, nil, true, false, AstraWorkerModel, AstraWorkerEffort, AstraRouteSourceFormalPacket, AstraRouteSourceFormalPacket, ""},
+		{"fast launch declined", ProfileFast, func(task *TaskSpec) {
+			task.FastIntent = &FastIntent{Schema: FastIntentSchemaVersion, LatencyClass: "interactive", QualityFloor: "accepted", CostCeiling: "bounded", CachePolicy: "preserve", FallbackPolicy: "degrade"}
+		}, true, false, AstraWorkerModel, AstraWorkerEffort, AstraRouteSourceFormalPacket, AstraRouteSourceFormalPacket, ""},
 		{"canonical Astra task pin", ProfileAuto, func(task *TaskSpec) { task.Pins.Model = AstraWorkerModel }, true, true, AstraWorkerModel, AstraWorkerEffort, AstraRouteSourceTaskPin, AstraRouteSourceFormalPacket, ""},
 		{"alias Astra task pin", ProfileAuto, func(task *TaskSpec) { task.Pins.Model = "openai/astra" }, true, true, "openai/astra", AstraWorkerEffort, AstraRouteSourceTaskPin, AstraRouteSourceFormalPacket, ""},
 		{"non-Astra task pin", ProfileAuto, func(task *TaskSpec) { task.Pins.Model = "gpt-5.6-sol" }, true, false, "gpt-5.6-sol", AstraWorkerEffort, AstraRouteSourceTaskPin, AstraRouteSourceFormalPacket, ""},
@@ -341,9 +442,11 @@ func TestFormalPacketRouteAuthorityInvariant(t *testing.T) {
 				}
 				return Provenance{}, false
 			}
-			for _, forbidden := range []string{"fast.model", "fast.effort"} {
-				if _, ok := lastProvenance(forbidden); ok {
-					t.Fatalf("formal route emitted forbidden provenance field %q: %+v", forbidden, got.Overrides)
+			if tc.profile != ProfileFast {
+				for _, forbidden := range []string{"fast.model", "fast.effort"} {
+					if _, ok := lastProvenance(forbidden); ok {
+						t.Fatalf("formal route emitted forbidden provenance field %q: %+v", forbidden, got.Overrides)
+					}
 				}
 			}
 			for field, wantSource := range map[string]string{

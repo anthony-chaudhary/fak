@@ -313,12 +313,6 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 		managerModel = guardCodexDefaultModelID
 	}
 	workerModel, workerEffort := orchestration.ChildWorkerRoute(managerModel, route.WorkerModel, route.WorkerReasoningEffort)
-	if envModel := strings.TrimSpace(os.Getenv("FAK_ORCHESTRATION_WORKER_MODEL")); envModel != "" {
-		workerModel = envModel
-	}
-	if envEffort := strings.TrimSpace(os.Getenv("FAK_ORCHESTRATION_WORKER_EFFORT")); envEffort != "" {
-		workerEffort = strings.ToLower(envEffort)
-	}
 	var emptyUsageWindow time.Duration
 	workload, workloadErr := orchestrationWorkloadFromEnv()
 	if workloadErr != nil {

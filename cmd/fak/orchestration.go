@@ -121,19 +121,42 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		orchestration.RouteResolution(&resolved, *taskText, guardCodexDefaultModelID)
 	}
 	if err == nil {
+		envModel := strings.TrimSpace(os.Getenv("FAK_ORCHESTRATION_WORKER_MODEL"))
+		envEffortRaw := strings.TrimSpace(os.Getenv("FAK_ORCHESTRATION_WORKER_EFFORT"))
+		if envModel != "" && task.Pins.Model == "" && *workerModel == "" {
+			resolved.Resolved.SOLRoute.WorkerModel = envModel
+			replaceOrchestrationOverride(&resolved, "sol_route.worker_model", orchestrationRouteSourceEnvironment, envModel)
+			if route := resolved.Resolved.AstraRoute; route != nil {
+				route.Model = envModel
+				route.Source = orchestrationRouteSourceEnvironment
+			}
+		}
+		if envEffortRaw != "" && task.Pins.Effort == "" && *workerEffort == "" {
+			envEffort, valid := orchestrationWorkerEffort(envEffortRaw)
+			if !valid {
+				fmt.Fprintf(stderr, "fak orchestration plan: invalid FAK_ORCHESTRATION_WORKER_EFFORT %q\n", envEffortRaw)
+				return 2
+			}
+			if envEffort != "" {
+				resolved.Resolved.SOLRoute.WorkerReasoningEffort = envEffort
+				replaceOrchestrationOverride(&resolved, "sol_route.worker_reasoning_effort", orchestrationRouteSourceEnvironment, envEffort)
+				if route := resolved.Resolved.AstraRoute; route != nil {
+					route.ReasoningEffort = envEffort
+					route.ReasoningEffortSource = orchestrationRouteSourceEnvironment
+				}
+			}
+		}
 		if *workerModel != "" {
 			resolved.Resolved.SOLRoute.WorkerModel = *workerModel
 			replaceOrchestrationOverride(&resolved, "sol_route.worker_model", orchestration.AstraRouteSourceOperatorPin, *workerModel)
 			if route := resolved.Resolved.AstraRoute; route != nil {
 				route.Model = *workerModel
-				route.Selected = resolved.Resolved.Profile == orchestration.ProfileUltracode &&
-					resolved.Resolved.Budget.MaxWorkers > 1 && orchestration.IsAstraModel(*workerModel)
 				route.Source = orchestration.AstraRouteSourceOperatorPin
 			}
 		}
 		if *workerEffort != "" {
-			effort := strings.ToLower(strings.TrimSpace(*workerEffort))
-			if effort != "low" && effort != "medium" && effort != "high" && effort != "xhigh" {
+			effort, valid := orchestrationWorkerEffort(*workerEffort)
+			if !valid {
 				fmt.Fprintf(stderr, "fak orchestration plan: invalid --worker-effort %q\n", *workerEffort)
 				return 2
 			}
@@ -143,6 +166,10 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 				route.ReasoningEffort = effort
 				route.ReasoningEffortSource = orchestration.AstraRouteSourceOperatorPin
 			}
+		}
+		if route := resolved.Resolved.AstraRoute; route != nil {
+			route.Selected = resolved.Resolved.Profile == orchestration.ProfileUltracode &&
+				resolved.Resolved.Budget.MaxWorkers > 1 && orchestration.IsAstraModel(resolved.Resolved.SOLRoute.WorkerModel)
 		}
 	}
 	if err != nil {
@@ -236,6 +263,21 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stdout, "DEGRADED %s: required=%s available=%s reason=%s\n", d.Capability, d.Required, d.Available, d.Reason)
 	}
 	return 0
+}
+
+const orchestrationRouteSourceEnvironment = "environment"
+
+func orchestrationWorkerEffort(raw string) (string, bool) {
+	effort := strings.ToLower(strings.TrimSpace(raw))
+	if effort == "" {
+		return "", true
+	}
+	switch effort {
+	case "low", "medium", "high", "xhigh":
+		return effort, true
+	default:
+		return effort, false
+	}
 }
 
 func replaceOrchestrationOverride(resolution *orchestration.Resolution, field, source string, value any) {

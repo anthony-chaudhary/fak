@@ -43,6 +43,21 @@ func quarantineRestoreCASBlob() []byte {
 		strings.Repeat("x", ctxRestoreMediaThreshold) + `"}`)
 }
 
+type mismatchedQuarantinePageOut struct {
+	calls int
+	body  []byte
+}
+
+func (b *mismatchedQuarantinePageOut) PageOut(_ context.Context, r abi.Ref) (abi.Ref, error) {
+	b.calls++
+	b.body = append([]byte(nil), r.Inline...)
+	return abi.Ref{Kind: abi.RefBlob, Digest: "opaque-mismatched-handle"}, nil
+}
+
+func (b *mismatchedQuarantinePageOut) PageIn(_ context.Context, _ abi.Ref) (abi.Ref, error) {
+	return abi.Ref{Kind: abi.RefInline, Inline: append([]byte(nil), b.body...)}, nil
+}
+
 // TestQuarantineRestoreRefusalSurvivesRestart is the #12056 process-boundary witness:
 // one process persists both a durable restore-CAS entry and the MMU's quarantine
 // authority, then a fresh process proves neither the original/backend digest nor its
@@ -177,6 +192,46 @@ func TestQuarantineRestoreRefusalSurvivesRestart(t *testing.T) {
 			t.Fatal("capacity refusal published an uncommitted denial")
 		}
 		return
+
+	case "mismatched-backend":
+		backend := &mismatchedQuarantinePageOut{}
+		abi.RegisterPageOutBackend("opaque-test", backend)
+		poison := quarantineRestoreCASBlob()
+		call := &abi.ToolCall{Tool: "fetch_remote_payload",
+			Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{}`)},
+			Meta: map[string]string{"readOnlyHint": "true"}}
+		result := &abi.Result{Call: call, Status: abi.StatusOK,
+			Payload: abi.Ref{Kind: abi.RefInline, Inline: poison}}
+		m := ctxmmu.New()
+		verdict := m.Admit(context.Background(), call, result)
+		pageOut, ok := verdict.Payload.(abi.QuarantinePayload)
+		if verdict.Kind != abi.VerdictQuarantine || !ok || !pageOut.PageOut {
+			t.Fatalf("opaque backend verdict = %#v, want canonical blob publication", verdict)
+		}
+		held := m.Held()
+		if backend.calls != 0 || len(held) != 1 {
+			t.Fatalf("opaque backend publication = (%d calls, %d handles), want zero opaque calls and one canonical handle", backend.calls, len(held))
+		}
+		qid := result.Meta["quarantine_id"]
+		if got := held[qid].Digest; got != ctxplan.Digest(poison) {
+			t.Fatalf("quarantine handle = %q, want canonical content digest", got)
+		}
+		if ref, err := backend.PageIn(context.Background(), abi.Ref{Kind: abi.RefBlob, Digest: "opaque-mismatched-handle"}); err != nil || len(ref.Inline) != 0 {
+			t.Fatalf("opaque backend restored %d bytes, err=%v", len(ref.Inline), err)
+		}
+		return
+
+	case "ledger-off-check":
+		ctxmmu.ResetQuarantineLedgerForTest()
+		digest := strings.Repeat("e", 64)
+		if err := ctxmmu.RecordQuarantine(digest); err != nil {
+			t.Fatalf("record ledger-off probe: %v", err)
+		}
+		_, err := os.Stat(filepath.Join(".fak", "ctxmmu", "quarantine.jsonl"))
+		if err != nil {
+			t.Fatalf("ledger kill-switch bypassed mandatory authority: %v", err)
+		}
+		return
 	}
 
 	dir := t.TempDir()
@@ -198,7 +253,7 @@ func TestQuarantineRestoreRefusalSurvivesRestart(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command(os.Args[0], "-test.run=^TestQuarantineRestoreRefusalSurvivesRestart$", "-test.count=1")
 		cmd.Dir = workspace
-		cmd.Env = append(envWithout("FAK_QUARANTINE_LEDGER_PATH", ctxRestoreCASEnvDir), quarantineRestoreRestartPhase+"="+phase)
+		cmd.Env = append(envWithout("FAK_QUARANTINE_LEDGER_PATH", ctxRestoreCASEnvDir, "FAK_PAGEOUT_BACKEND", "FAK_BLOB_DIR", "FAK_BLOB_HTTP_URL", "FAK_STORE", "FAK_XENGINE_KV"), quarantineRestoreRestartPhase+"="+phase)
 		cmd.Env = append(cmd.Env, extraEnv...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%s subprocess: %v\n%s", phase, err, out)
@@ -244,6 +299,11 @@ func TestQuarantineRestoreRefusalSurvivesRestart(t *testing.T) {
 		t.Fatalf("capacity authority fixture: %v", err)
 	}
 	runPhase(capacityWorkspace, "capacity-read")
+
+	runPhase(t.TempDir(), "mismatched-backend", "FAK_PAGEOUT_BACKEND=opaque-test")
+	runPhase(t.TempDir(), "ledger-off-check", "FAK_QUARANTINE_LEDGER_PATH=off", ctxRestoreCASEnvDir+"=off", "FAK_PAGEOUT_BACKEND=opaque-test")
+	runPhase(t.TempDir(), "ledger-off-check", "FAK_QUARANTINE_LEDGER_PATH=off", ctxRestoreCASEnvDir+"=off", "FAK_PAGEOUT_BACKEND=off")
+	runPhase(t.TempDir(), "ledger-off-check", "FAK_QUARANTINE_LEDGER_PATH=off", ctxRestoreCASEnvDir+"=off", "FAK_PAGEOUT_BACKEND=off", "FAK_BLOB_DIR=custom-resolver")
 }
 
 // TestRestoreDurableCASSurvivesEvictionAndRestart (#5163): a media entry evicted from the RAM stash

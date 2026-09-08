@@ -16,7 +16,6 @@ import (
 const (
 	quarantineLedgerEnv          = "FAK_QUARANTINE_LEDGER_PATH"
 	quarantineLedgerDefaultPath  = ".fak/ctxmmu/quarantine.jsonl"
-	durableRestoreCASEnv         = "FAK_CTXRESTORE_CAS_DIR"
 	maxQuarantineLedgerEntries   = 32768
 	maxQuarantineLedgerWALBytes  = 8 << 20
 	maxQuarantineLedgerKeyLength = 128
@@ -49,11 +48,9 @@ func NewQuarantineLedger(path ...string) *QuarantineLedger {
 	} else if envPath, ok := os.LookupEnv(quarantineLedgerEnv); ok {
 		switch strings.ToLower(strings.TrimSpace(envPath)) {
 		case "off", "0", "none":
-			// A durable restore store without a durable refusal authority is unsafe.
-			// Honor the kill-switch only when durable restore is explicitly off too.
-			if durableRestoreExplicitlyOff() {
-				p = ""
-			}
+			// Generic restore has multiple durable sources (gateway CAS, page-out
+			// codecs, active resolvers, and caller-named images). No single process
+			// env switch proves all are absent, so the authority remains mandatory.
 		case "":
 			// Empty is the default, not an accidental disable.
 		default:
@@ -68,15 +65,6 @@ func NewQuarantineLedger(path ...string) *QuarantineLedger {
 		l.loadErr = l.load()
 	}
 	return l
-}
-
-func durableRestoreExplicitlyOff() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(durableRestoreCASEnv))) {
-	case "off", "0", "none":
-		return true
-	default:
-		return false
-	}
 }
 
 func (l *QuarantineLedger) load() error {
@@ -262,9 +250,12 @@ func marshalQuarantineRecord(op, digest string) ([]byte, error) {
 }
 
 func (l *QuarantineLedger) appendBytesLocked(record []byte) error {
-	if err := os.MkdirAll(filepath.Dir(l.path), 0o700); err != nil {
+	dir := filepath.Dir(l.path)
+	if err := ensureQuarantineLedgerDir(dir); err != nil {
 		return err
 	}
+	_, statErr := os.Stat(l.path)
+	created := os.IsNotExist(statErr)
 	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
@@ -280,12 +271,17 @@ func (l *QuarantineLedger) appendBytesLocked(record []byte) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
+	if created {
+		if err := syncQuarantineLedgerCreation(dir); err != nil {
+			return err
+		}
+	}
 	l.walSize += int64(len(record))
 	return nil
 }
 
 func (l *QuarantineLedger) rewriteSnapshotLocked() error {
-	if err := os.MkdirAll(filepath.Dir(l.path), 0o700); err != nil {
+	if err := ensureQuarantineLedgerDir(filepath.Dir(l.path)); err != nil {
 		return err
 	}
 	keys := make([]string, 0, len(l.entries))
@@ -322,11 +318,40 @@ func (l *QuarantineLedger) rewriteSnapshotLocked() error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpName, l.path); err != nil {
+	if err := replaceQuarantineLedgerFile(tmpName, l.path); err != nil {
 		return err
 	}
 	ok = true
 	l.walSize = size
+	return nil
+}
+
+// ensureQuarantineLedgerDir makes every missing directory component durable
+// before any quarantine bytes can be published. Syncing only the leaf would
+// still allow a crash to forget a newly-created ancestor such as .fak.
+func ensureQuarantineLedgerDir(dir string) error {
+	dir = filepath.Clean(dir)
+	missing := make([]string, 0, 2)
+	for current := dir; ; current = filepath.Dir(current) {
+		if _, err := os.Stat(current); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		missing = append(missing, current)
+		parent := filepath.Dir(current)
+		if parent == current {
+			return fmt.Errorf("ctxmmu: no existing parent for quarantine authority %s", dir)
+		}
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	for i := len(missing) - 1; i >= 0; i-- {
+		if err := syncQuarantineLedgerCreation(filepath.Dir(missing[i])); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
