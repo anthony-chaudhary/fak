@@ -6,9 +6,115 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"math/rand"
 	"testing"
 	"unsafe"
 )
+
+func TestVulkanQwen35GDNQ8InputProjectionMatchesComposition(t *testing.T) {
+	be := vk(t)
+	if !be.VulkanDebugQ8GDNInProjAvailable() {
+		t.Skip("optional fused Q8 GDN input-projection pipeline unavailable")
+	}
+
+	const hidden = 2112 // Crosses the shader's 2,048-element activation window.
+	outputs := []int{32, 16, 2, 2}
+	rng := rand.New(rand.NewSource(416))
+	xHost := make([]float32, hidden)
+	for i := range xHost {
+		xHost[i] = (rng.Float32()*2 - 1) * 0.75
+	}
+	x := be.UploadClass(NewF32(cpu(), []int{hidden}, xHost), F32, MemoryActivation, "fused GDN x")
+	t.Cleanup(func() { be.Free(x) })
+
+	weights := make([]Tensor, len(outputs))
+	for i, out := range outputs {
+		host := make([]float32, out*hidden)
+		for j := range host {
+			host[j] = (rng.Float32()*2 - 1) * 0.125
+		}
+		weights[i] = be.UploadClass(NewF32(cpu(), []int{out, hidden}, host), Q8_0, MemoryWeights, "fused GDN weight")
+		weight := weights[i]
+		t.Cleanup(func() { be.Free(weight) })
+	}
+
+	be.VulkanDebugResetGDNProfile()
+	fused, z, beta, alpha, ok, err := be.tryQwen35GDNQ8InputProjections(
+		x, weights[0], weights[1], weights[2], weights[3],
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("eligible Q8 operands did not select fused input projection")
+	}
+	got := []Tensor{fused, z, beta, alpha}
+	for _, tensor := range got {
+		value := tensor
+		t.Cleanup(func() { be.Free(value) })
+	}
+	want := make([]Tensor, len(weights))
+	for i := range weights {
+		want[i] = be.MatMul(weights[i], x)
+		value := want[i]
+		t.Cleanup(func() { be.Free(value) })
+	}
+	for i := range got {
+		gotHost := be.Read(got[i])
+		wantHost := be.Read(want[i])
+		if delta := maxAbs(gotHost, wantHost); delta > 1e-5 {
+			t.Fatalf("projection %d max|delta|=%g, want <= 1e-5", i, delta)
+		}
+	}
+	if fusedCalls, composedCalls := be.VulkanDebugGDNProjectionProfileSnapshot(); fusedCalls != 1 || composedCalls != 0 {
+		t.Fatalf("projection profile fused/composed=%d/%d, want 1/0", fusedCalls, composedCalls)
+	}
+
+	makeValues := func(n int, scale float32) []float32 {
+		values := make([]float32, n)
+		for i := range values {
+			values[i] = (rng.Float32()*2 - 1) * scale
+		}
+		return values
+	}
+	uploadF32 := func(shape []int, values []float32, class MemoryClass, name string) Tensor {
+		tensor := be.UploadClass(NewF32(cpu(), shape, values), F32, class, name)
+		t.Cleanup(func() { be.Free(tensor) })
+		return tensor
+	}
+	const nK, nV, kHd, vHd, kernel = 1, 2, 8, 8, 3
+	const convDim, valueDim = 32, 16
+	convW := uploadF32([]int{convDim, kernel}, makeValues(convDim*kernel, 0.1), MemoryWeights, "fused GDN conv")
+	aLog := uploadF32([]int{nV}, []float32{-0.8, -0.6}, MemoryWeights, "fused GDN A_log")
+	dtBias := uploadF32([]int{nV}, []float32{0.1, -0.1}, MemoryWeights, "fused GDN dt_bias")
+	norm := uploadF32([]int{vHd}, makeValues(vHd, 0.25), MemoryWeights, "fused GDN norm")
+	outProj := uploadF32([]int{hidden, valueDim}, makeValues(hidden*valueDim, 0.05), MemoryWeights, "fused GDN out projection")
+	convState := uploadF32([]int{kernel - 1, convDim}, makeValues((kernel-1)*convDim, 0.02), MemoryKVCache, "fused GDN conv state")
+	recurrentState := uploadF32([]int{nV, kHd, vHd}, makeValues(nV*kHd*vHd, 0.02), MemoryKVCache, "fused GDN recurrent state")
+	convIdentity, recurrentIdentity := convState.Buf(), recurrentState.Buf()
+
+	be.VulkanDebugResetGDNProfile()
+	output, nextConv, nextRecurrent, err := be.Qwen35GDNDecode(
+		x, weights[0], weights[1], weights[2], weights[3],
+		convW, aLog, dtBias, norm, outProj, convState, recurrentState,
+		nK, nV, kHd, vHd, kernel, 1e-5,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { be.Free(output) })
+	if nextConv.Buf() != convIdentity || nextRecurrent.Buf() != recurrentIdentity {
+		t.Fatal("whole decode changed persistent state identity")
+	}
+	for i, value := range be.Read(output) {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			t.Fatalf("whole decode output[%d]=%g is not finite", i, value)
+		}
+	}
+	if fusedCalls, composedCalls := be.VulkanDebugGDNProjectionProfileSnapshot(); fusedCalls != 1 || composedCalls != 0 {
+		t.Fatalf("whole decode projection profile fused/composed=%d/%d, want 1/0", fusedCalls, composedCalls)
+	}
+}
 
 type qwen35GDNPreprojectedParityOracleEvent struct {
 	Schema         string                                    `json:"schema"`
