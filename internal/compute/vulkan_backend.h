@@ -31,6 +31,11 @@ extern "C" {
  * lavapipe — can be told apart from the real GPU). Returns 0 on success, non-zero if no
  * Vulkan compute device is reachable or pipeline creation fails. */
 int fvk_init(char *name, int namelen, int *is_discrete, const char *spirv_dir);
+/* Query identity from the physical device selected by fvk_init. Values come
+ * directly from VkPhysicalDeviceProperties, never process configuration. */
+int fvk_device_identity(char *name, int namelen, uint32_t *vendor_id,
+                        uint32_t *device_id, uint32_t *driver_version,
+                        uint32_t *api_version);
 
 /* device memory + transfers (the residency seam). The returned handle is an opaque
  * VkBuffer wrapper; it is NOT a host pointer. */
@@ -212,6 +217,10 @@ int fvk_glm_kda_step_f32(
     void* state, const void* q, const void* k, const void* value,
     const void* alpha, const void* beta, void* output, int heads, int variant);
 void fvk_q4k_matmul_f32(const void *dQ4K, const void *dX, void *dY, int out, int in, int P);
+void fvk_rmsnorm_q4k_matmul2_f32(const void *dW0, const void *dW1, const void *dX, const void *dNorm,
+                                 void *dY0, void *dY1, int out0, int out1, int in, int P, float eps);
+void fvk_swiglu_q4k_matmul_add_f32(const void *dW, const void *dG, const void *dU,
+                                   void *dD, int out, int in, int P);
 void fvk_q2k_matmul_f32(const void *dQ2K, const void *dX, void *dY, int out, int in, int P);
 typedef struct fvk_dispatch_profile {
     uint64_t compute_dispatches;

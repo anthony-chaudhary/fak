@@ -13,8 +13,8 @@ import (
 )
 
 func TestVulkanShadersCompleteness(t *testing.T) {
-	if len(VulkanShaders) != 40 {
-		t.Fatalf("expected 40 Vulkan shaders, got %d", len(VulkanShaders))
+	if len(VulkanShaders) != 42 {
+		t.Fatalf("expected 42 Vulkan shaders, got %d", len(VulkanShaders))
 	}
 
 	seen := make(map[string]bool)
@@ -38,6 +38,7 @@ func TestVulkanShadersCompleteness(t *testing.T) {
 		"sigmoid_mul", "q8_matmul_decode",
 		"glm_kda_recurrent_reread", "glm_kda_recurrent_wave32",
 		"flash_attn_dequant", "qwen35_gdn_tiled_transpose", "coopmat_wave32_wmma",
+		"rmsnorm_q4k_matmul2", "swiglu_q4k_matmul_add",
 	}
 
 	for i, exp := range expectedShaders {
@@ -277,9 +278,12 @@ func TestToolchainDiscoveryMocked(t *testing.T) {
 	}
 
 	// Test ResolveRepoRoot from a directory without go.mod
-	_, err = ResolveRepoRoot(tempDir)
+	isolatedDir, err := os.MkdirTemp(os.TempDir(), "fak-isolated-test-*")
 	if err == nil {
-		t.Errorf("expected ResolveRepoRoot to fail in isolated temp dir")
+		defer os.RemoveAll(isolatedDir)
+		if _, err := ResolveRepoRoot(isolatedDir); err == nil {
+			t.Errorf("expected ResolveRepoRoot to fail in isolated temp dir")
+		}
 	}
 }
 
