@@ -80,7 +80,6 @@ var tier = map[string]int{
 	"usagepreflight":  2, // remaining-quota admission calculation; stdlib-only, off the hot path.
 
 	"envconfiglint":          2, // CONFIG_NOT_ENV ratchet banning new non-secret env reads; imports windowgate(1), off the hot path.
-	"flowcredit":             2, // receiver-granted credit ledger for KV-transfer backpressure; stdlib-only, imports nothing internal, off the hot path.
 	"flowmetrics":            2, // deterministic flow-metrics fold (#6194); composes maputil for stable issue/commit row traversal while grading Little's-Law KPIs and working-tree WIP.
 	"stallpage":              2, // durable deduped operator page for stallscan reboot high-water; imports stallscan(1)+choicetriage(1)+flock, off the hot path.
 	"agenticbench":           3, // #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
@@ -781,7 +780,6 @@ var tier = map[string]int{
 	"studyadjacency":             2,
 	"studyprio":                  2,
 	"studytickets":               2,
-	"microfleeteconomics":        1,
 	"placementtax":               1,
 	"localappcert":               1, // stdlib-only deterministic Mac certification-matrix validator (#9157).
 	"localapphelper":             2, // authenticated app-scoped helper admission boundary (#9149).
