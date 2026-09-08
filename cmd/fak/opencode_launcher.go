@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -32,6 +34,7 @@ type opencodeLaunchOptions struct {
 	noAudit         bool
 	quiet           bool
 	localAuto       bool
+	metal           bool
 	ggufPath        string
 	gpuBackend      string
 	tokenizerPath   string
@@ -48,6 +51,10 @@ func cmdOpencode(argv []string) {
 }
 
 func runOpencode(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "config" {
+		return runOpencodeConfig(stdout, stderr, argv[1:])
+	}
+
 	fs := flag.NewFlagSet("opencode", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	verbFlagUsage(fs, "opencode")
@@ -68,12 +75,14 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	noAudit := fs.Bool("no-audit", false, "disable guard's decision journal")
 	quiet := fs.Bool("quiet", false, "suppress guard's startup banner and exit summary")
 	localAuto := fs.Bool("local", false, "auto-detect a local OpenAI-compatible model server for guard's upstream")
+	metal := fs.Bool("metal", false, "with --gguf: require Apple Silicon Metal GPU acceleration")
 	ggufPath := fs.String("gguf", "", "run a local in-kernel GGUF model as guard's upstream")
 	gpuBackend := fs.String("backend", "", "with --gguf: compute backend")
 	tokenizerPath := fs.String("tokenizer", "", "with --gguf: tokenizer override")
 
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak opencode [launcher flags] [-- <opencode args...>]")
+		fmt.Fprintln(stderr, "       fak opencode config [--write] [--addr ADDR] [--model MODEL]")
 		fmt.Fprintln(stderr, "  e.g. fak opencode")
 		fmt.Fprintln(stderr, "       fak opencode --dry-run")
 		fmt.Fprintln(stderr, "       fak opencode --probe \"Use bash to print hello\"")
@@ -91,6 +100,35 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	*ggufPath = pathutil.ExpandTilde(*ggufPath)
 	*tokenizerPath = pathutil.ExpandTilde(*tokenizerPath)
 
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		if *metal || (*ggufPath != "" && *gpuBackend == "") {
+			*gpuBackend = "metal"
+			*metal = true
+		}
+	}
+	if *baseURL == "" && *remoteServe == "" && *ggufPath == "" && *apiKeyEnv == "" && !*localAuto {
+		if os.Getenv("OPENAI_API_KEY") == "" {
+			if base, modelID, label, found := guardDetectLocalBackend(); found {
+				*localAuto = true
+				if !*quiet {
+					fmt.Fprintf(stderr, "fak opencode: auto-connected to local %s at %s (model: %s) (one-touch)\n", label, base, modelID)
+				}
+			} else {
+				// On Apple Silicon macOS, if no local server is running and no API key is set, assume gguf default with Metal!
+				if runtime.GOOS == "darwin" {
+					*ggufPath = "default"
+					if runtime.GOARCH == "arm64" {
+						*gpuBackend = "metal"
+						*metal = true
+					}
+					if !*quiet {
+						fmt.Fprintln(stderr, "fak opencode: no local model server running — assuming in-kernel model (qwen38:27b) with Metal GPU acceleration (one-touch)")
+					}
+				}
+			}
+		}
+	}
+
 	fakBin := tuiExecutable()
 	launch := opencodeLaunchOptions{
 		dryRun:          *dryRun,
@@ -107,6 +145,7 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		noAudit:         *noAudit,
 		quiet:           *quiet,
 		localAuto:       *localAuto,
+		metal:           *metal,
 		ggufPath:        *ggufPath,
 		gpuBackend:      *gpuBackend,
 		tokenizerPath:   *tokenizerPath,
@@ -236,5 +275,44 @@ func execOpencodeLaunchChildContext(ctx context.Context, stdout, stderr io.Write
 		}
 		return code
 	}
+	return 0
+}
+
+func runOpencodeConfig(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("opencode config", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	addr := fs.String("addr", "127.0.0.1:8080", "fak serve gateway listen address")
+	model := fs.String("model", projectassets.DefaultOpenCodeModelID, "served model ID")
+	write := fs.Bool("write", false, "write or update opencode.json in the current workspace")
+	dir := fs.String("dir", ".", "workspace directory containing opencode.json")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	baseURL := *addr
+	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+		baseURL = "http://" + baseURL
+	}
+	if !strings.HasSuffix(baseURL, "/v1") {
+		baseURL = strings.TrimSuffix(baseURL, "/") + "/v1"
+	}
+	if *write {
+		modified, err := projectassets.EnsureOpenCodeProviderConfig(*dir, baseURL, *model)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak opencode config: %v\n", err)
+			return 1
+		}
+		if modified {
+			fmt.Fprintf(stdout, "fak opencode config: updated %s with provider \"fak\" (baseURL: %s, model: %s)\n", filepath.Join(*dir, "opencode.json"), baseURL, *model)
+		} else {
+			fmt.Fprintf(stdout, "fak opencode config: %s already has up-to-date provider \"fak\"\n", filepath.Join(*dir, "opencode.json"))
+		}
+		return 0
+	}
+	out, err := projectassets.GenerateOpenCodeConfig(baseURL, *model)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak opencode config: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, string(out))
 	return 0
 }
