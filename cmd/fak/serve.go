@@ -494,14 +494,31 @@ func cmdServe(argv []string) {
 			rt.addStartupMessage(serveRemoteKVStartupMessage(receipt))
 		}
 	}
-	releaseMetalResidency, err := loadLocalLauncherModelWithMetalLease(rt.useMetal, *sf.ggufPath, gpulease.Options{}, func() {
-		rt.loadModel(sf)
+	useVulkan := isServeVulkan(rt, sf)
+	modelPath := *sf.ggufPath
+	if modelPath == "" && sf.model != nil {
+		modelPath = *sf.model
+	}
+	var releaseMetalResidency func()
+	var metalErr error
+	releaseVulkanResidency, err := loadLocalLauncherModelWithVulkanLease(useVulkan, modelPath, gpulease.Options{}, func() {
+		releaseMetalResidency, metalErr = loadLocalLauncherModelWithMetalLease(rt.useMetal, *sf.ggufPath, gpulease.Options{}, func() {
+			rt.loadModel(sf)
+		})
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	defer releaseMetalResidency()
+	defer releaseVulkanResidency()
+	if metalErr != nil {
+		releaseVulkanResidency()
+		fmt.Fprintln(os.Stderr, metalErr)
+		os.Exit(2)
+	}
+	if releaseMetalResidency != nil {
+		defer releaseMetalResidency()
+	}
 	rt.configureEPDecode()
 	rt.resolveSessionPlane(sf)
 	rt.resolveObservers(sf)
@@ -509,6 +526,22 @@ func cmdServe(argv []string) {
 	rt.wireGateway(sf)
 	rt.addStartupMessage(serveDurabilityStartupMessage(durability))
 	rt.run(sf)
+}
+
+// isServeVulkan reports whether the serve configuration intends to use the Vulkan
+// compute backend, either via an explicit flag or an initialized chat backend.
+// Proxy modes (--base-url) remain lease-free because they delegate model residency.
+func isServeVulkan(rt *serveRuntime, sf *serveFlags) bool {
+	if sf != nil && sf.baseURL != nil && strings.TrimSpace(*sf.baseURL) != "" {
+		return false
+	}
+	if rt != nil && rt.chatBackend != nil && strings.EqualFold(rt.chatBackend.Name(), "vulkan") {
+		return true
+	}
+	if sf != nil && sf.backendName != nil && strings.EqualFold(strings.TrimSpace(*sf.backendName), "vulkan") {
+		return true
+	}
+	return false
 }
 
 // warnIfNotFakWorkspace emits a loud stderr advisory when the serve cwd is not inside a

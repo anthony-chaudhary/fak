@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 )
 
@@ -282,4 +283,311 @@ func TestLoadLocalLauncherModelWithMetalLeaseLoadFailureReleasesReservation(t *t
 	_, _ = loadLocalLauncherModelWithMetalLease(true, "panicking-model.gguf", gpulease.Options{}, func() {
 		panic("simulated loader panic")
 	})
+}
+
+func TestLoadLocalLauncherModelWithVulkanLeaseRefusesBeforeLoadAndReleasesAfterServe(t *testing.T) {
+	const holderEnv = "FAK_LOCAL_LAUNCHER_VULKAN_LEASE_HOLDER_TEST"
+	if path := os.Getenv(holderEnv); path != "" {
+		lease, err := gpulease.Acquire(gpulease.Options{Path: path, NoWait: true})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "child lease acquire:", err)
+			os.Exit(3)
+		}
+		fmt.Fprintf(os.Stdout, "READY %d\n", os.Getpid())
+		_ = os.Stdout.Sync()
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		runtime.KeepAlive(lease)
+		os.Exit(0)
+	}
+
+	path := filepath.Join(t.TempDir(), "gpu.lease")
+	t.Setenv("FAK_GPU_LEASE", path)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestLoadLocalLauncherModelWithVulkanLeaseRefusesBeforeLoadAndReleasesAfterServe$")
+	child.Env = append(os.Environ(), holderEnv+"="+path)
+	childIn, err := child.StdinPipe()
+	if err != nil {
+		t.Fatalf("child stdin: %v", err)
+	}
+	childOut, err := child.StdoutPipe()
+	if err != nil {
+		t.Fatalf("child stdout: %v", err)
+	}
+	var childStderr strings.Builder
+	child.Stderr = &childStderr
+	if err := child.Start(); err != nil {
+		t.Fatalf("start unrelated lease holder: %v", err)
+	}
+	waited := false
+	t.Cleanup(func() {
+		_ = childIn.Close()
+		if !waited && child.Process != nil {
+			_ = child.Process.Kill()
+			_ = child.Wait()
+		}
+	})
+	ready, err := bufio.NewReader(childOut).ReadString('\n')
+	if err != nil {
+		t.Fatalf("wait for child lease holder: %v; stderr=%s", err, childStderr.String())
+	}
+	wantReady := "READY " + strconv.Itoa(child.Process.Pid)
+	if strings.TrimSpace(ready) != wantReady {
+		t.Fatalf("child readiness = %q, want %q; stderr=%s", strings.TrimSpace(ready), wantReady, childStderr.String())
+	}
+
+	loads := 0
+	release, err := loadLocalLauncherModelWithVulkanLease(true, "qwen3.8-27b-q4_k_m.gguf", gpulease.Options{}, func() {
+		loads++
+	})
+	if err == nil {
+		t.Fatal("Vulkan serve admission succeeded while lease was held")
+	}
+	if !errors.Is(err, gpulease.ErrBusy) {
+		t.Fatalf("busy admission error = %v, want errors.Is(ErrBusy)", err)
+	}
+	for _, want := range []string{path, "pid " + strconv.Itoa(child.Process.Pid), "before model load", "stop the holder process"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("busy admission error %q does not contain %q", err, want)
+		}
+	}
+	if loads != 0 {
+		t.Fatalf("load callback calls while lease held = %d, want 0", loads)
+	}
+	release()
+
+	if err := childIn.Close(); err != nil {
+		t.Fatalf("signal holder exit: %v", err)
+	}
+	if err := child.Wait(); err != nil {
+		t.Fatalf("holder exit: %v; stderr=%s", err, childStderr.String())
+	}
+	waited = true
+
+	release, err = loadLocalLauncherModelWithVulkanLease(true, "qwen3.8-27b-q4_k_m.gguf", gpulease.Options{}, func() {
+		loads++
+	})
+	if err != nil {
+		t.Fatalf("admit after holder release: %v", err)
+	}
+	if loads != 1 {
+		t.Fatalf("load callback calls after admission = %d, want 1", loads)
+	}
+	if _, err := gpulease.Acquire(gpulease.Options{NoWait: true}); !errors.Is(err, gpulease.ErrBusy) {
+		t.Fatalf("serve lease was not retained after load callback: got %v, want ErrBusy", err)
+	}
+
+	// Verify lease file contains our pid
+	lockData, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read lease file: %v", err)
+	}
+	if strings.TrimSpace(string(lockData)) != strconv.Itoa(os.Getpid()) {
+		t.Fatalf("lease holder in file = %q, want %d", strings.TrimSpace(string(lockData)), os.Getpid())
+	}
+
+	release()
+	reacquired, err := gpulease.Acquire(gpulease.Options{NoWait: true})
+	if err != nil {
+		t.Fatalf("reacquire after serve cleanup: %v", err)
+	}
+	reacquired.Release()
+}
+
+func TestLoadLocalLauncherModelWithVulkanLeaseLeavesCPUAndEmptyModelUnserialized(t *testing.T) {
+	tests := []struct {
+		name      string
+		vulkan    bool
+		modelPath string
+	}{
+		{name: "CPU model", vulkan: false, modelPath: "model.gguf"},
+		{name: "Vulkan proxy without local model", vulkan: true, modelPath: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "gpu.lease")
+			held, err := gpulease.Acquire(gpulease.Options{Path: path})
+			if err != nil {
+				t.Fatalf("hold unrelated lease: %v", err)
+			}
+			defer held.Release()
+
+			loads := 0
+			release, err := loadLocalLauncherModelWithVulkanLease(tc.vulkan, tc.modelPath, gpulease.Options{Path: path}, func() { loads++ })
+			if err != nil {
+				t.Fatalf("unserialized path: %v", err)
+			}
+			defer release()
+			if loads != 1 {
+				t.Fatalf("load callback calls = %d, want 1", loads)
+			}
+		})
+	}
+}
+
+func TestVulkanServiceProcessLeaseLifetime(t *testing.T) {
+	const serviceEnv = "FAK_VULKAN_SERVICE_PROCESS_REGRESSION_TEST"
+	if path := os.Getenv(serviceEnv); path != "" {
+		modelPath := os.Getenv("FAK_VULKAN_SERVICE_MODEL")
+		if modelPath == "" {
+			modelPath = "qwen3.8-27b-q4_k_m.gguf"
+		}
+		loaded := false
+		release, err := loadLocalLauncherModelWithVulkanLease(true, modelPath, gpulease.Options{Path: path, NoWait: true}, func() {
+			loaded = true
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "service start refused: %v\n", err)
+			os.Exit(2)
+		}
+		if !loaded {
+			fmt.Fprintln(os.Stderr, "service start error: load callback never ran")
+			os.Exit(3)
+		}
+		fmt.Fprintf(os.Stdout, "SERVING %d\n", os.Getpid())
+		_ = os.Stdout.Sync()
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		release()
+		os.Exit(0)
+	}
+
+	path := filepath.Join(t.TempDir(), "fak-gpu.lease")
+	t.Setenv("FAK_GPU_LEASE", path)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+
+	// Step 1: Launch service process 1 with temporary lease.
+	child1 := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestVulkanServiceProcessLeaseLifetime$")
+	child1.Env = append(os.Environ(), serviceEnv+"="+path)
+	child1In, err := child1.StdinPipe()
+	if err != nil {
+		t.Fatalf("child1 stdin pipe: %v", err)
+	}
+	child1Out, err := child1.StdoutPipe()
+	if err != nil {
+		t.Fatalf("child1 stdout pipe: %v", err)
+	}
+	var child1Stderr strings.Builder
+	child1.Stderr = &child1Stderr
+	if err := child1.Start(); err != nil {
+		t.Fatalf("start service child1: %v", err)
+	}
+	waited1 := false
+	t.Cleanup(func() {
+		_ = child1In.Close()
+		if !waited1 && child1.Process != nil {
+			_ = child1.Process.Kill()
+			_ = child1.Wait()
+		}
+	})
+
+	reader1 := bufio.NewReader(child1Out)
+	line, err := reader1.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read service readiness: %v; stderr=%s", err, child1Stderr.String())
+	}
+	wantServing := "SERVING " + strconv.Itoa(child1.Process.Pid)
+	if strings.TrimSpace(line) != wantServing {
+		t.Fatalf("service readiness = %q, want %q; stderr=%s", strings.TrimSpace(line), wantServing, child1Stderr.String())
+	}
+
+	// Step 2: Prove the service PID owns the canonical lease on disk.
+	lockData, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read lease file %s: %v", path, err)
+	}
+	recordedPID, err := strconv.Atoi(strings.TrimSpace(string(lockData)))
+	if err != nil || recordedPID != child1.Process.Pid {
+		t.Fatalf("lease file records pid %q (parsed %d), want service PID %d", string(lockData), recordedPID, child1.Process.Pid)
+	}
+
+	// Step 3: Prove a competing acquisition fails while service runs.
+	competingLease, compErr := gpulease.Acquire(gpulease.Options{Path: path, NoWait: true})
+	if compErr == nil {
+		competingLease.Release()
+		t.Fatal("competing lease acquisition succeeded while service was running")
+	}
+	if !errors.Is(compErr, gpulease.ErrBusy) {
+		t.Fatalf("competing error = %v, want errors.Is(ErrBusy)", compErr)
+	}
+
+	// Step 4: Prove a competing service instance fails before model load.
+	child2 := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestVulkanServiceProcessLeaseLifetime$")
+	child2.Env = append(os.Environ(), serviceEnv+"="+path)
+	var child2Stdout, child2Stderr strings.Builder
+	child2.Stdout = &child2Stdout
+	child2.Stderr = &child2Stderr
+	child2Err := child2.Run()
+	if child2Err == nil {
+		t.Fatal("competing service child2 succeeded while service child1 held lease")
+	}
+	if !strings.Contains(child2Stderr.String(), "Vulkan residency admission refused before model load") {
+		t.Fatalf("child2 stderr %q does not contain refusal notice", child2Stderr.String())
+	}
+	if !strings.Contains(child2Stderr.String(), strconv.Itoa(child1.Process.Pid)) {
+		t.Fatalf("child2 stderr %q does not identify incumbent PID %d", child2Stderr.String(), child1.Process.Pid)
+	}
+
+	// Step 5: Close child 1 and prove lease is released on clean process exit.
+	if err := child1In.Close(); err != nil {
+		t.Fatalf("close child1 stdin: %v", err)
+	}
+	if err := child1.Wait(); err != nil {
+		t.Fatalf("child1 wait: %v; stderr=%s", err, child1Stderr.String())
+	}
+	waited1 = true
+
+	// Step 6: Verify lease is free and can be acquired immediately.
+	afterLease, err := gpulease.Acquire(gpulease.Options{Path: path, NoWait: true})
+	if err != nil {
+		t.Fatalf("acquire lease after service exit: %v", err)
+	}
+	afterLease.Release()
+}
+
+type mockVulkanBackendForTest struct {
+	compute.Backend
+}
+
+func (m *mockVulkanBackendForTest) Name() string { return "vulkan" }
+
+func TestIsServeVulkan(t *testing.T) {
+	if isServeVulkan(nil, nil) {
+		t.Error("nil rt/sf should not be vulkan")
+	}
+
+	backendName := "vulkan"
+	sf := &serveFlags{backendName: &backendName}
+	if !isServeVulkan(nil, sf) {
+		t.Error("sf with backendName=vulkan should be vulkan")
+	}
+
+	upperBackend := "VULKAN"
+	sfUpper := &serveFlags{backendName: &upperBackend}
+	if !isServeVulkan(nil, sfUpper) {
+		t.Error("sf with backendName=VULKAN should be vulkan")
+	}
+
+	otherBackend := "metal"
+	sfOther := &serveFlags{backendName: &otherBackend}
+	if isServeVulkan(nil, sfOther) {
+		t.Error("sf with backendName=metal should not be vulkan")
+	}
+
+	emptyBackend := ""
+	sfEmpty := &serveFlags{backendName: &emptyBackend}
+	rt := &serveRuntime{chatBackend: &mockVulkanBackendForTest{Backend: compute.Default()}}
+	if !isServeVulkan(rt, sfEmpty) {
+		t.Error("rt with chatBackend vulkan should be vulkan")
+	}
+
+	baseURL := "http://127.0.0.1:8080/v1"
+	sfProxy := &serveFlags{backendName: &backendName, baseURL: &baseURL}
+	if isServeVulkan(nil, sfProxy) {
+		t.Error("sf with baseURL should not be vulkan (proxy mode is lease-free)")
+	}
+	if isServeVulkan(rt, sfProxy) {
+		t.Error("rt with baseURL should not be vulkan (proxy mode is lease-free)")
+	}
 }
