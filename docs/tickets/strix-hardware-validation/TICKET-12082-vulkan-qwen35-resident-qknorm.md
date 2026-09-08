@@ -66,5 +66,14 @@ one-ULP float-order failures (`TestQwen35LinearAttnBatchedResumesState`,
 - [x] [SW-VERIFIED] Qwen Q/K normalization has no host fallback.
 - [x] [SW-VERIFIED] Unsupported norm layouts fail with a typed resident-path error.
 - [x] [SW-VERIFIED] Focused CPU/reference regressions pass.
-- [ ] [HW-WITNESSED] Radeon 8060S runs exactly two resident norm dispatches with zero operation-window transfers.
+- [x] [HW-WITNESSED] Radeon 8060S runs exactly two resident norm dispatches with zero operation-window transfers.
 - [ ] [HW-WITNESSED] Exact Qwen3.8 checkpoint output/identity is qualified without disrupting the active service.
+
+Operation-level physical receipt:
+[`strix-vulkan-qwen35-resident-qknorm-20260908.json`](../../benchmarks/receipts/strix-vulkan-qwen35-resident-qknorm-20260908.json).
+The source-bound Radeon 8060S run used the production Qwen3.8 geometry (24 Q
+heads, 4 KV heads, head dimension 256), attributed exactly two Vulkan norm
+dispatches, recorded zero H2D/D2H bytes and submits inside the operation window,
+and matched the CPU oracle with cosine 1.0. The loaded Qwen3.8 service remained
+online and was neither stopped nor reloaded. Consequently this closes the
+kernel-residency witness but not the issue's exact-checkpoint end-to-end gate.
