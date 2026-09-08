@@ -1,0 +1,113 @@
+#version 450
+#extension GL_KHR_shader_subgroup_arithmetic : require
+#extension GL_KHR_shader_subgroup_basic : require
+
+// Cooperative Wave32 Q4_K matmul decode for gfx1151 / Vulkan 1.2.
+// Maps one 32-lane subgroup to two output rows (r0, r1).
+// For each 256-value Q4_K super-block:
+//   - Each lane owns eight K values (one per 32-element group, across 8 groups).
+//   - Accumulates two FP32 row partials (sum0, sum1).
+//   - Participates in one subgroup reduction per row via subgroupAdd.
+//   - Lane 0 writes the reduced sum to output Y.
+// Odd row tails (outDim % 2 != 0) are handled safely: r1 is omitted when r1 >= outDim.
+
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) readonly buffer Q4K { uint raw[]; };
+layout(set = 0, binding = 1) readonly buffer X { float x[]; };
+layout(set = 0, binding = 2) writeonly buffer Y { float y[]; };
+layout(push_constant) uniform PC { int outDim; int inDim; int tokens; } pc;
+
+uint byteAt(uint off) {
+    uint w = raw[off >> 2];
+    return (w >> ((off & 3u) * 8u)) & 255u;
+}
+
+float halfAt(uint off) {
+    uint bits = byteAt(off) | (byteAt(off + 1u) << 8u);
+    return unpackHalf2x16(bits).x;
+}
+
+void scaleMin(uint base, int group, out uint sc, out uint mn) {
+    int j = group;
+    if (j < 4) {
+        sc = byteAt(base + uint(j)) & 63u;
+        mn = byteAt(base + uint(j + 4)) & 63u;
+    } else {
+        sc = (byteAt(base + uint(j + 4)) & 15u) | ((byteAt(base + uint(j - 4)) >> 6u) << 4u);
+        mn = (byteAt(base + uint(j + 4)) >> 4u) | ((byteAt(base + uint(j)) >> 6u) << 4u);
+    }
+}
+
+void main() {
+    uint groupIdx = gl_WorkGroupID.x;
+    int r0 = int(groupIdx * 2u);
+    int r1 = r0 + 1;
+    if (r0 >= pc.outDim) return;
+    bool hasR1 = (r1 < pc.outDim);
+
+    uint lane = gl_LocalInvocationID.x;
+    int blocks = pc.inDim / 256;
+    float sum0 = 0.0;
+    float sum1 = 0.0;
+
+    for (int sb = 0; sb < blocks; ++sb) {
+        uint base0 = uint((r0 * blocks + sb) * 144);
+        float d0 = halfAt(base0);
+        float dm0 = halfAt(base0 + 2u);
+
+        uint base1 = 0u;
+        float d1 = 0.0;
+        float dm1 = 0.0;
+        if (hasR1) {
+            base1 = uint((r1 * blocks + sb) * 144);
+            d1 = halfAt(base1);
+            dm1 = halfAt(base1 + 2u);
+        }
+
+        uint sc0[8], mn0[8];
+        uint sc1[8], mn1[8];
+        for (int g = 0; g < 8; ++g) {
+            scaleMin(base0 + 4u, g, sc0[g], mn0[g]);
+            if (hasR1) {
+                scaleMin(base1 + 4u, g, sc1[g], mn1[g]);
+            }
+        }
+
+        for (int p = 0; p < 4; ++p) {
+            int g0 = p * 2;
+            int g1 = g0 + 1;
+
+            float xv0 = x[sb * 256 + g0 * 32 + int(lane)];
+            float xv1 = x[sb * 256 + g1 * 32 + int(lane)];
+
+            uint pk0 = byteAt(base0 + 16u + uint(p * 32 + int(lane)));
+            uint code0_0 = pk0 & 15u;
+            uint code0_1 = pk0 >> 4u;
+            float w0_0 = d0 * float(sc0[g0]) * float(code0_0) - dm0 * float(mn0[g0]);
+            float w0_1 = d0 * float(sc0[g1]) * float(code0_1) - dm0 * float(mn0[g1]);
+            sum0 += w0_0 * xv0;
+            sum0 += w0_1 * xv1;
+
+            if (hasR1) {
+                uint pk1 = byteAt(base1 + 16u + uint(p * 32 + int(lane)));
+                uint code1_0 = pk1 & 15u;
+                uint code1_1 = pk1 >> 4u;
+                float w1_0 = d1 * float(sc1[g0]) * float(code1_0) - dm1 * float(mn1[g0]);
+                float w1_1 = d1 * float(sc1[g1]) * float(code1_1) - dm1 * float(mn1[g1]);
+                sum1 += w1_0 * xv0;
+                sum1 += w1_1 * xv1;
+            }
+        }
+    }
+
+    float total0 = subgroupAdd(sum0);
+    float total1 = subgroupAdd(sum1);
+
+    if (lane == 0u) {
+        y[r0] = total0;
+        if (hasR1) {
+            y[r1] = total1;
+        }
+    }
+}
