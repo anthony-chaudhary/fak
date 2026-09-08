@@ -214,6 +214,20 @@ func (g *Qwen38MTPAdaptiveDepthGovernor) DowngradeReason() Qwen38MTPDowngradeRea
 	return Qwen38MTPEligible
 }
 
+// IsTargetOnly reports whether the governor is currently in target-only escape (depth 0).
+func (g *Qwen38MTPAdaptiveDepthGovernor) IsTargetOnly() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.currentDepth == 0
+}
+
+// IsProbing reports whether the governor is currently executing a depth-1 probe step.
+func (g *Qwen38MTPAdaptiveDepthGovernor) IsProbing() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.isProbing
+}
+
 // ObserveStep processes an execution step observation, updates EMAs, evaluates target-only escape
 // and hysteresis transitions, and returns the next draft depth along with the deterministic trace record.
 func (g *Qwen38MTPAdaptiveDepthGovernor) ObserveStep(obs Qwen38AdaptiveStepObservation) (int, Qwen38AdaptiveTraceRecord, error) {

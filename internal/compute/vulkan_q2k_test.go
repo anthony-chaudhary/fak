@@ -387,10 +387,10 @@ func TestVulkanQ2KShaderInvariants(t *testing.T) {
 		"int outDim;",
 		"int inDim;",
 		"int tokens;",
-		"int fused;",
-		"uint base = uint((row * blocks + sb) * 84);",
-		"halfAt(base + 80u)",
-		"halfAt(base + 82u)",
+		"int auxOutDim;",
+		"uint base = uint((row * uint(pc.inDim / 256) + sb) * 84u);",
+		"halfAt(second, base + 80u)",
+		"halfAt(second, base + 82u)",
 	}
 
 	for _, clause := range requiredClauses {
@@ -415,14 +415,14 @@ func TestVulkanQ2KSwiGLUMatMulAddSourceContract(t *testing.T) {
 			clauses: []string{
 				"binding = 2) readonly buffer U",
 				"binding = 3) buffer Y",
-				"int fused;",
-				"pc.fused != 0",
+				"int auxOutDim;",
+				"pc.auxOutDim < 0",
 			},
 		},
 		{
 			path: filepath.Join(repoRoot, "internal", "compute", "vulkan_shim.cpp"),
 			clauses: []string{
-				"buildKernel(g_kern[K_Q2K_MATMUL], P(\"q2k_matmul.spv\"), 4, 4 * sizeof(int))",
+				"buildKernel(g_kern[K_Q2K_MATMUL], P(\"q2k_matmul.spv\"), 7, 4 * sizeof(int) + sizeof(float))",
 				"fvk_swiglu_q2k_matmul_add_f32",
 			},
 		},

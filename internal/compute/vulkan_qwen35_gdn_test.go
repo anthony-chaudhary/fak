@@ -4,9 +4,11 @@ package compute
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"math/rand"
 	"testing"
+	"unsafe"
 )
 
 func TestVulkanQwen35GDNQ8InputProjectionMatchesComposition(t *testing.T) {
@@ -533,4 +535,117 @@ func BenchmarkVulkanQwen35GDNPreprojected(b *testing.B) {
 		}
 		be.Free(out)
 	}
+}
+
+func TestVulkanQwen35GDNConvTiledChannelTransposeDirectFailClosed(t *testing.T) {
+	v := &vulkanBackend{}
+
+	dummyByte := byte(0)
+	makeResident := func(shape []int) Tensor {
+		n := 1
+		for _, d := range shape {
+			n *= d
+		}
+		return Tensor{
+			Dtype:  F32,
+			Layout: RowMajor,
+			Shape:  shape,
+			buf:    &vulkanBuf{ptr: unsafe.Pointer(&dummyByte), n: n * 4},
+			be:     v,
+		}
+	}
+
+	tokens := 4
+	convDim := 64
+	kernel := 4
+	hist := kernel - 1
+
+	// 1. Unaligned strides fail closed with *Qwen35GDNGeometryError
+	t.Run("UnalignedStride", func(t *testing.T) {
+		unalignedDim := 65 // 260 bytes (not multiple of 32)
+		m := makeResident([]int{tokens, unalignedDim})
+		w := makeResident([]int{unalignedDim, kernel})
+		s := makeResident([]int{hist, unalignedDim})
+		_, _, err := v.Qwen35GDNConvTiledChannelTranspose(m, w, s, tokens, unalignedDim, kernel)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		var geomErr *Qwen35GDNGeometryError
+		if !errors.As(err, &geomErr) {
+			t.Fatalf("expected *Qwen35GDNGeometryError, got %T: %v", err, err)
+		}
+		if !errors.Is(err, ErrVulkanInvalidGeometry) {
+			t.Fatalf("expected ErrVulkanInvalidGeometry, got %v", err)
+		}
+	})
+
+	// 2. Non-positive dimensions fail closed before execution with *Qwen35GDNGeometryError
+	t.Run("ZeroOrNegativeDimensions", func(t *testing.T) {
+		m := makeResident([]int{tokens, convDim})
+		w := makeResident([]int{convDim, kernel})
+		s := makeResident([]int{hist, convDim})
+		dimCases := [][3]int{
+			{0, convDim, kernel},
+			{-1, convDim, kernel},
+			{tokens, 0, kernel},
+			{tokens, -64, kernel},
+			{tokens, convDim, 0},
+			{tokens, convDim, -1},
+		}
+		for _, dc := range dimCases {
+			_, _, err := v.Qwen35GDNConvTiledChannelTranspose(m, w, s, dc[0], dc[1], dc[2])
+			if err == nil {
+				t.Fatalf("expected error for dims %v, got nil", dc)
+			}
+			var geomErr *Qwen35GDNGeometryError
+			if !errors.As(err, &geomErr) {
+				t.Fatalf("expected *Qwen35GDNGeometryError, got %T: %v", err, err)
+			}
+			if !errors.Is(err, ErrVulkanInvalidGeometry) {
+				t.Fatalf("expected ErrVulkanInvalidGeometry, got %v", err)
+			}
+		}
+	})
+
+	// 3. Nil tensors or non-resident tensors fail closed with *Qwen35GDNResidencyError
+	t.Run("NilOrNonResidentTensors", func(t *testing.T) {
+		m := makeResident([]int{tokens, convDim})
+		w := makeResident([]int{convDim, kernel})
+		s := makeResident([]int{hist, convDim})
+
+		c := cpu()
+		hostM := NewF32(c, []int{tokens, convDim}, make([]float32, tokens*convDim))
+		nilTensor := Tensor{}
+		typedNilBuf := Tensor{Dtype: F32, Layout: RowMajor, Shape: []int{tokens, convDim}, buf: (*vulkanBuf)(nil), be: v}
+		nullPtrBuf := Tensor{Dtype: F32, Layout: RowMajor, Shape: []int{tokens, convDim}, buf: &vulkanBuf{ptr: nil}, be: v}
+
+		resCases := []struct {
+			name    string
+			m, w, s Tensor
+		}{
+			{"NilMixed", nilTensor, w, s},
+			{"HostMixed", hostM, w, s},
+			{"TypedNilBufMixed", typedNilBuf, w, s},
+			{"NullPtrBufMixed", nullPtrBuf, w, s},
+			{"NilWeights", m, nilTensor, s},
+			{"NilState", m, w, nilTensor},
+		}
+
+		for _, rc := range resCases {
+			t.Run(rc.name, func(t *testing.T) {
+				_, _, err := v.Qwen35GDNConvTiledChannelTranspose(rc.m, rc.w, rc.s, tokens, convDim, kernel)
+				if err == nil {
+					t.Fatalf("expected error for %s, got nil", rc.name)
+				}
+				var resErr *Qwen35GDNResidencyError
+				var geomErr *Qwen35GDNGeometryError
+				if !errors.As(err, &resErr) && !errors.As(err, &geomErr) {
+					t.Fatalf("expected *Qwen35GDNResidencyError or *Qwen35GDNGeometryError, got %T: %v", err, err)
+				}
+				if !errors.Is(err, ErrVulkanInvalidGeometry) {
+					t.Fatalf("expected ErrVulkanInvalidGeometry, got %v", err)
+				}
+			})
+		}
+	})
 }

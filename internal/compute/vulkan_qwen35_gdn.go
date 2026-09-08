@@ -16,6 +16,8 @@ import (
 
 const qwen35GDNVulkanPath = "vulkan/qwen35-gdn-ssm-decode-v1"
 
+var _ VulkanQwen35GDNConvTiledChannelTransposer = (*vulkanBackend)(nil)
+
 func (v *vulkanBackend) Qwen35GDNPath() string { return qwen35GDNVulkanPath }
 
 // Qwen35GDNPreprojected runs the causal convolution and recurrent GDN panel on
@@ -442,4 +444,151 @@ func (v *vulkanBackend) SigmoidMulInPlace(x, gate Tensor) {
 	if status != 0 {
 		panic(fmt.Sprintf("compute: vulkan SigmoidMulInPlace failed closed with status %d", int(status)))
 	}
+}
+
+// Qwen35GDNConvTiledChannelTranspose runs 2D block-tiled channel transpose and causal depthwise 1D
+// convolution for DeltaNet conv-state concatenation on Vulkan / RDNA 3.5 (gfx1151).
+// Memory reads are distributed across all 16 pseudo-channels with 256-bit bus alignment,
+// and convolution state is staged in LDS using Pad-1 bank stride (65 floats) to eliminate
+// 32-way bank conflicts on Wave32.
+func (v *vulkanBackend) Qwen35GDNConvTiledChannelTranspose(
+	mixed, conv1D, convState Tensor,
+	tokens, convDim, convKernel int,
+) (output, nextConvState Tensor, err error) {
+	if tokens <= 0 || convDim <= 0 || convKernel <= 0 {
+		return Tensor{}, Tensor{}, &Qwen35GDNGeometryError{
+			Operand: "geometry",
+			Reason:  fmt.Sprintf("invalid conv dimensions tokens=%d, convDim=%d, convKernel=%d", tokens, convDim, convKernel),
+			Err:     ErrVulkanInvalidGeometry,
+		}
+	}
+	strideBytes := convDim * F32.Bytes()
+	if !ValidateDeltaNet256BitBusAlignment(strideBytes) {
+		return Tensor{}, Tensor{}, &Qwen35GDNGeometryError{
+			Operand: "convDim",
+			Reason:  fmt.Sprintf("convDim %d (stride %d bytes) violates 256-bit bus alignment", convDim, strideBytes),
+			Err:     ErrVulkanInvalidGeometry,
+		}
+	}
+
+	want := func(name string, t Tensor, n int) error {
+		if t.Dtype != F32 || t.Numel() != n {
+			return &Qwen35GDNGeometryError{
+				Operand: name,
+				Got:     t.Shape,
+				Reason:  fmt.Sprintf("elements/dtype=%d/%s, want %d/F32", t.Numel(), t.Dtype, n),
+				Err:     ErrVulkanInvalidGeometry,
+			}
+		}
+		if t.buf == nil {
+			return &Qwen35GDNResidencyError{
+				Operand: name,
+				Reason:  "tensor buffer is nil",
+				Err:     ErrVulkanInvalidGeometry,
+			}
+		}
+		vb, ok := t.buf.(*vulkanBuf)
+		if !ok || vb == nil || vb.ptr == nil {
+			return &Qwen35GDNResidencyError{
+				Operand: name,
+				Reason:  "tensor is not Vulkan-resident",
+				Err:     ErrVulkanInvalidGeometry,
+			}
+		}
+		return nil
+	}
+	hist := convKernel - 1
+	if err := want("mixed", mixed, tokens*convDim); err != nil {
+		return Tensor{}, Tensor{}, err
+	}
+	if err := want("conv1d", conv1D, convDim*convKernel); err != nil {
+		return Tensor{}, Tensor{}, err
+	}
+	if hist > 0 {
+		if err := want("conv_state", convState, hist*convDim); err != nil {
+			return Tensor{}, Tensor{}, err
+		}
+	}
+
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+
+	if v.isVectorGDNDisabledLocked() {
+		return v.qwen35GDNConvTiledScalarLocked(mixed, conv1D, convState, tokens, convDim, convKernel)
+	}
+
+	outBuf := v.dallocTransient(tokens * convDim * F32.Bytes())
+	output = Tensor{Dtype: F32, Layout: RowMajor, Shape: []int{tokens, convDim}, buf: outBuf, be: v}
+
+	var statePtr unsafe.Pointer
+	if hist > 0 {
+		statePtr = v.vp(convState)
+	} else {
+		statePtr = v.vp(output)
+	}
+
+	status := int(C.fvk_qwen35_gdn_conv_tiled_transpose_f32(
+		v.vp(mixed), v.vp(conv1D), statePtr, v.vp(output),
+		C.int(tokens), C.int(convDim), C.int(convKernel),
+	))
+	if status != 0 {
+		C.fvk_free(v.vp(output))
+		return Tensor{}, Tensor{}, &Qwen35GDNKernelError{Stage: "qwen35_gdn_conv_tiled_transpose", Code: status}
+	}
+	v.vectorGDNCalls++
+	v.transient = append(v.transient, outBuf)
+	return output, convState, nil
+}
+
+func (v *vulkanBackend) qwen35GDNConvTiledScalarLocked(
+	mixed, conv1D, convState Tensor,
+	tokens, convDim, convKernel int,
+) (output, nextConvState Tensor, err error) {
+	wasBatch := bool(C.fvk_batch_active())
+	if wasBatch {
+		C.fvk_batch_flush()
+	}
+
+	readBuf := func(t Tensor) []float32 {
+		b, ok := t.buf.(*vulkanBuf)
+		if !ok || b == nil {
+			return make([]float32, t.Numel())
+		}
+		data := make([]float32, t.Numel())
+		if b.ptr != nil && len(data) > 0 {
+			C.fvk_d2h(unsafe.Pointer(&data[0]), b.ptr, C.size_t(len(data)*4))
+		}
+		return data
+	}
+
+	mixedHost := readBuf(mixed)
+	convHost := readBuf(conv1D)
+	var convStateHost []float32
+	if convKernel > 1 {
+		convStateHost = readBuf(convState)
+	}
+
+	outHost, nextCS, _, err := Tiled16ChannelTransposeConcat(mixedHost, convHost, tokens, convDim, convKernel, convStateHost)
+	if err != nil {
+		return Tensor{}, Tensor{}, err
+	}
+
+	if convKernel > 1 && len(nextCS) > 0 {
+		csBuf, _ := convState.buf.(*vulkanBuf)
+		if csBuf != nil && csBuf.ptr != nil {
+			C.fvk_h2d(csBuf.ptr, unsafe.Pointer(&nextCS[0]), C.size_t(len(nextCS)*4))
+		}
+	}
+
+	outBuf := v.dallocTransient(tokens * convDim * F32.Bytes())
+	if outBuf != nil && outBuf.ptr != nil && len(outHost) > 0 {
+		C.fvk_h2d(outBuf.ptr, unsafe.Pointer(&outHost[0]), C.size_t(len(outHost)*4))
+	}
+	if wasBatch {
+		C.fvk_batch_begin()
+	}
+	output = Tensor{Dtype: F32, Layout: RowMajor, Shape: []int{tokens, convDim}, buf: outBuf, be: v}
+	v.scalarGDNCalls++
+	v.transient = append(v.transient, outBuf)
+	return output, convState, nil
 }
