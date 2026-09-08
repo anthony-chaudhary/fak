@@ -61,9 +61,128 @@ from typing import Any, NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dispatch_worker import install_no_window_subprocess_defaults  # noqa: E402
-from fresh_status import git_pane, repo_root, DEFAULT_PUSH_LAG_ACTION_SECONDS  # noqa: E402
 
 install_no_window_subprocess_defaults(subprocess)
+
+DEFAULT_PUSH_LAG_ACTION_SECONDS = 45 * 60
+DEFAULT_DIRTY_LAG_ACTION_SECONDS = 45 * 60
+
+
+def repo_root(start: Path | None = None) -> Path:
+    here = (start or Path(__file__)).resolve()
+    if here.is_file():
+        here = here.parent
+    for path in [here, *here.parents]:
+        if (path / "VERSION").exists() or (path / ".git").exists():
+            return path
+    return Path(__file__).resolve().parents[1]
+
+
+def _git_line(args: list[str], root: Path) -> str:
+    try:
+        p = subprocess.run(["git", *args], cwd=str(root), capture_output=True,
+                           text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if p.returncode != 0:
+        return ""
+    return p.stdout.strip()
+
+
+def _dirty_paths_from_porcelain(porcelain: str) -> list[str]:
+    paths: list[str] = []
+    for raw in porcelain.splitlines():
+        if not raw.strip() or len(raw) < 4:
+            continue
+        path = raw[3:].strip()
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip()
+        if path:
+            paths.append(path.strip('"'))
+    return paths
+
+
+def _oldest_dirty_path(root: Path, paths: list[str]) -> tuple[str | None, int | None]:
+    oldest_path: str | None = None
+    oldest_ts: int | None = None
+    for rel in paths:
+        try:
+            ts = int((root / rel).stat().st_mtime)
+        except OSError:
+            continue
+        if oldest_ts is None or ts < oldest_ts:
+            oldest_path, oldest_ts = rel, ts
+    return oldest_path, oldest_ts
+
+
+def git_pane(root: Path, *, now: datetime | None = None,
+             push_lag_action_seconds: int = DEFAULT_PUSH_LAG_ACTION_SECONDS,
+             dirty_lag_action_seconds: int = DEFAULT_DIRTY_LAG_ACTION_SECONDS) -> dict[str, Any]:
+    now = now or datetime.now(timezone.utc)
+    sha = _git_line(["rev-parse", "--short", "HEAD"], root)
+    branch = _git_line(["rev-parse", "--abbrev-ref", "HEAD"], root)
+    if not sha:
+        return {
+            "key": "git", "label": "git", "ok": False, "verdict": "ERROR",
+            "reason": "git rev-parse HEAD failed — not a repo or git unavailable",
+            "sha": None, "branch": None, "dirty": None, "ahead": None, "behind": None,
+            "push_lag_seconds": None, "oldest_unpushed_ts": None,
+            "dirty_lag_seconds": None, "oldest_dirty_path": None, "oldest_dirty_mtime": None,
+            "push_lag_stale": False, "dirty_lag_stale": False,
+        }
+    porcelain = _git_line(["status", "--porcelain"], root)
+    dirty_paths = _dirty_paths_from_porcelain(porcelain)
+    dirty = len(dirty_paths)
+    oldest_dirty_p, oldest_dirty_mtime = _oldest_dirty_path(root, dirty_paths)
+    dirty_lag_seconds = None
+    if oldest_dirty_mtime is not None:
+        dirty_lag_seconds = max(0, int(now.timestamp()) - oldest_dirty_mtime)
+    ahead = behind = None
+    counts = _git_line(["rev-list", "--left-right", "--count", "@{upstream}...HEAD"], root)
+    if counts:
+        parts = counts.split()
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            behind, ahead = int(parts[0]), int(parts[1])
+    push_lag_seconds: int | None = None
+    oldest_unpushed_ts: int | None = None
+    if ahead:
+        cts = _git_line(["log", "--format=%ct", "@{upstream}..HEAD"], root)
+        stamps = [int(s) for s in cts.split() if s.isdigit()] if cts else []
+        if stamps:
+            oldest_unpushed_ts = min(stamps)
+            push_lag_seconds = max(0, int(now.timestamp()) - oldest_unpushed_ts)
+    stale_push = push_lag_seconds is not None and push_lag_seconds > push_lag_action_seconds
+    stale_dirty = (dirty_lag_seconds is not None
+                   and dirty_lag_seconds > dirty_lag_action_seconds)
+    bits = [f"{sha} ({branch or 'detached'})"]
+    if dirty:
+        bits.append(f"{dirty} dirty")
+        if dirty_lag_seconds is not None:
+            mins = dirty_lag_seconds // 60
+            path = oldest_dirty_p or "unknown"
+            bits.append(f"oldest dirty {mins}m old at {path} — run fak sweep --json"
+                        if stale_dirty else f"oldest dirty {mins}m at {path}")
+    else:
+        bits.append("clean tree")
+    if ahead is not None:
+        bits.append(f"+{ahead}/-{behind} vs upstream")
+    if push_lag_seconds is not None:
+        mins = push_lag_seconds // 60
+        bits.append(f"{ahead} unpushed, oldest {mins}m old — push to origin"
+                    if stale_push else f"{ahead} unpushed, oldest {mins}m")
+    return {
+        "key": "git", "label": "git", "ok": not (stale_push or stale_dirty),
+        "verdict": "ACTION" if stale_push or stale_dirty else "OK",
+        "reason": ", ".join(bits),
+        "sha": sha, "branch": branch or None, "dirty": dirty,
+        "ahead": ahead, "behind": behind,
+        "push_lag_seconds": push_lag_seconds, "oldest_unpushed_ts": oldest_unpushed_ts,
+        "dirty_lag_seconds": dirty_lag_seconds,
+        "oldest_dirty_path": oldest_dirty_p,
+        "oldest_dirty_mtime": oldest_dirty_mtime,
+        "push_lag_stale": stale_push,
+        "dirty_lag_stale": stale_dirty,
+    }
 
 SCHEMA = "fak-auto-push-on-lag/1"
 STATE_SCHEMA = "fak-auto-push-on-lag-state/1"
