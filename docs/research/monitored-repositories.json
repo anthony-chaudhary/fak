@@ -346,7 +346,7 @@
         "indexed_revision": "53028cf321123d3e9ba95adea40c4c582100ce13",
         "subsystem_count": 5,
         "candidate_count": 5,
-        "filed_issue_count": 2,
+        "filed_issue_count": 6,
         "issue_refs": [
           "#10991",
           "#10994"
@@ -3198,6 +3198,101 @@
         "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
         "issue_refs": [
           "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "ebitengine/purego",
+      "url": "https://github.com/ebitengine/purego",
+      "status": "studied",
+      "priority": 18,
+      "why": "Portable no-CGo dynamic-call substrate relevant to accelerator host bindings; ABI and lifetime correctness remain fak-owned.",
+      "last_checked": "2026-09-08",
+      "checked_revision": "72b0dcd291d424a09c2a56411ac60f488bacbe7d",
+      "stars_at_check": 3878,
+      "last_push_at_check": "2026-09-06T16:32:32Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-PURE-GO-HOST-BINDINGS-2026-09-08.md",
+      "inventory": {
+        "mode": "focused",
+        "source_classes": [
+          "readme_docs",
+          "runtime_source",
+          "tests_fixtures",
+          "license_provenance",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "candidate_count": 1,
+        "filed_issue_count": 2,
+        "completeness_critic": "The study validates portable call support but deliberately leaves every driver signature, structure ABI, callback, thread-affinity rule, and resource lifetime to backend-specific real-device witnesses.",
+        "issue_refs": [
+          "#12210",
+          "#12212",
+          "#12283",
+          "#12284",
+          "#12285",
+          "#12286"
+        ]
+      }
+    },
+    {
+      "repository": "townsendmerino/aikit",
+      "url": "https://github.com/townsendmerino/aikit",
+      "status": "studied",
+      "priority": 19,
+      "why": "CGo-free Metal device, queue, pipeline, dispatch, autorelease, and leak-test precedent for fak's Apple accelerator migration.",
+      "last_checked": "2026-09-08",
+      "checked_revision": "c214070f53c0675202885c231747bd8b2e59af44",
+      "stars_at_check": 3,
+      "last_push_at_check": "2026-09-07T01:27:43Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-PURE-GO-HOST-BINDINGS-2026-09-08.md",
+      "inventory": {
+        "mode": "focused",
+        "source_classes": [
+          "runtime_source",
+          "tests_fixtures",
+          "license_provenance",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Real Metal vadd and lifecycle tests are strong bootstrap evidence but do not prove fak's MPSMatrixMultiplication ABI, numerical parity, or performance envelope.",
+        "issue_refs": [
+          "#12210"
+        ]
+      }
+    },
+    {
+      "repository": "eitamring/gocudrv",
+      "url": "https://github.com/eitamring/gocudrv",
+      "status": "studied",
+      "priority": 19,
+      "why": "CGo-free CUDA Driver API loader, context-affinity executor, and real PTX launch precedent for fak's existing dynamic CUDA leaf.",
+      "last_checked": "2026-09-08",
+      "checked_revision": "498ca99de542a2e9bd1ce15b57dcc1263dd65a46",
+      "stars_at_check": 21,
+      "last_push_at_check": "2026-08-07T03:32:30Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-PURE-GO-HOST-BINDINGS-2026-09-08.md",
+      "inventory": {
+        "mode": "focused",
+        "source_classes": [
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "license_provenance",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "The driver-loader and PTX-launch proof excludes cuBLAS, NCCL, kernel compilation, fak engine receipts, and API stability; those remain explicit fak work.",
+        "issue_refs": [
+          "#11657",
+          "#12210"
         ]
       }
     },
