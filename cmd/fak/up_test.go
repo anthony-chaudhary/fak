@@ -38,14 +38,15 @@ func TestUpBootsUnifiedAgentRuntime(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
-	goCache := filepath.Join(cacheRoot, "gocache")
 	goTmp := filepath.Join(cacheRoot, "gotmp")
 	if err := os.MkdirAll(goTmp, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	build := exec.Command("go", "build", "-o", bin, "./cmd/fak")
+	buildCtx, cancelBuild := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancelBuild()
+	build := exec.CommandContext(buildCtx, "go", "build", "-o", bin, "./cmd/fak")
 	build.Dir = root
-	build.Env = append(os.Environ(), "GOCACHE="+goCache, "GOTMPDIR="+goTmp)
+	build.Env = append(os.Environ(), "GOTMPDIR="+goTmp)
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build fak: %v\n%s", err, out)
 	}
