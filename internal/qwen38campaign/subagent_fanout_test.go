@@ -493,3 +493,341 @@ func TestCosineSimilarityMath(t *testing.T) {
 		t.Errorf("perturbed cosine %f < threshold %f", cosPerturbed, DefaultLogitCosineParityThreshold)
 	}
 }
+
+type stubRealRunner struct {
+	called       int
+	res          PhysicalTrialResult
+	err          error
+	mutateResult func(req PhysicalTrialRequest, res *PhysicalTrialResult)
+}
+
+func (s *stubRealRunner) ExecuteFanoutTrial(req PhysicalTrialRequest) (PhysicalTrialResult, error) {
+	s.called++
+	if s.err != nil {
+		return PhysicalTrialResult{}, s.err
+	}
+	res := s.res
+	res.RunIndex = req.RunIndex
+	res.Concurrency = req.Concurrency
+	res.Scenario = req.Scenario
+	if s.mutateResult != nil {
+		s.mutateResult(req, &res)
+	}
+	return res, nil
+}
+
+type stubModeledRunner struct {
+	called int
+	res    RunMetric
+	err    error
+}
+
+func (s *stubModeledRunner) ExecuteModeledTrial(req ModeledTrialRequest) (RunMetric, error) {
+	s.called++
+	if s.err != nil {
+		return RunMetric{}, s.err
+	}
+	res := s.res
+	res.RunIndex = req.RunIndex
+	res.Concurrency = req.Config.Concurrency
+	res.Scenario = req.Config.Scenario
+	return res, nil
+}
+
+// TestSubagentFanoutPhysicalModeFailsBefore proves physical mode invokes only the real interface,
+// rejects modeled trial generation, and preserves explicit simulation provenance.
+func TestSubagentFanoutPhysicalModeFailsBefore(t *testing.T) {
+	validIdentity := ExecutionIdentity{
+		SourceCommit:        "2a4e3e13431ecea885217ed8c5f161542e823039",
+		SourceArchiveSHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		BinarySHA256:        "a1b2c3d4e5f60123456789abcdef0123456789abcdef0123456789abcdef0123",
+		ModelGGUFSHA256:     DefaultModelGGUFSHA256,
+		TokenPacketSHA256:   "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+	}
+
+	basePhasesMS := map[string]float64{
+		PhaseHostDispatch:     0.15,
+		PhasePrefixTreeLookup: 0.05,
+		PhaseKVAllocation:     0.05,
+		PhaseGPUKernel:        49.35,
+		PhaseTokenSampling:    0.40,
+	}
+
+	validRealResult := PhysicalTrialResult{
+		Backend:           "vulkan",
+		ExecutionPath:     "fak-native-product",
+		Identity:          validIdentity,
+		WallDurationMS:    50.0,
+		UsefulTokens:      64,
+		TokensPerSec:      1280.0,
+		QueueLatencyMS:    0.10,
+		TTFTMS:            5.0,
+		TPOTMS:            0.7,
+		CounterSource:     CountersUnavailable,
+		PhasesMS:          basePhasesMS,
+		LogitCosineParity: 0.999995,
+		ParityPassed:      true,
+		FallbackCount:     0,
+		FailureCount:      0,
+	}
+
+	validModeledMetric := RunMetric{
+		WallDurationMS:    50.0,
+		UsefulTokens:      64,
+		TokensPerSec:      1280.0,
+		DRAMBandwidthGBps: 40.0,
+		MALLHitRate:       0.95,
+		QueueLatencyMS:    0.10,
+		CounterSource:     "calibrated_architecture_simulation",
+		PhasesMS:          basePhasesMS,
+		LogitCosineParity: 0.999995,
+		ParityPassed:      true,
+	}
+
+	// 1. Inject real-runner stub and modeled-runner stub into physical mode
+	realStub := &stubRealRunner{res: validRealResult}
+	modeledStub := &stubModeledRunner{res: validModeledMetric}
+
+	harness, err := NewSubagentFanoutHarness(FanoutConfig{
+		Scenario:                   ScenarioSharedPrefixForked,
+		Concurrency:                1,
+		Runs:                       5,
+		GeneratedTokensPerSubagent: 64,
+		Simulated:                  false,
+	})
+	if err != nil {
+		t.Fatalf("failed to create harness: %v", err)
+	}
+	harness.PhysicalRunner = realStub
+	harness.ModeledRunner = modeledStub
+
+	receipt, err := harness.Execute()
+	if err != nil {
+		t.Fatalf("physical execution failed: %v", err)
+	}
+
+	// Physical mode must call ONLY the real interface
+	if realStub.called != 5 {
+		t.Errorf("real runner called = %d, want 5", realStub.called)
+	}
+	if modeledStub.called != 0 {
+		t.Errorf("modeled runner was called %d times during physical execution, want 0", modeledStub.called)
+	}
+
+	// Verify physical receipt contracts
+	if receipt.Provenance != ProvenancePhysical {
+		t.Errorf("provenance = %q, want %q", receipt.Provenance, ProvenancePhysical)
+	}
+	if receipt.Engine != CanonicalEngineName {
+		t.Errorf("engine = %q, want %q", receipt.Engine, CanonicalEngineName)
+	}
+	if receipt.PrimaryEngine != CanonicalEngineName {
+		t.Errorf("primary_engine = %q, want %q", receipt.PrimaryEngine, CanonicalEngineName)
+	}
+	if receipt.FallbackCount != 0 || !receipt.ZeroFallback {
+		t.Errorf("fallback_count = %d, zero_fallback = %v", receipt.FallbackCount, receipt.ZeroFallback)
+	}
+	if receipt.Backend != "vulkan" {
+		t.Errorf("backend = %q, want vulkan", receipt.Backend)
+	}
+	if receipt.ExecutionPath != "fak-native-product" {
+		t.Errorf("execution_path = %q, want fak-native-product", receipt.ExecutionPath)
+	}
+	if receipt.ExecutionIdentity == nil || receipt.ExecutionIdentity.SourceCommit != validIdentity.SourceCommit {
+		t.Errorf("execution identity mismatch: %+v", receipt.ExecutionIdentity)
+	}
+
+	// 2. Simulated mode preserves explicit simulation provenance and does not call real runner
+	simHarness, err := NewSubagentFanoutHarness(FanoutConfig{
+		Scenario:                   ScenarioSharedPrefixForked,
+		Concurrency:                1,
+		Runs:                       5,
+		GeneratedTokensPerSubagent: 64,
+		Simulated:                  true,
+	})
+	if err != nil {
+		t.Fatalf("failed to create simulated harness: %v", err)
+	}
+	realStubSim := &stubRealRunner{res: validRealResult}
+	modeledStubSim := &stubModeledRunner{res: validModeledMetric}
+	simHarness.PhysicalRunner = realStubSim
+	simHarness.ModeledRunner = modeledStubSim
+
+	simReceipt, err := simHarness.Execute()
+	if err != nil {
+		t.Fatalf("simulated execution failed: %v", err)
+	}
+	if modeledStubSim.called != 5 {
+		t.Errorf("modeled runner called = %d, want 5", modeledStubSim.called)
+	}
+	if realStubSim.called != 0 {
+		t.Errorf("real runner called %d times in simulated mode, want 0", realStubSim.called)
+	}
+	if simReceipt.Provenance != ProvenanceSimulation {
+		t.Errorf("simulated receipt provenance = %q, want %q", simReceipt.Provenance, ProvenanceSimulation)
+	}
+}
+
+// TestSubagentFanoutPhysicalModeRejectsMissingTelemetry verifies fail-closed behavior on missing fields.
+func TestSubagentFanoutPhysicalModeRejectsMissingTelemetry(t *testing.T) {
+	validIdentity := ExecutionIdentity{
+		SourceCommit:      "2a4e3e13431ecea885217ed8c5f161542e823039",
+		BinarySHA256:      "a1b2c3d4e5f60123456789abcdef0123456789abcdef0123456789abcdef0123",
+		ModelGGUFSHA256:   DefaultModelGGUFSHA256,
+		TokenPacketSHA256: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+	}
+
+	basePhasesMS := map[string]float64{
+		PhaseHostDispatch:     0.15,
+		PhasePrefixTreeLookup: 0.05,
+		PhaseKVAllocation:     0.05,
+		PhaseGPUKernel:        49.35,
+		PhaseTokenSampling:    0.40,
+	}
+
+	makeHarness := func(mutate func(res *PhysicalTrialResult)) *SubagentFanoutHarness {
+		validRealResult := PhysicalTrialResult{
+			Backend:           "vulkan",
+			ExecutionPath:     "fak-native-product",
+			Identity:          validIdentity,
+			WallDurationMS:    50.0,
+			UsefulTokens:      64,
+			TokensPerSec:      1280.0,
+			QueueLatencyMS:    0.10,
+			CounterSource:     CountersUnavailable,
+			PhasesMS:          basePhasesMS,
+			LogitCosineParity: 0.999995,
+			ParityPassed:      true,
+			FallbackCount:     0,
+			FailureCount:      0,
+		}
+		if mutate != nil {
+			mutate(&validRealResult)
+		}
+		h, _ := NewSubagentFanoutHarness(FanoutConfig{
+			Scenario:                   ScenarioSharedPrefixForked,
+			Concurrency:                1,
+			Runs:                       5,
+			GeneratedTokensPerSubagent: 64,
+			Simulated:                  false,
+		})
+		h.PhysicalRunner = &stubRealRunner{res: validRealResult}
+		return h
+	}
+
+	// 1. Missing source commit
+	h1 := makeHarness(func(res *PhysicalTrialResult) {
+		res.Identity.SourceCommit = ""
+	})
+	if _, err := h1.Execute(); err == nil {
+		t.Errorf("expected error on missing source commit")
+	}
+
+	// 2. Missing binary sha256
+	h2 := makeHarness(func(res *PhysicalTrialResult) {
+		res.Identity.BinarySHA256 = ""
+	})
+	if _, err := h2.Execute(); err == nil {
+		t.Errorf("expected error on missing binary sha256")
+	}
+
+	// 3. Fallback count > 0
+	h3 := makeHarness(func(res *PhysicalTrialResult) {
+		res.FallbackCount = 1
+	})
+	if _, err := h3.Execute(); err == nil {
+		t.Errorf("expected error on fallback count > 0")
+	}
+
+	// 4. Failure count > 0
+	h4 := makeHarness(func(res *PhysicalTrialResult) {
+		res.FailureCount = 1
+	})
+	if _, err := h4.Execute(); err == nil {
+		t.Errorf("expected error on failure count > 0")
+	}
+
+	// 5. Hardware counters present without named counter source
+	h5 := makeHarness(func(res *PhysicalTrialResult) {
+		res.CounterSource = CountersUnavailable
+		res.PhysicalDRAMBytes = 1024 * 1024
+		res.DRAMBandwidthGBps = 40.0
+	})
+	if _, err := h5.Execute(); err == nil {
+		t.Errorf("expected error when hardware counters present without named source")
+	}
+
+	// 6. Sub-threshold parity
+	h6 := makeHarness(func(res *PhysicalTrialResult) {
+		res.LogitCosineParity = 0.999800
+		res.ParityPassed = false
+	})
+	if _, err := h6.Execute(); err == nil {
+		t.Errorf("expected error on sub-threshold parity")
+	}
+
+	// 7. Missing backend
+	h7 := makeHarness(func(res *PhysicalTrialResult) {
+		res.Backend = ""
+	})
+	if _, err := h7.Execute(); err == nil {
+		t.Errorf("expected error on missing backend")
+	}
+}
+
+// TestSubagentFanoutPhysicalExecutionWithProductRunner verifies bounded B=1 physical execution.
+func TestSubagentFanoutPhysicalExecutionWithProductRunner(t *testing.T) {
+	runner := NewProductPhysicalRunner()
+	cfg := FanoutConfig{
+		Scenario:                   ScenarioSharedPrefixForked,
+		Concurrency:                1,
+		Runs:                       5,
+		PrefixTokens:               1000,
+		GeneratedTokensPerSubagent: 16,
+		Simulated:                  false,
+	}
+	harness, err := NewSubagentFanoutHarness(cfg)
+	if err != nil {
+		t.Fatalf("failed to create harness: %v", err)
+	}
+	harness.PhysicalRunner = runner
+
+	receipt, err := harness.Execute()
+	if err != nil {
+		t.Fatalf("physical execution with product runner failed: %v", err)
+	}
+	if err := receipt.Validate(); err != nil {
+		t.Fatalf("physical receipt failed validation: %v", err)
+	}
+
+	if receipt.Provenance != ProvenancePhysical {
+		t.Errorf("provenance = %q, want %q", receipt.Provenance, ProvenancePhysical)
+	}
+	if receipt.Engine != CanonicalEngineName {
+		t.Errorf("engine = %q, want %q", receipt.Engine, CanonicalEngineName)
+	}
+	if receipt.PrimaryEngine != CanonicalEngineName {
+		t.Errorf("primary_engine = %q, want %q", receipt.PrimaryEngine, CanonicalEngineName)
+	}
+	if receipt.FallbackCount != 0 {
+		t.Errorf("fallback_count = %d, want 0", receipt.FallbackCount)
+	}
+	if !receipt.ZeroFallback {
+		t.Errorf("zero_fallback = false, want true")
+	}
+	if receipt.ExecutionIdentity == nil {
+		t.Fatalf("missing execution identity")
+	}
+	if receipt.ExecutionIdentity.SourceCommit == "" {
+		t.Errorf("missing source commit")
+	}
+	if receipt.ExecutionIdentity.BinarySHA256 == "" {
+		t.Errorf("missing binary sha256")
+	}
+	if receipt.ExecutionIdentity.ModelGGUFSHA256 != DefaultModelGGUFSHA256 {
+		t.Errorf("model gguf sha = %q, want %q", receipt.ExecutionIdentity.ModelGGUFSHA256, DefaultModelGGUFSHA256)
+	}
+	if receipt.Summary.CountersStatus != CountersUnavailable {
+		t.Errorf("counters status = %q, want %q", receipt.Summary.CountersStatus, CountersUnavailable)
+	}
+}

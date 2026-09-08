@@ -8,6 +8,7 @@ load() importlib pattern mirrors the other tools/*_test.py files.
 from __future__ import annotations
 
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -630,6 +631,175 @@ class AuditCacheTest(unittest.TestCase):
             rec = {"sha": "abc", "verdict": "OK", "witness": "diff-witnessed", "claim_kind": "fix"}
             m.save_audit_cache(cp, {"abc": rec})
             self.assertEqual(m.load_audit_cache(cp)["abc"]["verdict"], "OK")
+
+
+class RefineAuditRecordTest(unittest.TestCase):
+    """Issue #12087: recovery of false ABSTAIN on legitimate code fixes with domain nouns colliding with noclaim markers."""
+
+    def test_refine_audit_record_recovers_release_noun_in_code_fix(self):
+        payload = {
+            "sha": "ac1df8c0b0",
+            "verdict": "ABSTAIN",
+            "claim_kind": "none",
+            "witness": "abstain",
+            "reason": "subject makes no checkable code/test claim",
+            "source_files": [
+                "internal/leaseref/fence.go",
+                "internal/leaseref/generation_history_test.go",
+                "internal/leaseref/release.go",
+            ],
+            "test_files": [
+                "internal/leaseref/generation_history_test.go",
+            ],
+        }
+        refined = m.refine_audit_record(
+            payload,
+            "ac1df8c0b0",
+            Path("."),
+            subject="fix(leaseref): retain generation history across lease release (#11850)",
+        )
+        self.assertEqual(refined["verdict"], "OK")
+        self.assertEqual(refined["witness"], "diff-witnessed")
+        self.assertEqual(refined["claim_kind"], "code_effect")
+
+    def test_refine_audit_record_preserves_explicit_chore_and_wip(self):
+        payload_chore = {
+            "sha": "chore1",
+            "verdict": "ABSTAIN",
+            "claim_kind": "none",
+            "witness": "abstain",
+            "source_files": ["version.go"],
+            "test_files": [],
+        }
+        res_chore = m.refine_audit_record(
+            payload_chore, "chore1", Path("."), subject="chore: bump release version to 1.2"
+        )
+        self.assertEqual(res_chore["verdict"], "ABSTAIN")
+
+        payload_wip = {
+            "sha": "wip1",
+            "verdict": "ABSTAIN",
+            "claim_kind": "none",
+            "witness": "abstain",
+            "source_files": ["parser.go"],
+            "test_files": [],
+        }
+        res_wip = m.refine_audit_record(
+            payload_wip, "wip1", Path("."), subject="wip: hack on parser"
+        )
+        self.assertEqual(res_wip["verdict"], "ABSTAIN")
+
+    def test_refine_audit_record_preserves_abstain_when_no_source_files(self):
+        payload = {
+            "sha": "fix_empty",
+            "verdict": "ABSTAIN",
+            "claim_kind": "none",
+            "witness": "abstain",
+            "source_files": [],
+            "test_files": [],
+        }
+        refined = m.refine_audit_record(
+            payload, "fix_empty", Path("."), subject="fix: note"
+        )
+        self.assertEqual(refined["verdict"], "ABSTAIN")
+
+    def test_refine_audit_record_recovers_other_domain_nouns(self):
+        p_feat = {
+            "sha": "f1",
+            "verdict": "ABSTAIN",
+            "claim_kind": "none",
+            "witness": "abstain",
+            "source_files": ["internal/metrics/trace.go"],
+            "test_files": [],
+        }
+        res_feat = m.refine_audit_record(
+            p_feat, "f1", Path("."), subject="feat(metrics): export microtrace spans in Perfetto format (#1234)"
+        )
+        self.assertEqual(res_feat["verdict"], "OK")
+        self.assertEqual(res_feat["witness"], "diff-witnessed")
+        self.assertEqual(res_feat["claim_kind"], "code_effect")
+
+        p_fix = {
+            "sha": "f2",
+            "verdict": "ABSTAIN",
+            "claim_kind": "none",
+            "witness": "abstain",
+            "source_files": ["internal/guideddecode/decode.go"],
+            "test_files": [],
+        }
+        res_fix = m.refine_audit_record(
+            p_fix, "f2", Path("."), subject="fix(guideddecode): tolerate optional JSON whitespace (#11719)"
+        )
+        self.assertEqual(res_fix["verdict"], "OK")
+        self.assertEqual(res_fix["witness"], "diff-witnessed")
+        self.assertEqual(res_fix["claim_kind"], "code_effect")
+
+        p_test = {
+            "sha": "f3",
+            "verdict": "ABSTAIN",
+            "claim_kind": "none",
+            "witness": "abstain",
+            "source_files": [],
+            "test_files": ["internal/provenance/version_test.go"],
+        }
+        res_test = m.refine_audit_record(
+            p_test, "f3", Path("."), subject="test(provenance): add version verification (#11792)"
+        )
+        self.assertEqual(res_test["verdict"], "OK")
+        self.assertEqual(res_test["witness"], "diff-witnessed")
+        self.assertEqual(res_test["claim_kind"], "test")
+
+    def test_load_audit_cache_evicts_legacy_abstain_records(self):
+        with tempfile.TemporaryDirectory() as td:
+            cp = Path(td) / "cache.json"
+            data = {
+                "schema": "fleet-commit-audit-cache/1",
+                "audits": {
+                    "sha_abstain": {
+                        "sha": "sha_abstain",
+                        "verdict": "ABSTAIN",
+                        "witness": "abstain",
+                        "claim_kind": "none",
+                    },
+                    "sha_ok": {
+                        "sha": "sha_ok",
+                        "verdict": "OK",
+                        "witness": "diff-witnessed",
+                        "claim_kind": "code_effect",
+                    },
+                },
+            }
+            cp.write_text(json.dumps(data), encoding="utf-8")
+            loaded = m.load_audit_cache(cp)
+            self.assertNotIn("sha_abstain", loaded)
+            self.assertIn("sha_ok", loaded)
+            self.assertEqual(loaded["sha_ok"]["verdict"], "OK")
+
+    def test_grade_issue_with_recovered_commit_11850(self):
+        issue = _issue(11850, state="CLOSED", reason="COMPLETED", title="fix(leaseref): retain generation history across lease release")
+        raw_audit = {
+            "sha": "ac1df8c0b0",
+            "verdict": "ABSTAIN",
+            "claim_kind": "none",
+            "witness": "abstain",
+            "source_files": ["internal/leaseref/release.go"],
+            "test_files": ["internal/leaseref/generation_history_test.go"],
+        }
+        refined = m.refine_audit_record(
+            raw_audit,
+            "ac1df8c0b0",
+            Path("."),
+            subject="fix(leaseref): retain generation history across lease release (#11850) (fak leaseref)",
+        )
+        refs = [{"sha": "ac1df8c0b0", "subject": "fix(leaseref): retain generation history across lease release (#11850)", "kind": m.RESOLVING}]
+        g = m.grade_issue(issue, refs, {"ac1df8c0b0": refined})
+        self.assertEqual(g["bucket"], m.TRUE_RESOLVED)
+        self.assertIn("ac1df8c", g["witnessed_commits"])
+
+    def test_audit_commit_real_commit_11850_diff_witnessed(self):
+        rec = m.audit_commit("ac1df8c0b09ee7e55b75973edb272fc546e98893", Path("."))
+        self.assertEqual(rec["verdict"], "OK")
+        self.assertEqual(rec["witness"], "diff-witnessed")
 
 
 if __name__ == "__main__":
