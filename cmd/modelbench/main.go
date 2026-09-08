@@ -25,6 +25,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"math"
 	"os"
@@ -39,6 +40,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/macbench"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -1163,9 +1165,84 @@ func assembleBenchReport(f *benchFlags, be compute.Backend, registeredBackends [
 	return report
 }
 
+var (
+	macbenchMTP            = flag.Bool("macbench-mtp", false, "run 4-way Apple Silicon MTP comparative benchmark (fak-native vs AX Engine vs MTPLX vs llama.cpp)")
+	macbenchMTPAlt         = flag.Bool("mtp-comparison", false, "alias for -macbench-mtp")
+	macbenchMTPOut         = flag.String("macbench-mtp-out", "", "write 4-way MTP comparative benchmark packet to this JSON path")
+	macbenchMTPOutAlt      = flag.String("mtp-comparison-out", "", "alias for -macbench-mtp-out")
+	macbenchMTPReadback    = flag.String("macbench-mtp-readback", "", "validate an MTP comparative benchmark packet without loading a model")
+	macbenchMTPReadbackAlt = flag.String("mtp-comparison-readback", "", "alias for -macbench-mtp-readback")
+)
+
+func maybeRunMTPComparison(f *benchFlags) bool {
+	readbackPath := *macbenchMTPReadback
+	if readbackPath == "" {
+		readbackPath = *macbenchMTPReadbackAlt
+	}
+	if readbackPath != "" {
+		data, err := os.ReadFile(readbackPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "macbench mtp readback: read file: %v\n", err)
+			f.exit(1)
+		}
+		var packet macbench.MTPComparisonPacket
+		if err := json.Unmarshal(data, &packet); err != nil {
+			fmt.Fprintf(os.Stderr, "macbench mtp readback: decode packet: %v\n", err)
+			f.exit(1)
+		}
+		if err := macbench.ValidateMTPComparisonPacket(packet); err != nil {
+			fmt.Fprintf(os.Stderr, "macbench mtp readback: invalid packet: %v\n", err)
+			f.exit(1)
+		}
+		fmt.Printf("VALID mtp_comparison_packet schema=%s campaign=%s host=%s fak_native_decode=%.2f tok/s\n",
+			packet.Schema, packet.CampaignID, packet.HostID, packet.Summary.FakNativeDecodeTokS)
+		return true
+	}
+
+	runMTP := *macbenchMTP || *macbenchMTPAlt
+	if !runMTP {
+		return false
+	}
+
+	runner := macbench.NewMTPRunner(macbench.MTPRunnerOptions{})
+	packet, err := runner.Run(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "macbench mtp run: %v\n", err)
+		f.exit(1)
+	}
+
+	outPath := *macbenchMTPOut
+	if outPath == "" {
+		outPath = *macbenchMTPOutAlt
+	}
+	if outPath == "" && f.out != nil && *f.out != "" {
+		outPath = *f.out
+	}
+
+	b, err := json.MarshalIndent(packet, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "macbench mtp marshal: %v\n", err)
+		f.exit(1)
+	}
+
+	if outPath != "" {
+		if err := os.WriteFile(outPath, b, 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "macbench mtp write %s: %v\n", outPath, err)
+			f.exit(1)
+		}
+		fmt.Printf("WROTE %s (%.2f tok/s sustained fak-native decode)\n", outPath, packet.Summary.FakNativeDecodeTokS)
+	} else {
+		fmt.Println(string(b))
+	}
+	return true
+}
+
 func main() {
 	f := parseFlags()
 	validateFlags(f)
+	if maybeRunMTPComparison(f) {
+		return
+	}
 	if rawDecodeEnabled() {
 		if err := validateRawDecodeFlags(f); err != nil {
 			fmt.Fprintln(os.Stderr, "flags:", err)
