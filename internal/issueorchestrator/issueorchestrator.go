@@ -1,6 +1,7 @@
 package issueorchestrator
 
 import (
+	"github.com/anthony-chaudhary/fak/internal/debtlane"
 	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
@@ -130,6 +131,7 @@ type WavePlanOptions struct {
 	ExcludedIssues          []int
 	ExcludedLanes           []string
 	AutoDetectHeld          bool
+	HeldLeases              []debtlane.HeldLease
 	StrictProjectWork       bool
 	WorkspaceRoot           string
 	Graph                   map[string]map[string]struct{}

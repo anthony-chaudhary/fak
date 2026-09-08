@@ -234,3 +234,66 @@ func TestBuildOpencodeChat_ExplicitAgentOverride(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatOpencodePrompt_ShiftLeftSoftwareFirst(t *testing.T) {
+	iss := Issue{
+		Number: 12253,
+		Key:    "issue-12253",
+		Title:  "feat(amdgpu): shift-left deterministic software witness before hardware validation",
+		Lane:   "amdgpu",
+		Paths:  []string{"internal/amdgpu/device.go"},
+	}
+
+	prompt := FormatOpencodePrompt(iss)
+
+	// 1. Verifies that for a hardware-relevant issue, the software witness / landing pipeline index appears before Physical hardware validation: index in prompt.
+	idxSoftwareWitness := strings.Index(prompt, "deterministic software witness")
+	idxPipeline := strings.Index(prompt, "Mandatory 4-Phase Delivery and Landing Pipeline")
+	idxHw := strings.Index(prompt, "Physical hardware validation:")
+
+	if idxSoftwareWitness == -1 {
+		t.Fatalf("prompt missing deterministic software witness instruction:\n%s", prompt)
+	}
+	if idxPipeline == -1 {
+		t.Fatalf("prompt missing Mandatory 4-Phase Delivery and Landing Pipeline:\n%s", prompt)
+	}
+	if idxHw == -1 {
+		t.Fatalf("prompt missing Physical hardware validation for hardware-relevant issue:\n%s", prompt)
+	}
+	if idxSoftwareWitness >= idxHw {
+		t.Fatalf("expected software witness instruction (idx %d) before hardware validation (idx %d)", idxSoftwareWitness, idxHw)
+	}
+	if idxPipeline >= idxHw {
+		t.Fatalf("expected 4-phase landing pipeline (idx %d) before hardware validation (idx %d)", idxPipeline, idxHw)
+	}
+
+	// 2. Verifies prompt contains "PENDING_HARDWARE" and "green software increment".
+	if !strings.Contains(prompt, "PENDING_HARDWARE") {
+		t.Fatalf("prompt missing 'PENDING_HARDWARE':\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "green software increment") {
+		t.Fatalf("prompt missing 'green software increment':\n%s", prompt)
+	}
+
+	// 3. Verifies prompt contains coordination edges distinction ("alignment assumptions", "typed pickup block").
+	if !strings.Contains(prompt, "alignment assumptions") {
+		t.Fatalf("prompt missing 'alignment assumptions':\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "typed pickup block") {
+		t.Fatalf("prompt missing 'typed pickup block':\n%s", prompt)
+	}
+
+	// 4. Verifies prompt contains collision narrowing ("disjoint slice", "BLOCKED").
+	if !strings.Contains(prompt, "disjoint slice") {
+		t.Fatalf("prompt missing 'disjoint slice':\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "BLOCKED") {
+		t.Fatalf("prompt missing 'BLOCKED':\n%s", prompt)
+	}
+
+	// 5. Verifies software-first sequence explicitly stated.
+	seq := "failing deterministic contract -> smallest implementation -> focused validation -> guarded software landing -> physical qualification"
+	if !strings.Contains(prompt, seq) {
+		t.Fatalf("prompt missing software-first sequence %q:\n%s", seq, prompt)
+	}
+}

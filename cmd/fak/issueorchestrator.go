@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
+	"github.com/anthony-chaudhary/fak/internal/debtlane"
 	"github.com/anthony-chaudhary/fak/internal/issueorchestrator"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
@@ -34,6 +35,9 @@ type SpawnedChatRecord struct {
 	ControllerBinarySHA string   `json:"controller_binary_sha,omitempty"`
 	ControllerFreshness string   `json:"controller_freshness,omitempty"`
 	AgentProfile        string   `json:"agent_profile,omitempty"`
+	ExactPaths          []string `json:"exact_paths,omitempty"`
+	NarrowedPaths       []string `json:"narrowed_paths,omitempty"`
+	TreeLeaseAcquired   bool     `json:"tree_lease_acquired,omitempty"`
 }
 
 type OpencodeSpawnReceipt struct {
@@ -47,6 +51,9 @@ type OpencodeSpawnReceipt struct {
 	ControllerBinarySHA string              `json:"controller_binary_sha,omitempty"`
 	ControllerFreshness string              `json:"controller_freshness,omitempty"`
 	AgentProfile        string              `json:"agent_profile,omitempty"`
+	ExactPaths          []string            `json:"exact_paths,omitempty"`
+	NarrowedPaths       []string            `json:"narrowed_paths,omitempty"`
+	TreeLeaseAcquired   bool                `json:"tree_lease_acquired,omitempty"`
 	Chats               []SpawnedChatRecord `json:"chats"`
 }
 
@@ -65,6 +72,12 @@ var (
 		return ""
 	}
 	controllerBinarySHAFunc = currentExecutableSum
+	acquireTreeLeaseFunc    = debtlane.AcquireTreeLease
+	releaseTreeLeaseFunc    = debtlane.ReleaseTreeLease
+	discoverHeldLeasesFunc  = debtlane.DiscoverHeldLeases
+	startDispatchWorkerFunc = func(cmd *exec.Cmd) error {
+		return cmd.Start()
+	}
 )
 
 func revisionsMatch(a, b string) bool {
@@ -469,6 +482,9 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 			Chats:               make([]SpawnedChatRecord, 0, len(selectedWave.Issues)),
 		}
 
+		heldLeases, _ := discoverHeldLeasesFunc(root)
+		var sessionAcquiredTrees []string
+
 		hasError := false
 		for issueIdx, issue := range selectedWave.Issues {
 			if issueIdx > 0 && !*dryRun {
@@ -478,6 +494,90 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 				})
 				time.Sleep(delay)
 			}
+
+			exactPaths := append([]string(nil), issue.Paths...)
+
+			// Check collision against held leases from disk and this session
+			var collidingPaths []string
+			var disjointPaths []string
+
+			if len(exactPaths) > 0 {
+				for _, p := range exactPaths {
+					collides := false
+					for _, hl := range heldLeases {
+						if len(hl.Tree) > 0 {
+							for _, ht := range hl.Tree {
+								if debtlane.TreesOverlap(p, ht) {
+									collides = true
+									break
+								}
+							}
+						} else if hl.Lane != "" {
+							target := "internal/" + strings.ToLower(hl.Lane)
+							if debtlane.TreesOverlap(p, target) || debtlane.TreesOverlap(p, hl.Lane) {
+								collides = true
+								break
+							}
+						}
+						if collides {
+							break
+						}
+					}
+					if !collides {
+						for _, st := range sessionAcquiredTrees {
+							if debtlane.TreesOverlap(p, st) {
+								collides = true
+								break
+							}
+						}
+					}
+					if collides {
+						collidingPaths = append(collidingPaths, p)
+					} else {
+						disjointPaths = append(disjointPaths, p)
+					}
+				}
+			} else if issue.Lane != "" {
+				laneHeld := false
+				for _, hl := range heldLeases {
+					if strings.EqualFold(hl.Lane, issue.Lane) {
+						laneHeld = true
+						break
+					}
+				}
+				if laneHeld {
+					collidingPaths = []string{"internal/" + issue.Lane}
+				}
+			}
+
+			// 1. Full collision: all declared paths overlap with held leases -> refuse spawn
+			if (len(exactPaths) > 0 && len(disjointPaths) == 0) || (len(exactPaths) == 0 && len(collidingPaths) > 0) {
+				record := SpawnedChatRecord{
+					IssueNumber:         issue.Number,
+					Key:                 issue.Key,
+					Title:               issue.Title,
+					Lane:                issue.Lane,
+					ControllerRevision:  stamp.Revision,
+					ControllerBinarySHA: binSHA,
+					ControllerFreshness: freshness,
+					AgentProfile:        effectiveAgent,
+					ExactPaths:          exactPaths,
+					Status:              "error",
+					Error:               fmt.Sprintf("EXACT_TREE_OVERLAP_REFUSAL: path tree %v overlaps with held lease", collidingPaths),
+				}
+				receipt.Chats = append(receipt.Chats, record)
+				hasError = true
+				continue
+			}
+
+			// 2. Partial collision with non-empty disjoint subset -> narrow paths
+			var narrowedPaths []string
+			effectivePaths := exactPaths
+			if len(collidingPaths) > 0 && len(disjointPaths) > 0 {
+				narrowedPaths = disjointPaths
+				effectivePaths = disjointPaths
+			}
+
 			var wtDir string
 			if *worktree {
 				res := workerworktree.Prepare(root, issue.Lane, strconv.Itoa(issue.Number), "", "", nil)
@@ -495,7 +595,12 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 				AutoApprove: true,
 				PrintLogs:   true,
 			}
-			chat := issueorchestrator.BuildOpencodeChat(issue, chatOpts)
+
+			issueForChat := issue
+			if len(narrowedPaths) > 0 {
+				issueForChat.Paths = narrowedPaths
+			}
+			chat := issueorchestrator.BuildOpencodeChat(issueForChat, chatOpts)
 
 			record := SpawnedChatRecord{
 				IssueNumber:         issue.Number,
@@ -509,20 +614,35 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 				ControllerBinarySHA: binSHA,
 				ControllerFreshness: freshness,
 				AgentProfile:        effectiveAgent,
+				ExactPaths:          exactPaths,
+				NarrowedPaths:       narrowedPaths,
 			}
 
 			if *dryRun {
 				record.Status = "dry_run"
+				sessionAcquiredTrees = append(sessionAcquiredTrees, effectivePaths...)
 				receipt.Chats = append(receipt.Chats, record)
 				receipt.TotalSpawned++
 				continue
 			}
+
+			// Acquire exact tree lease before starting worker process
+			if err := acquireTreeLeaseFunc(root, issue.Lane, effectivePaths, os.Getpid()); err != nil {
+				record.Status = "error"
+				record.Error = fmt.Sprintf("acquire tree lease: %v", err)
+				receipt.Chats = append(receipt.Chats, record)
+				hasError = true
+				continue
+			}
+			record.TreeLeaseAcquired = true
 
 			targetLogDir := *logDir
 			if targetLogDir == "" {
 				targetLogDir = filepath.Join(root, ".dispatch-runs")
 			}
 			if err := os.MkdirAll(targetLogDir, 0o755); err != nil {
+				_ = releaseTreeLeaseFunc(root, issue.Lane, effectivePaths, 0)
+				record.TreeLeaseAcquired = false
 				record.Status = "error"
 				record.Error = fmt.Sprintf("create log dir: %v", err)
 				receipt.Chats = append(receipt.Chats, record)
@@ -530,10 +650,12 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 				continue
 			}
 
-			stamp := time.Now().UTC().Format("20060102-150405")
-			logFile := filepath.Join(targetLogDir, fmt.Sprintf("resolve-%d-%s.log", issue.Number, stamp))
+			stampStr := time.Now().UTC().Format("20060102-150405")
+			logFile := filepath.Join(targetLogDir, fmt.Sprintf("resolve-%d-%s.log", issue.Number, stampStr))
 			fh, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 			if err != nil {
+				_ = releaseTreeLeaseFunc(root, issue.Lane, effectivePaths, 0)
+				record.TreeLeaseAcquired = false
 				record.Status = "error"
 				record.Error = fmt.Sprintf("open log file: %v", err)
 				receipt.Chats = append(receipt.Chats, record)
@@ -541,7 +663,7 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 				continue
 			}
 
-			fmt.Fprintf(fh, "# fak-spawn %s issue=%d lane=%s backend=opencode\n", stamp, issue.Number, issue.Lane)
+			fmt.Fprintf(fh, "# fak-spawn %s issue=%d lane=%s backend=opencode\n", stampStr, issue.Number, issue.Lane)
 
 			exe := resolveDispatchWorkerExecutable("opencode", "opencode")
 			cmdArgs := []string{}
@@ -570,8 +692,10 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 			configureDispatchSpawn(cmd)
 			configureDispatchWorkerConsole(cmd, "opencode")
 
-			if err := cmd.Start(); err != nil {
+			if err := startDispatchWorkerFunc(cmd); err != nil {
 				_ = fh.Close()
+				_ = releaseTreeLeaseFunc(root, issue.Lane, effectivePaths, 0)
+				record.TreeLeaseAcquired = false
 				record.Status = "error"
 				record.Error = err.Error()
 				record.LogFile = logFile
@@ -581,15 +705,18 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 			}
 
 			_ = fh.Close()
-			pid := cmd.Process.Pid
-			pidStem := strings.TrimSuffix(logFile, ".log")
-			_ = os.WriteFile(pidStem+".pid", []byte(strconv.Itoa(pid)), 0o644)
-			if chat.Worktree != "" {
-				_ = workerworktree.HandoffOwner(chat.Worktree, pid)
+			pid := 0
+			if cmd.Process != nil {
+				pid = cmd.Process.Pid
+				pidStem := strings.TrimSuffix(logFile, ".log")
+				_ = os.WriteFile(pidStem+".pid", []byte(strconv.Itoa(pid)), 0o644)
+				if chat.Worktree != "" {
+					_ = workerworktree.HandoffOwner(chat.Worktree, pid)
+				}
+				_ = cmd.Process.Release()
 			}
-			_ = cmd.Process.Release()
 
-			if *supervise {
+			if *supervise && pid > 0 {
 				supCfg := issueorchestrator.WorkerSupervisorConfig{
 					PID:         pid,
 					WorktreeDir: chat.Worktree,
@@ -598,12 +725,35 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 				_ = newWorkerSupervisorFunc(supCfg)
 			}
 
+			sessionAcquiredTrees = append(sessionAcquiredTrees, effectivePaths...)
 			record.PID = pid
 			record.Status = "spawned"
 			record.LogFile = logFile
 			receipt.Chats = append(receipt.Chats, record)
 			receipt.TotalSpawned++
 		}
+
+		var allExact []string
+		var allNarrowed []string
+		anyAcquired := false
+		for _, c := range receipt.Chats {
+			if c.TreeLeaseAcquired {
+				anyAcquired = true
+			}
+			for _, p := range c.ExactPaths {
+				if !containsStr(allExact, p) {
+					allExact = append(allExact, p)
+				}
+			}
+			for _, p := range c.NarrowedPaths {
+				if !containsStr(allNarrowed, p) {
+					allNarrowed = append(allNarrowed, p)
+				}
+			}
+		}
+		receipt.ExactPaths = allExact
+		receipt.NarrowedPaths = allNarrowed
+		receipt.TreeLeaseAcquired = anyAcquired
 
 		if *asJSON {
 			if err := writeIndentedJSON(stdout, receipt); err != nil {
@@ -833,3 +983,13 @@ func findLatestReceipt(root string) string {
 	}
 	return latestPath
 }
+
+func containsStr(slice []string, val string) bool {
+	for _, s := range slice {
+		if s == val {
+			return true
+		}
+	}
+	return false
+}
+

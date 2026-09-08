@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
+	"github.com/anthony-chaudhary/fak/internal/debtlane"
 	"github.com/anthony-chaudhary/fak/internal/issueorchestrator"
 )
 
@@ -63,6 +66,7 @@ func TestIssueOrchestratorCLIPlanWavesJSON(t *testing.T) {
 	code := runIssueOrchestrator(&stdout, &stderr, []string{
 		"--from-issues", issuesPath,
 		"--wave-size", "2",
+		"--adaptive-concurrency=false",
 		"--json",
 	})
 	if code != 0 {
@@ -1224,5 +1228,373 @@ func TestIssueOrchestratorExplicitAgent(t *testing.T) {
 	}
 	if !foundAgentFlag {
 		t.Fatalf("expected command to contain '--agent custom-profile', got: %v", chat.Command)
+	}
+}
+
+func TestIssueOrchestrator_ExactTreeLeaseAcquisitionBeforeSpawn(t *testing.T) {
+	origStamp := controllerStampFunc
+	origHead := controllerHeadRevFunc
+	origAcquire := acquireTreeLeaseFunc
+	origRelease := releaseTreeLeaseFunc
+	origStart := startDispatchWorkerFunc
+	defer func() {
+		controllerStampFunc = origStamp
+		controllerHeadRevFunc = origHead
+		acquireTreeLeaseFunc = origAcquire
+		releaseTreeLeaseFunc = origRelease
+		startDispatchWorkerFunc = origStart
+	}()
+
+	const testRev = "532688a0a04ba669a20d2c7f353150d044ae8be8"
+	controllerStampFunc = func() binstamp.Stamp {
+		return binstamp.Stamp{Revision: testRev, HasVCS: true}
+	}
+	controllerHeadRevFunc = func(string) string {
+		return testRev
+	}
+
+	tempDir := t.TempDir()
+	logDir := filepath.Join(tempDir, "logs")
+
+	var acquiredLane string
+	var acquiredPaths []string
+	acquireTreeLeaseFunc = func(workspace, lane string, paths []string, pid int) error {
+		acquiredLane = lane
+		acquiredPaths = append([]string(nil), paths...)
+		return nil
+	}
+
+	startDispatchWorkerFunc = func(cmd *exec.Cmd) error {
+		dummy := exec.Command("cmd.exe", "/c", "exit 0")
+		if err := dummy.Start(); err != nil {
+			return err
+		}
+		cmd.Process = dummy.Process
+		return nil
+	}
+
+	issues := []issueorchestrator.Issue{
+		{
+			Number:          1201,
+			Key:             "issue-1201",
+			Title:           "Exact tree lease acquisition test",
+			Lane:            "compute",
+			Paths:           []string{"internal/compute/leaf.go"},
+			ExpectedSteps:   1,
+			Dispatchability: "dispatchable",
+		},
+	}
+	issuesPath := writeTestIssuesFile(t, issues)
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath,
+		"--spawn-opencode",
+		"--workspace", tempDir,
+		"--log-dir", logDir,
+		"--supervise=false",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
+	}
+
+	if acquiredLane != "compute" {
+		t.Errorf("expected acquired lane 'compute', got %q", acquiredLane)
+	}
+	if !reflect.DeepEqual(acquiredPaths, []string{"internal/compute/leaf.go"}) {
+		t.Errorf("expected acquired paths [internal/compute/leaf.go], got %v", acquiredPaths)
+	}
+
+	var receipt OpencodeSpawnReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
+		t.Fatalf("decode receipt: %v; raw: %s", err, stdout.String())
+	}
+	if !receipt.TreeLeaseAcquired {
+		t.Errorf("expected receipt TreeLeaseAcquired to be true")
+	}
+	if !reflect.DeepEqual(receipt.ExactPaths, []string{"internal/compute/leaf.go"}) {
+		t.Errorf("expected receipt ExactPaths [internal/compute/leaf.go], got %v", receipt.ExactPaths)
+	}
+	if len(receipt.Chats) != 1 {
+		t.Fatalf("expected 1 chat, got %d", len(receipt.Chats))
+	}
+	if !receipt.Chats[0].TreeLeaseAcquired {
+		t.Errorf("expected chat TreeLeaseAcquired to be true")
+	}
+	if !reflect.DeepEqual(receipt.Chats[0].ExactPaths, []string{"internal/compute/leaf.go"}) {
+		t.Errorf("expected chat ExactPaths [internal/compute/leaf.go], got %v", receipt.Chats[0].ExactPaths)
+	}
+}
+
+func TestIssueOrchestrator_OverlapRefusal(t *testing.T) {
+	origStamp := controllerStampFunc
+	origHead := controllerHeadRevFunc
+	origDiscover := discoverHeldLeasesFunc
+	defer func() {
+		controllerStampFunc = origStamp
+		controllerHeadRevFunc = origHead
+		discoverHeldLeasesFunc = origDiscover
+	}()
+
+	const testRev = "532688a0a04ba669a20d2c7f353150d044ae8be8"
+	controllerStampFunc = func() binstamp.Stamp {
+		return binstamp.Stamp{Revision: testRev, HasVCS: true}
+	}
+	controllerHeadRevFunc = func(string) string {
+		return testRev
+	}
+
+	tempDir := t.TempDir()
+
+	// Mock held lease on internal/compute/a.go
+	discoverHeldLeasesFunc = func(workspace string) ([]debtlane.HeldLease, error) {
+		return []debtlane.HeldLease{
+			{Lane: "compute", Tree: []string{"internal/compute/a.go"}, PID: 1234},
+		}, nil
+	}
+
+	issues := []issueorchestrator.Issue{
+		{
+			Number:          1202,
+			Key:             "issue-1202",
+			Title:           "Overlap refusal test",
+			Lane:            "compute",
+			Paths:           []string{"internal/compute/a.go"},
+			ExpectedSteps:   1,
+			Dispatchability: "dispatchable",
+		},
+	}
+	issuesPath := writeTestIssuesFile(t, issues)
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath,
+		"--spawn-opencode",
+		"--workspace", tempDir,
+		"--dry-run",
+		"--json",
+	})
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code due to overlap refusal, got 0")
+	}
+
+	var receipt OpencodeSpawnReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
+		t.Fatalf("decode receipt: %v; raw: %s", err, stdout.String())
+	}
+	if len(receipt.Chats) != 1 {
+		t.Fatalf("expected 1 chat in receipt, got %d", len(receipt.Chats))
+	}
+	chat := receipt.Chats[0]
+	if chat.Status != "error" {
+		t.Errorf("expected status 'error', got %q", chat.Status)
+	}
+	if !strings.Contains(chat.Error, "EXACT_TREE_OVERLAP_REFUSAL") {
+		t.Errorf("expected error to contain 'EXACT_TREE_OVERLAP_REFUSAL', got %q", chat.Error)
+	}
+}
+
+func TestIssueOrchestrator_CleanupOnSpawnFailure(t *testing.T) {
+	origStamp := controllerStampFunc
+	origHead := controllerHeadRevFunc
+	origAcquire := acquireTreeLeaseFunc
+	origRelease := releaseTreeLeaseFunc
+	origStart := startDispatchWorkerFunc
+	defer func() {
+		controllerStampFunc = origStamp
+		controllerHeadRevFunc = origHead
+		acquireTreeLeaseFunc = origAcquire
+		releaseTreeLeaseFunc = origRelease
+		startDispatchWorkerFunc = origStart
+	}()
+
+	const testRev = "532688a0a04ba669a20d2c7f353150d044ae8be8"
+	controllerStampFunc = func() binstamp.Stamp {
+		return binstamp.Stamp{Revision: testRev, HasVCS: true}
+	}
+	controllerHeadRevFunc = func(string) string {
+		return testRev
+	}
+
+	tempDir := t.TempDir()
+	logDir := filepath.Join(tempDir, "logs")
+
+	leaseAcquired := false
+	acquireTreeLeaseFunc = func(workspace, lane string, paths []string, pid int) error {
+		leaseAcquired = true
+		return nil
+	}
+
+	leaseReleased := false
+	var releasedPaths []string
+	releaseTreeLeaseFunc = func(workspace, lane string, paths []string, pid int) error {
+		leaseReleased = true
+		releasedPaths = append([]string(nil), paths...)
+		return nil
+	}
+
+	// Mock start worker to fail
+	startDispatchWorkerFunc = func(cmd *exec.Cmd) error {
+		return fmt.Errorf("simulated process start failure")
+	}
+
+	issues := []issueorchestrator.Issue{
+		{
+			Number:          1203,
+			Key:             "issue-1203",
+			Title:           "Spawn failure cleanup test",
+			Lane:            "compute",
+			Paths:           []string{"internal/compute/fail.go"},
+			ExpectedSteps:   1,
+			Dispatchability: "dispatchable",
+		},
+	}
+	issuesPath := writeTestIssuesFile(t, issues)
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath,
+		"--spawn-opencode",
+		"--workspace", tempDir,
+		"--log-dir", logDir,
+		"--supervise=false",
+		"--json",
+	})
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code on spawn failure, got 0")
+	}
+
+	if !leaseAcquired {
+		t.Errorf("expected lease to be acquired before spawn")
+	}
+	if !leaseReleased {
+		t.Errorf("expected lease to be released after spawn failure")
+	}
+	if !reflect.DeepEqual(releasedPaths, []string{"internal/compute/fail.go"}) {
+		t.Errorf("expected released paths [internal/compute/fail.go], got %v", releasedPaths)
+	}
+
+	var receipt OpencodeSpawnReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
+		t.Fatalf("decode receipt: %v; raw: %s", err, stdout.String())
+	}
+	if len(receipt.Chats) != 1 {
+		t.Fatalf("expected 1 chat in receipt, got %d", len(receipt.Chats))
+	}
+	if receipt.Chats[0].TreeLeaseAcquired {
+		t.Errorf("expected TreeLeaseAcquired to be false after cleanup")
+	}
+	if receipt.Chats[0].Status != "error" {
+		t.Errorf("expected chat status 'error', got %q", receipt.Chats[0].Status)
+	}
+	if !strings.Contains(receipt.Chats[0].Error, "simulated process start failure") {
+		t.Errorf("expected error to contain simulated failure, got %q", receipt.Chats[0].Error)
+	}
+}
+
+func TestIssueOrchestrator_NarrowedPathRecording(t *testing.T) {
+	origStamp := controllerStampFunc
+	origHead := controllerHeadRevFunc
+	origDiscover := discoverHeldLeasesFunc
+	origAcquire := acquireTreeLeaseFunc
+	origRelease := releaseTreeLeaseFunc
+	origStart := startDispatchWorkerFunc
+	defer func() {
+		controllerStampFunc = origStamp
+		controllerHeadRevFunc = origHead
+		discoverHeldLeasesFunc = origDiscover
+		acquireTreeLeaseFunc = origAcquire
+		releaseTreeLeaseFunc = origRelease
+		startDispatchWorkerFunc = origStart
+	}()
+
+	const testRev = "532688a0a04ba669a20d2c7f353150d044ae8be8"
+	controllerStampFunc = func() binstamp.Stamp {
+		return binstamp.Stamp{Revision: testRev, HasVCS: true}
+	}
+	controllerHeadRevFunc = func(string) string {
+		return testRev
+	}
+
+	tempDir := t.TempDir()
+	logDir := filepath.Join(tempDir, "logs")
+
+	// Held lease specifically on internal/compute/a.go
+	discoverHeldLeasesFunc = func(workspace string) ([]debtlane.HeldLease, error) {
+		return []debtlane.HeldLease{
+			{Lane: "compute", Tree: []string{"internal/compute/a.go"}, PID: 999},
+		}, nil
+	}
+
+	var acquiredPaths []string
+	acquireTreeLeaseFunc = func(workspace, lane string, paths []string, pid int) error {
+		acquiredPaths = append([]string(nil), paths...)
+		return nil
+	}
+
+	startDispatchWorkerFunc = func(cmd *exec.Cmd) error {
+		dummy := exec.Command("cmd.exe", "/c", "exit 0")
+		if err := dummy.Start(); err != nil {
+			return err
+		}
+		cmd.Process = dummy.Process
+		return nil
+	}
+
+	// Issue declared paths: both a.go (collides) and b.go (disjoint)
+	issues := []issueorchestrator.Issue{
+		{
+			Number:          1204,
+			Key:             "issue-1204",
+			Title:           "Narrowed path recording test",
+			Lane:            "compute",
+			Paths:           []string{"internal/compute/a.go", "internal/compute/b.go"},
+			ExpectedSteps:   1,
+			Dispatchability: "dispatchable",
+		},
+	}
+	issuesPath := writeTestIssuesFile(t, issues)
+
+	var stdout, stderr bytes.Buffer
+	code := runIssueOrchestrator(&stdout, &stderr, []string{
+		"--from-issues", issuesPath,
+		"--spawn-opencode",
+		"--workspace", tempDir,
+		"--log-dir", logDir,
+		"--supervise=false",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
+	}
+
+	// Tree lease acquired should be ONLY the narrowed disjoint subset: ["internal/compute/b.go"]
+	if !reflect.DeepEqual(acquiredPaths, []string{"internal/compute/b.go"}) {
+		t.Errorf("expected acquiredPaths to be narrowed to [internal/compute/b.go], got %v", acquiredPaths)
+	}
+
+	var receipt OpencodeSpawnReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &receipt); err != nil {
+		t.Fatalf("decode receipt: %v; raw: %s", err, stdout.String())
+	}
+	if !reflect.DeepEqual(receipt.ExactPaths, []string{"internal/compute/a.go", "internal/compute/b.go"}) {
+		t.Errorf("expected receipt ExactPaths [a.go, b.go], got %v", receipt.ExactPaths)
+	}
+	if !reflect.DeepEqual(receipt.NarrowedPaths, []string{"internal/compute/b.go"}) {
+		t.Errorf("expected receipt NarrowedPaths [b.go], got %v", receipt.NarrowedPaths)
+	}
+	if len(receipt.Chats) != 1 {
+		t.Fatalf("expected 1 chat in receipt, got %d", len(receipt.Chats))
+	}
+	chat := receipt.Chats[0]
+	if !reflect.DeepEqual(chat.ExactPaths, []string{"internal/compute/a.go", "internal/compute/b.go"}) {
+		t.Errorf("expected chat ExactPaths [a.go, b.go], got %v", chat.ExactPaths)
+	}
+	if !reflect.DeepEqual(chat.NarrowedPaths, []string{"internal/compute/b.go"}) {
+		t.Errorf("expected chat NarrowedPaths [b.go], got %v", chat.NarrowedPaths)
+	}
+	if chat.Status != "spawned" {
+		t.Errorf("expected chat status 'spawned', got %q", chat.Status)
 	}
 }
