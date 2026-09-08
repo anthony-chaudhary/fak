@@ -38,6 +38,10 @@ const (
 	TriageOnly   = "triage_only"
 	Refused      = "refused"
 
+	RelStartBlockedBy    = "start-blocked-by"
+	RelCoordinatesWith   = "coordinates-with"
+	RelPromotionRequires = "promotion-requires"
+
 	ReasonScopeIncomplete        = "ISSUE_SCOPE_INCOMPLETE"
 	ReasonProblemFrameIncomplete = "ISSUE_PROBLEM_FRAME_INCOMPLETE"
 	ReasonUnrouted               = "ISSUE_UNROUTED"
@@ -152,6 +156,7 @@ type Candidate struct {
 	Lane                   string          `json:"lane,omitempty"`
 	Paths                  []string        `json:"paths,omitempty"`
 	Dependencies           []DependencyRef `json:"dependencies,omitempty"`
+	BlockedBy              []string        `json:"blocked_by,omitempty"`
 	Labels                 []string        `json:"labels,omitempty"`
 	Priority               string          `json:"priority,omitempty"`
 	BoundaryNotes          []string        `json:"boundary_notes,omitempty"`
@@ -274,6 +279,7 @@ type Review struct {
 	SuggestedLanes    []string                 `json:"suggested_lanes,omitempty"`
 	Paths             []string                 `json:"paths,omitempty"`
 	Dependencies      []DependencyRef          `json:"dependencies,omitempty"`
+	BlockedBy         []string                 `json:"blocked_by,omitempty"`
 	WorkUnit          string                   `json:"work_unit,omitempty"`
 	ExpectedSteps     int                      `json:"expected_steps,omitempty"`
 	Assumptions       []string                 `json:"assumptions,omitempty"`
@@ -453,6 +459,7 @@ func reviewCandidate(c Candidate, opt Options, allowLegacyProblemFrame bool) Rev
 		Lane:              c.Lane,
 		Paths:             append([]string(nil), c.Paths...),
 		Dependencies:      append([]DependencyRef(nil), c.Dependencies...),
+		BlockedBy:         append([]string(nil), c.BlockedBy...),
 		WorkUnit:          c.WorkUnit,
 		ExpectedSteps:     c.ExpectedSteps,
 		Assumptions:       append([]string(nil), c.Assumptions...),
@@ -1012,7 +1019,46 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		}
 	}
 
+	c.BlockedBy = CandidatePickupBlockedBy(c.Dependencies)
 	return c
+}
+
+// CandidatePickupBlockedBy extracts deduped issue IDs (as strconv.Itoa(dep.Issue))
+// for blocking dependency references (dep.Blocking == true). Advisory ('coordinates-with')
+// and promotion ('promotion-requires') references never populate this set.
+func CandidatePickupBlockedBy(deps []DependencyRef) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, dep := range deps {
+		if !dep.Blocking || dep.Issue <= 0 || dep.Relation == RelCoordinatesWith || dep.Relation == RelPromotionRequires || dep.Relation == "related" {
+			continue
+		}
+		id := strconv.Itoa(dep.Issue)
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+// BlockedByIssues returns the numeric issue IDs from BlockedBy for convenience.
+func (c Candidate) BlockedByIssues() []int {
+	blocked := c.BlockedBy
+	if len(blocked) == 0 && len(c.Dependencies) > 0 {
+		blocked = CandidatePickupBlockedBy(c.Dependencies)
+	}
+	if len(blocked) == 0 {
+		return nil
+	}
+	out := make([]int, 0, len(blocked))
+	for _, s := range blocked {
+		if n, err := strconv.Atoi(s); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // ParseIssueDependencies parses issue-body dependency markers from a
@@ -1060,6 +1106,12 @@ func dependencyRelation(raw string) (relation string, blocking bool, ok bool) {
 	key = strings.ReplaceAll(key, "_", "-")
 	key = strings.Join(strings.Fields(key), "-")
 	switch key {
+	case "start-blocked-by", "start-blocked":
+		return RelStartBlockedBy, true, true
+	case "coordinates-with", "coordinates":
+		return RelCoordinatesWith, false, true
+	case "promotion-requires", "promotes-after", "promotion":
+		return RelPromotionRequires, false, true
 	case "after", "depends", "depends-on", "requires", "prerequisite", "blocked-by":
 		return "after", true, true
 	case "blocks":
@@ -1178,6 +1230,21 @@ func normalize(c Candidate) Candidate {
 	c.OptimalModelTier = strings.TrimSpace(c.OptimalModelTier)
 	c.Paths = compact(c.Paths)
 	c.Dependencies = normalizeDependencies(c.Dependencies)
+	if len(c.BlockedBy) == 0 && len(c.Dependencies) > 0 {
+		c.BlockedBy = CandidatePickupBlockedBy(c.Dependencies)
+	} else if len(c.BlockedBy) > 0 {
+		var deduped []string
+		seen := map[string]bool{}
+		for _, s := range c.BlockedBy {
+			s = strings.TrimSpace(s)
+			if s == "" || seen[s] {
+				continue
+			}
+			seen[s] = true
+			deduped = append(deduped, s)
+		}
+		c.BlockedBy = deduped
+	}
 	c.Labels = compact(c.Labels)
 	c.BoundaryNotes = compact(c.BoundaryNotes)
 	c.Reversibility = strings.TrimSpace(c.Reversibility)
