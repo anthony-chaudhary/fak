@@ -18,6 +18,12 @@ type vulkanQKNormDebug interface {
 }
 
 func TestQwen35VulkanResidentQKNormMatchesCPUWithZeroTransfers(t *testing.T) {
+	if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") != "1" {
+		if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
+			t.Fatal("physical QKNorm witness requires FAK_VULKAN_DISPATCH_PROFILE=1 before process start")
+		}
+		t.Skip("set FAK_VULKAN_DISPATCH_PROFILE=1 to attribute the resident norm dispatches")
+	}
 	be, ok := compute.Lookup("vulkan")
 	if !ok || be == nil || be.Name() != "vulkan" {
 		if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
@@ -103,8 +109,12 @@ func TestQwen35VulkanResidentQKNormMatchesCPUWithZeroTransfers(t *testing.T) {
 	if qCos < 0.999999 || kCos < 0.999999 || qMax > 2e-5 || kMax > 2e-5 {
 		t.Fatalf("QKNorm parity q_cos=%.9f q_max_abs=%g k_cos=%.9f k_max_abs=%g", qCos, qMax, kCos, kMax)
 	}
-	t.Logf("engine=fak-native backend=%s device=%s model_fixture=qwen3.5-27b-qwen3.8-qknorm-geometry source=working-tree n_heads=%d n_kv_heads=%d head_dim=%d qk_eps=%g norm_gain_1p=true norm_dispatches=%d h2d_bytes=%d d2h_bytes=%d h2d_submits=%d d2h_submits=%d q_cos=%.9f k_cos=%.9f q_max_abs=%g k_max_abs=%g implicit_fallback=false",
-		be.Name(), be.Tier(), nH, nKV, hd, cfg.QKNormEps, normDispatches, h2dDelta, d2hDelta, h2dSubmits, d2hSubmits, qCos, kCos, qMax, kMax)
+	source := os.Getenv("FAK_VULKAN_SOURCE_REV")
+	if source == "" {
+		source = "unbound-working-tree"
+	}
+	t.Logf("engine=fak-native backend=%s device=%s model_fixture=qwen3.5-27b-qwen3.8-qknorm-geometry source=%s n_heads=%d n_kv_heads=%d head_dim=%d qk_eps=%g norm_gain_1p=true norm_dispatches=%d h2d_bytes=%d d2h_bytes=%d h2d_submits=%d d2h_submits=%d q_cos=%.9f k_cos=%.9f q_max_abs=%g k_max_abs=%g implicit_fallback=false",
+		be.Name(), be.Tier(), source, nH, nKV, hd, cfg.QKNormEps, normDispatches, h2dDelta, d2hDelta, h2dSubmits, d2hSubmits, qCos, kCos, qMax, kMax)
 }
 
 func qknormVectorAgreement(got, want []float32) (cosine, maxAbs float64) {
