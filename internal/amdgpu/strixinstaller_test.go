@@ -255,12 +255,14 @@ func TestGenerateStrixInstallerPackage_LANCommunications(t *testing.T) {
 		"FLEET_SPINE_ADVERTISE_S=20.0",
 		"FAK_CORS_ALLOWED_ORIGINS=http://localhost:3000,http://192.168.1.*",
 		"PREFILL_CHUNK_TOKENS=1024",
-		"FAK_GPU_LEASE=/tmp/fak-gpu.lease",
 	}
 	for _, item := range wantEnvItems {
 		if !strings.Contains(env, item) {
 			t.Errorf("conf/strix-halo.env missing %q:\n%s", item, env)
 		}
+	}
+	if strings.Contains(env, "FAK_GPU_LEASE=") {
+		t.Errorf("proxy-only conf/strix-halo.env must not claim the GPU lease:\n%s", env)
 	}
 
 	// 2. Check conf/fak-serve.service
@@ -271,13 +273,15 @@ func TestGenerateStrixInstallerPackage_LANCommunications(t *testing.T) {
 		"--model qwen3.6-27b",
 		"/opt/fak/bin/fak serve",
 		"--require-key-env FAK_GATEWAY_KEY",
-		"Environment=FAK_GPU_LEASE=/tmp/fak-gpu.lease",
 		"UnsetEnvironment=GGML_CUDA_ENABLE_UNIFIED_MEMORY HSA_OVERRIDE_GFX_VERSION",
 	}
 	for _, item := range wantServe {
 		if !strings.Contains(serve, item) {
 			t.Errorf("conf/fak-serve.service missing %q:\n%s", item, serve)
 		}
+	}
+	if strings.Contains(serve, "FAK_GPU_LEASE=") {
+		t.Errorf("proxy-only conf/fak-serve.service must not claim the GPU lease:\n%s", serve)
 	}
 
 	// 3. Check scripts/setup-firewall.sh
