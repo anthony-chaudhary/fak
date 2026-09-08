@@ -1455,3 +1455,203 @@ func TestSessionEventHookApprovalBroadcastValidCardInventoryAndReplay(t *testing
 		t.Fatalf("CurrentCards() mismatch: %+v", current)
 	}
 }
+
+func TestSessionHubDroppedFrames(t *testing.T) {
+	// 1. Test isolated sessionHub instance with blocked subscriber
+	hub := &sessionHub{
+		subscribers: make(map[chan []byte]*sseSubscriber),
+	}
+	if got := hub.DroppedFrames(); got != 0 {
+		t.Fatalf("expected 0 dropped frames on fresh hub, got %d", got)
+	}
+	initialDiag := hub.Diagnostics()
+	if initialDiag.DroppedFrames != 0 || initialDiag.Subscribers != 0 {
+		t.Fatalf("unexpected initial diagnostics: %+v", initialDiag)
+	}
+	if status := hub.Status(); status != initialDiag {
+		t.Fatalf("Status() != Diagnostics(): %+v vs %+v", status, initialDiag)
+	}
+
+	subCh := hub.subscribe("")
+	if diag := hub.Diagnostics(); diag.Subscribers != 1 {
+		t.Fatalf("expected 1 subscriber, got %d", diag.Subscribers)
+	}
+
+	// Channel capacity is 32. Broadcast 32 messages: all fit without dropping.
+	for i := 0; i < 32; i++ {
+		hub.broadcast("test_event", []byte(fmt.Sprintf(`{"msg":%d}`, i)))
+	}
+	if got := hub.DroppedFrames(); got != 0 {
+		t.Fatalf("expected 0 dropped frames after 32 messages, got %d", got)
+	}
+
+	// Broadcast 8 more messages to stalled subscriber: all 8 must drop.
+	for i := 0; i < 8; i++ {
+		hub.broadcast("test_event", []byte(fmt.Sprintf(`{"overflow":%d}`, i)))
+	}
+	if got := hub.DroppedFrames(); got != 8 {
+		t.Fatalf("expected 8 dropped frames after overflow, got %d", got)
+	}
+	if diag := hub.Diagnostics(); diag.DroppedFrames != 8 || diag.Subscribers != 1 {
+		t.Fatalf("diagnostics mismatch after drop: %+v", diag)
+	}
+
+	// Drain 4 messages from subscriber channel
+	for i := 0; i < 4; i++ {
+		<-subCh
+	}
+
+	// Broadcast 4 messages: all 4 fit into the drained capacity, dropped counter unchanged at 8
+	for i := 0; i < 4; i++ {
+		hub.broadcast("test_event", []byte(`{"drained_fit":true}`))
+	}
+	if got := hub.DroppedFrames(); got != 8 {
+		t.Fatalf("dropped frames changed unexpectedly after drained fit: %d", got)
+	}
+
+	// Broadcast 2 more messages: buffer is full again, these 2 must drop -> total 10
+	for i := 0; i < 2; i++ {
+		hub.broadcast("test_event", []byte(`{"dropped_again":true}`))
+	}
+	if got := hub.DroppedFrames(); got != 10 {
+		t.Fatalf("expected 10 dropped frames, got %d", got)
+	}
+
+	// resetForTest clears dropped counter
+	hub.resetForTest()
+	if got := hub.DroppedFrames(); got != 0 {
+		t.Fatalf("expected 0 dropped frames after resetForTest, got %d", got)
+	}
+	hub.unsubscribe(subCh)
+
+	// 2. Test defaultSessionHub, broadcaster, and HTTP endpoints
+	resetSessionHubForTest()
+	defer resetSessionHubForTest()
+
+	ch := SubscribeSessionEvents("")
+	defer UnsubscribeSessionEvents(ch)
+
+	for i := 0; i < 32; i++ {
+		BroadcastSessionUpdate([]byte(fmt.Sprintf(`{"msg":%d}`, i)))
+	}
+	if got := DroppedSSEFrames(); got != 0 {
+		t.Fatalf("expected 0 dropped frames after 32 messages, got %d", got)
+	}
+	if got := DroppedFrames(); got != 0 {
+		t.Fatalf("expected 0 dropped frames from DroppedFrames(), got %d", got)
+	}
+
+	broadcaster := newSessionBroadcaster()
+	if got := broadcaster.DroppedFrames(); got != 0 {
+		t.Fatalf("expected 0 dropped frames from broadcaster, got %d", got)
+	}
+
+	for i := 0; i < 5; i++ {
+		BroadcastSessionUpdate([]byte(fmt.Sprintf(`{"overflow":%d}`, i)))
+	}
+	if got := DroppedSSEFrames(); got != 5 {
+		t.Fatalf("expected 5 dropped frames after 5 overflow messages, got %d", got)
+	}
+	if got := DroppedFrames(); got != 5 {
+		t.Fatalf("expected 5 dropped frames from DroppedFrames(), got %d", got)
+	}
+	if got := broadcaster.DroppedFrames(); got != 5 {
+		t.Fatalf("expected 5 dropped frames from broadcaster, got %d", got)
+	}
+	if bDiag := broadcaster.Diagnostics(); bDiag.DroppedFrames != 5 || bDiag.Subscribers != 1 {
+		t.Fatalf("broadcaster diagnostics mismatch: %+v", bDiag)
+	}
+
+	diag := DefaultSessionHubDiagnostics()
+	if diag.DroppedFrames != 5 {
+		t.Fatalf("expected 5 dropped frames in diagnostics, got %d", diag.DroppedFrames)
+	}
+	if diag.Subscribers != 1 {
+		t.Fatalf("expected 1 subscriber in diagnostics, got %d", diag.Subscribers)
+	}
+
+	ts := httptest.NewServer(handler(newStore()))
+	defer ts.Close()
+
+	// GET /api/sessions/diagnostics
+	resp, err := ts.Client().Get(ts.URL + "/api/sessions/diagnostics")
+	if err != nil {
+		t.Fatalf("GET /api/sessions/diagnostics failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+
+	var respDiag SessionHubDiagnostics
+	if err := json.Unmarshal(body, &respDiag); err != nil {
+		t.Fatalf("unmarshal diagnostics json: %v", err)
+	}
+	if respDiag.DroppedFrames != 5 {
+		t.Fatalf("expected 5 dropped frames in response, got %d", respDiag.DroppedFrames)
+	}
+	if !strings.Contains(string(body), `"dropped_frames":5`) && !strings.Contains(string(body), `"dropped_frames": 5`) {
+		t.Fatalf("response json missing dropped_frames: 5, body: %s", string(body))
+	}
+
+	// GET /v1/fak/sessions/diagnostics
+	respV1, err := ts.Client().Get(ts.URL + "/v1/fak/sessions/diagnostics")
+	if err != nil {
+		t.Fatalf("GET /v1/fak/sessions/diagnostics failed: %v", err)
+	}
+	defer respV1.Body.Close()
+	if respV1.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 from v1 diagnostics, got %d", respV1.StatusCode)
+	}
+	var respV1Diag SessionHubDiagnostics
+	if err := json.NewDecoder(respV1.Body).Decode(&respV1Diag); err != nil {
+		t.Fatalf("decode v1 diagnostics json: %v", err)
+	}
+	if respV1Diag.DroppedFrames != 5 {
+		t.Fatalf("expected 5 dropped frames in v1 diagnostics, got %d", respV1Diag.DroppedFrames)
+	}
+
+	// GET /api/sessions includes dropped_frames
+	respSess, err := ts.Client().Get(ts.URL + "/api/sessions")
+	if err != nil {
+		t.Fatalf("GET /api/sessions failed: %v", err)
+	}
+	defer respSess.Body.Close()
+	if respSess.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 from /api/sessions, got %d", respSess.StatusCode)
+	}
+	var sessPayload struct {
+		DroppedFrames uint64                 `json:"dropped_frames"`
+		Diagnostics   SessionHubDiagnostics `json:"diagnostics"`
+	}
+	if err := json.NewDecoder(respSess.Body).Decode(&sessPayload); err != nil {
+		t.Fatalf("decode /api/sessions payload: %v", err)
+	}
+	if sessPayload.DroppedFrames != 5 || sessPayload.Diagnostics.DroppedFrames != 5 {
+		t.Fatalf("unexpected dropped frames in /api/sessions: dropped_frames=%d diagnostics=%+v", sessPayload.DroppedFrames, sessPayload.Diagnostics)
+	}
+
+	// GET /api/status includes session_hub diagnostics
+	respStatus, err := ts.Client().Get(ts.URL + "/api/status")
+	if err != nil {
+		t.Fatalf("GET /api/status failed: %v", err)
+	}
+	defer respStatus.Body.Close()
+	if respStatus.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 from /api/status, got %d", respStatus.StatusCode)
+	}
+	var statPayload struct {
+		SessionHub *SessionHubDiagnostics `json:"session_hub"`
+	}
+	if err := json.NewDecoder(respStatus.Body).Decode(&statPayload); err != nil {
+		t.Fatalf("decode /api/status payload: %v", err)
+	}
+	if statPayload.SessionHub == nil || statPayload.SessionHub.DroppedFrames != 5 {
+		t.Fatalf("unexpected session_hub in /api/status: %+v", statPayload.SessionHub)
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
@@ -466,10 +467,11 @@ type sseSubscriber struct {
 }
 
 type sessionHub struct {
-	mu          sync.RWMutex
-	subscribers map[chan []byte]*sseSubscriber
-	lastCards   []SessionCard
-	lastHTML    string
+	mu            sync.RWMutex
+	subscribers   map[chan []byte]*sseSubscriber
+	lastCards     []SessionCard
+	lastHTML      string
+	droppedFrames atomic.Uint64
 }
 
 var defaultSessionHub = &sessionHub{
@@ -525,6 +527,7 @@ func (h *sessionHub) broadcastSession(sessionID string, eventType string, data [
 			select {
 			case ch <- msg:
 			default:
+				h.droppedFrames.Add(1)
 			}
 		}
 	}
@@ -570,6 +573,54 @@ func CurrentCards() []SessionCard {
 	return defaultSessionHub.currentCards()
 }
 
+// DroppedFrames returns the cumulative count of dropped SSE frames across all subscribers in the default hub.
+func DroppedFrames() uint64 {
+	return defaultSessionHub.DroppedFrames()
+}
+
+// DroppedSSEFrames returns the cumulative count of dropped SSE frames across all subscribers in the default hub.
+func DroppedSSEFrames() uint64 {
+	return defaultSessionHub.DroppedFrames()
+}
+
+// DefaultSessionHubDiagnostics returns diagnostic telemetry for the default session hub.
+func DefaultSessionHubDiagnostics() SessionHubDiagnostics {
+	return defaultSessionHub.Diagnostics()
+}
+
+// SessionHubDiagnostics conveys runtime subscriber and drop telemetry for the SSE hub.
+type SessionHubDiagnostics struct {
+	Subscribers   int    `json:"subscribers"`
+	DroppedFrames uint64 `json:"dropped_frames"`
+}
+
+// DroppedFrames returns the cumulative number of SSE frames dropped due to full subscriber buffers.
+func (h *sessionHub) DroppedFrames() uint64 {
+	if h == nil {
+		return 0
+	}
+	return h.droppedFrames.Load()
+}
+
+// Diagnostics returns an instantaneous snapshot of the hub's subscriber count and dropped frame telemetry.
+func (h *sessionHub) Diagnostics() SessionHubDiagnostics {
+	if h == nil {
+		return SessionHubDiagnostics{}
+	}
+	h.mu.RLock()
+	subs := len(h.subscribers)
+	h.mu.RUnlock()
+	return SessionHubDiagnostics{
+		Subscribers:   subs,
+		DroppedFrames: h.droppedFrames.Load(),
+	}
+}
+
+// Status returns the current diagnostic status of the hub.
+func (h *sessionHub) Status() SessionHubDiagnostics {
+	return h.Diagnostics()
+}
+
 func (h *sessionHub) currentCards() []SessionCard {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -581,6 +632,7 @@ func (h *sessionHub) resetForTest() {
 	defer h.mu.Unlock()
 	h.lastCards = nil
 	h.lastHTML = ""
+	h.droppedFrames.Store(0)
 }
 
 func resetSessionHubForTest() {
@@ -653,6 +705,22 @@ func (b *sessionBroadcaster) broadcastCards(source any) {
 		return
 	}
 	b.hub.broadcastCards(source)
+}
+
+// DroppedFrames returns the number of dropped SSE frames recorded by the broadcaster's hub.
+func (b *sessionBroadcaster) DroppedFrames() uint64 {
+	if b == nil || b.hub == nil {
+		return defaultSessionHub.DroppedFrames()
+	}
+	return b.hub.DroppedFrames()
+}
+
+// Diagnostics returns diagnostic telemetry for the broadcaster's hub.
+func (b *sessionBroadcaster) Diagnostics() SessionHubDiagnostics {
+	if b == nil || b.hub == nil {
+		return defaultSessionHub.Diagnostics()
+	}
+	return b.hub.Diagnostics()
 }
 
 func (b *sessionBroadcaster) subscribe() (chan []byte, func()) {
@@ -813,12 +881,23 @@ func installSessionRoutesWithStore(mux *http.ServeMux, source SessionSource, s *
 	mux.HandleFunc("GET /api/sessions/events", handleSessionSSE(false))
 	mux.HandleFunc("GET /v1/fak/sessions/events", handleSessionSSE(false))
 	mux.HandleFunc("GET /v1/fak/sessions/{id}/events", handleSessionSSE(true))
+	mux.HandleFunc("GET /api/sessions/diagnostics", func(w http.ResponseWriter, r *http.Request) {
+		writeSessionJSON(w, http.StatusOK, defaultSessionHub.Diagnostics())
+	})
+	mux.HandleFunc("GET /v1/fak/sessions/diagnostics", func(w http.ResponseWriter, r *http.Request) {
+		writeSessionJSON(w, http.StatusOK, defaultSessionHub.Diagnostics())
+	})
 	mux.HandleFunc("POST /v1/fak/sessions/{id}/events", handleSessionEventHook(source, s))
 	mux.HandleFunc("POST /api/sessions/{id}/events", handleSessionEventHook(source, s))
 
 	mux.HandleFunc("GET /api/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if source == nil {
-			writeSessionJSON(w, http.StatusOK, map[string]any{"sessions": []SessionCard{}, "html": `<p class="empty">Session authority is not connected.</p>`})
+			writeSessionJSON(w, http.StatusOK, map[string]any{
+				"sessions":       []SessionCard{},
+				"html":           `<p class="empty">Session authority is not connected.</p>`,
+				"dropped_frames": defaultSessionHub.DroppedFrames(),
+				"diagnostics":    defaultSessionHub.Diagnostics(),
+			})
 			return
 		}
 		cards, err := source.Sessions(r.Context())
@@ -840,7 +919,12 @@ func installSessionRoutesWithStore(mux *http.ServeMux, source SessionSource, s *
 		defaultSessionHub.lastCards = cloneSessionCards(cards)
 		defaultSessionHub.lastHTML = markup
 		defaultSessionHub.mu.Unlock()
-		writeSessionJSON(w, http.StatusOK, map[string]any{"sessions": cards, "html": markup})
+		writeSessionJSON(w, http.StatusOK, map[string]any{
+			"sessions":       cards,
+			"html":           markup,
+			"dropped_frames": defaultSessionHub.DroppedFrames(),
+			"diagnostics":    defaultSessionHub.Diagnostics(),
+		})
 	})
 	mux.HandleFunc("POST /api/sessions/{id}/controls/{action}", func(w http.ResponseWriter, r *http.Request) {
 		if source == nil {

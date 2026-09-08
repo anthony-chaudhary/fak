@@ -221,13 +221,14 @@ type liveSessionSummary struct {
 }
 
 type statusPayload struct {
-	Mode       string            `json:"mode"`
-	Workspace  workspaceStatus   `json:"workspace"`
-	Gateway    gatewayOverview   `json:"gateway"`
-	Agents     agentOverview     `json:"agents"`
-	Goals      goalOverview      `json:"goals"`
-	LocalWork  localWorkOverview `json:"local_work"`
-	Dashboards []dashboardLink   `json:"dashboards"`
+	Mode       string                `json:"mode"`
+	Workspace  workspaceStatus       `json:"workspace"`
+	Gateway    gatewayOverview       `json:"gateway"`
+	Agents     agentOverview         `json:"agents"`
+	Goals      goalOverview          `json:"goals"`
+	LocalWork  localWorkOverview     `json:"local_work"`
+	Dashboards []dashboardLink       `json:"dashboards"`
+	SessionHub SessionHubDiagnostics `json:"session_hub"`
 }
 
 type agentOverview struct {
@@ -751,6 +752,7 @@ func handlerWithAllSources(s *store, live *liveAdapter, goals goalLister, sessio
 			Agents: agents, Goals: readGoalOverview(goals),
 			LocalWork:  readLocalWorkOverview(r.Context(), local, root, time.Now()),
 			Dashboards: dashboardLinks(gateway.URL),
+			SessionHub: defaultSessionHub.Diagnostics(),
 		})
 	})
 	mux.HandleFunc("POST /api/runs", func(w http.ResponseWriter, r *http.Request) {
