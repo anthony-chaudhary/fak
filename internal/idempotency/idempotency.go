@@ -323,6 +323,9 @@ func (s *Store) Status(key string) (Record, bool, error) {
 //   - if its identity does not match ident, it returns ErrIdentityConflict without calling apply();
 //   - if its identity matches, it replays a fresh APPLIED result, blocks on ambiguous states, or allows PROVEN_ABSENT.
 func (s *Store) DoBound(key string, ident RequestIdentity, apply func() (string, error)) (result string, replayed bool, err error) {
+	if ident.IsZero() {
+		return "", false, errors.New("idempotency: non-zero RequestIdentity required for DoBound")
+	}
 	return s.do(key, ident.Operation, ident, apply)
 }
 
@@ -363,8 +366,9 @@ func (s *Store) do(key, op string, ident RequestIdentity, apply func() (string, 
 		}
 		bound := !ident.IsZero()
 		if r, ok := s.recs[key]; ok {
-			if bound {
-				if r.Identity == nil || r.Identity.IsZero() {
+			hasBoundRecord := r.Identity != nil && !r.Identity.IsZero()
+			if hasBoundRecord || bound {
+				if !hasBoundRecord {
 					return ErrLegacyBindingRequired
 				}
 				if *r.Identity != ident {

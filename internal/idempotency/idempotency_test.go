@@ -601,6 +601,24 @@ func TestBoundIdentityRestart(t *testing.T) {
 		})
 	}
 
+	// Unbound Do (missing identity) on bound record conflicts without re-applying.
+	_, _, err = store2.Do(key, ident.Operation, apply)
+	if !errors.Is(err, ErrIdentityConflict) {
+		t.Fatalf("unbound Do on bound record: got %v, want ErrIdentityConflict", err)
+	}
+	if calls != 1 {
+		t.Fatalf("apply() called during unbound Do conflict: calls = %d, want 1", calls)
+	}
+
+	// DoBound with zero RequestIdentity is rejected without re-applying.
+	_, _, err = store2.DoBound(key, RequestIdentity{}, apply)
+	if err == nil {
+		t.Fatal("DoBound with zero RequestIdentity must return an error")
+	}
+	if calls != 1 {
+		t.Fatalf("apply() called during zero identity DoBound: calls = %d, want 1", calls)
+	}
+
 	// 5. In an existing store with an unbound legacy record (written with regular Do): calling DoBound on that key returns ErrLegacyBindingRequired.
 	legacyToken := "legacy-token-xyz"
 	legacyKey := Key("issue-create", legacyToken)
