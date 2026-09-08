@@ -10,7 +10,11 @@ package compute
 */
 import "C"
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+	"unsafe"
+)
 
 // RMSNorm applies row-wise RMS normalization scaled by weight (eps in the denominator)
 // to each row of x, returning a new device tensor of the same shape.
@@ -112,4 +116,133 @@ func (v *vulkanBackend) Argmax(logits Tensor) int {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	return int(C.fvk_argmax_f32(v.vp(logits), C.int(logits.Numel())))
+}
+
+// ExecuteAttentionWithDequantOnce runs multi-head attention against the quantized KV cache,
+// performing dequantization exactly once into the scratchpad and reusing the contiguous buffers
+// across all nQ query heads.
+func (s *VulkanKVScratchpad) ExecuteAttentionWithDequantOnce(q []float32, rawK, rawV []byte, nQ int) ([]float32, error) {
+	// 1. Dequantize once into local GPU UMA scratchpad memory
+	if err := s.DequantizeOnce(rawK, rawV); err != nil {
+		return nil, err
+	}
+
+	// 2. Evaluate all nQ attention heads by reusing the dequantized scratchpad buffers
+	return s.ExecuteAttentionFromScratchpad(q, nQ)
+}
+
+// ExecuteAttentionFromScratchpad evaluates all nQ attention heads by streaming contiguous tiles from the scratchpad.
+func (s *VulkanKVScratchpad) ExecuteAttentionFromScratchpad(q []float32, nQ int) ([]float32, error) {
+	if nQ <= 0 {
+		return nil, fmt.Errorf("compute: invalid nQ=%d", nQ)
+	}
+	if len(q) < nQ*s.HeadDim {
+		return nil, fmt.Errorf("compute: query buffer too small (%d < %d)", len(q), nQ*s.HeadDim)
+	}
+
+	out := make([]float32, nQ*s.HeadDim)
+	scale := float32(1.0 / math.Sqrt(float64(s.HeadDim)))
+	groupSize := nQ / s.NumKVHeads
+	if groupSize < 1 {
+		groupSize = 1
+	}
+
+	scores := make([]float32, s.NumPos)
+
+	for qh := 0; qh < nQ; qh++ {
+		kvh := qh / groupSize
+		if kvh >= s.NumKVHeads {
+			kvh = s.NumKVHeads - 1
+		}
+
+		kHead, vHead, _, err := s.GetHeadSlice(kvh)
+		if err != nil {
+			return nil, err
+		}
+
+		qOff := qh * s.HeadDim
+		qVec := q[qOff : qOff+s.HeadDim]
+
+		// Dot-product Q with K
+		maxScore := float32(-math.MaxFloat32)
+		for p := 0; p < s.NumPos; p++ {
+			kOff := p * s.HeadDim
+			var dot float32
+			for d := 0; d < s.HeadDim; d++ {
+				dot += qVec[d] * kHead[kOff+d]
+			}
+			sVal := dot * scale
+			scores[p] = sVal
+			if sVal > maxScore {
+				maxScore = sVal
+			}
+		}
+
+		// Softmax
+		var sumExp float32
+		for p := 0; p < s.NumPos; p++ {
+			expVal := float32(math.Exp(float64(scores[p] - maxScore)))
+			scores[p] = expVal
+			sumExp += expVal
+		}
+
+		invSum := float32(1.0) / sumExp
+		for p := 0; p < s.NumPos; p++ {
+			scores[p] *= invSum
+		}
+
+		// Weighted sum of V
+		outOff := qh * s.HeadDim
+		for d := 0; d < s.HeadDim; d++ {
+			var acc float32
+			for p := 0; p < s.NumPos; p++ {
+				vOff := p * s.HeadDim
+				acc += scores[p] * vHead[vOff+d]
+			}
+			out[outOff+d] = acc
+		}
+	}
+
+	return out, nil
+}
+
+// ExecuteVulkanAttentionWithDequantOnce runs FlashAttention on AMD RDNA 3.5 (gfx1151 / Strix Halo)
+// using the single-pass Vulkan dequantization scratchpad pipeline, eliminating redundant per-head KV dequantization.
+func ExecuteVulkanAttentionWithDequantOnce(
+	q []float32,
+	rawK, rawV []byte,
+	arch string,
+	nPos, nQ, nKV, headDim int,
+	format QuantizedKVType,
+) ([]float32, *VulkanKVScratchpad, error) {
+	scratch, err := NewVulkanKVScratchpad(arch, format, nPos, nKV, headDim)
+	if err != nil {
+		return nil, nil, fmt.Errorf("vulkan: failed to create dequant scratchpad: %w", err)
+	}
+	out, err := scratch.ExecuteAttentionWithDequantOnce(q, rawK, rawV, nQ)
+	if err != nil {
+		return nil, nil, fmt.Errorf("vulkan: dequant-once attention failed: %w", err)
+	}
+	return out, scratch, nil
+}
+
+// AttentionQuantizedKV executes attention for one layer over quantized KV caches using the dequant-once scratchpad.
+func (v *vulkanBackend) AttentionQuantizedKV(
+	q Tensor,
+	rawK, rawV []byte,
+	format QuantizedKVType,
+	layer, nPos, nQ, nKV, headDim int,
+	scale float32,
+) (Tensor, *VulkanKVScratchpad, error) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	qHost := v.Read(q)
+	arch := "gfx1151"
+	outHost, scratch, err := ExecuteVulkanAttentionWithDequantOnce(qHost, rawK, rawV, arch, nPos, nQ, nKV, headDim, format)
+	if err != nil {
+		return Tensor{}, nil, err
+	}
+	outDev, _ := v.devTr([]int{nQ * headDim}, F32)
+	C.fvk_h2d(v.vp(outDev), unsafe.Pointer(&outHost[0]), C.size_t(len(outHost)*4))
+	return outDev, scratch, nil
 }
