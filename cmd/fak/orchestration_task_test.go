@@ -95,3 +95,60 @@ func TestOrchestrationPlanRequiresExactlyOneTaskSource(t *testing.T) {
 		}
 	}
 }
+
+func TestOrchestrationPlanRoutesCompleteFormalPacketAndPreservesOperatorPins(t *testing.T) {
+	fixture := t.TempDir() + "/formal-task.json"
+	body := `{
+		"schema":"fak-orchestration-task/1",
+		"id":"formal-cli-spine",
+		"work_class":"rigor",
+		"formal_packet":{
+			"schema":"fak-formal-packet/1",
+			"task_kinds":["state_machine_audit"],
+			"definitions_and_assumptions":"For finite states S, transition relation R is total.",
+			"exact_proposition":"Prove every reachable state has exactly one canonical successor.",
+			"required_output_form":"DEFINITIONS, PROPOSITION, PROOF, COUNTEREXAMPLES, WITNESS",
+			"deterministic_witness":"go test ./internal/orchestration -run TestFormalPacket",
+			"surfaces":["internal/orchestration/**"]
+		}
+	}`
+	if err := os.WriteFile(fixture, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(extra ...string) (orchestration.Resolution, string) {
+		t.Helper()
+		args := []string{"plan", "--profile", "auto", "--task", fixture, "--json", "--selfcheck"}
+		args = append(args, extra...)
+		var stdout, stderr bytes.Buffer
+		if code := runOrchestration(&stdout, &stderr, args); code != 0 {
+			t.Fatalf("args=%v code=%d stderr=%s", extra, code, stderr.String())
+		}
+		var got orchestration.Resolution
+		if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v\n%s", err, stdout.String())
+		}
+		if !strings.Contains(stderr.String(), "SELFCHECK PASS") || !strings.Contains(stderr.String(), "launched=0") {
+			t.Fatalf("selfcheck receipt missing: %s", stderr.String())
+		}
+		return got, stderr.String()
+	}
+
+	automatic, _ := run()
+	route := automatic.Resolved.AstraRoute
+	if route == nil || !route.Eligible || !route.Selected || route.Source != orchestration.AstraRouteSourceFormalPacket || route.Model != orchestration.AstraWorkerModel || route.ReasoningEffort != orchestration.AstraWorkerEffort || route.ReasoningEffortSource != orchestration.AstraRouteSourceFormalPacket {
+		t.Fatalf("automatic Astra receipt = %+v", route)
+	}
+	if automatic.Resolved.SOLRoute.WorkerModel != orchestration.AstraWorkerModel || automatic.Resolved.SOLRoute.WorkerReasoningEffort != orchestration.AstraWorkerEffort {
+		t.Fatalf("automatic worker route = %+v", automatic.Resolved.SOLRoute)
+	}
+
+	pinned, _ := run("--worker-model", "gpt-5.6-sol", "--worker-effort", "high")
+	route = pinned.Resolved.AstraRoute
+	if route == nil || !route.Eligible || route.Selected || route.Source != orchestration.AstraRouteSourceOperatorPin || route.Model != "gpt-5.6-sol" || route.ReasoningEffort != "high" || route.ReasoningEffortSource != orchestration.AstraRouteSourceOperatorPin {
+		t.Fatalf("operator-pinned Astra receipt = %+v", route)
+	}
+	if pinned.Resolved.SOLRoute.WorkerModel != "gpt-5.6-sol" || pinned.Resolved.SOLRoute.WorkerReasoningEffort != "high" {
+		t.Fatalf("operator pins lost from worker route: %+v", pinned.Resolved.SOLRoute)
+	}
+}

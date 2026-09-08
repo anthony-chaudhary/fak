@@ -1,7 +1,7 @@
 package orchestration
 
 import (
-	"path/filepath"
+	"path"
 	"strings"
 )
 
@@ -57,6 +57,7 @@ type AstraRouteReason string
 const (
 	AstraReasonSchemaInvalid             AstraRouteReason = "ASTRA_FORMAL_PACKET_SCHEMA_INVALID"
 	AstraReasonWorkClassRequired         AstraRouteReason = "ASTRA_FORMAL_PACKET_WORK_CLASS_REQUIRED"
+	AstraReasonAnalysisOnly              AstraRouteReason = "ASTRA_FORMAL_PACKET_ANALYSIS_ONLY"
 	AstraReasonTaskKindRequired          AstraRouteReason = "ASTRA_FORMAL_PACKET_TASK_KIND_REQUIRED"
 	AstraReasonTaskKindDuplicate         AstraRouteReason = "ASTRA_FORMAL_PACKET_TASK_KIND_DUPLICATE"
 	AstraReasonTaskKindExcluded          AstraRouteReason = "ASTRA_FORMAL_PACKET_TASK_KIND_EXCLUDED"
@@ -73,6 +74,7 @@ const (
 const (
 	AstraRouteSourceFormalPacket = "formal-packet"
 	AstraRouteSourceTaskPin      = "task.pin"
+	AstraRouteSourceOperatorPin  = "operator-pin"
 )
 
 // AstraRoute is present only when a task supplied formal_packet. Eligible says
@@ -104,8 +106,16 @@ func AssessAstraRoute(task TaskSpec) *AstraRoute {
 		}
 	}
 
-	add(AstraReasonSchemaInvalid, strings.TrimSpace(p.Schema) != FormalPacketSchemaVersion)
+	add(AstraReasonSchemaInvalid, p.Schema != FormalPacketSchemaVersion)
 	add(AstraReasonWorkClassRequired, task.WorkClass != WorkRigor)
+	effectAccess := false
+	for _, worker := range task.WorkerAccess {
+		if worker.Access.Mode == ChildAccessEffect {
+			effectAccess = true
+			break
+		}
+	}
+	add(AstraReasonAnalysisOnly, effectAccess)
 
 	missingKind := len(p.TaskKinds) == 0
 	duplicateKind, excludedKind, unknownKind := false, false, false
@@ -143,14 +153,16 @@ func AssessAstraRoute(task TaskSpec) *AstraRoute {
 	unboundedSurface, duplicateSurface := false, false
 	seenSurfaces := make(map[string]struct{}, len(p.Surfaces))
 	for _, raw := range p.Surfaces {
-		surface := filepathCleanSlash(raw)
-		if !boundedAccessRegion(raw) {
+		surface, bounded := formalSurfaceKey(raw)
+		if !bounded {
 			unboundedSurface = true
 		}
-		if _, exists := seenSurfaces[surface]; exists {
-			duplicateSurface = true
+		if surface != "" {
+			if _, exists := seenSurfaces[surface]; exists {
+				duplicateSurface = true
+			}
+			seenSurfaces[surface] = struct{}{}
 		}
-		seenSurfaces[surface] = struct{}{}
 	}
 	add(AstraReasonSurfaceUnbounded, unboundedSurface)
 	add(AstraReasonSurfaceDuplicate, duplicateSurface)
@@ -165,9 +177,39 @@ func AssessAstraRoute(task TaskSpec) *AstraRoute {
 	return route
 }
 
-func filepathCleanSlash(raw string) string {
-	clean := filepath.Clean(strings.ReplaceAll(strings.TrimSpace(raw), `\`, string(filepath.Separator)))
-	return strings.ToLower(filepath.ToSlash(clean))
+func formalSurfaceKey(raw string) (string, bool) {
+	surface := strings.ReplaceAll(strings.TrimSpace(raw), `\`, "/")
+	if surface == "" || strings.Contains(surface, ",") || strings.HasPrefix(surface, "/") || windowsDrivePath(surface) {
+		return "", false
+	}
+
+	recursive := strings.HasSuffix(surface, "/**")
+	base := strings.TrimSuffix(surface, "/**")
+	if strings.ContainsAny(base, "*?[") || strings.Contains(base, ":") {
+		return "", false
+	}
+	for _, segment := range strings.Split(base, "/") {
+		if segment == ".." {
+			return "", false
+		}
+	}
+	base = path.Clean(base)
+	if base == "" || base == "." || base == ".." || strings.HasPrefix(base, "../") {
+		return "", false
+	}
+	key := strings.ToLower(base)
+	if recursive {
+		key += "/**"
+	}
+	return key, true
+}
+
+func windowsDrivePath(surface string) bool {
+	if len(surface) < 2 || surface[1] != ':' {
+		return false
+	}
+	letter := surface[0]
+	return letter >= 'a' && letter <= 'z' || letter >= 'A' && letter <= 'Z'
 }
 
 func placeholderFormalValue(raw string) bool {
@@ -178,6 +220,13 @@ func placeholderFormalValue(raw string) bool {
 	switch v {
 	case "...", "?", "n/a", "na", "none", "placeholder", "tbd", "todo", "unknown":
 		return true
+	}
+	for _, token := range strings.FieldsFunc(v, func(r rune) bool {
+		return r < 'a' || r > 'z'
+	}) {
+		if token == "todo" || token == "tbd" {
+			return true
+		}
 	}
 	return strings.Contains(v, "<todo>") || strings.Contains(v, "<tbd>") ||
 		strings.Contains(v, "fill this") || strings.Contains(v, "fill in")

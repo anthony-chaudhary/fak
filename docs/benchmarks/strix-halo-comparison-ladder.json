@@ -1,0 +1,533 @@
+{
+  "schema": "fak.benchmark.strix-halo-comparison-ladder/v1",
+  "issue": 12093,
+  "campaign_issue": 11572,
+  "observed_date": "2026-09-08",
+  "status": "NO_COMPARABLE_LOCAL_RESULT",
+  "purpose": "Freeze source-dated external Qwen3.8 Strix Halo challenge points and their comparability boundaries before a fak-native candidate run.",
+  "local_target": {
+    "hardware": "AMD Ryzen AI Max+ 395 / Radeon 8060S",
+    "gpu_architecture": "gfx1151",
+    "compute_units": 40,
+    "memory_gib": 64,
+    "memory_topology": "unified",
+    "engine_required_for_candidate": "fak-native",
+    "fallback_allowed": false,
+    "source_binding_issue": 12034,
+    "power_envelope": {
+      "status": "UNMEASURED",
+      "required_fields": [
+        "configured_power_limit_w",
+        "observed_power_w",
+        "energy_j",
+        "temperature_c",
+        "throttle_state"
+      ]
+    },
+    "vendor_reference": {
+      "url": "https://www.amd.com/en/products/processors/desktops/ryzen/ryzen-ai-halo/ryzen-ai-max-plus-395.html",
+      "memory_gib": 128,
+      "memory_bandwidth_gbps": 256,
+      "reference_power_w": 120,
+      "disposition": "CONTEXT_ONLY",
+      "reason": "The reachable appliance has 64 GiB and an unmeasured power envelope; vendor maximum-platform specifications are not a benchmark result."
+    }
+  },
+  "contract": {
+    "dispositions": [
+      "COMPARABLE",
+      "CONTEXT_ONLY",
+      "STALE",
+      "EXCLUDE"
+    ],
+    "required_for_comparable": [
+      "source.url",
+      "source.revision",
+      "source.event_date",
+      "source.observed_date",
+      "hardware.identity",
+      "hardware.memory_gib",
+      "model.identity",
+      "artifact.identity",
+      "artifact.sha256",
+      "quantization.weights",
+      "engine.identity",
+      "engine.backend",
+      "engine.build",
+      "workload.identity",
+      "workload.sha256",
+      "workload.metric",
+      "workload.statistic",
+      "load.concurrency",
+      "cache.state",
+      "speculation.method",
+      "power.configured_limit_w",
+      "power.observed_w",
+      "quality.method",
+      "quality.verdict",
+      "raw_evidence.url"
+    ],
+    "ratio_policy": "ratio must be null unless disposition is COMPARABLE and every required field is present; an absolute published point may be a challenge bar but cannot prove engine superiority without a paired local reference run",
+    "candidate_engine_policy": "A promoted fak candidate must report engine=fak-native, fallback_count=0, executed backend/path, and accepted output-token counts.",
+    "hard_exclusions": [
+      "corrupt output",
+      "repetitive-output or ngram replay presented as general throughput",
+      "synthetic or microkernel throughput presented as end-to-end serving",
+      "missing engine identity or silent fallback"
+    ],
+    "context_only_boundaries": [
+      "different model architecture, including sparse MoE versus dense Qwen3.8-27B",
+      "different hardware or memory envelope",
+      "different quantization or speculation method without a paired quality-constrained run",
+      "marketing or vendor specification",
+      "published result without complete artifact, workload, power, and cache identity"
+    ]
+  },
+  "rows": [
+    {
+      "id": "nabe-qwen38-27b-vulkan-mtp-c1-c4-c8",
+      "disposition": "CONTEXT_ONLY",
+      "reason": "Closest dense-model challenge bars, but the source run used 128 GiB and supplies no artifact SHA256, explicit cache state, power observation, or repeated-run statistics. A paired local replay is required for an engine-win claim.",
+      "index_display": {
+        "frozen_point": "c1 **16.65**, c4 **24.13**, c8 **29.42** aggregate output tok/s",
+        "why_no_ratio": "Closest dense Qwen3.8-27B Q4_K_M + MTP bars, but measured on 128 GiB with artifact hash, cache state, power, and repeated-run statistics incomplete."
+      },
+      "source": {
+        "name": "nabe2030/qwen38-evo-x2",
+        "url": "https://github.com/nabe2030/qwen38-evo-x2/blob/d2049a8892577a2e8caef51d71b5f74dfbd7abad/README.md#L35-L71",
+        "revision": "d2049a8892577a2e8caef51d71b5f74dfbd7abad",
+        "event_date": "2026-08-30",
+        "observed_date": "2026-09-07",
+        "license": "MIT"
+      },
+      "hardware": {
+        "identity": "GMKtec EVO-X2 / AMD Ryzen AI Max+ 395 / Radeon 8060S",
+        "gpu_architecture": "gfx1151",
+        "memory_gib": 128,
+        "memory_topology": "unified"
+      },
+      "model": {
+        "identity": "Qwen3.8-27B",
+        "architecture_class": "dense"
+      },
+      "artifact": {
+        "identity": "ggml-org Qwen3.8-27B Q4_K_M main 17.67 GB + Q8_0 MTP 2.95 GB + Q8_0 mmproj",
+        "sha256": null
+      },
+      "quantization": {
+        "weights": "Q4_K_M",
+        "draft": "Q8_0"
+      },
+      "engine": {
+        "identity": "llama.cpp",
+        "backend": "Vulkan",
+        "build": "b10588 (70adb1b4c)",
+        "runtime": "Mesa RADV / Ubuntu 26.04"
+      },
+      "workload": {
+        "identity": "ShareGPT_V3_unfiltered_cleaned_split.json / 200 requests per condition / reasoning off / context 32768",
+        "sha256": "35f0e213ce091ed9b9af2a1f0755e9d39f9ccec34ab281cd4ca60d70f6479ba4",
+        "dataset_revision": "192ab2185289094fc556ec8ce5ce1e8e587154ca",
+        "metric": "aggregate accepted output tokens per second",
+        "statistic": "one 200-request run per condition; no cross-run variance study",
+        "measurements": [
+          {
+            "concurrency": 1,
+            "value": 16.65,
+            "unit": "output_tok_s"
+          },
+          {
+            "concurrency": 4,
+            "value": 24.13,
+            "unit": "output_tok_s"
+          },
+          {
+            "concurrency": 8,
+            "value": 29.42,
+            "unit": "output_tok_s"
+          }
+        ]
+      },
+      "load": {
+        "concurrency": [
+          1,
+          4,
+          8
+        ],
+        "slot_policy": "parallel slots matched to condition"
+      },
+      "cache": {
+        "state": null,
+        "prefix_reuse": null
+      },
+      "speculation": {
+        "method": "draft-mtp",
+        "ngram": false
+      },
+      "power": {
+        "configured_limit_w": null,
+        "observed_w": null,
+        "temperature_c": null,
+        "throttle_state": null
+      },
+      "quality": {
+        "method": "20 saved prompts per condition checked for degeneration; JamC-QA 2309 questions",
+        "verdict": "PASS_FOR_REPORTED_VULKAN_CONDITIONS",
+        "details": "0/20 corrupt at c1/c4/c8; JamC-QA 53.49%"
+      },
+      "raw_evidence": {
+        "url": "https://github.com/nabe2030/qwen38-evo-x2/tree/d2049a8892577a2e8caef51d71b5f74dfbd7abad/results"
+      },
+      "ratio": null
+    },
+    {
+      "id": "q38rocm-rocmfp4-mtp",
+      "disposition": "CONTEXT_ONLY",
+      "reason": "Same dense model and APU family, but a different quantization/backend crossover with missing artifact and power identity. The source engine pin and long-output integrity are disputed, so the range is a challenge bar only until independently reproduced.",
+      "index_display": {
+        "frozen_point": "**30.56–36.04** output tok/s across 512–4096-token contexts",
+        "why_no_ratio": "Different ROCmFP4/backend envelope; exact engine provenance and clean long-output integrity still need independent reproduction."
+      },
+      "source": {
+        "name": "julianmb/q38rocm",
+        "url": "https://github.com/julianmb/q38rocm/tree/6c142530031c923ece1adf4d8c9c824b7369fef8",
+        "revision": "6c142530031c923ece1adf4d8c9c824b7369fef8",
+        "event_date": "2026-09-03",
+        "observed_date": "2026-09-07",
+        "license": "Apache-2.0"
+      },
+      "hardware": {
+        "identity": "AMD Ryzen AI Max+ 395 / Radeon 8060S",
+        "gpu_architecture": "gfx1151",
+        "memory_gib": null,
+        "memory_topology": "unified"
+      },
+      "model": {
+        "identity": "Qwen3.8-27B",
+        "architecture_class": "dense"
+      },
+      "artifact": {
+        "identity": "ROCmFP4_FAST 13.55 GiB / 4.26 bpw",
+        "sha256": null
+      },
+      "quantization": {
+        "weights": "ROCmFP4_FAST",
+        "draft": "embedded high-precision MTP heads"
+      },
+      "engine": {
+        "identity": "ROCmFPX-derived runtime",
+        "backend": "ROCm prefill / Vulkan RADV decode",
+        "build": null,
+        "runtime": "gfx1151"
+      },
+      "workload": {
+        "identity": "single-stream context-scaling decode",
+        "sha256": null,
+        "metric": "accepted output tokens per second with MTP",
+        "statistic": "reported measured ranges without a frozen repetition distribution",
+        "measurements": [
+          {
+            "context_tokens": 512,
+            "low": 34.82,
+            "high": 36.04,
+            "unit": "output_tok_s"
+          },
+          {
+            "context_tokens": 2048,
+            "low": 32.4,
+            "high": 34.82,
+            "unit": "output_tok_s"
+          },
+          {
+            "context_tokens": 4096,
+            "low": 30.56,
+            "high": 32.24,
+            "unit": "output_tok_s"
+          }
+        ]
+      },
+      "load": {
+        "concurrency": 1,
+        "slot_policy": "single stream"
+      },
+      "cache": {
+        "state": "asymmetric TurboQuant KV reported",
+        "prefix_reuse": false
+      },
+      "speculation": {
+        "method": "embedded-mtp",
+        "ngram": false
+      },
+      "power": {
+        "configured_limit_w": null,
+        "observed_w": null,
+        "temperature_c": null,
+        "throttle_state": null
+      },
+      "quality": {
+        "method": "source reports task validators; independent long-output challenge reports repetition/runaway corruption",
+        "verdict": "DISPUTED",
+        "details": "Do not promote until the exact engine and artifact produce clean held-out long outputs."
+      },
+      "raw_evidence": {
+        "url": "https://github.com/julianmb/q38rocm/blob/6c142530031c923ece1adf4d8c9c824b7369fef8/README.md",
+        "integrity_challenge": "https://github.com/julianmb/q38rocm/issues/3"
+      },
+      "ratio": null
+    },
+    {
+      "id": "flash-next-vulkan-real-agent-median",
+      "disposition": "CONTEXT_ONLY",
+      "reason": "Qwen3.8-Flash-Next is a sparse-MoE/PLE architecture measured on a 128 GiB appliance with a different requantized artifact. Its 33.1 tok/s median is a cross-model service challenge, never a dense-Qwen matched win.",
+      "index_display": {
+        "frozen_point": "**33.1** warm-cache median output tok/s over 10 agent conversations",
+        "why_no_ratio": "Sparse-MoE/PLE Flash-Next, mixed quantization, and 128 GiB are cross-model context, never a dense-Qwen matched win."
+      },
+      "source": {
+        "name": "drluoto/llama.cpp",
+        "url": "https://github.com/drluoto/llama.cpp/blob/ba5354d46ca63e8225c28e1331f0f7651723ad05/docs/strix-halo-flash-next-vulkan.md#L1-L26",
+        "revision": "ba5354d46ca63e8225c28e1331f0f7651723ad05",
+        "event_date": "2026-09-06",
+        "observed_date": "2026-09-07",
+        "license": "MIT"
+      },
+      "hardware": {
+        "identity": "Bosgame M5 / AMD Ryzen AI Max+ 395 / Radeon 8060S",
+        "gpu_architecture": "gfx1151",
+        "memory_gib": 128,
+        "memory_topology": "unified"
+      },
+      "model": {
+        "identity": "Qwen3.8-Flash-Next",
+        "architecture_class": "sparse MoE with PLE"
+      },
+      "artifact": {
+        "identity": "UD-IQ4_XS requantized trunk with dense weights Q5_K, routers Q8_0, FR-Spec 65k Q8_0 MTP draft head",
+        "sha256": null
+      },
+      "quantization": {
+        "weights": "mixed UD-IQ4_XS/Q5_K/Q8_0",
+        "draft": "FR-Spec 65k Q8_0"
+      },
+      "engine": {
+        "identity": "llama.cpp fork",
+        "backend": "Vulkan RADV",
+        "build": "ba5354d46ca63e8225c28e1331f0f7651723ad05",
+        "runtime": "Mesa 26.0.3"
+      },
+      "workload": {
+        "identity": "10 real agent conversations replayed against the server",
+        "sha256": null,
+        "metric": "per-conversation decode tokens per second",
+        "statistic": "median across 10 conversations",
+        "measurements": [
+          {
+            "cache_state": "warm",
+            "value": 33.1,
+            "unit": "output_tok_s"
+          },
+          {
+            "cache_state": "cold",
+            "value": 32.5,
+            "unit": "output_tok_s"
+          }
+        ]
+      },
+      "load": {
+        "concurrency": 1,
+        "slot_policy": "server configured np=3 with session checkpoints"
+      },
+      "cache": {
+        "state": "warm and cold reported separately",
+        "prefix_reuse": true
+      },
+      "speculation": {
+        "method": "draft-mtp depth 3",
+        "ngram": false
+      },
+      "power": {
+        "configured_limit_w": null,
+        "observed_w": null,
+        "temperature_c": null,
+        "throttle_state": null
+      },
+      "quality": {
+        "method": "greedy output compared across runs",
+        "verdict": "SOURCE_REPORTS_BIT_IDENTICAL",
+        "details": "No independent task-result or corpus-hash reproduction is attached."
+      },
+      "raw_evidence": {
+        "url": "https://github.com/drluoto/llama.cpp/blob/ba5354d46ca63e8225c28e1331f0f7651723ad05/docs/strix-halo-flash-next-vulkan.md"
+      },
+      "ratio": null
+    },
+    {
+      "id": "nabe-qwen38-27b-hip-corrupt-concurrency",
+      "disposition": "EXCLUDE",
+      "reason": "Multi-slot HIP output was corrupt with and without MTP; the apparent throughput is garbage-token production and cannot be a challenge bar.",
+      "index_display": {
+        "frozen_point": "no admissible point",
+        "why_no_ratio": "HIP c8/c16/c32 emitted corrupt output with and without MTP; garbage-token throughput is not a benchmark."
+      },
+      "source": {
+        "name": "nabe2030/qwen38-evo-x2",
+        "url": "https://github.com/nabe2030/qwen38-evo-x2/blob/d2049a8892577a2e8caef51d71b5f74dfbd7abad/README.md#output-verification",
+        "revision": "d2049a8892577a2e8caef51d71b5f74dfbd7abad",
+        "event_date": "2026-08-30",
+        "observed_date": "2026-09-07",
+        "license": "MIT"
+      },
+      "hardware": {
+        "identity": "GMKtec EVO-X2 / AMD Ryzen AI Max+ 395 / Radeon 8060S",
+        "gpu_architecture": "gfx1151",
+        "memory_gib": 128,
+        "memory_topology": "unified"
+      },
+      "model": {
+        "identity": "Qwen3.8-27B",
+        "architecture_class": "dense"
+      },
+      "artifact": {
+        "identity": "ggml-org Q4_K_M main with optional Q8_0 MTP",
+        "sha256": null
+      },
+      "quantization": {
+        "weights": "Q4_K_M",
+        "draft": "Q8_0 when enabled"
+      },
+      "engine": {
+        "identity": "llama.cpp",
+        "backend": "HIP rocBLAS",
+        "build": "b10588 (70adb1b4c)",
+        "runtime": "ROCm 7.2.2"
+      },
+      "workload": {
+        "identity": "ShareGPT-derived serving plus 20 saved output checks per condition",
+        "sha256": "35f0e213ce091ed9b9af2a1f0755e9d39f9ccec34ab281cd4ca60d70f6479ba4",
+        "metric": "aggregate output tokens per second",
+        "statistic": "excluded observations",
+        "measurements": []
+      },
+      "load": {
+        "concurrency": [
+          8,
+          16,
+          32
+        ],
+        "slot_policy": "multi-slot"
+      },
+      "cache": {
+        "state": null,
+        "prefix_reuse": null
+      },
+      "speculation": {
+        "method": "both disabled and draft-mtp",
+        "ngram": false
+      },
+      "power": {
+        "configured_limit_w": null,
+        "observed_w": null,
+        "temperature_c": null,
+        "throttle_state": null
+      },
+      "quality": {
+        "method": "20 saved prompts per condition checked for degeneration",
+        "verdict": "FAIL_CORRUPT_OUTPUT",
+        "details": "MTP on flagged 20/17/15 of 20 at c8/c16/c32; MTP off flagged 18/20/15 of 20."
+      },
+      "raw_evidence": {
+        "url": "https://github.com/nabe2030/qwen38-evo-x2/tree/d2049a8892577a2e8caef51d71b5f74dfbd7abad/results"
+      },
+      "ratio": null
+    }
+  ],
+  "negative_fixtures": [
+    {
+      "id": "reject-comparable-missing-quality",
+      "attempted_disposition": "COMPARABLE",
+      "omitted_required_paths": [
+        "quality.method",
+        "quality.verdict"
+      ],
+      "expected": {
+        "accepted": false,
+        "ratio_emitted": false,
+        "reason": "missing quality identity"
+      }
+    },
+    {
+      "id": "reject-comparable-missing-source-revision",
+      "attempted_disposition": "COMPARABLE",
+      "omitted_required_paths": [
+        "source.revision"
+      ],
+      "expected": {
+        "accepted": false,
+        "ratio_emitted": false,
+        "reason": "missing immutable source revision"
+      }
+    },
+    {
+      "id": "reject-comparable-missing-artifact",
+      "attempted_disposition": "COMPARABLE",
+      "omitted_required_paths": [
+        "artifact.identity",
+        "artifact.sha256"
+      ],
+      "expected": {
+        "accepted": false,
+        "ratio_emitted": false,
+        "reason": "missing artifact identity"
+      }
+    },
+    {
+      "id": "reject-comparable-missing-workload",
+      "attempted_disposition": "COMPARABLE",
+      "omitted_required_paths": [
+        "workload.identity",
+        "workload.sha256",
+        "workload.metric",
+        "workload.statistic"
+      ],
+      "expected": {
+        "accepted": false,
+        "ratio_emitted": false,
+        "reason": "missing workload identity"
+      }
+    },
+    {
+      "id": "reject-comparable-missing-engine",
+      "attempted_disposition": "COMPARABLE",
+      "omitted_required_paths": [
+        "engine.identity",
+        "engine.backend",
+        "engine.build"
+      ],
+      "expected": {
+        "accepted": false,
+        "ratio_emitted": false,
+        "reason": "missing execution-engine identity"
+      }
+    },
+    {
+      "id": "reject-comparable-sparse-moe-as-dense",
+      "attempted_disposition": "COMPARABLE",
+      "violated_boundary": "different model architecture, including sparse MoE versus dense Qwen3.8-27B",
+      "expected": {
+        "accepted": false,
+        "ratio_emitted": false,
+        "reason": "cross-model result is context only"
+      }
+    },
+    {
+      "id": "reject-comparable-corrupt-output",
+      "attempted_disposition": "COMPARABLE",
+      "violated_boundary": "corrupt output",
+      "expected": {
+        "accepted": false,
+        "ratio_emitted": false,
+        "reason": "quality failure requires exclusion"
+      }
+    }
+  ]
+}

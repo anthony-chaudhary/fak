@@ -123,6 +123,13 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	if err == nil {
 		if *workerModel != "" {
 			resolved.Resolved.SOLRoute.WorkerModel = *workerModel
+			replaceOrchestrationOverride(&resolved, "sol_route.worker_model", orchestration.AstraRouteSourceOperatorPin, *workerModel)
+			if route := resolved.Resolved.AstraRoute; route != nil {
+				route.Model = *workerModel
+				route.Selected = resolved.Resolved.Profile == orchestration.ProfileUltracode &&
+					resolved.Resolved.Budget.MaxWorkers > 1 && orchestration.IsAstraModel(*workerModel)
+				route.Source = orchestration.AstraRouteSourceOperatorPin
+			}
 		}
 		if *workerEffort != "" {
 			effort := strings.ToLower(strings.TrimSpace(*workerEffort))
@@ -131,6 +138,11 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 				return 2
 			}
 			resolved.Resolved.SOLRoute.WorkerReasoningEffort = effort
+			replaceOrchestrationOverride(&resolved, "sol_route.worker_reasoning_effort", orchestration.AstraRouteSourceOperatorPin, effort)
+			if route := resolved.Resolved.AstraRoute; route != nil {
+				route.ReasoningEffort = effort
+				route.ReasoningEffortSource = orchestration.AstraRouteSourceOperatorPin
+			}
 		}
 	}
 	if err != nil {
@@ -191,7 +203,11 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		if *capset == "unsupported" {
 			capabilityProfile = "unsupported"
 		}
-		launched, launchErr := launchCodexOrchestrationWorkersWithProfiles(*codexHome, sessionID, *profile, capabilityProfile, *taskText, output.Style, work.Profile, profileSource, resolved, *maxWall)
+		launchTaskText := *taskText
+		if task.FormalPacket != nil {
+			launchTaskText = orchestrationFormalPacketTaskText(*task.FormalPacket)
+		}
+		launched, launchErr := launchCodexOrchestrationWorkersWithProfiles(*codexHome, sessionID, *profile, capabilityProfile, launchTaskText, output.Style, work.Profile, profileSource, resolved, *maxWall)
 		if launchErr != nil {
 			fmt.Fprintf(stderr, "fak orchestration plan: %v\n", launchErr)
 			return 1
@@ -220,6 +236,35 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stdout, "DEGRADED %s: required=%s available=%s reason=%s\n", d.Capability, d.Required, d.Available, d.Reason)
 	}
 	return 0
+}
+
+func replaceOrchestrationOverride(resolution *orchestration.Resolution, field, source string, value any) {
+	overrides := resolution.Overrides[:0]
+	for _, override := range resolution.Overrides {
+		if override.Field != field {
+			overrides = append(overrides, override)
+		}
+	}
+	resolution.Overrides = append(overrides, orchestration.Provenance{Field: field, Source: source, Value: value})
+}
+
+func orchestrationFormalPacketTaskText(packet orchestration.FormalPacket) string {
+	var text strings.Builder
+	text.WriteString("Execute this typed formal packet exactly.\n")
+	fmt.Fprintf(&text, "schema: %s\n", packet.Schema)
+	text.WriteString("task_kinds:\n")
+	for _, kind := range packet.TaskKinds {
+		fmt.Fprintf(&text, "- %s\n", kind)
+	}
+	fmt.Fprintf(&text, "definitions_and_assumptions:\n%s\n", packet.DefinitionsAndAssumptions)
+	fmt.Fprintf(&text, "exact_proposition:\n%s\n", packet.ExactProposition)
+	fmt.Fprintf(&text, "required_output_form:\n%s\n", packet.RequiredOutputForm)
+	fmt.Fprintf(&text, "deterministic_witness:\n%s\n", packet.DeterministicWitness)
+	text.WriteString("surfaces:\n")
+	for _, surface := range packet.Surfaces {
+		fmt.Fprintf(&text, "- %s\n", surface)
+	}
+	return strings.TrimSpace(text.String())
 }
 
 type codexOrchestrationInvocationReceipt struct {

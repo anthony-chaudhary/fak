@@ -574,7 +574,7 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 		solRoute.ReasoningEffort = effort
 		solRoute.WorkerReasoningEffort = effort
 		solRoute.Decision += "; effort pinned by operator to " + effort
-		prov = append(prov, Provenance{"fast.effort", "task.pin", effort})
+		prov = append(prov, Provenance{"sol_route.worker_reasoning_effort", AstraRouteSourceTaskPin, effort})
 		if astraRoute != nil {
 			astraRoute.ReasoningEffort = effort
 			astraRoute.ReasoningEffortSource = AstraRouteSourceTaskPin
@@ -582,12 +582,19 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 	}
 	if task.Pins.Model != "" {
 		solRoute.WorkerModel = task.Pins.Model
-		prov = append(prov, Provenance{"fast.model", "task.pin", task.Pins.Model})
+		prov = append(prov, Provenance{"sol_route.worker_model", AstraRouteSourceTaskPin, task.Pins.Model})
 		if astraRoute != nil {
 			astraRoute.Model = task.Pins.Model
 			astraRoute.Source = AstraRouteSourceTaskPin
-			astraRoute.Selected = task.Pins.Model == AstraWorkerModel
+			astraRoute.Selected = IsAstraModel(task.Pins.Model)
 		}
+	}
+	if astraRoute != nil {
+		// Selected describes an executable child route, not packet eligibility in
+		// isolation. A direct plan has no child to select even when its packet is
+		// otherwise complete; explicit pins still determine the model whenever a
+		// child route exists.
+		astraRoute.Selected = multi && IsAstraModel(solRoute.WorkerModel)
 	}
 	explain := []string{fmt.Sprintf("profile %s resolved from %s work", resolvedProfile, task.WorkClass), fmt.Sprintf("budget capped at %d workers and %d tokens", workers, tokens), fmt.Sprintf("task execution remains delegated to taskmgr with engine reference %s", engine)}
 	for _, d := range deg {

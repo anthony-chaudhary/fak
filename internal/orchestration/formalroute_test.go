@@ -92,6 +92,16 @@ func TestFormalPacketFailsClosedForEveryRequiredField(t *testing.T) {
 	}
 }
 
+func TestFormalPacketSchemaRequiresExactVersionIdentity(t *testing.T) {
+	for _, schema := range []string{" fak-formal-packet/1", "fak-formal-packet/1 ", "FAK-FORMAL-PACKET/1", "fak-formal-packet/2"} {
+		t.Run(schema, func(t *testing.T) {
+			task := completeFormalTask()
+			task.FormalPacket.Schema = schema
+			assertAstraRefusal(t, task, AstraReasonSchemaInvalid)
+		})
+	}
+}
+
 func TestFormalPacketRejectsKindsOutsideExclusiveClosedSet(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -130,6 +140,8 @@ func TestFormalPacketRejectsPlaceholders(t *testing.T) {
 		{"proposition", func(p *FormalPacket) { p.ExactProposition = "<TODO>" }, AstraReasonExactProposition},
 		{"output", func(p *FormalPacket) { p.RequiredOutputForm = "fill this in" }, AstraReasonRequiredOutputForm},
 		{"witness", func(p *FormalPacket) { p.DeterministicWitness = "placeholder" }, AstraReasonDeterministicWitness},
+		{"todo prefix", func(p *FormalPacket) { p.ExactProposition = "TODO: later" }, AstraReasonExactProposition},
+		{"tbd token", func(p *FormalPacket) { p.RequiredOutputForm = "proof; TBD pending format" }, AstraReasonRequiredOutputForm},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -137,6 +149,12 @@ func TestFormalPacketRejectsPlaceholders(t *testing.T) {
 			tc.mutate(task.FormalPacket)
 			assertAstraRefusal(t, task, tc.reason)
 		})
+	}
+
+	task := completeFormalTask()
+	task.FormalPacket.DefinitionsAndAssumptions = "The methodology fixes all definitions before proof."
+	if route := AssessAstraRoute(task); route == nil || !route.Eligible {
+		t.Fatalf("placeholder substring false positive: %+v", route)
 	}
 }
 
@@ -150,15 +168,37 @@ func TestFormalPacketRequiresOneToThreeDistinctBoundedSurfaces(t *testing.T) {
 		{"too many", []string{"a", "b", "c", "d"}, AstraReasonSurfaceCount},
 		{"repository root", []string{"."}, AstraReasonSurfaceUnbounded},
 		{"parent escape", []string{"../other"}, AstraReasonSurfaceUnbounded},
-		{"absolute", []string{`C:\\workspace\\file.go`}, AstraReasonSurfaceUnbounded},
+		{"slash root", []string{"/x"}, AstraReasonSurfaceUnbounded},
+		{"backslash root", []string{`\x`}, AstraReasonSurfaceUnbounded},
+		{"unc", []string{`\\server\share`}, AstraReasonSurfaceUnbounded},
+		{"windows absolute", []string{`C:\workspace\file.go`}, AstraReasonSurfaceUnbounded},
+		{"windows drive relative", []string{`C:workspace\file.go`}, AstraReasonSurfaceUnbounded},
 		{"wildcard region", []string{"internal/*/file.go"}, AstraReasonSurfaceUnbounded},
 		{"duplicate", []string{"internal/orchestration", `internal\\orchestration`}, AstraReasonSurfaceDuplicate},
+		{"canonical duplicate", []string{"internal/./orchestration", `INTERNAL\orchestration`}, AstraReasonSurfaceDuplicate},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			task := completeFormalTask()
 			task.FormalPacket.Surfaces = tc.surfaces
 			assertAstraRefusal(t, task, tc.reason)
+		})
+	}
+
+	for _, surface := range []string{
+		"internal/orchestration",
+		"cmd/fak/orchestration.go",
+		`internal\orchestration`,
+		`cmd\fak\orchestration.go`,
+		"internal/orchestration/**",
+		`internal\orchestration\**`,
+	} {
+		t.Run("accept-"+surface, func(t *testing.T) {
+			task := completeFormalTask()
+			task.FormalPacket.Surfaces = []string{surface}
+			if route := AssessAstraRoute(task); route == nil || !route.Eligible {
+				t.Fatalf("bounded surface %q refused: %+v", surface, route)
+			}
 		})
 	}
 }
@@ -214,6 +254,117 @@ func TestFormalPacketExplicitTaskPinsWinAndReceiptNamesSource(t *testing.T) {
 	}
 }
 
+func TestFormalPacketSeparateTaskPinsPreserveReceiptProvenance(t *testing.T) {
+	t.Run("model only Astra alias", func(t *testing.T) {
+		task := completeFormalTask()
+		task.Pins.Model = "openai/astra"
+		got, err := Resolve(OrchestrationProfile{Name: ProfileAuto}, task, nativeCaps())
+		if err != nil {
+			t.Fatal(err)
+		}
+		route := got.Resolved.AstraRoute
+		if route == nil || !route.Eligible || !route.Selected || route.Source != AstraRouteSourceTaskPin || route.Model != task.Pins.Model {
+			t.Fatalf("model-only alias receipt = %+v", route)
+		}
+		if route.ReasoningEffort != AstraWorkerEffort || route.ReasoningEffortSource != AstraRouteSourceFormalPacket {
+			t.Fatalf("model-only pin changed automatic effort provenance: %+v", route)
+		}
+	})
+
+	t.Run("effort only", func(t *testing.T) {
+		task := completeFormalTask()
+		task.Pins.Effort = "high"
+		got, err := Resolve(OrchestrationProfile{Name: ProfileAuto}, task, nativeCaps())
+		if err != nil {
+			t.Fatal(err)
+		}
+		route := got.Resolved.AstraRoute
+		if route == nil || !route.Eligible || !route.Selected || route.Source != AstraRouteSourceFormalPacket || route.Model != AstraWorkerModel {
+			t.Fatalf("effort-only receipt changed model provenance: %+v", route)
+		}
+		if route.ReasoningEffort != task.Pins.Effort || route.ReasoningEffortSource != AstraRouteSourceTaskPin {
+			t.Fatalf("effort-only receipt = %+v", route)
+		}
+	})
+}
+
+func TestFormalPacketRouteAuthorityInvariant(t *testing.T) {
+	tests := []struct {
+		name         string
+		profile      Profile
+		configure    func(*TaskSpec)
+		eligible     bool
+		selected     bool
+		model        string
+		effort       string
+		modelSource  string
+		effortSource string
+		reason       AstraRouteReason
+	}{
+		{"auto", ProfileAuto, nil, true, true, AstraWorkerModel, AstraWorkerEffort, AstraRouteSourceFormalPacket, AstraRouteSourceFormalPacket, ""},
+		{"off direct", ProfileOff, nil, true, false, AstraWorkerModel, AstraWorkerEffort, AstraRouteSourceFormalPacket, AstraRouteSourceFormalPacket, ""},
+		{"canonical Astra task pin", ProfileAuto, func(task *TaskSpec) { task.Pins.Model = AstraWorkerModel }, true, true, AstraWorkerModel, AstraWorkerEffort, AstraRouteSourceTaskPin, AstraRouteSourceFormalPacket, ""},
+		{"alias Astra task pin", ProfileAuto, func(task *TaskSpec) { task.Pins.Model = "openai/astra" }, true, true, "openai/astra", AstraWorkerEffort, AstraRouteSourceTaskPin, AstraRouteSourceFormalPacket, ""},
+		{"non-Astra task pin", ProfileAuto, func(task *TaskSpec) { task.Pins.Model = "gpt-5.6-sol" }, true, false, "gpt-5.6-sol", AstraWorkerEffort, AstraRouteSourceTaskPin, AstraRouteSourceFormalPacket, ""},
+		{"effort-only task pin", ProfileAuto, func(task *TaskSpec) { task.Pins.Effort = "high" }, true, true, AstraWorkerModel, "high", AstraRouteSourceFormalPacket, AstraRouteSourceTaskPin, ""},
+		{"explicit observe access", ProfileAuto, func(task *TaskSpec) {
+			task.WorkerAccess = []WorkerAccessSpec{{RoleID: "worker-1", Access: ChildAccess{Mode: ChildAccessObserve}}}
+		}, true, true, AstraWorkerModel, AstraWorkerEffort, AstraRouteSourceFormalPacket, AstraRouteSourceFormalPacket, ""},
+		{"effect access", ProfileAuto, func(task *TaskSpec) {
+			task.WorkerAccess = []WorkerAccessSpec{{RoleID: "worker-1", Access: ChildAccess{Mode: ChildAccessEffect, WriteSet: []string{"internal/orchestration"}}}}
+		}, false, false, "", "", "", "", AstraReasonAnalysisOnly},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			task := completeFormalTask()
+			if tc.configure != nil {
+				tc.configure(&task)
+			}
+			got, err := Resolve(OrchestrationProfile{Name: tc.profile}, task, nativeCaps())
+			if err != nil {
+				t.Fatal(err)
+			}
+			route := got.Resolved.AstraRoute
+			if route == nil || route.Eligible != tc.eligible || route.Selected != tc.selected || route.Model != tc.model || route.ReasoningEffort != tc.effort {
+				t.Fatalf("route = %+v, want eligible=%v selected=%v model=%q effort=%q", route, tc.eligible, tc.selected, tc.model, tc.effort)
+			}
+			if tc.reason != "" && !containsAstraReason(route.Reasons, tc.reason) {
+				t.Fatalf("route reasons = %v, want %q", route.Reasons, tc.reason)
+			}
+
+			lastProvenance := func(field string) (Provenance, bool) {
+				for i := len(got.Overrides) - 1; i >= 0; i-- {
+					if got.Overrides[i].Field == field {
+						return got.Overrides[i], true
+					}
+				}
+				return Provenance{}, false
+			}
+			for _, forbidden := range []string{"fast.model", "fast.effort"} {
+				if _, ok := lastProvenance(forbidden); ok {
+					t.Fatalf("formal route emitted forbidden provenance field %q: %+v", forbidden, got.Overrides)
+				}
+			}
+			for field, wantSource := range map[string]string{
+				"sol_route.worker_model":            tc.modelSource,
+				"sol_route.worker_reasoning_effort": tc.effortSource,
+			} {
+				entry, ok := lastProvenance(field)
+				if wantSource == "" {
+					if ok {
+						t.Fatalf("provenance %q = %+v, want absent", field, entry)
+					}
+					continue
+				}
+				if !ok || entry.Source != wantSource {
+					t.Fatalf("provenance %q = %+v present=%v, want source %q", field, entry, ok, wantSource)
+				}
+			}
+		})
+	}
+}
+
 func TestFormalPacketStableJSONRoundTripAndAbsentCompatibility(t *testing.T) {
 	got, err := Resolve(OrchestrationProfile{Name: ProfileAuto}, completeFormalTask(), nativeCaps())
 	if err != nil {
@@ -259,11 +410,13 @@ func TestFormalPacketReasonOrderIsClosedAndDeterministic(t *testing.T) {
 			TaskKinds: []FormalTaskKind{"implementation", "mystery", "implementation", ""},
 			Surfaces:  []string{".", "../escape", "internal/orchestration", "internal/orchestration"},
 		},
+		WorkerAccess: []WorkerAccessSpec{{Access: ChildAccess{Mode: ChildAccessEffect}}},
 	}
 	route := AssessAstraRoute(task)
 	want := []AstraRouteReason{
 		AstraReasonSchemaInvalid,
 		AstraReasonWorkClassRequired,
+		AstraReasonAnalysisOnly,
 		AstraReasonTaskKindRequired,
 		AstraReasonTaskKindDuplicate,
 		AstraReasonTaskKindExcluded,
@@ -279,6 +432,15 @@ func TestFormalPacketReasonOrderIsClosedAndDeterministic(t *testing.T) {
 	if route == nil || !reflect.DeepEqual(route.Reasons, want) {
 		t.Fatalf("reasons = %v, want %v", route.Reasons, want)
 	}
+}
+
+func containsAstraReason(reasons []AstraRouteReason, want AstraRouteReason) bool {
+	for _, reason := range reasons {
+		if reason == want {
+			return true
+		}
+	}
+	return false
 }
 
 func assertAstraRefusal(t *testing.T, task TaskSpec, reason AstraRouteReason) {

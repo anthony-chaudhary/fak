@@ -44,6 +44,23 @@ Numbers in different envelope keys are not interchangeable. Quote the key, model
 
 **No accepted current Qwen3.8 performance row is indexed for AMD/Vulkan or CPU-only hardware.** Absence is not a zero or a failed benchmark.
 
+<!-- strix-halo-comparison-ladder:begin -->
+## Strix Halo external comparison ladder
+
+Source: [`strix-halo-comparison-ladder.json`](strix-halo-comparison-ladder.json) · status: **NO_COMPARABLE_LOCAL_RESULT** · observed **2026-09-08**.
+
+These are frozen external challenge points, not accepted fak results. `CONTEXT_ONLY` rows emit no ratio; `EXCLUDE` rows cannot become a performance bar. A published absolute point can be exceeded without proving engine superiority. That stronger claim requires a paired local reference run with the complete artifact, workload, cache, power, quality, and engine envelope.
+
+| Disposition | Source row | Frozen point | Why no ratio is emitted |
+|---|---|---:|---|
+| **CONTEXT_ONLY** | `nabe-qwen38-27b-vulkan-mtp-c1-c4-c8` | c1 **16.65**, c4 **24.13**, c8 **29.42** aggregate output tok/s | Closest dense Qwen3.8-27B Q4_K_M + MTP bars, but measured on 128 GiB with artifact hash, cache state, power, and repeated-run statistics incomplete. |
+| **CONTEXT_ONLY** | `q38rocm-rocmfp4-mtp` | **30.56–36.04** output tok/s across 512–4096-token contexts | Different ROCmFP4/backend envelope; exact engine provenance and clean long-output integrity still need independent reproduction. |
+| **CONTEXT_ONLY** | `flash-next-vulkan-real-agent-median` | **33.1** warm-cache median output tok/s over 10 agent conversations | Sparse-MoE/PLE Flash-Next, mixed quantization, and 128 GiB are cross-model context, never a dense-Qwen matched win. |
+| **EXCLUDE** | `nabe-qwen38-27b-hip-corrupt-concurrency` | no admissible point | HIP c8/c16/c32 emitted corrupt output with and without MTP; garbage-token throughput is not a benchmark. |
+
+The reachable target is the distinct **64 GiB** Ryzen AI Max+ 395 / Radeon 8060S appliance. A future candidate remains non-comparable until #12034 binds the physical receipt to the tested source and the receipt reports `engine=fak-native`, its executed backend/path, `fallback_count=0`, accepted output-token counts, power/thermal state, and quality evidence. Ngram or repetitive-output rates remain excluded from general-throughput claims.
+<!-- strix-halo-comparison-ladder:end -->
+
 ## Newer code awaiting comparable remeasurement
 
 This section prevents landed optimizations from masquerading as newer result rows. Entries are reaped when a comparable receipt is promoted above, the work is rejected, or the stated review date passes without a renewed reason to retain it.
@@ -75,5 +92,6 @@ The deterministic test rejects duplicate CURRENT envelope keys and active rows w
 - [Qwen3.8 ladder contract](qwen38-ladder/README.md)
 - [Qwen3.8 native overnight campaign](../_witnesses/issue-8848-qwen38-overnight/README.md)
 - [Qwen3.8 cache attribution](../_witnesses/issue-8819-qwen38-cache-attribution/README.md)
+- [Strix Halo external comparison ladder](strix-halo-comparison-ladder.json)
 - [Benchmark authority and comparison doctrine](../../BENCHMARK-AUTHORITY.md)
 - [Sanctioned hardware routes](../fleet-compute-nodes.md)
