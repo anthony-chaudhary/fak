@@ -2,6 +2,9 @@ package compute
 
 import (
 	"math"
+	"os"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -175,6 +178,114 @@ func TestSubAllocatorResetZerosLiveAllocCount(t *testing.T) {
 	}
 	if a.PeakAllocations() != peak || a.Blocks() != blocks {
 		t.Fatalf("Reset must preserve peak/blocks: peak %d->%d blocks %d->%d", peak, a.PeakAllocations(), blocks, a.Blocks())
+	}
+}
+
+// TestVulkanWeightArenaSuballocation pins the issue #12217 contract without requiring a Vulkan
+// device: the existing arithmetic oracle proves the packed ranges, while source-contract checks
+// ensure the build-tagged Go/C++ runtime actually selects and owns the immutable-weight arena.
+func TestVulkanWeightArenaSuballocation(t *testing.T) {
+	const (
+		alignment = int64(256)
+		blockSize = int64(1 << 20)
+		maxBytes  = int64(2 << 20)
+	)
+	plan := NewSubAllocator(alignment, blockSize)
+	live := map[int][]interval{}
+	for i := 0; i < 1500; i++ {
+		sa := plan.Alloc(1024)
+		if sa.Offset%alignment != 0 {
+			t.Fatalf("weight %d: offset %d not %d-aligned", i, sa.Offset, alignment)
+		}
+		if sa.Offset+sa.Size > blockSize {
+			t.Fatalf("weight %d: range [%d,%d) escapes block %d capacity %d",
+				i, sa.Offset, sa.Offset+sa.Size, sa.Block, blockSize)
+		}
+		for _, iv := range live[sa.Block] {
+			if sa.Offset < iv.hi && iv.lo < sa.Offset+sa.Size {
+				t.Fatalf("weight %d: [%d,%d) overlaps [%d,%d) in block %d",
+					i, sa.Offset, sa.Offset+sa.Size, iv.lo, iv.hi, sa.Block)
+			}
+		}
+		live[sa.Block] = append(live[sa.Block], interval{sa.Offset, sa.Offset + sa.Size})
+	}
+
+	if plan.Blocks() != 2 || plan.Allocations() != 1500 {
+		t.Fatalf("arena allocations/bindings = %d/%d, want 2/1500", plan.Blocks(), plan.Allocations())
+	}
+	if plan.Reserved() > maxBytes || plan.Live() > plan.Reserved() {
+		t.Fatalf("arena escaped bound: live=%d reserved=%d max=%d", plan.Live(), plan.Reserved(), maxBytes)
+	}
+
+	for file, needles := range map[string][]string{
+		"vulkan.go": {
+			"C.fvk_malloc_weight",
+			"weightArenaStatsLocked",
+		},
+		"vulkan_shim.cpp": {
+			"WEIGHT_ARENA_BLOCK_BYTES",
+			"fvk_malloc_weight",
+			"releaseWeightArena",
+			"fvk_weight_arena_stats",
+		},
+	} {
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		for _, needle := range needles {
+			if !strings.Contains(string(src), needle) {
+				t.Errorf("%s missing runtime arena contract %q", file, needle)
+			}
+		}
+	}
+
+	backend, ok := Lookup("vulkan")
+	if !ok {
+		return
+	}
+	counters, ok := backend.(interface {
+		VulkanWeightArenaCounters() (memoryAllocations, bufferBindings, reservedBytes, liveBytes, peakReservedBytes uint64)
+	})
+	if !ok {
+		t.Fatal("registered Vulkan backend does not expose weight-arena counters")
+	}
+	beforeAllocations, beforeBindings, beforeReserved, beforeLive, _ := counters.VulkanWeightArenaCounters()
+	const physicalWeights = 64
+	resident := make([]Tensor, 0, physicalWeights)
+	want := make([]float32, 256)
+	for i := range want {
+		want[i] = float32(i) / 16
+	}
+	for i := 0; i < physicalWeights; i++ {
+		host := NewF32(Default(), []int{1, len(want)}, want)
+		device := backend.Upload(host, F32)
+		if got := backend.Read(device); !reflect.DeepEqual(got, want) {
+			t.Fatalf("physical weight %d did not survive arena upload/read", i)
+		}
+		resident = append(resident, device)
+	}
+	afterAllocations, afterBindings, afterReserved, afterLive, _ := counters.VulkanWeightArenaCounters()
+	allocationDelta := afterAllocations - beforeAllocations
+	bindingDelta := afterBindings - beforeBindings
+	if bindingDelta != physicalWeights {
+		t.Fatalf("physical arena bindings = %d, want %d", bindingDelta, physicalWeights)
+	}
+	if allocationDelta == 0 || allocationDelta*8 >= bindingDelta {
+		t.Fatalf("physical arena did not sharply reduce VkDeviceMemory allocations: allocations=%d bindings=%d",
+			allocationDelta, bindingDelta)
+	}
+	if afterReserved <= beforeReserved || afterLive <= beforeLive || afterLive > afterReserved {
+		t.Fatalf("physical arena accounting invalid: reserved %d->%d live %d->%d",
+			beforeReserved, afterReserved, beforeLive, afterLive)
+	}
+	for _, device := range resident {
+		backend.Free(device)
+	}
+	_, _, finalReserved, finalLive, _ := counters.VulkanWeightArenaCounters()
+	if finalReserved != beforeReserved || finalLive != beforeLive {
+		t.Fatalf("physical arena retained storage after last free: reserved=%d (want %d) live=%d (want %d)",
+			finalReserved, beforeReserved, finalLive, beforeLive)
 	}
 }
 
