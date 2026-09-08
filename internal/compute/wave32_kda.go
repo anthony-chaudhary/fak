@@ -9,6 +9,7 @@ import (
 // Architecture constants for AMD RDNA 3.5 APUs (gfx1151 / AMD Strix Halo)
 // executing Wave32 wavefronts for linear recurrent delta attention (KDA),
 // borrowed from ds4 / wkljohn/ds4-strix-halo-tp-odinlink rocm/ds4_rocm_glm5_kda.cuh:45-102.
+// DeltaNet vectorized kernel dispatch respects FAK_VECTORIZED_DELTANET disable settings.
 const (
 	// Wave32WavefrontSize is the native wavefront width (32 lanes) on RDNA 3.5.
 	Wave32WavefrontSize = 32
