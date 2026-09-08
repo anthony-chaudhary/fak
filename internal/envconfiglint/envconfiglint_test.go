@@ -194,7 +194,22 @@ func TestAdmittedPostFreezeCoversTrunkAdvances(t *testing.T) {
 	if len(admittedPostFreeze) == 0 {
 		t.Fatal("expected non-empty admittedPostFreeze")
 	}
-	want := []string{"OPENCODE_HOME", "XDG_DATA_HOME"}
+	want := []string{
+		"ALLOW_CACHE_HEADLINE_DRIFT",
+		"AR",
+		"CLAUDE_PROJECT_DIR",
+		"CUDA_HOME",
+		"CUDA_PATH",
+		"CXX",
+		"FAK_DISABLE_VECTOR_GDN",
+		"FAK_INKERNEL_RADIX_CPU_BYTES",
+		"FAK_NGRAM_AVX512",
+		"FAK_VECTORIZED_DELTANET",
+		"FAK_VECTOR_GDN",
+		"OPENCODE_HOME",
+		"VULKAN_SDK",
+		"XDG_DATA_HOME",
+	}
 	admitted := map[string]bool{}
 	for _, name := range admittedPostFreeze {
 		admitted[name] = true
