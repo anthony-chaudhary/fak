@@ -1,8 +1,10 @@
 package compute
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 )
@@ -199,13 +201,14 @@ const (
 
 // WMMATileGeometry specifies cooperative matrix tile geometry tuned for RDNA 3.5 dual-issue WMMA.
 type WMMATileGeometry struct {
-	M         int           `json:"m"`          // M dimension (16)
-	N         int           `json:"n"`          // N dimension (16)
-	K         int           `json:"k"`          // K dimension (16 or 32)
-	Lanes     int           `json:"lanes"`      // Wave32 lane count (32)
-	Primitive WMMAPrimitive `json:"primitive"`  // "16x16x16" or "16x16x32"
-	DualIssue bool          `json:"dual_issue"` // true on RDNA 3.5 (gfx1151)
-	Precision string        `json:"precision"`  // e.g. "fp16/bf16" or "int8/fp8/int4"
+	M            int           `json:"m"`             // M dimension (16)
+	N            int           `json:"n"`             // N dimension (16)
+	K            int           `json:"k"`             // K dimension (16 or 32)
+	Lanes        int           `json:"lanes"`         // Wave32 lane count (32)
+	SubgroupSize int           `json:"subgroup_size"` // Wave32 subgroup size (32)
+	Primitive    WMMAPrimitive `json:"primitive"`     // "16x16x16" or "16x16x32"
+	DualIssue    bool          `json:"dual_issue"`    // true on RDNA 3.5 (gfx1151)
+	Precision    string        `json:"precision"`     // e.g. "fp16/bf16" or "int8/fp8/int4"
 }
 
 // CooperativeMatrixConfig provides complete workgroup tile sizing, LDS allocation,
@@ -213,6 +216,7 @@ type WMMATileGeometry struct {
 type CooperativeMatrixConfig struct {
 	Arch              string        `json:"arch"`
 	Primitive         WMMAPrimitive `json:"primitive"`
+	SubgroupSize      int           `json:"subgroup_size"`
 	TileM             int           `json:"tile_m"`
 	TileN             int           `json:"tile_n"`
 	TileK             int           `json:"tile_k"`
@@ -240,22 +244,24 @@ func (a ROCmArch) SupportedWMMATiles() []WMMATileGeometry {
 	isRDNA3_5 := a.Family == ROCmRDNA3_5 || a.GFX == "gfx1151"
 	return []WMMATileGeometry{
 		{
-			M:         16,
-			N:         16,
-			K:         16,
-			Lanes:     32,
-			Primitive: WMMAPrimitive16x16x16,
-			DualIssue: isRDNA3_5,
-			Precision: "fp16/bf16",
+			M:            16,
+			N:            16,
+			K:            16,
+			Lanes:        32,
+			SubgroupSize: 32,
+			Primitive:    WMMAPrimitive16x16x16,
+			DualIssue:    isRDNA3_5,
+			Precision:    "fp16/bf16",
 		},
 		{
-			M:         16,
-			N:         16,
-			K:         32,
-			Lanes:     32,
-			Primitive: WMMAPrimitive16x16x32,
-			DualIssue: isRDNA3_5,
-			Precision: "int8/fp8/int4",
+			M:            16,
+			N:            16,
+			K:            32,
+			Lanes:        32,
+			SubgroupSize: 32,
+			Primitive:    WMMAPrimitive16x16x32,
+			DualIssue:    isRDNA3_5,
+			Precision:    "int8/fp8/int4",
 		},
 	}
 }
@@ -294,6 +300,7 @@ func (a ROCmArch) TuneCooperativeMatrixGEMM(m, n, k int, precision string) (Coop
 	return CooperativeMatrixConfig{
 		Arch:              a.GFX,
 		Primitive:         primitive,
+		SubgroupSize:      32,
 		TileM:             tileM,
 		TileN:             tileN,
 		TileK:             tileK,
@@ -306,6 +313,144 @@ func (a ROCmArch) TuneCooperativeMatrixGEMM(m, n, k int, precision string) (Coop
 		LDSBytes:          ldsBytes,
 		ActiveBanks:       conflictRep.ActiveBanks,
 		SpeedupEstimate:   conflictRep.SpeedupEstimate,
+	}, nil
+}
+
+// ValidateCooperativeMatrixConfig verifies that a CooperativeMatrixConfig adheres to
+// RDNA 3.5 Wave32 hardware invariants: SubgroupSize=32, 4 waves/group, 32x32 spatial tile,
+// and Pad-2 LDS stride.
+func ValidateCooperativeMatrixConfig(cfg CooperativeMatrixConfig) error {
+	if cfg.SubgroupSize != 32 {
+		return fmt.Errorf("rocm: invalid subgroup size %d, want 32 for Wave32", cfg.SubgroupSize)
+	}
+	if cfg.WavesPerWorkgroup != 4 {
+		return fmt.Errorf("rocm: invalid waves per workgroup %d, want 4 (2x2 wave grid)", cfg.WavesPerWorkgroup)
+	}
+	if cfg.TileM != 32 || cfg.TileN != 32 {
+		return fmt.Errorf("rocm: invalid spatial tile (%d x %d), want (32 x 32)", cfg.TileM, cfg.TileN)
+	}
+	if cfg.WaveM != 16 || cfg.WaveN != 16 {
+		return fmt.Errorf("rocm: invalid wave tile (%d x %d), want (16 x 16)", cfg.WaveM, cfg.WaveN)
+	}
+	if cfg.TileK != 16 && cfg.TileK != 32 {
+		return fmt.Errorf("rocm: unsupported TileK=%d (must be 16 for fp16 or 32 for int8)", cfg.TileK)
+	}
+	expectedPadded := LDSBankPad2Stride(cfg.UnpaddedStride)
+	if cfg.PaddedStride != expectedPadded {
+		return fmt.Errorf("rocm: padded stride %d does not match Pad-2 alignment of unpadded %d (want %d)", cfg.PaddedStride, cfg.UnpaddedStride, expectedPadded)
+	}
+	if cfg.LDSBytes <= 0 || cfg.LDSBytes > 65536 {
+		return fmt.Errorf("rocm: invalid LDS allocation %d bytes (must be > 0 and <= 64KB CU LDS)", cfg.LDSBytes)
+	}
+	return nil
+}
+
+// CooperativeMatrixPushConstants encapsulates the 32-byte push constant block
+// consumed by coopmat_wave32_wmma.comp.
+type CooperativeMatrixPushConstants struct {
+	M     uint32  `json:"m"`
+	N     uint32  `json:"n"`
+	K     uint32  `json:"k"`
+	Alpha float32 `json:"alpha"`
+	Beta  float32 `json:"beta"`
+	LDA   uint32  `json:"lda"`
+	LDB   uint32  `json:"ldb"`
+	LDC   uint32  `json:"ldc"`
+}
+
+// NewCooperativeMatrixPushConstants creates and validates push constants for Wave32 WMMA GEMM.
+func NewCooperativeMatrixPushConstants(m, n, k int, alpha, beta float32) (CooperativeMatrixPushConstants, error) {
+	if m <= 0 || n <= 0 || k <= 0 {
+		return CooperativeMatrixPushConstants{}, fmt.Errorf("rocm: invalid matrix dimensions M=%d, N=%d, K=%d", m, n, k)
+	}
+	pc := CooperativeMatrixPushConstants{
+		M:     uint32(m),
+		N:     uint32(n),
+		K:     uint32(k),
+		Alpha: alpha,
+		Beta:  beta,
+		LDA:   uint32(k),
+		LDB:   uint32(n),
+		LDC:   uint32(n),
+	}
+	return pc, nil
+}
+
+// Size returns the encoded size in bytes (8 uint32/float32 fields = 32 bytes).
+func (pc CooperativeMatrixPushConstants) Size() int {
+	return 32
+}
+
+// Validate checks that matrix dimensions are non-zero.
+func (pc CooperativeMatrixPushConstants) Validate() error {
+	if pc.M == 0 || pc.N == 0 || pc.K == 0 {
+		return errors.New("rocm: cooperative matrix push constants contain zero dimension")
+	}
+	return nil
+}
+
+// Encode serializes the push constants into little-endian bytes.
+func (pc CooperativeMatrixPushConstants) Encode() []byte {
+	buf := make([]byte, 32)
+	binary.LittleEndian.PutUint32(buf[0:4], pc.M)
+	binary.LittleEndian.PutUint32(buf[4:8], pc.N)
+	binary.LittleEndian.PutUint32(buf[8:12], pc.K)
+	binary.LittleEndian.PutUint32(buf[12:16], math.Float32bits(pc.Alpha))
+	binary.LittleEndian.PutUint32(buf[16:20], math.Float32bits(pc.Beta))
+	binary.LittleEndian.PutUint32(buf[20:24], pc.LDA)
+	binary.LittleEndian.PutUint32(buf[24:28], pc.LDB)
+	binary.LittleEndian.PutUint32(buf[28:32], pc.LDC)
+	return buf
+}
+
+// CooperativeMatrixPipelineDescriptor captures the complete shader pipeline metadata
+// for RDNA 3.5 Wave32 cooperative matrix execution.
+type CooperativeMatrixPipelineDescriptor struct {
+	Arch            string                         `json:"arch"`
+	ShaderFile      string                         `json:"shader_file"`
+	SubgroupSize    int                            `json:"subgroup_size"`
+	WorkgroupLocalX int                            `json:"workgroup_local_x"`
+	WorkgroupLocalY int                            `json:"workgroup_local_y"`
+	WorkgroupLocalZ int                            `json:"workgroup_local_z"`
+	WavesPerGroup   int                            `json:"waves_per_group"`
+	SpatialTileM    int                            `json:"spatial_tile_m"`
+	SpatialTileN    int                            `json:"spatial_tile_n"`
+	TileK           int                            `json:"tile_k"`
+	Pad2Stride      int                            `json:"pad2_stride"`
+	PushConstants   CooperativeMatrixPushConstants `json:"push_constants"`
+	Config          CooperativeMatrixConfig        `json:"config"`
+}
+
+// GenerateWave32WMMAPipelineDescriptor generates and validates a complete pipeline descriptor
+// for running Wave32 WMMA cooperative matrix GEMM on the given architecture.
+func (a ROCmArch) GenerateWave32WMMAPipelineDescriptor(m, n, k int, precision string) (*CooperativeMatrixPipelineDescriptor, error) {
+	cfg, err := a.TuneCooperativeMatrixGEMM(m, n, k, precision)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateCooperativeMatrixConfig(cfg); err != nil {
+		return nil, fmt.Errorf("rocm: config validation failed: %w", err)
+	}
+
+	pc, err := NewCooperativeMatrixPushConstants(m, n, k, 1.0, 0.0)
+	if err != nil {
+		return nil, err
+	}
+
+	return &CooperativeMatrixPipelineDescriptor{
+		Arch:            a.GFX,
+		ShaderFile:      "coopmat_wave32_wmma.comp",
+		SubgroupSize:    32,
+		WorkgroupLocalX: 32,
+		WorkgroupLocalY: 4,
+		WorkgroupLocalZ: 1,
+		WavesPerGroup:   cfg.WavesPerWorkgroup,
+		SpatialTileM:    cfg.TileM,
+		SpatialTileN:    cfg.TileN,
+		TileK:           cfg.TileK,
+		Pad2Stride:      cfg.PaddedStride,
+		PushConstants:   pc,
+		Config:          cfg,
 	}, nil
 }
 

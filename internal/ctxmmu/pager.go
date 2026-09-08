@@ -19,16 +19,17 @@ import (
 // Furthermore, standard OS mmap sequential readahead fetches 128 KiB per read for 130-byte embedding rows,
 // generating 249.7 GiB of disk read traffic for a single 512-token prompt and choking the NVMe bus.
 //
-// LazyTensorGather resolves both bottlenecks:
+// LazyTensorGather implements Lazy Tensor Read (--tensor-read-lazy) and SSD-GTT gather to resolve both bottlenecks:
 //  1. Advises the operating system that the mapping has random access patterns (MADV_RANDOM), suppressing
 //     wasteful 128 KiB sequential readahead.
 //  2. Implements ubatch prefetch: inspects the upcoming batch of token IDs and issues batched madvise(MADV_WILLNEED)
 //     over exact row offsets, reducing resident RAM footprint to <= 2.0 GiB RSS (typically ~1.0–1.4 GiB) and
 //     sustaining >= 300 tok/s prefill without NVMe thrashing.
-//  3. Preserves the unified memory carveout: the engram table remains host-mapped and is never uploaded wholesale
-//     into unified GPU GTT aperture, unlocking the full 262,144-token context window.
-//  4. Provides a fallback flag (--pin-engram-ram / PinEngramRAM) for high-capacity systems (>= 256 GB DRAM)
-//     to pin the entire table in RAM for sub-millisecond TTFT gains.
+//  3. Preserves the unified memory carveout via SSD-GTT gather: the engram table remains host-mapped and is never
+//     uploaded wholesale into unified GPU GTT aperture, unlocking the full 262,144-token context window.
+//  4. Defaults to lazy tensor reading (--tensor-read-lazy=true / TensorReadLazy: true) with fallback flag
+//     (--pin-engram-ram / PinEngramRAM) for high-capacity systems (>= 256 GB DRAM) to pin the entire table in RAM
+//     for sub-millisecond TTFT gains.
 
 const (
 	// DefaultPLEHeads is the standard number of attention heads indexing the PLE table in Qwen 3.8 Flash-Next.
@@ -105,7 +106,7 @@ func (defaultAdvisor) MadviseWillneed(data []byte, off, length int) bool {
 	return osMadviseWillneed(data, off, length)
 }
 
-// GatherOptions configures the LazyTensorGather paging engine.
+// GatherOptions configures the LazyTensorGather paging engine for SSD-GTT gather and lazy tensor reads (--tensor-read-lazy).
 type GatherOptions struct {
 	// TablePath is the filesystem path to the SSD-backed tensor table.
 	TablePath string
@@ -127,6 +128,12 @@ type GatherOptions struct {
 
 	// PinEngramRAM enables full RAM pinning for high-DRAM systems (>= 256 GB) to maximize TTFT.
 	PinEngramRAM bool
+
+	// TensorReadLazy enables lazy SSD-GTT tensor reading (--tensor-read-lazy, default: true).
+	// When true, embedding rows are read and prefetched lazily from SSD/host memory using MADV_RANDOM
+	// and batched MADV_WILLNEED, preserving GPU GTT memory for KV cache. When PinEngramRAM is enabled,
+	// TensorReadLazy defaults to false.
+	TensorReadLazy bool `json:"tensor_read_lazy"`
 
 	// HostMapped asserts that the table remains host-mapped rather than uploaded to GTT. Must be true.
 	HostMapped bool
@@ -150,6 +157,7 @@ func DefaultGatherOptions() GatherOptions {
 		TotalRows:         DefaultPLETotalRows,
 		TotalSizeBytes:    DefaultPLETotalRows * int64(DefaultPLERowSizeBytes), // ~41.6 GB uncompacted or ~26.8 GiB packed
 		PinEngramRAM:      false,
+		TensorReadLazy:    true,
 		HostMapped:        true,
 		MaxResidentRSS:    DefaultMaxResidentRSS,
 		TargetPrefillTokS: MinTargetPrefillTokPerSec,
@@ -174,6 +182,7 @@ type GatherStats struct {
 	HostMapped             bool    `json:"host_mapped"`
 	GTTAllocated           bool    `json:"gtt_allocated"`
 	PinnedRAM              bool    `json:"pinned_ram"`
+	TensorReadLazy         bool    `json:"tensor_read_lazy"`
 	MADVRandomApplied      bool    `json:"madv_random_applied"`
 }
 
@@ -254,6 +263,11 @@ func NewLazyTensorGatherFromData(data []byte, opts GatherOptions) (*LazyTensorGa
 }
 
 func normalizeOptions(opts GatherOptions, dataSize int64) GatherOptions {
+	if !opts.PinEngramRAM {
+		opts.TensorReadLazy = true
+	} else {
+		opts.TensorReadLazy = false
+	}
 	if opts.RowSizeBytes <= 0 {
 		opts.RowSizeBytes = DefaultPLERowSizeBytes
 	}
@@ -587,6 +601,13 @@ func (g *LazyTensorGather) IsGTTAllocated() bool {
 	return false // Strictly false by architectural invariant
 }
 
+// IsTensorReadLazy reports whether lazy tensor read / SSD-GTT gather is enabled.
+func (g *LazyTensorGather) IsTensorReadLazy() bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.opts.TensorReadLazy
+}
+
 // Stats returns a thread-safe snapshot of paging and prefetch telemetry.
 func (g *LazyTensorGather) Stats() GatherStats {
 	g.mu.RLock()
@@ -614,6 +635,7 @@ func (g *LazyTensorGather) Stats() GatherStats {
 		HostMapped:             g.opts.HostMapped,
 		GTTAllocated:           false,
 		PinnedRAM:              g.opts.PinEngramRAM,
+		TensorReadLazy:         g.opts.TensorReadLazy,
 		MADVRandomApplied:      g.madvRandomApplied,
 	}
 }

@@ -16,7 +16,12 @@ layout(push_constant) uniform Push {
     int nPos; int nH; int nKV; int hd; float scale;
 } pc;
 
-shared float red[128];
+const uint RED_STRIDE = 32u + 2u;
+shared float red[4u * RED_STRIDE];
+
+uint red_idx(uint i) {
+    return (i / 32u) * RED_STRIDE + (i % 32u);
+}
 
 void main() {
     uint h = gl_WorkGroupID.x;
@@ -40,12 +45,12 @@ void main() {
     // phase 2: block-reduce max
     float lm = -1e30;
     for (uint j = tid; j < uint(pc.nPos); j += 128u) lm = max(lm, Scores[scbase + j]);
-    red[tid] = lm; barrier();
+    red[red_idx(tid)] = lm; barrier();
     for (uint s = 64u; s > 0u; s >>= 1) {
-        if (tid < s) red[tid] = max(red[tid], red[tid + s]);
+        if (tid < s) red[red_idx(tid)] = max(red[red_idx(tid)], red[red_idx(tid + s)]);
         barrier();
     }
-    float mx = red[0];
+    float mx = red[red_idx(0)];
     barrier();
 
     // phase 3: exp in place + block-reduce sum
@@ -55,12 +60,12 @@ void main() {
         Scores[scbase + j] = e;
         ls += e;
     }
-    red[tid] = ls; barrier();
+    red[red_idx(tid)] = ls; barrier();
     for (uint s = 64u; s > 0u; s >>= 1) {
-        if (tid < s) red[tid] += red[tid + s];
+        if (tid < s) red[red_idx(tid)] += red[red_idx(tid + s)];
         barrier();
     }
-    float sum = red[0];
+    float sum = red[red_idx(0)];
     barrier();
 
     // phase 4: out[d] = Σ_j (sc[j]/sum) * V[j, kvh, d]

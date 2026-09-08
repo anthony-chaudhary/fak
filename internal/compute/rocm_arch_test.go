@@ -1,6 +1,11 @@
 package compute
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 // rocm_arch_test.go — host-tractable witnesses for the ROCm device-arch taxonomy (#266).
 // Every assertion here is hardware-independent: it checks the gfx→family mapping, the
@@ -386,15 +391,18 @@ func TestROCm_Ticket514_Wave32WMMAAndPad2(t *testing.T) {
 	has16x16x16 := false
 	has16x16x32 := false
 	for _, tile := range tiles {
+		if tile.SubgroupSize != 32 {
+			t.Errorf("tile.SubgroupSize = %d, want 32", tile.SubgroupSize)
+		}
 		if tile.Primitive == WMMAPrimitive16x16x16 {
 			has16x16x16 = true
-			if tile.M != 16 || tile.N != 16 || tile.K != 16 || tile.Lanes != 32 || !tile.DualIssue {
+			if tile.M != 16 || tile.N != 16 || tile.K != 16 || tile.Lanes != 32 || tile.SubgroupSize != 32 || !tile.DualIssue {
 				t.Errorf("invalid 16x16x16 tile config: %+v", tile)
 			}
 		}
 		if tile.Primitive == WMMAPrimitive16x16x32 {
 			has16x16x32 = true
-			if tile.M != 16 || tile.N != 16 || tile.K != 32 || tile.Lanes != 32 || !tile.DualIssue {
+			if tile.M != 16 || tile.N != 16 || tile.K != 32 || tile.Lanes != 32 || tile.SubgroupSize != 32 || !tile.DualIssue {
 				t.Errorf("invalid 16x16x32 tile config: %+v", tile)
 			}
 		}
@@ -411,6 +419,9 @@ func TestROCm_Ticket514_Wave32WMMAAndPad2(t *testing.T) {
 	if fp16Cfg.Primitive != WMMAPrimitive16x16x16 || fp16Cfg.TileK != 16 || !fp16Cfg.DualIssue {
 		t.Errorf("fp16Cfg = %+v, want 16x16x16 dual-issue", fp16Cfg)
 	}
+	if fp16Cfg.SubgroupSize != 32 {
+		t.Errorf("fp16Cfg.SubgroupSize = %d, want 32", fp16Cfg.SubgroupSize)
+	}
 	if fp16Cfg.PaddedStride != fp16Cfg.UnpaddedStride+2 {
 		t.Errorf("fp16Cfg padded stride %d != unpadded %d + 2", fp16Cfg.PaddedStride, fp16Cfg.UnpaddedStride)
 	}
@@ -421,6 +432,9 @@ func TestROCm_Ticket514_Wave32WMMAAndPad2(t *testing.T) {
 	}
 	if int8Cfg.Primitive != WMMAPrimitive16x16x32 || int8Cfg.TileK != 32 || !int8Cfg.DualIssue {
 		t.Errorf("int8Cfg = %+v, want 16x16x32 dual-issue", int8Cfg)
+	}
+	if int8Cfg.SubgroupSize != 32 {
+		t.Errorf("int8Cfg.SubgroupSize = %d, want 32", int8Cfg.SubgroupSize)
 	}
 
 	// 3. Verify LDS bank conflict Pad-2 alignment helper (+13% matmul speedup)
@@ -468,5 +482,148 @@ func TestROCm_Ticket514_Wave32WMMAAndPad2(t *testing.T) {
 	}
 	if report.SpeedupEstimate != 1.13 {
 		t.Errorf("report.SpeedupEstimate = %f, want 1.13", report.SpeedupEstimate)
+	}
+}
+
+// TestROCm_Ticket12081_Wave32WMMA_ShaderAndPipeline verifies the Wave32 Cooperative Matrix Retiling (WMMA)
+// micro-architectural optimization for RDNA 3.5 (gfx1151) (#12081):
+// 1. coopmat_wave32_wmma.comp shader source verification (GL extensions, workgroup size 32x4x1, Pad-2 stride 34, attribution).
+// 2. SubgroupSize == 32 propagation across WMMATileGeometry and CooperativeMatrixConfig.
+// 3. Pipeline generation and validation helpers.
+func TestROCm_Ticket12081_Wave32WMMA_ShaderAndPipeline(t *testing.T) {
+	// 1. Verify coopmat_wave32_wmma.comp shader file
+	shaderPath := filepath.Join("shaders", "coopmat_wave32_wmma.comp")
+	content, err := os.ReadFile(shaderPath)
+	if err != nil {
+		// Try relative to repo root if test running in different directory
+		shaderPath = filepath.Join("..", "..", "internal", "compute", "shaders", "coopmat_wave32_wmma.comp")
+		content, err = os.ReadFile(shaderPath)
+	}
+	if err != nil {
+		t.Fatalf("failed to read coopmat_wave32_wmma.comp: %v", err)
+	}
+	shaderSrc := string(content)
+
+	requiredShaderTokens := []string{
+		"#version 450",
+		"Nathanw1014",
+		"MIT License",
+		"GL_KHR_cooperative_matrix",
+		"GL_KHR_memory_scope_semantics",
+		"GL_KHR_shader_subgroup_basic",
+		"GL_EXT_shader_explicit_arithmetic_types_float16",
+		"GL_EXT_shader_explicit_arithmetic_types_int8",
+		"layout(local_size_x = 32, local_size_y = 4, local_size_z = 1) in;",
+		"uint M;",
+		"uint N;",
+		"uint K;",
+		"float alpha;",
+		"float beta;",
+		"STRIDE_N = TILE_N + LDS_PAD_2;",
+		"32 + 2 = 34",
+		"coopMatLoad",
+		"coopMatMulAdd",
+		"coopMatStore",
+	}
+
+	for _, tok := range requiredShaderTokens {
+		if !strings.Contains(shaderSrc, tok) {
+			t.Errorf("coopmat_wave32_wmma.comp missing required token: %q", tok)
+		}
+	}
+
+	// 2. Verify SubgroupSize == 32 in SupportedWMMATiles and TuneCooperativeMatrixGEMM
+	arch, ok := LookupROCmArch("gfx1151")
+	if !ok {
+		t.Fatal("gfx1151 not found")
+	}
+
+	tiles := arch.SupportedWMMATiles()
+	if len(tiles) == 0 {
+		t.Fatal("SupportedWMMATiles() returned empty slice")
+	}
+	for _, tile := range tiles {
+		if tile.SubgroupSize != 32 {
+			t.Errorf("tile.SubgroupSize = %d, want 32", tile.SubgroupSize)
+		}
+	}
+
+	cfgFP16, err := arch.TuneCooperativeMatrixGEMM(64, 64, 64, "fp16")
+	if err != nil {
+		t.Fatalf("TuneCooperativeMatrixGEMM(fp16): %v", err)
+	}
+	if cfgFP16.SubgroupSize != 32 {
+		t.Errorf("cfgFP16.SubgroupSize = %d, want 32", cfgFP16.SubgroupSize)
+	}
+	if cfgFP16.WavesPerWorkgroup != 4 {
+		t.Errorf("cfgFP16.WavesPerWorkgroup = %d, want 4", cfgFP16.WavesPerWorkgroup)
+	}
+	if cfgFP16.TileM != 32 || cfgFP16.TileN != 32 {
+		t.Errorf("cfgFP16 tile dimensions = (%d, %d), want (32, 32)", cfgFP16.TileM, cfgFP16.TileN)
+	}
+	if cfgFP16.PaddedStride != 34 {
+		t.Errorf("cfgFP16.PaddedStride = %d, want 34", cfgFP16.PaddedStride)
+	}
+
+	cfgINT8, err := arch.TuneCooperativeMatrixGEMM(64, 64, 64, "int8")
+	if err != nil {
+		t.Fatalf("TuneCooperativeMatrixGEMM(int8): %v", err)
+	}
+	if cfgINT8.SubgroupSize != 32 {
+		t.Errorf("cfgINT8.SubgroupSize = %d, want 32", cfgINT8.SubgroupSize)
+	}
+	if cfgINT8.TileK != 32 {
+		t.Errorf("cfgINT8.TileK = %d, want 32", cfgINT8.TileK)
+	}
+
+	// 3. ValidateCooperativeMatrixConfig
+	if err := ValidateCooperativeMatrixConfig(cfgFP16); err != nil {
+		t.Errorf("ValidateCooperativeMatrixConfig(cfgFP16) unexpected error: %v", err)
+	}
+	if err := ValidateCooperativeMatrixConfig(cfgINT8); err != nil {
+		t.Errorf("ValidateCooperativeMatrixConfig(cfgINT8) unexpected error: %v", err)
+	}
+
+	// Verify fail-closed validation on mismatched subgroup size
+	badCfg := cfgFP16
+	badCfg.SubgroupSize = 64
+	if err := ValidateCooperativeMatrixConfig(badCfg); err == nil {
+		t.Errorf("ValidateCooperativeMatrixConfig with SubgroupSize=64 should have failed")
+	}
+
+	// 4. Test pipeline descriptor generation
+	pipelineFP16, err := arch.GenerateWave32WMMAPipelineDescriptor(128, 128, 128, "fp16")
+	if err != nil {
+		t.Fatalf("GenerateWave32WMMAPipelineDescriptor(fp16): %v", err)
+	}
+	if pipelineFP16.SubgroupSize != 32 {
+		t.Errorf("pipelineFP16.SubgroupSize = %d, want 32", pipelineFP16.SubgroupSize)
+	}
+	if pipelineFP16.WorkgroupLocalX != 32 || pipelineFP16.WorkgroupLocalY != 4 || pipelineFP16.WorkgroupLocalZ != 1 {
+		t.Errorf("pipelineFP16 workgroup local size = (%d, %d, %d), want (32, 4, 1)", pipelineFP16.WorkgroupLocalX, pipelineFP16.WorkgroupLocalY, pipelineFP16.WorkgroupLocalZ)
+	}
+	if pipelineFP16.Pad2Stride != 34 {
+		t.Errorf("pipelineFP16.Pad2Stride = %d, want 34", pipelineFP16.Pad2Stride)
+	}
+
+	// 5. Test push constants encoding and validation
+	pc, err := NewCooperativeMatrixPushConstants(128, 128, 64, 1.0, 0.0)
+	if err != nil {
+		t.Fatalf("NewCooperativeMatrixPushConstants: %v", err)
+	}
+	if pc.Size() != 32 {
+		t.Errorf("pc.Size() = %d, want 32", pc.Size())
+	}
+	encoded := pc.Encode()
+	if len(encoded) != 32 {
+		t.Errorf("len(encoded) = %d, want 32", len(encoded))
+	}
+	if err := pc.Validate(); err != nil {
+		t.Errorf("pc.Validate() error: %v", err)
+	}
+
+	zeroPC := CooperativeMatrixPushConstants{}
+	if err := zeroPC.Validate(); err == nil {
+		t.Errorf("zeroPC.Validate() should have failed for zero dimensions")
 	}
 }

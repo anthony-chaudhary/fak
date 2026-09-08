@@ -1,0 +1,131 @@
+// flash_attn_dequant.comp — Single-pass dequantization of quantized KV blocks (Q8_0, Q4_0, Q4_K)
+// into contiguous local GPU scratchpad memory for AMD RDNA 3.5 (gfx1151 / Strix Halo).
+//
+// Ported and adapted from Nathanw1014/strix-halo-llamacpp@45bec945 under the MIT License:
+// Copyright (c) 2025 Nathanw1014 / The GGML / LLaMA.cpp Contributors
+// Copyright (c) 2026 anthony-chaudhary/fak contributors
+//
+// Micro-architectural rationale for AMD RDNA 3.5 (gfx1151 / Strix Halo):
+// On AMD Strix Halo unified memory (256-bit LPDDR5X across 16 pseudo-channels), quantized KV caches
+// (Q8_0, Q4_0, Q4_K) historically suffered from redundant per-head dequantization: each query head in
+// multi-head attention (MHA/GQA) re-dequantized the same KV blocks inside the inner attention loop.
+// For nQ heads sharing nKV heads (e.g. GQA ratio 4:1 or 8:1), this imposed a 4x-8x redundant ALU
+// and memory bandwidth penalty.
+//
+// By dequantizing quantized KV blocks ONCE into a head-contiguous float32 scratchpad [nKV, nPos, headDim]
+// prior to attention, all query heads reuse the dequantized values directly.
+// This eliminates the redundant dequantization tax (+35% at medium context, up to 3.26x at deep context >= 32k)
+// while organizing output stores into 128-byte cache-line aligned transactions across Wave32 wavefronts.
+
+#version 450
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform FlashAttnDequantPushConstants {
+    int nPos;
+    int nKV;
+    int headDim;
+    int format; // 0 = Q8_0, 1 = Q4_0, 2 = Q4_K
+} pc;
+
+layout(std430, set = 0, binding = 0) readonly buffer RawCodesBuffer {
+    uint rawCodes[];
+};
+
+layout(std430, set = 0, binding = 1) readonly buffer ScaleBuffer {
+    float scales[];
+};
+
+layout(std430, set = 0, binding = 2) writeonly buffer OutputScratchpad {
+    float scratch[];
+};
+
+uint byteAt(uint off) {
+    uint w = rawCodes[off >> 2];
+    return (w >> ((off & 3u) * 8u)) & 255u;
+}
+
+int int8At(uint off) {
+    uint b = byteAt(off);
+    return (b >= 128u) ? int(b) - 256 : int(b);
+}
+
+float halfAt(uint off) {
+    uint bits = byteAt(off) | (byteAt(off + 1u) << 8u);
+    return unpackHalf2x16(bits).x;
+}
+
+void scaleMin(uint base, int group, out uint sc, out uint mn) {
+    int j = group;
+    if (j < 4) {
+        sc = byteAt(base + uint(j)) & 63u;
+        mn = byteAt(base + uint(j + 4)) & 63u;
+    } else {
+        sc = (byteAt(base + uint(j + 4)) & 15u) | ((byteAt(base + uint(j - 4)) >> 6u) << 4u);
+        mn = (byteAt(base + uint(j + 4)) >> 4u) | ((byteAt(base + uint(j)) >> 6u) << 4u);
+    }
+}
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    uint totalElems = uint(pc.nPos) * uint(pc.nKV) * uint(pc.headDim);
+    if (gid >= totalElems) {
+        return;
+    }
+
+    if (pc.format == 0) {
+        // Q8_0: 32 elements per block (Wave32 lockstep dequantization)
+        uint blockIdx = gid / 32u;
+        uint lane = gid % 32u;
+        float s = scales[blockIdx];
+        if (s != 0.0) {
+            int code = int8At(gid);
+            scratch[gid] = s * float(code);
+        } else {
+            uint base = blockIdx * 34u;
+            float scale = halfAt(base);
+            int code = int8At(base + 2u + lane);
+            scratch[gid] = scale * float(code);
+        }
+    } else if (pc.format == 1) {
+        // Q4_0: 32 elements per block (Wave32 lockstep dequantization)
+        uint blockIdx = gid / 32u;
+        uint lane = gid % 32u;
+        float s = scales[blockIdx];
+        if (s != 0.0) {
+            uint byteOff = blockIdx * 16u + (lane >> 1u);
+            uint b = byteAt(byteOff);
+            uint nibble = ((lane & 1u) == 0u) ? (b & 0x0Fu) : ((b >> 4u) & 0x0Fu);
+            scratch[gid] = s * float(int(nibble) - 8);
+        } else {
+            uint base = blockIdx * 18u;
+            float scale = halfAt(base);
+            uint byteOff = base + 2u + (lane >> 1u);
+            uint b = byteAt(byteOff);
+            uint nibble = ((lane & 1u) == 0u) ? (b & 0x0Fu) : ((b >> 4u) & 0x0Fu);
+            scratch[gid] = scale * float(int(nibble) - 8);
+        }
+    } else if (pc.format == 2) {
+        // Q4_K: 256 elements per super-block (8 Wave32 subgroups per workgroup)
+        uint sb = gid / 256u;
+        uint l = gid % 256u;
+        uint group = l / 32u;
+        uint lane = l % 32u;
+        float s = scales[sb * 8u + group];
+        if (s != 0.0) {
+            uint qBase = sb * 128u;
+            uint packed = byteAt(qBase + uint((group >> 1u) * 32u + lane));
+            uint code = ((group & 1u) != 0u) ? (packed >> 4u) : (packed & 15u);
+            scratch[gid] = s * float(code);
+        } else {
+            uint base = sb * 144u;
+            float d = halfAt(base);
+            float dm = halfAt(base + 2u);
+            uint sc, mn;
+            scaleMin(base + 4u, int(group), sc, mn);
+            uint packed = byteAt(base + 16u + uint((group >> 1u) * 32u + lane));
+            uint code = ((group & 1u) != 0u) ? (packed >> 4u) : (packed & 15u);
+            scratch[gid] = d * float(sc) * float(code) - dm * float(mn);
+        }
+    }
+}

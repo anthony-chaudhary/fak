@@ -28,6 +28,7 @@ layout(local_size_x = 256) in;
 const uint BLOCK = 32u;
 const uint SHARED_CAP = 2048u;            // staged input floats per window (multiple of BLOCK)
 const uint WIN_BLOCKS = SHARED_CAP / BLOCK; // whole Q8_0 blocks staged per window (=64)
+const uint XS_STRIDE = 32u + 2u;
 
 layout(std430, binding = 0) readonly buffer Wq   { int8_t  Wcodes[]; };  // [out*in] int8 weight codes
 layout(std430, binding = 1) readonly buffer Ws   { float   Wscale[]; };  // [out*nblk] per-block weight scales
@@ -37,7 +38,11 @@ layout(std430, binding = 3) writeonly buffer Yb  { float   Y[]; };       // [P*o
 layout(push_constant) uniform Push { int outDim; int inDim; int P; } pc;
 
 shared int8_t Xq[SHARED_CAP];        // quantized activation codes for row t
-shared float  Xs[SHARED_CAP / 32u];  // per-block activation scale (one per 32)
+shared float  Xs[2u * XS_STRIDE];    // per-block activation scale (one per 32)
+
+uint xs_idx(uint b) {
+    return (b / 32u) * XS_STRIDE + (b % 32u);
+}
 
 int8_t q8round(float x) {
     // truncate-then-fractional round, half away from zero, clamped to [-127,127] (matches q8round)
@@ -79,7 +84,7 @@ void main() {
             float amax = 0.0;
             for (uint i = 0u; i < BLOCK; ++i) amax = max(amax, abs(X[xbase + gbase + i]));
             float d = amax / 127.0;
-            Xs[b] = d;
+            Xs[xs_idx(b)] = d;
             float inv = d > 0.0 ? 1.0 / d : 0.0;
             for (uint i = 0u; i < BLOCK; ++i) {
                 Xq[base + i] = (d > 0.0) ? q8round(X[xbase + gbase + i] * inv) : int8_t(0);
@@ -100,7 +105,7 @@ void main() {
                     s2 += int(Wcodes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
                     s3 += int(Wcodes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
                 }
-                acc += float((s0 + s1) + (s2 + s3)) * Wscale[sbase + wb + lb] * Xs[lb];
+                acc += float((s0 + s1) + (s2 + s3)) * Wscale[sbase + wb + lb] * Xs[xs_idx(lb)];
             }
         }
         barrier();  // all threads done reading shared before the next window overwrites it

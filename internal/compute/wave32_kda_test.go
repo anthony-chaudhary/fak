@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -1023,6 +1026,208 @@ func TestTiledChannelTranspose_LDSBankConflicts(t *testing.T) {
 	}
 	if err := unpaddedAudit.AssertZeroBankConflicts(); err == nil {
 		t.Errorf("expected AssertZeroBankConflicts() to fail on unpadded stride 32")
+	}
+}
+
+// TestTiledChannelTranspose_ShaderDescriptor verifies the shader descriptor and push constants
+// configuration for qwen35_gdn_tiled_transpose on AMD RDNA 3.5 (gfx1151 / Wave32).
+func TestTiledChannelTranspose_ShaderDescriptor(t *testing.T) {
+	if Qwen35GDNTiledTransposeShader != "qwen35_gdn_tiled_transpose" {
+		t.Errorf("Qwen35GDNTiledTransposeShader = %q, want %q", Qwen35GDNTiledTransposeShader, "qwen35_gdn_tiled_transpose")
+	}
+
+	cfg := DefaultTiledChannelTransposeConfig()
+	if cfg.ShaderName != Qwen35GDNTiledTransposeShader {
+		t.Errorf("cfg.ShaderName = %q, want %q", cfg.ShaderName, Qwen35GDNTiledTransposeShader)
+	}
+
+	const T = 64
+	const convDim = 10240
+
+	desc := cfg.Descriptor(convDim, T)
+	if desc.ShaderName != Qwen35GDNTiledTransposeShader {
+		t.Errorf("desc.ShaderName = %q, want %q", desc.ShaderName, Qwen35GDNTiledTransposeShader)
+	}
+	if desc.TargetArch != Wave32TargetArch {
+		t.Errorf("desc.TargetArch = %q, want %q", desc.TargetArch, Wave32TargetArch)
+	}
+	if desc.LocalSizeX != 32 || desc.LocalSizeY != 8 || desc.LocalSizeZ != 1 {
+		t.Errorf("desc local size = (%d, %d, %d), want (32, 8, 1)", desc.LocalSizeX, desc.LocalSizeY, desc.LocalSizeZ)
+	}
+	if desc.TileT != 32 || desc.TileC != 32 {
+		t.Errorf("desc tile dims = (%d, %d), want (32, 32)", desc.TileT, desc.TileC)
+	}
+	if desc.LDSBankStride != 33 {
+		t.Errorf("desc.LDSBankStride = %d, want 33", desc.LDSBankStride)
+	}
+	expectedSharedMem := 32 * 33 * 4 // 4224 bytes
+	if desc.SharedMemorySize != expectedSharedMem {
+		t.Errorf("desc.SharedMemorySize = %d, want %d", desc.SharedMemorySize, expectedSharedMem)
+	}
+	if desc.PushConstants.Width != int32(convDim) || desc.PushConstants.Height != int32(T) {
+		t.Errorf("push constants = (%d, %d), want (%d, %d)", desc.PushConstants.Width, desc.PushConstants.Height, convDim, T)
+	}
+	wantGridX := (convDim + 31) / 32
+	wantGridY := (T + 31) / 32
+	if desc.GridX != wantGridX || desc.GridY != wantGridY || desc.GridZ != 1 {
+		t.Errorf("grid = (%d, %d, %d), want (%d, %d, 1)", desc.GridX, desc.GridY, desc.GridZ, wantGridX, wantGridY)
+	}
+	if len(desc.Bindings) != 2 {
+		t.Fatalf("len(desc.Bindings) = %d, want 2", len(desc.Bindings))
+	}
+}
+
+// TestTiledChannelTranspose_ShaderExecution verifies that the modeled shader execution
+// ExecuteTiledTransposeShader produces exact bitwise parity with TiledChannelTranspose
+// across various sequence lengths and channel dimensions.
+func TestTiledChannelTranspose_ShaderExecution(t *testing.T) {
+	testCases := []struct {
+		T       int
+		convDim int
+	}{
+		{T: 1, convDim: 1},
+		{T: 7, convDim: 13},
+		{T: 16, convDim: 32},
+		{T: 32, convDim: 32},
+		{T: 33, convDim: 33},
+		{T: 64, convDim: 128},
+		{T: 64, convDim: 10240},
+	}
+
+	cfg := DefaultTiledChannelTransposeConfig()
+
+	for _, tc := range testCases {
+		t.Run(fmt.Sprintf("T%d_C%d", tc.T, tc.convDim), func(t *testing.T) {
+			rng := rand.New(rand.NewSource(int64(tc.T*777 + tc.convDim)))
+			total := tc.T * tc.convDim
+			input := make([]float32, total)
+			for i := range input {
+				input[i] = rng.Float32()*2.0 - 1.0
+			}
+
+			desc := cfg.Descriptor(tc.convDim, tc.T)
+			shaderOut, err := ExecuteTiledTransposeShader(input, tc.convDim, tc.T, desc)
+			if err != nil {
+				t.Fatalf("ExecuteTiledTransposeShader failed: %v", err)
+			}
+
+			tiledOut, err := TiledChannelTranspose(input, tc.T, tc.convDim, cfg, nil)
+			if err != nil {
+				t.Fatalf("TiledChannelTranspose failed: %v", err)
+			}
+
+			if len(shaderOut) != len(tiledOut) {
+				t.Fatalf("length mismatch: shaderOut=%d, tiledOut=%d", len(shaderOut), len(tiledOut))
+			}
+
+			for i := range shaderOut {
+				if shaderOut[i] != tiledOut[i] {
+					t.Fatalf("element mismatch at %d: shaderOut=%g, tiledOut=%g", i, shaderOut[i], tiledOut[i])
+				}
+			}
+		})
+	}
+}
+
+// TestTiledChannelTranspose_PipelineAuditWiring verifies that TiledChannelTranspose,
+// TiledChannelTransposeInverse, and TiledConvConcatForward attach the shader descriptor
+// to the audit struct.
+func TestTiledChannelTranspose_PipelineAuditWiring(t *testing.T) {
+	const T = 32
+	const convDim = 128
+	const K = 4
+	cfg := DefaultTiledChannelTransposeConfig()
+
+	input := make([]float32, T*convDim)
+	for i := range input {
+		input[i] = float32(i)
+	}
+
+	aud := &TiledChannelTransposeAudit{}
+	_, err := TiledChannelTranspose(input, T, convDim, cfg, aud)
+	if err != nil {
+		t.Fatalf("TiledChannelTranspose failed: %v", err)
+	}
+	if aud.ShaderDescriptor == nil {
+		t.Fatal("expected aud.ShaderDescriptor != nil")
+	}
+	if aud.ShaderDescriptor.ShaderName != Qwen35GDNTiledTransposeShader {
+		t.Errorf("ShaderName = %q, want %q", aud.ShaderDescriptor.ShaderName, Qwen35GDNTiledTransposeShader)
+	}
+	if aud.ShaderDescriptor.PushConstants.Width != convDim || aud.ShaderDescriptor.PushConstants.Height != T {
+		t.Errorf("PushConstants mismatch: %+v", aud.ShaderDescriptor.PushConstants)
+	}
+
+	invAud := &TiledChannelTransposeAudit{}
+	_, err = TiledChannelTransposeInverse(input, convDim, T, cfg, invAud)
+	if err != nil {
+		t.Fatalf("TiledChannelTransposeInverse failed: %v", err)
+	}
+	if invAud.ShaderDescriptor == nil {
+		t.Fatal("expected invAud.ShaderDescriptor != nil")
+	}
+	if invAud.ShaderDescriptor.PushConstants.Width != T || invAud.ShaderDescriptor.PushConstants.Height != convDim {
+		t.Errorf("invAud PushConstants mismatch: %+v", invAud.ShaderDescriptor.PushConstants)
+	}
+
+	convW := make([]float32, convDim*K)
+	_, _, fwdAud, err := TiledConvConcatForward(input, convW, T, convDim, K, nil, cfg)
+	if err != nil {
+		t.Fatalf("TiledConvConcatForward failed: %v", err)
+	}
+	if fwdAud.ShaderDescriptor == nil {
+		t.Fatal("expected fwdAud.ShaderDescriptor != nil")
+	}
+	if fwdAud.ShaderDescriptor.ShaderName != Qwen35GDNTiledTransposeShader {
+		t.Errorf("fwdAud ShaderName = %q, want %q", fwdAud.ShaderDescriptor.ShaderName, Qwen35GDNTiledTransposeShader)
+	}
+}
+
+// TestTiledChannelTranspose_ShaderFile verifies that the compute shader file
+// internal/compute/shaders/qwen35_gdn_tiled_transpose.comp exists and adheres to
+// the RDNA 3.5 (gfx1151) 32x32 Pad-1/Pad-2 LDS bank conflict elimination contract.
+func TestTiledChannelTranspose_ShaderFile(t *testing.T) {
+	candidates := []string{
+		"shaders/qwen35_gdn_tiled_transpose.comp",
+		"internal/compute/shaders/qwen35_gdn_tiled_transpose.comp",
+		filepath.Join("..", "internal", "compute", "shaders", "qwen35_gdn_tiled_transpose.comp"),
+	}
+
+	var content string
+	var foundPath string
+	for _, p := range candidates {
+		data, err := os.ReadFile(p)
+		if err == nil {
+			content = string(data)
+			foundPath = p
+			break
+		}
+	}
+
+	if content == "" {
+		t.Fatalf("could not find qwen35_gdn_tiled_transpose.comp in any candidate path: %v", candidates)
+	}
+
+	requiredTokens := []string{
+		"#version 450",
+		"local_size_x = 32",
+		"local_size_y = 8",
+		"shared float tile[32][33];",
+		"PushConstants",
+		"int width;",
+		"int height;",
+		"readonly buffer InBuf",
+		"writeonly buffer OutBuf",
+		"barrier();",
+		"Nathanw1014/strix-halo-llamacpp",
+		"16-channel",
+		"LPDDR5X",
+	}
+
+	for _, tok := range requiredTokens {
+		if !strings.Contains(content, tok) {
+			t.Errorf("shader %s missing required token %q", foundPath, tok)
+		}
 	}
 }
 

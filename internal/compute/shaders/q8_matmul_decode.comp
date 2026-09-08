@@ -10,6 +10,7 @@ layout(local_size_x = 256) in;
 const uint BLOCK = 32u;
 const uint SHARED_CAP = 2048u;
 const uint WIN_BLOCKS = SHARED_CAP / BLOCK;
+const uint PARTIAL_STRIDE = WIN_BLOCKS + 2u; // 66 floats (Pad-2)
 
 layout(std430, binding = 0) readonly buffer Wq { int8_t Wcodes[]; };
 layout(std430, binding = 1) readonly buffer Ws { float Wscale[]; };
@@ -19,7 +20,7 @@ layout(push_constant) uniform Push { int outDim; int inDim; int P; } pc;
 
 shared int8_t Xq[SHARED_CAP];
 shared float Xs[WIN_BLOCKS];
-shared float partial[8u * WIN_BLOCKS];
+shared float partial[8u * PARTIAL_STRIDE];
 
 int8_t q8round(float x) {
     int t = int(x);
@@ -69,14 +70,14 @@ void main() {
                     s2 += int(Wcodes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
                     s3 += int(Wcodes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
                 }
-                partial[row * WIN_BLOCKS + lb] = float((s0 + s1) + (s2 + s3))
+                partial[row * PARTIAL_STRIDE + lb] = float((s0 + s1) + (s2 + s3))
                     * Wscale[outputRow * nblk + block];
             }
         }
         barrier();
         if (lane == 0u && outputRow < uint(pc.outDim)) {
             for (uint lb = 0u; lb < winBlocks; ++lb)
-                acc += partial[row * WIN_BLOCKS + lb] * Xs[lb];
+                acc += partial[row * PARTIAL_STRIDE + lb] * Xs[lb];
         }
         barrier();
     }
