@@ -443,3 +443,70 @@ func TestDebtLanesCLICrossIndex(t *testing.T) {
 		t.Errorf("expected COMPANION column header, got:\n%s", out)
 	}
 }
+
+func TestDebtOrchestratorCLIOpencodeCommands(t *testing.T) {
+	tmp := setupDebtLaneWaveWorkspace(t)
+	var stdout, stderr bytes.Buffer
+	code := runDebtOrchestrator(&stdout, &stderr, []string{
+		"--workspace", tmp,
+		"--wave-size", "2",
+		"--max-waves", "1",
+		"--opencode-commands",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runDebtOrchestrator --opencode-commands failed: code %d, stderr: %s", code, stderr.String())
+	}
+
+	var plan debtlane.WavePlan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("failed to parse JSON wave plan: %v; raw: %s", err, stdout.String())
+	}
+	if len(plan.Waves) == 0 {
+		t.Fatalf("expected planned waves, got 0")
+	}
+	if len(plan.Waves[0].OpencodeChats) == 0 {
+		t.Errorf("expected OpencodeChats to be populated on Wave 0")
+	}
+	if len(plan.OpencodeCommands) == 0 {
+		t.Errorf("expected OpencodeCommands summary on plan")
+	}
+
+	// Test text rendering includes OpenCode commands
+	var textOut, textErr bytes.Buffer
+	textCode := runDebtOrchestrator(&textOut, &textErr, []string{
+		"--workspace", tmp,
+		"--wave-size", "2",
+		"--max-waves", "1",
+		"--opencode-commands",
+	})
+	if textCode != 0 {
+		t.Fatalf("runDebtOrchestrator text failed: code %d, stderr: %s", textCode, textErr.String())
+	}
+	if !strings.Contains(textOut.String(), "OpenCode Chat Commands:") {
+		t.Errorf("expected text output to include OpenCode Chat Commands:\n%s", textOut.String())
+	}
+}
+
+func TestDebtOrchestratorCLIPerfFocus(t *testing.T) {
+	tmp := setupDebtLaneWaveWorkspace(t)
+	var stdout, stderr bytes.Buffer
+	code := runDebtOrchestrator(&stdout, &stderr, []string{
+		"--workspace", tmp,
+		"--wave-size", "2",
+		"--max-waves", "1",
+		"--perf-focus",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runDebtOrchestrator --perf-focus failed: code %d, stderr: %s", code, stderr.String())
+	}
+
+	var plan debtlane.WavePlan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+	if plan.Schema != debtlane.WavePlanSchema {
+		t.Errorf("expected schema %s, got %s", debtlane.WavePlanSchema, plan.Schema)
+	}
+}

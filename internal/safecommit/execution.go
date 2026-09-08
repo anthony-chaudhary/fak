@@ -81,6 +81,64 @@ func pushVerifiedCommit(ctx context.Context, run Runner, dir, trunk, sha string)
 	})
 }
 
+// applyVerifiedPush performs step (8): the optional push of the already-verified commit. It
+// pushes only when opts.Push is set, by exact SHA refspec through pushVerifiedCommit, and maps
+// a rejected push to ReasonPushRejected (a value, never a force-push). When the push is rejected
+// due to safe disjoint divergence and !opts.DisableAutoReconcile, it attempts auto-reconciliation
+// through safesync (#12078).
+func applyVerifiedPush(ctx context.Context, run Runner, opts Options, trunk string, res Result) (Result, error) {
+	if opts.Push {
+		pushed, err := pushVerifiedCommit(ctx, run, opts.Dir, trunk, res.SHA)
+		if err != nil {
+			return res, err
+		}
+		if !pushed.Pushed {
+			isDisjoint := pushed.Reason == safesync.ReasonDivergedDisjoint ||
+				(pushed.Divergence == string(safesync.PushDiverged) && pushed.Reason == safesync.ReasonDivergedDisjoint)
+			if isDisjoint && !opts.DisableAutoReconcile {
+				remote := gitConfigValue(ctx, run, opts.Dir, "branch."+trunk+".remote")
+				if remote == "" {
+					remote = "origin"
+				}
+				branch := branchFromMergeRef(gitConfigValue(ctx, run, opts.Dir, "branch."+trunk+".merge"), trunk)
+				pktOpts := safesync.PacketOptions{
+					Repo:    opts.Dir,
+					Remote:  remote,
+					Branch:  branch,
+					Runner:  safeSyncRunner(run),
+					Session: opts.SessionID,
+				}
+				pkt, pktErr := safesync.BuildReconciliationPacket(ctx, pktOpts)
+				if pktErr == nil && pkt != nil && pkt.Dispatchable &&
+					pkt.Disposition == safesync.DispositionSafeDisjoint {
+					execOpts := safesync.ExecuteOptions{
+						Repo:           opts.Dir,
+						Remote:         remote,
+						Branch:         branch,
+						Runner:         safeSyncRunner(run),
+						WriterLeaseTTL: safesync.DefaultWriterLeaseTTL,
+						Session:        opts.SessionID,
+					}
+					receipt, _ := safesync.ExecutePacket(ctx, pkt, execOpts)
+					if receipt != nil && receipt.Pushed {
+						res.Pushed = true
+						return res, nil
+					}
+				}
+			}
+			res.Reason = ReasonPushRejected
+			res.Detail = trimDetail(pushed.Detail)
+			if res.Detail == "" {
+				res.Detail = pushed.Reason
+			}
+			return res, nil
+		}
+		res.Pushed = true
+	}
+
+	return res, nil
+}
+
 func safeSyncRunner(run Runner) safesync.Runner {
 	return func(ctx context.Context, repo string, args ...string) safesync.RunResult {
 		out, code, err := run(ctx, repo, args...)

@@ -11,9 +11,18 @@ package compute
 import "C"
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"unsafe"
+)
+
+const (
+	directFragmentTile              = 16
+	directFragmentLDSStride         = directFragmentTile + 2
+	directFragmentLDSLimitBytes     = 32 << 10
+	directFragmentVGPRLimit         = 64
+	directFragmentEstimatedVGPRLane = 16
 )
 
 // RMSNorm applies row-wise RMS normalization scaled by weight (eps in the denominator)
@@ -55,6 +64,10 @@ func (v *vulkanBackend) SwiGLU(gate, up Tensor) Tensor {
 	defer vulkanMu.Unlock()
 	n := gate.Numel()
 	y, _ := v.devTr(append([]int(nil), gate.Shape...), F32)
+	dispatch := recurrentSwiGLUVulkanDispatch
+	if dispatch.Kernel != vulkanElementwiseKernelSwiGLU || dispatch.Dispatches != 1 || dispatch.IntermediateBarriers != 0 {
+		panic(fmt.Sprintf("compute: invalid recurrent SwiGLU Vulkan lowering %+v", dispatch))
+	}
 	C.fvk_swiglu_f32(v.vp(gate), v.vp(up), v.vp(y), C.int(n))
 	return y
 }
@@ -295,6 +308,192 @@ func (v *vulkanBackend) Argmax(logits Tensor) int {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	return int(C.fvk_argmax_f32(v.vp(logits), C.int(logits.Numel())))
+}
+
+// VulkanQuantKVDirectFragmentPlan binds the gfx1151 resource and shape contract for the
+// FAK_DIRECT_FRAGMENT shader variant. The two stages bracket the attention softmax: QK emits
+// logits and PV consumes probabilities. Quantized K/V values exist only in bounded FP16 LDS
+// tiles immediately consumed by cooperative-matrix fragments; no full-cache F32 KV buffer exists.
+type VulkanQuantKVDirectFragmentPlan struct {
+	Arch                    string          `json:"arch"`
+	Format                  QuantizedKVType `json:"format"`
+	NumPos                  int             `json:"num_pos"`
+	NumQHeads               int             `json:"num_q_heads"`
+	NumKVHeads              int             `json:"num_kv_heads"`
+	HeadDim                 int             `json:"head_dim"`
+	HeadsPerKV              int             `json:"heads_per_kv"`
+	TileM                   int             `json:"tile_m"`
+	TileN                   int             `json:"tile_n"`
+	TileK                   int             `json:"tile_k"`
+	QKWorkgroups            int             `json:"qk_workgroups"`
+	PVWorkgroups            int             `json:"pv_workgroups"`
+	LDSBytes                int             `json:"lds_bytes"`
+	EstimatedVGPRPerLane    int             `json:"estimated_vgpr_per_lane"`
+	FullCacheScratchBytes   int64           `json:"full_cache_scratch_bytes"`
+	FullCacheScratchWrites  int64           `json:"full_cache_scratch_writes"`
+	EliminatedScratchBytes  int64           `json:"eliminated_scratch_bytes"`
+	EliminatedScratchWrites int64           `json:"eliminated_scratch_writes"`
+	FallbackCount           int             `json:"fallback_count"`
+}
+
+// PlanVulkanQuantKVDirectFragment admits only the first resource-bounded Wave32 shape family.
+// Unsupported shapes fail closed so callers cannot silently route native work through another engine.
+func PlanVulkanQuantKVDirectFragment(
+	arch string,
+	format QuantizedKVType,
+	nPos, nQ, nKV, headDim int,
+) (VulkanQuantKVDirectFragmentPlan, error) {
+	if !isStrixHaloArch(arch) {
+		return VulkanQuantKVDirectFragmentPlan{}, fmt.Errorf("vulkan: direct-fragment KV requires gfx1151 / Strix Halo (got %q)", arch)
+	}
+	if nPos <= 0 || nQ <= 0 || nKV <= 0 || headDim <= 0 {
+		return VulkanQuantKVDirectFragmentPlan{}, fmt.Errorf("vulkan: invalid direct-fragment shape nPos=%d nQ=%d nKV=%d headDim=%d", nPos, nQ, nKV, headDim)
+	}
+	if nQ%nKV != 0 {
+		return VulkanQuantKVDirectFragmentPlan{}, fmt.Errorf("vulkan: direct-fragment GQA requires nQ divisible by nKV (%d %% %d != 0)", nQ, nKV)
+	}
+	headsPerKV := nQ / nKV
+	if headsPerKV > directFragmentTile {
+		return VulkanQuantKVDirectFragmentPlan{}, fmt.Errorf("vulkan: direct-fragment GQA group %d exceeds cooperative tile %d", headsPerKV, directFragmentTile)
+	}
+	if headDim%directFragmentTile != 0 {
+		return VulkanQuantKVDirectFragmentPlan{}, fmt.Errorf("vulkan: direct-fragment headDim %d is not a multiple of %d", headDim, directFragmentTile)
+	}
+	switch format {
+	case QuantizedKVQ8_0, QuantizedKVQ4_0, QuantizedKVQ4_K:
+	default:
+		return VulkanQuantKVDirectFragmentPlan{}, fmt.Errorf("vulkan: unsupported direct-fragment KV format %q", format)
+	}
+
+	totalElements := int64(nPos) * int64(nKV) * int64(headDim)
+	legacyScratchBytes := 2 * totalElements * 4
+	// Two FP16 16x18 Pad-2 tiles plus one FP32 16x16 accumulator tile.
+	ldsBytes := 2*directFragmentTile*directFragmentLDSStride*2 + directFragmentTile*directFragmentTile*4
+	return VulkanQuantKVDirectFragmentPlan{
+		Arch:                    arch,
+		Format:                  format,
+		NumPos:                  nPos,
+		NumQHeads:               nQ,
+		NumKVHeads:              nKV,
+		HeadDim:                 headDim,
+		HeadsPerKV:              headsPerKV,
+		TileM:                   directFragmentTile,
+		TileN:                   directFragmentTile,
+		TileK:                   directFragmentTile,
+		QKWorkgroups:            ((nPos + directFragmentTile - 1) / directFragmentTile) * nKV,
+		PVWorkgroups:            ((headDim + directFragmentTile - 1) / directFragmentTile) * nKV,
+		LDSBytes:                ldsBytes,
+		EstimatedVGPRPerLane:    directFragmentEstimatedVGPRLane,
+		FullCacheScratchBytes:   0,
+		FullCacheScratchWrites:  0,
+		EliminatedScratchBytes:  legacyScratchBytes,
+		EliminatedScratchWrites: 2 * totalElements,
+		FallbackCount:           0,
+	}, nil
+}
+
+// VulkanQuantKVDirectFragmentReceipt records software-oracle execution of the direct-fragment
+// arithmetic. A physical receipt is separate and must additionally bind the SPIR-V digest and device.
+type VulkanQuantKVDirectFragmentReceipt struct {
+	VulkanQuantKVDirectFragmentPlan
+}
+
+// ExecuteVulkanQuantKVDirectFragmentReference is the deterministic software oracle for the two
+// shader stages. It decodes one packed element at its point of use, deliberately never allocating
+// the full dequantized K/V cache that the #12186 baseline materializes.
+func ExecuteVulkanQuantKVDirectFragmentReference(
+	q []float32,
+	rawK, rawV []byte,
+	arch string,
+	nPos, nQ, nKV, headDim int,
+	format QuantizedKVType,
+) ([]float32, VulkanQuantKVDirectFragmentReceipt, error) {
+	plan, err := PlanVulkanQuantKVDirectFragment(arch, format, nPos, nQ, nKV, headDim)
+	if err != nil {
+		return nil, VulkanQuantKVDirectFragmentReceipt{}, err
+	}
+	if len(q) < nQ*headDim {
+		return nil, VulkanQuantKVDirectFragmentReceipt{}, fmt.Errorf("vulkan: direct-fragment query buffer too small (%d < %d)", len(q), nQ*headDim)
+	}
+	totalKV := nPos * nKV * headDim
+	wantBytes := QuantizedKVTotalBytes(format, totalKV)
+	if len(rawK) < wantBytes || len(rawV) < wantBytes {
+		return nil, VulkanQuantKVDirectFragmentReceipt{}, fmt.Errorf("vulkan: direct-fragment KV buffer too small (K=%d V=%d want=%d)", len(rawK), len(rawV), wantBytes)
+	}
+
+	out := make([]float32, nQ*headDim)
+	scores := make([]float32, nPos)
+	attentionScale := float32(1 / math.Sqrt(float64(headDim)))
+	for qHead := 0; qHead < nQ; qHead++ {
+		kvHead := qHead / plan.HeadsPerKV
+		qBase := qHead * headDim
+		maxScore := float32(-math.MaxFloat32)
+		for pos := 0; pos < nPos; pos++ {
+			kvBase := (kvHead*nPos + pos) * headDim
+			var dot float32
+			for dim := 0; dim < headDim; dim++ {
+				dot += q[qBase+dim] * dequantQuantizedKVElement(rawK, kvBase+dim, format)
+			}
+			score := dot * attentionScale
+			scores[pos] = score
+			if score > maxScore {
+				maxScore = score
+			}
+		}
+
+		var sum float32
+		for pos := range scores {
+			scores[pos] = float32(math.Exp(float64(scores[pos] - maxScore)))
+			sum += scores[pos]
+		}
+		invSum := float32(1) / sum
+		for dim := 0; dim < headDim; dim++ {
+			var acc float32
+			for pos := 0; pos < nPos; pos++ {
+				kvElement := (kvHead*nPos+pos)*headDim + dim
+				acc += scores[pos] * invSum * dequantQuantizedKVElement(rawV, kvElement, format)
+			}
+			out[qBase+dim] = acc
+		}
+	}
+
+	return out, VulkanQuantKVDirectFragmentReceipt{
+		VulkanQuantKVDirectFragmentPlan: plan,
+	}, nil
+}
+
+func dequantQuantizedKVElement(src []byte, element int, format QuantizedKVType) float32 {
+	switch format {
+	case QuantizedKVQ8_0:
+		base := (element / 32) * 34
+		scale := Float16BitsToFloat32(binary.LittleEndian.Uint16(src[base : base+2]))
+		return scale * float32(int8(src[base+2+element%32]))
+	case QuantizedKVQ4_0:
+		base := (element / 32) * 18
+		lane := element % 32
+		packed := src[base+2+lane/2]
+		code := packed & 0x0f
+		if lane&1 != 0 {
+			code = packed >> 4
+		}
+		scale := Float16BitsToFloat32(binary.LittleEndian.Uint16(src[base : base+2]))
+		return scale * float32(int(code)-8)
+	case QuantizedKVQ4_K:
+		base := (element / 256) * 144
+		local := element % 256
+		group, lane := local/32, local%32
+		sc, mn := scaleMinK4Go(group, src[base+4:base+16])
+		packed := src[base+16+(group>>1)*32+lane]
+		code := packed & 0x0f
+		if group&1 != 0 {
+			code = packed >> 4
+		}
+		d := Float16BitsToFloat32(binary.LittleEndian.Uint16(src[base : base+2]))
+		dMin := Float16BitsToFloat32(binary.LittleEndian.Uint16(src[base+2 : base+4]))
+		return d*float32(sc)*float32(code) - dMin*float32(mn)
+	default:
+		panic("unreachable quantized KV format")
+	}
 }
 
 // ExecuteAttentionWithDequantOnce runs multi-head attention against the quantized KV cache,

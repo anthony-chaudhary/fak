@@ -159,6 +159,7 @@ func packageExistsOnDisk(root, pkg string) bool {
 // whole-tree findings. When scoped is false (no remote/trunk read-back), it keeps
 // every finding blocking. Non-TIER_DECLARED findings are never changed.
 func ScopeTierDeclaredFindings(findings []Finding, changedPaths []string, scoped bool) []Finding {
+	findings = ScopeVerbTierFindings(findings, changedPaths, scoped)
 	if !scoped {
 		return findings
 	}

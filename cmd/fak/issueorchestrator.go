@@ -13,37 +13,90 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/issueorchestrator"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 type SpawnedChatRecord struct {
-	IssueNumber  int      `json:"issue_number"`
-	Key          string   `json:"key"`
-	Title        string   `json:"title"`
-	Lane         string   `json:"lane"`
-	SessionTitle string   `json:"session_title"`
-	PID          int      `json:"pid"`
-	Status       string   `json:"status"` // "dry_run", "spawned", "error"
-	Worktree     string   `json:"worktree,omitempty"`
-	LogFile      string   `json:"log_file,omitempty"`
-	Command      []string `json:"command"`
-	Error        string   `json:"error,omitempty"`
+	IssueNumber         int      `json:"issue_number"`
+	Key                 string   `json:"key"`
+	Title               string   `json:"title"`
+	Lane                string   `json:"lane"`
+	SessionTitle        string   `json:"session_title"`
+	PID                 int      `json:"pid"`
+	Status              string   `json:"status"` // "dry_run", "spawned", "error"
+	Worktree            string   `json:"worktree,omitempty"`
+	LogFile             string   `json:"log_file,omitempty"`
+	Command             []string `json:"command"`
+	Error               string   `json:"error,omitempty"`
+	ControllerRevision  string   `json:"controller_revision,omitempty"`
+	ControllerBinarySHA string   `json:"controller_binary_sha,omitempty"`
+	ControllerFreshness string   `json:"controller_freshness,omitempty"`
+	AgentProfile        string   `json:"agent_profile,omitempty"`
 }
 
 type OpencodeSpawnReceipt struct {
-	Schema       string              `json:"schema"`
-	Workspace    string              `json:"workspace"`
-	WaveID       string              `json:"wave_id"`
-	WaveIndex    int                 `json:"wave_index"`
-	TotalSpawned int                 `json:"total_spawned"`
-	DryRun       bool                `json:"dry_run"`
-	Chats        []SpawnedChatRecord `json:"chats"`
+	Schema              string              `json:"schema"`
+	Workspace           string              `json:"workspace"`
+	WaveID              string              `json:"wave_id"`
+	WaveIndex           int                 `json:"wave_index"`
+	TotalSpawned        int                 `json:"total_spawned"`
+	DryRun              bool                `json:"dry_run"`
+	ControllerRevision  string              `json:"controller_revision,omitempty"`
+	ControllerBinarySHA string              `json:"controller_binary_sha,omitempty"`
+	ControllerFreshness string              `json:"controller_freshness,omitempty"`
+	AgentProfile        string              `json:"agent_profile,omitempty"`
+	Chats               []SpawnedChatRecord `json:"chats"`
 }
 
 const opencodeSpawnReceiptSchema = "fak.issue-orchestrator-opencode-spawn.v1"
 
-var newWorkerSupervisorFunc = issueorchestrator.NewWorkerSupervisor
+var (
+	newWorkerSupervisorFunc = issueorchestrator.NewWorkerSupervisor
+	controllerStampFunc     = binstamp.Self
+	controllerHeadRevFunc   = func(root string) string {
+		if root == "" {
+			root = repoRoot()
+		}
+		if root != "" {
+			return repoRevOf(root, "HEAD")
+		}
+		return ""
+	}
+	controllerBinarySHAFunc = currentExecutableSum
+)
+
+func revisionsMatch(a, b string) bool {
+	a, b = strings.ToLower(strings.TrimSpace(a)), strings.ToLower(strings.TrimSpace(b))
+	if a == b {
+		return true
+	}
+	short, long := a, b
+	if len(short) > len(long) {
+		short, long = long, short
+	}
+	if len(short) < 7 {
+		return false
+	}
+	return strings.HasPrefix(long, short)
+}
+
+func verifyControllerProvenance(root string) (binstamp.Stamp, string, error) {
+	stamp := controllerStampFunc()
+	runningRev := strings.TrimSpace(stamp.Revision)
+	headRev := strings.TrimSpace(controllerHeadRevFunc(root))
+
+	if runningRev == "" || headRev == "" {
+		return stamp, "", fmt.Errorf("CONTROLLER_AMBIGUOUS: running fak controller carries no VCS revision (%q) or checkout HEAD is unresolvable (%q); rebuild in-repo with `go build ./cmd/fak`", runningRev, headRev)
+	}
+
+	if !revisionsMatch(runningRev, headRev) {
+		return stamp, "", fmt.Errorf("CONTROLLER_STALE: running fak controller at %s does not match checkout HEAD %s; rebuild in-repo with `go build ./cmd/fak`", runningRev, headRev)
+	}
+
+	return stamp, "fresh", nil
+}
 
 func cmdIssueOrchestrator(argv []string) {
 	os.Exit(runIssueOrchestrator(os.Stdout, os.Stderr, argv))
@@ -268,9 +321,13 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 	}
 	if *spawnOpencode || *opencodeCommands {
 		waveOpts.IncludeOpencodeCommands = true
+		effectiveAgent := *agent
+		if effectiveAgent == "" {
+			effectiveAgent = "worker"
+		}
 		waveOpts.OpencodeOptions = issueorchestrator.OpencodeChatOptions{
 			Model:       *model,
-			Agent:       *agent,
+			Agent:       effectiveAgent,
 			Variant:     *variant,
 			Interactive: *interactive,
 			AutoApprove: true,
@@ -354,14 +411,32 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 
 	// 6. Handle OpenCode chat spawning if requested
 	if *spawnOpencode {
+		stamp, freshness, err := verifyControllerProvenance(root)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak issue-orchestrator: %v\n", err)
+			return 1
+		}
+		var binSHA string
+		if controllerBinarySHAFunc != nil {
+			binSHA, _ = controllerBinarySHAFunc()
+		}
+		effectiveAgent := *agent
+		if effectiveAgent == "" {
+			effectiveAgent = "worker"
+		}
+
 		if len(plan.Waves) == 0 {
 			receipt := OpencodeSpawnReceipt{
-				Schema:       opencodeSpawnReceiptSchema,
-				Workspace:    root,
-				WaveIndex:    *spawnWave,
-				TotalSpawned: 0,
-				DryRun:       *dryRun,
-				Chats:        []SpawnedChatRecord{},
+				Schema:              opencodeSpawnReceiptSchema,
+				Workspace:           root,
+				WaveIndex:           *spawnWave,
+				TotalSpawned:        0,
+				DryRun:              *dryRun,
+				ControllerRevision:  stamp.Revision,
+				ControllerBinarySHA: binSHA,
+				ControllerFreshness: freshness,
+				AgentProfile:        effectiveAgent,
+				Chats:               []SpawnedChatRecord{},
 			}
 			if *asJSON {
 				if err := writeIndentedJSON(stdout, receipt); err != nil {
@@ -382,12 +457,16 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 
 		selectedWave := plan.Waves[targetWaveIdx]
 		receipt := OpencodeSpawnReceipt{
-			Schema:    opencodeSpawnReceiptSchema,
-			Workspace: root,
-			WaveID:    selectedWave.ID,
-			WaveIndex: *spawnWave,
-			DryRun:    *dryRun,
-			Chats:     make([]SpawnedChatRecord, 0, len(selectedWave.Issues)),
+			Schema:              opencodeSpawnReceiptSchema,
+			Workspace:           root,
+			WaveID:              selectedWave.ID,
+			WaveIndex:           *spawnWave,
+			DryRun:              *dryRun,
+			ControllerRevision:  stamp.Revision,
+			ControllerBinarySHA: binSHA,
+			ControllerFreshness: freshness,
+			AgentProfile:        effectiveAgent,
+			Chats:               make([]SpawnedChatRecord, 0, len(selectedWave.Issues)),
 		}
 
 		hasError := false
@@ -409,7 +488,7 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 
 			chatOpts := issueorchestrator.OpencodeChatOptions{
 				Model:       *model,
-				Agent:       *agent,
+				Agent:       effectiveAgent,
 				Variant:     *variant,
 				Interactive: *interactive,
 				WorktreeDir: wtDir,
@@ -419,13 +498,17 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 			chat := issueorchestrator.BuildOpencodeChat(issue, chatOpts)
 
 			record := SpawnedChatRecord{
-				IssueNumber:  issue.Number,
-				Key:          issue.Key,
-				Title:        issue.Title,
-				Lane:         issue.Lane,
-				SessionTitle: chat.SessionTitle,
-				Worktree:     chat.Worktree,
-				Command:      chat.Command,
+				IssueNumber:         issue.Number,
+				Key:                 issue.Key,
+				Title:               issue.Title,
+				Lane:                issue.Lane,
+				SessionTitle:        chat.SessionTitle,
+				Worktree:            chat.Worktree,
+				Command:             chat.Command,
+				ControllerRevision:  stamp.Revision,
+				ControllerBinarySHA: binSHA,
+				ControllerFreshness: freshness,
+				AgentProfile:        effectiveAgent,
 			}
 
 			if *dryRun {
@@ -533,6 +616,12 @@ func runIssueOrchestrator(stdout, stderr io.Writer, argv []string) int {
 				statusStr = "DRY RUN"
 			}
 			fmt.Fprintf(stdout, "=== OpenCode Chat Spawner: %s (%s) ===\n", receipt.WaveID, statusStr)
+			if receipt.ControllerRevision != "" {
+				fmt.Fprintf(stdout, "Controller:  %s (freshness: %s)\n", receipt.ControllerRevision, receipt.ControllerFreshness)
+			}
+			if receipt.AgentProfile != "" {
+				fmt.Fprintf(stdout, "Agent:       %s\n", receipt.AgentProfile)
+			}
 			fmt.Fprintf(stdout, "Total Chats: %d\n\n", len(receipt.Chats))
 			for _, c := range receipt.Chats {
 				fmt.Fprintf(stdout, "- Issue #%d [%s]: %s\n", c.IssueNumber, c.Lane, c.Title)

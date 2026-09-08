@@ -124,6 +124,26 @@ func CalculateInterest(c Criticality, bounds BoundsAndLimits, e Evidence, gap fl
 		drivers = append(drivers, fmt.Sprintf("modularity_surcharge (+%.2f: %s)", surcharge, summary))
 	}
 
+	// Performance hazard: unbenchmarked core or enabling runtime paths.
+	if (c == CriticalityCore || c == CriticalityEnabling) && e.Integrated && !e.Benchmarked {
+		surcharge := 0.06
+		if c == CriticalityEnabling {
+			surcharge = 0.04
+		}
+		rate += surcharge
+		drivers = append(drivers, fmt.Sprintf("unbenchmarked_%s_perf_hazard (+%.2f)", string(c), surcharge))
+	}
+
+	// Performance hazard: unproven/undogfooded core or enabling runtime paths.
+	if (c == CriticalityCore || c == CriticalityEnabling) && e.Integrated && !e.Dogfooded {
+		surcharge := 0.05
+		if c == CriticalityEnabling {
+			surcharge = 0.03
+		}
+		rate += surcharge
+		drivers = append(drivers, fmt.Sprintf("unproven_runtime_%s_perf_hazard (+%.2f)", string(c), surcharge))
+	}
+
 	// Pacing urgency adjustments.
 	switch bounds.Pacing {
 	case PacingUrgent:

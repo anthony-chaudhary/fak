@@ -51,6 +51,10 @@ concurrency:
 jobs:
   add-to-board:
     name: add issue -> fak fleet board
+    if: >-
+      github.event_name != 'issues' ||
+      github.event.action != 'labeled' ||
+      startsWith(github.event.label.name, 'gen/')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:

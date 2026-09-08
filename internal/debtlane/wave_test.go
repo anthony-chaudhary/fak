@@ -213,3 +213,94 @@ func TestDiscoverHeldLanes_TouchAndHeartbeat(t *testing.T) {
 		t.Fatalf("expected %v, got %v", expectedWithTouch, heldWithTouch)
 	}
 }
+
+func TestLaneJournalEntry_UnmarshalTree(t *testing.T) {
+	// 1. Array tree
+	data1 := []byte(`{"op":"ACQUIRE","lane":"compute","tree":["internal/compute/a.go","internal/compute/b.go"],"pid":123}`)
+	var e1 LaneJournalEntry
+	if err := json.Unmarshal(data1, &e1); err != nil {
+		t.Fatalf("unmarshal array tree: %v", err)
+	}
+	if !reflect.DeepEqual(e1.Tree, []string{"internal/compute/a.go", "internal/compute/b.go"}) {
+		t.Errorf("expected array tree, got %v", e1.Tree)
+	}
+
+	// 2. String tree
+	data2 := []byte(`{"op":"ACQUIRE","lane":"gateway","tree":"internal/gateway/**","pid":456}`)
+	var e2 LaneJournalEntry
+	if err := json.Unmarshal(data2, &e2); err != nil {
+		t.Fatalf("unmarshal string tree: %v", err)
+	}
+	if !reflect.DeepEqual(e2.Tree, []string{"internal/gateway/**"}) {
+		t.Errorf("expected string tree converted to slice, got %v", e2.Tree)
+	}
+
+	// 3. Nested lease.tree
+	data3 := []byte(`{"op":"ACQUIRE","lane":"model","lease":{"tree":["internal/model/m.go"]},"pid":789}`)
+	var e3 LaneJournalEntry
+	if err := json.Unmarshal(data3, &e3); err != nil {
+		t.Fatalf("unmarshal lease.tree: %v", err)
+	}
+	if !reflect.DeepEqual(e3.Tree, []string{"internal/model/m.go"}) {
+		t.Errorf("expected nested lease.tree, got %v", e3.Tree)
+	}
+}
+
+func TestDiscoverHeldLeasesAndTrees(t *testing.T) {
+	tempDir := t.TempDir()
+
+	origLiveness := pidLivenessCheck
+	defer func() { pidLivenessCheck = origLiveness }()
+	pidLivenessCheck = func(pid int) bool { return true }
+
+	if err := AcquireTreeLease(tempDir, "compute", []string{"internal/compute/a.go"}, 5001); err != nil {
+		t.Fatalf("AcquireTreeLease 1: %v", err)
+	}
+	if err := AcquireTreeLease(tempDir, "compute", []string{"internal/compute/b.go"}, 5002); err != nil {
+		t.Fatalf("AcquireTreeLease 2: %v", err)
+	}
+	if err := AcquireTreeLease(tempDir, "gateway", []string{"internal/gateway/**"}, 5003); err != nil {
+		t.Fatalf("AcquireTreeLease 3: %v", err)
+	}
+
+	leases, err := DiscoverHeldLeases(tempDir)
+	if err != nil {
+		t.Fatalf("DiscoverHeldLeases: %v", err)
+	}
+	if len(leases) != 3 {
+		t.Fatalf("expected 3 held leases, got %d: %v", len(leases), leases)
+	}
+
+	trees, err := DiscoverHeldTrees(tempDir)
+	if err != nil {
+		t.Fatalf("DiscoverHeldTrees: %v", err)
+	}
+	if len(trees["compute"]) != 2 {
+		t.Errorf("expected 2 compute trees, got %v", trees["compute"])
+	}
+	if len(trees["gateway"]) != 1 {
+		t.Errorf("expected 1 gateway tree, got %v", trees["gateway"])
+	}
+
+	// Release one of the compute tree leases
+	if err := ReleaseTreeLease(tempDir, "compute", []string{"internal/compute/a.go"}, 5001); err != nil {
+		t.Fatalf("ReleaseTreeLease: %v", err)
+	}
+
+	leasesAfter, err := DiscoverHeldLeases(tempDir)
+	if err != nil {
+		t.Fatalf("DiscoverHeldLeases after release: %v", err)
+	}
+	if len(leasesAfter) != 2 {
+		t.Fatalf("expected 2 held leases after release, got %d", len(leasesAfter))
+	}
+	foundComputeB := false
+	for _, l := range leasesAfter {
+		if l.Lane == "compute" && l.PID == 5002 {
+			foundComputeB = true
+		}
+	}
+	if !foundComputeB {
+		t.Errorf("expected compute PID 5002 still held, got %v", leasesAfter)
+	}
+}

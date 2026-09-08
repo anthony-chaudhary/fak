@@ -441,6 +441,7 @@ func TestBuildOpencodeChatAndFormatPrompt(t *testing.T) {
 		"--dangerously-skip-permissions",
 		"--title", "Issue #42: Fix memory leak in kvcache",
 		"-m", "claude-sonnet-4-6",
+		"--agent", "worker",
 		"--variant", "high",
 		prompt,
 	}

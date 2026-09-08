@@ -76,32 +76,32 @@ type LaneHealth struct {
 
 // RelatedThings cross-indexes related items, companions, dependencies, and artifacts for a debt lane.
 type RelatedThings struct {
-	CompanionRepo       string   `json:"companion_repo,omitempty"`        // Opposing repo (fak <-> fak-private).
-	CompanionLane       string   `json:"companion_lane,omitempty"`        // Corresponding companion lane name.
+	CompanionRepo       string   `json:"companion_repo,omitempty"`         // Opposing repo (fak <-> fak-private).
+	CompanionLane       string   `json:"companion_lane,omitempty"`         // Corresponding companion lane name.
 	CompanionUnitOfWork string   `json:"companion_unit_of_work,omitempty"` // Directory path in companion repo.
-	Dependents          []string `json:"dependents,omitempty"`            // Internal packages importing this lane.
-	Dependencies        []string `json:"dependencies,omitempty"`          // Internal packages imported by this lane.
-	DosTrees            []string `json:"dos_trees,omitempty"`             // Tree globs declared in dos.toml.
-	ProofWitnesses      []string `json:"proof_witnesses,omitempty"`       // Runtime proof entries / IDs.
-	BenchmarkWitnesses  []string `json:"benchmark_witnesses,omitempty"`   // Benchmark authority mentions.
+	Dependents          []string `json:"dependents,omitempty"`             // Internal packages importing this lane.
+	Dependencies        []string `json:"dependencies,omitempty"`           // Internal packages imported by this lane.
+	DosTrees            []string `json:"dos_trees,omitempty"`              // Tree globs declared in dos.toml.
+	ProofWitnesses      []string `json:"proof_witnesses,omitempty"`        // Runtime proof entries / IDs.
+	BenchmarkWitnesses  []string `json:"benchmark_witnesses,omitempty"`    // Benchmark authority mentions.
 }
 
 // Evidence captures verified facts discovered from disk for a unit of work.
 type Evidence struct {
-	FilesCount             int     `json:"files_count"`
-	TestFilesCount         int     `json:"test_files_count"`
-	CodeLines              int     `json:"code_lines"`
-	CommentLines           int     `json:"comment_lines"`
-	CommentRatio           float64 `json:"comment_ratio"`
-	ExcessComments         bool    `json:"excess_comments"`
-	HasCode                bool    `json:"has_code"`
-	HasTests               bool    `json:"has_tests"`
-	Integrated             bool    `json:"integrated"`
-	Dogfooded              bool    `json:"dogfooded"`
-	Benchmarked            bool    `json:"benchmarked"`
-	Documented             bool    `json:"documented"`
-	ExportedSymbols        int     `json:"exported_symbols"`
-	DocumentedExports      int     `json:"documented_exports"`
+	FilesCount             int      `json:"files_count"`
+	TestFilesCount         int      `json:"test_files_count"`
+	CodeLines              int      `json:"code_lines"`
+	CommentLines           int      `json:"comment_lines"`
+	CommentRatio           float64  `json:"comment_ratio"`
+	ExcessComments         bool     `json:"excess_comments"`
+	HasCode                bool     `json:"has_code"`
+	HasTests               bool     `json:"has_tests"`
+	Integrated             bool     `json:"integrated"`
+	Dogfooded              bool     `json:"dogfooded"`
+	Benchmarked            bool     `json:"benchmarked"`
+	Documented             bool     `json:"documented"`
+	ExportedSymbols        int      `json:"exported_symbols"`
+	DocumentedExports      int      `json:"documented_exports"`
 	DependentsCount        int      `json:"dependents_count"` // Inbound internal imports (blast radius).
 	TransitiveDependencies int      `json:"transitive_dependencies"`
 	HasContractComments    bool     `json:"has_contract_comments,omitempty"` // Deprecated: formulaic comments do not award maturity points.
@@ -118,26 +118,27 @@ type Evidence struct {
 
 // DebtLane represents a dedicated maturity debt lane for one single unit of work.
 type DebtLane struct {
-	Lane                    string          `json:"lane"`                     // Unique lane identifier (leaf package or subsystem name).
-	Repo                    string          `json:"repo,omitempty"`           // Repository name (e.g. "fak", "fak-private").
-	UnitOfWork              string          `json:"unit_of_work"`             // Primary directory path (e.g. "internal/gateway" or "platform/dispatch").
-	Criticality             Criticality     `json:"criticality"`              // core, enabling, stewardship, peripheral.
-	Weight                  float64         `json:"weight"`                   // Relative weight in production denominator (e.g. 3.0 for core).
-	Maturity                float64         `json:"maturity"`                 // Current maturity on 0.0 - 10.0 curve.
-	MaturityRung            string          `json:"maturity_rung"`            // Name of closest lifecycle rung.
-	TargetMaturity          float64         `json:"target_maturity"`          // Target maturity ceiling under declared bounds.
-	MaturityGap             float64         `json:"maturity_gap"`             // max(0, TargetMaturity - Maturity).
-	DebtPrincipal           float64         `json:"debt_principal"`           // MaturityGap * Weight.
-	Interest                Interest        `json:"interest"`                 // Relative carrying cost rate & drivers.
-	CarryingCost            float64         `json:"carrying_cost"`            // DebtPrincipal * Interest.Rate (capped).
-	TotalDebt               float64         `json:"total_debt"`               // DebtPrincipal + CarryingCost.
-	DenominatorContribution float64         `json:"denominator_contribution"` // TargetMaturity * Weight (adds to production denominator).
-	RealizedContribution    float64         `json:"realized_contribution"`    // Maturity * Weight.
-	Bounds                  BoundsAndLimits `json:"bounds"`                   // Declared or derived constraints.
-	Evidence                Evidence        `json:"evidence"`                 // Ground-truth facts.
-	Related                 RelatedThings   `json:"related"`                  // Cross-indexed related items and companions.
-	Health                  LaneHealth      `json:"health"`                   // Multi-dimensional health verdict and score.
-	NextAction              string          `json:"next_action"`              // Concrete action to retire debt.
+	Lane                    string          `json:"lane"`                       // Unique lane identifier (leaf package or subsystem name).
+	Repo                    string          `json:"repo,omitempty"`             // Repository name (e.g. "fak", "fak-private").
+	UnitOfWork              string          `json:"unit_of_work"`               // Primary directory path (e.g. "internal/gateway" or "platform/dispatch").
+	Criticality             Criticality     `json:"criticality"`                // core, enabling, stewardship, peripheral.
+	Weight                  float64         `json:"weight"`                     // Relative weight in production denominator (e.g. 3.0 for core).
+	Maturity                float64         `json:"maturity"`                   // Current maturity on 0.0 - 10.0 curve.
+	MaturityRung            string          `json:"maturity_rung"`              // Name of closest lifecycle rung.
+	TargetMaturity          float64         `json:"target_maturity"`            // Target maturity ceiling under declared bounds.
+	MaturityGap             float64         `json:"maturity_gap"`               // max(0, TargetMaturity - Maturity).
+	DebtPrincipal           float64         `json:"debt_principal"`             // MaturityGap * Weight.
+	Interest                Interest        `json:"interest"`                   // Relative carrying cost rate & drivers.
+	CarryingCost            float64         `json:"carrying_cost"`              // DebtPrincipal * Interest.Rate (capped).
+	TotalDebt               float64         `json:"total_debt"`                 // DebtPrincipal + CarryingCost.
+	DenominatorContribution float64         `json:"denominator_contribution"`   // TargetMaturity * Weight (adds to production denominator).
+	RealizedContribution    float64         `json:"realized_contribution"`      // Maturity * Weight.
+	Bounds                  BoundsAndLimits `json:"bounds"`                     // Declared or derived constraints.
+	Evidence                Evidence        `json:"evidence"`                   // Ground-truth facts.
+	Related                 RelatedThings   `json:"related"`                    // Cross-indexed related items and companions.
+	Health                  LaneHealth      `json:"health"`                     // Multi-dimensional health verdict and score.
+	NextAction              string          `json:"next_action"`                // Concrete action to retire debt.
+	OpencodeCommand         []string        `json:"opencode_command,omitempty"` // Ready-to-run OpenCode worker command.
 }
 
 // ProductionGrade holds the system-wide denominator and realized production-readiness metrics.

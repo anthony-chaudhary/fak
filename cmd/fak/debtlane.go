@@ -67,6 +67,13 @@ func runDebtLanesInternal(stdout, stderr io.Writer, flagSetName string, defaultP
 	var targetPoints float64
 	fs.Float64Var(&targetPoints, "target-points", 0, "campaign target points to retire")
 	fs.Float64Var(&targetPoints, "points", 0, "alias for --target-points")
+	opencodeCommands := fs.Bool("opencode-commands", false, "render ready-to-run OpenCode leaf worker commands for planned waves")
+	perfFocus := fs.Bool("perf-focus", false, "apply 3x harsher performance focus: prioritize unbenchmarked, unproven, and modularity debt in waves")
+	harsherPerf := fs.Bool("harsher-perf", false, "alias for --perf-focus")
+	variant := fs.String("variant", "high", "OpenCode worker variant (default: high)")
+	agent := fs.String("agent", "worker", "OpenCode worker agent profile (default: worker)")
+	model := fs.String("model", "", "OpenCode model override")
+	interactive := fs.Bool("interactive", false, "generate interactive OpenCode run (-i) commands")
 
 	if !parseFlags(fs, argv) {
 		return 2
@@ -134,13 +141,24 @@ func runDebtLanesInternal(stdout, stderr io.Writer, flagSetName string, defaultP
 			}
 		}
 
+		effectivePerfFocus := *perfFocus || *harsherPerf
 		plan := debtlane.PlanWaves(report, debtlane.WavePlanOptions{
-			WaveSize:       *waveSize,
-			MaxWaves:       *maxWaves,
-			TargetGrade:    *targetGrade,
-			TargetPoints:   targetPoints,
-			ExcludedLanes:  excluded,
-			AutoDetectHeld: !*noDetectHeld,
+			WaveSize:         *waveSize,
+			MaxWaves:         *maxWaves,
+			TargetGrade:      *targetGrade,
+			TargetPoints:     targetPoints,
+			ExcludedLanes:    excluded,
+			AutoDetectHeld:   !*noDetectHeld,
+			OpencodeCommands: *opencodeCommands,
+			PerfFocus:        effectivePerfFocus,
+			OpencodeOptions: debtlane.OpencodeChatOptions{
+				Model:       *model,
+				Agent:       *agent,
+				Variant:     *variant,
+				AutoApprove: true,
+				Interactive: *interactive,
+				PerfFocus:   effectivePerfFocus,
+			},
 		})
 
 		switch {

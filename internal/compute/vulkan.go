@@ -13,6 +13,13 @@ package compute
 #cgo LDFLAGS: -L${SRCDIR} -lfakvulkan
 #include <stdlib.h>
 #include "vulkan_backend.h"
+// Issue-local adapter while the shared Vulkan C ABI remains stable: the fused Q2_K
+// tail reuses the required q2k_matmul pipeline rather than adding an optional module.
+void fvk_swiglu_q2k_matmul_add_f32(const void *dW, const void *dG, const void *dU,
+                                   void *dD, int out, int in, int P);
+void fvk_rmsnorm_q2k_matmul2_f32(const void* dW0, const void* dW1,
+    const void* dX, const void* dNorm, void* dY0, void* dY1,
+    int out0, int out1, int in, int P, float eps);
 
 // Issue-local #12217 ABI pending the generic #11096 VMM contract. Keeping these declarations
 // beside the only Go consumer avoids widening the public backend header before that contract lands.
@@ -200,6 +207,23 @@ func (v *vulkanBackend) selectQ4KFusionLocked(P int) bool {
 	return false
 }
 
+// selectQ2KFusionLocked keeps the new packed-Q2_K gate/up kernel behind an
+// explicit candidate arm until its repeated gfx1151 A/B receipt is accepted.
+// The fallback remains the established native Vulkan composition; it never
+// redirects execution through an external engine.
+func (v *vulkanBackend) selectQ2KFusionLocked(P int) bool {
+	if P != 1 {
+		return false
+	}
+	optIn := strings.TrimSpace(strings.ToLower(os.Getenv("FAK_VULKAN_Q2K_FUSION")))
+	switch optIn {
+	case "candidate", "fusion", "fused", "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
 func (v *vulkanBackend) ConfigureQ4KFusion(rmsnorm2, swigluAdd, forceScalar bool) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -227,6 +251,27 @@ func (v *vulkanBackend) VulkanDebugResetQ4KFusionProfile() {
 	v.q4kComposedRMSNormCalls = 0
 	v.q4kFusionSwiGLUCalls = 0
 	v.q4kComposedSwiGLUCalls = 0
+}
+
+func (v *vulkanBackend) VulkanDebugTransientSnapshot() (buffers int, bytes int64) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	for _, b := range v.transient {
+		if b != nil && b.ptr != nil {
+			buffers++
+			bytes += int64(b.n)
+		}
+	}
+	return buffers, bytes
+}
+
+func (v *vulkanBackend) VulkanDebugQ2KDispatchSnapshot() (compute, q2k, swiglu, add uint64) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	var p C.fvk_dispatch_profile
+	C.fvk_dispatch_profile_snapshot(&p)
+	return uint64(p.compute_dispatches), uint64(p.q2k_matmul_dispatches),
+		uint64(p.other_swiglu_dispatches), uint64(p.other_add_dispatches)
 }
 
 type vulkanGDNConfigurer interface {
@@ -1308,19 +1353,26 @@ func (v *vulkanBackend) q8WeightBufLocked(w Tensor, in int, op string) *vulkanBu
 	return wb
 }
 
-// MatMulArgmax fuses the final F32 projection and the argmax reduction in one shader,
-// returning the index of the largest logit without copying the logits host-ward.
+// MatMulArgmax returns the final projection's largest-logit index without copying
+// logits host-ward. F32 uses the fused shader; Q2_K stays packed for its device
+// projection and composes the existing device argmax until the packed fused shader lands.
 func (v *vulkanBackend) MatMulArgmax(w, x Tensor) int {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	out, in := w.Shape[0], w.Shape[1]
-	if w.Dtype != F32 {
-		panic("compute: vulkan MatMulArgmax supports only F32 weights today (got " + w.Dtype.String() + ")")
-	}
 	if in == 0 || x.Numel() != in {
 		panic("compute: vulkan MatMulArgmax expects one input row matching the weight input dim")
 	}
-	return int(C.fvk_matmul_argmax_f32(v.vp(w), v.vp(x), C.int(out), C.int(in)))
+	switch w.Dtype {
+	case F32:
+		return int(C.fvk_matmul_argmax_f32(v.vp(w), v.vp(x), C.int(out), C.int(in)))
+	case Q2_K:
+		logits, _ := v.devTr([]int{out}, F32)
+		v.q2kMatMulLocked(w, x, logits, out, in, 1)
+		return int(C.fvk_argmax_f32(v.vp(logits), C.int(out)))
+	default:
+		panic("compute: vulkan MatMulArgmax supports only F32 or Q2_K weights (got " + w.Dtype.String() + ")")
+	}
 }
 
 // RMSNormMatMulArgmax fuses RMSNorm of x, the final F32 projection, and the argmax into
@@ -1535,6 +1587,11 @@ func (v *vulkanBackend) RMSNormMatMul2(w0, w1, x, normWeight Tensor, eps float32
 		}
 		y0, _ := v.devTr([]int{out0}, F32)
 		y1, _ := v.devTr([]int{out1}, F32)
+		if w0.Dtype == Q2_K && w1.Dtype == Q2_K && v.selectQ2KFusionLocked(P) {
+			C.fvk_rmsnorm_q2k_matmul2_f32(v.vp(w0), v.vp(w1), v.vp(x), v.vp(normWeight), v.vp(y0), v.vp(y1),
+				C.int(out0), C.int(out1), C.int(in), C.int(P), C.float(eps))
+			return y0, y1
+		}
 		xn, _ := v.devTr([]int{in}, F32)
 		C.fvk_rmsnorm_f32(v.vp(x), v.vp(normWeight), v.vp(xn), C.int(P), C.int(in), C.float(eps))
 		project := func(w, y Tensor, out int) {
@@ -1700,6 +1757,11 @@ func (v *vulkanBackend) SwiGLUMatMulAddInPlace(dst, w, gate, up Tensor) {
 	case F32:
 		C.fvk_swiglu_matmul_add_f32(v.vp(w), v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))
 	case Q4_K, Q2_K:
+		if w.Dtype == Q2_K && P == 1 {
+			wb := w.buf.(*vulkanBuf)
+			C.fvk_swiglu_q2k_matmul_add_f32(wb.ptr, v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))
+			return
+		}
 		if w.Dtype == Q4_K && v.selectQ4KFusionLocked(P) {
 			v.q4kFusionSwiGLUCalls++
 			C.fvk_swiglu_q4k_matmul_add_f32(v.vp(w), v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))

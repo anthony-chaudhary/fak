@@ -19,6 +19,195 @@
 
 #version 450
 
+#ifdef FAK_DIRECT_FRAGMENT
+// FAK_DIRECT_FRAGMENT_BEGIN
+// Issue #12228 adapter: decode packed K/V only into bounded LDS tiles, load those tiles
+// immediately into Wave32 cooperative-matrix fragments, and never materialize an F32 KV cache.
+// MODE_QK emits attention logits; the attention consumer applies softmax before MODE_PV emits
+// context vectors. The default branch below preserves the #12186 baseline ABI until #12181's
+// fused-attention pipeline selects this variant explicitly.
+#extension GL_KHR_cooperative_matrix : enable
+#extension GL_KHR_memory_scope_semantics : enable
+#extension GL_KHR_shader_subgroup_basic : enable
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+#extension GL_EXT_shader_16bit_storage : require
+
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+
+const uint TILE = 16u;
+const uint LDS_STRIDE = TILE + 2u;
+const int MODE_QK = 0;
+const int MODE_PV = 1;
+
+layout(push_constant) uniform DirectFragmentPushConstants {
+    int nPos;
+    int nQ;
+    int nKV;
+    int headDim;
+    int format; // 0 = Q8_0, 1 = Q4_0, 2 = Q4_K
+    int mode;   // MODE_QK or MODE_PV
+    float scale;
+} directPC;
+
+layout(std430, set = 0, binding = 0) readonly buffer DenseInputBuffer {
+    float DenseInput[]; // Q [nQ,headDim] for QK; softmax probabilities [nQ,nPos] for PV
+};
+
+layout(std430, set = 0, binding = 1) readonly buffer RawQuantizedKV {
+    uint rawQuantizedKV[];
+};
+
+layout(std430, set = 0, binding = 2) writeonly buffer FragmentOutputBuffer {
+    float FragmentOutput[]; // logits [nQ,nPos] or context [nQ,headDim]
+};
+
+shared float16_t fragmentA[TILE * LDS_STRIDE];
+shared float16_t fragmentB[TILE * LDS_STRIDE];
+shared float fragmentAccumulator[TILE * TILE];
+
+uint directByteAt(uint off) {
+    uint word = rawQuantizedKV[off >> 2u];
+    return (word >> ((off & 3u) * 8u)) & 255u;
+}
+
+float directHalfAt(uint off) {
+    uint bits = directByteAt(off) | (directByteAt(off + 1u) << 8u);
+    return unpackHalf2x16(bits).x;
+}
+
+void directScaleMin(uint base, uint group, out uint sc, out uint mn) {
+    if (group < 4u) {
+        sc = directByteAt(base + group) & 63u;
+        mn = directByteAt(base + group + 4u) & 63u;
+    } else {
+        sc = (directByteAt(base + group + 4u) & 15u) |
+             ((directByteAt(base + group - 4u) >> 6u) << 4u);
+        mn = (directByteAt(base + group + 4u) >> 4u) |
+             ((directByteAt(base + group) >> 6u) << 4u);
+    }
+}
+
+float dequantKV(uint element) {
+    if (directPC.format == 0) {
+        uint block = element / 32u;
+        uint lane = element % 32u;
+        uint base = block * 34u;
+        uint codeByte = directByteAt(base + 2u + lane);
+        int code = (codeByte >= 128u) ? int(codeByte) - 256 : int(codeByte);
+        return directHalfAt(base) * float(code);
+    }
+    if (directPC.format == 1) {
+        uint block = element / 32u;
+        uint lane = element % 32u;
+        uint base = block * 18u;
+        uint packed = directByteAt(base + 2u + (lane >> 1u));
+        uint code = ((lane & 1u) == 0u) ? (packed & 15u) : (packed >> 4u);
+        return directHalfAt(base) * float(int(code) - 8);
+    }
+
+    uint superBlock = element / 256u;
+    uint localElement = element % 256u;
+    uint group = localElement / 32u;
+    uint lane = localElement % 32u;
+    uint base = superBlock * 144u;
+    uint sc;
+    uint mn;
+    directScaleMin(base + 4u, group, sc, mn);
+    uint packed = directByteAt(base + 16u + (group >> 1u) * 32u + lane);
+    uint code = ((group & 1u) != 0u) ? (packed >> 4u) : (packed & 15u);
+    return directHalfAt(base) * float(sc) * float(code) - directHalfAt(base + 2u) * float(mn);
+}
+
+void clearFragmentTiles(uint lane) {
+    for (uint i = lane; i < TILE * LDS_STRIDE; i += 32u) {
+        fragmentA[i] = float16_t(0.0);
+        fragmentB[i] = float16_t(0.0);
+    }
+}
+
+void main() {
+    uint lane = gl_LocalInvocationID.x;
+    uint kvHead = gl_WorkGroupID.y;
+    if (directPC.nPos <= 0 || directPC.nQ <= 0 || directPC.nKV <= 0 ||
+        directPC.headDim <= 0 || kvHead >= uint(directPC.nKV) ||
+        (directPC.nQ % directPC.nKV) != 0 || (directPC.headDim % int(TILE)) != 0 ||
+        directPC.format < 0 || directPC.format > 2 ||
+        (directPC.mode != MODE_QK && directPC.mode != MODE_PV)) {
+        return;
+    }
+
+    uint headsPerKV = uint(directPC.nQ / directPC.nKV);
+    if (headsPerKV == 0u || headsPerKV > TILE) {
+        return;
+    }
+
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> matC;
+    matC = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+
+    uint reductionLength = (directPC.mode == MODE_QK) ? uint(directPC.headDim) : uint(directPC.nPos);
+    uint outputTile = gl_WorkGroupID.x * TILE;
+
+    for (uint reductionBase = 0u; reductionBase < reductionLength; reductionBase += TILE) {
+        clearFragmentTiles(lane);
+        barrier();
+
+        for (uint i = lane; i < TILE * TILE; i += 32u) {
+            uint row = i / TILE;
+            uint col = i % TILE;
+            uint queryHead = kvHead * headsPerKV + row;
+            uint reductionIndex = reductionBase + col;
+            if (row < headsPerKV && queryHead < uint(directPC.nQ) && reductionIndex < reductionLength) {
+                if (directPC.mode == MODE_QK) {
+                    fragmentA[row * LDS_STRIDE + col] = float16_t(
+                        DenseInput[queryHead * uint(directPC.headDim) + reductionIndex]);
+                } else if (directPC.mode == MODE_PV) {
+                    fragmentA[row * LDS_STRIDE + col] = float16_t(
+                        DenseInput[queryHead * uint(directPC.nPos) + reductionIndex]);
+                }
+            }
+
+            uint outputIndex = outputTile + col;
+            uint reductionRow = reductionBase + row;
+            if (outputIndex < ((directPC.mode == MODE_QK) ? uint(directPC.nPos) : uint(directPC.headDim)) &&
+                reductionRow < reductionLength) {
+                uint element;
+                if (directPC.mode == MODE_QK) {
+                    element = (kvHead * uint(directPC.nPos) + outputIndex) * uint(directPC.headDim) + reductionRow;
+                } else {
+                    element = (kvHead * uint(directPC.nPos) + reductionRow) * uint(directPC.headDim) + outputIndex;
+                }
+                fragmentB[row * LDS_STRIDE + col] = float16_t(dequantKV(element));
+            }
+        }
+        barrier();
+
+        coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> matA;
+        coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> matB;
+        coopMatLoad(matA, fragmentA, 0u, LDS_STRIDE, gl_CooperativeMatrixLayoutRowMajor);
+        coopMatLoad(matB, fragmentB, 0u, LDS_STRIDE, gl_CooperativeMatrixLayoutRowMajor);
+        matC = coopMatMulAdd(matA, matB, matC);
+        barrier();
+    }
+
+    coopMatStore(matC, fragmentAccumulator, 0u, TILE, gl_CooperativeMatrixLayoutRowMajor);
+    barrier();
+
+    uint outputWidth = (directPC.mode == MODE_QK) ? uint(directPC.nPos) : uint(directPC.headDim);
+    for (uint i = lane; i < TILE * TILE; i += 32u) {
+        uint row = i / TILE;
+        uint col = i % TILE;
+        uint queryHead = kvHead * headsPerKV + row;
+        uint outputIndex = outputTile + col;
+        if (row < headsPerKV && queryHead < uint(directPC.nQ) && outputIndex < outputWidth) {
+            float value = fragmentAccumulator[row * TILE + col];
+            FragmentOutput[queryHead * outputWidth + outputIndex] =
+                (directPC.mode == MODE_QK) ? value * directPC.scale : value;
+        }
+    }
+}
+// FAK_DIRECT_FRAGMENT_END
+#else
+
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
 layout(push_constant) uniform FlashAttnDequantPushConstants {
@@ -129,3 +318,4 @@ void main() {
         }
     }
 }
+#endif
