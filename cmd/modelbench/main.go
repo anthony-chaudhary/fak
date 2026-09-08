@@ -87,6 +87,9 @@ func loadModelContext(ctx context.Context, f *benchFlags, lp *ggufload.LoadProfi
 			opts := []ggufload.Q4KLoadOption{ggufload.WithDenseKQuantResident(false)}
 			if *f.backendName == "vulkan" {
 				opts = append(opts, ggufload.WithDenseQ2KResident(true))
+				if q2kEmbeddingEligible(*f.gguf) {
+					opts = append(opts, ggufload.WithQ2KEmbeddingResident(true))
+				}
 			}
 			loader := ggufload.LoadModelQ4KProfileOptionsContext
 			label := " [gguf-q4k]"
@@ -118,6 +121,31 @@ func loadModelContext(ctx context.Context, f *benchFlags, lp *ggufload.LoadProfi
 	}
 	m, err := model.Load(*f.dir)
 	return m, filepath.Base(*f.dir), err
+}
+
+func q2kEmbeddingEligible(path string) bool {
+	if path == "" {
+		return false
+	}
+	ws, err := ggufload.OpenWeights(path)
+	if err != nil {
+		return false
+	}
+	defer ws.Close()
+	cfg, err := ws.File.Config()
+	if err != nil || !cfg.IsQwen35Hybrid() || cfg.IsMoE() || cfg.TieWordEmbeddings {
+		return false
+	}
+	var hasQ2KEmbd, hasOutput bool
+	for _, t := range ws.File.Tensors {
+		if t.Name == "token_embd.weight" && t.Type == ggufload.TensorQ2_K {
+			hasQ2KEmbd = true
+		}
+		if t.Name == "output.weight" {
+			hasOutput = true
+		}
+	}
+	return hasQ2KEmbd && hasOutput
 }
 
 // loadWorkerControl is the exact, non-inferred readback of GGUF loader concurrency.

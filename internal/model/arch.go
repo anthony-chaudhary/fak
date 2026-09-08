@@ -494,6 +494,15 @@ func scaleEmbedInPlace(x []float32, cfg Config) {
 // config's embedding scale in place (Gemma; a no-op for Llama). This is the embedding
 // lookup every batched lane opens with; it used to be transcribed per lane.
 func (m *Model) embedRowsInto(X []float32, ids []int, H int, cfg Config) {
+	if m.Q2KEmbedding != nil {
+		scale := cfg.embedScale()
+		for row, id := range ids {
+			if err := m.Q2KEmbedding.GatherRow(id, X[row*H:(row+1)*H], scale); err != nil {
+				panic(err)
+			}
+		}
+		return
+	}
 	embed := m.embedRows()
 	for row, id := range ids {
 		copy(X[row*H:(row+1)*H], embed[id*H:(id+1)*H])

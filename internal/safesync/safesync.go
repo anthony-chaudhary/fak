@@ -13,6 +13,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 const (
@@ -34,9 +35,6 @@ const (
 	ReasonTargetMoved              = "TARGET_MOVED"
 	ReasonLeaseOwnerUnavailable    = "LEASE_OWNER_UNAVAILABLE"
 	ReasonPathspecRace             = "PATHSPEC_RACE"
-	ReasonBuildCheckFailed         = "BUILD_CHECK_FAILED"
-	ReasonTestCheckFailed          = "TEST_CHECK_FAILED"
-	ReasonTestsFailed              = ReasonTestCheckFailed
 )
 
 // Runner executes a git subcommand in repo. Err is non-nil only when git could
@@ -493,43 +491,58 @@ func currentBranch(ctx context.Context, run Runner, repo string) (string, error)
 	}
 	branch := strings.TrimSpace(string(out))
 	if branch == "" || branch == "HEAD" {
-		if isSanctionedWorkerWorktree(ctx, run, repo) {
+		if isSanctionedWorkerWorktree(repo) {
 			roles, _ := branchrole.Load(repo)
-			if roles.DevelopmentBranch != "" {
-				return roles.DevelopmentBranch, nil
+			devBranch := strings.TrimSpace(roles.DevelopmentBranch)
+			if devBranch == "" {
+				devBranch = "main"
 			}
-			return "main", nil
+			return devBranch, nil
 		}
 		return "", fmt.Errorf("detached HEAD; no branch to sync")
 	}
 	return branch, nil
 }
 
-const workerWorktreeMarker = "fak-worker-wt"
+func isSanctionedWorkerWorktree(repo string) bool {
+	if strings.TrimSpace(repo) == "" {
+		repo = "."
+	}
+	abs, err := filepath.Abs(repo)
+	if err != nil {
+		abs = filepath.Clean(repo)
+	}
+	if fi, err := os.Stat(abs); err == nil && !fi.IsDir() {
+		abs = filepath.Dir(abs)
+	}
 
-func isWorkerWorktree(path string) bool {
-	name := filepath.Base(filepath.Clean(path))
-	return name == workerWorktreeMarker || strings.HasPrefix(name, workerWorktreeMarker+"-")
-}
-
-func isSanctionedWorkerWorktree(ctx context.Context, run Runner, repo string) bool {
-	if isWorkerWorktree(repo) {
-		return true
-	}
-	if abs, err := filepath.Abs(repo); err == nil && isWorkerWorktree(abs) {
-		return true
-	}
-	if os.Getenv("FLEET_WORKER_WORKTREE_DIR") != "" {
-		return true
-	}
-	if run != nil {
-		res := run(ctx, repo, "rev-parse", "--git-dir")
-		if res.Err == nil && res.Code == 0 {
-			gitDir := strings.ReplaceAll(strings.TrimSpace(string(res.Stdout)), "\\", "/")
-			if strings.Contains(gitDir, "worktrees") {
+	for curr := abs; ; {
+		if workerworktree.IsWorkerWorktree(curr) {
+			return true
+		}
+		if lease, err := workerworktree.ReadWorkerLease(curr); err == nil {
+			if lease.PID > 0 || strings.TrimSpace(lease.SessionID) != "" {
 				return true
 			}
 		}
+		if fi, err := os.Stat(filepath.Join(curr, "lease.json")); err == nil && !fi.IsDir() {
+			return true
+		}
+		if fi, err := os.Stat(workerworktree.OwnerStampPath(curr)); err == nil && !fi.IsDir() {
+			return true
+		}
+		if fi, err := os.Stat(filepath.Join(curr, ".owner.json")); err == nil && !fi.IsDir() {
+			return true
+		}
+		if fi, err := os.Stat(filepath.Join(curr, "owner.json")); err == nil && !fi.IsDir() {
+			return true
+		}
+
+		parent := filepath.Dir(curr)
+		if parent == curr {
+			break
+		}
+		curr = parent
 	}
 	return false
 }

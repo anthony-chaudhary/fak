@@ -3,8 +3,10 @@ package ggufload
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -256,5 +258,197 @@ func TestLoadModelQ4KProfileOptionsContextClosesReaderOnceBeforeReturn(t *testin
 	}
 	if got := closer.closes.Load(); got != 1 {
 		t.Fatalf("reader closes before return = %d, want exactly 1", got)
+	}
+}
+
+func buildQwen35GGUFFixture(t *testing.T, arch string, dim, vocab int, embType, outType TensorType, aliased, dropOut bool) string {
+	t.Helper()
+	var b bytes.Buffer
+	nKV := 8
+	if arch == "qwen35" {
+		nKV += 2 // + full_attention_interval, attention.head_count_kv
+	}
+	nTensors := 5
+	if dropOut {
+		nTensors--
+	}
+	writeMinimalHeader(&b, uint64(nTensors), uint64(nKV))
+	writeKVString(&b, "general.architecture", arch)
+	writeKVUint32(&b, "general.alignment", 32)
+	prefix := arch + "."
+	writeKVUint32(&b, prefix+"embedding_length", uint32(dim))
+	writeKVUint32(&b, prefix+"block_count", 2)
+	writeKVUint32(&b, prefix+"attention.head_count", 1)
+	if arch == "qwen35" {
+		writeKVUint32(&b, prefix+"attention.head_count_kv", 1)
+		writeKVUint32(&b, prefix+"full_attention_interval", 4)
+	}
+	writeKVUint32(&b, prefix+"attention.key_length", uint32(dim))
+	writeKVUint32(&b, prefix+"feed_forward_length", uint32(dim))
+	writeKVFloat32(&b, prefix+"attention.layer_norm_rms_epsilon", 1e-6)
+
+	embBlkBytes := blockQ2KBytes
+	if embType == TensorF32 {
+		embBlkBytes = 4
+	}
+	embBytes := (vocab * dim / 256) * embBlkBytes
+	if embType == TensorF32 {
+		embBytes = vocab * dim * 4
+	}
+
+	outBlkBytes := 144 // Q4_K
+	if outType == TensorQ2_K {
+		outBlkBytes = blockQ2KBytes
+	}
+	outBytes := (vocab * dim / 256) * outBlkBytes
+
+	ffnBytes := (dim * dim / 256) * 144
+
+	align32 := func(n uint64) uint64 {
+		return (n + 31) &^ 31
+	}
+
+	offset := uint64(0)
+	writeTensorInfoForTest(&b, "token_embd.weight", []uint64{uint64(dim), uint64(vocab)}, embType, offset)
+	offset = align32(offset + uint64(embBytes))
+
+	outOffset := uint64(0)
+	if !dropOut {
+		outOffset = offset
+		if aliased {
+			outOffset = 0 // alias to token_embd.weight
+		}
+		writeTensorInfoForTest(&b, "output.weight", []uint64{uint64(dim), uint64(vocab)}, outType, outOffset)
+		if !aliased {
+			offset = align32(offset + uint64(outBytes))
+		}
+	}
+
+	vOffset := offset
+	writeTensorInfoForTest(&b, "blk.0.attn_v.weight", []uint64{uint64(dim), uint64(dim)}, TensorQ4_K, vOffset)
+	offset = align32(offset + uint64(ffnBytes))
+	upOffset := offset
+	writeTensorInfoForTest(&b, "blk.0.ffn_up.weight", []uint64{uint64(dim), uint64(dim)}, TensorQ4_K, upOffset)
+	offset = align32(offset + uint64(ffnBytes))
+	ffnOffset := offset
+	writeTensorInfoForTest(&b, "blk.0.ffn_down.weight", []uint64{uint64(dim), uint64(dim)}, TensorQ4_K, ffnOffset)
+	offset = align32(offset + uint64(ffnBytes))
+
+	padToAlignment(&b, 32)
+	dataStart := b.Len()
+
+	writePayloadAt := func(off uint64, data []byte) {
+		target := dataStart + int(off)
+		for b.Len() < target {
+			b.WriteByte(0)
+		}
+		b.Write(data)
+	}
+
+	// Write dummy payloads
+	embPayload := make([]byte, embBytes)
+	if embType == TensorQ2_K {
+		for i := range embPayload {
+			embPayload[i] = byte((i*17 + 3) % 256)
+		}
+		for i := 0; i < len(embPayload); i += blockQ2KBytes {
+			binary.LittleEndian.PutUint16(embPayload[i+80:], 0x3C00) // d = 1.0
+			binary.LittleEndian.PutUint16(embPayload[i+82:], 0)      // min = 0
+		}
+	}
+	writePayloadAt(0, embPayload)
+
+	if !dropOut && !aliased {
+		writePayloadAt(outOffset, make([]byte, outBytes))
+	}
+	writePayloadAt(vOffset, make([]byte, ffnBytes))
+	writePayloadAt(upOffset, make([]byte, ffnBytes))
+	writePayloadAt(ffnOffset, make([]byte, ffnBytes))
+
+	path := filepath.Join(t.TempDir(), "fixture.gguf")
+	if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestWithQ2KEmbeddingResidentRejections(t *testing.T) {
+	const (
+		dim   = 256
+		vocab = 4
+	)
+	// 1. Non-hybrid arch (e.g. llama)
+	llamaPath := buildQwen35GGUFFixture(t, "llama", dim, vocab, TensorQ2_K, TensorQ4_K, false, false)
+	if _, err := LoadModelQ4KProfileOptions(llamaPath, nil, WithQ2KEmbeddingResident(true)); err == nil {
+		t.Error("LoadModelQ4K with resident Q2K embedding on llama must fail")
+	}
+
+	// 2. Missing output.weight (tied config)
+	tiedPath := buildQwen35GGUFFixture(t, "qwen35", dim, vocab, TensorQ2_K, TensorQ4_K, false, true)
+	if _, err := LoadModelQ4KProfileOptions(tiedPath, nil, WithQ2KEmbeddingResident(true)); err == nil {
+		t.Error("LoadModelQ4K with resident Q2K embedding on tied/missing output.weight must fail")
+	}
+
+	// 3. Aliased output.weight
+	aliasedPath := buildQwen35GGUFFixture(t, "qwen35", dim, vocab, TensorQ2_K, TensorQ4_K, true, false)
+	if _, err := LoadModelQ4KProfileOptions(aliasedPath, nil, WithQ2KEmbeddingResident(true)); err == nil {
+		t.Error("LoadModelQ4K with resident Q2K embedding on aliased output.weight must fail")
+	}
+
+	// 4. token_embd.weight is not Q2_K (e.g. F32)
+	f32EmbPath := buildQwen35GGUFFixture(t, "qwen35", dim, vocab, TensorF32, TensorQ4_K, false, false)
+	if _, err := LoadModelQ4KProfileOptions(f32EmbPath, nil, WithQ2KEmbeddingResident(true)); err == nil {
+		t.Error("LoadModelQ4K with resident Q2K embedding on F32 token_embd.weight must fail")
+	}
+}
+
+func TestWithQ2KEmbeddingResidentLoad(t *testing.T) {
+	const (
+		dim   = 256
+		vocab = 4
+	)
+	validPath := buildQwen35GGUFFixture(t, "qwen35", dim, vocab, TensorQ2_K, TensorQ4_K, false, false)
+
+	// A. Opt-in WithQ2KEmbeddingResident(true)
+	mOpt, err := LoadModelQ4KProfileOptions(validPath, nil, WithQ2KEmbeddingResident(true))
+	if err != nil {
+		t.Fatalf("LoadModelQ4KProfileOptions with WithQ2KEmbeddingResident: %v", err)
+	}
+	if !mOpt.HasQ2KEmbedding() {
+		t.Fatal("expected model to have Q2KEmbedding resident")
+	}
+	if mOpt.Q2KEmbedding.Vocab() != vocab || mOpt.Q2KEmbedding.Hidden() != dim {
+		t.Fatalf("Q2KEmbedding geometry = (%d, %d), want (%d, %d)", mOpt.Q2KEmbedding.Vocab(), mOpt.Q2KEmbedding.Hidden(), vocab, dim)
+	}
+	// Verify token_embd.weight was NOT expanded to F32 manifest
+	if mOpt.HasF32("model.embed_tokens.weight") {
+		t.Fatal("model manifest must NOT contain model.embed_tokens.weight as F32 when Q2_K embedding is resident")
+	}
+	// Verify GatherRow
+	row := make([]float32, dim)
+	if err := mOpt.Q2KEmbedding.GatherRow(0, row, 1.0); err != nil {
+		t.Fatalf("GatherRow(0): %v", err)
+	}
+	for i, v := range row {
+		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+			t.Fatalf("GatherRow elem %d is not finite: %v", i, v)
+		}
+	}
+	// Verify ResidentReport
+	rr := mOpt.ResidentReport()
+	if rr.Q2KEmbedTensors != 1 || rr.Q2KEmbedBytes != int64(vocab*(dim/256)*blockQ2KBytes) {
+		t.Fatalf("ResidentReport Q2KEmbed: tensors=%d bytes=%d", rr.Q2KEmbedTensors, rr.Q2KEmbedBytes)
+	}
+
+	// B. Default-off: Without WithQ2KEmbeddingResident, embedding expands to F32
+	mDef, err := LoadModelQ4KProfileOptions(validPath, nil)
+	if err != nil {
+		t.Fatalf("LoadModelQ4KProfileOptions default: %v", err)
+	}
+	if mDef.HasQ2KEmbedding() {
+		t.Fatal("default load must NOT have Q2KEmbedding resident")
+	}
+	if !mDef.HasF32("model.embed_tokens.weight") {
+		t.Fatal("default load must retain model.embed_tokens.weight in F32 manifest")
 	}
 }

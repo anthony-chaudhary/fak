@@ -263,6 +263,11 @@ type Model struct {
 	// sourceDir anchors V4 lazy expert/index range reads to the admitted snapshot.
 	sourceDir string
 
+	// Q2KEmbedding holds the optional resident Q2_K embedding table for native row gathering.
+	// When populated, embedRows() refuses whole-table expansion, while native row gathering
+	// paths (TokenEmbedding, embedRowsInto, HAL upload) dequantize rows on demand.
+	Q2KEmbedding *Q2KEmbedding
+
 	// attnObs is the optional attention-mass witness (#852). nil by default — the
 	// unobserved forward pass is byte-identical and allocation-identical. When set via
 	// SetAttnObserver, the named attention seams emit a COPY of their post-softmax
@@ -536,6 +541,9 @@ func (m *Model) hasWeight(name string) bool {
 	if m.has(name) {
 		return true
 	}
+	if name == "model.embed_tokens.weight" && m.Q2KEmbedding != nil {
+		return true
+	}
 	if m.q8w != nil {
 		if _, ok := m.q8w[name]; ok {
 			return true
@@ -572,7 +580,18 @@ func (m *Model) finalNorm(x []float32) []float32 {
 
 // embedRows returns the [vocab, hidden] embedding matrix, which is also the tied
 // LM-head matrix when TieWordEmbeddings.
-func (m *Model) embedRows() []float32 { return m.tensor("model.embed_tokens.weight") }
+func (m *Model) embedRows() []float32 {
+	if m.Q2KEmbedding != nil {
+		panic(ErrPackedEmbeddingWholeTableRefused)
+	}
+	return m.tensor("model.embed_tokens.weight")
+}
+
+// HasQ2KEmbedding reports whether the model retains a packed Q2_K embedding table.
+func (m *Model) HasQ2KEmbedding() bool { return m != nil && m.Q2KEmbedding != nil }
+
+// HasF32 reports whether a named float32 manifest tensor is present.
+func (m *Model) HasF32(name string) bool { return m != nil && m.has(name) }
 
 // lmHead returns the [vocab, hidden] output projection. Tied -> the embedding.
 func (m *Model) lmHead() []float32 {

@@ -75,6 +75,7 @@ func loadWorkers() int {
 type pendingTensor struct {
 	resident     bool       // true -> AddResident*(raw) by residentType; false -> AddF32Tensor(f32)
 	residentType TensorType // which resident raw-quant store, when resident
+	q2kEmbed     bool       // true -> model.NewQ2KEmbedding(raw) -> builder.SetQ2KEmbedding
 	lazyQ4K      bool
 	sourceInfo   TensorInfo
 	lazyReader   io.ReaderAt

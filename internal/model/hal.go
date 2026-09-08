@@ -622,10 +622,21 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 	if meta, ok := m.manifest["model.embed_tokens.weight"]; ok && !deviceEmbeddingTableFits(be, meta.Shape) {
 		useDeviceEmbed = false
 	}
+	if m.Q2KEmbedding != nil {
+		useDeviceEmbed = false
+	}
 	if useDeviceEmbed {
 		embedTable = s.weightHAL("model.embed_tokens.weight")
 	} else {
-		x = s.uploadHostF32([]int{H}, append([]float32(nil), m.embedRows()[id*H:(id+1)*H]...), compute.MemoryActivation, "hal-token-input")
+		if m.Q2KEmbedding != nil {
+			buf := make([]float32, H)
+			if err := m.Q2KEmbedding.GatherRow(id, buf, 1.0); err != nil {
+				panic(err)
+			}
+			x = s.uploadHostF32([]int{H}, buf, compute.MemoryActivation, "hal-token-input")
+		} else {
+			x = s.uploadHostF32([]int{H}, append([]float32(nil), m.embedRows()[id*H:(id+1)*H]...), compute.MemoryActivation, "hal-token-input")
+		}
 	}
 	var batch batchBackend
 	if b, ok := be.(batchBackend); ok {

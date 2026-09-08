@@ -265,9 +265,17 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 			// down-projection prep calls, so keep the allocation-safe kernel for that path.
 			mat = q8Kernel{m}
 		}
-		embed := m.embedRows()
-		x := append([]float32(nil), embed[id*H:(id+1)*H]...)
-		scaleEmbedInPlace(x, cfg) // Gemma; no-op for Llama
+		var x []float32
+		if m.Q2KEmbedding != nil {
+			x = make([]float32, H)
+			if err := m.Q2KEmbedding.GatherRow(id, x, cfg.embedScale()); err != nil {
+				panic(err)
+			}
+		} else {
+			embed := m.embedRows()
+			x = append([]float32(nil), embed[id*H:(id+1)*H]...)
+			scaleEmbedInPlace(x, cfg) // Gemma; no-op for Llama
+		}
 		for l := 0; l < cfg.NumLayers; l++ {
 			cos, sin := ropeRowForLayer(cfg, l, pos)
 			x = s.blockStep(l, pos, x, cos, sin, mat)
@@ -297,11 +305,20 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 	db.cos, db.sin = cos, sin
 	ropeRowInto(cos, sin, cachedInvFreq(cfg, 0), pos)
 
-	embed := m.embedRows()
-	x := grow(db.X, H)
-	db.X = x
-	copy(x, embed[id*H:(id+1)*H])
-	scaleEmbedInPlace(x, cfg) // Gemma; no-op for Llama
+	var x []float32
+	if m.Q2KEmbedding != nil {
+		x = grow(db.X, H)[:H]
+		db.X = x
+		if err := m.Q2KEmbedding.GatherRow(id, x, cfg.embedScale()); err != nil {
+			panic(err)
+		}
+	} else {
+		embed := m.embedRows()
+		x = grow(db.X, H)
+		db.X = x
+		copy(x, embed[id*H:(id+1)*H])
+		scaleEmbedInPlace(x, cfg) // Gemma; no-op for Llama
+	}
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		ql := m.q8Layer(l)
@@ -592,11 +609,20 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 		return scratch
 	}
 
-	embed := m.embedRows()
 	X := make([]float32, P*H)
-	for t, id := range ids {
-		copy(X[t*H:(t+1)*H], embed[id*H:(id+1)*H])
-		scaleEmbedInPlace(X[t*H:(t+1)*H], cfg) // Gemma; no-op for Llama
+	if m.Q2KEmbedding != nil {
+		scale := cfg.embedScale()
+		for t, id := range ids {
+			if err := m.Q2KEmbedding.GatherRow(id, X[t*H:(t+1)*H], scale); err != nil {
+				panic(err)
+			}
+		}
+	} else {
+		embed := m.embedRows()
+		for t, id := range ids {
+			copy(X[t*H:(t+1)*H], embed[id*H:(id+1)*H])
+			scaleEmbedInPlace(X[t*H:(t+1)*H], cfg) // Gemma; no-op for Llama
+		}
 	}
 
 	cosP := make([][]float32, P)

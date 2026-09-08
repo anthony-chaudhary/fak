@@ -509,6 +509,7 @@ func (s *Session) validateDenseGPULayers() (int, bool) {
 	if s == nil || s.M == nil {
 		return 0, false
 	}
+	s.validatePackedQ2KEmbeddingGuards()
 	n := s.denseGPULayers()
 	cfg := s.M.Cfg
 	if n < 0 || n > cfg.NumLayers {
@@ -521,6 +522,18 @@ func (s *Session) validateDenseGPULayers() (int, bool) {
 		s.Cache = NewKVCache(cfg)
 	}
 	return n, n > 0 && n < cfg.NumLayers
+}
+
+func (s *Session) validatePackedQ2KEmbeddingGuards() {
+	if s == nil || s.M == nil || s.M.Q2KEmbedding == nil {
+		return
+	}
+	if s.Metal || s.MetalQ4K || s.Q4 || s.F16 || s.GPTQ || s.PrecisionPolicy != nil || s.DenseGPULayers != 0 || s.GPULayers != 0 {
+		panic("model: resident Q2_K embedding does not support Metal/MetalQ4K/Q4/F16/GPTQ/PrecisionPolicy or GPU layer offload")
+	}
+	if s.Backend == nil && !s.Quant && !s.Q4K {
+		panic("model: resident Q2_K embedding on CPU without backend requires Quant or Q4K session mode")
+	}
 }
 
 func (s *Session) hostMatKernel() matKernel {
@@ -739,6 +752,13 @@ func (s *Session) TokenEmbedding(token int) ([]float32, error) {
 	if h <= 0 {
 		return nil, fmt.Errorf("model: token embedding id %d is unavailable", token)
 	}
+	if s.M.Q2KEmbedding != nil {
+		out := make([]float32, h)
+		if err := s.M.Q2KEmbedding.GatherRow(token, out, 1.0); err != nil {
+			return nil, err
+		}
+		return out, nil
+	}
 	embed := s.M.embedRows()
 	if token >= len(embed)/h {
 		return nil, fmt.Errorf("model: token embedding id %d is unavailable", token)
@@ -766,9 +786,17 @@ func (s *Session) tokenHidden(id, pos int) (out []float32) {
 	s.tapActive = tap
 	defer func() { s.tapActive = prevTap }()
 
-	embed := m.embedRows()
-	x := append([]float32(nil), embed[id*H:(id+1)*H]...)
-	scaleEmbedInPlace(x, cfg) // Gemma sqrt(hidden); no-op for Llama
+	var x []float32
+	if m.Q2KEmbedding != nil {
+		x = make([]float32, H)
+		if err := m.Q2KEmbedding.GatherRow(id, x, cfg.embedScale()); err != nil {
+			panic(err)
+		}
+	} else {
+		embed := m.embedRows()
+		x = append([]float32(nil), embed[id*H:(id+1)*H]...)
+		scaleEmbedInPlace(x, cfg) // Gemma sqrt(hidden); no-op for Llama
+	}
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		cos, sin := ropeRowForLayer(cfg, l, pos)

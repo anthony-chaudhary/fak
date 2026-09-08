@@ -61,17 +61,24 @@ func ExpertShardForRank(numExperts, ranks, rank int) (ExpertShard, error) {
 }
 
 type q4kLoadOptions struct {
-	expertShardSet      bool
-	expertShard         ExpertShard
-	residentDenseKQuant bool
-	residentDenseQ2K    bool
-	streamedExperts     bool
-	streamedExpertBytes int64
-	streamedDenseQ4K    bool
+	expertShardSet        bool
+	expertShard           ExpertShard
+	residentDenseKQuant   bool
+	residentDenseQ2K      bool
+	residentQ2KEmbedding  bool
+	streamedExperts       bool
+	streamedExpertBytes   int64
+	streamedDenseQ4K      bool
 }
 
 // Q4KLoadOption configures the direct-resident-Q4_K GGUF load path.
 type Q4KLoadOption func(*q4kLoadOptions)
+
+// WithQ2KEmbeddingResident controls whether eligible Q2_K token embedding tables stay in
+// raw Q2_K packed format for on-demand row gathering, skipping full F32 expansion.
+func WithQ2KEmbeddingResident(enabled bool) Q4KLoadOption {
+	return func(o *q4kLoadOptions) { o.residentQ2KEmbedding = enabled }
+}
 
 // WithDenseKQuantResident controls whether eligible dense Q5_K/Q6_K/IQ tensors stay in
 // the raw k-quant store. Backends without dense k-quant kernels must disable this so those
@@ -215,6 +222,11 @@ func LoadModelQ4KProfileOptionsContext(ctx context.Context, path string, p *Load
 	return loadModelQ4KProfileOptionsContext(ctx, path, p, OpenWeights, opts...)
 }
 
+// LoadQ4KModelContextWithProgress is an alias for LoadModelQ4KProfileOptionsContext.
+func LoadQ4KModelContextWithProgress(ctx context.Context, path string, p *LoadProfiler, opts ...Q4KLoadOption) (*model.Model, error) {
+	return LoadModelQ4KProfileOptionsContext(ctx, path, p, opts...)
+}
+
 func loadModelQ4KProfileOptionsContext(ctx context.Context, path string, p *LoadProfiler, open func(string) (*WeightSource, error), opts ...Q4KLoadOption) (*model.Model, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -299,6 +311,65 @@ func (s *WeightSource) shapeAndBytesOrFail(info TensorInfo, tw *tensorWork) (sha
 	return shape, raw, true
 }
 
+func (s *WeightSource) validateResidentQ2KEmbedding(cfg model.Config) error {
+	if !cfg.IsQwen35Hybrid() || cfg.IsMoE() {
+		return fmt.Errorf("gguf: resident Q2_K embedding requires a dense Qwen3.5-family hybrid model")
+	}
+	if cfg.TieWordEmbeddings {
+		return fmt.Errorf("gguf: resident Q2_K embedding requires untied word embeddings")
+	}
+	var (
+		embInfo *TensorInfo
+		outInfo *TensorInfo
+	)
+	for i := range s.File.Tensors {
+		t := &s.File.Tensors[i]
+		if t.Name == "token_embd.weight" {
+			embInfo = t
+		} else if t.Name == "output.weight" {
+			outInfo = t
+		}
+	}
+	if embInfo == nil {
+		return fmt.Errorf("gguf: token_embd.weight tensor missing")
+	}
+	if outInfo == nil {
+		return fmt.Errorf("gguf: resident Q2_K embedding requires distinct output.weight")
+	}
+	if embInfo.FileOffset == outInfo.FileOffset && embInfo.Offset == outInfo.Offset {
+		return fmt.Errorf("gguf: output.weight is aliased to token_embd.weight")
+	}
+	if embInfo.Type != TensorQ2_K {
+		return fmt.Errorf("gguf: token_embd.weight is %s, want Q2_K", embInfo.Type)
+	}
+	shape, err := modelShapeFromGGUFDims(embInfo.Name, embInfo.Dims)
+	if err != nil {
+		return err
+	}
+	if len(shape) != 2 {
+		return fmt.Errorf("gguf: token_embd.weight rank %d != 2", len(shape))
+	}
+	vocab, hidden := shape[0], shape[1]
+	if cfg.HiddenSize != 0 && hidden != cfg.HiddenSize {
+		return fmt.Errorf("gguf: token_embd.weight hidden %d != config %d", hidden, cfg.HiddenSize)
+	}
+	if cfg.VocabSize != 0 && vocab != cfg.VocabSize {
+		return fmt.Errorf("gguf: token_embd.weight vocab %d != config %d", vocab, cfg.VocabSize)
+	}
+	if hidden%qkK != 0 {
+		return fmt.Errorf("gguf: token_embd.weight hidden dimension %d is not divisible by %d", hidden, qkK)
+	}
+	wantPayload := uint64(vocab) * (uint64(hidden) / qkK) * blockQ2KBytes
+	payloadBytes, err := tensorPayloadBytes(*embInfo)
+	if err != nil {
+		return err
+	}
+	if payloadBytes != wantPayload {
+		return fmt.Errorf("gguf: token_embd.weight payload bytes %d != expected %d", payloadBytes, wantPayload)
+	}
+	return nil
+}
+
 // QuantModelQ4KProfileOptions is QuantModelQ4KProfile with explicit load options. The default
 // option set is byte-compatible with QuantModelQ4KProfile; an expert shard only filters routed
 // expert tensors after the GGUF batched expert split.
@@ -324,6 +395,11 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	loadOpts, err := resolveQ4KLoadOptions(cfg, opts)
 	if err != nil {
 		return nil, err
+	}
+	if loadOpts.residentQ2KEmbedding {
+		if err := s.validateResidentQ2KEmbedding(cfg); err != nil {
+			return nil, err
+		}
 	}
 	// R5/#5616: under WithStreamedExperts the fused routed-expert slabs are described from the
 	// tensor directory (no payload IO) and left on disk; `streamed` is the read-only set of GGUF
@@ -447,6 +523,14 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 	p.recordLoadPath(tw.acctType, tw.acctExpert, tw.acctResident, tw.acctBytes, tw.acctTensors)
 	for _, pt := range tw.pending {
 		switch {
+		case pt.q2kEmbed:
+			embed, err := model.NewQ2KEmbedding(pt.raw, pt.shape[0], pt.shape[1])
+			if err != nil {
+				return err
+			}
+			if err := builder.SetQ2KEmbedding(embed); err != nil {
+				return err
+			}
 		case pt.lazyQ4K:
 			n, err := tensorPayloadBytes(pt.sourceInfo)
 			if err != nil {
@@ -644,6 +728,15 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 	canon, ok := CanonicalTensorNameArch(info.Name, cfg.ModelType)
 	if !ok {
 		tw.err = fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
+		return tw
+	}
+	if loadOpts.residentQ2KEmbedding && info.Name == "token_embd.weight" {
+		shape, raw, ok := s.shapeAndBytesOrFail(info, &tw)
+		if !ok {
+			return tw
+		}
+		tw.acctType, tw.acctExpert, tw.acctBytes, tw.acctTensors, tw.acctResident = info.Type.String(), false, tensorOnDiskBytes(info), 1, true
+		tw.pending = []pendingTensor{{q2kEmbed: true, name: canon, shape: shape, raw: raw}}
 		return tw
 	}
 	if loadOpts.streamedDenseQ4K && info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {
