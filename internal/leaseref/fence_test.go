@@ -2,6 +2,7 @@ package leaseref
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -292,3 +293,101 @@ func TestPublishFencedSuppressesMissingOrExpiredToken(t *testing.T) {
 		t.Fatalf("missing/expired tokens published %d results, want zero", writes)
 	}
 }
+
+// TestFenceRefusesMissingHolderIdentity witnesses issue #12109: every accepted
+// positive-generation Fence token must have matching, non-empty presented and current
+// holder identities. Equal positive generations with either holder empty must be refused
+// with STALE_LEASE. Generation 0 remains the only legacy anonymous exception.
+func TestFenceRefusesMissingHolderIdentity(t *testing.T) {
+	g := newFakeGit()
+	s := NewWithRunner(g.run, "")
+	now := time.Unix(5000, 0)
+
+	setRec := func(r Record) {
+		b, err := json.Marshal(r)
+		if err != nil {
+			t.Fatalf("marshal record: %v", err)
+		}
+		oid := "oid-" + r.ID
+		g.blobs[oid] = b
+		g.refs["refs/fak/locks/"+r.ID] = oid
+	}
+
+	// Seed a live positive-generation lease with holder "worker-A".
+	lane, v, err := s.AcquireFenced(ctx(), Record{ID: "lane", TreeGlobs: []string{"x/**"}, Holder: "worker-A", TTLSeconds: 300}, now)
+	if err != nil || !v.OK || lane.Generation != 1 {
+		t.Fatalf("AcquireFenced seed: ok=%v gen=%d err=%v", v.OK, lane.Generation, err)
+	}
+
+	// 1. Positive generation with empty presented holder: must refuse STALE_LEASE.
+	vEmptyPresented, err := s.Fence(ctx(), Record{ID: "lane", Generation: 1, Holder: ""}, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("Fence empty presented holder: %v", err)
+	}
+	if vEmptyPresented.OK || vEmptyPresented.Reason != ReasonStaleLease {
+		t.Fatalf("Fence with empty presented holder admitted: ok=%v reason=%q, want refused STALE_LEASE (%+v)",
+			vEmptyPresented.OK, vEmptyPresented.Reason, vEmptyPresented.Detail)
+	}
+
+	// 2. Positive generation matching non-empty holder: must admit OK.
+	vValid, err := s.Fence(ctx(), Record{ID: "lane", Generation: 1, Holder: "worker-A"}, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("Fence valid: %v", err)
+	}
+	if !vValid.OK {
+		t.Fatalf("Fence with matching non-empty holder refused: %+v", vValid)
+	}
+
+	// 3. Positive generation with mismatched holder: must refuse STALE_LEASE.
+	vMismatched, err := s.Fence(ctx(), Record{ID: "lane", Generation: 1, Holder: "worker-B"}, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("Fence mismatched: %v", err)
+	}
+	if vMismatched.OK || vMismatched.Reason != ReasonStaleLease {
+		t.Fatalf("Fence with mismatched holder admitted: ok=%v reason=%q, want refused STALE_LEASE (%+v)",
+			vMismatched.OK, vMismatched.Reason, vMismatched.Detail)
+	}
+
+	// 4. Current lease in store has positive generation but empty holder.
+	setRec(Record{ID: "anon-pos", Generation: 1, Holder: "", TTLSeconds: 300, RenewedAt: now.Unix()})
+	vEmptyCur, err := s.Fence(ctx(), Record{ID: "anon-pos", Generation: 1, Holder: "worker-A"}, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("Fence empty current holder: %v", err)
+	}
+	if vEmptyCur.OK || vEmptyCur.Reason != ReasonStaleLease {
+		t.Fatalf("Fence with empty current holder admitted: ok=%v reason=%q, want refused STALE_LEASE (%+v)",
+			vEmptyCur.OK, vEmptyCur.Reason, vEmptyCur.Detail)
+	}
+
+	// 5. Current lease and presented token both have positive generation and empty holders.
+	vBothEmpty, err := s.Fence(ctx(), Record{ID: "anon-pos", Generation: 1, Holder: ""}, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("Fence both empty holders: %v", err)
+	}
+	if vBothEmpty.OK || vBothEmpty.Reason != ReasonStaleLease {
+		t.Fatalf("Fence with both positive-generation holders empty admitted: ok=%v reason=%q, want refused STALE_LEASE (%+v)",
+			vBothEmpty.OK, vBothEmpty.Reason, vBothEmpty.Detail)
+	}
+
+	// 6. Legacy generation 0: anonymous leases admit for backward compatibility.
+	setRec(Record{ID: "legacy-anon", Generation: 0, Holder: "", TTLSeconds: 300, RenewedAt: now.Unix()})
+	vLegacyAnon, err := s.Fence(ctx(), Record{ID: "legacy-anon", Generation: 0, Holder: ""}, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("Fence legacy anon: %v", err)
+	}
+	if !vLegacyAnon.OK {
+		t.Fatalf("Fence legacy gen 0 anon refused: %+v", vLegacyAnon)
+	}
+
+	// 7. Legacy generation 0 with mismatched non-empty holders still refuses.
+	setRec(Record{ID: "legacy-named", Generation: 0, Holder: "worker-A", TTLSeconds: 300, RenewedAt: now.Unix()})
+	vLegacyMismatch, err := s.Fence(ctx(), Record{ID: "legacy-named", Generation: 0, Holder: "worker-B"}, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("Fence legacy mismatch: %v", err)
+	}
+	if vLegacyMismatch.OK || vLegacyMismatch.Reason != ReasonStaleLease {
+		t.Fatalf("Fence legacy gen 0 with mismatched holders admitted: ok=%v reason=%q, want refused STALE_LEASE",
+			vLegacyMismatch.OK, vLegacyMismatch.Reason)
+	}
+}
+

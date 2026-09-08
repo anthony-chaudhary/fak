@@ -95,7 +95,8 @@ type FenceVerdict struct {
 //
 // Generation 0 on BOTH sides with a matching (or empty) holder is the legacy/unfenced lease:
 // it carries no fence opinion and admits, so a pre-fence flow that never set a generation is
-// not broken. The moment either side carries a real generation, the order rule applies.
+// not broken. For any positive generation, both presented and current holder identities must
+// be non-empty and match.
 func (s *Store) Fence(ctx context.Context, presented Record, now time.Time) (FenceVerdict, error) {
 	if !validID(presented.ID) {
 		return FenceVerdict{}, fmt.Errorf("leaseref: invalid lease id %q", presented.ID)
@@ -114,10 +115,22 @@ func (s *Store) Fence(ctx context.Context, presented Record, now time.Time) (Fen
 	v.Holder = cur.Holder
 
 	if cur.Generation == presented.Generation {
-		// Same generation: an admit, UNLESS the holder identity disagrees (a different holder
-		// at the same generation is an anomaly — fail closed rather than admit a possible
-		// impostor). Empty holders on both sides are the anonymous legacy case and admit.
-		if presented.Holder != "" && cur.Holder != "" && cur.Holder != presented.Holder {
+		if cur.Generation == 0 {
+			// Generation 0 on both sides is the legacy unfenced lease.
+			// Anonymous holders are permitted for backward compatibility.
+			if presented.Holder != "" && cur.Holder != "" && cur.Holder != presented.Holder {
+				v.Reason = ReasonStaleLease
+				v.Detail = fmt.Sprintf("generation 0 is held by %q, not %q — halt and reacquire", cur.Holder, presented.Holder)
+				return v, nil
+			}
+			v.OK = true
+			return v, nil
+		}
+
+		// Positive generation: every positive generation denotes an acquired holder epoch.
+		// Publication is allowed only for the currently owning holder at the same generation,
+		// so both presented and current holder identities must be non-empty and match.
+		if presented.Holder == "" || cur.Holder == "" || cur.Holder != presented.Holder {
 			v.Reason = ReasonStaleLease
 			v.Detail = fmt.Sprintf("generation %d is held by %q, not %q — halt and reacquire", cur.Generation, cur.Holder, presented.Holder)
 			return v, nil
