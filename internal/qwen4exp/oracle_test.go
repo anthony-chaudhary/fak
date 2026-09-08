@@ -3,6 +3,8 @@ package qwen4exp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"math"
 	"os"
 	"reflect"
 	"testing"
@@ -102,6 +104,156 @@ func TestStateRestoreIsBitExact(t *testing.T) {
 		if !reflect.DeepEqual(got.Tokens[0].Layers[layer], want.Tokens[0].Layers[layer]) {
 			t.Fatalf("restored layer %d diverged", layer)
 		}
+	}
+}
+
+func TestGatedDeltaChunkBoundaryEquivalence(t *testing.T) {
+	if HiddenSize != 4 {
+		t.Fatalf("test contract requires d=4, got %d", HiddenSize)
+	}
+
+	type testCase struct {
+		name        string
+		steps       int
+		initial     [HiddenSize * HiddenSize]float32
+		residual    [HiddenSize]float32
+		q           [HiddenSize]float32
+		k           [HiddenSize]float32
+		v           [HiddenSize]float32
+		z           [HiddenSize]float32
+		a           [HiddenSize]float32
+		b           [HiddenSize]float32
+		wantOutputs [][HiddenSize]float32
+		wantStates  [][HiddenSize * HiddenSize]float32
+	}
+
+	entry := func(row, col int, value float32) (out [HiddenSize * HiddenSize]float32) {
+		out[row*HiddenSize+col] = value
+		return out
+	}
+	row0 := func(a, b, c, d float32) (out [HiddenSize * HiddenSize]float32) {
+		out[0], out[1], out[2], out[3] = a, b, c, d
+		return out
+	}
+	vec := func(a, b, c, d float32) [HiddenSize]float32 {
+		return [HiddenSize]float32{a, b, c, d}
+	}
+
+	e0 := vec(1, 0, 0, 0)
+	e1 := vec(0, 1, 0, 0)
+	e2 := vec(0, 0, 1, 0)
+	zeroVector := vec(0, 0, 0, 0)
+	zeroState := [HiddenSize * HiddenSize]float32{}
+	cases := []testCase{
+		{
+			name:        "zero",
+			steps:       3,
+			wantOutputs: [][HiddenSize]float32{zeroVector, zeroVector, zeroVector},
+			wantStates:  [][HiddenSize * HiddenSize]float32{zeroState, zeroState, zeroState},
+		},
+		{
+			name:        "rank-one write",
+			steps:       3,
+			q:           e0,
+			k:           e0,
+			v:           e0,
+			wantOutputs: [][HiddenSize]float32{vec(0.25, 0, 0, 0), vec(0.25, 0, 0, 0), vec(0.25, 0, 0, 0)},
+			wantStates:  [][HiddenSize * HiddenSize]float32{entry(0, 0, 0.5), entry(0, 0, 0.5), entry(0, 0, 0.5)},
+		},
+		{
+			name:        "off-diagonal orientation",
+			steps:       3,
+			q:           e1,
+			k:           e1,
+			v:           e2,
+			wantOutputs: [][HiddenSize]float32{vec(0, 0, 0.25, 0), vec(0, 0, 0.25, 0), vec(0, 0, 0.25, 0)},
+			wantStates:  [][HiddenSize * HiddenSize]float32{entry(2, 1, 0.5), entry(2, 1, 0.5), entry(2, 1, 0.5)},
+		},
+		{
+			name:        "state-dependent decay",
+			steps:       3,
+			initial:     entry(0, 0, 1),
+			q:           e0,
+			wantOutputs: [][HiddenSize]float32{vec(0.25, 0, 0, 0), vec(0.125, 0, 0, 0), vec(0.0625, 0, 0, 0)},
+			wantStates:  [][HiddenSize * HiddenSize]float32{entry(0, 0, 0.5), entry(0, 0, 0.25), entry(0, 0, 0.125)},
+		},
+		{
+			name:        "prediction-before-decay",
+			steps:       2,
+			initial:     entry(0, 0, 1),
+			q:           e0,
+			k:           e0,
+			wantOutputs: [][HiddenSize]float32{zeroVector, zeroVector},
+			wantStates:  [][HiddenSize * HiddenSize]float32{zeroState, zeroState},
+		},
+		{
+			name:        "accumulation order",
+			steps:       3,
+			initial:     row0(1<<24, 1, -(1 << 24), 1),
+			q:           vec(1, 1, 1, 1),
+			wantOutputs: [][HiddenSize]float32{vec(0.25, 0, 0, 0), vec(0.125, 0, 0, 0), vec(0.0625, 0, 0, 0)},
+			wantStates: [][HiddenSize * HiddenSize]float32{
+				row0(1<<23, 0.5, -(1 << 23), 0.5),
+				row0(1<<22, 0.25, -(1 << 22), 0.25),
+				row0(1<<21, 0.125, -(1 << 21), 0.125),
+			},
+		},
+	}
+
+	assertVectorBits := func(t *testing.T, label string, got, want [HiddenSize]float32) {
+		t.Helper()
+		for i := range want {
+			if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
+				t.Fatalf("%s[%d] bits = %08x, want %08x (%g != %g)", label, i, math.Float32bits(got[i]), math.Float32bits(want[i]), got[i], want[i])
+			}
+		}
+	}
+	assertStateBits := func(t *testing.T, label string, got, want State) {
+		t.Helper()
+		for layer := range want.Recurrent {
+			for i := range want.Recurrent[layer] {
+				if math.Float32bits(got.Recurrent[layer][i]) != math.Float32bits(want.Recurrent[layer][i]) {
+					t.Fatalf("%s layer=%d index=%d bits = %08x, want %08x (%g != %g)", label, layer, i, math.Float32bits(got.Recurrent[layer][i]), math.Float32bits(want.Recurrent[layer][i]), got.Recurrent[layer][i], want.Recurrent[layer][i])
+				}
+			}
+		}
+	}
+	runStep := func(tc testCase, state *State) [HiddenSize]float32 {
+		return gatedDelta(tc.residual, tc.q, tc.k, tc.v, tc.z, tc.a, tc.b, &state.Recurrent[0])
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fullState := State{}
+			fullState.Recurrent[0] = tc.initial
+			fullOutputs := make([][HiddenSize]float32, tc.steps)
+			for token := 0; token < tc.steps; token++ {
+				fullOutputs[token] = runStep(tc, &fullState)
+				assertVectorBits(t, fmt.Sprintf("token %d output", token+1), fullOutputs[token], tc.wantOutputs[token])
+				wantState := State{}
+				wantState.Recurrent[0] = tc.wantStates[token]
+				assertStateBits(t, fmt.Sprintf("token %d state", token+1), fullState, wantState)
+			}
+
+			for split := 0; split <= tc.steps; split++ {
+				splitState := State{}
+				splitState.Recurrent[0] = tc.initial
+				for token := 0; token < split; token++ {
+					runStep(tc, &splitState)
+				}
+
+				var restored State
+				if err := restored.UnmarshalBinary(splitState.MarshalBinary()); err != nil {
+					t.Fatalf("split %d state round-trip: %v", split, err)
+				}
+				assertStateBits(t, fmt.Sprintf("split %d restored prefix state", split), restored, splitState)
+				for token := split; token < tc.steps; token++ {
+					got := runStep(tc, &restored)
+					assertVectorBits(t, fmt.Sprintf("split %d suffix token %d output", split, token+1), got, fullOutputs[token])
+				}
+				assertStateBits(t, fmt.Sprintf("split %d final state", split), restored, fullState)
+			}
+		})
 	}
 }
 
