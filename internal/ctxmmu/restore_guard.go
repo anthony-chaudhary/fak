@@ -251,7 +251,7 @@ func marshalQuarantineRecord(op, digest string) ([]byte, error) {
 
 func (l *QuarantineLedger) appendBytesLocked(record []byte) error {
 	dir := filepath.Dir(l.path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := ensureQuarantineLedgerDir(dir); err != nil {
 		return err
 	}
 	_, statErr := os.Stat(l.path)
@@ -281,7 +281,7 @@ func (l *QuarantineLedger) appendBytesLocked(record []byte) error {
 }
 
 func (l *QuarantineLedger) rewriteSnapshotLocked() error {
-	if err := os.MkdirAll(filepath.Dir(l.path), 0o700); err != nil {
+	if err := ensureQuarantineLedgerDir(filepath.Dir(l.path)); err != nil {
 		return err
 	}
 	keys := make([]string, 0, len(l.entries))
@@ -323,6 +323,35 @@ func (l *QuarantineLedger) rewriteSnapshotLocked() error {
 	}
 	ok = true
 	l.walSize = size
+	return nil
+}
+
+// ensureQuarantineLedgerDir makes every missing directory component durable
+// before any quarantine bytes can be published. Syncing only the leaf would
+// still allow a crash to forget a newly-created ancestor such as .fak.
+func ensureQuarantineLedgerDir(dir string) error {
+	dir = filepath.Clean(dir)
+	missing := make([]string, 0, 2)
+	for current := dir; ; current = filepath.Dir(current) {
+		if _, err := os.Stat(current); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		missing = append(missing, current)
+		parent := filepath.Dir(current)
+		if parent == current {
+			return fmt.Errorf("ctxmmu: no existing parent for quarantine authority %s", dir)
+		}
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	for i := len(missing) - 1; i >= 0; i-- {
+		if err := syncQuarantineLedgerCreation(filepath.Dir(missing[i])); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
