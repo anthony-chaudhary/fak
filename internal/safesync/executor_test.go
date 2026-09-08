@@ -2,6 +2,7 @@ package safesync
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -403,4 +404,272 @@ func TestExecutePacket_OwnerAuthorizedPathSuspend(t *testing.T) {
 	if string(actualPeer) != peerContent {
 		t.Errorf("unrelated peer content altered: got %q, want %q", string(actualPeer), peerContent)
 	}
+}
+
+func TestPacketExecutor_EnforcesBuildAndTestGates(t *testing.T) {
+	t.Run("build check failure blocks push and records failed receipt", func(t *testing.T) {
+		origin, clone := setupTestOriginAndClone(t)
+
+		writeFile(t, filepath.Join(origin, "remote_feat.txt"), "remote line\n")
+		git(t, origin, "add", ".")
+		git(t, origin, "commit", "-m", "remote feature commit")
+
+		writeFile(t, filepath.Join(clone, "local_feat.txt"), "local line\n")
+		git(t, clone, "add", ".")
+		git(t, clone, "commit", "-m", "local feature commit")
+
+		git(t, clone, "fetch", "origin")
+
+		opts := PacketOptions{
+			Repo:   clone,
+			Remote: "origin",
+			Branch: "work",
+		}
+		pkt, err := BuildReconciliationPacket(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("BuildReconciliationPacket: %v", err)
+		}
+		if pkt.Disposition != DispositionSafeDisjoint {
+			t.Fatalf("disposition = %s, want safe-disjoint", pkt.Disposition)
+		}
+
+		originHeadBefore, err := rev(context.Background(), RealRunner, origin, "HEAD")
+		if err != nil {
+			t.Fatalf("rev origin HEAD: %v", err)
+		}
+
+		buildCalled := false
+		execOpts := ExecuteOptions{
+			Repo:   clone,
+			Remote: "origin",
+			Branch: "work",
+			BuildVerifier: func(ctx context.Context, repo string) error {
+				buildCalled = true
+				return errors.New("synthetic compile error: package syntax error")
+			},
+		}
+
+		receipt, err := ExecutePacket(context.Background(), pkt, execOpts)
+		if err == nil {
+			t.Fatal("expected error when build gate fails, got nil")
+		}
+		if !buildCalled {
+			t.Error("expected BuildVerifier to be called")
+		}
+		if receipt == nil {
+			t.Fatal("expected non-nil receipt on build failure")
+		}
+		if receipt.Status != ExecuteStatusFailed {
+			t.Errorf("receipt.Status = %q, want %q", receipt.Status, ExecuteStatusFailed)
+		}
+		if receipt.Pushed {
+			t.Error("receipt.Pushed = true, want false when build gate fails")
+		}
+		if receipt.Reason != ReasonBuildCheckFailed {
+			t.Errorf("receipt.Reason = %q, want %q", receipt.Reason, ReasonBuildCheckFailed)
+		}
+		if !strings.Contains(receipt.Detail, "syntax error") {
+			t.Errorf("receipt.Detail = %q, want containing syntax error", receipt.Detail)
+		}
+
+		// Verify origin HEAD was NOT updated (push was blocked)
+		originHeadAfter, err := rev(context.Background(), RealRunner, origin, "HEAD")
+		if err != nil {
+			t.Fatalf("rev origin HEAD: %v", err)
+		}
+		if originHeadAfter != originHeadBefore {
+			t.Errorf("origin HEAD moved despite build failure: got %s, want %s", originHeadAfter, originHeadBefore)
+		}
+	})
+
+	t.Run("test gate failure blocks push and records failed receipt", func(t *testing.T) {
+		origin, clone := setupTestOriginAndClone(t)
+
+		writeFile(t, filepath.Join(origin, "remote_feat.txt"), "remote line\n")
+		git(t, origin, "add", ".")
+		git(t, origin, "commit", "-m", "remote feature commit")
+
+		writeFile(t, filepath.Join(clone, "local_feat.txt"), "local line\n")
+		git(t, clone, "add", ".")
+		git(t, clone, "commit", "-m", "local feature commit")
+
+		git(t, clone, "fetch", "origin")
+
+		opts := PacketOptions{
+			Repo:   clone,
+			Remote: "origin",
+			Branch: "work",
+		}
+		pkt, err := BuildReconciliationPacket(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("BuildReconciliationPacket: %v", err)
+		}
+		if pkt.Disposition != DispositionSafeDisjoint {
+			t.Fatalf("disposition = %s, want safe-disjoint", pkt.Disposition)
+		}
+
+		originHeadBefore, err := rev(context.Background(), RealRunner, origin, "HEAD")
+		if err != nil {
+			t.Fatalf("rev origin HEAD: %v", err)
+		}
+
+		testCalled := false
+		execOpts := ExecuteOptions{
+			Repo:   clone,
+			Remote: "origin",
+			Branch: "work",
+			BuildVerifier: func(ctx context.Context, repo string) error {
+				return nil
+			},
+			TestVerifier: func(ctx context.Context, repo string) error {
+				testCalled = true
+				return errors.New("synthetic test failure: TestSomethingFailed")
+			},
+		}
+
+		receipt, err := ExecutePacket(context.Background(), pkt, execOpts)
+		if err == nil {
+			t.Fatal("expected error when test gate fails, got nil")
+		}
+		if !testCalled {
+			t.Error("expected TestVerifier to be called")
+		}
+		if receipt == nil {
+			t.Fatal("expected non-nil receipt on test failure")
+		}
+		if receipt.Status != ExecuteStatusFailed {
+			t.Errorf("receipt.Status = %q, want %q", receipt.Status, ExecuteStatusFailed)
+		}
+		if receipt.Pushed {
+			t.Error("receipt.Pushed = true, want false when test gate fails")
+		}
+		if receipt.Reason != ReasonTestCheckFailed {
+			t.Errorf("receipt.Reason = %q, want %q", receipt.Reason, ReasonTestCheckFailed)
+		}
+		if !strings.Contains(receipt.Detail, "TestSomethingFailed") {
+			t.Errorf("receipt.Detail = %q, want containing TestSomethingFailed", receipt.Detail)
+		}
+
+		// Verify origin HEAD was NOT updated (push was blocked)
+		originHeadAfter, err := rev(context.Background(), RealRunner, origin, "HEAD")
+		if err != nil {
+			t.Fatalf("rev origin HEAD: %v", err)
+		}
+		if originHeadAfter != originHeadBefore {
+			t.Errorf("origin HEAD moved despite test failure: got %s, want %s", originHeadAfter, originHeadBefore)
+		}
+	})
+
+	t.Run("both gates pass allows push and records executed receipt", func(t *testing.T) {
+		origin, clone := setupTestOriginAndClone(t)
+
+		writeFile(t, filepath.Join(origin, "remote_feat.txt"), "remote line\n")
+		git(t, origin, "add", ".")
+		git(t, origin, "commit", "-m", "remote feature commit")
+
+		writeFile(t, filepath.Join(clone, "local_feat.txt"), "local line\n")
+		git(t, clone, "add", ".")
+		git(t, clone, "commit", "-m", "local feature commit")
+
+		git(t, clone, "fetch", "origin")
+
+		opts := PacketOptions{
+			Repo:   clone,
+			Remote: "origin",
+			Branch: "work",
+		}
+		pkt, err := BuildReconciliationPacket(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("BuildReconciliationPacket: %v", err)
+		}
+
+		buildCalled := false
+		testCalled := false
+		execOpts := ExecuteOptions{
+			Repo:   clone,
+			Remote: "origin",
+			Branch: "work",
+			BuildVerifier: func(ctx context.Context, repo string) error {
+				buildCalled = true
+				return nil
+			},
+			TestVerifier: func(ctx context.Context, repo string) error {
+				testCalled = true
+				return nil
+			},
+		}
+
+		receipt, err := ExecutePacket(context.Background(), pkt, execOpts)
+		if err != nil {
+			t.Fatalf("ExecutePacket failed: %v", err)
+		}
+		if !buildCalled || !testCalled {
+			t.Errorf("buildCalled=%v, testCalled=%v, both want true", buildCalled, testCalled)
+		}
+		if receipt.Status != ExecuteStatusExecuted {
+			t.Errorf("status = %q, want %q", receipt.Status, ExecuteStatusExecuted)
+		}
+		if !receipt.Pushed {
+			t.Errorf("pushed = %v, want true", receipt.Pushed)
+		}
+
+		// Verify origin HEAD was updated
+		originHead, err := rev(context.Background(), RealRunner, origin, "HEAD")
+		if err != nil {
+			t.Fatalf("rev origin HEAD: %v", err)
+		}
+		if originHead != receipt.NewHEAD {
+			t.Errorf("origin HEAD %s != receipt NewHEAD %s", originHead, receipt.NewHEAD)
+		}
+	})
+
+	t.Run("witnesses not declared skips gates", func(t *testing.T) {
+		origin, clone := setupTestOriginAndClone(t)
+
+		writeFile(t, filepath.Join(origin, "remote_feat.txt"), "remote line\n")
+		git(t, origin, "add", ".")
+		git(t, origin, "commit", "-m", "remote feature commit")
+
+		writeFile(t, filepath.Join(clone, "local_feat.txt"), "local line\n")
+		git(t, clone, "add", ".")
+		git(t, clone, "commit", "-m", "local feature commit")
+
+		git(t, clone, "fetch", "origin")
+
+		opts := PacketOptions{
+			Repo:   clone,
+			Remote: "origin",
+			Branch: "work",
+		}
+		pkt, err := BuildReconciliationPacket(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("BuildReconciliationPacket: %v", err)
+		}
+
+		// Clear required witnesses so gates are skipped
+		pkt.RequiredWitnesses = []string{"remote containment"}
+
+		execOpts := ExecuteOptions{
+			Repo:   clone,
+			Remote: "origin",
+			Branch: "work",
+			BuildVerifier: func(ctx context.Context, repo string) error {
+				return errors.New("should not be called")
+			},
+			TestVerifier: func(ctx context.Context, repo string) error {
+				return errors.New("should not be called")
+			},
+		}
+
+		receipt, err := ExecutePacket(context.Background(), pkt, execOpts)
+		if err != nil {
+			t.Fatalf("ExecutePacket failed: %v", err)
+		}
+		if receipt.Status != ExecuteStatusExecuted {
+			t.Errorf("status = %q, want %q", receipt.Status, ExecuteStatusExecuted)
+		}
+		if !receipt.Pushed {
+			t.Errorf("pushed = %v, want true", receipt.Pushed)
+		}
+	})
 }

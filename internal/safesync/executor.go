@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/mergepreview"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // ExecuteReceiptSchema is the schema identifier for typed reconciliation execution receipts.
@@ -55,18 +57,20 @@ type ExecutionReceipt struct {
 
 // ExecuteOptions configures PacketExecutor.
 type ExecuteOptions struct {
-	Repo               string           `json:"repo"`
-	Remote             string           `json:"remote"`
-	Branch             string           `json:"branch,omitempty"`
-	LeaseOwner         string           `json:"lease_owner,omitempty"`
-	WriterLeaseTTL     time.Duration    `json:"-"`
-	PushVelocityBudget time.Duration    `json:"-"`
-	MaxPushRetries     int              `json:"max_push_retries,omitempty"`
-	SuspendPaths       []string         `json:"suspend_paths,omitempty"`
-	Session            string           `json:"session,omitempty"`
-	Runner             Runner           `json:"-"`
-	EnvRunner          EnvRunner        `json:"-"`
-	Now                func() time.Time `json:"-"`
+	Repo               string                                       `json:"repo"`
+	Remote             string                                       `json:"remote"`
+	Branch             string                                       `json:"branch,omitempty"`
+	LeaseOwner         string                                       `json:"lease_owner,omitempty"`
+	WriterLeaseTTL     time.Duration                                `json:"-"`
+	PushVelocityBudget time.Duration                                `json:"-"`
+	MaxPushRetries     int                                          `json:"max_push_retries,omitempty"`
+	SuspendPaths       []string                                     `json:"suspend_paths,omitempty"`
+	Session            string                                       `json:"session,omitempty"`
+	Runner             Runner                                       `json:"-"`
+	EnvRunner          EnvRunner                                    `json:"-"`
+	Now                func() time.Time                             `json:"-"`
+	BuildVerifier      func(ctx context.Context, repo string) error `json:"-"`
+	TestVerifier       func(ctx context.Context, repo string) error `json:"-"`
 }
 
 // PacketExecutor executes leased reconciliation packets with independent graph readback.
@@ -334,7 +338,46 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 		return nil, fmt.Errorf("unsupported disposition %q", packet.Disposition)
 	}
 
-	// 5. Push: execute SafePush.
+	// 5. Verify required build and test witnesses before pushing.
+	if requiresWitness(packet.RequiredWitnesses, "build check") || requiresWitness(packet.RequiredWitnesses, "build") {
+		buildVerifier := e.opts.BuildVerifier
+		if buildVerifier == nil {
+			buildVerifier = defaultBuildVerifier
+		}
+		if err := buildVerifier(ctx, repo); err != nil {
+			receipt := &ExecutionReceipt{
+				Schema:    ExecuteReceiptSchema,
+				Status:    ExecuteStatusFailed,
+				Pushed:    false,
+				TargetSHA: packet.TargetSHA,
+				NewHEAD:   newHEAD,
+				Reason:    ReasonBuildCheckFailed,
+				Detail:    err.Error(),
+			}
+			return receipt, fmt.Errorf("build check gate failed: %w", err)
+		}
+	}
+
+	if requiresWitness(packet.RequiredWitnesses, "tests") || requiresWitness(packet.RequiredWitnesses, "test") {
+		testVerifier := e.opts.TestVerifier
+		if testVerifier == nil {
+			testVerifier = defaultTestVerifier
+		}
+		if err := testVerifier(ctx, repo); err != nil {
+			receipt := &ExecutionReceipt{
+				Schema:    ExecuteReceiptSchema,
+				Status:    ExecuteStatusFailed,
+				Pushed:    false,
+				TargetSHA: packet.TargetSHA,
+				NewHEAD:   newHEAD,
+				Reason:    ReasonTestCheckFailed,
+				Detail:    err.Error(),
+			}
+			return receipt, fmt.Errorf("test gate failed: %w", err)
+		}
+	}
+
+	// 6. Push: execute SafePush.
 	targetPushRef := "refs/heads/" + branch
 	pushOpts := PushOptions{
 		Repo:           repo,
@@ -373,7 +416,7 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 		return receipt, fmt.Errorf("push failed: %s", pushRes.Reason)
 	}
 
-	// 6. Independent graph readback: verify git merge-base --is-ancestor each local commit in origin/main, verify peer dirty bytes unchanged before/after.
+	// 7. Independent graph readback: verify git merge-base --is-ancestor each local commit in origin/main, verify peer dirty bytes unchanged before/after.
 	if e.opts.Remote != "" && branch != "" {
 		_ = run(ctx, repo, "fetch", e.opts.Remote, branch)
 	}
@@ -398,7 +441,7 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 	}
 	peerBytesPreserved := verifySnapshotsEqual(peerSnapshotsBefore, peerSnapshotsAfter)
 
-	// 7. Return ExecutionReceipt with {Schema, Status, LocalCommitsContained, PeerBytesPreserved, Pushed, TargetSHA, NewHEAD}.
+	// 8. Return ExecutionReceipt with {Schema, Status, LocalCommitsContained, PeerBytesPreserved, Pushed, TargetSHA, NewHEAD}.
 	receipt := &ExecutionReceipt{
 		Schema:                ExecuteReceiptSchema,
 		Status:                ExecuteStatusExecuted,
@@ -529,4 +572,78 @@ func verifySnapshotsEqual(before, after map[string][]byte) bool {
 		}
 	}
 	return true
+}
+
+func requiresWitness(witnesses []string, name string) bool {
+	target := strings.ToLower(strings.TrimSpace(name))
+	for _, w := range witnesses {
+		if strings.ToLower(strings.TrimSpace(w)) == target {
+			return true
+		}
+	}
+	return false
+}
+
+func defaultBuildVerifier(ctx context.Context, repo string) error {
+	if !hasGoSource(repo) {
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, "go", "build", "./...")
+	cmd.Dir = repo
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		detail := strings.TrimSpace(string(out))
+		if detail == "" {
+			detail = err.Error()
+		}
+		return fmt.Errorf("go build ./... failed: %s", detail)
+	}
+	return nil
+}
+
+func defaultTestVerifier(ctx context.Context, repo string) error {
+	if !hasGoSource(repo) {
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, "go", "test", "-short", "./...")
+	cmd.Dir = repo
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		detail := strings.TrimSpace(string(out))
+		if detail == "" {
+			detail = err.Error()
+		}
+		return fmt.Errorf("go test -short ./... failed: %s", detail)
+	}
+	return nil
+}
+
+func hasGoSource(repo string) bool {
+	if _, err := os.Stat(filepath.Join(repo, "go.mod")); err == nil {
+		return true
+	}
+	var found bool
+	_ = filepath.Walk(repo, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if found {
+			return filepath.SkipDir
+		}
+		if info != nil && info.IsDir() {
+			name := info.Name()
+			if p != repo && (name == ".git" || name == "vendor" || name == "_scratch") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info != nil && strings.HasSuffix(info.Name(), ".go") {
+			found = true
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	return found
 }
