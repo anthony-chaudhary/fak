@@ -45,8 +45,9 @@ func isGPURelatedValidation(mine []string) bool {
 }
 
 var (
-	discoverStrixTargetFn = amdgpu.DiscoverStrixTarget
-	runStrixValidationFn  = amdgpu.RunStrixValidation
+	discoverStrixTargetFn        = amdgpu.DiscoverStrixTarget
+	runStrixValidationFn         = amdgpu.RunStrixValidation
+	buildStrixCandidateArchiveFn = amdgpu.BuildStrixCandidateArchive
 )
 
 // shouldRunStrixValidation determines whether Strix Halo validation should run.
@@ -114,7 +115,7 @@ func executeStrixValidationPhase(
 	}
 
 	// Prepare validation options
-	skList := []string{"argmax", "matmul_f32", "q4k_matmul", "rmsnorm", "swiglu"}
+	skList := append([]string(nil), amdgpu.DefaultCreditableSubkernelSelectors...)
 	if subkernelsArg != "" && subkernelsArg != "all" {
 		skList = strings.Split(subkernelsArg, ",")
 	}
@@ -130,16 +131,34 @@ func executeStrixValidationPhase(
 		}
 	}
 
+	root := resolveRootWithin(ctx, "")
+	candidate, archiveErr := buildStrixCandidateArchiveFn(ctx, root, res.Tip, mine)
+	if archiveErr != nil {
+		phase.finish(archiveErr)
+		res.OK = false
+		res.Failures = append(res.Failures, ciPreflightFailure{Step: "strix-validation", Detail: fmt.Sprintf("exact candidate archive failed: %v", archiveErr), Files: mine})
+		return fmt.Errorf("strix candidate archive: %w", archiveErr)
+	}
+	admissionTimeout := 30 * time.Second
+	runCount := len(skList) + len(abList)
+	// Reserve a fresh-build budget plus the complete worst-case admission and
+	// TERM/kill-after envelope for every sequential device execution.
+	totalTimeout := 3*time.Minute + time.Duration(runCount)*(admissionTimeout+65*time.Second)
+
 	opts := amdgpu.StrixValidationOpts{
-		Host:          target.Host,
-		RunSubkernels: true,
-		Subkernels:    skList,
-		RunAblations:  runAblations,
-		Ablations:     abList,
-		GitRef:        res.Ref,
-		GitTip:        res.Tip,
-		Command:       "fak validate --strix",
-		Timeout:       25 * time.Second,
+		Host:                 target.Host,
+		RunSubkernels:        true,
+		Subkernels:           skList,
+		RunAblations:         runAblations,
+		Ablations:            abList,
+		GitRef:               res.Ref,
+		GitTip:               res.Tip,
+		Command:              "fak validate --strix",
+		Timeout:              totalTimeout,
+		RequireSourceBinding: true,
+		CandidateArchive:     candidate.Bytes,
+		SourceArchiveSHA256:  candidate.SourceArchiveSHA256,
+		AdmissionTimeout:     admissionTimeout,
 	}
 
 	receipt, valErr := runStrixValidationFn(ctx, opts)
@@ -197,6 +216,15 @@ func executeStrixValidationPhase(
 			}
 		}
 		return fmt.Errorf("strix validation failed with verdict: %s", receipt.Verdict)
+	}
+	if !receipt.CreditEligible() {
+		res.OK = false
+		res.Failures = append(res.Failures, ciPreflightFailure{
+			Step:   "strix-validation",
+			Detail: "receipt is integrity-readable but not eligible for current physical Strix credit",
+			Files:  []string{target.Host},
+		})
+		return fmt.Errorf("strix validation receipt is not credit eligible")
 	}
 
 	if valErr != nil {

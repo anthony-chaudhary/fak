@@ -514,6 +514,9 @@ func (r *StrixCandidateRegistry) EvaluateReceipt(receipt *StrixValidationReceipt
 	if receipt.Digest != expectedDigest {
 		return nil, fmt.Errorf("amdgpu: validation artifact digest mismatch: recorded %s != computed %s", receipt.Digest, expectedDigest)
 	}
+	if receipt.Schema == StrixValidationSchemaV1 {
+		return nil, fmt.Errorf("amdgpu: historical v1 receipt is integrity-readable but not eligible for current performance credit")
+	}
 	if err := receipt.Validate(); err != nil {
 		return nil, fmt.Errorf("amdgpu: validation artifact invalid: %w", err)
 	}
@@ -547,6 +550,12 @@ func ValidateBenchmarkArtifact(data []byte) (*StrixValidationReceipt, error) {
 	}
 	if receipt.Digest != expectedDigest {
 		return nil, fmt.Errorf("amdgpu: benchmark artifact digest mismatch: recorded %s != computed %s", receipt.Digest, expectedDigest)
+	}
+	// Historical v1 artifacts remain inspectable after their legacy digest is
+	// verified, but EvaluateReceipt/Validate deliberately refuse them as current
+	// performance credit.
+	if receipt.Schema == StrixValidationSchemaV1 {
+		return &receipt, nil
 	}
 	if err := receipt.Validate(); err != nil {
 		return nil, fmt.Errorf("amdgpu: validate benchmark artifact: %w", err)

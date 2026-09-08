@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -16,12 +17,16 @@ const (
 	StrixValidationSchema   = StrixValidationSchemaV2
 )
 
+var fullGitTipRE = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+var sha256RE = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
 // StrixOracleKind represents a closed typed-oracle kind for Strix subkernel parity.
 type StrixOracleKind string
 
 const (
 	StrixOracleExactArgmax     StrixOracleKind = "exact_argmax"
 	StrixOracleCosineMaxAbs    StrixOracleKind = "cosine_max_abs"
+	StrixOracleCosineArgmax    StrixOracleKind = "cosine_argmax"
 	StrixOracleMaxAbs          StrixOracleKind = "max_abs"
 	StrixOracleStateContinuity StrixOracleKind = "state_continuity"
 	StrixOracleHostContract    StrixOracleKind = "host_contract"
@@ -32,6 +37,7 @@ func (k StrixOracleKind) Valid() bool {
 	switch k {
 	case StrixOracleExactArgmax,
 		StrixOracleCosineMaxAbs,
+		StrixOracleCosineArgmax,
 		StrixOracleMaxAbs,
 		StrixOracleStateContinuity,
 		StrixOracleHostContract:
@@ -56,6 +62,9 @@ type StrixParityMetrics struct {
 	CosineSimilarity *float64 `json:"cosine_similarity,omitempty"`
 	MaxAbsoluteDelta *float64 `json:"max_absolute_delta,omitempty"`
 	RelativeL2       *float64 `json:"relative_l2,omitempty"`
+	MaxSourceDelta   *float64 `json:"max_source_delta,omitempty"`
+	StateIdentity    *bool    `json:"state_identity,omitempty"`
+	FiniteOutput     *bool    `json:"finite_output,omitempty"`
 
 	// state_continuity
 	StateCosine     *float64 `json:"state_cosine,omitempty"`
@@ -75,10 +84,14 @@ type StrixParityBounds struct {
 	ExactMatch *bool `json:"exact_match,omitempty"`
 
 	// cosine_max_abs
-	MinCosine        *float64 `json:"min_cosine,omitempty"`
-	CosineComparison string   `json:"cosine_comparison,omitempty"`
-	MaxAbsDelta      *float64 `json:"max_abs_delta,omitempty"`
-	MaxAbsComparison string   `json:"max_abs_comparison,omitempty"`
+	MinCosine             *float64 `json:"min_cosine,omitempty"`
+	CosineComparison      string   `json:"cosine_comparison,omitempty"`
+	MaxAbsDelta           *float64 `json:"max_abs_delta,omitempty"`
+	MaxAbsComparison      string   `json:"max_abs_comparison,omitempty"`
+	MaxSourceDelta        *float64 `json:"max_source_delta,omitempty"`
+	SourceDeltaComparison string   `json:"source_delta_comparison,omitempty"`
+	StateIdentity         *bool    `json:"state_identity,omitempty"`
+	FiniteOutput          *bool    `json:"finite_output,omitempty"`
 
 	// state_continuity
 	MinStateCosine        *float64 `json:"min_state_cosine,omitempty"`
@@ -144,15 +157,48 @@ func (e StrixParityEvent) Validate() error {
 		"observed.cosine_similarity":  e.Observed.CosineSimilarity,
 		"observed.max_absolute_delta": e.Observed.MaxAbsoluteDelta,
 		"observed.relative_l2":        e.Observed.RelativeL2,
+		"observed.max_source_delta":   e.Observed.MaxSourceDelta,
 		"observed.state_cosine":       e.Observed.StateCosine,
 		"observed.state_delta":        e.Observed.StateDelta,
 		"bounds.min_cosine":           e.Bounds.MinCosine,
 		"bounds.max_abs_delta":        e.Bounds.MaxAbsDelta,
+		"bounds.max_source_delta":     e.Bounds.MaxSourceDelta,
 		"bounds.min_state_cosine":     e.Bounds.MinStateCosine,
 		"bounds.max_state_delta":      e.Bounds.MaxStateDelta,
 	} {
 		if err := checkFinite(name, f); err != nil {
 			return err
+		}
+	}
+	if e.Observed.MaxSourceDelta != nil {
+		if e.Bounds.MaxSourceDelta == nil {
+			return fmt.Errorf("amdgpu: oracle %s reports max_source_delta without a bound", e.OracleKind)
+		}
+		cmp := e.Bounds.SourceDeltaComparison
+		if cmp == "" {
+			cmp = "<="
+		}
+		if cmp != "<=" && cmp != "<" {
+			return fmt.Errorf("amdgpu: wrong comparison %q for max_source_delta", cmp)
+		}
+		if e.Passed && ((cmp == "<=" && *e.Observed.MaxSourceDelta > *e.Bounds.MaxSourceDelta) || (cmp == "<" && *e.Observed.MaxSourceDelta >= *e.Bounds.MaxSourceDelta)) {
+			return fmt.Errorf("amdgpu: false pass: observed max_source_delta exceeds bound")
+		}
+	}
+	if e.Observed.StateIdentity != nil {
+		if e.Bounds.StateIdentity == nil {
+			return fmt.Errorf("amdgpu: oracle %s reports state_identity without a bound", e.OracleKind)
+		}
+		if e.Passed && *e.Observed.StateIdentity != *e.Bounds.StateIdentity {
+			return fmt.Errorf("amdgpu: false pass: state_identity does not match bound")
+		}
+	}
+	if e.Observed.FiniteOutput != nil {
+		if e.Bounds.FiniteOutput == nil {
+			return fmt.Errorf("amdgpu: oracle %s reports finite_output without a bound", e.OracleKind)
+		}
+		if e.Passed && *e.Observed.FiniteOutput != *e.Bounds.FiniteOutput {
+			return fmt.Errorf("amdgpu: false pass: finite_output does not match bound")
 		}
 	}
 
@@ -179,6 +225,20 @@ func (e StrixParityEvent) Validate() error {
 		}
 		if e.Passed && !*e.Observed.ArgmaxExact {
 			return fmt.Errorf("amdgpu: false pass: passed is true but observed argmax_exact is false")
+		}
+
+	case StrixOracleCosineArgmax:
+		if e.Observed.CosineSimilarity == nil || e.Observed.ArgmaxExact == nil {
+			return fmt.Errorf("amdgpu: cosine_argmax requires cosine_similarity and argmax_exact")
+		}
+		if e.Bounds.MinCosine == nil || e.Bounds.ExactMatch == nil || !*e.Bounds.ExactMatch {
+			return fmt.Errorf("amdgpu: cosine_argmax requires min_cosine and exact_match=true bounds")
+		}
+		if *e.Bounds.MinCosine < 0.90 || *e.Bounds.MinCosine > 1.0 {
+			return fmt.Errorf("amdgpu: loosened bounds: min_cosine %.6f outside canonical range [0.90, 1.00]", *e.Bounds.MinCosine)
+		}
+		if e.Passed && (*e.Observed.CosineSimilarity < *e.Bounds.MinCosine || !*e.Observed.ArgmaxExact) {
+			return fmt.Errorf("amdgpu: false pass: cosine_argmax observation violates bounds")
 		}
 
 	case StrixOracleCosineMaxAbs:
@@ -272,7 +332,7 @@ func (e StrixParityEvent) Validate() error {
 		}
 
 	case StrixOracleStateContinuity:
-		hasMetric := e.Observed.StateContinuous != nil || e.Observed.StateCosine != nil || e.Observed.StateDelta != nil
+		hasMetric := e.Observed.StateContinuous != nil || e.Observed.StateCosine != nil || e.Observed.StateDelta != nil || e.Observed.StateIdentity != nil || e.Observed.FiniteOutput != nil
 		if !hasMetric {
 			return fmt.Errorf("amdgpu: state_continuity requires observed state continuity metric")
 		}
@@ -485,6 +545,8 @@ type StrixValidationReceipt struct {
 	ExecutedCount      int                    `json:"executed_count,omitempty"`
 	SelectedSubkernels int                    `json:"selected_subkernels,omitempty"`
 	ExecutedSubkernels int                    `json:"executed_subkernels,omitempty"`
+	SelectedAblations  int                    `json:"selected_ablations,omitempty"`
+	ExecutedAblations  int                    `json:"executed_ablations,omitempty"`
 	Subkernels         []StrixSubkernelResult `json:"subkernels,omitempty"`
 	Ablations          []StrixAblationResult  `json:"ablations,omitempty"`
 	ParityEvents       []StrixParityEvent     `json:"parity_events,omitempty"`
@@ -495,23 +557,52 @@ type StrixValidationReceipt struct {
 
 // StrixProvenance records the software revision, command, and run mode.
 type StrixProvenance struct {
-	GitRef      string `json:"git_ref,omitempty"`
-	GitTip      string `json:"git_tip,omitempty"`
-	Command     string `json:"command,omitempty"`
-	GeneratedBy string `json:"generated_by"`
-	Transport   string `json:"transport"` // "local" | "ssh"
+	GitRef                  string   `json:"git_ref,omitempty"`
+	GitTip                  string   `json:"git_tip,omitempty"`
+	Command                 string   `json:"command,omitempty"`
+	GeneratedBy             string   `json:"generated_by"`
+	Transport               string   `json:"transport"` // "local" | "ssh"
+	SourceArchiveSHA256     string   `json:"source_archive_sha256,omitempty"`
+	BinarySHA256            string   `json:"binary_sha256,omitempty"`
+	ShaderBundleSHA256      string   `json:"shader_bundle_sha256,omitempty"`
+	BuildCommandSHA256      string   `json:"build_command_sha256,omitempty"`
+	ExecutionManifestSHA256 string   `json:"execution_manifest_sha256,omitempty"`
+	EngineIdentity          string   `json:"engine_identity,omitempty"`
+	Trace                   []string `json:"trace,omitempty"`
+	CleanupObserved         bool     `json:"cleanup_observed"`
+}
+
+type StrixExecutionEvidence struct {
+	SourceArchiveSHA256 string `json:"source_archive_sha256"`
+	BinarySHA256        string `json:"binary_sha256"`
+	ShaderBundleSHA256  string `json:"shader_bundle_sha256"`
+	CommandSHA256       string `json:"command_sha256"`
+	DeviceIdentity      string `json:"device_identity"`
+	EngineIdentity      string `json:"engine_identity"`
+	ArtifactRehashed    bool   `json:"artifact_rehashed"`
+	DeviceTimeoutMS     int64  `json:"device_timeout_ms"`
+	LeasePathSHA256     string `json:"lease_path_sha256"`
+	AdmissionWaitMS     int64  `json:"admission_wait_ms"`
+	Acquired            bool   `json:"acquired"`
+	Released            bool   `json:"released"`
+	AcquireOrdinal      int    `json:"acquire_ordinal"`
+	ReleaseOrdinal      int    `json:"release_ordinal"`
+	ExitCode            *int   `json:"exit_code,omitempty"`
+	RawOutputSHA256     string `json:"raw_output_sha256"`
+	RawOutputBytes      int    `json:"raw_output_bytes"`
 }
 
 // StrixSubkernelResult records the physical device execution of one compute sub-kernel.
 type StrixSubkernelResult struct {
-	Name         string             `json:"name"`        // e.g. "argmax", "matmul_f32", "q4k_matmul"
-	Status       string             `json:"status"`      // PASS | FAIL | SKIPPED
-	DurationUS   int64              `json:"duration_us"` // latency in microseconds
-	Iterations   int                `json:"iterations"`
-	Parity       StrixParityVerdict `json:"parity"`
-	ParityEvents []StrixParityEvent `json:"parity_events,omitempty"`
-	Metrics      map[string]any     `json:"metrics,omitempty"`
-	Error        string             `json:"error,omitempty"`
+	Name         string                 `json:"name"`        // e.g. "argmax", "matmul_f32", "q4k_matmul"
+	Status       string                 `json:"status"`      // PASS | FAIL | SKIPPED
+	DurationUS   int64                  `json:"duration_us"` // latency in microseconds
+	Iterations   int                    `json:"iterations"`
+	Parity       StrixParityVerdict     `json:"parity"`
+	ParityEvents []StrixParityEvent     `json:"parity_events,omitempty"`
+	Evidence     StrixExecutionEvidence `json:"evidence"`
+	Metrics      map[string]any         `json:"metrics,omitempty"`
+	Error        string                 `json:"error,omitempty"`
 }
 
 // StrixParityVerdict captures numerical and functional agreement against CPU reference.
@@ -526,67 +617,12 @@ type StrixParityVerdict struct {
 	Events                []StrixParityEvent `json:"events,omitempty"`
 }
 
-// AllParityEvents aggregates all typed parity events from ParityEvents and Parity.Events,
-// synthesizing a typed event from legacy Parity fields when no explicit events are present.
+// AllParityEvents aggregates only explicit typed parity events. Historical
+// legacy fields remain readable but never become v2 credit by inference.
 func (s *StrixSubkernelResult) AllParityEvents() []StrixParityEvent {
-	events := make([]StrixParityEvent, 0, len(s.ParityEvents)+len(s.Parity.Events)+1)
+	events := make([]StrixParityEvent, 0, len(s.ParityEvents)+len(s.Parity.Events))
 	events = append(events, s.ParityEvents...)
 	events = append(events, s.Parity.Events...)
-	if len(events) == 0 {
-		if s.Parity.ArgmaxExact && s.Parity.LogitCosineSimilarity > 0 {
-			// Exact/cosine conflation on legacy fields
-			cos := s.Parity.LogitCosineSimilarity
-			t := true
-			events = append(events, StrixParityEvent{
-				OracleKind:     StrixOracleExactArgmax,
-				CaseCount:      1,
-				DeviceObserved: true,
-				Engine:         "fak-native/vulkan",
-				Passed:         s.Parity.Passed,
-				Observed: StrixParityMetrics{
-					ArgmaxExact:      &t,
-					CosineSimilarity: &cos,
-				},
-				Bounds: StrixParityBounds{ExactMatch: &t, Comparison: "=="},
-			})
-		} else if s.Parity.ArgmaxExact {
-			t := true
-			events = append(events, StrixParityEvent{
-				OracleKind:     StrixOracleExactArgmax,
-				CaseCount:      1,
-				DeviceObserved: true,
-				Engine:         "fak-native/vulkan",
-				Passed:         s.Parity.Passed,
-				Observed:       StrixParityMetrics{ArgmaxExact: &t},
-				Bounds:         StrixParityBounds{ExactMatch: &t, Comparison: "=="},
-			})
-		} else if s.Parity.LogitCosineSimilarity > 0 {
-			cos := s.Parity.LogitCosineSimilarity
-			minCos := 0.999900
-			maxDelta := s.Parity.MaxAbsoluteDelta
-			boundDelta := 0.05
-			if boundDelta < maxDelta {
-				boundDelta = maxDelta
-			}
-			events = append(events, StrixParityEvent{
-				OracleKind:     StrixOracleCosineMaxAbs,
-				CaseCount:      1,
-				DeviceObserved: true,
-				Engine:         "fak-native/vulkan",
-				Passed:         s.Parity.Passed,
-				Observed: StrixParityMetrics{
-					CosineSimilarity: &cos,
-					MaxAbsoluteDelta: &maxDelta,
-				},
-				Bounds: StrixParityBounds{
-					MinCosine:        &minCos,
-					CosineComparison: ">=",
-					MaxAbsDelta:      &boundDelta,
-					MaxAbsComparison: "<=",
-				},
-			})
-		}
-	}
 	return events
 }
 
@@ -603,6 +639,9 @@ func (r *StrixValidationReceipt) AllParityEvents() []StrixParityEvent {
 // CreditEligible reports whether the receipt qualifies for physical Strix Halo parity credit.
 // Historical v1 receipts and host contracts are non-credit.
 func (r *StrixValidationReceipt) CreditEligible() bool {
+	if err := r.Validate(); err != nil {
+		return false
+	}
 	if r.Schema != StrixValidationSchemaV2 {
 		return false
 	}
@@ -635,20 +674,22 @@ func (r *StrixValidationReceipt) PhysicalParityCredit() bool {
 
 // StrixAblationResult records a differential comparison across architectural or execution arms.
 type StrixAblationResult struct {
-	Dimension    string         `json:"dimension"`     // "target" | "topology" | "quantization" | "residency" | "batch"
-	Feature      string         `json:"feature"`       // e.g. "f16_contiguize", "q4k_vs_f32", "fused_vs_discrete"
-	BaselineArm  StrixArmResult `json:"baseline_arm"`  // control
-	CandidateArm StrixArmResult `json:"candidate_arm"` // treatment
-	Speedup      float64        `json:"speedup"`       // baseline_latency / candidate_latency
-	LiftRatio    float64        `json:"lift_ratio"`    // candidate_throughput / baseline_throughput
-	CosineParity float64        `json:"cosine_parity"` // numerical parity between arms
-	Verdict      string         `json:"verdict"`       // VERIFIED_LIFT | PARITY_MATCH | REGRESSION
+	Dimension    string                 `json:"dimension"`     // "target" | "topology" | "quantization" | "residency" | "batch"
+	Feature      string                 `json:"feature"`       // e.g. "f16_contiguize", "q4k_vs_f32", "fused_vs_discrete"
+	BaselineArm  StrixArmResult         `json:"baseline_arm"`  // control
+	CandidateArm StrixArmResult         `json:"candidate_arm"` // treatment
+	Speedup      float64                `json:"speedup"`       // baseline_latency / candidate_latency
+	LiftRatio    float64                `json:"lift_ratio"`    // candidate_throughput / baseline_throughput
+	CosineParity float64                `json:"cosine_parity"` // numerical parity between arms
+	Evidence     StrixExecutionEvidence `json:"evidence"`
+	Verdict      string                 `json:"verdict"` // VERIFIED_LIFT | PARITY_MATCH | REGRESSION
 }
 
 // StrixArmResult captures throughput, latency, and memory for one ablation arm.
 type StrixArmResult struct {
 	Name            string  `json:"name"`
 	LatencyUS       int64   `json:"latency_us"`
+	Samples         int     `json:"samples"`
 	ThroughputTokS  float64 `json:"throughput_tok_s,omitempty"`
 	DRAMBandwidthGB float64 `json:"dram_bandwidth_gbps,omitempty"`
 	AllocatedBytes  int64   `json:"allocated_bytes,omitempty"`
@@ -657,9 +698,11 @@ type StrixArmResult struct {
 
 // ComputeDigest computes a deterministic SHA-256 digest over the receipt.
 func (r *StrixValidationReceipt) ComputeDigest() (string, error) {
+	if r.Schema == StrixValidationSchemaV1 {
+		return r.computeV1Digest()
+	}
 	copyReceipt := *r
 	copyReceipt.Digest = ""
-	copyReceipt.Verified = false
 
 	raw, err := json.Marshal(copyReceipt)
 	if err != nil {
@@ -667,6 +710,80 @@ func (r *StrixValidationReceipt) ComputeDigest() (string, error) {
 	}
 	hash := sha256.Sum256(raw)
 	return "sha256:" + hex.EncodeToString(hash[:]), nil
+}
+
+func (r *StrixValidationReceipt) computeV1Digest() (string, error) {
+	type p struct {
+		ReferenceGEMV         string  `json:"reference_gemv"`
+		LogitCosineSimilarity float64 `json:"logit_cosine_similarity"`
+		MaxAbsoluteDelta      float64 `json:"max_absolute_delta"`
+		RelativeL2            float64 `json:"relative_l2"`
+		ArgmaxExact           bool    `json:"argmax_exact"`
+		Passed                bool    `json:"passed"`
+	}
+	type sk struct {
+		Name       string         `json:"name"`
+		Status     string         `json:"status"`
+		DurationUS int64          `json:"duration_us"`
+		Iterations int            `json:"iterations"`
+		Parity     p              `json:"parity"`
+		Metrics    map[string]any `json:"metrics,omitempty"`
+		Error      string         `json:"error,omitempty"`
+	}
+	type arm struct {
+		Name            string  `json:"name"`
+		LatencyUS       int64   `json:"latency_us"`
+		ThroughputTokS  float64 `json:"throughput_tok_s,omitempty"`
+		DRAMBandwidthGB float64 `json:"dram_bandwidth_gbps,omitempty"`
+		AllocatedBytes  int64   `json:"allocated_bytes,omitempty"`
+		Argmax          int     `json:"argmax,omitempty"`
+	}
+	type ab struct {
+		Dimension    string  `json:"dimension"`
+		Feature      string  `json:"feature"`
+		BaselineArm  arm     `json:"baseline_arm"`
+		CandidateArm arm     `json:"candidate_arm"`
+		Speedup      float64 `json:"speedup"`
+		LiftRatio    float64 `json:"lift_ratio"`
+		CosineParity float64 `json:"cosine_parity"`
+		Verdict      string  `json:"verdict"`
+	}
+	type prov struct {
+		GitRef      string `json:"git_ref,omitempty"`
+		GitTip      string `json:"git_tip,omitempty"`
+		Command     string `json:"command,omitempty"`
+		GeneratedBy string `json:"generated_by"`
+		Transport   string `json:"transport"`
+	}
+	type rec struct {
+		Schema             string      `json:"schema"`
+		Timestamp          string      `json:"timestamp"`
+		Verdict            string      `json:"verdict"`
+		Target             StrixTarget `json:"target"`
+		Provenance         prov        `json:"provenance"`
+		SelectedCount      int         `json:"selected_count,omitempty"`
+		ExecutedCount      int         `json:"executed_count,omitempty"`
+		SelectedSubkernels int         `json:"selected_subkernels,omitempty"`
+		ExecutedSubkernels int         `json:"executed_subkernels,omitempty"`
+		Subkernels         []sk        `json:"subkernels,omitempty"`
+		Ablations          []ab        `json:"ablations,omitempty"`
+		Failures           []string    `json:"failures,omitempty"`
+		Digest             string      `json:"digest,omitempty"`
+		Verified           bool        `json:"verified"`
+	}
+	x := rec{Schema: r.Schema, Timestamp: r.Timestamp, Verdict: r.Verdict, Target: r.Target, Provenance: prov{r.Provenance.GitRef, r.Provenance.GitTip, r.Provenance.Command, r.Provenance.GeneratedBy, r.Provenance.Transport}, SelectedCount: r.SelectedCount, ExecutedCount: r.ExecutedCount, SelectedSubkernels: r.SelectedSubkernels, ExecutedSubkernels: r.ExecutedSubkernels, Failures: r.Failures}
+	for _, s := range r.Subkernels {
+		x.Subkernels = append(x.Subkernels, sk{Name: s.Name, Status: s.Status, DurationUS: s.DurationUS, Iterations: s.Iterations, Parity: p{s.Parity.ReferenceGEMV, s.Parity.LogitCosineSimilarity, s.Parity.MaxAbsoluteDelta, s.Parity.RelativeL2, s.Parity.ArgmaxExact, s.Parity.Passed}, Metrics: s.Metrics, Error: s.Error})
+	}
+	for _, a := range r.Ablations {
+		x.Ablations = append(x.Ablations, ab{a.Dimension, a.Feature, arm{a.BaselineArm.Name, a.BaselineArm.LatencyUS, a.BaselineArm.ThroughputTokS, a.BaselineArm.DRAMBandwidthGB, a.BaselineArm.AllocatedBytes, a.BaselineArm.Argmax}, arm{a.CandidateArm.Name, a.CandidateArm.LatencyUS, a.CandidateArm.ThroughputTokS, a.CandidateArm.DRAMBandwidthGB, a.CandidateArm.AllocatedBytes, a.CandidateArm.Argmax}, a.Speedup, a.LiftRatio, a.CosineParity, a.Verdict})
+	}
+	raw, err := json.Marshal(x)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(h[:]), nil
 }
 
 // Validate checks receipt invariants, schema, and consistency.
@@ -686,6 +803,18 @@ func (r *StrixValidationReceipt) Validate() error {
 	}
 	if r.Digest != expectedDigest {
 		return fmt.Errorf("digest mismatch (recorded %s != computed %s)", r.Digest, expectedDigest)
+	}
+	if r.Schema == StrixValidationSchemaV1 {
+		return nil
+	}
+	if r.Verdict != "PASS" {
+		if r.Verified {
+			return fmt.Errorf("non-PASS v2 receipt cannot be Verified")
+		}
+		return nil
+	}
+	if !r.Verified {
+		return fmt.Errorf("PASS v2 receipt is not Verified")
 	}
 	if r.Verdict == "PASS" {
 		if !r.Target.Reachable {
@@ -733,6 +862,182 @@ func (r *StrixValidationReceipt) Validate() error {
 				return fmt.Errorf("verdict is PASS but ablation %q suffered regression (speedup=%.2fx)", ab.Feature, ab.Speedup)
 			}
 		}
+		if err := r.validateExecutionCredit(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validExecutionEvidence(e StrixExecutionEvidence) error {
+	for n, v := range map[string]string{"source archive": e.SourceArchiveSHA256, "binary": e.BinarySHA256, "shader bundle": e.ShaderBundleSHA256, "command": e.CommandSHA256, "lease path": e.LeasePathSHA256, "raw output": e.RawOutputSHA256} {
+		if !sha256RE.MatchString(v) {
+			return fmt.Errorf("missing or invalid %s digest", n)
+		}
+	}
+	if e.EngineIdentity != "fak-native/vulkan" || strings.TrimSpace(e.DeviceIdentity) == "" {
+		return fmt.Errorf("missing device or fak-native engine identity")
+	}
+	if !e.ArtifactRehashed {
+		return fmt.Errorf("missing in-admission artifact rehash evidence")
+	}
+	if e.DeviceTimeoutMS <= 0 || e.DeviceTimeoutMS > 60000 {
+		return fmt.Errorf("missing or invalid host-local device timeout")
+	}
+	if e.AdmissionWaitMS <= 0 || e.AdmissionWaitMS > 60000 {
+		return fmt.Errorf("invalid admission wait")
+	}
+	if !e.Acquired || !e.Released || e.AcquireOrdinal <= 0 || e.ReleaseOrdinal <= e.AcquireOrdinal {
+		return fmt.Errorf("incomplete or unordered admission evidence")
+	}
+	if e.ExitCode == nil || *e.ExitCode != 0 {
+		return fmt.Errorf("missing or nonzero exit evidence")
+	}
+	if e.RawOutputBytes <= 0 {
+		return fmt.Errorf("missing raw output evidence")
+	}
+	return nil
+}
+
+func (r *StrixValidationReceipt) crossBindEvidence(e StrixExecutionEvidence) error {
+	if e.SourceArchiveSHA256 != r.Provenance.SourceArchiveSHA256 || e.BinarySHA256 != r.Provenance.BinarySHA256 || e.ShaderBundleSHA256 != r.Provenance.ShaderBundleSHA256 || e.DeviceIdentity != r.Target.GPUName+"|"+r.Target.TargetISA || e.EngineIdentity != r.Provenance.EngineIdentity {
+		return fmt.Errorf("execution evidence contradicts top-level source/binary/shader/device/engine provenance")
+	}
+	return nil
+}
+
+func sameOptionalFloat(got, want *float64) bool {
+	if got == nil || want == nil {
+		return got == nil && want == nil
+	}
+	return *got == *want
+}
+
+func validateReceiptEventContract(selector string, event StrixParityEvent) error {
+	contract, ok := LookupSubkernelParityContract(selector)
+	if !ok {
+		return fmt.Errorf("unknown subkernel selector %q", selector)
+	}
+	if event.OracleKind != StrixOracleKind(contract.OracleKind) || event.DeviceObserved != contract.DeviceObserved {
+		return fmt.Errorf("typed event contradicts registered oracle/device contract")
+	}
+	if contract.DeviceObserved && event.Engine != StrixVulkanEngine {
+		return fmt.Errorf("typed event contradicts registered engine contract")
+	}
+	if !sameOptionalFloat(event.Bounds.MinCosine, contract.Bounds.MinCosine) || !sameOptionalFloat(event.Bounds.MaxAbsDelta, contract.Bounds.MaxAbsDelta) || !sameOptionalFloat(event.Bounds.MaxSourceDelta, contract.Bounds.MaxSourceDelta) {
+		return fmt.Errorf("typed event bounds contradict registered selector bounds")
+	}
+	if contract.Bounds.RequireArgmaxExact != (event.Bounds.ExactMatch != nil && *event.Bounds.ExactMatch) || contract.Bounds.RequireStateIdentity != (event.Bounds.StateIdentity != nil && *event.Bounds.StateIdentity) || contract.Bounds.RequireFinite != (event.Bounds.FiniteOutput != nil && *event.Bounds.FiniteOutput) {
+		return fmt.Errorf("typed event boolean bounds contradict registered selector bounds")
+	}
+	if contract.Bounds.MinCosine != nil && (event.Observed.CosineSimilarity == nil || *event.Observed.CosineSimilarity < *contract.Bounds.MinCosine) {
+		return fmt.Errorf("typed event lacks required in-bound cosine observation")
+	}
+	if contract.Bounds.MaxAbsDelta != nil && (event.Observed.MaxAbsoluteDelta == nil || *event.Observed.MaxAbsoluteDelta > *contract.Bounds.MaxAbsDelta) {
+		return fmt.Errorf("typed event lacks required in-bound max-absolute observation")
+	}
+	if contract.Bounds.RequireSourceMutationCheck && (event.Observed.MaxSourceDelta == nil || contract.Bounds.MaxSourceDelta == nil || *event.Observed.MaxSourceDelta > *contract.Bounds.MaxSourceDelta) {
+		return fmt.Errorf("typed event lacks required source-mutation observation")
+	}
+	if contract.Bounds.RequireArgmaxExact && (event.Observed.ArgmaxExact == nil || !*event.Observed.ArgmaxExact) {
+		return fmt.Errorf("typed event lacks required exact argmax observation")
+	}
+	if contract.Bounds.RequireStateIdentity && (event.Observed.StateIdentity == nil || !*event.Observed.StateIdentity) {
+		return fmt.Errorf("typed event lacks required state identity observation")
+	}
+	if contract.Bounds.RequireFinite && (event.Observed.FiniteOutput == nil || !*event.Observed.FiniteOutput) {
+		return fmt.Errorf("typed event lacks required finite-output observation")
+	}
+	return nil
+}
+func executionManifestDigest(r *StrixValidationReceipt) string {
+	var b strings.Builder
+	for _, s := range r.Subkernels {
+		fmt.Fprintf(&b, "subkernel:%s:%s\n", s.Name, s.Evidence.CommandSHA256)
+	}
+	for _, a := range r.Ablations {
+		fmt.Fprintf(&b, "ablation:%s:%s\n", a.Feature, a.Evidence.CommandSHA256)
+	}
+	h := sha256.Sum256([]byte(b.String()))
+	return "sha256:" + hex.EncodeToString(h[:])
+}
+func withinRatioTolerance(got, want, tol float64) bool {
+	return want > 0 && !math.IsNaN(got) && !math.IsInf(got, 0) && math.Abs(got-want)/want <= tol
+}
+func (r *StrixValidationReceipt) validateExecutionCredit() error {
+	if !fullGitTipRE.MatchString(r.Provenance.GitTip) || !sha256RE.MatchString(r.Provenance.SourceArchiveSHA256) || !sha256RE.MatchString(r.Provenance.BinarySHA256) || !sha256RE.MatchString(r.Provenance.ShaderBundleSHA256) || !sha256RE.MatchString(r.Provenance.BuildCommandSHA256) || !sha256RE.MatchString(r.Provenance.ExecutionManifestSHA256) || r.Provenance.EngineIdentity != "fak-native/vulkan" || strings.TrimSpace(r.Provenance.Command) == "" {
+		return fmt.Errorf("PASS v2 receipt has incomplete immutable source/build/command provenance")
+	}
+	if !r.Provenance.CleanupObserved {
+		return fmt.Errorf("PASS v2 receipt lacks cleanup evidence")
+	}
+	if len(r.Failures) > 0 || len(r.Subkernels)+len(r.Ablations) == 0 {
+		return fmt.Errorf("PASS v2 receipt has failures or no execution evidence")
+	}
+	if r.SelectedCount != r.ExecutedCount || r.SelectedSubkernels != r.ExecutedSubkernels || r.ExecutedSubkernels != len(r.Subkernels) {
+		return fmt.Errorf("PASS v2 receipt has partial subkernel execution")
+	}
+	if r.SelectedAblations != r.ExecutedAblations || r.ExecutedAblations != len(r.Ablations) {
+		return fmt.Errorf("PASS v2 receipt has partial ablation execution")
+	}
+	for _, s := range r.Subkernels {
+		if s.Status != "PASS" || s.DurationUS <= 0 || s.Iterations <= 0 {
+			return fmt.Errorf("subkernel %q has incomplete execution", s.Name)
+		}
+		events := s.AllParityEvents()
+		if len(events) == 0 {
+			return fmt.Errorf("subkernel %q lacks typed parity", s.Name)
+		}
+		physical := false
+		for _, ev := range events {
+			if err := ev.Validate(); err != nil {
+				return fmt.Errorf("subkernel %q parity: %w", s.Name, err)
+			}
+			if err := validateReceiptEventContract(s.Name, ev); err != nil {
+				return fmt.Errorf("subkernel %q parity contract: %w", s.Name, err)
+			}
+			if !ev.Passed {
+				return fmt.Errorf("subkernel %q parity failed", s.Name)
+			}
+			physical = physical || ev.PhysicalParityCredit()
+		}
+		if !physical {
+			return fmt.Errorf("subkernel %q lacks physical parity credit", s.Name)
+		}
+		if err := validExecutionEvidence(s.Evidence); err != nil {
+			return fmt.Errorf("subkernel %q: %w", s.Name, err)
+		}
+		if err := r.crossBindEvidence(s.Evidence); err != nil {
+			return fmt.Errorf("subkernel %q: %w", s.Name, err)
+		}
+	}
+	for _, a := range r.Ablations {
+		if a.Dimension == "" || a.Feature == "" || a.BaselineArm.Name == "" || a.CandidateArm.Name == "" || a.BaselineArm.LatencyUS <= 0 || a.CandidateArm.LatencyUS <= 0 || a.BaselineArm.Samples <= 0 || a.CandidateArm.Samples <= 0 || math.IsNaN(a.CosineParity) || math.IsInf(a.CosineParity, 0) || a.CosineParity < .999 || (a.Verdict != "VERIFIED_LIFT" && a.Verdict != "PARITY_MATCH") {
+			return fmt.Errorf("ablation %q has incomplete or invalid evidence", a.Feature)
+		}
+		speed := float64(a.BaselineArm.LatencyUS) / float64(a.CandidateArm.LatencyUS)
+		lift := speed
+		if a.BaselineArm.ThroughputTokS > 0 && a.CandidateArm.ThroughputTokS > 0 {
+			lift = a.CandidateArm.ThroughputTokS / a.BaselineArm.ThroughputTokS
+		}
+		if !withinRatioTolerance(a.Speedup, speed, .01) || !withinRatioTolerance(a.LiftRatio, lift, .01) {
+			return fmt.Errorf("ablation %q contradicts recomputed speedup/lift", a.Feature)
+		}
+		if a.Verdict == "VERIFIED_LIFT" && speed <= 1 {
+			return fmt.Errorf("ablation %q claims lift without faster candidate", a.Feature)
+		}
+		if a.Verdict == "PARITY_MATCH" && (speed < .99 || speed > 1) {
+			return fmt.Errorf("ablation %q claims parity outside the [0.99, 1.00] latency ratio band", a.Feature)
+		}
+		if err := validExecutionEvidence(a.Evidence); err != nil {
+			return fmt.Errorf("ablation %q: %w", a.Feature, err)
+		}
+		if err := r.crossBindEvidence(a.Evidence); err != nil {
+			return fmt.Errorf("ablation %q: %w", a.Feature, err)
+		}
+	}
+	if r.Provenance.ExecutionManifestSHA256 != executionManifestDigest(r) {
+		return fmt.Errorf("execution command manifest mismatch")
 	}
 	return nil
 }

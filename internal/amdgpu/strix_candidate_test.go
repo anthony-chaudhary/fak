@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestNewStrixCandidateRegistry_CanonicalBaselines(t *testing.T) {
@@ -487,43 +486,42 @@ func TestEvaluateCandidate_UnknownCandidate(t *testing.T) {
 func TestEvaluateReceipt(t *testing.T) {
 	reg := NewStrixCandidateRegistry()
 
-	receipt := &StrixValidationReceipt{
-		Schema:  StrixValidationSchema,
-		Verdict: "PASS",
-		Target: StrixTarget{
-			Reachable: true,
-			GPUName:   "AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
-			TargetISA: "gfx1151",
+	receipt := validStrixReceipt(t)
+	receipt.Ablations = []StrixAblationResult{
+		{
+			Dimension: "target",
+			Feature:   "cpu_vs_vulkan_gpu",
+			BaselineArm: StrixArmResult{
+				Name:      "cpu_q4_reference",
+				LatencyUS: 75561,
+				Samples:   1,
+			},
+			CandidateArm: StrixArmResult{
+				Name:      "vulkan_gpu_q4k",
+				LatencyUS: 450,
+				Samples:   1,
+			},
+			Speedup: 167.9, LiftRatio: 167.9, CosineParity: 0.999999, Verdict: "VERIFIED_LIFT", Evidence: validStrixExecutionEvidence(),
 		},
-		Ablations: []StrixAblationResult{
-			{
-				Dimension: "target",
-				Feature:   "cpu_vs_vulkan_gpu",
-				BaselineArm: StrixArmResult{
-					Name:      "cpu_q4_reference",
-					LatencyUS: 75561,
-				},
-				CandidateArm: StrixArmResult{
-					Name:      "vulkan_gpu_q4k",
-					LatencyUS: 450,
-				},
-				CosineParity: 0.999999,
+		{
+			Dimension: "residency",
+			Feature:   "device_local_vs_host_visible",
+			BaselineArm: StrixArmResult{
+				Name:      "host_visible_streaming",
+				LatencyUS: 1420,
+				Samples:   1,
 			},
-			{
-				Dimension: "residency",
-				Feature:   "device_local_vs_host_visible",
-				BaselineArm: StrixArmResult{
-					Name:      "host_visible_streaming",
-					LatencyUS: 1420,
-				},
-				CandidateArm: StrixArmResult{
-					Name:      "device_local_pool",
-					LatencyUS: 420,
-				},
-				CosineParity: 1.0,
+			CandidateArm: StrixArmResult{
+				Name:      "device_local_pool",
+				LatencyUS: 420,
+				Samples:   1,
 			},
+			Speedup: 3.38, LiftRatio: 3.38, CosineParity: 1.0, Verdict: "VERIFIED_LIFT", Evidence: validStrixExecutionEvidence(),
 		},
 	}
+	receipt.SelectedAblations = 2
+	receipt.ExecutedAblations = 2
+	receipt.Provenance.ExecutionManifestSHA256 = executionManifestDigest(receipt)
 
 	digest, err := receipt.ComputeDigest()
 	if err != nil {
@@ -706,12 +704,8 @@ func TestStrixValidationBenchmarkArtifact(t *testing.T) {
 		}
 
 		reg := NewStrixCandidateRegistry()
-		comparisons, err := reg.EvaluateReceipt(receipt)
-		if err != nil {
-			t.Fatalf("EvaluateReceipt failed for genuine artifact %s: %v", artifactPath, err)
-		}
-		if len(comparisons) == 0 {
-			t.Fatalf("expected non-empty comparisons from artifact %s", artifactPath)
+		if _, err := reg.EvaluateReceipt(receipt); err == nil || !strings.Contains(err.Error(), "historical v1") {
+			t.Fatalf("historical artifact %s incorrectly earned current credit: %v", artifactPath, err)
 		}
 
 		// 2. Direct digest corruption must cause failure
@@ -768,37 +762,7 @@ func TestStrixValidationBenchmarkArtifact(t *testing.T) {
 
 	// 5. Synthetic benchmark artifact verification with deterministic failure matrix
 	t.Run("synthetic_artifact_digest_mismatch", func(t *testing.T) {
-		receipt := NewStrixValidationReceipt(
-			StrixTarget{
-				Mode:         "ssh",
-				Host:         "strix1",
-				Reachable:    true,
-				GPUName:      "AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
-				TargetISA:    "gfx1151",
-				ComputeUnits: 40,
-				DiscoveredAt: time.Now().UTC().Format(time.RFC3339),
-			},
-			"HEAD",
-			"tip123",
-			"fak validate --strix",
-		)
-		receipt.Ablations = []StrixAblationResult{
-			{
-				Dimension: "target",
-				Feature:   "cpu_vs_vulkan_gpu",
-				BaselineArm: StrixArmResult{
-					Name:      "cpu_q4_reference",
-					LatencyUS: 75561,
-				},
-				CandidateArm: StrixArmResult{
-					Name:      "vulkan_gpu_q4k",
-					LatencyUS: 451,
-				},
-				Speedup:      167.5,
-				CosineParity: 0.999999,
-				Verdict:      "VERIFIED_LIFT",
-			},
-		}
+		receipt := validStrixReceipt(t)
 		digest, err := receipt.ComputeDigest()
 		if err != nil {
 			t.Fatalf("ComputeDigest failed: %v", err)
