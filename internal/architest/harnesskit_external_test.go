@@ -1,6 +1,7 @@
 package architest
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,48 @@ import (
 )
 
 const harnesskitModule = "github.com/anthony-chaudhary/fak"
+
+func TestHarnessKitLockV2Export(t *testing.T) {
+	root := repositoryRoot(t)
+	consumer := `package main
+import (
+    "encoding/json"
+    lockv2 "github.com/anthony-chaudhary/fak/pkg/harnesskit/lockv2"
+)
+func main() {
+    lock := &lockv2.Lock{
+        Schema: lockv2.ProductLockSchemaV2,
+        Platforms: []lockv2.PlatformRequirement{{OS: "linux", Arch: "amd64"}},
+        Budget: lockv2.LockBudget{ContextTokens: 512, Workers: 1},
+        Components: []lockv2.LockedComponent{{ID: "runtime", Version: "1.0.0", Digest: "sha256:fixture", Source: "registry/runtime"}},
+        Assets: []lockv2.LockedAsset{{Kind: "secret", ID: "token", Ref: "env:FIXTURE_TOKEN", Source: "env"}},
+    }
+    id, err := lockv2.CanonicalID(lock)
+    if err != nil { panic(err) }
+    lock.ID = id
+    raw, err := json.Marshal(lock)
+    if err != nil { panic(err) }
+    parsed, err := lockv2.Parse(raw)
+    if err != nil { panic(err) }
+    if err := lockv2.ValidateSecretContracts(parsed); err != nil { panic(err) }
+}`
+	dir := writeExternalModule(t, root, consumer)
+	runGo(t, dir, true, "run", ".")
+
+	output := runGo(t, dir, true, "list", "-json", harnesskitModule+"/pkg/harnesskit/lockv2")
+	var info struct {
+		Imports []string
+		Deps    []string
+	}
+	if err := json.Unmarshal([]byte(output), &info); err != nil {
+		t.Fatalf("decode go list output: %v", err)
+	}
+	for _, imported := range append(info.Imports, info.Deps...) {
+		if strings.HasPrefix(imported, harnesskitModule+"/internal/") {
+			t.Fatalf("pkg/harnesskit/lockv2 imports internal package %q", imported)
+		}
+	}
+}
 
 func TestHarnesskitExternalImportBoundary(t *testing.T) {
 	if testing.Short() {

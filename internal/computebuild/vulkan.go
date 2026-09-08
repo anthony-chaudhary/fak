@@ -51,6 +51,8 @@ var VulkanShaders = []string{
 	"flash_attn_dequant",
 	"qwen35_gdn_tiled_transpose",
 	"coopmat_wave32_wmma",
+	"rmsnorm_q4k_matmul2",
+	"swiglu_q4k_matmul_add",
 }
 
 // BuildShaders compiles all registered GLSL shaders to SPIR-V using glslc.

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -148,6 +149,12 @@ func init() {
 		maxStorageBufferRange:   vulkanCapInt64(C.fvk_max_storage_buffer_range()),
 		maxMemoryAllocationSize: vulkanCapInt64(C.fvk_max_memory_allocation_size()),
 	}
+	spvRMSNorm := filepath.Join(spirv, "rmsnorm_q4k_matmul2.spv")
+	spvSwiGLU := filepath.Join(spirv, "swiglu_q4k_matmul_add.spv")
+	_, errR := os.Stat(spvRMSNorm)
+	_, errS := os.Stat(spvSwiGLU)
+	vulkanDev.haveQ4KFusedRMSNormMatMul2 = errR == nil
+	vulkanDev.haveQ4KFusedSwiGLUMatMulAdd = errS == nil
 	Register(vulkanDev)
 }
 
@@ -156,6 +163,63 @@ func (v *vulkanBackend) configureVulkanQ4K(profile, stage bool) {
 	defer vulkanMu.Unlock()
 	v.q4kProfile = profile
 	v.q4kStage = stage
+}
+
+// selectQ4KFusionLocked evaluates candidate selection for fused Q4_K dense-MLP dispatches.
+// Candidate selection requires P=1, both optional pipelines, and explicit opt-in;
+// unset/false/unknown/P>1 selects unchanged Q4_K composition, and an explicit scalar override wins.
+func (v *vulkanBackend) selectQ4KFusionLocked(P int) bool {
+	if v.forceScalarQ4K {
+		return false
+	}
+	if P != 1 {
+		return false
+	}
+	if !v.haveQ4KFusedRMSNormMatMul2 || !v.haveQ4KFusedSwiGLUMatMulAdd {
+		return false
+	}
+	optIn := os.Getenv("FAK_VULKAN_Q4K_FUSION")
+	if optIn == "" {
+		optIn = os.Getenv("FAK_VULKAN_Q4K_ARM")
+	}
+	optIn = strings.TrimSpace(strings.ToLower(optIn))
+	if optIn == "scalar" || optIn == "0" || optIn == "false" || optIn == "off" || optIn == "no" || optIn == "" {
+		return false
+	}
+	if optIn == "candidate" || optIn == "fusion" || optIn == "fused" || optIn == "1" || optIn == "true" || optIn == "on" || optIn == "yes" {
+		return true
+	}
+	// Unset/false/unknown selects unchanged Q4_K composition.
+	return false
+}
+
+func (v *vulkanBackend) ConfigureQ4KFusion(rmsnorm2, swigluAdd, forceScalar bool) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	v.haveQ4KFusedRMSNormMatMul2 = rmsnorm2
+	v.haveQ4KFusedSwiGLUMatMulAdd = swigluAdd
+	v.forceScalarQ4K = forceScalar
+}
+
+func (v *vulkanBackend) Q4KFusionStatus() (haveRMSNorm2, haveSwiGLUAdd, enabled bool) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return v.haveQ4KFusedRMSNormMatMul2, v.haveQ4KFusedSwiGLUMatMulAdd, v.selectQ4KFusionLocked(1)
+}
+
+func (v *vulkanBackend) VulkanDebugQ4KFusionCalls() (fusedRMSNorm, composedRMSNorm, fusedSwiGLU, composedSwiGLU int64) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return v.q4kFusionRMSNormCalls, v.q4kComposedRMSNormCalls, v.q4kFusionSwiGLUCalls, v.q4kComposedSwiGLUCalls
+}
+
+func (v *vulkanBackend) VulkanDebugResetQ4KFusionProfile() {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	v.q4kFusionRMSNormCalls = 0
+	v.q4kComposedRMSNormCalls = 0
+	v.q4kFusionSwiGLUCalls = 0
+	v.q4kComposedSwiGLUCalls = 0
 }
 
 type vulkanGDNConfigurer interface {
@@ -246,31 +310,38 @@ type vulkanBackend struct {
 	// effective STORAGE buffer ceiling: min(maxStorageBufferRange, maxMemoryAllocationSize)
 	// when both are known. It does not solve chunking, but it turns a raw driver allocation
 	// failure into a deterministic refusal that names the over-cap buffer (#362).
-	haveMemoryBudget          bool
-	totalMem                  int64
-	maxBufferBytes            int64
-	maxStorageBufferRange     int64
-	maxMemoryAllocationSize   int64
-	q4kProfile                bool
-	q4kDeviceCalls            int64
-	q4kDevicePackedBytes      int64
-	q4kHostVisibleCalls       int64
-	q4kHostVisiblePackedBytes int64
-	q4kStage                  bool
-	q4kStagePtr               unsafe.Pointer
-	q4kStageBytes             int64
-	q4kStagedCalls            int64
-	q4kStagedBytes            int64
-	q4kStageFallbacks         int64
-	homes                     map[vulkanQ4KHomeKey]vulkanQ4KHome
-	homeHits                  int64
-	homeMisses                int64
-	homeBypasses              int64
-	homeBytes                 int64
-	homeCopied                int64
-	disableVectorGDN          bool
-	vectorGDNCalls            int64
-	scalarGDNCalls            int64
+	haveMemoryBudget            bool
+	totalMem                    int64
+	maxBufferBytes              int64
+	maxStorageBufferRange       int64
+	maxMemoryAllocationSize     int64
+	q4kProfile                  bool
+	q4kDeviceCalls              int64
+	q4kDevicePackedBytes        int64
+	q4kHostVisibleCalls         int64
+	q4kHostVisiblePackedBytes   int64
+	q4kStage                    bool
+	q4kStagePtr                 unsafe.Pointer
+	q4kStageBytes               int64
+	q4kStagedCalls              int64
+	q4kStagedBytes              int64
+	q4kStageFallbacks           int64
+	homes                       map[vulkanQ4KHomeKey]vulkanQ4KHome
+	homeHits                    int64
+	homeMisses                  int64
+	homeBypasses                int64
+	homeBytes                   int64
+	homeCopied                  int64
+	disableVectorGDN            bool
+	vectorGDNCalls              int64
+	scalarGDNCalls              int64
+	haveQ4KFusedRMSNormMatMul2  bool
+	haveQ4KFusedSwiGLUMatMulAdd bool
+	forceScalarQ4K              bool
+	q4kFusionRMSNormCalls       int64
+	q4kFusionSwiGLUCalls        int64
+	q4kComposedRMSNormCalls     int64
+	q4kComposedSwiGLUCalls      int64
 }
 
 var _ TensorCloner = (*vulkanBackend)(nil)
@@ -1437,6 +1508,14 @@ func (v *vulkanBackend) RMSNormMatMul2(w0, w1, x, normWeight Tensor, eps float32
 		if w0.Dtype != Q4_K || w1.Dtype != Q4_K {
 			panic("compute: vulkan RMSNormMatMul2 requires either all F32, all Q8_0, or all Q4_K weights")
 		}
+		if v.selectQ4KFusionLocked(P) {
+			v.q4kFusionRMSNormCalls++
+			C.fvk_rmsnorm_q4k_matmul2_f32(v.vp(w0), v.vp(w1), v.vp(x), v.vp(normWeight), v.vp(y0), v.vp(y1),
+				C.int(out0), C.int(out1), C.int(in), C.int(P), C.float(eps))
+			return y0, y1
+		}
+		// Unchanged Q4_K composition: RMSNorm + 2 Q4_K GEMVs (three dispatches)
+		v.q4kComposedRMSNormCalls++
 		xn, _ := v.devTr([]int{in}, F32)
 		C.fvk_rmsnorm_f32(v.vp(x), v.vp(normWeight), v.vp(xn), C.int(P), C.int(in), C.float(eps))
 		v.q4kMatMulLocked(w0, xn, y0, out0, in, P)
@@ -1570,6 +1649,15 @@ func (v *vulkanBackend) SwiGLUMatMulAddInPlace(dst, w, gate, up Tensor) {
 	case F32:
 		C.fvk_swiglu_matmul_add_f32(v.vp(w), v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))
 	case Q4_K, Q2_K:
+		if w.Dtype == Q4_K && v.selectQ4KFusionLocked(P) {
+			v.q4kFusionSwiGLUCalls++
+			C.fvk_swiglu_q4k_matmul_add_f32(v.vp(w), v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))
+			return
+		}
+		if w.Dtype == Q4_K {
+			// Unchanged Q4_K composition: SwiGLU + Q4_K GEMV + Add (three dispatches)
+			v.q4kComposedSwiGLUCalls++
+		}
 		sw, _ := v.devTr(append([]int(nil), gate.Shape...), F32)
 		C.fvk_swiglu_f32(v.vp(gate), v.vp(up), v.vp(sw), C.int(gate.Numel()))
 		projShape := []int{P, out}

@@ -268,82 +268,135 @@ func TestVulkanQ4KBatchedMatMulMultipleTokensMatchesCPUReference(t *testing.T) {
 
 func TestVulkanQ4KRMSNormMatMul2MatchesCPUReference(t *testing.T) {
 	v := q4FusedDevice(t)
-	const out0, out1, in = 12, 16, 768
+	inDims := []int{256, 512, 768}
+	const out0, out1 = 12, 16
 	rng := rand.New(rand.NewSource(9716))
-	newWeight := func(out int) Tensor {
-		raw := make([]byte, out*(in/q4kSuper)*q4kSuperBlock)
-		for b := 0; b < out*(in/q4kSuper); b++ {
-			randQ4KBlockC(rng, raw[b*q4kSuperBlock:(b+1)*q4kSuperBlock])
+
+	for _, in := range inDims {
+		nblk := in / q4kSuper
+		newWeight := func(out int, seedOffset int) Tensor {
+			raw := make([]byte, out*nblk*q4kSuperBlock)
+			for b := 0; b < out*nblk; b++ {
+				fillCraftedQ4KBlock(raw[b*q4kSuperBlock:(b+1)*q4kSuperBlock], b+seedOffset)
+			}
+			return NewQ4K(Default(), []int{out, in}, raw)
 		}
-		return NewQ4K(Default(), []int{out, in}, raw)
-	}
-	hw0, hw1 := newWeight(out0), newWeight(out1)
-	x := make([]float32, in)
-	norm := make([]float32, in)
-	for i := range x {
-		x[i] = rng.Float32()*2 - 1
-		norm[i] = 0.5 + rng.Float32()
-	}
-	dw0 := v.Upload(hw0, Q4_K)
-	defer v.Free(dw0)
-	dw1 := v.Upload(hw1, Q4_K)
-	defer v.Free(dw1)
-	dx := v.Upload(NewF32(Default(), []int{in}, x), F32)
-	defer v.Free(dx)
-	dnorm := v.Upload(NewF32(Default(), []int{in}, norm), F32)
-	defer v.Free(dnorm)
-	const eps = float32(1e-6)
-	got0, got1 := v.RMSNormMatMul2(dw0, dw1, dx, dnorm, eps)
-	defer v.Free(got0)
-	defer v.Free(got1)
-	hx := NewF32(Default(), []int{in}, x)
-	hnorm := NewF32(Default(), []int{in}, norm)
-	xn := Default().RMSNorm(hx, hnorm, eps)
-	want0 := Default().Read(Default().MatMul(hw0, xn))
-	want1 := Default().Read(Default().MatMul(hw1, xn))
-	for name, pair := range map[string][2][]float32{
-		"projection 0": {v.Read(got0), want0},
-		"projection 1": {v.Read(got1), want1},
-	} {
-		if c := cosineC(pair[0], pair[1]); c < 0.995 {
-			t.Fatalf("%s cosine %.8f < 0.995", name, c)
+		hw0, hw1 := newWeight(out0, 0), newWeight(out1, 100)
+		x := make([]float32, in)
+		norm := make([]float32, in)
+		for i := range x {
+			x[i] = rng.Float32()*2 - 1
+			norm[i] = 0.5 + rng.Float32()
+		}
+		dw0 := v.Upload(hw0, Q4_K)
+		defer v.Free(dw0)
+		dw1 := v.Upload(hw1, Q4_K)
+		defer v.Free(dw1)
+		dx := v.Upload(NewF32(Default(), []int{in}, x), F32)
+		defer v.Free(dx)
+		dnorm := v.Upload(NewF32(Default(), []int{in}, norm), F32)
+		defer v.Free(dnorm)
+		const eps = float32(1e-6)
+		got0, got1 := v.RMSNormMatMul2(dw0, dw1, dx, dnorm, eps)
+		defer v.Free(got0)
+		defer v.Free(got1)
+		hx := NewF32(Default(), []int{in}, x)
+		hnorm := NewF32(Default(), []int{in}, norm)
+		xn := Default().RMSNorm(hx, hnorm, eps)
+		want0 := Default().Read(Default().MatMul(hw0, xn))
+		want1 := Default().Read(Default().MatMul(hw1, xn))
+		for name, pair := range map[string][2][]float32{
+			"projection 0": {v.Read(got0), want0},
+			"projection 1": {v.Read(got1), want1},
+		} {
+			got, want := pair[0], pair[1]
+			var sqErr, sqRef float64
+			for i := range got {
+				if math.IsNaN(float64(got[i])) || math.IsInf(float64(got[i]), 0) {
+					t.Fatalf("%s in=%d non-finite value at %d: %v", name, in, i, got[i])
+				}
+				diff := float64(got[i] - want[i])
+				sqErr += diff * diff
+				sqRef += float64(want[i]) * float64(want[i])
+			}
+			if sqRef <= 0 {
+				t.Fatalf("%s in=%d reference norm is zero", name, in)
+			}
+			relL2 := math.Sqrt(sqErr / sqRef)
+			cos := cosineC(got, want)
+			if argmaxF32(got) != argmaxF32(want) {
+				t.Fatalf("%s in=%d argmax mismatch: got %d, want %d", name, in, argmaxF32(got), argmaxF32(want))
+			}
+			if relL2 > 1e-4 {
+				t.Fatalf("%s in=%d relative L2 %g > 1e-4", name, in, relL2)
+			}
+			if cos < 0.995 {
+				t.Fatalf("%s in=%d cosine %.8f < 0.995", name, in, cos)
+			}
 		}
 	}
 }
+
 func TestVulkanQ4KSwiGLUMatMulAddInPlaceMatchesCPUReference(t *testing.T) {
 	v := q4FusedDevice(t)
-	const out, in = 16, 768
+	inDims := []int{256, 512, 768}
+	const out = 16
 	rng := rand.New(rand.NewSource(9717))
-	raw := make([]byte, out*(in/q4kSuper)*q4kSuperBlock)
-	for b := 0; b < out*(in/q4kSuper); b++ {
-		randQ4KBlockC(rng, raw[b*q4kSuperBlock:(b+1)*q4kSuperBlock])
-	}
-	gate, up := make([]float32, in), make([]float32, in)
-	dst := make([]float32, out)
-	for i := range gate {
-		gate[i], up[i] = rng.Float32()*2-1, rng.Float32()*2-1
-	}
-	for i := range dst {
-		dst[i] = rng.Float32()*2 - 1
-	}
-	hw := NewQ4K(Default(), []int{out, in}, raw)
-	dw := v.Upload(hw, Q4_K)
-	defer v.Free(dw)
-	dgate := v.Upload(NewF32(Default(), []int{in}, gate), F32)
-	defer v.Free(dgate)
-	dup := v.Upload(NewF32(Default(), []int{in}, up), F32)
-	defer v.Free(dup)
-	ddst := v.Upload(NewF32(Default(), []int{out}, dst), F32)
-	defer v.Free(ddst)
-	v.SwiGLUMatMulAddInPlace(ddst, dw, dgate, dup)
-	sw := Default().SwiGLU(NewF32(Default(), []int{in}, gate), NewF32(Default(), []int{in}, up))
-	proj := Default().Read(Default().MatMul(hw, sw))
-	want := append([]float32(nil), dst...)
-	for i := range want {
-		want[i] += proj[i]
-	}
-	if c := cosineC(v.Read(ddst), want); c < 0.995 {
-		t.Fatalf("cosine %.8f < 0.995", c)
+
+	for _, in := range inDims {
+		nblk := in / q4kSuper
+		raw := make([]byte, out*nblk*q4kSuperBlock)
+		for b := 0; b < out*nblk; b++ {
+			fillCraftedQ4KBlock(raw[b*q4kSuperBlock:(b+1)*q4kSuperBlock], b+200)
+		}
+		gate, up := make([]float32, in), make([]float32, in)
+		dst := make([]float32, out)
+		for i := range gate {
+			gate[i], up[i] = rng.Float32()*2-1, rng.Float32()*2-1
+		}
+		for i := range dst {
+			dst[i] = rng.Float32()*2 - 1
+		}
+		hw := NewQ4K(Default(), []int{out, in}, raw)
+		dw := v.Upload(hw, Q4_K)
+		defer v.Free(dw)
+		dgate := v.Upload(NewF32(Default(), []int{in}, gate), F32)
+		defer v.Free(dgate)
+		dup := v.Upload(NewF32(Default(), []int{in}, up), F32)
+		defer v.Free(dup)
+		ddst := v.Upload(NewF32(Default(), []int{out}, dst), F32)
+		defer v.Free(ddst)
+		v.SwiGLUMatMulAddInPlace(ddst, dw, dgate, dup)
+		sw := Default().SwiGLU(NewF32(Default(), []int{in}, gate), NewF32(Default(), []int{in}, up))
+		proj := Default().Read(Default().MatMul(hw, sw))
+		want := append([]float32(nil), dst...)
+		for i := range want {
+			want[i] += proj[i]
+		}
+		got := v.Read(ddst)
+		var sqErr, sqRef float64
+		for i := range got {
+			if math.IsNaN(float64(got[i])) || math.IsInf(float64(got[i]), 0) {
+				t.Fatalf("in=%d non-finite value at %d: %v", in, i, got[i])
+			}
+			diff := float64(got[i] - want[i])
+			sqErr += diff * diff
+			sqRef += float64(want[i]) * float64(want[i])
+		}
+		if sqRef <= 0 {
+			t.Fatalf("in=%d reference norm is zero", in)
+		}
+		relL2 := math.Sqrt(sqErr / sqRef)
+		cos := cosineC(got, want)
+		if argmaxF32(got) != argmaxF32(want) {
+			t.Fatalf("in=%d argmax mismatch: got %d, want %d", in, argmaxF32(got), argmaxF32(want))
+		}
+		if relL2 > 1e-4 {
+			t.Fatalf("in=%d relative L2 %g > 1e-4", in, relL2)
+		}
+		if cos < 0.995 {
+			t.Fatalf("in=%d cosine %.8f < 0.995", in, cos)
+		}
 	}
 }
 
