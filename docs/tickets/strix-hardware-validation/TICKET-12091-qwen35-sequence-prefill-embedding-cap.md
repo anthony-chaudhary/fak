@@ -65,4 +65,11 @@ this change.
 - [x] [SW-VERIFIED] Deterministic pre-allocation decline for an oversized embedding.
 - [x] [SW-VERIFIED] Explicit degraded-route receipt and strict qualification refusal.
 - [x] [SW-VERIFIED] Focused Standard and Q2_K fallback tests pass.
-- [ ] [HW-WITNESSED] Real Strix Vulkan backend reports its cap and declines safely.
+- [x] [HW-WITNESSED] Real Strix Vulkan backend reports its cap and declines safely.
+
+Physical receipt:
+[`strix-qwen35-prefill-cap-20260908.json`](../../benchmarks/receipts/strix-qwen35-prefill-cap-20260908.json).
+The source-bound Vulkan run reported the Radeon 8060S resource cap as
+4,294,967,292 bytes, selected `qwen35/scalar-token-replay-v1`, and rejected the
+route as non-qualifying. The active inference service remained healthy and was
+not restarted or reloaded.
