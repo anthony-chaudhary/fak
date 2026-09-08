@@ -35,12 +35,12 @@ func TestNativeReceiptMetricsRenderOnGatewayMetricsSurface(t *testing.T) {
 	out := srv.renderMetrics()
 	for _, want := range []string{
 		`# TYPE fak_native_receipt_requests_total counter`,
-		`fak_native_receipt_requests_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda"} 1`,
-		`fak_native_receipt_phase_seconds_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",phase="queue"} 0.05`,
-		`fak_native_receipt_phase_seconds_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",phase="prefill"} 0.2`,
-		`fak_native_receipt_phase_seconds_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",phase="decode"} 0.4`,
-		`fak_native_receipt_bytes_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",kind="kv"} 384`,
-		`fak_native_receipt_bytes_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",kind="transfer"} 4480`,
+		`fak_native_receipt_requests_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",evidence_class="device"} 1`,
+		`fak_native_receipt_phase_seconds_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",evidence_class="device",phase="queue"} 0.05`,
+		`fak_native_receipt_phase_seconds_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",evidence_class="device",phase="prefill"} 0.2`,
+		`fak_native_receipt_phase_seconds_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",evidence_class="device",phase="decode"} 0.4`,
+		`fak_native_receipt_bytes_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",evidence_class="device",kind="kv"} 384`,
+		`fak_native_receipt_bytes_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",evidence_class="device",kind="transfer"} 4480`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("live /metrics surface missing %q\n--- got ---\n%s", want, out)
@@ -76,9 +76,9 @@ func TestNativePhaseAccountingRendersOnGatewayMetricsSurface(t *testing.T) {
 	}
 	out := srv.renderMetrics()
 	for _, want := range []string{
-		`fak_native_phase_seconds_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",phase="queue_admission",kind="wait"} 0.002`,
-		`fak_native_phase_seconds_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",phase="host_device_upload",kind="wait"} 0.002`,
-		`fak_native_phase_seconds_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",phase="kernel",kind="active"} 0.002`,
+		`fak_native_phase_seconds_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",evidence_class="device",phase="queue_admission",kind="wait"} 0.002`,
+		`fak_native_phase_seconds_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",evidence_class="device",phase="host_device_upload",kind="wait"} 0.002`,
+		`fak_native_phase_seconds_total{engine="inkernel",backend="cuda",forward_path="qwen_cuda",evidence_class="device",phase="kernel",kind="active"} 0.002`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("live /metrics surface missing %q\n--- got ---\n%s", want, out)
