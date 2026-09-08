@@ -6,6 +6,39 @@ import "fmt"
 // entire Qwen3.5/3.8 hybrid prompt panel, KV cache, and recurrent state for one call.
 const Qwen35SequencePrefillPath = "qwen35-hybrid-sequence-prefill-v1"
 
+// Qwen35SequenceEmbeddingRowsPath identifies the optional extension which accepts
+// an already-gathered [tokens, hidden] embedding panel. Backends must advertise
+// this exact identity before model may replace the full [vocab, hidden] table.
+const Qwen35SequenceEmbeddingRowsPath = "qwen35-hybrid-sequence-embedding-rows-v1"
+
+// Qwen35SequenceEmbeddingRowsBackend is the structural marker for bounded prompt
+// embedding panels. The operation itself remains Qwen35SequencePrefill; the marker
+// prevents an older backend from interpreting a row panel as a vocabulary table.
+type Qwen35SequenceEmbeddingRowsBackend interface {
+	Qwen35SequenceEmbeddingRowsPath() string
+}
+
+// qwen35SequenceEmbeddingContract resolves the mutually exclusive embedding
+// representations used by sequence prefill. Table mode derives vocabulary from
+// [vocab, hidden] and forbids an override; row mode requires [tokens, hidden]
+// plus the original vocabulary used to validate token IDs and size logits.
+func qwen35SequenceEmbeddingContract(req Qwen35SequencePrefillRequest) (vocab int, shape []int, err error) {
+	if req.TokenEmbeddingRows {
+		if req.TokenEmbeddingVocab <= 0 {
+			return 0, nil, &Qwen35SequenceError{Stage: "tensor-preflight", Layer: -1, Reason: "token embedding row panel requires a positive vocabulary size"}
+		}
+		return req.TokenEmbeddingVocab, []int{len(req.TokenIDs), req.Hidden}, nil
+	}
+	if req.TokenEmbeddingVocab != 0 {
+		return 0, nil, &Qwen35SequenceError{Stage: "tensor-preflight", Layer: -1, Reason: "token embedding vocabulary override requires row-panel mode"}
+	}
+	if len(req.TokenEmbedding.Shape) != 2 || req.TokenEmbedding.Shape[0] <= 0 {
+		return 0, nil, &Qwen35SequenceError{Stage: "tensor-preflight", Layer: -1, Reason: fmt.Sprintf("token embedding shape %v, want [vocab,%d]", req.TokenEmbedding.Shape, req.Hidden)}
+	}
+	vocab = req.TokenEmbedding.Shape[0]
+	return vocab, []int{vocab, req.Hidden}, nil
+}
+
 // Qwen35SequenceParityCosineMin is the bounded device/reference acceptance
 // floor for the complete deterministic sequence witness.
 const Qwen35SequenceParityCosineMin = 0.999
@@ -101,12 +134,14 @@ type Qwen35SequencePrefillRequest struct {
 	TokenIDs []int
 	StartPos int
 
-	TokenEmbedding Tensor
-	OutputNorm     Tensor
-	Output         Tensor
-	Layers         []Qwen35SequenceLayer
-	States         []Qwen35SequenceState
-	KV             KVStore
+	TokenEmbedding      Tensor
+	TokenEmbeddingRows  bool
+	TokenEmbeddingVocab int
+	OutputNorm          Tensor
+	Output              Tensor
+	Layers              []Qwen35SequenceLayer
+	States              []Qwen35SequenceState
+	KV                  KVStore
 
 	Hidden, Intermediate int
 	NumHeads, NumKVHeads int

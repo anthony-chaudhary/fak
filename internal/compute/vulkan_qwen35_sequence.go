@@ -16,6 +16,10 @@ import (
 
 func (*vulkanBackend) Qwen35SequencePrefillPath() string { return Qwen35SequencePrefillPath }
 
+func (*vulkanBackend) Qwen35SequenceEmbeddingRowsPath() string {
+	return Qwen35SequenceEmbeddingRowsPath
+}
+
 func qwen35VulkanSequenceError(stage string, layer int, reason string) error {
 	return &Qwen35SequenceError{Stage: stage, Layer: layer, Reason: reason}
 }
@@ -113,10 +117,10 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 	add := func(layer int, name string, t Tensor, matrix bool, shape ...int) {
 		operands = append(operands, operand{name, t, matrix, shape, layer})
 	}
-	if len(req.TokenEmbedding.Shape) != 2 || req.TokenEmbedding.Shape[0] <= 0 {
-		return fail("tensor-preflight", "embedding must have [vocabulary, hidden] shape")
+	vocab, embeddingShape, err := qwen35SequenceEmbeddingContract(req)
+	if err != nil {
+		return nil, err
 	}
-	vocab := req.TokenEmbedding.Shape[0]
 	if int64(vocab) > math.MaxInt32 || int64(vocab)*4 > int64(^uint(0)>>1) || singleResourceCapExceeded(vocab*4, v.maxBufferBytes) {
 		return fail("geometry", "output vector exceeds shader/device allocation limits")
 	}
@@ -125,7 +129,7 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 			return fail("embedding-gather", "token ID is outside embedding vocabulary")
 		}
 	}
-	add(-1, "embedding", req.TokenEmbedding, false, vocab, req.Hidden)
+	add(-1, "embedding", req.TokenEmbedding, false, embeddingShape...)
 	add(-1, "output_norm", req.OutputNorm, false, req.Hidden)
 	add(-1, "output", req.Output, true, vocab, req.Hidden)
 	kv, ok := req.KV.(*vulkanKV)
@@ -432,8 +436,12 @@ func (v *vulkanBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) 
 	h2dStart, d2hStart := uint64(C.fvk_h2d_bytes()), uint64(C.fvk_d2h_bytes())
 	stage = "embedding-gather"
 	x, _ := v.devTr([]int{tokens, req.Hidden}, F32)
-	for row, id := range req.TokenIDs {
-		C.fvk_d2d_range(v.vp(x), C.size_t(row*req.Hidden*4), v.vp(req.TokenEmbedding), C.size_t(id*req.Hidden*4), C.size_t(req.Hidden*4))
+	if req.TokenEmbeddingRows {
+		C.fvk_d2d(v.vp(x), v.vp(req.TokenEmbedding), C.size_t(tokens*req.Hidden*4))
+	} else {
+		for row, id := range req.TokenIDs {
+			C.fvk_d2d_range(v.vp(x), C.size_t(row*req.Hidden*4), v.vp(req.TokenEmbedding), C.size_t(id*req.Hidden*4), C.size_t(req.Hidden*4))
+		}
 	}
 	attention := 0
 	for i, layer := range req.Layers {

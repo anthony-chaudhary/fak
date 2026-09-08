@@ -58,8 +58,11 @@ const (
 	// selected after native whole-sequence prefill declines before submission.
 	Qwen35SequencePrefillFallbackPath = "qwen35/scalar-token-replay-v1"
 	// Qwen35SequencePrefillDeclineEmbeddingCap is stable receipt vocabulary for
-	// an f32 embedding table that cannot fit in one backend weight buffer.
+	// an embedding table or bounded row panel that cannot fit in one backend buffer.
 	Qwen35SequencePrefillDeclineEmbeddingCap = "embedding-table-exceeds-device-weight-buffer-cap"
+	// Qwen35SequencePrefillDeclineEmbeddingRowsUnsupported records that a backend
+	// supports whole-sequence prefill but not compact pre-gathered embedding rows.
+	Qwen35SequencePrefillDeclineEmbeddingRowsUnsupported = "packed-embedding-row-panel-unsupported"
 )
 
 // Qwen35SequencePrefillRouteStatus is the session-local effective route marker
@@ -72,6 +75,8 @@ type Qwen35SequencePrefillRouteStatus struct {
 	DeclineReason               string `json:"decline_reason,omitempty"`
 	FallbackActive              bool   `json:"fallback_active"`
 	NativePerformanceQualifying bool   `json:"native_performance_qualifying"`
+	PackedEmbeddingRows         bool   `json:"packed_embedding_rows,omitempty"`
+	EmbeddingPanelBytes         int64  `json:"embedding_panel_bytes,omitempty"`
 }
 
 // Qwen35SequencePrefillRouteStatus returns an immutable snapshot of the latest
@@ -477,13 +482,7 @@ func (s *Session) derivedWeightHAL(key string, shape []int, data []float32) comp
 
 func (s *Session) tokenEmbeddingHAL() compute.Tensor {
 	if s.M != nil && s.M.Q2KEmbedding != nil {
-		return s.cachedImmutableWeight("model.embed_tokens.weight#q2k", "f32:model.embed_tokens.weight#q2k", func() compute.Tensor {
-			data, err := s.M.Q2KEmbedding.DequantizeTable()
-			if err != nil {
-				panic(fmt.Sprintf("model: dequantize Q2_K embedding: %v", err))
-			}
-			return s.uploadHostF32([]int{s.M.Q2KEmbedding.Vocab(), s.M.Q2KEmbedding.Hidden()}, data, compute.MemoryWeights, "hal-weight model.embed_tokens.weight#q2k")
-		})
+		panic(ErrPackedEmbeddingWholeTableRefused)
 	}
 	return s.weightHAL("model.embed_tokens.weight")
 }
@@ -708,12 +707,13 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 	be.AddInPlace(residual, out)
 }
 
-func (s *Session) qwen35SequencePrefillRequest(ids []int, needLogits bool) compute.Qwen35SequencePrefillRequest {
+func (s *Session) qwen35SequencePrefillRequestWithEmbedding(ids []int, needLogits bool, embedding compute.Tensor, embeddingRows bool, embeddingVocab int) compute.Qwen35SequencePrefillRequest {
 	cfg := s.M.Cfg
 	nK, nV, kHd, vHd, _, _, _ := cfg.linearAttnDims()
 	req := compute.Qwen35SequencePrefillRequest{
 		Path: compute.Qwen35SequencePrefillPath, TokenIDs: append([]int(nil), ids...), StartPos: s.halKV.Len(),
-		TokenEmbedding: s.tokenEmbeddingHAL(), OutputNorm: s.normWeightHAL("model.norm.weight"), Output: s.lmHeadMatHAL(),
+		TokenEmbedding: embedding, TokenEmbeddingRows: embeddingRows, TokenEmbeddingVocab: embeddingVocab,
+		OutputNorm: s.normWeightHAL("model.norm.weight"), Output: s.lmHeadMatHAL(),
 		Layers: make([]compute.Qwen35SequenceLayer, cfg.NumLayers), States: make([]compute.Qwen35SequenceState, cfg.NumLayers), KV: s.halKV,
 		Hidden: cfg.HiddenSize, Intermediate: cfg.IntermediateSize, NumHeads: cfg.NumHeads, NumKVHeads: cfg.NumKVHeads,
 		HeadDim: cfg.HeadDim, RotaryDim: cfg.rotaryDim(), NumKeyHeads: nK, NumValueHeads: nV, KeyHeadDim: kHd, ValueHeadDim: vHd,
@@ -753,6 +753,10 @@ func (s *Session) qwen35SequencePrefillRequest(ids []int, needLogits bool) compu
 	return req
 }
 
+func (s *Session) qwen35SequencePrefillRequest(ids []int, needLogits bool) compute.Qwen35SequencePrefillRequest {
+	return s.qwen35SequencePrefillRequestWithEmbedding(ids, needLogits, s.tokenEmbeddingHAL(), false, 0)
+}
+
 func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.Qwen35SequencePrefillResult, bool, error) {
 	if s == nil || s.M == nil || s.Backend == nil || !s.M.Cfg.IsQwen35Hybrid() || len(ids) < 2 {
 		return compute.Qwen35SequencePrefillResult{}, false, nil
@@ -763,26 +767,60 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 	}
 	embedShape := []int{s.M.Cfg.VocabSize, s.M.Cfg.HiddenSize}
 	if s.M.Q2KEmbedding != nil {
-		embedShape = []int{s.M.Q2KEmbedding.Vocab(), s.M.Q2KEmbedding.Hidden()}
+		embedShape = []int{len(ids), s.M.Q2KEmbedding.Hidden()}
 	} else if meta, ok := s.M.manifest["model.embed_tokens.weight"]; ok && len(meta.Shape) == 2 {
 		embedShape = meta.Shape
 	}
+	embedBytes, validEmbedShape := f32TensorBytes(embedShape)
 	if !deviceEmbeddingTableFits(s.Backend, embedShape) {
+		packedRows := s.M.Q2KEmbedding != nil
 		s.qwen35HAL.prefillRoute = Qwen35SequencePrefillRouteStatus{
-			RequestedPath:  compute.Qwen35SequencePrefillPath,
-			EffectivePath:  Qwen35SequencePrefillFallbackPath,
-			DeclineReason:  Qwen35SequencePrefillDeclineEmbeddingCap,
-			FallbackActive: true,
+			RequestedPath:       compute.Qwen35SequencePrefillPath,
+			EffectivePath:       Qwen35SequencePrefillFallbackPath,
+			DeclineReason:       Qwen35SequencePrefillDeclineEmbeddingCap,
+			FallbackActive:      true,
+			PackedEmbeddingRows: packedRows,
+		}
+		if validEmbedShape && packedRows {
+			s.qwen35HAL.prefillRoute.EmbeddingPanelBytes = embedBytes
 		}
 		return compute.Qwen35SequencePrefillResult{}, false, nil
 	}
 	if _, isSplit := s.validateDenseGPULayers(); isSplit {
 		return compute.Qwen35SequencePrefillResult{}, false, nil
 	}
+	request := compute.Qwen35SequencePrefillRequest{}
+	panelBytes := int64(0)
+	if packed := s.M.Q2KEmbedding; packed != nil {
+		panelBytes = embedBytes
+		rows, ok := s.Backend.(compute.Qwen35SequenceEmbeddingRowsBackend)
+		if !ok {
+			s.qwen35HAL.prefillRoute = Qwen35SequencePrefillRouteStatus{
+				RequestedPath: compute.Qwen35SequencePrefillPath, EffectivePath: Qwen35SequencePrefillFallbackPath,
+				DeclineReason: Qwen35SequencePrefillDeclineEmbeddingRowsUnsupported, FallbackActive: true,
+				PackedEmbeddingRows: true, EmbeddingPanelBytes: panelBytes,
+			}
+			return compute.Qwen35SequencePrefillResult{}, false, nil
+		}
+		if rows.Qwen35SequenceEmbeddingRowsPath() != compute.Qwen35SequenceEmbeddingRowsPath {
+			return compute.Qwen35SequencePrefillResult{}, true, &UnsupportedSequencePrefillError{
+				Backend: s.Backend.Name(), Path: rows.Qwen35SequenceEmbeddingRowsPath(), Reason: "wrong embedding-row capability identity",
+			}
+		}
+		data, gatherErr := packed.GatherRows(ids, s.M.Cfg.embedScale())
+		if gatherErr != nil {
+			return compute.Qwen35SequencePrefillResult{}, true, &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardQwen35GDN, Path: compute.Qwen35SequencePrefillPath, Layer: -1, Stage: "packed embedding row gather", Cause: gatherErr}
+		}
+		panel := s.uploadHostF32([]int{len(ids), packed.Hidden()}, data, compute.MemoryActivation, "qwen35-sequence-q2k-embedding-rows")
+		defer s.Backend.Free(panel)
+		request = s.qwen35SequencePrefillRequestWithEmbedding(ids, needLogits, panel, true, packed.Vocab())
+	} else {
+		request = s.qwen35SequencePrefillRequest(ids, needLogits)
+	}
 	startPos := s.halKV.Len()
 	finishLineage := s.beginHALTokenLineageWrite(ids)
 	defer finishLineage()
-	result, err := seq.Qwen35SequencePrefill(s.qwen35SequencePrefillRequest(ids, needLogits))
+	result, err := seq.Qwen35SequencePrefill(request)
 	if err != nil {
 		return result, true, &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardQwen35GDN, Path: compute.Qwen35SequencePrefillPath, Layer: -1, Stage: "sequence prefill", Cause: err}
 	}
@@ -793,6 +831,8 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 		RequestedPath:               compute.Qwen35SequencePrefillPath,
 		EffectivePath:               compute.Qwen35SequencePrefillPath,
 		NativePerformanceQualifying: true,
+		PackedEmbeddingRows:         s.M.Q2KEmbedding != nil,
+		EmbeddingPanelBytes:         panelBytes,
 	}
 	return result, true, nil
 }

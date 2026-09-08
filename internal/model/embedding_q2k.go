@@ -90,6 +90,25 @@ func (q *Q2KEmbedding) GatherRow(tokenID int, dst []float32, scale float32) erro
 	return nil
 }
 
+// GatherRows dequantizes exactly the requested token rows into a compact row-major
+// panel. Input order and repetitions are preserved; no unrequested vocabulary row
+// is materialized. The returned slice is owned by the caller.
+func (q *Q2KEmbedding) GatherRows(tokenIDs []int, scale float32) ([]float32, error) {
+	if q == nil {
+		return nil, fmt.Errorf("model: Q2KEmbedding is nil")
+	}
+	if len(tokenIDs) > 0 && q.hidden > int(^uint(0)>>1)/len(tokenIDs) {
+		return nil, fmt.Errorf("model: Q2K embedding row panel size overflows int")
+	}
+	dst := make([]float32, len(tokenIDs)*q.hidden)
+	for row, tokenID := range tokenIDs {
+		if err := q.GatherRow(tokenID, dst[row*q.hidden:(row+1)*q.hidden], scale); err != nil {
+			return nil, err
+		}
+	}
+	return dst, nil
+}
+
 // DequantizeTable dequantizes all rows into a float32 slice of length vocab * hidden.
 func (q *Q2KEmbedding) DequantizeTable() ([]float32, error) {
 	if q == nil {
@@ -103,4 +122,3 @@ func (q *Q2KEmbedding) DequantizeTable() ([]float32, error) {
 	}
 	return dst, nil
 }
-
