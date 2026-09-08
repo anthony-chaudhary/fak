@@ -35,9 +35,54 @@ type qwen35HALState struct {
 	sequenceLayers   []Qwen35GDNAuxState
 	sequenceAccepted bool
 	sequenceFailure  error
+	prefillRoute     Qwen35SequencePrefillRouteStatus
 	decodeAccepted   bool
 	decodePath       string
 	decodeHandoff    Qwen35DecodeHandoffReceipt
+}
+
+const (
+	// Qwen35SequencePrefillFallbackPath names the ordinary token-at-a-time route
+	// selected after native whole-sequence prefill declines before submission.
+	Qwen35SequencePrefillFallbackPath = "qwen35/scalar-token-replay-v1"
+	// Qwen35SequencePrefillDeclineEmbeddingCap is stable receipt vocabulary for
+	// an f32 embedding table that cannot fit in one backend weight buffer.
+	Qwen35SequencePrefillDeclineEmbeddingCap = "embedding-table-exceeds-device-weight-buffer-cap"
+)
+
+// Qwen35SequencePrefillRouteStatus is the session-local effective route marker
+// for the latest eligible Qwen hybrid prefill. A decline is explicit evidence
+// that ordinary serving may continue through scalar token replay, but that work
+// must not be credited as native whole-sequence performance.
+type Qwen35SequencePrefillRouteStatus struct {
+	RequestedPath               string `json:"requested_path"`
+	EffectivePath               string `json:"effective_path"`
+	DeclineReason               string `json:"decline_reason,omitempty"`
+	FallbackActive              bool   `json:"fallback_active"`
+	NativePerformanceQualifying bool   `json:"native_performance_qualifying"`
+}
+
+// Qwen35SequencePrefillRouteStatus returns an immutable snapshot of the latest
+// eligible route decision. false means no Qwen sequence-prefill decision exists.
+func (s *Session) Qwen35SequencePrefillRouteStatus() (Qwen35SequencePrefillRouteStatus, bool) {
+	if s == nil || s.qwen35HAL == nil || s.qwen35HAL.prefillRoute.RequestedPath == "" {
+		return Qwen35SequencePrefillRouteStatus{}, false
+	}
+	return s.qwen35HAL.prefillRoute, true
+}
+
+// RequireQwen35SequencePrefillNativePerformance rejects a qualification attempt
+// unless the latest eligible prefill actually completed on the canonical native
+// sequence route. It is deliberately stricter than ordinary serving.
+func (s *Session) RequireQwen35SequencePrefillNativePerformance() error {
+	status, ok := s.Qwen35SequencePrefillRouteStatus()
+	if !ok {
+		return fmt.Errorf("model: Qwen sequence-prefill native performance is non-qualifying: no route decision")
+	}
+	if !status.NativePerformanceQualifying || status.FallbackActive || status.EffectivePath != compute.Qwen35SequencePrefillPath {
+		return fmt.Errorf("model: Qwen sequence-prefill native performance is non-qualifying: requested=%q effective=%q fallback=%t reason=%q", status.RequestedPath, status.EffectivePath, status.FallbackActive, status.DeclineReason)
+	}
+	return nil
 }
 
 type qwen35HALLayerState struct {
@@ -674,6 +719,10 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 	if s == nil || s.M == nil || s.Backend == nil || !s.M.Cfg.IsQwen35Hybrid() || len(ids) < 2 {
 		return compute.Qwen35SequencePrefillResult{}, false, nil
 	}
+	seq, advertised, err := qwen35SequencePrefillBackend(s.Backend)
+	if err != nil || !advertised {
+		return compute.Qwen35SequencePrefillResult{}, advertised, err
+	}
 	embedShape := []int{s.M.Cfg.VocabSize, s.M.Cfg.HiddenSize}
 	if s.M.Q2KEmbedding != nil {
 		embedShape = []int{s.M.Q2KEmbedding.Vocab(), s.M.Q2KEmbedding.Hidden()}
@@ -681,14 +730,16 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 		embedShape = meta.Shape
 	}
 	if !deviceEmbeddingTableFits(s.Backend, embedShape) {
+		s.qwen35HAL.prefillRoute = Qwen35SequencePrefillRouteStatus{
+			RequestedPath:  compute.Qwen35SequencePrefillPath,
+			EffectivePath:  Qwen35SequencePrefillFallbackPath,
+			DeclineReason:  Qwen35SequencePrefillDeclineEmbeddingCap,
+			FallbackActive: true,
+		}
 		return compute.Qwen35SequencePrefillResult{}, false, nil
 	}
 	if _, isSplit := s.validateDenseGPULayers(); isSplit {
 		return compute.Qwen35SequencePrefillResult{}, false, nil
-	}
-	seq, advertised, err := qwen35SequencePrefillBackend(s.Backend)
-	if err != nil || !advertised {
-		return compute.Qwen35SequencePrefillResult{}, advertised, err
 	}
 	startPos := s.halKV.Len()
 	finishLineage := s.beginHALTokenLineageWrite(ids)
@@ -699,6 +750,11 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 	}
 	if result.Tokens != len(ids) || s.halKV.Len() != startPos+len(ids) || result.LastHidden.Buf() == nil || !result.LastHidden.Ready() || (needLogits && (result.Logits.Buf() == nil || !result.Logits.Ready())) {
 		return result, true, &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardQwen35GDN, Path: compute.Qwen35SequencePrefillPath, Layer: -1, Stage: "sequence result", Cause: fmt.Errorf("malformed result: tokens=%d want=%d kv_len=%d want=%d", result.Tokens, len(ids), s.halKV.Len(), startPos+len(ids))}
+	}
+	s.qwen35HAL.prefillRoute = Qwen35SequencePrefillRouteStatus{
+		RequestedPath:               compute.Qwen35SequencePrefillPath,
+		EffectivePath:               compute.Qwen35SequencePrefillPath,
+		NativePerformanceQualifying: true,
 	}
 	return result, true, nil
 }

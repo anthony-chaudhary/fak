@@ -1,0 +1,66 @@
+{
+  "schema": "fak.strix.qwen35-sequence-prefill-cap.v1",
+  "issue": 12091,
+  "status": "PASS",
+  "scope": "Synthetic Qwen3.5 session against the physical Vulkan backend; controlled route-decline witness only, not full-model or throughput qualification.",
+  "observed_utc": "2026-09-08T05:52:09.2758694Z",
+  "source": {
+    "repository": "anthony-chaudhary/fak",
+    "commit": "7f37f1fab539f48a018ecf5723e6162af630c1ef",
+    "blobs": {
+      "internal/model/qwen35_hal.go": "b31d73ce89868ab23d1b08874c94dfdbce7b65c7",
+      "internal/model/qwen35_sequence_prefill_test.go": "634136ec1698481c8fbfd346b2dd4a428d045d8e"
+    }
+  },
+  "artifacts": {
+    "model_test_sha256": "27230ac5a7cff7835f7d60a2b9f5d5266a80b18cb378acc757d3d9218f1d839c"
+  },
+  "hardware": {
+    "backend": "vulkan",
+    "tier": "integrated:AMD Radeon 8060S Graphics (RADV STRIX_HALO)",
+    "max_weight_buffer_bytes": 4294967292
+  },
+  "safety": {
+    "lease": "exclusive nonblocking read-only flock on the appliance GPU lease",
+    "cooldown_seconds": 4,
+    "admission_limits": {
+      "inflight_including_scrape_max": 1,
+      "chat_requests": 0,
+      "gpu_busy_percent_max": 5,
+      "MemAvailable_kib_min": 4194304
+    },
+    "before": {
+      "inflight_including_scrape": 1,
+      "chat_requests": 0,
+      "gpu_busy_percent": 0,
+      "MemAvailable_kib": 27818532
+    },
+    "after": {
+      "service_http_health": 200,
+      "service_engine": "inkernel",
+      "inflight_including_scrape": 1,
+      "chat_requests": 0,
+      "gpu_busy_percent": 0
+    },
+    "service_restart": false,
+    "model_reload": false
+  },
+  "command": {
+    "environment": {
+      "FAK_VULKAN_REQUIRE_DEVICE": "1",
+      "FAK_VULKAN_EXPECT_DEVICE": "8060S",
+      "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/radeon_icd.x86_64.json"
+    },
+    "test_regex": "^TestQwen35SequencePrefillDeclinesWhenEmbeddingExceedsDeviceCap/VulkanDeviceCap$",
+    "watchdog": "timeout --kill-after=1s 25s; Go test timeout 20s"
+  },
+  "result": {
+    "exit_code": 0,
+    "executed_test": "TestQwen35SequencePrefillDeclinesWhenEmbeddingExceedsDeviceCap/VulkanDeviceCap",
+    "effective_path": "qwen35/scalar-token-replay-v1",
+    "fallback_active": true,
+    "decline_reason": "embedding-table-exceeds-device-weight-buffer-cap",
+    "native_performance_qualifying": false,
+    "skipped": false
+  }
+}

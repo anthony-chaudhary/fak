@@ -3,6 +3,8 @@ package model
 import (
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -134,6 +136,13 @@ func TestQwen35SequencePrefillDispatchCarriesResidentStateAndKV(t *testing.T) {
 	if be.retires != 1 {
 		t.Fatalf("request retirement calls=%d, want 1 after successful sequence prefill", be.retires)
 	}
+	status, ok := s.Qwen35SequencePrefillRouteStatus()
+	if !ok || status.RequestedPath != compute.Qwen35SequencePrefillPath || status.EffectivePath != compute.Qwen35SequencePrefillPath || status.FallbackActive || !status.NativePerformanceQualifying {
+		t.Fatalf("sequence route status=%+v present=%t", status, ok)
+	}
+	if err := s.RequireQwen35SequencePrefillNativePerformance(); err != nil {
+		t.Fatalf("successful native sequence was non-qualifying: %v", err)
+	}
 }
 
 func TestQwen35SequencePrefillNoCapabilityFallsBack(t *testing.T) {
@@ -155,6 +164,29 @@ type cappedSequencePrefillBackend struct {
 
 func (b *cappedSequencePrefillBackend) MaxWeightBufferBytes() int64 {
 	return b.maxBufferBytes
+}
+
+func assertOversizedEmbeddingFallbackStatus(t *testing.T, s *Session, base *sequencePrefillBackend, vocab int) {
+	t.Helper()
+	if got := s.Prefill([]int{3, 7}); len(got) != vocab || base.gdnCalls == 0 {
+		t.Fatalf("ordinary fallback logits=%d scalar_calls=%d", len(got), base.gdnCalls)
+	}
+	if base.calls != 0 {
+		t.Fatalf("oversized embedding reached sequence backend %d times", base.calls)
+	}
+	status, ok := s.Qwen35SequencePrefillRouteStatus()
+	want := Qwen35SequencePrefillRouteStatus{
+		RequestedPath:  compute.Qwen35SequencePrefillPath,
+		EffectivePath:  Qwen35SequencePrefillFallbackPath,
+		DeclineReason:  Qwen35SequencePrefillDeclineEmbeddingCap,
+		FallbackActive: true,
+	}
+	if !ok || status != want {
+		t.Fatalf("oversized route status=%+v present=%t, want %+v", status, ok, want)
+	}
+	if err := s.RequireQwen35SequencePrefillNativePerformance(); err == nil || !strings.Contains(err.Error(), Qwen35SequencePrefillDeclineEmbeddingCap) || !strings.Contains(err.Error(), "non-qualifying") {
+		t.Fatalf("native qualification error=%v, want explicit cap decline", err)
+	}
 }
 
 func TestQwen35SequencePrefillDeclinesWhenEmbeddingExceedsDeviceCap(t *testing.T) {
@@ -181,6 +213,7 @@ func TestQwen35SequencePrefillDeclinesWhenEmbeddingExceedsDeviceCap(t *testing.T
 		if base.calls != 0 {
 			t.Fatalf("expected 0 sequence prefill calls on declined oversized embedding, got %d", base.calls)
 		}
+		assertOversizedEmbeddingFallbackStatus(t, s, base, m.Cfg.VocabSize)
 	})
 
 	t.Run("Q2K", func(t *testing.T) {
@@ -193,6 +226,9 @@ func TestQwen35SequencePrefillDeclinesWhenEmbeddingExceedsDeviceCap(t *testing.T
 			t.Fatal(err)
 		}
 		m.Q2KEmbedding = q2k
+		// Keep an untied synthetic head so the ordinary row-gather fallback can
+		// produce logits after the packed embedding replaces its f32 manifest row.
+		m.manifest["lm_head.weight"] = m.manifest["model.embed_tokens.weight"]
 		delete(m.manifest, "model.embed_tokens.weight")
 		base := newSequencePrefillBackend(m)
 		be := &cappedSequencePrefillBackend{
@@ -213,6 +249,46 @@ func TestQwen35SequencePrefillDeclinesWhenEmbeddingExceedsDeviceCap(t *testing.T
 		if base.calls != 0 {
 			t.Fatalf("expected 0 sequence prefill calls on declined oversized Q2_K embedding, got %d", base.calls)
 		}
+		assertOversizedEmbeddingFallbackStatus(t, s, base, m.Cfg.VocabSize)
+	})
+
+	t.Run("VulkanDeviceCap", func(t *testing.T) {
+		be, ok := compute.Lookup("vulkan")
+		if !ok {
+			if os.Getenv("FAK_VULKAN_REQUIRE_DEVICE") == "1" {
+				t.Fatal("required Vulkan device is not registered")
+			}
+			t.Skip("Vulkan backend unavailable")
+		}
+		if expected := os.Getenv("FAK_VULKAN_EXPECT_DEVICE"); expected != "" && !strings.Contains(strings.ToLower(be.Tier()), strings.ToLower(expected)) {
+			t.Fatalf("device %q does not match required %q", be.Tier(), expected)
+		}
+		capper, ok := be.(weightBufferCapBackend)
+		if !ok || capper.MaxWeightBufferBytes() <= 0 {
+			t.Fatalf("Vulkan backend has no positive single-buffer cap")
+		}
+
+		m := NewSynthetic(qwen35HybridTestCfg())
+		meta := m.manifest["model.embed_tokens.weight"]
+		meta.Shape = []int{248320, 5120}
+		m.manifest["model.embed_tokens.weight"] = meta
+		s, err := m.NewBackendSessionChecked(be)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+		_, used, err := s.tryQwen35SequencePrefill([]int{3, 7}, false)
+		if err != nil || used {
+			t.Fatalf("oversized Vulkan route used=%t err=%v", used, err)
+		}
+		status, present := s.Qwen35SequencePrefillRouteStatus()
+		if !present || status.EffectivePath != Qwen35SequencePrefillFallbackPath || status.DeclineReason != Qwen35SequencePrefillDeclineEmbeddingCap || !status.FallbackActive || status.NativePerformanceQualifying {
+			t.Fatalf("Vulkan route status=%+v present=%t", status, present)
+		}
+		if err := s.RequireQwen35SequencePrefillNativePerformance(); err == nil {
+			t.Fatal("oversized Vulkan route qualified as native sequence performance")
+		}
+		t.Logf("backend=%s tier=%s max_weight_buffer_bytes=%d effective_path=%s fallback_active=%t qualifying=%t", be.Name(), be.Tier(), capper.MaxWeightBufferBytes(), status.EffectivePath, status.FallbackActive, status.NativePerformanceQualifying)
 	})
 }
 
@@ -512,4 +588,3 @@ func TestQwen35SequencePrefill_Q2KEmbedding(t *testing.T) {
 		t.Fatalf("TokenEmbedding differs from dequantized Q2K table: max|delta|=%g", d)
 	}
 }
-
