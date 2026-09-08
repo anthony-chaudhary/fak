@@ -109,7 +109,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_SIGMOID_MUL, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
@@ -137,7 +137,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_QWEN35_GDN_CONV: case K_QWEN35_GDN_RECURRENT:
     case K_GLM_KDA_REREAD: case K_GLM_KDA_WAVE32:
         return g_dp.otherGDN;
-    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q2K_MATMUL: case K_COUNT:
+    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_COUNT:
         return g_dp.otherUnclassified;
     }
     return g_dp.otherUnclassified;
@@ -148,7 +148,7 @@ static inline void dpDispatch(const Kernel& k) {
     const KId id = static_cast<KId>(&k - g_kern);
     if (id == K_Q4K_MATMUL || id == K_Q4K_MATMUL_WAVE32) {
         g_dp.q4k.fetch_add(1, std::memory_order_relaxed);
-    } else if (id == K_Q2K_MATMUL) {
+    } else if (id == K_Q2K_MATMUL || id == K_RMSNORM_Q2K_MATMUL2) {
         g_dp.q2k.fetch_add(1, std::memory_order_relaxed);
     } else {
         g_dp.other.fetch_add(1, std::memory_order_relaxed);
@@ -1024,7 +1024,8 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     }
     buildKernel(g_kern[K_RMSNORM_Q4K_MATMUL2], P("rmsnorm_q4k_matmul2.spv"), 6, 4 * sizeof(int) + sizeof(float));
     buildKernel(g_kern[K_SWIGLU_Q4K_MATMUL_ADD], P("swiglu_q4k_matmul_add.spv"), 4, 3 * sizeof(int));
-    ok &= buildKernel(g_kern[K_Q2K_MATMUL], P("q2k_matmul.spv"), 4, 4 * sizeof(int));
+    ok &= buildKernel(g_kern[K_Q2K_MATMUL], P("q2k_matmul.spv"), 7, 4 * sizeof(int) + sizeof(float));
+    ok &= buildKernel(g_kern[K_RMSNORM_Q2K_MATMUL2], P("q2k_matmul.spv"), 7, 4 * sizeof(int) + sizeof(float));
     if (!ok) return 8;
     // Q8 kernel is built only when the device advertised the int8/8-bit-storage features; its
     // SPIR-V uses them, so loading it without the enabled device feature would be invalid. If
@@ -1694,10 +1695,11 @@ extern "C" void fvk_q4k_matmul_f32(const void* dQ4K, const void* dX, void* dY,
 }
 extern "C" void fvk_q2k_matmul_f32(const void* dQ2K, const void* dX, void* dY,
                           int out, int in, int P) {
-    struct PC { int out, in, p, fused; } pc{out, in, P, 0};
-    // Mode 0 ignores binding 2. Rebinding X keeps the descriptor valid without
-    // allocating a dummy buffer or changing the ordinary packed-Q2 contract.
-    Buffer* bufs[4] = {B((void*)dQ2K), B((void*)dX), B((void*)dX), B(dY)};
+    struct PC { int out, in, p, aux; float eps; } pc{out, in, P, 0, 0.0f};
+    Buffer* bufs[7] = {
+        B((void*)dQ2K), B((void*)dX), B((void*)dX), B(dY),
+        B((void*)dQ2K), B((void*)dX), B(dY),
+    };
     dispatch(g_kern[K_Q2K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)(((size_t)out * P + 255) / 256));
 }
 extern "C" void fvk_swiglu_q2k_matmul_add_f32(const void* dQ2K, const void* dG,
@@ -1707,9 +1709,24 @@ extern "C" void fvk_swiglu_q2k_matmul_add_f32(const void* dQ2K, const void* dG,
         fprintf(stderr, "fak-vulkan: fused Q2_K SwiGLU down projection is decode-only\n");
         abort();
     }
-    struct PC { int out, in, p, fused; } pc{out, in, P, 1};
-    Buffer* bufs[4] = {B((void*)dQ2K), B((void*)dG), B((void*)dU), B(dD)};
+    struct PC { int out, in, p, aux; float eps; } pc{out, in, P, -1, 0.0f};
+    Buffer* bufs[7] = {
+        B((void*)dQ2K), B((void*)dG), B((void*)dU), B(dD),
+        B((void*)dQ2K), B((void*)dG), B(dD),
+    };
     dispatch(g_kern[K_Q2K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)(((size_t)out * P + 255) / 256));
+}
+extern "C" void fvk_rmsnorm_q2k_matmul2_f32(const void* dW0, const void* dW1,
+                                  const void* dX, const void* dNorm,
+                                  void* dY0, void* dY1,
+                                  int out0, int out1, int in, int P, float eps) {
+    struct PC { int out, in, p, aux; float eps; } pc{out0, in, P, out1, eps};
+    Buffer* bufs[7] = {
+        B((void*)dW0), B((void*)dX), B((void*)dX), B(dY0),
+        B((void*)dW1), B((void*)dNorm), B(dY1),
+    };
+    uint32_t groups = ((uint32_t)(out0 + out1) + 255u) / 256u;
+    dispatch(g_kern[K_RMSNORM_Q2K_MATMUL2], bufs, &pc, sizeof(pc), groups);
 }
 extern "C" void fvk_dispatch_profile_snapshot(fvk_dispatch_profile* out) {
     if (!out) return;

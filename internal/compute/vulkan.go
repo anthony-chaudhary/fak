@@ -17,6 +17,9 @@ package compute
 // tail reuses the required q2k_matmul pipeline rather than adding an optional module.
 void fvk_swiglu_q2k_matmul_add_f32(const void *dW, const void *dG, const void *dU,
                                    void *dD, int out, int in, int P);
+void fvk_rmsnorm_q2k_matmul2_f32(const void* dW0, const void* dW1,
+    const void* dX, const void* dNorm, void* dY0, void* dY1,
+    int out0, int out1, int in, int P, float eps);
 */
 import "C"
 
@@ -195,6 +198,23 @@ func (v *vulkanBackend) selectQ4KFusionLocked(P int) bool {
 	}
 	// Unset/false/unknown selects unchanged Q4_K composition.
 	return false
+}
+
+// selectQ2KFusionLocked keeps the new packed-Q2_K gate/up kernel behind an
+// explicit candidate arm until its repeated gfx1151 A/B receipt is accepted.
+// The fallback remains the established native Vulkan composition; it never
+// redirects execution through an external engine.
+func (v *vulkanBackend) selectQ2KFusionLocked(P int) bool {
+	if P != 1 {
+		return false
+	}
+	optIn := strings.TrimSpace(strings.ToLower(os.Getenv("FAK_VULKAN_Q2K_FUSION")))
+	switch optIn {
+	case "candidate", "fusion", "fused", "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 func (v *vulkanBackend) ConfigureQ4KFusion(rmsnorm2, swigluAdd, forceScalar bool) {
@@ -1497,6 +1517,11 @@ func (v *vulkanBackend) RMSNormMatMul2(w0, w1, x, normWeight Tensor, eps float32
 		}
 		y0, _ := v.devTr([]int{out0}, F32)
 		y1, _ := v.devTr([]int{out1}, F32)
+		if w0.Dtype == Q2_K && w1.Dtype == Q2_K && v.selectQ2KFusionLocked(P) {
+			C.fvk_rmsnorm_q2k_matmul2_f32(v.vp(w0), v.vp(w1), v.vp(x), v.vp(normWeight), v.vp(y0), v.vp(y1),
+				C.int(out0), C.int(out1), C.int(in), C.int(P), C.float(eps))
+			return y0, y1
+		}
 		xn, _ := v.devTr([]int{in}, F32)
 		C.fvk_rmsnorm_f32(v.vp(x), v.vp(normWeight), v.vp(xn), C.int(P), C.int(in), C.float(eps))
 		project := func(w, y Tensor, out int) {
