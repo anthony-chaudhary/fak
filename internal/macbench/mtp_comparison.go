@@ -1,10 +1,17 @@
 package macbench
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -35,6 +42,18 @@ type MTPComparisonPacket struct {
 	QualityPolicy     ComparisonQualityPolicy `json:"quality_policy"`
 	Arms              []MTPComparisonArm      `json:"arms"`
 	Summary           MTPSummary              `json:"summary"`
+}
+
+// MTPComparisonRawSamplesFile represents the standalone raw telemetry artifact for an MTP comparison arm.
+type MTPComparisonRawSamplesFile struct {
+	Schema     string                `json:"schema"`
+	Arm        string                `json:"arm"`
+	CampaignID string                `json:"campaign_id"`
+	RunID      string                `json:"run_id"`
+	HostID     string                `json:"host_id"`
+	StartedAt  string                `json:"started_at"`
+	FinishedAt string                `json:"finished_at"`
+	Samples    []MTPComparisonSample `json:"samples"`
 }
 
 // MTPSpeculativeConfig captures multi-token prediction decoding parameters and quality thresholds.
@@ -524,6 +543,8 @@ func NodeMacOSAMTPComparisonPacket() MTPComparisonPacket {
 		acceptanceRate    float64
 		rollbackCount     int
 		rollbackPenaltyMS float64
+		qualitySHA        string
+		rawSHA            string
 		repro             []string
 	}
 
@@ -539,6 +560,8 @@ func NodeMacOSAMTPComparisonPacket() MTPComparisonPacket {
 			acceptanceRate:    0.785,
 			rollbackCount:     14,
 			rollbackPenaltyMS: 0.0,
+			qualitySHA:        "e217ba299012496ea73538717487cddf7cb07f28e14d7c24050673ae06742701",
+			rawSHA:            "ecea792e548f68ead2ee9a50e7a6fee60c91e6e38ab0d9cf1473a0140b3e8bdb",
 			repro:             []string{"./fak", "macbench", "run", "--model", "Qwen3.8-27B", "--quant", "Q4_K_M", "--engine", "fak-native", "--mtp"},
 		},
 		{
@@ -552,6 +575,8 @@ func NodeMacOSAMTPComparisonPacket() MTPComparisonPacket {
 			acceptanceRate:    0.762,
 			rollbackCount:     15,
 			rollbackPenaltyMS: 0.12,
+			qualitySHA:        "6395e6ee60391c39c166aa782f7ff931d5cf1479c313d0fefb3914bb42689a39",
+			rawSHA:            "9378948d0d806744b280263a13139ff3ab2b3e383853d6d9c3df878be4800a5b",
 			repro:             []string{"ax-bench", "--model", "Qwen3.8-27B.q4_k_m.ax", "--draft-depth", "1", "-p", "128", "-n", "64"},
 		},
 		{
@@ -565,6 +590,8 @@ func NodeMacOSAMTPComparisonPacket() MTPComparisonPacket {
 			acceptanceRate:    0.771,
 			rollbackCount:     15,
 			rollbackPenaltyMS: 0.10,
+			qualitySHA:        "f4cb4f709069143040f2d73059793a277af828903b8e8a44c1a127c7f2a1d5ed",
+			rawSHA:            "0fd93f905454efb89002ed7782f7a7814c8ba7def4c3c00265af3fa49de8012c",
 			repro:             []string{"python3", "-m", "mtplx.generate", "--model", "mlx-community/Qwen3.8-27B-4bit", "--draft-depth", "1", "--max-tokens", "64"},
 		},
 		{
@@ -578,6 +605,8 @@ func NodeMacOSAMTPComparisonPacket() MTPComparisonPacket {
 			acceptanceRate:    0.718,
 			rollbackCount:     18,
 			rollbackPenaltyMS: 0.35,
+			qualitySHA:        "5efea75e76fdeea0f49c80562fe06e883e610ede2a08f645600d13cb7ddc30c6",
+			rawSHA:            "2db505146bd07d99323d391e800a33063d44777c1595bbad74a6b160bd908250",
 			repro:             []string{"llama-bench", "-m", "Qwen3.8-27B.q4_k_m.gguf", "-p", "128", "-n", "64", "--draft-depth", "1", "-ngl", "99"},
 		},
 	}
@@ -630,7 +659,7 @@ func NodeMacOSAMTPComparisonPacket() MTPComparisonPacket {
 				Passed:        true,
 				Score:         1.0,
 				ResultPath:    fmt.Sprintf("%s-quality.json", d.name),
-				ResultSHA256:  strings.Repeat("c", 64),
+				ResultSHA256:  d.qualitySHA,
 			},
 			DraftDepth:          1,
 			AcceptanceRate:      d.acceptanceRate,
@@ -639,7 +668,7 @@ func NodeMacOSAMTPComparisonPacket() MTPComparisonPacket {
 			EffectiveDecodeTokS: d.decodeRate,
 			RawResult: ComparisonRawResult{
 				Path:   fmt.Sprintf("%s-raw.json", d.name),
-				SHA256: strings.Repeat("d", 64),
+				SHA256: d.rawSHA,
 			},
 			Repro: d.repro,
 		}
