@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"math"
 	"sync"
-
-	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 )
 
 var (
@@ -76,6 +74,52 @@ type MetalMTPAcceptanceStats struct {
 	TotalGenerated  int     `json:"total_generated"`
 }
 
+// MTPCheckpointRecorder records speculative candidate draft tokens and atomic page commit/rollback.
+type MTPCheckpointRecorder interface {
+	RecordMTPDraft(sessionID string, tokens []int32) error
+	CommitMTPDraft(sessionID string, accepted int) (int, int, error)
+	RollbackMTPDraft(sessionID string) (int, error)
+}
+
+// MTPDraftTracker records speculative candidate draft tokens, depth, and page state.
+type MTPDraftTracker struct {
+	DraftDepth       int     `json:"draft_depth"`
+	DraftTokens      []int32 `json:"draft_tokens"`
+	AcceptedCount    int     `json:"accepted_count"`
+	RollbackOccurred bool    `json:"rollback_occurred"`
+	AllocatedPages   int     `json:"allocated_pages"`
+	CommittedPages   int     `json:"committed_pages"`
+	FreedPages       int     `json:"freed_pages"`
+}
+
+// RecordDraft registers candidate draft tokens.
+func (s *MTPDraftTracker) RecordDraft(tokens []int32) {
+	s.DraftDepth = len(tokens)
+	s.DraftTokens = append([]int32(nil), tokens...)
+	s.AcceptedCount = 0
+	s.RollbackOccurred = false
+	s.AllocatedPages += len(tokens)
+}
+
+// CommitDraft atomically commits accepted draft tokens and tracks freed pages.
+func (s *MTPDraftTracker) CommitDraft(accepted int) (committedPages int, freedPages int, err error) {
+	if accepted < 0 || accepted > len(s.DraftTokens) {
+		return 0, 0, fmt.Errorf("model: accepted %d outside range [0, %d]", accepted, len(s.DraftTokens))
+	}
+	s.AcceptedCount = accepted
+	s.RollbackOccurred = accepted < len(s.DraftTokens)
+	s.CommittedPages += accepted
+	freed := len(s.DraftTokens) - accepted
+	s.FreedPages += freed
+	return accepted, freed, nil
+}
+
+// RollbackDraft frees all speculative draft pages.
+func (s *MTPDraftTracker) RollbackDraft() (freedPages int, err error) {
+	_, freed, err := s.CommitDraft(0)
+	return freed, err
+}
+
 // MetalMTPCoordinator coordinates resident MTP candidate proposal generation,
 // wide-M Metal verification dispatch, atomic Context-MMU page commit/rollback,
 // and greedy temperature-zero tripwires into an autonomous speculative decode loop.
@@ -88,9 +132,9 @@ type MetalMTPCoordinator struct {
 	draftSes *Qwen35MTPDraftSession
 
 	// Context-MMU state
-	checkpointMgr *ctxmmu.CheckpointManager
+	checkpointMgr MTPCheckpointRecorder
 	sessionID     string
-	draftState    *ctxmmu.MTPDraftState
+	draftState    *MTPDraftTracker
 
 	// Rolling acceptance monitoring (32-token window)
 	windowOutcomes []bool
@@ -135,7 +179,7 @@ func NewMetalMTPCoordinator(target *Session, cfgs ...MetalMTPConfig) (*MetalMTPC
 	c := &MetalMTPCoordinator{
 		target:         target,
 		cfg:            cfg,
-		draftState:     &ctxmmu.MTPDraftState{DraftDepth: cfg.DraftDepth},
+		draftState:     &MTPDraftTracker{DraftDepth: cfg.DraftDepth},
 		windowOutcomes: make([]bool, 0, cfg.WindowSize),
 	}
 
@@ -188,7 +232,7 @@ func (c *MetalMTPCoordinator) SetDrafter(p ProposalGenerator) {
 }
 
 // SetMMU wires a Context-MMU CheckpointManager and session identifier.
-func (c *MetalMTPCoordinator) SetMMU(cm *ctxmmu.CheckpointManager, sessionID string) {
+func (c *MetalMTPCoordinator) SetMMU(cm MTPCheckpointRecorder, sessionID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.checkpointMgr = cm

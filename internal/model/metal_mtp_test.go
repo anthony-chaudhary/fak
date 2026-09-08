@@ -6,9 +6,28 @@ import (
 	"math"
 	"reflect"
 	"testing"
-
-	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 )
+
+type mockMTPRecorder struct {
+	records   int
+	commits   int
+	rollbacks int
+}
+
+func (m *mockMTPRecorder) RecordMTPDraft(sessionID string, tokens []int32) error {
+	m.records++
+	return nil
+}
+
+func (m *mockMTPRecorder) CommitMTPDraft(sessionID string, accepted int) (int, int, error) {
+	m.commits++
+	return accepted, 0, nil
+}
+
+func (m *mockMTPRecorder) RollbackMTPDraft(sessionID string) (int, error) {
+	m.rollbacks++
+	return 0, nil
+}
 
 // TestMetalMTPDraftVerifyRollbackLoop is the comprehensive witness test for Issue #12238:
 // It asserts:
@@ -71,8 +90,8 @@ func TestMetalMTPDraftVerifyRollbackLoop(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = coord.Close() })
 
-		// Wire real CheckpointManager from ctxmmu
-		cm := ctxmmu.NewCheckpointManager(nil, nil, nil, nil)
+		// Wire recorder for MMU checkpoint tracking
+		cm := &mockMTPRecorder{}
 		sessionID := "test-metal-mtp-session"
 		coord.SetMMU(cm, sessionID)
 
