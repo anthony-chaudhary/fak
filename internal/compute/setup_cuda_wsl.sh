@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup_cuda_wsl.sh — stand up a NO-SUDO CUDA 12.6 toolchain in WSL for the -tags cuda
+# setup_cuda_wsl.sh — stand up a NO-SUDO CUDA 12.8 toolchain in WSL for the -tags cuda
 # build of internal/compute. This box has working WSL2 GPU passthrough (nvidia-smi sees
 # the RTX 4070, /usr/lib/wsl/lib/libcuda.so present) and a C compiler, but no system CUDA
 # toolkit and no passwordless sudo — so we install a complete user-space toolkit (real
@@ -10,7 +10,7 @@
 # Idempotent. After it runs, `source ~/cudaenv.env` then `bash build_cuda.sh test`.
 set -euo pipefail
 MAMBA=$HOME/bin/micromamba
-ENVDIR=$HOME/cudaenv
+ENVDIR=$HOME/cudaenv-12.8
 mkdir -p "$HOME/bin"
 
 if [ ! -x "$MAMBA" ]; then
@@ -19,9 +19,9 @@ if [ ! -x "$MAMBA" ]; then
 fi
 
 if [ ! -x "$ENVDIR/bin/nvcc" ]; then
-  echo "[setup] creating CUDA 12.6 env (cuda-nvcc + cudart-dev + cublas-dev + nvrtc-dev + cmake) ..."
+  echo "[setup] creating CUDA 12.8 env (cuda-nvcc + cudart-dev + cublas-dev + nvrtc-dev + cmake) ..."
   "$MAMBA" create -y -p "$ENVDIR" -c nvidia -c conda-forge \
-    cuda-nvcc=12.6 cuda-cudart-dev=12.6 cuda-nvrtc-dev=12.6 libcublas-dev=12.6 cuda-cccl=12.6 \
+    cuda-nvcc=12.8 cuda-cudart-dev=12.8 cuda-nvrtc-dev=12.8 libcublas-dev=12.8 cuda-cccl=12.8 \
     cmake ninja make
 fi
 
