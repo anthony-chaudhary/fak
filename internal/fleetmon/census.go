@@ -136,16 +136,21 @@ var uuidRE = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0
 // The result is stably sorted by (agent, namespace, session).
 func Census(home string, now time.Time) []CensusRow {
 	var rows []CensusRow
-	seenNoNamespace := make(map[string]bool)
+	seen := make(map[censusRowIdentity]struct{})
 	for _, p := range harnessprofile.Profiles() {
-		for _, r := range censusForProfile(home, now, p) {
-			if r.Kind == KindNoNamespace {
-				if seenNoNamespace[r.Agent] {
-					continue
-				}
-				seenNoNamespace[r.Agent] = true
+		for _, row := range censusForProfile(home, now, p) {
+			identity := censusRowIdentity{
+				agent:     row.Agent,
+				kind:      row.Kind,
+				namespace: row.Namespace,
+				session:   row.Session,
+				path:      row.Path,
 			}
-			rows = append(rows, r)
+			if _, ok := seen[identity]; ok {
+				continue
+			}
+			seen[identity] = struct{}{}
+			rows = append(rows, row)
 		}
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -160,14 +165,21 @@ func Census(home string, now time.Time) []CensusRow {
 	return rows
 }
 
+// censusRowIdentity de-duplicates repeated registry profiles without merging
+// distinct agents or transcript locations.
+type censusRowIdentity struct {
+	agent     string
+	kind      RowKind
+	namespace string
+	session   string
+	path      string
+}
+
 // censusForProfile returns one profile's session rows, or a single NO_NAMESPACE
 // row when the profile's transcript namespace cannot be located.
 func censusForProfile(home string, now time.Time, p harnessprofile.HarnessProfile) []CensusRow {
 	layout, known := nsLayouts[p.Name]
 	if home == "" || p.ConfigHomeGlob == "" || !known {
-		if p.Name == "fak" {
-			return nil
-		}
 		return []CensusRow{noNamespaceRow(p, known)}
 	}
 	homes, _ := filepath.Glob(filepath.Join(home, p.ConfigHomeGlob))
@@ -185,9 +197,6 @@ func censusForProfile(home string, now time.Time, p harnessprofile.HarnessProfil
 		}
 	}
 	if len(roots) == 0 {
-		if p.Name == "fak" {
-			return nil
-		}
 		return []CensusRow{{
 			Agent:    p.Name,
 			Kind:     KindNoNamespace,

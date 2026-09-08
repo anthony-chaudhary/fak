@@ -130,10 +130,10 @@ func TestCensusCrossAgentGolden(t *testing.T) {
 		t.Errorf("pi NO_NAMESPACE row should explain why the namespace is absent")
 	}
 
-	// No agent is silently dropped: every built-in profile contributes at least one
-	// row, and each SESSION row's agent is exactly its profile Name.
-	if got := len(rows); got != 5 {
-		t.Fatalf("census row count = %d, want 5 (claude + codex + gemini + openai-generic + pi); rows=%+v", got, rows)
+	// No agent is silently dropped: every distinct built-in agent contributes at
+	// least one row, and duplicate profiles do not duplicate its census identity.
+	if got := len(rows); got != 6 {
+		t.Fatalf("census row count = %d, want 6 (claude + codex + fak + gemini + openai-generic + pi); rows=%+v", got, rows)
 	}
 	for _, r := range rows {
 		if r.Agent == "" {
@@ -150,7 +150,7 @@ func TestCensusNoAgentsNeverSilent(t *testing.T) {
 
 	rows := Census(home, censusFixtureNow)
 
-	agents := []string{"claude", "codex", "gemini", "openai-generic", "pi"}
+	agents := []string{"claude", "codex", "fak", "gemini", "openai-generic", "pi"}
 	for _, agent := range agents {
 		r, ok := findRow(rows, agent, KindNoNamespace)
 		if !ok {
@@ -162,6 +162,19 @@ func TestCensusNoAgentsNeverSilent(t *testing.T) {
 	}
 	if len(rows) != len(agents) {
 		t.Errorf("bare home census = %d rows, want one NO_NAMESPACE row per %d agents", len(rows), len(agents))
+	}
+}
+
+func TestCensusDuplicateProfilesShareOneRowIdentity(t *testing.T) {
+	rows := Census(t.TempDir(), censusFixtureNow)
+	var fakRows []CensusRow
+	for _, row := range rows {
+		if row.Agent == "fak" {
+			fakRows = append(fakRows, row)
+		}
+	}
+	if len(fakRows) != 1 || fakRows[0].Kind != KindNoNamespace {
+		t.Fatalf("fak census rows = %+v, want one NO_NAMESPACE identity", fakRows)
 	}
 }
 
@@ -196,19 +209,5 @@ func TestCensusIdleAndMultiSession(t *testing.T) {
 	}
 	if byLive[LivenessLive] != 1 || byLive[LivenessIdle] != 1 {
 		t.Errorf("recency split = %v, want one LIVE + one IDLE", byLive)
-	}
-}
-
-// TestCensusDeduplicatesUnnamespacedFakRows verifies that unnamespaced host fak observations
-// are omitted from the cross-agent census and never duplicate rows (#12131).
-func TestCensusDeduplicatesUnnamespacedFakRows(t *testing.T) {
-	home := t.TempDir()
-
-	rows := Census(home, censusFixtureNow)
-
-	for _, r := range rows {
-		if r.Agent == "fak" && r.Kind == KindNoNamespace {
-			t.Errorf("unexpected unnamespaced fak row in census: %+v", r)
-		}
 	}
 }
