@@ -1802,31 +1802,41 @@ func TestVulkanPrefillBatch(t *testing.T) {
 	c := cpu()
 
 	if !v.Caps().FusedAttn {
-		t.Fatalf("vulkan backend does not advertise FusedAttn in Caps")
+		t.Fatalf("vulkan backend must advertise Caps.FusedAttn=true (got FusedAttn=false)")
 	}
 	if !v.Caps().BatchedPrefill {
-		t.Fatalf("vulkan backend does not advertise BatchedPrefill in Caps")
+		t.Fatalf("vulkan backend must advertise Caps.BatchedPrefill=true (got BatchedPrefill=false)")
 	}
 
 	testCases := []struct {
-		name     string
-		P        int
-		D        int
-		nH, nKV  int
-		hd       int
-		startPos int
-		withWo   bool
+		name        string
+		P           int
+		D           int
+		nH, nKV     int
+		hd          int
+		startPos    int
+		withWo      bool
+		withKV      bool
+		prefillKV   int
+		hostTensors bool
 	}{
-		{name: "P=1 single-token", P: 1, D: 32, nH: 4, nKV: 2, hd: 8, startPos: 0, withWo: true},
-		{name: "P=4 MHA with Wo", P: 4, D: 32, nH: 4, nKV: 4, hd: 8, startPos: 0, withWo: true},
-		{name: "P=8 GQA with Wo", P: 8, D: 64, nH: 4, nKV: 2, hd: 16, startPos: 0, withWo: true},
-		{name: "P=8 GQA without Wo", P: 8, D: 64, nH: 4, nKV: 2, hd: 16, startPos: 0, withWo: false},
-		{name: "P=8 with non-zero startPos", P: 8, D: 64, nH: 4, nKV: 2, hd: 16, startPos: 4, withWo: true},
+		{name: "P=1 single-token with Wo and KV", P: 1, D: 32, nH: 4, nKV: 2, hd: 8, startPos: 0, withWo: true, withKV: true},
+		{name: "P=4 MHA with Wo and KV", P: 4, D: 32, nH: 4, nKV: 4, hd: 8, startPos: 0, withWo: true, withKV: true},
+		{name: "P=8 GQA with Wo and KV", P: 8, D: 64, nH: 4, nKV: 2, hd: 16, startPos: 0, withWo: true, withKV: true},
+		{name: "P=16 MQA with Wo and KV", P: 16, D: 64, nH: 4, nKV: 1, hd: 16, startPos: 0, withWo: true, withKV: true},
+		{name: "P=8 GQA without Wo with KV", P: 8, D: 64, nH: 4, nKV: 2, hd: 16, startPos: 0, withWo: false, withKV: true},
+		{name: "P=4 MHA without KV (nil KV)", P: 4, D: 32, nH: 4, nKV: 4, hd: 8, startPos: 0, withWo: true, withKV: false},
+		{name: "P=8 GQA without KV (nil KV)", P: 8, D: 64, nH: 4, nKV: 2, hd: 16, startPos: 0, withWo: true, withKV: false},
+		{name: "P=8 without Wo without KV", P: 8, D: 64, nH: 4, nKV: 2, hd: 16, startPos: 0, withWo: false, withKV: false},
+		{name: "P=8 non-zero startPos with KV", P: 8, D: 64, nH: 4, nKV: 2, hd: 16, startPos: 6, withWo: true, withKV: true, prefillKV: 6},
+		{name: "P=4 host tensors auto-upload with KV", P: 4, D: 32, nH: 4, nKV: 2, hd: 8, startPos: 0, withWo: true, withKV: true, hostTensors: true},
+		{name: "P=32 large prompt panel with KV", P: 32, D: 64, nH: 8, nKV: 2, hd: 16, startPos: 0, withWo: true, withKV: true},
 	}
 
 	for _, tc := range testCases {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			var rng lcg = lcg(42 + uint64(tc.P)*17)
+			var rng lcg = lcg(123456789 + uint64(tc.P)*31 + uint64(tc.D)*17 + uint64(tc.startPos)*11)
 			P := tc.P
 			D := tc.D
 			nH := tc.nH
@@ -1846,73 +1856,154 @@ func TestVulkanPrefillBatch(t *testing.T) {
 				woData = randVec(&rng, D*qOut)
 			}
 
-			xHost := NewF32(c, []int{P, D}, xData)
-			wqHost := NewF32(c, []int{qOut, D}, wqData)
-			wkHost := NewF32(c, []int{kvOut, D}, wkData)
-			wvHost := NewF32(c, []int{kvOut, D}, wvData)
-			var woHost Tensor
+			// Prepare CPU reference tensors
+			refX := NewF32(c, []int{P, D}, xData)
+			refWq := NewF32(c, []int{qOut, D}, wqData)
+			refWk := NewF32(c, []int{kvOut, D}, wkData)
+			refWv := NewF32(c, []int{kvOut, D}, wvData)
+			var refWo Tensor
 			if tc.withWo {
-				woHost = NewF32(c, []int{D, qOut}, woData)
+				refWo = NewF32(c, []int{D, qOut}, woData)
 			}
 
-			cfg := KVConfig{NumLayers: 1, NumKVHeads: nKV, HeadDim: hd, RopeTheta: theta}
-			ckv := c.NewKV(cfg)
-			vkv := v.NewKV(cfg)
+			// Prepare Vulkan tensors
+			var vX, vWq, vWk, vWv, vWo Tensor
+			if tc.hostTensors {
+				vX = refX
+				vWq = refWq
+				vWk = refWk
+				vWv = refWv
+				vWo = refWo
+			} else {
+				vX = v.Upload(refX, F32)
+				defer v.Free(vX)
+				vWq = v.Upload(refWq, F32)
+				defer v.Free(vWq)
+				vWk = v.Upload(refWk, F32)
+				defer v.Free(vWk)
+				vWv = v.Upload(refWv, F32)
+				defer v.Free(vWv)
+				if tc.withWo {
+					vWo = v.Upload(refWo, F32)
+					defer v.Free(vWo)
+				}
+			}
 
-			if tc.startPos > 0 {
-				for p := 0; p < tc.startPos; p++ {
-					kRaw := randVec(&rng, kvOut)
-					kRoPE := randVec(&rng, kvOut)
-					val := randVec(&rng, kvOut)
-					ckv.AppendKV(0, NewF32(c, []int{kvOut}, kRaw), NewF32(c, []int{kvOut}, kRoPE), NewF32(c, []int{kvOut}, val), p)
-					vkv.AppendKV(0, v.Upload(NewF32(c, []int{kvOut}, kRaw), F32), v.Upload(NewF32(c, []int{kvOut}, kRoPE), F32), v.Upload(NewF32(c, []int{kvOut}, val), F32), p)
+			var ckv, vkv KVStore
+			if tc.withKV {
+				kvCfg := KVConfig{
+					NumLayers:  1,
+					NumKVHeads: nKV,
+					HeadDim:    hd,
+					RopeTheta:  theta,
+				}
+				ckv = c.NewKV(kvCfg)
+				vkv = v.NewKV(kvCfg)
+				defer vkv.Free()
+
+				if tc.prefillKV > 0 {
+					for p := 0; p < tc.prefillKV; p++ {
+						kRaw := randVec(&rng, kvOut)
+						kRoPE := randVec(&rng, kvOut)
+						val := randVec(&rng, kvOut)
+						ckv.AppendKV(0, NewF32(c, []int{kvOut}, kRaw), NewF32(c, []int{kvOut}, kRoPE), NewF32(c, []int{kvOut}, val), p)
+						vkv.AppendKV(0, v.Upload(NewF32(c, []int{kvOut}, kRaw), F32), v.Upload(NewF32(c, []int{kvOut}, kRoPE), F32), v.Upload(NewF32(c, []int{kvOut}, val), F32), p)
+					}
 				}
 			}
 
 			refArgs := PrefillBatchArgs{
-				X: xHost, Wq: wqHost, Wk: wkHost, Wv: wvHost, Wo: woHost,
-				KV: ckv, Layer: 0, StartPos: tc.startPos, NumHeads: nH, NumKVHeads: nKV, HeadDim: hd,
-				RopeTheta: theta, Scale: scale,
+				X:          refX,
+				Wq:         refWq,
+				Wk:         refWk,
+				Wv:         refWv,
+				Wo:         refWo,
+				KV:         ckv,
+				Layer:      0,
+				StartPos:   tc.startPos,
+				NumHeads:   nH,
+				NumKVHeads: nKV,
+				HeadDim:    hd,
+				RopeTheta:  theta,
+				Scale:      scale,
 			}
 			refRes, err := c.PrefillBatch(refArgs)
 			if err != nil {
-				t.Fatalf("CPU ref PrefillBatch failed: %v", err)
+				t.Fatalf("CPU PrefillBatch failed: %v", err)
 			}
 
-			xDev := v.Upload(xHost, F32)
-			wqDev := v.Upload(wqHost, F32)
-			wkDev := v.Upload(wkHost, F32)
-			wvDev := v.Upload(wvHost, F32)
-			var woDev Tensor
-			if tc.withWo {
-				woDev = v.Upload(woHost, F32)
+			vArgs := PrefillBatchArgs{
+				X:          vX,
+				Wq:         vWq,
+				Wk:         vWk,
+				Wv:         vWv,
+				Wo:         vWo,
+				KV:         vkv,
+				Layer:      0,
+				StartPos:   tc.startPos,
+				NumHeads:   nH,
+				NumKVHeads: nKV,
+				HeadDim:    hd,
+				RopeTheta:  theta,
+				Scale:      scale,
 			}
-
-			vulkanArgs := PrefillBatchArgs{
-				X: xDev, Wq: wqDev, Wk: wkDev, Wv: wvDev, Wo: woDev,
-				KV: vkv, Layer: 0, StartPos: tc.startPos, NumHeads: nH, NumKVHeads: nKV, HeadDim: hd,
-				RopeTheta: theta, Scale: scale,
-			}
-			vulkanRes, err := v.PrefillBatch(vulkanArgs)
+			vRes, err := v.PrefillBatch(vArgs)
 			if err != nil {
 				t.Fatalf("Vulkan PrefillBatch failed: %v", err)
 			}
+			if vRes.Tokens != P {
+				t.Fatalf("vRes.Tokens = %d, want %d", vRes.Tokens, P)
+			}
 
+			// Output verification
 			refOut := c.Read(refRes.Output)
-			vulkanOut := v.Read(vulkanRes.Output)
-
-			cos := cosine(refOut, vulkanOut)
-			if cos < 0.995 {
-				t.Fatalf("PrefillBatch cosine %.6f < 0.995", cos)
+			gotOut := v.Read(vRes.Output)
+			if len(gotOut) != len(refOut) {
+				t.Fatalf("Output length mismatch: got=%d ref=%d", len(gotOut), len(refOut))
+			}
+			cosOut := cosine(refOut, gotOut)
+			if cosOut < 0.995 {
+				t.Fatalf("Output cosine similarity %.6f < 0.995", cosOut)
 			}
 
-			refArgmax := c.Argmax(refRes.Output)
-			vulkanArgmax := v.Argmax(vulkanRes.Output)
-			if refArgmax != vulkanArgmax {
-				t.Fatalf("PrefillBatch argmax mismatch: got %d, want %d", vulkanArgmax, refArgmax)
+			outDim := len(refOut) / P
+			for tok := 0; tok < P; tok++ {
+				refRow := refOut[tok*outDim : (tok+1)*outDim]
+				gotRow := gotOut[tok*outDim : (tok+1)*outDim]
+				refArg := argmaxF32(refRow)
+				gotArg := argmaxF32(gotRow)
+				if refArg != gotArg {
+					t.Fatalf("token %d Output argmax mismatch: got=%d ref=%d", tok, gotArg, refArg)
+				}
 			}
 
-			t.Logf("PrefillBatch %s: cosine=%.6f, argmax=%d", tc.name, cos, vulkanArgmax)
+			// Context verification
+			refCtx := c.Read(refRes.Context)
+			gotCtx := v.Read(vRes.Context)
+			if len(gotCtx) != len(refCtx) {
+				t.Fatalf("Context length mismatch: got=%d ref=%d", len(gotCtx), len(refCtx))
+			}
+			cosCtx := cosine(refCtx, gotCtx)
+			if cosCtx < 0.995 {
+				t.Fatalf("Context cosine similarity %.6f < 0.995", cosCtx)
+			}
+
+			// KV store verification if KVStore was provided
+			if tc.withKV {
+				if ckv.Len() != vkv.Len() {
+					t.Fatalf("KV length mismatch: ckv=%d vkv=%d", ckv.Len(), vkv.Len())
+				}
+				refK := c.Read(ckv.KeysView(0))
+				gotK := v.Read(vkv.KeysView(0))
+				if cosK := cosine(refK, gotK); cosK < 0.995 {
+					t.Fatalf("KV KeysView cosine %.6f < 0.995", cosK)
+				}
+				refV := c.Read(ckv.ValuesView(0))
+				gotV := v.Read(vkv.ValuesView(0))
+				if cosV := cosine(refV, gotV); cosV < 0.995 {
+					t.Fatalf("KV ValuesView cosine %.6f < 0.995", cosV)
+				}
+			}
 		})
 	}
 }
