@@ -381,3 +381,55 @@ func TestEpilogueDurabilityAcrossCrash(t *testing.T) {
 		t.Fatalf("durable.txt = %q, want 'crashed_worker_work\\n'", string(data))
 	}
 }
+
+func TestEpilogueDrainInPlaceDirtyWorkingTree(t *testing.T) {
+	// #12084: When an in-place worker queues on busy and leaves changes in root,
+	// DrainEpilogues must not wipe them via git checkout or fail with git apply inversion.
+	repo := initGitRepo(t)
+
+	file := filepath.Join(repo, "inplace.txt")
+	if err := os.WriteFile(file, []byte("line1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitExec(t, repo, "add", "inplace.txt")
+	gitExec(t, repo, "commit", "-m", "init: inplace (fak test)")
+
+	// Worker modifies file in-place and queues with patch
+	if err := os.WriteFile(file, []byte("line1\nline2_worker_change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := gitExec(t, repo, "diff", "inplace.txt")
+	// NOTICE: We do NOT checkout! File remains dirty in working tree as in real queue-on-busy!
+
+	runsDir := filepath.Join(repo, ".dispatch-runs")
+	_, err := SubmitEpilogue(runsDir, EpilogueRecord{
+		Issue:       501,
+		Lane:        "cmd",
+		Paths:       []string{"inplace.txt"},
+		WorktreeDir: repo,
+		Patch:       patch,
+		Message:     "feat(#501): inplace queue commit (fak cmd)",
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	result, err := DrainEpilogues(repo, runsDir, EpilogueDrainOptions{})
+	if err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	if result.Landed != 1 || result.Conflicted != 0 {
+		t.Fatalf("expected 1 landed, 0 conflicted, got %+v", result)
+	}
+
+	content, _ := os.ReadFile(file)
+	if string(content) != "line1\nline2_worker_change\n" {
+		t.Fatalf("inplace.txt content was wiped or corrupted: %q", string(content))
+	}
+
+	headMsg := gitExec(t, repo, "log", "-1", "--pretty=%B")
+	if !strings.Contains(headMsg, "inplace queue commit") {
+		t.Fatalf("HEAD commit message does not match: %s", headMsg)
+	}
+}
