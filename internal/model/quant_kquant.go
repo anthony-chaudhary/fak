@@ -256,8 +256,16 @@ func q6kDequantSuperBlock(dst []float32, blk []byte) {
 }
 
 // q2kDequantSuperBlock writes the 256 weights of one 84-byte Q2_K super-block into dst
-// (len >= 256). Byte-for-byte ggufload.dequantQ2KScalar factored to one super-block.
+// (len >= 256), using the architecture kernel when available.
 func q2kDequantSuperBlock(dst []float32, blk []byte) {
+	if !q2kDequantSuperBlockArch(dst, blk) {
+		q2kDequantSuperBlockScalar(dst, blk)
+	}
+}
+
+// q2kDequantSuperBlockScalar is the byte-for-byte ggufload.dequantQ2KScalar
+// reference factored to one super-block.
+func q2kDequantSuperBlockScalar(dst []float32, blk []byte) {
 	scales := blk[:qkK/16]
 	q := blk[qkK/16 : qkK/16+qkK/4]
 	dm := qkK/16 + qkK/4

@@ -427,3 +427,110 @@ q6kdot16AVX2:
 	ADDQ $4, R8
 	ADDQ $4, R9
 	RET
+
+// func q2kDequantSuperBlockAsmAVX2(dst *float32, q *byte, tables *float32)
+//
+// q contains the 64 packed Q2_K code bytes. tables contains 16 consecutive
+// four-float lookup tables in scale-byte order. For outer half k, group j, and
+// half h, the scalar mapping is:
+//
+//   dst[128*k + 32*j + 16*h + l] =
+//       tables[8*k + 2*j + h][(q[32*k + 16*h + l] >> (2*j)) & 3]
+//
+// Each 16-byte q half is widened once and then reused for all four two-bit
+// planes. VPMOVZXBD loads exactly eight bytes at a time, so neither path reads
+// beyond q[64].
+#define Q2K_AVX2_PLANE(SHIFT, TOFF, DOFF) \
+	VMOVUPS TOFF(DX), X0                 \
+	VPSRLD $SHIFT, Y6, Y1                \
+	VPAND Y5, Y1, Y1                     \
+	VPERMPS Y0, Y1, Y2                   \
+	VMOVUPS Y2, DOFF(DI)                 \
+	VPSRLD $SHIFT, Y7, Y1                \
+	VPAND Y5, Y1, Y1                     \
+	VPERMPS Y0, Y1, Y2                   \
+	VMOVUPS Y2, DOFF+32(DI)
+
+TEXT ·q2kDequantSuperBlockAsmAVX2(SB), NOSPLIT, $0-24
+	MOVQ dst+0(FP), DI
+	MOVQ q+8(FP), SI
+	MOVQ tables+16(FP), DX
+	MOVL $3, AX
+	MOVQ AX, X5
+	VPBROADCASTD X5, Y5
+
+	VPMOVZXBD 0(SI), Y6
+	VPMOVZXBD 8(SI), Y7
+	Q2K_AVX2_PLANE(0, 0, 0)
+	Q2K_AVX2_PLANE(2, 32, 128)
+	Q2K_AVX2_PLANE(4, 64, 256)
+	Q2K_AVX2_PLANE(6, 96, 384)
+
+	VPMOVZXBD 16(SI), Y6
+	VPMOVZXBD 24(SI), Y7
+	Q2K_AVX2_PLANE(0, 16, 64)
+	Q2K_AVX2_PLANE(2, 48, 192)
+	Q2K_AVX2_PLANE(4, 80, 320)
+	Q2K_AVX2_PLANE(6, 112, 448)
+
+	VPMOVZXBD 32(SI), Y6
+	VPMOVZXBD 40(SI), Y7
+	Q2K_AVX2_PLANE(0, 128, 512)
+	Q2K_AVX2_PLANE(2, 160, 640)
+	Q2K_AVX2_PLANE(4, 192, 768)
+	Q2K_AVX2_PLANE(6, 224, 896)
+
+	VPMOVZXBD 48(SI), Y6
+	VPMOVZXBD 56(SI), Y7
+	Q2K_AVX2_PLANE(0, 144, 576)
+	Q2K_AVX2_PLANE(2, 176, 704)
+	Q2K_AVX2_PLANE(4, 208, 832)
+	Q2K_AVX2_PLANE(6, 240, 960)
+	VZEROUPPER
+	RET
+
+// func q2kDequantSuperBlockAsmAVX512(dst *float32, q *byte, tables *float32)
+// AVX-512 processes each 16-weight half in one vector. K1 is all ones: Go's
+// assembler spells EVEX operations with an explicit mask operand.
+#define Q2K_AVX512_PLANE(SHIFT, TOFF, DOFF) \
+	VBROADCASTF32X4 TOFF(DX), K1, Z0          \
+	VPSRLD $SHIFT, Z6, K1, Z1                 \
+	VPANDD Z5, Z1, K1, Z1                     \
+	VPERMPS Z0, Z1, K1, Z2                    \
+	VMOVUPS Z2, DOFF(DI)
+
+TEXT ·q2kDequantSuperBlockAsmAVX512(SB), NOSPLIT, $0-24
+	MOVQ dst+0(FP), DI
+	MOVQ q+8(FP), SI
+	MOVQ tables+16(FP), DX
+	MOVL $0xffff, AX
+	KMOVW AX, K1
+	MOVL $3, AX
+	MOVQ AX, X5
+	VPBROADCASTD X5, K1, Z5
+
+	VPMOVZXBD 0(SI), K1, Z6
+	Q2K_AVX512_PLANE(0, 0, 0)
+	Q2K_AVX512_PLANE(2, 32, 128)
+	Q2K_AVX512_PLANE(4, 64, 256)
+	Q2K_AVX512_PLANE(6, 96, 384)
+
+	VPMOVZXBD 16(SI), K1, Z6
+	Q2K_AVX512_PLANE(0, 16, 64)
+	Q2K_AVX512_PLANE(2, 48, 192)
+	Q2K_AVX512_PLANE(4, 80, 320)
+	Q2K_AVX512_PLANE(6, 112, 448)
+
+	VPMOVZXBD 32(SI), K1, Z6
+	Q2K_AVX512_PLANE(0, 128, 512)
+	Q2K_AVX512_PLANE(2, 160, 640)
+	Q2K_AVX512_PLANE(4, 192, 768)
+	Q2K_AVX512_PLANE(6, 224, 896)
+
+	VPMOVZXBD 48(SI), K1, Z6
+	Q2K_AVX512_PLANE(0, 144, 576)
+	Q2K_AVX512_PLANE(2, 176, 704)
+	Q2K_AVX512_PLANE(4, 208, 832)
+	Q2K_AVX512_PLANE(6, 240, 960)
+	VZEROUPPER
+	RET
