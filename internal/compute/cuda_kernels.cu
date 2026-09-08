@@ -2054,7 +2054,7 @@ __global__ void k_attention(const float *Q, const float *K, const float *V, floa
   }
   __syncthreads();
   // phase 2: block-reduce max
-  float lm = -1e30f;
+  float lm = -INFINITY;
   for (int j = threadIdx.x; j < nPos; j += blockDim.x) lm = fmaxf(lm, sc[j]);
   red[threadIdx.x] = lm; __syncthreads();
   for (int s = blockDim.x / 2; s > 0; s >>= 1) { if (threadIdx.x < s) red[threadIdx.x] = fmaxf(red[threadIdx.x], red[threadIdx.x + s]); __syncthreads(); }
@@ -2139,7 +2139,7 @@ __global__ void k_flash_attention(const float *Q, const float *K, const float *V
   __syncthreads();
   // online-softmax running state. acc[k] is this thread's accumulator for owned dim
   // d = tid + k*FLASH_THREADS; m and l are replicated across the block.
-  float m = -1e30f, l = 0.f;
+  float m = -INFINITY, l = 0.f;
   float acc[FLASH_ACC_MAX];
 #pragma unroll
   for (int k = 0; k < FLASH_ACC_MAX; k++) acc[k] = 0.f;
@@ -2568,7 +2568,7 @@ __global__ void k_dsa_sparse_attend(const float *Q, const float *selK, const flo
   for (int d = tid; d < kd; d += FLASH_THREADS) qs[d] = qh[d];
   __syncthreads();
   // online-softmax running state; acc[k] owns value dim d = tid + k*FLASH_THREADS, m/l replicated.
-  float m = -1e30f, l = 0.f;
+  float m = -INFINITY, l = 0.f;
   float acc[FLASH_ACC_MAX];
 #pragma unroll
   for (int k = 0; k < FLASH_ACC_MAX; k++) acc[k] = 0.f;
@@ -2737,7 +2737,7 @@ extern "C" int fcuda_dsa_index_select_f32(const float *dIndexQ, const float *dIn
 __global__ void k_argmax(const float *L, int n, int *outIdx) {
   __shared__ float vbest[256];
   __shared__ int   ibest[256];
-  float bv = -1e30f; int bi = 0;
+  float bv = -INFINITY; int bi = 0;
   for (int i = threadIdx.x; i < n; i += blockDim.x) {
     float v = L[i];
     if (v > bv || (v == bv && i < bi)) { bv = v; bi = i; }

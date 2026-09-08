@@ -300,3 +300,35 @@ func TestPythonToolGate_FailsOpenOnUnreadableBaseline(t *testing.T) {
 		t.Fatalf("want ErrCouldNotRun on a missing baseline, got %v", err)
 	}
 }
+
+func TestPythonGate_PushScope(t *testing.T) {
+	in := []Finding{
+		{Gate: "NEW_PYTHON_TOOL", File: "tools/owned.py", Detail: "owned new python tool"},
+		{Gate: "NEW_PYTHON_TOOL", File: "tools/peer.py", Detail: "peer new python tool"},
+		{Gate: "TIER_DECLARED", File: "internal/peer/", Detail: "unrelated gate"},
+	}
+	got := ScopePythonToolFindings(in, []string{"tools/owned.py"}, true)
+	if got[0].Advisory {
+		t.Fatalf("push-owned python tool was demoted: %+v", got[0])
+	}
+	if !got[1].Advisory || !strings.Contains(got[1].Detail, "does not touch") {
+		t.Fatalf("peer python tool not advisory: %+v", got[1])
+	}
+	if got[2].Advisory {
+		t.Fatalf("unrelated gate was demoted: %+v", got[2])
+	}
+	fallback := ScopePythonToolFindings(in[:1], nil, false)
+	if fallback[0].Advisory {
+		t.Fatalf("no-trunk fallback demoted finding: %+v", fallback[0])
+	}
+
+	// Test Windows backslash normalization in changedPaths
+	winPaths := []string{`tools\owned.py`}
+	gotWin := ScopePythonToolFindings(in, winPaths, true)
+	if gotWin[0].Advisory {
+		t.Fatalf("push-owned python tool with Windows path was demoted: %+v", gotWin[0])
+	}
+	if !gotWin[1].Advisory {
+		t.Fatalf("peer python tool with Windows path not advisory: %+v", gotWin[1])
+	}
+}

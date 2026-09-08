@@ -428,14 +428,27 @@ def _run_gh_json(args: list[str]) -> object | None:
         return None
 
 
+DEFAULT_CI_STALENESS_HORIZON_COMMITS = 20
+
+
 def fold_latest_trunk_ci(latest_trunk: object,
-                         workflow: str = "ci.yml") -> tuple[str, dict | None, str | None]:
+                         workflow: str = "ci.yml",
+                         head: str | None = None,
+                         *,
+                         max_commits_behind: int = DEFAULT_CI_STALENESS_HORIZON_COMMITS) -> tuple[str, dict | None, str | None]:
     if latest_trunk is None:
         return "unknown", None, "gh unavailable/offline - CI state not read"
     if not isinstance(latest_trunk, list):
         return "unknown", None, "gh returned an unexpected CI payload"
 
+    if head is None:
+        try:
+            head = run(["git", "rev-parse", "HEAD"]).strip()
+        except Exception:
+            head = None
+
     indecisive = 0
+    stale_failure_ci: dict | None = None
     for row in latest_trunk:
         if not isinstance(row, dict):
             continue
@@ -443,20 +456,53 @@ def fold_latest_trunk_ci(latest_trunk: object,
         if conclusion not in _DECISIVE_CI_CONCLUSIONS:
             indecisive += 1
             continue
+
+        sha = str(row.get("headSha") or "").strip()
+        behind = -1
+        if isinstance(row.get("commits_behind_head"), int) and not isinstance(row.get("commits_behind_head"), bool):
+            behind = row["commits_behind_head"]
+        elif sha and head:
+            if run_status(["git", "merge-base", "--is-ancestor", sha, head]) == 0:
+                try:
+                    behind = int(run(["git", "rev-list", "--count", f"{sha}..{head}"]).strip())
+                except (ValueError, Exception):
+                    behind = -1
+
+        is_stale = bool(conclusion != "success" and behind > max_commits_behind)
         trunk_ci = {
             "conclusion": conclusion,
-            "head_sha": (str(row.get("headSha") or "")[:7] or None),
+            "head_sha": (sha[:7] or None),
             "updated_at": row.get("updatedAt"),
             "attempt": row.get("attempt"),
             "database_id": row.get("databaseId"),
             "url": row.get("url"),
             "indecisive_runs_since": indecisive,
+            "commits_behind_head": behind if behind >= 0 else None,
+            "stale": is_stale,
         }
         if conclusion == "success":
             return "green", trunk_ci, None
+
+        if is_stale:
+            if stale_failure_ci is None:
+                stale_failure_ci = trunk_ci
+            indecisive += 1
+            continue
+
         return "red", trunk_ci, (
             f"latest decisive main {workflow} run is not green; a release cut on "
             "this base inherits that failure"
+        )
+
+    if stale_failure_ci is not None:
+        behind_msg = (
+            f" ({stale_failure_ci['commits_behind_head']} commits behind HEAD)"
+            if stale_failure_ci.get("commits_behind_head") is not None
+            else ""
+        )
+        return "none", stale_failure_ci, (
+            f"latest decisive main {workflow} run is stale{behind_msg} and "
+            f"past the {max_commits_behind}-commit staleness horizon"
         )
     return "none", None, f"no decisive completed {workflow} run on main in the last 30"
 
@@ -483,14 +529,16 @@ def _run_age_seconds(updated_at: object) -> int | None:
 
 
 def decisive_runs_with_ancestry(latest_trunk: object, head: str,
-                                *, limit: int = 20) -> list[dict]:
+                                *, limit: int = 20,
+                                max_commits_behind: int = DEFAULT_CI_STALENESS_HORIZON_COMMITS) -> list[dict]:
     """Normalize recent DECISIVE trunk runs into green-ancestor evidence (#2655).
 
     Each element is ``{result, head_sha, ancestor_of_head, commits_behind_head,
-    age_seconds}``. ``result`` folds the gh conclusion to ``"green"``/``"red"``;
+    age_seconds, stale}``. ``result`` folds the gh conclusion to ``"green"``/``"red"``;
     ``commits_behind_head`` is the git distance ``sha..HEAD`` (0 == the run is on
     HEAD), or -1 when ``sha`` is not an ancestor of HEAD or the distance cannot be
-    read. This is what lets ``release_decide`` accept a green ANCESTOR when the
+    read. Failed runs older than ``max_commits_behind`` are marked ``stale=True``
+    (#12169). This is what lets ``release_decide`` accept a green ANCESTOR when the
     exact-HEAD run is unobservable on a churned trunk, while still refusing a cut
     when a red decisive run sits between that green ancestor and HEAD.
 
@@ -510,17 +558,21 @@ def decisive_runs_with_ancestry(latest_trunk: object, head: str,
         ancestor = bool(sha) and run_status(
             ["git", "merge-base", "--is-ancestor", sha, head]) == 0
         behind = -1
-        if ancestor:
+        if isinstance(row.get("commits_behind_head"), int) and not isinstance(row.get("commits_behind_head"), bool):
+            behind = row["commits_behind_head"]
+        elif ancestor:
             try:
                 behind = int(run(["git", "rev-list", "--count", f"{sha}..{head}"]).strip())
             except ValueError:
                 behind = -1
+        is_stale = bool(conclusion != "success" and behind > max_commits_behind)
         out.append({
             "result": "green" if conclusion == "success" else "red",
             "head_sha": sha[:7] or None,
             "ancestor_of_head": ancestor,
             "commits_behind_head": behind,
             "age_seconds": _run_age_seconds(row.get("updatedAt")),
+            "stale": is_stale,
         })
         if len(out) >= limit:
             break
@@ -568,7 +620,7 @@ def ci_signal_for_workflow(workflow: str, default_branch: str = DEFAULT_BRANCH,
         "--status", "completed", "--limit", "30",
         "--json", "conclusion,headSha,updatedAt,attempt,databaseId,url",
     ])
-    status, latest, note = fold_latest_trunk_ci(latest_trunk, workflow)
+    status, latest, note = fold_latest_trunk_ci(latest_trunk, workflow, head=head)
     return {
         "workflow": workflow,
         "status": status,

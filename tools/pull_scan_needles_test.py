@@ -2,9 +2,9 @@
 """Tests for tools/pull_scan_needles.py -- the hard-cut scan-instructions puller.
 
 Proves the self-healing contract the `scan-needles` control-pane loop relies on:
---check is OK when pulled OR no private repo is reachable, and ACTION (exit 1)
-only when a private repo is reachable but the needles are not pulled. Also covers
-the canonical-artifact preference, pull, status, and dump. Pure stdlib.
+default discovery selects the authorized sibling, a retired-source sidecar is
+rejected, a current loaded sidecar reports full mode, and an absent sidecar is
+explicitly shape-only. Pure stdlib.
 """
 from __future__ import annotations
 
@@ -39,48 +39,99 @@ def main() -> int:
             failures.append(name)
 
     with tempfile.TemporaryDirectory() as tmp:
-        public = os.path.join(tmp, "public")
+        public = os.path.join(tmp, "fak")
         os.makedirs(public)
-        private = os.path.join(tmp, "private")
+        private = os.path.join(tmp, "fak-private")
+        legacy = os.path.join(tmp, "fleet")
+        missing = os.path.join(tmp, "unavailable")
         os.makedirs(private)
-        missing = os.path.join(tmp, "nope")
-        write(os.path.join(private, "scrub_needles.json"),
-              json.dumps({"schema": "fleet-scrub-needles/1", "audit_needles": ["AAA"],
-                          "export_audit_needles": ["AAA", "BBB"]}))
+        os.makedirs(legacy)
+        authorized_audit = ["fixture-authorized-audit"]
+        authorized_export = authorized_audit + ["fixture-authorized-export"]
+        legacy_audit = ["fixture-retired-audit"]
+        legacy_export = legacy_audit + ["fixture-retired-export"]
+        write(os.path.join(private, "scrub_needles.json"), json.dumps({
+            "schema": "fleet-scrub-needles/1",
+            "audit_needles": authorized_audit,
+            "export_audit_needles": authorized_export,
+        }))
+        write(os.path.join(legacy, "scrub_needles.json"), json.dumps({
+            "schema": "fleet-scrub-needles/1",
+            "audit_needles": legacy_audit,
+            "export_audit_needles": legacy_export,
+        }))
 
-        # 1) --check, no sidecar, NO private repo -> OK (no nag where you can't pull)
+        # 1) No sidecar is explicit shape-only, while default discovery still sees
+        # the authorized sibling and never reports local paths or needle values.
+        rc, out = run("--check", "--json", "--public-dir", public)
+        payload = json.loads(out)
+        check("absent sidecar exits 1", rc == 1, out)
+        check("absent sidecar is shape-only", payload.get("pulled") is False and
+              payload.get("mode") == "shape-only-pullable", out)
+        check("absent receipt is value-free", tmp not in out and
+              not any(value in out for value in authorized_export + legacy_export), out)
+
         rc, out = run("--check", "--json", "--public-dir", public, "--from", missing)
-        check("check no-private exits 0", rc == 0, out)
-        check("check no-private mode", '"shape-only-no-private"' in out, out)
+        payload = json.loads(out)
+        check("absent companion exits 0", rc == 0, out)
+        check("absent companion is explicit shape-only", payload.get("pulled") is False and
+              payload.get("mode") == "shape-only-no-private", out)
+        check("absent-companion receipt is value-free", tmp not in out, out)
 
-        # 2) --check, no sidecar, private REACHABLE -> ACTION (exit 1) so recover fires
-        rc, out = run("--check", "--json", "--public-dir", public, "--from", private)
-        check("check pullable exits 1", rc == 1, out)
-        check("check pullable mode", '"shape-only-pullable"' in out, out)
-
-        # 3) pull reads the canonical scrub_needles.json artifact
-        rc, out = run("--public-dir", public, "--from", private)
-        check("pull exits 0", rc == 0, out)
+        # 2) A sidecar attributed to the retired sibling is not accepted as full.
         sidecar = os.path.join(public, "tools", "_registry", "scrub_needles.private.json")
-        check("sidecar written", os.path.isfile(sidecar), out)
-        if os.path.isfile(sidecar):
-            data = json.load(open(sidecar, encoding="utf-8"))
-            check("sidecar has export needles", data.get("export_audit_needles") == ["AAA", "BBB"], str(data))
-            check("source is the canonical artifact", str(data.get("source", "")).endswith("scrub_needles.json"), str(data))
+        write(sidecar, json.dumps({
+            "schema": "fleet-scrub-needles/1",
+            "source": os.path.join(legacy, "scrub_needles.json"),
+            "audit_needles": legacy_audit,
+            "export_audit_needles": legacy_export,
+        }))
+        rc, out = run("--check", "--json", "--public-dir", public)
+        payload = json.loads(out)
+        check("retired sidecar is rejected", rc == 1 and payload.get("pulled") is False and
+              payload.get("mode") == "shape-only-pullable", out)
+        check("retired receipt is value-free", tmp not in out and
+              not any(value in out for value in legacy_export), out)
 
-        # 4) --check after pull -> OK, full mode
-        rc, out = run("--check", "--json", "--public-dir", public, "--from", private)
-        check("check after pull exits 0", rc == 0, out)
-        check("check after pull is full", '"full"' in out, out)
+        # 3) Default pull selects fak-private, ignoring the present retired sibling.
+        os.remove(sidecar)
+        rc, out = run("--public-dir", public)
+        check("default authorized pull exits 0", rc == 0, out)
+        check("pull output is value-free", tmp not in out and
+              not any(value in out for value in authorized_export + legacy_export), out)
+        data = json.load(open(sidecar, encoding="utf-8"))
+        sidecar_summary = {
+            "source": data.get("source"),
+            "has_digest": bool(data.get("source_digest")),
+            "audit_count": len(data.get("audit_needles") or []),
+            "export_count": len(data.get("export_audit_needles") or []),
+        }
+        check("authorized artifact wins", data.get("audit_needles") == authorized_audit and
+              data.get("export_audit_needles") == authorized_export, str(sidecar_summary))
+        check("sidecar stores portable source identity", data.get("source") == "scrub_needles.json",
+              str(sidecar_summary))
+        check("sidecar carries freshness digest", bool(data.get("source_digest")),
+              str(sidecar_summary))
 
-        # 5) --status reports pulled
+        # 4) A current, actually loaded sidecar reports pulled=true/full without values.
+        rc, out = run("--check", "--json", "--public-dir", public)
+        payload = json.loads(out)
+        check("current sidecar exits 0", rc == 0, out)
+        check("current sidecar is full", payload.get("pulled") is True and
+              payload.get("mode") == "full", out)
+        check("full receipt is value-free", tmp not in out and
+              not any(value in out for value in authorized_export), out)
+
+        # 5) Human status is also value-free.
         rc, out = run("--status", "--public-dir", public)
-        check("status reports PULLED", rc == 0 and "PULLED" in out, out)
+        check("status reports PULLED", rc == 0 and "PULLED" in out and tmp not in out, out)
 
-        # 6) --dump emits the canonical artifact
+        # 6) The explicit canonical-artifact export remains available.
         rc, out = run("--dump", "--from", private)
+        dumped = json.loads(out)
         check("dump exits 0", rc == 0, out)
-        check("dump contains needles", '"BBB"' in out, out)
+        check("dump preserves canonical fixture", dumped.get("audit_needles") == authorized_audit and
+              dumped.get("export_audit_needles") == authorized_export, "unexpected fixture counts")
 
     print()
     if failures:

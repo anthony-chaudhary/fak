@@ -162,10 +162,10 @@ fi
 tier_mode="${FLEET_TIER_GUARD:-block}"
 if [ "$tier_mode" != "off" ] && [ "${ALLOW_TIER_DRIFT:-0}" != "1" ]; then
 	if command -v fak >/dev/null 2>&1; then
-		tier_out="$(fak hygiene --root "$root" --gates TIER_DECLARED 2>&1)"
+		tier_out="$(fak hygiene --root "$root" --gates TIER_DECLARED,NEW_PYTHON_TOOL 2>&1)"
 		tier_status=$?
 	elif command -v go >/dev/null 2>&1; then
-		tier_out="$(cd "$root" && go run ./cmd/fak hygiene --root "$root" --gates TIER_DECLARED 2>&1)"
+		tier_out="$(cd "$root" && go run ./cmd/fak hygiene --root "$root" --gates TIER_DECLARED,NEW_PYTHON_TOOL 2>&1)"
 		tier_status=$?
 	else
 		tier_out="neither 'fak' nor 'go' is on PATH"
