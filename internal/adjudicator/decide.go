@@ -499,6 +499,98 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) (verdict 
 		}
 	}
 
+	// In-syscall transparent transform from grep-family tools to fak_grep (#11499).
+	if (lowerTool == "grep" || lowerTool == "rg" || lowerTool == "ripgrep" || lowerTool == "search") && args != nil {
+		var patternVal any
+		patternFound := false
+		for _, key := range []string{"pattern", "regex", "query"} {
+			if v, ok := args[key]; ok && v != nil {
+				patternVal = v
+				patternFound = true
+				break
+			}
+		}
+		if patternFound {
+			var pathVal any
+			pathFound := false
+			for _, key := range []string{"path", "filePath", "file_path", "dir", "directory"} {
+				if v, ok := args[key]; ok && v != nil {
+					pathVal = v
+					pathFound = true
+					break
+				}
+			}
+
+			normalizedArgs := make(map[string]any, len(args))
+			for k, v := range args {
+				switch k {
+				case "pattern", "regex", "query", "path", "filePath", "file_path", "dir", "directory":
+					continue
+				default:
+					normalizedArgs[k] = v
+				}
+			}
+			normalizedArgs["pattern"] = patternVal
+			if pathFound && pathVal != nil {
+				normalizedArgs["path"] = pathVal
+			}
+			if ref, ok := putJSON(ctx, normalizedArgs); ok {
+				return abi.Verdict{
+					Kind:    abi.VerdictTransform,
+					By:      "monitor/grep_to_fak_grep",
+					Payload: abi.TransformPayload{NewTool: "fak_grep", NewArgs: ref},
+					Meta:    map[string]string{"reversibility_autorepair": "grep_to_fak_grep"},
+				}
+			}
+		}
+	}
+
+	// In-syscall transparent transform from glob-family tools to fak_glob (#11499).
+	if (lowerTool == "glob" || lowerTool == "find") && args != nil {
+		var patternVal any
+		patternFound := false
+		for _, key := range []string{"pattern", "glob", "query"} {
+			if v, ok := args[key]; ok && v != nil {
+				patternVal = v
+				patternFound = true
+				break
+			}
+		}
+		if patternFound {
+			var pathVal any
+			pathFound := false
+			for _, key := range []string{"path", "directory", "dir", "filePath", "file_path"} {
+				if v, ok := args[key]; ok && v != nil {
+					pathVal = v
+					pathFound = true
+					break
+				}
+			}
+
+			normalizedArgs := make(map[string]any, len(args))
+			for k, v := range args {
+				switch k {
+				case "pattern", "glob", "query", "path", "directory", "dir", "filePath", "file_path":
+					continue
+				default:
+					normalizedArgs[k] = v
+				}
+			}
+			normalizedArgs["pattern"] = patternVal
+			if pathFound && pathVal != nil {
+				normalizedArgs["path"] = pathVal
+			}
+			if ref, ok := putJSON(ctx, normalizedArgs); ok {
+				return abi.Verdict{
+					Kind:    abi.VerdictTransform,
+					By:      "monitor/glob_to_fak_glob",
+					Payload: abi.TransformPayload{NewTool: "fak_glob", NewArgs: ref},
+					Meta:    map[string]string{"reversibility_autorepair": "glob_to_fak_glob"},
+				}
+			}
+		}
+	}
+
 	// Coarse risk class for the RungProfile (#666). Computed ONCE from the DECODED
 	// args (never model-controlled Meta), and ONLY when a profile is installed — a
 	// nil profile runs every rung regardless (pr.runs == true), so the default floor
@@ -1376,6 +1468,7 @@ func DefaultPolicy() Policy {
 			"calculate": true, "search_direct_flight": true,
 			"transfer_to_human_agents": true, "send_certificate": true,
 			"book_reservation": true, "update_reservation_flights": true,
+			"fak_grep": true, "fak_glob": true,
 		},
 		AllowPrefix: []string{"read_", "get_", "search_", "list_", "lookup_", "find_", "calc"},
 		Deny: map[string]abi.ReasonCode{
