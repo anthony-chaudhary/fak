@@ -81,6 +81,9 @@ var (
 
 	// ErrCheckpointAlreadyRestored is returned when attempting to restore an already-restored checkpoint.
 	ErrCheckpointAlreadyRestored = errors.New("ctxmmu: checkpoint already restored")
+
+	// ErrInvalidAcceptedCount is returned when accepted count is out of bounds.
+	ErrInvalidAcceptedCount = errors.New("ctxmmu: invalid accepted token count")
 )
 
 // AttentionGeometry identifies the mask topology.
@@ -192,13 +195,130 @@ type RoPEOffsets struct {
 	PositionDelta int64    `json:"position_delta"`
 }
 
+// MTPDraftPage records a speculative KV page association during MTP candidate drafting.
+type MTPDraftPage struct {
+	TokenIndex int              `json:"token_index"`
+	TokenID    int32            `json:"token_id"`
+	PageBlock  *PageBlock       `json:"-"`
+	KVBlock    *PhysicalKVBlock `json:"-"`
+	Committed  bool             `json:"committed"`
+}
+
 // MTPDraftState snapshots speculative multi-token prediction draft depth, tokens, and rollback state.
 type MTPDraftState struct {
-	DraftDepth       int     `json:"draft_depth"`
-	DraftTokens      []int32 `json:"draft_tokens"`
-	AcceptedCount    int     `json:"accepted_count"`
-	RollbackState    []byte  `json:"rollback_state,omitempty"`
-	RollbackOccurred bool    `json:"rollback_occurred"`
+	mu               *sync.Mutex
+	DraftDepth       int             `json:"draft_depth"`
+	DraftTokens      []int32         `json:"draft_tokens"`
+	AcceptedCount    int             `json:"accepted_count"`
+	RollbackState    []byte          `json:"rollback_state,omitempty"`
+	RollbackOccurred bool            `json:"rollback_occurred"`
+	AllocatedPages   int             `json:"allocated_pages"`
+	CommittedPages   int             `json:"committed_pages"`
+	FreedPages       int             `json:"freed_pages"`
+	DraftPages       []*MTPDraftPage `json:"-"`
+}
+
+func (s *MTPDraftState) getMutex() *sync.Mutex {
+	if s.mu == nil {
+		s.mu = &sync.Mutex{}
+	}
+	return s.mu
+}
+
+// RecordDraft registers candidate draft tokens and associates speculative page blocks.
+func (s *MTPDraftState) RecordDraft(tokens []int32, pages ...*PageBlock) {
+	mu := s.getMutex()
+	mu.Lock()
+	defer mu.Unlock()
+
+	s.DraftDepth = len(tokens)
+	s.DraftTokens = make([]int32, len(tokens))
+	copy(s.DraftTokens, tokens)
+	s.AcceptedCount = 0
+	s.RollbackOccurred = false
+
+	// If there were existing uncommitted draft pages, free them first to prevent leaks
+	for _, dp := range s.DraftPages {
+		if dp != nil && !dp.Committed {
+			if dp.PageBlock != nil {
+				dp.PageBlock.Release()
+				dp.PageBlock = nil
+			}
+			if dp.KVBlock != nil {
+				dp.KVBlock.Release()
+				dp.KVBlock = nil
+			}
+			s.FreedPages++
+		}
+	}
+
+	s.DraftPages = make([]*MTPDraftPage, 0, len(tokens))
+	for i, tok := range tokens {
+		var pb *PageBlock
+		if i < len(pages) {
+			pb = pages[i]
+		}
+		if pb != nil {
+			pb.Retain()
+		}
+		s.AllocatedPages++
+		s.DraftPages = append(s.DraftPages, &MTPDraftPage{
+			TokenIndex: i,
+			TokenID:    tok,
+			PageBlock:  pb,
+			Committed:  false,
+		})
+	}
+}
+
+// CommitDraft atomically commits accepted draft tokens and immediately frees rejected draft pages.
+func (s *MTPDraftState) CommitDraft(accepted int) (committedPages int, freedPages int, err error) {
+	mu := s.getMutex()
+	mu.Lock()
+	defer mu.Unlock()
+
+	if accepted < 0 || accepted > len(s.DraftTokens) {
+		return 0, 0, fmt.Errorf("%w: accepted %d outside draft range [0, %d]", ErrInvalidAcceptedCount, accepted, len(s.DraftTokens))
+	}
+
+	s.AcceptedCount = accepted
+	s.RollbackOccurred = accepted < len(s.DraftTokens)
+
+	for i := 0; i < len(s.DraftPages); i++ {
+		dp := s.DraftPages[i]
+		if dp == nil {
+			continue
+		}
+		if i < accepted {
+			dp.Committed = true
+			committedPages++
+			s.CommittedPages++
+		} else {
+			// Immediately free rejected speculative draft page without memory leaks
+			if dp.PageBlock != nil {
+				dp.PageBlock.Release()
+				dp.PageBlock = nil
+			}
+			if dp.KVBlock != nil {
+				dp.KVBlock.Release()
+				dp.KVBlock = nil
+			}
+			freedPages++
+			s.FreedPages++
+		}
+	}
+
+	// Keep only accepted pages in the active draft page list
+	if accepted < len(s.DraftPages) {
+		s.DraftPages = s.DraftPages[:accepted]
+	}
+	return committedPages, freedPages, nil
+}
+
+// RollbackDraft frees all active speculative draft pages without memory leaks.
+func (s *MTPDraftState) RollbackDraft() (freedPages int, err error) {
+	_, freed, err := s.CommitDraft(0)
+	return freed, err
 }
 
 // SessionDescriptor encapsulates all lightweight sequence and physical block descriptors
@@ -264,6 +384,40 @@ func (d *SessionDescriptor) releasePinsLocked() {
 			cowBlk.Release()
 		}
 	}
+	for _, dp := range d.MTPState.DraftPages {
+		if dp != nil && !dp.Committed {
+			if dp.PageBlock != nil {
+				dp.PageBlock.Release()
+				dp.PageBlock = nil
+			}
+			if dp.KVBlock != nil {
+				dp.KVBlock.Release()
+				dp.KVBlock = nil
+			}
+			d.MTPState.FreedPages++
+		}
+	}
+}
+
+// RecordMTPDraft registers candidate draft tokens and associates speculative pages under descriptor lock.
+func (d *SessionDescriptor) RecordMTPDraft(tokens []int32, pages ...*PageBlock) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.MTPState.RecordDraft(tokens, pages...)
+}
+
+// CommitMTPDraft atomically commits accepted draft tokens and frees rejected speculative pages.
+func (d *SessionDescriptor) CommitMTPDraft(accepted int) (int, int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.MTPState.CommitDraft(accepted)
+}
+
+// RollbackMTPDraft frees all speculative draft pages.
+func (d *SessionDescriptor) RollbackMTPDraft() (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.MTPState.RollbackDraft()
 }
 
 // SetExpiresAt sets an explicit expiration time on the descriptor.
@@ -666,6 +820,40 @@ func (cm *CheckpointManager) GetCheckpoint(sessionID string) (*SessionDescriptor
 		return nil, ErrCheckpointNotFound
 	}
 	return desc, nil
+}
+
+// RecordMTPDraft registers candidate draft tokens for a session's checkpoint.
+func (cm *CheckpointManager) RecordMTPDraft(sessionID string, tokens []int32, pages ...*PageBlock) error {
+	cm.mu.RLock()
+	desc, ok := cm.checkpoints[sessionID]
+	cm.mu.RUnlock()
+	if !ok {
+		return ErrCheckpointNotFound
+	}
+	desc.RecordMTPDraft(tokens, pages...)
+	return nil
+}
+
+// CommitMTPDraft atomically commits accepted draft tokens for a session and frees rejected draft pages.
+func (cm *CheckpointManager) CommitMTPDraft(sessionID string, accepted int) (int, int, error) {
+	cm.mu.RLock()
+	desc, ok := cm.checkpoints[sessionID]
+	cm.mu.RUnlock()
+	if !ok {
+		return 0, 0, ErrCheckpointNotFound
+	}
+	return desc.CommitMTPDraft(accepted)
+}
+
+// RollbackMTPDraft rolls back and frees all speculative draft pages for a session without memory leaks.
+func (cm *CheckpointManager) RollbackMTPDraft(sessionID string) (int, error) {
+	cm.mu.RLock()
+	desc, ok := cm.checkpoints[sessionID]
+	cm.mu.RUnlock()
+	if !ok {
+		return 0, ErrCheckpointNotFound
+	}
+	return desc.RollbackMTPDraft()
 }
 
 // ReapExpiredCheckpoints scans all stored checkpoints and reaps those that have expired,
