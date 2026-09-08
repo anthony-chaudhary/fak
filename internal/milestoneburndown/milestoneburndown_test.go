@@ -2,6 +2,7 @@ package milestoneburndown
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -336,5 +337,280 @@ func TestRenderSmoke(t *testing.T) {
 	out := Render(Fold(Interpret(ms, 28, fixedNow, ""), FoldOpts{Date: "2026-07-10"}))
 	if !strings.Contains(out, "MILESTONE BURNDOWN") || !strings.Contains(out, "OVERDUE") {
 		t.Errorf("render missing expected content:\n%s", out)
+	}
+}
+
+func TestCohortTrackingDecouplesDiscoveryFromDrain(t *testing.T) {
+	base := BurndownBaseline{
+		Schema:      BaselineSchema,
+		Date:        "2026-07-13",
+		Commit:      "31c6538b",
+		OpenTotal:   100,
+		ClosedTotal: 50,
+		Total:       150,
+	}
+	// 40 issues from the baseline cohort were closed (closed 50 -> 90),
+	// but 40 new issues were filed (open 100 - 40 + 40 = 100).
+	// Gross open stays 100 (net change 0), but 40% of original cohort actually drained.
+	cur := Portfolio{
+		OpenTotal:   100,
+		ClosedTotal: 90,
+	}
+	cohort := ComputeCohortProgress(base, cur)
+
+	if cohort.BaselineOpen != 100 {
+		t.Errorf("baseline open = %d, want 100", cohort.BaselineOpen)
+	}
+	if cohort.CurrentOpen != 100 {
+		t.Errorf("current open = %d, want 100", cohort.CurrentOpen)
+	}
+	if cohort.CohortDrained != 40 {
+		t.Errorf("cohort drained = %d, want 40", cohort.CohortDrained)
+	}
+	if cohort.CohortRemaining != 60 {
+		t.Errorf("cohort remaining = %d, want 60", cohort.CohortRemaining)
+	}
+	if cohort.DrainPct != 40.0 {
+		t.Errorf("drain pct = %v, want 40.0", cohort.DrainPct)
+	}
+	if cohort.SurvivalPct != 60.0 {
+		t.Errorf("survival pct = %v, want 60.0", cohort.SurvivalPct)
+	}
+	if cohort.Discovered != 40 {
+		t.Errorf("discovered = %d, want 40", cohort.Discovered)
+	}
+	if cohort.ExpansionRatio != 1.40 {
+		t.Errorf("expansion ratio = %v, want 1.40", cohort.ExpansionRatio)
+	}
+	if cohort.DiscoveryMult != 1.00 {
+		t.Errorf("discovery multiplier = %v, want 1.00", cohort.DiscoveryMult)
+	}
+
+	p := cur.WithCohort(cohort)
+	if p.Cohort == nil || p.Cohort.CohortDrained != 40 {
+		t.Fatalf("WithCohort failed to attach cohort to Portfolio")
+	}
+}
+
+func TestLedgerCohortRoundTripAndLegacyCompatibility(t *testing.T) {
+	// 1. Round-trip row with full cohort fields
+	row := LedgerRow{
+		Schema:         LedgerSchema,
+		Date:           "2026-09-07",
+		Commit:         "ce4a342d9",
+		GeneratedAt:    "2026-09-07T14:20:12Z",
+		Verdict:        "OK",
+		Total:          20,
+		OpenTotal:      580,
+		ClosedTotal:    120,
+		AtRiskDebt:     38,
+		BaselineOpen:   386,
+		CohortDrained:  120,
+		CohortSurvival: 68.9,
+		CohortDrain:    31.1,
+		Discovered:     314,
+		ExpansionRatio: 1.81,
+	}
+	line, err := trendreport.AppendLedgerLine(row)
+	if err != nil {
+		t.Fatalf("AppendLedgerLine: %v", err)
+	}
+	rows := ParseLedger(line)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 parsed row, got %d", len(rows))
+	}
+	got := rows[0]
+	if got.BaselineOpen != 386 || got.CohortDrained != 120 || got.CohortDrain != 31.1 ||
+		got.CohortSurvival != 68.9 || got.Discovered != 314 || got.ExpansionRatio != 1.81 ||
+		got.ClosedTotal != 120 {
+		t.Errorf("round-trip mismatch: got %+v want %+v", got, row)
+	}
+
+	// 2. Legacy compatibility: line without closed_total or cohort fields
+	legacyLine := `{"schema":"fak-milestone-burndown-ledger/1","date":"2026-07-13","commit":"31c6538b","generated_at":"2026-07-13T11:32:31Z","verdict":"OK","total":17,"overdue":1,"at_risk":2,"no_due_date":6,"on_track":8,"done":0,"open_total":386,"at_risk_debt":13}`
+	parsed := ParseLedger(legacyLine)
+	if len(parsed) != 1 {
+		t.Fatalf("expected 1 legacy row, got %d", len(parsed))
+	}
+	leg := parsed[0]
+	if leg.OpenTotal != 386 || leg.Date != "2026-07-13" || leg.BaselineOpen != 0 || leg.CohortDrained != 0 {
+		t.Errorf("legacy parse mismatch: %+v", leg)
+	}
+}
+
+func TestTrendVsLastCohortProgression(t *testing.T) {
+	prior := LedgerRow{
+		Date:           "2026-08-24",
+		Commit:         "307ae3213",
+		AtRiskDebt:     37,
+		BaselineOpen:   386,
+		CohortDrain:    25.0,
+		CohortSurvival: 75.0,
+		Discovered:     150,
+		ExpansionRatio: 1.39,
+	}
+	cur := LedgerRow{
+		Date:           "2026-08-31",
+		Commit:         "ecdae2ce0",
+		AtRiskDebt:     39,
+		BaselineOpen:   386,
+		CohortDrain:    31.5,
+		CohortSurvival: 68.5,
+		Discovered:     190,
+		ExpansionRatio: 1.49,
+	}
+
+	tr := TrendVsLast(cur, []LedgerRow{prior})
+	if tr.CohortDrainFrom != 25.0 || tr.CohortDrainTo != 31.5 {
+		t.Errorf("cohort drain from/to = %v/%v, want 25.0/31.5", tr.CohortDrainFrom, tr.CohortDrainTo)
+	}
+	if tr.CohortDrainDelta != 6.5 {
+		t.Errorf("cohort drain delta = %v, want 6.5", tr.CohortDrainDelta)
+	}
+	if tr.CohortSurvivalDelta != -6.5 {
+		t.Errorf("cohort survival delta = %v, want -6.5", tr.CohortSurvivalDelta)
+	}
+	if tr.DiscoveredDelta != 40 {
+		t.Errorf("discovered delta = %d, want 40", tr.DiscoveredDelta)
+	}
+	if tr.ExpansionDelta != 0.10 {
+		t.Errorf("expansion delta = %v, want 0.10", tr.ExpansionDelta)
+	}
+	if !strings.Contains(tr.Summary, "cohort drained +6.5% vs 2026-08-24") {
+		t.Errorf("summary missing cohort drained delta clause: %q", tr.Summary)
+	}
+
+	// Flat cohort drain delta does not append cohort clause
+	flatCur := cur
+	flatCur.CohortDrain = 25.0
+	flatTr := TrendVsLast(flatCur, []LedgerRow{prior})
+	if strings.Contains(flatTr.Summary, "cohort drained") {
+		t.Errorf("flat cohort drain should not append cohort drained clause, got %q", flatTr.Summary)
+	}
+}
+
+func TestRenderCohortProgress(t *testing.T) {
+	ms := []Milestone{
+		{Number: 1, Title: "Milestone One", DueOn: "2026-07-20T00:00:00Z", Open: 2, Closed: 8, ClosedInWindow: 5, WindowDays: 28},
+	}
+	p := Interpret(ms, 28, fixedNow, "")
+	cohort := CohortProgress{
+		BaselineDate:    "2026-07-13",
+		BaselineOpen:    100,
+		CurrentOpen:     90,
+		CohortDrained:   30,
+		CohortRemaining: 70,
+		DrainPct:        30.0,
+		SurvivalPct:     70.0,
+		Discovered:      20,
+		ExpansionRatio:  1.20,
+		DiscoveryMult:   0.67,
+	}
+	p = p.WithCohort(cohort)
+	rep := Fold(p, FoldOpts{Date: "2026-07-20", Commit: "1234abc"})
+	out := Render(rep)
+
+	wantSubstrings := []string{
+		"cohort progress (2026-07-13, 100 baseline open):",
+		"original cohort: 30.0% drained (30/100 closed, 70 surviving | 70.0% survival)",
+		"gross discovery: 20 new issues filed (expansion ratio 1.20x, discovery:drain 0.67:1)",
+		"net-open change: -10 (gross open conflates 30 closures with 20 discoveries)",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(out, want) {
+			t.Errorf("Render missing %q in output:\n%s", want, out)
+		}
+	}
+}
+
+func TestBaselineFromLedger(t *testing.T) {
+	rows := []LedgerRow{
+		{Date: "2026-07-13", Commit: "31c6538b", OpenTotal: 386, ClosedTotal: 50, Total: 17},
+		{Date: "2026-07-20", Commit: "abcdef12", OpenTotal: 350, ClosedTotal: 90, Total: 17},
+	}
+
+	// 1. Default (date == "") returns earliest row
+	b1, ok := BaselineFromLedger(rows, "")
+	if !ok || b1.Date != "2026-07-13" || b1.OpenTotal != 386 || b1.Schema != BaselineSchema {
+		t.Errorf("BaselineFromLedger default: got %+v, ok=%v", b1, ok)
+	}
+
+	// 2. Exact date
+	b2, ok := BaselineFromLedger(rows, "2026-07-20")
+	if !ok || b2.Date != "2026-07-20" || b2.OpenTotal != 350 {
+		t.Errorf("BaselineFromLedger exact date: got %+v, ok=%v", b2, ok)
+	}
+
+	// 3. Unknown date
+	_, ok = BaselineFromLedger(rows, "2025-01-01")
+	if ok {
+		t.Errorf("BaselineFromLedger unknown date should return false")
+	}
+
+	// 4. Empty rows
+	_, ok = BaselineFromLedger(nil, "")
+	if ok {
+		t.Errorf("BaselineFromLedger empty rows should return false")
+	}
+
+	// 5. ParseBaseline valid JSON
+	raw := `{"schema":"fak-milestone-burndown-baseline/1","date":"2026-07-13","commit":"31c6538b","open_total":386,"closed_total":50,"total":17}`
+	parsed, err := ParseBaseline([]byte(raw))
+	if err != nil || parsed.OpenTotal != 386 || parsed.Date != "2026-07-13" {
+		t.Fatalf("ParseBaseline failed: %v, parsed=%+v", err, parsed)
+	}
+
+	// 6. ParseBaseline schema mismatch
+	badSchema := `{"schema":"bad-schema","date":"2026-07-13"}`
+	if _, err := ParseBaseline([]byte(badSchema)); err == nil {
+		t.Errorf("ParseBaseline should reject bad schema")
+	}
+}
+
+func TestCohortBoundaryConditionsAndInvariants(t *testing.T) {
+	// 1. BaselineOpen == 0
+	baseZero := BurndownBaseline{OpenTotal: 0}
+	cpZero := ComputeCohortProgress(baseZero, Portfolio{OpenTotal: 50, ClosedTotal: 20})
+	if cpZero.BaselineOpen != 0 || cpZero.DrainPct != 0 || cpZero.SurvivalPct != 0 {
+		t.Errorf("zero baseline should yield 0 pcts: %+v", cpZero)
+	}
+
+	// 2. CohortDrained == 0: DiscoveryMult must not divide by zero or yield NaN/Inf
+	base := BurndownBaseline{OpenTotal: 100, ClosedTotal: 10, Total: 110}
+	cpNoDrain := ComputeCohortProgress(base, Portfolio{OpenTotal: 120, ClosedTotal: 10})
+	if cpNoDrain.CohortDrained != 0 {
+		t.Errorf("drained = %d, want 0", cpNoDrain.CohortDrained)
+	}
+	if cpNoDrain.DiscoveryMult != 0.0 {
+		t.Errorf("discovery multiplier should be 0.0 when 0 drained, got %v", cpNoDrain.DiscoveryMult)
+	}
+	if math.IsNaN(cpNoDrain.DiscoveryMult) || math.IsInf(cpNoDrain.DiscoveryMult, 0) {
+		t.Errorf("discovery multiplier must be finite")
+	}
+
+	// 3. Closures exceed BaselineOpen: CohortDrained clamped to BaselineOpen, remaining 0
+	cpOver := ComputeCohortProgress(base, Portfolio{OpenTotal: 20, ClosedTotal: 200})
+	if cpOver.CohortDrained != 100 {
+		t.Errorf("drained should clamp to baseline open 100, got %d", cpOver.CohortDrained)
+	}
+	if cpOver.CohortRemaining != 0 {
+		t.Errorf("remaining should be 0, got %d", cpOver.CohortRemaining)
+	}
+	if cpOver.DrainPct != 100.0 || cpOver.SurvivalPct != 0.0 {
+		t.Errorf("drain/survival pct = %v/%v, want 100.0/0.0", cpOver.DrainPct, cpOver.SurvivalPct)
+	}
+
+	// 4. Invariant: CohortDrained + CohortRemaining == BaselineOpen
+	base100 := BurndownBaseline{OpenTotal: 100, ClosedTotal: 0, Total: 100}
+	for closed := 0; closed <= 100; closed += 17 {
+		cp := ComputeCohortProgress(base100, Portfolio{OpenTotal: 100 - closed, ClosedTotal: closed})
+		if cp.CohortDrained+cp.CohortRemaining != 100 {
+			t.Errorf("invariant broken for closed=%d: %d + %d != 100",
+				closed, cp.CohortDrained, cp.CohortRemaining)
+		}
+		if math.Abs((cp.DrainPct+cp.SurvivalPct)-100.0) > 0.1 {
+			t.Errorf("pct sum invariant broken for closed=%d: %v + %v != 100.0",
+				closed, cp.DrainPct, cp.SurvivalPct)
+		}
 	}
 }

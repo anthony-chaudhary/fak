@@ -259,6 +259,42 @@ func evaluateDispatchProgress(opts dispatchProgressOptions, stderr io.Writer) (m
 		"close_result":              nil,
 		"audit_error":               nil,
 	}
+
+	verifiedClosed := dispatchProgressVerifiedClosed(audit)
+	rec["verified_closed"] = verifiedClosed
+
+	if hasBaseline && baselineOpen > 0 {
+		rec["cohort_baseline"] = baselineOpen
+		drained := closedTotal
+		if drained > baselineOpen {
+			drained = baselineOpen
+		} else if drained < 0 {
+			drained = 0
+		}
+		cohortRemaining := baselineOpen - drained
+		drainPct := dispatchProgressRound1(100.0 * float64(drained) / float64(baselineOpen))
+		survivalPct := dispatchProgressRound1(100.0 * float64(cohortRemaining) / float64(baselineOpen))
+		rec["cohort_drained"] = drained
+		rec["cohort_remaining"] = cohortRemaining
+		rec["cohort_drain_pct"] = drainPct
+		rec["cohort_survival_pct"] = survivalPct
+
+		if ok {
+			curTotal := openNow + closedTotal
+			discovered := curTotal - baselineOpen
+			if discovered < 0 {
+				discovered = 0
+			}
+			expRatio := dispatchProgressRound2(float64(baselineOpen+discovered) / float64(baselineOpen))
+			discRatio := 0.0
+			if drained > 0 {
+				discRatio = dispatchProgressRound2(float64(discovered) / float64(drained))
+			}
+			rec["scope_expansion_count"] = discovered
+			rec["scope_expansion_ratio"] = expRatio
+			rec["discovery_drain_ratio"] = discRatio
+		}
+	}
 	for key, value := range dispatchProgressHourlyProjection(runsDir, now, rec) {
 		rec[key] = value
 	}
@@ -637,6 +673,34 @@ func dispatchProgressWitnessedOpen(audit map[string]any) []int {
 	return out
 }
 
+func dispatchProgressVerifiedClosed(audit map[string]any) int {
+	if audit == nil {
+		return 0
+	}
+	if v := dispatchMapInt(audit, "verified_closed"); v > 0 {
+		return v
+	}
+	if counts, ok := audit["counts"].(map[string]any); ok {
+		n := dispatchMapInt(counts, "TRUE_RESOLVED") + dispatchMapInt(counts, "DATA_RESOLVED")
+		if n > 0 {
+			return n
+		}
+	}
+	raw, _ := audit["issues"].([]any)
+	n := 0
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		b := dispatchMapString(m, "bucket")
+		if b == "TRUE_RESOLVED" || b == "DATA_RESOLVED" {
+			n++
+		}
+	}
+	return n
+}
+
 func dispatchProgressLoadBaseline(runsDir string) (int, bool) {
 	doc, err := dispatchReadJSONFile(filepath.Join(runsDir, dispatchProgressBaseline))
 	if err != nil {
@@ -894,6 +958,9 @@ func dispatchProgressMetrics(payload map[string]any) map[string]int64 {
 		"target_remaining", "closures_toward_target", "closures_target_remaining",
 		"witnessed_open", "closed_now", "closed_by_loop_total",
 		"starved_count", "aging_count", "oldest_wait_seconds",
+		"cohort_baseline", "cohort_drained", "cohort_remaining",
+		"cohort_drain_pct", "cohort_survival_pct",
+		"scope_expansion_count", "verified_closed",
 	}
 	out := map[string]int64{}
 	for _, key := range keys {
@@ -1022,6 +1089,36 @@ func renderDispatchProgress(p map[string]any) string {
 		dispatchMapFloat(p, "issues_per_hour_gap"),
 		dispatchMapInt(p, "projection_closed_count"),
 		dispatchMapFloat(p, "projection_window_hours"))
+	if cBase := dispatchMapInt(p, "cohort_baseline"); cBase > 0 {
+		cDrained := dispatchMapInt(p, "cohort_drained")
+		cRem := dispatchMapInt(p, "cohort_remaining")
+		drainPct := dispatchMapFloat(p, "cohort_drain_pct")
+		survPct := dispatchMapFloat(p, "cohort_survival_pct")
+		verified := dispatchMapInt(p, "verified_closed")
+		if verified == 0 {
+			verified = dispatchMapInt(p, "cohort_verified_drained")
+		}
+
+		verifiedClause := ""
+		if verified > 0 {
+			verifiedClause = fmt.Sprintf("; %d verified drain", verified)
+		}
+		fmt.Fprintf(&b, "  original cohort: %.1f%% drained (%d/%d closed, %d surviving | %.1f%% survival%s)\n",
+			drainPct, cDrained, cBase, cRem, survPct, verifiedClause)
+
+		if _, hasExp := p["scope_expansion_count"]; hasExp {
+			expCount := dispatchMapInt(p, "scope_expansion_count")
+			expRatio := dispatchMapFloat(p, "scope_expansion_ratio")
+			discRatio := dispatchMapFloat(p, "discovery_drain_ratio")
+			fmt.Fprintf(&b, "  scope expansion: %d new issues filed (expansion ratio %.2fx, discovery:drain %.2f:1)\n",
+				expCount, expRatio, discRatio)
+
+			openNow := dispatchMapInt(p, "open_now")
+			netOpen := openNow - cBase
+			fmt.Fprintf(&b, "  net-open change: %+d (gross open conflates %d closures with %d discoveries)\n",
+				netOpen, cDrained, expCount)
+		}
+	}
 	// Anti-starvation census, folded from dispatchaging over the ready set (#3590). Only
 	// rendered when an aging fold ran (the --aging-candidates ready set was supplied).
 	if _, ok := p["starved_count"]; ok {

@@ -1,6 +1,7 @@
 package milestoneburndown
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -15,8 +16,10 @@ import (
 
 // Schema is the report envelope schema id; LedgerSchema is the durable trend row.
 const (
-	Schema       = "fak-milestone-burndown/1"
-	LedgerSchema = "fak-milestone-burndown-ledger/1"
+	Schema             = "fak-milestone-burndown/1"
+	LedgerSchema       = "fak-milestone-burndown-ledger/1"
+	BaselineSchema     = "fak-milestone-burndown-baseline/1"
+	DefaultBaselineRel = "docs/milestones/burndown-baseline.json"
 )
 
 // DefaultWindowDays is the trailing window over which recent closure velocity is
@@ -89,21 +92,166 @@ type Row struct {
 	Note         string  `json:"note"`
 }
 
+// CohortProgress tracks the forward progress of a fixed baseline cohort of open
+// issues, decoupling genuine drain from new issue discovery.
+type CohortProgress struct {
+	BaselineDate    string  `json:"baseline_date,omitempty"`
+	BaselineCommit  string  `json:"baseline_commit,omitempty"`
+	BaselineOpen    int     `json:"baseline_open"`
+	BaselineClosed  int     `json:"baseline_closed,omitempty"`
+	BaselineTotal   int     `json:"baseline_total,omitempty"`
+	CurrentOpen     int     `json:"current_open"`
+	CurrentClosed   int     `json:"current_closed,omitempty"`
+	CohortDrained   int     `json:"cohort_drained"`
+	CohortRemaining int     `json:"cohort_remaining"`
+	SurvivalPct     float64 `json:"survival_pct"`
+	DrainPct        float64 `json:"drain_pct"`
+	Discovered      int     `json:"discovered"`
+	ExpansionRatio  float64 `json:"expansion_ratio"`
+	DiscoveryMult   float64 `json:"discovery_multiplier"`
+}
+
+// BurndownBaseline pins the baseline state of milestone burndown to track cohort drain.
+type BurndownBaseline struct {
+	Schema       string `json:"schema"`
+	Date         string `json:"date"`
+	Commit       string `json:"commit,omitempty"`
+	OpenTotal    int    `json:"open_total"`
+	ClosedTotal  int    `json:"closed_total,omitempty"`
+	Total        int    `json:"total,omitempty"`
+	BaselineOpen int    `json:"baseline_open,omitempty"`
+}
+
+// ParseBaseline unmarshals a JSON baseline record into BurndownBaseline.
+func ParseBaseline(data []byte) (BurndownBaseline, error) {
+	var b BurndownBaseline
+	if err := json.Unmarshal(data, &b); err != nil {
+		return BurndownBaseline{}, fmt.Errorf("parse burndown baseline: %w", err)
+	}
+	if b.Schema != "" && b.Schema != BaselineSchema {
+		return BurndownBaseline{}, fmt.Errorf("invalid baseline schema %q, want %q", b.Schema, BaselineSchema)
+	}
+	if b.OpenTotal == 0 && b.BaselineOpen > 0 {
+		b.OpenTotal = b.BaselineOpen
+	}
+	return b, nil
+}
+
+// BaselineFromLedger extracts a BurndownBaseline from durable JSONL ledger rows.
+// If date is empty, the earliest row (the baseline genesis) is used.
+func BaselineFromLedger(rows []LedgerRow, date string) (BurndownBaseline, bool) {
+	if len(rows) == 0 {
+		return BurndownBaseline{}, false
+	}
+	if date == "" {
+		r := rows[0]
+		return BurndownBaseline{
+			Schema:      BaselineSchema,
+			Date:        r.Date,
+			Commit:      r.Commit,
+			OpenTotal:   r.OpenTotal,
+			ClosedTotal: r.ClosedTotal,
+			Total:       r.Total,
+		}, true
+	}
+	for _, r := range rows {
+		if r.Date == date {
+			return BurndownBaseline{
+				Schema:      BaselineSchema,
+				Date:        r.Date,
+				Commit:      r.Commit,
+				OpenTotal:   r.OpenTotal,
+				ClosedTotal: r.ClosedTotal,
+				Total:       r.Total,
+			}, true
+		}
+	}
+	return BurndownBaseline{}, false
+}
+
+// ComputeCohortProgress computes CohortProgress cleanly with pure decoupled drain
+// and discovery calculations.
+func ComputeCohortProgress(base BurndownBaseline, cur Portfolio) CohortProgress {
+	baseOpen := base.OpenTotal
+	if baseOpen <= 0 {
+		baseOpen = base.BaselineOpen
+	}
+	baseClosed := base.ClosedTotal
+	baseTotal := base.Total
+	if baseTotal <= 0 {
+		baseTotal = baseOpen + baseClosed
+	}
+
+	curOpen := cur.OpenTotal
+	curClosed := cur.ClosedTotal
+	curTotal := curOpen + curClosed
+
+	cp := CohortProgress{
+		BaselineDate:   base.Date,
+		BaselineCommit: base.Commit,
+		BaselineOpen:   baseOpen,
+		BaselineClosed: baseClosed,
+		BaselineTotal:  baseTotal,
+		CurrentOpen:    curOpen,
+		CurrentClosed:  curClosed,
+	}
+
+	if baseOpen <= 0 {
+		return cp
+	}
+
+	closedDelta := curClosed - baseClosed
+	if closedDelta < 0 {
+		closedDelta = 0
+	}
+	drained := closedDelta
+	if drained > baseOpen {
+		drained = baseOpen
+	}
+	cp.CohortDrained = drained
+	cp.CohortRemaining = baseOpen - drained
+
+	cp.DrainPct = round1(100.0 * float64(cp.CohortDrained) / float64(baseOpen))
+	cp.SurvivalPct = round1(100.0 * float64(cp.CohortRemaining) / float64(baseOpen))
+
+	discovered := curTotal - baseTotal
+	if discovered < 0 {
+		discovered = 0
+	}
+	cp.Discovered = discovered
+
+	cp.ExpansionRatio = round2(float64(baseOpen+discovered) / float64(baseOpen))
+
+	if cp.CohortDrained > 0 {
+		cp.DiscoveryMult = round2(float64(discovered) / float64(cp.CohortDrained))
+	}
+
+	return cp
+}
+
 // Portfolio is the folded view over every milestone: the per-milestone rows plus
 // the counts and the single at-risk-debt integer the trend ledger tracks.
 type Portfolio struct {
-	Rows       []Row  `json:"rows"`
-	Total      int    `json:"total"`
-	OnTrack    int    `json:"on_track"`
-	AtRisk     int    `json:"at_risk"`
-	Overdue    int    `json:"overdue"`
-	NoDueDate  int    `json:"no_due_date"`
-	Done       int    `json:"done"`
-	OpenTotal  int    `json:"open_total"`
-	WindowDays int    `json:"window_days"`
-	AtRiskDebt int    `json:"at_risk_debt"`
-	Err        string `json:"err,omitempty"`
-	OK         bool   `json:"ok"`
+	Rows        []Row           `json:"rows"`
+	Total       int             `json:"total"`
+	OnTrack     int             `json:"on_track"`
+	AtRisk      int             `json:"at_risk"`
+	Overdue     int             `json:"overdue"`
+	NoDueDate   int             `json:"no_due_date"`
+	Done        int             `json:"done"`
+	OpenTotal   int             `json:"open_total"`
+	ClosedTotal int             `json:"closed_total"`
+	Cohort      *CohortProgress `json:"cohort,omitempty"`
+	WindowDays  int             `json:"window_days"`
+	AtRiskDebt  int             `json:"at_risk_debt"`
+	Err         string          `json:"err,omitempty"`
+	OK          bool            `json:"ok"`
+}
+
+// WithCohort attaches computed cohort progress to the portfolio.
+func (p Portfolio) WithCohort(cohort CohortProgress) Portfolio {
+	p.Cohort = &cohort
+	return p
 }
 
 // Report is the embeddable control-pane envelope plus the folded portfolio and an
@@ -145,6 +293,7 @@ func Interpret(ms []Milestone, windowDays int, now time.Time, readErr string) Po
 	p.Total = len(rows)
 	for _, r := range rows {
 		p.OpenTotal += r.Open
+		p.ClosedTotal += r.Closed
 		switch r.Status {
 		case StatusOverdue:
 			p.Overdue++
@@ -361,6 +510,16 @@ func Render(rep Report) string {
 	if rep.Trend != nil {
 		fmt.Fprintf(&b, "  trend: %s — %s\n", rep.Trend.Direction, rep.Trend.Summary)
 	}
+	if p.Cohort != nil && p.Cohort.BaselineOpen > 0 {
+		netOpen := p.Cohort.CurrentOpen - p.Cohort.BaselineOpen
+		fmt.Fprintf(&b, "  cohort progress (%s, %d baseline open):\n", p.Cohort.BaselineDate, p.Cohort.BaselineOpen)
+		fmt.Fprintf(&b, "    original cohort: %.1f%% drained (%d/%d closed, %d surviving | %.1f%% survival)\n",
+			p.Cohort.DrainPct, p.Cohort.CohortDrained, p.Cohort.BaselineOpen, p.Cohort.CohortRemaining, p.Cohort.SurvivalPct)
+		fmt.Fprintf(&b, "    gross discovery: %d new issues filed (expansion ratio %.2fx, discovery:drain %.2f:1)\n",
+			p.Cohort.Discovered, p.Cohort.ExpansionRatio, p.Cohort.DiscoveryMult)
+		fmt.Fprintf(&b, "    net-open change: %+d (gross open conflates %d closures with %d discoveries)\n",
+			netOpen, p.Cohort.CohortDrained, p.Cohort.Discovered)
+	}
 	b.WriteString("\n")
 	for _, r := range p.Rows {
 		due := r.DueOn
@@ -378,25 +537,32 @@ func Render(rep Report) string {
 // LedgerRow is the durable JSONL trend row: the flattened portfolio counts keyed by
 // date, with generated_at the same-day idempotency key.
 type LedgerRow struct {
-	Schema      string `json:"schema"`
-	Date        string `json:"date"`
-	Commit      string `json:"commit"`
-	GeneratedAt string `json:"generated_at"`
-	Verdict     string `json:"verdict"`
-	Total       int    `json:"total"`
-	Overdue     int    `json:"overdue"`
-	AtRisk      int    `json:"at_risk"`
-	NoDueDate   int    `json:"no_due_date"`
-	OnTrack     int    `json:"on_track"`
-	Done        int    `json:"done"`
-	OpenTotal   int    `json:"open_total"`
-	AtRiskDebt  int    `json:"at_risk_debt"`
+	Schema         string  `json:"schema"`
+	Date           string  `json:"date"`
+	Commit         string  `json:"commit"`
+	GeneratedAt    string  `json:"generated_at"`
+	Verdict        string  `json:"verdict"`
+	Total          int     `json:"total"`
+	Overdue        int     `json:"overdue"`
+	AtRisk         int     `json:"at_risk"`
+	NoDueDate      int     `json:"no_due_date"`
+	OnTrack        int     `json:"on_track"`
+	Done           int     `json:"done"`
+	OpenTotal      int     `json:"open_total"`
+	ClosedTotal    int     `json:"closed_total,omitempty"`
+	AtRiskDebt     int     `json:"at_risk_debt"`
+	BaselineOpen   int     `json:"baseline_open,omitempty"`
+	CohortDrained  int     `json:"cohort_drained,omitempty"`
+	CohortSurvival float64 `json:"cohort_survival,omitempty"`
+	CohortDrain    float64 `json:"cohort_drain,omitempty"`
+	Discovered     int     `json:"discovered,omitempty"`
+	ExpansionRatio float64 `json:"expansion_ratio,omitempty"`
 }
 
 // RowFromReport projects a report into its durable ledger row.
 func RowFromReport(rep Report) LedgerRow {
 	p := rep.Portfolio
-	return LedgerRow{
+	row := LedgerRow{
 		Schema:      LedgerSchema,
 		Date:        rep.Date,
 		Commit:      rep.Commit,
@@ -409,8 +575,18 @@ func RowFromReport(rep Report) LedgerRow {
 		OnTrack:     p.OnTrack,
 		Done:        p.Done,
 		OpenTotal:   p.OpenTotal,
+		ClosedTotal: p.ClosedTotal,
 		AtRiskDebt:  p.AtRiskDebt,
 	}
+	if p.Cohort != nil && p.Cohort.BaselineOpen > 0 {
+		row.BaselineOpen = p.Cohort.BaselineOpen
+		row.CohortDrained = p.Cohort.CohortDrained
+		row.CohortSurvival = p.Cohort.SurvivalPct
+		row.CohortDrain = p.Cohort.DrainPct
+		row.Discovered = p.Cohort.Discovered
+		row.ExpansionRatio = p.Cohort.ExpansionRatio
+	}
+	return row
 }
 
 // ParseLedger parses an append-only JSONL ledger, tolerating blank lines and
@@ -427,18 +603,24 @@ func ParseLedger(content string) []LedgerRow {
 // Trend is the week-over-week direction, driven by the at-risk debt integer (a
 // falling debt is an improvement; a rising one a regression).
 type Trend struct {
-	Direction    string `json:"direction"` // improved | regressed | flat | new
-	PrevDate     string `json:"prev_date,omitempty"`
-	PrevCommit   string `json:"prev_commit,omitempty"`
-	DebtFrom     int    `json:"debt_from"`
-	DebtTo       int    `json:"debt_to"`
-	DebtDelta    int    `json:"debt_delta"`
-	OverdueFrom  int    `json:"overdue_from"`
-	OverdueTo    int    `json:"overdue_to"`
-	OverdueDelta int    `json:"overdue_delta"`
-	AtRiskFrom   int    `json:"at_risk_from"`
-	AtRiskTo     int    `json:"at_risk_to"`
-	Summary      string `json:"summary"`
+	Direction           string  `json:"direction"` // improved | regressed | flat | new
+	PrevDate            string  `json:"prev_date,omitempty"`
+	PrevCommit          string  `json:"prev_commit,omitempty"`
+	DebtFrom            int     `json:"debt_from"`
+	DebtTo              int     `json:"debt_to"`
+	DebtDelta           int     `json:"debt_delta"`
+	OverdueFrom         int     `json:"overdue_from"`
+	OverdueTo           int     `json:"overdue_to"`
+	OverdueDelta        int     `json:"overdue_delta"`
+	AtRiskFrom          int     `json:"at_risk_from"`
+	AtRiskTo            int     `json:"at_risk_to"`
+	CohortDrainFrom     float64 `json:"cohort_drain_from,omitempty"`
+	CohortDrainTo       float64 `json:"cohort_drain_to,omitempty"`
+	CohortDrainDelta    float64 `json:"cohort_drain_delta,omitempty"`
+	CohortSurvivalDelta float64 `json:"cohort_survival_delta,omitempty"`
+	DiscoveredDelta     int     `json:"discovered_delta,omitempty"`
+	ExpansionDelta      float64 `json:"expansion_delta,omitempty"`
+	Summary             string  `json:"summary"`
 }
 
 // TrendVsLast computes the per-tick trend of `row` against the most recent prior
@@ -446,7 +628,7 @@ type Trend struct {
 func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 	last, ok := latestBefore(row, prior)
 	if !ok {
-		return Trend{
+		t := Trend{
 			Direction: "new",
 			DebtTo:    row.AtRiskDebt,
 			OverdueTo: row.Overdue,
@@ -454,6 +636,10 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 			Summary: fmt.Sprintf("first burndown tick (at-risk debt %d: %d overdue, %d at-risk, %d no-due-date)",
 				row.AtRiskDebt, row.Overdue, row.AtRisk, row.NoDueDate),
 		}
+		if row.BaselineOpen > 0 {
+			t.CohortDrainTo = row.CohortDrain
+		}
+		return t
 	}
 	debtDelta := row.AtRiskDebt - last.AtRiskDebt
 	dir := "flat"
@@ -463,7 +649,10 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 	case debtDelta > 0:
 		dir = "regressed"
 	}
-	return Trend{
+	summary := fmt.Sprintf("at-risk debt %s %+d (%d->%d); overdue %+d, at-risk %+d vs %s",
+		dir, debtDelta, last.AtRiskDebt, row.AtRiskDebt, row.Overdue-last.Overdue, row.AtRisk-last.AtRisk, last.Date)
+
+	t := Trend{
 		Direction:    dir,
 		PrevDate:     last.Date,
 		PrevCommit:   last.Commit,
@@ -475,9 +664,21 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 		OverdueDelta: row.Overdue - last.Overdue,
 		AtRiskFrom:   last.AtRisk,
 		AtRiskTo:     row.AtRisk,
-		Summary: fmt.Sprintf("at-risk debt %s %+d (%d->%d); overdue %+d, at-risk %+d vs %s",
-			dir, debtDelta, last.AtRiskDebt, row.AtRiskDebt, row.Overdue-last.Overdue, row.AtRisk-last.AtRisk, last.Date),
 	}
+
+	if row.BaselineOpen > 0 || last.BaselineOpen > 0 {
+		t.CohortDrainFrom = last.CohortDrain
+		t.CohortDrainTo = row.CohortDrain
+		t.CohortDrainDelta = round1(row.CohortDrain - last.CohortDrain)
+		t.CohortSurvivalDelta = round1(row.CohortSurvival - last.CohortSurvival)
+		t.DiscoveredDelta = row.Discovered - last.Discovered
+		t.ExpansionDelta = round2(row.ExpansionRatio - last.ExpansionRatio)
+		if t.CohortDrainDelta != 0 {
+			summary += fmt.Sprintf("; cohort drained %+.1f%% vs %s", t.CohortDrainDelta, last.Date)
+		}
+	}
+	t.Summary = summary
+	return t
 }
 
 // latestBefore returns the most recent prior row, comparing by (date, then
@@ -533,6 +734,8 @@ func pct(closed, total int) float64 {
 	}
 	return round2(100 * float64(closed) / float64(total))
 }
+
+func round1(f float64) float64 { return math.Round(f*10) / 10 }
 
 func round2(f float64) float64 { return math.Round(f*100) / 100 }
 

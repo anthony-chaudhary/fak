@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -44,6 +45,10 @@ func runMilestoneBurndown(stdout, stderr io.Writer, argv []string) int {
 	window := fs.Int("window", milestoneburndown.DefaultWindowDays, "trailing window (days) recent closure velocity is measured over")
 	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+milestoneburndown.DefaultLedgerRel+")")
 	date := fs.String("date", "", "snapshot date YYYY-MM-DD (default: today UTC)")
+	cohortBaseline := fs.String("cohort-baseline", "", "path to milestone burndown baseline JSON file (default: docs/milestones/burndown-baseline.json if present)")
+	baselineDate := fs.String("baseline-date", "", "snapshot date YYYY-MM-DD to anchor baseline cohort from history ledger")
+	baselineOpen := fs.Int("baseline-open", 0, "explicit baseline open issue count to anchor cohort drain tracking")
+	baselineClosed := fs.Int("baseline-closed", 0, "explicit baseline closed issue count to anchor cohort drain tracking")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -65,9 +70,62 @@ func runMilestoneBurndown(stdout, stderr io.Writer, argv []string) int {
 		snapDate = now.Format("2006-01-02")
 	}
 
+	ledgerPath := *ledger
+	if ledgerPath == "" {
+		ledgerPath = filepath.Join(root, filepath.FromSlash(milestoneburndown.DefaultLedgerRel))
+	}
+	prior := readLedgerFile(ledgerPath, milestoneburndown.ParseLedger)
+
 	// Collect live (a nil runner shells the real `gh`); a per-milestone velocity read
 	// that fails degrades only that row, never the whole portfolio.
 	portfolio := milestoneburndown.Collect(*repo, nil, *window, now)
+
+	// Resolve baseline cohort (explicit -> file -> ledger history).
+	var base milestoneburndown.BurndownBaseline
+	var baseResolved bool
+	if *baselineOpen > 0 {
+		base = milestoneburndown.BurndownBaseline{
+			Schema:       milestoneburndown.BaselineSchema,
+			Date:         *baselineDate,
+			OpenTotal:    *baselineOpen,
+			ClosedTotal:  *baselineClosed,
+			BaselineOpen: *baselineOpen,
+		}
+		baseResolved = true
+	}
+	if !baseResolved {
+		baseFile := *cohortBaseline
+		if baseFile == "" {
+			defaultPath := filepath.Join(root, filepath.FromSlash(milestoneburndown.DefaultBaselineRel))
+			if fi, err := os.Stat(defaultPath); err == nil && !fi.IsDir() {
+				baseFile = defaultPath
+			}
+		} else if !filepath.IsAbs(baseFile) {
+			baseFile = filepath.Join(root, baseFile)
+		}
+		if baseFile != "" {
+			if data, err := os.ReadFile(baseFile); err == nil {
+				if parsed, err := milestoneburndown.ParseBaseline(data); err == nil {
+					base = parsed
+					baseResolved = true
+				}
+			}
+		}
+	}
+	if !baseResolved {
+		if fromLedger, ok := milestoneburndown.BaselineFromLedger(prior, *baselineDate); ok {
+			base = fromLedger
+			baseResolved = true
+		}
+	}
+
+	if baseResolved {
+		cp := milestoneburndown.ComputeCohortProgress(base, portfolio)
+		if cp.BaselineOpen > 0 {
+			portfolio = portfolio.WithCohort(cp)
+		}
+	}
+
 	report := milestoneburndown.Fold(portfolio, milestoneburndown.FoldOpts{
 		Workspace:   root,
 		Commit:      milestonereport.HeadCommit(root),
@@ -77,12 +135,7 @@ func runMilestoneBurndown(stdout, stderr io.Writer, argv []string) int {
 
 	// Attach the per-tick trend vs the last ledger row (read-only), and -- only under
 	// --append-history -- durably append this tick so the trend accrues.
-	ledgerPath := *ledger
-	if ledgerPath == "" {
-		ledgerPath = filepath.Join(root, filepath.FromSlash(milestoneburndown.DefaultLedgerRel))
-	}
 	row := milestoneburndown.RowFromReport(report)
-	prior := readLedgerFile(ledgerPath, milestoneburndown.ParseLedger)
 	report = report.WithTrend(milestoneburndown.TrendVsLast(row, prior))
 	if code := appendReportHistory(stdout, stderr, *appendHistory, !*asJSON && !*check, root, ledgerPath,
 		"milestone burndown", "burndown", row, trendreport.AppendLedgerLine); code != 0 {

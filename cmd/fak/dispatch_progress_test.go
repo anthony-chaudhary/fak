@@ -389,6 +389,147 @@ func TestRenderDispatchProgressShowsAgingCensus(t *testing.T) {
 	}
 }
 
+func TestRenderDispatchProgressCohortDecoupling(t *testing.T) {
+	// 1. Direct rendering test of 3-tier decoupled output without verified drain
+	payload := map[string]any{
+		"target":                 50,
+		"open_now":               110,
+		"baseline_open":          100,
+		"cohort_baseline":        100,
+		"cohort_drained":         30,
+		"cohort_remaining":       70,
+		"cohort_drain_pct":       30.0,
+		"cohort_survival_pct":    70.0,
+		"scope_expansion_count":  40,
+		"scope_expansion_ratio":  1.40,
+		"discovery_drain_ratio":  1.33,
+		"closures_toward_target": 30,
+		"witnessed_open":         0,
+		"closed_now":             0,
+		"closed_by_loop_total":   30,
+	}
+	out := renderDispatchProgress(payload)
+	for _, want := range []string{
+		"original cohort: 30.0% drained (30/100 closed, 70 surviving | 70.0% survival)",
+		"scope expansion: 40 new issues filed (expansion ratio 1.40x, discovery:drain 1.33:1)",
+		"net-open change: +10 (gross open conflates 30 closures with 40 discoveries)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rendered progress missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "verified drain") {
+		t.Fatalf("rendered progress without verified drain should not contain 'verified drain':\n%s", out)
+	}
+
+	// 2. Direct rendering test with verified drain
+	payloadWithVerified := map[string]any{
+		"target":                 50,
+		"open_now":               110,
+		"baseline_open":          100,
+		"cohort_baseline":        100,
+		"cohort_drained":         30,
+		"cohort_remaining":       70,
+		"cohort_drain_pct":       30.0,
+		"cohort_survival_pct":    70.0,
+		"scope_expansion_count":  40,
+		"scope_expansion_ratio":  1.40,
+		"discovery_drain_ratio":  1.33,
+		"verified_closed":        25,
+		"closures_toward_target": 30,
+		"witnessed_open":         0,
+		"closed_now":             0,
+		"closed_by_loop_total":   30,
+	}
+	outWithVerified := renderDispatchProgress(payloadWithVerified)
+	for _, want := range []string{
+		"original cohort: 30.0% drained (30/100 closed, 70 surviving | 70.0% survival; 25 verified drain)",
+		"scope expansion: 40 new issues filed (expansion ratio 1.40x, discovery:drain 1.33:1)",
+		"net-open change: +10 (gross open conflates 30 closures with 40 discoveries)",
+	} {
+		if !strings.Contains(outWithVerified, want) {
+			t.Fatalf("rendered progress with verified missing %q:\n%s", want, outWithVerified)
+		}
+	}
+
+	// 3. End-to-end evaluation test through evaluateDispatchProgress
+	root := t.TempDir()
+	runsDir := filepath.Join(root, dispatchProgressRunsDir)
+	writeDispatchProgressRows(t, runsDir, []map[string]any{
+		{"utc": "2026-07-01T10:00:00Z", "closed_now": 10, "closed_by_loop_total": 10},
+		{"utc": "2026-07-01T10:30:00Z", "closed_now": 20, "closed_by_loop_total": 30},
+	})
+	if err := dispatchProgressSaveBaseline(runsDir, 100); err != nil {
+		t.Fatal(err)
+	}
+
+	restoreOpen, restoreAudit, restoreNow := dispatchProgressOpenCount, dispatchProgressAudit, dispatchProgressNow
+	t.Cleanup(func() {
+		dispatchProgressOpenCount, dispatchProgressAudit, dispatchProgressNow = restoreOpen, restoreAudit, restoreNow
+	})
+	dispatchProgressOpenCount = func(string) (int, error) { return 110, nil }
+	dispatchProgressAudit = func(string, io.Writer, int, string) (map[string]any, error) {
+		return map[string]any{
+			"counts": map[string]any{
+				"TRUE_RESOLVED": 20,
+				"DATA_RESOLVED": 5,
+			},
+			"issues": []any{},
+		}, nil
+	}
+	dispatchProgressNow = func() time.Time { return time.Date(2026, 7, 1, 11, 0, 0, 0, time.UTC) }
+
+	rec, err := evaluateDispatchProgress(dispatchProgressOptions{Workspace: root, Target: 50, MaxCommits: 10}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := dispatchMapInt(rec, "cohort_baseline"); got != 100 {
+		t.Fatalf("cohort_baseline = %d, want 100", got)
+	}
+	if got := dispatchMapInt(rec, "cohort_drained"); got != 30 {
+		t.Fatalf("cohort_drained = %d, want 30", got)
+	}
+	if got := dispatchMapInt(rec, "cohort_remaining"); got != 70 {
+		t.Fatalf("cohort_remaining = %d, want 70", got)
+	}
+	if got := dispatchMapFloat(rec, "cohort_drain_pct"); got != 30.0 {
+		t.Fatalf("cohort_drain_pct = %v, want 30.0", got)
+	}
+	if got := dispatchMapFloat(rec, "cohort_survival_pct"); got != 70.0 {
+		t.Fatalf("cohort_survival_pct = %v, want 70.0", got)
+	}
+	if got := dispatchMapInt(rec, "scope_expansion_count"); got != 40 {
+		t.Fatalf("scope_expansion_count = %d, want 40", got)
+	}
+	if got := dispatchMapFloat(rec, "scope_expansion_ratio"); got != 1.40 {
+		t.Fatalf("scope_expansion_ratio = %v, want 1.40", got)
+	}
+	if got := dispatchMapFloat(rec, "discovery_drain_ratio"); got != 1.33 {
+		t.Fatalf("discovery_drain_ratio = %v, want 1.33", got)
+	}
+	if got := dispatchMapInt(rec, "verified_closed"); got != 25 {
+		t.Fatalf("verified_closed = %d, want 25", got)
+	}
+
+	metrics := dispatchProgressMetrics(rec)
+	if metrics["cohort_baseline"] != 100 || metrics["cohort_drained"] != 30 || metrics["cohort_remaining"] != 70 ||
+		metrics["scope_expansion_count"] != 40 || metrics["verified_closed"] != 25 {
+		t.Fatalf("metrics missing or incorrect cohort keys: %+v", metrics)
+	}
+
+	evalRender := renderDispatchProgress(rec)
+	for _, want := range []string{
+		"original cohort: 30.0% drained (30/100 closed, 70 surviving | 70.0% survival; 25 verified drain)",
+		"scope expansion: 40 new issues filed (expansion ratio 1.40x, discovery:drain 1.33:1)",
+		"net-open change: +10 (gross open conflates 30 closures with 40 discoveries)",
+	} {
+		if !strings.Contains(evalRender, want) {
+			t.Fatalf("evalRender missing %q:\n%s", want, evalRender)
+		}
+	}
+}
+
 func writeDispatchProgressRows(t *testing.T, runsDir string, rows []map[string]any) {
 	t.Helper()
 	if err := os.MkdirAll(runsDir, 0o755); err != nil {
