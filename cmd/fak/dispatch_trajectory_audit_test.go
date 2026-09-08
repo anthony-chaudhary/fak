@@ -65,3 +65,82 @@ func TestDispatchTrajectoryAuditSinceAndJSON(t *testing.T) {
 		t.Fatalf("unexpected report: %+v", rep)
 	}
 }
+
+func TestDispatchTrajectoryAuditFullTreeGateRetryRecommendsValidateOwnedPaths(t *testing.T) {
+	// #12083: full_tree_gate_retry produces the validate_owned_paths recommendation.
+	dir := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("resolve-301-20260819-030000.log", "# fak-spawn\n== go build ==\nmake ci\nscripts\\ci.ps1\n")
+	write("resolve-301-20260819-030000.witness", `{"claim":"CLAIM_NO_COMMIT","issue":301,"reason":"full_tree_gate_retry"}`)
+
+	rep, err := auditDispatchTrajectories(dir, time.Date(2026, 8, 19, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var foundRec bool
+	for _, rec := range rep.Recommendations {
+		if rec.ID == "validate_owned_paths" {
+			foundRec = true
+			if !strings.Contains(rec.Evidence, "full-tree gate retries") {
+				t.Fatalf("expected full-tree gate retries in evidence, got: %s", rec.Evidence)
+			}
+			if !strings.Contains(rec.Action, "fak validate --mine") {
+				t.Fatalf("expected action to cite fak validate --mine, got: %s", rec.Action)
+			}
+		}
+	}
+	if !foundRec {
+		t.Fatalf("expected validate_owned_paths recommendation, got: %+v", rep.Recommendations)
+	}
+}
+
+func TestDispatchTrajectoryAuditIdleSleepWasteRecommendsEpilogueQueue(t *testing.T) {
+	// #12084: idle_sleep_waste produces the queue_commit_epilogues recommendation.
+	dir := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("resolve-401-20260819-040000.log", "# fak-spawn\nStart-Sleep -Seconds 10\nStart-Sleep 5\n")
+	write("resolve-401-20260819-040000.witness", `{"claim":"CLAIM_NO_COMMIT","issue":401,"reason":"idle_sleep_waste"}`)
+
+	rep, err := auditDispatchTrajectories(dir, time.Date(2026, 8, 19, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var foundFriction bool
+	for _, f := range rep.Friction {
+		if f.ID == "idle_sleep_waste" {
+			foundFriction = true
+			if f.Sessions != 1 || f.Events != 2 {
+				t.Fatalf("expected 1 session and 2 events for idle_sleep_waste, got %+v", f)
+			}
+		}
+	}
+	if !foundFriction {
+		t.Fatalf("expected idle_sleep_waste friction in report, got: %+v", rep.Friction)
+	}
+
+	var foundRec bool
+	for _, rec := range rep.Recommendations {
+		if rec.ID == "queue_commit_epilogues" {
+			foundRec = true
+			if !strings.Contains(rec.Evidence, "Start-Sleep") {
+				t.Fatalf("expected Start-Sleep in evidence, got: %s", rec.Evidence)
+			}
+			if !strings.Contains(rec.Action, "fak commit --queue-on-busy") || !strings.Contains(rec.Action, "fak dispatch epilogue") {
+				t.Fatalf("expected action to cite fak commit --queue-on-busy and fak dispatch epilogue, got: %s", rec.Action)
+			}
+		}
+	}
+	if !foundRec {
+		t.Fatalf("expected queue_commit_epilogues recommendation, got: %+v", rep.Recommendations)
+	}
+}

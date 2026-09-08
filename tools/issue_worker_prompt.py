@@ -217,9 +217,12 @@ def _origin_quality_checks(lane: str, issue: dict[str, Any]) -> str:
         "handoff — the at-origin QA-dogfood rule, #1961):",
         f"- lane gate ({lane}): {_origin_gate_line(lane)}.",
         "- full gate (every lane): command `make ci` (build + vet + test + claims-lint; "
-        "a native-Windows host runs the tests under WSL `./test.ps1`) → expected "
-        "artifact: a green gate log; refusal mode: the pre-commit / commit-msg hook "
-        "refuses the commit until it is green.",
+        "a native-Windows host runs the tests under WSL `./test.ps1`) is an observational "
+        "supervisor check on clean trunk, NOT the worker's inner-loop completion gate on "
+        "the dirty shared tree — scope worker validation to owned paths (`fak validate --mine <paths>` "
+        "or the lane gate above); do not enter gate retry loops on peer WIP → expected "
+        "artifact: a green scoped validation / package test log; refusal mode: "
+        "`COMMITTED_RED` (the commit gate refuses broken owned paths).",
     ]
     if _is_qa_dogfood(issue):
         lines.append(
@@ -290,16 +293,17 @@ def _work_rules(n: int, lane: str) -> list[tuple[str, str, str]]:
          "commit for the end - your session can be killed at any moment and "
          "uncommitted edits are simply lost. A checkpoint is honest as soon as it "
          "COMPILES and its own targeted test passes; that bar is deliberately lower "
-         "than the full `make ci` ship gate, but it is never a licence for broken "
-         "work. Say only what actually landed in the subject and withhold the "
-         "issue-closing `Fixes` line until the real fix is green. Do NOT use a "
-         "`wip(...)` subject - it forces the claim to none and lands your work "
-         "UNWITNESSED, which silently defeats the witness ledger",
+         "than the final scoped validation gate (`fak validate --mine <paths>`), but "
+         "it is never a licence for broken work. Say only what actually landed in the "
+         "subject and withhold the issue-closing `Fixes` line until the real fix is "
+         "green. Do NOT use a `wip(...)` subject - it forces the claim to none and lands "
+         "your work UNWITNESSED, which silently defeats the witness ledger",
          "fak commit --path"),
         ("gate-before-done",
          "Run the gate yourself before claiming done: the lane's own test "
-         "(`go test ./... -count=1` for the touched package, or the doc/lint check "
-         "the issue names) - a claim with no gate run is not done",
+         "(`go test ./internal/<pkg> -count=1` for the touched package, or "
+         "`fak validate --mine <paths>`, or the doc/lint check the issue names) - "
+         "a claim with no gate run is not done",
          "LOOP_DONE_UNWITNESSED"),
         ("proof-by-default",
          "Match the proof to the defect: visual/TUI bugs need a captured render or "

@@ -190,6 +190,9 @@ func TestIssuePromptRendersOriginQualityChecks(t *testing.T) {
 		"expected artifact: a green package test + clean vet",
 		"refusal mode: an upward/cross-tier import reds architest (`ARCH_LAYER_VIOLATION`)",
 		"- full gate (every lane): command `make ci`",
+		"observational supervisor check on clean trunk",
+		"fak validate --mine <paths>",
+		"`COMMITTED_RED`",
 		"- at-origin score control (QA-dogfood spine):",
 		"record the result in your final report BEFORE handoff",
 	} {
@@ -491,3 +494,31 @@ func TestIssuePromptInvokesBoundedHarnessProbeByDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestIssuePromptScopesValidationToOwnedPaths(t *testing.T) {
+	// #12083: worker prompt fuel scopes verification to owned paths and package tests,
+	// treating make ci / full live-tree CI as observational supervisor checks rather than
+	// interactive inner-loop gates that cause retry loops on dirty shared trunks.
+	in := sampleIssuePrompt()
+	in.Lane = "gateway"
+	p := RenderIssuePrompt(in)
+
+	for _, want := range []string{
+		"observational supervisor check on clean trunk",
+		"NOT the worker's inner-loop completion gate",
+		"scope worker validation to owned paths (`fak validate --mine <paths>`",
+		"`COMMITTED_RED`",
+		"final scoped validation gate (`fak validate --mine <paths>`)",
+		"`go test ./internal/<pkg> -count=1`",
+	} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt missing scoped validation phrasing %q:\n%s", want, p)
+		}
+	}
+
+	// Must NOT instruct workers to run full-tree test in gate-before-done rule.
+	if strings.Contains(p, "gate-before-done: Run the gate yourself before claiming done: the lane's own test (`go test ./...") {
+		t.Fatalf("prompt must not mandate whole-repo `go test ./...` in gate-before-done rule:\n%s", p)
+	}
+}
+

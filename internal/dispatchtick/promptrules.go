@@ -87,17 +87,17 @@ func WorkRules(issue int, lane string) []PromptRule {
 			"Commit each working increment AS YOU REACH IT instead of saving every "+
 				"commit for the end - your session can be killed at any moment and uncommitted "+
 				"edits are simply lost. A checkpoint is honest as soon as it COMPILES and its own "+
-				"targeted test passes; that bar is deliberately lower than the full `make ci` ship "+
-				"gate, but it is never a licence for broken work. Say only what actually landed in "+
-				"the subject and withhold the issue-closing `Fixes` line until the real fix is "+
-				"green. Do NOT use a `wip(...)` subject - it forces the claim to none and lands "+
-				"your work UNWITNESSED, which silently defeats the witness ledger",
+				"targeted test passes; that bar is deliberately lower than the final scoped validation "+
+				"gate (`fak validate --mine <paths>`), but it is never a licence for broken work. "+
+				"Say only what actually landed in the subject and withhold the issue-closing `Fixes` "+
+				"line until the real fix is green. Do NOT use a `wip(...)` subject - it forces the "+
+				"claim to none and lands your work UNWITNESSED, which silently defeats the witness ledger",
 			"fak commit --path"),
 		promptRule(
 			"gate-before-done",
 			"Run the gate yourself before claiming done: the lane's own test "+
-				"(`go test ./... -count=1` for the touched package, or the doc/lint check the issue "+
-				"names) - a claim with no gate run is not done",
+				"(`go test ./internal/<pkg> -count=1` for the touched package, or `fak validate --mine <paths>`, "+
+				"or the doc/lint check the issue names) - a claim with no gate run is not done",
 			"LOOP_DONE_UNWITNESSED"),
 		promptRule(
 			"proof-by-default",

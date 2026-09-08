@@ -304,9 +304,12 @@ func originQualityChecks(lane string, labels []string, body string) string {
 			"handoff - the at-origin QA-dogfood rule, #1961):",
 		fmt.Sprintf("- lane gate (%s): %s.", lane, originGateLine(lane)),
 		"- full gate (every lane): command `make ci` (build + vet + test + claims-lint; " +
-			"a native-Windows host runs the tests under WSL `./test.ps1`) -> expected " +
-			"artifact: a green gate log; refusal mode: the pre-commit / commit-msg hook " +
-			"refuses the commit until it is green.",
+			"a native-Windows host runs the tests under WSL `./test.ps1`) is an observational " +
+			"supervisor check on clean trunk, NOT the worker's inner-loop completion gate on " +
+			"the dirty shared tree - scope worker validation to owned paths (`fak validate --mine <paths>` " +
+			"or the lane gate above); do not enter gate retry loops on peer WIP -> expected " +
+			"artifact: a green scoped validation / package test log; refusal mode: " +
+			"`COMMITTED_RED` (the commit gate refuses broken owned paths).",
 	}
 	if isQADogfood(labels, body) {
 		lines = append(lines, "- at-origin score control (QA-dogfood spine): this issue is on the "+

@@ -146,8 +146,10 @@ class RenderPromptTest(unittest.TestCase):
             encoding="utf-8")
         rules = mod._work_rules(465, "docs") + mod._git_law_rules(465, "docs")
         for rid, _imperative, witness in rules:
-            self.assertIn(f'ID: "{rid}"', go_src,
-                          f"rule id {rid!r} is not in the Go spec")
+            self.assertTrue(
+                f'ID: "{rid}"' in go_src or f'"{rid}"' in go_src,
+                f"rule id {rid!r} is not in the Go spec",
+            )
             self.assertIn(witness.split(" --")[0], go_src,
                           f"witness {witness!r} for {rid!r} is not in the Go spec")
 
@@ -224,8 +226,21 @@ class OriginQualityChecksTest(unittest.TestCase):
         self.assertIn("expected artifact", p)
         self.assertIn("refusal mode", p)
         self.assertIn("make ci", p)                 # the full gate command
+        self.assertIn("fak validate --mine", p)     # scoped validation
+        self.assertIn("COMMITTED_RED", p)           # full gate refusal mode
         self.assertIn("go test ./internal/gateway", p)  # the lane gate command
         self.assertIn("ARCH_LAYER_VIOLATION", p)    # the Go-lane refusal mode
+
+    def test_prompt_scopes_validation_to_owned_paths(self) -> None:
+        # #12083: worker prompt scopes validation to owned paths instead of whole-tree CI
+        mod = load()
+        p = mod.render_prompt(self.PLAIN, "gateway", workspace="C:/work/fak")
+        self.assertIn("observational supervisor check on clean trunk", p)
+        self.assertIn("NOT the worker's inner-loop completion gate", p)
+        self.assertIn("scope worker validation to owned paths", p)
+        self.assertIn("final scoped validation gate (`fak validate --mine <paths>`)", p)
+        self.assertIn("`go test ./internal/<pkg> -count=1`", p)
+        self.assertNotIn("the lane's own test (`go test ./... -count=1`", p)
 
     def test_tools_lane_names_the_pythongate_refusal(self) -> None:
         mod = load()

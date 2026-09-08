@@ -61,6 +61,7 @@ var dispatchTrajectorySignatures = []struct {
 	re *regexp.Regexp
 }{
 	{"commit_lock_contention", regexp.MustCompile(`(?i)LOCK_BUSY|commit lane: (?:busy|stale)`)},
+	{"idle_sleep_waste", regexp.MustCompile(`(?i)Start-Sleep\s+-(?:Seconds|s)\s+\d+|Start-Sleep\s+\d+`)},
 	{"prestaged_path_overlap", regexp.MustCompile(`PRESTAGED_PATH_OVERLAP`)},
 	{"patch_application_failure", regexp.MustCompile(`Invalid patch:`)},
 	{"dependency_timeout", regexp.MustCompile(`(?i)timed out|timeout after`)},
@@ -212,8 +213,25 @@ func dispatchTrajectoryRecommendations(rep dispatchTrajectoryAuditReport) []disp
 	if row := counts["commit_lock_contention"]; row.Sessions > 0 {
 		out = appendTrajectoryRecommendation(out, "serialize_epilogues", fmt.Sprintf("%d sessions hit commit-lock contention (%d events)", row.Sessions, row.Events), "Keep implementation parallel, but queue commit/push/close epilogues through one controller instead of making every worker poll the shared commit lock.")
 	}
-	if row := counts["peer_wip_interference"]; row.Sessions > 0 {
-		out = append(out, dispatchTrajectoryRecommendation{ID: "validate_owned_paths", Evidence: fmt.Sprintf("%d sessions encountered peer-WIP interference", row.Sessions), Action: "Generate each worker's exact fak validate --mine command from its declared lease tree and treat full live-tree CI as observational, not the worker's completion gate."})
+	if row := counts["idle_sleep_waste"]; row.Sessions > 0 {
+		out = appendTrajectoryRecommendation(out, "queue_commit_epilogues", fmt.Sprintf("%d sessions wasted idle compute polling locks via Start-Sleep (%d events)", row.Sessions, row.Events), "Eliminate distributed sleep-polling loops by submitting commit tasks to the epilogue queue (fak commit --queue-on-busy or fak dispatch epilogue).")
+	}
+	peerRow := counts["peer_wip_interference"]
+	gateRow := counts["full_tree_gate_retry"]
+	if peerRow.Sessions > 0 || gateRow.Sessions > 0 {
+		var evidence string
+		if peerRow.Sessions > 0 && gateRow.Sessions > 0 {
+			evidence = fmt.Sprintf("%d sessions encountered peer-WIP interference (%d sessions had full-tree gate retries)", peerRow.Sessions, gateRow.Sessions)
+		} else if peerRow.Sessions > 0 {
+			evidence = fmt.Sprintf("%d sessions encountered peer-WIP interference", peerRow.Sessions)
+		} else {
+			evidence = fmt.Sprintf("%d sessions encountered full-tree gate retries (%d events)", gateRow.Sessions, gateRow.Events)
+		}
+		out = append(out, dispatchTrajectoryRecommendation{
+			ID:       "validate_owned_paths",
+			Evidence: evidence,
+			Action:   "Generate each worker's exact fak validate --mine command from its declared lease tree and treat full live-tree CI as observational, not the worker's completion gate.",
+		})
 	}
 	if row := counts["dependency_timeout"]; row.Sessions > 0 {
 		out = append(out, dispatchTrajectoryRecommendation{ID: "bound_planning", Evidence: fmt.Sprintf("%d sessions recorded dependency timeouts", row.Sessions), Action: "Price at full target, then launch bounded 4-8 member waves; fall back to explicit disjoint ticks when contract audit exceeds its deadline."})
