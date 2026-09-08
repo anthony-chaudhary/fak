@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 )
 
 // coarseClock reports whether this host's monotonic clock cannot resolve
@@ -138,6 +140,39 @@ func TestRunFullSpan_FourBandsAndDenyClasses(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	assertNoForbiddenKeys(t, doc, "")
+}
+
+// TestRunFullSpan_IsolatedFromGlobalPolicyMutation proves issue #12063:
+// RunFullSpan's B2 scripted turn retains deterministic default-policy verdicts
+// even when process-global adjudicator.Default has been mutated into an open posture
+// (e.g. by agent.Configure() in preceding suite tests).
+func TestRunFullSpan_IsolatedFromGlobalPolicyMutation(t *testing.T) {
+	snap := adjudicator.Default.PolicySnapshot()
+	t.Cleanup(func() {
+		adjudicator.Default.SetPolicy(snap)
+	})
+	adjudicator.Default.SetPolicy(adjudicator.Policy{
+		Posture: adjudicator.PostureDefaultOpen,
+		Allow:   map[string]bool{"some_unrelated_tool": true},
+	})
+
+	tr, err := RunFullSpan(context.Background())
+	if err != nil {
+		t.Fatalf("RunFullSpan under mutated global policy: %v", err)
+	}
+
+	verdicts := map[string]string{}
+	for _, s := range tr.Spans {
+		if s.Band == "B0" {
+			verdicts[s.Tool] = s.Verdict
+		}
+	}
+	if verdicts["write_ledger_entry"] != "DENY" {
+		t.Errorf("write_ledger_entry verdict = %q, want DENY", verdicts["write_ledger_entry"])
+	}
+	if verdicts["shell_rm_rf"] != "DENY" {
+		t.Errorf("shell_rm_rf verdict = %q, want DENY", verdicts["shell_rm_rf"])
+	}
 }
 
 // The classifier is a pure fold: verify each class on a synthetic span list.

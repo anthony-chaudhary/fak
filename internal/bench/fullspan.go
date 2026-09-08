@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/superloop"
@@ -221,7 +222,13 @@ func RunFullSpan(ctx context.Context) (*FullSpanTrace, error) {
 	}
 
 	// --- B2: one scripted agent turn over the real kernel ------------------
-	k := kernel.New("mock")
+	// Isolate the B2 turn's kernel from process-global policy mutations
+	// (issue #12063): preceding tests or concurrent arms may have reconfigured
+	// adjudicator.Default. We swap the monitor with a freshly-constructed
+	// monitor holding adjudicator.DefaultPolicy() so the scripted turn's
+	// deterministic default-policy verdicts (ALLOW, DEFAULT_DENY, POLICY_BLOCK)
+	// remain reproducible regardless of test execution order.
+	k := kernel.New("mock", kernel.WithAdjudicators(isolatedDefaultChain()))
 	res := abi.ActiveResolver()
 	b2 := span(b4.ID, "B2", "seconds", "agent turn (scripted call set)")
 	b2id := b2.ID
@@ -356,4 +363,27 @@ func verdictName(k abi.VerdictKind) string {
 		return "INDETERMINATE"
 	}
 	return fmt.Sprintf("KIND_%d", k)
+}
+
+// isolatedDefaultChain returns a copy of the registered adjudicator chain with
+// the rank-100 reference monitor (adjudicator.Default) replaced by a clean
+// monitor bound to DefaultPolicy(). Every other registered rung is preserved in
+// order; mutable suite state on Default is isolated.
+func isolatedDefaultChain() []abi.Adjudicator {
+	base := abi.Adjudicators()
+	mon := adjudicator.New(adjudicator.DefaultPolicy())
+	out := make([]abi.Adjudicator, 0, len(base)+1)
+	swapped := false
+	for _, a := range base {
+		if a == abi.Adjudicator(adjudicator.Default) {
+			out = append(out, mon)
+			swapped = true
+			continue
+		}
+		out = append(out, a)
+	}
+	if !swapped {
+		out = append(out, mon)
+	}
+	return out
 }
