@@ -97,11 +97,22 @@ func Scan(opts Options) (Report, error) {
 	}
 
 	var allLanes []DebtLane
+	var cpMap CriticalPathMap
 	if len(opts.Facts) > 0 {
 		allLanes = make([]DebtLane, len(opts.Facts))
 		copy(allLanes, opts.Facts)
+		if opts.Graph != nil {
+			cpMap = MapCriticalPaths(nil, opts.Graph)
+		} else if absRoot != "" {
+			cpMap = MapProductionCriticalPaths(absRoot, opts.Graph)
+		}
 		for i := range allLanes {
 			recomputeLane(&allLanes[i])
+			if allLanes[i].CriticalPath == nil && len(cpMap) > 0 {
+				if cp, ok := LookupCriticalPath(allLanes[i], cpMap); ok {
+					allLanes[i].CriticalPath = &cp
+				}
+			}
 		}
 	} else if targetRepo == "both" {
 		privRoot := resolvePrivateRoot(absRoot, opts.PrivateRoot)
@@ -184,6 +195,10 @@ func Scan(opts Options) (Report, error) {
 			extra[i].Repo = targetRepo
 			allLanes = append(allLanes, extra[i])
 		}
+	}
+
+	if len(opts.Facts) == 0 && len(cpMap) == 0 {
+		cpMap = MapProductionCriticalPaths(absRoot, opts.Graph)
 	}
 
 	// Calculate overall production grade over ALL discovered units of work
@@ -421,6 +436,7 @@ func Scan(opts Options) (Report, error) {
 		Lanes:           filtered,
 		Hotspots:        hotspots,
 		Coverage:        &coverage,
+		CriticalPaths:   cpMap,
 	}, nil
 }
 
@@ -691,6 +707,7 @@ func discoverLanesFromDisk(root string, companionRoots ...string) ([]DebtLane, e
 	// Build dependency graph and reachability.
 	graph, internalPkgs := BuildInternalImportGraph(root)
 	reachable := scanReachableFromCmd(root, graph)
+	cpMap := MapProductionCriticalPaths(root, graph)
 
 	inboundDependents := make(map[string][]string)
 	for pkg, edges := range graph {
@@ -929,6 +946,9 @@ func discoverLanesFromDisk(root string, companionRoots ...string) ([]DebtLane, e
 			NextAction:              NextActionForGap(lane, unitDir, maturityScore, target, evidence),
 		}
 		dl.Health = EvaluateLaneHealth(dl)
+		if cp, ok := LookupCriticalPath(dl, cpMap); ok {
+			dl.CriticalPath = &cp
+		}
 		result = append(result, dl)
 	}
 

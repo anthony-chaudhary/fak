@@ -1740,3 +1740,160 @@ func TestCoverageReceiptByteStable(t *testing.T) {
 		t.Fatalf("coverage receipts are not byte-stable:\nraw1: %s\nraw2: %s", string(raw1), string(raw2))
 	}
 }
+
+func TestProductionPerformanceCriticalPathWitness(t *testing.T) {
+	// Witness for #12361:
+	// A synthetic graph: cmd/fak up -> gateway -> scheduler -> cache
+	// plus a disconnected high-debt utility identifies only the four reachable nodes,
+	// records root/distance, and ranks the lower-debt choke point ahead under performance focus.
+
+	graph := map[string]map[string]struct{}{
+		"cmd/fak up": {"gateway": {}},
+		"gateway":    {"scheduler": {}},
+		"scheduler":  {"cache": {}},
+		"utility":    {},
+	}
+
+	roots := []string{"cmd/fak up"}
+	cpMap := MapCriticalPaths(roots, graph)
+
+	// 1. Identifies only the four reachable nodes
+	if len(cpMap) != 4 {
+		t.Fatalf("expected exactly 4 reachable nodes, got %d: %+v", len(cpMap), cpMap)
+	}
+
+	expectedNodes := []string{"cmd/fak up", "gateway", "scheduler", "cache"}
+	for _, node := range expectedNodes {
+		info, ok := cpMap[node]
+		if !ok || !info.OnCriticalPath {
+			t.Errorf("expected node %q to be on critical path", node)
+		}
+	}
+
+	if _, ok := cpMap["utility"]; ok {
+		t.Errorf("disconnected utility must not be on critical path")
+	}
+
+	// 2. Records root and distance provenance
+	expectedDistances := map[string]int{
+		"cmd/fak up": 0,
+		"gateway":    1,
+		"scheduler":  2,
+		"cache":      3,
+	}
+	for node, expectedDist := range expectedDistances {
+		info := cpMap[node]
+		if info.Root != "cmd/fak up" {
+			t.Errorf("node %s: expected root 'cmd/fak up', got %q", node, info.Root)
+		}
+		if info.Distance != expectedDist {
+			t.Errorf("node %s: expected distance %d, got %d", node, expectedDist, info.Distance)
+		}
+	}
+
+	// 3. Path provenance
+	expectedPathCache := []string{"cmd/fak up", "gateway", "scheduler", "cache"}
+	cacheInfo := cpMap["cache"]
+	if len(cacheInfo.Path) != len(expectedPathCache) {
+		t.Fatalf("cache path length mismatch: got %v, want %v", cacheInfo.Path, expectedPathCache)
+	}
+	for i := range expectedPathCache {
+		if cacheInfo.Path[i] != expectedPathCache[i] {
+			t.Errorf("cache path[%d] = %q, want %q", i, cacheInfo.Path[i], expectedPathCache[i])
+		}
+	}
+
+	// 4. Ranks the lower-debt choke point ahead under performance focus
+	chokePoint := DebtLane{
+		Lane:        "cache",
+		UnitOfWork:  "internal/cache",
+		Criticality: CriticalityCore,
+		TotalDebt:   5.0,
+	}
+	highDebtUtility := DebtLane{
+		Lane:        "utility",
+		UnitOfWork:  "tools/utility",
+		Criticality: CriticalityStewardship,
+		TotalDebt:   50.0,
+	}
+
+	candidates := []DebtLane{highDebtUtility, chokePoint}
+
+	// Without perf focus: high-debt utility (50.0) ranks ahead of lower-debt choke point (5.0)
+	defaultPlan := PlanWaves(Report{
+		Lanes: candidates,
+	}, WavePlanOptions{
+		PerfFocus: false,
+		Graph:     graph,
+	})
+	if len(defaultPlan.Waves) == 0 || len(defaultPlan.Waves[0].Lanes) == 0 {
+		t.Fatalf("expected default planned waves")
+	}
+	if defaultPlan.Waves[0].Lanes[0].Lane != "utility" {
+		t.Errorf("without perf focus: expected utility to rank first by total debt, got %s", defaultPlan.Waves[0].Lanes[0].Lane)
+	}
+
+	// With perf focus: lower-debt choke point on critical path ranks ahead of disconnected high-debt utility
+	perfPlan := PlanWaves(Report{
+		Lanes: candidates,
+	}, WavePlanOptions{
+		PerfFocus: true,
+		Graph:     graph,
+	})
+	if len(perfPlan.Waves) == 0 || len(perfPlan.Waves[0].Lanes) == 0 {
+		t.Fatalf("expected perf-focused planned waves")
+	}
+	if perfPlan.Waves[0].Lanes[0].Lane != "cache" {
+		t.Errorf("with perf focus: expected critical path choke point 'cache' to rank first, got %s", perfPlan.Waves[0].Lanes[0].Lane)
+	}
+
+	// Also verify via RankCandidatesUnderPerfFocus helper directly
+	rankedDirect := RankCandidatesUnderPerfFocus(candidates, cpMap)
+	if len(rankedDirect) < 2 || rankedDirect[0].Lane != "cache" {
+		t.Errorf("RankCandidatesUnderPerfFocus: expected cache first, got %+v", rankedDirect)
+	}
+}
+
+func TestMultipleRootsAndCyclesCriticalPath(t *testing.T) {
+	// Test multiple roots (fak up and fak serve) and cycle handling
+	graph := map[string]map[string]struct{}{
+		"cmd/fak up":    {"gateway": {}, "memory": {}},
+		"cmd/fak serve": {"gateway": {}, "model": {}},
+		"gateway":       {"scheduler": {}},
+		"scheduler":     {"cache": {}, "gateway": {}}, // Cycle: scheduler -> gateway
+		"cache":         {},
+		"model":         {"cache": {}},
+		"memory":        {},
+		"off_spine":     {},
+	}
+
+	cpMap := MapCriticalPaths(DefaultProductionRoots, graph)
+
+	// Verify all 7 connected nodes are on critical path
+	for _, node := range []string{"cmd/fak up", "cmd/fak serve", "gateway", "memory", "model", "scheduler", "cache"} {
+		info, ok := cpMap[node]
+		if !ok || !info.OnCriticalPath {
+			t.Errorf("node %s expected on critical path", node)
+		}
+	}
+
+	// off_spine must not be on critical path
+	if _, ok := cpMap["off_spine"]; ok {
+		t.Errorf("off_spine must not be on critical path")
+	}
+
+	// gateway should be reachable from both roots
+	gwInfo := cpMap["gateway"]
+	if len(gwInfo.Roots) != 2 {
+		t.Errorf("expected gateway to have 2 roots, got %v", gwInfo.Roots)
+	}
+	if gwInfo.Distance != 1 {
+		t.Errorf("expected gateway distance 1, got %d", gwInfo.Distance)
+	}
+
+	// cache should have distance 2 (via model or scheduler)
+	cacheInfo := cpMap["cache"]
+	if cacheInfo.Distance != 2 {
+		t.Errorf("expected cache distance 2, got %d", cacheInfo.Distance)
+	}
+}
