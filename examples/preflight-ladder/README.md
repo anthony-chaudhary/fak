@@ -103,7 +103,7 @@ Rung 1 (schema validation) is **SHIPPED and unit-proven** — a required field w
 type, or a missing required field, is refused `DENY/MALFORMED by=preflight` at rung 1, *after*
 rung 0 passes. But the schema is a **per-tool input** the kernel must be told (`SetSchema`),
 and the standalone `fak preflight` default capability floor installs **no** per-tool schema —
-the airline-demo schemas are registered by the agent loop's `agent.Configure()`, which the
+the demo schemas are registered by the agent loop's `agent.Configure()`, which the
 witness verb does not run. So in *this* demo rung 1 **defers** for every tool, and you see the
 rung-0 catch and the monitor verdict, not a live rung-1 DENY.
 
