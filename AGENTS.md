@@ -285,6 +285,15 @@ implementation worker, search open and closed issues for duplicates, then claim 
 issue or create one that states the problem, intended outcome, and witness. Put the issue
 number in worker packets and keep discoveries, scope changes, and follow-ons reconciled there.
 
+Before spawning one fresh task per issue (including direct Codex `create_thread` waves),
+normalize every dependency through the issue contract and run the repository's issue/dispatch
+admission surface. Newly authored work uses exactly three relations: `Start blocked by: #N`
+may prevent pickup only when no executable disjoint slice exists; `Coordinates with: #N` is
+non-blocking alignment; `Promotion requires: #N` gates closure or performance claims, not
+implementation. A broad `After:` list or a hand-written prompt saying all dependency fences are
+binding is not an admission contract. If an issue is triage-only, repair its scope and typed
+relations before spawning it; direct task packets must repeat the same typed pickup rule.
+
 Scoping, reproduction, and read-only triage may precede the issue when needed to write an
 honest ticket. Skip advance ticketing only when it would be unreasonable: the request needs no
 repository change, the change is truly trivial and tracking would cost more than the work, an

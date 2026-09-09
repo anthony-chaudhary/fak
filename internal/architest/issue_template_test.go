@@ -475,3 +475,28 @@ func TestHumanIssueTemplatesPromptForCanonicalProblemFrame(t *testing.T) {
 		}
 	}
 }
+
+func TestIssueAuthoringUsesTypedDependencyEdges(t *testing.T) {
+	root := filepath.Dir(internalDir(t))
+	paths := []string{
+		filepath.Join(root, "AGENTS.md"),
+		filepath.Join(root, ".github", "ISSUE_TEMPLATE", "worker-ready-issue.yml"),
+		filepath.Join(root, "docs", "agentic-issue-dispatch.md"),
+	}
+
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := string(data)
+		for _, want := range []string{"Start blocked by:", "Coordinates with:", "Promotion requires:"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s missing typed dependency guidance %q", path, want)
+			}
+		}
+		if strings.Contains(body, "`after: #123`: this issue must wait") || strings.Contains(body, "Dispatch after the parent route issue lands") {
+			t.Errorf("%s still teaches blanket after-as-wait dependency semantics", path)
+		}
+	}
+}

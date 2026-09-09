@@ -42,32 +42,33 @@ const (
 	RelCoordinatesWith   = "coordinates-with"
 	RelPromotionRequires = "promotion-requires"
 
-	ReasonScopeIncomplete        = "ISSUE_SCOPE_INCOMPLETE"
-	ReasonProblemFrameIncomplete = "ISSUE_PROBLEM_FRAME_INCOMPLETE"
-	ReasonUnrouted               = "ISSUE_UNROUTED"
-	ReasonNotBornRouted          = "ISSUE_NOT_BORN_ROUTED"
-	ReasonNotBornMerged          = "ISSUE_NOT_BORN_MERGED"
-	ReasonPrivateBoundary        = "ISSUE_PRIVATE_BOUNDARY"
-	ReasonLiveUnarmored          = "ISSUE_LIVE_UNARMORED"
-	ReasonNotDispatchLeaf        = "ISSUE_NOT_DISPATCH_LEAF"
-	ReasonOversizedSteps         = "ISSUE_OVERSIZED_EXPECTED_STEPS"
-	ReasonNoiseIncomplete        = "ISSUE_NOISE_CONTROL_INCOMPLETE"
-	ReasonAgentIncomplete        = "ISSUE_AGENT_CONTEXT_INCOMPLETE"
-	ReasonUnexpandedTemplate     = "ISSUE_UNEXPANDED_TEMPLATE"
-	ReasonModelTierIncomplete    = "ISSUE_MODEL_TIER_INCOMPLETE"
-	ReasonScaleUndeclared        = "ISSUE_SCALE_UNDECLARED"
-	ReasonWitnessScaleMismatch   = "ISSUE_WITNESS_SCALE_MISMATCH"
-	ReasonTargetEnvelopeMissing  = "ISSUE_TARGET_ENVELOPE_MISSING"
-	ReasonEnvelopeInvalid        = "ISSUE_OPERATING_ENVELOPE_INVALID"
-	ReasonEnvelopeUnderTarget    = "ISSUE_OPERATING_ENVELOPE_UNDER_TARGET"
-	ReasonScaleEvidenceInvalid   = "ISSUE_SCALE_EVIDENCE_INVALID"
-	ReasonScaleStageMissing      = "ISSUE_SCALE_EVIDENCE_STAGE_MISSING"
-	ReasonWitnessForgeable       = "ISSUE_WITNESS_FORGEABLE"
-	ReasonProjectWorkMissing     = "ISSUE_PROJECT_WORK_MISSING"
-	ReasonProjectWorkInvalid     = "ISSUE_PROJECT_WORK_INVALID"
-	ReasonClosureWitnessMissing  = "ISSUE_CLOSURE_WITNESS_MISSING"
-	ReasonClosureWitnessMismatch = "ISSUE_CLOSURE_WITNESS_MISMATCH"
-	ReasonClosureProductionGap   = "ISSUE_CLOSURE_PRODUCTION_GAP"
+	ReasonScopeIncomplete             = "ISSUE_SCOPE_INCOMPLETE"
+	ReasonProblemFrameIncomplete      = "ISSUE_PROBLEM_FRAME_INCOMPLETE"
+	ReasonUnrouted                    = "ISSUE_UNROUTED"
+	ReasonNotBornRouted               = "ISSUE_NOT_BORN_ROUTED"
+	ReasonNotBornMerged               = "ISSUE_NOT_BORN_MERGED"
+	ReasonPrivateBoundary             = "ISSUE_PRIVATE_BOUNDARY"
+	ReasonLiveUnarmored               = "ISSUE_LIVE_UNARMORED"
+	ReasonNotDispatchLeaf             = "ISSUE_NOT_DISPATCH_LEAF"
+	ReasonOversizedSteps              = "ISSUE_OVERSIZED_EXPECTED_STEPS"
+	ReasonNoiseIncomplete             = "ISSUE_NOISE_CONTROL_INCOMPLETE"
+	ReasonAgentIncomplete             = "ISSUE_AGENT_CONTEXT_INCOMPLETE"
+	ReasonUnexpandedTemplate          = "ISSUE_UNEXPANDED_TEMPLATE"
+	ReasonModelTierIncomplete         = "ISSUE_MODEL_TIER_INCOMPLETE"
+	ReasonScaleUndeclared             = "ISSUE_SCALE_UNDECLARED"
+	ReasonWitnessScaleMismatch        = "ISSUE_WITNESS_SCALE_MISMATCH"
+	ReasonTargetEnvelopeMissing       = "ISSUE_TARGET_ENVELOPE_MISSING"
+	ReasonEnvelopeInvalid             = "ISSUE_OPERATING_ENVELOPE_INVALID"
+	ReasonEnvelopeUnderTarget         = "ISSUE_OPERATING_ENVELOPE_UNDER_TARGET"
+	ReasonScaleEvidenceInvalid        = "ISSUE_SCALE_EVIDENCE_INVALID"
+	ReasonScaleStageMissing           = "ISSUE_SCALE_EVIDENCE_STAGE_MISSING"
+	ReasonWitnessForgeable            = "ISSUE_WITNESS_FORGEABLE"
+	ReasonProjectWorkMissing          = "ISSUE_PROJECT_WORK_MISSING"
+	ReasonProjectWorkInvalid          = "ISSUE_PROJECT_WORK_INVALID"
+	ReasonClosureWitnessMissing       = "ISSUE_CLOSURE_WITNESS_MISSING"
+	ReasonClosureWitnessMismatch      = "ISSUE_CLOSURE_WITNESS_MISMATCH"
+	ReasonClosureProductionGap        = "ISSUE_CLOSURE_PRODUCTION_GAP"
+	ReasonDependencyRelationAmbiguous = "ISSUE_DEPENDENCY_RELATION_AMBIGUOUS"
 )
 
 const MaxDispatchExpectedSteps = 8
@@ -605,6 +606,15 @@ func ReviewIssueDraft(d IssueDraft, opt Options) Review {
 			review.OK = len(review.Reasons) == 0
 		}
 	}
+	if hasAmbiguousModernAfterDependency(d.Body) {
+		review.OK = false
+		review.Verdict = "needs_dependency_relation"
+		review.Dispatchability = TriageOnly
+		addReviewReason(&review, ReasonDependencyRelationAmbiguous)
+		review.MissingFields = appendUnique(review.MissingFields, "dependency_relation")
+		review.Coordination = appendUnique(review.Coordination,
+			"Choose Start blocked by / Coordinates with / Promotion requires for every dependency before dispatch.")
+	}
 	if HasUnexpandedTemplate(d.Body) {
 		review.OK = false
 		review.Verdict = "refused"
@@ -1008,7 +1018,7 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		AcceptanceGate:         acceptanceGate,
 		Lane:                   lane,
 		Paths:                  paths,
-		Dependencies:           ParseIssueDependencies(section("Dependencies", "Dependency markers")),
+		Dependencies:           ParseIssueDependencies(section("Dependencies and scope fences", "Dependencies", "Dependency markers")),
 		Labels:                 issueDraftLabels(d.Labels),
 		BoundaryNotes:          issueDraftNotes(section("Boundary notes", "Risk / boundary notes")),
 		Reversibility:          agentSectionValue(section("Reversibility", "Rollback")),
@@ -1134,6 +1144,43 @@ func ParseIssueDependencies(section string) []DependencyRef {
 		}
 	}
 	return out
+}
+
+// hasAmbiguousModernAfterDependency rejects the broad "After" relation from
+// newly authored worker contracts. A dependency-and-scope-fences section is
+// explicitly modern; other modern issue bodies are rejected when they use the
+// capitalized form emitted by the affected roadmap authoring flow. Historical
+// minimal Dependencies sections keep their lowercase "after:" hard hold.
+func hasAmbiguousModernAfterDependency(body string) bool {
+	sections := markdownSections(body)
+	modernSection := strings.TrimSpace(sections[normalizeHeading("Dependencies and scope fences")])
+	if modernSection != "" && dependencySectionHasAfter(modernSection, false) {
+		return true
+	}
+
+	legacySection := strings.TrimSpace(sections[normalizeHeading("Dependencies")])
+	if legacySection == "" {
+		return false
+	}
+	return dependencySectionHasAfter(legacySection, true)
+}
+
+func dependencySectionHasAfter(section string, allowLegacyLowercase bool) bool {
+	for _, line := range strings.Split(section, "\n") {
+		raw := trimListPrefix(line)
+		key, _, ok := strings.Cut(raw, ":")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(strings.Trim(key, "`*_ "))
+		if !strings.EqualFold(key, "after") {
+			continue
+		}
+		if !allowLegacyLowercase || key != "after" {
+			return true
+		}
+	}
+	return false
 }
 
 func dependencyRelation(raw string) (relation string, blocking bool, ok bool) {
