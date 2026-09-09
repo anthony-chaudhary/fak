@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -76,8 +77,13 @@ func runCronEmit(stdout, stderr io.Writer, argv []string) int {
 	label := fs.String("label", "", "unit/task name (default fak-loop-<id>)")
 	ledger := fs.String("ledger", "", "loop ledger path passed through to fak loop run")
 	runner := fs.Bool("runner", false, "emit a unit invoking `fak cron run` for bounded scheduled tasks")
-	job := fs.String("job", "", "job id for the bounded runner (required with --runner)")
+	opencode := fs.Bool("opencode", false, "emit a unit invoking `fak cron opencode` for bounded OpenCode sessions")
+	job := fs.String("job", "", "job id for the bounded runner or opencode (required with --runner or --opencode)")
 	timeout := fs.Duration("timeout", 0, "command execution timeout for the bounded runner (required with --runner)")
+	until := fs.String("until", "", "expiration deadline passed through to the runner (RFC3339 or duration)")
+	workdir := fs.String("workdir", "", "working directory for the scheduled unit")
+	env := fs.String("env", "", "environment variables KEY=VAL (semicolon-separated)")
+	unloadPlist := fs.String("unload-plist", "", "launchd plist to unload upon expiration (macOS)")
 
 	// Find the trailing "--" separator for command arguments
 	dashIdx := -1
@@ -130,6 +136,23 @@ func runCronEmit(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
+	envMap := make(map[string]string)
+	if strings.TrimSpace(*env) != "" {
+		for _, part := range strings.Split(*env, ";") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if eqIdx := strings.Index(part, "="); eqIdx > 0 {
+				k := strings.TrimSpace(part[:eqIdx])
+				v := strings.TrimSpace(part[eqIdx+1:])
+				if k != "" {
+					envMap[k] = v
+				}
+			}
+		}
+	}
+
 	bin := strings.TrimSpace(*fakBin)
 	if bin == "" {
 		if exe, err := os.Executable(); err == nil && exe != "" {
@@ -170,14 +193,27 @@ func runCronEmit(stdout, stderr io.Writer, argv []string) int {
 			*label = "fak-cron-" + cronSanitizeLabel(*job)
 		}
 
+		resolvedUntil := strings.TrimSpace(*until)
+		if resolvedUntil != "" {
+			if d, err := time.ParseDuration(resolvedUntil); err == nil && d > 0 {
+				resolvedUntil = time.Now().Add(d).UTC().Format(time.RFC3339)
+			}
+		}
+
 		runArgs := []string{
 			bin, "cron", "run",
 			"--job", *job,
 			"--ledger", *ledger,
 			"--interval", interval.String(),
 			"--timeout", timeout.String(),
-			"--",
 		}
+		if resolvedUntil != "" {
+			runArgs = append(runArgs, "--until", resolvedUntil)
+		}
+		if strings.TrimSpace(*workdir) != "" {
+			runArgs = append(runArgs, "--workdir", strings.TrimSpace(*workdir))
+		}
+		runArgs = append(runArgs, "--")
 		runArgs = append(runArgs, cmdArgs...)
 
 		joinedCmd := strings.Join(cmdArgs, " ")
@@ -186,7 +222,72 @@ func runCronEmit(stdout, stderr io.Writer, argv []string) int {
 			timer:   "Timer for " + *label,
 			task:    fmt.Sprintf("fak cron run %s (%s)", *job, joinedCmd),
 		}
-		cronRender(stdout, schedTarget, *label, descs, *interval, runArgs)
+		cronRender(stdout, schedTarget, *label, descs, *interval, runArgs, *workdir, envMap)
+		return 0
+	}
+
+	// Mode 2: --opencode (#11953)
+	if *opencode {
+		if strings.TrimSpace(*command) != "" {
+			fmt.Fprintln(stderr, "fak cron emit: --command is not allowed with --opencode")
+			return 2
+		}
+		if strings.TrimSpace(*loopID) != "" {
+			fmt.Fprintln(stderr, "fak cron emit: --loop is not allowed with --opencode")
+			return 2
+		}
+		if strings.TrimSpace(*job) == "" {
+			fmt.Fprintln(stderr, "fak cron emit: --job is required with --opencode")
+			return 2
+		}
+		if strings.TrimSpace(*ledger) == "" {
+			fmt.Fprintln(stderr, "fak cron emit: --ledger is required with --opencode")
+			return 2
+		}
+		cmdArgs := rest
+		if len(cmdArgs) == 0 {
+			fmt.Fprintln(stderr, "fak cron emit: trailing command args are required with --opencode")
+			return 2
+		}
+		if strings.TrimSpace(*label) == "" {
+			*label = "fak-cron-" + cronSanitizeLabel(*job)
+		}
+
+		resolvedUntil := strings.TrimSpace(*until)
+		if resolvedUntil != "" {
+			if d, err := time.ParseDuration(resolvedUntil); err == nil && d > 0 {
+				resolvedUntil = time.Now().Add(d).UTC().Format(time.RFC3339)
+			}
+		}
+
+		runArgs := []string{
+			bin, "cron", "opencode",
+			"--job", *job,
+			"--ledger", *ledger,
+			"--interval", interval.String(),
+		}
+		if *timeout > 0 {
+			runArgs = append(runArgs, "--timeout", timeout.String())
+		}
+		if resolvedUntil != "" {
+			runArgs = append(runArgs, "--until", resolvedUntil)
+		}
+		if strings.TrimSpace(*workdir) != "" {
+			runArgs = append(runArgs, "--workdir", strings.TrimSpace(*workdir))
+		}
+		if strings.TrimSpace(*unloadPlist) != "" {
+			runArgs = append(runArgs, "--unload-plist", strings.TrimSpace(*unloadPlist))
+		}
+		runArgs = append(runArgs, "--")
+		runArgs = append(runArgs, cmdArgs...)
+
+		joinedCmd := strings.Join(cmdArgs, " ")
+		descs := cronDescs{
+			service: fmt.Sprintf("fak cron opencode %s (%s)", *job, joinedCmd),
+			timer:   "Timer for " + *label,
+			task:    fmt.Sprintf("fak cron opencode %s (%s)", *job, joinedCmd),
+		}
+		cronRender(stdout, schedTarget, *label, descs, *interval, runArgs, *workdir, envMap)
 		return 0
 	}
 
@@ -214,7 +315,7 @@ func runCronEmit(stdout, stderr io.Writer, argv []string) int {
 			timer:   "Timer for " + *label,
 			task:    "fak cron command " + joined + " (cron-emitted)",
 		}
-		cronRender(stdout, schedTarget, *label, descs, *interval, cmdVec)
+		cronRender(stdout, schedTarget, *label, descs, *interval, cmdVec, *workdir, envMap)
 		return 0
 	}
 
@@ -251,7 +352,7 @@ func runCronEmit(stdout, stderr io.Writer, argv []string) int {
 		timer:   "Timer for fak loop " + *loopID,
 		task:    "fak loop " + *loopID + " (cron-emitted)",
 	}
-	cronRender(stdout, schedTarget, *label, descs, *interval, runArgs)
+	cronRender(stdout, schedTarget, *label, descs, *interval, runArgs, *workdir, envMap)
 	return 0
 }
 
@@ -266,12 +367,12 @@ type cronDescs struct {
 }
 
 // cronRender dispatches the resolved argv to the per-target renderer.
-func cronRender(stdout io.Writer, target, label string, descs cronDescs, interval time.Duration, args []string) {
+func cronRender(stdout io.Writer, target, label string, descs cronDescs, interval time.Duration, args []string, workdir string, envMap map[string]string) {
 	switch target {
 	case "launchd":
-		fmt.Fprint(stdout, cronRenderLaunchd(label, interval, args))
+		fmt.Fprint(stdout, cronRenderLaunchd(label, interval, args, workdir, envMap))
 	case "systemd":
-		fmt.Fprint(stdout, cronRenderSystemd(label, descs, interval, args))
+		fmt.Fprint(stdout, cronRenderSystemd(label, descs, interval, args, workdir, envMap))
 	case "taskscheduler":
 		fmt.Fprint(stdout, cronRenderTaskScheduler(label, descs.task, interval, args))
 	}
@@ -279,7 +380,7 @@ func cronRender(stdout io.Writer, target, label string, descs cronDescs, interva
 
 // cronRenderLaunchd renders a launchd .plist whose ProgramArguments is the
 // `fak loop run` vector and whose StartInterval is the firing cadence in seconds.
-func cronRenderLaunchd(label string, interval time.Duration, args []string) string {
+func cronRenderLaunchd(label string, interval time.Duration, args []string, workdir string, envMap map[string]string) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	fmt.Fprintf(&b, "<!-- Written by: fak cron emit (#765) — install: launchctl load -w %s.plist -->\n", label)
@@ -293,6 +394,21 @@ func cronRenderLaunchd(label string, interval time.Duration, args []string) stri
 	b.WriteString("    </array>\n")
 	fmt.Fprintf(&b, "    <key>StartInterval</key>\n    <integer>%d</integer>\n", int64(interval.Seconds()))
 	b.WriteString("    <key>RunAtLoad</key>\n    <false/>\n")
+	if strings.TrimSpace(workdir) != "" {
+		fmt.Fprintf(&b, "    <key>WorkingDirectory</key>\n    <string>%s</string>\n", cronXMLEscape(strings.TrimSpace(workdir)))
+	}
+	if len(envMap) > 0 {
+		b.WriteString("    <key>EnvironmentVariables</key>\n    <dict>\n")
+		keys := make([]string, 0, len(envMap))
+		for k := range envMap {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(&b, "      <key>%s</key>\n      <string>%s</string>\n", cronXMLEscape(k), cronXMLEscape(envMap[k]))
+		}
+		b.WriteString("    </dict>\n")
+	}
 	fmt.Fprintf(&b, "    <key>StandardOutPath</key>\n    <string>/tmp/%s.log</string>\n", cronXMLEscape(label))
 	fmt.Fprintf(&b, "    <key>StandardErrorPath</key>\n    <string>/tmp/%s.err</string>\n", cronXMLEscape(label))
 	b.WriteString("  </dict>\n</plist>\n")
@@ -303,7 +419,7 @@ func cronRenderLaunchd(label string, interval time.Duration, args []string) stri
 // a `# === <name> ===` header). The service is a oneshot whose ExecStart is the
 // action vector (the `fak loop run` wrapper by default, or the arbitrary --command
 // vector); the timer fires it every interval.
-func cronRenderSystemd(label string, descs cronDescs, interval time.Duration, args []string) string {
+func cronRenderSystemd(label string, descs cronDescs, interval time.Duration, args []string, workdir string, envMap map[string]string) string {
 	sec := int64(interval.Seconds())
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Written by: fak cron emit (#765). Install both units to ~/.config/systemd/user/,\n")
@@ -313,6 +429,19 @@ func cronRenderSystemd(label string, descs cronDescs, interval time.Duration, ar
 	fmt.Fprintf(&b, "Description=%s\n\n", descs.service)
 	b.WriteString("[Service]\n")
 	b.WriteString("Type=oneshot\n")
+	if strings.TrimSpace(workdir) != "" {
+		fmt.Fprintf(&b, "WorkingDirectory=%s\n", cronSystemdQuote(strings.TrimSpace(workdir)))
+	}
+	if len(envMap) > 0 {
+		keys := make([]string, 0, len(envMap))
+		for k := range envMap {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(&b, "Environment=\"%s=%s\"\n", k, envMap[k])
+		}
+	}
 	fmt.Fprintf(&b, "ExecStart=%s\n", cronSystemdExecLine(args))
 	fmt.Fprintf(&b, "\n# === %s.timer ===\n", label)
 	b.WriteString("[Unit]\n")
@@ -357,16 +486,20 @@ func cronRenderTaskScheduler(label, desc string, interval time.Duration, args []
 	return b.String()
 }
 
+// cronSystemdQuote quotes an individual string for systemd configuration files.
+func cronSystemdQuote(s string) string {
+	if strings.ContainsAny(s, " \t\"\\") {
+		return `"` + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`) + `"`
+	}
+	return s
+}
+
 // cronSystemdExecLine joins an argv into a systemd ExecStart line, double-quoting
 // any argument that contains whitespace, a quote, or a backslash (systemd's own quoting rules).
 func cronSystemdExecLine(args []string) string {
 	parts := make([]string, len(args))
 	for i, a := range args {
-		if strings.ContainsAny(a, " \t\"\\") {
-			parts[i] = `"` + strings.ReplaceAll(strings.ReplaceAll(a, `\`, `\\`), `"`, `\"`) + `"`
-		} else {
-			parts[i] = a
-		}
+		parts[i] = cronSystemdQuote(a)
 	}
 	return strings.Join(parts, " ")
 }
