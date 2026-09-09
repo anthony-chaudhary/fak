@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"strings"
 	"time"
 
@@ -23,8 +26,14 @@ import (
 // fak-info split pane. Managed launches default to Codex's non-interactive approval/sandbox
 // bypass while fak's independent routing, capacity, policy, hook, and loop gates remain active.
 // Operators can explicitly restore Codex's native approval and sandbox layer.
+//
+// When --raw (or `fak codex raw`) is passed, it connects Codex directly to fak serve
+// without fak guard ("raw" mode), providing first-class backend integration on Mac.
 
 type codexLaunchOptions struct {
+	raw             bool
+	probePrompt     string
+	wireAPI         string
 	dryRun          bool
 	skipPermissions bool
 	approveForMe    bool
@@ -71,6 +80,12 @@ func cmdCodex(argv []string) {
 		cmdCodexMCP(argv[1:])
 		return
 	}
+	if len(argv) > 0 && argv[0] == "config" {
+		os.Exit(runCodexConfig(os.Stdout, os.Stderr, argv[1:]))
+	}
+	if len(argv) > 0 && argv[0] == "raw" {
+		argv = append([]string{"--raw"}, argv[1:]...)
+	}
 	args, code, stop := runCodexFreshnessAdmission(argv)
 	if stop {
 		os.Exit(code)
@@ -81,7 +96,11 @@ func cmdCodex(argv []string) {
 func runCodex(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("codex", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	dryRun := fs.Bool("dry-run", false, "print the guarded Codex command and exit without launching")
+	raw := fs.Bool("raw", false, "launch Codex directly against fak serve without fak guard (\"raw\" mode)")
+	noGuard := fs.Bool("no-guard", false, "alias for --raw")
+	probePrompt := fs.String("probe", "", "with --raw: run a single headless probe turn with this prompt and exit")
+	wireAPI := fs.String("wire-api", projectassets.DefaultCodexWireAPI, "with --raw: wire API to use (responses|chat)")
+	dryRun := fs.Bool("dry-run", false, "print the Codex command and exit without launching")
 	_ = fs.String("freshness-gate", "on", "require a current checkout launcher before admission (on|off; off is an explicit recovery override)")
 	skipPermissions := fs.Bool("skip-permissions", true, "legacy explicit opt-in for Codex's full approval/sandbox bypass (default true for managed launches); fak routing, capacity, policy, hook, and loop gates still apply")
 	nativePermissions := fs.Bool("native-permissions", false, "restore Codex's native approval prompts and sandbox; Codex subagents inherit this parent permission mode")
@@ -93,13 +112,13 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	splitInterval := fs.Duration("split-interval", 2*time.Second, "with --split: fak-info refresh interval")
 	policyPath := fs.String("policy", "", "capability-floor manifest to enforce (default: guard's embedded floor)")
 	apiKeyEnv := fs.String("api-key-env", "", "env var holding the upstream OpenAI API key (default: OPENAI_API_KEY)")
-	baseURL := fs.String("base-url", "", "upstream provider base URL; advanced override passed to fak guard")
-	remoteServe := fs.String("remote-serve", "", "send inference to a remote fak serve (HOST or HOST:PORT), while this local guard adjudicates")
-	model := fs.String("model", "", "upstream model id override passed to fak guard")
+	baseURL := fs.String("base-url", "", "upstream provider base URL; advanced override passed to fak guard or fak serve in raw mode")
+	remoteServe := fs.String("remote-serve", "", "send inference to a remote fak serve (HOST or HOST:PORT)")
+	model := fs.String("model", "", "upstream model id override")
 	managedCache := fs.String("managed-cache", os.Getenv(fleetManagedCacheEnv), "managed-cache posture forwarded to fak guard: auto|on|off (default: $"+fleetManagedCacheEnv+", else auto). The openai wire has no cache_control today, so this is passive there; the flag is carried so a cache-capable wire lands managed")
 	auditPath := fs.String("audit", "", "write guard's decision journal to this file (or 'off')")
 	noAudit := fs.Bool("no-audit", false, "disable guard's decision journal")
-	quiet := fs.Bool("quiet", false, "suppress guard's startup banner and exit summary")
+	quiet := fs.Bool("quiet", false, "suppress startup banner and exit summary")
 	localAuto := fs.Bool("local", false, "auto-detect a local OpenAI-compatible model server for guard's upstream")
 	ggufPath := fs.String("gguf", "", "run a local in-kernel GGUF model as guard's upstream")
 	gpuBackend := fs.String("backend", "", "with --gguf: compute backend")
@@ -111,7 +130,10 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	loopGateLimit := fs.Int("loop-gate-limit", 20, "legacy compatibility value; the launch gate evaluates only the newest Codex session")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak codex [launcher flags] [-- <codex args...>]")
+		fmt.Fprintln(stderr, "       fak codex config [--write] [--addr ADDR] [--model MODEL] [--wire-api WIRE]")
 		fmt.Fprintln(stderr, "  e.g. fak codex")
+		fmt.Fprintln(stderr, "       fak codex --raw")
+		fmt.Fprintln(stderr, "       fak codex --raw --probe \"summarize AGENTS.md\"")
 		fmt.Fprintln(stderr, "       fak codex -- exec \"summarize AGENTS.md\"")
 		fmt.Fprintln(stderr, "       fak codex --policy my-floor.json -- exec --json \"check the repo\"")
 		fmt.Fprintln(stderr, "")
@@ -135,6 +157,9 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 
 	fakBin := tuiExecutable()
 	launch := codexLaunchOptions{
+		raw:             *raw || *noGuard,
+		probePrompt:     *probePrompt,
+		wireAPI:         *wireAPI,
 		dryRun:          *dryRun,
 		skipPermissions: *skipPermissions && !*nativePermissions && !*approveForMe,
 		approveForMe:    *approveForMe,
@@ -159,6 +184,38 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 		codexHome:       *codexHome,
 		passthrough:     fs.Args(),
 	}
+
+	if launch.raw {
+		argvOut, extraEnv := buildCodexRawArgv(launch)
+		env := os.Environ()
+		for _, kv := range extraEnv {
+			env = append(env, kv[0]+"="+kv[1])
+		}
+		if launch.dryRun {
+			fmt.Fprintln(stderr, "fak codex: dry-run - not launching (raw mode, without guard)")
+			fmt.Fprintln(stderr, "  backend     = fak serve ("+firstNonEmpty(launch.baseURL, projectassets.DefaultCodexBaseURL)+")")
+			if launch.approveForMe {
+				fmt.Fprintln(stderr, "  permissions = Codex automated approval reviewer (sandbox active)")
+			} else if launch.skipPermissions {
+				fmt.Fprintln(stderr, "  permissions = Codex approval/sandbox bypass (managed default)")
+			} else {
+				fmt.Fprintln(stderr, "  permissions = Codex native approvals + sandbox explicitly restored")
+			}
+			fmt.Fprintln(stderr, "  command     = "+strings.Join(argvOut, " "))
+			fmt.Fprintln(stdout, strings.Join(argvOut, " "))
+			return 0
+		}
+		if !launch.quiet {
+			fmt.Fprintln(stderr, "fak codex: launching Codex directly against fak serve (raw mode, without guard) ...")
+		}
+		started := time.Now()
+		code := codexLaunchRun(stdout, stderr, argvOut, env)
+		if code == 0 && !launch.quiet {
+			fmt.Fprintf(stderr, "fak codex: Codex completed successfully in %s\n", time.Since(started).Round(time.Millisecond))
+		}
+		return code
+	}
+
 	if !launch.dryRun {
 		workingDir, cwdErr := os.Getwd()
 		if cwdErr != nil {
@@ -386,4 +443,145 @@ func runCodexLoopGate(stderr io.Writer, cfg codexLoopGateConfig) int {
 			codexLoopFailOnName(threshold), rep.Verdict, rep.Scanned)
 	}
 	return 0
+}
+
+func runCodexConfig(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("codex config", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	addr := fs.String("addr", "127.0.0.1:8080", "fak serve gateway listen address")
+	model := fs.String("model", projectassets.DefaultCodexModelID, "served model ID (e.g. qwen38:27b-q4)")
+	wireAPI := fs.String("wire-api", projectassets.DefaultCodexWireAPI, "wire API to use: responses|chat")
+	envKey := fs.String("env-key", projectassets.DefaultCodexEnvKey, "environment variable holding API key for provider")
+	codexHome := fs.String("codex-home", "", "Codex home directory (default: $CODEX_HOME or ~/.codex)")
+	dir := fs.String("dir", "", "workspace directory containing .codex/config.toml")
+	write := fs.Bool("write", false, "write or update config.toml for Codex")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	baseURL := *addr
+	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+		baseURL = "http://" + baseURL
+	}
+	if !strings.HasSuffix(baseURL, "/v1") {
+		baseURL = strings.TrimSuffix(baseURL, "/") + "/v1"
+	}
+	if *write {
+		targetPath := projectassets.ResolveCodexConfigFile(*codexHome, *dir)
+		modified, err := projectassets.EnsureCodexProviderConfig(targetPath, baseURL, *model, *wireAPI, *envKey)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak codex config: %v\n", err)
+			return 1
+		}
+		if modified {
+			fmt.Fprintf(stdout, "fak codex config: updated %s with provider \"fak\" (baseURL: %s, model: %s, wire: %s)\n", targetPath, baseURL, *model, *wireAPI)
+		} else {
+			fmt.Fprintf(stdout, "fak codex config: %s already has up-to-date provider \"fak\"\n", targetPath)
+		}
+		return 0
+	}
+	out := projectassets.GenerateCodexConfig(baseURL, *model, *wireAPI, *envKey)
+	fmt.Fprint(stdout, out)
+	return 0
+}
+
+func detectServedModel(baseURL string) string {
+	target := strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1") + "/healthz"
+	client := &http.Client{Timeout: 150 * time.Millisecond}
+	resp, err := client.Get(target)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var data struct {
+		Model string `json:"model"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(data.Model)
+}
+
+func buildCodexRawArgv(o codexLaunchOptions) ([]string, [][2]string) {
+	codexBin := "codex"
+	if runtime.GOOS == "windows" {
+		if p, err := exec.LookPath("codex.cmd"); err == nil {
+			codexBin = p
+		}
+	}
+	base := o.baseURL
+	if base == "" {
+		if o.remoteServe != "" {
+			host := o.remoteServe
+			if !strings.Contains(host, ":") {
+				host += ":8080"
+			}
+			base = "http://" + host + "/v1"
+		} else {
+			base = projectassets.DefaultCodexBaseURL
+		}
+	}
+	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+		base = "http://" + base
+	}
+	if !strings.HasSuffix(base, "/v1") {
+		base = strings.TrimSuffix(base, "/") + "/v1"
+	}
+
+	model := o.model
+	if model == "" {
+		if detected := detectServedModel(base); detected != "" {
+			model = detected
+		} else {
+			model = projectassets.DefaultCodexModelID
+		}
+	}
+
+	wire := o.wireAPI
+	if wire == "" {
+		wire = projectassets.DefaultCodexWireAPI
+	}
+
+	envKey := o.apiKeyEnv
+	if envKey == "" {
+		envKey = projectassets.DefaultCodexEnvKey
+	}
+
+	q := func(s string) string { return `"` + s + `"` }
+	id := projectassets.DefaultCodexProviderID
+
+	argv := []string{
+		codexBin,
+		"-c", "model_provider=" + id,
+		"-c", "model=" + q(model),
+		"-c", "model_providers." + id + ".name=" + q("fak serve"),
+		"-c", "model_providers." + id + ".base_url=" + q(base),
+		"-c", "model_providers." + id + ".wire_api=" + q(wire),
+		"-c", "model_providers." + id + ".env_key=" + q(envKey),
+	}
+
+	if o.approveForMe {
+		argv = append(argv, "-c", `approvals_reviewer="auto_review"`)
+	}
+	if o.skipPermissions {
+		if flag := launchSkipPermsFlag("codex"); flag != "" {
+			argv = append(argv, flag)
+		}
+	}
+
+	if o.probePrompt != "" {
+		argv = append(argv, "exec", o.probePrompt)
+	}
+
+	argv = append(argv, o.passthrough...)
+
+	var extraEnv [][2]string
+	extraEnv = append(extraEnv, [2]string{"FAK_CODEX_RAW_RECOVERY", "break-glass"})
+	if os.Getenv(envKey) == "" {
+		extraEnv = append(extraEnv, [2]string{envKey, guardCodexLocalPlaceholderAPIKey})
+	}
+
+	return argv, extraEnv
 }

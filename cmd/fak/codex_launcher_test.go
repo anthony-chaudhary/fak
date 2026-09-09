@@ -226,6 +226,119 @@ func TestRunCodexPermissionHelpNamesManagedDefaultAndNativeOptOut(t *testing.T) 
 	}
 }
 
+func TestBuildCodexRawArgvDefault(t *testing.T) {
+	argv, env := buildCodexRawArgv(codexLaunchOptions{
+		raw:             true,
+		skipPermissions: true,
+	})
+	wantBin := "codex"
+	if runtime.GOOS == "windows" {
+		if p, err := exec.LookPath("codex.cmd"); err == nil {
+			wantBin = p
+		}
+	}
+	if argv[0] != wantBin {
+		t.Errorf("argv[0] = %q, want %q", argv[0], wantBin)
+	}
+	joined := strings.Join(argv, " ")
+	for _, want := range []string{
+		`-c model_provider=fak`,
+		`-c model="qwen38:27b-q4"`,
+		`-c model_providers.fak.name="fak serve"`,
+		`-c model_providers.fak.base_url="http://127.0.0.1:8080/v1"`,
+		`-c model_providers.fak.wire_api="responses"`,
+		`-c model_providers.fak.env_key="OPENAI_API_KEY"`,
+		"--dangerously-bypass-approvals-and-sandbox",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("buildCodexRawArgv default missing %q:\n%s", want, joined)
+		}
+	}
+	foundRecovery := false
+	for _, kv := range env {
+		if kv[0] == "FAK_CODEX_RAW_RECOVERY" && kv[1] == "break-glass" {
+			foundRecovery = true
+		}
+	}
+	if !foundRecovery {
+		t.Errorf("buildCodexRawArgv env missing FAK_CODEX_RAW_RECOVERY=break-glass: %v", env)
+	}
+}
+
+func TestRunCodexRawDryRun(t *testing.T) {
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{
+		"--raw",
+		"--dry-run",
+		"--base-url", "http://127.0.0.1:8080/v1",
+		"--model", "qwen38:27b-q4",
+		"--probe", "summarize AGENTS.md",
+	})
+	if rc != 0 {
+		t.Fatalf("runCodex --raw --dry-run rc=%d stderr=%s", rc, errb.String())
+	}
+	gotOut := out.String()
+	for _, want := range []string{
+		"model_provider=fak",
+		"model_providers.fak.base_url=",
+		"model_providers.fak.wire_api=",
+		"exec summarize AGENTS.md",
+	} {
+		if !strings.Contains(gotOut, want) {
+			t.Errorf("raw dry-run stdout missing %q:\n%s", want, gotOut)
+		}
+	}
+	gotErr := errb.String()
+	if !strings.Contains(gotErr, "raw mode, without guard") {
+		t.Errorf("raw dry-run stderr missing banner:\n%s", gotErr)
+	}
+}
+
+func TestRunCodexConfigCommand(t *testing.T) {
+	var out, errb bytes.Buffer
+	rc := runCodexConfig(&out, &errb, []string{
+		"--addr", "127.0.0.1:8080",
+		"--model", "qwen38:27b-q4",
+	})
+	if rc != 0 {
+		t.Fatalf("runCodexConfig rc=%d stderr=%s", rc, errb.String())
+	}
+	content := out.String()
+	for _, want := range []string{
+		`model_provider = "fak"`,
+		`model = "qwen38:27b-q4"`,
+		`[model_providers.fak]`,
+		`base_url = "http://127.0.0.1:8080/v1"`,
+		`wire_api = "responses"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("runCodexConfig output missing %q:\n%s", want, content)
+		}
+	}
+
+	// Test with --write in temporary directory
+	tmp := t.TempDir()
+	out.Reset()
+	errb.Reset()
+	rcWrite := runCodexConfig(&out, &errb, []string{
+		"--dir", tmp,
+		"--write",
+		"--addr", "127.0.0.1:8080",
+		"--model", "qwen38:27b-q4",
+	})
+	if rcWrite != 0 {
+		t.Fatalf("runCodexConfig --write rc=%d stderr=%s", rcWrite, errb.String())
+	}
+	writtenPath := filepath.Join(tmp, "config.toml")
+	data, err := os.ReadFile(writtenPath)
+	if err != nil {
+		t.Fatalf("failed to read written config: %v", err)
+	}
+	if !strings.Contains(string(data), `[model_providers.fak]`) {
+		t.Errorf("written config missing provider: %s", string(data))
+	}
+}
+
 func TestCodexDryRunSubprocessPermissions(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	built := filepath.Join(t.TempDir(), "fak-codex-permissions-test")

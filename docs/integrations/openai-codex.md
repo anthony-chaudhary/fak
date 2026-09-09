@@ -26,6 +26,7 @@ There are two useful fak entry points:
 | Current Codex CLI or IDE extension | `fak serve --stdio` as an MCP server | Codex supports MCP, and fak exposes verdict tools without changing Codex's model wire. |
 | Codex Desktop App for Windows (UI/UX) | `fak codex mcp install` + capability floor | Connects fak as an immutable local MCP server in the desktop app's Settings -> MCP panel; lets you run `approval_policy = "never"` safely without modal prompt fatigue or destructive execution risk. |
 | Codex CLI with an OpenAI API key and you want fak in front of the model wire | `fak codex -- <codex args...>` | One command starts `fak manage`, launches Codex, and injects per-run Codex `-c model_provider=fak` overrides for the Responses wire. |
+| Codex CLI on Mac against local `fak serve` ("raw", without guard) | `fak codex --raw` | First-class raw Codex harness against native Apple Silicon Metal `fak serve` backend with automated `-c` provider injection. |
 | OpenAI SDKs, OpenAI Agents SDK, LangChain, LlamaIndex, or any Chat Completions client | `fak serve` as an OpenAI-compatible gateway | The client already calls `/v1/chat/completions`, so you repoint its base URL to fak. Endpoint-by-endpoint compatibility and current limits: [openai.md](openai.md). |
 
 Honest wire boundary: current Codex model-provider docs are Responses-oriented. fak can
@@ -861,6 +862,58 @@ Codex skills stored under `.agents/skills/<name>/SKILL.md` conform to the [Agent
 - [Supported APIs and protocols](../supported/apis-and-protocols.md)
 - [Compatibility matrix](compatibility-matrix.md)
 
+
+## Path 4: Direct Codex CLI against local Mac backend (raw, without guard)
+
+For local development on Apple Silicon, you can run `fak serve` with native Metal GPU acceleration as the backend for the Codex CLI without the `fak guard` wrapper:
+
+```bash
+# Terminal 1: launch Metal GPU server with one-touch Codex configuration
+fak serve --gguf qwen38:27b-q4 --codex
+
+# Terminal 2: run Codex CLI directly connected to fak serve
+fak codex --raw
+```
+
+### 1. Dedicated raw launcher: `fak codex --raw`
+
+`fak codex --raw` launches the Codex CLI with automatic `-c` provider overrides pointing to `fak serve` on `http://127.0.0.1:8080/v1`:
+
+- Injects `-c model_provider=fak` and `-c model_providers.fak.base_url="http://127.0.0.1:8080/v1"`
+- Injects `-c model_providers.fak.wire_api="responses"` and `-c model_providers.fak.env_key="OPENAI_API_KEY"`
+- Auto-detects the currently loaded model on `fak serve` (or defaults to `qwen38:27b-q4`)
+- Auto-populates `OPENAI_API_KEY` placeholder in child environment if unset
+- Forwards `--approve-for-me`, `--skip-permissions`, and pass-through subcommands
+
+Useful commands:
+
+```bash
+# Dry run: preview the exact command without launching
+fak codex --raw --dry-run
+
+# Run a single headless probe query
+fak codex --raw --probe "Explain prefix caching in one sentence"
+
+# Connect to a remote or custom-port fak serve
+fak codex --raw --base-url http://192.168.1.50:8080/v1 --model qwen38:27b-q4
+```
+
+### 2. Standalone config generation: `fak codex config`
+
+To configure Codex CLI's `config.toml` permanently to use `fak serve`:
+
+```bash
+# Preview config.toml configuration snippet
+fak codex config
+
+# Atomically write or update ~/.codex/config.toml (or $CODEX_HOME/config.toml)
+fak codex config --write
+
+# Write to custom workspace directory
+fak codex config --write --dir .
+```
+
+---
 
 ## Diagnose an MCP startup before Codex
 
