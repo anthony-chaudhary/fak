@@ -858,7 +858,7 @@ func guardChildPlanCommandEnv(plan guardLaunchPlan, injected [][2]string, pinUps
 	// posture: guard already resolved and captured its own upstream OAuth token in
 	// THIS (parent) process before spawning, and the provider API keys an
 	// API-billing child needs are spared by StripInheritedSecrets.
-	ambient := os.Environ()
+	ambient := guardStripOrchestrationWorktreeLifecycleEnv(os.Environ())
 	// #8172: a request-signed cloud route (Bedrock SigV4 / Vertex ADC) resolves its
 	// credential through the cloud SDK chain, and the credential-shaped members of
 	// that chain (AWS_SESSION_TOKEN, GOOGLE_APPLICATION_CREDENTIALS, …) are exactly
@@ -902,6 +902,18 @@ func guardChildPlanCommandEnv(plan guardLaunchPlan, injected [][2]string, pinUps
 		env = append(env, "OPENAI_API_KEY="+guardCodexOAuthPlaceholderAPIKey)
 	}
 	return plan, env
+}
+
+func guardStripOrchestrationWorktreeLifecycleEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, item := range env {
+		key, _, _ := strings.Cut(item, "=")
+		if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(key)), orchestrationWorktreeLifecycleEnvPrefix) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func guardChildSpawnAttempt(plan guardLaunchPlan, injected [][2]string, pinUpstream bool, meta guardChildSpawnMetadata, extraEnv ...[2]string) (guardLaunchPlan, toolprocgate.SpawnAttempt, error) {

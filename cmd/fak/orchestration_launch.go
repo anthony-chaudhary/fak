@@ -21,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/trajectory"
 	"github.com/anthony-chaudhary/fak/internal/ultracodebench"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 const codexOrchestrationLaunchSchema = "fak.codex_orchestration_launch.v1"
@@ -80,6 +81,15 @@ func validateCodexOrchestrationArtifactHome(codexHome string) error {
 
 const orchestrationChildEnv = "FAK_ORCHESTRATION_CHILD"
 
+const (
+	orchestrationWorktreeLifecycleEnvPrefix  = "FAK_ORCHESTRATION_WORKTREE_"
+	orchestrationWorktreeRootEnv             = orchestrationWorktreeLifecycleEnvPrefix + "ROOT"
+	orchestrationWorktreePathEnv             = orchestrationWorktreeLifecycleEnvPrefix + "PATH"
+	orchestrationWorktreeBaseSHAEnv          = orchestrationWorktreeLifecycleEnvPrefix + "BASE_SHA"
+	orchestrationWorktreeTreeEnv             = orchestrationWorktreeLifecycleEnvPrefix + "TREE_JSON"
+	orchestrationWorktreeLifecycleReceiptEnv = orchestrationWorktreeLifecycleEnvPrefix + "RECEIPT"
+)
+
 type codexOrchestrationWorkerLaunch struct {
 	RoleID           string                               `json:"role_id"`
 	OutputProfile    string                               `json:"output_profile"`
@@ -98,6 +108,9 @@ type codexOrchestrationWorkerLaunch struct {
 	AccessMode       string                               `json:"access_mode,omitempty"`
 	ReadOnly         bool                                 `json:"read_only"`
 	WriteTree        string                               `json:"write_tree,omitempty"`
+	WorktreePath     string                               `json:"worktree_path,omitempty"`
+	WorktreeBaseSHA  string                               `json:"worktree_base_sha,omitempty"`
+	WorktreeReceipt  string                               `json:"worktree_receipt,omitempty"`
 	PolicyPath       string                               `json:"policy_path,omitempty"`
 	ReservedTokens   int64                                `json:"reserved_tokens,omitempty"`
 	DeadlineAt       time.Time                            `json:"deadline_at,omitempty"`
@@ -233,12 +246,32 @@ type orchestrationWorkerLaunchRequest struct {
 	OutputProfile    string
 	WorkProfile      string
 	Attempt          int
+	WorktreePath     string
+	WorktreeBaseSHA  string
 	RecordStarted    func(codexOrchestrationWorkerLaunch) error
 }
 
 var orchestrationWorkerLauncher = launchGuardedCodexOrchestrationWorker
 var orchestrationWorkerUsageMonitor = monitorQwenOrchestrationWorker
 var orchestrationWorkerStopper = stopQwenOrchestrationWorker
+
+type orchestrationStartedWorkerProcess struct {
+	PID         int
+	KillAndWait func()
+	Release     func() error
+}
+
+var orchestrationWorkerWorktreePreparer = prepareCodexOrchestrationWorkerWorktree
+var orchestrationWorkerWorktreeBuildDirs = workerworktree.EnsureBuildDirs
+var orchestrationWorkerWorktreeHandoff = workerworktree.HandoffOwner
+var orchestrationWorkerWorktreePreOwnerCleanup = func(root, path string) workerworktree.Result {
+	return workerworktree.ReapChecked(root, path, "", nil)
+}
+var orchestrationWorkerProcessStarter = startCodexOrchestrationWorkerProcess
+var orchestrationWorkerLaunchProbe = func(pid int) bool {
+	time.Sleep(3 * time.Second)
+	return dispatchPIDAlive(pid)
+}
 
 func launchCodexOrchestrationWorkers(home, sessionID, requestedProfile, capabilityProfile, taskText string, resolution orchestration.Resolution, wallLimitArg ...time.Duration) (codexOrchestrationLaunchReceipt, error) {
 	return launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfile, capabilityProfile, taskText, agentDefaultOutputStyle, agentDefaultWorkProfile, "shipped-default", resolution, wallLimitArg...)
@@ -424,6 +457,7 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 			joinWorker(codexOrchestrationWorkerLaunch{
 				RoleID: role.ID, Status: "starting", LogPath: logPath,
 				Attempt: attempt, RecoveryAttempts: attempt - 1, AttemptLogs: append([]string(nil), attemptLogs...),
+				WorktreePath: request.WorktreePath, WorktreeBaseSHA: request.WorktreeBaseSHA,
 			})
 			receipt.Status = "launching"
 			if err := persistCodexOrchestrationLaunchReceipt(home, receipt); err != nil {
@@ -472,6 +506,10 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 			launched.Attempt = attempt
 			launched.RecoveryAttempts = attempt - 1
 			launched.AttemptLogs = append([]string(nil), attemptLogs...)
+			if launched.WorktreePath != "" {
+				request.WorktreePath = launched.WorktreePath
+				request.WorktreeBaseSHA = launched.WorktreeBaseSHA
+			}
 			launched = joinWorker(launched)
 			if launchErr != nil {
 				return failWorker(launched, attempt, "launch", launchErr)
@@ -672,15 +710,74 @@ func stopQwenOrchestrationWorker(pid int) error {
 	return nil
 }
 
+func prepareCodexOrchestrationWorkerWorktree(req orchestrationWorkerLaunchRequest) workerworktree.Result {
+	budget := 2 * time.Minute
+	if req.RemainingWall > 0 && req.RemainingWall < budget {
+		budget = req.RemainingWall
+	}
+	key := req.RunID + "-" + req.Role.ID
+	leaseID := "orchestration-child-" + req.RunID + "-" + req.Role.ID
+	return workerworktree.PrepareOwnedBounded(
+		req.Root,
+		req.Access.Admission.Lane,
+		key,
+		"",
+		"",
+		workerworktree.OwnerStamp{PID: os.Getpid(), LeaseID: leaseID},
+		budget,
+	)
+}
+
+func startCodexOrchestrationWorkerProcess(cmd *exec.Cmd) (orchestrationStartedWorkerProcess, error) {
+	if err := cmd.Start(); err != nil {
+		return orchestrationStartedWorkerProcess{}, err
+	}
+	if cmd.Process == nil {
+		return orchestrationStartedWorkerProcess{}, fmt.Errorf("worker started without process")
+	}
+	return orchestrationStartedWorkerProcess{
+		PID: cmd.Process.Pid,
+		KillAndWait: func() {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		},
+		Release: cmd.Process.Release,
+	}, nil
+}
+
 func launchGuardedCodexOrchestrationWorker(req orchestrationWorkerLaunchRequest) (codexOrchestrationWorkerLaunch, error) {
 	fakBin, err := os.Executable()
 	if err != nil {
 		return codexOrchestrationWorkerLaunch{}, err
 	}
+	worktreePath := ""
+	worktreeBaseSHA := ""
+	worktreeReceipt := ""
+	if req.Access.Mode == orchestration.ChildAccessEffect {
+		worktreePath = req.WorktreePath
+		worktreeBaseSHA = req.WorktreeBaseSHA
+		if worktreePath == "" {
+			prepared := orchestrationWorkerWorktreePreparer(req)
+			worktreePath = prepared.Path
+			worktreeBaseSHA = prepared.BaseSHA
+			if !prepared.OK {
+				detail := firstString(prepared.Reason, prepared.Detail, "managed worktree preparation failed")
+				return codexOrchestrationWorkerLaunch{
+					RoleID: req.Role.ID, WorktreePath: worktreePath, WorktreeBaseSHA: worktreeBaseSHA,
+				}, fmt.Errorf("WORKTREE_PREPARE_FAILED: child %q: %s", req.Role.ID, detail)
+			}
+		}
+		if strings.TrimSpace(worktreePath) == "" || strings.TrimSpace(worktreeBaseSHA) == "" {
+			return codexOrchestrationWorkerLaunch{
+				RoleID: req.Role.ID, WorktreePath: worktreePath, WorktreeBaseSHA: worktreeBaseSHA,
+			}, fmt.Errorf("WORKTREE_PREPARE_FAILED: child %q returned incomplete worktree identity", req.Role.ID)
+		}
+		worktreeReceipt = filepath.Join(req.RunDir, toolcallFileStem(req.Role.ID)+"-worktree-lifecycle.json")
+	}
 	logPath := orchestrationWorkerLogPath(req)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 	if err != nil {
-		return codexOrchestrationWorkerLaunch{}, err
+		return cleanupCodexOrchestrationPreOwnerFailure(req, codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, WorktreePath: worktreePath, WorktreeBaseSHA: worktreeBaseSHA, WorktreeReceipt: worktreeReceipt}, err)
 	}
 	auditPath := orchestrationWorkerAuditPath(req)
 	cmd := exec.Command(fakBin, orchestrationWorkerArgs(req, auditPath)...)
@@ -689,32 +786,94 @@ func launchGuardedCodexOrchestrationWorker(req orchestrationWorkerLaunchRequest)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.Env = orchestrationWorkerEnv(os.Environ())
+	if worktreePath != "" {
+		if _, err := orchestrationWorkerWorktreeBuildDirs(worktreePath); err != nil {
+			_ = logFile.Close()
+			return cleanupCodexOrchestrationPreOwnerFailure(req, codexOrchestrationWorkerLaunch{
+				RoleID: req.Role.ID, LogPath: logPath, WorktreePath: worktreePath,
+				WorktreeBaseSHA: worktreeBaseSHA, WorktreeReceipt: worktreeReceipt,
+			}, fmt.Errorf("WORKTREE_BUILD_DIRS_FAILED: child %q: %w", req.Role.ID, err))
+		}
+		cmd.Dir = worktreePath
+		cmd.Env = envSliceFromMap(workerworktree.WorktreeEnv(envMap(cmd.Env), worktreePath))
+		treeJSON, err := json.Marshal(req.Access.Admission.Tree)
+		if err != nil {
+			_ = logFile.Close()
+			return cleanupCodexOrchestrationPreOwnerFailure(req, codexOrchestrationWorkerLaunch{
+				RoleID: req.Role.ID, LogPath: logPath, WorktreePath: worktreePath,
+				WorktreeBaseSHA: worktreeBaseSHA, WorktreeReceipt: worktreeReceipt,
+			}, fmt.Errorf("encode child worktree lifecycle: %w", err))
+		}
+		lifecycleEnv := map[string]string{
+			orchestrationWorktreeRootEnv:             req.Root,
+			orchestrationWorktreePathEnv:             worktreePath,
+			orchestrationWorktreeBaseSHAEnv:          worktreeBaseSHA,
+			orchestrationWorktreeTreeEnv:             string(treeJSON),
+			orchestrationWorktreeLifecycleReceiptEnv: worktreeReceipt,
+		}
+		childEnv := envMap(cmd.Env)
+		for key, value := range lifecycleEnv {
+			childEnv[key] = value
+		}
+		cmd.Env = envSliceFromMap(childEnv)
+	}
 	configureDispatchSpawn(cmd)
-	if err := cmd.Start(); err != nil {
+	process, err := orchestrationWorkerProcessStarter(cmd)
+	if err != nil {
 		_ = logFile.Close()
-		return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, LogPath: logPath}, err
+		return cleanupCodexOrchestrationPreOwnerFailure(req, codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, LogPath: logPath, WorktreePath: worktreePath, WorktreeBaseSHA: worktreeBaseSHA, WorktreeReceipt: worktreeReceipt}, err)
 	}
 	_ = logFile.Close()
-	if cmd.Process == nil {
-		return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, LogPath: logPath}, fmt.Errorf("worker started without process")
+	if process.PID <= 0 {
+		if process.KillAndWait != nil {
+			process.KillAndWait()
+		}
+		return cleanupCodexOrchestrationPreOwnerFailure(req, codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, LogPath: logPath, WorktreePath: worktreePath, WorktreeBaseSHA: worktreeBaseSHA, WorktreeReceipt: worktreeReceipt}, fmt.Errorf("worker started without process"))
 	}
-	pid := cmd.Process.Pid
-	started := codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: pid, Status: "started", LogPath: logPath, StartedAt: orchestrationLaunchNow().UTC(), Attempt: req.Attempt}
+	pid := process.PID
+	started := codexOrchestrationWorkerLaunch{
+		RoleID: req.Role.ID, PID: pid, Status: "started", LogPath: logPath,
+		StartedAt: orchestrationLaunchNow().UTC(), Attempt: req.Attempt,
+		WorktreePath: worktreePath, WorktreeBaseSHA: worktreeBaseSHA, WorktreeReceipt: worktreeReceipt,
+	}
+	if worktreePath != "" {
+		if err := orchestrationWorkerWorktreeHandoff(worktreePath, pid); err != nil {
+			if process.KillAndWait != nil {
+				process.KillAndWait()
+			}
+			return cleanupCodexOrchestrationPreOwnerFailure(req, started, fmt.Errorf("WORKTREE_OWNER_HANDOFF_FAILED: child %q: %w", req.Role.ID, err))
+		}
+	}
 	if req.RecordStarted != nil {
 		if err := req.RecordStarted(started); err != nil {
-			_ = cmd.Process.Kill()
-			_, _ = cmd.Process.Wait()
+			if process.KillAndWait != nil {
+				process.KillAndWait()
+			}
 			return started, err
 		}
 	}
-	time.Sleep(3 * time.Second)
-	if !dispatchPIDAlive(pid) {
-		return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: pid, Status: "failed", LogPath: logPath}, fmt.Errorf("worker exited during launch probe; inspect %s", logPath)
+	if !orchestrationWorkerLaunchProbe(pid) {
+		return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: pid, Status: "failed", LogPath: logPath, WorktreePath: worktreePath, WorktreeBaseSHA: worktreeBaseSHA, WorktreeReceipt: worktreeReceipt}, fmt.Errorf("worker exited during launch probe; inspect %s", logPath)
 	}
-	if err := cmd.Process.Release(); err != nil {
-		return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: pid, Status: "failed", LogPath: logPath}, fmt.Errorf("release worker process handle: %w", err)
+	if process.Release != nil {
+		if err := process.Release(); err != nil {
+			return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: pid, Status: "failed", LogPath: logPath, WorktreePath: worktreePath, WorktreeBaseSHA: worktreeBaseSHA, WorktreeReceipt: worktreeReceipt}, fmt.Errorf("release worker process handle: %w", err)
+		}
 	}
 	return started, nil
+}
+
+func cleanupCodexOrchestrationPreOwnerFailure(req orchestrationWorkerLaunchRequest, launch codexOrchestrationWorkerLaunch, launchErr error) (codexOrchestrationWorkerLaunch, error) {
+	if strings.TrimSpace(launch.WorktreePath) == "" {
+		return launch, launchErr
+	}
+	cleaned := orchestrationWorkerWorktreePreOwnerCleanup(req.Root, launch.WorktreePath)
+	if cleaned.OK {
+		launch.WorktreePath = ""
+		launch.WorktreeBaseSHA = ""
+		launch.WorktreeReceipt = ""
+	}
+	return launch, launchErr
 }
 
 func orchestrationWorkerPrompt(req orchestrationWorkerLaunchRequest) string {
@@ -766,7 +925,8 @@ func orchestrationWorkerEnv(env []string) []string {
 	out := make([]string, 0, len(env)+1)
 	for _, item := range env {
 		key, _, _ := strings.Cut(item, "=")
-		if strings.EqualFold(key, "CODEX_THREAD_ID") || strings.EqualFold(key, orchestrationChildEnv) || strings.HasPrefix(strings.ToUpper(key), "FAK_GUARD_") {
+		upperKey := strings.ToUpper(key)
+		if strings.EqualFold(key, "CODEX_THREAD_ID") || strings.EqualFold(key, orchestrationChildEnv) || strings.HasPrefix(upperKey, "FAK_GUARD_") || strings.HasPrefix(upperKey, orchestrationWorktreeLifecycleEnvPrefix) {
 			continue
 		}
 		out = append(out, item)

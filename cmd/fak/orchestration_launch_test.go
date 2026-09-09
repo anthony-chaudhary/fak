@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,8 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/laneadmit"
 	"github.com/anthony-chaudhary/fak/internal/orchestration"
 	"github.com/anthony-chaudhary/fak/internal/trajectory"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 func TestOrchestrationLaunchLowersFormalPacketAndBindsAssignmentDigest(t *testing.T) {
@@ -403,6 +406,334 @@ func TestOrchestrationLaunchWritesJoinedWorkerReceipt(t *testing.T) {
 		if !strings.Contains(prompt, "Work read-only") || !strings.Contains(prompt, "Do not edit files") {
 			t.Fatalf("observe-only prompt = %q", prompt)
 		}
+	}
+}
+
+func TestCodexOrchestrationWorkerUsesManagedWorktree(t *testing.T) {
+	root := t.TempDir()
+	runDir := t.TempDir()
+	worktreePath := filepath.Join(t.TempDir(), "fak-worker-wt-cmd-managed")
+	baseSHA := strings.Repeat("a", 40)
+	home := externalOrchestrationTestHome(t)
+
+	oldPrepare := orchestrationWorkerWorktreePreparer
+	oldBuildDirs := orchestrationWorkerWorktreeBuildDirs
+	oldHandoff := orchestrationWorkerWorktreeHandoff
+	oldCleanup := orchestrationWorkerWorktreePreOwnerCleanup
+	oldStart := orchestrationWorkerProcessStarter
+	oldProbe := orchestrationWorkerLaunchProbe
+	t.Cleanup(func() {
+		orchestrationWorkerWorktreePreparer = oldPrepare
+		orchestrationWorkerWorktreeBuildDirs = oldBuildDirs
+		orchestrationWorkerWorktreeHandoff = oldHandoff
+		orchestrationWorkerWorktreePreOwnerCleanup = oldCleanup
+		orchestrationWorkerProcessStarter = oldStart
+		orchestrationWorkerLaunchProbe = oldProbe
+	})
+
+	var prepareCalls int
+	var handoffCalls int
+	var handoffPath string
+	var handoffPID int
+	var commandDirs []string
+	var commandEnvs []map[string]string
+	var events []string
+	orchestrationWorkerWorktreePreparer = func(req orchestrationWorkerLaunchRequest) workerworktree.Result {
+		prepareCalls++
+		events = append(events, "prepare")
+		if req.Access.Mode != orchestration.ChildAccessEffect || req.Access.Admission.Lane != "cmd" {
+			t.Fatalf("prepare request = %+v", req)
+		}
+		return workerworktree.Result{OK: true, Path: worktreePath, BaseSHA: baseSHA}
+	}
+	orchestrationWorkerWorktreeBuildDirs = func(path string) (map[string]string, error) {
+		if path != worktreePath {
+			t.Fatalf("build dirs path=%q, want %q", path, worktreePath)
+		}
+		events = append(events, "ensure")
+		return workerworktree.WorktreeEnv(nil, path), nil
+	}
+	orchestrationWorkerWorktreeHandoff = func(path string, pid int) error {
+		handoffCalls++
+		events = append(events, "handoff")
+		handoffPath, handoffPID = path, pid
+		return nil
+	}
+	orchestrationWorkerProcessStarter = func(cmd *exec.Cmd) (orchestrationStartedWorkerProcess, error) {
+		events = append(events, "start")
+		commandDirs = append(commandDirs, cmd.Dir)
+		commandEnvs = append(commandEnvs, envMap(cmd.Env))
+		return orchestrationStartedWorkerProcess{PID: 4242 + len(commandDirs), Release: func() error { return nil }}, nil
+	}
+	orchestrationWorkerLaunchProbe = func(int) bool { return true }
+
+	req := orchestrationWorkerLaunchRequest{
+		Role: orchestration.Role{
+			ID: "effect-worker", Purpose: "implement",
+			Access: orchestration.ChildAccess{Mode: orchestration.ChildAccessEffect, Lane: "cmd", WriteTree: "cmd/fak/**"},
+		},
+		Access: orchestrationCompiledChildAccess{
+			Mode:      orchestration.ChildAccessEffect,
+			Admission: laneadmit.Request{Lane: "cmd", Tree: []string{"cmd/fak/**"}},
+		},
+		Root: root, RunDir: runDir, RunID: "managed-worktree-test", Attempt: 1,
+		Model: "test-model", Effort: "low", RemainingWall: time.Minute,
+	}
+	req.RecordStarted = func(started codexOrchestrationWorkerLaunch) error {
+		events = append(events, "record")
+		return persistCodexOrchestrationLaunchReceipt(home, codexOrchestrationLaunchReceipt{
+			Schema: codexOrchestrationLaunchSchema, SessionID: "managed-worktree-test", RunID: req.RunID,
+			Workers: []codexOrchestrationWorkerLaunch{started},
+		})
+	}
+
+	launched, err := launchGuardedCodexOrchestrationWorker(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepareCalls != 1 || launched.WorktreePath != worktreePath || launched.WorktreeBaseSHA != baseSHA {
+		t.Fatalf("effect launch = %+v, prepare calls=%d", launched, prepareCalls)
+	}
+	if handoffCalls != 1 || handoffPath != worktreePath || handoffPID != launched.PID {
+		t.Fatalf("handoff path=%q pid=%d, launch=%+v", handoffPath, handoffPID, launched)
+	}
+	if got := strings.Join(events, ","); got != "prepare,ensure,start,handoff,record" {
+		t.Fatalf("launch event order = %q", got)
+	}
+	if len(commandDirs) != 1 || commandDirs[0] != worktreePath {
+		t.Fatalf("effect command dirs = %v", commandDirs)
+	}
+	for key, want := range workerworktree.WorktreeEnv(nil, worktreePath) {
+		if got := commandEnvs[0][key]; got != want {
+			t.Errorf("effect env %s=%q, want %q", key, got, want)
+		}
+	}
+	for key, want := range map[string]string{
+		orchestrationWorktreeRootEnv:    root,
+		orchestrationWorktreePathEnv:    worktreePath,
+		orchestrationWorktreeBaseSHAEnv: baseSHA,
+		orchestrationWorktreeTreeEnv:    `["cmd/fak/**"]`,
+	} {
+		if got := commandEnvs[0][key]; got != want {
+			t.Errorf("lifecycle env %s=%q, want %q", key, got, want)
+		}
+	}
+	if launched.WorktreeReceipt == "" || commandEnvs[0][orchestrationWorktreeLifecycleReceiptEnv] != launched.WorktreeReceipt {
+		t.Fatalf("lifecycle receipt env=%q launch=%q", commandEnvs[0][orchestrationWorktreeLifecycleReceiptEnv], launched.WorktreeReceipt)
+	}
+	stripped := guardStripOrchestrationWorktreeLifecycleEnv(envSliceFromMap(commandEnvs[0]))
+	for key := range envMap(stripped) {
+		if strings.HasPrefix(strings.ToUpper(key), orchestrationWorktreeLifecycleEnvPrefix) {
+			t.Fatalf("inner child inherited lifecycle metadata %q", key)
+		}
+	}
+	persisted, ok := readCodexOrchestrationLaunchReceipt(home, "managed-worktree-test")
+	if !ok || len(persisted.Workers) != 1 || persisted.Workers[0].WorktreePath != worktreePath || persisted.Workers[0].WorktreeBaseSHA != baseSHA || persisted.Workers[0].WorktreeReceipt != launched.WorktreeReceipt {
+		t.Fatalf("persisted managed worker receipt = %+v, ok=%v", persisted, ok)
+	}
+
+	observe := req
+	observe.Role.ID = "observe-worker"
+	observe.Role.Access = orchestration.ChildAccess{Mode: orchestration.ChildAccessObserve}
+	observe.Access = orchestrationCompiledChildAccess{Mode: orchestration.ChildAccessObserve, Admission: laneadmit.Request{ReadOnly: true}}
+	observe.RecordStarted = nil
+	if _, err := launchGuardedCodexOrchestrationWorker(observe); err != nil {
+		t.Fatal(err)
+	}
+	if prepareCalls != 1 {
+		t.Fatalf("observe worker prepared a managed worktree; calls=%d", prepareCalls)
+	}
+	if len(commandDirs) != 2 || commandDirs[1] != root {
+		t.Fatalf("observe command dirs = %v", commandDirs)
+	}
+	if handoffCalls != 1 || handoffPath != worktreePath || handoffPID != launched.PID {
+		t.Fatalf("observe worker invoked owner handoff: path=%q pid=%d", handoffPath, handoffPID)
+	}
+
+	orchestrationWorkerWorktreePreparer = func(orchestrationWorkerLaunchRequest) workerworktree.Result {
+		return workerworktree.Result{Code: "PREPARE_TIMEOUT", Reason: "bounded preparation timed out"}
+	}
+	failed := req
+	failed.Role.ID = "prepare-failure"
+	if _, err := launchGuardedCodexOrchestrationWorker(failed); err == nil || !strings.Contains(err.Error(), "WORKTREE_PREPARE_FAILED") {
+		t.Fatalf("effect prepare failure error = %v", err)
+	}
+	if len(commandDirs) != 2 {
+		t.Fatalf("effect prepare failure started a process; command dirs=%v", commandDirs)
+	}
+
+	orchestrationWorkerWorktreePreparer = oldPrepare
+	orchestrationWorkerWorktreeBuildDirs = func(string) (map[string]string, error) {
+		return nil, errors.New("cache directory unavailable")
+	}
+	var cleanupCalls int
+	orchestrationWorkerWorktreePreOwnerCleanup = func(gotRoot, gotPath string) workerworktree.Result {
+		cleanupCalls++
+		if gotRoot != root || gotPath != worktreePath {
+			t.Fatalf("cleanup root=%q path=%q", gotRoot, gotPath)
+		}
+		return workerworktree.Result{Code: workerworktree.ReapCodeDirtyWorktreeRefused, Preserved: true}
+	}
+	buildFailed := req
+	buildFailed.Role.ID = "build-dirs-failure"
+	buildFailed.WorktreePath = worktreePath
+	buildFailed.WorktreeBaseSHA = baseSHA
+	failedLaunch, err := launchGuardedCodexOrchestrationWorker(buildFailed)
+	if err == nil || !strings.Contains(err.Error(), "WORKTREE_BUILD_DIRS_FAILED") {
+		t.Fatalf("effect build-dir failure error = %v", err)
+	}
+	if cleanupCalls != 1 || failedLaunch.WorktreePath != worktreePath || failedLaunch.WorktreeBaseSHA != baseSHA {
+		t.Fatalf("dirty pre-owner cleanup calls=%d launch=%+v", cleanupCalls, failedLaunch)
+	}
+	if len(commandDirs) != 2 {
+		t.Fatalf("effect build-dir failure started a process; command dirs=%v", commandDirs)
+	}
+	orchestrationWorkerWorktreePreOwnerCleanup = func(string, string) workerworktree.Result {
+		cleanupCalls++
+		return workerworktree.Result{OK: true, Removed: true}
+	}
+	buildFailed.Role.ID = "build-dirs-clean-failure"
+	cleanedLaunch, err := launchGuardedCodexOrchestrationWorker(buildFailed)
+	if err == nil || cleanedLaunch.WorktreePath != "" || cleanedLaunch.WorktreeBaseSHA != "" || cleanupCalls != 2 {
+		t.Fatalf("clean pre-owner cleanup calls=%d launch=%+v err=%v", cleanupCalls, cleanedLaunch, err)
+	}
+}
+
+func TestGuardOrchestrationWorktreeLifecycle(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(t.TempDir(), "fak-worker-wt-cmd-lifecycle")
+	receiptPath := filepath.Join(t.TempDir(), "lifecycle.json")
+	baseSHA := strings.Repeat("b", 40)
+	t.Setenv(orchestrationWorktreeRootEnv, root)
+	t.Setenv(orchestrationWorktreePathEnv, worktree)
+	t.Setenv(orchestrationWorktreeBaseSHAEnv, baseSHA)
+	t.Setenv(orchestrationWorktreeTreeEnv, `["cmd/fak/**"]`)
+	t.Setenv(orchestrationWorktreeLifecycleReceiptEnv, receiptPath)
+
+	oldLand, oldOwner, oldReap := guardOrchestrationWorktreeLand, guardOrchestrationWorktreeOwnerProcessLive, guardOrchestrationWorktreeReap
+	t.Cleanup(func() {
+		guardOrchestrationWorktreeLand = oldLand
+		guardOrchestrationWorktreeOwnerProcessLive = oldOwner
+		guardOrchestrationWorktreeReap = oldReap
+	})
+	var events []string
+	guardOrchestrationWorktreeOwnerProcessLive = func(_ string, alive workerworktree.ProcessLiveFn) (bool, bool) {
+		return alive(os.Getpid()), true
+	}
+	guardOrchestrationWorktreeLand = func(meta guardOrchestrationWorktreeMetadata) workerworktree.Result {
+		events = append(events, "land")
+		if meta.Root != root || meta.Path != worktree || meta.BaseSHA != baseSHA || !reflect.DeepEqual(meta.Trees, []string{"cmd/fak/**"}) {
+			t.Fatalf("land metadata=%+v", meta)
+		}
+		return workerworktree.Result{OK: true}
+	}
+	guardOrchestrationWorktreeReap = func(gotRoot, gotPath string) workerworktree.Result {
+		events = append(events, "reap")
+		if gotRoot != root || gotPath != worktree {
+			t.Fatalf("reap root=%q path=%q", gotRoot, gotPath)
+		}
+		return workerworktree.Result{OK: true}
+	}
+	readReceipt := func() guardOrchestrationWorktreeLifecycleReceipt {
+		raw, err := os.ReadFile(receiptPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var receipt guardOrchestrationWorktreeLifecycleReceipt
+		if err := json.Unmarshal(raw, &receipt); err != nil {
+			t.Fatal(err)
+		}
+		return receipt
+	}
+
+	if err := guardFinalizeOrchestrationWorktree(nil, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(events, ","); got != "land,reap" {
+		t.Fatalf("success lifecycle order=%q", got)
+	}
+	if receipt := readReceipt(); receipt.Status != "landed_reaped" || receipt.Worktree != worktree {
+		t.Fatalf("success receipt=%+v", receipt)
+	}
+
+	events = nil
+	guardOrchestrationWorktreeLand = func(guardOrchestrationWorktreeMetadata) workerworktree.Result {
+		events = append(events, "land")
+		return workerworktree.Result{Reason: "merge conflict"}
+	}
+	if err := guardFinalizeOrchestrationWorktree(nil, true, nil); err == nil || !strings.Contains(err.Error(), "ORCHESTRATION_WORKTREE_LAND_FAILED") {
+		t.Fatalf("land failure=%v", err)
+	}
+	if got := strings.Join(events, ","); got != "land" {
+		t.Fatalf("land failure lifecycle order=%q", got)
+	}
+	if receipt := readReceipt(); receipt.Status != "preserved" || !strings.Contains(receipt.Reason, "ORCHESTRATION_WORKTREE_LAND_FAILED") {
+		t.Fatalf("land failure receipt=%+v", receipt)
+	}
+
+	events = nil
+	guardOrchestrationWorktreeLand = func(guardOrchestrationWorktreeMetadata) workerworktree.Result {
+		events = append(events, "land")
+		return workerworktree.Result{OK: true, DroppedOutOfLane: 2}
+	}
+	if err := guardFinalizeOrchestrationWorktree(nil, true, nil); err == nil || !strings.Contains(err.Error(), "ORCHESTRATION_WORKTREE_POLICY_VIOLATION") {
+		t.Fatalf("out-of-lane land failure=%v", err)
+	}
+	if got := strings.Join(events, ","); got != "land" {
+		t.Fatalf("out-of-lane lifecycle order=%q", got)
+	}
+	if receipt := readReceipt(); receipt.Status != "landed_preserved" || receipt.Code != "ORCHESTRATION_WORKTREE_POLICY_VIOLATION" || receipt.Land.DroppedOutOfLane != 2 || receipt.Worktree != worktree {
+		t.Fatalf("out-of-lane receipt=%+v", receipt)
+	}
+
+	events = nil
+	guardOrchestrationWorktreeLand = func(guardOrchestrationWorktreeMetadata) workerworktree.Result {
+		events = append(events, "land")
+		return workerworktree.Result{OK: true}
+	}
+	guardOrchestrationWorktreeReap = func(string, string) workerworktree.Result {
+		events = append(events, "reap")
+		return workerworktree.Result{Code: workerworktree.ReapCodeDirtyWorktreeRefused, Preserved: true, Path: worktree}
+	}
+	if err := guardFinalizeOrchestrationWorktree(nil, true, nil); err == nil || !strings.Contains(err.Error(), "ORCHESTRATION_WORKTREE_REAP_FAILED") {
+		t.Fatalf("checked reap refusal=%v", err)
+	}
+	if got := strings.Join(events, ","); got != "land,reap" {
+		t.Fatalf("checked reap lifecycle order=%q", got)
+	}
+	if receipt := readReceipt(); receipt.Status != "landed_preserved" || receipt.Reap.Code != workerworktree.ReapCodeDirtyWorktreeRefused || receipt.Worktree != worktree {
+		t.Fatalf("checked reap refusal receipt=%+v", receipt)
+	}
+
+	events = nil
+	ownerRefusalReceipt := filepath.Join(t.TempDir(), "owner-refusal.json")
+	t.Setenv(orchestrationWorktreeLifecycleReceiptEnv, ownerRefusalReceipt)
+	guardOrchestrationWorktreeOwnerProcessLive = func(string, workerworktree.ProcessLiveFn) (bool, bool) {
+		return false, false
+	}
+	if err := guardFinalizeOrchestrationWorktree(nil, true, nil); err == nil || !strings.Contains(err.Error(), "ORCHESTRATION_WORKTREE_OWNER_REFUSED") {
+		t.Fatalf("owner refusal=%v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("owner refusal mutated worktree: %v", events)
+	}
+	if _, err := os.Stat(ownerRefusalReceipt); !os.IsNotExist(err) {
+		t.Fatalf("owner refusal wrote untrusted receipt path: %v", err)
+	}
+
+	events = nil
+	t.Setenv(orchestrationWorktreeLifecycleReceiptEnv, receiptPath)
+	guardOrchestrationWorktreeOwnerProcessLive = func(_ string, alive workerworktree.ProcessLiveFn) (bool, bool) {
+		return alive(os.Getpid()), true
+	}
+	if err := guardFinalizeOrchestrationWorktree(errors.New("codex crashed"), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("child failure mutated worktree: %v", events)
+	}
+	if receipt := readReceipt(); receipt.Status != "preserved" || !strings.Contains(receipt.Reason, "ORCHESTRATION_WORKTREE_CHILD_FAILED") {
+		t.Fatalf("child failure receipt=%+v", receipt)
 	}
 }
 
