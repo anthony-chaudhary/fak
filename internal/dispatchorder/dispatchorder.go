@@ -63,8 +63,9 @@ const (
 	// DispBlocked: this unit names a prerequisite (BlockedBy) that is still an OPEN candidate this
 	// tick — a SOFT hold, so it is excluded from Keep but kept in Order with the reason (legible,
 	// not silently dropped). Fail-open: a prerequisite ABSENT from the candidate set (already
-	// closed) does NOT block. Cycle-safe: a mutual A<->B block breaks toward the lowest ID — the
-	// lower keeps the dispatch, the higher is held — so exploratory work never deadlocks.
+	// closed) does NOT block. Cycle-safe: every cyclic strongly connected component releases its
+	// lexically lowest ID from intra-cycle edges only, so exploratory work never deadlocks while
+	// every open prerequisite outside that cycle remains enforced for the whole component.
 	DispBlocked Disposition = "blocked"
 )
 
@@ -144,8 +145,8 @@ type Candidate struct {
 	// SAME tick's set, this unit is held (DispBlocked): excluded from Keep but kept in Order with
 	// the reason, so the dependency is legible instead of silently dropped. Fail-open: a BlockedBy
 	// id ABSENT from the candidate set is an already-closed prerequisite and never holds. Cycle-safe:
-	// a mutual A<->B block breaks toward the lowest ID (the lower keeps the dispatch, the higher is
-	// held), so exploratory work never deadlocks or freezes on a dependency cycle. Empty for every
+	// each cyclic strongly connected component releases its lexically lowest ID from intra-cycle
+	// blockers only, and any member's external prerequisite still holds the breaker. Empty for every
 	// legacy candidate, which keeps their disposition byte-identical (the no-regression guarantee).
 	BlockedBy []string `json:"blocked_by,omitempty"`
 	// Live reports that a worker is currently running this unit (the in-flight skip).
@@ -594,32 +595,40 @@ func BlockedByOpenPrereq(cands []Candidate) map[string][]string { return blocked
 //   - Fail-open: a prerequisite id ABSENT from this tick's candidate set is already closed (no
 //     longer an open unit) and never holds — so a dependency clears itself the moment its
 //     prerequisite leaves the set.
-//   - Cycle-safe: a mutual A<->B block (each names the other) breaks toward the LOWEST ID — the
-//     lower keeps the right to dispatch, only the higher is held — so a dependency cycle resolves
-//     deterministically to one dispatchable unit instead of hanging. A self-edge never blocks.
+//   - Cycle-safe: every cyclic strongly connected component releases its lexically LOWEST ID from
+//     blockers inside that same component only. Other component members remain held, and every
+//     open prerequisite outside the component is propagated to the breaker. A self-edge never
+//     blocks.
 func blockedByOpenPrereq(cands []Candidate) map[string][]string {
+	hasPrerequisites := false
+	for _, c := range cands {
+		if len(c.BlockedBy) > 0 {
+			hasPrerequisites = true
+			break
+		}
+	}
+	if !hasPrerequisites {
+		return nil
+	}
+
 	present := make(map[string]bool, len(cands))
-	names := make(map[string]map[string]bool, len(cands))
 	for _, c := range cands {
 		present[c.ID] = true
 	}
-	for _, c := range cands {
-		for _, p := range c.BlockedBy {
-			if names[c.ID] == nil {
-				names[c.ID] = make(map[string]bool, len(c.BlockedBy))
-			}
-			names[c.ID][p] = true
-		}
-	}
+	component, breaker := cyclicPrereqComponents(cands, present)
+	external := componentExternalBlockers(cands, present, component)
 	blocked := make(map[string][]string)
 	for _, c := range cands {
 		var open []string
+		if own, cyclic := component[c.ID]; cyclic && breaker[own] == c.ID {
+			open = append(open, external[own]...)
+		}
 		for _, p := range c.BlockedBy {
 			if p == c.ID || !present[p] {
 				continue // a self-edge, or an absent (already-closed) prerequisite: fail-open, no hold
 			}
-			if names[p][c.ID] && c.ID < p {
-				continue // mutual A<->B cycle: the lowest ID keeps the dispatch, only the higher is held
+			if own, cyclic := component[c.ID]; cyclic && component[p] == own && breaker[own] == c.ID {
+				continue // deterministic SCC breaker ignores only its intra-cycle prerequisite
 			}
 			open = appendUniqueString(open, p)
 		}
@@ -629,6 +638,104 @@ func blockedByOpenPrereq(cands []Candidate) map[string][]string {
 		}
 	}
 	return blocked
+}
+
+// componentExternalBlockers collects the open prerequisites leaving each cyclic component. The
+// breaker inherits this union, so it cannot run ahead of an external prerequisite declared by a
+// different member. Absent references are excluded here exactly as they are in the ordinary hold.
+func componentExternalBlockers(cands []Candidate, present map[string]bool, component map[string]int) map[int][]string {
+	external := make(map[int][]string)
+	for _, c := range cands {
+		own, cyclic := component[c.ID]
+		if !cyclic {
+			continue
+		}
+		for _, p := range c.BlockedBy {
+			if p == c.ID || !present[p] || component[p] == own {
+				continue
+			}
+			external[own] = appendUniqueString(external[own], p)
+		}
+	}
+	for own := range external {
+		sort.Strings(external[own])
+	}
+	return external
+}
+
+// cyclicPrereqComponents returns only cyclic strongly connected components from the graph of
+// present prerequisite edges. component maps each cyclic member to its component ID; breaker maps
+// that component to its lexically lowest candidate ID. Tarjan's traversal order cannot change the
+// result because component membership is graph-defined and the breaker is selected explicitly.
+func cyclicPrereqComponents(cands []Candidate, present map[string]bool) (map[string]int, map[int]string) {
+	edges := make(map[string][]string, len(cands))
+	ids := make([]string, 0, len(present))
+	for id := range present {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, c := range cands {
+		for _, p := range c.BlockedBy {
+			if p != c.ID && present[p] {
+				edges[c.ID] = appendUniqueString(edges[c.ID], p)
+			}
+		}
+		sort.Strings(edges[c.ID])
+	}
+
+	index := 0
+	indices := make(map[string]int, len(ids))
+	lowlink := make(map[string]int, len(ids))
+	onStack := make(map[string]bool, len(ids))
+	stack := make([]string, 0, len(ids))
+	component := make(map[string]int)
+	breaker := make(map[int]string)
+	componentID := 0
+	var visit func(string)
+	visit = func(id string) {
+		index++
+		indices[id], lowlink[id] = index, index
+		stack = append(stack, id)
+		onStack[id] = true
+		for _, next := range edges[id] {
+			if indices[next] == 0 {
+				visit(next)
+				if lowlink[next] < lowlink[id] {
+					lowlink[id] = lowlink[next]
+				}
+			} else if onStack[next] && indices[next] < lowlink[id] {
+				lowlink[id] = indices[next]
+			}
+		}
+		if lowlink[id] != indices[id] {
+			return
+		}
+		members := make([]string, 0, 2)
+		for {
+			n := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			onStack[n] = false
+			members = append(members, n)
+			if n == id {
+				break
+			}
+		}
+		if len(members) < 2 {
+			return
+		}
+		sort.Strings(members)
+		componentID++
+		breaker[componentID] = members[0]
+		for _, member := range members {
+			component[member] = componentID
+		}
+	}
+	for _, id := range ids {
+		if indices[id] == 0 {
+			visit(id)
+		}
+	}
+	return component, breaker
 }
 
 // beats reports whether a is the fresher duplicate than b: greater recency, then greater
