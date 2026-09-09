@@ -182,6 +182,7 @@ func TestGardenDispatchApplySpawnsAdmittedOnly(t *testing.T) {
 	gardenDispatchSpawnerFor(t)
 	root := t.TempDir()
 	initDispatchGit(t, root)
+	runDispatchGit(t, root, "-c", "user.email=fak@example.invalid", "-c", "user.name=fak test", "commit", "--allow-empty", "-m", "init (fak cmd)")
 	fixture := gardenDispatchIssuesFixture(t)
 	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
 

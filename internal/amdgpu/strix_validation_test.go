@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -24,6 +25,16 @@ func validStrixExecutionEvidence() StrixExecutionEvidence {
 	exit := 0
 	return StrixExecutionEvidence{SourceArchiveSHA256: testHash, BinarySHA256: testHash, ShaderBundleSHA256: testHash, CommandSHA256: testHash, DeviceIdentity: "AMD Radeon 8060S Graphics|gfx1151", EngineIdentity: "fak-native/vulkan", ArtifactRehashed: true, DeviceTimeoutMS: 60000, LeasePathSHA256: testHash, AdmissionWaitMS: 30000, Acquired: true, Released: true, AcquireOrdinal: 1, ReleaseOrdinal: 2, ExitCode: &exit, RawOutputSHA256: testHash, RawOutputBytes: 1}
 }
+
+func authorizeStrixReceiptForTest(t *testing.T, r *StrixValidationReceipt) {
+	t.Helper()
+	binding, err := r.ComputeDigest()
+	if err != nil {
+		t.Fatalf("ComputeDigest for test authority failed: %v", err)
+	}
+	r.authority = strixReceiptAuthority{seal: &strixReceiptAuthoritySealValue, binding: binding}
+}
+
 func validStrixReceipt(t *testing.T) *StrixValidationReceipt {
 	t.Helper()
 	r := NewStrixValidationReceipt(StrixTarget{Mode: "ssh", Host: "strix1", Reachable: true, GPUName: "AMD Radeon 8060S Graphics", TargetISA: "gfx1151"}, "HEAD", testTip, "test")
@@ -43,8 +54,102 @@ func validStrixReceipt(t *testing.T) *StrixValidationReceipt {
 	r.Ablations = []StrixAblationResult{{Dimension: "target", Feature: "cpu_vs_vulkan_gpu", BaselineArm: StrixArmResult{Name: "cpu", LatencyUS: 2, Samples: 1}, CandidateArm: StrixArmResult{Name: "gpu", LatencyUS: 1, Samples: 1}, Speedup: 2, LiftRatio: 2, CosineParity: .9999, Verdict: "VERIFIED_LIFT", Evidence: validStrixExecutionEvidence()}}
 	r.Provenance.ExecutionManifestSHA256 = executionManifestDigest(r)
 	r.Verified = true
+	authorizeStrixReceiptForTest(t, r)
 	r.Digest, _ = r.ComputeDigest()
 	return r
+}
+
+func TestStrixValidationReceiptRejectsSelfAuthoredPhysicalCredit(t *testing.T) {
+	authorized := validStrixReceipt(t)
+	authorized.SelectedAblations = 0
+	authorized.ExecutedAblations = 0
+	authorized.Ablations = nil
+	authorized.Provenance.ExecutionManifestSHA256 = executionManifestDigest(authorized)
+	authorizeStrixReceiptForTest(t, authorized)
+	authorized.Digest, _ = authorized.ComputeDigest()
+	if err := authorized.Validate(); err != nil {
+		t.Fatalf("verifier-authorized control receipt failed validation: %v", err)
+	}
+	if !authorized.CreditEligible() {
+		t.Fatal("verifier-authorized argmax control must earn physical parity credit")
+	}
+	registry := NewStrixCandidateRegistry()
+	before := registry.Scoreboard()
+	if comparisons, err := registry.EvaluateReceipt(authorized); err != nil || len(comparisons) != 0 {
+		t.Fatalf("argmax-only control must be accepted with no ablation comparisons: comparisons=%d err=%v", len(comparisons), err)
+	}
+	if after := registry.Scoreboard(); !reflect.DeepEqual(after, before) {
+		t.Fatalf("argmax-only control mutated scoreboard: before=%v after=%v", before, after)
+	}
+	raw, err := json.Marshal(authorized)
+	if err != nil {
+		t.Fatalf("marshal fabricated receipt: %v", err)
+	}
+	if bytes.Contains(raw, []byte("authority")) {
+		t.Fatalf("opaque authority leaked into serialized receipt: %s", raw)
+	}
+	assertReadableNonCredit := func(t *testing.T, receipt *StrixValidationReceipt) {
+		t.Helper()
+		if err := receipt.Validate(); err != nil {
+			t.Fatalf("serialized receipt should remain structurally readable: %v", err)
+		}
+		if receipt.CreditEligible() {
+			t.Fatal("serialized receipt earned physical parity credit")
+		}
+		registry := NewStrixCandidateRegistry()
+		before := registry.Scoreboard()
+		if _, err := registry.EvaluateReceipt(receipt); err == nil {
+			t.Fatal("serialized receipt earned candidate-evaluation credit")
+		}
+		if after := registry.Scoreboard(); !reflect.DeepEqual(after, before) {
+			t.Fatalf("rejected receipt mutated scoreboard: before=%v after=%v", before, after)
+		}
+	}
+
+	t.Run("genuine_roundtrip", func(t *testing.T) {
+		var roundTrip StrixValidationReceipt
+		if err := json.Unmarshal(raw, &roundTrip); err != nil {
+			t.Fatalf("unmarshal genuine receipt: %v", err)
+		}
+		assertReadableNonCredit(t, &roundTrip)
+	})
+
+	t.Run("reused_authorized_destination", func(t *testing.T) {
+		reused := *authorized
+		if !reused.CreditEligible() {
+			t.Fatal("copied verifier-authorized receipt lost physical parity credit before decoding")
+		}
+		if err := json.Unmarshal(raw, &reused); err != nil {
+			t.Fatalf("unmarshal genuine receipt into authorized destination: %v", err)
+		}
+		assertReadableNonCredit(t, &reused)
+	})
+
+	ablationRaw, err := json.Marshal(validStrixReceipt(t))
+	if err != nil {
+		t.Fatalf("marshal ablation receipt: %v", err)
+	}
+	const fabricatedHash = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	for _, tc := range []struct {
+		verdict  string
+		verified bool
+	}{{verdict: "PASS", verified: true}, {verdict: "FAIL"}, {verdict: "SKIPPED"}} {
+		t.Run(tc.verdict, func(t *testing.T) {
+			var fabricated StrixValidationReceipt
+			if err := json.Unmarshal(ablationRaw, &fabricated); err != nil {
+				t.Fatalf("unmarshal fabricated receipt: %v", err)
+			}
+			fabricated.Verdict = tc.verdict
+			fabricated.Verified = tc.verified
+			fabricated.Subkernels[0].Evidence.RawOutputSHA256 = fabricatedHash
+			fabricated.Ablations[0].Evidence.RawOutputSHA256 = fabricatedHash
+			fabricated.Digest, err = fabricated.ComputeDigest()
+			if err != nil {
+				t.Fatalf("recompute fabricated digest: %v", err)
+			}
+			assertReadableNonCredit(t, &fabricated)
+		})
+	}
 }
 
 func TestFilterSubkernelSpecs_RejectsUnknownSelectors(t *testing.T) {
