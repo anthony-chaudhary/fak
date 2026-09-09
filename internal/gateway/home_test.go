@@ -3,7 +3,6 @@ package gateway
 import (
 	"bytes"
 	"context"
-	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +11,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/engine"
+	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 )
+
+func init() {
+	abi.RegisterEngine("mock", engine.MockEngine)
+}
 
 func TestGatewayHomepageRendersDiscoverySurface(t *testing.T) {
 	s, err := New(Config{
