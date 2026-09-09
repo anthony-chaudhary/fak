@@ -18,9 +18,16 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/allinone"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/macfit"
+	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelreg"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
 func printUpHelp(w io.Writer) {
@@ -270,6 +277,7 @@ func runTurnkeyUp(in io.Reader, stdout, stderr io.Writer, argv []string) {
 type turnkeyServer struct {
 	plan         macfit.TurnkeyProfile
 	mock         bool
+	planner      *agent.InKernelPlanner
 	listener     net.Listener
 	boundAddr    string
 	httpServer   *http.Server
@@ -287,6 +295,10 @@ func (s *turnkeyServer) Plan() macfit.TurnkeyProfile {
 	return s.plan
 }
 
+func (s *turnkeyServer) Planner() *agent.InKernelPlanner {
+	return s.planner
+}
+
 func (s *turnkeyServer) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	s.stopping = true
@@ -298,7 +310,75 @@ func (s *turnkeyServer) Close() error {
 	return s.httpServer.Close()
 }
 
-func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr string, mock bool) (*turnkeyServer, error) {
+func newInKernelChatPlanner(model *fakmodel.Model, tok *tokenizer.Tokenizer, modelID string, q4k bool, backend compute.Backend, metal bool) *agent.InKernelPlanner {
+	return agent.NewInKernelPlanner(model, tok, modelID, q4k, backend, metal)
+}
+
+func resolveTurnkeyModelRef(ref string) string {
+	trimmed := strings.TrimSpace(ref)
+	if trimmed == "" {
+		return modelreg.DefaultAlias
+	}
+	if _, err := os.Stat(trimmed); err == nil {
+		return trimmed
+	}
+	switch strings.ToLower(trimmed) {
+	case "70b", "qwen3.8-70b-q4_k_m", "qwen3.8-70b":
+		return "qwen38:70b"
+	case "27b", "qwen3.8-27b-q4_k_m", "qwen3.8-27b":
+		return "qwen38:27b"
+	case "7b", "qwen3.8-7b-q4_k_m", "qwen3.8-7b":
+		return "qwen2.5:7b"
+	case "3b", "qwen3.8-3b-q4_k_m", "qwen3.8-3b":
+		return "qwen2.5-coder:3b"
+	}
+	return trimmed
+}
+
+func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr string, mock bool, custom ...*agent.InKernelPlanner) (*turnkeyServer, error) {
+	var planner *agent.InKernelPlanner
+	if !mock {
+		if len(custom) > 0 && custom[0] != nil {
+			planner = custom[0]
+		} else {
+			modelRef := plan.Tier.ModelID
+			if modelRef == "" {
+				modelRef = modelreg.DefaultAlias
+			}
+			ref := resolveTurnkeyModelRef(modelRef)
+			ref, _ = modelreg.Resolve(ref)
+			ref = pathutil.ExpandTilde(ref)
+			if hfhub.IsURI(ref) {
+				resolved, err := hfhub.FetchURI(ctx, ref, os.Stderr)
+				if err != nil {
+					return nil, fmt.Errorf("fetch %s: %w", ref, err)
+				}
+				ref = resolved
+			}
+			if _, err := os.Stat(ref); err != nil {
+				return nil, fmt.Errorf("model %q (%s) is not a known alias, an hf:// URI, or an existing .gguf path", plan.Tier.ModelID, ref)
+			}
+
+			backend, err := resolveServeChatBackend("")
+			if err != nil {
+				return nil, fmt.Errorf("backend: %w", err)
+			}
+			useMetal, _ := resolveServeMetal(false, false, "")
+
+			effectiveTokens := int(plan.ContextBudgetTokens)
+			m, q4k, _, _ := loadServeInKernelModel(ref, backend, false, effectiveTokens, nil, 1)
+			if m == nil {
+				return nil, fmt.Errorf("failed to load %q into the in-kernel engine", ref)
+			}
+			tok, ok := resolveServeTokenizer("", ref)
+			if !ok || tok == nil {
+				return nil, fmt.Errorf("%q has no usable tokenizer; pass a GGUF with an embedded tokenizer", ref)
+			}
+
+			planner = newInKernelChatPlanner(m, tok, plan.Tier.ModelID, q4k, backend, useMetal)
+		}
+	}
+
 	if addr == "" {
 		addr = "127.0.0.1:8080"
 	}
@@ -310,6 +390,7 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	ts := &turnkeyServer{
 		plan:      plan,
 		mock:      mock,
+		planner:   planner,
 		listener:  ln,
 		boundAddr: ln.Addr().String(),
 	}
@@ -418,30 +499,73 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 	}
 
 	promptTokens := 0
-	lastUserContent := ""
-	for _, m := range req.Messages {
-		words := len(strings.Fields(m.Content))
-		promptTokens += words + 4
-		if m.Role == "user" {
-			lastUserContent = m.Content
-		}
-	}
-	if promptTokens == 0 {
-		promptTokens = 8
-	}
-
+	compTokens := 0
+	totalTokens := 0
+	finishReason := "stop"
 	var answerText string
-	if lastUserContent != "" {
-		answerText = fmt.Sprintf("Turnkey %s completion on Apple Silicon (Metal). Probed unified RAM with %.1f%% headroom. Processed: %s",
-			s.plan.Tier.Name, s.plan.HeadroomRatio*100, lastUserContent)
+
+	if !s.mock && s.planner != nil {
+		agentMsgs := make([]agent.Message, len(req.Messages))
+		for i, m := range req.Messages {
+			agentMsgs[i] = agent.Message{
+				Role:    m.Role,
+				Content: m.Content,
+			}
+		}
+		var sampleOpts []agent.SampleOpt
+		if req.MaxTokens > 0 {
+			sampleOpts = append(sampleOpts, agent.WithMaxTokens(req.MaxTokens))
+		}
+		if req.Temperature > 0 {
+			t := req.Temperature
+			sampleOpts = append(sampleOpts, agent.WithTemperature(&t))
+		}
+		comp, err := s.planner.Complete(r.Context(), agentMsgs, nil, sampleOpts...)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("inference error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		answerText = comp.Message.Content
+		promptTokens = comp.Usage.PromptTokens
+		compTokens = comp.Usage.CompletionTokens
+		totalTokens = comp.Usage.TotalTokens
+		if comp.FinishReason != "" {
+			finishReason = comp.FinishReason
+		}
+		if compTokens == 0 && answerText != "" {
+			compTokens = len(strings.Fields(answerText))
+			if compTokens == 0 {
+				compTokens = 1
+			}
+			totalTokens = promptTokens + compTokens
+		}
 	} else {
-		answerText = fmt.Sprintf("Turnkey %s completion on Apple Silicon via Metal. Ready to assist.", s.plan.Tier.Name)
+		lastUserContent := ""
+		for _, m := range req.Messages {
+			words := len(strings.Fields(m.Content))
+			promptTokens += words + 4
+			if m.Role == "user" {
+				lastUserContent = m.Content
+			}
+		}
+		if promptTokens == 0 {
+			promptTokens = 8
+		}
+
+		if lastUserContent != "" {
+			answerText = fmt.Sprintf("Turnkey %s completion on Apple Silicon (Metal). Probed unified RAM with %.1f%% headroom. Processed: %s",
+				s.plan.Tier.Name, s.plan.HeadroomRatio*100, lastUserContent)
+		} else {
+			answerText = fmt.Sprintf("Turnkey %s completion on Apple Silicon via Metal. Ready to assist.", s.plan.Tier.Name)
+		}
+
+		compTokens = len(strings.Fields(answerText))
+		if compTokens == 0 {
+			compTokens = 12
+		}
+		totalTokens = promptTokens + compTokens
 	}
 
-	compTokens := len(strings.Fields(answerText))
-	if compTokens == 0 {
-		compTokens = 12
-	}
 	atomic.AddInt64(&s.requestCount, 1)
 	atomic.AddInt64(&s.totalTokens, int64(compTokens))
 
@@ -478,7 +602,7 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 
 		sendChunk(map[string]any{"role": "assistant"}, nil)
 		sendChunk(map[string]any{"content": answerText}, nil)
-		stop := "stop"
+		stop := finishReason
 		sendChunk(map[string]any{}, &stop)
 		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 		if flusher != nil {
@@ -501,13 +625,13 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 					Role:    "assistant",
 					Content: answerText,
 				},
-				FinishReason: "stop",
+				FinishReason: finishReason,
 			},
 		},
 		Usage: chatCompletionUsage{
 			PromptTokens:     promptTokens,
 			CompletionTokens: compTokens,
-			TotalTokens:      promptTokens + compTokens,
+			TotalTokens:      totalTokens,
 		},
 	}
 	_ = json.NewEncoder(w).Encode(resp)

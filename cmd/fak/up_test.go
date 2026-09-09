@@ -17,8 +17,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/allinone"
 	"github.com/anthony-chaudhary/fak/internal/macfit"
+	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
 func TestUpHelpUsesServeSurface(t *testing.T) {
@@ -607,4 +610,220 @@ func TestFakUpTurnkeyBootstrap(t *testing.T) {
 			t.Fatalf("REPL output missing token/s telemetry:\n%s", replText)
 		}
 	})
+}
+
+func testProbeTokenizer(t *testing.T) *tokenizer.Tokenizer {
+	t.Helper()
+	var bs []int
+	for i := 0x21; i <= 0x7E; i++ {
+		bs = append(bs, i)
+	}
+	for i := 0xA1; i <= 0xAC; i++ {
+		bs = append(bs, i)
+	}
+	for i := 0xAE; i <= 0xFF; i++ {
+		bs = append(bs, i)
+	}
+	cs := append([]int{}, bs...)
+	n := 0
+	inBs := func(b int) bool {
+		for _, x := range bs {
+			if x == b {
+				return true
+			}
+		}
+		return false
+	}
+	for b := 0; b < 256; b++ {
+		if !inBs(b) {
+			bs = append(bs, b)
+			cs = append(cs, 256+n)
+			n++
+		}
+	}
+	vocab := map[string]int{
+		"<|endoftext|>": 0, "<|im_start|>": 1, "<|im_end|>": 2,
+	}
+	id := 3
+	for i := range bs {
+		r := rune(cs[i])
+		vocab[string(r)] = id
+		id++
+	}
+	doc := map[string]any{
+		"model":   map[string]any{"type": "BPE", "vocab": vocab, "merges": []string{}},
+		"decoder": map[string]any{"type": "ByteLevel"},
+		"added_tokens": []map[string]any{
+			{"id": 0, "content": "<|endoftext|>", "special": true},
+			{"id": 1, "content": "<|im_start|>", "special": true},
+			{"id": 2, "content": "<|im_end|>", "special": true},
+		},
+	}
+	b, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal vocab: %v", err)
+	}
+	tk, err := tokenizer.ParseJSON(b)
+	if err != nil {
+		t.Fatalf("ParseJSON: %v", err)
+	}
+	return tk
+}
+
+func TestUpInKernelModelExecution(t *testing.T) {
+	tok := testProbeTokenizer(t)
+	m := fakmodel.NewSynthetic(fakmodel.Config{
+		HiddenSize:        32,
+		NumLayers:         2,
+		NumHeads:          4,
+		NumKVHeads:        2,
+		HeadDim:           8,
+		IntermediateSize:  64,
+		VocabSize:         320,
+		RMSNormEps:        1e-5,
+		RopeTheta:         10000,
+		TieWordEmbeddings: true,
+		EOSTokenID:        -1,
+	})
+	m.Quantize()
+
+	// 1. Verify newInKernelChatPlanner constructs valid planner
+	planner := newInKernelChatPlanner(m, tok, "test-qwen-tier", false, nil, false)
+	if planner == nil {
+		t.Fatal("newInKernelChatPlanner returned nil")
+	}
+	var _ *agent.InKernelPlanner = planner
+	if planner.Model() != "test-qwen-tier" {
+		t.Fatalf("planner.Model() = %q, want 'test-qwen-tier'", planner.Model())
+	}
+
+	// Verify Metal resolution on Apple Silicon
+	useMetal, metalErr := resolveServeMetal(false, false, "")
+	if metalErr != nil {
+		t.Fatalf("resolveServeMetal: %v", metalErr)
+	}
+	metalPlanner := newInKernelChatPlanner(m, tok, "test-metal", false, nil, useMetal)
+	if metalPlanner == nil {
+		t.Fatal("newInKernelChatPlanner with Metal returned nil")
+	}
+
+	// Verify model tier alias resolution
+	if got := resolveTurnkeyModelRef("27B"); got != "qwen38:27b" {
+		t.Fatalf("resolveTurnkeyModelRef(27B) = %q, want qwen38:27b", got)
+	}
+	if got := resolveTurnkeyModelRef("qwen3.8-27b-q4_k_m"); got != "qwen38:27b" {
+		t.Fatalf("resolveTurnkeyModelRef(qwen3.8-27b-q4_k_m) = %q, want qwen38:27b", got)
+	}
+	if got := resolveTurnkeyModelRef("7B"); got != "qwen2.5:7b" {
+		t.Fatalf("resolveTurnkeyModelRef(7B) = %q, want qwen2.5:7b", got)
+	}
+	if got := resolveTurnkeyModelRef(""); got != "qwen38:27b" {
+		t.Fatalf("resolveTurnkeyModelRef(\"\") = %q, want qwen38:27b", got)
+	}
+
+	// 2. Verify turnkeyServer in non-mock mode routes handleChatCompletions through InKernelPlanner
+	plan, err := macfit.ConfigureTurnkey(36 * macfit.GiB)
+	if err != nil {
+		t.Fatalf("ConfigureTurnkey: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	server, err := startTurnkeyServer(ctx, plan, "127.0.0.1:0", false, planner)
+	if err != nil {
+		t.Fatalf("startTurnkeyServer non-mock: %v", err)
+	}
+	defer func() {
+		_ = server.Shutdown(context.Background())
+	}()
+
+	if server.Planner() == nil {
+		t.Fatal("server.Planner() is nil for non-mock server")
+	}
+
+	base := "http://" + server.Addr()
+
+	// 3. Post chat completion to non-mock turnkey server
+	bodyJSON := `{"model":"qwen3.8-27b-q4_k_m","messages":[{"role":"user","content":"hello world"}],"max_tokens":4,"stream":false}`
+	cResp, err := http.Post(base+"/v1/chat/completions", "application/json", strings.NewReader(bodyJSON))
+	if err != nil {
+		t.Fatalf("POST /v1/chat/completions: %v", err)
+	}
+	defer cResp.Body.Close()
+
+	if cResp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(cResp.Body)
+		t.Fatalf("chat completion status = %d, body = %s", cResp.StatusCode, raw)
+	}
+
+	var compResp chatCompletionResponse
+	if err := json.NewDecoder(cResp.Body).Decode(&compResp); err != nil {
+		t.Fatalf("decode chat completion: %v", err)
+	}
+
+	if len(compResp.Choices) == 0 {
+		t.Fatal("chat completion returned no choices")
+	}
+	choice := compResp.Choices[0]
+	if choice.Message.Role != "assistant" {
+		t.Fatalf("choice role = %q, want 'assistant'", choice.Message.Role)
+	}
+	if choice.Message.Content == "" {
+		t.Fatal("choice content is empty")
+	}
+	// Assert content is real generated in-kernel text, NOT the canned mock response
+	if strings.Contains(choice.Message.Content, "Turnkey") && strings.Contains(choice.Message.Content, "Probed unified RAM") {
+		t.Fatalf("response returned canned mock text instead of in-kernel completion: %q", choice.Message.Content)
+	}
+	// Assert non-zero token usage
+	if compResp.Usage.PromptTokens == 0 {
+		t.Fatalf("prompt tokens = 0, want > 0")
+	}
+	if compResp.Usage.CompletionTokens == 0 {
+		t.Fatalf("completion tokens = 0, want > 0")
+	}
+	if compResp.Usage.TotalTokens != compResp.Usage.PromptTokens+compResp.Usage.CompletionTokens {
+		t.Fatalf("total tokens mismatch: got %d, want %d", compResp.Usage.TotalTokens, compResp.Usage.PromptTokens+compResp.Usage.CompletionTokens)
+	}
+
+	// 4. Verify streaming completions route through planner
+	streamJSON := `{"model":"qwen3.8-27b-q4_k_m","messages":[{"role":"user","content":"hello stream"}],"max_tokens":2,"stream":true}`
+	sResp, err := http.Post(base+"/v1/chat/completions", "application/json", strings.NewReader(streamJSON))
+	if err != nil {
+		t.Fatalf("POST /v1/chat/completions (stream): %v", err)
+	}
+	defer sResp.Body.Close()
+
+	if sResp.StatusCode != http.StatusOK {
+		t.Fatalf("stream status = %d, want 200", sResp.StatusCode)
+	}
+	scanner := bufio.NewScanner(sResp.Body)
+	seenChunk := false
+	seenDone := false
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "data: ") {
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				seenDone = true
+				break
+			}
+			seenChunk = true
+		}
+	}
+	if !seenChunk || !seenDone {
+		t.Fatalf("streaming SSE incomplete: seenChunk=%v, seenDone=%v", seenChunk, seenDone)
+	}
+
+	// 5. Test startTurnkeyServer fails gracefully for missing model in non-mock mode
+	missingPlan := macfit.TurnkeyProfile{
+		Tier: macfit.ModelTier{
+			ModelID: "nonexistent-model-test-xyz",
+		},
+	}
+	_, loadErr := startTurnkeyServer(ctx, missingPlan, "127.0.0.1:0", false)
+	if loadErr == nil {
+		t.Fatal("startTurnkeyServer succeeded for nonexistent model, want error")
+	}
 }
