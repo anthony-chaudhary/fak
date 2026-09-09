@@ -1,8 +1,11 @@
 package macobs
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 )
 
 // Default36GBWiredCeilingBytes is the 75% wired memory limit on a 36GB Apple Silicon system (27 GB).
@@ -16,6 +19,7 @@ const (
 	ReasonSwapDeltaDetected         = "SWAP_DELTA_DETECTED"
 	ReasonPressureCritical          = "MEMORY_PRESSURE_CRITICAL"
 	ReasonPressureWarn              = "MEMORY_PRESSURE_WARN"
+	ReasonSwapRisk                  = "SWAP_RISK"
 )
 
 // GovernorOption configures MemoryGovernor instances.
@@ -260,8 +264,8 @@ func (g *MemoryGovernor) evaluateAdmissionLocked(spec AgentSpec) AdmissionDecisi
 
 		return AdmissionDecision{
 			Admitted:               false,
-			Verdict:                AdmissionVerdictThrottled,
-			Reason:                 fmt.Sprintf("WIRED_MEMORY_CEILING_EXCEEDED: projected resident memory %d MB exceeds %d MB wired ceiling (%d active agents); admission throttled", projectedResident/(1024*1024), g.wiredCeilingBytes/(1024*1024), len(g.activeAgents)),
+			Verdict:                AdmissionVerdictRejected,
+			Reason:                 fmt.Sprintf("WIRED_MEMORY_CEILING_EXCEEDED: projected resident memory %d MB exceeds %d MB wired ceiling (%d active agents); disk swap risk (SWAP_RISK)", projectedResident/(1024*1024), g.wiredCeilingBytes/(1024*1024), len(g.activeAgents)),
 			ReasonToken:            ReasonWiredCeilingExceeded,
 			ProjectedResidentBytes: projectedResident,
 			WiredCeilingBytes:      g.wiredCeilingBytes,
@@ -323,6 +327,72 @@ func (g *MemoryGovernor) Admit(spec AgentSpec) (bool, string) {
 	}
 
 	return true, decision.Reason
+}
+
+// AdmitWithQueue attempts to admit an agent, queuing up to timeout if headroom is temporarily constrained.
+func (g *MemoryGovernor) AdmitWithQueue(ctx context.Context, spec AgentSpec, timeout time.Duration) (bool, string) {
+	if timeout <= 0 {
+		return g.Admit(spec)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	deadline := time.Now().Add(timeout)
+	for {
+		g.mu.Lock()
+		decision := g.evaluateAdmissionLocked(spec)
+		if decision.Admitted {
+			if spec.ID == "" {
+				spec.ID = fmt.Sprintf("agent-%d", len(g.activeAgents)+1)
+			}
+			if spec.PreambleTokens == 0 {
+				spec.PreambleTokens = g.sharedPreambleTokens
+			}
+			if spec.TailTokens == 0 {
+				spec.TailTokens = g.cfg.PrivateTailTokens
+			}
+			if spec.RecurrentStateBytes == 0 {
+				spec.RecurrentStateBytes = g.cfg.RecurrentStateBytes
+			}
+			g.activeAgents[spec.ID] = spec
+			g.activeOrder = append(g.activeOrder, spec.ID)
+			if decision.ProjectedResidentBytes > g.peakResidentBytes {
+				g.peakResidentBytes = decision.ProjectedResidentBytes
+			}
+			g.mu.Unlock()
+			return true, decision.Reason
+		}
+		g.mu.Unlock()
+
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false, decision.Reason
+		}
+
+		select {
+		case <-ctx.Done():
+			return false, fmt.Sprintf("admission canceled while queued: %v", ctx.Err())
+		case <-time.After(minDuration(remaining, 10*time.Millisecond)):
+		}
+	}
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// IsSwapRisk reports whether the admission decision indicates disk swap risk.
+func (d AdmissionDecision) IsSwapRisk() bool {
+	return !d.Admitted && (d.ReasonToken == ReasonSwapRisk ||
+		d.ReasonToken == ReasonNonSharedPreambleSwapRisk ||
+		d.ReasonToken == ReasonWiredCeilingExceeded ||
+		d.ReasonToken == ReasonSwapDeltaDetected ||
+		strings.Contains(d.Reason, "SWAP_RISK") ||
+		strings.Contains(d.Reason, "swap"))
 }
 
 // Release frees an active agent's reservation.

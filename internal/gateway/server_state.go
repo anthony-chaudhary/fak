@@ -16,6 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessversion"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/kv"
+	"github.com/anthony-chaudhary/fak/internal/macobs"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
@@ -1061,6 +1062,12 @@ type Server struct {
 	spendGovernor *SpendGovernor
 	spendScopeOf  func(trace string) ScopeKey
 
+	// memoryGovernor is the optional Apple Silicon zero-swap memory admission governor (#12509).
+	// When non-nil, inbound request intake evaluates CanAdmit / EvaluateAdmission against live
+	// wired memory headroom and shared preamble state before allocating resources or proxying.
+	memoryGovernorMu sync.RWMutex
+	memoryGovernor   *macobs.MemoryGovernor
+
 	// preemptionMetrics is the optional native-serving KV preemption / swap / recompute
 	// metric writer (#31). nil leaves fak_sched_preempt_* absent; a host attaches the live
 	// native scheduler only after a positive paged-KV block budget arms preemption.
@@ -1155,4 +1162,24 @@ func (s *Server) HarnessRouter() *harnessversion.StickySessionRouter {
 	s.harnessRouterMu.RLock()
 	defer s.harnessRouterMu.RUnlock()
 	return s.harnessRouter
+}
+
+// SetMemoryGovernor attaches or replaces the Apple Silicon zero-swap memory governor on Server (#12509).
+func (s *Server) SetMemoryGovernor(g *macobs.MemoryGovernor) {
+	if s == nil {
+		return
+	}
+	s.memoryGovernorMu.Lock()
+	s.memoryGovernor = g
+	s.memoryGovernorMu.Unlock()
+}
+
+// MemoryGovernor returns the attached zero-swap memory governor on Server.
+func (s *Server) MemoryGovernor() *macobs.MemoryGovernor {
+	if s == nil {
+		return nil
+	}
+	s.memoryGovernorMu.RLock()
+	defer s.memoryGovernorMu.RUnlock()
+	return s.memoryGovernor
 }

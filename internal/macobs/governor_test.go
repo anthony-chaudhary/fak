@@ -1,11 +1,13 @@
 package macobs
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestGovernor_24AgentConcurrencyWithoutSwap(t *testing.T) {
@@ -530,5 +532,144 @@ func TestGovernor_AdversarialChurnAndPressure(t *testing.T) {
 	}
 	if telem.ResidentMemoryBytes >= hw.WiredMemoryLimitBytes {
 		t.Errorf("resident memory %d exceeds wired limit %d", telem.ResidentMemoryBytes, hw.WiredMemoryLimitBytes)
+	}
+}
+
+func TestGovernor_WiredCeilingSwapRisk(t *testing.T) {
+	// Constrained ceiling scenario: 25GB wired ceiling
+	hw := HardwareTelemetry{
+		TotalSystemMemoryBytes: 36 * 1024 * 1024 * 1024,
+		WiredMemoryLimitBytes:  25 * 1024 * 1024 * 1024,
+		SwapUsedBytes:          0,
+		PageOuts:               0,
+		Available:              true,
+	}
+	cfg := Qwen38GDNHeadroomConfig() // base resident = 23.75 GB = 25501368320 bytes
+	// Available headroom to 25 GB = 1.25 GB = 1342177280 bytes
+	// Each shared agent = 67.2 MB = 70464307 bytes -> ~19 shared agents fit under 25 GB!
+
+	gov := NewMemoryGovernor(hw, cfg)
+
+	// Admit shared agents until capacity reached
+	admittedCount := 0
+	for i := 1; i <= 30; i++ {
+		spec := AgentSpec{
+			ID:             fmt.Sprintf("burst-agent-%d", i),
+			SharedPreamble: true,
+			PreambleTokens: 4096,
+			TailTokens:     1024,
+		}
+		admitted, _ := gov.Admit(spec)
+		if admitted {
+			admittedCount++
+		} else {
+			break
+		}
+	}
+
+	if admittedCount < 15 || admittedCount > 20 {
+		t.Fatalf("expected 15-20 admitted shared agents under 25GB limit, got %d", admittedCount)
+	}
+
+	// The next agent must be rejected with WIRED_MEMORY_CEILING_EXCEEDED and SWAP_RISK
+	overflowSpec := AgentSpec{
+		ID:             "overflow-agent",
+		SharedPreamble: true,
+		PreambleTokens: 4096,
+		TailTokens:     1024,
+	}
+	canAdmit, reason := gov.CanAdmit(overflowSpec)
+	if canAdmit {
+		t.Fatalf("expected overflow agent to be rejected, got admitted")
+	}
+	if !strings.Contains(reason, "SWAP_RISK") {
+		t.Errorf("expected reason to contain 'SWAP_RISK', got %q", reason)
+	}
+	if !strings.Contains(reason, ReasonWiredCeilingExceeded) {
+		t.Errorf("expected reason to contain %s, got %q", ReasonWiredCeilingExceeded, reason)
+	}
+
+	decision := gov.EvaluateAdmission(overflowSpec)
+	if !decision.IsSwapRisk() {
+		t.Errorf("expected decision.IsSwapRisk() == true")
+	}
+	if err := gov.AssertZeroSwapDelta(); err != nil {
+		t.Errorf("expected zero swap delta preserved: %v", err)
+	}
+}
+
+func TestGovernor_AdmitWithQueue(t *testing.T) {
+	hw := HardwareTelemetry{
+		TotalSystemMemoryBytes: 36 * 1024 * 1024 * 1024,
+		WiredMemoryLimitBytes:  25 * 1024 * 1024 * 1024,
+		SwapUsedBytes:          0,
+		PageOuts:               0,
+		Available:              true,
+	}
+	cfg := Qwen38GDNHeadroomConfig()
+	gov := NewMemoryGovernor(hw, cfg)
+
+	// Fill to capacity
+	var activeIDs []string
+	for i := 1; i <= 30; i++ {
+		id := fmt.Sprintf("fill-agent-%d", i)
+		spec := AgentSpec{
+			ID:             id,
+			SharedPreamble: true,
+			PreambleTokens: 4096,
+			TailTokens:     1024,
+		}
+		if admitted, _ := gov.Admit(spec); admitted {
+			activeIDs = append(activeIDs, id)
+		} else {
+			break
+		}
+	}
+
+	// 1. Queue timeout test: no slot freed, must time out with SWAP_RISK
+	queuedSpec := AgentSpec{
+		ID:             "queued-timeout-agent",
+		SharedPreamble: true,
+		PreambleTokens: 4096,
+		TailTokens:     1024,
+	}
+	ctxTimeout, cancelTimeout := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancelTimeout()
+
+	admitted, reason := gov.AdmitWithQueue(ctxTimeout, queuedSpec, 30*time.Millisecond)
+	if admitted {
+		t.Fatalf("expected queue timeout rejection, but was admitted")
+	}
+	if !strings.Contains(reason, "SWAP_RISK") {
+		t.Errorf("expected timeout reason to contain SWAP_RISK, got %q", reason)
+	}
+
+	// 2. Queuing success test: release an active agent after 15ms
+	ctxSuccess, cancelSuccess := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelSuccess()
+
+	promoteSpec := AgentSpec{
+		ID:             "promote-agent",
+		SharedPreamble: true,
+		PreambleTokens: 4096,
+		TailTokens:     1024,
+	}
+
+	go func() {
+		time.Sleep(15 * time.Millisecond)
+		if len(activeIDs) > 0 {
+			gov.Release(activeIDs[0])
+		}
+	}()
+
+	promoted, promoReason := gov.AdmitWithQueue(ctxSuccess, promoteSpec, 300*time.Millisecond)
+	if !promoted {
+		t.Fatalf("expected promote-agent to be admitted from queue after release, failed: %s", promoReason)
+	}
+	if !strings.Contains(promoReason, ReasonHeadroomOK) {
+		t.Errorf("expected reason to contain %s, got %s", ReasonHeadroomOK, promoReason)
+	}
+	if err := gov.AssertZeroSwapDelta(); err != nil {
+		t.Errorf("expected zero swap delta preserved: %v", err)
 	}
 }

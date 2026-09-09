@@ -28,13 +28,18 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/harnessversion"
 	"github.com/anthony-chaudhary/fak/internal/lifecycle"
+	"github.com/anthony-chaudhary/fak/internal/macobs"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/sessionledger"
@@ -46,10 +51,13 @@ const (
 )
 
 type servedSessionTurn struct {
-	traceID   string
-	state     SessionState
-	maxTokens int
-	minGapMs  int
+	traceID     string
+	state       SessionState
+	maxTokens   int
+	minGapMs    int
+	srv         *Server
+	govAdmitted bool
+	govAgentID  string
 }
 
 // beginServedRequest establishes the request context and trace before admitting
@@ -57,6 +65,10 @@ type servedSessionTurn struct {
 func (s *Server) beginServedRequest(w http.ResponseWriter, r *http.Request) (context.Context, string, servedSessionTurn, bool, bool) {
 	ctx := r.Context()
 	trace := s.useHTTPTrace(w, r, "")
+	if r != nil {
+		spec := parseAgentSpecFromRequest(r, trace)
+		ctx = carrierWithSpec(ctx, spec)
+	}
 	if s != nil {
 		router := s.HarnessRouter()
 		if router != nil && r != nil {
@@ -144,7 +156,7 @@ func (s *Server) admitServedRequest(w http.ResponseWriter, r *http.Request, mess
 // shipped run-state admission guard. With neither hook, it is fail-open and leaves the
 // historical request path unchanged.
 func (s *Server) beginServedSessionTurn(ctx context.Context, trace string) (servedSessionTurn, bool, bool) {
-	turn := servedSessionTurn{traceID: trace}
+	turn := servedSessionTurn{traceID: trace, srv: s}
 	appendSessionLedger(trace, "turn_begin", nil)
 	if trace == "" {
 		return turn, true, false
@@ -180,6 +192,17 @@ func (s *Server) beginServedSessionTurn(ctx context.Context, trace string) (serv
 	if brk := s.spendBreach(trace); brk != nil {
 		turn.state = SessionState{TraceID: trace, Run: spendBreachRunToken(brk.Action), Reason: brk.Reason}
 		return turn, false, false
+	}
+	// Apple Silicon zero-swap memory governor (#12509):
+	// Inbound client sessions requesting token generation evaluate wired headroom
+	// and shared preamble cache state. Reject/queue with structured SWAP_RISK backpressure.
+	spec := carrierSpec(ctx, trace)
+	if ref, agentID := s.memoryGovernorRefusal(ctx, spec); ref != nil {
+		turn.state = *ref
+		return turn, false, false
+	} else if agentID != "" {
+		turn.govAdmitted = true
+		turn.govAgentID = agentID
 	}
 	var v SessionVerdict
 	hasDecide := false
@@ -474,6 +497,24 @@ func (s *Server) sessionAdmits(ctx context.Context, trace string) (bool, Session
 // write. The error code is "session_<state>" so a client can branch on it, and the
 // operator's reason token (if any) rides the message.
 func writeSessionRefusal(w http.ResponseWriter, st SessionState) {
+	if w == nil {
+		return
+	}
+	// MemoryGovernor zero-swap backpressure (#12509):
+	// Emits 503 (Service Unavailable) with Retry-After and structured swap_risk code and reason.
+	if isSwapRiskReason(st.Reason) {
+		w.Header().Set("Retry-After", "2")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error": map[string]any{
+				"message": fmt.Sprintf("memory governor backpressure: %s", st.Reason),
+				"type":    errType(http.StatusServiceUnavailable),
+				"code":    "swap_risk",
+				"param":   nil,
+			},
+			"reason": st.Reason,
+		})
+		return
+	}
 	// Deployment session-ceiling backpressure (#3425) is NOT operator DRIVE control: the
 	// request is well-formed and the session is not held — the DEPLOYMENT is at capacity.
 	// Emit 503 (Service Unavailable) with a Retry-After hint and the closed reason token,
@@ -619,7 +660,147 @@ func turnLedgerSummary(req *agent.AnthropicMessagesRequest) []byte {
 	return b
 }
 
-func (t servedSessionTurn) complete() { appendSessionLedger(t.traceID, "turn_complete", nil) }
+func (t servedSessionTurn) complete() {
+	appendSessionLedger(t.traceID, "turn_complete", nil)
+	if t.govAdmitted && t.srv != nil && t.govAgentID != "" {
+		t.srv.memoryGovernorRelease(t.govAgentID)
+	}
+}
+
+// memoryGovernorRefusal evaluates the attached Apple Silicon zero-swap memory governor (#12509).
+// Inbound client sessions requesting token generation evaluate wired headroom and shared
+// preamble cache state. If memory headroom would force disk swap, it rejects with structured
+// SWAP_RISK backpressure.
+func (s *Server) memoryGovernorRefusal(ctx context.Context, spec macobs.AgentSpec) (*SessionState, string) {
+	if s == nil {
+		return nil, ""
+	}
+	gov := s.MemoryGovernor()
+	if gov == nil {
+		return nil, ""
+	}
+	if spec.ID == "" {
+		spec.ID = fmt.Sprintf("agent-%d", atomic.AddUint64(&s.traceSeq, 1))
+	}
+
+	queueTimeout := time.Duration(0)
+	if raw := os.Getenv("FAK_MEMORY_GOVERNOR_QUEUE_TIMEOUT"); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			queueTimeout = d
+		}
+	}
+
+	if queueTimeout > 0 {
+		admitted, reason := gov.AdmitWithQueue(ctx, spec, queueTimeout)
+		if !admitted {
+			return &SessionState{
+				TraceID: spec.ID,
+				Run:     "throttled",
+				Reason:  reason,
+			}, ""
+		}
+		return nil, spec.ID
+	}
+
+	canAdmit, reason := gov.CanAdmit(spec)
+	if !canAdmit {
+		return &SessionState{
+			TraceID: spec.ID,
+			Run:     "throttled",
+			Reason:  reason,
+		}, ""
+	}
+
+	admitted, admitReason := gov.Admit(spec)
+	if !admitted {
+		return &SessionState{
+			TraceID: spec.ID,
+			Run:     "throttled",
+			Reason:  admitReason,
+		}, ""
+	}
+
+	return nil, spec.ID
+}
+
+// memoryGovernorRelease frees an admitted session's reservation from the memory governor.
+func (s *Server) memoryGovernorRelease(agentID string) {
+	if s == nil || agentID == "" {
+		return
+	}
+	gov := s.MemoryGovernor()
+	if gov != nil {
+		gov.Release(agentID)
+	}
+}
+
+type specCarrierKey struct{}
+
+func carrierWithSpec(ctx context.Context, spec macobs.AgentSpec) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, specCarrierKey{}, spec)
+}
+
+func carrierSpec(ctx context.Context, trace string) macobs.AgentSpec {
+	if ctx != nil {
+		if spec, ok := ctx.Value(specCarrierKey{}).(macobs.AgentSpec); ok {
+			if spec.ID == "" {
+				spec.ID = trace
+			}
+			return spec
+		}
+	}
+	return macobs.AgentSpec{
+		ID:             trace,
+		SharedPreamble: true,
+	}
+}
+
+func parseAgentSpecFromRequest(r *http.Request, trace string) macobs.AgentSpec {
+	spec := macobs.AgentSpec{
+		ID:             trace,
+		SharedPreamble: true,
+	}
+	if r == nil {
+		return spec
+	}
+	if val := r.Header.Get("X-Fak-Shared-Preamble"); val != "" {
+		val = strings.ToLower(strings.TrimSpace(val))
+		if val == "false" || val == "0" || val == "no" {
+			spec.SharedPreamble = false
+		}
+	} else if val := r.Header.Get("X-Shared-Preamble"); val != "" {
+		val = strings.ToLower(strings.TrimSpace(val))
+		if val == "false" || val == "0" || val == "no" {
+			spec.SharedPreamble = false
+		}
+	}
+	if pt := r.Header.Get("X-Fak-Preamble-Tokens"); pt != "" {
+		if n, err := strconv.ParseUint(strings.TrimSpace(pt), 10, 64); err == nil && n > 0 {
+			spec.PreambleTokens = n
+		}
+	}
+	if tt := r.Header.Get("X-Fak-Tail-Tokens"); tt != "" {
+		if n, err := strconv.ParseUint(strings.TrimSpace(tt), 10, 64); err == nil && n > 0 {
+			spec.TailTokens = n
+		}
+	}
+	return spec
+}
+
+func isSwapRiskReason(reason string) bool {
+	if reason == "" {
+		return false
+	}
+	return strings.Contains(reason, "SWAP_RISK") ||
+		strings.Contains(reason, macobs.ReasonNonSharedPreambleSwapRisk) ||
+		strings.Contains(reason, macobs.ReasonWiredCeilingExceeded) ||
+		strings.Contains(reason, macobs.ReasonSwapDeltaDetected) ||
+		strings.Contains(reason, macobs.ReasonPressureCritical) ||
+		strings.Contains(reason, macobs.ReasonPressureWarn)
+}
 
 // SetSpendGovernor wires the control-plane spend cap (#3273) onto the Server. scopeOf maps
 // a request trace to its scope hierarchy (tenant/team/agent/session); a nil resolver

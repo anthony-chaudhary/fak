@@ -2,12 +2,19 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/macobs"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
@@ -196,5 +203,231 @@ func TestServeDeferToolsFlag(t *testing.T) {
 	}
 	if status2.Mode != "ceiling" || status2.Reason != "advertisement_ceiling" {
 		t.Fatalf("expected status ceiling/advertisement_ceiling, got %+v", status2)
+	}
+}
+
+func TestServeMemoryGovernorDynamicZeroSwapAdmission(t *testing.T) {
+	// 1. Configure MemoryGovernor with 25GB wired ceiling
+	hw := macobs.HardwareTelemetry{
+		TotalSystemMemoryBytes: 36 * 1024 * 1024 * 1024,
+		WiredMemoryLimitBytes:  25 * 1024 * 1024 * 1024, // 25 GB limit
+		SwapUsedBytes:          0,
+		PageOuts:               0,
+		Available:              true,
+	}
+	cfg := macobs.Qwen38GDNHeadroomConfig() // base resident = 23.75 GB = 25501368320 bytes
+	// Available headroom to 25 GB = 1.25 GB = 1342177280 bytes
+	// An isolated (non-shared preamble) agent requires ~338.7 MB.
+	// 4 isolated agents require 4 * 338.7 MB = 1354.8 MB > 1280 MB!
+	// So exactly 3 isolated agents fit under 25 GB limit; the 4th MUST be rejected with SWAP_RISK!
+
+	gov := macobs.NewMemoryGovernor(hw, cfg)
+
+	// 2. Build gateway server and attach MemoryGovernor
+	srv, err := gateway.New(gateway.Config{
+		EngineID:      "mock",
+		Model:         "mock",
+		ExposeProfile: "headless",
+	})
+	if err != nil {
+		t.Fatalf("gateway.New: %v", err)
+	}
+	defer srv.Close()
+
+	srv.SetMemoryGovernor(gov)
+
+	// 3. Start loopback HTTP test server
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// 4. Pre-admit 3 isolated agents (simulate 3 active concurrent sessions holding KV headroom)
+	for i := 1; i <= 3; i++ {
+		admitted, reason := gov.Admit(macobs.AgentSpec{
+			ID:             fmt.Sprintf("active-session-%d", i),
+			SharedPreamble: false,
+			PreambleTokens: 4096,
+			TailTokens:     1024,
+		})
+		if !admitted {
+			t.Fatalf("failed to admit initial session %d: %s", i, reason)
+		}
+	}
+
+	// 5. Inbound client burst requesting token generation:
+	// A 4th non-shared session arrives via loopback HTTP POST /v1/chat/completions.
+	// This 4th session would exceed the 25GB wired ceiling, so MemoryGovernor.CanAdmit
+	// MUST evaluate headroom and reject with structured SWAP_RISK backpressure.
+	body := `{"model":"mock","messages":[{"role":"user","content":"hello"}]}`
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/v1/chat/completions", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Trace-Id", "overflow-agent-4")
+	req.Header.Set("X-Fak-Shared-Preamble", "false") // Non-shared preamble forces full preamble allocation
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("http request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	rawBody, _ := io.ReadAll(resp.Body)
+
+	// Must be rejected with HTTP 503 (Service Unavailable)
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503 Service Unavailable, got %d; body: %s", resp.StatusCode, string(rawBody))
+	}
+
+	// Must contain Retry-After header
+	if retryAfter := resp.Header.Get("Retry-After"); retryAfter == "" {
+		t.Errorf("expected Retry-After header in 503 refusal response")
+	}
+
+	// Must contain structured SWAP_RISK error
+	var errResp struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+			Code    string `json:"code"`
+		} `json:"error"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(rawBody, &errResp); err != nil {
+		t.Fatalf("unmarshal error response failed: %v (raw: %s)", err, rawBody)
+	}
+	if errResp.Error.Code != "swap_risk" {
+		t.Errorf("expected error.code 'swap_risk', got %q", errResp.Error.Code)
+	}
+	if !strings.Contains(errResp.Reason, "SWAP_RISK") {
+		t.Errorf("expected reason to contain 'SWAP_RISK', got %q", errResp.Reason)
+	}
+
+	// Zero-swap bound assertion: verify zero swap delta on the host
+	if err := gov.AssertZeroSwapDelta(); err != nil {
+		t.Fatalf("zero-swap delta assertion failed: %v", err)
+	}
+	telem := gov.Telemetry()
+	if telem.SwapUsedDeltaBytes != 0 || telem.PageoutsDelta != 0 {
+		t.Errorf("expected swap delta == 0 and pageouts delta == 0, got swap=%d, pageouts=%d",
+			telem.SwapUsedDeltaBytes, telem.PageoutsDelta)
+	}
+	if !telem.ZeroSwapGuaranteed {
+		t.Errorf("expected ZeroSwapGuaranteed == true")
+	}
+
+	// 6. Release one active agent and verify admission succeeds
+	gov.Release("active-session-1")
+
+	reqAdmit, err := http.NewRequest(http.MethodPost, ts.URL+"/v1/chat/completions", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	reqAdmit.Header.Set("Content-Type", "application/json")
+	reqAdmit.Header.Set("X-Trace-Id", "now-admitted-agent")
+	reqAdmit.Header.Set("X-Fak-Shared-Preamble", "false")
+
+	respAdmit, err := http.DefaultClient.Do(reqAdmit)
+	if err != nil {
+		t.Fatalf("http request failed: %v", err)
+	}
+	defer respAdmit.Body.Close()
+	rawAdmit, _ := io.ReadAll(respAdmit.Body)
+	if respAdmit.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 OK after headroom freed, got %d; body: %s", respAdmit.StatusCode, string(rawAdmit))
+	}
+}
+
+func TestServeMemoryGovernorConcurrentBurstAdmission(t *testing.T) {
+	// Set wired ceiling to allow only 2 shared agents
+	// Base = 23.75 GB = 25501368320 bytes
+	// 2 shared agents = 2 * 70464307 = 140928614 bytes
+	// Ceiling = 25501368320 + 140928614 + 10MB = 25652777334 bytes
+	base := uint64(25501368320)
+	twoAgents := uint64(140928614)
+	ceiling := base + twoAgents + 10*1024*1024
+
+	hw := macobs.HardwareTelemetry{
+		TotalSystemMemoryBytes: 36 * 1024 * 1024 * 1024,
+		WiredMemoryLimitBytes:  ceiling,
+		SwapUsedBytes:          0,
+		PageOuts:               0,
+		Available:              true,
+	}
+	cfg := macobs.Qwen38GDNHeadroomConfig()
+	gov := macobs.NewMemoryGovernor(hw, cfg)
+
+	srv, err := gateway.New(gateway.Config{
+		EngineID:      "mock",
+		Model:         "mock",
+		ExposeProfile: "headless",
+	})
+	if err != nil {
+		t.Fatalf("gateway.New: %v", err)
+	}
+	defer srv.Close()
+
+	srv.SetMemoryGovernor(gov)
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// Pre-admit 2 shared agents to fill the ceiling
+	for i := 1; i <= 2; i++ {
+		admitted, reason := gov.Admit(macobs.AgentSpec{
+			ID:             fmt.Sprintf("concurrent-holder-%d", i),
+			SharedPreamble: true,
+			PreambleTokens: 4096,
+			TailTokens:     1024,
+		})
+		if !admitted {
+			t.Fatalf("admit holder %d: %s", i, reason)
+		}
+	}
+
+	// Now burst 5 concurrent requests; all must receive structured SWAP_RISK refusal
+	var wg sync.WaitGroup
+	errCh := make(chan error, 5)
+
+	for i := 1; i <= 5; i++ {
+		wg.Add(1)
+		go func(agentNum int) {
+			defer wg.Done()
+			body := `{"model":"mock","messages":[{"role":"user","content":"concurrent burst"}]}`
+			req, err := http.NewRequest(http.MethodPost, ts.URL+"/v1/chat/completions", strings.NewReader(body))
+			if err != nil {
+				errCh <- err
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Trace-Id", fmt.Sprintf("burst-client-%d", agentNum))
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			defer resp.Body.Close()
+			raw, _ := io.ReadAll(resp.Body)
+
+			if resp.StatusCode != http.StatusServiceUnavailable {
+				errCh <- fmt.Errorf("agent %d expected status 503, got %d: %s", agentNum, resp.StatusCode, raw)
+				return
+			}
+			if !strings.Contains(string(raw), "SWAP_RISK") && !strings.Contains(string(raw), "swap_risk") {
+				errCh <- fmt.Errorf("agent %d missing SWAP_RISK: %s", agentNum, raw)
+				return
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Errorf("burst error: %v", err)
+	}
+
+	if err := gov.AssertZeroSwapDelta(); err != nil {
+		t.Fatalf("zero swap delta violated: %v", err)
 	}
 }

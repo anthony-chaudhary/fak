@@ -148,6 +148,10 @@ type serveFlags struct {
 	opencode                     *bool
 	opencodeConfig               *bool
 	writeOpencodeConfig          *bool
+	pi                           *bool
+	piConfig                     *bool
+	writePiConfig                *bool
+	piConfigPath                 *string
 	routeManifest                *string
 	routeAccounts                *string
 	ggufPath                     *string
@@ -178,6 +182,7 @@ type serveFlags struct {
 	vulkanQ4KProfile             *bool
 	vulkanStageQ4K               *bool
 	metal                        *bool
+	memoryGovernor               *bool
 	gpudirectOverflow            *bool
 	expertParallel               *int
 	tensorParallel               *int
@@ -225,6 +230,17 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.opencode = fs.Bool("opencode", false, "one-touch OpenCode setup: write or update opencode.json in the current workspace with this server's provider config")
 	sf.opencodeConfig = fs.Bool("opencode-config", false, "print opencode.json provider configuration for this server and exit without binding a listener")
 	sf.writeOpencodeConfig = fs.Bool("write-opencode-config", false, "write or update opencode.json in the current workspace with this server's provider config and exit without binding a listener")
+	sf.claude = fs.Bool("claude", false, "one-touch Claude Code setup: write or update .claude/settings.json in the current workspace with this server's backend environment")
+	sf.claudeConfig = fs.Bool("claude-config", false, "print .claude/settings.json configuration for this server and exit without binding a listener")
+	sf.writeClaudeConfig = fs.Bool("write-claude-config", false, "write or update .claude/settings.json in the current workspace with this server's backend environment and exit without binding a listener")
+	sf.pi = fs.Bool("pi", false, "one-touch Pi setup: write or update ~/.pi/agent/models.json with this server's provider config")
+	sf.piConfig = fs.Bool("pi-config", false, "print Pi models.json provider configuration for this server and exit without binding a listener")
+	sf.writePiConfig = fs.Bool("write-pi-config", false, "write or update ~/.pi/agent/models.json with this server's provider config and exit without binding a listener")
+	sf.piConfigPath = fs.String("pi-config-path", "", "custom destination path or directory for Pi models.json (default: ~/.pi/agent/models.json)")
+	sf.codex = fs.Bool("codex", false, "one-touch Codex setup: write or update config.toml with this server's provider config")
+	sf.codexConfig = fs.Bool("codex-config", false, "print Codex config.toml configuration for this server and exit without binding a listener")
+	sf.writeCodexConfig = fs.Bool("write-codex-config", false, "write or update config.toml with this server's provider config and exit without binding a listener")
+	sf.codexConfigPath = fs.String("codex-config-path", "", "custom destination path for Codex config.toml (default: $CODEX_HOME/config.toml or ~/.codex/config.toml)")
 	sf.apiKeyEnv = fs.String("api-key-env", "", "env var holding the upstream API key (proxy mode)")
 	sf.streamProgressTimeout = fs.Duration("stream-progress-timeout", agent.DefaultStreamProgressTimeout, "proxy mode: end a STREAMING upstream turn that has stayed warm this long without a single frame that advances it (#5486). Keepalive frames (a ping, an SSE comment, an empty-delta chunk) re-arm the inter-byte deadline but are NOT progress, so a generation wedged behind a live socket otherwise rides the 600s whole-request ceiling. DEFAULT-ON at agent.DefaultStreamProgressTimeout (300s), which sits above the worst prefill-to-first-token gap on a large cached prompt and above any extended-thinking pause (thinking streams content deltas, which do count as progress). Pass 0 to DISABLE the deadline — the escape hatch when a provider's prefill legitimately outlasts the window. A positive value outside [5s, 600s] is not honored as a real window: the default is used instead, so a typo never silently becomes a different deadline. Inert on the non-streaming path and on the offline mock planner.")
 	sf.engineCacheEngine = fs.String("engine-cache-engine", "", "self-hosted upstream cache reset engine for quarantined provider-bound tool results: sglang|vllm (empty disables)")
@@ -287,6 +303,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.nativeGPULayers = fs.Int("gpu-layers", 0, "number of contiguous layers [0, N) to place on the GPU (Backend), with the remainder executing on host CPU; alias for --native-gpu-layers")
 	fs.IntVar(sf.nativeGPULayers, "native-gpu-layers", 0, "number of contiguous layers [0, N) to place on the GPU (Backend), with the remainder executing on host CPU (alias for --gpu-layers)")
 	sf.metal = fs.Bool("metal", false, "with --gguf (no --base-url), require the Apple-Silicon Metal GPU forward — GPU prefill + GPU-resident Q8 decode (#67, ~0.99x of llama.cpp-Metal on dense Qwen2.5-7B Q8). Apple-Silicon+cgo builds auto-select Metal when a usable device is present; this flag/FAK_METAL=1 makes absence fail loud instead of falling back to CPU. Mutually exclusive with --backend (Metal is the CPU-session seam, not a compute HAL device). Dense Qwen-class Q8 GGUFs only — a MoE/hybrid model (GLM-5.2, GDN) self-declines to CPU decode.")
+	sf.memoryGovernor = fs.Bool("memory-governor", false, "enable dynamic zero-swap memory governor admission on Apple Silicon / Metal serving (auto-enabled with --metal or FAK_MEMORY_GOVERNOR=1)")
 	sf.gpudirectOverflow = fs.Bool("gpudirect-overflow", true, "enable AMD GPU Direct / NVMe P2PDMA zero-copy storage for KV cache and layer overflow handling (bypasses CPU bounce buffers on VRAM saturation; default on)")
 	sf.expertParallel = fs.Int("expert-parallel", 1, "with --gguf: shard the routed MoE experts of a glm_moe_dsa model (GLM-5.2) across N expert-parallel ranks — the lever to move supported expert GEMMs off the host (the `--cpu-offload-experts` wall) onto resident GPUs (#971). Mixed k-quant expert formats without backend kernels (for example Q5_K/Q6_K today) still use the host k-quant fallback; set FAK_KQ_INT8=1 to use its production int8 path. The per-rank residual partials are reduced by one AllReduceSum through the wired Collective. 1 (default) = the unchanged monolith forward. N>1 requires an initialized non-cpu-ref compute.CollectiveBackend; CUDA builds provide that only with -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1) on a box with enough visible GPUs.")
 	sf.tensorParallel = fs.Int("tensor-parallel", 1, "with --gguf: tensor-parallel rank count for the dense projections (the Megatron column/row split, tensor_parallel.go). 1 (default) = no split. N>1 uses the same initialized device-collective gate as --expert-parallel; CUDA builds require -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1).")
@@ -381,7 +398,7 @@ func cmdServe(argv []string) {
 	}
 	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
 		if *sf.ggufPath == "" && strings.TrimSpace(*sf.baseURL) == "" && len(sf.replicaBaseURLs.Values()) == 0 {
-			if *sf.opencode || *sf.metal {
+			if *sf.opencode || *sf.pi || *sf.claude || *sf.codex || *sf.metal {
 				*sf.ggufPath = "default"
 				*sf.metal = true
 				if *sf.model == "mock" || *sf.model == "" {
@@ -466,6 +483,21 @@ func cmdServe(argv []string) {
 	// --opencode: ensure opencode.json is configured before booting listener.
 	if *sf.opencode {
 		runServeOpenCodeConfig(sf, os.Stderr, true)
+	}
+
+	// --pi-config: emit Pi models.json provider configuration and exit before load.
+	if *sf.piConfig {
+		runServePiConfig(sf, os.Stdout, false)
+		return
+	}
+	// --write-pi-config: write or update Pi models.json and exit before load.
+	if *sf.writePiConfig {
+		runServePiConfig(sf, os.Stderr, true)
+		return
+	}
+	// --pi: ensure Pi models.json is configured before booting listener.
+	if *sf.pi {
+		runServePiConfig(sf, os.Stderr, true)
 	}
 
 	// Advisory (#3094): a serve launched from a non-fak cwd silently indexes whatever
